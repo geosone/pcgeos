@@ -27,7 +27,7 @@
 #include <graphics.h>
 #include <HTMLDRV.H>
 @include <objects/clipbrd.goh>
-#include <ansi/string.h>
+#include <Ansi/string.h>
 #include <vm.h>
 #include <graphics.h>
 #include <library.h>

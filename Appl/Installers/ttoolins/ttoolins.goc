@@ -22,7 +22,7 @@
 @include <stdapp.goh>
 @include <thread.h>
 @include <gstring.h>
-#include <ansi/string.h>
+#include <Ansi/string.h>
 #include <string.h>  /*for the sblaster strcmp */
 @include <initfile.h> /* to modify GEOS.INI */
 @include "tti_icon.goh"

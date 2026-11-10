@@ -44,8 +44,8 @@ process.eobj: stdapp.goh object.goh ui.goh Objects/metaC.goh \
                 Objects/gItemC.goh Objects/gBoolC.goh \
                 Objects/gGadgetC.goh Objects/gToolCC.goh \
                 Objects/gValueC.goh Objects/gToolGC.goh \
-                Objects/helpCC.goh ansi/stdlib.h ansi/stdio.h \
-                ansi/string.h compress.h math.h comptest.goh appui.goh
+                Objects/helpCC.goh Ansi/stdlib.h Ansi/stdio.h \
+                Ansi/string.h compress.h math.h comptest.goh appui.goh
 process.obj \
 process.eobj: geos.h heap.h geode.h resource.h ec.h object.h lmem.h \
                 graphics.h fontID.h font.h color.h gstring.h timer.h vm.h \

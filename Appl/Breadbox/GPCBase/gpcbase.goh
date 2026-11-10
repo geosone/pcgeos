@@ -33,7 +33,7 @@
 
 @include <stdapp.goh>
 @include <gstring.h>
-#include <ansi/string.h>
+#include <Ansi/string.h>
 @include <math.goh>
 #include <token.h>	/* for assigning doc token */
 #include <print.h>       /* These two for printing  */

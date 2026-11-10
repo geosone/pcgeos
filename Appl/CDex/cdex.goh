@@ -25,7 +25,7 @@ DESCRIPTION:
 
 @include <stdapp.goh>
 #include <gstring.h>
-#include <ansi/string.h>
+#include <Ansi/string.h>
 /*#include <math.h>  */
 #include <initfile.h> 
 /*@include <spell.goh>  */

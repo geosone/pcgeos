@@ -19,7 +19,7 @@ DESCRIPTION:
 
 @include <stdapp.goh>
 #include <gstring.h>
-#include <ansi/string.h>
+#include <Ansi/string.h>
 #include <initfile.h>
 @include <ruler.goh>
 @include <Objects/Text/tCtrlC.goh>

@@ -31,7 +31,7 @@
  *		Include Files
  *******************************************************************/
     @include <stdapp.goh>
-    @include <ansi/string.h>	/* strcpy() */
+    @include <Ansi/string.h>	/* strcpy() */
 
 /********************************************************************
  *		Constants and types

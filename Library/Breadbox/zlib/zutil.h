@@ -186,7 +186,7 @@ extern const char *z_errmsg[10]; /* indexed by 2-zlib_error */
 
 /* Diagnostic functions */
 #ifdef DEBUG
-#  include <ansi/stdio.h>
+#  include <Ansi/stdio.h>
    extern int z_verbose;
    extern void z_error    OF((char *m));
 #  ifdef __GEOS__

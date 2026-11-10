@@ -16,7 +16,7 @@
 @include <stdapp.goh>
 @include <thread.h>
 #include <gstring.h>
-/* #include <ansi/string.h> */
+/* #include <Ansi/string.h> */
 @include <initfile.h>
 
 

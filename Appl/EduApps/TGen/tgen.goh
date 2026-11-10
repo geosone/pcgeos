@@ -20,7 +20,7 @@
 
 @include <stdapp.goh>
 #include <gstring.h>
-#include <ansi/string.h>
+#include <Ansi/string.h>
 @include <iacp.goh>     /* to launch calculator */
 #include <token.h>  /* for assigning doc token */
 #include <math.h>

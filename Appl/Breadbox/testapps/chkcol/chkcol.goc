@@ -23,7 +23,7 @@
  */
 
 @include <stdapp.goh>
-#include <ansi/string.h>
+#include <Ansi/string.h>
 
 /*
  ***************************************************************************

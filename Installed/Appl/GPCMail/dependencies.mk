@@ -266,7 +266,7 @@ mailAdvertisement.eobj: product.h geos.h heap.h geode.h resource.h ec.h object.h
                 stylesh.h driver.h thread.h print.h Internal/spoolInt.h \
                 serialDr.h parallDr.h hugearr.h fileEnum.h medium.h \
                 HTMLDRV.H math.h htmlfstr.h awatcher.h htmlprog.h \
-                ansi/string.h library.h initfile.h
+                Ansi/string.h library.h initfile.h
 mailAttach.obj \
 mailAttach.eobj: mail.goh stdapp.goh object.goh ui.goh Objects/metaC.goh \
                 Objects/inputC.goh Objects/clipbrd.goh \
