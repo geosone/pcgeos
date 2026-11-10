@@ -1,220 +1,224 @@
-# Port32: Arbeitsplan
+# Port32: Work Plan
 
-**Stand:** 2026-11-10. Nur Planung, keine Implementierung.
+**As of:** 2026-11-10.
 
-**Gehört zu:** `Port32/GHAL-Konzept.md` (Architektur). Der Pilot liegt in `Port32/Math/`. `Port32/GonDesk-GEOS-auf-GonWare.md` beschreibt einen späteren Host.
+**Belongs to:** `Port32/GHAL-Concept.md` (architecture). The pilot lives in `Port32/Math/`. `Port32/GonDesk-GEOS-on-GonWare.md` describes a later host.
 
-**Ziel:** GEOS wird von festverdrahtetem 16-Bit-Assembler gelöst und in C neu aufgebaut. Darunter liegt eine GEOS Hardware Abstraction Layer (GHAL). Die Hosts kommen in dieser Reihenfolge:
+**Goal:** Free GEOS from hard-wired 16-bit assembler and rebuild it in C, on top of a GEOS Hardware Abstraction Layer (GHAL). Hosts, in this order:
 
-1. `dos32` (DOS muss die ganze Zeit laufen)
-2. `linux` (erste Erweiterung)
-3. `win32`/`win64`
-4. später `gonware`
+1. `dos32` (DOS must keep working the whole time)
+2. `linux` (first extension)
+3. `win32` / `win64`
+4. later `gonware`
 
-Die Architekturen sind amd64, i386, arm64 und armhf.
+Architectures: amd64, i386, arm64, armhf.
+
+**Language rule:** everything in the repository (documents, comments, commit messages, generated reports) is written in English.
 
 ---
 
-## 1. Lage upstream (bluewaysw/pcgeos, Issues und PRs gesichtet am 2026-11-10)
+## 1. Upstream situation (bluewaysw/pcgeos, issues and PRs reviewed 2026-11-10)
 
-Upstream hat 450 Issues (199 offen) und 811 PRs (723 gemerged, 19 offen). Am aktivsten seit 2025 sind bluewaysw, HubertHuckevoll, nschulux, jirkakunze, mgroeber9110 und rabe-soft.
+Upstream has 450 issues (199 open) and 811 PRs (723 merged, 19 open). The most active contributors since 2025 are bluewaysw, HubertHuckevoll, nschulux, jirkakunze, mgroeber9110 and rabe-soft.
 
-### 1.1 Was für den Port direkt zählt
+### 1.1 What matters directly for the port
 
-| Thema | Issue/PR | Stand | Bedeutung für uns |
+| Topic | Issue/PR | State | Meaning for us |
 |---|---|---|---|
-| **Protected Mode** | #665, Branch **`665-protected-mode-2026`** | offen, aktiv (letzter Commit 2026-11-08 `56e18c03`), 32 Commits vor `master`; **356 Dateien, +58 121 / −35 718 Zeilen**, davon Kernel + `Loader32` 81 Dateien (+29 137 / −14 409) | „GEOS32“: GEOS läuft in **16-Bit-Protected-Mode** unter **HDPMI16** (Selektoren statt Segmente), mit neuem **`Loader32`** und **GPMI** (GEOS Protected Mode Interface, Vektortabelle über DPMI: Blöcke, Aliase, Deskriptoren, Interrupt- und Exception-Handler, DMA-Puffer …). Dazu kommen ein `swat`-`Stub32` und Anpassungen in Kernel, User, SpecUI, Text, Spool und Video-Treibern. Präemptives Multitasking läuft seit 2026-11-05 wieder. Ziel ist „6.1 release in the long run“. |
-| Fehlerberichte im Loader32 | #1210 | offen | Der Maintainer will **`swat` als zentrales Debug-Werkzeug behalten**. Das ist wichtig für unseren Werkzeug-Plan. |
-| Host-Schnittstelle (Basebox) | #829 (erledigt), #149 / PR #176, #1050, PR #1246 (offen, auf dem PM-Branch) | aktiv | `Library/HostIf` + `Driver/Socket/HstTCPIP` + SSL über den Host. Auf dem PM-Branch gibt es neu **`Driver/IFS/HostFS`**, ein Dateisystem des Hosts über Basebox. **Das ist bereits das Muster „Host-Dienste + generische Treiber“ aus dem GHAL-Konzept.** |
-| 16-Bit-Variante bleibt | #672, #960 | offen | 8086/8088/V20/286 sollen als eigene Build-Variante bleiben. In #960 heißt es dazu: „requires some concept how the configuration should happen“. **Dort fehlt also ein Konzept für Build-Varianten. Die GHAL-Build-Konfiguration kann das liefern.** |
-| Tests auf dem Entwicklungsrechner | #1239 | offen | Gewünscht: Tests mit Standardort, Aufruf, Berichten, „documented API for … substituting GEOS services“. **Das deckt sich genau mit unserem `linux`-Test-Host und dem Math-Pilot.** |
-| Toolchain | #983 (neueres Open Watcom), #117/#120/#55 (Werkzeuge unter Linux-64), #72 (ia16-gcc), #28/#162/#393/#1147 (Watcom/glue) | teils offen | Die Toolchain ist ein altes OW-Snapshot von 2020 und wackelig. Für den C-Port brauchen wir **parallel** GCC/Clang, ohne die bestehende OW-Kette zu stören. |
-| XMS-Swap-Überlauf | #1209 | offen | ein Beispiel für 16-Bit-Grenzen im Swap-Treiber. Mit 32-Bit-DPMI entfällt die Klasse. |
-| CGA behalten | #456 | offen | Gehört zur 16-Bit-Variante, nicht in den Port. |
+| **Protected mode** | #665, branch **`665-protected-mode-2026`** | open, active (last commit 2026-11-08 `56e18c03`), 32 commits ahead of `master`; **356 files, +58,121 / −35,718 lines**, of which kernel + `Loader32` 81 files (+29,137 / −14,409) | "GEOS32": GEOS runs in **16-bit protected mode** under **HDPMI16** (selectors instead of segments), with a new **`Loader32`** and **GPMI** (GEOS Protected Mode Interface, a vector table over DPMI: blocks, aliases, descriptors, interrupt and exception handlers, DMA buffers …). Plus a `swat` `Stub32` and changes in kernel, User, SpecUI, Text, Spool and video drivers. Preemptive multitasking works again since 2026-11-05. Target: "6.1 release in the long run". |
+| Loader32 error reporting | #1210 | open | The maintainer wants to **keep `swat` as the central debugging tool**. Relevant for our tooling plan. |
+| Host interface (Basebox) | #829 (done), #149 / PR #176, #1050, PR #1246 (open, on the PM branch) | active | `Library/HostIf` + `Driver/Socket/HstTCPIP` + SSL via the host. The PM branch adds **`Driver/IFS/HostFS`**, a host file system via Basebox. **This already is the "host services + generic drivers" pattern of the GHAL concept.** |
+| 16-bit variant stays | #672, #960 | open | 8086/8088/V20/286 are to stay as a separate build variant. #960 says it "requires some concept how the configuration should happen". **A build-variant concept is missing there; the GHAL build configuration can provide it.** |
+| Host-side tests | #1239 | open | Wanted: tests with a standard location, invocation, reporting, a "documented API for … substituting GEOS services". **Matches our `linux` test host and the Math pilot exactly.** |
+| Toolchain | #983 (newer Open Watcom), #117/#120/#55 (tools on 64-bit Linux), #72 (ia16-gcc), #28/#162/#393/#1147 (Watcom/glue) | partly open | The toolchain is an old 2020 OW snapshot and fragile. The C port needs GCC/Clang **in parallel**, without disturbing the existing OW chain. Upstream branch `983-fix-watcom-latest-incompatibilitites` makes the tools build with current OW (merged into `ghal`, see P0). |
+| XMS swap overflow | #1209 | open | An example of 16-bit limits in the swap driver. The whole class disappears with 32-bit DPMI. |
+| Keep CGA | #456 | open | Belongs to the 16-bit variant, not to the port. |
 
-### 1.2 Folgerungen
+### 1.2 Conclusions
 
-1. **Upstream hat sich schon für Protected Mode entschieden**, aber zunächst für 16-Bit-PM. Unser Plan muss **auf diesem Branch aufbauen**, nicht daneben. GPMI ist bereits eine kleine Abstraktion für Speicher, Deskriptoren und Interrupts. Sie wird der DOS-Teil von `ghal_mem`/`ghal_irq`, wir erfinden ihn nicht neu.
-2. **Upstream hat drei Varianten**, und die GHAL-Build-Konfiguration muss alle tragen:
-   - **real16**: heutiges GEOS, 8086 bis 286, #672
-   - **pm16**: GEOS32 aus #665, HDPMI16
-   - **c32/c64**: unser Port, `dos32`/`linux`/`win`/`gonware`
-3. **HostIf/HostFS** zeigen: Host-Dienste mit generischen Treibern sind upstream akzeptiert. Die GHAL-Host-Dienste setzen das fort, ohne Basebox-Bindung.
-4. **`swat` bleibt** für die DOS-Varianten (Maintainer-Wunsch). Für `linux`/`win` kommt gdb dazu. Langfristig ein `swat`-Stub auf GHAL-Basis prüfen.
-5. **Die Tests auf dem Entwicklungsrechner (#1239)** sind der natürliche erste Beitrag nach upstream.
-6. Der alte Mirror `gitea.disconnected-by-peer.at/bluewaysw/pcgeos` hat den PM-Branch nicht. **Der neue vollständige Mirror `gitea.disconnected-by-peer.at/dbp/pcgeos` hat ihn** (inkl. `665-protected-mode`, PR-Refs). Er ist seit 2026-11-10 als Remote `dbp` im Klon eingetragen; `dbp/665-protected-mode-2026` ist geholt.
+1. **Upstream has already decided on protected mode**, but on 16-bit PM first. Our plan must **build on that branch**, not next to it. GPMI is already a small abstraction for memory, descriptors and interrupts. It becomes the DOS side of `ghal_mem` / `ghal_irq`; we do not reinvent it.
+2. **Upstream has three variants**, and the GHAL build configuration must carry all of them:
+   - **real16**: today's GEOS, 8086 to 286, #672
+   - **pm16**: GEOS32 from #665, HDPMI16
+   - **c32/c64**: our port, `dos32` / `linux` / `win` / `gonware`
+3. **HostIf/HostFS** show that host services with generic drivers are accepted upstream. The GHAL host services continue this, without being tied to Basebox.
+4. **`swat` stays** for the DOS variants (maintainer's wish). gdb is added for `linux` / `win`. Longer term, evaluate a `swat` stub on top of the GHAL.
+5. **Host-side tests (#1239)** are the natural first piece of work.
+6. The old mirror `gitea.disconnected-by-peer.at/bluewaysw/pcgeos` lacks the PM branch. **The new full mirror `gitea.disconnected-by-peer.at/dbp/pcgeos` has it** (including `665-protected-mode` and PR refs); it is the remote `dbp` in the clone.
 
 ---
 
-## 2. Phasen
+## 2. Phases
 
-Jede Phase endet mit einem prüfbaren Ergebnis. **Nach jeder Phase läuft GEOS unter DOS.** Upstream-Bezug steht jeweils dabei.
+Every phase ends with a verifiable result. **After every phase GEOS still runs under DOS.** The related upstream topic is noted for each phase.
 
-**Arbeitsweise (Entscheidung 2026-11-10):**
-- Gearbeitet wird **nur im Fork `github.com/geosone/pcgeos`**, Branch `ghal` (auf `665-protected-mode-2026`).
-- Es gibt **keine Pull Requests zu upstream**. **Ein Issue** bei upstream wird erst erstellt, **sobald etwas lauffähig ist** (frühestens nach P5, z. B. GEOS-Kern in C unter DOS/Linux). Es weist auf den Fork hin, damit upstream sich das ansehen kann. Vorher keine Issues.
-- Upstream wird nur **beobachtet und eingeholt**: Neue Commits auf `master` und dem PM-Branch werden regelmäßig in `ghal` übernommen (Merge oder Rebase).
-- „Upstream-Bezug“ heißt im Folgenden nur, an welches upstream-Thema eine Phase anknüpft.
+**Way of working (decided 2026-11-10):**
+- Work happens **only in the fork `github.com/geosone/pcgeos`**, branch `ghal` (on top of `665-protected-mode-2026`).
+- **No pull requests to upstream.** **One issue** upstream is created only **once something runs** (at the earliest after P5, e.g. the GEOS kernel in C under DOS/Linux). It points to the fork so upstream can take a look. No issues before that.
+- Upstream is only **watched and pulled in**: new commits on `master` and the PM branch are merged into `ghal` regularly.
+- "Related upstream topic" below only says which upstream topic a phase connects to.
 
-### P0: Grundlagen
+### P0: Foundations
 
-- ~~PM-Branch verfügbar machen, Fork einrichten~~ **erledigt 2026-11-10**: Remote `geosone` (SSH, weil das globale `insteadOf` `https://github.com` auf Gitea umleitet), PM-Branch in den Fork gepusht, Arbeitsbranch `ghal`.
-- Ablauf zum Einholen von upstream festlegen: Wie oft, Merge oder Rebase, wer löst Konflikte im PM-Branch.
-- Offene Fragen aus dem GHAL-Konzept (9.) selbst entscheiden: Verhältnis zu GPMI/HostIf/HostFS, Build-Varianten (#960), Tests (#1239), `swat`.
-- Konventionen festlegen: C-Standard (C11), Formatierung, Präfixe (`ghal_`), Lizenzkopf Apache 2.0, Sprache der Doku.
-- **Build-System: CMake (Entscheidung 2026-11-10).** Alles Neue (GHAL, C-Port, Tests, Werkzeuge) wird mit CMake + CTest gebaut, Build-Verzeichnisse außerhalb des Quellbaums, Architektur/Host über Toolchain-Dateien in `Port32/cmake/` und die Cache-Variablen `GEOS_HOST`, `GEOS_LINUX_DISPLAY`, `GEOS_ERROR_CHECK`. Die bestehenden 16-Bit-/PM-Builds (pmake, esp, glue, Open Watcom) laufen vorerst unverändert weiter; sie später ebenfalls unter CMake zu bringen (esp/glue als eigene CMake-Sprache bzw. Custom-Commands), ist ein eigener Arbeitspunkt in P3. **Stand:** `Port32/CMakeLists.txt` existiert, der Math-Pilot baut und testet darüber (x86-64 und i686).
+- ~~Make the PM branch available, set up the fork~~ **done 2026-11-10**: remote `geosone` (SSH, because the global git `insteadOf` rule redirects `https://github.com` to Gitea), PM branch pushed to the fork, work branch `ghal`.
+- ~~Build the GEOS toolchain~~ **done 2026-11-10**: Open Watcom 2.0 (May 2026) in `/opt/watcom`; the Linux tool builds failed on "`_WCI86FAR` is reserved" (#983), fixed by merging upstream branch `983-fix-watcom-latest-incompatibilitites` into `ghal`. `pmake`, `esp`, `glue`, `goc`, `uic`, `loc`, `swat` build for Linux. Full target build (`Installed/`) in progress, to be kept as the byte-identical reference for P2.
+- Define how upstream is pulled in: how often, merge vs. rebase, who resolves conflicts with the PM branch.
+- Decide the open questions of the GHAL concept (section 9) ourselves: relation to GPMI/HostIf/HostFS, build variants (#960), tests (#1239), `swat`.
+- Conventions: C standard (C11), formatting, prefixes (`ghal_`), Apache 2.0 license header, English everywhere in the repo.
+- **Build system: CMake (decided 2026-11-10).** Everything new (GHAL, C port, tests, tools) is built with CMake + CTest, out-of-tree build directories, architecture/host selected via toolchain files in `Port32/cmake/` and the cache variables `GEOS_HOST`, `GEOS_LINUX_DISPLAY`, `GEOS_ERROR_CHECK`. The existing 16-bit / PM builds (pmake, esp, glue, Open Watcom) keep running unchanged for now; bringing them under CMake as well is a separate work item in P3. **Status:** `Port32/CMakeLists.txt` exists; the Math pilot builds and tests through it (x86-64 and i686).
 
-**Ergebnis:** Fork und Branch stehen; das Einholen von upstream ist geregelt; die offenen Fragen aus dem GHAL-Konzept (9.) sind beantwortet.
+**Result:** fork and branch in place; pulling in upstream is defined; the open questions of the GHAL concept are answered.
 
-### P1: Tests auf dem Entwicklungsrechner (knüpft an upstream #1239 an)
+### P1: Host-side tests (related upstream: #1239)
 
-- Ort, Aufruf und Berichtsformat für Tests auf dem Entwicklungsrechner festlegen (z. B. `Tests/Host/`, `make host-tests` bzw. CTest).
-- Minimaler `linux`-GHAL-Kern **ohne Grafik**: `ghal_mem`, `ghal_time`, `ghal_log`, Stub-Dienste.
-- **Math-Pilot** (`Port32/Math`) als erster Testfall einbringen. Dafür `fpstack.c` auf `double` umstellen.
-- CI auf linux-amd64, i386, arm64 und armhf (ARM über QEMU-User).
+- Define location, invocation and reporting for host-side tests (CTest).
+- Minimal `linux` GHAL core **without graphics**: `ghal_mem`, `ghal_time`, `ghal_log`, stub services.
+- Bring in the **Math pilot** (`Port32/Math`) as the first test case; switch `fpstack.c` to `double` for that.
+- CI on linux-amd64, i386, arm64 and armhf (ARM via QEMU user mode).
 
-**Ergebnis:** Test-Infrastruktur im Fork; der Pilot läuft auf vier Architekturen.
+**Result:** test infrastructure in the fork; the pilot runs on four architectures.
 
-### P2: GHAL im bestehenden Assembler einziehen (Schritt S0)
+### P2: Pull the GHAL into the existing assembler (step S0)
 
-Die Arbeit läuft auf Basis des PM-Branches.
+Work is based on the PM branch.
 
-- **Inventar per Skript** (wiederholbar, in der CI): alle `int 21h/10h/15h/16h/2Fh/67h`, Port-I/O, `SysCatch*Interrupt`, `SysLockBIOS`, `INT_OFF`/`cli` in Kernel und Loader/Loader32. **Erledigt 2026-11-10:** `Port32/tools/ghal_inventory.py`, Bericht `Port32/GHAL-Inventar.md`, Baseline `Port32/tools/ghal_baseline.json`; CMake-Ziele `ghal-inventory` und `ghal-inventory-check` (schlägt fehl, wenn upstream neue Host-Kontakte bringt). Ergebnis auf `ghal`: 3 531 Stellen gesamt; im GHAL-Kern (Kernel + Loader + Loader32) rund 1 200, davon ohne `INT_OFF`/`INT_ON` gut 900, und davon entfallen über 500 auf `Loader`/`Loader32` und die GPMI-Nutzung im Kernel-Heap.
-- GHAL-Einsprungpunkte und -Makros in asm (`GHAL_CRIT_ENTER`, `GHALDosCall`, `GHALCatchIrq` …). **real16** und **pm16** setzen sie auf das bisherige Verhalten bzw. auf GPMI um.
-- Kernel (`Sys`, `Timer`, `FSD`, `File`, `Boot`, `Thread`) und `Loader32` darauf umstellen.
-- **Abnahme:** Die real16-Variante baut **bytegleich** wie vorher, oder mit dokumentierten Unterschieden. pm16 bootet wie vorher bis zum Desk.
-- Build-Varianten-Konzept für #960 (V20/186/286-Optimierungen) mitliefern, auf denselben Mechanismen.
+- **Inventory by script** (repeatable, in CI): all `int 21h/10h/15h/16h/2Fh/67h`, port I/O, `SysCatch*Interrupt`, `SysLockBIOS`, `INT_OFF`/`cli` in kernel and Loader/Loader32. **Done 2026-11-10:** `Port32/tools/ghal_inventory.py`, report `Port32/GHAL-Inventory.md`, baseline `Port32/tools/ghal_baseline.json`; CMake targets `ghal-inventory` and `ghal-inventory-check` (fails if upstream brings new host contacts). Result on `ghal`: 3,531 sites in total; about 1,200 in the GHAL core area (kernel + Loader + Loader32), a good 900 of them excluding `INT_OFF`/`INT_ON`, and more than 500 of those are in `Loader`/`Loader32` and the GPMI use in the kernel heap.
+- GHAL entry points and macros in asm (`GHAL_CRIT_ENTER`, `GHALDosCall`, `GHALCatchIrq` …). **real16** and **pm16** map them to the previous behaviour or to GPMI respectively. Starting point: `INT_OFF`/`INT_ON` are already macros (`Include/Internal/interrup.def`, `equ <cli>` / `<sti>`); the kernel also has an old, barely used `NO_DOS` switch (`DOS`/`NODOS` macros in `kernelMacro.def`, Geoworks 1993).
+- Route the kernel (`Sys`, `Timer`, `FSD`, `File`, `Boot`, `Thread`) and `Loader32` through them.
+- **Acceptance:** the real16 variant builds **byte-identical** to before, or with documented differences. pm16 boots to Desk as before.
+- Deliver a build-variant concept for #960 (V20/186/286 optimizations) on the same mechanisms.
 
-**Ergebnis:** Alle Host-Kontakte von Kernel und Loader liegen an einer Stelle und haben Namen. Commits in kleinen Paketen pro Kernel-Modul, damit das Einholen von upstream beherrschbar bleibt.
+**Result:** all host contacts of kernel and loader are in one place and have names. Commits in small packages per kernel module, so pulling in upstream stays manageable.
 
-### P3: C-Toolchain neben Open Watcom
+### P3: C toolchain next to Open Watcom
 
-- `goc`-Backend für GCC/Clang (neben `COM_WATCOM` usw. in `Tools/goc`).
-- `uic` → C-Daten statt `.rdef`.
-- `geosport.h`: Typen, `_far`/`_pascal` leer, 64-Bit-saubere `CInclude/`. Zuerst als Prüfung: CInclude kompiliert mit `-m64 -Wall`.
-- **Geode-Format:** ELF-Shared-Object und ein Ladeformat aus `.gp` (Exporte, Protokollnummern). Spezifikation + Prototyp-Lader als Test auf dem Entwicklungsrechner.
-- Build-System: CMake (siehe P0). Für die asm-Varianten zunächst pmake; Arbeitspunkt: auch diese unter CMake (esp/glue/goc/uic als Custom-Commands bzw. eigene CMake-Sprache), damit es am Ende **ein** Build-System gibt.
+- `goc` backend for GCC/Clang (next to `COM_WATCOM` etc. in `Tools/goc`).
+- `uic` → C data instead of `.rdef`.
+- `geosport.h`: types, `_far` / `_pascal` empty, 64-bit clean `CInclude/`. First as a check: CInclude compiles with `-m64 -Wall`.
+- **Geode format:** ELF shared object plus a load format derived from `.gp` (exports, protocol numbers). Specification + prototype loader as a host-side test.
+- Build system: CMake (see P0). The asm variants use pmake for now; work item: move them under CMake as well (esp/glue/goc/uic as custom commands or a CMake language of their own), so that there is **one** build system in the end.
 
-**Ergebnis:** Eine GOC-Beispiel-App (`Appl/SDK_C/*`) kompiliert für `linux` (ohne zu laufen); ELF-Geodes laden im Test.
+**Result:** a GOC sample app (`Appl/SDK_C/*`) compiles for `linux` (without running); ELF geodes load in the test.
 
-### P4: Laufzeitkern in C
+### P4: Runtime kernel in C
 
-Reihenfolge nach Abhängigkeit, jeweils mit Tests auf dem Entwicklungsrechner unter `linux`:
+Ordered by dependency, each with host-side tests under `linux`:
 
-1. Heap (32-Bit-Handles, Blöcke wandern nicht), LMem (Chunks bleiben), Initfile, Local
-2. Thread/Sem/Timer auf `ghal_ctx`/`ghal_time` (GEOS-Scheduler + Kernel-Sperre)
-3. Object (Message-Dispatch mit C-Signaturen, 32-Bit-Message-Nummern), Geodes (ELF-Lader aus P3)
-4. VMem (neues Dateiformat), File-API, FSD + HostFS-Treiber auf `ghal_fs`
+1. Heap (32-bit handles, blocks do not move), LMem (chunks still move within a block), Initfile, Local
+2. Thread/Sem/Timer on `ghal_ctx` / `ghal_time` (GEOS scheduler + kernel lock)
+3. Object (message dispatch with C signatures, 32-bit message numbers), Geodes (ELF loader from P3)
+4. VMem (new file format), File API, FSD + HostFS driver on `ghal_fs`
 
-**Ergebnis:** Ein GEOS-Kernel ohne Grafik läuft unter `linux` als Prozess, lädt Geodes, sendet Messages und liest und schreibt VM-Dateien. Alles ist durch Tests abgedeckt.
+**Result:** a GEOS kernel without graphics runs under `linux` as a process, loads geodes, sends messages, reads and writes VM files. Everything is covered by tests.
 
 ### P5: Host `dos32`
 
-- GHAL-Kern `dos32` (HDPMI32/HX): Speicher, Scheduler mit Kontextwechsel, IRQ-Stubs, DOS-Sperre. Dabei die Struktur aus GPMI/Loader32 übernehmen.
-- Treiber nach C/32-Bit:
-  - Video: VESA-LFB aus `VGAlike`/`VidCom`
-  - Tastatur, Maus (PS/2, seriell)
-  - IFS/DOS mit LFN
-  - HostFS für Basebox
-- Start, `geos.ini`, Systemverzeichnis.
+- GHAL core `dos32` (HDPMI32/HX): memory, scheduler with context switch, IRQ stubs, DOS lock. Reuse the structure of GPMI/Loader32.
+- Drivers to C/32-bit:
+  - video: VESA LFB from `VGAlike` / `VidCom`
+  - keyboard, mouse (PS/2, serial)
+  - IFS/DOS with LFN
+  - HostFS for Basebox
+- Startup, `geos.ini`, system directory.
 
-**Ergebnis:** Der Kern aus P4 läuft unter DOS (FreeDOS + HDPMI32, QEMU und echte Hardware) mit einer Testanzeige. **Ab hier ist DOS auch im C-Zweig die Referenzplattform.**
+**Result:** the kernel from P4 runs under DOS (FreeDOS + HDPMI32, QEMU and real hardware) with a test display. **From here on DOS is the reference platform in the C branch as well.**
 
-**Meilenstein „vorzeigbar“:** Ab hier kann das Issue bei upstream erstellt werden (siehe Arbeitsweise), spätestens nach P6 mit dem ersten C-Desktop.
+**Milestone "presentable":** from here on the upstream issue can be created (see way of working), at the latest after P6 with the first C desktop.
 
-### P6: Grafik, Fenster, UI, Text
+### P6: Graphics, windows, UI, text
 
-- Kernel `Graphics`/`Win`/`IM` (~130 k Zeilen asm) → C. Der generische FB-Videotreiber auf `ghal_display` und der Software-Renderer kommen dazu.
+- Kernel `Graphics` / `Win` / `IM` (~130 k lines of asm) → C, plus the generic FB video driver on `ghal_display` and the software renderer.
 - `Library/User` (~169 k) → C.
-- `SpecUI/CommonUI` + Motif (~295 k) → C. Andere SpecUIs später.
+- `SpecUI/CommonUI` + Motif (~295 k) → C. Other SpecUIs later.
 - `Library/Text` (~149 k) → C.
-- FreeType-Treiber (schon C) anbinden.
+- Hook up the FreeType driver (already C).
 
-**Ergebnis:** **Erster GEOS-Desktop in C, unter `dos32` und `linux` (SDL3).** `Appl/SDK_C`-Beispiele laufen.
+**Result:** **first GEOS desktop in C, under `dos32` and `linux` (SDL3).** `Appl/SDK_C` samples run.
 
-### P7: Host `linux` vollständig
+### P7: Host `linux` complete
 
-- Anzeige: SDL3 → fbdev → X11.
-- Eingabe → HID-Usages, HostFS mit xattrs, Sockets (Host-Socket-Treiber nach dem Modell `HstTCPIP`), Audio, Drucken über CUPS.
+- Display: SDL3 → fbdev → X11.
+- Input → HID usages, HostFS with xattrs, sockets (host socket driver modelled on `HstTCPIP`), audio, printing via CUPS.
 
-**Ergebnis:** GEOS als normales Linux-Programm auf amd64, i386, arm64 und armhf.
+**Result:** GEOS as a normal Linux program on amd64, i386, arm64 and armhf.
 
-### P8: Komponenten und Anwendungen
+### P8: Components and applications
 
-- Komponenten: GrObj, Spreadsheet, Chart, Math (Rest), Parse, Spline, Impex.
-- GOC-Apps neu bauen (~0,83 Mio. Zeilen, u. a. Breadbox).
-- asm-Apps übersetzen oder ersetzen: FileMgr, GeoWrite, Calendar …
+- Components: GrObj, Spreadsheet, Chart, Math (rest), Parse, Spline, Impex.
+- Rebuild the GOC apps (~0.83 M lines, including Breadbox).
+- Translate or replace the asm apps: FileMgr, GeoWrite, Calendar …
 
-### P9: Host `win32`/`win64`
+### P9: Host `win32` / `win64`
 
-- GHAL-Kern Windows: Win32-Threads, `VirtualAlloc`, Winsock, Anzeige über DIB oder SDL3, HostFS mit NTFS-Streams.
-- Achtung LLP64 (GHAL-Konzept, Build-Regeln).
+- GHAL core for Windows: Win32 threads, `VirtualAlloc`, Winsock, display via DIB or SDL3, HostFS with NTFS streams.
+- Mind LLP64 (GHAL concept, build rules).
 
 ### P10: Host `gonware`
 
-- Siehe `GonDesk-GEOS-auf-GonWare.md`. Voraussetzung ist Ring 3 in GonWare (dortige Phase 6).
+- See `GonDesk-GEOS-on-GonWare.md`. Requires Ring 3 in GonWare (its phase 6).
 
 ---
 
-## 3. Größenordnung
+## 3. Order of magnitude
 
-| Phase | Umfang |
+| Phase | Scope |
 |---|---|
-| P0–P3 | Infrastruktur und Toolchain. Monate, nicht Jahre. Das meiste ist schon im 16-Bit-Code nützlich. |
-| P4–P6 | ~0,75 Mio. asm-Zeilen bis zum Desktop. Mehrere Personenjahre. |
-| P7–P10 | Hosts und Apps. Hosts sind klein, sobald die GHAL steht. Die asm-Apps sind der große Rest (zusammen 10+ Personenjahre bis zum Vollausbau). |
+| P0–P3 | Infrastructure and toolchain. Months, not years. Most of it is already useful for the 16-bit code. |
+| P4–P6 | ~0.75 M lines of asm up to the desktop. Several person-years. |
+| P7–P10 | Hosts and apps. Hosts are small once the GHAL stands. The asm apps are the big remainder (10+ person-years in total for the full build-out). |
 
-Der Pilot hat für asm-Code zu C ein Verhältnis von ~1,9 : 1 ergeben. Die meiste Zeit kostet das Klären der Semantik, nicht das Tippen.
+The pilot gave a ratio of about 1.9 : 1 for asm code to C. Most of the time goes into clarifying semantics, not typing.
 
 ---
 
-## 4. Risiken
+## 4. Risks
 
-| Risiko | Gegenmaßnahme |
+| Risk | Mitigation |
 |---|---|
-| **Auseinanderlaufen mit upstream** (PM-Branch bewegt sich schnell) | auf dem PM-Branch arbeiten, upstream regelmäßig einholen, kleine Commits, Änderungen an upstream-Dateien möglichst gering halten (neuer Code in eigenen Verzeichnissen) |
-| Upstream ändert Dinge, auf denen wir aufbauen (z. B. GPMI, Loader32) | Inventar-Skript (P2) in der CI des Forks, damit neue Host-Kontakte aus upstream sofort auffallen |
-| Toolchain (altes OW, Linux-64-Bugs) | C-Port mit GCC/Clang parallel; die OW-Kette bleibt unangetastet |
-| `swat` vs. gdb | `swat` für DOS-Varianten behalten; gdb für gehostete Systeme; Symbolformat später angleichen |
-| Umfang (3,7 Mio. asm-Zeilen) | Reihenfolge nach Nutzen (Kernel → UI → Text → GOC-Apps); asm-Apps zuletzt oder ersetzen |
-| Semantik-Fehler beim Übersetzen | jeder portierte Teil mit Tests auf dem Entwicklungsrechner, Vergleich gegen das 16-Bit-Original, wo es Sinn ergibt (wie im Math-Pilot) |
-| Lizenz | alles Apache 2.0; keine GPL-Teile in den GEOS-Code (relevant z. B. bei HX-Teilen und Hilfsbibliotheken) |
+| **Drifting apart from upstream** (the PM branch moves fast) | work on the PM branch, pull in upstream regularly, small commits, keep changes to upstream files minimal (new code in separate directories) |
+| Upstream changes things we build on (e.g. GPMI, Loader32) | inventory script (P2) in the fork's CI, so new host contacts from upstream show up immediately |
+| Toolchain (old OW, 64-bit Linux bugs) | C port with GCC/Clang in parallel; the OW chain stays untouched apart from upstream fixes |
+| `swat` vs. gdb | keep `swat` for the DOS variants; gdb for hosted systems; align symbol formats later |
+| Size (3.7 M lines of asm) | order by value (kernel → UI → text → GOC apps); asm apps last or replaced |
+| Semantic errors while translating | every ported part with host-side tests, compared against the 16-bit original where it makes sense (as in the Math pilot) |
+| License | everything Apache 2.0; no GPL parts in GEOS code (relevant e.g. for HX parts and helper libraries) |
 
 ---
 
-## 5. Nächste konkrete Schritte
+## 5. Next concrete steps
 
-1. ~~PM-Branch holen~~ erledigt (Remote `dbp`). Nächster Teil davon: den PM-Branch durchsehen (GPMI, `Loader32`, Kernel-Änderungen, HostFS) und das Ergebnis hier eintragen.
-2. Inventar-Skript für P2 schreiben und gegen `master` und den PM-Branch laufen lassen.
-3. Ablauf zum Einholen von upstream festlegen (P0).
-4. Den Math-Pilot an #1239 ausrichten (Ort, Aufruf, `double`), als Vorschlag für den ersten PR.
+1. Finish the full target build and store its output (geodes, loader, kernel) as the byte-identical reference.
+2. Review the PM branch (GPMI, `Loader32`, kernel changes, HostFS) and record the result here.
+3. Start S0 with `INT_OFF`/`INT_ON`: new `Include/Internal/ghal.def`, route kernel `Timer` and `Sys` through it, verify byte-identical output.
+4. Define how upstream is pulled in (P0).
+5. Align the Math pilot with #1239 (location, invocation, `double`).
 
 ---
 
-## Anhang: Gesichtete Issues/PRs mit Bezug zum Port
+## Appendix: Reviewed issues/PRs related to the port
 
-**Offen:**
+**Open:**
 
-- #665 (Protected Mode)
-- #1210 (Loader32-Diagnose)
-- #672, #960 (16-Bit-Variante)
-- #1239 (Tests auf dem Entwicklungsrechner)
-- #983 (neueres OW)
-- #117, #55, #85, #16 (Build unter Linux)
+- #665 (protected mode)
+- #1210 (Loader32 diagnostics)
+- #672, #960 (16-bit variant)
+- #1239 (host-side tests)
+- #983 (newer OW)
+- #117, #55, #85, #16 (building on Linux)
 - #72 (ia16-gcc)
-- #149/PR #176, #1050, PR #1246 (Host-TCP/HostIf)
-- #1209 (XMS-Swap)
+- #149 / PR #176, #1050, PR #1246 (host TCP / HostIf)
+- #1209 (XMS swap)
 - #456 (CGA)
 - #28, #162, #393, #168, #169, #177, #453, #1089 (glue/esp/Watcom)
-- #224 (OW-Debuginfo)
+- #224 (OW debug info)
 - #421, #573, #306, #1074 (swat)
 
-**Erledigt, als Hintergrund:**
+**Closed, as background:**
 
-- #829 (Basebox-Schnittstelle)
-- #89/#90 (swat unter Windows/Linux)
-- #91/#104/#126 (swat über TCP/IPX/seriell)
-- PR #51 (Toolchain unter Linux)
-- PR #686/#688 (HostIf-Library)
-- PR #1226 (Handle-Leck, PM-Branch)
-- PR #1140 (DOSBox-Erkennung im Kernel)
+- #829 (Basebox interface)
+- #89 / #90 (swat on Windows/Linux)
+- #91 / #104 / #126 (swat via TCP/IPX/serial)
+- PR #51 (toolchain on Linux)
+- PR #686 / #688 (HostIf library)
+- PR #1226 (handle leak, PM branch)
+- PR #1140 (DOSBox detection in the kernel)

@@ -1,5 +1,5 @@
 # Port32 -- C port of PC/GEOS on top of the GHAL (GEOS Hardware Abstraction
-# Layer).  See PLAN.md and GHAL-Konzept.md.
+# Layer).  See PLAN.md and GHAL-Concept.md.
 #
 #   cmake -S Port32 -B build -G Ninja                       # host linux, native
 #   cmake -S Port32 -B build32 -G Ninja \
@@ -47,7 +47,7 @@ if(Python3_FOUND)
   add_custom_target(ghal-inventory
     COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tools/ghal_inventory.py
             --root ${CMAKE_CURRENT_SOURCE_DIR}/..
-            --markdown ${CMAKE_BINARY_DIR}/GHAL-Inventar.md
+            --markdown ${CMAKE_BINARY_DIR}/GHAL-Inventory.md
             --json ${CMAKE_BINARY_DIR}/ghal_inventory.json
     COMMENT "Scanning GEOS sources for direct host contacts"
     VERBATIM)
