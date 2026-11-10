@@ -60,8 +60,9 @@ extern time_t time(time_t *tm);
 
 #elif defined(__WATCOMC__)
 #	include    <signal.h>
+_WCRTLINK extern int getopt(int __argc, char* const __argv[], const char* __optstring);
 
-extern time_t time(time_t *tm);
+//extern time_t time(time_t *tm);
 
 #elif defined(__HIGHC__)
 #	include	   <malloc.h>
@@ -501,7 +502,6 @@ MainParseArgs (int argc, char** argv)
     if (backwards) {
 	oldVars = TRUE;
     }
-
     /*
      * See if the rest of the arguments are variable assignments and perform
      * them if so. Else take them to be targets and stuff them on the end
@@ -658,7 +658,6 @@ main (int argc, char** argv)
 	/* printf("cwd = %s\n", GetCwd(tempcwd, MAX_PATH)); */
     }
 #endif
-
     /*
      * See what the user calls us. If s/he calls us (yuck) "make", then
      * act like it. Otherwise act like our normal, cheerful self.

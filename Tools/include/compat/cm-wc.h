@@ -44,9 +44,9 @@
 //#include <io.h>
 
 #define HAVE_DIRENT
-#define HAVE_BCMP
-#define HAVE_BCOPY
-#define HAVE_BZERO
+//#define HAVE_BCMP
+//#define HAVE_BCOPY
+//#define HAVE_BZERO
 #define HAVE_ISINF
 #define HAVE_MKTEMP
 
@@ -62,6 +62,7 @@
 /* Borland doesn't allow arithmetic on void *. */
 typedef char *genptr;
 typedef void *genptrparam ;
+typedef const void *genptrparamconst ;
 
 /* Borland doesn't support the inline keyword in any obvious way. */
 #define inline
