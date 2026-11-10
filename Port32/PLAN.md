@@ -52,7 +52,7 @@ Jede Phase endet mit einem prüfbaren Ergebnis. **Nach jeder Phase läuft GEOS u
 
 **Arbeitsweise (Entscheidung 2026-11-10):**
 - Gearbeitet wird **nur im Fork `github.com/geosone/pcgeos`**, Branch `ghal` (auf `665-protected-mode-2026`).
-- Es gibt **keine Pull Requests und keine Issues zu upstream**.
+- Es gibt **keine Pull Requests zu upstream**. **Ein Issue** bei upstream wird erst erstellt, **sobald etwas lauffähig ist** (frühestens nach P5, z. B. GEOS-Kern in C unter DOS/Linux). Es weist auf den Fork hin, damit upstream sich das ansehen kann. Vorher keine Issues.
 - Upstream wird nur **beobachtet und eingeholt**: Neue Commits auf `master` und dem PM-Branch werden regelmäßig in `ghal` übernommen (Merge oder Rebase).
 - „Upstream-Bezug“ heißt im Folgenden nur, an welches upstream-Thema eine Phase anknüpft.
 
@@ -118,6 +118,8 @@ Reihenfolge nach Abhängigkeit, jeweils mit Tests auf dem Entwicklungsrechner un
 - Start, `geos.ini`, Systemverzeichnis.
 
 **Ergebnis:** Der Kern aus P4 läuft unter DOS (FreeDOS + HDPMI32, QEMU und echte Hardware) mit einer Testanzeige. **Ab hier ist DOS auch im C-Zweig die Referenzplattform.**
+
+**Meilenstein „vorzeigbar“:** Ab hier kann das Issue bei upstream erstellt werden (siehe Arbeitsweise), spätestens nach P6 mit dem ersten C-Desktop.
 
 ### P6: Grafik, Fenster, UI, Text
 
