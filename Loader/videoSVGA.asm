@@ -86,7 +86,7 @@ LoaderDisplaySVGA	proc	near
 	mov	ah, VESA_BIOS_EXT
 	mov	al, VESA_SET_MODE
 	mov	bx, VESA_800x600_4BIT 	; mode number, clear memory
-	int	VIDEO_BIOS
+	GHAL_VideoBios
 
 	;Disable this screen, so the user doesn't have to watch us draw
 	;(Can't do this before setting the video mode.)
@@ -95,7 +95,7 @@ LoaderDisplaySVGA	proc	near
 	mov	ah, ALT_SELECT		; choose BIOS function number
 	mov	bl, VIDEO_SCREEN_ON_OFF ; choose sub-function number
 	mov	al, VGA_DISABLE_VIDEO	; disable it this time
-	int	VIDEO_BIOS
+	GHAL_VideoBios
 
 	; If we have an image to blast up, skip the text options.
 	; j- 4/16/93
@@ -156,7 +156,7 @@ endif
 	mov	ah, ALT_SELECT		; choose BIOS function number
 	mov	bl, VIDEO_SCREEN_ON_OFF ; choose sub-function number
 	mov	al, VGA_ENABLE_VIDEO	; disable video signal
-	int	VIDEO_BIOS
+	GHAL_VideoBios
 
 	;indicate we were successful
 

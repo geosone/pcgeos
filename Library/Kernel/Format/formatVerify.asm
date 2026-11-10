@@ -79,7 +79,7 @@ VerifyKeyTracks	proc	near	uses	ds, es
 verifyLoop:
 	clr	bx
 	push	ax,cx,dx
-	int	25h
+	GHAL_DosAbsRead
 	inc	sp
 	inc	sp
 	pop	ax,cx,dx
@@ -154,14 +154,14 @@ VerifyInt13	proc	near	uses	bp
 
 	push	ax
 	clr	ah			;reset disk system
-	int	13h
+	GHAL_DiskBios
 	pop	ax
 
 	mov	bp, 5
 
 tryLoop:
 	push	ax
-	int	13h			;perform operation
+	GHAL_DiskBios			;perform operation
 	pop	ax
 	jnc	done
 

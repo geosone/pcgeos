@@ -795,7 +795,7 @@ ReprogramRealTimeTimer	proc	near
 	;
 	;  Reset the timer
 	mov	ah, TRTCF_RESET_RTC_ALARM
-	int	TIMER_RTC_BIOS_INT
+	GHAL_ClockBios
 
 	;
 	;  Get the new settings for the RT timer
@@ -822,7 +822,7 @@ ReprogramRealTimeTimer	proc	near
 	mov	dh, al				; dh = Second
 	
 	mov	ah, TRTCF_SET_RTC_ALARM
-	int	TIMER_RTC_BIOS_INT
+	GHAL_ClockBios
 EC <	ERROR_C	TIMER_SET_RTC_RETURNED_ERROR				>
 	
 	.leave

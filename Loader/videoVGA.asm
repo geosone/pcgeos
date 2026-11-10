@@ -73,7 +73,7 @@ LoaderDisplayVGA	proc	near
 
 	mov	ah, SET_VMODE		; function # to set video mode
 	mov	al, GR0F_6448		; set up 640x480 graphics mode
-	int	VIDEO_BIOS		; use video BIOS call
+	GHAL_VideoBios		; use video BIOS call
 
 	;Disable this screen, so the user doesn't have to watch us draw
 	;(Can't do this before setting the video mode.)
@@ -82,7 +82,7 @@ LoaderDisplayVGA	proc	near
 	mov	ah, ALT_SELECT		; choose BIOS function number
 	mov	bl, VIDEO_SCREEN_ON_OFF ; choose sub-function number
 	mov	al, VGA_DISABLE_VIDEO	; disable it this time
-	int	VIDEO_BIOS
+	GHAL_VideoBios
 
 	; If we have an image to blast up, skip the text options.
 	; j- 4/16/93
@@ -142,7 +142,7 @@ endif
 	mov	ah, ALT_SELECT		; choose BIOS function number
 	mov	bl, VIDEO_SCREEN_ON_OFF ; choose sub-function number
 	mov	al, VGA_ENABLE_VIDEO	; enable video signal
-	int	VIDEO_BIOS
+	GHAL_VideoBios
 
 	; pause for a little bit of time (about 1/4 second)
 	; based on the raster being on/off the screen

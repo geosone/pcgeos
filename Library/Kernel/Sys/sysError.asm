@@ -591,7 +591,7 @@ poll:
 	;
 	mov	ax, APMSC_GET_PM_EVENT or (APM_MAJOR_COMMAND shl 8)
 	call	SysLockBIOS	; Should we lock BIOS and risk deadlocking?
-	int	APM_COMMAND_IRQ		; bx = APMEvent, ah = APMErrorCode, CF
+	GHAL_SysBios		; bx = APMEvent, ah = APMErrorCode, CF
 	call	SysUnlockBIOS
 	jc	poll			; => no event
 
@@ -608,7 +608,7 @@ poll:
 	mov	bx, APMDID_ALL_BIOS_DEVICES
 	mov	cx, APMS_REQUEST_REJECTED
 	call	SysLockBIOS	; Should we lock BIOS and risk deadlocking?
-	int	APM_COMMAND_IRQ
+	GHAL_SysBios
 	call	SysUnlockBIOS
 
 	;
@@ -667,13 +667,13 @@ if	HARDWARE_PC_KEYBOARD
 	; Make sure there's a character waiting.
 	; 
 		mov	ah, 01h
-		int	16h
+		GHAL_KbdBios
 		jz	done			; => no character there
 	;
 	; There is. Fetch it.
 	; 
 		mov	ah, 0
-		int	16h			; al <- ascii value,
+		GHAL_KbdBios			; al <- ascii value,
 						;  ah <- scan code
 		tst	al			; special char? (e.g. F1)
 		jz	done			; yes, don't pass special chars

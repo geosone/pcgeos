@@ -621,7 +621,7 @@ FSDAutoLoadMSNet proc	near
 		cmp	ds:[dosVersion].low, 3	; int 2fh not around before 3.0
 		jb	done
 		mov	ax, MSNET_EXISTENCE_CHECK
-		int	2fh
+		GHAL_MultiplexCall
 		tst	al		; still 0?
 		jz	done		; yes -- not installed
 		test	bl, mask MSNIF_REDIRECTOR or mask MSNIF_SERVER
@@ -673,7 +673,7 @@ FSDAutoLoadCDROM proc	near
 
 		clr	bx		; avoid conflict with GRAPHICS.COM
 		mov	ax, CDROM_GET_STATUS
-		int	2fh
+		GHAL_MultiplexCall
 		tst	bx
 		jz	done
 	;

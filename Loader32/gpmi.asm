@@ -198,7 +198,7 @@ endif
 
 	; Now go into protected mode
 	mov     ax, 1687h
-	int     2Fh
+	GHAL_MultiplexCall
 	test    ax, ax
 	jnz     failed
 	mov     cs:[DPMIEntry.offset], di

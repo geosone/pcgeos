@@ -73,7 +73,7 @@ LoaderDisplayEGA	proc	near
 
 	mov	ah, SET_VMODE		; function # to set video mode
 	mov	al, GR0F_6435		; set up 640x350 graphics mode
-	int	VIDEO_BIOS		; use video BIOS call
+	GHAL_VideoBios		; use video BIOS call
 
 	;Disable this screen, so the user doesn't have to watch us draw
 	;(Can't do this before setting the video mode.)
@@ -210,7 +210,7 @@ egapalette	local	EGAPalette
 		rep	stosb			; fill the buffer
 
 		mov	ax, SET_PALREGS		; set all the registers
-		int	VIDEO_BIOS
+		GHAL_VideoBios
 
 		.leave
 		ret
@@ -257,7 +257,7 @@ LoaderEnableEGA	proc	far
 		segmov	es, ss, di
 		mov	dx, offset palCurEntries ; es:dx -> palette buffer
 		mov	ax, SET_PALREGS		 ; set all the registers
-		int	VIDEO_BIOS
+		GHAL_VideoBios
 
 		.leave
 		ret

@@ -114,7 +114,7 @@ ploop:
 		tst	al
 		jz	done
 		mov	ah, 0xe
-		int	0x10
+		GHAL_VideoBios
 		jmp	ploop
 done:
 		jmp	done

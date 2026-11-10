@@ -504,7 +504,7 @@ woofWoof	label	near
 	; 
 	LoadVarSeg	ds
 	clr	ax			; set mode 0
-	int	10h
+	GHAL_VideoBios
 	mov	ds, ds:[fixedStringsSegment]
 	assume	ds:FixedStrings
 	mov	si, ds:[unableToExit]
@@ -514,7 +514,7 @@ woofLoop:
 	tst	al
 	jz	woofLoopForever
 	mov	ah, 0eh
-	int	10h
+	GHAL_VideoBios
 	jmp	woofLoop
 
 woofLoopForever:

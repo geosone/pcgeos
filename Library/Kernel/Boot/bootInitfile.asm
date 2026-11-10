@@ -734,7 +734,7 @@ LoadEMS	proc	near	uses ds, es
 	jnz	done
 
 	mov	ah, 40h			;check status of driver
-	int	67h			;call EMM
+	GHAL_EmsCall			;call EMM
 	tst	ah			;test for error
 	jnz	done
 	;
@@ -789,7 +789,7 @@ LoadXMS		proc	near	uses ds
 		jb	done
 
 		mov	ax, 4300h	; See if XMS manager is present (q.v.
-		int	2fh		;  XMS spec p. 2-2)
+		GHAL_MultiplexCall		;  XMS spec p. 2-2)
 
 		cmp	al, 80h
 		jne	done
@@ -835,7 +835,7 @@ REVISION HISTORY:
 LoadExtMem	proc	near	uses ds
 		.enter
 		mov	ah, 88h		;call function to get size of ext mem
-		int	15h
+		GHAL_SysBios
 		test	ah, 0x80	;some BIOSes return carry set even if
 					; there is extended memory. On machines
 					; that don't support extended memory,

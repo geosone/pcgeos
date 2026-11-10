@@ -2021,7 +2021,7 @@ notMapPage:
 	xchg	si, bx		;BX <- logical page to map in
 	mov	ah, high EMF_MAP_BANK
 	mov	dx, cs:[loaderVars].KLV_emmHandle
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah			;If error, whine...
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
 
@@ -2331,12 +2331,12 @@ AllocateEMSMemory	proc	near	uses	ax, bx, cx, ds, si
 	segmov	ds, cs
 	mov	si, offset hanName
 	mov	ax, EMF_SEARCH
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	jnz	notFound
 
 	mov	ah, high EMF_FREE
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
 	
@@ -2369,13 +2369,13 @@ endif
 	pop	dx			;DX <- EMM handle
 
 	mov	ax, EMF_ALLOC
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah			;If there is an error allocating our
 	stc				; memory, return it...
 	jnz	exit
 
 	mov	ax, EMF_SET_NAME	;Set the name to the string whose ptr
-	int	EMM_INT			; is still in DS:SI
+	GHAL_EmsCall			; is still in DS:SI
 	tst	ah
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
 
@@ -2498,14 +2498,14 @@ nextBank:
 	mov	ax, EMF_MAP_BANK
 	mov	bx, logicalPageNum
 	mov	dx, emmHan
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
 
 ;	Find out the address of physical page #0
 
 	mov	ah, high EMF_GET_PAGE_FRAME
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
 	mov	ds, bx			
@@ -2533,7 +2533,7 @@ nextBank:
 	mov	ax, EMF_MAP_BANK
 	mov	bx, UNMAP_BANK
 	mov	dx, emmHan
-	int	EMM_INT
+	GHAL_EmsCall
 	
 	tst_clc	ah
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
@@ -3133,12 +3133,12 @@ LocateMapPage	proc	near
 	mov	ax, EMF_MAP_BANK	;Start XIPHeader into bank "0"
 	clr	bx
 	mov	dx, cs:[loaderVars].KLV_emmHandle
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
 	
 	mov	ah, high EMF_GET_PAGE_FRAME
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
 	mov	es, bx			
@@ -3152,7 +3152,7 @@ LocateMapPage	proc	near
 	mov	ax, EMF_GET_BANKS
 	segmov	es, cs
 	mov	di, offset physicalPages
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	ERROR_NZ	LS_EMMXIP_EMM_ERROR
 	cmp	cx, MAX_PHYSICAL_PAGES

@@ -301,17 +301,13 @@
  },
  "Library/Kernel": {
   "bios_lock": 2,
-  "ems_xms": 1,
   "gpmi": 13,
   "int_flag": 11,
   "irq_vector": 2,
   "port_io": 17
  },
  "Library/Kernel/Boot": {
-  "bios": 4,
   "breakpoint": 1,
-  "dos_other": 1,
-  "ems_xms": 1,
   "int_flag": 5,
   "port_io": 2
  },
@@ -328,22 +324,18 @@
  "Library/Kernel/FSD": {
   "bios_lock": 2,
   "dos_int21": 1,
-  "dos_other": 2,
   "gpmi": 6,
   "int_flag": 4,
   "irq_vector": 8
  },
  "Library/Kernel/Format": {
-  "bios": 4,
-  "dos_int21": 5,
-  "dos_other": 1
+  "dos_int21": 5
  },
  "Library/Kernel/Geodes": {
   "gpmi": 2,
   "int_flag": 27
  },
  "Library/Kernel/Graphics": {
-  "bios": 3,
   "int_flag": 5
  },
  "Library/Kernel/Heap": {
@@ -360,27 +352,21 @@
   "int_flag": 8
  },
  "Library/Kernel/Sys": {
-  "bios": 3,
   "bios_lock": 18,
   "breakpoint": 2,
   "dos_int21": 1,
-  "dos_other": 5,
-  "ems_xms": 7,
   "gpmi": 19,
   "int_flag": 17,
   "irq_vector": 10,
   "port_io": 38
  },
  "Library/Kernel/Thread": {
-  "bios": 1,
   "bios_lock": 4,
-  "ems_xms": 7,
   "int_flag": 23,
   "irq_vector": 6,
   "port_io": 6
  },
  "Library/Kernel/Timer": {
-  "bios": 7,
   "bios_lock": 2,
   "dos_int21": 2,
   "gpmi": 7,
@@ -420,14 +406,10 @@
   "port_io": 7
  },
  "Loader": {
-  "bios": 20,
-  "ems_xms": 11,
   "int_flag": 10,
   "port_io": 94
  },
  "Loader32": {
-  "bios": 4,
-  "dos_other": 1,
   "dpmi": 71,
   "gpmi": 204,
   "int_flag": 4,

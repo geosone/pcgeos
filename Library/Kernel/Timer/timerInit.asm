@@ -89,7 +89,7 @@ ifidn	HARDWARE_TYPE, <GULLIVER>
 	; want it to be (namely no pending Alarm
 	; from the previous reboot)...
 	mov	ah, TRTCF_RESET_RTC_ALARM
-	int	TIMER_RTC_BIOS_INT
+	GHAL_ClockBios
 
 else
 	.err <need to initialize real-time-clock support>

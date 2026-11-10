@@ -1311,7 +1311,7 @@ waitReset:
 	GHAL_DosCall
 else	; not PROTECTED_MODE
 if 0	; Doesn't work on many machines. The floppy just spins...
-	int	19h
+	GHAL_BootstrapBios
 else
 	; set WARM_START flag in BIOS data area and vault to the processor
 	; reset vector up in high memory.
@@ -1482,7 +1482,7 @@ RestoreTextVideoModeIfSplashScreenStillPresent	proc	near
 	cmp	al, SITM_UNKNOWN
 	je	done			;skip if the loader was baffled by it...
 
-	int	VIDEO_BIOS
+	GHAL_VideoBios
 
 done:
 	ret

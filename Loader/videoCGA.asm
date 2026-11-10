@@ -107,7 +107,7 @@ else
 
 	mov	ah, SET_VMODE		; function # to set video mode
 	mov	al, GR02_6420		; set up 640x200 graphics mode
-	int	VIDEO_BIOS		; use video BIOS call
+	GHAL_VideoBios		; use video BIOS call
 
 	;Disable this screen, so the user doesn't have to watch us draw
 	;(Can't do this before setting the video mode.)

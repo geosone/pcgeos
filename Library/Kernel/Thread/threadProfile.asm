@@ -100,14 +100,14 @@ SingleStepInitAccountant	proc	far
 	;
 	;  Look for block left over from the last time...
 		mov	ax, EMF_SEARCH
-		int	EMM_INT
+		GHAL_EmsCall
 		tst	ah
 		jnz	getNewBlock ; => Couldn't find one
 
 	;
 	;  There was one.  Free it.
 		mov	ah, high EMF_FREE
-		int	EMM_INT
+		GHAL_EmsCall
 		tst	ah
 		jnz	error ; => mysterious problem
 
@@ -121,7 +121,7 @@ getNewBlock:
 	;
 	;  Allocate one mondo-huge block to store the counters in
 		mov	ax, EMF_ALLOC
-		int	EMM_INT
+		GHAL_EmsCall
 		tst	ah
 		jnz	error ; => Couldn't get it
 
@@ -129,7 +129,7 @@ getNewBlock:
 	;  Associate this block with us, so we can find it
 	;  again if we need it (like if we crash).
 		mov	ax, EMF_SET_NAME
-		int	EMM_INT
+		GHAL_EmsCall
 		tst	ah
 		jnz	error ; => mysterious problem
 
@@ -220,7 +220,7 @@ SingleStepFreeAccountant	proc	far
 	;  Free the entire array "just-like-that"
 		mov	dx, ax
 		mov	ax, EMF_FREE
-		int	EMM_INT
+		GHAL_EmsCall
 done:
 		.leave
 		ret
@@ -1021,7 +1021,7 @@ MapSSPage	proc	near
 		mov	dx, ds:[blobHandle]		; dx <- EMS Handle
 		mov	ah, high EMF_MAP_BANK		; ah <- command
 		mov	al, ds:[loaderVars].KLV_mapPage	; al <- mapping seg
-		int	EMM_INT			; ax <- non-zero on error
+		GHAL_EmsCall			; ax <- non-zero on error
 			; No point in checking for an error,
 			; all we can do is crash
 ;-----------------------------------------------------------------------------
@@ -1057,7 +1057,7 @@ endif
 		mov	dx, ds:[loaderVars].KLV_emmHandle; dx <- EMS Handle
 		mov	ah, high EMF_MAP_BANK		; ah <- command
 		mov	al, ds:[loaderVars].KLV_mapPage	; al <- mapping seg
-		int	EMM_INT
+		GHAL_EmsCall
 			; No point in checking for an error,
 			; all we can do is crash
 ;-----------------------------------------------------------------------------
@@ -1486,7 +1486,7 @@ PrintSSPDebugChar	proc	far	uses	ax, bx
 
 	mov	ah, 0x0e
 	clr	bx
-	int	10h
+	GHAL_VideoBios
 	.leave
 	ret
 PrintSSPDebugChar	endp

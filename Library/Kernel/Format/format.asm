@@ -304,7 +304,7 @@ REVISION HISTORY:
 FormatInt13	proc	near
 		.enter
 		call	FormatGrabDOS
-		int	13h
+		GHAL_DiskBios
 		call	FormatReleaseDOS
 		.leave
 		ret

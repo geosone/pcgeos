@@ -500,12 +500,12 @@ AllocateEMSMemory	proc	near	uses	ax, bx, cx, ds, si
 	segmov	ds, cs
 	mov	si, offset hanName
 	mov	ax, EMF_SEARCH
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	jnz	notFound
 
 	mov	ah, high EMF_FREE
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	ERROR_NZ	UTIL_WINDOW_EMM_ERROR
 	
@@ -543,7 +543,7 @@ else
 	;
 	push	dx
 	mov	ax, EMF_GET_NUM_PAGES
-	int	EMM_INT			; bx = num available pages
+	GHAL_EmsCall			; bx = num available pages
 	pop	dx
 	tst	ah
 	stc
@@ -553,13 +553,13 @@ else
 endif
 
 	mov	ax, EMF_ALLOC
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah			;If there is an error allocating our
 	stc				; memory, return it...
 	jnz	exit
 
 	mov	ax, EMF_SET_NAME	;Set the name to the string whose ptr
-	int	EMM_INT			; is still in DS:SI
+	GHAL_EmsCall			; is still in DS:SI
 	tst	ah
 	ERROR_NZ	UTIL_WINDOW_EMM_ERROR
 
@@ -687,7 +687,7 @@ CheckIfXMMPresent	proc	near
 	; See if an Extended Memory Manager is present.
 	;
 	mov	ax, XMS_PRESENT?
-	int	2fh
+	GHAL_MultiplexCall
 	cmp	al, XMS_HERE
 	stc				; assume XMM not present
 	jne	done			; => XMM not present
@@ -696,7 +696,7 @@ CheckIfXMMPresent	proc	near
 	; Fetch the entry address for the thing.
 	;
 	mov	ax, XMS_ADDRESS?	; es:bx = addr
-	int	2fh
+	GHAL_MultiplexCall
 	movdw	ds:[xmsAddrUW], esbx
 ifndef PROTECTED_MODE
 EC <	call	NullES			; to avoid ec segment crash	>
@@ -1019,7 +1019,7 @@ noNum:
 	; get page frame, using highest possible bank(s)
 	;
 	mov	ah, high EMF_GET_PAGE_FRAME
-	int	EMM_INT				; bx = segment
+	GHAL_EmsCall				; bx = segment
 	tst	ah
 	jnz	noWindow
 	mov	cx, UTIL_WINDOW_MAX_NUM_WINDOWS
@@ -2041,7 +2041,7 @@ EC <	tst	ah							>
 EC <	ERROR_NZ	UTIL_WINDOW_EMM_ERROR				>
 	ornf	ax, EMF_MAP_BANK		; ah = cmd, al = window #
 	mov	dx, ds:[utilWindowEMMHandle]	; dx = EMM handle
-	int	EMM_INT
+	GHAL_EmsCall
 	tst	ah
 	jnz	error				; error, no map update
 	;

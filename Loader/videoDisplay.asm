@@ -525,7 +525,7 @@ LoaderDisplayTextAtXY	proc	near
 
 	mov	ax, 0x1300		;use bios function 13h, don't move 
 					;cursor, and use attribute in bl.
-	int	10h
+	GHAL_VideoBios
 
 	.leave
 	ret
@@ -659,7 +659,7 @@ LoaderDisplayRestoreTextMode	proc	near
 	push	ax
 	mov	ah, SET_VMODE
 	mov	al, ds:[loaderVars].KLV_initialTextMode
-	int	VIDEO_BIOS
+	GHAL_VideoBios
 	pop	ax
 
 done:

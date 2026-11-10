@@ -430,7 +430,7 @@ checkXms::
 	; See if an Extended Memory Manager is present.
 	;
 		mov	ax, XMS_PRESENT?
-		int	2fh
+		GHAL_MultiplexCall
 		cmp	al, XMS_HERE
 		je	fetchXMSAddr
 		stc
@@ -442,7 +442,7 @@ fetchXMSAddr:
 	;
 EC <		push	es		; avoid segment-checking death 	>
 		mov	ax, XMS_ADDRESS?
-		int	2fh
+		GHAL_MultiplexCall
 		mov	ds:xmsAddr.offset, bx
 		mov	ds:xmsAddr.segment, es
 EC <		pop	es						>

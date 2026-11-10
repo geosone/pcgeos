@@ -218,7 +218,7 @@ storePT:
 	; BIOS_GET_SYS_DESC disables the trap flag also, so save and restore
 	; our trap status here.
 		mov	ah, BIOS_GET_SYS_DESC
-		int	15h
+		GHAL_SysBios
 		INT_ON			; Some machines return interrupts off
 					; here, the bastards
 		jc	IS30		; Call unsupported
@@ -554,7 +554,7 @@ ifdef PROTECTED_MODE
 		segmov	ds, cs
 		mov	si, offset hdpmiVendorName
 		mov	ax, 168ah
-		int	2fh
+		GHAL_MultiplexCall
 		pop	ds
 		tst	al			; 0 = vendor API supported
 		jnz	noHDPMI

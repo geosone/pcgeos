@@ -427,7 +427,7 @@ writeThroughBIOS:
 	tst	al
 	jz	done
 	mov	ah, 0xe			; output a single character
-	int	10h
+	GHAL_VideoBios
 	jmp	writeThroughBIOS
 LogWriteString	endp
 

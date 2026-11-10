@@ -1445,7 +1445,7 @@ CallEMMDriver	macro	opt
 ifnb	<opt>
 	mov	ax, opt
 endif
-	int	EMM_INT
+	GHAL_EmsCall
 if	ERROR_CHECK
 	tst	ah
 	ERROR_NZ	EMMXIP_EMM_ERROR

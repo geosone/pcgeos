@@ -97,7 +97,7 @@ LoaderDisplayDCGA	proc	near
 
 	mov	ah, SET_VMODE		; function # to set video mode
 	mov     al, ATT6300_MODE        ; set up 640x400 graphics mode
-	int	VIDEO_BIOS		; use video BIOS call
+	GHAL_VideoBios		; use video BIOS call
 
 	; Clear the screen before the image is displayed.
 

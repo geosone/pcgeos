@@ -191,7 +191,7 @@ LoaderDetectVideoModes	proc	near
 	; VESA Super VGA Standard VS891001, page 6, 10/1/89)
 
 	mov	ah, GET_VMODE		;get current mode
-	int	VIDEO_BIOS
+	GHAL_VideoBios
 
 EC <	cmp	al, SITM_UNKNOWN					>
 EC <	ERROR_E BIOS_RETURNED_A_WEIRD_TEXT_MODE_VALUE			>
@@ -527,7 +527,7 @@ LoaderFindVGAOrMCGA	proc	near
 
 		mov	ah, 1ah			; function code
 		clr	al			; al = 0 >> Get Display Comb
-		int	VIDEO_BIOS
+		GHAL_VideoBios
 
 		cmp	al, 1ah			; call successful ?
 		jne	failed			; skip if not...
@@ -587,7 +587,7 @@ LoaderFindEGA	proc	near
 
 		mov	ah, VIDMISC
 ;VIDEO_BIOS?
-		int	10h		; if bl returns unchanged then there
+		GHAL_VideoBios		; if bl returns unchanged then there
 					; is no EGA present.
 		cmp	bl,10h		;
 		jne	SFE_Found	;
@@ -647,7 +647,7 @@ vesaInfo	local	VESAInfoBlock
 		lea	di, vesaInfo	; es:di -> info block
 		mov	ah, VESA_BIOS_EXT ; use VESA bios extensions
 		mov	al, VESA_GET_SVGA_INFO ; basic info call
-		int	VIDEO_BIOS	; make bios call
+		GHAL_VideoBios	; make bios call
 
 		; if al = VESA_BIOS_EXT, then there is a VESA compatible board
 		; there...actually, we need to check for the VESA signature too

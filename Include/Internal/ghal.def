@@ -107,3 +107,62 @@ endm
 GHAL_DosCall	macro
 	int	21h
 endm
+
+;------------------------------------------------------------------------------
+;	BIOS and other host services
+;
+;	Each macro issues the software interrupt of one host service.
+;	Registers in and out as documented for that service.
+;
+;	Macro			int	Service -> GHAL module on other hosts
+;	GHAL_VideoBios      	10h	video BIOS -> ghal_video / video driver
+;	GHAL_DiskBios       	13h	disk BIOS -> ghal_fs (raw disk, format)
+;	GHAL_SysBios        	15h	system BIOS (APM, A20, memory size) -> ghal_power / ghal_boot
+;	GHAL_KbdBios        	16h	keyboard BIOS -> ghal_input
+;	GHAL_BootstrapBios  	19h	bootstrap loader (reboot) -> ghal_exit
+;	GHAL_ClockBios      	1ah	clock BIOS / RTC -> ghal_time
+;	GHAL_DosAbsRead     	25h	DOS absolute disk read (leaves flags on stack) -> ghal_fs
+;	GHAL_DosAbsWrite    	26h	DOS absolute disk write (leaves flags on stack) -> ghal_fs
+;	GHAL_MultiplexCall  	2fh	DOS multiplex (XMS, task switchers, ...) -> ghal_mem / ghal_boot
+;	GHAL_EmsCall        	67h	EMS driver -> ghal_mem
+;------------------------------------------------------------------------------
+
+GHAL_VideoBios	macro
+	int	10h
+endm
+
+GHAL_DiskBios	macro
+	int	13h
+endm
+
+GHAL_SysBios	macro
+	int	15h
+endm
+
+GHAL_KbdBios	macro
+	int	16h
+endm
+
+GHAL_BootstrapBios	macro
+	int	19h
+endm
+
+GHAL_ClockBios	macro
+	int	1ah
+endm
+
+GHAL_DosAbsRead	macro
+	int	25h
+endm
+
+GHAL_DosAbsWrite	macro
+	int	26h
+endm
+
+GHAL_MultiplexCall	macro
+	int	2fh
+endm
+
+GHAL_EmsCall	macro
+	int	67h
+endm

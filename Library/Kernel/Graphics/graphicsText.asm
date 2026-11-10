@@ -324,7 +324,7 @@ useBIOSLoop:
 		LocalIsNull ax
 		jz	useBIOSDone
 		mov	ah, 0eh
-		int	10h
+		GHAL_VideoBios
 		loop	useBIOSLoop
 useBIOSDone:
 	;
@@ -332,9 +332,9 @@ useBIOSDone:
 	; it to us :)
 	; 
 		mov	ax, (0eh shl 8) or '\r'
-		int	10h
+		GHAL_VideoBios
 		mov	ax, (0eh shl 8) or '\n'
-		int	10h
+		GHAL_VideoBios
 		pop	si, ax, cx
 		ret
 SNDrawText	endp

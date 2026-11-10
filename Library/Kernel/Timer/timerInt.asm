@@ -2763,7 +2763,7 @@ noEvent:
 		
 noEventClearAlarm:
 		mov	ah, TRTCF_RESET_RTC_ALARM
-		int	TIMER_RTC_BIOS_INT
+		GHAL_ClockBios
 		jmp	short noEvent
 		
 RTCInterruptHandler		endp
@@ -2885,7 +2885,7 @@ clearHardware:
 	;  interrupts, or we might wake up when we've critically
 	;  suspended, and kill the ram drive due to lack of power.
 	mov	ah, TRTCF_RESET_RTC_ALARM
-	int	TIMER_RTC_BIOS_INT
+	GHAL_ClockBios
 	jmp	short exit
 endif	
 CheckRealTimeTimers	endp
