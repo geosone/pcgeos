@@ -54,20 +54,34 @@ static void test_mem_plain(void)
     CHECK(ghal_mem_alloc(0, 0) == NULL);
 }
 
-/* Returns the signal that ended a child writing to p, or 0. */
-static int write_in_child(volatile unsigned char *p)
+/* Exit code of a child that hits a memory protection fault.  The child
+ * catches the fault itself, so no real crash (and no core dump) happens. */
+#define FAULT_EXIT 99
+
+static void fault_exit(int sig)
+{
+    (void)sig;
+    _exit(FAULT_EXIT);
+}
+
+/* Returns 1 if writing to p faults, 0 if it works, -1 on error. */
+static int write_faults(volatile unsigned char *p)
 {
     int status;
     pid_t pid = fork();
     if (pid == 0) {
-        signal(SIGSEGV, SIG_DFL);   /* sanitizers install their own */
-        signal(SIGBUS, SIG_DFL);
+        struct sigaction sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sa_handler = fault_exit;
+        sigaction(SIGSEGV, &sa, NULL);  /* replaces sanitizer handlers too */
+        sigaction(SIGBUS, &sa, NULL);
         p[0] = 1;
         _exit(0);
     }
-    if (pid < 0 || waitpid(pid, &status, 0) != pid)
+    if (pid < 0 || waitpid(pid, &status, 0) != pid || !WIFEXITED(status))
         return -1;
-    return WIFSIGNALED(status) ? WTERMSIG(status) : 0;
+    return WEXITSTATUS(status) == FAULT_EXIT ? 1
+         : WEXITSTATUS(status) == 0 ? 0 : -1;
 }
 
 static void test_mem_paged(void)
@@ -81,13 +95,13 @@ static void test_mem_paged(void)
     CHECK(((uintptr_t)c % info.page_size) == 0);
     CHECK(all_zero(c, 5000));
     memset(c, 0xc3, 5000);                 /* "ret" */
-    CHECK(write_in_child(c) == 0);
+    CHECK(write_faults(c) == 0);
     CHECK(ghal_mem_protect(c, GHAL_PROT_RX) == GHAL_OK);
     CHECK(c[4999] == 0xc3);                /* still readable */
-    CHECK(write_in_child(c) == SIGSEGV);   /* no longer writable */
+    CHECK(write_faults(c) == 1);           /* no longer writable */
     c = ghal_mem_resize(c, 9000);          /* back to RW, content kept */
     CHECK(c != NULL && c[4999] == 0xc3 && ghal_mem_size(c) == 9000);
-    CHECK(write_in_child(c) == 0);
+    CHECK(write_faults(c) == 0);
     CHECK(ghal_mem_protect(c, 8) == GHAL_ERR_INVAL);
     ghal_mem_free(c);
 }
