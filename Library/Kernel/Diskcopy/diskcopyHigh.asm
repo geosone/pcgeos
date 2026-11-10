@@ -1505,7 +1505,7 @@ if	0
 	mov	bx, FML_DOS
 	call	FileGrabSystem
 	mov	ah, 0dh
-	int	21h
+	GHAL_DosCall
 	mov	bx, FML_DOS
 	call	FileReleaseSystem
 	pop	ax,bx

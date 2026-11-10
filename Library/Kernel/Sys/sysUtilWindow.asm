@@ -419,11 +419,11 @@ CheckIfEMMPresent	proc	near	uses	es, ds
 	; for their own purposes.
 	;
 		mov	ah, MSDOS_GET_VERSION
-		int 21h
+		GHAL_DosCall
 		xchg	ax, cx
 		
 		mov	ah, MSDOS_GET_DOS_TABLES
-		int 21h
+		GHAL_DosCall
 		
 		add	bx, offset D2LOL_null	; assume DOS 2.X
 		cmp	cl, 2

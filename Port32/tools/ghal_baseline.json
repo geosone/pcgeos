@@ -310,37 +310,32 @@
  "Library/Kernel/Boot": {
   "bios": 4,
   "breakpoint": 1,
-  "dos_int21": 4,
   "dos_other": 1,
   "ems_xms": 1,
   "int_flag": 5,
   "port_io": 2
  },
  "Library/Kernel/Diskcopy": {
-  "dos_int21": 3,
+  "dos_int21": 2,
   "int_flag": 2
  },
  "Library/Kernel/Dosappl": {
-  "bios_lock": 3,
-  "dos_int21": 1
+  "bios_lock": 3
  },
  "Library/Kernel/Drive": {
   "bios_lock": 2
  },
  "Library/Kernel/FSD": {
   "bios_lock": 2,
-  "dos_int21": 31,
+  "dos_int21": 1,
   "dos_other": 2,
   "gpmi": 6,
   "int_flag": 4,
   "irq_vector": 8
  },
- "Library/Kernel/File": {
-  "dos_int21": 2
- },
  "Library/Kernel/Format": {
   "bios": 4,
-  "dos_int21": 6,
+  "dos_int21": 5,
   "dos_other": 1
  },
  "Library/Kernel/Geodes": {
@@ -368,7 +363,7 @@
   "bios": 3,
   "bios_lock": 18,
   "breakpoint": 2,
-  "dos_int21": 7,
+  "dos_int21": 1,
   "dos_other": 5,
   "ems_xms": 7,
   "gpmi": 19,
@@ -387,7 +382,7 @@
  "Library/Kernel/Timer": {
   "bios": 7,
   "bios_lock": 2,
-  "dos_int21": 8,
+  "dos_int21": 2,
   "gpmi": 7,
   "int_flag": 37,
   "port_io": 4
@@ -426,14 +421,12 @@
  },
  "Loader": {
   "bios": 20,
-  "dos_int21": 57,
   "ems_xms": 11,
   "int_flag": 10,
   "port_io": 94
  },
  "Loader32": {
   "bios": 4,
-  "dos_int21": 47,
   "dos_other": 1,
   "dpmi": 71,
   "gpmi": 204,

@@ -960,14 +960,14 @@ RestoreMSDOSTime	proc	far
 
 	call	SysLockBIOS
 	mov	ah,MSDOS_SET_TIME
-	int	21h
+	GHAL_DosCall
 EC <	tst	al							>
 EC <	ERROR_NZ BAD_MSDOS_TIME_SET					>
 
 	mov	ah,MSDOS_SET_DATE
 	mov	cx, si				; years -> cx
 	mov	dx, bx				; month/days => dx
-	int	21h
+	GHAL_DosCall
 EC <	tst	al							>
 EC <	ERROR_NZ BAD_MSDOS_DATE_SET					>
 	call	SysUnlockBIOS

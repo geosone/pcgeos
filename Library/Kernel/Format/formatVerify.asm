@@ -70,7 +70,7 @@ VerifyKeyTracks	proc	near	uses	ds, es
 	call    FileGrabSystem
 
 	mov	ah, 0dh				;reset disk system
-	int	21h
+	GHAL_DosCall
 
 	clr	dx				;logical sector 0
 	mov	al, es:[drive]

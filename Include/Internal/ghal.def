@@ -93,3 +93,17 @@ GHAL_TimerReset	macro	value
 	mov	al, ah
 	out	TIMER_IO_0_LATCH, al
 endm
+
+;------------------------------------------------------------------------------
+;	DOS services
+;
+;	GHAL_DosCall
+;		Issue a DOS function call (int 21h).  Registers in and out as
+;		documented for the DOS function in ah.  Other hosts map the
+;		functions the kernel uses to ghal_fs / ghal_boot / ghal_time
+;		(Port32/GHAL-Concept.md).
+;------------------------------------------------------------------------------
+
+GHAL_DosCall	macro
+	int	21h
+endm

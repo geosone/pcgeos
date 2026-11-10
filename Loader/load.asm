@@ -165,7 +165,7 @@ FindAndOpenKernel	proc	near
 
 	mov	dx, offset systemString
 	mov	ah, MSDOS_SET_CURRENT_DIR
-	int	21h
+	GHAL_DosCall
 	jc	notLocal
 
 	call	TryOpeningKernel
@@ -191,7 +191,7 @@ done:
 	pushf
 	push	ax
 	mov	ah, MSDOS_GET_DEFAULT_DRIVE
-	int	21h
+	GHAL_DosCall
 	mov	ds:[loaderVars].KLV_kernelFileDrive, al
 	pop	ax
 	popf
@@ -590,7 +590,7 @@ TryOpeningKernel	proc	near	uses ax, cx, dx, ds
 	; opened the beast in compatibility mode...)
 	; 
 	mov	ah, MSDOS_GET_VERSION
-	int	21h		; al = major, ah = minor, bx:cx = oemSerialNum
+	GHAL_DosCall		; al = major, ah = minor, bx:cx = oemSerialNum
 	cmp	al, 3
 	mov	ax, (MSDOS_OPEN_FILE shl 8) or \
 			FileAccessFlags <FE_DENY_WRITE, FA_READ_ONLY>
@@ -599,7 +599,7 @@ TryOpeningKernel	proc	near	uses ax, cx, dx, ds
 doOpen:
 	mov	dx, offset cs:[kernelName]
 	segmov	ds, cs
-	int	21h
+	GHAL_DosCall
 	mov_trash	bx, ax			;bx = file handle
 
 	.leave
@@ -654,7 +654,7 @@ ReadProcessHeaderAndCoreBlock	proc	near
 	mov	cx,size GeosFileHeader	;read first header info
 	mov	dx, offset kernelFileHeader
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	;if (signature wrong) -> return error
@@ -674,7 +674,7 @@ ReadProcessHeaderAndCoreBlock	proc	near
 	mov	cx, size ExecutableFileHeader
 	mov	dx, offset kernelExecHeader
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	; read in the core block
@@ -682,7 +682,7 @@ ReadProcessHeaderAndCoreBlock	proc	near
 	mov	cx, GEODE_FILE_TABLE_SIZE
 	mov	dx, offset kernelCoreBlock
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	; save the file position of the exported entry table
@@ -690,7 +690,7 @@ ReadProcessHeaderAndCoreBlock	proc	near
 	clr	cx
 	mov	dx, cx
 	mov	ax, (MSDOS_POS_FILE shl 8) or FILE_POS_RELATIVE
-	int	21h				;dx.ax = file position
+	GHAL_DosCall				;dx.ax = file position
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 	mov	ds:[exportTablePos].high, dx
 	mov	ds:[exportTablePos].low, ax
@@ -704,7 +704,7 @@ ReadProcessHeaderAndCoreBlock	proc	near
 	add	dx, 2
 	clr	cx
 	mov	ax, (MSDOS_POS_FILE shl 8) or FILE_POS_RELATIVE
-	int	21h				;dx.ax = file position
+	GHAL_DosCall				;dx.ax = file position
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	; load in the first words to get the size of kdata block
@@ -712,7 +712,7 @@ ReadProcessHeaderAndCoreBlock	proc	near
 	mov	cx, size kdataSize
 	mov	dx, offset kdataSize
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	; store file handle (it's a DOS file handle, but the kernel will
@@ -898,7 +898,7 @@ LoadExportTable	proc	near
 	mov	ax, (MSDOS_POS_FILE shl 8) or FILE_POS_START
 	; already relative to start of file, since comes from FILE_POS_RELATIVE
 	; call.
-	int	21h				;dx.ax = file position
+	GHAL_DosCall				;dx.ax = file position
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	; Compute location for the exported entry point table
@@ -913,7 +913,7 @@ LoadExportTable	proc	near
 	shl	cx			;*2
 	shl	cx			;*4
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	ret
@@ -1184,7 +1184,7 @@ InitResources	proc	near
 	shl	cx			;cx = #resources * 8
 	mov	bx, ds:[GH_geoHandle]
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	;Read allocation flags into local variable space
@@ -1200,7 +1200,7 @@ InitResources	proc	near
 	segmov	ds, ss
 	mov	dx, di
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 	pop	ds
 
@@ -1584,7 +1584,7 @@ groupLoop:
 	mov	bx, ds:[GH_geoHandle]
 	segmov	ds, ss
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 	pop	ds
 
@@ -1674,7 +1674,7 @@ LoadResourceData	proc	near	uses ax, bx, cx, dx, si, ds
 	adc	cx, 0
 	mov	al,FILE_POS_START
 	mov	ah, MSDOS_POS_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	;Read in resource
@@ -1684,7 +1684,7 @@ LoadResourceData	proc	near	uses ax, bx, cx, dx, si, ds
 
 	clr	dx			;read at offset 0
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOAD_KERNEL
 
 	.leave
@@ -1916,11 +1916,11 @@ CheckIfEMMPresent	proc	near	uses	es, ds
 	; for their own purposes.
 	;
 		mov	ah, MSDOS_GET_VERSION
-		int 21h
+		GHAL_DosCall
 		xchg	ax, cx
 		
 		mov	ah, MSDOS_GET_DOS_TABLES
-		int 21h
+		GHAL_DosCall
 		
 		add	bx, offset D2LOL_null	; assume DOS 2.X
 		cmp	cl, 2
@@ -2278,7 +2278,7 @@ OpenXIPImageFile	proc	near
 	; opened the beast in compatibility mode...)
 	; 
 	mov	ah, MSDOS_GET_VERSION
-	int	21h		; al = major, ah = minor, bx:cx = oemSerialNum
+	GHAL_DosCall		; al = major, ah = minor, bx:cx = oemSerialNum
 	cmp	al, 3
 	mov	ax, (MSDOS_OPEN_FILE shl 8) or \
 			FileAccessFlags <FE_DENY_WRITE, FA_READ_ONLY>
@@ -2287,7 +2287,7 @@ OpenXIPImageFile	proc	near
 doOpen:
 	mov	dx, offset cs:[imageName]
 	segmov	ds, cs
-	int	21h
+	GHAL_DosCall
 	mov_trash	bx, ax			;bx = file handle
 	.leave
 	ret
@@ -2417,13 +2417,13 @@ LoadXIPImageIntoMemory	proc	near	uses	ax, bx, cx, dx
 ;
 	mov	ax, FILE_POS_END or MSDOS_POS_FILE shl 8
 	clrdw	cxdx
-	int	21h		;dx:ax = file size
+	GHAL_DosCall		;dx:ax = file size
 	ERROR_C	LS_EMMXIP_CANNOT_READ_IMAGE_FILE
 	
 	pushdw	dxax
 	clrdw	cxdx
 	mov	ax, FILE_POS_START or MSDOS_POS_FILE shl 8
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_EMMXIP_CANNOT_READ_IMAGE_FILE
 	popdw	dxax
 
@@ -2443,7 +2443,7 @@ exit:
 
 	pushf
 	mov	ah, MSDOS_CLOSE_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_EMMXIP_CANNOT_READ_IMAGE_FILE
 	popf	
 	.leave
@@ -2514,7 +2514,7 @@ nextBank:
 	mov	bx, fileHan
 	mov	cx, PHYSICAL_PAGE_SIZE
 	mov	ah, MSDOS_READ_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_EMMXIP_CANNOT_READ_IMAGE_FILE
 
 	tst	ax		;Barf if 0 bytes read

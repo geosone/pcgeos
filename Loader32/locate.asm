@@ -81,7 +81,7 @@ LocateGeosDir	proc	near
 
 	; save start-up path so that we can pass it to the kernel
 	mov	ah, MSDOS_GET_DEFAULT_DRIVE	;store the drive letter
-	int	21h				;does NOT return the carry flag
+	GHAL_DosCall				;does NOT return the carry flag
 
 	mov	ds:[loaderVars.KLV_bootDrive], al
 	add	al, 'A'
@@ -90,7 +90,7 @@ LocateGeosDir	proc	near
 	mov	si, offset loaderVars.KLV_bootupPath+3
 	clr	dl
 	mov	ah, MSDOS_GET_CURRENT_DIR
-	int	21h				;store current directory
+	GHAL_DosCall				;store current directory
 	ERROR_C	LS_CANNOT_LOCATE_KERNEL
 
 	; look in current directory
@@ -118,7 +118,7 @@ done:
 
         ; Re-read the path and see where DOS really put us.
 	mov	ah, MSDOS_GET_DEFAULT_DRIVE	;set drive
-	int	21h
+	GHAL_DosCall
 
         ; Get the drive letter
 	add	al, 'A'
@@ -128,7 +128,7 @@ done:
 	mov	si, offset loaderVars.KLV_topLevelPath+3
 	clr	dl
 	mov	ah, MSDOS_GET_CURRENT_DIR
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_CANNOT_LOCATE_KERNEL
 
 	.leave
@@ -285,7 +285,7 @@ afterCopy:
 	LoaderDS				;ds <- loader segment
 	mov	dx, offset loaderVars.KLV_topLevelPath
 	mov	ax, MSDOS_GET_SET_ATTRIBUTES shl 8
-	int	21h
+	GHAL_DosCall
 	mov	{char} es:[bp], 0
 
 done:
@@ -492,7 +492,7 @@ strncpy endp
 LocateAtEndOfEnv	proc	near
 	; check DOS version
 	mov	ax, MSDOS_GET_VERSION shl 8
-	int	21h
+	GHAL_DosCall
 	cmp	al, 3
 	jae	dosOK
 	stc
@@ -721,12 +721,12 @@ SetCurrentDirAndDisk	proc	near	uses	ax, dx, si
 yesLowerCase:
 	; set the drive
 	mov	ah, MSDOS_SET_DEFAULT_DRIVE
-	int	21h
+	GHAL_DosCall
 	pop	dx
 
 	add	dx, 2			; skip drive letter and colon
 	mov	ah, MSDOS_SET_CURRENT_DIR
-	int	21h			; set current directory
+	GHAL_DosCall			; set current directory
 
 	.leave
 	ret

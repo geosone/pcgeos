@@ -51,6 +51,7 @@ include system.def		;for SysGetVideoConfig, SysInitialTextMode, etc.
 include	color.def		;for Color enum.
 
 include Internal/dos.def
+include Internal/ghal.def
 include Internal/debug.def
 include Internal/kLoader.def
 include Internal/heapInt.def
@@ -758,7 +759,7 @@ LimitLoaderSize	proc	near
 	mov	bx, LOADER_SIZE
 	shr	bx, 4
 	mov	ah, MSDOS_RESIZE_MEM_BLK
-	int	21h
+	GHAL_DosCall
 
 	.leave
 	ret
@@ -990,6 +991,6 @@ cannotRestart:
 	; No snapshot (out of memory at startup) -- the best we can do is
 	; to return to DOS.
 	mov	ax, MSDOS_QUIT_APPL shl 8
-	int	21h
+	GHAL_DosCall
 	.UNREACHED
 LoaderRestartSystem	endp

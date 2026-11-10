@@ -48,6 +48,7 @@ include system.def		;for SysGetVideoConfig, SysInitialTextMode, etc.
 include	color.def		;for Color enum.
 
 include Internal/dos.def
+include Internal/ghal.def
 include Internal/debug.def
 include Internal/kLoader.def
 include Internal/heapInt.def
@@ -346,7 +347,7 @@ FindLoaderTSRStub	proc	near
 	; es:bx address returned by MSDOS_GET_DOS_TABLES.
 	; 
 		mov	ah, MSDOS_GET_DOS_TABLES
-		int	21h
+		GHAL_DosCall
 		mov	ax, es:[bx-2]
 		mov	es, ax
 
@@ -468,7 +469,7 @@ TransferControlToLoaderTSR	proc	near
 	; perform a standard exit
 	;
 		mov	ax, MSDOS_QUIT_APPL shl 8
-		int	21h
+		GHAL_DosCall
 	
 	.unreached
 TransferControlToLoaderTSR	endp

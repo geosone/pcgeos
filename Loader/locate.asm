@@ -92,13 +92,13 @@ if HARD_CODED_PATH
 
 	mov	dl, BOOT_DRIVE
 	mov	ah, MSDOS_SET_DEFAULT_DRIVE	;set drive
-	int	21h
+	GHAL_DosCall
 
 		
 
 	mov	dx, offset bootPath
 	mov	ah, MSDOS_SET_CURRENT_DIR
-	int	21h
+	GHAL_DosCall
 
 	mov	es:[loaderVars].KLV_bootDrive, BOOT_DRIVE
 	lea	di, es:[loaderVars].KLV_bootupPath
@@ -122,7 +122,7 @@ else
 	DEBUG_INT_STATUS
 
 	mov	ah, MSDOS_GET_DEFAULT_DRIVE	;set drive
-	int	21h				;does NOT return the carry flag
+	GHAL_DosCall				;does NOT return the carry flag
 
 	DEBUG_INT_STATUS
 
@@ -133,7 +133,7 @@ else
 	mov	si, offset loaderVars.KLV_bootupPath+3
 	clr	dl
 	mov	ah, MSDOS_GET_CURRENT_DIR
-	int	21h				;set current directory
+	GHAL_DosCall				;set current directory
 	ERROR_C	LS_CANNOT_LOCATE_KERNEL
 
 	; look in current directory
@@ -170,7 +170,7 @@ done:
 	; DOS likes it
 
 	mov	ah, MSDOS_GET_DEFAULT_DRIVE	;set drive
-	int	21h
+	GHAL_DosCall
 ; Ditto...
 ;	ERROR_C	LS_CANNOT_LOCATE_KERNEL
 	add	al, 'A'
@@ -179,7 +179,7 @@ done:
 	mov	si, offset loaderVars.KLV_topLevelPath+3
 	clr	dl
 	mov	ah, MSDOS_GET_CURRENT_DIR
-	int	21h				;set current directory
+	GHAL_DosCall				;set current directory
 	ERROR_C	LS_CANNOT_LOCATE_KERNEL
 
 	.leave
@@ -324,12 +324,12 @@ SetCurrentDirAndDisk	proc	near	uses	ax, dx, si
 	; set the drive
 
 	mov	ah, MSDOS_SET_DEFAULT_DRIVE
-	int	21h
+	GHAL_DosCall
 	pop	dx
 
 	add	dx, 2			;skip drive letter and colon
 	mov	ah, MSDOS_SET_CURRENT_DIR
-	int	21h				;set current directory
+	GHAL_DosCall				;set current directory
 
 	.leave
 	ret
@@ -519,7 +519,7 @@ afterCopy:
 	mov	dx, offset loaderVars.KLV_topLevelPath
 
 	mov	ax, MSDOS_GET_SET_ATTRIBUTES shl 8
-	int	21h
+	GHAL_DosCall
 
 	mov	{char} es:[bp], 0
 
@@ -632,7 +632,7 @@ LocateAtEndOfEnv	proc	near
 	; check DOS version
 
 	mov	ax, MSDOS_GET_VERSION shl 8
-	int	21h
+	GHAL_DosCall
 	cmp	al, 3
 	jae	dosOK
 	stc
@@ -1011,7 +1011,7 @@ afterCopy:
 	mov	dx, offset specialIniFilePathAndName
 
 	mov	ax, MSDOS_GET_SET_ATTRIBUTES shl 8
-	int	21h
+	GHAL_DosCall
 
 done:
 	.leave

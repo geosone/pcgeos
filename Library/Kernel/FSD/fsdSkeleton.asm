@@ -498,13 +498,13 @@ dta		local	FCB		; DTA for DOS to use during volume
 		segmov	ds, ss
 		lea	dx, ss:[dta]			; Point DOS at DTA
 		mov	ah, MSDOS_SET_DTA
-		int	21h
+		GHAL_DosCall
 	;
 	; Now ask DOS to find the durn thing.
 	; 
 		lea	dx, ss:[volFCB]
 		mov	ah,MSDOS_FCB_SEARCH_FOR_FIRST
-		int	21h
+		GHAL_DosCall
 
 		tst	al
 		pop	ax		; ah <- FSDNamelessAction
@@ -575,7 +575,7 @@ FSDSDiskFindFree proc	near
 		mov	dl, es:[si].DSE_number
 		inc	dx		; (1-byte inst)
 		mov	ah, MSDOS_FREE_SPACE
-		int	21h
+		GHAL_DosCall
 		cmp	ax, 0xffff
 		je	fail
 		
@@ -639,7 +639,7 @@ FSDSDiskInfo	proc	near
 		mov	dl, es:[bx].DSE_number
 		inc	dx
 		mov	ah, MSDOS_FREE_SPACE
-		int	21h		; ax <- sectors/cluster
+		GHAL_DosCall		; ax <- sectors/cluster
 					; bx <- free clusters
 					; cx <- bytes/sector
 					; dx <- total clusters
@@ -1000,7 +1000,7 @@ FSDSSetDefaultDriveFromDisk proc near
 		mov	bx, es:[si].DD_drive
 		mov	dl, es:[bx].DSE_number
 		mov	ah, MSDOS_SET_DEFAULT_DRIVE
-		int	21h
+		GHAL_DosCall
 		popf
 		.leave
 		ret
@@ -1133,7 +1133,7 @@ figureDevice:
 		push	ds
 		segmov	ds, ss
 		mov	ah, MSDOS_READ_FILE
-		int	21h
+		GHAL_DosCall
 		pop	ds
 
 		clr	dx		; assume not geos
@@ -1153,7 +1153,7 @@ seekBackToStart:
 		and	dx, size GeosFileHeader	; yes, I really mean "and"
 		clr	cx
 		mov	ax, MSDOS_POS_FILE shl 8 or FILE_POS_START
-		int	21h
+		GHAL_DosCall
 		pop	dx
 		pop	cx
 	;
@@ -1161,7 +1161,7 @@ seekBackToStart:
 	; 
 		push	dx		; save geos/not geos flag
 		mov	ax, MSDOS_IOCTL_GET_DEV_INFO
-		int	21h
+		GHAL_DosCall
 		test	dx, mask DOS_IOCTL_IS_CHAR_DEVICE
 		pop	dx
 		mov_tr	ax, bx	; ah is already 0, since DOS file
@@ -1190,7 +1190,7 @@ notWritable:
 	; 
 		mov_tr	bx, ax		; bx <- file handle
 		mov	ah, MSDOS_CLOSE_FILE
-		int	21h
+		GHAL_DosCall
 		mov	ax, ERROR_WRITE_PROTECTED
 		stc
 		jmp	done
@@ -1252,7 +1252,7 @@ CheckHack <FILE_POS_START lt FILE_POS_RELATIVE and \
 	; adjustment of the resulting position is the same in both cases...
 	; 
 		mov	ah, MSDOS_POS_FILE
-		int	21h
+		GHAL_DosCall
 		jc	done
 	    ;
 	    ; Adjust resulting position to not include the header. If that
@@ -1276,7 +1276,7 @@ posStart:
 		add	dx, size GeosFileHeader
 		adc	cx, 0
 		mov	ah, MSDOS_POS_FILE
-		int	21h
+		GHAL_DosCall
 		jc	done
 		
 		sub	ax, size GeosFileHeader
@@ -1287,7 +1287,7 @@ done:
 
 doNormalPosition:
 		mov	ah, MSDOS_POS_FILE
-		int	21h
+		GHAL_DosCall
 		jmp	done
 FSDSPosition 	endp
 
@@ -1512,7 +1512,7 @@ doClose:
 		mov	ah, MSDOS_CLOSE_FILE
 passToDOS:
 		call	convertGeosToDos
-		int	21h
+		GHAL_DosCall
 		jmp	done
 	;--------------------
 doTruncate:
@@ -1528,7 +1528,7 @@ doTruncate:
 	; 
 		clr	cx
 		mov	ah, MSDOS_WRITE_FILE
-		int	21h
+		GHAL_DosCall
 truncateDone:
 		pop	cx, dx
 		jmp	done
@@ -1550,17 +1550,17 @@ doCommit:
 	; duplicating the open file and closing the duplicate handle.
 	; 
 		mov	ah, MSDOS_DUPLICATE_HANDLE
-		int	21h
+		GHAL_DosCall
 		jc	doneJmp
 		
 		mov_tr bx, ax
 		mov	ah, MSDOS_CLOSE_FILE
-		int	21h
+		GHAL_DosCall
 doneJmp:
 		jmp	done
 useCommit:
 		mov	ah, MSDOS_COMMIT
-		int	21h
+		GHAL_DosCall
 		jmp	done
 	;--------------------
 doLockUnlock:
@@ -1577,7 +1577,7 @@ doLockUnlock:
 		mov	cx, ss:[bp].FSHLUF_regionStart.high	; cx:dx <- start
 		mov	dx, ss:[bp].FSHLUF_regionStart.low
 		mov	ah, MSDOS_LOCK_RECORD
-		int	21h
+		GHAL_DosCall
 		pop	bp, si, di, dx
 		jmp	done
 	;--------------------
@@ -1589,7 +1589,7 @@ doGetSetDateTime:
 						; al <- 1 for set date/time
 			CheckHack <FSHOF_SET_DATE_TIME eq FSHOF_GET_DATE_TIME+1>
 		mov	ah, MSDOS_GET_SET_DATE
-		int	21h
+		GHAL_DosCall
 		jmp	done
 	;--------------------
 doFileSize:
@@ -1602,7 +1602,7 @@ doFileSize:
 		clr	cx
 		mov	dx, cx
 		mov	ax, FILE_POS_RELATIVE or (MSDOS_POS_FILE shl 8)
-		int	21h
+		GHAL_DosCall
 		push	dx, ax
 	;
 	; Seek to the end, getting us the file size.
@@ -1610,7 +1610,7 @@ doFileSize:
 		clr	cx
 		mov	dx, cx
 		mov	ax, FILE_POS_END or (MSDOS_POS_FILE shl 8)
-		int	21h
+		GHAL_DosCall
 	;
 	; Recover original position (cx:di, since we've got stuff in dx) and
 	; save the file size.
@@ -1622,7 +1622,7 @@ doFileSize:
 	;
 		mov	dx, di
 		mov	ax, FILE_POS_START or (MSDOS_POS_FILE shl 8)
-		int	21h
+		GHAL_DosCall
 	;
 	; Recover file size, account for file header and return.
 	;
@@ -1656,7 +1656,7 @@ doCheckDirty:
 		call	convertGeosToDos
 		push	dx
 		mov	ax, MSDOS_IOCTL_GET_DEV_INFO
-		int	21h
+		GHAL_DosCall
 		clr	ax
 		test	dx, mask DOS_BDEV_IOCTL_FILE_CLEAN
 		pop	dx
@@ -1848,7 +1848,7 @@ doRenameFile:
 		mov	es, bx
 		mov	di, cx
 		mov	ah, MSDOS_RENAME_FILE
-		int	21h
+		GHAL_DosCall
 		pop	es
 		jmp	done
 	;--------------------
@@ -1861,7 +1861,7 @@ doMoveFile:
 		push	es
 		les	di, ss:[bx].FMFD_dest
 		mov	ah, MSDOS_RENAME_FILE
-		int	21h
+		GHAL_DosCall
 		pop	es
 		jmp	done
 		
@@ -1873,7 +1873,7 @@ doGetSetAttrs:
 		mov_tr	ax, di
 		mov	ah, MSDOS_GET_SET_ATTRIBUTES
 passToDOS:
-		int	21h
+		GHAL_DosCall
 		.assert	$ eq done
 	;--------------------
 done:
@@ -1995,7 +1995,7 @@ EC <		ERROR_AE UNCONVERTABLE_GEOS_CHARACTER_FOR_SKELETON_FSD	>
 	;
 	; Make the int 21h call
 	;
-		int	21h
+		GHAL_DosCall
 	;
 	; Free the buffer preserving the carry
 	;

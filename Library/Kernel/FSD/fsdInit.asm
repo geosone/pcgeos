@@ -179,7 +179,7 @@ endif
 	; 
 		mov	ax, MSDOS_GET_VERSION shl 8	; al = 0 so we know if
 							;  DOS is < 2.0...
-		int	21h
+		GHAL_DosCall
 		mov	ds:[dosVersion], ax
 		mov	ds:[oemSerialNum.low], cx
 		mov	ds:[oemSerialNum.high], bx
@@ -190,7 +190,7 @@ endif
 		cmp	ax, 5
 		jne	notNT
 		mov	ax, 3306h	;  DOS 5+ - GET TRUE VERSION
-		int	21h
+		GHAL_DosCall
 		cmp	bx, 3205h 	; WINNT will always return ver 5.50
 		jne	notNT
 		mov	ds:[isWINNT], BB_TRUE		
@@ -228,7 +228,7 @@ notDOSBox:
 	; See if we're running under DRDOS...
 	;
 		mov	ax, DRDOS_GET_VERSION
-		int	21h
+		GHAL_DosCall
 		jc	done
 		cmp	ax, DVER_3_41
 		je	10$

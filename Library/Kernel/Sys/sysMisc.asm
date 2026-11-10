@@ -1369,7 +1369,7 @@ SysSetDOSTables	proc	far
 	; to various system data structures.
 	; 
 		mov	ah, 52h	; Get DOS tables...
-		int	21h
+		GHAL_DosCall
 	;
 	; Point to the start of the checksum table and clear it.
 	;

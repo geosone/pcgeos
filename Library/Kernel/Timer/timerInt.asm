@@ -3016,14 +3016,14 @@ TimerUnsuspend	proc	near
 	; 
 
 		mov	ah,MSDOS_GET_DATE		;get date
-		int	21h
+		GHAL_DosCall
 		mov	ds:[years],cx
 		mov	ds:[months],dh
 		mov	ds:[days],dl
 		mov	ds:[dayOfWeek],al
 
 		mov	ah,MSDOS_GET_TIME		;get time
-		int	21h
+		GHAL_DosCall
 		mov	ds:[hours],ch
 		mov	ds:[minutes],cl
 		mov	ds:[seconds],dh

@@ -135,7 +135,7 @@ fileFound::
 	; the kernel.
 
 	mov	ah, MSDOS_GET_DEFAULT_DRIVE
-	int	21h
+	GHAL_DosCall
 	mov	ds:[loaderVars].KLV_initFileDrive, al
 
 	;if a /Pxxx argument was passed on the command line to LOADER.EXE,
@@ -407,7 +407,7 @@ OpenIniFileAndRead	proc	near
 
 tryAgain:	
 	mov	ah, MSDOS_GET_VERSION
-	int	21h			; al <- major; trashes bx&cx
+	GHAL_DosCall			; al <- major; trashes bx&cx
 	cmp	al, 2
 	mov	ax, (MSDOS_OPEN_FILE shl 8) or FA_READ_ONLY ; assume 2.x
 	jbe	figureReadWrite
@@ -425,7 +425,7 @@ figureReadWrite:
 	ornf	ax, FA_READ_WRITE
 
 doOpen:
-	int	21h
+	GHAL_DosCall
 	
 	jnc 	openOK
 
@@ -464,7 +464,7 @@ openOK:
 	mov	ah, MSDOS_POS_FILE
 	clr	cx
 	clr	dx
-	int	21h				;dx:ax = file size
+	GHAL_DosCall				;dx:ax = file size
 	ERROR_C	LS_INIT_FILE_CANNOT_READ_FILE
 	tst	dx				;if (size > MAX_INI_SIZE)
 	ERROR_NZ	LS_INIT_FILE_TOO_LARGE	; then error
@@ -489,13 +489,13 @@ openOK:
 	mov	ah, MSDOS_POS_FILE
 	clr	cx
 	clr	dx
-	int	21h				;dx:ax = file size
+	GHAL_DosCall				;dx:ax = file size
 	pop	cx				;cx = size
 	ERROR_C	LS_INIT_FILE_CANNOT_READ_FILE
 
 	mov	ah, MSDOS_READ_FILE
 	clr	dx
-	int	21h				;ax = size
+	GHAL_DosCall				;ax = size
 	ERROR_C	LS_INIT_FILE_CANNOT_READ_FILE
 
 	mov_trash	si, ax			;si = size
@@ -524,7 +524,7 @@ storeEOF:
 	tst	di
 	jz	noClose
 	mov	ah, MSDOS_CLOSE_FILE
-	int	21h
+	GHAL_DosCall
 	ERROR_C	LS_INIT_FILE_CANNOT_READ_FILE
 	clr	bx				;return bx=0 if .ini is r/o.
 noClose:

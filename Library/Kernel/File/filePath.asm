@@ -246,11 +246,11 @@ endif
 	add	dl, 'a' - 'A'		; whoops. Adjust b/c it was uppercase
 10$:
 	mov	ah, MSDOS_SET_DEFAULT_DRIVE
-	int	21h
+	GHAL_DosCall
 20$:
 	mov	dx, bx
 	mov	ah, MSDOS_SET_CURRENT_DIR
-	int	21h
+	GHAL_DosCall
 	.leave
 	ret
 FileChangeDirectory	endp

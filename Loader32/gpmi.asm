@@ -2705,7 +2705,7 @@ ExtenderCreateFilename	proc	near
 
 	; Start the path with a X:\ prefix
 	mov	ah, MSDOS_GET_DEFAULT_DRIVE
-	int	21h
+	GHAL_DosCall
 	add	al, 'A'
 	mov	ds:[si], al
 	inc	si
@@ -2717,7 +2717,7 @@ ExtenderCreateFilename	proc	near
 	; Append the drive path
 	mov	ah, MSDOS_GET_CURRENT_DIR
 	clr	dl
-	int	21h
+	GHAL_DosCall
 
 	cld
 	clr	al
@@ -2780,7 +2780,7 @@ ExtenderMakeRoom	proc	near
 	ERROR_C LS_NOT_ENOUGH_MEMORY
 
 	mov	ah, MSDOS_RESIZE_MEM_BLK
-	int	21h
+	GHAL_DosCall
 
 	.leave
 	ret
@@ -2846,14 +2846,14 @@ lpa		local	LoadProgramArgs
 	mov	ax, (MSDOS_EXEC shl 8) or MSESF_LOAD
 	push	bp, ds
 	segmov	ds, cs
-	int	21h		; XXX: on 2.X, this biffs everything
+	GHAL_DosCall		; XXX: on 2.X, this biffs everything
 				;  but CS:IP
 	pop	bp, ds
 	ERROR_C	LS_CANNOT_LOAD_DOS_EXTENDER
 
 	; Get the PSP of the dos extender
 	mov	ah, MSDOS_GET_PSP
-	int	21h
+	GHAL_DosCall
 	mov	cs:extenderPSP, bx
 
 	; Store the pertinent data
@@ -2925,7 +2925,7 @@ GPMILoadDOSExtender	proc	near
 
 	; Get the PSP of us!
 	mov	ah, MSDOS_GET_PSP
-	int	21h
+	GHAL_DosCall
 	mov	es, bx
 
 	call	ExtenderCreateFilename

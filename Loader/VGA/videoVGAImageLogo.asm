@@ -43,7 +43,7 @@ slowLoop:
 dontTrim:
 	mov     dx, offset loadBlock
 	mov     ah, 3fh
-	int	21h
+	GHAL_DosCall
 	jc	done	; error
 
 	; Copy over the block
@@ -98,7 +98,7 @@ loadCounter	local	byte
 	mov	cx, 0
 	mov	ah, 3dh
 	mov	al, 0
-	int	21h
+	GHAL_DosCall
 	jc	loadError
 	mov	loadHandle, ax
 
@@ -109,7 +109,7 @@ loadPaletteLoop:
 	mov	cx, 48
 	mov	bx, loadHandle
 	mov	ah, 3fh
-	int	21h
+	GHAL_DosCall
 	dec	loadCounter
 	jnz	loadPaletteLoop
 
@@ -175,7 +175,7 @@ if 1
 	call    LoadSectionSlow
 else
 	mov	ah, 3fh
-	int	21h
+	GHAL_DosCall
 	jc	closeLoadFile
 	cmp	ax, 38400
 	jne	closeLoadFile
@@ -185,7 +185,7 @@ endif
 closeLoadFile:
 	mov	bx, loadHandle
 	mov	ah, 3eh
-	int	21h
+	GHAL_DosCall
 ;loadDone:
 
 loadError:

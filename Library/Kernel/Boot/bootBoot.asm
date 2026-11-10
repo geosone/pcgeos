@@ -1160,7 +1160,7 @@ endif
 
 	mov	dx, offset sysSemaphoreFile
 	mov	ah, MSDOS_DELETE_FILE
-	int	21h
+	GHAL_DosCall
 
 finishSystem:
 	;
@@ -1264,7 +1264,7 @@ if	NO_DOS
 endif
 
 	mov	ax,4c00h		;exit program
-	int	21h
+	GHAL_DosCall
 
 useOldExit:
 	; Use DOS 1.x exit style, since running under DOS 1.x (else wouldn't be
@@ -1308,7 +1308,7 @@ waitReset:
 	;
 	INT_ON
 	mov	ax, 4c00h
-	int	21h
+	GHAL_DosCall
 else	; not PROTECTED_MODE
 if 0	; Doesn't work on many machines. The floppy just spins...
 	int	19h
@@ -1371,7 +1371,7 @@ CallInt21PrintStringReplaceDollarSign	proc	near
 	mov	{char}es:[di-1], '$'
 
 	mov	ah, MSDOS_DISPLAY_STRING
-	int	21h
+	GHAL_DosCall
 	ret
 CallInt21PrintStringReplaceDollarSign	endp
 

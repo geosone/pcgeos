@@ -64,7 +64,7 @@ ReadStringsFile	proc	near
 
 	mov	ax, (MSDOS_OPEN_FILE shl 8) or FA_READ_ONLY
 	mov	dx, offset stringsFileName
-	int	21h
+	GHAL_DosCall
 if	REQUIRE_STRINGS_FILE
 	ERROR_C	LS_CANNOT_OPEN_STRINGS_FILE
 else
@@ -76,7 +76,7 @@ endif
 	mov	ah, MSDOS_READ_FILE
 	mov	cx, MAX_STRING_FILE_SIZE
 	mov	dx, STR_BUFFER
-	int	21h				;ax = bytes read
+	GHAL_DosCall				;ax = bytes read
 if	REQUIRE_STRINGS_FILE
 	ERROR_C	LS_CANNOT_OPEN_STRINGS_FILE
 else
@@ -89,7 +89,7 @@ endif
 	mov	{byte} ds:[si], 0
 
 	mov	ah, MSDOS_CLOSE_FILE
-	int	21h
+	GHAL_DosCall
 if	REQUIRE_STRINGS_FILE
 	ERROR_C	LS_CANNOT_OPEN_STRINGS_FILE
 else
@@ -215,7 +215,7 @@ validSeg:
 	push	ax
 	mov	dx, offset crlfString
 	mov	ah, MSDOS_DISPLAY_STRING
-	int	21h
+	GHAL_DosCall
 
 	mov	ax, LS_ERROR_PREFIX
 	call	PrintString
@@ -229,12 +229,12 @@ validSeg:
 
 	mov	dx, offset crlfString
 	mov	ah, MSDOS_DISPLAY_STRING
-	int	21h
+	GHAL_DosCall
 
 noPrint:
 	; run away
 	mov	ax, 0x4c00
-	int	21h
+	GHAL_DosCall
 	.unreached
 LoaderError	endp
 
@@ -317,7 +317,7 @@ skipLineLoop:
 print:
 	mov	dx, si
 	mov	ah, MSDOS_DISPLAY_STRING
-	int	21h
+	GHAL_DosCall
 	ret
 PrintString	endp
 

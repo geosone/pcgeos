@@ -1545,7 +1545,7 @@ AXIP <	mov	bx, ds:[loaderVars].KLV_heapStart			>
 		mov	bx, LOADER_ARGS_OFFSET
 						; es:bx <- parameter block
 		mov	ax, MSDOS_EXEC shl 8 or MSESF_LOAD_OVERLAY
-		int	21h
+		GHAL_DosCall
 	; XXX: deal with error here.
 
 		mov	ds, cx

@@ -412,7 +412,7 @@ IS90:
 		ornf	ds:[sysConfig], mask SCF_CRASHED	; assume yes
 		mov	dx, offset sysSemaphoreFile
 		mov	ax, (MSDOS_GET_SET_ATTRIBUTES shl 8) or 0
-		int	21h
+		GHAL_DosCall
 		jnc	interceptIRQs		; file exists => crashed before
 	;
 	; Semaphore file existeth not, so createth it please, m'lord.
@@ -421,14 +421,14 @@ IS90:
 		
 		mov	cx, FILE_ATTR_NORMAL
 		mov	ah, MSDOS_CREATE_TRUNCATE
-		int	21h
+		GHAL_DosCall
 		jc	interceptIRQs		; DOS is weird, so no close
 		
 		; successfully created -- close down the file as we need it
 		; no more.
 		mov_trash	bx, ax
 		mov	ah, MSDOS_CLOSE_FILE
-		int	21h
+		GHAL_DosCall
 interceptIRQs:
 	;
 	; Intercept all hardware interrupts so we can protect them from
