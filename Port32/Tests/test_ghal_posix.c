@@ -1,5 +1,7 @@
 /*
- * test_ghal.c -- host-side tests of the GHAL core (Port32/ghal).
+ * test_ghal_posix.c -- GHAL tests that need POSIX (fork, threads, signals):
+ * enforced code protection, ghal_crit against other threads, ghal_fault.
+ * The host-independent tests are in test_ghal_core.c.
  */
 #define _GNU_SOURCE 1
 
@@ -21,39 +23,6 @@ static int failures;
             failures++; \
         } \
     } while (0)
-
-static int all_zero(const unsigned char *p, size_t n)
-{
-    while (n--)
-        if (*p++)
-            return 0;
-    return 1;
-}
-
-static void test_mem_plain(void)
-{
-    unsigned char *a = ghal_mem_alloc(100, GHAL_MEM_ZERO), *b;
-    size_t i;
-    CHECK(a != NULL);
-    CHECK(ghal_mem_size(a) == 100);
-    CHECK(all_zero(a, 100));
-    CHECK(((uintptr_t)a & 15) == 0);
-    for (i = 0; i < 100; i++)
-        a[i] = (unsigned char)i;
-    b = ghal_mem_resize(a, 100000);
-    CHECK(b != NULL);
-    CHECK(ghal_mem_size(b) == 100000);
-    for (i = 0; i < 100; i++)
-        if (b[i] != (unsigned char)i)
-            break;
-    CHECK(i == 100);
-    b = ghal_mem_resize(b, 10);
-    CHECK(b && ghal_mem_size(b) == 10 && b[9] == 9);
-    CHECK(ghal_mem_protect(b, GHAL_PROT_RX) == GHAL_ERR_INVAL); /* not paged */
-    ghal_mem_free(b);
-    ghal_mem_free(NULL);
-    CHECK(ghal_mem_alloc(0, 0) == NULL);
-}
 
 /* Exit code of a child that hits a memory protection fault.  The child
  * catches the fault itself, so no real crash (and no core dump) happens. */
@@ -85,16 +54,11 @@ static int write_faults(volatile unsigned char *p)
          : WEXITSTATUS(status) == 0 ? 0 : -1;
 }
 
-static void test_mem_paged(void)
+static void test_mem_protect(void)
 {
-    ghal_mem_info info;
-    unsigned char *c;
-    CHECK(ghal_mem_get_info(&info) == GHAL_OK);
-    CHECK(info.page_size >= 4096);
-    c = ghal_mem_alloc(5000, GHAL_MEM_PAGED);
+    unsigned char *c = ghal_mem_alloc(5000, GHAL_MEM_PAGED);
     CHECK(c != NULL);
-    CHECK(((uintptr_t)c % info.page_size) == 0);
-    CHECK(all_zero(c, 5000));
+    CHECK(ghal_caps() & GHAL_CAP_EXEC_PROTECT);
     memset(c, 0xc3, 5000);                 /* "ret" */
     CHECK(write_faults(c) == 0);
     CHECK(ghal_mem_protect(c, GHAL_PROT_RX) == GHAL_OK);
@@ -103,20 +67,7 @@ static void test_mem_paged(void)
     c = ghal_mem_resize(c, 9000);          /* back to RW, content kept */
     CHECK(c != NULL && c[4999] == 0xc3 && ghal_mem_size(c) == 9000);
     CHECK(write_faults(c) == 0);
-    CHECK(ghal_mem_protect(c, 8) == GHAL_ERR_INVAL);
     ghal_mem_free(c);
-}
-
-static void test_time(void)
-{
-    ghal_datetime dt;
-    uint64_t t0 = ghal_time_monotonic_ns(), t1;
-    usleep(20000);
-    t1 = ghal_time_monotonic_ns();
-    CHECK(t1 >= t0 + 15000000u);
-    CHECK(ghal_time_get_local(&dt) == GHAL_OK);
-    CHECK(dt.year >= 2024 && dt.month >= 1 && dt.month <= 12);
-    CHECK(dt.day >= 1 && dt.day <= 31 && dt.hour < 24 && dt.weekday < 7);
 }
 
 static volatile int shared_counter;
@@ -144,66 +95,6 @@ static void test_crit(void)
     ghal_crit_leave();
     pthread_join(t, NULL);
     CHECK(shared_counter == 1);
-    ghal_hostlock_enter();
-    ghal_hostlock_leave();
-}
-
-static void test_caps(void)
-{
-    ghal_irq_source *src = (ghal_irq_source *)1;
-    CHECK(ghal_host_name() && ghal_host_name()[0]);
-    CHECK(ghal_caps() & GHAL_CAP_THREADS);
-    CHECK(ghal_irq_attach(GHAL_IRQ_TICK, NULL, NULL, &src) == GHAL_ERR_INVAL);
-    CHECK(src == NULL);
-}
-
-/* ---- ghal_irq: tick source ---- */
-
-static volatile int ticks_a, ticks_b;
-
-static void tick_a(void *ctx)
-{
-    (void)ctx;
-    ticks_a++;
-}
-
-static void tick_b(void *ctx)
-{
-    *(volatile int *)ctx += 1;
-}
-
-static void test_irq_tick(void)
-{
-    ghal_irq_source *a, *b;
-    int n, held;
-    CHECK(ghal_irq_attach(12345, tick_a, NULL, &a) == GHAL_ERR_UNSUPPORTED);
-    CHECK(ghal_irq_set_tick_rate(0) == GHAL_ERR_INVAL);
-    CHECK(ghal_irq_set_tick_rate(100) == GHAL_OK);
-    CHECK(ghal_irq_attach(GHAL_IRQ_TICK, tick_a, NULL, &a) == GHAL_OK && a);
-    CHECK(ghal_irq_attach(GHAL_IRQ_TICK, tick_b, (void *)&ticks_b, &b) == GHAL_OK && b);
-    usleep(300000);
-    n = ticks_a;
-    CHECK(n >= 15 && n <= 45);              /* ~30 at 100 Hz */
-    CHECK(ticks_b >= 15 && ticks_b <= 45);
-
-    /* handlers are held off while the kernel is in a critical section */
-    ghal_crit_enter();
-    held = ticks_a;
-    usleep(100000);
-    CHECK(ticks_a == held);
-    ghal_crit_leave();
-    usleep(100000);
-    CHECK(ticks_a > held);
-
-    CHECK(ghal_irq_detach(a) == GHAL_OK);
-    n = ticks_b;
-    usleep(100000);
-    CHECK(ticks_b > n);                     /* b still runs */
-    CHECK(ghal_irq_detach(b) == GHAL_OK);   /* last one: thread stops */
-    n = ticks_b;
-    usleep(100000);
-    CHECK(ticks_b == n);
-    CHECK(ghal_irq_set_tick_rate(60) == GHAL_OK);
 }
 
 /* ---- ghal_fault ---- */
@@ -272,13 +163,10 @@ static void test_fault(void)
 
 int main(void)
 {
-    test_mem_plain();
-    test_mem_paged();
-    test_time();
+    CHECK(ghal_caps() & GHAL_CAP_THREADS);
+    test_mem_protect();
     test_crit();
-    test_caps();
-    test_irq_tick();
     test_fault();
-    printf("%s: %s\n", ghal_host_name(), failures ? "FAILED" : "all GHAL tests passed");
+    printf("%s: %s\n", ghal_host_name(), failures ? "FAILED" : "all POSIX GHAL tests passed");
     return failures ? 1 : 0;
 }

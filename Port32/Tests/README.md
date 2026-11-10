@@ -77,11 +77,23 @@ build/Port32/Tests/test_ffa -v   # all test cases with output
 4. Not included: the DBCS variant (mechanical: `char` → `wchar`), the
    date/time branch (`FloatFloatToDateTime`, separate file).
 
-## GHAL core
+## GHAL
 
-`test_ghal.c` (ctest `ghal.core`) tests the C GHAL from `Port32/ghal/` on the
-build host: memory blocks (plain and paged, protection to read/execute),
-clocks, nesting and exclusion of `ghal_crit`, the tick source of `ghal_irq`
-(rate, serialization against `ghal_crit`, detach), `ghal_fault` (access,
-divide, breakpoint; caught by the test, so no real crash), and the capability
-query.
+`test_ghal_core.c` (ctest `ghal.core`) runs on every host and uses only
+`ghal.h`: memory blocks (plain and paged), clocks (resolution, never
+backwards), `ghal_crit`/`ghal_hostlock` nesting, the `GHAL_IRQ_TICK` source
+(rate, held off inside `ghal_crit`, detach) and the capability query.
+
+`test_ghal_posix.c` (ctest `ghal.posix`, linux only) covers what needs
+fork, threads and signals: enforced read/execute protection, `ghal_crit`
+against another thread, and `ghal_fault` (access, divide, breakpoint; the
+test catches every fault, so no real crash happens).
+
+For dos32 the tests are DOS programs; ctest starts them headless in
+DOSBox-X through `Port32/tools/dosrun.sh`:
+
+```sh
+cmake -S . -B build-dos32 -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-dos32-watcom.cmake
+cmake --build build-dos32 && ctest --test-dir build-dos32
+```

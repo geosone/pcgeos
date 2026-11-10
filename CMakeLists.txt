@@ -8,6 +8,8 @@
 #   cmake -S . -B build -G Ninja                            # host linux, native
 #   cmake -S . -B build32 -G Ninja \
 #         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-linux-i686.cmake
+#   cmake -S . -B build-dos32 -G Ninja \
+#         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-dos32-watcom.cmake
 #   cmake --build build && ctest --test-dir build
 cmake_minimum_required(VERSION 3.20)
 project(PCGEOS LANGUAGES C)
@@ -28,9 +30,14 @@ endif()
 
 option(GEOS_ERROR_CHECK "Build the error-checking (EC) variant" ON)
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+if(CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
+  # dos32: Open Watcom 386 (C99 mode, warning level 4)
+  add_compile_options(-za99 -w4)
+else()
+  set(CMAKE_C_STANDARD 11)
+  set(CMAKE_C_STANDARD_REQUIRED ON)
+  set(CMAKE_C_EXTENSIONS OFF)
+endif()
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra)
 endif()
@@ -44,7 +51,11 @@ message(STATUS "GEOS_HOST=${GEOS_HOST} arch=${CMAKE_SYSTEM_PROCESSOR} EC=${GEOS_
 
 enable_testing()
 add_subdirectory(Port32/ghal)
-add_subdirectory(Library/Math/Float)
+# The float pilot needs C11 and C99 long double math, which Open Watcom
+# lacks; it joins dos32 with the planned switch to double (PLAN.md P1).
+if(NOT GEOS_HOST STREQUAL "dos32")
+  add_subdirectory(Library/Math/Float)
+endif()
 add_subdirectory(Port32/Tests)
 
 # Inventory of direct host contacts (plan P2).  Not part of 'all'.
