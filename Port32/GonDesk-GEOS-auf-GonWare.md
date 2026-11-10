@@ -24,7 +24,7 @@ Die Begriffe aus GonWare werden übernommen: GDOS, `SERVER`, GLM, Ring 0/3, mlib
 
 | Festlegung (CONCEPT.md) | Folge für die GEOS-Seite |
 |---|---|
-| Zusammenarbeit mit OpenGEOS, Beiträge gehen upstream unter Apache 2.0 | Alles, was in `pcgeos` entsteht, bleibt Apache 2.0 und darf keinen GPL-Code enthalten (siehe Abschnitt 8) |
+| Zusammenarbeit mit OpenGEOS, Beiträge gehen upstream unter Apache 2.0 | Alles, was in `pcgeos` entsteht, bleibt Apache 2.0 und darf keinen GPL-Code enthalten (siehe Abschnitt 8). **Abweichend davon (2026-11-10): keine PRs zu upstream, Arbeit nur im Fork `geosone/pcgeos`.** |
 | ~~Erst emuliert (x86-16-Emulator)~~, nativer Port als Ring-3-Programm mit einer Schicht für das GEOS-Speichermodell | **Entscheidung 2026-11-10: keine Emulation, ein richtiger Port; Bruch der Kompatibilität zum alten GEOS erlaubt.** CONCEPT.md sollte an dieser Stelle angepasst werden |
 | Far-Pointer und 16-Bit-Annahmen sofort hinter eigene Typen und Makros legen | genau der Ansatz des Piloten (`fpstack.h`, `FFA_stackFrame`), muss aber verbindlich werden |
 | GEOS bleibt ein eigenes Programm und **kein GLM** im Kernel-Adressraum | GEOS läuft in Ring 3, linkt nur gegen `LIBC.DLL` (mlibc, MIT) und eigene Bibliotheken |
