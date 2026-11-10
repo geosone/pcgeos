@@ -43,6 +43,7 @@ add_compile_definitions(GEOS_HOST_${_host})
 message(STATUS "GEOS_HOST=${GEOS_HOST} arch=${CMAKE_SYSTEM_PROCESSOR} EC=${GEOS_ERROR_CHECK}")
 
 enable_testing()
+add_subdirectory(Port32/ghal)
 add_subdirectory(Library/Math/Float)
 add_subdirectory(Port32/Tests)
 

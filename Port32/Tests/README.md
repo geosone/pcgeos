@@ -76,3 +76,9 @@ build/Port32/Tests/test_ffa -v   # all test cases with output
    algorithm) but could in theory branch differently at exact powers of ten.
 4. Not included: the DBCS variant (mechanical: `char` → `wchar`), the
    date/time branch (`FloatFloatToDateTime`, separate file).
+
+## GHAL core
+
+`test_ghal.c` (ctest `ghal.core`) tests the C GHAL from `Port32/ghal/` on the
+build host: memory blocks (plain and paged, protection to read/execute),
+clocks, nesting and exclusion of `ghal_crit`, and the capability query.

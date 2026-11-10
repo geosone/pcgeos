@@ -98,7 +98,7 @@ Under DOS, on the other hand, the real hardware drivers stay (VGA/VESA, PS/2, IF
 | Group | Task | `dos32` | `linux` | `win32/64` |
 |---|---|---|---|---|
 | `ghal_boot` | startup, arguments, environment, path to `geos.ini`, system directory | DPMI program (PE via HX or LE), replaces `Loader/` | `main()` | `WinMain`/`main` |
-| `ghal_mem` | obtain and release large memory areas, set protection | DPMI `int 31h` (0501h …) | `mmap` | `VirtualAlloc` |
+| `ghal_mem` | memory blocks for the kernel heap (one host allocation per block, see 4.6), protection of code blocks | DPMI `int 31h` (0501h …) | `mmap` | `VirtualAlloc` |
 | `ghal_time` | monotonic clock, wall clock, **tick source** for the scheduler | PIT (IRQ0) + RTC | `clock_gettime`, timer thread | `QueryPerformanceCounter`, timer thread |
 | `ghal_ctx` | execution contexts for GEOS threads (see 4.1) | own stacks + context switch | one host thread per GEOS thread | same with Win32 threads |
 | `ghal_crit` | critical sections, replaces `INT_OFF`/`INT_ON` (see 4.2) | `cli`/`sti` | kernel lock | kernel lock |
