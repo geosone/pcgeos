@@ -252,18 +252,12 @@ Thread&value&PassOnIrqDefault	proc	far
 		push	ax
 			on_stack	ax iret
 if	irq le LAST_IRQ_INTERCEPT_LEVEL_ONE_IC
-		mov	al, IC_READ_ISR
-		out	IC1_CMDPORT, al
-		jmp	$+2
-		in	al, IC1_CMDPORT
+		GHAL_PicReadIsr	IC1_CMDPORT
 		test	al, 1 shl (irq)
 else
 	; ddurran said we only need to check the slave controller but don't
 	; need to check the master one.
-		mov	al, IC_READ_ISR
-		out	IC2_CMDPORT, al
-		jmp	$+2
-		in	al, IC2_CMDPORT
+		GHAL_PicReadIsr	IC2_CMDPORT
 		test	al, 1 shl (irq-8)
 endif
 		pop	ax
@@ -458,10 +452,10 @@ NMIFrontEnd	proc	far
 
 		cmp	ds:[sysMachineType], SMT_PC_XT_286
 		jb	xt
-		in	al, 61h
+		GHAL_NmiStatusAT
 		jmp	gotFlags
 xt:
-		in	al, 62h
+		GHAL_NmiStatusXT
 gotFlags:
 
 		; get the carry flag to hold the XOR of b7 and b6. if the

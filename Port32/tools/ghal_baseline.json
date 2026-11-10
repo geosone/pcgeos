@@ -363,8 +363,7 @@
  "Library/Kernel/Thread": {
   "bios_lock": 4,
   "int_flag": 23,
-  "irq_vector": 6,
-  "port_io": 6
+  "irq_vector": 6
  },
  "Library/Kernel/Timer": {
   "bios_lock": 2,

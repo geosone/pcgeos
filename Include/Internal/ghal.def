@@ -166,3 +166,31 @@ endm
 GHAL_EmsCall	macro
 	int	67h
 endm
+
+;------------------------------------------------------------------------------
+;	Interrupt controller (8259) and NMI status, continued
+;
+;	GHAL_PicReadIsr	cmdport
+;		Return: al = in-service register of the PIC at cmdport
+;		(IC1_CMDPORT or IC2_CMDPORT).  Used to tell a hardware IRQ
+;		from a CPU exception on the same vector.
+;
+;	GHAL_NmiStatusAT / GHAL_NmiStatusXT
+;		Return: al = NMI source bits (system control port B on AT
+;		class machines, port C of the 8255 on PC/XT).
+;------------------------------------------------------------------------------
+
+GHAL_PicReadIsr	macro	cmdport
+	mov	al, IC_READ_ISR
+	out	cmdport, al
+	jmp	$+2
+	in	al, cmdport
+endm
+
+GHAL_NmiStatusAT	macro
+	in	al, 61h
+endm
+
+GHAL_NmiStatusXT	macro
+	in	al, 62h
+endm

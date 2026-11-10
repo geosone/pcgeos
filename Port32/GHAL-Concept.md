@@ -152,6 +152,32 @@ Today the GEOS kernel loads its `.geo` files **itself** (own format, own relocat
 
 `Loader/` (video detection, logo, locating `geos.ini`, loading the kernel, preparing memory) goes into `ghal_boot` and kernel startup. Video detection becomes part of the video driver or of `ghal_display`.
 
+### 4.6 What S0 leaves for real interfaces (status 2026-11-10)
+
+After the S0 macro steps (`Include/Internal/ghal.def`), the kernel and the loaders issue no direct DOS, BIOS, EMS or multiplex interrupt and touch the 8253/8259 only through GHAL macros. The remaining host contacts in the GHAL core area cannot be routed one-to-one; this section fixes how they map.
+
+**GPMI is the pm16 backend of `ghal_mem`, `ghal_irq` and `ghal_fault`.** In the PM branch `Loader32` provides a call table (`KLV_GPMIVectorTable`, `GPMICallType` in `Include/gpmi.def`), and only the kernel uses it, through about 30 wrappers at the end of `Library/Kernel/Heap/heapCore.asm` (about 45 call sites elsewhere in the kernel). No driver or library calls GPMI. These wrappers are therefore the GHAL boundary of the 16-bit protected-mode kernel; the 474 `gpmi` hits of the inventory are mostly the implementation in `Loader32` (204) and declarations in `Include` (138).
+
+In the 32-bit C kernel (flat memory, no selectors) the GPMI calls map as follows:
+
+| GPMI call | C GHAL | Note |
+|---|---|---|
+| `ALLOCATE_BLOCK`, `RESIZE_BLOCK`, `FREE_BLOCK` | `ghal_mem_alloc` / `_resize` / `_free` | one host allocation per heap block, as in the PM branch; a locked block is a plain pointer, so the heap need not move blocks |
+| `CONVERT_TO_CODE_BLOCK` | `ghal_mem_protect(…, GHAL_PROT_RX)` | code blocks become read/execute after relocation |
+| `ALIAS`, `FREE_ALIAS` | – | flat model: the alias is the same pointer; write access to code goes through `ghal_mem_protect` |
+| `GET/SET_DESCRIPTOR`, `IS_SELECTOR_16_BIT`, `SELECTOR_GET_LIMIT`, `SELECTOR_CHECK_LIMITS` | – (EC: `ghal_mem_size`) | selectors disappear; error checking asks the size of a block |
+| `MAKE_PRESENT`, `MAKE_NOT_PRESENT`, `ALLOCATE_NOT_PRESENT_BLOCK` | – | lazy loading of discarded resources via not-present faults; the C kernel loads them explicitly in `MemLock` (as the real-mode kernel does) |
+| `GET/SET_EXCEPTION_HANDLER` | `ghal_fault_set_handler` | DPMI exceptions / `SIGSEGV`, `SIGFPE`, `SIGILL` / vectored exception handler |
+| `GET/SET_INTERRUPT_HANDLER` | `ghal_irq_*` (4.2) | real IRQs only under `dos32`; elsewhere event sources |
+| `GET_INFO` | `ghal_mem_info` | free / total memory, page size |
+| `ACCESS/MAP/UNMAP_REAL_SEGMENT`, `RELEASE_SEGMENT_ACCESS`, `MAP_PHYSICALL_ADDRESS` | `dos32` host service `ghal_dos_lowmem` / `ghal_phys_map` | only for `dos32` drivers (VGA at A000h, VESA LFB); not part of the portable core |
+| `REAL_INTERRUPT`, `ALLOCATE/FREE_DOS_BLOCK`, `ALLOCATE/FREE_REAL_MODE_CALLBACK` | `dos32` host service `ghal_dos_*` | DOS-specific drivers (IFS/DOS, mouse, packet driver) |
+| `STARTUP`, `RESTART_LOADER` | `ghal_boot`, `ghal_exit(GHAL_EXIT_RESTART)` | |
+
+**Port I/O.** About 130 of the roughly 160 port accesses in kernel and loaders belong to handheld and XIP variants that are not built for the PC (`GULLIVER`, `EMMXIP`, `VG230`, `_GPCHW`, `_DOVEHW`, `ZOOMER`: `Loader/load.asm`, `Sys/sysUtilWindow.asm`, `kernelMacro.def`, the RTC code in `Timer/timerMisc.asm`). They are **not ported**; these variants end with the 16-bit code. The active PC accesses are routed: PIC in-service register and NMI status in `Thread/threadException.asm` (`GHAL_PicReadIsr`, `GHAL_NmiStatusAT/XT`); the COM1 probe in `Sys/sysInterrupt.asm` exists only for debugging (`CATCH_MISSED_COM1_INTERRUPTS`) and goes to `ghal_log`. The loader video probe (`Loader/video*.asm`) moves into the video driver or `ghal_display` (4.5) and stays asm only as long as the 16-bit loader exists.
+
+**Kernel APIs that already are the boundary.** `SysCatchInterrupt`/`SysCatchDeviceInterrupt`/`SysReset*` (drivers hook IRQs) and `SysLockBIOS`/`SysUnlockBIOS` keep their API; in the C kernel they are implemented on `ghal_irq` and `ghal_hostlock`. Their call sites in drivers do not change.
+
 ## 5. Driver sets per host
 
 | Driver class | `dos32` (from today's DOS parts, 32-bit) | `linux` | `win32/64` | `gonware` (later) |
