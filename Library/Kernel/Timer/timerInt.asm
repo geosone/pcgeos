@@ -421,8 +421,7 @@ endif
 
 if	HARDWARE_INT_CONTROL_8259
 
-	mov	al, IC_GENEOI			;send EOI, because...
-	out	IC1_CMDPORT, al
+	GHAL_PicEoi	IC_GENEOI		;send EOI, because...
 
 else
 
@@ -546,8 +545,7 @@ systemCounterUpdated:
 	; since we're handling the interrupt, send an EOI
 
 if	HARDWARE_INT_CONTROL_8259
-	mov	al, IC_GENEOI		; send EOI
-	out	IC1_CMDPORT,al
+	GHAL_PicEoi	IC_GENEOI	; send EOI
 
 else
 
@@ -1732,14 +1730,7 @@ REVISION HISTORY:
 ReadTimer	proc	near
 
 if	HARDWARE_TIMER_8253
-	mov	al, TIMER_COMMAND_0_READ_COUNTER
-	out	TIMER_IO_COMMAND,al
-	jmp	$+2			; I/O delay
-	in	al, TIMER_IO_0_LATCH		;al = low byte
-	jmp	$+2			; I/O delay
-	mov	ah, al
-	in	al, TIMER_IO_0_LATCH		;al = high byte
-	xchg	al, ah
+	GHAL_TimerRead
 else
 
 
@@ -1794,14 +1785,7 @@ if	HARDWARE_TIMER_8253
 	push	cx
 	mov_tr	cx, ax
 
-	mov	al, TIMER_COMMAND_0_WRITE
-	out	TIMER_IO_COMMAND, al
-	jmp	$+2			; give 8253 time to react
-	mov	al, cl
-	out	TIMER_IO_0_LATCH, al
-	jmp	$+2			; give 8253 time to react
-	mov	al, ch
-	out	TIMER_IO_0_LATCH, al
+	GHAL_TimerWrite
 
 	mov_tr	ax, cx
 	pop	cx

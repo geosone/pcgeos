@@ -17,6 +17,8 @@ code.
 
 SetDef	__INTERRUP
 
+include Internal/ghal.def
+
 StartKernel
 
 
@@ -29,8 +31,8 @@ COMMENT @----------------------------------------------------------------------
 		INT_ON - Turn interrupts on
 
 -------------------------------------------------------------------------------@
-INT_OFF	equ	<cli>
-INT_ON	equ	<sti>
+INT_OFF	equ	<GHAL_IntOff>
+INT_ON	equ	<GHAL_IntOn>
 
 global SysEnterInterrupt:far
 global SysEnterCritical:far

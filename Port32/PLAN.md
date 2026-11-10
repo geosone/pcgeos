@@ -190,9 +190,9 @@ The pilot gave a ratio of about 1.9 : 1 for asm code to C. Most of the time goes
 
 ## 5. Next concrete steps
 
-1. ~~Confirm that two clean builds via `geosbuild.sh` are identical under `geocmp.py`.~~ Done 2026-11-10: two clean builds, 2356 files, 0 changed. The manifest is kept as `Port32/reference/pm-baseline.json`; every P2 step must pass `geocmp.py compare Port32/reference/pm-baseline.json Installed` (refresh it only on intended output changes).
+1. ~~Confirm that two clean builds via `geosbuild.sh` are identical under `geocmp.py`.~~ Done 2026-11-10: two clean builds, 2356 files, 0 changed. The manifest is kept as `Port32/reference/pm-baseline.json`; every P2 step must pass `geocmp.py compare --code Port32/reference/pm-baseline.json Installed` (strict mode without `--code` when no source lines move) (refresh it only on intended output changes).
 2. Review the PM branch (GPMI, `Loader32`, kernel changes, HostFS) and record the result here.
-3. Start S0 with `INT_OFF`/`INT_ON`: new `Include/Internal/ghal.def`, route kernel `Timer` and `Sys` through it, verify byte-identical output.
+3. Start S0 with `INT_OFF`/`INT_ON`: new `Include/Internal/ghal.def`, route kernel `Timer` and `Sys` through it, verify byte-identical output. **Started 2026-11-10:** `Include/Internal/ghal.def` (dos backend) has `GHAL_IntOff`/`GHAL_IntOn` (now behind `INT_OFF`/`INT_ON`), `GHAL_PicEoi`, `GHAL_TimerRead`, `GHAL_TimerWrite` and `GHAL_TimerReset`; all 8253/8259 accesses of the PC kernel `Timer` go through them. A clean build has identical `.geo`/`.exe`/`.com`/`.vm` (`geocmp.py compare --code`); only `.sym`/`.ldf` of geodes that include `interrup.def` differ (debug info: new include file, moved source lines). The inventory does not count `ghal.def`. Open: the RTC accesses in `timerMisc.asm` (GULLIVER only), and `Sys`, whose remaining contacts are BIOS/DOS/EMS calls (next: `GHALDosCall`).
 4. Define how upstream is pulled in (P0).
 5. Align the Math pilot with #1239 (location, invocation, `double`).
 

@@ -233,8 +233,7 @@ STI_tempVector	proc	far
 
 if	HARDWARE_INT_CONTROL_8259
 
-	mov	al,IC_SPECEOI or SDI_TIMER_0		;send EOI
-	out	IC1_CMDPORT,al
+	GHAL_PicEoi	<IC_SPECEOI or SDI_TIMER_0>	;send EOI
 
 else
 

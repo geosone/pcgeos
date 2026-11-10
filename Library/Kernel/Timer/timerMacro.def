@@ -42,12 +42,7 @@ REVISION HISTORY:
 TimerReset	macro	timeValue
 
 ifidn		HARDWARE_TYPE, <PC>
-		mov	al, TimerControlWord <0,TRLC_WORD,TM_SQUARE_WAVE,0>
-		out	TIMER_IO_COMMAND, al
-		mov	ax, timeValue
-		out	TIMER_IO_0_LATCH, al
-		mov	al, ah
-		out	TIMER_IO_0_LATCH, al
+		GHAL_TimerReset	<timeValue>
 
 endif
 		endm

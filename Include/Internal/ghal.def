@@ -1,0 +1,95 @@
+COMMENT @----------------------------------------------------------------------
+
+PROJECT:	PC GEOS
+FILE:		ghal.def
+
+DESCRIPTION:
+	GEOS Hardware Abstraction Layer (GHAL), asm side.
+
+	Every direct contact of the kernel with PC hardware (interrupt
+	flag, 8259 PIC, 8253 PIT) goes through the macros below, so that
+	the C port has one defined contract per contact (see
+	Port32/GHAL-Concept.md).
+
+	This is the dos backend (real16 and pm16).  Each macro expands to
+	exactly the instructions it replaces, so the build output stays
+	byte-identical (checked with Port32/tools/geocmp.py against
+	Port32/reference/pm-baseline.json).
+
+	The PIT macros use constants from Library/Kernel/Timer/
+	timerConstant.def, which must be visible where they are expanded.
+
+------------------------------------------------------------------------------@
+
+SetDef	__GHAL
+
+;------------------------------------------------------------------------------
+;	CPU interrupt flag
+;------------------------------------------------------------------------------
+
+GHAL_IntOff	macro
+	cli
+endm
+
+GHAL_IntOn	macro
+	sti
+endm
+
+;------------------------------------------------------------------------------
+;	Interrupt controller (8259)
+;
+;	GHAL_PicEoi	cmd
+;		Send end-of-interrupt command byte cmd to the master PIC.
+;		Destroys: al
+;------------------------------------------------------------------------------
+
+GHAL_PicEoi	macro	cmd
+	mov	al, cmd
+	out	IC1_CMDPORT, al
+endm
+
+;------------------------------------------------------------------------------
+;	Programmable interval timer (8253), counter 0
+;
+;	GHAL_TimerRead
+;		Return:	ax = current count of counter 0
+;
+;	GHAL_TimerWrite
+;		Pass:	cx = new count for counter 0
+;		Destroys: al
+;
+;	GHAL_TimerReset	value
+;		Put counter 0 into square wave mode with the given count.
+;		Destroys: ax
+;------------------------------------------------------------------------------
+
+GHAL_TimerRead	macro
+	mov	al, TIMER_COMMAND_0_READ_COUNTER
+	out	TIMER_IO_COMMAND, al
+	jmp	$+2			; I/O delay
+	in	al, TIMER_IO_0_LATCH	; al = low byte
+	jmp	$+2			; I/O delay
+	mov	ah, al
+	in	al, TIMER_IO_0_LATCH	; al = high byte
+	xchg	al, ah
+endm
+
+GHAL_TimerWrite	macro
+	mov	al, TIMER_COMMAND_0_WRITE
+	out	TIMER_IO_COMMAND, al
+	jmp	$+2			; give 8253 time to react
+	mov	al, cl
+	out	TIMER_IO_0_LATCH, al
+	jmp	$+2			; give 8253 time to react
+	mov	al, ch
+	out	TIMER_IO_0_LATCH, al
+endm
+
+GHAL_TimerReset	macro	value
+	mov	al, TimerControlWord <0,TRLC_WORD,TM_SQUARE_WAVE,0>
+	out	TIMER_IO_COMMAND, al
+	mov	ax, value
+	out	TIMER_IO_0_LATCH, al
+	mov	al, ah
+	out	TIMER_IO_0_LATCH, al
+endm

@@ -390,7 +390,7 @@
   "dos_int21": 8,
   "gpmi": 7,
   "int_flag": 37,
-  "port_io": 16
+  "port_io": 4
  },
  "Library/Kernel/VMem": {
   "int_flag": 31

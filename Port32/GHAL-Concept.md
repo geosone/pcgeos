@@ -132,7 +132,7 @@ GEOS has its own scheduler (priorities, time slices driven by the timer interrup
 
 Today the kernel protects itself with `INT_OFF`/`INT_ON`, and drivers hook interrupt vectors.
 
-- `INT_OFF`/`INT_ON` already are macros (`Include/Internal/interrup.def`: `equ <cli>` / `<sti>`) and become **`ghal_crit_enter`/`leave`** (nestable). Under `dos32` that is `cli`/`sti` as before; on other hosts a lock against the "interrupt context".
+- `INT_OFF`/`INT_ON` already are macros (`Include/Internal/interrup.def`, since 2026-11-10 `equ <GHAL_IntOff>` / `<GHAL_IntOn>` from `Include/Internal/ghal.def`) and become **`ghal_crit_enter`/`leave`** (nestable). Under `dos32` that is `cli`/`sti` as before; on other hosts a lock against the "interrupt context".
 - **Interrupt context:** under DOS that is the real IRQ handler. On other hosts it is a host thread (timer, event loop, network) that calls the driver's handler between `ghal_irq_enter`/`exit`. That serializes it against the kernel, exactly like a real interrupt.
 - `SysEnterInterrupt`/`SysExitInterrupt` and the kernel's wake-up paths keep their logic unchanged.
 
