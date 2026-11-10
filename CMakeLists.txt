@@ -1,12 +1,16 @@
-# Port32 -- C port of PC/GEOS on top of the GHAL (GEOS Hardware Abstraction
-# Layer).  See PLAN.md and GHAL-Concept.md.
+# PC/GEOS C port on top of the GHAL (GEOS Hardware Abstraction Layer).
+# See Port32/PLAN.md and Port32/GHAL-Concept.md.
 #
-#   cmake -S Port32 -B build -G Ninja                       # host linux, native
-#   cmake -S Port32 -B build32 -G Ninja \
-#         -DCMAKE_TOOLCHAIN_FILE=Port32/cmake/toolchain-linux-i686.cmake
+# C ports of asm files live next to the asm they replace; Port32/ only holds
+# new material (docs, tools, tests).  The existing 16-bit/pm16 build still
+# uses pmake (Port32/tools/geosbuild.sh) and is not touched by this file.
+#
+#   cmake -S . -B build -G Ninja                            # host linux, native
+#   cmake -S . -B build32 -G Ninja \
+#         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-linux-i686.cmake
 #   cmake --build build && ctest --test-dir build
 cmake_minimum_required(VERSION 3.20)
-project(GeosPort32 LANGUAGES C)
+project(PCGEOS LANGUAGES C)
 
 set(GEOS_HOSTS dos32 linux win32 win64 gonware)
 set(GEOS_HOST linux CACHE STRING "GHAL host: ${GEOS_HOSTS}")
@@ -39,22 +43,23 @@ add_compile_definitions(GEOS_HOST_${_host})
 message(STATUS "GEOS_HOST=${GEOS_HOST} arch=${CMAKE_SYSTEM_PROCESSOR} EC=${GEOS_ERROR_CHECK}")
 
 enable_testing()
-add_subdirectory(Math)
+add_subdirectory(Library/Math/Float)
+add_subdirectory(Port32/Tests)
 
 # Inventory of direct host contacts (plan P2).  Not part of 'all'.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
   add_custom_target(ghal-inventory
-    COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tools/ghal_inventory.py
-            --root ${CMAKE_CURRENT_SOURCE_DIR}/..
+    COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/Port32/tools/ghal_inventory.py
+            --root ${CMAKE_CURRENT_SOURCE_DIR}
             --markdown ${CMAKE_BINARY_DIR}/GHAL-Inventory.md
             --json ${CMAKE_BINARY_DIR}/ghal_inventory.json
     COMMENT "Scanning GEOS sources for direct host contacts"
     VERBATIM)
   add_custom_target(ghal-inventory-check
-    COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tools/ghal_inventory.py
-            --root ${CMAKE_CURRENT_SOURCE_DIR}/..
-            --check ${CMAKE_CURRENT_SOURCE_DIR}/tools/ghal_baseline.json
+    COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/Port32/tools/ghal_inventory.py
+            --root ${CMAKE_CURRENT_SOURCE_DIR}
+            --check ${CMAKE_CURRENT_SOURCE_DIR}/Port32/tools/ghal_baseline.json
     COMMENT "Checking for new host contacts against the baseline"
     VERBATIM)
 endif()

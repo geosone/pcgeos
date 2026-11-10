@@ -4,14 +4,14 @@ A measuring point for how much effort translating PC/GEOS assembler to C
 takes. Translated: `Library/Math/Float/floatFloatToAscii.asm` (number → text
 formatting, used by GeoCalc, Chart, Parse and others).
 
-Built with CMake through `Port32/CMakeLists.txt` (out-of-tree build directory):
+The C files live next to the asm in `Library/Math/Float/` (`floatFloatToAscii.c/.h`, `fpstack.c/.h`); the test is `Port32/Tests/test_ffa.c`. Built with CMake from the repository root (out-of-tree build directory):
 
 ```sh
-cmake -S Port32 -B build -G Ninja && cmake --build build && ctest --test-dir build
-cmake -S Port32 -B build32 -G Ninja \
-      -DCMAKE_TOOLCHAIN_FILE=Port32/cmake/toolchain-linux-i686.cmake
+cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build
+cmake -S . -B build32 -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-linux-i686.cmake
 cmake --build build32 && ctest --test-dir build32
-build/Math/test_ffa -v   # all test cases with output
+build/Port32/Tests/test_ffa -v   # all test cases with output
 ```
 
 ## Files

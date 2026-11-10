@@ -5,7 +5,7 @@
 **Based on:**
 
 - this repository (as of 2026-11)
-- the pilot `Port32/Math/`
+- the pilot `Library/Math/Float/floatFloatToAscii.c` (test in `Port32/Tests/`)
 - `../GonWare/CONCEPT.md` (section "Outlook: GonDesk – a desktop with GEOS")
 - `../GonWare/PLAN.md`
 
@@ -193,7 +193,7 @@ The GHAL is a narrow C API (prefix `ghal_`) in its own headers. Each group has o
 #### Directory layout (proposal)
 
 ```
-Port32/ (later a directory of its own in the repo)
+Port32/
   ghal/
     include/ghal/*.h          shared API
     common/                  software renderer, openinput tables, helpers
@@ -370,7 +370,7 @@ Aligned with GonWare's PLAN.md:
 6. **Multi-session:** one GEOS session per GDS user, e.g. via remote access? Natural for a server operating system.
 7. **First target hardware for GonDesk:** QEMU, a PC with GOP, or an ARM64 board (Raspberry Pi via device tree).
 
-## 11. Relation to the pilot `Port32/Math`
+## 11. Relation to the pilot `Library/Math/Float/floatFloatToAscii.c`
 
 - The method is confirmed: keep the structure 1:1 and replace helper routines with a shim. For the first pass this remains sensible, because it allows checking against the original.
 - **With the compatibility break, three things change:**

@@ -89,3 +89,7 @@ Local/gbuild.ec
 AGENTS.md
 AGENTS.MD
 agents.md
+
+# CMake build trees and the pmake LOCAL_ROOT
+/build*/
+/Local/

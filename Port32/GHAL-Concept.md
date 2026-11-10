@@ -4,7 +4,7 @@
 
 **Scope:** pcgeos only. How GonWare itself abstracts hardware (GWVIDEO etc.) is a different topic; here GonWare is just one of several later hosts.
 
-**Based on:** measurements in this repository (as of 2026-11), the pilot `Port32/Math/`, `Port32/GonDesk-GEOS-on-GonWare.md`, the inventory `Port32/GHAL-Inventory.md`.
+**Based on:** measurements in this repository (as of 2026-11), the pilot `Library/Math/Float/floatFloatToAscii.c`, `Port32/GonDesk-GEOS-on-GonWare.md`, the inventory `Port32/GHAL-Inventory.md`.
 
 ## 1. Goal
 
@@ -204,7 +204,7 @@ Step S0 (section 6) does not contradict this: it only puts the existing 16-bit a
 
 ## 8. Build
 
-**The build system is CMake** (decided 2026-11-10); tests run through CTest. Entry point for now: `Port32/CMakeLists.txt`.
+**The build system is CMake** (decided 2026-11-10); tests run through CTest. Entry point: the root `CMakeLists.txt`; toolchain files in `cmake/`.
 
 ```sh
 cmake -S . -B build-dos   -G Ninja -DGEOS_HOST=dos32  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-dos32-hx.cmake
@@ -231,15 +231,15 @@ cmake -S . -B build-w64   -G Ninja -DGEOS_HOST=win64  -DCMAKE_TOOLCHAIN_FILE=cma
    - `dos32` in QEMU with FreeDOS + HDPMI32,
    - `gonware` in QEMU.
 
-**Directory layout (proposal):**
+**Directory layout (proposal):** new code without an asm original lives under `Port32/` (see the layout rule in `PLAN.md`); C ports of asm files sit next to their asm.
 
 ```
-ghal/
+Port32/ghal/
   include/ghal/*.h            API of the GHAL core and the host services
   common/                     software renderer, HID tables, helpers
   dos32/  linux/  win/  gonware/
   linux/display-sdl3/  linux/display-x11/  linux/display-fbdev/
-Driver/Host/                  generic drivers on the host services
+Port32/Driver/Host/           generic drivers on the host services (new, no asm original)
   Video/FB  IFS/HostFS  Keyboard/Host  Mouse/Host  Socket/Host  Sound/Host
 ```
 
@@ -256,5 +256,5 @@ Driver/Host/                  generic drivers on the host services
 
 - `Port32/PLAN.md`: phases and current status.
 - `Port32/GHAL-Inventory.md`: generated list of all direct host contacts.
-- `Port32/Math/README.md`: pilot. The shim `fpstack.c` is an example of "code above the GHAL, independent of the host".
+- `Port32/Tests/README.md`: pilot. The shim `fpstack.c` is an example of "code above the GHAL, independent of the host".
 - `Port32/GonDesk-GEOS-on-GonWare.md`: the `gonware` host in detail (GWVIDEO, openinput, NSS, Ring 3). The GHAL there is the same as here.

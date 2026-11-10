@@ -24,7 +24,9 @@ from collections import defaultdict
 
 # Directories that are not GEOS target code.
 SKIP_DIRS = {"Installed", "Tools", "TechDocs", "Port32", ".git", "bin",
-             "FontData", "DOSAppl"}
+             "FontData", "DOSAppl", "Local", "cmake"}
+# top-level directories starting with this prefix are CMake build trees
+SKIP_PREFIX = "build"
 ASM_EXT = {".asm", ".def", ".ui"}
 C_EXT = {".c", ".h", ".goc", ".goh"}
 
@@ -167,8 +169,9 @@ def scan(root):
         rel_dir = os.path.relpath(dirpath, root)
         top = rel_dir.split(os.sep)[0]
         if rel_dir == ".":
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-        elif top in SKIP_DIRS:
+            dirnames[:] = [d for d in dirnames
+                           if d not in SKIP_DIRS and not d.startswith(SKIP_PREFIX)]
+        elif top in SKIP_DIRS or top.startswith(SKIP_PREFIX):
             dirnames[:] = []
             continue
         for fn in filenames:

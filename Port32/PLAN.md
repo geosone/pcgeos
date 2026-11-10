@@ -2,7 +2,7 @@
 
 **As of:** 2026-11-10.
 
-**Belongs to:** `Port32/GHAL-Concept.md` (architecture). The pilot lives in `Port32/Math/`. `Port32/GonDesk-GEOS-on-GonWare.md` describes a later host.
+**Belongs to:** `Port32/GHAL-Concept.md` (architecture). The pilot is `Library/Math/Float/floatFloatToAscii.c` (test in `Port32/Tests/`). `Port32/GonDesk-GEOS-on-GonWare.md` describes a later host.
 
 **Goal:** Free GEOS from hard-wired 16-bit assembler and rebuild it in C, on top of a GEOS Hardware Abstraction Layer (GHAL). Hosts, in this order:
 
@@ -14,6 +14,8 @@
 Architectures: amd64, i386, arm64, armhf.
 
 **Language rule:** everything in the repository (documents, comments, commit messages, generated reports) is written in English.
+
+**Layout rule (2026-11-10):** a C port of an asm file goes **next to the asm it replaces** (e.g. `Library/Math/Float/floatFloatToAscii.c` beside `floatFloatToAscii.asm`, with a `CMakeLists.txt` in that directory). `Port32/` holds **only new material**: documents, tools, tests, and new code without an asm original (GHAL core, generic host drivers). The CMake entry point is the repository root (`CMakeLists.txt`, toolchain files in `cmake/`).
 
 ---
 
@@ -61,11 +63,12 @@ Every phase ends with a verifiable result. **After every phase GEOS still runs u
 ### P0: Foundations
 
 - ~~Make the PM branch available, set up the fork~~ **done 2026-11-10**: remote `geosone` (SSH, because the global git `insteadOf` rule redirects `https://github.com` to Gitea), PM branch pushed to the fork, work branch `ghal`.
-- ~~Build the GEOS toolchain~~ **done 2026-11-10**: Open Watcom 2.0 (May 2026) in `/opt/watcom`; the Linux tool builds failed on "`_WCI86FAR` is reserved" (#983), fixed by merging upstream branch `983-fix-watcom-latest-incompatibilitites` into `ghal`. `pmake`, `esp`, `glue`, `goc`, `uic`, `loc`, `swat` build for Linux. Full target build (`Installed/`) in progress, to be kept as the byte-identical reference for P2.
+- ~~Build the GEOS toolchain~~ **done 2026-11-10**: Open Watcom 2.0 (May 2026) in `/opt/watcom`; the Linux tool builds failed on "`_WCI86FAR` is reserved" (#983), fixed by merging upstream branch `983-fix-watcom-latest-incompatibilitites` into `ghal`. `pmake`, `esp`, `glue`, `goc`, `uic`, `loc`, `swat` build for Linux. All built tools were smoke- and function-tested; fixed: pmake segfault on every error exit (`DieHorribly` lacked `_LINUX`), geodump (DOS upper-casing, `/` options), grev endless loop at EOF, sym2dis crash without argument. The full target build (`Installed/`, 810 geodes incl. the real16 kernel/`Loader` and the pm16 `Kernel/GEOS32`/`Loader32`) needed two more fixes: `<ansi/...>` includes (case) and a pointer-keyed hash in `Tools/utils/localize.c` that made `.rsc`/`.vm` order random.
+- **Reproducible builds (2026-11-10):** run the build through `Port32/tools/geosbuild.sh` (sets the environment, runs pmake under `setarch -R`). Open Watcom's `wcc` leaks heap addresses into `.obj` files, so with ASLR two clean builds differ. Compare builds with `Port32/tools/geocmp.py` (`snapshot` / `compare`), which masks the link timestamps (file header create date/time, `GH_geodeSerial`, the serial in the `.sym`/`.ldf` info field). This is the byte-identical check for P2.
 - Define how upstream is pulled in: how often, merge vs. rebase, who resolves conflicts with the PM branch.
 - Decide the open questions of the GHAL concept (section 9) ourselves: relation to GPMI/HostIf/HostFS, build variants (#960), tests (#1239), `swat`.
 - Conventions: C standard (C11), formatting, prefixes (`ghal_`), Apache 2.0 license header, English everywhere in the repo.
-- **Build system: CMake (decided 2026-11-10).** Everything new (GHAL, C port, tests, tools) is built with CMake + CTest, out-of-tree build directories, architecture/host selected via toolchain files in `Port32/cmake/` and the cache variables `GEOS_HOST`, `GEOS_LINUX_DISPLAY`, `GEOS_ERROR_CHECK`. The existing 16-bit / PM builds (pmake, esp, glue, Open Watcom) keep running unchanged for now; bringing them under CMake as well is a separate work item in P3. **Status:** `Port32/CMakeLists.txt` exists; the Math pilot builds and tests through it (x86-64 and i686).
+- **Build system: CMake (decided 2026-11-10).** Everything new (GHAL, C port, tests, tools) is built with CMake + CTest, out-of-tree build directories, architecture/host selected via toolchain files in `cmake/` and the cache variables `GEOS_HOST`, `GEOS_LINUX_DISPLAY`, `GEOS_ERROR_CHECK`. The existing 16-bit / PM builds (pmake, esp, glue, Open Watcom) keep running unchanged for now; bringing them under CMake as well is a separate work item in P3. **Status:** the root `CMakeLists.txt` exists; the Math pilot builds and tests through it (x86-64 and i686).
 
 **Result:** fork and branch in place; pulling in upstream is defined; the open questions of the GHAL concept are answered.
 
@@ -73,7 +76,7 @@ Every phase ends with a verifiable result. **After every phase GEOS still runs u
 
 - Define location, invocation and reporting for host-side tests (CTest).
 - Minimal `linux` GHAL core **without graphics**: `ghal_mem`, `ghal_time`, `ghal_log`, stub services.
-- Bring in the **Math pilot** (`Port32/Math`) as the first test case; switch `fpstack.c` to `double` for that.
+- Bring in the **Math pilot** (`Library/Math/Float/*.c`, test `Port32/Tests/test_ffa.c`) as the first test case; switch `fpstack.c` to `double` for that.
 - CI on linux-amd64, i386, arm64 and armhf (ARM via QEMU user mode).
 
 **Result:** test infrastructure in the fork; the pilot runs on four architectures.
@@ -187,7 +190,7 @@ The pilot gave a ratio of about 1.9 : 1 for asm code to C. Most of the time goes
 
 ## 5. Next concrete steps
 
-1. Finish the full target build and store its output (geodes, loader, kernel) as the byte-identical reference.
+1. Confirm that two clean builds via `geosbuild.sh` are identical under `geocmp.py`, then keep that manifest as the P2 reference.
 2. Review the PM branch (GPMI, `Loader32`, kernel changes, HostFS) and record the result here.
 3. Start S0 with `INT_OFF`/`INT_ON`: new `Include/Internal/ghal.def`, route kernel `Timer` and `Sys` through it, verify byte-identical output.
 4. Define how upstream is pulled in (P0).
