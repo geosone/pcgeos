@@ -50,22 +50,29 @@ Upstream hat 450 Issues (199 offen) und 811 PRs (723 gemerged, 19 offen). Am akt
 
 Jede Phase endet mit einem prüfbaren Ergebnis. **Nach jeder Phase läuft GEOS unter DOS.** Upstream-Bezug steht jeweils dabei.
 
-### P0: Grundlagen und Abstimmung
+**Arbeitsweise (Entscheidung 2026-11-10):**
+- Gearbeitet wird **nur im Fork `github.com/geosone/pcgeos`**, Branch `ghal` (auf `665-protected-mode-2026`).
+- Es gibt **keine Pull Requests und keine Issues zu upstream**.
+- Upstream wird nur **beobachtet und eingeholt**: Neue Commits auf `master` und dem PM-Branch werden regelmäßig in `ghal` übernommen (Merge oder Rebase).
+- „Upstream-Bezug“ heißt im Folgenden nur, an welches upstream-Thema eine Phase anknüpft.
 
-- ~~PM-Branch `665-protected-mode-2026` lokal verfügbar machen~~ **erledigt 2026-11-10** (Remote `dbp` → `dbp/pcgeos`).
-- GHAL-Konzept upstream vorstellen (Issue oder Discord), vor allem: Verhältnis zu GPMI/HostIf/HostFS, Build-Varianten (#960), Tests (#1239), `swat`.
+### P0: Grundlagen
+
+- ~~PM-Branch verfügbar machen, Fork einrichten~~ **erledigt 2026-11-10**: Remote `geosone` (SSH, weil das globale `insteadOf` `https://github.com` auf Gitea umleitet), PM-Branch in den Fork gepusht, Arbeitsbranch `ghal`.
+- Ablauf zum Einholen von upstream festlegen: Wie oft, Merge oder Rebase, wer löst Konflikte im PM-Branch.
+- Offene Fragen aus dem GHAL-Konzept (9.) selbst entscheiden: Verhältnis zu GPMI/HostIf/HostFS, Build-Varianten (#960), Tests (#1239), `swat`.
 - Konventionen festlegen: C-Standard (C11), Formatierung, Präfixe (`ghal_`), Lizenzkopf Apache 2.0, Sprache der Doku.
 
-**Ergebnis:** Branch lokal; Upstream kennt den Plan; offene Fragen aus dem GHAL-Konzept (9.) sind beantwortet.
+**Ergebnis:** Fork und Branch stehen; das Einholen von upstream ist geregelt; die offenen Fragen aus dem GHAL-Konzept (9.) sind beantwortet.
 
-### P1: Tests auf dem Entwicklungsrechner (upstream #1239)
+### P1: Tests auf dem Entwicklungsrechner (knüpft an upstream #1239 an)
 
 - Ort, Aufruf und Berichtsformat für Tests auf dem Entwicklungsrechner festlegen (z. B. `Tests/Host/`, `make host-tests` bzw. CTest).
 - Minimaler `linux`-GHAL-Kern **ohne Grafik**: `ghal_mem`, `ghal_time`, `ghal_log`, Stub-Dienste.
 - **Math-Pilot** (`Port32/Math`) als erster Testfall einbringen. Dafür `fpstack.c` auf `double` umstellen.
 - CI auf linux-amd64, i386, arm64 und armhf (ARM über QEMU-User).
 
-**Ergebnis:** PR upstream für #1239; der Pilot läuft auf vier Architekturen.
+**Ergebnis:** Test-Infrastruktur im Fork; der Pilot läuft auf vier Architekturen.
 
 ### P2: GHAL im bestehenden Assembler einziehen (Schritt S0)
 
@@ -77,7 +84,7 @@ Die Arbeit läuft auf Basis des PM-Branches.
 - **Abnahme:** Die real16-Variante baut **bytegleich** wie vorher, oder mit dokumentierten Unterschieden. pm16 bootet wie vorher bis zum Desk.
 - Build-Varianten-Konzept für #960 (V20/186/286-Optimierungen) mitliefern, auf denselben Mechanismen.
 
-**Ergebnis:** Alle Host-Kontakte von Kernel und Loader liegen an einer Stelle und haben Namen. Es gibt PRs upstream, in kleinen Paketen pro Kernel-Modul.
+**Ergebnis:** Alle Host-Kontakte von Kernel und Loader liegen an einer Stelle und haben Namen. Commits in kleinen Paketen pro Kernel-Modul, damit das Einholen von upstream beherrschbar bleibt.
 
 ### P3: C-Toolchain neben Open Watcom
 
@@ -85,7 +92,7 @@ Die Arbeit läuft auf Basis des PM-Branches.
 - `uic` → C-Daten statt `.rdef`.
 - `geosport.h`: Typen, `_far`/`_pascal` leer, 64-Bit-saubere `CInclude/`. Zuerst als Prüfung: CInclude kompiliert mit `-m64 -Wall`.
 - **Geode-Format:** ELF-Shared-Object und ein Ladeformat aus `.gp` (Exporte, Protokollnummern). Spezifikation + Prototyp-Lader als Test auf dem Entwicklungsrechner.
-- Build-System: CMake für die C-Ziele, gemeinsam mit pmake für die asm-Varianten. Vorher klären, ob upstream pmake behalten will.
+- Build-System: CMake für die C-Ziele, gemeinsam mit pmake für die asm-Varianten (pmake bleibt, solange upstream es nutzt).
 
 **Ergebnis:** Eine GOC-Beispiel-App (`Appl/SDK_C/*`) kompiliert für `linux` (ohne zu laufen); ELF-Geodes laden im Test.
 
@@ -162,8 +169,8 @@ Der Pilot hat für asm-Code zu C ein Verhältnis von ~1,9 : 1 ergeben. Die meist
 
 | Risiko | Gegenmaßnahme |
 |---|---|
-| **Auseinanderlaufen mit upstream** (PM-Branch bewegt sich schnell) | auf dem PM-Branch arbeiten, kleine PRs, P2 früh upstream bringen |
-| Upstream will C-Port / GHAL (noch) nicht | P1 und P2 nützen upstream auch ohne C-Port (Tests, Build-Varianten, Übersicht der Host-Kontakte). Der C-Zweig kann notfalls als Fork weiterlaufen. |
+| **Auseinanderlaufen mit upstream** (PM-Branch bewegt sich schnell) | auf dem PM-Branch arbeiten, upstream regelmäßig einholen, kleine Commits, Änderungen an upstream-Dateien möglichst gering halten (neuer Code in eigenen Verzeichnissen) |
+| Upstream ändert Dinge, auf denen wir aufbauen (z. B. GPMI, Loader32) | Inventar-Skript (P2) in der CI des Forks, damit neue Host-Kontakte aus upstream sofort auffallen |
 | Toolchain (altes OW, Linux-64-Bugs) | C-Port mit GCC/Clang parallel; die OW-Kette bleibt unangetastet |
 | `swat` vs. gdb | `swat` für DOS-Varianten behalten; gdb für gehostete Systeme; Symbolformat später angleichen |
 | Umfang (3,7 Mio. asm-Zeilen) | Reihenfolge nach Nutzen (Kernel → UI → Text → GOC-Apps); asm-Apps zuletzt oder ersetzen |
@@ -176,7 +183,7 @@ Der Pilot hat für asm-Code zu C ein Verhältnis von ~1,9 : 1 ergeben. Die meist
 
 1. ~~PM-Branch holen~~ erledigt (Remote `dbp`). Nächster Teil davon: den PM-Branch durchsehen (GPMI, `Loader32`, Kernel-Änderungen, HostFS) und das Ergebnis hier eintragen.
 2. Inventar-Skript für P2 schreiben und gegen `master` und den PM-Branch laufen lassen.
-3. Entwurf für das Upstream-Issue „GHAL / Port-Konzept“, nur als Text zum Prüfen, nicht abschicken.
+3. Ablauf zum Einholen von upstream festlegen (P0).
 4. Den Math-Pilot an #1239 ausrichten (Ort, Aufruf, `double`), als Vorschlag für den ersten PR.
 
 ---
