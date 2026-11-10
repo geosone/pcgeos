@@ -79,6 +79,7 @@ typedef struct 	{
 
     LocalizeInfo 	*r_locInfo;
     LocalizeInfo 	*r_locIns;
+    int		 r_seq;		/* order of first appearance */
 }ResourceSym;
 
 

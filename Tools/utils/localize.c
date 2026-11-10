@@ -50,6 +50,7 @@ static Hash_Table 		locHash;		/* all resources    */
 static ResourceSym 		*currentResource = NULL;/* currnet resource */
 static upcaseLinkerResourceNames; /* true iff using MetaWare */
 static char 	    	    	*locName = NULL;
+static int			resourceCount = 0;	/* resources entered */
 
 
 
@@ -173,6 +174,7 @@ Localize_EnterResource(Opaque key,  	/* 32-bit value that identifies the
 	
 	res->r_name =	 (char *)(res+1);
 	strcpy(res->r_name, name);
+	res->r_seq = resourceCount++;
     }
     currentResource = (ResourceSym *)Hash_GetValue(ent);
     return new;
@@ -345,6 +347,8 @@ void
 Localize_DumpLocalizations (void)
 {
     int	    	    	needFile = 0;
+    ResourceSym		**sorted;
+    int			i;
 
     FOR_ALL_RESOURCES(res, {
 	if (RES_INFO(res) != NULL) {
@@ -360,8 +364,21 @@ Localize_DumpLocalizations (void)
 	    return;
 	}
 
+	/*
+	 * The hash table is keyed by pointer, so its enumeration order
+	 * depends on heap addresses (ASLR).  Emit the resources in the
+	 * order they were first entered to keep the output reproducible.
+	 */
+	sorted = (ResourceSym **)
+	    malloc((resourceCount ? resourceCount : 1) * sizeof(ResourceSym *));
+
+	FOR_ALL_RESOURCES(r, {
+	    sorted[r->r_seq] = r;
+	});
+
 	/* now declare all groups and their chunks */
-	FOR_ALL_RESOURCES(res,{
+	for (i = 0; i < resourceCount; i++) {
+	    ResourceSym *res = sorted[i];
 	    char *x;
 	    if(!upcaseLinkerResourceNames){
 		fprintf(locOut,"resource %s\n",RES_NAME(res));
@@ -380,8 +397,9 @@ Localize_DumpLocalizations (void)
 	    FOR_ALL_LOCINFOS_IN_RESOURCE(res,loc,{
 		DumpLocInfo(loc);
 	    });
-	});
+	}
 
+	free((malloc_t)sorted);
 	(void)fclose(locOut);
     }
 }	
