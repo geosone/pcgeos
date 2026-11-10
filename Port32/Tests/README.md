@@ -89,8 +89,24 @@ fork, threads and signals: enforced read/execute protection, `ghal_crit`
 against another thread, and `ghal_fault` (access, divide, breakpoint; the
 test catches every fault, so no real crash happens).
 
-For dos32 the tests are DOS programs; ctest starts them headless in
-DOSBox-X through `Port32/tools/dosrun.sh`:
+For dos32 the tests are DOS programs; ctest starts them through
+`Port32/tools/dosrun.sh`, which has three engines:
+
+| Engine | Chosen when | Environment |
+|---|---|---|
+| `qemu-hd` | `DOSRUN_BASE_IMG` is set | complete DOS on a hard disk image (HIMEM, EMM386, mouse driver) in QEMU, booted read-only; closest to a real PC |
+| `qemu` | `DOSRUN_BOOT_IMG` is set | bare DOS from a boot floppy image in QEMU |
+| `dosbox` | otherwise | DOSBox-X headless, built-in DOS |
+
+The base image is built once, unattended, from an MS-DOS 7.1 installation
+set of [msdosinst](https://github.com/geosone/msdosinst) (bring your own; no
+DOS files are in this repository) and kept in the git-ignored `Local/`:
+
+```sh
+Port32/tools/mkdosbase.sh Local/dosbase.img DISK1.IMG DISK2.IMG DISK3.IMG DISK4.IMG
+export DOSRUN_BASE_IMG=$PWD/Local/dosbase.img
+```
+
 
 ```sh
 cmake -S . -B build-dos32 -G Ninja \
