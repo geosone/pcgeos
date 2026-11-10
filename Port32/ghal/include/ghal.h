@@ -10,8 +10,8 @@
  *   - Functions that can fail return ghal_status (GHAL_OK == 0) or NULL.
  *   - Nothing here is GEOS-specific beyond the needs of the kernel; the
  *     kernel builds handles, threads and the heap on top of it.
- *   - Groups marked "not implemented yet" are part of the contract but no
- *     backend provides them so far.
+ *   - A backend may return GHAL_ERR_UNSUPPORTED for what its host cannot
+ *     offer (e.g. ghal_irq sources other than GHAL_IRQ_TICK).
  */
 #ifndef GHAL_H
 #define GHAL_H
@@ -117,7 +117,7 @@ void        ghal_hostlock_enter(void);
 void        ghal_hostlock_leave(void);
 
 /* ---------------------------------------------------------------------
- * ghal_irq -- asynchronous event sources (not implemented yet).
+ * ghal_irq -- asynchronous event sources.
  *
  * dos32: hardware IRQ vectors.  Other hosts: a host thread or the event
  * loop calls the handler between ghal_irq_enter/ghal_irq_exit, serialized
@@ -134,12 +134,13 @@ enum {
 
 ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
                             ghal_irq_source **out);
+/* Not from inside a handler. */
 ghal_status ghal_irq_detach(ghal_irq_source *src);
 /* Tick rate of GHAL_IRQ_TICK in Hz (GEOS uses 60). */
 ghal_status ghal_irq_set_tick_rate(unsigned hz);
 
 /* ---------------------------------------------------------------------
- * ghal_fault -- CPU exceptions (not implemented yet).
+ * ghal_fault -- CPU exceptions.
  * dos32: DPMI exceptions; linux: SIGSEGV/SIGBUS/SIGFPE/SIGILL/SIGTRAP;
  * windows: vectored exception handler.
  * ------------------------------------------------------------------- */

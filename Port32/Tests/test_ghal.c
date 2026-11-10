@@ -6,6 +6,7 @@
 #include "ghal.h"
 
 #include <pthread.h>
+#include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -152,8 +153,121 @@ static void test_caps(void)
     ghal_irq_source *src = (ghal_irq_source *)1;
     CHECK(ghal_host_name() && ghal_host_name()[0]);
     CHECK(ghal_caps() & GHAL_CAP_THREADS);
-    CHECK(ghal_irq_attach(GHAL_IRQ_TICK, NULL, NULL, &src) == GHAL_ERR_UNSUPPORTED);
+    CHECK(ghal_irq_attach(GHAL_IRQ_TICK, NULL, NULL, &src) == GHAL_ERR_INVAL);
     CHECK(src == NULL);
+}
+
+/* ---- ghal_irq: tick source ---- */
+
+static volatile int ticks_a, ticks_b;
+
+static void tick_a(void *ctx)
+{
+    (void)ctx;
+    ticks_a++;
+}
+
+static void tick_b(void *ctx)
+{
+    *(volatile int *)ctx += 1;
+}
+
+static void test_irq_tick(void)
+{
+    ghal_irq_source *a, *b;
+    int n, held;
+    CHECK(ghal_irq_attach(12345, tick_a, NULL, &a) == GHAL_ERR_UNSUPPORTED);
+    CHECK(ghal_irq_set_tick_rate(0) == GHAL_ERR_INVAL);
+    CHECK(ghal_irq_set_tick_rate(100) == GHAL_OK);
+    CHECK(ghal_irq_attach(GHAL_IRQ_TICK, tick_a, NULL, &a) == GHAL_OK && a);
+    CHECK(ghal_irq_attach(GHAL_IRQ_TICK, tick_b, (void *)&ticks_b, &b) == GHAL_OK && b);
+    usleep(300000);
+    n = ticks_a;
+    CHECK(n >= 15 && n <= 45);              /* ~30 at 100 Hz */
+    CHECK(ticks_b >= 15 && ticks_b <= 45);
+
+    /* handlers are held off while the kernel is in a critical section */
+    ghal_crit_enter();
+    held = ticks_a;
+    usleep(100000);
+    CHECK(ticks_a == held);
+    ghal_crit_leave();
+    usleep(100000);
+    CHECK(ticks_a > held);
+
+    CHECK(ghal_irq_detach(a) == GHAL_OK);
+    n = ticks_b;
+    usleep(100000);
+    CHECK(ticks_b > n);                     /* b still runs */
+    CHECK(ghal_irq_detach(b) == GHAL_OK);   /* last one: thread stops */
+    n = ticks_b;
+    usleep(100000);
+    CHECK(ticks_b == n);
+    CHECK(ghal_irq_set_tick_rate(60) == GHAL_OK);
+}
+
+/* ---- ghal_fault ---- */
+
+static sigjmp_buf fault_jmp;
+static ghal_fault_info last_fault;
+
+static void on_fault(const ghal_fault_info *info)
+{
+    last_fault = *info;
+    siglongjmp(fault_jmp, 1);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((no_sanitize("undefined")))
+#endif
+static int divide(volatile int a, volatile int b)
+{
+    return a / b;
+}
+
+static void test_fault(void)
+{
+    volatile unsigned char *code;
+    CHECK(ghal_fault_set_handler(on_fault) == GHAL_OK);
+
+    /* write to a read/execute block */
+    code = ghal_mem_alloc(100, GHAL_MEM_PAGED);
+    CHECK(code && ghal_mem_protect((void *)code, GHAL_PROT_RX) == GHAL_OK);
+    memset(&last_fault, 0, sizeof last_fault);
+    if (sigsetjmp(fault_jmp, 1) == 0) {
+        code[5] = 1;
+        CHECK(!"write to RX block did not fault");
+    }
+    CHECK(last_fault.kind == GHAL_FAULT_ACCESS);
+    CHECK(last_fault.address == (void *)(code + 5));
+#if defined(__x86_64__) || defined(__i386__) || defined(__aarch64__) || defined(__arm__)
+    CHECK(last_fault.pc != NULL);
+#endif
+    ghal_mem_free((void *)code);
+
+#if defined(__x86_64__) || defined(__i386__)
+    /* integer divide error (ARM has no such trap) */
+    memset(&last_fault, 0, sizeof last_fault);
+    if (sigsetjmp(fault_jmp, 1) == 0) {
+        volatile int r = divide(1, 0);
+        (void)r;
+        CHECK(!"divide by zero did not fault");
+    }
+    CHECK(last_fault.kind == GHAL_FAULT_DIVIDE);
+#endif
+
+    /* breakpoint */
+    memset(&last_fault, 0, sizeof last_fault);
+    if (sigsetjmp(fault_jmp, 1) == 0) {
+        raise(SIGTRAP);
+        CHECK(!"SIGTRAP did not reach the handler");
+    }
+    CHECK(last_fault.kind == GHAL_FAULT_BREAKPOINT);
+
+    /* the handler survives repeated faults */
+    if (sigsetjmp(fault_jmp, 1) == 0)
+        *(volatile int *)16 = 0;
+    CHECK(last_fault.kind == GHAL_FAULT_ACCESS && last_fault.address == (void *)16);
 }
 
 int main(void)
@@ -163,6 +277,8 @@ int main(void)
     test_time();
     test_crit();
     test_caps();
+    test_irq_tick();
+    test_fault();
     printf("%s: %s\n", ghal_host_name(), failures ? "FAILED" : "all GHAL tests passed");
     return failures ? 1 : 0;
 }

@@ -81,4 +81,7 @@ build/Port32/Tests/test_ffa -v   # all test cases with output
 
 `test_ghal.c` (ctest `ghal.core`) tests the C GHAL from `Port32/ghal/` on the
 build host: memory blocks (plain and paged, protection to read/execute),
-clocks, nesting and exclusion of `ghal_crit`, and the capability query.
+clocks, nesting and exclusion of `ghal_crit`, the tick source of `ghal_irq`
+(rate, serialization against `ghal_crit`, detach), `ghal_fault` (access,
+divide, breakpoint; caught by the test, so no real crash), and the capability
+query.

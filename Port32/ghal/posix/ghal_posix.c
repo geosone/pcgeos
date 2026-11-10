@@ -1,9 +1,7 @@
 /*
  * ghal_posix.c -- GHAL backend for POSIX hosts (linux; later other Unix).
  *
- * Implements ghal_mem, ghal_time, ghal_crit, ghal_hostlock, ghal_log,
- * ghal_exit and ghal_caps.  ghal_irq and ghal_fault are not implemented yet
- * and return GHAL_ERR_UNSUPPORTED.
+ * Implements the whole of ghal.h.  ghal_irq offers GHAL_IRQ_TICK only.
  */
 #define _GNU_SOURCE 1   /* MAP_ANONYMOUS, _SC_AVPHYS_PAGES */
 
@@ -252,34 +250,224 @@ void ghal_hostlock_enter(void) { lock(&host_lock); }
 void ghal_hostlock_leave(void) { unlock(&host_lock); }
 
 /* ------------------------------------------------------------------ */
-/* ghal_irq, ghal_fault: not implemented yet                          */
+/* ghal_irq                                                           */
+/*                                                                    */
+/* GHAL_IRQ_TICK: a host thread wakes at the tick rate (absolute      */
+/* deadlines, so no drift) and calls every attached handler inside    */
+/* ghal_crit_enter/leave, i.e. serialized against the kernel exactly  */
+/* like a real interrupt.  The handler list is only changed inside    */
+/* ghal_crit, too.                                                    */
 /* ------------------------------------------------------------------ */
+
+struct ghal_irq_source {
+    struct ghal_irq_source *next;
+    ghal_irq_handler        fn;
+    void                   *ctx;
+};
+
+static struct ghal_irq_source *tick_list;
+static unsigned  tick_hz = 60;          /* GEOS default */
+static pthread_t tick_thread;
+static int       tick_running;          /* thread exists */
+static volatile int tick_stop;
+static pthread_mutex_t tick_ctl = PTHREAD_MUTEX_INITIALIZER; /* start/stop */
+
+static void *tick_main(void *arg)
+{
+    struct timespec next;
+    (void)arg;
+    clock_gettime(CLOCK_MONOTONIC, &next);
+    for (;;) {
+        struct ghal_irq_source *s;
+        long period;
+        ghal_crit_enter();
+        period = 1000000000L / (long)tick_hz;
+        ghal_crit_leave();
+        next.tv_nsec += period;
+        while (next.tv_nsec >= 1000000000L) {
+            next.tv_nsec -= 1000000000L;
+            next.tv_sec++;
+        }
+        while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL) == EINTR)
+            ;
+        ghal_crit_enter();
+        if (tick_stop) {
+            ghal_crit_leave();
+            return NULL;
+        }
+        for (s = tick_list; s; s = s->next)
+            s->fn(s->ctx);
+        ghal_crit_leave();
+    }
+}
 
 ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
                             ghal_irq_source **out)
 {
-    (void)source; (void)fn; (void)ctx;
+    struct ghal_irq_source *s;
+    ghal_status st = GHAL_OK;
     if (out)
         *out = NULL;
-    return GHAL_ERR_UNSUPPORTED;
+    if (!fn || !out)
+        return GHAL_ERR_INVAL;
+    if (source != GHAL_IRQ_TICK)
+        return GHAL_ERR_UNSUPPORTED;
+    s = malloc(sizeof *s);
+    if (!s)
+        return GHAL_ERR_NOMEM;
+    s->fn = fn;
+    s->ctx = ctx;
+    pthread_mutex_lock(&tick_ctl);
+    ghal_crit_enter();
+    s->next = tick_list;
+    tick_list = s;
+    tick_stop = 0;
+    ghal_crit_leave();
+    if (!tick_running) {
+        if (pthread_create(&tick_thread, NULL, tick_main, NULL) == 0) {
+            tick_running = 1;
+        } else {
+            ghal_crit_enter();
+            tick_list = s->next;
+            ghal_crit_leave();
+            free(s);
+            s = NULL;
+            st = GHAL_ERR_HOST;
+        }
+    }
+    pthread_mutex_unlock(&tick_ctl);
+    *out = s;
+    return st;
 }
 
+/* Must not be called from a handler (it waits for the tick thread). */
 ghal_status ghal_irq_detach(ghal_irq_source *src)
 {
-    (void)src;
-    return GHAL_ERR_UNSUPPORTED;
+    struct ghal_irq_source **pp;
+    int found = 0, last;
+    if (!src)
+        return GHAL_ERR_INVAL;
+    pthread_mutex_lock(&tick_ctl);
+    ghal_crit_enter();
+    for (pp = &tick_list; *pp; pp = &(*pp)->next) {
+        if (*pp == src) {
+            *pp = src->next;
+            found = 1;
+            break;
+        }
+    }
+    last = found && !tick_list;
+    if (last)
+        tick_stop = 1;
+    ghal_crit_leave();
+    if (last && tick_running) {
+        pthread_join(tick_thread, NULL);
+        tick_running = 0;
+    }
+    pthread_mutex_unlock(&tick_ctl);
+    if (!found)
+        return GHAL_ERR_INVAL;
+    free(src);
+    return GHAL_OK;
 }
 
 ghal_status ghal_irq_set_tick_rate(unsigned hz)
 {
-    (void)hz;
-    return GHAL_ERR_UNSUPPORTED;
+    if (hz < 1 || hz > 1000)
+        return GHAL_ERR_INVAL;
+    ghal_crit_enter();
+    tick_hz = hz;
+    ghal_crit_leave();
+    return GHAL_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* ghal_fault                                                         */
+/*                                                                    */
+/* CPU exceptions arrive as signals.  The handler runs on an          */
+/* alternate stack (installed for the thread that sets the handler),  */
+/* so a stack overflow is reported too.                               */
+/* ------------------------------------------------------------------ */
+
+#include <ucontext.h>
+
+static ghal_fault_handler fault_handler;
+static const int fault_signals[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGTRAP };
+
+static void *fault_pc(void *uc_void)
+{
+    ucontext_t *uc = uc_void;
+    if (!uc)
+        return NULL;
+#if defined(__linux__) && defined(__x86_64__)
+    return (void *)uc->uc_mcontext.gregs[REG_RIP];
+#elif defined(__linux__) && defined(__i386__)
+    return (void *)uc->uc_mcontext.gregs[REG_EIP];
+#elif defined(__linux__) && defined(__aarch64__)
+    return (void *)uc->uc_mcontext.pc;
+#elif defined(__linux__) && defined(__arm__)
+    return (void *)uc->uc_mcontext.arm_pc;
+#else
+    return NULL;
+#endif
+}
+
+static void fault_entry(int sig, siginfo_t *si, void *uc)
+{
+    ghal_fault_info info;
+    switch (sig) {
+    case SIGFPE:
+        info.kind = (si->si_code == FPE_INTDIV || si->si_code == FPE_INTOVF)
+                  ? GHAL_FAULT_DIVIDE : GHAL_FAULT_FPU;
+        break;
+    case SIGILL:  info.kind = GHAL_FAULT_ILLEGAL;    break;
+    case SIGTRAP: info.kind = GHAL_FAULT_BREAKPOINT; break;
+    default:      info.kind = GHAL_FAULT_ACCESS;     break;
+    }
+    info.address = si->si_addr;
+    info.pc = fault_pc(uc);
+    if (fault_handler)
+        fault_handler(&info);
+    /* The handler returned (or there is none): report, then die with the
+     * original signal so the host debugger / core dump sees the fault. */
+    {
+        char msg[160];
+        int n = snprintf(msg, sizeof msg,
+                         "geos[error]: unhandled fault %d (signal %d) at pc %p, address %p\n",
+                         (int)info.kind, sig, info.pc, info.address);
+        if (n > 0)
+            (void)!write(2, msg, (size_t)n < sizeof msg ? (size_t)n : sizeof msg - 1);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
 }
 
 ghal_status ghal_fault_set_handler(ghal_fault_handler fn)
 {
-    (void)fn;
-    return GHAL_ERR_UNSUPPORTED;
+    static char *altstack;
+    struct sigaction sa;
+    size_t i;
+    if (!altstack) {
+        stack_t ss;
+        size_t size = 64 * 1024;
+        altstack = malloc(size);
+        if (!altstack)
+            return GHAL_ERR_NOMEM;
+        ss.ss_sp = altstack;
+        ss.ss_size = size;
+        ss.ss_flags = 0;
+        if (sigaltstack(&ss, NULL) != 0)
+            return GHAL_ERR_HOST;
+    }
+    fault_handler = fn;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = fault_entry;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    for (i = 0; i < sizeof fault_signals / sizeof fault_signals[0]; i++)
+        if (sigaction(fault_signals[i], &sa, NULL) != 0)
+            return GHAL_ERR_HOST;
+    return GHAL_OK;
 }
 
 /* ------------------------------------------------------------------ */
