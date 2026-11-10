@@ -884,7 +884,7 @@ void DisplayGeosFile(FILE *f)
           DisplayVMFile(f);             // Dateispezifische Informationen
 }
 
-void main(int argc,char *argv[])
+int main(int argc,char *argv[])
 {
         FILE *f;
         char path[_MAX_PATH],drive[_MAX_DRIVE],dir[_MAX_DIR],
@@ -898,7 +898,12 @@ void main(int argc,char *argv[])
         init_disasm();                  // initialize disassenbly module
 
         i=1;
+#ifdef _LINUX
+        /* '/' starts absolute paths on Linux, so only accept '-' options */
+        while(argc>i && argv[i][0]=='-') {
+#else
         while(argc>i && (argv[i][0]=='/' || argv[i][0]=='-')) {
+#endif
           switch(toupper(argv[i][1])) {
           case 'L':
             dolist=1;                   // '/L'-Switch: Listing
@@ -931,9 +936,15 @@ void main(int argc,char *argv[])
         }
 
         _splitpath(argv[i],drive,dir,name,ext);
+#ifndef _LINUX                         /* Linux file names are case-sensitive */
         strupr(name); strupr(ext);      // Dateinamen in Großbuchstaben
+#endif
         if(*ext=='\0')                  // Extension fehlt: GEO annehmen
+#ifdef _LINUX
+          strcpy(ext,".geo");
+#else
           strcpy(ext,".GEO");
+#endif
         _makepath(path,drive,dir,name,ext);
 
         if(!(f=fopen(path,"rb"))) {     // Datei zum Lesen öffnen
@@ -954,4 +965,5 @@ void main(int argc,char *argv[])
         fclose(f);                      // Datei schließen
 
         deinit_disasm();                // release data used by disassembly mod
+        return 0;
 }

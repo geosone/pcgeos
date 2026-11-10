@@ -404,7 +404,12 @@ main(int argc, char **argv)
 	}
 
 	while (!protof || !revf) {
-	    fscanf(fp, "%s", type);
+	    if (fscanf(fp, "%99s", type) != 1) {
+		fprintf(stderr, "%s: no %s%s entry found\n", revFile,
+			protof ? "revision" : "protocol",
+			*branch ? " for this branch" : "");
+		exit(1);
+	    }
 
 	    /* if we find the token P and we are looking for the
 	     * protocol, AND the branch matches what the user

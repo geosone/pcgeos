@@ -1223,7 +1223,7 @@ Fatal (char *fmt, ...)
 
     va_start(ap,fmt);
 
-#if defined(unix) || defined(_WIN32)
+#if defined(unix) || defined(_WIN32) || defined(_LINUX)
     if (jobsRunning) {
 	Job_Wait();
     }
@@ -1285,7 +1285,7 @@ Punt (char* fmt, ...)
 void
 DieHorribly(void)
 {
-#if defined(unix) || defined(_WIN32)
+#if defined(unix) || defined(_WIN32) || defined(_LINUX)
     if (jobsRunning) {
 	Job_AbortAll ();
     }
@@ -1295,11 +1295,11 @@ DieHorribly(void)
 	Targ_PrintGraph(2);
     }
 
-#if defined(unix)
-    exit (2);			/* Not 1, so -q can distinguish error */
-#elif defined(_WIN32)
+#if defined(_WIN32)
     ExitProcess(2);
-#endif /* defined(unix) */
+#else
+    exit (2);			/* Not 1, so -q can distinguish error */
+#endif
 }
 
 /*

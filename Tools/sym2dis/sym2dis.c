@@ -10,7 +10,17 @@ int main(int argc,char *argv[])
         unsigned short seg,seg_valid;
         unsigned short ofs;
         int nread = 0;
-        FILE *f = fopen(argv[1], "r");
+        FILE *f;
+
+        if (argc != 2) {
+          fprintf(stderr, "usage: %s <symfile>\n", argv[0]);
+          return 1;
+        }
+        f = fopen(argv[1], "r");
+        if (f == NULL) {
+          perror(argv[1]);
+          return 1;
+        }
 
         seg=0;                          // No segment read yet
         seg_valid=0;
