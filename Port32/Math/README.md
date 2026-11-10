@@ -4,9 +4,14 @@ Messpunkt für die Frage, wie aufwendig eine Übersetzung des PC/GEOS-Assemblers
 nach C ist. Übersetzt wurde `Library/Math/Float/floatFloatToAscii.asm` (die
 Zahl→Text-Formatierung, die u. a. GeoCalc, Chart und Parse nutzen).
 
-```
-make test      # baut für x86-64 und i386 (-m32) und führt beide Tests aus
-./test_ffa -v  # alle Testfälle mit Ausgabe
+Gebaut wird mit CMake über `Port32/CMakeLists.txt` (Build-Verzeichnis außerhalb des Quellbaums):
+
+```sh
+cmake -S Port32 -B build -G Ninja && cmake --build build && ctest --test-dir build
+cmake -S Port32 -B build32 -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=Port32/cmake/toolchain-linux-i686.cmake
+cmake --build build32 && ctest --test-dir build32
+build/Math/test_ffa -v   # alle Testfälle mit Ausgabe
 ```
 
 ## Dateien

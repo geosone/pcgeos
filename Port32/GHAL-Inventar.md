@@ -1,0 +1,1248 @@
+# GHAL-Inventar: direkte Host-Kontakte
+
+Erzeugt von `Port32/tools/ghal_inventory.py` auf `ghal (fce286470, Basis 665-protected-mode-2026)`.
+Kommentare (`;`, `COMMENT x…x`, C-Kommentare) sind ausgenommen; nicht gescannt: `.git/`, `DOSAppl/`, `FontData/`, `Installed/`, `Port32/`, `TechDocs/`, `Tools/`, `bin/`.
+
+## Kategorien
+
+| Kategorie | Bedeutung | GHAL-Ziel |
+|---|---|---|
+| `dos_int21` | DOS-Aufrufe (`int 21h`, `DOSUtilInt21`, `FileInt21`, `intdos`) | `ghal_fs`/`ghal_boot`, bzw. IFS/DOS-Treiber |
+| `dos_other` | andere DOS-Interrupts (20h, 22h–2Eh, Multiplex 2Fh) | `ghal_boot`/`ghal_exit`/Treiber |
+| `dpmi` | DPMI `int 31h` | `ghal_mem`/`ghal_irq` (dos32/pm16) |
+| `bios` | BIOS 10h–1Fh (`VIDEO_BIOS` …) | Treiber bzw. `ghal_display`/`ghal_time` |
+| `ems_xms` | EMS/XMS | entfällt (Swap) bzw. `ghal_mem` |
+| `port_io` | Port-I/O `in`/`out` | nur in DOS-Treibern; Kernel → `ghal_time`/`ghal_irq` |
+| `irq_vector` | Interrupt-/Exception-Vektoren | `ghal_irq` |
+| `int_flag` | `INT_OFF`/`INT_ON`/`cli`/`sti` | `ghal_crit` |
+| `bios_lock` | `SysLockBIOS`/DOS-Sperre | `ghal_hostlock` |
+| `gpmi` | GPMI (PM-Branch) | DOS-Seite von `ghal_mem`/`ghal_irq` |
+| `hostif` | HostIf (Basebox) | Host-Dienste der GHAL |
+| `breakpoint` | `int 3` | `ghal_log` (Breakpoint) |
+| `inline_asm` | C: Inline-Assembler / `#pragma aux` | nach C bzw. GHAL |
+
+## Gesamt
+
+| | `bios` | `bios_lock` | `breakpoint` | `dos_int21` | `dos_other` | `dpmi` | `ems_xms` | `gpmi` | `hostif` | `inline_asm` | `int_flag` | `irq_vector` | `port_io` | Summe |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **alle** | 195 | 231 | 5 | 646 | 53 | 73 | 34 | 474 | 73 | 87 | 604 | 102 | 954 | 3531 |
+
+## GHAL-Kern: Kernel und Loader
+
+| Bereich | `bios` | `bios_lock` | `breakpoint` | `dos_int21` | `dos_other` | `dpmi` | `ems_xms` | `gpmi` | `hostif` | `inline_asm` | `int_flag` | `irq_vector` | `port_io` | Summe |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `Loader32` | 4 |  |  | 47 | 1 | 71 |  | 204 |  |  | 4 | 13 | 7 | 351 |
+| `Loader` | 20 |  |  | 57 |  |  | 11 |  |  |  | 10 |  | 94 | 192 |
+| `Library/Kernel/Heap` |  | 2 | 1 |  |  |  |  | 85 |  |  | 45 | 6 |  | 139 |
+| `Library/Kernel/Sys` | 3 | 18 | 2 | 7 | 5 |  | 7 | 19 |  |  | 17 | 10 | 38 | 126 |
+| `Library/Kernel/Timer` | 7 | 2 |  | 8 |  |  |  | 7 |  |  | 37 |  | 16 | 77 |
+| `Library/Kernel/FSD` |  | 2 |  | 31 | 2 |  |  | 6 |  |  | 4 | 8 |  | 53 |
+| `Library/Kernel/Thread` | 1 | 4 |  |  |  |  | 7 |  |  |  | 23 | 6 | 6 | 47 |
+| `Library/Kernel` |  | 2 |  |  |  |  | 1 | 13 |  |  | 11 | 2 | 17 | 46 |
+| `Library/Kernel/VMem` |  |  |  |  |  |  |  |  |  |  | 31 |  |  | 31 |
+| `Library/Kernel/Geodes` |  |  |  |  |  |  |  | 2 |  |  | 27 |  |  | 29 |
+| `Library/Kernel/Win` |  |  |  |  |  |  |  |  |  |  | 22 |  |  | 22 |
+| `Library/Kernel/Boot` | 4 |  | 1 | 4 | 1 |  | 1 |  |  |  | 5 |  | 2 | 18 |
+| `Library/Kernel/Format` | 4 |  |  | 6 | 1 |  |  |  |  |  |  |  |  | 11 |
+| `Library/Kernel/Graphics` | 3 |  |  |  |  |  |  |  |  |  | 5 |  |  | 8 |
+| `Library/Kernel/Object` |  |  |  |  |  |  |  |  |  |  | 8 |  |  | 8 |
+| `Library/Kernel/Diskcopy` |  |  |  | 3 |  |  |  |  |  |  | 2 |  |  | 5 |
+| `Library/Kernel/Dosappl` |  | 3 |  | 1 |  |  |  |  |  |  |  |  |  | 4 |
+| `Library/Kernel/IM` |  |  |  |  |  |  |  |  |  |  | 4 |  |  | 4 |
+| `Library/Kernel/Drive` |  | 2 |  |  |  |  |  |  |  |  |  |  |  | 2 |
+| `Library/Kernel/File` |  |  |  | 2 |  |  |  |  |  |  |  |  |  | 2 |
+
+## Treiber
+
+| Bereich | `bios` | `bios_lock` | `breakpoint` | `dos_int21` | `dos_other` | `dpmi` | `ems_xms` | `gpmi` | `hostif` | `inline_asm` | `int_flag` | `irq_vector` | `port_io` | Summe |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `Driver/IFS/DOS` | 10 | 72 |  | 420 | 23 |  |  |  | 5 |  | 7 | 17 |  | 554 |
+| `Driver/Video/VGAlike` | 84 |  |  |  |  |  |  |  | 3 |  | 2 |  | 219 | 308 |
+| `Driver/Stream/Serial` |  |  |  |  |  |  |  |  |  |  | 34 | 2 | 99 | 135 |
+| `Driver/Keyboard` |  |  |  |  |  |  |  |  |  |  | 20 | 8 | 47 | 75 |
+| `Driver/Sound/BSD8ST` |  |  |  |  |  |  |  |  |  |  | 27 | 1 | 44 | 72 |
+| `Driver/Stream/Parallel` | 2 | 2 |  | 1 |  |  |  |  |  |  | 22 | 3 | 28 | 58 |
+| `Driver/Sound/BSD16` |  |  |  |  |  |  |  |  |  |  | 19 | 1 | 28 | 48 |
+| `Driver/Socket/EtherODI` |  | 22 |  |  |  |  |  |  |  |  | 17 |  |  | 39 |
+| `Driver/Video/Dumb` | 9 |  |  |  |  |  |  |  |  |  | 2 |  | 28 | 39 |
+| `Driver/Printer/PrintCom` |  | 2 |  |  |  |  |  |  |  |  | 8 |  | 24 | 34 |
+| `Driver/Sound/SoundBlaster` |  |  |  |  |  |  |  |  |  |  | 12 | 1 | 21 | 34 |
+| `Driver/Task/TaskMax` |  | 14 |  | 6 | 9 |  | 1 |  |  |  | 4 |  |  | 34 |
+| `Driver/Swap/EMS` |  |  |  | 3 |  |  | 4 |  |  |  | 19 | 2 |  | 28 |
+| `Driver/Video/EGA` |  |  |  |  |  |  |  |  |  |  |  |  | 27 | 27 |
+| `Driver/Power/APMCommon` |  | 20 |  |  |  |  |  |  |  |  | 6 |  |  | 26 |
+| `Driver/Mouse/AlpsPen` |  |  |  |  |  |  |  |  |  |  | 2 | 2 | 21 | 25 |
+| `Driver/Mouse/MSBus` |  |  |  |  |  |  |  |  |  |  | 6 |  | 19 | 25 |
+| `Driver/Mouse/NikeMouse` |  |  |  |  |  |  |  |  |  |  | 4 | 2 | 19 | 25 |
+| `Driver/Video/VidCom` | 3 |  |  |  |  |  |  |  |  |  | 7 |  | 13 | 23 |
+| `Driver/Mouse/LogiBus` |  |  |  |  |  |  |  |  |  |  | 6 |  | 16 | 22 |
+| `Driver/Mouse/imps2` | 18 | 4 |  |  |  |  |  |  |  |  |  |  |  | 22 |
+| `Driver/Breadbox/X10drvr` |  |  |  |  |  |  |  |  |  |  | 4 |  | 12 | 16 |
+| `Driver/Task/NonTS` |  |  |  | 16 |  |  |  |  |  |  |  |  |  | 16 |
+| `Driver/Net/NW` |  | 8 |  | 7 |  |  |  |  |  |  |  |  |  | 15 |
+| `Driver/Socket/EtherPKT` |  | 2 |  |  |  |  |  |  |  |  | 13 |  |  | 15 |
+| `Driver/Swap/XMS` |  |  |  | 11 | 2 |  |  |  |  |  |  |  |  | 13 |
+| `Driver/IFS/GEOS` |  | 8 |  | 2 |  |  |  |  |  |  |  |  | 2 | 12 |
+| `Driver/Mouse/PS2` | 10 | 2 |  |  |  |  |  |  |  |  |  |  |  | 12 |
+| `Driver/DMA/DOSReal` |  |  |  |  |  |  |  |  |  |  |  |  | 11 | 11 |
+| `Driver/Mouse/CandTPen` |  |  |  |  |  |  |  |  |  |  |  | 2 | 9 | 11 |
+| `Driver/Socket/HstTCPIP` |  |  |  |  |  |  |  |  | 10 |  |  |  |  | 10 |
+| `Driver/Stream` |  |  |  |  |  |  |  |  |  |  | 10 |  |  | 10 |
+| `Driver/Power/APM10` |  | 9 |  |  |  |  |  |  |  |  |  |  |  | 9 |
+| `Driver/Power/APM11` |  | 9 |  |  |  |  |  |  |  |  |  |  |  | 9 |
+| `Driver/Font/TrueType` |  |  |  |  |  |  |  |  |  | 7 |  |  |  | 7 |
+| `Driver/Sound/Tandy` |  |  |  |  |  |  |  |  |  |  |  |  | 6 | 6 |
+| `Driver/Mouse/Pqpen` |  |  |  |  |  |  |  |  |  |  |  | 2 | 3 | 5 |
+| `Driver/Printer/DotMatrix` | 3 |  |  |  |  |  |  |  |  |  |  |  | 2 | 5 |
+| `Driver/Task/BNF` | 3 | 2 |  |  |  |  |  |  |  |  |  |  |  | 5 |
+| `Driver/Task/DOS5` |  |  |  | 2 | 1 |  |  |  |  |  |  | 2 |  | 5 |
+| `Driver/IFS/HostFS` |  |  |  |  |  |  |  |  | 4 |  |  |  |  | 4 |
+| `Driver/Mouse/CasioPen` |  | 4 |  |  |  |  |  |  |  |  |  |  |  | 4 |
+| `Driver/Swap/Disk` |  |  |  | 4 |  |  |  |  |  |  |  |  |  | 4 |
+| `Driver/Mouse/MSys` |  |  |  |  |  |  |  |  |  |  | 2 |  | 1 | 3 |
+| `Driver/Mouse/Gazelle` |  |  |  |  |  |  |  |  |  |  | 2 |  |  | 2 |
+| `Driver/Mouse/GridPen` |  |  |  |  |  |  |  |  |  |  |  | 2 |  | 2 |
+| `Driver/Mouse/LogiSer` |  |  |  |  |  |  |  |  |  |  | 2 |  |  | 2 |
+| `Driver/Mouse/MSSer` |  |  |  |  |  |  |  |  |  |  | 2 |  |  | 2 |
+| `Driver/Mouse/Scripen` |  |  |  |  |  |  |  |  |  |  | 2 |  |  | 2 |
+| `Driver/Power/hltpwr` |  |  |  |  | 1 |  |  |  |  |  | 1 |  |  | 2 |
+| `Driver/Sound/Standard` |  |  |  |  |  |  |  |  |  |  |  |  | 2 | 2 |
+| `Driver/Stream/Filestr` |  |  |  |  |  |  |  |  |  |  | 2 |  |  | 2 |
+| `Driver/Swap/ExtMem` | 2 |  |  |  |  |  |  |  |  |  |  |  |  | 2 |
+| `Driver/Socket/EtherCom` |  |  |  |  |  |  |  |  |  |  | 1 |  |  | 1 |
+| `Driver/Socket/EtherLink` |  |  |  |  |  |  |  |  |  |  | 1 |  |  | 1 |
+| `Driver/Stream/IrCOMM` |  |  |  |  |  |  |  |  |  |  | 1 |  |  | 1 |
+
+## Libraries, Apps, Include
+
+| Bereich | `bios` | `bios_lock` | `breakpoint` | `dos_int21` | `dos_other` | `dpmi` | `ems_xms` | `gpmi` | `hostif` | `inline_asm` | `int_flag` | `irq_vector` | `port_io` | Summe |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `Include` |  | 2 |  |  |  |  |  | 138 | 4 |  | 10 | 4 | 12 | 170 |
+| `Library/GDI` |  |  |  |  |  |  |  |  |  |  | 15 | 2 | 28 | 45 |
+| `Library/Breadbox` |  |  |  |  | 5 |  |  |  |  | 21 | 4 |  | 12 | 42 |
+| `Library/Sound` |  |  |  |  |  |  |  |  |  |  | 42 |  |  | 42 |
+| `CInclude` |  | 2 |  |  |  |  |  |  | 2 | 33 |  |  |  | 37 |
+| `Library/HostIf` |  |  |  |  |  | 2 |  |  | 15 |  | 5 | 2 | 13 | 37 |
+| `Library/SSL` |  |  |  |  |  |  |  |  | 30 | 4 |  |  |  | 34 |
+| `Appl/Breadbox` | 2 |  |  |  |  |  |  |  |  | 18 | 2 |  | 1 | 23 |
+| `Library/User` | 2 |  |  |  |  |  |  |  |  |  |  |  | 7 | 9 |
+| `Library/SpecUI` |  | 2 |  | 3 | 1 |  |  |  |  |  |  |  |  | 6 |
+| `Appl/Startup` |  | 2 |  |  |  |  |  |  |  |  | 2 |  |  | 4 |
+| `Library/Math` |  |  |  |  |  |  |  |  |  |  | 2 | 2 |  | 4 |
+| `Appl/GPCMail` |  | 2 |  | 1 |  |  |  |  |  |  |  |  |  | 3 |
+| `Appl/Preferences` | 1 |  |  | 2 |  |  |  |  |  |  |  |  |  | 3 |
+| `Library/CDRom` |  | 2 |  |  | 1 |  |  |  |  |  |  |  |  | 3 |
+| `Appl/IDialup` |  |  |  |  |  |  |  |  |  | 2 |  |  |  | 2 |
+| `Appl/SDK_C` |  |  |  |  |  |  |  |  |  | 2 |  |  |  | 2 |
+| `Library/ConView` |  | 2 |  |  |  |  |  |  |  |  |  |  |  | 2 |
+| `Library/Pref` |  |  |  |  |  |  | 2 |  |  |  |  |  |  | 2 |
+| `Library/Swap` |  | 2 |  |  |  |  |  |  |  |  |  |  |  | 2 |
+| `Appl/FileMgrs` |  |  |  | 1 |  |  |  |  |  |  |  |  |  | 1 |
+| `Appl/FileMgrs2` |  |  |  | 1 |  |  |  |  |  |  |  |  |  | 1 |
+| `Appl/Test` |  |  | 1 |  |  |  |  |  |  |  |  |  |  | 1 |
+
+## Einzelstellen im GHAL-Kern (Kernel, Loader, Loader32)
+
+Ohne `int_flag` (zu zahlreich; siehe Tabelle). Format: `Datei:Zeile` Code.
+
+
+**Library/Kernel – `bios_lock`**
+
+- `Library/Kernel/kernelGlobal.def:683` `global SysLockBIOSFar:far`
+- `Library/Kernel/kernelGlobal.def:684` `global SysUnlockBIOSFar:far`
+
+**Library/Kernel – `ems_xms`**
+
+- `Library/Kernel/kernelMacro.def:1482` `int	EMM_INT`
+
+**Library/Kernel – `gpmi`**
+
+- `Library/Kernel/kernelGlobal.def:317` `global GPMIMapRealSegment:near`
+- `Library/Kernel/kernelGlobal.def:319` `global GPMIAliasFar:far`
+- `Library/Kernel/kernelGlobal.def:320` `global GPMIFreeAliasFar:far`
+- `Library/Kernel/kernelGlobal.def:321` `global GPMIRealModeCallbackFar:far`
+- `Library/Kernel/kernelGlobal.def:322` `global GPMIFreeRealModeCallbackFar:far`
+- `Library/Kernel/kernelGlobal.def:323` `global GPMISetInterruptHandlerFar:far`
+- `Library/Kernel/kernelGlobal.def:324` `global GPMIGetInterruptHandlerFar:far`
+- `Library/Kernel/kernelGlobal.def:325` `global GPMIConvertToCodeBlockFar:far`
+- `Library/Kernel/kernelGlobal.def:326` `global GPMIRealInterruptFar:far`
+- `Library/Kernel/kernelGlobal.def:327` `global GPMIAllocDOSBlockFar:far`
+- `Library/Kernel/kernelGlobal.def:328` `global GPMIFreeDOSBlockFar:far`
+- `Library/Kernel/kernelGlobal.def:329` `global GPMISelectorGetLimitFar:far`
+- `Library/Kernel/kernelGlobal.def:331` `global GPMIGetInfoFar:far`
+
+**Library/Kernel – `irq_vector`**
+
+- `Library/Kernel/kernelResource.def:347` `global	SysCatchInterrupt:far`
+- `Library/Kernel/kernelResource.def:356` `global	SysResetInterrupt:far`
+
+**Library/Kernel – `port_io`**
+
+- `Library/Kernel/kernelMacro.def:1619` `in	al, ELAN_INDEX`
+- `Library/Kernel/kernelMacro.def:1624` `out	ELAN_INDEX, al`
+- `Library/Kernel/kernelMacro.def:1625` `in	al, ELAN_DATA`
+- `Library/Kernel/kernelMacro.def:1630` `out	ELAN_DATA, al`
+- `Library/Kernel/kernelMacro.def:1676` `out	ELAN_INDEX, al`
+- `Library/Kernel/kernelMacro.def:1677` `in	al, ELAN_DATA`
+- `Library/Kernel/kernelMacro.def:1680` `out	ELAN_DATA, al`
+- `Library/Kernel/kernelMacro.def:1687` `out	ELAN_INDEX, al`
+- `Library/Kernel/kernelMacro.def:1688` `in	al, ELAN_DATA`
+- `Library/Kernel/kernelMacro.def:1690` `out	ELAN_DATA, al`
+- `Library/Kernel/kernelMacro.def:1695` `out	ELAN_INDEX, al`
+- `Library/Kernel/kernelMacro.def:1710` `in	al, VG230_ADDR_REGISTER`
+- `Library/Kernel/kernelMacro.def:1714` `out	VG230_ADDR_REGISTER, al`
+- `Library/Kernel/kernelMacro.def:1716` `out	VG230_DATA_REGISTER, ax`
+- `Library/Kernel/kernelMacro.def:1724` `out	VG230_ADDR_REGISTER, al`
+- `Library/Kernel/kernelMacro.def:1727` `out	VG230_DATA_REGISTER, ax`
+- `Library/Kernel/kernelMacro.def:1734` `out	VG230_ADDR_REGISTER, al`
+
+**Library/Kernel/Boot – `bios`**
+
+- `Library/Kernel/Boot/bootBoot.asm:1326` `int	19h`
+- `Library/Kernel/Boot/bootBoot.asm:1499` `int	VIDEO_BIOS`
+- `Library/Kernel/Boot/bootInitfile.asm:851` `int	15h`
+- `Library/Kernel/Boot/bootLog.asm:434` `int	10h`
+
+**Library/Kernel/Boot – `breakpoint`**
+
+- `Library/Kernel/Boot/bootBoot.asm:1004` `int	3`
+
+**Library/Kernel/Boot – `dos_int21`**
+
+- `Library/Kernel/Boot/bootBoot.asm:1175` `int	21h`
+- `Library/Kernel/Boot/bootBoot.asm:1279` `int	21h`
+- `Library/Kernel/Boot/bootBoot.asm:1323` `int	21h`
+- `Library/Kernel/Boot/bootBoot.asm:1386` `int	21h`
+
+**Library/Kernel/Boot – `dos_other`**
+
+- `Library/Kernel/Boot/bootInitfile.asm:804` `int	2fh`
+
+**Library/Kernel/Boot – `ems_xms`**
+
+- `Library/Kernel/Boot/bootInitfile.asm:748` `int	67h`
+
+**Library/Kernel/Boot – `port_io`**
+
+- `Library/Kernel/Boot/bootBoot.asm:1310` `in	al, 64h`
+- `Library/Kernel/Boot/bootBoot.asm:1314` `out	64h, al`
+
+**Library/Kernel/Diskcopy – `dos_int21`**
+
+- `Library/Kernel/Diskcopy/diskcopyHigh.asm:1524` `int	21h`
+- `Library/Kernel/Diskcopy/diskcopyIoctl.asm:503` `call	FileInt21`
+- `Library/Kernel/Diskcopy/diskcopyIoctl.asm:554` `call	FileInt21`
+
+**Library/Kernel/Dosappl – `bios_lock`**
+
+- `Library/Kernel/Dosappl/dosapplMain.asm:1860` `call	SysLockBIOSFar`
+- `Library/Kernel/Dosappl/dosapplMain.asm:1915` `call	SysUnlockBIOSFar`
+- `Library/Kernel/Dosappl/dosapplMain.asm:2027` `call	SysUnlockBIOSFar`
+
+**Library/Kernel/Dosappl – `dos_int21`**
+
+- `Library/Kernel/Dosappl/dosapplMain.asm:1561` `int	21h`
+
+**Library/Kernel/Drive – `bios_lock`**
+
+- `Library/Kernel/Drive/driveLow.asm:118` `call	LockDOS`
+- `Library/Kernel/Drive/driveLow.asm:142` `call	UnlockDOS`
+
+**Library/Kernel/FSD – `bios_lock`**
+
+- `Library/Kernel/FSD/fsdFile.asm:352` `call	SysLockBIOSFar`
+- `Library/Kernel/FSD/fsdFile.asm:414` `call	SysUnlockBIOSFar`
+
+**Library/Kernel/FSD – `dos_int21`**
+
+- `Library/Kernel/FSD/fsdInit.asm:184` `int	21h`
+- `Library/Kernel/FSD/fsdInit.asm:195` `int	21h`
+- `Library/Kernel/FSD/fsdInit.asm:233` `int	21h`
+- `Library/Kernel/FSD/fsdInit.asm:574` `call	FileInt21`
+- `Library/Kernel/FSD/fsdSkeleton.asm:508` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:514` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:586` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:651` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1017` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1151` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1171` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1179` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1208` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1271` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1295` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1306` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1532` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1548` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1570` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1575` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1580` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1597` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1609` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1622` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1630` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1642` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1676` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1869` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1882` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:1894` `int	21h`
+- `Library/Kernel/FSD/fsdSkeleton.asm:2018` `int	21h`
+
+**Library/Kernel/FSD – `dos_other`**
+
+- `Library/Kernel/FSD/fsdInit.asm:630` `int	2fh`
+- `Library/Kernel/FSD/fsdInit.asm:683` `int	2fh`
+
+**Library/Kernel/FSD – `gpmi`**
+
+- `Library/Kernel/FSD/fsdInit.asm:159` `call	GPMIAliasFar`
+- `Library/Kernel/FSD/fsdInit.asm:168` `call	GPMIFreeAliasFar`
+- `Library/Kernel/FSD/fsdInit.asm:1147` `call	GPMIAliasFar`
+- `Library/Kernel/FSD/fsdInit.asm:1156` `call	GPMIFreeAliasFar`
+- `Library/Kernel/FSD/fsdInit.asm:1282` `call	GPMIAliasFar`
+- `Library/Kernel/FSD/fsdInit.asm:1289` `call	GPMIFreeAliasFar`
+
+**Library/Kernel/FSD – `irq_vector`**
+
+- `Library/Kernel/FSD/fsdInit.asm:165` `call	SysCatchInterrupt`
+- `Library/Kernel/FSD/fsdInit.asm:175` `call	SysCatchInterrupt`
+- `Library/Kernel/FSD/fsdInit.asm:214` `call	SysCatchInterrupt`
+- `Library/Kernel/FSD/fsdInit.asm:221` `call	SysResetInterrupt`
+- `Library/Kernel/FSD/fsdInit.asm:1153` `call	SysCatchInterrupt`
+- `Library/Kernel/FSD/fsdInit.asm:1163` `call	SysCatchInterrupt`
+- `Library/Kernel/FSD/fsdInit.asm:1286` `call	SysResetInterrupt`
+- `Library/Kernel/FSD/fsdInit.asm:1296` `call	SysResetInterrupt`
+
+**Library/Kernel/File – `dos_int21`**
+
+- `Library/Kernel/File/filePath.asm:250` `int	21h`
+- `Library/Kernel/File/filePath.asm:254` `int	21h`
+
+**Library/Kernel/Format – `bios`**
+
+- `Library/Kernel/Format/format.asm:311` `int	13h`
+- `Library/Kernel/Format/formatFormat.asm:119` `int	0x10`
+- `Library/Kernel/Format/formatVerify.asm:159` `int	13h`
+- `Library/Kernel/Format/formatVerify.asm:166` `int	13h`
+
+**Library/Kernel/Format – `dos_int21`**
+
+- `Library/Kernel/Format/format.asm:121` `call	FileInt21`
+- `Library/Kernel/Format/formatInit.asm:219` `call	FileInt21`
+- `Library/Kernel/Format/formatIoctl.asm:369` `call	FileInt21`
+- `Library/Kernel/Format/formatIoctl.asm:420` `call	FileInt21`
+- `Library/Kernel/Format/formatLow.asm:190` `call	FileInt21`
+- `Library/Kernel/Format/formatVerify.asm:74` `int	21h`
+
+**Library/Kernel/Format – `dos_other`**
+
+- `Library/Kernel/Format/formatVerify.asm:83` `int	25h`
+
+**Library/Kernel/Geodes – `gpmi`**
+
+- `Library/Kernel/Geodes/geodesInit.asm:160` `call	GPMISetInterruptHandlerFar`
+- `Library/Kernel/Geodes/geodesLoad.asm:3713` `call	GPMIConvertToCodeBlockFar`
+
+**Library/Kernel/Graphics – `bios`**
+
+- `Library/Kernel/Graphics/graphicsText.asm:330` `int	10h`
+- `Library/Kernel/Graphics/graphicsText.asm:338` `int	10h`
+- `Library/Kernel/Graphics/graphicsText.asm:340` `int	10h`
+
+**Library/Kernel/Heap – `bios_lock`**
+
+- `Library/Kernel/Heap/heapScrub.asm:104` `call	SysLockBIOS`
+- `Library/Kernel/Heap/heapScrub.asm:106` `call	SysUnlockBIOS`
+
+**Library/Kernel/Heap – `breakpoint`**
+
+- `Library/Kernel/Heap/heapHandle.asm:399` `int	3`
+
+**Library/Kernel/Heap – `gpmi`**
+
+- `Library/Kernel/Heap/heapCore.asm:2906` `GPMIAllocateBlock  proc    near`
+- `Library/Kernel/Heap/heapCore.asm:2914` `GPMIAllocateBlock       endp`
+- `Library/Kernel/Heap/heapCore.asm:2916` `GPMIAliasFar	proc	far`
+- `Library/Kernel/Heap/heapCore.asm:2919` `call	GPMIAlias`
+- `Library/Kernel/Heap/heapCore.asm:2922` `GPMIAliasFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:2924` `GPMIAlias       proc    near`
+- `Library/Kernel/Heap/heapCore.asm:2932` `GPMIAlias       endp`
+- `Library/Kernel/Heap/heapCore.asm:2934` `GPMIFreeAliasFar	proc	far`
+- `Library/Kernel/Heap/heapCore.asm:2937` `call	GPMIFreeAlias`
+- `Library/Kernel/Heap/heapCore.asm:2940` `GPMIFreeAliasFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:2942` `GPMIFreeAlias       proc    near`
+- `Library/Kernel/Heap/heapCore.asm:2950` `GPMIFreeAlias       endp`
+- `Library/Kernel/Heap/heapCore.asm:2952` `GPMIAccessRealSegment       proc    near`
+- `Library/Kernel/Heap/heapCore.asm:2960` `GPMIAccessRealSegment       endp`
+- `Library/Kernel/Heap/heapCore.asm:2962` `GPMIMapRealSegment       proc    near`
+- `Library/Kernel/Heap/heapCore.asm:2970` `GPMIMapRealSegment       endp`
+- `Library/Kernel/Heap/heapCore.asm:2972` `GPMIRealModeCallbackFar	proc	far`
+- `Library/Kernel/Heap/heapCore.asm:2981` `GPMIRealModeCallbackFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:2983` `GPMIFreeRealModeCallbackFar	proc	far`
+- `Library/Kernel/Heap/heapCore.asm:2986` `call	GPMIFreeRealModeCallback`
+- `Library/Kernel/Heap/heapCore.asm:2990` `GPMIFreeRealModeCallbackFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:2992` `GPMIFreeRealModeCallback       proc    near`
+- `Library/Kernel/Heap/heapCore.asm:3000` `GPMIFreeRealModeCallback       endp`
+- `Library/Kernel/Heap/heapCore.asm:3002` `GPMIResizeBlock	proc near`
+- `Library/Kernel/Heap/heapCore.asm:3010` `GPMIResizeBlock	endp`
+- `Library/Kernel/Heap/heapCore.asm:3012` `GPMIFreeBlock	proc near`
+- `Library/Kernel/Heap/heapCore.asm:3020` `GPMIFreeBlock	endp`
+- `Library/Kernel/Heap/heapCore.asm:3022` `GPMIConvertToCodeBlockFar	proc far`
+- `Library/Kernel/Heap/heapCore.asm:3023` `call	GPMIConvertToCodeBlock`
+- `Library/Kernel/Heap/heapCore.asm:3025` `GPMIConvertToCodeBlockFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:3027` `GPMIConvertToCodeBlock proc near`
+- `Library/Kernel/Heap/heapCore.asm:3035` `GPMIConvertToCodeBlock endp`
+- `Library/Kernel/Heap/heapCore.asm:3037` `GPMIGetInterruptHandlerFar	proc far`
+- `Library/Kernel/Heap/heapCore.asm:3040` `call	GPMIGetInterruptHandler`
+- `Library/Kernel/Heap/heapCore.asm:3043` `GPMIGetInterruptHandlerFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:3045` `GPMIGetInterruptHandler	proc near`
+- `Library/Kernel/Heap/heapCore.asm:3053` `GPMIGetInterruptHandler	endp`
+- `Library/Kernel/Heap/heapCore.asm:3055` `GPMISetInterruptHandlerFar	proc far`
+- `Library/Kernel/Heap/heapCore.asm:3058` `call	GPMISetInterruptHandler`
+- `Library/Kernel/Heap/heapCore.asm:3061` `GPMISetInterruptHandlerFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:3063` `GPMIRealInterrupt	proc near`
+- `Library/Kernel/Heap/heapCore.asm:3075` `GPMIRealInterrupt	endp`
+- `Library/Kernel/Heap/heapCore.asm:3077` `GPMIRealInterruptFar	proc far`
+- `Library/Kernel/Heap/heapCore.asm:3080` `call	GPMIRealInterrupt`
+- `Library/Kernel/Heap/heapCore.asm:3083` `GPMIRealInterruptFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:3090` `GPMIAllocateDOSBlock  proc    near`
+- `Library/Kernel/Heap/heapCore.asm:3098` `GPMIAllocateDOSBlock       endp`
+- `Library/Kernel/Heap/heapCore.asm:3100` `GPMIAllocDOSBlockFar	proc far`
+- `Library/Kernel/Heap/heapCore.asm:3103` `call	GPMIAllocateDOSBlock`
+- `Library/Kernel/Heap/heapCore.asm:3106` `GPMIAllocDOSBlockFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:3108` `GPMIFreeDOSBlock	proc near`
+- `Library/Kernel/Heap/heapCore.asm:3116` `GPMIFreeDOSBlock	endp`
+- `Library/Kernel/Heap/heapCore.asm:3118` `GPMIFreeDOSBlockFar	proc far`
+- `Library/Kernel/Heap/heapCore.asm:3121` `call	GPMIFreeDOSBlock`
+- `Library/Kernel/Heap/heapCore.asm:3124` `GPMIFreeDOSBlockFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:3127` `GPMISetInterruptHandler	proc near`
+- `Library/Kernel/Heap/heapCore.asm:3135` `GPMISetInterruptHandler	endp`
+- `Library/Kernel/Heap/heapCore.asm:3137` `GPMIIsSelector16Bit     proc near`
+- `Library/Kernel/Heap/heapCore.asm:3145` `GPMIIsSelector16Bit     endp`
+- `Library/Kernel/Heap/heapCore.asm:3147` `GPMISelectorGetLimitFar	proc far`
+- `Library/Kernel/Heap/heapCore.asm:3150` `call	GPMISelectorGetLimit`
+- `Library/Kernel/Heap/heapCore.asm:3153` `GPMISelectorGetLimitFar	endp`
+- `Library/Kernel/Heap/heapCore.asm:3155` `GPMISelectorGetLimit proc near`
+- `Library/Kernel/Heap/heapCore.asm:3163` `GPMISelectorGetLimit endp`
+- `Library/Kernel/Heap/heapCore.asm:3165` `GPMISelectorCheckLimits proc near`
+- `Library/Kernel/Heap/heapCore.asm:3173` `GPMISelectorCheckLimits endp`
+- `Library/Kernel/Heap/heapCore.asm:3175` `GPMIAllocateNotPresentBlock proc near`
+- `Library/Kernel/Heap/heapCore.asm:3183` `GPMIAllocateNotPresentBlock endp`
+- `Library/Kernel/Heap/heapCore.asm:3185` `GPMIMakePresent proc near`
+- `Library/Kernel/Heap/heapCore.asm:3193` `GPMIMakePresent endp`
+- `Library/Kernel/Heap/heapCore.asm:3195` `GPMIMakeNotPresent proc near`
+- `Library/Kernel/Heap/heapCore.asm:3203` `GPMIMakeNotPresent endp`
+- `Library/Kernel/Heap/heapCore.asm:3205` `GPMIGetInfoFar	proc far`
+- `Library/Kernel/Heap/heapCore.asm:3213` `GPMIGetInfoFar	endp`
+- `Library/Kernel/Heap/heapLow.asm:536` `call	GPMIAllocateNotPresentBlock`
+- `Library/Kernel/Heap/heapLow.asm:544` `call	GPMIConvertToCodeBlock`
+- `Library/Kernel/Heap/heapLow.asm:559` `call	GPMIConvertToCodeBlock`
+- `Library/Kernel/Heap/heapLow.asm:787` `call    GPMIAllocateBlock`
+- `Library/Kernel/Heap/heapLow.asm:1241` `call	GPMIResizeBlock`
+- `Library/Kernel/Heap/heapLow.asm:1324` `call	GPMIMakePresent`
+- `Library/Kernel/Heap/heapLow.asm:1387` `call	GPMIConvertToCodeBlock`
+- `Library/Kernel/Heap/heapLow.asm:1580` `call	GPMIResizeBlock`
+- `Library/Kernel/Heap/heapLow.asm:1652` `call	GPMIMakePresent`
+- `Library/Kernel/Heap/heapLow.asm:1666` `call	GPMIConvertToCodeBlock`
+- `Library/Kernel/Heap/heapLow.asm:2264` `call	GPMIFreeBlock`
+
+**Library/Kernel/Heap – `irq_vector`**
+
+- `Library/Kernel/Heap/heapCore.asm:3040` `call	GPMIGetInterruptHandler`
+- `Library/Kernel/Heap/heapCore.asm:3045` `GPMIGetInterruptHandler	proc near`
+- `Library/Kernel/Heap/heapCore.asm:3053` `GPMIGetInterruptHandler	endp`
+- `Library/Kernel/Heap/heapCore.asm:3058` `call	GPMISetInterruptHandler`
+- `Library/Kernel/Heap/heapCore.asm:3127` `GPMISetInterruptHandler	proc near`
+- `Library/Kernel/Heap/heapCore.asm:3135` `GPMISetInterruptHandler	endp`
+
+**Library/Kernel/Sys – `bios`**
+
+- `Library/Kernel/Sys/sysError.asm:677` `int	16h`
+- `Library/Kernel/Sys/sysError.asm:683` `int	16h`
+- `Library/Kernel/Sys/sysInit.asm:222` `int	15h`
+
+**Library/Kernel/Sys – `bios_lock`**
+
+- `Library/Kernel/Sys/sysError.asm:599` `call	SysLockBIOS`
+- `Library/Kernel/Sys/sysError.asm:601` `call	SysUnlockBIOS`
+- `Library/Kernel/Sys/sysError.asm:616` `call	SysLockBIOS`
+- `Library/Kernel/Sys/sysError.asm:618` `call	SysUnlockBIOS`
+- `Library/Kernel/Sys/sysMisc.asm:1133` `SysLockBIOSFar	proc	far`
+- `Library/Kernel/Sys/sysMisc.asm:1134` `call	SysLockBIOS`
+- `Library/Kernel/Sys/sysMisc.asm:1136` `SysLockBIOSFar	endp`
+- `Library/Kernel/Sys/sysMisc.asm:1137` `public	SysLockBIOSFar`
+- `Library/Kernel/Sys/sysMisc.asm:1139` `SysLockBIOS	proc	near`
+- `Library/Kernel/Sys/sysMisc.asm:1143` `SysLockBIOS	endp`
+- `Library/Kernel/Sys/sysMisc.asm:1171` `SysUnlockBIOSFar proc	far`
+- `Library/Kernel/Sys/sysMisc.asm:1172` `call	SysUnlockBIOS`
+- `Library/Kernel/Sys/sysMisc.asm:1174` `SysUnlockBIOSFar endp`
+- `Library/Kernel/Sys/sysMisc.asm:1175` `public	SysUnlockBIOSFar`
+- `Library/Kernel/Sys/sysMisc.asm:1177` `SysUnlockBIOS	proc	near`
+- `Library/Kernel/Sys/sysMisc.asm:1189` `SysUnlockBIOS	endp`
+- `Library/Kernel/Sys/sysProfile.asm:1494` `call	SysLockBIOSFar`
+- `Library/Kernel/Sys/sysProfile.asm:1502` `call	SysUnlockBIOSFar`
+
+**Library/Kernel/Sys – `breakpoint`**
+
+- `Library/Kernel/Sys/sysInterrupt.asm:330` `int	3`
+- `Library/Kernel/Sys/sysInterrupt.asm:457` `int	3`
+
+**Library/Kernel/Sys – `dos_int21`**
+
+- `Library/Kernel/Sys/sysInit.asm:416` `int	21h`
+- `Library/Kernel/Sys/sysInit.asm:425` `int	21h`
+- `Library/Kernel/Sys/sysInit.asm:432` `int	21h`
+- `Library/Kernel/Sys/sysMisc.asm:1390` `int	21h`
+- `Library/Kernel/Sys/sysProfile.asm:428` `call	FileInt21`
+- `Library/Kernel/Sys/sysUtilWindow.asm:423` `int 21h`
+- `Library/Kernel/Sys/sysUtilWindow.asm:427` `int 21h`
+
+**Library/Kernel/Sys – `dos_other`**
+
+- `Library/Kernel/Sys/sysInit.asm:558` `int	2fh`
+- `Library/Kernel/Sys/sysProfile.asm:437` `int	2fh`
+- `Library/Kernel/Sys/sysProfile.asm:449` `int	2fh`
+- `Library/Kernel/Sys/sysUtilWindow.asm:694` `int	2fh`
+- `Library/Kernel/Sys/sysUtilWindow.asm:703` `int	2fh`
+
+**Library/Kernel/Sys – `ems_xms`**
+
+- `Library/Kernel/Sys/sysUtilWindow.asm:505` `int	EMM_INT`
+- `Library/Kernel/Sys/sysUtilWindow.asm:510` `int	EMM_INT`
+- `Library/Kernel/Sys/sysUtilWindow.asm:548` `int	EMM_INT`
+- `Library/Kernel/Sys/sysUtilWindow.asm:558` `int	EMM_INT`
+- `Library/Kernel/Sys/sysUtilWindow.asm:564` `int	EMM_INT`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1030` `int	EMM_INT`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2061` `int	EMM_INT`
+
+**Library/Kernel/Sys – `gpmi`**
+
+- `Library/Kernel/Sys/sysInit.asm:458` `call	GPMIAliasFar`
+- `Library/Kernel/Sys/sysInit.asm:535` `call	GPMIFreeAliasFar`
+- `Library/Kernel/Sys/sysInterrupt.asm:1062` `call	GPMIGetInterruptHandlerFar`
+- `Library/Kernel/Sys/sysInterrupt.asm:1069` `call	GPMISetInterruptHandlerFar`
+- `Library/Kernel/Sys/sysInterrupt.asm:1143` `call	GPMISetInterruptHandlerFar`
+- `Library/Kernel/Sys/sysInterrupt.asm:1341` `call	GPMIFreeAliasFar`
+- `Library/Kernel/Sys/sysInterrupt.asm:1388` `call	GPMIFreeAliasFar`
+- `Library/Kernel/Sys/sysInterrupt.asm:1435` `call	GPMIAliasFar`
+- `Library/Kernel/Sys/sysMisc.asm:2112` `call	GPMIMapRealSegment`
+- `Library/Kernel/Sys/sysMisc.asm:2183` `call	GPMIAliasFar`
+- `Library/Kernel/Sys/sysMisc.asm:2215` `call	GPMIFreeAliasFar`
+- `Library/Kernel/Sys/sysMisc.asm:2251` `call	GPMIRealModeCallbackFar`
+- `Library/Kernel/Sys/sysMisc.asm:2282` `call	GPMIFreeRealModeCallbackFar`
+- `Library/Kernel/Sys/sysMisc.asm:2324` `call	GPMIRealInterruptFar`
+- `Library/Kernel/Sys/sysMisc.asm:2360` `call	GPMIAllocDOSBlockFar`
+- `Library/Kernel/Sys/sysMisc.asm:2393` `call	GPMIFreeDOSBlockFar`
+- `Library/Kernel/Sys/sysMisc.asm:2436` `call	GPMISelectorGetLimitFar`
+- `Library/Kernel/Sys/sysStats.asm:344` `call	GPMIGetInfoFar`
+- `Library/Kernel/Sys/sysStats.asm:357` `call	GPMIGetInfoFar`
+
+**Library/Kernel/Sys – `irq_vector`**
+
+- `Library/Kernel/Sys/sysInterrupt.asm:1040` `SysCatchInterrupt proc	far`
+- `Library/Kernel/Sys/sysInterrupt.asm:1094` `SysCatchInterrupt endp`
+- `Library/Kernel/Sys/sysInterrupt.asm:1124` `SysResetInterrupt proc	far`
+- `Library/Kernel/Sys/sysInterrupt.asm:1168` `SysResetInterrupt endp`
+- `Library/Kernel/Sys/sysInterrupt.asm:1210` `mov	dx, offset SysCatchInterrupt`
+- `Library/Kernel/Sys/sysInterrupt.asm:1251` `mov	dx, offset SysResetInterrupt`
+- `Library/Kernel/Sys/sysInterrupt.asm:1323` `SysCatchDeviceInterrupt	proc	far`
+- `Library/Kernel/Sys/sysInterrupt.asm:1349` `SysCatchDeviceInterrupt	endp`
+- `Library/Kernel/Sys/sysInterrupt.asm:1376` `SysResetDeviceInterrupt	proc	far`
+- `Library/Kernel/Sys/sysInterrupt.asm:1405` `SysResetDeviceInterrupt	endp`
+
+**Library/Kernel/Sys – `port_io`**
+
+- `Library/Kernel/Sys/sysInterrupt.asm:327` `in	al, dx`
+- `Library/Kernel/Sys/sysInterrupt.asm:453` `in	al, dx`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1090` `out	SC400_CHIP_INDEX, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1091` `in	al, SC400_CHIP_DATA`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1093` `out	SC400_CHIP_DATA, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1099` `out	SC400_CHIP_INDEX, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1100` `in	al, SC400_CHIP_DATA`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1102` `out	SC400_CHIP_DATA, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1111` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1113` `in	al, dx`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1115` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1121` `out	SC400_CHIP_INDEX, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1122` `in	al, SC400_CHIP_DATA`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1125` `out	SC400_CHIP_DATA, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1147` `out	SC400_CHIP_INDEX, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1148` `in	al, SC400_CHIP_DATA`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1150` `out	SC400_CHIP_DATA, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1163` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1166` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1172` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1175` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1183` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1186` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1192` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:1195` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2019` `out	dx, ax`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2163` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2167` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2173` `out	dx, ax`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2176` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2183` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2185` `in	al, dx`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2195` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2197` `in	al, dx`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2202` `out	dx, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2297` `out	SC400_CHIP_INDEX, al`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2298` `in	al, SC400_CHIP_DATA`
+- `Library/Kernel/Sys/sysUtilWindow.asm:2300` `out	SC400_CHIP_DATA, al`
+
+**Library/Kernel/Thread – `bios`**
+
+- `Library/Kernel/Thread/threadProfile.asm:1509` `int	10h`
+
+**Library/Kernel/Thread – `bios_lock`**
+
+- `Library/Kernel/Thread/threadProfile.asm:93` `call	SysLockBIOSFar`
+- `Library/Kernel/Thread/threadProfile.asm:166` `call	SysUnlockBIOSFar`
+- `Library/Kernel/Thread/threadThread.asm:795` `call	SysLockBIOS`
+- `Library/Kernel/Thread/threadThread.asm:993` `call	SysUnlockBIOS`
+
+**Library/Kernel/Thread – `ems_xms`**
+
+- `Library/Kernel/Thread/threadProfile.asm:104` `int	EMM_INT`
+- `Library/Kernel/Thread/threadProfile.asm:111` `int	EMM_INT`
+- `Library/Kernel/Thread/threadProfile.asm:125` `int	EMM_INT`
+- `Library/Kernel/Thread/threadProfile.asm:133` `int	EMM_INT`
+- `Library/Kernel/Thread/threadProfile.asm:225` `int	EMM_INT`
+- `Library/Kernel/Thread/threadProfile.asm:1036` `int	EMM_INT`
+- `Library/Kernel/Thread/threadProfile.asm:1072` `int	EMM_INT`
+
+**Library/Kernel/Thread – `irq_vector`**
+
+- `Library/Kernel/Thread/threadException.asm:547` `call	SysResetInterrupt`
+- `Library/Kernel/Thread/threadInit.asm:102` `call	SysCatchInterrupt`
+- `Library/Kernel/Thread/threadProfile.asm:378` `call	SysCatchInterrupt`
+- `Library/Kernel/Thread/threadProfile.asm:424` `call	SysResetInterrupt`
+- `Library/Kernel/Thread/threadProfile.asm:1365` `call	SysCatchInterrupt`
+- `Library/Kernel/Thread/threadProfile.asm:1401` `call	SysResetInterrupt`
+
+**Library/Kernel/Thread – `port_io`**
+
+- `Library/Kernel/Thread/threadException.asm:258` `out	IC1_CMDPORT, al`
+- `Library/Kernel/Thread/threadException.asm:260` `in	al, IC1_CMDPORT`
+- `Library/Kernel/Thread/threadException.asm:266` `out	IC2_CMDPORT, al`
+- `Library/Kernel/Thread/threadException.asm:268` `in	al, IC2_CMDPORT`
+- `Library/Kernel/Thread/threadException.asm:465` `in	al, 61h`
+- `Library/Kernel/Thread/threadException.asm:468` `in	al, 62h`
+
+**Library/Kernel/Timer – `bios`**
+
+- `Library/Kernel/Timer/timerInit.asm:94` `int	TIMER_RTC_BIOS_INT`
+- `Library/Kernel/Timer/timerInt.asm:2806` `int	TIMER_RTC_BIOS_INT`
+- `Library/Kernel/Timer/timerInt.asm:2929` `int	TIMER_RTC_BIOS_INT`
+- `Library/Kernel/Timer/timerList.asm:807` `int	TIMER_RTC_BIOS_INT`
+- `Library/Kernel/Timer/timerList.asm:834` `int	TIMER_RTC_BIOS_INT`
+- `Library/Kernel/Timer/timerMisc.asm:518` `int	10h`
+- `Library/Kernel/Timer/timerMisc.asm:528` `int	10h`
+
+**Library/Kernel/Timer – `bios_lock`**
+
+- `Library/Kernel/Timer/timerMisc.asm:976` `call	SysLockBIOS`
+- `Library/Kernel/Timer/timerMisc.asm:988` `call	SysUnlockBIOS`
+
+**Library/Kernel/Timer – `dos_int21`**
+
+- `Library/Kernel/Timer/timerInit.asm:642` `int	21h`
+- `Library/Kernel/Timer/timerInit.asm:648` `int	21h`
+- `Library/Kernel/Timer/timerInt.asm:3063` `int	21h`
+- `Library/Kernel/Timer/timerInt.asm:3070` `int	21h`
+- `Library/Kernel/Timer/timerMisc.asm:161` `call	FileInt21`
+- `Library/Kernel/Timer/timerMisc.asm:167` `call	FileInt21`
+- `Library/Kernel/Timer/timerMisc.asm:978` `int	21h`
+- `Library/Kernel/Timer/timerMisc.asm:985` `int	21h`
+
+**Library/Kernel/Timer – `gpmi`**
+
+- `Library/Kernel/Timer/timerInit.asm:149` `call	GPMIGetInterruptHandlerFar`
+- `Library/Kernel/Timer/timerInit.asm:168` `call	GPMISetInterruptHandlerFar`
+- `Library/Kernel/Timer/timerInit.asm:190` `call	GPMISetInterruptHandlerFar`
+- `Library/Kernel/Timer/timerInit.asm:340` `call	GPMIAliasFar`
+- `Library/Kernel/Timer/timerInit.asm:360` `call	GPMIFreeAliasFar`
+- `Library/Kernel/Timer/timerInit.asm:513` `call	GPMIAliasFar`
+- `Library/Kernel/Timer/timerInit.asm:531` `call	GPMIFreeAliasFar`
+
+**Library/Kernel/Timer – `port_io`**
+
+- `Library/Kernel/Timer/timerInit.asm:241` `out	IC1_CMDPORT,al`
+- `Library/Kernel/Timer/timerInt.asm:427` `out	IC1_CMDPORT, al`
+- `Library/Kernel/Timer/timerInt.asm:552` `out	IC1_CMDPORT,al`
+- `Library/Kernel/Timer/timerInt.asm:1742` `out	TIMER_IO_COMMAND,al`
+- `Library/Kernel/Timer/timerInt.asm:1744` `in	al, TIMER_IO_0_LATCH`
+- `Library/Kernel/Timer/timerInt.asm:1747` `in	al, TIMER_IO_0_LATCH`
+- `Library/Kernel/Timer/timerInt.asm:1804` `out	TIMER_IO_COMMAND, al`
+- `Library/Kernel/Timer/timerInt.asm:1807` `out	TIMER_IO_0_LATCH, al`
+- `Library/Kernel/Timer/timerInt.asm:1810` `out	TIMER_IO_0_LATCH, al`
+- `Library/Kernel/Timer/timerMacro.def:47` `out	TIMER_IO_COMMAND, al`
+- `Library/Kernel/Timer/timerMacro.def:49` `out	TIMER_IO_0_LATCH, al`
+- `Library/Kernel/Timer/timerMacro.def:51` `out	TIMER_IO_0_LATCH, al`
+- `Library/Kernel/Timer/timerMisc.asm:810` `out	TIMER_RTC_INDEX_REGISTER, al`
+- `Library/Kernel/Timer/timerMisc.asm:811` `in	al, TIMER_RTC_DATA_REGISTER`
+- `Library/Kernel/Timer/timerMisc.asm:897` `out	TIMER_RTC_INDEX_REGISTER, al`
+- `Library/Kernel/Timer/timerMisc.asm:898` `in	al, TIMER_RTC_DATA_REGISTER`
+
+**Loader – `bios`**
+
+- `Loader/videoCGA.asm:111` `int	VIDEO_BIOS`
+- `Loader/videoDCGA.asm:101` `int	VIDEO_BIOS`
+- `Loader/videoDetect.asm:195` `int	VIDEO_BIOS`
+- `Loader/videoDetect.asm:536` `int	VIDEO_BIOS`
+- `Loader/videoDetect.asm:597` `int	10h`
+- `Loader/videoDetect.asm:658` `int	VIDEO_BIOS`
+- `Loader/videoDisplay.asm:535` `int	10h`
+- `Loader/videoDisplay.asm:671` `int	VIDEO_BIOS`
+- `Loader/videoEGA.asm:77` `int	VIDEO_BIOS`
+- `Loader/videoEGA.asm:215` `int	VIDEO_BIOS`
+- `Loader/videoEGA.asm:263` `int	VIDEO_BIOS`
+- `Loader/videoMCGA.asm:70` `int	VIDEO_BIOS`
+- `Loader/videoMCGA.asm:79` `int	VIDEO_BIOS`
+- `Loader/videoMCGA.asm:129` `int	VIDEO_BIOS`
+- `Loader/videoSVGA.asm:90` `int	VIDEO_BIOS`
+- `Loader/videoSVGA.asm:99` `int	VIDEO_BIOS`
+- `Loader/videoSVGA.asm:160` `int	VIDEO_BIOS`
+- `Loader/videoVGA.asm:77` `int	VIDEO_BIOS`
+- `Loader/videoVGA.asm:86` `int	VIDEO_BIOS`
+- `Loader/videoVGA.asm:146` `int	VIDEO_BIOS`
+
+**Loader – `dos_int21`**
+
+- `Loader/VGA/videoVGAImageLogo.asm:46` `int	21h`
+- `Loader/VGA/videoVGAImageLogo.asm:101` `int	21h`
+- `Loader/VGA/videoVGAImageLogo.asm:112` `int	21h`
+- `Loader/VGA/videoVGAImageLogo.asm:178` `int	21h`
+- `Loader/VGA/videoVGAImageLogo.asm:188` `int	21h`
+- `Loader/ini.asm:139` `int	21h`
+- `Loader/ini.asm:413` `int	21h`
+- `Loader/ini.asm:431` `int	21h`
+- `Loader/ini.asm:470` `int	21h`
+- `Loader/ini.asm:495` `int	21h`
+- `Loader/ini.asm:501` `int	21h`
+- `Loader/ini.asm:530` `int	21h`
+- `Loader/load.asm:170` `int	21h`
+- `Loader/load.asm:196` `int	21h`
+- `Loader/load.asm:599` `int	21h`
+- `Loader/load.asm:608` `int	21h`
+- `Loader/load.asm:664` `int	21h`
+- `Loader/load.asm:684` `int	21h`
+- `Loader/load.asm:692` `int	21h`
+- `Loader/load.asm:700` `int	21h`
+- `Loader/load.asm:714` `int	21h`
+- `Loader/load.asm:722` `int	21h`
+- `Loader/load.asm:912` `int	21h`
+- `Loader/load.asm:927` `int	21h`
+- `Loader/load.asm:1202` `int	21h`
+- `Loader/load.asm:1218` `int	21h`
+- `Loader/load.asm:1606` `int	21h`
+- `Loader/load.asm:1697` `int	21h`
+- `Loader/load.asm:1707` `int	21h`
+- `Loader/load.asm:1945` `int 21h`
+- `Loader/load.asm:1949` `int 21h`
+- `Loader/load.asm:2309` `int	21h`
+- `Loader/load.asm:2318` `int	21h`
+- `Loader/load.asm:2450` `int	21h`
+- `Loader/load.asm:2456` `int	21h`
+- `Loader/load.asm:2476` `int	21h`
+- `Loader/load.asm:2548` `int	21h`
+- `Loader/locate.asm:96` `int	21h`
+- `Loader/locate.asm:102` `int	21h`
+- `Loader/locate.asm:126` `int	21h`
+- `Loader/locate.asm:137` `int	21h`
+- `Loader/locate.asm:174` `int	21h`
+- `Loader/locate.asm:183` `int	21h`
+- `Loader/locate.asm:332` `int	21h`
+- `Loader/locate.asm:337` `int	21h`
+- `Loader/locate.asm:531` `int	21h`
+- `Loader/locate.asm:646` `int	21h`
+- `Loader/locate.asm:1031` `int	21h`
+- `Loader/main.asm:353` `int	21h`
+- `Loader/main.asm:476` `int	21h`
+- `Loader/strings.asm:74` `int	21h`
+- `Loader/strings.asm:87` `int	21h`
+- `Loader/strings.asm:101` `int	21h`
+- `Loader/strings.asm:226` `int	21h`
+- `Loader/strings.asm:241` `int	21h`
+- `Loader/strings.asm:248` `int	21h`
+- `Loader/strings.asm:358` `int	21h`
+
+**Loader – `ems_xms`**
+
+- `Loader/load.asm:2051` `int	EMM_INT`
+- `Loader/load.asm:2363` `int	EMM_INT`
+- `Loader/load.asm:2368` `int	EMM_INT`
+- `Loader/load.asm:2401` `int	EMM_INT`
+- `Loader/load.asm:2407` `int	EMM_INT`
+- `Loader/load.asm:2532` `int	EMM_INT`
+- `Loader/load.asm:2539` `int	EMM_INT`
+- `Loader/load.asm:2567` `int	EMM_INT`
+- `Loader/load.asm:3171` `int	EMM_INT`
+- `Loader/load.asm:3176` `int	EMM_INT`
+- `Loader/load.asm:3190` `int	EMM_INT`
+
+**Loader – `port_io`**
+
+- `Loader/VGA/videoVGAImageLogo.asm:137` `out	dx, al`
+- `Loader/VGA/videoVGAImageLogo.asm:143` `out	dx, al`
+- `Loader/VGA/videoVGAImageLogo.asm:148` `out	dx, al`
+- `Loader/VGA/videoVGAImageLogo.asm:153` `out	dx, al`
+- `Loader/VGA/videoVGAImageLogo.asm:167` `out	dx, al`
+- `Loader/VGA/videoVGAImageLogo.asm:170` `out	dx, al`
+- `Loader/VGA/videoVGAImageLogo.asm:194` `out	dx, ax`
+- `Loader/VGA/videoVGAImageLogo.asm:218` `out	dx, ax`
+- `Loader/VGA/videoVGAImageLogo.asm:916` `out	dx, ax`
+- `Loader/VGA/videoVGAImageLogo.asm:2064` `out	dx, ax`
+- `Loader/VGA/videoVGAImageLogo.asm:3210` `out	dx, ax`
+- `Loader/VGA/videoVGAImageLogo.asm:4367` `out	dx, ax`
+- `Loader/load.asm:2089` `out	dx, ax`
+- `Loader/load.asm:2118` `out	BULLET_ADDR_REGISTER, al`
+- `Loader/load.asm:2120` `in	ax, BULLET_DATA_REGISTER`
+- `Loader/load.asm:2153` `out	BULLET_ADDR_REGISTER, al`
+- `Loader/load.asm:2155` `out	BULLET_DATA_REGISTER, ax`
+- `Loader/load.asm:2156` `in	al, BULLET_ADDR_REGISTER`
+- `Loader/load.asm:2185` `out	VG230_ADDR_REGISTER, al`
+- `Loader/load.asm:2187` `out	VG230_DATA_REGISTER, ax`
+- `Loader/load.asm:2188` `in	al, VG230_ADDR_REGISTER`
+- `Loader/load.asm:2220` `out	ELAN_INDEX, al`
+- `Loader/load.asm:2221` `in	al, ELAN_DATA`
+- `Loader/load.asm:2223` `out	ELAN_DATA, al`
+- `Loader/load.asm:2227` `out	ELAN_INDEX, al`
+- `Loader/load.asm:2231` `in	al, ELAN_DATA`
+- `Loader/load.asm:2234` `out	ELAN_DATA, al`
+- `Loader/load.asm:2237` `out	ELAN_INDEX, al`
+- `Loader/load.asm:2241` `in	al, ELAN_DATA`
+- `Loader/load.asm:2244` `out	ELAN_DATA, al`
+- `Loader/load.asm:2261` `out	dx, al`
+- `Loader/load.asm:2682` `out	VG230_ADDR_REGISTER,al`
+- `Loader/load.asm:2684` `out	VG230_DATA_REGISTER,ax`
+- `Loader/load.asm:2741` `out	VG230_ADDR_REGISTER,al`
+- `Loader/load.asm:2744` `out	VG230_DATA_REGISTER,ax`
+- `Loader/load.asm:2781` `out	ELAN_INDEX, al`
+- `Loader/load.asm:2782` `in	al, ELAN_DATA`
+- `Loader/load.asm:2795` `out	ELAN_DATA, al`
+- `Loader/load.asm:3564` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3566` `out	ELAN_DATA, al`
+- `Loader/load.asm:3571` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3572` `in	al, ELAN_DATA`
+- `Loader/load.asm:3575` `out	ELAN_DATA, al`
+- `Loader/load.asm:3580` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3581` `in	al, ELAN_DATA`
+- `Loader/load.asm:3584` `out	ELAN_DATA, al`
+- `Loader/load.asm:3590` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3591` `in	al, ELAN_DATA`
+- `Loader/load.asm:3593` `out	ELAN_DATA, al`
+- `Loader/load.asm:3599` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3600` `in	al, ELAN_DATA`
+- `Loader/load.asm:3602` `out	ELAN_DATA, al`
+- `Loader/load.asm:3608` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3612` `in	al, ELAN_DATA`
+- `Loader/load.asm:3615` `out	ELAN_DATA, al`
+- `Loader/load.asm:3618` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3622` `in	al, ELAN_DATA`
+- `Loader/load.asm:3625` `out	ELAN_DATA, al`
+- `Loader/load.asm:3630` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3632` `out	ELAN_DATA, al`
+- `Loader/load.asm:3637` `out	ELAN_INDEX, al`
+- `Loader/load.asm:3639` `out	ELAN_DATA, al`
+- `Loader/main.asm:164` `out	dx, al`
+- `Loader/main.asm:177` `out	dx, al`
+- `Loader/main.asm:181` `out	dx, al`
+- `Loader/videoCGA.asm:119` `out	dx, al`
+- `Loader/videoCGA.asm:169` `out	dx, al`
+- `Loader/videoDetect.asm:383` `in	al,dx`
+- `Loader/videoDetect.asm:390` `in	al,dx`
+- `Loader/videoDetect.asm:473` `out	dx,al`
+- `Loader/videoDetect.asm:476` `in	al,dx`
+- `Loader/videoDetect.asm:480` `out	dx,al`
+- `Loader/videoDetect.asm:486` `in	al,dx`
+- `Loader/videoDetect.asm:489` `out	dx,al`
+- `Loader/videoEGA.asm:317` `out	dx, ax`
+- `Loader/videoEGA.asm:324` `out	dx, ax`
+- `Loader/videoEGA.asm:331` `out	dx, ax`
+- `Loader/videoEGA.asm:351` `out	dx, ax`
+- `Loader/videoHGC.asm:154` `out	dx, al`
+- `Loader/videoHGC.asm:192` `out	dx,al`
+- `Loader/videoHGC.asm:297` `out	dx,al`
+- `Loader/videoHGC.asm:314` `out	dx,al`
+- `Loader/videoHGC.asm:317` `out	dx,al`
+- `Loader/videoHGC.asm:330` `out	dx,al`
+- `Loader/videoSVGA.asm:208` `out	dx, ax`
+- `Loader/videoSVGA.asm:215` `out	dx, ax`
+- `Loader/videoSVGA.asm:222` `out	dx, ax`
+- `Loader/videoSVGA.asm:241` `out	dx, ax`
+- `Loader/videoVGA.asm:154` `in	al, dx`
+- `Loader/videoVGA.asm:158` `in	al, dx`
+- `Loader/videoVGA.asm:213` `out	dx, ax`
+- `Loader/videoVGA.asm:220` `out	dx, ax`
+- `Loader/videoVGA.asm:227` `out	dx, ax`
+- `Loader/videoVGA.asm:246` `out	dx, ax`
+
+**Loader32 – `bios`**
+
+- `Loader32/videoDetect.asm:197` `int	VIDEO_BIOS`
+- `Loader32/videoDetect.asm:538` `int	VIDEO_BIOS`
+- `Loader32/videoDetect.asm:599` `int	10h`
+- `Loader32/videoDetect.asm:660` `int	VIDEO_BIOS`
+
+**Loader32 – `dos_int21`**
+
+- `Loader32/gpmi.asm:2714` `int	21h`
+- `Loader32/gpmi.asm:2726` `int	21h`
+- `Loader32/gpmi.asm:2790` `int	21h`
+- `Loader32/gpmi.asm:2857` `int	21h`
+- `Loader32/gpmi.asm:2864` `int	21h`
+- `Loader32/gpmi.asm:2938` `int	21h`
+- `Loader32/ini.asm:139` `int	21h`
+- `Loader32/ini.asm:413` `int	21h`
+- `Loader32/ini.asm:431` `int	21h`
+- `Loader32/ini.asm:470` `int	21h`
+- `Loader32/ini.asm:498` `int	21h`
+- `Loader32/ini.asm:504` `int	21h`
+- `Loader32/ini.asm:533` `int	21h`
+- `Loader32/load.asm:170` `int	21h`
+- `Loader32/load.asm:196` `int	21h`
+- `Loader32/load.asm:602` `int	21h`
+- `Loader32/load.asm:611` `int	21h`
+- `Loader32/load.asm:667` `int	21h`
+- `Loader32/load.asm:687` `int	21h`
+- `Loader32/load.asm:695` `int	21h`
+- `Loader32/load.asm:703` `int	21h`
+- `Loader32/load.asm:717` `int	21h`
+- `Loader32/load.asm:725` `int	21h`
+- `Loader32/load.asm:916` `int	21h`
+- `Loader32/load.asm:931` `int	21h`
+- `Loader32/load.asm:1206` `int	21h`
+- `Loader32/load.asm:1222` `int	21h`
+- `Loader32/load.asm:1688` `int	21h`
+- `Loader32/load.asm:1779` `int	21h`
+- `Loader32/load.asm:1789` `int	21h`
+- `Loader32/locate.asm:85` `int	21h`
+- `Loader32/locate.asm:94` `int	21h`
+- `Loader32/locate.asm:122` `int	21h`
+- `Loader32/locate.asm:132` `int	21h`
+- `Loader32/locate.asm:291` `int	21h`
+- `Loader32/locate.asm:502` `int	21h`
+- `Loader32/locate.asm:735` `int	21h`
+- `Loader32/locate.asm:740` `int	21h`
+- `Loader32/main.asm:770` `int	21h`
+- `Loader32/main.asm:1004` `int	21h`
+- `Loader32/strings.asm:69` `int	21h`
+- `Loader32/strings.asm:81` `int	21h`
+- `Loader32/strings.asm:94` `int	21h`
+- `Loader32/strings.asm:221` `int	21h`
+- `Loader32/strings.asm:235` `int	21h`
+- `Loader32/strings.asm:240` `int	21h`
+- `Loader32/strings.asm:324` `int	21h`
+
+**Loader32 – `dos_other`**
+
+- `Loader32/gpmi.asm:201` `int     2Fh`
+
+**Loader32 – `dpmi`**
+
+- `Loader32/gpmi.asm:313` `int	31h`
+- `Loader32/gpmi.asm:324` `int	31h`
+- `Loader32/gpmi.asm:330` `int	31h`
+- `Loader32/gpmi.asm:410` `int	31h`
+- `Loader32/gpmi.asm:417` `int	31h`
+- `Loader32/gpmi.asm:429` `int	31h`
+- `Loader32/gpmi.asm:514` `int	31h`
+- `Loader32/gpmi.asm:602` `int	31h`
+- `Loader32/gpmi.asm:652` `int	31h`
+- `Loader32/gpmi.asm:683` `int	31h`
+- `Loader32/gpmi.asm:692` `int	31h`
+- `Loader32/gpmi.asm:701` `int	31h`
+- `Loader32/gpmi.asm:781` `int	31h`
+- `Loader32/gpmi.asm:785` `int	31h`
+- `Loader32/gpmi.asm:790` `int	31h`
+- `Loader32/gpmi.asm:794` `int	31h`
+- `Loader32/gpmi.asm:810` `int	31h`
+- `Loader32/gpmi.asm:817` `int	31h`
+- `Loader32/gpmi.asm:823` `int	31h`
+- `Loader32/gpmi.asm:831` `int	31h`
+- `Loader32/gpmi.asm:840` `int	31h`
+- `Loader32/gpmi.asm:863` `int	31h`
+- `Loader32/gpmi.asm:872` `int	31h`
+- `Loader32/gpmi.asm:920` `int	31h`
+- `Loader32/gpmi.asm:1021` `int	31h`
+- `Loader32/gpmi.asm:1057` `int	31h`
+- `Loader32/gpmi.asm:1099` `int	31h`
+- `Loader32/gpmi.asm:1122` `int	31h`
+- `Loader32/gpmi.asm:1168` `int	31h`
+- `Loader32/gpmi.asm:1219` `int	31h`
+- `Loader32/gpmi.asm:1252` `int	31h`
+- `Loader32/gpmi.asm:1284` `int	31h`
+- `Loader32/gpmi.asm:1316` `int	31h`
+- `Loader32/gpmi.asm:1369` `int	31h`
+- `Loader32/gpmi.asm:1378` `int	31h`
+- `Loader32/gpmi.asm:1384` `int	31h`
+- `Loader32/gpmi.asm:1463` `int	31h`
+- `Loader32/gpmi.asm:1469` `int	31h`
+- `Loader32/gpmi.asm:1564` `int	31h`
+- `Loader32/gpmi.asm:1593` `int	31h`
+- `Loader32/gpmi.asm:1630` `int	31h`
+- `Loader32/gpmi.asm:1650` `int	31h`
+- `Loader32/gpmi.asm:1672` `int	31h`
+- `Loader32/gpmi.asm:1710` `int	31h`
+- `Loader32/gpmi.asm:1768` `int	31h`
+- `Loader32/gpmi.asm:1784` `int	31h`
+- `Loader32/gpmi.asm:1795` `int	31h`
+- `Loader32/gpmi.asm:1859` `int	31h`
+- `Loader32/gpmi.asm:1866` `int	31h`
+- `Loader32/gpmi.asm:1893` `int	31h`
+- `Loader32/gpmi.asm:1898` `int	31h`
+- `Loader32/gpmi.asm:1905` `int	31h`
+- `Loader32/gpmi.asm:2002` `int	31h`
+- `Loader32/gpmi.asm:2009` `int	31h`
+- `Loader32/gpmi.asm:2017` `int	31h`
+- `Loader32/gpmi.asm:2024` `int	31h`
+- `Loader32/gpmi.asm:2029` `int	31h`
+- `Loader32/gpmi.asm:2043` `int	31h`
+- `Loader32/gpmi.asm:2128` `int	31h`
+- `Loader32/gpmi.asm:2176` `int	31h`
+- `Loader32/gpmi.asm:2283` `int	31h`
+- `Loader32/gpmi.asm:2377` `int	31h`
+- `Loader32/gpmi.asm:2417` `int	31h`
+- `Loader32/gpmi.asm:2451` `int	31h`
+- `Loader32/heap.asm:689` `int	31h`
+- `Loader32/main.asm:869` `int	31h`
+- `Loader32/main.asm:878` `int	31h`
+- `Loader32/main.asm:896` `int	31h`
+- `Loader32/main.asm:905` `int	31h`
+- `Loader32/main.asm:914` `int	31h`
+- `Loader32/main.asm:923` `int	31h`
+
+**Loader32 – `gpmi`**
+
+- `Loader32/gpmi.asm:60` `include Internal/gpmiInt.def`
+- `Loader32/gpmi.asm:93` `GPMIVectorTable	fptr \`
+- `Loader32/gpmi.asm:94` `GPMIStartupWithCaller,`
+- `Loader32/gpmi.asm:95` `GPMIAllocateBlock,`
+- `Loader32/gpmi.asm:96` `GPMIFreeBlock,`
+- `Loader32/gpmi.asm:97` `GPMIResizeBlock,`
+- `Loader32/gpmi.asm:98` `GPMIAlias,`
+- `Loader32/gpmi.asm:99` `GPMIFreeAlias,`
+- `Loader32/gpmi.asm:100` `GPMIConvertToCodeBlock,`
+- `Loader32/gpmi.asm:101` `GPMIAccessRealSegment,`
+- `Loader32/gpmi.asm:102` `GPMIGetExceptionHandler,`
+- `Loader32/gpmi.asm:103` `GPMISetExceptionHandler,`
+- `Loader32/gpmi.asm:104` `GPMIGetInterruptHandler,`
+- `Loader32/gpmi.asm:105` `GPMISetInterruptHandler,`
+- `Loader32/gpmi.asm:106` `GPMIMapPhysicalAddress,`
+- `Loader32/gpmi.asm:107` `GPMIMapRealSegment,`
+- `Loader32/gpmi.asm:108` `GPMIGetDescriptor,`
+- `Loader32/gpmi.asm:109` `GPMISetDescriptor,`
+- `Loader32/gpmi.asm:110` `GPMIGetInfo,`
+- `Loader32/gpmi.asm:111` `GPMIMakeNotPresent,`
+- `Loader32/gpmi.asm:112` `GPMIMakePresent,`
+- `Loader32/gpmi.asm:113` `GPMIAllocateNotPresentBlock,`
+- `Loader32/gpmi.asm:114` `GPMIIsSelector16Bit,`
+- `Loader32/gpmi.asm:115` `GPMISelectorGetLimit,`
+- `Loader32/gpmi.asm:116` `GPMISelectorCheckLimits,`
+- `Loader32/gpmi.asm:117` `GPMITestPresent,`
+- `Loader32/gpmi.asm:118` `GPMIUnmapRealSegment,`
+- `Loader32/gpmi.asm:119` `GPMIReleaseSegmentAccess,`
+- `Loader32/gpmi.asm:120` `GPMIRealInterrupt,`
+- `Loader32/gpmi.asm:121` `GPMIAllocateDOSBlock,`
+- `Loader32/gpmi.asm:122` `GPMIFreeDOSBlock,`
+- `Loader32/gpmi.asm:123` `GPMIRealModeCallback,`
+- `Loader32/gpmi.asm:124` `GPMIFreeRealModeCallback,`
+- `Loader32/gpmi.asm:170` `GPMIStartupWithCaller   proc far`
+- `Loader32/gpmi.asm:171` `call    GPMIStartup`
+- `Loader32/gpmi.asm:179` `call    GPMIMapRealSegment`
+- `Loader32/gpmi.asm:186` `call    GPMIConvertToCodeBlock`
+- `Loader32/gpmi.asm:191` `GPMIStartupWithCaller   endp`
+- `Loader32/gpmi.asm:193` `GPMIStartup	proc near`
+- `Loader32/gpmi.asm:196` `call	GPMILoadDOSExtender`
+- `Loader32/gpmi.asm:234` `GPMIStartup	endp`
+- `Loader32/gpmi.asm:263` `GPMIQueryStarted   proc far`
+- `Loader32/gpmi.asm:268` `GPMIQueryStarted   endp`
+- `Loader32/gpmi.asm:295` `GPMIAllocateBlock	proc far`
+- `Loader32/gpmi.asm:338` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_MEMORY`
+- `Loader32/gpmi.asm:341` `mov	[si].GPMIS_data1, ax`
+- `Loader32/gpmi.asm:342` `mov	[si].GPMIS_data2, di`
+- `Loader32/gpmi.asm:343` `andnf	[si].GPMIS_flags, not mask GPMISF_isCode`
+- `Loader32/gpmi.asm:361` `GPMIAllocateBlock	endp`
+- `Loader32/gpmi.asm:389` `GPMIAllocateNotPresentBlock	proc far`
+- `Loader32/gpmi.asm:436` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_NOT_PRESENT`
+- `Loader32/gpmi.asm:439` `clr	[si].GPMIS_data1`
+- `Loader32/gpmi.asm:440` `clr	[si].GPMIS_data2`
+- `Loader32/gpmi.asm:441` `andnf	[si].GPMIS_flags, not mask GPMISF_isCode`
+- `Loader32/gpmi.asm:442` `ornf	[si].GPMIS_flags, mask GPMISF_isNotPresent`
+- `Loader32/gpmi.asm:455` `GPMIAllocateNotPresentBlock	endp`
+- `Loader32/gpmi.asm:480` `GPMIFreeBlock	proc far`
+- `Loader32/gpmi.asm:492` `test	[si].GPMIS_flags, mask GPMISF_allocated`
+- `Loader32/gpmi.asm:496` `cmp	[si].GPMIS_type, GPMI_SELECTOR_TYPE_MEMORY`
+- `Loader32/gpmi.asm:499` `cmp	[si].GPMIS_type, GPMI_SELECTOR_TYPE_NOT_PRESENT`
+- `Loader32/gpmi.asm:505` `mov	ax, [si].GPMIS_data1`
+- `Loader32/gpmi.asm:506` `mov	di, [si].GPMIS_data2`
+- `Loader32/gpmi.asm:507` `clr	[si].GPMIS_data1`
+- `Loader32/gpmi.asm:508` `clr	[si].GPMIS_data2`
+- `Loader32/gpmi.asm:509` `andnf	[si].GPMIS_flags, not mask GPMISF_allocated`
+- `Loader32/gpmi.asm:529` `GPMIFreeBlock	endp`
+- `Loader32/gpmi.asm:558` `GPMIResizeBlock	proc far`
+- `Loader32/gpmi.asm:579` `test	[si].GPMIS_flags, mask GPMISF_allocated`
+- `Loader32/gpmi.asm:583` `mov	ax, [si].GPMIS_data1`
+- `Loader32/gpmi.asm:585` `mov	ax, [si].GPMIS_data2`
+- `Loader32/gpmi.asm:846` `mov	[si].GPMIS_data1, ax`
+- `Loader32/gpmi.asm:848` `mov	[si].GPMIS_data2, ax`
+- `Loader32/gpmi.asm:884` `GPMIResizeBlock	endp`
+- `Loader32/gpmi.asm:911` `GPMIAlias	proc far`
+- `Loader32/gpmi.asm:928` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_ALIAS`
+- `Loader32/gpmi.asm:930` `mov	[si].GPMIS_data1, ax`
+- `Loader32/gpmi.asm:937` `GPMIAlias	endp`
+- `Loader32/gpmi.asm:962` `GPMIFreeAlias	proc far`
+- `Loader32/gpmi.asm:973` `mov	bl, [si].GPMIS_type`
+- `Loader32/gpmi.asm:986` `GPMIFreeAlias	endp`
+- `Loader32/gpmi.asm:1015` `GPMIRealModeCallback	proc far`
+- `Loader32/gpmi.asm:1024` `GPMIRealModeCallback	endp`
+- `Loader32/gpmi.asm:1053` `GPMIFreeRealModeCallback	proc far`
+- `Loader32/gpmi.asm:1060` `GPMIFreeRealModeCallback	endp`
+- `Loader32/gpmi.asm:1090` `GPMIConvertToCodeBlock	proc far`
+- `Loader32/gpmi.asm:1128` `ornf	[bx].GPMIS_flags, mask GPMISF_isCode`
+- `Loader32/gpmi.asm:1134` `GPMIConvertToCodeBlock	endp`
+- `Loader32/gpmi.asm:1161` `GPMIAccessRealSegment	proc far`
+- `Loader32/gpmi.asm:1178` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_REAL_SEGMENT`
+- `Loader32/gpmi.asm:1183` `pop	[si].GPMIS_data1`
+- `Loader32/gpmi.asm:1190` `GPMIAccessRealSegment	endp`
+- `Loader32/gpmi.asm:1215` `GPMIGetExceptionHandler	proc far`
+- `Loader32/gpmi.asm:1222` `GPMIGetExceptionHandler	endp`
+- `Loader32/gpmi.asm:1248` `GPMISetExceptionHandler	proc far`
+- `Loader32/gpmi.asm:1255` `GPMISetExceptionHandler	endp`
+- `Loader32/gpmi.asm:1280` `GPMIGetInterruptHandler	proc far`
+- `Loader32/gpmi.asm:1287` `GPMIGetInterruptHandler	endp`
+- `Loader32/gpmi.asm:1312` `GPMISetInterruptHandler proc far`
+- `Loader32/gpmi.asm:1319` `GPMISetInterruptHandler endp`
+- `Loader32/gpmi.asm:1346` `GPMIMapPhysicalAddress	proc far`
+- `Loader32/gpmi.asm:1390` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_PHYSICAL_ADDRESS`
+- `Loader32/gpmi.asm:1394` `mov	[si].GPMIS_data1, cx`
+- `Loader32/gpmi.asm:1395` `mov	[si].GPMIS_data2, dx`
+- `Loader32/gpmi.asm:1396` `andnf	[si].GPMIS_flags, not mask GPMISF_isCode`
+- `Loader32/gpmi.asm:1414` `GPMIMapPhysicalAddress	endp`
+- `Loader32/gpmi.asm:1443` `GPMIMapRealSegment	proc	far`
+- `Loader32/gpmi.asm:1475` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_PHYSICAL_ADDRESS`
+- `Loader32/gpmi.asm:1476` `pop	[si].GPMIS_data1`
+- `Loader32/gpmi.asm:1477` `andnf	[si].GPMIS_flags, not mask GPMISF_isCode`
+- `Loader32/gpmi.asm:1487` `GPMIMapRealSegment	endp`
+- `Loader32/gpmi.asm:1512` `GPMIUnmapRealSegment	proc	far`
+- `Loader32/gpmi.asm:1522` `mov	bl, [si].GPMIS_type`
+- `Loader32/gpmi.asm:1535` `GPMIUnmapRealSegment	endp`
+- `Loader32/gpmi.asm:1562` `GPMIGetDescriptor	proc far`
+- `Loader32/gpmi.asm:1566` `GPMIGetDescriptor	endp`
+- `Loader32/gpmi.asm:1591` `GPMISetDescriptor	proc far`
+- `Loader32/gpmi.asm:1595` `GPMISetDescriptor	endp`
+- `Loader32/gpmi.asm:1619` `GPMIGetInfo	proc far`
+- `Loader32/gpmi.asm:1715` `GPMIGetInfo	endp`
+- `Loader32/gpmi.asm:1747` `GPMIMakeNotPresent	proc	far`
+- `Loader32/gpmi.asm:1760` `cmp	[si].GPMIS_type, GPMI_SELECTOR_TYPE_MEMORY`
+- `Loader32/gpmi.asm:1765` `mov	di, [si].GPMIS_data2`
+- `Loader32/gpmi.asm:1766` `mov	si, [si].GPMIS_data1`
+- `Loader32/gpmi.asm:1773` `clr	[si].GPMIS_data1`
+- `Loader32/gpmi.asm:1774` `clr	[si].GPMIS_data2`
+- `Loader32/gpmi.asm:1775` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_NOT_PRESENT`
+- `Loader32/gpmi.asm:1776` `andnf	[si].GPMIS_flags, not mask GPMISF_allocated`
+- `Loader32/gpmi.asm:1777` `ornf	[si].GPMIS_flags, mask GPMISF_isNotPresent`
+- `Loader32/gpmi.asm:1802` `GPMIMakeNotPresent	endp`
+- `Loader32/gpmi.asm:1836` `GPMIMakePresent	proc	far`
+- `Loader32/gpmi.asm:1852` `cmp	[si].GPMIS_type, GPMI_SELECTOR_TYPE_NOT_PRESENT`
+- `Loader32/gpmi.asm:1872` `mov	[si].GPMIS_data1, ax`
+- `Loader32/gpmi.asm:1873` `mov	[si].GPMIS_data2, di`
+- `Loader32/gpmi.asm:1874` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_MEMORY`
+- `Loader32/gpmi.asm:1875` `ornf	[si].GPMIS_flags, mask GPMISF_allocated`
+- `Loader32/gpmi.asm:1876` `andnf	[si].GPMIS_flags, not mask GPMISF_isNotPresent`
+- `Loader32/gpmi.asm:1910` `test	[si].GPMIS_flags, mask GPMISF_isCode`
+- `Loader32/gpmi.asm:1915` `andnf	[si].GPMIS_flags, not mask GPMISF_isCode`
+- `Loader32/gpmi.asm:1924` `GPMIMakePresent	endp`
+- `Loader32/gpmi.asm:1957` `mov	[di].GPMIS_type, GPMI_SELECTOR_TYPE_NOT_USED`
+- `Loader32/gpmi.asm:1958` `clr	[di].GPMIS_flags`
+- `Loader32/gpmi.asm:1959` `clr	[di].GPMIS_reserved`
+- `Loader32/gpmi.asm:1960` `clr	[di].GPMIS_data1`
+- `Loader32/gpmi.asm:1961` `clr	[di].GPMIS_data2`
+- `Loader32/gpmi.asm:1962` `add	di, size GPMISelector`
+- `Loader32/gpmi.asm:2082` `mov	si, offset GPMIVectorTable`
+- `Loader32/gpmi.asm:2138` `ornf	[si].GPMIS_flags, mask GPMISF_allocated`
+- `Loader32/gpmi.asm:2139` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_EMPTY`
+- `Loader32/gpmi.asm:2180` `clr	[si].GPMIS_flags`
+- `Loader32/gpmi.asm:2181` `mov	[si].GPMIS_type, GPMI_SELECTOR_TYPE_NOT_USED`
+- `Loader32/gpmi.asm:2182` `clr	[si].GPMIS_data1`
+- `Loader32/gpmi.asm:2183` `clr	[si].GPMIS_data2`
+- `Loader32/gpmi.asm:2208` `GPMIMarkResident	proc	near`
+- `Loader32/gpmi.asm:2215` `cmp	[si].GPMIS_type, GPMI_SELECTOR_TYPE_NOT_USED`
+- `Loader32/gpmi.asm:2217` `ornf	[si].GPMIS_flags, mask GPMISF_resident`
+- `Loader32/gpmi.asm:2219` `add	si, size GPMISelector`
+- `Loader32/gpmi.asm:2223` `GPMIMarkResident	endp`
+- `Loader32/gpmi.asm:2256` `GPMIFreeNonResident	proc	near`
+- `Loader32/gpmi.asm:2267` `mov	al, [bx].GPMIS_type`
+- `Loader32/gpmi.asm:2270` `test	[bx].GPMIS_flags, mask GPMISF_resident`
+- `Loader32/gpmi.asm:2280` `mov	si, [bx].GPMIS_data1`
+- `Loader32/gpmi.asm:2281` `mov	di, [bx].GPMIS_data2`
+- `Loader32/gpmi.asm:2292` `add	bx, size GPMISelector`
+- `Loader32/gpmi.asm:2297` `GPMIFreeNonResident	endp`
+- `Loader32/gpmi.asm:2322` `GPMIReleaseSegmentAccess	proc far`
+- `Loader32/gpmi.asm:2332` `mov	bl, [si].GPMIS_type`
+- `Loader32/gpmi.asm:2344` `GPMIReleaseSegmentAccess	endp`
+- `Loader32/gpmi.asm:2372` `GPMIRealInterrupt	proc far`
+- `Loader32/gpmi.asm:2385` `GPMIRealInterrupt	endp`
+- `Loader32/gpmi.asm:2411` `GPMIAllocateDOSBlock	proc far`
+- `Loader32/gpmi.asm:2420` `GPMIAllocateDOSBlock	endp`
+- `Loader32/gpmi.asm:2445` `GPMIFreeDOSBlock	proc far`
+- `Loader32/gpmi.asm:2454` `GPMIFreeDOSBlock	endp`
+- `Loader32/gpmi.asm:2481` `GPMIIsSelector16Bit proc    far`
+- `Loader32/gpmi.asm:2488` `call    GPMIGetDescriptor`
+- `Loader32/gpmi.asm:2497` `GPMIIsSelector16Bit endp`
+- `Loader32/gpmi.asm:2530` `GPMISelectorGetLimit proc far`
+- `Loader32/gpmi.asm:2537` `call    GPMIGetDescriptor`
+- `Loader32/gpmi.asm:2563` `GPMISelectorGetLimit endp`
+- `Loader32/gpmi.asm:2596` `GPMISelectorCheckLimits proc far`
+- `Loader32/gpmi.asm:2599` `call    GPMISelectorGetLimit`
+- `Loader32/gpmi.asm:2622` `GPMISelectorCheckLimits endp`
+- `Loader32/gpmi.asm:2648` `GPMITestPresent	proc	far`
+- `Loader32/gpmi.asm:2658` `cmp	[si].GPMIS_type, GPMI_SELECTOR_TYPE_NOT_PRESENT`
+- `Loader32/gpmi.asm:2665` `GPMITestPresent	endp`
+- `Loader32/gpmi.asm:2932` `GPMILoadDOSExtender	proc	near`
+- `Loader32/gpmi.asm:2947` `GPMILoadDOSExtender	endp`
+- `Loader32/heap.asm:101` `call    GPMIAllocateBlock`
+- `Loader32/heap.asm:640` `call	GPMIAllocateBlock`
+- `Loader32/load.asm:1353` `call	GPMIAllocateNotPresentBlock`
+- `Loader32/load.asm:1367` `call	GPMIConvertToCodeBlock`
+- `Loader32/load.asm:1603` `call	GPMIConvertToCodeBlock`
+- `Loader32/main.asm:68` `word GPMIVectorTable`
+- `Loader32/main.asm:166` `call	GPMIQueryStarted`
+- `Loader32/main.asm:167` `jne	gpmiStarted`
+- `Loader32/main.asm:168` `call	GPMIStartup`
+- `Loader32/main.asm:170` `gpmiStarted:`
+- `Loader32/main.asm:175` `call	GPMISetExceptionHandler`
+- `Loader32/main.asm:179` `call	GPMIAlias`
+- `Loader32/main.asm:457` `call    GPMIAllocateBlock`
+- `Loader32/main.asm:464` `mov	ds:[loaderVars].KLV_GPMIVectorTable.offset, offset GPMIVectorTable`
+- `Loader32/main.asm:815` `call	GPMIAllocateBlock`
+- `Loader32/main.asm:824` `call	GPMIMarkResident`
+- `Loader32/main.asm:988` `call	GPMIFreeNonResident`
+
+**Loader32 – `irq_vector`**
+
+- `Loader32/gpmi.asm:102` `GPMIGetExceptionHandler,`
+- `Loader32/gpmi.asm:103` `GPMISetExceptionHandler,`
+- `Loader32/gpmi.asm:104` `GPMIGetInterruptHandler,`
+- `Loader32/gpmi.asm:105` `GPMISetInterruptHandler,`
+- `Loader32/gpmi.asm:1215` `GPMIGetExceptionHandler	proc far`
+- `Loader32/gpmi.asm:1222` `GPMIGetExceptionHandler	endp`
+- `Loader32/gpmi.asm:1248` `GPMISetExceptionHandler	proc far`
+- `Loader32/gpmi.asm:1255` `GPMISetExceptionHandler	endp`
+- `Loader32/gpmi.asm:1280` `GPMIGetInterruptHandler	proc far`
+- `Loader32/gpmi.asm:1287` `GPMIGetInterruptHandler	endp`
+- `Loader32/gpmi.asm:1312` `GPMISetInterruptHandler proc far`
+- `Loader32/gpmi.asm:1319` `GPMISetInterruptHandler endp`
+- `Loader32/main.asm:175` `call	GPMISetExceptionHandler`
+
+**Loader32 – `port_io`**
+
+- `Loader32/videoDetect.asm:385` `in	al,dx`
+- `Loader32/videoDetect.asm:392` `in	al,dx`
+- `Loader32/videoDetect.asm:475` `out	dx,al`
+- `Loader32/videoDetect.asm:478` `in	al,dx`
+- `Loader32/videoDetect.asm:482` `out	dx,al`
+- `Loader32/videoDetect.asm:488` `in	al,dx`
+- `Loader32/videoDetect.asm:491` `out	dx,al`
+

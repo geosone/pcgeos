@@ -62,6 +62,7 @@ Jede Phase endet mit einem prüfbaren Ergebnis. **Nach jeder Phase läuft GEOS u
 - Ablauf zum Einholen von upstream festlegen: Wie oft, Merge oder Rebase, wer löst Konflikte im PM-Branch.
 - Offene Fragen aus dem GHAL-Konzept (9.) selbst entscheiden: Verhältnis zu GPMI/HostIf/HostFS, Build-Varianten (#960), Tests (#1239), `swat`.
 - Konventionen festlegen: C-Standard (C11), Formatierung, Präfixe (`ghal_`), Lizenzkopf Apache 2.0, Sprache der Doku.
+- **Build-System: CMake (Entscheidung 2026-11-10).** Alles Neue (GHAL, C-Port, Tests, Werkzeuge) wird mit CMake + CTest gebaut, Build-Verzeichnisse außerhalb des Quellbaums, Architektur/Host über Toolchain-Dateien in `Port32/cmake/` und die Cache-Variablen `GEOS_HOST`, `GEOS_LINUX_DISPLAY`, `GEOS_ERROR_CHECK`. Die bestehenden 16-Bit-/PM-Builds (pmake, esp, glue, Open Watcom) laufen vorerst unverändert weiter; sie später ebenfalls unter CMake zu bringen (esp/glue als eigene CMake-Sprache bzw. Custom-Commands), ist ein eigener Arbeitspunkt in P3. **Stand:** `Port32/CMakeLists.txt` existiert, der Math-Pilot baut und testet darüber (x86-64 und i686).
 
 **Ergebnis:** Fork und Branch stehen; das Einholen von upstream ist geregelt; die offenen Fragen aus dem GHAL-Konzept (9.) sind beantwortet.
 
@@ -78,7 +79,7 @@ Jede Phase endet mit einem prüfbaren Ergebnis. **Nach jeder Phase läuft GEOS u
 
 Die Arbeit läuft auf Basis des PM-Branches.
 
-- **Inventar per Skript** (wiederholbar, in der CI): alle `int 21h/10h/15h/16h/2Fh/67h`, Port-I/O, `SysCatch*Interrupt`, `SysLockBIOS`, `INT_OFF`/`cli` in Kernel und Loader/Loader32. Die Zahlen aus GHAL-Konzept 2.2 sind die Ausgangsbasis.
+- **Inventar per Skript** (wiederholbar, in der CI): alle `int 21h/10h/15h/16h/2Fh/67h`, Port-I/O, `SysCatch*Interrupt`, `SysLockBIOS`, `INT_OFF`/`cli` in Kernel und Loader/Loader32. **Erledigt 2026-11-10:** `Port32/tools/ghal_inventory.py`, Bericht `Port32/GHAL-Inventar.md`, Baseline `Port32/tools/ghal_baseline.json`; CMake-Ziele `ghal-inventory` und `ghal-inventory-check` (schlägt fehl, wenn upstream neue Host-Kontakte bringt). Ergebnis auf `ghal`: 3 531 Stellen gesamt; im GHAL-Kern (Kernel + Loader + Loader32) rund 1 200, davon ohne `INT_OFF`/`INT_ON` gut 900, und davon entfallen über 500 auf `Loader`/`Loader32` und die GPMI-Nutzung im Kernel-Heap.
 - GHAL-Einsprungpunkte und -Makros in asm (`GHAL_CRIT_ENTER`, `GHALDosCall`, `GHALCatchIrq` …). **real16** und **pm16** setzen sie auf das bisherige Verhalten bzw. auf GPMI um.
 - Kernel (`Sys`, `Timer`, `FSD`, `File`, `Boot`, `Thread`) und `Loader32` darauf umstellen.
 - **Abnahme:** Die real16-Variante baut **bytegleich** wie vorher, oder mit dokumentierten Unterschieden. pm16 bootet wie vorher bis zum Desk.
@@ -92,7 +93,7 @@ Die Arbeit läuft auf Basis des PM-Branches.
 - `uic` → C-Daten statt `.rdef`.
 - `geosport.h`: Typen, `_far`/`_pascal` leer, 64-Bit-saubere `CInclude/`. Zuerst als Prüfung: CInclude kompiliert mit `-m64 -Wall`.
 - **Geode-Format:** ELF-Shared-Object und ein Ladeformat aus `.gp` (Exporte, Protokollnummern). Spezifikation + Prototyp-Lader als Test auf dem Entwicklungsrechner.
-- Build-System: CMake für die C-Ziele, gemeinsam mit pmake für die asm-Varianten (pmake bleibt, solange upstream es nutzt).
+- Build-System: CMake (siehe P0). Für die asm-Varianten zunächst pmake; Arbeitspunkt: auch diese unter CMake (esp/glue/goc/uic als Custom-Commands bzw. eigene CMake-Sprache), damit es am Ende **ein** Build-System gibt.
 
 **Ergebnis:** Eine GOC-Beispiel-App (`Appl/SDK_C/*`) kompiliert für `linux` (ohne zu laufen); ELF-Geodes laden im Test.
 

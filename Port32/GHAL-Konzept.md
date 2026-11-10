@@ -203,6 +203,8 @@ Der Schritt S0 (6.) widerspricht dem nicht: Er ordnet nur den bestehenden 16-Bit
 
 ## 8. Build
 
+**Build-System ist CMake** (Entscheidung 2026-11-10); Tests über CTest. Einstieg vorerst `Port32/CMakeLists.txt`.
+
 ```sh
 cmake -S . -B build-dos   -G Ninja -DGEOS_HOST=dos32  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-dos32-hx.cmake
 cmake -S . -B build-linux -G Ninja -DGEOS_HOST=linux  -DGEOS_LINUX_DISPLAY=sdl3   # oder x11, fbdev

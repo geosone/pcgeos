@@ -1,0 +1,444 @@
+{
+ "Appl/Breadbox": {
+  "bios": 2,
+  "inline_asm": 18,
+  "int_flag": 2,
+  "port_io": 1
+ },
+ "Appl/FileMgrs": {
+  "dos_int21": 1
+ },
+ "Appl/FileMgrs2": {
+  "dos_int21": 1
+ },
+ "Appl/GPCMail": {
+  "bios_lock": 2,
+  "dos_int21": 1
+ },
+ "Appl/IDialup": {
+  "inline_asm": 2
+ },
+ "Appl/Preferences": {
+  "bios": 1,
+  "dos_int21": 2
+ },
+ "Appl/SDK_C": {
+  "inline_asm": 2
+ },
+ "Appl/Startup": {
+  "bios_lock": 2,
+  "int_flag": 2
+ },
+ "Appl/Test": {
+  "breakpoint": 1
+ },
+ "CInclude": {
+  "bios_lock": 2,
+  "hostif": 2,
+  "inline_asm": 33
+ },
+ "Driver/Breadbox/X10drvr": {
+  "int_flag": 4,
+  "port_io": 12
+ },
+ "Driver/DMA/DOSReal": {
+  "port_io": 11
+ },
+ "Driver/Font/TrueType": {
+  "inline_asm": 7
+ },
+ "Driver/IFS/DOS": {
+  "bios": 10,
+  "bios_lock": 72,
+  "dos_int21": 420,
+  "dos_other": 23,
+  "hostif": 5,
+  "int_flag": 7,
+  "irq_vector": 17
+ },
+ "Driver/IFS/GEOS": {
+  "bios_lock": 8,
+  "dos_int21": 2,
+  "port_io": 2
+ },
+ "Driver/IFS/HostFS": {
+  "hostif": 4
+ },
+ "Driver/Keyboard": {
+  "int_flag": 20,
+  "irq_vector": 8,
+  "port_io": 47
+ },
+ "Driver/Mouse/AlpsPen": {
+  "int_flag": 2,
+  "irq_vector": 2,
+  "port_io": 21
+ },
+ "Driver/Mouse/CandTPen": {
+  "irq_vector": 2,
+  "port_io": 9
+ },
+ "Driver/Mouse/CasioPen": {
+  "bios_lock": 4
+ },
+ "Driver/Mouse/Gazelle": {
+  "int_flag": 2
+ },
+ "Driver/Mouse/GridPen": {
+  "irq_vector": 2
+ },
+ "Driver/Mouse/LogiBus": {
+  "int_flag": 6,
+  "port_io": 16
+ },
+ "Driver/Mouse/LogiSer": {
+  "int_flag": 2
+ },
+ "Driver/Mouse/MSBus": {
+  "int_flag": 6,
+  "port_io": 19
+ },
+ "Driver/Mouse/MSSer": {
+  "int_flag": 2
+ },
+ "Driver/Mouse/MSys": {
+  "int_flag": 2,
+  "port_io": 1
+ },
+ "Driver/Mouse/NikeMouse": {
+  "int_flag": 4,
+  "irq_vector": 2,
+  "port_io": 19
+ },
+ "Driver/Mouse/PS2": {
+  "bios": 10,
+  "bios_lock": 2
+ },
+ "Driver/Mouse/Pqpen": {
+  "irq_vector": 2,
+  "port_io": 3
+ },
+ "Driver/Mouse/Scripen": {
+  "int_flag": 2
+ },
+ "Driver/Mouse/imps2": {
+  "bios": 18,
+  "bios_lock": 4
+ },
+ "Driver/Net/NW": {
+  "bios_lock": 8,
+  "dos_int21": 7
+ },
+ "Driver/Power/APM10": {
+  "bios_lock": 9
+ },
+ "Driver/Power/APM11": {
+  "bios_lock": 9
+ },
+ "Driver/Power/APMCommon": {
+  "bios_lock": 20,
+  "int_flag": 6
+ },
+ "Driver/Power/hltpwr": {
+  "dos_other": 1,
+  "int_flag": 1
+ },
+ "Driver/Printer/DotMatrix": {
+  "bios": 3,
+  "port_io": 2
+ },
+ "Driver/Printer/PrintCom": {
+  "bios_lock": 2,
+  "int_flag": 8,
+  "port_io": 24
+ },
+ "Driver/Socket/EtherCom": {
+  "int_flag": 1
+ },
+ "Driver/Socket/EtherLink": {
+  "int_flag": 1
+ },
+ "Driver/Socket/EtherODI": {
+  "bios_lock": 22,
+  "int_flag": 17
+ },
+ "Driver/Socket/EtherPKT": {
+  "bios_lock": 2,
+  "int_flag": 13
+ },
+ "Driver/Socket/HstTCPIP": {
+  "hostif": 10
+ },
+ "Driver/Sound/BSD16": {
+  "int_flag": 19,
+  "irq_vector": 1,
+  "port_io": 28
+ },
+ "Driver/Sound/BSD8ST": {
+  "int_flag": 27,
+  "irq_vector": 1,
+  "port_io": 44
+ },
+ "Driver/Sound/SoundBlaster": {
+  "int_flag": 12,
+  "irq_vector": 1,
+  "port_io": 21
+ },
+ "Driver/Sound/Standard": {
+  "port_io": 2
+ },
+ "Driver/Sound/Tandy": {
+  "port_io": 6
+ },
+ "Driver/Stream": {
+  "int_flag": 10
+ },
+ "Driver/Stream/Filestr": {
+  "int_flag": 2
+ },
+ "Driver/Stream/IrCOMM": {
+  "int_flag": 1
+ },
+ "Driver/Stream/Parallel": {
+  "bios": 2,
+  "bios_lock": 2,
+  "dos_int21": 1,
+  "int_flag": 22,
+  "irq_vector": 3,
+  "port_io": 28
+ },
+ "Driver/Stream/Serial": {
+  "int_flag": 34,
+  "irq_vector": 2,
+  "port_io": 99
+ },
+ "Driver/Swap/Disk": {
+  "dos_int21": 4
+ },
+ "Driver/Swap/EMS": {
+  "dos_int21": 3,
+  "ems_xms": 4,
+  "int_flag": 19,
+  "irq_vector": 2
+ },
+ "Driver/Swap/ExtMem": {
+  "bios": 2
+ },
+ "Driver/Swap/XMS": {
+  "dos_int21": 11,
+  "dos_other": 2
+ },
+ "Driver/Task/BNF": {
+  "bios": 3,
+  "bios_lock": 2
+ },
+ "Driver/Task/DOS5": {
+  "dos_int21": 2,
+  "dos_other": 1,
+  "irq_vector": 2
+ },
+ "Driver/Task/NonTS": {
+  "dos_int21": 16
+ },
+ "Driver/Task/TaskMax": {
+  "bios_lock": 14,
+  "dos_int21": 6,
+  "dos_other": 9,
+  "ems_xms": 1,
+  "int_flag": 4
+ },
+ "Driver/Video/Dumb": {
+  "bios": 9,
+  "int_flag": 2,
+  "port_io": 28
+ },
+ "Driver/Video/EGA": {
+  "port_io": 27
+ },
+ "Driver/Video/VGAlike": {
+  "bios": 84,
+  "hostif": 3,
+  "int_flag": 2,
+  "port_io": 219
+ },
+ "Driver/Video/VidCom": {
+  "bios": 3,
+  "int_flag": 7,
+  "port_io": 13
+ },
+ "Include": {
+  "bios_lock": 2,
+  "gpmi": 138,
+  "hostif": 4,
+  "int_flag": 10,
+  "irq_vector": 4,
+  "port_io": 12
+ },
+ "Library/Breadbox": {
+  "dos_other": 5,
+  "inline_asm": 21,
+  "int_flag": 4,
+  "port_io": 12
+ },
+ "Library/CDRom": {
+  "bios_lock": 2,
+  "dos_other": 1
+ },
+ "Library/ConView": {
+  "bios_lock": 2
+ },
+ "Library/GDI": {
+  "int_flag": 15,
+  "irq_vector": 2,
+  "port_io": 28
+ },
+ "Library/HostIf": {
+  "dpmi": 2,
+  "hostif": 15,
+  "int_flag": 5,
+  "irq_vector": 2,
+  "port_io": 13
+ },
+ "Library/Kernel": {
+  "bios_lock": 2,
+  "ems_xms": 1,
+  "gpmi": 13,
+  "int_flag": 11,
+  "irq_vector": 2,
+  "port_io": 17
+ },
+ "Library/Kernel/Boot": {
+  "bios": 4,
+  "breakpoint": 1,
+  "dos_int21": 4,
+  "dos_other": 1,
+  "ems_xms": 1,
+  "int_flag": 5,
+  "port_io": 2
+ },
+ "Library/Kernel/Diskcopy": {
+  "dos_int21": 3,
+  "int_flag": 2
+ },
+ "Library/Kernel/Dosappl": {
+  "bios_lock": 3,
+  "dos_int21": 1
+ },
+ "Library/Kernel/Drive": {
+  "bios_lock": 2
+ },
+ "Library/Kernel/FSD": {
+  "bios_lock": 2,
+  "dos_int21": 31,
+  "dos_other": 2,
+  "gpmi": 6,
+  "int_flag": 4,
+  "irq_vector": 8
+ },
+ "Library/Kernel/File": {
+  "dos_int21": 2
+ },
+ "Library/Kernel/Format": {
+  "bios": 4,
+  "dos_int21": 6,
+  "dos_other": 1
+ },
+ "Library/Kernel/Geodes": {
+  "gpmi": 2,
+  "int_flag": 27
+ },
+ "Library/Kernel/Graphics": {
+  "bios": 3,
+  "int_flag": 5
+ },
+ "Library/Kernel/Heap": {
+  "bios_lock": 2,
+  "breakpoint": 1,
+  "gpmi": 85,
+  "int_flag": 45,
+  "irq_vector": 6
+ },
+ "Library/Kernel/IM": {
+  "int_flag": 4
+ },
+ "Library/Kernel/Object": {
+  "int_flag": 8
+ },
+ "Library/Kernel/Sys": {
+  "bios": 3,
+  "bios_lock": 18,
+  "breakpoint": 2,
+  "dos_int21": 7,
+  "dos_other": 5,
+  "ems_xms": 7,
+  "gpmi": 19,
+  "int_flag": 17,
+  "irq_vector": 10,
+  "port_io": 38
+ },
+ "Library/Kernel/Thread": {
+  "bios": 1,
+  "bios_lock": 4,
+  "ems_xms": 7,
+  "int_flag": 23,
+  "irq_vector": 6,
+  "port_io": 6
+ },
+ "Library/Kernel/Timer": {
+  "bios": 7,
+  "bios_lock": 2,
+  "dos_int21": 8,
+  "gpmi": 7,
+  "int_flag": 37,
+  "port_io": 16
+ },
+ "Library/Kernel/VMem": {
+  "int_flag": 31
+ },
+ "Library/Kernel/Win": {
+  "int_flag": 22
+ },
+ "Library/Math": {
+  "int_flag": 2,
+  "irq_vector": 2
+ },
+ "Library/Pref": {
+  "ems_xms": 2
+ },
+ "Library/SSL": {
+  "hostif": 30,
+  "inline_asm": 4
+ },
+ "Library/Sound": {
+  "int_flag": 42
+ },
+ "Library/SpecUI": {
+  "bios_lock": 2,
+  "dos_int21": 3,
+  "dos_other": 1
+ },
+ "Library/Swap": {
+  "bios_lock": 2
+ },
+ "Library/User": {
+  "bios": 2,
+  "port_io": 7
+ },
+ "Loader": {
+  "bios": 20,
+  "dos_int21": 57,
+  "ems_xms": 11,
+  "int_flag": 10,
+  "port_io": 94
+ },
+ "Loader32": {
+  "bios": 4,
+  "dos_int21": 47,
+  "dos_other": 1,
+  "dpmi": 71,
+  "gpmi": 204,
+  "int_flag": 4,
+  "irq_vector": 13,
+  "port_io": 7
+ }
+}
