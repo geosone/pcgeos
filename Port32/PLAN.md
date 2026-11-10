@@ -190,7 +190,7 @@ The pilot gave a ratio of about 1.9 : 1 for asm code to C. Most of the time goes
 
 ## 5. Next concrete steps
 
-1. Confirm that two clean builds via `geosbuild.sh` are identical under `geocmp.py`, then keep that manifest as the P2 reference.
+1. ~~Confirm that two clean builds via `geosbuild.sh` are identical under `geocmp.py`.~~ Done 2026-11-10: two clean builds, 2356 files, 0 changed. The manifest is kept as `Port32/reference/pm-baseline.json`; every P2 step must pass `geocmp.py compare Port32/reference/pm-baseline.json Installed` (refresh it only on intended output changes).
 2. Review the PM branch (GPMI, `Loader32`, kernel changes, HostFS) and record the result here.
 3. Start S0 with `INT_OFF`/`INT_ON`: new `Include/Internal/ghal.def`, route kernel `Timer` and `Sys` through it, verify byte-identical output.
 4. Define how upstream is pulled in (P0).
