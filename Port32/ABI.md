@@ -265,7 +265,39 @@ functions are GEOS's, see §4). ctest `geode.hello` loads the Hello sample
 `__geos_module` against `hello.gp`, down to the class pointer of the
 application object, which must be the import `GenApplicationClass`.
 
-## 8. Open
+## 8. Kernel heap (`Library/Kernel/Heap`, P4)
+
+The C kernel starts with the handle table and the memory block API of
+`heap.h` (`heapHandle.c`, `heapHigh.c`; fatal errors in
+`Sys/sysError.c`, internal interfaces in `Library/Kernel/kernelC.h`).
+
+- **Handles** are the index of their entry times 16: 0 stays the null
+  handle and handles keep the alignment they had as offsets into the
+  16-bit handle table. The table grows in pages of 1024 entries (up to
+  16M handles); entries never move. Memory handles have type `HT_MEM`,
+  the other handle types keep the signatures of `heapInt.def`.
+- **Blocks** are one GHAL block each (`ghal_mem_alloc`, as
+  `GPMI_CALL_ALLOCATE_BLOCK` in the PM kernel). A block does not move,
+  except through `MemReAlloc`. There is no compaction and no swapping;
+  discarding frees the data and keeps the handle, and `MemLock` on a
+  discarded block returns `NULL`.
+- **Sizes stay words** (64K per block): LMem chunk handles are 16-bit
+  offsets, and big data lives in HugeArrays and VM files.
+- **`MemGetInfo` returns a `dword`** under `GEOS_PORT32`, so the owner
+  (a 32-bit handle) fits. `MGIT_ADDRESS` is a fatal error (no segments;
+  use `MemDeref`).
+- **Fatal errors** keep the names of `kernelErrors.def`, not their
+  numbers; the C kernel reports them by name (`KernelFatal`).
+- Not yet: `HandleP`/`HandleV`, `MemPLock`/`MemUnlockV`,
+  `MemThreadGrab`, shared/exclusive locks (they need threads and
+  semaphores, next in P4).
+
+ctest `kernel.heap` covers allocation, locking, resizing (zero fill),
+discarding, fixed blocks, reference counts, owners, 5000 handles and the
+error checks (caught with `kernelFatalHook`) on all hosts, dos32 with
+both DJGPP and Open Watcom.
+
+## 9. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`). The
    module format is decided (`GHAL-Concept.md` §4.4) and the `.gp` data is

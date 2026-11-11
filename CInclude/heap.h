@@ -100,8 +100,17 @@ typedef enum /* word */ {
     MGIT_EXEC_THREAD=10
 } MemGetInfoType;
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: handles are 32 bits, so the owner does not fit a word.  There
+ * are no segments: MGIT_ADDRESS is an error (use MemDeref).
+ */
+extern dword
+    MemGetInfo(MemHandle mh, MemGetInfoType info);
+#else
 extern word	
     _pascal MemGetInfo(MemHandle mh, MemGetInfoType info);
+#endif
 
 /***/
 

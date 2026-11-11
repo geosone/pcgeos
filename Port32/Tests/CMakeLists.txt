@@ -8,6 +8,11 @@ add_executable(test_ghal_core test_ghal_core.c)
 target_link_libraries(test_ghal_core PRIVATE ghal)
 add_test(NAME ghal.core COMMAND test_ghal_core)
 
+# C kernel (Library/Kernel, P4): handle table and memory blocks
+add_executable(test_kernel_heap test_kernel_heap.c)
+target_link_libraries(test_kernel_heap PRIVATE geos_kernel)
+add_test(NAME kernel.heap COMMAND test_kernel_heap)
+
 # ghal_module: a geode in the host's module format (ELF, or DXE3 on dos32),
 # embedded in the test program.  Not with Open Watcom (no geode toolchain).
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
