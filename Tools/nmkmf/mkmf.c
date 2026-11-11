@@ -642,6 +642,77 @@ MkmfStringMatch(register const char *string,  /* String. */
 
 
 /***********************************************************************
+ *				MkmfReadSourceList
+ ***********************************************************************
+ * SYNOPSIS:	    Read the list of the files a directory gives to the
+ *		    DOS16 build: its file "mkmf.lst", one name a line,
+ *		    "#" starts a comment.  A directory that holds C ports
+ *		    for the 32-bit build (Port32) beside its asm lists its
+ *		    own sources there, so mkmf does not take in the ports.
+ * CALLED BY:	    MkmfScanDir
+ * RETURN:	    the names (malloc'ed) or NULL if there is no list
+ ***********************************************************************/
+static Lst
+MkmfReadSourceList(const char *dir)
+{
+    char    path[MAX_PATH_LENGTH + 16];
+    char    line[256];
+    FILE    *f;
+    Lst	    names;
+
+    sprintf(path, "%s/mkmf.lst", dir);
+    f = fopen(path, "r");
+    if (f == NULL) {
+	return((Lst)NULL);
+    }
+    names = Lst_Init(FALSE);
+    while (fgets(line, sizeof(line), f) != NULL) {
+	char	*s = line, *e;
+
+	while (*s == ' ' || *s == '\t') {
+	    s++;
+	}
+	if (*s == '#') {
+	    continue;
+	}
+	for (e = s; *e && *e != ' ' && *e != '\t' && *e != '\r' &&
+		 *e != '\n' && *e != '#'; e++) {
+	    ;
+	}
+	if (e != s) {
+	    char *name = (char *)malloc(e - s + 1);
+
+	    memcpy(name, s, e - s);
+	    name[e - s] = '\0';
+	    Lst_AtEnd(names, (ClientData)name);
+	}
+    }
+    fclose(f);
+    return(names);
+}
+
+/* is `name' on the list (case ignored)? */
+static int
+MkmfOnSourceList(Lst names, const char *name)
+{
+    LstNode ln;
+
+    for (ln = Lst_First(names); ln != NILLNODE; ln = Lst_Succ(ln)) {
+	const char *a = (const char *)Lst_Datum(ln), *b = name;
+
+	while (*a && tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+	    a++, b++;
+	}
+	if (*a == '\0' && *b == '\0') {
+	    return(1);
+	}
+    }
+    return(0);
+}
+
+
+
+/***********************************************************************
  *				MkmfScanDir
  ***********************************************************************
  * SYNOPSIS:	    Scan a directory, looking for files that match
@@ -670,6 +741,7 @@ MkmfScanDir(const char	    	*dir,	    	/* Directory to scan */
     int	    	        i;   	/* Current pattern number being checked */
     char    	       *name;  	/* Copy of current entry name */
     int	    	        matches;/* Number of matches seen so far */
+    Lst	    	        sourceList;	/* mkmf.lst, or NULL */
 
     dirp = opendir((char *)dir);
     if (dirp == NULL) {
@@ -677,9 +749,14 @@ MkmfScanDir(const char	    	*dir,	    	/* Directory to scan */
     }
 
     matches = 0;
+    sourceList = MkmfReadSourceList(dir);
     
     while ((dep = readdir(dirp)) != (struct dirent *)NULL) {
 	name = NULL;
+	if (sourceList != (Lst)NULL &&
+	    !MkmfOnSourceList(sourceList, dep->d_name)) {
+	    continue;
+	}
 	
 	for (i = 0; i < numPatterns; i++) {
 	    LstNode    ln;
@@ -734,6 +811,9 @@ MkmfScanDir(const char	    	*dir,	    	/* Directory to scan */
     }
 
     closedir(dirp);
+    if (sourceList != (Lst)NULL) {
+	Lst_Destroy(sourceList, (void (*)())free);
+    }
 
     return(matches);
 }

@@ -1,0 +1,12 @@
+# mkmf.lst -- the files of this directory that the DOS16 build takes
+# (Tools/nmkmf reads only these).  The C ports of the 32-bit build
+# (CMake, Port32) beside them are left out.
+driveC.asm
+driveConstant.def
+driveEC.asm
+driveHigh.asm
+driveInit.asm
+driveLow.asm
+driveManager.asm
+driveVariable.def
+README

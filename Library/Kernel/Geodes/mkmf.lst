@@ -1,0 +1,28 @@
+# mkmf.lst -- the files of this directory that the DOS16 build takes
+# (Tools/nmkmf reads only these).  The C ports of the 32-bit build
+# (CMake, Port32) beside them are left out.
+geodesAccess.asm
+geodesAnalysis.asm
+geodesC.asm
+geodesConstant.def
+geodesDriver.asm
+geodesErrorCheck.asm
+geodesEvent.asm
+geodesHandle.asm
+geodesInit.asm
+geodesLibrary.asm
+geodesLoad.asm
+geodesMacro.def
+geodesManager.asm
+geodesPatch.asm
+geodesPatchCoreBlock.asm
+geodesPatchFile.asm
+geodesPatchInit.asm
+geodesPatchResource.asm
+geodesPatchXIP.asm
+geodesPriv.asm
+geodesProcess.asm
+geodesResource.asm
+geodesSystem.asm
+geodesUtils.asm
+geodesVariable.def

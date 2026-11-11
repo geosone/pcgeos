@@ -1,0 +1,23 @@
+# mkmf.lst -- the files of this directory that the DOS16 build takes
+# (Tools/nmkmf reads only these).  The C ports of the 32-bit build
+# (CMake, Port32) beside them are left out.
+geos.str
+heap.asm
+ini.asm
+list_of_files
+load.asm
+loader.def
+local.mk
+locate.asm
+main.asm
+path.asm
+strings.asm
+videoCGA.asm
+videoDCGA.asm
+videoDetect.asm
+videoDisplay.asm
+videoEGA.asm
+videoHGC.asm
+videoMCGA.asm
+videoSVGA.asm
+videoVGA.asm

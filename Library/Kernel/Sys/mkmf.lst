@@ -1,0 +1,17 @@
+# mkmf.lst -- the files of this directory that the DOS16 build takes
+# (Tools/nmkmf reads only these).  The C ports of the 32-bit build
+# (CMake, Port32) beside them are left out.
+sysC.asm
+sysConstant.def
+sysError.asm
+sysErrorNotKCode.asm
+sysInit.asm
+sysInterrupt.asm
+sysManager.asm
+sysMisc.asm
+sysNotification.asm
+sysProfile.asm
+sysScreen.asm
+sysStats.asm
+sysUtilWindow.asm
+sysVariable.def
