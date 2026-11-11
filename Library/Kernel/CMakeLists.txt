@@ -40,6 +40,8 @@
 #                      of fileFile.asm, fileOpenClose.asm)
 #   File/fileEnum.c <- FileEnum of File/fileEnum.asm, fileC.asm
 #   FSD/fsdDrive.c  <- the drive table of FSD/fsdDrive.asm (FSDInitDrive)
+#   FSD/fsdInit.c   <- the primary driver of FSD/fsdInit.asm (the HostFS
+#                      name layout from [system] primaryFSD)
 #   Drive/driveHigh.c <- the drive API of Drive/driveHigh.asm, driveC.asm
 #   Disk/diskHigh.c <- disks of Disk/diskHigh.asm, diskC.asm
 #   Port32/hostfs/hostfsDriver.c <- the HostFS file system driver
@@ -87,6 +89,7 @@ add_library(geos_kernel_objs OBJECT
   File/fileEA.c
   File/fileEnum.c
   FSD/fsdDrive.c
+  FSD/fsdInit.c
   Drive/driveHigh.c
   Disk/diskHigh.c
   ${PROJECT_SOURCE_DIR}/Port32/hostfs/hostfsDriver.c

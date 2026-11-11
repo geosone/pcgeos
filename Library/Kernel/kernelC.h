@@ -725,6 +725,9 @@ DiskHandle FileTopDisk(void);
 /* Initfile/initfileHigh.c: forget the init files read; the next init
  * file routine reads them again (after FileSetTopHostPath) */
 void InitFileReset(void);
+/* FSD/fsdInit.c: the primary file system driver ([system] primaryFSD
+ * of the init file: the layout of HostFS names) */
+void FSDLoadPrimary(void);
 /* the disk of a GEOS path (relative to the current path, or to the
  * root of its disk if it starts with '\\', or "drive:") and the path on
  * it from its root, "\\" separated; NULL with the error set */

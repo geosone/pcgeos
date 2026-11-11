@@ -52,11 +52,13 @@
 #define HOSTFS_NAME_MAX		256	/* host names, with the NUL */
 
 /* the layout of the host names */
+#define HOSTFS_NAMES_AUTO       (-1)    /* the host's: asked on first use */
 #define HOSTFS_NAMES_LONG       0       /* other hosts */
 #define HOSTFS_NAMES_DOS        1       /* dos32 without LFN */
 #define HOSTFS_NAMES_DOS_LFN    2       /* dos32 with LFN (MSLF) */
 void        HostFSSetDosNames(int mode);
 int         HostFSDosNames(void);       /* the mode; 0 for long names */
+int         HostFSHostLongNames(void);  /* can the host keep long names? */
 char        HostFSSep(void);	/* the host's path separator */
 
 int         HostFSIsHeader(const unsigned char *hdr);

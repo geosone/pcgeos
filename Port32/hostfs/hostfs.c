@@ -20,12 +20,9 @@
 #include <fcntl.h>
 #endif
 
-/* -1: not known yet (dos32 asks DOS for LFN on first use) */
-#ifdef GEOS_HOST_DOS32
-static int dosNames = -1;
-#else
-static int dosNames = HOSTFS_NAMES_LONG;
-#endif
+/* HOSTFS_NAMES_AUTO: not known yet (dos32 asks DOS for LFN on first
+ * use, other hosts have long names) */
+static int dosNames = HOSTFS_NAMES_AUTO;
 
 void HostFSSetDosNames(int mode)
 {
@@ -37,11 +34,24 @@ int HostFSDosNames(void)
     if (dosNames < 0) {
 #if defined(GEOS_HOST_DOS32) && defined(__DJGPP__)
         dosNames = _use_lfn(NULL) ? HOSTFS_NAMES_DOS_LFN : HOSTFS_NAMES_DOS;
-#else
+#elif defined(GEOS_HOST_DOS32)
         dosNames = HOSTFS_NAMES_DOS;    /* Open Watcom: no LFN calls */
+#else
+        dosNames = HOSTFS_NAMES_LONG;
 #endif
     }
     return dosNames;
+}
+
+int HostFSHostLongNames(void)
+{
+#if defined(GEOS_HOST_DOS32) && defined(__DJGPP__)
+    return _use_lfn(NULL) != 0;
+#elif defined(GEOS_HOST_DOS32)
+    return 0;
+#else
+    return 1;
+#endif
 }
 
 char HostFSSep(void)

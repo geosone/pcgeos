@@ -10,8 +10,9 @@
  * that need blobs and escapes and reading them back, data in one line
  * and in a blob, string sections written and deleted, deleting entries
  * and categories, InitFileCommit to the file and reading it again,
- * InitFileSave/Revert, InitFileGrab/Release and
- * InitFileMakeCanonicKeyCategory.
+ * InitFileSave/Revert, InitFileGrab/Release,
+ * InitFileMakeCanonicKeyCategory, and the HostFS name layout from
+ * [system] primaryFSD (FSDLoadPrimary).
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -372,6 +373,31 @@ static void Grab(void)
     MemFree(mh);
 }
 
+/* [system] primaryFSD: the layout of HostFS names (FSD/fsdInit.c) */
+static void PrimaryFSD(void)
+{
+    int was = HostFSDosNames();
+
+    InitFileWriteString("system", "primaryFSD", "MSLFEC.GEO");
+    FSDLoadPrimary();
+    CHECK(HostFSDosNames() == (HostFSHostLongNames() ? HOSTFS_NAMES_DOS_LFN
+						     : HOSTFS_NAMES_DOS));
+    InitFileWriteString("system", "primaryFSD", "C:\\GEOWORKS\\os2.geo");
+    FSDLoadPrimary();
+    CHECK(HostFSDosNames() == HOSTFS_NAMES_DOS);
+    InitFileWriteString("system", "primaryFSD", "hostfs.geo");
+    FSDLoadPrimary();
+    CHECK(HostFSDosNames() == HOSTFS_NAMES_LONG);
+    InitFileDeleteEntry("system", "primaryFSD");
+    FSDLoadPrimary();
+#ifdef GEOS_HOST_DOS32
+    CHECK(HostFSDosNames() != HOSTFS_NAMES_LONG);
+#else
+    CHECK(HostFSDosNames() == HOSTFS_NAMES_LONG);
+#endif
+    HostFSSetDosNames(was);
+}
+
 int main(int argc, char **argv)
 {
     char canon[40], *slash;
@@ -401,6 +427,7 @@ int main(int argc, char **argv)
     Writes();
     Commit();
     Grab();
+    PrimaryFSD();
 
     InitFileMakeCanonicKeyCategory(canon, "a;b[c]{ ~\001Z");
     CHECK(!strcmp(canon, "a3Bb5Bc5D7B 7E01Z"));

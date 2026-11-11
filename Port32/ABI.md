@@ -1232,6 +1232,15 @@ on the way to a FAT disk.
   an open file only on a commit, so a new GEOS file is committed after
   its header is written; otherwise it could not be found by its GEOS
   name while open.
+- **Choosing the layout.** As in DOS16 GEOS, `[system] primaryFSD` in
+  the init file chooses it (`FSDLoadPrimary`, `FSD/fsdInit.c`):
+  - `mslf.geo` selects DOS names with LFN. On a DOS without LFN it falls
+    back to DOS names.
+  - `ms3`, `ms4`, `ms7`, `dri`, `os2` and `ntfat` select DOS 8.3 names.
+  - `hostfs.geo` selects long names.
+  - Without the key, the host's layout is used.
+  - A Linux tree can therefore be kept in the DOS16 layout, and be used
+    by DOS16 GEOS at the same time.
 - ctest `kernel.file.geos` covers all of this on every host, DOS
   included (DOS names, with and without LFN, are tested on Linux too;
   the QEMU DOS has no LFN).
