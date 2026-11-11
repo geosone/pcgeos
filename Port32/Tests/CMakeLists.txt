@@ -15,6 +15,9 @@ add_test(NAME kernel.heap COMMAND test_kernel_heap)
 add_executable(test_kernel_thread test_kernel_thread.c)
 target_link_libraries(test_kernel_thread PRIVATE geos_kernel)
 add_test(NAME kernel.thread COMMAND test_kernel_thread)
+add_executable(test_kernel_lmem test_kernel_lmem.c)
+target_link_libraries(test_kernel_lmem PRIVATE geos_kernel)
+add_test(NAME kernel.lmem COMMAND test_kernel_lmem)
 
 # ghal_module: a geode in the host's module format (ELF, or DXE3 on dos32),
 # embedded in the test program.  Not with Open Watcom (no geode toolchain).
@@ -86,7 +89,8 @@ include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
 # built with DJGPP gcc for the port (decided 2026-11-11, ABI.md section 5).
 if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
   geos_goc(_gocres_c Goc/gocres.gp Goc/gocres.goc Goc/gocres2.goc)
-  add_executable(test_gocres ${_gocres_c} Goc/test_gocres.c)
+  add_executable(test_gocres ${_gocres_c} Goc/test_gocres.c Goc/gocres_lmem.c)
+  target_link_libraries(test_gocres PRIVATE geos_kernel)
   target_compile_definitions(test_gocres PRIVATE GEOS_PORT32)
   target_include_directories(test_gocres PRIVATE
     ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)

@@ -14,6 +14,8 @@
 #include <heap.h>
 #include <sem.h>
 #include <thread.h>
+#include <lmem.h>
+#include <geosport.h>
 
 /* ---------------------------------------------------------------------
  * Fatal errors.  The names are those of kernelErrors.def; the C kernel
@@ -43,7 +45,16 @@
     X(THREAD_RELEASE_NOT_OWNER) \
     X(UNLOCK_MODULE_BY_WRONG_THREAD) \
     X(THREAD_GET_INFO_BAD_PARAMETER) \
-    X(THREAD_CREATE_FAILED)	/* no memory for a thread */
+    X(THREAD_CREATE_FAILED)	/* no memory for a thread */ \
+    X(LMEM_CANNOT_ALLOCATE) \
+    X(NOT_LMEM_HANDLE) \
+    X(CORRUPTED_LMEM_BLOCK) \
+    X(LMEM_HANDLE_BEFORE_HANDLE_TABLE) \
+    X(LMEM_HANDLE_BEYOND_HANDLE_TABLE) \
+    X(LMEM_CHUNK_HANDLE_AT_ODD_ADDRESS) \
+    X(LMEM_BAD_INSERT_OFFSET) \
+    X(LMEM_BAD_DELETE_OFFSET) \
+    X(LMEM_BAD_DELETE_SIZE)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -199,5 +210,15 @@ void  ThreadWakeOne(KSem *s);
 void  KernelYield(void);
 /* ticks (1/60 s) since the start, from the GHAL clock */
 dword KernelTicks(void);
+
+/* ---------------------------------------------------------------------
+ * LMem (LMem/lmemCode.c, after lmemCode.asm).  Port32/ABI.md section 10.
+ * ------------------------------------------------------------------- */
+/* Check the structure of an LMem block (fatal CORRUPTED_LMEM_BLOCK). */
+void LMemValidate(MemHandle mh);
+/* Build the LMem block of a resource made by goc -cg (header, handle
+ * table, chunks in handle order).  Optrs in it stay unrelocated. */
+MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
+				  HeapFlags hf, HeapAllocFlags haf);
 
 #endif /* KERNELC_H */

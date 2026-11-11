@@ -5,6 +5,7 @@
  * kernel stands in for the real one: every message goes to
  * GocTestProcessClass (or the superclass for @callsuper) through the
  * method thunks of its class structure, @record keeps one event.
+ * gocres_lmem.c builds the resources' LMem blocks with the C kernel.
  */
 #include <geos.h>
 #include <object.h>
@@ -99,10 +100,11 @@ void *CMessageDispatchP(EventHandle ev, word flags, void *reply,
 
 extern int GocTestCheck(void);
 extern int GocTestExtraCheck(void);
+extern int GocResLMemCheck(void);
 
 int main(void)
 {
-    int fails = GocTestCheck() + GocTestExtraCheck();
+    int fails = GocTestCheck() + GocTestExtraCheck() + GocResLMemCheck();
 
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "ok", fails);
     return fails != 0;

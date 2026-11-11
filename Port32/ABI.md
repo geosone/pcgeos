@@ -334,7 +334,44 @@ yield and `ThreadModify`, release of ended threads, nested thread locks
 and `MemThreadGrab` between threads, `MemThreadGrabNB`, timed P and the
 error checks; `ghal.core` covers `ghal_ctx` on every host.
 
-## 10. Open
+## 10. LMem (`Library/Kernel/LMem`, P4)
+
+`LMem/lmemCode.c` keeps the block layout of the asm kernel: header,
+handle table at `LMBH_offset` (a chunk handle is the offset of its
+entry; 0 is a free handle, `0xffff` a chunk without data), then the
+chunks, each with a size word (data size + 2) right before its data.
+That is the layout `goc -cg` describes (section 4), and
+`LMemCreateResourceBlock` builds a resource's block from its
+`GocResource`: header, handle table, chunks in handle order, the two
+parts of a chunk one after the other.
+
+- **Chunk data is aligned to 8** (objects hold pointers and 64-bit
+  optrs): every chunk occupies a multiple of 8 bytes including its size
+  word, and the heap starts where the first chunk's data is 8-aligned.
+- Free chunks are linked through their first word, sorted by address and
+  merged with free neighbours; a free chunk's size word is its whole
+  slot. Allocation is first fit, then compaction, then growing the block
+  (with some padding). Blocks stay below 64K.
+- Chunks move (compaction) and the block may move when it grows, as in
+  the asm kernel: dereference again after `LMemAlloc`, `LMemReAlloc`,
+  `LMemInsertAt`. `LMemReAlloc`/`LMemInsertAt` return TRUE on failure
+  (with `LMF_RETURN_ERRORS`; otherwise `LMEM_CANNOT_ALLOCATE` is fatal).
+- Object blocks (`LMF_HAS_FLAGS`): handle 0 is the flags chunk, one
+  `ObjChunkFlags` byte per handle; it grows with the handle table.
+  `MemAllocLMem(LMEM_TYPE_OBJ_BLOCK)` makes the running thread the exec
+  thread, as in the asm kernel.
+- `LMemDeref` of a chunk without data returns `NULL`.
+- Not yet: `LMF_NO_HANDLES` (DB items), `LMemSplitBlock`, chunk/element/
+  name arrays and GCN lists (next), object relocation (object system).
+
+ctest `kernel.lmem` runs a random sequence of allocations, frees,
+resizes, inserts and deletes against shadow copies and validates the
+block after every step (`LMemValidate`), then object blocks,
+contraction, the 64K limit and the error checks. `goc.resources` builds
+the blocks of its goc resources with `LMemCreateResourceBlock` and finds
+every chunk through its goc chunk handle.
+
+## 11. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`). The
    module format is decided (`GHAL-Concept.md` §4.4) and the `.gp` data is
