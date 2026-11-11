@@ -144,7 +144,8 @@ the 16-bit build. The older Watcom dos32 build
 (`cmake/toolchain-dos32-watcom.cmake`) still builds GHAL, but it leaves
 out `goc.resources`.
 
-The DJGPP toolchain comes from crossdev (`i586-pc-msdosdjgpp`, gcc 16).
+The DJGPP toolchain comes from crossdev (`i586-pc-msdosdjgpp`, gcc 16,
+C and C++).
 The C library is the DJGPP CVS state after 2.05, and gcc needs two DJGPP
 fixes: `float.h` with `#include_next`, and `.bss` section flags. Every
 executable gets CWSDPMI bound in (`cwsdstub.exe`,
