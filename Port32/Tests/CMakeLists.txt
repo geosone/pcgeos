@@ -60,12 +60,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # goc -cg: object resources, class structures and chunk handles of a .goc
-# file, linked and checked on the host (Goc/gocres.goc).
+# geode in two files, linked and checked on the host (Goc/gocres*.goc).
 include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
 # goc -cg needs C99 compound literals, which Open Watcom lacks: dos32 is
 # built with DJGPP gcc for the port (decided 2026-11-11, ABI.md section 5).
 if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
-  geos_goc(_gocres_c Goc/gocres.gp Goc/gocres.goc)
+  geos_goc(_gocres_c Goc/gocres.gp Goc/gocres.goc Goc/gocres2.goc)
   add_executable(test_gocres ${_gocres_c} Goc/test_gocres.c)
   target_compile_definitions(test_gocres PRIVATE GEOS_PORT32)
   target_include_directories(test_gocres PRIVATE

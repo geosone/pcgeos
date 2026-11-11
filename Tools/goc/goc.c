@@ -68,6 +68,8 @@ char	    	libraryName[100] = "";
 DeflibNode    	*deflibPtr;
 
 char  		*outFile = "goc.out";
+char		*gccExportName = NULL;	/* -x: chunk constants for other files */
+FILE		*gccExport = NULL;
 
 char            *asciiStringType = "/* ASCII */char ";
 char            *lStringType = "/* L */wchar_t ";
@@ -278,6 +280,7 @@ Usage(char *fmt, ...)
 	    "\t-L <name>\tspecify library name for class structures\n"
 	    "\t-M\t\toutput makedepend information\n"
 	    "\t-o <filename>\tspecify output filename\n"
+	    "\t-x <filename>\t-cg: chunk constants for the other files\n"
 	    "\t-O\t\tUNIX-only, optimize for space with @optimize\n"
 	    "\t-p<path>\tdirectory to put/get @optimized files\n"
 	    "\t-w\t\tUNIX-only\n"
@@ -632,6 +635,9 @@ FatalError(char *fmt, ...)
     fprintf(stderr, "\n");
     fflush(stderr);
     unlink(outFile);
+    if (gccExportName != NULL) {
+	unlink(gccExportName);
+    }
     exit(-1);
     va_end(args);
 }
@@ -823,6 +829,9 @@ main(int argc, char **argv)
     if (yyerrors && !makeDepend) {
 	printf("\n\n%d errors found\n", yyerrors);
 	unlink(outFile);
+	if (gccExportName != NULL) {
+	    unlink(gccExportName);
+	}
         exit(yyerrors);
     }
 
@@ -841,6 +850,9 @@ main(int argc, char **argv)
     if (yyerrors && !makeDepend) {
 	fprintf(stderr, "\n\n%d errors found\n", yyerrors);
 	unlink(outFile);
+	if (gccExportName != NULL) {
+	    unlink(gccExportName);
+	}
         exit(yyerrors);
     }
 
@@ -857,10 +869,17 @@ main(int argc, char **argv)
     if (yyerrors && !makeDepend) {
 	fprintf(stderr, "\n\n%d errors found\n", yyerrors);
 	unlink(outFile);
+	if (gccExportName != NULL) {
+	    unlink(gccExportName);
+	}
 	exit(yyerrors);
     }
     if (localize) {
 	Localize_DumpLocalizations();
+    }
+    if (gccExport != NULL && fclose(gccExport) != 0) {
+	perror(gccExportName);
+	exit(1);
     }
 
 #if defined(unix)
@@ -1404,6 +1423,18 @@ ParseArgs(int argc, char **argv)
 		    break;
 		}
 
+		case 'x': {
+		    /* -cg: write the chunk constants of this file as macros
+		     * for the other files of the geode (Port32/ABI.md 6) */
+		    if (ac + 1 == argc) {
+			Usage("-x requires a filename argument");
+			/*NOTREACHED*/
+		    }
+		    gccExportName = argv[ac+1];
+		    ac++;
+		    break;
+		}
+
 		case 'O':
 #if !defined(unix)
 		    allowOptimize = FALSE;
@@ -1501,5 +1532,17 @@ ParseArgs(int argc, char **argv)
     if (OpenOutputFile(outFile) == FALSE) {
 	perror(outFile);
 	exit(1);
+    }
+    if (gccExportName != NULL) {
+	if (compiler != COM_GCC) {
+	    Usage("-x needs -cg");
+	}
+	gccExport = fopen(gccExportName, "w");
+	if (gccExport == NULL) {
+	    perror(gccExportName);
+	    exit(1);
+	}
+	fprintf(gccExport, "/* chunk constants of %s for the other files "
+		"of the geode (goc -cg -x) */\n", inFile);
     }
 }

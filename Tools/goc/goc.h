@@ -80,6 +80,7 @@ extern int	yyerrors;
 
 extern char	inFile[];
 extern char 	*outFile;
+extern FILE	*gccExport;	/* goc -cg -x */
 extern Boolean	allowOptimize;
 
 extern char *asciiStringType;
@@ -255,6 +256,7 @@ extern void CopySubst(char *dest, char *source, char *find, char *repl);
 extern void OutputObjRef(char *name);
 extern void FormatObjRef(char *dest, char *name, Symbol *sym);
 extern void OutputChunkExtern(char *name);
+extern void OutputExternDecl(char *name);	/* @extern */
 extern void OutputChunkDefined(Symbol *chunk);
 /* COM_GCC: message invocations and method thunks (output.c) */
 extern void OutputGccMessage(MsgInvocType mit, Symbol *passMsg,

@@ -1,0 +1,91 @@
+/***********************************************************************
+ *
+ * gocres2.goc -- second file of the goc -cg test geode (Port32/Tests).
+ *
+ * Uses objects of gocres.goc through @extern: in an object tree, in
+ * instance data, in chunk data, in a static table in code and in code.
+ * The constants come from gocres_objs.h (goc -cg -x, cmake/GeosGoc.cmake).
+ *
+ ***********************************************************************/
+@include <stdapp.goh>
+#include <stdio.h>
+
+@extern object GocTestPrimary;
+@extern object GocTestGlyph;
+@extern chunk GocTestText;
+
+@start Extra;
+@object GenInteractionClass GocTestExtraGroup = {
+    GI_comp = @GocTestExtraTrigger;
+}
+@object GenTriggerClass GocTestExtraTrigger = {
+    GTI_destination = @GocTestGlyph;
+}
+@chunk optr GocTestExtraRef = @GocTestText;
+@end Extra;
+
+/* objects of both files in static data in code */
+static const optr gocTestExtraTable[] = { @GocTestPrimary, @GocTestExtraGroup };
+static const ChunkHandle gocTestExtraChunk = OptrToChunk(@GocTestText);
+
+extern const GocResource __goc_resource_Extra;
+extern optr gocTestLastDest;
+
+static int extraFails;
+
+static void
+ExtraCheck(int ok, const char *what)
+{
+    if (!ok) {
+	extraFails++;
+	printf("FAIL %s\n", what);
+    }
+}
+
+static const void *
+ExtraChunk(ChunkHandle ch)
+{
+    word first = (word) GOCR_LMEM_HANDLES(ObjLMemBlockHeader);
+
+    return __goc_resource_Extra.GR_chunk[(ch - first) / 2].GC_data;
+}
+
+static const GenInstance *
+ExtraGenPart(ChunkHandle ch)
+{
+    const GenBase *base = (const GenBase *) ExtraChunk(ch);
+
+    return (const GenInstance *) ((const byte *) base + base->Gen_offset);
+}
+
+int
+GocTestExtraCheck(void)
+{
+    const optr text = GOCR_UNRELOC_OPTR(GOCR_RES_INTERFACE, GocTestText);
+
+    ExtraCheck(__goc_resource_Extra.GR_number == GOCR_RES_EXTRA,
+	       "extern: resource of the second file");
+    ExtraCheck(ExtraGenPart(GocTestExtraGroup)->GI_comp.CP_firstChild ==
+	       GOCR_UNRELOC_OPTR(GOCR_RES_EXTRA, GocTestExtraTrigger),
+	       "extern: object tree of the second file");
+    ExtraCheck(((const GenTriggerInstance *)
+		ExtraGenPart(GocTestExtraTrigger))->GTI_destination ==
+	       GOCR_UNRELOC_OPTR(GOCR_RES_INTERFACE, GocTestGlyph),
+	       "extern: instance data");
+    ExtraCheck(*(const optr *) ExtraChunk(GocTestExtraRef) == text,
+	       "extern: chunk data");
+    ExtraCheck(gocTestExtraTable[0] ==
+	       GOCR_UNRELOC_OPTR(GOCR_RES_INTERFACE, GocTestPrimary) &&
+	       gocTestExtraTable[1] ==
+	       GOCR_UNRELOC_OPTR(GOCR_RES_EXTRA, GocTestExtraGroup),
+	       "extern: static table");
+    ExtraCheck(gocTestExtraChunk == GocTestText, "extern: static chunk");
+    ExtraCheck(@GocTestGlyph == ConstructOptr(__goc_resource_handles[
+		   GOCR_RES_INTERFACE], GocTestGlyph), "extern: code");
+    @send gocTestExtraTable[0]::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    ExtraCheck(gocTestLastDest == GOCR_RESOLVE(gocTestExtraTable[0]) &&
+	       OptrToHandle(gocTestLastDest) ==
+	       __goc_resource_handles[GOCR_RES_INTERFACE],
+	       "extern: @send to a static table entry");
+    return extraFails;
+}

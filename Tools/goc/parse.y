@@ -2589,7 +2589,7 @@ defaultModelLine    :
 externLine	:
     	EXTERN OBJECT IDENT semiColonOrError
  	{
-	    OutputChunkExtern($3);
+	    OutputExternDecl($3);
 	    (void) EnterSymbolInGlobal($3, OBJECT_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -2602,7 +2602,7 @@ externLine	:
 	}
     	| EXTERN CHUNK IDENT  semiColonOrError
  	{
-	    OutputChunkExtern($3);
+	    OutputExternDecl($3);
 	    (void) EnterSymbolInGlobal($3, CHUNK_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -2615,7 +2615,7 @@ externLine	:
 	}
     	| EXTERN VIS_MONIKER IDENT semiColonOrError
  	{
-	    OutputChunkExtern($3);
+	    OutputExternDecl($3);
 	    (void) EnterSymbolInGlobal($3, VIS_MONIKER_CHUNK_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);

@@ -13,7 +13,7 @@
 #include <string.h>
 
 ClassStruct GenProcessClass, GenApplicationClass, GenPrimaryClass,
-    GenTriggerClass, GenGlyphClass;
+    GenTriggerClass, GenGlyphClass, GenInteractionClass;
 Handle __goc_resource_handles[8];
 extern ClassStruct GocTestProcessClass;
 
@@ -98,10 +98,11 @@ void *CMessageDispatchP(EventHandle ev, word flags, void *reply,
 }
 
 extern int GocTestCheck(void);
+extern int GocTestExtraCheck(void);
 
 int main(void)
 {
-    int fails = GocTestCheck();
+    int fails = GocTestCheck() + GocTestExtraCheck();
 
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "ok", fails);
     return fails != 0;

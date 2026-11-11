@@ -263,6 +263,71 @@ GccLocalChunk(Symbol *sym)
 	    sym->data.symChunk.resource != NullSymbol);
 }
 
+/*
+ * Objects and chunks of other files of the geode (@extern).  goc keeps
+ * their names itself: the symbols are not found any more when resource
+ * data is written at the end.
+ */
+typedef struct GccExternName {
+    struct GccExternName *next;
+    char name[1];
+} GccExternName;
+static GccExternName *gccExterns;
+static void GccAddExtern(const char *name);
+
+void
+OutputExternDecl(char *name)
+{
+    OutputChunkExtern(name);
+    if (compiler == COM_GCC) {
+	GccAddExtern(name);
+    }
+}
+
+static void
+GccAddExtern(const char *name)
+{
+    GccExternName *e = (GccExternName *) malloc(sizeof(*e) + strlen(name));
+
+    strcpy(e->name, name);
+    e->next = gccExterns;
+    gccExterns = e;
+}
+
+static Boolean
+GccExternChunk(const char *name)
+{
+    GccExternName *e;
+
+    for (e = gccExterns; e != NULL; e = e->next) {
+	if (!strcmp(e->name, name)) {
+	    return TRUE;
+	}
+    }
+    return FALSE;
+}
+
+/* "X" for an object or chunk of another file: GOCR_XSOPTR, GOCR_XSCHUNK */
+static const char *
+GccXPrefix(const char *name)
+{
+    return GccExternChunk(name) ? "X" : "";
+}
+
+/* "@name" as a constant (resource data, static data in code) */
+static void
+GccFormatConstRef(char *dest, const char *name, Symbol *sym,
+		  Boolean afterOptrToChunk)
+{
+    const char *x = GccXPrefix(name);
+
+    if (afterOptrToChunk && (GccLocalChunk(sym) || *x != '\0')) {
+	sprintf(dest, "GOCR_%sSCHUNK(%s)", x, name);
+    } else {
+	sprintf(dest, "GOCR_%sSOPTR(%s)", x, name);
+    }
+}
+
 /* the form of "@name" in code; lex: the C structure at that point */
 static void
 GccFormatCodeRef(char *dest, const char *name, Symbol *sym,
@@ -273,11 +338,11 @@ GccFormatCodeRef(char *dest, const char *name, Symbol *sym,
     } else if (GccLocalChunk(sym) && afterOptrToChunk) {
 	sprintf(dest, "GOCR_SCHUNK(%s)", name);
     } else if (GccInStaticInit(lex)) {
-	if (!GccLocalChunk(sym)) {
-	    yyerror("@%s in a static initializer: only objects and chunks "
-		    "of this file can be used there (Port32/ABI.md 6)", name);
+	if (!GccLocalChunk(sym) && !GccExternChunk(name)) {
+	    yyerror("@%s in a static initializer: not an object or chunk "
+		    "of this geode (Port32/ABI.md 6)", name);
 	}
-	sprintf(dest, "GOCR_SOPTR(%s)", name);
+	GccFormatConstRef(dest, name, sym, afterOptrToChunk);
     } else {
 	sprintf(dest, "GOCR_OPTR(%s)", name);
     }
@@ -300,7 +365,9 @@ GccSubstOptr(char *dest, const char *src, Boolean inData)
 	    id[n] = '\0';
 	    cp = dest;
 	    if (inData) {
-		dest += sprintf(dest, "GOCR_SOPTR(%s)", id);
+		GccFormatConstRef(dest, id, Symbol_Find(id, TRUE),
+				  GccAfterOptrToChunk(start, dest));
+		dest += strlen(dest);
 	    } else {
 		GccFormatCodeRef(dest, id, Symbol_Find(id, TRUE),
 				 GccAfterOptrToChunk(start, dest), &lex);
@@ -850,14 +917,16 @@ OutputObjectData(Symbol *class,
 		      if (valueToUse->data.instLink.isParentLink) {
 			  /* need to set  the first bit, a GI_link flag */
 			  if (compiler == COM_GCC) {
-			      Output("{GOCR_SOPTR(%s) | 1}",
+			      Output("{GOCR_%sSOPTR(%s) | 1}",
+				     GccXPrefix(valueToUse->data.instLink.link->name),
 				     valueToUse->data.instLink.link->name);
 			  } else {
                           Output("{(optr)(((char *)&%s)+1)}",
                                  valueToUse->data.instLink.link->name);
 			  }
 			}else if (compiler == COM_GCC) {
-			  Output("{GOCR_SOPTR(%s)}",
+			  Output("{GOCR_%sSOPTR(%s)}",
+				 GccXPrefix(valueToUse->data.instLink.link->name),
 				 valueToUse->data.instLink.link->name);
 			}else{
                           Output("{(optr)&%s}",
@@ -876,7 +945,8 @@ OutputObjectData(Symbol *class,
 			    if (!strcmp(valueToUse->value, "process")) {
 				Output("GOCR_PROCESS_OPTR");
 			    } else {
-				Output("GOCR_SOPTR(%s)", valueToUse->value);
+				Output("GOCR_%sSOPTR(%s)", GccXPrefix(valueToUse->value),
+				       valueToUse->value);
 			    }
 			    break;
 			}
@@ -902,7 +972,8 @@ OutputObjectData(Symbol *class,
 		case CHUNK_INST_SYM : {
 		    if (valueToUse != NullInstanceValue &&
 			compiler == COM_GCC) {
-			Output("GOCR_SCHUNK(%s)", valueToUse->value);
+			Output("GOCR_%sSCHUNK(%s)", GccXPrefix(valueToUse->value),
+				   valueToUse->value);
 		    } else if (valueToUse != NullInstanceValue) {
 			Output("(ChunkHandle)(dword)&%s",
 			       	    valueToUse->value);
@@ -914,7 +985,8 @@ OutputObjectData(Symbol *class,
 		case VIS_MONIKER_SYM : {
 		    if (valueToUse != NullInstanceValue &&
 			compiler == COM_GCC) {
-			Output("GOCR_SCHUNK(%s)", valueToUse->value);
+			Output("GOCR_%sSCHUNK(%s)", GccXPrefix(valueToUse->value),
+				   valueToUse->value);
 		    } else if (valueToUse != NullInstanceValue) {
 			Output("(ChunkHandle)(dword)&%s",
 			       	    valueToUse->value);
@@ -2285,8 +2357,12 @@ OutputChunk(Symbol *chunk)
 		Output("GCNListElement %s _e_%s[] = {",lms, chunk->name);
 		for (sle = chunk->data.symGCNList.firstItem;
 		     sle != NullSymbolListEntry; sle = sle->next) {
-			 Output(compiler == COM_GCC ? "{GOCR_SOPTR(%s)}, " :
-				"{(optr)&%s}, ", sle->entry->name);
+			 if (compiler == COM_GCC) {
+			     Output("{GOCR_%sSOPTR(%s)}, ",
+				    GccXPrefix(sle->entry->name), sle->entry->name);
+			 } else {
+			     Output("{(optr)&%s}, ", sle->entry->name);
+			 }
 		}
 		Output("};");
 	    }
@@ -2628,6 +2704,18 @@ OutputChunkConstantGcc(Symbol *chunk)
 	   chunk->name, ResourceHeaderType(resource), index, chunk->name);
     OutputResourceNumber(resource);
     Output(" };");
+    if (gccExport != NULL) {
+	/* macros: the header type need not be known where this is read */
+	char *cp;
+
+	fprintf(gccExport, "#define __goc_xch_%s GOCR_CHUNK_HANDLE(%s, %d)\n"
+		"#define __goc_xrs_%s GOCR_RES_",
+		chunk->name, ResourceHeaderType(resource), index, chunk->name);
+	for (cp = resource->name; *cp != '\0'; cp++) {
+	    putc(toupper((unsigned char) *cp), gccExport);
+	}
+	putc('\n', gccExport);
+    }
 }
 
 /* the C object(s) holding the data of a chunk: {data, size, data2, size2} */
@@ -2711,7 +2799,8 @@ OutputResourceTablesGcc(Symbol *resource, int flagsChunk,
 	   roundedNumChunks);
     if (resource->flags & SYM_OBJECT_BLOCK) {
 	if (resource->data.symResource.resourceOutput != NullSymbol) {
-	    Output(", 0, 0, GOCR_SOPTR(%s), 0}",
+	    Output(", 0, 0, GOCR_%sSOPTR(%s), 0}",
+		   GccXPrefix(resource->data.symResource.resourceOutput->name),
 		   resource->data.symResource.resourceOutput->name);
 	} else {
 	    Output(", 0, 0, 0, 0}");

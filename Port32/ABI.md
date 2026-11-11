@@ -187,9 +187,10 @@ strings, comments and preprocessor lines. In the initializer of an object
 with static storage (file scope or `static`), `@X` becomes
 `GOCR_SOPTR(X)`. Everywhere else it remains `GOCR_OPTR(X)`, which is
 relocated at once. Automatic variables therefore get relocated optrs.
-Only objects and chunks of the same file can be used in static data.
-Other objects are a goc error until §7.1 is solved. In the SDK samples,
-26 table entries change form, and no other code does.
+Objects and chunks of other files of the geode (`@extern`) can be used
+as well (§6.1). Anything else (`@X` that is not an object or chunk of
+the geode) is a goc error in static data. In the SDK samples, 26 table
+entries change form, and no other code does.
 
 Checks: `goc.resources` covers a static optr, an optr table at file
 scope, a feature-list structure that is `static` in a function, an
@@ -197,15 +198,44 @@ automatic optr, `GOCR_RESOLVE` including `process`, `GeodeResolveOptrAt`,
 and `@send` to a table entry. The UICtrl and Levels samples no longer
 fail on their tables, and Levels now compiles (`goc_sdk`: 45 samples).
 
+### 6.1 Objects of other files (`@extern`)
+
+A geode's objects are spread over several `.goc` files, and one file
+refers to another's objects with `@extern object X;` (`chunk`,
+`visMoniker`). In code that is `GOCR_OPTR(X)` with the `const` variables
+`X` and `X_resid` of the defining file, which works across files at run
+time. In resource data and static data in code the value must be a
+constant, and C has no constants across translation units. Therefore:
+
+- `goc -cg -x <file>` writes the chunk constants of every chunk the file
+  defines as **macros**:
+  `#define __goc_xch_X GOCR_CHUNK_HANDLE(<header type>, <n>)` and
+  `#define __goc_xrs_X GOCR_RES_<RESOURCE>`. Macros are expanded only
+  where they are used, so the header type need not be known when the
+  file is read.
+- `cmake/GeosGoc.cmake` collects these per geode in `<geode>_objs.h`
+  (`cmake/GeosGocObjs.cmake`, rewritten only when it changes). Every C
+  file of the geode includes it after `<geode>_res.h`.
+- For a name declared with `@extern`, goc writes `GOCR_XSOPTR(X)` /
+  `GOCR_XSCHUNK(X)` instead of `GOCR_SOPTR` / `GOCR_SCHUNK`, in instance
+  data (links, composite, optr fields), GCN lists, chunk data, resource
+  output and static initializers in code.
+
+No load-time relocation by name is needed: resource numbers are fixed per
+geode by `gpres.py`, chunk handles by the order of the chunks. The SDK
+output does not change (none of its samples uses `@extern` in data). Of
+the real multi-file geodes in `Appl` that goc can translate on Linux,
+BbxBrow and Webbox use it (12 references), and all resolve. `goc.resources`
+is now a geode of two files: `gocres2.goc` uses objects of `gocres.goc` in
+an object tree, instance data, chunk data, a static table, `OptrToChunk`
+in static data, code and `@send`.
+
 ## 7. Open
 
-1. **References to objects of other files in resource data.** `@extern`
-   objects have no compile-time resource, so they need load-time
-   relocation by name.
-2. **Geode format**: an ELF shared object plus the `.gp` tables (resources
+1. **Geode format**: an ELF shared object plus the `.gp` tables (resources
    as above, exports, protocol numbers); see `GHAL-Concept.md` §4.4.
-3. **DOS16 file formats under dos32**: which structures of VM files and
+2. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.
-4. **GEOS `stdio.h` and the DBCS string functions** on top of the host C
+3. **GEOS `stdio.h` and the DBCS string functions** on top of the host C
    library.

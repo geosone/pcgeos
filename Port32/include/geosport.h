@@ -83,6 +83,13 @@ typedef word		VardataKey;
 				 | (optr) (ChunkHandle) (ch))
 #define GOCR_SOPTR(chunk)	GOCR_UNRELOC_OPTR(__goc_rs_##chunk, __goc_ch_##chunk)
 #define GOCR_PROCESS_OPTR	GOCR_UNRELOC_OPTR(GOCR_PROCESS_RES, 0)
+/*
+ * The same for an object or chunk of another file of the geode
+ * (@extern): goc -cg -x writes the __goc_xch_/__goc_xrs_ macros of each
+ * file, and cmake/GeosGoc.cmake collects them in <geode>_objs.h.
+ */
+#define GOCR_XSCHUNK(chunk)	((ChunkHandle) (__goc_xch_##chunk))
+#define GOCR_XSOPTR(chunk)	GOCR_UNRELOC_OPTR(__goc_xrs_##chunk, __goc_xch_##chunk)
 #define GOCR_VARIANT_SUPERCLASS	((struct _ClassStruct *) 1)
 
 /*

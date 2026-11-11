@@ -5119,7 +5119,7 @@ yyreduce:
   case 249:
 
     {
-	    OutputChunkExtern((yyvsp[-1].string));
+	    OutputExternDecl((yyvsp[-1].string));
 	    (void) EnterSymbolInGlobal((yyvsp[-1].string), OBJECT_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -5140,7 +5140,7 @@ yyreduce:
   case 251:
 
     {
-	    OutputChunkExtern((yyvsp[-1].string));
+	    OutputExternDecl((yyvsp[-1].string));
 	    (void) EnterSymbolInGlobal((yyvsp[-1].string), CHUNK_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -5161,7 +5161,7 @@ yyreduce:
   case 253:
 
     {
-	    OutputChunkExtern((yyvsp[-1].string));
+	    OutputExternDecl((yyvsp[-1].string));
 	    (void) EnterSymbolInGlobal((yyvsp[-1].string), VIS_MONIKER_CHUNK_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
