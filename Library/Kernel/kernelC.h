@@ -111,7 +111,8 @@
     X(VM_ALLOC_FAILED)		/* no memory for a block */ \
     X(VM_CHAIN_NOT_SUPPORTED)	/* DB item chains */ \
     X(CANNOT_ALLOCATE_CORRECT_CHUNK_HANDLE)	/* LMemAllocAt: handle taken */ \
-    X(OBJ_LOAD_ERROR)		/* a state file that cannot be used */
+    X(OBJ_LOAD_ERROR)		/* a state file that cannot be used */ \
+    X(INIT_FILE_ERROR)		/* no memory for the init file */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -721,6 +722,9 @@ void KernelSetError(word error);	/* threadThread.c: ThreadGetError */
 /* SP_TOP on the host: the drive of the GEOS top directory (HostFS) */
 void FileSetTopHostPath(const char *hostPath);
 DiskHandle FileTopDisk(void);
+/* Initfile/initfileHigh.c: forget the init files read; the next init
+ * file routine reads them again (after FileSetTopHostPath) */
+void InitFileReset(void);
 /* the disk of a GEOS path (relative to the current path, or to the
  * root of its disk if it starts with '\\', or "drive:") and the path on
  * it from its root, "\\" separated; NULL with the error set */

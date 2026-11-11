@@ -1362,6 +1362,84 @@ Port32 differences:
 Not yet: standard paths spread over several directories, `FEA_CUSTOM`,
 and the order of entries (it is the host's directory order).
 
+## 13h. The init file (`Library/Kernel/Initfile`, P4)
+
+The init file routines of `CInclude/initfile.h` work on the same files
+as the asm kernel: geos.ini and the files it chains to.
+
+**Format** (as before, `initfileLow.asm`, `initfileConstruct.asm`):
+
+- `[category]` lines, then `key = value` lines. `;` starts a comment.
+- Categories and keys compare without case and without spaces and tabs
+  (`"My Cat"` is `mycat`).
+- A value ends at the comment or the line end; spaces and tabs before
+  them do not count.
+- A value of several lines is a blob, `{` to `}`.
+  - In a blob, `\` escapes `{`, `[`, `}` and `\`; `\n` and `\r` are a
+    lone LF and CR.
+  - Outside a blob only `\{` and `\[` are escapes.
+- What `InitFileWriteString` writes:
+  - A string becomes a blob if it starts or ends with a blank, or holds a
+    line end or a `;`.
+  - The empty string is `{}`.
+  - Lines end with CR/LF.
+- Integers are decimal; booleans are `true` and `false`.
+- Data are two hex digits per byte, 20 bytes per line, and in a blob when
+  the entry is longer than 40 columns.
+- String sections are lines: runs of characters from the space up,
+  separated by control characters.
+
+**Files** (`Loader/ini.asm`):
+
+- The init files are read on first use. The first is `geos.ini` in the
+  top directory (`GEOS.INI` is also tried).
+- `[paths] ini` names further files, separated by spaces, up to four in
+  all.
+- Reads search the files in order:
+  - `IFRF_FIRST_ONLY`: the first file only.
+  - `IFRF_READ_ALL`: every file; the values are joined by CR/LF.
+- Writes and deletions change the first file, in memory.
+  - `InitFileCommit` writes it back.
+  - A file that cannot be written (a read-only geos.ini) is left alone.
+- `InitFileSave` and `InitFileRevert` copy the first file to and from
+  `ini.bak` in PRIVDATA.
+- `InitFileReset` (kernel only) forgets what was read, e.g. after
+  `FileSetTopHostPath`.
+
+**Return values** follow the C stubs of `initfileC.asm`:
+
+- Reading routines return TRUE on error. A string read into a buffer is
+  cut to the buffer.
+- `InitFileEnumStringSection` returns TRUE only if the callback stopped
+  the enumeration.
+- `InitFileReadAllInteger` returns TRUE if the callback stopped it, or if
+  no file has the key.
+
+Port32 differences:
+
+- **Lenient reading.** These cases are read the way an editor of the
+  file means them; the asm kernel misread them:
+  - A line without `=` is skipped by itself.
+  - `key =` with nothing after it is empty, unless a blob starts on the
+    next line.
+  - A blob may start with `{` and a lone LF (a file edited on Linux).
+  - A boolean may end at the end of the file.
+  - A section must fit into the buffer together with its null.
+  - `IFRF_READ_ALL` also reads into a buffer.
+- **Files.**
+  - The files of `[paths] ini` are GEOS paths (a drive name, or relative
+    to the top directory), not host paths.
+  - Without a geos.ini the first file starts empty, and `InitFileCommit`
+    creates it.
+  - The file is not kept open between commits.
+- **Grab.** `InitFileGrab` copies the passed block. What is written
+  while grabbed goes back into the block (with a `C_CTRL_Z` at the end)
+  at `InitFileRelease`; until then other threads wait.
+
+Not yet: the loader's `/P` switch, geosec.ini, the hash table of the
+categories, `InitFileBackupLanguage`/`InitFileSwitchLanguages`, and
+`InitFilePushPrimaryFile`/`InitFilePopPrimaryFile`.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

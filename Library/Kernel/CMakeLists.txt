@@ -45,6 +45,9 @@
 #   Port32/hostfs/hostfsDriver.c <- the HostFS file system driver
 #                      (Port32/include/fsdriver.h), part of the kernel
 #                      until drivers are geodes
+#   Initfile/initfileLow.c, initfileConstruct.c, initfileHigh.c <- the
+#                      init file (geos.ini) of the same asm files,
+#                      initfileC.asm and Loader/ini.asm
 #   VMem/vmemBlkManip.c, vmemHeader.c, vmemHigh.c, vmemChain.c <- the
 #                      same asm files (vmemHigh.c also vmemC.asm): VM
 #                      files in the DOS16 format
@@ -87,6 +90,9 @@ add_library(geos_kernel_objs OBJECT
   Drive/driveHigh.c
   Disk/diskHigh.c
   ${PROJECT_SOURCE_DIR}/Port32/hostfs/hostfsDriver.c
+  Initfile/initfileLow.c
+  Initfile/initfileConstruct.c
+  Initfile/initfileHigh.c
   VMem/vmemBlkManip.c
   VMem/vmemHeader.c
   VMem/vmemHigh.c
