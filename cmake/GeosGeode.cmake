@@ -1,8 +1,8 @@
 # GeosGeode.cmake -- build geodes in the module format of the host.
 #
 #   geos_geode(<name> <source>... [GP <geode.gp> [GOC <file.goc>...]
-#              [REV <geode.rev>]] [INCLUDES dir...] [DEFINITIONS def...]
-#              [OPTIONS opt...])
+#              [REV <geode.rev>] [PROTOCOL <major.minor>]]
+#              [INCLUDES dir...] [DEFINITIONS def...] [OPTIONS opt...])
 #
 # Builds <name>.geo in the current binary directory and the target
 # geode_<name>; the path of the file goes to the variable <name>_GEO in
@@ -10,7 +10,9 @@
 # through goc -cg (GeosGoc.cmake) and Port32/tools/gpgeode.py writes the
 # GEOS data of the module (__geos_module, CInclude/geosmod.h) from
 # the .gp file and the .rev file (default: <geode>.rev next to the .gp
-# file, if there is one).  The format is the host's own (Port32/GHAL-Concept.md
+# file, if there is one).  PROTOCOL gives the protocol where the .rev
+# file does not have it (drivers: glue took theirs from the .ldf file of
+# their protocol, e.g. kbd.ldf for KEYBOARD_PROTO).  The format is the host's own (Port32/GHAL-Concept.md
 # section 4.4, loaded by ghal_module):
 #
 #   linux (later gonware): ELF shared object, -shared -nostdlib -z now
@@ -37,7 +39,7 @@
 set(_geos_geode_cflags -ffreestanding -fno-stack-protector -fno-sanitize=all)
 
 function(geos_geode name)
-  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "GP;REV"
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "GP;REV;PROTOCOL"
                         "GOC;INCLUDES;DEFINITIONS;OPTIONS")
   set(sources ${ARG_UNPARSED_ARGUMENTS})
   set(geo ${CMAKE_CURRENT_BINARY_DIR}/${name}.geo)
@@ -65,6 +67,9 @@ function(geos_geode name)
     set(rev_args)
     if(rev)
       set(rev_args --rev ${rev})
+    endif()
+    if(ARG_PROTOCOL)
+      list(APPEND rev_args --protocol ${ARG_PROTOCOL})
     endif()
     add_custom_command(OUTPUT ${module_c}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${dir}

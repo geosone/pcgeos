@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gpgeode.py -- the GEOS data of a geode module from its .gp file.
 
-Usage:  gpgeode.py [-o OUT.c] [--rev FILE.rev] [-D NAME]... [--res RES.h]
+Usage:  gpgeode.py [-o OUT.c] [--rev FILE.rev] [--protocol M.m] [-D NAME]... [--res RES.h]
                    [--objs OBJS.h] GEODE.gp [FILE.goc...]
 
 Writes the C definition of __geos_module (CInclude/geosmod.h): what
@@ -19,8 +19,8 @@ resource <name> <flags> (RESF_* as glue computes them), export [x as y],
 publish, skip <n>, skip until <n>, ifdef/ifndef/else/endif.  Ignored:
 usernotes, platform, ship, exempt, nosort, incminor, load, rev.
 
-The protocol comes from the first "P major.minor" line of the .rev file
-(0.0 without one).  The protocol a library needs is 0.0 ("any") for now:
+The protocol comes from --protocol major.minor, else from the first
+"P major.minor" line of the .rev file (0.0 without one).  The protocol a library needs is 0.0 ("any") for now:
 glue took it from the library's .ldf file.
 """
 import os
@@ -260,7 +260,7 @@ def c_string(s):
 
 def main():
     args = sys.argv[1:]
-    out = rev = res_h = objs_h = None
+    out = rev = res_h = objs_h = proto = None
     defines = set()
     while args and args[0].startswith('-'):
         opt = args.pop(0)
@@ -268,6 +268,8 @@ def main():
             out = args.pop(0)
         elif opt == '--rev':
             rev = args.pop(0)
+        elif opt == '--protocol':
+            proto = args.pop(0)
         elif opt == '--res':
             res_h = args.pop(0)
         elif opt == '--objs':
@@ -347,7 +349,10 @@ def main():
         L.append(f'    {{{desc}, {c_string(case[up])}, 0x{flags:04x}}},')
     L.append('};')
     L.append('')
-    major, minor = protocol(rev)
+    if proto:
+        major, minor = (int(x) for x in proto.split('.'))
+    else:
+        major, minor = protocol(rev)
     appobj = f'GOCR_XSOPTR({gp.appobj})' if gp.appobj else '0'
     L += ['const GeosModuleInfo __geos_module = {',
           '    GEOS_MODULE_MAGIC, GEOS_MODULE_VERSION,',
