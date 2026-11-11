@@ -1,0 +1,276 @@
+/***********************************************************************
+ *
+ * kmsg.goc -- messages through the C kernel (Port32/ABI.md section 12).
+ *
+ * Classes made by goc -cg, objects in LMem blocks built by the kernel,
+ * sent and called with @send/@call/@record/@dispatch: direct calls, a
+ * process thread with a queue, calls to another thread, message flags,
+ * master parts built on demand and a variant superclass resolved by the
+ * object.  test_kernel_msg.c drives it.
+ *
+ ***********************************************************************/
+@include <stdapp.goh>
+#include <stdio.h>
+
+/* a master level (like Vis) ... */
+@class KTopClass, MetaClass, master;
+    @instance word KTI_x;
+    @instance word KTI_inits;
+@message word MSG_KT_GET_X();
+@endc
+@classdecl KTopClass;
+
+/* ... below it a variant master level (like Gen) ... */
+@class KVarClass, KTopClass, master, variant;
+    @instance word KVI_y;
+@message word MSG_KV_GET_Y();
+@message ThreadHandle MSG_KV_WHO();
+@message void MSG_KV_ADD(word delta);
+@endc
+@classdecl KVarClass;
+
+/* ... whose superclass the object picks (like OLButtonClass) */
+@class KTopImplClass, KTopClass;
+@endc
+@classdecl KTopImplClass;
+
+/* the class of the objects (like GenTriggerClass) */
+@class KButtonClass, KVarClass;
+@message word MSG_KB_SUM(word a, word b, word c);
+@endc
+@classdecl KButtonClass;
+
+@class KMsgProcessClass, ProcessClass;
+@message word MSG_KP_PING(word value);
+@message void MSG_KP_LOG(word value);
+@message void MSG_KP_DUP(word value);
+@message ThreadHandle MSG_KP_WHO();
+@message void MSG_KP_TIMER(dword tick, word id);
+@endc
+@classdecl KMsgProcessClass;
+
+@start Objects;
+@object KButtonClass KButton = {
+    KVI_y = 5;
+}
+@end Objects;
+
+@start Remote;
+@object KButtonClass KRemote = {
+    KVI_y = 9;
+}
+@end Remote;
+
+int kmsgResolves;
+word kmsgLog[16];
+int kmsgLogCount;
+word kmsgDup, kmsgDupCount;
+word kmsgTimerId;
+int kmsgTimers;
+word kmsgAckCode;
+optr kmsgAckCaller;
+
+/* ---- master and variant levels ---- */
+
+@method KTopClass, MSG_META_INITIALIZE
+{
+    pself->KTI_x = 42;
+    pself->KTI_inits++;
+}
+
+@method KTopClass, MSG_KT_GET_X
+{
+    return pself->KTI_x;
+}
+
+@method KTopImplClass, MSG_KT_GET_X
+{
+    return @callsuper() + 1000;
+}
+
+@method KVarClass, MSG_META_INITIALIZE
+{
+    pself->KVI_y = 7;			/* not called: the part is built */
+}
+
+@method KVarClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    kmsgResolves++;
+    return &KTopImplClass;
+}
+
+@method KVarClass, MSG_KV_GET_Y
+{
+    return pself->KVI_y;
+}
+
+@method KVarClass, MSG_KV_WHO
+{
+    return (ThreadHandle) ThreadGetInfo(0, TGIT_THREAD_HANDLE);
+}
+
+@method KVarClass, MSG_KV_ADD
+{
+    pself->KVI_y += delta;
+}
+
+@method KButtonClass, MSG_KB_SUM
+{
+    return a + b + c + pself->KVI_y;
+}
+
+/* ---- the process thread ---- */
+
+@method KMsgProcessClass, MSG_KP_PING
+{
+    return value + 1;
+}
+
+@method KMsgProcessClass, MSG_KP_LOG
+{
+    if (kmsgLogCount < 16)
+	kmsgLog[kmsgLogCount++] = value;
+}
+
+@method KMsgProcessClass, MSG_KP_DUP
+{
+    kmsgDup = value;
+    kmsgDupCount++;
+}
+
+@method KMsgProcessClass, MSG_KP_WHO
+{
+    return (ThreadHandle) ThreadGetInfo(0, TGIT_THREAD_HANDLE);
+}
+
+@method KMsgProcessClass, MSG_KP_TIMER
+{
+    kmsgTimerId = id;
+    kmsgTimers++;
+}
+
+@method KMsgProcessClass, MSG_META_ACK
+{
+    kmsgAckCode = callerID;
+    kmsgAckCaller = caller;
+}
+
+/* ---- checks ---- */
+
+static int fails;
+#define CHECK(c) \
+    do { if (!(c)) { fails++; printf("FAIL kmsg.goc %d: %s\n", __LINE__, #c); } \
+    } while (0)
+
+/* each returns its own failures */
+
+/* objects run by the calling thread: direct calls */
+int KMsgLocal(optr button)
+{
+    int before = fails;
+    ThreadHandle me = (ThreadHandle) ThreadGetInfo(0, TGIT_THREAD_HANDLE);
+    word x;
+
+    CHECK(@call button::MSG_KV_GET_Y() == 5);
+    CHECK(@call button::MSG_KB_SUM(1, 2, 3) == 11);
+    CHECK(@call button::MSG_KV_WHO() == me);
+    @send button::MSG_KV_ADD(10);		/* direct: done at once */
+    CHECK(@call button::MSG_KV_GET_Y() == 15);
+
+    /* not handled on the Var level: the variant superclass is resolved,
+     * the Top level built (MSG_META_INITIALIZE) and the override in
+     * KTopImplClass calls KTopClass */
+    CHECK(kmsgResolves == 0);
+    x = @call button::MSG_KT_GET_X();
+    CHECK(x == 1042);
+    CHECK(kmsgResolves == 1);
+    x = @call button::MSG_KT_GET_X();
+    CHECK(x == 1042 && kmsgResolves == 1);
+    CHECK(((KTopInstance *) ObjDeref1(button))->KTI_inits == 1);
+    CHECK(((KVarInstance *) ObjDeref2(button))->KVI_y == 15);
+    CHECK(ObjIsClassADescendant(&KButtonClass, &KVarClass) &&
+	  !ObjIsClassADescendant(&KVarClass, &KButtonClass));
+
+    /* an unhandled message: nothing happens, the reply stays 0 */
+    CHECK(@call button::MSG_KP_PING(1) == 0);
+    return fails - before;
+}
+
+/* the process thread `proc' and an object `remote' it runs */
+int KMsgRemote(optr proc, optr remote)
+{
+    int before = fails;
+    ThreadHandle t2 = (ThreadHandle) OptrToHandle(proc);
+    EventHandle ev;
+    optr dest;
+
+    /* the process thread has lower priority: sends queue up until the
+     * call blocks this thread, then they run in order */
+    @send proc::MSG_KP_LOG(1);
+    @send proc::MSG_KP_LOG(2);
+    @send ,forceQueue,insertAtFront proc::MSG_KP_LOG(3);
+    CHECK(kmsgLogCount == 0);
+    CHECK(@call proc::MSG_KP_PING(10) == 11);
+    CHECK(kmsgLogCount == 3 && kmsgLog[0] == 3 && kmsgLog[1] == 1 &&
+	  kmsgLog[2] == 2);
+    CHECK(@call proc::MSG_KP_WHO() == t2);
+
+    /* duplicates: kept once; with replace, the new value */
+    @send ,forceQueue,checkDuplicate proc::MSG_KP_DUP(1);
+    @send ,forceQueue,checkDuplicate proc::MSG_KP_DUP(2);
+    @send ,forceQueue,checkDuplicate,replace proc::MSG_KP_DUP(3);
+    (void) @call proc::MSG_KP_PING(0);
+    CHECK(kmsgDupCount == 1 && kmsgDup == 3);
+
+    /* @record and @dispatch */
+    ev = @record proc::MSG_KP_PING(20);
+    CHECK(ObjGetMessageInfo(ev, &dest) == MSG_KP_PING && dest == proc);
+    {
+	EventHandle dup = ObjDuplicateMessage(ev);
+	CHECK(@dispatchcall (MSG_KP_PING) dup == 21);
+    }
+    CHECK(@dispatchcall (MSG_KP_PING) ev == 21);
+
+    /* an object block run by the other thread: remote calls */
+    CHECK(@call remote::MSG_KV_WHO() == t2);
+    CHECK(@call remote::MSG_KB_SUM(1, 1, 1) == 12);
+    @send remote::MSG_KV_ADD(1);
+    CHECK(@call remote::MSG_KV_GET_Y() == 10);
+    CHECK(@call remote::MSG_KT_GET_X() == 1042);
+    return fails - before;
+}
+
+/* event timer: the timer interrupt queues MSG_KP_TIMER */
+int KMsgTimer(optr proc)
+{
+    int before = fails;
+    word id;
+
+    TimerStart(TIMER_EVENT_ONE_SHOT, proc, 2, MSG_KP_TIMER, 0, &id);
+    TimerSleep(10);
+    (void) @call proc::MSG_KP_PING(0);
+    CHECK(kmsgTimers == 1 && kmsgTimerId == id);
+    return fails - before;
+}
+
+/* a queue nobody reads, flushed into the process thread's queue */
+int KMsgFlush(optr proc, optr other)
+{
+    int before = fails;
+    QueueHandle q = GeodeAllocQueue();
+    QueueHandle pq = (QueueHandle) ThreadGetInfo((ThreadHandle)
+						 OptrToHandle(proc),
+						 TGIT_QUEUE_HANDLE);
+
+    kmsgLogCount = 0;
+    QueuePostMessage(q, @record proc::MSG_KP_LOG(7), 0);
+    QueuePostMessage(q, @record other::MSG_KV_ADD(1), 0);
+    QueuePostMessage(q, @record proc::MSG_KP_LOG(8), 0);
+    CHECK(GeodeInfoQueue(q) == 3);
+    GeodeFlushQueue(q, pq, proc, 0);
+    CHECK(GeodeInfoQueue(q) == 1);
+    (void) @call proc::MSG_KP_PING(0);
+    CHECK(kmsgLogCount == 2 && kmsgLog[0] == 7 && kmsgLog[1] == 8);
+    GeodeFreeQueue(q);
+    return fails - before;
+}

@@ -1547,7 +1547,11 @@ OutputClassTable(Symbol *class)
     /*
      * Output Class_masterOffset and Class_messageCount
      */
-    if (class->data.symClass.masterLevel) {
+    if (class->data.symClass.masterLevel && compiler == COM_GCC) {
+	/* the master offsets follow the class pointer of MetaBase */
+	Output("(word) (sizeof(ClassStruct *) + %d), ",
+	       (class->data.symClass.masterLevel - 1) * 2);
+    } else if (class->data.symClass.masterLevel) {
         Output("%d, ", 4+(class->data.symClass.masterLevel*2)-2);
     } else {
         Output("0, ");

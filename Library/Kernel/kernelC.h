@@ -16,6 +16,7 @@
 #include <thread.h>
 #include <lmem.h>
 #include <timer.h>
+#include <object.h>
 #include <geosport.h>
 
 /* ---------------------------------------------------------------------
@@ -61,7 +62,18 @@
     X(CANNOT_SORT_VARIABLE_SIZED_CHUNK_ARRAYS) \
     X(CANNOT_RESIZE_FIXED_SIZE_ELEMENT) \
     X(NULL_ELEMENT_PASSED_TO_CHUNK_ARRAY_ROUTINE) \
-    X(BAD_TIMER_TYPE)
+    X(BAD_TIMER_TYPE) \
+    X(NOT_AN_EVENT_HANDLE) \
+    X(NOT_A_QUEUE_HANDLE) \
+    X(OUT_OF_HANDLES) \
+    X(QUEUE_FLUSH_TOO_LARGE) \
+    X(NO_THREAD_FOR_DESTINATION) \
+    X(NO_QUEUE_FOR_DESTINATION) \
+    X(ILLEGAL_DESTINATION) \
+    X(MF_CUSTOM_NOT_SUPPORTED) \
+    X(CANNOT_HAVE_BOTH_MF_FORCE_QUEUE_AND_MF_CALL) \
+    X(VARIANT_SUPERCLASS_NOT_RESOLVED) \
+    X(OBJ_BAD_MASTER_PARTS)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -189,6 +201,8 @@ typedef struct {
     word	T_startValue;
     word	T_exitCode;
     Handle	T_eventQueue;
+    ClassStruct	*T_class;	/* ThreadAttachToQueue: for messages to
+				 * the thread, its queue or its process */
 } KThread;
 
 /* the running thread (0 before KernelThreadInit) */
@@ -246,6 +260,27 @@ void TimerReap(void);
 extern void (*kernelTimerEventHook)(optr dest, Message msg, dword tick,
 				    word id);
 extern dword kernelTimerEventsDropped;
+
+/* ---------------------------------------------------------------------
+ * Events, queues and messages (Geodes/geodesEvent.c, Object/
+ * objectClass.c).  Port32/ABI.md section 12.
+ * ------------------------------------------------------------------- */
+/* MetaClass messages the kernel sends itself (MetaMessages, metaC.goh) */
+#define KMSG_META_INITIALIZE			1
+#define KMSG_META_ACK				9
+#define KMSG_META_RESOLVE_VARIANT_SUPERCLASS	19
+
+/* event reserve for interrupt code, event timers through messages */
+void KernelEventInit(void);
+/* events interrupt code could not send (no reserve left) */
+extern dword kernelEventsDropped;
+/* the parameter structure of an event */
+const void *KernelEventParams(EventHandle event, dword *size);
+/* call the method of `dest' (run by the current thread) */
+void KernelDeliver(optr dest, Message msg, const void *params, void *reply);
+/* the thread a queue's messages go to (ThreadAttachToQueue) */
+void KQueueAttach(QueueHandle qh, ThreadHandle th);
+void KQueueDetach(QueueHandle qh);
 
 /* ---------------------------------------------------------------------
  * LMem (LMem/lmemCode.c, after lmemCode.asm).  Port32/ABI.md section 10.

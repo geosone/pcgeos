@@ -322,6 +322,7 @@ ThreadHandle KernelThreadInit(ThreadPriority priority)
     t->T_ctx = ghal_ctx_self();
     t->T_state = TS_RUNNING;
     kernelCurrentThread = th;
+    KernelEventInit();
     return th;
 }
 
@@ -376,8 +377,19 @@ void ThreadDestroy(word errorCode, optr ackObject, word ackData)
     Handle cur = KernelThisThread();
     KThread *t = ThreadOf(cur);
 
-    (void) ackObject;			/* MSG_META_ACK: with messages */
-    (void) ackData;
+    /* MSG_META_ACK(exit code, thread:ackData) once it is gone: queued,
+     * it is dispatched after the switch below */
+    if (ackObject) {
+	struct { word callerID; optr caller; } p;
+	p.callerID = errorCode;
+	p.caller = ConstructOptr(cur, ackData);
+	CObjMessageP(MF_FORCE_QUEUE, ackObject, KMSG_META_ACK, &p, sizeof(p),
+		     NULL, 0);
+    }
+    if (t->T_eventQueue) {
+	KQueueDetach(t->T_eventQueue);
+	t->T_eventQueue = 0;
+    }
     ghal_crit_enter();
     t->T_exitCode = errorCode;
     t->T_state = TS_DEAD;
@@ -385,6 +397,27 @@ void ThreadDestroy(word errorCode, optr ackObject, word ackData)
     deadList = cur;
     Dispatch();				/* does not return */
     ghal_crit_leave();
+}
+
+/* Attach the running thread to a queue and dispatch its events for good
+ * (threadThread.asm).  qh 0: the thread's own queue (none: the thread
+ * exits). */
+void ThreadAttachToQueue(QueueHandle qh, ClassStruct *class)
+{
+    Handle cur = KernelThisThread();
+    KThread *t = ThreadOf(cur);
+
+    if (!qh) {
+	qh = t->T_eventQueue;
+	if (!qh)
+	    ThreadDestroy(1, 0, 0);
+    } else {
+	t->T_class = class;
+	KQueueAttach(qh, cur);
+	t->T_eventQueue = qh;
+    }
+    for (;;)
+	CMessageDispatchP(QueueGetMessage(qh), MF_CALL, NULL, 0);
 }
 
 /* ---------------------------------------------------------------------

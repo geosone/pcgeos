@@ -11,6 +11,9 @@
 #                      <- the arrays of the same names (.asm)
 #   Timer/timerList.c  <- timers of Timer/timerList.asm, timerMisc.asm
 #   Timer/timerInt.c   <- the timer interrupt of Timer/timerInt.asm
+#   Geodes/geodesEvent.c <- events, queues, ObjMessage of geodesEvent.asm
+#   Object/objectClass.c <- method calls of Object/objectClass.asm and
+#                          the master part routines of objectUtils.asm
 add_library(geos_kernel STATIC
   Sys/sysError.c
   Heap/heapHandle.c
@@ -22,7 +25,9 @@ add_library(geos_kernel STATIC
   LMem/lmemElementArray.c
   LMem/lmemNameArray.c
   Timer/timerList.c
-  Timer/timerInt.c)
+  Timer/timerInt.c
+  Geodes/geodesEvent.c
+  Object/objectClass.c)
 target_include_directories(geos_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

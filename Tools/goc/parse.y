@@ -817,7 +817,13 @@ classLine	:
 		    	&& !(classBeingParsed->flags & SYM_PROCESS_CLASS))
 		{
 		    if ($6 & SYM_CLASS_MASTER) {
-			Output("typedef struct {%sBase %s_metaBase; word %s_offset; } %sBase;",
+			/*
+			 * COM_GCC: packed, so the master offsets follow the
+			 * class pointer without padding, as the kernel and
+			 * Class_masterOffset expect (Port32/ABI.md).
+			 */
+			Output("typedef struct %s{%sBase %s_metaBase; word %s_offset; } %sBase;",
+			       compiler == COM_GCC ? "GOCR_PACKED " : "",
 			       classBeingParsed->data.symClass.superclass->
 			       data.symClass.root,
 			       classBeingParsed->data.symClass.root,

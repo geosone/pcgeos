@@ -97,7 +97,12 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "
   geos_goc(_gocres_c Goc/gocres.gp Goc/gocres.goc Goc/gocres2.goc)
   add_executable(test_gocres ${_gocres_c} Goc/test_gocres.c Goc/gocres_lmem.c)
   target_link_libraries(test_gocres PRIVATE geos_kernel)
-  target_compile_definitions(test_gocres PRIVATE GEOS_PORT32)
+  # test_gocres.c stands in for the message kernel (fake handles show
+  # where goc sends to): its entry points get their own names, so the
+  # real ones of geos_kernel (used for LMem) do not clash
+  target_compile_definitions(test_gocres PRIVATE GEOS_PORT32
+    CObjMessageP=GocTestObjMessageP CObjCallSuperP=GocTestObjCallSuperP
+    CMessageDispatchP=GocTestMessageDispatchP)
   target_include_directories(test_gocres PRIVATE
     ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
   if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -105,6 +110,18 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "
     target_compile_options(test_gocres PRIVATE -Wno-unused-parameter)
   endif()
   add_test(NAME goc.resources COMMAND test_gocres)
+
+  # messages through the C kernel, with classes and objects of goc -cg
+  geos_goc(_kmsg_c Goc/kmsg.gp Goc/kmsg.goc)
+  add_executable(test_kernel_msg ${_kmsg_c} test_kernel_msg.c)
+  target_link_libraries(test_kernel_msg PRIVATE geos_kernel)
+  target_compile_definitions(test_kernel_msg PRIVATE GEOS_PORT32)
+  target_include_directories(test_kernel_msg PRIVATE
+    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_kernel_msg PRIVATE -Wno-unused-parameter)
+  endif()
+  add_test(NAME kernel.msg COMMAND test_kernel_msg)
 endif()
 
 # The SDK_C samples of goc_sdk.txt must keep building through goc -cg,

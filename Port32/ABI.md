@@ -376,7 +376,7 @@ Name arrays are variable-sized element arrays of reference count, data
 
 - `RefElementHeader` is 4 bytes in Port32 (`WordAndAHalf` gets host
   alignment), 3 in 16-bit GEOS: name and element arrays in DOS16 files
-  need the converter (section 12).
+  need the converter (section 13).
 - `ElementArrayAddElement` has no size for variable-sized elements (the
   asm C stub passed none either): it serves fixed-size arrays; the kernel
   uses `ElementArrayAddElementSized` (for name arrays).
@@ -418,8 +418,9 @@ every chunk through its goc chunk handle.
   `GEOS_PORT32` (`TimerRoutineOptr(fn)`, `TimerRoutine(word data, dword
   tickCount)` in `timer.h`); the routine runs in interrupt context, as
   in the asm kernel. Millisecond timers are rounded up to ticks.
-- **Event timers** send through `kernelTimerEventHook`, which the message
-  system will set; until then their events are counted as dropped.
+- **Event timers** send their message from the interrupt (section 12):
+  parameters `(dword tickCount, word id)`; for continual timers the id is
+  the interval, as in the asm kernel.
 - **Real-time timers** (`TIMER_*_REAL_TIME`) are not there yet
   (`BAD_TIMER_TYPE`).
 - Interrupt code does not free memory (DJGPP's `malloc` under a hardware
@@ -441,7 +442,91 @@ waking a blocked thread, event timers through the hook, and two
 computing threads of the same priority sharing the CPU by time slices
 (with rising priority) while a better thread sleeps and comes back.
 
-## 12. Open
+## 12. Events, queues and messages (`Geodes/geodesEvent.c`, `Object/objectClass.c`, P4)
+
+**Events** are `SIG_EVENT_REG` handles (`SIG_EVENT_STACK` when the
+parameter structure is longer than the 32 bytes kept in the event) with
+destination, message and a copy of the parameter structure of section 5.
+**Queues** are `SIG_QUEUE` handles: events linked through the handle
+table, a semaphore counting them, the attached thread.
+
+**Routing** (`CObjMessageP`, as `ObjMessage`): the destination's handle
+names the thread that runs it: a thread; a queue (its attached thread);
+a memory handle: `HM_otherInfo` (the burden thread of an object block,
+the first thread of a process core block). Messages for the running
+thread are direct calls unless `MF_FORCE_QUEUE`; others become events.
+`MF_CALL` to another thread queues the event and blocks until the
+receiver has dispatched it; the receiver writes the reply straight into
+the caller's buffer. A message to optr 0 is ignored.
+
+- Supported flags: `MF_CALL`, `MF_FORCE_QUEUE`, `MF_RECORD`,
+  `MF_INSERT_AT_FRONT`, `MF_CHECK_DUPLICATE` with `MF_CHECK_LAST_ONLY`,
+  `MF_REPLACE` and `MF_DISCARD_IF_NO_MATCH` (a duplicate has the same
+  message and destination), `MF_DISPATCH_DONT_FREE`. `MF_CUSTOM` (a
+  compare routine passed on the stack) is not supported yet. `MF_STACK`
+  and `MF_FIXUP_*` mean nothing here (parameters are always a structure,
+  there are no segments).
+- Interrupt code may send with `MF_FORCE_QUEUE` (event timers): events
+  come from a reserve that normal code refills, handles only from the
+  free list; when both are empty the event is dropped and counted.
+- `ThreadAttachToQueue(queue, class)` makes the running thread dispatch
+  its queue for good; messages to the thread, its queue or its process
+  (chunk 0) go to `class`.
+- `ThreadDestroy` sends `MSG_META_ACK(exitCode, thread:ackData)` to its
+  ack object, as in the asm kernel.
+- API: `GeodeAllocQueue`, `GeodeFreeQueue`, `GeodeInfoQueue`,
+  `GeodeFlushQueue`, `QueuePostMessage`, `QueueGetMessage`,
+  `CMessageDispatchP`, `ObjDispatchMessage`, `ObjFreeMessage`,
+  `ObjGetMessageInfo`, `MessageSetDestination`, `ObjDuplicateMessage`,
+  `ObjSetEventInfo`. `ObjGetMessageData` has no registers to return.
+
+**Method calls** (`ObjCallMethodTable`): from the object's class up the
+superclasses, through the thunks of section 5. `pself` is the chunk, or
+for a class with a master level the master part
+(`Class_masterOffset`). As in the asm kernel:
+
+- a master part that is not built yet is built when a class of its
+  level is reached (`ObjInitializeMaster`: `ObjResizeMaster` grows it
+  to `Class_instanceSize`, then `MSG_META_INITIALIZE` to that class);
+- `MSG_META_INITIALIZE` is not inherited across a master class;
+- above a variant master class, the superclass is the class pointer at
+  the start of its master part. While it is 0, the object gets
+  `MSG_META_RESOLVE_VARIANT_SUPERCLASS(masterOffset)` and the answer is
+  stored there.
+
+Also `ObjDeref`, `ObjDeref1`, `ObjDeref2`, `ObjIsClassADescendant`,
+`ObjResizeMaster`, `ObjInitializeMaster`.
+
+**The base structure of an object** (class pointer, one word per master
+level) has no padding: `goc -cg` declares the `<Class>Base` types
+`GOCR_PACKED`, and `Class_masterOffset` is `sizeof(ClassStruct *) +
+2 * (level - 1)` (8, 10, ... on 64-bit hosts; 4, 6, ... on 32-bit ones,
+as in 16-bit GEOS). Before this, the C compiler padded the nested base
+structures on 64-bit hosts, and goc wrote the 16-bit offsets 4, 6, ...
+
+Not yet: the kernel's own `MetaClass` and `ProcessClass` (the test
+brings empty ones), `@children`/`CObjSendToChildren` (composites),
+relocation of objects, `ObjInstantiate`, variable data.
+
+ctest `kernel.msg` (with `Goc/kmsg.goc`, classes and objects from
+`goc -cg`):
+
+- direct calls to an object block of the running thread;
+- a variant superclass resolved by the object, with the master part
+  above it built and initialized once, and an override that calls its
+  superclass;
+- a process thread on its own queue, with order and
+  `MF_INSERT_AT_FRONT`, duplicate checking with replace, and
+  `@record`/`@dispatchcall` with a duplicated event;
+- remote calls to an object block run by the other thread;
+- an event timer sent from the timer interrupt;
+- `GeodeFlushQueue` of one destination;
+- `MSG_META_ACK` from `ThreadDestroy`.
+
+`goc.resources` keeps its stand-in message kernel (fake handles show where
+goc sends to), under its own names.
+
+## 13. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`). The
    module format is decided (`GHAL-Concept.md` §4.4) and the `.gp` data is

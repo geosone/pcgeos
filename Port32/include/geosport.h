@@ -91,6 +91,9 @@ typedef word		VardataKey;
 #define GOCR_XSCHUNK(chunk)	((ChunkHandle) (__goc_xch_##chunk))
 #define GOCR_XSOPTR(chunk)	GOCR_UNRELOC_OPTR(__goc_xrs_##chunk, __goc_xch_##chunk)
 #define GOCR_VARIANT_SUPERCLASS	((struct _ClassStruct *) 1)
+/* the base structure of an object (class pointer, master offsets) has no
+ * padding: Class_masterOffset is sizeof(ClassStruct *) + 2 * (level - 1) */
+#define GOCR_PACKED		__attribute__((packed))
 
 /*
  * In code, "@Obj" is GOCR_OPTR(Obj): the handle of the resource as loaded

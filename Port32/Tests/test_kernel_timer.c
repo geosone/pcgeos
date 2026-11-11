@@ -127,7 +127,9 @@ int main(void)
     t1 = TimerGetCount();
     CHECK(t1 - t0 >= 5 && t1 - t0 <= 12);
 
-    /* events: dropped without a message system, else to the hook */
+    /* events: dropped without a message system, else to the hook (the
+     * message system's own hook is tested in kernel.msg) */
+    kernelTimerEventHook = NULL;
     TimerStart(TIMER_EVENT_ONE_SHOT, 0x1234500000006ull, 1, 77, 0, NULL);
     TimerSleep(4);
     CHECK(kernelTimerEventsDropped == 1);

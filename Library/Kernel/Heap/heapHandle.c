@@ -54,7 +54,8 @@ Handle HandleAlloc(byte type, GeodeHandle owner)
     HandleEntry *he;
 
     ghal_crit_enter();
-    if (freeList == 0 && !GrowTable()) {
+    /* interrupt code takes only what is free (no memory allocation) */
+    if (freeList == 0 && (ghal_irq_active() || !GrowTable())) {
 	ghal_crit_leave();
 	return 0;
     }
