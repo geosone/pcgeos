@@ -9,9 +9,20 @@
  * static GCN list), which the loader relocated through their shadows.
  * And it saves objects of its own class and of kglib's to a VM file and
  * reads them again (the classes are exported entries in the file).
+ *
+ * Then it attaches to its state file KGSTATE.VM (ObjAssocVMFile).  The
+ * first time there is none: it changes the counter, adds an object to
+ * KGObjects and saves on MSG_META_DETACH (ObjDisassocVMFile, with an
+ * extra block).  The second time it checks what came back.
  */
 @include <stdapp.goh>
 @include "kglib.goh"
+
+/* the state file routines of the kernel (asm only in 16-bit GEOS, where
+ * the UI calls them; Port32/ABI.md section 13e) */
+Boolean ObjAssocVMFile(VMFileHandle file, MemHandle *extra);
+void ObjDisassocVMFile(void);
+void ObjSaveExtraStateBlock(MemHandle mh);
 
 typedef struct {
     word	KGAS_attached;
@@ -26,7 +37,19 @@ typedef struct {
     MemHandle	KGAS_dup;		/* ObjDuplicateResource of KGTemplate */
     word	KGAS_dupChecks;		/* checks of the copies that were right */
     word	KGAS_vmChecks;		/* checks of objects in a VM file */
+    word	KGAS_restored;		/* 1: attached to an old state file */
+    word	KGAS_stateChecks;	/* checks of the restored state */
 } KGAppState;
+
+/* the extra block of the state file */
+typedef struct {
+    word		KGX_magic;
+    ChunkHandle		KGX_added;	/* the object added to KGObjects */
+    VMBlockHandle	KGX_dup;	/* VM ID of the duplicate */
+} KGExtra;
+#define KGX_MAGIC	0x4b47
+
+static MemHandle kgExtra;
 
 /* a structure with an optr behind a word (padding before it) */
 typedef struct {
@@ -199,5 +222,71 @@ KGAppState kgAppState;
 	}
 	kgAppState.KGAS_vmChecks = n;
     }
+    /* the state file */
+    {
+	VMFileHandle sf = VMOpen("KGSTATE.VM", 0, VMO_OPEN, 0);
+	MemHandle extra;
+	KGExtra *x;
+	word n = 0;
+
+	kgAppState.KGAS_restored = sf != 0;
+	if (!sf)
+	    sf = VMOpen("KGSTATE.VM", 0, VMO_CREATE_ONLY, 0);
+	if (sf && !ObjAssocVMFile(sf, &extra)) {
+	    if (!kgAppState.KGAS_restored) {
+		/* change the resource; saved on detach */
+		optr added;
+		@call KGAppCounter::MSG_KG_COUNTER_ADD(100);
+		MemLock(OptrToHandle(@KGAppCounter));
+		ObjMarkDirty(@KGAppCounter);
+		MemUnlock(OptrToHandle(@KGAppCounter));
+		added = ObjInstantiate(OptrToHandle(@KGAppCounter),
+				       &KGRefClass);
+		MemLock(OptrToHandle(added));
+		((KGRefInstance *) LMemDeref(added))->KGRI_ref = @KGAppOther;
+		MemUnlock(OptrToHandle(added));
+		kgExtra = MemAlloc(sizeof(KGExtra), HF_SWAPABLE, 0);
+		x = MemLock(kgExtra);
+		x->KGX_magic = KGX_MAGIC;
+		x->KGX_added = OptrToChunk(added);
+		x->KGX_dup = ObjMapSavedToState(kgAppState.KGAS_dup);
+		if (x->KGX_dup) n++;
+		MemUnlock(kgExtra);
+	    } else if (extra) {
+		MemHandle dup;
+		optr added, a, b;
+		x = MemLock(extra);
+		if (x->KGX_magic == KGX_MAGIC) n++;
+		/* the counter changed, the object added */
+		if (@call KGAppCounter::MSG_KG_COUNTER_GET() == 112) n++;
+		added = ConstructOptr(OptrToHandle(@KGAppCounter), x->KGX_added);
+		if (ObjIsObjectInClass(added, &KGRefClass) &&
+		    @call added::MSG_KG_REF_GET() == @KGAppOther) n++;
+		/* the resource's chunks that were not changed */
+		if (@call KGAppOther::MSG_KG_COUNTER_GET() == 0) n++;
+		if (@call KGAppCounter::MSG_META_GCN_LIST_FIND_ITEM(@KGAppOther,
+				7, MANUFACTURER_ID_GEOWORKS)) n++;
+		/* the duplicate, with its references */
+		dup = ObjMapStateToSaved(x->KGX_dup, 0);
+		a = ConstructOptr(dup, OptrToChunk(@KGTplA));
+		b = ConstructOptr(dup, OptrToChunk(@KGTplB));
+		if (dup && dup != kgAppState.KGAS_dup &&
+		    MemOwner(dup) == GeodeGetProcessHandle()) n++;
+		if (dup && @call a::MSG_KG_REF_GET() == b &&
+		    @call b::MSG_KG_REF_GET() == @KGAppCounter) n++;
+		MemUnlock(extra);
+		MemFree(extra);
+	    }
+	}
+	kgAppState.KGAS_stateChecks = n;
+    }
     kgAppState.KGAS_attached++;
+}
+
+@method KGAppProcessClass, MSG_META_DETACH
+{
+    ObjSaveExtraStateBlock(kgExtra);
+    kgExtra = 0;
+    ObjDisassocVMFile();
+    @callsuper();
 }

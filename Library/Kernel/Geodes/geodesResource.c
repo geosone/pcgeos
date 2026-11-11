@@ -58,6 +58,14 @@ Handle GeodeResourceHandle(GeodeHandle gh, word res)
     return res < geodes[i].count ? geodes[i].handles[res] : 0;
 }
 
+/* the number of resources (entries) of `gh' */
+word GeodeResourceCount(GeodeHandle gh)
+{
+    int i = Find(gh);
+
+    return i < 0 ? 0 : geodes[i].count;
+}
+
 sdword GeodeHandleToResource(GeodeHandle gh, Handle h)
 {
     int i = Find(gh);

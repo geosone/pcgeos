@@ -1054,7 +1054,6 @@ Not yet:
 - backup mode (`VMSave`, `VMRevert`, `VMSaveAs`);
 - sharing between processes, `VMGrabExclusive`;
 - discarding clean blocks;
-- saving to state;
 - DB items, huge arrays, compression.
 
 ## 13d. Object blocks in files (`Object/objectReloc.c`, P4)
@@ -1072,7 +1071,7 @@ reference becomes `GOCR_UNRELOCATED | source << 28 | index`
 | `KUR_UNKNOWN` 3 | handle >> 4 | `ORS_UNKNOWN_BLOCK` |
 | `KUR_ENTRY_OWNER` 4 | export number of the owner | `ORS_OWNING_GEODE_ENTRY_POINT` |
 | `KUR_ENTRY_LIBRARY` 5 | library number << 16, export number | `ORS_LIBRARY` |
-| `KUR_ENTRY_KERNEL` 6 | kernel export number | `ORS_KERNEL` |
+| `KUR_ENTRY_KERNEL` 6 | entry number in `geos.gp` | `ORS_KERNEL` |
 
 Handles are optrs, hptrs and the block output. Pointers are the class
 of every object (relocated first, unrelocated last, as
@@ -1080,9 +1079,12 @@ of every object (relocated first, unrelocated last, as
 part, and `RELOC_RELOC_ENTRY_POINT` entries: they must be **exported
 entries** of the owner, one of its libraries or the kernel
 (`GeodeEntryToReloc`/`GeodeRelocToEntry` in `geodesLoad.c`), so a
-class whose objects are saved is exported, as in 16-bit GEOS. Without
-a kernel export table (Open Watcom) the kernel's classes are
-`MetaClass` 0 and `ProcessClass` 1. Relocation methods see the same
+class whose objects are saved is exported, as in 16-bit GEOS. The
+numbers do not change when a geode or the kernel grows: the export
+number of a geode is its `.gp` order, and each kernel export carries
+its entry number in `geos.gp` (`kexports.py` counts exports and `skip`
+as glue does). Without a kernel export table (Open Watcom) the kernel
+knows the numbers of `MetaClass` and `ProcessClass`. Relocation methods see the same
 references through `ObjDoRelocation`/`ObjDoUnRelocation` (a per-thread
 flag, `KThread.T_fileReloc`).
 
@@ -1095,6 +1097,57 @@ ctest `kernel.geode`: the process `kgapp` saves objects of its own
 class and of `kglib`'s class with references in the same block, to
 another VM block and to a resource, closes the file, opens it again,
 and sends them messages.
+
+## 13e. The state file (`Object/objectFile.c`, P4)
+
+As `objectFile.asm`. The routines are asm-only in 16-bit GEOS (the UI
+calls them); in C:
+
+```c
+Boolean ObjAssocVMFile(VMFileHandle file, MemHandle *extra); /* TRUE: protocol error */
+void ObjDisassocVMFile(void);
+void ObjCloseVMFile(void);
+void ObjSaveExtraStateBlock(MemHandle mh);
+VMBlockHandle ObjMapSavedToState(MemHandle mh);
+MemHandle ObjMapStateToSaved(VMBlockHandle vmbh, GeodeHandle gh);
+```
+
+The process keeps its state file in `GeodeCore.GC_vmHandle`
+(`PH_vmHandle`); the blocks to save are its detachable object
+resources and its saved blocks (`GC_savedBlocks`: duplicated detachable
+resources and `ObjSaveBlock`). The file is a VM file in the DOS16
+format (section 13b) with the asm kernel's user IDs: the resource
+number for a resource, `VM_SAVED_UI`/`VM_SAVED_APP` for saved blocks
+(who runs them), `VM_EXTRA_DATA` for the extra block. A new file gets
+`FEA_PROTOCOL`/`FEA_RELEASE` of the process and a map block with the
+protocols of its libraries; an old one must match them.
+
+- **Saving** (`ObjDisassocVMFile`): each block is written as a copy,
+  compacted as `CompactObjBlock` does (clean resource chunks become
+  empty, chunks neither dirty nor from the resource go, master parts of
+  `CLASSF_DISCARD_ON_SAVE` classes above a variant go, variable data
+  without `VDF_SAVE_TO_STATE` goes) and unrelocated for a file (section
+  13d). The blocks stay in memory: the process is about to exit.
+- **Restoring** (`ObjAssocVMFile`): the asm kernel did this when a
+  block was first locked (`FullObjLock`), because its resources came
+  from the geode file then. Port32 builds resources when the geode is
+  loaded, so it is done at once: the saved blocks come back as blocks
+  of the process (VM ID = their VM block handle); then each resource
+  with saved chunks is unrelocated, the chunks are merged in with the
+  same chunk handles (`MergeObjBlock`, `LMemAllocAt`), and the resource
+  is relocated again.
+- A saved block made while a state file is open gets a VM block at
+  once (`AllocEmptyVMBlock`); one made before gets an odd ID, replaced
+  by a VM block in `ObjAssocVMFile`.
+
+The instance data keep the layout of the host ABI, as in section 13d:
+a state file belongs to one host ABI.
+
+ctest `kernel.geode`: `kgapp` attaches to a new state file, changes an
+object of a resource, adds an object to it and saves on
+`MSG_META_DETACH` with an extra block; loaded again, it finds the
+changed and the added object, the unchanged chunks of the resource,
+its static GCN list and the duplicated block with its references.
 
 ## 13c. GEOS files and host names (`Port32/hostfs`, `File/fileEA.c`, P4)
 

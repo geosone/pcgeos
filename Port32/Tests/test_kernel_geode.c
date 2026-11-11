@@ -52,6 +52,8 @@ typedef struct {
     MemHandle	KGAS_dup;
     word	KGAS_dupChecks;
     word	KGAS_vmChecks;
+    word	KGAS_restored;
+    word	KGAS_stateChecks;
 } KGAppState;
 
 #define GEODE	0x2340
@@ -110,6 +112,7 @@ int main(int argc, char **argv)
     kernelCurrentGeode = GEODE;
     me = KernelThreadInit(PRIORITY_STANDARD);
     KernelTimerInit();
+    FileDelete("KGSTATE.VM");		/* none from an earlier run */
     GeodeRegisterImage("kglib", kglib_geode, kglib_geode_size);
     GeodeRegisterImage("kgapp", kgapp_geode, kgapp_geode_size);
     base = HandleCountUsed();
@@ -186,6 +189,8 @@ int main(int argc, char **argv)
     Check(st->KGAS_gcnFound, "static GCN list relocated");
     Check(st->KGAS_dupChecks == 8, "ObjDuplicateResource, ObjFreeDuplicate");
     Check(st->KGAS_vmChecks == 7, "object blocks in a VM file");
+    Check(!st->KGAS_restored && st->KGAS_stateChecks == 1,
+	  "a new state file");
     if (st->KGAS_vmChecks != 7)
 	printf("vm checks %u\n", st->KGAS_vmChecks);
     {
@@ -208,6 +213,21 @@ int main(int argc, char **argv)
     Check(GeodeGetInfo(lib, GGIT_GEODE_REF_COUNT, NULL) == 1,
 	  "the process dropped the library");
     Check(calls->KGLC_calls[LCT_DETACH] == 0, "library still attached");
+
+    /* again: from the state file it saved */
+    app = GeodeLoad("kgapp", GA_PROCESS, GA_LIBRARY, 0, 0x00070009, &e);
+    Check(app != 0, "GeodeLoad kgapp again");
+    st = (KGAppState *) ProcGetLibraryEntry(app, 0);
+    WAIT_FOR(st->KGAS_attached);
+    Check(st->KGAS_restored && st->KGAS_stateChecks == 7,
+	  "restored from the state file");
+    if (st->KGAS_stateChecks != 7)
+	printf("state checks %u\n", st->KGAS_stateChecks);
+    CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,
+		 &dp, sizeof(dp), NULL, 0);
+    WAIT_FOR(!GeodeFind("kgapp   ", GEODE_NAME_SIZE, 0, 0));
+    Check(!GeodeFind("kgapp   ", GEODE_NAME_SIZE, 0, 0),
+	  "process freed again");
 
     GeodeFreeLibrary(lib);
     Check(!GeodeFind("kglib   ", GEODE_NAME_SIZE, 0, 0), "library freed");

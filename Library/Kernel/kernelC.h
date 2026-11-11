@@ -109,7 +109,9 @@
     X(VM_NOT_A_VM_BLOCK)		/* memory handle not of a VM file */ \
     X(VM_HEADER_FULL)		/* the block table cannot grow */ \
     X(VM_ALLOC_FAILED)		/* no memory for a block */ \
-    X(VM_CHAIN_NOT_SUPPORTED)	/* DB item chains */
+    X(VM_CHAIN_NOT_SUPPORTED)	/* DB item chains */ \
+    X(CANNOT_ALLOCATE_CORRECT_CHUNK_HANDLE)	/* LMemAllocAt: handle taken */ \
+    X(OBJ_LOAD_ERROR)		/* a state file that cannot be used */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -405,6 +407,19 @@ typedef Boolean ObjRelocMethod(void *pself, optr oself, word message,
  * does the reverse.  The handles come from the resources of the block's
  * owner (GeodeResourceHandle). */
 void ObjRelocateObjBlock(MemHandle mh, word vmRelocType);
+/* for a state file: every reference, whatever the type (objectFile.c) */
+void ObjRelocateForFile(MemHandle mh, word vmRelocType, Boolean unreloc);
+/* the state file (objectFile.c): TRUE if the file does not fit the
+ * process; *extra gets the block of ObjSaveExtraStateBlock */
+Boolean ObjAssocVMFile(VMFileHandle file, MemHandle *extra);
+void ObjDisassocVMFile(void);
+void ObjCloseVMFile(void);
+void ObjSaveExtraStateBlock(MemHandle mh);
+VMFileHandle ObjStateFile(GeodeHandle gh);
+word ObjSavedBlockUserID(MemHandle mh);
+/* objectDup.c: put a block on its owner's saved-block list with VM ID
+ * `id' (0: a new one: a VM block of the state file, or an odd number) */
+void ObjAddToSavedList(MemHandle mh, word id);
 /* the optrs in the non-object chunks of a resource block built from `r'
  * (GocChunk shadows) */
 void ObjRelocateResourceChunks(MemHandle mh, const GocResource *r);
@@ -558,6 +573,7 @@ void GeodeSetResourceHandles(GeodeHandle gh, const Handle *handles,
 Handle GeodeResourceHandle(GeodeHandle gh, word res);
 /* the resource number of `h' in a geode, or -1 */
 sdword GeodeHandleToResource(GeodeHandle gh, Handle h);
+word GeodeResourceCount(GeodeHandle gh);	/* entries, process included */
 
 /*
  * Unrelocated references in object blocks written to files (VM files,
@@ -614,6 +630,9 @@ typedef struct {
     word		GC_refCount;
     word		GC_threadCount;
     Handle		GC_savedBlocks;	/* SIG_SAVED_BLOCK list (objectDup.c) */
+    VMFileHandle	GC_vmHandle;	/* the state file (PH_vmHandle) */
+    ThreadHandle	GC_uiThread;	/* runs VM_SAVED_UI blocks (PH_uiThread;
+					 * 0: the process thread) */
     word		GC_libraryCount;
     GeodeHandle		GC_libraries[1];	/* GC_libraryCount of them
 						 * (0: not loaded, noload) */
@@ -755,6 +774,7 @@ word ElementArrayAddElementSized(optr arr, void *element, word size,
 /* LMem blocks in files in the DOS16 layout (VM files): the size of the
  * image (0: too large), the image, and a block owned by `owner' from an
  * image (0 if it is not a valid LMem block) */
+ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize);
 word LMemDOS16Size(MemHandle mh);
 word LMemToDOS16(MemHandle mh, byte *out);
 MemHandle LMemFromDOS16(const byte *img, word size, Handle owner);

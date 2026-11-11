@@ -39,6 +39,7 @@
 typedef struct {
     const char	*name;
     const void	*addr;
+    word	entry;		/* its entry number in geos.gp */
 } KernelExport;
 extern const KernelExport kernelExports[];
 extern const unsigned kernelExportCount;
@@ -179,10 +180,10 @@ extern void *__deregister_frame_info(const void *);
 #endif
 
 static const KernelExport hostExports[] = {
-    { "raise", (const void *) GeodeRaise },
+    { "raise", (const void *) GeodeRaise, 0 },
 #if defined(GEOS_HOST_DOS32) && defined(__GNUC__)
-    { "__register_frame_info", (const void *) __register_frame_info },
-    { "__deregister_frame_info", (const void *) __deregister_frame_info },
+    { "__register_frame_info", (const void *) __register_frame_info, 0 },
+    { "__deregister_frame_info", (const void *) __deregister_frame_info, 0 },
 #endif
 };
 
@@ -694,9 +695,14 @@ GeodeHandle GeodeLoad(const char *name, GeodeAttrs attrMatch,
  * Entries as unrelocated references (classes in saved object blocks)
  * ------------------------------------------------------------------- */
 
-/* the kernel's classes where it has no export table (Open Watcom) */
+/* the kernel's classes where it has no export table (Open Watcom), with
+ * their entry numbers in geos.gp (kexports.py) */
 extern ClassStruct MetaClass, ProcessClass;
-static const void *const kernelClasses[] = { &MetaClass, &ProcessClass };
+static const struct {
+    const void	*addr;
+    word	entry;
+} kernelClasses[] = { { &MetaClass, 0x2c6 }, { &ProcessClass, 0x2c7 } };
+#define N_KERNEL_CLASSES (sizeof(kernelClasses) / sizeof(kernelClasses[0]))
 
 static Boolean InExports(const GeosModuleInfo *info, const void *addr,
 			 dword *entry)
@@ -736,13 +742,13 @@ Boolean GeodeEntryToReloc(GeodeHandle owner, const void *addr, dword *code)
 	return TRUE;
     for (i = 0; i < kernelExportCount; i++)
 	if (kernelExports[i].addr == addr) {
-	    *code = KUR_MAKE(KUR_ENTRY_KERNEL, i);
+	    *code = KUR_MAKE(KUR_ENTRY_KERNEL, kernelExports[i].entry);
 	    return TRUE;
 	}
     if (!kernelExportCount)
-	for (i = 0; i < sizeof(kernelClasses) / sizeof(kernelClasses[0]); i++)
-	    if (kernelClasses[i] == addr) {
-		*code = KUR_MAKE(KUR_ENTRY_KERNEL, i);
+	for (i = 0; i < N_KERNEL_CLASSES; i++)
+	    if (kernelClasses[i].addr == addr) {
+		*code = KUR_MAKE(KUR_ENTRY_KERNEL, kernelClasses[i].entry);
 		return TRUE;
 	    }
     return FALSE;
@@ -770,10 +776,20 @@ const void *GeodeRelocToEntry(GeodeHandle owner, dword code)
 	GeodeUnlock();
 	return a;
     case KUR_ENTRY_KERNEL:
-	if (kernelExportCount)
-	    return idx < kernelExportCount ? kernelExports[idx].addr : NULL;
-	return idx < sizeof(kernelClasses) / sizeof(kernelClasses[0])
-	       ? kernelClasses[idx] : NULL;
+	if (kernelExportCount) {
+	    unsigned i;
+	    for (i = 0; i < kernelExportCount; i++)
+		if (kernelExports[i].entry == idx)
+		    return kernelExports[i].addr;
+	    return NULL;
+	}
+	{
+	    unsigned i;
+	    for (i = 0; i < N_KERNEL_CLASSES; i++)
+		if (kernelClasses[i].entry == idx)
+		    return kernelClasses[i].addr;
+	}
+	return NULL;
     default:
 	return NULL;
     }

@@ -355,12 +355,13 @@ MemHandle MemAllocLMem(LMemType type, word headerSize)
     return mh;
 }
 
+static ChunkHandle AllocHandle(MemHandle mh, word i, word chunkSize);
+
 ChunkHandle LMemAlloc(MemHandle mh, word chunkSize)
 {
     byte *b = BlockOf(mh);
     LMemBlockHeader *h = HDR(b);
-    word i, data;
-    ChunkHandle ch;
+    word i;
 
     for (i = 0; i < h->LMBH_nHandles; i++)
 	if (W(b, h->LMBH_offset + 2 * i) == 0)
@@ -370,9 +371,38 @@ ChunkHandle LMemAlloc(MemHandle mh, word chunkSize)
 	    Failed(mh);
 	    return 0;
 	}
-	b = BlockOf(mh);
-	h = HDR(b);
     }
+    return AllocHandle(mh, i, chunkSize);
+}
+
+/* LMemAllocHere: a chunk with the free handle `ch' (state, objectFile.c) */
+ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize)
+{
+    byte *b = BlockOf(mh);
+    LMemBlockHeader *h = HDR(b);
+    word i;
+
+    if (ch < h->LMBH_offset || (ch - h->LMBH_offset) & 1)
+	KernelFatal(LMEM_HANDLE_BEFORE_HANDLE_TABLE);
+    i = (word) ((ch - h->LMBH_offset) / 2);
+    if (i >= h->LMBH_nHandles &&
+	!MoreHandles(mh, (word) (i + 1 - h->LMBH_nHandles))) {
+	Failed(mh);
+	return 0;
+    }
+    b = BlockOf(mh);
+    if (W(b, ch) != 0)
+	KernelFatal(CANNOT_ALLOCATE_CORRECT_CHUNK_HANDLE);
+    return AllocHandle(mh, i, chunkSize);
+}
+
+static ChunkHandle AllocHandle(MemHandle mh, word i, word chunkSize)
+{
+    byte *b = BlockOf(mh);
+    LMemBlockHeader *h = HDR(b);
+    word data;
+    ChunkHandle ch;
+
     ch = (ChunkHandle) (h->LMBH_offset + 2 * i);
     W(b, ch) = LMEM_EMPTY;		/* taken, even while we compact */
     if (chunkSize) {

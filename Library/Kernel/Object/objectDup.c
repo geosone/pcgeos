@@ -16,8 +16,9 @@
  * A duplicated block of a detachable resource, and a block given to
  * ObjSaveBlock, goes onto the saved-block list of its owner (a
  * SIG_SAVED_BLOCK handle per block: HE_otherInfo is the block, HE_size
- * the VM ID, HE_next the next one), which saving to state will use.
- * Not yet: the state file (VM blocks for the saved blocks).
+ * the VM ID, HE_next the next one).  With a state file (objectFile.c)
+ * the VM ID is the block's VM block handle in it; without, an odd number
+ * (the VM block comes with ObjAssocVMFile).
  */
 #include "kernelC.h"
 #include "geosmod.h"
@@ -29,12 +30,11 @@
  * The saved-block list
  * ------------------------------------------------------------------- */
 
-static void AddToSavedList(MemHandle mh)
+void ObjAddToSavedList(MemHandle mh, word id)
 {
     GeodeHandle owner = MemOwner(mh);
     GeodeCore *c;
     Handle sb;
-    word id = 1;
 
     GeodeLock();
     c = GeodeCoreOf(owner);
@@ -42,9 +42,17 @@ static void AddToSavedList(MemHandle mh)
 	sb = HandleAlloc(SIG_SAVED_BLOCK, owner);
 	if (!sb)
 	    KernelFatal(HANDLE_TABLE_FULL);
-	/* the next odd ID (the asm kernel's, without a state file) */
-	if (c->GC_savedBlocks)
-	    id = (word) (HandleEntryOf(c->GC_savedBlocks)->HE_size + 2);
+	if (!id && c->GC_vmHandle)	/* AllocEmptyVMBlock */
+	    id = VMAlloc(c->GC_vmHandle, 0, ObjSavedBlockUserID(mh));
+	if (!id) {
+	    /* the next odd ID (the asm kernel's, without a state file) */
+	    Handle o;
+	    id = 1;
+	    for (o = c->GC_savedBlocks; o; o = HandleEntryOf(o)->HE_next)
+		if ((HandleEntryOf(o)->HE_size & 1) &&
+		    HandleEntryOf(o)->HE_size >= id)
+		    id = (word) (HandleEntryOf(o)->HE_size + 2);
+	}
 	HandleEntryOf(sb)->HE_otherInfo = mh;
 	HandleEntryOf(sb)->HE_size = id;
 	HandleEntryOf(sb)->HE_next = c->GC_savedBlocks;
@@ -66,8 +74,12 @@ static void RemoveFromSavedList(MemHandle mh)
 	for (p = &c->GC_savedBlocks; *p; p = &HandleEntryOf(*p)->HE_next)
 	    if (HandleEntryOf(*p)->HE_otherInfo == mh) {
 		Handle sb = *p;
+		word id = (word) HandleEntryOf(sb)->HE_size;
 		*p = HandleEntryOf(sb)->HE_next;
 		HandleFree(sb);
+		/* its VM block in the state file goes too */
+		if (!(id & 1) && c->GC_vmHandle)
+		    VMFree(c->GC_vmHandle, id);
 		break;
 	    }
     GeodeUnlock();
@@ -75,7 +87,7 @@ static void RemoveFromSavedList(MemHandle mh)
 
 void ObjSaveBlock(MemHandle mh)
 {
-    AddToSavedList(mh);
+    ObjAddToSavedList(mh, 0);
     /* there is no other copy of the block in the state file */
     ((LMemBlockHeader *) MemLock(mh))->LMBH_flags |= LMF_DUPLICATED;
     MemUnlock(mh);
@@ -202,7 +214,7 @@ MemHandle ObjDuplicateResource(MemHandle blockToDup, GeodeHandle owner,
     h = MemLock(mh);
     if (h->OLMBH_header.LMBH_flags & LMF_DETACHABLE) {
 	MemUnlock(mh);
-	AddToSavedList(mh);
+	ObjAddToSavedList(mh, 0);
     } else
 	MemUnlock(mh);
     return mh;

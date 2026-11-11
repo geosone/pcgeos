@@ -30,6 +30,7 @@
 #   Object/objectShutdown.c <- detach and quit of objectShutdown.asm
 #   Object/objectDup.c <- duplicating resources, saved blocks of
 #                          objectDup.asm
+#   Object/objectFile.c <- the state file of objectFile.asm
 #   File/filePath.c <- current and standard paths of File/filePath.asm,
 #                      host paths (ghal_fs)
 #   File/fileOpenClose.c, File/fileIO.c, File/fileFile.c <- the same
@@ -68,6 +69,7 @@ add_library(geos_kernel_objs OBJECT
   Object/objectLinkable.c
   Object/objectShutdown.c
   Object/objectDup.c
+  Object/objectFile.c
   File/filePath.c
   File/fileOpenClose.c
   File/fileIO.c
@@ -107,8 +109,8 @@ if(CMAKE_NM AND Python3_Interpreter_FOUND)
     VERBATIM)
 else()
   file(WRITE ${_kexports}
-    "typedef struct { const char *name; const void *addr; } KernelExport;\n"
-    "const KernelExport kernelExports[] = { { 0, 0 } };\n"
+    "typedef struct { const char *name; const void *addr; unsigned short entry; } KernelExport;\n"
+    "const KernelExport kernelExports[] = { { 0, 0, 0 } };\n"
     "const unsigned kernelExportCount = 0;\n")
 endif()
 

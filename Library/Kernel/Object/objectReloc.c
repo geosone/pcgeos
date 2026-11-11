@@ -21,8 +21,10 @@
  * resource: the module loader relocated them.  The "frame" of the
  * relocation methods carries the VMRelocType and whether it unrelocates.
  *
- * Object blocks written to a file (VM files, state: VMRT_* types other
- * than the resource ones) are unrelocated completely, as the asm kernel
+ * Object blocks written to a file (VM files: the VMRT_* types other than
+ * the resource ones; the state file: ObjRelocateForFile with the
+ * resource types, as the asm kernel passes them) are unrelocated
+ * completely, as the asm kernel
  * does: handles to KUR_* references (resources of the owner, saved
  * blocks, blocks of the same VM file, others), and pointers -- the class
  * of every object, variant superclasses, RELOC_RELOC_ENTRY_POINT -- to
@@ -305,15 +307,16 @@ static int FileFrame(word frame)
 	|| t == VMRT_RELOCATE_AFTER_WRITE;
 }
 
-/* the output of the block, then every object */
-static void RelocBlock(MemHandle mh, word frame, KernelFatalError err)
+/* the output of the block, then every object; `file': for a file */
+static void RelocBlock(MemHandle mh, word frame, KernelFatalError err,
+		       int file)
 {
     ObjLMemBlockHeader *h = ObjLockObjBlock(mh);
     int unreloc = (frame & FRAME_UNRELOC) != 0;
     Handle out = OptrToHandle(h->OLMBH_output);
     word i, n, table, was = fileReloc;
 
-    fileReloc = (word) FileFrame(frame);
+    fileReloc = (word) file;
     if (DoHandle(mh, &out, &out, unreloc && fileReloc ? 2 : unreloc))
 	KernelFatal(err);
     h->OLMBH_output = ConstructOptr(out, OptrToChunk(h->OLMBH_output));
@@ -347,12 +350,26 @@ static void RelocBlock(MemHandle mh, word frame, KernelFatalError err)
 
 void ObjRelocateObjBlock(MemHandle mh, word vmRelocType)
 {
-    RelocBlock(mh, (word) (vmRelocType & ~FRAME_UNRELOC), CANNOT_RELOCATE);
+    RelocBlock(mh, (word) (vmRelocType & ~FRAME_UNRELOC), CANNOT_RELOCATE,
+	       FileFrame(vmRelocType));
+}
+
+/* a block of a state file, with the resource types as the asm kernel
+ * passes them (objectFile.c) */
+void ObjRelocateForFile(MemHandle mh, word vmRelocType, Boolean unreloc)
+{
+    if (unreloc)
+	RelocBlock(mh, (word) (vmRelocType | FRAME_UNRELOC),
+		   CANNOT_UNRELOCATE, 1);
+    else
+	RelocBlock(mh, (word) (vmRelocType & ~FRAME_UNRELOC),
+		   CANNOT_RELOCATE, 1);
 }
 
 void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType)
 {
-    RelocBlock(mh, (word) (vmRelocType | FRAME_UNRELOC), CANNOT_UNRELOCATE);
+    RelocBlock(mh, (word) (vmRelocType | FRAME_UNRELOC), CANNOT_UNRELOCATE,
+	       FileFrame(vmRelocType));
 }
 
 /*
