@@ -245,4 +245,12 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   add_dependencies(test_kernel_boot geode_kglib geode_kgapp)
   target_link_libraries(test_kernel_boot PRIVATE geos_kernel)
   add_test(NAME kernel.boot COMMAND test_kernel_boot)
+
+  # the C keyboard driver (Driver/Keyboard): US and German maps
+  geos_embed(_kbd_c ${kbd_GEO} kbd_geode)
+  geos_embed(_kbde_gr_c ${kbde_gr_GEO} kbde_gr_geode)
+  add_executable(test_kbd test_kbd.c ${_kbd_c} ${_kbde_gr_c})
+  add_dependencies(test_kbd geode_kbd geode_kbde_gr)
+  target_link_libraries(test_kbd PRIVATE geos_kernel)
+  add_test(NAME driver.keyboard COMMAND test_kbd)
 endif()

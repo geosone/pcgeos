@@ -117,6 +117,7 @@
     X(OBJ_LOAD_ERROR)		/* a state file that cannot be used */ \
     X(INIT_FILE_ERROR)		/* no memory for the init file */ \
     X(CANNOT_LOAD_UI)		/* [ui] generic and ui.geo do not load */ \
+    X(CANNOT_LOAD_KEYBOARD_DRIVER)	/* [keyboard] driver, kbd.geo */ \
     X(BAD_SHUTDOWN_TYPE)		/* SysShutdown: no such type */
 
 #define KFE_ENUM(name) name,

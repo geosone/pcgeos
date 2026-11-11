@@ -259,6 +259,7 @@ typedef ByteEnum Chars;
 #define C_UY_DIERESIS   0xd9
 #define C_FRACTION   0xda
 #define C_CURRENCY   0xdb
+#define C_EURO_CHAR   C_CURRENCY	/* char.def: "C_EURO_SIGN" is already used */
 #define C_GUILSNGLEFT   0xdc
 #define C_GUILSNGRIGHT   0xdd
 #define C_LY_ACUTE   0xde

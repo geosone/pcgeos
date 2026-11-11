@@ -472,6 +472,91 @@ checks:
 - `DR_EXIT` on the last free and from `GeodeExitSystemDrivers`, and no
   second one.
 
+**What a geode may import.** A geode has no host C library (§7). The
+kernel exports, besides its routines:
+- the GHAL host services that drivers need (`kexports.py`
+  `GHAL_EXPORTS`): `ghal_crit_*`, `ghal_log`, `ghal_time_monotonic_ns`,
+  `ghal_irq_*`, `ghal_input_*` and `ghal_display_*`;
+- `memcpy`, `memmove`, `memset` and `memcmp` (`COMPILER_EXPORTS`). gcc
+  and clang may call these on their own even in a freestanding geode,
+  for structure copies and zeroing.
+
+These entries have no asm counterpart. Their entry numbers are
+`0x8000` plus their position in the list of extras.
+
+**Protocol.** A driver's protocol is the protocol of its driver class.
+glue took it from the `.ldf` file of that protocol (`kbd.ldf` gives
+`KEYBOARD_PROTO`, 4.1), not from the `.rev` file. `geos_geode(...
+PROTOCOL 4.1)` passes it to `gpgeode.py --protocol`.
+
+### 7.3 The keyboard driver (`Driver/Keyboard`, P4)
+
+The C keyboard driver keeps the design of the asm driver
+(`keyboard.h`, `keyboardProcess.c`, `keyboardInput.c`,
+`keyboardInit.c`, beside the asm files).
+
+**The interrupt.**
+- The handler of `GHAL_IRQ_INPUT` takes over from the IRQ 1 handler.
+- It reads the keyboard's HID events (`ghal_input_read(GHAL_INPUT_KEYBOARD)`).
+- It turns them into the set-1 scan codes the 8042 gave. Keys of the
+  extended keyboard get `0xe0`. `<Pause>` becomes
+  `e1 1d 45 e1 9d c5` and sends nothing on release.
+- It sends each scan code to the output as `MSG_IM_KBD_SCAN`, with
+  `cx` = `extension << 8 | code` and `0x80` set on a release. The
+  message is queued (`MF_FORCE_QUEUE`), as from the interrupt.
+- `IM_FIRST_MESSAGE` is 8704 (`CInclude/Internal/im.h`): `IMClass` is a
+  subclass of `ProcessClass`. ctest `kernel.obj` checks this number
+  against goc.
+
+**`DR_KBD_XLATE_SCAN`.** This is a port of `ProcessKeyElement`,
+`ConvertExtCodes`, `ProcessScanCode`, `HandleExtendedDef`,
+`HandleNormalDef`, `ProcessStateRelease` and `AccentTranslation`
+(SBCS).
+- It works on the tables of the keyboard map. `Port32/tools/kmapgen.py`
+  makes C of a `kmap*.def` file (`KeyboardMap`,
+  `CInclude/Internal/kbdMap.h`). It handles all 28 SBCS maps.
+- It returns `di` = `MSG_META_KBD_CHAR` (119) and `al` = 1 for a
+  character.
+- It returns `cx` = the character, `dl` = `CharFlags`,
+  `dh` = `ShiftState`, `bp` = `ToggleState` with the scan code above.
+
+**Options.** These `[keyboard]` keys are read: `keyboardTypematic`,
+`keyboardDoesLEDs`, `keyboardAltGr`, `keyboardShiftRelease` and
+`keyboardSwapCtrl`. The toggles start off.
+
+**Not in the C driver:**
+- the BIOS shift and toggle bytes;
+- the LEDs and the typematic rate of the 8042 (the states are kept; the
+  host repeats keys itself);
+- hotkeys, `DR_KBD_MAP_KEY` and `DR_KBD_CHECK_SHORTCUT` (not yet);
+- DBCS.
+
+**Output.** In DOS16 the input manager's monitor gave the driver its
+output (`ImAddMonitor`). Until the input manager is in C, the output is
+set with `DR_KBD_CHANGE_OUTPUT` or `DR_KBD_SET_KBD_STATE`. Without an
+output, the driver sends nothing.
+
+**Geodes.** There is one geode per map: `kbd.geo` (US, `kbd.gp`) and
+`kbde_gr.geo` (German extended, `German/Extended/kbde_gr.gp`).
+`Driver/Keyboard/mkmf.lst` keeps the C files out of the DOS16 build.
+
+**Boot.** `KernelBoot` loads `[keyboard] driver` from
+`SP_KEYBOARD_DRIVERS`; if that fails it falls back to `kbd.geo`, and if
+that fails too it raises `CANNOT_LOAD_KEYBOARD_DRIVER`. The driver
+becomes the default `GDDT_KEYBOARD` driver (`LoadKeyboardDriver`).
+Without the key, no keyboard driver is loaded.
+
+ctest `driver.keyboard` boots with `kbd.geo` and loads `kbde_gr.geo`.
+It posts HID events and translates the scan codes it gets from a queue
+output. It checks:
+- letters, digits, `<Shift>`, `<Caps Lock>` and `<Ctrl>`;
+- the cursor keys and `<Del>`;
+- the keypad with and without `<Num Lock>`;
+- the `<Pause>` sequence;
+- `DR_KBD_GET_KBD_STATE`;
+- no output;
+- the German map: y and z, the dead acute, and `<Alt Gr>`-q giving @.
+
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 
 The C kernel starts with the handle table and the memory block API of

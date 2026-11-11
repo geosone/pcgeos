@@ -1,0 +1,18 @@
+# mkmf.lst -- the files of this directory that the DOS16 build takes
+# (Tools/nmkmf reads only these).  The C driver of the 32-bit build
+# (CMake: keyboard.h, keyboard*.c) beside them is left out.
+kbd.gp
+keyboard.asm
+keyboard.rev
+keyboardConstant.def
+keyboardGeode.def
+keyboardHotkey.asm
+keyboardInit.asm
+keyboardMacro.def
+keyboardProcess.asm
+keyboardStrings.asm
+keyboardUtils.asm
+keyboardVariable.def
+kmapUS.def
+kmapUSDBCS.def
+local.mk

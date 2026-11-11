@@ -6,6 +6,7 @@
  * object blocks, composites, GCN lists, detach and quit.
  */
 #include "kernelC.h"
+#include <Internal/im.h>
 #include "ghal.h"
 #include <vm.h>
 
@@ -63,7 +64,8 @@ static const Message kernelMessages[] = {
     KMSG_META_GCN_LIST_FIND_ITEM,
     KMSG_META_DETACH, KMSG_META_DETACH_COMPLETE, KMSG_META_APP_SHUTDOWN,
     KMSG_META_SHUTDOWN_COMPLETE, KMSG_META_SHUTDOWN_ACK, KMSG_META_QUIT,
-    KMSG_META_QUIT_ACK, KMSG_META_FINISH_QUIT, KMSG_PROCESS_EXIT
+    KMSG_META_QUIT_ACK, KMSG_META_FINISH_QUIT, KMSG_PROCESS_EXIT,
+    MSG_IM_BUTTON_CHANGE, MSG_IM_KBD_SCAN, IM_META_KBD_CHAR
 };
 static const word kernelVarData[] = {
     KVD_TEMP_META_GCN, KVD_TEMP_META_QUIT_LIST, KVD_DETACH_DATA

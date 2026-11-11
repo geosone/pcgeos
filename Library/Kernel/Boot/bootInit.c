@@ -15,7 +15,9 @@
  *   3. the primary file system driver and its drives (LoadFSDriver,
  *      FSDLoadPrimary); the init file is read on first use;
  *   4. the standard paths of [paths] (GetPaths of the loader);
- *   5. the UI (LoadUI), from SP_SYSTEM;
+ *   5. the keyboard driver (LoadKeyboardDriver), from
+ *      SP_KEYBOARD_DRIVERS, the default GDDT_KEYBOARD driver;
+ *      the UI (LoadUI), from SP_SYSTEM;
  *   6. a geode named on the command line (ProcessCommandLine): what is
  *      left of the tail after the switches ("/x"), loaded as a process
  *      from SP_SYSTEM, the path LoadUI left.
@@ -30,7 +32,12 @@
  * (CANNOT_LOAD_UI).  Without the key, no UI is loaded yet: there is no
  * C UI library to be the default.
  *
- * Not yet: the drivers (memory, power, keyboard, mouse, video, font),
+ * The keyboard driver: "[keyboard] driver" names it, as in DOS16; if it
+ * does not load, kbd.geo is tried and its failure is fatal
+ * (CANNOT_LOAD_KEYBOARD_DRIVER).  Without the key, none is loaded yet:
+ * a host without keys (the tests) needs none.
+ *
+ * Not yet: the drivers (memory, power, mouse, video, font),
  * the input manager, fonts, graphics and windows, patches, the log
  * file, documentIsTop, FSDInitComplete.
  */
@@ -38,6 +45,8 @@
 
 #include <initfile.h>
 #include <system.h>
+#include <driver.h>
+#include <Internal/kbdDr.h>
 #include <string.h>
 
 GeodeHandle kernelUIHandle;
@@ -58,6 +67,39 @@ static void ActiveFile(void)
 					FILE_ACCESS_RW, 0);
     if (fh)
 	FileClose(fh, TRUE);
+}
+
+/* LoadDriver of bootInitfile.asm: a driver from a standard path */
+static GeodeHandle LoadDriver(const char *name, StandardPath sp,
+			      word major, word minor)
+{
+    GeodeLoadError e;
+    GeodeHandle gh;
+
+    FilePushDir();
+    FileSetStandardPath(sp);
+    gh = GeodeUseDriver(name, major, minor, &e);
+    FilePopDir();
+    return gh;
+}
+
+static void LoadKeyboardDriver(void)
+{
+    char name[FILE_LONGNAME_BUFFER_SIZE];
+    word n;
+    GeodeHandle gh;
+
+    if (InitFileReadStringBuffer("keyboard", "driver", name, sizeof(name),
+				 &n))
+	return;
+    gh = LoadDriver(name, SP_KEYBOARD_DRIVERS, KEYBOARD_PROTO_MAJOR,
+		    KEYBOARD_PROTO_MINOR);
+    if (!gh)
+	gh = LoadDriver("kbd.geo", SP_KEYBOARD_DRIVERS, KEYBOARD_PROTO_MAJOR,
+			KEYBOARD_PROTO_MINOR);
+    if (!gh)
+	KernelFatal(CANNOT_LOAD_KEYBOARD_DRIVER);
+    GeodeSetDefaultDriver(GDDT_KEYBOARD, gh);
 }
 
 static void LoadUI(void)
@@ -110,6 +152,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     ActiveFile();
     FSDLoadPrimary();
     FileInitStdPaths();
+    LoadKeyboardDriver();
     LoadUI();
     gh = ProcessCommandLine(cmdTail, &e);
     if (err)
