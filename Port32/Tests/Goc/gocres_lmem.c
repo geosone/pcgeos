@@ -6,13 +6,15 @@
 #include "kernelC.h"
 
 #include <object.h>
+#include <chunkarr.h>
 #include <stdio.h>
 #include <string.h>
 
 extern const GocResource __goc_resource_AppResource;
 extern const GocResource __goc_resource_Interface;
 extern const GocResource __goc_resource_Extra;
-extern const ChunkHandle GocTestText, GocTestExtraRef, GocTestPrimary;
+extern const ChunkHandle GocTestText, GocTestExtraRef, GocTestPrimary,
+    GocTestNumbers;
 extern const word GocTestText_resid;
 
 static int fails;
@@ -67,6 +69,21 @@ int GocResLMemCheck(void)
 	  OptrToChunk(ref) == GocTestText, "GocTestExtraRef");
     Check(LMemGetChunkSize(ConstructOptr(ui, GocTestPrimary)) > 0,
 	  "GocTestPrimary is an object");
+    /* @chunkArray: header and elements are one chunk array */
+    {
+	optr numbers = ConstructOptr(extra, GocTestNumbers);
+	word *p;
+	Check(ChunkArrayGetCount(numbers) == 3, "@chunkArray count");
+	p = ChunkArrayElementToPtr(numbers, 2, NULL);
+	Check(p && *p == 30 && *(word *) ChunkArrayElementToPtr(numbers, 0,
+							       NULL) == 10,
+	      "@chunkArray elements");
+	*(word *) ChunkArrayAppend(numbers, 0) = 40;
+	Check(ChunkArrayGetCount(numbers) == 4 &&
+	      *(word *) ChunkArrayElementToPtr(numbers, 3, NULL) == 40,
+	      "@chunkArray append");
+	LMemValidate(extra);
+    }
     MemFree(app);
     MemFree(ui);
     MemFree(extra);

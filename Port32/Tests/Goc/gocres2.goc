@@ -22,6 +22,7 @@
     GTI_destination = @GocTestGlyph;
 }
 @chunk optr GocTestExtraRef = @GocTestText;
+@chunkArray word GocTestNumbers = {10, 20, 30};
 @end Extra;
 
 /* objects of both files in static data in code */

@@ -361,8 +361,41 @@ parts of a chunk one after the other.
   `MemAllocLMem(LMEM_TYPE_OBJ_BLOCK)` makes the running thread the exec
   thread, as in the asm kernel.
 - `LMemDeref` of a chunk without data returns `NULL`.
-- Not yet: `LMF_NO_HANDLES` (DB items), `LMemSplitBlock`, chunk/element/
-  name arrays and GCN lists (next), object relocation (object system).
+- Not yet: `LMF_NO_HANDLES` (DB items), `LMemSplitBlock`, GCN lists
+  (they send messages), object relocation (object system).
+
+**Chunk, element and name arrays** (`lmemChunkArray.c`,
+`lmemElementArray.c`, `lmemNameArray.c`) keep the asm format: header
+(`CAH_offset` bytes), fixed-size elements right after it, or for
+variable-sized ones a table of `CAH_count` word offsets (from the chunk
+start) and the elements. Element arrays start each element with a
+`RefElementHeader` (24-bit reference count) and keep freed elements on a
+free list (`EAH_freePtr`, `WAAH_high` = `0xff`), so tokens stay valid.
+Name arrays are variable-sized element arrays of reference count, data
+(`NAH_dataSize`) and name (no terminator).
+
+- `RefElementHeader` is 4 bytes in Port32 (`WordAndAHalf` gets host
+  alignment), 3 in 16-bit GEOS: name and element arrays in DOS16 files
+  need the converter (section 11).
+- `ElementArrayAddElement` has no size for variable-sized elements (the
+  asm C stub passed none either): it serves fixed-size arrays; the kernel
+  uses `ElementArrayAddElementSized` (for name arrays).
+- `ChunkArrayEnum` callbacks may delete or insert elements;
+  `CAH_curOffset` holds the running enumeration's position.
+- An element of size 0 has the offset of the next one: a pointer cannot
+  tell them apart (`ChunkArrayPtrToElement`, `ChunkArrayInsertAt`), as
+  in the asm kernel.
+- **`goc -cg` writes the element count** of `@chunkArray` and
+  `@elementArray` (the elements come first, the header counts them with
+  `sizeof`); glue did that for the 16-bit backends, whose output is
+  unchanged.
+
+ctest `kernel.carray`: fixed-size arrays (insert, delete, range, enum
+with deletion, sort), a random sequence on a variable-sized array
+against shadows, element arrays (references, free list reuse, merging
+in `ElementArrayElementChanged`, used index/token), name arrays and
+`ArrayQuickSort`. `goc.resources` reads a goc `@chunkArray` through the
+C kernel.
 
 ctest `kernel.lmem` runs a random sequence of allocations, frees,
 resizes, inserts and deletes against shadow copies and validates the

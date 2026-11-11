@@ -7,13 +7,18 @@
 #   Thread/threadThread.c <- threads, scheduler of Thread/threadThread.asm
 #   Thread/threadSem.c <- semaphores, thread locks of Thread/threadSem.asm
 #   LMem/lmemCode.c    <- local memory heaps of LMem/lmemCode.asm
+#   LMem/lmemChunkArray.c, lmemElementArray.c, lmemNameArray.c
+#                      <- the arrays of the same names (.asm)
 add_library(geos_kernel STATIC
   Sys/sysError.c
   Heap/heapHandle.c
   Heap/heapHigh.c
   Thread/threadThread.c
   Thread/threadSem.c
-  LMem/lmemCode.c)
+  LMem/lmemCode.c
+  LMem/lmemChunkArray.c
+  LMem/lmemElementArray.c
+  LMem/lmemNameArray.c)
 target_include_directories(geos_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

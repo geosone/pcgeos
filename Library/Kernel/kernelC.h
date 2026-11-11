@@ -54,7 +54,12 @@
     X(LMEM_CHUNK_HANDLE_AT_ODD_ADDRESS) \
     X(LMEM_BAD_INSERT_OFFSET) \
     X(LMEM_BAD_DELETE_OFFSET) \
-    X(LMEM_BAD_DELETE_SIZE)
+    X(LMEM_BAD_DELETE_SIZE) \
+    X(CHUNK_ARRAY_BAD_ELEMENT) \
+    X(CHUNK_ARRAY_HEADER_SIZE_TOO_SMALL) \
+    X(CANNOT_SORT_VARIABLE_SIZED_CHUNK_ARRAYS) \
+    X(CANNOT_RESIZE_FIXED_SIZE_ELEMENT) \
+    X(NULL_ELEMENT_PASSED_TO_CHUNK_ARRAY_ROUTINE)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -218,6 +223,13 @@ dword KernelTicks(void);
 void LMemValidate(MemHandle mh);
 /* Build the LMem block of a resource made by goc -cg (header, handle
  * table, chunks in handle order).  Optrs in it stay unrelocated. */
+/* ElementArrayAddElement with the size of a variable-sized element
+ * (lmemElementArray.c) */
+word ElementArrayAddElementSized(optr arr, void *element, word size,
+				 dword callbackData,
+				 Boolean (*callback)(void *elementToAdd,
+						     void *elementFromArray,
+						     dword valueForCallback));
 MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
 				  HeapFlags hf, HeapAllocFlags haf);
 

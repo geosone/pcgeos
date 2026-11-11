@@ -18,6 +18,9 @@ add_test(NAME kernel.thread COMMAND test_kernel_thread)
 add_executable(test_kernel_lmem test_kernel_lmem.c)
 target_link_libraries(test_kernel_lmem PRIVATE geos_kernel)
 add_test(NAME kernel.lmem COMMAND test_kernel_lmem)
+add_executable(test_kernel_carray test_kernel_carray.c)
+target_link_libraries(test_kernel_carray PRIVATE geos_kernel)
+add_test(NAME kernel.carray COMMAND test_kernel_carray)
 
 # ghal_module: a geode in the host's module format (ELF, or DXE3 on dos32),
 # embedded in the test program.  Not with Open Watcom (no geode toolchain).

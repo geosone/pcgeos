@@ -2064,7 +2064,37 @@ OutputChunk(Symbol *chunk)
 		 * Note that we do not output the correct number of
 		 * elements.  The linker takes care of this for us, we
 		 * just output the element size.
+		 *
+		 * COM_GCC: there is no glue to do that, so the elements
+		 * come first and the header counts them.
 		 */
+		if (compiler == COM_GCC) {
+		    char count[512];
+		    sprintf(count, "(word) (sizeof(_carray_%s) / sizeof(%s))",
+			    chunk->name, chunk->data.symChunk.ctype);
+		    Output("%s _carray_%s[] = ", chunk->data.symChunk.ctype,
+			   chunk->name);
+		    OutputSubstOptr(chunk->data.symChunk.data);
+		    Output("; ");
+		    if (strlen(chunk->data.symChunk.headerType) != 0) {
+			Output("%s _%s = {%s{%s, sizeof(%s), 0, sizeof(%s)}%s, ",
+			       hname, chunk->name,
+			       (chunk->flags & SYM_IS_ELEMENT_ARRAY) ? "{" : "",
+			       count, chunk->data.symChunk.ctype, hname,
+			       (chunk->flags & SYM_IS_ELEMENT_ARRAY) ?
+			       ", 0xffff}" : "");
+			OutputSubstOptr(chunk->data.symChunk.headerData);
+			Output("};\n");
+		    } else {
+			Output("%s _%s = {%s%s, sizeof(%s), 0, sizeof(%s)%s};\n",
+			       hname, chunk->name,
+			       (chunk->flags & SYM_IS_ELEMENT_ARRAY) ? "{" : "",
+			       count, chunk->data.symChunk.ctype, hname,
+			       (chunk->flags & SYM_IS_ELEMENT_ARRAY) ?
+			       "}, 0xffff" : "");
+		    }
+		    break;
+		}
 		if (chunk->flags & SYM_IS_ELEMENT_ARRAY) {
 	    	    if (strlen(chunk->data.symChunk.headerType) != 0) {
 			Output("%s %s _%s%s = %s{{{0, sizeof(%s), 0, "
