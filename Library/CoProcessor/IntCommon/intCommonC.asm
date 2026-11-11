@@ -341,7 +341,7 @@ INTEL80X87FLOATTOASCII	proc	far 		stackFrame:fptr,
 						resultString:fptr,
 						number:fptr
 
-	uses	ax, es, ds, si, di
+	uses	es, ds, si, di		; (not ax: returns the count)
 	.enter	
 
 	les	di, resultString

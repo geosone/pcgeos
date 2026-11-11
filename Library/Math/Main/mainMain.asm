@@ -93,6 +93,8 @@ REVISION HISTORY:
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%@
 
+global	FLOATFLOATTOASCII_OLD:far		; (Float/floatC.asm)
+
 Init segment resource
 
 ife	FULL_EXECUTE_IN_PLACE
@@ -594,6 +596,27 @@ OverwriteRelocationTable	proc	near
 	add	si, bx			; put ds:si beyond first few routines
 	shl	cx			; bx = size(fptr)/2 * # of entries
 	rep	movsw			; copy tables
+
+	;
+	; The C entry FLOATFLOATTOASCII was published after the tables above
+	; were laid out and so is not copied: callers got the software routine
+	; while their number was on the coprocessor stack (wrong result, one
+	; number left on that stack).  Send it where its predecessor
+	; FLOATFLOATTOASCII_OLD (same interface) now goes.
+	;
+	push	dx
+	mov	di, es:[GH_exportLibTabOff]
+	mov	bx, enum FLOATFLOATTOASCII_OLD
+	shl	bx
+	shl	bx
+	mov	ax, es:[di][bx].offset
+	mov	dx, es:[di][bx].segment
+	mov	bx, enum FLOATFLOATTOASCII
+	shl	bx
+	shl	bx
+	mov	es:[di][bx].offset, ax
+	mov	es:[di][bx].segment, dx
+	pop	dx
 
 	; because of the fact that the CoProcessor library references the
 	; math library, the math library will not get an LCT_DETACH until
