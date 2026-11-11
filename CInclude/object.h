@@ -137,11 +137,27 @@ typedef struct _CMethodDef {
  *	Constants and Structures for Object Variable Storage Mechanism
  */
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: variable data starts at an offset aligned to 8 in the object
+ * chunk, and each entry is aligned to 8 and has a size word, so its data
+ * (right after the entry) is 8-aligned.  VDE_entrySize is the size of
+ * the entry and its data, without the padding to the next entry.  Type
+ * and size come right before the data, as in 16-bit GEOS.
+ * Port32/ABI.md section 13.
+ */
+typedef struct {
+    word	VDE_reserved[2];
+    word	VDE_dataType;
+    word	VDE_entrySize;
+} VarDataEntry;
+#else
 typedef struct {
     word	VDE_dataType;
     /* for data type with extra data, the following exist */
     word	VDE_entrySize;
 } VarDataEntry;
+#endif
 
 /* offset to extra data */
 #define VDE_extraData	sizeof(VarDataEntry)
@@ -167,9 +183,17 @@ typedef WordFlags VarDataFlags;
 
 #define VarDataFlagsPtr(ptr) ((*(((word *)ptr)-2))&~VDF_TYPE)
 
+#ifdef GEOS_PORT32
+/* Port32: the size of the extra data (the 16-bit macro gave the entry
+ * size, header included) */
+#define VarDataSizePtr(ptr) ((*(((word *)ptr)-2))&VDF_EXTRA_DATA \
+                                ? (word) (*(((word *)ptr)-1) - sizeof(VarDataEntry)) \
+                                : 0)
+#else
 #define VarDataSizePtr(ptr) ((*(((word *)ptr)-2))&VDF_EXTRA_DATA \
                                 ? (*(((word *)ptr)-1)) \
                                 : 0)
+#endif
 
 
 typedef struct {

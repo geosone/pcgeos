@@ -73,7 +73,17 @@
     X(MF_CUSTOM_NOT_SUPPORTED) \
     X(CANNOT_HAVE_BOTH_MF_FORCE_QUEUE_AND_MF_CALL) \
     X(VARIANT_SUPERCLASS_NOT_RESOLVED) \
-    X(OBJ_BAD_MASTER_PARTS)
+    X(OBJ_BAD_MASTER_PARTS) \
+    X(NOT_AN_OBJECT) \
+    X(NOT_OBJECT_BLOCK) \
+    X(NESTED_FREE_OBJ_BLOCK) \
+    X(OVS_SIZE_OF_VAR_DATA_ENTRIES_GREATER_THAN_VAR_DATA_AREA) \
+    X(OVS_BAD_MSG_META_INITIALIZE_VAR_DATA_HANDLER) \
+    X(BAD_RELOCATION_TYPE) \
+    X(ILLEGAL_VARDATA_RELOCATION_OFFSET) \
+    X(ERROR_RETURNED_BY_RELOCATION_HANDLER) \
+    X(CANNOT_RELOCATE) \
+    X(CANNOT_UNRELOCATE)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -203,6 +213,7 @@ typedef struct {
     Handle	T_eventQueue;
     ClassStruct	*T_class;	/* ThreadAttachToQueue: for messages to
 				 * the thread, its queue or its process */
+    MemHandle	T_dynamicObjBlock;	/* ObjInstantiateForThread */
 } KThread;
 
 /* the running thread (0 before KernelThreadInit) */
@@ -265,10 +276,38 @@ extern dword kernelTimerEventsDropped;
  * Events, queues and messages (Geodes/geodesEvent.c, Object/
  * objectClass.c).  Port32/ABI.md section 12.
  * ------------------------------------------------------------------- */
-/* MetaClass messages the kernel sends itself (MetaMessages, metaC.goh) */
+/* MetaClass and ProcessClass messages the kernel handles or sends
+ * (MetaMessages in metaC.goh, ProcessMessages in processC.goh; the
+ * ctest kernel.obj compares them with goc's numbers) */
+#define KMSG_META_NULL				0
 #define KMSG_META_INITIALIZE			1
+#define KMSG_META_DUMMY				3
 #define KMSG_META_ACK				9
+#define KMSG_META_GET_CLASS			13
+#define KMSG_META_IS_OBJECT_IN_CLASS		14
+#define KMSG_META_BLOCK_FREE			15
+#define KMSG_META_OBJ_FREE			16
+#define KMSG_META_FINAL_OBJ_FREE		17
+#define KMSG_META_DEC_BLOCK_REF_COUNT		18
 #define KMSG_META_RESOLVE_VARIANT_SUPERCLASS	19
+#define KMSG_META_RELOCATE			20
+#define KMSG_META_UNRELOCATE			21
+#define KMSG_META_SET_FLAGS			23
+#define KMSG_META_GET_FLAGS			24
+#define KMSG_META_DISPATCH_EVENT		28
+#define KMSG_META_SEND_CLASSED_EVENT		29
+#define KMSG_META_GET_OPTR			30
+#define KMSG_META_ADD_VAR_DATA			32
+#define KMSG_META_DELETE_VAR_DATA		33
+#define KMSG_META_INITIALIZE_VAR_DATA		34
+#define KMSG_META_GET_VAR_DATA			46
+#define KMSG_META_NOTIFY_OBJ_BLOCK_INTERACTIBLE	47
+#define KMSG_META_NOTIFY_OBJ_BLOCK_NOT_INTERACTIBLE 48
+#define KMSG_META_SET_OBJ_BLOCK_OUTPUT		53
+#define KMSG_META_GET_OBJ_BLOCK_OUTPUT		56
+#define KMSG_PROCESS_INSTANTIATE		8197
+#define KMSG_PROCESS_FINAL_BLOCK_FREE		8204
+#define KMSG_PROCESS_INSTANTIATE_FOR_THREAD	8208
 
 /* event reserve for interrupt code, event timers through messages */
 void KernelEventInit(void);
@@ -281,6 +320,50 @@ void KernelDeliver(optr dest, Message msg, const void *params, void *reply);
 /* the thread a queue's messages go to (ThreadAttachToQueue) */
 void KQueueAttach(QueueHandle qh, ThreadHandle th);
 void KQueueDetach(QueueHandle qh);
+
+/* ---------------------------------------------------------------------
+ * The object system (Object/, Port32/ABI.md section 13).
+ * ------------------------------------------------------------------- */
+extern ClassStruct MetaClass, ProcessClass;	/* objectMeta.c, objectProcess.c */
+#define OBJ_ALIGN(n)	(((n) + 7u) & ~7u)	/* parts, variable data */
+#define OBJ_VARIANT_SUPER ((ClassStruct *) 1)	/* GOCR_VARIANT_SUPERCLASS */
+
+/* the class of the object (chunk locked) */
+#define ObjClassOf(o)	(*(ClassStruct **) LMemDeref(o))
+/* the superclass a variant master class `cls' has for this object (asks
+ * the object if it is not known yet; objectClass.c) */
+ClassStruct *ObjResolveVariant(optr o, ClassStruct *cls);
+/* the next class up from `cls' for object `o' (0: none): variant
+ * superclasses come from the object, unresolved ones give 0 */
+ClassStruct *ObjSuperOf(optr o, ClassStruct *cls);
+/* where an object's variable data lies in its chunk, from the chunk
+ * start (objectVarData.c) */
+void ObjVarDataArea(optr o, word *start, word *end);
+/* the relocation method of a class (Class_relocMethod, made by goc for
+ * "@method XClass, _reloc", whose prototype has a word message): TRUE on
+ * error */
+typedef Boolean ObjRelocMethod(void *pself, optr oself, word message,
+			       word vmRelocType, word frame);
+/* Relocate an object block: the output, and every object through its
+ * classes' relocation tables and methods (objectReloc.c).  Unrelocate
+ * does the reverse.  The handles come from the resources of the block's
+ * owner (GeodeResourceHandle). */
+void ObjRelocateObjBlock(MemHandle mh, word vmRelocType);
+void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType);
+
+/* ---------------------------------------------------------------------
+ * Geode resources (Geodes/geodesResource.c).  Until GeodeLoad exists,
+ * whoever builds a geode's resources registers their handles here.
+ * ------------------------------------------------------------------- */
+/* handles[0] is the geode's process (core block), as in
+ * __goc_resource_handles; the table must stay valid */
+void GeodeSetResourceHandles(GeodeHandle gh, const Handle *handles,
+			     word count);
+/* the handle of resource `res' of a geode (GOCR_PROCESS_RES: the
+ * process); 0 if the geode or resource is not known */
+Handle GeodeResourceHandle(GeodeHandle gh, word res);
+/* the resource number of `h' in a geode, or -1 */
+sdword GeodeHandleToResource(GeodeHandle gh, Handle h);
 
 /* ---------------------------------------------------------------------
  * LMem (LMem/lmemCode.c, after lmemCode.asm).  Port32/ABI.md section 10.

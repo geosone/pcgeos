@@ -784,8 +784,9 @@ OutputMasterFields(Symbol *class,   	    /* Current class */
 		 * Instance data for this thing actually needs to be given,
 		 * so put out a field for it.
 		 */
-		Output("%sInstance m%d;", bottomClass->data.symClass.root,
-		       *masterNumPtr);
+		Output("%s%sInstance m%d;",
+		       compiler == COM_GCC ? "GOCR_PART " : "",
+		       bottomClass->data.symClass.root, *masterNumPtr);
 	    }
 	}
     }
@@ -1380,6 +1381,24 @@ OutputGccMethodThunks(Symbol *class)
     }
 }
 
+/*
+ * The offset of a relocation table entry points to the handle: the high
+ * word of a 16-bit optr or fptr (+2).  Port32 (goc -cg): the handle half
+ * of a 64-bit optr; an fptr (a pointer, RELOC_RELOC_ENTRY_POINT) and an
+ * hptr are the field itself.
+ */
+static void
+OutputRelocHandleOffset(int type)
+{
+    if (compiler == COM_GCC) {
+	if (type == RT_OPTR) {
+	    Output("+GOCR_OPTR_HANDLE_OFS");
+	}
+    } else if (type != RT_HPTR) {
+	Output("+2");
+    }
+}
+
 void
 OutputClassTable(Symbol *class)
 {
@@ -1461,9 +1480,7 @@ OutputClassTable(Symbol *class)
 		    Output("{%d, word_offsetof(%sInstance, %s)",
 				    relocTable[rel->type],
 				    class->data.symClass.root, rel->text);
-		    if (rel->type != RT_HPTR) {
-			Output("+2");
-		    }
+		    OutputRelocHandleOffset(rel->type);
 		    if (count > 0) {
 			Output("+%d*sizeof(%s)", count, rel->structName);
 		    }
@@ -1498,9 +1515,7 @@ OutputClassTable(Symbol *class)
 			       relocTable[rel->type],
 			       rel->tag->data.symVardata.tag);
 		    }
-		    if (rel->type != RT_HPTR) {
-			Output("+2");
-		    }
+		    OutputRelocHandleOffset(rel->type);
 		    if (count > 0) {
 			Output("+%d*sizeof(%s)", count, rel->structName);
 		    }
@@ -1617,7 +1632,10 @@ OutputClassTable(Symbol *class)
 	    }
 	}
 	if (meth != NullMethod) {
-	    Output("(MessageMethod *)%s};\n", meth->name);
+	    /* via void (*)(void): the method has word parameters
+	     * (vmRelocType, frame), which an unprototyped type cannot
+	     * take; the kernel calls it with its real type */
+	    Output("(MessageMethod *)(void (*)(void))%s};\n", meth->name);
 	} else {
 	    Output("0};\n");
 	}
@@ -1730,6 +1748,10 @@ OutputClassTable(Symbol *class)
 	    Output("typedef MessageMethod *MessageMethodP;");
 	    Output("%sMessageMethodP%s _Reloc_%s[] = {(MessageMethod *)&%s};\n",
 		   preTypeString, postTypeString, class->name, meth->name);
+	} else if (compiler == COM_GCC) {
+	    Output("MessageMethod *_Reloc_%s = "
+		   "(MessageMethod *)(void (*)(void))&%s;\n",
+		   class->name, meth->name);
 	} else {
 	    Output("%sMessageMethod%s *_Reloc_%s = (MessageMethod *)&%s;\n",
 		   preTypeString, postTypeString, class->name, meth->name);
@@ -1927,7 +1949,62 @@ OutputVariableData(Symbol *class, Symbol *object, Boolean setup)
 	 * single structure and avoid the word alignment of
 	 * variables.  Its name is _vs_<object->name>.
 	 */
-	if (setup) {
+	if (setup && compiler == COM_GCC) {
+	    /*
+	     * Port32: the area and each entry are aligned to 8; an entry
+	     * is VarDataEntry (4 reserved bytes, type, size: the type and
+	     * size right before the data, as VEDP_dataType/VEDP_entrySize
+	     * expect) and its data.  Port32/ABI.md section 13.
+	     */
+	    int counter = 1;
+	    Output("GOCR_PART struct {");
+	    for (vd = object->data.symObject.vardata;
+		    vd != NullVardataValue;
+		    vd = vd->next) {
+		Output("GOCR_PART struct {dword _%dp; word _%dh; word _%ds; ",
+		       counter, counter, counter);
+		if (strlen(vd->value) != 0) {
+		    if (OutputCheckIfString(vd->type->data.symVardata.ctype)) {
+			Output("char _%dd[sizeof(%s)]; ", counter, vd->value);
+		    } else if (vd->arraySize == NULL) {
+			Output("%s _%dd%s; ", vd->type->data.symVardata.ctype,
+			       counter, vd->type->data.symVardata.typeSuffix);
+		    } else {
+			Output("%s _%dd[%s]; ", vd->type->data.symVardata.ctype,
+			       counter, vd->arraySize);
+		    }
+		}
+		Output("} _%d; ", counter);
+		counter++;
+	    }
+	    Output("} v;");
+	} else if (compiler == COM_GCC) {
+	    for (vd = object->data.symObject.vardata;
+		    vd != NullVardataValue;
+		    vd = vd->next)
+	    {
+		if (strlen(vd->value) == 0) {
+		    Output("{0, %d|%d, sizeof(VarDataEntry)}, ",
+			   vd->type->data.symVardata.tag, VDF_SAVE_TO_STATE);
+		    continue;
+		}
+		Output("{0, %d|%d|%d, ", vd->type->data.symVardata.tag,
+		       VDF_SAVE_TO_STATE, VDF_EXTRA_DATA);
+		if (OutputCheckIfString(vd->type->data.symVardata.ctype)) {
+		    Output("sizeof(VarDataEntry)+sizeof(%s), %s",
+			   vd->value, vd->value);
+		} else if (vd->arraySize == NULL) {
+		    Output("sizeof(VarDataEntry)+sizeof(%s), ",
+			   vd->type->data.symVardata.ctype);
+		    OutputSubstOptr(vd->value);
+		} else {
+		    Output("sizeof(VarDataEntry)+sizeof(%s)*%s, ",
+			   vd->type->data.symVardata.ctype, vd->arraySize);
+		    OutputSubstOptr(vd->value);
+		}
+		Output("}, ");
+	    }
+	} else if (setup) {
 	    int counter = 1;
 	    Output("struct {");
 	    for (vd = object->data.symObject.vardata;

@@ -16,12 +16,13 @@
  *    with MSG_META_RESOLVE_VARIANT_SUPERCLASS (ResolveVariant).
  *
  * Methods are called through their thunks (Port32/ABI.md section 5).
+ * ObjInstantiate makes objects (the master parts are built on demand).
  * Messages to a thread, queue or process (chunk 0) go to the class the
  * running thread was attached with (ThreadAttachToQueue).
  */
 #include "kernelC.h"
 
-#define VARIANT_SUPER	((ClassStruct *) 1)	/* GOCR_VARIANT_SUPERCLASS */
+#include <string.h>
 
 static byte *Obj(optr o)
 {
@@ -38,55 +39,6 @@ static ClassStruct *ClassOfObj(optr o)
     return *(ClassStruct **) Obj(o);
 }
 
-/* Resize the master part whose offset word is at `masterOffset' to
- * `size' bytes; the later parts move (objectUtils.asm). */
-void ObjResizeMaster(optr o, word masterOffset, word size)
-{
-    word last = ClassOfObj(o)->Class_masterOffset;
-    word start, end, cur, at;
-    sword delta;
-
-    if (masterOffset >= last) {
-	/* the last part: the class's instance size (variable data may
-	 * follow); not built: the end of the base structure */
-	start = *MasterWord(o, masterOffset);
-	end = start ? (word) (start + ClassOfObj(o)->Class_instanceSize)
-		    : (word) (last + sizeof(word));
-    } else {
-	/* up to the next part that is built */
-	word next = masterOffset;
-	do {
-	    next += sizeof(word);
-	    end = *MasterWord(o, next);
-	} while (!end && next < last);
-	if (!end) {
-	    if (*MasterWord(o, masterOffset))
-		KernelFatal(OBJ_BAD_MASTER_PARTS);
-	    end = (word) (last + sizeof(word));
-	}
-    }
-    if (!*MasterWord(o, masterOffset))
-	*MasterWord(o, masterOffset) = end;
-    start = *MasterWord(o, masterOffset);
-    cur = (word) (end - start);
-    delta = (sword) (size - cur);
-    if (delta == 0)
-	return;
-    if (delta > 0) {
-	at = end;
-	if (LMemInsertAt(o, at, (word) delta))
-	    KernelFatal(LMEM_CANNOT_ALLOCATE);
-    } else {
-	at = (word) (end + delta);
-	LMemDeleteAt(o, at, (word) -delta);
-    }
-    /* the parts after this one moved */
-    for (cur = (word) (masterOffset + sizeof(word)); cur <= last;
-	 cur += sizeof(word))
-	if (*MasterWord(o, cur))
-	    *MasterWord(o, cur) = (word) (*MasterWord(o, cur) + delta);
-}
-
 static int CallClass(ClassStruct *cls, optr oself, int isObj, Message msg,
 		     const void *params, void *reply);
 
@@ -97,7 +49,7 @@ void ObjInitializeMaster(optr o, ClassStruct *cls)
 }
 
 /* the superclass of a variant master class `cls' for this object */
-static ClassStruct *ResolveVariant(optr o, ClassStruct *cls)
+ClassStruct *ObjResolveVariant(optr o, ClassStruct *cls)
 {
     ClassStruct **slot;
     ClassStruct *super;
@@ -145,10 +97,10 @@ static int CallClass(ClassStruct *cls, optr oself, int isObj, Message msg,
 	if (cls->Class_flags & CLASSF_MASTER_CLASS) {
 	    if (msg == KMSG_META_INITIALIZE)
 		return 0;		/* not inherited across masters */
-	    if (cls->Class_superClass == VARIANT_SUPER) {
+	    if (cls->Class_superClass == OBJ_VARIANT_SUPER) {
 		if (!isObj)
 		    return 0;
-		cls = ResolveVariant(oself, cls);
+		cls = ObjResolveVariant(oself, cls);
 		continue;
 	    }
 	}
@@ -194,8 +146,8 @@ void *CObjCallSuperP(ClassStruct *superOf, optr dest, Message message,
     if (isObj)
 	MemLock(h);
     cls = superOf->Class_superClass;
-    if (cls == VARIANT_SUPER)
-	cls = isObj ? ResolveVariant(dest, superOf) : NULL;
+    if (cls == OBJ_VARIANT_SUPER)
+	cls = isObj ? ObjResolveVariant(dest, superOf) : NULL;
     if (!(superOf->Class_flags & CLASSF_MASTER_CLASS) ||
 	message != KMSG_META_INITIALIZE)
 	CallClass(cls, dest, isObj, message, params, reply);
@@ -225,8 +177,117 @@ void *ObjDeref2(optr obj)
 /* TRUE if `cls' is `of' or below it (variants: the static chain only) */
 Boolean ObjIsClassADescendant(ClassStruct *cls, ClassStruct *of)
 {
-    for (; cls && cls != VARIANT_SUPER; cls = cls->Class_superClass)
+    for (; cls && cls != OBJ_VARIANT_SUPER; cls = cls->Class_superClass)
 	if (cls == of)
 	    return TRUE;
     return FALSE;
+}
+
+/* the next class up for object `o' (0: none or an unresolved variant) */
+ClassStruct *ObjSuperOf(optr o, ClassStruct *cls)
+{
+    word mo;
+
+    if (cls->Class_superClass != OBJ_VARIANT_SUPER)
+	return cls->Class_superClass;
+    mo = cls->Class_masterOffset;
+    if (!OptrToChunk(o) || !*MasterWord(o, mo))
+	return NULL;
+    return *(ClassStruct **) (Obj(o) + *MasterWord(o, mo));
+}
+
+/* ClassInClassCommon: is the object's class `of' or below it? */
+Boolean ObjIsObjectInClass(optr obj, ClassStruct *of)
+{
+    ClassStruct *cls;
+
+    for (cls = ClassOfObj(obj); cls; cls = ObjSuperOf(obj, cls)) {
+	if (of->Class_masterOffset > cls->Class_masterOffset)
+	    return FALSE;
+	if (cls == of)
+	    return TRUE;
+    }
+    return FALSE;
+}
+
+/*
+ * A new object of class `cls' in object block `block'.  With master
+ * parts only the base structure is allocated (the parts are built when
+ * a message reaches them); without, the whole instance, and the object
+ * gets MSG_META_INITIALIZE.  A block run by another thread asks that
+ * thread (MSG_PROCESS_INSTANTIATE).
+ */
+optr ObjInstantiate(MemHandle block, ClassStruct *cls)
+{
+    ThreadHandle exec = (ThreadHandle) MemGetInfo(block, MGIT_EXEC_THREAD);
+    ChunkHandle ch;
+    word size;
+    byte *p;
+
+    if (exec && exec != KernelThisThread()) {
+	struct { MemHandle block; ClassStruct *cls; } params;
+	ChunkHandle reply = 0;
+	params.block = block;
+	params.cls = cls;
+	CObjMessageP(MF_CALL, ConstructOptr(exec, 0),
+		     KMSG_PROCESS_INSTANTIATE, &params, sizeof(params),
+		     &reply, sizeof(reply));
+	return ConstructOptr(block, reply);
+    }
+    size = cls->Class_masterOffset
+	   ? (word) (cls->Class_masterOffset + sizeof(word))
+	   : cls->Class_instanceSize;
+    MemLock(block);
+    ch = LMemAlloc(block, size);
+    p = LMemDeref(ConstructOptr(block, ch));
+    memset(p, 0, size);
+    *(ClassStruct **) p = cls;
+    ObjSetFlags(ConstructOptr(block, ch), OCF_IS_OBJECT | OCF_DIRTY, 0);
+    if (!cls->Class_masterOffset)
+	CallClass(cls, ConstructOptr(block, ch), 1, KMSG_META_INITIALIZE,
+		  NULL, NULL);
+    MemUnlock(block);
+    return ConstructOptr(block, ch);
+}
+
+/* the header of the blocks of ObjInstantiateForThread */
+typedef struct {
+    ObjLMemBlockHeader	OOLMBH_header;
+    MemHandle		OOLMBH_dynamicObjBlock;	/* next block */
+} OIFTObjLMemBlockHeader;
+
+#define DESIRED_OBJECT_BLOCK_SIZE	0x1000
+
+/* A new object run by `thread' (0: this one), in a block of its own
+ * that is not saved to state. */
+optr ObjInstantiateForThread(ThreadHandle thread, ClassStruct *cls)
+{
+    KThread *t;
+    MemHandle mh;
+
+    if (thread && thread != KernelThisThread()) {
+	optr reply = 0;
+	CObjMessageP(MF_CALL, ConstructOptr(thread, 0),
+		     KMSG_PROCESS_INSTANTIATE_FOR_THREAD, &cls, sizeof(cls),
+		     &reply, sizeof(reply));
+	return reply;
+    }
+    t = ThreadOf(KernelThisThread());
+    for (mh = t->T_dynamicObjBlock; mh; ) {
+	OIFTObjLMemBlockHeader *h = MemLock(mh);
+	word used = (word) (h->OOLMBH_header.OLMBH_header.LMBH_blockSize -
+			    h->OOLMBH_header.OLMBH_header.LMBH_totalFree);
+	MemHandle next = h->OOLMBH_dynamicObjBlock;
+	MemUnlock(mh);
+	if (used < DESIRED_OBJECT_BLOCK_SIZE)
+	    return ObjInstantiate(mh, cls);
+	mh = next;
+    }
+    mh = MemAllocLMem(LMEM_TYPE_OBJ_BLOCK, sizeof(OIFTObjLMemBlockHeader));
+    MemModifyOtherInfo(mh, KernelThisThread());
+    ((OIFTObjLMemBlockHeader *) MemLock(mh))->OOLMBH_dynamicObjBlock =
+	t->T_dynamicObjBlock;
+    MemUnlock(mh);
+    t->T_dynamicObjBlock = mh;
+    return ObjInstantiate(mh, cls);
 }

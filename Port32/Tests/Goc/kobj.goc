@@ -1,0 +1,449 @@
+/***********************************************************************
+ *
+ * kobj.goc -- the object system of the C kernel (Port32/ABI.md
+ * section 13): object layout, variable data, relocation, MetaClass and
+ * ProcessClass, ObjInstantiate, freeing objects and blocks.
+ *
+ * Two master levels with optrs in their instance data, variable data
+ * with an optr that is relocated, a class with a relocation method and
+ * a class without master levels; objects in two resources that point to
+ * each other and to the process.  test_kernel_obj.c drives it.
+ *
+ ***********************************************************************/
+@include <stdapp.goh>
+#include <stdio.h>
+#include <string.h>
+
+/* kernel internals the test uses (kernelC.h) */
+void ObjRelocateObjBlock(MemHandle mh, word vmRelocType);
+void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType);
+
+@class KOTopClass, MetaClass, master;
+    @instance optr KOTI_link;
+    @instance word KOTI_inits;
+@message word MSG_KOT_INITS();
+@endc
+@classdecl KOTopClass;
+
+@class KOMidClass, KOTopClass, master;
+    @instance optr KOMI_target;
+    @instance word KOMI_value;
+    @instance MemHandle KOMI_block;
+    @reloc KOMI_block, handle;
+    @vardata optr ATTR_KOM_LINK;
+    @reloc ATTR_KOM_LINK, 0, optr;
+    @vardata void HINT_KOM_FLAG;
+    @vardata char[] ATTR_KOM_NAME;
+    @vardata dword ATTR_KOM_COUNT;
+    @vardata word TEMP_KOM_INIT;
+@message word MSG_KOM_GET_VALUE();
+@message void MSG_KOM_BUMP();
+@endc
+@classdecl KOMidClass;
+
+@class KORelocClass, KOMidClass;
+    @instance word KORI_extra;
+@endc
+@classdecl KORelocClass;
+
+@class KOPlainClass, MetaClass;
+    @instance optr KOPI_other;
+    @instance optr KOPI_proc;
+    @instance word KOPI_x;
+    @vardata word ATTR_KOP_W;
+@endc
+@classdecl KOPlainClass;
+
+@class KObjProcessClass, ProcessClass;
+@endc
+@classdecl KObjProcessClass;
+
+@start Objects;
+@object KOMidClass KOObj1 = {
+    KOTI_link = @KOPlain1;
+    KOMI_target = @KOObj2;
+    KOMI_value = 7;
+    ATTR_KOM_LINK = @KOPlain1;
+    HINT_KOM_FLAG;
+    ATTR_KOM_NAME = "hello";
+    ATTR_KOM_COUNT = 0x12345678;
+}
+@object KORelocClass KOObj2 = {
+    KOMI_target = @KOOther;
+    KOMI_value = 9;
+}
+@object KOPlainClass KOPlain1 = {
+    KOPI_other = @KOObj1;
+    KOPI_proc = process;
+    KOPI_x = 3;
+}
+@end Objects;
+
+@start Other;
+@object KOPlainClass KOOther = {
+    KOPI_other = @KOObj2;
+    KOPI_x = 4;
+    ATTR_KOP_W = 0x55;
+}
+@end Other;
+
+/* goc's message numbers, for the kernel's KMSG_* (test_kernel_obj.c) */
+const Message kobjGocMessages[] = {
+    MSG_META_NULL, MSG_META_INITIALIZE, MSG_META_DUMMY, MSG_META_ACK,
+    MSG_META_GET_CLASS, MSG_META_IS_OBJECT_IN_CLASS, MSG_META_BLOCK_FREE,
+    MSG_META_OBJ_FREE, MSG_META_FINAL_OBJ_FREE,
+    MSG_META_DEC_BLOCK_REF_COUNT, MSG_META_RESOLVE_VARIANT_SUPERCLASS,
+    MSG_META_RELOCATE, MSG_META_UNRELOCATE, MSG_META_SET_FLAGS,
+    MSG_META_GET_FLAGS, MSG_META_DISPATCH_EVENT,
+    MSG_META_SEND_CLASSED_EVENT, MSG_META_GET_OPTR,
+    MSG_META_ADD_VAR_DATA, MSG_META_DELETE_VAR_DATA,
+    MSG_META_INITIALIZE_VAR_DATA, MSG_META_GET_VAR_DATA,
+    MSG_META_NOTIFY_OBJ_BLOCK_INTERACTIBLE,
+    MSG_META_NOTIFY_OBJ_BLOCK_NOT_INTERACTIBLE,
+    MSG_META_SET_OBJ_BLOCK_OUTPUT, MSG_META_GET_OBJ_BLOCK_OUTPUT,
+    MSG_PROCESS_INSTANTIATE, MSG_PROCESS_FINAL_BLOCK_FREE,
+    MSG_PROCESS_INSTANTIATE_FOR_THREAD
+};
+const int kobjGocMessageCount =
+    sizeof(kobjGocMessages) / sizeof(kobjGocMessages[0]);
+
+/* the offsets of the master offset words */
+#define TOP_MO	word_offsetof(KOTopBase, KOTop_offset)
+#define MID_MO	word_offsetof(KOMidBase, KOMid_offset)
+
+int kobjRelocs, kobjUnrelocs, kobjBumps;
+static int fails;
+
+static void
+Check(int ok, const char *what)
+{
+    if (!ok) {
+	fails++;
+	printf("FAIL %s\n", what);
+    }
+}
+
+static int
+Aligned(const void *p)
+{
+    return ((uintptr_t) p & 7) == 0;
+}
+
+/* ---- methods ---- */
+
+@method KOTopClass, MSG_META_INITIALIZE
+{
+    pself->KOTI_inits++;
+    @callsuper();
+}
+
+@method KOTopClass, MSG_KOT_INITS
+{
+    return pself->KOTI_inits;
+}
+
+@method KOMidClass, MSG_KOM_GET_VALUE
+{
+    return pself->KOMI_value;
+}
+
+@method KOMidClass, MSG_KOM_BUMP
+{
+    kobjBumps++;
+}
+
+/* TEMP_KOM_INIT is made on demand (ObjVarDerefData) */
+@method KOMidClass, MSG_META_INITIALIZE_VAR_DATA
+{
+    if (dataType == TEMP_KOM_INIT) {
+	word *p = ObjVarAddData(oself, TEMP_KOM_INIT, sizeof(word));
+	*p = 99;
+	return (word) ((byte *) p - (byte *) MemDeref(OptrToHandle(oself)));
+    }
+    return @callsuper();
+}
+
+@method KORelocClass, _reloc
+{
+    if (message == MSG_META_RELOCATE) {
+	kobjRelocs++;
+    } else {
+	kobjUnrelocs++;
+    }
+    return @callsuper();
+}
+
+@method KOPlainClass, MSG_META_INITIALIZE
+{
+    pself->KOPI_x = 77;
+    @callsuper();
+}
+
+/* ---- the layout goc made, relocation ---- */
+
+/* Before relocation: unrelocated optrs, aligned parts and vardata. */
+int
+KObjLayout(optr obj1, optr obj2)
+{
+    KOMidInstance *mid;
+    KOTopInstance *top;
+    byte *chunk;
+    optr *link;
+    char *name;
+    dword *count;
+
+    fails = 0;
+    chunk = LMemDeref(obj1);
+    Check(Aligned(chunk), "chunk aligned");
+    top = ObjDeref(obj1, TOP_MO);
+    mid = ObjDeref(obj1, MID_MO);
+    Check(Aligned(top) && Aligned(mid), "master parts aligned");
+    Check(mid->KOMI_value == 7, "KOMI_value");
+    Check(GOCR_IS_UNRELOCATED(mid->KOMI_target) &&
+	  GOCR_RES_OF(mid->KOMI_target) == GOCR_RES_OBJECTS &&
+	  OptrToChunk(mid->KOMI_target) == KOObj2, "unrelocated optr");
+    Check(top->KOTI_link == GOCR_UNRELOC_OPTR(GOCR_RES_OBJECTS, KOPlain1),
+	  "unrelocated optr in the first part");
+    link = ObjVarFindData(obj1, ATTR_KOM_LINK);
+    Check(link && Aligned(link) &&
+	  *link == GOCR_UNRELOC_OPTR(GOCR_RES_OBJECTS, KOPlain1),
+	  "optr in vardata");
+    name = ObjVarFindData(obj1, ATTR_KOM_NAME);
+    Check(name && strcmp(name, "hello") == 0 &&
+	  VarDataSizePtr(name) == 6, "string vardata");
+    count = ObjVarFindData(obj1, ATTR_KOM_COUNT);
+    Check(count && Aligned(count) && *count == 0x12345678 &&
+	  VarDataSizePtr(count) == 4, "dword vardata");
+    Check(ObjVarFindData(obj1, HINT_KOM_FLAG) != NULL &&
+	  VarDataSizePtr(ObjVarFindData(obj1, HINT_KOM_FLAG)) == 0,
+	  "vardata without data");
+    Check(ObjVarFindData(obj1, TEMP_KOM_INIT) == NULL, "no TEMP_KOM_INIT");
+    Check((ObjGetFlags(obj1) & (OCF_IS_OBJECT | OCF_IN_RESOURCE |
+				OCF_VARDATA_RELOC)) ==
+	  (OCF_IS_OBJECT | OCF_IN_RESOURCE | OCF_VARDATA_RELOC), "flags");
+    mid = ObjDeref(obj2, MID_MO);
+    /* goc builds every part that is not above an unresolved variant */
+    Check(*(word *) ((byte *) LMemDeref(obj2) + TOP_MO) != 0 &&
+	  Aligned(ObjDeref(obj2, TOP_MO)), "static part built");
+    Check(mid->KOMI_value == 9, "KOObj2 value");
+    return fails;
+}
+
+/* After relocation with handles[]: everything points to blocks. */
+int
+KObjRelocated(optr obj1, optr obj2, optr plain, optr other,
+	      const Handle *handles)
+{
+    KOMidInstance *mid;
+    KOPlainInstance *p;
+
+    fails = 0;
+    mid = ObjDeref(obj1, MID_MO);
+    Check(mid->KOMI_target == obj2, "relocated target");
+    Check(((KOTopInstance *) ObjDeref(obj1, TOP_MO))->KOTI_link ==
+	  plain, "relocated link");
+    Check(*(optr *) ObjVarFindData(obj1, ATTR_KOM_LINK) == plain,
+	  "relocated vardata optr");
+    mid = ObjDeref(obj2, MID_MO);
+    Check(mid->KOMI_target == other, "relocated across resources");
+    p = LMemDeref(plain);
+    Check(p->KOPI_other == obj1, "plain other");
+    Check(p->KOPI_proc == ConstructOptr(handles[0], 0), "process");
+    p = LMemDeref(other);
+    Check(p->KOPI_other == obj2, "other block to this block");
+    Check(*(word *) ObjVarFindData(other, ATTR_KOP_W) == 0x55,
+	  "plain vardata");
+    return fails;
+}
+
+/* An hptr (@reloc handle) is the handle itself. */
+int
+KObjHptr(optr obj1, MemHandle other)
+{
+    MemHandle mh = OptrToHandle(obj1);
+    KOMidInstance *mid;
+
+    fails = 0;
+    mid = ObjDeref(obj1, MID_MO);
+    mid->KOMI_block = other;
+    ObjUnRelocateObjBlock(mh, 0);
+    mid = ObjDeref(obj1, MID_MO);
+    Check(mid->KOMI_block == (GOCR_UNRELOCATED | GOCR_RES_OTHER),
+	  "hptr unrelocated");
+    ObjRelocateObjBlock(mh, 0);
+    mid = ObjDeref(obj1, MID_MO);
+    Check(mid->KOMI_block == other, "hptr relocated");
+    return fails;
+}
+
+/* ---- variable data ---- */
+
+static int scanCount, scanTotal;
+
+static void
+ScanCount(MemHandle mh, ChunkHandle ch, VarDataEntry *extra, word type,
+	  void *data)
+{
+    (void) mh; (void) ch; (void) extra; (void) type;
+    scanCount++;
+    scanTotal += *(int *) data;
+}
+
+int
+KObjVarData(optr obj1, optr obj2, optr plain)
+{
+    VarDataCHandler handlers[] = {
+	{ATTR_KOM_COUNT, ScanCount},
+	{HINT_KOM_FLAG, ScanCount},
+	{ATTR_KOM_NAME, ScanCount}
+    };
+    int three = 3;
+    word *w;
+    dword *d;
+    char buf[16];
+    word n;
+    struct {
+	word	dataType;
+	word	dataSize;
+	void	*data;
+    } avdp;
+    KOMidInstance *mid;
+
+    fails = 0;
+    ObjVarScanData(obj1, 3, handlers, &three);
+    Check(scanCount == 3 && scanTotal == 9, "ObjVarScanData");
+
+    /* made on demand by the class */
+    w = ObjVarDerefData(obj1, TEMP_KOM_INIT);
+    Check(w && *w == 99 && Aligned(w), "ObjVarDerefData");
+    Check(ObjVarDerefData(obj1, TEMP_KOM_INIT) == w, "found again");
+
+    /* add over an existing entry: same size, data cleared */
+    d = ObjVarAddData(obj1, ATTR_KOM_COUNT, sizeof(dword));
+    Check(*d == 0 && Aligned(d), "re-add clears");
+    *d = 41;
+    /* another size: moved to the end */
+    d = ObjVarAddData(obj1, ATTR_KOM_COUNT, 3 * sizeof(dword));
+    Check(d && VarDataSizePtr(d) == 12 && Aligned(d), "re-add resized");
+    d[2] = 0xabcdef01;
+
+    Check(ObjVarDeleteData(obj1, HINT_KOM_FLAG), "delete");
+    Check(!ObjVarDeleteData(obj1, HINT_KOM_FLAG), "delete again");
+    Check(strcmp(ObjVarFindData(obj1, ATTR_KOM_NAME), "hello") == 0,
+	  "others stay");
+
+    /* through MetaClass messages */
+    avdp.dataType = ATTR_KOM_NAME;
+    avdp.dataSize = 4;
+    avdp.data = "abc";
+    @call obj1::MSG_META_ADD_VAR_DATA(avdp.dataType, avdp.dataSize,
+				      avdp.data);
+    n = @call obj1::MSG_META_GET_VAR_DATA(ATTR_KOM_NAME, sizeof(buf), buf);
+    Check(n == 4 && strcmp(buf, "abc") == 0, "MSG_META_GET_VAR_DATA");
+    n = @call obj1::MSG_META_GET_VAR_DATA(HINT_KOM_FLAG, sizeof(buf), buf);
+    Check(n == 0xffff, "MSG_META_GET_VAR_DATA not found");
+    Check(!@call obj1::MSG_META_DELETE_VAR_DATA(ATTR_KOM_NAME),
+	  "MSG_META_DELETE_VAR_DATA");
+    Check(@call obj1::MSG_META_DELETE_VAR_DATA(ATTR_KOM_NAME),
+	  "MSG_META_DELETE_VAR_DATA not found");
+
+    /* copy a range, delete a range */
+    ObjVarCopyDataRange(obj1, plain, ATTR_KOM_LINK, TEMP_KOM_INIT);
+    Check(*(word *) ObjVarFindData(plain, TEMP_KOM_INIT) == 99 &&
+	  ((dword *) ObjVarFindData(plain, ATTR_KOM_COUNT))[2] ==
+	  0xabcdef01, "ObjVarCopyDataRange");
+    ObjVarDeleteDataRange(plain, ATTR_KOM_LINK, TEMP_KOM_INIT, FALSE);
+    Check(!ObjVarFindData(plain, TEMP_KOM_INIT) &&
+	  !ObjVarFindData(plain, ATTR_KOM_COUNT) &&
+	  !ObjVarFindData(plain, ATTR_KOM_LINK), "ObjVarDeleteDataRange");
+
+    /* vardata on an object with static parts */
+    w = ObjVarAddData(obj2, ATTR_KOM_COUNT, sizeof(dword));
+    *(dword *) w = 5;
+    Check(@call obj2::MSG_KOT_INITS() == 0, "static part not initialized");
+    d = ObjVarFindData(obj2, ATTR_KOM_COUNT);
+    Check(d && *d == 5 && Aligned(d), "vardata after the parts");
+    mid = ObjDeref(obj2, MID_MO);
+    Check(Aligned(mid) && mid->KOMI_value == 9, "parts unchanged");
+    return fails;
+}
+
+/* ---- ObjInstantiate, MetaClass ---- */
+
+int
+KObjInstantiate(MemHandle block)
+{
+    optr a, b;
+    dword *d;
+
+    fails = 0;
+    a = ObjInstantiate(block, &KOMidClass);
+    Check(LMemGetChunkSize(a) == MID_MO + sizeof(word),
+	  "only the base structure");
+    d = ObjVarAddData(a, ATTR_KOM_COUNT, sizeof(dword));
+    *d = 8;
+    Check(@call a::MSG_KOT_INITS() == 1, "parts built on demand");
+    Check(@call a::MSG_KOM_GET_VALUE() == 0, "new part is zero");
+    d = ObjVarFindData(a, ATTR_KOM_COUNT);
+    Check(d && *d == 8 && Aligned(d), "vardata kept");
+    Check(Aligned(ObjDeref(a, TOP_MO)) &&
+	  Aligned(ObjDeref(a, MID_MO)), "new parts aligned");
+    Check((ObjGetFlags(a) & (OCF_IS_OBJECT | OCF_DIRTY)) ==
+	  (OCF_IS_OBJECT | OCF_DIRTY), "new object flags");
+
+    b = ObjInstantiate(block, &KOPlainClass);
+    Check(((KOPlainInstance *) LMemDeref(b))->KOPI_x == 77,
+	  "MSG_META_INITIALIZE without master parts");
+    d = ObjVarAddData(b, ATTR_KOP_W, sizeof(word));
+    Check(Aligned(d), "vardata of a plain object aligned");
+
+    Check(@call a::MSG_META_GET_CLASS() == &KOMidClass, "GET_CLASS");
+    Check(@call a::MSG_META_IS_OBJECT_IN_CLASS(&KOTopClass),
+	  "IS_OBJECT_IN_CLASS");
+    Check(!@call a::MSG_META_IS_OBJECT_IN_CLASS(&KOPlainClass),
+	  "IS_OBJECT_IN_CLASS not");
+    Check(ObjIsObjectInClass(b, &MetaClass), "in MetaClass");
+    Check(@call a::MSG_META_GET_OPTR() == a, "GET_OPTR");
+    @call a::MSG_META_SET_FLAGS(OptrToChunk(b), OCF_IGNORE_DIRTY, OCF_DIRTY);
+    Check(@call a::MSG_META_GET_FLAGS(OptrToChunk(b)) ==
+	  (OCF_IS_OBJECT | OCF_IGNORE_DIRTY), "SET/GET_FLAGS");
+    @call a::MSG_META_SET_OBJ_BLOCK_OUTPUT(b);
+    Check(@call a::MSG_META_GET_OBJ_BLOCK_OUTPUT() == b &&
+	  ObjBlockGetOutput(block) == b, "block output");
+    ObjBlockSetOutput(block, 0);
+    return fails;
+}
+
+/* ---- classed events ---- */
+
+int
+KObjClassed(optr mid, optr plain)
+{
+    EventHandle ev;
+
+    fails = 0;
+    ev = @record KOMidClass::MSG_KOM_BUMP();
+    @call mid::MSG_META_SEND_CLASSED_EVENT(ev, TO_SELF);
+    Check(kobjBumps == 1, "classed event delivered");
+    ev = @record KOMidClass::MSG_KOM_BUMP();
+    @call plain::MSG_META_SEND_CLASSED_EVENT(ev, TO_SELF);
+    Check(kobjBumps == 1, "classed event of another class dropped");
+    ev = @record KOMidClass::MSG_KOM_BUMP();
+    @call mid::MSG_META_SEND_CLASSED_EVENT(ev, TO_NULL);
+    Check(kobjBumps == 1, "TO_NULL dropped");
+    return fails;
+}
+
+/* ---- freeing, remote ---- */
+
+void
+KObjSendFree(optr o)
+{
+    @send o::MSG_META_OBJ_FREE();
+}
+
+ClassStruct *
+KObjClassOf(optr o)
+{
+    return @call o::MSG_META_GET_CLASS();
+}

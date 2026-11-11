@@ -94,6 +94,16 @@ typedef word		VardataKey;
 /* the base structure of an object (class pointer, master offsets) has no
  * padding: Class_masterOffset is sizeof(ClassStruct *) + 2 * (level - 1) */
 #define GOCR_PACKED		__attribute__((packed))
+/*
+ * Master parts and variable data start at offsets aligned to 8 in the
+ * object chunk (whose data is 8-aligned), so the optrs and pointers in
+ * them are aligned on every host; each variable data entry is aligned to
+ * 8 as well (Port32/ABI.md section 13).
+ */
+#define GOCR_PART		__attribute__((aligned(8)))
+/* where the handle half of an optr lies in it (little endian hosts):
+ * relocation tables point to that handle, as the 16-bit ones did */
+#define GOCR_OPTR_HANDLE_OFS	4
 
 /*
  * In code, "@Obj" is GOCR_OPTR(Obj): the handle of the resource as loaded

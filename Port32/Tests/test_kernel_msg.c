@@ -8,8 +8,6 @@
 
 #include <stdio.h>
 
-/* the kernel's own classes are not there yet: empty stand-ins */
-ClassStruct MetaClass, ProcessClass;
 Handle __goc_resource_handles[4];	/* the geode loader fills it */
 
 extern ClassStruct KMsgProcessClass;
@@ -43,7 +41,6 @@ int main(void)
     MemHandle objects, remote;
     int fails = 0;
 
-    ProcessClass.Class_superClass = &MetaClass;
     kernelCurrentGeode = 0x2340;
     me = KernelThreadInit(PRIORITY_STANDARD);
     KernelTimerInit();

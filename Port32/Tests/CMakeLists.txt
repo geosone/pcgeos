@@ -122,6 +122,18 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "
     target_compile_options(test_kernel_msg PRIVATE -Wno-unused-parameter)
   endif()
   add_test(NAME kernel.msg COMMAND test_kernel_msg)
+
+  # the object system of the C kernel, with classes and objects of goc -cg
+  geos_goc(_kobj_c Goc/kobj.gp Goc/kobj.goc)
+  add_executable(test_kernel_obj ${_kobj_c} test_kernel_obj.c)
+  target_link_libraries(test_kernel_obj PRIVATE geos_kernel)
+  target_compile_definitions(test_kernel_obj PRIVATE GEOS_PORT32)
+  target_include_directories(test_kernel_obj PRIVATE
+    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_kernel_obj PRIVATE -Wno-unused-parameter)
+  endif()
+  add_test(NAME kernel.obj COMMAND test_kernel_obj)
 endif()
 
 # The SDK_C samples of goc_sdk.txt must keep building through goc -cg,

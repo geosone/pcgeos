@@ -340,7 +340,9 @@ void LMemInitHeap(MemHandle mh, LMemType type, LocalMemoryFlags flags,
 
 MemHandle MemAllocLMem(LMemType type, word headerSize)
 {
-    MemHandle mh = MemAlloc(128, HF_SWAPABLE, HAF_NO_ERR);
+    /* zeroed: the rest of a larger header (ObjLMemBlockHeader: in-use
+     * count, output) starts at 0 */
+    MemHandle mh = MemAlloc(128, HF_SWAPABLE, HAF_NO_ERR | HAF_ZERO_INIT);
     LocalMemoryFlags flags = 0;
     word def = sizeof(LMemBlockHeader);
 

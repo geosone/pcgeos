@@ -362,7 +362,7 @@ parts of a chunk one after the other.
   thread, as in the asm kernel.
 - `LMemDeref` of a chunk without data returns `NULL`.
 - Not yet: `LMF_NO_HANDLES` (DB items), `LMemSplitBlock`, GCN lists
-  (they send messages), object relocation (object system).
+  (they send messages). Object relocation: section 13.
 
 **Chunk, element and name arrays** (`lmemChunkArray.c`,
 `lmemElementArray.c`, `lmemNameArray.c`) keep the asm format: header
@@ -376,7 +376,7 @@ Name arrays are variable-sized element arrays of reference count, data
 
 - `RefElementHeader` is 4 bytes in Port32 (`WordAndAHalf` gets host
   alignment), 3 in 16-bit GEOS: name and element arrays in DOS16 files
-  need the converter (section 13).
+  need the converter (section 14).
 - `ElementArrayAddElement` has no size for variable-sized elements (the
   asm C stub passed none either): it serves fixed-size arrays; the kernel
   uses `ElementArrayAddElementSized` (for name arrays).
@@ -504,9 +504,9 @@ level) has no padding: `goc -cg` declares the `<Class>Base` types
 as in 16-bit GEOS). Before this, the C compiler padded the nested base
 structures on 64-bit hosts, and goc wrote the 16-bit offsets 4, 6, ...
 
-Not yet: the kernel's own `MetaClass` and `ProcessClass` (the test
-brings empty ones), `@children`/`CObjSendToChildren` (composites),
-relocation of objects, `ObjInstantiate`, variable data.
+`MetaClass`, `ProcessClass`, `ObjInstantiate`, variable data and
+relocation: section 13. Not yet: `@children`/`CObjSendToChildren`
+(composites).
 
 ctest `kernel.msg` (with `Goc/kmsg.goc`, classes and objects from
 `goc -cg`):
@@ -526,14 +526,164 @@ ctest `kernel.msg` (with `Goc/kmsg.goc`, classes and objects from
 `goc.resources` keeps its stand-in message kernel (fake handles show where
 goc sends to), under its own names.
 
-## 13. Open
+## 13. Objects (`Library/Kernel/Object`, P4)
+
+**Layout of an object chunk.** Optrs are 8 bytes and pointers are 8 bytes
+on 64-bit hosts, and armhf traps on some misaligned 64-bit accesses. So
+everything in an object that holds them is aligned to 8. The chunk data
+is 8-aligned (section 10). Then:
+
+```
+base structure   class pointer, one word per master level (packed, sec. 12)
+master parts     each at an offset aligned to 8, occupying its
+                 Class_instanceSize rounded up to 8, in level order
+variable data    from the next offset aligned to 8 to the end of the chunk
+```
+
+- **`goc -cg`** marks the master parts and the variable data area of a
+  resource object `GOCR_PART` (`__attribute__((aligned(8)))`), so its
+  static objects have this layout. goc builds every master part that
+  lies below an unresolved variant; the parts above one stay 0 and are
+  built later.
+- **`ObjResizeMaster`** builds a part where the next built part starts
+  (parts are built from the last level up), or else after the base
+  structure. It grows or shrinks by multiples of 8, so the later parts
+  and the variable data stay aligned.
+- Without master levels, the instance is the class's
+  `Class_instanceSize` bytes from the chunk start (class pointer
+  included), and variable data follows at the next offset aligned to 8.
+
+**Variable data.** Each entry is a `VarDataEntry` and its data:
+
+```
+VDE_reserved[2]   4 bytes, 0
+VDE_dataType      type | VarDataFlags
+VDE_entrySize     8 + size of the data (always present)
+data              8-aligned
+```
+
+The next entry starts at the next offset aligned to 8. Type and size
+come right before the data, as in 16-bit GEOS (`VEDP_dataType` -4,
+`VEDP_entrySize` -2), so the `VarData*Ptr` macros keep working.
+`VarDataSizePtr` returns the size of the data under Port32. The 16-bit
+macro returned the entry size, header included, and the callers in the
+tree use it as the data size. goc writes each entry as an aligned
+structure `{0, type|flags, sizeof(VarDataEntry)+sizeof(data), data}`.
+Pointers to variable data point to the data, as in the asm kernel.
+Where the C API passes such a pointer as a word (`ObjVarDeleteDataAt`,
+the reply of `MSG_META_INITIALIZE_VAR_DATA`), the word is its offset
+from the start of the block, like a 16-bit near pointer.
+
+API: `ObjVarAddData` (an existing entry of another size moves to the
+end, the data is cleared), `ObjVarFindData`, `ObjVarDerefData` (asks
+the object with `MSG_META_INITIALIZE_VAR_DATA`), `ObjVarDeleteData`
+(TRUE if deleted), `ObjVarDeleteDataAt`, `ObjVarScanData`,
+`ObjVarDeleteDataRange`, `ObjVarCopyDataRange`.
+
+**Relocation** (`objectReloc.c`). In an unrelocated optr or hptr, the
+handle holds a resource number of the block's owner with
+`GOCR_UNRELOCATED` set (section 4). Relocated, it holds that resource's
+handle. `GOCR_PROCESS_RES` stands for the process.
+`ObjRelocateObjBlock`/`ObjUnRelocateObjBlock` do the block output and
+every object (`OCF_IS_OBJECT`) through its classes, as the asm kernel
+does:
+
+- `Class_relocTable` entries give an offset in the class's master part
+  (skipped while the part is not built). goc makes them for `optr`,
+  link and composite instance variables, and for `@reloc`.
+- `Class_vdRelocTable` entries give a vardata tag and an offset in its
+  data. They apply only to objects marked `OCF_VARDATA_RELOC`.
+- A class with a relocation method (`@method XClass, _reloc`,
+  `CLASSF_HAS_RELOC`) gets the call instead of its tables. Its
+  `@callsuper()` is `ObjRelocOrUnRelocSuper`, which does the class's
+  tables and goes on up. The method's "frame" word carries the
+  `VMRelocType` and whether it unrelocates.
+
+Table entries point to the handle: under `goc -cg`, the handle half of
+an optr (`+GOCR_OPTR_HANDLE_OFS`, 4 on the little-endian hosts) or the
+hptr itself. The 16-bit backends keep `+2`. Pointers
+(`RELOC_RELOC_ENTRY_POINT`: classes, routines) need nothing at load
+time: the module loader made them absolute. goc casts a relocation
+method to `MessageMethod *` through `void (*)(void)`, because its
+prototype has `word` parameters. The kernel calls it with that
+prototype (`ObjRelocMethod`).
+
+Until `GeodeLoad` exists, the code that builds a geode's resources
+registers their handles with `GeodeSetResourceHandles`
+(`Geodes/geodesResource.c`). Entry 0 is the process, as in
+`__goc_resource_handles`.
+
+**MetaClass and ProcessClass** are written by hand in C
+(`objectMeta.c`, `objectProcess.c`): a message table and thunks that
+take the parameter structures of section 5. Their message numbers
+(`KMSG_*` in `kernelC.h`) are checked against goc's by `kernel.obj`.
+
+- `MetaClass`: `GET_CLASS`, `IS_OBJECT_IN_CLASS`, `GET_OPTR`,
+  `BLOCK_FREE`, `OBJ_FREE`/`FINAL_OBJ_FREE`, `DEC_BLOCK_REF_COUNT`,
+  `SET_FLAGS`/`GET_FLAGS`, `DISPATCH_EVENT`, `SEND_CLASSED_EVENT`
+  (self if of the event's class, block output, process, or dropped),
+  `ADD_VAR_DATA`, `DELETE_VAR_DATA` (TRUE if not found, as the carry
+  was), `INITIALIZE_VAR_DATA`, `GET_VAR_DATA` (`0xffff`: not found),
+  `SET_OBJ_BLOCK_OUTPUT`/`GET_OBJ_BLOCK_OUTPUT`.
+- `ProcessClass`: `MSG_PROCESS_INSTANTIATE` (`{MemHandle, ClassStruct
+  *}`, replies with the chunk), `MSG_PROCESS_INSTANTIATE_FOR_THREAD`,
+  `MSG_PROCESS_FINAL_BLOCK_FREE`.
+- `ObjInstantiate` allocates only the base structure for a class with
+  master levels; parts are built on demand. Without master levels it
+  allocates the whole instance and sends `MSG_META_INITIALIZE`. A block
+  run by another thread is passed to that thread with
+  `MSG_PROCESS_INSTANTIATE`. `ObjInstantiateForThread` keeps the
+  thread's blocks of up to 4K (`T_dynamicObjBlock`).
+- Freeing (`ObjFreeChunk`, `MSG_META_OBJ_FREE`, `ObjFreeObjBlock`)
+  works as in the asm kernel. An object of a resource keeps its handle
+  with no data and is marked dirty. A block in use (`OLMBH_inUseCount`)
+  is only marked `LMF_AUTO_FREE`. The final message goes through the
+  queue of the thread that runs the object. Without the input manager
+  there is no flush of the input queues yet.
+- Also: `ObjGetFlags`, `ObjSetFlags`, `ObjMarkDirty`,
+  `ObjInitializePart`, the in-use and interactible counts (the latter
+  notify the block output), `ObjBlockSetOutput`/`GetOutput`,
+  `ObjLockObjBlock`, `ObjTestIfObjBlockRunByCurThread`,
+  `ObjIsObjectInClass` (follows resolved variants).
+- `MemAllocLMem` zeroes its block, so the rest of an
+  `ObjLMemBlockHeader` (counts, output) starts at 0.
+
+ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
+
+- the layout goc made: aligned parts and variable data, unrelocated
+  optrs, string data, data of 4 bytes and entries without data;
+- relocation across two resources and to the process, through instance
+  and vardata tables, an hptr and a relocation method;
+- unrelocation back to the bytes goc made;
+- variable data through the API and the `MetaClass` messages;
+- `ObjInstantiate` of both kinds of class, with parts built after
+  variable data was added;
+- the `MetaClass` messages and classed events;
+- remote `ObjInstantiate` and `ObjInstantiateForThread`;
+- `MSG_META_OBJ_FREE`, and `ObjFreeObjBlock` with and without an in-use
+  count.
+
+Not yet:
+
+- Composites and links (`CObjSendToChildren`, `ObjCompAddChild`, ...),
+  GCN lists (`TEMP_META_GCN`), detach and quit (`objectShutdown.asm`),
+  duplicating resources and saving to state.
+- **optrs in chunks that are not objects** (moniker lists, GCN list
+  elements, chunk data). Glue relocated them through the geode's
+  relocation table; under `goc -cg` they need a relocation list per
+  resource (section 14).
+
+## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`). The
    module format is decided (`GHAL-Concept.md` §4.4) and the `.gp` data is
-   in the module (§7). Open: resolving imports by name over the
-   geode's libraries with a protocol check, and the protocol a library
-   needs (glue took it from the library's `.ldf`; `GML_proto*` is 0.0,
-   "any", for now).
+   in the module (§7). Open:
+   - resolving imports by name over the geode's libraries, with a
+     protocol check;
+   - the protocol a library needs (glue took it from the library's
+     `.ldf`; `GML_proto*` is 0.0, "any", for now);
+   - the optrs in non-object chunks of a resource, which `goc -cg` has
+     to list for the loader (section 13).
 2. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.
