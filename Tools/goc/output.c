@@ -30,6 +30,7 @@ static char *rcsid =
 #include    <ctype.h>
 #include    <compat/string.h>
 #include    <assert.h>
+#include    <stdlib.h>
 
 Symbol *processClass;
 
@@ -208,9 +209,168 @@ FmtBytes(char *dest,char *fmt, ...)
  *	tony	3/91		Initial Revision
  *
  ***********************************************************************/
+/*
+ * COM_GCC: there are no far pointers to object chunks.  "@Obj" becomes
+ * GOCR_OPTR(Obj) in code (the resource handle is looked up at run time) and
+ * GOCR_SOPTR(Obj) in data that goes into a resource (an unrelocated optr
+ * that is relocated when the resource is loaded).  See geosport.h.
+ */
+static int
+GccIdentLen(const char *s)
+{
+    int n = 0;
+
+    if (!isalpha((unsigned char) *s) && *s != '_') {
+	return 0;
+    }
+    while (isalnum((unsigned char) s[n]) || s[n] == '_') {
+	n++;
+    }
+    return n;
+}
+
+/*
+ * TRUE if the text from start to end (or, for start == NULL, the output so
+ * far) ends in "OptrToChunk(": then the chunk handle of a local object is
+ * used directly, which keeps OptrToChunk(@Obj) a constant expression.
+ */
+static Boolean
+GccAfterOptrToChunk(const char *start, const char *end)
+{
+    static const char key[] = "OptrToChunk(";
+    int n = sizeof(key) - 1;
+
+    if (start == NULL) {
+	start = gccOutTail;
+	end = gccOutTail + strlen(gccOutTail);
+    }
+    while (end > start && isspace((unsigned char) end[-1])) {
+	end--;
+    }
+    return (end - start >= n && !strncmp(end - n, key, n));
+}
+
+static Boolean
+GccLocalChunk(Symbol *sym)
+{
+    return (sym != NullSymbol &&
+	    (sym->type == OBJECT_SYM || sym->type == CHUNK_SYM ||
+	     sym->type == VIS_MONIKER_CHUNK_SYM) &&
+	    sym->data.symChunk.resource != NullSymbol);
+}
+
+static char *
+GccSubstOptr(char *dest, const char *src, Boolean inData)
+{
+    char id[256];
+    Symbol *sym;
+    int n;
+    char *start = dest;
+
+    while (*src != '\0') {
+	if (*src == '@' && (n = GccIdentLen(src + 1)) > 0 &&
+	    n < (int) sizeof(id))
+	{
+	    memcpy(id, src + 1, n);
+	    id[n] = '\0';
+	    sym = inData ? NullSymbol : Symbol_Find(id, TRUE);
+	    if (inData) {
+		dest += sprintf(dest, "GOCR_SOPTR(%s)", id);
+	    } else if (sym != NullSymbol && sym->type == CLASS_SYM) {
+		dest += sprintf(dest, "GOCR_CLASS_OPTR(%s)", id);
+	    } else if (GccLocalChunk(sym) && GccAfterOptrToChunk(start, dest)) {
+		dest += sprintf(dest, "GOCR_SCHUNK(%s)", id);
+	    } else {
+		dest += sprintf(dest, "GOCR_OPTR(%s)", id);
+	    }
+	    src += 1 + n;
+	} else {
+	    *dest++ = *src++;
+	}
+    }
+    *dest = '\0';
+    return dest;
+}
+
+static void
+GccOutputSubstOptr(char *str, Boolean inData)
+{
+    /* "@x" (2 chars) grows to at most "GOCR_CLASS_OPTR(x)" (17 chars) */
+    char *buf = (char *) malloc(strlen(str) * 9 + 1);
+    char *cp;
+
+    GccSubstOptr(buf, str, inData);
+    for (cp = buf; *cp != '\0'; cp++) {
+	OutputChar(*cp);
+    }
+    free(buf);
+}
+
+/* " (optr)&name" for an object, chunk or moniker symbol in code */
+void
+OutputObjRef(char *name)
+{
+    if (compiler == COM_GCC) {
+	if (GccLocalChunk(Symbol_Find(name, TRUE)) &&
+	    GccAfterOptrToChunk(NULL, NULL))
+	{
+	    Output(" GOCR_SCHUNK(%s)", name);
+	} else {
+	    Output(" GOCR_OPTR(%s)", name);
+	}
+    } else {
+	Output(" (optr)&%s", name);
+    }
+}
+
+/* "(optr) &name" for an object or class given as message destination */
+void
+FormatObjRef(char *dest, char *name, Symbol *sym)
+{
+    if (compiler != COM_GCC) {
+	sprintf(dest, "(optr) &%s", name);
+    } else if (sym->type == CLASS_SYM) {
+	sprintf(dest, "GOCR_CLASS_OPTR(%s)", name);
+    } else {
+	sprintf(dest, "GOCR_OPTR(%s)", name);
+    }
+}
+
+static void OutputChunkConstantGcc(Symbol *chunk);
+
+/* a chunk was added to the current resource: declare its handle */
+void
+OutputChunkDefined(Symbol *chunk)
+{
+    if (compiler == COM_GCC) {
+	OutputChunkConstantGcc(chunk);
+    }
+    OutputChunkExtern(chunk->name);
+}
+
+/* extern declaration of a chunk handle (@extern, chunks of a resource) */
+void
+OutputChunkExtern(char *name)
+{
+    if (compiler == COM_GCC) {
+	Output("extern const ChunkHandle %s; extern const word %s_resid;",
+	       name, name);
+    } else {
+	Output("extern %s %s %s%s;",
+	       compilerOffsetTypeName,
+	       compilerFarKeyword,
+	       name,
+	       _ar);
+    }
+}
+
 void
 OutputSubstOptr(char *str)
 {
+    if (compiler == COM_GCC) {
+	GccOutputSubstOptr(str, TRUE);
+	return;
+    }
     OutputSubst(str, "@", "(optr)&");
 }
 
@@ -218,6 +378,11 @@ void
 OutputSubst(char *str, char *find, char *repl)
 {
     char *cp;
+
+    if (compiler == COM_GCC && !strcmp(find, "@") && !strcmp(repl, "(optr)&")) {
+	GccOutputSubstOptr(str, FALSE);
+	return;
+    }
     while (*str != '\0') {
 	cp = OurStrPos(str, find);
 	while (cp > str) {
@@ -251,6 +416,10 @@ CopySubst(char *dest, char *source, char *find, char *repl)
 {
     char *cp;
 
+    if (compiler == COM_GCC && !strcmp(find, "@") && !strcmp(repl, "(optr)&")) {
+	GccSubstOptr(dest, source, FALSE);
+	return;
+    }
     while (*source != '\0') {
 	cp = OurStrPos(source, find);
 	while (cp > source) {
@@ -639,6 +808,8 @@ OutputObjectData(Symbol *class,
 			    if (processClass == NullSymbol) {
 			    	gocerror(NullSymbol,
 					 "No process class defined");
+			    } else if (compiler == COM_GCC) {
+				Output("GOCR_PROCESS_OPTR");
 			    } else {
 			    	Output("(optr)&%s", processClass->name);
 			    }
@@ -653,8 +824,16 @@ OutputObjectData(Symbol *class,
 		  if (valueToUse != NullInstanceValue) {
 		      if (valueToUse->data.instLink.isParentLink) {
 			  /* need to set  the first bit, a GI_link flag */
+			  if (compiler == COM_GCC) {
+			      Output("{GOCR_SOPTR(%s) | 1}",
+				     valueToUse->data.instLink.link->name);
+			  } else {
                           Output("{(optr)(((char *)&%s)+1)}",
                                  valueToUse->data.instLink.link->name);
+			  }
+			}else if (compiler == COM_GCC) {
+			  Output("{GOCR_SOPTR(%s)}",
+				 valueToUse->data.instLink.link->name);
 			}else{
                           Output("{(optr)&%s}",
                                  valueToUse->data.instLink.link->name);
@@ -666,6 +845,16 @@ OutputObjectData(Symbol *class,
 		}
 		case OPTR_SYM : {
 		    if (valueToUse != NullInstanceValue) {
+			if (compiler == COM_GCC &&
+			    (valueToUse->data.instReg.flags & INST_ADD_OPTR))
+			{
+			    if (!strcmp(valueToUse->value, "process")) {
+				Output("GOCR_PROCESS_OPTR");
+			    } else {
+				Output("GOCR_SOPTR(%s)", valueToUse->value);
+			    }
+			    break;
+			}
 			if (valueToUse->data.instReg.flags & INST_ADD_OPTR) {
 			    Output("(optr)&");
 			}
@@ -686,7 +875,10 @@ OutputObjectData(Symbol *class,
 		    break;
 		}
 		case CHUNK_INST_SYM : {
-		    if (valueToUse != NullInstanceValue) {
+		    if (valueToUse != NullInstanceValue &&
+			compiler == COM_GCC) {
+			Output("GOCR_SCHUNK(%s)", valueToUse->value);
+		    } else if (valueToUse != NullInstanceValue) {
 			Output("(ChunkHandle)(dword)&%s",
 			       	    valueToUse->value);
 		    } else {
@@ -695,7 +887,10 @@ OutputObjectData(Symbol *class,
 		    break;
 		}
 		case VIS_MONIKER_SYM : {
-		    if (valueToUse != NullInstanceValue) {
+		    if (valueToUse != NullInstanceValue &&
+			compiler == COM_GCC) {
+			Output("GOCR_SCHUNK(%s)", valueToUse->value);
+		    } else if (valueToUse != NullInstanceValue) {
 			Output("(ChunkHandle)(dword)&%s",
 			       	    valueToUse->value);
 		    } else {
@@ -827,6 +1022,12 @@ OutputClassTable(Symbol *class)
 	    *preTypeString = '\0';
 	    *postTypeString = '\0';
     }
+    if (compiler == COM_GCC) {
+	/* flat memory: no class segments */
+	segName = NULL;
+	*preTypeString = '\0';
+	*postTypeString = '\0';
+    }
 
     /*
      * For Borland, we want things to look like:
@@ -941,13 +1142,21 @@ OutputClassTable(Symbol *class)
     }
 
     /* START CLASSSTRUCT */
+    if (compiler == COM_GCC && class->data.symClass.methodCount != 0) {
+	/* the class structure points to its tables (Port32 ClassStruct) */
+	Output("extern Message _Messages_%s[]; "
+	       "extern MessageMethod *_Methods_%s[]; "
+	       "extern CMethodDef _htypes_%s[];\n",
+	       class->name, class->name, class->name);
+    }
     Output("%sClassStruct%s %s%s = {%s", preTypeString, postTypeString, class->name, compiler == COM_BORL ? "[]" : "", compiler == COM_BORL ? "{" : "");
     if (class->data.symClass.superclass != NullSymbol) {
 	if (class->flags & SYM_CLASS_VARIANT) {
 	    /*
 	     * Variant classes have 1:0 for the superclass.
 	     */
-	    Output("(ClassStruct *)((dword)1 << 16), ");
+	    Output(compiler == COM_GCC ? "GOCR_VARIANT_SUPERCLASS, " :
+		   "(ClassStruct *)((dword)1 << 16), ");
 	} else {
 	    Output("(ClassStruct *)&%s, ",
 		   class->data.symClass.superclass->name);
@@ -1004,6 +1213,31 @@ OutputClassTable(Symbol *class)
 	   ((class->flags & SYM_CLASS_MASTER) ? CLASSF_MASTER_CLASS : 0)|
 	   ((class->flags & SYM_CLASS_HAS_RELOC) ? CLASSF_HAS_RELOC : 0));
 
+    if (compiler == COM_GCC) {
+	Output("%d, ", class->data.symClass.masterMessages);
+	if (class->data.symClass.methodCount != 0) {
+	    Output("_Messages_%s, _Methods_%s, _htypes_%s, ",
+		   class->name, class->name, class->name);
+	} else {
+	    Output("0, 0, 0, ");
+	}
+	meth = NullMethod;
+	if (class->flags & SYM_CLASS_HAS_RELOC) {
+	    for (meth = class->data.symClass.firstMethod;
+		 meth != NullMethod;
+		 meth = meth->next)
+	    {
+		if (meth->message->data.symMessage.class == NULL) {
+		    break;
+		}
+	    }
+	}
+	if (meth != NullMethod) {
+	    Output("(MessageMethod *)%s};\n", meth->name);
+	} else {
+	    Output("0};\n");
+	}
+    } else
     Output("%d%s};\n", class->data.symClass.masterMessages, compiler == COM_BORL ? "}" : "");
     /* END CLASSSTRUCT */
 
@@ -1192,6 +1426,7 @@ OutputLineNumberWithCount(int lineNumber, char *fileName,Boolean print)
 	sprintf(outputLineNumberBuf,"\n# %d \"%s\"\n", lineNumber, fileName);
     	break;
 
+      case COM_GCC:
       case COM_WATCOM:
       case COM_MSC:
       case COM_BORL:
@@ -1205,7 +1440,8 @@ OutputLineNumberWithCount(int lineNumber, char *fileName,Boolean print)
 		*from;
 		from++,to++){
 		*to = (*from =='\\' && 
-			((compiler==COM_MSC) || (compiler==COM_WATCOM)))? '/' : *from;
+			((compiler==COM_MSC) || (compiler==COM_WATCOM) ||
+			 (compiler==COM_GCC)))? '/' : *from;
 	    }
 	    sprintf(to,"\"");
 	    prevFile =  fileName;
@@ -1737,7 +1973,8 @@ OutputChunk(Symbol *chunk)
 		Output("GCNListElement %s _e_%s[] = {",lms, chunk->name);
 		for (sle = chunk->data.symGCNList.firstItem;
 		     sle != NullSymbolListEntry; sle = sle->next) {
-			 Output("{(optr)&%s}, ", sle->entry->name);
+			 Output(compiler == COM_GCC ? "{GOCR_SOPTR(%s)}, " :
+				"{(optr)&%s}, ", sle->entry->name);
 		}
 		Output("};");
 	    }
@@ -1768,7 +2005,8 @@ OutputChunk(Symbol *chunk)
 					sle->data.symGCNList.manufID,
 					sle->data.symGCNList.type,
 					GCNLTF_SAVE_TO_STATE);
-			 Output("(ChunkHandle)(optr)&%s }, ", sle->name);
+			 Output(compiler == COM_GCC ? "GOCR_SCHUNK(%s) }, " :
+				"(ChunkHandle)(optr)&%s }, ", sle->name);
 		}
 		Output("};");
 	    }
@@ -1787,7 +2025,8 @@ OutputChunk(Symbol *chunk)
 		Output("VisMonikerListEntry %s _%s[] = {",lms, chunk->name);
 		for (sle = chunk->data.symVisMoniker.list;
 		     sle != NullSymbolListEntry; sle = sle->next) {
-			 Output("{%d, (optr)&%s}, ", VMLET_MONIKER_LIST |
+			 Output(compiler == COM_GCC ? "{%d, GOCR_SOPTR(%s)}, " :
+				"{%d, (optr)&%s}, ", VMLET_MONIKER_LIST |
 			   ((sle->entry->data.symVisMoniker.vmType.gsColor<<
 			    	VMLET_GS_COLOR_OFFSET) & VMLET_GS_COLOR) |
 			   ((sle->entry->data.symVisMoniker.vmType.style<<
@@ -1967,6 +2206,21 @@ void OutputMethodAntiWarningCode(Method *meth)
     break;
   case COM_MSC:
     break;
+  case COM_GCC:
+    /* -Wunused-parameter */
+    if (!(meth->class->flags & SYM_PROCESS_CLASS)) {
+      switch (meth->model) {
+      case MM_FAR:
+      case MM_NEAR:
+	Output("(void) pself; ");
+	break;
+      case MM_BASED:
+	Output("(void) sself; (void) pself; ");
+	break;
+      }
+    }
+    Output("(void) oself; (void) message; ");
+    break;
   default:
     assert(0);
   }
@@ -1990,6 +2244,191 @@ void OutputMethodAntiWarningCode(Method *meth)
  *	tony	3/91		Initial Revision
  *
  ***********************************************************************/
+/***********************************************************************
+ *
+ * COM_GCC resources
+ *
+ * Without segments, glue cannot build an LMem block from the data, handle
+ * and header segments of a resource.  Instead, for each LMem resource we
+ * emit
+ *
+ *	enum { __goc_ch_<chunk> = GOCR_CHUNK_HANDLE(<header>, <index>),
+ *	       __goc_rs_<chunk> = GOCR_RES_<RESOURCE> };
+ *	    (where the chunk is defined, so code after it can use them)
+ *	const ChunkHandle <chunk> = ...; const word <chunk>_resid = ...;
+ *	    (for code: GOCR_OPTR(<chunk>), also from other files)
+ *	<header type> _<Resource>Header = {...};
+ *	const GocChunk __goc_chunks_<Resource>[] = {{data, size, data2, size2}};
+ *	const GocResource __goc_resource_<Resource> = {...};
+ *
+ * A chunk may consist of two C objects (header and elements of a chunk
+ * array or GCN list, a moniker and its text); the loader puts them one
+ * after the other, as the segment order did for glue.  GOCR_RES_<RESOURCE>
+ * is the resource number from the .gp file (Port32/tools/gpres.py).
+ *
+ ***********************************************************************/
+static char *
+ResourceHeaderType(Symbol *resource)
+{
+    if (resource->data.symResource.header_ctype != NULL) {
+	return resource->data.symResource.header_ctype;
+    } else if (resource->flags & SYM_OBJECT_BLOCK) {
+	return "ObjLMemBlockHeader";
+    } else {
+	return "LMemBlockHeader";
+    }
+}
+
+static void
+OutputResourceNumber(Symbol *resource)
+{
+    char *cp;
+
+    Output("GOCR_RES_");
+    for (cp = resource->name; *cp != '\0'; cp++) {
+	OutputChar(toupper((unsigned char) *cp));
+    }
+}
+
+/*
+ * Called when a chunk is added to its resource (in source order, which is
+ * also the order of the handle table), so code after the definition can
+ * use the constants.
+ */
+static void
+OutputChunkConstantGcc(Symbol *chunk)
+{
+    Symbol *resource = chunk->data.symChunk.resource;
+    Symbol *sym;
+    int index;
+
+    if (resource == NullSymbol || (resource->flags & SYM_RESOURCE_NOT_LMEM)) {
+	return;
+    }
+    index = (resource->flags & SYM_OBJECT_BLOCK) ? 1 : 0;
+    for (sym = resource->data.symResource.firstChunk;
+	 sym != NullSymbol && sym != chunk;
+	 sym = sym->data.symChunk.nextChunk)
+    {
+	index++;
+    }
+    Output("enum { __goc_ch_%s = GOCR_CHUNK_HANDLE(%s, %d), __goc_rs_%s = ",
+	   chunk->name, ResourceHeaderType(resource), index, chunk->name);
+    OutputResourceNumber(resource);
+    Output(" };");
+}
+
+/* the C object(s) holding the data of a chunk: {data, size, data2, size2} */
+static void
+OutputChunkPartsGcc(Symbol *chunk)
+{
+    char *second = NULL;
+    char *prefix = "";
+    char *suffix = "";
+
+    if (chunk->flags & SYM_IS_EMPTY_CHUNK) {
+	Output("{0, 0, 0, 0}");
+	return;
+    }
+    switch (chunk->type) {
+	case CHUNK_SYM:
+	    if (chunk->flags & SYM_IS_CHUNK_ARRAY) {
+		prefix = "_carray_";
+		second = chunk->name;
+	    }
+	    break;
+	case GCN_LIST_SYM:
+	    if (chunk->data.symGCNList.firstItem != NullSymbolListEntry) {
+		prefix = "_e_";
+		second = chunk->name;
+	    }
+	    break;
+	case GCN_LIST_OF_LISTS_SYM:
+	    if (chunk->data.symGCNListOfLists.firstList != NullSymbol) {
+		prefix = "_e_";
+		second = chunk->name;
+	    }
+	    break;
+	case VIS_MONIKER_CHUNK_SYM:
+	    if (!(chunk->flags & (SYM_LIST_MONIKER | SYM_GSTRING_MONIKER))) {
+		prefix = "_";
+		suffix = "_text";
+		second = chunk->name;
+	    }
+	    break;
+	default:
+	    break;
+    }
+    Output("{&_%s, sizeof(_%s), ", chunk->name, chunk->name);
+    if (second != NULL) {
+	Output("%s%s%s, sizeof(%s%s%s)}", prefix, second, suffix,
+	       prefix, second, suffix);
+    } else {
+	Output("0, 0}");
+    }
+}
+
+static void
+OutputResourceTablesGcc(Symbol *resource, int flagsChunk,
+			int roundedNumChunks, int flags)
+{
+    Symbol *chunk;
+    char *headerType = ResourceHeaderType(resource);
+
+    /* chunk handles for code (GOCR_OPTR) */
+    for (chunk = resource->data.symResource.firstChunk; chunk != NullSymbol;
+	 chunk = chunk->data.symChunk.nextChunk)
+    {
+	Output("const ChunkHandle %s = __goc_ch_%s; "
+	       "const word %s_resid = __goc_rs_%s;\n",
+	       chunk->name, chunk->name, chunk->name, chunk->name);
+    }
+
+    /* block header */
+    Output("%s _%sHeader = {", headerType, resource->name);
+    if (resource->flags & SYM_OBJECT_BLOCK) {
+	Output("{");
+    }
+    if (resource->data.symResource.header_ctype != NULL) {
+	Output("{");
+    }
+    Output("0, (word) GOCR_LMEM_HANDLES(%s), 0x%04x, %s, 0, %d, 0, 0}",
+	   headerType, flags,
+	   (resource->flags & SYM_OBJECT_BLOCK) ?
+	   "LMEM_TYPE_OBJ_BLOCK" : "LMEM_TYPE_GENERAL",
+	   roundedNumChunks);
+    if (resource->flags & SYM_OBJECT_BLOCK) {
+	if (resource->data.symResource.resourceOutput != NullSymbol) {
+	    Output(", 0, 0, GOCR_SOPTR(%s), 0}",
+		   resource->data.symResource.resourceOutput->name);
+	} else {
+	    Output(", 0, 0, 0, 0}");
+	}
+    }
+    if (resource->data.symResource.header_initializer != NULL) {
+	Output(", %s}", resource->data.symResource.header_initializer);
+    }
+    Output(";\n");
+
+    /* chunk table and resource descriptor */
+    Output("const GocChunk __goc_chunks_%s[] = {", resource->name);
+    if (flagsChunk) {
+	Output("{__%s_Flags, sizeof(__%s_Flags), 0, 0}, ",
+	       resource->name, resource->name);
+    }
+    for (chunk = resource->data.symResource.firstChunk; chunk != NullSymbol;
+	 chunk = chunk->data.symChunk.nextChunk)
+    {
+	OutputChunkPartsGcc(chunk);
+	Output(", ");
+    }
+    Output("};\nconst GocResource __goc_resource_%s = {", resource->name);
+    OutputResourceNumber(resource);
+    Output(", %d, &_%sHeader, sizeof(_%sHeader), __goc_chunks_%s};\n",
+	   resource->data.symResource.numberOfChunks + flagsChunk,
+	   resource->name, resource->name, resource->name);
+}
+
 void
 OutputResource(Symbol *resource)
 {
@@ -2064,6 +2503,18 @@ OutputResource(Symbol *resource)
     }
     CompilerEndSegment("__DATA_", resource->name);
     Output("\n");
+
+    if (compiler == COM_GCC) {
+	flags = 0;
+	if (resource->flags & SYM_OBJECT_BLOCK) {
+	    flags |= LMF_HAS_FLAGS | LMF_IN_RESOURCE;
+	    if (!(resource->flags & SYM_NOT_DETACHABLE)) {
+		flags |= LMF_DETACHABLE;
+	    }
+	}
+	OutputResourceTablesGcc(resource, flagsChunk, roundedNumChunks, flags);
+	return;
+    }
 
     /*
      * Output the handle table
@@ -2246,7 +2697,7 @@ DoFinalOutput(void)
 	  case COM_HIGHC:
 	    Output("pragma Off(Warn);\n");
 	    break;
-	  case COM_MSC: case COM_BORL: case COM_WATCOM:
+	  case COM_MSC: case COM_BORL: case COM_WATCOM: case COM_GCC:
 	    break;
 	  default:
 	    assert(0);

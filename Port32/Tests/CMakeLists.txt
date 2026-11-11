@@ -58,3 +58,41 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_include_directories(cinclude_port32 PRIVATE
     ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
 endif()
+
+# goc -cg: object resources, class structures and chunk handles of a .goc
+# file, linked and checked on the host (Goc/gocres.goc).
+include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
+if(GEOS_GOC AND Python3_Interpreter_FOUND)
+  geos_goc(_gocres_c Goc/gocres.gp Goc/gocres.goc)
+  add_executable(test_gocres ${_gocres_c} Goc/test_gocres.c)
+  target_compile_definitions(test_gocres PRIVATE GEOS_PORT32)
+  target_include_directories(test_gocres PRIVATE
+    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    # parameters of methods are often unused
+    target_compile_options(test_gocres PRIVATE -Wno-unused-parameter)
+  endif()
+  add_test(NAME goc.resources COMMAND test_gocres)
+endif()
+
+# The SDK_C samples of goc_sdk.txt must keep compiling through goc -cg
+# (compile only: linking needs the ported kernel and UI).  Only errors
+# count here; the samples are old code with many harmless warnings.
+if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/goc_sdk.txt _samples REGEX "^[^#]")
+  set(_sdk_srcs)
+  foreach(_s IN LISTS _samples)
+    set(_dir ${PROJECT_SOURCE_DIR}/Appl/SDK_C/${_s})
+    file(GLOB _gp ${_dir}/*.gp)
+    file(GLOB _gocs ${_dir}/*.goc)
+    list(GET _gp 0 _gp)
+    geos_goc(_c ${_gp} ${_gocs})
+    set_source_files_properties(${_c} PROPERTIES INCLUDE_DIRECTORIES ${_dir})
+    list(APPEND _sdk_srcs ${_c})
+  endforeach()
+  add_library(goc_sdk OBJECT ${_sdk_srcs})
+  target_compile_definitions(goc_sdk PRIVATE GEOS_PORT32)
+  target_include_directories(goc_sdk PRIVATE
+    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+  target_compile_options(goc_sdk PRIVATE -w)
+endif()

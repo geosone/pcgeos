@@ -5119,11 +5119,7 @@ yyreduce:
   case 249:
 
     {
-	    Output("extern %s %s %s%s;",
-		   compilerOffsetTypeName,
-		   compilerFarKeyword, 
-		   (yyvsp[-1].string),
-		   _ar);
+	    OutputChunkExtern((yyvsp[-1].string));
 	    (void) EnterSymbolInGlobal((yyvsp[-1].string), OBJECT_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -5144,11 +5140,7 @@ yyreduce:
   case 251:
 
     {
-	    Output("extern %s %s %s%s;",
-		   compilerOffsetTypeName,
-		   compilerFarKeyword, 
-		   (yyvsp[-1].string),
-		   _ar);
+	    OutputChunkExtern((yyvsp[-1].string));
 	    (void) EnterSymbolInGlobal((yyvsp[-1].string), CHUNK_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -5169,11 +5161,7 @@ yyreduce:
   case 253:
 
     {
-	    Output("extern %s %s %s%s;", 
-		   compilerOffsetTypeName,
-		   compilerFarKeyword,
-		   (yyvsp[-1].string),
-		   _ar);
+	    OutputChunkExtern((yyvsp[-1].string));
 	    (void) EnterSymbolInGlobal((yyvsp[-1].string), VIS_MONIKER_CHUNK_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -5194,7 +5182,7 @@ yyreduce:
   case 255:
 
     {
-	    Output(" (optr)&%s", (yyvsp[0].sym)->name);
+	    OutputObjRef((yyvsp[0].sym)->name);
 	    SWITCH_CONTEXT( LC_NONE);
 	}
 
@@ -5203,7 +5191,7 @@ yyreduce:
   case 256:
 
     {
-	    Output(" (optr)&%s", (yyvsp[0].sym)->name);
+	    OutputObjRef((yyvsp[0].sym)->name);
 	    SWITCH_CONTEXT( LC_NONE);
 	}
 
@@ -5212,7 +5200,7 @@ yyreduce:
   case 257:
 
     {
-	    Output(" (optr)&%s", (yyvsp[0].sym)->name);
+	    OutputObjRef((yyvsp[0].sym)->name);
 	    SWITCH_CONTEXT( LC_NONE);
 	}
 
@@ -5508,7 +5496,7 @@ yyreduce:
 		sym = Symbol_Find((yyvsp[-1].string), TRUE);
 		if ((sym != NullSymbol) && ((sym->type == OBJECT_SYM) ||
 					    (sym->type == CLASS_SYM))) {
-		    sprintf(DEST((yyval.od)), "(optr) &%s", (yyvsp[-1].string));    
+		    FormatObjRef(DEST((yyval.od)), (yyvsp[-1].string), sym);    
 		} else {
 		    CopySubst(DEST((yyval.od)), (yyvsp[-1].string), "@", "(optr)&");
 		}
@@ -5987,6 +5975,10 @@ yyreduce:
 	    if (curResource == NullSymbol) {
 		yyerror("@header outside of resource definition");
 	    } else {
+		if (compiler == COM_GCC &&
+		    curResource->data.symResource.numberOfChunks != 0) {
+		    yyerror("@header must come before the chunks of a resource (goc -cg)");
+		}
 		curResource->data.symResource.header_ctype = (yyvsp[-5].string);
 		curResource->data.symResource.header_initializer = (yyvsp[-2].string);
 	    }
@@ -6619,7 +6611,7 @@ yyreduce:
 						 LOCAL_SCOPE);
 		    Symbol_PopScope();
 		    if (tempMetaGCNSym != NullSymbol) {
-			sprintf(buf, "{{((ChunkHandle)(optr)&_%s_gcnLOL)}, 0}", 
+			sprintf(buf, compiler == COM_GCC ? "{GOCR_SCHUNK(_%s_gcnLOL), 0}" : "{{((ChunkHandle)(optr)&_%s_gcnLOL)}, 0}", 
 				curObject->name);
 			AddVarData(tempMetaGCNSym, String_EnterZT(buf),NULL);
 		    } else {
@@ -7770,11 +7762,7 @@ AddChunkToCurResourceAndOutputExtern(Symbol *chunk)
     		_ar);
 	}
 	else {
-	    Output("extern %s %s %s%s;", 
-		compilerOffsetTypeName,
-		compilerFarKeyword,
-		chunk->name,
-		_ar);
+	    OutputChunkDefined(chunk);
         }
 	CompilerEndSegment("__HANDLES_", curResource->name);
     }

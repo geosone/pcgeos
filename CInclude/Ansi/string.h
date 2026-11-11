@@ -33,7 +33,11 @@ DESCRIPTION:
 #include <geos.h>
 
 /* Define size_t.	*/
+#ifdef GEOS_PORT32
+#include <stddef.h>	/* the host's size_t (Port32/ABI.md) */
+#else
 typedef	unsigned int size_t;
+#endif
 
 extern void
   *_pascal memchr (const void *__s, int __c, size_t __n);

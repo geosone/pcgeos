@@ -289,7 +289,7 @@ typedef struct {
 #ifdef __HIGHC__
     char	UWPMIB_info[0];
 #else
-#ifdef __WATCOM__
+#if defined(__WATCOM__) || defined(GEOS_PORT32)
     char	UWPMIB_info[];
 #else
     void	UWPMIB_info;

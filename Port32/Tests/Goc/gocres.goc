@@ -1,0 +1,166 @@
+/***********************************************************************
+ *
+ * gocres.goc -- object resources made by goc -cg (Port32/ABI.md 4).
+ *
+ * goc -cg turns this file into C for a flat 32/64-bit host; the test
+ * (test_gocres.c) links it and checks the tables the geode loader will
+ * get: chunk handles, unrelocated optrs in instance data, chunks made of
+ * two C objects, the class structure and its method table.
+ *
+ ***********************************************************************/
+@include <stdapp.goh>
+#include <stdio.h>
+#include <string.h>
+
+@class GocTestProcessClass, GenProcessClass;
+@message void MSG_GOCTEST_PING(word value);
+@endc
+@classdecl GocTestProcessClass, neverSaved;
+
+@start AppResource;
+@object GenApplicationClass GocTestApp = {
+    GI_visMoniker = list { @GocTestTextMoniker };
+    GI_comp = @GocTestPrimary;
+    gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS) = @GocTestPrimary;
+}
+@visMoniker GocTestTextMoniker = "Goc Test";
+@end AppResource;
+
+@start Interface;
+@object GenPrimaryClass GocTestPrimary = {
+    GI_comp = @GocTestTrigger, @GocTestGlyph;
+}
+@object GenTriggerClass GocTestTrigger = {
+    GI_visMoniker = "Ping";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_GOCTEST_PING;
+}
+@object GenGlyphClass GocTestGlyph = {
+    GI_visMoniker = "Hello";
+}
+@chunk char GocTestText[] = "some text";
+@end Interface;
+
+/* a static table of chunk handles must stay a constant expression */
+const ChunkHandle gocTestChunks[] = {
+    OptrToChunk(@GocTestTrigger),
+    OptrToChunk(@GocTestGlyph),
+    OptrToChunk(@GocTestText)
+};
+
+@method GocTestProcessClass, MSG_GOCTEST_PING
+{
+    if (value != 0) {
+	@send GocTestGlyph::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Checks, called by test_gocres.c.  The resource data is emitted at the
+ * end of the file, so it is reached through the descriptors.
+ * ------------------------------------------------------------------ */
+extern const GocResource __goc_resource_AppResource;
+extern const GocResource __goc_resource_Interface;
+
+static int gocFails;
+
+static void
+Check(int ok, const char *what)
+{
+    if (!ok) {
+	gocFails++;
+	printf("FAIL %s\n", what);
+    }
+}
+
+/* the chunk table entry of a chunk handle */
+static const GocChunk *
+TestChunkOf(const GocResource *res, ChunkHandle ch)
+{
+    word first = (word) GOCR_LMEM_HANDLES(ObjLMemBlockHeader);
+
+    if (ch < first || (ch - first) % 2 != 0 ||
+	(ch - first) / 2 >= res->GR_chunks) {
+	return NULL;
+    }
+    return &res->GR_chunk[(ch - first) / 2];
+}
+
+static GenInstance *
+TestGenPart(const GocChunk *c)
+{
+    const GenBase *base = (const GenBase *) c->GC_data;
+
+    return (GenInstance *) ((byte *) c->GC_data + base->Gen_offset);
+}
+
+int
+GocTestCheck(void)
+{
+    const GocResource *ui = &__goc_resource_Interface;
+    const GocResource *app = &__goc_resource_AppResource;
+    const ObjLMemBlockHeader *hdr = ui->GR_header;
+    const GocChunk *primary, *trigger, *glyph, *text, *appObj, *moniker;
+
+    Check(ui->GR_number == GOCR_RES_INTERFACE, "Interface number");
+    Check(app->GR_number == GOCR_RES_APPRESOURCE, "AppResource number");
+    Check(hdr->OLMBH_header.LMBH_lmemType == LMEM_TYPE_OBJ_BLOCK, "obj block");
+    Check(hdr->OLMBH_header.LMBH_offset ==
+	  (word) GOCR_LMEM_HANDLES(ObjLMemBlockHeader), "handle table offset");
+    Check(hdr->OLMBH_header.LMBH_nHandles >= ui->GR_chunks &&
+	  hdr->OLMBH_header.LMBH_nHandles % 2 == 0, "handle count");
+    Check(ui->GR_chunk[0].GC_size >= ui->GR_chunks, "flags chunk");
+
+    primary = TestChunkOf(ui, GocTestPrimary);
+    trigger = TestChunkOf(ui, GocTestTrigger);
+    glyph = TestChunkOf(ui, GocTestGlyph);
+    text = TestChunkOf(ui, GocTestText);
+    appObj = TestChunkOf(app, GocTestApp);
+    moniker = TestChunkOf(app, GocTestTextMoniker);
+    Check(primary && trigger && glyph && text && appObj && moniker,
+	  "chunks in their resources");
+    if (gocFails) {
+	return gocFails;
+    }
+    Check(GocTestPrimary_resid == GOCR_RES_INTERFACE, "resid");
+    Check(GocTestApp_resid == GOCR_RES_APPRESOURCE, "resid app");
+
+    /* the object tree: unrelocated optrs (resource number, chunk) */
+    Check(TestGenPart(primary)->GI_comp.CP_firstChild ==
+	  GOCR_UNRELOC_OPTR(GOCR_RES_INTERFACE, GocTestTrigger), "GI_comp");
+    Check(TestGenPart(trigger)->GI_link.LP_next ==
+	  GOCR_UNRELOC_OPTR(GOCR_RES_INTERFACE, GocTestGlyph), "GI_link");
+    Check(TestGenPart(glyph)->GI_link.LP_next ==
+	  (GOCR_UNRELOC_OPTR(GOCR_RES_INTERFACE, GocTestPrimary) | 1),
+	  "GI_link to parent");
+    Check(TestGenPart(appObj)->GI_comp.CP_firstChild ==
+	  GOCR_UNRELOC_OPTR(GOCR_RES_INTERFACE, GocTestPrimary),
+	  "GI_comp across resources");
+    Check(((GenTriggerInstance *) TestGenPart(trigger))->GTI_destination ==
+	  GOCR_PROCESS_OPTR, "process as destination");
+    Check(((GenTriggerInstance *) TestGenPart(trigger))->GTI_actionMsg ==
+	  MSG_GOCTEST_PING, "action message");
+    Check(((MetaBase *) primary->GC_data)->MB_class ==
+	  (ClassStruct *) &GenPrimaryClass, "class pointer");
+
+    /* chunk data */
+    Check(text->GC_size == sizeof("some text") &&
+	  !strcmp((const char *) text->GC_data, "some text") &&
+	  text->GC_data2 == NULL, "plain chunk");
+    Check(moniker->GC_data2 != NULL &&
+	  moniker->GC_size2 == sizeof("Goc Test") &&
+	  !strcmp((const char *) moniker->GC_data2, "Goc Test"),
+	  "text moniker in two parts");
+    Check(gocTestChunks[0] == GocTestTrigger &&
+	  gocTestChunks[1] == GocTestGlyph &&
+	  gocTestChunks[2] == GocTestText, "OptrToChunk(@x) table");
+
+    /* the class structure points to its tables */
+    Check(GocTestProcessClass.Class_superClass ==
+	  (ClassStruct *) &GenProcessClass, "superclass");
+    Check(GocTestProcessClass.Class_methodCount == 1 &&
+	  GocTestProcessClass.Class_messages[0] == MSG_GOCTEST_PING &&
+	  GocTestProcessClass.Class_methods[0] != NULL &&
+	  GocTestProcessClass.Class_htypes != NULL, "method table");
+    return gocFails;
+}

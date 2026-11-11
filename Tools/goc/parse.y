@@ -2589,11 +2589,7 @@ defaultModelLine    :
 externLine	:
     	EXTERN OBJECT IDENT semiColonOrError
  	{
-	    Output("extern %s %s %s%s;",
-		   compilerOffsetTypeName,
-		   compilerFarKeyword, 
-		   $3,
-		   _ar);
+	    OutputChunkExtern($3);
 	    (void) EnterSymbolInGlobal($3, OBJECT_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -2606,11 +2602,7 @@ externLine	:
 	}
     	| EXTERN CHUNK IDENT  semiColonOrError
  	{
-	    Output("extern %s %s %s%s;",
-		   compilerOffsetTypeName,
-		   compilerFarKeyword, 
-		   $3,
-		   _ar);
+	    OutputChunkExtern($3);
 	    (void) EnterSymbolInGlobal($3, CHUNK_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -2623,11 +2615,7 @@ externLine	:
 	}
     	| EXTERN VIS_MONIKER IDENT semiColonOrError
  	{
-	    Output("extern %s %s %s%s;", 
-		   compilerOffsetTypeName,
-		   compilerFarKeyword,
-		   $3,
-		   _ar);
+	    OutputChunkExtern($3);
 	    (void) EnterSymbolInGlobal($3, VIS_MONIKER_CHUNK_SYM,
  		                       SYM_DEFINED | SYM_EXTERN);
 	    SWITCH_CONTEXT( LC_NONE);
@@ -2649,17 +2637,17 @@ externLine	:
 objectDerefLine	:
     	OBJECT_SYM
  	{
-	    Output(" (optr)&%s", $1->name);
+	    OutputObjRef($1->name);
 	    SWITCH_CONTEXT( LC_NONE);
 	}
     	| CHUNK_SYM
  	{
-	    Output(" (optr)&%s", $1->name);
+	    OutputObjRef($1->name);
 	    SWITCH_CONTEXT( LC_NONE);
 	}
     	| VIS_MONIKER_CHUNK_SYM
  	{
-	    Output(" (optr)&%s", $1->name);
+	    OutputObjRef($1->name);
 	    SWITCH_CONTEXT( LC_NONE);
 	}
  	;
@@ -2914,7 +2902,7 @@ objDest	    :
 		sym = Symbol_Find($1, TRUE);
 		if ((sym != NullSymbol) && ((sym->type == OBJECT_SYM) ||
 					    (sym->type == CLASS_SYM))) {
-		    sprintf(DEST($$), "(optr) &%s", $1);    
+		    FormatObjRef(DEST($$), $1, sym);    
 		} else {
 		    CopySubst(DEST($$), $1, "@", "(optr)&");
 		}
@@ -3266,6 +3254,10 @@ headerLine  :
 	    if (curResource == NullSymbol) {
 		yyerror("@header outside of resource definition");
 	    } else {
+		if (compiler == COM_GCC &&
+		    curResource->data.symResource.numberOfChunks != 0) {
+		    yyerror("@header must come before the chunks of a resource (goc -cg)");
+		}
 		curResource->data.symResource.header_ctype = $2;
 		curResource->data.symResource.header_initializer = $5;
 	    }
@@ -3724,7 +3716,7 @@ objectField :
 						 LOCAL_SCOPE);
 		    Symbol_PopScope();
 		    if (tempMetaGCNSym != NullSymbol) {
-			sprintf(buf, "{{((ChunkHandle)(optr)&_%s_gcnLOL)}, 0}", 
+			sprintf(buf, compiler == COM_GCC ? "{GOCR_SCHUNK(_%s_gcnLOL), 0}" : "{{((ChunkHandle)(optr)&_%s_gcnLOL)}, 0}", 
 				curObject->name);
 			AddVarData(tempMetaGCNSym, String_EnterZT(buf),NULL);
 		    } else {
@@ -4500,11 +4492,7 @@ AddChunkToCurResourceAndOutputExtern(Symbol *chunk)
     		_ar);
 	}
 	else {
-	    Output("extern %s %s %s%s;", 
-		compilerOffsetTypeName,
-		compilerFarKeyword,
-		chunk->name,
-		_ar);
+	    OutputChunkDefined(chunk);
         }
 	CompilerEndSegment("__HANDLES_", curResource->name);
     }

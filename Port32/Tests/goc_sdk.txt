@@ -1,0 +1,48 @@
+# SDK_C samples (Appl/SDK_C/<dir>) that goc -cg translates and that compile
+# on 32- and 64-bit hosts (target goc_sdk).  The others still need porting
+# of the application code: NULL used as a handle, PtrToSegment, inline asm,
+# static optr tables in code (Port32/ABI.md section 4).
+AppIcon
+Bitmap
+ChunkArr
+ClipSamp
+CustGeom
+ECheck
+Focus
+FP2Asc
+FSelSamp
+FSFilter
+GCont
+GenAttrs
+GenDisp
+GenDList
+GenInter
+GenItemG
+GenTree
+Glyph
+GStest
+Hello
+Hello2
+Hello3
+InkTest
+Launch
+Moniker
+ParaAttr
+Parser
+Print
+PSCText
+Rulers
+Serial
+Serial2
+SimpInk
+SimpWP
+SubUI
+Tabs
+Talk
+Template
+TextInk
+TicTac
+TriggerData
+VLText
+Wavsamp
+Wheel

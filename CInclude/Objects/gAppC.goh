@@ -396,7 +396,7 @@ typedef ByteFlags AppOptFlags;
 typedef AppOptFlags ApplicationOptFlags;
 
 
-    @instance AppInstanceReference	GAI_appRef = {0,0,NullHandle,{0}};
+    @instance AppInstanceReference	GAI_appRef = {{0},{0},NullHandle,{0}};
 
     @instance Message			GAI_appMode = 0;
     @instance AppLaunchFlags		GAI_launchFlags = 0;

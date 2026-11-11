@@ -54,16 +54,79 @@ headers switch on `GEOS_PORT32`, and that build stays byte-identical
   other headers included first. A few clash with the host C library: GEOS
   `math.h` against `<math.h>`, and `Ansi/ctype.h` against the built-ins.
 
-## 4. Open
+## 4. Object resources: `goc -cg`
 
-1. **GEOS `ansic` or the host C library** for the port: name clashes
-   (`math.h`, `ctype.h`, `size_t`) must be resolved either way.
-2. **goc for GCC/Clang** (`COM_GCC`). Object resources can no longer be
-   built from `__based` segment data. goc computes the chunk handles itself
-   and emits each resource as a table that the geode loader turns into an
-   LMem block. Instance data with optrs needs load-time relocation.
-3. **Geode format**: an ELF shared object plus tables derived from `.gp`
-   (resources, exports, protocol numbers); see `GHAL-Concept.md` §4.4.
-4. **DOS16 file formats under dos32**: which structures of VM files and
+`goc -cg` is the backend of `goc` for flat hosts (GCC, Clang and Open
+Watcom 386). The 16-bit backends are unchanged: for every SDK sample, the
+`-cw` output is byte-identical to before.
+
+With segments, glue built each LMem resource from three segments: data,
+handle table and header. A chunk handle was the address of the chunk's
+entry in the handle segment, and `(optr)&Obj` was a far pointer relocated
+to the resource handle. Without segments, `goc` does that work itself:
+
+- **Chunk handles are compile-time constants.** Where a chunk is defined,
+  `goc` emits `enum { __goc_ch_X = GOCR_CHUNK_HANDLE(<header>, <index>),
+  __goc_rs_X = GOCR_RES_<RESOURCE> }`. The handle table follows the block
+  header, rounded up to 4 bytes; in an object block, entry 0 is the flags
+  chunk. Code (also in other files) gets `const ChunkHandle X` and
+  `const word X_resid`.
+- **Resource numbers come from the `.gp` file.** `Port32/tools/gpres.py`
+  numbers the resources the way glue does: first the `resource` lines in
+  order, then any other resource the `.goc` files start. Numbering starts at 2:
+  0 is the core block and 1 the fixed data.
+- **optrs in resource data are unrelocated:** `GOCR_SOPTR(X)` puts the
+  resource number with `GOCR_UNRELOCATED` set in the handle half. Object
+  relocation replaces it with the resource handle when the block is loaded,
+  as it already does for 16-bit object blocks. `process` as an output is
+  `GOCR_PROCESS_OPTR`.
+- **In code, `@X` is `GOCR_OPTR(X)`.** This combines the resource handle,
+  which the geode loader writes to the geode's hidden
+  `__goc_resource_handles[]`, with the chunk handle.
+  `OptrToChunk(@X)` of an object in the same file becomes the constant
+  `GOCR_SCHUNK(X)`, so static tables of chunk handles still work.
+- **Each resource is described by tables:** `GocResource
+  __goc_resource_<Name>` gives the number, the header and a `GocChunk` per
+  chunk. A chunk can consist of two C objects: a chunk array or GCN list
+  header and its elements, or a moniker and its text. Glue relied on the
+  segment order to place them next to each other. Now the loader copies
+  them one after the other into the LMem block.
+- **`ClassStruct` points to its tables** (`Class_messages`,
+  `Class_methods`, `Class_htypes`, `Class_relocMethod`). The tables no
+  longer have to follow the structure in a class segment, and the reloc
+  tables are pointers.
+- An `@header` must come before the first chunk of its resource.
+
+Checks: `goc.resources` (`Port32/Tests/Goc`) links a `.goc` file with
+objects in two resources, monikers, a GCN list and a `process` destination.
+It checks the tables on amd64, i686, arm64 and dos32. The target `goc_sdk`
+compiles 44 of the 55 SDK_C samples (`Port32/Tests/goc_sdk.txt`). In the
+other samples, the application code needs porting: `NULL` used as a handle,
+`PtrToSegment`, inline asm, and static optr tables in code.
+
+The ANSI headers forward to the host C library where nothing GEOS-specific
+is lost: `ctype.h`, and `size_t` in `string.h`. The GEOS `stdio.h` works on
+GEOS files, so it stays GEOS (open).
+
+## 5. Open
+
+1. **Sending messages.** `goc` still casts `CObjMessage` to a prototype
+   with the message's parameters. That only worked because of the 16-bit
+   Pascal convention. Plan: `goc` puts the parameters of a message into a
+   structure and emits a typed thunk per method. The kernel then always
+   sends `(destination, message, &parameters, &return value)`, which also
+   suits queued messages.
+2. **optrs in static data in code**, e.g. GenControl feature tables
+   (`{OptrToChunk(@X), @Name, 0}`). Glue relocated these. Options are
+   ELF relocations resolved by the geode loader, or unrelocated optrs
+   resolved where they are used.
+3. **References to objects of other files in resource data.** `@extern`
+   objects have no compile-time resource, so they need load-time
+   relocation by name.
+4. **Geode format**: an ELF shared object plus the `.gp` tables (resources
+   as above, exports, protocol numbers); see `GHAL-Concept.md` §4.4.
+5. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.
+6. **GEOS `stdio.h` and the DBCS string functions** on top of the host C
+   library.

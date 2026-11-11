@@ -261,7 +261,7 @@ typedef struct {
 #define TRAE_ABS(pos, type) {{pos, 0}, type}
 #define TRAE_ALL(type) {{0, 0}, type}
 #define TRAE_END {{(short) (TEXT_ADDRESS_PAST_END & 0xffff), \
-		  	(signed char)(TEXT_ADDRESS_PAST_END >> 16) }, \ 
+		  	(signed char)(TEXT_ADDRESS_PAST_END >> 16) }, \
 			CA_NULL_ELEMENT}
 
 @define CHAR_ATTR_ELEMENT_ARRAY_HEADER @elementArray VisTextCharAttr \

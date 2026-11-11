@@ -23,6 +23,11 @@
 #ifndef __CTYPE_H
 #define __CTYPE_H
 
+#ifdef GEOS_PORT32
+/* the port uses the host's C library (Port32/ABI.md) */
+#include <ctype.h>
+#else
+
 extern int	
   _pascal isalnum(unsigned int __c);
 
@@ -78,6 +83,8 @@ pragma Alias(isgraph, "ISGRAPH");
 pragma Alias(toupper, "TOUPPER");
 pragma Alias(tolower, "TOLOWER");
 #endif
+
+#endif /* GEOS_PORT32 */
 
 #endif
 

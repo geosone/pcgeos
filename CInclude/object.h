@@ -89,6 +89,26 @@ typedef ByteFlags ClassFlags;
 #define CLASSF_HAS_RELOC	0x04
 #define CLASSF_C_HANDLERS	0x02
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: no segments, so the method tables cannot follow the structure
+ * in the class segment; the structure points to them (Port32/ABI.md).
+ */
+typedef struct _ClassStruct {
+    struct _ClassStruct	*Class_superClass;
+    word		Class_masterOffset;
+    word		Class_methodCount;
+    word		Class_instanceSize;
+    const void		*Class_vdRelocTable;
+    const void		*Class_relocTable;
+    ClassFlags		Class_flags;
+    byte		Class_masterMessages;
+    const Message	*Class_messages;
+    MessageMethod * const *Class_methods;
+    const struct _CMethodDef *Class_htypes;
+    MessageMethod	*Class_relocMethod;
+} ClassStruct;
+#else
 typedef struct _ClassStruct {
     struct _ClassStruct	*Class_superClass;
     word		Class_masterOffset;
@@ -104,10 +124,11 @@ typedef struct _ClassStruct {
     ClassFlags		Class_flags;
     byte		Class_masterMessages;
 } ClassStruct;
+#endif
 
 #define NullClass ((ClassStruct *)0)
 
-typedef struct {
+typedef struct _CMethodDef {
     word	methodParameterDef;
     byte	handlerTypeDef;
 } CMethodDef;

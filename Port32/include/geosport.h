@@ -60,4 +60,62 @@ typedef word		VardataKey;
 #define ConstructOptr(han, ch)	((((optr) (Handle) (han)) << 32) | \
 				 (optr) (ChunkHandle) (ch))
 
+/* --- object resources made by goc -cg (Port32/ABI.md section 4) ----------- */
+/*
+ * goc gives every chunk of a resource a compile-time chunk handle:
+ * the handle table follows the block header (rounded up to 4 bytes) and
+ * has one word per chunk; in an object block, chunk 0 holds the flags.
+ */
+#define GOCR_LMEM_HANDLES(hdr)	((sizeof(hdr) + 3) & ~(size_t) 3)
+#define GOCR_CHUNK_HANDLE(hdr, n) ((int) (GOCR_LMEM_HANDLES(hdr) + 2 * (n)))
+#define GOCR_SCHUNK(chunk)	((ChunkHandle) __goc_ch_##chunk)
+
+/*
+ * optrs in resource data are unrelocated: the handle half holds the
+ * resource number (from the .gp file) with GOCR_UNRELOCATED set, and
+ * object relocation replaces it with the resource's handle when the
+ * block is loaded.  GOCR_PROCESS_RES stands for the geode's process.
+ */
+#define GOCR_UNRELOCATED	0x80000000u
+#define GOCR_PROCESS_RES		0x7fff
+#define GOCR_UNRELOC_OPTR(res, ch)	((((optr) (GOCR_UNRELOCATED | (dword) (res))) << 32) \
+				 | (optr) (ChunkHandle) (ch))
+#define GOCR_SOPTR(chunk)	GOCR_UNRELOC_OPTR(__goc_rs_##chunk, __goc_ch_##chunk)
+#define GOCR_PROCESS_OPTR	GOCR_UNRELOC_OPTR(GOCR_PROCESS_RES, 0)
+#define GOCR_VARIANT_SUPERCLASS	((struct _ClassStruct *) 1)
+
+/*
+ * In code, "@Obj" is GOCR_OPTR(Obj): the handle of the resource as loaded
+ * for this geode (filled in by the geode loader) and the chunk handle.
+ * Obj and Obj_resid are constants defined by the file that holds Obj.
+ */
+#if defined(__GNUC__) && !defined(_WIN32)
+#define GOCR_HIDDEN		__attribute__((visibility("hidden")))
+#else
+#define GOCR_HIDDEN
+#endif
+extern Handle __goc_resource_handles[] GOCR_HIDDEN;
+#define GOCR_OPTR(chunk)		ConstructOptr(__goc_resource_handles[chunk##_resid], chunk)
+#define GOCR_CLASS_OPTR(cls)	((optr) (uintptr_t) &(cls))
+
+/*
+ * What the loader needs to build a resource: the block header and, per
+ * chunk, up to two C objects that are put one after the other (header and
+ * elements of a chunk array or GCN list, a moniker and its text).
+ */
+typedef struct {
+    const void	*GC_data;
+    dword	GC_size;
+    const void	*GC_data2;
+    dword	GC_size2;
+} GocChunk;
+
+typedef struct {
+    word		GR_number;	/* GOCR_RES_<NAME> */
+    word		GR_chunks;	/* entries in GR_chunk */
+    const void		*GR_header;
+    dword		GR_headerSize;
+    const GocChunk	*GR_chunk;
+} GocResource;
+
 #endif /* GEOSPORT_H */

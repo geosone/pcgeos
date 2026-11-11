@@ -130,7 +130,12 @@ extern char *compilerFarKeyword;
 extern char *compilerOffsetTypeName;
 extern char *compilerCastForOffset;
 
-typedef enum { COM_HIGHC, COM_MSC, COM_BORL, COM_WATCOM } Compilers;
+/*
+ * COM_GCC: GCC/Clang (and Open Watcom 386) on flat 32/64-bit hosts, the
+ * Port32 C port.  No segments; object resources are described by tables
+ * that the geode loader turns into LMem blocks (Port32/ABI.md).
+ */
+typedef enum { COM_HIGHC, COM_MSC, COM_BORL, COM_WATCOM, COM_GCC } Compilers;
 
 extern Compilers compiler;
 
@@ -246,6 +251,15 @@ extern int  OutputLineDirectiveOrNewlinesForFile (int difference,
                                                   char *fileName,
                                                   int lineNumber);
 extern void CopySubst(char *dest, char *source, char *find, char *repl);
+/* object references that differ for COM_GCC (output.c) */
+extern void OutputObjRef(char *name);
+extern void FormatObjRef(char *dest, char *name, Symbol *sym);
+extern void OutputChunkExtern(char *name);
+extern void OutputChunkDefined(Symbol *chunk);
+/* COM_GCC: the last characters written to the output (goc.c) */
+#define GCC_TAIL_SIZE 32
+extern char gccOutTail[];
+extern void GccTrackOutput(const char *s, int n);
 
 /* is 1 if used directive, 0 if used newlines */
 #define OutputLineDirectiveOrNewlines(count) \

@@ -151,6 +151,11 @@ Symbol_OutputProtoMinorRelocations(char *inFileName)
     char        *cp;
     int         refnum = 0;
 
+    if (compiler == COM_GCC) {
+	/* no glue: protocol checks of the port do not use this */
+	return;
+    }
+
     /*
      * We'll use the name of the infile to generate the name of the
      * bogus routine that'll contain references to the protoMinor symbols.

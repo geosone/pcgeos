@@ -3286,6 +3286,9 @@ Scan_OutputMultiByteString(char prefix, char *str)
         if(bufP!= outBuf){					     \
 	    if(foutput){					     \
 		fwrite(outBuf,sizeof(char),bufP - outBuf,foutput);   \
+		if (compiler == COM_GCC) {			     \
+		    GccTrackOutput(outBuf, bufP - outBuf);	     \
+		}						     \
 	    }           					     \
 	    bufP = outBuf;					     \
 	}							     \

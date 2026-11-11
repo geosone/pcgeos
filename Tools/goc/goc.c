@@ -153,6 +153,7 @@ char               *lms;
 char *highCFarString = "_far";
 char *borlandFarString = "far";
 char *microSoftFarString = "__far";
+char *gccFarString = "";
 
 /*
  * This variable contains the compiler dependent type-string  for
@@ -167,6 +168,7 @@ char *compilerOffsetTypeName;
 char *microsoftOffsetTypeName 	= "ChunkHandle";
 char *borlandOffsetTypeName 	= "word";
 char *highCOffsetTypeName 	= "word";
+char *gccOffsetTypeName 	= "const ChunkHandle";
 
 /*
  * When a structure needs to have an offset of another object, it
@@ -176,6 +178,7 @@ char *compilerCastForOffset;
 char *microsoftCastForOffset 	= "(ChunkHandle)";
 char *borlandCastForOffset 	= "(word)(dword)";
 char *highCCastForOffset 	= "(word)(dword)";
+char *gccCastForOffset 	= "(const void *)";
 
 #ifndef BORLAND_HAS_GOT_THEIR_SHIT_TOGETHER
 /*
@@ -263,8 +266,8 @@ Usage(char *fmt, ...)
 	    "\n"
 	    "Usage: goc @argfile | goc [args] <file>\n"
 	    "Valid arguments:\n"
-	    "\t-c[mbhw]\t"
-		"output Microsoft or Borland or HighC or Watcom output\n"
+	    "\t-c[mbhwg]\t"
+		"output Microsoft, Borland, HighC, Watcom or GCC output\n"
 	    "\t-C<segment>\tput class structures in <segment>\n"
 	    "\t-d[ylsoumLOd]\toutput debugging information\n"
 	    "\t-D<name>=<val>\tdefine the goc macro <name> to be <val>\n"
@@ -314,6 +317,26 @@ Output(char *fmt, ...)
     int len = 0;
     va_list args;
 
+    if (foutput && compiler == COM_GCC) {
+	char buf[4096];
+	char *p = buf;
+
+	va_start(args, fmt);
+	len = vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+	if (len >= (int) sizeof(buf)) {
+	    p = (char *) malloc(len + 1);
+	    va_start(args, fmt);
+	    vsprintf(p, fmt, args);
+	    va_end(args);
+	}
+	fwrite(p, 1, len, foutput);
+	GccTrackOutput(p, len);
+	if (p != buf) {
+	    free(p);
+	}
+	return len;
+    }
     if (foutput){
 	va_start(args, fmt);
 	len = vfprintf(foutput,fmt,args);
@@ -327,7 +350,35 @@ OutputChar(char c)
 {
     if(foutput){
 	putc(c, foutput);
+	if (compiler == COM_GCC) {
+	    GccTrackOutput(&c, 1);
+	}
     }
+}
+
+/*
+ * COM_GCC: keep the last characters written, so that an object reference
+ * can see what precedes it (OptrToChunk(@Obj) is a constant).
+ */
+char gccOutTail[GCC_TAIL_SIZE + 1];
+
+void
+GccTrackOutput(const char *s, int n)
+{
+    int have = strlen(gccOutTail);
+
+    if (n >= GCC_TAIL_SIZE) {
+	memcpy(gccOutTail, s + n - GCC_TAIL_SIZE, GCC_TAIL_SIZE);
+	gccOutTail[GCC_TAIL_SIZE] = '\0';
+	return;
+    }
+    if (have + n > GCC_TAIL_SIZE) {
+	memmove(gccOutTail, gccOutTail + have + n - GCC_TAIL_SIZE,
+		GCC_TAIL_SIZE - n);
+	have = GCC_TAIL_SIZE - n;
+    }
+    memcpy(gccOutTail + have, s, n);
+    gccOutTail[have + n] = '\0';
 }
 
 
@@ -471,6 +522,9 @@ CompilerStartSegment(char *prefix, char *name)
     Output("#pragma data_seg(\"%s%s\")\n",prefix,name);
     OutputLineNumber(yylineno, curFile->name);
     break;
+  case COM_GCC :
+    /* flat memory: no segments */
+    break;
   case COM_WATCOM :
     if(strcmp(prefix, "__HANDLES_") != 0)
     {
@@ -513,6 +567,8 @@ CompilerEndSegment(char *prefix, char *name)
     switch (compiler) {
 	case COM_HIGHC :
 	    Output("pragma Data();");
+	    break;
+	case COM_GCC :
 	    break;
 	case COM_MSC :
 	case COM_WATCOM :
@@ -993,13 +1049,21 @@ ParseArgs(int argc, char **argv)
 		      compilerCastForOffset  = borlandCastForOffset;
 		      compiler = COM_BORL;
 		      break;
+		    case 'g':
+		      /* flat 32/64-bit hosts (Port32) */
+		      lms = compilerFarKeyword = gccFarString;
+		      compilerOffsetTypeName = gccOffsetTypeName;
+		      compilerCastForOffset = gccCastForOffset;
+		      compiler = COM_GCC;
+		      break;
 		    case 'h':
 		      /* lms and compilerFarKeyword are already set */
 		      compiler = COM_HIGHC;
 		      break;
 		    default:  case '\0':
 		      Usage("-c requires the name of a compiler, where\n"
-			    "\tb=borland\n\th=HighC\n\tm=MicroSoft\n");
+			    "\tb=borland\n\th=HighC\n\tm=MicroSoft\n"
+			    "\tw=Watcom\n\tg=GCC/Clang (Port32, flat)\n");
 		    }
 		    break;
 
