@@ -3,7 +3,10 @@
  * geodesLibrary.asm).
  *
  * A library is found by its permanent name among the loaded geodes, or
- * loaded from the image of that name (GeodeRegisterImage).  The protocol
+ * loaded from the image of that name (GeodeRegisterImage), or from the
+ * file of that name with ".geo" in SP_SYSTEM (TryOpenLib of
+ * geodesLibrary.asm; there are no "ec.geo" files to try first: the C
+ * kernel has no separate error-checking geodes).  The protocol
  * the client was built with must match the library's: the same major
  * number, and a minor number not above the library's
  * (TestProtocolNumbers of geodesLoad.asm).  0.0 takes any protocol:
@@ -29,6 +32,26 @@ static GeodeLoadError TestProtocol(word wantMajor, word wantMinor,
     return GLE_OK;
 }
 
+/* the permanent name, up to its first blank, plus ".geo" in SP_SYSTEM */
+static GeodeHandle LoadLibrary(const char *pname, size_t n,
+			       GeodeLoadError *err)
+{
+    char file[GEODE_NAME_SIZE + 5];
+    size_t i;
+    GeodeHandle gh;
+
+    if (GeodeHasImage(pname))
+	return GeodeLoadLow(pname, GA_LIBRARY, 0, 0, 0, err);
+    for (i = 0; i < n && pname[i] && pname[i] != ' '; i++)
+	file[i] = pname[i];
+    strcpy(file + i, ".geo");
+    FilePushDir();
+    FileSetStandardPath(SP_SYSTEM);
+    gh = GeodeLoadLow(file, GA_LIBRARY, 0, 0, 0, err);
+    FilePopDir();
+    return gh;
+}
+
 GeodeHandle GeodeUseLibraryLow(const char *pname, word protoMajor,
 			       word protoMinor, GeodeLoadError *err)
 {
@@ -48,7 +71,7 @@ GeodeHandle GeodeUseLibraryLow(const char *pname, word protoMajor,
     if (gh)
 	GeodeCoreOf(gh)->GC_refCount++;
     else {
-	gh = GeodeLoadLow(pname, GA_LIBRARY, 0, 0, 0, err);
+	gh = LoadLibrary(pname, n, err);
 	if (!gh) {
 	    if (*err == GLE_FILE_NOT_FOUND)
 		*err = GLE_LIBRARY_NOT_FOUND;

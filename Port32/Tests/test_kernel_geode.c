@@ -80,6 +80,26 @@ static int Dump(Handle h, HandleEntry *he, void *ctx)
     return 0;
 }
 
+/* a native file of the top directory */
+static int WriteFile(const char *name, const void *data, unsigned long size)
+{
+    FileHandle fh = FileCreate(name, FILE_CREATE_TRUNCATE | FCF_NATIVE |
+				     FILE_ACCESS_RW, 0);
+    const unsigned char *p = data;
+    unsigned long done;
+    word n;
+
+    if (!fh)
+	return 0;
+    for (done = 0; done < size; done += n) {
+	n = size - done > 0x4000 ? 0x4000 : (word) (size - done);
+	if (FileWrite(fh, p + done, n, FALSE) != n)
+	    break;
+    }
+    FileClose(fh, FALSE);
+    return done >= size;
+}
+
 int main(int argc, char **argv)
 {
     char top[260], *slash;
@@ -231,6 +251,45 @@ int main(int argc, char **argv)
 
     GeodeFreeLibrary(lib);
     Check(!GeodeFind("kglib   ", GEODE_NAME_SIZE, 0, 0), "library freed");
+
+    /* from geode files: the process from WORLD, its library from SYSTEM */
+    GeodeRegisterImage("kglib", NULL, 0);
+    GeodeRegisterImage("kgapp", NULL, 0);
+    FileSetStandardPath(SP_TOP);
+    FileCreateDir("SYSTEM");
+    FileCreateDir("WORLD");
+    Check(WriteFile("SYSTEM\\kglib.geo", kglib_geode, kglib_geode_size) &&
+	  WriteFile("WORLD\\kgapp.geo", kgapp_geode, kgapp_geode_size),
+	  "geode files written");
+    FileSetStandardPath(SP_APPLICATION);
+    Check(!GeodeLoad("nosuch.geo", 0, 0, 0, 0, &e) &&
+	  e == GLE_FILE_NOT_FOUND, "no such geode file");
+    FileSetStandardPath(SP_SYSTEM);
+    FileRename("kglib.geo", "kglib.old");
+    FileSetStandardPath(SP_APPLICATION);
+    Check(!GeodeLoad("kgapp.geo", GA_PROCESS, 0, 0, 0, &e) &&
+	  e == GLE_LIBRARY_NOT_FOUND, "no library file");
+    FileSetStandardPath(SP_SYSTEM);
+    FileRename("kglib.old", "kglib.geo");
+    FileSetStandardPath(SP_APPLICATION);
+    app = GeodeLoad("kgapp.geo", GA_PROCESS, GA_LIBRARY, 0, 0x00070009, &e);
+    Check(app != 0, "GeodeLoad from a file");
+    if (app) {
+	lib = GeodeFind("kglib   ", GEODE_NAME_SIZE, GA_LIBRARY, 0);
+	Check(lib != 0, "the library from its file in SYSTEM");
+	st = (KGAppState *) ProcGetLibraryEntry(app, 0);
+	WAIT_FOR(st->KGAS_attached);
+	Check(st->KGAS_attached == 1 && st->KGAS_sum == 16,
+	      "the process from a file runs");
+	CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,
+		     &dp, sizeof(dp), NULL, 0);
+	WAIT_FOR(!GeodeFind("kglib   ", GEODE_NAME_SIZE, 0, 0));
+	Check(!GeodeFind("kgapp   ", GEODE_NAME_SIZE, 0, 0) &&
+	      !GeodeFind("kglib   ", GEODE_NAME_SIZE, 0, 0),
+	      "process and library from files freed");
+    } else
+	printf("GeodeLoad error %d\n", (int) e);
+    FileSetStandardPath(SP_TOP);
     WAIT_FOR(HandleCountUsed() == base);
     Check(HandleCountUsed() == base, "no handles left");
     if (HandleCountUsed() != base) {

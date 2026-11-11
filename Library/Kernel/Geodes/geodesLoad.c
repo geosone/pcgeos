@@ -24,7 +24,11 @@
  * A library is freed when its reference count drops to 0, a process when
  * its last thread exits.
  *
- * Not yet: geode files (the images come from GeodeRegisterImage), drivers
+ * The image is one the program registered (GeodeRegisterImage) under the
+ * name, or the contents of the file of that name (from the current path;
+ * a library's from SP_SYSTEM, geodesLibrary.c).
+ *
+ * Not yet: drivers
  * (DR_INIT; a driver loads like a library without an entry), "noload"
  * libraries, resources loaded on demand (RESF_DISCARDED: all are built
  * at once), heapspace and the UI thread.
@@ -109,7 +113,7 @@ GeodeHandle GeodeFindLow(const char *name, word n, GeodeAttrs attrMatch,
 }
 
 /* ---------------------------------------------------------------------
- * Images (until there are geode files)
+ * Images: registered by the program, or read from the geode's file
  * ------------------------------------------------------------------- */
 
 #define MAX_IMAGES	64
@@ -140,8 +144,54 @@ static int FindImage(const char *name)
 
     for (i = 0; i < MAX_IMAGES && images[i].name; i++)
 	if (strcmp(images[i].name, name) == 0)
-	    return i;
+	    return images[i].image ? i : -1;
     return -1;
+}
+
+Boolean GeodeHasImage(const char *name)
+{
+    return FindImage(name) >= 0;
+}
+
+/* the contents of a geode file (ghal_mem), after the open of
+ * LoadGeodeLow; the module keeps nothing of it, so it is read whole and
+ * the file is closed again (DOS16 kept it open for its resources) */
+static void *ReadGeodeFile(const char *fileName, dword *size,
+			   GeodeLoadError *err)
+{
+    FileHandle fh;
+    byte *buf;
+    dword n, done;
+    word chunk, got;
+
+    fh = FileOpen(fileName, FILE_ACCESS_R);
+    if (!fh) {
+	word e = ThreadGetError();
+	*err = e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND ||
+	       e == ERROR_INVALID_VOLUME ? GLE_FILE_NOT_FOUND
+					   : GLE_FILE_READ_ERROR;
+	return NULL;
+    }
+    n = FileSize(fh);
+    buf = n ? ghal_mem_alloc(n, 0) : NULL;
+    if (!buf) {
+	FileClose(fh, TRUE);
+	*err = n ? GLE_MEMORY_ALLOCATION_ERROR : GLE_NOT_GEOS_FILE;
+	return NULL;
+    }
+    for (done = 0; done < n; done += got) {
+	chunk = n - done > 0x8000 ? 0x8000 : (word) (n - done);
+	got = FileRead(fh, buf + done, chunk, TRUE);
+	if (got != chunk) {
+	    FileClose(fh, TRUE);
+	    ghal_mem_free(buf);
+	    *err = GLE_FILE_READ_ERROR;
+	    return NULL;
+	}
+    }
+    FileClose(fh, TRUE);
+    *size = n;
+    return buf;
 }
 
 /* ---------------------------------------------------------------------
@@ -548,6 +598,10 @@ GeodeHandle GeodeLoadLow(const char *fileName, GeodeAttrs attrMatch,
     GeodeAttrs attrs;
     word nlibs = 0, i;
     int img;
+    const void *image;
+    void *file = NULL;
+    dword size;
+    ghal_status st;
     ghal_module *m;
     const GeosModuleInfo *info;
     GeodeCore *c;
@@ -557,17 +611,20 @@ GeodeHandle GeodeLoadLow(const char *fileName, GeodeAttrs attrMatch,
     memset(libs, 0, sizeof(libs));
     *err = GLE_OK;
     img = FindImage(fileName);
-    if (img < 0) {
-	*err = GLE_FILE_NOT_FOUND;
-	return 0;
+    if (img >= 0) {
+	image = images[img].image;
+	size = images[img].size;
+    } else {
+	image = file = ReadGeodeFile(fileName, &size, err);
+	if (!file)
+	    return 0;
     }
-    *err = Probe(images[img].image, images[img].size, name, &attrs, need,
-		 &nlibs);
+    *err = Probe(image, size, name, &attrs, need, &nlibs);
     if (*err != GLE_OK)
-	return 0;
+	goto freeFile;
     if ((attrs & attrMatch) != attrMatch || (attrs & attrNoMatch)) {
 	*err = GLE_ATTRIBUTE_MISMATCH;
-	return 0;
+	goto freeFile;
     }
 
     /* loaded already: a library is shared, a process may run again only
@@ -576,11 +633,13 @@ GeodeHandle GeodeLoadLow(const char *fileName, GeodeAttrs attrMatch,
     if (gh) {
 	if (!(attrs & GA_PROCESS)) {
 	    CORE(gh)->GC_refCount++;
+	    if (file)
+		ghal_mem_free(file);
 	    return gh;
 	}
 	if (!(attrs & GA_MULTI_LAUNCHABLE)) {
 	    *err = GLE_NOT_MULTI_LAUNCHABLE;
-	    return 0;
+	    goto freeFile;
 	}
     }
 
@@ -596,8 +655,12 @@ GeodeHandle GeodeLoadLow(const char *fileName, GeodeAttrs attrMatch,
 
     ic.libs = libs;
     ic.count = nlibs;
-    switch (ghal_module_load(images[img].image, images[img].size, Import, &ic,
-			     &m)) {
+    st = ghal_module_load(image, size, Import, &ic, &m);
+    if (file) {
+	ghal_mem_free(file);
+	file = NULL;
+    }
+    switch (st) {
     case GHAL_OK:
 	break;
     case GHAL_ERR_UNRESOLVED:
@@ -673,6 +736,9 @@ freeLibs:
     for (i = 0; i < nlibs; i++)
 	if (libs[i])
 	    GeodeFreeLibraryLow(libs[i]);
+freeFile:
+    if (file)
+	ghal_mem_free(file);
     return 0;
 }
 
