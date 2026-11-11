@@ -3,7 +3,14 @@
  * fileFile.asm), over DR_FS_PATH_OP of the disk's driver.  Every routine
  * sets the error for ThreadGetError.
  *
- * Not yet: links, FileCopy/FileMove, the notification of file changes.
+ * FileCopy copies the data and the attributes of a file from one disk to
+ * another (or the same) over both drivers; FileMove asks the driver to
+ * move a file within a disk (FSPOF_MOVE_FILE), and copies and deletes
+ * it between disks.  A source or destination disk of 0 is the current
+ * path's; with a disk, the path is relative to its root.
+ *
+ * Not yet: links, the notification of file changes, remote copies of
+ * standard paths (FileCopyLocal, FileMoveLocal are FileCopy, FileMove).
  */
 #include "kernelC.h"
 
@@ -116,4 +123,176 @@ word FileDeleteDir(const char *name)
 	id == cid)
 	return Fail(ERROR_IS_CURRENT_DIRECTORY);
     return Fail(FSD_OF(d)->FSD_deleteDir(d, dp));
+}
+
+/* ---------------------------------------------------------------------
+ * Copying and moving (FileCopyCommon, FileMoveCommon)
+ * ------------------------------------------------------------------- */
+
+#define COPY_BUF	32768
+
+/* the attributes of the GeosFileHeader that go with a copy (not the
+ * name: the copy has its own) */
+static const struct {
+    FileExtendedAttribute attr;
+    word size;
+} copyAttrs[] = {
+    {FEA_FILE_TYPE, 2}, {FEA_FLAGS, 2}, {FEA_RELEASE, 8},
+    {FEA_PROTOCOL, 4}, {FEA_TOKEN, 6}, {FEA_CREATOR, 6},
+    {FEA_USER_NOTES, 100}, {FEA_NOTICE, 32}, {FEA_CREATION, 4},
+    {FEA_PASSWORD, 8}, {FEA_DESKTOP_INFO, 16},
+};
+
+static word SameFile(FSDDisk *d1, const char *p1, FSDDisk *d2, const char *p2)
+{
+    dword id1, id2;
+
+    return d1 == d2 &&
+	   !FSD_OF(d1)->FSD_pathExtAttrs(d1, p1, FEA_FILE_ID, &id1,
+					 sizeof(id1), FALSE) &&
+	   !FSD_OF(d2)->FSD_pathExtAttrs(d2, p2, FEA_FILE_ID, &id2,
+					 sizeof(id2), FALSE) &&
+	   id1 == id2;
+}
+
+/* src (open) to a new file dst on dd: the data, then the header
+ * attributes, the date and the file attributes (attrs: those of the
+ * source by its path; DOS has them only there) */
+static word CopyOpen(FSDFile *src, FileAttrs attrs, FSDDisk *dd,
+		     const char *dst)
+{
+    const FSDriver *sf = FSD_OF(src->FF_disk), *df = FSD_OF(dd);
+    FSDFile out;
+    byte *buf, v[100];
+    word type = GFT_NOT_GEOS_FILE, n, done, e, e2;
+    FileDateAndTime fdat = 0;
+    unsigned i;
+
+    sf->FSD_handleExtAttrs(src, FEA_FILE_TYPE, &type, sizeof(type), FALSE);
+    sf->FSD_getDateTime(src, &fdat);
+    buf = ghal_mem_alloc(COPY_BUF, 0);
+    if (!buf)
+	return ERROR_INSUFFICIENT_MEMORY;
+    out.FF_disk = dd;
+    out.FF_private = NULL;
+    e = df->FSD_create(dd, dst, (FileCreateFlags) (FILE_CREATE_ONLY |
+		       FILE_ACCESS_RW |
+		       (type == GFT_NOT_GEOS_FILE ? FCF_NATIVE : 0)), 0, &out);
+    if (e) {
+	ghal_mem_free(buf);
+	return e;
+    }
+    do {
+	e = sf->FSD_read(src, buf, COPY_BUF, &n);
+	if (!e && n) {
+	    e = df->FSD_write(&out, buf, n, &done);
+	    if (!e && done < n)
+		e = ERROR_SHORT_READ_WRITE;	/* the disk is full */
+	}
+    } while (!e && n == COPY_BUF);
+    if (!e && type != GFT_NOT_GEOS_FILE)
+	for (i = 0; !e && i < sizeof(copyAttrs) / sizeof(copyAttrs[0]); i++)
+	    if (!sf->FSD_handleExtAttrs(src, copyAttrs[i].attr, v,
+					copyAttrs[i].size, FALSE))
+		e = df->FSD_handleExtAttrs(&out, copyAttrs[i].attr, v,
+					   copyAttrs[i].size, TRUE);
+    /* the date last: writing changes it */
+    if (!e && fdat)
+	e = df->FSD_setDateTime(&out, fdat);
+    e2 = df->FSD_close(&out);
+    if (!e)
+	e = e2;
+    attrs &= FA_RDONLY | FA_HIDDEN | FA_SYSTEM | FA_ARCHIVE;
+    if (!e && attrs)
+	e = df->FSD_setAttrs(dd, dst, attrs);
+    if (e)
+	df->FSD_deleteFile(dd, dst);
+    ghal_mem_free(buf);
+    return e;
+}
+
+/* an existing destination is replaced (FileCopy) */
+static word Copy(FSDDisk *sd, const char *src, FSDDisk *dd, const char *dst)
+{
+    FSDFile in;
+    FileAttrs a, sa = 0;
+    word e;
+
+    if (SameFile(sd, src, dd, dst))
+	return 0;
+    FSD_OF(sd)->FSD_getAttrs(sd, src, &sa);
+    in.FF_disk = sd;
+    in.FF_private = NULL;
+    e = FSD_OF(sd)->FSD_open(sd, src, FILE_ACCESS_R | FILE_DENY_W, &in);
+    if (e)
+	return e;
+    if (!FSD_OF(dd)->FSD_getAttrs(dd, dst, &a))
+	e = (a & FA_SUBDIR) ? ERROR_ACCESS_DENIED
+			    : FSD_OF(dd)->FSD_deleteFile(dd, dst);
+    if (!e)
+	e = CopyOpen(&in, sa, dd, dst);
+    FSD_OF(sd)->FSD_close(&in);
+    return e;
+}
+
+static word CopyMove(const TCHAR *source, const TCHAR *dest,
+		     DiskHandle sourceDisk, DiskHandle destDisk, Boolean move)
+{
+    char src[FILE_DISK_PATH_SIZE], dst[FILE_DISK_PATH_SIZE];
+    FSDDisk *sd, *dd;
+    FileAttrs a;
+    word e;
+
+    sd = FileResolveOn(sourceDisk, source, src, sizeof(src));
+    if (!sd)
+	return ThreadGetError();
+    dd = FileResolveOn(destDisk, dest, dst, sizeof(dst));
+    if (!dd)
+	return ThreadGetError();
+    if (!move)
+	return Fail(Copy(sd, src, dd, dst));
+    e = FSD_OF(sd)->FSD_getAttrs(sd, src, &a);
+    if (e)
+	return Fail(e);
+    if (!FSD_OF(dd)->FSD_getAttrs(dd, dst, &a) &&
+	!SameFile(sd, src, dd, dst))
+	return Fail(ERROR_FILE_EXISTS);
+    if (sd == dd)
+	return Fail(FSD_OF(sd)->FSD_rename(sd, src, dst));
+    FSD_OF(sd)->FSD_getAttrs(sd, src, &a);
+    if (a & FA_SUBDIR)
+	return Fail(ERROR_DIFFERENT_DEVICE);
+    e = Copy(sd, src, dd, dst);
+    if (!e) {
+	if (a & FA_RDONLY)
+	    FSD_OF(sd)->FSD_setAttrs(sd, src, 0);
+	e = FSD_OF(sd)->FSD_deleteFile(sd, src);
+	if (e)
+	    FSD_OF(dd)->FSD_deleteFile(dd, dst);
+    }
+    return Fail(e);
+}
+
+word FileCopy(const TCHAR *source, const TCHAR *dest, DiskHandle sourceDisk,
+	      DiskHandle destDisk)
+{
+    return CopyMove(source, dest, sourceDisk, destDisk, FALSE);
+}
+
+word FileCopyLocal(const TCHAR *source, const TCHAR *dest,
+		   DiskHandle sourceDisk, DiskHandle destDisk)
+{
+    return CopyMove(source, dest, sourceDisk, destDisk, FALSE);
+}
+
+word FileMove(const TCHAR *source, const TCHAR *dest, DiskHandle sourceDisk,
+	      DiskHandle destDisk)
+{
+    return CopyMove(source, dest, sourceDisk, destDisk, TRUE);
+}
+
+word FileMoveLocal(const TCHAR *source, const TCHAR *dest,
+		   DiskHandle sourceDisk, DiskHandle destDisk)
+{
+    return CopyMove(source, dest, sourceDisk, destDisk, TRUE);
 }

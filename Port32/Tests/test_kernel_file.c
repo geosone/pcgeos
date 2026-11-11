@@ -8,7 +8,8 @@
  * their directories, current paths (relative, absolute, "..", push and
  * pop, taken over by a new thread), create/open/read/write/seek/
  * truncate/size/close, duplicated handles sharing the position, date
- * and time, attributes, rename, directories, drives and disks (the
+ * and time, attributes, rename, copy and move, directories, drives
+ * and disks (the
  * HostFS drive of the top directory, paths with a drive name), and the
  * error codes.
  */
@@ -290,6 +291,99 @@ int main(int argc, char **argv)
 	CHECK(FileDelete("\\DOCUMENT\\DISK.TXT") == 0);
 	CHECK(FileSetCurrentPath((DiskHandle) SP_DOCUMENT, "") ==
 	      (DiskHandle) SP_DOCUMENT);
+    }
+
+    /* copying and moving, on a disk and between two (a second HostFS
+     * drive D) */
+    {
+	static const byte token[6] = {'T', 'O', 'K', 'N', 1, 0};
+	byte tk[6];
+	char nm[FILE_LONGNAME_BUFFER_SIZE];
+	word type;
+	DiskHandle dd;
+
+	CHECK(FileSetCurrentPath((DiskHandle) SP_DOCUMENT, "") != 0);
+	f = FileCreate("ORIG.TXT", FILE_CREATE_ONLY | FCF_NATIVE |
+		       FILE_ACCESS_RW, 0);
+	CHECK(f && FileWrite(f, "native", 6, FALSE) == 6 &&
+	      FileClose(f, FALSE) == 0);
+	f = FileCreate("Geos Orig", FILE_CREATE_ONLY | FILE_ACCESS_RW, 0);
+	CHECK(f && FileWrite(f, "geosdata", 8, FALSE) == 8 &&
+	      FileClose(f, FALSE) == 0);
+	CHECK(FileSetPathExtAttributes("Geos Orig", FEA_TOKEN, token, 6) == 0);
+	CHECK(FileSetAttributes("ORIG.TXT", FA_RDONLY) == 0);
+
+	CHECK(FileCopy("ORIG.TXT", "COPY.TXT", 0, 0) == 0);
+	f = FileOpen("COPY.TXT", FILE_ACCESS_R);
+	CHECK(f && FileRead(f, buf, 10, FALSE) == 6 && !memcmp(buf, "native", 6));
+	CHECK(f && FileClose(f, FALSE) == 0);
+	CHECK(FileGetAttributes("COPY.TXT") & FA_RDONLY);
+	CHECK(FileCopy("Geos Orig", "Geos Copy", 0, 0) == 0);
+	CHECK(FileCopy("Geos Orig", "\\DOCUMENT\\Geos Copy", 0, 0) == 0);
+	CHECK(FileCopy("Geos Orig", "Geos Orig", 0, 0) == 0);
+	f = FileOpen("Geos Copy", FILE_ACCESS_R);
+	CHECK(f && FileSize(f) == 8 && FileRead(f, buf, 8, FALSE) == 8 &&
+	      !memcmp(buf, "geosdata", 8));
+	CHECK(f && FileClose(f, FALSE) == 0);
+	CHECK(FileGetPathExtAttributes("Geos Copy", FEA_TOKEN, tk, 6) == 0 &&
+	      !memcmp(tk, token, 6));
+	CHECK(FileGetPathExtAttributes("Geos Copy", FEA_NAME, nm,
+				       sizeof(nm)) == 0 &&
+	      !strcmp(nm, "Geos Copy"));
+	CHECK(FileGetPathExtAttributes("Geos Copy", FEA_FILE_TYPE, &type,
+				       2) == 0 && type == GFT_DATA);
+	f = FileOpen("Geos Orig", FILE_ACCESS_R);
+	CHECK(f && FileSize(f) == 8 && FileClose(f, FALSE) == 0);
+	CHECK(FileCopy("NONE", "X.TXT", 0, 0) == ERROR_FILE_NOT_FOUND);
+	CHECK(FileCopy("ORIG.TXT", "NONE\\X.TXT", 0, 0) ==
+	      ERROR_PATH_NOT_FOUND);
+	/* paths relative to a standard path given as the disk */
+	CHECK(FileSetCurrentPath((DiskHandle) SP_TOP, "") != 0);
+	CHECK(FileCopy("Geos Orig", "Geos Std", (DiskHandle) SP_DOCUMENT,
+		       (DiskHandle) SP_DOCUMENT) == 0);
+	CHECK(FileSetCurrentPath((DiskHandle) SP_DOCUMENT, "") != 0);
+	CHECK(FileDelete("Geos Std") == 0);
+
+	/* moving within the disk */
+	CHECK(FileCreateDir("MDIR") == 0);
+	CHECK(FileMove("ORIG.TXT", "\\DOCUMENT\\MDIR\\ORIG.TXT", 0, 0) == 0);
+	CHECK(FileGetAttributes("ORIG.TXT") == 0 &&
+	      ThreadGetError() == ERROR_FILE_NOT_FOUND);
+	CHECK(FileMove("COPY.TXT", "MDIR\\ORIG.TXT", 0, 0) ==
+	      ERROR_FILE_EXISTS);
+	CHECK(FileMove("Geos Orig", "MDIR\\Geos Moved", 0, 0) == 0);
+	CHECK(FileGetPathExtAttributes("MDIR\\Geos Moved", FEA_NAME, nm,
+				       sizeof(nm)) == 0 &&
+	      !strcmp(nm, "Geos Moved"));
+
+	/* between disks: copied and deleted; not a directory */
+	CHECK(ghal_fs_mkdir(H("DDRIVE")) == GHAL_OK);
+	CHECK(FSDInitDrive(3, "D", DS_PRESENT | DRIVE_FIXED, MEDIA_FIXED_DISK,
+			   &hostFSDriver, HostFSDriveData(H("DDRIVE"))));
+	dd = DiskRegisterDisk(3);
+	CHECK(dd != 0 && dd != DiskRegisterDisk(2));
+	CHECK(FileMove("Geos Copy", "\\Geos On D", 0, dd) == 0);
+	CHECK(FileGetAttributes("Geos Copy") == 0 &&
+	      ThreadGetError() == ERROR_FILE_NOT_FOUND);
+	f = FileOpen("D:\\Geos On D", FILE_ACCESS_R);
+	CHECK(f && FileRead(f, buf, 8, FALSE) == 8 &&
+	      !memcmp(buf, "geosdata", 8));
+	CHECK(f && FileGetDiskHandle(f) == dd && FileClose(f, FALSE) == 0);
+	CHECK(FileGetPathExtAttributes("D:\\Geos On D", FEA_TOKEN, tk, 6) ==
+	      0 && !memcmp(tk, token, 6));
+	CHECK(FileMove("COPY.TXT", "D:\\COPY.TXT", 0, 0) == 0);
+	CHECK((FileGetAttributes("D:\\COPY.TXT") & FA_RDONLY) &&
+	      FileGetAttributes("COPY.TXT") == 0);
+	CHECK(FileMove("MDIR", "\\MDIR", 0, dd) == ERROR_DIFFERENT_DEVICE);
+	CHECK(FileRename("D:\\COPY.TXT", "\\DOCUMENT\\COPY.TXT") ==
+	      ERROR_DIFFERENT_DEVICE);
+
+	CHECK(FileSetAttributes("D:\\COPY.TXT", 0) == 0 &&
+	      FileDelete("D:\\COPY.TXT") == 0 &&
+	      FileDelete("D:\\Geos On D") == 0);
+	CHECK(FileSetAttributes("MDIR\\ORIG.TXT", 0) == 0 &&
+	      FileDelete("MDIR\\ORIG.TXT") == 0 &&
+	      FileDelete("MDIR\\Geos Moved") == 0 && FileDeleteDir("MDIR") == 0);
     }
 
     /* every handle is gone again (the child thread's too) */

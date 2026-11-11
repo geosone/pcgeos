@@ -580,10 +580,14 @@ static word Load(EATarget *t)
     ghal_status s;
 
     if (t->hf) {
+	ghal_fs_info byPath;
 	s = ghal_fs_fstat(t->hf->f, &t->info);
 	if (s != GHAL_OK)
 	    return ErrorOf(s, NULL);
 	strcpy(t->host, t->hf->host);
+	/* DOS has the attributes only by the path */
+	if (ghal_fs_stat(t->host, &byPath) == GHAL_OK)
+	    t->info.attrs = byPath.attrs;
 	if (!t->hf->base) {
 	    t->geos = FALSE;
 	    return 0;

@@ -956,6 +956,22 @@ where it is with `FileSetTopHostPath`.
   old directory unless it has a path; it never replaces a file),
   attributes, and create/delete directories (the current directory
   cannot be deleted).
+- **Copy and move** (`fileFile.c`, after `FileCopyCommon`,
+  `FileMoveCommon`). A source or destination disk of 0 means the
+  current path. With a disk, the path is relative to its root; a
+  standard path given as the disk means the path is relative to that
+  standard path.
+  - `FileCopy` copies the data through both drivers, and then the
+    header attributes of a GEOS file (all but the name), the date and
+    the DOS attributes. It replaces an existing file; a copy onto
+    itself does nothing.
+  - `FileMove` refuses an existing destination (`ERROR_FILE_EXISTS`).
+    Within a disk, the driver moves the file (`FSD_rename`). Between
+    disks, it copies and deletes, and a directory gets
+    `ERROR_DIFFERENT_DEVICE`. `FileRename` between disks gives the
+    same error.
+  - `FileCopyLocal` and `FileMoveLocal` are the same as `FileCopy` and
+    `FileMove`.
 - **GEOS files**, extended attributes and host names: section 13c.
 - **Errors.** Every routine sets the thread's error (`ThreadGetError`).
   A missing file is `ERROR_FILE_NOT_FOUND`. If its directory is
@@ -964,8 +980,7 @@ where it is with `FileSetTopHostPath`.
 Not yet:
 
 - deny modes and record locks;
-- `FileEnum`, links, `FileCopy`/`FileMove`, temporary files, and
-  change notification;
+- links, temporary files, and change notification;
 - several directories per standard path (`geos.ini` `paths`).
 
 ## 13b. VM files (`Library/Kernel/VMem`, P4)

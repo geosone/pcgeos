@@ -247,6 +247,21 @@ static Boolean DiskPath(const Comps *c, char *out, size_t size)
     return TRUE;
 }
 
+/* relative to the root of `disk' (a standard path: to it) */
+FSDDisk *FileResolveOn(DiskHandle disk, const char *path, char *out,
+		       size_t size)
+{
+    DiskHandle base = disk;
+    const char *tail = "";
+    Comps c;
+    FSDDisk *d;
+
+    if (!disk)
+	return FileResolve(path, out, size);
+    d = ResolveFrom(&base, &tail, &path, &c);
+    return d && DiskPath(&c, out, size) ? d : NULL;
+}
+
 FSDDisk *FileResolve(const char *path, char *out, size_t size)
 {
     KPath *cur = CurPath();

@@ -725,6 +725,9 @@ DiskHandle FileTopDisk(void);
  * root of its disk if it starts with '\\', or "drive:") and the path on
  * it from its root, "\\" separated; NULL with the error set */
 FSDDisk *FileResolve(const char *path, char *out, size_t size);
+/* the same relative to the root of `disk' (0: FileResolve) */
+FSDDisk *FileResolveOn(DiskHandle disk, const char *path, char *out,
+		       size_t size);
 #define FILE_DISK_PATH_SIZE	(PATH_BUFFER_SIZE + 2)
 /* the directory name of a standard path and its parent (NULL,
  * SP_NOT_STANDARD_PATH if it is none) */
