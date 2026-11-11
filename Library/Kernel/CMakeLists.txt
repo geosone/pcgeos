@@ -30,6 +30,10 @@
 #   Object/objectShutdown.c <- detach and quit of objectShutdown.asm
 #   Object/objectDup.c <- duplicating resources, saved blocks of
 #                          objectDup.asm
+#   File/filePath.c <- current and standard paths of File/filePath.asm,
+#                      host paths (ghal_fs)
+#   File/fileOpenClose.c, File/fileIO.c, File/fileFile.c <- the same
+#                      asm files: open/close, I/O, by-name operations
 add_library(geos_kernel_objs OBJECT
   Sys/sysError.c
   Heap/heapHandle.c
@@ -57,7 +61,11 @@ add_library(geos_kernel_objs OBJECT
   Object/objectComposite.c
   Object/objectLinkable.c
   Object/objectShutdown.c
-  Object/objectDup.c)
+  Object/objectDup.c
+  File/filePath.c
+  File/fileOpenClose.c
+  File/fileIO.c
+  File/fileFile.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

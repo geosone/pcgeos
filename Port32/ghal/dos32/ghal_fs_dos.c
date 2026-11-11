@@ -245,7 +245,8 @@ ghal_status ghal_fs_stat(const char *path, ghal_fs_info *info)
 
     if (stat(path, &st) != 0)
         return Err(errno);
-    ToInfo(&st, DosAttrs(path), info);
+    if (info)
+        ToInfo(&st, DosAttrs(path), info);
     return GHAL_OK;
 }
 
@@ -277,6 +278,19 @@ ghal_status ghal_fs_set_mtime(const char *path, const ghal_datetime *dt)
     ut.actime = t;
     ut.modtime = t;
     return utime(path, &ut) == 0 ? GHAL_OK : Err(errno);
+}
+
+ghal_status ghal_fs_set_fmtime(ghal_file *f, const ghal_datetime *dt)
+{
+    unsigned date, time;
+
+    if (dt->year < 1980 || dt->year > 2107)
+        return GHAL_ERR_INVAL;
+    date = ((unsigned)(dt->year - 1980) << 9) | ((unsigned)dt->month << 5) |
+           dt->day;
+    time = ((unsigned)dt->hour << 11) | ((unsigned)dt->minute << 5) |
+           (dt->second / 2u);
+    return _dos_setftime(f->fd, date, time) == 0 ? GHAL_OK : GHAL_ERR_HOST;
 }
 
 ghal_status ghal_fs_delete(const char *path)

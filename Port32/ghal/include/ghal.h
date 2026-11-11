@@ -300,7 +300,11 @@ ghal_status ghal_fs_seek(ghal_file *f, int64_t offset, int whence,
 ghal_status ghal_fs_truncate(ghal_file *f, uint64_t size);
 ghal_status ghal_fs_sync(ghal_file *f);
 ghal_status ghal_fs_fstat(ghal_file *f, ghal_fs_info *info);
+/* the modification time of an open file; it stays when the file is
+ * closed unless it is written again (DOS: function 5701h) */
+ghal_status ghal_fs_set_fmtime(ghal_file *f, const ghal_datetime *dt);
 
+/* info may be NULL: only whether it exists */
 ghal_status ghal_fs_stat(const char *path, ghal_fs_info *info);
 /* the attributes GHAL_FS_ATTR_READONLY, HIDDEN, SYSTEM, ARCHIVE; on
  * POSIX only READONLY means something */

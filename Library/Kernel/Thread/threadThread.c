@@ -131,6 +131,7 @@ static void Reap(void)
 	Handle th = QueuePop(&deadList);
 	KThread *t = ThreadOf(th);
 	ghal_ctx_destroy(t->T_ctx);
+	FileThreadExit(t);
 	ghal_mem_free(t);
 	HandleFree(th);
     }
@@ -306,6 +307,9 @@ static KThread *NewThread(ThreadHandle *out, GeodeHandle owner,
     }
     t->T_basePriority = t->T_curPriority = priority;
     HandleEntryOf(th)->HE_addr = t;
+    /* the current path of the creator (none for the first thread) */
+    FileThreadInit(t, kernelCurrentThread ? ThreadOf(kernelCurrentThread)
+					  : NULL);
     return t;
 }
 
@@ -465,6 +469,17 @@ void ThreadAttachToQueue(QueueHandle qh, ClassStruct *class)
 /* ---------------------------------------------------------------------
  * Information and priorities
  * ------------------------------------------------------------------- */
+
+/* the error of the last file (and other) routine of the running thread */
+word ThreadGetError(void)
+{
+    return ThreadOf(KernelThisThread())->T_error;
+}
+
+void KernelSetError(word error)
+{
+    ThreadOf(KernelThisThread())->T_error = error;
+}
 
 dword ThreadGetInfo(ThreadHandle th, ThreadGetInfoType info)
 {

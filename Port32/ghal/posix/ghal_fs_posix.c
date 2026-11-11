@@ -226,7 +226,8 @@ ghal_status ghal_fs_stat(const char *path, ghal_fs_info *info)
 
     if (stat(path, &st) != 0)
         return Err(errno);
-    ToInfo(&st, DosAttrOfPath(path), info);
+    if (info)
+        ToInfo(&st, DosAttrOfPath(path), info);
     return GHAL_OK;
 }
 
@@ -252,10 +253,9 @@ ghal_status ghal_fs_set_attrs(const char *path, unsigned attrs)
     return GHAL_OK;
 }
 
-ghal_status ghal_fs_set_mtime(const char *path, const ghal_datetime *dt)
+static int ToTimes(const ghal_datetime *dt, struct timespec ts[2])
 {
     struct tm tm;
-    struct timespec ts[2];
     time_t t;
 
     memset(&tm, 0, sizeof(tm));
@@ -268,12 +268,30 @@ ghal_status ghal_fs_set_mtime(const char *path, const ghal_datetime *dt)
     tm.tm_isdst = -1;
     t = mktime(&tm);
     if (t == (time_t)-1)
-        return GHAL_ERR_INVAL;
+        return 0;
     ts[0].tv_sec = 0;
     ts[0].tv_nsec = UTIME_OMIT;
     ts[1].tv_sec = t;
     ts[1].tv_nsec = 0;
+    return 1;
+}
+
+ghal_status ghal_fs_set_mtime(const char *path, const ghal_datetime *dt)
+{
+    struct timespec ts[2];
+
+    if (!ToTimes(dt, ts))
+        return GHAL_ERR_INVAL;
     return utimensat(AT_FDCWD, path, ts, 0) == 0 ? GHAL_OK : Err(errno);
+}
+
+ghal_status ghal_fs_set_fmtime(ghal_file *f, const ghal_datetime *dt)
+{
+    struct timespec ts[2];
+
+    if (!ToTimes(dt, ts))
+        return GHAL_ERR_INVAL;
+    return futimens(f->fd, ts) == 0 ? GHAL_OK : Err(errno);
 }
 
 ghal_status ghal_fs_delete(const char *path)

@@ -21,6 +21,7 @@
 #include <resource.h>
 #include <timer.h>
 #include <object.h>
+#include <file.h>
 #include <geosport.h>
 
 /* ---------------------------------------------------------------------
@@ -98,7 +99,10 @@
     X(GEODE_FREE_LIBRARY_NOT_LIBRARY) \
     X(DIVIDE_BY_ZERO)		/* raise(SIGFPE) of libgcc */ \
     X(OBJ_DUPLICATE_NOT_A_RESOURCE)	/* no module data for the block */ \
-    X(OBJ_DUPLICATE_BLOCK_REQUIRES_AN_OBJECT_BLOCK)
+    X(OBJ_DUPLICATE_BLOCK_REQUIRES_AN_OBJECT_BLOCK) \
+    X(FILE_ERROR_NOT_EXPECTED)	/* noErrorFlag given, yet it failed */ \
+    X(FILE_POP_DIR_WITHOUT_PUSH) \
+    X(FILE_PATH_ALLOC_FAILED)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -230,6 +234,8 @@ typedef struct {
 				 * the thread, its queue or its process */
     MemHandle	T_dynamicObjBlock;	/* ObjInstantiateForThread */
     struct DispatchRec *T_dispatching;	/* CMessageDispatchP */
+    word	T_error;	/* ThreadGetError (TPD_error) */
+    struct KPath *T_path;	/* current path, then FilePushDir's */
 } KThread;
 
 /* the running thread (0 before KernelThreadInit) */
@@ -605,6 +611,40 @@ GeodeHandle GeodeLoadLow(const char *name, GeodeAttrs attrMatch,
 /* geodesLoad.c: free a geode whose reference count or last thread is
  * gone */
 void GeodeFreeLow(GeodeHandle gh);
+/* ---------------------------------------------------------------------
+ * Files (File/)
+ * ------------------------------------------------------------------- */
+
+/* a current path: a standard path (or SP_TOP) and the directories below
+ * it, separated by '\\' (filePath.c) */
+typedef struct KPath {
+    struct KPath *KP_next;	/* FilePushDir stack */
+    StandardPath KP_disk;
+    char	KP_tail[PATH_BUFFER_SIZE];
+} KPath;
+
+/* an open file; SIG_FILE handles point to it (HE_addr), several after
+ * FileDuplicateHandle (fileOpenClose.c) */
+typedef struct KFile {
+    struct ghal_file *KF_file;
+    word	KF_refs;
+    char	*KF_path;	/* host path */
+    FileAttrs	KF_attrs;	/* FileCreate: set when it is closed */
+} KFile;
+
+void KernelSetError(word error);	/* threadThread.c: ThreadGetError */
+/* filePath.c */
+void FileSetTopHostPath(const char *hostPath);	/* SP_TOP on the host */
+/* the host path of a GEOS path (relative to the current path, or to the
+ * top if it starts with '\\'); FALSE with the error set */
+Boolean FileHostPath(const char *path, char *out, size_t size);
+void FileThreadInit(KThread *t, KThread *creator);
+void FileThreadExit(KThread *t);
+word FileErrorOf(int ghalStatus, const char *hostPath);
+/* fileOpenClose.c: close a file handle of a geode that is freed */
+void FileFreeHandle(FileHandle fh);
+KFile *FileOf(FileHandle fh);
+
 /* geodesLoad.c: the module data of resource `res' of a geode and its
  * RESF_* flags; NULL if it has none (not a loaded geode, code) */
 const GocResource *GeodeResourceImage(GeodeHandle gh, word res, word *resf);

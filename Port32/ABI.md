@@ -909,6 +909,60 @@ Not yet:
   objects. Those optrs are relocated when a resource is loaded or
   duplicated (shadows, section 4).
 
+## 13a. Files (`Library/Kernel/File`, P4)
+
+The file routines of the kernel use `ghal_fs` directly. The file system
+driver layer (FSD, `DR_FS_*`) and the HostFS driver come later. Until
+then there is one disk: the GEOS top directory on the host. The kernel
+is told where it is with `FileSetTopHostPath`.
+
+- **Paths** (`filePath.c`).
+  - A standard path is a directory below the top, named as in 16-bit
+    GEOS (`WORLD`, `DOCUMENT`, `SYSTEM\FS`, `PRIVDATA\STATE`, ...,
+    after `stdPathUpwardTree`). A DOS16 installation keeps its layout.
+  - A path that starts with `\` is relative to the top. Any other path
+    is relative to the current path. `..` may leave a standard path;
+    the current path is then the top plus the directories below it.
+    Going above the top is `ERROR_PATH_NOT_FOUND`.
+  - Every thread has a current path: a `StandardPath` and a tail.
+    `FileGetCurrentPath` returns them. A new thread starts with its
+    creator's path, the first thread at `SP_TOP`.
+    `FilePushDir`/`FilePopDir` keep a stack; a pop without a push is
+    fatal.
+  - A standard path need not exist on the host. A directory below it
+    must exist.
+  - Disk handles other than standard paths are `ERROR_INVALID_VOLUME`
+    for now.
+- **Open files** (`fileOpenClose.c`, `fileIO.c`).
+  - A `FileHandle` is a `SIG_FILE` handle owned by the process of the
+    opening thread. Its `HE_addr` is a `KFile` holding the host file.
+  - `FileDuplicateHandle` gives a second handle to the same `KFile`,
+    so the position is shared, as in DOS.
+  - Files a geode still has open are closed when it is freed.
+  - A new file created read-only can still be written through its
+    handle; its attributes are set when it is closed (DOS semantics).
+    `FileSetDateAndTime` works on the open file.
+  - A short read or write sets `ERROR_SHORT_READ_WRITE`. With
+    `noErrorFlag`, other errors are fatal.
+- **By name** (`fileFile.c`): delete, rename (the new name stays in the
+  old directory unless it has a path; it never replaces a file),
+  attributes, and create/delete directories (the current directory
+  cannot be deleted).
+- **Errors.** Every routine sets the thread's error (`ThreadGetError`).
+  A missing file is `ERROR_FILE_NOT_FOUND`. If its directory is
+  missing too, the error is `ERROR_PATH_NOT_FOUND`.
+
+Not yet:
+
+- the FSD layer and HostFS as a driver;
+- the GEOS file header of DOS16 files (long names, extended
+  attributes; every file is native for now);
+- deny modes and record locks;
+- `FileEnum`, links, `FileCopy`/`FileMove`, temporary files, and
+  change notification;
+- several directories per standard path (`geos.ini` `paths`);
+- case-insensitive names on POSIX hosts.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

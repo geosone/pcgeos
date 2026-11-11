@@ -322,13 +322,13 @@ static int OwnedHandle(Handle h, HandleEntry *he, void *ctx)
 
     if (he->HE_owner == gh && h != gh &&
 	(he->HE_type == HT_MEM || he->HE_type == SIG_QUEUE ||
-	 he->HE_type == SIG_SAVED_BLOCK))
+	 he->HE_type == SIG_SAVED_BLOCK || he->HE_type == SIG_FILE))
 	return (int) h;
     return 0;
 }
 
-/* the blocks, queues and saved-block entries the geode owns (not its
- * core block) */
+/* the blocks, queues, saved-block entries and open files the geode owns
+ * (not its core block) */
 static void FreeOwned(GeodeHandle gh)
 {
     Handle h;
@@ -341,6 +341,9 @@ static void FreeOwned(GeodeHandle gh)
 	    break;
 	case SIG_SAVED_BLOCK:
 	    HandleFree(h);
+	    break;
+	case SIG_FILE:
+	    FileFreeHandle(h);
 	    break;
 	default:
 	    MemFree(h);

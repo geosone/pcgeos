@@ -97,6 +97,14 @@ int main(int argc, char **argv)
         memset(&dt, 0, sizeof(dt));
         dt.year = 2001; dt.month = 2; dt.day = 3;
         dt.hour = 4; dt.minute = 5; dt.second = 6;
+        CHECK(ghal_fs_open(P("GFSTEST/A.DAT"), GHAL_FS_READ | GHAL_FS_WRITE,
+                           &f) == GHAL_OK);
+        dt.year = 2003;
+        CHECK(ghal_fs_set_fmtime(f, &dt) == GHAL_OK);
+        CHECK(ghal_fs_close(f) == GHAL_OK);
+        CHECK(ghal_fs_stat(P("GFSTEST/A.DAT"), &info) == GHAL_OK &&
+              info.mtime.year == 2003 && info.mtime.second == 6);
+        dt.year = 2001;
         CHECK(ghal_fs_set_mtime(P("GFSTEST/A.DAT"), &dt) == GHAL_OK);
         CHECK(ghal_fs_stat(P("GFSTEST/A.DAT"), &info) == GHAL_OK &&
               info.mtime.year == 2001 && info.mtime.month == 2 &&
