@@ -289,8 +289,18 @@ application object, which must be the import `GenApplicationClass`.
 `geodesLoad.c`, `geodesLibrary.c` and `geodesAccess.c` load geodes
 from their modules:
 
-- **Images.** There is no file system yet: the program registers
-  geode images by name (`GeodeRegisterImage`), and a library is looked
+- **Geode files.** `GeodeLoad` reads the geode file of the given name
+  from the current path, whole, and hands it to `ghal_module`; the file
+  is closed again (DOS16 kept it open to load resources from it). A
+  geode file is a native file (no GEOS header): what the header held is
+  in `__geos_module`.
+- **Libraries.** A library not loaded yet is the file of its permanent
+  name, up to the first blank, plus `.geo`, in `SP_SYSTEM` (and so at
+  every place of `SP_SYSTEM`, §13a), as `TryOpenLib` did. There are no
+  `ec.geo` files to try first.
+- **Images.** A program may also register images by name
+  (`GeodeRegisterImage`; tests embed their geodes this way). A
+  registered image comes before the file; a library's image is looked
   up under its permanent name.
 - **Libraries first.** A module describes itself only once it is
   loaded. So `GeodeLoad` loads it once with dummy imports, reads the
@@ -380,11 +390,12 @@ resource. The test checks:
   frees the library;
 - at the end, not a single handle is left.
 
-It runs on amd64, i686, arm64, armhf and DJGPP dos32.
+It runs on amd64, i686, arm64, armhf and DJGPP dos32. At its end it
+loads `kgapp.geo` from `WORLD` and `kglib.geo` from `SYSTEM` as files,
+and checks that a missing library file is `GLE_LIBRARY_NOT_FOUND`.
 
 Not yet:
 
-- geode files (FileOpen and the geode's file handle);
 - drivers (`DR_INIT`), which load like libraries without an entry;
 - `noload` libraries;
 - resources loaded on demand (`RESF_DISCARDED`);
@@ -1484,6 +1495,55 @@ Port32 differences:
 Not yet: the loader's `/P` switch, geosec.ini, the hash table of the
 categories, `InitFileBackupLanguage`/`InitFileSwitchLanguages`, and
 `InitFilePushPrimaryFile`/`InitFilePopPrimaryFile`.
+
+## 13i. Starting the kernel (`Library/Kernel/Boot`, `Loader`, P4)
+
+`Loader/main.c` is the program that starts GEOS on the host (`geos`,
+`geos.exe` on dos32), after `LoadGeos` of `Loader/main.asm`.
+
+- **Top and command tail.** As the DOS loader, it takes the current
+  directory as the GEOS top. Its arguments, joined by blanks, are the
+  command tail.
+- **`KernelBoot`** (`bootInit.c`, after `InitGeos`) does, in order:
+  1. the first thread and the timer;
+  2. the top as drive C, and the initial path `SP_TOP`;
+  3. the primary file system driver (`FSDLoadPrimary`): the HostFS name
+     layout (§13c) and its drives;
+  4. the standard paths of `[paths]` (§13a);
+  5. the UI (`LoadUI`);
+  6. the geode the command tail names (`ProcessCommandLine`).
+- **Drives.** DOS16's file system driver made a drive for each DOS
+  drive. HostFS serves the top as drive C. `[hostfs] drives` gives it
+  more: `D=/srv/geos E=/mnt/cd`, a letter, `=`, a host directory,
+  separated by blanks or line ends. A host path with a blank cannot be
+  given. The key is new in Port32.
+- **The UI.** `[ui] generic` names the UI geode, loaded from
+  `SP_SYSTEM`. If it fails, `ui.geo` is tried, and if that fails too,
+  `CANNOT_LOAD_UI` is fatal. Without the key no UI is loaded: there is
+  no C UI library yet to be the default. `kernelUIHandle` holds it.
+- **The command tail.** The switches (`/x...`, up to a blank) are
+  skipped. The rest is loaded as a process from `SP_SYSTEM`, the path
+  `LoadUI` left, as DOS16 did. `KernelBoot` returns that process.
+- **Running.** DOS16 turned the boot thread into the scheduler's idle
+  loop. Here the host schedules the threads, and `KernelRun` keeps the
+  boot thread waiting until no process is left. `geos` then exits.
+
+ctest `kernel.boot` checks the chain on every host that loads geodes
+(not Open Watcom):
+
+- a geos.ini gives drive D;
+- `[paths] system` puts `D:\GEODES` into `SP_SYSTEM`;
+- `[ui] generic` names `kglib.geo`;
+- the tail `/a /bc kgapp.geo` loads the process. Both geodes exist only
+  on drive D.
+
+Not yet:
+
+- the drivers (memory, power, keyboard, mouse, video, font);
+- the input manager, fonts, graphics and windows;
+- patches, the log file, `documentIsTop`, `FSDInitComplete`;
+- the loader's switches (`/p`, `/sp`, memory limits);
+- `SysShutdown` and `EndGeos`.
 
 ## 14. Open
 

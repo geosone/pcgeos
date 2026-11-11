@@ -62,6 +62,7 @@ add_subdirectory(Port32/ghal)
 add_subdirectory(Port32/hostfs)
 add_subdirectory(Library/Math/Float)
 add_subdirectory(Library/Kernel)
+add_subdirectory(Loader)
 add_subdirectory(Port32/Tests)
 
 # Inventory of direct host contacts (plan P2).  Not part of 'all'.

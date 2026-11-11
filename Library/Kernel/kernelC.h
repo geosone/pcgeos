@@ -112,7 +112,8 @@
     X(VM_CHAIN_NOT_SUPPORTED)	/* DB item chains */ \
     X(CANNOT_ALLOCATE_CORRECT_CHUNK_HANDLE)	/* LMemAllocAt: handle taken */ \
     X(OBJ_LOAD_ERROR)		/* a state file that cannot be used */ \
-    X(INIT_FILE_ERROR)		/* no memory for the init file */
+    X(INIT_FILE_ERROR)		/* no memory for the init file */ \
+    X(CANNOT_LOAD_UI)		/* [ui] generic and ui.geo do not load */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -642,10 +643,11 @@ typedef struct {
 
 /* The core block of a loaded geode, or NULL. */
 GeodeCore *GeodeCoreOf(GeodeHandle gh);
-/* Without a file system yet, GeodeLoad takes geodes from images the
- * program registers by name (the file name; for a library also its
- * permanent name).  The image must stay valid. */
+/* GeodeLoad takes a geode from an image the program registered by name
+ * (the file name; for a library its permanent name) before it looks for
+ * the file.  The image must stay valid; a NULL image drops the name. */
 void GeodeRegisterImage(const char *name, const void *image, dword size);
+Boolean GeodeHasImage(const char *name);
 /* the threads of a geode (threadThread.c): the last thread of a process
  * to exit frees it */
 void GeodeAddThread(GeodeHandle gh);
@@ -662,7 +664,8 @@ void GeodeUnlock(void);
  * permanent name and extension; the caller holds the geode lock */
 GeodeHandle GeodeFindLow(const char *name, word n, GeodeAttrs attrMatch,
 			 GeodeAttrs attrNoMatch);
-/* geodesLoad.c: load a geode from its image (the geode lock held) */
+/* geodesLoad.c: load a geode from its image or file (the geode lock
+ * held) */
 GeodeHandle GeodeLoadLow(const char *name, GeodeAttrs attrMatch,
 			 GeodeAttrs attrNoMatch, word priority, dword appInfo,
 			 GeodeLoadError *err);
@@ -802,5 +805,20 @@ word LMemToDOS16(MemHandle mh, byte *out);
 MemHandle LMemFromDOS16(const byte *img, word size, Handle owner);
 MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
 				  HeapFlags hf, HeapAllocFlags haf);
+
+/* ---------------------------------------------------------------------
+ * Starting the kernel (Boot/bootInit.c)
+ * ------------------------------------------------------------------- */
+
+/* InitGeos: the first thread, the top directory (a host path), the
+ * primary file system driver and its drives, [paths], the UI, and the
+ * process the command tail names (after its "/" switches).  Returns that
+ * process, or 0 (with its error, GLE_OK if the tail names none). */
+GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
+		       GeodeLoadError *err);
+/* wait until no process is left */
+void KernelRun(void);
+/* the UI library (LoadUI), or 0 */
+extern GeodeHandle kernelUIHandle;
 
 #endif /* KERNELC_H */

@@ -50,6 +50,8 @@
 #   Initfile/initfileLow.c, initfileConstruct.c, initfileHigh.c <- the
 #                      init file (geos.ini) of the same asm files,
 #                      initfileC.asm and Loader/ini.asm
+#   Boot/bootInit.c <- InitGeos and ProcessCommandLine of bootInit.asm,
+#                      LoadUI of bootInitfile.asm
 #   VMem/vmemBlkManip.c, vmemHeader.c, vmemHigh.c, vmemChain.c <- the
 #                      same asm files (vmemHigh.c also vmemC.asm): VM
 #                      files in the DOS16 format
@@ -99,7 +101,8 @@ add_library(geos_kernel_objs OBJECT
   VMem/vmemBlkManip.c
   VMem/vmemHeader.c
   VMem/vmemHigh.c
-  VMem/vmemChain.c)
+  VMem/vmemChain.c
+  Boot/bootInit.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

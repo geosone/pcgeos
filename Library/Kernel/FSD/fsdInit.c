@@ -16,6 +16,14 @@
  * Reading the init file does not depend on the layout: HostFS finds a
  * name in any of them.
  *
+ * The drives of the primary driver: DOS16's driver made one for each DOS
+ * drive.  HostFS serves the top directory as drive C, and
+ *	[hostfs]
+ *	drives = D=/srv/geos E=/mnt/cd
+ * gives it more: a letter, "=", a host directory, separated by blanks
+ * or line ends (a host path cannot hold a blank).  [paths] may then
+ * name directories on them.
+ *
  * Not yet: the drivers of "[system] fs" and the secondary drivers
  * (network, CD-ROM).
  */
@@ -64,6 +72,61 @@ static int LayoutOf(const char *name)
     return HOSTFS_NAMES_AUTO;
 }
 
+#define TOP_DRIVE	2		/* C: (filePath.c) */
+
+/* one "X=hostpath" of [hostfs] drives */
+static void HostDrive(const char *item, word len)
+{
+    char path[256], name[2];
+    word number;
+    FSDDrive *old;
+    void *priv;
+    char c = item[0];
+
+    if (c >= 'a' && c <= 'z')
+	c = (char) (c - 'a' + 'A');
+    if (len < 3 || c < 'A' || c > 'Z' || item[1] != '=' ||
+	(size_t) (len - 2) >= sizeof(path))
+	return;
+    number = (word) (c - 'A');
+    if (number == TOP_DRIVE)
+	return;
+    memcpy(path, item + 2, len - 2);
+    path[len - 2] = 0;
+    priv = HostFSDriveData(path);
+    if (!priv)
+	return;
+    old = FSDDriveOf(number);
+    if (old && old->FDR_fsd == &hostFSDriver)
+	HostFSFreeDriveData(old->FDR_private);
+    name[0] = c;
+    name[1] = 0;
+    if (!FSDInitDrive(number, name, DS_PRESENT | DRIVE_FIXED,
+		      MEDIA_FIXED_DISK, &hostFSDriver, priv))
+	HostFSFreeDriveData(priv);
+}
+
+static void HostDrives(void)
+{
+    MemHandle mh;
+    word n, i, start;
+    const char *t;
+
+    if (InitFileReadStringBlock("hostfs", "drives", &mh, IFRF_READ_ALL, &n))
+	return;
+    t = MemLock(mh);
+    for (i = 0; i < n; ) {
+	while (i < n && (byte) t[i] <= ' ')
+	    i++;
+	start = i;
+	while (i < n && (byte) t[i] > ' ')
+	    i++;
+	if (i > start)
+	    HostDrive(t + start, (word) (i - start));
+    }
+    MemFree(mh);
+}
+
 void FSDLoadPrimary(void)
 {
     char name[64];
@@ -76,4 +139,5 @@ void FSDLoadPrimary(void)
     if (layout == HOSTFS_NAMES_DOS_LFN && !HostFSHostLongNames())
 	layout = HOSTFS_NAMES_DOS;
     HostFSSetDosNames(layout);
+    HostDrives();
 }

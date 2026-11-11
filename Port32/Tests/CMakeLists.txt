@@ -216,4 +216,11 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   add_dependencies(test_kernel_geode geode_kglib geode_kgapp)
   target_link_libraries(test_kernel_geode PRIVATE geos_kernel)
   add_test(NAME kernel.geode COMMAND test_kernel_geode)
+
+  # starting the kernel: drives, [paths], the UI and a process from files
+  add_executable(test_kernel_boot test_kernel_boot.c ${_kglib_c}
+                 ${_kgapp_c})
+  add_dependencies(test_kernel_boot geode_kglib geode_kgapp)
+  target_link_libraries(test_kernel_boot PRIVATE geos_kernel)
+  add_test(NAME kernel.boot COMMAND test_kernel_boot)
 endif()
