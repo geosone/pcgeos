@@ -14,6 +14,8 @@
 
 @class GocTestProcessClass, GenProcessClass;
 @message void MSG_GOCTEST_PING(word value);
+@message sdword MSG_GOCTEST_ADD(sword a, sdword b, WWFixed c);
+@message void MSG_GOCTEST_STORE(const char *text, word len);
 @endc
 @classdecl GocTestProcessClass, neverSaved;
 
@@ -53,6 +55,20 @@ const ChunkHandle gocTestChunks[] = {
     if (value != 0) {
 	@send GocTestGlyph::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
     }
+    @callsuper();
+}
+
+@method GocTestProcessClass, MSG_GOCTEST_ADD
+{
+    return a + b + c.WWF_int;
+}
+
+char gocTestStored[32];
+
+@method GocTestProcessClass, MSG_GOCTEST_STORE
+{
+    memcpy(gocTestStored, text, len);
+    gocTestStored[len] = '\0';
 }
 
 /* ---------------------------------------------------------------------
@@ -155,12 +171,45 @@ GocTestCheck(void)
 	  gocTestChunks[1] == GocTestGlyph &&
 	  gocTestChunks[2] == GocTestText, "OptrToChunk(@x) table");
 
+    /* sending messages: parameters as a structure, methods via thunks */
+    {
+	extern int gocTestSuperCalls;
+	WWFixed c;
+	EventHandle ev;
+
+	c.WWF_frac = 0;
+	c.WWF_int = 5;
+	Check(@call process::MSG_GOCTEST_ADD(-3, 100000, c) == 100002,
+	      "@call with parameters and reply");
+	@send process::MSG_GOCTEST_STORE("hello", 5);
+	Check(!strcmp(gocTestStored, "hello"), "@send");
+	ev = @record process::MSG_GOCTEST_STORE("again", 5);
+	Check(!strcmp(gocTestStored, "hello"), "@record does not deliver");
+	@dispatch ev;
+	Check(!strcmp(gocTestStored, "again"), "@dispatch");
+	@call process::MSG_GOCTEST_PING(0);
+	Check(gocTestSuperCalls == 1, "@callsuper");
+    }
+
     /* the class structure points to its tables */
     Check(GocTestProcessClass.Class_superClass ==
 	  (ClassStruct *) &GenProcessClass, "superclass");
-    Check(GocTestProcessClass.Class_methodCount == 1 &&
-	  GocTestProcessClass.Class_messages[0] == MSG_GOCTEST_PING &&
-	  GocTestProcessClass.Class_methods[0] != NULL &&
-	  GocTestProcessClass.Class_htypes != NULL, "method table");
+    {
+	static const Message msgs[] = {
+	    MSG_GOCTEST_PING, MSG_GOCTEST_ADD, MSG_GOCTEST_STORE
+	};
+	word i, j, found = 0;
+
+	for (i = 0; i < 3; i++) {
+	    for (j = 0; j < GocTestProcessClass.Class_methodCount; j++) {
+		if (GocTestProcessClass.Class_messages[j] == msgs[i] &&
+		    GocTestProcessClass.Class_methods[j] != NULL) {
+		    found++;
+		}
+	    }
+	}
+	Check(GocTestProcessClass.Class_methodCount == 3 && found == 3 &&
+	      GocTestProcessClass.Class_htypes != NULL, "method table");
+    }
     return gocFails;
 }

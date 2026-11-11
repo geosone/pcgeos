@@ -231,6 +231,25 @@ typedef ByteEnum ObjRelocationSource;
 
 #define RID_SOURCE_OFFSET 12
 
+#ifdef GEOS_PORT32
+/*
+ * Port32 (goc -cg): the parameters of a message are a structure, the
+ * reply comes back through a buffer; each function returns `reply'.
+ * Methods are called through thunks of type GocMethodThunk.  See
+ * Port32/ABI.md section 5.
+ */
+typedef void GocMethodThunk(void *pself, optr oself, Message message,
+			    void *params, void *reply);
+extern void *CObjMessageP(word flags, optr dest, Message message,
+			  const void *params, dword paramSize,
+			  void *reply, dword replySize);
+extern void *CObjCallSuperP(ClassStruct *superOf, optr dest, Message message,
+			    const void *params, dword paramSize,
+			    void *reply, dword replySize);
+extern void *CMessageDispatchP(EventHandle event, word flags,
+			       void *reply, dword replySize);
+#endif
+
 extern dword
     _pascal CObjMessage();
 

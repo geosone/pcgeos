@@ -6,9 +6,9 @@
 # resources from <geode.gp> and the files (Port32/tools/gpres.py).
 # <out-var> receives one C file per .goc file to add to a target: each
 # includes the resource numbers and then the goc output, so no compiler-
-# specific "force include" option is needed (GCC, Clang and Open Watcom
-# alike).  goc is the one built by the pmake tools build (bin/goc); it runs
-# on the build host, also when cross compiling.
+# specific "force include" option is needed.  goc is the one built by the
+# pmake tools build (bin/goc); it runs on the build host, also when cross
+# compiling.
 find_program(GEOS_GOC goc PATHS ${PROJECT_SOURCE_DIR}/bin NO_DEFAULT_PATH)
 find_package(Python3 COMPONENTS Interpreter)
 

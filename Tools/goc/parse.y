@@ -2709,6 +2709,12 @@ sendOrCallOrRecordLine:
 
 	    if(passMsg != NullSymbol){  /* if no parse error, continue */
 
+		if (compiler == COM_GCC) {
+		    OutputGccMessage($1, passMsg, retMsg, $5,
+				     $12,
+				     ($3 | RECORD_FLAG($1,$5) | CALL_FLAG($1)),
+				     MSG_OUT($9));
+		} else {
 		if (HAS_CHILDREN($5)){
 		    Output("CObjSendToChildren(oself, ");
 		}
@@ -2726,6 +2732,7 @@ sendOrCallOrRecordLine:
 		
 		if (HAS_CHILDREN($5)){
 		    Output(", %s)", OBJ_CHILDREN($5));
+		}
 		}
 	    }
 	    SWITCH_CONTEXT( LC_NONE);
@@ -2812,6 +2819,10 @@ callsuperStuff	:
 	    } else {
 		/* must set up an objDest before calling GeneratePrototype */
 		SET_OBJ_DEST(&objDest,"",PROTO_ONE_PARAM,"");
+	if (compiler == COM_GCC) {
+		OutputGccCallSuperInMethod(curMethod);
+		Output("%s", $1 ? ";" : "");
+	} else {
 	    	GeneratePrototype(MIT_CALLSUPER, curMethod->message, &objDest);
 
 	    	Output("CObjCallSuper)(");
@@ -2824,6 +2835,7 @@ callsuperStuff	:
 		   GenerateMPDString(curMethod->message, 
 				     PARAM_ENUM(MIT_CALLSUPER)), 
 		       $1?";":"");  /* XXX should go away */
+	}
 	    }
 
             if (compiler == COM_BORL) {
@@ -2852,6 +2864,9 @@ callsuperStuff	:
  	')'
  	{
 	    if($4 && $7){
+		if (compiler == COM_GCC) {
+		    OutputGccCallSuper($7, $1, $10, $4->name);
+		} else {
 		GeneratePrototype(MIT_CALLSUPER,$7, $1);
 		Output("CObjCallSuper)(");
 		OutputSubst($10, "@", "(optr)&");
@@ -2862,6 +2877,7 @@ callsuperStuff	:
 		       DEST($1),  	    	    	    /* dest */
 		       $7->data.symMessage.messageNumber, /* message */
 		       GenerateMPDString($7, PARAM_ENUM(MIT_CALLSUPER))); 
+		}
 	    }
 	    SWITCH_CONTEXT( LC_NONE);
 	}
@@ -3055,12 +3071,16 @@ dispatchOrDispatchCallLine   :
 	    }else{
 		mit = MIT_DISPATCH;
 	    }
+	    if (compiler == COM_GCC) {
+		OutputGccDispatch(mit, $1, $3, $1?MF_CALL:0);
+	    } else {
 	    Output("(");
 	    GenerateReturnType(mit, $1, FALSE);
 	    Output(")CMessageDispatch(%s, 0x%x, %s)",
 		   $3,                                 /* Message handle */
 		   $1?MF_CALL:0,                       /* flags */
 		   GenerateMPDString(NullSymbol,PARAM_ENUM(mit)));  /* mpd   */
+	    }
 
 	    SWITCH_CONTEXT( LC_NONE);
         }
@@ -3096,12 +3116,16 @@ newDispatchOrDispatchCallLine:	newDispatchOrDispatchCall
 	    }else{
 		mit = MIT_DISPATCH;
 	    }
+	    if (compiler == COM_GCC) {
+		OutputGccDispatch(mit, $1, $2, $1?MF_CALL:0);
+	    } else {
 	    Output("(");
 	    GenerateReturnType(mit, $1, FALSE);
 	    Output(")CMessageDispatch(%s, 0x%x, %s)",
 		   $2,                                 /* Message handle */
 		   $1?MF_CALL:0,                       /* flags */
 		   GenerateMPDString(NullSymbol,PARAM_ENUM(mit)));  /* mpd   */
+	    }
 
 	    SWITCH_CONTEXT( LC_NONE);
         }
@@ -4872,7 +4896,8 @@ GenerateMethodDef(Method *meth)
 		       	    meth->class->data.symClass.root);
 		break;
 	    case MM_BASED:
-		Output("_segment sself, %sInstance _based(sself) *pself, ",
+		Output(compiler == COM_GCC ? "%sInstance *pself, " :
+		       "_segment sself, %sInstance _based(sself) *pself, ",
 		       	    meth->class->data.symClass.root);
 		break;
 	}

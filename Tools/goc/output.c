@@ -1002,12 +1002,270 @@ int relocTable[] = {
     RELOC_RELOC_HANDLE
 };
 
+/***********************************************************************
+ *
+ * COM_GCC message invocations (Port32/ABI.md section 5)
+ *
+ * The 16-bit backends cast CObjMessage & co. to a prototype with the
+ * message's parameters and let the kernel take them from the stack.  For
+ * the port, the parameters travel as a structure built in place (a C99
+ * compound literal) and the reply comes back through a buffer:
+ *
+ *	(*(R *) CObjMessageP(flags, dest, (Message) MSG,
+ *			     &(struct {T1 _p0; T2 _p1;}){args},
+ *			     sizeof(struct {T1 _p0; T2 _p1;}),
+ *			     &(R){0}, sizeof(R)))
+ *
+ * On the receiving side, every method gets a thunk that unpacks the
+ * structure and calls the method with its real prototype; the method
+ * table of the class points to the thunks.
+ *
+ ***********************************************************************/
+static void
+GccTrim(char *dest, const char *src)
+{
+    char *end;
+
+    while (isspace((unsigned char) *src)) {
+	src++;
+    }
+    strcpy(dest, src);
+    end = dest + strlen(dest);
+    while (end > dest && isspace((unsigned char) end[-1])) {
+	*--end = '\0';
+    }
+}
+
+/* the type of the reply: "void", "EventHandle" or the message's type */
+static void
+GccReplyType(char *buf, MsgInvocType mit, Symbol *retMsg, Boolean children)
+{
+    if (HAS_RECORD_FLAG(mit, children)) {
+	strcpy(buf, "EventHandle");
+    } else if (IS_CALL_TYPE(mit) && retMsg != NullSymbol) {
+	GccTrim(buf, retMsg->data.symMessage.returnType);
+    } else {
+	strcpy(buf, "void");
+    }
+}
+
+/*
+ * The parameter structure of a message, "" if it has none.  An array
+ * parameter (T name[n]...) is passed as a pointer, as in a prototype.
+ */
+static void
+GccParamStruct(char *buf, Symbol *msg)
+{
+    MessageParam *pp;
+    char *cp = buf;
+    int n = 0;
+    const char *rest;
+
+    *buf = '\0';
+    if (msg == NullSymbol || msg->data.symMessage.firstParam == NullParam) {
+	return;
+    }
+    cp += sprintf(cp, "struct {");
+    for (pp = msg->data.symMessage.firstParam; pp != NullParam;
+	 pp = pp->next, n++)
+    {
+	if (pp->typeSuffix[0] == '[') {
+	    rest = strchr(pp->typeSuffix, ']');
+	    cp += sprintf(cp, "%s (*_p%d)%s; ", pp->ctype, n,
+			  rest != NULL ? rest + 1 : "");
+	} else {
+	    cp += sprintf(cp, "%s _p%d%s; ", pp->ctype, n, pp->typeSuffix);
+	}
+    }
+    sprintf(cp, "}");
+}
+
+/* "&(S){args}, sizeof(S)" or "NULL, 0" */
+static void
+GccOutputParams(const char *st, const char *args, Boolean substOptr)
+{
+    if (*st == '\0') {
+	Output("NULL, 0");
+	return;
+    }
+    Output("&(%s){", st);
+    if (substOptr) {
+	GccOutputSubstOptr((char *) args, FALSE);
+    } else {
+	Output("%s", args);
+    }
+    Output("}, sizeof(%s)", st);
+}
+
+static void
+GccOutputReplyStart(const char *rt)
+{
+    if (!strcmp(rt, "void")) {
+	Output("((void) ");
+    } else {
+	Output("(*(%s *) ", rt);
+    }
+}
+
+static void
+GccOutputReplyEnd(const char *rt)
+{
+    if (!strcmp(rt, "void")) {
+	Output(", NULL, 0))");
+    } else {
+	Output(", &(%s){0}, sizeof(%s)))", rt, rt);
+    }
+}
+
+static void
+GccOutputDest(ObjDest *od)
+{
+    if (DEST_TYPE(od) == PROTO_TWO_PARAMS) {
+	Output("ConstructOptr(%s)", DEST(od));
+    } else {
+	Output("%s", DEST(od));
+    }
+}
+
+/* @send, @call, @record (also to @children) */
+void
+OutputGccMessage(MsgInvocType mit, Symbol *passMsg, Symbol *retMsg,
+		 ObjDest *od, char *args, int flags, char *msgOut)
+{
+    char rt[256], st[2048];
+
+    GccReplyType(rt, mit, retMsg, HAS_CHILDREN(od));
+    GccParamStruct(st, passMsg);
+    if (HAS_CHILDREN(od)) {
+	Output("CObjSendToChildren(oself, ");
+    }
+    GccOutputReplyStart(rt);
+    Output("CObjMessageP(0x%x, ", flags);
+    GccOutputDest(od);
+    Output(", (Message) %s, ", msgOut);
+    GccOutputParams(st, args, TRUE);
+    GccOutputReplyEnd(rt);
+    if (HAS_CHILDREN(od)) {
+	Output(", %s)", OBJ_CHILDREN(od));
+    }
+}
+
+/* @callsuper() in a method: pass the method's own parameters on */
+void
+OutputGccCallSuperInMethod(Method *meth)
+{
+    char rt[256], st[2048], args[2048];
+    MessageParam *pp;
+    char *cp = args;
+
+    *args = '\0';
+    for (pp = meth->message->data.symMessage.firstParam; pp != NullParam;
+	 pp = pp->next)
+    {
+	cp += sprintf(cp, "%s%s", cp == args ? "" : ", ", pp->name);
+    }
+    GccReplyType(rt, MIT_CALLSUPER, meth->message, FALSE);
+    GccParamStruct(st, meth->message);
+    GccOutputReplyStart(rt);
+    Output("CObjCallSuperP(&%s, oself, message, ", meth->class->name);
+    GccOutputParams(st, args, FALSE);
+    GccOutputReplyEnd(rt);
+}
+
+/* @callsuper obj::Class::MSG(args) */
+void
+OutputGccCallSuper(Symbol *msg, ObjDest *od, char *args, char *className)
+{
+    char rt[256], st[2048];
+
+    GccReplyType(rt, MIT_CALLSUPER, msg, FALSE);
+    GccParamStruct(st, msg);
+    GccOutputReplyStart(rt);
+    Output("CObjCallSuperP(&%s, ", className);
+    GccOutputDest(od);
+    Output(", (Message) %d, ", msg->data.symMessage.messageNumber);
+    GccOutputParams(st, args, TRUE);
+    GccOutputReplyEnd(rt);
+}
+
+/* @dispatch / @dispatchcall: the parameters are in the event */
+void
+OutputGccDispatch(MsgInvocType mit, Symbol *msg, char *event, int flags)
+{
+    char rt[256];
+
+    GccReplyType(rt, mit, msg, FALSE);
+    GccOutputReplyStart(rt);
+    Output("CMessageDispatchP(%s, 0x%x", event, flags);
+    GccOutputReplyEnd(rt);
+}
+
+/*
+ * The thunks of the methods of a class, in the order of its method table:
+ *	static void _goc_t_<Class>_<n>(void *pself, optr oself,
+ *				       Message message, void *params,
+ *				       void *reply)
+ * Each one is preceded by the method's prototype (the method may be
+ * defined in another file: @extern method).
+ */
+static void
+OutputGccMethodThunks(Symbol *class)
+{
+    Method *meth;
+    MessageParam *pp;
+    char rt[256], st[2048];
+    int n = 0, i;
+
+    for (meth = class->data.symClass.firstMethod; meth != NullMethod;
+	 meth = meth->next)
+    {
+	if (meth->message->data.symMessage.class == NULL) {
+	    continue;		/* relocation method: not in the table */
+	}
+	GenerateMethodDef(meth);
+	Output(";\n");
+	GccTrim(rt, meth->message->data.symMessage.returnType);
+	GccParamStruct(st, meth->message);
+	Output("static void _goc_t_%s_%d(void *pself, optr oself, "
+	       "Message message, void *params, void *reply)\n{ ",
+	       class->name, n);
+	if (*st != '\0') {
+	    Output("%s *p = params; ", st);
+	} else {
+	    Output("(void) params; ");
+	}
+	if (class->flags & SYM_PROCESS_CLASS) {
+	    Output("(void) pself; ");
+	}
+	if (strcmp(rt, "void") != 0) {
+	    Output("*(%s *) reply = ", rt);
+	} else {
+	    Output("(void) reply; ");
+	}
+	if (class->flags & SYM_PROCESS_CLASS) {
+	    Output("%s(", meth->name);
+	} else {
+	    Output("%s((%sInstance *) pself, ", meth->name,
+		   class->data.symClass.root);
+	}
+	Output("oself, (%sMessages) message",
+	       meth->message->data.symMessage.class->data.symClass.root);
+	for (pp = meth->message->data.symMessage.firstParam, i = 0;
+	     pp != NullParam; pp = pp->next, i++)
+	{
+	    Output(", p->_p%d", i);
+	}
+	Output("); }\n");
+	n++;
+    }
+}
+
 void
 OutputClassTable(Symbol *class)
 {
     Reloc     *rel;
     int       flag;
-    int       cmethEntries;
+    int       cmethEntries = 0;
     Method    *meth;
     char      preTypeString[] = "_far ";
     char      postTypeString[] = " far";
@@ -1143,6 +1401,8 @@ OutputClassTable(Symbol *class)
 
     /* START CLASSSTRUCT */
     if (compiler == COM_GCC && class->data.symClass.methodCount != 0) {
+	/* methods are called through thunks (Port32/ABI.md section 5) */
+	OutputGccMethodThunks(class);
 	/* the class structure points to its tables (Port32 ClassStruct) */
 	Output("extern Message _Messages_%s[]; "
 	       "extern MessageMethod *_Methods_%s[]; "
@@ -1292,6 +1552,10 @@ OutputClassTable(Symbol *class)
 	    if (flag) {
 		Output(", ");
 	    }
+	    if (compiler == COM_GCC) {
+		Output("(MessageMethod *)_goc_t_%s_%d", class->name, cmethEntries);
+		cmethEntries++;
+	    } else
             Output("(MessageMethod *)%s", meth->name);
 	    flag = TRUE;
 	}
@@ -2215,7 +2479,7 @@ void OutputMethodAntiWarningCode(Method *meth)
 	Output("(void) pself; ");
 	break;
       case MM_BASED:
-	Output("(void) sself; (void) pself; ");
+	Output("(void) pself; ");	/* no sself without segments */
 	break;
       }
     }

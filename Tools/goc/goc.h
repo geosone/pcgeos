@@ -131,7 +131,7 @@ extern char *compilerOffsetTypeName;
 extern char *compilerCastForOffset;
 
 /*
- * COM_GCC: GCC/Clang (and Open Watcom 386) on flat 32/64-bit hosts, the
+ * COM_GCC: GCC/Clang (C99) on flat 32/64-bit hosts, the
  * Port32 C port.  No segments; object resources are described by tables
  * that the geode loader turns into LMem blocks (Port32/ABI.md).
  */
@@ -256,6 +256,16 @@ extern void OutputObjRef(char *name);
 extern void FormatObjRef(char *dest, char *name, Symbol *sym);
 extern void OutputChunkExtern(char *name);
 extern void OutputChunkDefined(Symbol *chunk);
+/* COM_GCC: message invocations and method thunks (output.c) */
+extern void OutputGccMessage(MsgInvocType mit, Symbol *passMsg,
+			     Symbol *retMsg, ObjDest *od, char *args,
+			     int flags, char *msgOut);
+extern void OutputGccCallSuperInMethod(Method *meth);
+extern void OutputGccCallSuper(Symbol *msg, ObjDest *od, char *args,
+			       char *className);
+extern void OutputGccDispatch(MsgInvocType mit, Symbol *msg, char *event,
+			      int flags);
+extern void GenerateMethodDef(Method *meth);
 /* COM_GCC: the last characters written to the output (goc.c) */
 #define GCC_TAIL_SIZE 32
 extern char gccOutTail[];

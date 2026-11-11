@@ -5276,6 +5276,12 @@ yyreduce:
 
 	    if(passMsg != NullSymbol){  /* if no parse error, continue */
 
+		if (compiler == COM_GCC) {
+		    OutputGccMessage((yyvsp[-13].mit), passMsg, retMsg, (yyvsp[-9].od),
+				     (yyvsp[-2].string),
+				     ((yyvsp[-11].num) | RECORD_FLAG((yyvsp[-13].mit),(yyvsp[-9].od)) | CALL_FLAG((yyvsp[-13].mit))),
+				     MSG_OUT((yyvsp[-5].sm)));
+		} else {
 		if (HAS_CHILDREN((yyvsp[-9].od))){
 		    Output("CObjSendToChildren(oself, ");
 		}
@@ -5293,6 +5299,7 @@ yyreduce:
 		
 		if (HAS_CHILDREN((yyvsp[-9].od))){
 		    Output(", %s)", OBJ_CHILDREN((yyvsp[-9].od)));
+		}
 		}
 	    }
 	    SWITCH_CONTEXT( LC_NONE);
@@ -5393,6 +5400,10 @@ yyreduce:
 	    } else {
 		/* must set up an objDest before calling GeneratePrototype */
 		SET_OBJ_DEST(&objDest,"",PROTO_ONE_PARAM,"");
+	if (compiler == COM_GCC) {
+		OutputGccCallSuperInMethod(curMethod);
+		Output("%s", (yyvsp[0].num) ? ";" : "");
+	} else {
 	    	GeneratePrototype(MIT_CALLSUPER, curMethod->message, &objDest);
 
 	    	Output("CObjCallSuper)(");
@@ -5405,6 +5416,7 @@ yyreduce:
 		   GenerateMPDString(curMethod->message, 
 				     PARAM_ENUM(MIT_CALLSUPER)), 
 		       (yyvsp[0].num)?";":"");  /* XXX should go away */
+	}
 	    }
 
             if (compiler == COM_BORL) {
@@ -5445,6 +5457,9 @@ yyreduce:
 
     {
 	    if((yyvsp[-8].sym) && (yyvsp[-5].sym)){
+		if (compiler == COM_GCC) {
+		    OutputGccCallSuper((yyvsp[-5].sym), (yyvsp[-11].od), (yyvsp[-2].string), (yyvsp[-8].sym)->name);
+		} else {
 		GeneratePrototype(MIT_CALLSUPER,(yyvsp[-5].sym), (yyvsp[-11].od));
 		Output("CObjCallSuper)(");
 		OutputSubst((yyvsp[-2].string), "@", "(optr)&");
@@ -5455,6 +5470,7 @@ yyreduce:
 		       DEST((yyvsp[-11].od)),  	    	    	    /* dest */
 		       (yyvsp[-5].sym)->data.symMessage.messageNumber, /* message */
 		       GenerateMPDString((yyvsp[-5].sym), PARAM_ENUM(MIT_CALLSUPER))); 
+		}
 	    }
 	    SWITCH_CONTEXT( LC_NONE);
 	}
@@ -5742,12 +5758,16 @@ yyreduce:
 	    }else{
 		mit = MIT_DISPATCH;
 	    }
+	    if (compiler == COM_GCC) {
+		OutputGccDispatch(mit, (yyvsp[-2].sym), (yyvsp[0].string), (yyvsp[-2].sym)?MF_CALL:0);
+	    } else {
 	    Output("(");
 	    GenerateReturnType(mit, (yyvsp[-2].sym), FALSE);
 	    Output(")CMessageDispatch(%s, 0x%x, %s)",
 		   (yyvsp[0].string),                                 /* Message handle */
 		   (yyvsp[-2].sym)?MF_CALL:0,                       /* flags */
 		   GenerateMPDString(NullSymbol,PARAM_ENUM(mit)));  /* mpd   */
+	    }
 
 	    SWITCH_CONTEXT( LC_NONE);
         }
@@ -5793,12 +5813,16 @@ yyreduce:
 	    }else{
 		mit = MIT_DISPATCH;
 	    }
+	    if (compiler == COM_GCC) {
+		OutputGccDispatch(mit, (yyvsp[-3].sym), (yyvsp[-2].string), (yyvsp[-3].sym)?MF_CALL:0);
+	    } else {
 	    Output("(");
 	    GenerateReturnType(mit, (yyvsp[-3].sym), FALSE);
 	    Output(")CMessageDispatch(%s, 0x%x, %s)",
 		   (yyvsp[-2].string),                                 /* Message handle */
 		   (yyvsp[-3].sym)?MF_CALL:0,                       /* flags */
 		   GenerateMPDString(NullSymbol,PARAM_ENUM(mit)));  /* mpd   */
+	    }
 
 	    SWITCH_CONTEXT( LC_NONE);
         }
@@ -8142,7 +8166,8 @@ GenerateMethodDef(Method *meth)
 		       	    meth->class->data.symClass.root);
 		break;
 	    case MM_BASED:
-		Output("volatile _segment sself, volatile %sInstance _based(sself) *pself, ",
+		Output(compiler == COM_GCC ? "%sInstance *pself, " :
+		       "volatile _segment sself, volatile %sInstance _based(sself) *pself, ",
 		       	    meth->class->data.symClass.root);
 		break;
 	}

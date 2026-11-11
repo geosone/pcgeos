@@ -56,8 +56,8 @@ headers switch on `GEOS_PORT32`, and that build stays byte-identical
 
 ## 4. Object resources: `goc -cg`
 
-`goc -cg` is the backend of `goc` for flat hosts (GCC, Clang and Open
-Watcom 386). The 16-bit backends are unchanged: for every SDK sample, the
+`goc -cg` is the backend of `goc` for flat hosts (GCC and Clang, C99;
+see section 5). The 16-bit backends are unchanged: for every SDK sample, the
 `-cw` output is byte-identical to before.
 
 With segments, glue built each LMem resource from three segments: data,
@@ -108,25 +108,59 @@ The ANSI headers forward to the host C library where nothing GEOS-specific
 is lost: `ctype.h`, and `size_t` in `string.h`. The GEOS `stdio.h` works on
 GEOS files, so it stays GEOS (open).
 
-## 5. Open
+## 5. Sending messages
 
-1. **Sending messages.** `goc` still casts `CObjMessage` to a prototype
-   with the message's parameters. That only worked because of the 16-bit
-   Pascal convention. Plan: `goc` puts the parameters of a message into a
-   structure and emits a typed thunk per method. The kernel then always
-   sends `(destination, message, &parameters, &return value)`, which also
-   suits queued messages.
-2. **optrs in static data in code**, e.g. GenControl feature tables
+The 16-bit backends cast `CObjMessage` to a prototype with the message's
+parameters, and the kernel takes them from the stack (Pascal convention,
+MPD). In C on a flat host, that would be a call through the wrong
+function type. Under `goc -cg`:
+
+- **The sender passes the parameters as a structure that is built in
+  place:** a C99 compound literal `&(struct {T1 _p0; T2 _p1;}){args}`. goc
+  does not have to split the argument list, because the initialiser
+  assigns the arguments in order and converts them like a prototype
+  would. Array parameters become pointers.
+- **The reply comes back through a buffer**, `&(R){0}`. Each kernel
+  function returns that buffer, so `@call` stays an expression:
+  `(*(R *) CObjMessageP(flags, dest, msg, params, size, reply, size))`.
+  `@send` passes no buffer; `@record` gets an `EventHandle` as its reply.
+- **Kernel entry points** (`object.h`): `CObjMessageP` for `@send`,
+  `@call` and `@record` (and inside `CObjSendToChildren` for
+  `@children`), `CObjCallSuperP` and `CMessageDispatchP`. The kernel
+  copies `params` into the event when it queues a message, because it
+  knows the size.
+- **The receiver calls methods through thunks:** for every method of a
+  class, goc emits `_goc_t_<Class>_<n>(pself, oself, message, params,
+  reply)`. The thunk unpacks the structure and calls the method with its
+  real prototype. `Class_methods` points to the thunks (`GocMethodThunk`).
+  The method's prototype comes first, so `@extern method` works too.
+- `MM_BASED` methods get an ordinary `pself` because there are no
+  segments.
+
+Compound literals need C99. Open Watcom 386 lacks them, so **dos32 is
+built with DJGPP gcc for the port** (decided 2026-11-11). Open Watcom
+remains the compiler of the 16-bit build. Until DJGPP is set up,
+`goc.resources` is left out of Watcom builds.
+
+Checks: `goc.resources` sends messages with scalar, structure and pointer
+parameters. It covers `@call` with a reply, `@send`, `@record` +
+`@dispatch` and `@callsuper`, through a minimal stand-in kernel in
+`Goc/test_gocres.c`. The 44 SDK samples of `goc_sdk` compile with the
+same scheme.
+
+## 6. Open
+
+1. **optrs in static data in code**, e.g. GenControl feature tables
    (`{OptrToChunk(@X), @Name, 0}`). Glue relocated these. Options are
    ELF relocations resolved by the geode loader, or unrelocated optrs
    resolved where they are used.
-3. **References to objects of other files in resource data.** `@extern`
+2. **References to objects of other files in resource data.** `@extern`
    objects have no compile-time resource, so they need load-time
    relocation by name.
-4. **Geode format**: an ELF shared object plus the `.gp` tables (resources
+3. **Geode format**: an ELF shared object plus the `.gp` tables (resources
    as above, exports, protocol numbers); see `GHAL-Concept.md` §4.4.
-5. **DOS16 file formats under dos32**: which structures of VM files and
+4. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.
-6. **GEOS `stdio.h` and the DBCS string functions** on top of the host C
+5. **GEOS `stdio.h` and the DBCS string functions** on top of the host C
    library.
