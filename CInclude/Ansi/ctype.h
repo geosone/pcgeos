@@ -24,8 +24,24 @@
 #define __CTYPE_H
 
 #ifdef GEOS_PORT32
-/* the port uses the host's C library (Port32/ABI.md) */
-#include <ctype.h>
+/*
+ * Port32: a geode imports these from the GEOS C library like any other
+ * routine.  The prototypes are the standard ones, so they agree with the
+ * compiler's built-ins and with a host <ctype.h> (Port32/ABI.md).
+ */
+extern int isalnum(int __c);
+extern int isalpha(int __c);
+extern int iscntrl(int __c);
+extern int isdigit(int __c);
+extern int isgraph(int __c);
+extern int islower(int __c);
+extern int isprint(int __c);
+extern int ispunct(int __c);
+extern int isspace(int __c);
+extern int isupper(int __c);
+extern int isxdigit(int __c);
+extern int toupper(int __c);
+extern int tolower(int __c);
 #else
 
 extern int	

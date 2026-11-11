@@ -89,24 +89,33 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "
   add_test(NAME goc.resources COMMAND test_gocres)
 endif()
 
-# The SDK_C samples of goc_sdk.txt must keep compiling through goc -cg
-# (compile only: linking needs the ported kernel and UI).  Only errors
-# count here; the samples are old code with many harmless warnings.
+# The SDK_C samples of goc_sdk.txt must keep building through goc -cg,
+# each as a geode in the module format of the host (ELF, DXE3 on dos32;
+# cmake/GeosGeode.cmake).  Their imports are resolved only when a kernel
+# loads them; test geode.hello does that for Hello.  Only errors count
+# here; the samples are old code with many harmless warnings.
 if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  include(${PROJECT_SOURCE_DIR}/cmake/GeosGeode.cmake)
   file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/goc_sdk.txt _samples REGEX "^[^#]")
-  set(_sdk_srcs)
+  set(_sdk_geodes)
   foreach(_s IN LISTS _samples)
     set(_dir ${PROJECT_SOURCE_DIR}/Appl/SDK_C/${_s})
     file(GLOB _gp ${_dir}/*.gp)
     file(GLOB _gocs ${_dir}/*.goc)
     list(GET _gp 0 _gp)
-    geos_goc(_c ${_gp} ${_gocs})
-    set_source_files_properties(${_c} PROPERTIES INCLUDE_DIRECTORIES ${_dir})
-    list(APPEND _sdk_srcs ${_c})
+    geos_geode(sdk_${_s} GP ${_gp} GOC ${_gocs} OPTIONS -w)
+    list(APPEND _sdk_geodes geode_sdk_${_s})
   endforeach()
-  add_library(goc_sdk OBJECT ${_sdk_srcs})
-  target_compile_definitions(goc_sdk PRIVATE GEOS_PORT32)
-  target_include_directories(goc_sdk PRIVATE
-    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
-  target_compile_options(goc_sdk PRIVATE -w)
+  add_custom_target(goc_sdk DEPENDS ${_sdk_geodes})
+
+  # a real geode loaded and checked: Hello (no kernel yet: dummy imports)
+  geos_embed(_hello_c ${sdk_Hello_GEO} hello_geode)
+  add_executable(test_geode_hello test_geode_hello.c geode_hello_check.c
+                 ${_hello_c})
+  add_dependencies(test_geode_hello geode_sdk_Hello)
+  target_link_libraries(test_geode_hello PRIVATE ghal)
+  set_source_files_properties(geode_hello_check.c PROPERTIES
+    COMPILE_DEFINITIONS GEOS_PORT32
+    INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/Port32/include;${PROJECT_SOURCE_DIR}/CInclude")
+  add_test(NAME geode.hello COMMAND test_geode_hello)
 endif()

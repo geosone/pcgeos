@@ -1,10 +1,16 @@
 # GeosGeode.cmake -- build geodes in the module format of the host.
 #
-#   geos_geode(<name> <source>... [INCLUDES dir...] [DEFINITIONS def...])
+#   geos_geode(<name> <source>... [GP <geode.gp> [GOC <file.goc>...]
+#              [REV <geode.rev>]] [INCLUDES dir...] [DEFINITIONS def...]
+#              [OPTIONS opt...])
 #
 # Builds <name>.geo in the current binary directory and the target
 # geode_<name>; the path of the file goes to the variable <name>_GEO in
-# the caller's scope.  The format is the host's own (Port32/GHAL-Concept.md
+# the caller's scope.  With GP it is a GEOS geode: the .goc files go
+# through goc -cg (GeosGoc.cmake) and Port32/tools/gpgeode.py writes the
+# GEOS data of the module (__geos_module, Port32/include/geosmod.h) from
+# the .gp file and the .rev file (default: <geode>.rev next to the .gp
+# file, if there is one).  The format is the host's own (Port32/GHAL-Concept.md
 # section 4.4, loaded by ghal_module):
 #
 #   linux (later gonware): ELF shared object, -shared -nostdlib -z now
@@ -31,9 +37,53 @@
 set(_geos_geode_cflags -ffreestanding -fno-stack-protector -fno-sanitize=all)
 
 function(geos_geode name)
-  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "" "INCLUDES;DEFINITIONS")
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "GP;REV"
+                        "GOC;INCLUDES;DEFINITIONS;OPTIONS")
   set(sources ${ARG_UNPARSED_ARGUMENTS})
   set(geo ${CMAKE_CURRENT_BINARY_DIR}/${name}.geo)
+  set(incs ${ARG_INCLUDES})
+  set(defs ${ARG_DEFINITIONS})
+  set(opts ${_geos_geode_cflags} ${ARG_OPTIONS})
+
+  if(ARG_GP)
+    include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
+    get_filename_component(gp ${ARG_GP} ABSOLUTE)
+    get_filename_component(gp_dir ${gp} DIRECTORY)
+    get_filename_component(geode ${gp} NAME_WE)
+    set(gocs)
+    foreach(g IN LISTS ARG_GOC)
+      get_filename_component(g ${g} ABSOLUTE)
+      list(APPEND gocs ${g})
+    endforeach()
+    geos_goc(wrappers ${gp} ${gocs} INCLUDES ${ARG_INCLUDES})
+    set(dir ${CMAKE_CURRENT_BINARY_DIR}/goc/${geode})
+    set(module_c ${dir}/${geode}_module.c)
+    set(rev ${ARG_REV})
+    if(NOT rev AND EXISTS ${gp_dir}/${geode}.rev)
+      set(rev ${gp_dir}/${geode}.rev)
+    endif()
+    set(rev_args)
+    if(rev)
+      set(rev_args --rev ${rev})
+    endif()
+    add_custom_command(OUTPUT ${module_c}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${dir}
+      COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/gpgeode.py
+              -o ${module_c} ${rev_args} --res ${geode}_res.h
+              --objs ${geode}_objs.h ${gp} ${gocs}
+      DEPENDS ${gp} ${gocs} ${rev} ${PROJECT_SOURCE_DIR}/Port32/tools/gpgeode.py
+              ${PROJECT_SOURCE_DIR}/Port32/tools/gpres.py
+      COMMENT "gpgeode ${geode}"
+      VERBATIM)
+    set_source_files_properties(${module_c} PROPERTIES
+      OBJECT_DEPENDS "${dir}/${geode}_res.h;${dir}/${geode}_objs.h")
+    list(APPEND sources ${wrappers} ${module_c})
+    # GEOS's own C library headers (CInclude/Ansi) before the host's:
+    # a geode imports the C functions from GEOS, not from the host
+    list(APPEND incs ${gp_dir} ${PROJECT_SOURCE_DIR}/Port32/include
+         ${PROJECT_SOURCE_DIR}/CInclude/Ansi ${PROJECT_SOURCE_DIR}/CInclude)
+    list(APPEND defs GEOS_PORT32)
+  endif()
 
   if(GEOS_HOST STREQUAL "dos32")
     if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
@@ -45,12 +95,17 @@ function(geos_geode name)
     execute_process(COMMAND ${CMAKE_C_COMPILER} -print-libgcc-file-name
                     OUTPUT_VARIABLE _libgcc OUTPUT_STRIP_TRAILING_WHITESPACE)
     add_library(geode_${name}_obj OBJECT ${sources})
-    target_compile_options(geode_${name}_obj PRIVATE ${_geos_geode_cflags})
-    target_include_directories(geode_${name}_obj PRIVATE ${ARG_INCLUDES})
-    target_compile_definitions(geode_${name}_obj PRIVATE ${ARG_DEFINITIONS})
+    target_compile_options(geode_${name}_obj PRIVATE ${opts})
+    target_include_directories(geode_${name}_obj PRIVATE ${incs})
+    target_compile_definitions(geode_${name}_obj PRIVATE ${defs})
+    # dxe3gen writes dxe_tmp.* into the current directory: one directory
+    # per geode, so parallel builds do not collide
+    set(work ${CMAKE_CURRENT_BINARY_DIR}/dxe3gen/${name})
+    file(MAKE_DIRECTORY ${work})
     add_custom_command(OUTPUT ${geo}
       COMMAND ${GEOS_DXE3GEN} -U -o ${geo} $<TARGET_OBJECTS:geode_${name}_obj>
               ${_libgcc}
+      WORKING_DIRECTORY ${work}
       DEPENDS $<TARGET_OBJECTS:geode_${name}_obj>
       COMMAND_EXPAND_LISTS
       COMMENT "dxe3gen ${name}.geo"
@@ -62,9 +117,9 @@ function(geos_geode name)
       PREFIX "" SUFFIX ".geo" OUTPUT_NAME ${name}
       LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
       POSITION_INDEPENDENT_CODE ON)
-    target_compile_options(geode_${name} PRIVATE ${_geos_geode_cflags})
-    target_include_directories(geode_${name} PRIVATE ${ARG_INCLUDES})
-    target_compile_definitions(geode_${name} PRIVATE ${ARG_DEFINITIONS})
+    target_compile_options(geode_${name} PRIVATE ${opts})
+    target_include_directories(geode_${name} PRIVATE ${incs})
+    target_compile_definitions(geode_${name} PRIVATE ${defs})
     target_link_options(geode_${name} PRIVATE -nostdlib -fno-sanitize=all
       -Wl,-z,now -Wl,--hash-style=both)
     target_link_libraries(geode_${name} PRIVATE gcc)

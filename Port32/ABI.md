@@ -104,9 +104,13 @@ compiles 44 of the 55 SDK_C samples (`Port32/Tests/goc_sdk.txt`). In the
 other samples, the application code needs porting: `NULL` used as a handle,
 `PtrToSegment`, inline asm, and static optr tables in code.
 
-The ANSI headers forward to the host C library where nothing GEOS-specific
-is lost: `ctype.h`, and `size_t` in `string.h`. The GEOS `stdio.h` works on
-GEOS files, so it stays GEOS (open).
+A geode uses the C library of GEOS, not the host's: `geos_geode()` puts
+`CInclude/Ansi` before the host headers, and the C functions are imports
+like any other routine. `Ansi/ctype.h` declares the standard prototypes
+under `GEOS_PORT32` (`int isalpha(int)`, ...), so it agrees with the
+compiler's built-ins and with a host `<ctype.h>`; `string.h` takes the
+host's `size_t`. The GEOS `stdio.h` works on GEOS files, so it stays GEOS
+(open).
 
 ## 5. Sending messages
 
@@ -230,15 +234,45 @@ is now a geode of two files: `gocres2.goc` uses objects of `gocres.goc` in
 an object tree, instance data, chunk data, a static table, `OptrToChunk`
 in static data, code and `@send`.
 
-## 7. Open
+## 7. Geodes as modules
 
-1. **Geode format**: the module format of the host (dos32: DXE3, linux and
-   gonware: ELF shared object) is decided and loaded by `ghal_module`
-   (`GHAL-Concept.md` §4.4). Open: the `.gp` tables as data in the module
-   (type, tokens, protocol, libraries, exported entries in `.gp` order,
-   resource table pointing to the `GocResource` descriptors) and how the
-   kernel's import function resolves imports of library geodes (by name
-   with a protocol check per library).
+A geode is a module in the host's format (`GHAL-Concept.md` §4.4: DXE3 on
+dos32, ELF shared object on linux and gonware), loaded by `ghal_module`.
+What glue put into the geode header from the `.gp` file is the exported
+object `__geos_module` (`Port32/include/geosmod.h`), written by
+`Port32/tools/gpgeode.py`:
+
+- permanent name and extension (space padded), long name, token,
+  attributes (`type`, computed as glue does: without `single` the geode
+  is multi-launchable), protocol from the `.rev` file, `heapspace` (in
+  paragraphs, `13k` = 832), `stack`, process class, `appobj` (an
+  unrelocated optr, §4), `entry`;
+- the libraries (`library x [noload [fixed]]`);
+- the exported entries in `.gp` order with their names (`export x as y`,
+  `publish`, `skip n`, `skip until n` as empty slots), so entry numbers
+  stay those of the `.gp` file;
+- the resource table indexed by resource number (`gpres.py`): the `RESF_*`
+  flags of the `resource` lines exactly as glue computes them, and for
+  LMem resources made by goc a pointer to their `GocResource`;
+- `GM_resourceHandles`, the geode's `__goc_resource_handles[]`, which the
+  kernel fills as it loads the resources.
+
+`geos_geode(<name> GP <x.gp> GOC <files>)` (`cmake/GeosGeode.cmake`) builds
+such a geode. All 45 samples of `goc_sdk` are built this way on every
+host; their imports are GEOS routines and classes only (the C library
+functions are GEOS's, see §4). ctest `geode.hello` loads the Hello sample
+(no kernel yet: every import gets a dummy address) and checks its
+`__geos_module` against `hello.gp`, down to the class pointer of the
+application object, which must be the import `GenApplicationClass`.
+
+## 8. Open
+
+1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`). The
+   module format is decided (`GHAL-Concept.md` §4.4) and the `.gp` data is
+   in the module (§7). Open: resolving imports by name over the
+   geode's libraries with a protocol check, and the protocol a library
+   needs (glue took it from the library's `.ldf`; `GML_proto*` is 0.0,
+   "any", for now).
 2. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.

@@ -1,6 +1,7 @@
 # CInclude headers that compile under GEOS_PORT32 (geos.h first) without
 # warnings on 32- and 64-bit hosts.  Built by the target cinclude_port32;
 # add a header here once it is clean.
+Ansi/ctype.h
 awatcher.h
 cell.h
 char.h
@@ -15,8 +16,8 @@ drive.h
 driver.h
 ec.h
 extgraph.h
-fileEnum.h
 file.h
+fileEnum.h
 float.h
 font.h
 fontID.h
@@ -59,8 +60,8 @@ sem.h
 serialDr.h
 sllang.h
 sockmisc.h
-soundFmt.h
 sound.h
+soundFmt.h
 sstor.h
 stdapp.h
 stylesh.h

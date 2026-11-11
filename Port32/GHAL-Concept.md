@@ -153,7 +153,7 @@ Today the GEOS kernel loads its `.geo` files **itself** (own format, own relocat
 - `cmake/GeosGeode.cmake` (`geos_geode()`) builds a geode in the host's format. A geode has no host C library and no sanitizer or stack-protector runtime; libgcc is linked in. What libgcc itself imports (DXE3 with unwind tables: `__register_frame_info`/`__deregister_frame_info`; ARM: `raise` for division by zero) is provided by the kernel.
 - Names are C names on every host (DJGPP's leading underscore is dropped by the loader).
 - `ghal.module` loads a test geode on all five builds (linux amd64, i686, arm64, armhf under qemu-user, dos32 on DOS in QEMU): imports by call and by data reference, pointers in data, function pointers, bss, initializers/finalizers, two instances, unresolved imports and broken images.
-- Still open: the GEOS metadata of a geode (the `.gp` tables: type, tokens, protocol, libraries, exported entries, resource table) as data inside the module, and `GeodeLoad` of the C kernel on top of `ghal_module` (`Port32/ABI.md` §7.1).
+- The GEOS data of a geode (the `.gp` tables: name, token, attributes, protocol, libraries, exported entries, resource table) is the exported object `__geos_module` in the module (`Port32/ABI.md` §7, `Port32/tools/gpgeode.py`). Still open: `GeodeLoad` of the C kernel on top of `ghal_module` (`Port32/ABI.md` §8.1).
 - On Linux additionally a debug mode via `dlopen`, so gdb sees the symbols (or registration through the gdb JIT interface).
 - The kernel and the GHAL core are built together as a normal host program: DOS (DJGPP COFF with CWSDPMI), ELF program or `.exe`.
 
