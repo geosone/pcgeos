@@ -1057,7 +1057,7 @@ on the way to a FAT disk.
   - `FEA_NAME` is changed by `FileRename` only
     (`ERROR_ATTR_CANNOT_BE_SET`). `VMOpen` sets `GFT_VM` and the flags,
     as `VMCreateFileHeader` did.
-- **Host names** (`Port32/hostfs`). Two layouts:
+- **Host names** (`Port32/hostfs`). Three layouts:
   - *DOS names* (dos32; `HostFSSetDosNames`): as the DOS file system
     driver (`dosVirtual.asm`, `dosPath.asm`). A GEOS file gets a
     generated 8.3 name: the first eight characters, illegal ones as `_`,
@@ -1066,10 +1066,16 @@ on the way to a FAT disk.
     its GEOS name (type `GFT_DIRECTORY`). A native file needs a DOS name
     (`ERROR_INVALID_LONGNAME`). Renaming within the directory changes
     only the name in the header.
+  - *DOS names with long file names* (dos32 when DOS has the LFN API:
+    Windows 9x, DOSLFN; detected at the first use), as the MSLF driver
+    of DOS16 GEOS. GEOS files still get generated 8.3 names. Native
+    files and directories may keep a long DOS name (up to 32
+    characters, none of `" * / : < > ? \ |`). A directory with such a
+    name needs no `@DIRNAME.000`.
   - *Long names* (the other hosts): the GEOS name is the host name.
   - **Lookup**, on every host, for each part of a path:
-    1. the name itself (with DOS names only if it is a DOS name, since
-       DOS would cut it to 8.3);
+    1. the name itself (with DOS names without LFN only if it is a DOS
+       name, since DOS would cut it to 8.3);
     2. the name in any case;
     3. the GEOS name in the headers of the files with likely
        extensions (`.000`–`.999`, `.GEO`, `.VM`, `.DB`, `.STA`, `.BIT`)
@@ -1077,15 +1083,17 @@ on the way to a FAT disk.
 
     So either layout can be read on any host. A DOS16 installation
     works on Linux as it is.
-- **Moving trees.** `Port32/tools/geostree.py todos|tolong SRC DST`
-  copies a tree into the other layout (ctest `tools.geostree`).
-- **dos32** runs DJGPP without long file names and keeps the case of the
-  DOS names (`_crt0_startup_flags`). DOS updates the directory entry of
+- **Moving trees.** `Port32/tools/geostree.py todos [--lfn]|tolong SRC
+  DST` copies a tree into the other layout (ctest `tools.geostree`).
+- **dos32** uses long file names where DOS has them (DJGPP `_use_lfn`;
+  Open Watcom's C library has no LFN calls, so it uses 8.3 names) and
+  keeps the case of 8.3 names (`_crt0_startup_flags`). DOS updates the directory entry of
   an open file only on a commit, so a new GEOS file is committed after
   its header is written; otherwise it could not be found by its GEOS
   name while open.
 - ctest `kernel.file.geos` covers all of this on every host, DOS
-  included (DOS names are tested on Linux too).
+  included (DOS names, with and without LFN, are tested on Linux too;
+  the QEMU DOS has no LFN).
 
 Not yet: links in `@DIRNAME.000`; the DOS code page for characters
 above 0x7f in names; `FEA_GEODE_ATTR`, `FEA_CUSTOM` and the

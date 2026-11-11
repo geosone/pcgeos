@@ -16,19 +16,31 @@
 #define GFT_DATA		3
 #define GFT_DIRECTORY		4
 
-#ifdef GEOS_HOST_DOS32
-static int dosNames = 1;
-#else
-static int dosNames = 0;
+#if defined(GEOS_HOST_DOS32) && defined(__DJGPP__)
+#include <fcntl.h>
 #endif
 
-void HostFSSetDosNames(int on)
+/* -1: not known yet (dos32 asks DOS for LFN on first use) */
+#ifdef GEOS_HOST_DOS32
+static int dosNames = -1;
+#else
+static int dosNames = HOSTFS_NAMES_LONG;
+#endif
+
+void HostFSSetDosNames(int mode)
 {
-    dosNames = on;
+    dosNames = mode;
 }
 
 int HostFSDosNames(void)
 {
+    if (dosNames < 0) {
+#if defined(GEOS_HOST_DOS32) && defined(__DJGPP__)
+        dosNames = _use_lfn(NULL) ? HOSTFS_NAMES_DOS_LFN : HOSTFS_NAMES_DOS;
+#else
+        dosNames = HOSTFS_NAMES_DOS;    /* Open Watcom: no LFN calls */
+#endif
+    }
     return dosNames;
 }
 
@@ -168,6 +180,22 @@ static int DosForm(const char *name, char *out)
     return 1;
 }
 
+/* a long DOS name (DOSVirtMapCheckComponentIsValidDosLongName):
+ * no control characters, none of the characters " * / : < > ? \\ |,
+ * not ending in a dot or a space */
+static int DosLongForm(const char *name)
+{
+    size_t n = strlen(name), i;
+
+    if (!n || n > GEOS_LONGNAME_LENGTH || name[n - 1] == '.' ||
+        name[n - 1] == ' ')
+        return 0;
+    for (i = 0; i < n; i++)
+        if ((unsigned char)name[i] < ' ' || strchr("\"*/:<>?\\|", name[i]))
+            return 0;
+    return 1;
+}
+
 static int ValidGeosName(const char *name)
 {
     size_t n = strlen(name);
@@ -214,11 +242,22 @@ ghal_status HostFSNewName(const char *dir, const char *name, int kind,
 {
     char dos[13];
 
+    int mode = HostFSDosNames();
+
     if (needsDirName)
         *needsDirName = 0;
     if (!ValidGeosName(name))
         return GHAL_ERR_INVAL;
-    if (!dosNames) {
+    /* with LFN as MSLF: native files and directories keep a long DOS
+     * name, GEOS files get generated names all the same */
+    if (mode == HOSTFS_NAMES_DOS_LFN && kind != HOSTFS_GEOS &&
+        DosLongForm(name)) {
+        if (strlen(name) >= size)
+            return GHAL_ERR_INVAL;
+        strcpy(out, name);
+        return GHAL_OK;
+    }
+    if (mode == HOSTFS_NAMES_LONG) {
         if (strlen(name) >= size)
             return GHAL_ERR_INVAL;
         strcpy(out, name);
@@ -324,8 +363,10 @@ ghal_status HostFSLookup(const char *dir, const char *name, char *out,
 
     if (!*name || strlen(name) >= size)
         return GHAL_ERR_INVAL;
-    /* DOS cuts long names to 8.3: only a DOS name is tried as it is */
-    if ((!dosNames || DosForm(name, entry)) && Exists(dir, name)) {
+    /* DOS without LFN cuts long names to 8.3: only a DOS name is tried
+     * as it is */
+    if ((HostFSDosNames() != HOSTFS_NAMES_DOS || DosForm(name, entry)) &&
+        Exists(dir, name)) {
         strcpy(out, name);
         return GHAL_OK;
     }

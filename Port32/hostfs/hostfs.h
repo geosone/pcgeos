@@ -12,6 +12,10 @@
  *    eight characters of its GEOS name made legal, extension .000, .001
  *    ...), a directory whose name is no DOS name gets one too and a
  *    @DIRNAME.000 file with its GEOS name (dosVirtual.asm, dosPath.asm);
+ *  - DOS names with long file names (dos32 where DOS has the LFN API:
+ *    Windows 9x, DOSLFN), as the MSLF driver of DOS16 GEOS: GEOS files
+ *    still get generated 8.3 names, but native files and directories may
+ *    have long DOS names, and a directory with one needs no @DIRNAME.000;
  *  - long names (other hosts): the GEOS name is the host name.
  *
  * Looking a GEOS name up tries the host name, then the name in any case,
@@ -47,9 +51,12 @@
 #define HOSTFS_DIRNAME_FILE	"@DIRNAME.000"
 #define HOSTFS_NAME_MAX		256	/* host names, with the NUL */
 
-/* DOS names (default on dos32) or long names */
-void        HostFSSetDosNames(int on);
-int         HostFSDosNames(void);
+/* the layout of the host names */
+#define HOSTFS_NAMES_LONG       0       /* other hosts */
+#define HOSTFS_NAMES_DOS        1       /* dos32 without LFN */
+#define HOSTFS_NAMES_DOS_LFN    2       /* dos32 with LFN (MSLF) */
+void        HostFSSetDosNames(int mode);
+int         HostFSDosNames(void);       /* the mode; 0 for long names */
 char        HostFSSep(void);	/* the host's path separator */
 
 int         HostFSIsHeader(const unsigned char *hdr);

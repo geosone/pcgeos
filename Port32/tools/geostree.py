@@ -16,12 +16,15 @@ names in their headers), so this is needed only to put a tree on a DOS
 disk (todos) or to give the files of a DOS tree their long names on the
 host (tolong):
 
-  geostree.py todos  SRC DST     long (or mixed) -> dos
-  geostree.py tolong SRC DST     dos (or mixed)  -> long
+  geostree.py todos [--lfn] SRC DST   long (or mixed) -> dos
+  geostree.py tolong SRC DST         dos (or mixed)  -> long
   geostree.py selftest
 
 DST must not exist.  Native files (no header) keep their names; for todos
-they must be DOS names already.  Dates and attributes are kept.
+they must be DOS names already.  --lfn is for a DOS with long file names
+(Windows 9x, DOSLFN; the MSLF driver of DOS16 GEOS): GEOS files still get
+8.3 names, but native files and directories may keep long DOS names.
+Dates and attributes are kept.
 """
 import os
 import shutil
@@ -35,6 +38,7 @@ TYPE_OFF = 40
 GFT_DIRECTORY = 4
 DIRNAME = "@DIRNAME.000"
 BAD_DOS = set('"*+,./:;<=>?[\\]|')
+BAD_DOS_LONG = set('"*/:<>?\\|')
 
 
 class TreeError(Exception):
@@ -79,6 +83,16 @@ def dos_form(name):
     return name.upper()
 
 
+def dos_long_form(name):
+    """a long DOS name as it is, else None"""
+    if not name or len(name) > 32 or name[-1] in ". ":
+        return None
+    for c in name:
+        if ord(c) < 32 or c in BAD_DOS_LONG:
+            return None
+    return name
+
+
 def generate(name, taken):
     """DOSVirtGenerateDosName"""
     base = "".join("_" if (ord(c) <= 32 or ord(c) >= 0x7f or c in BAD_DOS)
@@ -121,39 +135,42 @@ def extra_dirname(src):
     return None
 
 
-def copy_todos(src, dst, report):
+def copy_todos(src, dst, report, lfn=False):
     os.mkdir(dst)
     taken = set()
     plan = []
-    # names that are DOS names already first, so they keep them
+    # names that stay first, so they keep them: native files, and
+    # directories without @DIRNAME.000 named as on DOS
     for host, name, isdir, geos in entries(src):
-        form = dos_form(host)
-        if isdir and form and form == name.upper() and not geos:
+        form = dos_form(host) or (lfn and dos_long_form(host)) or None
+        if isdir and not geos and form and form.upper() == host.upper():
             plan.append((host, name, isdir, geos, form))
-            taken.add(form)
-        elif not geos and not isdir:
+            taken.add(form.upper())
+        elif not isdir and not geos:
             if not form:
                 raise TreeError("native file %s has no DOS name"
                                 % os.path.join(src, host))
-            if form in taken:
+            if form.upper() in taken:
                 raise TreeError("two files named %s in %s" % (form, src))
             plan.append((host, name, isdir, geos, form))
-            taken.add(form)
+            taken.add(form.upper())
         else:
             plan.append((host, name, isdir, geos, None))
     for i, (host, name, isdir, geos, form) in enumerate(plan):
         if form is None:
-            if isdir and dos_form(name) == name:
+            if isdir and (dos_form(name) == name or
+                          (lfn and dos_long_form(name) == name and
+                           name.upper() not in taken)):
                 form = name     # a DOS name exactly: no @DIRNAME.000
             else:
                 form = generate(name, taken)
-            taken.add(form)
+            taken.add(form.upper())
             plan[i] = (host, name, isdir, geos, form)
     for host, name, isdir, geos, form in plan:
         s = os.path.join(src, host)
         d = os.path.join(dst, form)
         if isdir:
-            copy_todos(s, d, report)
+            copy_todos(s, d, report, lfn)
             keep = extra_dirname(s)
             if keep:
                 shutil.copy2(keep, os.path.join(d, DIRNAME))
@@ -231,7 +248,7 @@ def selftest():
                 with open(os.path.join(root, fn), "rb") as x, \
                         open(os.path.join(other, fn), "rb") as y:
                     assert x.read() == y.read(), fn
-        # a native file without a DOS name cannot go to DOS
+        # a native file without a DOS name cannot go to DOS ...
         with open(os.path.join(a, "long native.txt"), "wb") as f:
             f.write(b"n")
         try:
@@ -239,6 +256,17 @@ def selftest():
             raise AssertionError("long native name taken")
         except TreeError:
             pass
+        # ... but to a DOS with long file names, as directories do
+        lf = os.path.join(tmp, "l")
+        copy_todos(a, lf, lambda m: None, lfn=True)
+        assert set(os.listdir(lf)) == {
+            "LONG_DOC.000", "LONG_DOC.001", "My Folder", "NATIVE.TXT",
+            "PLAIN", "long native.txt"}, os.listdir(lf)
+        assert set(os.listdir(os.path.join(lf, "My Folder"))) == \
+            {"Inner Dir", "X_VM.000"}
+        b2 = os.path.join(tmp, "b2")
+        copy_tolong(lf, b2, lambda m: None)
+        assert set(os.listdir(b2)) == set(os.listdir(a))
     print("ok")
 
 
@@ -246,7 +274,11 @@ def main(argv):
     if len(argv) == 2 and argv[1] == "selftest":
         selftest()
         return 0
-    if len(argv) != 4 or argv[1] not in ("todos", "tolong"):
+    lfn = "--lfn" in argv[2:3]
+    if lfn:
+        argv = argv[:2] + argv[3:]
+    if len(argv) != 4 or argv[1] not in ("todos", "tolong") or \
+            (lfn and argv[1] != "todos"):
         sys.stderr.write(__doc__)
         return 2
     src, dst = argv[2], argv[3]
@@ -254,7 +286,10 @@ def main(argv):
         sys.stderr.write("geostree: %s exists\n" % dst)
         return 2
     try:
-        (copy_todos if argv[1] == "todos" else copy_tolong)(src, dst, print)
+        if argv[1] == "todos":
+            copy_todos(src, dst, print, lfn)
+        else:
+            copy_tolong(src, dst, print)
     except TreeError as e:
         if os.path.exists(dst):
             shutil.rmtree(dst)

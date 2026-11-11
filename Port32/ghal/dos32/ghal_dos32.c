@@ -53,12 +53,11 @@
 #ifdef __DJGPP__
 /* GEOS is the whole system: keep all its memory locked (interrupt
  * handlers and what they call must never be paged out) and the data
- * segment base fixed (the IRQ0 handler runs with our DS).  Names are
- * 8.3 even where DOS has long names (Windows, DOSLFN), as for DOS16
- * GEOS: Port32/hostfs maps the GEOS names.  readdir gives them as DOS
+ * segment base fixed (the IRQ0 handler runs with our DS).  Long file
+ * names are used where DOS has them (Windows 9x, DOSLFN), as by the MSLF
+ * driver of DOS16 GEOS (Port32/hostfs).  readdir gives 8.3 names as DOS
  * has them (upper case), not in lower case. */
 int _crt0_startup_flags = _CRT0_FLAG_LOCK_MEMORY | _CRT0_FLAG_NONMOVE_SBRK |
-                          _CRT0_FLAG_NO_LFN |
                           _CRT0_FLAG_PRESERVE_FILENAME_CASE;
 
 #define outp(port, v) outportb((port), (unsigned char)(v))

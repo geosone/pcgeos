@@ -8,8 +8,8 @@
  * positions, truncation), native files, the attributes by handle, by
  * path and FEA_MULTIPLE with their errors, a VM file of type GFT_VM,
  * DOS names (generated 8.3 names, @DIRNAME.000, renaming, deleting a
- * directory), and a tree of one kind read with the names of the other
- * (not on dos32, which has DOS names only).
+ * directory), and, not on dos32 (whose mode depends on DOS), a tree of
+ * one kind read with the names of the other and DOS names with LFN.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -259,7 +259,7 @@ static void DosNames(void)
     char buf[64];
     int was = HostFSDosNames();
 
-    HostFSSetDosNames(1);
+    HostFSSetDosNames(HOSTFS_NAMES_DOS);
     f = FileCreate("Long Document Name", FILE_CREATE_ONLY | FILE_ACCESS_RW,
 		   0);
     CHECK(f && FileWrite(f, "1", 1, FALSE) == 1 && FileClose(f, FALSE) == 0);
@@ -317,7 +317,7 @@ static void DosNames(void)
     CHECK(FileDeleteDir("Plain Folder") == 0);
 #ifndef GEOS_HOST_DOS32
     /* the same tree with long names: found by the headers */
-    HostFSSetDosNames(0);
+    HostFSSetDosNames(HOSTFS_NAMES_LONG);
     f = FileOpen("Long Document Name", FILE_ACCESS_R);
     CHECK(f && FileRead(f, buf, 1, FALSE) == 1 && buf[0] == '1');
     CHECK(f && FileClose(f, FALSE) == 0);
@@ -328,12 +328,32 @@ static void DosNames(void)
     CHECK(FileRename("A Long Name", "Another Name") == 0 &&
 	  Exists(H("Another Name")) && !Exists(H("A Long Name")));
     /* and those with DOS names again */
-    HostFSSetDosNames(1);
+    HostFSSetDosNames(HOSTFS_NAMES_DOS);
     f = FileOpen("Another Name", FILE_ACCESS_R);
     CHECK(f && FileClose(f, FALSE) == 0);
     CHECK(FileSetCurrentPath(0, "Long Folder") != 0 &&
 	  FileSetCurrentPath(0, "..") != 0);
     CHECK(FileDelete("Another Name") == 0 && FileDeleteDir("Long Folder") == 0);
+
+    /* DOS with long file names (the MSLF driver): GEOS files still get
+     * 8.3 names, native files and directories keep long DOS names */
+    HostFSSetDosNames(HOSTFS_NAMES_DOS_LFN);
+    f = FileCreate("Lfn Document", FILE_CREATE_ONLY | FILE_ACCESS_RW, 0);
+    CHECK(f && FileClose(f, FALSE) == 0 && Exists(H("LFN_DOCU.000")));
+    f = FileCreate("Long Native.txt", FCF_NATIVE | FILE_CREATE_ONLY |
+		   FILE_ACCESS_RW, 0);
+    CHECK(f && FileClose(f, FALSE) == 0 && Exists(H("Long Native.txt")));
+    CHECK(FileCreate("Bad|Native", FCF_NATIVE | FILE_CREATE_ONLY |
+		     FILE_ACCESS_RW, 0) == 0 &&
+	  ThreadGetError() == ERROR_INVALID_LONGNAME);
+    CHECK(FileCreateDir("Lfn Folder") == 0 && Exists(H("Lfn Folder")) &&
+	  !Exists(H("Lfn Folder/@DIRNAME.000")));
+    CHECK(FileCreateDir("Odd|Folder") == 0 && Exists(H("ODD_FOLD.000")) &&
+	  Exists(H("ODD_FOLD.000/@DIRNAME.000")));
+    CHECK(FileOpen("Lfn Document", FILE_ACCESS_R) != 0);
+    CHECK(FileDelete("Lfn Document") == 0 &&
+	  FileDelete("Long Native.txt") == 0 &&
+	  FileDeleteDir("Lfn Folder") == 0 && FileDeleteDir("Odd|Folder") == 0);
 #endif
     HostFSSetDosNames(was);
     CHECK(FileDelete("Long Document Name") == 0 &&
