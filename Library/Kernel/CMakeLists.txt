@@ -28,6 +28,8 @@
 #                          CObjSendToChildren of Object/objectC.asm
 #   Object/objectLinkable.c <- ObjLinkFindParent of objectLinkable.asm
 #   Object/objectShutdown.c <- detach and quit of objectShutdown.asm
+#   Object/objectDup.c <- duplicating resources, saved blocks of
+#                          objectDup.asm
 add_library(geos_kernel_objs OBJECT
   Sys/sysError.c
   Heap/heapHandle.c
@@ -54,7 +56,8 @@ add_library(geos_kernel_objs OBJECT
   Object/objectReloc.c
   Object/objectComposite.c
   Object/objectLinkable.c
-  Object/objectShutdown.c)
+  Object/objectShutdown.c
+  Object/objectDup.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

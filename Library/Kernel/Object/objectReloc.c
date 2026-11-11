@@ -29,20 +29,40 @@
 #define FRAME_UNRELOC	0x8000u
 #define VORT_RELOC_TYPE	0x0003u		/* VarObjRelocation: type bits */
 
-/* relocate or unrelocate a handle of an object in `block' */
+/* the resource number an object block was built from (OLMBH_resource,
+ * goc -cg), 0 if none or not an object block */
+static word OwnResource(MemHandle block)
+{
+    const ObjLMemBlockHeader *h = MemDeref(block);
+
+    if (!h || h->OLMBH_header.LMBH_lmemType != LMEM_TYPE_OBJ_BLOCK)
+	return 0;
+    return h->OLMBH_resource;
+}
+
+/*
+ * relocate or unrelocate a handle of an object in `block'.  The resource
+ * the block was built from is the block itself: so a duplicate's
+ * references within the template lead to the duplicate (glue's
+ * ORS_CURRENT_BLOCK).
+ */
 static Boolean DoHandle(MemHandle block, const Handle *src, Handle *dst,
 			int unreloc)
 {
     GeodeHandle owner = (GeodeHandle) MemGetInfo(block,
 						 MGIT_OWNER_OR_VM_FILE_HANDLE);
     Handle h = *src;
+    word own = OwnResource(block);
 
     if (!unreloc) {
 	if (h & GOCR_UNRELOCATED) {
-	    h = GeodeResourceHandle(owner, (word) h);
+	    h = (own && (word) h == own) ? block
+					 : GeodeResourceHandle(owner, (word) h);
 	    if (!h)
 		return TRUE;
 	}
+    } else if (h == block && own) {
+	h = GOCR_UNRELOCATED | own;
     } else if (h && !(h & GOCR_UNRELOCATED)) {
 	sdword res = GeodeHandleToResource(owner, h);
 	if (res < 0)

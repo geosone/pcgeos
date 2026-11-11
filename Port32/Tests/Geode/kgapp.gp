@@ -15,4 +15,5 @@ library geos
 library kglib
 resource KGObjects object
 resource KGData lmem
+resource KGTemplate object
 export kgAppState

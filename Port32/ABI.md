@@ -372,6 +372,10 @@ resource. The test checks:
 - the optrs in an LMem data resource (an optr chunk, a structure with
   an optr behind a word, a chunk array of optrs) and in a static GCN
   list are relocated (and the test fails without the shadows);
+- `ObjDuplicateResource` of a template, which holds references within
+  itself, to another resource and in chunk data: with the owner and
+  thread given, and taken from the source; also the saved-block list
+  and `ObjFreeDuplicate` (the test fails without `OLMBH_resource`);
 - `MSG_META_DETACH`: the process frees itself, then `GeodeFreeLibrary`
   frees the library;
 - at the end, not a single handle is left.
@@ -870,12 +874,40 @@ ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
 - goc's numbers for the new messages and vardata tags, and the sizes of
   the GCN and detach structures.
 
+**Duplicating resources** (`objectDup.c`).
+
+- `ObjDuplicateResource` builds the copy from the module data of the
+  resource: the `GocResource` of its owner, as the asm kernel read the
+  geode file (`GeodeDuplicateResource` does the same without
+  relocating). The source block itself is not used, so it may be in
+  memory.
+- The copy is relocated like a resource when it is loaded (chunk
+  shadows, then the objects). An object block knows the resource it was
+  built from: `OLMBH_resource` is a Port32 field of
+  `ObjLMemBlockHeader` that goc fills in. An optr to that resource is
+  the block itself. This makes references within a template lead to
+  the copy, as glue's `ORS_CURRENT_BLOCK` did.
+- Other resources are taken from the template's owner, unless the new
+  owner runs the same geode (it has the same permanent name). In that
+  case they are taken from the new owner.
+- The owner and the thread can be given, or taken from the running
+  thread (0) or from the source (-1). A source run by its process's
+  first thread gives the new owner's first thread.
+- The copy gets `LMF_DUPLICATED` and loses `LMF_IN_RESOURCE`.
+- **The saved-block list.** A copy of a detachable resource, and a block
+  given to `ObjSaveBlock`, goes onto its owner's saved-block list. Each
+  entry is a `SIG_SAVED_BLOCK` handle: `HE_otherInfo` is the block,
+  `HE_size` the VM ID and `HE_next` the next entry. The list starts at
+  `GeodeCore.GC_savedBlocks`.
+- `ObjFreeDuplicate` takes the block off the list and frees it. When a
+  geode is freed, its entries are freed as well.
+
 Not yet:
 
-- Duplicating resources (`objectDup.asm`) and saving to state
-  (`objectState.asm`, with VMem). optrs in chunks that are not objects
-  are relocated when a resource is loaded (shadows, section 4). They are
-  not yet unrelocated.
+- Saving to state (`objectState.asm`, with VMem): the VM blocks of the
+  saved blocks, and unrelocating the optrs in chunks that are not
+  objects. Those optrs are relocated when a resource is loaded or
+  duplicated (shadows, section 4).
 
 ## 14. Open
 

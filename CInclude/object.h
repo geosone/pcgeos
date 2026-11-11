@@ -67,6 +67,12 @@ typedef struct {
     word		OLMBH_interactibleCount;
     optr		OLMBH_output;
     word		OLMBH_resourceSize;
+#ifdef GEOS_PORT32
+    word		OLMBH_resource;	/* the resource number it was built from
+				 * (goc -cg), 0 if none: an optr to that
+				 * resource is the block itself, also in a
+				 * duplicate (ORS_CURRENT_BLOCK of glue) */
+#endif
 } ObjLMemBlockHeader;
 
 /* Flags kept for each chunk in an object block */

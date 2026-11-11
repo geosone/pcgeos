@@ -146,7 +146,7 @@ typedef struct { void *cls; word a; optr link; } TestObj;
 static ObjLMemBlockHeader resHeader = {
     {0, (word) GOCR_LMEM_HANDLES(ObjLMemBlockHeader),
      LMF_HAS_FLAGS | LMF_IN_RESOURCE, LMEM_TYPE_OBJ_BLOCK, 0, 4, 0, 0},
-    0, 0, 0, 0};
+    0, 0, 0, 0, 3};
 static byte resFlags[] = {OCF_IGNORE_DIRTY, OCF_IN_RESOURCE | OCF_IS_OBJECT,
 			  OCF_IN_RESOURCE, OCF_IN_RESOURCE, 0, 0, 0};
 static TestObj resObj = {&resHeader, 0x1234,

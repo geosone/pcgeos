@@ -321,22 +321,50 @@ static int OwnedHandle(Handle h, HandleEntry *he, void *ctx)
     GeodeHandle gh = *(GeodeHandle *) ctx;
 
     if (he->HE_owner == gh && h != gh &&
-	(he->HE_type == HT_MEM || he->HE_type == SIG_QUEUE))
+	(he->HE_type == HT_MEM || he->HE_type == SIG_QUEUE ||
+	 he->HE_type == SIG_SAVED_BLOCK))
 	return (int) h;
     return 0;
 }
 
-/* the blocks and queues the geode owns (not its core block) */
+/* the blocks, queues and saved-block entries the geode owns (not its
+ * core block) */
 static void FreeOwned(GeodeHandle gh)
 {
     Handle h;
 
+    CORE(gh)->GC_savedBlocks = 0;
     while ((h = (Handle) HandleEnum(OwnedHandle, &gh)) != 0) {
-	if (HandleEntryOf(h)->HE_type == SIG_QUEUE)
+	switch (HandleEntryOf(h)->HE_type) {
+	case SIG_QUEUE:
 	    GeodeFreeQueue(h);
-	else
+	    break;
+	case SIG_SAVED_BLOCK:
+	    HandleFree(h);
+	    break;
+	default:
 	    MemFree(h);
+	}
     }
+}
+
+const GocResource *GeodeResourceImage(GeodeHandle gh, word res, word *resf)
+{
+    const GocResource *r = NULL;
+    const GeosModuleInfo *info;
+    GeodeCore *c;
+
+    GeodeLock();
+    c = GeodeCoreOf(gh);
+    if (c) {
+	info = INFO(c);
+	if (res >= 2 && res < info->GM_resourceCount) {
+	    r = info->GM_resources[res].GMR_resource;
+	    *resf = info->GM_resources[res].GMR_flags;
+	}
+    }
+    GeodeUnlock();
+    return r;
 }
 
 static void Unlink(GeodeHandle gh)

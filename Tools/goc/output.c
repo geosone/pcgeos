@@ -3042,13 +3042,16 @@ OutputResourceTablesGcc(Symbol *resource, int flagsChunk,
 	   "LMEM_TYPE_OBJ_BLOCK" : "LMEM_TYPE_GENERAL",
 	   roundedNumChunks);
     if (resource->flags & SYM_OBJECT_BLOCK) {
+	/* OLMBH_resource: the resource number (Port32) */
 	if (resource->data.symResource.resourceOutput != NullSymbol) {
-	    Output(", 0, 0, GOCR_%sSOPTR(%s), 0}",
+	    Output(", 0, 0, GOCR_%sSOPTR(%s), 0, ",
 		   GccXPrefix(resource->data.symResource.resourceOutput->name),
 		   resource->data.symResource.resourceOutput->name);
 	} else {
-	    Output(", 0, 0, 0, 0}");
+	    Output(", 0, 0, 0, 0, ");
 	}
+	OutputResourceNumber(resource);
+	Output("}");
     }
     if (resource->data.symResource.header_initializer != NULL) {
 	Output(", %s}", resource->data.symResource.header_initializer);

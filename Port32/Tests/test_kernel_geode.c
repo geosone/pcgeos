@@ -17,6 +17,9 @@
  *     that are not objects (an optr, a structure, a chunk array, a
  *     static GCN list) relocated, MSG_META_ATTACH
  *     with the appInfo words on the process thread, GeodeGetAppObject;
+ *   - ObjDuplicateResource of a template (references within it lead to
+ *     the copy, others to the resources; owner and thread given or taken
+ *     from the source), the saved-block list, ObjFreeDuplicate;
  *   - MSG_META_DETACH: the thread exits and frees the geode, which
  *     drops its reference to kglib (LCT_CLIENT_EXIT); GeodeFreeLibrary
  *     frees kglib (LCT_DETACH); no handle is left over.
@@ -45,6 +48,8 @@ typedef struct {
     ThreadHandle KGAS_thread;
     word	KGAS_chunkRefs;
     Boolean	KGAS_gcnFound;
+    MemHandle	KGAS_dup;
+    word	KGAS_dupChecks;
 } KGAppState;
 
 #define GEODE	0x2340
@@ -161,6 +166,14 @@ int main(void)
     Check(st->KGAS_chunkRefs == 3,
 	  "optrs in chunk data relocated (optr, structure, chunk array)");
     Check(st->KGAS_gcnFound, "static GCN list relocated");
+    Check(st->KGAS_dupChecks == 8, "ObjDuplicateResource, ObjFreeDuplicate");
+    {
+	GeodeCore *c = GeodeCoreOf(app);
+	Handle sb = c ? c->GC_savedBlocks : 0;
+	Check(sb && HandleEntryOf(sb)->HE_otherInfo == st->KGAS_dup &&
+	      !HandleEntryOf(sb)->HE_next,
+	      "the copy alone on the saved-block list");
+    }
     Check(MemOwner(OptrToHandle(st->KGAS_appObj)) == app,
 	  "the process owns its resource");
 

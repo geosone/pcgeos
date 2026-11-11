@@ -96,7 +96,9 @@
     X(OBJ_DETACH_NOT_STARTED) \
     X(GEODE_NOT_LOADED)		/* not the handle of a loaded geode */ \
     X(GEODE_FREE_LIBRARY_NOT_LIBRARY) \
-    X(DIVIDE_BY_ZERO)		/* raise(SIGFPE) of libgcc */
+    X(DIVIDE_BY_ZERO)		/* raise(SIGFPE) of libgcc */ \
+    X(OBJ_DUPLICATE_NOT_A_RESOURCE)	/* no module data for the block */ \
+    X(OBJ_DUPLICATE_BLOCK_REQUIRES_AN_OBJECT_BLOCK)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -568,6 +570,7 @@ typedef struct {
     GeodeAttrs		GC_attrs;	/* with GA_*_INITIALIZED */
     word		GC_refCount;
     word		GC_threadCount;
+    Handle		GC_savedBlocks;	/* SIG_SAVED_BLOCK list (objectDup.c) */
     word		GC_libraryCount;
     GeodeHandle		GC_libraries[1];	/* GC_libraryCount of them
 						 * (0: not loaded, noload) */
@@ -602,6 +605,9 @@ GeodeHandle GeodeLoadLow(const char *name, GeodeAttrs attrMatch,
 /* geodesLoad.c: free a geode whose reference count or last thread is
  * gone */
 void GeodeFreeLow(GeodeHandle gh);
+/* geodesLoad.c: the module data of resource `res' of a geode and its
+ * RESF_* flags; NULL if it has none (not a loaded geode, code) */
+const GocResource *GeodeResourceImage(GeodeHandle gh, word res, word *resf);
 
 /* A process thread (ProcCreate of geodesProcess.asm): it runs the events
  * of `qh' with `cls' for messages to the thread, its queue and its
