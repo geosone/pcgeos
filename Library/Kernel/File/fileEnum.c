@@ -22,10 +22,12 @@
  * DI of the asm routine).
  *
  * In a standard path, its standard subdirectories are entries even
- * where no directory exists (FEEnumSpecials).
+ * where no directory exists (FEEnumSpecials).  A path in a standard
+ * path spread over several directories (filePath.c) is enumerated at
+ * each of them; a name found at an earlier one hides the later ones
+ * (FESlowEnumCallback).
  *
- * Not yet: standard paths spread over several directories, FEA_CUSTOM,
- * FESF_LOCK_CB_DATA (nothing to lock).
+ * Not yet: FEA_CUSTOM, FESF_LOCK_CB_DATA (nothing to lock).
  */
 #include "kernelC.h"
 #include <fileEnum.h>
@@ -72,6 +74,11 @@ static const FileExtAttrDesc fescaName[] = {	/* FESC_WILDCARD */
 };
 
 typedef struct {
+    char	FS_name[FILE_LONGNAME_BUFFER_SIZE];
+    Boolean	FS_dir;
+} FESeen;
+
+typedef struct {
     FileEnumParams	*params;	/* the caller's */
     const FileExtAttrDesc *ret;		/* FEP_returnAttrs */
     word	(*callback)(FileEnumParams *, FileEnumCallbackData *, word);
@@ -94,8 +101,12 @@ typedef struct {
     word	off[FE_MAX_ATTRS];	/* of each value in vals */
     byte	*vals;
     word	valSize;
-    char	seen[64][FILE_LONGNAME_BUFFER_SIZE];	/* directories */
+    word	place;		/* of the current path (filePath.c) */
+    Boolean	multi;		/* a standard path of several places */
+    FESeen	*seen;		/* names: directories of spTop, all of
+				 * multi (ghal_mem) */
     word	nSeen;
+    word	maxSeen;
 } FEState;
 
 static Boolean IsBits(FileExtendedAttribute a)
@@ -356,8 +367,10 @@ static Boolean KernelAttr(FEState *st, FileExtendedAttribute a, void *v,
 
     switch (a) {
     case FEA_PATH_INFO:
-	u.w = (word) (DPI_EXISTS_LOCALLY | (st->spTop ? (st->sp & DPI_STD_PATH)
-						      : 0));
+	u.w = (word) ((st->place ? (st->place << DPI_ENTRY_NUMBER_IN_PATH_OFFSET)
+				   & DPI_ENTRY_NUMBER_IN_PATH
+				 : DPI_EXISTS_LOCALLY) |
+		      (st->spTop ? (st->sp & DPI_STD_PATH) : 0));
 	n = sizeof(word);
 	break;
     case FEA_DISK:
@@ -389,13 +402,35 @@ static Boolean SameName(const char *a, const char *b)
     return TRUE;
 }
 
-static void Seen(FEState *st, const char *name)
+static void Seen(FEState *st, const char *name, Boolean dir)
 {
-    if (st->nSeen < sizeof(st->seen) / sizeof(st->seen[0])) {
-	strncpy(st->seen[st->nSeen], name, FILE_LONGNAME_BUFFER_SIZE - 1);
-	st->seen[st->nSeen][FILE_LONGNAME_BUFFER_SIZE - 1] = 0;
-	st->nSeen++;
+    FESeen *n;
+
+    if (st->nSeen == st->maxSeen) {
+	n = st->seen ? ghal_mem_resize(st->seen, (st->maxSeen + 64) *
+						 sizeof(FESeen))
+		     : ghal_mem_alloc(64 * sizeof(FESeen), 0);
+	if (!n)
+	    return;
+	st->seen = n;
+	st->maxSeen = (word) (st->maxSeen + 64);
     }
+    strncpy(st->seen[st->nSeen].FS_name, name, FILE_LONGNAME_BUFFER_SIZE - 1);
+    st->seen[st->nSeen].FS_name[FILE_LONGNAME_BUFFER_SIZE - 1] = 0;
+    st->seen[st->nSeen].FS_dir = dir;
+    st->nSeen++;
+}
+
+/* FESlowEnumCallback: was the name at an earlier place? */
+static Boolean WasSeen(FEState *st, const char *name, Boolean dirsOnly)
+{
+    word j;
+
+    for (j = 0; j < st->nSeen; j++)
+	if ((!dirsOnly || st->seen[j].FS_dir) &&
+	    SameName(st->seen[j].FS_name, name))
+	    return TRUE;
+    return FALSE;
 }
 
 static word Entry(void *data, void *entry)
@@ -412,11 +447,16 @@ static word Entry(void *data, void *entry)
 							d->FEAD_size)
 			? v : NULL;
     }
-    if (st->spTop) {
+    if (st->spTop || st->multi) {
 	const byte *fa = Locate(st->fecd, FEA_FILE_ATTR);
 	const char *name = Locate(st->fecd, FEA_NAME);
-	if (fa && (*fa & FA_SUBDIR) && name)
-	    Seen(st, name);
+	Boolean dir = fa && (*fa & FA_SUBDIR);
+	if (name) {
+	    if (st->multi && st->place && WasSeen(st, name, FALSE))
+		return 0;
+	    if (st->multi || dir)
+		Seen(st, name, dir);
+	}
     }
     return Consider(st);
 }
@@ -426,15 +466,10 @@ static void Specials(FEState *st)
 {
     StandardPath sp;
     const char *name;
-    word i, j;
+    word i;
 
     for (sp = SP_TOP + 2; (name = FileStdPathName(sp)) != NULL; sp += 2) {
-	if (FileStdPathParent(sp) != st->sp)
-	    continue;
-	for (j = 0; j < st->nSeen; j++)
-	    if (SameName(st->seen[j], name))
-		break;
-	if (j < st->nSeen)
+	if (FileStdPathParent(sp) != st->sp || WasSeen(st, name, TRUE))
 	    continue;
 	memset(st->vals, 0, st->valSize);
 	for (i = 0; i < st->nAttrs; i++) {
@@ -477,7 +512,8 @@ word FileEnum(FileEnumParams *params, MemHandle *bufCreated, word *numNoFit)
     DiskHandle cur;
     char tail[2];
     void *outer;
-    word i, e, count;
+    word i, e, pe, count;
+    Boolean end, missing;
 
     *bufCreated = 0;
     if (numNoFit)
@@ -543,24 +579,41 @@ word FileEnum(FileEnumParams *params, MemHandle *bufCreated, word *numNoFit)
     }
 
     if (!e) {
-	st->disk = FileResolve("", dp, sizeof(dp));
-	if (!st->disk)
-	    e = ThreadGetError();
-    }
-    if (!e) {
 	cur = FileGetCurrentPath(tail, sizeof(tail));
 	if (cur & DISK_IS_STD_PATH_MASK) {
 	    st->sp = (StandardPath) cur;
 	    st->spTop = !tail[0];
 	}
+	st->multi = FileResolvePlace("", 1, dp, sizeof(dp), &end) || !end;
 	outer = t->T_fileEnum;
 	t->T_fileEnum = st;
-	e = FSD_OF(st->disk)->FSD_fileEnum(st->disk, dp, Entry, st);
-	/* a standard path need not exist */
-	if (e == ERROR_PATH_NOT_FOUND && st->spTop)
-	    e = 0;
-	if (!e && st->spTop)
-	    Specials(st);
+	/* every place of the path; a name seen at an earlier one is
+	 * hidden.  A standard path need not exist at every place, but
+	 * below it the directory must be at one. */
+	missing = TRUE;
+	for (st->place = 0; !e; st->place++) {
+	    st->disk = FileResolvePlace("", st->place, dp, sizeof(dp), &end);
+	    if (end)
+		break;
+	    if (!st->disk) {
+		if (st->place == 0)
+		    e = ThreadGetError();
+		continue;
+	    }
+	    pe = FSD_OF(st->disk)->FSD_fileEnum(st->disk, dp, Entry, st);
+	    if (pe == ERROR_PATH_NOT_FOUND && st->sp)
+		continue;
+	    e = pe;
+	    missing = FALSE;
+	}
+	if (!e && missing && !st->spTop)
+	    e = ERROR_PATH_NOT_FOUND;
+	if (!e && st->spTop) {
+	    st->place = 0;
+	    st->disk = FileResolve("", dp, sizeof(dp));
+	    if (st->disk)
+		Specials(st);
+	}
 	t->T_fileEnum = outer;
     }
 
@@ -584,6 +637,8 @@ word FileEnum(FileEnumParams *params, MemHandle *bufCreated, word *numNoFit)
 	count = st->found;
     }
     ghal_mem_free(st->vals);
+    if (st->seen)
+	ghal_mem_free(st->seen);
     ghal_mem_free(st);
     KernelSetError(e);
     return count;

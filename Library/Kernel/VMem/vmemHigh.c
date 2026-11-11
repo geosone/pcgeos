@@ -99,7 +99,7 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
 	name = tmp;
 	create = TRUE;
     }
-    disk = FileResolve(name, dp, sizeof(dp));
+    disk = FileLocate(0, name, dp, sizeof(dp));
     if (!disk) {
 	if (fh)
 	    FileClose(fh, FALSE);

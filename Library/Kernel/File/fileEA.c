@@ -19,7 +19,7 @@ static word ByPath(const TCHAR *path, FileExtendedAttribute attr,
 		   void *buffer, word bufSize, Boolean set)
 {
     char dp[FILE_DISK_PATH_SIZE];
-    FSDDisk *d = FileResolve(path, dp, sizeof(dp));
+    FSDDisk *d = FileLocate(0, path, dp, sizeof(dp));
 
     if (!d)
 	return ThreadGetError();

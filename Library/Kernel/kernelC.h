@@ -736,6 +736,21 @@ FSDDisk *FileResolve(const char *path, char *out, size_t size);
 FSDDisk *FileResolveOn(DiskHandle disk, const char *path, char *out,
 		       size_t size);
 #define FILE_DISK_PATH_SIZE	(PATH_BUFFER_SIZE + 2)
+/* A path relative to a standard path has places: the directory below
+ * the top, then those of [paths] (FileInitStdPaths).  FileResolve gives
+ * place 0; FileResolvePlace place n (NULL with *end set when there are
+ * no more).  FileOpOnPath calls op at each place until it returns other
+ * than ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND, and returns that. */
+typedef word FileOpFunc(FSDDisk *disk, const char *diskPath, void *data);
+FSDDisk *FileResolvePlace(const char *path, word n, char *out, size_t size,
+			  Boolean *end);
+word FileOpOnPath(const char *path, FileOpFunc *op, void *data);
+/* the first place of path (relative to the root of disk, 0: to the
+ * current path) where it exists, else place 0 */
+FSDDisk *FileLocate(DiskHandle disk, const char *path, char *out,
+		    size_t size);
+/* the directories of the standard paths from [paths] of the init files */
+void FileInitStdPaths(void);
 /* the directory name of a standard path and its parent (NULL,
  * SP_NOT_STANDARD_PATH if it is none) */
 const char *FileStdPathName(StandardPath sp);

@@ -14,11 +14,21 @@
  * the directories below it), taken over from the thread that creates
  * it, and a stack for FilePushDir.
  *
- * Not yet: paths of standard paths spread over several directories
- * (geos.ini "paths"), links, a current directory per drive.
+ * A standard path may be spread over several directories (Loader/
+ * path.asm, Int_SetDirOnPath): the one below the top, then those that
+ * "[paths]" of the init files give it ("document = D:\\DOCS E:\\MORE",
+ * keys as "systemfs" for SP_FILE_SYSTEM_DRIVERS), then those of the
+ * standard paths above it with the names down to it ("top = D:\\NET"
+ * gives D:\\NET\\DOCUMENT).  These are the places of a path relative to
+ * a standard path; FileOpOnPath tries an operation at each until one
+ * does not say the file or path is not there, FileEnum goes over all.
+ * The directories of [paths] are GEOS paths with a drive name.
+ *
+ * Not yet: links, a current directory per drive.
  */
 #include "kernelC.h"
 
+#include <initfile.h>
 #include <string.h>
 
 #define TOP_DRIVE	2		/* C: */
@@ -163,6 +173,131 @@ static Boolean AddStdPath(Comps *c, StandardPath sp)
     return Append(c, stdPaths[sp / 2].name, strlen(stdPaths[sp / 2].name));
 }
 
+/* the names of the standard paths from below `above' down to sp */
+static Boolean AddStdPathBelow(Comps *c, StandardPath sp, StandardPath above)
+{
+    if (sp == above || sp == SP_NOT_STANDARD_PATH)
+	return TRUE;
+    if (!AddStdPathBelow(c, stdPaths[sp / 2].parent, above))
+	return FALSE;
+    return Append(c, stdPaths[sp / 2].name, strlen(stdPaths[sp / 2].name));
+}
+
+static Boolean DriveSpec(const char **path, DiskHandle *base, Boolean *spec);
+
+/* ---------------------------------------------------------------------
+ * The directories of [paths] (GetPaths of Loader/path.asm)
+ * ------------------------------------------------------------------- */
+
+/* per standard path: its directories, each null terminated, an empty
+ * one at the end (ghal_mem); NULL if it has none */
+static char *stdDirs[STD_PATH_COUNT];
+
+/* the key of sp in [paths]: the names from the top down, lower case
+ * ("top" for SP_TOP) */
+static void StdPathKey(StandardPath sp, char *key, size_t size)
+{
+    Comps c;
+    size_t i, j = 0;
+
+    c.len = 0;
+    c.buf[0] = 0;
+    if (sp == SP_TOP || !AddStdPath(&c, sp)) {
+	strcpy(key, "top");
+	return;
+    }
+    for (i = 0; i < c.len && j + 1 < size; i++)
+	if (c.buf[i] != '\\')
+	    key[j++] = (char) (c.buf[i] >= 'A' && c.buf[i] <= 'Z'
+			       ? c.buf[i] - 'A' + 'a' : c.buf[i]);
+    key[j] = 0;
+}
+
+static Boolean IsSeparator(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+void FileInitStdPaths(void)
+{
+    StandardPath sp;
+    char key[40];
+    MemHandle mh;
+    word n, i, j;
+    const char *v;
+    char *dirs;
+
+    for (i = 0; i < STD_PATH_COUNT; i++) {
+	if (stdDirs[i])
+	    ghal_mem_free(stdDirs[i]);
+	stdDirs[i] = NULL;
+    }
+    for (i = 0; i < STD_PATH_COUNT; i++) {
+	sp = (StandardPath) (2 * i + 1);
+	StdPathKey(sp, key, sizeof(key));
+	if (InitFileReadStringBlock("paths", key, &mh, IFRF_READ_ALL, &n))
+	    continue;
+	v = MemLock(mh);
+	dirs = ghal_mem_alloc((dword) n + 2, 0);
+	if (dirs) {
+	    /* NullTerminatePathElements */
+	    for (j = 0; *v; ) {
+		while (IsSeparator(*v))
+		    v++;
+		if (!*v)
+		    break;
+		while (*v && !IsSeparator(*v))
+		    dirs[j++] = *v++;
+		dirs[j++] = 0;
+	    }
+	    dirs[j] = 0;
+	    if (j)
+		stdDirs[i] = dirs;
+	    else
+		ghal_mem_free(dirs);
+	}
+	MemUnlock(mh);
+	MemFree(mh);
+    }
+    KernelSetError(0);
+}
+
+/*
+ * The prefix of place n of the standard path sp (FindNextPathEntry,
+ * BuildPathEntry): place 0 is the directory below the top, then come
+ * the directories of sp and of the standard paths above it.  Returns
+ * the disk; NULL with *end set if there is no place n, NULL alone if
+ * place n cannot be used (an unknown drive).
+ */
+static FSDDisk *Place(StandardPath sp, word n, Comps *c, Boolean *end)
+{
+    StandardPath p;
+    const char *e, *q;
+    DiskHandle base = 0;
+    Boolean spec;
+
+    *end = FALSE;
+    c->len = 0;
+    c->buf[0] = 0;
+    if (n == 0) {
+	AddStdPath(c, sp);
+	return FSDDiskOf(SP_TOP);
+    }
+    for (p = sp; p != SP_NOT_STANDARD_PATH; p = stdPaths[p / 2].parent) {
+	for (e = stdDirs[p / 2]; e && *e; e += strlen(e) + 1) {
+	    if (--n)
+		continue;
+	    q = e;
+	    if (!DriveSpec(&q, &base, &spec) || !spec ||
+		!AddPath(c, q) || !AddStdPathBelow(c, sp, p))
+		return NULL;
+	    return FSDDiskOf(base);
+	}
+    }
+    *end = TRUE;
+    return NULL;
+}
+
 static KPath *CurPath(void)
 {
     KThread *t = ThreadOf(KernelThisThread());
@@ -197,16 +332,19 @@ static Boolean DriveSpec(const char **path, DiskHandle *base, Boolean *spec)
     return TRUE;
 }
 
-/* the disk of `path' relative to (*base, *tail), and its components
- * from the root of the disk (full).  A drive name or a separator at the
- * start changes *base and *tail, and *path is what follows a drive
- * name. */
+/* the disk of place n of `path' relative to (*base, *tail), and its
+ * components from the root of the disk (full).  A drive name or a
+ * separator at the start changes *base and *tail, and *path is what
+ * follows a drive name.  Only a standard path has places after 0; *end
+ * is set (NULL returned) when there are no more. */
 static FSDDisk *ResolveFrom(DiskHandle *base, const char **tail,
-			    const char **path, Comps *full)
+			    const char **path, Comps *full, word n,
+			    Boolean *end)
 {
     FSDDisk *d;
     Boolean spec;
 
+    *end = FALSE;
     full->len = 0;
     full->buf[0] = 0;
     if (!DriveSpec(path, base, &spec))
@@ -221,9 +359,16 @@ static FSDDisk *ResolveFrom(DiskHandle *base, const char **tail,
 	    KernelSetError(ERROR_INVALID_VOLUME);
 	    return NULL;
 	}
-	AddStdPath(full, (StandardPath) *base);
-    }
-    d = FSDDiskOf(*base);
+	d = Place((StandardPath) *base, n, full, end);
+	if (!d) {
+	    KernelSetError(ERROR_PATH_NOT_FOUND);
+	    return NULL;
+	}
+    } else if (n) {
+	*end = TRUE;
+	return NULL;
+    } else
+	d = FSDDiskOf(*base);
     if (!d) {
 	KernelSetError(ERROR_INVALID_VOLUME);
 	return NULL;
@@ -247,30 +392,119 @@ static Boolean DiskPath(const Comps *c, char *out, size_t size)
     return TRUE;
 }
 
+/* place n of path relative to (base, tail) as a disk and the path on
+ * it; NULL with *end set when there are no more places */
+static FSDDisk *ResolvePlace(DiskHandle base, const char *tail,
+			     const char *path, word n, char *out, size_t size,
+			     Boolean *end)
+{
+    Comps c;
+    FSDDisk *d = ResolveFrom(&base, &tail, &path, &c, n, end);
+
+    return d && DiskPath(&c, out, size) ? d : NULL;
+}
+
 /* relative to the root of `disk' (a standard path: to it) */
 FSDDisk *FileResolveOn(DiskHandle disk, const char *path, char *out,
 		       size_t size)
 {
-    DiskHandle base = disk;
-    const char *tail = "";
-    Comps c;
-    FSDDisk *d;
+    Boolean end;
 
     if (!disk)
 	return FileResolve(path, out, size);
-    d = ResolveFrom(&base, &tail, &path, &c);
-    return d && DiskPath(&c, out, size) ? d : NULL;
+    return ResolvePlace(disk, "", path, 0, out, size, &end);
 }
 
 FSDDisk *FileResolve(const char *path, char *out, size_t size)
 {
     KPath *cur = CurPath();
-    DiskHandle base = cur->KP_disk;
-    const char *tail = cur->KP_tail;
-    Comps c;
-    FSDDisk *d = ResolveFrom(&base, &tail, &path, &c);
+    Boolean end;
 
-    return d && DiskPath(&c, out, size) ? d : NULL;
+    return ResolvePlace(cur->KP_disk, cur->KP_tail, path, 0, out, size,
+			&end);
+}
+
+FSDDisk *FileResolvePlace(const char *path, word n, char *out, size_t size,
+			  Boolean *end)
+{
+    KPath *cur = CurPath();
+
+    return ResolvePlace(cur->KP_disk, cur->KP_tail, path, n, out, size,
+			end);
+}
+
+/* FileOpOnPath: op at each place of the path (from base, tail) until
+ * one returns other than "not found"; that, else ERROR_FILE_NOT_FOUND
+ * if a place had the directory, else ERROR_PATH_NOT_FOUND */
+static word OpOnPlaces(DiskHandle base, const char *tail, const char *path,
+		       FileOpFunc *op, void *data)
+{
+    char dp[FILE_DISK_PATH_SIZE];
+    word n, e, notFound = ERROR_PATH_NOT_FOUND;
+    Boolean end;
+    FSDDisk *d;
+
+    for (n = 0; ; n++) {
+	d = ResolvePlace(base, tail, path, n, dp, sizeof(dp), &end);
+	if (end)
+	    break;
+	if (!d) {
+	    if (n == 0)
+		return ThreadGetError();
+	    continue;
+	}
+	e = op(d, dp, data);
+	if (e == ERROR_FILE_NOT_FOUND)
+	    notFound = e;
+	else if (e != ERROR_PATH_NOT_FOUND)
+	    return e;
+    }
+    return notFound;
+}
+
+word FileOpOnPath(const char *path, FileOpFunc *op, void *data)
+{
+    KPath *cur = CurPath();
+
+    return OpOnPlaces(cur->KP_disk, cur->KP_tail, path, op, data);
+}
+
+/* the first place of path (relative to the root of disk; 0: to the
+ * current path) where it exists, else place 0 (an operation there then
+ * finds it missing) */
+FSDDisk *FileLocate(DiskHandle disk, const char *path, char *out,
+		    size_t size)
+{
+    KPath *cur = CurPath();
+    DiskHandle base = disk ? disk : cur->KP_disk;
+    const char *tail = disk ? "" : cur->KP_tail;
+    char dp[FILE_DISK_PATH_SIZE];
+    FSDDisk *d0, *d;
+    FileAttrs a;
+    Boolean end, probed = FALSE;
+    word n;
+
+    d0 = ResolvePlace(base, tail, path, 0, out, size, &end);
+    if (!d0)
+	return NULL;
+    for (n = 1; ; n++) {
+	d = ResolvePlace(base, tail, path, n, dp, sizeof(dp), &end);
+	if (end)
+	    break;
+	if (!probed) {
+	    probed = TRUE;
+	    if (!FSD_OF(d0)->FSD_getAttrs(d0, out, &a))
+		break;
+	}
+	if (d && !FSD_OF(d)->FSD_getAttrs(d, dp, &a) &&
+	    strlen(dp) < size) {
+	    strcpy(out, dp);
+	    KernelSetError(0);
+	    return d;
+	}
+    }
+    KernelSetError(0);
+    return d0;
 }
 
 /* ---------------------------------------------------------------------
@@ -305,6 +539,19 @@ void FileThreadExit(KThread *t)
     }
 }
 
+/* DR_FS_CUR_PATH_SET at a place (full: the components, if dp is NULL) */
+static word CurPathSetAt(FSDDisk *d, const char *dp, void *full)
+{
+    char buf[FILE_DISK_PATH_SIZE];
+
+    if (!dp) {
+	if (!DiskPath(full, buf, sizeof(buf)))
+	    return ThreadGetError();
+	dp = buf;
+    }
+    return FSD_OF(d)->FSD_curPathSet(d, dp);
+}
+
 /* a path relative to a standard path stays relative to it unless it
  * leaves it: then it is relative to the top */
 DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
@@ -313,13 +560,13 @@ DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
     Comps c, full;
     DiskHandle base = disk ? disk : cur->KP_disk;
     const char *tail = disk ? "" : cur->KP_tail;
-    char dp[FILE_DISK_PATH_SIZE];
     FSDDisk *d;
     word e;
+    Boolean end;
 
     if (!path)
 	path = "";
-    d = ResolveFrom(&base, &tail, &path, &full);
+    d = ResolveFrom(&base, &tail, &path, &full, 0, &end);
     if (!d)
 	return 0;
     c = full;
@@ -331,11 +578,12 @@ DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
 	    base = SP_TOP;
 	}
     }
-    /* a standard path itself need not exist */
+    /* a standard path itself need not exist; below it, the directory
+     * must be at one of its places */
     if (c.len) {
-	if (!DiskPath(&full, dp, sizeof(dp)))
-	    return 0;
-	e = FSD_OF(d)->FSD_curPathSet(d, dp);
+	e = (base & DISK_IS_STD_PATH_MASK)
+	    ? OpOnPlaces(base, "", c.buf, CurPathSetAt, NULL)
+	    : CurPathSetAt(d, NULL, &full);
 	if (e) {
 	    KernelSetError(e);
 	    return 0;

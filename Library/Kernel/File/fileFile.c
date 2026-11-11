@@ -9,8 +9,12 @@
  * it between disks.  A source or destination disk of 0 is the current
  * path's; with a disk, the path is relative to its root.
  *
- * Not yet: links, the notification of file changes, remote copies of
- * standard paths (FileCopyLocal, FileMoveLocal are FileCopy, FileMove).
+ * In a standard path spread over several directories (filePath.c) a
+ * file is found at the first of them that has it; a new file or
+ * directory goes to the first whose directory exists.  FileCopyLocal
+ * and FileMoveLocal take the source from the first only.
+ *
+ * Not yet: links, the notification of file changes.
  */
 #include "kernelC.h"
 
@@ -25,7 +29,7 @@ static word Fail(word e)
 word FileDelete(const char *name)
 {
     char dp[FILE_DISK_PATH_SIZE];
-    FSDDisk *d = FileResolve(name, dp, sizeof(dp));
+    FSDDisk *d = FileLocate(0, name, dp, sizeof(dp));
 
     if (!d)
 	return ThreadGetError();
@@ -42,38 +46,35 @@ word FileRename(const char *oldName, const char *newName)
     FSDDisk *d, *d2;
     size_t n;
 
+    d = FileLocate(0, oldName, from, sizeof(from));
+    if (!d)
+	return ThreadGetError();
     if (strchr(newName, '\\') || strchr(newName, '/') ||
 	strchr(newName, ':')) {
 	if (strlen(newName) >= sizeof(rel))
 	    return Fail(ERROR_PATH_TOO_LONG);
 	strcpy(rel, newName);
+	d2 = FileResolve(rel, to, sizeof(to));
+	if (!d2)
+	    return ThreadGetError();
+	if (d2 != d)
+	    return Fail(ERROR_DIFFERENT_DEVICE);
     } else {
-	sep = strrchr(oldName, '\\');
-	if (!sep || (strrchr(oldName, '/') && strrchr(oldName, '/') > sep))
-	    sep = strrchr(oldName, '/');
-	if (!sep)
-	    sep = strchr(oldName, ':');
-	n = sep ? (size_t) (sep - oldName) + 1 : 0;
-	if (n + strlen(newName) >= sizeof(rel))
+	/* in the directory where the old one was found */
+	sep = strrchr(from, '\\');
+	n = sep ? (size_t) (sep - from) + 1 : 0;
+	if (n + strlen(newName) >= sizeof(to))
 	    return Fail(ERROR_PATH_TOO_LONG);
-	memcpy(rel, oldName, n);
-	strcpy(rel + n, newName);
+	memcpy(to, from, n);
+	strcpy(to + n, newName);
     }
-    d = FileResolve(oldName, from, sizeof(from));
-    if (!d)
-	return ThreadGetError();
-    d2 = FileResolve(rel, to, sizeof(to));
-    if (!d2)
-	return ThreadGetError();
-    if (d2 != d)
-	return Fail(ERROR_DIFFERENT_DEVICE);
     return Fail(FSD_OF(d)->FSD_rename(d, from, to));
 }
 
 FileAttrs FileGetAttributes(const char *path)
 {
     char dp[FILE_DISK_PATH_SIZE];
-    FSDDisk *d = FileResolve(path, dp, sizeof(dp));
+    FSDDisk *d = FileLocate(0, path, dp, sizeof(dp));
     FileAttrs a = 0;
 
     if (!d)
@@ -89,27 +90,28 @@ word FileSetAttributes(const char *path, FileAttrs attr)
 
     if (attr & (FA_SUBDIR | FA_VOLUME | FA_LINK))
 	return Fail(ERROR_ACCESS_DENIED);
-    d = FileResolve(path, dp, sizeof(dp));
+    d = FileLocate(0, path, dp, sizeof(dp));
     if (!d)
 	return ThreadGetError();
     return Fail(FSD_OF(d)->FSD_setAttrs(d, dp, attr));
 }
 
+static word CreateDirAt(FSDDisk *d, const char *dp, void *data)
+{
+    (void) data;
+    return FSD_OF(d)->FSD_createDir(d, dp);
+}
+
 word FileCreateDir(const char *name)
 {
-    char dp[FILE_DISK_PATH_SIZE];
-    FSDDisk *d = FileResolve(name, dp, sizeof(dp));
-
-    if (!d)
-	return ThreadGetError();
-    return Fail(FSD_OF(d)->FSD_createDir(d, dp));
+    return Fail(FileOpOnPath(name, CreateDirAt, NULL));
 }
 
 /* not the current directory (the same file as "") */
 word FileDeleteDir(const char *name)
 {
     char dp[FILE_DISK_PATH_SIZE], cp[FILE_DISK_PATH_SIZE];
-    FSDDisk *d = FileResolve(name, dp, sizeof(dp)), *cd;
+    FSDDisk *d = FileLocate(0, name, dp, sizeof(dp)), *cd;
     dword id, cid;
 
     if (!d)
@@ -236,14 +238,16 @@ static word Copy(FSDDisk *sd, const char *src, FSDDisk *dd, const char *dst)
 }
 
 static word CopyMove(const TCHAR *source, const TCHAR *dest,
-		     DiskHandle sourceDisk, DiskHandle destDisk, Boolean move)
+		     DiskHandle sourceDisk, DiskHandle destDisk, Boolean move,
+		     Boolean local)
 {
     char src[FILE_DISK_PATH_SIZE], dst[FILE_DISK_PATH_SIZE];
     FSDDisk *sd, *dd;
     FileAttrs a;
     word e;
 
-    sd = FileResolveOn(sourceDisk, source, src, sizeof(src));
+    sd = local ? FileResolveOn(sourceDisk, source, src, sizeof(src))
+	       : FileLocate(sourceDisk, source, src, sizeof(src));
     if (!sd)
 	return ThreadGetError();
     dd = FileResolveOn(destDisk, dest, dst, sizeof(dst));
@@ -276,23 +280,23 @@ static word CopyMove(const TCHAR *source, const TCHAR *dest,
 word FileCopy(const TCHAR *source, const TCHAR *dest, DiskHandle sourceDisk,
 	      DiskHandle destDisk)
 {
-    return CopyMove(source, dest, sourceDisk, destDisk, FALSE);
+    return CopyMove(source, dest, sourceDisk, destDisk, FALSE, FALSE);
 }
 
 word FileCopyLocal(const TCHAR *source, const TCHAR *dest,
 		   DiskHandle sourceDisk, DiskHandle destDisk)
 {
-    return CopyMove(source, dest, sourceDisk, destDisk, FALSE);
+    return CopyMove(source, dest, sourceDisk, destDisk, FALSE, TRUE);
 }
 
 word FileMove(const TCHAR *source, const TCHAR *dest, DiskHandle sourceDisk,
 	      DiskHandle destDisk)
 {
-    return CopyMove(source, dest, sourceDisk, destDisk, TRUE);
+    return CopyMove(source, dest, sourceDisk, destDisk, TRUE, FALSE);
 }
 
 word FileMoveLocal(const TCHAR *source, const TCHAR *dest,
 		   DiskHandle sourceDisk, DiskHandle destDisk)
 {
-    return CopyMove(source, dest, sourceDisk, destDisk, TRUE);
+    return CopyMove(source, dest, sourceDisk, destDisk, TRUE, TRUE);
 }

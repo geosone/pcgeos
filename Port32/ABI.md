@@ -940,6 +940,38 @@ where it is with `FileSetTopHostPath`.
     fatal.
   - A standard path need not exist on the host. A directory below it
     must exist.
+- **Standard paths over several directories** (`filePath.c`, after
+  `GetPaths` of `Loader/path.asm` and `Int_SetDirOnPath`).
+  - `[paths]` in the init files gives a standard path further
+    directories. The key is made of the names from the top down, in
+    lower case, as the loader's: `document`, `systemfs`,
+    `userdatafont`, and `top` for SP_TOP. The values of all init files
+    count. The directories are separated by blanks or line ends (a blob
+    for several lines).
+  - Each directory is a GEOS path with a drive name (`D:\DOCS`). DOS16
+    used DOS paths; here a drive must exist (`FSDInitDrive`). An entry
+    on an unknown drive is skipped.
+  - The places of a path in standard path S, in order:
+    1. the directory below the top;
+    2. the `[paths]` directories of S;
+    3. those of the standard paths above S, each with the names down to
+       S (`top = D:\NET` gives `D:\NET\DOCUMENT` to DOCUMENT).
+  - An existing file or directory is found at the first place that has
+    it (`FileLocate`). This holds for open, delete, rename (the new name
+    goes to the same directory), attributes, extended attributes,
+    `VMOpen`, and the source of `FileCopy`/`FileMove`.
+  - A new file or directory goes to the first place whose directory
+    exists (`FileOpOnPath`, after `FileOpOnPathLow`). If no place has
+    it, the error is `ERROR_FILE_NOT_FOUND` when some place had the
+    directory, else `ERROR_PATH_NOT_FOUND`.
+  - A current path below a standard path must exist at one of its
+    places.
+  - `FileEnum` enumerates every place. A name found at an earlier place
+    hides the same name at later ones. `FEA_PATH_INFO` has
+    `DPI_EXISTS_LOCALLY` for the first place, and the place number in
+    `DPI_ENTRY_NUMBER_IN_PATH` for the others.
+  - `FileInitStdPaths` reads `[paths]`; the boot will call it after the
+    init file and the drives.
 - **Open files** (`fileOpenClose.c`, `fileIO.c`).
   - A `FileHandle` is a `SIG_FILE` handle owned by the process of the
     opening thread. Its `HE_addr` is a `KFile` holding the driver's
@@ -970,8 +1002,9 @@ where it is with `FileSetTopHostPath`.
     disks, it copies and deletes, and a directory gets
     `ERROR_DIFFERENT_DEVICE`. `FileRename` between disks gives the
     same error.
-  - `FileCopyLocal` and `FileMoveLocal` are the same as `FileCopy` and
-    `FileMove`.
+  - `FileCopyLocal` and `FileMoveLocal` take the source only from the
+    directory below the top, not from the other places of a standard
+    path.
 - **GEOS files**, extended attributes and host names: section 13c.
 - **Errors.** Every routine sets the thread's error (`ThreadGetError`).
   A missing file is `ERROR_FILE_NOT_FOUND`. If its directory is
@@ -981,7 +1014,8 @@ Not yet:
 
 - deny modes and record locks;
 - links, temporary files, and change notification;
-- several directories per standard path (`geos.ini` `paths`).
+- `SPA_DOES_NOT_EXIST_LOCALLY` (every standard path has its place
+  below the top).
 
 ## 13b. VM files (`Library/Kernel/VMem`, P4)
 
@@ -1368,7 +1402,9 @@ Port32 differences:
   for the next call (the DI of the asm routine): the number of entries
   passed before the first one that did not fit.
 
-Not yet: standard paths spread over several directories, `FEA_CUSTOM`,
+Standard paths spread over several directories: section 13a.
+
+Not yet: `FEA_CUSTOM`,
 and the order of entries (it is the host's directory order).
 
 ## 13h. The init file (`Library/Kernel/Initfile`, P4)

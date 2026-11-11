@@ -39,31 +39,51 @@ static FileHandle NewHandle(KFile *kf, byte access)
     return fh;
 }
 
-/* open or create (create: FileCreate's flags) the file at `name' */
+typedef struct {
+    word	O_flags;
+    FileAttrs	O_attrs;
+    Boolean	O_create;
+    KFile	*O_kf;
+} OpenOp;
+
+static word OpenAt(FSDDisk *d, const char *dp, void *data)
+{
+    OpenOp *o = data;
+
+    o->O_kf->KF_file.FF_disk = d;
+    return o->O_create
+	   ? FSD_OF(d)->FSD_create(d, dp, o->O_flags, o->O_attrs,
+				   &o->O_kf->KF_file)
+	   : FSD_OF(d)->FSD_open(d, dp, o->O_flags, &o->O_kf->KF_file);
+}
+
+/* open or create (create: FileCreate's flags) the file at `name', at
+ * the first place of the path that has it (or its directory) */
 static FileHandle Open(const char *name, word flags, FileAttrs attrs,
 		       Boolean create)
 {
-    char dp[FILE_DISK_PATH_SIZE];
-    FSDDisk *d = FileResolve(name, dp, sizeof(dp));
     KFile *kf;
+    FSDDisk *d;
     FileHandle fh;
+    OpenOp o;
     word e;
 
-    if (!d)
-	return 0;
     kf = ghal_mem_alloc(sizeof(KFile), GHAL_MEM_ZERO);
     if (!kf) {
 	KernelSetError(ERROR_INSUFFICIENT_MEMORY);
 	return 0;
     }
-    kf->KF_file.FF_disk = d;
-    e = create ? FSD_OF(d)->FSD_create(d, dp, flags, attrs, &kf->KF_file)
-	       : FSD_OF(d)->FSD_open(d, dp, flags, &kf->KF_file);
+    o.O_flags = flags;
+    o.O_attrs = attrs;
+    o.O_create = create;
+    o.O_kf = kf;
+    e = FileOpOnPath(name, OpenAt, &o);
     if (e) {
 	ghal_mem_free(kf);
 	KernelSetError(e);
 	return 0;
     }
+    d = kf->KF_file.FF_disk;
     fh = NewHandle(kf, (byte) (flags & FCF_ACCESS));
     if (!fh) {
 	FSD_OF(d)->FSD_close(&kf->KF_file);
