@@ -134,14 +134,20 @@ const Message kobjGocMessages[] = {
     MSG_META_NOTIFY, MSG_META_NOTIFY_WITH_DATA_BLOCK,
     MSG_META_GCN_LIST_ADD, MSG_META_GCN_LIST_REMOVE,
     MSG_META_GCN_LIST_SEND, MSG_META_GCN_LIST_DESTROY,
-    MSG_META_GCN_LIST_FIND_ITEM
+    MSG_META_GCN_LIST_FIND_ITEM,
+    MSG_META_DETACH, MSG_META_DETACH_COMPLETE, MSG_META_APP_SHUTDOWN,
+    MSG_META_SHUTDOWN_COMPLETE, MSG_META_SHUTDOWN_ACK, MSG_META_QUIT,
+    MSG_META_QUIT_ACK, MSG_META_FINISH_QUIT, MSG_PROCESS_EXIT
+};
+const word kobjGocVarData[] = {
+    TEMP_META_GCN, TEMP_META_QUIT_LIST, DETACH_DATA
 };
 /* goc's vardata tag and GCN structures, for the kernel's */
-const word kobjGocTempMetaGCN = TEMP_META_GCN;
 const word kobjGocGCNSizes[] = {
     sizeof(GCNListHeader), sizeof(GCNListElement),
     sizeof(GCNListOfListsElement), sizeof(TempMetaGCNData),
-    offsetof(GCNListHeader, GCNLH_statusCount)
+    offsetof(GCNListHeader, GCNLH_statusCount),
+    sizeof(DetachDataEntry), offsetof(DetachDataEntry, DDE_completeMsg)
 };
 const int kobjGocMessageCount =
     sizeof(kobjGocMessages) / sizeof(kobjGocMessages[0]);
@@ -808,5 +814,132 @@ KObjGCNObject(optr tree, optr a, optr b)
     @call tree::MSG_META_GCN_LIST_DESTROY();
     Check(ObjVarFindData(tree, TEMP_META_GCN) == NULL,
 	  "MSG_META_GCN_LIST_DESTROY");
+    return fails;
+}
+
+/* ---- detach and quit (objects run by a process thread) ---- */
+
+@class KODetClass, MetaClass;
+    @instance optr KODI_h1;
+    @instance optr KODI_h2;
+@endc
+@classdecl KODetClass;
+
+@class KOAbortClass, MetaClass;
+@endc
+@classdecl KOAbortClass;
+
+static volatile int acks, shutdownAcks, finishes, finishAbort, quits;
+static volatile word ackCaller;
+static volatile optr ackFrom;
+
+/* waits for a detach on the helpers it sends MSG_META_DETACH to */
+@method KODetClass, MSG_META_DETACH
+{
+    optr h1 = pself->KODI_h1, h2 = pself->KODI_h2;
+
+    ObjInitDetach(MSG_META_DETACH, oself, callerID, caller);
+    ObjIncDetach(oself);
+    @send h1::MSG_META_DETACH(0, oself);
+    ObjIncDetach(oself);
+    @send h2::MSG_META_DETACH(0, oself);
+    ObjEnableDetach(oself);
+    @callsuper();
+}
+
+@method KOCompClass, MSG_META_ACK
+{
+    acks++;
+    ackCaller = callerID;
+    ackFrom = caller;
+    @callsuper();
+}
+
+@method KOCompClass, MSG_META_SHUTDOWN_ACK
+{
+    shutdownAcks++;
+    ackCaller = callerID;
+    ackFrom = ackOD;
+    @callsuper();
+}
+
+@method KOCompClass, MSG_META_FINISH_QUIT
+{
+    finishes++;
+    finishAbort = abortFlag;
+    @callsuper();
+}
+
+/* MSG_META_QUIT as MSG_META_QUIT_OBJECT: refuse */
+@method KOAbortClass, MSG_META_QUIT_OBJECT
+{
+    quits++;
+    @send obj::MSG_META_QUIT_ACK(0, TRUE);
+}
+
+/* run a sync call to t2's objects until `cond' holds (or give up) */
+#define WAIT_FOR(any, cond) do { \
+	int _n; \
+	for (_n = 0; _n < 200 && !(cond); _n++) { \
+	    (void) @call any::MSG_META_GET_CLASS(); \
+	    TimerSleep(1); \
+	} \
+    } while (0)
+
+int
+KObjDetach(ThreadHandle t2, ThreadHandle t3)
+{
+    optr rec, det, h1, h2, q, ab;
+    KODetInstance *di;
+
+    fails = 0;
+    rec = ObjInstantiateForThread(t2, &KOCompClass);
+    det = ObjInstantiateForThread(t2, &KODetClass);
+    h1 = ObjInstantiateForThread(t2, &KOCompClass);
+    h2 = ObjInstantiateForThread(t2, &KOCompClass);
+    di = LMemDeref(det);
+    di->KODI_h1 = h1;
+    di->KODI_h2 = h2;
+
+    /* an object that waits for two others */
+    acks = 0;
+    @send det::MSG_META_DETACH(7, rec);
+    WAIT_FOR(rec, acks == 1);
+    Check(acks == 1 && ackCaller == 7 && ackFrom == det &&
+	  ObjVarFindData(det, DETACH_DATA) == NULL, "detach with acks");
+
+    /* an object that acks at once */
+    @send h1::MSG_META_APP_SHUTDOWN(3, rec);
+    WAIT_FOR(rec, shutdownAcks == 1);
+    Check(shutdownAcks == 1 && ackCaller == 3 && ackFrom == h1,
+	  "app shutdown");
+
+    /* quit: each object on the active list in turn, then FINISH_QUIT */
+    q = ObjInstantiateForThread(t2, &KOCompClass);
+    (void) @call q::MSG_META_GCN_LIST_ADD(h1, MGCNLT_ACTIVE_LIST, GEOWORKS);
+    (void) @call q::MSG_META_GCN_LIST_ADD(h2, MGCNLT_ACTIVE_LIST, GEOWORKS);
+    finishes = 0;
+    @send q::MSG_META_QUIT_ACK(0, 0);
+    WAIT_FOR(rec, finishes == 1);
+    Check(finishes == 1 && !finishAbort &&
+	  ObjVarFindData(q, TEMP_META_QUIT_LIST) == NULL, "quit");
+
+    /* an object on the active list that refuses */
+    ab = ObjInstantiateForThread(t2, &KOAbortClass);
+    (void) @call q::MSG_META_GCN_LIST_ADD(ab, MGCNLT_ACTIVE_LIST, GEOWORKS);
+    finishes = 0;
+    @send q::MSG_META_QUIT_ACK(0, 0);
+    WAIT_FOR(rec, finishes == 1);
+    Check(quits == 1 && finishes == 1 && finishAbort &&
+	  ObjVarFindData(q, TEMP_META_QUIT_LIST) == NULL, "quit aborted");
+    if (fails)
+	printf("quits %d finishes %d abort %d\n", quits, finishes, finishAbort);
+
+    /* a process: its thread exits, the ack names the thread */
+    acks = 0;
+    @send ConstructOptr(t3, 0)::MSG_META_DETACH(5, rec);
+    WAIT_FOR(rec, acks == 1);
+    Check(acks == 1 && ackCaller == 5 && OptrToHandle(ackFrom) == t3,
+	  "process detach");
     return fails;
 }

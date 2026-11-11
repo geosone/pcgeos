@@ -24,6 +24,7 @@
 #   Object/objectComposite.c <- composites of Object/objectComposite.asm,
 #                          CObjSendToChildren of Object/objectC.asm
 #   Object/objectLinkable.c <- ObjLinkFindParent of objectLinkable.asm
+#   Object/objectShutdown.c <- detach and quit of objectShutdown.asm
 add_library(geos_kernel STATIC
   Sys/sysError.c
   Heap/heapHandle.c
@@ -46,7 +47,8 @@ add_library(geos_kernel STATIC
   Object/objectProcess.c
   Object/objectReloc.c
   Object/objectComposite.c
-  Object/objectLinkable.c)
+  Object/objectLinkable.c
+  Object/objectShutdown.c)
 target_include_directories(geos_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

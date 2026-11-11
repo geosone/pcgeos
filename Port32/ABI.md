@@ -690,6 +690,34 @@ events, relocation, and `MetaClass`'s `MSG_META_GCN_LIST_*` with
 `ObjSetFlags` and `ObjMarkDirty` do nothing in a block without chunk
 flags, as in the asm kernel. GCN lists also live in plain LMem blocks.
 
+**Detach and quit** (`objectShutdown.c`) work as in the asm kernel:
+
+- `ObjInitDetach`, `ObjIncDetach` and `ObjEnableDetach` keep
+  `DETACH_DATA`. `MSG_META_ACK` and `SHUTDOWN_ACK` count down, and at 0
+  the object gets `MSG_META_DETACH_COMPLETE` (or `SHUTDOWN_COMPLETE`).
+  `MetaClass` then acks the asker through the queue.
+- An object that never called `ObjInitDetach` acks when
+  `MSG_META_DETACH` or `APP_SHUTDOWN` reaches `MetaClass`. An ack to an
+  object that is not detaching (a thread's exit, for instance) is
+  ignored.
+- Under Port32 the complete messages carry `(word callerID, optr
+  ackOD)` as parameters, because the asm kernel passed them in
+  registers. `metaC.goh` declares them with `@ifdef GEOS_PORT32`, which
+  `goc -cg` predefines.
+- Quit: `MSG_META_QUIT` (`MSG_META_QUIT_OBJECT`: the optr to ack) is
+  acked with `MSG_META_QUIT_ACK`. An object with an active list
+  (`MGCNLT_ACTIVE_LIST`) sends `MSG_META_QUIT` to each object on it in
+  turn, keeps the ones it has asked in `TEMP_META_QUIT_LIST`, and ends
+  with `MSG_META_FINISH_QUIT`. An abort ends the sequence.
+- `ProcessClass`: `MSG_META_DETACH` queues `MSG_PROCESS_EXIT` with the
+  same parameters, and that calls `ThreadDestroy(callerID, ackOD, 0)`.
+  The ack data the asm kernel passed in SI is 0.
+
+Aliases (`@alias`) have parameters of their own, and the method gets
+the parameters of whichever alias the sender used. A method handles
+the alias it expects (`@method X, MSG_META_QUIT_OBJECT`). `@callsuper()`
+passes the parameters of the message the method was declared for.
+
 ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
 
 - the layout goc made: aligned parts and variable data, unrelocated
@@ -713,13 +741,16 @@ ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
   sent to new objects, not sent again when unchanged, and replaced; an
   object's lists through the `MetaClass` messages; unrelocating and
   relocating them, with and without `GCNLTF_SAVE_TO_STATE`;
-- goc's numbers for the new messages and `TEMP_META_GCN`, and the sizes
-  of the GCN structures.
+- detach with acks from other objects, an object that acks at once, app
+  shutdown, quit over an active list, a quit that one object refuses,
+  and detaching a process (its thread exits and acks);
+- goc's numbers for the new messages and vardata tags, and the sizes of
+  the GCN and detach structures.
 
 Not yet:
 
-- Detach and quit (`objectShutdown.asm`), duplicating resources and
-  saving to state.
+- Duplicating resources (`objectDup.asm`) and saving to state
+  (`objectState.asm`, with VMem).
 - **optrs in chunks that are not objects** (moniker lists, GCN list
   elements, chunk data). Glue relocated them through the geode's
   relocation table; under `goc -cg` they need a relocation list per
@@ -735,7 +766,8 @@ Not yet:
    - the protocol a library needs (glue took it from the library's
      `.ldf`; `GML_proto*` is 0.0, "any", for now);
    - the optrs in non-object chunks of a resource, which `goc -cg` has
-     to list for the loader (section 13).
+     to list for the loader (section 13). goc's static GCN lists
+     (`gcnList(...) = ...`) are such chunks.
 2. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.

@@ -8,7 +8,7 @@
  * message's parameters in order) and the reply buffer.  Messages to a
  * thread or process reach MetaClass with pself NULL.
  *
- * Not yet: detach and quit (objectShutdown.asm), help and options
+ * Detach and quit are in objectShutdown.c.  Not yet: help and options
  * messages, MSG_META_OBJ_FLUSH_INPUT_QUEUE.  Without the input
  * manager, freeing an object or a block flushes only the queue of the
  * thread that runs it (the final message goes through that queue).
@@ -394,7 +394,16 @@ static const Message metaMessages[] = {
     KMSG_META_GCN_LIST_REMOVE,
     KMSG_META_GCN_LIST_SEND,
     KMSG_META_GCN_LIST_DESTROY,
-    KMSG_META_GCN_LIST_FIND_ITEM
+    KMSG_META_GCN_LIST_FIND_ITEM,
+    KMSG_META_ACK,
+    KMSG_META_SHUTDOWN_ACK,
+    KMSG_META_DETACH,
+    KMSG_META_DETACH_COMPLETE,
+    KMSG_META_APP_SHUTDOWN,
+    KMSG_META_SHUTDOWN_COMPLETE,
+    KMSG_META_QUIT,
+    KMSG_META_QUIT_ACK,
+    KMSG_META_FINISH_QUIT
 };
 
 static GocMethodThunk *const metaMethods[] = {
@@ -421,7 +430,16 @@ static GocMethodThunk *const metaMethods[] = {
     MetaGCNListRemove,
     MetaGCNListSend,
     MetaGCNListDestroy,
-    MetaGCNListFindItem
+    MetaGCNListFindItem,
+    MetaAck,
+    MetaAck,				/* SHUTDOWN_ACK */
+    MetaDetach,
+    MetaDetachComplete,
+    MetaAppShutdown,
+    MetaShutdownComplete,
+    MetaQuit,
+    MetaQuitAck,
+    MetaFinishQuit
 };
 
 ClassStruct MetaClass = {

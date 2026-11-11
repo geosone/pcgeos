@@ -81,14 +81,24 @@ typedef struct {
 
 @message void MSG_META_DETACH(word callerID = cx, optr caller = dx:bp);
 
+@ifdef GEOS_PORT32
+/* Port32: the caller ID and the ack optr of ObjInitDetach, which the
+ * asm kernel passes in registers (Port32/ABI.md section 13) */
+@message void MSG_META_DETACH_COMPLETE(word callerID, optr ackOD);
+@else
 @message void MSG_META_DETACH_COMPLETE();
+@endif
 
 @message void MSG_META_DETACH_ABORT();
 
 @message void MSG_META_ACK(word callerID = cx, optr caller = dx:bp);
 
 @message void MSG_META_APP_SHUTDOWN(word callerID = cx, optr ackOD = dx:bp);
+@ifdef GEOS_PORT32
+@message void MSG_META_SHUTDOWN_COMPLETE(word callerID, optr ackOD);
+@else
 @message void MSG_META_SHUTDOWN_COMPLETE();
+@endif
 @message void MSG_META_SHUTDOWN_ACK(word callerID = cx, optr ackOD = dx:bp);
 
 @message ClassStruct * MSG_META_GET_CLASS() = cx:dx;

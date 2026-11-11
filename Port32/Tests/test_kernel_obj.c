@@ -3,7 +3,7 @@
  * (Library/Kernel/Object, Port32/ABI.md section 13) with the classes and
  * objects of Goc/kobj.goc: layout, relocation and unrelocation, variable
  * data, ObjInstantiate, MetaClass and ProcessClass, freeing objects and
- * object blocks, composites, GCN lists.
+ * object blocks, composites, GCN lists, detach and quit.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -22,7 +22,7 @@ extern const ChunkHandle KOObj1, KOObj2, KOPlain1, KOOther;
 extern const ChunkHandle KOTree, KOLeafA, KOLeafB, KOLeafC;
 extern const Message kobjGocMessages[];
 extern const int kobjGocMessageCount;
-extern const word kobjGocTempMetaGCN, kobjGocGCNSizes[];
+extern const word kobjGocVarData[], kobjGocGCNSizes[];
 extern int kobjRelocs, kobjUnrelocs;
 
 int KObjLayout(optr obj1, optr obj2);
@@ -38,6 +38,7 @@ int KObjCompLayout(optr tree, optr a, optr c);
 int KObjComposite(optr tree, optr a, optr b, optr c);
 int KObjGCNSystem(optr a, optr b, optr c);
 int KObjGCNObject(optr tree, optr a, optr b);
+int KObjDetach(ThreadHandle t2, ThreadHandle t3);
 
 /* in the order of kobjGocMessages */
 static const Message kernelMessages[] = {
@@ -58,14 +59,21 @@ static const Message kernelMessages[] = {
     KMSG_META_NOTIFY, KMSG_META_NOTIFY_WITH_DATA_BLOCK,
     KMSG_META_GCN_LIST_ADD, KMSG_META_GCN_LIST_REMOVE,
     KMSG_META_GCN_LIST_SEND, KMSG_META_GCN_LIST_DESTROY,
-    KMSG_META_GCN_LIST_FIND_ITEM
+    KMSG_META_GCN_LIST_FIND_ITEM,
+    KMSG_META_DETACH, KMSG_META_DETACH_COMPLETE, KMSG_META_APP_SHUTDOWN,
+    KMSG_META_SHUTDOWN_COMPLETE, KMSG_META_SHUTDOWN_ACK, KMSG_META_QUIT,
+    KMSG_META_QUIT_ACK, KMSG_META_FINISH_QUIT, KMSG_PROCESS_EXIT
+};
+static const word kernelVarData[] = {
+    KVD_TEMP_META_GCN, KVD_TEMP_META_QUIT_LIST, KVD_DETACH_DATA
 };
 
 /* in the order of kobjGocGCNSizes */
 static const word kernelGCNSizes[] = {
     sizeof(GCNListHeader), sizeof(GCNListElement),
     sizeof(GCNListOfListsElement), sizeof(TempMetaGCNData),
-    offsetof(GCNListHeader, GCNLH_statusCount)
+    offsetof(GCNListHeader, GCNLH_statusCount),
+    sizeof(DetachDataEntry), offsetof(DetachDataEntry, DDE_completeMsg)
 };
 
 static int fails;
@@ -117,7 +125,7 @@ static int Same(const Saved *s, optr o)
 
 int main(void)
 {
-    ThreadHandle me, t2;
+    ThreadHandle me, t2, t3;
     MemHandle objects, other, blk;
     optr obj1, obj2, plain, oth, o, o2, o3, tree, la, lb, lc;
     Saved s1, s2, sp, so;
@@ -139,10 +147,13 @@ int main(void)
 	    Check(0, "message number");
 	}
 
-    Check(kobjGocTempMetaGCN == KVD_TEMP_META_GCN, "TEMP_META_GCN");
-    if (kobjGocTempMetaGCN != KVD_TEMP_META_GCN)
-	printf("TEMP_META_GCN: goc %u kernel %u\n",
-	       (unsigned) kobjGocTempMetaGCN, (unsigned) KVD_TEMP_META_GCN);
+    for (i = 0; i < (int) (sizeof(kernelVarData) / sizeof(kernelVarData[0]));
+	 i++)
+	if (kobjGocVarData[i] != kernelVarData[i]) {
+	    printf("vardata %d: goc %u kernel %u\n", i,
+		   (unsigned) kobjGocVarData[i], (unsigned) kernelVarData[i]);
+	    Check(0, "vardata tag");
+	}
     for (i = 0; i < (int) (sizeof(kernelGCNSizes) / sizeof(kernelGCNSizes[0]));
 	 i++)
 	if (kobjGocGCNSizes[i] != kernelGCNSizes[i]) {
@@ -245,6 +256,12 @@ int main(void)
     ObjDecInUseCount(blk);		/* now */
     (void) KObjClassOf(o3);
     Check(!InUse(blk), "ObjFreeObjBlock");
+
+    /* detach and quit run through t2's queue; t3 is detached */
+    t3 = ThreadCreate(PRIORITY_STANDARD, 0, ProcessThread, 0, GEODE);
+    while (!ThreadGetInfo(t3, TGIT_QUEUE_HANDLE))
+	TimerSleep(1);
+    fails += KObjDetach(t2, t3);
 
     if (kernelEventsDropped) {
 	fails++;

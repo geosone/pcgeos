@@ -2461,9 +2461,11 @@ OutputChunk(Symbol *chunk)
 		 sle != NullSymbolListEntry; sle = sle->next) {
 		     count++;
 	    }
+	    /* Port32: GCNLH_reserved aligns the elements to 8 */
 	    Output("GCNListHeader %s _%s%s =%s{{%d, sizeof(GCNListElement),"
-		   "0, sizeof(GCNListHeader)}, 0, 0, 0}%s; ",
-		   lms, chunk->name,_ar,_op, count,_cl);
+		   "0, sizeof(GCNListHeader)}, 0, 0, 0%s}%s; ",
+		   lms, chunk->name,_ar,_op, count,
+		   compiler == COM_GCC ? ", {0}" : "", _cl);
 	    if (count != 0) {
 		Output("GCNListElement %s _e_%s[] = {",lms, chunk->name);
 		for (sle = chunk->data.symGCNList.firstItem;

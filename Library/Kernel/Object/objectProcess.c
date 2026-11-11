@@ -7,9 +7,11 @@
  * blocks the thread runs and frees them at the end of a block free.
  *
  * Not yet: creating event and UI threads, MSG_PROCESS_CALL_ROUTINE, the
- * copy-chunk messages, discarding and VM blocks, detach.
+ * copy-chunk messages, discarding and VM blocks.
  */
 #include "kernelC.h"
+
+#include <string.h>
 
 /* MSG_PROCESS_INSTANTIATE (internal): ObjInstantiate for another thread */
 static void ProcessInstantiate(void *pself, optr oself, Message m,
@@ -36,16 +38,47 @@ static void ProcessFinalBlockFree(void *pself, optr oself, Message m,
     MemFree(*(MemHandle *) params);
 }
 
+/* MSG_META_DETACH to a process: the thread exits once its queue is
+ * through (MSG_PROCESS_EXIT, queued with the same parameters) */
+static void ProcessDetach(void *pself, optr oself, Message m, void *params,
+			  void *reply)
+{
+    struct { word callerID; optr ackOD; } p = { 0, 0 };
+
+    (void) pself; (void) oself; (void) m; (void) reply;
+    if (params)
+	memcpy(&p, params, sizeof(p));
+    CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(KernelThisThread(), 0),
+		 KMSG_PROCESS_EXIT, &p, sizeof(p), NULL, 0);
+}
+
+/* MSG_PROCESS_EXIT: ThreadDestroy(exit code, ack optr); the ack data the
+ * asm kernel passed in SI is 0 (Port32: no registers) */
+static void ProcessExit(void *pself, optr oself, Message m, void *params,
+			void *reply)
+{
+    struct { word callerID; optr ackOD; } p = { 0, 0 };
+
+    (void) pself; (void) oself; (void) m; (void) reply;
+    if (params)
+	memcpy(&p, params, sizeof(p));
+    ThreadDestroy(p.callerID, p.ackOD, 0);
+}
+
 static const Message processMessages[] = {
     KMSG_PROCESS_INSTANTIATE,
     KMSG_PROCESS_FINAL_BLOCK_FREE,
-    KMSG_PROCESS_INSTANTIATE_FOR_THREAD
+    KMSG_PROCESS_INSTANTIATE_FOR_THREAD,
+    KMSG_META_DETACH,
+    KMSG_PROCESS_EXIT
 };
 
 static GocMethodThunk *const processMethods[] = {
     ProcessInstantiate,
     ProcessFinalBlockFree,
-    ProcessInstantiateForThread
+    ProcessInstantiateForThread,
+    ProcessDetach,
+    ProcessExit
 };
 
 ClassStruct ProcessClass = {

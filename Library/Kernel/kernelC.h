@@ -88,7 +88,10 @@
     X(CANNOT_UNRELOCATE) \
     X(ADD_CHILD_OF_OBJ_ALREADY_IN_COMPOSITE) \
     X(BAD_OBJ_COMP_CALL_TYPE) \
-    X(GCN_LIST_ERROR)
+    X(GCN_LIST_ERROR) \
+    X(BAD_DETACH_MSG) \
+    X(OBJ_SHUTDOWN_OR_DETACH_WHILE_OTHER_STILL_ACTIVE) \
+    X(OBJ_DETACH_NOT_STARTED)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -317,9 +320,20 @@ extern dword kernelTimerEventsDropped;
 #define KMSG_META_GCN_LIST_SEND			39
 #define KMSG_META_GCN_LIST_DESTROY		40
 #define KMSG_META_GCN_LIST_FIND_ITEM		60
+#define KMSG_META_DETACH			6
+#define KMSG_META_DETACH_COMPLETE		7
+#define KMSG_META_APP_SHUTDOWN			10
+#define KMSG_META_SHUTDOWN_COMPLETE		11
+#define KMSG_META_SHUTDOWN_ACK			12
+#define KMSG_META_QUIT				26
+#define KMSG_META_QUIT_ACK			27
+#define KMSG_META_FINISH_QUIT			52
 /* MetaClass variable data (metaC.goh) */
 #define KVD_TEMP_META_GCN			0	/* the first */
+#define KVD_TEMP_META_QUIT_LIST			4
+#define KVD_DETACH_DATA				8
 #define KMSG_PROCESS_INSTANTIATE		8197
+#define KMSG_PROCESS_EXIT			8198
 #define KMSG_PROCESS_FINAL_BLOCK_FREE		8204
 #define KMSG_PROCESS_INSTANTIATE_FOR_THREAD	8208
 
@@ -480,6 +494,24 @@ void GCNListUnRelocateList(optr list, MemHandle relocBlock);
  * (with `oldData')?  Then it need not be sent again (geodesEvent.c) */
 Boolean EventSameStatus(EventHandle newEv, MemHandle newData,
 			EventHandle oldEv, MemHandle oldData);
+
+/* ---------------------------------------------------------------------
+ * Detach and quit (Object/objectShutdown.c), as in metaC.goh.
+ * ------------------------------------------------------------------- */
+typedef struct {
+    word	DDE_ackCount;
+    word	DDE_callerID;
+    optr	DDE_ackOD;
+    word	DDE_completeMsg;
+} DetachDataEntry;
+#define MGCNLT_ACTIVE_LIST	0x0000		/* geoworks.h */
+
+void ObjInitDetach(Message msg, optr obj, word callerID, optr ackOD);
+void ObjIncDetach(optr obj);
+void ObjEnableDetach(optr obj);
+/* the MetaClass methods (objectShutdown.c) */
+GocMethodThunk MetaAck, MetaDetach, MetaDetachComplete, MetaAppShutdown,
+	       MetaShutdownComplete, MetaQuit, MetaQuitAck, MetaFinishQuit;
 
 /* ---------------------------------------------------------------------
  * Geode resources (Geodes/geodesResource.c).  Until GeodeLoad exists,

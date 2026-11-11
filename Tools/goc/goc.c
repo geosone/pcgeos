@@ -1259,6 +1259,9 @@ ParseArgs(int argc, char **argv)
 		      compilerOffsetTypeName = gccOffsetTypeName;
 		      compilerCastForOffset = gccCastForOffset;
 		      compiler = COM_GCC;
+		      /* @ifdef GEOS_PORT32: declarations that differ in
+		       * Port32 (Port32/ABI.md section 13) */
+		      Scan_DefineMacro("GEOS_PORT32", "1");
 		      break;
 		    case 'h':
 		      /* lms and compilerFarKeyword are already set */
