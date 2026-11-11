@@ -3,12 +3,15 @@
  *              floating point stack (pilot port, see README.md).
  *
  * GEOS-80 numbers (FloatNum, 10 bytes: 4 mantissa words + sign/exponent word,
- * bias 0x3fff, explicit integer bit) are bit-identical to the x87 80-bit
- * extended format.  On x86/x86-64 with GCC/Clang, `long double` is exactly
- * that format, so the stack holds `long double` values.
+ * bias 0x3fff, explicit integer bit) have the layout of the x87 80-bit
+ * extended format.  The stack holds IEEE `double` values (FpValue): the
+ * same on every host and compiler (x86, arm64, armhf; GCC, Clang, Open
+ * Watcom), as agreed for the port (PLAN.md, upstream #1239).  FloatNum is
+ * converted arithmetically, never by copying bytes, so the host's
+ * `long double` (80, 64 or 128 bits) does not matter.
  *
- * NOTE: Open Watcom's `long double` is only 64 bits -- a Watcom build would
- * need SoftFloat extF80 or inline x87 code instead.
+ * Consequences of double: 53-bit mantissa (15-17 significant digits) and
+ * the range of double; GEOS-80 numbers beyond it become +/-inf or 0.
  */
 #ifndef FPSTACK_H
 #define FPSTACK_H
@@ -20,6 +23,8 @@ typedef uint16_t word;
 typedef int16_t  sword;
 typedef uint32_t dword;
 typedef int32_t  sdword;
+
+typedef double FpValue;       /* one element of the float stack */
 
 /* In-memory GEOS-80 layout (math.def: FloatNum). */
 typedef struct {
@@ -33,9 +38,9 @@ typedef struct {
 /* ---- stack primitives (Forth-style names as in the asm sources) ---- */
 void   FpReset(void);
 int    FpDepth(void);
-void   FloatPushLD(long double x);
-long double FloatPopLD(void);
-long double FloatTopLD(void);
+void    FloatPushValue(FpValue x);
+FpValue FloatPopValue(void);
+FpValue FloatTopValue(void);
 void   FloatPushNumber(const FloatNum *n);     /* FloatPushNumberFar */
 void   FloatPopNumber(FloatNum *n);
 

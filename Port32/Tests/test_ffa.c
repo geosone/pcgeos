@@ -14,13 +14,13 @@
 
 static int fails, total, verbose;
 
-static void check(const char *name, long double x, word flags, int digits,
+static void check(const char *name, double x, word flags, int digits,
                   int decimals, const char *expect)
 {
     char buf[FLOAT_TO_ASCII_HUGE_BUF_LEN];
     memset(buf, 'X', sizeof buf);
     FpReset();
-    FloatPushLD(x);
+    FloatPushValue(x);
     int n = FloatFloatToAscii_StdFormat(flags, (byte)digits, (byte)decimals,
                                         buf, NULL);
     total++;
@@ -29,25 +29,25 @@ static void check(const char *name, long double x, word flags, int digits,
     if (!ok)
         fails++;
     if (!ok || verbose)
-        printf("%s %-28s %-24.17Lg flags=%04x d=%2d dec=%2d -> \"%s\" (n=%d, depth=%d)%s%s%s\n",
+        printf("%s %-28s %-24.17g flags=%04x d=%2d dec=%2d -> \"%s\" (n=%d, depth=%d)%s%s%s\n",
                ok ? "ok  " : "FAIL", name, x, flags, digits, decimals, buf, n,
                FpDepth(), ok ? "" : "  expected \"", ok ? "" : expect,
                ok ? "" : "\"");
 }
 
-static void checkFrame(const char *name, long double x, FFA_stackFrame *f,
+static void checkFrame(const char *name, double x, FFA_stackFrame *f,
                        const char *expect)
 {
     char buf[FLOAT_TO_ASCII_HUGE_BUF_LEN];
     FpReset();
-    FloatPushLD(x);
+    FloatPushValue(x);
     int n = FloatFloatToAscii(f, buf, NULL);
     total++;
     int ok = strcmp(buf, expect) == 0 && FpDepth() == 0;
     if (!ok)
         fails++;
     if (!ok || verbose)
-        printf("%s %-28s %-24.17Lg -> \"%s\" (n=%d)%s%s%s\n", ok ? "ok  " : "FAIL",
+        printf("%s %-28s %-24.17g -> \"%s\" (n=%d)%s%s%s\n", ok ? "ok  " : "FAIL",
                name, x, buf, n, ok ? "" : "  expected \"", ok ? "" : expect,
                ok ? "" : "\"");
 }
@@ -62,42 +62,42 @@ int main(int argc, char **argv)
     /* --- fixed format, fast path --- */
     check("int",            1234,        0,   15, 0,  "1234");
     check("int+dec",        1234,        0,   15, 2,  "1234.00");
-    check("round 2",        3.14159L,    0,   15, 2,  "3.14");
-    check("round away 0",   0.56L,       0,   15, 0,  "1");
-    check("round away 0 neg", -0.56L,    0,   15, 0,  "-1");
-    check("round half",     2.5L,        0,   15, 0,  "3");
-    check("345.678 dec2",   345.678L,    0,   15, 2,  "345.68");
+    check("round 2",        3.14159,    0,   15, 2,  "3.14");
+    check("round away 0",   0.56,       0,   15, 0,  "1");
+    check("round away 0 neg", -0.56,    0,   15, 0,  "-1");
+    check("round half",     2.5,        0,   15, 0,  "3");
+    check("345.678 dec2",   345.678,    0,   15, 2,  "345.68");
     check("zero",           0,           0,   15, 2,  "0.00");
     check("zero no dec",    0,           0,   15, 0,  "0");
-    check("small",          0.05L,       0,   15, 2,  "0.05");
-    check("neg",            -42.5L,      0,   15, 1,  "-42.5");
-    check("commas",         1234567.891L, COM, 15, 2, "1,234,567.89");
+    check("small",          0.05,       0,   15, 2,  "0.05");
+    check("neg",            -42.5,      0,   15, 1,  "-42.5");
+    check("commas",         1234567.891, COM, 15, 2, "1,234,567.89");
     check("commas 3",       123456,      COM, 15, 0,  "123,456");
-    check("no trail 0",     2.5L,        NTZ, 15, 5,  "2.5");
-    check("no trail 0 int", 2.0L,        NTZ, 15, 5,  "2");
-    check("no lead 0",      0.25L,       NLZ, 15, 2,  ".25");
-    check("percent",        0.125L,      PCT, 15, 1,  "12.5%");
+    check("no trail 0",     2.5,        NTZ, 15, 5,  "2.5");
+    check("no trail 0 int", 2.0,        NTZ, 15, 5,  "2");
+    check("no lead 0",      0.25,       NLZ, 15, 2,  ".25");
+    check("percent",        0.125,      PCT, 15, 1,  "12.5%");
     /* QUIRK (documented): rounds at decimalLimit, then truncates to totalDigits */
-    check("totalDigits cut",123.456L,    0,   5,  4,  "123.45");
+    check("totalDigits cut",123.456,    0,   5,  4,  "123.45");
     check("1e9",            1e9L,        0,   15, 0,  "1000000000");
-    check("dec 10",         0.1234567891L, 0, 15, 10, "0.1234567891");
+    check("dec 10",         0.1234567891, 0, 15, 10, "0.1234567891");
 
     /* --- fixed format, general path (> 32 bit integer) --- */
-    check("big int",        12345678901234.0L, 0,  15, 0, "12345678901234");
-    check("big commas",     12345678901234.0L, COM, 15, 0, "12,345,678,901,234");
-    check("big int+dec",    1234567890123.5L,  0,  15, 2, "1234567890123.50");
+    check("big int",        12345678901234.0, 0,  15, 0, "12345678901234");
+    check("big commas",     12345678901234.0, COM, 15, 0, "12,345,678,901,234");
+    check("big int+dec",    1234567890123.5,  0,  15, 2, "1234567890123.50");
     check("too big -> sci", 1e20L,       0,   15, 2,  "1.00E+20");
-    check("dec > 10",       0.5L,        0,   15, 12, "0.500000000000");
+    check("dec > 10",       0.5,        0,   15, 12, "0.500000000000");
 
     /* --- scientific --- */
-    check("sci 1",          12345.678L,  SCI, 15, 3,  "1.235E+04");
-    check("sci neg exp",    0.000123L,   SCI, 15, 2,  "1.23E-04");
-    check("sci neg num",    -6.02e23L,   SCI, 15, 2,  "-6.02E+23");
+    check("sci 1",          12345.678,  SCI, 15, 3,  "1.235E+04");
+    check("sci neg exp",    0.000123,   SCI, 15, 2,  "1.23E-04");
+    check("sci neg num",    -6.02e23,   SCI, 15, 2,  "-6.02E+23");
     check("sci 1e100",      1e100L,      SCI, 15, 1,  "1.0E+100");
     check("sci 1e-300",     1e-300L,     SCI, 15, 1,  "1.0E-300");
     check("sci zero",       0,           SCI, 15, 2,  "0.00E+00");
-    check("sci ntz",        1.5e10L,     SCI|NTZ, 15, 6, "1.5E+10");
-    check("sci round up",   9.999L,      SCI, 15, 2,  "1.00E+01");
+    check("sci ntz",        1.5e10,     SCI|NTZ, 15, 6, "1.5E+10");
+    check("sci round up",   9.999,      SCI, 15, 2,  "1.00E+01");
 
     /* --- don't use scientific (huge) --- */
     check("huge fixed",     1e20L,       DUS, 64, 0,  "100000000000000000000");
@@ -118,7 +118,7 @@ int main(int argc, char **argv)
         strcpy(f.FFA_float.FFA_params.header, "$");
         strcpy(f.FFA_float.FFA_params.preNegative, "(");
         strcpy(f.FFA_float.FFA_params.postNegative, ")");
-        checkFrame("currency neg", -1234.5L, &f, "$(1,234.50)");
+        checkFrame("currency neg", -1234.5, &f, "$(1,234.50)");
         memset(&f, 0, sizeof f);
         f.FFA_float.FFA_params.formatFlags = FFAF_HEADER_PRESENT | COM;
         f.FFA_float.FFA_params.totalDigits = 15;

@@ -472,8 +472,11 @@ done:
 int FloatFloatToAscii(FFA_stackFrame *frame, char *resultString,
                       const FloatNum *number)
 {
-    Out o = { resultString, 0 };
+    Out o;
     int cx = 0;
+
+    o.buf = resultString;
+    o.di = 0;
 
     if (P.formatFlags & FFAF_FLOAT_RESERVED) {
         /* date/time formatting: FloatFloatToDateTime (floatDateTime.asm),

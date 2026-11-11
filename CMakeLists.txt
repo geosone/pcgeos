@@ -51,11 +51,7 @@ message(STATUS "GEOS_HOST=${GEOS_HOST} arch=${CMAKE_SYSTEM_PROCESSOR} EC=${GEOS_
 
 enable_testing()
 add_subdirectory(Port32/ghal)
-# The float pilot needs C11 and C99 long double math, which Open Watcom
-# lacks; it joins dos32 with the planned switch to double (PLAN.md P1).
-if(NOT GEOS_HOST STREQUAL "dos32")
-  add_subdirectory(Library/Math/Float)
-endif()
+add_subdirectory(Library/Math/Float)
 add_subdirectory(Port32/Tests)
 
 # Inventory of direct host contacts (plan P2).  Not part of 'all'.

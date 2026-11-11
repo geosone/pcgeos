@@ -11,6 +11,9 @@ cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build
 cmake -S . -B build32 -G Ninja \
       -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-linux-i686.cmake
 cmake --build build32 && ctest --test-dir build32
+cmake -S . -B build-arm64 -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-linux-aarch64.cmake
+cmake --build build-arm64 && ctest --test-dir build-arm64   # via qemu-aarch64
 build/Port32/Tests/test_ffa -v   # all test cases with output
 ```
 

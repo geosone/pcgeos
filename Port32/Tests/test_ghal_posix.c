@@ -108,6 +108,7 @@ static void on_fault(const ghal_fault_info *info)
     siglongjmp(fault_jmp, 1);
 }
 
+#if defined(__x86_64__) || defined(__i386__)
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((no_sanitize("undefined")))
 #endif
@@ -115,6 +116,7 @@ static int divide(volatile int a, volatile int b)
 {
     return a / b;
 }
+#endif
 
 static void test_fault(void)
 {
