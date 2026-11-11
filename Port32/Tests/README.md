@@ -89,6 +89,10 @@ fork, threads and signals: enforced read/execute protection, `ghal_crit`
 against another thread, and `ghal_fault` (access, divide, breakpoint; the
 test catches every fault, so no real crash happens).
 
+`test_ghal_dos32.c` (ctest `ghal.dos32`, dos32 only) covers `ghal_fault`
+through DPMI exception handlers: divide error, invalid selector, invalid
+opcode and `int 3`.
+
 For dos32 the tests are DOS programs; ctest starts them through
 `Port32/tools/dosrun.sh`, which has three engines:
 

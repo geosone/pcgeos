@@ -13,13 +13,14 @@
  *   ghal_hostlock  nesting count only (single CPU, no host threads).
  *   ghal_irq       GHAL_IRQ_TICK on IRQ0: the PIT is reprogrammed to the
  *                  tick rate and the BIOS handler is chained at 18.2 Hz.
- *   ghal_fault     not implemented yet (DPMI exception handlers, 0203h).
+ *   ghal_fault     DPMI exception handlers (0203h); no fault address.
  */
 #include "ghal.h"
 
 #include <conio.h>
 #include <dos.h>
 #include <i86.h>
+#include <process.h>   /* _exit */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -282,8 +283,11 @@ static void irq0_unhook(void)
 
 /* At exit: first our IRQ0 vector, then the PIT mode.  Never leave DOS
  * with our vector installed or the PIT in a mode the BIOS does not use. */
+static void fault_uninstall(void);
+
 static void dos32_cleanup(void)
 {
+    fault_uninstall();
     irq0_unhook();
     pit_restore();
 }
@@ -449,13 +453,139 @@ ghal_status ghal_time_get_local(ghal_datetime *dt)
 }
 
 /* ------------------------------------------------------------------ */
-/* ghal_fault: not implemented yet                                    */
+/* ghal_fault: DPMI exception handlers (0202h/0203h)                  */
+/*                                                                    */
+/* The DPMI host calls a handler with a 32-bit frame on a locked      */
+/* stack:  [esp] ret EIP, ret CS, error code, EIP, CS, EFLAGS, ESP,   */
+/* SS.  Our stub records the exception, sets the frame's EIP to       */
+/* fault_trampoline and returns (RETF): the host resumes the faulting */
+/* context there, outside the exception, where the C handler may run  */
+/* and longjmp.  DPMI 0.9 gives no fault address (CR2).               */
 /* ------------------------------------------------------------------ */
+
+static ghal_fault_handler fault_handler;
+static volatile uint32_t exc_no, exc_err, exc_eip;
+static uint32_t tramp_addr;
+static unsigned short saved_ds;
+
+/* exceptions we take; 1 (debug) and 7 (no coprocessor, FPU emulators)
+ * stay with the host */
+static const unsigned char exc_list[] = { 0, 3, 4, 5, 6, 10, 11, 12, 13, 14, 16 };
+#define NEXC (sizeof exc_list / sizeof exc_list[0])
+static struct { unsigned short sel; uint32_t off; } exc_old[NEXC];
+static int exc_installed;
+
+#define EXC_STUB(n)                                                     \
+static void __declspec(naked) exc_stub_##n(void)                        \
+{                                                                       \
+    _asm { push ds }                                                    \
+    _asm { push eax }                                                   \
+    _asm { mov ds, word ptr cs:saved_ds }                               \
+    _asm { mov dword ptr exc_no, n }                                    \
+    _asm { mov eax, [esp + 16] }    /* error code */                    \
+    _asm { mov exc_err, eax }                                           \
+    _asm { mov eax, [esp + 20] }    /* faulting EIP */                  \
+    _asm { mov exc_eip, eax }                                           \
+    _asm { mov eax, tramp_addr }                                        \
+    _asm { mov [esp + 20], eax }    /* resume in fault_trampoline */    \
+    _asm { pop eax }                                                    \
+    _asm { pop ds }                                                     \
+    _asm { retf }                                                       \
+}
+EXC_STUB(0)  EXC_STUB(3)  EXC_STUB(4)  EXC_STUB(5)  EXC_STUB(6)
+EXC_STUB(10) EXC_STUB(11) EXC_STUB(12) EXC_STUB(13) EXC_STUB(14)
+EXC_STUB(16)
+
+static void (*const exc_stubs[NEXC])(void) = {
+    exc_stub_0, exc_stub_3, exc_stub_4, exc_stub_5, exc_stub_6,
+    exc_stub_10, exc_stub_11, exc_stub_12, exc_stub_13, exc_stub_14,
+    exc_stub_16
+};
+
+static ghal_fault_kind fault_kind(uint32_t n)
+{
+    switch (n) {
+    case 0: case 4: return GHAL_FAULT_DIVIDE;
+    case 3:         return GHAL_FAULT_BREAKPOINT;
+    case 6:         return GHAL_FAULT_ILLEGAL;
+    case 16:        return GHAL_FAULT_FPU;
+    default:        return GHAL_FAULT_ACCESS;
+    }
+}
+
+/* Entered by "returning" from the exception: no caller, never returns. */
+static void fault_trampoline(void)
+{
+    ghal_fault_info info;
+    info.kind = fault_kind(exc_no);
+    info.address = NULL;
+    info.pc = (void *)exc_eip;
+    if (fault_handler)
+        fault_handler(&info);
+    fprintf(stderr, "geos[error]: unhandled exception %lu (error code %lx) at pc %p\n",
+            (unsigned long)exc_no, (unsigned long)exc_err, info.pc);
+    dos32_cleanup();
+    fflush(NULL);
+    _exit(3);
+}
+
+static int dpmi_get_exc(unsigned n, unsigned short *sel, uint32_t *off)
+{
+    union REGS r;
+    memset(&r, 0, sizeof r);
+    r.x.eax = 0x0202;
+    r.h.bl = (unsigned char)n;
+    int386(0x31, &r, &r);
+    *sel = (unsigned short)r.x.ecx;
+    *off = r.x.edx;
+    return !r.x.cflag;
+}
+
+static int dpmi_set_exc(unsigned n, unsigned short sel, uint32_t off)
+{
+    union REGS r;
+    memset(&r, 0, sizeof r);
+    r.x.eax = 0x0203;
+    r.h.bl = (unsigned char)n;
+    r.x.ecx = sel;
+    r.x.edx = off;
+    int386(0x31, &r, &r);
+    return !r.x.cflag;
+}
+
+static void fault_uninstall(void)
+{
+    size_t i;
+    if (!exc_installed)
+        return;
+    for (i = 0; i < NEXC; i++)
+        dpmi_set_exc(exc_list[i], exc_old[i].sel, exc_old[i].off);
+    exc_installed = 0;
+}
 
 ghal_status ghal_fault_set_handler(ghal_fault_handler fn)
 {
-    (void)fn;
-    return GHAL_ERR_UNSUPPORTED;
+    struct SREGS sr;
+    size_t i;
+    fault_handler = fn;
+    if (exc_installed)
+        return GHAL_OK;
+    segread(&sr);
+    saved_ds = sr.ds;
+    tramp_addr = (uint32_t)fault_trampoline;
+    for (i = 0; i < NEXC; i++)
+        if (!dpmi_get_exc(exc_list[i], &exc_old[i].sel, &exc_old[i].off))
+            return GHAL_ERR_HOST;
+    ensure_cleanup();
+    for (i = 0; i < NEXC; i++) {
+        if (!dpmi_set_exc(exc_list[i], sr.cs, (uint32_t)exc_stubs[i])) {
+            while (i--)
+                dpmi_set_exc(exc_list[i], exc_old[i].sel, exc_old[i].off);
+            return GHAL_ERR_HOST;
+        }
+    }
+    exc_installed = 1;
+    return GHAL_OK;
 }
 
 /* ------------------------------------------------------------------ */
