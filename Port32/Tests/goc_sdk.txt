@@ -1,7 +1,7 @@
 # SDK_C samples (Appl/SDK_C/<dir>) that goc -cg translates and that compile
 # on 32- and 64-bit hosts (target goc_sdk).  The others still need porting
 # of the application code: NULL used as a handle, PtrToSegment, inline asm,
-# static optr tables in code (Port32/ABI.md section 4).
+# pointer types C no longer converts (Port32/ABI.md sections 4 and 6).
 AppIcon
 Bitmap
 ChunkArr
@@ -26,6 +26,7 @@ Hello2
 Hello3
 InkTest
 Launch
+Levels
 Moniker
 ParaAttr
 Parser

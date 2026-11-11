@@ -50,6 +50,25 @@ const ChunkHandle gocTestChunks[] = {
     OptrToChunk(@GocTestText)
 };
 
+/* static optrs in code: unrelocated constants, resolved where used */
+static const optr gocTestOne = @GocTestText;
+const optr gocTestOptrs[] = { @GocTestTrigger, @GocTestGlyph, @GocTestApp };
+typedef struct {
+    ChunkHandle	TFI_object;
+    optr	TFI_name;
+    word	TFI_flags;
+} TestFeaturesInfo;		/* like GenControlFeaturesInfo */
+
+static const TestFeaturesInfo *
+GocTestFeatures(void)
+{
+    static const TestFeaturesInfo list[] = {
+	{OptrToChunk(@GocTestTrigger), @GocTestTextMoniker, 1},
+	{OptrToChunk(@GocTestGlyph), @GocTestText, 2}
+    };
+    return list;
+}
+
 @method GocTestProcessClass, MSG_GOCTEST_PING
 {
     if (value != 0) {
@@ -189,6 +208,43 @@ GocTestCheck(void)
 	Check(!strcmp(gocTestStored, "again"), "@dispatch");
 	@call process::MSG_GOCTEST_PING(0);
 	Check(gocTestSuperCalls == 1, "@callsuper");
+    }
+
+    /* static optrs in code */
+    {
+	extern optr gocTestLastDest;
+	const TestFeaturesInfo *f = GocTestFeatures();
+	optr automatic;
+
+	__goc_resource_handles[0] = 0x11;
+	__goc_resource_handles[GOCR_RES_INTERFACE] = 0x22;
+	__goc_resource_handles[GOCR_RES_APPRESOURCE] = 0x33;
+	{
+	    optr a = @GocTestGlyph;	/* not static: relocated at once */
+	    automatic = a;
+	}
+	Check(gocTestOne == GOCR_UNRELOC_OPTR(GOCR_RES_INTERFACE, GocTestText),
+	      "static optr unrelocated");
+	Check(gocTestOptrs[2] ==
+	      GOCR_UNRELOC_OPTR(GOCR_RES_APPRESOURCE, GocTestApp),
+	      "static optr table");
+	Check(GOCR_RESOLVE(gocTestOptrs[1]) == ConstructOptr(0x22, GocTestGlyph) &&
+	      GOCR_RESOLVE(gocTestOptrs[2]) == ConstructOptr(0x33, GocTestApp),
+	      "GOCR_RESOLVE");
+	Check(GOCR_RESOLVE(GOCR_PROCESS_OPTR) == ConstructOptr(0x11, 0),
+	      "GOCR_RESOLVE process");
+	Check(GOCR_RESOLVE(automatic) == automatic &&
+	      automatic == ConstructOptr(0x22, GocTestGlyph),
+	      "automatic optr relocated");
+	Check(f[0].TFI_object == GocTestTrigger &&
+	      f[0].TFI_name == GOCR_UNRELOC_OPTR(GOCR_RES_APPRESOURCE,
+						 GocTestTextMoniker) &&
+	      f[1].TFI_flags == 2, "static feature list");
+	Check(GeodeResolveOptrAt(&f[1].TFI_name, f[1].TFI_name) ==
+	      ConstructOptr(0x22, GocTestText), "GeodeResolveOptrAt");
+	@send gocTestOptrs[1]::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	Check(gocTestLastDest == ConstructOptr(0x22, GocTestGlyph),
+	      "@send to a static optr");
     }
 
     /* the class structure points to its tables */

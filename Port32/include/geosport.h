@@ -26,6 +26,7 @@
 #define _pascal
 #define _cdecl
 #define _export
+#define vfar		/* data qualifier of some 16-bit sources (Levels, GeoFile) */
 #define PCB(ret, name, args)	ret (*name) args
 #define CCB(ret, name, args)	ret (*name) args
 /* inline machine code has no meaning above the GHAL */
@@ -97,6 +98,32 @@ typedef word		VardataKey;
 extern Handle __goc_resource_handles[] GOCR_HIDDEN;
 #define GOCR_OPTR(chunk)		ConstructOptr(__goc_resource_handles[chunk##_resid], chunk)
 #define GOCR_CLASS_OPTR(cls)	((optr) (uintptr_t) &(cls))
+
+/*
+ * Static data in code (a table of optrs, a GenControl feature list) holds
+ * unrelocated optrs as well (GOCR_SOPTR: a constant).  They are resolved
+ * where they are used: in the geode that holds them with GOCR_RESOLVE
+ * (goc does that for the destination of @send/@call), elsewhere with
+ * GeodeResolveOptrAt(), which finds the geode from the address of the
+ * data.  Entry 0 of __goc_resource_handles is the geode's core block,
+ * which is also its process (GOCR_PROCESS_RES).  Port32/ABI.md section 6.
+ */
+#define GOCR_IS_UNRELOCATED(op)	((OptrToHandle(op) & GOCR_UNRELOCATED) != 0)
+#define GOCR_RES_OF(op)		((word) OptrToHandle(op))
+
+static inline optr
+GocrResolveWith(optr op, const Handle *handles)
+{
+    word res;
+
+    if (!GOCR_IS_UNRELOCATED(op)) {
+	return op;
+    }
+    res = GOCR_RES_OF(op);
+    return ConstructOptr(handles[res == GOCR_PROCESS_RES ? 0 : res],
+			 OptrToChunk(op));
+}
+#define GOCR_RESOLVE(op)		GocrResolveWith((op), __goc_resource_handles)
 
 /*
  * What the loader needs to build a resource: the block header and, per

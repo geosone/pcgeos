@@ -159,19 +159,53 @@ parameters. It covers `@call` with a reply, `@send`, `@record` +
 (DJGPP, real DOS in QEMU). The 44 SDK samples of `goc_sdk` compile with
 the same scheme.
 
-## 6. Open
+## 6. optrs in static data in code
 
-1. **optrs in static data in code**, e.g. GenControl feature tables
-   (`{OptrToChunk(@X), @Name, 0}`). Glue relocated these. Options are
-   ELF relocations resolved by the geode loader, or unrelocated optrs
-   resolved where they are used.
-2. **References to objects of other files in resource data.** `@extern`
+Code has static tables of optrs, for example GenControl feature lists
+(`{OptrToChunk(@X), @XName, 0}`) and `GenAppUsabilityTuple` lists. Glue
+relocated them when the geode was loaded. Under `goc -cg`, an optr in
+such a table must be a constant, so goc writes it **unrelocated**, the
+same way as in resource data (§4): `GOCR_SOPTR(X)` holds the resource
+number with `GOCR_UNRELOCATED` set, plus the chunk handle. The value is
+resolved where it is used:
+
+- **In the geode that holds the table**, `GOCR_RESOLVE(o)` uses the
+  geode's own `__goc_resource_handles[]`. goc applies it to the
+  destination of every `@send`/`@call` that is not already relocated, so
+  `@send table[i]::MSG` works unchanged. For an optr that is already
+  relocated, it changes nothing.
+- **In another geode**, for example the UI library reading a controller's
+  feature list, `GeodeResolveOptrAt(where, o)` is used (`geode.h`). The
+  kernel finds the owning geode from the address `where` that the optr
+  was read from.
+- Entry 0 of `__goc_resource_handles` is the core block of the geode. For
+  an application, this is also its process, which is how `process`
+  (`GOCR_PROCESS_RES`) is resolved.
+
+goc decides by context. It follows the C structure of its output: braces,
+strings, comments and preprocessor lines. In the initializer of an object
+with static storage (file scope or `static`), `@X` becomes
+`GOCR_SOPTR(X)`. Everywhere else it remains `GOCR_OPTR(X)`, which is
+relocated at once. Automatic variables therefore get relocated optrs.
+Only objects and chunks of the same file can be used in static data.
+Other objects are a goc error until §7.1 is solved. In the SDK samples,
+26 table entries change form, and no other code does.
+
+Checks: `goc.resources` covers a static optr, an optr table at file
+scope, a feature-list structure that is `static` in a function, an
+automatic optr, `GOCR_RESOLVE` including `process`, `GeodeResolveOptrAt`,
+and `@send` to a table entry. The UICtrl and Levels samples no longer
+fail on their tables, and Levels now compiles (`goc_sdk`: 45 samples).
+
+## 7. Open
+
+1. **References to objects of other files in resource data.** `@extern`
    objects have no compile-time resource, so they need load-time
    relocation by name.
-3. **Geode format**: an ELF shared object plus the `.gp` tables (resources
+2. **Geode format**: an ELF shared object plus the `.gp` tables (resources
    as above, exports, protocol numbers); see `GHAL-Concept.md` §4.4.
-4. **DOS16 file formats under dos32**: which structures of VM files and
+3. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.
-5. **GEOS `stdio.h` and the DBCS string functions** on top of the host C
+4. **GEOS `stdio.h` and the DBCS string functions** on top of the host C
    library.

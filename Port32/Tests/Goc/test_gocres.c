@@ -39,6 +39,15 @@ static void *Deliver(ClassStruct *cls, optr dest, Message message,
     return reply;
 }
 
+/* the geode's static data is this program: resolve with its handles */
+optr GeodeResolveOptrAt(const void *where, optr o)
+{
+    (void) where;
+    return GocrResolveWith(o, __goc_resource_handles);
+}
+
+optr gocTestLastDest;
+
 /* the one recorded event */
 static struct {
     optr dest;
@@ -50,6 +59,7 @@ void *CObjMessageP(word flags, optr dest, Message message,
 		   const void *params, dword paramSize,
 		   void *reply, dword replySize)
 {
+    gocTestLastDest = dest;
     if (flags & MF_RECORD) {
 	if (paramSize > sizeof(event.params) || replySize != sizeof(EventHandle)) {
 	    printf("FAIL record: sizes %u/%u\n", (unsigned) paramSize,

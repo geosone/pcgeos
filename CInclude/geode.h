@@ -135,6 +135,16 @@ extern word	/*XXX*/
 extern GeodeHandle	/*XXX*/
     _pascal GeodeGetProcessHandle(void);
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: resolve an optr read from static data of a geode (a GenControl
+ * feature list, ...).  goc leaves those unrelocated (GOCR_SOPTR); `where'
+ * is the address the optr was read from, which tells the geode.  Other
+ * optrs come back unchanged.  See Port32/ABI.md section 6.
+ */
+extern optr GeodeResolveOptrAt(const void *where, optr o);
+#endif
+
 /***/
 
 extern GeodeHandle

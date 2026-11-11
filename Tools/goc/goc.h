@@ -271,6 +271,28 @@ extern void GenerateMethodDef(Method *meth);
 extern char gccOutTail[];
 extern void GccTrackOutput(const char *s, int n);
 
+/* COM_GCC: the C structure of the output (goc.c) */
+#define GCC_LEX_DEPTH 64
+typedef enum { GLM_CODE, GLM_STRING, GLM_CHAR, GLM_LINE_COMMENT,
+	       GLM_BLOCK_COMMENT, GLM_PREPROC } GccLexMode;
+typedef enum { GLB_BLOCK, GLB_TYPE, GLB_INIT } GccLexBrace;
+typedef struct {
+    GccLexMode	mode;
+    Boolean	escape, lineStart;
+    char	prev, lastSig, beforeSlash;
+    char	word[32];
+    int		wordLen;
+    int		typeKeyword;	/* > 0 after struct/union/enum (+ tag) */
+    Boolean	sawStatic, sawEquals;	/* in the current declaration */
+    int		depth, blocks;	/* open braces, open function/blocks */
+    GccLexBrace	kind[GCC_LEX_DEPTH];
+    Boolean	stat[GCC_LEX_DEPTH];	/* GLB_INIT: static storage */
+    Boolean	savedStatic[GCC_LEX_DEPTH], savedEquals[GCC_LEX_DEPTH];
+} GccLexState;
+extern GccLexState gccLex;
+extern void GccLexChar(GccLexState *st, char c);
+extern Boolean GccInStaticInit(const GccLexState *st);
+
 /* is 1 if used directive, 0 if used newlines */
 #define OutputLineDirectiveOrNewlines(count) \
    OutputLineDirectiveOrNewlinesForFile(count,curFile->name,yylineno)

@@ -213,7 +213,11 @@ FmtBytes(char *dest,char *fmt, ...)
  * COM_GCC: there are no far pointers to object chunks.  "@Obj" becomes
  * GOCR_OPTR(Obj) in code (the resource handle is looked up at run time) and
  * GOCR_SOPTR(Obj) in data that goes into a resource (an unrelocated optr
- * that is relocated when the resource is loaded).  See geosport.h.
+ * that is relocated when the resource is loaded).  In the initializer of
+ * an object with static storage in code (a GenControl feature table, ...)
+ * it is GOCR_SOPTR(Obj) as well, a constant that is resolved where it is
+ * used (GOCR_RESOLVE, GeodeResolveOptrAt).  See geosport.h and
+ * Port32/ABI.md section 6.
  */
 static int
 GccIdentLen(const char *s)
@@ -259,13 +263,34 @@ GccLocalChunk(Symbol *sym)
 	    sym->data.symChunk.resource != NullSymbol);
 }
 
+/* the form of "@name" in code; lex: the C structure at that point */
+static void
+GccFormatCodeRef(char *dest, const char *name, Symbol *sym,
+		 Boolean afterOptrToChunk, const GccLexState *lex)
+{
+    if (sym != NullSymbol && sym->type == CLASS_SYM) {
+	sprintf(dest, "GOCR_CLASS_OPTR(%s)", name);
+    } else if (GccLocalChunk(sym) && afterOptrToChunk) {
+	sprintf(dest, "GOCR_SCHUNK(%s)", name);
+    } else if (GccInStaticInit(lex)) {
+	if (!GccLocalChunk(sym)) {
+	    yyerror("@%s in a static initializer: only objects and chunks "
+		    "of this file can be used there (Port32/ABI.md 6)", name);
+	}
+	sprintf(dest, "GOCR_SOPTR(%s)", name);
+    } else {
+	sprintf(dest, "GOCR_OPTR(%s)", name);
+    }
+}
+
 static char *
 GccSubstOptr(char *dest, const char *src, Boolean inData)
 {
     char id[256];
-    Symbol *sym;
     int n;
     char *start = dest;
+    GccLexState lex = gccLex;	/* follows the text as it is copied */
+    char *cp;
 
     while (*src != '\0') {
 	if (*src == '@' && (n = GccIdentLen(src + 1)) > 0 &&
@@ -273,18 +298,20 @@ GccSubstOptr(char *dest, const char *src, Boolean inData)
 	{
 	    memcpy(id, src + 1, n);
 	    id[n] = '\0';
-	    sym = inData ? NullSymbol : Symbol_Find(id, TRUE);
+	    cp = dest;
 	    if (inData) {
 		dest += sprintf(dest, "GOCR_SOPTR(%s)", id);
-	    } else if (sym != NullSymbol && sym->type == CLASS_SYM) {
-		dest += sprintf(dest, "GOCR_CLASS_OPTR(%s)", id);
-	    } else if (GccLocalChunk(sym) && GccAfterOptrToChunk(start, dest)) {
-		dest += sprintf(dest, "GOCR_SCHUNK(%s)", id);
 	    } else {
-		dest += sprintf(dest, "GOCR_OPTR(%s)", id);
+		GccFormatCodeRef(dest, id, Symbol_Find(id, TRUE),
+				 GccAfterOptrToChunk(start, dest), &lex);
+		dest += strlen(dest);
+	    }
+	    while (cp < dest) {
+		GccLexChar(&lex, *cp++);
 	    }
 	    src += 1 + n;
 	} else {
+	    GccLexChar(&lex, *src);
 	    *dest++ = *src++;
 	}
     }
@@ -311,13 +338,11 @@ void
 OutputObjRef(char *name)
 {
     if (compiler == COM_GCC) {
-	if (GccLocalChunk(Symbol_Find(name, TRUE)) &&
-	    GccAfterOptrToChunk(NULL, NULL))
-	{
-	    Output(" GOCR_SCHUNK(%s)", name);
-	} else {
-	    Output(" GOCR_OPTR(%s)", name);
-	}
+	char buf[300];
+
+	GccFormatCodeRef(buf, name, Symbol_Find(name, TRUE),
+			 GccAfterOptrToChunk(NULL, NULL), &gccLex);
+	Output(" %s", buf);
     } else {
 	Output(" (optr)&%s", name);
     }
@@ -1117,14 +1142,37 @@ GccOutputReplyEnd(const char *rt)
     }
 }
 
+/*
+ * The destination of a message.  An optr expression that may come from
+ * static data (unrelocated, GOCR_SOPTR) is resolved first; @Obj, oself,
+ * process and handle:chunk pairs are relocated already.
+ */
 static void
 GccOutputDest(ObjDest *od)
 {
+    static const char *const resolved[] = {
+	"GOCR_OPTR(", "GOCR_CLASS_OPTR(", "ConstructOptr(", "oself", NULL
+    };
+    const char *d = DEST(od);
+    int i;
+
+    while (isspace((unsigned char) *d)) {
+	d++;
+    }
     if (DEST_TYPE(od) == PROTO_TWO_PARAMS) {
 	Output("ConstructOptr(%s)", DEST(od));
-    } else {
-	Output("%s", DEST(od));
+	return;
     }
+    for (i = 0; resolved[i] != NULL; i++) {
+	if (!strncmp(d, resolved[i], strlen(resolved[i])) &&
+	    (strcmp(resolved[i], "oself") != 0 || d[5] == '\0' ||
+	     isspace((unsigned char) d[5])))
+	{
+	    Output("%s", DEST(od));
+	    return;
+	}
+    }
+    Output("GOCR_RESOLVE(%s)", DEST(od));
 }
 
 /* @send, @call, @record (also to @children) */

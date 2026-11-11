@@ -358,14 +358,199 @@ OutputChar(char c)
 
 /*
  * COM_GCC: keep the last characters written, so that an object reference
- * can see what precedes it (OptrToChunk(@Obj) is a constant).
+ * can see what precedes it (OptrToChunk(@Obj) is a constant), and follow
+ * the C structure of the output far enough to know whether it is in the
+ * initializer of an object with static storage (file scope or "static"):
+ * there "@Obj" must be a constant (Port32/ABI.md section 6).
  */
 char gccOutTail[GCC_TAIL_SIZE + 1];
+GccLexState gccLex = { GLM_CODE, FALSE, TRUE };
+
+static void
+GccLexWord(GccLexState *st)
+{
+    st->word[st->wordLen] = '\0';
+    if (!strcmp(st->word, "static")) {
+	st->sawStatic = TRUE;
+    }
+    if (!strcmp(st->word, "struct") || !strcmp(st->word, "union") ||
+	!strcmp(st->word, "enum"))
+    {
+	st->typeKeyword = 2;	/* this word and the tag after it */
+    } else if (st->typeKeyword > 0) {
+	st->typeKeyword--;
+    }
+    st->wordLen = 0;
+}
+
+void
+GccLexChar(GccLexState *st, char c)
+{
+    char prev = st->prev;
+
+    st->prev = c;
+    switch (st->mode) {
+      case GLM_STRING:
+      case GLM_CHAR:
+	if (st->escape) {
+	    st->escape = FALSE;
+	} else if (c == '\\') {
+	    st->escape = TRUE;
+	} else if (c == (st->mode == GLM_STRING ? '"' : '\'')) {
+	    st->mode = GLM_CODE;
+	}
+	return;
+      case GLM_LINE_COMMENT:
+      case GLM_PREPROC:
+	if (c == '\n' && !(st->mode == GLM_PREPROC && prev == '\\')) {
+	    st->mode = GLM_CODE;
+	    st->lineStart = TRUE;
+	}
+	return;
+      case GLM_BLOCK_COMMENT:
+	if (prev == '*' && c == '/') {
+	    st->mode = GLM_CODE;
+	    st->prev = ' ';
+	}
+	return;
+      default:
+	break;
+    }
+
+    if (isalnum((unsigned char) c) || c == '_') {
+	if (st->wordLen < (int) sizeof(st->word) - 1) {
+	    st->word[st->wordLen++] = c;
+	}
+	st->lineStart = FALSE;
+	st->lastSig = 'a';
+	return;
+    }
+    if (st->wordLen > 0) {
+	GccLexWord(st);
+    }
+    if (c == '\n') {
+	st->lineStart = TRUE;
+	return;
+    }
+    if (isspace((unsigned char) c)) {
+	return;
+    }
+    if (c == '#' && st->lineStart) {
+	st->mode = GLM_PREPROC;
+	return;
+    }
+    st->lineStart = FALSE;
+    if (c == '/' && prev == '/') {
+	st->mode = GLM_LINE_COMMENT;
+	st->lastSig = st->beforeSlash;
+	return;
+    }
+    if (c == '*' && prev == '/') {
+	st->mode = GLM_BLOCK_COMMENT;
+	st->lastSig = st->beforeSlash;
+	return;
+    }
+    if (c == '/') {
+	st->beforeSlash = st->lastSig;
+    }
+
+    switch (c) {
+      case '"':
+	st->mode = GLM_STRING;
+	break;
+      case '\'':
+	st->mode = GLM_CHAR;
+	break;
+      case '=':
+	if (prev != '!' && prev != '<' && prev != '>') {
+	    st->sawEquals = TRUE;
+	}
+	break;
+      case ';':
+	if (st->depth == 0 || st->kind[st->depth - 1] != GLB_INIT) {
+	    st->sawStatic = st->sawEquals = FALSE;
+	}
+	break;
+      case '{':
+	if (st->depth < GCC_LEX_DEPTH) {
+	    GccLexBrace kind;
+	    Boolean stat;
+
+	    if (st->depth > 0 && st->kind[st->depth - 1] == GLB_INIT) {
+		kind = GLB_INIT;		/* nested initializer */
+		stat = st->stat[st->depth - 1];
+	    } else if (st->lastSig == '=') {
+		kind = GLB_INIT;
+		stat = st->blocks == 0 || st->sawStatic;
+	    } else if (st->typeKeyword > 0) {
+		kind = GLB_TYPE;		/* struct/union/enum body */
+		stat = FALSE;
+	    } else {
+		kind = GLB_BLOCK;		/* function body, block */
+		stat = FALSE;
+	    }
+	    st->kind[st->depth] = kind;
+	    st->stat[st->depth] = stat;
+	    st->savedStatic[st->depth] = st->sawStatic;
+	    st->savedEquals[st->depth] = st->sawEquals;
+	    if (kind == GLB_BLOCK) {
+		st->blocks++;
+		st->sawStatic = st->sawEquals = FALSE;
+	    } else if (kind == GLB_TYPE) {
+		st->sawEquals = FALSE;
+	    }
+	}
+	st->depth++;
+	break;
+      case '}':
+	if (st->depth > 0) {
+	    st->depth--;
+	    if (st->depth < GCC_LEX_DEPTH) {
+		if (st->kind[st->depth] == GLB_BLOCK) {
+		    st->blocks--;
+		    st->sawStatic = st->sawEquals = FALSE;
+		} else {
+		    /* the declaration goes on after a struct body or an
+		     * initializer */
+		    st->sawStatic = st->savedStatic[st->depth];
+		    st->sawEquals = st->kind[st->depth] == GLB_INIT ? TRUE
+				    : st->savedEquals[st->depth];
+		}
+	    }
+	}
+	break;
+      default:
+	break;
+    }
+    st->typeKeyword = (c == '{' || c == ';' || c == ')' || c == '=')
+		      ? 0 : st->typeKeyword;
+    st->lastSig = c;
+}
+
+/* TRUE in the initializer of an object with static storage */
+Boolean
+GccInStaticInit(const GccLexState *st)
+{
+    if (st->mode != GLM_CODE) {
+	return FALSE;
+    }
+    if (st->depth > 0 && st->depth <= GCC_LEX_DEPTH &&
+	st->kind[st->depth - 1] == GLB_INIT)
+    {
+	return st->stat[st->depth - 1];
+    }
+    return st->sawEquals && (st->blocks == 0 || st->sawStatic);
+}
 
 void
 GccTrackOutput(const char *s, int n)
 {
     int have = strlen(gccOutTail);
+    int i;
+
+    for (i = 0; i < n; i++) {
+	GccLexChar(&gccLex, s[i]);
+    }
 
     if (n >= GCC_TAIL_SIZE) {
 	memcpy(gccOutTail, s + n - GCC_TAIL_SIZE, GCC_TAIL_SIZE);
