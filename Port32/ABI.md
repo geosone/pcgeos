@@ -1241,6 +1241,7 @@ functions (`Port32/include/fsdriver.h`). Each function returns 0 or a
 | `FSD_open`, `FSD_create` | `DR_FS_ALLOC_OP` `FSAOF_OPEN`, `FSAOF_CREATE` |
 | `FSD_read` ... `FSD_close`, `FSD_handleExtAttrs` | `DR_FS_HANDLE_OP` `FSHOF_*` |
 | `FSD_createDir` ... `FSD_pathExtAttrs` | `DR_FS_PATH_OP` `FSPOF_*` |
+| `FSD_fileEnum`, `FSD_enumAttr` | `DR_FS_FILE_ENUM` |
 
 - **Paths** passed to a driver are absolute on its disk. They are
   `\`-separated, with `.` and `..` already resolved by the kernel, and
@@ -1285,7 +1286,66 @@ Not yet:
 - removable media, `DiskSave`/`DiskRestore`, formatting, copying and
   renaming disks, and volume names;
 - a current directory per drive (`C:NAME` is relative to the root);
-- file enumeration (`DR_FS_FILE_ENUM`) and links.
+- links.
+
+## 13g. FileEnum (`File/fileEnum.c`, P4)
+
+`FileEnum` works as in the asm kernel (`fileEnum.asm`):
+
+- For each entry the driver reports (`FSD_fileEnum`), the kernel
+  collects the attributes named in `FEP_returnAttrs`, `FEP_matchAttrs`
+  and `FEP_callbackAttrs`, plus `FEA_FILE_ATTR`, `FEA_FILE_TYPE` and
+  `FEA_NAME`.
+  - They go into the `FileEnumCallbackData`, an array of
+    `FileExtAttrDesc`.
+  - An attribute the entry does not have has a null `FEAD_value`.
+  - The kernel fills in `FEA_PATH_INFO`, `FEA_DISK` and
+    `FEA_DRIVE_STATUS` itself.
+- **Directories** are taken if `FESF_DIRS` is set.
+- **Other entries** must pass two checks:
+  - They must match `FEP_matchAttrs`:
+    - Bit attributes (`FEA_FILE_ATTR`, `FEA_FLAGS`, `FEA_GEODE_ATTR`,
+      `FEA_PATH_INFO`, `FEA_DRIVE_STATUS`): `FEAD_value` is not a
+      pointer. Its low 16 bits are the bits that must be set, the next
+      16 bits the bits that must be clear (the asm offset and segment).
+    - Strings must be equal.
+    - Anything else must be byte-for-byte the same.
+  - They must have one of the file types in `FEP_searchFlags`.
+- **Then the callback** (`FESF_CALLBACK`) decides. It accepts an entry
+  by returning non-zero, as documented.
+  - `FileEnumWildcard` returns TRUE for a match, as documented (the asm
+    C stub returned the opposite).
+  - `FEP_callback` NULL (`FESC_WILDCARD`) means the standard wildcard
+    callback: `*`, `?`, `[..]`, `[^..]`, `\` escapes. The pattern is
+    in `FEP_cbData1`; ignore case if the low byte of `FEP_cbData2` is
+    non-zero.
+- **Return types.** `FEP_returnAttrs` may be a
+  `FileEnumStandardReturnType` cast to a pointer. In a return array,
+  `FEAD_value` is the offset within the entry. Attributes the entry
+  does not have are zero.
+- **Buffer limits.** `FEP_bufSize`, `FEP_skipCount`,
+  `FESF_LEAVE_HEADER` and `FESRT_COUNT_ONLY` work as before. The
+  matches that did not fit go to `*numNoFit`. If there are no entries,
+  there is no buffer, unless a header was asked for.
+- **Standard subdirectories.** In a standard path itself (not below
+  it), its standard subdirectories are entries even if they do not
+  exist on the disk (`FEEnumSpecials`). A standard path that does not
+  exist enumerates as empty.
+- **Return value.** The number of entries, or -1 with
+  `ThreadGetError`.
+
+Port32 differences:
+
+- `FEP_cbData1` and `FEP_cbData2` are `uintptr_t`, so they can hold a
+  pointer (`CInclude/fileEnum.h`).
+- The callback is called with frame 0. `FileEnumWildcard` finds its
+  `FileEnum` through the calling thread.
+- With `FESF_REAL_SKIP`, `FEP_skipCount` is set to the real skip count
+  for the next call (the DI of the asm routine): the number of entries
+  passed before the first one that did not fit.
+
+Not yet: standard paths spread over several directories, `FEA_CUSTOM`,
+and the order of entries (it is the host's directory order).
 
 ## 14. Open
 

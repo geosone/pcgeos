@@ -38,6 +38,7 @@
 #                      over the file system driver of the disk
 #   File/fileEA.c   <- extended attributes (the FileGet/Set...ExtAttributes
 #                      of fileFile.asm, fileOpenClose.asm)
+#   File/fileEnum.c <- FileEnum of File/fileEnum.asm, fileC.asm
 #   FSD/fsdDrive.c  <- the drive table of FSD/fsdDrive.asm (FSDInitDrive)
 #   Drive/driveHigh.c <- the drive API of Drive/driveHigh.asm, driveC.asm
 #   Disk/diskHigh.c <- disks of Disk/diskHigh.asm, diskC.asm
@@ -81,6 +82,7 @@ add_library(geos_kernel_objs OBJECT
   File/fileIO.c
   File/fileFile.c
   File/fileEA.c
+  File/fileEnum.c
   FSD/fsdDrive.c
   Drive/driveHigh.c
   Disk/diskHigh.c

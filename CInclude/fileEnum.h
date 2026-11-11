@@ -89,8 +89,14 @@ typedef struct _FileEnumParams {
 					 word frame));
 
     FileExtAttrDesc 	*FEP_callbackAttrs;
+#ifdef GEOS_PORT32
+    /* Port32: big enough for a pointer (FESC_WILDCARD: the pattern) */
+    uintptr_t	    	FEP_cbData1;
+    uintptr_t	    	FEP_cbData2;
+#else
     dword   	    	FEP_cbData1;
     dword   	    	FEP_cbData2;
+#endif
     word    	    	FEP_headerSize;
 } FileEnumParams;
 

@@ -67,6 +67,16 @@ static Boolean IsStdPath(word sp)
     return (sp & 1) && sp / 2 < STD_PATH_COUNT;
 }
 
+const char *FileStdPathName(StandardPath sp)
+{
+    return IsStdPath(sp) ? stdPaths[sp / 2].name : NULL;
+}
+
+StandardPath FileStdPathParent(StandardPath sp)
+{
+    return IsStdPath(sp) ? stdPaths[sp / 2].parent : SP_NOT_STANDARD_PATH;
+}
+
 /* the drive of the top directory, and its disk */
 void FileSetTopHostPath(const char *hostPath)
 {

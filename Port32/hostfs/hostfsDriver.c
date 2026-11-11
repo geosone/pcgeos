@@ -21,8 +21,8 @@
  * ERROR_ATTR_NOT_FOUND, setting one ERROR_ATTR_NOT_SUPPORTED.
  *
  * Not yet: deny modes, record locks, links, FEA_GEODE_ATTR, FEA_CUSTOM,
- * FEA_PATH_INFO, FEA_DISK, FEA_DRIVE_STATUS, FEA_OWNER, FEA_RIGHTS, file
- * enumeration, volume names.
+ * FEA_PATH_INFO, FEA_DISK, FEA_DRIVE_STATUS (the kernel's in FileEnum),
+ * FEA_OWNER, FEA_RIGHTS, volume names.
  */
 #include "fsdriver.h"
 #include "hostfs.h"
@@ -991,6 +991,51 @@ static word DeleteDir(FSDDisk *disk, const char *path)
     return ErrorOf(ghal_fs_rmdir(host), host);
 }
 
+/* ---------------------------------------------------------------------
+ * Enumerating a directory
+ * ------------------------------------------------------------------- */
+
+/* every entry but a directory's @DIRNAME.000; one that cannot be read
+ * is left out */
+static word FileEnum(FSDDisk *disk, const char *path,
+		     word (*cb)(void *data, void *entry), void *data)
+{
+    char dir[HPATH], name[HOSTFS_NAME_MAX];
+    EATarget *t;
+    ghal_dir *d;
+    ghal_status s;
+    word e = 0;
+
+    if (HostOf(disk, path, dir))
+	return ERROR_PATH_TOO_LONG;
+    s = ghal_fs_opendir(dir, &d);
+    if (s != GHAL_OK)
+	return s == GHAL_ERR_NOTFOUND ? ERROR_PATH_NOT_FOUND : ErrorOf(s, dir);
+    t = ghal_mem_alloc(sizeof(EATarget), 0);
+    if (!t) {
+	ghal_fs_closedir(d);
+	return ERROR_INSUFFICIENT_MEMORY;
+    }
+    while (ghal_fs_readdir(d, name, sizeof(name), NULL) == GHAL_OK) {
+	if (HostFSIsDirNameFile(name))
+	    continue;
+	memset(t, 0, sizeof(*t));
+	if (!HostFSJoin(t->host, sizeof(t->host), dir, name) || Load(t))
+	    continue;
+	if (cb(data, t))
+	    break;
+    }
+    ghal_fs_closedir(d);
+    ghal_mem_free(t);
+    return e;
+}
+
+static word EnumAttr(void *entry, FileExtendedAttribute attr, void *buf,
+		     word size)
+{
+    return GetOne(entry, attr, buf, size);
+}
+
 const FSDriver hostFSDriver = {
     "HostFS",
     DiskID,
@@ -1016,4 +1061,6 @@ const FSDriver hostFSDriver = {
     GetAttrs,
     SetAttrs,
     PathExtAttrs,
+    FileEnum,
+    EnumAttr,
 };

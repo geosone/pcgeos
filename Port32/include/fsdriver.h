@@ -97,6 +97,15 @@ typedef struct FSDriver {
     word (*FSD_pathExtAttrs)(FSDDisk *disk, const char *path,
 			     FileExtendedAttribute attr, void *buf, word size,
 			     Boolean set);
+
+    /* DR_FS_FILE_ENUM: calls cb for each file and directory in the
+     * directory `path' (not what the driver keeps for itself); cb
+     * returns non-zero to stop.  FSD_enumAttr gets an attribute of the
+     * entry cb was given (a missing one: ERROR_ATTR_NOT_FOUND). */
+    word (*FSD_fileEnum)(FSDDisk *disk, const char *path,
+			 word (*cb)(void *data, void *entry), void *data);
+    word (*FSD_enumAttr)(void *entry, FileExtendedAttribute attr,
+			 void *buf, word size);
 } FSDriver;
 
 /* the kernel: a drive served by `fsd' (FSDInitDrive); replaces one with

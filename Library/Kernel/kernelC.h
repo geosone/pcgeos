@@ -246,6 +246,7 @@ typedef struct {
     struct DispatchRec *T_dispatching;	/* CMessageDispatchP */
     word	T_error;	/* ThreadGetError (TPD_error) */
     struct KPath *T_path;	/* current path, then FilePushDir's */
+    void	*T_fileEnum;	/* the FileEnum running (FileEnumWildcard) */
     word	T_fileReloc;	/* relocating an object block for a file
 				 * (objectReloc.c) */
 } KThread;
@@ -725,6 +726,10 @@ DiskHandle FileTopDisk(void);
  * it from its root, "\\" separated; NULL with the error set */
 FSDDisk *FileResolve(const char *path, char *out, size_t size);
 #define FILE_DISK_PATH_SIZE	(PATH_BUFFER_SIZE + 2)
+/* the directory name of a standard path and its parent (NULL,
+ * SP_NOT_STANDARD_PATH if it is none) */
+const char *FileStdPathName(StandardPath sp);
+StandardPath FileStdPathParent(StandardPath sp);
 void FileThreadInit(KThread *t, KThread *creator);
 void FileThreadExit(KThread *t);
 /* fileIO.c: FileDateAndTime of a time and back, and of now */
