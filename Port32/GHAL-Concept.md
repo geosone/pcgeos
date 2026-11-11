@@ -187,6 +187,42 @@ In the 32-bit C kernel (flat memory, no selectors) the GPMI calls map as follows
 
 **Kernel APIs that already are the boundary.** `SysCatchInterrupt`/`SysCatchDeviceInterrupt`/`SysReset*` (drivers hook IRQs) and `SysLockBIOS`/`SysUnlockBIOS` keep their API; in the C kernel they are implemented on `ghal_irq` and `ghal_hostlock`. Their call sites in drivers do not change.
 
+### 4.7 The display (implemented 2026-11-11)
+
+`ghal_display` (`ghal.h`, `Port32/ghal/display/`) gives one surface,
+32 bits a pixel (`0x00RRGGBB`), and flushes rectangles of it to the
+host. The generic video driver will draw into it.
+
+- **`x11`** (Linux): an XImage, in shared memory when it can be. It is
+  shown in a window of the requested size, or covering the screen with
+  `GHAL_DISPLAY_FULLSCREEN`. A host thread repaints on Expose and notes
+  the window's close button. X11 came before SDL3 because the window is
+  all GEOS needs from the host. The libraries are on every Linux
+  desktop, and the same code runs on a server without a window manager.
+- **`null`**: memory nobody sees. It serves dos32 until VESA and the
+  cross builds without X11 libraries for the target.
+- `GEOS_DISPLAY=window|fullscreen` overrides the caller's choice.
+
+**Testing without giving GEOS the desktop.** Full screen is how GEOS
+will run for real. For development, `Port32/tools/geos-xserver.sh`
+starts an X server of its own and runs the command on it with
+`GEOS_DISPLAY=fullscreen`:
+
+- Xvfb by default: invisible, used by ctest `ghal.display`;
+- with `-vnc`: Xvnc, to watch and use with a VNC viewer, only from
+  this machine and without a password; `-view` also starts
+  `vncviewer`.
+
+So GEOS gets a whole screen of its own while the desktop stays usable:
+
+```sh
+GHAL_DISPLAY_HOLD=30 Port32/tools/geos-xserver.sh -vnc -view -geometry 800x600 \
+    build/Port32/Tests/test_ghal_display
+```
+
+Alternatively, `GEOS_DISPLAY=window` puts it in a window on the
+desktop.
+
 ## 5. Driver sets per host
 
 | Driver class | `dos32` (from today's DOS parts, 32-bit) | `linux` | `win32/64` | `gonware` (later) |
@@ -211,7 +247,7 @@ In the 32-bit C kernel (flat memory, no selectors) the GPMI calls map as follows
 |---|---|---|
 | **S0: pull the GHAL into the 16-bit code** | In *today's* asm kernel, put the direct accesses from 2.2 (Loader, kernel `Sys`, `Timer`, `FSD`, `File`, `Boot`, `Thread`) behind GHAL entry points, still in asm. `INT_OFF`/`INT_ON`, `SysLockBIOS` and `SysCatch*Interrupt` go through the GHAL macros and routines. | Unchanged 16-bit GEOS under DOS, but **every host contact is visible in one place** and named. Testable on real hardware and in the usual DOS environments. |
 | **S1: 32-bit under DOS** | Port the code above the GHAL to C/32-bit (see pilot). GHAL core `dos32` from the S0 parts via DPMI; DOS drivers to 32-bit (VESA LFB instead of bank switching, keyboard, mouse, IFS/DOS). | GEOS 32-bit under DOS/HX. DOS remains the reference platform. |
-| **S2: Linux** | GHAL core `linux`, host services, generic drivers (FB, HostFS, input, sockets); display SDL3 first, then fbdev and X11 | GEOS under Linux; gdb and ASan usable for all platforms |
+| **S2: Linux** | GHAL core `linux`, host services, generic drivers (FB, HostFS, input, sockets); display X11 first (4.7), then SDL3 and fbdev | GEOS under Linux; gdb and ASan usable for all platforms |
 | **S3: Windows** | GHAL core `win32`/`win64`, same generic drivers | GEOS under Windows |
 | **S4: GonWare** | GHAL core `gonware` (see the GonDesk document) | GonDesk |
 
@@ -243,7 +279,7 @@ Step S0 (section 6) does not contradict this: it only puts the existing 16-bit a
 
 ```sh
 cmake -S . -B build-dos   -G Ninja -DGEOS_HOST=dos32  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-dos32-hx.cmake
-cmake -S . -B build-linux -G Ninja -DGEOS_HOST=linux  -DGEOS_LINUX_DISPLAY=sdl3   # or x11, fbdev
+cmake -S . -B build-linux -G Ninja -DGEOS_HOST=linux  -DGEOS_LINUX_DISPLAY=x11    # or sdl3, fbdev (null until done)
 cmake -S . -B build-w64   -G Ninja -DGEOS_HOST=win64  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mingw-w64.cmake
 ```
 

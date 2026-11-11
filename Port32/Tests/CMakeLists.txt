@@ -10,6 +10,17 @@ add_test(NAME ghal.core COMMAND test_ghal_core)
 add_executable(test_ghal_fs test_ghal_fs.c)
 target_link_libraries(test_ghal_fs PRIVATE ghal)
 add_test(NAME ghal.fs COMMAND test_ghal_fs)
+add_executable(test_ghal_display test_ghal_display.c)
+target_link_libraries(test_ghal_display PRIVATE ghal)
+# on a screen of its own (Xvfb) where the display is X11; never the desktop
+find_program(GEOS_XVFB Xvfb)
+if(GEOS_HOST STREQUAL "linux" AND GHAL_HAVE_X11 AND GEOS_LINUX_DISPLAY STREQUAL "x11" AND GEOS_XVFB)
+  add_test(NAME ghal.display
+           COMMAND ${PROJECT_SOURCE_DIR}/Port32/tools/geos-xserver.sh
+                   $<TARGET_FILE:test_ghal_display>)
+else()
+  add_test(NAME ghal.display COMMAND test_ghal_display)
+endif()
 
 # C kernel (Library/Kernel, P4): handle table, memory blocks, threads
 add_executable(test_kernel_heap test_kernel_heap.c)

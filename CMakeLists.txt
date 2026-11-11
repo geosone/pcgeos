@@ -23,8 +23,10 @@ if(NOT GEOS_HOST IN_LIST GEOS_HOSTS)
   message(FATAL_ERROR "GEOS_HOST must be one of: ${GEOS_HOSTS}")
 endif()
 
-set(GEOS_LINUX_DISPLAYS sdl3 x11 fbdev)
-set(GEOS_LINUX_DISPLAY sdl3 CACHE STRING "Display backend for GEOS_HOST=linux: ${GEOS_LINUX_DISPLAYS}")
+# x11 is implemented (null where the target has no X11 libraries);
+# sdl3 and fbdev give the null display until they are
+set(GEOS_LINUX_DISPLAYS x11 sdl3 fbdev)
+set(GEOS_LINUX_DISPLAY x11 CACHE STRING "Display backend for GEOS_HOST=linux: ${GEOS_LINUX_DISPLAYS}")
 set_property(CACHE GEOS_LINUX_DISPLAY PROPERTY STRINGS ${GEOS_LINUX_DISPLAYS})
 if(NOT GEOS_LINUX_DISPLAY IN_LIST GEOS_LINUX_DISPLAYS)
   message(FATAL_ERROR "GEOS_LINUX_DISPLAY must be one of: ${GEOS_LINUX_DISPLAYS}")

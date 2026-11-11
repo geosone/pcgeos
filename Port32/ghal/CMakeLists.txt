@@ -6,8 +6,37 @@ if(GEOS_HOST STREQUAL "linux")
   target_sources(ghal PRIVATE posix/ghal_posix.c posix/ghal_fs_posix.c elf/ghal_module_elf.c)
   find_package(Threads REQUIRED)
   target_link_libraries(ghal PUBLIC Threads::Threads)
+  # ghal_display: X11 where its libraries are there for the target (not
+  # in the cross builds), else null
+  set(_display null)
+  if(GEOS_LINUX_DISPLAY STREQUAL "x11")
+    find_package(X11 QUIET)
+    if(X11_FOUND AND X11_Xext_FOUND)
+      include(CheckCSourceCompiles)
+      set(CMAKE_REQUIRED_INCLUDES ${X11_INCLUDE_DIR})
+      set(CMAKE_REQUIRED_LIBRARIES ${X11_X11_LIB} ${X11_Xext_LIB})
+      check_c_source_compiles("#include <X11/Xlib.h>
+#include <X11/extensions/XShm.h>
+int main(void) { return XShmQueryExtension(XOpenDisplay(0)); }"
+        GHAL_HAVE_X11)
+      unset(CMAKE_REQUIRED_INCLUDES)
+      unset(CMAKE_REQUIRED_LIBRARIES)
+      if(GHAL_HAVE_X11)
+        set(_display x11)
+      endif()
+    endif()
+  endif()
+  if(_display STREQUAL "x11")
+    target_sources(ghal PRIVATE display/ghal_display_x11.c)
+    target_include_directories(ghal PRIVATE ${X11_INCLUDE_DIR})
+    target_link_libraries(ghal PUBLIC ${X11_X11_LIB} ${X11_Xext_LIB})
+  else()
+    target_sources(ghal PRIVATE display/ghal_display_null.c)
+  endif()
+  message(STATUS "ghal_display: ${_display}")
 elseif(GEOS_HOST STREQUAL "dos32")
-  target_sources(ghal PRIVATE dos32/ghal_dos32.c dos32/ghal_fs_dos.c)
+  target_sources(ghal PRIVATE dos32/ghal_dos32.c dos32/ghal_fs_dos.c
+                              display/ghal_display_null.c)
   # geodes are DXE3 modules (dxe3gen); the Watcom build has no loader
   if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_sources(ghal PRIVATE dos32/ghal_module_dxe.c)

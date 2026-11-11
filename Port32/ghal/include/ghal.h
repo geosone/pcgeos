@@ -379,6 +379,51 @@ enum {
 const char *ghal_host_name(void);     /* "dos32", "linux", ... */
 uint32_t    ghal_caps(void);
 
+/* ---------------------------------------------------------------------
+ * ghal_display -- the screen as a surface (GHAL-Concept.md section 4,
+ * host services).  The generic video driver draws into the surface and
+ * flushes the rectangles it changed.
+ *
+ * The surface is 32 bits a pixel, 0x00RRGGBB in a native uint32_t; a
+ * driver for palette modes converts when it flushes.  There is one
+ * display.
+ *
+ * Backends (chosen at build time, ghal_display_backend):
+ *   "x11"   a window on the X server of $DISPLAY, or the whole screen
+ *           (GHAL_DISPLAY_FULLSCREEN).  To test without giving GEOS the
+ *           desktop, run it in a window, or full screen on an X server
+ *           of its own: Xvnc (Port32/tools/geos-xvnc.sh) or Xvfb.
+ *   "null"  a surface in memory, shown nowhere (hosts without a backend
+ *           yet, tests).
+ * The environment variable GEOS_DISPLAY overrides the caller's choice:
+ * "window" or "fullscreen".
+ * ------------------------------------------------------------------- */
+
+enum {
+    GHAL_DISPLAY_FULLSCREEN = 1u << 0  /* the whole screen; its size wins */
+};
+
+typedef struct ghal_surface {
+    uint32_t   *pixels;     /* 0x00RRGGBB */
+    uint32_t    pitch;      /* bytes from one line to the next */
+    uint16_t    width, height;
+} ghal_surface;
+
+/* Open the display with width x height pixels (in full screen mode the
+ * screen's size is used).  The surface stays valid until close. */
+ghal_status ghal_display_open(unsigned width, unsigned height,
+                              unsigned flags, ghal_surface *out);
+/* Show the rectangle of the surface. */
+void        ghal_display_flush(int x, int y, int w, int h);
+void        ghal_display_close(void);
+/* Non-zero once the user closed the window (until there is ghal_input). */
+int         ghal_display_close_requested(void);
+/* For tests: the pixel at (x, y) as the host shows it (0x00RRGGBB), or
+ * the surface's for "null". */
+uint32_t    ghal_display_read_back(int x, int y);
+/* "x11", "null" */
+const char *ghal_display_backend(void);
+
 #ifdef __cplusplus
 }
 #endif
