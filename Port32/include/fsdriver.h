@@ -127,7 +127,7 @@ FileDateAndTime FilePackDate(const ghal_datetime *dt);
 void FileUnpackDate(FileDateAndTime fdat, ghal_datetime *dt);
 FileDateAndTime FileNow(void);
 
-/* the HostFS driver on ghal_fs (Port32/hostfs/hostfsDriver.c), and the
+/* the HostFS driver on ghal_fs (Driver/IFS/HostFS/hostfsDriver.c), and the
  * private data of a drive for it: the host directory that is its root */
 extern const FSDriver hostFSDriver;
 void *HostFSDriveData(const char *hostRoot);

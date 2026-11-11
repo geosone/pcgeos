@@ -55,7 +55,7 @@
  * handlers and what they call must never be paged out) and the data
  * segment base fixed (the IRQ0 handler runs with our DS).  Long file
  * names are used where DOS has them (Windows 9x, DOSLFN), as by the MSLF
- * driver of DOS16 GEOS (Port32/hostfs).  readdir gives 8.3 names as DOS
+ * driver of DOS16 GEOS (Driver/IFS/HostFS).  readdir gives 8.3 names as DOS
  * has them (upper case), not in lower case. */
 int _crt0_startup_flags = _CRT0_FLAG_LOCK_MEMORY | _CRT0_FLAG_NONMOVE_SBRK |
                           _CRT0_FLAG_PRESERVE_FILENAME_CASE;

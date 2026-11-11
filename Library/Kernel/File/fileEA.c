@@ -3,7 +3,7 @@
  * FileGet/Set...ExtAttributes of fileFile.asm and fileOpenClose.asm), over
  * FSHOF_GET/SET_EXT_ATTRIBUTES and FSPOF_GET/SET_EXT_ATTRIBUTES of the
  * disk's driver: what they are and where they are kept is the driver's
- * (HostFS: the GeosFileHeader, Port32/hostfs/hostfsDriver.c).
+ * (HostFS: the GeosFileHeader, Driver/IFS/HostFS/hostfsDriver.c).
  *
  * Not yet: FileGetHandleAllExtAttributes, FileCopyPathExtAttributes.
  */

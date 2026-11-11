@@ -4,6 +4,11 @@
  * headers of hostfs.h.  It serves Linux, GonWare and, until the DOS
  * file system driver is ported, dos32.
  *
+ * It takes the place of the asm HostFS driver beside it (hostfs*.asm),
+ * which forwards each request to the emulator through int 0xA0.  This
+ * one does the work itself, on ghal_fs; its host names follow the DOS
+ * driver (dosVirtual.asm).
+ *
  * A drive is a host directory (HostFSDriveData).  The paths the kernel
  * passes are "\\" separated from the root of the drive, with GEOS names:
  * each name is looked up in its host directory (HostFSLookup), a new

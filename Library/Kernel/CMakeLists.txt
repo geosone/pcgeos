@@ -46,7 +46,7 @@
 #                      name layout from [system] primaryFSD)
 #   Drive/driveHigh.c <- the drive API of Drive/driveHigh.asm, driveC.asm
 #   Disk/diskHigh.c <- disks of Disk/diskHigh.asm, diskC.asm
-#   Port32/hostfs/hostfsDriver.c <- the HostFS file system driver
+#   Driver/IFS/HostFS/hostfsDriver.c <- the HostFS file system driver
 #                      (Port32/include/fsdriver.h), part of the kernel
 #                      until drivers are geodes
 #   Initfile/initfileLow.c, initfileConstruct.c, initfileHigh.c <- the
@@ -97,7 +97,7 @@ add_library(geos_kernel_objs OBJECT
   FSD/fsdInit.c
   Drive/driveHigh.c
   Disk/diskHigh.c
-  ${PROJECT_SOURCE_DIR}/Port32/hostfs/hostfsDriver.c
+  ${PROJECT_SOURCE_DIR}/Driver/IFS/HostFS/hostfsDriver.c
   Initfile/initfileLow.c
   Initfile/initfileConstruct.c
   Initfile/initfileHigh.c

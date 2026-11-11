@@ -2,7 +2,7 @@
 """geostree.py -- copy a GEOS tree between the two host layouts.
 
 Every GEOS file starts with the 256-byte GeosFileHeader of DOS16 GEOS on
-every host (Port32/hostfs), so a tree differs between hosts only in its
+every host (Driver/IFS/HostFS), so a tree differs between hosts only in its
 host names:
 
   dos   GEOS files and directories whose GEOS name is no DOS name have

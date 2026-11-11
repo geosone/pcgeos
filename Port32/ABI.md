@@ -1271,7 +1271,7 @@ object of a resource, adds an object to it and saves on
 changed and the added object, the unchanged chunks of the resource,
 its static GCN list and the duplicated block with its references.
 
-## 13c. GEOS files and host names (`Port32/hostfs`, the HostFS driver, P4)
+## 13c. GEOS files and host names (`Driver/IFS/HostFS`, the HostFS driver, P4)
 
 **The header is in the file on every host (decided 2026-11-11).** A
 GEOS file (created without `FCF_NATIVE`) starts with the 256-byte
@@ -1301,7 +1301,7 @@ on the way to a FAT disk.
   - `FEA_NAME` is changed by `FileRename` only
     (`ERROR_ATTR_CANNOT_BE_SET`). `VMOpen` sets `GFT_VM` and the flags,
     as `VMCreateFileHeader` did.
-- **Host names** (`Port32/hostfs`). Three layouts:
+- **Host names** (`Driver/IFS/HostFS`). Three layouts:
   - *DOS names* (dos32; `HostFSSetDosNames`): as the DOS file system
     driver (`dosVirtual.asm`, `dosPath.asm`). A GEOS file gets a
     generated 8.3 name: the first eight characters, illegal ones as `_`,
@@ -1353,7 +1353,7 @@ above 0x7f in names; `FEA_GEODE_ATTR`, `FEA_CUSTOM` and the
 network attributes; `FileGetHandleAllExtAttributes`;
 `FileCopyPathExtAttributes`.
 
-## 13f. File system drivers, drives and disks (`Library/Kernel/FSD`, `Drive`, `Disk`, `Port32/hostfs/hostfsDriver.c`, P4)
+## 13f. File system drivers, drives and disks (`Library/Kernel/FSD`, `Drive`, `Disk`, `Driver/IFS/HostFS/hostfsDriver.c`, P4)
 
 The asm kernel talks to a file system driver through `DR_FS_*` calls of
 its strategy routine (`Include/Internal/fsDriver.def`). Port32 keeps
@@ -1392,7 +1392,7 @@ functions (`Port32/include/fsdriver.h`). Each function returns 0 or a
     `DiskGetVolumeInfo`, `DiskGetVolumeFreeSpace` (from
     `ghal_fs_space`), `DiskCheckWritable`, `DiskCheckInUse` (open
     files), `DiskCheckUnnamed`, `DiskForEach` and `DiskFind`.
-- **HostFS** (`Port32/hostfs/hostfsDriver.c`). A drive is a host
+- **HostFS** (`Driver/IFS/HostFS/hostfsDriver.c`). A drive is a host
   directory (`HostFSDriveData`). The driver contains what section 13c
   describes: host names, the `GeosFileHeader`, `@DIRNAME.000` and
   extended attributes.

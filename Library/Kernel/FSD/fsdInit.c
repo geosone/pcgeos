@@ -5,7 +5,7 @@
  * DOS16 GEOS loads the driver that "[system] primaryFSD" of the init
  * file names, or else one chosen by the DOS version.  In Port32 HostFS
  * is the primary driver on every host, and primaryFSD chooses the layout
- * of its host names (Port32/hostfs/hostfs.h):
+ * of its host names (Driver/IFS/HostFS/hostfs.h):
  *	mslf.geo			DOS names with long names (MSLF), or
  *					DOS names where the host has none
  *	ms3, ms4, ms7, dri, os2,

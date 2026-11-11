@@ -1,7 +1,7 @@
 /*
  * test_kernel_fileea.c -- GEOS files of the C kernel: the GeosFileHeader
  * at the start of a GEOS file, extended attributes (File/fileEA.c) and
- * the host names of GEOS files and directories (Port32/hostfs), on
+ * the host names of GEOS files and directories (Driver/IFS/HostFS), on
  * every host.
  *
  * Checked: the header of a new GEOS file and the data after it (size,
