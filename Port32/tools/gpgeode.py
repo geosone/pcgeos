@@ -312,6 +312,9 @@ def main():
     for s in syms:
         if s != gp.process_class:
             L.append(f'extern char {s}[];')
+    driver = bool(gp.attrs & GA['driver'])
+    if driver and 'DriverTable' not in syms:
+        L.append('extern char DriverTable[];')
     L.append('')
 
     count = gpres.FIRST + len(names)
@@ -358,7 +361,8 @@ def main():
           f'    {len(gp.libraries)}, libraries,',
           f'    {len(gp.exports)}, exports,',
           f'    {count}, resources,',
-          '    __goc_resource_handles',
+          '    __goc_resource_handles,',
+          f'    {"(const void *) &DriverTable" if driver else "0"}',
           '};']
     text = '\n'.join(L) + '\n'
     if out:

@@ -209,11 +209,13 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   # the C kernel loads geodes: the process kgapp and its library kglib
   geos_geode(kglib GP Geode/kglib.gp GOC Geode/kglib.goc)
   geos_geode(kgapp GP Geode/kgapp.gp GOC Geode/kgapp.goc)
+  geos_geode(kgdrv Geode/kgdrv.c GP Geode/kgdrv.gp)
   geos_embed(_kglib_c ${kglib_GEO} kglib_geode)
   geos_embed(_kgapp_c ${kgapp_GEO} kgapp_geode)
+  geos_embed(_kgdrv_c ${kgdrv_GEO} kgdrv_geode)
   add_executable(test_kernel_geode test_kernel_geode.c ${_kglib_c}
-                 ${_kgapp_c})
-  add_dependencies(test_kernel_geode geode_kglib geode_kgapp)
+                 ${_kgapp_c} ${_kgdrv_c})
+  add_dependencies(test_kernel_geode geode_kglib geode_kgapp geode_kgdrv)
   target_link_libraries(test_kernel_geode PRIVATE geos_kernel)
   add_test(NAME kernel.geode COMMAND test_kernel_geode)
 

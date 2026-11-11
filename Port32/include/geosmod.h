@@ -16,7 +16,7 @@
 #include <geode.h>
 
 #define GEOS_MODULE_MAGIC	0x444f4d47u	/* "GMOD" */
-#define GEOS_MODULE_VERSION	1
+#define GEOS_MODULE_VERSION	2
 
 /* a library the geode uses ("library" lines) */
 #define GML_NOLOAD		0x0001	/* "noload": loaded on demand */
@@ -86,6 +86,9 @@ typedef struct {
     /* the geode's resource handles, filled in by the kernel when it
      * loads the resources: GOCR_OPTR, GOCR_RESOLVE (geosport.h) */
     Handle			*GM_resourceHandles;
+    /* a driver's DriverInfoStruct: its variable "DriverTable", as glue
+     * found it (geosdriver.h); 0 for other geodes */
+    const void			*GM_driverTable;
 } GeosModuleInfo;
 
 #endif /* GEOSMOD_H */

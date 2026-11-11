@@ -396,12 +396,70 @@ and checks that a missing library file is `GLE_LIBRARY_NOT_FOUND`.
 
 Not yet:
 
-- drivers (`DR_INIT`), which load like libraries without an entry;
 - `noload` libraries;
 - resources loaded on demand (`RESF_DISCARDED`);
 - heapspace, the UI thread, `LCT_NEW_CLIENT_THREAD`;
 - freeing a geode's semaphores and timers;
 - `GeodeResolveOptrAt`.
+
+### 7.2 Drivers (`Geodes/geodesDriver.c`, P4)
+
+**Strategy routine.** A DOS16 driver had a strategy routine. It was
+called with the function number in `di` and the arguments in the
+registers its `.def` file describes. The carry flag returned an error.
+In Port32 the strategy routine is a C function
+(`Port32/include/geosdriver.h`):
+
+```c
+typedef struct {
+    dword DR_ax, DR_bx, DR_cx, DR_dx, DR_si, DR_bp;
+    void  *DR_dsSi, *DR_esDi;   /* segment:offset pairs as pointers */
+} DriverRegs;
+typedef Boolean DriverStrategy(word function, DriverRegs *regs); /* carry */
+```
+
+- The registers are dwords because handles are 32 bits wide (§2).
+- A ported driver keeps the register use of its `.def` file.
+- The file system drivers have their own table of C functions instead
+  (§13f).
+
+**Driver table.** A driver defines its `DriverInfoStruct` as the
+variable `DriverTable`, as glue required. `gpgeode.py` puts its address
+into `GM_driverTable` (`GEOS_MODULE_VERSION` 2). `DRIVER_STRATEGY(f)`
+stores a strategy function in it, and `DriverCall(dis, fn, &regs)`
+calls it.
+
+**Load and free.**
+- Once loaded, a driver gets `DR_INIT` with its geode handle in `bx`
+  and the appInfo words in `cx` and `dx`.
+- A carry fails the load with `GLE_DRIVER_INIT_ERROR`, and the driver
+  gets no `DR_EXIT`.
+- It gets `DR_EXIT` before it is freed.
+- A driver of type `system` joins the system driver list.
+  `GeodeExitSystemDrivers` gives the drivers on it `DR_EXIT`, the last
+  first (`ExitSystemDrivers`, for the shutdown).
+
+**Using geodes.** As in `UseLibraryDriverCommon`:
+- `GeodeUseDriver` and `GeodeUseLibrary` take a file name. They load
+  the geode, or use it if it is loaded already. A missing file is
+  `GLE_FILE_NOT_FOUND`.
+- `GeodeUseDriverPermName` and `GeodeUseLibraryPermName` only use a
+  loaded geode; otherwise the error is `GLE_LIBRARY_NOT_FOUND`.
+- Up to now, `GeodeUseLibrary` had taken a permanent name.
+
+**Other routines.** `GeodeFreeDriver`, `GeodeInfoDriver`,
+`GeodeGetDefaultDriver` and `GeodeSetDefaultDriver`. The default video,
+keyboard and task drivers do not yet get their strategy shortcuts.
+
+ctest `kernel.geode` loads the test driver `kgdrv` from `SYSTEM`. It
+checks:
+- a refused `DR_INIT`;
+- `DR_INIT` with the geode handle;
+- a call of the strategy routine, and the carry for an unknown call;
+- the reference counts of both use routines;
+- the default driver;
+- `DR_EXIT` on the last free and from `GeodeExitSystemDrivers`, and no
+  second one.
 
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 

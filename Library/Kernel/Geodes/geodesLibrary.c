@@ -2,7 +2,13 @@
  * geodesLibrary.c -- using and freeing libraries (after
  * geodesLibrary.asm).
  *
- * A library is found by its permanent name among the loaded geodes, or
+ * GeodeUseLibrary and GeodeUseDriver take the file name of the geode: it
+ * is loaded, or used if it is loaded already.  GeodeUseLibraryPermName
+ * and GeodeUseDriverPermName take a permanent name and only use a geode
+ * that is loaded (UseLibraryDriverCommon of geodesLibrary.asm).
+ *
+ * The libraries a geode imports are found by their permanent name among
+ * the loaded geodes, or
  * loaded from the image of that name (GeodeRegisterImage), or from the
  * file of that name with ".geo" in SP_SYSTEM (TryOpenLib of
  * geodesLibrary.asm; there are no "ec.geo" files to try first: the C
@@ -118,26 +124,65 @@ static void TellLibrary(GeodeHandle gh, LibraryCallType ty)
 	e(ty, GeodeGetProcessHandle());
 }
 
-GeodeHandle GeodeUseLibrary(const char *name, word protoMajor,
-			    word protoMinor, GeodeLoadError *err)
+/* UseLibraryDriverCommon: a file name is loaded, or its geode used if it
+ * is loaded already (GeodeLoadLow knows it by the permanent name in the
+ * file); a permanent name must be loaded already */
+GeodeHandle GeodeUseCommon(const char *name, Boolean permName,
+			   GeodeAttrs attr, word protoMajor, word protoMinor,
+			   GeodeLoadError *err)
 {
-    GeodeLoadError e;
+    char pname[GEODE_NAME_SIZE];
+    size_t n;
+    GeodeLoadError e = GLE_OK;
     GeodeHandle gh;
+    GeodeCore *c;
 
     GeodeLock();
-    gh = GeodeUseLibraryLow(name, protoMajor, protoMinor, &e);
-    if (gh)
-	TellLibrary(gh, LCT_NEW_CLIENT);
+    if (permName) {
+	n = strlen(name);
+	if (n > GEODE_NAME_SIZE)
+	    n = GEODE_NAME_SIZE;
+	memset(pname, ' ', sizeof(pname));
+	memcpy(pname, name, n);
+	gh = GeodeFindLow(pname, GEODE_NAME_SIZE, attr, 0);
+	if (gh)
+	    GeodeCoreOf(gh)->GC_refCount++;
+	else
+	    e = GLE_LIBRARY_NOT_FOUND;
+    } else
+	gh = GeodeLoadLow(name, attr, 0, 0, 0, &e);
+    if (gh) {
+	const GeosModuleInfo *info;
+
+	c = GeodeCoreOf(gh);
+	info = c->GC_info;
+	e = TestProtocol(protoMajor, protoMinor, info->GM_protoMajor,
+			 info->GM_protoMinor);
+	if (e != GLE_OK) {
+	    if (!--c->GC_refCount)
+		GeodeFreeLow(gh);
+	    gh = 0;
+	} else if (attr & GA_LIBRARY)
+	    TellLibrary(gh, LCT_NEW_CLIENT);
+    }
     GeodeUnlock();
     if (err)
 	*err = e;
     return gh;
 }
 
+GeodeHandle GeodeUseLibrary(const char *name, word protoMajor,
+			    word protoMinor, GeodeLoadError *err)
+{
+    return GeodeUseCommon(name, FALSE, GA_LIBRARY, protoMajor, protoMinor,
+			  err);
+}
+
 GeodeHandle GeodeUseLibraryPermName(const char *pname, word protoMajor,
 				    word protoMinor, GeodeLoadError *err)
 {
-    return GeodeUseLibrary(pname, protoMajor, protoMinor, err);
+    return GeodeUseCommon(pname, TRUE, GA_LIBRARY, protoMajor, protoMinor,
+			  err);
 }
 
 void GeodeFreeLibrary(GeodeHandle gh)

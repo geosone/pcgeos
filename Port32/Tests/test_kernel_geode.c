@@ -26,12 +26,22 @@
  */
 #include "kernelC.h"
 #include "ghal.h"
+#include "geosdriver.h"
 
 #include <stdio.h>
 #include <string.h>
 
-extern const unsigned char kglib_geode[], kgapp_geode[];
-extern const unsigned long kglib_geode_size, kgapp_geode_size;
+extern const unsigned char kglib_geode[], kgapp_geode[], kgdrv_geode[];
+extern const unsigned long kglib_geode_size, kgapp_geode_size,
+			   kgdrv_geode_size;
+
+/* as kgdrv.c */
+typedef struct {
+    word	KGDC_init, KGDC_exit;
+    GeodeHandle	KGDC_handle;
+    word	KGDC_value1, KGDC_value2;
+} KGDrvCounts;
+#define KGDRV_ADD	100
 
 /* as kglib.goh and kgapp.goc */
 typedef struct {
@@ -142,8 +152,10 @@ int main(int argc, char **argv)
 	  "no such geode");
     Check(!GeodeLoad("kgapp", GA_LIBRARY, 0, 0, 0, &e) &&
 	  e == GLE_ATTRIBUTE_MISMATCH, "attribute mismatch");
-    Check(!GeodeUseLibrary("nosuch", 0, 0, &e) && e == GLE_LIBRARY_NOT_FOUND,
-	  "no such library");
+    Check(!GeodeUseLibrary("nosuch", 0, 0, &e) && e == GLE_FILE_NOT_FOUND,
+	  "no such library file");
+    Check(!GeodeUseLibraryPermName("kglib", 0, 0, &e) &&
+	  e == GLE_LIBRARY_NOT_FOUND, "a permanent name must be loaded");
     Check(!GeodeUseLibrary("kglib", 3, 0, &e) &&
 	  e == GLE_PROTOCOL_IMPORTER_TOO_RECENT, "protocol: major too new");
     Check(!GeodeUseLibrary("kglib", 1, 9, &e) &&
@@ -289,6 +301,72 @@ int main(int argc, char **argv)
 	      "process and library from files freed");
     } else
 	printf("GeodeLoad error %d\n", (int) e);
+    FileSetStandardPath(SP_TOP);
+
+    /* a driver: DR_INIT, its strategy routine, DR_EXIT */
+    Check(WriteFile("SYSTEM\\kgdrv.geo", kgdrv_geode, kgdrv_geode_size),
+	  "driver file written");
+    FileSetStandardPath(SP_SYSTEM);
+    Check(!GeodeUseDriverPermName("kgdrv", 0, 0, &e) &&
+	  e == GLE_LIBRARY_NOT_FOUND, "a permanent name must be loaded");
+    Check(!GeodeUseLibrary("kgdrv.geo", 0, 0, &e) &&
+	  e == GLE_ATTRIBUTE_MISMATCH, "a driver is no library");
+    Check(!GeodeLoad("kgdrv.geo", GA_DRIVER, 0, 0, 0xdead0000, &e) &&
+	  e == GLE_DRIVER_INIT_ERROR, "DR_INIT fails the load");
+    Check(!GeodeFind("kgdrv   ", GEODE_NAME_SIZE, 0, 0),
+	  "freed after GLE_DRIVER_INIT_ERROR");
+    {
+	GeodeHandle drv, drv2;
+	DriverInfoStruct *dis;
+	KGDrvCounts *dc;
+	DriverRegs r;
+
+	drv = GeodeUseDriver("kgdrv.geo", 0, 0, &e);
+	Check(drv != 0, "GeodeUseDriver");
+	if (drv) {
+	    dc = ((KGDrvCounts *(*)(void)) ProcGetLibraryEntry(drv, 0))();
+	    Check(dc->KGDC_init == 1 && dc->KGDC_exit == 0 &&
+		  dc->KGDC_handle == drv, "DR_INIT with the geode handle");
+	    Check((GeodeGetInfo(drv, GGIT_ATTRIBUTES, NULL) &
+		   (GA_DRIVER | GA_DRIVER_INITIALIZED)) ==
+		  (GA_DRIVER | GA_DRIVER_INITIALIZED), "driver attributes");
+	    dis = GeodeInfoDriver(drv);
+	    Check(dis && dis->DIS_driverType == DRIVER_TYPE_OTHER_PROCESSOR,
+		  "GeodeInfoDriver");
+	    memset(&r, 0, sizeof(r));
+	    r.DR_ax = 40;
+	    r.DR_bx = 2;
+	    Check(dis && !DriverCall(dis, KGDRV_ADD, &r) && r.DR_cx == 42,
+		  "the strategy routine");
+	    Check(dis && DriverCall(dis, 999, &r), "carry for an unknown call");
+	    drv2 = GeodeUseDriverPermName("kgdrv", 0, 0, &e);
+	    Check(drv2 == drv && dc->KGDC_init == 1 &&
+		  GeodeGetInfo(drv, GGIT_GEODE_REF_COUNT, NULL) == 2,
+		  "GeodeUseDriverPermName: the loaded driver");
+	    GeodeSetDefaultDriver(GDDT_POWER_MANAGEMENT, drv);
+	    Check(GeodeGetDefaultDriver(GDDT_POWER_MANAGEMENT) == drv,
+		  "default driver");
+	    GeodeFreeDriver(drv2);
+	    Check(dc->KGDC_exit == 0, "still in use");
+	    GeodeFreeDriver(drv);
+	    Check(!GeodeFind("kgdrv   ", GEODE_NAME_SIZE, 0, 0),
+		  "driver freed");
+	    Check(GeodeGetDefaultDriver(GDDT_POWER_MANAGEMENT) == 0,
+		  "no default driver once freed");
+	}
+	/* a system driver gets DR_EXIT from GeodeExitSystemDrivers */
+	drv = GeodeUseDriver("kgdrv.geo", 0, 0, &e);
+	if (drv) {
+	    dc = ((KGDrvCounts *(*)(void)) ProcGetLibraryEntry(drv, 0))();
+	    GeodeExitSystemDrivers();
+	    Check(dc->KGDC_exit == 1 &&
+		  !(GeodeGetInfo(drv, GGIT_ATTRIBUTES, NULL) &
+		    GA_DRIVER_INITIALIZED), "GeodeExitSystemDrivers");
+	    GeodeFreeDriver(drv);
+	    Check(!GeodeFind("kgdrv   ", GEODE_NAME_SIZE, 0, 0),
+		  "no second DR_EXIT, driver freed");
+	}
+    }
     FileSetStandardPath(SP_TOP);
     WAIT_FOR(HandleCountUsed() == base);
     Check(HandleCountUsed() == base, "no handles left");

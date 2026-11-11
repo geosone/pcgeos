@@ -16,6 +16,8 @@
 #   Geodes/geodesResource.c <- resource handles of geodes
 #   Geodes/geodesLoad.c  <- GeodeLoad of Geodes/geodesLoad.asm (modules)
 #   Geodes/geodesLibrary.c <- GeodeUseLibrary, GeodeFreeLibrary
+#   Geodes/geodesDriver.c <- geodesDriver.asm, DR_INIT and DR_EXIT of
+#                      geodesLoad.asm and geodesUtils.asm
 #   Geodes/geodesAccess.c <- GeodeGetInfo, GeodeGetProcessHandle, GeodeFind
 #   Object/objectClass.c <- method calls, ObjInstantiate of objectClass.asm
 #   Object/objectUtils.c <- master parts, chunk flags, counts, block output
@@ -72,6 +74,7 @@ add_library(geos_kernel_objs OBJECT
   Geodes/geodesResource.c
   Geodes/geodesLoad.c
   Geodes/geodesLibrary.c
+  Geodes/geodesDriver.c
   Geodes/geodesAccess.c
   Object/objectClass.c
   Object/objectUtils.c

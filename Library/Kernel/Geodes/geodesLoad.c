@@ -28,9 +28,10 @@
  * name, or the contents of the file of that name (from the current path;
  * a library's from SP_SYSTEM, geodesLibrary.c).
  *
- * Not yet: drivers
- * (DR_INIT; a driver loads like a library without an entry), "noload"
- * libraries, resources loaded on demand (RESF_DISCARDED: all are built
+ * A driver gets DR_INIT once it is loaded and DR_EXIT before it is
+ * freed (geodesDriver.c).
+ *
+ * Not yet: "noload" libraries, resources loaded on demand (RESF_DISCARDED: all are built
  * at once), heapspace and the UI thread.
  */
 #include "kernelC.h"
@@ -473,6 +474,8 @@ void GeodeFreeLow(GeodeHandle gh)
 	if (e)
 	    e(LCT_DETACH, 0);
     }
+    if (c->GC_attrs & GA_DRIVER_INITIALIZED)
+	GeodeExitDriver(gh);
     if (c->GC_attrs & GA_GEODE_INITIALIZED)
 	CallLibraries(gh, LCT_CLIENT_EXIT);
     Unlink(gh);
@@ -708,6 +711,11 @@ GeodeHandle GeodeLoadLow(const char *fileName, GeodeAttrs attrMatch,
 
     if (!(attrs & GA_PROCESS))
 	RelocateObjectBlocks(info, KernelThisThread());
+    if (attrs & GA_DRIVER) {
+	*err = GeodeInitDriver(gh, appInfo);
+	if (*err != GLE_OK)
+	    goto freeGeode;
+    }
     if (attrs & GA_LIBRARY) {
 	GeodeLibraryEntry *e = (GeodeLibraryEntry *) info->GM_entry;
 	if (e && e(LCT_ATTACH, 0)) {

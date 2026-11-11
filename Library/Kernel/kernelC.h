@@ -97,6 +97,9 @@
     X(OBJ_DETACH_NOT_STARTED) \
     X(GEODE_NOT_LOADED)		/* not the handle of a loaded geode */ \
     X(GEODE_FREE_LIBRARY_NOT_LIBRARY) \
+    X(GEODE_FREE_DRIVER_NOT_DRIVER) \
+    X(GEODE_GET_DEF_DRIVER_BAD_TYPE) \
+    X(GEODE_SET_DEF_DRIVER_BAD_TYPE) \
     X(DIVIDE_BY_ZERO)		/* raise(SIGFPE) of libgcc */ \
     X(OBJ_DUPLICATE_NOT_A_RESOURCE)	/* no module data for the block */ \
     X(OBJ_DUPLICATE_BLOCK_REQUIRES_AN_OBJECT_BLOCK) \
@@ -657,6 +660,18 @@ void GeodeRemoveThread(GeodeHandle gh);
 GeodeHandle GeodeUseLibraryLow(const char *pname, word protoMajor,
 			       word protoMinor, GeodeLoadError *err);
 void GeodeFreeLibraryLow(GeodeHandle gh);
+/* geodesLibrary.c: GeodeUseLibrary/Driver(PermName): use a geode of type
+ * `attr' by file name (loaded if need be) or by permanent name (loaded
+ * already), check its protocol */
+GeodeHandle GeodeUseCommon(const char *name, Boolean permName,
+			   GeodeAttrs attr, word protoMajor, word protoMinor,
+			   GeodeLoadError *err);
+/* geodesDriver.c: DR_INIT for a driver being loaded (GLE_OK or the
+ * error), DR_EXIT for one being freed, and DR_EXIT for the system
+ * drivers */
+GeodeLoadError GeodeInitDriver(GeodeHandle gh, dword appInfo);
+void GeodeExitDriver(GeodeHandle gh);
+void GeodeExitSystemDrivers(void);
 /* geodesLoad.c: the lock of the geode list (reentrant) */
 void GeodeLock(void);
 void GeodeUnlock(void);
