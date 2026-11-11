@@ -30,6 +30,9 @@ vesaBufSeg	word				; DOS block for the VESA BIOS
 vesaBufSel	word				;  calls (VidGetVesaBuffer)
 winASegCache	VesaSegCache <>			; selectors of the VESA
 winBSegCache	VesaSegCache <>			;  window segments
+modeListCache	VesaSegCache <>			; ... and of the BIOS mode list
+vesaBiosMode	word				; BIOS mode number for vesaMode
+						;  (without host interface)
 
 curWinEnd	word				; offset at end of curr page
 		; leave the next two in this order

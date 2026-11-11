@@ -139,6 +139,13 @@ VESAInfoBlock	ends
 VESA_BUF_SIZE		equ	(size VESAInfoBlock) + 4096
 VESA_DOS_BUFFER		equ	TRUE
 
+; BIOS mode list entries copied by VidFindVesaMode (the list may live in
+; the info block, which the mode info calls overwrite)
+VESA_MAX_MODES		equ	256
+
+; VESAModeAttr bit 6 (VBE 2.0+): windowed (banked) access not available
+VESA_MODE_NO_WINDOWS	equ	0x40
+
 VesaSegCache	struct
     VSC_realSeg	word		; real mode segment mapped
     VSC_selector	word		; selector for it, 0 if none
@@ -167,6 +174,7 @@ VMM_HERCULES	enum	VESAMemModel	; Hercules graphics mode
 VMM_4PLANE	enum	VESAMemModel	; 4 plane planar
 VMM_PACKED	enum	VESAMemModel	; packed pixels
 VMM_NONCHAINED4	enum	VESAMemModel	; non-chained 4, 256 color
+VMM_DIRECT	enum	VESAMemModel	; direct color (VBE 1.2+)
 
 VESAModeInfo	struct
     VMI_modeAttr	VESAModeAttr <>	; mode attributes
@@ -188,6 +196,12 @@ VESAModeInfo	struct
     VMI_nbanks		byte		; number of memory banks
     VMI_memModel	VESAMemModel	; memory model
     VMI_backSize	byte		; bank size, KB
+    VMI_imagePages	byte		; (VBE 1.2+) image pages - 1
+    VMI_reserved1	byte
+    VMI_redMaskSize	byte		; (VBE 1.2+) direct color layout
+    VMI_redFieldPos	byte
+    VMI_greenMaskSize	byte
+    VMI_greenFieldPos	byte
 
 	align		512		; pad out to 256 bytes
 VESAModeInfo	ends

@@ -30,7 +30,6 @@ cd -
 
 # 2. run it in GEOS on real DOS and fetch the result
 DOSRUN_BASE_IMG=$PWD/Local/dosbase.img \
-GEOSRUN_VIDEO="VESA Compatible SuperVGA: 640x480 64K-color" \
     Port32/tools/geosrun.sh Local/gbuild/localpc/ensemble FFAREF.TXT \
     Local/geosref/ffaref/ffaref.geo > Port32/Tests/GeosRef/ffaref.txt
 ```
@@ -69,6 +68,11 @@ coprocessor stack. `OverwriteRelocationTable` now also redirects it. In
 addition, the coprocessor library's stub returned the caller's AX instead
 of the character count.
 
-Open: in plain DOSBox-X (no host interface), the `vga16` driver still
-reports no compatible video hardware (UI-18). In QEMU, 640×480 works and
-1024×768 does not.
+`vga16` without the host interface (anything but pcgeos-basebox) never
+set a video mode: when the host interface came in, the `4F02h` call of the
+no-host path was lost, and since `vesaMode` holds the `VideoDevice` (0, 2,
+...) instead of a BIOS mode number, `VidTestVESA` looked for that number in
+the BIOS mode list (640x480 passed in QEMU by chance, nothing else did).
+`VidFindVesaMode` now finds the BIOS mode by its mode info (resolution,
+16 bpp 5:6:5, windowed access), as VBE 2.0 asks; GEOS32 shows its desktop
+at 1024x768 in QEMU, and the reference run also works in DOSBox-X.

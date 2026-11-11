@@ -637,181 +637,23 @@ else ; NT_DRIVER
 
 		mov	ss:[vesaMode], ax	; save it
 
-		call	VidGetVesaBuffer	; DOS buffer for the BIOS calls
-		LONG jc	noBuffer
-
-		; allocate fixed block to get vesa info
-
-		CheckHack <(size VESAInfoBlock) eq (size VESAModeInfo)>
-
-		mov	ax, size VESAInfoBlock + 0x600	; MemAlloc: size in AX,
-						;  in bytes
-		mov	cx, ALLOC_FIXED
-		call	MemAlloc
-		push 	bx
-		;call SysAllocDOSBlock
-		; use extended BIOS function 0x4f - 0 to determine if this
-		; is a VESA compatible board, then check the table of 
-		; supported modes to determine if the 640x480x256-color mode
-		; is supported.
-
-
-		mov	es, ax
-		clr	di			; es:di -> VESAInfoBlock
-
-		mov	ah, VESA_BIOS_EXT 	; use VESA bios extensions
-		mov	al, VESA_GET_SVGA_INFO 	; basic info call
-
-		; init regs
-                mov     ss:[regs.PMRMR_edi], 0 
-                ;mov     ss:[regs.PMRMR_esi], 0 
-                ;mov     ss:[regs.PMRMR_ebp], 0 
-                ;mov     ss:[regs.PMRMR_reseverd], 0 
-                ;mov     ss:[regs.PMRMR_ebx], 0 
-                ;mov     ss:[regs.PMRMR_edx], 0 
-                ;mov     ss:[regs.PMRMR_ecx], 0 
-                mov     ss:[regs.PMRMR_eax], eax
-                mov     ss:[regs.PMRMR_flags], 0 
-		push	ss:[vesaBufSeg]		; our DOS buffer, not a fixed 2000h
-		pop	ss:[regs.PMRMR_es]
-                ;mov     ss:[regs.PMRMR_ds], 0 
-		;mov     ss:[regs.PMRMR_fs], 0 
-                ;mov     ss:[regs.PMRMR_gs], 0 
-                ;mov     ss:[regs.PMRMR_ip], 0 
-                ;mov     ss:[regs.PMRMR_cs], 0 
-		mov	ss:[regs.PMRMR_sp], VESA_BUF_SIZE ; stack at end of buffer
-		push	ss:[vesaBufSeg]
-		pop	ss:[regs.PMRMR_ss]
-
-		; regs are passed in es:di
-		lea	di, ss:regs
-		mov	dx, ss
-		mov	es, dx
-
-		mov	cx, 0
-		mov	bh, 0
-		mov 	bl, 10h ; VIDEO_BIOS
-
-		call    SysRealInterrupt
-		;int	VIDEO_BIOS		; make bios call
-
-                mov     eax, ss:[regs.PMRMR_eax]
-
-		; if al = VESA_BIOS_EXT, then there is a VESA compatible board
-		; there...actually, we need to check for the VESA signature too
-
-		cmp	ax, VESA_BIOS_EXT ; is this a VESA board ?
-		jne	notPresent		; no, exit
-		
-	
-		; PASS:	ax - real-mode segment
-		;	cx - limit of segment in bytes		
-		mov	ax, ss:[vesaBufSel]		; buffer selector
-		
-		mov	es, ax
-		mov	di, 0
-
-
-		cmp	{word} es:[di].VIB_sig, 'VE' ; gimme a VE
-		jne	notPresent
-		cmp	{word} es:[di].VIB_sig[2], 'SA' ; gimme a SA
-		jne	notPresent
-
-		; OK, there is a VESA board out there.  Check the mode table
-		; for the correct mode.  
-
-		mov	ax, es:[di].VIB_modes.segment
-		mov	cx, 0xFFFF
-		call	SysMapRealSegment
-		
-		mov	di, es:[di].VIB_modes.offset
-		mov	es, ax
-
-		;les	di, es:[di].VIB_modes	; get pointer to mode info
-		mov	ax, ss:[vesaMode]	; mode to check for
-checkLoop:
-		cmp	es:[di], 0xffff		; at mode table terminator?
-		je	notPresent
-		scasw				; check this word
-		jne	checkLoop		;  nope, on to next mode
-
-		; OK, the mode is supported in the BIOS.  Now check to see if
-		; it is supported by the current card/monitor setup.  To do
-		; this, we need to call the GetModeInfo function.
-
-		;call	MemDerefES
-		;clr	di			; es:di -> VESAModeInfo
-		
-		mov	cx, ax			; cx = mode number
-		mov	ah, VESA_BIOS_EXT	; BIOS mode number
-		mov	al, VESA_GET_MODE_INFO	; get info about mode
-
-		; init regs
-                mov     ss:[regs.PMRMR_edi], 0 
-                ;mov     ss:[regs.PMRMR_esi], 0 
-                ;mov     ss:[regs.PMRMR_ebp], 0 
-                ;mov     ss:[regs.PMRMR_reseverd], 0 
-                ;mov     ss:[regs.PMRMR_ebx], 0 
-                ;mov     ss:[regs.PMRMR_edx], 0 
-                mov     ss:[regs.PMRMR_ecx], ecx 
-                mov     ss:[regs.PMRMR_eax], eax
-                mov     ss:[regs.PMRMR_flags], 0 
-		push	ss:[vesaBufSeg]		; our DOS buffer, not a fixed 2000h
-		pop	ss:[regs.PMRMR_es]
-                ;mov     ss:[regs.PMRMR_ds], 0 
-		;mov     ss:[regs.PMRMR_fs], 0 
-                ;mov     ss:[regs.PMRMR_gs], 0 
-                ;mov     ss:[regs.PMRMR_ip], 0 
-                ;mov     ss:[regs.PMRMR_cs], 0 
-		mov	ss:[regs.PMRMR_sp], VESA_BUF_SIZE ; stack at end of buffer
-		push	ss:[vesaBufSeg]
-		pop	ss:[regs.PMRMR_ss]
-
-		push	es
-		
-		; regs are passed in es:di
-		lea	di, ss:regs
-		mov	dx, ss
-		mov	es, dx
-
-		mov	cx, 0
-		mov	bh, 0
-		mov 	bl, 10h ; VIDEO_BIOS
-
-		call    SysRealInterrupt
-		;int	VIDEO_BIOS		; get mode info
-		
-		pop 	es
-		mov	es, ss:[vesaBufSel]	; mode info is in our buffer
-		clr	di
-
-		; now see if the current hardware is cool.
-
-		test	es:[di].VMI_modeAttr, mask VMA_SUPPORTED
-		jz	notPresent
-
-		; passed the acid test.  Use it.
-
+		;
+		; Look for a 64K-color mode of the device's resolution in the
+		; BIOS mode list.  (This used to look for the VideoDevice value
+		; itself in the list -- 0 for 640x480 -- since vesaMode holds the
+		; device, not a BIOS mode number.)
+		;
+		call	VidFindVesaMode
+		mov	ax, DP_NOT_PRESENT
+		jc	done
 		mov	ax, DP_PRESENT		; yep, it's there
 done:
-		; free allocated memory block; its handle was pushed after
-		; MemAlloc (bx itself is the interrupt number of the
-		; SysRealInterrupt calls by now)
-		pop	bx
-		call	MemFree
 endif  ; not NT_DRIVER
 realDone:
 		pop	es
 donedone:
 		.leave
 		ret
-
-notPresent::
-		mov	ax, DP_NOT_PRESENT	; 
-		jmp	done
-noBuffer:
-		mov	ax, DP_NOT_PRESENT
-		jmp	realDone
 VidTestVESA	endp
 
 
@@ -855,6 +697,187 @@ done:
 		.leave
 		ret
 VidGetVesaBuffer	endp
+
+
+COMMENT @%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+		VidVesaCall
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+SYNOPSIS:	Call the VESA BIOS (INT 10h) in real mode, with ES:DI and the
+		stack in our DOS buffer.
+
+CALLED BY:	VidFindVesaMode, VidSetVESA
+PASS:		ax, bx, cx	= register values for the BIOS
+		vesaBufSeg set (VidGetVesaBuffer)
+RETURN:		ax	= AX returned by the BIOS (004Fh: success)
+		results in the buffer (vesaBufSel:0)
+DESTROYED:	nothing
+
+REVISION HISTORY:
+	Name	Date		Description
+	----	----		-----------
+		2026		Initial version
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%@
+VidVesaCall	proc	near
+		uses	bx, cx, di, es
+regs		local	PMRealModeRegister
+		.enter
+		push	ax, cx
+		segmov	es, ss, ax
+		lea	di, ss:[regs]
+		mov	cx, size PMRealModeRegister
+		clr	al
+		rep	stosb			; all other registers 0
+		pop	ax, cx
+		mov	{word} ss:[regs.PMRMR_eax], ax
+		mov	{word} ss:[regs.PMRMR_ebx], bx
+		mov	{word} ss:[regs.PMRMR_ecx], cx
+		mov	ax, ss:[vesaBufSeg]
+		mov	ss:[regs.PMRMR_es], ax	; es:di = buffer:0
+		mov	ss:[regs.PMRMR_ss], ax	; stack at end of buffer
+		mov	ss:[regs.PMRMR_sp], VESA_BUF_SIZE
+		lea	di, ss:[regs]		; es:di = regs
+		clr	cx			; nothing to copy to the stack
+		mov	bx, 10h			; bh = 0, bl = VIDEO_BIOS
+		call	SysRealInterrupt
+		mov	ax, {word} ss:[regs.PMRMR_eax]
+		.leave
+		ret
+VidVesaCall	endp
+
+
+COMMENT @%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+		VidFindVesaMode
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+SYNOPSIS:	Find the BIOS mode for the device in vesaMode: a supported
+		graphics mode of its resolution with 64K colors (5:6:5) and
+		windowed access.
+
+CALLED BY:	VidTestVESA, VidSetVESA
+PASS:		ss	= dgroup
+		ss:[vesaMode] = VideoDevice
+RETURN:		carry clear: ss:[vesaBiosMode] = BIOS mode number
+		carry set: no such mode (or no VESA BIOS, no DOS buffer)
+DESTROYED:	nothing
+
+PSEUDO CODE/STRATEGY:
+		VBE 2.0 asks callers to find modes by their mode info rather
+		than by fixed numbers (most of our resolutions have none).
+		The mode list is copied first: it may live in the info block,
+		which the mode info calls overwrite.  The DPI devices need
+		the host interface.
+
+REVISION HISTORY:
+	Name	Date		Description
+	----	----		-----------
+		2026		Initial version
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%@
+VidFindVesaMode	proc	near
+		uses	ax, bx, cx, dx, si, di, ds, es
+		.enter
+		call	VidGetVesaBuffer
+		LONG jc	done
+		mov	bx, ss:[vesaMode]
+		cmp	bx, VD_VESA_DPI72_16	; DPI devices: host only
+		LONG jae notFound
+		mov	si, cs:[vesaWidth][bx]
+		mov	dx, cs:[vesaHeight][bx]
+		push	si, dx
+
+		mov	ax, (VESA_BIOS_EXT shl 8) or VESA_GET_SVGA_INFO
+		call	VidVesaCall
+		cmp	ax, VESA_BIOS_EXT
+		LONG jne notFoundPop
+		mov	es, ss:[vesaBufSel]
+		cmp	{word} es:[VIB_sig], 'VE'
+		LONG jne notFoundPop
+		cmp	{word} es:[VIB_sig][2], 'SA'
+		LONG jne notFoundPop
+
+		;
+		; Copy the mode list (up to VESA_MAX_MODES - 1 entries).
+		;
+		mov	ax, VESA_MAX_MODES * (size word)
+		mov	cx, ALLOC_FIXED
+		call	MemAlloc		; bx = handle, ax = segment
+		LONG jc	notFoundPop
+		push	bx
+		mov	es, ss:[vesaBufSel]
+		mov	si, es:[VIB_modes].offset
+		push	ax
+		mov	ax, es:[VIB_modes].segment
+		mov	di, offset modeListCache
+		call	VidMapVesaWinSeg	; ax = selector (cached)
+		mov	ds, ax			; ds:si = BIOS mode list
+		pop	es
+		clr	di			; es:di = our copy
+		mov	cx, VESA_MAX_MODES - 1
+copyLoop:
+		lodsw
+		cmp	ax, VESA_MODE_NONE	; terminator
+		je	copyDone
+		stosw
+		loop	copyLoop
+copyDone:
+		mov	ax, VESA_MODE_NONE
+		stosw
+		segmov	ds, es			; ds:si = our copy
+		clr	si
+		pop	bx			; bx = its handle
+		pop	di, dx			; di = width, dx = height
+
+		;
+		; Ask for each mode's info.
+		;
+modeLoop:
+		lodsw
+		cmp	ax, VESA_MODE_NONE
+		je	notFoundFree
+		mov	cx, ax			; cx = mode
+		mov	ax, (VESA_BIOS_EXT shl 8) or VESA_GET_MODE_INFO
+		call	VidVesaCall
+		cmp	ax, VESA_BIOS_EXT
+		jne	modeLoop
+		mov	es, ss:[vesaBufSel]	; es:0 = VESAModeInfo
+		mov	ax, {word} es:[VMI_modeAttr]
+		and	ax, mask VMA_SUPPORTED or mask VMA_GRAPHICS or \
+			    VESA_MODE_NO_WINDOWS
+		cmp	ax, mask VMA_SUPPORTED or mask VMA_GRAPHICS
+		jne	modeLoop
+		cmp	es:[VMI_Xres], di
+		jne	modeLoop
+		cmp	es:[VMI_Yres], dx
+		jne	modeLoop
+		cmp	es:[VMI_bitsPerPixel], 16
+		jne	modeLoop
+		cmp	es:[VMI_memModel], VMM_PACKED	; VBE 1.1: no layout
+		je	found
+		cmp	es:[VMI_memModel], VMM_DIRECT
+		jne	modeLoop
+		cmp	es:[VMI_greenMaskSize], 6	; 5:6:5, not 1:5:5:5
+		jne	modeLoop
+found:
+		mov	ss:[vesaBiosMode], cx
+		segmov	ds, ss			; not the block we free
+		call	MemFree
+		clc
+		jmp	done
+
+notFoundFree:
+		segmov	ds, ss
+		call	MemFree
+		jmp	notFound
+notFoundPop:
+		pop	si, dx
+notFound:
+		stc
+done:
+		.leave
+		ret
+VidFindVesaMode	endp
 
 COMMENT @%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 		VidMapVesaWinSeg
@@ -958,7 +981,7 @@ if ALLOW_BIG_MOUSE_POINTER
 		mov	ss:[cursorSize], CUR_SIZE * 2
 		jmp	afterCursor
 defaultCursor:
-		cmp	ss:[vesaMode], VM_640x480_16
+		cmp	ss:[vesaMode], VD_VESA_640x480_16
 		jne	afterCursor
 		mov	ss:[cursorSize], CUR_SIZE * 2
 afterCursor:
@@ -1036,8 +1059,19 @@ setResolution:
 
 		jmp	commonSetup
 regularSetup:
-		mov	ah, VESA_BIOS_EXT
-		mov	al, VESA_SET_MODE
+		;
+		; No host interface (which sets the mode itself): set the BIOS
+		; mode found for our resolution.  This call was lost when the
+		; host interface came in; the mode was never set, and the mode
+		; info below was asked for mode number hostIfVersion.
+		;
+		call	VidFindVesaMode
+		LONG jc	noBuffer
+		mov	bx, ss:[vesaBiosMode]	; bit 15 clear: clear memory
+		mov	ax, (VESA_BIOS_EXT shl 8) or VESA_SET_MODE
+		call	VidVesaCall		; (bx preserved)
+		cmp	ax, VESA_BIOS_EXT
+		LONG jne	noBuffer
 
 commonSetup:
 		push	ax
