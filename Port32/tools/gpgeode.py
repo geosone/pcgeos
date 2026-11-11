@@ -4,7 +4,7 @@
 Usage:  gpgeode.py [-o OUT.c] [--rev FILE.rev] [-D NAME]... [--res RES.h]
                    [--objs OBJS.h] GEODE.gp [FILE.goc...]
 
-Writes the C definition of __geos_module (Port32/include/geosmod.h): what
+Writes the C definition of __geos_module (CInclude/geosmod.h): what
 glue put into the geode header from the geode parameter file.  Resource
 numbers are those of gpres.py (the .gp "resource" lines, then the @start
 resources of the .goc files); resources made by goc -cg point to their

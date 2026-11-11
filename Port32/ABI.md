@@ -28,7 +28,7 @@ headers switch on `GEOS_PORT32`, and that build stays byte-identical
   - A new asm file in such a directory must be added to its
     `mkmf.lst`.
 
-## 2. Base types (`Port32/include/geosport.h`)
+## 2. Base types (`CInclude/geosport.h`)
 
 `geos.h` includes `geosport.h` when `GEOS_PORT32` is defined.
 
@@ -267,7 +267,7 @@ in static data, code and `@send`.
 A geode is a module in the host's format (`GHAL-Concept.md` §4.4: DXE3 on
 dos32, ELF shared object on linux and gonware), loaded by `ghal_module`.
 What glue put into the geode header from the `.gp` file is the exported
-object `__geos_module` (`Port32/include/geosmod.h`), written by
+object `__geos_module` (`CInclude/geosmod.h`), written by
 `Port32/tools/gpgeode.py`:
 
 - permanent name and extension (space padded), long name, token,

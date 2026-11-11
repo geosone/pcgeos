@@ -146,8 +146,8 @@ Today the GEOS kernel loads its `.geo` files **itself** (own format, own relocat
 
 | Host | Geode format | Produced by | Loader |
 |---|---|---|---|
-| `dos32` | **DXE3**, the module format of DJGPP | `dxe3gen -U` from the DJGPP objects | `Port32/ghal/dos32/ghal_module_dxe.c` |
-| `linux`, later `gonware` | **ELF shared object** (`ET_DYN`), `-shared -nostdlib -z now` | gcc/clang of the architecture | `Port32/ghal/elf/ghal_module_elf.c` (amd64, i386, arm64, armhf) |
+| `dos32` | **DXE3**, the module format of DJGPP | `dxe3gen -U` from the DJGPP objects | `Ghal/Dos32/ghal_module_dxe.c` |
+| `linux`, later `gonware` | **ELF shared object** (`ET_DYN`), `-shared -nostdlib -z now` | gcc/clang of the architecture | `Ghal/Elf/ghal_module_elf.c` (amd64, i386, arm64, armhf) |
 | `win32/64` | (open, presumably PE DLL) | | |
 
 - `cmake/GeosGeode.cmake` (`geos_geode()`) builds a geode in the host's format. A geode has no host C library and no sanitizer or stack-protector runtime; libgcc is linked in. What libgcc itself imports (DXE3 with unwind tables: `__register_frame_info`/`__deregister_frame_info`; ARM: `raise` for division by zero) is provided by the kernel.
@@ -189,7 +189,7 @@ In the 32-bit C kernel (flat memory, no selectors) the GPMI calls map as follows
 
 ### 4.7 The display and input (implemented 2026-11-11)
 
-`ghal_display` (`ghal.h`, `Port32/ghal/display/`) gives one surface,
+`ghal_display` (`ghal.h`, `Ghal/Display/`) gives one surface,
 32 bits a pixel (`0x00RRGGBB`), and flushes rectangles of it to the
 host. The generic video driver will draw into it.
 
@@ -223,7 +223,7 @@ GHAL_DISPLAY_HOLD=30 Port32/tools/geos-xserver.sh -vnc -view -geometry 800x600 \
 Alternatively, `GEOS_DISPLAY=window` puts it in a window on the
 desktop.
 
-**Input** (`ghal_input`, `Port32/ghal/common/ghal_input.c`):
+**Input** (`ghal_input`, `Ghal/Common/ghal_input.c`):
 
 - **Events.** Keys, buttons and the pointer come as events in the
   openinput format: HID usage page, usage and value.
@@ -317,7 +317,7 @@ cmake -S . -B build-w64   -G Ninja -DGEOS_HOST=win64  -DCMAKE_TOOLCHAIN_FILE=cma
 
 **Rules:**
 
-1. **`#ifdef GEOS_HOST_*` and host headers only in `ghal/` and in the host driver directories.** Everything else is built identically for all hosts. CI checks this with a script.
+1. **`#ifdef GEOS_HOST_*` and host headers only in `Ghal/`.** Everything else is built identically for all hosts. CI checks this with a script.
 2. **Architecture is not host.** x86-64, i686, aarch64 and armhf are handled only through types (`uintptr_t`, `intptr_t`, fixed widths), not through `#ifdef`.
 3. **64-bit Windows is LLP64:** `long` is 32-bit there. So **never use `long` for pointers or sizes**; use `intptr_t`/`size_t`. And `wchar_t` is 16-bit there, so never use `wchar_t` as the GEOS character type.
 4. Query missing capabilities via `ghal_caps()`; do not infer them from the host name.
@@ -327,16 +327,24 @@ cmake -S . -B build-w64   -G Ninja -DGEOS_HOST=win64  -DCMAKE_TOOLCHAIN_FILE=cma
    - `dos32` in QEMU with FreeDOS + HDPMI32,
    - `gonware` in QEMU.
 
-**Directory layout (proposal):** new code without an asm original lives under `Port32/` (see the layout rule in `PLAN.md`); C ports of asm files sit next to their asm.
+**Directory layout** (decided 2026-11-11). The GHAL is the layer that
+replaces `Loader/` and the direct hardware access, so it is a top-level
+directory like `Loader/`, `Library/` and `Driver/`, named in the GEOS
+scheme. GEOS drivers on the GHAL go into the `Driver/` tree like any
+other driver, and C ports of asm files sit next to their asm. `Port32/`
+holds only documentation, tests and tools.
 
 ```
-Port32/ghal/
-  include/ghal/*.h            API of the GHAL core and the host services
-  common/                     software renderer, HID tables, helpers
-  dos32/  linux/  win/  gonware/
-  linux/display-sdl3/  linux/display-x11/  linux/display-fbdev/
-Port32/Driver/Host/           generic drivers on the host services (new, no asm original)
-  Video/FB  IFS/HostFS  Keyboard/Host  Mouse/Host  Socket/Host  Sound/Host
+CInclude/ghal.h               API of the GHAL core and the host services
+Ghal/
+  ghal_internal.h             what the parts of the GHAL share
+  Common/                     the input queue, HID tables
+  Posix/  Dos32/  Elf/        core backends (Linux and other POSIX hosts,
+                              DOS with DPMI, the ELF module loader)
+  Display/                    display backends: x11, null (later sdl3, fbdev)
+Driver/Keyboard/              the C keyboard driver beside the asm one,
+Driver/Mouse/..., Driver/Video/...   drivers on the host services
+Driver/IFS/HostFS/            the file system driver on ghal_fs
 ```
 
 ## 9. Open decisions

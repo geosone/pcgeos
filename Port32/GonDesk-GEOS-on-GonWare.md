@@ -190,18 +190,17 @@ The GHAL is a narrow C API (prefix `ghal_`) in its own headers. Each group has o
 4. Capabilities a host lacks are **queried** (`ghal_caps()`, e.g. "audio", "network", "dynamic loading"), not guessed from the host name.
 5. Every host has a **test run in CI**: `linux` fully, with graphics tests through an offscreen backend; `gonware` in QEMU like the GonWare boot tests; `dos32` in QEMU or DOSBox-X with FreeDOS + HDPMI32.
 
-#### Directory layout (proposal)
+#### Directory layout
 
 ```
-Port32/
-  ghal/
-    include/ghal/*.h          shared API
-    common/                  software renderer, openinput tables, helpers
-    linux/                   mem, thread, file, module, time, net ...
-    linux/display-sdl3/  linux/display-x11/  linux/display-fbdev/
-    gonware/                 mlibc, GWVIDEO, openinput, NSS attributes
-    dos32/                   DPMI, scheduler, VBE, int 21h, PS/2
-  cmake/
+CInclude/ghal.h              shared API
+Ghal/
+    Common/                  openinput queue and tables, helpers
+    Posix/                   mem, thread, file, time, net ... (Linux)
+    Display/                 x11, null; later sdl3, fbdev
+    GonWare/                 mlibc, GWVIDEO, openinput, NSS attributes
+    Dos32/                   DPMI, scheduler, VBE, int 21h, PS/2
+cmake/
     toolchain-gonware-{x86_64,i686,aarch64}.cmake
     toolchain-dos32-hx.cmake   toolchain-dos32-djgpp.cmake
 ```

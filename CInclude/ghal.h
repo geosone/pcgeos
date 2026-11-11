@@ -3,7 +3,7 @@
  *
  * The only place where the 32/64-bit GEOS kernel touches its host.  Each
  * host (dos32, linux, win32/win64, later gonware) implements this file in
- * Port32/ghal/<backend>/.  Design: Port32/GHAL-Concept.md, sections 4 and
+ * Ghal/<Backend>/.  Design: Port32/GHAL-Concept.md, sections 4 and
  * 4.6; the asm side for the 16-bit kernel is Include/Internal/ghal.def.
  *
  * Conventions:

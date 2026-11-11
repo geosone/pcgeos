@@ -1,5 +1,5 @@
 /*
- * test_geosport.c -- base types of GEOS in C (Port32/include/geosport.h,
+ * test_geosport.c -- base types of GEOS in C (CInclude/geosport.h,
  * reached through CInclude/geos.h with GEOS_PORT32 defined).
  *
  * Same widths on every host: 32/64-bit Linux, dos32 (Open Watcom 386),

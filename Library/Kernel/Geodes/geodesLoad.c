@@ -4,7 +4,7 @@
  *
  * A geode is a module of the host, loaded by ghal_module (Port32/ABI.md
  * section 7): what glue put into the geode header is the module's
- * __geos_module (Port32/include/geosmod.h).  GeodeLoad
+ * __geos_module (CInclude/geosmod.h).  GeodeLoad
  *
  *   - loads the module once with dummy imports to read the libraries it
  *     uses (a module is self-describing only after it is loaded), and

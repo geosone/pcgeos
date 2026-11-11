@@ -8,7 +8,7 @@
 # geode_<name>; the path of the file goes to the variable <name>_GEO in
 # the caller's scope.  With GP it is a GEOS geode: the .goc files go
 # through goc -cg (GeosGoc.cmake) and Port32/tools/gpgeode.py writes the
-# GEOS data of the module (__geos_module, Port32/include/geosmod.h) from
+# GEOS data of the module (__geos_module, CInclude/geosmod.h) from
 # the .gp file and the .rev file (default: <geode>.rev next to the .gp
 # file, if there is one).  The format is the host's own (Port32/GHAL-Concept.md
 # section 4.4, loaded by ghal_module):
@@ -80,7 +80,7 @@ function(geos_geode name)
     list(APPEND sources ${wrappers} ${module_c})
     # GEOS's own C library headers (CInclude/Ansi) before the host's:
     # a geode imports the C functions from GEOS, not from the host
-    list(APPEND incs ${gp_dir} ${PROJECT_SOURCE_DIR}/Port32/include
+    list(APPEND incs ${gp_dir} ${PROJECT_SOURCE_DIR}/CInclude
          ${PROJECT_SOURCE_DIR}/CInclude/Ansi ${PROJECT_SOURCE_DIR}/CInclude)
     list(APPEND defs GEOS_PORT32)
   endif()

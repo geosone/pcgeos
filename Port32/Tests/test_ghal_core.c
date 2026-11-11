@@ -1,5 +1,5 @@
 /*
- * test_ghal_core.c -- host-independent tests of the GHAL (Port32/ghal).
+ * test_ghal_core.c -- host-independent tests of the GHAL (Ghal).
  *
  * Runs on every host (linux, dos32, ...): memory blocks, clocks, critical
  * sections, the tick source and the capability query.  Only ghal.h and the

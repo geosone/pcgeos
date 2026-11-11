@@ -125,7 +125,7 @@ endif()
 add_executable(test_geosport test_geosport.c)
 target_compile_definitions(test_geosport PRIVATE GEOS_PORT32)
 target_include_directories(test_geosport PRIVATE
-  ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+  ${PROJECT_SOURCE_DIR}/CInclude)
 add_test(NAME cinclude.geosport COMMAND test_geosport)
 
 # Every header of cinclude_port32.txt must compile on its own (after
@@ -145,7 +145,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_definitions(cinclude_port32 PRIVATE GEOS_PORT32)
   target_compile_options(cinclude_port32 PRIVATE -Werror)
   target_include_directories(cinclude_port32 PRIVATE
-    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+    ${PROJECT_SOURCE_DIR}/CInclude)
 endif()
 
 # goc -cg: object resources, class structures and chunk handles of a .goc
@@ -164,7 +164,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "
     CObjMessageP=GocTestObjMessageP CObjCallSuperP=GocTestObjCallSuperP
     CMessageDispatchP=GocTestMessageDispatchP)
   target_include_directories(test_gocres PRIVATE
-    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+    ${PROJECT_SOURCE_DIR}/CInclude)
   if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     # parameters of methods are often unused
     target_compile_options(test_gocres PRIVATE -Wno-unused-parameter)
@@ -177,7 +177,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "
   target_link_libraries(test_kernel_msg PRIVATE geos_kernel)
   target_compile_definitions(test_kernel_msg PRIVATE GEOS_PORT32)
   target_include_directories(test_kernel_msg PRIVATE
-    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+    ${PROJECT_SOURCE_DIR}/CInclude)
   if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(test_kernel_msg PRIVATE -Wno-unused-parameter)
   endif()
@@ -189,7 +189,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "
   target_link_libraries(test_kernel_obj PRIVATE geos_kernel)
   target_compile_definitions(test_kernel_obj PRIVATE GEOS_PORT32)
   target_include_directories(test_kernel_obj PRIVATE
-    ${PROJECT_SOURCE_DIR}/Port32/include ${PROJECT_SOURCE_DIR}/CInclude)
+    ${PROJECT_SOURCE_DIR}/CInclude)
   if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(test_kernel_obj PRIVATE -Wno-unused-parameter)
   endif()
@@ -223,7 +223,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   target_link_libraries(test_geode_hello PRIVATE ghal)
   set_source_files_properties(geode_hello_check.c PROPERTIES
     COMPILE_DEFINITIONS GEOS_PORT32
-    INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/Port32/include;${PROJECT_SOURCE_DIR}/CInclude")
+    INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/CInclude")
   add_test(NAME geode.hello COMMAND test_geode_hello)
 
   # the C kernel loads geodes: the process kgapp and its library kglib

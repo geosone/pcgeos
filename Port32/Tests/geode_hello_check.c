@@ -1,7 +1,7 @@
 /*
  * geode_hello_check.c -- checks of the GEOS data of the Hello geode
  * (test_geode_hello.c), compiled with the GEOS headers: __geos_module
- * (Port32/include/geosmod.h) against Appl/SDK_C/Hello/hello.gp.
+ * (CInclude/geosmod.h) against Appl/SDK_C/Hello/hello.gp.
  */
 #include <geos.h>
 #include <object.h>

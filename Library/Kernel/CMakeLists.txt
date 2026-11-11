@@ -112,7 +112,6 @@ add_library(geos_kernel_objs OBJECT
   Sys/sysMisc.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/Port32/include
   ${PROJECT_SOURCE_DIR}/CInclude)
 target_compile_definitions(geos_kernel_objs PRIVATE GEOS_PORT32)
 target_link_libraries(geos_kernel_objs PRIVATE ghal hostfs)
@@ -148,7 +147,6 @@ endif()
 add_library(geos_kernel STATIC $<TARGET_OBJECTS:geos_kernel_objs> ${_kexports})
 target_include_directories(geos_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/Port32/include
   ${PROJECT_SOURCE_DIR}/CInclude)
 target_compile_definitions(geos_kernel PUBLIC GEOS_PORT32)
 target_link_libraries(geos_kernel PUBLIC ghal hostfs)

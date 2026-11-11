@@ -22,7 +22,7 @@
  * 0xff0000, 0xff00, 0xff, as every current server has.
  */
 #include "ghal.h"
-#include "../common/ghal_hid.h"
+#include "../Common/ghal_hid.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
