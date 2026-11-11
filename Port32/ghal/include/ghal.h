@@ -474,8 +474,13 @@ typedef struct ghal_input_event {
     uint32_t time_ms;       /* ghal_time_monotonic_ns / 1e6 */
 } ghal_input_event;
 
-/* Take the oldest event; 0 if there is none. */
-int         ghal_input_read(ghal_input_event *ev);
+/* Masks of sources, for ghal_input_read: each driver takes its own. */
+#define GHAL_INPUT_KEYBOARD (1u << GHAL_INPUT_SOURCE_KEYBOARD)
+#define GHAL_INPUT_POINTER  (1u << GHAL_INPUT_SOURCE_POINTER)
+#define GHAL_INPUT_ALL      0xffffu
+/* Take the oldest event of one of the sources in the mask; 0 if there
+ * is none.  Events of other sources stay queued, in order. */
+int         ghal_input_read(unsigned sources, ghal_input_event *ev);
 /* Queue events (time_ms is filled in when 0) and run the GHAL_IRQ_INPUT
  * handlers.  For backends, and for tests and drivers that make input. */
 ghal_status ghal_input_post(const ghal_input_event *ev, unsigned n);

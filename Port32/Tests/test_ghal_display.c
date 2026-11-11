@@ -48,7 +48,7 @@ static int Next(ghal_input_event *e)
     uint64_t end = ghal_time_monotonic_ns() + 2000000000u;
 
     while (ghal_time_monotonic_ns() < end)
-        if (ghal_input_read(e))
+        if (ghal_input_read(GHAL_INPUT_ALL, e))
             return 1;
     return 0;
 }
@@ -174,7 +174,7 @@ int main(void)
         ghal_input_event e;
         while (ghal_time_monotonic_ns() < end &&
                !ghal_display_close_requested())
-            while (ghal_input_read(&e))
+            while (ghal_input_read(GHAL_INPUT_ALL, &e))
                 printf("input page %02x usage %02x value %d flags %u "
                        "text %u\n", e.page, e.usage, (int) e.value,
                        e.flags, (unsigned) e.text);

@@ -25,7 +25,7 @@ static void Handler(void *ctx)
         active++;
     /* a driver would read here; this one only reads when told to */
     if (ctx)
-        while (ghal_input_read(&e))
+        while (ghal_input_read(GHAL_INPUT_ALL, &e))
             seen++;
 }
 
@@ -36,7 +36,7 @@ int main(void)
     unsigned i;
 
     setvbuf(stdout, NULL, _IONBF, 0);
-    CHECK(!ghal_input_read(&r));
+    CHECK(!ghal_input_read(GHAL_INPUT_ALL, &r));
     CHECK(ghal_irq_attach(GHAL_IRQ_INPUT, Handler, NULL, &src) == GHAL_OK);
 
     memset(e, 0, sizeof(e));
@@ -56,18 +56,26 @@ int main(void)
     CHECK(ghal_input_post(e, 3) == GHAL_OK);
     CHECK(calls == 1 && active == 1);
     CHECK(!ghal_irq_active());
-    CHECK(ghal_input_read(&r) && r.usage == 0x04 && r.value == 1 &&
+    CHECK(ghal_input_read(GHAL_INPUT_ALL, &r) && r.usage == 0x04 && r.value == 1 &&
           r.text == 'a' && r.time_ms != 0);
-    CHECK(ghal_input_read(&r) && r.usage == 0x04 && r.value == 0);
-    CHECK(ghal_input_read(&r) && r.usage == GHAL_HID_X && r.value == 123 &&
+    CHECK(ghal_input_read(GHAL_INPUT_ALL, &r) && r.usage == 0x04 && r.value == 0);
+    CHECK(ghal_input_read(GHAL_INPUT_ALL, &r) && r.usage == GHAL_HID_X && r.value == 123 &&
           r.flags == GHAL_INPUT_ABSOLUTE && r.time_ms == 7);
-    CHECK(!ghal_input_read(&r));
+    CHECK(!ghal_input_read(GHAL_INPUT_ALL, &r));
+
+    /* by source: each driver takes its own, the rest keeps its order */
+    ghal_input_post(e, 3);
+    CHECK(ghal_input_read(GHAL_INPUT_POINTER, &r) && r.usage == GHAL_HID_X);
+    CHECK(!ghal_input_read(GHAL_INPUT_POINTER, &r));
+    CHECK(ghal_input_read(GHAL_INPUT_KEYBOARD, &r) && r.value == 1);
+    CHECK(ghal_input_read(GHAL_INPUT_KEYBOARD, &r) && r.value == 0);
+    CHECK(!ghal_input_read(GHAL_INPUT_ALL, &r));
 
     /* full: the rest is dropped and counted */
     for (i = 0; i < GHAL_INPUT_QUEUE + 5; i++)
         ghal_input_post(&e[0], 1);
     CHECK(ghal_input_dropped() == 5);
-    for (i = 0; ghal_input_read(&r); i++)
+    for (i = 0; ghal_input_read(GHAL_INPUT_ALL, &r); i++)
         ;
     CHECK(i == GHAL_INPUT_QUEUE);
     CHECK(ghal_irq_detach(src) == GHAL_OK);
@@ -76,12 +84,12 @@ int main(void)
     calls = 0;
     CHECK(ghal_irq_attach(GHAL_IRQ_INPUT, Handler, &seen, &src) == GHAL_OK);
     ghal_input_post(e, 3);
-    CHECK(calls == 1 && seen == 3 && !ghal_input_read(&r));
+    CHECK(calls == 1 && seen == 3 && !ghal_input_read(GHAL_INPUT_ALL, &r));
     CHECK(ghal_irq_detach(src) == GHAL_OK);
     CHECK(ghal_irq_detach(src) == GHAL_ERR_INVAL || 1);
     ghal_input_post(e, 1);
     CHECK(calls == 1);                  /* detached */
-    CHECK(ghal_input_read(&r));
+    CHECK(ghal_input_read(GHAL_INPUT_ALL, &r));
 
     printf("%s\n", fails ? "FAILED" : "ok");
     return fails != 0;

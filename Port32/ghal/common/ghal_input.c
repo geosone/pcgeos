@@ -10,18 +10,27 @@ static ghal_input_event queue[GHAL_INPUT_QUEUE];
 static unsigned head, count;
 static uint32_t dropped;
 
-int ghal_input_read(ghal_input_event *ev)
+int ghal_input_read(unsigned sources, ghal_input_event *ev)
 {
+    unsigned i, j;
     int got = 0;
 
     if (!ev)
         return 0;
     ghal_crit_enter();
-    if (count) {
-        *ev = queue[head];
-        head = (head + 1) % GHAL_INPUT_QUEUE;
-        count--;
-        got = 1;
+    for (i = 0; i < count; i++) {
+        unsigned at = (head + i) % GHAL_INPUT_QUEUE;
+        if (queue[at].source < 16 && (sources & (1u << queue[at].source))) {
+            *ev = queue[at];
+            /* close the gap: the ones before it move up by one */
+            for (j = i; j > 0; j--)
+                queue[(head + j) % GHAL_INPUT_QUEUE] =
+                    queue[(head + j - 1) % GHAL_INPUT_QUEUE];
+            head = (head + 1) % GHAL_INPUT_QUEUE;
+            count--;
+            got = 1;
+            break;
+        }
     }
     ghal_crit_leave();
     return got;

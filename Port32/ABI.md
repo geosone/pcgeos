@@ -423,6 +423,8 @@ In Port32 the strategy routine is a C function
 typedef struct {
     dword DR_ax, DR_bx, DR_cx, DR_dx, DR_si, DR_bp;
     void  *DR_dsSi, *DR_esDi;   /* segment:offset pairs as pointers */
+    dword  DR_di;               /* di as a value */
+    void  *DR_esSi;             /* es:si as a pointer */
 } DriverRegs;
 typedef Boolean DriverStrategy(word function, DriverRegs *regs); /* carry */
 ```

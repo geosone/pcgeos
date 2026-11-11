@@ -32,6 +32,8 @@ typedef struct {
     dword	DR_ax, DR_bx, DR_cx, DR_dx, DR_si, DR_bp;
     void	*DR_dsSi;	/* ds:si as a pointer */
     void	*DR_esDi;	/* es:di as a pointer */
+    dword	DR_di;		/* di as a value (DR_KBD_XLATE_SCAN) */
+    void	*DR_esSi;	/* es:si as a pointer */
 } DriverRegs;
 
 /* TRUE: the carry flag, an error */
