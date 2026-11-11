@@ -20,6 +20,7 @@
  *   ghal_fault     DPMI exception handlers (0203h); no fault address.
  */
 #include "ghal.h"
+#include "ghal_internal.h"
 
 #include <dos.h>
 #include <stdarg.h>
@@ -479,6 +480,7 @@ struct ghal_irq_source {
 #define MAX_SOURCES 8
 static struct ghal_irq_source sources[MAX_SOURCES];
 static struct ghal_irq_source *volatile tick_list;
+static struct ghal_irq_source *volatile input_list; /* GHAL_IRQ_INPUT */
 
 static unsigned          tick_hz = 60;
 static volatile uint32_t pit_reload = 65536;   /* counts per IRQ0 */
@@ -669,7 +671,7 @@ ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
         *out = NULL;
     if (!fn || !out)
         return GHAL_ERR_INVAL;
-    if (source != GHAL_IRQ_TICK)
+    if (source != GHAL_IRQ_TICK && source != GHAL_IRQ_INPUT)
         return GHAL_ERR_UNSUPPORTED;
     ghal_crit_enter();
     for (i = 0; i < MAX_SOURCES; i++)
@@ -677,6 +679,15 @@ ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
             s = &sources[i];
             break;
         }
+    if (s && source == GHAL_IRQ_INPUT) {
+        s->fn = fn;
+        s->ctx = ctx;
+        s->next = input_list;
+        input_list = s;
+        ghal_crit_leave();
+        *out = s;
+        return GHAL_OK;
+    }
     if (s) {
         s->fn = fn;
         s->ctx = ctx;
@@ -701,6 +712,13 @@ ghal_status ghal_irq_detach(ghal_irq_source *src)
     if (!src)
         return GHAL_ERR_INVAL;
     ghal_crit_enter();
+    for (pp = (struct ghal_irq_source **)&input_list; *pp; pp = &(*pp)->next)
+        if (*pp == src) {
+            *pp = src->next;
+            src->fn = NULL;
+            ghal_crit_leave();
+            return GHAL_OK;
+        }
     for (pp = (struct ghal_irq_source **)&tick_list; *pp; pp = &(*pp)->next)
         if (*pp == src) {
             *pp = src->next;
@@ -714,6 +732,20 @@ ghal_status ghal_irq_detach(ghal_irq_source *src)
     if (last)
         irq0_unhook();
     return found ? GHAL_OK : GHAL_ERR_INVAL;
+}
+
+/* GHAL_IRQ_INPUT: run its handlers like an interrupt */
+void ghal_irq_raise(int source)
+{
+    struct ghal_irq_source *s;
+    if (source != GHAL_IRQ_INPUT)
+        return;
+    ghal_crit_enter();
+    irq_depth++;
+    for (s = input_list; s; s = s->next)
+        s->fn(s->ctx);
+    irq_depth--;
+    ghal_crit_leave();
 }
 
 ghal_status ghal_irq_set_tick_rate(unsigned hz)

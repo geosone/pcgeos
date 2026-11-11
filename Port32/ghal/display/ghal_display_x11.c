@@ -10,18 +10,25 @@
  * without one, such as Xvnc or Xvfb).
  *
  * A host thread serves the events: Expose repaints from the surface, the
- * window manager's close button sets close_requested.  Xlib is used from
- * that thread and from the callers' threads (XInitThreads, and the
- * display lock around each use).
+ * window manager's close button sets close_requested, and keys, buttons
+ * and the pointer go to ghal_input (ghal_input.c) as HID usages.  Key
+ * codes are the evdev ones (Linux KEY_* + 8), which every current X
+ * server uses; a key the server repeats comes as presses with
+ * GHAL_INPUT_REPEAT (detectable auto repeat), its character from the
+ * keysym.  Xlib is used from that thread and from the callers' threads
+ * (XInitThreads, and the display lock around each use).
  *
  * The server must have a 24-bit TrueColor visual with the masks
  * 0xff0000, 0xff00, 0xff, as every current server has.
  */
 #include "ghal.h"
+#include "../common/ghal_hid.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include <X11/XKBlib.h>
+#include <X11/keysym.h>
 #include <X11/extensions/XShm.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
@@ -40,6 +47,107 @@ static Atom wmDelete;
 static pthread_t thread;
 static volatile int stop, closeRequested;
 static ghal_surface surf;
+
+static unsigned char keyDown[256];
+
+/* the character of a keysym: Latin-1 and Unicode keysyms, and the
+ * keys that type control characters */
+static uint32_t KeysymText(KeySym ks)
+{
+    if ((ks >= 0x20 && ks <= 0x7e) || (ks >= 0xa0 && ks <= 0xff))
+        return (uint32_t) ks;
+    if ((ks & 0xff000000) == 0x01000000)
+        return (uint32_t) (ks & 0xffffff);
+    switch (ks) {
+    case XK_BackSpace: return 8;
+    case XK_Tab: case XK_KP_Tab: return 9;
+    case XK_Return: case XK_KP_Enter: return 13;
+    case XK_Escape: return 27;
+    case XK_Delete: return 127;
+    default: break;
+    }
+    if (ks >= XK_KP_0 && ks <= XK_KP_9)
+        return (uint32_t) ('0' + (ks - XK_KP_0));
+    switch (ks) {
+    case XK_KP_Decimal: return '.';
+    case XK_KP_Add: return '+';
+    case XK_KP_Subtract: return '-';
+    case XK_KP_Multiply: return '*';
+    case XK_KP_Divide: return '/';
+    case XK_KP_Space: return ' ';
+    case XK_KP_Equal: return '=';
+    default: return 0;
+    }
+}
+
+static void Key(XKeyEvent *k, int down)
+{
+    ghal_input_event e;
+    KeySym ks = NoSymbol;
+    char buf[8];
+
+    memset(&e, 0, sizeof(e));
+    e.page = GHAL_HID_PAGE_KEYBOARD;
+    e.usage = k->keycode >= 8 ? ghal_hid_from_linux_key(k->keycode - 8) : 0;
+    if (!e.usage)
+        return;
+    e.source = GHAL_INPUT_SOURCE_KEYBOARD;
+    e.value = down;
+    if (down) {
+        if (keyDown[k->keycode & 0xff])
+            e.flags = GHAL_INPUT_REPEAT;
+        XLookupString(k, buf, sizeof(buf), &ks, NULL);
+        e.text = KeysymText(ks);
+    }
+    keyDown[k->keycode & 0xff] = (unsigned char) down;
+    ghal_input_post(&e, 1);
+}
+
+static void Button(XButtonEvent *b, int down)
+{
+    static const uint16_t hidButton[4] = { 0, 1, 3, 2 };
+    ghal_input_event e;
+
+    memset(&e, 0, sizeof(e));
+    e.source = GHAL_INPUT_SOURCE_POINTER;
+    if (b->button >= 1 && b->button <= 3) {
+        e.page = GHAL_HID_PAGE_BUTTON;
+        e.usage = hidButton[b->button];
+        e.value = down;
+    } else if (!down) {
+        return;                 /* wheels: one step a press */
+    } else if (b->button == 4 || b->button == 5) {
+        e.page = GHAL_HID_PAGE_DESKTOP;
+        e.usage = GHAL_HID_WHEEL;
+        e.value = b->button == 4 ? 1 : -1;
+    } else if (b->button == 6 || b->button == 7) {
+        e.page = GHAL_HID_PAGE_CONSUMER;
+        e.usage = GHAL_HID_PAN;
+        e.value = b->button == 6 ? -1 : 1;
+    } else {
+        e.page = GHAL_HID_PAGE_BUTTON;
+        e.usage = (uint16_t) (b->button - 4);   /* 8, 9: buttons 4, 5 */
+        e.value = 1;
+        ghal_input_post(&e, 1);
+        e.value = 0;
+    }
+    ghal_input_post(&e, 1);
+}
+
+static void Motion(int x, int y)
+{
+    ghal_input_event e[2];
+
+    memset(e, 0, sizeof(e));
+    e[0].page = e[1].page = GHAL_HID_PAGE_DESKTOP;
+    e[0].usage = GHAL_HID_X;
+    e[1].usage = GHAL_HID_Y;
+    e[0].value = x;
+    e[1].value = y;
+    e[0].source = e[1].source = GHAL_INPUT_SOURCE_POINTER;
+    e[0].flags = e[1].flags = GHAL_INPUT_ABSOLUTE;
+    ghal_input_post(e, 2);
+}
 
 static int (*oldHandler)(Display *, XErrorEvent *);
 static volatile int shmFailed;
@@ -97,6 +205,31 @@ static void *EventThread(void *arg)
             case Expose:
                 Put(ev.xexpose.x, ev.xexpose.y, ev.xexpose.width,
                     ev.xexpose.height);
+                break;
+            case KeyPress:
+            case KeyRelease:
+                Key(&ev.xkey, ev.type == KeyPress);
+                break;
+            case ButtonPress:
+            case ButtonRelease:
+                Button(&ev.xbutton, ev.type == ButtonPress);
+                break;
+            case MotionNotify:
+                Motion(ev.xmotion.x, ev.xmotion.y);
+                break;
+            case FocusOut:
+                /* keys held when the focus goes are released */
+                {
+                    XKeyEvent k;
+                    unsigned c;
+                    memset(&k, 0, sizeof(k));
+                    k.display = dpy;
+                    for (c = 8; c < 256; c++)
+                        if (keyDown[c]) {
+                            k.keycode = c;
+                            Key(&k, 0);
+                        }
+                }
                 break;
             case ClientMessage:
                 if ((Atom) ev.xclient.data.l[0] == wmDelete)
@@ -201,7 +334,9 @@ ghal_status ghal_display_open(unsigned width, unsigned height,
                                   AllocNone);
     wa.background_pixel = 0;
     wa.border_pixel = 0;
-    wa.event_mask = ExposureMask | StructureNotifyMask;
+    wa.event_mask = ExposureMask | StructureNotifyMask | KeyPressMask |
+                    KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
+                    PointerMotionMask | FocusChangeMask;
     win = XCreateWindow(dpy, RootWindow(dpy, scr), 0, 0, width, height, 0,
                         24, InputOutput, vi.visual,
                         CWColormap | CWBackPixel | CWBorderPixel |
@@ -225,6 +360,10 @@ ghal_status ghal_display_open(unsigned width, unsigned height,
     do
         XNextEvent(dpy, &ev);
     while (ev.type != MapNotify);
+    if (full)                   /* a server without a window manager */
+        XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
+    XkbSetDetectableAutoRepeat(dpy, True, NULL);
+    memset(keyDown, 0, sizeof(keyDown));
 
     surf.pixels = (uint32_t *) img->data;
     surf.pitch = (uint32_t) img->bytes_per_line;

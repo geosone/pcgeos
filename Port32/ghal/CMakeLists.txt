@@ -1,6 +1,9 @@
 # GHAL core library (Port32/GHAL-Concept.md).  One backend per host.
 add_library(ghal STATIC)
-target_include_directories(ghal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(ghal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# the same on every host
+target_sources(ghal PRIVATE common/ghal_input.c common/ghal_hid_linux.c)
 
 if(GEOS_HOST STREQUAL "linux")
   target_sources(ghal PRIVATE posix/ghal_posix.c posix/ghal_fs_posix.c elf/ghal_module_elf.c)

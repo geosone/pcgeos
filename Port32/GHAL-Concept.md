@@ -187,7 +187,7 @@ In the 32-bit C kernel (flat memory, no selectors) the GPMI calls map as follows
 
 **Kernel APIs that already are the boundary.** `SysCatchInterrupt`/`SysCatchDeviceInterrupt`/`SysReset*` (drivers hook IRQs) and `SysLockBIOS`/`SysUnlockBIOS` keep their API; in the C kernel they are implemented on `ghal_irq` and `ghal_hostlock`. Their call sites in drivers do not change.
 
-### 4.7 The display (implemented 2026-11-11)
+### 4.7 The display and input (implemented 2026-11-11)
 
 `ghal_display` (`ghal.h`, `Port32/ghal/display/`) gives one surface,
 32 bits a pixel (`0x00RRGGBB`), and flushes rectangles of it to the
@@ -222,6 +222,31 @@ GHAL_DISPLAY_HOLD=30 Port32/tools/geos-xserver.sh -vnc -view -geometry 800x600 \
 
 Alternatively, `GEOS_DISPLAY=window` puts it in a window on the
 desktop.
+
+**Input** (`ghal_input`, `Port32/ghal/common/ghal_input.c`):
+
+- **Events.** Keys, buttons and the pointer come as events in the
+  openinput format: HID usage page, usage and value.
+  - A key is the physical key (page 7); the keyboard driver applies the
+    layout, as it did with scan codes.
+  - A press also carries the character the host's layout gives, for
+    drivers that take the host's layout.
+  - The pointer reports absolute positions in surface pixels.
+- **Queue.** Events go into one queue on every host, either from the
+  display backend or from `ghal_input_post`. Each time events arrive,
+  the handlers of the new `ghal_irq` source `GHAL_IRQ_INPUT` run as an
+  interrupt, as the keyboard and mouse IRQs did, and read the queue.
+- **X11.** The window's events are mapped like this:
+  - key codes: evdev, i.e. Linux `KEY_*` + 8, through
+    `common/ghal_hid_linux.c`, which fbdev with evdev will use too;
+  - repeats the server makes: presses with `GHAL_INPUT_REPEAT`;
+  - buttons 4 and 5: the wheel, 6 and 7: pan;
+  - focus loss: the keys still down are released.
+
+ctest `ghal.input` checks the queue and the interrupt on every host.
+`ghal.display` sends key, button and pointer events to the window and
+checks what comes out. With `GHAL_DISPLAY_HOLD`, the test prints what
+is typed and clicked in its window or VNC session.
 
 ## 5. Driver sets per host
 

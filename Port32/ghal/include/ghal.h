@@ -185,7 +185,8 @@ typedef void (*ghal_irq_handler)(void *ctx);
 typedef struct ghal_irq_source ghal_irq_source;
 
 enum {
-    GHAL_IRQ_TICK = 0       /* scheduler tick (dos32: IRQ0 / PIT) */
+    GHAL_IRQ_TICK = 0,      /* scheduler tick (dos32: IRQ0 / PIT) */
+    GHAL_IRQ_INPUT = 1      /* ghal_input has events (every host) */
 };
 
 ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
@@ -416,13 +417,70 @@ ghal_status ghal_display_open(unsigned width, unsigned height,
 /* Show the rectangle of the surface. */
 void        ghal_display_flush(int x, int y, int w, int h);
 void        ghal_display_close(void);
-/* Non-zero once the user closed the window (until there is ghal_input). */
+/* Non-zero once the user closed the window. */
 int         ghal_display_close_requested(void);
 /* For tests: the pixel at (x, y) as the host shows it (0x00RRGGBB), or
  * the surface's for "null". */
 uint32_t    ghal_display_read_back(int x, int y);
 /* "x11", "null" */
 const char *ghal_display_backend(void);
+
+/* ---------------------------------------------------------------------
+ * ghal_input -- keyboard and pointer, as events in the openinput format:
+ * HID usages (USB HID Usage Tables), so a key is the physical key and
+ * the keyboard driver applies the layout, as it did with scan codes.
+ *
+ *   page 0x07 (keyboard)  usage = HID key code, value 1 down, 0 up;
+ *                         GHAL_INPUT_REPEAT on a key the host repeats;
+ *                         `text' is the character the host's layout
+ *                         gives for a press (0 if none)
+ *   page 0x09 (button)    usage 1 primary, 2 secondary, 3 middle
+ *   page 0x01 (desktop)   usage 0x30 X, 0x31 Y: GHAL_INPUT_ABSOLUTE in
+ *                         surface pixels, else a movement;
+ *                         usage 0x38 wheel: +1 away from the user
+ *   page 0x0c (consumer)  usage 0x238 pan (horizontal wheel)
+ *
+ * Events come from the display's backend (x11: the window's events) or
+ * from ghal_input_post.  Each time events arrive, the handlers attached
+ * to GHAL_IRQ_INPUT run, as the keyboard and mouse interrupts did; they
+ * read the events with ghal_input_read.  The queue holds
+ * GHAL_INPUT_QUEUE events; more are dropped (and counted).
+ * ------------------------------------------------------------------- */
+
+enum {
+    GHAL_HID_PAGE_DESKTOP  = 0x01,
+    GHAL_HID_PAGE_KEYBOARD = 0x07,
+    GHAL_HID_PAGE_BUTTON   = 0x09,
+    GHAL_HID_PAGE_CONSUMER = 0x0c,
+    GHAL_HID_X = 0x30, GHAL_HID_Y = 0x31, GHAL_HID_WHEEL = 0x38,
+    GHAL_HID_PAN = 0x238
+};
+
+enum {
+    GHAL_INPUT_ABSOLUTE = 1u << 0,  /* X/Y: a position */
+    GHAL_INPUT_REPEAT   = 1u << 1   /* key: a repeat of the host */
+};
+
+enum { GHAL_INPUT_SOURCE_KEYBOARD = 0, GHAL_INPUT_SOURCE_POINTER = 1 };
+
+#define GHAL_INPUT_QUEUE 256
+
+typedef struct ghal_input_event {
+    uint16_t page, usage;
+    int32_t  value;
+    uint16_t source;        /* GHAL_INPUT_SOURCE_* */
+    uint16_t flags;         /* GHAL_INPUT_* */
+    uint32_t text;          /* Unicode, keyboard presses only */
+    uint32_t time_ms;       /* ghal_time_monotonic_ns / 1e6 */
+} ghal_input_event;
+
+/* Take the oldest event; 0 if there is none. */
+int         ghal_input_read(ghal_input_event *ev);
+/* Queue events (time_ms is filled in when 0) and run the GHAL_IRQ_INPUT
+ * handlers.  For backends, and for tests and drivers that make input. */
+ghal_status ghal_input_post(const ghal_input_event *ev, unsigned n);
+/* Events dropped because the queue was full, since the start. */
+uint32_t    ghal_input_dropped(void);
 
 #ifdef __cplusplus
 }

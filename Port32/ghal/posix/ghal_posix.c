@@ -1,11 +1,13 @@
 /*
  * ghal_posix.c -- GHAL backend for POSIX hosts (linux; later other Unix).
  *
- * Implements the whole of ghal.h.  ghal_irq offers GHAL_IRQ_TICK only.
+ * Implements the whole of ghal.h but ghal_fs, ghal_module, ghal_display
+ * and ghal_input.  ghal_irq offers GHAL_IRQ_TICK and GHAL_IRQ_INPUT.
  */
 #define _GNU_SOURCE 1   /* MAP_ANONYMOUS, _SC_AVPHYS_PAGES */
 
 #include "ghal.h"
+#include "ghal_internal.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -522,6 +524,7 @@ struct ghal_irq_source {
 };
 
 static struct ghal_irq_source *tick_list;
+static struct ghal_irq_source *input_list;  /* GHAL_IRQ_INPUT */
 static unsigned  tick_hz = 60;          /* GEOS default */
 static pthread_t tick_thread;
 static int       tick_running;          /* thread exists */
@@ -569,13 +572,22 @@ ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
         *out = NULL;
     if (!fn || !out)
         return GHAL_ERR_INVAL;
-    if (source != GHAL_IRQ_TICK)
+    if (source != GHAL_IRQ_TICK && source != GHAL_IRQ_INPUT)
         return GHAL_ERR_UNSUPPORTED;
     s = malloc(sizeof *s);
     if (!s)
         return GHAL_ERR_NOMEM;
     s->fn = fn;
     s->ctx = ctx;
+    if (source == GHAL_IRQ_INPUT) {
+        /* raised by whoever posts input (ghal_irq_raise) */
+        ghal_crit_enter();
+        s->next = input_list;
+        input_list = s;
+        ghal_crit_leave();
+        *out = s;
+        return GHAL_OK;
+    }
     pthread_mutex_lock(&tick_ctl);
     ghal_crit_enter();
     s->next = tick_list;
@@ -606,6 +618,16 @@ ghal_status ghal_irq_detach(ghal_irq_source *src)
     int found = 0, last;
     if (!src)
         return GHAL_ERR_INVAL;
+    ghal_crit_enter();
+    for (pp = &input_list; *pp; pp = &(*pp)->next) {
+        if (*pp == src) {
+            *pp = src->next;
+            ghal_crit_leave();
+            free(src);
+            return GHAL_OK;
+        }
+    }
+    ghal_crit_leave();
     pthread_mutex_lock(&tick_ctl);
     ghal_crit_enter();
     for (pp = &tick_list; *pp; pp = &(*pp)->next) {
@@ -628,6 +650,22 @@ ghal_status ghal_irq_detach(ghal_irq_source *src)
         return GHAL_ERR_INVAL;
     free(src);
     return GHAL_OK;
+}
+
+void ghal_irq_raise(int source)
+{
+    struct ghal_irq_source *s;
+    int was;
+    if (source != GHAL_IRQ_INPUT)
+        return;
+    ghal_crit_enter();
+    was = irq_active;
+    irq_active = 1;
+    for (s = input_list; s; s = s->next)
+        s->fn(s->ctx);
+    irq_active = was;
+    pthread_cond_broadcast(&idle_cv);
+    ghal_crit_leave();
 }
 
 ghal_status ghal_irq_set_tick_rate(unsigned hz)
