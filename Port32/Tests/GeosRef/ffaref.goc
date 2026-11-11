@@ -1,0 +1,184 @@
+/*
+ * ffaref.goc -- run the FloatFloatToAscii test cases (ffa_cases.h)
+ * through the 16-bit original in the GEOS math library and record the
+ * results, as reference for the C port (Port32/Tests/test_ffa.c).
+ *
+ * Output: FFAREF.TXT in the GEOS top directory, one line per case:
+ *     name <TAB> result <TAB> return value <TAB> float stack depth after
+ * Then GEOS shuts down (SST_CLEAN_FORCED), so a batch file can go on.
+ */
+@include <stdapp.goh>
+@include <math.goh>
+#include <Ansi/string.h>
+#include <Ansi/stdio.h>
+
+@class FfaRefProcessClass, GenProcessClass;
+@endc;
+@classdecl FfaRefProcessClass, neverSaved;
+
+@start AppResource;
+@object GenApplicationClass FfaRefApp = {
+    GI_visMoniker = "FFA Reference";
+}
+@end AppResource;
+
+static FileHandle out;
+
+static void put(const char *s)
+{
+    FileWrite(out, s, strlen(s), FALSE);
+    FileCommit(out, FALSE);     /* keep what we have if something crashes */
+}
+
+static void emit(const char *name, const char *result, word ret)
+{
+    char num[32];
+    put(name);
+    put("\t");
+    put(result);
+    sprintf(num, "\t%u\t%u\r\n", ret, FloatDepth());
+    put(num);
+}
+
+static void runCase(const char *name, double x, word flags, word digits,
+                    word dec)
+{
+    char buf[FLOAT_TO_ASCII_HUGE_BUF_LEN];
+    word r;
+    FloatIEEE64ToGeos80(&x);                /* pushes x */
+    r = FloatFloatToAscii_StdFormat(buf, NULL, flags, digits, dec);
+    emit(name, buf, r);
+}
+
+static void runRaw(const char *name, word w3, word exp, word flags,
+                   word digits, word dec)
+{
+    char buf[FLOAT_TO_ASCII_HUGE_BUF_LEN];
+    FloatNum n;
+    word r;
+    memset(&n, 0, sizeof n);
+    n.F_mantissa_wd3 = w3;
+    n.F_exponent = exp;
+    FloatPushNumber(&n);
+    r = FloatFloatToAscii_StdFormat(buf, NULL, flags, digits, dec);
+    emit(name, buf, r);
+}
+
+static void runFrame(const char *name, double x, FFA_stackFrame *f)
+{
+    char buf[FLOAT_TO_ASCII_HUGE_BUF_LEN];
+    word r;
+#ifdef FFAREF_DUMP
+    char hex[3 * sizeof(FFA_stackFrame) + 80];
+    word i;
+    static const char dig[] = "0123456789abcdef";
+#endif
+#ifdef FFAREF_DUMP
+    word d0, d1;
+    FloatNum pn;
+    d0 = FloatDepth();
+    FloatIEEE64ToGeos80(&x);
+    d1 = FloatDepth();
+    FloatPopNumber(&pn);
+    FloatPushNumber(&pn);
+#else
+    FloatIEEE64ToGeos80(&x);
+#endif
+    r = FloatFloatToAscii(f, buf, NULL);
+#ifdef FFAREF_DUMP
+    /* where did the routine put its internal fields? (FFA_saveDI = buf) */
+    i = 0;
+    hex[i++] = '#'; hex[i++] = ' ';
+    {
+        word v[10], k, j;
+        v[0] = sizeof(FFA_stackFrame); v[1] = (word)(dword)(void *)f;
+        v[2] = (word)(dword)(void *)buf; v[3] = d0; v[4] = d1;
+        v[5] = pn.F_mantissa_wd0; v[6] = pn.F_mantissa_wd1;
+        v[7] = pn.F_mantissa_wd2; v[8] = pn.F_mantissa_wd3;
+        v[9] = pn.F_exponent;
+        for (k = 0; k < 10; k++) {
+            for (j = 0; j < 4; j++)
+                hex[i++] = dig[(v[k] >> (12 - 4 * j)) & 15];
+            hex[i++] = ' ';
+        }
+    }
+    {
+        word j;
+        for (j = 0; j < sizeof(FFA_stackFrame); j++) {
+            hex[i++] = dig[((byte *)f)[j] >> 4];
+            hex[i++] = dig[((byte *)f)[j] & 15];
+        }
+    }
+    hex[i++] = '\r'; hex[i++] = '\n'; hex[i] = 0;
+    put(hex);
+#endif
+    emit(name, buf, r);
+}
+
+static void runAll(void)
+{
+    FFA_stackFrame f;
+    FloatNum n;
+    char buf[FLOAT_TO_ASCII_NORMAL_BUF_LEN];
+    word r;
+
+#define FFA_CASE(name, x, flags, digits, dec, expect) \
+    runCase(name, x, flags, digits, dec);
+#define FFA_RAW(name, w3, exp, flags, digits, dec, expect) \
+    runRaw(name, w3, exp, flags, digits, dec);
+#include "ffa_cases.h"
+
+    /* full frame: header, trailer, sign strings, decimal offset */
+    memset(&f, 0, sizeof f);
+    f.FFA_float.FFA_params.formatFlags = FFAF_HEADER_PRESENT |
+        FFAF_USE_COMMAS | FFAF_SIGN_CHAR_TO_FOLLOW_HEADER;
+    f.FFA_float.FFA_params.totalDigits = 15;
+    f.FFA_float.FFA_params.decimalLimit = 2;
+    strcpy(f.FFA_float.FFA_params.header, "$");
+    strcpy(f.FFA_float.FFA_params.preNegative, "(");
+    strcpy(f.FFA_float.FFA_params.postNegative, ")");
+    runFrame("currency neg", -1234.5, &f);
+
+    memset(&f, 0, sizeof f);
+    f.FFA_float.FFA_params.formatFlags = FFAF_HEADER_PRESENT | FFAF_USE_COMMAS;
+    f.FFA_float.FFA_params.totalDigits = 15;
+    f.FFA_float.FFA_params.decimalLimit = 2;
+    strcpy(f.FFA_float.FFA_params.header, "$");
+    strcpy(f.FFA_float.FFA_params.preNegative, "-");
+    runFrame("sign before header", -5, &f);
+
+    memset(&f, 0, sizeof f);
+    f.FFA_float.FFA_params.formatFlags = FFAF_TRAILER_PRESENT;
+    f.FFA_float.FFA_params.totalDigits = 15;
+    f.FFA_float.FFA_params.decimalLimit = 1;
+    f.FFA_float.FFA_params.decimalOffset = (byte)-6;
+    strcpy(f.FFA_float.FFA_params.trailer, " Mio");
+    runFrame("millions", 2500000, &f);
+
+    /* FFAF_FROM_ADDR with the GEOS-80 pattern of 10^10 */
+    memset(&n, 0, sizeof n);
+    n.F_mantissa_wd2 = 0xf900;
+    n.F_mantissa_wd3 = 0x9502;
+    n.F_exponent = 0x4020;
+    r = FloatFloatToAscii_StdFormat(buf, &n, FFAF_FROM_ADDR | FFAF_USE_COMMAS,
+                                    15, 0);
+    emit("from addr", buf, r);
+}
+
+@method FfaRefProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
+{
+    @callsuper();
+    FloatInit(FP_DEFAULT_STACK_SIZE, FLOAT_STACK_GROW);
+    FileSetStandardPath(SP_TOP);
+    out = FileCreate("FFAREF.TXT",
+                     FILE_CREATE_TRUNCATE | FCF_NATIVE |
+                     FILE_ACCESS_W | FILE_DENY_RW, 0);
+    if (out) {
+        put("# ffaref: FloatFloatToAscii of the GEOS math library\r\n");
+        runAll();
+        put("# end\r\n");
+        FileClose(out, FALSE);
+    }
+    FloatExit();
+    SysShutdown(SST_CLEAN_FORCED);
+}

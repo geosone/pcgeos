@@ -19,3 +19,15 @@ if(GEOS_HOST STREQUAL "dos32")
   target_link_libraries(test_ghal_dos32 PRIVATE ghal)
   add_test(NAME ghal.dos32 COMMAND test_ghal_dos32)
 endif()
+
+# The expected strings of test_ffa must be those of the original GEOS math
+# library (reference output in GeosRef/ffaref.txt, see GeosRef/README.md).
+# Runs on the build host, also when cross compiling.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME math.floatFloatToAscii.geosref
+           COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/GeosRef/check_ref.py
+                   ${CMAKE_CURRENT_SOURCE_DIR}/ffa_cases.h
+                   ${CMAKE_CURRENT_SOURCE_DIR}/test_ffa.c
+                   ${CMAKE_CURRENT_SOURCE_DIR}/GeosRef/ffaref.txt)
+endif()

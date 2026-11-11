@@ -33,7 +33,8 @@ build/Port32/Tests/test_ffa -v   # all test cases with output
 | Total lines | 2,252 | 603 (+309 shim) |
 | Code without comments | ~870 | ~470 (+240 shim) |
 
-- 41/41 tests pass on x86-64 **and** i386.
+- 41/41 tests pass on x86-64, i386, arm64 and DOS (dos32); the expected
+  strings are those of the original (see `GeosRef/README.md`).
 - Code ratio: ~1.9 : 1 (total lines ~3.7 : 1; the asm files are comment-heavy).
 - Effort: most of it was **not** translating the file itself but clarifying
   the semantics of the helper routines it calls (rounding in
@@ -70,10 +71,11 @@ build/Port32/Tests/test_ffa -v   # all test cases with output
    `FFAF_NO_LEAD_ZERO` (".25") the point sits at offset 0 → ambiguous.
    For the real port: check the callers (GeoCalc, Spreadsheet) and switch to
    pointers or offset+1.
-2. **No reference comparison yet**: the expected strings come from the
-   documentation, not from the 16-bit original. Next step: run the 16-bit
-   version (e.g. `Appl/SDK_C/FP2Asc`) with the same test vectors and compare
-   bit for bit.
+2. ~~No reference comparison~~ **done**: all expected strings were checked
+   against the original GEOS math library running under GEOS32 on real
+   MS-DOS (`GeosRef/`, ctest `math.floatFloatToAscii.geosref`); they all
+   match, including the frame cases with header, sign strings and decimal
+   offset.
 3. `FloatLog` uses `log10l` instead of the GEOS series expansion; it only
    serves the exponent *estimate* (an error of ±1.6 is absorbed by the
    algorithm) but could in theory branch differently at exact powers of ten.
