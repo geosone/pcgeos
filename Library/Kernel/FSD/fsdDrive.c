@@ -3,7 +3,7 @@
  * drive routines of Disk/diskHigh.asm).
  *
  * A drive has a number (0 is A:), a name, a status and the file system
- * driver that runs it (Port32/include/fsdriver.h).  A driver's drives
+ * driver that runs it (CInclude/Internal/fsDriver.h).  A driver's drives
  * are made with FSDInitDrive (FSDInitDrive in fsdDrive.asm, called by
  * the driver as it initializes); the kernel makes the drive of the GEOS
  * top directory (FileSetTopHostPath, filePath.c).
@@ -13,7 +13,7 @@
  * Not yet: drive locks (DR_FS_DRIVE_LOCK), aliases, removing a drive.
  */
 #include "kernelC.h"
-#include "fsdriver.h"
+#include <Internal/fsDriver.h>
 
 #include <string.h>
 

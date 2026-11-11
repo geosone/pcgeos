@@ -693,7 +693,7 @@ void GeodeFreeLow(GeodeHandle gh);
 
 #define HOST_PATH_SIZE	512	/* a path on the host */
 
-#include "fsdriver.h"	/* drives, disks, file system drivers */
+#include <Internal/fsDriver.h>	/* drives, disks, file system drivers */
 
 /* a current path: a standard path (or SP_TOP) and the directories below
  * it, separated by '\\' (filePath.c) */
@@ -705,7 +705,7 @@ typedef struct KPath {
 
 /* an open file; SIG_FILE handles point to it (HE_addr), several after
  * FileDuplicateHandle (fileOpenClose.c).  KF_file is what its file
- * system driver keeps (Port32/include/fsdriver.h). */
+ * system driver keeps (CInclude/Internal/fsDriver.h). */
 typedef struct KFile {
     FSDFile	KF_file;
     word	KF_refs;

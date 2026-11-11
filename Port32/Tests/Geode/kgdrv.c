@@ -1,12 +1,12 @@
 /*
  * kgdrv.c -- a driver for the kernel.geode test: a C strategy routine
- * (Port32/include/geosdriver.h) that counts DR_INIT and DR_EXIT, refuses
+ * (CInclude/geosdriver.h) that counts DR_INIT and DR_EXIT, refuses
  * DR_INIT with cx = 0xdead, and adds ax and bx into cx for function
  * KGDRV_ADD.
  */
 #include <geos.h>
 #include <geode.h>
-#include "geosdriver.h"
+#include <geosdriver.h>
 
 #define KGDRV_ADD	100
 

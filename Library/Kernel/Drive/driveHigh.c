@@ -5,7 +5,7 @@
  * Not yet: drive locks.
  */
 #include "kernelC.h"
-#include "fsdriver.h"
+#include <Internal/fsDriver.h>
 
 #include <string.h>
 

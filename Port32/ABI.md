@@ -18,6 +18,15 @@ headers switch on `GEOS_PORT32`, and that build stays byte-identical
   in-memory layouts with the file.
 - **Other hosts may change formats** (e.g. long names, wider VM block
   handles), as long as dos32 keeps the DOS16 formats.
+- **The DOS16 build stays intact.**
+  - The C ports lie beside their asm files. The 16-bit build must not
+    take them in.
+  - `Tools/nmkmf` makes the 16-bit Makefiles and would take every `.c`
+    file of a directory. A directory with C ports therefore has a file
+    `mkmf.lst` that lists, one name a line, the files the DOS16 build
+    takes; mkmf then reads only those.
+  - A new asm file in such a directory must be added to its
+    `mkmf.lst`.
 
 ## 2. Base types (`Port32/include/geosport.h`)
 
@@ -408,7 +417,7 @@ Not yet:
 called with the function number in `di` and the arguments in the
 registers its `.def` file describes. The carry flag returned an error.
 In Port32 the strategy routine is a C function
-(`Port32/include/geosdriver.h`):
+(`CInclude/geosdriver.h`):
 
 ```c
 typedef struct {
@@ -1358,7 +1367,7 @@ network attributes; `FileGetHandleAllExtAttributes`;
 The asm kernel talks to a file system driver through `DR_FS_*` calls of
 its strategy routine (`Include/Internal/fsDriver.def`). Port32 keeps
 the same split but uses C. A driver is an `FSDriver`: a table of C
-functions (`Port32/include/fsdriver.h`). Each function returns 0 or a
+functions (`CInclude/Internal/fsDriver.h`). Each function returns 0 or a
 `FileError`.
 
 | `FSDriver` | asm |

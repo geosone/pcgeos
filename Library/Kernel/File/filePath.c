@@ -4,7 +4,7 @@
  *
  * The kernel resolves a GEOS path to a disk and the path on it from its
  * root; the disk's file system driver maps it to its medium
- * (Port32/include/fsdriver.h).  The GEOS top directory is a drive of the
+ * (CInclude/Internal/fsDriver.h).  The GEOS top directory is a drive of the
  * HostFS driver: a directory on the host (FileSetTopHostPath).  A
  * standard path is a directory below it, named as in 16-bit GEOS (WORLD,
  * DOCUMENT, SYSTEM\\FS, ...), so a DOS16 installation keeps its layout.

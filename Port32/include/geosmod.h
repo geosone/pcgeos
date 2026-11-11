@@ -87,7 +87,7 @@ typedef struct {
      * loads the resources: GOCR_OPTR, GOCR_RESOLVE (geosport.h) */
     Handle			*GM_resourceHandles;
     /* a driver's DriverInfoStruct: its variable "DriverTable", as glue
-     * found it (geosdriver.h); 0 for other geodes */
+     * found it (CInclude/geosdriver.h); 0 for other geodes */
     const void			*GM_driverTable;
 } GeosModuleInfo;
 

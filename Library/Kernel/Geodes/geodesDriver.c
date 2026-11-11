@@ -4,7 +4,7 @@
  *
  * A driver is a geode of type "driver" with a DriverInfoStruct, the
  * variable DriverTable (GM_driverTable).  Its strategy routine is a C
- * function (Port32/include/geosdriver.h).
+ * function (CInclude/geosdriver.h).
  *
  *   - Once a driver is loaded, its strategy routine gets DR_INIT with
  *     the geode handle in bx and the two words of appInfo in cx and dx
@@ -24,7 +24,7 @@
  */
 #include "kernelC.h"
 #include "geosmod.h"
-#include "geosdriver.h"
+#include <geosdriver.h>
 
 #include <string.h>
 

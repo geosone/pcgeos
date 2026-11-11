@@ -26,7 +26,7 @@
  */
 #include "kernelC.h"
 #include "ghal.h"
-#include "geosdriver.h"
+#include <geosdriver.h>
 
 #include <stdio.h>
 #include <string.h>

@@ -14,7 +14,7 @@
  * removable media (the user asked to insert a disk).
  */
 #include "kernelC.h"
-#include "fsdriver.h"
+#include <Internal/fsDriver.h>
 
 #include <string.h>
 

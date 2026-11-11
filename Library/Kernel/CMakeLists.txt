@@ -47,7 +47,7 @@
 #   Drive/driveHigh.c <- the drive API of Drive/driveHigh.asm, driveC.asm
 #   Disk/diskHigh.c <- disks of Disk/diskHigh.asm, diskC.asm
 #   Driver/IFS/HostFS/hostfsDriver.c <- the HostFS file system driver
-#                      (Port32/include/fsdriver.h), part of the kernel
+#                      (CInclude/Internal/fsDriver.h), part of the kernel
 #                      until drivers are geodes
 #   Initfile/initfileLow.c, initfileConstruct.c, initfileHigh.c <- the
 #                      init file (geos.ini) of the same asm files,

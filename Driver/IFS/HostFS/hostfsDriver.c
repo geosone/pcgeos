@@ -1,5 +1,5 @@
 /*
- * hostfsDriver.c -- the HostFS file system driver (fsdriver.h): GEOS
+ * hostfsDriver.c -- the HostFS file system driver (Internal/fsDriver.h): GEOS
  * files in a directory of the host, over ghal_fs and the names and
  * headers of hostfs.h.  It serves Linux, GonWare and, until the DOS
  * file system driver is ported, dos32.
@@ -29,7 +29,7 @@
  * FEA_PATH_INFO, FEA_DISK, FEA_DRIVE_STATUS (the kernel's in FileEnum),
  * FEA_OWNER, FEA_RIGHTS, volume names.
  */
-#include "fsdriver.h"
+#include <Internal/fsDriver.h>
 #include "hostfs.h"
 #include "ghal.h"
 
