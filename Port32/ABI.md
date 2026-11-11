@@ -99,7 +99,7 @@ to the resource handle. Without segments, `goc` does that work itself:
 
 Checks: `goc.resources` (`Port32/Tests/Goc`) links a `.goc` file with
 objects in two resources, monikers, a GCN list and a `process` destination.
-It checks the tables on amd64, i686, arm64 and dos32. The target `goc_sdk`
+It checks the tables on amd64, i686, arm64 and dos32 (DJGPP). The target `goc_sdk`
 compiles 44 of the 55 SDK_C samples (`Port32/Tests/goc_sdk.txt`). In the
 other samples, the application code needs porting: `NULL` used as a handle,
 `PtrToSegment`, inline asm, and static optr tables in code.
@@ -138,15 +138,25 @@ function type. Under `goc -cg`:
   segments.
 
 Compound literals need C99. Open Watcom 386 lacks them, so **dos32 is
-built with DJGPP gcc for the port** (decided 2026-11-11). Open Watcom
-remains the compiler of the 16-bit build. Until DJGPP is set up,
-`goc.resources` is left out of Watcom builds.
+built with DJGPP gcc for the port** (decided 2026-11-11;
+`cmake/toolchain-dos32-djgpp.cmake`). Open Watcom remains the compiler of
+the 16-bit build. The older Watcom dos32 build
+(`cmake/toolchain-dos32-watcom.cmake`) still builds GHAL, but it leaves
+out `goc.resources`.
+
+The DJGPP toolchain comes from crossdev (`i586-pc-msdosdjgpp`, gcc 16).
+The C library is the DJGPP CVS state after 2.05, and gcc needs two DJGPP
+fixes: `float.h` with `#include_next`, and `.bss` section flags. Every
+executable gets CWSDPMI bound in (`cwsdstub.exe`,
+`Port32/tools/djgpp-bind.sh`), so it runs on plain DOS without other
+files.
 
 Checks: `goc.resources` sends messages with scalar, structure and pointer
 parameters. It covers `@call` with a reply, `@send`, `@record` +
 `@dispatch` and `@callsuper`, through a minimal stand-in kernel in
-`Goc/test_gocres.c`. The 44 SDK samples of `goc_sdk` compile with the
-same scheme.
+`Goc/test_gocres.c`. It passes on linux amd64/i686/arm64 and on dos32
+(DJGPP, real DOS in QEMU). The 44 SDK samples of `goc_sdk` compile with
+the same scheme.
 
 ## 6. Open
 

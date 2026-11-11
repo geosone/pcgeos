@@ -9,7 +9,9 @@
 #   cmake -S . -B build32 -G Ninja \
 #         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-linux-i686.cmake
 #   cmake -S . -B build-dos32 -G Ninja \
-#         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-dos32-watcom.cmake
+#         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-dos32-djgpp.cmake
+#   (cmake/toolchain-dos32-watcom.cmake: the older Open Watcom 386 build,
+#    without goc -cg)
 #   cmake --build build && ctest --test-dir build
 cmake_minimum_required(VERSION 3.20)
 project(PCGEOS LANGUAGES C)
@@ -36,7 +38,13 @@ if(CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
 else()
   set(CMAKE_C_STANDARD 11)
   set(CMAKE_C_STANDARD_REQUIRED ON)
-  set(CMAKE_C_EXTENSIONS OFF)
+  if(GEOS_HOST STREQUAL "dos32")
+    # DJGPP hides its DOS/DPMI functions (inportb, _dos_*, __dpmi_*) from
+    # strict ISO C: gnu11
+    set(CMAKE_C_EXTENSIONS ON)
+  else()
+    set(CMAKE_C_EXTENSIONS OFF)
+  endif()
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra)

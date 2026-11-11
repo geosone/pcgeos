@@ -1,6 +1,7 @@
 /*
  * test_ghal_dos32.c -- GHAL tests for the dos32 host only: CPU exceptions
- * through ghal_fault (DPMI exception handlers).  Open Watcom inline asm.
+ * through ghal_fault (DPMI exception handlers under Open Watcom, signals
+ * under DJGPP).  Inline asm for both compilers.
  */
 #include "ghal.h"
 
@@ -33,6 +34,24 @@ static int divide(volatile int a, volatile int b)
     return a / b;
 }
 
+#ifdef __GNUC__
+static void load_bad_selector(void)
+{
+    /* not a valid selector -> general protection fault */
+    __asm__ volatile ("pushl %%es\n\tmovw $0xfff8, %%ax\n\tmovw %%ax, %%es\n\tpopl %%es"
+                      : : : "eax", "memory");
+}
+
+static void illegal_opcode(void)
+{
+    __asm__ volatile ("ud2");
+}
+
+static void breakpoint(void)
+{
+    __asm__ volatile ("int3");
+}
+#else
 static void load_bad_selector(void)
 {
     _asm {
@@ -56,6 +75,7 @@ static void breakpoint(void)
         int 3
     }
 }
+#endif
 
 #define EXPECT_FAULT(call, k)                                   \
     do {                                                        \
@@ -80,6 +100,7 @@ int main(void)
     EXPECT_FAULT(r = divide(7, 0), GHAL_FAULT_DIVIDE);  /* handler survives */
     printf("faults caught: %d\n", fault_count);
     CHECK(fault_count == 5);
+    (void)r;
     printf("%s: %s\n", ghal_host_name(), failures ? "FAILED" : "all dos32 GHAL tests passed");
     return failures ? 1 : 0;
 }

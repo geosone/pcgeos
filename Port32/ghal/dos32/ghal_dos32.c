@@ -1,8 +1,12 @@
 /*
  * ghal_dos32.c -- GHAL backend for 32-bit protected mode DOS (dos32).
  *
- * Open Watcom 386, flat zero-based model under a DPMI extender (DOS/32A),
- * so conventional memory (BIOS data area) is addressable directly.
+ * Two compilers, one backend:
+ *   DJGPP gcc   (the port's compiler for dos32, Port32/ABI.md section 5):
+ *               CWSDPMI or another DPMI host; conventional memory through
+ *               _dos_ds; CPU exceptions arrive as signals.
+ *   Open Watcom 386, flat zero-based model under DOS/32A; conventional
+ *               memory addressable directly; own DPMI exception stubs.
  *
  *   ghal_mem       C heap of the extender (DPMI memory).  Protection is
  *                  accepted but not enforced (DPMI 0.9 has no page
@@ -17,14 +21,26 @@
  */
 #include "ghal.h"
 
-#include <conio.h>
 #include <dos.h>
-#include <i86.h>
-#include <process.h>   /* _exit */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __DJGPP__
+#include <crt0.h>
+#include <dpmi.h>
+#include <go32.h>
+#include <pc.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <sys/exceptn.h>
+#include <sys/farptr.h>
+#include <unistd.h>    /* _exit */
+#else
+#include <conio.h>
+#include <i86.h>
+#include <process.h>   /* _exit */
+#endif
 
 #define PIT_HZ        1193182u
 #define PIT_CMD       0x43
@@ -32,18 +48,40 @@
 #define PIC1_CMD      0x20
 #define PIC_EOI       0x20
 #define PIC_READ_IRR  0x0a
-#define BIOS_TICKS    ((volatile uint32_t *)0x46c)
 #define TICKS_PER_DAY 0x1800b0u
+
+#ifdef __DJGPP__
+/* GEOS is the whole system: keep all its memory locked (interrupt
+ * handlers and what they call must never be paged out) and the data
+ * segment base fixed (the IRQ0 handler runs with our DS). */
+int _crt0_startup_flags = _CRT0_FLAG_LOCK_MEMORY | _CRT0_FLAG_NONMOVE_SBRK;
+
+#define outp(port, v) outportb((port), (unsigned char)(v))
+#define inp(port)     inportb(port)
+#define bios_ticks()  _farpeekl(_dos_ds, 0x46c)
+
+static unsigned long get_eflags(void)
+{
+    unsigned long f;
+    __asm__ volatile ("pushfl; popl %0" : "=r" (f));
+    return f;
+}
+/* <dos.h> of DJGPP maps _disable/_enable to disable/enable */
+#else
+#define bios_ticks()  (*(volatile uint32_t *)0x46c)
+#endif
 
 /* ------------------------------------------------------------------ */
 /* CPU flags                                                          */
 /* ------------------------------------------------------------------ */
 
+#ifndef __DJGPP__
 unsigned long get_eflags(void);
 #pragma aux get_eflags = \
     "pushfd"             \
     "pop eax"            \
     value [eax];
+#endif
 
 #define IF_FLAG 0x200u
 
@@ -139,6 +177,19 @@ ghal_status ghal_mem_protect(void *block, unsigned prot)
 
 ghal_status ghal_mem_get_info(ghal_mem_info *info)
 {
+#ifdef __DJGPP__
+    __dpmi_free_mem_info fm;
+    int fail;
+    if (!info)
+        return GHAL_ERR_INVAL;
+    memset(&fm, 0xff, sizeof fm);
+    fail = __dpmi_get_free_memory_information(&fm) != 0;
+    info->page_size = PAGE_SIZE;
+    info->available = fail ? 0 : fm.largest_available_free_block_in_bytes;
+    info->total = (fail || fm.total_number_of_physical_pages == 0xffffffffu) ? 0
+                : (uint64_t)fm.total_number_of_physical_pages * PAGE_SIZE;
+    return GHAL_OK;
+#else
     /* DPMI 0500h: free memory information (48 bytes) */
     uint32_t buf[12];
     union REGS r;
@@ -157,6 +208,7 @@ ghal_status ghal_mem_get_info(ghal_mem_info *info)
     info->total = (r.x.cflag || buf[6] == 0xffffffffu) ? 0
                 : (uint64_t)buf[6] * PAGE_SIZE;
     return GHAL_OK;
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -212,7 +264,6 @@ static struct ghal_irq_source *volatile tick_list;
 static unsigned          tick_hz = 60;
 static volatile uint32_t pit_reload = 65536;   /* counts per IRQ0 */
 static volatile uint32_t pit_acc;              /* counts since last BIOS tick */
-static void (__interrupt __far *bios_irq0)(void);
 static int               irq0_hooked;
 
 /* Mode 2 (rate generator) counts down once per period, so the counter
@@ -245,8 +296,9 @@ static void pit_program(uint32_t reload)
     pit_mode2 = 1;
 }
 
-#pragma off (check_stack)
-static void __interrupt __far irq0_handler(void)
+/* Runs the tick handlers; returns nonzero when the BIOS handler is due
+ * (it counts its tick and sends the EOI). */
+static int irq0_work(void)
 {
     struct ghal_irq_source *s;
     crit_depth++;                   /* we run with interrupts off */
@@ -256,11 +308,71 @@ static void __interrupt __far irq0_handler(void)
     pit_acc += pit_reload;
     if (pit_acc >= 65536u) {
         pit_acc -= 65536u;
-        _chain_intr(bios_irq0);     /* BIOS counts its tick and sends EOI */
+        return 1;
+    }
+    return 0;
+}
+
+#ifdef __DJGPP__
+static _go32_dpmi_seginfo bios_irq0, our_irq0;
+static struct { uint32_t off; uint16_t sel; } __attribute__((packed)) bios_irq0_far;
+
+/* called through the iret wrapper of libc (own stack, our DS) */
+static void irq0_handler(void)
+{
+    if (irq0_work()) {
+        /* simulate an interrupt into the previous handler: it returns
+         * with IRET */
+        __asm__ volatile ("pushfl\n\tlcall *%0" : : "m" (bios_irq0_far)
+                          : "memory", "cc");
+        return;
     }
     outp(PIC1_CMD, PIC_EOI);
 }
+
+static void set_irq0(int ours)
+{
+    _go32_dpmi_set_protected_mode_interrupt_vector(8, ours ? &our_irq0 : &bios_irq0);
+}
+
+static int get_irq0(void)
+{
+    _go32_dpmi_get_protected_mode_interrupt_vector(8, &bios_irq0);
+    bios_irq0_far.off = bios_irq0.pm_offset;
+    bios_irq0_far.sel = bios_irq0.pm_selector;
+    if (!our_irq0.pm_offset) {
+        our_irq0.pm_offset = (unsigned long)irq0_handler;
+        our_irq0.pm_selector = _go32_my_cs();
+        if (_go32_dpmi_allocate_iret_wrapper(&our_irq0) != 0) {
+            our_irq0.pm_offset = 0;
+            return 0;
+        }
+    }
+    return 1;
+}
+#else
+static void (__interrupt __far *bios_irq0)(void);
+
+#pragma off (check_stack)
+static void __interrupt __far irq0_handler(void)
+{
+    if (irq0_work())
+        _chain_intr(bios_irq0);     /* BIOS counts its tick and sends EOI */
+    outp(PIC1_CMD, PIC_EOI);
+}
 #pragma on (check_stack)
+
+static void set_irq0(int ours)
+{
+    _dos_setvect(8, ours ? irq0_handler : bios_irq0);
+}
+
+static int get_irq0(void)
+{
+    bios_irq0 = _dos_getvect(8);
+    return 1;
+}
+#endif
 
 static uint32_t reload_for(unsigned hz)
 {
@@ -276,7 +388,7 @@ static void irq0_unhook(void)
     pit_program(65536u);                        /* BIOS rate, still mode 2 */
     pit_reload = 65536u;
     pit_acc = 0;
-    _dos_setvect(8, bios_irq0);
+    set_irq0(0);
     irq0_hooked = 0;
     ghal_crit_leave();
 }
@@ -301,19 +413,23 @@ static void ensure_cleanup(void)
     }
 }
 
-static void irq0_hook(void)
+static int irq0_hook(void)
 {
     if (irq0_hooked)
-        return;
+        return 1;
     ensure_cleanup();
     ghal_crit_enter();
-    bios_irq0 = _dos_getvect(8);
-    _dos_setvect(8, irq0_handler);
+    if (!get_irq0()) {
+        ghal_crit_leave();
+        return 0;
+    }
+    set_irq0(1);
     pit_acc = 0;
     pit_reload = reload_for(tick_hz);
     pit_program(pit_reload);
     irq0_hooked = 1;
     ghal_crit_leave();
+    return 1;
 }
 
 ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
@@ -342,7 +458,10 @@ ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
     ghal_crit_leave();
     if (!s)
         return GHAL_ERR_NOMEM;
-    irq0_hook();
+    if (!irq0_hook()) {
+        ghal_irq_detach(s);
+        return GHAL_ERR_HOST;
+    }
     *out = s;
     return GHAL_OK;
 }
@@ -397,7 +516,7 @@ static uint64_t pit_counts_now(void)
     ghal_crit_enter();
     if (!pit_mode2)
         pit_program(pit_reload);                /* same rate, mode 2 */
-    ticks = *BIOS_TICKS;
+    ticks = bios_ticks();
     acc = pit_acc;
     reload = pit_reload;
     outp(PIT_CMD, 0x00);                        /* latch counter 0 */
@@ -453,7 +572,87 @@ ghal_status ghal_time_get_local(ghal_datetime *dt)
 }
 
 /* ------------------------------------------------------------------ */
-/* ghal_fault: DPMI exception handlers (0202h/0203h)                  */
+/* ghal_fault                                                         */
+/* ------------------------------------------------------------------ */
+
+static ghal_fault_handler fault_handler;
+
+static ghal_fault_kind fault_kind(uint32_t n)
+{
+    switch (n) {
+    case 0: case 4: return GHAL_FAULT_DIVIDE;
+    case 3:         return GHAL_FAULT_BREAKPOINT;
+    case 6:         return GHAL_FAULT_ILLEGAL;
+    case 16:        return GHAL_FAULT_FPU;
+    default:        return GHAL_FAULT_ACCESS;
+    }
+}
+
+/* the fault was not handled (fault_handler returned or is not set) */
+static void fault_fatal(uint32_t n, uint32_t err, void *pc)
+{
+    fprintf(stderr, "geos[error]: unhandled exception %lu (error code %lx) at pc %p\n",
+            (unsigned long)n, (unsigned long)err, pc);
+    dos32_cleanup();
+    fflush(NULL);
+    _exit(3);
+}
+
+#ifdef __DJGPP__
+/* DJGPP: libc turns CPU exceptions into signals and keeps the exception
+ * number and the faulting EIP in __djgpp_exception_state; a handler may
+ * longjmp.  DPMI 0.9 gives no fault address (CR2). */
+static const int fault_signals[] = { SIGSEGV, SIGFPE, SIGILL, SIGTRAP };
+#define NSIG_FAULT (sizeof fault_signals / sizeof fault_signals[0])
+static int exc_installed;
+
+static void fault_signal(int sig)
+{
+    ghal_fault_info info;
+    uint32_t n = __djgpp_exception_state_ptr ? (uint32_t)__djgpp_exception_state->__signum : 13;
+    switch (sig) {
+    case SIGILL:  n = 6; break;
+    case SIGTRAP: n = 3; break;
+    case SIGFPE:  if (n != 0 && n != 4) n = 16; break;
+    default:      break;
+    }
+    info.kind = fault_kind(n);
+    info.address = NULL;
+    info.pc = __djgpp_exception_state_ptr ? (void *)__djgpp_exception_state->__eip : NULL;
+    if (fault_handler)
+        fault_handler(&info);
+    fault_fatal(n, 0, info.pc);
+}
+
+static void fault_uninstall(void)
+{
+    size_t i;
+    if (!exc_installed)
+        return;
+    for (i = 0; i < NSIG_FAULT; i++)
+        signal(fault_signals[i], SIG_DFL);
+    exc_installed = 0;
+}
+
+ghal_status ghal_fault_set_handler(ghal_fault_handler fn)
+{
+    size_t i;
+    fault_handler = fn;
+    if (exc_installed)
+        return GHAL_OK;
+    ensure_cleanup();
+    for (i = 0; i < NSIG_FAULT; i++)
+        if (signal(fault_signals[i], fault_signal) == SIG_ERR) {
+            while (i--)
+                signal(fault_signals[i], SIG_DFL);
+            return GHAL_ERR_HOST;
+        }
+    exc_installed = 1;
+    return GHAL_OK;
+}
+
+#else /* Open Watcom: DPMI exception handlers (0202h/0203h) */
+/* ------------------------------------------------------------------ */
 /*                                                                    */
 /* The DPMI host calls a handler with a 32-bit frame on a locked      */
 /* stack:  [esp] ret EIP, ret CS, error code, EIP, CS, EFLAGS, ESP,   */
@@ -463,7 +662,6 @@ ghal_status ghal_time_get_local(ghal_datetime *dt)
 /* and longjmp.  DPMI 0.9 gives no fault address (CR2).               */
 /* ------------------------------------------------------------------ */
 
-static ghal_fault_handler fault_handler;
 static volatile uint32_t exc_no, exc_err, exc_eip;
 static uint32_t tramp_addr;
 static unsigned short saved_ds;
@@ -502,17 +700,6 @@ static void (*const exc_stubs[NEXC])(void) = {
     exc_stub_16
 };
 
-static ghal_fault_kind fault_kind(uint32_t n)
-{
-    switch (n) {
-    case 0: case 4: return GHAL_FAULT_DIVIDE;
-    case 3:         return GHAL_FAULT_BREAKPOINT;
-    case 6:         return GHAL_FAULT_ILLEGAL;
-    case 16:        return GHAL_FAULT_FPU;
-    default:        return GHAL_FAULT_ACCESS;
-    }
-}
-
 /* Entered by "returning" from the exception: no caller, never returns. */
 static void fault_trampoline(void)
 {
@@ -522,11 +709,7 @@ static void fault_trampoline(void)
     info.pc = (void *)exc_eip;
     if (fault_handler)
         fault_handler(&info);
-    fprintf(stderr, "geos[error]: unhandled exception %lu (error code %lx) at pc %p\n",
-            (unsigned long)exc_no, (unsigned long)exc_err, info.pc);
-    dos32_cleanup();
-    fflush(NULL);
-    _exit(3);
+    fault_fatal(exc_no, exc_err, info.pc);
 }
 
 static int dpmi_get_exc(unsigned n, unsigned short *sel, uint32_t *off)
@@ -587,6 +770,7 @@ ghal_status ghal_fault_set_handler(ghal_fault_handler fn)
     exc_installed = 1;
     return GHAL_OK;
 }
+#endif /* __DJGPP__ */
 
 /* ------------------------------------------------------------------ */
 /* ghal_log, ghal_exit, ghal_caps                                     */

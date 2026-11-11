@@ -89,7 +89,7 @@ typedef word		VardataKey;
  * for this geode (filled in by the geode loader) and the chunk handle.
  * Obj and Obj_resid are constants defined by the file that holds Obj.
  */
-#if defined(__GNUC__) && !defined(_WIN32)
+#if defined(__GNUC__) && defined(__ELF__)	/* COFF/PE: no visibility */
 #define GOCR_HIDDEN		__attribute__((visibility("hidden")))
 #else
 #define GOCR_HIDDEN
