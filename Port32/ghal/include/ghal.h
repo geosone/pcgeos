@@ -32,7 +32,15 @@ typedef enum ghal_status {
     GHAL_ERR_UNSUPPORTED,   /* not available on this host */
     GHAL_ERR_HOST,          /* host call failed for another reason */
     GHAL_ERR_FORMAT,        /* not a module of this host's format */
-    GHAL_ERR_UNRESOLVED     /* a module imports a name nobody provides */
+    GHAL_ERR_UNRESOLVED,    /* a module imports a name nobody provides */
+    GHAL_ERR_NOTFOUND,      /* no such file or directory */
+    GHAL_ERR_EXISTS,        /* it exists already */
+    GHAL_ERR_ACCESS,        /* access denied, read-only, in use */
+    GHAL_ERR_NOSPACE,       /* the disk is full */
+    GHAL_ERR_NOTEMPTY,      /* directory not empty */
+    GHAL_ERR_ISDIR,         /* a directory where a file was expected */
+    GHAL_ERR_NOTDIR,        /* a file where a directory was expected */
+    GHAL_ERR_END            /* no more entries (ghal_fs_readdir) */
 } ghal_status;
 
 /* ---------------------------------------------------------------------
@@ -245,6 +253,81 @@ void       *ghal_module_symbol(const ghal_module *m, const char *name);
 void        ghal_module_unload(ghal_module *m);
 /* "elf" or "dxe3" */
 const char *ghal_module_format(void);
+
+/* ---------------------------------------------------------------------
+ * ghal_fs -- files and directories of the host, for the HostFS file
+ * system driver (GHAL-Concept.md section 4).  Paths are host paths:
+ * '/'-separated on POSIX, DOS paths ('\\' or '/') on dos32, where names
+ * are 8.3.  Calls may block the calling context; they are made outside
+ * ghal_crit.
+ * ------------------------------------------------------------------- */
+typedef struct ghal_file ghal_file;
+typedef struct ghal_dir ghal_dir;
+
+/* ghal_fs_open flags */
+#define GHAL_FS_READ        0x0001u
+#define GHAL_FS_WRITE       0x0002u
+#define GHAL_FS_CREATE      0x0004u /* create if missing */
+#define GHAL_FS_TRUNCATE    0x0008u /* make empty */
+#define GHAL_FS_EXCL        0x0010u /* with CREATE: fail if it exists */
+
+/* ghal_fs_info attrs (the DOS attribute bits) */
+#define GHAL_FS_ATTR_READONLY 0x01u
+#define GHAL_FS_ATTR_HIDDEN   0x02u
+#define GHAL_FS_ATTR_SYSTEM   0x04u
+#define GHAL_FS_ATTR_DIR      0x10u
+#define GHAL_FS_ATTR_ARCHIVE  0x20u
+
+typedef struct ghal_fs_info {
+    uint64_t      size;
+    ghal_datetime mtime;            /* local time */
+    unsigned      attrs;            /* GHAL_FS_ATTR_* */
+} ghal_fs_info;
+
+/* seek origins */
+#define GHAL_FS_SEEK_SET    0
+#define GHAL_FS_SEEK_CUR    1
+#define GHAL_FS_SEEK_END    2
+
+ghal_status ghal_fs_open(const char *path, unsigned flags, ghal_file **out);
+ghal_status ghal_fs_close(ghal_file *f);
+/* *done: bytes read (less at the end of the file) or written */
+ghal_status ghal_fs_read(ghal_file *f, void *buf, size_t n, size_t *done);
+ghal_status ghal_fs_write(ghal_file *f, const void *buf, size_t n,
+                          size_t *done);
+ghal_status ghal_fs_seek(ghal_file *f, int64_t offset, int whence,
+                         uint64_t *pos);
+ghal_status ghal_fs_truncate(ghal_file *f, uint64_t size);
+ghal_status ghal_fs_sync(ghal_file *f);
+ghal_status ghal_fs_fstat(ghal_file *f, ghal_fs_info *info);
+
+ghal_status ghal_fs_stat(const char *path, ghal_fs_info *info);
+/* the attributes GHAL_FS_ATTR_READONLY, HIDDEN, SYSTEM, ARCHIVE; on
+ * POSIX only READONLY means something */
+ghal_status ghal_fs_set_attrs(const char *path, unsigned attrs);
+ghal_status ghal_fs_set_mtime(const char *path, const ghal_datetime *dt);
+ghal_status ghal_fs_delete(const char *path);
+ghal_status ghal_fs_rename(const char *from, const char *to);
+ghal_status ghal_fs_mkdir(const char *path);
+ghal_status ghal_fs_rmdir(const char *path);
+
+/* the entries of a directory, without "." and "..";
+ * ghal_fs_readdir returns GHAL_ERR_END after the last one */
+ghal_status ghal_fs_opendir(const char *path, ghal_dir **out);
+ghal_status ghal_fs_readdir(ghal_dir *d, char *name, size_t size,
+                            ghal_fs_info *info);
+void        ghal_fs_closedir(ghal_dir *d);
+
+/* Named attributes of a file or directory (POSIX: the extended attribute
+ * "user.geos.<name>"); GHAL_ERR_UNSUPPORTED where the host has none
+ * (dos32, file systems without xattrs).  ghal_fs_xattr_get: *size in:
+ * the buffer, out: the attribute's size; GHAL_ERR_NOTFOUND if it is not
+ * set. */
+ghal_status ghal_fs_xattr_get(const char *path, const char *name, void *buf,
+                              size_t *size);
+ghal_status ghal_fs_xattr_set(const char *path, const char *name,
+                              const void *buf, size_t size);
+ghal_status ghal_fs_xattr_remove(const char *path, const char *name);
 
 /* ---------------------------------------------------------------------
  * ghal_log -- debug output.

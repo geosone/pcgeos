@@ -115,7 +115,7 @@ Under DOS, on the other hand, the real hardware drivers stay (VGA/VESA, PS/2, IF
 |---|---|---|---|---|
 | `ghal_display` | modes, surface (pointer, pitch, format), flush rectangles, resize | VESA VBE 2/3 LFB (or the VGA driver directly) | SDL3 / X11-SHM / fbdev | DIB section + `BitBlt` or SDL3 |
 | `ghal_input` | events in the **openinput format** `{page, usage, value, source}` (HID usages) | PS/2 or the DOS drivers | SDL/X11/evdev → HID | Win32 messages → HID |
-| `ghal_fs` | files, directories, attributes (long name, token, protocol) | (not needed, IFS/DOS) | POSIX + xattrs `user.geos.*` | Win32 `*W` API + NTFS streams (`:geos`) |
+| `ghal_fs` | files, directories, attributes (long name, token, protocol); implemented for POSIX and dos32 (`ghal.h`) | C library DOS calls, 8.3 names, no named attributes (the DOS FSD keeps the GEOS header) | POSIX + xattrs `user.geos.*` | Win32 `*W` API + NTFS streams (`:geos`) |
 | `ghal_audio` | PCM output | (SoundBlaster driver) | SDL3 audio / OSS / ALSA | SDL3 / WASAPI |
 | `ghal_net` | TCP/UDP, name resolution | (GEOS's own TCP/IP stack over a packet driver) | BSD sockets | Winsock |
 

@@ -7,6 +7,9 @@ add_test(NAME math.floatFloatToAscii COMMAND test_ffa)
 add_executable(test_ghal_core test_ghal_core.c)
 target_link_libraries(test_ghal_core PRIVATE ghal)
 add_test(NAME ghal.core COMMAND test_ghal_core)
+add_executable(test_ghal_fs test_ghal_fs.c)
+target_link_libraries(test_ghal_fs PRIVATE ghal)
+add_test(NAME ghal.fs COMMAND test_ghal_fs)
 
 # C kernel (Library/Kernel, P4): handle table, memory blocks, threads
 add_executable(test_kernel_heap test_kernel_heap.c)
