@@ -52,60 +52,38 @@ static void checkFrame(const char *name, double x, FFA_stackFrame *f,
                ok ? "" : "\"");
 }
 
+static void checkRaw(const char *name, word w3, word exp, word flags,
+                     int digits, int decimals, const char *expect)
+{
+    char buf[FLOAT_TO_ASCII_HUGE_BUF_LEN];
+    FloatNum n;
+    memset(&n, 0, sizeof n);
+    n.F_mantissa_wd3 = w3;
+    n.F_exponent = exp;
+    FpReset();
+    FloatPushNumber(&n);
+    int r = FloatFloatToAscii_StdFormat(flags, (byte)digits, (byte)decimals,
+                                        buf, NULL);
+    total++;
+    int ok = strcmp(buf, expect) == 0 && FpDepth() == 0;
+    if (!ok)
+        fails++;
+    if (!ok || verbose)
+        printf("%s %-28s %04x:%04x -> \"%s\" (n=%d)%s%s%s\n", ok ? "ok  " : "FAIL",
+               name, exp, w3, buf, r, ok ? "" : "  expected \"", ok ? "" : expect,
+               ok ? "" : "\"");
+}
+
 int main(int argc, char **argv)
 {
     verbose = argc > 1 && strcmp(argv[1], "-v") == 0;
-    const word SCI = FFAF_SCIENTIFIC, COM = FFAF_USE_COMMAS,
-               NTZ = FFAF_NO_TRAIL_ZEROS, NLZ = FFAF_NO_LEAD_ZERO,
-               PCT = FFAF_PERCENT, DUS = FFAF_DONT_USE_SCIENTIFIC;
+    const word COM = FFAF_USE_COMMAS;
 
-    /* --- fixed format, fast path --- */
-    check("int",            1234,        0,   15, 0,  "1234");
-    check("int+dec",        1234,        0,   15, 2,  "1234.00");
-    check("round 2",        3.14159,    0,   15, 2,  "3.14");
-    check("round away 0",   0.56,       0,   15, 0,  "1");
-    check("round away 0 neg", -0.56,    0,   15, 0,  "-1");
-    check("round half",     2.5,        0,   15, 0,  "3");
-    check("345.678 dec2",   345.678,    0,   15, 2,  "345.68");
-    check("zero",           0,           0,   15, 2,  "0.00");
-    check("zero no dec",    0,           0,   15, 0,  "0");
-    check("small",          0.05,       0,   15, 2,  "0.05");
-    check("neg",            -42.5,      0,   15, 1,  "-42.5");
-    check("commas",         1234567.891, COM, 15, 2, "1,234,567.89");
-    check("commas 3",       123456,      COM, 15, 0,  "123,456");
-    check("no trail 0",     2.5,        NTZ, 15, 5,  "2.5");
-    check("no trail 0 int", 2.0,        NTZ, 15, 5,  "2");
-    check("no lead 0",      0.25,       NLZ, 15, 2,  ".25");
-    check("percent",        0.125,      PCT, 15, 1,  "12.5%");
-    /* QUIRK (documented): rounds at decimalLimit, then truncates to totalDigits */
-    check("totalDigits cut",123.456,    0,   5,  4,  "123.45");
-    check("1e9",            1e9L,        0,   15, 0,  "1000000000");
-    check("dec 10",         0.1234567891, 0, 15, 10, "0.1234567891");
-
-    /* --- fixed format, general path (> 32 bit integer) --- */
-    check("big int",        12345678901234.0, 0,  15, 0, "12345678901234");
-    check("big commas",     12345678901234.0, COM, 15, 0, "12,345,678,901,234");
-    check("big int+dec",    1234567890123.5,  0,  15, 2, "1234567890123.50");
-    check("too big -> sci", 1e20L,       0,   15, 2,  "1.00E+20");
-    check("dec > 10",       0.5,        0,   15, 12, "0.500000000000");
-
-    /* --- scientific --- */
-    check("sci 1",          12345.678,  SCI, 15, 3,  "1.235E+04");
-    check("sci neg exp",    0.000123,   SCI, 15, 2,  "1.23E-04");
-    check("sci neg num",    -6.02e23,   SCI, 15, 2,  "-6.02E+23");
-    check("sci 1e100",      1e100L,      SCI, 15, 1,  "1.0E+100");
-    check("sci 1e-300",     1e-300L,     SCI, 15, 1,  "1.0E-300");
-    check("sci zero",       0,           SCI, 15, 2,  "0.00E+00");
-    check("sci ntz",        1.5e10,     SCI|NTZ, 15, 6, "1.5E+10");
-    check("sci round up",   9.999,      SCI, 15, 2,  "1.00E+01");
-
-    /* --- don't use scientific (huge) --- */
-    check("huge fixed",     1e20L,       DUS, 64, 0,  "100000000000000000000");
-
-    /* --- NaN / Inf --- */
-    check("+inf",           INFINITY,    0,   15, 2,  "overflow");
-    check("-inf",           -INFINITY,   0,   15, 2,  "underflow");
-    check("nan",            NAN,         0,   15, 2,  "error");
+#define FFA_CASE(name, x, flags, digits, dec, expect) \
+    check(name, x, flags, digits, dec, expect);
+#define FFA_RAW(name, w3, exp, flags, digits, dec, expect) \
+    checkRaw(name, w3, exp, flags, digits, dec, expect);
+#include "ffa_cases.h"
 
     /* --- full frame: header, trailer, sign strings, decimal offset --- */
     {
