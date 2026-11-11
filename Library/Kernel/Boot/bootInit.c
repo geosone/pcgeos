@@ -20,7 +20,8 @@
  *
  * DOS16 then turned the boot thread into the scheduler's idle loop
  * (Dispatch).  Here the host schedules the threads; KernelRun keeps the
- * boot thread waiting until no process is left, and returns.
+ * boot thread waiting until no process is left or GEOS ends (EndGeos,
+ * bootBoot.c), and returns the exit flags.
  *
  * The UI: "[ui] generic" names its geode, as in DOS16; if it does not
  * load, the default ui.geo is tried and its failure is fatal
@@ -37,6 +38,7 @@
 #include <string.h>
 
 GeodeHandle kernelUIHandle;
+ThreadHandle kernelBootThread;
 
 static void LoadUI(void)
 {
@@ -81,7 +83,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     GeodeLoadError e;
     GeodeHandle gh;
 
-    KernelThreadInit(PRIORITY_STANDARD);
+    kernelBootThread = KernelThreadInit(PRIORITY_STANDARD);
     KernelTimerInit();
     FileSetTopHostPath(topHostPath);
     FileSetStandardPath(SP_TOP);
@@ -94,11 +96,11 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     return gh;
 }
 
-void KernelRun(void)
+word KernelRun(void)
 {
     GeodeHandle gh;
 
-    for (;;) {
+    while (!KernelEnded()) {
 	GeodeLock();
 	gh = GeodeFindLow("", 0, GA_PROCESS, 0);
 	GeodeUnlock();
@@ -106,4 +108,5 @@ void KernelRun(void)
 	    break;
 	TimerSleep(6);
     }
+    return kernelExitFlags;
 }

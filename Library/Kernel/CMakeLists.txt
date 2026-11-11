@@ -52,6 +52,8 @@
 #   Initfile/initfileLow.c, initfileConstruct.c, initfileHigh.c <- the
 #                      init file (geos.ini) of the same asm files,
 #                      initfileC.asm and Loader/ini.asm
+#   Boot/bootBoot.c <- EndGeos of bootBoot.asm (RemoveGeodes, ExitFile)
+#   Sys/sysMisc.c   <- SysShutdown of sysMisc.asm and sysC.asm
 #   Boot/bootInit.c <- InitGeos and ProcessCommandLine of bootInit.asm,
 #                      LoadUI of bootInitfile.asm
 #   VMem/vmemBlkManip.c, vmemHeader.c, vmemHigh.c, vmemChain.c <- the
@@ -105,7 +107,9 @@ add_library(geos_kernel_objs OBJECT
   VMem/vmemHeader.c
   VMem/vmemHigh.c
   VMem/vmemChain.c
-  Boot/bootInit.c)
+  Boot/bootInit.c
+  Boot/bootBoot.c
+  Sys/sysMisc.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

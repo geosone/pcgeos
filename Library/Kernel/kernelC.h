@@ -116,7 +116,8 @@
     X(CANNOT_ALLOCATE_CORRECT_CHUNK_HANDLE)	/* LMemAllocAt: handle taken */ \
     X(OBJ_LOAD_ERROR)		/* a state file that cannot be used */ \
     X(INIT_FILE_ERROR)		/* no memory for the init file */ \
-    X(CANNOT_LOAD_UI)		/* [ui] generic and ui.geo do not load */
+    X(CANNOT_LOAD_UI)		/* [ui] generic and ui.geo do not load */ \
+    X(BAD_SHUTDOWN_TYPE)		/* SysShutdown: no such type */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -831,9 +832,20 @@ MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
  * process, or 0 (with its error, GLE_OK if the tail names none). */
 GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
 		       GeodeLoadError *err);
-/* wait until no process is left */
-void KernelRun(void);
-/* the UI library (LoadUI), or 0 */
+/* wait until no process is left or GEOS has ended; the exit flags */
+word KernelRun(void);
+/* the UI library (LoadUI), or 0; the thread that booted */
 extern GeodeHandle kernelUIHandle;
+extern ThreadHandle kernelBootThread;
+
+/* Ending GEOS (Boot/bootBoot.c, Sys/sysMisc.c): EndGeos with KEF_* and
+ * a reason (or NULL); it returns only on the boot thread */
+#define KEF_DIRTY	0x0001	/* not a clean exit */
+#define KEF_RESET	0x0002	/* the machine should reboot */
+#define KEF_POWER_OFF	0x0004	/* it may be switched off */
+extern word kernelExitFlags;
+void EndGeos(word flags, const char *reason);
+Boolean KernelEnded(void);
+const char *KernelExitMessage(void);	/* "" if none */
 
 #endif /* KERNELC_H */

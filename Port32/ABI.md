@@ -1592,8 +1592,58 @@ categories, `InitFileBackupLanguage`/`InitFileSwitchLanguages`, and
   skipped. The rest is loaded as a process from `SP_SYSTEM`, the path
   `LoadUI` left, as DOS16 did. `KernelBoot` returns that process.
 - **Running.** DOS16 turned the boot thread into the scheduler's idle
-  loop. Here the host schedules the threads, and `KernelRun` keeps the
-  boot thread waiting until no process is left. `geos` then exits.
+  loop. Here the host schedules the threads. `KernelRun` keeps the boot
+  thread waiting until no process is left or GEOS ends, and returns the
+  exit flags. `geos` then prints the reason, if there is one, and exits
+  with 1 after a dirty end.
+
+**Shutdown** (`Sys/sysMisc.c` after `SysShutdown` of `sysMisc.asm` and
+`sysC.asm`):
+
+- The arguments follow `system.h`:
+  - `SST_CLEAN`, `SST_SUSPEND`, `SST_CLEAN_REBOOT`, `SST_POWER_OFF`:
+    `optr ackOD, Message ackMsg`;
+  - `SST_DIRTY`, `SST_FINAL`: `const char *reason` (NULL for none);
+  - `SST_CONFIRM_END`: `Boolean allow`.
+- **A clean shutdown or suspend** sends `MSG_META_CONFIRM_SHUTDOWN
+  (word confirmed, GCNShutdownControlType type)` to the objects on
+  `GCNSLT_SHUTDOWN_CONTROL`.
+  - Each answers with `SST_CONFIRM_START` and then `SST_CONFIRM_END`.
+    `SST_CONFIRM_START` gives the right to ask the user, one at a time;
+    it returns TRUE when someone has refused already.
+  - After the last answer, `ackOD` gets `ackMsg` with `{ word confirmed }`.
+    Without an `ackOD`, the UI gets `MSG_META_DETACH` if all agreed.
+  - Only one clean shutdown or suspend runs at a time; another call
+    returns TRUE.
+- **`SST_CLEAN_FORCED`** detaches the UI, which comes back with
+  `SST_FINAL`. Without a UI it ends GEOS at once.
+- **`SST_RESTART`** returns TRUE: the C kernel cannot reload itself.
+  DOS16 returned the same when it could not find `loader.exe`.
+
+**EndGeos** (`Boot/bootBoot.c`), reached through `SST_DIRTY`,
+`SST_FINAL`, `SST_PANIC` and `SST_REBOOT`:
+
+1. clears the file change list;
+2. gives `DR_EXIT` to the drivers that are not system drivers;
+3. closes the files still open;
+4. gives `DR_EXIT` to the system drivers;
+5. lets `KernelRun` return `KEF_DIRTY`, `KEF_RESET` or `KEF_POWER_OFF`,
+   and the reason (`KernelExitMessage`).
+
+On every thread but the boot thread, EndGeos does not return, as in
+DOS16: the thread waits until the program ends the process. On the boot
+thread it returns.
+
+ctest `kernel.shutdown` stands queues in for the objects on the list
+and for `ackOD`. It checks:
+
+- a confirmed shutdown, and a second one refused while it runs;
+- a suspend refused by one of two objects;
+- `SST_RESTART`;
+- `SST_DIRTY` from another thread: the reason, the files closed, the
+  thread kept.
+
+It needs no geodes, so it also runs on Open Watcom.
 
 ctest `kernel.boot` checks the chain on every host that loads geodes
 (not Open Watcom):
@@ -1610,7 +1660,8 @@ Not yet:
 - the input manager, fonts, graphics and windows;
 - patches, the log file, `documentIsTop`, `FSDInitComplete`;
 - the loader's switches (`/p`, `/sp`, memory limits);
-- `SysShutdown` and `EndGeos`.
+- the `GEOS_ACT.IVE` file that tells the next start about a dirty end,
+  `ExitFSD`, the task driver, and the power-off message.
 
 ## 14. Open
 

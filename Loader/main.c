@@ -7,7 +7,9 @@
  * This program does the same: the top is the current directory, and the
  * arguments, joined by blanks, are the command tail (switches "/x", then
  * the name of a geode to run, from SP_SYSTEM).  It returns when no
- * process is left.
+ * process is left or GEOS ends (SysShutdown), and prints the reason
+ * GEOS gave.  The exit code is 1 after a dirty exit.  A reboot or power
+ * off (KEF_RESET, KEF_POWER_OFF) only ends the program.
  *
  *	geos [/switch ...] [geode]
  *
@@ -27,6 +29,7 @@ int main(int argc, char **argv)
     size_t len = 0, n;
     GeodeLoadError e;
     GeodeHandle gh;
+    word flags;
     int i;
 
     tail[0] = 0;
@@ -47,6 +50,8 @@ int main(int argc, char **argv)
 		(int) e);
 	return 1;
     }
-    KernelRun();
-    return 0;
+    flags = KernelRun();
+    if (*KernelExitMessage())
+	printf("%s\n", KernelExitMessage());
+    return flags & KEF_DIRTY ? 1 : 0;
 }
