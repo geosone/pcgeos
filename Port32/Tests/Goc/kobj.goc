@@ -314,11 +314,11 @@ KObjHptr(optr obj1, MemHandle other)
     fails = 0;
     mid = ObjDeref(obj1, MID_MO);
     mid->KOMI_block = other;
-    ObjUnRelocateObjBlock(mh, 0);
+    ObjUnRelocateObjBlock(mh, VMRT_UNRELOCATE_FROM_RESOURCE);
     mid = ObjDeref(obj1, MID_MO);
     Check(mid->KOMI_block == (GOCR_UNRELOCATED | GOCR_RES_OTHER),
 	  "hptr unrelocated");
-    ObjRelocateObjBlock(mh, 0);
+    ObjRelocateObjBlock(mh, VMRT_RELOCATE_FROM_RESOURCE);
     mid = ObjDeref(obj1, MID_MO);
     Check(mid->KOMI_block == other, "hptr relocated");
     return fails;

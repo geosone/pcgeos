@@ -8,8 +8,9 @@
  * reusing their space, a block table that grows, attach and detach,
  * owners, chains and trees (copy, compare, info, free), read-only and
  * temporary files, and reading a VM file written by the 16-bit tools
- * (vm_reference.h).  A.VM, B.VM and REF.VM stay for vmcheck.py (ctest
- * kernel.vm.format).
+ * (vm_reference.h), LMem blocks (the DOS16 layout in the file) and the
+ * routine of VMSetReloc.  A.VM, B.VM, LM.VM and REF.VM stay for
+ * vmcheck.py (ctest kernel.vm.format).
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -133,6 +134,43 @@ static VMBlockHandle LinkBlock(VMFileHandle vm, word size, word next,
 }
 
 /* the size of the data of a GEOS file */
+/* VMSetReloc: the calls by type, and the block of the last one */
+static word relocCalls[3];
+static VMBlockHandle relocBlock;
+
+static void Reloc(VMFileHandle file, VMBlockHandle block, MemHandle mh,
+		  void *data, VMRelocType type)
+{
+    (void) file;
+    (void) data;
+    (void) mh;
+    if (type <= VMRT_RELOCATE_AFTER_WRITE)
+	relocCalls[type]++;
+    relocBlock = block;
+}
+
+static void FillChunk(optr o, word size, byte seed)
+{
+    byte *c = LMemDeref(o);
+    word i;
+
+    for (i = 0; i < size; i++)
+	c[i] = (byte) (seed + i * 7);
+}
+
+static Boolean SameChunk(optr o, word size, byte seed)
+{
+    byte *c = LMemDeref(o);
+    word i;
+
+    if (LMemGetChunkSize(o) != size)
+	return FALSE;
+    for (i = 0; i < size; i++)
+	if (c[i] != (byte) (seed + i * 7))
+	    return FALSE;
+    return TRUE;
+}
+
 static uint64_t SizeOf(const char *rel)
 {
     dword size = 0;
@@ -360,6 +398,92 @@ int main(int argc, char **argv)
 	    printf("REF.VM: %u\n", ThreadGetError());
 	CHECK(vm && Same(vm, b1, 300, 10) &&
 	      VMGetMapBlock(vm) == VMREF_MAP_BLOCK);
+	CHECK(VMClose(vm, FALSE) == 0);
+    }
+
+    /* LMem blocks: in the DOS16 layout in the file, back on reading */
+    {
+	static const word sizes[5] = { 1, 5, 13, 100, 2000 };
+	ChunkHandle ch[5], extra;
+	LMemBlockHeader *lh;
+	word offset;
+
+	vm = VMOpen("LM.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	CHECK(vm != 0);
+	VMSetReloc(vm, Reloc);
+	b1 = VMAllocLMem(vm, LMEM_TYPE_GENERAL, sizeof(LMemBlockHeader) + 8);
+	lh = VMLock(vm, b1, &mh);
+	CHECK(lh && (lh->LMBH_flags & LMF_IS_VM) &&
+	      (MemGetInfo(mh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM));
+	memcpy(lh + 1, "HEADER!!", 8);
+	for (i = 0; i < 5; i++) {
+	    ch[i] = LMemAlloc(mh, sizes[i]);
+	    FillChunk(ConstructOptr(mh, ch[i]), sizes[i], (byte) i);
+	}
+	extra = LMemAlloc(mh, 0);		/* an empty chunk */
+	LMemFree(ConstructOptr(mh, ch[1]));	/* a free handle */
+	CHECK(!LMemReAlloc(ConstructOptr(mh, ch[2]), 300));
+	FillChunk(ConstructOptr(mh, ch[2]), 300, 2);
+	lh = MemDeref(mh);
+	offset = lh->LMBH_offset;
+	VMDirty(mh);
+	VMUnlock(mh);
+	b2 = VMAlloc(vm, 64, 0x55);		/* no LMem: the routine's */
+	Fill(vm, b2, 64, 3);
+	CHECK(VMClose(vm, FALSE) == 0);
+	CHECK(relocCalls[VMRT_UNRELOCATE_BEFORE_WRITE] == 2 &&
+	      relocCalls[VMRT_RELOCATE_AFTER_WRITE] == 2 &&
+	      relocCalls[VMRT_RELOCATE_AFTER_READ] == 0);
+
+	vm = VMOpen("LM.VM", 0, VMO_OPEN, 0);
+	CHECK(vm != 0);
+	VMSetReloc(vm, Reloc);
+	lh = VMLock(vm, b1, &mh);
+	CHECK(relocCalls[VMRT_RELOCATE_AFTER_READ] == 1 && relocBlock == b1);
+	CHECK(lh && lh->LMBH_handle == mh && lh->LMBH_offset == offset &&
+	      (lh->LMBH_flags & LMF_IS_VM) &&
+	      lh->LMBH_lmemType == LMEM_TYPE_GENERAL &&
+	      (MemGetInfo(mh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) &&
+	      !memcmp(lh + 1, "HEADER!!", 8));
+	CHECK(SameChunk(ConstructOptr(mh, ch[0]), 1, 0) &&
+	      SameChunk(ConstructOptr(mh, ch[2]), 300, 2) &&
+	      SameChunk(ConstructOptr(mh, ch[3]), 100, 3) &&
+	      SameChunk(ConstructOptr(mh, ch[4]), 2000, 4));
+	CHECK(*(word *) ((byte *) lh + ch[1]) == 0 &&
+	      *(word *) ((byte *) lh + extra) == 0xffff);
+	/* it is an LMem heap again */
+	ch[1] = LMemAlloc(mh, 40);
+	FillChunk(ConstructOptr(mh, ch[1]), 40, 9);
+	CHECK(!LMemReAlloc(ConstructOptr(mh, ch[0]), 500));
+	FillChunk(ConstructOptr(mh, ch[0]), 500, 8);
+	CHECK(SameChunk(ConstructOptr(mh, ch[1]), 40, 9) &&
+	      SameChunk(ConstructOptr(mh, ch[4]), 2000, 4));
+	VMDirty(mh);
+	VMUnlock(mh);
+	CHECK(Same(vm, b2, 64, 3) && relocBlock == b2 &&
+	      relocCalls[VMRT_RELOCATE_AFTER_READ] == 2);
+	CHECK(VMClose(vm, FALSE) == 0);
+
+	vm = VMOpen("LM.VM", 0, VMO_OPEN, 0);
+	lh = VMLock(vm, b1, &mh);
+	CHECK(lh && SameChunk(ConstructOptr(mh, ch[0]), 500, 8) &&
+	      SameChunk(ConstructOptr(mh, ch[1]), 40, 9) &&
+	      SameChunk(ConstructOptr(mh, ch[2]), 300, 2));
+	VMUnlock(mh);
+	/* detached, it is no VM block any more */
+	d = VMDetach(vm, b1, 0);
+	lh = MemLock(d);
+	CHECK(!(lh->LMBH_flags & LMF_IS_VM) &&
+	      SameChunk(ConstructOptr(d, ch[3]), 100, 3));
+	MemUnlock(d);
+	MemFree(d);
+	CHECK(VMClose(vm, FALSE) == 0);
+	/* written again, for vmcheck.py */
+	vm = VMOpen("LM.VM", 0, VMO_OPEN, 0);
+	b1 = VMAllocLMem(vm, LMEM_TYPE_GENERAL, 0);
+	lh = VMLock(vm, b1, &mh);
+	ch[0] = LMemAlloc(mh, 77);
+	VMUnlock(mh);
 	CHECK(VMClose(vm, FALSE) == 0);
     }
 

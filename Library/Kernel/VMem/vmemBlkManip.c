@@ -17,6 +17,7 @@
  * Not yet: backup mode (VMBT_DUP/BACKUP/ZOMBIE), compression, compaction.
  */
 #include "vmemInt.h"
+#include <stdlib.h>
 #include "ghal.h"
 
 #include <string.h>
@@ -244,11 +245,45 @@ dword VMUseSpace(KVMFile *f, word size)
  * Reading and writing blocks
  * ------------------------------------------------------------------- */
 
+/*
+ * CallVMReloc: an object block of a file with VMA_OBJECT_RELOC is
+ * relocated by the kernel (VMObjRelocOrUnReloc), any other block by the
+ * routine of VMSetReloc.  The block is not locked.
+ */
+static void CallReloc(KVMFile *f, VMBlockHandle h, MemHandle mh,
+		      VMRelocType type)
+{
+    byte attrs = f->VF_hdr[VMH_ATTRIBUTES];
+    byte *p = MemLock(mh);
+    ObjLMemBlockHeader *o = (ObjLMemBlockHeader *) p;
+
+    if ((MemGetInfo(mh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) &&
+	(attrs & VMA_OBJECT_RELOC) &&
+	o->OLMBH_header.LMBH_lmemType == LMEM_TYPE_OBJ_BLOCK) {
+	if (type == VMRT_RELOCATE_AFTER_READ) {
+	    o->OLMBH_inUseCount = 0;
+	    o->OLMBH_interactibleCount = 0;
+	}
+	MemUnlock(mh);
+	/* VMA_COMPACT_OBJ_BLOCK: Port32 LMem blocks have no free space
+	 * to drop in the file (LMemToDOS16 leaves it out) */
+	if (type == VMRT_UNRELOCATE_BEFORE_WRITE)
+	    ObjUnRelocateObjBlock(mh, type);
+	else
+	    ObjRelocateObjBlock(mh, type);
+	return;
+    }
+    if (f->VF_reloc)
+	f->VF_reloc(f->VF_handle, h, mh, p, type);
+    MemUnlock(mh);
+}
+
 word VMReadBlock(KVMFile *f, VMBlockHandle h)
 {
     word size = VHGet16(f, h + VMBH_FILE_SIZE);
+    Boolean lmem = (f->VF_hdr[h + VMBH_FLAGS] & VMBF_LMEM) != 0;
     MemHandle mh;
-    void *p;
+    byte *p;
     word e = 0;
 
     if (!size)
@@ -260,13 +295,31 @@ word VMReadBlock(KVMFile *f, VMBlockHandle h)
     FilePos(f->VF_file, VHGet32(f, h + VMBH_FILE_POS), FILE_POS_START);
     if (FileRead(f->VF_file, p, size, FALSE) != size)
 	e = ThreadGetError() ? ThreadGetError() : ERROR_SHORT_READ_WRITE;
-    MemUnlock(mh);
-    if (e) {
+    if (!e && lmem) {
+	/* the DOS16 layout of the file to the Port32 one */
+	MemHandle lm = LMemFromDOS16(p, size, f->VF_handle);
+	if (!lm)
+	    e = ERROR_FILE_FORMAT_MISMATCH;
+	MemUnlock(mh);
 	MemFree(mh);
+	mh = lm;
+	if (mh) {
+	    LMemBlockHeader *lh = MemLock(mh);
+	    lh->LMBH_flags |= LMF_IS_VM;
+	    if (lh->LMBH_lmemType == LMEM_TYPE_OBJ_BLOCK && f->VF_execThread)
+		MemModifyOtherInfo(mh, f->VF_execThread);
+	    MemUnlock(mh);
+	}
+    } else
+	MemUnlock(mh);
+    if (e) {
+	if (mh)
+	    MemFree(mh);
 	return e;
     }
     f->VF_mem[VM_INDEX(h)] = mh;
     f->VF_dirty[VM_INDEX(h)] = FALSE;
+    CallReloc(f, h, mh, VMRT_RELOCATE_AFTER_READ);
     return 0;
 }
 
@@ -302,12 +355,33 @@ word VMWriteData(KVMFile *f, VMBlockHandle h, const void *data, word size)
 word VMWriteBlock(KVMFile *f, VMBlockHandle h)
 {
     MemHandle mh = f->VF_mem[VM_INDEX(h)];
-    word e;
+    byte flags = f->VF_hdr[h + VMBH_FLAGS] & (byte) ~VMBF_LMEM;
+    byte *p, *img = NULL;
+    word e, size;
 
     if (!mh)
 	return 0;
-    e = VMWriteData(f, h, MemLock(mh), (word) MemGetInfo(mh, MGIT_SIZE));
+    CallReloc(f, h, mh, VMRT_UNRELOCATE_BEFORE_WRITE);
+    p = MemLock(mh);
+    size = (word) MemGetInfo(mh, MGIT_SIZE);
+    /* an LMem block goes to the file in the DOS16 layout (lmemCode.c) */
+    if ((MemGetInfo(mh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) &&
+	!(((LMemBlockHeader *) p)->LMBH_flags & LMF_NO_HANDLES)) {
+	size = LMemDOS16Size(mh);
+	img = size ? malloc(size) : NULL;
+	if (!img) {
+	    MemUnlock(mh);
+	    CallReloc(f, h, mh, VMRT_RELOCATE_AFTER_WRITE);
+	    return ERROR_INSUFFICIENT_MEMORY;
+	}
+	size = LMemToDOS16(mh, img);
+	flags |= VMBF_LMEM;
+    }
+    VHSet8(f, h + VMBH_FLAGS, flags);
+    e = VMWriteData(f, h, img ? img : p, size);
+    free(img);
     MemUnlock(mh);
+    CallReloc(f, h, mh, VMRT_RELOCATE_AFTER_WRITE);
     if (!e)
 	f->VF_dirty[VM_INDEX(h)] = FALSE;
     return e;

@@ -17,3 +17,4 @@ resource KGObjects object
 resource KGData lmem
 resource KGTemplate object
 export kgAppState
+export KGRefClass

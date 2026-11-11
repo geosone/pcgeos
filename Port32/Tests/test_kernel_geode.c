@@ -25,6 +25,7 @@
  *     frees kglib (LCT_DETACH); no handle is left over.
  */
 #include "kernelC.h"
+#include "ghal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -50,6 +51,7 @@ typedef struct {
     Boolean	KGAS_gcnFound;
     MemHandle	KGAS_dup;
     word	KGAS_dupChecks;
+    word	KGAS_vmChecks;
 } KGAppState;
 
 #define GEODE	0x2340
@@ -76,8 +78,10 @@ static int Dump(Handle h, HandleEntry *he, void *ctx)
     return 0;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    char top[260], *slash;
+
     ThreadHandle me;
     GeodeHandle lib, app;
     GeodeLoadError e;
@@ -89,6 +93,20 @@ int main(void)
     struct { word callerID; optr ackOD; } dp = { 0, 0 };
     dword base;
 
+    (void) argc;
+    setvbuf(stdout, NULL, _IONBF, 0);	/* all of it, should DOS crash */
+    /* the GEOS top directory GGTOP next to the program (the VM file) */
+    strncpy(top, argv[0], sizeof(top) - 8);
+    top[sizeof(top) - 8] = 0;
+    slash = strrchr(top, '/');
+    if (!slash || (strrchr(top, '\\') && strrchr(top, '\\') > slash))
+	slash = strrchr(top, '\\');
+    if (slash)
+	strcpy(slash + 1, "GGTOP");
+    else
+	strcpy(top, "GGTOP");
+    ghal_fs_mkdir(top);
+    FileSetTopHostPath(top);
     kernelCurrentGeode = GEODE;
     me = KernelThreadInit(PRIORITY_STANDARD);
     KernelTimerInit();
@@ -167,6 +185,9 @@ int main(void)
 	  "optrs in chunk data relocated (optr, structure, chunk array)");
     Check(st->KGAS_gcnFound, "static GCN list relocated");
     Check(st->KGAS_dupChecks == 8, "ObjDuplicateResource, ObjFreeDuplicate");
+    Check(st->KGAS_vmChecks == 7, "object blocks in a VM file");
+    if (st->KGAS_vmChecks != 7)
+	printf("vm checks %u\n", st->KGAS_vmChecks);
     {
 	GeodeCore *c = GeodeCoreOf(app);
 	Handle sb = c ? c->GC_savedBlocks : 0;

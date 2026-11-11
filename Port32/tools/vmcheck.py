@@ -26,6 +26,61 @@ STRICT = False
 ENTRY = 12
 
 
+VMBF_LMEM = 0x01
+LMF_NO_HANDLES = 0x0080
+LMEM_EMPTY = 0xffff
+
+
+def check_lmem(blk, what, err):
+    """an LMem block in the DOS16 layout (lmemCode.asm): 16-byte header,
+    handle table at LMBH_offset, chunks with a size word (data + 2) in
+    slots rounded to 4 after the table, free chunks on LMBH_freeList"""
+    if len(blk) < 16:
+        err("%s: LMem block of %d bytes" % (what, len(blk)))
+        return
+    (handle, offset, flags, ltype, bsize, nh, free, total_free) = \
+        struct.unpack_from("<8H", blk, 0)
+    if flags & LMF_NO_HANDLES:
+        return
+    if bsize > len(blk) or bsize < offset:
+        err("%s: LMBH_blockSize %d (%d in the file)" % (what, bsize, len(blk)))
+        return
+    end = offset + 2 * nh
+    if offset < 16 or offset & 1 or end > bsize:
+        err("%s: handle table %d+%d outside the block" % (what, offset, nh))
+        return
+    slots = []
+    for i in range(nh):
+        e = struct.unpack_from("<H", blk, offset + 2 * i)[0]
+        if e in (0, LMEM_EMPTY):
+            continue
+        size = struct.unpack_from("<H", blk, e - 2)[0] if e >= 2 else 0
+        if e < end + 2 or e & 1 or size < 2 or e - 2 + size > bsize:
+            err("%s: chunk %#x (%d bytes at %d) outside the heap"
+                % (what, offset + 2 * i, size, e))
+            continue
+        slots.append((e - 2, (size + 3) & ~3, "chunk %#x" % (offset + 2 * i)))
+    free_sum, f, n = 0, free, 0
+    while f and n < 4096:
+        if f < end + 2 or f + 2 > bsize:
+            err("%s: free chunk at %d outside the heap" % (what, f))
+            break
+        size = struct.unpack_from("<H", blk, f - 2)[0]
+        slots.append((f - 2, size, "free chunk"))
+        free_sum += size
+        f = struct.unpack_from("<H", blk, f)[0]
+        n += 1
+    if free_sum != total_free:
+        err("%s: LMBH_totalFree %d, free chunks have %d"
+            % (what, total_free, free_sum))
+    slots.sort()
+    last = end
+    for pos, size, name in slots:
+        if pos < last or pos + size > bsize:
+            err("%s: %s at %d overlaps or leaves the block" % (what, name, pos))
+        last = max(last, pos + size)
+
+
 def check(path):
     data = open(path, "rb").read()
     if data[:4] == GFH_SIG:
@@ -122,6 +177,8 @@ def check(path):
             size, pos = u16(h + 6), u32(h + 8)
             if size:
                 spans.append((pos, size, "block %#x" % h))
+                if hdr[h + 3] & VMBF_LMEM and pos + size <= len(data):
+                    check_lmem(data[pos:pos + size], "block %#x" % h, err)
         elif h not in seen:
             err("free entry %#x on no list" % h)
     if nused != n_used:

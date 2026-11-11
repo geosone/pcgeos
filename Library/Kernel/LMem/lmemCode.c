@@ -612,3 +612,148 @@ MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
     FreeSlot(b, (word) (pos + 2), size - pos);
     return mh;
 }
+
+/* ---------------------------------------------------------------------
+ * LMem blocks in files: the DOS16 layout (VM files, Port32/ABI.md 13b)
+ *
+ *   LMemBlockHeader   16 bytes: handle, offset, flags, type, blockSize,
+ *                     nHandles, freeList, totalFree (words)
+ *   rest of a larger  the bytes of the Port32 header after its own
+ *   header            LMemBlockHeader, as they are (a converter per type
+ *                     where they differ: section 14)
+ *   handle table      at LMBH_offset = Port32 LMBH_offset - 4
+ *   heap              the chunks in handle order right after the table,
+ *                     each a size word (data size + 2) and its data in a
+ *                     slot rounded up to 4; no free chunk
+ *
+ * The chunk handles of the file are 4 lower than in memory (the Port32
+ * header is 20 bytes): chunk handles inside chunk data are not changed.
+ * ------------------------------------------------------------------- */
+
+#define DOS16_LMBH_SIZE	16u
+#define LMBH_DELTA	((word) (sizeof(LMemBlockHeader) - DOS16_LMBH_SIZE))
+#define ALIGN4(n)	(((n) + 3u) & ~(dword) 3u)
+
+static void Put16(byte *p, word v)
+{
+    p[0] = (byte) v;
+    p[1] = (byte) (v >> 8);
+}
+
+static word Get16(const byte *p)
+{
+    return (word) (p[0] | (p[1] << 8));
+}
+
+word LMemDOS16Size(MemHandle mh)
+{
+    const byte *b = MemDeref(mh);
+    const LMemBlockHeader *h = HDR(b);
+    dword size = h->LMBH_offset - LMBH_DELTA + 2u * h->LMBH_nHandles, i;
+
+    for (i = 0; i < h->LMBH_nHandles; i++) {
+	word e = W(b, h->LMBH_offset + 2 * i);
+	if (e && e != LMEM_EMPTY)
+	    size += ALIGN4(W(b, e - 2));
+    }
+    return size > LMEM_MAX_BLOCK ? 0 : (word) size;
+}
+
+word LMemToDOS16(MemHandle mh, byte *out)
+{
+    const byte *b = MemDeref(mh);
+    const LMemBlockHeader *h = HDR(b);
+    word off = (word) (h->LMBH_offset - LMBH_DELTA), n = h->LMBH_nHandles;
+    dword pos = off + 2u * n, i;
+
+    memcpy(out + DOS16_LMBH_SIZE, b + sizeof(LMemBlockHeader),
+	   off - DOS16_LMBH_SIZE);
+    for (i = 0; i < n; i++) {
+	word e = W(b, h->LMBH_offset + 2 * i), sz;
+	if (!e || e == LMEM_EMPTY) {
+	    Put16(out + off + 2 * i, e);
+	    continue;
+	}
+	sz = W(b, e - 2);
+	Put16(out + pos, sz);
+	memcpy(out + pos + 2, b + e, sz - 2u);
+	memset(out + pos + sz, 0, ALIGN4(sz) - sz);
+	Put16(out + off + 2 * i, (word) (pos + 2));
+	pos += ALIGN4(sz);
+    }
+    Put16(out, 0);			/* the handle means nothing in a file */
+    Put16(out + 2, off);
+    Put16(out + 4, h->LMBH_flags);
+    Put16(out + 6, (word) h->LMBH_lmemType);
+    Put16(out + 8, (word) pos);
+    Put16(out + 10, n);
+    Put16(out + 12, 0);
+    Put16(out + 14, 0);
+    return (word) pos;
+}
+
+MemHandle LMemFromDOS16(const byte *img, word size, Handle owner)
+{
+    word off, n, flags, i;
+    dword memOff, start, total, tableEnd;
+    MemHandle mh;
+    byte *b;
+    LMemBlockHeader *h;
+
+    if (size < DOS16_LMBH_SIZE)
+	return 0;
+    off = Get16(img + 2);
+    flags = Get16(img + 4);
+    n = Get16(img + 10);
+    tableEnd = off + 2u * n;
+    if (off < DOS16_LMBH_SIZE || (off & 1) || tableEnd > size ||
+	(flags & LMF_NO_HANDLES))
+	return 0;
+    memOff = off + LMBH_DELTA;
+    start = ALIGN(memOff + 2u * n + 2) - 2;
+    total = start + LMEM_ALIGN;		/* a free chunk at the end */
+    for (i = 0; i < n; i++) {
+	word e = Get16(img + off + 2 * i), sz;
+	if (!e || e == LMEM_EMPTY)
+	    continue;
+	if (e < tableEnd + 2 || e > size)
+	    return 0;
+	sz = Get16(img + e - 2);
+	if (sz < 2 || (dword) e - 2 + sz > size)
+	    return 0;
+	total += ALIGN(sz);
+    }
+    if (total > LMEM_MAX_BLOCK)
+	return 0;
+    mh = MemAllocSetOwner(owner, (word) total, HF_SWAPABLE | HF_LMEM,
+			  HAF_ZERO_INIT);
+    if (!mh)
+	return 0;
+    b = MemDeref(mh);
+    h = HDR(b);
+    memcpy(b + sizeof(LMemBlockHeader), img + DOS16_LMBH_SIZE,
+	   off - DOS16_LMBH_SIZE);
+    h->LMBH_handle = mh;
+    h->LMBH_offset = (word) memOff;
+    h->LMBH_flags = flags;
+    h->LMBH_lmemType = (LMemType) Get16(img + 6);
+    h->LMBH_blockSize = (word) total;
+    h->LMBH_nHandles = n;
+    h->LMBH_freeList = 0;
+    h->LMBH_totalFree = 0;
+    start = HeapStart(b);
+    for (i = 0; i < n; i++) {
+	word e = Get16(img + off + 2 * i), sz;
+	if (!e || e == LMEM_EMPTY) {
+	    W(b, memOff + 2 * i) = e;
+	    continue;
+	}
+	sz = Get16(img + e - 2);
+	W(b, start) = sz;
+	memcpy(b + start + 2, img + e, sz - 2u);
+	W(b, memOff + 2 * i) = (word) (start + 2);
+	start += ALIGN(sz);
+    }
+    FreeSlot(b, (word) (start + 2), total - start);
+    return mh;
+}

@@ -31,6 +31,7 @@
  */
 #include "kernelC.h"
 #include "geosmod.h"
+#include <vm.h>
 #include "ghal.h"
 
 #include <string.h>
@@ -308,7 +309,8 @@ static void RelocateObjectBlocks(const GeosModuleInfo *info,
 	if (info->GM_resourceHandles[r] &&
 	    (info->GM_resources[r].GMR_flags & RESF_OBJECT)) {
 	    MemModifyOtherInfo(info->GM_resourceHandles[r], burden);
-	    ObjRelocateObjBlock(info->GM_resourceHandles[r], 0);
+	    ObjRelocateObjBlock(info->GM_resourceHandles[r],
+				VMRT_RELOCATE_FROM_RESOURCE);
 	}
 }
 
@@ -686,4 +688,93 @@ GeodeHandle GeodeLoad(const char *name, GeodeAttrs attrMatch,
     if (err)
 	*err = e;
     return gh;
+}
+
+/* ---------------------------------------------------------------------
+ * Entries as unrelocated references (classes in saved object blocks)
+ * ------------------------------------------------------------------- */
+
+/* the kernel's classes where it has no export table (Open Watcom) */
+extern ClassStruct MetaClass, ProcessClass;
+static const void *const kernelClasses[] = { &MetaClass, &ProcessClass };
+
+static Boolean InExports(const GeosModuleInfo *info, const void *addr,
+			 dword *entry)
+{
+    word i;
+
+    for (i = 0; info && i < info->GM_exportCount; i++)
+	if (info->GM_exports[i].GME_address == addr) {
+	    *entry = i;
+	    return TRUE;
+	}
+    return FALSE;
+}
+
+Boolean GeodeEntryToReloc(GeodeHandle owner, const void *addr, dword *code)
+{
+    GeodeCore *c;
+    dword e;
+    word i;
+    Boolean found = FALSE;
+
+    GeodeLock();
+    c = GeodeCoreOf(owner);
+    if (c && InExports(INFO(c), addr, &e)) {
+	*code = KUR_MAKE(KUR_ENTRY_OWNER, e);
+	found = TRUE;
+    }
+    for (i = 0; c && !found && i < c->GC_libraryCount; i++) {
+	GeodeCore *l = GeodeCoreOf(c->GC_libraries[i]);
+	if (l && InExports(INFO(l), addr, &e) && e <= 0xffff) {
+	    *code = KUR_MAKE(KUR_ENTRY_LIBRARY, ((dword) i << 16) | e);
+	    found = TRUE;
+	}
+    }
+    GeodeUnlock();
+    if (found)
+	return TRUE;
+    for (i = 0; i < kernelExportCount; i++)
+	if (kernelExports[i].addr == addr) {
+	    *code = KUR_MAKE(KUR_ENTRY_KERNEL, i);
+	    return TRUE;
+	}
+    if (!kernelExportCount)
+	for (i = 0; i < sizeof(kernelClasses) / sizeof(kernelClasses[0]); i++)
+	    if (kernelClasses[i] == addr) {
+		*code = KUR_MAKE(KUR_ENTRY_KERNEL, i);
+		return TRUE;
+	    }
+    return FALSE;
+}
+
+const void *GeodeRelocToEntry(GeodeHandle owner, dword code)
+{
+    dword idx = KUR_INDEX(code);
+    const void *a = NULL;
+    GeodeCore *c;
+
+    switch (KUR_SOURCE(code)) {
+    case KUR_ENTRY_OWNER:
+    case KUR_ENTRY_LIBRARY:
+	GeodeLock();
+	c = GeodeCoreOf(owner);
+	if (c && KUR_SOURCE(code) == KUR_ENTRY_LIBRARY) {
+	    word lib = (word) (idx >> 16);
+	    c = lib < c->GC_libraryCount ? GeodeCoreOf(c->GC_libraries[lib])
+					 : NULL;
+	    idx &= 0xffff;
+	}
+	if (c && INFO(c) && idx < INFO(c)->GM_exportCount)
+	    a = INFO(c)->GM_exports[idx].GME_address;
+	GeodeUnlock();
+	return a;
+    case KUR_ENTRY_KERNEL:
+	if (kernelExportCount)
+	    return idx < kernelExportCount ? kernelExports[idx].addr : NULL;
+	return idx < sizeof(kernelClasses) / sizeof(kernelClasses[0])
+	       ? kernelClasses[idx] : NULL;
+    default:
+	return NULL;
+    }
 }

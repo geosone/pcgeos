@@ -729,7 +729,10 @@ Table entries point to the handle: under `goc -cg`, the handle half of
 an optr (`+GOCR_OPTR_HANDLE_OFS`, 4 on the little-endian hosts) or the
 hptr itself. The 16-bit backends keep `+2`. Pointers
 (`RELOC_RELOC_ENTRY_POINT`: classes, routines) need nothing at load
-time: the module loader made them absolute. goc casts a relocation
+time: the module loader made them absolute. The relocation types of
+resources are `VMRT_RELOCATE_FROM_RESOURCE` and
+`VMRT_UNRELOCATE_FROM_RESOURCE`; the other `VMRelocType`s unrelocate
+for a file (section 13d). goc casts a relocation
 method to `MessageMethod *` through `void (*)(void)`, because its
 prototype has `word` parameters. The kernel calls it with that
 prototype (`ObjRelocMethod`).
@@ -1018,14 +1021,80 @@ of type `GFT_VM` (section 13c): the VM data follow the 256-byte
   - `kernel.vm` reads a tools-written file (`vm_reference.h`) on every
     host, DOS included, and changes it.
 
+- **LMem blocks** (`VMAllocLMem`, or an LMem block attached) are
+  written in the **DOS16 LMem layout** and converted back on reading
+  (`LMemToDOS16`/`LMemFromDOS16` in `lmemCode.c`; decided 2026-11-11:
+  the Port32 `LMemBlockHeader` stays 20 bytes in memory):
+
+  | DOS16 in the file | Port32 in memory |
+  |---|---|
+  | `LMemBlockHeader`, 16 bytes (`LMBH_handle` 0) | 20 bytes |
+  | rest of a larger header (e.g. `ObjLMemBlockHeader`) as it is | after the 20 bytes |
+  | handle table at `LMBH_offset` | at `LMBH_offset + 4` |
+  | chunks in handle order right after the table, size word = data + 2, slots rounded to 4, no free chunk | chunk data aligned to 8, one free chunk at the end |
+
+  The entry gets `VMBF_LMEM`. On reading, the block gets
+  `LMBH_handle`, `LMF_IS_VM` and `HF_LMEM`; `VMAttach` sets
+  `LMF_IS_VM`, `VMDetach` clears it. Blocks with `LMF_NO_HANDLES` are
+  written as they are. The chunk handles of a file are 4 lower than in
+  memory: chunk handles stored inside chunk data (DB items, element
+  array references) and the rest of larger headers whose layout
+  differs are left to the converters of section 14.2.
+- **Relocation** (`CallReloc` in `vmemBlkManip.c`, as `CallVMReloc`):
+  before a block is written (`VMRT_UNRELOCATE_BEFORE_WRITE`), after
+  it was written (`VMRT_RELOCATE_AFTER_WRITE`) and after it was read
+  (`VMRT_RELOCATE_AFTER_READ`). An object block of a file with
+  `VMA_OBJECT_RELOC` is relocated by the kernel (section 13d; after
+  reading, the in-use and interactible counts are cleared and the
+  block gets the thread of `VMSetExecThread`); any other block goes to
+  the routine of `VMSetReloc`.
+
 Not yet:
 
 - backup mode (`VMSave`, `VMRevert`, `VMSaveAs`);
 - sharing between processes, `VMGrabExclusive`;
 - discarding clean blocks;
-- relocation (`VMSetReloc`, object blocks), and with it saving to state;
-- LMem blocks (`VMAllocLMem`) with converted headers;
+- saving to state;
 - DB items, huge arrays, compression.
+
+## 13d. Object blocks in files (`Object/objectReloc.c`, P4)
+
+An object block written to a VM file is unrelocated completely, as the
+asm kernel does (`VMObjRelocOrUnReloc`, `UnRelocateObjBlock`). A
+reference becomes `GOCR_UNRELOCATED | source << 28 | index`
+(`KUR_*` in `kernelC.h`):
+
+| Source | Index | 16-bit counterpart |
+|---|---|---|
+| `KUR_RESOURCE` 0 | resource number of the owner (what `goc -cg` writes) | `ORS_OWNING_GEODE` |
+| `KUR_SAVED` 1 | VM ID of a saved block (saved-block list) | `ORS_VM_HANDLE` |
+| `KUR_VM` 2 | VM block handle in the same file | `ORS_NON_STATE_VM` |
+| `KUR_UNKNOWN` 3 | handle >> 4 | `ORS_UNKNOWN_BLOCK` |
+| `KUR_ENTRY_OWNER` 4 | export number of the owner | `ORS_OWNING_GEODE_ENTRY_POINT` |
+| `KUR_ENTRY_LIBRARY` 5 | library number << 16, export number | `ORS_LIBRARY` |
+| `KUR_ENTRY_KERNEL` 6 | kernel export number | `ORS_KERNEL` |
+
+Handles are optrs, hptrs and the block output. Pointers are the class
+of every object (relocated first, unrelocated last, as
+`RelocOrUnRelocAndLoadClass`), the superclass of a variant master
+part, and `RELOC_RELOC_ENTRY_POINT` entries: they must be **exported
+entries** of the owner, one of its libraries or the kernel
+(`GeodeEntryToReloc`/`GeodeRelocToEntry` in `geodesLoad.c`), so a
+class whose objects are saved is exported, as in 16-bit GEOS. Without
+a kernel export table (Open Watcom) the kernel's classes are
+`MetaClass` 0 and `ProcessClass` 1. Relocation methods see the same
+references through `ObjDoRelocation`/`ObjDoUnRelocation` (a per-thread
+flag, `KThread.T_fileReloc`).
+
+The instance data keep the Port32 layout of the host ABI (64-bit optrs,
+8-byte pointers on 64-bit hosts), so such object blocks are not
+portable between hosts with different pointer sizes; portable
+documents do not store objects (section 14.2).
+
+ctest `kernel.geode`: the process `kgapp` saves objects of its own
+class and of `kglib`'s class with references in the same block, to
+another VM block and to a resource, closes the file, opens it again,
+and sends them messages.
 
 ## 13c. GEOS files and host names (`Port32/hostfs`, `File/fileEA.c`, P4)
 

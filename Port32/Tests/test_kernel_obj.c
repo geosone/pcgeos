@@ -7,6 +7,7 @@
  */
 #include "kernelC.h"
 #include "ghal.h"
+#include <vm.h>
 
 #include <stddef.h>
 #include <stdio.h>
@@ -190,19 +191,19 @@ int main(void)
     Save(&so, oth);
 
     /* relocate, unrelocate: what goc made, relocate again */
-    ObjRelocateObjBlock(objects, 0);
-    ObjRelocateObjBlock(other, 0);
+    ObjRelocateObjBlock(objects, VMRT_RELOCATE_FROM_RESOURCE);
+    ObjRelocateObjBlock(other, VMRT_RELOCATE_FROM_RESOURCE);
     Check(kobjRelocs == 1, "relocation method");
     Check((((LMemBlockHeader *) MemDeref(objects))->LMBH_flags &
 	   LMF_RELOCATED) != 0, "LMF_RELOCATED");
     fails += KObjRelocated(obj1, obj2, plain, oth, __goc_resource_handles);
-    ObjUnRelocateObjBlock(objects, 0);
-    ObjUnRelocateObjBlock(other, 0);
+    ObjUnRelocateObjBlock(objects, VMRT_UNRELOCATE_FROM_RESOURCE);
+    ObjUnRelocateObjBlock(other, VMRT_UNRELOCATE_FROM_RESOURCE);
     Check(kobjUnrelocs == 1, "unrelocation method");
     Check(Same(&s1, obj1) && Same(&s2, obj2) && Same(&sp, plain) &&
 	  Same(&so, oth), "unrelocated as goc made it");
-    ObjRelocateObjBlock(objects, 0);
-    ObjRelocateObjBlock(other, 0);
+    ObjRelocateObjBlock(objects, VMRT_RELOCATE_FROM_RESOURCE);
+    ObjRelocateObjBlock(other, VMRT_RELOCATE_FROM_RESOURCE);
     fails += KObjRelocated(obj1, obj2, plain, oth, __goc_resource_handles);
     fails += KObjHptr(obj1, other);
     LMemValidate(objects);

@@ -244,6 +244,8 @@ typedef struct {
     struct DispatchRec *T_dispatching;	/* CMessageDispatchP */
     word	T_error;	/* ThreadGetError (TPD_error) */
     struct KPath *T_path;	/* current path, then FilePushDir's */
+    word	T_fileReloc;	/* relocating an object block for a file
+				 * (objectReloc.c) */
 } KThread;
 
 /* the running thread (0 before KernelThreadInit) */
@@ -557,6 +559,33 @@ Handle GeodeResourceHandle(GeodeHandle gh, word res);
 /* the resource number of `h' in a geode, or -1 */
 sdword GeodeHandleToResource(GeodeHandle gh, Handle h);
 
+/*
+ * Unrelocated references in object blocks written to files (VM files,
+ * state; objectReloc.c, ABI.md section 13d): GOCR_UNRELOCATED, a source
+ * and an index.  KUR_RESOURCE is what goc -cg writes (a resource number
+ * of the owner, GOCR_PROCESS_RES the process).
+ */
+#define KUR_SHIFT		28
+#define KUR_INDEX_MASK		0x0fffffffu
+#define KUR_MAKE(src, idx)	(GOCR_UNRELOCATED | ((dword) (src) << KUR_SHIFT) \
+				 | (dword) (idx))
+#define KUR_SOURCE(v)		((word) (((v) >> KUR_SHIFT) & 7))
+#define KUR_INDEX(v)		((dword) (v) & KUR_INDEX_MASK)
+enum {
+    KUR_RESOURCE,	/* resource number of the owner */
+    KUR_SAVED,		/* a saved block: its VM ID (ORS_VM_HANDLE) */
+    KUR_VM,		/* a block of the same VM file: its VM block handle
+			 * (ORS_NON_STATE_VM) */
+    KUR_UNKNOWN,	/* any other block: handle >> 4 (ORS_UNKNOWN_BLOCK) */
+    KUR_ENTRY_OWNER,	/* exported entry of the owner */
+    KUR_ENTRY_LIBRARY,	/* library << 16 | its entry (ORS_LIBRARY) */
+    KUR_ENTRY_KERNEL	/* entry of the kernel (ORS_KERNEL) */
+};
+/* geodesLoad.c: an exported entry of `owner', its libraries or the
+ * kernel as KUR_ENTRY_* (FALSE if it is none), and back (NULL) */
+Boolean GeodeEntryToReloc(GeodeHandle owner, const void *addr, dword *code);
+const void *GeodeRelocToEntry(GeodeHandle owner, dword code);
+
 /* ---------------------------------------------------------------------
  * Geodes (Geodes/geodesLoad.c, geodesLibrary.c, geodesAccess.c; after
  * geodesLoad.asm, geodesLibrary.asm, geodesAccess.asm).  Port32/ABI.md
@@ -659,6 +688,10 @@ typedef struct KVMFile {
     Boolean	VF_readOnly;
     Boolean	VF_hdrDirty;
     char	VF_path[HOST_PATH_SIZE];	/* host path */
+    /* VMSetReloc: relocates blocks that are no object blocks */
+    void	(*VF_reloc)(VMFileHandle file, VMBlockHandle block,
+			    MemHandle mh, void *data, word type);
+    ThreadHandle VF_execThread;	/* VMSetExecThread: runs object blocks */
 } KVMFile;
 
 void VMFreeHandle(Handle vm);	/* vmemHigh.c: close for a freed geode */
@@ -719,6 +752,12 @@ word ElementArrayAddElementSized(optr arr, void *element, word size,
 				 Boolean (*callback)(void *elementToAdd,
 						     void *elementFromArray,
 						     dword valueForCallback));
+/* LMem blocks in files in the DOS16 layout (VM files): the size of the
+ * image (0: too large), the image, and a block owned by `owner' from an
+ * image (0 if it is not a valid LMem block) */
+word LMemDOS16Size(MemHandle mh);
+word LMemToDOS16(MemHandle mh, byte *out);
+MemHandle LMemFromDOS16(const byte *img, word size, Handle owner);
 MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
 				  HeapFlags hf, HeapAllocFlags haf);
 

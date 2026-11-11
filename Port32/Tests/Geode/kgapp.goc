@@ -7,6 +7,8 @@
  * which the test reads through ProcGetLibraryEntry.  It also reads the
  * optrs goc put into chunks that are not objects (a data resource and a
  * static GCN list), which the loader relocated through their shadows.
+ * And it saves objects of its own class and of kglib's to a VM file and
+ * reads them again (the classes are exported entries in the file).
  */
 @include <stdapp.goh>
 @include "kglib.goh"
@@ -23,6 +25,7 @@ typedef struct {
     Boolean	KGAS_gcnFound;
     MemHandle	KGAS_dup;		/* ObjDuplicateResource of KGTemplate */
     word	KGAS_dupChecks;		/* checks of the copies that were right */
+    word	KGAS_vmChecks;		/* checks of objects in a VM file */
 } KGAppState;
 
 /* a structure with an optr behind a word (padding before it) */
@@ -138,6 +141,63 @@ KGAppState kgAppState;
 	ObjFreeDuplicate(dup2);
 	kgAppState.KGAS_dup = dup;
 	kgAppState.KGAS_dupChecks = n;
+    }
+    /* object blocks in a VM file: saved, read again */
+    {
+	VMFileHandle vm;
+	VMBlockHandle v1, v2;
+	MemHandle m1, m2;
+	ChunkHandle ca, cb, cd, cc;
+	optr a, b, c, d;
+	word n = 0;
+	ThreadHandle me = ThreadGetInfo(0, TGIT_THREAD_HANDLE);
+
+	vm = VMOpen("KGOBJ.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	if (vm) {
+	    VMSetAttributes(vm, VMA_OBJECT_RELOC, 0);
+	    VMSetExecThread(vm, me);
+	    v1 = VMAllocLMem(vm, LMEM_TYPE_OBJ_BLOCK, sizeof(ObjLMemBlockHeader));
+	    v2 = VMAllocLMem(vm, LMEM_TYPE_OBJ_BLOCK, sizeof(ObjLMemBlockHeader));
+	    m1 = VMVMBlockToMemBlock(vm, v1);
+	    m2 = VMVMBlockToMemBlock(vm, v2);
+	    a = ObjInstantiate(m1, &KGRefClass);
+	    b = ObjInstantiate(m1, &KGRefClass);
+	    d = ObjInstantiate(m1, &KGRefClass);
+	    c = ObjInstantiate(m2, &KGCounterClass);	/* kglib's class */
+	    ca = OptrToChunk(a);
+	    cb = OptrToChunk(b);
+	    cd = OptrToChunk(d);
+	    cc = OptrToChunk(c);
+	    @call c::MSG_KG_COUNTER_ADD(41);
+	    MemLock(m1);
+	    ((KGRefInstance *) LMemDeref(a))->KGRI_ref = b;	/* same block */
+	    ((KGRefInstance *) LMemDeref(b))->KGRI_ref = c;	/* other block */
+	    ((KGRefInstance *) LMemDeref(d))->KGRI_ref = @KGAppCounter;
+	    MemUnlock(m1);
+	    VMDirty(m1);
+	    VMDirty(m2);
+	    if (VMClose(vm, FALSE) == 0) n++;
+	}
+	vm = VMOpen("KGOBJ.VM", 0, VMO_OPEN, 0);
+	if (vm) {
+	    VMSetExecThread(vm, me);
+	    m1 = VMVMBlockToMemBlock(vm, v1);
+	    m2 = VMVMBlockToMemBlock(vm, v2);
+	    a = ConstructOptr(m1, ca);
+	    b = ConstructOptr(m1, cb);
+	    c = ConstructOptr(m2, cc);
+	    d = ConstructOptr(m1, cd);
+	    if (m1 && m2) n++;
+	    if (@call a::MSG_KG_REF_GET() == b) n++;
+	    if (@call b::MSG_KG_REF_GET() == c) n++;
+	    if (@call d::MSG_KG_REF_GET() == @KGAppCounter) n++;
+	    if (@call c::MSG_KG_COUNTER_GET() == 41) n++;
+	    if (ObjIsObjectInClass(a, &KGRefClass) &&
+		ObjIsObjectInClass(c, &KGCounterClass)) n++;
+	    VMClose(vm, FALSE);
+	    FileDelete("KGOBJ.VM");
+	}
+	kgAppState.KGAS_vmChecks = n;
     }
     kgAppState.KGAS_attached++;
 }

@@ -9,10 +9,12 @@
  * is read when it is first locked and stays in memory until the file is
  * closed; VMUpdate and VMClose write what is dirty and then the header.
  *
+ * LMem blocks go to the file in the DOS16 LMem layout and object blocks
+ * unrelocated (vmemBlkManip.c, Port32/ABI.md sections 13b and 13d).
+ *
  * Not yet: backup mode (VMSave, VMRevert, VMSaveAs), sharing between
- * processes and VMGrabExclusive, discarding clean blocks, relocation
- * (VMSetReloc, object blocks), LMem blocks in VM files, the GEOS file
- * header of the file (a native file for now), compression.
+ * processes and VMGrabExclusive, discarding clean blocks, saving to
+ * state, compression.
  */
 #include "vmemInt.h"
 #include "ghal.h"
@@ -451,6 +453,10 @@ VMBlockHandle VMAttach(VMFileHandle file, VMBlockHandle block, MemHandle mh)
     f->VF_mem[i] = mh;
     f->VF_dirty[i] = TRUE;
     HandleModifyOwner(mh, file);
+    if (MemGetInfo(mh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) {
+	((LMemBlockHeader *) MemLock(mh))->LMBH_flags |= LMF_IS_VM;
+	MemUnlock(mh);
+    }
     return block;
 }
 
@@ -470,7 +476,30 @@ MemHandle VMDetach(VMFileHandle file, VMBlockHandle block, GeodeHandle owner)
     f->VF_mem[i] = 0;
     f->VF_dirty[i] = FALSE;
     HandleModifyOwner(mh, owner ? owner : GeodeGetProcessHandle());
+    if (MemGetInfo(mh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) {
+	((LMemBlockHeader *) MemLock(mh))->LMBH_flags &= ~LMF_IS_VM;
+	MemUnlock(mh);
+    }
     return mh;
+}
+
+VMBlockHandle VMAllocLMem(VMFileHandle file, LMemType ltype, word headerSize)
+{
+    return VMAttach(file, 0, MemAllocLMem(ltype, headerSize));
+}
+
+void VMSetReloc(VMFileHandle file,
+		void (*reloc)(VMFileHandle file, VMBlockHandle block,
+			      MemHandle mh, void *data, VMRelocType type))
+{
+    VMFileOf(file)->VF_reloc =
+	(void (*)(VMFileHandle, VMBlockHandle, MemHandle, void *, word))
+	(void (*)(void)) reloc;
+}
+
+void VMSetExecThread(VMFileHandle file, ThreadHandle thread)
+{
+    VMFileOf(file)->VF_execThread = thread;
 }
 
 void VMPreserveBlocksHandle(VMFileHandle file, VMBlockHandle block)
