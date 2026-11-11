@@ -44,6 +44,9 @@ if(Python3_FOUND AND NOT GEOS_HOST STREQUAL "dos32")
     ${CMAKE_CURRENT_BINARY_DIR}/GVTOP/REF.VM)
   set_tests_properties(kernel.vm.format kernel.vm.format16
     PROPERTIES FIXTURES_REQUIRED vmfiles)
+  # GEOS trees between DOS names and long names (Port32/hostfs)
+  add_test(NAME tools.geostree COMMAND ${Python3_EXECUTABLE}
+    ${PROJECT_SOURCE_DIR}/Port32/tools/geostree.py selftest)
 endif()
 add_executable(test_kernel_carray test_kernel_carray.c)
 target_link_libraries(test_kernel_carray PRIVATE geos_kernel)
