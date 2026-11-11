@@ -197,9 +197,14 @@ void *MemDeref(MemHandle mh)
     return MemEntryOf(mh)->HE_addr;
 }
 
+/* the owner of a VM file's block is the owner of the file (MemOwner of
+ * heapHigh.asm) */
 GeodeHandle MemOwner(MemHandle mh)
 {
-    return HandleEntryOf(mh)->HE_owner;
+    Handle owner = HandleEntryOf(mh)->HE_owner;
+    HandleEntry *he = HandleEntryPeek(owner);
+
+    return he && he->HE_type == SIG_VM ? he->HE_owner : owner;
 }
 
 typedef struct {

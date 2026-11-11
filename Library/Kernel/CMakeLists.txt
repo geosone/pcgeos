@@ -34,6 +34,9 @@
 #                      host paths (ghal_fs)
 #   File/fileOpenClose.c, File/fileIO.c, File/fileFile.c <- the same
 #                      asm files: open/close, I/O, by-name operations
+#   VMem/vmemBlkManip.c, vmemHeader.c, vmemHigh.c, vmemChain.c <- the
+#                      same asm files (vmemHigh.c also vmemC.asm): VM
+#                      files in the DOS16 format
 add_library(geos_kernel_objs OBJECT
   Sys/sysError.c
   Heap/heapHandle.c
@@ -65,7 +68,11 @@ add_library(geos_kernel_objs OBJECT
   File/filePath.c
   File/fileOpenClose.c
   File/fileIO.c
-  File/fileFile.c)
+  File/fileFile.c
+  VMem/vmemBlkManip.c
+  VMem/vmemHeader.c
+  VMem/vmemHigh.c
+  VMem/vmemChain.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

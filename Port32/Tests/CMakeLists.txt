@@ -24,6 +24,24 @@ add_test(NAME kernel.lmem COMMAND test_kernel_lmem)
 add_executable(test_kernel_file test_kernel_file.c)
 target_link_libraries(test_kernel_file PRIVATE geos_kernel)
 add_test(NAME kernel.file COMMAND test_kernel_file)
+add_executable(test_kernel_vm test_kernel_vm.c)
+target_link_libraries(test_kernel_vm PRIVATE geos_kernel)
+add_test(NAME kernel.vm COMMAND test_kernel_vm)
+# the files it leaves, checked by an independent reader of the format
+# (not on dos32: the files stay inside the DOS machine)
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND AND NOT GEOS_HOST STREQUAL "dos32")
+  set_tests_properties(kernel.vm PROPERTIES FIXTURES_SETUP vmfiles)
+  add_test(NAME kernel.vm.format COMMAND ${Python3_EXECUTABLE}
+    ${PROJECT_SOURCE_DIR}/Port32/tools/vmcheck.py --strict
+    ${CMAKE_CURRENT_BINARY_DIR}/GVTOP/A.VM
+    ${CMAKE_CURRENT_BINARY_DIR}/GVTOP/B.VM)
+  add_test(NAME kernel.vm.format16 COMMAND ${Python3_EXECUTABLE}
+    ${PROJECT_SOURCE_DIR}/Port32/tools/vmcheck.py
+    ${CMAKE_CURRENT_BINARY_DIR}/GVTOP/REF.VM)
+  set_tests_properties(kernel.vm.format kernel.vm.format16
+    PROPERTIES FIXTURES_REQUIRED vmfiles)
+endif()
 add_executable(test_kernel_carray test_kernel_carray.c)
 target_link_libraries(test_kernel_carray PRIVATE geos_kernel)
 add_test(NAME kernel.carray COMMAND test_kernel_carray)

@@ -102,7 +102,14 @@
     X(OBJ_DUPLICATE_BLOCK_REQUIRES_AN_OBJECT_BLOCK) \
     X(FILE_ERROR_NOT_EXPECTED)	/* noErrorFlag given, yet it failed */ \
     X(FILE_POP_DIR_WITHOUT_PUSH) \
-    X(FILE_PATH_ALLOC_FAILED)
+    X(FILE_PATH_ALLOC_FAILED) \
+    X(VM_BAD_FILE_HANDLE)		/* not a VMFileHandle */ \
+    X(VM_BAD_BLOCK_HANDLE)		/* not a used VM block */ \
+    X(VM_BLOCK_HAS_NO_DATA)		/* VMLock of a block without data */ \
+    X(VM_NOT_A_VM_BLOCK)		/* memory handle not of a VM file */ \
+    X(VM_HEADER_FULL)		/* the block table cannot grow */ \
+    X(VM_ALLOC_FAILED)		/* no memory for a block */ \
+    X(VM_CHAIN_NOT_SUPPORTED)	/* DB item chains */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -200,6 +207,7 @@ Handle HandleAlloc(byte type, GeodeHandle owner);
 void   HandleFree(Handle h);
 /* The entry of a handle in use; fatal ILLEGAL_HANDLE / HANDLE_FREE. */
 HandleEntry *HandleEntryOf(Handle h);
+HandleEntry *HandleEntryPeek(Handle h);	/* NULL if not a live handle */
 /* The entry of a memory handle; fatal also with NOT_MEM_HANDLE. */
 HandleEntry *MemEntryOf(Handle h);
 /* Call fn for every handle in use (in handle order); stops when fn
@@ -631,6 +639,25 @@ typedef struct KFile {
     char	*KF_path;	/* host path */
     FileAttrs	KF_attrs;	/* FileCreate: set when it is closed */
 } KFile;
+
+/* an open VM file; its SIG_VM handle (the VMFileHandle, owned by the
+ * process that opened it) points to it, and owns the memory of its
+ * blocks (VMem/) */
+typedef struct KVMFile {
+    struct KVMFile *VF_next;	/* all open VM files */
+    Handle	VF_handle;	/* the SIG_VM handle */
+    FileHandle	VF_file;
+    byte	*VF_hdr;	/* the VM header as in the file */
+    word	VF_hdrAlloc;	/* bytes allocated for VF_hdr */
+    MemHandle	*VF_mem;	/* memory of each block table entry */
+    byte	*VF_dirty;	/* each entry: written since the update */
+    word	VF_refs;	/* VMOpen of an open file */
+    Boolean	VF_readOnly;
+    Boolean	VF_hdrDirty;
+    char	VF_path[PATH_BUFFER_SIZE];	/* host path */
+} KVMFile;
+
+void VMFreeHandle(Handle vm);	/* vmemHigh.c: close for a freed geode */
 
 void KernelSetError(word error);	/* threadThread.c: ThreadGetError */
 /* filePath.c */

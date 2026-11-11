@@ -86,6 +86,13 @@ static HandleEntry *Lookup(Handle h)
     return Entry(index);
 }
 
+HandleEntry *HandleEntryPeek(Handle h)
+{
+    HandleEntry *he = Lookup(h);
+
+    return he && he->HE_type != HT_FREE ? he : NULL;
+}
+
 void HandleFree(Handle h)
 {
     HandleEntry *he = Lookup(h);

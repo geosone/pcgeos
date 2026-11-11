@@ -963,6 +963,73 @@ Not yet:
 - several directories per standard path (`geos.ini` `paths`);
 - case-insensitive names on POSIX hosts.
 
+## 13b. VM files (`Library/Kernel/VMem`, P4)
+
+**Format: DOS16 on every host (decided 2026-11-11).** VM files use the
+format of 16-bit GEOS, on every host:
+
+- the `VMFileHeader` at position 0 of the file data;
+- the blocks, each rounded up to 16 bytes;
+- the VM header block. Its table holds 12-byte entries from offset
+  0x20, and a `VMBlockHandle` is the offset of its entry.
+
+So block handles inside documents stay valid, and files move freely
+between hosts. The header is kept in memory as it is in the file
+(little endian, `vmemInt.h`). The memory of each block is kept beside it
+(`KVMFile.VF_mem`), because the 16-bit `VMBH_memHandle` cannot hold a
+32-bit handle; that field is 0 in the file. The GEOS file header in
+front of the data (256 bytes on DOS) belongs to the file system driver
+and is not written yet.
+
+- **Block table** (`vmemBlkManip.c`), as in `vmemBlkManip.asm`:
+  - used entries;
+  - assigned free entries: free space, sorted by position, with
+    neighbours merged;
+  - unassigned entries, cleared;
+  - the table grows by 4 entries when needed.
+  
+  A block is written in place if it still fits; any rest becomes free
+  space. Otherwise it goes to the first free space that is large
+  enough, then the free space at the end of the file, then the end of
+  the file.
+- **Header** (`vmemHeader.c`): the header is the block of the first
+  entry. The `VMFileHeader` repeats that entry (signature, size,
+  position). On open, the used size is computed again and the old
+  memory handles are cleared.
+- **API** (`vmemHigh.c`, `vmemChain.c`):
+  - **Handles.** A `VMFileHandle` is a `SIG_VM` handle owned by the
+    opening process; it owns the memory of its blocks. `MemOwner` of a
+    block returns the file's owner, as in `heapHigh.asm`. Opening an
+    open file returns the same handle again.
+  - **Blocks** are read when first locked. `VMUpdate`/`VMClose` write
+    the dirty blocks, then the header.
+  - Implemented: `VMOpen` (open, create, create-only, truncate,
+    temporary file, read-only, with the `VM_OPEN_OK_*`/`VM_CREATE_OK`
+    status), `VMClose`, `VMUpdate`, `VMAlloc`, `VMFree`, `VMLock`,
+    `VMUnlock`, `VMDirty`, `VMFind`, `VMInfo`, `VMModifyUserID`, map
+    block, attributes, `VMGetDirtyState`, `VMMemBlockToVMBlock`,
+    `VMVMBlockToMemBlock`, `VMAttach`, `VMDetach` (the file keeps the
+    contents), `VMPreserveBlocksHandle`, `VMCopyVMBlock`, and the
+    chains and trees of blocks (copy, free, compare, info).
+  - VM files a geode still has open are closed when it is freed.
+- **Checks:**
+  - `Port32/tools/vmcheck.py` reads the format independently. It finds
+    all 823 `.sym` files of the 16-bit tools sound.
+  - ctest `kernel.vm.format` runs it in strict mode on the files the
+    kernel writes.
+  - `kernel.vm` reads a tools-written file (`vm_reference.h`) on every
+    host, DOS included, and changes it.
+
+Not yet:
+
+- backup mode (`VMSave`, `VMRevert`, `VMSaveAs`);
+- sharing between processes, `VMGrabExclusive`;
+- discarding clean blocks;
+- relocation (`VMSetReloc`, object blocks), and with it saving to state;
+- LMem blocks (`VMAllocLMem`) with converted headers;
+- DB items, huge arrays, compression;
+- the GEOS file header.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).
