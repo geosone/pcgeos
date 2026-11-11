@@ -13,8 +13,9 @@
  *     kernel's export table (kernelExports.c, Port32/tools/kexports.py)
  *     and from the exports of the libraries;
  *   - allocates the core block, builds the LMem resources made by goc
- *     (LMemCreateResourceBlock), registers the resource handles and
- *     relocates the object blocks;
+ *     (LMemCreateResourceBlock), registers the resource handles,
+ *     relocates the optrs in chunks that are not objects and the object
+ *     blocks;
  *   - calls the library entry with LCT_NEW_CLIENT for each library and,
  *     for a library, its own with LCT_ATTACH;
  *   - for a process, creates the event queue, queues MSG_META_ATTACH
@@ -26,8 +27,7 @@
  * Not yet: geode files (the images come from GeodeRegisterImage), drivers
  * (DR_INIT; a driver loads like a library without an entry), "noload"
  * libraries, resources loaded on demand (RESF_DISCARDED: all are built
- * at once), heapspace, the UI thread, and the relocation of optrs in
- * non-object chunks (Port32/ABI.md section 14.1).
+ * at once), heapspace and the UI thread.
  */
 #include "kernelC.h"
 #include "geosmod.h"
@@ -289,6 +289,12 @@ static Boolean CreateResources(GeodeHandle gh, const GeosModuleInfo *info)
 	    return FALSE;
     }
     GeodeSetResourceHandles(gh, handles, info->GM_resourceCount);
+    /* optrs in chunks that are not objects; objects are relocated when
+     * their exec thread is known */
+    for (r = 2; r < info->GM_resourceCount; r++)
+	if (handles[r])
+	    ObjRelocateResourceChunks(handles[r],
+				      info->GM_resources[r].GMR_resource);
     return TRUE;
 }
 

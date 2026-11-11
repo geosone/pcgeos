@@ -272,6 +272,8 @@ extern void GenerateMethodDef(Method *meth);
 #define GCC_TAIL_SIZE 32
 extern char gccOutTail[];
 extern void GccTrackOutput(const char *s, int n);
+extern void GccCaptureBegin(void);
+extern char *GccCaptureEnd(void);
 
 /* COM_GCC: the C structure of the output (goc.c) */
 #define GCC_LEX_DEPTH 64

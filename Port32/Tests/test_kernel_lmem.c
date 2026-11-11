@@ -154,10 +154,10 @@ static TestObj resObj = {&resHeader, 0x1234,
 static char resPart1[] = "head:";
 static char resPart2[] = "tail";
 static const GocChunk resChunks[] = {
-    {resFlags, sizeof(resFlags), 0, 0},
-    {&resObj, sizeof(resObj), 0, 0},
-    {resPart1, 5, resPart2, sizeof(resPart2)},
-    {0, 0, 0, 0},
+    {resFlags, sizeof(resFlags), 0, 0, 0, 0},
+    {&resObj, sizeof(resObj), 0, 0, 0, 0},
+    {resPart1, 5, resPart2, sizeof(resPart2), 0, 0},
+    {0, 0, 0, 0, 0, 0},
 };
 static const GocResource res = {3, 4, &resHeader, sizeof(resHeader),
 				resChunks};

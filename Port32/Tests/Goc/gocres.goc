@@ -186,6 +186,25 @@ GocTestCheck(void)
 	  moniker->GC_size2 == sizeof("Goc Test") &&
 	  !strcmp((const char *) moniker->GC_data2, "Goc Test"),
 	  "text moniker in two parts");
+    /* optrs in chunks that are not objects: shadows with handle 0 */
+    {
+	const GocChunk *list = TestChunkOf(app, _GI_visMoniker_GocTestApp);
+	const VisMonikerListEntry *d, *sh;
+
+	Check(text->GC_shadow == NULL && primary->GC_shadow == NULL &&
+	      moniker->GC_shadow == NULL, "no shadow without optrs");
+	Check(list && list->GC_shadow != NULL && list->GC_shadow2 == NULL,
+	      "moniker list shadow");
+	if (list && list->GC_shadow) {
+	    d = list->GC_data;
+	    sh = list->GC_shadow;
+	    Check(d->VMLE_moniker ==
+		  GOCR_UNRELOC_OPTR(GOCR_RES_APPRESOURCE, GocTestTextMoniker) &&
+		  sh->VMLE_moniker ==
+		  ConstructOptr(0, GocTestTextMoniker) &&
+		  d->VMLE_type == sh->VMLE_type, "moniker list shadow data");
+	}
+    }
     Check(gocTestChunks[0] == GocTestTrigger &&
 	  gocTestChunks[1] == GocTestGlyph &&
 	  gocTestChunks[2] == GocTestText, "OptrToChunk(@x) table");

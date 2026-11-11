@@ -2114,8 +2114,8 @@ void OutputByteArray(char *bytes, int length)
  *	tony	3/91		Initial Revision
  *
  ***********************************************************************/
-void
-OutputChunk(Symbol *chunk)
+static void
+OutputChunkLow(Symbol *chunk)
 {
     if(localize){
 	Localize_AddLocalization(CHUNK_LOC(chunk));
@@ -2655,6 +2655,156 @@ OutputChunk(Symbol *chunk)
     Output("\n");
 }
 
+/*
+ * COM_GCC: optrs in chunks that are not objects (moniker lists, GCN list
+ * elements, chunk data of any C type).  Glue relocated them through the
+ * geode's relocation table; here the loader has to find them.  goc does
+ * not know the C layout of the data, the compiler does: a chunk whose
+ * data holds unrelocated optrs is written a second time, as its shadow,
+ * with GOCR_SHADOW_MASK 0, so the handle half of every unrelocated optr
+ * is 0 there and the rest is the same.  The loader compares data and
+ * shadow (GocChunk GC_shadow, GC_shadow2; Port32/ABI.md section 4).
+ */
+typedef struct GccShadowName {
+    struct GccShadowName *next;
+    char name[1];
+} GccShadowName;
+static GccShadowName *gccShadows;
+
+static Boolean
+GccHasShadow(const char *name)
+{
+    GccShadowName *e;
+
+    for (e = gccShadows; e != NULL; e = e->next) {
+	if (!strcmp(e->name, name)) {
+	    return TRUE;
+	}
+    }
+    return FALSE;
+}
+
+/* the second C object of a chunk (see OutputChunkPartsGcc), or NULL */
+static char *
+GccChunkSecondName(Symbol *chunk, char *buf)
+{
+    char *prefix = NULL;
+    char *suffix = "";
+
+    if (chunk->flags & SYM_IS_EMPTY_CHUNK) {
+	return NULL;
+    }
+    switch (chunk->type) {
+	case CHUNK_SYM:
+	    if (chunk->flags & SYM_IS_CHUNK_ARRAY) {
+		prefix = "_carray_";
+	    }
+	    break;
+	case GCN_LIST_SYM:
+	    if (chunk->data.symGCNList.firstItem != NullSymbolListEntry) {
+		prefix = "_e_";
+	    }
+	    break;
+	case GCN_LIST_OF_LISTS_SYM:
+	    if (chunk->data.symGCNListOfLists.firstList != NullSymbol) {
+		prefix = "_e_";
+	    }
+	    break;
+	case VIS_MONIKER_CHUNK_SYM:
+	    if (!(chunk->flags & (SYM_LIST_MONIKER | SYM_GSTRING_MONIKER))) {
+		prefix = "_";
+		suffix = "_text";
+	    }
+	    break;
+	default:
+	    break;
+    }
+    if (prefix == NULL) {
+	return NULL;
+    }
+    sprintf(buf, "%s%s%s", prefix, chunk->name, suffix);
+    return buf;
+}
+
+/* the text again, with the identifiers from1/from2 renamed (strings and
+ * character constants are copied as they are) */
+static void
+GccOutputRenamed(const char *t, const char *from1, const char *to1,
+		 const char *from2, const char *to2)
+{
+    while (*t != '\0') {
+	int n = GccIdentLen(t);
+
+	if (n > 0) {
+	    if (from1 && (int) strlen(from1) == n && !strncmp(t, from1, n)) {
+		Output("%s", to1);
+	    } else if (from2 && (int) strlen(from2) == n &&
+		       !strncmp(t, from2, n)) {
+		Output("%s", to2);
+	    } else {
+		Output("%.*s", n, t);
+	    }
+	    t += n;
+	} else if (isdigit((unsigned char) *t)) {
+	    for (n = 0; isalnum((unsigned char) t[n]) || t[n] == '_'; n++)
+		;
+	    Output("%.*s", n, t);
+	    t += n;
+	} else if (*t == '"' || *t == '\'') {
+	    char q = *t;
+	    for (n = 1; t[n] != '\0' && t[n] != q; n++) {
+		if (t[n] == '\\' && t[n + 1] != '\0') {
+		    n++;
+		}
+	    }
+	    if (t[n] == q) {
+		n++;
+	    }
+	    Output("%.*s", n, t);
+	    t += n;
+	} else {
+	    OutputChar(*t++);
+	}
+    }
+}
+
+void
+OutputChunk(Symbol *chunk)
+{
+    char *text;
+    char second[512], data[512], sh1[512], sh2[512];
+    char *sec;
+
+    if (compiler != COM_GCC || chunk->type == OBJECT_SYM ||
+	(chunk->flags & SYM_IS_EMPTY_CHUNK))
+    {
+	OutputChunkLow(chunk);
+	return;
+    }
+    GccCaptureBegin();
+    OutputChunkLow(chunk);
+    text = GccCaptureEnd();
+    if (strstr(text, "SOPTR(") != NULL ||
+	strstr(text, "GOCR_PROCESS_OPTR") != NULL)
+    {
+	GccShadowName *e = (GccShadowName *) malloc(sizeof(*e) +
+						    strlen(chunk->name));
+
+	sec = GccChunkSecondName(chunk, second);
+	sprintf(data, "_%s", chunk->name);
+	sprintf(sh1, "__goc_sh_%s", chunk->name);
+	sprintf(sh2, "__goc_sh2_%s", chunk->name);
+	Output("\n#undef GOCR_SHADOW_MASK\n#define GOCR_SHADOW_MASK 0u\n");
+	GccOutputRenamed(text, data, sh1, sec, sh2);
+	Output("\n#undef GOCR_SHADOW_MASK\n"
+	       "#define GOCR_SHADOW_MASK GOCR_SHADOW_MASK_ALL\n");
+	strcpy(e->name, chunk->name);
+	e->next = gccShadows;
+	gccShadows = e;
+    }
+    free(text);
+}
+
 /***********************************************************************
  *
  * FUNCTION:	OutputMethodAntiWarningCode
@@ -2831,51 +2981,32 @@ OutputChunkConstantGcc(Symbol *chunk)
     }
 }
 
-/* the C object(s) holding the data of a chunk: {data, size, data2, size2} */
+/* the C object(s) holding the data of a chunk and their shadows:
+ * {data, size, data2, size2, shadow, shadow2} */
 static void
 OutputChunkPartsGcc(Symbol *chunk)
 {
-    char *second = NULL;
-    char *prefix = "";
-    char *suffix = "";
+    char buf[512];
+    char *second;
 
     if (chunk->flags & SYM_IS_EMPTY_CHUNK) {
-	Output("{0, 0, 0, 0}");
+	Output("{0, 0, 0, 0, 0, 0}");
 	return;
     }
-    switch (chunk->type) {
-	case CHUNK_SYM:
-	    if (chunk->flags & SYM_IS_CHUNK_ARRAY) {
-		prefix = "_carray_";
-		second = chunk->name;
-	    }
-	    break;
-	case GCN_LIST_SYM:
-	    if (chunk->data.symGCNList.firstItem != NullSymbolListEntry) {
-		prefix = "_e_";
-		second = chunk->name;
-	    }
-	    break;
-	case GCN_LIST_OF_LISTS_SYM:
-	    if (chunk->data.symGCNListOfLists.firstList != NullSymbol) {
-		prefix = "_e_";
-		second = chunk->name;
-	    }
-	    break;
-	case VIS_MONIKER_CHUNK_SYM:
-	    if (!(chunk->flags & (SYM_LIST_MONIKER | SYM_GSTRING_MONIKER))) {
-		prefix = "_";
-		suffix = "_text";
-		second = chunk->name;
-	    }
-	    break;
-	default:
-	    break;
-    }
+    second = GccChunkSecondName(chunk, buf);
     Output("{&_%s, sizeof(_%s), ", chunk->name, chunk->name);
     if (second != NULL) {
-	Output("%s%s%s, sizeof(%s%s%s)}", prefix, second, suffix,
-	       prefix, second, suffix);
+	Output("%s, sizeof(%s), ", second, second);
+    } else {
+	Output("0, 0, ");
+    }
+    if (GccHasShadow(chunk->name)) {
+	Output("&__goc_sh_%s, ", chunk->name);
+	if (second != NULL) {
+	    Output("__goc_sh2_%s}", chunk->name);
+	} else {
+	    Output("0}");
+	}
     } else {
 	Output("0, 0}");
     }
@@ -2927,7 +3058,7 @@ OutputResourceTablesGcc(Symbol *resource, int flagsChunk,
     /* chunk table and resource descriptor */
     Output("const GocChunk __goc_chunks_%s[] = {", resource->name);
     if (flagsChunk) {
-	Output("{__%s_Flags, sizeof(__%s_Flags), 0, 0}, ",
+	Output("{__%s_Flags, sizeof(__%s_Flags), 0, 0, 0, 0}, ",
 	       resource->name, resource->name);
     }
     for (chunk = resource->data.symResource.firstChunk; chunk != NullSymbol;

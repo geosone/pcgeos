@@ -91,6 +91,25 @@ to the resource handle. Without segments, `goc` does that work itself:
   header and its elements, or a moniker and its text. Glue relied on the
   segment order to place them next to each other. Now the loader copies
   them one after the other into the LMem block.
+- **optrs in chunks that are not objects** (moniker lists, GCN list
+  elements, chunk data of any C type). Glue relocated these through the
+  geode's relocation table. goc does not know the C layout of the data,
+  but the compiler does. So goc writes such a chunk a second time, as
+  its **shadow** (`__goc_sh_X`, `__goc_sh2_X` for the second object),
+  with the same text but with `GOCR_SHADOW_MASK` defined as 0, so that
+  the handle half of every unrelocated optr is 0 there.
+  - `GocChunk` points to the shadows (`GC_shadow`, `GC_shadow2`).
+  - Where data and shadow differ lies a handle to relocate: a run of
+    differing bytes ends with the top byte of the handle, which holds
+    `GOCR_UNRELOCATED`.
+  - The loader relocates these after it has built the resources
+    (`ObjRelocateResourceChunks`).
+  - Only chunks whose data holds `GOCR_*SOPTR` get a shadow. goc
+    captures the output of the chunk (`GccCaptureBegin`/`End`) and
+    writes it again with the defined names renamed.
+  - Checks: `goc.resources` checks the shadow of a moniker list and that
+    chunks without optrs have none. `kernel.geode` checks the
+    relocation (section 7.1).
 - **`ClassStruct` points to its tables** (`Class_messages`,
   `Class_methods`, `Class_htypes`, `Class_relocMethod`). The tables no
   longer have to follow the structure in a class segment, and the reloc
@@ -299,6 +318,8 @@ from their modules:
   - Each LMem resource made by goc becomes a block owned by the geode
     (`LMemCreateResourceBlock`), with heap flags from its `RESF_*`.
   - The handles go to `GM_resourceHandles`; entry 0 is the core block.
+  - The optrs in chunks that are not objects are relocated through
+    their shadows (section 4).
   - Object blocks are relocated once their exec thread is known.
   - Code and data resources are part of the module and have no handle.
 - **Library entries.** `LCT_NEW_CLIENT` goes to each library of a new
@@ -348,6 +369,9 @@ resource. The test checks:
 - `MSG_META_ATTACH` on the process thread: it calls into the library
   and sends messages to the relocated object, and `GeodeGetAppObject`
   works;
+- the optrs in an LMem data resource (an optr chunk, a structure with
+  an optr behind a word, a chunk array of optrs) and in a static GCN
+  list are relocated (and the test fails without the shadows);
 - `MSG_META_DETACH`: the process frees itself, then `GeodeFreeLibrary`
   frees the library;
 - at the end, not a single handle is left.
@@ -849,11 +873,9 @@ ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
 Not yet:
 
 - Duplicating resources (`objectDup.asm`) and saving to state
-  (`objectState.asm`, with VMem).
-- **optrs in chunks that are not objects** (moniker lists, GCN list
-  elements, chunk data). Glue relocated them through the geode's
-  relocation table; under `goc -cg` they need a relocation list per
-  resource (section 14).
+  (`objectState.asm`, with VMem). optrs in chunks that are not objects
+  are relocated when a resource is loaded (shadows, section 4). They are
+  not yet unrelocated.
 
 ## 14. Open
 
@@ -863,10 +885,7 @@ Not yet:
      `.ldf`; `GML_proto*` is 0.0, "any", for now);
    - reading the library list without a first load with dummy imports
      (a note or section the loader can read before it resolves
-     imports);
-   - the optrs in non-object chunks of a resource, which `goc -cg` has
-     to list for the loader (section 13). goc's static GCN lists
-     (`gcnList(...) = ...`) are such chunks.
+     imports).
 2. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.

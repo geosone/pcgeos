@@ -4,7 +4,9 @@
  * MSG_META_ATTACH (queued by GeodeLoad) runs on the process thread: it
  * calls a routine of kglib, sends messages to an object of kglib's class
  * in its own object resource, and records what it saw in kgAppState,
- * which the test reads through ProcGetLibraryEntry.
+ * which the test reads through ProcGetLibraryEntry.  It also reads the
+ * optrs goc put into chunks that are not objects (a data resource and a
+ * static GCN list), which the loader relocated through their shadows.
  */
 @include <stdapp.goh>
 @include "kglib.goh"
@@ -17,7 +19,16 @@ typedef struct {
     GeodeHandle	KGAS_process;
     optr	KGAS_appObj;
     ThreadHandle KGAS_thread;
+    word	KGAS_chunkRefs;		/* optrs in chunks that were right */
+    Boolean	KGAS_gcnFound;
 } KGAppState;
+
+/* a structure with an optr behind a word (padding before it) */
+typedef struct {
+    word	KGP_tag;
+    optr	KGP_obj;
+    optr	KGP_none;
+} KGPair;
 
 KGAppState kgAppState;
 
@@ -29,8 +40,17 @@ KGAppState kgAppState;
 @start KGObjects;
 @object KGCounterClass KGAppCounter = {
     KGCI_count = 5;
+    gcnList(MANUFACTURER_ID_GEOWORKS, 7) = KGAppOther;
+}
+@object KGCounterClass KGAppOther = {
 }
 @end KGObjects;
+
+@start KGData;
+@chunk optr KGRef = @KGAppCounter;
+@chunk KGPair KGPairData = { 0x1234, @KGAppOther, 0 };
+@chunkArray optr KGRefs = { @KGAppOther, @KGAppCounter, @KGRef };
+@end KGData;
 
 @method KGAppProcessClass, MSG_META_ATTACH_PROCESS
 {
@@ -42,5 +62,24 @@ KGAppState kgAppState;
     kgAppState.KGAS_process = GeodeGetProcessHandle();
     kgAppState.KGAS_appObj = GeodeGetAppObject(0);
     kgAppState.KGAS_thread = ThreadGetInfo(0, TGIT_THREAD_HANDLE);
+    {
+	optr *o;
+	KGPair *p;
+	word n = 0;
+
+	MemLock(OptrToHandle(@KGRef));
+	if (*(optr *) LMemDeref(@KGRef) == @KGAppCounter) n++;
+	p = LMemDeref(@KGPairData);
+	if (p->KGP_tag == 0x1234 && p->KGP_obj == @KGAppOther &&
+	    p->KGP_none == 0) n++;
+	o = ChunkArrayElementToPtr(@KGRefs, 0, NULL);
+	if (o[0] == @KGAppOther && o[1] == @KGAppCounter && o[2] == @KGRef)
+	    n++;
+	MemUnlock(OptrToHandle(@KGRef));
+	kgAppState.KGAS_chunkRefs = n;
+    }
+    kgAppState.KGAS_gcnFound =
+	@call KGAppCounter::MSG_META_GCN_LIST_FIND_ITEM(@KGAppOther, 7,
+							MANUFACTURER_ID_GEOWORKS);
     kgAppState.KGAS_attached++;
 }

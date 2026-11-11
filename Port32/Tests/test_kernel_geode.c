@@ -13,7 +13,9 @@
  *   - GeodeUseLibrary: LCT_ATTACH and LCT_NEW_CLIENT, GeodeGetInfo,
  *     GeodeFind, ProcGetLibraryEntry;
  *   - GeodeLoad of the process: its imports from the kernel and from
- *     kglib, the object resource built and relocated, MSG_META_ATTACH
+ *     kglib, the object resource built and relocated, optrs in chunks
+ *     that are not objects (an optr, a structure, a chunk array, a
+ *     static GCN list) relocated, MSG_META_ATTACH
  *     with the appInfo words on the process thread, GeodeGetAppObject;
  *   - MSG_META_DETACH: the thread exits and frees the geode, which
  *     drops its reference to kglib (LCT_CLIENT_EXIT); GeodeFreeLibrary
@@ -41,6 +43,8 @@ typedef struct {
     GeodeHandle	KGAS_process;
     optr	KGAS_appObj;
     ThreadHandle KGAS_thread;
+    word	KGAS_chunkRefs;
+    Boolean	KGAS_gcnFound;
 } KGAppState;
 
 #define GEODE	0x2340
@@ -154,6 +158,9 @@ int main(void)
     Check(OptrToHandle(st->KGAS_appObj) != 0 &&
 	  !GOCR_IS_UNRELOCATED(st->KGAS_appObj) &&
 	  st->KGAS_appObj == GeodeGetAppObject(app), "GeodeGetAppObject");
+    Check(st->KGAS_chunkRefs == 3,
+	  "optrs in chunk data relocated (optr, structure, chunk array)");
+    Check(st->KGAS_gcnFound, "static GCN list relocated");
     Check(MemOwner(OptrToHandle(st->KGAS_appObj)) == app,
 	  "the process owns its resource");
 

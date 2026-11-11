@@ -387,6 +387,9 @@ typedef Boolean ObjRelocMethod(void *pself, optr oself, word message,
  * does the reverse.  The handles come from the resources of the block's
  * owner (GeodeResourceHandle). */
 void ObjRelocateObjBlock(MemHandle mh, word vmRelocType);
+/* the optrs in the non-object chunks of a resource block built from `r'
+ * (GocChunk shadows) */
+void ObjRelocateResourceChunks(MemHandle mh, const GocResource *r);
 void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType);
 
 /* ---------------------------------------------------------------------

@@ -79,7 +79,15 @@ typedef word		VardataKey;
  */
 #define GOCR_UNRELOCATED	0x80000000u
 #define GOCR_PROCESS_RES		0x7fff
-#define GOCR_UNRELOC_OPTR(res, ch)	((((optr) (GOCR_UNRELOCATED | (dword) (res))) << 32) \
+/* goc -cg writes a chunk that holds unrelocated optrs a second time, as
+ * its shadow, with GOCR_SHADOW_MASK 0: the loader finds the optrs where
+ * the two differ (GocChunk GC_shadow, Port32/ABI.md section 4) */
+#define GOCR_SHADOW_MASK_ALL	0xffffffffu
+#ifndef GOCR_SHADOW_MASK
+#define GOCR_SHADOW_MASK	GOCR_SHADOW_MASK_ALL
+#endif
+#define GOCR_UNRELOC_OPTR(res, ch)	((((optr) (GOCR_SHADOW_MASK & \
+					   (GOCR_UNRELOCATED | (dword) (res)))) << 32) \
 				 | (optr) (ChunkHandle) (ch))
 #define GOCR_SOPTR(chunk)	GOCR_UNRELOC_OPTR(__goc_rs_##chunk, __goc_ch_##chunk)
 #define GOCR_PROCESS_OPTR	GOCR_UNRELOC_OPTR(GOCR_PROCESS_RES, 0)
@@ -148,13 +156,18 @@ GocrResolveWith(optr op, const Handle *handles)
 /*
  * What the loader needs to build a resource: the block header and, per
  * chunk, up to two C objects that are put one after the other (header and
- * elements of a chunk array or GCN list, a moniker and its text).
+ * elements of a chunk array or GCN list, a moniker and its text).  A
+ * chunk that is not an object and holds unrelocated optrs has shadows of
+ * both, the same but with 0 in the handle half of those optrs; the loader
+ * relocates the handles where data and shadow differ.
  */
 typedef struct {
     const void	*GC_data;
     dword	GC_size;
     const void	*GC_data2;
     dword	GC_size2;
+    const void	*GC_shadow;	/* of GC_data, or NULL */
+    const void	*GC_shadow2;	/* of GC_data2, or NULL */
 } GocChunk;
 
 typedef struct {

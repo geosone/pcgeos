@@ -545,11 +545,49 @@ GccInStaticInit(const GccLexState *st)
     return st->sawEquals && (st->blocks == 0 || st->sawStatic);
 }
 
+/*
+ * COM_GCC: the output can be captured (GccCaptureBegin/End), so a chunk
+ * whose data holds optrs can be written a second time as its shadow
+ * (output.c, OutputChunk).
+ */
+static char *gccCapBuf;
+static int gccCapLen, gccCapSize, gccCapturing;
+
+void
+GccCaptureBegin(void)
+{
+    gccCapturing = 1;
+    gccCapLen = 0;
+}
+
+/* the text written since GccCaptureBegin (the caller frees it) */
+char *
+GccCaptureEnd(void)
+{
+    char *t = (char *) malloc(gccCapLen + 1);
+
+    memcpy(t, gccCapBuf ? gccCapBuf : "", gccCapLen);
+    t[gccCapLen] = '\0';
+    gccCapturing = 0;
+    return t;
+}
+
 void
 GccTrackOutput(const char *s, int n)
 {
     int have = strlen(gccOutTail);
     int i;
+
+    if (gccCapturing) {
+	if (gccCapLen + n > gccCapSize) {
+	    gccCapSize = (gccCapLen + n) * 2 + 1024;
+	    /* Watcom's realloc(NULL, n) fails */
+	    gccCapBuf = (char *) (gccCapBuf ? realloc(gccCapBuf, gccCapSize)
+					    : malloc(gccCapSize));
+	}
+	memcpy(gccCapBuf + gccCapLen, s, n);
+	gccCapLen += n;
+    }
 
     for (i = 0; i < n; i++) {
 	GccLexChar(&gccLex, s[i]);

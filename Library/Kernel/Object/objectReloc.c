@@ -72,6 +72,7 @@ static Boolean DoReloc(ObjRelocationType type, MemHandle block, void *src,
 	return FALSE;
     default:
 	KernelFatal(BAD_RELOCATION_TYPE);
+	return TRUE;
     }
 }
 
@@ -188,4 +189,53 @@ void ObjRelocateObjBlock(MemHandle mh, word vmRelocType)
 void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType)
 {
     RelocBlock(mh, (word) (vmRelocType | FRAME_UNRELOC), CANNOT_UNRELOCATE);
+}
+
+/*
+ * optrs in the chunks of a resource that are not objects (moniker lists,
+ * GCN list elements, chunk data): goc -cg gave such a chunk a shadow, the
+ * same data with 0 in the handle half of each unrelocated optr
+ * (GocChunk, geosport.h).  Where data and shadow differ lies such a
+ * handle; a run of differing bytes ends with its top byte (it holds
+ * GOCR_UNRELOCATED), so the handle starts 3 bytes before.  The block
+ * still holds the data of the resource.
+ */
+static void RelocChunkPart(MemHandle mh, byte *dst, const byte *data,
+			   const byte *shadow, dword size)
+{
+    dword j;
+    Handle h;
+
+    if (!shadow)
+	return;
+    for (j = 0; j < size; j++) {
+	if (data[j] == shadow[j] ||
+	    (j + 1 < size && data[j + 1] != shadow[j + 1]))
+	    continue;
+	if (j < 3)
+	    KernelFatal(CANNOT_RELOCATE);
+	memcpy(&h, dst + j - 3, sizeof(h));
+	if (DoHandle(mh, &h, &h, 0))
+	    KernelFatal(CANNOT_RELOCATE);
+	memcpy(dst + j - 3, &h, sizeof(h));
+    }
+}
+
+void ObjRelocateResourceChunks(MemHandle mh, const GocResource *r)
+{
+    byte *b = MemLock(mh);
+    word table = ((LMemBlockHeader *) b)->LMBH_offset;
+    word i;
+
+    for (i = 0; i < r->GR_chunks; i++) {
+	const GocChunk *c = &r->GR_chunk[i];
+	word e = *(word *) (b + table + 2 * i);
+
+	if ((!c->GC_shadow && !c->GC_shadow2) || e == 0 || e == 0xffff)
+	    continue;
+	RelocChunkPart(mh, b + e, c->GC_data, c->GC_shadow, c->GC_size);
+	RelocChunkPart(mh, b + e + c->GC_size, c->GC_data2, c->GC_shadow2,
+		       c->GC_size2);
+    }
+    MemUnlock(mh);
 }

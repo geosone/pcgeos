@@ -14,4 +14,5 @@ appobj KGAppCounter
 library geos
 library kglib
 resource KGObjects object
+resource KGData lmem
 export kgAppState
