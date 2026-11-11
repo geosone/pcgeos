@@ -17,6 +17,8 @@
 #include <lmem.h>
 #include <chunkarr.h>
 #include <geode.h>
+#include <library.h>
+#include <resource.h>
 #include <timer.h>
 #include <object.h>
 #include <geosport.h>
@@ -91,7 +93,10 @@
     X(GCN_LIST_ERROR) \
     X(BAD_DETACH_MSG) \
     X(OBJ_SHUTDOWN_OR_DETACH_WHILE_OTHER_STILL_ACTIVE) \
-    X(OBJ_DETACH_NOT_STARTED)
+    X(OBJ_DETACH_NOT_STARTED) \
+    X(GEODE_NOT_LOADED)		/* not the handle of a loaded geode */ \
+    X(GEODE_FREE_LIBRARY_NOT_LIBRARY) \
+    X(DIVIDE_BY_ZERO)		/* raise(SIGFPE) of libgcc */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -222,6 +227,7 @@ typedef struct {
     ClassStruct	*T_class;	/* ThreadAttachToQueue: for messages to
 				 * the thread, its queue or its process */
     MemHandle	T_dynamicObjBlock;	/* ObjInstantiateForThread */
+    struct DispatchRec *T_dispatching;	/* CMessageDispatchP */
 } KThread;
 
 /* the running thread (0 before KernelThreadInit) */
@@ -320,6 +326,7 @@ extern dword kernelTimerEventsDropped;
 #define KMSG_META_GCN_LIST_SEND			39
 #define KMSG_META_GCN_LIST_DESTROY		40
 #define KMSG_META_GCN_LIST_FIND_ITEM		60
+#define KMSG_META_ATTACH			5
 #define KMSG_META_DETACH			6
 #define KMSG_META_DETACH_COMPLETE		7
 #define KMSG_META_APP_SHUTDOWN			10
@@ -347,6 +354,9 @@ const void *KernelEventParams(EventHandle event, dword *size);
 void KernelDeliver(optr dest, Message msg, const void *params, void *reply);
 /* the thread a queue's messages go to (ThreadAttachToQueue) */
 void KQueueAttach(QueueHandle qh, ThreadHandle th);
+/* a thread that ends in a handler: free the events it is dispatching and
+ * wake their callers (ThreadDestroy) */
+void KernelDispatchAbandon(KThread *t);
 void KQueueDetach(QueueHandle qh);
 
 /* ---------------------------------------------------------------------
@@ -514,11 +524,12 @@ GocMethodThunk MetaAck, MetaDetach, MetaDetachComplete, MetaAppShutdown,
 	       MetaShutdownComplete, MetaQuit, MetaQuitAck, MetaFinishQuit;
 
 /* ---------------------------------------------------------------------
- * Geode resources (Geodes/geodesResource.c).  Until GeodeLoad exists,
- * whoever builds a geode's resources registers their handles here.
+ * Geode resources (Geodes/geodesResource.c).  GeodeLoad registers the
+ * handles of a geode it loads; tests that build resources without a
+ * geode module register theirs.
  * ------------------------------------------------------------------- */
 /* handles[0] is the geode's process (core block), as in
- * __goc_resource_handles; the table must stay valid */
+ * __goc_resource_handles; the table must stay valid (NULL: forget) */
 void GeodeSetResourceHandles(GeodeHandle gh, const Handle *handles,
 			     word count);
 /* the handle of resource `res' of a geode (GOCR_PROCESS_RES: the
@@ -526,6 +537,77 @@ void GeodeSetResourceHandles(GeodeHandle gh, const Handle *handles,
 Handle GeodeResourceHandle(GeodeHandle gh, word res);
 /* the resource number of `h' in a geode, or -1 */
 sdword GeodeHandleToResource(GeodeHandle gh, Handle h);
+
+/* ---------------------------------------------------------------------
+ * Geodes (Geodes/geodesLoad.c, geodesLibrary.c, geodesAccess.c; after
+ * geodesLoad.asm, geodesLibrary.asm, geodesAccess.asm).  Port32/ABI.md
+ * section 7.
+ *
+ * The core block of a geode is a fixed block that owns itself; its
+ * handle is the geode handle, and its HM_otherInfo the first thread of
+ * a process.  The GEOS data of the module (__geos_module) stays in the
+ * module; the core block holds what the kernel keeps per geode.
+ * ------------------------------------------------------------------- */
+struct ghal_module;
+
+/* no error (GeodeLoadError has no such value; GeodeLoad sets *err only
+ * meaningfully when it fails) */
+#define GLE_OK	GLE_LAST_GEODE_LOAD_ERROR
+
+typedef Boolean GeodeLibraryEntry(LibraryCallType ty, GeodeHandle client);
+
+typedef struct {
+    GeodeHandle		GC_handle;
+    GeodeHandle		GC_next;	/* the list of loaded geodes */
+    struct ghal_module	*GC_module;
+    const void		*GC_info;	/* the GeosModuleInfo (geosmod.h) */
+    char		GC_name[GEODE_NAME_SIZE + GEODE_NAME_EXT_SIZE];
+    GeodeAttrs		GC_attrs;	/* with GA_*_INITIALIZED */
+    word		GC_refCount;
+    word		GC_threadCount;
+    word		GC_libraryCount;
+    GeodeHandle		GC_libraries[1];	/* GC_libraryCount of them
+						 * (0: not loaded, noload) */
+} GeodeCore;
+
+/* The core block of a loaded geode, or NULL. */
+GeodeCore *GeodeCoreOf(GeodeHandle gh);
+/* Without a file system yet, GeodeLoad takes geodes from images the
+ * program registers by name (the file name; for a library also its
+ * permanent name).  The image must stay valid. */
+void GeodeRegisterImage(const char *name, const void *image, dword size);
+/* the threads of a geode (threadThread.c): the last thread of a process
+ * to exit frees it */
+void GeodeAddThread(GeodeHandle gh);
+void GeodeRemoveThread(GeodeHandle gh);
+/* geodesLibrary.c: use a library by permanent name for a geode being
+ * loaded (no LCT_NEW_CLIENT), and drop such a reference */
+GeodeHandle GeodeUseLibraryLow(const char *pname, word protoMajor,
+			       word protoMinor, GeodeLoadError *err);
+void GeodeFreeLibraryLow(GeodeHandle gh);
+/* geodesLoad.c: the lock of the geode list (reentrant) */
+void GeodeLock(void);
+void GeodeUnlock(void);
+/* geodesLoad.c: find a loaded geode by the first `n' characters of its
+ * permanent name and extension; the caller holds the geode lock */
+GeodeHandle GeodeFindLow(const char *name, word n, GeodeAttrs attrMatch,
+			 GeodeAttrs attrNoMatch);
+/* geodesLoad.c: load a geode from its image (the geode lock held) */
+GeodeHandle GeodeLoadLow(const char *name, GeodeAttrs attrMatch,
+			 GeodeAttrs attrNoMatch, word priority, dword appInfo,
+			 GeodeLoadError *err);
+/* geodesLoad.c: free a geode whose reference count or last thread is
+ * gone */
+void GeodeFreeLow(GeodeHandle gh);
+
+/* A process thread (ProcCreate of geodesProcess.asm): it runs the events
+ * of `qh' with `cls' for messages to the thread, its queue and its
+ * process.  It is created stopped but attached to the queue, so events
+ * reach it at once; KernelThreadRun starts it. */
+ThreadHandle KernelEventThreadCreate(QueueHandle qh, ClassStruct *cls,
+				     ThreadPriority priority, word stackSize,
+				     GeodeHandle owner);
+void KernelThreadRun(ThreadHandle th);
 
 /* ---------------------------------------------------------------------
  * LMem (LMem/lmemCode.c, after lmemCode.asm).  Port32/ABI.md section 10.

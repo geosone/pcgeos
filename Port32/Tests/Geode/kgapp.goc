@@ -1,0 +1,46 @@
+/*
+ * kgapp.goc -- a process geode for the kernel.geode test (Port32/Tests).
+ *
+ * MSG_META_ATTACH (queued by GeodeLoad) runs on the process thread: it
+ * calls a routine of kglib, sends messages to an object of kglib's class
+ * in its own object resource, and records what it saw in kgAppState,
+ * which the test reads through ProcGetLibraryEntry.
+ */
+@include <stdapp.goh>
+@include "kglib.goh"
+
+typedef struct {
+    word	KGAS_attached;
+    word	KGAS_value1, KGAS_value2;
+    int		KGAS_sum;
+    word	KGAS_count;
+    GeodeHandle	KGAS_process;
+    optr	KGAS_appObj;
+    ThreadHandle KGAS_thread;
+} KGAppState;
+
+KGAppState kgAppState;
+
+@class KGAppProcessClass, ProcessClass;
+@endc
+
+@classdecl KGAppProcessClass, neverSaved;
+
+@start KGObjects;
+@object KGCounterClass KGAppCounter = {
+    KGCI_count = 5;
+}
+@end KGObjects;
+
+@method KGAppProcessClass, MSG_META_ATTACH_PROCESS
+{
+    kgAppState.KGAS_value1 = value1;
+    kgAppState.KGAS_value2 = value2;
+    kgAppState.KGAS_sum = KGLibAdd(value1, value2);
+    @call KGAppCounter::MSG_KG_COUNTER_ADD(value1);
+    kgAppState.KGAS_count = @call KGAppCounter::MSG_KG_COUNTER_GET();
+    kgAppState.KGAS_process = GeodeGetProcessHandle();
+    kgAppState.KGAS_appObj = GeodeGetAppObject(0);
+    kgAppState.KGAS_thread = ThreadGetInfo(0, TGIT_THREAD_HANDLE);
+    kgAppState.KGAS_attached++;
+}

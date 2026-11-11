@@ -1,0 +1,40 @@
+/*
+ * kglib.goc -- a library geode for the kernel.geode test (Port32/Tests):
+ * a routine, a class the client has an object of, and the library entry,
+ * which counts its calls.
+ */
+@include <stdapp.goh>
+#include <library.h>
+@include "kglib.goh"
+
+@classdecl KGCounterClass;
+
+static KGLibCallCounts calls;
+
+Boolean KGLibEntry(LibraryCallType ty, GeodeHandle client)
+{
+    if (ty <= LCT_CLIENT_EXIT)
+	calls.KGLC_calls[ty]++;
+    calls.KGLC_lastClient = client;
+    return FALSE;
+}
+
+int KGLibAdd(int a, int b)
+{
+    return a + b;
+}
+
+KGLibCallCounts *KGLibGetCalls(void)
+{
+    return &calls;
+}
+
+@method KGCounterClass, MSG_KG_COUNTER_ADD
+{
+    pself->KGCI_count += n;
+}
+
+@method KGCounterClass, MSG_KG_COUNTER_GET
+{
+    return pself->KGCI_count;
+}

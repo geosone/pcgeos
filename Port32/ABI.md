@@ -265,6 +265,105 @@ functions are GEOS's, see §4). ctest `geode.hello` loads the Hello sample
 `__geos_module` against `hello.gp`, down to the class pointer of the
 application object, which must be the import `GenApplicationClass`.
 
+### 7.1 GeodeLoad in the C kernel (`Library/Kernel/Geodes`, P4)
+
+`geodesLoad.c`, `geodesLibrary.c` and `geodesAccess.c` load geodes
+from their modules:
+
+- **Images.** There is no file system yet: the program registers
+  geode images by name (`GeodeRegisterImage`), and a library is looked
+  up under its permanent name.
+- **Libraries first.** A module describes itself only once it is
+  loaded. So `GeodeLoad` loads it once with dummy imports, reads the
+  library list from `__geos_module` and unloads it again. Then it uses
+  the libraries (found among the loaded geodes, or loaded) and loads
+  the module for good.
+- **Imports by name.** An import comes from one of three places:
+  - the kernel's export table: every symbol of the kernel's objects
+    that `Library/Kernel/geos.gp` exports, case ignored
+    (`Port32/tools/kexports.py`, generated at build time from `nm`);
+  - a few host names: `raise` for libgcc on ARM, and libgcc's frame
+    registration for a DXE3;
+  - a library's exports: an "export ... as" name, or a module symbol
+    that is one of its exported entries.
+- **Protocols.** A library's protocol is checked as
+  `TestProtocolNumbers` did: the importer's major number must be equal,
+  and its minor number must not be newer. 0.0 accepts any protocol,
+  which is what gpgeode writes for now.
+- **Core block.** The core block is a fixed block that owns itself; its
+  handle is the geode handle. It holds the kernel's data on the geode
+  (`GeodeCore` in `kernelC.h`): the name, the attributes, the
+  reference and thread counts, and the libraries in use. The GEOS data
+  stays in the module.
+- **Resources.**
+  - Each LMem resource made by goc becomes a block owned by the geode
+    (`LMemCreateResourceBlock`), with heap flags from its `RESF_*`.
+  - The handles go to `GM_resourceHandles`; entry 0 is the core block.
+  - Object blocks are relocated once their exec thread is known.
+  - Code and data resources are part of the module and have no handle.
+- **Library entries.** `LCT_NEW_CLIENT` goes to each library of a new
+  geode, and `LCT_ATTACH` to a new library's own entry (a TRUE return
+  fails the load). `LCT_CLIENT_EXIT` and `LCT_DETACH` go out when the
+  geode is freed. `GeodeUseLibrary` and `GeodeFreeLibrary` also call
+  the entry for the running geode.
+- **Processes.**
+  1. The loader allocates the event queue (owned by the geode) and
+     queues `MSG_META_ATTACH`, with the appInfo high and low words as
+     `value1` and `value2`.
+  2. It creates the process thread with the process class, attached to
+     the queue but stopped (`KernelEventThreadCreate`).
+  3. The core block and the object blocks get that thread as their
+     exec thread, and only then does the thread start.
+  4. When the last thread of a process exits, it frees the geode. The
+     geode's blocks and queues go, the module is unloaded, and the
+     references to its libraries are dropped.
+- **Multiple launches.** A loaded library is shared. A process that is
+  not multi-launchable fails a second time with
+  `GLE_NOT_MULTI_LAUNCHABLE`.
+- **A thread that ends inside a handler.** A handler that ends its own
+  thread (`MSG_PROCESS_EXIT` calls `ThreadDestroy`) never returns, so
+  the dispatcher cannot free the event or wake an `MF_CALL` caller.
+  `CMessageDispatchP` keeps a chain of the events a thread is
+  dispatching, and `ThreadDestroy` frees them. In the asm kernel the
+  event had been freed already, because its parameters were in
+  registers.
+- **Other routines:** `GeodeGetInfo` (attributes, protocol, token,
+  permanent name, reference count; no release number), `GeodeFind`,
+  `GeodeGetProcessHandle`, `GeodeGetAppObject` and
+  `ProcGetLibraryEntry` (entries in `.gp` order).
+
+The Open Watcom build of dos32 has no module loader
+(`ghal_module_none.c`), so it loads no geodes.
+
+ctest `kernel.geode` loads two geodes built with `goc -cg` (sources in
+`Port32/Tests/Geode`): the library `kglib` (protocol 2.3; a routine, a
+class and an entry that counts its calls) and the process `kgapp`, which
+uses `kglib` and holds an object of `kglib`'s class in its object
+resource. The test checks:
+
+- the load errors: no such geode, wrong attributes, the three protocol
+  errors, no such library, and a second launch;
+- the library entry calls, `GeodeGetInfo`, `GeodeFind` and
+  `ProcGetLibraryEntry`;
+- `MSG_META_ATTACH` on the process thread: it calls into the library
+  and sends messages to the relocated object, and `GeodeGetAppObject`
+  works;
+- `MSG_META_DETACH`: the process frees itself, then `GeodeFreeLibrary`
+  frees the library;
+- at the end, not a single handle is left.
+
+It runs on amd64, i686, arm64, armhf and DJGPP dos32.
+
+Not yet:
+
+- geode files (FileOpen and the geode's file handle);
+- drivers (`DR_INIT`), which load like libraries without an entry;
+- `noload` libraries;
+- resources loaded on demand (`RESF_DISCARDED`);
+- heapspace, the UI thread, `LCT_NEW_CLIENT_THREAD`;
+- freeing a geode's semaphores and timers;
+- `GeodeResolveOptrAt`.
+
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 
 The C kernel starts with the handle table and the memory block API of
@@ -758,13 +857,13 @@ Not yet:
 
 ## 14. Open
 
-1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`). The
-   module format is decided (`GHAL-Concept.md` §4.4) and the `.gp` data is
-   in the module (§7). Open:
-   - resolving imports by name over the geode's libraries, with a
-     protocol check;
+1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).
+   Open:
    - the protocol a library needs (glue took it from the library's
      `.ldf`; `GML_proto*` is 0.0, "any", for now);
+   - reading the library list without a first load with dummy imports
+     (a note or section the loader can read before it resolves
+     imports);
    - the optrs in non-object chunks of a resource, which `goc -cg` has
      to list for the loader (section 13). goc's static GCN lists
      (`gcnList(...) = ...`) are such chunks.

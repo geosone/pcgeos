@@ -247,6 +247,12 @@ def protocol(rev):
     return 0, 0
 
 
+def c_chars(s):
+    """a char array without NUL (space padded names)"""
+    return '{' + ', '.join(f"'{c}'" if c.isalnum() or c in ' ._-' else
+                           str(ord(c)) for c in s) + '}'
+
+
 def c_string(s):
     return '"' + ''.join(c if c.isprintable() and c not in '"\\'
                          else f'\\{ord(c):03o}' for c in s) + '"'
@@ -342,7 +348,7 @@ def main():
     appobj = f'GOCR_XSOPTR({gp.appobj})' if gp.appobj else '0'
     L += ['const GeosModuleInfo __geos_module = {',
           '    GEOS_MODULE_MAGIC, GEOS_MODULE_VERSION,',
-          f'    {c_string(gp.name.ljust(8))}, {c_string(gp.ext.ljust(4))},',
+          f'    {c_chars(gp.name.ljust(8))}, {c_chars(gp.ext.ljust(4))},',
           f'    {c_string(gp.longname) if gp.longname is not None else "0"},',
           f'    {{{{{", ".join(str(ord(c)) for c in gp.tokenchars)}}}, {gp.tokenid}}},',
           f'    0x{gp.attrs:04x}, {major}, {minor}, {gp.heapspace}, {gp.stack},',

@@ -3,9 +3,9 @@
  *
  * Unrelocated optrs in resources hold the resource number (Port32/ABI.md
  * section 4); object relocation turns it into the handle of that
- * resource of the block's owner, and back.  GeodeLoad will keep the
- * handles in the geode (GM_resourceHandles); until it exists, whoever
- * builds a geode's resources registers them here.
+ * resource of the block's owner, and back.  GeodeLoad registers the
+ * handles of a geode it loads (GM_resourceHandles, geodesLoad.c); tests
+ * that build resources without a geode module register theirs.
  */
 #include "kernelC.h"
 

@@ -1,0 +1,20 @@
+/*
+ * kglib.goh -- what the test library kglib exports (Port32/Tests/Geode).
+ */
+#include <library.h>
+
+@class KGCounterClass, MetaClass;
+    @message void MSG_KG_COUNTER_ADD(word n);
+    @message word MSG_KG_COUNTER_GET();
+    @instance word KGCI_count = 0;
+@endc
+
+/* the library entry calls kglib has seen, by LibraryCallType */
+typedef struct {
+    word	KGLC_calls[LCT_CLIENT_EXIT + 1];
+    GeodeHandle	KGLC_lastClient;
+} KGLibCallCounts;
+
+extern int KGLibAdd(int a, int b);
+/* exported as "KGLibCalls" */
+extern KGLibCallCounts *KGLibCalls(void);

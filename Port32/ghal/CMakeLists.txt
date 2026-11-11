@@ -11,6 +11,8 @@ elseif(GEOS_HOST STREQUAL "dos32")
   # geodes are DXE3 modules (dxe3gen); the Watcom build has no loader
   if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_sources(ghal PRIVATE dos32/ghal_module_dxe.c)
+  else()
+    target_sources(ghal PRIVATE dos32/ghal_module_none.c)
   endif()
 else()
   message(FATAL_ERROR "No GHAL backend for GEOS_HOST=${GEOS_HOST} yet")

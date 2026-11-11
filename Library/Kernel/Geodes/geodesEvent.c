@@ -580,23 +580,55 @@ void *CObjMessageP(word flags, optr dest, Message message,
 /* Deliver an event (MessageDispatch): as ObjMessage with `flags' (the
  * dispatching thread calls directly what it runs itself).  The reply
  * goes to the waiting caller if the event is a call, else to `reply'. */
+/*
+ * The events a thread is dispatching, innermost first (a chain of records
+ * on its stack, KThread.T_dispatching).  A handler that ends its thread
+ * (ThreadDestroy) does not return to free its event and wake its caller:
+ * KernelDispatchAbandon does that.  The asm kernel had freed the event
+ * already, its parameters being in registers.
+ */
+typedef struct DispatchRec {
+    EventHandle		DR_event;	/* to free, or 0 */
+    KSem		*DR_done;	/* the caller of an MF_CALL, or NULL */
+    struct DispatchRec	*DR_prev;
+} DispatchRec;
+
 void *CMessageDispatchP(EventHandle event, word flags, void *reply,
 			dword replySize)
 {
     KEvent *e = EventOf(event);
     void *to = e->E_done ? e->E_reply : reply;
     dword toSize = e->E_done ? e->E_replySize : replySize;
-    KSem *done = e->E_done;
+    KThread *t = ThreadOf(KernelThisThread());
+    DispatchRec rec;
 
+    rec.DR_event = (flags & MF_DISPATCH_DONT_FREE) ? 0 : event;
+    rec.DR_done = e->E_done;
+    rec.DR_prev = t->T_dispatching;
+    t->T_dispatching = &rec;
     e->E_done = NULL;
     CObjMessageP((word) (flags & (MF_CALL | MF_FORCE_QUEUE |
 				  MF_INSERT_AT_FRONT)),
 		 e->E_dest, e->E_msg, e->E_params, e->E_size, to, toSize);
-    if (done)
-	KSemV(done);
-    if (!(flags & MF_DISPATCH_DONT_FREE))
+    t->T_dispatching = rec.DR_prev;
+    if (rec.DR_done)
+	KSemV(rec.DR_done);
+    if (rec.DR_event)
 	ObjFreeMessage(event);
     return reply;
+}
+
+void KernelDispatchAbandon(KThread *t)
+{
+    DispatchRec *r;
+
+    for (r = t->T_dispatching; r; r = r->DR_prev) {
+	if (r->DR_done)
+	    KSemV(r->DR_done);
+	if (r->DR_event)
+	    ObjFreeMessage(r->DR_event);
+    }
+    t->T_dispatching = NULL;
 }
 
 /* the event with another message or destination (0: keep) */

@@ -365,10 +365,49 @@ ThreadHandle ThreadCreate(word priority, word valueToPass,
 	HandleFree(th);
 	return 0;
     }
+    GeodeAddThread(owner);
+    KernelThreadRun(th);
+    return th;
+}
+
+void KernelThreadRun(ThreadHandle th)
+{
     ghal_crit_enter();
     MakeReady(th);
     MaybePreempt();
     ghal_crit_leave();
+}
+
+static void EventThreadStart(void *arg)
+{
+    (void) arg;
+    ghal_crit_enter();
+    Reap();
+    ghal_crit_leave();
+    ThreadAttachToQueue(0, NULL);
+}
+
+ThreadHandle KernelEventThreadCreate(QueueHandle qh, ClassStruct *cls,
+				     ThreadPriority priority, word stackSize,
+				     GeodeHandle owner)
+{
+    ThreadHandle th;
+    KThread *t;
+
+    KernelThisThread();
+    t = NewThread(&th, owner, priority);
+    if (!t)
+	return 0;
+    if (ghal_ctx_create(EventThreadStart, (void *) (uintptr_t) th, stackSize,
+			&t->T_ctx) != GHAL_OK) {
+	ghal_mem_free(t);
+	HandleFree(th);
+	return 0;
+    }
+    t->T_class = cls;
+    KQueueAttach(qh, th);
+    t->T_eventQueue = qh;
+    GeodeAddThread(owner);
     return th;
 }
 
@@ -390,6 +429,9 @@ void ThreadDestroy(word errorCode, optr ackObject, word ackData)
 	KQueueDetach(t->T_eventQueue);
 	t->T_eventQueue = 0;
     }
+    KernelDispatchAbandon(t);
+    /* the last thread of a process frees the geode */
+    GeodeRemoveThread(HandleEntryOf(cur)->HE_owner);
     ghal_crit_enter();
     t->T_exitCode = errorCode;
     t->T_state = TS_DEAD;

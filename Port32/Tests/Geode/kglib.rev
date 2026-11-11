@@ -1,0 +1,4 @@
+#
+# the protocol of kglib (the kernel.geode test checks it)
+#
+P 2.3

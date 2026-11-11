@@ -165,4 +165,15 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     COMPILE_DEFINITIONS GEOS_PORT32
     INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/Port32/include;${PROJECT_SOURCE_DIR}/CInclude")
   add_test(NAME geode.hello COMMAND test_geode_hello)
+
+  # the C kernel loads geodes: the process kgapp and its library kglib
+  geos_geode(kglib GP Geode/kglib.gp GOC Geode/kglib.goc)
+  geos_geode(kgapp GP Geode/kgapp.gp GOC Geode/kgapp.goc)
+  geos_embed(_kglib_c ${kglib_GEO} kglib_geode)
+  geos_embed(_kgapp_c ${kgapp_GEO} kgapp_geode)
+  add_executable(test_kernel_geode test_kernel_geode.c ${_kglib_c}
+                 ${_kgapp_c})
+  add_dependencies(test_kernel_geode geode_kglib geode_kgapp)
+  target_link_libraries(test_kernel_geode PRIVATE geos_kernel)
+  add_test(NAME kernel.geode COMMAND test_kernel_geode)
 endif()

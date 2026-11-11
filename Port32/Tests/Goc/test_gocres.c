@@ -20,7 +20,6 @@ extern ClassStruct GocTestProcessClass;
 
 int gocTestSuperCalls;
 
-GeodeHandle GeodeGetProcessHandle(void) { return 1; }
 dword CObjMessage(void) { return 0; }
 
 static void *Deliver(ClassStruct *cls, optr dest, Message message,
