@@ -15,6 +15,8 @@
 #include <sem.h>
 #include <thread.h>
 #include <lmem.h>
+#include <chunkarr.h>
+#include <geode.h>
 #include <timer.h>
 #include <object.h>
 #include <geosport.h>
@@ -85,7 +87,8 @@
     X(CANNOT_RELOCATE) \
     X(CANNOT_UNRELOCATE) \
     X(ADD_CHILD_OF_OBJ_ALREADY_IN_COMPOSITE) \
-    X(BAD_OBJ_COMP_CALL_TYPE)
+    X(BAD_OBJ_COMP_CALL_TYPE) \
+    X(GCN_LIST_ERROR)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -307,6 +310,15 @@ extern dword kernelTimerEventsDropped;
 #define KMSG_META_NOTIFY_OBJ_BLOCK_NOT_INTERACTIBLE 48
 #define KMSG_META_SET_OBJ_BLOCK_OUTPUT		53
 #define KMSG_META_GET_OBJ_BLOCK_OUTPUT		56
+#define KMSG_META_NOTIFY			35
+#define KMSG_META_NOTIFY_WITH_DATA_BLOCK	36
+#define KMSG_META_GCN_LIST_ADD			37
+#define KMSG_META_GCN_LIST_REMOVE		38
+#define KMSG_META_GCN_LIST_SEND			39
+#define KMSG_META_GCN_LIST_DESTROY		40
+#define KMSG_META_GCN_LIST_FIND_ITEM		60
+/* MetaClass variable data (metaC.goh) */
+#define KVD_TEMP_META_GCN			0	/* the first */
 #define KMSG_PROCESS_INSTANTIATE		8197
 #define KMSG_PROCESS_FINAL_BLOCK_FREE		8204
 #define KMSG_PROCESS_INSTANTIATE_FOR_THREAD	8208
@@ -392,6 +404,82 @@ Boolean ObjCompProcessChildren(optr obj, optr firstChild,
 			       ObjCompCallType stdCallback, void *cbData,
 			       word masterOffset, word compOffset,
 			       word linkOffset, ObjCompCallback *callback);
+
+/* ---------------------------------------------------------------------
+ * General change notification lists (LMem/lmemGCNList.c), as in
+ * metaC.goh and gcnlist.goh (Port32 layout: Port32/ABI.md section 13).
+ * ------------------------------------------------------------------- */
+typedef struct {
+    word	GCNLT_manuf;
+    word	GCNLT_type;
+} GCNListType;
+#define GCNLTF_SAVE_TO_STATE	0x0001
+typedef struct {
+    optr	GCNLE_item;
+} GCNListElement;
+typedef struct {
+    ChunkArrayHeader	GCNLH_meta;
+    EventHandle		GCNLH_statusEvent;
+    MemHandle		GCNLH_statusData;
+    word		GCNLH_statusCount;
+    word		GCNLH_reserved[3];	/* elements aligned to 8 */
+} GCNListHeader;
+typedef struct {
+    GCNListType		GCNLOLE_ID;
+    ChunkHandle		GCNLOLE_list;
+} GCNListOfListsElement;
+typedef struct {
+    ChunkArrayHeader	GCNLOL_meta;
+} GCNListOfListsHeader;
+typedef ByteFlags TempMetaGCNFlags;
+#define TMGCNF_RELOCATED	0x80
+typedef struct {
+    ChunkHandle		TMGCND_listOfLists;
+    TempMetaGCNFlags	TMGCND_flags;
+} TempMetaGCNData;
+typedef WordFlags GCNListSendFlags;
+#define GCNLSF_SET_STATUS			0x8000
+#define GCNLSF_IGNORE_IF_STATUS_TRANSITIONING	0x4000
+#define GCNLSF_FORCE_QUEUE			0x2000
+
+/* the system lists (a kernel block) */
+Boolean GCNListAdd(optr OD, ManufacturerID manufID, word listType);
+Boolean GCNListRemove(optr OD, ManufacturerID manufID, word listType);
+word GCNListSend(ManufacturerID manufID, word listType, EventHandle event,
+		 MemHandle dataBlock, GCNListSendFlags flags);
+void GCNListClearList(ManufacturerID manufID, word listType);
+/* lists in a block: a list of lists */
+ChunkHandle GCNListCreateBlock(MemHandle mh);
+Boolean GCNListAddToBlock(optr OD, ManufacturerID manufID, word listType,
+			  MemHandle mh, ChunkHandle listOfLists);
+Boolean GCNListRemoveFromBlock(optr OD, ManufacturerID manufID,
+			       word listType, MemHandle mh,
+			       ChunkHandle listOfLists);
+word GCNListSendToBlock(ManufacturerID manufID, word listType,
+			EventHandle event, MemHandle dataBlock, MemHandle mh,
+			ChunkHandle listOfLists, GCNListSendFlags flags);
+ChunkHandle GCNListFindListInBlock(ManufacturerID manufID, word listType,
+				   MemHandle mh, ChunkHandle listOfLists,
+				   Boolean createIfNotFound);
+void GCNListDestroyBlock(MemHandle mh, ChunkHandle listOfLists);
+void GCNListRelocateBlock(MemHandle mh, ChunkHandle listOfLists,
+			  MemHandle relocBlock);
+Boolean GCNListUnRelocateBlock(MemHandle mh, ChunkHandle listOfLists,
+			       MemHandle relocBlock);
+/* one list */
+ChunkHandle GCNListCreateList(MemHandle mh);
+Boolean GCNListAddToList(optr OD, optr list);
+Boolean GCNListRemoveFromList(optr OD, optr list);
+void GCNListSendToList(optr list, EventHandle event, MemHandle dataBlock,
+		       GCNListSendFlags flags);
+Boolean GCNListFindItemInList(optr OD, optr list);
+void GCNListDestroyList(optr list);
+void GCNListRelocateList(optr list, MemHandle relocBlock);
+void GCNListUnRelocateList(optr list, MemHandle relocBlock);
+/* is `newEv' (with data block `newData') the same status as `oldEv'
+ * (with `oldData')?  Then it need not be sent again (geodesEvent.c) */
+Boolean EventSameStatus(EventHandle newEv, MemHandle newData,
+			EventHandle oldEv, MemHandle oldData);
 
 /* ---------------------------------------------------------------------
  * Geode resources (Geodes/geodesResource.c).  Until GeodeLoad exists,

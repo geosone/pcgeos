@@ -8,8 +8,8 @@
  * message's parameters in order) and the reply buffer.  Messages to a
  * thread or process reach MetaClass with pself NULL.
  *
- * Not yet: detach and quit (objectShutdown.asm), GCN lists, help and
- * options messages, MSG_META_OBJ_FLUSH_INPUT_QUEUE.  Without the input
+ * Not yet: detach and quit (objectShutdown.asm), help and options
+ * messages, MSG_META_OBJ_FLUSH_INPUT_QUEUE.  Without the input
  * manager, freeing an object or a block flushes only the queue of the
  * thread that runs it (the final message goes through that queue).
  */
@@ -200,12 +200,25 @@ static void MetaDeleteVarData(void *pself, optr oself, Message m,
     *(Boolean *) reply = !ObjVarDeleteData(oself, *(word *) params);
 }
 
-/* MetaClass has no data to make: 0 (ObjVarDerefData fails) */
+/* MetaClass makes TEMP_META_GCN (an empty list of lists in the
+ * object's block); other data: 0 (ObjVarDerefData fails) */
 static void MetaInitializeVarData(void *pself, optr oself, Message m,
 				  void *params, void *reply)
 {
-    (void) pself; (void) oself; (void) m; (void) params;
-    *(word *) reply = 0;
+    MemHandle mh = OptrToHandle(oself);
+    TempMetaGCNData *d;
+    ChunkHandle lol;
+
+    (void) pself; (void) m;
+    if (*(word *) params != KVD_TEMP_META_GCN) {
+	*(word *) reply = 0;
+	return;
+    }
+    lol = GCNListCreateBlock(mh);
+    d = ObjVarAddData(oself, KVD_TEMP_META_GCN, sizeof(TempMetaGCNData));
+    d->TMGCND_listOfLists = lol;
+    d->TMGCND_flags = TMGCNF_RELOCATED;	/* in memory, so relocated */
+    *(word *) reply = (word) ((byte *) d - (byte *) MemDeref(mh));
 }
 
 /* copy out the data: the bytes copied, or 0xffff if not there */
@@ -242,6 +255,121 @@ static void MetaGetObjBlockOutput(void *pself, optr oself, Message m,
     *(optr *) reply = ObjBlockGetOutput(OptrToHandle(oself));
 }
 
+/* ---- notification, GCN lists of the object (TEMP_META_GCN) ---- */
+
+static void MetaNotify(void *pself, optr oself, Message m, void *params,
+		       void *reply)
+{
+    (void) pself; (void) oself; (void) m; (void) params; (void) reply;
+}
+
+/* the receiver's reference to the data block */
+static void MetaNotifyWithDataBlock(void *pself, optr oself, Message m,
+				    void *params, void *reply)
+{
+    struct { ManufacturerID manufID; word type; MemHandle data; } *p = params;
+
+    (void) pself; (void) oself; (void) m; (void) reply;
+    if (p->data)
+	MemDecRefCount(p->data);
+}
+
+typedef struct {			/* MSG_META_GCN_LIST_ADD, ... */
+    optr		dest;
+    word		listType;
+    ManufacturerID	listManuf;
+} GCNListParamsP;
+
+static ChunkHandle Lists(optr oself, Boolean make, Boolean saveToState)
+{
+    TempMetaGCNData *d;
+
+    if (!make) {
+	d = ObjVarFindData(oself, KVD_TEMP_META_GCN);
+	return d ? d->TMGCND_listOfLists : 0;
+    }
+    d = ObjVarDerefData(oself, KVD_TEMP_META_GCN);
+    if (saveToState)
+	*((word *) d - 2) |= VDF_SAVE_TO_STATE;
+    return d->TMGCND_listOfLists;
+}
+
+static void MetaGCNListAdd(void *pself, optr oself, Message m, void *params,
+			   void *reply)
+{
+    GCNListParamsP *p = params;
+    ChunkHandle lol = Lists(oself, TRUE,
+			    (p->listType & GCNLTF_SAVE_TO_STATE) != 0);
+
+    (void) pself; (void) m;
+    *(Boolean *) reply = GCNListAddToBlock(p->dest, p->listManuf,
+					   p->listType, OptrToHandle(oself),
+					   lol);
+}
+
+static void MetaGCNListRemove(void *pself, optr oself, Message m,
+			      void *params, void *reply)
+{
+    GCNListParamsP *p = params;
+    ChunkHandle lol = Lists(oself, FALSE, FALSE);
+
+    (void) pself; (void) m;
+    *(Boolean *) reply = lol &&
+	GCNListRemoveFromBlock(p->dest, p->listManuf, p->listType,
+			       OptrToHandle(oself), lol);
+}
+
+static void MetaGCNListSend(void *pself, optr oself, Message m, void *params,
+			    void *reply)
+{
+    struct {
+	GCNListSendFlags flags;
+	EventHandle	event;
+	MemHandle	block;
+	word		listType;
+	ManufacturerID	listManuf;
+    } *p = params;
+    ChunkHandle lol = Lists(oself, (p->flags & GCNLSF_SET_STATUS) != 0,
+			    FALSE);
+
+    (void) pself; (void) m; (void) reply;
+    if (!lol) {
+	ObjFreeMessage(p->event);
+	if (p->block)
+	    MemDecRefCount(p->block);
+	return;
+    }
+    GCNListSendToBlock(p->listManuf, p->listType, p->event, p->block,
+		       OptrToHandle(oself), lol, p->flags);
+}
+
+static void MetaGCNListDestroy(void *pself, optr oself, Message m,
+			       void *params, void *reply)
+{
+    ChunkHandle lol = Lists(oself, FALSE, FALSE);
+
+    (void) pself; (void) m; (void) params; (void) reply;
+    if (lol) {
+	GCNListDestroyBlock(OptrToHandle(oself), lol);
+	ObjVarDeleteData(oself, KVD_TEMP_META_GCN);
+    }
+}
+
+static void MetaGCNListFindItem(void *pself, optr oself, Message m,
+				void *params, void *reply)
+{
+    GCNListParamsP *p = params;
+    MemHandle mh = OptrToHandle(oself);
+    ChunkHandle lol = Lists(oself, FALSE, FALSE), list = 0;
+
+    (void) pself; (void) m;
+    if (lol)
+	list = GCNListFindListInBlock(p->listManuf, p->listType, mh, lol,
+				      FALSE);
+    *(Boolean *) reply = list &&
+	GCNListFindItemInList(p->dest, ConstructOptr(mh, list));
+}
+
 static const Message metaMessages[] = {
     KMSG_META_GET_CLASS,
     KMSG_META_IS_OBJECT_IN_CLASS,
@@ -259,7 +387,14 @@ static const Message metaMessages[] = {
     KMSG_META_INITIALIZE_VAR_DATA,
     KMSG_META_GET_VAR_DATA,
     KMSG_META_SET_OBJ_BLOCK_OUTPUT,
-    KMSG_META_GET_OBJ_BLOCK_OUTPUT
+    KMSG_META_GET_OBJ_BLOCK_OUTPUT,
+    KMSG_META_NOTIFY,
+    KMSG_META_NOTIFY_WITH_DATA_BLOCK,
+    KMSG_META_GCN_LIST_ADD,
+    KMSG_META_GCN_LIST_REMOVE,
+    KMSG_META_GCN_LIST_SEND,
+    KMSG_META_GCN_LIST_DESTROY,
+    KMSG_META_GCN_LIST_FIND_ITEM
 };
 
 static GocMethodThunk *const metaMethods[] = {
@@ -279,7 +414,14 @@ static GocMethodThunk *const metaMethods[] = {
     MetaInitializeVarData,
     MetaGetVarData,
     MetaSetObjBlockOutput,
-    MetaGetObjBlockOutput
+    MetaGetObjBlockOutput,
+    MetaNotify,
+    MetaNotifyWithDataBlock,
+    MetaGCNListAdd,
+    MetaGCNListRemove,
+    MetaGCNListSend,
+    MetaGCNListDestroy,
+    MetaGCNListFindItem
 };
 
 ClassStruct MetaClass = {

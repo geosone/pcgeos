@@ -246,6 +246,18 @@ typedef struct {
 } GCNListElement;
 
 /* Structure of a single GCN list (resides in a chunk) */
+#ifdef GEOS_PORT32
+/* Port32: the status event is a 32-bit handle, and the elements (optrs)
+ * start at an offset aligned to 8.  Port32/ABI.md section 13. */
+typedef struct {
+	ChunkArrayHeader	GCNLH_meta;
+	EventHandle		GCNLH_statusEvent;
+	MemHandle		GCNLH_statusData;
+	word			GCNLH_statusCount;
+	word			GCNLH_reserved[3];
+	/* Start of GCNListOfListElement's */
+} GCNListHeader;
+#else
 typedef struct {
 	ChunkArrayHeader	GCNLH_meta;
 	word			GCNLH_statusEvent;
@@ -253,6 +265,7 @@ typedef struct {
 	word			GCNLH_statusCount;
 	/* Start of GCNListOfListElement's */
 } GCNListHeader;
+#endif
 
 /* Structure of an element in the list of GCN Lists */
 typedef struct {

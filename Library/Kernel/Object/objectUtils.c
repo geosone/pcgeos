@@ -135,9 +135,16 @@ ObjChunkFlags ObjGetFlags(optr o)
     return *FlagsOf(o);
 }
 
+/* a block without chunk flags (an LMem block that is not an object
+ * block) has nothing to set, as in the asm kernel */
 void ObjSetFlags(optr o, ObjChunkFlags bitsToSet, ObjChunkFlags bitsToClear)
 {
-    byte *f = FlagsOf(o);
+    LMemBlockHeader *h = MemDeref(OptrToHandle(o));
+    byte *f;
+
+    if (h && !(h->LMBH_flags & LMF_HAS_FLAGS))
+	return;
+    f = FlagsOf(o);
 
     *f = (byte) ((*f & ~bitsToClear) | bitsToSet);
     /* VM object blocks: dirtying the VM block comes with VMem */

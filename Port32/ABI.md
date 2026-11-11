@@ -668,6 +668,28 @@ same way, unrelocated, and the class relocation tables cover them.
 - The register routines `ObjLinkCallParent`, `ObjLinkCallNextSibling`
   and `ObjSwapLockParent` have no C form.
 
+**GCN lists** (`LMem/lmemGCNList.c`) work as in the asm kernel. This
+covers the system lists, lists in a block, single lists, status
+events, relocation, and `MetaClass`'s `MSG_META_GCN_LIST_*` with
+`TEMP_META_GCN`.
+
+- The Port32 `GCNListHeader` (`metaC.goh`) holds the status event as a
+  32-bit `EventHandle`. Reserved words align the elements (optrs) to 8,
+  so the header is 24 bytes.
+- The objects on a list are taken from it before the first one gets the
+  event, so a handler may change the list. The system lists are
+  unlocked by then.
+- Each object gets one reference to the data block, which
+  `MSG_META_NOTIFY_WITH_DATA_BLOCK` gives back. The sender's reference
+  is given up at the end.
+- A status that is the same as the last one is not sent again: the same
+  message and parameters, or a data block with the same bytes.
+- Not yet: handing the events and blocks of system lists to the kernel
+  geode (comes with geode exit).
+
+`ObjSetFlags` and `ObjMarkDirty` do nothing in a block without chunk
+flags, as in the asm kernel. GCN lists also live in plain LMem blocks.
+
 ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
 
 - the layout goc made: aligned parts and variable data, unrelocated
@@ -685,12 +707,19 @@ ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
 - a static tree of composites across two resources: links as goc made
   them, `@children`, `@parent`, finding, counting, callbacks that stop
   or start at a child, removing, adding at every position, moving, and
-  new objects whose parts are built when they are added.
+  new objects whose parts are built when they are added;
+- GCN lists: adding, sending and removing on the system lists (also a
+  block's objects at once); data block references; status events kept,
+  sent to new objects, not sent again when unchanged, and replaced; an
+  object's lists through the `MetaClass` messages; unrelocating and
+  relocating them, with and without `GCNLTF_SAVE_TO_STATE`;
+- goc's numbers for the new messages and `TEMP_META_GCN`, and the sizes
+  of the GCN structures.
 
 Not yet:
 
-- GCN lists (`TEMP_META_GCN`), detach and quit (`objectShutdown.asm`),
-  duplicating resources and saving to state.
+- Detach and quit (`objectShutdown.asm`), duplicating resources and
+  saving to state.
 - **optrs in chunks that are not objects** (moniker lists, GCN list
   elements, chunk data). Glue relocated them through the geode's
   relocation table; under `goc -cg` they need a relocation list per

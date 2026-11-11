@@ -130,7 +130,18 @@ const Message kobjGocMessages[] = {
     MSG_META_NOTIFY_OBJ_BLOCK_NOT_INTERACTIBLE,
     MSG_META_SET_OBJ_BLOCK_OUTPUT, MSG_META_GET_OBJ_BLOCK_OUTPUT,
     MSG_PROCESS_INSTANTIATE, MSG_PROCESS_FINAL_BLOCK_FREE,
-    MSG_PROCESS_INSTANTIATE_FOR_THREAD
+    MSG_PROCESS_INSTANTIATE_FOR_THREAD,
+    MSG_META_NOTIFY, MSG_META_NOTIFY_WITH_DATA_BLOCK,
+    MSG_META_GCN_LIST_ADD, MSG_META_GCN_LIST_REMOVE,
+    MSG_META_GCN_LIST_SEND, MSG_META_GCN_LIST_DESTROY,
+    MSG_META_GCN_LIST_FIND_ITEM
+};
+/* goc's vardata tag and GCN structures, for the kernel's */
+const word kobjGocTempMetaGCN = TEMP_META_GCN;
+const word kobjGocGCNSizes[] = {
+    sizeof(GCNListHeader), sizeof(GCNListElement),
+    sizeof(GCNListOfListsElement), sizeof(TempMetaGCNData),
+    offsetof(GCNListHeader, GCNLH_statusCount)
 };
 const int kobjGocMessageCount =
     sizeof(kobjGocMessages) / sizeof(kobjGocMessages[0]);
@@ -638,5 +649,164 @@ KObjComposite(optr tree, optr a, optr b, optr c)
     ObjCompAddChild(tree, d, CCO_LAST, COMP_ARGS);
     Check(@call e::MSG_KOC_PARENT_ID() == 0 &&
 	  ObjCompFindChildByNumber(tree, 3, COMP_ARGS) == d, "nested");
+    return fails;
+}
+
+/* ---- GCN lists ---- */
+
+#define GEOWORKS	MANUFACTURER_ID_GEOWORKS
+#define LIST_A		GCNSLT_DATE_TIME
+#define LIST_O		0x100			/* an object's lists */
+#define LIST_S		(0x102 | GCNLTF_SAVE_TO_STATE)
+
+static int notifies, dataNotifies;
+static word notifyData, notifyIds;
+
+@method KOCompClass, MSG_META_NOTIFY
+{
+    notifies++;
+    notifyData = data;
+    notifyIds += pself->KOCI_id;
+}
+
+@method KOCompClass, MSG_META_NOTIFY_WITH_DATA_BLOCK
+{
+    dataNotifies++;
+    notifyIds += pself->KOCI_id;
+    @callsuper();			/* gives up the reference */
+}
+
+static void
+Reset(void)
+{
+    notifies = dataNotifies = 0;
+    notifyIds = 0;
+}
+
+static word
+Refs(MemHandle blk)
+{
+    return (word) MemGetInfo(blk, MGIT_OTHER_INFO);
+}
+
+/* the system lists: a, b, c are leaves of the tree (ids 10, 20, 30) */
+int
+KObjGCNSystem(optr a, optr b, optr c)
+{
+    MemHandle blk;
+    EventHandle ev;
+    word n;
+
+    fails = 0;
+    Check(GCNListAdd(a, GEOWORKS, LIST_A) && !GCNListAdd(a, GEOWORKS, LIST_A)
+	  && GCNListAdd(b, GEOWORKS, LIST_A), "GCNListAdd");
+    Reset();
+    ev = @record KOCompClass::MSG_META_NOTIFY(GEOWORKS, 7, 42);
+    n = GCNListSend(GEOWORKS, LIST_A, ev, 0, 0);
+    Check(n == 2 && notifies == 2 && notifyData == 42 && notifyIds == 30,
+	  "GCNListSend");
+    Check(GCNListSend(GEOWORKS, LIST_A + 2,
+		      @record KOCompClass::MSG_META_NOTIFY(GEOWORKS, 7, 1), 0,
+		      0) == 0, "send to no list");
+
+    /* a data block: a reference per object, the sender's given up */
+    blk = MemAlloc(16, HF_SWAPABLE, HAF_ZERO_INIT);
+    MemInitRefCount(blk, 2);		/* the sender's and ours */
+    Reset();
+    ev = @record KOCompClass::MSG_META_NOTIFY_WITH_DATA_BLOCK(GEOWORKS, 8, blk);
+    GCNListSend(GEOWORKS, LIST_A, ev, blk, 0);
+    Check(dataNotifies == 2 && Refs(blk) == 1, "data block references");
+
+    /* the status: kept by the list, sent to who comes later */
+    MemIncRefCount(blk);		/* the sender's */
+    Reset();
+    ev = @record KOCompClass::MSG_META_NOTIFY_WITH_DATA_BLOCK(GEOWORKS, 8, blk);
+    GCNListSend(GEOWORKS, LIST_A, ev, blk, GCNLSF_SET_STATUS);
+    Check(dataNotifies == 2 && Refs(blk) == 2, "status kept");
+    Reset();
+    Check(GCNListAdd(c, GEOWORKS, LIST_A) && dataNotifies == 1 &&
+	  notifyIds == 30 && Refs(blk) == 2, "status to a new object");
+    /* the same status again: nobody is told */
+    MemIncRefCount(blk);
+    Reset();
+    ev = @record KOCompClass::MSG_META_NOTIFY_WITH_DATA_BLOCK(GEOWORKS, 8, blk);
+    GCNListSend(GEOWORKS, LIST_A, ev, blk, GCNLSF_SET_STATUS);
+    Check(dataNotifies == 0 && Refs(blk) == 2, "same status not sent");
+    /* another status: the old one and its block are let go */
+    Reset();
+    ev = @record KOCompClass::MSG_META_NOTIFY(GEOWORKS, 9, 5);
+    GCNListSend(GEOWORKS, LIST_A, ev, 0, GCNLSF_SET_STATUS);
+    Check(notifies == 3 && Refs(blk) == 1, "new status");
+    MemDecRefCount(blk);		/* ours: freed */
+
+    /* remove, by optr and for a whole block (chunk 0) */
+    Check(GCNListRemove(b, GEOWORKS, LIST_A) &&
+	  !GCNListRemove(b, GEOWORKS, LIST_A), "GCNListRemove");
+    Reset();
+    Check(GCNListSend(GEOWORKS, LIST_A,
+		      @record KOCompClass::MSG_META_NOTIFY(GEOWORKS, 7, 1), 0,
+		      0) == 2 && notifyIds == 40, "send after remove");
+    Check(GCNListRemove(ConstructOptr(OptrToHandle(a), 0), GEOWORKS, LIST_A)
+	  && GCNListSend(GEOWORKS, LIST_A,
+			 @record KOCompClass::MSG_META_NOTIFY(GEOWORKS, 7, 1),
+			 0, 0) == 0, "remove a block's objects");
+    /* clear the status for the next test run */
+    GCNListSend(GEOWORKS, LIST_A, 0, 0, GCNLSF_SET_STATUS);
+    return fails;
+}
+
+/* an object's lists (MetaClass, TEMP_META_GCN) */
+int
+KObjGCNObject(optr tree, optr a, optr b)
+{
+    MemHandle mh = OptrToHandle(tree);
+    TempMetaGCNData *d;
+    GCNListElement *e;
+    ChunkHandle lol, list;
+    EventHandle ev;
+
+    fails = 0;
+    Check(ObjVarFindData(tree, TEMP_META_GCN) == NULL, "no lists yet");
+    Check(!@call tree::MSG_META_GCN_LIST_REMOVE(a, LIST_O, GEOWORKS) &&
+	  !@call tree::MSG_META_GCN_LIST_FIND_ITEM(a, LIST_O, GEOWORKS),
+	  "remove, find without lists");
+    Check(@call tree::MSG_META_GCN_LIST_ADD(a, LIST_O, GEOWORKS) &&
+	  @call tree::MSG_META_GCN_LIST_ADD(b, LIST_O, GEOWORKS) &&
+	  !@call tree::MSG_META_GCN_LIST_ADD(b, LIST_O, GEOWORKS),
+	  "MSG_META_GCN_LIST_ADD");
+    d = ObjVarFindData(tree, TEMP_META_GCN);
+    Check(d && d->TMGCND_flags == TMGCNF_RELOCATED &&
+	  !(VarDataFlagsPtr(d) & VDF_SAVE_TO_STATE), "TEMP_META_GCN");
+    Check(@call tree::MSG_META_GCN_LIST_FIND_ITEM(b, LIST_O, GEOWORKS),
+	  "MSG_META_GCN_LIST_FIND_ITEM");
+    Reset();
+    ev = @record KOCompClass::MSG_META_NOTIFY(GEOWORKS, 1, 2);
+    @call tree::MSG_META_GCN_LIST_SEND(0, ev, 0, LIST_O, GEOWORKS);
+    Check(notifies == 2 && notifyIds == 30, "MSG_META_GCN_LIST_SEND");
+    Check(@call tree::MSG_META_GCN_LIST_REMOVE(a, LIST_O, GEOWORKS) &&
+	  !@call tree::MSG_META_GCN_LIST_FIND_ITEM(a, LIST_O, GEOWORKS),
+	  "MSG_META_GCN_LIST_REMOVE");
+
+    /* a list saved to state survives unrelocation, the other goes */
+    Check(@call tree::MSG_META_GCN_LIST_ADD(a, LIST_S, GEOWORKS),
+	  "add to a saved list");
+    d = ObjVarFindData(tree, TEMP_META_GCN);
+    Check(VarDataFlagsPtr(d) & VDF_SAVE_TO_STATE, "VDF_SAVE_TO_STATE");
+    lol = d->TMGCND_listOfLists;
+    Check(!GCNListUnRelocateBlock(mh, lol, mh), "unrelocate the lists");
+    Check(GCNListFindListInBlock(GEOWORKS, LIST_O, mh, lol, FALSE) == 0,
+	  "unsaved list dropped");
+    list = GCNListFindListInBlock(GEOWORKS, LIST_S, mh, lol, FALSE);
+    e = ChunkArrayElementToPtr(ConstructOptr(mh, list), 0, NULL);
+    Check(list && e->GCNLE_item ==
+	  GOCR_UNRELOC_OPTR(GOCR_RES_OBJECTS, OptrToChunk(a)),
+	  "saved list unrelocated");
+    GCNListRelocateBlock(mh, lol, mh);
+    e = ChunkArrayElementToPtr(ConstructOptr(mh, list), 0, NULL);
+    Check(e->GCNLE_item == a, "saved list relocated");
+
+    @call tree::MSG_META_GCN_LIST_DESTROY();
+    Check(ObjVarFindData(tree, TEMP_META_GCN) == NULL,
+	  "MSG_META_GCN_LIST_DESTROY");
     return fails;
 }

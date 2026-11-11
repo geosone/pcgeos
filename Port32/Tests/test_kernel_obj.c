@@ -3,11 +3,12 @@
  * (Library/Kernel/Object, Port32/ABI.md section 13) with the classes and
  * objects of Goc/kobj.goc: layout, relocation and unrelocation, variable
  * data, ObjInstantiate, MetaClass and ProcessClass, freeing objects and
- * object blocks, composites.
+ * object blocks, composites, GCN lists.
  */
 #include "kernelC.h"
 #include "ghal.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -21,6 +22,7 @@ extern const ChunkHandle KOObj1, KOObj2, KOPlain1, KOOther;
 extern const ChunkHandle KOTree, KOLeafA, KOLeafB, KOLeafC;
 extern const Message kobjGocMessages[];
 extern const int kobjGocMessageCount;
+extern const word kobjGocTempMetaGCN, kobjGocGCNSizes[];
 extern int kobjRelocs, kobjUnrelocs;
 
 int KObjLayout(optr obj1, optr obj2);
@@ -34,6 +36,8 @@ void KObjSendFree(optr o);
 ClassStruct *KObjClassOf(optr o);
 int KObjCompLayout(optr tree, optr a, optr c);
 int KObjComposite(optr tree, optr a, optr b, optr c);
+int KObjGCNSystem(optr a, optr b, optr c);
+int KObjGCNObject(optr tree, optr a, optr b);
 
 /* in the order of kobjGocMessages */
 static const Message kernelMessages[] = {
@@ -50,7 +54,18 @@ static const Message kernelMessages[] = {
     KMSG_META_NOTIFY_OBJ_BLOCK_NOT_INTERACTIBLE,
     KMSG_META_SET_OBJ_BLOCK_OUTPUT, KMSG_META_GET_OBJ_BLOCK_OUTPUT,
     KMSG_PROCESS_INSTANTIATE, KMSG_PROCESS_FINAL_BLOCK_FREE,
-    KMSG_PROCESS_INSTANTIATE_FOR_THREAD
+    KMSG_PROCESS_INSTANTIATE_FOR_THREAD,
+    KMSG_META_NOTIFY, KMSG_META_NOTIFY_WITH_DATA_BLOCK,
+    KMSG_META_GCN_LIST_ADD, KMSG_META_GCN_LIST_REMOVE,
+    KMSG_META_GCN_LIST_SEND, KMSG_META_GCN_LIST_DESTROY,
+    KMSG_META_GCN_LIST_FIND_ITEM
+};
+
+/* in the order of kobjGocGCNSizes */
+static const word kernelGCNSizes[] = {
+    sizeof(GCNListHeader), sizeof(GCNListElement),
+    sizeof(GCNListOfListsElement), sizeof(TempMetaGCNData),
+    offsetof(GCNListHeader, GCNLH_statusCount)
 };
 
 static int fails;
@@ -124,6 +139,18 @@ int main(void)
 	    Check(0, "message number");
 	}
 
+    Check(kobjGocTempMetaGCN == KVD_TEMP_META_GCN, "TEMP_META_GCN");
+    if (kobjGocTempMetaGCN != KVD_TEMP_META_GCN)
+	printf("TEMP_META_GCN: goc %u kernel %u\n",
+	       (unsigned) kobjGocTempMetaGCN, (unsigned) KVD_TEMP_META_GCN);
+    for (i = 0; i < (int) (sizeof(kernelGCNSizes) / sizeof(kernelGCNSizes[0]));
+	 i++)
+	if (kobjGocGCNSizes[i] != kernelGCNSizes[i]) {
+	    printf("GCN structure %d: goc %u kernel %u\n", i,
+		   (unsigned) kobjGocGCNSizes[i], (unsigned) kernelGCNSizes[i]);
+	    Check(0, "GCN structures");
+	}
+
     /* the resources, as the geode loader will build them */
     objects = LMemCreateResourceBlock(&__goc_resource_Objects, GEODE,
 				      HF_SWAPABLE, 0);
@@ -175,6 +202,9 @@ int main(void)
     LMemValidate(objects);
     fails += KObjClassed(obj1, plain);
     fails += KObjComposite(tree, la, lb, lc);
+    fails += KObjGCNSystem(la, lb, lc);
+    fails += KObjGCNObject(tree, la, lb);
+    LMemValidate(objects);
     LMemValidate(objects);
     LMemValidate(other);
 

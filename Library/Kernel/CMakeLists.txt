@@ -9,6 +9,7 @@
 #   LMem/lmemCode.c    <- local memory heaps of LMem/lmemCode.asm
 #   LMem/lmemChunkArray.c, lmemElementArray.c, lmemNameArray.c
 #                      <- the arrays of the same names (.asm)
+#   LMem/lmemGCNList.c <- GCN lists of LMem/lmemGCNList.asm
 #   Timer/timerList.c  <- timers of Timer/timerList.asm, timerMisc.asm
 #   Timer/timerInt.c   <- the timer interrupt of Timer/timerInt.asm
 #   Geodes/geodesEvent.c <- events, queues, ObjMessage of geodesEvent.asm
@@ -33,6 +34,7 @@ add_library(geos_kernel STATIC
   LMem/lmemChunkArray.c
   LMem/lmemElementArray.c
   LMem/lmemNameArray.c
+  LMem/lmemGCNList.c
   Timer/timerList.c
   Timer/timerInt.c
   Geodes/geodesEvent.c
