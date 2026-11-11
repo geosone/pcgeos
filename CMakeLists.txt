@@ -42,7 +42,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra)
 endif()
 if(GEOS_ERROR_CHECK)
-  add_compile_definitions(ERROR_CHECK)
+  add_compile_definitions(DO_ERROR_CHECKING)   # GEOS convention; geos.h derives ERROR_CHECK
 endif()
 string(TOUPPER "${GEOS_HOST}" _host)
 add_compile_definitions(GEOS_HOST_${_host})

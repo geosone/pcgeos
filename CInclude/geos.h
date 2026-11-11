@@ -30,7 +30,13 @@
  ******************************************************************
  */
 
-#ifdef __HIGHC__
+#ifdef GEOS_PORT32
+/*
+ *      *****   GEOS in C on 32/64-bit hosts (Port32)   *****
+ */
+#include <geosport.h>
+
+#elif defined __HIGHC__
 
 /*
  *      *****   MetaWare HighC   *****
@@ -179,7 +185,11 @@ pragma On(Long_enums);          /* to be compatible with MSC */
 #ifdef  DO_DBCS
 
 #define DBCS_GEOS (-1)
+#ifdef GEOS_PORT32
+typedef unsigned short TCHAR;	/* = wchar; wchar_t differs per host */
+#else
 typedef wchar_t TCHAR;
+#endif
 #define __T(x) L##x
 
 #else
@@ -207,13 +217,16 @@ typedef char TCHAR;
  *      cast it, so we change it to just be 0 here. If you want some other
  *      value of NULL, define it after including "geos.h".
  */
+#ifndef GEOS_PORT32
 #undef  NULL
 #define NULL 0
+#endif
 
 /*
  * Standard types
  */
 
+#ifndef GEOS_PORT32		/* geosport.h has these */
 typedef	unsigned char byte;
 typedef	signed char sbyte;
 typedef	unsigned short word;
@@ -238,6 +251,7 @@ typedef word Message;
 typedef word VardataKey;
 
 typedef word Handle;
+#endif
 typedef Handle MemHandle;
 typedef Handle DiskHandle;
 typedef Handle FileHandle;
@@ -273,7 +287,9 @@ typedef struct _ClassStruct ClassStruct;
  * Standard macros
  */
 
-#ifdef __BORLANDC__
+#ifdef GEOS_PORT32
+  /* optr macros in geosport.h; no segments, so no PtrToSegment & co. */
+#elif defined __BORLANDC__
   /*
    * Versions optimized for Borland C, modelled after FP_SEG etc.
    */
@@ -325,7 +341,11 @@ typedef struct _ClassStruct ClassStruct;
 #define offsetof(str, field)    ((word)&((str _near *)0)->field)
 #endif
 
+#ifdef GEOS_PORT32
+#define word_offsetof(str, field) ((word) offsetof(str, field))
+#else
 #define word_offsetof(str, field) ((word)&((str _near *)0)->field)
+#endif
 
 #define ARRAY_LEN(array, struct) (sizeof(array)/sizeof(struct))
 

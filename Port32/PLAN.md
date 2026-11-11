@@ -99,6 +99,7 @@ Work is based on the PM branch.
 - `goc` backend for GCC/Clang (next to `COM_WATCOM` etc. in `Tools/goc`).
 - `uic` → C data instead of `.rdef`.
 - `geosport.h`: types, `_far` / `_pascal` empty, 64-bit clean `CInclude/`. First as a check: CInclude compiles with `-m64 -Wall`.
+  **Started 2026-11-11:** decisions in `Port32/ABI.md`: no binary compatibility with 16-bit GEOS, 32-bit handles and 64-bit optr on every host, dos32 stays **data-compatible** with DOS16 files. `Port32/include/geosport.h` behind `GEOS_PORT32` in `geos.h` (16-bit build unchanged per `geocmp.py`). ctest `cinclude.geosport` checks the type widths on linux amd64/i686/arm64 and dos32; the target `cinclude_port32` compiles 81 of 114 `CInclude/*.h` warning-free on their own.
 - **Geode format:** ELF shared object plus a load format derived from `.gp` (exports, protocol numbers). Specification + prototype loader as a host-side test.
 - Build system: CMake (see P0). The asm variants use pmake for now; work item: move them under CMake as well (esp/glue/goc/uic as custom commands or a CMake language of their own), so that there is **one** build system in the end.
 

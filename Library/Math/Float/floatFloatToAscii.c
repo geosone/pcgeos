@@ -20,7 +20,7 @@
 #include "fpstack.h"
 #include "floatFloatToAscii.h"
 
-#ifdef ERROR_CHECK
+#ifdef DO_ERROR_CHECKING
 #define EC(x) assert(x)
 #else
 #define EC(x) ((void)0)
@@ -484,7 +484,7 @@ int FloatFloatToAscii(FFA_stackFrame *frame, char *resultString,
         return 0;
     }
 
-#ifdef ERROR_CHECK
+#ifdef DO_ERROR_CHECKING
     EC(P.totalDigits >= 1);
     if (P.formatFlags & FFAF_DONT_USE_SCIENTIFIC)
         EC(P.totalDigits <= MAX_DIGITS_FOR_HUGE_NUMBERS);
