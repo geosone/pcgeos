@@ -30,7 +30,9 @@ typedef enum ghal_status {
     GHAL_ERR_NOMEM,         /* out of memory */
     GHAL_ERR_INVAL,         /* bad argument */
     GHAL_ERR_UNSUPPORTED,   /* not available on this host */
-    GHAL_ERR_HOST           /* host call failed for another reason */
+    GHAL_ERR_HOST,          /* host call failed for another reason */
+    GHAL_ERR_FORMAT,        /* not a module of this host's format */
+    GHAL_ERR_UNRESOLVED     /* a module imports a name nobody provides */
 } ghal_status;
 
 /* ---------------------------------------------------------------------
@@ -77,6 +79,10 @@ size_t      ghal_mem_size(const void *block);
 /* Set the protection of a whole paged block (e.g. GHAL_PROT_RX for code
  * after relocation, GPMI_CALL_CONVERT_TO_CODE_BLOCK). */
 ghal_status ghal_mem_protect(void *block, unsigned prot);
+/* The same for the pages [offset, offset + len) of a paged block; offset
+ * must be a multiple of the page size, len is rounded up. */
+ghal_status ghal_mem_protect_range(void *block, size_t offset, size_t len,
+                                   unsigned prot);
 ghal_status ghal_mem_get_info(ghal_mem_info *info);
 
 /* ---------------------------------------------------------------------
@@ -164,6 +170,36 @@ typedef struct ghal_fault_info {
  * process with a crash report. */
 typedef void (*ghal_fault_handler)(const ghal_fault_info *info);
 ghal_status ghal_fault_set_handler(ghal_fault_handler fn);
+
+/* ---------------------------------------------------------------------
+ * ghal_module -- load code (geodes).  GHAL-Concept.md section 4.4.
+ *
+ * The kernel reads the file and passes its contents; the GHAL lays it out
+ * in memory, resolves its imports through `import' and relocates it.  The
+ * format is the host's own:
+ *   linux, gonware: ELF shared object (ET_DYN), one per architecture;
+ *   dos32:          DXE3, the module format of DJGPP (dxe3gen).
+ * Names are C names on every host (the leading underscore of DJGPP's
+ * COFF symbols is not part of them).  A module has no host C library:
+ * all it imports comes from `import' (the kernel and other geodes).
+ * ------------------------------------------------------------------- */
+
+typedef struct ghal_module ghal_module;
+/* Address of an imported name, or NULL if unknown. */
+typedef void *(*ghal_module_import)(void *ctx, const char *name);
+
+/* Load a module from image[0..size); the image may be freed afterwards.
+ * Runs the module's initializers.  On GHAL_ERR_UNRESOLVED the missing
+ * name is logged (ghal_log). */
+ghal_status ghal_module_load(const void *image, size_t size,
+                             ghal_module_import import, void *ctx,
+                             ghal_module **out);
+/* Address of a name the module exports, or NULL. */
+void       *ghal_module_symbol(const ghal_module *m, const char *name);
+/* Run the module's finalizers and release it. */
+void        ghal_module_unload(ghal_module *m);
+/* "elf" or "dxe3" */
+const char *ghal_module_format(void);
 
 /* ---------------------------------------------------------------------
  * ghal_log -- debug output.

@@ -11,8 +11,8 @@ set(CMAKE_SYSTEM_PROCESSOR aarch64)
 
 if(NOT GEOS_AARCH64_TRIPLE)
   foreach(_t aarch64-unknown-linux-gnu aarch64-linux-gnu)
-    find_program(_cc ${_t}-gcc)
-    if(_cc)
+    find_program(_cc_${_t} ${_t}-gcc)  # one cache entry per candidate
+    if(_cc_${_t})
       set(GEOS_AARCH64_TRIPLE ${_t})
       break()
     endif()

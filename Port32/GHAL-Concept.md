@@ -104,7 +104,7 @@ Under DOS, on the other hand, the real hardware drivers stay (VGA/VESA, PS/2, IF
 | `ghal_crit` | critical sections, replaces `INT_OFF`/`INT_ON` (see 4.2) | `cli`/`sti` | kernel lock | kernel lock |
 | `ghal_irq` | register asynchronous event sources, replaces `SysCatch(Device)Interrupt` (see 4.2) | real IRQ vectors via DPMI | host thread / event loop calls the handler | same |
 | `ghal_hostlock` | lock for non-reentrant host services, replaces `SysLockBIOS` | DOS lock as today | only where needed, e.g. calls that must go to the main thread (4.3) | same |
-| `ghal_module` | load code (see 4.4) | own loader | own loader (optionally `dlopen` for debugging) | own loader |
+| `ghal_module` | load code (see 4.4) | own loader, DXE3 modules | own loader, ELF shared objects (optionally `dlopen` for debugging) | own loader |
 | `ghal_log` | debug output, assert, crash report, breakpoint | serial / file | stderr, `SIGTRAP` | `OutputDebugString`, `DebugBreak` |
 | `ghal_exit` | quit, restart, return to the host | back to DOS | `exit` | `ExitProcess` |
 | `ghal_caps` | query capabilities (audio, network, multiple windows …) | – | – | – |
@@ -142,11 +142,20 @@ SDL, X11 and Win32 expect windows and events to be served on **one particular th
 
 ### 4.4 Loading geodes
 
-Today the GEOS kernel loads its `.geo` files **itself** (own format, own relocation). That stays, just with a 32/64-bit format, because it **works the same on all hosts** and needs no `dlopen`, which matters for DOS.
+Today the GEOS kernel loads its `.geo` files **itself** (own format, own relocation). That stays: the kernel reads the file and hands its contents to **`ghal_module`**, which lays it out, resolves the imports through a function of the kernel (never through the host's dynamic linker or C library) and relocates it. Every host keeps **its own module format** (decided 2026-11-11: "DOS stays DOS"):
 
-- **Recommendation:** a small **ELF loader** of our own in the kernel. A geode becomes an ELF shared object with export and import tables derived from the `.gp` file; protocol numbers stay. One format for all hosts, produced directly by the toolchain (GCC/Clang/lld).
+| Host | Geode format | Produced by | Loader |
+|---|---|---|---|
+| `dos32` | **DXE3**, the module format of DJGPP | `dxe3gen -U` from the DJGPP objects | `Port32/ghal/dos32/ghal_module_dxe.c` |
+| `linux`, later `gonware` | **ELF shared object** (`ET_DYN`), `-shared -nostdlib -z now` | gcc/clang of the architecture | `Port32/ghal/elf/ghal_module_elf.c` (amd64, i386, arm64, armhf) |
+| `win32/64` | (open, presumably PE DLL) | | |
+
+- `cmake/GeosGeode.cmake` (`geos_geode()`) builds a geode in the host's format. A geode has no host C library and no sanitizer or stack-protector runtime; libgcc is linked in. What libgcc itself imports (DXE3 with unwind tables: `__register_frame_info`/`__deregister_frame_info`; ARM: `raise` for division by zero) is provided by the kernel.
+- Names are C names on every host (DJGPP's leading underscore is dropped by the loader).
+- `ghal.module` loads a test geode on all five builds (linux amd64, i686, arm64, armhf under qemu-user, dos32 on DOS in QEMU): imports by call and by data reference, pointers in data, function pointers, bss, initializers/finalizers, two instances, unresolved imports and broken images.
+- Still open: the GEOS metadata of a geode (the `.gp` tables: type, tokens, protocol, libraries, exported entries, resource table) as data inside the module, and `GeodeLoad` of the C kernel on top of `ghal_module` (`Port32/ABI.md` §7.1).
 - On Linux additionally a debug mode via `dlopen`, so gdb sees the symbols (or registration through the gdb JIT interface).
-- The kernel and the GHAL core are built together as a normal host program: DOS PE/LE, ELF program or `.exe`.
+- The kernel and the GHAL core are built together as a normal host program: DOS (DJGPP COFF with CWSDPMI), ELF program or `.exe`.
 
 ### 4.5 The former loader tasks
 
@@ -273,7 +282,7 @@ Port32/Driver/Host/           generic drivers on the host services (new, no asm 
 
 1. **Really do S0 in 16-bit asm?** Recommendation: yes. It makes all host contacts visible without breaking anything, and every later step builds on it. The alternative is to introduce the GHAL only with the C port, but then without a runnable intermediate result.
 2. **Scheduler on hosted systems:** host threads plus kernel lock (recommended) or something else?
-3. **Geode format:** own ELF loader (recommended) or host loader (`dlopen`, `LoadLibrary`, HX PE DLLs)?
+3. ~~**Geode format:** own ELF loader (recommended) or host loader (`dlopen`, `LoadLibrary`, HX PE DLLs)?~~ **Decided 2026-11-11:** own loader (`ghal_module`) with the host's module format: DXE3 on `dos32` (DOS stays DOS), ELF on `linux`/`gonware` (4.4).
 4. **DOS extender:** HX (PE, with Win32 emulation via DKRNL32 as a bonus) or a classic LE extender (DOS/4GW compatible, e.g. DOS/32A)?
 5. **Reuse `Library/GDI`?** Its callback model for keyboard, pointer and power fits `ghal_input` well: use it as a template or keep it as a bridge.
 6. **What is dropped for good?** Swap (EMS/XMS), task switcher, CGA/EGA/Hercules, pen devices, PCMCIA. Proposal: all of it in S1.

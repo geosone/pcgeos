@@ -175,6 +175,18 @@ ghal_status ghal_mem_protect(void *block, unsigned prot)
     return GHAL_OK;             /* not enforced, see file header */
 }
 
+ghal_status ghal_mem_protect_range(void *block, size_t offset, size_t len,
+                                   unsigned prot)
+{
+    mem_header *h = header_of(block);
+    (void)len;
+    if (!h || !(h->flags & GHAL_MEM_PAGED) || offset % PAGE_SIZE != 0 ||
+        offset > h->size ||
+        (prot & ~(unsigned)(GHAL_PROT_R | GHAL_PROT_W | GHAL_PROT_X)))
+        return GHAL_ERR_INVAL;
+    return GHAL_OK;             /* not enforced, see file header */
+}
+
 ghal_status ghal_mem_get_info(ghal_mem_info *info)
 {
 #ifdef __DJGPP__

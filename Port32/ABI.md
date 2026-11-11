@@ -232,8 +232,13 @@ in static data, code and `@send`.
 
 ## 7. Open
 
-1. **Geode format**: an ELF shared object plus the `.gp` tables (resources
-   as above, exports, protocol numbers); see `GHAL-Concept.md` §4.4.
+1. **Geode format**: the module format of the host (dos32: DXE3, linux and
+   gonware: ELF shared object) is decided and loaded by `ghal_module`
+   (`GHAL-Concept.md` §4.4). Open: the `.gp` tables as data in the module
+   (type, tokens, protocol, libraries, exported entries in `.gp` order,
+   resource table pointing to the `GocResource` descriptors) and how the
+   kernel's import function resolves imports of library geodes (by name
+   with a protocol check per library).
 2. **DOS16 file formats under dos32**: which structures of VM files and
    documents need converters, given 32-bit handles and 64-bit optrs in
    memory.

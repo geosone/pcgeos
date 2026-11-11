@@ -165,6 +165,29 @@ ghal_status ghal_mem_protect(void *block, unsigned prot)
     return GHAL_OK;
 }
 
+ghal_status ghal_mem_protect_range(void *block, size_t offset, size_t len,
+                                   unsigned prot)
+{
+    mem_header *h = header_of(block);
+    size_t ps = page_size(), avail;
+    int p = PROT_NONE;
+    if (!h || !(h->flags & GHAL_MEM_PAGED) || offset % ps != 0 ||
+        (prot & ~(unsigned)(GHAL_PROT_R | GHAL_PROT_W | GHAL_PROT_X)))
+        return GHAL_ERR_INVAL;
+    avail = h->map_len - ps;
+    len = (len + ps - 1) / ps * ps;
+    if (offset > avail || len > avail - offset)
+        return GHAL_ERR_INVAL;
+    if (len == 0)
+        return GHAL_OK;
+    if (prot & GHAL_PROT_R) p |= PROT_READ;
+    if (prot & GHAL_PROT_W) p |= PROT_WRITE;
+    if (prot & GHAL_PROT_X) p |= PROT_EXEC;
+    if (mprotect((char *)block + offset, len, p) != 0)
+        return errno == ENOMEM ? GHAL_ERR_NOMEM : GHAL_ERR_HOST;
+    return GHAL_OK;
+}
+
 ghal_status ghal_mem_get_info(ghal_mem_info *info)
 {
     long pages, avail;

@@ -8,6 +8,18 @@ add_executable(test_ghal_core test_ghal_core.c)
 target_link_libraries(test_ghal_core PRIVATE ghal)
 add_test(NAME ghal.core COMMAND test_ghal_core)
 
+# ghal_module: a geode in the host's module format (ELF, or DXE3 on dos32),
+# embedded in the test program.  Not with Open Watcom (no geode toolchain).
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
+  include(${PROJECT_SOURCE_DIR}/cmake/GeosGeode.cmake)
+  geos_geode(testgeode Geode/testgeode.c)
+  geos_embed(_testgeode_c ${testgeode_GEO} testgeode_image)
+  add_executable(test_ghal_module test_ghal_module.c ${_testgeode_c})
+  add_dependencies(test_ghal_module geode_testgeode)
+  target_link_libraries(test_ghal_module PRIVATE ghal)
+  add_test(NAME ghal.module COMMAND test_ghal_module)
+endif()
+
 if(GEOS_HOST STREQUAL "linux")
   add_executable(test_ghal_posix test_ghal_posix.c)
   target_link_libraries(test_ghal_posix PRIVATE ghal)
