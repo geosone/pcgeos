@@ -79,6 +79,10 @@ DriverTable	FontDriverInfoStruct <
 
 ForceRef DriverTable
 
+; EC: recursion guard.  Not in the code segment: under protected mode
+; (GEOS32) code selectors are not writable on a real CPU.
+EC <inDriverFlag	byte	0	>
+
 idata	ends
 
 include		truetypeMacros.def
@@ -175,13 +179,14 @@ REVISION HISTORY:
 ------------------------------------------------------------------------------}
 
 
-EC <inDriverFlag	byte	0	>
-
 TrueTypeStrategy	proc	far
 
-EC <	tst	cs:[inDriverFlag]		>
+EC <	push	ds, ax			>
+EC <	segmov	ds, dgroup, ax		>
+EC <	tst	ds:[inDriverFlag]		>
 EC <	ERROR_NZ RECURSIVE_CALL_TO_FONT_DRIVER	>
-EC <	inc	cs:[inDriverFlag]		>
+EC <	inc	ds:[inDriverFlag]		>
+EC <	pop	ds, ax			>
 
 	tst	di			;escape function (>=0x8000) ?
 	js	escapeFunction		;branch if escape function
@@ -196,7 +201,10 @@ EC <	ERROR_AE FONT_BAD_ROUTINE		;>
 	jz	ignoreCall		; => no (carry clear)
 	call	ProcCallModuleRoutine
 callComplete:
-EC <	mov	cs:[inDriverFlag],0		>
+EC <	push	ds, ax			>
+EC <	segmov	ds, dgroup, ax		>
+EC <	mov	ds:[inDriverFlag],0		>
+EC <	pop	ds, ax			>
 done:
 EC <	call	ECNukeVariableBlock		;>
 	ret

@@ -644,9 +644,8 @@ else ; NT_DRIVER
 
 		CheckHack <(size VESAInfoBlock) eq (size VESAModeInfo)>
 
-		mov	bx, size VESAInfoBlock
-		add	bx, 0x600
-		shr	bx, 4
+		mov	ax, size VESAInfoBlock + 0x600	; MemAlloc: size in AX,
+						;  in bytes
 		mov	cx, ALLOC_FIXED
 		call	MemAlloc
 		push 	bx
@@ -795,8 +794,11 @@ checkLoop:
 
 		mov	ax, DP_PRESENT		; yep, it's there
 done:
-		; free allocated memory block
-		call	MemFree		; bx is handle to block to free
+		; free allocated memory block; its handle was pushed after
+		; MemAlloc (bx itself is the interrupt number of the
+		; SysRealInterrupt calls by now)
+		pop	bx
+		call	MemFree
 endif  ; not NT_DRIVER
 realDone:
 		pop	es

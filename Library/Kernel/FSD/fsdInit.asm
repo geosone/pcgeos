@@ -204,6 +204,34 @@ notNT:
 		jb	notDOSBox
 		pushf
 		INT_OFF
+ifdef PROTECTED_MODE
+	;
+	; In protected mode the invalid opcode is a processor exception that
+	; the DPMI host delivers to the exception handler, not to the INT 06h
+	; vector (HDPMI16 ends the program with "Exception 06").  So catch
+	; it through the GPMI exception interface for the probe.
+	;
+		push	si
+		mov	bl, GPMI_EXCEPTION_INVALID_OPCODE
+		les	si, ds:[loaderVars].KLV_GPMIVectorTable
+		call	{fptr}es:[si+GPMI_CALL_GET_EXCEPTION_HANDLER]
+		movdw	ds:[dosBoxInt06Addr], cxdx
+		mov	bl, GPMI_EXCEPTION_INVALID_OPCODE
+		mov	cx, cs
+		clr	edx
+		mov	dx, offset DOSBoxInvalidOpcodePM
+		call	{fptr}es:[si+GPMI_CALL_SET_EXCEPTION_HANDLER]
+		mov	ax, BB_TRUE
+		.inst	byte	0feh, 038h, 0, 0	; DOSBox callback 0
+		push	ax
+		mov	bl, GPMI_EXCEPTION_INVALID_OPCODE
+		clr	edx
+		movdw	cxdx, ds:[dosBoxInt06Addr]
+		les	si, ds:[loaderVars].KLV_GPMIVectorTable
+		call	{fptr}es:[si+GPMI_CALL_SET_EXCEPTION_HANDLER]
+		pop	ax
+		pop	si
+else
 		segmov	es, ds
 		mov	di, offset dosBoxInt06Addr
 		mov	bx, cs
@@ -218,6 +246,7 @@ notNT:
 		mov	ax, 6
 		call	SysResetInterrupt	; restore INT 06h immediately
 		pop	ax
+endif
 		call	SafePopf
 		tst	ax
 		jz	notDOSBox
@@ -250,6 +279,8 @@ done:
 InitFSD		endp
 
 
+ifndef PROTECTED_MODE
+
 COMMENT @%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 		DOSBoxInvalidOpcode
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -273,6 +304,36 @@ DOSBoxInvalidOpcode	proc	far
 		pop	ax
 		iret
 DOSBoxInvalidOpcode	endp
+
+else	; PROTECTED_MODE
+
+COMMENT @%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+		DOSBoxInvalidOpcodePM
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+SYNOPSIS:	DPMI exception 06h handler for the DOSBox FE /7 probe
+		(protected mode)
+
+CALLED BY:	DPMI host, with a 16-bit exception frame:
+		    ss:[sp]	return address to the host (fptr)
+		    ss:[sp+4]	error code
+		    ss:[sp+6]	faulting IP, CS, FLAGS, SP, SS
+PASS:		nothing
+RETURN:		AX = 0 (real CPU) in the faulting context, which resumes
+		after the 4-byte probe instruction
+DESTROYED:	nothing else
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%@
+DOSBoxInvalidOpcodePM	proc	far
+		push	bp
+		mov	bp, sp
+		add	{word}ss:[bp+8], 4	; skip FE 38 00 00
+		pop	bp
+		clr	ax			; real CPU: return AX = 0
+		ret				; back to the DPMI host
+DOSBoxInvalidOpcodePM	endp
+
+endif
 
 
 COMMENT @%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -401,6 +462,15 @@ endif	; PRIMARY_FSD_FOUND_IN_INTIFILE
 		mov	si, offset os2Name
 		tst	ds:[isDOSBox]
 		jnz	loadDriver
+ifdef PROTECTED_MODE
+	;
+	; The DOS-version specific drivers (ms4.geo and others) read DOS
+	; internals through real-mode pointers and have no protected mode
+	; support.  os2.geo restricts itself to DOS calls, which the DPMI
+	; host translates, so it is the primary FSD on every DOS.
+	;
+		jmp	loadDriver
+endif
 
 		mov	si, offset drdosName
 		tst	ds:[isDRDOS]

@@ -415,13 +415,22 @@ CoProcessorChips nptr \
 	offset	intel80X87,		; 80387		
 	offset	intel80X87		; 80487		
 
-if FULL_EXECUTE_IN_PLACE
+; NDP_STATUS is written (fnstsw/fnstcw), so it cannot live in the code
+; segment under XIP, nor under protected mode (GEOS32), where a real CPU
+; does not write through a code selector.
+ifdef PROTECTED_MODE
+NDP_STATUS_IN_IDATA	equ	TRUE
+else
+NDP_STATUS_IN_IDATA	equ	FULL_EXECUTE_IN_PLACE
+endif
+
+if NDP_STATUS_IN_IDATA
 idata	segment
 endif
 
 NDP_STATUS	dw	-1
 
-if FULL_EXECUTE_IN_PLACE
+if NDP_STATUS_IN_IDATA
 idata	ends
 endif
 
@@ -432,11 +441,18 @@ DetectCoProcessor	proc	near
 	mov	dh, dl
 	clr	dl			; clear return value
 	fninit
-NOFXIP<	segmov	ds, cs							>
-FXIP<	push	bx							>
-FXIP<	mov	bx, handle dgroup					>
-FXIP<	call	MemDerefDS		; ds = dgroup			>
-FXIP<	pop	bx							>
+if FULL_EXECUTE_IN_PLACE
+	push	bx
+	mov	bx, handle dgroup
+	call	MemDerefDS		; ds = dgroup
+	pop	bx
+elseif NDP_STATUS_IN_IDATA
+	push	ax
+	segmov	ds, dgroup, ax		; ds = dgroup
+	pop	ax
+else
+	segmov	ds, cs
+endif
 	fnstsw	{word}ds:[NDP_STATUS]
 
 	; if we can't write the status word, no processor

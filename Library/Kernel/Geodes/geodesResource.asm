@@ -1731,6 +1731,27 @@ endif
 afterLoad::
 
 	mov	es, ax			;save module address
+ifdef PROTECTED_MODE
+	;
+	; Code blocks get a code selector as soon as they are allocated
+	; (HeapAllocFlags HAF_CODE, see heapLow.asm), and a real CPU does
+	; not write through a code selector (DOSBox does not check).  Do
+	; the relocations through a data alias of the block; the alias is
+	; freed at noRelocations.
+	;
+	push	bx
+	mov	bx, ax
+	call	GPMIAliasFar		;bx <- data alias, carry on error
+	mov	di, bx
+	pop	bx
+	jnc	haveRelocAlias
+	clr	di			;no alias: use the block itself
+	jmp	pushRelocAlias
+haveRelocAlias:
+	mov	es, di
+pushRelocAlias:
+	push	di
+endif
 if	FULL_EXECUTE_IN_PLACE
 	test	ds:[GH_geodeAttr], mask GA_XIP
 	jz	notXIP
@@ -1922,6 +1943,14 @@ done:
 	call	ThreadReturnStackSpace
 
 noRelocations:
+ifdef PROTECTED_MODE
+	pop	bx			;data alias from above, or 0
+	tst	bx
+	jz	noRelocAlias
+	segmov	es, ds			;not the alias: it is freed now
+	call	GPMIFreeAliasFar
+noRelocAlias:
+endif
 	pop	ss:[TPD_dataAX], ss:[TPD_dataBX]
 
 	.leave
@@ -2116,10 +2145,19 @@ doSegment:
 	cmp	si, bp
 	LONG jnz storeDI
 
+ifdef PROTECTED_MODE
+	; ES may be a data alias of the block (see DoLoadResource): store
+	; the block's own selector, from its handle (cx = TPD_dataAX).
+	; ds = kdata here.
+	mov	si, cx
+	mov	di, ds:[si].HM_addr
+	jmp	storeDI
+else
 	mov	es:[bx],es
 	pop	ds
 exit3::
 	ret
+endif
 
 ;-----------------------------------------------------------
 

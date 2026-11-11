@@ -36,6 +36,9 @@ include Internal/interrup.def
 include Internal/geodeStr.def
 include Internal/fileStr.def
 include Internal/timerInt.def	; For counting durations of operations
+ifdef PROTECTED_MODE
+include gpmi.def		; DOSBox probe: invalid opcode exception
+endif
 
 include kernelFS.def
 ;------------------------------------------------------------------------------

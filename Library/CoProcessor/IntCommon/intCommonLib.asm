@@ -48,7 +48,9 @@ REVISION HISTORY:
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%@
 
+ifndef PROTECTED_MODE
 NDP_STATUS	dw	-1
+endif
 
 public Intel80X87LibraryEntry
 
@@ -56,6 +58,34 @@ Intel80X87LibraryEntry	proc	far
 	uses	ds
 	.enter
 	fninit
+ifdef PROTECTED_MODE
+	;
+	; The status word goes to the stack: under protected mode (GEOS32)
+	; a real CPU does not write through the code selector.
+	;
+	push	bp
+	push	ax			; scratch word for fnstsw/fnstcw
+	mov	bp, sp
+	fnstsw	{word}ss:[bp]
+
+	; if we can't write the status word, no processor
+	tst	{byte}ss:[bp]
+	jnz	noCoproc
+
+	; next, we check to see if a valid control word can be written
+	; if not, no CoProcessor is present. Don't use WAIT forms!!!
+
+	fnstcw	{word}ss:[bp]
+	and	{word}ss:[bp], 103fh
+	cmp	{word}ss:[bp], 3fh	; correct value
+	jne	noCoproc
+	clc
+done:
+	pop	ax			; (pop leaves the carry alone)
+	pop	bp
+	.leave
+	ret
+else
 	segmov	ds, cs
 	fnstsw	{word}ds:[NDP_STATUS]
 
@@ -74,6 +104,7 @@ Intel80X87LibraryEntry	proc	far
 done:
 	.leave
 	ret
+endif
 noCoproc:
 	stc
 	jmp	done

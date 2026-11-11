@@ -3174,8 +3174,18 @@ EC <	call	CheckClass						>
 	; assume that ds:[0] is a handle and see if its data address
 	; matches ds.
 
+ifdef PROTECTED_MODE
+	; A null DS is legal in protected mode, but must not be dereferenced
+	; (a real CPU faults; the check below came too late for that).
+	mov	ax,ds
+	tst	ax
+	jz	nullDS
+	mov	si,ds:[LMBH_handle]
+nullDS:
+else
 	mov	si,ds:[LMBH_handle]
 	mov	ax,ds
+endif
 	LoadVarSeg	ds
 	tst	ax
 	jnz	notNull
