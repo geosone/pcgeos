@@ -505,8 +505,7 @@ as in 16-bit GEOS). Before this, the C compiler padded the nested base
 structures on 64-bit hosts, and goc wrote the 16-bit offsets 4, 6, ...
 
 `MetaClass`, `ProcessClass`, `ObjInstantiate`, variable data and
-relocation: section 13. Not yet: `@children`/`CObjSendToChildren`
-(composites).
+relocation, composites: section 13.
 
 ctest `kernel.msg` (with `Goc/kmsg.goc`, classes and objects from
 `goc -cg`):
@@ -648,6 +647,27 @@ take the parameter structures of section 5. Their message numbers
 - `MemAllocLMem` zeroes its block, so the rest of an
   `ObjLMemBlockHeader` (counts, output) starts at 0.
 
+**Composites** (`objectComposite.c`, `objectLinkable.c`) work as in
+the asm kernel. A composite's `CompPart` holds its first child. Each
+child's `LinkPart` holds the next sibling, and the last child holds the
+parent with `LP_IS_PARENT` set in the chunk. goc writes these links the
+same way, unrelocated, and the class relocation tables cover them.
+
+- The routines take the C API's offsets: the master offset, then the
+  offsets of the parts in that master part.
+- Children may lie in other blocks.
+- `ObjCompAddChild` builds the master part of the composite and of the
+  child if they are not built yet.
+- `ObjCompProcessChildren` takes the next sibling before the callback,
+  so a callback may remove its child. Without a callback, only
+  `OCCT_COUNT_CHILDREN` exists in C (the count is added to
+  `*(word *) cbData`). The other call types send a message in
+  registers, and C uses `CObjSendToChildren` (`@send @children`)
+  instead.
+- `ObjLinkFindParent` is `@parent`.
+- The register routines `ObjLinkCallParent`, `ObjLinkCallNextSibling`
+  and `ObjSwapLockParent` have no C form.
+
 ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
 
 - the layout goc made: aligned parts and variable data, unrelocated
@@ -661,12 +681,15 @@ ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
 - the `MetaClass` messages and classed events;
 - remote `ObjInstantiate` and `ObjInstantiateForThread`;
 - `MSG_META_OBJ_FREE`, and `ObjFreeObjBlock` with and without an in-use
-  count.
+  count;
+- a static tree of composites across two resources: links as goc made
+  them, `@children`, `@parent`, finding, counting, callbacks that stop
+  or start at a child, removing, adding at every position, moving, and
+  new objects whose parts are built when they are added.
 
 Not yet:
 
-- Composites and links (`CObjSendToChildren`, `ObjCompAddChild`, ...),
-  GCN lists (`TEMP_META_GCN`), detach and quit (`objectShutdown.asm`),
+- GCN lists (`TEMP_META_GCN`), detach and quit (`objectShutdown.asm`),
   duplicating resources and saving to state.
 - **optrs in chunks that are not objects** (moniker lists, GCN list
   elements, chunk data). Glue relocated them through the geode's

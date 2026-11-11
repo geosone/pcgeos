@@ -83,7 +83,9 @@
     X(ILLEGAL_VARDATA_RELOCATION_OFFSET) \
     X(ERROR_RETURNED_BY_RELOCATION_HANDLER) \
     X(CANNOT_RELOCATE) \
-    X(CANNOT_UNRELOCATE)
+    X(CANNOT_UNRELOCATE) \
+    X(ADD_CHILD_OF_OBJ_ALREADY_IN_COMPOSITE) \
+    X(BAD_OBJ_COMP_CALL_TYPE)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -350,6 +352,46 @@ typedef Boolean ObjRelocMethod(void *pself, optr oself, word message,
  * owner (GeodeResourceHandle). */
 void ObjRelocateObjBlock(MemHandle mh, word vmRelocType);
 void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType);
+
+/* ---------------------------------------------------------------------
+ * Composites and links (Object/objectComposite.c, objectLinkable.c),
+ * as in metaC.goh.  A link (LinkPart) holds the next sibling, or the
+ * parent with LP_IS_PARENT set in the chunk for the last child; a
+ * composite (CompPart) holds its first child.  The offsets are those of
+ * the C API: the master offset (0: none), and the offsets of the
+ * CompPart and LinkPart in that master part.
+ * ------------------------------------------------------------------- */
+#define LP_IS_PARENT	1
+typedef WordFlags CompChildFlags;
+#define CCF_MARK_DIRTY	0x8000
+#define CCF_REFERENCE	0x7fff
+#define CCO_FIRST	0x0000
+#define CCO_LAST	0x7FFF
+typedef enum {
+    OCCT_SAVE_PARAMS_TEST_ABORT = 0,
+    OCCT_SAVE_PARAMS_DONT_TEST_ABORT = 2,
+    OCCT_DONT_SAVE_PARAMS_TEST_ABORT = 4,
+    OCCT_DONT_SAVE_PARAMS_DONT_TEST_ABORT = 6,
+    OCCT_ABORT_AFTER_FIRST = 8,
+    OCCT_COUNT_CHILDREN = 10
+} ObjCompCallType;
+typedef Boolean ObjCompCallback(optr parent, optr child, void *cbData);
+
+optr ObjLinkFindParent(optr obj, word masterOffset, word linkOffset);
+word ObjCompFindChildByOptr(optr obj, optr childToFind, word masterOffset,
+			    word compOffset, word linkOffset);
+optr ObjCompFindChildByNumber(optr obj, word childToFind, word masterOffset,
+			      word compOffset, word linkOffset);
+void ObjCompAddChild(optr obj, optr objToAdd, word flags, word masterOffset,
+		     word compOffset, word linkOffset);
+void ObjCompRemoveChild(optr obj, optr objToRemove, word flags,
+			word masterOffset, word compOffset, word linkOffset);
+void ObjCompMoveChild(optr obj, optr objToMove, word flags,
+		      word masterOffset, word compOffset, word linkOffset);
+Boolean ObjCompProcessChildren(optr obj, optr firstChild,
+			       ObjCompCallType stdCallback, void *cbData,
+			       word masterOffset, word compOffset,
+			       word linkOffset, ObjCompCallback *callback);
 
 /* ---------------------------------------------------------------------
  * Geode resources (Geodes/geodesResource.c).  Until GeodeLoad exists,

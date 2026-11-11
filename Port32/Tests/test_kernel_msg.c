@@ -54,8 +54,8 @@ int main(void)
     LMemValidate(objects);
 
     t2 = ThreadCreate(PRIORITY_LOW, 0, ProcessThread, 0, 0x2340);
-    KernelYield();
-    TimerSleep(1);			/* let it attach */
+    while (!ThreadGetInfo(t2, TGIT_QUEUE_HANDLE))
+	TimerSleep(1);			/* let it attach (slow under QEMU) */
     MemModifyOtherInfo(remote, t2);
     fails += KMsgRemote(ConstructOptr(t2, 0), ConstructOptr(remote, KRemote));
     fails += KMsgTimer(ConstructOptr(t2, 0));

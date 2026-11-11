@@ -20,6 +20,9 @@
 #   Object/objectMeta.c  <- MetaClass, freeing objects of objectMeta.asm
 #   Object/objectProcess.c <- ProcessClass of Object/objectProcess.asm
 #   Object/objectReloc.c <- object relocation of Object/objectReloc.asm
+#   Object/objectComposite.c <- composites of Object/objectComposite.asm,
+#                          CObjSendToChildren of Object/objectC.asm
+#   Object/objectLinkable.c <- ObjLinkFindParent of objectLinkable.asm
 add_library(geos_kernel STATIC
   Sys/sysError.c
   Heap/heapHandle.c
@@ -39,7 +42,9 @@ add_library(geos_kernel STATIC
   Object/objectVarData.c
   Object/objectMeta.c
   Object/objectProcess.c
-  Object/objectReloc.c)
+  Object/objectReloc.c
+  Object/objectComposite.c
+  Object/objectLinkable.c)
 target_include_directories(geos_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

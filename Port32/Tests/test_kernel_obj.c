@@ -3,7 +3,7 @@
  * (Library/Kernel/Object, Port32/ABI.md section 13) with the classes and
  * objects of Goc/kobj.goc: layout, relocation and unrelocation, variable
  * data, ObjInstantiate, MetaClass and ProcessClass, freeing objects and
- * object blocks.
+ * object blocks, composites.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -18,6 +18,7 @@ Handle __goc_resource_handles[4];	/* the geode loader fills it */
 extern ClassStruct KObjProcessClass, KOMidClass, KOPlainClass;
 extern const GocResource __goc_resource_Objects, __goc_resource_Other;
 extern const ChunkHandle KOObj1, KOObj2, KOPlain1, KOOther;
+extern const ChunkHandle KOTree, KOLeafA, KOLeafB, KOLeafC;
 extern const Message kobjGocMessages[];
 extern const int kobjGocMessageCount;
 extern int kobjRelocs, kobjUnrelocs;
@@ -31,6 +32,8 @@ int KObjInstantiate(MemHandle block);
 int KObjClassed(optr mid, optr plain);
 void KObjSendFree(optr o);
 ClassStruct *KObjClassOf(optr o);
+int KObjCompLayout(optr tree, optr a, optr c);
+int KObjComposite(optr tree, optr a, optr b, optr c);
 
 /* in the order of kobjGocMessages */
 static const Message kernelMessages[] = {
@@ -101,7 +104,7 @@ int main(void)
 {
     ThreadHandle me, t2;
     MemHandle objects, other, blk;
-    optr obj1, obj2, plain, oth, o, o2, o3;
+    optr obj1, obj2, plain, oth, o, o2, o3, tree, la, lb, lc;
     Saved s1, s2, sp, so;
     int i;
 
@@ -136,8 +139,13 @@ int main(void)
     obj2 = ConstructOptr(objects, KOObj2);
     plain = ConstructOptr(objects, KOPlain1);
     oth = ConstructOptr(other, KOOther);
+    tree = ConstructOptr(objects, KOTree);
+    la = ConstructOptr(objects, KOLeafA);
+    lb = ConstructOptr(other, KOLeafB);
+    lc = ConstructOptr(objects, KOLeafC);
 
     fails += KObjLayout(obj1, obj2);
+    fails += KObjCompLayout(tree, la, lc);
     Save(&s1, obj1);
     Save(&s2, obj2);
     Save(&sp, plain);
@@ -166,6 +174,9 @@ int main(void)
     fails += KObjInstantiate(objects);
     LMemValidate(objects);
     fails += KObjClassed(obj1, plain);
+    fails += KObjComposite(tree, la, lb, lc);
+    LMemValidate(objects);
+    LMemValidate(other);
 
     /* an object of a resource keeps its handle when freed */
     ObjFreeChunk(plain);
@@ -175,8 +186,8 @@ int main(void)
 
     /* a process thread runs a block: remote instantiation, freeing */
     t2 = ThreadCreate(PRIORITY_STANDARD, 0, ProcessThread, 0, GEODE);
-    KernelYield();
-    TimerSleep(1);			/* let it attach */
+    while (!ThreadGetInfo(t2, TGIT_QUEUE_HANDLE))
+	TimerSleep(1);			/* let it attach (slow under QEMU) */
     blk = MemAllocLMem(LMEM_TYPE_OBJ_BLOCK, 0);
     MemModifyOtherInfo(blk, t2);
     o = ObjInstantiate(blk, &KOPlainClass);	/* MSG_PROCESS_INSTANTIATE */

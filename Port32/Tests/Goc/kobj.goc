@@ -2,12 +2,14 @@
  *
  * kobj.goc -- the object system of the C kernel (Port32/ABI.md
  * section 13): object layout, variable data, relocation, MetaClass and
- * ProcessClass, ObjInstantiate, freeing objects and blocks.
+ * ProcessClass, ObjInstantiate, freeing objects and blocks,
+ * composites.
  *
  * Two master levels with optrs in their instance data, variable data
  * with an optr that is relocated, a class with a relocation method and
  * a class without master levels; objects in two resources that point to
- * each other and to the process.  test_kernel_obj.c drives it.
+ * each other and to the process; a tree of composites across both
+ * resources.  test_kernel_obj.c drives it.
  *
  ***********************************************************************/
 @include <stdapp.goh>
@@ -54,6 +56,19 @@ void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType);
 @endc
 @classdecl KOPlainClass;
 
+@class KOCompClass, MetaClass, master;
+    @instance @link KOCI_link;
+    @instance @composite KOCI_kids = KOCI_link;
+    @instance word KOCI_id;
+@message void MSG_KOC_VISIT(word add);
+@message word MSG_KOC_ID();
+@message word MSG_KOC_PARENT_ID();
+@endc
+@classdecl KOCompClass;
+
+@define kocChildren @children word_offsetof(KOCompBase, KOComp_offset), word_offsetof(KOCompInstance, KOCI_kids), word_offsetof(KOCompInstance, KOCI_link)
+@define kocParent @parent word_offsetof(KOCompBase, KOComp_offset), word_offsetof(KOCompInstance, KOCI_link)
+
 @class KObjProcessClass, ProcessClass;
 @endc
 @classdecl KObjProcessClass;
@@ -77,6 +92,16 @@ void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType);
     KOPI_proc = process;
     KOPI_x = 3;
 }
+@object KOCompClass KOTree = {
+    KOCI_id = 1;
+    KOCI_kids = @KOLeafA, @KOLeafB, @KOLeafC;
+}
+@object KOCompClass KOLeafA = {
+    KOCI_id = 10;
+}
+@object KOCompClass KOLeafC = {
+    KOCI_id = 30;
+}
 @end Objects;
 
 @start Other;
@@ -84,6 +109,9 @@ void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType);
     KOPI_other = @KOObj2;
     KOPI_x = 4;
     ATTR_KOP_W = 0x55;
+}
+@object KOCompClass KOLeafB = {
+    KOCI_id = 20;
 }
 @end Other;
 
@@ -110,6 +138,9 @@ const int kobjGocMessageCount =
 /* the offsets of the master offset words */
 #define TOP_MO	word_offsetof(KOTopBase, KOTop_offset)
 #define MID_MO	word_offsetof(KOMidBase, KOMid_offset)
+#define COMP_MO	word_offsetof(KOCompBase, KOComp_offset)
+#define COMP_ARGS COMP_MO, word_offsetof(KOCompInstance, KOCI_kids), \
+		  word_offsetof(KOCompInstance, KOCI_link)
 
 int kobjRelocs, kobjUnrelocs, kobjBumps;
 static int fails;
@@ -446,4 +477,166 @@ ClassStruct *
 KObjClassOf(optr o)
 {
     return @call o::MSG_META_GET_CLASS();
+}
+
+/* ---- composites ---- */
+
+static word visits[8];
+static int nVisits;
+
+@method KOCompClass, MSG_KOC_VISIT
+{
+    if (nVisits < 8) {
+	visits[nVisits++] = pself->KOCI_id + add;
+    }
+}
+
+@method KOCompClass, MSG_KOC_ID
+{
+    return pself->KOCI_id;
+}
+
+@method KOCompClass, MSG_KOC_PARENT_ID
+{
+    return @call @kocParent::MSG_KOC_ID();
+}
+
+/* the children's ids in order, through @send @children (from the
+ * composite: @children is of oself) */
+static int
+KObjCompOrder(optr tree, word a, word b, word c)
+{
+    optr oself = tree;
+
+    nVisits = 0;
+    @send @kocChildren::MSG_KOC_VISIT(0);
+    if (c) {
+	return nVisits == 3 && visits[0] == a && visits[1] == b &&
+	       visits[2] == c;
+    }
+    if (b) {
+	return nVisits == 2 && visits[0] == a && visits[1] == b;
+    }
+    if (a) {
+	return nVisits == 1 && visits[0] == a;
+    }
+    return nVisits == 0;
+}
+
+static int abortAt;
+
+static Boolean
+Visit(optr parent, optr child, void *cbData)
+{
+    (void) parent;
+    (*(int *) cbData)++;
+    visits[nVisits++] = @call child::MSG_KOC_ID();
+    return *(int *) cbData == abortAt;
+}
+
+/* goc's unrelocated links: siblings, and the parent for the last */
+int
+KObjCompLayout(optr tree, optr a, optr c)
+{
+    KOCompInstance *t, *ci;
+
+    fails = 0;
+    t = ObjDeref(tree, COMP_MO);
+    ci = ObjDeref(c, COMP_MO);
+    Check(t->KOCI_kids.CP_firstChild == GOCR_UNRELOC_OPTR(GOCR_RES_OBJECTS, KOLeafA),
+	  "unrelocated first child");
+    Check(ci->KOCI_link.LP_next == (GOCR_UNRELOC_OPTR(GOCR_RES_OBJECTS, KOTree) | 1),
+	  "unrelocated parent link");
+    (void) a;
+    return fails;
+}
+
+int
+KObjComposite(optr tree, optr a, optr b, optr c)
+{
+    MemHandle mh = OptrToHandle(tree);
+    word count = 0;
+    int n;
+    optr d, e;
+    KOCompInstance *ci;
+
+    fails = 0;
+    ci = ObjDeref(c, COMP_MO);
+    Check(ci->KOCI_link.LP_next == (tree | 1), "relocated parent link");
+    Check(ObjLinkFindParent(a, COMP_MO, word_offsetof(KOCompInstance,
+						      KOCI_link)) == tree &&
+	  ObjLinkFindParent(b, COMP_MO, word_offsetof(KOCompInstance,
+						      KOCI_link)) == tree,
+	  "ObjLinkFindParent");
+    Check(ObjLinkFindParent(tree, COMP_MO, word_offsetof(KOCompInstance,
+							 KOCI_link)) == 0,
+	  "no parent");
+    Check(@call b::MSG_KOC_PARENT_ID() == 1, "@parent");
+    Check(ObjCompFindChildByOptr(tree, b, COMP_ARGS) == 1 &&
+	  ObjCompFindChildByOptr(tree, tree, COMP_ARGS) == 0xffff,
+	  "ObjCompFindChildByOptr");
+    Check(ObjCompFindChildByNumber(tree, 2, COMP_ARGS) == c &&
+	  ObjCompFindChildByNumber(tree, 0, COMP_ARGS) == a &&
+	  ObjCompFindChildByNumber(tree, 3, COMP_ARGS) == 0,
+	  "ObjCompFindChildByNumber");
+    ObjCompProcessChildren(tree, 0, OCCT_COUNT_CHILDREN, &count, COMP_ARGS,
+			   NULL);
+    Check(count == 3, "OCCT_COUNT_CHILDREN");
+
+    /* @send @children, across both blocks */
+    Check(KObjCompOrder(tree, 10, 20, 30), "@children");
+
+    /* a callback that stops, a start at a child number */
+    n = 0;
+    nVisits = 0;
+    abortAt = 2;
+    Check(ObjCompProcessChildren(tree, 0, 0, &n, COMP_ARGS, Visit) &&
+	  n == 2 && visits[1] == 20, "callback abort");
+    n = 0;
+    nVisits = 0;
+    abortAt = 0;
+    Check(!ObjCompProcessChildren(tree, ConstructOptr(0, 1), 0, &n,
+				  COMP_ARGS, Visit) &&
+	  n == 2 && visits[0] == 20, "start at child 1");
+    n = 0;
+    nVisits = 0;
+    Check(!ObjCompProcessChildren(tree, c, 0, &n, COMP_ARGS, Visit) &&
+	  n == 1 && visits[0] == 30, "start at a child");
+
+    /* remove: the middle, the first, the only child */
+    ObjSetFlags(a, 0, OCF_DIRTY);
+    ObjCompRemoveChild(tree, b, CCF_MARK_DIRTY, COMP_ARGS);
+    Check(KObjCompOrder(tree, 10, 30, 0) &&
+	  ((KOCompInstance *) ObjDeref(b, COMP_MO))->KOCI_link.LP_next == 0 &&
+	  (ObjGetFlags(a) & OCF_DIRTY), "remove the middle child");
+    ObjCompRemoveChild(tree, a, 0, COMP_ARGS);
+    Check(KObjCompOrder(tree, 30, 0, 0), "remove the first child");
+    ObjCompRemoveChild(tree, c, 0, COMP_ARGS);
+    Check(KObjCompOrder(tree, 0, 0, 0) &&
+	  ((KOCompInstance *) ObjDeref(tree, COMP_MO))->KOCI_kids.CP_firstChild == 0,
+	  "remove the only child");
+
+    /* add at the end, at the front, in the middle; move */
+    ObjCompAddChild(tree, a, CCO_LAST, COMP_ARGS);
+    Check(ObjLinkFindParent(a, COMP_MO, word_offsetof(KOCompInstance,
+						      KOCI_link)) == tree,
+	  "add to an empty composite");
+    ObjCompAddChild(tree, c, CCO_FIRST, COMP_ARGS);
+    ObjCompAddChild(tree, b, 1 | CCF_MARK_DIRTY, COMP_ARGS);
+    Check(KObjCompOrder(tree, 30, 20, 10), "add");
+    ObjCompMoveChild(tree, a, CCO_FIRST, COMP_ARGS);
+    Check(KObjCompOrder(tree, 10, 30, 20), "move");
+
+    /* new objects: the parts are built when added */
+    d = ObjInstantiate(mh, &KOCompClass);
+    e = ObjInstantiate(mh, &KOCompClass);
+    ObjCompAddChild(d, e, CCO_LAST, COMP_ARGS);
+    Check(ObjLinkFindParent(e, COMP_MO, word_offsetof(KOCompInstance,
+						      KOCI_link)) == d &&
+	  ObjCompFindChildByNumber(d, 0, COMP_ARGS) == e,
+	  "new composite");
+    ObjCompAddChild(tree, d, CCO_LAST, COMP_ARGS);
+    Check(@call e::MSG_KOC_PARENT_ID() == 0 &&
+	  ObjCompFindChildByNumber(tree, 3, COMP_ARGS) == d, "nested");
+    return fails;
 }
