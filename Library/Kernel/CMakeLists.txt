@@ -9,6 +9,8 @@
 #   LMem/lmemCode.c    <- local memory heaps of LMem/lmemCode.asm
 #   LMem/lmemChunkArray.c, lmemElementArray.c, lmemNameArray.c
 #                      <- the arrays of the same names (.asm)
+#   Timer/timerList.c  <- timers of Timer/timerList.asm, timerMisc.asm
+#   Timer/timerInt.c   <- the timer interrupt of Timer/timerInt.asm
 add_library(geos_kernel STATIC
   Sys/sysError.c
   Heap/heapHandle.c
@@ -18,7 +20,9 @@ add_library(geos_kernel STATIC
   LMem/lmemCode.c
   LMem/lmemChunkArray.c
   LMem/lmemElementArray.c
-  LMem/lmemNameArray.c)
+  LMem/lmemNameArray.c
+  Timer/timerList.c
+  Timer/timerInt.c)
 target_include_directories(geos_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

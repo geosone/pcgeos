@@ -170,6 +170,7 @@ void *MemLock(MemHandle mh)
 {
     HandleEntry *he = MemEntryOf(mh);
 
+    KernelPreemptPoint();
     if (!he->HE_addr)
 	return NULL;			/* discarded */
     if (!(he->HE_flags & HF_FIXED)) {

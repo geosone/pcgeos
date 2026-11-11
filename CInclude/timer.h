@@ -48,6 +48,16 @@ extern TimerHandle
 
 /***/
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: routine timers (TIMER_ROUTINE_*, TIMER_MS_ROUTINE_ONE_SHOT) pass
+ * the routine as destObject (TimerRoutineOptr) and its data as msg; the
+ * routine runs in interrupt context.  Port32/ABI.md section 11.
+ */
+typedef void TimerRoutine(word data, dword tickCount);
+#define TimerRoutineOptr(fn)	((optr) (uintptr_t) (TimerRoutine *) (fn))
+#endif
+
 extern Boolean		/* true if not found */
     _pascal TimerStop(TimerHandle th, word id);
 

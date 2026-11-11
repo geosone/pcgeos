@@ -15,6 +15,7 @@
 #include <sem.h>
 #include <thread.h>
 #include <lmem.h>
+#include <timer.h>
 #include <geosport.h>
 
 /* ---------------------------------------------------------------------
@@ -59,7 +60,8 @@
     X(CHUNK_ARRAY_HEADER_SIZE_TOO_SMALL) \
     X(CANNOT_SORT_VARIABLE_SIZED_CHUNK_ARRAYS) \
     X(CANNOT_RESIZE_FIXED_SIZE_ELEMENT) \
-    X(NULL_ELEMENT_PASSED_TO_CHUNK_ARRAY_ROUTINE)
+    X(NULL_ELEMENT_PASSED_TO_CHUNK_ARRAY_ROUTINE) \
+    X(BAD_TIMER_TYPE)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -213,8 +215,37 @@ int   ThreadBlockOn(KSem *s, dword timeout);
 void  ThreadWakeOne(KSem *s);
 /* let other threads of the same priority run */
 void  KernelYield(void);
+/* Set from interrupt code when another thread should run (time slice
+ * over, a better thread woke up); KernelPreemptPoint, called at kernel
+ * entry points, switches then.  Port32/GHAL-Concept.md 4.1. */
+extern volatile int kernelReschedulePending;
+void  KernelPreemptPoint(void);
+/* from the timer interrupt (Timer/timerInt.c), inside ghal_crit: CPU
+ * usage and time slice of the running thread, timeouts; every second:
+ * halve the CPU usage of all threads */
+void  ThreadTick(void);
+void  ThreadDecay(void);
 /* ticks (1/60 s) since the start, from the GHAL clock */
 dword KernelTicks(void);
+
+/* ---------------------------------------------------------------------
+ * Timer (Timer/timerList.c, timerInt.c).  Port32/ABI.md section 11.
+ * ------------------------------------------------------------------- */
+#define TIMER_INTERRUPT_RATE	60	/* ticks per second */
+#define TIME_SLICE		6	/* ticks (INTERRUPT_RATE / 10) */
+
+/* Start the timer interrupt (GHAL_IRQ_TICK at 60 Hz). */
+void KernelTimerInit(void);
+void KernelTimerExit(void);
+/* runs the timers that are due; from the timer interrupt */
+void TimerCheckList(dword now);
+/* frees what interrupt code could not (deferred); not from interrupts */
+void TimerReap(void);
+/* Event timers send a message; the message system sets this.  Until it
+ * does, events are counted in kernelTimerEventsDropped. */
+extern void (*kernelTimerEventHook)(optr dest, Message msg, dword tick,
+				    word id);
+extern dword kernelTimerEventsDropped;
 
 /* ---------------------------------------------------------------------
  * LMem (LMem/lmemCode.c, after lmemCode.asm).  Port32/ABI.md section 10.

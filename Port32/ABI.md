@@ -376,7 +376,7 @@ Name arrays are variable-sized element arrays of reference count, data
 
 - `RefElementHeader` is 4 bytes in Port32 (`WordAndAHalf` gets host
   alignment), 3 in 16-bit GEOS: name and element arrays in DOS16 files
-  need the converter (section 11).
+  need the converter (section 12).
 - `ElementArrayAddElement` has no size for variable-sized elements (the
   asm C stub passed none either): it serves fixed-size arrays; the kernel
   uses `ElementArrayAddElementSized` (for name arrays).
@@ -404,7 +404,44 @@ contraction, the 64K limit and the error checks. `goc.resources` builds
 the blocks of its goc resources with `LMemCreateResourceBlock` and finds
 every chunk through its goc chunk handle.
 
-## 11. Open
+## 11. Timer (`Library/Kernel/Timer`, P4)
+
+`Timer/timerList.c` and `timerInt.c`: `TimerStart`, `TimerStop`,
+`TimerSleep`, `TimerGetCount` and the timer interrupt.
+
+- **Ticks** are 1/60 s of the GHAL clock (`KernelTicks`); the interrupt
+  is `GHAL_IRQ_TICK` at 60 Hz (PIT/IRQ0 on dos32, a host thread on
+  linux). `TimerGetCount` and the timeouts of `ThreadPTimedSem` use the
+  same clock.
+- **Routine timers** (`TIMER_ROUTINE_*`, `TIMER_MS_ROUTINE_ONE_SHOT`)
+  pass the routine as `destObject` and its data as `msg` under
+  `GEOS_PORT32` (`TimerRoutineOptr(fn)`, `TimerRoutine(word data, dword
+  tickCount)` in `timer.h`); the routine runs in interrupt context, as
+  in the asm kernel. Millisecond timers are rounded up to ticks.
+- **Event timers** send through `kernelTimerEventHook`, which the message
+  system will set; until then their events are counted as dropped.
+- **Real-time timers** (`TIMER_*_REAL_TIME`) are not there yet
+  (`BAD_TIMER_TYPE`).
+- Interrupt code does not free memory (DJGPP's `malloc` under a hardware
+  interrupt); ended timers are freed from normal code (`TimerReap`).
+
+**Scheduling** now follows `timerInt.asm`: every tick the running thread's
+CPU usage and current priority go up; after a time slice (6 ticks) or
+when a better thread became ready, the interrupt sets
+`kernelReschedulePending`; every second the CPU usage of all threads is
+halved and the priorities recomputed. The switch itself happens at the
+next kernel entry (`KernelPreemptPoint`: `MemLock`, semaphore P,
+`TimerGetCount`, ...) or at once when every thread waits (idle).
+GHAL-Concept §4.1: soft preemption first; hard preemption of threads
+that never enter the kernel is not needed so far.
+
+ctest `kernel.timer`: sleep, one-shot and continual routine timers,
+`TimerStop` (found, ended, wrong id), millisecond timers, an interrupt
+waking a blocked thread, event timers through the hook, and two
+computing threads of the same priority sharing the CPU by time slices
+(with rising priority) while a better thread sleeps and comes back.
+
+## 12. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`). The
    module format is decided (`GHAL-Concept.md` §4.4) and the `.gp` data is

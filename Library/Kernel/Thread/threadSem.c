@@ -19,6 +19,7 @@ SemaphoreError KSemP(KSem *s, dword timeout)
 {
     SemaphoreError r = SE_NO_ERROR;
 
+    KernelPreemptPoint();
     ghal_crit_enter();
     if (--s->S_value < 0) {
 	if (timeout == 0) {

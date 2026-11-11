@@ -20,7 +20,10 @@
 
 ThreadHandle kernelCurrentThread;
 
+volatile int kernelReschedulePending;
+
 static Handle runQueue;			/* ready threads, via T_nextQ */
+static byte   sliceLeft = TIME_SLICE;	/* ticks of the running thread */
 static Handle deadList;			/* ended, to be released */
 static dword  timedWaiters;		/* blocked threads with a deadline */
 static uint64_t tickBase;
@@ -151,6 +154,7 @@ static void Dispatch(void)
     nt = ThreadOf(next);
     nt->T_state = TS_RUNNING;
     kernelCurrentThread = next;
+    sliceLeft = TIME_SLICE;
     if (next == prev)
 	return;
     if (pt->T_state == TS_DEAD)
@@ -165,8 +169,12 @@ static void MaybePreempt(void)
 {
     Handle cur = kernelCurrentThread;
 
-    if (cur && runQueue && !ghal_irq_active() &&
+    if (cur && runQueue &&
 	ThreadOf(runQueue)->T_curPriority < ThreadOf(cur)->T_curPriority) {
+	if (ghal_irq_active()) {
+	    kernelReschedulePending = 1;
+	    return;
+	}
 	MakeReady(cur);
 	Dispatch();
     }
@@ -200,6 +208,68 @@ void ThreadWakeOne(KSem *s)
     if (th) {
 	MakeReady(th);
 	MaybePreempt();
+    }
+}
+
+void KernelPreemptPoint(void)
+{
+    if (kernelReschedulePending && !ghal_irq_active()) {
+	kernelReschedulePending = 0;
+	KernelYield();
+    }
+}
+
+/* the running thread used a tick (timerInt.asm, step 9) */
+void ThreadTick(void)
+{
+    Handle cur = kernelCurrentThread;
+    KThread *t;
+
+    CheckTimeouts();
+    if (!cur)
+	return;
+    t = ThreadOf(cur);
+    if (t->T_cpuUsage < 255)
+	t->T_cpuUsage++;
+    if (t->T_curPriority < PRIORITY_IDLE - 1)
+	t->T_curPriority++;
+    if (--sliceLeft == 0) {
+	sliceLeft = TIME_SLICE;
+	if (runQueue)
+	    kernelReschedulePending = 1;
+    } else if (runQueue &&
+	       ThreadOf(runQueue)->T_curPriority < t->T_curPriority)
+	kernelReschedulePending = 1;	/* a woken thread is better */
+}
+
+/* every second: halve the CPU usage (timerInt.asm, step 7) */
+static int Decay(Handle th, HandleEntry *he, void *ctx)
+{
+    KThread *t = he->HE_addr;
+    word p;
+
+    (void) th;
+    (void) ctx;
+    if (he->HE_type != SIG_THREAD)
+	return 0;
+    t->T_cpuUsage >>= 1;
+    p = (word) (t->T_basePriority + t->T_cpuUsage);
+    if (p < PRIORITY_IDLE)
+	t->T_curPriority = (byte) p;
+    return 0;
+}
+
+void ThreadDecay(void)
+{
+    Handle q;
+
+    HandleEnum(Decay, NULL);
+    /* priorities changed: order the run queue again */
+    q = runQueue;
+    runQueue = 0;
+    while (q) {
+	Handle th = QueuePop(&q);
+	QueueInsert(&runQueue, th);
     }
 }
 
