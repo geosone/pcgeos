@@ -111,7 +111,7 @@ Work is based on the PM branch.
 Ordered by dependency, each with host-side tests under `linux`:
 
 1. Heap (32-bit handles, blocks do not move), LMem (chunks still move within a block), Initfile, Local
-   **Started 2026-11-11:** handle table and memory block API (`Library/Kernel/Heap/heapHandle.c`, `heapHigh.c`, `Sys/sysError.c`; ABI.md §8), ctest `kernel.heap` on all hosts. Next: threads and semaphores for `HandleP`/`V` and the thread locks, then LMem.
+   **Started 2026-11-11:** handle table and memory block API (`Library/Kernel/Heap/heapHandle.c`, `heapHigh.c`, `Sys/sysError.c`; ABI.md §8), ctest `kernel.heap` on all hosts. Threads, scheduler, semaphores and thread locks on the new `ghal_ctx` (`Thread/threadThread.c`, `threadSem.c`; ABI.md §9), ctest `kernel.thread` on all hosts. Next: LMem, then the timer (time slices, `TimerSleep`) and event queues.
 2. Thread/Sem/Timer on `ghal_ctx` / `ghal_time` (GEOS scheduler + kernel lock)
 3. Object (message dispatch with C signatures, 32-bit message numbers), Geodes (`GeodeLoad` on `ghal_module`: DXE3 on dos32, ELF on linux/gonware)
 4. VMem (new file format), File API, FSD + HostFS driver on `ghal_fs`

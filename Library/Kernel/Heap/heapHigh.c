@@ -10,8 +10,9 @@
  * discarded block returns NULL (the caller reloads it, e.g. a resource).
  * Block sizes stay words (64K at most), as LMem chunk handles are 16 bits.
  *
- * Not here yet (they need threads): HandleP/HandleV, MemPLock/MemUnlockV,
- * MemThreadGrab/Release and the shared/exclusive locks.  Port32/PLAN.md P4.
+ * HandleP/HandleV use the KSem of the handle (threadSem.c); MemThreadGrab
+ * keeps the grabbing thread in the other info, as the asm kernel does.
+ * Not here yet: the shared/exclusive locks.  Port32/PLAN.md P4.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -61,6 +62,7 @@ MemHandle MemAllocSetOwner(GeodeHandle owner, word byteSize,
     he->HE_allocFlags = haf & HAF_KEEP_MASK;
     he->HE_size = byteSize;
     he->HE_addr = data;
+    KSemInit(&he->HE_sem, 1);
     if ((haf & HAF_LOCK) && data && !(hf & HF_FIXED))
 	he->HE_lockCount = 1;
     return h;
@@ -159,7 +161,7 @@ void HandleModifyOwner(Handle h, GeodeHandle owner)
     HandleEntryOf(h)->HE_owner = owner;
 }
 
-void MemModifyOtherInfo(MemHandle mh, word otherInfo)
+void MemModifyOtherInfo(MemHandle mh, dword otherInfo)
 {
     MemEntryOf(mh)->HE_otherInfo = otherInfo;
 }
@@ -250,4 +252,73 @@ void MemDecRefCount(MemHandle mh)
 	KernelFatal(MEM_REFERENCE_COUNT_UNDERFLOW);
     if (--he->HE_otherInfo == 0)
 	MemFree(mh);
+}
+
+/* ---------------------------------------------------------------------
+ * Exclusive access between threads
+ * ------------------------------------------------------------------- */
+
+void HandleP(MemHandle mh)
+{
+    KSemP(&HandleEntryOf(mh)->HE_sem, KSEM_FOREVER);
+}
+
+void HandleV(MemHandle mh)
+{
+    KSemV(&HandleEntryOf(mh)->HE_sem);
+}
+
+void *MemPLock(MemHandle mh)
+{
+    HandleP(mh);
+    return MemLock(mh);
+}
+
+void MemUnlockV(MemHandle mh)
+{
+    MemUnlock(mh);
+    HandleV(mh);
+}
+
+/* grab for the running thread; `block' 0: return BLOCK_GRABBED instead
+ * of waiting */
+static void *Grab(MemHandle mh, int block)
+{
+    HandleEntry *he = MemEntryOf(mh);
+    ThreadHandle cur = KernelThisThread();
+
+    if (he->HE_nesting && he->HE_otherInfo == cur) {
+	if (he->HE_nesting == 0xffff)
+	    KernelFatal(TOO_MANY_LOCKS);
+	he->HE_nesting++;
+    } else {
+	if (KSemP(&he->HE_sem, block ? KSEM_FOREVER : 0) != SE_NO_ERROR)
+	    return (void *) BLOCK_GRABBED;
+	he->HE_otherInfo = cur;
+	he->HE_nesting = 1;
+    }
+    return MemLock(mh);
+}
+
+void *MemThreadGrab(MemHandle mh)
+{
+    return Grab(mh, 1);
+}
+
+void *MemThreadGrabNB(MemHandle mh)
+{
+    return Grab(mh, 0);
+}
+
+void MemThreadRelease(MemHandle mh)
+{
+    HandleEntry *he = MemEntryOf(mh);
+
+    if (he->HE_nesting == 0 || he->HE_otherInfo != KernelThisThread())
+	KernelFatal(THREAD_RELEASE_NOT_OWNER);
+    MemUnlock(mh);
+    if (--he->HE_nesting == 0) {
+	he->HE_otherInfo = 0;
+	KSemV(&he->HE_sem);
+    }
 }

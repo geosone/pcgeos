@@ -115,6 +115,48 @@ void        ghal_crit_enter(void);
 void        ghal_crit_leave(void);
 
 /* ---------------------------------------------------------------------
+ * ghal_ctx -- execution contexts for GEOS threads (GHAL-Concept.md 4.1).
+ *
+ * The GEOS scheduler stays in the kernel; the GHAL only runs contexts.
+ * Exactly one context runs at a time: ghal_ctx_switch stops the caller
+ * and runs the target.  dos32: own stacks and a context switch.  Hosts
+ * with threads: one host thread per context, handed a baton.
+ *
+ * ghal_ctx_switch may be called inside ghal_crit.  The nesting of
+ * ghal_crit belongs to the context: the target continues with the depth
+ * it had when it switched away (a new context starts with depth 0), the
+ * caller gets its own back when it runs again.
+ * ------------------------------------------------------------------- */
+
+typedef struct ghal_ctx ghal_ctx;
+typedef void (*ghal_ctx_entry)(void *arg);
+
+/* The running context.  The first call makes one for the program's own
+ * thread.  Not from a ghal_irq handler. */
+ghal_ctx   *ghal_ctx_self(void);
+/* A new context that starts in fn(arg) when it is first switched to.
+ * fn must not return; it ends with ghal_ctx_exit.  stack_size 0: the
+ * default (64K at least). */
+ghal_status ghal_ctx_create(ghal_ctx_entry fn, void *arg, size_t stack_size,
+                            ghal_ctx **out);
+/* Stop the caller and run `to' (not the caller).  Returns when another
+ * context switches back. */
+void        ghal_ctx_switch(ghal_ctx *to);
+/* End the calling context and run `to'.  Another context releases the
+ * ended one with ghal_ctx_destroy. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noreturn))
+#endif
+void        ghal_ctx_exit(ghal_ctx *to);
+/* Release a context that has ended or never ran (not the running one). */
+void        ghal_ctx_destroy(ghal_ctx *c);
+
+/* Called inside ghal_crit when no GEOS thread can run: wait for the next
+ * asynchronous event (a ghal_irq handler) with the critical section
+ * released, return inside it.  May return early. */
+void        ghal_idle(void);
+
+/* ---------------------------------------------------------------------
  * ghal_hostlock -- serialize calls into non-reentrant host services;
  * replaces SysLockBIOS/SysUnlockBIOS.  Nestable.
  * ------------------------------------------------------------------- */
@@ -144,6 +186,9 @@ ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
 ghal_status ghal_irq_detach(ghal_irq_source *src);
 /* Tick rate of GHAL_IRQ_TICK in Hz (GEOS uses 60). */
 ghal_status ghal_irq_set_tick_rate(unsigned hz);
+/* Non-zero while the caller runs a ghal_irq handler (the kernel must
+ * not switch contexts there; it reschedules when the handler is done). */
+int         ghal_irq_active(void);
 
 /* ---------------------------------------------------------------------
  * ghal_fault -- CPU exceptions.

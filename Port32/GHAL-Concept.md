@@ -100,7 +100,7 @@ Under DOS, on the other hand, the real hardware drivers stay (VGA/VESA, PS/2, IF
 | `ghal_boot` | startup, arguments, environment, path to `geos.ini`, system directory | DPMI program (PE via HX or LE), replaces `Loader/` | `main()` | `WinMain`/`main` |
 | `ghal_mem` | memory blocks for the kernel heap (one host allocation per block, see 4.6), protection of code blocks | DPMI `int 31h` (0501h …) | `mmap` | `VirtualAlloc` |
 | `ghal_time` | monotonic clock, wall clock, **tick source** for the scheduler | PIT (IRQ0) + RTC | `clock_gettime`, timer thread | `QueryPerformanceCounter`, timer thread |
-| `ghal_ctx` | execution contexts for GEOS threads (see 4.1) | own stacks + context switch | one host thread per GEOS thread | same with Win32 threads |
+| `ghal_ctx` | execution contexts for GEOS threads (see 4.1; implemented, ABI.md §9) | own stacks + context switch | one host thread per GEOS thread | same with Win32 threads |
 | `ghal_crit` | critical sections, replaces `INT_OFF`/`INT_ON` (see 4.2) | `cli`/`sti` | kernel lock | kernel lock |
 | `ghal_irq` | register asynchronous event sources, replaces `SysCatch(Device)Interrupt` (see 4.2) | real IRQ vectors via DPMI | host thread / event loop calls the handler | same |
 | `ghal_hostlock` | lock for non-reentrant host services, replaces `SysLockBIOS` | DOS lock as today | only where needed, e.g. calls that must go to the main thread (4.3) | same |
@@ -153,7 +153,7 @@ Today the GEOS kernel loads its `.geo` files **itself** (own format, own relocat
 - `cmake/GeosGeode.cmake` (`geos_geode()`) builds a geode in the host's format. A geode has no host C library and no sanitizer or stack-protector runtime; libgcc is linked in. What libgcc itself imports (DXE3 with unwind tables: `__register_frame_info`/`__deregister_frame_info`; ARM: `raise` for division by zero) is provided by the kernel.
 - Names are C names on every host (DJGPP's leading underscore is dropped by the loader).
 - `ghal.module` loads a test geode on all five builds (linux amd64, i686, arm64, armhf under qemu-user, dos32 on DOS in QEMU): imports by call and by data reference, pointers in data, function pointers, bss, initializers/finalizers, two instances, unresolved imports and broken images.
-- The GEOS data of a geode (the `.gp` tables: name, token, attributes, protocol, libraries, exported entries, resource table) is the exported object `__geos_module` in the module (`Port32/ABI.md` §7, `Port32/tools/gpgeode.py`). Still open: `GeodeLoad` of the C kernel on top of `ghal_module` (`Port32/ABI.md` §9.1).
+- The GEOS data of a geode (the `.gp` tables: name, token, attributes, protocol, libraries, exported entries, resource table) is the exported object `__geos_module` in the module (`Port32/ABI.md` §7, `Port32/tools/gpgeode.py`). Still open: `GeodeLoad` of the C kernel on top of `ghal_module` (`Port32/ABI.md` §10.1).
 - On Linux additionally a debug mode via `dlopen`, so gdb sees the symbols (or registration through the gdb JIT interface).
 - The kernel and the GHAL core are built together as a normal host program: DOS (DJGPP COFF with CWSDPMI), ELF program or `.exe`.
 

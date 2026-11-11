@@ -126,8 +126,14 @@ extern void	/*XXX*/
 
 /***/
 
+#ifdef GEOS_PORT32
+/* Port32: other info may hold a thread handle (exec thread), 32 bits */
+extern void
+    MemModifyOtherInfo(MemHandle mh, dword otherInfo);
+#else
 extern void	/*XXX*/
     _pascal MemModifyOtherInfo(MemHandle mh, word otherInfo);
+#endif
 
 /***/
 

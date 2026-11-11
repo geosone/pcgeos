@@ -288,16 +288,53 @@ The C kernel starts with the handle table and the memory block API of
   use `MemDeref`).
 - **Fatal errors** keep the names of `kernelErrors.def`, not their
   numbers; the C kernel reports them by name (`KernelFatal`).
-- Not yet: `HandleP`/`HandleV`, `MemPLock`/`MemUnlockV`,
-  `MemThreadGrab`, shared/exclusive locks (they need threads and
-  semaphores, next in P4).
+- `HandleP`/`HandleV`, `MemPLock`/`MemUnlockV` and `MemThreadGrab`
+  use a semaphore in every handle entry (section 9). Not yet: the
+  shared/exclusive locks.
+- **`MemModifyOtherInfo` takes a `dword`** under `GEOS_PORT32`: the
+  other info may hold a thread handle (exec thread, grabbing thread).
 
 ctest `kernel.heap` covers allocation, locking, resizing (zero fill),
 discarding, fixed blocks, reference counts, owners, 5000 handles and the
 error checks (caught with `kernelFatalHook`) on all hosts, dos32 with
 both DJGPP and Open Watcom.
 
-## 9. Open
+## 9. Threads and semaphores (`Library/Kernel/Thread`, P4)
+
+GEOS keeps its own scheduler (GHAL-Concept §4.1); the GHAL runs the
+contexts (`ghal_ctx`).
+
+- **`ghal_ctx`**: exactly one context runs; `ghal_ctx_switch` stops the
+  caller and runs the target. The `ghal_crit` nesting belongs to the
+  context. linux: one host thread per context and a baton (no
+  `pthread_exit`; an ended context returns from its thread function).
+  dos32: own stacks and one small stack switch routine (DJGPP and Open
+  Watcom); Watcom's stack check limit `_STACKLOW` is switched with the
+  context, so stack overflow checks keep working per thread.
+  `ghal_idle` waits for the next interrupt when no thread can run;
+  `ghal_irq_active` tells the kernel it must not switch.
+- **Threads** are `SIG_THREAD` handles with a `KThread`. The run queue is
+  ordered by priority (lower number first, FIFO within a priority). A
+  thread switches when it blocks, ends, yields, or when a thread of
+  better priority becomes ready outside interrupt code. Not yet: time
+  slices and CPU usage (with the timer), the `ThreadDestroy`
+  acknowledgement (with messages), event queues, exceptions.
+- **Stacks**: the 16-bit stack sizes are too small for 32/64-bit code;
+  every context gets at least the GHAL minimum (dos32 64K, linux 256K).
+- **Semaphores** (`ThreadAllocSem`, `ThreadPSem`, `ThreadVSem`,
+  `ThreadPTimedSem`) and **thread locks** (`ThreadGrabThreadLock`, nested
+  per thread) are `SIG_SEMAPHORE` handles; the waiting threads are queued
+  by priority. Timeouts are in ticks (1/60 s) of the GHAL clock;
+  timeout 0 does not block.
+- **`ThreadGetInfo` returns a `dword`** under `GEOS_PORT32` (thread and
+  queue handles are 32 bits).
+
+ctest `kernel.thread` covers turn taking, priorities and preemption,
+yield and `ThreadModify`, release of ended threads, nested thread locks
+and `MemThreadGrab` between threads, `MemThreadGrabNB`, timed P and the
+error checks; `ghal.core` covers `ghal_ctx` on every host.
+
+## 10. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`). The
    module format is decided (`GHAL-Concept.md` §4.4) and the `.gp` data is

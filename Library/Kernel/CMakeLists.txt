@@ -4,10 +4,14 @@
 #   Sys/sysError.c     <- fatal errors of Sys/sysError.asm
 #   Heap/heapHandle.c  <- handle table of Heap/heapHandle.asm
 #   Heap/heapHigh.c    <- memory block API of Heap/heapHigh.asm, heapC.asm
+#   Thread/threadThread.c <- threads, scheduler of Thread/threadThread.asm
+#   Thread/threadSem.c <- semaphores, thread locks of Thread/threadSem.asm
 add_library(geos_kernel STATIC
   Sys/sysError.c
   Heap/heapHandle.c
-  Heap/heapHigh.c)
+  Heap/heapHigh.c
+  Thread/threadThread.c
+  Thread/threadSem.c)
 target_include_directories(geos_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/Port32/include

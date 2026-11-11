@@ -12,25 +12,10 @@
 
 KernelFatalHook *kernelFatalHook;
 
+#define KFE_NAME(name) #name,
 static const char *const names[KFE_COUNT] = {
     "KFE_NONE",
-    "ILLEGAL_HANDLE",
-    "HANDLE_TABLE_FULL",
-    "TOO_MANY_LOCKS",
-    "BAD_UNLOCK",
-    "HANDLE_FREE",
-    "NOT_MEM_HANDLE",
-    "ALLOC_ZERO",
-    "ALLOC_TOO_LARGE",
-    "REALLOC_TOO_LARGE",
-    "ALLOC_BAD_FLAGS",
-    "MEM_GET_INFO_BAD_PARAMETER",
-    "FREEING_FREE_HANDLE",
-    "MEM_REFERENCE_COUNT_ILLEGAL_INITIAL_VALUE",
-    "MEM_REFERENCE_COUNT_OVERFLOW",
-    "MEM_REFERENCE_COUNT_UNDERFLOW",
-    "CANNOT_CHANGE_OWNER",
-    "HAF_NO_ERR_ALLOC_FAILED",
+    KERNEL_FATAL_ERRORS(KFE_NAME)
 };
 
 const char *KernelFatalErrorName(KernelFatalError code)

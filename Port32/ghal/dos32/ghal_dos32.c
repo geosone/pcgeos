@@ -260,6 +260,209 @@ void ghal_hostlock_leave(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* ghal_ctx: own stacks and a context switch                          */
+/*                                                                    */
+/* ctx_swap saves the callee-saved registers on the current stack,    */
+/* stores the stack pointer, loads the target's and pops its          */
+/* registers.  The interrupt flag and the ghal_crit nesting belong to */
+/* the context: ghal_ctx_switch saves them with interrupts off and    */
+/* the target restores its own (ctx_resume).  A new stack is laid out */
+/* as if ctx_swap had been called from ctx_start.  Open Watcom checks */
+/* the stack against _STACKLOW; it is switched with the context.      */
+/* ------------------------------------------------------------------ */
+
+#define CTX_MIN_STACK (64u * 1024u)
+
+struct ghal_ctx {
+    void          *sp;          /* saved stack pointer */
+    void          *stack;       /* own stack (NULL: the program's) */
+    ghal_ctx_entry fn;
+    void          *arg;
+    unsigned       crit_depth;  /* saved ghal_crit state */
+    int            crit_restore_if;
+    int            if_on;       /* interrupts were on */
+    int            ended;
+#ifndef __DJGPP__
+    unsigned       stacklow;    /* _STACKLOW of the context */
+#endif
+};
+
+static ghal_ctx *ctx_cur;
+
+#ifdef __DJGPP__
+void ghal_dos32_ctx_swap(void **save_sp, void *new_sp);
+__asm__(
+    ".text\n"
+    ".globl _ghal_dos32_ctx_swap\n"
+    "_ghal_dos32_ctx_swap:\n"
+    "    movl 4(%esp), %eax\n"
+    "    movl 8(%esp), %edx\n"
+    "    pushl %ebp\n"
+    "    pushl %ebx\n"
+    "    pushl %esi\n"
+    "    pushl %edi\n"
+    "    movl %esp, (%eax)\n"
+    "    movl %edx, %esp\n"
+    "    popl %edi\n"
+    "    popl %esi\n"
+    "    popl %ebx\n"
+    "    popl %ebp\n"
+    "    ret\n");
+#define ctx_swap ghal_dos32_ctx_swap
+#define SWITCH_STACKLOW(from, to) ((void)0)
+#else
+extern unsigned _STACKLOW;              /* Watcom stack check limit */
+#define SWITCH_STACKLOW(from, to) \
+    ((from)->stacklow = _STACKLOW, _STACKLOW = (to)->stacklow)
+static void __declspec(naked) __cdecl ctx_swap(void **save_sp, void *new_sp)
+{
+    (void)save_sp;
+    (void)new_sp;
+    _asm {
+        mov eax, [esp + 4]
+        mov edx, [esp + 8]
+        push ebp
+        push ebx
+        push esi
+        push edi
+        mov [eax], esp
+        mov esp, edx
+        pop edi
+        pop esi
+        pop ebx
+        pop ebp
+        ret
+    }
+}
+#endif
+
+static void ctx_resume(ghal_ctx *c)
+{
+    crit_depth = c->crit_depth;
+    crit_restore_if = c->crit_restore_if;
+    if (c->if_on)
+        _enable();
+}
+
+static void ctx_start(void)
+{
+    ghal_ctx *c = ctx_cur;
+    ctx_resume(c);
+    c->fn(c->arg);
+    ghal_log(GHAL_LOG_ERROR, "ghal_ctx: entry function returned");
+    abort();
+}
+
+ghal_ctx *ghal_ctx_self(void)
+{
+    if (!ctx_cur) {
+        ctx_cur = calloc(1, sizeof(*ctx_cur));
+        if (!ctx_cur)
+            abort();
+    }
+    return ctx_cur;
+}
+
+ghal_status ghal_ctx_create(ghal_ctx_entry fn, void *arg, size_t stack_size,
+                            ghal_ctx **out)
+{
+    ghal_ctx *c;
+    uint32_t *sp;
+
+    if (!fn || !out)
+        return GHAL_ERR_INVAL;
+    *out = NULL;
+    if (stack_size < CTX_MIN_STACK)
+        stack_size = CTX_MIN_STACK;
+    c = calloc(1, sizeof(*c));
+    if (!c)
+        return GHAL_ERR_NOMEM;
+    c->stack = malloc(stack_size);
+    if (!c->stack) {
+        free(c);
+        return GHAL_ERR_NOMEM;
+    }
+    c->fn = fn;
+    c->arg = arg;
+    c->if_on = 1;
+#ifndef __DJGPP__
+    c->stacklow = (unsigned)(uintptr_t)c->stack + 256;
+#endif
+    /* top aligned to 16; ctx_start is entered like a call (esp + 4
+     * aligned to 16, as gcc expects) */
+    sp = (uint32_t *)(((uintptr_t)c->stack + stack_size) & ~(uintptr_t)15);
+    *--sp = 0;                          /* return address of ctx_start */
+    *--sp = (uint32_t)(uintptr_t)ctx_start;
+    *--sp = 0;                          /* ebp */
+    *--sp = 0;                          /* ebx */
+    *--sp = 0;                          /* esi */
+    *--sp = 0;                          /* edi */
+    c->sp = sp;
+    *out = c;
+    return GHAL_OK;
+}
+
+void ghal_ctx_switch(ghal_ctx *to)
+{
+    ghal_ctx *self = ghal_ctx_self();
+    unsigned long f;
+
+    if (!to || to == self || to->ended)
+        return;
+    f = get_eflags();
+    _disable();
+    self->crit_depth = crit_depth;
+    self->crit_restore_if = crit_restore_if;
+    self->if_on = (f & IF_FLAG) != 0;
+    ctx_cur = to;
+    SWITCH_STACKLOW(self, to);
+    ctx_swap(&self->sp, to->sp);
+    ctx_resume(self);
+}
+
+void ghal_ctx_exit(ghal_ctx *to)
+{
+    ghal_ctx *self = ghal_ctx_self();
+    void *dummy;
+
+    _disable();
+    self->ended = 1;
+    if (!to || to == self) {
+        ghal_log(GHAL_LOG_ERROR, "ghal_ctx_exit: nothing to run");
+        abort();
+    }
+    ctx_cur = to;
+    SWITCH_STACKLOW(self, to);
+    ctx_swap(&dummy, to->sp);
+    abort();                            /* not reached */
+}
+
+void ghal_ctx_destroy(ghal_ctx *c)
+{
+    if (!c || c == ctx_cur)
+        return;
+    free(c->stack);
+    free(c);
+}
+
+/* No GEOS thread can run: let interrupts in for a moment.  (hlt is
+ * privileged under DPMI.) */
+void ghal_idle(void)
+{
+    volatile int i;
+    unsigned d = crit_depth;
+    int rif = crit_restore_if;
+
+    crit_depth = 0;
+    _enable();
+    for (i = 0; i < 1000; i++)
+        ;
+    _disable();
+    crit_depth = d;
+    crit_restore_if = rif;
+}
+
+/* ------------------------------------------------------------------ */
 /* ghal_irq: GHAL_IRQ_TICK on IRQ0                                    */
 /* ------------------------------------------------------------------ */
 
@@ -310,12 +513,21 @@ static void pit_program(uint32_t reload)
 
 /* Runs the tick handlers; returns nonzero when the BIOS handler is due
  * (it counts its tick and sends the EOI). */
+static int irq_depth;
+
+int ghal_irq_active(void)
+{
+    return irq_depth != 0;
+}
+
 static int irq0_work(void)
 {
     struct ghal_irq_source *s;
     crit_depth++;                   /* we run with interrupts off */
+    irq_depth++;
     for (s = tick_list; s; s = s->next)
         s->fn(s->ctx);
+    irq_depth--;
     crit_depth--;
     pit_acc += pit_reload;
     if (pit_acc >= 65536u) {

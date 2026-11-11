@@ -235,6 +235,83 @@ static void test_caps(void)
            caps & GHAL_CAP_EXEC_PROTECT ? " exec-protect" : "");
 }
 
+/* ghal_ctx: two contexts take turns, keep their ghal_crit depth and
+ * their stacks; one ends with ghal_ctx_exit; one is destroyed unrun. */
+static ghal_ctx *ctx_main, *ctx_a, *ctx_b;
+static char ctx_log[64];
+static int ctx_pos;
+
+static void ctx_note(char c)
+{
+    if (ctx_pos < (int)sizeof(ctx_log) - 1)
+        ctx_log[ctx_pos++] = c;
+}
+
+/* deep enough to need the stack of its own */
+static int ctx_recurse(int n)
+{
+    volatile char pad[256];
+    pad[0] = (char)n;
+    return n == 0 ? pad[0] : ctx_recurse(n - 1) + 1;
+}
+
+static void ctx_entry_a(void *arg)
+{
+    int i, local = 1234;
+    CHECK(arg == &ctx_pos);
+    ghal_crit_enter();                  /* A switches away inside crit */
+    for (i = 0; i < 3; i++) {
+        ctx_note('a');
+        ghal_ctx_switch(ctx_b);
+    }
+    ghal_crit_leave();
+    CHECK(local == 1234);
+    CHECK(ctx_recurse(100) == 100);
+    ctx_note('A');
+    ghal_ctx_exit(ctx_main);
+}
+
+static void ctx_entry_b(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ctx_note('b');
+        ghal_ctx_switch(ctx_a);
+    }
+}
+
+static void ctx_entry_never(void *arg)
+{
+    (void)arg;
+    CHECK(!"never runs");
+    ghal_ctx_exit(ctx_main);
+}
+
+static void test_ctx(void)
+{
+    ghal_ctx *never;
+
+    ctx_main = ghal_ctx_self();
+    CHECK(ctx_main != NULL && ghal_ctx_self() == ctx_main);
+    CHECK(ghal_ctx_create(ctx_entry_a, &ctx_pos, 0, &ctx_a) == GHAL_OK);
+    CHECK(ghal_ctx_create(ctx_entry_b, NULL, 128 * 1024, &ctx_b) == GHAL_OK);
+    CHECK(ghal_ctx_create(ctx_entry_never, NULL, 0, &never) == GHAL_OK);
+    ghal_crit_enter();
+    ghal_crit_enter();                  /* main keeps depth 2 */
+    ghal_ctx_switch(ctx_a);
+    ghal_crit_leave();
+    ghal_crit_leave();
+    ctx_log[ctx_pos] = 0;
+    CHECK(strcmp(ctx_log, "abababA") == 0);
+    if (strcmp(ctx_log, "abababA") != 0)
+        printf("  ctx order: %s\n", ctx_log);
+    ghal_ctx_destroy(ctx_a);
+    ghal_ctx_destroy(never);
+    /* ctx_b waits in ghal_ctx_switch forever; that is allowed */
+    CHECK(!ghal_irq_active());
+    printf("ghal_ctx: ok\n");
+}
+
 int main(void)
 {
     test_caps();
@@ -243,6 +320,7 @@ int main(void)
     test_time();
     calibrate_spin();
     test_crit_nesting();
+    test_ctx();
     test_irq_tick();
     printf("%s: %s\n", ghal_host_name(), failures ? "FAILED" : "all GHAL core tests passed");
     return failures ? 1 : 0;

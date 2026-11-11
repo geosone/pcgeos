@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <setjmp.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -240,16 +241,24 @@ ghal_status ghal_time_get_local(ghal_datetime *dt)
 /* ------------------------------------------------------------------ */
 
 static pthread_mutex_t crit_lock, host_lock;
+static pthread_cond_t idle_cv;          /* signalled after each ghal_irq run */
 static pthread_once_t locks_once = PTHREAD_ONCE_INIT;
+static _Thread_local unsigned crit_depth;   /* nesting of the caller */
+static _Thread_local int irq_active;        /* caller runs a handler */
 
 static void init_locks(void)
 {
     pthread_mutexattr_t a;
+    pthread_condattr_t c;
     pthread_mutexattr_init(&a);
     pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&crit_lock, &a);
     pthread_mutex_init(&host_lock, &a);
     pthread_mutexattr_destroy(&a);
+    pthread_condattr_init(&c);
+    pthread_condattr_setclock(&c, CLOCK_MONOTONIC);
+    pthread_cond_init(&idle_cv, &c);
+    pthread_condattr_destroy(&c);
 }
 
 static void lock(pthread_mutex_t *m)
@@ -267,10 +276,234 @@ static void unlock(pthread_mutex_t *m)
     }
 }
 
-void ghal_crit_enter(void)     { lock(&crit_lock); }
-void ghal_crit_leave(void)     { unlock(&crit_lock); }
+void ghal_crit_enter(void)
+{
+    lock(&crit_lock);
+    crit_depth++;
+}
+
+void ghal_crit_leave(void)
+{
+    if (crit_depth == 0) {
+        ghal_log(GHAL_LOG_ERROR, "ghal: leave without enter");
+        abort();
+    }
+    crit_depth--;
+    unlock(&crit_lock);
+}
+
 void ghal_hostlock_enter(void) { lock(&host_lock); }
 void ghal_hostlock_leave(void) { unlock(&host_lock); }
+
+/* leave ghal_crit completely; returns the depth for crit_restore */
+static unsigned crit_release(void)
+{
+    unsigned d = crit_depth;
+    while (crit_depth)
+        ghal_crit_leave();
+    return d;
+}
+
+static void crit_restore(unsigned d)
+{
+    while (d--)
+        ghal_crit_enter();
+}
+
+void ghal_idle(void)
+{
+    struct timespec t;
+    unsigned d = crit_depth;
+
+    if (d == 0) {                       /* misuse; do not spin */
+        ghal_crit_enter();
+        ghal_idle();
+        ghal_crit_leave();
+        return;
+    }
+    /* cond_wait needs the recursive lock held exactly once */
+    while (crit_depth > 1)
+        ghal_crit_leave();
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    t.tv_nsec += 100000000L;            /* 100 ms: return early at worst */
+    if (t.tv_nsec >= 1000000000L) {
+        t.tv_nsec -= 1000000000L;
+        t.tv_sec++;
+    }
+    crit_depth = 0;
+    pthread_cond_timedwait(&idle_cv, &crit_lock, &t);
+    crit_depth = 1;
+    crit_restore(d - 1);
+}
+
+int ghal_irq_active(void)
+{
+    return irq_active;
+}
+
+/* ------------------------------------------------------------------ */
+/* ghal_ctx: one host thread per context and a baton.                 */
+/*                                                                    */
+/* Every context has a flag `run' and a condition variable; a context */
+/* runs only while its flag is set.  ghal_ctx_switch sets the flag of */
+/* the target, clears its own and waits.  ghal_crit is a host lock,   */
+/* so a context leaves it completely before it waits and enters it    */
+/* again (to its old depth) when it runs again.                       */
+/* ------------------------------------------------------------------ */
+
+#define CTX_MIN_STACK (256u * 1024u)
+
+struct ghal_ctx {
+    pthread_t      th;
+    int            has_thread;  /* made by ghal_ctx_create */
+    int            run;         /* may run (ctx_lock) */
+    int            started;     /* fn was called */
+    int            ended;       /* ghal_ctx_exit */
+    int            cancel;      /* destroyed before it ran */
+    pthread_cond_t cv;
+    ghal_ctx_entry fn;
+    void          *arg;
+    jmp_buf        done;        /* ghal_ctx_exit returns from ctx_main */
+};
+
+static pthread_mutex_t ctx_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local ghal_ctx *ctx_cur;
+
+static ghal_ctx *ctx_new(void)
+{
+    ghal_ctx *c = calloc(1, sizeof(*c));
+    if (c)
+        pthread_cond_init(&c->cv, NULL);
+    return c;
+}
+
+ghal_ctx *ghal_ctx_self(void)
+{
+    if (!ctx_cur) {
+        ctx_cur = ctx_new();
+        if (!ctx_cur)
+            abort();
+        ctx_cur->run = 1;
+        ctx_cur->started = 1;
+    }
+    return ctx_cur;
+}
+
+static void *ctx_main(void *p)
+{
+    ghal_ctx *c = p;
+    int cancel;
+
+    ctx_cur = c;
+    pthread_mutex_lock(&ctx_lock);
+    while (!c->run)
+        pthread_cond_wait(&c->cv, &ctx_lock);
+    cancel = c->cancel;
+    c->started = !cancel;
+    pthread_mutex_unlock(&ctx_lock);
+    if (cancel || setjmp(c->done))
+        return NULL;
+    c->fn(c->arg);
+    ghal_log(GHAL_LOG_ERROR, "ghal_ctx: entry function returned");
+    abort();
+}
+
+ghal_status ghal_ctx_create(ghal_ctx_entry fn, void *arg, size_t stack_size,
+                            ghal_ctx **out)
+{
+    pthread_attr_t a;
+    ghal_ctx *c;
+    int r;
+
+    if (!fn || !out)
+        return GHAL_ERR_INVAL;
+    *out = NULL;
+    c = ctx_new();
+    if (!c)
+        return GHAL_ERR_NOMEM;
+    c->fn = fn;
+    c->arg = arg;
+    if (stack_size < CTX_MIN_STACK)
+        stack_size = CTX_MIN_STACK;
+    pthread_attr_init(&a);
+    pthread_attr_setstacksize(&a, stack_size);
+    r = pthread_create(&c->th, &a, ctx_main, c);
+    pthread_attr_destroy(&a);
+    if (r != 0) {
+        pthread_cond_destroy(&c->cv);
+        free(c);
+        return r == EAGAIN ? GHAL_ERR_NOMEM : GHAL_ERR_HOST;
+    }
+    c->has_thread = 1;
+    *out = c;
+    return GHAL_OK;
+}
+
+void ghal_ctx_switch(ghal_ctx *to)
+{
+    ghal_ctx *self = ghal_ctx_self();
+    unsigned d;
+
+    if (!to || to == self || to->ended)
+        return;
+    d = crit_release();
+    pthread_mutex_lock(&ctx_lock);
+    self->run = 0;
+    to->run = 1;
+    pthread_cond_signal(&to->cv);
+    while (!self->run)
+        pthread_cond_wait(&self->cv, &ctx_lock);
+    pthread_mutex_unlock(&ctx_lock);
+    crit_restore(d);
+}
+
+void ghal_ctx_exit(ghal_ctx *to)
+{
+    ghal_ctx *self = ghal_ctx_self();
+
+    crit_release();
+    pthread_mutex_lock(&ctx_lock);
+    self->run = 0;
+    self->ended = 1;
+    if (to && to != self) {
+        to->run = 1;
+        pthread_cond_signal(&to->cv);
+    }
+    if (self->has_thread) {
+        pthread_mutex_unlock(&ctx_lock);
+        ctx_cur = NULL;
+        longjmp(self->done, 1);         /* no pthread_exit: no unwinder */
+    }
+    /* the program's own thread: never runs again */
+    for (;;)
+        pthread_cond_wait(&self->cv, &ctx_lock);
+}
+
+void ghal_ctx_destroy(ghal_ctx *c)
+{
+    if (!c || c == ctx_cur)
+        return;
+    pthread_mutex_lock(&ctx_lock);
+    if (c->started && !c->ended) {
+        pthread_mutex_unlock(&ctx_lock);
+        ghal_log(GHAL_LOG_ERROR, "ghal_ctx_destroy: context still alive");
+        return;
+    }
+    if (!c->has_thread) {               /* the program's own thread */
+        pthread_mutex_unlock(&ctx_lock);
+        return;                         /* waits in ghal_ctx_exit for good */
+    }
+    if (!c->started) {
+        c->cancel = 1;
+        c->run = 1;
+        pthread_cond_signal(&c->cv);
+    }
+    pthread_mutex_unlock(&ctx_lock);
+    if (c->has_thread)
+        pthread_join(c->th, NULL);
+    pthread_cond_destroy(&c->cv);
+    free(c);
+}
 
 /* ------------------------------------------------------------------ */
 /* ghal_irq                                                           */
@@ -318,8 +551,11 @@ static void *tick_main(void *arg)
             ghal_crit_leave();
             return NULL;
         }
+        irq_active = 1;
         for (s = tick_list; s; s = s->next)
             s->fn(s->ctx);
+        irq_active = 0;
+        pthread_cond_broadcast(&idle_cv);
         ghal_crit_leave();
     }
 }

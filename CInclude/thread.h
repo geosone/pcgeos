@@ -43,8 +43,14 @@ typedef enum /* word */ {
     TGIT_QUEUE_HANDLE=4
 } ThreadGetInfoType;
 
+#ifdef GEOS_PORT32
+/* Port32: handles are 32 bits */
+extern dword
+    ThreadGetInfo(ThreadHandle th, ThreadGetInfoType info);
+#else
 extern word	/*XXX*/
     _pascal ThreadGetInfo(ThreadHandle th, ThreadGetInfoType info);
+#endif
 
 /***/
 
