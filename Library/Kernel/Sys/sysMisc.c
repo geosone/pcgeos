@@ -204,3 +204,11 @@ Boolean SysShutdown(SysShutdownType type, ...)
 	return TRUE;
     }
 }
+
+ByteFlags kernelSysConfig = SCF_RTC | SCF_COPROC;
+
+dword SysGetConfig(void)
+{
+    return (dword) kernelSysConfig | ((dword) SPT_80486 << 16) |
+	   ((dword) SMT_UNKNOWN << 24);
+}

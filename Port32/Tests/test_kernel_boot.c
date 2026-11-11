@@ -14,6 +14,7 @@
 #include "kernelC.h"
 #include "ghal.h"
 #include "hostfs.h"
+#include <system.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -142,6 +143,16 @@ int main(int argc, char **argv)
     KernelRun();
     CHECK(!GeodeFind("kgapp   ", GEODE_NAME_SIZE, 0, 0));
     CHECK(GeodeGetInfo(lib, GGIT_GEODE_REF_COUNT, NULL) == 1);
+
+    /* a fresh top: no crash before; a clean end deletes GEOS_ACT.IVE */
+    CHECK(!(SysGetConfig() & SCF_CRASHED));
+    FileSetStandardPath(SP_TOP);
+    FileGetAttributes(KERNEL_ACTIVE_FILE);
+    CHECK(ThreadGetError() == 0);
+    CHECK(!SysShutdown(SST_FINAL, NULL));	/* the boot thread: returns */
+    CHECK(KernelEnded() && KernelRun() == 0);
+    FileGetAttributes(KERNEL_ACTIVE_FILE);
+    CHECK(ThreadGetError() == ERROR_FILE_NOT_FOUND);
 
     printf("%s\n", fails ? "FAILED" : "ok");
     return fails != 0;

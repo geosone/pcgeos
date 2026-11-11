@@ -8,15 +8,15 @@
  *   2. gives DR_EXIT to the drivers that are not system drivers
  *      (RemoveGeodes);
  *   3. closes the files still open (ExitFile);
- *   4. gives DR_EXIT to the system drivers (ExitSystemDrivers).
+ *   4. gives DR_EXIT to the system drivers (ExitSystemDrivers);
+ *   5. after a clean end, deletes GEOS_ACT.IVE from the top.
  * Then it lets KernelRun return the exit flags (KEF_*) and the reason
  * to the program, which ends the host process.  On any thread but the
  * boot thread, EndGeos does not return (DOS16 never returned): the
  * thread waits until the program ends.  On the boot thread it returns,
  * and the next KernelRun returns at once.
  *
- * Not yet: the GEOS_ACT.IVE file that tells the next start of a dirty
- * exit, and ExitFSD.
+ * Not yet: ExitFSD.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -89,6 +89,13 @@ void EndGeos(word flags, const char *reason)
     for (i = 0; files[i]; i++)
 	FileClose(files[i], TRUE);
     GeodeExitSystemDrivers();
+    /* a clean end: the next start will not see GEOS_ACT.IVE */
+    if (!(kernelExitFlags & KEF_DIRTY)) {
+	FilePushDir();
+	FileSetStandardPath(SP_TOP);
+	FileDelete(KERNEL_ACTIVE_FILE);
+	FilePopDir();
+    }
     done = TRUE;
     if (KernelThisThread() != kernelBootThread)
 	KSemP(&never, KSEM_FOREVER);

@@ -847,5 +847,8 @@ extern word kernelExitFlags;
 void EndGeos(word flags, const char *reason);
 Boolean KernelEnded(void);
 const char *KernelExitMessage(void);	/* "" if none */
+/* in the top while GEOS runs (sysSemaphoreFile); SysGetConfig's flags */
+#define KERNEL_ACTIVE_FILE	"GEOS_ACT.IVE"
+extern ByteFlags kernelSysConfig;	/* SysConfigFlags (system.h) */
 
 #endif /* KERNELC_H */

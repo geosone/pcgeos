@@ -9,7 +9,9 @@
  *
  *   1. the first thread and the timer (InitThread, InitTimer);
  *   2. the top directory as drive C (the loader's top level path) and
- *      the initial path SP_TOP (FileSetInitialPath);
+ *      the initial path SP_TOP (FileSetInitialPath); GEOS_ACT.IVE in
+ *      the top, made here and deleted by a clean end: if it is there
+ *      already, the last run did not end cleanly (SCF_CRASHED, InitSys);
  *   3. the primary file system driver and its drives (LoadFSDriver,
  *      FSDLoadPrimary); the init file is read on first use;
  *   4. the standard paths of [paths] (GetPaths of the loader);
@@ -35,10 +37,28 @@
 #include "kernelC.h"
 
 #include <initfile.h>
+#include <system.h>
 #include <string.h>
 
 GeodeHandle kernelUIHandle;
 ThreadHandle kernelBootThread;
+
+/* InitSys: GEOS_ACT.IVE in the top tells of a start that did not end
+ * cleanly; it stays there until a clean end (EndGeos) deletes it */
+static void ActiveFile(void)
+{
+    FileHandle fh;
+
+    FileGetAttributes(KERNEL_ACTIVE_FILE);
+    if (ThreadGetError() == 0) {
+	kernelSysConfig |= SCF_CRASHED;
+	return;
+    }
+    fh = FileCreate(KERNEL_ACTIVE_FILE, FILE_CREATE_ONLY | FCF_NATIVE |
+					FILE_ACCESS_RW, 0);
+    if (fh)
+	FileClose(fh, TRUE);
+}
 
 static void LoadUI(void)
 {
@@ -87,6 +107,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     KernelTimerInit();
     FileSetTopHostPath(topHostPath);
     FileSetStandardPath(SP_TOP);
+    ActiveFile();
     FSDLoadPrimary();
     FileInitStdPaths();
     LoadUI();

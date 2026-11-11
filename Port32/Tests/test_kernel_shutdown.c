@@ -89,7 +89,18 @@ int main(int argc, char **argv)
     else
 	strcpy(top, "GSDTOP");
     ghal_fs_mkdir(top);
+    {
+	/* as if the last run had not ended: GEOS_ACT.IVE is there */
+	char act[300];
+	ghal_file *f;
+	sprintf(act, "%s%c%s", top, slash && *slash == '\\' ? '\\' : '/',
+		KERNEL_ACTIVE_FILE);
+	if (ghal_fs_open(act, GHAL_FS_WRITE | GHAL_FS_CREATE, &f) == GHAL_OK)
+	    ghal_fs_close(f);
+    }
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
+    CHECK(SysGetConfig() & SCF_CRASHED);
+    CHECK((SysGetConfig() & (SCF_RTC | SCF_COPROC)) == (SCF_RTC | SCF_COPROC));
 
     q1 = GeodeAllocQueue();
     q2 = GeodeAllocQueue();
@@ -146,6 +157,10 @@ int main(int argc, char **argv)
     CHECK(KernelRun() == KEF_DIRTY);
     CHECK(KernelEnded());
     CHECK(!strcmp(KernelExitMessage(), "the test ends GEOS"));
+    FileSetStandardPath(SP_TOP);
+    FileGetAttributes(KERNEL_ACTIVE_FILE);
+    CHECK(ThreadGetError() == 0);	/* a dirty end keeps it */
+    nfiles = 0;
     HandleEnum(OpenFiles, &nfiles);
     CHECK(nfiles == 0);
     TimerSleep(5);

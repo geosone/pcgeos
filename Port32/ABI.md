@@ -1634,6 +1634,17 @@ On every thread but the boot thread, EndGeos does not return, as in
 DOS16: the thread waits until the program ends the process. On the boot
 thread it returns.
 
+**`GEOS_ACT.IVE`** (after `InitSys` and `EndGeos`):
+- `KernelBoot` creates it in the top. If it is there already, the last
+  run did not end cleanly, and `SysGetConfig` reports `SCF_CRASHED`.
+- A clean end deletes it; a dirty end leaves it.
+
+**`SysGetConfig`** returns:
+- `SCF_RTC | SCF_COPROC`, because every host has a clock and floating
+  point, plus `SCF_CRASHED` when it applies;
+- processor `SPT_80486`, the newest the type knows;
+- machine `SMT_UNKNOWN`.
+
 ctest `kernel.shutdown` stands queues in for the objects on the list
 and for `ackOD`. It checks:
 
@@ -1641,7 +1652,12 @@ and for `ackOD`. It checks:
 - a suspend refused by one of two objects;
 - `SST_RESTART`;
 - `SST_DIRTY` from another thread: the reason, the files closed, the
-  thread kept.
+  thread kept;
+- `SCF_CRASHED` after a left-over `GEOS_ACT.IVE`, which the dirty end
+  keeps.
+
+`kernel.boot` ends cleanly with `SST_FINAL` on the boot thread and
+checks that `GEOS_ACT.IVE` is gone.
 
 It needs no geodes, so it also runs on Open Watcom.
 
@@ -1660,8 +1676,8 @@ Not yet:
 - the input manager, fonts, graphics and windows;
 - patches, the log file, `documentIsTop`, `FSDInitComplete`;
 - the loader's switches (`/p`, `/sp`, memory limits);
-- the `GEOS_ACT.IVE` file that tells the next start about a dirty end,
-  `ExitFSD`, the task driver, and the power-off message.
+- `ExitFSD`, the task driver, the power-off message, and the
+  switches `/s` and `/log` (`SCF_UNDER_SWAT`, `SCF_LOGGING`).
 
 ## 14. Open
 
