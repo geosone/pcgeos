@@ -8,6 +8,9 @@ The C files live next to the asm in `Library/Math/Float/` (`floatFloatToAscii.c/
 
 ```sh
 cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build
+# amd64 by name (from another host: cross toolchain, tests via qemu-x86_64)
+cmake -S . -B build-amd64 -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-linux-x86_64.cmake
 cmake -S . -B build32 -G Ninja \
       -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-linux-i686.cmake
 cmake --build build32 && ctest --test-dir build32
