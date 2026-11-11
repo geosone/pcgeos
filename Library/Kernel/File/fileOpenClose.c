@@ -3,22 +3,16 @@
  * fileOpenClose.asm).
  *
  * A file handle is a SIG_FILE handle owned by the process of the thread
- * that opened it; its HE_addr is the KFile with the host file
- * (ghal_fs).  FileDuplicateHandle gives another handle to the same
- * KFile, so both share the position as with DOS.  The files a geode
- * still has open are closed when it is freed.
- *
- * A GEOS file (created without FCF_NATIVE) starts with the
- * GeosFileHeader of DOS16 on every host (Port32/hostfs); the handle
- * reads and writes the data after it (KF_base).  FileOpen takes a file
- * with that header as a GEOS file.
+ * that opened it; its HE_addr is the KFile with what the file system
+ * driver of its disk keeps (DR_FS_ALLOC_OP, DR_FS_HANDLE_OP).
+ * FileDuplicateHandle gives another handle to the same KFile, so both
+ * share the position as with DOS.  The files a geode still has open are
+ * closed when it is freed.
  *
  * Not yet: the deny modes (sharing), temporary files, open/close
  * notification.
  */
 #include "kernelC.h"
-#include "ghal.h"
-#include "hostfs.h"
 
 #include <string.h>
 
@@ -45,152 +39,58 @@ static FileHandle NewHandle(KFile *kf, byte access)
     return fh;
 }
 
-static ghal_status AccessFlags(byte access, unsigned *flags)
+/* open or create (create: FileCreate's flags) the file at `name' */
+static FileHandle Open(const char *name, word flags, FileAttrs attrs,
+		       Boolean create)
 {
-    switch (access & 3) {
-    case FILE_ACCESS_R:	*flags = GHAL_FS_READ; return GHAL_OK;
-    case FILE_ACCESS_W:	*flags = GHAL_FS_WRITE; return GHAL_OK;
-    case FILE_ACCESS_RW:	*flags = GHAL_FS_READ | GHAL_FS_WRITE; return GHAL_OK;
-    default:			return GHAL_ERR_INVAL;
-    }
-}
-
-/* the handle of an open host file, positioned at the start of its data */
-static FileHandle Finish(ghal_file *f, const char *host, byte access,
-			 FileAttrs attrs, Boolean geos)
-{
-    size_t n = strlen(host) + 1;
-    KFile *kf = ghal_mem_alloc(sizeof(KFile) + n, GHAL_MEM_ZERO);
+    char dp[FILE_DISK_PATH_SIZE];
+    FSDDisk *d = FileResolve(name, dp, sizeof(dp));
+    KFile *kf;
     FileHandle fh;
+    word e;
 
+    if (!d)
+	return 0;
+    kf = ghal_mem_alloc(sizeof(KFile), GHAL_MEM_ZERO);
     if (!kf) {
-	ghal_fs_close(f);
 	KernelSetError(ERROR_INSUFFICIENT_MEMORY);
 	return 0;
     }
-    kf->KF_file = f;
-    kf->KF_base = geos ? GFH_SIZE : 0;
-    ghal_fs_seek(f, kf->KF_base, GHAL_FS_SEEK_SET, NULL);
-    /* a new read-only file can still be written over this handle, as
-     * with DOS: its attributes are set when it is closed */
-    kf->KF_attrs = attrs & (FA_RDONLY | FA_HIDDEN | FA_SYSTEM);
-    kf->KF_path = (char *) (kf + 1);
-    memcpy(kf->KF_path, host, n);
-    fh = NewHandle(kf, access);
+    kf->KF_file.FF_disk = d;
+    e = create ? FSD_OF(d)->FSD_create(d, dp, flags, attrs, &kf->KF_file)
+	       : FSD_OF(d)->FSD_open(d, dp, flags, &kf->KF_file);
+    if (e) {
+	ghal_mem_free(kf);
+	KernelSetError(e);
+	return 0;
+    }
+    fh = NewHandle(kf, (byte) (flags & FCF_ACCESS));
     if (!fh) {
-	ghal_fs_close(f);
+	FSD_OF(d)->FSD_close(&kf->KF_file);
 	ghal_mem_free(kf);
 	return 0;
     }
+    d->FDK_inUse++;
     KernelSetError(0);
     return fh;
 }
 
-static Boolean HasHeader(const char *host)
-{
-    unsigned char hdr[GFH_SIZE];
-
-    return HostFSReadHeader(host, hdr) == GHAL_OK;
-}
-
 FileHandle FileOpen(const char *name, FileAccessFlags flags)
 {
-    char host[HOST_PATH_SIZE];
-    unsigned gf;
-    ghal_file *f;
-    ghal_status s;
-
-    if (!FileHostPath(name, host, sizeof(host)))
-	return 0;
-    if (AccessFlags((byte) flags, &gf) != GHAL_OK) {
-	KernelSetError(ERROR_ARGS_INVALID);
-	return 0;
-    }
-    s = ghal_fs_open(host, gf, &f);
-    if (s != GHAL_OK) {
-	KernelSetError(FileErrorOf(s, host));
-	return 0;
-    }
-    return Finish(f, host, (byte) flags, 0, HasHeader(host));
+    return Open(name, flags, 0, FALSE);
 }
 
-/* without FCF_NATIVE a GEOS file: the GeosFileHeader (GFT_DATA) first,
- * on DOS a generated 8.3 name (dosPath.asm DOSAllocOpCreate).  An
- * existing file must be of the kind asked for. */
+/* without FCF_NATIVE a GEOS file (the driver: with the GeosFileHeader) */
 FileHandle FileCreate(const char *name, FileCreateFlags flags,
 		      FileAttrs attributes)
 {
-    Boolean geos = !(flags & FCF_NATIVE), had;
-    byte access = (byte) (flags & FCF_ACCESS);
-    FileTarget *t;
-    unsigned gf;
-    ghal_file *f = NULL;
-    ghal_status s;
-    FileHandle fh = 0;
-
-    if (AccessFlags(access, &gf) != GHAL_OK ||
-	((flags & FCF_MODE) != FILE_CREATE_TRUNCATE &&
-	 (flags & FCF_MODE) != FILE_CREATE_NO_TRUNCATE &&
-	 (flags & FCF_MODE) != FILE_CREATE_ONLY)) {
+    if ((flags & FCF_MODE) != FILE_CREATE_TRUNCATE &&
+	(flags & FCF_MODE) != FILE_CREATE_NO_TRUNCATE &&
+	(flags & FCF_MODE) != FILE_CREATE_ONLY) {
 	KernelSetError(ERROR_ARGS_INVALID);
 	return 0;
     }
-    t = ghal_mem_alloc(sizeof(FileTarget), 0);
-    if (!t) {
-	KernelSetError(ERROR_INSUFFICIENT_MEMORY);
-	return 0;
-    }
-    if (!FileResolveNew(name, (flags & (FCF_NATIVE | FCF_NATIVE_WITH_EXT_ATTRS))
-			      ? HOSTFS_NATIVE : HOSTFS_GEOS, t))
-	goto done;
-    if (t->FT_exists) {
-	if ((flags & FCF_MODE) == FILE_CREATE_ONLY) {
-	    KernelSetError(ERROR_FILE_EXISTS);
-	    goto done;
-	}
-	had = HasHeader(t->FT_host);
-	if (had != geos) {
-	    KernelSetError(ERROR_FILE_FORMAT_MISMATCH);
-	    goto done;
-	}
-	s = ghal_fs_open(t->FT_host, gf, &f);
-	/* truncating keeps the header */
-	if (s == GHAL_OK && (flags & FCF_MODE) == FILE_CREATE_TRUNCATE)
-	    s = ghal_fs_truncate(f, geos ? GFH_SIZE : 0);
-	if (s != GHAL_OK) {
-	    if (f)
-		ghal_fs_close(f);
-	    KernelSetError(FileErrorOf(s, t->FT_host));
-	    goto done;
-	}
-	fh = Finish(f, t->FT_host, access, 0, geos);
-	goto done;
-    }
-    s = ghal_fs_open(t->FT_host, GHAL_FS_READ | GHAL_FS_WRITE |
-		     GHAL_FS_CREATE | GHAL_FS_EXCL, &f);
-    if (s == GHAL_OK && geos) {
-	unsigned char hdr[GFH_SIZE];
-	size_t done = 0;
-	HostFSInitHeader(hdr, t->FT_name, GFT_DATA, FileNow());
-	s = ghal_fs_write(f, hdr, sizeof(hdr), &done);
-	/* DOS updates the directory entry of an open file only on a
-	 * commit: before it, the file looks empty and its header is not
-	 * found by its GEOS name (HostFSLookup) */
-	if (s == GHAL_OK)
-	    s = ghal_fs_sync(f);
-	if (s != GHAL_OK) {
-	    ghal_fs_close(f);
-	    ghal_fs_delete(t->FT_host);
-	}
-    }
-    if (s != GHAL_OK) {
-	KernelSetError(FileErrorOf(s, t->FT_host));
-	goto done;
-    }
-    fh = Finish(f, t->FT_host, access, attributes, geos);
-done:
-    ghal_mem_free(t);
-    return fh;
+    return Open(name, flags, attributes, TRUE);
 }
 
 FileHandle FileDuplicateHandle(FileHandle fh)
@@ -202,19 +102,25 @@ FileHandle FileDuplicateHandle(FileHandle fh)
     return nh;
 }
 
+DiskHandle FileGetDiskHandle(FileHandle fh)
+{
+    KernelSetError(0);
+    return FileOf(fh)->KF_file.FF_disk->FDK_handle;
+}
+
 static word Close(FileHandle fh)
 {
     KFile *kf = FileOf(fh);
-    ghal_status s = GHAL_OK;
+    word e = 0;
 
     HandleFree(fh);
     if (--kf->KF_refs == 0) {
-	s = ghal_fs_close(kf->KF_file);
-	if (s == GHAL_OK && kf->KF_attrs)
-	    s = ghal_fs_set_attrs(kf->KF_path, kf->KF_attrs);
+	FSDDisk *d = kf->KF_file.FF_disk;
+	e = FSD_OF(d)->FSD_close(&kf->KF_file);
+	d->FDK_inUse--;
 	ghal_mem_free(kf);
     }
-    return FileErrorOf(s, NULL);
+    return e;
 }
 
 word FileClose(FileHandle fh, Boolean noErrorFlag)

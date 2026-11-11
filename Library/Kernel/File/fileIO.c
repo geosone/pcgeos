@@ -1,12 +1,12 @@
 /*
- * fileIO.c -- input and output on an open file (after fileIO.asm).
+ * fileIO.c -- input and output on an open file (after fileIO.asm), over
+ * DR_FS_HANDLE_OP of the file's driver.
  *
  * Every routine sets the error for ThreadGetError.  A read or write
  * that moves fewer bytes than asked is ERROR_SHORT_READ_WRITE (the end
  * of the file, a full disk).  With noErrorFlag set, an error is fatal.
- *
- * In a GEOS file the data start after the GeosFileHeader (KF_base):
- * positions and sizes are those of the data, as on DOS16.
+ * Positions and sizes are those of the data (in a GEOS file: after the
+ * GeosFileHeader), as on DOS16.
  *
  * Not yet: record locks.
  */
@@ -21,84 +21,59 @@ static word Done(word e, Boolean noErrorFlag)
     return e;
 }
 
-/* reading or writing never reaches into the header: the position is
- * at the data at least */
-static ghal_file *AtData(KFile *kf)
-{
-    uint64_t pos;
-
-    if (kf->KF_base &&
-	ghal_fs_seek(kf->KF_file, 0, GHAL_FS_SEEK_CUR, &pos) == GHAL_OK &&
-	pos < kf->KF_base)
-	ghal_fs_seek(kf->KF_file, kf->KF_base, GHAL_FS_SEEK_SET, NULL);
-    return kf->KF_file;
-}
+#define DRV(kf)	FSD_OF((kf)->KF_file.FF_disk)
 
 word FileRead(FileHandle fh, void *buf, word count, Boolean noErrorFlag)
 {
-    size_t done = 0;
-    ghal_status s = ghal_fs_read(AtData(FileOf(fh)), buf, count, &done);
+    KFile *kf = FileOf(fh);
+    word done = 0, e = DRV(kf)->FSD_read(&kf->KF_file, buf, count, &done);
 
-    Done(s != GHAL_OK ? FileErrorOf(s, NULL) :
-	 done < count ? ERROR_SHORT_READ_WRITE : 0, noErrorFlag);
-    return (word) done;
+    Done(e ? e : done < count ? ERROR_SHORT_READ_WRITE : 0, noErrorFlag);
+    return done;
 }
 
 word FileWrite(FileHandle fh, const void *buf, word count,
 	       Boolean noErrorFlag)
 {
-    size_t done = 0;
-    ghal_status s = ghal_fs_write(AtData(FileOf(fh)), buf, count, &done);
+    KFile *kf = FileOf(fh);
+    word done = 0, e = DRV(kf)->FSD_write(&kf->KF_file, buf, count, &done);
 
-    Done(s != GHAL_OK ? FileErrorOf(s, NULL) :
-	 done < count ? ERROR_SHORT_READ_WRITE : 0, noErrorFlag);
-    return (word) done;
+    Done(e ? e : done < count ? ERROR_SHORT_READ_WRITE : 0, noErrorFlag);
+    return done;
 }
 
 dword FilePos(FileHandle fh, dword posOrOffset, FilePosMode mode)
 {
     KFile *kf = FileOf(fh);
-    int whence = mode == FILE_POS_RELATIVE ? GHAL_FS_SEEK_CUR :
-		 mode == FILE_POS_END ? GHAL_FS_SEEK_END : GHAL_FS_SEEK_SET;
-    int64_t off = mode == FILE_POS_START ? (int64_t) posOrOffset + kf->KF_base
-					 : (int64_t) (sdword) posOrOffset;
-    uint64_t pos = 0;
-    ghal_status s = ghal_fs_seek(kf->KF_file, off, whence, &pos);
+    dword pos = 0;
+    word e = DRV(kf)->FSD_position(&kf->KF_file, (sdword) posOrOffset, mode,
+				   &pos);
 
-    /* not before the data */
-    if (s == GHAL_OK && pos < kf->KF_base)
-	s = ghal_fs_seek(kf->KF_file, kf->KF_base, GHAL_FS_SEEK_SET, &pos);
-    KernelSetError(FileErrorOf(s, NULL));
-    return s == GHAL_OK ? (dword) (pos - kf->KF_base) : (dword) -1;
+    KernelSetError(e);
+    return e ? (dword) -1 : pos;
 }
 
 word FileTruncate(FileHandle fh, dword offset, Boolean noErrorFlag)
 {
     KFile *kf = FileOf(fh);
-    uint64_t end = (uint64_t) offset + kf->KF_base;
-    ghal_status s = ghal_fs_truncate(kf->KF_file, end);
 
-    /* the position is at the new end, as DOS left it */
-    if (s == GHAL_OK)
-	s = ghal_fs_seek(kf->KF_file, (int64_t) end, GHAL_FS_SEEK_SET, NULL);
-    return Done(FileErrorOf(s, NULL), noErrorFlag);
+    return Done(DRV(kf)->FSD_truncate(&kf->KF_file, offset), noErrorFlag);
 }
 
 dword FileSize(FileHandle fh)
 {
     KFile *kf = FileOf(fh);
-    ghal_fs_info info;
-    ghal_status s = ghal_fs_fstat(kf->KF_file, &info);
+    dword size = 0;
 
-    KernelSetError(FileErrorOf(s, NULL));
-    return s == GHAL_OK && info.size > kf->KF_base
-	   ? (dword) (info.size - kf->KF_base) : 0;
+    KernelSetError(DRV(kf)->FSD_size(&kf->KF_file, &size));
+    return size;
 }
 
 word FileCommit(FileHandle fh, Boolean noErrorFlag)
 {
-    return Done(FileErrorOf(ghal_fs_sync(FileOf(fh)->KF_file), NULL),
-		noErrorFlag);
+    KFile *kf = FileOf(fh);
+
+    return Done(DRV(kf)->FSD_commit(&kf->KF_file), noErrorFlag);
 }
 
 /* ---------------------------------------------------------------------
@@ -119,11 +94,11 @@ FileDateAndTime FilePackDate(const ghal_datetime *dt)
 
 FileDateAndTime FileGetDateAndTime(FileHandle fh)
 {
-    ghal_fs_info info;
-    ghal_status s = ghal_fs_fstat(FileOf(fh)->KF_file, &info);
+    KFile *kf = FileOf(fh);
+    FileDateAndTime fdat = 0;
 
-    KernelSetError(FileErrorOf(s, NULL));
-    return s == GHAL_OK ? FilePackDate(&info.mtime) : 0;
+    KernelSetError(DRV(kf)->FSD_getDateTime(&kf->KF_file, &fdat));
+    return fdat;
 }
 
 void FileUnpackDate(FileDateAndTime dateAndTime, ghal_datetime *dt)
@@ -147,9 +122,6 @@ FileDateAndTime FileNow(void)
 word FileSetDateAndTime(FileHandle fh, FileDateAndTime dateAndTime)
 {
     KFile *kf = FileOf(fh);
-    ghal_datetime dt;
 
-    FileUnpackDate(dateAndTime, &dt);
-    return Done(FileErrorOf(ghal_fs_set_fmtime(kf->KF_file, &dt), NULL),
-		FALSE);
+    return Done(DRV(kf)->FSD_setDateTime(&kf->KF_file, dateAndTime), FALSE);
 }

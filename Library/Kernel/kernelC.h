@@ -673,23 +673,22 @@ void GeodeFreeLow(GeodeHandle gh);
 
 #define HOST_PATH_SIZE	512	/* a path on the host */
 
+#include "fsdriver.h"	/* drives, disks, file system drivers */
+
 /* a current path: a standard path (or SP_TOP) and the directories below
  * it, separated by '\\' (filePath.c) */
 typedef struct KPath {
     struct KPath *KP_next;	/* FilePushDir stack */
-    StandardPath KP_disk;
-    char	KP_tail[PATH_BUFFER_SIZE];
+    DiskHandle	KP_disk;	/* a StandardPath (odd) or a disk */
+    char	KP_tail[PATH_BUFFER_SIZE];	/* below it */
 } KPath;
 
 /* an open file; SIG_FILE handles point to it (HE_addr), several after
- * FileDuplicateHandle (fileOpenClose.c) */
+ * FileDuplicateHandle (fileOpenClose.c).  KF_file is what its file
+ * system driver keeps (Port32/include/fsdriver.h). */
 typedef struct KFile {
-    struct ghal_file *KF_file;
+    FSDFile	KF_file;
     word	KF_refs;
-    dword	KF_base;	/* GFH_SIZE in a GEOS file: the data follow the
-				 * GeosFileHeader (Port32/hostfs) */
-    char	*KF_path;	/* host path */
-    FileAttrs	KF_attrs;	/* FileCreate: set when it is closed */
 } KFile;
 
 /* an open VM file; its SIG_VM handle (the VMFileHandle, owned by the
@@ -706,7 +705,8 @@ typedef struct KVMFile {
     word	VF_refs;	/* VMOpen of an open file */
     Boolean	VF_readOnly;
     Boolean	VF_hdrDirty;
-    char	VF_path[HOST_PATH_SIZE];	/* host path */
+    FSDDisk	*VF_disk;	/* the file: its disk and FEA_FILE_ID */
+    dword	VF_id;
     /* VMSetReloc: relocates blocks that are no object blocks */
     void	(*VF_reloc)(VMFileHandle file, VMBlockHandle block,
 			    MemHandle mh, void *data, word type);
@@ -717,24 +717,16 @@ void VMFreeHandle(Handle vm);	/* vmemHigh.c: close for a freed geode */
 
 void KernelSetError(word error);	/* threadThread.c: ThreadGetError */
 /* filePath.c */
-void FileSetTopHostPath(const char *hostPath);	/* SP_TOP on the host */
-/* the host path for a new file or directory (FileResolveNew) */
-typedef struct FileTarget {
-    char	FT_host[HOST_PATH_SIZE];	/* existing, or to create */
-    char	FT_dir[HOST_PATH_SIZE];		/* its directory */
-    char	FT_name[FILE_LONGNAME_BUFFER_SIZE];	/* the GEOS name */
-    Boolean	FT_exists;
-    int		FT_dirName;	/* a new directory needs @DIRNAME.000 */
-} FileTarget;
-/* kind: HOSTFS_NATIVE, HOSTFS_GEOS, HOSTFS_DIR; FALSE with the error set
- * if the directory is missing or the name cannot be mapped */
-Boolean FileResolveNew(const char *path, int kind, FileTarget *t);
-/* the host path of a GEOS path (relative to the current path, or to the
- * top if it starts with '\\'); FALSE with the error set */
-Boolean FileHostPath(const char *path, char *out, size_t size);
+/* SP_TOP on the host: the drive of the GEOS top directory (HostFS) */
+void FileSetTopHostPath(const char *hostPath);
+DiskHandle FileTopDisk(void);
+/* the disk of a GEOS path (relative to the current path, or to the
+ * root of its disk if it starts with '\\', or "drive:") and the path on
+ * it from its root, "\\" separated; NULL with the error set */
+FSDDisk *FileResolve(const char *path, char *out, size_t size);
+#define FILE_DISK_PATH_SIZE	(PATH_BUFFER_SIZE + 2)
 void FileThreadInit(KThread *t, KThread *creator);
 void FileThreadExit(KThread *t);
-word FileErrorOf(int ghalStatus, const char *hostPath);
 /* fileIO.c: FileDateAndTime of a time and back, and of now */
 struct ghal_datetime;
 FileDateAndTime FilePackDate(const struct ghal_datetime *dt);

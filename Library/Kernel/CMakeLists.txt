@@ -32,12 +32,18 @@
 #                          objectDup.asm
 #   Object/objectFile.c <- the state file of objectFile.asm
 #   File/filePath.c <- current and standard paths of File/filePath.asm,
-#                      host paths (ghal_fs)
+#                      the resolution of paths to a disk
 #   File/fileOpenClose.c, File/fileIO.c, File/fileFile.c <- the same
-#                      asm files: open/close, I/O, by-name operations
+#                      asm files: open/close, I/O, by-name operations,
+#                      over the file system driver of the disk
 #   File/fileEA.c   <- extended attributes (the FileGet/Set...ExtAttributes
-#                      of fileFile.asm, fileOpenClose.asm), kept in the
-#                      GEOS file header (Port32/hostfs)
+#                      of fileFile.asm, fileOpenClose.asm)
+#   FSD/fsdDrive.c  <- the drive table of FSD/fsdDrive.asm (FSDInitDrive)
+#   Drive/driveHigh.c <- the drive API of Drive/driveHigh.asm, driveC.asm
+#   Disk/diskHigh.c <- disks of Disk/diskHigh.asm, diskC.asm
+#   Port32/hostfs/hostfsDriver.c <- the HostFS file system driver
+#                      (Port32/include/fsdriver.h), part of the kernel
+#                      until drivers are geodes
 #   VMem/vmemBlkManip.c, vmemHeader.c, vmemHigh.c, vmemChain.c <- the
 #                      same asm files (vmemHigh.c also vmemC.asm): VM
 #                      files in the DOS16 format
@@ -75,6 +81,10 @@ add_library(geos_kernel_objs OBJECT
   File/fileIO.c
   File/fileFile.c
   File/fileEA.c
+  FSD/fsdDrive.c
+  Drive/driveHigh.c
+  Disk/diskHigh.c
+  ${PROJECT_SOURCE_DIR}/Port32/hostfs/hostfsDriver.c
   VMem/vmemBlkManip.c
   VMem/vmemHeader.c
   VMem/vmemHigh.c

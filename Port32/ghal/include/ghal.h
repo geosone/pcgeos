@@ -314,6 +314,10 @@ ghal_status ghal_fs_delete(const char *path);
 ghal_status ghal_fs_rename(const char *from, const char *to);
 ghal_status ghal_fs_mkdir(const char *path);
 ghal_status ghal_fs_rmdir(const char *path);
+/* the size of the file system that holds `path', the space free on it
+ * and its allocation unit, in bytes */
+ghal_status ghal_fs_space(const char *path, uint64_t *total, uint64_t *avail,
+                          uint32_t *blockSize);
 
 /* the entries of a directory, without "." and "..";
  * ghal_fs_readdir returns GHAL_ERR_END after the last one */

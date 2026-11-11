@@ -914,31 +914,36 @@ Not yet:
 
 ## 13a. Files (`Library/Kernel/File`, P4)
 
-The file routines of the kernel use `ghal_fs` directly. The file system
-driver layer (FSD, `DR_FS_*`) and the HostFS driver come later. Until
-then there is one disk: the GEOS top directory on the host. The kernel
-is told where it is with `FileSetTopHostPath`.
+The file routines of the kernel resolve a path to a disk and the path
+on it. They call the file system driver of that disk for everything
+that touches the medium (section 13f). The GEOS top directory is drive
+`C` of the HostFS driver: a directory on the host. The kernel is told
+where it is with `FileSetTopHostPath`.
 
 - **Paths** (`filePath.c`).
   - A standard path is a directory below the top, named as in 16-bit
     GEOS (`WORLD`, `DOCUMENT`, `SYSTEM\FS`, `PRIVDATA\STATE`, ...,
     after `stdPathUpwardTree`). A DOS16 installation keeps its layout.
-  - A path that starts with `\` is relative to the top. Any other path
-    is relative to the current path. `..` may leave a standard path;
-    the current path is then the top plus the directories below it.
-    Going above the top is `ERROR_PATH_NOT_FOUND`.
-  - Every thread has a current path: a `StandardPath` and a tail.
+  - A path that starts with `\` is relative to the root of the current
+    disk; for a standard path that is the top. A path that starts with
+    a drive name (`C:`) is relative to the root of that drive's disk.
+    Any other path is relative to the current path. `..` may leave a
+    standard path; the current path is then the top plus the
+    directories below it. Going above the root is
+    `ERROR_PATH_NOT_FOUND`. An unknown drive or disk is
+    `ERROR_INVALID_VOLUME`.
+  - Every thread has a current path: a `StandardPath` or a disk
+    handle, and a tail.
     `FileGetCurrentPath` returns them. A new thread starts with its
     creator's path, the first thread at `SP_TOP`.
     `FilePushDir`/`FilePopDir` keep a stack; a pop without a push is
     fatal.
   - A standard path need not exist on the host. A directory below it
     must exist.
-  - Disk handles other than standard paths are `ERROR_INVALID_VOLUME`
-    for now.
 - **Open files** (`fileOpenClose.c`, `fileIO.c`).
   - A `FileHandle` is a `SIG_FILE` handle owned by the process of the
-    opening thread. Its `HE_addr` is a `KFile` holding the host file.
+    opening thread. Its `HE_addr` is a `KFile` holding the driver's
+    open file (`FSDFile`). `FileGetDiskHandle` returns its disk.
   - `FileDuplicateHandle` gives a second handle to the same `KFile`,
     so the position is shared, as in DOS.
   - Files a geode still has open are closed when it is freed.
@@ -958,7 +963,6 @@ is told where it is with `FileSetTopHostPath`.
 
 Not yet:
 
-- the FSD layer and HostFS as a driver;
 - deny modes and record locks;
 - `FileEnum`, links, `FileCopy`/`FileMove`, temporary files, and
   change notification;
@@ -1149,7 +1153,7 @@ object of a resource, adds an object to it and saves on
 changed and the added object, the unchanged chunks of the resource,
 its static GCN list and the duplicated block with its references.
 
-## 13c. GEOS files and host names (`Port32/hostfs`, `File/fileEA.c`, P4)
+## 13c. GEOS files and host names (`Port32/hostfs`, the HostFS driver, P4)
 
 **The header is in the file on every host (decided 2026-11-11).** A
 GEOS file (created without `FCF_NATIVE`) starts with the 256-byte
@@ -1166,7 +1170,7 @@ on the way to a FAT disk.
   keeps the header. `FileOpen` takes any file that starts with the
   signature as a GEOS file. `FileCreate` of an existing file of the
   other kind is `ERROR_FILE_FORMAT_MISMATCH`.
-- **Extended attributes** (`fileEA.c`): `FileGet/SetPathExtAttributes`,
+- **Extended attributes** (`File/fileEA.c` over the driver, kept by HostFS): `FileGet/SetPathExtAttributes`,
   `FileGet/SetHandleExtAttributes`, one attribute or `FEA_MULTIPLE`
   (the first error is returned, the others are still done).
   - The header fields are read and set as they are in the file (little
@@ -1221,6 +1225,67 @@ Not yet: links in `@DIRNAME.000`; the DOS code page for characters
 above 0x7f in names; `FEA_GEODE_ATTR`, `FEA_CUSTOM` and the
 network attributes; `FileGetHandleAllExtAttributes`;
 `FileCopyPathExtAttributes`.
+
+## 13f. File system drivers, drives and disks (`Library/Kernel/FSD`, `Drive`, `Disk`, `Port32/hostfs/hostfsDriver.c`, P4)
+
+The asm kernel talks to a file system driver through `DR_FS_*` calls of
+its strategy routine (`Include/Internal/fsDriver.def`). Port32 keeps
+the same split but uses C. A driver is an `FSDriver`: a table of C
+functions (`Port32/include/fsdriver.h`). Each function returns 0 or a
+`FileError`.
+
+| `FSDriver` | asm |
+|---|---|
+| `FSD_diskID`, `FSD_diskInit`, `FSD_diskInfo` | `DR_FS_DISK_ID`, `DISK_INIT`, `DISK_INFO` |
+| `FSD_curPathSet` | `DR_FS_CUR_PATH_SET` |
+| `FSD_open`, `FSD_create` | `DR_FS_ALLOC_OP` `FSAOF_OPEN`, `FSAOF_CREATE` |
+| `FSD_read` ... `FSD_close`, `FSD_handleExtAttrs` | `DR_FS_HANDLE_OP` `FSHOF_*` |
+| `FSD_createDir` ... `FSD_pathExtAttrs` | `DR_FS_PATH_OP` `FSPOF_*` |
+
+- **Paths** passed to a driver are absolute on its disk. They are
+  `\`-separated, with `.` and `..` already resolved by the kernel, and
+  use the names GEOS knows (long names). How the names map to the
+  medium is up to the driver.
+- **Positions and sizes** are those of the data. For a GEOS file this
+  is the data after the `GeosFileHeader`.
+- **Drives** (`FSD/fsdDrive.c`, `Drive/driveHigh.c`). A driver makes a
+  drive with `FSDInitDrive(number, name, status, media, fsd, private)`.
+  The drive API (`DriveGetStatus`, `DriveGetExtStatus`,
+  `DriveGetDefaultMedia`, `DriveTestMediaSupport`, `DriveGetName`)
+  reads this table.
+- **Disks** (`Disk/diskHigh.c`). `DiskRegisterDisk` asks the driver for
+  the ID of the medium in the drive. It then returns the disk with that
+  ID, or registers a new one (`FSD_diskInit`).
+  - A `DiskHandle` is an even number, so it never collides with a
+    `StandardPath`, which is odd (`DISK_IS_STD_PATH_MASK`).
+  - A standard path used as a disk stands for the disk of the top
+    directory.
+  - Also available: `DiskGetDrive`, `DiskGetVolumeName`,
+    `DiskGetVolumeInfo`, `DiskGetVolumeFreeSpace` (from
+    `ghal_fs_space`), `DiskCheckWritable`, `DiskCheckInUse` (open
+    files), `DiskCheckUnnamed`, `DiskForEach` and `DiskFind`.
+- **HostFS** (`Port32/hostfs/hostfsDriver.c`). A drive is a host
+  directory (`HostFSDriveData`). The driver contains what section 13c
+  describes: host names, the `GeosFileHeader`, `@DIRNAME.000` and
+  extended attributes.
+  - Its disk ID is a hash of the directory. The disk has no volume
+    name.
+  - `FEA_FILE_ID` is a hash of the host path, the same for every name
+    the file is reached by. `VMOpen` uses the disk and this ID to find
+    a VM file that is already open.
+  - HostFS serves Linux, GonWare and, for now, dos32 too.
+- **Driver binding.** Until drivers are geodes, HostFS is linked into
+  the kernel and the kernel makes drive `C`.
+
+Not yet:
+
+- drivers as geodes, and their registration (`FSDRegister`);
+- the DOS file system driver (IFS) for dos32;
+- drive locks, aliases and removing drives;
+- removable media, `DiskSave`/`DiskRestore`, formatting, copying and
+  renaming disks, and volume names;
+- a current directory per drive (`C:NAME` is relative to the root);
+- file enumeration (`DR_FS_FILE_ENUM`) and links.
 
 ## 14. Open
 

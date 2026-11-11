@@ -320,6 +320,32 @@ ghal_status ghal_fs_mkdir(const char *path)
 #endif
 }
 
+/* int 21h function 36h (_dos_getdiskfree): the drive of `path', or the
+ * current one */
+ghal_status ghal_fs_space(const char *path, uint64_t *total, uint64_t *avail,
+                          uint32_t *blockSize)
+{
+    struct diskfree_t df;
+    unsigned drive = 0;
+    uint32_t unit;
+
+    if (path[0] && path[1] == ':') {
+        char c = path[0];
+        if (c >= 'a' && c <= 'z')
+            c = (char) (c - 'a' + 'A');
+        if (c < 'A' || c > 'Z')
+            return GHAL_ERR_INVAL;
+        drive = (unsigned) (c - 'A' + 1);
+    }
+    if (_dos_getdiskfree(drive, &df) != 0)
+        return GHAL_ERR_NOTFOUND;
+    unit = (uint32_t) df.sectors_per_cluster * df.bytes_per_sector;
+    *total = (uint64_t) df.total_clusters * unit;
+    *avail = (uint64_t) df.avail_clusters * unit;
+    *blockSize = unit;
+    return GHAL_OK;
+}
+
 ghal_status ghal_fs_rmdir(const char *path)
 {
     ghal_dir *d;

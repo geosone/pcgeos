@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <sys/xattr.h>
 #include <time.h>
@@ -321,6 +322,19 @@ ghal_status ghal_fs_mkdir(const char *path)
 ghal_status ghal_fs_rmdir(const char *path)
 {
     return rmdir(path) == 0 ? GHAL_OK : Err(errno);
+}
+
+ghal_status ghal_fs_space(const char *path, uint64_t *total, uint64_t *avail,
+                          uint32_t *blockSize)
+{
+    struct statvfs v;
+
+    if (statvfs(path, &v) != 0)
+        return Err(errno);
+    *total = (uint64_t) v.f_blocks * v.f_frsize;
+    *avail = (uint64_t) v.f_bavail * v.f_frsize;
+    *blockSize = (uint32_t) v.f_frsize;
+    return GHAL_OK;
 }
 
 ghal_status ghal_fs_opendir(const char *path, ghal_dir **out)

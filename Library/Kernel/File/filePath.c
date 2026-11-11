@@ -1,33 +1,29 @@
 /*
- * filePath.c -- current paths, standard paths and host paths (after
- * filePath.asm and the path parts of fileC.asm).
+ * filePath.c -- current paths, standard paths and the resolution of
+ * paths (after filePath.asm and the path parts of fileC.asm).
  *
- * Until the file system driver layer exists, the kernel has one disk:
- * the GEOS top directory on the host (FileSetTopHostPath), reached over
- * ghal_fs.  A standard path is a directory below it, named as in
- * 16-bit GEOS (WORLD, DOCUMENT, SYSTEM\\FS, ...), so a DOS16
- * installation keeps its layout.  "\\" at the start of a path is the
- * top.  Every thread has a current path (a standard path and the
- * directories below it), taken over from the thread that creates it,
- * and a stack for FilePushDir.
+ * The kernel resolves a GEOS path to a disk and the path on it from its
+ * root; the disk's file system driver maps it to its medium
+ * (Port32/include/fsdriver.h).  The GEOS top directory is a drive of the
+ * HostFS driver: a directory on the host (FileSetTopHostPath).  A
+ * standard path is a directory below it, named as in 16-bit GEOS (WORLD,
+ * DOCUMENT, SYSTEM\\FS, ...), so a DOS16 installation keeps its layout.
+ * "\\" at the start of a path is the root of the current disk (the top
+ * for a standard path), "name:" at the start the root of that drive's
+ * disk.  Every thread has a current path (a standard path or a disk, and
+ * the directories below it), taken over from the thread that creates
+ * it, and a stack for FilePushDir.
  *
- * A GEOS name becomes a host name through Port32/hostfs: on DOS a GEOS
- * file has a generated 8.3 name and its GEOS name in its header, on the
- * other hosts the GEOS name is the host name; either tree can be read
- * on every host.
- *
- * Not yet: disk handles and drives, paths of standard paths spread over
- * several directories (geos.ini "paths"), links.
+ * Not yet: paths of standard paths spread over several directories
+ * (geos.ini "paths"), links, a current directory per drive.
  */
 #include "kernelC.h"
-#include "ghal.h"
-#include "hostfs.h"
 
 #include <string.h>
 
-#define HOST_SEP (HostFSSep())
+#define TOP_DRIVE	2		/* C: */
 
-static char topHost[HOST_PATH_SIZE] = ".";
+static DiskHandle topDisk;
 
 /* names and parents of the standard paths (fileVariable.def,
  * stdPathUpwardTree), by StandardPath / 2 */
@@ -71,17 +67,29 @@ static Boolean IsStdPath(word sp)
     return (sp & 1) && sp / 2 < STD_PATH_COUNT;
 }
 
+/* the drive of the top directory, and its disk */
 void FileSetTopHostPath(const char *hostPath)
 {
-    size_t n = strlen(hostPath);
+    FSDDrive *old = FSDDriveOf(TOP_DRIVE);
+    void *priv = HostFSDriveData(hostPath);
 
-    if (n >= sizeof(topHost))
-	n = sizeof(topHost) - 1;
-    memcpy(topHost, hostPath, n);
-    /* without a separator at the end */
-    while (n > 1 && (topHost[n - 1] == '/' || topHost[n - 1] == '\\'))
-	n--;
-    topHost[n] = 0;
+    if (!priv)
+	KernelFatal(FILE_PATH_ALLOC_FAILED);
+    if (old && old->FDR_fsd == &hostFSDriver)
+	HostFSFreeDriveData(old->FDR_private);
+    if (!FSDInitDrive(TOP_DRIVE, "C", DS_PRESENT | DRIVE_FIXED,
+		      MEDIA_FIXED_DISK, &hostFSDriver, priv))
+	KernelFatal(FILE_PATH_ALLOC_FAILED);
+    topDisk = 0;		/* registered when it is used */
+}
+
+DiskHandle FileTopDisk(void)
+{
+    if (!FSDDriveOf(TOP_DRIVE))
+	FileSetTopHostPath(".");
+    if (!topDisk)
+	topDisk = DiskRegisterDiskSilently(TOP_DRIVE);
+    return topDisk;
 }
 
 /* ---------------------------------------------------------------------
@@ -154,150 +162,90 @@ static KPath *CurPath(void)
     return t->T_path;
 }
 
-/* the components of `path' from the top: relative to the current path
- * unless it starts with a separator */
-static Boolean Resolve(const char *path, Comps *c)
+/* a drive name at the start of *path ("C:"): *base becomes its disk and
+ * *path what follows.  FALSE with the error set for an unknown drive. */
+static Boolean DriveSpec(const char **path, DiskHandle *base, Boolean *spec)
+{
+    const char *p = *path, *e = p;
+    sword drive;
+
+    *spec = FALSE;
+    while (*e && *e != ':' && *e != '\\' && *e != '/')
+	e++;
+    if (*e != ':' || e == p)
+	return TRUE;
+    drive = FSDDriveByName(p, (word) (e - p));
+    if (drive < 0) {
+	KernelSetError(ERROR_INVALID_VOLUME);
+	return FALSE;
+    }
+    *base = DiskRegisterDiskSilently((word) drive);
+    if (!*base)
+	return FALSE;
+    *path = e + 1;
+    *spec = TRUE;
+    return TRUE;
+}
+
+/* the disk of `path' relative to (*base, *tail), and its components
+ * from the root of the disk (full).  A drive name or a separator at the
+ * start changes *base and *tail, and *path is what follows a drive
+ * name. */
+static FSDDisk *ResolveFrom(DiskHandle *base, const char **tail,
+			    const char **path, Comps *full)
+{
+    FSDDisk *d;
+    Boolean spec;
+
+    full->len = 0;
+    full->buf[0] = 0;
+    if (!DriveSpec(path, base, &spec))
+	return NULL;
+    if (spec || **path == '\\' || **path == '/') {
+	*tail = "";
+	if (*base & DISK_IS_STD_PATH_MASK)
+	    *base = SP_TOP;
+    }
+    if (*base & DISK_IS_STD_PATH_MASK) {
+	if (!IsStdPath(*base)) {
+	    KernelSetError(ERROR_INVALID_VOLUME);
+	    return NULL;
+	}
+	AddStdPath(full, (StandardPath) *base);
+    }
+    d = FSDDiskOf(*base);
+    if (!d) {
+	KernelSetError(ERROR_INVALID_VOLUME);
+	return NULL;
+    }
+    if (!AddPath(full, *tail) || !AddPath(full, *path)) {
+	KernelSetError(ERROR_PATH_NOT_FOUND);
+	return NULL;
+    }
+    return d;
+}
+
+/* the path on the disk: "\\" and the components */
+static Boolean DiskPath(const Comps *c, char *out, size_t size)
+{
+    if (c->len + 2 > size) {
+	KernelSetError(ERROR_PATH_TOO_LONG);
+	return FALSE;
+    }
+    out[0] = '\\';
+    memcpy(out + 1, c->buf, c->len + 1);
+    return TRUE;
+}
+
+FSDDisk *FileResolve(const char *path, char *out, size_t size)
 {
     KPath *cur = CurPath();
-
-    c->len = 0;
-    c->buf[0] = 0;
-    if (*path == '\\' || *path == '/')
-	return AddPath(c, path);
-    return AddStdPath(c, cur->KP_disk) && AddPath(c, cur->KP_tail) &&
-	   AddPath(c, path);
-}
-
-/* the host path of the first n bytes of c: each name is looked up in
- * its host directory (hostfs), a missing one is taken as it is */
-static Boolean ToHostN(const Comps *c, size_t n, char *out, size_t size)
-{
-    char name[HOSTFS_NAME_MAX], comp[PATH_BUFFER_SIZE];
-    size_t i = 0, t = strlen(topHost);
-
-    if (t >= size)
-	return FALSE;
-    memcpy(out, topHost, t + 1);
-    while (i < n) {
-	size_t e = i;
-	while (e < n && c->buf[e] != '\\')
-	    e++;
-	memcpy(comp, c->buf + i, e - i);
-	comp[e - i] = 0;
-	if (HostFSLookup(out, comp, name, sizeof(name)) != GHAL_OK)
-	    strcpy(name, comp);
-	t = strlen(out);
-	if (t + 1 + strlen(name) + 1 > size)
-	    return FALSE;
-	out[t] = HOST_SEP;
-	strcpy(out + t + 1, name);
-	i = e + 1;
-    }
-    return TRUE;
-}
-
-static Boolean ToHost(const Comps *c, char *out, size_t size)
-{
-    return ToHostN(c, c->len, out, size);
-}
-
-Boolean FileResolveNew(const char *path, int kind, FileTarget *t)
-{
+    DiskHandle base = cur->KP_disk;
+    const char *tail = cur->KP_tail;
     Comps c;
-    size_t last;
-    char name[HOSTFS_NAME_MAX];
-    ghal_fs_info info;
-    ghal_status s;
+    FSDDisk *d = ResolveFrom(&base, &tail, &path, &c);
 
-    memset(t, 0, sizeof(*t));
-    if (!Resolve(path, &c) || !c.len) {
-	KernelSetError(ERROR_PATH_NOT_FOUND);
-	return FALSE;
-    }
-    last = c.len;
-    while (last && c.buf[last - 1] != '\\')
-	last--;
-    if (c.len - last >= sizeof(t->FT_name) - 3) {
-	KernelSetError(ERROR_INVALID_LONGNAME);
-	return FALSE;
-    }
-    strcpy(t->FT_name, c.buf + last);
-    if (!ToHostN(&c, last ? last - 1 : 0, t->FT_dir, sizeof(t->FT_dir))) {
-	KernelSetError(ERROR_PATH_TOO_LONG);
-	return FALSE;
-    }
-    if (ghal_fs_stat(t->FT_dir, &info) != GHAL_OK ||
-	!(info.attrs & GHAL_FS_ATTR_DIR)) {
-	KernelSetError(ERROR_PATH_NOT_FOUND);
-	return FALSE;
-    }
-    s = HostFSLookup(t->FT_dir, t->FT_name, name, sizeof(name));
-    if (s == GHAL_OK)
-	t->FT_exists = TRUE;
-    else {
-	s = HostFSNewName(t->FT_dir, t->FT_name, kind, name, sizeof(name),
-			  &t->FT_dirName);
-	if (s != GHAL_OK) {
-	    KernelSetError(s == GHAL_ERR_EXISTS ? ERROR_CANNOT_MAP_NAME
-						: ERROR_INVALID_LONGNAME);
-	    return FALSE;
-	}
-    }
-    if (!HostFSJoin(t->FT_host, sizeof(t->FT_host), t->FT_dir, name)) {
-	KernelSetError(ERROR_PATH_TOO_LONG);
-	return FALSE;
-    }
-    return TRUE;
-}
-
-Boolean FileHostPath(const char *path, char *out, size_t size)
-{
-    Comps c;
-
-    if (!Resolve(path, &c)) {
-	KernelSetError(ERROR_PATH_NOT_FOUND);
-	return FALSE;
-    }
-    if (!ToHost(&c, out, size)) {
-	KernelSetError(ERROR_PATH_TOO_LONG);
-	return FALSE;
-    }
-    return TRUE;
-}
-
-/* the FileError of a ghal_fs status; a missing file is a missing path
- * when its directory is missing too */
-word FileErrorOf(int status, const char *hostPath)
-{
-    switch ((ghal_status) status) {
-    case GHAL_OK:		return 0;
-    case GHAL_ERR_NOTFOUND:
-	if (hostPath) {
-	    char dir[HOST_PATH_SIZE];
-	    char *sep;
-	    ghal_fs_info info;
-	    strncpy(dir, hostPath, sizeof(dir) - 1);
-	    dir[sizeof(dir) - 1] = 0;
-	    sep = strrchr(dir, HOST_SEP);
-	    if (sep && sep != dir) {
-		*sep = 0;
-		if (ghal_fs_stat(dir, &info) != GHAL_OK ||
-		    !(info.attrs & GHAL_FS_ATTR_DIR))
-		    return ERROR_PATH_NOT_FOUND;
-	    }
-	}
-	return ERROR_FILE_NOT_FOUND;
-    case GHAL_ERR_NOTDIR:	return ERROR_PATH_NOT_FOUND;
-    case GHAL_ERR_EXISTS:	return ERROR_FILE_EXISTS;
-    case GHAL_ERR_ACCESS:
-    case GHAL_ERR_ISDIR:	return ERROR_ACCESS_DENIED;
-    case GHAL_ERR_NOSPACE:	return ERROR_SHORT_READ_WRITE;
-    case GHAL_ERR_NOTEMPTY:	return ERROR_DIRECTORY_NOT_EMPTY;
-    case GHAL_ERR_NOMEM:	return ERROR_INSUFFICIENT_MEMORY;
-    case GHAL_ERR_INVAL:	return ERROR_ARGS_INVALID;
-    case GHAL_ERR_UNSUPPORTED:	return ERROR_UNSUPPORTED_FUNCTION;
-    default:			return ERROR_GENERAL_FAILURE;
-    }
+    return d && DiskPath(&c, out, size) ? d : NULL;
 }
 
 /* ---------------------------------------------------------------------
@@ -332,57 +280,46 @@ void FileThreadExit(KThread *t)
     }
 }
 
+/* a path relative to a standard path stays relative to it unless it
+ * leaves it: then it is relative to the top */
 DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
 {
     KPath *cur = CurPath();
     Comps c, full;
-    StandardPath sp = SP_TOP;
-    const char *tail = "";
-    char host[HOST_PATH_SIZE];
-    ghal_fs_info info;
+    DiskHandle base = disk ? disk : cur->KP_disk;
+    const char *tail = disk ? "" : cur->KP_tail;
+    char dp[FILE_DISK_PATH_SIZE];
+    FSDDisk *d;
+    word e;
 
     if (!path)
 	path = "";
-    if (disk && !IsStdPath((word) disk)) {
-	KernelSetError(ERROR_INVALID_VOLUME);	/* no disks yet */
+    d = ResolveFrom(&base, &tail, &path, &full);
+    if (!d)
 	return 0;
+    c = full;
+    if (base & DISK_IS_STD_PATH_MASK) {
+	c.len = 0;
+	c.buf[0] = 0;
+	if (!AddPath(&c, tail) || !AddPath(&c, path)) {
+	    c = full;
+	    base = SP_TOP;
+	}
     }
-    if (*path != '\\' && *path != '/') {
-	sp = disk ? (StandardPath) disk : cur->KP_disk;
-	if (!disk)
-	    tail = cur->KP_tail;
-    }
-    /* the directories below the standard path, or below the top if the
-     * path leaves the standard path */
-    full.len = 0;
-    full.buf[0] = 0;
-    if (!AddStdPath(&full, sp) || !AddPath(&full, tail) ||
-	!AddPath(&full, path)) {
-	KernelSetError(ERROR_PATH_NOT_FOUND);
-	return 0;
-    }
-    c.len = 0;
-    c.buf[0] = 0;
-    if (!AddPath(&c, tail) || !AddPath(&c, path)) {
-	c = full;
-	sp = SP_TOP;
-    }
-    /* a standard path itself need not exist on the host */
+    /* a standard path itself need not exist */
     if (c.len) {
-	if (!ToHost(&full, host, sizeof(host))) {
-	    KernelSetError(ERROR_PATH_TOO_LONG);
+	if (!DiskPath(&full, dp, sizeof(dp)))
 	    return 0;
-	}
-	if (ghal_fs_stat(host, &info) != GHAL_OK ||
-	    !(info.attrs & GHAL_FS_ATTR_DIR)) {
-	    KernelSetError(ERROR_PATH_NOT_FOUND);
+	e = FSD_OF(d)->FSD_curPathSet(d, dp);
+	if (e) {
+	    KernelSetError(e);
 	    return 0;
 	}
     }
-    cur->KP_disk = sp;
+    cur->KP_disk = base;
     strcpy(cur->KP_tail, c.buf);
     KernelSetError(0);
-    return (DiskHandle) sp;
+    return base;
 }
 
 DiskHandle FileSetCurrentPathRaw(DiskHandle disk, const char *path)
@@ -403,7 +340,7 @@ DiskHandle FileGetCurrentPath(char *buffer, word bufferSize)
 	strncpy(buffer, cur->KP_tail, bufferSize - 1);
 	buffer[bufferSize - 1] = 0;
     }
-    return (DiskHandle) cur->KP_disk;
+    return cur->KP_disk;
 }
 
 void FilePushDir(void)

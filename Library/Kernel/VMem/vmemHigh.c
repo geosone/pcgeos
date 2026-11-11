@@ -78,7 +78,9 @@ static word OpenStatus(word e)
 VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
 		    word compression)
 {
-    char host[HOST_PATH_SIZE], tmp[HOST_PATH_SIZE];
+    char dp[FILE_DISK_PATH_SIZE], tmp[HOST_PATH_SIZE];
+    FSDDisk *disk;
+    dword id = 0;
     FileHandle fh = 0;
     Boolean create = FALSE, readOnly = FALSE, exists;
     FileCreateFlags native = (mode & VMO_NATIVE_WITH_EXT_ATTRS)
@@ -97,14 +99,18 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
 	name = tmp;
 	create = TRUE;
     }
-    if (!FileHostPath(name, host, sizeof(host))) {
+    disk = FileResolve(name, dp, sizeof(dp));
+    if (!disk) {
 	if (fh)
 	    FileClose(fh, FALSE);
 	return 0;
     }
-    /* open already: the same handle */
-    for (f = vmFiles; f; f = f->VF_next)
-	if (!strcmp(f->VF_path, host)) {
+    /* open already (the same file: disk and FEA_FILE_ID): the same
+     * handle */
+    exists = !FSD_OF(disk)->FSD_pathExtAttrs(disk, dp, FEA_FILE_ID, &id,
+					     sizeof(id), FALSE);
+    for (f = vmFiles; exists && !fh && f; f = f->VF_next)
+	if (f->VF_disk == disk && f->VF_id == id) {
 	    if (mode == VMO_CREATE_ONLY) {
 		KernelSetError(VM_FILE_EXISTS);
 		return 0;
@@ -116,7 +122,6 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
 	}
 
     if (!fh) {
-	exists = ghal_fs_stat(host, NULL) == GHAL_OK;
 	switch (mode) {
 	case VMO_OPEN:
 	    if (!exists) {
@@ -171,7 +176,13 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
     f->VF_file = fh;
     f->VF_refs = 1;
     f->VF_readOnly = readOnly;
-    strcpy(f->VF_path, FileOf(fh)->KF_path);	/* the name it got */
+    {
+	KFile *kf = FileOf(fh);
+	f->VF_disk = kf->KF_file.FF_disk;
+	FSD_OF(f->VF_disk)->FSD_handleExtAttrs(&kf->KF_file, FEA_FILE_ID,
+					       &f->VF_id, sizeof(f->VF_id),
+					       FALSE);
+    }
     f->VF_handle = HandleAlloc(SIG_VM, GeodeGetProcessHandle());
     if (!f->VF_handle) {
 	FreeVM(f);

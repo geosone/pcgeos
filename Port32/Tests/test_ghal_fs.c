@@ -130,6 +130,14 @@ int main(int argc, char **argv)
     CHECK(ghal_fs_open(P("GFSTEST"), GHAL_FS_READ, &f) == GHAL_ERR_ISDIR);
     CHECK(ghal_fs_delete(P("GFSTEST")) == GHAL_ERR_ISDIR);
 
+    /* the space of the file system */
+    {
+        uint64_t total = 0, avail = 0;
+        uint32_t unit = 0;
+        CHECK(ghal_fs_space(P("GFSTEST"), &total, &avail, &unit) == GHAL_OK &&
+              unit > 0 && total > 0 && avail <= total);
+    }
+
     /* directories */
     CHECK(ghal_fs_mkdir(P("GFSTEST/SUB")) == GHAL_OK);
     CHECK(ghal_fs_open(P("GFSTEST/SUB/C.DAT"), GHAL_FS_WRITE |

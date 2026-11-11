@@ -1,14 +1,16 @@
 /*
  * test_kernel_file.c -- the file routines of the C kernel
  * (Library/Kernel/File: filePath.c, fileOpenClose.c, fileIO.c,
- * fileFile.c) on ghal_fs, on every host.
+ * fileFile.c, FSD, Drive, Disk) on the HostFS driver, on every host.
  *
  * The GEOS top directory is GFTOP next to the program (on DOS the
  * program runs from a writable disk).  Checked: standard paths and
  * their directories, current paths (relative, absolute, "..", push and
  * pop, taken over by a new thread), create/open/read/write/seek/
  * truncate/size/close, duplicated handles sharing the position, date
- * and time, attributes, rename, directories, and the error codes.
+ * and time, attributes, rename, directories, drives and disks (the
+ * HostFS drive of the top directory, paths with a drive name), and the
+ * error codes.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -245,6 +247,50 @@ int main(int argc, char **argv)
     CHECK(FileSetCurrentPath(0, "..\\..") == (DiskHandle) SP_DOCUMENT);
     CHECK(FileDeleteDir("SUB\\DEEP") == 0 && FileDeleteDir("SUB") == 0);
     CHECK(FileDelete("RO.TXT") == 0);
+
+    /* drives and disks: the top directory is drive C of HostFS */
+    {
+	DiskHandle disk = DiskRegisterDisk(2);
+	DiskInfoStruct info;
+	char name[DRIVE_NAME_MAX_LENGTH + 1], dp[FILE_DISK_PATH_SIZE];
+	DiskFindResult found;
+
+	CHECK(disk != 0 && !(disk & DISK_IS_STD_PATH_MASK) &&
+	      DiskRegisterDisk(2) == disk);
+	CHECK(DiskGetDrive(disk) == 2 && DiskGetDrive((DiskHandle) SP_TOP) == 2);
+	CHECK((DriveGetStatus(2) & DS_PRESENT) &&
+	      (DriveGetStatus(2) & DS_TYPE) == DRIVE_FIXED);
+	CHECK(DriveGetStatus(3) == 0 && DiskRegisterDisk(3) == 0 &&
+	      ThreadGetError() == ERROR_INVALID_VOLUME);
+	CHECK(DriveGetName(2, name, sizeof(name)) == name + 1 &&
+	      !strcmp(name, "C") && DriveGetName(2, name, 1) == NULL);
+	CHECK(DriveGetDefaultMedia(2) == MEDIA_FIXED_DISK);
+	CHECK(DiskCheckWritable(disk) && DiskCheckUnnamed(disk));
+	CHECK(DiskGetVolumeInfo(disk, &info) == 0 && info.DIS_blockSize &&
+	      info.DIS_totalSpace > 0 && info.DIS_freeSpace >= 0);
+	CHECK(DiskFind("", &found) == disk && found == DFR_UNIQUE);
+	f = FileCreate("DISK.TXT", FILE_CREATE_ONLY | FILE_ACCESS_RW, 0);
+	CHECK(f && FileGetDiskHandle(f) == disk && DiskCheckInUse(disk));
+	CHECK(FileClose(f, FALSE) == 0 && !DiskCheckInUse(disk));
+	/* a path on the disk, and with the drive's name */
+	CHECK(FileSetCurrentPath(disk, "DOCUMENT") == disk);
+	CHECK(FileGetCurrentPath(buf, sizeof(buf)) == disk &&
+	      !strcmp(buf, "DOCUMENT"));
+	CHECK(FileResolve("DISK.TXT", dp, sizeof(dp)) != NULL &&
+	      !strcmp(dp, "\\DOCUMENT\\DISK.TXT"));
+	f = FileOpen("DISK.TXT", FILE_ACCESS_R);
+	CHECK(f && FileClose(f, FALSE) == 0);
+	CHECK(FileSetCurrentPath(disk, "..") == 0 &&
+	      ThreadGetError() == ERROR_PATH_NOT_FOUND);
+	CHECK(FileSetCurrentPath((DiskHandle) SP_SYSTEM, "c:\\DOCUMENT") == disk);
+	f = FileOpen("C:DOCUMENT\\DISK.TXT", FILE_ACCESS_R);
+	CHECK(f && FileClose(f, FALSE) == 0);
+	CHECK(FileOpen("Q:\\DISK.TXT", FILE_ACCESS_R) == 0 &&
+	      ThreadGetError() == ERROR_INVALID_VOLUME);
+	CHECK(FileDelete("\\DOCUMENT\\DISK.TXT") == 0);
+	CHECK(FileSetCurrentPath((DiskHandle) SP_DOCUMENT, "") ==
+	      (DiskHandle) SP_DOCUMENT);
+    }
 
     /* every handle is gone again (the child thread's too) */
     f = FileOpen("\\SYSTEM\\FS\\D.TXT", FILE_ACCESS_R);
