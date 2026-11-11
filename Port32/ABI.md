@@ -948,6 +948,7 @@ is told where it is with `FileSetTopHostPath`.
   old directory unless it has a path; it never replaces a file),
   attributes, and create/delete directories (the current directory
   cannot be deleted).
+- **GEOS files**, extended attributes and host names: section 13c.
 - **Errors.** Every routine sets the thread's error (`ThreadGetError`).
   A missing file is `ERROR_FILE_NOT_FOUND`. If its directory is
   missing too, the error is `ERROR_PATH_NOT_FOUND`.
@@ -955,13 +956,10 @@ is told where it is with `FileSetTopHostPath`.
 Not yet:
 
 - the FSD layer and HostFS as a driver;
-- the GEOS file header of DOS16 files (long names, extended
-  attributes; every file is native for now);
 - deny modes and record locks;
 - `FileEnum`, links, `FileCopy`/`FileMove`, temporary files, and
   change notification;
-- several directories per standard path (`geos.ini` `paths`);
-- case-insensitive names on POSIX hosts.
+- several directories per standard path (`geos.ini` `paths`).
 
 ## 13b. VM files (`Library/Kernel/VMem`, P4)
 
@@ -977,9 +975,9 @@ So block handles inside documents stay valid, and files move freely
 between hosts. The header is kept in memory as it is in the file
 (little endian, `vmemInt.h`). The memory of each block is kept beside it
 (`KVMFile.VF_mem`), because the 16-bit `VMBH_memHandle` cannot hold a
-32-bit handle; that field is 0 in the file. The GEOS file header in
-front of the data (256 bytes on DOS) belongs to the file system driver
-and is not written yet.
+32-bit handle; that field is 0 in the file. A VM file is a GEOS file
+of type `GFT_VM` (section 13c): the VM data follow the 256-byte
+`GeosFileHeader`, and the VM positions count from there, as on DOS16.
 
 - **Block table** (`vmemBlkManip.c`), as in `vmemBlkManip.asm`:
   - used entries;
@@ -1027,8 +1025,72 @@ Not yet:
 - discarding clean blocks;
 - relocation (`VMSetReloc`, object blocks), and with it saving to state;
 - LMem blocks (`VMAllocLMem`) with converted headers;
-- DB items, huge arrays, compression;
-- the GEOS file header.
+- DB items, huge arrays, compression.
+
+## 13c. GEOS files and host names (`Port32/hostfs`, `File/fileEA.c`, P4)
+
+**The header is in the file on every host (decided 2026-11-11).** A
+GEOS file (created without `FCF_NATIVE`) starts with the 256-byte
+`GeosFileHeader` of DOS16 GEOS (`Include/Internal/fileStr.def`): the
+signature, the GEOS name, type, flags, release, protocol, token,
+creator, user notes, notice, creation date, password and desktop info.
+The same file therefore works on DOS16, dos32 and Linux, copied either
+way. Host extended attributes (xattrs) are not used: they would be lost
+on the way to a FAT disk.
+
+- **Data.** A handle of a GEOS file reads and writes the data after the
+  header (`KFile.KF_base`). `FilePos`, `FileSize` and `FileTruncate`
+  count from there; the position never goes into the header. Truncating
+  keeps the header. `FileOpen` takes any file that starts with the
+  signature as a GEOS file. `FileCreate` of an existing file of the
+  other kind is `ERROR_FILE_FORMAT_MISMATCH`.
+- **Extended attributes** (`fileEA.c`): `FileGet/SetPathExtAttributes`,
+  `FileGet/SetHandleExtAttributes`, one attribute or `FEA_MULTIPLE`
+  (the first error is returned, the others are still done).
+  - The header fields are read and set as they are in the file (little
+    endian). Strings may be shorter than their field.
+  - `FEA_MODIFICATION`, `FEA_FILE_ATTR`, `FEA_SIZE` (the data),
+    `FEA_FILE_ID` and `FEA_DOS_NAME` (the host name) come from the host.
+  - A native file has no header attributes: getting one is
+    `ERROR_ATTR_NOT_FOUND`, setting one `ERROR_ATTR_NOT_SUPPORTED`. Its
+    `FEA_FILE_TYPE` is `GFT_NOT_GEOS_FILE`, its `FEA_NAME` the host name.
+  - `FEA_NAME` is changed by `FileRename` only
+    (`ERROR_ATTR_CANNOT_BE_SET`). `VMOpen` sets `GFT_VM` and the flags,
+    as `VMCreateFileHeader` did.
+- **Host names** (`Port32/hostfs`). Two layouts:
+  - *DOS names* (dos32; `HostFSSetDosNames`): as the DOS file system
+    driver (`dosVirtual.asm`, `dosPath.asm`). A GEOS file gets a
+    generated 8.3 name: the first eight characters, illegal ones as `_`,
+    upper case, then `.000`, `.001` and so on. A directory whose GEOS name
+    is not exactly a DOS name gets one too, plus a `@DIRNAME.000` with
+    its GEOS name (type `GFT_DIRECTORY`). A native file needs a DOS name
+    (`ERROR_INVALID_LONGNAME`). Renaming within the directory changes
+    only the name in the header.
+  - *Long names* (the other hosts): the GEOS name is the host name.
+  - **Lookup**, on every host, for each part of a path:
+    1. the name itself (with DOS names only if it is a DOS name, since
+       DOS would cut it to 8.3);
+    2. the name in any case;
+    3. the GEOS name in the headers of the files with likely
+       extensions (`.000`–`.999`, `.GEO`, `.VM`, `.DB`, `.STA`, `.BIT`)
+       and in the `@DIRNAME.000` of directories.
+
+    So either layout can be read on any host. A DOS16 installation
+    works on Linux as it is.
+- **Moving trees.** `Port32/tools/geostree.py todos|tolong SRC DST`
+  copies a tree into the other layout (ctest `tools.geostree`).
+- **dos32** runs DJGPP without long file names and keeps the case of the
+  DOS names (`_crt0_startup_flags`). DOS updates the directory entry of
+  an open file only on a commit, so a new GEOS file is committed after
+  its header is written; otherwise it could not be found by its GEOS
+  name while open.
+- ctest `kernel.file.geos` covers all of this on every host, DOS
+  included (DOS names are tested on Linux too).
+
+Not yet: links in `@DIRNAME.000`; the DOS code page for characters
+above 0x7f in names; `FEA_GEODE_ATTR`, `FEA_CUSTOM` and the
+network attributes; `FileGetHandleAllExtAttributes`;
+`FileCopyPathExtAttributes`.
 
 ## 14. Open
 

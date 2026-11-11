@@ -34,6 +34,9 @@
 #                      host paths (ghal_fs)
 #   File/fileOpenClose.c, File/fileIO.c, File/fileFile.c <- the same
 #                      asm files: open/close, I/O, by-name operations
+#   File/fileEA.c   <- extended attributes (the FileGet/Set...ExtAttributes
+#                      of fileFile.asm, fileOpenClose.asm), kept in the
+#                      GEOS file header (Port32/hostfs)
 #   VMem/vmemBlkManip.c, vmemHeader.c, vmemHigh.c, vmemChain.c <- the
 #                      same asm files (vmemHigh.c also vmemC.asm): VM
 #                      files in the DOS16 format
@@ -69,6 +72,7 @@ add_library(geos_kernel_objs OBJECT
   File/fileOpenClose.c
   File/fileIO.c
   File/fileFile.c
+  File/fileEA.c
   VMem/vmemBlkManip.c
   VMem/vmemHeader.c
   VMem/vmemHigh.c
@@ -78,7 +82,7 @@ target_include_directories(geos_kernel_objs PRIVATE
   ${PROJECT_SOURCE_DIR}/Port32/include
   ${PROJECT_SOURCE_DIR}/CInclude)
 target_compile_definitions(geos_kernel_objs PRIVATE GEOS_PORT32)
-target_link_libraries(geos_kernel_objs PRIVATE ghal)
+target_link_libraries(geos_kernel_objs PRIVATE ghal hostfs)
 
 # The kernel's export table (what geodes may import by name): the
 # symbols of the objects above that Library/Kernel/geos.gp exports
@@ -114,4 +118,4 @@ target_include_directories(geos_kernel PUBLIC
   ${PROJECT_SOURCE_DIR}/Port32/include
   ${PROJECT_SOURCE_DIR}/CInclude)
 target_compile_definitions(geos_kernel PUBLIC GEOS_PORT32)
-target_link_libraries(geos_kernel PUBLIC ghal)
+target_link_libraries(geos_kernel PUBLIC ghal hostfs)

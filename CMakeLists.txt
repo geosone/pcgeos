@@ -59,6 +59,7 @@ message(STATUS "GEOS_HOST=${GEOS_HOST} arch=${CMAKE_SYSTEM_PROCESSOR} EC=${GEOS_
 
 enable_testing()
 add_subdirectory(Port32/ghal)
+add_subdirectory(Port32/hostfs)
 add_subdirectory(Library/Math/Float)
 add_subdirectory(Library/Kernel)
 add_subdirectory(Port32/Tests)

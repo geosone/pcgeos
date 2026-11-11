@@ -12,6 +12,7 @@
  */
 #include "kernelC.h"
 #include "ghal.h"
+#include "hostfs.h"
 
 #include <setjmp.h>
 #include <stdio.h>
@@ -50,25 +51,31 @@ static const char *H(const char *rel)
     return b;
 }
 
+static void RemoveTree(const char *path)
+{
+    ghal_dir *d;
+    ghal_fs_info info;
+    char name[260], sub[400];
+
+    if (ghal_fs_opendir(path, &d) == GHAL_OK) {
+	while (ghal_fs_readdir(d, name, sizeof(name), &info) == GHAL_OK) {
+	    sprintf(sub, "%s%c%s", path, HostFSSep(), name);
+	    if (info.attrs & GHAL_FS_ATTR_DIR)
+		RemoveTree(sub);
+	    else {
+		ghal_fs_set_attrs(sub, 0);
+		ghal_fs_delete(sub);
+	    }
+	}
+	ghal_fs_closedir(d);
+    }
+    ghal_fs_rmdir(path);
+}
+
+/* everything below the top (GEOS files have generated names on DOS) */
 static void Cleanup(void)
 {
-    static const char *files[] = {
-	"DOCUMENT/A.TXT", "DOCUMENT/B.TXT", "DOCUMENT/SUB/C.TXT",
-	"DOCUMENT/RO.TXT", "SYSTEM/FS/D.TXT", "TOP.TXT", NULL
-    };
-    static const char *dirs[] = {
-	"DOCUMENT/SUB/DEEP", "DOCUMENT/SUB", "DOCUMENT", "SYSTEM/FS",
-	"SYSTEM", NULL
-    };
-    int i;
-
-    for (i = 0; files[i]; i++) {
-	ghal_fs_set_attrs(H(files[i]), 0);
-	ghal_fs_delete(H(files[i]));
-    }
-    for (i = 0; dirs[i]; i++)
-	ghal_fs_rmdir(H(dirs[i]));
-    ghal_fs_rmdir(top);
+    RemoveTree(top);
 }
 
 static SemaphoreHandle done;
@@ -91,6 +98,7 @@ int main(int argc, char **argv)
     FileDateAndTime fdat;
 
     (void) argc;
+    setvbuf(stdout, NULL, _IONBF, 0);	/* all of it, should DOS crash */
     kernelFatalHook = Catch;
     kernelCurrentGeode = 0x2340;
     strncpy(top, argv[0], sizeof(top) - 8);
@@ -118,7 +126,7 @@ int main(int argc, char **argv)
     FileSetStandardPath(SP_FILE_SYSTEM_DRIVERS);
     CHECK(FileGetCurrentPath(buf, sizeof(buf)) ==
 	  (DiskHandle) SP_FILE_SYSTEM_DRIVERS && buf[0] == 0);
-    f = FileCreate("D.TXT", FILE_CREATE_ONLY | FILE_ACCESS_RW, 0);
+    f = FileCreate("D.TXT", FCF_NATIVE | FILE_CREATE_ONLY | FILE_ACCESS_RW, 0);
     CHECK(f != 0 && ThreadGetError() == 0);
     CHECK(FileClose(f, FALSE) == 0);
     CHECK(ghal_fs_stat(H("SYSTEM/FS/D.TXT"), NULL) != GHAL_ERR_NOTFOUND);

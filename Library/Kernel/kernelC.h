@@ -623,6 +623,8 @@ void GeodeFreeLow(GeodeHandle gh);
  * Files (File/)
  * ------------------------------------------------------------------- */
 
+#define HOST_PATH_SIZE	512	/* a path on the host */
+
 /* a current path: a standard path (or SP_TOP) and the directories below
  * it, separated by '\\' (filePath.c) */
 typedef struct KPath {
@@ -636,6 +638,8 @@ typedef struct KPath {
 typedef struct KFile {
     struct ghal_file *KF_file;
     word	KF_refs;
+    dword	KF_base;	/* GFH_SIZE in a GEOS file: the data follow the
+				 * GeosFileHeader (Port32/hostfs) */
     char	*KF_path;	/* host path */
     FileAttrs	KF_attrs;	/* FileCreate: set when it is closed */
 } KFile;
@@ -654,7 +658,7 @@ typedef struct KVMFile {
     word	VF_refs;	/* VMOpen of an open file */
     Boolean	VF_readOnly;
     Boolean	VF_hdrDirty;
-    char	VF_path[PATH_BUFFER_SIZE];	/* host path */
+    char	VF_path[HOST_PATH_SIZE];	/* host path */
 } KVMFile;
 
 void VMFreeHandle(Handle vm);	/* vmemHigh.c: close for a freed geode */
@@ -662,12 +666,28 @@ void VMFreeHandle(Handle vm);	/* vmemHigh.c: close for a freed geode */
 void KernelSetError(word error);	/* threadThread.c: ThreadGetError */
 /* filePath.c */
 void FileSetTopHostPath(const char *hostPath);	/* SP_TOP on the host */
+/* the host path for a new file or directory (FileResolveNew) */
+typedef struct FileTarget {
+    char	FT_host[HOST_PATH_SIZE];	/* existing, or to create */
+    char	FT_dir[HOST_PATH_SIZE];		/* its directory */
+    char	FT_name[FILE_LONGNAME_BUFFER_SIZE];	/* the GEOS name */
+    Boolean	FT_exists;
+    int		FT_dirName;	/* a new directory needs @DIRNAME.000 */
+} FileTarget;
+/* kind: HOSTFS_NATIVE, HOSTFS_GEOS, HOSTFS_DIR; FALSE with the error set
+ * if the directory is missing or the name cannot be mapped */
+Boolean FileResolveNew(const char *path, int kind, FileTarget *t);
 /* the host path of a GEOS path (relative to the current path, or to the
  * top if it starts with '\\'); FALSE with the error set */
 Boolean FileHostPath(const char *path, char *out, size_t size);
 void FileThreadInit(KThread *t, KThread *creator);
 void FileThreadExit(KThread *t);
 word FileErrorOf(int ghalStatus, const char *hostPath);
+/* fileIO.c: FileDateAndTime of a time and back, and of now */
+struct ghal_datetime;
+FileDateAndTime FilePackDate(const struct ghal_datetime *dt);
+void FileUnpackDate(FileDateAndTime fdat, struct ghal_datetime *dt);
+FileDateAndTime FileNow(void);
 /* fileOpenClose.c: close a file handle of a geode that is freed */
 void FileFreeHandle(FileHandle fh);
 KFile *FileOf(FileHandle fh);

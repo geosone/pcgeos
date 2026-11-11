@@ -38,6 +38,22 @@ word VMCreateHeader(KVMFile *f)
     VHSet16(f, VMH_NUM_RESIDENT, 1);
     VMLinkFree(f, VM_INIT_NUM_BLKS - 1);
 
+    /* a GEOS file of type VM (VMCreateFileHeader); a native file has
+     * no such attributes */
+    {
+	FileExtAttrDesc d[2];
+	word type = GFT_VM, flags = 0;
+	d[0].FEAD_attr = FEA_FILE_TYPE;
+	d[0].FEAD_value = &type;
+	d[0].FEAD_size = sizeof(type);
+	d[0].FEAD_name = NULL;
+	d[1].FEAD_attr = FEA_FLAGS;
+	d[1].FEAD_value = &flags;
+	d[1].FEAD_size = sizeof(flags);
+	d[1].FEAD_name = NULL;
+	FileSetHandleExtAttributes(f->VF_file, FEA_MULTIPLE, d, 2);
+    }
+
     memset(fh, 0, sizeof(fh));
     Put16(fh + VMFH_SIGNATURE, VM_FILE_SIG);
     FilePos(f->VF_file, 0, FILE_POS_START);

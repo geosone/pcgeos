@@ -11,21 +11,23 @@
  * directories below it), taken over from the thread that creates it,
  * and a stack for FilePushDir.
  *
+ * A GEOS name becomes a host name through Port32/hostfs: on DOS a GEOS
+ * file has a generated 8.3 name and its GEOS name in its header, on the
+ * other hosts the GEOS name is the host name; either tree can be read
+ * on every host.
+ *
  * Not yet: disk handles and drives, paths of standard paths spread over
- * several directories (geos.ini "paths"), links, long names on DOS.
+ * several directories (geos.ini "paths"), links.
  */
 #include "kernelC.h"
 #include "ghal.h"
+#include "hostfs.h"
 
 #include <string.h>
 
-#ifdef GEOS_HOST_DOS32
-#define HOST_SEP '\\'
-#else
-#define HOST_SEP '/'
-#endif
+#define HOST_SEP (HostFSSep())
 
-static char topHost[PATH_BUFFER_SIZE] = ".";
+static char topHost[HOST_PATH_SIZE] = ".";
 
 /* names and parents of the standard paths (fileVariable.def,
  * stdPathUpwardTree), by StandardPath / 2 */
@@ -166,20 +168,85 @@ static Boolean Resolve(const char *path, Comps *c)
 	   AddPath(c, path);
 }
 
+/* the host path of the first n bytes of c: each name is looked up in
+ * its host directory (hostfs), a missing one is taken as it is */
+static Boolean ToHostN(const Comps *c, size_t n, char *out, size_t size)
+{
+    char name[HOSTFS_NAME_MAX], comp[PATH_BUFFER_SIZE];
+    size_t i = 0, t = strlen(topHost);
+
+    if (t >= size)
+	return FALSE;
+    memcpy(out, topHost, t + 1);
+    while (i < n) {
+	size_t e = i;
+	while (e < n && c->buf[e] != '\\')
+	    e++;
+	memcpy(comp, c->buf + i, e - i);
+	comp[e - i] = 0;
+	if (HostFSLookup(out, comp, name, sizeof(name)) != GHAL_OK)
+	    strcpy(name, comp);
+	t = strlen(out);
+	if (t + 1 + strlen(name) + 1 > size)
+	    return FALSE;
+	out[t] = HOST_SEP;
+	strcpy(out + t + 1, name);
+	i = e + 1;
+    }
+    return TRUE;
+}
+
 static Boolean ToHost(const Comps *c, char *out, size_t size)
 {
-    size_t t = strlen(topHost), i;
+    return ToHostN(c, c->len, out, size);
+}
 
-    if (t + 1 + c->len + 1 > size)
+Boolean FileResolveNew(const char *path, int kind, FileTarget *t)
+{
+    Comps c;
+    size_t last;
+    char name[HOSTFS_NAME_MAX];
+    ghal_fs_info info;
+    ghal_status s;
+
+    memset(t, 0, sizeof(*t));
+    if (!Resolve(path, &c) || !c.len) {
+	KernelSetError(ERROR_PATH_NOT_FOUND);
 	return FALSE;
-    memcpy(out, topHost, t);
-    if (c->len) {
-	out[t++] = HOST_SEP;
-	for (i = 0; i < c->len; i++)
-	    out[t + i] = c->buf[i] == '\\' ? HOST_SEP : c->buf[i];
-	t += c->len;
     }
-    out[t] = 0;
+    last = c.len;
+    while (last && c.buf[last - 1] != '\\')
+	last--;
+    if (c.len - last >= sizeof(t->FT_name) - 3) {
+	KernelSetError(ERROR_INVALID_LONGNAME);
+	return FALSE;
+    }
+    strcpy(t->FT_name, c.buf + last);
+    if (!ToHostN(&c, last ? last - 1 : 0, t->FT_dir, sizeof(t->FT_dir))) {
+	KernelSetError(ERROR_PATH_TOO_LONG);
+	return FALSE;
+    }
+    if (ghal_fs_stat(t->FT_dir, &info) != GHAL_OK ||
+	!(info.attrs & GHAL_FS_ATTR_DIR)) {
+	KernelSetError(ERROR_PATH_NOT_FOUND);
+	return FALSE;
+    }
+    s = HostFSLookup(t->FT_dir, t->FT_name, name, sizeof(name));
+    if (s == GHAL_OK)
+	t->FT_exists = TRUE;
+    else {
+	s = HostFSNewName(t->FT_dir, t->FT_name, kind, name, sizeof(name),
+			  &t->FT_dirName);
+	if (s != GHAL_OK) {
+	    KernelSetError(s == GHAL_ERR_EXISTS ? ERROR_CANNOT_MAP_NAME
+						: ERROR_INVALID_LONGNAME);
+	    return FALSE;
+	}
+    }
+    if (!HostFSJoin(t->FT_host, sizeof(t->FT_host), t->FT_dir, name)) {
+	KernelSetError(ERROR_PATH_TOO_LONG);
+	return FALSE;
+    }
     return TRUE;
 }
 
@@ -206,7 +273,7 @@ word FileErrorOf(int status, const char *hostPath)
     case GHAL_OK:		return 0;
     case GHAL_ERR_NOTFOUND:
 	if (hostPath) {
-	    char dir[PATH_BUFFER_SIZE];
+	    char dir[HOST_PATH_SIZE];
 	    char *sep;
 	    ghal_fs_info info;
 	    strncpy(dir, hostPath, sizeof(dir) - 1);
@@ -271,7 +338,7 @@ DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
     Comps c, full;
     StandardPath sp = SP_TOP;
     const char *tail = "";
-    char host[PATH_BUFFER_SIZE];
+    char host[HOST_PATH_SIZE];
     ghal_fs_info info;
 
     if (!path)

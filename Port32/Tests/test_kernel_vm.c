@@ -13,6 +13,7 @@
  */
 #include "kernelC.h"
 #include "ghal.h"
+#include "hostfs.h"
 #include <vm.h>
 #include "vm_reference.h"
 
@@ -52,32 +53,31 @@ static const char *H(const char *rel)
     return b;
 }
 
-static void Cleanup(void)
+static void RemoveTree(const char *path)
 {
     ghal_dir *d;
-    char name[64];
-    char sub[300];
+    ghal_fs_info info;
+    char name[260], sub[400];
 
-    if (ghal_fs_opendir(H("TMP"), &d) == GHAL_OK) {
-	while (ghal_fs_readdir(d, name, sizeof(name), NULL) == GHAL_OK) {
-	    sprintf(sub, "%s%c%s", H("TMP"),
-#ifdef GEOS_HOST_DOS32
-		    '\\',
-#else
-		    '/',
-#endif
-		    name);
-	    ghal_fs_delete(sub);
+    if (ghal_fs_opendir(path, &d) == GHAL_OK) {
+	while (ghal_fs_readdir(d, name, sizeof(name), &info) == GHAL_OK) {
+	    sprintf(sub, "%s%c%s", path, HostFSSep(), name);
+	    if (info.attrs & GHAL_FS_ATTR_DIR)
+		RemoveTree(sub);
+	    else {
+		ghal_fs_set_attrs(sub, 0);
+		ghal_fs_delete(sub);
+	    }
 	}
 	ghal_fs_closedir(d);
-	ghal_fs_rmdir(H("TMP"));
     }
-    ghal_fs_set_attrs(H("A.VM"), 0);
-    ghal_fs_delete(H("A.VM"));
-    ghal_fs_delete(H("B.VM"));
-    ghal_fs_delete(H("REF.VM"));
-    ghal_fs_delete(H("PLAIN.TXT"));
-    ghal_fs_rmdir(top);
+    ghal_fs_rmdir(path);
+}
+
+/* everything below the top (GEOS files have generated names on DOS) */
+static void Cleanup(void)
+{
+    RemoveTree(top);
 }
 
 static void Fill(VMFileHandle vm, VMBlockHandle b, word size, byte seed)
@@ -132,11 +132,13 @@ static VMBlockHandle LinkBlock(VMFileHandle vm, word size, word next,
     return b;
 }
 
+/* the size of the data of a GEOS file */
 static uint64_t SizeOf(const char *rel)
 {
-    ghal_fs_info info;
+    dword size = 0;
 
-    return ghal_fs_stat(H(rel), &info) == GHAL_OK ? info.size : 0;
+    FileGetPathExtAttributes(rel, FEA_SIZE, &size, sizeof(size));
+    return size;
 }
 
 int main(int argc, char **argv)
@@ -153,6 +155,7 @@ int main(int argc, char **argv)
     byte *p;
 
     (void) argc;
+    setvbuf(stdout, NULL, _IONBF, 0);	/* all of it, should DOS crash */
     kernelFatalHook = Catch;
     kernelCurrentGeode = 0x2340;
     strncpy(top, argv[0], sizeof(top) - 8);

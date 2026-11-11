@@ -76,9 +76,11 @@ static word OpenStatus(word e)
 VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
 		    word compression)
 {
-    char host[PATH_BUFFER_SIZE], tmp[PATH_BUFFER_SIZE];
+    char host[HOST_PATH_SIZE], tmp[HOST_PATH_SIZE];
     FileHandle fh = 0;
     Boolean create = FALSE, readOnly = FALSE, exists;
+    FileCreateFlags native = (mode & VMO_NATIVE_WITH_EXT_ATTRS)
+			     ? FCF_NATIVE_WITH_EXT_ATTRS : 0;
     KVMFile *f;
     word e;
 
@@ -140,7 +142,7 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
 	if (create) {
 	    fh = FileCreate(name, (mode == VMO_CREATE_ONLY ? FILE_CREATE_ONLY
 							  : FILE_CREATE_TRUNCATE)
-			    | FILE_ACCESS_RW, 0);
+			    | native | FILE_ACCESS_RW, 0);
 	} else {
 	    if (!(flags & VMAF_FORCE_READ_ONLY))
 		fh = FileOpen(name, FILE_ACCESS_RW | FILE_DENY_W);
@@ -167,7 +169,7 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
     f->VF_file = fh;
     f->VF_refs = 1;
     f->VF_readOnly = readOnly;
-    strcpy(f->VF_path, host);
+    strcpy(f->VF_path, FileOf(fh)->KF_path);	/* the name it got */
     f->VF_handle = HandleAlloc(SIG_VM, GeodeGetProcessHandle());
     if (!f->VF_handle) {
 	FreeVM(f);

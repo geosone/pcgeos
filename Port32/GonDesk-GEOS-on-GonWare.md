@@ -166,7 +166,7 @@ The GHAL is a narrow C API (prefix `ghal_`) in its own headers. Each group has o
 | `ghal_mem` | request and release pages/blocks | `mmap` | mlibc/syscalls | DPMI memory (`int 31h`) |
 | `ghal_thread` | threads, mutex (recursive), cond, semaphore, TLS, priorities | pthreads | Ring 3 pthreads | **own scheduler** (DOS has no threads): context switch + IRQ0 timer, like the old GEOS kernel |
 | `ghal_time` | monotonic clock, wall clock, timers | `clock_gettime`, `timerfd` | `clock_gettime` | PIT/RTC |
-| `ghal_file` | files, directories, **attributes** (long name, token, protocol) | POSIX + xattrs `user.geos.*` | POSIX + NSS name spaces | `int 21h` with LFN (71xxh) + sidecar file for attributes |
+| `ghal_file` | files, directories; the GEOS **attributes** (long name, token, protocol) are the DOS16 `GeosFileHeader` at the start of the file on every host (ABI.md §13c) | POSIX | POSIX | `int 21h`, 8.3 names as DOS16 GEOS |
 | `ghal_module` | load libraries/apps, resolve symbols | `dlopen` (ELF `.so`) | `dlopen` (ELF `.DLL`) | PE DLLs via HX `DPMILD32`, or DXE3 with DJGPP, or statically linked |
 | `ghal_display` | modes, surface (pointer, pitch, format), flush rectangles, optional 2D operations | SDL3 / X11-SHM / fbdev | **GWVIDEO Tier 1** | VESA VBE 2/3 with linear framebuffer via DPMI |
 | `ghal_input` | events in the **openinput format** `{page, usage, value, source}` | SDL/X11/evdev → HID usages | openinput directly | openinput (runs under DOS too, per the GonWare plan) or PS/2, `int 33h` |
@@ -315,7 +315,7 @@ These points are not yet explicit in GonWare's PLAN.md:
 2. **Input events for Ring 3:** forward the openinput stream (`{page, usage, value, source}`) to the foreground process.
 3. **Ring 3 pthreads with recursive mutex and timed waits** (phase 6, "user libc must grow pthreads").
 4. **Ring 3 ELF loader with shared libraries** (phase 6). GEOS loads libraries and apps dynamically, so `dlopen` is needed.
-5. **xattrs or NSS name spaces from Ring 3** for the GEOS file attributes.
+5. ~~xattrs or NSS name spaces from Ring 3 for the GEOS file attributes.~~ Not needed: the attributes are in the file (decided 2026-11-11, ABI.md §13c).
 6. **Sound:** GWSOUND with the OSS API is planned. `/dev/dsp` from Ring 3 is enough for GEOS. Not urgent; GEOS works without sound.
 7. **Graphics acceleration:** not needed. GEOS draws in software and is built for 2D. GWVIDEO Tier 2 (3D) does not concern GonDesk.
 
