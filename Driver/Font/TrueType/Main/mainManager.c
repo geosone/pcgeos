@@ -28,9 +28,12 @@
  * driver used ds for it); the outline entries come from it
  * (FontDrFindOutlineData).
  *
- * Not yet: DR_FONT_GEN_IN_REGION (the kernel has no region paths; it
- * fails, and the region path wrappers of truetypePath.asm do nothing),
- * the escape functions (TrueTypeFontEscape: they fail).
+ * DR_FONT_GEN_IN_REGION fails, and the region path wrappers of
+ * truetypePath.asm do nothing: the asm kernel used it only to put text
+ * into region paths; the C kernel fills text in paths from the outlines
+ * (DR_FONT_GEN_PATH), so nothing calls it.
+ *
+ * Not yet: the escape functions (TrueTypeFontEscape: they fail).
  */
 #include "../Adapter/ttadapter.h"
 #include "../Adapter/ttinit.h"
