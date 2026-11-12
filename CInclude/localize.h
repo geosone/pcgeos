@@ -94,6 +94,9 @@ typedef ByteEnum DistanceUnit;
 typedef WordFlags LocalDistanceFlags;
 #define LDF_FULL_NAMES	    	    0x8000
 #define LDF_PRINT_PLURAL_IF_NEEDED  0x4000
+#define LDF_OMIT_UNITS_STRING	    0x2000
+#define LDF_PASSING_DECIMAL_PLACES  0x0008	/* LDF_DECIMAL_PLACES given */
+#define LDF_DECIMAL_PLACES	    0x0007
 
 /***/
 

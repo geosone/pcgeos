@@ -125,7 +125,8 @@
     X(C_FATAL_ERROR)		/* CFatalError of a geode (code logged) */ \
     X(EC_BAD_HANDLE)		/* ECCheck*Handle: not of that type */ \
     X(OBJ_FLUSH_INPUT_QUEUE_BAD_NEXT_STOP) \
-    X(DISABLE_APO_COUNT_OVERFLOW)	/* SysDisableAPO/SysEnableAPO */
+    X(DISABLE_APO_COUNT_OVERFLOW)	/* SysDisableAPO/SysEnableAPO */ \
+    X(LOCAL_BAD_STRING)	/* Local/localStrings.c: no such string */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -841,6 +842,8 @@ void GrInitDefaultFont(void);
 /* Graphics/graphicsFontDriver.c: [system] font */
 void GrLoadFontDrivers(void);
 void KernelImStart(void);
+/* Local/localInit.c: the localization settings of geos.ini */
+void LocalInit(void);
 
 /* ---------------------------------------------------------------------
  * LMem (LMem/lmemCode.c, after lmemCode.asm).  Port32/ABI.md section 10.

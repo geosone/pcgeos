@@ -3355,12 +3355,25 @@ How each kind is drawn:
 
 The SBCS localization code in C beside the asm: character classes
 (`stringChar.c`), case (`stringCase.c`), lengths (`stringSize.c`),
-dictionary order (`stringSort.c`) and the DOS code pages
-(`dosConvert.c`), with the C signatures of `CInclude/localize.h`. The
-tables stay in the asm (`stringCharTables.asm`, `stringCaseTables.asm`,
-`stringSortTables.asm`, `cmap*.asm`): `Port32/tools/localgen.py` makes
-`localTables.c` of them at build time, the symbols resolved from
-`Include/char.def` and `Include/Internal/lexical.def`.
+dictionary order (`stringSort.c`), the DOS code pages (`dosConvert.c`),
+quotes (`stringQuotes.c`), number and currency formats
+(`numericFormats.c`), the measurement system and numbers and distances
+as text (`numericMeasure.c`), and `LocalInit` (`localInit.c`, at the
+boot after the standard paths), with the C signatures of
+`CInclude/localize.h`. The tables and strings stay in the asm
+(`stringCharTables.asm`, `stringCaseTables.asm`,
+`stringSortTables.asm`, `cmap*.asm`, `localStrings.asm`):
+`Port32/tools/localgen.py` makes `localTables.c` and `localStrings.h` of
+them at build time, the symbols resolved from `Include/char.def` and
+`Include/Internal/lexical.def`.
+
+The settings are the chunks of the asm's `LocalStrings` resource, a flag,
+digit or character each: `localStrings.c` keeps a copy of every string
+(`LS_*` of `localStrings.h`), under a lock that nests like
+`MemThreadGrab`. `LocalInit` reads `[localization]` of geos.ini into
+them as the asm does (the flags as booleans, separators, currency symbol
+and quotes as data, the digits and `measurementSystem` as strings), and
+the Set routines write them back the same way.
 
 - Routines that set or cleared a flag return a `Boolean` (`LocalIs*`;
   `TRUE` where the default character was used for the text conversions),
@@ -3376,15 +3389,22 @@ tables stay in the asm (`stringCharTables.asm`, `stringCaseTables.asm`,
 - `SORT_DOUBLE_S_CORRECTLY` (the German double s sorted as "ss") is
   not ported: only the MULTILANG product sets it.
 - `LocalGetLanguage` is `SL_ENGLISH`, as the asm's `curLanguage`.
+- `localize.h` has the `LocalDistanceFlags` of `localize.def` it
+  lacked: `LDF_OMIT_UNITS_STRING`, `LDF_PASSING_DECIMAL_PLACES`,
+  `LDF_DECIMAL_PLACES`.
 
-**Not yet:** quotes, numeric and currency formats, measures, date and
-time formatting and parsing (with `LocalIsDateChar`, `LocalIsTimeChar`,
-`LocalIsNumChar`), the init from geos.ini, DBCS.
+**Not yet:** date and time formatting and parsing (with
+`LocalIsDateChar`, `LocalIsTimeChar`), the time zone, DBCS.
 
 **Tests.** ctest `kernel.local`: the classes against ASCII, case of
 letters with accents, strings converted up to a size, compares with and
 without case, spaces and punctuation, and from a DOS code page, the
-code pages US and multilingual both ways with the default character.
+code pages US and multilingual both ways with the default character;
+the defaults of quotes, number and currency format, the same from a
+geos.ini at `LocalInit`, the Set routines and what they write;
+`LocalFixedToAscii` with rounding and trimming, `LocalAsciiToFixed`,
+distances to and from text in all kinds of units, full names, plural,
+decimal places, clamping.
 
 ## 14. Open
 

@@ -26,7 +26,6 @@ extern const word localCharClassTable[256];
 #define CC_GRAPHIC	0x0010
 
 /* stringCaseTables.asm: from MIN_UPCASE and MIN_DOWNCASE on */
-extern const word LOCAL_MIN_UPCASE, LOCAL_MIN_DOWNCASE;
 extern const byte localUpcaseTable[159];
 extern const byte localDowncaseTable[191];
 
@@ -51,5 +50,36 @@ const LocalCodePage *LocalCurrentCodePage(void);
 /* TextCommon */
 #define LocalCharIs(ch, mask) \
     ((ch) < 256 && (localCharClassTable[(ch)] & (mask)) != 0)
+
+/*
+ * The strings of localStrings.asm (localization), LS_* of the generated
+ * localStrings.h: a copy of each that the Set routines and the init file
+ * change (the chunks of the LocalStrings resource).  LockStringsDS and
+ * UnlockStrings guard them.
+ */
+#include "localStrings.h"
+#define LOCAL_STRING_SIZE	DATE_TIME_FORMAT_SIZE
+void LocalLockStrings(void);
+void LocalUnlockStrings(void);
+/* the string; the strings locked */
+char *LocalString(word id);
+/* StoreResourceString: a copy of the string (size: of the buffer) */
+void LocalGetString(word id, char *buf, word size);
+/* SetResourceString, cut to LOCAL_STRING_SIZE */
+void LocalSetString(word id, const char *str);
+/* the first character of the string, and the digit or flag ('0'..'9') */
+byte LocalStringChar(word id);
+#define LocalStringDigit(id)	((byte) (LocalStringChar(id) - '0'))
+
+/* the category of the localization settings in geos.ini */
+extern const char localizationCategory[];
+/* LocalGetStringAsData: TRUE if something was read */
+Boolean LocalReadStringAsData(const char *key, word id, word size);
+/* LocalWriteStringAsData: the string without its null */
+void LocalWriteStringAsData(const char *key, word id);
+
+/* the init routines of LocalInit */
+void LocalNumericInitFormats(void);
+void LocalInitQuotes(void);
 
 #endif

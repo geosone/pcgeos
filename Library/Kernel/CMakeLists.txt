@@ -65,9 +65,11 @@
 #                      same asm files (vmemHigh.c also vmemC.asm): VM
 #                      files in the DOS16 format
 #   Local/stringChar.c, stringCase.c, stringSize.c, stringSort.c,
-#   dosConvert.c <- the localization code of the same asm files (SBCS);
+#   dosConvert.c, localStrings.c, stringQuotes.c, numericFormats.c,
+#   numericMeasure.c, localInit.c <- the localization code of the same asm files (SBCS);
 #                      their tables (stringCharTables.asm, ...,
-#                      cmap*.asm) become localTables.c at build time
+#                      cmap*.asm) and strings (localStrings.asm) become
+#                      localTables.c and localStrings.h at build time
 #                      (Port32/tools/localgen.py)
 add_library(geos_kernel_objs OBJECT
   Sys/sysError.c
@@ -180,17 +182,24 @@ add_library(geos_kernel_objs OBJECT
   Local/stringSize.c
   Local/stringSort.c
   Local/dosConvert.c
+  Local/localStrings.c
+  Local/stringQuotes.c
+  Local/numericFormats.c
+  Local/numericMeasure.c
+  Local/localInit.c
   ${CMAKE_CURRENT_BINARY_DIR}/localTables.c)
 # The tables of the localization code, from the asm
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(_local_tables
   stringCharTables.asm stringCaseTables.asm stringSortTables.asm
   cmapUS.asm cmapMulti.asm cmapFrench.asm cmapNordic.asm cmapPort.asm
-  cmapLatin1.asm)
+  cmapLatin1.asm localStrings.asm)
 list(TRANSFORM _local_tables PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/Local/)
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/localTables.c
+                          ${CMAKE_CURRENT_BINARY_DIR}/localStrings.h
   COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/localgen.py
           -o ${CMAKE_CURRENT_BINARY_DIR}/localTables.c
+          --header ${CMAKE_CURRENT_BINARY_DIR}/localStrings.h
           --chars ${PROJECT_SOURCE_DIR}/Include/char.def
           --lexical ${PROJECT_SOURCE_DIR}/Include/Internal/lexical.def
           ${_local_tables}
@@ -201,6 +210,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/localTables.c
   VERBATIM)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
   ${PROJECT_SOURCE_DIR}/CInclude)
 target_compile_definitions(geos_kernel_objs PRIVATE GEOS_PORT32)
 target_link_libraries(geos_kernel_objs PRIVATE ghal hostfs)

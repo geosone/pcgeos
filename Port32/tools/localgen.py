@@ -3,7 +3,8 @@
 localgen.py -- the tables of the asm localization code
 (Library/Kernel/Local, SBCS) as C for the C kernel.
 
-    localgen.py -o out.c --chars char.def --lexical lexical.def file.asm...
+    localgen.py -o out.c [--header out.h] --chars char.def
+                --lexical lexical.def file.asm...
 
 Each data table of the files becomes a C array named "local" + the asm
 label (UpcaseTable -> localUpcaseTable), each "NAME = value" constant a
@@ -19,7 +20,17 @@ Include/Internal/lexical.def), Chars and Char (bytes; Chars from
 Include/char.def).  A value is a number (0x10, 10h, 16), a character
 ('a'), a symbol of those enums or the constants before it, or a record
 initializer Type<...>.  Conditionals take the SBCS side (DBCS_PCGEOS is
-0).  The values are resolved here: the C file has numbers, with the
+0) of the standard product (PZ_PCGEOS is 0).
+
+The strings of a resource (localStrings.asm),
+
+    LocalDefString Name <"text", 0>     a chunk, "text" and symbols
+    LocalDefString <"text", 0>          one without a name
+    Name chunk.char "text", 0
+
+become localDefaultStrings[], one per chunk in their order, and the
+header (--header) gets LS_Name for the index of each named one and
+LS_COUNT, and the declarations of the constants.  The values are resolved here: the C file has numbers, with the
 asm's comment of each.
 """
 import argparse
@@ -31,7 +42,7 @@ BYTE_TYPES = {"LexicalOrder", "Lex1stOrder", "Chars", "Char", "byte"}
 WORD_TYPES = {"CharClass"}
 CHARCLASS_FIELDS = 12
 # symbols of conditionals
-CONDS = {"DBCS_PCGEOS": 0}
+CONDS = {"DBCS_PCGEOS": 0, "PZ_PCGEOS": 0}
 
 
 def strip_comment(line):
@@ -165,9 +176,16 @@ def evaluate(expr, syms):
 
 
 def split_values(text):
-    out, depth, cur = [], 0, []
+    out, depth, cur, q = [], 0, [], None
     for ch in text:
-        if ch == "<":
+        if q:
+            cur.append(ch)
+            if ch == q:
+                q = None
+            continue
+        if ch in "'\"" and depth == 0:
+            q = ch
+        elif ch == "<":
             depth += 1
         elif ch == ">":
             depth -= 1
@@ -195,14 +213,39 @@ def value(v, typ, syms):
     return evaluate(v, syms)
 
 
-def parse_tables(path, syms):
-    """[(label, ctype, [(value, comment)])], {name: value}"""
+def string_bytes(text, syms):
+    """the bytes of "text", 0, SYMBOL, ... without a final null"""
+    out = bytearray()
+    for v in split_values(text):
+        if v[0] == '"':
+            out += v[1:-1].replace('""', '"').encode("latin1")
+        else:
+            out.append(evaluate(v, syms) & 0xff)
+    if out and out[-1] == 0:
+        del out[-1]
+    return bytes(out)
+
+
+def parse_tables(path, syms, strings=None):
+    """[(label, ctype, [(value, comment)])], {name: value}; the chunks of
+    strings go to strings, [(name or None, bytes)]"""
     tables, consts = [], {}
     lines = lines_sbcs(path)
     i = 0
     while i < len(lines):
         line = lines[i]
         s = strip_comment(line).strip()
+        m = re.match(r"LocalDefString\s+(?:(\w+)\s*)?<(.*?)>?$", s)
+        if not m:
+            m = re.match(r"(\w+)\s+chunk\.char\s+()(.*)$", s)
+            if m:
+                m = (m.group(1), m.group(3))
+        else:
+            m = (m.group(1), m.group(2))
+        if m and strings is not None:
+            strings.append((m[0], string_bytes(m[1], syms)))
+            i += 1
+            continue
         m = re.match(r"(\w+)\s*=\s*(.+)$", s)
         if m and not line[:1].isspace():
             try:
@@ -274,9 +317,22 @@ def parse_tables(path, syms):
     return tables, consts
 
 
+def c_string(b):
+    out = []
+    for c in b:
+        if c in (0x22, 0x5c):
+            out.append("\\" + chr(c))
+        elif 0x20 <= c < 0x7f:
+            out.append(chr(c))
+        else:
+            out.append("\\%03o" % c)
+    return '"' + "".join(out) + '"'
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-o", required=True)
+    ap.add_argument("--header", help="the header of the string indices")
     ap.add_argument("--chars", required=True, help="Include/char.def")
     ap.add_argument("--lexical", required=True,
                     help="Include/Internal/lexical.def")
@@ -289,8 +345,10 @@ def main():
            + ", ".join(os.path.basename(f) for f in a.files)
            + " -- do not edit */",
            "#include <geos.h>", ""]
+    strings, allconsts = [], []
     for f in a.files:
-        tables, consts = parse_tables(f, syms)
+        tables, consts = parse_tables(f, syms, strings)
+        allconsts += consts
         out.append("/* " + os.path.basename(f) + " */")
         for name, v in consts.items():
             out.append("const word LOCAL_%s = %d;" % (name, v))
@@ -305,8 +363,28 @@ def main():
                            + ("," if n + 1 < len(vals) else "") + c)
             out.append("};")
         out.append("")
+    if strings:
+        out.append("const char *const localDefaultStrings[%d] = {"
+                   % len(strings))
+        for n, (name, b) in enumerate(strings):
+            out.append("    %s%s /* %s */" % (c_string(b),
+                       "," if n + 1 < len(strings) else "", name or ""))
+        out.append("};")
     with open(a.o, "w") as f:
-        f.write("\n".join(out))
+        f.write("\n".join(out) + "\n")
+    if a.header:
+        h = ["/* generated by Port32/tools/localgen.py -- do not edit */",
+             "#ifndef __LOCALSTRINGS_H", "#define __LOCALSTRINGS_H", ""]
+        for n, (name, b) in enumerate(strings):
+            if name:
+                h.append("#define LS_%s %d" % (name, n))
+        h += ["#define LS_COUNT %d" % len(strings), ""]
+        h += ["extern const word LOCAL_%s;" % n for n in allconsts]
+        h += ["",
+              "extern const char *const localDefaultStrings[LS_COUNT];",
+              "", "#endif"]
+        with open(a.header, "w") as f:
+            f.write("\n".join(h) + "\n")
 
 
 if __name__ == "__main__":

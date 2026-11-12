@@ -4,8 +4,9 @@
  * localCharClassTable (stringCharTables.asm, made C at build time).
  *
  * Port32: the routines return a Boolean where the asm cleared the Z flag.
- * LocalIsDateChar, LocalIsTimeChar and LocalIsNumChar are in
- * localFormatChars.c.
+ *
+ * Not yet: LocalIsDateChar and LocalIsTimeChar (with the date and time
+ * formats).
  */
 #include "localInt.h"
 
@@ -32,6 +33,36 @@ Boolean LocalIsAlphaNumeric(wchar ch)
 }
 Boolean LocalIsPrintable(wchar ch) { return LocalCharIs(ch, CC_PRINTABLE); }
 Boolean LocalIsGraphic(wchar ch) { return LocalCharIs(ch, CC_GRAPHIC); }
+
+/* CheckCharGroup: whether the character is in the string; the null too,
+ * as the asm searched the whole chunk */
+static Boolean InGroup(wchar ch, word id)
+{
+    const char *p;
+    Boolean r = FALSE;
+
+    LocalLockStrings();
+    p = LocalString(id);
+    do {
+	if ((byte) *p == ch) {
+	    r = TRUE;
+	    break;
+	}
+    } while (*p++);
+    LocalUnlockStrings();
+    return r;
+}
+
+/* LocalIsNumChar: a digit, a sign or the decimal separator */
+Boolean LocalIsNumChar(wchar ch)
+{
+    LocalNumericFormat nf;
+
+    LocalGetNumericFormat(&nf);
+    if (ch == nf.decimalSeparator)
+	return TRUE;
+    return InGroup(ch, LS_NumChars);
+}
 
 /* LocalLexicalValue: the LexicalOrder of the character */
 word LocalLexicalValue(wchar ch)

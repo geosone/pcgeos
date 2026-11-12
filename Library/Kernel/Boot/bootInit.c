@@ -156,6 +156,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     ActiveFile();
     FSDLoadPrimary();
     FileInitStdPaths();
+    LocalInit();
     GrInitFonts();
     GrLoadFontDrivers();
     GrInitDefaultFont();
