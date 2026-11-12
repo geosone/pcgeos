@@ -165,6 +165,8 @@ sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
 
 /* graphicsRaster.c: CalcLineSize */
 word GrBitmapLineSize(word width, byte type);
+/* UncompactPackBits: n bytes from *src (moved on) to dst */
+void GrUnpackBits(const byte **src, byte *dst, dword n);
 /* BltCommon: in window wh (locked, the tree too), screen coordinates */
 void GrBltCommon(WindowHandle wh, sword sx, sword sy, sword dx, sword dy,
 		 word width, word height, BLTMode mode);

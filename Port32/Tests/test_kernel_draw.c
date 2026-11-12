@@ -27,7 +27,8 @@
  *     (a slice per block of the huge array), scaled, and PackBits;
  *   - bitmaps to draw into (the memory video driver vidmem.geo): 24
  *     bits, 4 bits, monochrome with a mask, GrGetPoint, the
- *     resolution; drawn on the screen;
+ *     resolution; drawn on the screen; compacted and uncompacted;
+ *     GrGetBitmap;
  *   - GrBitBlt: copy, move, clear, and from a source partly hidden;
  *   - WinScroll: the screen and the document moved, the rest washed;
  *   - fat lines: butt and square ends, mitered joins;
@@ -867,6 +868,57 @@ int main(int argc, char **argv)
 	CHECK(Pixel(25, 25) == RED && Pixel(29, 26) == RED &&
 	      Pixel(30, 25) == WHITE && Pixel(24, 25) == WHITE &&
 	      Pixel(37, 32) == BLUE && Pixel(37, 33) == WHITE);
+	/* compacted (PackBits) and back: drawn the same */
+	{
+	    VMBlockHandle cb = GrCompactBitmap(vm, b24, vm), ub;
+	    void *el;
+	    word esz;
+	    CHECK(HugeArrayGetCount(vm, cb) == 30);
+	    HugeArrayLock(vm, cb, 0, &el, &esz);
+	    CHECK(esz < 10);			/* a white line: 2 runs */
+	    HugeArrayUnlock(el);
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 50, 40);
+	    GrDrawHugeBitmap(g, 2, 2, vm, cb);
+	    CHECK(Pixel(25, 25) == RED && Pixel(29, 26) == RED &&
+		  Pixel(30, 25) == WHITE && Pixel(37, 32) == BLUE &&
+		  Pixel(37, 33) == WHITE);
+	    ub = GrUncompactBitmap(vm, cb, vm);
+	    CHECK(HugeArrayGetCount(vm, ub) == 30);
+	    HugeArrayLock(vm, ub, 20, &el, &esz);
+	    CHECK(esz == 120 && ((byte *) el)[2] == 0xff &&
+		  ((byte *) el)[0] == 0 && ((byte *) el)[119] == 0xff);
+	    HugeArrayUnlock(el);
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 50, 40);
+	    GrDrawHugeBitmap(g, 2, 2, vm, ub);
+	    CHECK(Pixel(25, 25) == RED && Pixel(37, 32) == BLUE &&
+		  Pixel(30, 25) == WHITE);
+	    HugeArrayDestroy(vm, cb);
+	    HugeArrayDestroy(vm, ub);
+	}
+	/* GrGetBitmap: from the screen, 24 bits */
+	{
+	    MemHandle gb;
+	    XYSize got;
+	    const Bitmap *gbm;
+	    const byte *px;
+	    gb = GrGetBitmap(g, 4, 5, 3, 2, &got);
+	    CHECK(gb != 0 && got.XYS_width == 3 && got.XYS_height == 2);
+	    if (gb) {
+		gbm = MemLock(gb);
+		px = (const byte *) (gbm + 1);
+		CHECK(gbm->B_width == 3 && gbm->B_height == 2 &&
+		      gbm->B_type == BMF_24BIT &&
+		      px[0] == 0xff && px[1] == 0xff && px[2] == 0xff &&
+		      px[3] == 0xff && px[4] == 0 && px[5] == 0);
+		MemFree(gb);
+	    }
+	    gb = GrGetBitmap(g, 95, 70, 20, 20, &got);	/* cut at A's end */
+	    CHECK(got.XYS_width == 5 && got.XYS_height == 10);
+	    if (gb)
+		MemFree(gb);
+	}
 
 	/* 4 bits: palette indices */
 	b4 = GrCreateBitmap(BMF_4BIT, 20, 10, vm, 0, &g4);

@@ -2500,8 +2500,11 @@ than a pixel is a six-point polygon.
   bitmap. The window is a root window on the memory video driver (see
   §7.5). The kernel does not lock the directory block into
   `W_bmSegment` around drawing as `EnterGraphics` did; the driver
-  locks it. Not yet: `GrGetBitmap`, `GrCompactBitmap`,
-  `GrUncompactBitmap`.
+  locks it. `GrGetBitmap` returns what `DR_VID_GETBITS` gives, 24
+  bits on the C drivers (DOS16: the device's format).
+  `GrCompactBitmap`/`GrUncompactBitmap` pack and unpack each scan line
+  (PackBits, runs of three and more repeated, at most 128); where a run
+  meets those limits the bytes may differ from the asm's.
 - Not yet: LZG, format conversion for devices with fewer colors.
 
 **GrBitBlt** (`graphicsRaster.c`, `GrBltCommon` for `WinScroll` too):

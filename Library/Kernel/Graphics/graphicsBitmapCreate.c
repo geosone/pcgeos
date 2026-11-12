@@ -3,6 +3,8 @@
  * graphicsBitmapCreate.asm: GrCreateBitmap, GrCreateBitmapRaw,
  * IsFormatSupported, GrEditBitmap, GrDestroyBitmap, GrSetBitmapMode,
  * GrGetBitmapMode, GrClearBitmap, LockHugeBitmap, GrGetPoint,
+ * GrGetBitmap, GetBitmap, GetBitSizeBlock, GrCompactBitmap,
+ * CompactPackBits, GrUncompactBitmap,
  * AllocBitmapInitDeviceInfo; graphicsRasterUtils.asm: GrSetBitmapRes,
  * GrGetBitmapRes, GrGetHugeBitmapSize, GrGetBitmapSize).
  *
@@ -17,8 +19,12 @@
  * W_bmSegment): the driver locks it itself while W_bmSegment is NULL.
  *
  * Formats: monochrome, 4, 8 and 24 bits, with or without a mask (the
- * DOS16 driver had CMYK too).  Not yet: GrGetBitmap, GrCompactBitmap,
- * GrUncompactBitmap, color transfer (EB_color).
+ * DOS16 driver had CMYK too).  GrGetBitmap returns what DR_VID_GETBITS
+ * gives, 24 bits on the C drivers (DOS16: the device's format).
+ * GrCompactBitmap packs with the rules of CompactPackBits (runs of three
+ * and more repeated, at most 128 a run); where a run meets the limits
+ * the bytes may differ from the asm's.  Not yet: color transfer
+ * (EB_color).
  */
 #include "graphicsInt.h"
 #include "Win/winInt.h"
@@ -404,4 +410,187 @@ XYValueAsDWord GrGetHugeBitmapSize(VMFileHandle vmFile, VMBlockHandle vmBlk)
     s = GrGetBitmapSize(&EB_BM(dir)->CB_simple);
     HugeArrayUnlockDir(dir);
     return s;
+}
+
+/* ---------------------------------------------------------------------
+ * GrGetBitmap
+ * ------------------------------------------------------------------- */
+
+MemHandle GrGetBitmap(GStateHandle gstate, sword x, sword y, word width,
+		      word height, XYSize *sizeCopied)
+{
+    GrDraw d;
+    DriverRegs r;
+    sword dx, dy;
+    sdword w = width, h = height;
+    dword size;
+    MemHandle mh = 0;
+
+    GrEnterGraphics(gstate, &d);
+    if (d.GD_w && GrTransDev(&d, x, y, &dx, &dy)) {
+	const Window *win = d.GD_w;
+	if (win->W_curTMatrix.TM_flags & TM_COMPLEX) {
+	    /* GGB_complex: the size as a point, from the window's
+	     * origin */
+	    sword tw, th;
+	    GrTransDev(&d, (sword) width, (sword) height, &tw, &th);
+	    w = tw - win->W_winRect.R_left;
+	    h = th - win->W_winRect.R_top;
+	}
+	/* GetBitSizeBlock: within the window */
+	if (w > win->W_winRect.R_right - dx + 1)
+	    w = win->W_winRect.R_right - dx + 1;
+	if (h > win->W_winRect.R_bottom - dy + 1)
+	    h = win->W_winRect.R_bottom - dy + 1;
+	size = sizeof(Bitmap) + (dword) (w > 0 ? w : 0) * 3 *
+	       (dword) (h > 0 ? h : 0);
+	if (w > 0 && h > 0 && size <= 0xffff) {
+	    mh = MemAlloc((word) size, HF_SHARABLE | HF_SWAPABLE,
+			  HAF_ZERO_INIT | HAF_LOCK);
+	    if (mh) {
+		memset(&r, 0, sizeof(r));
+		r.DR_ax = (word) dx;
+		r.DR_bx = (word) dy;
+		r.DR_cx = (word) w;
+		r.DR_dx = (word) h;
+		r.DR_si = (word) size;
+		r.DR_bpPtr = MemDeref(mh);
+		WinCallVidDriver(d.GD_w, DR_VID_GETBITS, &r);
+		MemUnlock(mh);
+	    }
+	}
+    }
+    GrExitGraphics(&d);
+    if (sizeCopied) {
+	sizeCopied->XYS_width = (word) (w > 0 ? w : 0);
+	sizeCopied->XYS_height = (word) (h > 0 ? h : 0);
+    }
+    return mh;
+}
+
+/* ---------------------------------------------------------------------
+ * Compacting
+ * ------------------------------------------------------------------- */
+
+/* CompactPackBits: n bytes of src to dst; the size of the result */
+static word PackBits(const byte *src, word n, byte *dst)
+{
+    word i = 0, o = 0;
+
+    while (i < n) {
+	word run = 1, j;
+	while (i + run < n && run < 128 && src[i + run] == src[i])
+	    run++;
+	if (run >= 3) {				/* repeated */
+	    dst[o++] = (byte) (1 - run);
+	    dst[o++] = src[i];
+	    i = (word) (i + run);
+	    continue;
+	}
+	for (j = i; j < n && j - i < 128; j++)	/* unique */
+	    if (j + 2u < n && src[j] == src[j + 1] && src[j] == src[j + 2])
+		break;
+	dst[o++] = (byte) (j - i - 1);
+	memcpy(dst + o, src + i, (word) (j - i));
+	o = (word) (o + (j - i));
+	i = j;
+    }
+    return o;
+}
+
+/* the new bitmap's directory: the old one's header (from EB_bm on),
+ * compaction and device information as asked */
+static VMBlockHandle CopyHeader(VMFileHandle srcFile, VMBlockHandle srcBlock,
+				VMFileHandle destFile, word elemSize,
+				void **dirOut)
+{
+    void *src, *dst;
+    word end;
+    VMBlockHandle nb;
+
+    HugeArrayLockDir(srcFile, srcBlock, &src);
+    end = ((LMemBlockHeader *) src)->LMBH_offset;
+    nb = HugeArrayCreate(destFile, elemSize, end);
+    HugeArrayLockDir(destFile, nb, &dst);
+    memcpy((byte *) dst + offsetof(EditableBitmap, EB_bm),
+	   (byte *) src + offsetof(EditableBitmap, EB_bm),
+	   end - offsetof(EditableBitmap, EB_bm));
+    HugeArrayUnlockDir(src);
+    *dirOut = dst;
+    return nb;
+}
+
+VMBlockHandle GrCompactBitmap(VMFileHandle srcFile, VMBlockHandle srcBlock,
+			      VMFileHandle destFile)
+{
+    void *dir, *p;
+    CBitmap *c;
+    word scan, height, size, n;
+    byte *buf;
+    VMBlockHandle nb = CopyHeader(srcFile, srcBlock, destFile, 0, &dir);
+    MemHandle mh;
+
+    c = EB_BM(dir);
+    c->CB_simple.B_compact = BMC_PACKBITS;
+    c->CB_devInfo = 0;
+    scan = GrBitmapLineSize(c->CB_simple.B_width, c->CB_simple.B_type);
+    height = c->CB_simple.B_height;
+    HugeArrayDirty(dir);
+    HugeArrayUnlockDir(dir);
+    mh = MemAlloc((word) (scan + scan / 64 + 4), HF_SWAPABLE, HAF_LOCK);
+    if (!mh)
+	return nb;
+    buf = MemDeref(mh);
+    if (height && HAL_COUNT(HugeArrayLock(srcFile, srcBlock, 0, &p, &size))) {
+	for (;;) {
+	    n = PackBits(p, scan, buf);
+	    HugeArrayAppend(destFile, nb, n, buf);
+	    if (!--height || !HugeArrayNext(&p, &size))
+		break;
+	}
+	HugeArrayUnlock(p);
+    }
+    MemFree(mh);
+    return nb;
+}
+
+VMBlockHandle GrUncompactBitmap(VMFileHandle srcFile, VMBlockHandle srcBlock,
+				VMFileHandle destFile)
+{
+    void *dir, *src, *p;
+    word scan, height, size;
+    byte *buf;
+    MemHandle mh;
+    VMBlockHandle nb;
+    EditableBitmap *eb;
+
+    HugeArrayLockDir(srcFile, srcBlock, &src);
+    scan = GrBitmapLineSize(EB_BM(src)->CB_simple.B_width,
+			    EB_BM(src)->CB_simple.B_type);
+    HugeArrayUnlockDir(src);
+    nb = CopyHeader(srcFile, srcBlock, destFile, scan, &dir);
+    eb = dir;
+    eb->EB_bm.CB_simple.B_compact = BMC_UNCOMPACTED;
+    eb->EB_bm.CB_devInfo = (word) (offsetof(EditableBitmap, EB_device) -
+				   offsetof(EditableBitmap, EB_bm));
+    InitDeviceInfo(eb, scan);
+    height = eb->EB_bm.CB_simple.B_height;
+    HugeArrayDirty(dir);
+    HugeArrayUnlockDir(dir);
+    mh = MemAlloc(scan ? scan : 1, HF_SWAPABLE, HAF_LOCK);
+    if (!mh)
+	return nb;
+    buf = MemDeref(mh);
+    if (height && HAL_COUNT(HugeArrayLock(srcFile, srcBlock, 0, &p, &size))) {
+	for (;;) {
+	    const byte *q = p;
+	    GrUnpackBits(&q, buf, scan);
+	    HugeArrayAppend(destFile, nb, 1, buf);
+	    if (!--height || !HugeArrayNext(&p, &size))
+		break;
+	}
+	HugeArrayUnlock(p);
+    }
+    MemFree(mh);
+    return nb;
 }

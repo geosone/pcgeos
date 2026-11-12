@@ -227,7 +227,7 @@ static const Bitmap *NextSlice(BMFrame *f, const Bitmap *bm)
 }
 
 /* UncompactPackBits: n bytes from *src to dst */
-static void UnpackBits(const byte **src, byte *dst, dword n)
+void GrUnpackBits(const byte **src, byte *dst, dword n)
 {
     const byte *s = *src;
 
@@ -278,7 +278,7 @@ static void DrawUnpacked(BMFrame *f)
 	    size = need;
 	}
 	if (n) {
-	    UnpackBits(&src, buf, need);
+	    GrUnpackBits(&src, buf, need);
 	    f->args.PBA_data = buf;
 	    f->args.PBA_bm.B_height = n;
 	    PutBits(f, y);
@@ -324,7 +324,7 @@ static Boolean SourceSlice(BMSource *s, const Bitmap *bm)
 	s->buf = nb;
 	s->size = need;
     }
-    UnpackBits(&src, s->buf, need);
+    GrUnpackBits(&src, s->buf, need);
     s->data = s->buf;
     return TRUE;
 }
