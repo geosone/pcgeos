@@ -371,6 +371,10 @@ extern dword kernelTimerEventsDropped;
 /* MetaWindowMessages the window system sends (winC.goh) */
 #define KMSG_META_EXPOSED			69
 #define KMSG_META_WIN_UPDATE_COMPLETE		71
+#define KMSG_META_WIN_CHANGE			73
+#define KMSG_META_IMPLIED_WIN_CHANGE		74
+#define KMSG_META_RAW_UNIV_ENTER		75
+#define KMSG_META_RAW_UNIV_LEAVE		76
 /* MetaClass variable data (metaC.goh) */
 #define KVD_TEMP_META_GCN			0	/* the first */
 #define KVD_TEMP_META_QUIT_LIST			4
@@ -379,6 +383,10 @@ extern dword kernelTimerEventsDropped;
 #define KMSG_PROCESS_EXIT			8198
 #define KMSG_PROCESS_FINAL_BLOCK_FREE		8204
 #define KMSG_PROCESS_INSTANTIATE_FOR_THREAD	8208
+
+/* Win/winNotification.c: the pointer moved to x, y on the root window
+ * tree, in the save under areas su (the input manager) */
+void WinMovePtr(word su, Handle tree, sword x, sword y);
 
 /* event reserve for interrupt code, event timers through messages */
 void KernelEventInit(void);

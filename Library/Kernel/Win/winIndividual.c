@@ -277,6 +277,8 @@ void WinCalcVisReg(WindowHandle wh)
 {
     Window *w = MemDeref(wh);
 
+    WinChangePtrNotification();		/* WinPerformVis */
+
     if (winUnderClosing & w->W_savedUnderMask) {
 	WinRegOr(WIN_REG(wh, w->W_visReg), winUnderRestored,
 		 WIN_REG(wh, w->W_visReg));

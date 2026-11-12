@@ -261,7 +261,7 @@ static Boolean VidCall(word function, DriverRegs *r)
 	vidPtrY = y;
 	VidDevMovePtr(x, y);
 	VidXORPtrMoved(dx, dy);			/* UpdateXORForPtr */
-	r->DR_ax = 0;				/* no save under hit */
+	r->DR_ax = VidUnderAt(x, y);		/* the areas under it */
 	return FALSE;
     }
     case DR_VID_SAVE_UNDER:

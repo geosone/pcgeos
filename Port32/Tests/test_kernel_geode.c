@@ -13,7 +13,7 @@
  *   - GeodeUseLibrary: LCT_ATTACH and LCT_NEW_CLIENT, GeodeGetInfo,
  *     GeodeFind, ProcGetLibraryEntry;
  *   - geode private data (GeodePrivAlloc/Read/Write/Free), freed with
- *     the process;
+ *     the process; the window variables of a geode (winGeode.c) in it;
  *   - GeodeLoad of the process: its imports from the kernel and from
  *     kglib, the object resource built and relocated, optrs in chunks
  *     that are not objects (an optr, a structure, a chunk array, a
@@ -27,6 +27,7 @@
  *     frees kglib (LCT_DETACH); no handle is left over.
  */
 #include "kernelC.h"
+#include <win.h>
 #include "ghal.h"
 #include <geosdriver.h>
 
@@ -257,6 +258,17 @@ int main(int argc, char **argv)
 	GeodePrivRead(app, privApp, 1, out);
 	Check(!out[0], "after the written range: zero");
     }
+
+    /* the window variables of a geode live there (winGeode.c) */
+    WinGeodeSetInputObj(app, ConstructOptr(0x1234, 0x10));
+    WinGeodeSetParentObj(app, ConstructOptr(0x5678, 0x20));
+    WinGeodeSetFlags(app, GWF_FOCUSABLE | GWF_TARGETABLE);
+    Check(WinGeodeGetInputObj(app) == ConstructOptr(0x1234, 0x10) &&
+	  WinGeodeGetParentObj(app) == ConstructOptr(0x5678, 0x20) &&
+	  WinGeodeGetFlags(app) == (GWF_FOCUSABLE | GWF_TARGETABLE),
+	  "WinGeodeSet/GetInputObj, ParentObj, Flags");
+    Check(!WinGeodeGetInputObj(lib) && !WinGeodeGetFlags(lib),
+	  "window variables per geode");
 
     /* detach: the thread exits and frees the process */
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,

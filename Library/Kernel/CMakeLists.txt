@@ -56,7 +56,7 @@
 #                      initfileC.asm and Loader/ini.asm
 #   Boot/bootBoot.c <- EndGeos of bootBoot.asm (RemoveGeodes, ExitFile)
 #   Sys/sysMisc.c   <- SysShutdown of sysMisc.asm and sysC.asm
-#   IM/imInit.c, imMonitors.c, imMisc.c <- the input manager of imInit.asm,
+#   IM/imInit.c, imMonitors.c, imMisc.c, imPtr.c <- the input manager of imInit.asm,
 #                      imMonitors.asm, imMisc.asm and imPtr.asm
 #   Boot/bootInit.c <- InitGeos and ProcessCommandLine of bootInit.asm,
 #                      LoadUI of bootInitfile.asm
@@ -121,10 +121,13 @@ add_library(geos_kernel_objs OBJECT
   IM/imInit.c
   IM/imMonitors.c
   IM/imMisc.c
+  IM/imPtr.c
   Win/winUtils.c
   Win/winWindows.c
   Win/winCreDest.c
   Win/winSaveUnder.c
+  Win/winNotification.c
+  Win/winGeode.c
   Win/winIndividual.c
   Win/winState.c
   Win/winTrans.c

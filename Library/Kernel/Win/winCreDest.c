@@ -167,6 +167,7 @@ void WinDecRefCount(WindowHandle win)
     w = MemLock(win);
     if (w && --w->W_refCount == 0) {
 	MemUnlock(win);
+	WinPtrFreed(win);
 	MemFree(win);
     } else if (w)
 	MemUnlock(win);
@@ -197,6 +198,7 @@ void WinClose(WindowHandle win)
     parent = w->W_parent;
     visible = (Boolean) !WinRegIsNull(wh, w->W_univReg);
     MemUnlock(wh);
+    WinPtrClosing(wh, parent);
     if (parent) {			/* save under areas */
 	under = WinUnderClosing(wh, parent);
 	if (!under)

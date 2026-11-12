@@ -294,6 +294,43 @@ extern WindowHandle	/*XXX*/
 extern void	/*XXX*/
     _pascal WinEnsureChangeNotification(void);
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: the parameters of the window system's pointer messages to the
+ * change object (WinGrabChange).  MSG_META_WIN_CHANGE has the pointer's
+ * position and its root window, to pass on to WinChangeAck;
+ * MSG_META_IMPLIED_WIN_CHANGE, MSG_META_RAW_UNIV_ENTER and
+ * MSG_META_RAW_UNIV_LEAVE the window's input object and the window
+ * (DOS16: cx, dx, bp).
+ */
+typedef struct {
+    sword		WCP_x;
+    sword		WCP_y;
+    WindowHandle	WCP_tree;
+} WinChangeParams;
+
+typedef struct {
+    optr		WPEP_inputObj;
+    WindowHandle	WPEP_win;
+} WinPtrEventParams;
+#endif
+
+/* the geode the mouse is down in (0: none): its windows' pointer images */
+extern void	/*XXX*/
+    _pascal WinSysSetActiveGeode(GeodeHandle gh);
+
+/* GeodeWinFlags */
+#define GWF_FOCUSABLE	0x8000
+#define GWF_TARGETABLE	0x4000
+#define GWF_MODELABLE	0x2000
+#define GWF_FULL_SCREEN	0x1000
+
+extern word	/*XXX*/
+    _pascal WinGeodeGetFlags(GeodeHandle gh);
+
+extern void	/*XXX*/
+    _pascal WinGeodeSetFlags(GeodeHandle gh, word flags);
+
 typedef enum {
     PIV_NONE,
     PIV_VIDEO_DRIVER_DEFAULT,

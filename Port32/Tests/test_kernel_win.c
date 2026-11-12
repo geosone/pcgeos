@@ -12,7 +12,10 @@
  *     invalid, within the update region;
  *   - overlapping windows, priority, moving, resizing, closing;
  *   - WinInvalReg, WinGetInfo/WinSetInfo, transformations, locating a
- *     point.
+ *     point;
+ *   - the window under the pointer: MSG_META_WIN_CHANGE, WinChangeAck,
+ *     the enters, leaves and implied changes, closing under the pointer,
+ *     the pointer images, ImSetPtrWin.
  */
 #include "kernelC.h"
 #include "Win/winInt.h"
@@ -27,7 +30,9 @@ static int fails;
 
 #define XY(x, y)	(((dword) (word) (y) << 16) | (word) (x))
 
-/* the fake driver: the washes */
+/* the fake driver: the washes, the pointer */
+static int movePtrs, setPtrs;
+static const void *lastPtrDef;
 static int rects;
 static Rectangle lastRect;
 static dword lastColor;
@@ -49,6 +54,14 @@ static Boolean Strategy(word function, DriverRegs *r)
     }
     if (function == DR_VID_CHECK_UNDER || function == DR_VID_INFO_UNDER)
 	r->DR_ax = r->DR_di = 0;		/* no areas */
+    if (function == DR_VID_MOVEPTR) {
+	movePtrs++;
+	r->DR_ax = 0;				/* no areas */
+    }
+    if (function == DR_VID_SETPTR) {
+	setPtrs++;
+	lastPtrDef = r->DR_dsSi;
+    }
     return function == DR_VID_SAVE_UNDER;	/* refused */
 }
 
@@ -118,6 +131,182 @@ static int Null(WindowHandle wh, int which)
 #define RECT(r, l, t, ri, b) \
     ((r).R_left == (l) && (r).R_top == (t) && (r).R_right == (ri) && \
      (r).R_bottom == (b))
+
+/* the next message to the change object: its message and parameters */
+static QueueHandle cq;
+
+static Message NextPtr(void *params, dword want)
+{
+    EventHandle ev;
+    const void *p;
+    dword size;
+    Message m;
+
+    if (!GeodeInfoQueue(cq))
+	return 0;
+    ev = QueueGetMessage(cq);
+    p = KernelEventParams(ev, &size);
+    m = ObjGetMessageInfo(ev, NULL);
+    memset(params, 0, want);
+    if (p)
+	memcpy(params, p, size < want ? size : want);
+    ObjFreeMessage(ev);
+    return m;
+}
+
+/* the next is an enter, leave or implied change for window wh */
+static int Next(Message msg, WindowHandle wh, optr od)
+{
+    WinPtrEventParams p;
+    Message m = NextPtr(&p, sizeof(p));
+
+    if (m != msg || p.WPEP_win != wh || p.WPEP_inputObj != od) {
+	printf("  got %u win %lx, want %u win %lx\n", (unsigned) m,
+	       (unsigned long) p.WPEP_win, (unsigned) msg,
+	       (unsigned long) wh);
+	return 0;
+    }
+    return 1;
+}
+
+/* the next is MSG_META_WIN_CHANGE; its parameters */
+static int Change(WinChangeParams *c)
+{
+    return NextPtr(c, sizeof(*c)) == KMSG_META_WIN_CHANGE;
+}
+
+/* a move, answered as the flow object would */
+static WindowHandle MoveAndAck(WindowHandle root, sword x, sword y,
+			       optr *od)
+{
+    WinChangeParams c;
+
+    WinMovePtr(0, root, x, y);
+    if (!Change(&c) || c.WCP_x != x || c.WCP_y != y || c.WCP_tree != root)
+	return (WindowHandle) -1;
+    return WinChangeAck(c.WCP_tree, c.WCP_x, c.WCP_y, od);
+}
+
+/* the messages so far, the changes answered */
+static void Drain(void)
+{
+    WinChangeParams c;
+    Message m;
+    optr od;
+
+    while ((m = NextPtr(&c, sizeof(c))) != 0)
+	if (m == KMSG_META_WIN_CHANGE)
+	    (void) WinChangeAck(c.WCP_tree, c.WCP_x, c.WCP_y, &od);
+}
+
+/* the window under the pointer (winNotification.c) */
+static void PtrTest(WindowHandle root, optr od)
+{
+    WindowHandle c, d, in;
+    WinChangeParams wc;
+    optr iod, chg, img;
+    MemHandle ib;
+    ChunkHandle ich;
+    Rectangle r;
+
+    cq = GeodeAllocQueue();
+    chg = ConstructOptr(cq, 0);
+    CHECK(WinGrabChange(0, chg) && !WinGrabChange(0, od));
+    c = WinOpen(root, od, od, CMT_CLOSEST, C_WHITE, 0, 0, 0, 0, 0, NULL,
+		200, 200, 299, 299);
+    d = WinOpen(c, od, od, CMT_CLOSEST, C_RED, 0, 0, 0, 0, 0, NULL,
+		20, 20, 39, 39);
+    WinGetWinScreenBounds(d, &r);
+    CHECK(RECT(r, 220, 220, 239, 239));
+    Drain();				/* the opens' changes */
+
+    /* onto C: the implied change first, then the enters, outside in */
+    in = MoveAndAck(root, 250, 250, &iod);
+    CHECK(in == c && iod == od);
+    CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, c, od));
+    CHECK(Next(KMSG_META_RAW_UNIV_ENTER, root, 0));
+    CHECK(Next(KMSG_META_RAW_UNIV_ENTER, c, od));
+    CHECK(!NextPtr(&wc, sizeof(wc)));
+    /* within the band of C's visible region: nothing */
+    WinMovePtr(0, root, 260, 290);
+    CHECK(!NextPtr(&wc, sizeof(wc)));
+    /* into D, C's child */
+    CHECK(MoveAndAck(root, 225, 225, &iod) == d);
+    CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, d, od));
+    CHECK(Next(KMSG_META_RAW_UNIV_ENTER, d, od));
+    CHECK(!NextPtr(&wc, sizeof(wc)));
+    /* out onto the root: the leaves inside out, then the change */
+    CHECK(MoveAndAck(root, 400, 400, &iod) == root);
+    CHECK(Next(KMSG_META_RAW_UNIV_LEAVE, d, od));
+    CHECK(Next(KMSG_META_RAW_UNIV_LEAVE, c, od));
+    CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, root, 0));
+    CHECK(!NextPtr(&wc, sizeof(wc)));
+
+    /* a key while a change is outstanding: another one */
+    WinEnsureChangeNotification();
+    CHECK(!NextPtr(&wc, sizeof(wc)));	/* none outstanding */
+    WinMovePtr(0, root, 250, 250);
+    WinEnsureChangeNotification();
+    CHECK(Change(&wc) && Change(&wc) && !NextPtr(&wc, sizeof(wc)));
+    CHECK(WinChangeAck(root, 250, 250, &iod) == c);
+    CHECK(WinChangeAck(root, 250, 250, &iod) == c);
+    CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, c, od));
+    CHECK(Next(KMSG_META_RAW_UNIV_ENTER, c, od));
+    /* each answer names the window, even where nothing changed */
+    CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, c, od));
+    CHECK(!NextPtr(&wc, sizeof(wc)));
+    /* into another save under area at the same place */
+    WinMovePtr(1, root, 250, 250);
+    CHECK(Change(&wc) && WinChangeAck(root, 250, 250, &iod) == c);
+    CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, c, od));
+    CHECK(!NextPtr(&wc, sizeof(wc)));
+
+    /* the input manager: the root window takes the pointer and draws
+     * it through its driver */
+    movePtrs = 0;
+    ImSetPtrWin(root, 100, 100);
+    CHECK(movePtrs == 1);
+
+    /* the pointer images follow the window: PIL_WINDOW of C */
+    ib = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+    MemLock(ib);
+    ich = LMemAlloc(ib, 40);
+    MemUnlock(ib);
+    img = ConstructOptr(ib, ich);
+    setPtrs = 0;
+    WinSetPtrImage(c, PIL_WINDOW, img);
+    CHECK(setPtrs == 1 && lastPtrDef != NULL);
+    WinSetPtrImage(c, PIL_WINDOW, img);	/* no change */
+    CHECK(setPtrs == 1);
+    WinSetPtrImage(c, PIL_GADGET, 0);
+    CHECK(setPtrs == 1);
+    CHECK(MoveAndAck(root, 225, 225, &iod) == d);	/* D: none */
+    CHECK(setPtrs == 2 && lastPtrDef == NULL);
+    Drain();
+
+    /* closing D under the pointer: its leave, then C */
+    Drain();
+    WinClose(d);
+    CHECK(Change(&wc) && WinChangeAck(root, 225, 225, &iod) == c);
+    CHECK(Next(KMSG_META_RAW_UNIV_LEAVE, d, od));
+    CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, c, od));
+    CHECK(!NextPtr(&wc, sizeof(wc)));
+    WinClose(c);
+    CHECK(Change(&wc) && WinChangeAck(root, 225, 225, &iod) == root);
+    CHECK(Next(KMSG_META_RAW_UNIV_LEAVE, c, od));
+    CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, root, 0));
+    CHECK(!NextPtr(&wc, sizeof(wc)));
+
+    WinReleaseChange(0, od);		/* not the holder */
+    CHECK(!WinGrabChange(0, od));
+    WinReleaseChange(0, chg);
+    CHECK(WinGrabChange(0, od));
+    WinReleaseChange(0, od);
+    MemFree(ib);
+    GeodeFreeQueue(cq);
+    while (Exposed(0))
+	;
+}
 
 int main(void)
 {
@@ -318,6 +507,7 @@ int main(void)
     w = MemLock(root);
     CHECK(w->W_firstChild == 0);
     MemUnlock(root);
+    PtrTest(root, ConstructOptr(q, 0));
     WinClose(root);
 
     printf("%s (%d failed)\n", fails ? "FAIL" : "ok", fails);

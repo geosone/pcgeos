@@ -5,10 +5,10 @@
  * ImPtrJump, ImForcePtrMethod, RefreshPtr, ImConstrainMouse,
  * EnsureConstraining, ImUnconstrainMouse).
  *
- * There are no windows yet: positions are on the screen (DOS16
- * transformed them for a window passed in di), and ImSetPtrWin, which
- * took the limits of the pointer from the root window, is
- * ImSetScreenLimits for now.  Not yet: ImSetPtrImage, ImSetPtrFlags,
+ * Positions are on the screen (DOS16 transformed them for a window
+ * passed in di).  The limits of the pointer come from the root window
+ * (ImSetPtrWin, imPtr.c) or, without one, from ImSetScreenLimits.
+ * Not yet: ImSetPtrFlags,
  * ImBumpMouse, the move/resize xor (ImStartMoveResize), the backlog
  * routines (INPUT_MESSAGE_RECEIPT is off, as in DOS16).
  */

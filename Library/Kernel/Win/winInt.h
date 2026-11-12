@@ -25,6 +25,8 @@
 #include <Internal/gstate.h>
 #include <Internal/grWinInt.h>
 #include <Internal/videoDr.h>
+#include <Internal/im.h>
+#include <geode.h>
 #include <string.h>
 
 #ifndef WRF_INVAL_TREE
@@ -54,6 +56,27 @@ void WinUnderOpened(WindowHandle wh);
 void WinUnderInval(WindowHandle wh);
 WinUnderFlags WinUnderClosing(WindowHandle wh, WindowHandle parent);
 void WinUnderClosed(WindowHandle wh, WindowHandle parent, WinUnderFlags f);
+
+/* winGeode.c: the window variables of a geode, in its private data */
+typedef struct {
+    optr		GWV_inputObj;	/* gets the geode's input */
+    optr		GWV_parentObj;	/* its field */
+    optr		GWV_ptrImage;	/* PIL_GEODE */
+    word		GWV_flags;	/* GeodeWinFlags */
+    WindowHandle	GWV_activeWin;	/* supersedes the implied window */
+} GeodeWinVars;
+void WinReadGeodeVars(GeodeHandle gh, GeodeWinVars *v);
+void WinWriteGeodeVars(GeodeHandle gh, const GeodeWinVars *v);
+
+/* winNotification.c: the window under the pointer */
+void WinPtrImageP(void);
+void WinPtrImageV(void);
+void WinUpdatePtrImages(void);		/* with WinPtrImageP */
+WindowHandle WinPtrFinalWin(void);
+GeodeHandle WinPtrFinalGeode(void);
+void WinChangePtrNotification(void);
+void WinPtrClosing(WindowHandle wh, WindowHandle parent);
+void WinPtrFreed(WindowHandle wh);
 
 /* winUtils.c: the tree lock */
 void WinTreeP(void);

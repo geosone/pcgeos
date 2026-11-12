@@ -18,13 +18,17 @@
  * asked again (message 0) once the rest of the chain is through.
  *
  * DOS16 builds without QUIET_PTR_SUPPORT and INPUT_MESSAGE_RECEIPT; so
- * does this.  Not yet: the screen saver (it unblanked here), the
- * pointer image (CallMovePtr) and the window under it (WinMovePtr,
- * WinEnsureChangeNotification), the move/resize xor, pen and ink.  The
+ * does this.  A move of the pointer moves its image (imPtr.c) and tells
+ * the window system (WinMovePtr); a button, key or wheel event first
+ * makes sure the UI knows the window under the pointer
+ * (WinEnsureChangeNotification).  Not yet: the screen saver (it
+ * unblanked here), the move/resize xor, pen and ink.  The
  * repeated keys are not thinned out when handles run short.
  */
 #include "kernelC.h"
 #include "imInt.h"
+
+#include <win.h>
 
 #include <input.h>
 #include <system.h>
@@ -439,8 +443,16 @@ static byte OutputMonitor(Monitor *mon, ImEvent *ev)
 	}
 	ev->IE_cx = (word) x;
 	ev->IE_dx = (word) y;
-	im.drawnX = x;
-	im.drawnY = y;
+	if (!im.drawnValid || x != im.drawnX || y != im.drawnY) {
+	    /* the image on the screen, then the window under it */
+	    word su;
+	    im.drawnX = x;
+	    im.drawnY = y;
+	    im.drawnValid = TRUE;
+	    su = ImCallMovePtr(x, y);
+	    if (im.pointerWin)
+		WinMovePtr(su, im.pointerWin, x, y);
+	}
 	/*
 	 * DOS16 folded the event into the last one in the output's queue
 	 * if that was a pointer event with the same button info
@@ -457,6 +469,10 @@ static byte OutputMonitor(Monitor *mon, ImEvent *ev)
 	return 0;
     }
     /* OutputNonPtr */
+    if (ev->IE_message == IM_META_MOUSE_BUTTON ||
+	ev->IE_message == IM_META_KBD_CHAR ||
+	ev->IE_message == IM_META_MOUSE_WHEEL_VERTICAL)
+	WinEnsureChangeNotification();	/* the UI knows the window first */
     if (ev->IE_message == IM_META_MOUSE_BUTTON && im.constraining &&
 	(buttonConvTab[ev->IE_bp & BI_BUTTON] & im.constrainButtons))
 	im.constraining = FALSE;	/* constrained while it is down */

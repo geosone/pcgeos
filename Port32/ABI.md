@@ -410,7 +410,8 @@ and checks that a missing library file is `GLE_LIBRARY_NOT_FOUND`.
 geodes (`GeodePrivAlloc`). It then reads and writes them per geode
 (`GeodePrivRead`, `GeodePrivWrite`; geode 0 is the current process).
 The window system keeps its `GeodeWinVars` there.
-- The map has one word per slot: the geode that allocated it, or 0.
+- The map has one entry per slot: the geode that allocated it, or 0.
+  Slots allocated for geode 0 belong to the kernel.
 - An offset is the byte offset of the range plus 2, never 0, as in the
   asm.
 - Each geode's words are a kernel heap block that the core block
@@ -830,9 +831,9 @@ with the C vidcom). It draws into the bitmaps of `GrCreateBitmap`
 The host display got `VidDevInfo` and `VidDevBegin` too; they do
 nothing there.
 
-Who tells the input manager the screen's size is the window system's
-business, as `ImSetPtrWin` did in DOS16. Until there is one, it is
-`ImSetScreenLimits` (§13j).
+The input manager gets the screen's size from the root window it is
+given (`ImSetPtrWin`, §13j). Without one, `ImSetScreenLimits` sets the
+limits.
 
 ctest `driver.video` loads `hostvid.geo` from `SP_VIDEO_DRIVERS` and
 draws with a Window and GState of its own. It reads the pixels back
@@ -2148,16 +2149,37 @@ in the queue (`MF_CHECK_DUPLICATE`, `MF_REPLACE`, `MF_CHECK_LAST_ONLY`).
 - pointer: `ImGetMousePos`, `ImPtrJump`, `ImForcePtrMethod`,
   `ImConstrainMouse`, `ImUnconstrainMouse`.
 
-There are no windows yet, so positions are screen positions. Instead of
-`ImSetPtrWin`, the video driver will set the pointer's limits with
-`ImSetScreenLimits`; until then there are none.
+Positions are screen positions (DOS16 converted them for a window
+passed in di).
+
+**The pointer on the screen** (`IM/imPtr.c`, after `imPtr.asm`).
+`ImSetPtrWin(root, x, y)` puts the pointer on a root window:
+- the window's bounds become the pointer's limits;
+- its video driver draws the pointer. `DR_VID_MOVEPTR` moves it and
+  returns the save under areas under it (`vidcomUnder.c`);
+- without a root window, `ImSetScreenLimits` sets the limits and
+  nothing is drawn.
+
+Each move of the pointer that the output monitor passes on moves the
+image (`CallMovePtr`). Then it tells the window system (`WinMovePtr`,
+§13l). A button, key or wheel event first calls
+`WinEnsureChangeNotification`, so the UI knows the window under the
+pointer before it gets the event.
+
+`ImSetPtrImage(level, ptrDef)` sets the image of one of the ten levels
+(`PtrImageLevel`, `PIL_SYSTEM` first). An image is an optr to a
+`PointerDef` chunk, which is locked while the driver takes it
+(`DR_VID_SETPTR`). The first level with an image is shown, or the
+driver's default if there is none. `ConstructOptr(0, PIV_UPDATE)` loads
+the current image again. `PIV_VIDEO_DRIVER_DEFAULT` counts as no image,
+as in the asm.
 
 **Not yet:**
 - the screen saver;
-- the pointer image (`CallMovePtr`) and the window under the pointer;
 - the move/resize xor;
 - pen and ink;
-- `ImSetPtrImage`/`Flags`, `ImBumpMouse`.
+- `ImSetPtrFlags` (hiding, the disembodied pointer), re-centering a
+  pen's pointer, `ImBumpMouse`.
 
 DOS16 built without `QUIET_PTR_SUPPORT` and `INPUT_MESSAGE_RECEIPT`, and
 so does the C kernel.
@@ -2372,18 +2394,96 @@ after drawing under the area, not washed after drawing beside it,
 washed after invalidating under it, and given up when a window closes.
 It also checks a ninth area taking the oldest's bit.
 
+**The window under the pointer** (`Win/winNotification.c`, after
+`winNotification.asm`). The input manager reports each move
+(`WinMovePtr`: the save under areas under the pointer, the root window,
+the position). As long as the pointer stays in the rectangle of the
+visible region it was last found in, nothing happens. Otherwise the
+change object gets `MSG_META_WIN_CHANGE`. The change object is the UI's
+flow object (`WinGrabChange`, `WinReleaseChange`).
+
+It answers with `WinChangeAck`, which walks the tree from the window
+the pointer was in to where it is now:
+- each window whose universe the pointer enters or leaves gets
+  `MSG_META_RAW_UNIV_ENTER` or `MSG_META_RAW_UNIV_LEAVE`
+  (`WPF_PTR_IN_UNIV`);
+- `MSG_META_IMPLIED_WIN_CHANGE` names the window the pointer ends in
+  (the implied window) and its input object. It comes before the first
+  enter, after the leaves, and once per answer even where nothing
+  changed;
+- the `PIL_GADGET` and `PIL_WINDOW` images follow the implied window, or
+  the active window of its geode (`WinGeodeSetActiveWin`). `PIL_GEODE`
+  follows its geode. With an active geode (`WinSysSetActiveGeode`),
+  only that geode's windows count. `WinSetPtrImage` and
+  `WinGeodeSetPtrImage` set the images.
+
+All these messages go to the change object, in order, after the tree
+lock is released. They take `WinPtrEventParams` (input object, window).
+goc's prototype of `MSG_META_IMPLIED_WIN_CHANGE` has the same layout.
+`MSG_META_WIN_CHANGE` takes `WinChangeParams` (position and root window,
+to pass to `WinChangeAck`). Both are in `win.h`.
+
+The next move sends `MSG_META_WIN_CHANGE` again after any of these:
+- a change of a visible region (`WinCalcVisReg`, as `WinPerformVis`
+  and `WinPerformObscure` did);
+- a closed window;
+- the pointer moving into another save under area.
+
+While a change is outstanding, a button or key sends another one.
+
+DOS16 builds without `WIN_ENTER_LEAVE_CONTROL`, so there is no
+`WinMouseGrab`, no branch exclusion, and no filtered
+`MSG_META_UNIV_ENTER`/`MSG_META_VIS_ENTER`. It also builds without
+`WIN_VIS_ENTER_LEAVE` (`MSG_META_RAW_VIS_*`). So does the C kernel.
+
+Differences from the asm:
+- the messages wait in arrays instead of two event queues;
+- without a change object nothing is counted as outstanding. The asm
+  counted a change sent to nobody and then never tested the pointer
+  again;
+- before the input manager has reported a position, a change of a
+  window sends nothing. The asm sent changes for tree 0, and each
+  answer sent the next one;
+- a window is freed when it closes unless a GState still holds it. So
+  closing sends `MSG_META_RAW_UNIV_LEAVE` to the windows of its branch
+  that the pointer was in, and the next walk starts at its parent. When
+  a window is freed, the pointer's variables and its geode's active
+  window forget it. The asm kept the window until the walk had left it.
+
+**The window variables of a geode** (`Win/winGeode.c`, after
+`winGeode.asm`) are a `GeodeWinVars` in the geode's private data (§7.1),
+allocated the first time they are needed:
+- the input object (`WinGeodeSet/GetInputObj`);
+- the parent object, its field (`WinGeodeSet/GetParentObj`);
+- the `PIL_GEODE` image;
+- `GeodeWinFlags` (`WinGeodeSet/GetFlags`);
+- the active window.
+
+ctest `kernel.win` checks:
+- the change and its answer;
+- the enters, leaves and implied changes into a window, into its child
+  and out onto the root;
+- no message within the rectangle;
+- another change for a key while one is outstanding, and for another
+  save under area;
+- the pointer images following the window;
+- closing under the pointer;
+- `ImSetPtrWin` through the driver;
+- `WinGrabChange` and `WinReleaseChange`.
+
+ctest `kernel.geode` checks the window variables of a geode. ctest
+`kernel.obj` checks the new message numbers against goc.
+
 **Locking.** The asm took the tree semaphore and P-locked each window.
 The C code has one recursive tree lock for all of it (`WinTreeP`,
 `WinTreeV`).
 
 **Not yet:**
-- pointer enter/leave notification (`winNotification.asm`);
 - `WinScroll`;
 - flushing the input and exposure objects' queues before a window is
   freed. `WinClose` frees the window at once, so a queued
   `MSG_META_EXPOSED` for a closed window must not be answered;
-- `WinForEach`, the geode window variables (`winGeode.asm`),
-  `WinRealizePalette`.
+- `WinForEach`, `WinRealizePalette`.
 
 **`WinSetInfo` in Port32** takes 64 bits (`optr`):
 - an optr for `WIT_INPUT_OBJ` and `WIT_EXPOSURE_OBJ`;

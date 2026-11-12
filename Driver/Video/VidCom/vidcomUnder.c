@@ -271,6 +271,12 @@ Boolean VidUnder(word function, DriverRegs *r)
     return FALSE;
 }
 
+/* the areas over a point (DR_VID_MOVEPTR returns them for WinMovePtr) */
+WinUnderFlags VidUnderAt(sword x, sword y)
+{
+    return Check(x, y, x, y);
+}
+
 /* CheckSaveUnderCollision: drawing to window w in b (NULL: anywhere)
  * touches the areas whose bits are in its W_savedUnderMask: those bits
  * cleared */

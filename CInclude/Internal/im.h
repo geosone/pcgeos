@@ -146,9 +146,17 @@ extern void ImForcePtrMethod(void);
 extern void ImConstrainMouse(sword left, sword top, sword right,
 			     sword bottom, byte buttons, optr od);
 extern void ImUnconstrainMouse(void);
-/* Port32: the limits of the pointer, set by the video driver where DOS16
- * took them from the root window (ImSetPtrWin); none until then */
+/* Port32: the limits of the pointer without a root window
+ * (ImSetPtrWin sets them from its bounds) */
 extern void ImSetScreenLimits(sword left, sword top, sword right,
 			      sword bottom);
+/* the root window the pointer is on and where on it: the pointer's
+ * limits are its bounds, its video driver draws the pointer */
+extern void ImSetPtrWin(WindowHandle root, sword x, sword y);
+/* the pointer image of a level (PtrImageLevel, win.h): an optr to a
+ * PointerDef chunk, or 0 for none (ConstructOptr(0, PIV_UPDATE) loads
+ * the current one again); the first level with an image is shown, the
+ * video driver's default if none */
+extern void ImSetPtrImage(word level, optr ptrDef);
 
 #endif /* __IM_H */

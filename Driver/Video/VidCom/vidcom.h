@@ -103,6 +103,7 @@ void VidResetXOR(void);
 
 /* vidcomUnder.c: save under areas */
 Boolean VidUnder(word function, DriverRegs *r);
+WinUnderFlags VidUnderAt(sword x, sword y);
 void VidUnderCollision(Window *w, const Rectangle *b);
 void VidUnderReset(void);
 
