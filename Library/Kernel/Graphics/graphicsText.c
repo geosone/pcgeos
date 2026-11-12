@@ -15,8 +15,16 @@
  *
  * Graphics strings and paths store the text (graphicsString*.c); a path
  * gets the outlines of the characters from the font driver when it is
- * used (GrTextOutline, graphicsPath.c).  Not yet: the bars of rotated
- * text (a polygon in the asm), right to left text, GrDrawTextField.
+ * used (GrTextOutline, graphicsPath.c).
+ *
+ * GrDrawTextField draws a field in style runs: the callback sets the
+ * attributes of each run (not recorded) and gives its characters; a
+ * graphics string gets one GR_DRAW_TEXT_FIELD element with the runs
+ * (StoreTextField: the 14 bytes of GDF_saved, then per run the count,
+ * the TextAttr with the gstate's space padding, the characters).
+ *
+ * Not yet: the bars of rotated text (a polygon in the asm), right to
+ * left text, hatch patterns in a text field.
  */
 #include "graphicsInt.h"
 #include <Internal/fontDr.h>
@@ -37,7 +45,7 @@ static void DrawBar(const GrDraw *d, sdword x1, sdword x2, sdword y,
     int64_t bx = (int64_t) x2 << 8, by = (int64_t) (y + pos + thick) << 8;
     sword l, t, r, b;
 
-    if (d->GD_w->W_curTMatrix.TM_flags & TM_ROTATED)
+    if (x2 <= x1 || d->GD_w->W_curTMatrix.TM_flags & TM_ROTATED)
 	return;
     GrMatTransDWF(&d->GD_w->W_curTMatrix, &ax, &ay);
     GrMatTransDWF(&d->GD_w->W_curTMatrix, &bx, &by);
@@ -47,15 +55,17 @@ static void DrawBar(const GrDraw *d, sdword x1, sdword x2, sdword y,
 }
 
 /* TextCallDriver: size characters (0: to the null) at x, y (doc,
- * 1/65536) */
-static void DrawText(GStateHandle gstate, int64_t x, int64_t y,
-		     const char *str, word size)
+ * 1/65536); the bars end at limit (DrawStyles: unless 0xffff, compared
+ * unsigned; none if it is before the text).  Returns x after the
+ * text. */
+static int64_t DrawText(GStateHandle gstate, int64_t x, int64_t y,
+			const char *str, word size, word limit)
 {
     GrDraw d;
     GState *gs;
     FontBuf *fb;
     const TMatrix *m;
-    sdword width, top;
+    sdword width, top, end;
     word n;
 
     GrEnterGraphics(gstate, &d);
@@ -65,11 +75,16 @@ static void DrawText(GStateHandle gstate, int64_t x, int64_t y,
     if (!fb) {
 	GrSetDocWWFPenPos(gs, (sdword) x, (sdword) y);
 	GrExitGraphics(&d);
-	return;
+	return x;
     }
     for (n = 0; (!size || n < size) && str[n]; n++)
 	;
     width = GrTextWidthLow(gs, fb, str, n);
+    end = (sdword) (x >> 8) + width;
+    if (limit != 0xffff && (word) (end >> 8) >= limit)
+	end = (sdword) limit << 8;
+    if (end < (sdword) (x >> 8))	/* the limit before the text */
+	end = (sdword) (x >> 8);
 
     top = (sdword) (y >> 8);
     if (gs->GS_textMode & TM_DRAW_BASE)
@@ -100,16 +115,17 @@ static void DrawText(GStateHandle gstate, int64_t x, int64_t y,
 	}
 	/* LibDrawKernelStyles */
 	if (gs->GS_fontAttr.FCA_textStyle & TS_UNDERLINE)
-	    DrawBar(&d, (sdword) (x >> 8), (sdword) (x >> 8) + width, top,
+	    DrawBar(&d, (sdword) (x >> 8), end, top,
 		    W256(&fb->FB_underPos), W256(&fb->FB_underThickness));
 	if (gs->GS_fontAttr.FCA_textStyle & TS_STRIKE_THRU)
-	    DrawBar(&d, (sdword) (x >> 8), (sdword) (x >> 8) + width, top,
+	    DrawBar(&d, (sdword) (x >> 8), end, top,
 		    W256(&fb->FB_strikePos), W256(&fb->FB_underThickness));
     }
     GrUnlockFont(gs);
     /* UpdateTextPos */
     GrSetDocWWFPenPos(gs, (sdword) (x + ((int64_t) width << 8)), (sdword) y);
     GrExitGraphics(&d);
+    return x + ((int64_t) width << 8);
 }
 
 /*
@@ -238,7 +254,8 @@ void GrDrawText(GStateHandle gstate, sword x, sword y, const char *str,
     }
     (void) GrGSRecord(gstate, GR_DRAW_TEXT, "wwwr", x, y, TextLen(str, size),
 		      str, TextLen(str, size));
-    DrawText(gstate, (int64_t) x * 65536, (int64_t) y * 65536, str, size);
+    (void) DrawText(gstate, (int64_t) x * 65536, (int64_t) y * 65536, str,
+		    size, 0xffff);
 }
 
 static void TextAtCP(GStateHandle gstate, const char *str, word size);
@@ -260,9 +277,10 @@ static void TextAtCP(GStateHandle gstate, const char *str, word size)
     PointWWFixed cp;
 
     GrGetCurPosWWFixed(gstate, &cp);
-    DrawText(gstate,
-	     (int64_t) cp.PF_x.WWF_int * 65536 + cp.PF_x.WWF_frac,
-	     (int64_t) cp.PF_y.WWF_int * 65536 + cp.PF_y.WWF_frac, str, size);
+    (void) DrawText(gstate,
+		    (int64_t) cp.PF_x.WWF_int * 65536 + cp.PF_x.WWF_frac,
+		    (int64_t) cp.PF_y.WWF_int * 65536 + cp.PF_y.WWF_frac, str,
+		    size, 0xffff);
 }
 
 void GrDrawChar(GStateHandle gstate, sword x, sword y, word ch)
@@ -275,7 +293,8 @@ void GrDrawChar(GStateHandle gstate, sword x, sword y, word ch)
 	return;
     }
     (void) GrGSRecord(gstate, GR_DRAW_CHAR, "bww", ch, x, y);
-    DrawText(gstate, (int64_t) x * 65536, (int64_t) y * 65536, &c, 1);
+    (void) DrawText(gstate, (int64_t) x * 65536, (int64_t) y * 65536, &c, 1,
+		    0xffff);
 }
 
 void GrDrawCharAtCP(GStateHandle gstate, word ch)
@@ -289,4 +308,144 @@ void GrDrawCharAtCP(GStateHandle gstate, word ch)
     }
     (void) GrGSRecord(gstate, GR_DRAW_CHAR_CP, "b", ch);
     TextAtCP(gstate, &c, 1);
+}
+
+/* GDF_saved in a GR_DRAW_TEXT_FIELD element (after the opcode) */
+void GrFieldEncode(const GDF_saved *f, byte *e)
+{
+    e[0] = (byte) f->GDFS_nChars;
+    e[1] = (byte) (f->GDFS_nChars >> 8);
+    e[2] = f->GDFS_drawPos.PWBF_x.WBF_frac;
+    e[3] = (byte) f->GDFS_drawPos.PWBF_x.WBF_int;
+    e[4] = (byte) ((word) f->GDFS_drawPos.PWBF_x.WBF_int >> 8);
+    e[5] = f->GDFS_drawPos.PWBF_y.WBF_frac;
+    e[6] = (byte) f->GDFS_drawPos.PWBF_y.WBF_int;
+    e[7] = (byte) ((word) f->GDFS_drawPos.PWBF_y.WBF_int >> 8);
+    e[8] = f->GDFS_baseline.WBF_frac;
+    e[9] = (byte) f->GDFS_baseline.WBF_int;
+    e[10] = (byte) ((word) f->GDFS_baseline.WBF_int >> 8);
+    e[11] = (byte) f->GDFS_limit;
+    e[12] = (byte) (f->GDFS_limit >> 8);
+    e[13] = f->GDFS_flags;
+}
+
+void GrFieldDecode(const byte *e, GDF_saved *f)
+{
+    f->GDFS_nChars = (word) (e[0] | (e[1] << 8));
+    f->GDFS_drawPos.PWBF_x.WBF_frac = e[2];
+    f->GDFS_drawPos.PWBF_x.WBF_int = (sword) (e[3] | (e[4] << 8));
+    f->GDFS_drawPos.PWBF_y.WBF_frac = e[5];
+    f->GDFS_drawPos.PWBF_y.WBF_int = (sword) (e[6] | (e[7] << 8));
+    f->GDFS_baseline.WBF_frac = e[8];
+    f->GDFS_baseline.WBF_int = (sword) (e[9] | (e[10] << 8));
+    f->GDFS_limit = (word) (e[11] | (e[12] << 8));
+    f->GDFS_flags = e[13];
+}
+
+/* a WBFixed as 1/65536 */
+int64_t GrWBF64(const WBFixed *w)
+{
+    return (int64_t) w->WBF_int * 65536 + ((int64_t) w->WBF_frac << 8);
+}
+
+/* the callback for the run at offset, the gstate's space padding in it
+ * (SetupGStateForDraw) */
+static word FieldRun(GStateHandle gstate, GDF_vars *v, TextAttr *ta,
+		     word offset, Boolean first)
+{
+    GState *gs;
+    const char *text = NULL;
+    word n;
+
+    memset(ta, 0, sizeof(*ta));
+    n = v->GDFV_styleCallback(v, ta, offset, first, &text);
+    v->GDFV_textPointer = text;
+    gs = MemLock(gstate);
+    ta->TA_spacePad = gs->GS_textSpacePad;
+    MemUnlock(gstate);
+    return text ? n : 0;
+}
+
+/* StoreTextField: the field and its runs as one element; a run of no
+ * characters before the end ends the field there */
+static void StoreField(GStateHandle gstate, GDF_vars *v)
+{
+    size_t cap = 256, len = GR_FIELD_HEAD - 1;
+    byte *buf = malloc(cap), *nb;
+    word left = v->GDFV_saved.GDFS_nChars, off = 0, n;
+    Boolean first = TRUE;
+    GDF_saved saved = v->GDFV_saved;
+    TextAttr ta;
+
+    if (!buf)
+	return;
+    do {
+	n = FieldRun(gstate, v, &ta, off, first);
+	first = FALSE;
+	if (n > left)
+	    n = left;
+	if (len + GR_FIELD_RUN + n > 0xfff0)
+	    n = 0;
+	if (!n && off)
+	    break;
+	if (len + GR_FIELD_RUN + n > cap) {
+	    cap = len + GR_FIELD_RUN + n + 256;
+	    if (!(nb = realloc(buf, cap)))
+		break;
+	    buf = nb;
+	}
+	buf[len] = (byte) n;
+	buf[len + 1] = (byte) (n >> 8);
+	GrTextAttrEncode(&ta, buf + len + 2);
+	if (n)
+	    memcpy(buf + len + GR_FIELD_RUN, v->GDFV_textPointer, n);
+	len += GR_FIELD_RUN + n;
+	off = (word) (off + n);
+	left = (word) (left - n);
+    } while (left && n);
+    saved.GDFS_nChars = off;
+    GrFieldEncode(&saved, buf);
+    (void) GrGSRecord(gstate, GR_DRAW_TEXT_FIELD, "r", buf, (word) len);
+    free(buf);
+}
+
+void GrDrawTextField(GStateHandle gstate, GDF_vars *vars)
+{
+    GState *gs = MemLock(gstate);
+    Handle gstring = gs->GS_gstring;
+    word left = vars->GDFV_saved.GDFS_nChars, off = 0, n;
+    Boolean first = TRUE;
+    int64_t x, y;
+
+    MemUnlock(gstate);
+    if (gstring) {
+	void *other = vars->GDFV_other;	/* the gstring code changes it */
+	StoreField(gstate, vars);
+	vars->GDFV_other = other;
+	first = FALSE;
+    }
+    y = GrWBF64(&vars->GDFV_saved.GDFS_drawPos.PWBF_y) +
+	GrWBF64(&vars->GDFV_saved.GDFS_baseline);
+    while ((sword) left > 0) {
+	TextAttr ta;
+	n = FieldRun(gstate, vars, &ta, off, first);
+	first = FALSE;
+	GrSetTextAttrLow(gstate, &ta);
+	if (n > left)
+	    n = left;
+	if (!n)
+	    break;
+	left = (word) (left - n);
+	x = DrawText(gstate,
+		     GrWBF64(&vars->GDFV_saved.GDFS_drawPos.PWBF_x), y,
+		     vars->GDFV_textPointer, n,
+		     vars->GDFV_saved.GDFS_limit);
+	vars->GDFV_saved.GDFS_drawPos.PWBF_x.WBF_int = (sword) (x >> 16);
+	vars->GDFV_saved.GDFS_drawPos.PWBF_x.WBF_frac = (byte) (x >> 8);
+	off = (word) (off + n);
+    }
+    if (vars->GDFV_saved.GDFS_flags & HF_AUTO_HYPHEN)
+	(void) DrawText(gstate,
+			GrWBF64(&vars->GDFV_saved.GDFS_drawPos.PWBF_x), y,
+			"-", 1, vars->GDFV_saved.GDFS_limit);
 }

@@ -331,4 +331,18 @@ MemHandle GrAllocPathString(void);
 byte *GrFreePathString(MemHandle mh, word *size);
 void GrRelMovePen(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y);
 
+/* graphicsState.c: TextAttr in graphics strings (DOS16 layout) */
+#define GR_TEXT_ATTR_SIZE	24
+void GrTextAttrEncode(const TextAttr *ta, byte *a);
+void GrTextAttrDecode(const byte *a, TextAttr *ta);
+void GrSetTextAttrLow(GStateHandle gstate, const TextAttr *ta);
+
+/* graphicsText.c: GR_DRAW_TEXT_FIELD: the opcode and GDF_saved, then
+ * per run the count, a TextAttr and the characters */
+#define GR_FIELD_HEAD	15
+#define GR_FIELD_RUN	(2 + GR_TEXT_ATTR_SIZE)
+void GrFieldEncode(const GDF_saved *f, byte *e);
+void GrFieldDecode(const byte *e, GDF_saved *f);
+int64_t GrWBF64(const WBFixed *w);
+
 #endif

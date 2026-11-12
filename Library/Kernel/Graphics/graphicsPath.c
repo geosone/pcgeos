@@ -439,16 +439,69 @@ static void Arc3(PathWalk *w, GStateHandle gstate, const byte *e)
 static const byte *Walk(PathWalk *w, GStateHandle gstate, const byte *e,
 			const byte *end);
 
-/* DrawTextToPath: the outlines of the characters (GrTextOutline), each
- * contour a closed subpath */
+/* DrawTextToPath: the outlines of size characters at x, y (doc,
+ * 1/65536; GrTextOutline), each contour a closed subpath; the pen ends
+ * after them */
+static void TextAt(PathWalk *w, GStateHandle gstate, int64_t x, int64_t y,
+		   const char *str, word size)
+{
+    word len, first, i;
+    byte *outline;
+    PointDWFixed pen;
+
+    outline = GrTextOutline(gstate, x, y, str, size, &len);
+    w->PW_d->GD_gs = MemDeref(gstate);
+    if (!outline)
+	return;
+    pen = w->PW_d->GD_gs->GS_penPos;	/* after the text */
+    w->PW_open = FALSE;
+    first = w->PW_count;
+    (void) Walk(w, gstate, outline, outline + len);
+    w->PW_d->GD_gs = MemDeref(gstate);
+    w->PW_d->GD_gs->GS_penPos = pen;
+    for (i = first; i < w->PW_count; i++)
+	w->PW_subs[i].SB_closed = TRUE;
+    w->PW_open = FALSE;
+    free(outline);
+}
+
+/* the runs of a GR_DRAW_TEXT_FIELD, each with its attributes (as
+ * GrDrawTextField sets them), and the auto hyphen */
+static void Field(PathWalk *w, GStateHandle gstate, const byte *e)
+{
+    GDF_saved f;
+    const byte *r = e + GR_FIELD_HEAD;
+    int64_t x, y;
+    word left;
+
+    GrFieldDecode(e + 1, &f);
+    x = GrWBF64(&f.GDFS_drawPos.PWBF_x);
+    y = GrWBF64(&f.GDFS_drawPos.PWBF_y) + GrWBF64(&f.GDFS_baseline);
+    for (left = f.GDFS_nChars; left; ) {
+	TextAttr ta;
+	PointWWFixed cp;
+	word n = U(r);
+	GrTextAttrDecode(r + 2, &ta);
+	GrSetTextAttrLow(gstate, &ta);
+	if (n) {
+	    TextAt(w, gstate, x, y, (const char *) r + GR_FIELD_RUN, n);
+	    GrGetCurPosWWFixed(gstate, &cp);
+	    x = (int64_t) cp.PF_x.WWF_int * 65536 + cp.PF_x.WWF_frac;
+	}
+	w->PW_d->GD_gs = MemDeref(gstate);
+	r += GR_FIELD_RUN + n;
+	left = (word) (left - n);
+    }
+    if (f.GDFS_flags & HF_AUTO_HYPHEN)
+	TextAt(w, gstate, x, y, "-", 1);
+}
+
 static void Text(PathWalk *w, GStateHandle gstate, const byte *e)
 {
     int64_t x, y;
     const char *str;
     char c;
-    word size, len, first, i;
-    byte *outline;
-    PointDWFixed pen;
+    word size;
 
     if (*e == GR_DRAW_TEXT || *e == GR_DRAW_CHAR) {
 	word at = (word) (*e == GR_DRAW_TEXT ? 1 : 2);
@@ -466,22 +519,8 @@ static void Text(PathWalk *w, GStateHandle gstate, const byte *e)
     case GR_DRAW_CHAR: c = (char) e[1]; str = &c; size = 1; break;
     default: c = (char) e[1]; str = &c; size = 1; break;
     }
-    if (!size)
-	return;
-    outline = GrTextOutline(gstate, x, y, str, size, &len);
-    w->PW_d->GD_gs = MemDeref(gstate);
-    if (!outline)
-	return;
-    pen = w->PW_d->GD_gs->GS_penPos;	/* after the text */
-    w->PW_open = FALSE;
-    first = w->PW_count;
-    (void) Walk(w, gstate, outline, outline + len);
-    w->PW_d->GD_gs = MemDeref(gstate);
-    w->PW_d->GD_gs->GS_penPos = pen;
-    for (i = first; i < w->PW_count; i++)
-	w->PW_subs[i].SB_closed = TRUE;
-    w->PW_open = FALSE;
-    free(outline);
+    if (size)
+	TextAt(w, gstate, x, y, str, size);
 }
 
 /* the elements from e to GR_END_PATH (or end) as subpaths; returns the
@@ -650,6 +689,9 @@ static const byte *Walk(PathWalk *w, GStateHandle gstate, const byte *e,
 	case GR_DRAW_CHAR:
 	case GR_DRAW_CHAR_CP:
 	    Text(w, gstate, e);
+	    break;
+	case GR_DRAW_TEXT_FIELD:
+	    Field(w, gstate, e);
 	    break;
 	case GR_DRAW_CURVE:
 	    if ((pts = Points(e + 1, 4)) != NULL) {

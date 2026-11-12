@@ -559,21 +559,74 @@ void GrSetTextSpacePad(GStateHandle gstate, WWFixedAsDWord padding)
     MemUnlock(gstate);
 }
 
-/* SetTextAttrLow */
+/* the DOS16 TextAttr of a graphics string (GR_SET_TEXT_ATTR, the
+ * style runs of GR_DRAW_TEXT_FIELD), GR_TEXT_ATTR_SIZE bytes */
+void GrTextAttrEncode(const TextAttr *ta, byte *a)
+{
+    a[0] = ta->TA_color.CQ_redOrIndex;
+    a[1] = ta->TA_color.CQ_info;
+    a[2] = ta->TA_color.CQ_green;
+    a[3] = ta->TA_color.CQ_blue;
+    a[4] = ta->TA_mask;
+    a[5] = ta->TA_pattern.HP_type;
+    a[6] = ta->TA_pattern.HP_data;
+    a[7] = ta->TA_styleSet;
+    a[8] = ta->TA_styleClear;
+    a[9] = ta->TA_modeSet;
+    a[10] = ta->TA_modeClear;
+    a[11] = ta->TA_spacePad.WBF_frac;
+    a[12] = (byte) ta->TA_spacePad.WBF_int;
+    a[13] = (byte) ((word) ta->TA_spacePad.WBF_int >> 8);
+    a[14] = (byte) ta->TA_font;
+    a[15] = (byte) (ta->TA_font >> 8);
+    a[16] = ta->TA_size.WBF_frac;
+    a[17] = (byte) ta->TA_size.WBF_int;
+    a[18] = (byte) ((word) ta->TA_size.WBF_int >> 8);
+    a[19] = (byte) ta->TA_trackKern;
+    a[20] = (byte) ((word) ta->TA_trackKern >> 8);
+    a[21] = ta->TA_fontWeight;
+    a[22] = ta->TA_fontWidth;
+    a[23] = 0;
+}
+
+void GrTextAttrDecode(const byte *a, TextAttr *ta)
+{
+    ta->TA_color.CQ_redOrIndex = a[0];
+    ta->TA_color.CQ_info = a[1];
+    ta->TA_color.CQ_green = a[2];
+    ta->TA_color.CQ_blue = a[3];
+    ta->TA_mask = a[4];
+    ta->TA_pattern.HP_type = a[5];
+    ta->TA_pattern.HP_data = a[6];
+    ta->TA_styleSet = a[7];
+    ta->TA_styleClear = a[8];
+    ta->TA_modeSet = a[9];
+    ta->TA_modeClear = a[10];
+    ta->TA_spacePad.WBF_frac = a[11];
+    ta->TA_spacePad.WBF_int = (sword) (a[12] | (a[13] << 8));
+    ta->TA_font = (FontID) (a[14] | (a[15] << 8));
+    ta->TA_size.WBF_frac = a[16];
+    ta->TA_size.WBF_int = (sword) (a[17] | (a[18] << 8));
+    ta->TA_trackKern = (sword) (a[19] | (a[20] << 8));
+    ta->TA_fontWeight = a[21];
+    ta->TA_fontWidth = a[22];
+}
+
 void GrSetTextAttr(GStateHandle gstate, const TextAttr *ta)
+{
+    byte a[GR_TEXT_ATTR_SIZE];
+
+    GrTextAttrEncode(ta, a);
+    (void) GrGSRecord(gstate, GR_SET_TEXT_ATTR, "r", a, sizeof(a));
+    GrSetTextAttrLow(gstate, ta);
+}
+
+/* SetTextAttrLow (SetTextAttrInt): not recorded */
+void GrSetTextAttrLow(GStateHandle gstate, const TextAttr *ta)
 {
     GState *gs = MemLock(gstate);
     TextMode set, clear;
 
-    (void) GrGSRecord(gstate, GR_SET_TEXT_ATTR, "bbbbbbbbbbbfwfwbbb",
-		      ta->TA_color.CQ_redOrIndex, ta->TA_color.CQ_info,
-		      ta->TA_color.CQ_green, ta->TA_color.CQ_blue,
-		      ta->TA_mask, ta->TA_pattern.HP_type,
-		      ta->TA_pattern.HP_data, ta->TA_styleSet,
-		      ta->TA_styleClear, ta->TA_modeSet, ta->TA_modeClear,
-		      GR_WBF_D(ta->TA_spacePad), ta->TA_font,
-		      GR_WBF_D(ta->TA_size), ta->TA_trackKern,
-		      ta->TA_fontWeight, ta->TA_fontWidth, 0);
     GrSetColorIn(gs, &gs->GS_textAttr, ta->TA_color.CQ_info,
 		 ta->TA_color.CQ_redOrIndex, ta->TA_color.CQ_green,
 		 ta->TA_color.CQ_blue);

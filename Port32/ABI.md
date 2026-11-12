@@ -2816,12 +2816,32 @@ bottom (`TM_DRAW_*`). It goes through the window's matrix to
 strike-through as a bar from the start to the end of the text. The pen
 ends after the text.
 
+**Text fields** (`GrDrawTextField`, the text object's lines). Under
+`GEOS_PORT32` the `GDF_vars` of `text.def` are C (`graphics.h`):
+`GDF_saved` stays as it was (number of characters, position, baseline,
+limit, `HyphenFlags`). The style callback is a C function:
+
+```c
+word GDFStyleCallback(GDF_vars *vars, TextAttr *attr, word offset,
+                      Boolean first, const char **text);
+```
+
+It fills the attributes of the run at `offset`, sets `*text` and
+returns the run's length (asm: `bx:di` buffer, `si` offset, `cx` = 0 on
+the first call; it returned `cx` and `ds:si`). The kernel sets the
+gstate's space padding in the attributes and applies them without
+recording them (`SetTextAttrInt`). Each run is drawn at the position,
+`GDFS_drawPos.x` moves on after it, and the pen ends after the field.
+`GDFS_limit` ends the underline and the strike-through (0xffff: no
+limit). `HF_AUTO_HYPHEN` draws a hyphen after the field. A run of no
+characters ends the field (the asm looped).
+
 **Port32 differences:** names compare as bytes (`FEF_DOWNCASE`,
 `FEF_ALPHABETIZE` on ASCII), not with the localization's collation. No
 greyscale text, no deleting of fonts, no DBCS.
 
-**Not yet:** `GrCharMetrics`, text in graphics strings and paths, the
-bars of rotated text, right to left text, `GrDrawTextField`.
+**Not yet:** `GrCharMetrics`, the bars of rotated text, right to left
+text, hatch patterns in a text field.
 
 **Tests.** ctest `kernel.draw` boots with `FontData/Berkeley.fnt` in
 `USERDATA/FONT`. It checks:
@@ -2830,7 +2850,10 @@ bars of rotated text, right to left text, `GrDrawTextField`.
 - `GrFontMetrics`, `GrCharWidth`, `GrTextWidth` with space padding;
 - the sizes of the file and the nearest one;
 - the pixels of drawn text, the pen after it, text at the pen,
-  underlined text, text at its baseline.
+  underlined text, text at its baseline;
+- a text field of two runs: the callback calls, the pixels, the
+  position and pen after it, the limit of the underline, the auto
+  hyphen.
 
 ## 13o. Font drivers (`Graphics/graphicsFontDriver.c`, `Driver/Font/TrueType`, P6)
 
@@ -2969,8 +2992,19 @@ for byte; into a GState it plays them. `GrGetGStringElement`,
 slice: the header, a complex bitmap's palette and the data, packed data
 as far as its scan lines go (`GrBitmapStringSize`).
 
-**Not yet:** `GR_DRAW_TEXT_FIELD` (style runs; reading one is a
-fault), the `*_PTR` and `*_OPTR` elements, bitmap slices after the
+**Text fields** (`StoreTextField`, `PETextField`). `GR_DRAW_TEXT_FIELD` is
+followed by the 14 bytes of `GDF_saved`. Then, per run, come the count,
+the 24-byte `TextAttr` (with the gstate's space padding) and the
+characters, until the counts add up to the field's characters (at least
+one run). Recording calls the callback once per run, then draws with it
+again. Reading checks that the runs add up; a stream is read a run at a
+time. Playing gives the runs to `GrDrawTextField` through a callback
+(`TextFieldCB`), so the attributes stay set afterwards, as in the asm.
+Bounds and paths take the runs as text with their attributes. The test
+records a field into a chunk and checks its bytes, plays it, bounds it,
+copies it into a file and plays it from there.
+
+**Not yet:** the `*_PTR` and `*_OPTR` elements, bitmap slices after the
 first (callbacks), palettes, the truncation of a full stream.
 (`GST_PATH` and the other path and clip elements: §13q.)
 

@@ -149,6 +149,42 @@ static FontID ttFont = FID_INVALID;	/* Cooper Black */
 
 /* GrParseGString: count the output elements, go on */
 static int nOutput;
+
+/* GrDrawTextField: "Hi" black, then "H" red and underlined */
+static int fieldCalls, fieldFirsts;
+static word FieldStyle(GDF_vars *v, TextAttr *ta, word offset,
+		       Boolean first, const char **text)
+{
+    static const char field[] = "HiH";
+    Boolean red = (Boolean) (offset >= 2);
+
+    (void) v;
+    fieldCalls++;
+    fieldFirsts += first != 0;
+    ta->TA_color.CQ_info = CF_RGB;
+    ta->TA_color.CQ_redOrIndex = (byte) (red ? 0xff : 0);
+    ta->TA_mask = SDM_100;
+    ta->TA_styleSet = (TextStyle) (red ? TS_UNDERLINE : 0);
+    ta->TA_styleClear = (TextStyle) (red ? 0 : TS_UNDERLINE);
+    ta->TA_modeClear = TM_DRAW_BASE;
+    ta->TA_font = FID_BERKELEY;
+    ta->TA_size.WBF_int = 10;
+    ta->TA_fontWeight = FW_NORMAL;
+    ta->TA_fontWidth = FWI_MEDIUM;
+    *text = field + offset;
+    return (word) (red ? 1 : 2);
+}
+
+static void FieldVars(GDF_vars *v, sword x, word limit, HyphenFlags flags)
+{
+    memset(v, 0, sizeof(*v));
+    v->GDFV_saved.GDFS_nChars = 3;
+    v->GDFV_saved.GDFS_drawPos.PWBF_x.WBF_int = x;
+    v->GDFV_saved.GDFS_drawPos.PWBF_y.WBF_int = 5;
+    v->GDFV_saved.GDFS_limit = limit;
+    v->GDFV_saved.GDFS_flags = flags;
+    v->GDFV_styleCallback = FieldStyle;
+}
 static Boolean CountOutput(void *element)
 {
     (void) element;
@@ -1163,6 +1199,41 @@ int main(int argc, char **argv)
 	CHECK(Pixel(90, 32) == BLACK && Pixel(90, 31) == WHITE &&
 	      Pixel(90, 39) == BLACK && Pixel(90, 40) == WHITE);
 	GrSetTextMode(g, 0, TM_DRAW_BASE);
+
+	/* a text field: the runs with their attributes, the position on
+	 * after each; the underline ends at the limit; the auto hyphen */
+	{
+	    GDF_vars v;
+	    XYValueAsDWord cp;
+	    word hy = (word) GrTextWidth(g, "-", 0);
+
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 99, 40);
+	    FieldVars(&v, 5, 0xffff, 0);
+	    fieldCalls = fieldFirsts = 0;
+	    GrDrawTextField(g, &v);
+	    CHECK(fieldCalls == 2 && fieldFirsts == 1);
+	    CHECK(Pixel(25, 27) == BLACK && Pixel(32, 27) == BLACK &&
+		  Pixel(35, 27) == RED && Pixel(34, 27) == WHITE);
+	    CHECK(Pixel(35, 36) == RED && Pixel(41, 36) == RED &&
+		  Pixel(42, 36) == WHITE && Pixel(30, 36) == WHITE);
+	    CHECK(v.GDFV_saved.GDFS_drawPos.PWBF_x.WBF_int == 22 &&
+		  v.GDFV_saved.GDFS_drawPos.PWBF_x.WBF_frac == 0);
+	    cp = GrGetCurPos(g);
+	    CHECK(DWORD_X(cp) == 22 && DWORD_Y(cp) == 5);
+
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 99, 40);
+	    FieldVars(&v, 5, 18, HF_AUTO_HYPHEN);
+	    GrDrawTextField(g, &v);
+	    CHECK(Pixel(35, 36) == RED && Pixel(37, 36) == RED &&
+		  Pixel(38, 36) == WHITE && Pixel(43, 36) == WHITE);
+	    cp = GrGetCurPos(g);
+	    CHECK(hy && DWORD_X(cp) == 22 + hy);
+	    CHECK(v.GDFV_saved.GDFS_drawPos.PWBF_x.WBF_int == 22);
+	    GrSetTextStyle(g, 0, TS_UNDERLINE);
+	    GrSetTextColor(g, CF_RGB, 0, 0, 0);
+	}
     }
 
     /* TrueType: the driver found Cooper Black in USERDATA/FONT/TTF (the
@@ -1377,6 +1448,78 @@ int main(int argc, char **argv)
 	      Pixel(60, 47) == BLACK);
 	GrDestroyGString(lf, g, GSKT_LEAVE_DATA);
 	FileClose(f, FALSE);
+
+	/* a text field: one element with its runs (the callback once per
+	 * run for it, again to draw); played from a chunk and from a
+	 * file, bounded as text */
+	{
+	    static const byte head[] = {
+		GR_DRAW_TEXT_FIELD, 3, 0, 0, 5, 0, 0, 5, 0, 0, 0, 0,
+		0xff, 0xff, HF_AUTO_HYPHEN
+	    };
+	    GDF_vars v;
+	    word fc = 0, sz;
+	    GStateHandle fg, fl;
+	    RectDWord rd;
+
+	    fg = GrCreateGString(blk, GST_CHUNK, &fc);
+	    FieldVars(&v, 5, 0xffff, HF_AUTO_HYPHEN);
+	    fieldCalls = fieldFirsts = 0;
+	    GrDrawTextField(fg, &v);
+	    CHECK(fieldCalls == 4 && fieldFirsts == 1);
+	    CHECK(GrEndGString(fg) == GSET_NO_ERROR);
+	    GrDestroyGString(fg, 0, GSKT_LEAVE_DATA);
+	    MemLock(blk);
+	    p = LMemDerefHandles(blk, fc);
+	    sz = LMemGetChunkSizeHandles(blk, fc);
+	    CHECK(sz == 15 + 26 + 2 + 26 + 1 + 1 &&
+		  !memcmp(p, head, sizeof(head)));
+	    CHECK(p[15] == 2 && p[16] == 0 && p[17 + 0] == 0 &&
+		  p[17 + 4] == SDM_100 && p[17 + 14] == (byte) FID_BERKELEY &&
+		  p[17 + 15] == (byte) (FID_BERKELEY >> 8) &&
+		  p[17 + 17] == 10 && p[41] == 'H' && p[42] == 'i');
+	    CHECK(p[43] == 1 && p[45] == 0xff && p[45 + 7] == TS_UNDERLINE &&
+		  p[69] == 'H' && p[70] == GR_END_GSTRING);
+	    MemUnlock(blk);
+
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 80, 80);
+	    fl = GrLoadGString(blk, GST_CHUNK, fc);
+	    fieldCalls = 0;
+	    CHECK(GrDrawGString(g, fl, 0, 0, 0, NULL) == GSRT_COMPLETE &&
+		  fieldCalls == 0);
+	    CHECK(Pixel(25, 27) == BLACK && Pixel(35, 27) == RED &&
+		  Pixel(35, 36) == RED && Pixel(30, 36) == WHITE);
+	    GrSetGStringPos(fl, GSSPT_BEGINNING, 0);
+	    CHECK(GrGetGStringElement(g, fl, sizeof(buf), buf, &n) ==
+		  GR_DRAW_TEXT_FIELD && n == sz - 1);
+	    GrDestroyGString(fl, 0, GSKT_LEAVE_DATA);
+	    GSBounds(blk, fc, 0, 0, &rd);
+	    CHECK(rd.RD_left == 5 && rd.RD_top == 5 &&
+		  rd.RD_right >= 22 && rd.RD_right <= 22 + 8 &&
+		  rd.RD_bottom >= 16 && rd.RD_bottom <= 18);
+
+	    f = FileCreate("GSF.MF", FILE_CREATE_TRUNCATE | FCF_NATIVE |
+			   FILE_ACCESS_RW, 0);
+	    fs = GrCreateGString(f, GST_STREAM, NULL);
+	    fl = GrLoadGString(blk, GST_CHUNK, fc);
+	    CHECK(GrCopyGString(fl, fs, 0) == GSRT_COMPLETE);
+	    GrDestroyGString(fl, 0, GSKT_LEAVE_DATA);
+	    CHECK(GrEndGString(fs) == GSET_NO_ERROR);
+	    GrDestroyGString(fs, 0, GSKT_LEAVE_DATA);
+	    FilePos(f, 0, FILE_POS_START);
+	    lf = GrLoadGString(f, GST_STREAM, 0);
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 80, 80);
+	    CHECK(GrDrawGString(g, lf, 20, 0, 0, NULL) == GSRT_COMPLETE &&
+		  Pixel(45, 27) == BLACK && Pixel(55, 27) == RED &&
+		  Pixel(55, 36) == RED);
+	    GrDestroyGString(lf, g, GSKT_LEAVE_DATA);
+	    FileClose(f, FALSE);
+	    LMemFreeHandles(blk, fc);
+	    GrSetTextStyle(g, 0, TS_UNDERLINE);
+	    GrSetTextColor(g, CF_RGB, 0, 0, 0);
+	}
 	FileSetStandardPath(SP_VIDEO_DRIVERS);
 
 	GrDestroyGString(ld, g, GSKT_KILL_DATA);

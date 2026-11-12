@@ -1687,6 +1687,41 @@ typedef struct {
 extern void	/*XXX*/
     _pascal GrSetTextAttr(GStateHandle gstate, const TextAttr *ta);
 
+#ifdef GEOS_PORT32
+/*
+ * GrDrawTextField: a field of text in style runs (the text object's
+ * lines).  The callback fills the attributes of the run at offset
+ * (characters into the field; first is TRUE on the first call), sets
+ * *text to its characters and returns its length.
+ */
+typedef ByteFlags HyphenFlags;
+#define HF_AUTO_HYPHEN	0x01	/* draw a hyphen after the field */
+
+typedef struct {
+    word		GDFS_nChars;	/* characters to draw */
+    PointWBFixed	GDFS_drawPos;	/* where, document coordinates */
+    WBFixed		GDFS_baseline;	/* added to the y position */
+    word		GDFS_limit;	/* end of underline, strike-through
+					 * (0xffff: none) */
+    HyphenFlags		GDFS_flags;
+} GDF_saved;
+
+struct _GDF_vars;
+typedef word GDFStyleCallback(struct _GDF_vars *vars, TextAttr *attr,
+			      word offset, Boolean first, const char **text);
+
+typedef struct _GDF_vars {
+    GDF_saved		GDFV_saved;
+    GDFStyleCallback	*GDFV_styleCallback;
+    dword		GDFV_textOffset;	/* the caller's */
+    void		*GDFV_other;		/* the caller's */
+    const char		*GDFV_textPointer;	/* set by the callback */
+} GDF_vars;
+
+extern void
+    _pascal GrDrawTextField(GStateHandle gstate, GDF_vars *vars);
+#endif
+
 /***/
 
 extern void

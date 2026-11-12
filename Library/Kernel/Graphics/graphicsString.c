@@ -19,8 +19,11 @@
  * is complete (GStringCleanup).  GrCopyGString to a graphics string
  * copies the elements byte for byte; to a GState it plays them.
  *
- * Not yet: GR_DRAW_TEXT_FIELD (style runs: the element is a fault),
- * the *_PTR and *_OPTR elements, bitmap slices, palettes.
+ * GR_DRAW_TEXT_FIELD has its style runs after GDF_saved, until their
+ * counts make the field's characters; it plays with a callback giving
+ * the runs (PETextField, TextFieldCB).
+ *
+ * Not yet: the *_PTR and *_OPTR elements, bitmap slices, palettes.
  * GrGetGStringBounds plays the elements with their bounds
  * (graphicsStringBounds.c).
  */
@@ -243,13 +246,48 @@ static void DWF(const byte *p, DWFixed *d)
     d->DWF_int = (sdword) D(p + 2);
 }
 
+/* GR_DRAW_TEXT_FIELD: the runs until their counts make the field's
+ * characters (at least one); 0 if it is not all there or the runs do
+ * not add up.  *need: the bytes known to be needed so far */
+static word FieldSizeNeed(const byte *e, dword avail, dword *need)
+{
+    dword size = GR_FIELD_HEAD;
+    word left, n;
+
+    *need = size;
+    if (avail < size)
+	return 0;
+    left = U(e + 1);
+    do {
+	*need = size + GR_FIELD_RUN;
+	if (avail < *need)
+	    return 0;
+	n = U(e + size);
+	if (n > left || (!n && left))
+	    return 0;
+	size += GR_FIELD_RUN + n;
+	*need = size;
+	left = (word) (left - n);
+    } while (left);
+    return (word) (size <= avail && size <= 0xffff ? size : 0);
+}
+
+static word FieldSize(const byte *e, dword avail)
+{
+    dword need;
+
+    return FieldSizeNeed(e, avail, &need);
+}
+
 word GrGSElemSize(const byte *e, dword avail)
 {
     const GSElemInfo *i;
     dword size;
 
-    if (!avail || *e >= GS_NUM_ELEMENTS || *e == GR_DRAW_TEXT_FIELD)
+    if (!avail || *e >= GS_NUM_ELEMENTS)
 	return 0;
+    if (*e == GR_DRAW_TEXT_FIELD)
+	return FieldSize(e, avail);
     i = &grGSElemInfo[*e];
     if (avail < i->GSEI_size)
 	return 0;
@@ -283,6 +321,39 @@ static Boolean Keep(GStringBlock *g, const void *src, word size)
 }
 
 static const byte endElement = GR_END_GSTRING;
+
+/* a GR_DRAW_TEXT_FIELD from a stream (its opcode read): a run at a time */
+static Boolean ReadField(GStringBlock *g, FileHandle fh)
+{
+    dword have = 1, need;
+    byte *e;
+
+    for (;;) {
+	if (g->GSS_elemCap < have || !g->GSS_elem) {
+	    if (!(e = realloc(g->GSS_elem, 64)))
+		return FALSE;
+	    g->GSS_elem = e;
+	    g->GSS_elemCap = 64;
+	}
+	g->GSS_elem[0] = GR_DRAW_TEXT_FIELD;
+	if (FieldSizeNeed(g->GSS_elem, have, &need)) {
+	    g->GSS_lastSize = (word) have;
+	    return TRUE;
+	}
+	if (need <= have || need > 0xffff)
+	    return FALSE;			/* the runs do not add up */
+	if (need > g->GSS_elemCap) {
+	    if (!(e = realloc(g->GSS_elem, need)))
+		return FALSE;
+	    g->GSS_elem = e;
+	    g->GSS_elemCap = (word) need;
+	}
+	if (FileRead(fh, g->GSS_elem + have, (word) (need - have), TRUE) !=
+	    (word) (need - have))
+	    return FALSE;
+	have = need;
+    }
+}
 
 /* ReadElement: the element at GSS_curPos into GSS_elem; FALSE: fault */
 static Boolean ReadElement(GStringBlock *g)
@@ -342,6 +413,10 @@ static Boolean ReadElement(GStringBlock *g)
 	    ok = Keep(g, &endElement, 1);
 	    break;
 	}
+	if (head[0] == GR_DRAW_TEXT_FIELD) {
+	    ok = ReadField(g, fh);
+	    break;
+	}
 	fixed = FixedSize(head[0]);
 	if (!fixed || fixed > sizeof(head) ||
 	    (fixed > 1 && FileRead(fh, head + 1, (word) (fixed - 1), TRUE) !=
@@ -393,6 +468,21 @@ static void *Copy(const byte *p, dword n)
     if (c && n)
 	memcpy(c, p, n);
     return c;
+}
+
+/* TextFieldCB: the runs of a GR_DRAW_TEXT_FIELD in turn */
+static word TextFieldCB(GDF_vars *v, TextAttr *ta, word offset,
+			Boolean first, const char **text)
+{
+    const byte *r = v->GDFV_other;
+    word n = U(r);
+
+    (void) offset;
+    (void) first;
+    GrTextAttrDecode(r + 2, ta);
+    *text = (const char *) r + GR_FIELD_RUN;
+    v->GDFV_other = (void *) (r + GR_FIELD_RUN + n);
+    return n;
 }
 
 /* PE*: play e into gstate */
@@ -755,28 +845,18 @@ void GrPlayElement(GStateHandle gstate, const byte *e)
 	GrSetAreaAttr(gstate, &aa);
 	break;
     }
+    case GR_DRAW_TEXT_FIELD: {			/* PETextField */
+	GDF_vars v;
+	memset(&v, 0, sizeof(v));
+	GrFieldDecode(e + 1, &v.GDFV_saved);
+	v.GDFV_styleCallback = TextFieldCB;
+	v.GDFV_other = (void *) (e + GR_FIELD_HEAD);
+	GrDrawTextField(gstate, &v);
+	break;
+    }
     case GR_SET_TEXT_ATTR: {
 	TextAttr ta;
-	const byte *a = e + 1;
-	ta.TA_color.CQ_redOrIndex = a[0];
-	ta.TA_color.CQ_info = a[1];
-	ta.TA_color.CQ_green = a[2];
-	ta.TA_color.CQ_blue = a[3];
-	ta.TA_mask = a[4];
-	ta.TA_pattern.HP_type = a[5];
-	ta.TA_pattern.HP_data = a[6];
-	ta.TA_styleSet = a[7];
-	ta.TA_styleClear = a[8];
-	ta.TA_modeSet = a[9];
-	ta.TA_modeClear = a[10];
-	ta.TA_spacePad.WBF_frac = a[11];
-	ta.TA_spacePad.WBF_int = S(a + 12);
-	ta.TA_font = U(a + 14);
-	ta.TA_size.WBF_frac = a[16];
-	ta.TA_size.WBF_int = S(a + 17);
-	ta.TA_trackKern = S(a + 19);
-	ta.TA_fontWeight = a[21];
-	ta.TA_fontWidth = a[22];
+	GrTextAttrDecode(e + 1, &ta);
 	GrSetTextAttr(gstate, &ta);
 	break;
     }

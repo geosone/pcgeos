@@ -26,8 +26,8 @@
  * (the asm's GrGetTextBounds used the character metrics) and by the
  * font's box otherwise; paths are bounded by their elements as they are
  * defined (GR_DRAW_PATH and GR_FILL_PATH add nothing, the asm asked
- * GrGetPathBounds too).  Not yet: the *_PTR and *_OPTR elements,
- * GR_DRAW_TEXT_FIELD (as for drawing, graphicsString.c).
+ * GrGetPathBounds too).  A text field is bounded run by run, as the
+ * text.  Not yet: the *_PTR and *_OPTR elements.
  */
 #include "graphicsInt.h"
 #include <gstring.h>
@@ -113,6 +113,35 @@ static void BitmapBox(BoundState *b, const GState *gs, const TMatrix *m,
 	       y + (int64_t) (word) (sz >> 16) * 65536);
 }
 
+/* a text field without outlines: each run's box with its attributes */
+static void FieldBox(BoundState *b, const TMatrix *m, const byte *e)
+{
+    GDF_saved f;
+    const byte *r = e + GR_FIELD_HEAD;
+    int64_t x, y, box[4];
+    word left;
+
+    GrFieldDecode(e + 1, &f);
+    x = GrWBF64(&f.GDFS_drawPos.PWBF_x);
+    y = GrWBF64(&f.GDFS_drawPos.PWBF_y) + GrWBF64(&f.GDFS_baseline);
+    for (left = f.GDFS_nChars; left; ) {
+	TextAttr ta;
+	word n = U(r);
+	GrTextAttrDecode(r + 2, &ta);
+	GrSetTextAttrLow(b->BS_gstate, &ta);
+	if (n && GrTextBox(b->BS_gstate, x, y, (const char *) r + GR_FIELD_RUN,
+			   n, box)) {
+	    AddDocRect(b, m, box[0], box[1], box[2], box[3]);
+	    x = box[2];
+	}
+	r += GR_FIELD_RUN + n;
+	left = (word) (left - n);
+    }
+    if ((f.GDFS_flags & HF_AUTO_HYPHEN) &&
+	GrTextBox(b->BS_gstate, x, y, "-", 1, box))
+	AddDocRect(b, m, box[0], box[1], box[2], box[3]);
+}
+
 /* text without outlines: the font's box */
 static void TextBox(BoundState *b, const GState *gs, const TMatrix *m,
 		    const byte *e)
@@ -126,7 +155,12 @@ static void TextBox(BoundState *b, const GState *gs, const TMatrix *m,
     switch (*e) {
     case GR_DRAW_TEXT: size = U(e + 5); str = (const char *) e + 7; break;
     case GR_DRAW_TEXT_CP: size = U(e + 1); str = (const char *) e + 3; break;
+    case GR_DRAW_TEXT_FIELD: size = 0; str = NULL; break;
     default: c = (char) e[1]; str = &c; size = 1; break;
+    }
+    if (*e == GR_DRAW_TEXT_FIELD) {
+	FieldBox(b, m, e);
+	return;
     }
     if (!size)
 	return;
@@ -179,6 +213,7 @@ static void Bound(void *ctx, const byte *e, word size)
     case GR_DRAW_TEXT_CP:
     case GR_DRAW_CHAR:
     case GR_DRAW_CHAR_CP:
+    case GR_DRAW_TEXT_FIELD:
 	if (GrElementBounds(&d, e, size, &r)) {
 	    Add(b, (int64_t) r.R_left * 65536, (int64_t) r.R_top * 65536);
 	    Add(b, (int64_t) r.R_right * 65536, (int64_t) r.R_bottom * 65536);
@@ -187,7 +222,6 @@ static void Bound(void *ctx, const byte *e, word size)
 	break;
     case GR_DRAW_PATH:
     case GR_FILL_PATH:
-    case GR_DRAW_TEXT_FIELD:
     case GR_DRAW_TEXT_PTR:
     case GR_DRAW_TEXT_OPTR:
     case GR_FILL_BITMAP_OPTR:
