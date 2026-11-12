@@ -46,8 +46,11 @@
  * driver gives when the path is used (GrTextOutline, graphicsText.c);
  * each contour is a closed subpath.
  *
- * Not yet: bitmaps in paths (skipped), a path defined in a graphics
- * string.
+ * A bitmap drawn while a path is defined goes into it as the rectangle
+ * it covers (graphicsRaster.c: PathRect).  A bitmap element that comes
+ * into a path otherwise (a graphics string played into it) is skipped.
+ *
+ * Not yet: a path defined in a graphics string.
  */
 #include "graphicsInt.h"
 #include <gstring.h>

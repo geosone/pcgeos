@@ -471,6 +471,30 @@ static void RecordBitmap(GStateHandle gstate, byte op, Boolean atCP, sword x,
 	(void) GrGSRecord(gstate, op, "wwwr", x, y, n, bm, n);
 }
 
+/* BitmapToPath: while a path is defined, a bitmap is the rectangle it
+ * covers (GR_DRAW_RECT; GR_DRAW_RECT_TO from the pen), of its size in
+ * points (GrGetBitmapSize; the asm's ScaleBitmapSide multiplied by the
+ * resolution over 72 where drawing divides); TRUE if so */
+static Boolean PathRect(GStateHandle gstate, Boolean atCP, sword x, sword y,
+			XYValueAsDWord size)
+{
+    GState *gs = MemLock(gstate);
+    Boolean path = (Boolean) (gs->GS_gstring &&
+			      (gs->GS_pathFlags & PF_DEFINING_PATH));
+
+    MemUnlock(gstate);
+    if (!path)
+	return FALSE;
+    if (atCP) {
+	XYValueAsDWord pen = GrGetCurPos(gstate);
+	GrDrawRectTo(gstate, (sword) (DWORD_X(pen) + (sword) (word) size),
+		     (sword) (DWORD_Y(pen) + (sword) (word) (size >> 16)));
+    } else
+	GrDrawRect(gstate, x, y, (sword) (x + (sword) (word) size),
+		   (sword) (y + (sword) (word) (size >> 16)));
+    return TRUE;
+}
+
 /* UncompactPackBits: n bytes from *src to dst */
 void GrUnpackBits(const byte **src, byte *dst, dword n)
 {
@@ -1311,6 +1335,8 @@ void GrDrawHugeBitmap(GStateHandle gstate, sword x, sword y,
 {
     GrDraw d;
 
+    if (PathRect(gstate, FALSE, x, y, GrGetHugeBitmapSize(vmFile, vmBlk)))
+	return;
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
     DrawHuge(&d, x, y, vmFile, vmBlk, FALSE);
@@ -1322,6 +1348,8 @@ void GrFillHugeBitmap(GStateHandle gstate, sword x, sword y,
 {
     GrDraw d;
 
+    if (PathRect(gstate, FALSE, x, y, GrGetHugeBitmapSize(vmFile, vmBlk)))
+	return;
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
     DrawHuge(&d, x, y, vmFile, vmBlk, TRUE);
@@ -1331,9 +1359,12 @@ void GrFillHugeBitmap(GStateHandle gstate, sword x, sword y,
 static void HugeAtCP(GStateHandle gstate, VMFileHandle vmFile,
 		     VMBlockHandle vmBlk, Boolean fill)
 {
-    XYValueAsDWord pen = GrGetCurPos(gstate);
+    XYValueAsDWord pen;
     GrDraw d;
 
+    if (PathRect(gstate, TRUE, 0, 0, GrGetHugeBitmapSize(vmFile, vmBlk)))
+	return;
+    pen = GrGetCurPos(gstate);
     GrEnterGraphics(gstate, &d);
     DrawHuge(&d, (sword) (word) pen, (sword) (word) (pen >> 16), vmFile,
 	     vmBlk, fill);
@@ -1357,6 +1388,8 @@ void GrDrawBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 {
     GrDraw d;
 
+    if (PathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
+	return;
     RecordBitmap(gstate, GR_DRAW_BITMAP, FALSE, x, y, bm);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
@@ -1369,6 +1402,8 @@ void GrFillBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 {
     GrDraw d;
 
+    if (PathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
+	return;
     RecordBitmap(gstate, GR_FILL_BITMAP, FALSE, x, y, bm);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
@@ -1392,6 +1427,8 @@ static void AtCP(GStateHandle gstate, const Bitmap *bm,
 void GrDrawBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 		      Bitmap *(*callback)(Bitmap *bm))
 {
+    if (PathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
+	return;
     RecordBitmap(gstate, GR_DRAW_BITMAP_CP, TRUE, 0, 0, bm);
     AtCP(gstate, bm, callback, FALSE);
 }
@@ -1399,6 +1436,8 @@ void GrDrawBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 void GrFillBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 		      Bitmap *(*callback)(Bitmap *bm))
 {
+    if (PathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
+	return;
     RecordBitmap(gstate, GR_FILL_BITMAP_CP, TRUE, 0, 0, bm);
     AtCP(gstate, bm, callback, TRUE);
 }

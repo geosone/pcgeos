@@ -44,6 +44,7 @@
  *   - patterns: system and custom hatches, a tiled bitmap, in a path,
  *     text in a hatch;
  *   - a masked window: drawn through a checker, its mask washed black;
+ *   - bitmaps in paths;
  *   - the bounds of graphics strings;
  *   - save under areas: restored, exposed when drawn under, given up;
  *   - an update: only the update region drawn;
@@ -1753,6 +1754,37 @@ int main(int argc, char **argv)
 	SetCol(g, WHITE);
 	GrFillRect(g, 0, 0, 80, 80);
 	CHECK(Pixel(40, 33) == WHITE);
+    }
+
+    /* a bitmap in a path: the rectangle it covers (GR_DRAW_RECT; at
+     * the pen GR_DRAW_RECT_TO), not drawn while the path is defined */
+    {
+	static union { Bitmap b; byte raw[64]; } bm;
+	Rectangle pb;
+
+	memset(&bm, 0, sizeof(bm));
+	bm.b.B_width = 16; bm.b.B_height = 8;
+	bm.b.B_compact = BMC_UNCOMPACTED; bm.b.B_type = BMF_MONO;
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	GrBeginPath(g, PCT_REPLACE);
+	GrDrawBitmap(g, 10, 10, &bm.b, NULL);
+	GrMoveTo(g, 40, 40);
+	GrFillBitmapAtCP(g, &bm.b, NULL);
+	GrEndPath(g);
+	CHECK(Pixel(35, 35) == WHITE);		/* nothing drawn */
+	CHECK(!GrGetPathBounds(g, GPT_CURRENT, &pb) && pb.R_left == 10 &&
+	      pb.R_top == 10 && pb.R_right >= 55 && pb.R_right <= 57 &&
+	      pb.R_bottom >= 47 && pb.R_bottom <= 49);
+	SetCol(g, RED);
+	GrFillPath(g, ODD_EVEN);
+	CHECK(Pixel(30, 30) == RED && Pixel(45, 37) == RED &&
+	      Pixel(65, 65) == RED && Pixel(70, 66) == RED &&
+	      Pixel(50, 50) == WHITE && Pixel(30, 40) == WHITE);
+	CHECK(GrTestPointInPath(g, 20, 15, ODD_EVEN) &&
+	      !GrTestPointInPath(g, 30, 30, ODD_EVEN));
+	GrBeginPath(g, PCT_NULL);
+	GrEndPath(g);
     }
 
     /* the bounds of graphics strings (in page coordinates while

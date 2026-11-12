@@ -2982,8 +2982,17 @@ contour is a closed subpath. The pen ends after the text, as when it is
 drawn. Only outline fonts give outlines (TrueType; a bitmap font gives
 nothing).
 
-**Not yet:** bitmaps in paths (they are skipped), a path defined inside
-a graphics string, `DR_FONT_GEN_IN_REGION`.
+**Bitmaps in paths** (`BitmapToPath`). A bitmap (or huge bitmap) drawn
+or filled while a path is being defined goes into the path as the
+rectangle it covers. Plain calls write `GR_DRAW_RECT`; the "at CP"
+calls write `GR_DRAW_RECT_TO` from the pen. Nothing is drawn. The size
+is the bitmap's size in points (`GrGetBitmapSize`), as it is drawn.
+The asm's `ScaleBitmapSide` multiplied by resolution/72, where drawing
+divides by it. A bitmap element that reaches a path some other way (a
+graphics string played into it) is skipped. ctest `kernel.draw`.
+
+**Not yet:** a path defined inside a graphics string,
+`DR_FONT_GEN_IN_REGION`.
 
 **Tests.** ctest `kernel.draw`:
 - a path defined from lines with nothing drawn, filled, with the pen
