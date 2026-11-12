@@ -28,7 +28,8 @@
  *   - bitmaps to draw into (the memory video driver vidmem.geo): 24
  *     bits, 4 bits, monochrome with a mask, GrGetPoint, the
  *     resolution; drawn on the screen; compacted and uncompacted;
- *     GrGetBitmap;
+ *     GrGetBitmap; bitmaps of more colors converted (24 and 8 bits to
+ *     4, 24 bits to monochrome with the grey dither);
  *   - GrBitBlt: copy, move, clear, and from a source partly hidden;
  *   - WinScroll: the screen and the document moved, the rest washed;
  *   - fat lines: butt and square ends, mitered joins;
@@ -930,6 +931,31 @@ int main(int argc, char **argv)
 	GrDrawHugeBitmap(g, 2, 40, vm, b4);
 	CHECK(Pixel(22, 60) == 0x0000aaUL && Pixel(28, 69) == 0x0000aaUL &&
 	      Pixel(29, 60) == WHITE);
+	/* bitmaps of more colors converted: 24 and 8 bits to 4 */
+	{
+	    static union { Bitmap b; byte raw[6 + 4 * 3]; } c24;
+	    static union { Bitmap b; byte raw[6 + 4]; } c8;
+	    byte *q = c24.raw + 6;
+	    c24.b.B_width = 4; c24.b.B_height = 1;
+	    c24.b.B_compact = BMC_UNCOMPACTED; c24.b.B_type = BMF_24BIT;
+	    q[0] = 0; q[1] = 0; q[2] = 0xaa;		/* C_BLUE */
+	    q[3] = 0xff; q[4] = 0xff; q[5] = 0xff;
+	    q[6] = 0; q[7] = 0xaa; q[8] = 0;		/* C_GREEN */
+	    q[9] = 0xf0; q[10] = 0x50; q[11] = 0x50;	/* near C_LIGHT_RED */
+	    GrDrawBitmap(g4, 10, 2, &c24.b, NULL);
+	    CHECK(GrGetPoint(g4, 10, 2) == 0xaa0000UL &&
+		  GrGetPoint(g4, 11, 2) == 0xffffffUL &&
+		  GrGetPoint(g4, 12, 2) == 0x00aa00UL &&
+		  GrGetPoint(g4, 13, 2) == 0x5555ffUL);
+	    c8.b.B_width = 4; c8.b.B_height = 1;
+	    c8.b.B_compact = BMC_UNCOMPACTED; c8.b.B_type = BMF_8BIT;
+	    c8.raw[6] = 4; c8.raw[7] = 15; c8.raw[8] = 2; c8.raw[9] = 0;
+	    GrDrawBitmap(g4, 10, 4, &c8.b, NULL);
+	    CHECK(GrGetPoint(g4, 10, 4) == 0x0000aaUL &&
+		  GrGetPoint(g4, 11, 4) == 0xffffffUL &&
+		  GrGetPoint(g4, 12, 4) == 0x00aa00UL &&
+		  GrGetPoint(g4, 13, 4) == 0);
+	}
 	GrDestroyBitmap(g4, BMD_KILL_DATA);
 
 	/* monochrome with a mask: drawing goes to the data, editing the
@@ -952,6 +978,26 @@ int main(int argc, char **argv)
 	CHECK(Pixel(62, 24) == BLACK && Pixel(63, 25) == BLACK &&
 	      Pixel(64, 24) == BLUE && Pixel(62, 26) == BLUE &&
 	      Pixel(61, 23) == WHITE);		/* masked, a 0 bit */
+	/* 24 bits to monochrome: black, white, a grey dithered */
+	{
+	    static union { Bitmap b; byte raw[6 + 8 * 8 * 3]; } cm;
+	    word xx, yy, black = 0;
+	    cm.b.B_width = 8; cm.b.B_height = 8;
+	    cm.b.B_compact = BMC_UNCOMPACTED; cm.b.B_type = BMF_24BIT;
+	    for (yy = 0; yy < 8; yy++)
+		for (xx = 0; xx < 8; xx++)
+		    memset(cm.raw + 6 + 3 * (yy * 8 + xx),
+			   xx < 2 ? 0 : xx < 4 ? 0xff : 0x80, 3);
+	    GrSetBitmapMode(gm, 0, 0);
+	    GrDrawBitmap(gm, 8, 8, &cm.b, NULL);
+	    CHECK(GrGetPoint(gm, 8, 8) == 0 && GrGetPoint(gm, 9, 15) == 0 &&
+		  GrGetPoint(gm, 10, 8) == 0xffffffUL &&
+		  GrGetPoint(gm, 11, 15) == 0xffffffUL);
+	    for (yy = 8; yy < 16; yy++)
+		for (xx = 12; xx < 16; xx++)
+		    black += GrGetPoint(gm, (sword) xx, (sword) yy) == 0;
+	    CHECK(black >= 10 && black <= 22);
+	}
 	GrDestroyBitmap(gm, BMD_KILL_DATA);
 	CHECK(VMClose(vm, FALSE) == 0);
     }

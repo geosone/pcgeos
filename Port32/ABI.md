@@ -2505,7 +2505,18 @@ than a pixel is a six-point polygon.
   `GrCompactBitmap`/`GrUncompactBitmap` pack and unpack each scan line
   (PackBits, runs of three and more repeated, at most 128); where a run
   meets those limits the bytes may differ from the asm's.
-- Not yet: LZG, format conversion for devices with fewer colors.
+- Bitmaps of more colors than the device (`InitFormatConversion`,
+  `ChangeBitmapFormat`) are converted scan line by scan line on their
+  way to the driver, so slices, scaling, rotation, PackBits and huge
+  bitmaps all get it. To monochrome: the luminance (`CalcLuminance`,
+  bit for bit) picks one of 17 grey system draw masks, whose bit at x
+  and at the line's number from the first converted line makes the
+  pixel white; `MM_SET`, `MM_CLEAR` and `MM_INVERT` take black. To 4 or
+  8 bits: the nearest of the first 16 or 256 entries of the window's
+  palette. The mask is kept. The asm kept the line number across a
+  draw too; it converted slices, the C code converts what goes to the
+  driver, so the dither rows of scaled bitmaps follow the drawn lines.
+- Not yet: LZG.
 
 **GrBitBlt** (`graphicsRaster.c`, `GrBltCommon` for `WinScroll` too):
 - Only what is visible and valid at the source is copied, with

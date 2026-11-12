@@ -36,9 +36,10 @@
  * of the destination invalid; the source left behind invalid
  * (BLTM_MOVE) or washed out (BLTM_CLEAR).
  *
- * Not yet: LZG compaction,
- * format conversion for devices of fewer colors than the bitmap,
- * graphics strings.
+ * Bitmaps of more colors than the device are converted scan line by
+ * scan line on their way to the driver (see "Format conversion").
+ *
+ * Not yet: LZG compaction, graphics strings.
  *
  * Huge bitmaps (graphicsBitmapHuge.asm) are drawn like complex ones,
  * each block of the huge array a slice (DrawSlice's note): the
@@ -67,6 +68,18 @@ typedef struct {
     VMBlockHandle	hblock;
     const byte		*hdata;		/* the locked slice */
     word		hfirst, hn;	/* its scan lines */
+    /* format conversion (BMOT_FORMAT) */
+    Boolean		conv;
+    byte		srcType;	/* BF_origBMtype, simple */
+    byte		convTab[256];	/* BF_formatPtr: index to SDM or
+					 * index */
+    const byte		*cur;		/* the window's palette (RGB to
+					 * index) */
+    Handle		curWin;
+    word		curLast;
+    word		fscan;		/* BF_formatScan */
+    byte		*cbuf;
+    dword		csize;
 } BMFrame;
 
 /* the huge bitmap's slice from scan line first on; FALSE past the end */
@@ -202,6 +215,158 @@ static void InitPalette(BMFrame *f, const Bitmap *bm)
     f->args.PBA_pal = f->pal;
 }
 
+/* ---------------------------------------------------------------------
+ * Format conversion for devices of fewer colors (graphicsRasterDraw.asm:
+ * InitFormatConversion, ChangeBitmapFormat and their routines VGAtoMono,
+ * SVGAtoMono, SVGAtoVGA, RGBtoVGA, RGBtoSVGA, RGBtoMono)
+ *
+ * Each scan line goes to the device's format on its way to the driver,
+ * the mask as it is.  To monochrome: a color's luminance picks one of
+ * 17 grey draw masks (MapRGBTo16GreyDither; MM_SET, MM_CLEAR and
+ * MM_INVERT take black), whose bit at the pixel's x and the scan line's
+ * number (from the first converted line, BF_formatScan) makes the pixel
+ * white.  To 4 or 8 bits: the nearest of the first 16 or 256 entries of
+ * the window's palette.  The colors of an index are the bitmap's palette
+ * or the default one.
+ * ------------------------------------------------------------------- */
+
+/* CalcLuminance, bit for bit */
+static byte Luminance(byte r, byte g, byte b)
+{
+    byte l = (byte) ((r >> 2) + (r >> 4) + (g >> 1) + (g >> 4) + (b >> 3));
+    byte c = (byte) (((r >> 3) & 1) + ((g >> 3) & 1) + ((b >> 2) & 1));
+
+    return (byte) (l + (c >> 1) + (c & 1));
+}
+
+/* MapRGBTo16GreyDither: a SystemDrawMask */
+static byte GreyDither(const BMFrame *f, byte r, byte g, byte b)
+{
+    MixMode m = f->d->GD_gs->GS_mixMode;
+    byte l;
+
+    if (m == MM_SET || m == MM_CLEAR || m == MM_INVERT)
+	return SDM_0;
+    l = Luminance(r, g, b);
+    return (byte) (SDM_0 - 4 * ((l >> 4) + ((l >> 3) & 1)));
+}
+
+/* InitFormatConversion: the table for indexed sources */
+static void InitConvert(BMFrame *f, const Bitmap *bm)
+{
+    byte src = (byte) (bm->B_type & BMT_FORMAT);
+    const byte *pal = grDefaultPalette;
+    word i, n = src == BMF_4BIT ? 16 : 256;
+
+    f->conv = TRUE;
+    f->srcType = (byte) (bm->B_type & ~(BMT_COMPLEX | BMT_HUGE));
+    f->cur = GrLockPalette(f->d->GD_gs, &f->curLast, &f->curWin);
+    if (src == BMF_24BIT)
+	return;					/* InitRGBtoAll */
+    if ((bm->B_type & BMT_PALETTE) && Complex(bm)->CB_palette) {
+	const byte *p = (const byte *) bm + Complex(bm)->CB_palette;
+	word k = (word) (p[0] | (p[1] << 8));
+	if (k)
+	    pal = p + 2;
+	if (k && k < n)
+	    n = k;
+    }
+    for (i = 0; i < n; i++) {
+	const byte *e = pal + 3 * i;
+	f->convTab[i] = f->devType == BMF_MONO ?
+			GreyDither(f, e[0], e[1], e[2]) :
+			GrMapRGBtoIndex(f->cur, 15, e[0], e[1], e[2]);
+    }
+}
+
+/* a pixel of a source line as RGB (24 bits) or its table entry */
+static byte ConvPixel(const BMFrame *f, const byte *s, word x, byte *rgb)
+{
+    switch (f->srcType & BMT_FORMAT) {
+    case BMF_4BIT:
+	return f->convTab[(x & 1) ? s[x >> 1] & 0x0f : s[x >> 1] >> 4];
+    case BMF_8BIT:
+	return f->convTab[s[x]];
+    default:
+	memcpy(rgb, s + 3 * x, 3);
+	return 0;
+    }
+}
+
+/* ChangeBitmapFormat: n lines of width w from src (stride sstride) to
+ * the device's format; the size of a converted line */
+static word ConvertLines(BMFrame *f, const byte *src, word sstride, word w,
+			 word n)
+{
+    byte dtype = (byte) ((f->srcType & BMT_MASK) | f->devType);
+    word dline = GrBitmapLineSize(w, dtype);
+    word mask = (f->srcType & BMT_MASK) ? (word) ((w + 7) >> 3) : 0;
+    Boolean rgbSrc = (Boolean) ((f->srcType & BMT_FORMAT) == BMF_24BIT);
+    dword need = (dword) dline * n;
+    word j, x;
+
+    if (need > f->csize) {
+	byte *nb = realloc(f->cbuf, need);
+	if (!nb)
+	    return 0;
+	f->cbuf = nb;
+	f->csize = need;
+    }
+    for (j = 0; j < n; j++, f->fscan++) {
+	const byte *s = src + (dword) j * sstride;
+	byte *d = f->cbuf + (dword) j * dline;
+	memcpy(d, s, mask);
+	s += mask;
+	d += mask;
+	memset(d, 0, dline - mask);
+	for (x = 0; x < w; x++) {
+	    byte rgb[3], v = ConvPixel(f, s, x, rgb);
+	    switch (f->devType) {
+	    case BMF_MONO:
+		if (rgbSrc)
+		    v = GreyDither(f, rgb[0], rgb[1], rgb[2]);
+		if (!(grSysDrawMasks[v][f->fscan & 7] & (0x80 >> (x & 7))))
+		    d[x >> 3] |= (byte) (0x80 >> (x & 7));
+		break;
+	    case BMF_4BIT:
+		if (rgbSrc)
+		    v = GrMapRGBtoIndex(f->cur, 15, rgb[0], rgb[1], rgb[2]);
+		d[x >> 1] |= (byte) ((x & 1) ? v & 0x0f : v << 4);
+		break;
+	    default:				/* RGBtoSVGA */
+		d[x] = GrMapRGBtoIndex(f->cur, f->curLast < 255 ?
+				       f->curLast : 255, rgb[0], rgb[1],
+				       rgb[2]);
+		break;
+	    }
+	}
+    }
+    return dline;
+}
+
+/* the driver gets the lines in the device's format */
+static void CallConverted(BMFrame *f, word function, DriverRegs *r,
+			  word lines)
+{
+    const byte *data = f->args.PBA_data;
+    word size = f->args.PBA_size;
+    byte type = f->args.PBA_bm.B_type;
+
+    if (f->conv) {
+	word dl = ConvertLines(f, data, size, f->args.PBA_bm.B_width, lines);
+	if (!dl)
+	    return;
+	f->args.PBA_data = f->cbuf;
+	f->args.PBA_size = dl;
+	f->args.PBA_bm.B_type = (byte) ((f->srcType & BMT_MASK) |
+					f->devType);
+    }
+    GrCallDriver(f->d, function, r, AREA);
+    f->args.PBA_data = data;
+    f->args.PBA_size = size;
+    f->args.PBA_bm.B_type = type;
+}
+
 static void PutBits(BMFrame *f, sword y)
 {
     DriverRegs r;
@@ -210,7 +375,7 @@ static void PutBits(BMFrame *f, sword y)
     r.DR_ax = (word) f->x;
     r.DR_bx = (word) y;
     r.DR_bpPtr = &f->args;
-    GrCallDriver(f->d, DR_VID_PUTBITS, &r, AREA);
+    CallConverted(f, DR_VID_PUTBITS, &r, f->args.PBA_bm.B_height);
 }
 
 /* the callback's next slice; NULL when there is none */
@@ -627,7 +792,7 @@ static void PutLine(BMFrame *f, sword ax, sword bx, sword cx, sword dx)
     r.DR_cx = (word) cx;
     r.DR_dx = (word) dx;
     r.DR_bpPtr = &f->args;
-    GrCallDriver(f->d, DR_VID_PUTLINE, &r, AREA);
+    CallConverted(f, DR_VID_PUTLINE, &r, 1);
 }
 
 static sword Abs(sword v)
@@ -773,16 +938,16 @@ static void Draw(BMFrame *f, sword x, sword y)
     f->devType = r.DR_dsSi ?
 	(byte) (((const VideoDriverInfo *) r.DR_dsSi)->VDI_bmFormat &
 		BMT_FORMAT) : BMF_24BIT;
-    if ((bm->B_type & BMT_FORMAT) != BMF_MONO &&
-	(bm->B_type & BMT_FORMAT) < BMF_4CMYK &&
-	(bm->B_type & BMT_FORMAT) > f->devType && !fill)
-	return;					/* format change: not yet */
 
     f->args.PBA_bm.B_width = bm->B_width;
     f->args.PBA_bm.B_compact = bm->B_compact;
     f->args.PBA_bm.B_type = (byte) (bm->B_type & ~BMT_COMPLEX);
     f->args.PBA_size = GrBitmapLineSize(bm->B_width, bm->B_type);
-    if (bm->B_type & BMT_PALETTE) {
+    if (!fill && (bm->B_type & BMT_FORMAT) < BMF_4CMYK &&
+	(bm->B_type & BMT_FORMAT) > f->devType) {
+	InitConvert(f, bm);			/* checkFormatChange */
+	f->args.PBA_bm.B_type &= (byte) ~BMT_PALETTE;
+    } else if (bm->B_type & BMT_PALETTE) {
 	if (fill)
 	    f->args.PBA_flags |= PBF_FILL_MASK;
 	else
@@ -830,6 +995,13 @@ static void Draw(BMFrame *f, sword x, sword y)
     }
 }
 
+static void DoneConvert(BMFrame *f)
+{
+    if (f->conv)
+	GrUnlockPalette(f->curWin);
+    free(f->cbuf);
+}
+
 static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
 		       Bitmap *(*cb)(Bitmap *), Boolean fill)
 {
@@ -843,6 +1015,7 @@ static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
     f.cb = cb;
     f.fill = fill;
     Draw(&f, x, y);
+    DoneConvert(&f);
 }
 
 /* graphicsBitmapHuge.asm: the bitmap in the huge array's directory
@@ -864,6 +1037,7 @@ static void DrawHuge(GrDraw *d, sword x, sword y, VMFileHandle file,
     f.hfile = file;
     f.hblock = block;
     Draw(&f, x, y);
+    DoneConvert(&f);
     if (f.hdata)
 	HugeArrayUnlock((void *) f.hdata);
     HugeArrayUnlockDir(dir);
