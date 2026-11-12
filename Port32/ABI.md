@@ -2086,6 +2086,35 @@ It checks:
 ctest `driver.keyboard` covers the way from the HID event to
 `MSG_META_KBD_CHAR`.
 
+## 13k. Graphics (`Library/Kernel/Graphics`, P6)
+
+**Regions** (`graphicsRegion.c` beside `graphicsRegion.asm`) are the
+DOS16 format without bounds words:
+- lines of the bottom y of a band, its on/off x pairs (inclusive) and
+  `EOREGREC`;
+- one more `EOREGREC` ends the region;
+- the first band reaches up to the top of the coordinate space, and
+  below the last one the region is empty.
+
+The routines:
+- `GrPtrRegOp` and `GrChunkRegOp` (`CInclude/Internal/grWinInt.h`)
+  compute AND, OR and NOT. NOT works within `MIN_COORD` ..
+  `MAX_COORD - 1`, as in the asm.
+- One walk over the bands of both regions does all three operations.
+  It merges equal neighbouring bands and touching pairs, and leaves out
+  an empty last band. A result may therefore be shorter than the asm's
+  for the same area.
+- When the result does not fit, `GrPtrRegOp` says so and returns the
+  size to try again with. This holds for NOT too (the asm did not check
+  there).
+- `GrChunkRegOp` takes optrs. It resizes the result chunk and
+  dereferences after each resize.
+- `GrMoveReg`, `GrGetPtrRegBounds`, `GrTestPointInReg` and
+  `GrTestRectInReg` are as in `graphics.h`.
+
+ctest `kernel.region` checks AND, OR and NOT of random unions of
+rectangles point by point.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

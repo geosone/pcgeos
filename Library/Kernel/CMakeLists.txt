@@ -115,7 +115,8 @@ add_library(geos_kernel_objs OBJECT
   IM/imInit.c
   IM/imMonitors.c
   IM/imMisc.c
-  Win/winIndividual.c)
+  Win/winIndividual.c
+  Graphics/graphicsRegion.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/CInclude)
