@@ -649,6 +649,8 @@ typedef struct {
     VMFileHandle	GC_vmHandle;	/* the state file (PH_vmHandle) */
     ThreadHandle	GC_uiThread;	/* runs VM_SAVED_UI blocks (PH_uiThread;
 					 * 0: the process thread) */
+    word		*GC_privData;	/* geode private data (geodesPriv.c) */
+    word		GC_privWords;
     word		GC_libraryCount;
     GeodeHandle		GC_libraries[1];	/* GC_libraryCount of them
 						 * (0: not loaded, noload) */
@@ -656,6 +658,8 @@ typedef struct {
 
 /* The core block of a loaded geode, or NULL. */
 GeodeCore *GeodeCoreOf(GeodeHandle gh);
+/* geodesPriv.c: the geode's private data and slots go */
+void GeodePrivExit(GeodeHandle gh);
 /* GeodeLoad takes a geode from an image the program registered by name
  * (the file name; for a library its permanent name) before it looks for
  * the file.  The image must stay valid; a NULL image drops the name. */

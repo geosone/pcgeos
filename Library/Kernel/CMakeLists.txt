@@ -20,6 +20,7 @@
 #   Geodes/geodesDriver.c <- geodesDriver.asm, DR_INIT and DR_EXIT of
 #                      geodesLoad.asm and geodesUtils.asm
 #   Geodes/geodesAccess.c <- GeodeGetInfo, GeodeGetProcessHandle, GeodeFind
+#   Geodes/geodesPriv.c  <- geode private data of geodesPriv.asm
 #   Object/objectClass.c <- method calls, ObjInstantiate of objectClass.asm
 #   Object/objectUtils.c <- master parts, chunk flags, counts, block output
 #                          of Object/objectUtils.asm
@@ -83,6 +84,7 @@ add_library(geos_kernel_objs OBJECT
   Geodes/geodesLibrary.c
   Geodes/geodesDriver.c
   Geodes/geodesAccess.c
+  Geodes/geodesPriv.c
   Object/objectClass.c
   Object/objectUtils.c
   Object/objectVarData.c

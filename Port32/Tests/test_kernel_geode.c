@@ -12,6 +12,8 @@
  *     is not there, a second launch of a single-launchable process;
  *   - GeodeUseLibrary: LCT_ATTACH and LCT_NEW_CLIENT, GeodeGetInfo,
  *     GeodeFind, ProcGetLibraryEntry;
+ *   - geode private data (GeodePrivAlloc/Read/Write/Free), freed with
+ *     the process;
  *   - GeodeLoad of the process: its imports from the kernel and from
  *     kglib, the object resource built and relocated, optrs in chunks
  *     that are not objects (an optr, a structure, a chunk array, a
@@ -117,6 +119,7 @@ int main(int argc, char **argv)
     ThreadHandle me;
     GeodeHandle lib, app;
     GeodeLoadError e;
+    word privOff, privApp;
     KGLibCallCounts *calls;
     KGAppState *st;
     int (*add)(int, int);
@@ -235,6 +238,26 @@ int main(int argc, char **argv)
     Check(MemOwner(OptrToHandle(st->KGAS_appObj)) == app,
 	  "the process owns its resource");
 
+    /* geode private data: slots for all geodes, words per geode */
+    {
+	word in[3] = { 0x1111, 0x2222, 0x3333 }, out[4];
+	privOff = GeodePrivAlloc(lib, 3);
+	privApp = GeodePrivAlloc(app, 2);
+	Check(privOff >= 2 && !(privOff & 1) && privApp &&
+	      privApp != privOff, "GeodePrivAlloc");
+	memset(out, 0xff, sizeof(out));
+	GeodePrivRead(app, privOff, 3, out);
+	Check(!out[0] && !out[1] && !out[2], "never written: zeros");
+	Check(GeodePrivWrite(app, privOff, 3, in), "GeodePrivWrite");
+	GeodePrivRead(app, privOff, 3, out);
+	Check(out[0] == 0x1111 && out[1] == 0x2222 && out[2] == 0x3333,
+	      "GeodePrivRead");
+	GeodePrivRead(lib, privOff, 3, out);
+	Check(!out[0] && !out[2], "per geode");
+	GeodePrivRead(app, privApp, 1, out);
+	Check(!out[0], "after the written range: zero");
+    }
+
     /* detach: the thread exits and frees the process */
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,
 		 &dp, sizeof(dp), NULL, 0);
@@ -244,6 +267,12 @@ int main(int argc, char **argv)
 	  calls->KGLC_lastClient == app, "LCT_CLIENT_EXIT for the process");
     Check(GeodeGetInfo(lib, GGIT_GEODE_REF_COUNT, NULL) == 1,
 	  "the process dropped the library");
+    Check(GeodePrivAlloc(lib, 2) == privApp,
+	  "the process's private slots freed with it");
+    GeodePrivFree(privApp, 2);
+    GeodePrivFree(privOff, 3);
+    Check(GeodePrivAlloc(lib, 5) == privOff, "GeodePrivFree");
+    GeodePrivFree(privOff, 5);
     Check(calls->KGLC_calls[LCT_DETACH] == 0, "library still attached");
 
     /* again: from the state file it saved */

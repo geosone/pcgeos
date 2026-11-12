@@ -478,6 +478,7 @@ void GeodeFreeLow(GeodeHandle gh)
 	GeodeExitDriver(gh);
     if (c->GC_attrs & GA_GEODE_INITIALIZED)
 	CallLibraries(gh, LCT_CLIENT_EXIT);
+    GeodePrivExit(gh);
     Unlink(gh);
     GeodeSetResourceHandles(gh, NULL, 0);
     FreeOwned(gh);

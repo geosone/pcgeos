@@ -395,6 +395,8 @@ resource. The test checks:
   itself, to another resource and in chunk data: with the owner and
   thread given, and taken from the source; also the saved-block list
   and `ObjFreeDuplicate` (the test fails without `OLMBH_resource`);
+- geode private data: slots allocated, words written and read per
+  geode, the process's slots freed with it, `GeodePrivFree`;
 - `MSG_META_DETACH`: the process frees itself, then `GeodeFreeLibrary`
   frees the library;
 - at the end, not a single handle is left.
@@ -402,6 +404,22 @@ resource. The test checks:
 It runs on amd64, i686, arm64, armhf and DJGPP dos32. At its end it
 loads `kgapp.geo` from `WORLD` and `kglib.geo` from `SYSTEM` as files,
 and checks that a missing library file is `GLE_LIBRARY_NOT_FOUND`.
+
+**Geode private data** (`Geodes/geodesPriv.c`, after
+`geodesPriv.asm`). A library allocates a range of words once for all
+geodes (`GeodePrivAlloc`). It then reads and writes them per geode
+(`GeodePrivRead`, `GeodePrivWrite`; geode 0 is the current process).
+The window system keeps its `GeodeWinVars` there.
+- The map has one word per slot: the geode that allocated it, or 0.
+- An offset is the byte offset of the range plus 2, never 0, as in the
+  asm.
+- Each geode's words are a kernel heap block that the core block
+  points to (`GC_privData`). Words never written read as 0.
+- Freeing a geode frees its words and the slots it allocated
+  (`GeodePrivExit`).
+
+The asm kept the map in the kernel's own private data block, and each
+geode's words in a block the geode owned.
 
 Not yet:
 
