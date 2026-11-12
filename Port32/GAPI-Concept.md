@@ -53,7 +53,7 @@ The GHAL does not cover this:
 |---|---|---|---|---|
 | `gapi_time` | set the date and time; later the time zone and whether NTP runs | int 21h/2Bh, 2Dh (as `RestoreMSDOSTime`) | `org.freedesktop.timedate1.SetTime` through our D-Bus client (polkit); without timedated `clock_settime` | `TimerSetDateAndTime`, Preferences Date & Time. **Implemented:** `gapi_time_set_local` |
 | `gapi_power` | switch off, reboot, suspend the machine | APM off, the reset through the keyboard controller | `org.freedesktop.login1` `Can*` and `PowerOff`/`Reboot`/`Suspend`/`Hibernate` | `EndGeos` after `SysShutdown` (`SST_POWER_OFF`, `SST_REBOOT`, `EF_RESET`). **Implemented** |
-| `gapi_print` | list printers and queues, default printer, add or change one, its options; submit a job | GEOS printer drivers to LPT/COM/file, as today | CUPS (IPP): queues and options; jobs as PostScript or PDF | Spool library, printer control panel. GEOS renders PostScript/PDF, CUPS prints |
+| `gapi_print` | list printers and queues, default printer, add or change one, its options; submit a job | GEOS printer drivers to LPT/COM/file, as today | CUPS (IPP): queues and options; jobs as PostScript or PDF | Spool library, printer control panel. GEOS renders PostScript/PDF, CUPS prints. **Listing and jobs implemented** (`gapi_ipp.c`) |
 | `gapi_locale` | keyboard layout, language, country formats, time zone | `COUNTRY`, code page, `geos.ini` | `org.freedesktop.locale1`, `timedate1` | `Local*`, keyboard driver, Preferences International |
 | `gapi_net` | interfaces, addresses, DNS, dial-up, Wi-Fi | GEOS's own TCP/IP and its configuration | NetworkManager over D-Bus (read first, change later) | Socket library, Preferences Network/Modem |
 | `gapi_storage` | drives and media, mount, eject, format | kernel `Disk`, `Format`, `Diskcopy` | udisks2 | Disk API, the file manager |
@@ -64,7 +64,7 @@ The order follows what the Preferences need first and what can be tested:
 
 1. time (done)
 2. power (done)
-3. printing
+3. printing (the IPP client done; next the `Cups` port driver, then PScript in C)
 4. locale and time zone
 5. network
 6. storage
@@ -114,6 +114,14 @@ Still open: command-line tools (`timedatectl`, `lpstat`) as a stopgap before the
 - `gapi_power_do` calls the action (with the interactive flag). On DOS, the reboot works as in `bootBoot.asm` in protected mode: the warm start flag at 40:72, then the reset line of the keyboard controller. Switching off uses APM 1.2 (int 15h/5301h, 530Eh, 5307h).
 - `EndGeos` calls it at the end of a shutdown with `KEF_RESET` or `KEF_POWER_OFF`, in the `session` role. That role is now the default where GEOS is the system (`gapi_host_is_geos`: dos32 yes, linux no).
 - The tests only call `gapi_power_can`.
+
+**Printing** (`gapi_print_*`, `Gapi/Linux/gapi_ipp.c`):
+- An IPP client of our own (RFC 8010/8011), as HTTP/1.1 on the CUPS socket (`$CUPS_SERVER` if it is a path, else `/run/cups/cups.sock`). No libcups.
+- `gapi_print_list` uses CUPS-Get-Printers: name, info, location, make and model, state, accepting jobs, color, duplex (`sides-supported`), default. `gapi_print_default` uses `LPDEST`/`PRINTER`, else CUPS-Get-Default.
+- A job is Print-Job with the document in HTTP chunks, written as GEOS makes it. Closing it sends the last chunk and returns the job id. Cancelling closes the connection without the last chunk, and CUPS drops the job. The options are format (PostScript, PDF), copies and duplex.
+- Statuses: HTTP 401/403 and IPP 0x0401-0x0403 are refusals (`GHAL_ERR_ACCESS`); not-found is `GHAL_ERR_NOTFOUND`; no CUPS is `GHAL_ERR_UNSUPPORTED`.
+- dos32 has none: GEOS's printer drivers write to LPT, COM or a file themselves.
+- ctest `gapi.print` runs against a stand-in IPP server in a child process, which checks the job's attributes and document. Against the real CUPS it only lists printers; it never prints.
 
 **The clock on Linux:** `timedate1.SetTime(usec, relative=false, interactive)`. Without timedated it uses `clock_settime`. While NTP is on, timedated refuses with `AutomaticTimeSyncEnabled`, which counts as `GHAL_ERR_ACCESS`: the host keeps the clock.
 
