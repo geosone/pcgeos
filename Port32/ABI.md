@@ -2194,8 +2194,26 @@ reads them (`Internal/im.h`).
   for `WinMovePtr`.
 - ctest `kernel.win` checks both through its pointer driver.
 
+**The screen saver** (`IM/imScreenSaver.c`) counts down in steps of 15
+seconds once `MSG_IM_ENABLE_SCREEN_SAVER` is sent; the delay is
+`MSG_IM_SET_SCREEN_SAVER_DELAY` (minutes, 15 at the start).
+- At zero, the saver of `MSG_IM_INSTALL_SCREEN_SAVER` gets its begin
+  message. Without one, the pointer's video driver gets
+  `DR_VID_SCREEN_OFF`. Input brings the screens back (the end message,
+  or `DR_VID_SCREEN_ON`); a pointer event that does not move does not.
+- Install and remove take `IMScreenSaverParams` (`Internal/im.h`): the
+  64-bit optr, then the begin and end messages. DOS16 passed them in
+  cx:dx, si and bp.
+- While `SysDisableAPO` holds, the screens are not blanked.
+- `GCNSLT_SCREEN_SAVER_NOTIFICATIONS` gets `MSG_META_NOTIFY` with the
+  `ScrSaverStatus` on enable, disable, blank and the deactivate message,
+  not when input unblanks, as in the asm.
+- Not yet: the power driver's `DR_POWER_LONG_TERM_IDLE`, the delay
+  through `SysGetInfo`.
+
+ctest `kernel.im` runs it with a queue as the saver.
+
 **Not yet:**
-- the screen saver;
 - the move/resize xor;
 - pen and ink;
 - re-centering a pen's pointer, `ImBumpMouse`.

@@ -26,6 +26,30 @@
 #define MSG_IM_PRESSURE_CHANGE	(IM_FIRST_MESSAGE + 2)
 #define MSG_IM_DIRECTION_CHANGE	(IM_FIRST_MESSAGE + 3)
 #define MSG_IM_KBD_SCAN		(IM_FIRST_MESSAGE + 4)
+/* the screen saver (imScreenSaver.c) */
+#define MSG_IM_ENABLE_SCREEN_SAVER	(IM_FIRST_MESSAGE + 7)
+#define MSG_IM_DISABLE_SCREEN_SAVER	(IM_FIRST_MESSAGE + 8)
+#define MSG_IM_INSTALL_SCREEN_SAVER	(IM_FIRST_MESSAGE + 9)
+#define MSG_IM_REMOVE_SCREEN_SAVER	(IM_FIRST_MESSAGE + 10)
+#define MSG_IM_GET_SCREEN_SAVER_DELAY	(IM_FIRST_MESSAGE + 11)
+#define MSG_IM_SET_SCREEN_SAVER_DELAY	(IM_FIRST_MESSAGE + 12)
+#define MSG_IM_SCREEN_SAVER_COUNTDOWN	(IM_FIRST_MESSAGE + 13)
+#define MSG_IM_SCREEN_SAVER_COUNTDOWN_REACHED_ZERO (IM_FIRST_MESSAGE + 14)
+#define MSG_IM_ACTIVATE_SCREEN_SAVER	(IM_FIRST_MESSAGE + 15)
+#define MSG_IM_DEACTIVATE_SCREEN_SAVER	(IM_FIRST_MESSAGE + 16)
+
+/*
+ * MSG_IM_INSTALL_SCREEN_SAVER, MSG_IM_REMOVE_SCREEN_SAVER: the object
+ * (DOS16 cx:dx), the message sent to it when the screen is to be blanked
+ * (si) and when it is to come back (bp); REMOVE only reads the object.
+ * MSG_IM_SET_SCREEN_SAVER_DELAY: a word, the minutes (cx);
+ * MSG_IM_GET_SCREEN_SAVER_DELAY returns them as a word (ax).
+ */
+typedef struct {
+    optr	IMSSP_od;
+    Message	IMSSP_beginMsg;
+    Message	IMSSP_endMsg;
+} IMScreenSaverParams;
 #define MSG_IM_MOUSE_WHEEL_VERTICAL (IM_FIRST_MESSAGE + 23)
 
 /* MSG_META_KBD_CHAR (MetaInputMessages, inputC.goh), which the

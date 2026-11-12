@@ -45,6 +45,15 @@ typedef struct {
     Boolean		curPtrValid;
     byte		ptrFlags;	/* PtrFlags (imPtrFlags) */
     Boolean		hidingPtr;	/* PS_HIDING_PTR */
+    /* imScreenSaver.c: ScreenSaverStruct; counts of 15 seconds */
+    byte		ssState;	/* ScrSaverStatus */
+    word		ssMaxCount, ssCurCount;
+    word		screenSaverDelay;
+    optr		ssOD;
+    Message		ssBeginMsg, ssEndMsg;
+    TimerHandle		ssTimer;
+    word		ssTimerID;
+    word		disableAPOCount;	/* SysDisableAPO */
     /* the buttons */
     byte		buttonState;	/* BI_B*_DOWN */
     byte		dragState;	/* armed for a drag */
@@ -75,5 +84,9 @@ byte ImPtrPerturbMonitor(Monitor *mon, ImEvent *ev);
 /* imPtr.c: move the pointer in the driver; the save under areas
  * under it */
 word ImCallMovePtr(sword x, sword y);
+void ImInitScreenSaver(void);
+Boolean ImMaybeUnblankScreens(void);
+void ImScreenSaverMethod(void *pself, optr oself, Message m, void *params,
+			 void *reply);
 
 #endif /* IMINT_H */

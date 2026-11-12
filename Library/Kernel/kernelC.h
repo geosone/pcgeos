@@ -124,7 +124,8 @@
     X(GRAPHICS_GR_INIT_FONTS_ERROR)	/* the font info block's chunks */ \
     X(C_FATAL_ERROR)		/* CFatalError of a geode (code logged) */ \
     X(EC_BAD_HANDLE)		/* ECCheck*Handle: not of that type */ \
-    X(OBJ_FLUSH_INPUT_QUEUE_BAD_NEXT_STOP)
+    X(OBJ_FLUSH_INPUT_QUEUE_BAD_NEXT_STOP) \
+    X(DISABLE_APO_COUNT_OVERFLOW)	/* SysDisableAPO/SysEnableAPO */
 
 #define KFE_ENUM(name) name,
 typedef enum {

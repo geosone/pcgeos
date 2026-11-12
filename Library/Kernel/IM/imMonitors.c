@@ -328,6 +328,18 @@ static byte ProcessPtr(ImEvent *ev)
 static byte CombineInputMonitor(Monitor *mon, ImEvent *ev)
 {
     (void) mon;
+    /* a real user (the screen saver, MaybeUnblankScreens): anything but
+     * a pointer event that does not move */
+    if (ev->IE_message == MSG_IM_PTR_CHANGE) {
+	sword dx = (sword) ev->IE_cx, dy = (sword) ev->IE_dx;
+	if (ev->IE_bp & PI_absX)
+	    dx = (sword) (dx - im.pointerX);
+	if (ev->IE_bp & PI_absY)
+	    dy = (sword) (dy - im.pointerY);
+	if (dx || dy)
+	    (void) ImMaybeUnblankScreens();
+    } else if (ev->IE_message)
+	(void) ImMaybeUnblankScreens();
     switch (ev->IE_message) {
     case MSG_IM_PTR_CHANGE:
 	return ProcessPtr(ev);

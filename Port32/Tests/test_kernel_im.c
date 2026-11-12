@@ -15,13 +15,16 @@
  *   - the wheel; MSG_META_KBD_CHAR passed on;
  *   - ImConstrainMouse with MSG_META_LEAVE_CONSTRAIN, the screen limits;
  *   - monitors of its own: one that makes two events of one
- *     (MF_MORE_TO_DO), one that eats events, ImRemoveMonitor.
+ *     (MF_MORE_TO_DO), one that eats events, ImRemoveMonitor;
+ *   - the screen saver: the delay, an installed saver blanked and
+ *     brought back by input, its notifications, SysDisableAPO.
  */
 #include "kernelC.h"
 #include "ghal.h"
 #include "IM/imInt.h"
 #include <input.h>
 #include <timer.h>
+#include <system.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -86,6 +89,16 @@ static Message Out(word *w)
 	lastY = (sword) w[1];
     }
     return m;
+}
+
+/* a message to the input manager, the reply word */
+static word ToIMCall(Message m, const void *p, word size)
+{
+    word r = 0xffff;
+
+    CObjMessageP(MF_CALL, ConstructOptr(ImInfoInputProcess(), 0), m,
+		 p, size, &r, sizeof(r));
+    return r;
 }
 
 static word Now(void)
@@ -274,6 +287,65 @@ int main(int argc, char **argv)
 	CHECK(w[0] != 'q');
     }
     CHECK(ImGrabInput(ConstructOptr(q, 0)));
+
+    /* the screen saver */
+    {
+	IMScreenSaverParams sp;
+	word min = 2;
+	optr saver = ConstructOptr(qc, 0);
+
+	while (GeodeInfoQueue(q))
+	    Get(q, w);
+	while (GeodeInfoQueue(qc))
+	    Get(qc, w);
+	CHECK(ToIMCall(MSG_IM_GET_SCREEN_SAVER_DELAY, NULL, 0) == 15);
+	(void) ToIMCall(MSG_IM_SET_SCREEN_SAVER_DELAY, &min, sizeof(min));
+	CHECK(ToIMCall(MSG_IM_GET_SCREEN_SAVER_DELAY, NULL, 0) == 2);
+	CHECK(im.ssCurCount == 8);
+	CHECK(GCNListAdd(saver, MANUFACTURER_ID_GEOWORKS, 72));
+	sp.IMSSP_od = saver;
+	sp.IMSSP_beginMsg = 0x5000;
+	sp.IMSSP_endMsg = 0x5001;
+	(void) ToIMCall(MSG_IM_INSTALL_SCREEN_SAVER, &sp, sizeof(sp));
+	(void) ToIMCall(MSG_IM_ENABLE_SCREEN_SAVER, NULL, 0);
+	CHECK(Get(qc, w) == KMSG_META_NOTIFY && w[0] ==
+	      MANUFACTURER_ID_GEOWORKS && w[1] == 170 && w[2] == SSS_ENABLED);
+	/* blanked: the saver's begin message, then the notification */
+	(void) ToIMCall(MSG_IM_ACTIVATE_SCREEN_SAVER, NULL, 0);
+	CHECK(Get(qc, w) == 0x5000);
+	CHECK(Get(qc, w) == KMSG_META_NOTIFY &&
+	      w[2] == (SSS_ENABLED | SSS_ACTIVE));
+	/* a pointer event that does not move is not the user */
+	ToIM(MSG_IM_PTR_CHANGE, 0, 0, Now());
+	(void) ToIMCall(MSG_IM_GET_SCREEN_SAVER_DELAY, NULL, 0);
+	CHECK(!GeodeInfoQueue(qc) && (im.ssState & SSS_ACTIVE));
+	/* a key is: back, no notification */
+	ToIM(IM_META_KBD_CHAR, 'k', 0, 0);
+	CHECK(Get(qc, w) == 0x5001);
+	CHECK(Out(w) == IM_META_KBD_CHAR && w[0] == 'k');
+	CHECK(!(im.ssState & SSS_ACTIVE) && im.ssCurCount == 8);
+	/* a countdown counts */
+	(void) ToIMCall(MSG_IM_SCREEN_SAVER_COUNTDOWN, NULL, 0);
+	CHECK(im.ssCurCount == 7);
+	/* busy: not blanked, the count stays at one */
+	SysDisableAPO();
+	im.ssCurCount = 1;
+	(void) ToIMCall(MSG_IM_SCREEN_SAVER_COUNTDOWN, NULL, 0);
+	CHECK(im.ssCurCount == 1 && !(im.ssState & SSS_ACTIVE));
+	SysEnableAPO();
+	(void) ToIMCall(MSG_IM_SCREEN_SAVER_COUNTDOWN, NULL, 0);
+	CHECK(Get(qc, w) == 0x5000);
+	CHECK(Get(qc, w) == KMSG_META_NOTIFY);
+	/* disabling while blank: back, two notifications */
+	(void) ToIMCall(MSG_IM_DISABLE_SCREEN_SAVER, NULL, 0);
+	CHECK(Get(qc, w) == 0x5001);
+	CHECK(Get(qc, w) == KMSG_META_NOTIFY && w[2] == SSS_ENABLED);
+	CHECK(Get(qc, w) == KMSG_META_NOTIFY && w[2] == 0);
+	CHECK(im.ssState == 0 && im.ssTimer == 0);
+	(void) ToIMCall(MSG_IM_REMOVE_SCREEN_SAVER, &sp, sizeof(sp));
+	CHECK(im.ssOD == 0);
+	CHECK(GCNListRemove(saver, MANUFACTURER_ID_GEOWORKS, 72));
+    }
 
     GeodeFreeQueue(qc);
     printf("%s\n", fails ? "FAILED" : "ok");

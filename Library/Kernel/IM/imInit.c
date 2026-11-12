@@ -18,7 +18,9 @@
  *   quickShutdownOnReset  the first <Ctrl><Alt><Del> ends GEOS dirty
  * DOS16 sent MSG_META_ATTACH with MSG_PROCESS_CREATE_EVENT_THREAD.
  *
- * Not yet: the screen saver (InitScreenSaver), pen mode (its stack).
+ * The screen saver is in imScreenSaver.c.
+ *
+ * Not yet: pen mode (its stack).
  */
 #include "kernelC.h"
 #include "imInt.h"
@@ -84,12 +86,26 @@ static const Message imMessages[] = {
     MSG_IM_KBD_SCAN,
     MSG_IM_MOUSE_WHEEL_VERTICAL,
     IM_META_KBD_CHAR,
-    KMSG_META_ATTACH
+    KMSG_META_ATTACH,
+    MSG_IM_ENABLE_SCREEN_SAVER,
+    MSG_IM_DISABLE_SCREEN_SAVER,
+    MSG_IM_INSTALL_SCREEN_SAVER,
+    MSG_IM_REMOVE_SCREEN_SAVER,
+    MSG_IM_GET_SCREEN_SAVER_DELAY,
+    MSG_IM_SET_SCREEN_SAVER_DELAY,
+    MSG_IM_SCREEN_SAVER_COUNTDOWN,
+    MSG_IM_SCREEN_SAVER_COUNTDOWN_REACHED_ZERO,
+    MSG_IM_ACTIVATE_SCREEN_SAVER,
+    MSG_IM_DEACTIVATE_SCREEN_SAVER
 };
 
 static GocMethodThunk *const imMethods[] = {
     ImInput, ImInput, ImInput, ImInput, ImInput, ImInput, ImInput,
-    ImAttach
+    ImAttach,
+    ImScreenSaverMethod, ImScreenSaverMethod, ImScreenSaverMethod,
+    ImScreenSaverMethod, ImScreenSaverMethod, ImScreenSaverMethod,
+    ImScreenSaverMethod, ImScreenSaverMethod, ImScreenSaverMethod,
+    ImScreenSaverMethod
 };
 
 ClassStruct IMClass = {
@@ -118,6 +134,7 @@ void KernelImInit(void)
     im.doubleClickDistance = IM_DEFAULT_DOUBLE_CLICK_DISTANCE;
     im.dragTime = IM_DEFAULT_DRAG_TIME;
     im.dragDistance = IM_DEFAULT_DRAG_DISTANCE;
+    ImInitScreenSaver();
     ImInitMonitors();
     q = GeodeAllocQueue();
     HandleEntryOf(q)->HE_owner = kernelCurrentGeode;
