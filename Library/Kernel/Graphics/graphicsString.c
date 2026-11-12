@@ -23,7 +23,11 @@
  * counts make the field's characters; it plays with a callback giving
  * the runs (PETextField, TextFieldCB).
  *
- * Not yet: bitmap slices.
+ * Bitmap slices: a complex bitmap element may be followed by
+ * GSE_BITMAP_SLICE elements, its slices after the first.  Playing it
+ * passes a callback (PEBitmapCB) that reads them in turn; as in the
+ * asm, CB_devInfo of the slice names the play (a slot of sliceSlots).
+ * Copying keeps them as they are.
  * GrGetGStringBounds plays the elements with their bounds
  * (graphicsStringBounds.c).
  */
@@ -469,6 +473,93 @@ static void *Copy(const byte *p, dword n)
     if (c && n)
 	memcpy(c, p, n);
     return c;
+}
+
+/* the plays of sliced bitmaps going on: the graphics string and the
+ * slice handed out last */
+#define SLICE_SLOTS	16
+static struct {
+    GStringBlock	*g;
+    void		*buf;
+} sliceSlots[SLICE_SLOTS];
+
+/* PEBitmapCB: the next GSE_BITMAP_SLICE element's slice, NULL if the
+ * next element is not one (it stays to be played) */
+static Bitmap *SliceCB(Bitmap *bm)
+{
+    word slot = ((CBitmap *) bm)->CB_devInfo;
+    GStringBlock *g;
+    CBitmap *c;
+
+    if (slot >= SLICE_SLOTS || !(g = sliceSlots[slot].g))
+	return NULL;
+    if (!ReadElement(g) || *g->GSS_elem != GSE_BITMAP_SLICE ||
+	g->GSS_lastSize < 3 + sizeof(CBitmap))
+	return NULL;
+    NextElement(g);
+    c = Copy(g->GSS_elem + 3, U(g->GSS_elem + 1));
+    if (!c)
+	return NULL;
+    free(sliceSlots[slot].buf);
+    sliceSlots[slot].buf = c;
+    c->CB_devInfo = slot;
+    return (Bitmap *) c;
+}
+
+/* a bitmap element with the slices after it: TRUE if played so */
+static Boolean PlaySliced(GStateHandle gstate, GStringBlock *g,
+			  const byte *e)
+{
+    word off, n, slot;
+    CBitmap *c;
+    Boolean cp = (Boolean) (*e == GR_DRAW_BITMAP_CP || *e == GR_FILL_BITMAP_CP);
+
+    if (*e != GR_DRAW_BITMAP && *e != GR_FILL_BITMAP && !cp)
+	return FALSE;
+    off = cp ? 3 : 7;
+    n = U(e + off - 2);
+    if (n < sizeof(CBitmap) || !(e[off + 2 * sizeof(word) + 1] &
+				  BMT_COMPLEX))
+	return FALSE;
+    c = (CBitmap *) Copy(e + off, n);
+    if (!c)
+	return FALSE;
+    if (c->CB_numScans >= c->CB_simple.B_height) {
+	free(c);
+	return FALSE;
+    }
+    ghal_crit_enter();
+    for (slot = 0; slot < SLICE_SLOTS && sliceSlots[slot].g; slot++)
+	;
+    if (slot < SLICE_SLOTS)
+	sliceSlots[slot].g = g;
+    ghal_crit_leave();
+    if (slot >= SLICE_SLOTS) {
+	free(c);
+	return FALSE;
+    }
+    c->CB_devInfo = slot;
+    switch (*e) {
+    case GR_DRAW_BITMAP:
+	GrDrawBitmap(gstate, S(e + 1), S(e + 3), (Bitmap *) c, SliceCB);
+	break;
+    case GR_FILL_BITMAP:
+	GrFillBitmap(gstate, S(e + 1), S(e + 3), (Bitmap *) c, SliceCB);
+	break;
+    case GR_DRAW_BITMAP_CP:
+	GrDrawBitmapAtCP(gstate, (Bitmap *) c, SliceCB);
+	break;
+    default:
+	GrFillBitmapAtCP(gstate, (Bitmap *) c, SliceCB);
+	break;
+    }
+    free(sliceSlots[slot].buf);
+    free(c);
+    ghal_crit_enter();
+    sliceSlots[slot].g = NULL;
+    sliceSlots[slot].buf = NULL;
+    ghal_crit_leave();
+    return TRUE;
 }
 
 /* TextFieldCB: the runs of a GR_DRAW_TEXT_FIELD in turn */
@@ -1170,7 +1261,7 @@ static GSRetType Play(GStateHandle gstate, GStateHandle gstring,
 		}
 		if (e && bound)		/* GSF_FIGURE_BOUNDS: before it */
 		    bound(ctx, e, size);
-		if (e && gstate)
+		if (e && gstate && (r || !PlaySliced(gstate, g, e)))
 		    GrPlayElement(gstate, e);
 		free(r);
 	    }

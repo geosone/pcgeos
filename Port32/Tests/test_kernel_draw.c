@@ -761,6 +761,54 @@ int main(int argc, char **argv)
 	CHECK(Pixel(80, 50) == RED && Pixel(81, 50) == GREEN &&
 	      Pixel(80, 51) == GREEN && Pixel(81, 51) == RED &&
 	      Pixel(80, 52) == BLUE);
+	/* into a graphics string: the first slice in the element, the
+	 * second a GSE_BITMAP_SLICE after it; played, both drawn */
+	{
+	    MemHandle sb = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+	    word sc = 0, n = 0, last = 0;
+	    GStateHandle sg = GrCreateGString(sb, GST_CHUNK, &sc), sl;
+	    byte buf[80];
+	    nextSlice = &pal2.c.CB_simple;
+	    GrDrawBitmap(sg, 0, 0, &pal.c.CB_simple, NextSlice);
+	    CHECK(nextSlice == NULL);
+	    CHECK(GrEndGString(sg) == GSET_NO_ERROR);
+	    GrDestroyGString(sg, 0, GSKT_LEAVE_DATA);
+	    sl = GrLoadGString(sb, GST_CHUNK, sc);
+	    CHECK(GrGetGStringElement(g, sl, sizeof(buf), buf, &n) ==
+		  GR_DRAW_BITMAP);
+	    GrSetGStringPos(sl, GSSPT_SKIP_1, 0);
+	    CHECK(GrGetGStringElement(g, sl, sizeof(buf), buf, &n) ==
+		  GSE_BITMAP_SLICE &&
+		  n == 3 + sizeof(CBitmap) + 1 &&
+		  ((CBitmap *) (buf + 3))->CB_startScan == 1 &&
+		  ((CBitmap *) (buf + 3))->CB_data == sizeof(CBitmap) &&
+		  buf[3 + sizeof(CBitmap)] == 0x10);
+	    GrSetGStringPos(sl, GSSPT_BEGINNING, 0);
+	    SetCol(g, BLUE);
+	    GrFillRect(g, 60, 30, 61, 31);
+	    CHECK(GrDrawGString(g, sl, 60, 30, 0, &last) == GSRT_COMPLETE &&
+		  last == GR_END_GSTRING);
+	    CHECK(Pixel(80, 50) == RED && Pixel(81, 50) == GREEN &&
+		  Pixel(80, 51) == GREEN && Pixel(81, 51) == RED);
+	    /* copied with its slice */
+	    {
+		word dc = 0;
+		GStateHandle dg = GrCreateGString(sb, GST_CHUNK, &dc);
+		GrSetGStringPos(sl, GSSPT_BEGINNING, 0);
+		CHECK(GrCopyGString(sl, dg, 0) == GSRT_COMPLETE);
+		CHECK(GrEndGString(dg) == GSET_NO_ERROR);
+		GrDestroyGString(dg, 0, GSKT_LEAVE_DATA);
+		MemLock(sb);
+		CHECK(LMemGetChunkSizeHandles(sb, dc) ==
+		      LMemGetChunkSizeHandles(sb, sc) &&
+		      !memcmp(LMemDerefHandles(sb, dc),
+			      LMemDerefHandles(sb, sc),
+			      LMemGetChunkSizeHandles(sb, sc)));
+		MemUnlock(sb);
+	    }
+	    GrDestroyGString(sl, 0, GSKT_LEAVE_DATA);
+	    MemFree(sb);
+	}
 
 	/* scaled: twice, half, mirrored in x and in y */
 	GrApplyScale(g, 2L << 16, 2L << 16);

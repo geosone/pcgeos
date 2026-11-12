@@ -3108,8 +3108,17 @@ time.
 - ctest `kernel.draw` plays a `GST_PTR` string with text by offset and
   by optr and a bitmap by offset, and bounds it.
 
-**Not yet:** bitmap slices after the first (callbacks), the truncation
-of a full stream.
+**Bitmap slices.** A complex bitmap drawn with a callback goes into the
+string as its element (the first slice) and a `GSE_BITMAP_SLICE`
+element for each slice after it: the size, the `CBitmap` with
+`CB_data` right after it, the data, no palette (`BitmapToString`).
+- Playing the element passes a callback that reads those elements in
+  turn. As in the asm, `CB_devInfo` of the slice names the play.
+- Copying keeps them byte for byte.
+- ctest `kernel.draw` records, reads, plays and copies a bitmap of two
+  slices.
+
+**Not yet:** the truncation of a full stream.
 (`GST_PATH` and the other path and clip elements: §13q.)
 
 **Bounds** (`graphicsStringBounds.c`). `GrGetGStringBoundsDWord` and

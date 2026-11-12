@@ -41,8 +41,10 @@
  *
  * Compacted bitmaps: PackBits or LZG (Heap/heapCompress.c).
  *
- * A graphics string stores a bitmap whole (GrBitmapStringSize); not
- * yet: the slices after the first, bitmaps in paths.
+ * A graphics string stores a bitmap (GrBitmapStringSize) in its element;
+ * a complex one with a callback stores its first slice there and each
+ * one after it as a GSE_BITMAP_SLICE element (BitmapToString): the
+ * size, the CBitmap with its data right after it (CB_data), the data.
  *
  * Huge bitmaps (graphicsBitmapHuge.asm) are drawn like complex ones,
  * each block of the huge array a slice (DrawSlice's note): the
@@ -457,18 +459,61 @@ word GrBitmapStringSize(const Bitmap *bm)
     return (word) (size <= 0xfff0 ? size : 0);
 }
 
-/* the element of a bitmap: at x, y or (atCP) at the pen */
-static void RecordBitmap(GStateHandle gstate, byte op, Boolean atCP, sword x,
-			 sword y, const Bitmap *bm)
+/* SliceToString of a slice after the first: GSE_BITMAP_SLICE, the size,
+ * the CBitmap (CB_data right after it), the data; no palette */
+static void RecordSlice(Handle gstring, const Bitmap *bm)
 {
-    word n;
+    const CBitmap *c = Complex(bm);
+    word all = GrBitmapStringSize(bm), data, n;
+    byte *e;
+    CBitmap h;
 
-    if (!GrGStringOf(gstate) || !(n = GrBitmapStringSize(bm)))
+    if (!all || all < c->CB_data)
 	return;
+    data = (word) (all - c->CB_data);
+    n = (word) (sizeof(CBitmap) + data);
+    e = malloc((size_t) n + 3);
+    if (!e)
+	return;
+    h = *c;
+    h.CB_data = sizeof(CBitmap);
+    e[0] = GSE_BITMAP_SLICE;
+    e[1] = (byte) n;
+    e[2] = (byte) (n >> 8);
+    memcpy(e + 3, &h, sizeof(h));
+    memcpy(e + 3 + sizeof(h), (const byte *) bm + c->CB_data, data);
+    (void) GrGSStore(gstring, e, (word) (n + 3));
+    free(e);
+}
+
+/* BitmapToString: the element of a bitmap at x, y or (atCP) at the pen,
+ * then the callback's slices; TRUE if the GState writes a graphics
+ * string (the callback is used up then) */
+static Boolean RecordBitmap(GStateHandle gstate, byte op, Boolean atCP,
+			    sword x, sword y, const Bitmap *bm,
+			    Bitmap *(*callback)(Bitmap *bm))
+{
+    Handle gstring = GrGStringOf(gstate);
+    word n, scans;
+
+    if (!gstring)
+	return FALSE;
+    if (!(n = GrBitmapStringSize(bm)))
+	return TRUE;
     if (atCP)
 	(void) GrGSRecord(gstate, op, "wr", n, bm, n);
     else
 	(void) GrGSRecord(gstate, op, "wwwr", x, y, n, bm, n);
+    if (!(bm->B_type & BMT_COMPLEX) || !callback)
+	return TRUE;
+    for (scans = Complex(bm)->CB_numScans; scans < bm->B_height;
+	 scans = (word) (scans + Complex(bm)->CB_numScans)) {
+	bm = callback((Bitmap *) bm);
+	if (!bm || !Complex(bm)->CB_numScans)
+	    break;
+	RecordSlice(gstring, bm);
+    }
+    return TRUE;
 }
 
 /* BitmapToPath: while a path is defined, a bitmap is the rectangle it
@@ -1390,7 +1435,8 @@ void GrDrawBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 
     if (PathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
 	return;
-    RecordBitmap(gstate, GR_DRAW_BITMAP, FALSE, x, y, bm);
+    if (RecordBitmap(gstate, GR_DRAW_BITMAP, FALSE, x, y, bm, callback))
+	callback = NULL;
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
     DrawBitmap(&d, x, y, bm, callback, FALSE);
@@ -1404,7 +1450,8 @@ void GrFillBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 
     if (PathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
 	return;
-    RecordBitmap(gstate, GR_FILL_BITMAP, FALSE, x, y, bm);
+    if (RecordBitmap(gstate, GR_FILL_BITMAP, FALSE, x, y, bm, callback))
+	callback = NULL;
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
     DrawBitmap(&d, x, y, bm, callback, TRUE);
@@ -1429,7 +1476,8 @@ void GrDrawBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 {
     if (PathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
 	return;
-    RecordBitmap(gstate, GR_DRAW_BITMAP_CP, TRUE, 0, 0, bm);
+    if (RecordBitmap(gstate, GR_DRAW_BITMAP_CP, TRUE, 0, 0, bm, callback))
+	callback = NULL;
     AtCP(gstate, bm, callback, FALSE);
 }
 
@@ -1438,7 +1486,8 @@ void GrFillBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 {
     if (PathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
 	return;
-    RecordBitmap(gstate, GR_FILL_BITMAP_CP, TRUE, 0, 0, bm);
+    if (RecordBitmap(gstate, GR_FILL_BITMAP_CP, TRUE, 0, 0, bm, callback))
+	callback = NULL;
     AtCP(gstate, bm, callback, TRUE);
 }
 
