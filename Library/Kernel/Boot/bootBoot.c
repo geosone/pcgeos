@@ -19,6 +19,7 @@
  * Not yet: ExitFSD.
  */
 #include "kernelC.h"
+#include <system.h>
 #include "ghal.h"
 
 #include <string.h>
@@ -78,6 +79,8 @@ void EndGeos(word flags, const char *reason)
     ghal_crit_leave();
 
     kernelExitFlags |= flags;
+    if (kernelSysExitFlags & EF_RESET)	/* SysSetExitFlags */
+	kernelExitFlags |= KEF_RESET;
     if (reason) {
 	strncpy(endMessage, reason, sizeof(endMessage) - 1);
 	endMessage[sizeof(endMessage) - 1] = 0;

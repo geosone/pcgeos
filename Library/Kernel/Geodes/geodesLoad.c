@@ -479,6 +479,7 @@ void GeodeFreeLow(GeodeHandle gh)
     if (c->GC_attrs & GA_GEODE_INITIALIZED)
 	CallLibraries(gh, LCT_CLIENT_EXIT);
     GeodePrivExit(gh);
+    ThreadPrivExit(gh);
     Unlink(gh);
     GeodeSetResourceHandles(gh, NULL, 0);
     FreeOwned(gh);
@@ -498,6 +499,61 @@ void GeodeFreeLow(GeodeHandle gh)
 /* ---------------------------------------------------------------------
  * Threads
  * ------------------------------------------------------------------- */
+
+void GeodeCount(word *total, word *processes, word *libraries,
+		word *drivers)
+{
+    GeodeHandle g;
+
+    *total = *processes = *libraries = *drivers = 0;
+    GeodeLock();
+    for (g = geodeList; g; g = CORE(g)->GC_next) {
+	GeodeAttrs a = CORE(g)->GC_attrs;
+	(*total)++;
+	if (a & GA_PROCESS)
+	    (*processes)++;
+	if (a & GA_LIBRARY)
+	    (*libraries)++;
+	if (a & GA_DRIVER)
+	    (*drivers)++;
+    }
+    GeodeUnlock();
+}
+
+/* ---------------------------------------------------------------------
+ * References (geodesLoad.asm GeodeAddReference, geodesUtils.asm
+ * GeodeRemoveReference)
+ * ------------------------------------------------------------------- */
+
+void GeodeAddReference(GeodeHandle gh)
+{
+    GeodeCore *c;
+
+    GeodeLock();
+    c = GeodeCoreOf(gh);
+    if (!c)
+	KernelFatal(GEODE_NOT_LOADED);
+    c->GC_refCount++;
+    GeodeUnlock();
+}
+
+/* TRUE if that was the last reference and the geode is gone */
+Boolean GeodeRemoveReference(GeodeHandle gh)
+{
+    GeodeCore *c;
+    Boolean gone = FALSE;
+
+    GeodeLock();
+    c = GeodeCoreOf(gh);
+    if (!c)
+	KernelFatal(GEODE_NOT_LOADED);
+    if (!--c->GC_refCount) {
+	GeodeFreeLow(gh);
+	gone = TRUE;
+    }
+    GeodeUnlock();
+    return gone;
+}
 
 void GeodeAddThread(GeodeHandle gh)
 {

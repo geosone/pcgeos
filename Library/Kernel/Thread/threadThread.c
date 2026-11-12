@@ -17,6 +17,9 @@
  */
 #include "kernelC.h"
 #include "ghal.h"
+#include <sysstats.h>
+
+#include <string.h>
 
 ThreadHandle kernelCurrentThread;
 
@@ -27,6 +30,7 @@ static byte   sliceLeft = TIME_SLICE;	/* ticks of the running thread */
 static Handle deadList;			/* ended, to be released */
 static dword  timedWaiters;		/* blocked threads with a deadline */
 static uint64_t tickBase;
+static SysStats curStats, lastStats;	/* SysStatistics: this, last second */
 
 #define NS_PER_TICK	(1000000000u / 60u)
 
@@ -149,6 +153,7 @@ static void Dispatch(void)
 	CheckTimeouts();
 	if (runQueue)
 	    break;
+	curStats.SS_idleCount++;
 	ghal_idle();			/* nothing can run: wait for an IRQ */
     }
     next = QueuePop(&runQueue);
@@ -158,6 +163,7 @@ static void Dispatch(void)
     sliceLeft = TIME_SLICE;
     if (next == prev)
 	return;
+    curStats.SS_contextSwitches++;
     if (pt->T_state == TS_DEAD)
 	ghal_ctx_exit(nt->T_ctx);
     ghal_ctx_switch(nt->T_ctx);
@@ -226,6 +232,7 @@ void ThreadTick(void)
     Handle cur = kernelCurrentThread;
     KThread *t;
 
+    curStats.SS_interrupts++;
     CheckTimeouts();
     if (!cur)
 	return;
@@ -263,6 +270,11 @@ static int Decay(Handle th, HandleEntry *he, void *ctx)
 void ThreadDecay(void)
 {
     Handle q;
+
+    for (q = runQueue, curStats.SS_runQueue = 0; q; q = ThreadOf(q)->T_nextQ)
+	curStats.SS_runQueue++;
+    lastStats = curStats;
+    memset(&curStats, 0, sizeof(curStats));
 
     HandleEnum(Decay, NULL);
     /* priorities changed: order the run queue again */
@@ -481,6 +493,11 @@ void KernelSetError(word error)
     ThreadOf(KernelThisThread())->T_error = error;
 }
 
+void ThreadSetError(word errno)
+{
+    KernelSetError(errno);
+}
+
 dword ThreadGetInfo(ThreadHandle th, ThreadGetInfoType info)
 {
     KThread *t;
@@ -528,5 +545,14 @@ void ThreadModify(ThreadHandle th, word newBasePriority,
 	KernelYield();
     else
 	MaybePreempt();
+    ghal_crit_leave();
+}
+
+/* SysStatistics: the counts of the last second (idle: times the
+ * scheduler found nothing to run; interrupts: timer ticks) */
+void KernelGetStatistics(void *stats)
+{
+    ghal_crit_enter();
+    *(SysStats *) stats = lastStats;
     ghal_crit_leave();
 }

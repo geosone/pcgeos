@@ -20,7 +20,7 @@
  * unblanks does not, as in the asm.
  *
  * Not yet: the power driver (DR_POWER_LONG_TERM_IDLE), which may turn
- * the machine off instead; the delay through SysGetInfo.
+ * the machine off instead.
  */
 #include "kernelC.h"
 #include "imInt.h"
@@ -229,4 +229,9 @@ void ImScreenSaverMethod(void *pself, optr oself, Message m, void *params,
 	    BlankScreens();	/* the new saver */
 	break;
     }
+}
+
+word ImGetScreenSaverDelay(void)
+{
+    return im.screenSaverDelay;
 }

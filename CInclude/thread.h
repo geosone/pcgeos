@@ -78,6 +78,13 @@ extern word	/*XXX*/
 extern void	/*XXX*/
     _pascal ThreadPrivFree(word range, word wordsRequested);
 
+#ifdef GEOS_PORT32
+/* Port32: the running thread's words at an offset of ThreadPrivAlloc (the
+ * asm read them at ss:offset) */
+extern word *
+    ThreadPrivData(word offset);
+#endif
+
 /***/
 
 typedef enum /* word */ {

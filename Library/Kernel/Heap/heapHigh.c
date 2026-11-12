@@ -12,7 +12,14 @@
  *
  * HandleP/HandleV use the KSem of the handle (threadSem.c); MemThreadGrab
  * keeps the grabbing thread in the other info, as the asm kernel does.
- * Not here yet: the shared/exclusive locks.  Port32/PLAN.md P4.
+ *
+ * Shared and exclusive locks (MemLockShared, MemLockExcl): the handle's
+ * semaphore is held by one writer or by the group of sharers, whose
+ * number is in HE_nesting.  A sharer joins a group that holds it; else it
+ * takes a free semaphore, or waits.  Waiting sharers (of any block) wait
+ * on one queue and all look again when a block is released or downgraded
+ * (the asm woke the readers on the handle's queue); writers wait on the
+ * handle's semaphore.  Port32/PLAN.md P4.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -327,4 +334,104 @@ void MemThreadRelease(MemHandle mh)
 	he->HE_otherInfo = 0;
 	KSemV(&he->HE_sem);
     }
+}
+
+/* ---------------------------------------------------------------------
+ * Shared and exclusive locks (heapHigh.asm)
+ * ------------------------------------------------------------------- */
+
+static KSem sharersQueue = { 0, 0 };	/* only its queue is used */
+
+/* inside ghal_crit: every waiting sharer looks again */
+static void WakeSharers(void)
+{
+    while (sharersQueue.S_queue)
+	ThreadWakeOne(&sharersQueue);
+}
+
+void *MemLockShared(MemHandle mh)
+{
+    HandleEntry *he = MemEntryOf(mh);
+
+    KernelPreemptPoint();
+    ghal_crit_enter();
+    for (;;) {
+	if (he->HE_nesting) {		/* sharers hold it: join them */
+	    he->HE_nesting++;
+	    break;
+	}
+	if (he->HE_sem.S_value > 0) {	/* free */
+	    he->HE_sem.S_value--;
+	    he->HE_nesting = 1;
+	    break;
+	}
+	(void) ThreadBlockOn(&sharersQueue, KSEM_FOREVER);
+    }
+    ghal_crit_leave();
+    return MemLock(mh);
+}
+
+void *MemLockExcl(MemHandle mh)
+{
+    (void) KSemP(&MemEntryOf(mh)->HE_sem, KSEM_FOREVER);
+    return MemLock(mh);
+}
+
+/* MemUnlockShared, and MemUnlockExcl (heap.h makes it the same) */
+void MemUnlockShared(MemHandle mh)
+{
+    HandleEntry *he = MemEntryOf(mh);
+
+    MemUnlock(mh);
+    ghal_crit_enter();
+    if (he->HE_nesting && --he->HE_nesting) {
+	ghal_crit_leave();		/* other sharers are left */
+	return;
+    }
+    if (++he->HE_sem.S_value <= 0)
+	ThreadWakeOne(&he->HE_sem);	/* a writer gets it */
+    WakeSharers();
+    ghal_crit_leave();
+}
+
+/* a shared lock (this thread's only one) to an exclusive one: at once if
+ * no one else shares the block, else after waiting */
+void *MemUpgradeSharedLock(MemHandle mh)
+{
+    HandleEntry *he = MemEntryOf(mh);
+
+    EC_CHECK(he->HE_nesting != 0,
+	     UPGRADING_SHARED_LOCK_WITHOUT_HAVING_LOCKED_IT_SHARED);
+    ghal_crit_enter();
+    if (he->HE_nesting == 1) {
+	he->HE_nesting = 0;		/* the semaphore stays ours */
+	ghal_crit_leave();
+	return MemDeref(mh);
+    }
+    ghal_crit_leave();
+    MemUnlockShared(mh);
+    return MemLockExcl(mh);
+}
+
+void MemDowngradeExclLock(MemHandle mh)
+{
+    HandleEntry *he = MemEntryOf(mh);
+
+    EC_CHECK(he->HE_nesting == 0 && he->HE_sem.S_value <= 0,
+	     DOWNGRADING_EXCL_LOCK_WITHOUT_HAVING_LOCKED_IT_EXCL);
+    ghal_crit_enter();
+    he->HE_nesting = 1;
+    WakeSharers();
+    ghal_crit_leave();
+}
+
+/* Port32: there are no virtual segments; a pointer is the data itself */
+void *MemLockFixedOrMovable(void *ptr)
+{
+    return ptr;
+}
+
+void MemUnlockFixedOrMovable(void *ptr)
+{
+    (void) ptr;
 }

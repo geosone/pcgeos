@@ -127,7 +127,13 @@
     X(DISABLE_APO_COUNT_OVERFLOW)	/* SysDisableAPO/SysEnableAPO */ \
     X(LOCAL_BAD_STRING)	/* Local/localStrings.c: no such string */ \
     X(DB_LOCK_FAILED)	/* DBase: a group or item block not readable */ \
-    X(DB_BAD_ITEM)	/* DBase: no such item in the group (EC) */
+    X(DB_BAD_ITEM)	/* DBase: no such item in the group (EC) */ \
+    X(UPGRADING_SHARED_LOCK_WITHOUT_HAVING_LOCKED_IT_SHARED) \
+    X(DOWNGRADING_EXCL_LOCK_WITHOUT_HAVING_LOCKED_IT_EXCL) \
+    X(THREAD_PRIVATE_DATA_NOT_ALLOCATED) \
+    X(THREAD_PRIVATE_DATA_OWNED_BY_SOMEONE_ELSE) \
+    X(BAD_EXIT_FLAGS) \
+    X(SYS_GET_INFO_BAD_PARAMETER)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -145,6 +151,10 @@ const char *KernelFatalErrorName(KernelFatalError code);
  * logged and the process ends. */
 typedef void KernelFatalHook(KernelFatalError code);
 extern KernelFatalHook *kernelFatalHook;
+/* answers SysNotify instead of the default (0: the default) */
+typedef word KernelSysNotifyHook(word flags, const char *string1,
+				 const char *string2);
+extern KernelSysNotifyHook *kernelSysNotifyHook;
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noreturn))
 #endif
@@ -231,8 +241,9 @@ HandleEntry *MemEntryOf(Handle h);
 /* Call fn for every handle in use (in handle order); stops when fn
  * returns non-zero and returns that value. */
 int HandleEnum(int (*fn)(Handle h, HandleEntry *he, void *ctx), void *ctx);
-/* handles in use (statistics, tests) */
+/* handles in use (statistics, tests); in the table so far */
 dword HandleCountUsed(void);
+dword HandleCountTotal(void);
 
 /* ---------------------------------------------------------------------
  * Threads (Thread/threadThread.c, threadSem.c; after threadThread.asm,
@@ -241,6 +252,10 @@ dword HandleCountUsed(void);
 typedef struct ghal_ctx ghal_ctx;
 
 enum { TS_READY, TS_RUNNING, TS_BLOCKED, TS_DEAD };
+
+/* words of thread-private data (ThreadPrivAlloc); DOS16 had the rest
+ * of a 64-byte ThreadPrivateData */
+#define THREAD_PRIV_WORDS	16
 
 typedef struct {
     ghal_ctx	*T_ctx;
@@ -265,7 +280,12 @@ typedef struct {
     void	*T_fileEnum;	/* the FileEnum running (FileEnumWildcard) */
     word	T_fileReloc;	/* relocating an object block for a file
 				 * (objectReloc.c) */
+    word	T_priv[THREAD_PRIV_WORDS];	/* ThreadPrivAlloc's words */
 } KThread;
+
+/* Thread/threadPrivate.c: the private words of every thread
+ * (ThreadPrivAlloc, TPD_heap); a geode's go when it exits */
+void ThreadPrivExit(GeodeHandle gh);
 
 /* the running thread (0 before KernelThreadInit) */
 extern ThreadHandle kernelCurrentThread;
@@ -301,6 +321,9 @@ void  KernelPreemptPoint(void);
  * halve the CPU usage of all threads */
 void  ThreadTick(void);
 void  ThreadDecay(void);
+/* the scheduler's counts of the last second into a SysStats
+ * (SysStatistics; sysstats.h has no struct tag) */
+void  KernelGetStatistics(void *sysStats);
 /* ticks (1/60 s) since the start, from the GHAL clock */
 dword KernelTicks(void);
 
@@ -315,6 +338,15 @@ void KernelTimerInit(void);
 void KernelTimerExit(void);
 /* runs the timers that are due; from the timer interrupt */
 void TimerCheckList(dword now);
+/* real-time timers due at `now' (KernelRealTimeNow), inside ghal_crit */
+void TimerCheckRealTime(dword now);
+/* Timer/timerMisc.c: the GEOS date and time (the host's clock and the
+ * offset TimerSetDateAndTime set); from the interrupt, the minute as a
+ * real-time timer has it (TimerCompressedDate << 16 | hours << 8 |
+ * minutes), 0 before the time was read once */
+struct ghal_datetime;
+void KernelGetDateTime(struct ghal_datetime *dt);
+dword KernelRealTimeNow(dword tick);
 /* frees what interrupt code could not (deferred); not from interrupts */
 void TimerReap(void);
 /* Event timers send a message; the message system sets this.  Until it
@@ -672,6 +704,7 @@ typedef struct {
     VMFileHandle	GC_vmHandle;	/* the state file (PH_vmHandle) */
     ThreadHandle	GC_uiThread;	/* runs VM_SAVED_UI blocks (PH_uiThread;
 					 * 0: the process thread) */
+    word		GC_uiData;	/* GeodeGet/SetUIData (PH_uiData) */
     word		*GC_privData;	/* geode private data (geodesPriv.c) */
     word		GC_privWords;
     word		GC_libraryCount;
@@ -709,6 +742,12 @@ GeodeHandle GeodeUseCommon(const char *name, Boolean permName,
 GeodeLoadError GeodeInitDriver(GeodeHandle gh, dword appInfo);
 void GeodeExitDriver(GeodeHandle gh);
 void GeodeExitSystemDrivers(void);
+/* geodesLoad.c: the loaded geodes; of them processes, libraries and
+ * drivers (SysGetInfo) */
+void GeodeCount(word *total, word *processes, word *libraries,
+		word *drivers);
+/* IM/imScreenSaver.c: the screen saver delay (SysGetInfo) */
+word ImGetScreenSaverDelay(void);
 /* geodesLoad.c: the lock of the geode list (reentrant) */
 void GeodeLock(void);
 void GeodeUnlock(void);
@@ -913,6 +952,7 @@ extern ThreadHandle kernelBootThread;
 #define KEF_RESET	0x0002	/* the machine should reboot */
 #define KEF_POWER_OFF	0x0004	/* it may be switched off */
 extern word kernelExitFlags;
+extern byte kernelSysExitFlags;		/* ExitFlags of SysSetExitFlags */
 void EndGeos(word flags, const char *reason);
 Boolean KernelEnded(void);
 const char *KernelExitMessage(void);	/* "" if none */

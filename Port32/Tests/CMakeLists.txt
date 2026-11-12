@@ -129,6 +129,9 @@ add_test(NAME kernel.local COMMAND test_kernel_local)
 add_executable(test_kernel_timer test_kernel_timer.c)
 target_link_libraries(test_kernel_timer PRIVATE geos_kernel)
 add_test(NAME kernel.timer COMMAND test_kernel_timer)
+add_executable(test_kernel_sys test_kernel_sys.c)
+target_link_libraries(test_kernel_sys PRIVATE geos_kernel)
+add_test(NAME kernel.sys COMMAND test_kernel_sys)
 
 # ghal_module: a geode in the host's module format (ELF, or DXE3 on dos32),
 # embedded in the test program.  Not with Open Watcom (no geode toolchain).

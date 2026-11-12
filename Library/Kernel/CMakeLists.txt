@@ -1,18 +1,20 @@
 # The C kernel (Port32/PLAN.md P4).  Its files lie next to the asm they
 # replace; the pmake build of the asm kernel lists its sources in the
 # generated Makefile and is not affected.
-#   Sys/sysError.c     <- fatal errors of Sys/sysError.asm
+#   Sys/sysError.c     <- fatal errors, SysNotify of Sys/sysError.asm
 #   Heap/heapHandle.c  <- handle table of Heap/heapHandle.asm
 #   Heap/heapHigh.c    <- memory block API of Heap/heapHigh.asm, heapC.asm
 #   Heap/heapCompress.c <- LZG of Heap/heapCompress.asm
 #   Thread/threadThread.c <- threads, scheduler of Thread/threadThread.asm
 #   Thread/threadSem.c <- semaphores, thread locks of Thread/threadSem.asm
+#   Thread/threadPrivate.c <- thread-private words of threadPrivate.asm
 #   LMem/lmemCode.c    <- local memory heaps of LMem/lmemCode.asm
 #   LMem/lmemChunkArray.c, lmemElementArray.c, lmemNameArray.c
 #                      <- the arrays of the same names (.asm)
 #   LMem/lmemGCNList.c <- GCN lists of LMem/lmemGCNList.asm
 #   Timer/timerList.c  <- timers of Timer/timerList.asm, timerMisc.asm
 #   Timer/timerInt.c   <- the timer interrupt of Timer/timerInt.asm
+#   Timer/timerMisc.c  <- date and time of Timer/timerMisc.asm
 #   Geodes/geodesEvent.c <- events, queues, ObjMessage of geodesEvent.asm
 #   Geodes/geodesResource.c <- resource handles of geodes
 #   Geodes/geodesLoad.c  <- GeodeLoad of Geodes/geodesLoad.asm (modules)
@@ -55,7 +57,8 @@
 #                      init file (geos.ini) of the same asm files,
 #                      initfileC.asm and Loader/ini.asm
 #   Boot/bootBoot.c <- EndGeos of bootBoot.asm (RemoveGeodes, ExitFile)
-#   Sys/sysMisc.c   <- SysShutdown of sysMisc.asm and sysC.asm
+#   Sys/sysMisc.c   <- SysShutdown, exit flags, Util hex of sysMisc.asm
+#   Sys/sysStats.c  <- SysGetInfo, SysStatistics of Sys/sysStats.asm
 #   IM/imInit.c, imMonitors.c, imMisc.c, imPtr.c, imScreenSaver.c <- the input
 #                      manager of imInit.asm, imMonitors.asm, imMisc.asm,
 #                      imPtr.asm and imScreenSaver.asm
@@ -82,6 +85,7 @@ add_library(geos_kernel_objs OBJECT
   Heap/heapCompress.c
   Thread/threadThread.c
   Thread/threadSem.c
+  Thread/threadPrivate.c
   LMem/lmemCode.c
   LMem/lmemChunkArray.c
   LMem/lmemElementArray.c
@@ -89,6 +93,7 @@ add_library(geos_kernel_objs OBJECT
   LMem/lmemGCNList.c
   Timer/timerList.c
   Timer/timerInt.c
+  Timer/timerMisc.c
   Geodes/geodesEvent.c
   Geodes/geodesResource.c
   Geodes/geodesLoad.c
@@ -129,6 +134,7 @@ add_library(geos_kernel_objs OBJECT
   Boot/bootInit.c
   Boot/bootBoot.c
   Sys/sysMisc.c
+  Sys/sysStats.c
   IM/imInit.c
   IM/imMonitors.c
   IM/imMisc.c

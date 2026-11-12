@@ -1,7 +1,8 @@
 /*
  * test_kernel_thread.c -- threads, scheduler, semaphores and thread locks
  * of the C kernel (Library/Kernel/Thread/threadThread.c, threadSem.c) and
- * HandleP/MemThreadGrab (Heap/heapHigh.c), on ghal_ctx.
+ * HandleP/MemThreadGrab and the shared/exclusive locks (Heap/heapHigh.c),
+ * thread-private words (Thread/threadPrivate.c), on ghal_ctx.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -124,6 +125,41 @@ static word Grabber(word c)
     return 0;
 }
 
+/* shared and exclusive locks of `block' */
+static word Sharer(word c)
+{
+    char *p;
+    Note('r');
+    p = MemLockShared(block);
+    Note((char) (p[0] == 'S' ? c : '?'));
+    MemUnlockShared(block);
+    ThreadVSem(done);
+    return 0;
+}
+
+static word Writer(word c)
+{
+    char *p;
+    (void) c;
+    Note('w');
+    p = MemLockExcl(block);
+    Note('W');
+    ThreadPSem(pong);			/* hold it while main looks */
+    p[0] = 'S';
+    MemUnlockExcl(block);
+    ThreadVSem(done);
+    return 0;
+}
+
+/* its own thread-private words are 0 */
+static word Private(word off)
+{
+    Note((char) (*ThreadPrivData(off) == 0 ? 'p' : '?'));
+    *ThreadPrivData(off) = 99;
+    ThreadVSem(done);
+    return 0;
+}
+
 static word Waker(word c)
 {
     (void) c;
@@ -237,6 +273,78 @@ int main(void)
     CHECK_TRACE("v");
     ThreadPSem(done);
     CHECK(ThreadPTimedSem(ping, 0) == SE_TIMEOUT);	/* value back to 0 */
+
+    /* shared locks: sharers together, a writer alone, sharers that come
+     * while the writer has it wait for it */
+    block = MemAlloc(16, HF_SWAPABLE | HF_SHARABLE, HAF_ZERO_INIT);
+    p = MemLockShared(block);
+    p[0] = 'S';
+    ThreadCreate(PRIORITY_LOW, 'a', Sharer, 0, 0x2340);
+    ThreadPSem(done);
+    CHECK_TRACE("ra");			/* joined main's shared lock */
+    ThreadCreate(PRIORITY_LOW, 0, Writer, 0, 0x2340);
+    ThreadPTimedSem(ping, 3);
+    CHECK_TRACE("w");			/* waits for main */
+    MemUnlockShared(block);
+    ThreadCreate(PRIORITY_LOW, 'b', Sharer, 0, 0x2340);
+    ThreadPTimedSem(ping, 3);
+    CHECK_TRACE("Wr");			/* the writer has it, b waits */
+    ThreadVSem(pong);
+    ThreadPSem(done);
+    ThreadPSem(done);
+    CHECK_TRACE("b");
+    CHECK(MemEntryOf(block)->HE_sem.S_value == 1 &&
+	  MemEntryOf(block)->HE_nesting == 0 &&
+	  MemEntryOf(block)->HE_lockCount == 0);
+    /* upgrade alone, downgrade */
+    p = MemLockShared(block);
+    CHECK(MemUpgradeSharedLock(block) == p);
+    CHECK(MemEntryOf(block)->HE_nesting == 0 &&
+	  MemEntryOf(block)->HE_sem.S_value == 0);
+    MemDowngradeExclLock(block);
+    ThreadCreate(PRIORITY_LOW, 'c', Sharer, 0, 0x2340);
+    ThreadPSem(done);
+    CHECK_TRACE("rc");
+    MemUnlockShared(block);
+    CHECK(MemLockExcl(block) == p);
+    MemUnlockExcl(block);
+    CHECK(MemEntryOf(block)->HE_sem.S_value == 1 &&
+	  MemEntryOf(block)->HE_lockCount == 0);
+    EXPECT_FATAL(UPGRADING_SHARED_LOCK_WITHOUT_HAVING_LOCKED_IT_SHARED,
+		 MemUpgradeSharedLock(block));
+    EXPECT_FATAL(DOWNGRADING_EXCL_LOCK_WITHOUT_HAVING_LOCKED_IT_EXCL,
+		 MemDowngradeExclLock(block));
+    CHECK(MemLockFixedOrMovable(p) == p);
+    MemUnlockFixedOrMovable(p);
+    MemFree(block);
+
+    /* thread-private words: first fit, per thread, freed with the geode */
+    {
+	word a, b, c;
+	a = ThreadPrivAlloc(3, 0x2340);
+	b = ThreadPrivAlloc(THREAD_PRIV_WORDS - 3, 0x2350);
+	CHECK(a == 2 && b == 8);
+	CHECK(ThreadPrivAlloc(1, 0x2340) == 0);	/* full */
+	*ThreadPrivData(a) = 7;
+	ThreadCreate(PRIORITY_LOW, a, Private, 0, 0x2340);
+	ThreadPSem(done);
+	CHECK_TRACE("p");
+	CHECK(*ThreadPrivData(a) == 7);
+	ThreadPrivFree(a, 3);
+	c = ThreadPrivAlloc(2, 0x2340);
+	CHECK(c == a);
+	EXPECT_FATAL(THREAD_PRIVATE_DATA_NOT_ALLOCATED,
+		     ThreadPrivFree((word) (2 * (THREAD_PRIV_WORDS + 1)), 1));
+	ThreadPrivAlloc(1, 0x2360);		/* the word after c */
+	EXPECT_FATAL(THREAD_PRIVATE_DATA_OWNED_BY_SOMEONE_ELSE,
+		     ThreadPrivFree(c, 3));
+	ThreadPrivExit(0x2360);
+	ThreadPrivExit(0x2350);
+	CHECK(ThreadPrivAlloc(THREAD_PRIV_WORDS - 2, 0x2340) == c + 4);
+	ThreadPrivExit(0x2340);
+	CHECK(ThreadPrivAlloc(THREAD_PRIV_WORDS, 0x2340) == 2);
+	ThreadPrivExit(0x2340);
+    }
 
     /* error checks */
     EXPECT_FATAL(NON_SEMAPHORE_PASSED_TO_SEM_ROUTINE, ThreadPSem(me));

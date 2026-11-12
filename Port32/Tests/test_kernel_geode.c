@@ -27,6 +27,7 @@
  *     frees kglib (LCT_DETACH); no handle is left over.
  */
 #include "kernelC.h"
+#include <sysstats.h>
 #include <win.h>
 #include "ghal.h"
 #include <geosdriver.h>
@@ -213,6 +214,24 @@ int main(int argc, char **argv)
     Check(st->KGAS_value1 == 7 && st->KGAS_value2 == 9, "appInfo words");
     Check(st->KGAS_sum == 16, "routine of the library");
     Check(st->KGAS_count == 12, "object of the library's class");
+    /* references, the UI's word, the first thread */
+    GeodeAddReference(lib);
+    Check(GeodeGetInfo(lib, GGIT_GEODE_REF_COUNT, NULL) == 3, "reference");
+    Check(GeodeRemoveReference(lib) == FALSE &&
+	  GeodeGetInfo(lib, GGIT_GEODE_REF_COUNT, NULL) == 2,
+	  "reference removed");
+    Check(GeodeGetUIData(app) == 0, "no UI data");
+    GeodeSetUIData(app, 0x1234);
+    Check(GeodeGetUIData(app) == 0x1234, "UI data");
+    Check(ProcInfo(app) != 0 &&
+	  HandleEntryOf(ProcInfo(app))->HE_owner == app, "ProcInfo");
+    {
+	word total, procs, libs, drvs;
+	GeodeCount(&total, &procs, &libs, &drvs);
+	Check(procs >= 1 && libs >= 1 && total >= procs + libs - 1 &&
+	      SysGetInfo(SGIT_NUMBER_OF_PROCESSES) == procs &&
+	      SysGetInfo(SGIT_TOTAL_GEODES) == total, "geode counts");
+    }
     Check(st->KGAS_process == app, "GeodeGetProcessHandle");
     Check(st->KGAS_thread && st->KGAS_thread != me, "process thread");
     Check((ThreadHandle) MemGetInfo(app, MGIT_OTHER_INFO) == st->KGAS_thread,

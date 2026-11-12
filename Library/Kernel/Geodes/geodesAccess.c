@@ -112,3 +112,26 @@ void *ProcGetLibraryEntry(GeodeHandle library, word entryNumber)
     GeodeUnlock();
     return (void *) a;
 }
+
+/* the word the UI keeps for a process (PH_uiData); 0: the running one */
+word GeodeGetUIData(GeodeHandle gh)
+{
+    return CoreOrCurrent(&gh)->GC_uiData;
+}
+
+void GeodeSetUIData(GeodeHandle gh, word data)
+{
+    CoreOrCurrent(&gh)->GC_uiData = data;
+}
+
+/* the first thread of a process (HM_otherInfo of its core block) */
+ThreadHandle ProcInfo(GeodeHandle gh)
+{
+    return (ThreadHandle) MemEntryOf(gh)->HE_otherInfo;
+}
+
+/* no multi-language mode (MULTI_LANGUAGE was off in the asm kernel) */
+Boolean IsMultiLanguageModeOn(void)
+{
+    return FALSE;
+}

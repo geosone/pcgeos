@@ -12,8 +12,15 @@
  * list that TimerReap empties from normal code.
  *
  * Ticks are 1/60 s of the GHAL clock (KernelTicks), so TimerGetCount and
- * the timeouts of ThreadPTimedSem agree.  Not yet: real-time timers
- * (TIMER_*_REAL_TIME: an alarm at a date and time).
+ * the timeouts of ThreadPTimedSem agree.
+ *
+ * Real-time timers (TIMER_*_REAL_TIME) go off at a date and minute: ticks
+ * is the TimerCompressedDate, interval the hours (high byte) and minutes.
+ * They wait on their own list, sorted by that time; every second the
+ * interrupt checks it against the clock (KernelRealTimeNow), and so does
+ * TimerSetDateAndTime.  A due one sends its message or calls its routine
+ * once with the date and time it was set for (TimerCompressedDate << 16
+ * | hours << 8 | minutes) where the others pass the tick count, and id 0.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -30,6 +37,7 @@ typedef struct KTimer {
 } KTimer;
 
 static KTimer *timerList;		/* sorted by TI_due */
+static KTimer *realTimeList;		/* sorted by TI_due (date, time) */
 static KTimer *endedList;		/* to be freed by TimerReap */
 static word nextId = 1;
 
@@ -75,6 +83,11 @@ static int IsRoutine(TimerType type)
 	   type == TIMER_MS_ROUTINE_ONE_SHOT;
 }
 
+static int IsRealTime(TimerType type)
+{
+    return type == TIMER_EVENT_REAL_TIME || type == TIMER_ROUTINE_REAL_TIME;
+}
+
 static int IsContinual(TimerType type)
 {
     return type == TIMER_ROUTINE_CONTINUAL || type == TIMER_EVENT_CONTINUAL;
@@ -93,13 +106,18 @@ TimerHandle TimerStart(TimerType timerType, optr destObject, word ticks,
     case TIMER_EVENT_ONE_SHOT:
     case TIMER_EVENT_CONTINUAL:
     case TIMER_MS_ROUTINE_ONE_SHOT:
+    case TIMER_EVENT_REAL_TIME:
+    case TIMER_ROUTINE_REAL_TIME:
 	break;
-    default:				/* real-time timers: not yet */
+    default:
 	KernelFatal(BAD_TIMER_TYPE);
     }
-    if (timerType == TIMER_MS_ROUTINE_ONE_SHOT)	/* ms -> ticks, up */
+    if (IsRealTime(timerType)) {
+	ghal_datetime now;
+	KernelGetDateTime(&now);	/* the interrupt counts from here */
+    } else if (timerType == TIMER_MS_ROUTINE_ONE_SHOT)	/* ms -> ticks, up */
 	ticks = (word) (((dword) ticks * TIMER_INTERRUPT_RATE + 999) / 1000);
-    if (ticks == 0)
+    if (ticks == 0 && !IsRealTime(timerType))
 	ticks = 1;			/* at the next tick */
     t = ghal_mem_alloc(sizeof(KTimer), GHAL_MEM_ZERO);
     if (!t)
@@ -120,8 +138,17 @@ TimerHandle TimerStart(TimerType timerType, optr destObject, word ticks,
     t->TI_id = nextId++;
     if (nextId == 0)
 	nextId = 1;
-    t->TI_due = KernelTicks() + ticks;
-    Insert(t);
+    if (IsRealTime(timerType)) {
+	KTimer **p = &realTimeList;
+	t->TI_due = ((dword) ticks << 16) | interval;
+	while (*p && (*p)->TI_due <= t->TI_due)
+	    p = &(*p)->TI_next;
+	t->TI_next = *p;
+	*p = t;
+    } else {
+	t->TI_due = KernelTicks() + ticks;
+	Insert(t);
+    }
     ghal_crit_leave();
     if (id)
 	*id = t->TI_id;
@@ -136,14 +163,19 @@ Boolean TimerStop(TimerHandle th, word id)
 
     ghal_crit_enter();
     for (p = &timerList; *p; p = &(*p)->TI_next)
-	if ((*p)->TI_handle == th && (*p)->TI_id == id) {
-	    KTimer *t = *p;
-	    *p = t->TI_next;
-	    t->TI_next = endedList;
-	    endedList = t;
-	    notFound = FALSE;
+	if ((*p)->TI_handle == th && (*p)->TI_id == id)
 	    break;
-	}
+    if (!*p)
+	for (p = &realTimeList; *p; p = &(*p)->TI_next)
+	    if ((*p)->TI_handle == th && (*p)->TI_id == id)
+		break;
+    if (*p) {
+	KTimer *t = *p;
+	*p = t->TI_next;
+	t->TI_next = endedList;
+	endedList = t;
+	notFound = FALSE;
+    }
     ghal_crit_leave();
     TimerReap();
     return notFound;
@@ -173,6 +205,26 @@ void TimerCheckList(dword now)
 	    t->TI_next = endedList;
 	    endedList = t;
 	}
+    }
+}
+
+/* CheckRealTimeTimers (timerInt.asm): inside ghal_crit */
+void TimerCheckRealTime(dword now)
+{
+    if (!now)
+	return;
+    while (realTimeList && realTimeList->TI_due <= now) {
+	KTimer *t = realTimeList;
+	realTimeList = t->TI_next;
+	if (t->TI_type == TIMER_ROUTINE_REAL_TIME) {
+	    TimerRoutine *fn = (TimerRoutine *) (uintptr_t) t->TI_dest;
+	    fn((word) t->TI_msg, t->TI_due);
+	} else if (kernelTimerEventHook)
+	    kernelTimerEventHook(t->TI_dest, t->TI_msg, t->TI_due, 0);
+	else
+	    kernelTimerEventsDropped++;
+	t->TI_next = endedList;
+	endedList = t;
     }
 }
 

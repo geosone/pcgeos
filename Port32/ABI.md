@@ -892,8 +892,18 @@ The C kernel starts with the handle table and the memory block API of
 - **Fatal errors** keep the names of `kernelErrors.def`, not their
   numbers; the C kernel reports them by name (`KernelFatal`).
 - `HandleP`/`HandleV`, `MemPLock`/`MemUnlockV` and `MemThreadGrab`
-  use a semaphore in every handle entry (section 9). Not yet: the
-  shared/exclusive locks.
+  use a semaphore in every handle entry (section 9).
+- **Shared and exclusive locks** (`MemLockShared`, `MemLockExcl`,
+  `MemUnlockShared`/`MemUnlockExcl`, `MemUpgradeSharedLock`,
+  `MemDowngradeExclLock`): the handle's semaphore is held by one writer
+  or by the group of sharers, counted in `HE_nesting`. A sharer joins a
+  group that holds it, takes a free semaphore, or waits. Sharers wait
+  on one kernel queue and all look again when a block is released or
+  downgraded (the asm woke them on the handle's queue). Writers wait on
+  the handle's semaphore. An upgrade by the only sharer happens at
+  once. Otherwise the shared lock is dropped and the exclusive lock is
+  waited for, as in the asm. `MemLockFixedOrMovable` returns the pointer,
+  because there are no virtual segments.
 - **`MemModifyOtherInfo` takes a `dword`** under `GEOS_PORT32`: the
   other info may hold a thread handle (exec thread, grabbing thread).
 
@@ -931,6 +941,13 @@ contexts (`ghal_ctx`).
   timeout 0 does not block.
 - **`ThreadGetInfo` returns a `dword`** under `GEOS_PORT32` (thread and
   queue handles are 32 bits).
+- **Thread-private words** (`Thread/threadPrivate.c`): `ThreadPrivAlloc`
+  gives a geode a range of the 16 words every thread has, first fit.
+  The words of an exiting geode are freed. The asm read them at
+  `ss:offset` in the `ThreadPrivateData`. A Port32 thread keeps them in
+  its `KThread`, read through `ThreadPrivData(offset)` (`thread.h`,
+  `GEOS_PORT32`). An offset is never 0, because 0 means no room.
+- `ThreadSetError` sets what `ThreadGetError` returns.
 
 ctest `kernel.thread` covers turn taking, priorities and preemption,
 yield and `ThreadModify`, release of ended threads, nested thread locks
@@ -1024,8 +1041,20 @@ every chunk through its goc chunk handle.
 - **Event timers** send their message from the interrupt (section 12):
   parameters `(dword tickCount, word id)`; for continual timers the id is
   the interval, as in the asm kernel.
-- **Real-time timers** (`TIMER_*_REAL_TIME`) are not there yet
-  (`BAD_TIMER_TYPE`).
+- **Real-time timers** (`TIMER_*_REAL_TIME`): `ticks` is the
+  `TimerCompressedDate` and `interval` holds the hour (high byte) and
+  minute. They wait on a list of their own, sorted by that time. Every
+  second the interrupt compares it with the clock, and so does
+  `TimerSetDateAndTime`. Routine and event alike get
+  `(TCD << 16 | hour << 8 | minute, id 0)`; the asm passed its handle
+  and the time in registers.
+- **Date and time** (`Timer/timerMisc.c`): GEOS never sets the host's
+  clock. `TimerSetDateAndTime` keeps an offset to it, sends
+  `MSG_META_DATE_TIME_CHANGE` to `GCNSLT_DATE_TIME` and checks the
+  real-time timers. The interrupt does not call the host. It counts
+  ticks from the last time the clock was read (`KernelRealTimeNow`).
+  Dates go from 1/1/1980 on, with the weekday computed.
+  `TimerGetFileDateTime` and the file routines use the same clock.
 - Interrupt code does not free memory (DJGPP's `malloc` under a hardware
   interrupt); ended timers are freed from normal code (`TimerReap`).
 
@@ -1039,7 +1068,10 @@ next kernel entry (`KernelPreemptPoint`: `MemLock`, semaphore P,
 GHAL-Concept §4.1: soft preemption first; hard preemption of threads
 that never enter the kernel is not needed so far.
 
-ctest `kernel.timer`: sleep, one-shot and continual routine timers,
+ctest `kernel.timer`: the date and time set and read again (a leap day,
+the weekday, the file date), real-time timers going off when the clock
+reaches them, stopped, or in the past; sleep, one-shot and continual
+routine timers,
 `TimerStop` (found, ended, wrong id), millisecond timers, an interrupt
 waking a blocked thread, event timers through the hook, and two
 computing threads of the same priority sharing the CPU by time slices
@@ -2220,8 +2252,7 @@ seconds once `MSG_IM_ENABLE_SCREEN_SAVER` is sent; the delay is
 - `GCNSLT_SCREEN_SAVER_NOTIFICATIONS` gets `MSG_META_NOTIFY` with the
   `ScrSaverStatus` on enable, disable, blank and the deactivate message,
   not when input unblanks, as in the asm.
-- Not yet: the power driver's `DR_POWER_LONG_TERM_IDLE`, the delay
-  through `SysGetInfo`.
+- Not yet: the power driver's `DR_POWER_LONG_TERM_IDLE`.
 
 ctest `kernel.im` runs it with a queue as the saver.
 
@@ -3499,6 +3530,41 @@ files with `vmcheck.py`. It now checks databases too: the DB map,
 groups, free lists, item blocks and their back links, chunks against
 `DBIBI_refCount`, `DBGH_numItems` and the map item. It finds all 2217
 VM files of the repository with a database sound.
+
+### 13u. Small system routines (`Sys/sysMisc.c`, `sysStats.c`, `sysError.c`, `Geodes`)
+
+- **`SysSetExitFlags`** keeps the `ExitFlags` of `system.h`. `EndGeos`
+  turns `EF_RESET` into a reset. `SysGet/SetECLevel` only store the
+  value, because the C kernel's checks do not depend on it.
+- **`SysGetDosEnvironment`** reads the host's environment; the asm read
+  the loader's DOS environment block.
+- **`UtilHex32ToAscii`, `UtilAsciiToHex32`** behave like the asm,
+  including its edges: thousands separators from the numeric format,
+  unsigned values up to 4294967295, and -2147483648 as an overflow.
+- **`SysGetInfo`**: the handles are those of the table so far. Heap size
+  and largest free block are 0xffff paragraphs, since there is no DOS
+  heap. `SGIT_TOTAL_COUNT` is the tick count. The geodes are counted by
+  type; the system disk, UI process and screen saver delay are
+  reported. Values that mean nothing in Port32 are 0: segments, loader
+  variables, the BIOS lock and text modes. Not yet: the number of
+  volumes and the counter at the last input.
+- **`SysStatistics`** gives the scheduler's counts of the last second:
+  how often it found nothing to run, context switches, timer interrupts
+  and the run queue. There is no swapping.
+- **`SysNotify`** has no box yet. It logs both strings and answers with
+  what needs no user: abort, else continue, else retry, else exit (a
+  forced clean shutdown), else reboot. `kernelSysNotifyHook` may answer
+  instead.
+- `SysGetPenMode` is `FALSE` (no digitizer yet). The ink size is kept.
+- **Geodes**: `GeodeAddReference`, `GeodeRemoveReference` (`TRUE` when
+  the geode went), `GeodeGet/SetUIData`, `ProcInfo` (the first thread).
+  `IsMultiLanguageModeOn` is `FALSE`.
+
+ctest `kernel.sys` covers the numbers, flags, environment, `SysGetInfo`,
+`SysStatistics` over a second and `SysNotify`; `kernel.geode` covers
+the references, UI data, `ProcInfo` and the geode counts; and
+`kernel.thread` covers the shared locks between threads, upgrade,
+downgrade and the thread-private words.
 
 ## 14. Open
 

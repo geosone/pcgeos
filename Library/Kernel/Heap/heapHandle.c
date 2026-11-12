@@ -148,3 +148,8 @@ dword HandleCountUsed(void)
 {
     return used;
 }
+
+dword HandleCountTotal(void)
+{
+    return pageCount * HANDLE_PAGE;
+}

@@ -116,7 +116,8 @@ FileDateAndTime FileNow(void)
 {
     ghal_datetime dt;
 
-    return ghal_time_get_local(&dt) == GHAL_OK ? FilePackDate(&dt) : 0;
+    KernelGetDateTime(&dt);		/* GEOS's clock (timerMisc.c) */
+    return FilePackDate(&dt);
 }
 
 word FileSetDateAndTime(FileHandle fh, FileDateAndTime dateAndTime)

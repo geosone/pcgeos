@@ -4,7 +4,8 @@
  * GHAL_IRQ_TICK at 60 Hz (the PIT on dos32, a host thread elsewhere)
  * runs, as interrupt code inside ghal_crit: the due timers, the CPU
  * usage and time slice of the running thread and the timeouts of
- * blocked threads; every second it halves the CPU usage of all threads.
+ * blocked threads; every second it halves the CPU usage of all threads
+ * and checks the real-time timers.
  * A thread switch it wants (time slice over, a better thread ready)
  * happens at the next kernel entry (KernelPreemptPoint) or, when every
  * thread waits, right away (the idle loop sees the ready thread).
@@ -23,6 +24,7 @@ static void TimerInterrupt(void *ctx)
     if (--ticksToDecay == 0) {
 	ticksToDecay = TIMER_INTERRUPT_RATE;
 	ThreadDecay();
+	TimerCheckRealTime(KernelRealTimeNow(KernelTicks()));
     }
 }
 
