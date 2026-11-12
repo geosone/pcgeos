@@ -66,7 +66,9 @@ typedef struct {
     Handle		W_updateState;	/* GState doing an update, or 0 */
     WinPrivateData	W_privData;
     void		*W_driverStrategy; /* of the window's video driver */
-    dword		W_bitmap;	/* HugeArray of a bitmap's window */
+    optr		W_bitmap;	/* a bitmap's window: its HugeArray,
+					 * file << 32 | block (DOS16: the
+					 * file:block in a dword) */
     void		*W_bmSegment;	/* its locked block (a pointer) */
     ChunkHandle		W_palette;	/* custom palette, or 0 */
     WinPriorityData	W_priority;

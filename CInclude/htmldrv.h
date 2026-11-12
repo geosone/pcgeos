@@ -217,6 +217,8 @@ typedef struct {
  * Internal data structure of a HugeBitmap. We can use this to create
  * HugeBitmaps from scratch or to quickly get properties of a graphic.
  */
+#ifndef _EDITABLE_BITMAP_DEFINED  /* Internal/videoDr.h has all of it */
+#define _EDITABLE_BITMAP_DEFINED
 typedef struct {
     HugeArrayDirectory EB_header;
     CBitmap            EB_bm;
@@ -224,6 +226,7 @@ typedef struct {
     MemHandle          EB_color;
     /* other stuff here, don't use size of EditableBitmap */
 } EditableBitmap;
+#endif
 
 
 typedef VMBlockHandle _pascal _export entry_MimeDrvGraphic(_MimeGraphicParams_);

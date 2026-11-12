@@ -297,8 +297,10 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   endif()
 
   # drawing through the window system to the host video driver
-  add_executable(test_kernel_draw test_kernel_draw.c ${_hostvid_c})
-  add_dependencies(test_kernel_draw geode_hostvid)
+  geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
+  add_executable(test_kernel_draw test_kernel_draw.c ${_hostvid_c}
+                 ${_vidmem_c})
+  add_dependencies(test_kernel_draw geode_hostvid geode_vidmem)
   target_include_directories(test_kernel_draw PRIVATE
     ${PROJECT_SOURCE_DIR}/Library/Kernel)
   target_link_libraries(test_kernel_draw PRIVATE geos_kernel)
@@ -309,5 +311,15 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
                      $<TARGET_FILE:test_kernel_draw>)
   else()
     add_test(NAME kernel.draw COMMAND test_kernel_draw)
+  endif()
+  # the bitmaps it leaves (a huge bitmap, one of GrCreateBitmap)
+  if(Python3_FOUND AND NOT GEOS_HOST STREQUAL "dos32")
+    set_tests_properties(kernel.draw PROPERTIES FIXTURES_SETUP bmfiles)
+    add_test(NAME kernel.draw.format COMMAND ${Python3_EXECUTABLE}
+      ${PROJECT_SOURCE_DIR}/Port32/tools/vmcheck.py --strict
+      ${CMAKE_CURRENT_BINARY_DIR}/GDRTOP/HB.VM
+      ${CMAKE_CURRENT_BINARY_DIR}/GDRTOP/BM.VM)
+    set_tests_properties(kernel.draw.format
+      PROPERTIES FIXTURES_REQUIRED bmfiles)
   endif()
 endif()

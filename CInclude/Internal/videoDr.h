@@ -30,6 +30,8 @@
 #include <driver.h>
 #include <graphics.h>
 #include <win.h>
+#include <hugearr.h>
+#include <stddef.h>
 
 /* 5.3, as videoDr.def has it (the minor from the major, sic) */
 #define VIDEO_PROTO_MAJOR	(DRIVER_EXT_PROTO_MAJOR+2)
@@ -187,5 +189,26 @@ typedef struct {
 } PointerDef;
 
 #define STANDARD_CURSOR_IMAGE_SIZE	32
+
+/*
+ * EditableBitmap (videoDr.def): the directory block of a bitmap made by
+ * GrCreateBitmap, its header after the HugeArrayDirectory.  The part
+ * after the HugeArrayDirectory is as in DOS16 (the file has it at 26):
+ * EB_color is the word of the DOS16 handle (no color transfer yet),
+ * EB_device the DOS16 VideoDriverInfo (32 bytes: the far strategy
+ * pointer and the resource handle of 16 bits) that CB_devInfo names.
+ * The memory video driver keeps a VideoDriverInfo of its own.
+ */
+#define EB_DEVICE_SIZE	32
+#define _EDITABLE_BITMAP_DEFINED
+typedef struct {
+    HugeArrayDirectory	EB_header;
+    CBitmap		EB_bm;
+    word		EB_flags;	/* BitmapMode */
+    word		EB_color;
+    byte		EB_device[EB_DEVICE_SIZE];
+} EditableBitmap;
+#define EB_BM(dir)	((CBitmap *) ((byte *) (dir) + \
+					  offsetof(EditableBitmap, EB_bm)))
 
 #endif /* __INTERNAL_VIDEODR_H */

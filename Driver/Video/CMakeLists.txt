@@ -1,6 +1,7 @@
 # The C video drivers: the common part (VidCom/*.c, beside the
-# vidcom*.asm) and a device part per driver.  Only the host display
-# (Host/, on ghal_display) so far.  The protocol is VIDEO_PROTO of
+# vidcom*.asm) and a device part per driver.  The host display
+# (Host/, on ghal_display) and the memory video driver (Dumb/VidMem,
+# into bitmaps).  The protocol is VIDEO_PROTO of
 # videoDr.def (5.3), as the DOS16 drivers have it.  Geodes need gcc or
 # clang (module loading).
 include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
@@ -26,3 +27,11 @@ geos_geode(hostvid ${_vidcom}
            GP Host/hostvid.gp PROTOCOL 5.3
            INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/VidCom)
 set(hostvid_GEO ${hostvid_GEO} PARENT_SCOPE)
+# the memory video driver: bitmaps of GrCreateBitmap
+set(_vidmem ${CMAKE_CURRENT_SOURCE_DIR}/Dumb/VidMem)
+geos_geode(vidmem ${_vidcom}
+           ${_vidmem}/Main/mainMain.c
+           ${_vidmem}/vidmemUtils.c
+           GP Dumb/VidMem/vidmem.gp PROTOCOL 5.3
+           INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/VidCom ${_vidmem})
+set(vidmem_GEO ${vidmem_GEO} PARENT_SCOPE)

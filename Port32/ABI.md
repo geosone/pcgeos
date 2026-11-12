@@ -767,6 +767,29 @@ buffer.
   with the default arrow (`pBasic`). It can be up to 32x32; DOS16 took
   16x16.
 
+**The memory video driver** is `Driver/Video/Dumb/VidMem`
+(`vidmem.geo`; `Main/mainMain.c` and `vidmemUtils.c` beside the asm,
+with the C vidcom). It draws into the bitmaps of `GrCreateBitmap`
+(§13m), the default driver `GDDT_MEMORY_VIDEO`.
+- The device part learns at the start of each function what it draws
+  on (`VidDevBegin`, the window at `es:di`): the window's `W_bitmap`
+  names the huge array (an optr, file << 32 | block, as handles are 32
+  bits; DOS16 had file:block in a dword). It locks the directory block
+  itself unless the kernel did (`W_bmSegment`), and the scan lines of
+  one data block at a time.
+- `DR_VID_INFO` (`VidDevInfo`) describes the bitmap: its size and
+  format, `BMF_MONO` while the mask is edited.
+- Formats: monochrome (1 = black), 4 and 8 bits (palette indices: a
+  color is drawn as the nearest entry of the bitmap's palette or the
+  default one, the mix modes work on the indices), 24 bits; the mask
+  with `BM_EDIT_MASK`. A monochrome bitmap gets black where a color is
+  dark; DOS16 dithered.
+- Not yet: CMYK, dithering, color transfer, the palette functions,
+  `PUTSTRING`. There is no device to set, no pointer, no XOR region.
+
+The host display got `VidDevInfo` and `VidDevBegin` too; they do
+nothing there.
+
 Who tells the input manager the screen's size is the window system's
 business, as `ImSetPtrWin` did in DOS16. Until there is one, it is
 `ImSetScreenLimits` (§13j).
@@ -2464,6 +2487,21 @@ than a pixel is a six-point polygon.
   array a slice (the directory stays locked, the data blocks are
   locked in turn), so scaling, rotation and PackBits work as for the
   others.
+- Bitmaps to draw into (`graphicsBitmapCreate.c`): `GrCreateBitmap`,
+  `GrCreateBitmapRaw`, `GrEditBitmap`, `GrDestroyBitmap`,
+  `GrSet`/`GetBitmapMode`, `GrClearBitmap`, `GrGetPoint`,
+  `GrSet`/`GetBitmapRes`, `GrGetBitmapSize`, `GrGetHugeBitmapSize`;
+  `GrGetPalette` (`graphicsColor.c`). The bitmap is a huge array whose
+  directory block is an `EditableBitmap` (`CInclude/Internal/videoDr.h`)
+  with the DOS16 layout after the `HugeArrayDirectory`: the `CBitmap`,
+  `EB_flags`, `EB_color` (a word: no color transfer yet), `EB_device`
+  (the DOS16 `VideoDriverInfo`, 32 bytes, `CB_devInfo` 24), the
+  scratch buffer the asm reserved, then the palette of a `BMT_PALETTE`
+  bitmap. The window is a root window on the memory video driver (see
+  §7.5). The kernel does not lock the directory block into
+  `W_bmSegment` around drawing as `EnterGraphics` did; the driver
+  locks it. Not yet: `GrGetBitmap`, `GrCompactBitmap`,
+  `GrUncompactBitmap`.
 - Not yet: LZG, format conversion for devices with fewer colors.
 
 **GrBitBlt** (`graphicsRaster.c`, `GrBltCommon` for `WinScroll` too):

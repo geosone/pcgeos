@@ -79,6 +79,31 @@ void GrUnlockPalette(Handle win)
 	MemUnlock(win);
 }
 
+/* GrGetPalette: a copy of the palette (the window's or the default),
+ * 256 RGBValues in a new block; the caller frees it */
+MemHandle GrGetPalette(GStateHandle gstate, GetPalType flag)
+{
+    const byte *p = grDefaultPalette;
+    GState *gs = NULL;
+    Handle win = 0;
+    MemHandle mh;
+    word last;
+
+    if (flag != GPT_DEFAULT && gstate) {
+	gs = MemLock(gstate);
+	p = GrLockPalette(gs, &last, &win);
+    }
+    mh = MemAlloc(256 * 3, HF_SWAPABLE, 0);
+    if (mh) {
+	memcpy(MemLock(mh), p, 256 * 3);
+	MemUnlock(mh);
+    }
+    GrUnlockPalette(win);
+    if (gs)
+	MemUnlock(gstate);
+    return mh;
+}
+
 void GrSetColorIn(const GState *gs, CommonAttr *ca, ColorFlag flag,
 		  byte redOrIndex, byte green, byte blue)
 {

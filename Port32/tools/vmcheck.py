@@ -13,7 +13,9 @@ the lists of unassigned and assigned (free space) entries, the counts,
 and that used blocks and free space lie in the file without overlapping.
 Huge arrays (vmemHugeArray.asm): the chain link in LMBH_handle is
 HAD_data or HAB_next, the directory entries name the data blocks in
-chain order, with HAB_prev, HAB_dir and the element counts right.
+chain order, with HAB_prev, HAB_dir and the element counts right; a
+bitmap of GrCreateBitmap (an EditableBitmap: B_type with BMT_HUGE) has
+its CBitmap at 26, CB_devInfo 24, and scan lines of the right size.
 Exit code 1 if a file is broken.  An independent reading of
 vmemConstant.def, used to check the files of the C kernel (Port32 VMem).
 """
@@ -95,6 +97,18 @@ def chunk(blk, handle):
     return blk[e:e - 2 + size]
 
 
+BMT_HUGE = 0x20
+BMT_MASK = 0x10
+
+
+def line_size(width, btype):
+    """CalcLineSize"""
+    bits = (width + 7) >> 3
+    n = [bits, (width + 1) >> 1, width, width * 3][btype & 7] \
+        if btype & 7 < 4 else bits * 4
+    return n + (bits if btype & BMT_MASK else 0)
+
+
 def check_huge_array(blocks, uids, h, err):
     """the huge array whose directory block is h"""
     d = blocks[h]
@@ -113,6 +127,15 @@ def check_huge_array(blocks, uids, h, err):
     if esize != 8 or not entries or entries[0][0] != 0xffffffff:
         err("%s: bad directory" % what)
         return
+    if len(d) >= 46 and d[31] & BMT_HUGE:
+        width, height = struct.unpack_from("<2H", d, 26)
+        btype = d[31]
+        devinfo, = struct.unpack_from("<H", d, 26 + 10)
+        if devinfo != 24 or had_size != line_size(width, btype) or \
+                entries[-1][0] + 1 != height & 0xffffffff:
+            err("%s: bitmap %dx%d type %#x, CB_devInfo %d, %d bytes a line, "
+                "%d lines" % (what, width, height, btype, devinfo, had_size,
+                              (entries[-1][0] + 1) & 0xffffffff))
     b, prev = had_data, 0
     for i, (last, size, handle) in enumerate(entries[1:], 1):
         if handle != b or b not in blocks or uids.get(b) != SVMID_HA_BLOCK_ID:

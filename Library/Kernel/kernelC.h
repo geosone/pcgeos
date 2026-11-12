@@ -119,7 +119,8 @@
     X(CANNOT_LOAD_UI)		/* [ui] generic and ui.geo do not load */ \
     X(CANNOT_LOAD_KEYBOARD_DRIVER)	/* [keyboard] driver, kbd.geo */ \
     X(CANNOT_START_INPUT_MANAGER)	/* no thread for it */ \
-    X(BAD_SHUTDOWN_TYPE)		/* SysShutdown: no such type */
+    X(BAD_SHUTDOWN_TYPE)		/* SysShutdown: no such type */ \
+    X(GRAPHICS_BAD_BITMAP_FORMAT)	/* GrCreateBitmap: not drawable */
 
 #define KFE_ENUM(name) name,
 typedef enum {

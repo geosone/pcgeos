@@ -61,6 +61,17 @@ Boolean VidDevInit(void)
     return FALSE;
 }
 
+VideoDriverInfo *VidDevInfo(DriverRegs *r)
+{
+    (void) r;
+    return &DriverTable;
+}
+
+void VidDevBegin(DriverRegs *r)
+{
+    (void) r;
+}
+
 void VidDevExit(void)
 {
     if (hostOpen)

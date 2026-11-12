@@ -356,7 +356,7 @@ Boolean VidStrategy(word function, DriverRegs *r)
 	return TRUE;
     switch (function) {
     case DR_VID_INFO:			/* dx:si */
-	r->DR_dsSi = &DriverTable;
+	r->DR_dsSi = VidDevInfo(r);
 	return FALSE;
     case DR_VID_GET_EXCLUSIVE:
 	r->DR_bx = exclusiveGState;
@@ -371,6 +371,7 @@ Boolean VidStrategy(word function, DriverRegs *r)
     if (function > DR_VID_LAST_NON_EXCLUSIVE && Excluded(function, r))
 	return FALSE;
     ThreadPSem(videoSem);
+    VidDevBegin(r);
     if (function > DR_VID_LAST_NON_EXCLUSIVE) {	/* CheckXORCollision */
 	Rectangle b;
 	if (OpBounds(function, r, &b))

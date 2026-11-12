@@ -25,6 +25,9 @@
  *     complex one with a palette in two slices; scaled twice, half,
  *     mirrored in x and y, at 144 dpi, and rotated; huge bitmaps
  *     (a slice per block of the huge array), scaled, and PackBits;
+ *   - bitmaps to draw into (the memory video driver vidmem.geo): 24
+ *     bits, 4 bits, monochrome with a mask, GrGetPoint, the
+ *     resolution; drawn on the screen;
  *   - GrBitBlt: copy, move, clear, and from a source partly hidden;
  *   - WinScroll: the screen and the document moved, the rest washed;
  *   - fat lines: butt and square ends, mitered joins;
@@ -46,6 +49,8 @@
 
 extern const unsigned char hostvid_geode[];
 extern const unsigned long hostvid_geode_size;
+extern const unsigned char vidmem_geode[];
+extern const unsigned long vidmem_geode_size;
 
 static int fails;
 #define CHECK(c) \
@@ -182,6 +187,7 @@ int main(int argc, char **argv)
     Put("SYSTEM", NULL, 0);
     Put("SYSTEM/VIDEO", NULL, 0);
     Put("SYSTEM/VIDEO/hostvid.geo", hostvid_geode, hostvid_geode_size);
+    Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     FileSetStandardPath(SP_VIDEO_DRIVERS);
     drv = GeodeUseDriver("hostvid.geo", VIDEO_PROTO_MAJOR,
@@ -812,6 +818,89 @@ int main(int argc, char **argv)
 	      Pixel(28, 25) == BLACK && Pixel(39, 25) == BLACK &&
 	      Pixel(32, 26) == BLACK && Pixel(36, 26) == WHITE &&
 	      Pixel(24, 27) == WHITE);
+	CHECK(VMClose(vm, FALSE) == 0);
+    }
+
+    /* bitmaps to draw into: the memory video driver */
+    {
+	GeodeHandle mdrv;
+	VMFileHandle vm;
+	VMBlockHandle b24, b4, bm;
+	GStateHandle g24, g4, gm;
+	XYValueAsDWord sz;
+
+	FileSetStandardPath(SP_VIDEO_DRIVERS);
+	mdrv = GeodeUseDriver("vidmem.geo", VIDEO_PROTO_MAJOR,
+			      VIDEO_PROTO_MINOR, &e);
+	CHECK(mdrv != 0);
+	GeodeSetDefaultDriver(GDDT_MEMORY_VIDEO, mdrv);
+	FileSetStandardPath(SP_TOP);
+	vm = VMOpen("BM.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	CHECK(vm != 0);
+
+	/* 24 bits: white at first, drawn into, then drawn on the screen */
+	b24 = GrCreateBitmap(BMF_24BIT, 40, 30, vm, 0, &g24);
+	CHECK(b24 != 0 && GrGetPoint(g24, 0, 0) == 0xffffffUL &&
+	      GrGetPoint(g24, 39, 29) == 0xffffffUL);
+	SetCol(g24, RED);
+	GrFillRect(g24, 5, 5, 15, 10);
+	SetCol(g24, BLUE);
+	GrDrawLine(g24, 0, 20, 39, 20);
+	CHECK(GrGetPoint(g24, 5, 5) == 0x0000ffUL &&	/* red: al */
+	      GrGetPoint(g24, 14, 9) == 0x0000ffUL &&
+	      GrGetPoint(g24, 15, 9) == 0xffffffUL &&
+	      GrGetPoint(g24, 30, 20) == 0xff0000UL &&	/* blue: high */
+	      GrGetPoint(g24, 30, 21) == 0xffffffUL);
+	GrDrawHugeBitmap(g, 2, 2, vm, b24);
+	CHECK(Pixel(22, 22) == WHITE && Pixel(27, 27) == RED &&
+	      Pixel(36, 31) == RED && Pixel(37, 31) == WHITE &&
+	      Pixel(50, 42) == BLUE && Pixel(61, 51) == WHITE);
+	/* the resolution: the size in points and the scale */
+	GrSetBitmapRes(g24, 144, 144);
+	CHECK(GrGetBitmapRes(g24) == ((144UL << 16) | 144));
+	sz = GrGetHugeBitmapSize(vm, b24);
+	CHECK(sz == ((15UL << 16) | 20));
+	GrDestroyBitmap(g24, BMD_LEAVE_DATA);	/* for vmcheck.py */
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 50, 40);
+	GrDrawHugeBitmap(g, 2, 2, vm, b24);	/* still there: at 144 dpi */
+	CHECK(Pixel(25, 25) == RED && Pixel(29, 26) == RED &&
+	      Pixel(30, 25) == WHITE && Pixel(24, 25) == WHITE &&
+	      Pixel(37, 32) == BLUE && Pixel(37, 33) == WHITE);
+
+	/* 4 bits: palette indices */
+	b4 = GrCreateBitmap(BMF_4BIT, 20, 10, vm, 0, &g4);
+	SetCol(g4, 0x0000aaUL);			/* C_BLUE */
+	GrFillRect(g4, 0, 0, 7, 10);
+	CHECK(GrGetPoint(g4, 0, 0) == 0xaa0000UL &&
+	      GrGetPoint(g4, 6, 9) == 0xaa0000UL &&
+	      GrGetPoint(g4, 7, 0) == 0xffffffUL);
+	GrDrawHugeBitmap(g, 2, 40, vm, b4);
+	CHECK(Pixel(22, 60) == 0x0000aaUL && Pixel(28, 69) == 0x0000aaUL &&
+	      Pixel(29, 60) == WHITE);
+	GrDestroyBitmap(g4, BMD_KILL_DATA);
+
+	/* monochrome with a mask: drawing goes to the data, editing the
+	 * mask to the mask; only what the mask has is drawn */
+	bm = GrCreateBitmap(BMF_MONO | BMT_MASK, 16, 16, vm, 0, &gm);
+	SetCol(gm, BLACK);
+	GrFillRect(gm, 2, 2, 6, 6);
+	CHECK(GrGetPoint(gm, 2, 2) == 0 && GrGetPoint(gm, 6, 6) == 0xffffffUL);
+	GrSetBitmapMode(gm, BM_EDIT_MASK, 0);
+	CHECK(GrGetBitmapMode(gm) == BM_EDIT_MASK);
+	CHECK(GrGetPoint(gm, 0, 0) == 0xffffffUL);	/* the mask: clear */
+	GrFillRect(gm, 0, 0, 4, 4);
+	CHECK(GrGetPoint(gm, 3, 3) == 0 && GrGetPoint(gm, 4, 4) == 0xffffffUL);
+	GrSetBitmapMode(gm, 0, 0);
+	CHECK(GrGetPoint(gm, 4, 4) == 0);		/* the data again */
+	SetCol(g, BLUE);
+	GrFillRect(g, 40, 2, 60, 22);
+	SetCol(g, BLACK);
+	GrDrawHugeBitmap(g, 40, 2, vm, bm);
+	CHECK(Pixel(62, 24) == BLACK && Pixel(63, 25) == BLACK &&
+	      Pixel(64, 24) == BLUE && Pixel(62, 26) == BLUE &&
+	      Pixel(61, 23) == WHITE);		/* masked, a 0 bit */
+	GrDestroyBitmap(gm, BMD_KILL_DATA);
 	CHECK(VMClose(vm, FALSE) == 0);
     }
 

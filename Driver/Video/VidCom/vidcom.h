@@ -131,6 +131,11 @@ void VidPutLine(DriverRegs *r);
  * The device part.
  */
 Boolean VidDevInit(void);			/* DR_INIT; carry */
+/* DR_VID_INFO: the driver's information (for the window at es:di) */
+VideoDriverInfo *VidDevInfo(DriverRegs *r);
+/* before a function with the semaphore: what it draws on (the window
+ * at es:di); VidDevUpdate ends it */
+void VidDevBegin(DriverRegs *r);
 void VidDevExit(void);				/* DR_EXIT */
 word VidDevTest(const char *name);		/* DevicePresent */
 Boolean VidDevSet(const char *name);		/* opens; carry */
