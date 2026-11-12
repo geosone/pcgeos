@@ -3010,9 +3010,12 @@ strategy, the bitmap and variable blocks, and the wrappers of
 halved in the device until flat) and `GrComment` (stored in graphics
 strings, §13p).
 
-**Not yet:** `DR_FONT_GEN_IN_REGION` (no region paths in the kernel; it
-fails), the escape functions, greyscale text, `GrCharMetrics` in the
-kernel.
+`DR_FONT_GEN_IN_REGION` fails and is not needed: the asm kernel used
+it only to put text into region paths, and the C kernel fills text in
+paths from the outlines (`DR_FONT_GEN_PATH`, §13q).
+
+**Not yet:** the escape functions, greyscale text, `GrCharMetrics` in
+the kernel.
 
 **Tests.** ctest `kernel.draw` puts `truetype.geo` into `SYSTEM/FONT`
 and `FontData/Ttf/cooper.ttf` into `USERDATA/FONT/TTF`. It checks the
@@ -3268,7 +3271,8 @@ string as well: `GrEndPath` stores the elements from `GR_BEGIN_PATH` to
 (`WritePathBackToGString`). The asm stored them by playing them into the
 GState; the C kernel stores them as they are. ctest `kernel.draw`.
 
-**Not yet:** `DR_FONT_GEN_IN_REGION`.
+Text in a path is its outlines (`DR_FONT_GEN_PATH`); the asm's region
+paths and `DR_FONT_GEN_IN_REGION` are not needed (§13o).
 
 **Tests.** ctest `kernel.draw`:
 - a path defined from lines with nothing drawn, filled, with the pen
@@ -3346,6 +3350,41 @@ How each kind is drawn:
 - a path filled with the pattern;
 - the pattern from a graphics string;
 - a TrueType "I" in a hatch: only the hatch rows are drawn.
+
+## 13s. Localization (`Library/Kernel/Local`, P4)
+
+The SBCS localization code in C beside the asm: character classes
+(`stringChar.c`), case (`stringCase.c`), lengths (`stringSize.c`),
+dictionary order (`stringSort.c`) and the DOS code pages
+(`dosConvert.c`), with the C signatures of `CInclude/localize.h`. The
+tables stay in the asm (`stringCharTables.asm`, `stringCaseTables.asm`,
+`stringSortTables.asm`, `cmap*.asm`): `Port32/tools/localgen.py` makes
+`localTables.c` of them at build time, the symbols resolved from
+`Include/char.def` and `Include/Internal/lexical.def`.
+
+- Routines that set or cleared a flag return a `Boolean` (`LocalIs*`;
+  `TRUE` where the default character was used for the text conversions),
+  the comparisons -1, 0 or 1, as the C stubs of `localC.asm` made of the
+  flags. `localize.h` declares, under `GEOS_PORT32`, the routines it had
+  no C prototype for (`LocalUpcaseChar`, `LocalCmpChars`,
+  `LocalIsPunctuation`, ...). The kernel exports `LocalIsUpper` and the
+  others that `localize.h` maps to `isupper()` etc. under their own
+  names.
+- The code pages are tables of the kernel, not resources:
+  `LocalSetCodePage` returns non-zero (the `DosCodePage`) for a known
+  page instead of the handle of its resource, zero for an unknown one.
+- `SORT_DOUBLE_S_CORRECTLY` (the German double s sorted as "ss") is
+  not ported: only the MULTILANG product sets it.
+- `LocalGetLanguage` is `SL_ENGLISH`, as the asm's `curLanguage`.
+
+**Not yet:** quotes, numeric and currency formats, measures, date and
+time formatting and parsing (with `LocalIsDateChar`, `LocalIsTimeChar`,
+`LocalIsNumChar`), the init from geos.ini, DBCS.
+
+**Tests.** ctest `kernel.local`: the classes against ASCII, case of
+letters with accents, strings converted up to a size, compares with and
+without case, spaces and punctuation, and from a DOS code page, the
+code pages US and multilingual both ways with the default character.
 
 ## 14. Open
 

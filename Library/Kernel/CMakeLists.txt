@@ -64,6 +64,11 @@
 #   VMem/vmemBlkManip.c, vmemHeader.c, vmemHigh.c, vmemChain.c <- the
 #                      same asm files (vmemHigh.c also vmemC.asm): VM
 #                      files in the DOS16 format
+#   Local/stringChar.c, stringCase.c, stringSize.c, stringSort.c,
+#   dosConvert.c <- the localization code of the same asm files (SBCS);
+#                      their tables (stringCharTables.asm, ...,
+#                      cmap*.asm) become localTables.c at build time
+#                      (Port32/tools/localgen.py)
 add_library(geos_kernel_objs OBJECT
   Sys/sysError.c
   Heap/heapHandle.c
@@ -169,7 +174,31 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsString.c
   Graphics/graphicsStringBounds.c
   Graphics/graphicsStringMisc.c
-  Graphics/graphicsStringStore.c)
+  Graphics/graphicsStringStore.c
+  Local/stringChar.c
+  Local/stringCase.c
+  Local/stringSize.c
+  Local/stringSort.c
+  Local/dosConvert.c
+  ${CMAKE_CURRENT_BINARY_DIR}/localTables.c)
+# The tables of the localization code, from the asm
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(_local_tables
+  stringCharTables.asm stringCaseTables.asm stringSortTables.asm
+  cmapUS.asm cmapMulti.asm cmapFrench.asm cmapNordic.asm cmapPort.asm
+  cmapLatin1.asm)
+list(TRANSFORM _local_tables PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/Local/)
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/localTables.c
+  COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/localgen.py
+          -o ${CMAKE_CURRENT_BINARY_DIR}/localTables.c
+          --chars ${PROJECT_SOURCE_DIR}/Include/char.def
+          --lexical ${PROJECT_SOURCE_DIR}/Include/Internal/lexical.def
+          ${_local_tables}
+  DEPENDS ${_local_tables} ${PROJECT_SOURCE_DIR}/Include/char.def
+          ${PROJECT_SOURCE_DIR}/Include/Internal/lexical.def
+          ${PROJECT_SOURCE_DIR}/Port32/tools/localgen.py
+  COMMENT "localization tables"
+  VERBATIM)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/CInclude)

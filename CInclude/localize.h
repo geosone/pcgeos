@@ -392,6 +392,24 @@ extern Boolean	/*XXX*/
 #define LocalIsPrint(ch)  isprint((ch))
 #define LocalIsGraph(ch)  isgraph((ch))
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: the kernel's own routines of these (Library/Kernel/Local); the
+ * ones with the names of the macros above it exports too, for code that
+ * does not include this file.
+ */
+extern wchar LocalUpcaseChar(wchar ch);
+extern wchar LocalDowncaseChar(wchar ch);
+extern sword LocalCmpChars(wchar ch1, wchar ch2);
+extern sword LocalCmpCharsNoCase(wchar ch1, wchar ch2);
+extern Boolean LocalIsPunctuation(wchar ch);
+extern Boolean LocalIsControl(wchar ch);
+extern Boolean LocalIsHexDigit(wchar ch);
+extern Boolean LocalIsAlphaNumeric(wchar ch);
+extern Boolean LocalIsPrintable(wchar ch);
+extern Boolean LocalIsGraphic(wchar ch);
+#endif
+
 #ifdef DO_DBCS
 /***/
 
