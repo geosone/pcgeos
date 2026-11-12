@@ -825,7 +825,13 @@ with the C vidcom). It draws into the bitmaps of `GrCreateBitmap`
   default one, the mix modes work on the indices), 24 bits; the mask
   with `BM_EDIT_MASK`. A monochrome bitmap gets black where a color is
   dark; DOS16 dithered.
-- Not yet: CMYK, dithering, color transfer, the palette functions.
+- `DR_VID_SET_PALETTE` and `DR_VID_GET_PALETTE` work on the palette in
+  the bitmap's header (`BMT_PALETTE`): `WinRealizePalette` on its window
+  sets it, and indices drawn after take it. A bitmap without a palette
+  keeps none; reading gives the default palette with a count of 0. The
+  asm's `VidGetPalette` read from the header instead of the palette.
+  The VidCom hook is `vidDevPalette`. ctest `kernel.draw`.
+- Not yet: CMYK, dithering, color transfer.
   There is no device to set, no pointer, no XOR region.
 
 The host display got `VidDevInfo` and `VidDevBegin` too; they do

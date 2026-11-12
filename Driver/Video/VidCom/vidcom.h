@@ -47,6 +47,9 @@ typedef struct {
 extern RGBValue vidPalette[256];
 void VidSetPalette(DriverRegs *r);
 void VidGetPalette(DriverRegs *r);
+/* a driver's own palette (the memory driver: the bitmap's); TRUE if it
+ * took the call */
+extern Boolean (*vidDevPalette)(DriverRegs *r, Boolean set);
 
 /* vidcomOutput.c: DR_VID_RECT; the clipping the others share */
 void VidDrawRect(DriverRegs *r);

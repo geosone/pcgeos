@@ -1136,6 +1136,49 @@ int main(int argc, char **argv)
 	}
 	GrDestroyBitmap(g4, BMD_KILL_DATA);
 
+	/* 8 bits with a palette: the window's palette realized goes into
+	 * the bitmap's header (DR_VID_SET_PALETTE), and drawn indices take
+	 * it; DR_VID_GET_PALETTE reads it */
+	{
+	    GStateHandle g8;
+	    VMBlockHandle b8 = GrCreateBitmap(BMF_8BIT | BMT_PALETTE, 4, 2, vm,
+					      0, &g8);
+	    WindowHandle w8 = GrGetWinHandle(g8);
+	    void *dir;
+	    const CBitmap *c;
+	    const byte *pe;
+	    byte got[6];
+	    DriverRegs dr;
+	    void *strat = NULL;
+
+	    GrSetAreaColor(g8, CF_INDEX, 5, 0, 0);
+	    GrFillRect(g8, 0, 0, 4, 2);
+	    CHECK(GrGetPoint(g8, 0, 0) == 0xaa00aaUL);	/* C_VIOLET */
+	    CHECK(GrCreatePalette(g8) != 0);
+	    GrSetPaletteEntry(g8, 5, 0x10, 0x20, 0x30);
+	    WinRealizePalette(w8);
+	    CHECK(GrGetPoint(g8, 1, 1) == 0x302010UL);
+	    HugeArrayLockDir(vm, b8, &dir);
+	    c = &((EditableBitmap *) dir)->EB_bm;
+	    pe = (const byte *) c + c->CB_palette;
+	    CHECK(c->CB_palette && pe[0] == 0 && pe[1] == 1 &&
+		  pe[2 + 15] == 0x10 && pe[2 + 16] == 0x20 &&
+		  pe[2 + 17] == 0x30 && pe[2 + 12] == 0xaa);
+	    HugeArrayUnlockDir(dir);
+	    WinGetInfo(w8, WIT_STRATEGY, &strat);
+	    memset(&dr, 0, sizeof(dr));
+	    memset(got, 0, sizeof(got));
+	    dr.DR_ax = 4;
+	    dr.DR_cx = 2;
+	    dr.DR_dsSi = got;
+	    dr.DR_esDi = MemLock(w8);
+	    (void) ((DriverStrategy *) strat)(DR_VID_GET_PALETTE, &dr);
+	    MemUnlock(w8);
+	    CHECK(dr.DR_cx == 2 && got[0] == 0xaa && got[1] == 0 &&
+		  got[2] == 0 && got[3] == 0x10 && got[5] == 0x30);
+	    GrDestroyBitmap(g8, BMD_KILL_DATA);
+	}
+
 	/* monochrome with a mask: drawing goes to the data, editing the
 	 * mask to the mask; only what the mask has is drawn */
 	bm = GrCreateBitmap(BMF_MONO | BMT_MASK, 16, 16, vm, 0, &gm);

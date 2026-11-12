@@ -16,8 +16,13 @@
  * formats are the pixel access of vidmemUtils.c: monochrome, 4, 8 and
  * 24 bits, and the mask.  Not yet: CMYK, dithering on monochrome
  * bitmaps (a color is black or white by its brightness), color
- * transfer, the palette functions (a bitmap's palette is set in its
- * header), PUTSTRING.  There is no device to set: the driver works from
+ * transfer, PUTSTRING.
+ *
+ * DR_VID_SET_PALETTE and DR_VID_GET_PALETTE (VidSetPalette,
+ * VidGetPalette) work on the palette in the bitmap's header; one
+ * without a palette keeps none, and reading gives the default palette.
+ * The asm's VidGetPalette read from the bitmap header instead of its
+ * palette; the C reads the palette.  There is no device to set: the driver works from
  * DR_INIT on.  No pointer, no XOR region, no save under.
  */
 #include "vidmem.h"
@@ -27,6 +32,63 @@ VIDEO_DRIVER_TABLE(24, 24, BMF_24BIT,
 		   (DAR_NORMAL << DT_DISP_ASPECT_RATIO_OFFSET) | DC_CF_RGB);
 
 static VideoDriverInfo info;
+
+/* the window's bitmap directory: locked here if *own */
+static void *BitmapDir(const Window *w, Boolean *own)
+{
+    void *dir;
+
+    *own = FALSE;
+    if (!w || !w->W_bitmap)
+	return NULL;
+    dir = w->W_bmSegment;
+    if (!dir) {
+	HugeArrayLockDir((VMFileHandle) OptrToHandle(w->W_bitmap),
+			 (VMBlockHandle) OptrToChunk(w->W_bitmap), &dir);
+	*own = TRUE;
+    }
+    return dir;
+}
+
+/* VidSetPalette, VidGetPalette: al the first entry, cx the count, dx:si
+ * the RGB values */
+static Boolean BitmapPalette(DriverRegs *r, Boolean set)
+{
+    const Window *w = r->DR_esDi;
+    byte *rgb = r->DR_dsSi;
+    word first = (byte) r->DR_ax, n = (word) r->DR_cx, have = 256;
+    Boolean own;
+    void *dir = BitmapDir(w, &own);
+    CBitmap *c;
+    byte *p = vmDefaultPalette;
+
+    if (!dir || !rgb)
+	return TRUE;
+    c = (CBitmap *) EB_BM(dir);
+    if (c->CB_palette) {
+	byte *pal = (byte *) c + c->CB_palette;
+	have = (word) (pal[0] | (pal[1] << 8));
+	p = pal + 2;
+    }
+    if (first >= have)
+	n = 0;
+    else if (first + n > have)
+	n = (word) (have - first);
+    if (set) {
+	if (c->CB_palette && n) {
+	    memcpy(p + 3 * first, rgb, (size_t) n * 3);
+	    HugeArrayDirty(dir);
+	}
+    } else {
+	memcpy(rgb, p + 3 * first, (size_t) n * 3);
+	r->DR_cx = c->CB_palette ? n : 0;
+    }
+    if (own)
+	HugeArrayUnlockDir(dir);
+    /* the bitmap selected for drawing reads its palette again */
+    VMRelease();
+    return TRUE;
+}
 
 Boolean VidDevInit(void)
 {
@@ -38,6 +100,7 @@ Boolean VidDevInit(void)
 	       sizeof(vmDefaultPalette));
 	MemFree(mh);
     }
+    vidDevPalette = BitmapPalette;
     DriverTable.VDI_tech = DT_MEMORY;
     DriverTable.VDI_device = 0;			/* nothing to set */
     return FALSE;
@@ -76,14 +139,11 @@ VideoDriverInfo *VidDevInfo(DriverRegs *r)
     void *dir = NULL;
     const CBitmap *c;
     byte f;
+    Boolean own;
 
     info = DriverTable;
-    if (!w || !w->W_bitmap)
+    if (!(dir = BitmapDir(w, &own)))
 	return &info;
-    dir = w->W_bmSegment;
-    if (!dir)
-	HugeArrayLockDir((VMFileHandle) OptrToHandle(w->W_bitmap),
-			 (VMBlockHandle) OptrToChunk(w->W_bitmap), &dir);
     c = EB_BM(dir);
     f = (byte) (c->CB_simple.B_type & BMT_FORMAT);
     if (((EditableBitmap *) dir)->EB_flags & BM_EDIT_MASK)
@@ -100,7 +160,7 @@ VideoDriverInfo *VidDevInfo(DriverRegs *r)
     info.VDI_nBits = nBits[f];
     info.VDI_nPlanes = nPlanes[f];
     info.VDI_wColTab = 24;
-    if (!w->W_bmSegment)
+    if (own)
 	HugeArrayUnlockDir(dir);
     return &info;
 }
