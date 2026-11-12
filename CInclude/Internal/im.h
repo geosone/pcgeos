@@ -188,5 +188,8 @@ typedef ByteFlags PtrFlags;
 #define PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE	0x40
 extern PtrFlags ImSetPtrFlags(PtrFlags set, PtrFlags clear);
 extern PtrFlags ImGetPtrFlags(void);
+/* ImBumpMouse: msg to the output (cx, dx the bump), then the pointer
+ * moved by xBump, yBump at once; for the UI's flow object */
+extern void ImBumpMouse(Message msg, sword xBump, sword yBump);
 
 #endif /* __IM_H */

@@ -16,6 +16,7 @@
  *   - ImConstrainMouse with MSG_META_LEAVE_CONSTRAIN, the screen limits;
  *   - monitors of its own: one that makes two events of one
  *     (MF_MORE_TO_DO), one that eats events, ImRemoveMonitor;
+ *   - ImBumpMouse;
  *   - the screen saver: the delay, an installed saver blanked and
  *     brought back by input, its notifications, SysDisableAPO.
  */
@@ -287,6 +288,13 @@ int main(int argc, char **argv)
 	CHECK(w[0] != 'q');
     }
     CHECK(ImGrabInput(ConstructOptr(q, 0)));
+
+    /* ImBumpMouse: the mark, then the pointer moved */
+    ImPtrJump(100, 100);
+    CHECK(Out(w) == IM_META_MOUSE_PTR && w[0] == 100 && w[1] == 100);
+    ImBumpMouse(0x6000, 5, -3);
+    CHECK(Out(w) == 0x6000 && w[0] == 5 && w[1] == (word) -3);
+    CHECK(Out(w) == IM_META_MOUSE_PTR && w[0] == 105 && w[1] == 97);
 
     /* the screen saver */
     {

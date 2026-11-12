@@ -2194,6 +2194,10 @@ reads them (`Internal/im.h`).
   for `WinMovePtr`.
 - ctest `kernel.win` checks both through its pointer driver.
 
+`ImBumpMouse(msg, xBump, yBump)` sends `msg` to the output (cx, dx the
+bump) and moves the pointer at once, with the monitor chain held; the
+pointer event after it has the new position (ctest `kernel.im`).
+
 **The screen saver** (`IM/imScreenSaver.c`) counts down in steps of 15
 seconds once `MSG_IM_ENABLE_SCREEN_SAVER` is sent; the delay is
 `MSG_IM_SET_SCREEN_SAVER_DELAY` (minutes, 15 at the start).
@@ -2216,7 +2220,7 @@ ctest `kernel.im` runs it with a queue as the saver.
 **Not yet:**
 - the move/resize xor;
 - pen and ink;
-- re-centering a pen's pointer, `ImBumpMouse`.
+- re-centering a pen's pointer.
 
 DOS16 built without `QUIET_PTR_SUPPORT` and `INPUT_MESSAGE_RECEIPT`, and
 so does the C kernel.

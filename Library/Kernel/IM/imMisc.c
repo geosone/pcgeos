@@ -2,13 +2,13 @@
  * imMisc.c -- the routines of the input manager (after imMisc.asm:
  * ImGrabInput, ImReleaseInput, ImInfoInputProcess, ImSetDoubleClick,
  * ImInfoDoubleClick, ImGetButtonState; imPtr.asm: ImGetMousePos,
- * ImPtrJump, ImForcePtrMethod, RefreshPtr, ImConstrainMouse,
- * EnsureConstraining, ImUnconstrainMouse).
+ * ImPtrJump, ImForcePtrMethod, RefreshPtr, ImBumpMouse,
+ * ImConstrainMouse, EnsureConstraining, ImUnconstrainMouse).
  *
  * Positions are on the screen (DOS16 transformed them for a window
  * passed in di).  The limits of the pointer come from the root window
  * (ImSetPtrWin, imPtr.c) or, without one, from ImSetScreenLimits.
- * Not yet: ImBumpMouse, the move/resize xor (ImStartMoveResize), the backlog
+ * Not yet: the move/resize xor (ImStartMoveResize), the backlog
  * routines (INPUT_MESSAGE_RECEIPT is off, as in DOS16).
  */
 #include "kernelC.h"
@@ -95,6 +95,26 @@ void ImPtrJump(sword x, sword y)
 void ImForcePtrMethod(void)
 {
     PtrChange(0, 0, (word) (TimerGetCount() & PI_time));
+}
+
+/* the message marks the end of the events the bump does not change; the
+ * chain is held, so no event comes between */
+void ImBumpMouse(Message msg, sword xBump, sword yBump)
+{
+    struct { word cx, dx, bp; } p;
+
+    ImLockChain();
+    if (im.outputOD) {
+	p.cx = (word) xBump;
+	p.dx = (word) yBump;
+	p.bp = 0;
+	CObjMessageP(MF_FORCE_QUEUE, im.outputOD, msg, &p, sizeof(p),
+		     NULL, 0);
+    }
+    im.pointerX = (sword) (im.pointerX + xBump);
+    im.pointerY = (sword) (im.pointerY + yBump);
+    ImUnlockChain();
+    ImForcePtrMethod();
 }
 
 void ImConstrainMouse(sword left, sword top, sword right, sword bottom,
