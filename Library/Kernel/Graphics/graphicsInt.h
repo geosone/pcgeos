@@ -14,6 +14,8 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdint.h>
+#include <geosdriver.h>
+#include <Internal/videoDr.h>
 #include <Internal/tmatrix.h>
 
 /* graphicsTables.c */
@@ -61,6 +63,29 @@ Boolean GrRoundToWord(int64_t v, sword *r);
 TMatrix *GrLockTransform(GStateHandle gstate, GState **gs, Window **win);
 void GrUnlockTransform(GStateHandle gstate, GState *gs, Window *win);
 void GrComposeMatrix(GStateHandle gstate, GState *gs, Window *w);
+
+/* graphicsUtils.c: drawing (EnterGraphics, ExitGraphics) */
+typedef struct {
+    GStateHandle	GD_gstate;
+    GState		*GD_gs;
+    WindowHandle	GD_win;		/* 0: nothing to draw on */
+    Window		*GD_w;
+} GrDraw;
+void GrEnterGraphics(GStateHandle gstate, GrDraw *d);
+void GrExitGraphics(GrDraw *d);
+Boolean GrTrivialReject(const GrDraw *d);	/* TRUE: nothing to draw */
+Boolean GrTransDev(const GrDraw *d, sword x, sword y, sword *dx,
+		   sword *dy);			/* FALSE: overflow */
+Boolean GrGetDevPenPos(const GrDraw *d, sword *x, sword *y);
+void GrSetDocPenPos(GState *gs, sword x, sword y);
+Boolean GrCallDriver(const GrDraw *d, word function, DriverRegs *r,
+		     word attr);
+
+/* graphicsOutput.c, graphicsLine.c */
+void GrFillRectLow(const GrDraw *d, sword l, sword t, sword r, sword b,
+		   word attr);
+void GrDrawLineLow(const GrDraw *d, sword x1, sword y1, sword x2, sword y2,
+		   word attr);
 
 /* graphicsColor.c */
 byte GrMapRGBtoIndex(const byte *palette, word last, byte red, byte green,

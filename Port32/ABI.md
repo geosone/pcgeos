@@ -2273,6 +2273,57 @@ The C code has one recursive tree lock for all of it (`WinTreeP`,
 - information and transformations;
 - `WinLocatePointC`.
 
+## 13m. Drawing (`Graphics/graphicsOutput.c`, `graphicsLine.c`, P6)
+
+Every drawing routine starts like `EnterGraphics` (`GrEnterGraphics`,
+`graphicsUtils.c`):
+- the GState is locked;
+- if it has a window, the tree lock is taken and the window locked;
+- `WinValWinStruct` runs when the window was last used by another
+  GState or its mask or matrix is not valid.
+
+`GrExitGraphics` undoes this. The pen moves as in the asm, also when
+nothing is drawn. Nothing is drawn (`TrivialReject`) without a window,
+with a null mask, or with a matrix that maps everything to a line.
+
+Coordinates go through `W_curTMatrix` (GState and window matrices plus
+the window's position) and are rounded to words; on overflow nothing is
+drawn. The driver is called with `DR_dsSi` the GState, `DR_si` the
+offset of `GS_areaAttr` or `GS_lineAttr`, `DR_esDi` the window.
+
+**Rectangles** (`GrFillRect`, `GrFillRectTo`, `GrDrawPoint`,
+`GrDrawPointAtCP`):
+- the 2.0 imaging conventions: the right and bottom pixels are not
+  filled, unless they equal the left and top;
+- `DR_VID_RECT`, clipped to `W_maskRect`;
+- rotated, the four corners as `DR_VID_POLYGON`.
+
+**Frames and lines** (`GrDrawRect`, `GrDrawRectTo`, `GrDrawLine`,
+`GrDrawLineTo`, `GrDrawRelLineTo`, `GrDrawHLine`, `GrDrawHLineTo`,
+`GrDrawVLine`, `GrDrawVLineTo`):
+- a frame is four lines with square ends;
+- `LE_BUTTCAP` leaves the last pixel out (`AdjustLineEnds`);
+- horizontal and vertical lines go as `DR_VID_RECT`, others as
+  `DR_VID_LINE`;
+- lines are rejected on the mask's bounds.
+
+**Not yet:**
+- graphics strings and paths (drawing to them does nothing);
+- fat lines (the asm drew polylines) and styled lines: drawn one pixel
+  wide and solid;
+- arcs, ellipses, polygons, polylines, splines, regions, bitmaps, text.
+
+**Tests.** ctest `kernel.draw` runs on the host video driver and reads
+the pixels back. It checks:
+- the windows' backgrounds;
+- rectangles with the imaging conventions, clipping to the window and to
+  windows in front;
+- translated, scaled and rotated GStates;
+- frames, butt and square line ends, 45 degree lines, lines from the
+  pen, points;
+- drawing during an update;
+- exposure after moving and closing windows.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

@@ -294,4 +294,19 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   else()
     add_test(NAME driver.video COMMAND test_video)
   endif()
+
+  # drawing through the window system to the host video driver
+  add_executable(test_kernel_draw test_kernel_draw.c ${_hostvid_c})
+  add_dependencies(test_kernel_draw geode_hostvid)
+  target_include_directories(test_kernel_draw PRIVATE
+    ${PROJECT_SOURCE_DIR}/Library/Kernel)
+  target_link_libraries(test_kernel_draw PRIVATE geos_kernel)
+  if(GEOS_HOST STREQUAL "linux" AND GHAL_HAVE_X11 AND
+     GEOS_LINUX_DISPLAY STREQUAL "x11" AND GEOS_XVFB)
+    add_test(NAME kernel.draw
+             COMMAND ${PROJECT_SOURCE_DIR}/Port32/tools/geos-xserver.sh
+                     $<TARGET_FILE:test_kernel_draw>)
+  else()
+    add_test(NAME kernel.draw COMMAND test_kernel_draw)
+  endif()
 endif()

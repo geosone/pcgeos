@@ -11,6 +11,7 @@
  * here the coordinates in the structures are set to it as well.
  */
 #include "graphicsInt.h"
+#include "../Win/winInt.h"
 
 #define OVER	((sword) 0x8000)
 
@@ -148,6 +149,8 @@ void GrUntransformDWord(GStateHandle gstate, sdword xCoord, sdword yCoord,
 }
 
 /* the pen position */
+void GrSetDocPenPos(GState *gs, sword x, sword y);
+
 static void SetPen(GState *gs, int64_t x, int64_t y)	/* SetDocWWFPenPos */
 {
     GrMatTransDWF(&gs->GS_TMatrix, &x, &y);
@@ -216,4 +219,97 @@ void GrGetCurPosWWFixed(GStateHandle gstate, PointWWFixed *cp)
     GetPen(gs, &x, &y);
     MemUnlock(gstate);
     ToWWF(x, y, cp);
+}
+
+void GrSetDocPenPos(GState *gs, sword x, sword y)
+{
+    SetPen(gs, (int64_t) x * 65536, (int64_t) y * 65536);
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/*
+ * EnterGraphics: the GState locked and, if it has a window, the tree
+ * lock taken, the window locked and made ready for this GState
+ * (WinValWinStruct).  Graphics strings and paths are not kept yet:
+ * drawing to one does nothing.
+ */
+void GrEnterGraphics(GStateHandle gstate, GrDraw *d)
+{
+    Window *w;
+
+    d->GD_gstate = gstate;
+    d->GD_gs = MemLock(gstate);
+    d->GD_win = 0;
+    d->GD_w = NULL;
+    if (d->GD_gs->GS_gstring || !d->GD_gs->GS_window)
+	return;
+    WinTreeP();
+    d->GD_win = d->GD_gs->GS_window;
+    w = MemLock(d->GD_win);
+    if (w->W_curState != gstate ||
+	(w->W_grFlags & (WGF_MASK_VALID | WGF_XFORM_VALID)) !=
+	(WGF_MASK_VALID | WGF_XFORM_VALID) ||
+	(w->W_grRegFlags & (WGRF_PATH_VALID | WGRF_WIN_PATH_VALID)) !=
+	(WGRF_PATH_VALID | WGRF_WIN_PATH_VALID))
+	WinValWinStruct(gstate, d->GD_gs, d->GD_win);
+    d->GD_w = MemDeref(d->GD_win);
+}
+
+void GrExitGraphics(GrDraw *d)
+{
+    if (d->GD_win) {
+	MemUnlock(d->GD_win);
+	WinTreeV();
+    }
+    MemUnlock(d->GD_gstate);
+}
+
+/* TrivialReject: no window, nothing visible, or a matrix that makes
+ * everything a point */
+Boolean GrTrivialReject(const GrDraw *d)
+{
+    const TMatrix *m;
+
+    if (!d->GD_w || (d->GD_w->W_grFlags & WGF_MASK_NULL))
+	return TRUE;
+    m = &d->GD_w->W_curTMatrix;
+    return (Boolean) ((!m->TM_11.WWF_int && !m->TM_11.WWF_frac &&
+		       !m->TM_21.WWF_int && !m->TM_21.WWF_frac) ||
+		      (!m->TM_12.WWF_int && !m->TM_12.WWF_frac &&
+		       !m->TM_22.WWF_int && !m->TM_22.WWF_frac));
+}
+
+/* GrTransCoord: a document point to the device (W_curTMatrix) */
+Boolean GrTransDev(const GrDraw *d, sword x, sword y, sword *dx, sword *dy)
+{
+    int64_t px = (int64_t) x * 65536, py = (int64_t) y * 65536;
+
+    GrMatTransDWF(&d->GD_w->W_curTMatrix, &px, &py);
+    return (Boolean) (GrRoundToWord(px, dx) && GrRoundToWord(py, dy));
+}
+
+/* GetDevPenPos: the pen (page coordinates) through W_TMatrix, moved by
+ * the window's position */
+Boolean GrGetDevPenPos(const GrDraw *d, sword *x, sword *y)
+{
+    int64_t px = GrDWF(&d->GD_gs->GS_penPos.PDF_x),
+	    py = GrDWF(&d->GD_gs->GS_penPos.PDF_y);
+
+    GrMatTransDWF(&d->GD_w->W_TMatrix, &px, &py);
+    px += (int64_t) d->GD_w->W_winRect.R_left * 65536;
+    py += (int64_t) d->GD_w->W_winRect.R_top * 65536;
+    return (Boolean) (GrRoundToWord(px, x) && GrRoundToWord(py, y));
+}
+
+/* a call to the window's video driver with the GState and an
+ * attribute offset (GS_areaAttr, GS_lineAttr) */
+Boolean GrCallDriver(const GrDraw *d, word function, DriverRegs *r,
+		     word attr)
+{
+    r->DR_dsSi = d->GD_gs;
+    r->DR_si = attr;
+    return WinCallVidDriver(d->GD_w, function, r);
 }

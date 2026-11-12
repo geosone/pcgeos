@@ -127,6 +127,8 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsTransformUtils.c
   Graphics/graphicsTransform.c
   Graphics/graphicsUtils.c
+  Graphics/graphicsOutput.c
+  Graphics/graphicsLine.c
   Graphics/graphicsColor.c
   Graphics/graphicsState.c
   Graphics/graphicsGetState.c)
