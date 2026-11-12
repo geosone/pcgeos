@@ -8,6 +8,8 @@
  * kernel goes:
  *
  *   1. the first thread and the timer (InitThread, InitTimer);
+ *      [system] setHostClock (default true) lets TimerSetDateAndTime
+ *      set the host's clock;
  *   2. the top directory as drive C (the loader's top level path) and
  *      the initial path SP_TOP (FileSetInitialPath); GEOS_ACT.IVE in
  *      the top, made here and deleted by a clean end: if it is there
@@ -157,6 +159,13 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     FSDLoadPrimary();
     FileInitStdPaths();
     LocalInit();
+    /* TimerSetDateAndTime sets the host's clock (GAPI) unless
+     * [system] setHostClock = false */
+    {
+	Boolean b = TRUE;
+	(void) InitFileReadBoolean("system", "setHostClock", &b);
+	kernelSetHostClock = b;
+    }
     GrInitFonts();
     GrLoadFontDrivers();
     GrInitDefaultFont();

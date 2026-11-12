@@ -63,6 +63,7 @@ message(STATUS "GEOS_HOST=${GEOS_HOST} arch=${CMAKE_SYSTEM_PROCESSOR} EC=${GEOS_
 
 enable_testing()
 add_subdirectory(Ghal)
+add_subdirectory(Gapi)
 add_subdirectory(Driver/IFS/HostFS)
 add_subdirectory(Library/Math/Float)
 add_subdirectory(Library/Kernel)

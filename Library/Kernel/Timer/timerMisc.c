@@ -3,11 +3,13 @@
  * stubs of timerC.asm).
  *
  * GEOS reads the host's local clock (ghal_time_get_local).  Setting the
- * date or time does not change the host's clock: it sets an offset that
- * GEOS adds from then on (until it exits).  The asm set DOS's clock
- * unless TIME_SET_GEOS_TIME_ONLY; Port32 never does.  A change goes to
- * GCNSLT_DATE_TIME (MSG_NOTIFY_DATE_TIME_CHANGE) and runs the real-time
- * timers that are due now.
+ * date or time sets the host's clock too (gapi_time_set_local: DOS's
+ * clock on dos32, the system clock on linux), as the asm set DOS's clock,
+ * unless TIME_SET_GEOS_TIME_ONLY or kernelSetHostClock is off.  When the
+ * host does not take it (no privilege), GEOS keeps an offset to the
+ * host's clock that it adds from then on (until it exits).  A change
+ * goes to GCNSLT_DATE_TIME (MSG_NOTIFY_DATE_TIME_CHANGE) and runs the
+ * real-time timers that are due now.
  *
  * The timer interrupt cannot ask the host (DOS), so it counts from the
  * last time read: KernelRealTimeNow gives the minute for the real-time
@@ -15,6 +17,7 @@
  */
 #include "kernelC.h"
 #include "ghal.h"
+#include "gapi.h"
 
 #include <timedate.h>
 
@@ -22,6 +25,9 @@
 #define KMSG_NOTIFY_DATE_TIME_CHANGE	697	/* gcnlist.goh */
 
 #define SECS_PER_DAY	86400L
+#define TIME_SET_GEOS_TIME_ONLY	0x20	/* timerInt.def */
+
+Boolean kernelSetHostClock;
 
 static int64_t offset;			/* seconds GEOS is ahead of the host */
 static int64_t anchorSecs;		/* GEOS time at anchorTick */
@@ -148,6 +154,22 @@ void TimerSetDateAndTime(word flags, const TimerDateAndTime *dateAndTime)
 	dt.day = (uint8_t) dateAndTime->TDAT_day;
     }
     secs = SecsOf(&dt);
+    if (kernelSetHostClock && !(flags & TIME_SET_GEOS_TIME_ONLY)) {
+	ghal_status st = gapi_time_set_local(&dt);
+	if (st == GHAL_OK) {
+	    ghal_crit_enter();
+	    offset = 0;			/* the host has it now */
+	    old = secs;
+	    ghal_crit_leave();
+	} else {
+	    static Boolean told;
+	    if (!told) {
+		told = TRUE;
+		ghal_log(GHAL_LOG_INFO, "kernel: the host's clock was not "
+			 "set (%d); GEOS keeps its own", (int) st);
+	    }
+	}
+    }
     ghal_crit_enter();
     offset += secs - old;
     anchorSecs = secs;

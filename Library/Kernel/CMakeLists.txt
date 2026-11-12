@@ -229,7 +229,7 @@ target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}
   ${PROJECT_SOURCE_DIR}/CInclude)
 target_compile_definitions(geos_kernel_objs PRIVATE GEOS_PORT32)
-target_link_libraries(geos_kernel_objs PRIVATE ghal hostfs)
+target_link_libraries(geos_kernel_objs PRIVATE ghal gapi hostfs)
 
 # The kernel's export table (what geodes may import by name): the
 # symbols of the objects above that Library/Kernel/geos.gp exports
@@ -264,4 +264,4 @@ target_include_directories(geos_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/CInclude)
 target_compile_definitions(geos_kernel PUBLIC GEOS_PORT32)
-target_link_libraries(geos_kernel PUBLIC ghal hostfs)
+target_link_libraries(geos_kernel PUBLIC ghal gapi hostfs)

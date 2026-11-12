@@ -91,6 +91,8 @@ The GHAL has **two levels**:
   - **one** keyboard and **one** mouse driver on `ghal_input`, similar to what `Library/GDI` already did
   - **one** socket driver on the host sockets, like `HstTCPIP`
 
+**Not in the GHAL:** the system management GEOS offers its user as an operating system of its own: setting the clock, printers, power, network, locale and drives. On a hosted system these belong to the host's services. That is the second layer, GAPI (`Port32/GAPI-Concept.md`, `CInclude/gapi.h`, `Gapi/`).
+
 Under DOS, on the other hand, the real hardware drivers stay (VGA/VESA, PS/2, IFS/DOS, serial, SoundBlaster …), ported to 32-bit. That is exactly how "DOS takes over the existing DOS parts".
 
 ## 4. The GHAL core in detail
@@ -359,6 +361,7 @@ Driver/IFS/HostFS/            the file system driver on ghal_fs
 ## 10. Related documents
 
 - `Port32/PLAN.md`: phases and current status.
+- `Port32/GAPI-Concept.md`: the GEOS Host API, the system management handed to the host.
 - `Port32/GHAL-Inventory.md`: generated list of all direct host contacts.
 - `Port32/Tests/README.md`: pilot. The shim `fpstack.c` is an example of "code above the GHAL, independent of the host".
 - `Port32/GonDesk-GEOS-on-GonWare.md`: the `gonware` host in detail (GWVIDEO, openinput, NSS, Ring 3). The GHAL there is the same as here.
