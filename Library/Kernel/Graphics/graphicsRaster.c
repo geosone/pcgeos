@@ -1,7 +1,8 @@
 /*
- * graphicsRaster.c -- drawing bitmaps (after graphicsRaster.asm:
- * GrDrawBitmap, GrDrawBitmapAtCP, GrFillBitmap, GrFillBitmapAtCP,
- * BitmapSetDrawPoint, BMCheckAllocation, InitBitmapPalette, BMCallBack,
+ * graphicsRaster.c -- drawing bitmaps and GrBitBlt (after
+ * graphicsRaster.asm: GrBitBlt, BltCommon, CalcDestRegion,
+ * CalcInvalRegion, GrDrawBitmap, GrDrawBitmapAtCP, GrFillBitmap,
+ * GrFillBitmapAtCP, BitmapSetDrawPoint, BMCheckAllocation, InitBitmapPalette, BMCallBack,
  * BMTrivialReject, CalcLineSize; graphicsRasterDraw.asm: DrawSlice,
  * InitBitmapOperations, BMGetSlice, GetSliceComplex, UncompactPackBits).
  *
@@ -29,6 +30,11 @@
  * Rotated, each scaled scan line goes along a line parallel to the
  * rotated top edge (DR_VID_PUTLINE), the lines stepping down the left
  * edge, as RotateBitmap does.
+ *
+ * GrBitBlt moves what is on the screen (BltCommon, which WinScroll
+ * uses too): only what is visible and valid at the source, the rest
+ * of the destination invalid; the source left behind invalid
+ * (BLTM_MOVE) or washed out (BLTM_CLEAR).
  *
  * Not yet: LZG compaction,
  * format conversion for devices of fewer colors than the bitmap, huge
@@ -828,4 +834,160 @@ void GrFillBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 		      Bitmap *(*callback)(Bitmap *bm))
 {
     AtCP(gstate, bm, callback, TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * GrBitBlt (graphicsRaster.asm: GrBitBlt, BltCommon, ScaleScalarSimple,
+ * CalcDestRegion, CalcInvalRegion)
+ * ------------------------------------------------------------------- */
+
+#define REG(wh, ch)	ConstructOptr((wh), (ch))
+
+/* CalcDestRegion: the mask becomes where the copy is good, the source
+ * visible and valid moved to the destination, within the mask; the old
+ * mask goes to W_temp2Reg */
+static void DestRegion(WindowHandle wh, const Rectangle *src, sword sx,
+		       sword sy)
+{
+    Window *w = MemDeref(wh);
+    ChunkHandle t;
+
+    WinRegRect(wh, w->W_temp2Reg, src->R_left, src->R_top, src->R_right,
+	       src->R_bottom);
+    w = MemDeref(wh);
+    WinRegAnd(REG(wh, w->W_temp2Reg), REG(wh, w->W_maskReg),
+	      REG(wh, w->W_temp1Reg));
+    w = MemDeref(wh);
+    if (!WinRegIsNull(wh, w->W_invalReg)) {	/* without the invalid */
+	WinRegSub(REG(wh, w->W_temp1Reg), REG(wh, w->W_invalReg),
+		  REG(wh, w->W_temp1Reg), REG(wh, w->W_temp2Reg));
+	w = MemDeref(wh);
+    }
+    if (WinRegIsNull(wh, w->W_temp1Reg))
+	WinRegNull(wh, w->W_temp2Reg);
+    else {
+	GrMoveReg(WinReg(wh, w->W_temp1Reg), sx, sy);
+	WinRegAnd(REG(wh, w->W_maskReg), REG(wh, w->W_temp1Reg),
+		  REG(wh, w->W_temp2Reg));
+    }
+    w = MemDeref(wh);
+    t = w->W_temp2Reg;
+    w->W_temp2Reg = w->W_maskReg;
+    w->W_maskReg = t;
+    WinSetupMaskFlags(w);
+}
+
+/* CalcInvalRegion: what of the destination was not copied is invalid;
+ * the source left behind, unless BLTM_COPY, invalid (BLTM_MOVE) or
+ * washed out (BLTM_CLEAR).  The mask is left not valid. */
+static void InvalRegion(WindowHandle wh, const Rectangle *src, sword sx,
+			sword sy, BLTMode mode)
+{
+    Window *w = MemDeref(wh);
+
+    w->W_grFlags &= (WinGrFlags) ~WGF_MASK_VALID;
+    WinRegNot(REG(wh, w->W_maskReg), REG(wh, w->W_temp1Reg));
+    w = MemDeref(wh);
+    WinRegAnd(REG(wh, w->W_temp2Reg), REG(wh, w->W_temp1Reg),
+	      REG(wh, w->W_maskReg));
+    w = MemDeref(wh);
+    WinRegRect(wh, w->W_temp2Reg, (sword) (src->R_left + sx),
+	       (sword) (src->R_top + sy), (sword) (src->R_right + sx),
+	       (sword) (src->R_bottom + sy));
+    w = MemDeref(wh);
+    WinRegAnd(REG(wh, w->W_maskReg), REG(wh, w->W_temp2Reg),
+	      REG(wh, w->W_temp1Reg));
+    w = MemDeref(wh);
+    if (!WinRegIsNull(wh, w->W_temp1Reg))
+	WinAddToInvalReg(wh);
+    if (mode == BLTM_COPY)
+	return;
+    w = MemDeref(wh);
+    WinRegRect(wh, w->W_temp2Reg, src->R_left, src->R_top, src->R_right,
+	       src->R_bottom);
+    w = MemDeref(wh);
+    WinRegAnd(REG(wh, w->W_maskReg), REG(wh, w->W_temp2Reg),
+	      REG(wh, w->W_temp1Reg));
+    w = MemDeref(wh);
+    if (WinRegIsNull(wh, w->W_temp1Reg))
+	return;
+    if (mode == BLTM_MOVE)
+	WinAddToInvalReg(wh);
+    else
+	WinWashOutReg(wh, w->W_temp1Reg);
+}
+
+/*
+ * BltCommon: width x height pixels from sx, sy to dx, dy (screen
+ * coordinates) in window wh (locked, the tree too); also for WinScroll.
+ * Only what is visible and valid at the source is copied, by
+ * DR_VID_MOVBITS within that; the rest of the destination becomes
+ * invalid.
+ */
+void GrBltCommon(WindowHandle wh, sword sx, sword sy, sword dx, sword dy,
+		 word width, word height, BLTMode mode)
+{
+    Window *w = MemDeref(wh);
+    DriverRegs r;
+    Rectangle src;
+
+    memset(&r, 0, sizeof(r));
+    r.DR_ax = (word) w->W_winRect.R_left;
+    r.DR_bx = (word) w->W_winRect.R_top;
+    r.DR_cx = (word) w->W_winRect.R_right;
+    r.DR_dx = (word) w->W_winRect.R_bottom;
+    WinCallVidDriver(w, DR_VID_COLLIDE_UNDER, &r);
+    if (!width || !height)
+	return;
+    src.R_left = sx;
+    src.R_top = sy;
+    src.R_right = (sword) (sx + width - 1);
+    src.R_bottom = (sword) (sy + height - 1);
+    DestRegion(wh, &src, (sword) (dx - sx), (sword) (dy - sy));
+    w = MemDeref(wh);
+    if (!(w->W_grFlags & WGF_MASK_NULL) &&
+	dx <= w->W_maskRect.R_right &&
+	(sword) (dx + width - 1) >= w->W_maskRect.R_left &&
+	dy <= w->W_maskRect.R_bottom &&
+	(sword) (dy + height - 1) >= w->W_maskRect.R_top) {
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = (word) sx;
+	r.DR_bx = (word) sy;
+	r.DR_cx = (word) dx;
+	r.DR_dx = (word) dy;
+	r.DR_si = width;
+	r.DR_bp = height;
+	WinCallVidDriver(w, DR_VID_MOVBITS, &r);
+    }
+    InvalRegion(wh, &src, (sword) (dx - sx), (sword) (dy - sy), mode);
+}
+
+/* ScaleScalarSimple: a size through the scale of the matrix, rounded */
+static word ScaleSize(word v, const WWFixed *f)
+{
+    sdword s = (sdword) (((dword) (word) f->WWF_int << 16) | f->WWF_frac);
+
+    return (word) (((int64_t) v * s + 0x8000) >> 16);
+}
+
+void GrBitBlt(GStateHandle gstate, sword sourceX, sword sourceY,
+	      sword destX, sword destY, word width, word height,
+	      BLTMode mode)
+{
+    GrDraw d;
+    sword sx, sy, dx, dy;
+
+    GrEnterGraphics(gstate, &d);
+    GrSetDocPenPos(d.GD_gs, destX, destY);
+    if (d.GD_w && !(d.GD_w->W_grFlags & WGF_MASK_NULL) &&
+	GrTransDev(&d, sourceX, sourceY, &sx, &sy) &&
+	GrTransDev(&d, destX, destY, &dx, &dy)) {
+	if (d.GD_w->W_curTMatrix.TM_flags & TM_COMPLEX) {
+	    width = ScaleSize(width, &d.GD_w->W_curTMatrix.TM_11);
+	    height = ScaleSize(height, &d.GD_w->W_curTMatrix.TM_22);
+	}
+	GrBltCommon(d.GD_win, sx, sy, dx, dy, width, height, mode);
+	d.GD_w = MemDeref(d.GD_win);
+    }
+    GrExitGraphics(&d);
 }

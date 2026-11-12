@@ -2431,6 +2431,14 @@ than a pixel is a six-point polygon.
 - Not yet: LZG, format conversion for devices with fewer colors, huge
   bitmaps.
 
+**GrBitBlt** (`graphicsRaster.c`, `GrBltCommon` for `WinScroll` too):
+- Only what is visible and valid at the source is copied, with
+  `DR_VID_MOVBITS` within that region (it is the mask meanwhile).
+- The rest of the destination becomes invalid.
+- The source left behind becomes invalid with `BLTM_MOVE` and is
+  washed out with `BLTM_CLEAR`.
+- Under a scaled matrix, the size is scaled by `TM_11`/`TM_22`.
+
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
 - area patterns (the asm filled them through a path);
@@ -2458,6 +2466,7 @@ the pixels back. It checks:
   one with a palette in two slices; scaled twice, half, mirrored in x
   and y, at 144 dpi; rotated by 90 degrees, and by 45 degrees without
   holes;
+- `GrBitBlt`: copy, move, clear, and from a source partly hidden;
 - drawing during an update;
 - exposure after moving and closing windows.
 

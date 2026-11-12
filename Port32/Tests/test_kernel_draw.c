@@ -24,6 +24,7 @@
  *   - bitmaps: monochrome drawn and filled, 24 bits, PackBits, a
  *     complex one with a palette in two slices; scaled twice, half,
  *     mirrored in x and y, at 144 dpi, and rotated;
+ *   - GrBitBlt: copy, move, clear, and from a source partly hidden;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
@@ -667,6 +668,26 @@ int main(int argc, char **argv)
 	      Pixel(82, 60) == BLUE && Pixel(80, 61) == BLUE);
     }
 
+    /* GrBitBlt: copy, move (the source invalid, washed white), clear,
+     * and from under B (that part of the destination invalid) */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 60, 79, 79);
+    SetCol(g, RED);
+    GrFillRect(g, 2, 62, 11, 71);		/* 22..30, 82..90 */
+    GrFillRect(g, 74, 62, 90, 71);		/* 94..99 */
+    GrBitBlt(g, 2, 62, 22, 62, 10, 10, BLTM_COPY);
+    CHECK(Pixel(45, 85) == RED && Pixel(25, 85) == RED &&
+	  Pixel(53, 85) == BLUE && Pixel(45, 92) == BLUE);
+    GrBitBlt(g, 22, 62, 42, 62, 10, 10, BLTM_MOVE);
+    CHECK(Pixel(65, 85) == RED && Pixel(45, 85) == WHITE &&
+	  Pixel(51, 85) == WHITE && Pixel(52, 85) == BLUE);
+    GrBitBlt(g, 42, 62, 52, 62, 10, 10, BLTM_CLEAR);
+    CHECK(Pixel(73, 85) == RED && Pixel(80, 85) == RED &&
+	  Pixel(65, 85) == WHITE && Pixel(71, 85) == WHITE);
+    GrBitBlt(g, 75, 62, 0, 62, 10, 10, BLTM_COPY);
+    CHECK(Pixel(21, 85) == RED && Pixel(24, 85) == RED &&
+	  Pixel(26, 85) == WHITE && Pixel(29, 85) == WHITE &&
+	  Pixel(97, 85) == RED);
     /* an update: only the invalid area is drawn */
     SetCol(g, BLUE);
     GrFillRect(g, 0, 0, 100, 100);
