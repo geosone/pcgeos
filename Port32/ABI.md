@@ -1234,9 +1234,18 @@ take the parameter structures of section 5. Their message numbers
 - Freeing (`ObjFreeChunk`, `MSG_META_OBJ_FREE`, `ObjFreeObjBlock`)
   works as in the asm kernel. An object of a resource keeps its handle
   with no data and is marked dirty. A block in use (`OLMBH_inUseCount`)
-  is only marked `LMF_AUTO_FREE`. The final message goes through the
-  queue of the thread that runs the object. Without the input manager
-  there is no flush of the input queues yet.
+  is only marked `LMF_AUTO_FREE`. The final message is sent only after
+  the input queues are flushed (`ObjStartQueueFlush`,
+  `MSG_META_OBJ_FLUSH_INPUT_QUEUE`). The message passes, each time queued,
+  through the input manager's thread, the system input object (the
+  pointer's output), the input object of the geode that owns the block,
+  and that geode's process. Then the recorded event is dispatched. A
+  stop that does not exist is passed at once: no input manager, no
+  output, or an owner that is not a process with a thread (the kernel,
+  a library). The stop numbers are the asm's (`OFIQNS_INPUT_MANAGER` 0
+  to `OFIQNS_DISPATCH` 8). `metaC.goh` names them one stop later, so a C
+  caller that passes `OFIQNS_SYSTEM_INPUT_OBJ` (0) starts at the input
+  manager, as the asm did.
 - Also: `ObjGetFlags`, `ObjSetFlags`, `ObjMarkDirty`,
   `ObjInitializePart`, the in-use and interactible counts (the latter
   notify the block output), `ObjBlockSetOutput`/`GetOutput`,
@@ -2243,6 +2252,15 @@ rectangles point by point.
   the closest entry by the asm's distance (`MapRGBtoIndex`): on the
   default palette, the first 32 entries and then one entry of the color
   cube. The palette is the window's (`W_palette`) or the default.
+- `GrCreatePalette` gives a window its own palette, the default one at
+  first, as a chunk of 256 RGB values in the window block.
+  `GrSetPalette` and `GrSetPaletteEntry` change it, and
+  `GrDestroyPalette` frees it. `GrGetPalette` returns a block with the
+  number of entries (256) followed by the window's or the default
+  values, as in the asm. None of these reach the device;
+  `WinRealizePalette` does (§13l). Graphics strings record them
+  (`GR_CREATE_PALETTE`, `GR_DESTROY_PALETTE`, `GR_SET_PALETTE_ENTRY`,
+  `GR_SET_PALETTE`); paths do not.
 - Draw masks come from the system table (`graphicsTables.c`, taken from
   `graphicsTables.asm`) and are lined up with `GS_xShift` and
   `GS_yShift`, as in `GrShiftMask`.
@@ -2478,12 +2496,30 @@ ctest `kernel.geode` checks the window variables of a geode. ctest
 The C code has one recursive tree lock for all of it (`WinTreeP`,
 `WinTreeV`).
 
-**Not yet:**
-- `WinScroll`;
-- flushing the input and exposure objects' queues before a window is
-  freed. `WinClose` frees the window at once, so a queued
-  `MSG_META_EXPOSED` for a closed window must not be answered;
-- `WinForEach`, `WinRealizePalette`.
+**Closing.** Before a window is freed, `WinClose` flushes the input
+object's and the exposure object's queues (`WinFlushQueue`, §13
+freeing). Each flush holds a reference until
+`MSG_META_WIN_DEC_REF_COUNT` comes back to the object at its end. That
+message is a MetaClass message, so it reaches `WinDecRefCount`. A window
+without either object flushes the queue of its owning process, or else
+the system input object's. So an event queued with the handle finds the
+window closed (`WRF_CLOSED`, nothing visible), not freed. `WinSetInfo`
+flushes the old object's queues when `WIT_INPUT_OBJ` or
+`WIT_EXPOSURE_OBJ` changes.
+
+**`WinForEach`** (Port32 C, `win.h`):
+`Boolean callback(WindowHandle *win, void *data)` is called with the
+tree locked. It returns TRUE to stop, or sets `*win` to the next window
+(0 ends). In the asm the window was in `di`, the data in `ax`, `cx`,
+`dx`, `bp`, and carry stopped.
+
+**`WinRealizePalette`** passes the window's palette, or the default
+one, to its driver (`DR_VID_SET_PALETTE`, all 256 entries). On a bitmap
+the memory driver finds the bitmap itself.
+
+ctest `kernel.win` checks the flush of a closing window's queues
+(answered as MetaClass would), `WinForEach` with a stop, and
+`WinRealizePalette` with the default palette and the window's own.
 
 **`WinSetInfo` in Port32** takes 64 bits (`optr`):
 - an optr for `WIT_INPUT_OBJ` and `WIT_EXPOSURE_OBJ`;
@@ -3005,7 +3041,9 @@ records a field into a chunk and checks its bytes, plays it, bounds it,
 copies it into a file and plays it from there.
 
 **Not yet:** the `*_PTR` and `*_OPTR` elements, bitmap slices after the
-first (callbacks), palettes, the truncation of a full stream.
+first (callbacks), the truncation of a full stream.
+`GR_SET_PALETTE` holds three bytes for each of its entries (the C table
+had counted bytes).
 (`GST_PATH` and the other path and clip elements: §13q.)
 
 **Bounds** (`graphicsStringBounds.c`). `GrGetGStringBoundsDWord` and

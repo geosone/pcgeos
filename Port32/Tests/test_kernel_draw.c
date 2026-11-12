@@ -1520,6 +1520,61 @@ int main(int argc, char **argv)
 	    GrSetTextStyle(g, 0, TS_UNDERLINE);
 	    GrSetTextColor(g, CF_RGB, 0, 0, 0);
 	}
+
+	/* palettes: the window's own, mapped to, copied out; recorded
+	 * and played */
+	{
+	    static const RGBValue two[2] = { {10, 20, 30}, {40, 50, 60} };
+	    static const byte pexpect[] = {
+		GR_CREATE_PALETTE,
+		GR_SET_PALETTE_ENTRY, 200, 0, 7, 8, 9,
+		GR_SET_PALETTE, 100, 2, 0, 10, 20, 30, 40, 50, 60,
+		GR_END_GSTRING
+	    };
+	    MemHandle pm;
+	    byte *pp;
+	    Color idx = 0;
+	    word pc = 0;
+	    GStateHandle pg, pl;
+
+	    CHECK(GrCreatePalette(g) != 0);
+	    GrSetPaletteEntry(g, 200, 7, 8, 9);
+	    GrSetPalette(g, two, 100, 2);
+	    (void) GrMapColorRGB(g, 7, 8, 9, &idx);
+	    CHECK(idx == 200);
+	    pm = GrGetPalette(g, GPT_ACTIVE);
+	    pp = MemLock(pm);
+	    CHECK(pp[0] == 0 && pp[1] == 1 && pp[2 + 200 * 3] == 7 &&
+		  pp[2 + 100 * 3] == 10 && pp[2 + 101 * 3 + 2] == 60 &&
+		  pp[2 + 15 * 3] == 0xff);
+	    MemFree(pm);
+	    pm = GrGetPalette(g, GPT_DEFAULT);
+	    pp = MemLock(pm);
+	    CHECK(pp[2 + 100 * 3] != 10 || pp[2 + 100 * 3 + 1] != 20);
+	    MemFree(pm);
+	    GrDestroyPalette(g);
+	    (void) GrMapColorRGB(g, 7, 8, 9, &idx);
+	    CHECK(idx != 200);
+
+	    pg = GrCreateGString(blk, GST_CHUNK, &pc);
+	    (void) GrCreatePalette(pg);
+	    GrSetPaletteEntry(pg, 200, 7, 8, 9);
+	    GrSetPalette(pg, two, 100, 2);
+	    CHECK(GrEndGString(pg) == GSET_NO_ERROR);
+	    GrDestroyGString(pg, 0, GSKT_LEAVE_DATA);
+	    MemLock(blk);
+	    p = LMemDerefHandles(blk, pc);
+	    CHECK(LMemGetChunkSizeHandles(blk, pc) == sizeof(pexpect) &&
+		  !memcmp(p, pexpect, sizeof(pexpect)));
+	    MemUnlock(blk);
+	    pl = GrLoadGString(blk, GST_CHUNK, pc);
+	    CHECK(GrDrawGString(g, pl, 0, 0, 0, NULL) == GSRT_COMPLETE);
+	    GrDestroyGString(pl, 0, GSKT_LEAVE_DATA);
+	    (void) GrMapColorRGB(g, 40, 50, 60, &idx);
+	    CHECK(idx == 101);
+	    GrDestroyPalette(g);
+	    LMemFreeHandles(blk, pc);
+	}
 	FileSetStandardPath(SP_VIDEO_DRIVERS);
 
 	GrDestroyGString(ld, g, GSKT_KILL_DATA);

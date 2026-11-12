@@ -77,6 +77,8 @@ GeodeHandle WinPtrFinalGeode(void);
 void WinChangePtrNotification(void);
 void WinPtrClosing(WindowHandle wh, WindowHandle parent);
 void WinPtrFreed(WindowHandle wh);
+/* winCreDest.c: a reference until od's queues are flushed */
+void WinFlushQueue(WindowHandle wh, optr od);
 
 /* winUtils.c: the tree lock */
 void WinTreeP(void);

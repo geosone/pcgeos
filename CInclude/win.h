@@ -375,6 +375,16 @@ extern void	/*XXX*/
 extern void 	/*XXX*/
     _pascal WinRealizePalette(WindowHandle win);
 
+#ifdef GEOS_PORT32
+/* WinForEach: callback for win and on, the window tree locked, until
+ * it returns TRUE or sets *win to 0; it sets *win to the next window
+ * (asm: di, data in ax, cx, dx, bp, carry to stop) */
+typedef Boolean WinForEachCallback(WindowHandle *win, void *data);
+extern void
+    _pascal WinForEach(WindowHandle win, WinForEachCallback *callback,
+		       void *data);
+#endif
+
 /***/
 
 

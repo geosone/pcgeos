@@ -33,7 +33,9 @@ Boolean VidDevInit(void)
     MemHandle mh = GrGetPalette(0, GPT_DEFAULT);
 
     if (mh) {
-	memcpy(vmDefaultPalette, MemLock(mh), sizeof(vmDefaultPalette));
+	/* the number of entries, then the entries */
+	memcpy(vmDefaultPalette, (byte *) MemLock(mh) + 2,
+	       sizeof(vmDefaultPalette));
 	MemFree(mh);
     }
     DriverTable.VDI_tech = DT_MEMORY;

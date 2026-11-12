@@ -8,12 +8,24 @@
  * message's parameters in order) and the reply buffer.  Messages to a
  * thread or process reach MetaClass with pself NULL.
  *
- * Detach and quit are in objectShutdown.c.  Not yet: help and options
- * messages, MSG_META_OBJ_FLUSH_INPUT_QUEUE.  Without the input
- * manager, freeing an object or a block flushes only the queue of the
- * thread that runs it (the final message goes through that queue).
+ * Detach and quit are in objectShutdown.c.
+ *
+ * Freeing an object, an object block or a window first flushes the
+ * input queues (ObjStartQueueFlush, MSG_META_OBJ_FLUSH_INPUT_QUEUE):
+ * the message goes through the input manager's queue, the system input
+ * object (the pointer's output), the input object of the geode owning
+ * the block and that geode's process, each queued, and then the
+ * recorded event is dispatched.  A stop that is not there (no input
+ * manager, no output, a block not owned by a process) is passed at
+ * once.  The numbers of the stops are those of the asm
+ * (OFIQNS_INPUT_MANAGER 0 to OFIQNS_DISPATCH 8; metaC.goh names them one
+ * stop later).
+ *
+ * Not yet: help and options messages.
  */
 #include "kernelC.h"
+#include <win.h>
+#include <Internal/im.h>
 
 #include <string.h>
 
@@ -66,14 +78,118 @@ static void MetaBlockFree(void *pself, optr oself, Message m, void *params,
     ObjFreeObjBlock(OptrToHandle(oself));
 }
 
+/* ObjFlushInputQueueNextStop as the asm numbers them */
+enum {
+    FLUSH_INPUT_MANAGER = 0,
+    FLUSH_SYSTEM_INPUT_OBJ = 2,
+    FLUSH_INPUT_OBJ_OF_OWNING_GEODE = 4,
+    FLUSH_PROCESS_OF_OWNING_GEODE = 6,
+    FLUSH_DISPATCH = 8
+};
+
+typedef struct {		/* MSG_META_OBJ_FLUSH_INPUT_QUEUE */
+    EventHandle	event;
+    int		nextStop;	/* ObjFlushInputQueueNextStop */
+    MemHandle	objBlock;
+} FlushParams;
+
+static void FlushStop(FlushParams *p);
+
+/* FlushNext: on to dest with the stop after it; none: that stop now */
+static void FlushTo(optr dest, FlushParams *p)
+{
+    p->nextStop += 2;
+    if (!OptrToHandle(dest)) {
+	FlushStop(p);
+	return;
+    }
+    CObjMessageP(MF_FORCE_QUEUE, dest, KMSG_META_OBJ_FLUSH_INPUT_QUEUE, p,
+		 sizeof(*p), NULL, 0);
+}
+
+/* the process owning the block, if it runs a thread (not the kernel) */
+GeodeHandle ObjOwnerProcess(MemHandle block)
+{
+    GeodeHandle owner = MemOwner(block);
+    GeodeCore *c = owner ? GeodeCoreOf(owner) : NULL;
+
+    if (!c || !(c->GC_attrs & GA_PROCESS) ||
+	!MemGetInfo(owner, MGIT_OTHER_INFO))
+	return 0;
+    return owner;
+}
+
+/* objFlushInputQueueActionTable */
+static void FlushStop(FlushParams *p)
+{
+    switch (p->nextStop) {
+    case FLUSH_INPUT_MANAGER:
+	FlushTo(ConstructOptr(ImInfoInputProcess(), 0), p);
+	break;
+    case FLUSH_SYSTEM_INPUT_OBJ:
+	FlushTo(WinPtrOutputOD(), p);
+	break;
+    case FLUSH_INPUT_OBJ_OF_OWNING_GEODE: {
+	GeodeHandle owner = MemOwner(p->objBlock);
+	optr io = owner && GeodeCoreOf(owner) ? WinGeodeGetInputObj(owner)
+					      : 0;
+	if (OptrToHandle(io))
+	    FlushTo(io, p);
+	else {
+	    p->nextStop = FLUSH_DISPATCH;
+	    FlushStop(p);
+	}
+	break;
+    }
+    case FLUSH_PROCESS_OF_OWNING_GEODE:
+	FlushTo(ConstructOptr(ObjOwnerProcess(p->objBlock), 0), p);
+	break;
+    case FLUSH_DISPATCH:
+	(void) CMessageDispatchP(p->event, MF_FORCE_QUEUE, NULL, 0);
+	break;
+    default:
+	KernelFatal(OBJ_FLUSH_INPUT_QUEUE_BAD_NEXT_STOP);
+    }
+}
+
+/* ObjStartQueueFlushCommon: msg to dest once the input queues are
+ * flushed, for block */
+void ObjStartQueueFlush(optr dest, Message msg, const void *params,
+			word size, MemHandle block)
+{
+    FlushParams p;
+
+    (void) CObjMessageP(MF_RECORD, dest, msg, params, size, &p.event,
+			sizeof(p.event));
+    p.nextStop = FLUSH_INPUT_MANAGER;
+    p.objBlock = block;
+    FlushStop(&p);
+}
+
+static void MetaObjFlushInputQueue(void *pself, optr oself, Message m,
+				   void *params, void *reply)
+{
+    FlushParams p = *(FlushParams *) params;
+
+    (void) pself; (void) oself; (void) m; (void) reply;
+    FlushStop(&p);
+}
+
+static void MetaWinDecRefCount(void *pself, optr oself, Message m,
+			       void *params, void *reply)
+{
+    (void) pself; (void) oself; (void) m; (void) reply;
+    WinDecRefCount(*(WindowHandle *) params);
+}
+
 static void MetaObjFree(void *pself, optr oself, Message m, void *params,
 			void *reply)
 {
     (void) pself; (void) m; (void) params; (void) reply;
     /* the in-use count goes down in MSG_META_FINAL_OBJ_FREE */
     ObjIncInUseCount(OptrToHandle(oself));
-    CObjMessageP(MF_FORCE_QUEUE, oself, KMSG_META_FINAL_OBJ_FREE, NULL, 0,
-		 NULL, 0);
+    ObjStartQueueFlush(oself, KMSG_META_FINAL_OBJ_FREE, NULL, 0,
+		       OptrToHandle(oself));
 }
 
 static void MetaFinalObjFree(void *pself, optr oself, Message m,
@@ -403,7 +519,9 @@ static const Message metaMessages[] = {
     KMSG_META_SHUTDOWN_COMPLETE,
     KMSG_META_QUIT,
     KMSG_META_QUIT_ACK,
-    KMSG_META_FINISH_QUIT
+    KMSG_META_FINISH_QUIT,
+    KMSG_META_OBJ_FLUSH_INPUT_QUEUE,
+    KMSG_META_WIN_DEC_REF_COUNT
 };
 
 static GocMethodThunk *const metaMethods[] = {
@@ -439,7 +557,9 @@ static GocMethodThunk *const metaMethods[] = {
     MetaShutdownComplete,
     MetaQuit,
     MetaQuitAck,
-    MetaFinishQuit
+    MetaFinishQuit,
+    MetaObjFlushInputQueue,
+    MetaWinDecRefCount
 };
 
 ClassStruct MetaClass = {
@@ -497,6 +617,6 @@ void ObjFreeObjBlock(MemHandle mh)
     exec = (ThreadHandle) MemGetInfo(mh, MGIT_EXEC_THREAD);
     if (!exec)
 	exec = KernelThisThread();
-    CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(exec, 0),
-		 KMSG_PROCESS_FINAL_BLOCK_FREE, &mh, sizeof(mh), NULL, 0);
+    ObjStartQueueFlush(ConstructOptr(exec, 0), KMSG_PROCESS_FINAL_BLOCK_FREE,
+		       &mh, sizeof(mh), mh);
 }

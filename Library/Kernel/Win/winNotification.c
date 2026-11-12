@@ -604,6 +604,11 @@ WindowHandle WinPtrFinalWin(void)
     return wp.finalWin;
 }
 
+optr WinPtrOutputOD(void)
+{
+    return wp.outputOD;
+}
+
 GeodeHandle WinPtrFinalGeode(void)
 {
     return wp.finalGeode;

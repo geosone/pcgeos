@@ -286,6 +286,7 @@ typedef struct {
 #define GSV_BYTES	1
 #define GSV_WORDS	2
 #define GSV_COORDS	3
+#define GSV_RGB		4	/* RGB values: three bytes a count */
 typedef struct {
     byte	GSEI_size;
     byte	GSEI_var;

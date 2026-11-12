@@ -11,12 +11,13 @@
  *
  * WinClose takes the window out of the tree, validates the tree (which
  * exposes what was under it) and drops its reference; the block is
- * freed when the last reference goes (WinDecRefCount).  The asm first
- * had the input and exposure objects' queues flushed
- * (MSG_META_OBJ_FLUSH_INPUT_QUEUE) and held a reference until then;
- * the C kernel has no such flush yet, so the window is freed at once.
- * An event already queued with its handle (MSG_META_EXPOSED) must
- * therefore not be answered with GrBeginUpdate after the close.
+ * freed when the last reference goes (WinDecRefCount).  Before, the
+ * input and exposure objects' queues are flushed (WinFlushQueue,
+ * MSG_META_OBJ_FLUSH_INPUT_QUEUE), each holding a reference until
+ * MSG_META_WIN_DEC_REF_COUNT comes back from the end of it; without
+ * either object, the owning process's queue (or the system input
+ * object's).  So events queued with the handle find the closed window
+ * (WRF_CLOSED, nothing visible) and not a freed handle.
  */
 #include "winInt.h"
 
@@ -159,6 +160,16 @@ WindowHandle WinOpen(Handle parentWinOrVidDr, optr inputRecipient,
     return wh;
 }
 
+/* WinFlushQueue: a reference to the locked window wh until od's input
+ * queues are flushed (none for a null od) */
+void WinFlushQueue(WindowHandle wh, optr od)
+{
+    if (!OptrToHandle(od))
+	return;
+    ((Window *) MemDeref(wh))->W_refCount++;
+    ObjStartQueueFlush(od, KMSG_META_WIN_DEC_REF_COUNT, &wh, sizeof(wh), wh);
+}
+
 void WinDecRefCount(WindowHandle win)
 {
     Window *w;
@@ -214,7 +225,21 @@ void WinClose(WindowHandle win)
 					 WGRF_WIN_PATH_VALID);
     WinSetupMaskFlags(w);
     w->W_regFlags |= WRF_CLOSED;
-    w->W_exposureObj = 0;
+    /* the queues first; the input object may yet get leaves */
+    {
+	optr in = w->W_inputObj, ex = w->W_exposureObj;
+	WinFlushQueue(wh, in);
+	w = MemDeref(wh);
+	w->W_exposureObj = 0;
+	if (ex != in)
+	    WinFlushQueue(wh, ex);
+	else if (!in) {
+	    GeodeHandle proc = ObjOwnerProcess(wh);
+	    WinFlushQueue(wh, proc ? ConstructOptr(proc, 0)
+				   : WinPtrOutputOD());
+	}
+	w = MemDeref(wh);
+    }
     w->W_parent = NULL_WINDOW;
     MemUnlock(wh);
     if (parent && visible)

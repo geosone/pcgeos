@@ -7,11 +7,18 @@
  * RGB value.  Set by RGB, the index is the closest palette entry, and
  * AO_USE_INDEX says whether it is the same color.
  *
- * Not yet: GrCreatePalette and the other palette routines (with the
- * window system); devices of 16 colors or fewer, where the asm
- * searched only the first 16 entries.
+ * A window may have a palette of its own (GrCreatePalette): a chunk of
+ * 256 RGB values in the window block (W_palette), the default palette
+ * at first.  GrSetPalette and GrSetPaletteEntry change it, GrGetPalette
+ * copies it (or the default) into a block, GrDestroyPalette frees it.
+ * They do not reach the device: WinRealizePalette does (winState.c).
+ * Graphics strings store them (not paths).
+ *
+ * Not yet: devices of 16 colors or fewer, where the asm searched only
+ * the first 16 entries.
  */
 #include "graphicsInt.h"
+#include "../Win/winInt.h"
 
 static word Dist(const byte *e, byte r, byte g, byte b)
 {
@@ -54,6 +61,140 @@ byte GrMapRGBtoIndex(const byte *palette, word last, byte red, byte green,
     return index;
 }
 
+/* EnterColor: the window of gstate, locked under the tree lock (its
+ * handle in *wh); NULL for none or a graphics string */
+static Window *EnterColor(GStateHandle gstate, WindowHandle *wh)
+{
+    GState *gs = MemLock(gstate);
+    WindowHandle win = gs->GS_window;
+    Handle gstring = gs->GS_gstring;
+
+    MemUnlock(gstate);
+    *wh = 0;
+    if (gstring || !win)
+	return NULL;
+    WinTreeP();
+    *wh = win;
+    return MemLock(win);
+}
+
+static void ExitColor(WindowHandle wh)
+{
+    if (wh) {
+	MemUnlock(wh);
+	WinTreeV();
+    }
+}
+
+static byte *WinPalette(WindowHandle wh)
+{
+    Window *w = MemDeref(wh);
+
+    return w->W_palette ? LMemDeref(ConstructOptr(wh, w->W_palette))
+			: NULL;
+}
+
+word GrCreatePalette(GStateHandle gstate)
+{
+    WindowHandle wh;
+    Window *w;
+    ChunkHandle ch = 0;
+
+    (void) GrGSRecord(gstate, GR_CREATE_PALETTE, "");
+    if ((w = EnterColor(gstate, &wh)) != NULL) {
+	ch = w->W_palette;
+	if (!ch && (ch = LMemAlloc(wh, 256 * 3)) != 0) {
+	    w = MemDeref(wh);
+	    w->W_palette = ch;
+	    memcpy(WinPalette(wh), grDefaultPalette, 256 * 3);
+	}
+    }
+    ExitColor(wh);
+    return ch;
+}
+
+void GrDestroyPalette(GStateHandle gstate)
+{
+    WindowHandle wh;
+    Window *w;
+
+    (void) GrGSRecord(gstate, GR_DESTROY_PALETTE, "");
+    if ((w = EnterColor(gstate, &wh)) != NULL && w->W_palette) {
+	ChunkHandle ch = w->W_palette;
+	w->W_palette = 0;
+	LMemFree(ConstructOptr(wh, ch));
+    }
+    ExitColor(wh);
+}
+
+/* the entries from index on (a byte), as many as fit */
+void GrSetPalette(GStateHandle gstate, const RGBValue *buffer, word index,
+		  word numEntries)
+{
+    WindowHandle wh;
+    byte *p;
+
+    index = (byte) index;
+    (void) GrGSRecord(gstate, GR_SET_PALETTE, "bwr", index, numEntries,
+		      buffer, (word) (numEntries * 3));
+    if (EnterColor(gstate, &wh) && (p = WinPalette(wh)) != NULL) {
+	if (index + numEntries > 256)
+	    numEntries = (word) (256 - index);
+	memcpy(p + index * 3, buffer, (size_t) numEntries * 3);
+    }
+    ExitColor(wh);
+}
+
+/* OpSetPaletteEntry: the entry as a word, then red, green, blue (the
+ * asm wrote the index into both bytes of the word) */
+void GrSetPaletteEntry(GStateHandle gstate, word index, word red,
+		       word green, word blue)
+{
+    WindowHandle wh;
+    byte *p;
+
+    index = (byte) index;
+    (void) GrGSRecord(gstate, GR_SET_PALETTE_ENTRY, "wbbb", index, red,
+		      green, blue);
+    if (EnterColor(gstate, &wh) && (p = WinPalette(wh)) != NULL) {
+	p += index * 3;
+	p[0] = (byte) red;
+	p[1] = (byte) green;
+	p[2] = (byte) blue;
+    }
+    ExitColor(wh);
+}
+
+/* a block: the number of entries (256), then the RGB values; the
+ * window's palette or the default one; 0 for a graphics string */
+MemHandle GrGetPalette(GStateHandle gstate, GetPalType flag)
+{
+    WindowHandle wh = 0;
+    const byte *p;
+    MemHandle mh;
+    byte *b;
+
+    if (gstate) {
+	GState *gs = MemLock(gstate);
+	Handle gstring = gs->GS_gstring;
+	MemUnlock(gstate);
+	if (gstring)
+	    return 0;
+    }
+    mh = MemAlloc(256 * 3 + 2, HF_SHARABLE | HF_SWAPABLE,
+		  HAF_ZERO_INIT | HAF_LOCK | HAF_NO_ERR);
+    b = MemDeref(mh);
+    if (gstate)
+	(void) EnterColor(gstate, &wh);
+    p = wh && flag != GPT_DEFAULT ? WinPalette(wh) : NULL;
+    b[0] = 0;
+    b[1] = 1;				/* 256 entries */
+    memcpy(b + 2, p ? p : grDefaultPalette, 256 * 3);
+    ExitColor(wh);
+    MemUnlock(mh);
+    return mh;
+}
+
 const byte *GrLockPalette(const GState *gs, word *last, Handle *win)
 {
     Window *w;
@@ -77,31 +218,6 @@ void GrUnlockPalette(Handle win)
 {
     if (win)
 	MemUnlock(win);
-}
-
-/* GrGetPalette: a copy of the palette (the window's or the default),
- * 256 RGBValues in a new block; the caller frees it */
-MemHandle GrGetPalette(GStateHandle gstate, GetPalType flag)
-{
-    const byte *p = grDefaultPalette;
-    GState *gs = NULL;
-    Handle win = 0;
-    MemHandle mh;
-    word last;
-
-    if (flag != GPT_DEFAULT && gstate) {
-	gs = MemLock(gstate);
-	p = GrLockPalette(gs, &last, &win);
-    }
-    mh = MemAlloc(256 * 3, HF_SWAPABLE, 0);
-    if (mh) {
-	memcpy(MemLock(mh), p, 256 * 3);
-	MemUnlock(mh);
-    }
-    GrUnlockPalette(win);
-    if (gs)
-	MemUnlock(gstate);
-    return mh;
 }
 
 void GrSetColorIn(const GState *gs, CommonAttr *ca, ColorFlag flag,

@@ -139,7 +139,7 @@ const GSElemInfo grGSElemInfo[GS_NUM_ELEMENTS] = {
     {  1, 0, 0},	/* 0x65 GR_CREATE_PALETTE */
     {  1, 0, 0},	/* 0x66 GR_DESTROY_PALETTE */
     {  6, 0, 0},	/* 0x67 GR_SET_PALETTE_ENTRY */
-    {  4, GSV_BYTES, 2},	/* 0x68 GR_SET_PALETTE */
+    {  4, GSV_RGB, 2},	/* 0x68 GR_SET_PALETTE */
     {  4, 0, 0},	/* 0x69 GR_SET_LINE_COLOR */
     {  2, 0, 0},	/* 0x6a GR_SET_LINE_MASK */
     {  2, 0, 0},	/* 0x6b GR_SET_LINE_COLOR_MAP */
@@ -296,6 +296,7 @@ word GrGSElemSize(const byte *e, dword avail)
     case GSV_BYTES: size += U(e + i->GSEI_varOff); break;
     case GSV_WORDS: size += (dword) U(e + i->GSEI_varOff) * 2; break;
     case GSV_COORDS: size += (dword) U(e + i->GSEI_varOff) * 4; break;
+    case GSV_RGB: size += (dword) U(e + i->GSEI_varOff) * 3; break;
     }
     return (word) (size <= avail && size <= 0xffff ? size : 0);
 }
@@ -854,6 +855,21 @@ void GrPlayElement(GStateHandle gstate, const byte *e)
 	GrDrawTextField(gstate, &v);
 	break;
     }
+    /* palettes */
+    case GR_CREATE_PALETTE:
+	(void) GrCreatePalette(gstate);
+	break;
+    case GR_DESTROY_PALETTE:
+	GrDestroyPalette(gstate);
+	break;
+    case GR_SET_PALETTE_ENTRY:
+	GrSetPaletteEntry(gstate, e[1], e[3], e[4], e[5]);
+	break;
+    case GR_SET_PALETTE:
+	v = Copy(e + 4, (dword) U(e + 2) * 3);
+	if (v)
+	    GrSetPalette(gstate, v, e[1], U(e + 2));
+	break;
     case GR_SET_TEXT_ATTR: {
 	TextAttr ta;
 	GrTextAttrDecode(e + 1, &ta);

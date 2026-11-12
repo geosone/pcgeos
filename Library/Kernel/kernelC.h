@@ -123,7 +123,8 @@
     X(GRAPHICS_BAD_BITMAP_FORMAT)	/* GrCreateBitmap: not drawable */ \
     X(GRAPHICS_GR_INIT_FONTS_ERROR)	/* the font info block's chunks */ \
     X(C_FATAL_ERROR)		/* CFatalError of a geode (code logged) */ \
-    X(EC_BAD_HANDLE)		/* ECCheck*Handle: not of that type */
+    X(EC_BAD_HANDLE)		/* ECCheck*Handle: not of that type */ \
+    X(OBJ_FLUSH_INPUT_QUEUE_BAD_NEXT_STOP)
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -368,6 +369,8 @@ extern dword kernelTimerEventsDropped;
 #define KMSG_META_QUIT				26
 #define KMSG_META_QUIT_ACK			27
 #define KMSG_META_FINISH_QUIT			52
+#define KMSG_META_OBJ_FLUSH_INPUT_QUEUE		49
+#define KMSG_META_WIN_DEC_REF_COUNT		50
 /* MetaWindowMessages the window system sends (winC.goh) */
 #define KMSG_META_EXPOSED			69
 #define KMSG_META_WIN_UPDATE_COMPLETE		71
@@ -387,6 +390,15 @@ extern dword kernelTimerEventsDropped;
 /* Win/winNotification.c: the pointer moved to x, y on the root window
  * tree, in the save under areas su (the input manager) */
 void WinMovePtr(word su, Handle tree, sword x, sword y);
+/* the pointer's output, the system input object (wPtrOutputOD) */
+optr WinPtrOutputOD(void);
+
+/* Object/objectMeta.c: msg to dest once the input queues are flushed
+ * for block (ObjStartQueueFlushCommon) */
+void ObjStartQueueFlush(optr dest, Message msg, const void *params,
+			word size, MemHandle block);
+/* the process owning a block, if it runs a thread; 0 otherwise */
+GeodeHandle ObjOwnerProcess(MemHandle block);
 
 /* event reserve for interrupt code, event timers through messages */
 void KernelEventInit(void);

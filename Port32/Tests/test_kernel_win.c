@@ -32,6 +32,9 @@ static int fails;
 
 /* the fake driver: the washes, the pointer */
 static int movePtrs, setPtrs;
+static int palettes;			/* DR_VID_SET_PALETTE */
+static word palFirst, palCount;
+static byte palCopy[256 * 3];
 static const void *lastPtrDef;
 static int rects;
 static Rectangle lastRect;
@@ -58,6 +61,12 @@ static Boolean Strategy(word function, DriverRegs *r)
 	movePtrs++;
 	r->DR_ax = 0;				/* no areas */
     }
+    if (function == DR_VID_SET_PALETTE) {
+	palettes++;
+	palFirst = (word) r->DR_ax;
+	palCount = (word) r->DR_cx;
+	memcpy(palCopy, r->DR_dsSi, sizeof(palCopy));
+    }
     if (function == DR_VID_SETPTR) {
 	setPtrs++;
 	lastPtrDef = r->DR_dsSi;
@@ -66,6 +75,56 @@ static Boolean Strategy(word function, DriverRegs *r)
 }
 
 static QueueHandle q;
+
+/* WinForEach: along the siblings, stopping at stopAt */
+typedef struct {
+    int		 n;
+    WindowHandle seen[4];
+    WindowHandle stopAt;
+} WinVisit;
+
+static Boolean NextSibling(WindowHandle *win, void *data)
+{
+    WinVisit *v = data;
+    WindowHandle wh = *win;
+    Window *w;
+
+    if (v->n < 4)
+	v->seen[v->n] = wh;
+    v->n++;
+    if (wh == v->stopAt)
+	return TRUE;
+    w = MemLock(wh);
+    *win = w->W_nextSibling;
+    MemUnlock(wh);
+    return FALSE;
+}
+
+/* the flush of a closing window's queues, answered as MetaClass would
+ * (no input manager, no process: the event is dispatched at once);
+ * TRUE if ev was one (it is freed) */
+static int flushes, decRefs;
+
+static int Flush(EventHandle ev, Message m, const void *p)
+{
+    if (m == KMSG_META_OBJ_FLUSH_INPUT_QUEUE && p) {
+	EventHandle e;
+	memcpy(&e, p, sizeof(e));
+	flushes++;
+	ObjFreeMessage(ev);
+	(void) CMessageDispatchP(e, MF_FORCE_QUEUE, NULL, 0);
+	return 1;
+    }
+    if (m == KMSG_META_WIN_DEC_REF_COUNT && p) {
+	WindowHandle w;
+	memcpy(&w, p, sizeof(w));
+	decRefs++;
+	ObjFreeMessage(ev);
+	WinDecRefCount(w);
+	return 1;
+    }
+    return 0;
+}
 
 /* the exposures queued for window wh since the last call for it */
 static WindowHandle seenWin[8];
@@ -81,6 +140,8 @@ static int Exposed(WindowHandle wh)
 	const WindowHandle *p;
 	ev = QueueGetMessage(q);
 	p = KernelEventParams(ev, &size);
+	if (Flush(ev, ObjGetMessageInfo(ev, NULL), p))
+	    continue;
 	if (ObjGetMessageInfo(ev, NULL) == KMSG_META_EXPOSED && p)
 	    for (i = 0; i < 8; i++)
 		if (seenWin[i] == *p || !seenWin[i]) {
@@ -135,6 +196,7 @@ static int Null(WindowHandle wh, int which)
 /* the next message to the change object: its message and parameters */
 static QueueHandle cq;
 
+
 static Message NextPtr(void *params, dword want)
 {
     EventHandle ev;
@@ -142,16 +204,20 @@ static Message NextPtr(void *params, dword want)
     dword size;
     Message m;
 
-    if (!GeodeInfoQueue(cq))
-	return 0;
-    ev = QueueGetMessage(cq);
-    p = KernelEventParams(ev, &size);
-    m = ObjGetMessageInfo(ev, NULL);
-    memset(params, 0, want);
-    if (p)
-	memcpy(params, p, size < want ? size : want);
-    ObjFreeMessage(ev);
-    return m;
+    for (;;) {
+	if (!GeodeInfoQueue(cq))
+	    return 0;
+	ev = QueueGetMessage(cq);
+	p = KernelEventParams(ev, &size);
+	m = ObjGetMessageInfo(ev, NULL);
+	if (Flush(ev, m, p))
+	    continue;
+	memset(params, 0, want);
+	if (p)
+	    memcpy(params, p, size < want ? size : want);
+	ObjFreeMessage(ev);
+	return m;
+    }
 }
 
 /* the next is an enter, leave or implied change for window wh */
@@ -286,11 +352,17 @@ static void PtrTest(WindowHandle root, optr od)
 
     /* closing D under the pointer: its leave, then C */
     Drain();
+    flushes = decRefs = 0;
     WinClose(d);
+    /* D lives until its queues are flushed (the output's here) */
+    CHECK(MemGetInfo(d, MGIT_SIZE) != 0);
     CHECK(Change(&wc) && WinChangeAck(root, 225, 225, &iod) == c);
     CHECK(Next(KMSG_META_RAW_UNIV_LEAVE, d, od));
     CHECK(Next(KMSG_META_IMPLIED_WIN_CHANGE, c, od));
     CHECK(!NextPtr(&wc, sizeof(wc)));
+    (void) Exposed(0);			/* its reference from q */
+    /* (the references of windows closed before come back too) */
+    CHECK(flushes >= 1 && decRefs >= flushes);
     WinClose(c);
     CHECK(Change(&wc) && WinChangeAck(root, 225, 225, &iod) == root);
     CHECK(Next(KMSG_META_RAW_UNIV_LEAVE, c, od));
@@ -494,6 +566,36 @@ int main(void)
     CHECK(od == ConstructOptr(q, 0));
     WinGetWinScreenBounds(g, &r);
     CHECK(RECT(r, 10, 10, 59, 39));
+
+    /* WinForEach from B, the first child, along the siblings; then
+     * stopped at B */
+    {
+	WinVisit v;
+	memset(&v, 0, sizeof(v));
+	WinForEach(b, NextSibling, &v);
+	CHECK(v.n == 2 && v.seen[0] == b && v.seen[1] == a);
+	memset(&v, 0, sizeof(v));
+	v.stopAt = b;
+	WinForEach(b, NextSibling, &v);
+	CHECK(v.n == 1);
+    }
+
+    /* WinRealizePalette: the default palette to the driver (all 256),
+     * then the window's own, changed through the GState */
+    palettes = 0;
+    WinRealizePalette(a);
+    CHECK(palettes == 1 && (byte) palFirst == 0 && palCount == 256 &&
+	  palCopy[15 * 3] == 0xff && palCopy[15 * 3 + 2] == 0xff &&
+	  palCopy[0] == 0 && palCopy[1 * 3 + 2] == 0xaa);
+    CHECK(GrCreatePalette(g) != 0);
+    GrSetPaletteEntry(g, 15, 1, 2, 3);
+    WinRealizePalette(g);
+    CHECK(palettes == 2 && palFirst == 0 && palCopy[15 * 3] == 1 &&
+	  palCopy[15 * 3 + 1] == 2 && palCopy[15 * 3 + 2] == 3 &&
+	  palCopy[14 * 3] == 0xff);
+    GrDestroyPalette(g);
+    WinRealizePalette(a);
+    CHECK(palettes == 3 && palCopy[15 * 3] == 0xff);
 
     /* closing B: the root gets its area back (plain: no exposure) */
     WinClose(b);

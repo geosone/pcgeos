@@ -15,11 +15,15 @@
  * WinSetInfo takes (win.h): WIT_PRIVATE_DATA a pointer to the
  * WinPrivateData, WIT_COLOR red | flags << 8 | green << 16 | blue << 24,
  * WIT_INPUT_OBJ and WIT_EXPOSURE_OBJ the optr, WIT_STRATEGY the
- * routine; the other types do nothing.  The asm flushed the old
- * object's queues when an optr changed; not yet (winCreDest.c).
+ * routine; the other types do nothing.  When an optr changes, the old
+ * object's queues are flushed first (WinSetOD, WinFlushQueue): the
+ * window lives until they are.
  */
 #include "winInt.h"
+#include "../Graphics/graphicsInt.h"
+#include <Internal/videoDr.h>
 #include <stdint.h>
+#include <string.h>
 
 void WinSetInfo(WindowHandle win, WinInfoType type, optr data)
 {
@@ -44,9 +48,13 @@ void WinSetInfo(WindowHandle win, WinInfoType type, optr data)
 	w->W_colorRGB.RGB_blue = (byte) (data >> 24);
 	break;
     case WIT_INPUT_OBJ:
+	if (w->W_inputObj != data)
+	    WinFlushQueue(wh, w->W_inputObj);
 	w->W_inputObj = data;
 	break;
     case WIT_EXPOSURE_OBJ:
+	if (w->W_exposureObj != data)
+	    WinFlushQueue(wh, w->W_exposureObj);
 	w->W_exposureObj = data;
 	break;
     case WIT_STRATEGY:
@@ -137,5 +145,36 @@ void WinGetWinScreenBounds(WindowHandle win, Rectangle *bounds)
 	*bounds = w->W_winRect;
 	MemUnlock(wh);
     }
+    WinTreeV();
+}
+
+/*
+ * WinRealizePalette: the window's palette (or the default one) to its
+ * video driver, all 256 entries (DR_VID_SET_PALETTE).  On a bitmap
+ * the memory driver finds the bitmap itself.
+ */
+void WinRealizePalette(WindowHandle win)
+{
+    WindowHandle wh;
+    Window *w;
+    DriverRegs r;
+
+    WinTreeP();
+    w = WinLockFromHandle(win, &wh);
+    if (!w) {
+	WinTreeV();
+	return;
+    }
+    memset(&r, 0, sizeof(r));
+    if (w->W_palette) {
+	r.DR_dsSi = LMemDeref(ConstructOptr(wh, w->W_palette));
+	r.DR_ax = 0;
+    } else {
+	r.DR_dsSi = (void *) grDefaultPalette;
+	r.DR_ax = 0x100;		/* as the asm: the first is al */
+    }
+    r.DR_cx = 0x100;
+    (void) WinCallVidDriver(MemDeref(wh), DR_VID_SET_PALETTE, &r);
+    MemUnlock(wh);
     WinTreeV();
 }

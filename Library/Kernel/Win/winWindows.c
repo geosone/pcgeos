@@ -4,7 +4,7 @@
  * FindWindowInsertPos, WinTInsertHere, WinTRemove, WinTValidate,
  * WinCalcUnivReg, WinMove, WinMoveHere, WinResize, WinNULLVisReg,
  * WinChangePriority, WinLocatePoint, WinScroll, WinSetMaskReg,
- * ShiftRegion).
+ * ShiftRegion, WinForEach).
  *
  * The children of a window are in order from the front: the first
  * child is on top.  Within its parent a window goes behind every
@@ -576,5 +576,15 @@ void WinScroll(WindowHandle win, WWFixedAsDWord xMove, WWFixedAsDWord yMove,
 	*(WWFixedAsDWord *) &scrollAmt->PF_y = ty;
     }
     MemUnlock(wh);
+    WinTreeV();
+}
+
+/* WinForEach: the callback on windows from win, the tree locked so that
+ * it may walk the links, until it stops */
+void WinForEach(WindowHandle win, WinForEachCallback *callback, void *data)
+{
+    WinTreeP();
+    while (win && !callback(&win, data))
+	;
     WinTreeV();
 }
