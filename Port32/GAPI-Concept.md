@@ -80,7 +80,12 @@ The order follows what the Preferences need first and what can be tested:
 ## 5. Decisions (2026-11-12)
 
 1. **D-Bus: a small client of our own** that fits the GEOS system. It talks the D-Bus wire protocol over the Unix socket, so there is no libdbus or sd-bus and no target library in the cross builds. It goes under `Gapi/Linux`. It is the path to systemd (`timedate1`, `login1`, `locale1`), polkit, NetworkManager and udisks, and the way logs reach the journal in the `session` role.
-2. **Printing: GEOS gives CUPS PostScript or PDF** of its own. It does not send raw data of the old printer drivers. On Linux, the spooler renders the job with a GEOS PostScript/PDF driver and hands it to the CUPS queue. The printer's own driver is then CUPS's business.
+2. **Printing: GEOS gives CUPS PostScript or PDF** of its own. It does not send raw data of the old printer drivers. The printer's own driver is then CUPS's business. GEOS's driver model already splits printing in two, and the CUPS path uses both halves:
+   - **Rendering:** the PostScript printer driver (`Driver/Printer/PScript`), which already has the "Host Integration Printer" (`hostPrinterInfo.asm`, PS to PDF, 2015). It gets ported to C. A PDF output can come later.
+   - **Transport:** a port driver of its own, `Driver/Stream/Cups`, beside `Parallel`, `Serial`, `Filestr` and `Netstr`. The spooler opens it as a custom port (`PPT_CUSTOM`, `processCustom.asm`), and it hands the job to the CUPS queue over IPP (`gapi_print`). It runs on the CUPS socket, the same way as the D-Bus client.
+   - **Printer list and options:** queues, default printer, paper sizes and duplex come from CUPS through `gapi_print`. The spooler and the printer control panel show the host's printers.
+
+   This keeps DOS unchanged (PScript to LPT or a file) and needs no special printer driver for Linux. A driver that renders and sends at once would duplicate PScript.
 3. **Guest by default; session when GEOS is the only UI** (section 2, rule 5). Journal logging and the password prompts come with the D-Bus client, when GEOS is that far.
 
 Still open: command-line tools (`timedatectl`, `lpstat`) as a stopgap before the D-Bus client, or not at all.
