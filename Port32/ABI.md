@@ -2799,10 +2799,9 @@ as far as its scan lines go (`GrBitmapStringSize`).
 
 **Not yet:** `GR_DRAW_TEXT_FIELD` (style runs; reading one is a
 fault), the `*_PTR` and `*_OPTR` elements, bitmap slices after the
-first (callbacks), palettes, patterns, clip rectangles and clip
-paths (skipped when played), `GrGetGStringBounds` and
+first (callbacks), palettes, patterns, `GrGetGStringBounds` and
 `GSF_FIGURE_BOUNDS`, the truncation of a full stream. (`GST_PATH` and
-the other path elements: §13q.)
+the other path and clip elements: §13q.)
 
 **Tests.** ctest `kernel.draw` records into a chunk and compares the
 bytes with the DOS16 elements, plays the string at a position, in parts
@@ -2851,10 +2850,24 @@ TRUE when the path exists, as the C stub did. In a graphics string,
 `GR_BEGIN_PATH`, `GR_END_PATH`, `GR_CLOSE_SUB_PATH`, `GR_FILL_PATH` and
 `GR_DRAW_PATH` are stored and played.
 
+**Clip paths.** The GState also keeps `GS_clipPath` and
+`GS_winClipPath` as chunks in the same form, each group carrying its
+fill rule in `OBP_flags` (0x80 = rule valid, bit 0 = the rule):
+- `GrSetClipPath` and `GrSetWinClipPath` combine the current path into
+  one of them;
+- `GrSetClipRect` and `GrSetWinClipRect` combine a rectangle, which is
+  recorded as a path of its own; the window rectangle is in page
+  coordinates (a null transformation). The current path stays.
+- `PCT_NULL` removes the clip path.
+
+`WinValWinStruct` ANDs the mask with the regions of both
+(`GrClipMask`), so the mask lies in both, as in GEOS. A change makes
+the window's mask invalid for that GState. The clip paths are saved and
+restored with the GState. In a graphics string the four elements are
+stored and played.
+
 **Not yet:**
-- clip paths and clip rectangles (`GrSetClipPath`,
-  `GrSetWinClipPath`, `GrSetClipRect`, `GrSetWinClipRect`, the
-  `WGRF_PATH_VALID` part of `WinValWinStruct`);
+- `GrGetClipRegion`, `GrGetWinClipRegion`;
 - `GrSetStrokePath`, `GrTestPointInPath`, `GrGetPathPoints`,
   `GrGetPathRegion`;
 - text, bitmaps, rounded rectangles and 3-point arcs in paths (they are
@@ -2868,6 +2881,9 @@ TRUE when the path exists, as the C stub did. In a graphics string,
 - a stroked rectangle;
 - a path filled from a graphics string;
 - `PCT_NULL`.
+- a clip rectangle that stays when the transformation changes, an
+  intersection with a clip path, `GrSaveState`/`GrRestoreState`, a
+  window clip rectangle, removal.
 
 ## 14. Open
 

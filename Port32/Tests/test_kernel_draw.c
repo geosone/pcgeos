@@ -38,7 +38,7 @@
  *   - graphics strings: recorded (the DOS16 bytes), played, in parts,
  *     from memory, copied into a huge array and a file, parsed;
  *   - paths: filled, combined (union, intersection), stroked, bounds,
- *     filled from a graphics string;
+ *     filled from a graphics string; clip rectangles and clip paths;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -1408,6 +1408,49 @@ int main(int argc, char **argv)
 	GrBeginPath(g, PCT_NULL);
 	CHECK(!GrTestPath(g, GPT_CURRENT) &&
 	      GrGetPathBounds(g, GPT_CURRENT, &rb));
+    }
+
+    /* clip rectangles and clip paths: the mask of the window (A at
+     * 20,20 on the screen) */
+    {
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	GrSetClipRect(g, PCT_REPLACE, 20, 20, 40, 40);
+	CHECK(GrTestPath(g, GPT_CLIP));
+	GrApplyTranslation(g, MakeWWFixed(5), MakeWWFixed(0));
+	SetCol(g, RED);
+	GrFillRect(g, -5, 0, 75, 80);	/* the clip stays where it was */
+	GrSetNullTransform(g);
+	CHECK(Pixel(50, 50) == RED && Pixel(41, 41) == RED &&
+	      Pixel(35, 50) == WHITE && Pixel(50, 65) == WHITE &&
+	      Pixel(80, 80) == WHITE);
+
+	GrSaveState(g);
+	GrBeginPath(g, PCT_REPLACE);
+	GrDrawEllipse(g, 30, 0, 80, 50);
+	GrEndPath(g);
+	GrSetClipPath(g, PCT_INTERSECTION, ODD_EVEN);
+	SetCol(g, BLUE);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(Pixel(55, 45) == BLUE && Pixel(42, 42) == RED &&
+	      Pixel(80, 50) == WHITE);
+	GrRestoreState(g);		/* the clip rectangle alone again */
+	SetCol(g, GREEN);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(Pixel(42, 42) == GREEN && Pixel(80, 50) == WHITE);
+
+	/* the window clip path is a second one: the mask is in both */
+	GrSetWinClipRect(g, PCT_REPLACE, 30, 30, 70, 70);
+	SetCol(g, BLUE);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(Pixel(55, 55) == BLUE && Pixel(45, 45) == GREEN &&
+	      Pixel(85, 85) == WHITE);
+	GrSetWinClipRect(g, PCT_NULL, 0, 0, 0, 0);
+	GrSetClipPath(g, PCT_NULL, ODD_EVEN);
+	CHECK(!GrTestPath(g, GPT_CLIP) && !GrTestPath(g, GPT_WIN_CLIP));
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(Pixel(70, 70) == WHITE && Pixel(50, 50) == WHITE);
     }
 
     /* an update: only the invalid area is drawn */

@@ -136,8 +136,10 @@ static Boolean InPath(byte op)
     return (Boolean) ((op >= GR_APPLY_ROTATION && op <= GR_RESTORE_TRANSFORM) ||
 		      (op >= GR_DRAW_LINE && op <= 0x5f) ||
 		      op == GR_MOVE_TO || op == GR_REL_MOVE_TO ||
-		      op == GR_MOVE_TO_WWFIXED || op >= GR_BEGIN_PATH ||
-		      op == GR_END_GSTRING);
+		      op == GR_MOVE_TO_WWFIXED || op == GR_END_GSTRING ||
+		      (op >= GR_BEGIN_PATH && op != GR_SET_CLIP_RECT &&
+		       op != GR_SET_WIN_CLIP_RECT && op != GR_SET_CLIP_PATH &&
+		       op != GR_SET_WIN_CLIP_PATH));
 }
 
 Boolean GrGSRecord(GStateHandle gstate, byte opcode, const char *fmt, ...)

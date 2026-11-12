@@ -21,7 +21,7 @@
  *
  * Not yet: GR_DRAW_TEXT_FIELD (style runs: the element is a fault),
  * the *_PTR and *_OPTR elements, bitmap slices, palettes, patterns,
- * clip rectangles and clip paths (skipped), GrGetGStringBounds and the
+ * GrGetGStringBounds and the
  * bounds of GSF_FIGURE_BOUNDS.
  */
 #include "graphicsInt.h"
@@ -762,6 +762,18 @@ void GrPlayElement(GStateHandle gstate, const byte *e)
 	break;
     case GR_DRAW_PATH:
 	GrDrawPath(gstate);
+	break;
+    case GR_SET_CLIP_RECT:
+    case GR_SET_WIN_CLIP_RECT:
+	(*e == GR_SET_CLIP_RECT ? GrSetClipRect : GrSetWinClipRect)
+	    (gstate, (PathCombineType) U(e + 1), S(e + 3), S(e + 5), S(e + 7),
+	     S(e + 9));
+	break;
+    case GR_SET_CLIP_PATH:
+	GrSetClipPath(gstate, (PathCombineType) U(e + 2), e[1]);
+	break;
+    case GR_SET_WIN_CLIP_PATH:
+	GrSetWinClipPath(gstate, (PathCombineType) U(e + 2), e[1]);
 	break;
     default:			/* not yet: see the top */
 	break;

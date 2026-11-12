@@ -67,6 +67,8 @@ void WinRegOr(optr a, optr b, optr dst);
 void WinRegNot(optr a, optr dst);
 /* dst = a without b; tmp is a chunk to work in (not a, b or dst) */
 void WinRegSub(optr a, optr b, optr dst, optr tmp);
+/* Graphics/graphicsPath.c: the clip paths of a GState into a mask */
+void GrClipMask(GStateHandle gh, WindowHandle wh, ChunkHandle mask);
 
 /* W_winRect from W_winReg (WinCalcWinBounds) */
 void WinCalcWinBounds(WindowHandle wh);

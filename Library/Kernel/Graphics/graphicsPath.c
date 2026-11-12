@@ -29,8 +29,14 @@
  * with the area attributes; GrDrawPath draws each subpath with the line
  * attributes, closed ones joined at the start.
  *
- * Not yet: clip paths and clip rectangles (GrSetClipPath,
- * GrSetWinClipPath, GrSetClipRect, GrSetWinClipRect), GrSetStrokePath,
+ * Clip paths (GS_clipPath, GS_winClipPath) are paths of the GState
+ * too, each group with its fill rule; GrSetClipPath and
+ * GrSetWinClipPath combine the current path into one, GrSetClipRect and
+ * GrSetWinClipRect a rectangle (the window one in page coordinates).
+ * The window's mask is the visible region AND their regions (GrClipMask
+ * from WinValWinStruct), recalculated when one changes.
+ *
+ * Not yet: GrGetClipRegion, GrSetStrokePath,
  * GrTestPointInPath, GrGetPathPoints, GrGetPathRegion, text, bitmaps
  * and rounded rectangles in paths (skipped), a path defined in a
  * graphics string.
@@ -41,6 +47,21 @@
 #include <stdlib.h>
 
 #define AREA	((word) offsetof(GState, GS_areaAttr))
+
+/* OBP_flags of a group of a clip path: its fill rule (the asm's
+ * BPF_FILL_RULE_VALID, BPF_FILL_RULE) */
+#define PATH_RULE_VALID	0x80
+#define PATH_RULE	0x01
+
+/* the GState's chunk of a path */
+static ChunkHandle *PathField(GState *gs, GetPathType ptype)
+{
+    switch (ptype) {
+    case GPT_CLIP: return &gs->GS_clipPath;
+    case GPT_WIN_CLIP: return &gs->GS_winClipPath;
+    default: return &gs->GS_currentPath;
+    }
+}
 
 static word U(const byte *p)
 {
@@ -56,12 +77,13 @@ static sword S(const byte *p)
  * Defining a path
  * ------------------------------------------------------------------- */
 
-static void FreePath(GStateHandle gstate)
+/* GrDestroyPath */
+static void FreePath(GStateHandle gstate, GetPathType ptype)
 {
     GState *gs = MemLock(gstate);
-    ChunkHandle ch = gs->GS_currentPath;
+    ChunkHandle ch = *PathField(gs, ptype);
 
-    gs->GS_currentPath = 0;
+    *PathField(gs, ptype) = 0;
     if (ch)
 	LMemFree(ConstructOptr(gstate, ch));
     MemUnlock(gstate);
@@ -80,7 +102,7 @@ void GrBeginPath(GStateHandle gstate, PathCombineType params)
     }
     if (params == PCT_NULL) {
 	MemUnlock(gstate);
-	FreePath(gstate);
+	FreePath(gstate, GPT_CURRENT);
 	return;
     }
     path = GrAllocPathString();
@@ -103,12 +125,13 @@ void GrBeginPath(GStateHandle gstate, PathCombineType params)
     GrMoveToWWFixed(gstate, GR_WWF_D(pen.PF_x), GR_WWF_D(pen.PF_y));
 }
 
-/* CombineGStringOrPathWithPath: the group (size bytes) into the current
- * path */
-static void Combine(GStateHandle gstate, const byte *group, word size)
+/* CombineGStringOrPathWithPath: the groups (size bytes) into a path of
+ * the GState, by the combination of the first */
+static void Combine(GStateHandle gstate, GetPathType ptype,
+		   const byte *group, word size)
 {
     GState *gs = MemLock(gstate);
-    ChunkHandle ch = gs->GS_currentPath;
+    ChunkHandle ch = *PathField(gs, ptype);
     word old = 0;
     byte *p;
 
@@ -117,7 +140,7 @@ static void Combine(GStateHandle gstate, const byte *group, word size)
     if (!ch) {
 	ch = LMemAlloc(gstate, size);
 	gs = MemDeref(gstate);
-	gs->GS_currentPath = ch;
+	*PathField(gs, ptype) = ch;
     } else
 	LMemReAlloc(ConstructOptr(gstate, ch), (word) (old + size));
     p = LMemDeref(ConstructOptr(gstate, ch));
@@ -145,7 +168,7 @@ void GrEndPath(GStateHandle gstate)
     GrRestoreState(gstate);
     elems = GrFreePathString(path, &size);
     if (elems && size > 5 && elems[0] == GR_BEGIN_PATH)
-	Combine(gstate, elems, size);
+	Combine(gstate, GPT_CURRENT, elems, size);
     free(elems);
     gs = MemLock(gstate);
     gs->GS_gstring = gs->GS_pathData;
@@ -577,6 +600,8 @@ static word *PathRegion(GStateHandle gstate, GrDraw *d, const byte *path,
 
     while (e < end && *e == GR_BEGIN_PATH) {
 	PathCombineType comb = (PathCombineType) U(e + 1);
+	RegionFillRule r = (e[3] & PATH_RULE_VALID) ?
+	    (RegionFillRule) (e[3] & PATH_RULE) : rule;
 	word first = w->PW_count, count;
 	sword *sep;
 	word *reg = NULL;
@@ -586,7 +611,7 @@ static word *PathRegion(GStateHandle gstate, GrDraw *d, const byte *path,
 	    e++;
 	sep = SepFormat(w, first, w->PW_count, FALSE, &count);
 	if (sep) {
-	    reg = GrPolygonRegion(d->GD_w, sep, count, rule, FALSE);
+	    reg = GrPolygonRegion(d->GD_w, sep, count, r, FALSE);
 	    free(sep);
 	}
 	if (reg) {			/* the region alone */
@@ -616,14 +641,15 @@ static word *PathRegion(GStateHandle gstate, GrDraw *d, const byte *path,
     return acc;
 }
 
-/* a copy of the current path (C heap); NULL if none */
-static byte *CopyPath(GStateHandle gstate, word *size)
+/* a copy of a path (C heap); NULL if none */
+static byte *CopyPath(GStateHandle gstate, GetPathType ptype, word *size)
 {
     GState *gs = MemLock(gstate);
+    ChunkHandle ch = *PathField(gs, ptype);
     byte *p = NULL;
 
-    if (gs->GS_currentPath) {
-	optr o = ConstructOptr(gstate, gs->GS_currentPath);
+    if (ch) {
+	optr o = ConstructOptr(gstate, ch);
 	*size = LMemGetChunkSize(o);
 	if ((p = malloc(*size)) != NULL)
 	    memcpy(p, LMemDeref(o), *size);
@@ -664,7 +690,7 @@ void GrFillPath(GStateHandle gstate, RegionFillRule rule)
 
     if (GrGSRecord(gstate, GR_FILL_PATH, "b", rule))
 	return;
-    if (!(path = CopyPath(gstate, &size)))
+    if (!(path = CopyPath(gstate, GPT_CURRENT, &size)))
 	return;
     GrEnterGraphics(gstate, &d);
     if (!GrTrivialReject(&d) &&
@@ -710,7 +736,7 @@ void GrDrawPath(GStateHandle gstate)
 
     if (GrGSRecord(gstate, GR_DRAW_PATH, ""))
 	return;
-    if (!(path = CopyPath(gstate, &size)))
+    if (!(path = CopyPath(gstate, GPT_CURRENT, &size)))
 	return;
     GrEnterGraphics(gstate, &d);
     if (!GrTrivialReject(&d) &&
@@ -758,7 +784,7 @@ Boolean GrGetPathBoundsDWord(GStateHandle gstate, GetPathType ptype,
     Boolean none = TRUE;
 
     memset(bounds, 0, sizeof(*bounds));
-    if (ptype != GPT_CURRENT || !(path = CopyPath(gstate, &size)))
+    if (!(path = CopyPath(gstate, ptype, &size)))
 	return TRUE;
     GrEnterGraphics(gstate, &d);
     if (d.GD_w) {
@@ -811,4 +837,165 @@ Boolean GrGetPathBounds(GStateHandle gstate, GetPathType ptype,
     bounds->R_right = (sword) r.RD_right;
     bounds->R_bottom = (sword) r.RD_bottom;
     return none;
+}
+
+/* ---------------------------------------------------------------------
+ * Clip paths
+ * ------------------------------------------------------------------- */
+
+/* SetClipPathCommon: the current path (its groups with the fill rule)
+ * combined into a clip path; the window's mask recalculated */
+static void SetClip(GStateHandle gstate, GetPathType ptype,
+		    PathCombineType params, RegionFillRule rule)
+{
+    GState *gs;
+    byte *path;
+    word size, off;
+
+    if (params == PCT_NULL)
+	FreePath(gstate, ptype);
+    else if ((path = CopyPath(gstate, GPT_CURRENT, &size)) != NULL) {
+	path[1] = (byte) params;
+	path[2] = (byte) (params >> 8);
+	for (off = 0; off + 5 <= size && path[off] == GR_BEGIN_PATH;) {
+	    word n;
+	    path[off + 3] = (byte) (PATH_RULE_VALID | (rule & PATH_RULE));
+	    for (off += 5; off < size && path[off] != GR_END_PATH;
+		 off = (word) (off + n))
+		if (!(n = GrGSElemSize(path + off, (dword) (size - off)))) {
+		    off = size;
+		    break;
+		}
+	    if (off < size)
+		off++;
+	}
+	Combine(gstate, ptype, path, size);
+	free(path);
+    } else if (params == PCT_REPLACE)
+	FreePath(gstate, ptype);
+    gs = MemLock(gstate);
+    GrWinStateFlags(gstate, gs, (WinGrFlags) ~WGF_MASK_VALID,
+		    (WinGrRegFlags) ~(ptype == GPT_CLIP ? WGRF_PATH_VALID :
+				      WGRF_WIN_PATH_VALID));
+    MemUnlock(gstate);
+}
+
+void GrSetClipPath(GStateHandle gstate, PathCombineType params,
+		   RegionFillRule rule)
+{
+    if (!GrGSRecord(gstate, GR_SET_CLIP_PATH, "bw", rule, params))
+	SetClip(gstate, GPT_CLIP, params, rule);
+}
+
+void GrSetWinClipPath(GStateHandle gstate, PathCombineType params,
+		      RegionFillRule rule)
+{
+    if (!GrGSRecord(gstate, GR_SET_WIN_CLIP_PATH, "bw", rule, params))
+	SetClip(gstate, GPT_WIN_CLIP, params, rule);
+}
+
+/* SetClipRectCommon, AddRectangleToPath: the rectangle as a path of its
+ * own (the clip rectangle with the transformation, the window one in
+ * page coordinates), combined into the clip path; the current path
+ * stays */
+static void SetClipRect(GStateHandle gstate, GetPathType ptype,
+			PathCombineType flags, sword l, sword t, sword r,
+			sword b)
+{
+    GState *gs = MemLock(gstate);
+    ChunkHandle cur = gs->GS_currentPath;
+
+    if (gs->GS_pathFlags & (PF_DEFINING_PATH | PF_FILL | PF_STROKE)) {
+	MemUnlock(gstate);
+	return;
+    }
+    if (flags == PCT_NULL) {
+	MemUnlock(gstate);
+	SetClip(gstate, ptype, PCT_NULL, ODD_EVEN);
+	return;
+    }
+    gs->GS_currentPath = 0;
+    MemUnlock(gstate);
+    GrBeginPath(gstate, PCT_REPLACE);
+    if (ptype == GPT_WIN_CLIP)
+	GrSetNullTransform(gstate);
+    GrFillRect(gstate, l, t, r, b);
+    GrEndPath(gstate);
+    SetClip(gstate, ptype, flags, ODD_EVEN);
+    FreePath(gstate, GPT_CURRENT);
+    gs = MemLock(gstate);
+    gs->GS_currentPath = cur;
+    MemUnlock(gstate);
+}
+
+void GrSetClipRect(GStateHandle gstate, PathCombineType flags, sword left,
+		   sword top, sword right, sword bottom)
+{
+    if (!GrGSRecord(gstate, GR_SET_CLIP_RECT, "wwwww", flags, left, top,
+		    right, bottom))
+	SetClipRect(gstate, GPT_CLIP, flags, left, top, right, bottom);
+}
+
+void GrSetWinClipRect(GStateHandle gstate, PathCombineType flags,
+		      sword left, sword top, sword right, sword bottom)
+{
+    if (!GrGSRecord(gstate, GR_SET_WIN_CLIP_RECT, "wwwww", flags, left, top,
+		    right, bottom))
+	SetClipRect(gstate, GPT_WIN_CLIP, flags, left, top, right, bottom);
+}
+
+/* the region rows of chunk ch (C heap) */
+static word *ChunkRows(optr o)
+{
+    word n = LMemGetChunkSize(o), *r = malloc(n ? n : 2);
+
+    if (r)
+	memcpy(r, LMemDeref(o), n);
+    return r;
+}
+
+/* the clip paths of GState gh (locked) taken into the mask of window wh
+ * (locked, the matrix composed): the mask AND each clip region
+ * (WinValWinStruct) */
+void GrClipMask(GStateHandle gh, WindowHandle wh, ChunkHandle mask)
+{
+    optr m = ConstructOptr(wh, mask);
+    GetPathType ptype;
+
+    for (ptype = GPT_CLIP; ptype <= GPT_WIN_CLIP; ptype++) {
+	GrDraw d;
+	PathWalk w;
+	PathSaved saved;
+	byte *path;
+	word size, *reg;
+
+	if (!(path = CopyPath(gh, ptype, &size)))
+	    continue;
+	d.GD_gstate = gh;
+	d.GD_gs = MemDeref(gh);
+	d.GD_win = wh;
+	d.GD_w = MemDeref(wh);
+	memset(&w, 0, sizeof(w));
+	w.PW_d = &d;
+	Save(&d, &saved, PF_FILL);
+	reg = PathRegion(gh, &d, path, size, ODD_EVEN, &w);
+	Restore(&d, &saved, PF_FILL);
+	FreeSubs(&w);
+	free(w.PW_subs);
+	free(path);
+	if (reg)
+	    reg = RegOp(ROF_AND_OP, ChunkRows(m), reg);
+	if (reg && *reg != EOREGREC) {
+	    Rectangle r;
+	    word n = GrGetPtrRegBounds(reg, &r);
+	    LMemReAlloc(m, n);
+	    memcpy(LMemDeref(m), reg, n);
+	} else {
+	    word *p;
+	    LMemReAlloc(m, 2 * sizeof(word));
+	    p = LMemDeref(m);
+	    p[0] = p[1] = EOREGREC;
+	}
+	free(reg);
+    }
 }

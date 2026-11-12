@@ -16,8 +16,9 @@
  *
  * The mask the video driver draws through (W_maskReg) is the visible
  * region without the invalid one, for the update GState within the
- * update region (WinValWinStruct).  Not yet: the clip paths of the
- * GState (GS_clipPath, GS_winClipPath) and WCF_MASKED windows.
+ * update region (WinValWinStruct), and within the clip paths of the
+ * GState (GS_clipPath, GS_winClipPath: GrClipMask).  Not yet:
+ * WCF_MASKED windows.
  */
 #include "winInt.h"
 
@@ -124,6 +125,9 @@ void WinValWinStruct(GStateHandle gh, GState *gs, WindowHandle wh)
 	w = MemDeref(wh);
 	if (w->W_updateState == gh)
 	    WinRegAnd(mask, WIN_REG(wh, w->W_updateReg), mask);
+	w = MemDeref(wh);
+	if (gs->GS_clipPath || gs->GS_winClipPath)
+	    GrClipMask(gh, wh, w->W_maskReg);
 	WinRegSmall(wh, ((Window *) MemDeref(wh))->W_temp2Reg);
 	w = MemDeref(wh);
 	w->W_grRegFlags |= WGRF_PATH_VALID | WGRF_WIN_PATH_VALID;
