@@ -386,24 +386,6 @@ void GrSetLineJoin(GStateHandle gstate, LineJoin join)
     MemUnlock(gstate);
 }
 
-/* 1 / v for v 16.16, rounded, as 16.16 (GrReciprocal32) */
-dword GrReciprocal32(dword v)
-{
-    dword q, r;
-
-    if (!v)
-	return 0xffffffffUL;
-    q = 0xffffffffUL / v;		/* 2^32 = 0xffffffff + 1 */
-    r = 0xffffffffUL % v + 1;
-    if (r == v) {
-	q++;
-	r = 0;
-    }
-    if (r >= v - r)
-	q++;
-    return q;
-}
-
 void GrSetMiterLimit(GStateHandle gstate, WWFixedAsDWord limit)
 {
     GState *gs = MemLock(gstate);

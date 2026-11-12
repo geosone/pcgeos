@@ -2137,7 +2137,6 @@ rectangles point by point.
 
 Not yet:
 - graphics strings and paths: a setter only changes the GState;
-- the pen position and the transformations;
 - the fonts: `GS_fontHandle` is only cleared, and there is no
   `GrSetFont` yet;
 - devices with 16 colors or fewer.
@@ -2150,6 +2149,50 @@ ctest `kernel.gstate` checks:
 - line, area and text attributes;
 - nested save and restore;
 - destroying a GState whose window holds it in `W_curState`.
+
+**Fixed point math** (`graphicsMath.c` beside `graphicsMath.asm` and
+`graphicsMathObscure.asm`) gives the asm's results bit for bit:
+- products of the magnitudes, truncated (`GrMulWWFixed`,
+  `GrMulDWFixed`); quotients truncated, `GrSDivDWFbyWWF` rounded; an
+  overflowing quotient is 0;
+- `GrReciprocal32` is the truncated `1.0 / v`;
+- `GrSqrRootWWFixed` takes two Newton steps as the asm;
+- sine and cosine interpolate the asm's tables (taken into
+  `graphicsTables.c`), with its step in the last degree; the arc sine
+  searches the table and mirrors only the integer part in the other
+  quadrants, as the asm.
+
+**Transformations** (`graphicsTransformUtils.c`, `graphicsTransform.c`,
+`graphicsUtils.c`):
+- a point is a row vector, `x' = 11 x + 21 y + 31`,
+  `y' = 12 x + 22 y + 32`; the 2x2 part is `WWFixed`, the translation
+  `DWFixed`;
+- the asm multiplied only the elements that are not 0 or 1; the C code
+  multiplies them all with the same truncating products, which gives
+  the same results;
+- `SetTMatrixFlags`: `x.0001` and `x.ffff` become whole numbers first;
+- translation, scale and rotation go before the matrix
+  (`GS_TMatrix = op * GS_TMatrix`), as does `GrApplyTransform`; all but
+  the translation drop the font;
+- `GrSaveTransform` keeps a stack of chunks in the GState (`next`,
+  matrix, default chunk and its matrix); `GrInitDefaultTransform` and
+  `GrSetDefaultTransform` use `GS_defTMatrix`;
+- with a window the device matrix is `W_curTMatrix`: `GS_TMatrix *
+  W_TMatrix`, moved by the window's left and top (`GrComposeMatrix`).
+  A change of the GState's matrix clears `WGF_XFORM_VALID` and
+  `WGRF_PATH_VALID` when the window holds the GState;
+- the inverse (`CalcInverse`) is `1/11`, `1/22` or, rotated,
+  `1 / det` in 32.32, its low word dropped as in the asm;
+- `GrTransform`, `GrUntransform` and `GrGetCurPos` round to words and
+  return `0x8000, 0x8000` on overflow;
+- the pen position `GS_penPos` is kept in page coordinates; a relative
+  move goes through the 2x2 part only.
+
+ctest `kernel.transform` checks the math (products, quotients, square
+roots, sine, cosine, tangent, arc sine, `DWFixed`), every transformation
+and its flags, there and back in words, `WWFixed`, `DWFixed` and
+dwords, the pen, saved and default matrices, and a window's matrix and
+position.
 
 ## 14. Open
 

@@ -118,6 +118,10 @@ add_library(geos_kernel_objs OBJECT
   Win/winIndividual.c
   Graphics/graphicsRegion.c
   Graphics/graphicsTables.c
+  Graphics/graphicsMath.c
+  Graphics/graphicsTransformUtils.c
+  Graphics/graphicsTransform.c
+  Graphics/graphicsUtils.c
   Graphics/graphicsColor.c
   Graphics/graphicsState.c
   Graphics/graphicsGetState.c)

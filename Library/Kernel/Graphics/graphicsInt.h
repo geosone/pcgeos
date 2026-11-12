@@ -13,17 +13,54 @@
 #include <Internal/window.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdint.h>
+#include <Internal/tmatrix.h>
 
 /* graphicsTables.c */
 #define GR_NUM_SYS_DRAW_MASKS	90
 extern const DrawMask grSysDrawMasks[GR_NUM_SYS_DRAW_MASKS];
 extern const byte grDefaultPalette[256 * 3];
 extern const byte grSysDashArrays[4][1 + 2 * 3];
+extern const word grSinIntTable[91];
+extern const word grSinFracTable[90];
 
 /* TextMode bits only the kernel sets (TM_INTERNAL) */
 #define GR_TM_INTERNAL		0x70
 /* the styles the kernel draws itself, not the font (KERNEL_STYLES) */
 #define GR_KERNEL_STYLES	(TS_UNDERLINE | TS_STRIKE_THRU)
+
+/* graphicsMath.c: the asm's internal names */
+#define GR_WWF(i, f)	((WWFixedAsDWord) (((dword) (word) (i) << 16) | (word) (f)))
+WWFixedAsDWord GrReciprocal32(WWFixedAsDWord v);
+/* GrSDiv32 and GrUDiv32: FALSE on overflow (*q undefined) */
+Boolean GrSDiv32(WWFixedAsDWord dividend, WWFixedAsDWord divisor,
+		 WWFixedAsDWord *q);
+Boolean GrUDiv32(WWFixedAsDWord dividend, WWFixedAsDWord divisor,
+		 WWFixedAsDWord *q);
+
+/* graphicsTransformUtils.c: values in 1/65536 as int64_t */
+int64_t GrDWF(const DWFixed *d);
+void GrSetDWF(DWFixed *d, int64_t v);
+int64_t GrMulWD(sdword w, int64_t d);
+void GrMatSetFlags(TMatrix *m);
+void GrMatIdentity(TMatrix *m);
+void GrMatMul(TMatrix *r, const TMatrix *a, const TMatrix *b);
+void GrMatScale(TMatrix *m, WWFixedAsDWord sx, WWFixedAsDWord sy);
+void GrMatRotate(TMatrix *m, WWFixedAsDWord angle);
+void GrMatTranslate(TMatrix *m, int64_t tx, int64_t ty);
+void GrMatFromTransMatrix(TMatrix *m, const TransMatrix *tm);
+void GrMatToTransMatrix(const TMatrix *m, TransMatrix *tm);
+void GrMatTransDWF(const TMatrix *m, int64_t *x, int64_t *y);
+void GrMatCalcInverse(TMatrix *m);
+void GrMatUntransDWF(TMatrix *m, int64_t *x, int64_t *y);
+Boolean GrRoundToWord(int64_t v, sword *r);
+
+/* graphicsTransform.c: the matrix from document to device coordinates
+ * of a GState (the window's W_curTMatrix, composed when not valid, or
+ * the GState's own); unlock with GrUnlockTransform */
+TMatrix *GrLockTransform(GStateHandle gstate, GState **gs, Window **win);
+void GrUnlockTransform(GStateHandle gstate, GState *gs, Window *win);
+void GrComposeMatrix(GStateHandle gstate, GState *gs, Window *w);
 
 /* graphicsColor.c */
 byte GrMapRGBtoIndex(const byte *palette, word last, byte red, byte green,
@@ -41,7 +78,6 @@ void GrSetMaskIn(GState *gs, CommonAttr *ca, SysDrawMask sdm,
 		 const DrawMask *custom);
 void GrShiftMask(GState *gs, DrawMask m, byte xShift, byte yShift);
 void GrUpdateOpts(GState *gs);
-dword GrReciprocal32(dword v);
 void GrInvalidateFont(GState *gs);
 /* IntExitGState: the window's cached flags for this GState, and'ed */
 void GrWinStateFlags(GStateHandle gstate, const GState *gs, WinGrFlags keep,
