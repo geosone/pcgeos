@@ -36,9 +36,13 @@
  * The window's mask is the visible region AND their regions (GrClipMask
  * from WinValWinStruct), recalculated when one changes.
  *
- * Not yet: GrGetClipRegion, GrSetStrokePath,
- * GrTestPointInPath, GrGetPathPoints, GrGetPathRegion, text, bitmaps
- * and rounded rectangles in paths (skipped), a path defined in a
+ * GrGetPathRegion and GrGetClipRegion return the region in device
+ * coordinates with its bounds first (NULL if empty or no window);
+ * GrTestPointInPath tests a document point against it.  GrGetPath
+ * returns a path as a graphics string.  GrSetStrokePath and
+ * GrGetPathPoints do nothing, as in the asm.
+ *
+ * Not yet: text and bitmaps in paths (skipped), a path defined in a
  * graphics string.
  */
 #include "graphicsInt.h"
@@ -347,6 +351,84 @@ static void Spline(PathWalk *w, const Point *pts, word n, Boolean to)
     Pen(w, pts[n - 1].P_x, pts[n - 1].P_y);
 }
 
+static sdword DW(const byte *p)
+{
+    return (sdword) ((dword) U(p) | ((dword) U(p + 2) << 16));
+}
+
+static void SetW(WWFixed *w, sdword v)
+{
+    w->WWF_frac = (word) v;
+    w->WWF_int = (sword) (v >> 16);
+}
+
+/* a 3-point arc: the "to" ones from the pen, continuing its subpath if
+ * open; the pen to point 3 (point 1 for an open GR_*_ARC_3POINT) */
+static void Arc3(PathWalk *w, GStateHandle gstate, const byte *e)
+{
+    GrArcParams ap;
+    sword l, t, r, b;
+    sdword x1, y1, px, py;
+    word flags, close = U(e + 1);
+    const byte *p = e + 3;
+    Boolean to = (Boolean) (*e != GR_DRAW_ARC_3POINT &&
+			    *e != GR_FILL_ARC_3POINT);
+
+    memset(&ap, 0, sizeof(ap));
+    ap.GA_close = close;
+    if (to) {
+	GrGetCurPosWWFixed(gstate, &ap.GA_point1);
+	x1 = (sdword) GR_WWF_D(ap.GA_point1.PF_x);
+	y1 = (sdword) GR_WWF_D(ap.GA_point1.PF_y);
+    } else {
+	x1 = DW(p);
+	y1 = DW(p + 4);
+	SetW(&ap.GA_point1.PF_x, x1);
+	SetW(&ap.GA_point1.PF_y, y1);
+	p += 8;
+    }
+    if (*e == GR_DRAW_REL_ARC_3POINT_TO) {
+	SetW(&ap.GA_point2.PF_x, x1 + DW(p));
+	SetW(&ap.GA_point2.PF_y, y1 + DW(p + 4));
+	SetW(&ap.GA_point3.PF_x, x1 + DW(p + 8));
+	SetW(&ap.GA_point3.PF_y, y1 + DW(p + 12));
+    } else {
+	SetW(&ap.GA_point2.PF_x, DW(p));
+	SetW(&ap.GA_point2.PF_y, DW(p + 4));
+	SetW(&ap.GA_point3.PF_x, DW(p + 8));
+	SetW(&ap.GA_point3.PF_y, DW(p + 12));
+    }
+    px = (sdword) GR_WWF_D(ap.GA_point3.PF_x);
+    py = (sdword) GR_WWF_D(ap.GA_point3.PF_y);
+    if (!to && close == ACT_OPEN) {
+	px = x1;
+	py = y1;
+    }
+    flags = GrSetupArc3PointLow(w->PW_d, &ap, &l, &t, &r, &b);
+    if (flags & GR_CEF_COLINEAR) {	/* a line from l, t to r, b */
+	SubPath *s = to ? Current(w) : NewSub(w);
+	if (!to)
+	    AddDoc(w, s, l, t);
+	AddDoc(w, s, r, b);
+    } else {
+	sword *pts, top, bot;
+	word count;
+	pts = GrCalcEllipse(w->PW_d, l, t, r, b, flags, &ap, &count, &top,
+			    &bot);
+	if (pts) {
+	    SubPath *s;
+	    if (close != ACT_OPEN)
+		GrCloseArc(&pts, &count, &ap);
+	    s = to && close == ACT_OPEN ? Current(w) : NewSub(w);
+	    AddSep(s, pts, FALSE);
+	    if (close != ACT_OPEN)
+		Closed(w, s);
+	    free(pts);
+	}
+    }
+    GrSetDocWWFPenPos(w->PW_d->GD_gs, px, py);
+}
+
 /* the elements from e to GR_END_PATH (or end) as subpaths; returns the
  * end */
 static const byte *Walk(PathWalk *w, GStateHandle gstate, const byte *e,
@@ -478,6 +560,36 @@ static const byte *Walk(PathWalk *w, GStateHandle gstate, const byte *e,
 	    Pen(w, x, y);
 	    break;
 	}
+	case GR_DRAW_ROUND_RECT:
+	case GR_FILL_ROUND_RECT:
+	case GR_DRAW_ROUND_RECT_TO:
+	case GR_FILL_ROUND_RECT_TO: {
+	    sword l, t, r, b, *dev;
+	    word count, i;
+	    if (*e == GR_DRAW_ROUND_RECT || *e == GR_FILL_ROUND_RECT) {
+		l = S(e + 3); t = S(e + 5); r = S(e + 7); b = S(e + 9);
+		Pen(w, l, t);
+	    } else {
+		pen = GrGetCurPos(gstate);
+		l = DWORD_X(pen); t = DWORD_Y(pen); r = S(e + 3); b = S(e + 5);
+	    }
+	    dev = GrRoundRectDevPoints(w->PW_d, l, t, r, b, U(e + 1), &count);
+	    if (dev) {
+		s = NewSub(w);
+		for (i = 0; i + 1 < count; i++)	/* not the first again */
+		    AddDev(s, dev[2 * i], dev[2 * i + 1]);
+		Closed(w, s);
+		free(dev);
+	    }
+	    break;
+	}
+	case GR_DRAW_ARC_3POINT:
+	case GR_FILL_ARC_3POINT:
+	case GR_DRAW_ARC_3POINT_TO:
+	case GR_FILL_ARC_3POINT_TO:
+	case GR_DRAW_REL_ARC_3POINT_TO:
+	    Arc3(w, gstate, e);
+	    break;
 	case GR_DRAW_CURVE:
 	    if ((pts = Points(e + 1, 4)) != NULL) {
 		Spline(w, pts, 4, FALSE);
@@ -998,4 +1110,177 @@ void GrClipMask(GStateHandle gh, WindowHandle wh, ChunkHandle mask)
 	}
 	free(reg);
     }
+}
+
+/* ---------------------------------------------------------------------
+ * Asking about paths
+ * ------------------------------------------------------------------- */
+
+/* the region (rows, device coordinates, C heap) of a path of the
+ * GState through its window; NULL: no path, no window or empty */
+static word *DevRegion(GStateHandle gstate, GetPathType ptype,
+		       RegionFillRule rule, GrDraw *d)
+{
+    PathWalk w;
+    PathSaved saved;
+    byte *path;
+    word size, *reg = NULL;
+
+    if (!(path = CopyPath(gstate, ptype, &size)))
+	return NULL;
+    if (d->GD_w && !(d->GD_gs->GS_pathFlags & (PF_FILL | PF_STROKE))) {
+	memset(&w, 0, sizeof(w));
+	w.PW_d = d;
+	Save(d, &saved, PF_FILL);
+	reg = PathRegion(gstate, d, path, size, rule, &w);
+	Restore(d, &saved, PF_FILL);
+	FreeSubs(&w);
+	free(w.PW_subs);
+    }
+    free(path);
+    if (reg && *reg == EOREGREC) {
+	free(reg);
+	reg = NULL;
+    }
+    return reg;
+}
+
+/* ConvertRegionPathToRegion: a block of the bounds and the rows */
+static MemHandle RegionBlock(word *reg)
+{
+    MemHandle mh;
+    Rectangle r;
+    word n, *p;
+
+    if (!reg)
+	return 0;
+    n = GrGetPtrRegBounds(reg, &r);
+    mh = MemAlloc((word) (n + sizeof(Rectangle)), HF_SWAPABLE, 0);
+    if (mh) {
+	p = MemLock(mh);
+	p[0] = (word) r.R_left;
+	p[1] = (word) r.R_top;
+	p[2] = (word) r.R_right;
+	p[3] = (word) r.R_bottom;
+	memcpy(p + 4, reg, n);
+	MemUnlock(mh);
+    }
+    free(reg);
+    return mh;
+}
+
+MemHandle GrGetPathRegion(GStateHandle gstate, RegionFillRule rule)
+{
+    GrDraw d;
+    word *reg;
+
+    GrEnterGraphics(gstate, &d);
+    reg = DevRegion(gstate, GPT_CURRENT, rule, &d);
+    GrExitGraphics(&d);
+    return RegionBlock(reg);
+}
+
+/* the clip paths ANDed (one alone if the other is missing) */
+MemHandle GrGetClipRegion(GStateHandle gstate, RegionFillRule rule)
+{
+    GrDraw d;
+    word *clip, *win;
+
+    GrEnterGraphics(gstate, &d);
+    clip = DevRegion(gstate, GPT_CLIP, rule, &d);
+    win = DevRegion(gstate, GPT_WIN_CLIP, rule, &d);
+    GrExitGraphics(&d);
+    if (clip && win)
+	clip = RegOp(ROF_AND_OP, clip, win);
+    else if (!clip)
+	clip = win;
+    if (clip && *clip == EOREGREC) {
+	free(clip);
+	clip = NULL;
+    }
+    return RegionBlock(clip);
+}
+
+/* TRUE if document point x, y is in the filled current path */
+Boolean GrTestPointInPath(GStateHandle gstate, word xPos, word yPos,
+			  RegionFillRule rule)
+{
+    GrDraw d;
+    word *reg;
+    sword x, y;
+    Rectangle b;
+    Boolean in = FALSE;
+
+    GrEnterGraphics(gstate, &d);
+    reg = DevRegion(gstate, GPT_CURRENT, rule, &d);
+    if (reg && GrTransDev(&d, (sword) xPos, (sword) yPos, &x, &y))
+	in = GrTestPointInReg((const Region *) reg, (word) x, (word) y, &b);
+    GrExitGraphics(&d);
+    free(reg);
+    return in;
+}
+
+/* the asm stores the element and leaves the path as it is */
+void GrSetStrokePath(GStateHandle gstate)
+{
+    (void) GrGSRecord(gstate, GR_SET_STROKE_PATH, "");
+}
+
+/* the asm returns no points */
+MemHandle GrGetPathPoints(GStateHandle gstate, word resolution)
+{
+    (void) gstate;
+    (void) resolution;
+    return 0;
+}
+
+/* GrGetPath: the path as a graphics string to draw into a GState: each
+ * group's transformation applied (GR_APPLY_TRANSFORM) and its pen set
+ * before its GR_BEGIN_PATH, so the path lands where it was defined
+ * relative to the GState's own transformation; GR_END_GSTRING at the
+ * end */
+MemHandle GrGetPath(GStateHandle gstate, GetPathType ptype)
+{
+    byte *path, *out, *o;
+    word size, off = 0;
+    MemHandle mh;
+
+    if (!(path = CopyPath(gstate, ptype, &size)))
+	return 0;
+    mh = MemAlloc((word) (size + 1), HF_SWAPABLE, 0);
+    if (!mh) {
+	free(path);
+	return 0;
+    }
+    out = o = MemLock(mh);
+    while (off < size) {
+	word n = GrGSElemSize(path + off, (dword) (size - off)), k = 0, m = 0;
+	if (!n)
+	    break;
+	if (path[off] == GR_BEGIN_PATH && off + n < size &&
+	    path[off + n] == GR_SET_TRANSFORM)
+	    k = GrGSElemSize(path + off + n, (dword) (size - off - n));
+	if (k && off + n + k < size)
+	    m = GrGSElemSize(path + off + n + k, (dword) (size - off - n - k));
+	if (m) {
+	    memcpy(o, path + off + n, k);	/* the transformation */
+	    *o = GR_APPLY_TRANSFORM;
+	    o += k;
+	    memcpy(o, path + off + n + k, m);	/* the pen */
+	    o += m;
+	    memcpy(o, path + off, n);		/* GR_BEGIN_PATH */
+	    o += n;
+	    off = (word) (off + n + k + m);
+	    continue;
+	}
+	memcpy(o, path + off, n);
+	o += n;
+	off = (word) (off + n);
+    }
+    *o++ = GR_END_GSTRING;
+    size = (word) (o - out);
+    MemUnlock(mh);
+    MemReAlloc(mh, size, 0);
+    free(path);
+    return mh;
 }

@@ -2866,24 +2866,42 @@ the window's mask invalid for that GState. The clip paths are saved and
 restored with the GState. In a graphics string the four elements are
 stored and played.
 
-**Not yet:**
-- `GrGetClipRegion`, `GrGetWinClipRegion`;
-- `GrSetStrokePath`, `GrTestPointInPath`, `GrGetPathPoints`,
-  `GrGetPathRegion`;
-- text, bitmaps, rounded rectangles and 3-point arcs in paths (they are
-  skipped).
+**Asking.** These work on the path's region, computed through the
+GState's window:
+- `GrGetPathRegion` and `GrGetClipRegion` return that region (the clip
+  region is both clip paths ANDed) in device coordinates, in a block
+  with the bounds first. They return 0 when the region is empty or
+  there is no window.
+- `GrTestPointInPath` tests a document point against the region.
+
+`GrGetPath` returns a path as a graphics string, as the asm did. Before
+each `GR_BEGIN_PATH` it puts the group's transformation, as
+`GR_APPLY_TRANSFORM`, and its pen. Played into a GState, the string
+defines the same path again. `GrSetStrokePath` (it only stores the
+element) and `GrGetPathPoints` (it returns 0) are as empty as in the
+asm.
+
+Rounded rectangles are closed subpaths (`GrRoundRectDevPoints`). 3-point
+arcs are now stored in graphics strings and played (`GR_*_ARC_3POINT*`).
+In paths, an open "to" arc continues the subpath at the pen.
+
+**Not yet:** text and bitmaps in paths (they are skipped), a path
+defined inside a graphics string.
 
 **Tests.** ctest `kernel.draw`:
 - a path defined from lines with nothing drawn, filled, with the pen
   kept;
 - a rectangle united with an ellipse, and the bounds;
+- `GrTestPointInPath`, `GrGetPathRegion`, and `GrGetPath` played back
+  into the GState;
 - an intersection of two rectangles;
 - a stroked rectangle;
+- a filled rounded rectangle and a filled 3-point chord;
 - a path filled from a graphics string;
-- `PCT_NULL`.
+- `PCT_NULL`;
 - a clip rectangle that stays when the transformation changes, an
   intersection with a clip path, `GrSaveState`/`GrRestoreState`, a
-  window clip rectangle, removal.
+  window clip rectangle with `GrGetClipRegion`, removal.
 
 ## 14. Open
 

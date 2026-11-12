@@ -308,6 +308,8 @@ Handle GrGStringOf(GStateHandle gstate);	/* 0: not a graphics string */
 word GrBitmapStringSize(const Bitmap *bm);
 sword *GrSplineDevPoints(const GrDraw *d, const Point *points, word n,
 			 word *count);
+sword *GrRoundRectDevPoints(const GrDraw *d, sword l, sword t, sword r,
+			   sword b, word radius, word *count);
 Boolean GrCloseArc(sword **pts, word *count, const GrArcParams *ap);
 void GrPlayElement(GStateHandle gstate, const byte *e);
 MemHandle GrAllocPathString(void);

@@ -12,7 +12,8 @@
  * into one closed polyline.  It is drawn in the line attributes or
  * filled as a convex polygon.  The "to" forms go from the pen, which
  * stays; the others leave the pen at the first corner.  Graphics
- * strings store the element; not yet: in a path.
+ * strings and paths store the element (graphicsPath.c:
+ * GrRoundRectDevPoints).
  */
 #include "graphicsInt.h"
 #include <stdlib.h>
@@ -37,8 +38,8 @@ static void Add(sword *o, word *n, sword x, sword y)
 
 /* PrepRoundRectLow: the outline, *count points (the first again at the
  * end), in the C heap */
-static sword *PrepRoundRect(const GrDraw *d, sword l, sword t, sword r,
-			    sword b, word radius, word *count)
+sword *GrRoundRectDevPoints(const GrDraw *d, sword l, sword t, sword r,
+			   sword b, word radius, word *count)
 {
     static const sword angles[5] = { 0, 90, 180, 270, 0 };
     Corner c[4];
@@ -118,7 +119,7 @@ static void RoundRect(GrDraw *d, sword l, sword t, sword r, sword b,
 
     if (GrTrivialReject(d))
 	return;
-    pts = PrepRoundRect(d, l, t, r, b, radius, &count);
+    pts = GrRoundRectDevPoints(d, l, t, r, b, radius, &count);
     if (!pts)
 	return;
     if (!fill)					/* DrawRoundRectLow */

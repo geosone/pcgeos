@@ -226,6 +226,12 @@ static dword D(const byte *p)
 }
 
 /* a WBFixed as a WWFixedAsDWord */
+static void SetW(WWFixed *w, dword v)
+{
+    w->WWF_frac = (word) v;
+    w->WWF_int = (sword) (v >> 16);
+}
+
 static WWFixedAsDWord WBF(const byte *p)
 {
     return ((dword) U(p + 1) << 16) | ((dword) p[0] << 8);
@@ -508,6 +514,42 @@ void GrPlayElement(GStateHandle gstate, const byte *e)
     case GR_FILL_RECT_TO:
 	GrFillRectTo(gstate, S(e + 1), S(e + 3));
 	break;
+    case GR_DRAW_ARC_3POINT:
+    case GR_FILL_ARC_3POINT: {
+	ThreePointArcParams p;
+	p.TPAP_close = (ArcCloseType) U(e + 1);
+	SetW(&p.TPAP_point1.PF_x, D(e + 3));
+	SetW(&p.TPAP_point1.PF_y, D(e + 7));
+	SetW(&p.TPAP_point2.PF_x, D(e + 11));
+	SetW(&p.TPAP_point2.PF_y, D(e + 15));
+	SetW(&p.TPAP_point3.PF_x, D(e + 19));
+	SetW(&p.TPAP_point3.PF_y, D(e + 23));
+	(*e == GR_DRAW_ARC_3POINT ? GrDrawArc3Point : GrFillArc3Point)
+	    (gstate, &p);
+	break;
+    }
+    case GR_DRAW_ARC_3POINT_TO:
+    case GR_FILL_ARC_3POINT_TO: {
+	ThreePointArcToParams p;
+	p.TPATP_close = (ArcCloseType) U(e + 1);
+	SetW(&p.TPATP_point2.PF_x, D(e + 3));
+	SetW(&p.TPATP_point2.PF_y, D(e + 7));
+	SetW(&p.TPATP_point3.PF_x, D(e + 11));
+	SetW(&p.TPATP_point3.PF_y, D(e + 15));
+	(*e == GR_DRAW_ARC_3POINT_TO ? GrDrawArc3PointTo : GrFillArc3PointTo)
+	    (gstate, &p);
+	break;
+    }
+    case GR_DRAW_REL_ARC_3POINT_TO: {
+	ThreePointRelArcToParams p;
+	p.TPRATP_close = (ArcCloseType) U(e + 1);
+	SetW(&p.TPRATP_delta2.PF_x, D(e + 3));
+	SetW(&p.TPRATP_delta2.PF_y, D(e + 7));
+	SetW(&p.TPRATP_delta3.PF_x, D(e + 11));
+	SetW(&p.TPRATP_delta3.PF_y, D(e + 15));
+	GrDrawRelArc3PointTo(gstate, &p);
+	break;
+    }
     case GR_DRAW_ROUND_RECT:
 	GrDrawRoundRect(gstate, S(e + 3), S(e + 5), S(e + 7), S(e + 9),
 			U(e + 1));

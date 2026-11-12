@@ -38,7 +38,8 @@
  *   - graphics strings: recorded (the DOS16 bytes), played, in parts,
  *     from memory, copied into a huge array and a file, parsed;
  *   - paths: filled, combined (union, intersection), stroked, bounds,
- *     filled from a graphics string; clip rectangles and clip paths;
+ *     filled from a graphics string; asked about (point, region, as a
+ *     graphics string); clip rectangles and clip paths, the clip region;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -1369,6 +1370,37 @@ int main(int argc, char **argv)
 	CHECK(!GrGetPathBounds(g, GPT_CURRENT, &rb) && rb.R_left == 10 &&
 	      rb.R_top == 10 && rb.R_right >= 69 && rb.R_right <= 71 &&
 	      rb.R_bottom >= 69 && rb.R_bottom <= 71);
+	CHECK(GrTestPointInPath(g, 20, 20, WINDING) &&
+	      GrTestPointInPath(g, 60, 60, WINDING) &&
+	      !GrTestPointInPath(g, 70, 15, WINDING) &&
+	      !GrTestPointInPath(g, 5, 5, WINDING));
+	{
+	    MemHandle rh = GrGetPathRegion(g, WINDING), ph;
+	    word *rp;
+	    CHECK(rh != 0);
+	    if (rh) {			/* device: A is at 20,20 */
+		rp = MemLock(rh);
+		CHECK(rp[0] == 30 && rp[1] == 30 && rp[2] >= 89 &&
+		      rp[2] <= 91);
+		MemFree(rh);
+	    }
+	    /* the path as a graphics string, played back into the
+	     * GState: the same path again */
+	    ph = GrGetPath(g, GPT_CURRENT);
+	    CHECK(ph != 0);
+	    if (ph) {
+		GStateHandle pg = GrLoadGStringPtr(MemLock(ph));
+		GrBeginPath(g, PCT_NULL);
+		CHECK(!GrTestPath(g, GPT_CURRENT));
+		CHECK(GrDrawGString(g, pg, 0, 0, 0, NULL) == GSRT_COMPLETE);
+		GrDestroyGString(pg, 0, GSKT_LEAVE_DATA);
+		MemFree(ph);
+		CHECK(!GrGetPathBounds(g, GPT_CURRENT, &rb) &&
+		      rb.R_left == 10 && rb.R_top == 10 &&
+		      rb.R_right >= 69 && rb.R_right <= 71 &&
+		      GrTestPointInPath(g, 20, 20, WINDING));
+	    }
+	}
 
 	SetCol(g, WHITE);
 	GrFillRect(g, 0, 0, 80, 80);
@@ -1392,6 +1424,42 @@ int main(int argc, char **argv)
 	GrDrawPath(g);
 	CHECK(Pixel(30, 45) == RED && Pixel(45, 30) == RED &&
 	      Pixel(45, 45) == WHITE && Pixel(60, 45) == RED);
+
+	/* a rounded rectangle and a 3-point arc (a chord) in a path */
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	GrBeginPath(g, PCT_REPLACE);
+	GrFillRoundRect(g, 10, 10, 50, 50, 10);
+	GrEndPath(g);
+	SetCol(g, RED);
+	GrFillPath(g, ODD_EVEN);	/* device: A is at 20,20 */
+	CHECK(Pixel(50, 50) == RED && Pixel(50, 31) == RED &&
+	      Pixel(31, 31) == WHITE && Pixel(68, 68) == WHITE);
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	{
+	    ThreePointArcParams tp;
+	    memset(&tp, 0, sizeof(tp));
+	    tp.TPAP_close = ACT_CHORD;
+	    tp.TPAP_point1.PF_x.WWF_int = 10;
+	    tp.TPAP_point1.PF_y.WWF_int = 30;
+	    tp.TPAP_point2.PF_x.WWF_int = 30;
+	    tp.TPAP_point2.PF_y.WWF_int = 10;
+	    tp.TPAP_point3.PF_x.WWF_int = 50;
+	    tp.TPAP_point3.PF_y.WWF_int = 30;
+	    GrBeginPath(g, PCT_REPLACE);
+	    GrFillArc3Point(g, &tp);
+	    GrEndPath(g);
+	}
+	SetCol(g, RED);
+	GrFillPath(g, ODD_EVEN);
+	CHECK(Pixel(50, 40) == RED && Pixel(50, 60) == WHITE &&
+	      Pixel(32, 32) == WHITE);
+
+	/* the stroked rectangle again */
+	GrBeginPath(g, PCT_REPLACE);
+	GrDrawRect(g, 10, 10, 40, 40);
+	GrEndPath(g);
 
 	/* a path filled by a graphics string */
 	gs = GrCreateGString(blk, GST_CHUNK, &ch);
@@ -1445,6 +1513,17 @@ int main(int argc, char **argv)
 	GrFillRect(g, 0, 0, 80, 80);
 	CHECK(Pixel(55, 55) == BLUE && Pixel(45, 45) == GREEN &&
 	      Pixel(85, 85) == WHITE);
+	{
+	    MemHandle rh = GrGetClipRegion(g, ODD_EVEN);
+	    word *rp;
+	    CHECK(rh != 0);
+	    if (rh) {			/* 40..60 AND 50..90 */
+		rp = MemLock(rh);
+		CHECK(rp[0] == 50 && rp[1] == 50 && rp[2] >= 59 &&
+		      rp[2] <= 60);
+		MemFree(rh);
+	    }
+	}
 	GrSetWinClipRect(g, PCT_NULL, 0, 0, 0, 0);
 	GrSetClipPath(g, PCT_NULL, ODD_EVEN);
 	CHECK(!GrTestPath(g, GPT_CLIP) && !GrTestPath(g, GPT_WIN_CLIP));
