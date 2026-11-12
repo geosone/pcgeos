@@ -133,6 +133,39 @@ void VidDevScreen(Boolean on)
     screenOn = on;
 }
 
+static dword Mix(dword d, dword c, MixMode m);
+
+void VidDevPutPixel(sword x, sword y, dword color, MixMode mix)
+{
+    uint32_t *p;
+
+    if (!hostOpen || x < 0 || y < 0 || x >= (sword) hostSurf.width ||
+	y >= (sword) hostSurf.height)
+	return;
+    p = HostPixel(x, y);
+    *p = Mix(*p, color, mix);
+    HostDirty(x, y, x, y);
+}
+
+void VidDevCopySpan(sword sx, sword sy, sword dx, sword dy, sword n)
+{
+    sword w = (sword) hostSurf.width, h = (sword) hostSurf.height;
+
+    if (!hostOpen || sy < 0 || dy < 0 || sy >= h || dy >= h)
+	return;
+    /* clip both to the screen */
+    if (sx < 0) { n = (sword) (n + sx); dx = (sword) (dx - sx); sx = 0; }
+    if (dx < 0) { n = (sword) (n + dx); sx = (sword) (sx - dx); dx = 0; }
+    if (sx + n > w)
+	n = (sword) (w - sx);
+    if (dx + n > w)
+	n = (sword) (w - dx);
+    if (n <= 0)
+	return;
+    memmove(HostPixel(dx, dy), HostPixel(sx, sy), (size_t) n * 4);
+    HostDirty(dx, dy, (sword) (dx + n - 1), dy);
+}
+
 static dword Mix(dword d, dword c, MixMode m)
 {
     switch (m) {

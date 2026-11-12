@@ -14,9 +14,8 @@
  *   - the video functions fail until a device is set.
  * The device part shows what changed at the end of each function.
  *
- * Not yet: GETBITS, the save under areas, the XOR region, PUTSTRING,
- * MOVBITS, PUTBITS, LINE, REGION, PUTLINE, POLYGON, POLYLINE, the dash
- * functions; the escapes (all "not supported", di 0).  The functions do
+ * Not yet: the save under areas, the XOR region, PUTSTRING, REGION,
+ * PUTLINE, POLYGON, POLYLINE, the dash functions; the escapes (all "not supported", di 0).  The functions do
  * nothing for now (the save under ones say "none").
  */
 #include "vidcom.h"
@@ -72,6 +71,25 @@ static void ExclBounds(word function, DriverRegs *r)
     case DR_VID_RECT:
 	ExclRectBounds(Coord(r->DR_ax), Coord(r->DR_bx), Coord(r->DR_cx),
 		       Coord(r->DR_dx), r->DR_esDi);
+	break;
+    case DR_VID_LINE:			/* ExclLineBounds */
+	ExclRectBounds(Coord(r->DR_ax), Coord(r->DR_bx), Coord(r->DR_cx),
+		       Coord(r->DR_dx), r->DR_esDi);
+	break;
+    case DR_VID_MOVBITS:		/* ExclMovBitsBounds: the destination */
+	ExclRectBounds(Coord(r->DR_cx), Coord(r->DR_dx),
+		       (sword) (Coord(r->DR_cx) + Coord(r->DR_si) - 1),
+		       (sword) (Coord(r->DR_dx) + Coord(r->DR_bp) - 1),
+		       r->DR_esDi);
+	break;
+    case DR_VID_PUTBITS:		/* ExclPutBitsBounds */
+	if (r->DR_bpPtr) {
+	    const PutBitsArgs *pba = r->DR_bpPtr;
+	    ExclRectBounds(Coord(r->DR_ax), Coord(r->DR_bx),
+			   (sword) (Coord(r->DR_ax) + pba->PBA_bm.B_width - 1),
+			   (sword) (Coord(r->DR_bx) + pba->PBA_bm.B_height - 1),
+			   r->DR_esDi);
+	}
 	break;
     default:
 	/* the functions not there yet draw nothing */
@@ -190,6 +208,18 @@ static Boolean VidCall(word function, DriverRegs *r)
 	return FALSE;
     case DR_VID_RECT:
 	VidDrawRect(r);
+	return FALSE;
+    case DR_VID_LINE:
+	VidDrawLine(r);
+	return FALSE;
+    case DR_VID_GETBITS:
+	VidGetBits(r);
+	return FALSE;
+    case DR_VID_PUTBITS:
+	VidPutBits(r);
+	return FALSE;
+    case DR_VID_MOVBITS:
+	VidMovBits(r);
 	return FALSE;
     case DR_VID_SCREEN_ON:
 	VidDevScreen(TRUE);

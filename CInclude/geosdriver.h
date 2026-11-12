@@ -34,6 +34,8 @@ typedef struct {
     void	*DR_esDi;	/* es:di as a pointer */
     dword	DR_di;		/* di as a value (DR_KBD_XLATE_SCAN) */
     void	*DR_esSi;	/* es:si as a pointer */
+    void	*DR_bpPtr;	/* bp with its segment as a pointer: ss:bp
+			 * (a structure on the stack), ds:bp */
 } DriverRegs;
 
 /* TRUE: the carry flag, an error */

@@ -11,6 +11,9 @@
  * The attributes are the CommonAttr at si in the GState: the RGB value
  * (the kernel maps an index to it), the draw mask (unless AO_MASK_1),
  * and the GState's mix mode.
+ *
+ * The other drawing functions clip through VidFillClipped (rectangles)
+ * and VidForSpans (the visible spans of each line).
  */
 #include "vidcom.h"
 
@@ -52,43 +55,96 @@ static void DrawComplexRect(Window *w, sword l, sword t, sword r,
     }
 }
 
+void VidSetupDraw(const GState *gs, const CommonAttr *ca, const Window *w,
+		  VidDrawState *ds)
+{
+    ds->VDS_color = ((dword) ca->CA_colorRGB.RGB_red << 16) |
+		    ((dword) ca->CA_colorRGB.RGB_green << 8) |
+		    ca->CA_colorRGB.RGB_blue;
+    if ((ca->CA_flags & AO_MASK_1_COPY) && !(w->W_color & WCF_MASKED)) {
+	ds->VDS_mix = MM_COPY;
+	ds->VDS_mask = NULL;
+    } else {
+	ds->VDS_mix = gs->GS_mixMode;
+	ds->VDS_mask = (ca->CA_flags & AO_MASK_1) ? NULL : ca->CA_mask;
+    }
+}
+
+/* clip to the mask's bounds; FALSE: nothing left */
+static Boolean ClipToMaskRect(const Window *w, sword *l, sword *t, sword *r,
+			      sword *b)
+{
+    if (w->W_grFlags & WGF_MASK_NULL)
+	return FALSE;
+    if (*r < w->W_maskRect.R_left || *l > w->W_maskRect.R_right ||
+	*b < w->W_maskRect.R_top || *t > w->W_maskRect.R_bottom)
+	return FALSE;
+    if (*l < w->W_maskRect.R_left)
+	*l = w->W_maskRect.R_left;
+    if (*r > w->W_maskRect.R_right)
+	*r = w->W_maskRect.R_right;
+    if (*t < w->W_maskRect.R_top)
+	*t = w->W_maskRect.R_top;
+    if (*b > w->W_maskRect.R_bottom)
+	*b = w->W_maskRect.R_bottom;
+    return TRUE;
+}
+
+void VidFillClipped(Window *w, sword left, sword top, sword right,
+		    sword bottom, const VidDrawState *ds)
+{
+    if (!ClipToMaskRect(w, &left, &top, &right, &bottom))
+	return;
+    if (w->W_grFlags & WGF_MASK_SIMPLE)
+	VidDevFillRect(left, top, right, bottom, ds);
+    else
+	DrawComplexRect(w, left, top, right, bottom, ds);
+}
+
+void VidForSpans(Window *w, sword left, sword top, sword right,
+		 sword bottom, Boolean bottomUp, VidSpanFn *fn, void *ctx)
+{
+    sword y, a, b;
+    const sword *p;
+
+    if (!ClipToMaskRect(w, &left, &top, &right, &bottom))
+	return;
+    for (y = bottomUp ? bottom : top; bottomUp ? y >= top : y <= bottom;
+	 y = (sword) (bottomUp ? y - 1 : y + 1)) {
+	if (w->W_grFlags & WGF_MASK_SIMPLE) {
+	    fn(y, left, right, ctx);
+	    continue;
+	}
+	if (y > w->W_clipRect.R_bottom || y < w->W_clipRect.R_top)
+	    WinValClipLine(w, y);
+	if (w->W_grFlags & WGF_CLIP_NULL)
+	    continue;
+	for (p = (const sword *) ((const byte *)
+				  WinRegionOf(w, w->W_maskReg) +
+				  w->W_clipPtr);
+	     (word) p[0] != EOREGREC && p[0] <= right; p += 2) {
+	    a = p[0] < left ? left : p[0];
+	    b = p[1] > right ? right : p[1];
+	    if (a <= b)
+		fn(y, a, b, ctx);
+	}
+    }
+}
+
 void VidDrawRect(DriverRegs *r)
 {
     GState *gs = r->DR_dsSi;
-    const CommonAttr *ca = (const CommonAttr *) ((byte *) gs +
-						 (word) r->DR_si);
     Window *w = r->DR_esDi;
     sword left = (sword) (word) r->DR_ax, top = (sword) (word) r->DR_bx;
     sword right = (sword) (word) r->DR_cx;
     sword bottom = (sword) (word) r->DR_dx;
     VidDrawState ds;
 
-    if (!gs || !w || (w->W_grFlags & WGF_MASK_NULL))
+    if (!gs || !w ||
+	!ClipToMaskRect(w, &left, &top, &right, &bottom))
 	return;
-    /* trivial reject, clip to the mask's bounds */
-    if (right < w->W_maskRect.R_left || left > w->W_maskRect.R_right ||
-	bottom < w->W_maskRect.R_top || top > w->W_maskRect.R_bottom)
-	return;
-    if (left < w->W_maskRect.R_left)
-	left = w->W_maskRect.R_left;
-    if (right > w->W_maskRect.R_right)
-	right = w->W_maskRect.R_right;
-    if (top < w->W_maskRect.R_top)
-	top = w->W_maskRect.R_top;
-    if (bottom > w->W_maskRect.R_bottom)
-	bottom = w->W_maskRect.R_bottom;
-
-    ds.VDS_color = ((dword) ca->CA_colorRGB.RGB_red << 16) |
-		   ((dword) ca->CA_colorRGB.RGB_green << 8) |
-		   ca->CA_colorRGB.RGB_blue;
-    if ((ca->CA_flags & AO_MASK_1_COPY) && !(w->W_color & WCF_MASKED)) {
-	ds.VDS_mix = MM_COPY;
-	ds.VDS_mask = NULL;
-    } else {
-	ds.VDS_mix = gs->GS_mixMode;
-	ds.VDS_mask = (ca->CA_flags & AO_MASK_1) ? NULL : ca->CA_mask;
-    }
-
+    VidSetupDraw(gs, (const CommonAttr *) ((byte *) gs + (word) r->DR_si),
+		 w, &ds);
     VidDevCondHidePtr(left, top, right, bottom);
     if (w->W_grFlags & WGF_MASK_SIMPLE)
 	VidDevFillRect(left, top, right, bottom, &ds);

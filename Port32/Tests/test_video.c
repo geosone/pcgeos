@@ -11,6 +11,9 @@
  *   - a mix mode with a draw mask;
  *   - the exclusive: another GState's drawing not done, its bounds;
  *   - the pointer: shown, moved, hidden, and kept over drawing;
+ *   - lines, through the mask region too;
+ *   - GETBITS, PUTBITS (mono, filled, 4 and 24 bits, a mask), MOVBITS
+ *     both ways over itself;
  *   - DR_VID_GETPIXEL, the palette, an escape, the screen off and on;
  * and reads the pixels back from the display (ghal_display_read_back).
  */
@@ -101,6 +104,34 @@ static Boolean Rect(int l, int t, int r, int b)
     regs.DR_si = offsetof(GState, GS_areaAttr);
     regs.DR_esDi = &win.w;
     return DriverCall(dis, DR_VID_RECT, &regs);
+}
+
+static Boolean Line(int x1, int y1, int x2, int y2)
+{
+    DriverRegs regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.DR_ax = (word) x1;
+    regs.DR_bx = (word) y1;
+    regs.DR_cx = (word) x2;
+    regs.DR_dx = (word) y2;
+    regs.DR_dsSi = &gs;
+    regs.DR_si = offsetof(GState, GS_areaAttr);
+    regs.DR_esDi = &win.w;
+    return DriverCall(dis, DR_VID_LINE, &regs);
+}
+
+static Boolean PutBits(int x, int y, PutBitsArgs *pba)
+{
+    DriverRegs regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.DR_ax = (word) x;
+    regs.DR_bx = (word) y;
+    regs.DR_dsSi = &gs;
+    regs.DR_esDi = &win.w;
+    regs.DR_bpPtr = pba;
+    return DriverCall(dis, DR_VID_PUTBITS, &regs);
 }
 
 static void Call(word f, dword ax, dword bx)
@@ -305,6 +336,142 @@ int main(int argc, char **argv)
 	Call(DR_VID_HIDEPTR, 0, 0);
 	CHECK(Pixel(149, 119) == RED && Pixel(149, 120) == RED);
     }
+
+    /* lines: across the hole of the mask region, both ends drawn */
+    SetMask(0, 0, 319, 199, TRUE);
+    SetColor(WHITE);
+    Rect(0, 0, 319, 199);
+    Call(DR_VID_HIDEPTR, 0, 0);
+    Call(DR_VID_SHOWPTR, 0, 0);
+    Call(DR_VID_HIDEPTR, 0, 0);		/* the pointer out of the way */
+    SetColor(RED);
+    CHECK(!Line(0, 0, 9, 9));
+    CHECK(Pixel(0, 0) == RED && Pixel(5, 5) == RED && Pixel(9, 9) == RED &&
+	  Pixel(10, 10) == WHITE && Pixel(1, 0) == WHITE);
+    Line(20, 5, 20, 1);				/* vertical, backwards */
+    CHECK(Pixel(20, 1) == RED && Pixel(20, 5) == RED && Pixel(20, 0) == WHITE);
+    Line(30, 3, 40, 5);				/* x major: runs */
+    CHECK(Pixel(30, 3) == RED && Pixel(40, 5) == RED && Pixel(35, 4) == RED);
+    {
+	int x, n = 0;
+	for (x = 30; x <= 40; x++)
+	    n += (Pixel(x, 3) == RED) + (Pixel(x, 4) == RED) +
+		 (Pixel(x, 5) == RED);
+	CHECK(n == 11);				/* one pixel a column */
+    }
+    Line(50, 0, 52, 8);				/* y major */
+    CHECK(Pixel(50, 0) == RED && Pixel(52, 8) == RED);
+    SetMask(10, 10, 99, 59, FALSE);
+    SetColor(BLUE);
+    Line(0, 35, 200, 35);
+    CHECK(Pixel(9, 35) == WHITE && Pixel(10, 35) == BLUE &&
+	  Pixel(39, 35) == BLUE && Pixel(45, 35) == WHITE &&
+	  Pixel(60, 35) == BLUE && Pixel(99, 35) == BLUE &&
+	  Pixel(100, 35) == WHITE);
+
+    /* GETBITS, PUTBITS */
+    SetMask(0, 0, 319, 199, TRUE);
+    {
+	static union { Bitmap bm; byte b[sizeof(Bitmap) + 3 * 4 * 2]; } got;
+	static const byte mono[2] = { 0xa0, 0x50 };	/* 4 x 2 */
+	static const byte rgb[3 * 3] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+	static const byte idx4[2] = { 0x4f, 0x10 };	/* red white, blue blk */
+	static const byte masked[2 * 2] = { 0x80, 0xff, 0x40, 0x00 };
+	PutBitsArgs pba;
+
+	SetColor(WHITE);
+	Rect(0, 0, 319, 199);
+	SetColor(RED);
+	Rect(100, 100, 101, 100);
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 100;
+	r.DR_bx = 100;
+	r.DR_cx = 4;
+	r.DR_dx = 3;
+	r.DR_bpPtr = &got;
+	r.DR_si = sizeof(got);			/* room for two lines */
+	CHECK(!DriverCall(dis, DR_VID_GETBITS, &r));
+	CHECK(got.bm.B_width == 4 && got.bm.B_height == 2 &&
+	      got.bm.B_type == BMF_24BIT && got.bm.B_compact == 0);
+	CHECK(got.b[sizeof(Bitmap)] == 0xff && got.b[sizeof(Bitmap) + 1] == 0 &&
+	      got.b[sizeof(Bitmap) + 6] == 0xff &&
+	      got.b[sizeof(Bitmap) + 7] == 0xff);
+
+	memset(&pba, 0, sizeof(pba));
+	pba.PBA_bm.B_width = 4;
+	pba.PBA_bm.B_height = 2;
+	pba.PBA_bm.B_type = BMF_MONO;
+	pba.PBA_data = mono;
+	pba.PBA_size = 1;
+	CHECK(!PutBits(10, 150, &pba));
+	CHECK(Pixel(10, 150) == 0 && Pixel(11, 150) == WHITE &&
+	      Pixel(12, 150) == 0 && Pixel(11, 151) == 0 &&
+	      Pixel(10, 151) == WHITE && Pixel(14, 150) == WHITE);
+	/* filled: the 1s in the area color, the 0s left */
+	SetColor(RED);
+	Rect(10, 150, 13, 151);
+	SetColor(BLUE);
+	pba.PBA_flags = PBF_FILL_MASK;
+	PutBits(10, 150, &pba);
+	CHECK(Pixel(10, 150) == BLUE && Pixel(11, 150) == RED &&
+	      Pixel(11, 151) == BLUE);
+	pba.PBA_flags = 0;
+	/* 24 bits, 3 x 1 */
+	pba.PBA_bm.B_width = 3;
+	pba.PBA_bm.B_height = 1;
+	pba.PBA_bm.B_type = BMF_24BIT;
+	pba.PBA_data = rgb;
+	pba.PBA_size = 9;
+	PutBits(20, 150, &pba);
+	CHECK(Pixel(20, 150) == 0x010203 && Pixel(22, 150) == 0x070809);
+	/* 4 bits through the driver's palette (the standard colors) */
+	pba.PBA_bm.B_width = 2;
+	pba.PBA_bm.B_height = 2;
+	pba.PBA_bm.B_type = BMF_4BIT;
+	pba.PBA_data = idx4;
+	pba.PBA_size = 1;
+	PutBits(30, 150, &pba);
+	CHECK(Pixel(30, 150) == 0xaa0000 && Pixel(31, 150) == WHITE &&
+	      Pixel(30, 151) == 0x0000aa && Pixel(31, 151) == 0);
+	/* with a mask: only the masked-in pixels */
+	SetColor(WHITE);
+	Rect(40, 150, 49, 151);
+	pba.PBA_bm.B_width = 8;
+	pba.PBA_bm.B_height = 2;
+	pba.PBA_bm.B_type = BMF_MONO | BMT_MASK;
+	pba.PBA_data = masked;
+	pba.PBA_size = 2;
+	PutBits(40, 150, &pba);
+	CHECK(Pixel(40, 150) == 0 && Pixel(41, 150) == WHITE &&
+	      Pixel(41, 151) == WHITE && Pixel(40, 151) == WHITE);
+    }
+
+    /* MOVBITS: down and right, overlapping */
+    SetColor(WHITE);
+    Rect(0, 0, 319, 199);
+    SetColor(RED);
+    Rect(200, 20, 209, 29);
+    SetColor(BLUE);
+    Rect(200, 20, 200, 20);
+    memset(&r, 0, sizeof(r));
+    r.DR_ax = 200;
+    r.DR_bx = 20;
+    r.DR_cx = 205;
+    r.DR_dx = 25;
+    r.DR_si = 10;
+    r.DR_bp = 10;
+    r.DR_dsSi = &gs;
+    r.DR_esDi = &win.w;
+    CHECK(!DriverCall(dis, DR_VID_MOVBITS, &r));
+    CHECK(Pixel(205, 25) == BLUE && Pixel(214, 34) == RED &&
+	  Pixel(206, 26) == RED && Pixel(215, 35) == WHITE);
+    /* and back up, overlapping */
+    r.DR_ax = 205;
+    r.DR_bx = 25;
+    r.DR_cx = 200;
+    r.DR_dx = 20;
+    CHECK(!DriverCall(dis, DR_VID_MOVBITS, &r));
+    CHECK(Pixel(200, 20) == BLUE && Pixel(209, 29) == RED);
 
     /* the palette */
     {

@@ -47,8 +47,26 @@ extern RGBValue vidPalette[256];
 void VidSetPalette(DriverRegs *r);
 void VidGetPalette(DriverRegs *r);
 
-/* vidcomOutput.c: DR_VID_RECT */
+/* vidcomOutput.c: DR_VID_RECT; the clipping the others share */
 void VidDrawRect(DriverRegs *r);
+/* the draw state of the CommonAttr at si in the GState, for window w */
+void VidSetupDraw(const GState *gs, const CommonAttr *ca, const Window *w,
+		  VidDrawState *ds);
+/* fill a rectangle where the window's mask is */
+void VidFillClipped(Window *w, sword left, sword top, sword right,
+		    sword bottom, const VidDrawState *ds);
+/* the visible spans of a rectangle, line by line, top down or bottom
+ * up */
+typedef void VidSpanFn(sword y, sword left, sword right, void *ctx);
+void VidForSpans(Window *w, sword left, sword top, sword right,
+		 sword bottom, Boolean bottomUp, VidSpanFn *fn, void *ctx);
+
+/* vidcomLine.c: DR_VID_LINE */
+void VidDrawLine(DriverRegs *r);
+/* vidcomRaster.c: DR_VID_GETBITS, DR_VID_PUTBITS, DR_VID_MOVBITS */
+void VidGetBits(DriverRegs *r);
+void VidPutBits(DriverRegs *r);
+void VidMovBits(DriverRegs *r);
 
 /*
  * The device part.
@@ -62,6 +80,10 @@ void VidDevScreen(Boolean on);			/* SCREEN_ON/OFF */
 void VidDevFillRect(sword left, sword top, sword right, sword bottom,
 		    const VidDrawState *ds);
 dword VidDevGetPixel(sword x, sword y);		/* 0x00RRGGBB */
+/* a pixel with a mix mode, within the screen or not */
+void VidDevPutPixel(sword x, sword y, dword color, MixMode mix);
+/* n pixels of line sy from sx to line dy at dx; overlapping is fine */
+void VidDevCopySpan(sword sx, sword sy, sword dx, sword dy, sword n);
 /* show what changed, at the end of a driver function */
 void VidDevUpdate(void);
 /* the pointer (DR_VID_SETPTR ... MOVEPTR); NULL: the default one */

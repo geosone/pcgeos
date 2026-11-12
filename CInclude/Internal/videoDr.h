@@ -16,6 +16,9 @@
  *	    es  the Window: DR_esDi (a Window *)
  *	    ds:si of DR_VID_SETPTR: DR_dsSi (a PointerDef *, or NULL for
  *	        the default pointer)
+ *	    a far pointer in dx:si (DR_VID_INFO, the palette, a device
+ *	        name): DR_dsSi
+ *	    ss:bp (PutBitsArgs), ds:bp of DR_VID_GETBITS: DR_bpPtr
  *
  ***********************************************************************/
 #ifndef __INTERNAL_VIDEODR_H
@@ -130,6 +133,24 @@ typedef struct {
     word	VXP_dx;
     Point	VXP_mousePos;
 } VisXORParams;
+
+/* DR_VID_PUTBITS, DR_VID_PUTLINE: ss:bp, here DR_bpPtr */
+typedef ByteEnum BMPalType;
+#define BMPT_RGB	0	/* 3-byte RGB entries */
+#define BMPT_INDEX	1	/* frame buffer values */
+
+typedef WordFlags PutBitsFlags;
+#define PBF_ALLOC_PALETTE	0x0004
+#define PBF_FILL_MASK		0x0002	/* GrFillBitmap: 1s in the color */
+#define PBF_PAL_TYPE		0x0001	/* BMPalType */
+
+typedef struct {
+    Bitmap		PBA_bm;		/* this slice, simple */
+    PutBitsFlags	PBA_flags;
+    const byte		*PBA_data;	/* the first byte */
+    word		PBA_size;	/* bytes a scan line */
+    const byte		*PBA_pal;	/* the palette, if BMT_PALETTE */
+} PutBitsArgs;
 
 /* PointerDef of graphics.def: the mask, then the image follow, a bit a
  * pixel, (width + 7) / 8 bytes a line.  mask 0 image 0: unchanged,

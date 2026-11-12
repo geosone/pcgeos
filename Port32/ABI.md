@@ -639,6 +639,9 @@ As in DOS16, a video driver is the common part plus a device part.
   - `es` (the Window) is `DR_esDi`;
   - a far pointer in `dx:si` (`DR_VID_INFO`, the palette, a
     `PointerDef`, a device name) is `DR_dsSi`.
+  - `ss:bp` (the `PutBitsArgs` of `DR_VID_PUTBITS`) and the `ds:bp` of
+    `DR_VID_GETBITS` are `DR_bpPtr`, a field `geosdriver.h` gained for
+    them.
 
 **Window and GState.** The driver reads the Window and the GState as
 the graphics system will keep them:
@@ -671,10 +674,27 @@ RGB value (the kernel maps an index to it), the draw mask (unless
 `AO_MASK_1`), and the GState's mix mode (`MM_COPY` for
 `AO_MASK_1_COPY`).
 
+**Lines and bits** (`vidcomLine.c`, `vidcomRaster.c`):
+- `DR_VID_LINE` is Bresenham's line in runs, each run a rectangle
+  through the mask (`VidFillClipped`). Both ends are drawn. Where the
+  error ties, a pixel may differ from the asm's DDA.
+- `DR_VID_GETBITS` writes a simple 24-bit `Bitmap`: the header, then as
+  many scan lines as fit.
+- `DR_VID_PUTBITS` draws mono, 4-bit, 8-bit and 24-bit scan lines:
+  - with their mask (`BMT_MASK`, ahead of each line) and the GState's
+    mix mode;
+  - indices go through the bitmap's palette or the driver's. The
+    driver's palette starts with the 16 standard colors until
+    `DR_VID_SET_PALETTE`.
+  - with `PBF_FILL_MASK`, the 1s are drawn in the area color with its
+    draw mask.
+- `DR_VID_MOVBITS` copies where the destination is visible, bottom up
+  when it moves down.
+- All three walk the visible spans of each line (`VidForSpans`).
+
 **Not yet:**
-- `GETBITS`, `PUTBITS`, `MOVBITS`;
-- `PUTSTRING`, `LINE`, `REGION`, `PUTLINE`, `POLYGON`, `POLYLINE`, the
-  dashed lines;
+- `PUTSTRING`, `REGION`, `PUTLINE`, `POLYGON`, `POLYLINE`, the dashed
+  lines;
 - the save under areas (`DR_VID_SAVE_UNDER` says it is not possible);
 - the XOR region;
 - the escapes (all unsupported, `di` 0).
@@ -709,6 +729,10 @@ from the display, under Xvfb where the display is X11. It checks:
 - the exclusive and its bounds;
 - the pointer: shown, moved, nested hide, kept over drawing, and a
   pointer of the test's own;
+- lines, including through the mask region;
+- `GETBITS`;
+- `PUTBITS`: mono, filled, 4 and 24 bits, and with a mask;
+- `MOVBITS` over itself, in both directions;
 - `DR_VID_GETPIXEL`, the palette, an escape, and the screen off and
   on.
 
