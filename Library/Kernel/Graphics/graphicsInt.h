@@ -163,6 +163,9 @@ sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
 		     word flags, GrArcParams *ap, word *count, sword *top,
 		     sword *bot);
 
+/* graphicsRaster.c: CalcLineSize */
+word GrBitmapLineSize(word width, byte type);
+
 /* graphicsArcLow.c */
 void GrFillEllipseDev(const GrDraw *d, sword l, sword t, sword r, sword b,
 		      word attr);

@@ -139,6 +139,7 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsCalcConic.c
   Graphics/graphicsRoundedRect.c
   Graphics/graphicsWin.c
+  Graphics/graphicsRaster.c
   Graphics/graphicsLineStyles.c
   Graphics/graphicsColor.c
   Graphics/graphicsState.c

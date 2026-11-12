@@ -21,6 +21,8 @@
  *   - a pie through a mirroring matrix;
  *   - regions, with a parameter; the window's and the mask's bounds,
  *     GrTestRectInMask, GrInvalRect (rotated too), GrInvalRectDWord;
+ *   - bitmaps: monochrome drawn and filled, 24 bits, PackBits, a
+ *     complex one with a palette in two slices;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
@@ -93,6 +95,18 @@ static WindowHandle Open(Handle parent, word flags, unsigned long rgb,
     return WinOpen(parent, 0, 0, WCF_RGB | WCF_PLAIN, (word) (rgb >> 16),
 		   (word) ((rgb >> 8) & 0xff), (word) (rgb & 0xff), flags, 0,
 		   0, NULL, (word) l, (word) t, (word) r, (word) b);
+}
+
+static Bitmap *nextSlice;
+
+/* a bitmap callback: the next slice once */
+static Bitmap *NextSlice(Bitmap *bm)
+{
+    Bitmap *n = nextSlice;
+
+    (void) bm;
+    nextSlice = NULL;
+    return n;
 }
 
 int main(int argc, char **argv)
@@ -497,6 +511,72 @@ int main(int argc, char **argv)
 	CHECK(Pixel(70, 60) == WHITE && Pixel(76, 60) == WHITE &&
 	      Pixel(70, 54) == WHITE && Pixel(75, 65) == BLUE &&
 	      Pixel(65, 55) == BLUE);
+    }
+
+    /* bitmaps */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    {
+	static union { Bitmap b; byte raw[32]; } mono;
+	static union { Bitmap b; byte raw[32]; } rgb;
+	static union { Bitmap b; byte raw[32]; } packed;
+	static union { CBitmap c; byte raw[64]; } pal, pal2;
+	static const byte monoData[] = { 0xf0, 0x0f, 0x80, 0x01 };
+	static const byte packData[] = { 0x01, 0xf0, 0x0f, 0xff, 0xff };
+	byte *p;
+
+	CHECK(sizeof(Bitmap) == 6 && sizeof(CBitmap) == 20);
+	mono.b.B_width = 16; mono.b.B_height = 2;
+	mono.b.B_compact = BMC_UNCOMPACTED; mono.b.B_type = BMF_MONO;
+	memcpy(mono.raw + 6, monoData, 4);
+	GrDrawBitmap(g, 10, 10, &mono.b, NULL);	/* 1 black, 0 white */
+	CHECK(Pixel(30, 30) == BLACK && Pixel(33, 30) == BLACK &&
+	      Pixel(34, 30) == WHITE && Pixel(41, 30) == WHITE &&
+	      Pixel(42, 30) == BLACK && Pixel(45, 30) == BLACK &&
+	      Pixel(46, 30) == BLUE && Pixel(30, 31) == BLACK &&
+	      Pixel(31, 31) == WHITE && Pixel(45, 31) == BLACK &&
+	      Pixel(30, 32) == BLUE);
+	SetCol(g, GREEN);
+	GrFillBitmap(g, 10, 20, &mono.b, NULL);	/* 1 green, 0 left */
+	CHECK(Pixel(30, 40) == GREEN && Pixel(34, 40) == BLUE &&
+	      Pixel(42, 40) == GREEN && Pixel(31, 41) == BLUE);
+
+	rgb.b.B_width = 2; rgb.b.B_height = 1;
+	rgb.b.B_compact = BMC_UNCOMPACTED; rgb.b.B_type = BMF_24BIT;
+	p = rgb.raw + 6;
+	p[0] = 0xff; p[1] = 0; p[2] = 0; p[3] = 0; p[4] = 0xff; p[5] = 0;
+	GrMoveTo(g, 50, 10);
+	GrDrawBitmapAtCP(g, &rgb.b, NULL);
+	CHECK(Pixel(70, 30) == RED && Pixel(71, 30) == GREEN &&
+	      Pixel(72, 30) == BLUE);
+
+	packed.b.B_width = 16; packed.b.B_height = 2;
+	packed.b.B_compact = BMC_PACKBITS; packed.b.B_type = BMF_MONO;
+	memcpy(packed.raw + 6, packData, sizeof(packData));
+	GrDrawBitmap(g, 10, 30, &packed.b, NULL);
+	CHECK(Pixel(30, 50) == BLACK && Pixel(34, 50) == WHITE &&
+	      Pixel(42, 50) == BLACK && Pixel(31, 51) == BLACK &&
+	      Pixel(38, 51) == BLACK && Pixel(30, 52) == BLUE);
+
+	/* complex, 4 bits with a palette, in two slices */
+	pal.c.CB_simple.B_width = 2; pal.c.CB_simple.B_height = 2;
+	pal.c.CB_simple.B_compact = BMC_UNCOMPACTED;
+	pal.c.CB_simple.B_type = BMF_4BIT | BMT_COMPLEX | BMT_PALETTE;
+	pal.c.CB_startScan = 0; pal.c.CB_numScans = 1;
+	pal.c.CB_palette = 20; pal.c.CB_data = 28;
+	pal.c.CB_xres = pal.c.CB_yres = 72;
+	p = pal.raw + 20;
+	p[0] = 2; p[1] = 0;			/* two colors: red, green */
+	p[2] = 0xff; p[3] = 0; p[4] = 0; p[5] = 0; p[6] = 0xff; p[7] = 0;
+	pal.raw[28] = 0x01;			/* red, green */
+	pal2 = pal;
+	pal2.c.CB_startScan = 1;
+	pal2.raw[28] = 0x10;			/* green, red */
+	nextSlice = &pal2.c.CB_simple;
+	GrDrawBitmap(g, 60, 30, &pal.c.CB_simple, NextSlice);
+	CHECK(Pixel(80, 50) == RED && Pixel(81, 50) == GREEN &&
+	      Pixel(80, 51) == GREEN && Pixel(81, 51) == RED &&
+	      Pixel(80, 52) == BLUE);
     }
 
     /* an update: only the invalid area is drawn */

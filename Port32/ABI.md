@@ -2395,10 +2395,24 @@ than a pixel is a six-point polygon.
   - the bounds are the whole coordinate space;
   - `GrTestRectInMask` gives `TRRT_OUT`.
 
+**Bitmaps** (`graphicsRaster.c`):
+- A bitmap goes to the driver as `DR_VID_PUTBITS` at its device
+  position, unchanged, when it can: uncompacted, with no scaling or
+  rotation, at 72 dpi, and in a format the device takes.
+- A complex bitmap comes in slices. The C callback returns the next
+  slice; NULL means there is no more.
+- A PackBits bitmap is unpacked slice by slice, the scan lines going
+  on down until the mask's bottom.
+- `GrFillBitmap` draws the 1s in the area color (`PBF_FILL_MASK`).
+- A palette goes as RGB to a 24-bit device; other devices get their
+  own indices for its colors.
+- Not yet: scaling and rotation (nothing is drawn), LZG, format
+  conversion for devices with fewer colors, huge bitmaps.
+
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
 - area patterns (the asm filled them through a path);
-- splines, regions, bitmaps, text.
+- splines, text.
 
 **Tests.** ctest `kernel.draw` runs on the host video driver and reads
 the pixels back. It checks:
@@ -2418,6 +2432,8 @@ the pixels back. It checks:
   matrix) and rounded rectangles;
 - regions, with a parameter; window and mask bounds,
   `GrTestRectInMask`, `GrInvalRect` (rotated too), `GrInvalRectDWord`;
+- bitmaps: monochrome drawn and filled, 24 bits, PackBits, a complex
+  one with a palette in two slices;
 - drawing during an update;
 - exposure after moving and closing windows.
 
