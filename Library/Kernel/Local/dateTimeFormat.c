@@ -133,16 +133,18 @@ void LocalInitTimezone(void)
 sword LocalCompareDateTimes(TimerDateAndTime *timedate1,
 			    TimerDateAndTime *timedate2)
 {
-    const word a[7] = { timedate1->TDAT_year, timedate1->TDAT_month,
-			timedate1->TDAT_day, (word) timedate1->TDAT_dayOfWeek,
-			timedate1->TDAT_hours, timedate1->TDAT_minutes,
-			timedate1->TDAT_seconds };
-    const word b[7] = { timedate2->TDAT_year, timedate2->TDAT_month,
-			timedate2->TDAT_day, (word) timedate2->TDAT_dayOfWeek,
-			timedate2->TDAT_hours, timedate2->TDAT_minutes,
-			timedate2->TDAT_seconds };
+    word a[7], b[7];
     int i;
 
+    /* C89: no initializers of automatic arrays from variables */
+    a[0] = timedate1->TDAT_year;	b[0] = timedate2->TDAT_year;
+    a[1] = timedate1->TDAT_month;	b[1] = timedate2->TDAT_month;
+    a[2] = timedate1->TDAT_day;		b[2] = timedate2->TDAT_day;
+    a[3] = (word) timedate1->TDAT_dayOfWeek;
+    b[3] = (word) timedate2->TDAT_dayOfWeek;
+    a[4] = timedate1->TDAT_hours;	b[4] = timedate2->TDAT_hours;
+    a[5] = timedate1->TDAT_minutes;	b[5] = timedate2->TDAT_minutes;
+    a[6] = timedate1->TDAT_seconds;	b[6] = timedate2->TDAT_seconds;
     for (i = 0; i < 7; i++)
 	if (a[i] != b[i])
 	    return (sword) (a[i] < b[i] ? -1 : 1);

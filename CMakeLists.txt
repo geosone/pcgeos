@@ -35,8 +35,10 @@ endif()
 option(GEOS_ERROR_CHECK "Build the error-checking (EC) variant" ON)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
-  # dos32: Open Watcom 386 (C99 mode, warning level 4)
-  add_compile_options(-za99 -w4)
+  # dos32: Open Watcom 386 (C99 mode, warning level 4); enums are ints
+  # as with gcc (Watcom makes them as small as their values, which
+  # changes structures such as TimerDateAndTime)
+  add_compile_options(-za99 -w4 -ei)
 else()
   set(CMAKE_C_STANDARD 11)
   set(CMAKE_C_STANDARD_REQUIRED ON)

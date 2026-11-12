@@ -174,7 +174,9 @@ built with DJGPP gcc for the port** (decided 2026-11-11;
 `cmake/toolchain-dos32-djgpp.cmake`). Open Watcom remains the compiler of
 the 16-bit build. The older Watcom dos32 build
 (`cmake/toolchain-dos32-watcom.cmake`) still builds GHAL, but it leaves
-out `goc.resources`.
+out `goc.resources`. It compiles with `-ei`: enums are ints as with gcc
+(Watcom makes them as small as their values, which changes structures
+such as `TimerDateAndTime`).
 
 The DJGPP toolchain comes from crossdev (`i586-pc-msdosdjgpp`, gcc 16,
 C and C++).
