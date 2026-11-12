@@ -22,7 +22,8 @@
  *   - regions, with a parameter; the window's and the mask's bounds,
  *     GrTestRectInMask, GrInvalRect (rotated too), GrInvalRectDWord;
  *   - bitmaps: monochrome drawn and filled, 24 bits, PackBits, a
- *     complex one with a palette in two slices;
+ *     complex one with a palette in two slices; scaled twice, half,
+ *     mirrored in x and y, and at 144 dpi;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
@@ -577,6 +578,44 @@ int main(int argc, char **argv)
 	CHECK(Pixel(80, 50) == RED && Pixel(81, 50) == GREEN &&
 	      Pixel(80, 51) == GREEN && Pixel(81, 51) == RED &&
 	      Pixel(80, 52) == BLUE);
+
+	/* scaled: twice, half, mirrored in x and in y */
+	GrApplyScale(g, 2L << 16, 2L << 16);
+	GrDrawBitmap(g, 5, 35, &mono.b, NULL);
+	GrSetNullTransform(g);
+	CHECK(Pixel(30, 90) == BLACK && Pixel(37, 91) == BLACK &&
+	      Pixel(38, 90) == WHITE && Pixel(53, 91) == WHITE &&
+	      Pixel(54, 90) == BLACK && Pixel(61, 91) == BLACK &&
+	      Pixel(62, 90) == BLUE && Pixel(31, 93) == BLACK &&
+	      Pixel(32, 92) == WHITE && Pixel(60, 93) == BLACK &&
+	      Pixel(30, 94) == BLUE);
+	GrApplyScale(g, 1L << 15, 1L << 15);
+	GrDrawBitmap(g, 20, 100, &mono.b, NULL);
+	GrSetNullTransform(g);
+	CHECK(Pixel(30, 70) == BLACK && Pixel(31, 70) == BLACK &&
+	      Pixel(32, 70) == WHITE && Pixel(35, 70) == WHITE &&
+	      Pixel(36, 70) == BLACK && Pixel(37, 70) == BLACK &&
+	      Pixel(38, 70) == BLUE && Pixel(30, 71) == BLUE);
+	GrApplyScale(g, -(1L << 16), 1L << 16);
+	GrDrawBitmap(g, -20, 60, &rgb.b, NULL);
+	GrSetNullTransform(g);
+	CHECK(Pixel(37, 80) == BLUE && Pixel(38, 80) == GREEN &&
+	      Pixel(39, 80) == RED && Pixel(40, 80) == BLUE);
+	GrApplyScale(g, 1L << 16, -(1L << 16));
+	GrDrawBitmap(g, 50, -76, &mono.b, NULL);
+	GrSetNullTransform(g);
+	CHECK(Pixel(70, 96) == BLACK && Pixel(74, 96) == WHITE &&
+	      Pixel(71, 95) == WHITE && Pixel(85, 95) == BLACK &&
+	      Pixel(70, 94) == BLUE && Pixel(70, 97) == BLUE);
+
+	/* a complex one at 144 dpi: half the size */
+	pal.c.CB_xres = pal.c.CB_yres = 144;
+	pal.c.CB_simple.B_width = 4;
+	pal.raw[28] = 0x00; pal.raw[29] = 0x11;	/* red red green green */
+	pal.c.CB_numScans = 2; pal.c.CB_simple.B_height = 2;
+	GrDrawBitmap(g, 60, 40, &pal.c.CB_simple, NULL);
+	CHECK(Pixel(80, 60) == RED && Pixel(81, 60) == GREEN &&
+	      Pixel(82, 60) == BLUE && Pixel(80, 61) == BLUE);
     }
 
     /* an update: only the invalid area is drawn */

@@ -2406,8 +2406,16 @@ than a pixel is a six-point polygon.
 - `GrFillBitmap` draws the 1s in the area color (`PBF_FILL_MASK`).
 - A palette goes as RGB to a 24-bit device; other devices get their
   own indices for its colors.
-- Not yet: scaling and rotation (nothing is drawn), LZG, format
-  conversion for devices with fewer colors, huge bitmaps.
+- Scaled (by the matrix, or a complex bitmap not at 72 dpi), the
+  scan lines and pixels are picked from the source in steps of the
+  inverse factor, as `InitBitmapScale`/`ScaleSlice` do. The scaled
+  size takes the fraction of the device position into account.
+- A negative factor mirrors: to the left of the position in x, and
+  upwards from it in y. The asm hands the driver a negative height for
+  the latter; the C kernel flips the lines itself, so drivers only see
+  positive heights.
+- Not yet: rotation (nothing is drawn), LZG, format conversion for
+  devices with fewer colors, huge bitmaps.
 
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
@@ -2433,7 +2441,8 @@ the pixels back. It checks:
 - regions, with a parameter; window and mask bounds,
   `GrTestRectInMask`, `GrInvalRect` (rotated too), `GrInvalRectDWord`;
 - bitmaps: monochrome drawn and filled, 24 bits, PackBits, a complex
-  one with a palette in two slices;
+  one with a palette in two slices; scaled twice, half, mirrored in x
+  and y, and at 144 dpi;
 - drawing during an update;
 - exposure after moving and closing windows.
 
