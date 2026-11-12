@@ -20,9 +20,9 @@
  * copies the elements byte for byte; to a GState it plays them.
  *
  * Not yet: GR_DRAW_TEXT_FIELD (style runs: the element is a fault),
- * the *_PTR and *_OPTR elements, bitmap slices, palettes,
- * GrGetGStringBounds and the
- * bounds of GSF_FIGURE_BOUNDS.
+ * the *_PTR and *_OPTR elements, bitmap slices, palettes.
+ * GrGetGStringBounds plays the elements with their bounds
+ * (graphicsStringBounds.c).
  */
 #include "graphicsInt.h"
 #include <gstring.h>
@@ -959,7 +959,9 @@ typedef enum { PM_DRAW, PM_COPY, PM_PARSE } PlayMode;
 
 static GSRetType Play(GStateHandle gstate, GStateHandle gstring,
 		      GSControl flags, word *lastElement, PlayMode mode,
-		      Boolean (*callback)(void *element))
+		      Boolean (*callback)(void *element),
+		      void (*bound)(void *ctx, const byte *e, word size),
+		      void *ctx)
 {
     PlayState s;
     GSRetType rt = GSRT_COMPLETE;
@@ -993,8 +995,12 @@ static GSRetType Play(GStateHandle gstate, GStateHandle gstring,
 	    NextElement(g);
 	    if (destString)
 		GrGSStore(destString, g->GSS_elem, g->GSS_lastSize);
-	    else if (gstate)
-		GrPlayElement(gstate, g->GSS_elem);
+	    else {
+		if (bound)		/* GSF_FIGURE_BOUNDS: before it */
+		    bound(ctx, g->GSS_elem, g->GSS_lastSize);
+		if (gstate)
+		    GrPlayElement(gstate, g->GSS_elem);
+	    }
 	    /* an element may have used the GString block: g stays */
 	}
     done:
@@ -1008,7 +1014,8 @@ static GSRetType Play(GStateHandle gstate, GStateHandle gstring,
 GSRetType GrDrawGStringAtCP(GStateHandle gstate, GStateHandle gstringToDraw,
 			    GSControl flags, word *lastElement)
 {
-    return Play(gstate, gstringToDraw, flags, lastElement, PM_DRAW, NULL);
+    return Play(gstate, gstringToDraw, flags, lastElement, PM_DRAW, NULL,
+		NULL, NULL);
 }
 
 GSRetType GrDrawGString(GStateHandle gstate, GStateHandle gstringToDraw,
@@ -1030,13 +1037,24 @@ GSRetType GrDrawGString(GStateHandle gstate, GStateHandle gstringToDraw,
 GSRetType GrCopyGString(GStateHandle source, GStateHandle dest,
 			GSControl flags)
 {
-    return Play(dest, source, flags, NULL, PM_COPY, NULL);
+    return Play(dest, source, flags, NULL, PM_COPY, NULL, NULL, NULL);
 }
 
 void GrParseGString(GStateHandle gstate, GStateHandle gstringToDraw,
 		    GSControl flags, Boolean (*callback)(void *element))
 {
-    (void) Play(gstate, gstringToDraw, flags, NULL, PM_PARSE, callback);
+    (void) Play(gstate, gstringToDraw, flags, NULL, PM_PARSE, callback,
+		NULL, NULL);
+}
+
+/* GrGetGStringBoundsDWord (graphicsStringBounds.c): bound gets each
+ * element before gstate plays it */
+GSRetType GrPlayBounds(GStateHandle gstate, GStateHandle gstring,
+		       GSControl flags,
+		       void (*bound)(void *ctx, const byte *e, word size),
+		       void *ctx)
+{
+    return Play(gstate, gstring, flags, NULL, PM_PARSE, NULL, bound, ctx);
 }
 
 GStringElement GrGetGStringElement(GStateHandle gstate, GStateHandle gstring,

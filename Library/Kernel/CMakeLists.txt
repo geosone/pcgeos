@@ -159,6 +159,7 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsPath.c
   Graphics/graphicsPattern.c
   Graphics/graphicsString.c
+  Graphics/graphicsStringBounds.c
   Graphics/graphicsStringMisc.c
   Graphics/graphicsStringStore.c)
 target_include_directories(geos_kernel_objs PRIVATE

@@ -2805,9 +2805,38 @@ as far as its scan lines go (`GrBitmapStringSize`).
 
 **Not yet:** `GR_DRAW_TEXT_FIELD` (style runs; reading one is a
 fault), the `*_PTR` and `*_OPTR` elements, bitmap slices after the
-first (callbacks), palettes, `GrGetGStringBounds` and
-`GSF_FIGURE_BOUNDS`, the truncation of a full stream. (`GST_PATH` and
-the other path and clip elements: §13q.)
+first (callbacks), palettes, the truncation of a full stream.
+(`GST_PATH` and the other path and clip elements: §13q.)
+
+**Bounds** (`graphicsStringBounds.c`). `GrGetGStringBoundsDWord` and
+`GrGetGStringBounds` play the string from its position until the
+`GSControl` flags stop. They play into a GState without a window that
+starts with the transformation, pen, line width and font of the GState
+passed. Before each output element plays (`GSF_FIGURE_BOUNDS`), its
+extent in page coordinates goes into the bounds:
+- Most elements use the points the path walker makes of them
+  (`GrElementBounds`), taken through a window on the stack whose matrix
+  is the GState's. Lines are widened by half the line width. Arcs,
+  ellipses, splines and rounded rectangles give their real points, as
+  `GetArcCoords` did.
+- Text uses the outlines of the characters. For a font without
+  outlines it uses the font's box (`GrTextBox`).
+- A point, `GR_SET_GSTRING_BOUNDS` and a bitmap use their rectangle.
+
+The result goes back through the transformation at the start, with the
+corners when it is rotated, and is rounded. An empty string gives
+zeros, and `GrGetGStringBounds` returns TRUE when a bound does not fit
+a word.
+
+Two deviations from the asm:
+- The asm's `GrGetTextBounds` used character metrics; here text is
+  bounded by its ink (outline fonts) or by the font box.
+- Paths count through their elements as they are defined. The asm also
+  asked `GrGetPathBounds` at `GR_DRAW_PATH`/`GR_FILL_PATH`.
+
+ctest `kernel.draw` checks rectangles, wide lines, the pen, `GSC_OUTPUT`,
+arcs, bitmaps, rotation, a bitmap font and Cooper Black, an empty
+string, and a scaled GState.
 
 **Tests.** ctest `kernel.draw` records into a chunk and compares the
 bytes with the DOS16 elements, plays the string at a position, in parts

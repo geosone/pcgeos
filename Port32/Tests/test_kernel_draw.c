@@ -44,6 +44,7 @@
  *   - patterns: system and custom hatches, a tiled bitmap, in a path,
  *     text in a hatch;
  *   - a masked window: drawn through a checker, its mask washed black;
+ *   - the bounds of graphics strings;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -106,6 +107,19 @@ static void Put(const char *rel, const void *data, unsigned long size)
     CHECK(done == size);
     ghal_fs_close(f);
 }
+
+/* GrGetGStringBoundsDWord of a chunk graphics string */
+static void GSBounds(MemHandle blk, word ch, GStateHandle gstate,
+		     GSControl flags, RectDWord *rd)
+{
+    GStateHandle ld = GrLoadGString(blk, GST_CHUNK, ch);
+
+    GrGetGStringBoundsDWord(ld, gstate, flags, rd);
+    GrDestroyGString(ld, 0, GSKT_LEAVE_DATA);
+}
+
+#define RD_IS(rd, l, t, r, b) ((rd).RD_left == (l) && (rd).RD_top == (t) && \
+			       (rd).RD_right == (r) && (rd).RD_bottom == (b))
 
 static unsigned long Pixel(int x, int y)
 {
@@ -1738,6 +1752,100 @@ int main(int argc, char **argv)
 	SetCol(g, WHITE);
 	GrFillRect(g, 0, 0, 80, 80);
 	CHECK(Pixel(40, 33) == WHITE);
+    }
+
+    /* the bounds of graphics strings (in page coordinates while
+     * playing, back through the transformation at the start) */
+    {
+	MemHandle blk = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+	static union { Bitmap b; byte raw[16]; } bm;
+	GStateHandle gs, sc;
+	RectDWord rd;
+	Rectangle r;
+	word ch[9], i;
+
+	bm.b.B_width = 16; bm.b.B_height = 2;
+	bm.b.B_compact = BMC_UNCOMPACTED; bm.b.B_type = BMF_MONO;
+	for (i = 0; i < 9; i++) {
+	    ch[i] = 0;
+	    gs = GrCreateGString(blk, GST_CHUNK, &ch[i]);
+	    switch (i) {
+	    case 0:			/* a filled rectangle */
+		GrFillRect(gs, 10, 20, 30, 40);
+		break;
+	    case 1:			/* a line: half its width around */
+		GrSetLineWidth(gs, 4UL << 16);
+		GrDrawLine(gs, 0, 0, 10, 0);
+		break;
+	    case 2:			/* GR_SET_GSTRING_BOUNDS, the pen */
+		GrSetGStringBounds(gs, -5, -5, 50, 50);
+		GrMoveTo(gs, 100, 100);
+		GrSetLineWidth(gs, 2UL << 16);
+		GrDrawLineTo(gs, 110, 100);
+		break;
+	    case 3:			/* an ellipse, an arc */
+		GrFillEllipse(gs, 0, 0, 40, 20);
+		GrSetLineWidth(gs, 0);
+		GrDrawArc(gs, 100, 0, 140, 40, 0, 90, ACT_OPEN);
+		break;
+	    case 4:			/* a bitmap */
+		GrDrawBitmap(gs, 5, 5, &bm.b, NULL);
+		break;
+	    case 5:			/* rotated */
+		GrApplyRotation(gs, 90UL << 16);
+		GrFillRect(gs, 0, 0, 10, 20);
+		break;
+	    case 6:			/* text in a bitmap font: its box */
+		GrDrawText(gs, 0, 30, "Hi", 0);
+		break;
+	    case 7:			/* text in Cooper Black: its ink */
+		GrSetFont(gs, ttFont, 40UL << 16);
+		GrDrawChar(gs, 0, 0, 'I');
+		break;
+	    default:			/* empty */
+		break;
+	    }
+	    CHECK(GrEndGString(gs) == GSET_NO_ERROR);
+	    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+	}
+	GSBounds(blk, ch[0], 0, 0, &rd);
+	CHECK(RD_IS(rd, 10, 20, 30, 40));
+	GSBounds(blk, ch[1], 0, 0, &rd);
+	CHECK(RD_IS(rd, -2, -2, 12, 2));
+	GSBounds(blk, ch[2], 0, 0, &rd);
+	CHECK(RD_IS(rd, -5, -5, 111, 101));
+	GSBounds(blk, ch[2], 0, GSC_OUTPUT, &rd); /* up to the line */
+	CHECK(RD_IS(rd, -5, -5, 50, 50));
+	GSBounds(blk, ch[3], 0, 0, &rd);	/* arc: 0 to 90 degrees */
+	CHECK(rd.RD_left >= -1 && rd.RD_left <= 1 && rd.RD_top >= -1 &&
+	      rd.RD_top <= 1 && rd.RD_right >= 139 && rd.RD_right <= 141 &&
+	      rd.RD_bottom >= 19 && rd.RD_bottom <= 21);
+	GSBounds(blk, ch[4], 0, 0, &rd);
+	CHECK(RD_IS(rd, 5, 5, 21, 7));
+	GSBounds(blk, ch[5], 0, 0, &rd);
+	CHECK(rd.RD_right - rd.RD_left == 20 && rd.RD_bottom - rd.RD_top == 10);
+	GSBounds(blk, ch[6], 0, 0, &rd);
+	sc = GrCreateState(0);
+	CHECK(rd.RD_left == 0 &&
+	      rd.RD_right == (sdword) GrTextWidth(sc, "Hi", 0) &&
+	      rd.RD_bottom - rd.RD_top ==
+		  (sdword) GrFontMetrics(sc, GFMI_HEIGHT_ROUNDED));
+	GSBounds(blk, ch[7], 0, 0, &rd);
+	CHECK(rd.RD_left >= 0 && rd.RD_right - rd.RD_left > 8 &&
+	      rd.RD_right - rd.RD_left < 30 && rd.RD_bottom - rd.RD_top > 20 &&
+	      rd.RD_bottom - rd.RD_top < 45);
+	GSBounds(blk, ch[8], 0, 0, &rd);
+	CHECK(RD_IS(rd, 0, 0, 0, 0));
+	/* through a scale of the GState passed: its document coordinates */
+	GrApplyScale(sc, 2UL << 16, 3UL << 16);
+	GSBounds(blk, ch[0], sc, 0, &rd);
+	CHECK(RD_IS(rd, 10, 20, 30, 40));
+	gs = GrLoadGString(blk, GST_CHUNK, ch[4]);
+	CHECK(!GrGetGStringBounds(gs, sc, 0, &r) && r.R_left == 5 &&
+	      r.R_top == 5 && r.R_right == 21 && r.R_bottom == 7);
+	GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+	GrDestroyState(sc);
+	MemFree(blk);
     }
 
     /* a masked window (WCF_MASKED, how the specific UI darkens a

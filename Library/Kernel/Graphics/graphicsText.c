@@ -189,6 +189,39 @@ byte *GrTextOutline(GStateHandle gstate, int64_t x, int64_t y,
     return elems;
 }
 
+/* the font's box of size characters (0: to the null) at x, y (doc,
+ * 1/65536): left, top, right, bottom in box (doc, 1/65536); FALSE
+ * without a font (GrGetGStringBounds, where a font has no outlines) */
+Boolean GrTextBox(GStateHandle gstate, int64_t x, int64_t y, const char *str,
+		  word size, int64_t *box)
+{
+    GState *gs = MemLock(gstate);
+    FontBuf *fb = GrLockFont(gs, &gs->GS_TMatrix);
+    sdword top;
+    word n;
+
+    if (!fb) {
+	MemUnlock(gstate);
+	return FALSE;
+    }
+    for (n = 0; (!size || n < size) && str[n]; n++)
+	;
+    top = (sdword) (y >> 8);
+    if (gs->GS_textMode & TM_DRAW_BASE)
+	top -= W256(&fb->FB_baselinePos);
+    else if (gs->GS_textMode & TM_DRAW_ACCENT)
+	top -= W256(&fb->FB_accent);
+    else if (gs->GS_textMode & TM_DRAW_BOTTOM)
+	top -= W256(&fb->FB_height);
+    box[0] = x;
+    box[1] = (int64_t) top << 8;
+    box[2] = x + ((int64_t) GrTextWidthLow(gs, fb, str, n) << 8);
+    box[3] = (int64_t) (top + W256(&fb->FB_height)) << 8;
+    GrUnlockFont(gs);
+    MemUnlock(gstate);
+    return TRUE;
+}
+
 /* the length of a string (size 0: null terminated) */
 static word TextLen(const char *str, word size)
 {

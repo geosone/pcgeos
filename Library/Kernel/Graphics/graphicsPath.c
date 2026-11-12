@@ -702,6 +702,40 @@ static void FreeSubs(PathWalk *w)
     w->PW_open = FALSE;
 }
 
+/* the device points of one output element (d's window: its
+ * W_curTMatrix) as the walker makes them, their bounds in *r; the pen
+ * is put back.  FALSE if none (GrGetGStringBounds) */
+Boolean GrElementBounds(GrDraw *d, const byte *e, word size, Rectangle *r)
+{
+    PathWalk w;
+    PointDWFixed pen = d->GD_gs->GS_penPos;
+    Boolean any = FALSE;
+    word i, j;
+
+    memset(&w, 0, sizeof(w));
+    w.PW_d = d;
+    (void) Walk(&w, d->GD_gstate, e, e + size);
+    d->GD_gs = MemDeref(d->GD_gstate);
+    d->GD_gs->GS_penPos = pen;
+    for (i = 0; i < w.PW_count; i++)
+	for (j = 0; j < w.PW_subs[i].SB_count; j++) {
+	    sword x = w.PW_subs[i].SB_pts[2 * j],
+		  y = w.PW_subs[i].SB_pts[2 * j + 1];
+	    if (!any) {
+		r->R_left = r->R_right = x;
+		r->R_top = r->R_bottom = y;
+		any = TRUE;
+		continue;
+	    }
+	    if (x < r->R_left) r->R_left = x;
+	    if (x > r->R_right) r->R_right = x;
+	    if (y < r->R_top) r->R_top = y;
+	    if (y > r->R_bottom) r->R_bottom = y;
+	}
+    FreeSubs(&w);
+    free(w.PW_subs);
+    return any;
+}
 /* the subpaths in the separator format, each closed or not as asked */
 static sword *SepFormat(const PathWalk *w, word first, word last,
 			Boolean close, word *count)

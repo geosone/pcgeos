@@ -7,6 +7,7 @@
 
 #include "kernelC.h"
 #include <graphics.h>
+#include <gstring.h>
 #include <color.h>
 #include <lmem.h>
 #include <Internal/gstate.h>
@@ -313,6 +314,13 @@ sword *GrRoundRectDevPoints(const GrDraw *d, sword l, sword t, sword r,
 			   sword b, word radius, word *count);
 byte *GrTextOutline(GStateHandle gstate, int64_t x, int64_t y,
 		    const char *str, word size, word *len);
+Boolean GrTextBox(GStateHandle gstate, int64_t x, int64_t y, const char *str,
+		  word size, int64_t *box);
+Boolean GrElementBounds(GrDraw *d, const byte *e, word size, Rectangle *r);
+GSRetType GrPlayBounds(GStateHandle gstate, GStateHandle gstring,
+		       GSControl flags,
+		       void (*bound)(void *ctx, const byte *e, word size),
+		       void *ctx);
 /* graphicsPattern.c */
 Boolean GrPatternStart(GStateHandle gstate, Boolean text);
 void GrPatternFinish(GStateHandle gstate, RegionFillRule rule, Boolean text);
