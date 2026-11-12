@@ -12,6 +12,10 @@
  *   - a translated and a scaled GState, a rotated rectangle (polygon);
  *   - GrDrawRect, GrDrawLine with butt and square ends, horizontal and
  *     vertical lines, GrDrawLineTo from the pen, GrDrawPoint;
+ *   - filled polygons by both rules, GrTestPointInPolygon, polylines,
+ *     polygon outlines, a brushed polyline;
+ *   - fat lines: butt and square ends, mitered joins;
+ *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -204,7 +208,107 @@ int main(int argc, char **argv)
     CHECK(Pixel(90, 90) == WHITE && Pixel(91, 90) == BLUE &&
 	  Pixel(90, 91) == BLUE);
 
+    /* polygons: the outline's pixels and the inside */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, RED);
+    {
+	static Point tri[] = { {0, 0}, {20, 0}, {0, 20} };
+	static Point sq[] = { {30, 0}, {40, 0}, {40, 10}, {30, 10} };
+	static Point star[] = { {20, 30}, {32, 68}, {1, 44}, {39, 44},
+				{8, 68} };
+
+	GrFillPolygon(g, ODD_EVEN, tri, 3);
+	CHECK(Pixel(20, 20) == RED && Pixel(40, 20) == RED &&
+	      Pixel(20, 40) == RED && Pixel(25, 25) == RED &&
+	      Pixel(30, 30) == RED && Pixel(41, 20) == BLUE &&
+	      Pixel(35, 35) == BLUE);
+	GrFillPolygon(g, ODD_EVEN, sq, 4);	/* both ends filled */
+	CHECK(Pixel(50, 20) == RED && Pixel(60, 30) == RED &&
+	      Pixel(61, 30) == BLUE && Pixel(60, 31) == BLUE &&
+	      Pixel(49, 25) == BLUE);
+	GrFillPolygon(g, ODD_EVEN, star, 5);	/* the middle is out */
+	CHECK(Pixel(20 + 20, 20 + 52) == BLUE &&
+	      Pixel(20 + 20, 20 + 34) == RED &&
+	      Pixel(20 + 5, 20 + 45) == RED);
+	CHECK(!GrTestPointInPolygon(g, ODD_EVEN, star, 5, 20, 52) &&
+	      GrTestPointInPolygon(g, WINDING, star, 5, 20, 52) &&
+	      GrTestPointInPolygon(g, ODD_EVEN, star, 5, 20, 34) &&
+	      !GrTestPointInPolygon(g, WINDING, star, 5, 60, 52));
+	GrFillPolygon(g, WINDING, star, 5);	/* the middle is in */
+	CHECK(Pixel(20 + 20, 20 + 52) == RED);
+
+	/* outlines: open and closed */
+	SetCol(g, BLUE);
+	GrFillRect(g, 0, 0, 100, 100);
+	SetCol(g, WHITE);
+	GrDrawPolyline(g, sq, 4);
+	CHECK(Pixel(50, 20) == WHITE && Pixel(60, 25) == WHITE &&
+	      Pixel(55, 30) == WHITE && Pixel(50, 25) == BLUE &&
+	      Pixel(55, 25) == BLUE &&
+	      GrGetCurPos(g) == ((10UL << 16) | 30));
+	GrDrawPolygon(g, tri, 3);
+	CHECK(Pixel(30, 20) == WHITE && Pixel(20, 30) == WHITE &&
+	      Pixel(30, 30) == WHITE && Pixel(25, 25) == BLUE &&
+	      GrGetCurPos(g) == 0);
+	GrBrushPolyline(g, star, 2, 3, 2);	/* 3 wide, 2 high */
+	CHECK(Pixel(40, 50) == WHITE && Pixel(42, 51) == WHITE &&
+	      Pixel(43, 50) == BLUE && Pixel(40, 49) == BLUE &&
+	      Pixel(39, 50) == BLUE);
+    }
+
+    /* fat lines */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, WHITE);
+    GrSetLineWidth(g, 5L << 16);
+    GrSetLineEnd(g, LE_BUTTCAP);
+    GrDrawLine(g, 10, 10, 40, 10);	/* 5 high, both ends in */
+    CHECK(Pixel(30, 28) == WHITE && Pixel(60, 32) == WHITE &&
+	  Pixel(29, 30) == BLUE && Pixel(61, 30) == BLUE &&
+	  Pixel(45, 27) == BLUE && Pixel(45, 33) == BLUE);
+    {
+	static Point zig[] = { {10, 30}, {40, 30}, {25, 60}, {60, 45} };
+
+	GrSetLineJoin(g, LJ_MITERED);
+	GrDrawPolyline(g, zig, 4);
+	CHECK(Pixel(30, 48) == WHITE && Pixel(30, 52) == WHITE);
+	CHECK(Pixel(30, 47) == BLUE && Pixel(30, 53) == BLUE);
+	CHECK(Pixel(41, 84) == WHITE && Pixel(41, 85) == BLUE &&
+	      Pixel(40, 84) == BLUE);	/* the mitered tip */
+	GrSetLineEnd(g, LE_SQUARECAP);
+	GrSetLineJoin(g, LJ_BEVELED);
+	GrDrawLine(g, 60, 5, 80, 25);	/* square ends: further */
+	CHECK(Pixel(100, 45) == WHITE && Pixel(99, 46) == WHITE &&
+	      Pixel(80, 22) == WHITE && Pixel(84, 34) == BLUE);
+	GrSetLineWidth(g, 1L << 16);
+	GrSetLineEnd(g, LE_BUTTCAP);
+    }
+
+    /* dashes: a line through the driver, a polyline cut here */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, WHITE);
+    GrSetLineStyle(g, LS_DASHED, 0, NULL, 0);
+    GrDrawLine(g, 10, 50, 50, 50);
+    CHECK(Pixel(30, 70) == WHITE && Pixel(33, 70) == WHITE &&
+	  Pixel(34, 70) == BLUE && Pixel(37, 70) == BLUE &&
+	  Pixel(38, 70) == WHITE);
+    {
+	static Point bend[] = { {10, 70}, {40, 70}, {40, 78} };
+
+	GrDrawPolyline(g, bend, 3);
+	CHECK(Pixel(30, 90) == WHITE && Pixel(33, 90) == WHITE &&
+	      Pixel(34, 90) == BLUE && Pixel(37, 90) == BLUE &&
+	      Pixel(38, 90) == WHITE && Pixel(60, 90) == BLUE &&
+	      Pixel(60, 91) == BLUE && Pixel(60, 92) == WHITE &&
+	      Pixel(60, 95) == WHITE && Pixel(60, 96) == BLUE);
+    }
+    GrSetLineStyle(g, LS_SOLID, 0, NULL, 0);
+
     /* an update: only the invalid area is drawn */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
     WinInvalReg(a, NULL, 0, 0, 9, 9);	/* plain: washed white, valid */
     CHECK(Pixel(20, 20) == WHITE && Pixel(29, 29) == WHITE &&
 	  Pixel(30, 30) == BLUE);

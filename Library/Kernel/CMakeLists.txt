@@ -129,6 +129,11 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsUtils.c
   Graphics/graphicsOutput.c
   Graphics/graphicsLine.c
+  Graphics/graphicsPolyline.c
+  Graphics/graphicsPolygon.c
+  Graphics/graphicsFatLine.c
+  Graphics/graphicsEllipse.c
+  Graphics/graphicsLineStyles.c
   Graphics/graphicsColor.c
   Graphics/graphicsState.c
   Graphics/graphicsGetState.c)

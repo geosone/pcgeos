@@ -2307,11 +2307,44 @@ offset of `GS_areaAttr` or `GS_lineAttr`, `DR_esDi` the window.
   `DR_VID_LINE`;
 - lines are rejected on the mask's bounds.
 
+**Polygons** (`graphicsPolygon.c`: `GrFillPolygon`,
+`GrTestPointInPolygon`) are scan converted into a region in device
+coordinates, as the asm did, and drawn with `DR_VID_REGION`. The polygon
+covers its outline's pixels (as a polyline would draw them) and what is
+inside by the even-odd or the winding rule. The asm's edge table,
+active edge list and Bresenham steps are kept. The tables and the region
+are in the C heap rather than a 64K block, and the region grows as it is
+written. `GrTestPointInPolygon` transforms the point by the window's
+matrix only, as the asm did.
+
+**Polylines** (`graphicsPolyline.c`: `GrDrawPolyline`, `GrDrawPolygon`,
+`GrBrushPolyline`) use the separator format of `DR_VID_POLYLINE`.
+- A point past `MAX_COORD` draws nothing.
+- The line width is scaled by the window's matrix (`ScaleScalar`).
+- `GrBrushPolyline` takes the brush width as its fourth argument, as the
+  C stub read it.
+
+**Fat lines** (`graphicsFatLine.c`): each segment of a polyline wider
+than a pixel is a six-point polygon.
+- Ends: butt, square or round.
+- Joins: beveled, mitered (beveled under the miter limit) or round.
+- The arithmetic is the asm's WWFixed arithmetic.
+- A round end or join is a filled circle (`GrFillEllipseDev`), which
+  draws nothing until ellipses are ported.
+
+**Dashes** (`graphicsLineStyles.c`):
+- A single thin line goes to the driver as `DR_VID_DASH_LINE`, with
+  lengths scaled along its major axis.
+- A polyline is cut into dashes along its Bresenham pixels. Each dash
+  is a polyline of its own and goes round corners.
+- Unlike the asm, the dashes of every polyline of the format are kept,
+  and a skip distance past the pattern length is taken modulo that
+  length.
+
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
-- fat lines (the asm drew polylines) and styled lines: drawn one pixel
-  wide and solid;
-- arcs, ellipses, polygons, polylines, splines, regions, bitmaps, text.
+- area patterns (the asm filled them through a path);
+- arcs, ellipses, rounded rectangles, splines, regions, bitmaps, text.
 
 **Tests.** ctest `kernel.draw` runs on the host video driver and reads
 the pixels back. It checks:
@@ -2321,6 +2354,10 @@ the pixels back. It checks:
 - translated, scaled and rotated GStates;
 - frames, butt and square line ends, 45 degree lines, lines from the
   pen, points;
+- filled polygons by both rules, `GrTestPointInPolygon`, polylines,
+  polygon outlines, a brushed polyline;
+- fat lines with butt and square ends and mitered joins;
+- dashes on a line and along a polyline;
 - drawing during an update;
 - exposure after moving and closing windows.
 

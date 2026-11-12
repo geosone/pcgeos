@@ -10,8 +10,8 @@
  * clipped to the mask's bounds; rotated, as a polygon of its corners
  * (DR_VID_POLYGON).  A frame is four lines with square ends.
  *
- * Not yet: graphics strings and paths (nothing is drawn), fat and
- * styled lines (drawn one pixel wide and solid).
+ * Not yet: graphics strings and paths (nothing is drawn), area
+ * patterns.
  */
 #include "graphicsInt.h"
 
@@ -87,13 +87,22 @@ static void FillRect(const GrDraw *d, sword l, sword t, sword r, sword b)
 	GrFillRectLow(d, dl, dt, dr, db, AREA);
 }
 
-/* DrawRect: four lines with square ends, in the device */
+/* DrawRect: four lines with square ends, in the device; a fat frame as
+ * a closed polyline (DrawFillRotRect) */
 static void DrawRect(GrDraw *d, sword l, sword t, sword r, sword b)
 {
     byte end = d->GD_gs->GS_lineEnd;
     Point p[4];
     int i;
 
+    if (!GrCheckThinLine(d)) {
+	p[0].P_x = l; p[0].P_y = t;
+	p[1].P_x = r; p[1].P_y = t;
+	p[2].P_x = r; p[2].P_y = b;
+	p[3].P_x = l; p[3].P_y = b;
+	GrDrawPolylineDoc(d, p, 4, TRUE);
+	return;
+    }
     if (!Corners(d, l, t, r, b, p))
 	return;
     d->GD_gs->GS_lineEnd = LE_SQUARECAP;

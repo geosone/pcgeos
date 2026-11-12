@@ -86,6 +86,45 @@ void GrFillRectLow(const GrDraw *d, sword l, sword t, sword r, sword b,
 		   word attr);
 void GrDrawLineLow(const GrDraw *d, sword x1, sword y1, sword x2, sword y2,
 		   word attr);
+Boolean GrRejectRect(const GrDraw *d, sword l, sword t, sword r, sword b);
+void GrAdjustLineEnds(const GState *gs, sword *x1, sword *y1, sword *x2,
+		      sword *y2);
+
+/* graphicsPolyline.c: points in the separator format (C heap) */
+sword *GrSeparatorFormat(const GrDraw *d, const Point *points, word n,
+			 Boolean close, word *count);
+void GrPolylineBounds(const sword *sep, Rectangle *b);
+word GrScaleScalar(const GrDraw *d, sdword len);
+void GrScaleLineWidth(const GrDraw *d);
+Boolean GrCheckThinLine(const GrDraw *d);
+void GrDrawSeparatorFormat(const GrDraw *d, const sword *sep, word brush);
+void GrDrawPolylineLow(const GrDraw *d, const sword *sep, word count,
+		       Boolean connected);
+void GrDrawPolylineMed(const GrDraw *d, const sword *sep, word count,
+		       Boolean connected);
+void GrDrawPolylineDoc(const GrDraw *d, const Point *points, word n,
+		       Boolean connected);
+
+/* graphicsPolygon.c */
+word *GrPolygonRegion(const Window *w, const sword *sep, word n,
+		      RegionFillRule rule, Boolean trivial);
+void GrDrawPolygonDev(const GrDraw *d, const sword *sep, word n,
+		      RegionFillRule rule, word attr);
+
+/* graphicsMath.c, not in graphics.h */
+WWFixedAsDWord GrSqrWWFixed(WWFixedAsDWord i);
+
+/* graphicsEllipse.c: a filled ellipse in device coordinates */
+void GrFillEllipseDev(const GrDraw *d, sword l, sword t, sword r, sword b,
+		      word attr);
+
+/* graphicsFatLine.c */
+void GrDrawFatLines(const GrDraw *d, const sword *sep, Boolean connected);
+
+/* graphicsLineStyles.c */
+sword *GrDashPolyline(const GrDraw *d, const sword *sep, word count);
+void GrDrawLineLowStyled(const GrDraw *d, sword x1, sword y1, sword x2,
+			 sword y2, word attr);
 
 /* graphicsColor.c */
 byte GrMapRGBtoIndex(const byte *palette, word last, byte red, byte green,

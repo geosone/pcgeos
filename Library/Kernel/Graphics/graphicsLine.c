@@ -11,16 +11,16 @@
  * driver as a rectangle, others as DR_VID_LINE.  The pen moves to the
  * second endpoint.
  *
- * Not yet: fat lines (the asm drew them as polylines) and styled
- * lines (DrawLineLowStyled): drawn one pixel wide and solid.
+ * A line wider than a pixel is drawn as a polyline
+ * (graphicsPolyline.c), a styled one in dashes (graphicsLineStyles.c).
  */
 #include "graphicsInt.h"
 
 #define LINE	((word) offsetof(GState, GS_lineAttr))
 
 /* AdjustLineEnds */
-static void AdjustLineEnds(const GState *gs, sword *x1, sword *y1,
-			   sword *x2, sword *y2)
+void GrAdjustLineEnds(const GState *gs, sword *x1, sword *y1, sword *x2,
+		      sword *y2)
 {
     sword ddx, ddy;
 
@@ -42,21 +42,32 @@ static void AdjustLineEnds(const GState *gs, sword *x1, sword *y1,
     }
 }
 
+/* TrivialRejectRect: TRUE when the bounds (not sorted) are outside the
+ * mask's */
+Boolean GrRejectRect(const GrDraw *d, sword l, sword t, sword r, sword b)
+{
+    const Window *w = d->GD_w;
+
+    return (Boolean) ((l < r ? r : l) < w->W_maskRect.R_left ||
+		      (l < r ? l : r) > w->W_maskRect.R_right ||
+		      (t < b ? b : t) < w->W_maskRect.R_top ||
+		      (t < b ? t : b) > w->W_maskRect.R_bottom);
+}
+
 /* DrawLineLow: device coordinates */
 void GrDrawLineLow(const GrDraw *d, sword x1, sword y1, sword x2, sword y2,
 		   word attr)
 {
-    const Window *w = d->GD_w;
     DriverRegs r;
     sword s;
     word fn = DR_VID_LINE;
 
-    AdjustLineEnds(d->GD_gs, &x1, &y1, &x2, &y2);
-    /* TrivialRejectRect */
-    if ((x1 < x2 ? x2 : x1) < w->W_maskRect.R_left ||
-	(x1 < x2 ? x1 : x2) > w->W_maskRect.R_right ||
-	(y1 < y2 ? y2 : y1) < w->W_maskRect.R_top ||
-	(y1 < y2 ? y1 : y2) > w->W_maskRect.R_bottom)
+    if (d->GD_gs->GS_lineStyle != LS_SOLID) {
+	GrDrawLineLowStyled(d, x1, y1, x2, y2, attr);
+	return;
+    }
+    GrAdjustLineEnds(d->GD_gs, &x1, &y1, &x2, &y2);
+    if (GrRejectRect(d, x1, y1, x2, y2))
 	return;
     if (x1 == x2 || y1 == y2) {
 	fn = DR_VID_RECT;
@@ -75,12 +86,19 @@ void GrDrawLineLow(const GrDraw *d, sword x1, sword y1, sword x2, sword y2,
     GrCallDriver(d, fn, &r, attr);
 }
 
-/* DrawLine: document coordinates */
+/* DrawFatOrThinLine: document coordinates; a fat line as a polyline */
 static void DrawLine(const GrDraw *d, sword x1, sword y1, sword x2, sword y2)
 {
     sword a, b, c, e;
+    Point p[2];
 
-    if (GrTransDev(d, x1, y1, &a, &b) && GrTransDev(d, x2, y2, &c, &e))
+    if (!GrCheckThinLine(d)) {
+	p[0].P_x = x1;
+	p[0].P_y = y1;
+	p[1].P_x = x2;
+	p[1].P_y = y2;
+	GrDrawPolylineDoc(d, p, 2, FALSE);
+    } else if (GrTransDev(d, x1, y1, &a, &b) && GrTransDev(d, x2, y2, &c, &e))
 	GrDrawLineLow(d, a, b, c, e, LINE);
 }
 
@@ -105,7 +123,8 @@ void GrDrawVLine(GStateHandle gstate, sword x, sword y1, sword y2)
     GrDrawLine(gstate, x, y1, x, y2);
 }
 
-/* from the pen (in the device) to x, y */
+/* from the pen (in the device) to x, y; a fat line from the pen in
+ * document coordinates */
 static void LineTo(GStateHandle gstate, sword x, sword y)
 {
     GrDraw d;
@@ -113,6 +132,16 @@ static void LineTo(GStateHandle gstate, sword x, sword y)
     Boolean ok;
 
     GrEnterGraphics(gstate, &d);
+    if (!GrTrivialReject(&d) && !GrCheckThinLine(&d)) {
+	XYValueAsDWord pen;
+	MemUnlock(gstate);
+	pen = GrGetCurPos(gstate);
+	MemLock(gstate);
+	GrSetDocPenPos(d.GD_gs, x, y);
+	DrawLine(&d, DWORD_X(pen), DWORD_Y(pen), x, y);
+	GrExitGraphics(&d);
+	return;
+    }
     ok = (Boolean) (!GrTrivialReject(&d) && GrGetDevPenPos(&d, &px, &py));
     GrSetDocPenPos(d.GD_gs, x, y);
     if (ok && GrTransDev(&d, x, y, &dx, &dy))
