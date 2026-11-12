@@ -453,6 +453,12 @@ static byte OutputMonitor(Monitor *mon, ImEvent *ev)
 		y = im.pointerY = im.screenYMax;
 	    }
 	}
+	if (im.inMoveResize) {
+	    /* OutputUpdateScreenXor: the end, or the xor's limits */
+	    ImUpdateScreenXor(ev->IE_bp, &x, &y);
+	    im.pointerX = x;
+	    im.pointerY = y;
+	}
 	ev->IE_cx = (word) x;
 	ev->IE_dx = (word) y;
 	if (!im.drawnValid || x != im.drawnX || y != im.drawnY) {
@@ -488,6 +494,8 @@ static byte OutputMonitor(Monitor *mon, ImEvent *ev)
     if (ev->IE_message == IM_META_MOUSE_BUTTON && im.constraining &&
 	(buttonConvTab[ev->IE_bp & BI_BUTTON] & im.constrainButtons))
 	im.constraining = FALSE;	/* constrained while it is down */
+    if (ev->IE_message == IM_META_MOUSE_BUTTON && im.inMoveResize)
+	ImXorButton(ev->IE_bp);
     Send(ev, MF_FORCE_QUEUE);
     return 0;
 }

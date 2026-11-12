@@ -19,6 +19,7 @@
 #define __IM_H
 
 #include <geos.h>
+#include <graphics.h>
 
 #define IM_FIRST_MESSAGE	8704
 #define MSG_IM_BUTTON_CHANGE	(IM_FIRST_MESSAGE + 0)
@@ -191,5 +192,49 @@ extern PtrFlags ImGetPtrFlags(void);
 /* ImBumpMouse: msg to the output (cx, dx the bump), then the pointer
  * moved by xBump, yBump at once; for the UI's flow object */
 extern void ImBumpMouse(Message msg, sword xBump, sword yBump);
+
+/* the move/resize xor: XorFlags (SMRP_boxFlags) */
+typedef WordFlags XorFlags;
+#define XF_RESIZE_LEFT		0x8000
+#define XF_RESIZE_TOP		0x4000
+#define XF_RESIZE_RIGHT		0x2000
+#define XF_RESIZE_BOTTOM	0x1000
+#define XF_FLIP_HORIZONTAL	0x0800	/* not supported */
+#define XF_FLIP_VERTICAL	0x0400	/* not supported */
+#define XF_END_MATCH_ACTION	0x0200
+#define XF_PTR_OFF_LEFT		0x0100
+#define XF_PTR_OFF_RIGHT	0x0080
+#define XF_PTR_OFF_TOP		0x0040
+#define XF_PTR_OFF_BOTTOM	0x0020
+#define XF_RESIZE_PENDING	0x0010
+#define XF_NO_END_MATCH_ACTION	0x0008
+#define XOR_RESIZE_ALL	(XF_RESIZE_LEFT | XF_RESIZE_TOP | XF_RESIZE_RIGHT | \
+			 XF_RESIZE_BOTTOM)
+
+/*
+ * ImStartMoveResize: DOS16 passed the rectangle, window and flags in
+ * registers and the rest on the stack.  The bounds are in the window's
+ * document coordinates, or relative to the pointer for the edges with
+ * XF_PTR_OFF_*.  The release flags end the xor: with XF_END_MATCH_ACTION
+ * a button action (BI_PRESS, BI_DOUBLE_PRESS, BI_BUTTON), else a state
+ * of the buttons (BI_B*_DOWN).  The minimum and maximum sizes count for
+ * a resize only; a maximum <= 0 or a minimum < 0 is none.  Returns TRUE
+ * if nothing was done, as an xor is going already.
+ */
+typedef struct {
+    Rectangle		SMRP_bounds;
+    WindowHandle	SMRP_win;
+    XorFlags		SMRP_boxFlags;
+    word		SMRP_releaseFlags;
+    MemHandle		SMRP_regionHandle;	/* the region definition */
+    word		SMRP_regionOffset;
+    sword		SMRP_xPos, SMRP_yPos;	/* the pointer, document */
+    sword		SMRP_maxWidth, SMRP_maxHeight;
+    sword		SMRP_minWidth, SMRP_minHeight;
+} StartMoveResizeParams;
+extern Boolean ImStartMoveResize(const StartMoveResizeParams *params);
+extern void ImStopMoveResize(void);
+#define MSG_IM_STOP_XOR		(IM_FIRST_MESSAGE + 5)
+#define MSG_IM_START_XOR	(IM_FIRST_MESSAGE + 21)
 
 #endif /* __IM_H */

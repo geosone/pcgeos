@@ -66,13 +66,10 @@ void SysEnableAPO(void)
 
 static void CallVideo(word function)
 {
-    DriverStrategy *s = (DriverStrategy *) im.ptrStrategy;
     DriverRegs r;
 
-    if (!s)
-	return;
     memset(&r, 0, sizeof(r));
-    (void) s(function, &r);
+    (void) ImCallPtrDriver(function, &r);
 }
 
 /* SendSaverNotification */

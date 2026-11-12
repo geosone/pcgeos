@@ -96,7 +96,9 @@ static const Message imMessages[] = {
     MSG_IM_SCREEN_SAVER_COUNTDOWN,
     MSG_IM_SCREEN_SAVER_COUNTDOWN_REACHED_ZERO,
     MSG_IM_ACTIVATE_SCREEN_SAVER,
-    MSG_IM_DEACTIVATE_SCREEN_SAVER
+    MSG_IM_DEACTIVATE_SCREEN_SAVER,
+    MSG_IM_START_XOR,
+    MSG_IM_STOP_XOR
 };
 
 static GocMethodThunk *const imMethods[] = {
@@ -105,7 +107,8 @@ static GocMethodThunk *const imMethods[] = {
     ImScreenSaverMethod, ImScreenSaverMethod, ImScreenSaverMethod,
     ImScreenSaverMethod, ImScreenSaverMethod, ImScreenSaverMethod,
     ImScreenSaverMethod, ImScreenSaverMethod, ImScreenSaverMethod,
-    ImScreenSaverMethod
+    ImScreenSaverMethod,
+    ImXorMethod, ImXorMethod
 };
 
 ClassStruct IMClass = {

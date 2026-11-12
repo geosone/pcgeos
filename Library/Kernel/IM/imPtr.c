@@ -30,7 +30,9 @@
 
 static KSem semPtrImage = { 1, 0 };
 
-static Boolean CallPtrDriver(word function, DriverRegs *r)
+#define CallPtrDriver ImCallPtrDriver
+
+Boolean ImCallPtrDriver(word function, DriverRegs *r)
 {
     DriverStrategy *s = (DriverStrategy *) im.ptrStrategy;
 

@@ -2217,8 +2217,23 @@ seconds once `MSG_IM_ENABLE_SCREEN_SAVER` is sent; the delay is
 
 ctest `kernel.im` runs it with a queue as the saver.
 
+**The move/resize xor** (`IM/imMisc.c`): `ImStartMoveResize` takes a
+`StartMoveResizeParams` (`Internal/im.h`; DOS16 passed registers and
+words on the stack) and returns TRUE if an xor is going already.
+- The input manager starts it on its thread (`MSG_IM_START_XOR`): the
+  bounds in screen coordinates, the limits of the pointer for the
+  minimum and maximum size of a resize, the pointer moved into them at
+  once, then `DR_VID_SET_XOR` to the pointer's video driver, which moves
+  the region with the pointer (`VidCom/vidcomXOR.c`).
+- Pointer events keep the pointer within the limits. The xor ends on
+  the release flags: a button state on any pointer or button event, or
+  a button action (`XF_END_MATCH_ACTION`) on a button event. It also
+  ends with `ImStopMoveResize` (`MSG_IM_STOP_XOR`); both send
+  `DR_VID_CLEAR_XOR`.
+- Flipping (`XF_FLIP_*`) is not supported, as in the asm.
+- ctest `kernel.im` checks it with a root window and a driver of its own.
+
 **Not yet:**
-- the move/resize xor;
 - pen and ink;
 - re-centering a pen's pointer.
 

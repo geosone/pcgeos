@@ -54,6 +54,11 @@ typedef struct {
     TimerHandle		ssTimer;
     word		ssTimerID;
     word		disableAPOCount;	/* SysDisableAPO */
+    /* imMisc.c: the move/resize xor */
+    Boolean		inMoveResize;	/* SXS_IN_MOVE_RESIZE */
+    XorFlags		xorBoxFlag;
+    word		xorButtonFlag;
+    Rectangle		xorConstraints;	/* EOREGREC: none */
     /* the buttons */
     byte		buttonState;	/* BI_B*_DOWN */
     byte		dragState;	/* armed for a drag */
@@ -84,6 +89,11 @@ byte ImPtrPerturbMonitor(Monitor *mon, ImEvent *ev);
 /* imPtr.c: move the pointer in the driver; the save under areas
  * under it */
 word ImCallMovePtr(sword x, sword y);
+Boolean ImCallPtrDriver(word function, DriverRegs *r);
+void ImXorMethod(void *pself, optr oself, Message m, void *params,
+		 void *reply);
+void ImUpdateScreenXor(word bp, sword *x, sword *y);
+void ImXorButton(word bp);
 void ImInitScreenSaver(void);
 Boolean ImMaybeUnblankScreens(void);
 void ImScreenSaverMethod(void *pself, optr oself, Message m, void *params,

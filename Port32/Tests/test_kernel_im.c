@@ -17,6 +17,8 @@
  *   - monitors of its own: one that makes two events of one
  *     (MF_MORE_TO_DO), one that eats events, ImRemoveMonitor;
  *   - ImBumpMouse;
+ *   - the move/resize xor on a root window with a pointer driver of the
+ *     test: its limits, the ends by button state and action;
  *   - the screen saver: the delay, an installed saver blanked and
  *     brought back by input, its notifications, SysDisableAPO.
  */
@@ -26,6 +28,8 @@
 #include <input.h>
 #include <timer.h>
 #include <system.h>
+#include <win.h>
+#include <Internal/videoDr.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -100,6 +104,119 @@ static word ToIMCall(Message m, const void *p, word size)
     CObjMessageP(MF_CALL, ConstructOptr(ImInfoInputProcess(), 0), m,
 		 p, size, &r, sizeof(r));
     return r;
+}
+
+static word Now(void);
+
+/* the video driver of the root window: the pointer and the xor */
+static int xorSets, xorClears;
+static DriverRegs xorRegs;
+static VisXORParams xorParams;
+
+static Boolean Strategy(word function, DriverRegs *r)
+{
+    switch (function) {
+    case DR_VID_MOVEPTR:
+    case DR_VID_CHECK_UNDER:
+    case DR_VID_INFO_UNDER:
+	r->DR_ax = r->DR_di = 0;	/* no save under areas */
+	return FALSE;
+    case DR_VID_SET_XOR:
+	xorSets++;
+	xorRegs = *r;
+	xorParams = *(const VisXORParams *) r->DR_bpPtr;
+	return FALSE;
+    case DR_VID_CLEAR_XOR:
+	xorClears++;
+	return FALSE;
+    case DR_VID_SAVE_UNDER:
+	return TRUE;			/* refused */
+    default:
+	return FALSE;
+    }
+}
+
+static void Sync(void)
+{
+    (void) ToIMCall(MSG_IM_GET_SCREEN_SAVER_DELAY, NULL, 0);
+}
+
+static void PtrAt(sword x, sword y)
+{
+    ToIM(MSG_IM_PTR_CHANGE, (word) x, (word) y, PI_absX | PI_absY);
+    Sync();
+}
+
+/* the move/resize xor (imMisc.c) */
+static void XorTest(void)
+{
+    StartMoveResizeParams p;
+    MemHandle rg = MemAlloc(16, HF_DYNAMIC, 0);
+    WindowHandle root;
+
+    root = WinOpen(0, 0, 0, WCF_PLAIN | CMT_CLOSEST, C_BLUE, 0, 0,
+		   WPF_ROOT, 0, 0, NULL, 0, 0, 639, 479);
+    WinSetInfo(root, WIT_STRATEGY, (optr) (uintptr_t) (void *) Strategy);
+    ImSetPtrWin(root, 50, 50);
+    PtrAt(50, 50);
+    CHECK(im.drawnX == 50 && im.drawnY == 50);
+    memset(&p, 0, sizeof(p));
+    p.SMRP_bounds.R_left = 10;
+    p.SMRP_bounds.R_top = 10;
+    p.SMRP_bounds.R_right = 100;
+    p.SMRP_bounds.R_bottom = 80;
+    p.SMRP_win = root;
+    p.SMRP_boxFlags = XF_RESIZE_RIGHT | XF_RESIZE_BOTTOM |
+		      XF_NO_END_MATCH_ACTION;
+    p.SMRP_regionHandle = rg;
+    p.SMRP_regionOffset = 4;
+    p.SMRP_xPos = 100;
+    p.SMRP_yPos = 80;
+    p.SMRP_minWidth = 60;
+    p.SMRP_minHeight = 60;
+    CHECK(!ImStartMoveResize(&p));
+    CHECK(xorSets == 1 && xorRegs.DR_ax == 0 && xorRegs.DR_bx == 0 &&
+	  xorRegs.DR_cx == 4 && xorRegs.DR_dx == rg &&
+	  xorRegs.DR_si == (VXF_CX_PARAM_FOLLOWS_MOUSE |
+			    VXF_DX_PARAM_FOLLOWS_MOUSE));
+    CHECK(xorParams.VXP_ax == 10 && xorParams.VXP_bx == 10 &&
+	  xorParams.VXP_cx == 100 && xorParams.VXP_dx == 80 &&
+	  xorParams.VXP_mousePos.P_x == 100 &&
+	  xorParams.VXP_mousePos.P_y == 80);
+    /* the pointer into the minimum size at once */
+    CHECK(im.drawnX == 70 && im.drawnY == 70);
+    CHECK(ImStartMoveResize(&p));		/* one is going */
+    PtrAt(20, 300);
+    CHECK(im.drawnX == 70 && im.drawnY == 300);
+    ImStopMoveResize();
+    CHECK(xorClears == 1 && !im.inMoveResize);
+    ImStopMoveResize();
+    CHECK(xorClears == 1);
+    PtrAt(20, 30);
+    CHECK(im.drawnX == 20 && im.drawnY == 30);
+
+    /* a move that ends when the buttons are up */
+    p.SMRP_boxFlags = 0;
+    p.SMRP_releaseFlags = 0;
+    CHECK(!ImStartMoveResize(&p));
+    CHECK(xorSets == 2 && xorRegs.DR_si == (VXF_X_POS_FOLLOWS_MOUSE |
+					     VXF_Y_POS_FOLLOWS_MOUSE));
+    CHECK(im.drawnX == 20 && im.drawnY == 30);	/* no limits */
+    PtrAt(60, 60);
+    CHECK(xorClears == 2 && !im.inMoveResize);
+
+    /* one that ends with the press of button 0 */
+    p.SMRP_boxFlags = XF_END_MATCH_ACTION;
+    p.SMRP_releaseFlags = BI_PRESS;
+    CHECK(!ImStartMoveResize(&p));
+    PtrAt(61, 61);
+    CHECK(xorClears == 2 && im.inMoveResize);
+    ToIM(MSG_IM_BUTTON_CHANGE, Now(), 0, BI_PRESS);
+    Sync();
+    CHECK(xorClears == 3 && !im.inMoveResize);
+    ToIM(MSG_IM_BUTTON_CHANGE, Now(), 0, 0);
+    Sync();
+    MemFree(rg);
 }
 
 static word Now(void)
@@ -354,6 +471,8 @@ int main(int argc, char **argv)
 	CHECK(im.ssOD == 0);
 	CHECK(GCNListRemove(saver, MANUFACTURER_ID_GEOWORKS, 72));
     }
+
+    XorTest();
 
     GeodeFreeQueue(qc);
     printf("%s\n", fails ? "FAILED" : "ok");
