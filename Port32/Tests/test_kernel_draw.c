@@ -21,7 +21,7 @@
  *   - a pie through a mirroring matrix;
  *   - regions, with a parameter; the window's and the mask's bounds,
  *     GrTestRectInMask, GrInvalRect (rotated too), GrInvalRectDWord;
- *   - bitmaps: monochrome drawn and filled, 24 bits, PackBits, a
+ *   - bitmaps: monochrome drawn and filled, 24 bits, PackBits, LZG, a
  *     complex one with a palette in two slices; scaled twice, half,
  *     mirrored in x and y, at 144 dpi, and rotated; huge bitmaps
  *     (a slice per block of the huge array), scaled, and PackBits;
@@ -611,6 +611,27 @@ int main(int argc, char **argv)
 	CHECK(Pixel(30, 50) == BLACK && Pixel(34, 50) == WHITE &&
 	      Pixel(42, 50) == BLACK && Pixel(31, 51) == BLACK &&
 	      Pixel(38, 51) == BLACK && Pixel(30, 52) == BLUE);
+
+	/* LZG: 24 bits, two lines in one stream */
+	{
+	    static union { Bitmap b; byte raw[6 + 64]; } lzg;
+	    byte lines[2 * 8 * 3];
+	    MemHandle st = LZGAllocCompressStack(0);
+	    int k;
+	    for (k = 0; k < 16; k++) {
+		byte *q = lines + 3 * k;
+		q[0] = k < 4 ? 0xff : 0; q[1] = k >= 4 && k < 8 ? 0xff : 0;
+		q[2] = k >= 8 ? 0xff : 0;
+	    }
+	    lzg.b.B_width = 8; lzg.b.B_height = 2;
+	    lzg.b.B_compact = BMC_LZG; lzg.b.B_type = BMF_24BIT;
+	    CHECK(LZGCompress(lzg.raw + 6, lines, sizeof(lines), st) <= 64);
+	    LZGFreeCompressStack(st);
+	    GrDrawBitmap(g, 60, 70, &lzg.b, NULL);
+	    CHECK(Pixel(80, 90) == RED && Pixel(83, 90) == RED &&
+		  Pixel(84, 90) == GREEN && Pixel(87, 90) == GREEN &&
+		  Pixel(80, 91) == BLUE && Pixel(87, 91) == BLUE);
+	}
 
 	/* complex, 4 bits with a palette, in two slices */
 	pal.c.CB_simple.B_width = 2; pal.c.CB_simple.B_height = 2;

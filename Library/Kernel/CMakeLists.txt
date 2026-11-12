@@ -4,6 +4,7 @@
 #   Sys/sysError.c     <- fatal errors of Sys/sysError.asm
 #   Heap/heapHandle.c  <- handle table of Heap/heapHandle.asm
 #   Heap/heapHigh.c    <- memory block API of Heap/heapHigh.asm, heapC.asm
+#   Heap/heapCompress.c <- LZG of Heap/heapCompress.asm
 #   Thread/threadThread.c <- threads, scheduler of Thread/threadThread.asm
 #   Thread/threadSem.c <- semaphores, thread locks of Thread/threadSem.asm
 #   LMem/lmemCode.c    <- local memory heaps of LMem/lmemCode.asm
@@ -65,6 +66,7 @@ add_library(geos_kernel_objs OBJECT
   Sys/sysError.c
   Heap/heapHandle.c
   Heap/heapHigh.c
+  Heap/heapCompress.c
   Thread/threadThread.c
   Thread/threadSem.c
   LMem/lmemCode.c

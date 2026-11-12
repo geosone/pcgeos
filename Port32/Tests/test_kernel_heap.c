@@ -1,6 +1,8 @@
 /*
  * test_kernel_heap.c -- the handle table and memory block API of the C
- * kernel (Library/Kernel/Heap/heapHandle.c, heapHigh.c; CInclude/heap.h).
+ * kernel (Library/Kernel/Heap/heapHandle.c, heapHigh.c; CInclude/heap.h),
+ * and LZG (heapCompress.c): a stream written as the asm writes it, and
+ * data of runs, repeats and noise through compress and uncompress.
  *
  * Fatal errors are caught through kernelFatalHook, so the error checks
  * are tested too.
@@ -162,6 +164,39 @@ int main(void)
     h2 = MemAlloc(4, HF_DYNAMIC, 0);
     CHECK(h2 != 0);
     MemFree(h2);
+
+    /* LZG */
+    {
+	static byte data[9000], packed[12000], back[9000];
+	static const byte abc[] = "ABCABCABC";
+	static const byte abcPacked[] =
+	    { 0xe0, 'A', 'B', 'C', 0x18, 0x03, 0x60 };
+	MemHandle st = LZGAllocCompressStack(0);
+	dword seed = 1;
+	int n, sizes[] = { 0, 1, 2, 3, 9, 100, 1000, 9000 }, k;
+	CHECK(st != 0);
+	n = LZGCompress(packed, (byte *) abc, 9, st);
+	CHECK(n == (int) sizeof(abcPacked) &&
+	      !memcmp(packed, abcPacked, sizeof(abcPacked)));
+	CHECK(LZGGetUncompressedSize(packed) == 9);
+	CHECK(LZGUncompress(back, packed) == 9 && !memcmp(back, abc, 9));
+	for (i = 0; i < (int) sizeof(data); i++) {
+	    seed = seed * 1103515245UL + 12345;
+	    data[i] = (i / 700) % 3 == 0 ? 0 :		/* runs */
+		      (i / 700) % 3 == 1 ? (byte) "pc/geos "[i % 8] :
+		      (byte) (seed >> 16);			/* noise */
+	}
+	for (k = 0; k < (int) (sizeof(sizes) / sizeof(sizes[0])); k++) {
+	    memset(back, 0xee, sizeof(back));
+	    n = LZGCompress(packed, data, sizes[k], st);
+	    CHECK(n > 0 && n < sizes[k] + sizes[k] / 8 + 8);
+	    CHECK(LZGGetUncompressedSize(packed) == sizes[k]);
+	    CHECK(LZGUncompress(back, packed) == sizes[k] &&
+		  !memcmp(back, data, sizes[k]));
+	}
+	CHECK(LZGCompress(packed, data, 9000, st) < 9000 * 2 / 3 + 300);
+	LZGFreeCompressStack(st);
+    }
 
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "ok", fails);
     return fails != 0;

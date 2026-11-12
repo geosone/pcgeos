@@ -2516,7 +2516,13 @@ than a pixel is a six-point polygon.
   palette. The mask is kept. The asm kept the line number across a
   draw too; it converted slices, the C code converts what goes to the
   driver, so the dither rows of scaled bitmaps follow the drawn lines.
-- Not yet: LZG.
+- LZG compacted bitmaps (`BMC_LZG`): the data of a slice is LZG streams
+  one after another, unpacked like PackBits. LZG itself
+  (`Library/Kernel/Heap/heapCompress.c`) writes the asm's format and,
+  except at the very end of the data (where the asm compared bytes past
+  it), the same bytes. The compress stack is just the block of the hash
+  tables. Compressed VM blocks (`COMPRESSED_VM`) and compressed XIP
+  resources were off in the DOS16 kernels and are not supported.
 
 **GrBitBlt** (`graphicsRaster.c`, `GrBltCommon` for `WinScroll` too):
 - Only what is visible and valid at the source is copied, with

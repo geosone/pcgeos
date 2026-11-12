@@ -39,7 +39,9 @@
  * Bitmaps of more colors than the device are converted scan line by
  * scan line on their way to the driver (see "Format conversion").
  *
- * Not yet: LZG compaction, graphics strings.
+ * Compacted bitmaps: PackBits or LZG (Heap/heapCompress.c).
+ *
+ * Not yet: graphics strings.
  *
  * Huge bitmaps (graphicsBitmapHuge.asm) are drawn like complex ones,
  * each block of the huge array a slice (DrawSlice's note): the
@@ -391,6 +393,26 @@ static const Bitmap *NextSlice(BMFrame *f, const Bitmap *bm)
     return f->cb((Bitmap *) bm);
 }
 
+/* n bytes from *src to dst, PackBits or LZG (a stream after another,
+ * as LZGUncompressSource in the asm loop) */
+static void Unpack(byte compact, const byte **src, byte *dst, dword n)
+{
+    if (compact != BMC_LZG) {
+	GrUnpackBits(src, dst, n);
+	return;
+    }
+    while (n) {
+	dword used, got = LZGUncompressBounded(dst, n, *src, &used);
+	*src += used;
+	if (!got)
+	    break;
+	if (got > n)
+	    got = n;
+	dst += got;
+	n -= got;
+    }
+}
+
 /* UncompactPackBits: n bytes from *src to dst */
 void GrUnpackBits(const byte **src, byte *dst, dword n)
 {
@@ -443,7 +465,7 @@ static void DrawUnpacked(BMFrame *f)
 	    size = need;
 	}
 	if (n) {
-	    GrUnpackBits(&src, buf, need);
+	    Unpack(bm->B_compact, &src, buf, need);
 	    f->args.PBA_data = buf;
 	    f->args.PBA_bm.B_height = n;
 	    PutBits(f, y);
@@ -477,7 +499,7 @@ static Boolean SourceSlice(BMSource *s, const Bitmap *bm)
 
     s->bm = bm;
     src = SliceData(s->f, bm, &s->n);
-    if (bm->B_compact != BMC_PACKBITS) {
+    if (bm->B_compact == BMC_UNCOMPACTED) {
 	s->data = src;
 	return TRUE;
     }
@@ -489,7 +511,7 @@ static Boolean SourceSlice(BMSource *s, const Bitmap *bm)
 	s->buf = nb;
 	s->size = need;
     }
-    GrUnpackBits(&src, s->buf, need);
+    Unpack(bm->B_compact, &src, s->buf, need);
     s->data = s->buf;
     return TRUE;
 }
@@ -955,8 +977,8 @@ static void Draw(BMFrame *f, sword x, sword y)
     } else if (fill)
 	f->args.PBA_flags |= PBF_FILL_MASK;
 
-    if (bm->B_compact != BMC_UNCOMPACTED && bm->B_compact != BMC_PACKBITS)
-	return;					/* LZG: not yet */
+    if (bm->B_compact > BMC_LZG)
+	return;
     if (f->hfile && !HugeSlice(f, 0))
 	return;
     if (rotated) {
@@ -967,7 +989,7 @@ static void Draw(BMFrame *f, sword x, sword y)
 	DrawScaled(f);
 	return;
     }
-    if (bm->B_compact == BMC_PACKBITS) {
+    if (bm->B_compact != BMC_UNCOMPACTED) {
 	DrawUnpacked(f);
 	return;
     }

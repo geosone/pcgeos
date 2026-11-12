@@ -830,6 +830,10 @@ word ElementArrayAddElementSized(optr arr, void *element, word size,
 ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize);
 word LMemDOS16Size(MemHandle mh, word gapLen);
 word LMemToDOS16(MemHandle mh, byte *out, word gapAt, word gapLen);
+/* Heap/heapCompress.c: one LZG stream, at most cap bytes written; the
+ * bytes of the source in *used (may be NULL); the bytes it holds */
+dword LZGUncompressBounded(byte *dst, dword cap, const byte *src,
+			   dword *used);
 MemHandle LMemFromDOS16(const byte *img, word size, Handle owner,
 			word gapAt, word gapLen);
 MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
