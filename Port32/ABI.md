@@ -1506,12 +1506,36 @@ of type `GFT_VM` (section 13c): the VM data follow the 256-byte
   block gets the thread of `VMSetExecThread`); any other block goes to
   the routine of `VMSetReloc`.
 
+- **Huge arrays** (`vmemHugeArray.c` beside `vmemHugeArray.asm`): the
+  DOS16 structure in the file. The directory block (user ID
+  `SVMID_HA_DIR_ID`) has `HugeArrayDirectory` (`HAD_data`, `HAD_dir`,
+  `HAD_xdir`, `HAD_self`, `HAD_size`), the user's part of the header,
+  and a chunk array of `HugeArrayDirEntry` {`HADE_last`, `HADE_size`,
+  `HADE_handle`} after a first entry with `HADE_last` -1. The data
+  blocks (`SVMID_HA_BLOCK_ID`) have `HAB_next`, `HAB_prev`, `HAB_dir`
+  after the LMem header and one chunk array of the elements (element
+  size `HAD_size`, 0: variable). In the file `LMBH_handle` of these
+  blocks is the chain link (`HAD_data`, `HAB_next`), as the asm left
+  it on unlocking, and `HAD_dir` a file chunk handle (4 lower); the
+  write and read of the block convert. The chain routines
+  (`vmemChain.c`) take the link from `HAD_data`/`HAB_next`; a copied
+  array gets its own handles (`FixupHugeArrayChain`), arrays are
+  compared element by element. Blocks: an insertion that keeps a
+  block within 6000 bytes goes into it, a larger one splits the block
+  and adds blocks of about 4000 bytes (fixed size) or one element
+  each (variable size); neighbours that fit within 6000 bytes are
+  combined after every change, not only around the place of the
+  change as in the asm, so blocks may be cut differently (the format
+  allows that). `HADE_size` is the block's DOS16 size.
+  `ECCheckHugeArray` checks nothing yet; `vmcheck.py` checks the
+  structure in files.
+
 Not yet:
 
 - backup mode (`VMSave`, `VMRevert`, `VMSaveAs`);
 - sharing between processes, `VMGrabExclusive`;
 - discarding clean blocks;
-- DB items, huge arrays, compression.
+- DB items, compression.
 
 ## 13d. Object blocks in files (`Object/objectReloc.c`, P4)
 

@@ -105,6 +105,15 @@ static inline void VHSet8(KVMFile *f, word off, byte v)
 
 /* vmemBlkManip.c */
 KVMFile *VMFileOf(VMFileHandle vm);
+
+/* vmemHugeArray.c: huge array blocks in chains and files */
+word VMHugeArrayLink(word uid, const void *p, Boolean *isHA);
+Boolean VMHugeArraySetLink(word uid, void *p, word link);
+void VMHugeArrayToDOS16(word uid, byte *img);
+void VMHugeArrayFromDOS16(word uid, MemHandle mh);
+void VMHugeArrayFixup(VMFileHandle file, VMBlockHandle dir);
+Boolean VMHugeArrayCompare(VMFileHandle fa, VMBlockHandle a,
+			   VMFileHandle fb, VMBlockHandle b);
 Boolean VMIsUsed(const KVMFile *f, VMBlockHandle h);
 void VMCheckBlock(const KVMFile *f, VMBlockHandle h);	/* fatal if not */
 VMBlockHandle VMGetUnassignedBlk(KVMFile *f);

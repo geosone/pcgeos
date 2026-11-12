@@ -109,6 +109,7 @@ add_library(geos_kernel_objs OBJECT
   VMem/vmemHeader.c
   VMem/vmemHigh.c
   VMem/vmemChain.c
+  VMem/vmemHugeArray.c
   Boot/bootInit.c
   Boot/bootBoot.c
   Sys/sysMisc.c

@@ -7,6 +7,10 @@
  * and count of the VMChains (little-endian dwords, 0 for none) of its
  * branches.  These are file data, read byte by byte.
  *
+ * The link of a huge array block (vmemHugeArray.c) is HAD_data or
+ * HAB_next; a copied huge array gets its own handles
+ * (FixupHugeArrayChain), and two are compared element by element.
+ *
  * Not yet: chains of DB items (a chunk in the low word).
  */
 #include "vmemInt.h"
@@ -34,6 +38,26 @@ static void Put32(byte *p, dword v)
 {
     Put16(p, (word) v);
     Put16(p + 2, (word) (v >> 16));
+}
+
+static word Uid(VMFileHandle file, VMBlockHandle b)
+{
+    return VHGet16(VMFileOf(file), (word) (b + VMBH_UID));
+}
+
+/* the link of block b, locked at p */
+static word Link(VMFileHandle file, VMBlockHandle b, const byte *p)
+{
+    Boolean ha;
+    word l = VMHugeArrayLink(Uid(file, b), p, &ha);
+
+    return ha ? l : Get16(p);
+}
+
+static void SetLink(VMFileHandle file, VMBlockHandle b, byte *p, word l)
+{
+    if (!VMHugeArraySetLink(Uid(file, b), p, l))
+	Put16(p, l);
 }
 
 static VMBlockHandle BlockOf(VMChain chain)
@@ -64,7 +88,7 @@ static Boolean IsTree(VMFileHandle file, VMBlockHandle b, VMBlockHandle *next)
 {
     MemHandle mh;
     const byte *p = VMLock(file, b, &mh);
-    word n = Get16(p);
+    word n = Link(file, b, p);
 
     VMUnlock(mh);
     *next = n == VM_CHAIN_TREE ? 0 : n;
@@ -115,13 +139,21 @@ VMChain VMCopyVMChain(VMFileHandle sourceFile, VMChain sourceChain,
 	}
 	if (prev) {
 	    p = VMLock(destFile, prev, &mh);
-	    Put16(p, nb);
+	    SetLink(destFile, prev, p, nb);
 	    VMDirty(mh);
 	    VMUnlock(mh);
 	}
 	prev = tree ? 0 : nb;
 	b = next;
     }
+    if (prev) {				/* the copy's last link */
+	p = VMLock(destFile, prev, &mh);
+	SetLink(destFile, prev, p, 0);
+	VMDirty(mh);
+	VMUnlock(mh);
+    }
+    if (first && Uid(destFile, first) == SVMID_HA_DIR_ID)
+	VMHugeArrayFixup(destFile, first);
     return VMCHAIN_MAKE_FROM_VM_BLOCK(first);
 }
 
@@ -132,6 +164,10 @@ Boolean VMCompareVMChains(VMFileHandle sourceFile, VMChain sourceChain,
     VMBlockHandle a = BlockOf(sourceChain), b = BlockOf(destChain);
     VMBlockHandle na, nb;
 
+    if (a && b && (Uid(sourceFile, a) == SVMID_HA_DIR_ID ||
+		   Uid(destFile, b) == SVMID_HA_DIR_ID))
+	return Uid(sourceFile, a) == Uid(destFile, b) &&
+	       VMHugeArrayCompare(sourceFile, a, destFile, b);
     while (a && b) {
 	MemHandle ma, mb;
 	const byte *pa, *pb;

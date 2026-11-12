@@ -11,6 +11,9 @@ A file may start with a GEOS file header (256 bytes, signature
 relative to the data after it.  Checked: the VMFileHeader, the VM header,
 the lists of unassigned and assigned (free space) entries, the counts,
 and that used blocks and free space lie in the file without overlapping.
+Huge arrays (vmemHugeArray.asm): the chain link in LMBH_handle is
+HAD_data or HAB_next, the directory entries name the data blocks in
+chain order, with HAB_prev, HAB_dir and the element counts right.
 Exit code 1 if a file is broken.  An independent reading of
 vmemConstant.def, used to check the files of the C kernel (Port32 VMem).
 """
@@ -79,6 +82,58 @@ def check_lmem(blk, what, err):
         if pos < last or pos + size > bsize:
             err("%s: %s at %d overlaps or leaves the block" % (what, name, pos))
         last = max(last, pos + size)
+
+
+SVMID_HA_DIR_ID = 0xff03
+SVMID_HA_BLOCK_ID = 0xff04
+
+
+def chunk(blk, handle):
+    """the data of the chunk of a handle in a DOS16 LMem block"""
+    e = struct.unpack_from("<H", blk, handle)[0]
+    size = struct.unpack_from("<H", blk, e - 2)[0]
+    return blk[e:e - 2 + size]
+
+
+def check_huge_array(blocks, uids, h, err):
+    """the huge array whose directory block is h"""
+    d = blocks[h]
+    link, = struct.unpack_from("<H", d, 0)
+    had_data, had_dir, had_xdir, had_self, had_size = \
+        struct.unpack_from("<5H", d, 16)
+    what = "huge array %#x" % h
+    if link != had_data or had_self != h or had_xdir:
+        err("%s: link %#x, HAD_data %#x, HAD_self %#x, HAD_xdir %#x"
+            % (what, link, had_data, had_self, had_xdir))
+        return
+    arr = chunk(d, had_dir)
+    count, esize, _, off = struct.unpack_from("<4H", arr, 0)
+    entries = [struct.unpack_from("<IHH", arr, off + 8 * i)
+               for i in range(count)]
+    if esize != 8 or not entries or entries[0][0] != 0xffffffff:
+        err("%s: bad directory" % what)
+        return
+    b, prev = had_data, 0
+    for i, (last, size, handle) in enumerate(entries[1:], 1):
+        if handle != b or b not in blocks or uids.get(b) != SVMID_HA_BLOCK_ID:
+            err("%s: entry %d names %#x, chain has %#x" % (what, i, handle, b))
+            return
+        blk = blocks[b]
+        link, nxt, prv, dirb = struct.unpack_from("<H", blk, 0) + \
+            struct.unpack_from("<3H", blk, 16)
+        offset, = struct.unpack_from("<H", blk, 2)
+        bsize, = struct.unpack_from("<H", blk, 8)
+        n, es = struct.unpack_from("<2H", chunk(blk, offset), 0)
+        if link != nxt or prv != prev or dirb != h or es != had_size or \
+                n != (last - entries[i - 1][0]) & 0xffffffff or \
+                size != bsize:
+            err("%s: data block %#x (link %#x next %#x prev %#x dir %#x, "
+                "%d elements, %d bytes)" % (what, b, link, nxt, prv, dirb, n,
+                                            len(blk)))
+            return
+        prev, b = b, nxt
+    if b:
+        err("%s: chain goes on after the directory (%#x)" % (what, b))
 
 
 def check(path):
@@ -169,9 +224,13 @@ def check(path):
         err("VMH_numAssigned %d, list has %d" % (n_assigned, count))
     # used entries
     nused = 0
+    blocks, uids = {}, {}
     for h in handles:
         if used(h):
             nused += 1
+            uids[h] = u16(h + 4)
+            if u16(h + 6) and u32(h + 8) + u16(h + 6) <= len(data):
+                blocks[h] = data[u32(h + 8):u32(h + 8) + u16(h + 6)]
             if h in seen:
                 err("used entry %#x on a list" % h)
             size, pos = u16(h + 6), u32(h + 8)
@@ -183,6 +242,9 @@ def check(path):
             err("free entry %#x on no list" % h)
     if nused != n_used:
         err("VMH_numUsed %d, table has %d" % (n_used, nused))
+    for h in blocks:
+        if uids[h] == SVMID_HA_DIR_ID and hdr[h + 3] & VMBF_LMEM:
+            check_huge_array(blocks, uids, h, err)
     hdr_entry = u16(TABLE + 6)
     real_used = sum(u16(h + 6) for h in handles if used(h))
     if STRICT and used_size != real_used:

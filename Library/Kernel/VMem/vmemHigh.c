@@ -537,6 +537,12 @@ VMBlockHandle VMCopyVMBlock(VMFileHandle sourceFile,
     nb = VMAlloc(destFile, size,
 		 VHGet16(sf, sourceBlock + VMBH_UID));
     memcpy(VMLock(destFile, nb, &dmh), src, size);
+    if (MemGetInfo(smh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) {
+	/* CopyVMBlock: an LMem block stays one */
+	MemModifyFlags(dmh, HF_LMEM, 0);
+	((LMemBlockHeader *) MemDeref(dmh))->LMBH_handle = dmh;
+    }
+    VMDirty(dmh);
     VMUnlock(dmh);
     VMUnlock(smh);
     return nb;

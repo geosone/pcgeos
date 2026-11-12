@@ -9,13 +9,18 @@
  * owners, chains and trees (copy, compare, info, free), read-only and
  * temporary files, and reading a VM file written by the 16-bit tools
  * (vm_reference.h), LMem blocks (the DOS16 layout in the file) and the
- * routine of VMSetReloc.  A.VM, B.VM, LM.VM and REF.VM stay for
- * vmcheck.py (ctest kernel.vm.format).
+ * routine of VMSetReloc; huge arrays (fixed and variable size elements,
+ * inserting, deleting, replacing, resizing, Next/Prev, Expand/Contract,
+ * Enum, copied and compared as chains, written and read again).  A.VM,
+ * B.VM, LM.VM, HA.VM and REF.VM stay for vmcheck.py (ctest
+ * kernel.vm.format).
  */
 #include "kernelC.h"
 #include "ghal.h"
 #include "hostfs.h"
 #include <vm.h>
+#include <lmem.h>
+#include <hugearr.h>
 #include "vm_reference.h"
 
 #include <setjmp.h>
@@ -179,6 +184,60 @@ static uint64_t SizeOf(const char *rel)
     return size;
 }
 
+/* huge arrays: element i of the fixed array holds dword values[i] */
+static dword values[4000];
+static dword nvalues;
+
+static Boolean HASame(VMFileHandle vm, VMBlockHandle ha)
+{
+    dword i;
+
+    if (HugeArrayGetCount(vm, ha) != nvalues)
+	return FALSE;
+    for (i = 0; i < nvalues; i++) {
+	void *p;
+	word size;
+	dword r = HugeArrayLock(vm, ha, i, &p, &size);
+	Boolean ok = HAL_COUNT(r) && size == 4 && *(dword *) p == values[i];
+	if (HAL_COUNT(r))
+	    HugeArrayUnlock(p);
+	if (!ok) {
+	    printf("element %lu: %lu want %lu size %u\n", (unsigned long) i, HAL_COUNT(r) ? (unsigned long) *(dword *) p : 0UL, (unsigned long) values[i], size);
+	    return FALSE;
+	}
+    }
+    return TRUE;
+}
+
+static void HAInsert(dword at, word n, dword base)
+{
+    word j;
+
+    memmove(values + at + n, values + at, (nvalues - at) * sizeof(dword));
+    for (j = 0; j < n; j++)
+	values[at + j] = base + j;
+    nvalues += n;
+}
+
+static void HADelete(dword at, word n)
+{
+    memmove(values + at, values + at + n,
+	    (nvalues - at - n) * sizeof(dword));
+    nvalues -= n;
+}
+
+static Boolean SumCb(void *element, void *data)
+{
+    *(dword *) data += *(byte *) element;
+    return FALSE;
+}
+
+static Boolean StopCb(void *element, void *data)
+{
+    (void) element;
+    return ++*(dword *) data == 5;
+}
+
 int main(int argc, char **argv)
 {
     VMFileHandle vm, vm2, f;
@@ -187,7 +246,7 @@ int main(int argc, char **argv)
     VMInfoStruct info;
     MemHandle mh, d;
     char *slash;
-    dword base, size;
+    dword base, size, size32;
     word i, blocks, db;
     uint64_t before;
     byte *p;
@@ -242,6 +301,144 @@ int main(int argc, char **argv)
 	  ThreadGetError() == VM_OPEN_OK_READ_WRITE_NOT_SHARED);
     CHECK(VMClose(vm, FALSE) == 0);
     CHECK(VMClose(vm, FALSE) == 0);
+    /* huge arrays */
+    {
+	VMBlockHandle ha, hv;
+	VMChain hcopy;
+	dword buf[3000], r, i, sum, n;
+	word size;
+	void *p, *q;
+	byte vbuf[300];
+	VMInfoStruct hi;
+
+	vm = VMOpen("HA.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	CHECK(vm != 0);
+	ha = HugeArrayCreate(vm, 4, 0);
+	CHECK(HugeArrayGetCount(vm, ha) == 0 &&
+	      HugeArrayLock(vm, ha, 0, &p, &size) == 0 && size == 4);
+	for (i = 0; i < 3000; i++)
+	    buf[i] = i * 7;
+	nvalues = 0;
+	CHECK(HugeArrayAppend(vm, ha, 3000, buf) == 0);
+	HAInsert(0, 0, 0);
+	for (i = 0; i < 3000; i++)
+	    values[i] = i * 7;
+	nvalues = 3000;
+	CHECK(HASame(vm, ha));
+	/* the counts of a lock: before and with it, from it on */
+	r = HugeArrayLock(vm, ha, 1500, &p, &size);
+	CHECK(HAL_COUNT(r) >= 1 && HAL_PREV(r) >= 1 &&
+	      HAL_COUNT(r) + HAL_PREV(r) - 1 <= 1001);
+	HugeArrayUnlock(p);
+	HugeArrayInsert(vm, ha, 10, 1500, NULL);
+	HAInsert(1500, 10, 0);
+	memset(values + 1500, 0, 10 * sizeof(dword));
+	CHECK(HASame(vm, ha));
+	HugeArrayReplace(vm, ha, 2, 1500, buf + 1);	/* 7, 14 */
+	values[1500] = 7;
+	values[1501] = 14;
+	HugeArrayDelete(vm, ha, 500, 100);
+	HADelete(100, 500);
+	HugeArrayInsert(vm, ha, 1, 0, buf + 2);
+	HAInsert(0, 1, 14);
+	CHECK(HugeArrayAppend(vm, ha, 2, buf + 3) == nvalues);
+	HAInsert(nvalues, 2, 21);
+	values[nvalues - 1] = 28;
+	CHECK(HASame(vm, ha));
+	/* Next over all, Prev back */
+	r = HugeArrayLock(vm, ha, 0, &p, &size);
+	for (i = 1, n = 1; HugeArrayNext(&p, &size); i++)
+	    n += *(dword *) p == values[i];
+	CHECK(i == nvalues && n == nvalues && *(dword *) p == values[i - 1]);
+	for (i = nvalues - 1, n = 0; HugeArrayPrev(&p, &q, &size); i--)
+	    n += *(dword *) p == values[i - 1];
+	CHECK(i == 0 && n == nvalues - 1 && p == q);
+	HugeArrayUnlock(p);
+	/* Expand and Contract at a pointer */
+	HugeArrayLock(vm, ha, 700, &p, &size);
+	CHECK(HugeArrayExpand(&p, 3, buf + 10) >= 3 && *(dword *) p == 70);
+	HAInsert(700, 3, 70);
+	values[701] = 77;
+	values[702] = 84;
+	CHECK(HugeArrayContract(&p, 2) >= 1 && *(dword *) p == 84);
+	HugeArrayUnlock(p);
+	HADelete(700, 2);
+	CHECK(HASame(vm, ha));
+	/* as a chain: copied (its own handles), compared, freed */
+	hcopy = VMCopyVMChain(vm, VMCHAIN_MAKE_FROM_VM_BLOCK(ha), vm);
+	CHECK(VMCompareVMChains(vm, VMCHAIN_MAKE_FROM_VM_BLOCK(ha), vm,
+				hcopy));
+	CHECK(HASame(vm, VMCHAIN_GET_VM_BLOCK(hcopy)));
+	HugeArrayReplace(vm, VMCHAIN_GET_VM_BLOCK(hcopy), 1, 5, buf);
+	CHECK(!VMCompareVMChains(vm, VMCHAIN_MAKE_FROM_VM_BLOCK(ha), vm,
+				 hcopy));
+	HASame(vm, ha);
+	/* variable size elements */
+	hv = HugeArrayCreate(vm, 0, sizeof(HugeArrayDirectory) + 8);
+	HugeArrayLockDir(vm, hv, &p);
+	memcpy((byte *) p + sizeof(HugeArrayDirectory), "USERDATA", 8);
+	HugeArrayDirty(p);
+	HugeArrayUnlockDir(p);
+	for (i = 0; i < 200; i++) {
+	    memset(vbuf, (int) i, sizeof(vbuf));
+	    HugeArrayAppend(vm, hv, (word) (i + 1), vbuf);
+	}
+	CHECK(HugeArrayGetCount(vm, hv) == 200);
+	r = HugeArrayLock(vm, hv, 150, &p, &size);
+	CHECK(HAL_COUNT(r) && size == 151 && ((byte *) p)[150] == 150);
+	HugeArrayUnlock(p);
+	memset(vbuf, 0xee, sizeof(vbuf));
+	HugeArrayInsert(vm, hv, 300, 100, vbuf);
+	HugeArrayResize(vm, hv, 101, 10);	/* was element 100: 101 */
+	HugeArrayReplace(vm, hv, 3, 0, "abc");
+	r = HugeArrayLock(vm, hv, 100, &p, &size);
+	CHECK(size == 300 && ((byte *) p)[299] == 0xee);
+	HugeArrayUnlock(p);
+	r = HugeArrayLock(vm, hv, 101, &p, &size);
+	CHECK(size == 10 && ((byte *) p)[9] == 100);
+	HugeArrayUnlock(p);
+	r = HugeArrayLock(vm, hv, 0, &p, &size);
+	CHECK(size == 3 && !memcmp(p, "abc", 3));
+	HugeArrayUnlock(p);
+	HugeArrayResize(vm, hv, 2, 7000);	/* a block of its own */
+	r = HugeArrayLock(vm, hv, 2, &p, &size);
+	CHECK(size == 7000 && ((byte *) p)[2] == 2 && ((byte *) p)[6999] == 0 &&
+	      HAL_COUNT(r) == 1 && HAL_PREV(r) == 1);
+	HugeArrayUnlock(p);
+	sum = 0;
+	CHECK(!HugeArrayEnum(vm, hv, SumCb, 1, 4, &sum) && sum == 1 + 2 + 3 +
+	      4);
+	sum = 0;
+	CHECK(HugeArrayEnum(vm, hv, StopCb, 0, 0xffffffffUL, &sum) &&
+	      sum == 5);
+	HugeArrayCompressBlocks(vm, hv);
+	CHECK(VMInfo(vm, ha, &hi) && hi.userId == SVMID_HA_DIR_ID);
+	CHECK(VMClose(vm, FALSE) == 0);
+
+	/* read again (the DOS16 layout) */
+	vm = VMOpen("HA.VM", 0, VMO_OPEN, 0);
+	CHECK(vm != 0 && HASame(vm, ha));
+	CHECK(HugeArrayGetCount(vm, hv) == 201);
+	r = HugeArrayLock(vm, hv, 199, &p, &size);
+	CHECK(size == 199 && ((byte *) p)[0] == 198);
+	HugeArrayUnlock(p);
+	HugeArrayLockDir(vm, hv, &p);
+	CHECK(!memcmp((byte *) p + sizeof(HugeArrayDirectory), "USERDATA", 8));
+	HugeArrayUnlockDir(p);
+	HugeArrayAppend(vm, ha, 1, buf + 4);
+	HAInsert(nvalues, 1, 28);
+	CHECK(HASame(vm, ha));
+	VMFreeVMChain(vm, hcopy);
+	CHECK(VMClose(vm, FALSE) == 0);
+	vm = VMOpen("HA.VM", 0, VMO_OPEN, 0);
+	CHECK(HASame(vm, ha));
+	HugeArrayDestroy(vm, hv);
+	blocks = 0;
+	CHECK(VMInfoVMChain(vm, VMCHAIN_MAKE_FROM_VM_BLOCK(ha), &size32,
+			    &blocks, &db) && blocks > 3);
+	CHECK(VMClose(vm, FALSE) == 0);
+    }
+
     CHECK(HandleCountUsed() == base);
 
     /* opened again: everything is back */

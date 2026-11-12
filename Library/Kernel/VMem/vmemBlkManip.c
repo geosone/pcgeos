@@ -304,7 +304,9 @@ word VMReadBlock(KVMFile *f, VMBlockHandle h)
 	MemFree(mh);
 	mh = lm;
 	if (mh) {
-	    LMemBlockHeader *lh = MemLock(mh);
+	    LMemBlockHeader *lh;
+	    VMHugeArrayFromDOS16(VHGet16(f, h + VMBH_UID), mh);
+	    lh = MemLock(mh);
 	    lh->LMBH_flags |= LMF_IS_VM;
 	    if (lh->LMBH_lmemType == LMEM_TYPE_OBJ_BLOCK && f->VF_execThread)
 		MemModifyOtherInfo(mh, f->VF_execThread);
@@ -375,6 +377,7 @@ word VMWriteBlock(KVMFile *f, VMBlockHandle h)
 	    return ERROR_INSUFFICIENT_MEMORY;
 	}
 	size = LMemToDOS16(mh, img);
+	VMHugeArrayToDOS16(VHGet16(f, h + VMBH_UID), img);
 	flags |= VMBF_LMEM;
     }
     VHSet8(f, h + VMBH_FLAGS, flags);
