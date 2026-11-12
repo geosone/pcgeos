@@ -643,6 +643,19 @@ int main(int argc, char **argv)
 	r.DR_dx = 70;
 	DriverCall(dis, DR_VID_PUTLINE, &r);
 	CHECK(Pixel(103, 70) == WHITE && Pixel(104, 70) == BLUE);
+	r.DR_ax = 103;				/* right to left, bottom up: */
+	r.DR_bx = 72;				/* still from the left end */
+	r.DR_cx = 100;
+	r.DR_dx = 72;
+	DriverCall(dis, DR_VID_PUTLINE, &r);
+	CHECK(Pixel(100, 72) == RED && Pixel(103, 72) == WHITE);
+	r.DR_ax = 108;
+	r.DR_bx = 75;
+	r.DR_cx = 108;
+	r.DR_dx = 72;
+	DriverCall(dis, DR_VID_PUTLINE, &r);
+	CHECK(Pixel(108, 72) == RED && Pixel(108, 73) == 0x00ff00 &&
+	      Pixel(108, 75) == WHITE);
     }
 
     /* the XOR region: a 10x10 square whose right edge (PARAM_2)

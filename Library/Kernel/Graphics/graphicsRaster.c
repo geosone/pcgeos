@@ -26,7 +26,11 @@
  * position into account.  A negative factor mirrors: to the left of
  * the position in x, upwards from it in y.
  *
- * Not yet: rotation (nothing is drawn), LZG compaction,
+ * Rotated, each scaled scan line goes along a line parallel to the
+ * rotated top edge (DR_VID_PUTLINE), the lines stepping down the left
+ * edge, as RotateBitmap does.
+ *
+ * Not yet: LZG compaction,
  * format conversion for devices of fewer colors than the bitmap, huge
  * bitmaps, graphics strings.
  */
@@ -370,6 +374,43 @@ static void MirrorBits(byte *p, word w, byte format)
     }
 }
 
+/* BuildMonoMasks and the others: the source pixel of each of the fw
+ * pixels of a scaled line */
+static word *XSteps(const Bitmap *bm, word fw, dword xstep)
+{
+    word *xs = malloc(fw * sizeof(word)), i;
+    dword acc = 0;
+
+    if (!xs)
+	return NULL;
+    xs[0] = 0;
+    for (i = 0; i + 1 < fw; i++) {
+	acc += xstep;
+	xs[i + 1] = (acc >> 16) < bm->B_width ? (word) (acc >> 16) : xs[i];
+    }
+    return xs;
+}
+
+/* ScaleOneScan (and MirrorBitmapBits): a source scan line to fw pixels,
+ * the mask first if there is one */
+static void ScaleLine(const Bitmap *bm, const byte *s, byte *d,
+		      const word *xs, word fw, Boolean mirror)
+{
+    byte format = (byte) (bm->B_type & BMT_FORMAT);
+    word srcMask = 0, dstMask = 0;
+
+    if (bm->B_type & BMT_MASK) {
+	srcMask = (word) ((bm->B_width + 7) >> 3);
+	dstMask = (word) ((fw + 7) >> 3);
+	ScaleBits(s, d, xs, fw, BMF_MONO);
+	if (mirror)
+	    MirrorBits(d, fw, BMF_MONO);
+    }
+    ScaleBits(s + srcMask, d + dstMask, xs, fw, format);
+    if (mirror)
+	MirrorBits(d + dstMask, fw, format);
+}
+
 /* InitBitmapScale: the factor of one direction (the matrix and the
  * bitmap's resolution), the scaled size and the step in the source */
 static void ScaleFactor(WWFixedAsDWord m, word res, Boolean complexBM,
@@ -402,10 +443,8 @@ static void DrawScaled(BMFrame *f)
     const Rectangle *mask = &f->d->GD_w->W_maskRect;
     Boolean complexBM = (Boolean) ((bm->B_type & BMT_COMPLEX) != 0);
     byte format = (byte) (bm->B_type & BMT_FORMAT);
-    word srcMask = (bm->B_type & BMT_MASK) ? (word) ((bm->B_width + 7) >> 3)
-					    : 0;
     Boolean negX, negY;
-    word fw, fh, line, dstMask, i, j, done;
+    word fw, fh, line, j, done;
     dword xstep, ystep, acc;
     word *xs;
     byte *out;
@@ -420,8 +459,7 @@ static void DrawScaled(BMFrame *f)
     if (!fw || !fh || format > BMF_24BIT)
 	return;
     line = GrBitmapLineSize(fw, bm->B_type);
-    dstMask = srcMask ? (word) ((fw + 7) >> 3) : 0;
-    xs = malloc(fw * sizeof(word));
+    xs = XSteps(bm, fw, xstep);
     out = malloc((dword) line * SCALE_LINES);
     memset(&src, 0, sizeof(src));
     src.f = f;
@@ -431,12 +469,6 @@ static void DrawScaled(BMFrame *f)
 	free(out);
 	free(src.buf);
 	return;
-    }
-    for (i = 0, acc = 0, xs[0] = 0; i + 1 < fw; i++) {	/* BuildMasks */
-	word si;
-	acc += xstep;
-	si = (word) (acc >> 16);
-	xs[i + 1] = (acc >> 16) < bm->B_width ? si : xs[i];
     }
     if (negX)					/* InitBitmapMasksJumps */
 	f->x = (sword) (f->x - fw);
@@ -460,14 +492,7 @@ static void DrawScaled(BMFrame *f)
 		break;
 	    }
 	    d = out + (dword) (negY ? SCALE_LINES - 1 - n : n) * line;
-	    if (srcMask) {
-		ScaleBits(s, d, xs, fw, BMF_MONO);
-		if (negX)
-		    MirrorBits(d, fw, BMF_MONO);
-	    }
-	    ScaleBits(s + srcMask, d + dstMask, xs, fw, format);
-	    if (negX)
-		MirrorBits(d + dstMask, fw, format);
+	    ScaleLine(bm, s, d, xs, fw, negX);
 	    acc += ystep;
 	    n++;
 	    j++;
@@ -528,6 +553,154 @@ static Boolean ComplexReject(BMFrame *f, sword x, sword y)
 		      b < m->R_top);
 }
 
+/* CalcBitmapDimensions: the size at 72 dpi, WWFixed */
+static WWFixedAsDWord Dimension(word size, word res, Boolean complexBM)
+{
+    if (!complexBM || res == DEF_BITMAP_RES)
+	return (WWFixedAsDWord) size << 16;
+    return GrMulWWFixed(GrUDivWWFixed((WWFixedAsDWord) DEF_BITMAP_RES << 16,
+				      (WWFixedAsDWord) res << 16),
+			(WWFixedAsDWord) size << 16);
+}
+
+static Boolean RotCorner(BMFrame *f, int64_t x, int64_t y, sword *dx,
+			 sword *dy)
+{
+    GrMatTransDWF(&f->d->GD_w->W_curTMatrix, &x, &y);
+    return (Boolean) (GrRoundToWord(x, dx) && GrRoundToWord(y, dy));
+}
+
+static void PutLine(BMFrame *f, sword ax, sword bx, sword cx, sword dx)
+{
+    DriverRegs r;
+
+    memset(&r, 0, sizeof(r));
+    r.DR_ax = (word) ax;
+    r.DR_bx = (word) bx;
+    r.DR_cx = (word) cx;
+    r.DR_dx = (word) dx;
+    r.DR_bpPtr = &f->args;
+    GrCallDriver(f->d, DR_VID_PUTLINE, &r, AREA);
+}
+
+static sword Abs(sword v)
+{
+    return (sword) (v < 0 ? -v : v);
+}
+
+/* RotateBitmap, CalcRotatedScaleFactor, BumpCoords: the bitmap scaled
+ * to the length of its rotated top edge and the number of steps down
+ * its left edge, each scan line put along a line parallel to the top
+ * edge (DR_VID_PUTLINE), the lines stepping down the left edge.  Where
+ * the left edge steps sideways too, the scan line is put once more
+ * before the sideways step, so that no holes are left (this happens
+ * after the last line too, as in the asm). */
+static void DrawRotated(BMFrame *f, sword x, sword y)
+{
+    const Bitmap *bm = f->bm;
+    Boolean complexBM = (Boolean) ((bm->B_type & BMT_COMPLEX) != 0);
+    WWFixedAsDWord w = Dimension(bm->B_width,
+				 complexBM ? Complex(bm)->CB_xres : 0,
+				 complexBM);
+    WWFixedAsDWord h = Dimension(bm->B_height,
+				 complexBM ? Complex(bm)->CB_yres : 0,
+				 complexBM);
+    int64_t ox = (int64_t) x << 16, oy = (int64_t) y << 16;
+    sword ulx, uly, urx, ury, llx, lly, xbump = 0, ybump = 0;
+    sword ax, bx, cx, dx;
+    sword adx, ady;
+    Boolean flip;
+    word fw, fh, j, line;
+    sdword slope, cur;
+    dword ystep, acc;
+    word *xs;
+    byte *out;
+    BMSource src;
+
+    if (!RotCorner(f, ox + (sdword) w, oy, &urx, &ury) ||
+	!RotCorner(f, ox, oy + (sdword) h, &llx, &lly) ||
+	!RotCorner(f, ox, oy, &ulx, &uly))
+	return;
+    adx = Abs((sword) (ulx - urx));
+    ady = Abs((sword) (uly - ury));
+    flip = (Boolean) (adx >= ady ? ulx > urx : uly >= ury);
+    fw = (word) ((adx > ady ? adx : ady) + 1);
+    adx = Abs((sword) (ulx - llx));
+    ady = Abs((sword) (uly - lly));
+    if (adx < ady) {				/* down the left edge in y */
+	fh = (word) ady;
+	ybump = (sword) (uly < lly ? 1 : -1);
+	cur = (sdword) ulx << 16;
+	slope = (sdword) GrSDivWWFixed((WWFixedAsDWord) ((sdword) (llx - ulx)
+							 << 16),
+				       (WWFixedAsDWord) ((sdword) fh << 16));
+    } else {					/* in x */
+	fh = (word) adx;
+	xbump = (sword) (ulx < llx ? 1 : -1);
+	cur = (sdword) uly << 16;
+	slope = fh ? (sdword) GrSDivWWFixed(
+	    (WWFixedAsDWord) ((sdword) (lly - uly) << 16),
+	    (WWFixedAsDWord) ((sdword) fh << 16)) : 0;
+    }
+    if (!fh || (bm->B_type & BMT_FORMAT) > BMF_24BIT)
+	return;
+    ystep = GrUDivWWFixed((WWFixedAsDWord) bm->B_height << 16,
+			  (WWFixedAsDWord) fh << 16);
+    line = GrBitmapLineSize(fw, bm->B_type);
+    xs = XSteps(bm, fw, GrUDivWWFixed((WWFixedAsDWord) bm->B_width << 16,
+				      (WWFixedAsDWord) fw << 16));
+    out = malloc(line);
+    memset(&src, 0, sizeof(src));
+    src.f = f;
+    src.line = GrBitmapLineSize(bm->B_width, bm->B_type);
+    if (!xs || !out || !SourceSlice(&src, bm)) {
+	free(xs);
+	free(out);
+	free(src.buf);
+	return;
+    }
+    f->args.PBA_bm.B_width = fw;
+    f->args.PBA_bm.B_height = 1;
+    f->args.PBA_bm.B_compact = BMC_UNCOMPACTED;
+    f->args.PBA_size = line;
+    f->args.PBA_data = out;
+    ax = ulx;
+    bx = uly;
+    cx = urx;
+    dx = ury;
+    for (j = 0, acc = 0; j < fh; j++, acc += ystep) {
+	const byte *s;
+	sword r, step;
+
+	if ((acc >> 16) >= bm->B_height ||
+	    !(s = SourceScan(&src, (word) (acc >> 16))))
+	    break;
+	ScaleLine(bm, s, out, xs, fw, flip);
+	PutLine(f, ax, bx, cx, dx);
+	ax = (sword) (ax + xbump);		/* BumpCoords */
+	cx = (sword) (cx + xbump);
+	bx = (sword) (bx + ybump);
+	dx = (sword) (dx + ybump);
+	cur += slope;
+	r = (sword) ((cur + ((cur & 0xffff) == 0x8000 && cur < 0 ? 0 :
+			     0x8000)) >> 16);
+	step = (sword) (r - (ybump ? ax : bx));
+	if (step) {
+	    PutLine(f, ax, bx, cx, dx);
+	    if (ybump) {
+		ax = (sword) (ax + step);
+		cx = (sword) (cx + step);
+	    } else {
+		bx = (sword) (bx + step);
+		dx = (sword) (dx + step);
+	    }
+	}
+    }
+    free(xs);
+    free(out);
+    free(src.buf);
+}
+
 static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
 		       Bitmap *(*cb)(Bitmap *), Boolean fill)
 {
@@ -535,7 +708,7 @@ static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
     DriverRegs r;
     const CBitmap *c = Complex(bm);
     Boolean complexBM = (Boolean) ((bm->B_type & BMT_COMPLEX) != 0);
-    Boolean scaled;
+    Boolean scaled, rotated;
 
     if (GrTrivialReject(d))
 	return;
@@ -544,11 +717,12 @@ static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
     f.bm = bm;
     f.cb = cb;
     f.fill = fill;
-    scaled = (Boolean) ((d->GD_w->W_curTMatrix.TM_flags & TM_SCALED) ||
+    rotated = (Boolean) ((d->GD_w->W_curTMatrix.TM_flags & TM_ROTATED) !=
+			 0);
+    scaled = (Boolean) (rotated ||
+			(d->GD_w->W_curTMatrix.TM_flags & TM_SCALED) ||
 			(complexBM && (c->CB_xres != DEF_BITMAP_RES ||
 				       c->CB_yres != DEF_BITMAP_RES)));
-    if (d->GD_w->W_curTMatrix.TM_flags & TM_ROTATED)
-	return;					/* rotated: not yet */
     if ((scaled ? ComplexReject(&f, x, y) : Reject(&f, x, y)) ||
 	!SetDrawPoint(&f, x, y))
 	return;
@@ -576,6 +750,10 @@ static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
 
     if (bm->B_compact != BMC_UNCOMPACTED && bm->B_compact != BMC_PACKBITS)
 	return;					/* LZG: not yet */
+    if (rotated) {
+	DrawRotated(&f, x, y);
+	return;
+    }
     if (scaled) {
 	DrawScaled(&f);
 	return;

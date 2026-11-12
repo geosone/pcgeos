@@ -3,16 +3,20 @@
  * VidPutLine).
  *
  * The first scan line of a bitmap (ss:bp, PutBitsArgs) along the line
- * from ax, bx to cx, dx: pixel k of the line (VidLineRuns) is pixel k
- * of the scan line, as far as it reaches; clipped by the window's mask
- * pixel by pixel.  The asm reversed the scan line when x1 > x2 and drew
- * from left to right; this steps from point 1, which is the same.
+ * from ax, bx to cx, dx, as far as it reaches; clipped by the window's
+ * mask pixel by pixel.  As in the asm (PutLineSetup, PutLineSegY), the
+ * scan line starts at the left end of a mostly horizontal line and at
+ * the top end of a mostly vertical one, whichever point that is: pixel
+ * x - left, or y - top, of the scan line goes to x, y.  The kernel
+ * mirrors the scan line when it wants it the other way round.
  */
 #include "vidcom.h"
 
 typedef struct {
     Window	*w;
     VidPutState	put;
+    sword	left, top;		/* d_x1, putStart */
+    Boolean	horiz;			/* |dx| >= |dy| */
 } PutLineCtx;
 
 typedef struct {
@@ -37,8 +41,10 @@ static void PutRun(sword x1, sword y1, sword x2, sword y2, word k,
     sword sy = (sword) (y2 > y1 ? 1 : y2 < y1 ? -1 : 0);
     PxCtx p;
 
+    (void) k;
     p.c = c;
-    for (p.bx = k;; p.bx++) {
+    for (;;) {
+	p.bx = (word) (c->horiz ? x1 - c->left : y1 - c->top);
 	if (p.bx < c->put.VPS_pba->PBA_bm.B_width)
 	    VidForSpans(c->w, x1, y1, x1, y1, FALSE, PxPut, &p);
 	if (x1 == x2 && y1 == y2)
@@ -59,6 +65,10 @@ void VidPutLine(DriverRegs *r)
     if (!pba || !c.w || !pba->PBA_data || !pba->PBA_bm.B_width)
 	return;
     VidPutSetup(r->DR_dsSi, c.w, pba, &c.put);
+    c.left = x1 < x2 ? x1 : x2;
+    c.top = y1 < y2 ? y1 : y2;
+    c.horiz = (Boolean) ((x2 > x1 ? x2 - x1 : x1 - x2) >=
+			 (y2 > y1 ? y2 - y1 : y1 - y2));
     VidDevCondHidePtr(x1 < x2 ? x1 : x2, y1 < y2 ? y1 : y2,
 		      x1 < x2 ? x2 : x1, y1 < y2 ? y2 : y1);
     VidLineRuns(x1, y1, x2, y2, FALSE, PutRun, &c);

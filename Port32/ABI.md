@@ -2414,8 +2414,22 @@ than a pixel is a six-point polygon.
   upwards from it in y. The asm hands the driver a negative height for
   the latter; the C kernel flips the lines itself, so drivers only see
   positive heights.
-- Not yet: rotation (nothing is drawn), LZG, format conversion for
-  devices with fewer colors, huge bitmaps.
+- Rotated, the bitmap is scaled to the length of its rotated top edge
+  and to the number of steps down its left edge. Each scan line goes
+  along a line parallel to the top edge (`DR_VID_PUTLINE`), and the
+  lines step down the left edge. Where the left edge also steps
+  sideways, the line is put once more first, so that no holes remain.
+  This also happens after the last line, as in the asm.
+  - The asm's `BumpCoords` compared the step with the old position
+    (`cmp di, ax`) instead of testing it. The C kernel tests the
+    step.
+- `DR_VID_PUTLINE` starts the scan line at the left end of a mostly
+  horizontal line, and at the top end of a mostly vertical one, as
+  the asm drivers do (`PutLineSetup`). The kernel mirrors the line
+  when it needs it the other way round. The C driver had started at
+  point 1; it is fixed.
+- Not yet: LZG, format conversion for devices with fewer colors, huge
+  bitmaps.
 
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
@@ -2442,7 +2456,8 @@ the pixels back. It checks:
   `GrTestRectInMask`, `GrInvalRect` (rotated too), `GrInvalRectDWord`;
 - bitmaps: monochrome drawn and filled, 24 bits, PackBits, a complex
   one with a palette in two slices; scaled twice, half, mirrored in x
-  and y, and at 144 dpi;
+  and y, at 144 dpi; rotated by 90 degrees, and by 45 degrees without
+  holes;
 - drawing during an update;
 - exposure after moving and closing windows.
 

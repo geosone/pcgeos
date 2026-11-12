@@ -23,7 +23,7 @@
  *     GrTestRectInMask, GrInvalRect (rotated too), GrInvalRectDWord;
  *   - bitmaps: monochrome drawn and filled, 24 bits, PackBits, a
  *     complex one with a palette in two slices; scaled twice, half,
- *     mirrored in x and y, and at 144 dpi;
+ *     mirrored in x and y, at 144 dpi, and rotated;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
@@ -607,6 +607,55 @@ int main(int argc, char **argv)
 	CHECK(Pixel(70, 96) == BLACK && Pixel(74, 96) == WHITE &&
 	      Pixel(71, 95) == WHITE && Pixel(85, 95) == BLACK &&
 	      Pixel(70, 94) == BLUE && Pixel(70, 97) == BLUE);
+
+	/* rotated by 90 degrees: x' = 50 + y, y' = 70 - x; the top edge
+	 * goes up from 70, 90 (17 pixels: 16 scaled to the 17 of the
+	 * line), the two scan lines step right */
+	GrApplyTranslation(g, 50L << 16, 70L << 16);
+	GrApplyRotation(g, 90L << 16);
+	GrDrawBitmap(g, 0, 0, &mono.b, NULL);
+	GrSetNullTransform(g);
+	CHECK(Pixel(70, 90) == BLACK && Pixel(70, 86) == BLACK &&
+	      Pixel(70, 85) == WHITE && Pixel(70, 78) == WHITE &&
+	      Pixel(70, 77) == BLACK && Pixel(70, 74) == BLACK &&
+	      Pixel(70, 73) == BLUE && Pixel(70, 91) == BLUE &&
+	      Pixel(71, 89) == BLACK && Pixel(71, 88) == WHITE &&
+	      Pixel(71, 75) == WHITE && Pixel(71, 74) == BLACK &&
+	      Pixel(72, 85) == BLUE);
+
+	{				/* rotated by 45 degrees */
+	    static union { Bitmap b; byte raw[32]; } sq;
+	    sq.b.B_width = 8; sq.b.B_height = 8;
+	    sq.b.B_compact = BMC_UNCOMPACTED; sq.b.B_type = BMF_MONO;
+	    memset(sq.raw + 6, 0xff, 8);
+	    SetCol(g, BLUE);
+	    GrFillRect(g, 0, 0, 30, 30);
+	    GrApplyTranslation(g, 15L << 16, 5L << 16);
+	    GrApplyRotation(g, -(45L << 16));	/* clockwise */
+	    GrDrawBitmap(g, 0, 0, &sq.b, NULL);
+	    GrSetNullTransform(g);
+	    {				/* a diamond without holes */
+		int xx, yy, holes = 0;
+		for (yy = 26; yy <= 35; yy++) {
+		    int l = 99, r = -1;
+		    for (xx = 20; xx < 50; xx++)
+			if (Pixel(xx, yy) == BLACK) {
+			    if (l == 99)
+				l = xx;
+			    r = xx;
+			}
+		    for (xx = l; xx <= r; xx++)
+			holes += Pixel(xx, yy) != BLACK;
+		}
+		CHECK(holes == 0);
+	    }
+	    CHECK(Pixel(34, 25) == BLACK && Pixel(35, 25) == BLACK &&
+		  Pixel(33, 25) == BLUE && Pixel(34, 24) == BLUE &&
+		  Pixel(29, 30) == BLACK && Pixel(40, 30) == BLACK &&
+		  Pixel(28, 30) == BLUE && Pixel(41, 30) == BLUE &&
+		  Pixel(35, 36) == BLACK && Pixel(36, 36) == BLACK &&
+		  Pixel(35, 37) == BLUE);
+	}
 
 	/* a complex one at 144 dpi: half the size */
 	pal.c.CB_xres = pal.c.CB_yres = 144;
