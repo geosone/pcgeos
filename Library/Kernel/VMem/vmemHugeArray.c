@@ -36,6 +36,7 @@
 #include <lmem.h>
 #include <chunkarr.h>
 #include <hugearr.h>
+#include <stddef.h>
 #include <string.h>
 
 typedef struct {
@@ -57,6 +58,11 @@ typedef struct {
 #define DOS16_LMBH_SIZE		16
 #define LMBH_DELTA		((word) (sizeof(LMemBlockHeader) - \
 					 DOS16_LMBH_SIZE))
+/* the padding at the end of HugeArrayDirectory: not in the file, so
+ * that the user's part of the header is where DOS16 has it */
+#define HAD_END			(offsetof(HugeArrayDirectory, HAD_size) + 2)
+#define HAD_GAP			((word) (sizeof(HugeArrayDirectory) - HAD_END))
+#define HAD_DELTA		((word) (LMBH_DELTA + HAD_GAP))
 
 typedef struct {
     VMFileHandle	file;
@@ -157,7 +163,7 @@ static MemHandle LockBlock(const HADir *d, word i)
 /* the block changed: its size to the directory, unlocked */
 static void DoneBlock(const HADir *d, word i, MemHandle mh)
 {
-    Ent(d, i)->HADE_size = LMemDOS16Size(mh);
+    Ent(d, i)->HADE_size = LMemDOS16Size(mh, 0);
     VMDirty(mh);
     VMUnlock(mh);
 }
@@ -213,7 +219,7 @@ static MemHandle NewBlock(const HADir *d, word i)
     h->HAB_dir = d->self;
     SetNext(d, prev, b);
     SetPrev(d, next, b);
-    Ent(d, i)->HADE_size = LMemDOS16Size(mh);
+    Ent(d, i)->HADE_size = LMemDOS16Size(mh, 0);
     VMDirty(mh);
     return mh;
 }
@@ -779,6 +785,12 @@ static void Put16(byte *p, word v)
     p[1] = (byte) (v >> 8);
 }
 
+void VMHugeArrayGap(word uid, word *gapAt, word *gapLen)
+{
+    *gapAt = uid == SVMID_HA_DIR_ID ? (word) HAD_END : 0;
+    *gapLen = uid == SVMID_HA_DIR_ID ? HAD_GAP : 0;
+}
+
 /* the DOS16 image of an LMem block (LMemToDOS16): the chain link in
  * LMBH_handle, as UnlockHABlock left it; HAD_dir as a file chunk
  * handle */
@@ -787,7 +799,7 @@ void VMHugeArrayToDOS16(word uid, byte *img)
     if (uid == SVMID_HA_DIR_ID) {
 	Put16(img, Get16(img + DOS16_LMBH_SIZE));
 	Put16(img + DOS16_LMBH_SIZE + 2,
-	      (word) (Get16(img + DOS16_LMBH_SIZE + 2) - LMBH_DELTA));
+	      (word) (Get16(img + DOS16_LMBH_SIZE + 2) - HAD_DELTA));
     } else if (uid == SVMID_HA_BLOCK_ID)
 	Put16(img, Get16(img + DOS16_LMBH_SIZE));
 }
@@ -796,7 +808,7 @@ void VMHugeArrayFromDOS16(word uid, MemHandle mh)
 {
     if (uid == SVMID_HA_DIR_ID) {
 	HugeArrayDirectory *h = MemLock(mh);
-	h->HAD_dir = (ChunkHandle) (h->HAD_dir + LMBH_DELTA);
+	h->HAD_dir = (ChunkHandle) (h->HAD_dir + HAD_DELTA);
 	MemUnlock(mh);
     }
 }

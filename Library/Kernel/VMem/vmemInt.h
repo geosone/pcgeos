@@ -109,6 +109,7 @@ KVMFile *VMFileOf(VMFileHandle vm);
 /* vmemHugeArray.c: huge array blocks in chains and files */
 word VMHugeArrayLink(word uid, const void *p, Boolean *isHA);
 Boolean VMHugeArraySetLink(word uid, void *p, word link);
+void VMHugeArrayGap(word uid, word *gapAt, word *gapLen);
 void VMHugeArrayToDOS16(word uid, byte *img);
 void VMHugeArrayFromDOS16(word uid, MemHandle mh);
 void VMHugeArrayFixup(VMFileHandle file, VMBlockHandle dir);

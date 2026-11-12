@@ -297,7 +297,10 @@ word VMReadBlock(KVMFile *f, VMBlockHandle h)
 	e = ThreadGetError() ? ThreadGetError() : ERROR_SHORT_READ_WRITE;
     if (!e && lmem) {
 	/* the DOS16 layout of the file to the Port32 one */
-	MemHandle lm = LMemFromDOS16(p, size, f->VF_handle);
+	word gapAt, gapLen;
+	MemHandle lm;
+	VMHugeArrayGap(VHGet16(f, h + VMBH_UID), &gapAt, &gapLen);
+	lm = LMemFromDOS16(p, size, f->VF_handle, gapAt, gapLen);
 	if (!lm)
 	    e = ERROR_FILE_FORMAT_MISMATCH;
 	MemUnlock(mh);
@@ -369,14 +372,16 @@ word VMWriteBlock(KVMFile *f, VMBlockHandle h)
     /* an LMem block goes to the file in the DOS16 layout (lmemCode.c) */
     if ((MemGetInfo(mh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) &&
 	!(((LMemBlockHeader *) p)->LMBH_flags & LMF_NO_HANDLES)) {
-	size = LMemDOS16Size(mh);
+	word gapAt, gapLen;
+	VMHugeArrayGap(VHGet16(f, h + VMBH_UID), &gapAt, &gapLen);
+	size = LMemDOS16Size(mh, gapLen);
 	img = size ? malloc(size) : NULL;
 	if (!img) {
 	    MemUnlock(mh);
 	    CallReloc(f, h, mh, VMRT_RELOCATE_AFTER_WRITE);
 	    return ERROR_INSUFFICIENT_MEMORY;
 	}
-	size = LMemToDOS16(mh, img);
+	size = LMemToDOS16(mh, img, gapAt, gapLen);
 	VMHugeArrayToDOS16(VHGet16(f, h + VMBH_UID), img);
 	flags |= VMBF_LMEM;
     }

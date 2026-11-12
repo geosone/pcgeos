@@ -1517,7 +1517,12 @@ of type `GFT_VM` (section 13c): the VM data follow the 256-byte
   size `HAD_size`, 0: variable). In the file `LMBH_handle` of these
   blocks is the chain link (`HAD_data`, `HAB_next`), as the asm left
   it on unlocking, and `HAD_dir` a file chunk handle (4 lower); the
-  write and read of the block convert. The chain routines
+  write and read of the block convert. `HugeArrayDirectory` is 32
+  bytes in C (2 bytes padding after `HAD_size`), 26 in DOS16: the
+  padding is a gap of the header that is not written
+  (`LMemToDOS16`/`LMemFromDOS16` take it), so the user's part of the
+  header (`EB_bm` of a bitmap) is at 26 in the file as in DOS16; the
+  chunk handles of directory blocks are 6 lower in the file. The chain routines
   (`vmemChain.c`) take the link from `HAD_data`/`HAB_next`; a copied
   array gets its own handles (`FixupHugeArrayChain`), arrays are
   compared element by element. Blocks: an insertion that keeps a

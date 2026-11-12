@@ -658,6 +658,9 @@ MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
  *
  * The chunk handles of the file are 4 lower than in memory (the Port32
  * header is 20 bytes): chunk handles inside chunk data are not changed.
+ * A block may have a gap in its header: gapLen bytes at gapAt in memory
+ * that are not in the file (the padding a larger header gets in C, as
+ * after HugeArrayDirectory); its chunk handles are 4 + gapLen lower.
  * ------------------------------------------------------------------- */
 
 #define DOS16_LMBH_SIZE	16u
@@ -675,11 +678,12 @@ static word Get16(const byte *p)
     return (word) (p[0] | (p[1] << 8));
 }
 
-word LMemDOS16Size(MemHandle mh)
+word LMemDOS16Size(MemHandle mh, word gapLen)
 {
     const byte *b = MemDeref(mh);
     const LMemBlockHeader *h = HDR(b);
-    dword size = h->LMBH_offset - LMBH_DELTA + 2u * h->LMBH_nHandles, i;
+    dword size = h->LMBH_offset - LMBH_DELTA - gapLen +
+		 2u * h->LMBH_nHandles, i;
 
     for (i = 0; i < h->LMBH_nHandles; i++) {
 	word e = W(b, h->LMBH_offset + 2 * i);
@@ -689,15 +693,33 @@ word LMemDOS16Size(MemHandle mh)
     return size > LMEM_MAX_BLOCK ? 0 : (word) size;
 }
 
-word LMemToDOS16(MemHandle mh, byte *out)
+/* the header after the LMemBlockHeader: memory to file (toFile) or
+ * back, without the gap */
+static void CopyHeader(byte *mem, byte *file, word off, word gapAt,
+		       word gapLen, Boolean toFile)
 {
-    const byte *b = MemDeref(mh);
+    word a = gapLen ? (word) (gapAt - sizeof(LMemBlockHeader)) :
+		      (word) (off - DOS16_LMBH_SIZE);
+    byte *m = mem + sizeof(LMemBlockHeader), *f = file + DOS16_LMBH_SIZE;
+
+    if (toFile) {
+	memcpy(f, m, a);
+	memcpy(f + a, m + a + gapLen, off - DOS16_LMBH_SIZE - a);
+    } else {
+	memcpy(m, f, a);
+	memcpy(m + a + gapLen, f + a, off - DOS16_LMBH_SIZE - a);
+    }
+}
+
+word LMemToDOS16(MemHandle mh, byte *out, word gapAt, word gapLen)
+{
+    byte *b = MemDeref(mh);
     const LMemBlockHeader *h = HDR(b);
-    word off = (word) (h->LMBH_offset - LMBH_DELTA), n = h->LMBH_nHandles;
+    word off = (word) (h->LMBH_offset - LMBH_DELTA - gapLen),
+	 n = h->LMBH_nHandles;
     dword pos = off + 2u * n, i;
 
-    memcpy(out + DOS16_LMBH_SIZE, b + sizeof(LMemBlockHeader),
-	   off - DOS16_LMBH_SIZE);
+    CopyHeader(b, out, off, gapAt, gapLen, TRUE);
     for (i = 0; i < n; i++) {
 	word e = W(b, h->LMBH_offset + 2 * i), sz;
 	if (!e || e == LMEM_EMPTY) {
@@ -722,7 +744,8 @@ word LMemToDOS16(MemHandle mh, byte *out)
     return (word) pos;
 }
 
-MemHandle LMemFromDOS16(const byte *img, word size, Handle owner)
+MemHandle LMemFromDOS16(const byte *img, word size, Handle owner,
+			word gapAt, word gapLen)
 {
     word off, n, flags, i;
     dword memOff, start, total, tableEnd;
@@ -739,7 +762,9 @@ MemHandle LMemFromDOS16(const byte *img, word size, Handle owner)
     if (off < DOS16_LMBH_SIZE || (off & 1) || tableEnd > size ||
 	(flags & LMF_NO_HANDLES))
 	return 0;
-    memOff = off + LMBH_DELTA;
+    if (gapLen && off < gapAt - LMBH_DELTA)
+	return 0;
+    memOff = off + LMBH_DELTA + gapLen;
     start = ALIGN(memOff + 2u * n + 2) - 2;
     total = start + LMEM_ALIGN;		/* a free chunk at the end */
     for (i = 0; i < n; i++) {
@@ -761,8 +786,7 @@ MemHandle LMemFromDOS16(const byte *img, word size, Handle owner)
 	return 0;
     b = MemDeref(mh);
     h = HDR(b);
-    memcpy(b + sizeof(LMemBlockHeader), img + DOS16_LMBH_SIZE,
-	   off - DOS16_LMBH_SIZE);
+    CopyHeader(b, (byte *) img, off, gapAt, gapLen, FALSE);
     h->LMBH_handle = mh;
     h->LMBH_offset = (word) memOff;
     h->LMBH_flags = flags;

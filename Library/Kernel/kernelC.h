@@ -824,11 +824,13 @@ word ElementArrayAddElementSized(optr arr, void *element, word size,
 						     dword valueForCallback));
 /* LMem blocks in files in the DOS16 layout (VM files): the size of the
  * image (0: too large), the image, and a block owned by `owner' from an
- * image (0 if it is not a valid LMem block) */
+ * image (0 if it is not a valid LMem block); gapLen bytes at gapAt of
+ * the header are not in the file (0: none) */
 ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize);
-word LMemDOS16Size(MemHandle mh);
-word LMemToDOS16(MemHandle mh, byte *out);
-MemHandle LMemFromDOS16(const byte *img, word size, Handle owner);
+word LMemDOS16Size(MemHandle mh, word gapLen);
+word LMemToDOS16(MemHandle mh, byte *out, word gapAt, word gapLen);
+MemHandle LMemFromDOS16(const byte *img, word size, Handle owner,
+			word gapAt, word gapLen);
 MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
 				  HeapFlags hf, HeapAllocFlags haf);
 

@@ -184,6 +184,27 @@ static uint64_t SizeOf(const char *rel)
     return size;
 }
 
+/* the user's part of a huge array's header in the file right after
+ * the DOS16 HugeArrayDirectory (26 bytes): HAD_self and HAD_size (0)
+ * just before it */
+static Boolean HAHeaderAt26(const char *rel, VMBlockHandle self)
+{
+    static byte buf[65536];
+    FileHandle fh = FileOpen(rel, FILE_ACCESS_R | FILE_DENY_NONE);
+    word n, i;
+    Boolean ok = FALSE;
+
+    if (!fh)
+	return FALSE;
+    n = (word) FileRead(fh, buf, sizeof(buf) - 1, FALSE);
+    FileClose(fh, FALSE);
+    for (i = 4; i + 8 <= n; i++)
+	if (!memcmp(buf + i, "USERDATA", 8))
+	    ok = buf[i - 4] == (byte) self && buf[i - 3] == (byte) (self >> 8) &&
+		 !buf[i - 2] && !buf[i - 1];
+    return ok;
+}
+
 /* huge arrays: element i of the fixed array holds dword values[i] */
 static dword values[4000];
 static dword nvalues;
@@ -415,6 +436,7 @@ int main(int argc, char **argv)
 	CHECK(VMInfo(vm, ha, &hi) && hi.userId == SVMID_HA_DIR_ID);
 	CHECK(VMClose(vm, FALSE) == 0);
 
+	CHECK(HAHeaderAt26("HA.VM", hv));
 	/* read again (the DOS16 layout) */
 	vm = VMOpen("HA.VM", 0, VMO_OPEN, 0);
 	CHECK(vm != 0 && HASame(vm, ha));
