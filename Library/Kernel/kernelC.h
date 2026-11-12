@@ -364,6 +364,9 @@ extern dword kernelTimerEventsDropped;
 #define KMSG_META_QUIT				26
 #define KMSG_META_QUIT_ACK			27
 #define KMSG_META_FINISH_QUIT			52
+/* MetaWindowMessages the window system sends (winC.goh) */
+#define KMSG_META_EXPOSED			69
+#define KMSG_META_WIN_UPDATE_COMPLETE		71
 /* MetaClass variable data (metaC.goh) */
 #define KVD_TEMP_META_GCN			0	/* the first */
 #define KVD_TEMP_META_QUIT_LIST			4

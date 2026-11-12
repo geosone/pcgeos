@@ -185,8 +185,16 @@ extern void	/*XXX*/
 
 /***/
 
+#ifdef GEOS_PORT32
+/* Port32: data is 64 bits, for an optr (WIT_INPUT_OBJ, WIT_EXPOSURE_OBJ)
+ * and, as an integer, a pointer (WIT_PRIVATE_DATA: a WinPrivateData,
+ * WIT_STRATEGY); WIT_COLOR as before (Port32/ABI.md 13l) */
+extern void
+    _pascal WinSetInfo(WindowHandle win, WinInfoType type, optr data);
+#else
 extern void	/*XXX*/
     _pascal WinSetInfo(WindowHandle win, WinInfoType type, dword data);
+#endif
 
 
 /***/

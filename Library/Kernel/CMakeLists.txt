@@ -115,7 +115,12 @@ add_library(geos_kernel_objs OBJECT
   IM/imInit.c
   IM/imMonitors.c
   IM/imMisc.c
+  Win/winUtils.c
+  Win/winWindows.c
+  Win/winCreDest.c
   Win/winIndividual.c
+  Win/winState.c
+  Win/winTrans.c
   Graphics/graphicsRegion.c
   Graphics/graphicsTables.c
   Graphics/graphicsMath.c

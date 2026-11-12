@@ -2194,6 +2194,85 @@ and its flags, there and back in words, `WWFixed`, `DWFixed` and
 dwords, the pen, saved and default matrices, and a window's matrix and
 position.
 
+## 13l. Windows (`Library/Kernel/Win`, P6)
+
+The window system in C lies beside the asm: `winCreDest.c`,
+`winWindows.c`, `winIndividual.c`, `winState.c`, `winTrans.c`,
+`winUtils.c`, with `winInt.h` for the kernel.
+
+**Windows and their regions.**
+- A window is an LMem block of type `LMEM_TYPE_WINDOW` that starts
+  with `Window` (`CInclude/Internal/window.h`).
+- Its regions are chunks of the block, in screen coordinates, without
+  bounds words.
+- The asm's `WHOLE_REG` is not used. Where the asm made the invalid
+  region WHOLE, it is the visible region here.
+
+**The tree.**
+- The first child is in front.
+- A window goes behind every sibling with a smaller layer priority
+  value. Within its layer (`W_layerID`) it goes behind those with a
+  smaller window priority.
+- On equal values it goes in front, or behind with
+  `WPF_PLACE_BEHIND` (`WPF_PLACE_LAYER_BEHIND` for a new layer).
+
+**Validation.**
+- `W_univReg` is `W_winReg` in the parent's universe, without the
+  siblings in front of it.
+- `W_visReg` is the universe without the children's regions.
+- The asm recalculated only the windows within the change bounds. The
+  C code recalculates the whole tree of the changed window, which gives
+  the same regions.
+- What becomes visible is added to `W_invalReg`. It is washed out with
+  the background through the driver's `DR_VID_RECT` (not for
+  `WCF_TRANSPARENT`) and exposed with `MSG_META_EXPOSED` (69).
+- There is one exposure at a time (`WRF_EXPOSE_PENDING`), none while
+  the window is suspended, and none for `WCF_PLAIN`.
+- Moving or resizing exposes the whole branch, as in the asm (no
+  blit).
+
+**Updates and the drawing mask.**
+- `GrBeginUpdate` makes the invalid region the update region.
+- `GrEndUpdate` and `WinAckUpdate` end the update and send
+  `MSG_META_WIN_UPDATE_COMPLETE` (71) to the input object.
+- The mask for a GState (`WinValWinStruct`) is the visible region
+  without the invalid one, and for the update GState also within the
+  update region.
+
+**Locking.** The asm took the tree semaphore and P-locked each window.
+The C code has one recursive tree lock for all of it (`WinTreeP`,
+`WinTreeV`).
+
+**Not yet:**
+- save-under areas (the C drivers refuse them, so none ever exists);
+- pointer enter/leave notification (`winNotification.asm`);
+- `WinScroll`;
+- the GState's clip paths in the mask;
+- `WCF_MASKED`;
+- flushing the input and exposure objects' queues before a window is
+  freed. `WinClose` frees the window at once, so a queued
+  `MSG_META_EXPOSED` for a closed window must not be answered;
+- `WinForEach`, the geode window variables (`winGeode.asm`),
+  `WinRealizePalette`.
+
+**`WinSetInfo` in Port32** takes 64 bits (`optr`):
+- an optr for `WIT_INPUT_OBJ` and `WIT_EXPOSURE_OBJ`;
+- for `WIT_PRIVATE_DATA`, a pointer to the `WinPrivateData`, as an
+  integer;
+- for `WIT_STRATEGY`, the routine, as an integer;
+- for `WIT_COLOR`, `red | flags << 8 | green << 16 | blue << 24`.
+
+`WinGetInfo` writes the C stub's layout with Port32's sizes (see
+`winState.c`).
+
+**Tests.** ctest `kernel.win` runs on a fake driver. It checks:
+- opening, washing and exposure;
+- updates, the mask, suspending and `WinInvalReg`;
+- overlapping windows and priority;
+- moving and resizing, child windows, closing;
+- information and transformations;
+- `WinLocatePointC`.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).
