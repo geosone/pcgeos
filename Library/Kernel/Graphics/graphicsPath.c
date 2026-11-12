@@ -858,6 +858,8 @@ void GrFillPath(GStateHandle gstate, RegionFillRule rule)
     byte *path;
     word size, *reg;
 
+    if (GrPatternFillPath(gstate, rule))
+	return;
     if (GrGSRecord(gstate, GR_FILL_PATH, "b", rule))
 	return;
     if (!(path = CopyPath(gstate, GPT_CURRENT, &size)))

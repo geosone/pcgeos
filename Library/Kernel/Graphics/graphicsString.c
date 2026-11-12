@@ -20,7 +20,7 @@
  * copies the elements byte for byte; to a GState it plays them.
  *
  * Not yet: GR_DRAW_TEXT_FIELD (style runs: the element is a fault),
- * the *_PTR and *_OPTR elements, bitmap slices, palettes, patterns,
+ * the *_PTR and *_OPTR elements, bitmap slices, palettes,
  * GrGetGStringBounds and the
  * bounds of GSF_FIGURE_BOUNDS.
  */
@@ -674,6 +674,29 @@ void GrPlayElement(GStateHandle gstate, const byte *e)
     case GR_SET_CUSTOM_AREA_MASK:
 	GrSetAreaMaskCustom(gstate, (const DrawMask *) (e + 1));
 	break;
+    case GR_SET_AREA_PATTERN:
+    case GR_SET_TEXT_PATTERN: {
+	GraphicPattern gp;
+	gp.HP_type = e[1];
+	gp.HP_data = e[2];
+	(*e == GR_SET_AREA_PATTERN ? GrSetAreaPattern : GrSetTextPattern)
+	    (gstate, gp);
+	break;
+    }
+    case GR_SET_CUSTOM_AREA_PATTERN:
+    case GR_SET_CUSTOM_TEXT_PATTERN: {
+	GraphicPattern gp;
+	gp.HP_type = e[1];
+	gp.HP_data = e[2];
+	if ((v = malloc(U(e + 3) ? U(e + 3) : 1)) == NULL)	/* aligned */
+	    break;
+	memcpy(v, e + 5, U(e + 3));
+	if (*e == GR_SET_CUSTOM_AREA_PATTERN)
+	    GrSetCustomAreaPattern(gstate, gp, v, U(e + 3));
+	else
+	    GrSetCustomTextPattern(gstate, gp, v);
+	break;
+    }
     case GR_SET_CUSTOM_TEXT_MASK:
 	GrSetTextMaskCustom(gstate, (const DrawMask *) (e + 1));
 	break;

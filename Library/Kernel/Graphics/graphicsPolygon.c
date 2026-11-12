@@ -30,7 +30,8 @@
  * 64K); here they are in the C heap and the region grows as it is
  * written.
  *
- * Not yet: an area pattern (the asm filled through a path).
+ * With an area pattern the polygon is filled through a path, by its
+ * fill rule (graphicsPattern.c).
  */
 #include "graphicsInt.h"
 #include <stdlib.h>
@@ -574,6 +575,11 @@ void GrFillPolygon(GStateHandle gstate, RegionFillRule windingRule,
 {
     GrDraw d;
 
+    if (GrPatternStart(gstate, FALSE)) {
+	GrFillPolygon(gstate, windingRule, points, numPoints);
+	GrPatternFinish(gstate, windingRule, FALSE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_FILL_POLYGON, "wbr", numPoints, windingRule,
 		      points, 4 * numPoints);
     GrEnterGraphics(gstate, &d);

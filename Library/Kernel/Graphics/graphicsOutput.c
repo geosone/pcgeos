@@ -11,7 +11,8 @@
  * (DR_VID_POLYGON).  A frame is four lines with square ends.
  *
  * Graphics strings and paths store the elements (graphicsString*.c,
- * graphicsPath.c).  Not yet: area patterns.
+ * graphicsPath.c).  A filled rectangle with an area pattern goes
+ * through a path (graphicsPattern.c).
  */
 #include "graphicsInt.h"
 
@@ -124,6 +125,11 @@ void GrFillRect(GStateHandle gstate, sword left, sword top, sword right,
 {
     GrDraw d;
 
+    if (GrPatternStart(gstate, FALSE)) {
+	GrFillRect(gstate, left, top, right, bottom);
+	GrPatternFinish(gstate, ODD_EVEN, FALSE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_FILL_RECT, "wwww", left, top, right, bottom);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, left, top);
@@ -157,6 +163,11 @@ void GrFillRectTo(GStateHandle gstate, sword x, sword y)
     GrDraw d;
     sword px, py;
 
+    if (GrPatternStart(gstate, FALSE)) {
+	GrFillRectTo(gstate, x, y);
+	GrPatternFinish(gstate, ODD_EVEN, FALSE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_FILL_RECT_TO, "ww", x, y);
     GrEnterGraphics(gstate, &d);
     if (!GrTrivialReject(&d)) {

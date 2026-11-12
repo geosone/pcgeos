@@ -198,6 +198,11 @@ static word TextLen(const char *str, word size)
 void GrDrawText(GStateHandle gstate, sword x, sword y, const char *str,
 		word size)
 {
+    if (GrPatternStart(gstate, TRUE)) {
+	GrDrawText(gstate, x, y, str, size);
+	GrPatternFinish(gstate, ODD_EVEN, TRUE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_DRAW_TEXT, "wwwr", x, y, TextLen(str, size),
 		      str, TextLen(str, size));
     DrawText(gstate, (int64_t) x * 65536, (int64_t) y * 65536, str, size);
@@ -207,6 +212,11 @@ static void TextAtCP(GStateHandle gstate, const char *str, word size);
 
 void GrDrawTextAtCP(GStateHandle gstate, const char *str, word size)
 {
+    if (GrPatternStart(gstate, TRUE)) {
+	GrDrawTextAtCP(gstate, str, size);
+	GrPatternFinish(gstate, ODD_EVEN, TRUE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_DRAW_TEXT_CP, "wr", TextLen(str, size), str,
 		      TextLen(str, size));
     TextAtCP(gstate, str, size);
@@ -226,6 +236,11 @@ void GrDrawChar(GStateHandle gstate, sword x, sword y, word ch)
 {
     char c = (char) ch;
 
+    if (GrPatternStart(gstate, TRUE)) {
+	GrDrawChar(gstate, x, y, ch);
+	GrPatternFinish(gstate, ODD_EVEN, TRUE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_DRAW_CHAR, "bww", ch, x, y);
     DrawText(gstate, (int64_t) x * 65536, (int64_t) y * 65536, &c, 1);
 }
@@ -234,6 +249,11 @@ void GrDrawCharAtCP(GStateHandle gstate, word ch)
 {
     char c = (char) ch;
 
+    if (GrPatternStart(gstate, TRUE)) {
+	GrDrawCharAtCP(gstate, ch);
+	GrPatternFinish(gstate, ODD_EVEN, TRUE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_DRAW_CHAR_CP, "b", ch);
     TextAtCP(gstate, &c, 1);
 }

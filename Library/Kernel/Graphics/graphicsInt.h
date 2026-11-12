@@ -313,6 +313,10 @@ sword *GrRoundRectDevPoints(const GrDraw *d, sword l, sword t, sword r,
 			   sword b, word radius, word *count);
 byte *GrTextOutline(GStateHandle gstate, int64_t x, int64_t y,
 		    const char *str, word size, word *len);
+/* graphicsPattern.c */
+Boolean GrPatternStart(GStateHandle gstate, Boolean text);
+void GrPatternFinish(GStateHandle gstate, RegionFillRule rule, Boolean text);
+Boolean GrPatternFillPath(GStateHandle gstate, RegionFillRule rule);
 Boolean GrCloseArc(sword **pts, word *count, const GrArcParams *ap);
 void GrPlayElement(GStateHandle gstate, const byte *e);
 MemHandle GrAllocPathString(void);

@@ -151,6 +151,11 @@ void GrFillRoundRect(GStateHandle gstate, sword left, sword top, sword right,
 {
     GrDraw d;
 
+    if (GrPatternStart(gstate, FALSE)) {
+	GrFillRoundRect(gstate, left, top, right, bottom, radius);
+	GrPatternFinish(gstate, ODD_EVEN, FALSE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_FILL_ROUND_RECT, "wwwww", radius, left, top,
 		      right, bottom);
     GrEnterGraphics(gstate, &d);
@@ -183,6 +188,11 @@ void GrDrawRoundRectTo(GStateHandle gstate, sword bottom, sword right,
 void GrFillRoundRectTo(GStateHandle gstate, sword right, sword bottom,
 		       word radius)
 {
+    if (GrPatternStart(gstate, FALSE)) {
+	GrFillRoundRectTo(gstate, right, bottom, radius);
+	GrPatternFinish(gstate, ODD_EVEN, FALSE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_FILL_ROUND_RECT_TO, "www", radius, right,
 		      bottom);
     RoundRectTo(gstate, right, bottom, radius, TRUE);

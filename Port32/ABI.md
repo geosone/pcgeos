@@ -2799,7 +2799,7 @@ as far as its scan lines go (`GrBitmapStringSize`).
 
 **Not yet:** `GR_DRAW_TEXT_FIELD` (style runs; reading one is a
 fault), the `*_PTR` and `*_OPTR` elements, bitmap slices after the
-first (callbacks), palettes, patterns, `GrGetGStringBounds` and
+first (callbacks), palettes, `GrGetGStringBounds` and
 `GSF_FIGURE_BOUNDS`, the truncation of a full stream. (`GST_PATH` and
 the other path and clip elements: §13q.)
 
@@ -2918,6 +2918,66 @@ a graphics string, `DR_FONT_GEN_IN_REGION`.
 - a clip rectangle that stays when the transformation changes, an
   intersection with a clip path, `GrSaveState`/`GrRestoreState`, a
   window clip rectangle with `GrGetClipRegion`, removal.
+
+## 13r. Patterns (`Graphics/graphicsPattern.c`, P6)
+
+**State.** The area and text patterns (`GS_areaPattern`,
+`GS_textPattern`) are a `PatternType` with its data. A hatch or a
+custom pattern is also copied into a chunk of the GState (`GCP_custom`),
+so it is saved and restored with the GState:
+- the six system hatches of `graphicsPatternHatch.asm` are C tables of
+  `HatchPattern`;
+- a custom one is the caller's `HatchPattern` or `Bitmap`, at most
+  `MAX_CUSTOM_PATTERN_SIZE` bytes.
+
+`GrGetAreaPattern` and `GrGetTextPattern` return a custom pattern in a
+new block. The C binding of `GrSetCustomTextPattern` has no size, so the
+size is taken from the hatch or the bitmap. The pattern elements
+(`GR_SET_AREA_PATTERN`, `GR_SET_CUSTOM_AREA_PATTERN` and the text ones)
+are stored in graphics strings and played. While a path is being
+defined, setting a pattern does nothing, as in the asm.
+
+**Filling.** This follows `EnterGraphicsFill` and `ExitGraphicsFill`.
+A filled figure or text drawn with a pattern other than `PT_SOLID` goes
+through these steps:
+1. The GState is saved.
+2. The figure becomes a path (`GrPatternStart`).
+3. That path is intersected into the clip path, with the polygon's
+   fill rule or odd-even.
+4. The pattern is drawn over what is visible.
+5. The GState is restored and the pen goes where the figure left it
+   (`GrPatternFinish`).
+
+`GrFillPath` with a pattern takes the current path as the clip in the
+same way. Which figures get this:
+- rectangles, ellipses, arcs (bounded and 3-point), polygons and
+  rounded rectangles, each with its "to" form;
+- `GrDrawText`, `GrDrawTextAtCP`, `GrDrawChar` and `GrDrawCharAtCP`
+  for the text pattern; the text's outline comes from the font driver,
+  §13q.
+
+How each kind is drawn:
+- **Hatch.** Each `HatchLine` is drawn in page coordinates: the GState's
+  transformation is replaced by the line's origin and angle. It repeats
+  every `HL_deltaX`, `HL_deltaY` over the window mask, taken back into
+  that space. Lines are solid or dashed (square ends), one pixel wide,
+  in the line's color; `CF_SAME` keeps the area color.
+- **Bitmap.** It is tiled from the document origin (`GrDrawBitmap`).
+
+**Differences:**
+- Text patterns use the text attributes; the asm used the area ones.
+- The asm had no system bitmaps and no user patterns. These fill solid
+  here.
+
+**Tests.** ctest `kernel.draw`:
+- a horizontal system hatch in a rectangle, with the pen, path and clip
+  left as they were;
+- a vertical hatch in an ellipse;
+- a custom dashed hatch in its own color, and `GrGetAreaPattern`;
+- a tiled 8x8 bitmap;
+- a path filled with the pattern;
+- the pattern from a graphics string;
+- a TrueType "I" in a hatch: only the hatch rows are drawn.
 
 ## 14. Open
 

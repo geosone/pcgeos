@@ -41,6 +41,8 @@
  *     filled from a graphics string; asked about (point, region, as a
  *     graphics string); text in a path (a TrueType outline); clip
  *     rectangles and clip paths, the clip region;
+ *   - patterns: system and custom hatches, a tiled bitmap, in a path,
+ *     text in a hatch;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -126,6 +128,7 @@ static WindowHandle Open(Handle parent, word flags, unsigned long rgb,
 }
 
 static Bitmap *nextSlice;
+static FontID ttFont = FID_INVALID;	/* Cooper Black */
 
 /* GrParseGString: count the output elements, go on */
 static int nOutput;
@@ -1156,6 +1159,7 @@ int main(int argc, char **argv)
 	n = GrEnumFonts(fes, 4, FEF_OUTLINES, 0);
 	CHECK(n == 1);
 	id = n ? fes[0].FES_ID : FID_INVALID;
+	ttFont = id;
 	CHECK(n && !strcmp(fes[0].FES_name, "Cooper* Black"));
 	CHECK(GrCheckFontAvailName(FEF_OUTLINES, 0, "Cooper* Black") == id);
 	GrSetFont(g, id, 40UL << 16);
@@ -1570,6 +1574,169 @@ int main(int argc, char **argv)
 	SetCol(g, WHITE);
 	GrFillRect(g, 0, 0, 80, 80);
 	CHECK(Pixel(70, 70) == WHITE && Pixel(50, 50) == WHITE);
+    }
+
+    /* area and text patterns: the figure made a clip path, the pattern
+     * drawn in it (A at 20,20 on the screen) */
+    {
+	GraphicPattern gp;
+	MemHandle cust = 0;
+	word csize = 0;
+	static union { Bitmap b; byte raw[16]; } tile;
+	static union { HatchPattern hp; byte raw[64]; } dashed;
+	HatchLine *hl;
+	HatchDash *hd;
+	XYValueAsDWord cp;
+
+	/* the DOS16 layout, as graphics strings carry it */
+	CHECK(sizeof(HatchPattern) == 2 && sizeof(HatchLine) == 26 &&
+	      sizeof(HatchDash) == 8);
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	SetCol(g, RED);
+	gp.HP_type = PT_SYSTEM_HATCH;
+	gp.HP_data = SH_HORIZONTAL;
+	GrSetAreaPattern(g, gp);
+	GrFillRect(g, 10, 10, 50, 50);	/* lines at y = 12, 16, ... */
+	CHECK(Pixel(40, 32) == RED && Pixel(40, 36) == RED &&
+	      Pixel(40, 33) == WHITE && Pixel(40, 34) == WHITE &&
+	      Pixel(25, 32) == WHITE && Pixel(75, 32) == WHITE &&
+	      Pixel(40, 76) == WHITE);
+	cp = GrGetCurPos(g);
+	CHECK(DWORD_X(cp) == 10 && DWORD_Y(cp) == 10);
+	CHECK(!GrTestPath(g, GPT_CURRENT) && !GrTestPath(g, GPT_CLIP));
+	gp = GrGetAreaPattern(g, NULL, NULL);
+	CHECK(gp.HP_type == PT_SYSTEM_HATCH && gp.HP_data == SH_HORIZONTAL);
+
+	/* vertical in an ellipse */
+	SetCol(g, WHITE);
+	gp.HP_type = PT_SOLID;
+	GrSetAreaPattern(g, gp);
+	GrFillRect(g, 0, 0, 80, 80);
+	gp.HP_type = PT_SYSTEM_HATCH;
+	gp.HP_data = SH_VERTICAL;
+	GrSetAreaPattern(g, gp);
+	SetCol(g, BLUE);
+	GrFillEllipse(g, 10, 10, 70, 70);
+	CHECK(Pixel(60, 60) == BLUE && Pixel(61, 60) == WHITE &&
+	      Pixel(64, 40) == BLUE && Pixel(32, 24) == WHITE);
+
+	/* a custom hatch: horizontal dashes 2 on, 6 off, every 8 */
+	memset(&dashed, 0, sizeof(dashed));
+	dashed.hp.HP_numLines = 1;
+	hl = (HatchLine *) (dashed.raw + sizeof(HatchPattern));
+	hl->HL_deltaY.WWF_int = 8;
+	hl->HL_color.CQ_info = CF_RGB;
+	hl->HL_color.CQ_redOrIndex = 0xff;
+	hl->HL_numDashes = 1;
+	hd = (HatchDash *) (hl + 1);
+	hd->HD_on.WWF_int = 2;
+	hd->HD_off.WWF_int = 6;
+	gp.HP_type = PT_CUSTOM_HATCH;
+	gp.HP_data = 0;
+	SetCol(g, WHITE);
+	gp.HP_type = PT_SOLID;
+	GrSetAreaPattern(g, gp);
+	GrFillRect(g, 0, 0, 80, 80);
+	gp.HP_type = PT_CUSTOM_HATCH;
+	GrSetCustomAreaPattern(g, gp, &dashed,
+			       (word) (sizeof(HatchPattern) + sizeof(HatchLine) +
+				       sizeof(HatchDash)));
+	SetCol(g, BLUE);			/* the line's own red */
+	GrFillRect(g, 10, 10, 50, 50);
+	CHECK(Pixel(36, 36) == RED && Pixel(38, 36) == RED &&	/* square */
+	      Pixel(40, 36) == WHITE && Pixel(44, 36) == RED &&	/* ends */
+	      Pixel(36, 37) == WHITE);
+	gp = GrGetAreaPattern(g, &cust, &csize);
+	CHECK(gp.HP_type == PT_CUSTOM_HATCH && cust && csize ==
+	      sizeof(HatchPattern) + sizeof(HatchLine) + sizeof(HatchDash));
+	if (cust)
+	    MemFree(cust);
+
+	/* a custom bitmap tiled from the origin: 8x8, its top left 4x4
+	 * black */
+	tile.b.B_width = 8; tile.b.B_height = 8;
+	tile.b.B_compact = BMC_UNCOMPACTED; tile.b.B_type = BMF_MONO;
+	memset(tile.raw + 6, 0, 8);
+	memset(tile.raw + 6, 0xf0, 4);
+	gp.HP_type = PT_SOLID;
+	GrSetAreaPattern(g, gp);
+	SetCol(g, GREEN);
+	GrFillRect(g, 0, 0, 80, 80);
+	gp.HP_type = PT_CUSTOM_BITMAP;
+	GrSetCustomAreaPattern(g, gp, &tile, (word) (6 + 8));
+	GrFillRect(g, 10, 10, 50, 50);
+	CHECK(Pixel(36, 36) == BLACK && Pixel(40, 36) == WHITE &&
+	      Pixel(36, 40) == WHITE && Pixel(44, 44) == BLACK &&
+	      Pixel(25, 36) == GREEN && Pixel(72, 36) == GREEN);
+
+	/* a path filled with the pattern */
+	GrBeginPath(g, PCT_REPLACE);
+	GrFillRect(g, 50, 10, 70, 30);
+	GrEndPath(g);
+	GrFillPath(g, ODD_EVEN);
+	CHECK(Pixel(76, 36) == BLACK && Pixel(80, 36) == WHITE &&
+	      Pixel(86, 36) == BLACK && Pixel(76, 40) == WHITE);
+
+	/* from a graphics string: the pattern element stored and played */
+	{
+	    MemHandle blk = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+	    word ch = 0;
+	    GStateHandle gs, ld;
+	    gp.HP_type = PT_SOLID;
+	    GrSetAreaPattern(g, gp);
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 80, 80);
+	    gs = GrCreateGString(blk, GST_CHUNK, &ch);
+	    gp.HP_type = PT_CUSTOM_HATCH;
+	    GrSetCustomAreaPattern(gs, gp, &dashed,
+				   (word) (sizeof(HatchPattern) +
+					   sizeof(HatchLine) +
+					   sizeof(HatchDash)));
+	    GrFillRect(gs, 10, 10, 50, 50);
+	    GrEndGString(gs);
+	    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+	    ld = GrLoadGString(blk, GST_CHUNK, ch);
+	    CHECK(GrDrawGString(g, ld, 0, 0, 0, NULL) == GSRT_COMPLETE &&
+		  Pixel(36, 36) == RED && Pixel(40, 36) == WHITE);
+	    GrDestroyGString(ld, g, GSKT_KILL_DATA);
+	    MemFree(blk);
+	    gp = GrGetAreaPattern(g, NULL, NULL);
+	    CHECK(gp.HP_type == PT_CUSTOM_HATCH);
+	}
+
+	/* text in a hatch (the text color) */
+	gp.HP_type = PT_SOLID;
+	GrSetAreaPattern(g, gp);
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	gp.HP_type = PT_SYSTEM_HATCH;
+	gp.HP_data = SH_HORIZONTAL;
+	GrSetTextPattern(g, gp);
+	GrSetTextColor(g, CF_RGB, 0, 0, 0xff);
+	{
+	    word x, y, blue = 0, rows = 0;
+	    GrSetFont(g, ttFont, 40UL << 16);
+	    GrDrawText(g, 5, 5, "I", 0);
+	    for (y = 25; y < 85; y++) {
+		word n = 0;
+		for (x = 25; x < 55; x++)
+		    n += Pixel(x, y) == BLUE;
+		blue += n;
+		rows += n != 0;
+		if (n && (y - 20) % 4)
+		    rows = 1000;		/* only the hatch's rows */
+	    }
+	    CHECK(blue >= 40 && rows >= 8 && rows < 1000);
+	    GrSetFont(g, FID_BERKELEY, 10UL << 16);
+	}
+	gp.HP_type = PT_SOLID;
+	GrSetTextPattern(g, gp);
+	GrSetTextColor(g, CF_RGB, 0, 0, 0);
+	GrSetAreaPattern(g, gp);
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(Pixel(40, 33) == WHITE);
     }
 
     /* an update: only the invalid area is drawn */

@@ -64,6 +64,11 @@ void GrFillArc(GStateHandle gstate, sword left, sword top, sword right,
 	       sword bottom, word startAngle, word endAngle,
 	       ArcCloseType closeType)
 {
+    if (GrPatternStart(gstate, FALSE)) {
+	GrFillArc(gstate, left, top, right, bottom, startAngle, endAngle, closeType);
+	GrPatternFinish(gstate, ODD_EVEN, FALSE);
+	return;
+    }
     (void) GrGSRecord(gstate, GR_FILL_ARC, "wwwwwww", closeType, left, top,
 		      right, bottom, startAngle, endAngle);
     Bounded(gstate, left, top, right, bottom, startAngle, endAngle,
@@ -123,6 +128,11 @@ void GrDrawArc3Point(GStateHandle gstate, const ThreePointArcParams *params)
 
 void GrFillArc3Point(GStateHandle gstate, const ThreePointArcParams *params)
 {
+    if (GrPatternStart(gstate, FALSE)) {
+	GrFillArc3Point(gstate, params);
+	GrPatternFinish(gstate, ODD_EVEN, FALSE);
+	return;
+    }
     Arc3Point(gstate, params, TRUE);
 }
 
@@ -163,6 +173,11 @@ void GrDrawArc3PointTo(GStateHandle gstate,
 void GrFillArc3PointTo(GStateHandle gstate,
 		       const ThreePointArcToParams *params)
 {
+    if (GrPatternStart(gstate, FALSE)) {
+	GrFillArc3PointTo(gstate, params);
+	GrPatternFinish(gstate, ODD_EVEN, FALSE);
+	return;
+    }
     Arc3PointTo(gstate, params, TRUE);
 }
 
