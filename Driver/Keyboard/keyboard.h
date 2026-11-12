@@ -79,7 +79,7 @@ typedef struct {
 
 /* keyboardVariable.def */
 typedef struct {
-    word		KV_outputHandle;	/* gets MSG_IM_KBD_SCAN */
+    Handle		KV_outputHandle;	/* gets MSG_IM_KBD_SCAN: the IM */
     byte		KV_shiftState;		/* ShiftState */
     byte		KV_toggleState;		/* ToggleState */
     byte		KV_xState1, KV_xState2;
@@ -100,6 +100,7 @@ extern const KeyboardMap kbdKeyboardMap;
 
 /* keyboardProcess.c */
 Boolean KbdXlateScan(word scan, DriverRegs *r);
+byte KbdMonRoutine(Monitor *mon, ImEvent *ev);
 void KbdScanEvent(word scan);
 /* keyboardInit.c */
 Boolean KbdInit(void);

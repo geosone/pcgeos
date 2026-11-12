@@ -13,9 +13,9 @@
  *   keyboardSwapCtrl      swap <Ctrl> and <Caps Lock>
  * The toggles start off: DOS16 took them from the BIOS.
  *
- * Not yet: the input manager's monitor (ImAddMonitor), which gave the
- * driver its output; until the input manager is in C, the output is set
- * with DR_KBD_CHANGE_OUTPUT or DR_KBD_SET_KBD_STATE.
+ * The driver is a monitor of the input manager at ML_DRIVER
+ * (KbdMonRoutine): it gets the scan codes back there and translates
+ * them.  ImAddMonitor gives the input manager's thread, the output.
  */
 #include "keyboard.h"
 
@@ -25,6 +25,7 @@
 
 static const char category[] = "keyboard";
 static ghal_irq_source *irq;
+static Monitor kbdMonitor;
 
 /* CheckKeyboardOption: TRUE (and the option set) if the key is TRUE */
 static Boolean CheckKeyboardOption(const char *key, byte option)
@@ -74,9 +75,12 @@ Boolean KbdInit(void)
     if (!InitFileReadInteger(category, "keyboardTypematic", &w))
 	kbd.KV_typematicState = (byte) (w & 0x7f);
     KbdSetOptions();
+    kbd.KV_outputHandle = ImAddMonitor(&kbdMonitor, ML_DRIVER,
+				       KbdMonRoutine);
     if (ghal_irq_attach(GHAL_IRQ_INPUT, KbdInputHandler, NULL, &irq) !=
 	GHAL_OK) {
 	irq = NULL;
+	ImRemoveMonitor(&kbdMonitor, MF_REMOVE_IMMEDIATE);
 	return TRUE;
     }
     return FALSE;
@@ -88,4 +92,5 @@ void KbdExit(void)
     if (irq)
 	ghal_irq_detach(irq);
     irq = NULL;
+    ImRemoveMonitor(&kbdMonitor, MF_REMOVE_IMMEDIATE);
 }

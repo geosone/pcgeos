@@ -118,6 +118,7 @@
     X(INIT_FILE_ERROR)		/* no memory for the init file */ \
     X(CANNOT_LOAD_UI)		/* [ui] generic and ui.geo do not load */ \
     X(CANNOT_LOAD_KEYBOARD_DRIVER)	/* [keyboard] driver, kbd.geo */ \
+    X(CANNOT_START_INPUT_MANAGER)	/* no thread for it */ \
     X(BAD_SHUTDOWN_TYPE)		/* SysShutdown: no such type */
 
 #define KFE_ENUM(name) name,
@@ -798,6 +799,11 @@ ThreadHandle KernelEventThreadCreate(QueueHandle qh, ClassStruct *cls,
 				     ThreadPriority priority, word stackSize,
 				     GeodeHandle owner);
 void KernelThreadRun(ThreadHandle th);
+
+/* The input manager (IM/imInit.c): its thread, made stopped at the boot
+ * before the drivers, and started once they are loaded. */
+void KernelImInit(void);
+void KernelImStart(void);
 
 /* ---------------------------------------------------------------------
  * LMem (LMem/lmemCode.c, after lmemCode.asm).  Port32/ABI.md section 10.

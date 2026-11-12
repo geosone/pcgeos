@@ -406,6 +406,26 @@ Boolean KbdXlateScan(word scan, DriverRegs *r)
     return FALSE;
 }
 
+/* KbdMonRoutine: the scan codes in the input manager's chain */
+byte KbdMonRoutine(Monitor *mon, ImEvent *ev)
+{
+    DriverRegs r;
+
+    (void) mon;
+    if (ev->IE_message != MSG_IM_KBD_SCAN)
+	return MF_DATA;
+    memset(&r, 0, sizeof(r));
+    KbdXlateScan(ev->IE_cx, &r);
+    if (!(r.DR_ax & MF_DATA))
+	return 0;			/* used up */
+    ev->IE_message = (Message) r.DR_di;
+    ev->IE_cx = (word) r.DR_cx;
+    ev->IE_dx = (word) r.DR_dx;
+    ev->IE_bp = (word) r.DR_bp;
+    ev->IE_si = (Handle) r.DR_si;
+    return (byte) (r.DR_ax & (MF_DATA | MF_MORE_TO_DO));
+}
+
 /* KbdSetState (DR_KBD_SET_KBD_STATE) */
 static void KbdSetState(DriverRegs *r)
 {
@@ -413,7 +433,7 @@ static void KbdSetState(DriverRegs *r)
     byte cl = (byte) r->DR_cx, ch = (byte) (r->DR_cx >> 8);
 
     if (ah & KSF_NEW_PROCESS)
-	kbd.KV_outputHandle = (word) r->DR_bx;
+	kbd.KV_outputHandle = (Handle) r->DR_bx;
     if (ah & KSF_NEW_INDICATOR) {
 	byte diff = (byte) (cl ^ kbd.KV_modeIndState);
 	kbd.KV_modeIndState = cl;
@@ -436,7 +456,7 @@ static void KbdGetState(DriverRegs *r)
 
 static Boolean KbdStrategy(word function, DriverRegs *r)
 {
-    word old;
+    Handle old;
 
     switch (function) {
     case DR_INIT:
@@ -457,7 +477,7 @@ static Boolean KbdStrategy(word function, DriverRegs *r)
 	return KbdXlateScan((word) r->DR_cx, r);
     case DR_KBD_CHANGE_OUTPUT:
 	old = kbd.KV_outputHandle;
-	kbd.KV_outputHandle = (word) r->DR_bx;
+	kbd.KV_outputHandle = (Handle) r->DR_bx;
 	r->DR_bx = old;
 	return FALSE;
     case DR_KBD_PASS_HOTKEY:

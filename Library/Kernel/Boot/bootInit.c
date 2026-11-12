@@ -15,7 +15,9 @@
  *   3. the primary file system driver and its drives (LoadFSDriver,
  *      FSDLoadPrimary); the init file is read on first use;
  *   4. the standard paths of [paths] (GetPaths of the loader);
- *   5. the keyboard driver (LoadKeyboardDriver), from
+ *   5. the input manager's thread (InitIM), which runs once the
+ *      drivers are loaded;
+ *      the keyboard driver (LoadKeyboardDriver), from
  *      SP_KEYBOARD_DRIVERS, the default GDDT_KEYBOARD driver;
  *      the UI (LoadUI), from SP_SYSTEM;
  *   6. a geode named on the command line (ProcessCommandLine): what is
@@ -38,7 +40,7 @@
  * a host without keys (the tests) needs none.
  *
  * Not yet: the drivers (memory, power, mouse, video, font),
- * the input manager, fonts, graphics and windows, patches, the log
+ * fonts, graphics and windows, patches, the log
  * file, documentIsTop, FSDInitComplete.
  */
 #include "kernelC.h"
@@ -152,7 +154,9 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     ActiveFile();
     FSDLoadPrimary();
     FileInitStdPaths();
+    KernelImInit();
     LoadKeyboardDriver();
+    KernelImStart();
     LoadUI();
     gh = ProcessCommandLine(cmdTail, &e);
     if (err)

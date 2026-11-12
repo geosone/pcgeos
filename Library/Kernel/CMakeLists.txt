@@ -54,6 +54,8 @@
 #                      initfileC.asm and Loader/ini.asm
 #   Boot/bootBoot.c <- EndGeos of bootBoot.asm (RemoveGeodes, ExitFile)
 #   Sys/sysMisc.c   <- SysShutdown of sysMisc.asm and sysC.asm
+#   IM/imInit.c, imMonitors.c, imMisc.c <- the input manager of imInit.asm,
+#                      imMonitors.asm, imMisc.asm and imPtr.asm
 #   Boot/bootInit.c <- InitGeos and ProcessCommandLine of bootInit.asm,
 #                      LoadUI of bootInitfile.asm
 #   VMem/vmemBlkManip.c, vmemHeader.c, vmemHigh.c, vmemChain.c <- the
@@ -109,7 +111,10 @@ add_library(geos_kernel_objs OBJECT
   VMem/vmemChain.c
   Boot/bootInit.c
   Boot/bootBoot.c
-  Sys/sysMisc.c)
+  Sys/sysMisc.c
+  IM/imInit.c
+  IM/imMonitors.c
+  IM/imMisc.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/CInclude)

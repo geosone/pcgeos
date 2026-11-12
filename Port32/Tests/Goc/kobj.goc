@@ -28,6 +28,25 @@ void ObjUnRelocateObjBlock(MemHandle mh, word vmRelocType);
 @message void MSG_KOIM_PRESSURE_CHANGE();
 @message void MSG_KOIM_DIRECTION_CHANGE();
 @message void MSG_KOIM_KBD_SCAN();
+@message void MSG_KOIM_UNUSED_5();
+@message void MSG_KOIM_UNUSED_6();
+@message void MSG_KOIM_UNUSED_7();
+@message void MSG_KOIM_UNUSED_8();
+@message void MSG_KOIM_UNUSED_9();
+@message void MSG_KOIM_UNUSED_10();
+@message void MSG_KOIM_UNUSED_11();
+@message void MSG_KOIM_UNUSED_12();
+@message void MSG_KOIM_UNUSED_13();
+@message void MSG_KOIM_UNUSED_14();
+@message void MSG_KOIM_UNUSED_15();
+@message void MSG_KOIM_UNUSED_16();
+@message void MSG_KOIM_UNUSED_17();
+@message void MSG_KOIM_UNUSED_18();
+@message void MSG_KOIM_UNUSED_19();
+@message void MSG_KOIM_UNUSED_20();
+@message void MSG_KOIM_UNUSED_21();
+@message void MSG_KOIM_UNUSED_22();
+@message void MSG_KOIM_MOUSE_WHEEL_VERTICAL();
 @endc
 
 @class KOTopClass, MetaClass, master;
@@ -148,7 +167,10 @@ const Message kobjGocMessages[] = {
     MSG_META_DETACH, MSG_META_DETACH_COMPLETE, MSG_META_APP_SHUTDOWN,
     MSG_META_SHUTDOWN_COMPLETE, MSG_META_SHUTDOWN_ACK, MSG_META_QUIT,
     MSG_META_QUIT_ACK, MSG_META_FINISH_QUIT, MSG_PROCESS_EXIT,
-    MSG_KOIM_BUTTON_CHANGE, MSG_KOIM_KBD_SCAN, MSG_META_KBD_CHAR
+    MSG_KOIM_BUTTON_CHANGE, MSG_KOIM_KBD_SCAN, MSG_META_KBD_CHAR,
+    MSG_KOIM_MOUSE_WHEEL_VERTICAL, MSG_META_MOUSE_BUTTON, MSG_META_MOUSE_PTR,
+    MSG_META_MOUSE_DRAG, MSG_META_MOUSE_WHEEL_VERTICAL,
+    MSG_META_LEAVE_CONSTRAIN
 };
 const word kobjGocVarData[] = {
     TEMP_META_GCN, TEMP_META_QUIT_LIST, DETACH_DATA

@@ -10,6 +10,9 @@
  *   - US: letters, <Shift>, <Caps Lock>, <Ctrl>, the cursor keys (0xe0),
  *     the keypad with and without <Num Lock>, <Pause> (0xe1), the state
  *     returned by DR_KBD_GET_KBD_STATE;
+ *   - the input manager: with the output the IM's thread, the driver's
+ *     monitor turns the scan codes into MSG_META_KBD_CHAR, which the
+ *     IM sends to its output (ImGrabInput);
  *   - German with keyboardAltGr: z and y swapped, the dead accent (the
  *     acute and e give e acute), <Alt Gr>-q gives @.
  */
@@ -21,6 +24,7 @@
 #include <initfile.h>
 #include <input.h>
 #include <char.h>
+#include <timer.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -178,7 +182,7 @@ static GeodeHandle Load(const char *file)
     memset(&r, 0, sizeof(r));
     r.DR_bx = q;
     CHECK(!DriverCall(dis, DR_KBD_CHANGE_OUTPUT, &r));
-    CHECK(r.DR_bx == 0xffff);		/* none before */
+    CHECK(r.DR_bx == ImInfoInputProcess());	/* the IM's thread */
     return drv;
 }
 
@@ -261,8 +265,59 @@ static void TestUS(void)
     Hid(H_A, 0);
     CHECK(!GeodeInfoQueue(q));
     memset(&r, 0, sizeof(r));
-    r.DR_bx = q;				/* back for the end */
+    r.DR_bx = ImInfoInputProcess();	/* back to the IM */
     DriverCall(dis, DR_KBD_CHANGE_OUTPUT, &r);
+}
+
+/* the next event of the queue, waiting for the IM's thread */
+static Message NextEvent(word *cx, word *dx)
+{
+    EventHandle ev;
+    const word *p;
+    dword size;
+    Message m;
+    int n;
+
+    for (n = 0; n < 200 && !GeodeInfoQueue(q); n++)
+	TimerSleep(1);
+    if (!GeodeInfoQueue(q))
+	return 0;
+    ev = QueueGetMessage(q);
+    m = ObjGetMessageInfo(ev, NULL);
+    p = KernelEventParams(ev, &size);
+    *cx = size >= 2 ? p[0] : 0;
+    *dx = size >= 4 ? p[1] : 0;
+    ObjFreeMessage(ev);
+    return m;
+}
+
+/* the whole way: HID event, scan code to the IM, the driver's monitor,
+ * MSG_META_KBD_CHAR to the output of the IM */
+static void TestIM(void)
+{
+    word cx, dx;
+
+    CHECK(ImGrabInput(ConstructOptr(q, 0)));
+    CHECK(!ImGrabInput(ConstructOptr(q, 1)));	/* taken */
+    Hid(H_A, 1);
+    Hid(H_A, 0);
+    CHECK(NextEvent(&cx, &dx) == IM_META_KBD_CHAR && cx == 'a' &&
+	  (dx & CF_FIRST_PRESS));
+    CHECK(NextEvent(&cx, &dx) == IM_META_KBD_CHAR && cx == 'a' &&
+	  (dx & CF_RELEASE));
+    Hid(H_LSHIFT, 1);
+    Hid(H_1, 1);
+    Hid(H_1, 0);
+    Hid(H_LSHIFT, 0);
+    CHECK(NextEvent(&cx, &dx) == IM_META_KBD_CHAR && (dx & CF_STATE_KEY));
+    CHECK(NextEvent(&cx, &dx) == IM_META_KBD_CHAR && cx == '!');
+    CHECK(NextEvent(&cx, &dx) == IM_META_KBD_CHAR && cx == '!');
+    CHECK(NextEvent(&cx, &dx) == IM_META_KBD_CHAR && (dx & CF_RELEASE));
+    ImReleaseInput(ConstructOptr(q, 0));
+    Hid(H_A, 1);
+    Hid(H_A, 0);
+    TimerSleep(5);
+    CHECK(!GeodeInfoQueue(q));		/* no output */
 }
 
 static void TestGerman(void)
@@ -329,6 +384,7 @@ int main(int argc, char **argv)
     q = GeodeAllocQueue();
     TestUS();
     TestGerman();
+    TestIM();
     GeodeFreeQueue(q);
     printf("%s\n", fails ? "FAILED" : "ok");
     return fails != 0;

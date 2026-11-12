@@ -531,10 +531,13 @@ The C keyboard driver keeps the design of the asm driver
 - hotkeys, `DR_KBD_MAP_KEY` and `DR_KBD_CHECK_SHORTCUT` (not yet);
 - DBCS.
 
-**Output.** In DOS16 the input manager's monitor gave the driver its
-output (`ImAddMonitor`). Until the input manager is in C, the output is
-set with `DR_KBD_CHANGE_OUTPUT` or `DR_KBD_SET_KBD_STATE`. Without an
-output, the driver sends nothing.
+**Output.** As in DOS16, `DR_INIT` adds the driver as a monitor of the
+input manager at `ML_DRIVER` (`KbdMonRoutine`, §13j). `ImAddMonitor`
+returns the input manager's thread, which becomes the output.
+`KbdMonRoutine` translates the scan codes in the chain.
+`DR_KBD_CHANGE_OUTPUT` and `DR_KBD_SET_KBD_STATE` can still change the
+output; without one, the driver sends nothing. `DR_EXIT` removes the
+monitor.
 
 **Geodes.** There is one geode per map: `kbd.geo` (US, `kbd.gp`) and
 `kbde_gr.geo` (German extended, `German/Extended/kbde_gr.gp`).
@@ -555,6 +558,7 @@ output. It checks:
 - the `<Pause>` sequence;
 - `DR_KBD_GET_KBD_STATE`;
 - no output;
+- the way through the input manager to its output (`ImGrabInput`);
 - the German map: y and z, the dead acute, and `<Alt Gr>`-q giving @.
 
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
@@ -1765,6 +1769,87 @@ Not yet:
 - the loader's switches (`/p`, `/sp`, memory limits);
 - `ExitFSD`, the task driver, the power-off message, and the
   switches `/s` and `/log` (`SCF_UNDER_SWAT`, `SCF_LOGGING`).
+
+## 13j. The input manager (`Library/Kernel/IM`, P4)
+
+The input manager is an event thread of the kernel with `IMClass`, a
+subclass of `ProcessClass` (`IM/imInit.c`). `KernelBoot` makes it,
+stopped, before the drivers load (`InitIM`). The drivers add their
+monitors and send to it. It starts when the drivers are loaded. Its
+`MSG_META_ATTACH` finds the default keyboard driver and reads
+`[input]`: `leftHanded`, `doubleClickTime`, `rebootOnReset` and
+`quickShutdownOnReset`.
+
+**Messages.** `IM_FIRST_MESSAGE` is 8704 (`CInclude/Internal/im.h`).
+- The drivers send `MSG_IM_PTR_CHANGE`, `MSG_IM_BUTTON_CHANGE`,
+  `MSG_IM_KBD_SCAN` and `MSG_IM_MOUSE_WHEEL_VERTICAL` (8727).
+- Their parameters are `IMParams`: `cx`, `dx` and `bp` as words, then
+  `si`, the driver handle, as a `Handle`.
+- What goes out are `MSG_META_KBD_CHAR` (119), `MSG_META_MOUSE_BUTTON`
+  (117), `_PTR` (118), `_DRAG` (123), `_WHEEL_VERTICAL` (124) and
+  `MSG_META_LEAVE_CONSTRAIN` (22). Their parameters are goc's three
+  words `cx`, `dx` and `bp`. ctest `kernel.obj` checks all these
+  numbers against goc.
+
+**The monitor chain** (`IM/imMonitors.c`). Every event goes through the
+monitors in the order of their levels:
+
+| Level | Name | What it does |
+|---|---|---|
+| 20 | `ML_DRIVER` | the keyboard driver |
+| 40 | `ML_COMBINE` | pointer changes summed into a position; button state, double press, drag (by distance and by time), the lost drag on a release with the release held back (`MF_MORE_TO_DO`), the wheel, the shift state after a state key, `<Ctrl><Alt><Del>` ending GEOS (`SST_CLEAN_FORCED`, the second time `SST_DIRTY`, or `SST_REBOOT`) |
+| 60 | `ML_PTR_PERTURB` | the rectangle of `ImConstrainMouse` |
+| 100 | `ML_OUTPUT` | the screen limits; the events go to the output |
+
+- A monitor is a C function on an `ImEvent` (message, `cx`, `dx`, `bp`,
+  `si`). It returns `MonitorFlags`. Message 0 asks a monitor that said
+  `MF_MORE_TO_DO` for its next event.
+- `ImAddMonitor(mon, level, routine)` returns the input manager's
+  thread.
+- `ImRemoveMonitor` waits on a semaphore of the monitor while the chain
+  is inside it.
+
+**Pointer events.** DOS16 folded a pointer event into the last one in
+the output queue when it had the same button info (`CombineMouseEvent`,
+`MF_CUSTOM`). The C kernel has no custom combining. Instead, a pointer
+event with the button info of the last one sent replaces the last event
+in the queue (`MF_CHECK_DUPLICATE`, `MF_REPLACE`, `MF_CHECK_LAST_ONLY`).
+
+**Routines** (`IM/imMisc.c`, exported as in `geos.gp`):
+- input: `ImGrabInput`, `ImReleaseInput`, `ImInfoInputProcess`;
+- buttons: `ImSetDoubleClick`, `ImInfoDoubleClick`, `ImGetButtonState`;
+- pointer: `ImGetMousePos`, `ImPtrJump`, `ImForcePtrMethod`,
+  `ImConstrainMouse`, `ImUnconstrainMouse`.
+
+There are no windows yet, so positions are screen positions. Instead of
+`ImSetPtrWin`, the video driver will set the pointer's limits with
+`ImSetScreenLimits`; until then there are none.
+
+**Not yet:**
+- the screen saver;
+- the pointer image (`CallMovePtr`) and the window under the pointer;
+- the move/resize xor;
+- pen and ink;
+- `ImSetPtrImage`/`Flags`, `ImBumpMouse`.
+
+DOS16 built without `QUIET_PTR_SUPPORT` and `INPUT_MESSAGE_RECEIPT`, and
+so does the C kernel.
+
+ctest `kernel.im` sends what pointer drivers send and reads the output.
+It checks:
+- relative and absolute moves;
+- presses, releases and the button state;
+- the double press and the time limit;
+- the drag, and the lost drag;
+- left-handed buttons and the wheel;
+- keys;
+- monitors of its own, with `MF_MORE_TO_DO`, eaten events and
+  `ImRemoveMonitor`;
+- `ImConstrainMouse` with `MSG_META_LEAVE_CONSTRAIN`;
+- the screen limits and the grab.
+
+ctest `driver.keyboard` covers the way from the HID event to
+`MSG_META_KBD_CHAR`.
 
 ## 14. Open
 
