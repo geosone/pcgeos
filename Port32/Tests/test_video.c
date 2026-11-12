@@ -17,6 +17,7 @@
  *   - polygons (clockwise only too), regions (with a parameter),
  *     polylines with a brush, dashed lines and their pattern index,
  *     fat dashes, a bitmap's scan line along a line;
+ *   - the XOR region: over drawing, following the pointer, cleared;
  *   - DR_VID_GETPIXEL, the palette, an escape, the screen off and on;
  * and reads the pixels back from the display (ghal_display_read_back).
  */
@@ -642,6 +643,58 @@ int main(int argc, char **argv)
 	r.DR_dx = 70;
 	DriverCall(dis, DR_VID_PUTLINE, &r);
 	CHECK(Pixel(103, 70) == WHITE && Pixel(104, 70) == BLUE);
+    }
+
+    /* the XOR region: a 10x10 square whose right edge (PARAM_2)
+     * follows the pointer; drawing over it, taking it away */
+    {
+	static const word sq[] = {
+	    0, 0, PARAM_2, 9,
+	    (word) -1, EOREGREC,
+	    9, 0, PARAM_2, EOREGREC,
+	    EOREGREC
+	};
+	MemHandle mh = MemAlloc(sizeof(sq), HF_DYNAMIC, 0);
+	VisXORParams xp;
+
+	CHECK(mh != 0);
+	memcpy(MemLock(mh), sq, sizeof(sq));
+	MemUnlock(mh);
+	SetMask(0, 0, 319, 199, TRUE);
+	SetColor(WHITE);
+	Rect(0, 0, 319, 199);
+	Call(DR_VID_MOVEPTR, 100, 100);
+	memset(&xp, 0, sizeof(xp));
+	xp.VXP_cx = 9;
+	xp.VXP_dx = 9;
+	xp.VXP_mousePos.P_x = 100;
+	xp.VXP_mousePos.P_y = 100;
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 50;
+	r.DR_bx = 50;
+	r.DR_dx = mh;
+	r.DR_cx = 0;
+	r.DR_si = VXF_CX_PARAM_FOLLOWS_MOUSE;
+	r.DR_bpPtr = &xp;
+	CHECK(!DriverCall(dis, DR_VID_SET_XOR, &r));
+	CHECK(Pixel(50, 50) == 0 && Pixel(59, 59) == 0 &&
+	      Pixel(60, 59) == WHITE && Pixel(50, 60) == WHITE);
+	/* drawing under it: it stays inverted on top */
+	SetColor(RED);
+	Rect(55, 55, 70, 70);
+	CHECK(Pixel(56, 56) == 0x00ffff && Pixel(65, 65) == RED &&
+	      Pixel(50, 50) == 0);
+	/* the pointer moves 5 right: the right edge with it */
+	Call(DR_VID_MOVEPTR, 105, 100);
+	CHECK(Pixel(64, 50) == 0 && Pixel(50, 50) == 0 &&
+	      Pixel(65, 50) == WHITE && Pixel(62, 56) == 0x00ffff);
+	memset(&r, 0, sizeof(r));
+	CHECK(!DriverCall(dis, DR_VID_CLEAR_XOR, &r));
+	CHECK(r.DR_cx == 14 && r.DR_dx == 9 && r.DR_si == 50 &&
+	      r.DR_di == 50);
+	CHECK(Pixel(50, 50) == WHITE && Pixel(56, 56) == RED &&
+	      Pixel(64, 50) == WHITE);
+	MemFree(mh);
     }
 
     /* the palette */

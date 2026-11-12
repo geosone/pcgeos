@@ -83,6 +83,26 @@ void VidPointBounds(const Point *p, word n, Rectangle *b);
 /* vidcomRegion.c */
 void VidDrawRegion(DriverRegs *r);
 Boolean VidRegionBounds(DriverRegs *r, Rectangle *b);
+typedef void VidRectFn(sword l, sword t, sword r, sword b, void *ctx);
+/* the bounds and the rectangles of a region with its parameters, moved
+ * by ox, oy */
+void VidRegionTransBounds(const word *rg, const sword *params, sword ox,
+			  sword oy, Rectangle *b);
+void VidRegionWalk(const word *rg, const sword *params, sword ox, sword oy,
+		   VidRectFn *fn, void *ctx);
+
+/* vidcomXOR.c: the XOR region */
+void VidSetXOR(DriverRegs *r);
+void VidClearXOR(DriverRegs *r);
+void VidHideXOR(void);
+void VidShowXOR(void);
+void VidCheckXORCollision(sword l, sword t, sword r, sword b);
+void VidXORPtrMoved(sword dx, sword dy);
+void VidResetXOR(void);
+
+/* vidcomEntry.c: where the pointer is (DR_VID_MOVEPTR); inverting */
+extern sword vidPtrX, vidPtrY;
+extern const VidDrawState vidInvertState;
 
 /* vidcomRaster.c: DR_VID_GETBITS, DR_VID_PUTBITS, DR_VID_MOVBITS, and
  * the pixels of a bitmap */

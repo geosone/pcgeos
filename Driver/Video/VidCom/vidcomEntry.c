@@ -12,10 +12,13 @@
  *     than the one with the exclusive are not done; their bounds are
  *     collected for DR_VID_END_EXCLUSIVE, which the caller invalidates;
  *   - the video functions fail until a device is set.
- * The device part shows what changed at the end of each function.
+ * The device part shows what changed at the end of each function.  The
+ * XOR region is taken away around drawing that touches it
+ * (CheckXORCollision) and follows the pointer (UpdateXORForPtr).
  *
- * Not yet: the save under areas, the XOR region, PUTSTRING; the escapes (all "not supported", di 0).  The functions do
- * nothing for now (the save under ones say "none").
+ * Save under areas: none, as on the 24-bit VGA (vga24Under.asm):
+ * DR_VID_SAVE_UNDER says it cannot.  Not yet: PUTSTRING (does nothing);
+ * the escapes (all "not supported", di 0).
  */
 #include "vidcom.h"
 
@@ -24,6 +27,8 @@
 #include <sem.h>
 
 static SemaphoreHandle videoSem;
+sword vidPtrX, vidPtrY;
+const VidDrawState vidInvertState = { 0, MM_INVERT, NULL };
 static Handle exclusiveGState;
 static Boolean exclusiveCausedAbort;
 static Rectangle exclBound;
@@ -64,64 +69,63 @@ static void ExclRectBounds(sword l, sword t, sword r, sword b,
 	exclBound.R_bottom = b;
 }
 
-static void ExclBounds(word function, DriverRegs *r)
+static void Sort(sword l, sword t, sword r, sword b, Rectangle *out)
+{
+    out->R_left = l < r ? l : r;
+    out->R_right = l < r ? r : l;
+    out->R_top = t < b ? t : b;
+    out->R_bottom = t < b ? b : t;
+}
+
+/* the bounds a drawing function touches (ExclRectBounds and friends);
+ * FALSE: not known (all) */
+static Boolean OpBounds(word function, DriverRegs *r, Rectangle *b)
 {
     switch (function) {
     case DR_VID_RECT:
-	ExclRectBounds(Coord(r->DR_ax), Coord(r->DR_bx), Coord(r->DR_cx),
-		       Coord(r->DR_dx), r->DR_esDi);
-	break;
     case DR_VID_LINE:			/* ExclLineBounds */
-	ExclRectBounds(Coord(r->DR_ax), Coord(r->DR_bx), Coord(r->DR_cx),
-		       Coord(r->DR_dx), r->DR_esDi);
-	break;
-    case DR_VID_MOVBITS:		/* ExclMovBitsBounds: the destination */
-	ExclRectBounds(Coord(r->DR_cx), Coord(r->DR_dx),
-		       (sword) (Coord(r->DR_cx) + Coord(r->DR_si) - 1),
-		       (sword) (Coord(r->DR_dx) + Coord(r->DR_bp) - 1),
-		       r->DR_esDi);
-	break;
-    case DR_VID_PUTBITS:		/* ExclPutBitsBounds */
+    case DR_VID_PUTLINE:
+	Sort(Coord(r->DR_ax), Coord(r->DR_bx), Coord(r->DR_cx),
+	     Coord(r->DR_dx), b);
+	return TRUE;
+    case DR_VID_MOVBITS:		/* the source and the destination */
+	Sort((sword) (Coord(r->DR_ax) < Coord(r->DR_cx) ?
+		      Coord(r->DR_ax) : Coord(r->DR_cx)),
+	     (sword) (Coord(r->DR_bx) < Coord(r->DR_dx) ?
+		      Coord(r->DR_bx) : Coord(r->DR_dx)),
+	     (sword) ((Coord(r->DR_ax) > Coord(r->DR_cx) ?
+		       Coord(r->DR_ax) : Coord(r->DR_cx)) +
+		      Coord(r->DR_si) - 1),
+	     (sword) ((Coord(r->DR_bx) > Coord(r->DR_dx) ?
+		       Coord(r->DR_bx) : Coord(r->DR_dx)) +
+		      Coord(r->DR_bp) - 1), b);
+	return TRUE;
+    case DR_VID_PUTBITS:
 	if (r->DR_bpPtr) {
 	    const PutBitsArgs *pba = r->DR_bpPtr;
-	    ExclRectBounds(Coord(r->DR_ax), Coord(r->DR_bx),
-			   (sword) (Coord(r->DR_ax) + pba->PBA_bm.B_width - 1),
-			   (sword) (Coord(r->DR_bx) + pba->PBA_bm.B_height - 1),
-			   r->DR_esDi);
+	    Sort(Coord(r->DR_ax), Coord(r->DR_bx),
+		 (sword) (Coord(r->DR_ax) + pba->PBA_bm.B_width - 1),
+		 (sword) (Coord(r->DR_bx) + pba->PBA_bm.B_height - 1), b);
+	    return TRUE;
 	}
-	break;
-    case DR_VID_PUTLINE:
-	ExclRectBounds(Coord(r->DR_ax), Coord(r->DR_bx), Coord(r->DR_cx),
-		       Coord(r->DR_dx), r->DR_esDi);
-	break;
-    case DR_VID_POLYGON:		/* ExclPolygonBounds */
+	return FALSE;
+    case DR_VID_POLYGON:
 	if (r->DR_farPtr && (word) r->DR_cx) {
-	    Rectangle b;
-	    VidPointBounds(r->DR_farPtr, (word) r->DR_cx, &b);
-	    ExclRectBounds(b.R_left, b.R_top, b.R_right, b.R_bottom,
-			   r->DR_esDi);
+	    VidPointBounds(r->DR_farPtr, (word) r->DR_cx, b);
+	    return TRUE;
 	}
-	break;
-    case DR_VID_POLYLINE:		/* ExclPolylineBounds */
+	return FALSE;
+    case DR_VID_POLYLINE:
 	if (r->DR_farPtr) {
-	    Rectangle b;
 	    sword bw = (sword) (byte) r->DR_ax;
 	    sword bh = (sword) (byte) (r->DR_ax >> 8);
-	    if (VidPolylineBounds(r->DR_farPtr, bw < 1 ? 1 : bw,
-				  bh < 1 ? 1 : bh, &b))
-		ExclRectBounds(b.R_left, b.R_top, b.R_right, b.R_bottom,
-			       r->DR_esDi);
+	    return VidPolylineBounds(r->DR_farPtr, bw < 1 ? 1 : bw,
+				     bh < 1 ? 1 : bh, b);
 	}
-	break;
-    case DR_VID_REGION:			/* ExclRegionBounds */
-	{
-	    Rectangle b;
-	    if (VidRegionBounds(r, &b))
-		ExclRectBounds(b.R_left, b.R_top, b.R_right, b.R_bottom,
-			       r->DR_esDi);
-	}
-	break;
-    case DR_VID_DASH_LINE:		/* ExclDashBounds */
+	return FALSE;
+    case DR_VID_REGION:
+	return VidRegionBounds(r, b);
+    case DR_VID_DASH_LINE:
     case DR_VID_DASH_FILL:
 	if (r->DR_farPtr) {
 	    const DashInfo *di = r->DR_farPtr;
@@ -130,18 +134,30 @@ static void ExclBounds(word function, DriverRegs *r)
 		ddx = Coord(r->DR_ax);
 		ddy = Coord(r->DR_cx);
 	    }
-	    ExclRectBounds(di->DI_pt1.P_x, di->DI_pt1.P_y, di->DI_pt2.P_x,
-			   di->DI_pt2.P_y, r->DR_esDi);
-	    ExclRectBounds((sword) (di->DI_pt1.P_x + ddx),
-			   (sword) (di->DI_pt1.P_y + ddy),
-			   (sword) (di->DI_pt2.P_x + ddx),
-			   (sword) (di->DI_pt2.P_y + ddy), r->DR_esDi);
+	    Sort(di->DI_pt1.P_x, di->DI_pt1.P_y, di->DI_pt2.P_x,
+		 di->DI_pt2.P_y, b);
+	    if (ddx < 0)
+		b->R_left = (sword) (b->R_left + ddx);
+	    else
+		b->R_right = (sword) (b->R_right + ddx);
+	    if (ddy < 0)
+		b->R_top = (sword) (b->R_top + ddy);
+	    else
+		b->R_bottom = (sword) (b->R_bottom + ddy);
+	    return TRUE;
 	}
-	break;
+	return FALSE;
     default:
-	/* PUTSTRING: not there yet */
-	break;
+	return FALSE;			/* PUTSTRING: not there yet */
     }
+}
+
+static void ExclBounds(word function, DriverRegs *r)
+{
+    Rectangle b;
+
+    if (OpBounds(function, r, &b))
+	ExclRectBounds(b.R_left, b.R_top, b.R_right, b.R_bottom, r->DR_esDi);
 }
 
 static void VidStartExclusive(Handle gstate)
@@ -197,6 +213,7 @@ static Boolean VidInit(void)
 
 static void VidExit(void)
 {
+    VidResetXOR();
     VidDevExit();
     DriverTable.VDI_device = VID_NO_DEVICE;
     if (videoSem)
@@ -235,10 +252,16 @@ static Boolean VidCall(word function, DriverRegs *r)
     case DR_VID_SHOWPTR:
 	VidDevShowPtr();
 	return FALSE;
-    case DR_VID_MOVEPTR:
-	VidDevMovePtr(Coord(r->DR_ax), Coord(r->DR_bx));
+    case DR_VID_MOVEPTR: {
+	sword x = Coord(r->DR_ax), y = Coord(r->DR_bx);
+	sword dx = (sword) (x - vidPtrX), dy = (sword) (y - vidPtrY);
+	vidPtrX = x;
+	vidPtrY = y;
+	VidDevMovePtr(x, y);
+	VidXORPtrMoved(dx, dy);			/* UpdateXORForPtr */
 	r->DR_ax = 0;				/* no save under hit */
 	return FALSE;
+    }
     case DR_VID_SAVE_UNDER:
 	return TRUE;				/* not possible */
     case DR_VID_REQUEST_UNDER:
@@ -249,9 +272,11 @@ static Boolean VidCall(word function, DriverRegs *r)
     case DR_VID_INFO_UNDER:
 	r->DR_di = 0;
 	return FALSE;
+    case DR_VID_SET_XOR:
+	VidSetXOR(r);
+	return FALSE;
     case DR_VID_CLEAR_XOR:
-	r->DR_ax = r->DR_bx = r->DR_cx = r->DR_dx = 0;
-	r->DR_si = r->DR_di = 0;
+	VidClearXOR(r);
 	return FALSE;
     case DR_VID_RECT:
 	VidDrawRect(r);
@@ -346,7 +371,15 @@ Boolean VidStrategy(word function, DriverRegs *r)
     if (function > DR_VID_LAST_NON_EXCLUSIVE && Excluded(function, r))
 	return FALSE;
     ThreadPSem(videoSem);
+    if (function > DR_VID_LAST_NON_EXCLUSIVE) {	/* CheckXORCollision */
+	Rectangle b;
+	if (OpBounds(function, r, &b))
+	    VidCheckXORCollision(b.R_left, b.R_top, b.R_right, b.R_bottom);
+	else
+	    VidHideXOR();
+    }
     carry = VidCall(function, r);
+    VidShowXOR();				/* if it was taken away */
     VidDevUpdate();
     ThreadVSem(videoSem);
     return carry;

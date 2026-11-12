@@ -18,6 +18,7 @@ set(_vidcom ${CMAKE_CURRENT_SOURCE_DIR}/VidCom/vidcomEntry.c
             ${CMAKE_CURRENT_SOURCE_DIR}/VidCom/vidcomPolygon.c
             ${CMAKE_CURRENT_SOURCE_DIR}/VidCom/vidcomRegion.c
             ${CMAKE_CURRENT_SOURCE_DIR}/VidCom/vidcomPutLine.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/VidCom/vidcomXOR.c
             ${CMAKE_CURRENT_SOURCE_DIR}/VidCom/vidcomPalette.c)
 geos_geode(hostvid ${_vidcom}
            ${CMAKE_CURRENT_SOURCE_DIR}/Host/hostVideo.c

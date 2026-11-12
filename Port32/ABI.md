@@ -730,13 +730,28 @@ bounds, then bands) moved by `ax`, `bx`:
 
 The exclusive collects the bounds of all these functions.
 
-**Not yet:**
-- `PUTSTRING`;
-- the save under areas (`DR_VID_SAVE_UNDER` says it is not possible);
-- the XOR region;
-- the escapes (all unsupported, `di` 0).
+**The XOR region** (`vidcomXOR.c`) is the frame drawn while a window is
+moved or resized.
+- `DR_VID_SET_XOR` takes:
+  - the position (`ax`, `bx`);
+  - the region as a handle and an offset (`dx:cx`), locked for as long
+    as the region is set;
+  - the `VisXORFlags` (`si`);
+  - the `VisXORParams` (`DR_bpPtr`).
+- It is inverted over everything and clipped to the screen only.
+- It is taken away around drawing that touches it.
+- On `DR_VID_MOVEPTR` the position and parameters that the flags name
+  move with the pointer. The asm moved them only while the pointer was
+  shown.
+- `DR_VID_CLEAR_XOR` returns the parameters and the position as they
+  are at that moment.
 
-These functions do nothing for now.
+**No save under areas**, as on the 24-bit VGA (`vga24Under.asm`):
+`DR_VID_SAVE_UNDER` says it is not possible.
+
+**Not yet:**
+- `PUTSTRING`, which does nothing for now;
+- the escapes (all unsupported, `di` 0).
 
 **The host display** is `Driver/Video/Host` (`hostvid.geo`). It has no
 asm original: on a host the screen is the `ghal_display` surface, 32
@@ -777,6 +792,7 @@ from the display, under Xvfb where the display is X11. It checks:
   solid;
 - fat dashes;
 - a scan line along a line;
+- the XOR region: over drawing, following the pointer, and cleared;
 - `DR_VID_GETPIXEL`, the palette, an escape, and the screen off and
   on.
 
