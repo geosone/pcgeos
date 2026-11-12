@@ -66,6 +66,7 @@ add_subdirectory(Library/Math/Float)
 add_subdirectory(Library/Kernel)
 add_subdirectory(Loader)
 add_subdirectory(Driver/Keyboard)
+add_subdirectory(Driver/Mouse)
 add_subdirectory(Port32/Tests)
 
 # Inventory of direct host contacts (plan P2).  Not part of 'all'.

@@ -1,0 +1,5 @@
+# mkmf.lst -- the files of this directory that the DOS16 build takes
+# (Tools/nmkmf reads only these).  The C mouse code of the 32-bit build
+# (CMake: mouseCommon.c, mouseCommon.h, Host/) is left out.
+mouseCommon.asm
+mouseSerCommon.asm

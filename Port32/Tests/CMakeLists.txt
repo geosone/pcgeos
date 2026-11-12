@@ -258,4 +258,11 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   add_dependencies(test_kbd geode_kbd geode_kbde_gr)
   target_link_libraries(test_kbd PRIVATE geos_kernel)
   add_test(NAME driver.keyboard COMMAND test_kbd)
+
+  # the C host mouse driver (Driver/Mouse) through the input manager
+  geos_embed(_hostmse_c ${hostmse_GEO} hostmse_geode)
+  add_executable(test_mouse test_mouse.c ${_hostmse_c})
+  add_dependencies(test_mouse geode_hostmse)
+  target_link_libraries(test_mouse PRIVATE geos_kernel)
+  add_test(NAME driver.mouse COMMAND test_mouse)
 endif()

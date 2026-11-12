@@ -561,6 +561,59 @@ output. It checks:
 - the way through the input manager to its output (`ImGrabInput`);
 - the German map: y and z, the dead acute, and `<Alt Gr>`-q giving @.
 
+### 7.4 The mouse drivers (`Driver/Mouse`, P4)
+
+As in DOS16, a mouse driver is the common part plus a device part.
+- `mouseCommon.c` is the C port of `mouseCommon.asm`, beside it. It has
+  the strategy routine, init/exit, acceleration, the combine mode and
+  `DR_MOUSE_CHANGE_OUTPUT`.
+- `MouseSendEvents(buttons, x, y, absolute)` sends `MSG_IM_PTR_CHANGE`
+  and `MSG_IM_BUTTON_CHANGE` to the input manager. `buttons` are
+  `MouseButtonBits`, 1 meaning up.
+  - Relative motion is accelerated as before (`[input]`
+    `mouseAccelThreshold` and `mouseAccelMultiplier`).
+  - Absolute positions go out with `PI_absX`/`PI_absY` and no
+    acceleration. This was compile-time `MOUSE_USES_ABSOLUTE_DELTAS`;
+    here it is decided per call, because a host has both kinds.
+- `MouseSendWheel` sends `MSG_IM_MOUSE_WHEEL_VERTICAL`
+  (`mouseNaturalScroll`).
+- The driver table is the `MouseDriverInfo` of `mouseDr.def`, including
+  `MDI_flags` (`CInclude/Internal/mouseDr.h`; the public `mouseDr.h`
+  stays as it was). The function numbers follow `DRE_SET_DEVICE`:
+  `DR_MOUSE_SET_RATE` is 12. The protocol is 3.2, as in DOS16.
+
+**Combining.** DOS16 folded pointer changes into the last one in the
+input manager's queue (`MouseCombineEvent`, `MF_CUSTOM`). The C kernel
+has no custom combining, so the changes go out as they come. The
+combine mode is only stored; the input manager combines what it sends
+on (§13j).
+
+**Not yet:** `ImSetPtrFlags`, calibration, the coordinate buffer
+escapes, wheel keys, and rates (`MOUSE_CANT_SET_RATE`).
+
+**The host pointer** is `Driver/Mouse/Host` (`hostmse.geo`). It has no
+asm original: DOS16 had one driver per kind of hardware, and on a host
+the pointer of the window system or console comes from `ghal_input`.
+- The handler of `GHAL_IRQ_INPUT` reads the pointer's events.
+- X and Y are a position (`GHAL_INPUT_ABSOLUTE`) or a change.
+- HID buttons 1, 2, 3 and 4 become GEOS buttons 0, 2, 1 and 3 (primary,
+  right, middle, fourth).
+- The wheel turned away from the user is up (< 0).
+- Motion goes out before a button change that follows it in the same
+  batch, so a press lands where the pointer was. Pan is dropped.
+
+The mouse driver is loaded by the UI, not the kernel (as in DOS16).
+
+ctest `driver.mouse` loads `hostmse.geo` from `SP_MOUSE_DRIVERS` and
+reads the input manager's output. It checks:
+- position and motion;
+- the three buttons, and a press after motion in one batch;
+- the wheel and acceleration;
+- the combine mode and the rate;
+- `DRE_TEST_DEVICE` and the driver table;
+- `DR_MOUSE_CHANGE_OUTPUT` (the raw `MSG_IM_*`);
+- no events after `DR_EXIT`.
+
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 
 The C kernel starts with the handle table and the memory block API of
