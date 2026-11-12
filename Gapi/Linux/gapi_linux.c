@@ -15,7 +15,9 @@
 #define _GNU_SOURCE
 #include "gapi.h"
 #include "gapi_dbus.h"
+#include "gapi_linux.h"
 
+#include <stdarg.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +41,14 @@ int gapi_host_is_geos(void)
 const char *gapi_last_error(void)
 {
     return lastError;
+}
+
+void gapi_linux_set_error(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(lastError, sizeof lastError, fmt, ap);
+    va_end(ap);
 }
 
 static ghal_status SystemBus(gapi_dbus **c)

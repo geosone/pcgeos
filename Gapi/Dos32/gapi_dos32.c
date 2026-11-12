@@ -167,3 +167,51 @@ ghal_status gapi_power_do(gapi_power_action a)
     return GHAL_ERR_HOST;       /* it did not happen */
 }
 
+/* ---------------------------------------------------------------------
+ * Printing: GEOS's printer drivers do it themselves on DOS
+ * ------------------------------------------------------------------- */
+
+ghal_status gapi_print_list(gapi_printer *list, int max, int *count)
+{
+    (void)list;
+    (void)max;
+    *count = 0;
+    return GHAL_ERR_UNSUPPORTED;
+}
+
+ghal_status gapi_print_default(char *name, size_t size)
+{
+    if (size)
+        name[0] = 0;
+    return GHAL_ERR_UNSUPPORTED;
+}
+
+ghal_status gapi_print_job_open(const char *printer, const char *title,
+                                gapi_doc_format format, int copies,
+                                int duplex, gapi_print_job **job)
+{
+    (void)printer; (void)title; (void)format; (void)copies; (void)duplex;
+    *job = 0;
+    return GHAL_ERR_UNSUPPORTED;
+}
+
+ghal_status gapi_print_job_write(gapi_print_job *job, const void *data,
+                                 size_t size)
+{
+    (void)job; (void)data; (void)size;
+    return GHAL_ERR_UNSUPPORTED;
+}
+
+ghal_status gapi_print_job_close(gapi_print_job *job, uint32_t *jobId)
+{
+    (void)job;
+    if (jobId)
+        *jobId = 0;
+    return GHAL_ERR_UNSUPPORTED;
+}
+
+void gapi_print_job_cancel(gapi_print_job *job)
+{
+    (void)job;
+}
+

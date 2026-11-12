@@ -83,6 +83,54 @@ ghal_status gapi_power_can(gapi_power_action a);
  * returns: the host then ends the session and GEOS with it. */
 ghal_status gapi_power_do(gapi_power_action a);
 
+/* ---------------------------------------------------------------------
+ * gapi_print -- the host's printers
+ *
+ * GEOS renders a job itself (PostScript, later PDF) and hands it to a
+ * queue of the host, which does the rest (Port32/GAPI-Concept.md §5).
+ * linux: CUPS over IPP on its socket ($CUPS_SERVER if it is a path,
+ * else /run/cups/cups.sock).  dos32: none (GEOS's printer drivers write
+ * to LPT, COM or a file themselves).
+ * ------------------------------------------------------------------- */
+
+#define GAPI_PRINT_NAME_SIZE 128
+
+typedef struct gapi_printer {
+    char name[GAPI_PRINT_NAME_SIZE];        /* the host's queue */
+    char info[GAPI_PRINT_NAME_SIZE];        /* the name the user sees */
+    char location[GAPI_PRINT_NAME_SIZE];
+    char makeModel[GAPI_PRINT_NAME_SIZE];
+    int  isDefault;
+    int  accepting;         /* takes jobs */
+    int  state;             /* 3 idle, 4 printing, 5 stopped */
+    int  color;
+    int  duplex;            /* can print on both sides */
+} gapi_printer;
+
+/* The host's printers, at most max of them; *count is how many there
+ * are (may be more than max). */
+ghal_status gapi_print_list(gapi_printer *list, int max, int *count);
+/* The name of the default printer (LPDEST/PRINTER, else the host's);
+ * GHAL_ERR_NOTFOUND if there is none. */
+ghal_status gapi_print_default(char *name, size_t size);
+
+typedef enum gapi_doc_format {
+    GAPI_DOC_POSTSCRIPT,    /* application/postscript */
+    GAPI_DOC_PDF            /* application/pdf */
+} gapi_doc_format;
+
+typedef struct gapi_print_job gapi_print_job;
+
+/* A job to a printer: open it, write the document as it is made, close
+ * it to print (with the host's job id), or cancel it. */
+ghal_status gapi_print_job_open(const char *printer, const char *title,
+                                gapi_doc_format format, int copies,
+                                int duplex, gapi_print_job **job);
+ghal_status gapi_print_job_write(gapi_print_job *job, const void *data,
+                                 size_t size);
+ghal_status gapi_print_job_close(gapi_print_job *job, uint32_t *jobId);
+void        gapi_print_job_cancel(gapi_print_job *job);
+
 #ifdef __cplusplus
 }
 #endif
