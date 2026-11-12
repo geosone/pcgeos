@@ -64,7 +64,7 @@ The order follows what the Preferences need first and what can be tested:
 
 1. time (done)
 2. power (done)
-3. printing (the IPP client done; next the `Cups` port driver, then PScript in C)
+3. printing (the IPP client and the `Cups` port driver done; next PScript in C)
 4. locale and time zone
 5. network
 6. storage
@@ -121,7 +121,14 @@ Still open: command-line tools (`timedatectl`, `lpstat`) as a stopgap before the
 - A job is Print-Job with the document in HTTP chunks, written as GEOS makes it. Closing it sends the last chunk and returns the job id. Cancelling closes the connection without the last chunk, and CUPS drops the job. The options are format (PostScript, PDF), copies and duplex.
 - Statuses: HTTP 401/403 and IPP 0x0401-0x0403 are refusals (`GHAL_ERR_ACCESS`); not-found is `GHAL_ERR_NOTFOUND`; no CUPS is `GHAL_ERR_UNSUPPORTED`.
 - dos32 has none: GEOS's printer drivers write to LPT, COM or a file themselves.
-- ctest `gapi.print` runs against a stand-in IPP server in a child process, which checks the job's attributes and document. Against the real CUPS it only lists printers; it never prints.
+- ctest `gapi.print` runs against a stand-in IPP server in a child process (`Port32/Tests/fakecups.c`), which checks the job's attributes and document. Against the real CUPS it only lists printers; it never prints.
+
+**The CUPS port driver** (`Driver/Stream/Cups`, `cups.geo`, `cupsDr.h`):
+- A stream driver that the spooler opens as a custom port (`PPT_CUSTOM`, `processCustom.asm`). It is new in Port32; there is no asm original.
+- `STREAM_ESC_LOAD_OPTIONS` gets the printer's name, which is its ini category: `hostQueue` (the CUPS queue) and `hostDuplex`. In `DR_STREAM_OPEN`, a queue name in `CPP_info` wins over `hostQueue`; without either, it uses the host's default printer, and without that it fails with `STREAM_NO_DEVICE`.
+- The printer driver's writes go into a buffer of 4 KB per unit. A full buffer goes to CUPS, and the job is opened with its first data, so a port without output prints nothing. `DR_STREAM_CLOSE` with `STREAM_LINGER` prints the job; with `STREAM_DISCARD` it drops it.
+- It has no Stream driver buffer and no thread of its own. An error stays with the unit (`DR_STREAM_GET_ERROR`: `CUPS_ERR_*`), and later writes fail.
+- ctest `driver.cups` loads it in a booted kernel and drives it as the spooler does, against the stand-in. It checks a job across buffer boundaries (with duplex from the ini), a cancelled job, a port without a job, the `CPP_info` queue, two units, a refused job, no CUPS, and no default printer.
 
 **The clock on Linux:** `timedate1.SetTime(usec, relative=false, interactive)`. Without timedated it uses `clock_settime`. While NTP is on, timedated refuses with `AutomaticTimeSyncEnabled`, which counts as `GHAL_ERR_ACCESS`: the host keeps the clock.
 

@@ -136,7 +136,7 @@ if(GEOS_HOST STREQUAL "linux")
   add_executable(test_gapi_dbus test_gapi_dbus.c)
   target_link_libraries(test_gapi_dbus PRIVATE gapi)
   add_test(NAME gapi.dbus COMMAND test_gapi_dbus)
-  add_executable(test_gapi_print test_gapi_print.c)
+  add_executable(test_gapi_print test_gapi_print.c fakecups.c)
   target_link_libraries(test_gapi_print PRIVATE gapi)
   add_test(NAME gapi.print COMMAND test_gapi_print)
 endif()
@@ -312,6 +312,17 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   add_dependencies(test_kbd geode_kbd geode_kbde_gr)
   target_link_libraries(test_kbd PRIVATE geos_kernel)
   add_test(NAME driver.keyboard COMMAND test_kbd)
+
+  # the CUPS port driver (Driver/Stream/Cups) against a stand-in for CUPS
+  if(GEOS_HOST STREQUAL "linux")
+    geos_embed(_cups_c ${cups_GEO} cups_geode)
+    add_executable(test_cups test_cups.c fakecups.c ${_cups_c})
+    add_dependencies(test_cups geode_cups)
+    target_include_directories(test_cups PRIVATE
+                               ${PROJECT_SOURCE_DIR}/Driver/Stream/Cups)
+    target_link_libraries(test_cups PRIVATE geos_kernel)
+    add_test(NAME driver.cups COMMAND test_cups)
+  endif()
 
   # the C host mouse driver (Driver/Mouse) through the input manager
   geos_embed(_hostmse_c ${hostmse_GEO} hostmse_geode)

@@ -497,7 +497,8 @@ checks:
 kernel exports, besides its routines:
 - the GHAL host services that drivers need (`kexports.py`
   `GHAL_EXPORTS`): `ghal_crit_*`, `ghal_log`, `ghal_time_monotonic_ns`,
-  `ghal_irq_*`, `ghal_input_*` and `ghal_display_*`;
+  `ghal_irq_*`, `ghal_input_*` and `ghal_display_*`, and the GAPI
+  print job routines and `gapi_last_error` for the CUPS port driver;
 - `memcpy`, `memmove`, `memset` and `memcmp` (`COMPILER_EXPORTS`). gcc
   and clang may call these on their own even in a freestanding geode,
   for structure copies and zeroing.

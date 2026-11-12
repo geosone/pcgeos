@@ -45,6 +45,9 @@ GHAL_EXPORTS = [
     "ghal_display_open", "ghal_display_flush", "ghal_display_close",
     "ghal_display_close_requested", "ghal_display_read_back",
     "ghal_display_backend",
+    # GAPI the drivers use (CInclude/gapi.h): the CUPS port driver
+    "gapi_print_default", "gapi_print_job_open", "gapi_print_job_write",
+    "gapi_print_job_close", "gapi_print_job_cancel", "gapi_last_error",
 ]
 
 # gcc and clang require these of a freestanding environment
