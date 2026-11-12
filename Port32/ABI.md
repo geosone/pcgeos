@@ -2104,7 +2104,13 @@ categories, `InitFileBackupLanguage`/`InitFileSwitchLanguages`, and
 2. gives `DR_EXIT` to the drivers that are not system drivers;
 3. closes the files still open;
 4. gives `DR_EXIT` to the system drivers;
-5. lets `KernelRun` return `KEF_DIRTY`, `KEF_RESET` or `KEF_POWER_OFF`,
+5. for a reboot or power off (`KEF_RESET`, `KEF_POWER_OFF`): when GEOS
+   is the user's session (`[system] hostRole`; on DOS by default), it
+   asks the host through `gapi_power_do`. On DOS that is the reset of
+   `bootBoot.asm` (warm start flag and keyboard controller) or APM, and
+   it does not return. On Linux it asks logind, which then ends the
+   session. As a guest, or if the host refuses (logged), only GEOS ends;
+6. lets `KernelRun` return `KEF_DIRTY`, `KEF_RESET` or `KEF_POWER_OFF`,
    and the reason (`KernelExitMessage`).
 
 On every thread but the boot thread, EndGeos does not return, as in

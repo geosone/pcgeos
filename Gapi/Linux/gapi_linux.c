@@ -2,6 +2,8 @@
  * gapi_linux.c -- GAPI on Linux (CInclude/gapi.h): the host's services
  * through our own D-Bus client (gapi_dbus.c) on the system bus.
  *
+ * Power: systemd-logind (org.freedesktop.login1.Manager), Can* first.
+ *
  * The clock: systemd-timedated (org.freedesktop.timedate1.SetTime); polkit
  * decides whether the user may, and asks for a password when GAPI is
  * interactive.  Without timedated (no systemd), clock_settime, which
@@ -27,6 +29,11 @@ static gapi_dbus *systemBus;
 void gapi_set_interactive(int allow)
 {
     interactive = allow != 0;
+}
+
+int gapi_host_is_geos(void)
+{
+    return 0;                   /* GEOS is one program of the host */
 }
 
 const char *gapi_last_error(void)
@@ -134,3 +141,82 @@ ghal_status gapi_time_set_local(const ghal_datetime *dt)
     }
     return GHAL_OK;
 }
+
+/* ---------------------------------------------------------------------
+ * Power: login1
+ * ------------------------------------------------------------------- */
+
+static const char *const powerNames[] = {
+    "PowerOff", "Reboot", "Suspend", "Hibernate"
+};
+
+ghal_status gapi_power_can(gapi_power_action a)
+{
+    gapi_dbus *c;
+    gapi_dbus_msg *m;
+    gapi_dbus_reply r;
+    gapi_dbus_iter it;
+    char member[32];
+    const char *ans;
+    ghal_status st;
+
+    if ((unsigned)a > GAPI_POWER_HIBERNATE)
+        return GHAL_ERR_INVAL;
+    lastError[0] = 0;
+    if ((st = SystemBus(&c)) != GHAL_OK)
+        return GHAL_ERR_UNSUPPORTED;
+    m = malloc(sizeof *m);
+    if (!m)
+        return GHAL_ERR_NOMEM;
+    snprintf(member, sizeof member, "Can%s", powerNames[a]);
+    gapi_dbus_msg_init(m, "org.freedesktop.login1", "/org/freedesktop/login1",
+                       "org.freedesktop.login1.Manager", member, NULL);
+    st = gapi_dbus_call(c, m, -1, &r);
+    free(m);
+    if (st != GHAL_OK) {
+        gapi_dbus_close(systemBus);
+        systemBus = NULL;
+        return st;
+    }
+    st = gapi_dbus_status(&r);
+    if (st == GHAL_OK) {
+        gapi_dbus_iter_init(&it, &r);
+        ans = gapi_dbus_get_string(&it);
+        snprintf(lastError, sizeof lastError, "%s: %s", member, ans);
+        /* yes, challenge (a password), no, na (not available) */
+        if (it.error)
+            st = GHAL_ERR_HOST;
+        else if (!strcmp(ans, "yes"))
+            st = GHAL_OK;
+        else if (!strcmp(ans, "challenge"))
+            st = interactive ? GHAL_OK : GHAL_ERR_ACCESS;
+        else if (!strcmp(ans, "na"))
+            st = GHAL_ERR_UNSUPPORTED;
+        else
+            st = GHAL_ERR_ACCESS;
+    } else {
+        snprintf(lastError, sizeof lastError, "%s",
+                 r.error ? r.error : "?");
+    }
+    gapi_dbus_reply_free(&r);
+    return st;
+}
+
+ghal_status gapi_power_do(gapi_power_action a)
+{
+    gapi_dbus_msg *m;
+    ghal_status st;
+
+    if ((unsigned)a > GAPI_POWER_HIBERNATE)
+        return GHAL_ERR_INVAL;
+    m = malloc(sizeof *m);
+    if (!m)
+        return GHAL_ERR_NOMEM;
+    gapi_dbus_msg_init(m, "org.freedesktop.login1", "/org/freedesktop/login1",
+                       "org.freedesktop.login1.Manager", powerNames[a], "b");
+    gapi_dbus_put_bool(m, interactive);
+    st = SystemCall(m);
+    free(m);
+    return st;
+}
+

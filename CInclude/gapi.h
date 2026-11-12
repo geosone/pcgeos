@@ -41,6 +41,10 @@ void gapi_set_interactive(int allow);
  * (dos32); the log then stays where it was. */
 ghal_status gapi_log_to_system(void);
 
+/* Is GEOS the system on this host (dos32: yes, there is nothing else),
+ * or one program of it (linux)?  The default of [system] hostRole. */
+int gapi_host_is_geos(void);
+
 /* What the host said about the last refused or failed call (a D-Bus
  * error name and message, ...), for the log; "" if nothing. */
 const char *gapi_last_error(void);
@@ -56,6 +60,28 @@ const char *gapi_last_error(void);
  * clock_settime (CAP_SYS_TIME).  GHAL_ERR_ACCESS also when the host
  * synchronizes its clock itself (NTP on). */
 ghal_status gapi_time_set_local(const ghal_datetime *dt);
+
+/* ---------------------------------------------------------------------
+ * gapi_power -- switching the machine off, rebooting, suspending
+ * ------------------------------------------------------------------- */
+
+typedef enum gapi_power_action {
+    GAPI_POWER_OFF,
+    GAPI_POWER_REBOOT,
+    GAPI_POWER_SUSPEND,
+    GAPI_POWER_HIBERNATE
+} gapi_power_action;
+
+/* Could the action be done now?  GHAL_OK: yes (when interactive, the
+ * host may still ask for a password); GHAL_ERR_ACCESS: not without
+ * rights; GHAL_ERR_UNSUPPORTED: the machine cannot.  Changes nothing. */
+ghal_status gapi_power_can(gapi_power_action a);
+
+/* Do it.  dos32: reboot through the keyboard controller (as EndGeos of
+ * bootBoot.asm), off through APM; neither returns when it works.  linux:
+ * org.freedesktop.login1 (PowerOff, Reboot, Suspend, Hibernate), which
+ * returns: the host then ends the session and GEOS with it. */
+ghal_status gapi_power_do(gapi_power_action a);
 
 #ifdef __cplusplus
 }

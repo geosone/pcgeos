@@ -8,7 +8,8 @@
  * kernel goes:
  *
  *   1. the first thread and the timer (InitThread, InitTimer);
- *      [system] hostRole: guest (default) or session, where GEOS is the
+ *      [system] hostRole: guest (default on linux) or session (the
+ *      default on DOS, where GEOS is the system), where GEOS is the
  *      desktop and manages the host through GAPI (the clock, ...): the
  *      host may then ask the user for a password, and the log goes to
  *      the host's system log (the journal);
@@ -167,10 +168,11 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     {
 	char role[16];
 	word n;
-	kernelHostSession =
-	    !InitFileReadStringBuffer("system", "hostRole", role,
-				      sizeof(role), &n) &&
-	    !strcmp(role, "session");
+	if (InitFileReadStringBuffer("system", "hostRole", role,
+				     sizeof(role), &n))
+	    kernelHostSession = (Boolean) gapi_host_is_geos();
+	else
+	    kernelHostSession = !strcmp(role, "session");
 	if (kernelHostSession) {
 	    /* the host may ask the user (polkit); the log goes to the
 	     * host's system log (the journal) */

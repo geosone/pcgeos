@@ -12,6 +12,7 @@
  * has detached, KernelRun returns.
  */
 #include "kernelC.h"
+#include "gapi.h"
 #include "ghal.h"
 #include "hostfs.h"
 #include <system.h>
@@ -122,6 +123,8 @@ int main(int argc, char **argv)
 
     app = KernelBoot(top, " /a /bc kgapp.geo", &e);
     CHECK(app != 0 && e == GLE_OK);
+    /* no [system] hostRole: a session where GEOS is the system (DOS) */
+    CHECK(kernelHostSession == (Boolean) gapi_host_is_geos());
     if (!app) {
 	printf("KernelBoot: GeodeLoadError %d\n", (int) e);
 	return 1;

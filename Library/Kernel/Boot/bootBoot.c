@@ -10,6 +10,11 @@
  *   3. closes the files still open (ExitFile);
  *   4. gives DR_EXIT to the system drivers (ExitSystemDrivers);
  *   5. after a clean end, deletes GEOS_ACT.IVE from the top.
+ *   6. a reboot or power off (KEF_RESET, KEF_POWER_OFF) goes to the host
+ *      when GEOS is the user's session (kernelHostSession; always on
+ *      DOS): gapi_power_do, which does not return on DOS (the reset of
+ *      bootBoot.asm, APM) and asks logind on linux.  As a guest, or if
+ *      the host refuses, only GEOS ends.
  * Then it lets KernelRun return the exit flags (KEF_*) and the reason
  * to the program, which ends the host process.  On any thread but the
  * boot thread, EndGeos does not return (DOS16 never returned): the
@@ -21,6 +26,7 @@
 #include "kernelC.h"
 #include <system.h>
 #include "ghal.h"
+#include "gapi.h"
 
 #include <string.h>
 
@@ -98,6 +104,15 @@ void EndGeos(word flags, const char *reason)
 	FileSetStandardPath(SP_TOP);
 	FileDelete(KERNEL_ACTIVE_FILE);
 	FilePopDir();
+    }
+    if (kernelHostSession && (kernelExitFlags & (KEF_RESET | KEF_POWER_OFF))) {
+	gapi_power_action a = kernelExitFlags & KEF_RESET ?
+	    GAPI_POWER_REBOOT : GAPI_POWER_OFF;
+	ghal_status st = gapi_power_do(a);
+	if (st != GHAL_OK)
+	    ghal_log(GHAL_LOG_WARN, "kernel: the host did not %s (%d: %s)",
+		     a == GAPI_POWER_REBOOT ? "reboot" : "switch off",
+		     (int) st, gapi_last_error());
     }
     done = TRUE;
     if (KernelThisThread() != kernelBootThread)
