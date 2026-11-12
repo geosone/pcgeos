@@ -1,6 +1,6 @@
 # GAPI: GEOS Host API
 
-**Status:** concept, with the first function implemented: setting the clock (`gapi_time_set_local`, 2026-11-12). The decisions of 2026-11-12 are in section 5.
+**Status:** the first parts are implemented (2026-11-12): setting the clock (`gapi_time_set_local`, through systemd-timedated on Linux), our own D-Bus client and the journal (section 6). The decisions of 2026-11-12 are in section 5.
 
 **Goal:** on Linux, GEOS can be a desktop of its own, as KDE or GNOME are: the user's session, which manages the machine through the host's services. GHAL is the abstraction of the hardware; GAPI is the way back into the system.
 
@@ -51,7 +51,7 @@ The GHAL does not cover this:
 
 | Group | Content | `dos32` | `linux` | GEOS side |
 |---|---|---|---|---|
-| `gapi_time` | set the date and time; later the time zone and whether NTP runs | int 21h/2Bh, 2Dh (as `RestoreMSDOSTime`) | `clock_settime`; then `org.freedesktop.timedate1` (polkit) through our D-Bus client | `TimerSetDateAndTime`, Preferences Date & Time. **Implemented:** `gapi_time_set_local` |
+| `gapi_time` | set the date and time; later the time zone and whether NTP runs | int 21h/2Bh, 2Dh (as `RestoreMSDOSTime`) | `org.freedesktop.timedate1.SetTime` through our D-Bus client (polkit); without timedated `clock_settime` | `TimerSetDateAndTime`, Preferences Date & Time. **Implemented:** `gapi_time_set_local` |
 | `gapi_power` | switch off, reboot, suspend the machine | APM, BIOS reset (power drivers) | `org.freedesktop.login1` `PowerOff`/`Reboot`/`Suspend` | `SysShutdown` (`SST_POWER_OFF`, `EF_RESET`), the power driver |
 | `gapi_print` | list printers and queues, default printer, add or change one, its options; submit a job | GEOS printer drivers to LPT/COM/file, as today | CUPS (IPP): queues and options; jobs as PostScript or PDF | Spool library, printer control panel. GEOS renders PostScript/PDF, CUPS prints |
 | `gapi_locale` | keyboard layout, language, country formats, time zone | `COUNTRY`, code page, `geos.ini` | `org.freedesktop.locale1`, `timedate1` | `Local*`, keyboard driver, Preferences International |
@@ -89,3 +89,30 @@ The order follows what the Preferences need first and what can be tested:
 3. **Guest by default; session when GEOS is the only UI** (section 2, rule 5). Journal logging and the password prompts come with the D-Bus client, when GEOS is that far.
 
 Still open: command-line tools (`timedatectl`, `lpstat`) as a stopgap before the D-Bus client, or not at all.
+
+## 6. Implemented
+
+**The session functions** (`gapi.h`):
+- `gapi_set_interactive` decides whether the host may ask the user (the D-Bus flag `ALLOW_INTERACTIVE_AUTHORIZATION`, so polkit shows its password prompt).
+- `gapi_log_to_system` sends `ghal_log` to the host's system log. That is the journal on Linux; there is nothing on DOS. It uses the GHAL hook `ghal_log_set_sink`.
+- `gapi_last_error` gives the host's own words for the last refusal (D-Bus error name and message), for the log.
+- In the `session` role the boot switches on both: the prompts and the journal.
+
+**The D-Bus client** (`Gapi/Linux/gapi_dbus.c`, `gapi_dbus.h`), about 700 lines of C:
+- `gapi_unix.c` connects to the bus by its address (`unix:path=`, `unix:abstract=`).
+- It authenticates with `AUTH EXTERNAL` (our uid) and calls `Hello`.
+- Calls are built with the signature given up front: all basic types, variants, arrays, structs and dict entries. A body overflow is caught.
+- `gapi_dbus_call` waits for the reply to its serial and drops signals in between. The iterator reads the reply in either byte order, checks every value against the signature, and can enter and skip containers.
+- `gapi_dbus_status` maps error names: access denied, not authorized or interactive authorization required become `GHAL_ERR_ACCESS`; an unknown service, object, interface, method or property becomes `GHAL_ERR_UNSUPPORTED`.
+- `gapi_linux.c` keeps one connection to the system bus and opens it again after an error.
+- A call blocks the calling GEOS thread. A password prompt (up to 5 minutes) would therefore stop GEOS while it is open. Long calls will have to run on a host thread and wake GEOS through `ghal_irq` before the session role is used for real. GEOS must then also bring its own polkit agent.
+
+**The journal** (`Gapi/Linux/gapi_journal.c`): the native protocol, one datagram of `PRIORITY=`, `SYSLOG_IDENTIFIER=geos` and `MESSAGE=` to `/run/systemd/journal/socket`. Without the journal the log stays on stderr.
+
+**The clock on Linux:** `timedate1.SetTime(usec, relative=false, interactive)`. Without timedated it uses `clock_settime`. While NTP is on, timedated refuses with `AutomaticTimeSyncEnabled`, which counts as `GHAL_ERR_ACCESS`: the host keeps the clock.
+
+**Tests:**
+- ctest `gapi.time`: the clock is set to its own time, and bad values are refused.
+- ctest `gapi.dbus`: marshalling of every type, containers, skipping, type errors and overflow; on the system bus `Hello`, `GetId`, `ListNames`, `NameHasOwner`, `Peer.Ping` (the bus policy may deny it), errors for unknown services and methods, and timedate1's `Timezone`; one debug line to the journal.
+- It runs on all Linux builds, the cross builds through qemu-user against the host's bus.
+

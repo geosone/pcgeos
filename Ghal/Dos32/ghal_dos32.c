@@ -1036,12 +1036,27 @@ ghal_status ghal_fault_set_handler(ghal_fault_handler fn)
 /* ghal_log, ghal_exit, ghal_caps                                     */
 /* ------------------------------------------------------------------ */
 
+static ghal_log_sink *log_sink;
+
+void ghal_log_set_sink(ghal_log_sink *sink)
+{
+    log_sink = sink;
+}
+
 void ghal_log(int level, const char *fmt, ...)
 {
     static const char *const names[] = { "debug", "info", "warn", "error" };
     va_list ap;
     if (level < GHAL_LOG_DEBUG || level > GHAL_LOG_ERROR)
         level = GHAL_LOG_ERROR;
+    if (log_sink) {
+        char msg[1024];
+        va_start(ap, fmt);
+        vsnprintf(msg, sizeof msg, fmt, ap);
+        va_end(ap);
+        log_sink(level, msg);
+        return;
+    }
     fprintf(stderr, "geos[%s]: ", names[level]);
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);

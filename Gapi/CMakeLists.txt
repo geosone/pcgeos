@@ -6,7 +6,10 @@ target_include_directories(gapi PUBLIC ${PROJECT_SOURCE_DIR}/CInclude)
 target_link_libraries(gapi PUBLIC ghal)
 
 if(GEOS_HOST STREQUAL "linux")
-  target_sources(gapi PRIVATE Linux/gapi_linux.c)
+  target_sources(gapi PRIVATE Linux/gapi_linux.c Linux/gapi_dbus.c
+                              Linux/gapi_unix.c Linux/gapi_journal.c)
+  # the D-Bus client and the sockets, for the tests
+  target_include_directories(gapi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/Linux)
 elseif(GEOS_HOST STREQUAL "dos32")
   target_sources(gapi PRIVATE Dos32/gapi_dos32.c)
 else()

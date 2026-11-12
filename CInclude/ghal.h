@@ -349,6 +349,11 @@ void        ghal_log(int level, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)))
 #endif
     ;
+/* Send the log elsewhere instead of stderr (GAPI: the host's system
+ * log); NULL: stderr again.  The message has no level prefix and no
+ * newline. */
+typedef void ghal_log_sink(int level, const char *msg);
+void        ghal_log_set_sink(ghal_log_sink *sink);
 /* Stop in the host debugger if one is attached (int 3 / SIGTRAP). */
 void        ghal_debug_break(void);
 

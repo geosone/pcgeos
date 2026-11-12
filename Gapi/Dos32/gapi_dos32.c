@@ -9,6 +9,22 @@
 
 #include <dos.h>
 
+/* DOS asks nobody and logs nowhere else */
+void gapi_set_interactive(int allow)
+{
+    (void) allow;
+}
+
+ghal_status gapi_log_to_system(void)
+{
+    return GHAL_ERR_UNSUPPORTED;
+}
+
+const char *gapi_last_error(void)
+{
+    return "";
+}
+
 ghal_status gapi_time_set_local(const ghal_datetime *dt)
 {
     struct dosdate_t d;

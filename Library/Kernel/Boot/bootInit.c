@@ -9,7 +9,9 @@
  *
  *   1. the first thread and the timer (InitThread, InitTimer);
  *      [system] hostRole: guest (default) or session, where GEOS is the
- *      desktop and manages the host through GAPI (the clock, ...);
+ *      desktop and manages the host through GAPI (the clock, ...): the
+ *      host may then ask the user for a password, and the log goes to
+ *      the host's system log (the journal);
  *   2. the top directory as drive C (the loader's top level path) and
  *      the initial path SP_TOP (FileSetInitialPath); GEOS_ACT.IVE in
  *      the top, made here and deleted by a clean end: if it is there
@@ -48,6 +50,7 @@
  * windows, patches, the log file, documentIsTop, FSDInitComplete.
  */
 #include "kernelC.h"
+#include "gapi.h"
 
 #include <initfile.h>
 #include <system.h>
@@ -168,6 +171,12 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
 	    !InitFileReadStringBuffer("system", "hostRole", role,
 				      sizeof(role), &n) &&
 	    !strcmp(role, "session");
+	if (kernelHostSession) {
+	    /* the host may ask the user (polkit); the log goes to the
+	     * host's system log (the journal) */
+	    gapi_set_interactive(TRUE);
+	    (void) gapi_log_to_system();
+	}
     }
     GrInitFonts();
     GrLoadFontDrivers();

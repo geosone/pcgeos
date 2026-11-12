@@ -167,7 +167,8 @@ void TimerSetDateAndTime(word flags, const TimerDateAndTime *dateAndTime)
 	    if (!told) {
 		told = TRUE;
 		ghal_log(GHAL_LOG_INFO, "kernel: the host's clock was not "
-			 "set (%d); GEOS keeps its own", (int) st);
+			 "set (%d: %s); GEOS keeps its own", (int) st,
+			 gapi_last_error());
 	    }
 	}
     }

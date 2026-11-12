@@ -27,12 +27,34 @@ extern "C" {
 #define GAPI_API_VERSION 1
 
 /* ---------------------------------------------------------------------
+ * gapi_session -- how GEOS stands to the host
+ * ------------------------------------------------------------------- */
+
+/* May the host ask the user (for a password: polkit on linux) when a
+ * change needs more rights?  Off by default; on when GEOS is the user's
+ * session ([system] hostRole = session).  A call that asks blocks until
+ * the user answered. */
+void gapi_set_interactive(int allow);
+
+/* Send ghal_log to the host's system log (linux: the journal, with
+ * SYSLOG_IDENTIFIER=geos).  GHAL_ERR_UNSUPPORTED where there is none
+ * (dos32); the log then stays where it was. */
+ghal_status gapi_log_to_system(void);
+
+/* What the host said about the last refused or failed call (a D-Bus
+ * error name and message, ...), for the log; "" if nothing. */
+const char *gapi_last_error(void);
+
+/* ---------------------------------------------------------------------
  * gapi_time -- the host's clock
  * ------------------------------------------------------------------- */
 
 /* Set the host's wall clock to a local date and time (the weekday is
  * ignored).  dos32: DOS's date and time (int 21h/2Bh, 2Dh, as the asm
- * kernel's RestoreMSDOSTime); linux: the system clock (CAP_SYS_TIME). */
+ * kernel's RestoreMSDOSTime).  linux: systemd-timedated's SetTime over
+ * D-Bus (polkit decides, and asks when interactive); without timedated,
+ * clock_settime (CAP_SYS_TIME).  GHAL_ERR_ACCESS also when the host
+ * synchronizes its clock itself (NTP on). */
 ghal_status gapi_time_set_local(const ghal_datetime *dt);
 
 #ifdef __cplusplus

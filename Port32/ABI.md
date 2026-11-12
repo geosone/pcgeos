@@ -1052,7 +1052,9 @@ every chunk through its goc chunk handle.
   session (`[system] hostRole = session`, `Port32/GAPI-Concept.md` §2),
   `TimerSetDateAndTime` sets the host's clock through GAPI
   (`gapi_time_set_local`), as the asm set DOS's clock. That means DOS's
-  clock on dos32 and the system clock on linux. It does not when the
+  clock on dos32. On linux it is systemd-timedated over GEOS's own D-Bus
+  client (polkit may ask for the password), or `clock_settime` without
+  timedated. It does not when the
   caller passes `TIME_SET_GEOS_TIME_ONLY` (0x20), and never before a
   boot, so tests do not. As a guest (the default), or if the host
   refuses (on linux, no `CAP_SYS_TIME`), GEOS keeps an offset to the

@@ -23,8 +23,9 @@ int main(void)
     CHECK(ghal_time_get_local(&dt) == GHAL_OK);
     st = gapi_time_set_local(&dt);
     CHECK(st == GHAL_OK || st == GHAL_ERR_ACCESS);
-    printf("%s: setting the clock: %s\n", ghal_host_name(),
-	   st == GHAL_OK ? "allowed" : "not allowed");
+    printf("%s: setting the clock: %s (%d) %s\n", ghal_host_name(),
+	   st == GHAL_OK ? "allowed" : "not allowed", (int) st,
+	   gapi_last_error());
     bad = dt;
     bad.month = 13;
     CHECK(gapi_time_set_local(&bad) == GHAL_ERR_INVAL);
