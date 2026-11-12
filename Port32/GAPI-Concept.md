@@ -1,6 +1,8 @@
 # GAPI: GEOS Host API
 
-**Status:** concept, with the first function implemented: setting the clock (`gapi_time_set_local`, 2026-11-12).
+**Status:** concept, with the first function implemented: setting the clock (`gapi_time_set_local`, 2026-11-12). The decisions of 2026-11-12 are in section 5.
+
+**Goal:** on Linux, GEOS can be a desktop of its own, as KDE or GNOME are: the user's session, which manages the machine through the host's services. GHAL is the abstraction of the hardware; GAPI is the way back into the system.
 
 **Scope:** pcgeos only, next to the GHAL (`Port32/GHAL-Concept.md`).
 
@@ -38,16 +40,20 @@ The GHAL does not cover this:
 2. **Every function may be refused.** `GHAL_ERR_UNSUPPORTED` means the host has no such function. `GHAL_ERR_ACCESS` means the host refuses it, for example because of missing privileges. GEOS then falls back to its own way, as `TimerSetDateAndTime` keeps an offset to the host's clock. A Preferences module may show "managed by the host". Nothing fails silently: the kernel logs a refusal once.
 3. **GEOS does not run as root.** On Linux, privileged changes go through the host's privileged services, which ask the user themselves: D-Bus to systemd with polkit, CUPS. A direct system call (`clock_settime`) is only the first step, for root or for a GEOS that is the session.
 4. **Same types and status codes as the GHAL.** `gapi.h` includes `ghal.h` and uses `ghal_status` and `ghal_datetime`.
-5. **Tests never change the host.** The kernel only uses GAPI after a boot (`[system] setHostClock`, default true). Unit tests without a boot never move the host's clock. `gapi.time` sets the clock to the time it already has.
-6. **Each setting can be switched off in `geos.ini`**, so GEOS can also run inside a desktop as a guest that leaves the host alone.
+5. **Two roles** (`[system] hostRole`):
+   - `guest` (the default, today's case): GEOS runs inside another desktop and leaves the host alone. The clock is kept as an offset, and printing still goes to the host's printers.
+   - `session`: GEOS is the user's only UI, as KDE or GNOME. It manages the host through GAPI. Where the user has the right, the host does it. Otherwise the host's service asks for the password (polkit over D-Bus). Its logs go to the journal.
+
+   On DOS, GEOS always is the system.
+6. **Tests never change the host.** The kernel uses GAPI only after a boot as a `session`. Unit tests without a boot never move the host's clock, and `gapi.time` sets the clock to the time it already has.
 
 ## 3. Groups
 
 | Group | Content | `dos32` | `linux` | GEOS side |
 |---|---|---|---|---|
-| `gapi_time` | set the date and time; later the time zone and whether NTP runs | int 21h/2Bh, 2Dh (as `RestoreMSDOSTime`) | `clock_settime`; then `org.freedesktop.timedate1` (polkit) | `TimerSetDateAndTime`, Preferences Date & Time. **Implemented:** `gapi_time_set_local` |
+| `gapi_time` | set the date and time; later the time zone and whether NTP runs | int 21h/2Bh, 2Dh (as `RestoreMSDOSTime`) | `clock_settime`; then `org.freedesktop.timedate1` (polkit) through our D-Bus client | `TimerSetDateAndTime`, Preferences Date & Time. **Implemented:** `gapi_time_set_local` |
 | `gapi_power` | switch off, reboot, suspend the machine | APM, BIOS reset (power drivers) | `org.freedesktop.login1` `PowerOff`/`Reboot`/`Suspend` | `SysShutdown` (`SST_POWER_OFF`, `EF_RESET`), the power driver |
-| `gapi_print` | list printers and queues, default printer, add or change one, its options; submit a job | GEOS printer drivers to LPT/COM/file, as today | CUPS (IPP): queues, PPD/IPP options; jobs as PostScript or PDF | Spool library, printer control panel. GEOS printer drivers render, CUPS prints |
+| `gapi_print` | list printers and queues, default printer, add or change one, its options; submit a job | GEOS printer drivers to LPT/COM/file, as today | CUPS (IPP): queues and options; jobs as PostScript or PDF | Spool library, printer control panel. GEOS renders PostScript/PDF, CUPS prints |
 | `gapi_locale` | keyboard layout, language, country formats, time zone | `COUNTRY`, code page, `geos.ini` | `org.freedesktop.locale1`, `timedate1` | `Local*`, keyboard driver, Preferences International |
 | `gapi_net` | interfaces, addresses, DNS, dial-up, Wi-Fi | GEOS's own TCP/IP and its configuration | NetworkManager over D-Bus (read first, change later) | Socket library, Preferences Network/Modem |
 | `gapi_storage` | drives and media, mount, eject, format | kernel `Disk`, `Format`, `Diskcopy` | udisks2 | Disk API, the file manager |
@@ -71,9 +77,10 @@ The order follows what the Preferences need first and what can be tested:
 - One backend per host: `Gapi/Dos32/gapi_dos32.c` and `Gapi/Linux/gapi_linux.c`. The Linux backend is not POSIX: it uses Linux services (D-Bus, systemd, CUPS). Later `Gapi/Win32` and `Gapi/GonWare`.
 - Tests: `Port32/Tests/test_gapi.c` (ctest `gapi.time`).
 
-## 5. Open decisions
+## 5. Decisions (2026-11-12)
 
-1. **D-Bus access on Linux:** libdbus, sd-bus (libsystemd), or a small client of our own. The cross builds (arm64, armhf) need the library for the target. An own minimal client avoids that dependency.
-2. **Command-line tools as a first step?** `timedatectl`, `lpadmin`/`lpstat` and `nmcli` work without a D-Bus library, but they depend on the tools being installed and on parsing their output.
-3. **Printing:** do GEOS printer drivers render and send their output to a CUPS queue (raw), or does GEOS give CUPS PDF/PostScript of its own? The first keeps the driver model. The second gives better results with modern printers.
-4. **GEOS as the session** (a kiosk or a GonDesk-like system): then GEOS may own the machine, and the direct calls are enough.
+1. **D-Bus: a small client of our own** that fits the GEOS system. It talks the D-Bus wire protocol over the Unix socket, so there is no libdbus or sd-bus and no target library in the cross builds. It goes under `Gapi/Linux`. It is the path to systemd (`timedate1`, `login1`, `locale1`), polkit, NetworkManager and udisks, and the way logs reach the journal in the `session` role.
+2. **Printing: GEOS gives CUPS PostScript or PDF** of its own. It does not send raw data of the old printer drivers. On Linux, the spooler renders the job with a GEOS PostScript/PDF driver and hands it to the CUPS queue. The printer's own driver is then CUPS's business.
+3. **Guest by default; session when GEOS is the only UI** (section 2, rule 5). Journal logging and the password prompts come with the D-Bus client, when GEOS is that far.
+
+Still open: command-line tools (`timedatectl`, `lpstat`) as a stopgap before the D-Bus client, or not at all.

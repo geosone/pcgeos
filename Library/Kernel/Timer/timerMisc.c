@@ -2,11 +2,12 @@
  * timerMisc.c -- the date and time of GEOS (after timerMisc.asm and the C
  * stubs of timerC.asm).
  *
- * GEOS reads the host's local clock (ghal_time_get_local).  Setting the
- * date or time sets the host's clock too (gapi_time_set_local: DOS's
- * clock on dos32, the system clock on linux), as the asm set DOS's clock,
- * unless TIME_SET_GEOS_TIME_ONLY or kernelSetHostClock is off.  When the
- * host does not take it (no privilege), GEOS keeps an offset to the
+ * GEOS reads the host's local clock (ghal_time_get_local).  When GEOS is
+ * the user's session ([system] hostRole = session), setting the date or
+ * time sets the host's clock too (gapi_time_set_local: DOS's clock on
+ * dos32, the system clock on linux), as the asm set DOS's clock, unless
+ * TIME_SET_GEOS_TIME_ONLY.  As a guest (the default), or when the host
+ * does not take it (no privilege), GEOS keeps an offset to the
  * host's clock that it adds from then on (until it exits).  A change
  * goes to GCNSLT_DATE_TIME (MSG_NOTIFY_DATE_TIME_CHANGE) and runs the
  * real-time timers that are due now.
@@ -27,7 +28,7 @@
 #define SECS_PER_DAY	86400L
 #define TIME_SET_GEOS_TIME_ONLY	0x20	/* timerInt.def */
 
-Boolean kernelSetHostClock;
+Boolean kernelHostSession;
 
 static int64_t offset;			/* seconds GEOS is ahead of the host */
 static int64_t anchorSecs;		/* GEOS time at anchorTick */
@@ -154,7 +155,7 @@ void TimerSetDateAndTime(word flags, const TimerDateAndTime *dateAndTime)
 	dt.day = (uint8_t) dateAndTime->TDAT_day;
     }
     secs = SecsOf(&dt);
-    if (kernelSetHostClock && !(flags & TIME_SET_GEOS_TIME_ONLY)) {
+    if (kernelHostSession && !(flags & TIME_SET_GEOS_TIME_ONLY)) {
 	ghal_status st = gapi_time_set_local(&dt);
 	if (st == GHAL_OK) {
 	    ghal_crit_enter();

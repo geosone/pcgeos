@@ -345,10 +345,11 @@ void TimerCheckRealTime(dword now);
  * real-time timer has it (TimerCompressedDate << 16 | hours << 8 |
  * minutes), 0 before the time was read once */
 struct ghal_datetime;
-/* Timer/timerMisc.c: TimerSetDateAndTime sets the host's clock through
- * GAPI (FALSE until the boot reads [system] setHostClock: tests and
- * programs without a boot never change it) */
-extern Boolean kernelSetHostClock;
+/* Timer/timerMisc.c: GEOS is the user's session on the host ([system]
+ * hostRole = session) and manages it through GAPI, e.g. its clock.
+ * FALSE for a guest (the default) and until the boot: tests and programs
+ * without a boot never change the host. */
+extern Boolean kernelHostSession;
 void KernelGetDateTime(struct ghal_datetime *dt);
 dword KernelRealTimeNow(dword tick);
 /* frees what interrupt code could not (deferred); not from interrupts */

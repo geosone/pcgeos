@@ -1048,14 +1048,15 @@ every chunk through its goc chunk handle.
   `TimerSetDateAndTime`. Routine and event alike get
   `(TCD << 16 | hour << 8 | minute, id 0)`; the asm passed its handle
   and the time in registers.
-- **Date and time** (`Timer/timerMisc.c`): `TimerSetDateAndTime` sets
-  the host's clock through GAPI (`gapi_time_set_local`,
-  `Port32/GAPI-Concept.md`), as the asm set DOS's clock. That means DOS's
+- **Date and time** (`Timer/timerMisc.c`): when GEOS is the user's
+  session (`[system] hostRole = session`, `Port32/GAPI-Concept.md` §2),
+  `TimerSetDateAndTime` sets the host's clock through GAPI
+  (`gapi_time_set_local`), as the asm set DOS's clock. That means DOS's
   clock on dos32 and the system clock on linux. It does not when the
-  caller passes `TIME_SET_GEOS_TIME_ONLY` (0x20) or `[system]
-  setHostClock = false`, and never before a boot, so tests do not. If
-  the host refuses (on linux, no `CAP_SYS_TIME`), GEOS keeps an offset
-  to the host's clock and logs this once. Either way it sends
+  caller passes `TIME_SET_GEOS_TIME_ONLY` (0x20), and never before a
+  boot, so tests do not. As a guest (the default), or if the host
+  refuses (on linux, no `CAP_SYS_TIME`), GEOS keeps an offset to the
+  host's clock. A refusal is logged once. Either way it sends
   `MSG_META_DATE_TIME_CHANGE` to `GCNSLT_DATE_TIME` and checks the
   real-time timers. The interrupt does not call the host. It counts
   ticks from the last time the clock was read (`KernelRealTimeNow`).
