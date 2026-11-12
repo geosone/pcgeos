@@ -3358,7 +3358,10 @@ The SBCS localization code in C beside the asm: character classes
 dictionary order (`stringSort.c`), the DOS code pages (`dosConvert.c`),
 quotes (`stringQuotes.c`), number and currency formats
 (`numericFormats.c`), the measurement system and numbers and distances
-as text (`numericMeasure.c`), and `LocalInit` (`localInit.c`, at the
+as text (`numericMeasure.c`), dates and times (`dateTimeFormat.c`: the
+standard formats, day of the week, time zone, comparing and normalizing;
+`dateTimeFields.c`: formatting by a format string; `dateTimeParse.c`:
+parsing by one, days of a month), and `LocalInit` (`localInit.c`, at the
 boot after the standard paths), with the C signatures of
 `CInclude/localize.h`. The tables and strings stay in the asm
 (`stringCharTables.asm`, `stringCaseTables.asm`,
@@ -3393,8 +3396,16 @@ the Set routines write them back the same way.
   lacked: `LDF_OMIT_UNITS_STRING`, `LDF_PASSING_DECIMAL_PLACES`,
   `LDF_DECIMAL_PLACES`.
 
-**Not yet:** date and time formatting and parsing (with
-`LocalIsDateChar`, `LocalIsTimeChar`), the time zone, DBCS.
+- `LocalCustomParseDateTime` returns `0xffff` if the text parsed, else
+  the offset of the mismatch, as the C stub did; `LocalParseDateTime`
+  returns `TRUE` or `FALSE`, as `localize.h` declares it (the stub
+  returned the same as the custom one). Fields a format lacks come back
+  as `0xff` (the year `0xffff`), as `CSetDateTime` stored them.
+- An unknown token in a format string puts in nothing and fails a
+  parse (the asm died on it in the EC version).
+
+**Not yet:** DBCS and the Japanese parts (Gengo, Kinsoku, Kana, Kanji,
+word parts).
 
 **Tests.** ctest `kernel.local`: the classes against ASCII, case of
 letters with accents, strings converted up to a size, compares with and
@@ -3404,7 +3415,12 @@ the defaults of quotes, number and currency format, the same from a
 geos.ini at `LocalInit`, the Set routines and what they write;
 `LocalFixedToAscii` with rounding and trimming, `LocalAsciiToFixed`,
 distances to and from text in all kinds of units, full names, plural,
-decimal places, clamping.
+decimal places, clamping; days of the week and of months, every kind of
+token formatted, file dates, parsing names without case, suffixes,
+padded and short years, 12- and 24-hour clocks with am/pm and 24:00,
+the mismatch offset, `LocalIsDateChar`/`LocalIsTimeChar`, comparing,
+normalizing across a day, month, year and leap day, in place; time zone
+and formats written to geos.ini and read at `LocalInit`.
 
 ## 14. Open
 

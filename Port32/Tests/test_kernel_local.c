@@ -2,7 +2,7 @@
  * test_kernel_local.c -- the localization code of the C kernel
  * (Library/Kernel/Local: character classes, case, string compare, DOS
  * code pages, quotes, number and currency formats and their settings in
- * geos.ini, numbers and distances as text; the tables and strings made at build time by
+ * geos.ini, numbers and distances as text, dates and times; the tables and strings made at build time by
  * Port32/tools/localgen.py).
  */
 #include "kernelC.h"
@@ -147,6 +147,146 @@ static void Numbers(void)
     CHECK(LocalGetMeasurementType() == MEASURE_US);
     CHECK(LocalIsNumChar('7') && LocalIsNumChar('-') && LocalIsNumChar('.'));
     CHECK(!LocalIsNumChar(',') && !LocalIsNumChar('a'));
+}
+
+static void SetTDAT(TimerDateAndTime *t, word y, word mo, word d, word h,
+		    word mi, word s)
+{
+    t->TDAT_year = y;
+    t->TDAT_month = mo;
+    t->TDAT_day = d;
+    t->TDAT_dayOfWeek = (DayOfTheWeek) LocalCalcDayOfWeek(y, mo, d);
+    t->TDAT_hours = h;
+    t->TDAT_minutes = mi;
+    t->TDAT_seconds = s;
+}
+
+static void DatesAndTimes(void)
+{
+    char buf[DATE_TIME_BUFFER_SIZE], fmt[DATE_TIME_FORMAT_SIZE];
+    TimerDateAndTime t, u;
+    FileDateAndTime fdat;
+    Boolean dst;
+    word n;
+    int ok;
+
+    /* --- days -------------------------------------------------------- */
+    CHECK(LocalCalcDayOfWeek(2026, 11, 12) == 4);
+    CHECK(LocalCalcDayOfWeek(1904, 1, 1) == 5);
+    CHECK(LocalCalcDayOfWeek(2000, 3, 1) == 3);
+    CHECK(LocalCalcDayOfWeek(2024, 2, 29) == 4);
+    CHECK(LocalCalcDayOfWeek(2025, 12, 31) == 3);
+    CHECK(LocalCalcDaysInMonth(2024, 2) == 29 &&
+	  LocalCalcDaysInMonth(1900, 2) == 28 &&
+	  LocalCalcDaysInMonth(2000, 2) == 29 &&
+	  LocalCalcDaysInMonth(2026, 4) == 30);
+
+    /* --- formatting -------------------------------------------------- */
+    SetTDAT(&t, 2026, 11, 12, 14, 5, 9);
+    n = LocalFormatDateTime(buf, DTF_LONG, &t);
+    CHECK(!strcmp(buf, "Thursday, November 12th, 2026") && n == strlen(buf));
+    LocalFormatDateTime(buf, DTF_LONG_CONDENSED, &t);
+    CHECK(!strcmp(buf, "Thu, Nov 12, 2026"));
+    LocalFormatDateTime(buf, DTF_SHORT, &t);
+    CHECK(!strcmp(buf, "11/12/26"));
+    LocalFormatDateTime(buf, DTF_HMS, &t);
+    CHECK(!strcmp(buf, "2:05:09 PM"));
+    LocalFormatDateTime(buf, DTF_HM_24HOUR, &t);
+    CHECK(!strcmp(buf, "14:05"));
+    SetTDAT(&t, 2003, 3, 5, 0, 7, 0);
+    LocalFormatDateTime(buf, DTF_ZERO_PADDED_SHORT, &t);
+    CHECK(!strcmp(buf, "03/05/03"));
+    LocalFormatDateTime(buf, DTF_H, &t);
+    CHECK(!strcmp(buf, "12 AM"));
+    LocalFormatDateTime(buf, DTF_LONG_NO_WEEKDAY, &t);
+    CHECK(!strcmp(buf, "March 5th, 2003"));
+    SetTDAT(&t, 2026, 11, 2, 9, 5, 0);
+    n = LocalCustomFormatDateTime(buf,
+				  "|LY|-|ZM|-|ZD| |PH|:|Zm| |DD| |ap|/|Ap|",
+				  &t);
+    CHECK(!strcmp(buf, "2026-11-02  9:05 | am/Am") && n == strlen(buf));
+    fdat = ((dword) ((14 << 11) | (5 << 5) | 4) << 16) |
+	((2026 - 1980) << 9) | (11 << 5) | 12;
+    LocalFormatFileDateTime(buf, DTF_LONG, &fdat);
+    CHECK(!strcmp(buf, "Thursday, November 12th, 2026"));
+    LocalFormatFileDateTime(buf, DTF_HMS_24HOUR, &fdat);
+    CHECK(!strcmp(buf, "14:05:08"));
+
+    /* --- parsing ----------------------------------------------------- */
+    CHECK(LocalParseDateTime("Thursday, november 12th, 2026", DTF_LONG, &t));
+    CHECK(t.TDAT_year == 2026 && t.TDAT_month == 11 && t.TDAT_day == 12 &&
+	  t.TDAT_dayOfWeek == 4 && t.TDAT_hours == 0xff &&
+	  t.TDAT_minutes == 0xff && t.TDAT_seconds == 0xff);
+    CHECK(!LocalParseDateTime("Thursday, November 12st, 2026", DTF_LONG, &t));
+    CHECK(LocalParseDateTime(" 11/ 2/26", DTF_SHORT, &t) &&
+	  t.TDAT_year == 2026 && t.TDAT_month == 11 && t.TDAT_day == 2 &&
+	  t.TDAT_dayOfWeek == 0xff);
+    CHECK(LocalParseDateTime("11/12/75", DTF_SHORT, &t) && t.TDAT_year == 1975);
+    CHECK(LocalParseDateTime("11/12/1999", DTF_SHORT, &t) &&
+	  t.TDAT_year == 1999);
+    CHECK(!LocalParseDateTime("13/12/26", DTF_SHORT, &t));
+    CHECK(!LocalParseDateTime("11/0/26", DTF_SHORT, &t));
+    CHECK(LocalParseDateTime("2:05:09 pm", DTF_HMS, &t) &&
+	  t.TDAT_hours == 14 && t.TDAT_minutes == 5 && t.TDAT_seconds == 9);
+    CHECK(LocalParseDateTime("12:00:00 AM", DTF_HMS, &t) && t.TDAT_hours == 0);
+    CHECK(LocalParseDateTime("12:30:00 PM", DTF_HMS, &t) &&
+	  t.TDAT_hours == 12);
+    CHECK(LocalParseDateTime("24:00", DTF_HM_24HOUR, &t) && t.TDAT_hours == 0 &&
+	  t.TDAT_seconds == 0xff);
+    CHECK(!LocalParseDateTime("24:01", DTF_HM_24HOUR, &t));
+    CHECK(LocalCustomParseDateTime("24:01", "|hh|:|Zm|", &t) == 0);
+    CHECK(LocalCustomParseDateTime("11-12", "|NM|/|SD|", &t) == 2);
+    CHECK(LocalCustomParseDateTime("Mar 5|2003", "|SM| |SD||DD||LY|", &t) ==
+	  0xffff && t.TDAT_month == 3 && t.TDAT_year == 2003);
+    CHECK(LocalIsDateChar('/') && LocalIsDateChar('5') && !LocalIsDateChar('x'));
+    CHECK(LocalIsTimeChar(':') && LocalIsTimeChar('P') &&
+	  !LocalIsTimeChar('/'));
+
+    /* --- compare and normalize --------------------------------------- */
+    SetTDAT(&t, 2026, 11, 12, 14, 5, 9);
+    u = t;
+    CHECK(LocalCompareDateTimes(&t, &u) == 0);
+    u.TDAT_seconds = 10;
+    CHECK(LocalCompareDateTimes(&t, &u) < 0 && LocalCompareDateTimes(&u, &t) > 0);
+    u.TDAT_year = 2025;
+    CHECK(LocalCompareDateTimes(&t, &u) > 0);
+    SetTDAT(&t, 2026, 1, 1, 0, 30, 7);
+    LocalNormalizeDateTime(&u, &t, 60);		/* an hour east of GMT */
+    CHECK(u.TDAT_year == 2025 && u.TDAT_month == 12 && u.TDAT_day == 31 &&
+	  u.TDAT_hours == 23 && u.TDAT_minutes == 30 && u.TDAT_seconds == 7 &&
+	  u.TDAT_dayOfWeek == 3);
+    SetTDAT(&t, 2026, 12, 31, 20, 0, 0);
+    LocalNormalizeDateTime(&t, &t, -8 * 60);	/* in place */
+    CHECK(t.TDAT_year == 2027 && t.TDAT_month == 1 && t.TDAT_day == 1 &&
+	  t.TDAT_hours == 4 && t.TDAT_dayOfWeek == 5);
+    SetTDAT(&t, 2024, 3, 1, 0, 10, 0);
+    LocalNormalizeDateTime(&t, &t, 90);
+    CHECK(t.TDAT_month == 2 && t.TDAT_day == 29 && t.TDAT_hours == 22 &&
+	  t.TDAT_minutes == 40);
+
+    /* --- time zone and formats in geos.ini --------------------------- */
+    CHECK(LocalGetTimezone(&dst) == -8 * 60 && !dst);
+    LocalSetTimezone(60, TRUE);
+    CHECK(LocalGetTimezone(&dst) == 60 && dst);
+    CHECK(!InitFileReadInteger("localization", "timezone", &n) && n == 60);
+    LocalGetDateTimeFormat(fmt, DTF_SHORT);
+    CHECK(!strcmp(fmt, "|NM|/|SD|/|SY|"));
+    LocalSetDateTimeFormat("|SD|.|NM|.|LY|", DTF_SHORT);
+    SetTDAT(&t, 2026, 11, 12, 0, 0, 0);
+    LocalFormatDateTime(buf, DTF_SHORT, &t);
+    CHECK(!strcmp(buf, "12.11.2026"));
+    CHECK(LocalIsDateChar('.') && !LocalIsDateChar('/'));
+    ok = !InitFileReadDataBuffer("localization", "shortDate", buf,
+				 sizeof(buf), &n);
+    CHECK(ok && n == 14 && !memcmp(buf, "|SD|.|NM|.|LY|", 14));
+    InitFileWriteData("localization", "hoursMinsTime", "|hh|h|Zm|", 9);
+    InitFileWriteInteger("localization", "timezone", (word) -300);
+    InitFileWriteBoolean("localization", "useDST", FALSE);
+    LocalInit();
+    SetTDAT(&t, 2026, 11, 12, 7, 3, 0);
+    LocalFormatDateTime(buf, DTF_HM, &t);
+    CHECK(!strcmp(buf, "7h03"));
+    CHECK(LocalGetTimezone(&dst) == -300 && !dst);
 }
 
 static void Formats(void)
@@ -345,6 +485,7 @@ int main(int argc, char **argv)
 
     Numbers();
     Formats();
+    DatesAndTimes();
     LocalSetMeasurementType(MEASURE_METRIC);
     CHECK(LocalGetMeasurementType() == MEASURE_METRIC);
     CHECK(!InitFileReadStringBuffer("localization", "measurementSystem", buf,

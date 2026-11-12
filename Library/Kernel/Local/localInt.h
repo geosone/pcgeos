@@ -81,5 +81,37 @@ void LocalWriteStringAsData(const char *key, word id);
 /* the init routines of LocalInit */
 void LocalNumericInitFormats(void);
 void LocalInitQuotes(void);
+void LocalDateTimeInitFormats(void);
+void LocalInitTimezone(void);
+
+/*
+ * Dates and times (dateTimeFields.c, dateTimeParse.c): the fields as the
+ * asm had them in registers, a byte each but the year; 0xff (0xffff)
+ * for a field that a parsed format did not have.
+ */
+typedef struct {
+    word	LDT_year;
+    byte	LDT_month;	/* 1-12 */
+    byte	LDT_day;	/* 1-31 */
+    byte	LDT_weekday;	/* 0-6 */
+    byte	LDT_hours;	/* 0-23 */
+    byte	LDT_minutes;
+    byte	LDT_seconds;
+} LocalDateTime;
+
+#define TOKEN_DELIMITER	'|'
+/* the tokens of a format string ("|LW|" ...), in the order of the asm's
+ * tokenTable; -1 for none */
+int LocalFindToken(char c1, char c2);
+#define LOCAL_TOKEN_TOKEN_DELIMITER	0	/* "DD", the '|' itself */
+/* DateTimeFieldFormat: the length without the null */
+word LocalDateTimeFieldFormat(char *str, const char *format,
+			      const LocalDateTime *dt);
+/* IsLegalFormatChar: whether the character is one of the format's own
+ * (not of its tokens) */
+Boolean LocalIsLegalFormatChar(wchar ch, DateTimeFormat format);
+/* CheckCharGroup: whether the character is in the string (the null
+ * too) */
+Boolean LocalInCharGroup(wchar ch, word id);
 
 #endif

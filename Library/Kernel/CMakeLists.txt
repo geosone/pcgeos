@@ -66,7 +66,8 @@
 #                      files in the DOS16 format
 #   Local/stringChar.c, stringCase.c, stringSize.c, stringSort.c,
 #   dosConvert.c, localStrings.c, stringQuotes.c, numericFormats.c,
-#   numericMeasure.c, localInit.c <- the localization code of the same asm files (SBCS);
+#   numericMeasure.c, dateTimeFormat.c, dateTimeFields.c,
+#   dateTimeParse.c, localInit.c <- the localization code of the same asm files (SBCS);
 #                      their tables (stringCharTables.asm, ...,
 #                      cmap*.asm) and strings (localStrings.asm) become
 #                      localTables.c and localStrings.h at build time
@@ -186,6 +187,9 @@ add_library(geos_kernel_objs OBJECT
   Local/stringQuotes.c
   Local/numericFormats.c
   Local/numericMeasure.c
+  Local/dateTimeFormat.c
+  Local/dateTimeFields.c
+  Local/dateTimeParse.c
   Local/localInit.c
   ${CMAKE_CURRENT_BINARY_DIR}/localTables.c)
 # The tables of the localization code, from the asm
