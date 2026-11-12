@@ -26,8 +26,7 @@
  * visible region goes to WinCalcVisReg, which washes out and exposes
  * what became visible.
  *
- * Save-under areas are not kept: the video drivers in C refuse them
- * (DR_VID_SAVE_UNDER), so the window system never has one.
+ * Save under areas: winSaveUnder.c.
  */
 #include "winInt.h"
 #include "../Graphics/graphicsInt.h"
@@ -300,6 +299,9 @@ void WinMove(WindowHandle win, sword xMove, sword yMove, WinPassFlags flags)
 
     if (!w)
 	return;
+    MemUnlock(wh);
+    WinUnderChange(wh);			/* save under areas */
+    w = L(wh);
     w->W_curState = 0;
     if (flags & WPF_ABS) {		/* from the parent's origin */
 	if (w->W_parent) {
@@ -327,6 +329,9 @@ void WinResize(WindowHandle win, const Region *reg, word axParam,
 
     if (!w)
 	return;
+    MemUnlock(wh);
+    WinUnderChange(wh);			/* save under areas */
+    w = L(wh);
     w->W_curState = 0;
     ox = w->W_winRect.R_left;
     oy = w->W_winRect.R_top;
@@ -383,7 +388,9 @@ void WinChangePriority(WindowHandle win, WinPassFlags flags, word layerID)
 
     if (!w)
 	return;
-    if (flags & WPF_LAYER) {
+    if (flags & WPF_LAYER) {		/* save under areas over it */
+	WinClearSaveUnders(wh, WinCheckUnder(w, &w->W_winRect));
+	w = MemDeref(wh);
 	for (ch = w->W_firstChild; ch; ch = next) {
 	    c = L(ch);
 	    next = c->W_nextSibling;
@@ -428,6 +435,9 @@ void WinChangePriority(WindowHandle win, WinPassFlags flags, word layerID)
 	WinTreeV();
 	return;
     }
+    MemUnlock(wh);
+    WinUnderChange(wh);			/* save under areas */
+    w = L(wh);
     parent = w->W_parent;
     if (layerID)
 	w->W_layerID = (Handle) layerID;

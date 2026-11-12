@@ -122,6 +122,7 @@ add_library(geos_kernel_objs OBJECT
   Win/winUtils.c
   Win/winWindows.c
   Win/winCreDest.c
+  Win/winSaveUnder.c
   Win/winIndividual.c
   Win/winState.c
   Win/winTrans.c

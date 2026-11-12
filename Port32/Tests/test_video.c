@@ -732,10 +732,62 @@ int main(int argc, char **argv)
     Rect(0, 0, 9, 9);
     Call(DR_VID_SCREEN_ON, 0, 0);
     CHECK(Pixel(5, 5) == BLUE);
-    /* save under: not possible */
-    memset(&r, 0, sizeof(r));
-    r.DR_esDi = &win.w;
-    CHECK(DriverCall(dis, DR_VID_SAVE_UNDER, &r));
+    /* save under areas (vidcomUnder.c): the pixels of 0..9 saved */
+    {
+	static const word left[] = {	/* x 0..4 on lines 0..9 */
+	    (word) -1, EOREGREC, 9, 0, 4, EOREGREC, EOREGREC
+	};
+	SetMask(0, 0, 50, 50, TRUE);
+	SetColor(BLUE);
+	CHECK(!Rect(0, 0, 9, 9));
+	win.w.W_header.LMBH_handle = 0x1234;
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 0; r.DR_bx = 0; r.DR_cx = 9; r.DR_dx = 9;
+	r.DR_esDi = &win.w;
+	CHECK(!DriverCall(dis, DR_VID_SAVE_UNDER, &r) && r.DR_ax == 1);
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 5; r.DR_bx = 5; r.DR_cx = 20; r.DR_dx = 20;
+	CHECK(!DriverCall(dis, DR_VID_CHECK_UNDER, &r) && r.DR_ax == 1);
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 10; r.DR_bx = 0; r.DR_cx = 20; r.DR_dx = 20;
+	CHECK(!DriverCall(dis, DR_VID_CHECK_UNDER, &r) && r.DR_ax == 0);
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 1;
+	CHECK(!DriverCall(dis, DR_VID_INFO_UNDER, &r) && r.DR_ax == 0 &&
+	      r.DR_cx == 9 && r.DR_dx == 9 && r.DR_di == 0x1234);
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 10; r.DR_bx = 10;
+	CHECK(!DriverCall(dis, DR_VID_REQUEST_UNDER, &r));	/* room */
+	/* drawing to a window marked under it: the mark goes */
+	win.w.W_savedUnderMask = 1;
+	SetColor(RED);
+	CHECK(!Rect(20, 20, 30, 30) && win.w.W_savedUnderMask == 1);
+	CHECK(!Rect(0, 0, 9, 9) && win.w.W_savedUnderMask == 0);
+	CHECK(Pixel(2, 2) == RED && Pixel(7, 7) == RED);
+	/* restored within a region: the left half */
+	memset(&r, 0, sizeof(r));
+	r.DR_esDi = &win.w;
+	r.DR_dsSi = (void *) left;
+	CHECK(!DriverCall(dis, DR_VID_RESTORE_UNDER, &r));
+	CHECK(Pixel(2, 2) == BLUE && Pixel(4, 9) == BLUE &&
+	      Pixel(7, 7) == RED);
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 0; r.DR_bx = 0; r.DR_cx = 9; r.DR_dx = 9;
+	CHECK(!DriverCall(dis, DR_VID_CHECK_UNDER, &r) && r.DR_ax == 0);
+	/* saved and given up */
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 0x8000;
+	win.w.W_winRect.R_right = 9;
+	win.w.W_winRect.R_bottom = 9;
+	r.DR_esDi = &win.w;
+	CHECK(!DriverCall(dis, DR_VID_SAVE_UNDER, &r) && r.DR_ax == 1);
+	memset(&r, 0, sizeof(r));
+	r.DR_esDi = &win.w;
+	CHECK(!DriverCall(dis, DR_VID_NUKE_UNDER, &r));
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 1;
+	CHECK(!DriverCall(dis, DR_VID_INFO_UNDER, &r) && r.DR_di == 0);
+    }
 
     GeodeFreeDriver(drv);
     printf("%s\n", fails ? "FAILED" : "ok");

@@ -47,6 +47,8 @@ static Boolean Strategy(word function, DriverRegs *r)
 	(void) w;
 	return FALSE;
     }
+    if (function == DR_VID_CHECK_UNDER || function == DR_VID_INFO_UNDER)
+	r->DR_ax = r->DR_di = 0;		/* no areas */
     return function == DR_VID_SAVE_UNDER;	/* refused */
 }
 

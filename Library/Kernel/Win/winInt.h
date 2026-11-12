@@ -43,6 +43,18 @@
 #define WINDOW_FREE_SPACE	206
 #define WIN_NUM_REGIONS		11	/* W_winReg ... W_pathReg */
 
+/* winSaveUnder.c: save under areas */
+extern WinUnderFlags winUnderClosing;
+extern optr winUnderRestored;
+WinUnderFlags WinCheckUnder(Window *w, const Rectangle *b);
+void WinClearSaveUnders(WindowHandle any, WinUnderFlags f);
+WinUnderFlags WinOverlyingUnders(WindowHandle wh);
+void WinUnderChange(WindowHandle wh);
+void WinUnderOpened(WindowHandle wh);
+void WinUnderInval(WindowHandle wh);
+WinUnderFlags WinUnderClosing(WindowHandle wh, WindowHandle parent);
+void WinUnderClosed(WindowHandle wh, WindowHandle parent, WinUnderFlags f);
+
 /* winUtils.c: the tree lock */
 void WinTreeP(void);
 void WinTreeV(void);

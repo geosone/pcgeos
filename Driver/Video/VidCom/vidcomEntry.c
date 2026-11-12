@@ -16,9 +16,9 @@
  * XOR region is taken away around drawing that touches it
  * (CheckXORCollision) and follows the pointer (UpdateXORForPtr).
  *
- * Save under areas: none, as on the 24-bit VGA (vga24Under.asm):
- * DR_VID_SAVE_UNDER says it cannot.  Not yet: the escapes (all "not
- * supported", di 0).
+ * Save under areas: vidcomUnder.c; a drawing function checks its
+ * bounds against them (CheckSaveUnderCollision).  Not yet: the escapes
+ * (all "not supported", di 0).
  */
 #include "vidcom.h"
 
@@ -85,6 +85,7 @@ static Boolean OpBounds(word function, DriverRegs *r, Rectangle *b)
     case DR_VID_RECT:
     case DR_VID_LINE:			/* ExclLineBounds */
     case DR_VID_PUTLINE:
+    case DR_VID_COLLIDE_UNDER:
 	Sort(Coord(r->DR_ax), Coord(r->DR_bx), Coord(r->DR_cx),
 	     Coord(r->DR_dx), b);
 	return TRUE;
@@ -214,6 +215,7 @@ static Boolean VidInit(void)
 static void VidExit(void)
 {
     VidResetXOR();
+    VidUnderReset();
     VidDevExit();
     DriverTable.VDI_device = VID_NO_DEVICE;
     if (videoSem)
@@ -263,14 +265,13 @@ static Boolean VidCall(word function, DriverRegs *r)
 	return FALSE;
     }
     case DR_VID_SAVE_UNDER:
-	return TRUE;				/* not possible */
+    case DR_VID_RESTORE_UNDER:
+    case DR_VID_NUKE_UNDER:
     case DR_VID_REQUEST_UNDER:
-	return FALSE;				/* none to remove */
     case DR_VID_CHECK_UNDER:
-	r->DR_ax = 0;
-	return FALSE;
     case DR_VID_INFO_UNDER:
-	r->DR_di = 0;
+	return VidUnder(function, r);
+    case DR_VID_COLLIDE_UNDER:		/* the check before: all done */
 	return FALSE;
     case DR_VID_SET_XOR:
 	VidSetXOR(r);
@@ -377,10 +378,13 @@ Boolean VidStrategy(word function, DriverRegs *r)
     VidDevBegin(r);
     if (function > DR_VID_LAST_NON_EXCLUSIVE) {	/* CheckXORCollision */
 	Rectangle b;
-	if (OpBounds(function, r, &b))
+	if (OpBounds(function, r, &b)) {
 	    VidCheckXORCollision(b.R_left, b.R_top, b.R_right, b.R_bottom);
-	else
+	    VidUnderCollision(r->DR_esDi, &b);
+	} else {
 	    VidHideXOR();
+	    VidUnderCollision(r->DR_esDi, NULL);
+	}
     }
     carry = VidCall(function, r);
     VidShowXOR();				/* if it was taken away */

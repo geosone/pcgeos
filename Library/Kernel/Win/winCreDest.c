@@ -114,7 +114,11 @@ WindowHandle WinOpen(Handle parentWinOrVidDr, optr inputRecipient,
 	    w = MemDeref(wh);
 	    r.DR_ax = (word) (w->W_winRect.R_right - w->W_winRect.R_left + 1);
 	    r.DR_bx = (word) (w->W_winRect.R_bottom - w->W_winRect.R_top + 1);
-	    WinCallVidDriver(w, DR_VID_REQUEST_UNDER, &r);
+	    if (WinCallVidDriver(w, DR_VID_REQUEST_UNDER, &r)) {
+		MemUnlock(parent);	/* one has to go for it */
+		WinClearSaveUnders(parent, (WinUnderFlags) r.DR_ax);
+		MemLock(parent);
+	    }
 	}
 	WinTInsert(wh, parent, (byte) flags, flags);
 	w = MemDeref(wh);
@@ -127,7 +131,15 @@ WindowHandle WinOpen(Handle parentWinOrVidDr, optr inputRecipient,
 	w->W_ditherY = (word) w->W_winRect.R_top;
 	w->W_pattPos = (word) (((w->W_winRect.R_top & 7) << 8) |
 			       (w->W_winRect.R_left & 7));
-	if (flags & WPF_SAVE_UNDER) {	/* refused by the drivers in C */
+	{				/* the areas over it go */
+	    WinUnderFlags over;
+	    MemUnlock(parent);
+	    over = WinOverlyingUnders(wh);
+	    WinClearSaveUnders(wh, over);
+	    MemLock(parent);
+	    w = MemDeref(wh);
+	}
+	if (flags & WPF_SAVE_UNDER) {	/* vidcomUnder.c */
 	    memset(&r, 0, sizeof(r));
 	    r.DR_ax = 0x8000;
 	    if (!WinCallVidDriver(w, DR_VID_SAVE_UNDER, &r))
@@ -142,6 +154,7 @@ WindowHandle WinOpen(Handle parentWinOrVidDr, optr inputRecipient,
 	w->W_suspendCount++;
     MemUnlock(wh);
     WinTValidateTree(wh);
+    WinUnderOpened(wh);
     WinTreeV();
     return wh;
 }
@@ -166,6 +179,7 @@ void WinClose(WindowHandle win)
     LMemBlockHeader *b;
     Window *w;
     Boolean visible;
+    WinUnderFlags under = 0;
 
     b = MemLock(win);
     if (!b)
@@ -183,8 +197,12 @@ void WinClose(WindowHandle win)
     parent = w->W_parent;
     visible = (Boolean) !WinRegIsNull(wh, w->W_univReg);
     MemUnlock(wh);
-    if (parent)
+    if (parent) {			/* save under areas */
+	under = WinUnderClosing(wh, parent);
+	if (!under)
+	    WinUnderChange(wh);
 	WinTRemove(wh);
+    }
     w = MemLock(wh);
     WinRegNull(wh, w->W_univReg);
     WinRegNull(wh, ((Window *) MemDeref(wh))->W_visReg);
@@ -199,6 +217,8 @@ void WinClose(WindowHandle win)
     MemUnlock(wh);
     if (parent && visible)
 	WinTValidateTree(parent);
+    if (under)
+	WinUnderClosed(wh, parent, under);
     WinTreeV();
     WinDecRefCount(wh);
 }

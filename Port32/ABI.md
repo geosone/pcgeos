@@ -746,8 +746,23 @@ moved or resized.
 - `DR_VID_CLEAR_XOR` returns the parameters and the position as they
   are at that moment.
 
-**No save under areas**, as on the 24-bit VGA (`vga24Under.asm`):
-`DR_VID_SAVE_UNDER` says it is not possible.
+**Save under areas** (`vidcomUnder.c`):
+- Up to eight areas, each one bit of `WinUnderFlags`.
+- The pixels are kept as 0x00RRGGBB in locked heap blocks owned by the
+  driver: whole rows, up to 64 blocks of at most 60000 bytes each. The
+  asm used one block or video memory. So the only limit on a new area
+  is the eight bits: `DR_VID_REQUEST_UNDER` names the oldest area only
+  when all eight are in use.
+- Saving and restoring keep the pointer and the XOR region out.
+- In C, `DR_VID_RESTORE_UNDER` takes the region to restore at `ds:si`:
+  screen coordinates, rows without bounds, `NULL` for all. The asm used
+  the window's `W_maskReg`.
+- `DR_VID_CHECK_UNDER` and `DR_VID_INFO_UNDER` work as in the asm.
+- Collision check: each drawing function checks its bounds (all of
+  them when they are not known) against the areas whose bits are in
+  the window's `W_savedUnderMask`, and clears the bits it touches.
+  `DR_VID_COLLIDE_UNDER` is only this check.
+- ctest `driver.video`.
 
 **Not yet:**
 - the escapes (all unsupported, `di` 0).
@@ -2305,12 +2320,45 @@ The window system in C lies beside the asm: `winCreDest.c`,
   transparent. ctest `kernel.draw` checks both. Bitmaps (not filled
   ones) are not yet drawn through the checker.
 
+**Save under areas** (`winSaveUnder.c`, driver side §7.5). A window
+opened with `WPF_SAVE_UNDER` has the screen under it saved and gets
+the area's bit in `W_saveUnder`. On close, the pixels go back within
+what of the window was visible.
+
+The asm left the regions of the windows below alone while the area was
+up, and cut the area out of a window only when drawing to that window
+hit it (`WinMaskOutSaveUnder`). The C code calculates the regions as
+always and uses the bits only for the exposure:
+- Opening marks the windows the area overlaps (`W_savedUnderMask` and
+  `W_savedUnderFlags`), but not the window's own branch.
+- The mask bit of a marked window is cleared when drawing to it touches
+  the area (the driver's collision check) or when an invalidation does
+  (`WinAddToInvalReg`).
+- When the area closes, validation does not wash out or expose the
+  restored part of windows whose mask bit is still set (`WinCalcVisReg`;
+  the asm's state "mask 1, flags 1"). It exposes the others as usual.
+  Then the bits are cleared.
+
+An area is given up (`DR_VID_NUKE_UNDER`, bits cleared; the regions are
+already right, so nothing is exposed) in the cases where the asm gives
+it up:
+- a window opens over it, unless the area belongs to one of the siblings
+  below the new window;
+- the driver needs the area's bit for a new area;
+- a window moves, is resized, changes priority or closes, and the area
+  overlaps that window's parent's bounds;
+- the area's own window moves, is resized or changes priority.
+
+ctest `kernel.draw` checks five cases: restored without washing, washed
+after drawing under the area, not washed after drawing beside it,
+washed after invalidating under it, and given up when a window closes.
+It also checks a ninth area taking the oldest's bit.
+
 **Locking.** The asm took the tree semaphore and P-locked each window.
 The C code has one recursive tree lock for all of it (`WinTreeP`,
 `WinTreeV`).
 
 **Not yet:**
-- save-under areas (the C drivers refuse them, so none ever exists);
 - pointer enter/leave notification (`winNotification.asm`);
 - `WinScroll`;
 - flushing the input and exposure objects' queues before a window is

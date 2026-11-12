@@ -101,6 +101,11 @@ void VidCheckXORCollision(sword l, sword t, sword r, sword b);
 void VidXORPtrMoved(sword dx, sword dy);
 void VidResetXOR(void);
 
+/* vidcomUnder.c: save under areas */
+Boolean VidUnder(word function, DriverRegs *r);
+void VidUnderCollision(Window *w, const Rectangle *b);
+void VidUnderReset(void);
+
 /* vidcomEntry.c: where the pointer is (DR_VID_MOVEPTR); inverting */
 extern sword vidPtrX, vidPtrY;
 extern const VidDrawState vidInvertState;

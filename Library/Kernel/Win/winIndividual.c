@@ -232,7 +232,7 @@ void WinSendUpdateComplete(WindowHandle wh)
  * WinAddToInvalReg: W_temp1Reg (screen) within the visible region to
  * the invalid region; that part washed out, an exposure sent.
  */
-void WinAddToInvalReg(WindowHandle wh)
+static void AddToInval(WindowHandle wh)
 {
     Window *w = MemDeref(wh);
     optr add;
@@ -259,14 +259,29 @@ void WinAddToInvalReg(WindowHandle wh)
     WinRegSmall(wh, w->W_temp3Reg);
 }
 
+/* an invalidation: what it touches of a save under area is no longer
+ * what was saved (winSaveUnder.c) */
+void WinAddToInvalReg(WindowHandle wh)
+{
+    WinUnderInval(wh);
+    AddToInval(wh);
+}
+
 /*
  * WinCalcVisReg: W_visReg = W_univReg - W_childReg; what is new of it
- * to the invalid region.
+ * to the invalid region.  While a save under area closes, its restored
+ * part is not new to a window whose mask bit is still set
+ * (winSaveUnder.c).
  */
 void WinCalcVisReg(WindowHandle wh)
 {
     Window *w = MemDeref(wh);
 
+    if (winUnderClosing & w->W_savedUnderMask) {
+	WinRegOr(WIN_REG(wh, w->W_visReg), winUnderRestored,
+		 WIN_REG(wh, w->W_visReg));
+	w = MemDeref(wh);
+    }
     /* W_temp1Reg = NOT the old visible region */
     WinRegNot(WIN_REG(wh, w->W_visReg), WIN_REG(wh, w->W_temp1Reg));
     w = MemDeref(wh);
@@ -278,7 +293,7 @@ void WinCalcVisReg(WindowHandle wh)
     w->W_grFlags &= (WinGrFlags) ~WGF_MASK_VALID;
     w->W_grRegFlags &= (WinGrRegFlags) ~(WGRF_PATH_VALID |
 					 WGRF_WIN_PATH_VALID);
-    WinAddToInvalReg(wh);
+    AddToInval(wh);
 }
 
 /* ---------------------------------------------------------------------

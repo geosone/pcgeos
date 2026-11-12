@@ -45,6 +45,7 @@
  *     text in a hatch;
  *   - a masked window: drawn through a checker, its mask washed black;
  *   - the bounds of graphics strings;
+ *   - save under areas: restored, exposed when drawn under, given up;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -1871,6 +1872,65 @@ int main(int argc, char **argv)
 	SetCol(g, WHITE);
 	GrFillRect(g, 0, 0, 80, 80);
 	CHECK(Pixel(41, 40) == WHITE && Pixel(40, 40) == WHITE);
+    }
+
+    /* save under areas: a window opened with WPF_SAVE_UNDER over A
+     * (screen 40..70, 30..60); closing it puts A's pixels back without
+     * washing A out, unless A was drawn to or invalidated under it, or
+     * the area was given up (a window closed within the screen) */
+    {
+	WindowHandle su, top;
+	Window *sw;
+	int i;
+
+	for (i = 0; i < 5; i++) {
+	    SetCol(g, RED);
+	    GrFillRect(g, 0, 0, 80, 80);
+	    su = Open(root, WPF_SAVE_UNDER, GREEN, 40, 30, 70, 60);
+	    sw = MemLock(su);
+	    CHECK(sw->W_saveUnder != 0);
+	    MemUnlock(su);
+	    CHECK(Pixel(50, 40) == GREEN && Pixel(30, 40) == RED);
+	    if (i == 1) {		/* drawn to under it: clipped */
+		SetCol(g, BLUE);
+		GrFillRect(g, 25, 15, 35, 25);
+		CHECK(Pixel(50, 40) == GREEN && Pixel(45, 35) == GREEN);
+	    } else if (i == 2) {	/* drawn to beside it */
+		SetCol(g, BLUE);
+		GrFillRect(g, 0, 0, 5, 5);
+	    } else if (i == 3)		/* invalidated under it */
+		GrInvalRect(g, 25, 15, 35, 25);
+	    else if (i == 4) {		/* a window over it stays (a */
+		top = Open(root, 0, BLUE, 60, 50, 90, 80); /* sibling) */
+		sw = MemLock(su);
+		CHECK(sw->W_saveUnder != 0);
+		MemUnlock(su);
+		WinClose(top);		/* its close gives it up */
+		sw = MemLock(su);
+		CHECK(sw->W_saveUnder == 0);
+		MemUnlock(su);
+		CHECK(Pixel(65, 55) == GREEN);
+	    }
+	    WinClose(su);
+	    if (i == 0 || i == 2)
+		CHECK(Pixel(50, 40) == RED && Pixel(70, 60) == RED &&
+		      Pixel(30, 40) == RED);
+	    else
+		CHECK(Pixel(50, 40) == WHITE && Pixel(30, 40) == RED);
+	}
+	/* many: the ninth asks for the oldest's bit */
+	{
+	    WindowHandle many[9];
+	    for (i = 0; i < 9; i++)
+		many[i] = Open(root, WPF_SAVE_UNDER, GREEN, (sword) (200 + i),
+			       150, (sword) (210 + i), 160);
+	    sw = MemLock(many[0]);
+	    CHECK(sw->W_saveUnder == 0);
+	    MemUnlock(many[0]);
+	    for (i = 8; i >= 0; i--)
+		WinClose(many[i]);
+	    CHECK(Pixel(205, 155) == GREY);
+	}
     }
 
     /* an update: only the invalid area is drawn */
