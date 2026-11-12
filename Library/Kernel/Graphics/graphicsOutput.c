@@ -10,8 +10,8 @@
  * clipped to the mask's bounds; rotated, as a polygon of its corners
  * (DR_VID_POLYGON).  A frame is four lines with square ends.
  *
- * Not yet: graphics strings and paths (nothing is drawn), area
- * patterns.
+ * Graphics strings and paths store the elements (graphicsString*.c,
+ * graphicsPath.c).  Not yet: area patterns.
  */
 #include "graphicsInt.h"
 

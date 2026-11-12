@@ -41,7 +41,8 @@
  *
  * Compacted bitmaps: PackBits or LZG (Heap/heapCompress.c).
  *
- * Not yet: graphics strings.
+ * A graphics string stores a bitmap whole (GrBitmapStringSize); not
+ * yet: the slices after the first, bitmaps in paths.
  *
  * Huge bitmaps (graphicsBitmapHuge.asm) are drawn like complex ones,
  * each block of the huge array a slice (DrawSlice's note): the

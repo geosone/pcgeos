@@ -275,6 +275,8 @@ typedef struct {
     byte	*GSS_elem;	/* the element read (C heap) */
     word	GSS_elemCap;
     word	GSS_lastSize;
+    byte	*GSS_buf;	/* GST_PATH: the elements (C heap) */
+    word	GSS_bufLen;
 } GStringBlock;
 
 /* the element table (gstring.def): fixed size, and for a variable one
@@ -304,6 +306,12 @@ Handle GrGStringOf(GStateHandle gstate);	/* 0: not a graphics string */
 #define GR_WBF_D(w)	(((dword) (word) (w).WBF_int << 16) | \
 			 ((dword) (byte) (w).WBF_frac << 8))
 word GrBitmapStringSize(const Bitmap *bm);
+sword *GrSplineDevPoints(const GrDraw *d, const Point *points, word n,
+			 word *count);
+Boolean GrCloseArc(sword **pts, word *count, const GrArcParams *ap);
+void GrPlayElement(GStateHandle gstate, const byte *e);
+MemHandle GrAllocPathString(void);
+byte *GrFreePathString(MemHandle mh, word *size);
 void GrRelMovePen(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y);
 
 #endif

@@ -2810,6 +2810,64 @@ reads elements and moves the position; parses; copies it into a huge
 array (one element each, the bytes again) and into a file (the
 metafile header), and plays both.
 
+## 13q. Paths (`Graphics/graphicsPath.c`, P6)
+
+**Defining.** `GrBeginPath` saves the GState and points `GS_gstring` at
+a graphics string of type `GST_PATH`, whose elements are kept in the C
+heap. It starts with `GR_BEGIN_PATH` (the `PathCombineType`), the
+transformation and the pen. The `Gr*` routines then store into it
+instead of drawing. A path keeps output, transformation, pen and path
+elements, not the attributes, as the asm did. `GrEndPath` stores
+`GR_END_PATH` and restores the GState (so the attributes set in between
+are dropped). It then combines the group with the current path, a chunk
+of the GState block (`GS_currentPath`), so `GrSaveState` and
+`GrRestoreState` carry it:
+- `PCT_REPLACE` keeps the new group alone;
+- `PCT_UNION` and `PCT_INTERSECTION` append it;
+- `PCT_NULL` (at `GrBeginPath`) removes the path.
+
+The stored elements are the DOS16 elements of §13p.
+
+**Using.** The elements are played to polygons in device coordinates,
+one group at a time. They use the GState's own transformation and pen
+as the elements change them, and the GState gets both back afterwards
+(`W_curTMatrix` is composed again):
+- An element that is not a "to" one starts a subpath, and the "to"
+  elements continue the subpath from the pen.
+- `GR_CLOSE_SUB_PATH` closes the subpath, and a move ends it.
+- Rectangles, polygons and ellipses are closed subpaths, and arcs as
+  their `ArcCloseType` says. Curves and splines are halved as when
+  drawn (`GrSplineDevPoints`).
+
+`GrFillPath` turns each group into a region with the fill rule
+(`GrPolygonRegion`). It combines the regions by union or intersection
+(`GrPtrRegOp`) and draws the result with the area attributes
+(`DR_VID_REGION`). `GrDrawPath` draws each subpath with the line
+attributes, a closed one back to its start. `GrGetPathBounds(DWord)`
+takes the device bounds of the filled path back through the inverse
+matrix, and returns TRUE when there is no path. `GrTestPath` returns
+TRUE when the path exists, as the C stub did. In a graphics string,
+`GR_BEGIN_PATH`, `GR_END_PATH`, `GR_CLOSE_SUB_PATH`, `GR_FILL_PATH` and
+`GR_DRAW_PATH` are stored and played.
+
+**Not yet:**
+- clip paths and clip rectangles (`GrSetClipPath`,
+  `GrSetWinClipPath`, `GrSetClipRect`, `GrSetWinClipRect`, the
+  `WGRF_PATH_VALID` part of `WinValWinStruct`);
+- `GrSetStrokePath`, `GrTestPointInPath`, `GrGetPathPoints`,
+  `GrGetPathRegion`;
+- text, bitmaps, rounded rectangles and 3-point arcs in paths (they are
+  skipped).
+
+**Tests.** ctest `kernel.draw`:
+- a path defined from lines with nothing drawn, filled, with the pen
+  kept;
+- a rectangle united with an ellipse, and the bounds;
+- an intersection of two rectangles;
+- a stroked rectangle;
+- a path filled from a graphics string;
+- `PCT_NULL`.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

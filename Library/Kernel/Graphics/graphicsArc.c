@@ -7,8 +7,9 @@
  *
  * The pen: a bounded arc leaves it at its end if open, else at its
  * start; a 3-point arc at point 1 if open, else at point 3; the "to"
- * arcs start at the pen and leave it at point 3.  Not yet: graphics
- * strings and paths.
+ * arcs start at the pen and leave it at point 3.  Graphics strings and
+ * paths store GrDrawArc and GrFillArc (graphicsString*.c,
+ * graphicsPath.c); not yet the 3-point arcs.
  */
 #include "graphicsInt.h"
 

@@ -50,7 +50,7 @@ static sword Round(sdword v)
 
 /* CloseArc: the end, the center for a pie, the start and the first point
  * after the arc's points; TRUE when closed */
-static Boolean CloseArc(sword **pts, word *count, const GrArcParams *ap)
+Boolean GrCloseArc(sword **pts, word *count, const GrArcParams *ap)
 {
     sword *p = realloc(*pts, ((size_t) *count + 6) * 2 * sizeof(sword));
     word n = *count;
@@ -104,7 +104,7 @@ void GrDrawArcEllipseLow(const GrDraw *d, sword l, sword t, sword r,
     if (!pts)
 	return;
     if ((flags & GR_CEF_TYPE) != GR_CET_ELLIPSE)
-	connected = CloseArc(&pts, &count, ap);
+	connected = GrCloseArc(&pts, &count, ap);
     if (count >= 2)
 	GrDrawPolylineLow(d, pts, count, connected);
     free(pts);
@@ -140,7 +140,7 @@ void GrFillArcEllipseLow(const GrDraw *d, sword l, sword t, sword r,
     if (!pts)
 	return;
     if (arc)
-	CloseArc(&pts, &count, ap);
+	GrCloseArc(&pts, &count, ap);
     if (count > 2)
 	FillPolygon(d, pts, count, (Boolean) !arc, attr);
     free(pts);

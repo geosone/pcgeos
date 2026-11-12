@@ -13,8 +13,8 @@
  * the start to the end of the text in the text attributes.  The pen
  * ends after the text.
  *
- * Not yet: graphics strings and paths (the pen moves, nothing is
- * drawn), the bars of rotated text (a polygon in the asm), right to
+ * Graphics strings store the text (graphicsString*.c).  Not yet: text
+ * in paths (the pen moves, nothing is kept), the bars of rotated text (a polygon in the asm), right to
  * left text, GrDrawTextField.
  */
 #include "graphicsInt.h"

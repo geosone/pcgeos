@@ -12,8 +12,9 @@
  * are a polyline, drawn with the line attributes.  The pen ends on the
  * last point.
  *
- * Not yet: paths (the pen moves, nothing is stored), the EC check of
- * the number of points.
+ * Graphics strings and paths store the element (graphicsString*.c,
+ * graphicsPath.c: GrSplineDevPoints).  Not yet: the EC check of the
+ * number of points.
  */
 #include "graphicsInt.h"
 #include <stdlib.h>
@@ -97,18 +98,20 @@ static Boolean Bezier(SplinePoly *poly, const sdword *p, int depth)
 		      Bezier(poly, r, depth + 1));
 }
 
-/* DrawSplineLow: n document points (3k+1) */
-static void DrawSpline(const GrDraw *d, const Point *points, word n)
+/* the device polyline of n document points (3k+1), in the separator
+ * format (C heap, *count points); NULL if none */
+sword *GrSplineDevPoints(const GrDraw *d, const Point *points, word n,
+			 word *count)
 {
     SplinePoly poly = {NULL, 0, 0};
     sword *dev;
     word i;
 
     if (n < 4)
-	return;
+	return NULL;
     dev = GrSeparatorFormat(d, points, n, FALSE, &i);
     if (!dev)
-	return;
+	return NULL;
     if (AddPoint(&poly, (sdword) dev[0] << 8, (sdword) dev[1] << 8)) {
 	for (i = 0; i + 3 < n; i += 3) {
 	    sdword p[8];
@@ -118,14 +121,28 @@ static void DrawSpline(const GrDraw *d, const Point *points, word n)
 	    if (!Bezier(&poly, p, 0))
 		break;
 	}
+	free(dev);
 	if (i + 3 >= n) {
 	    poly.SP_pts[2 * poly.SP_count] = SEPARATOR;
 	    poly.SP_pts[2 * poly.SP_count + 1] = SEPARATOR;
-	    GrDrawPolylineMed(d, poly.SP_pts, poly.SP_count, FALSE);
+	    *count = poly.SP_count;
+	    return poly.SP_pts;
 	}
-    }
+    } else
+	free(dev);
     free(poly.SP_pts);
-    free(dev);
+    return NULL;
+}
+
+/* DrawSplineLow */
+static void DrawSpline(const GrDraw *d, const Point *points, word n)
+{
+    word count;
+    sword *pts = GrSplineDevPoints(d, points, n, &count);
+
+    if (pts)
+	GrDrawPolylineMed(d, pts, count, FALSE);
+    free(pts);
 }
 
 /* points[0] is the start (the pen for the ...To forms) */

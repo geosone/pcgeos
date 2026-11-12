@@ -3,7 +3,8 @@
  * GrFillEllipse).
  *
  * The bounds are document coordinates; the pen goes to the first
- * corner.  Not yet: graphics strings and paths.
+ * corner.  Graphics strings and paths store the element
+ * (graphicsString*.c, graphicsPath.c).
  */
 #include "graphicsInt.h"
 

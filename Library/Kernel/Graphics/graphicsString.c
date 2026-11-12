@@ -21,7 +21,7 @@
  *
  * Not yet: GR_DRAW_TEXT_FIELD (style runs: the element is a fault),
  * the *_PTR and *_OPTR elements, bitmap slices, palettes, patterns,
- * clip rectangles and paths (skipped), GrGetGStringBounds and the
+ * clip rectangles and clip paths (skipped), GrGetGStringBounds and the
  * bounds of GSF_FIGURE_BOUNDS.
  */
 #include "graphicsInt.h"
@@ -390,7 +390,7 @@ static void *Copy(const byte *p, dword n)
 }
 
 /* PE*: play e into gstate */
-static void PlayElement(GStateHandle gstate, const byte *e)
+void GrPlayElement(GStateHandle gstate, const byte *e)
 {
     void *v = NULL;
 
@@ -747,6 +747,22 @@ static void PlayElement(GStateHandle gstate, const byte *e)
 	    GrSetSubscriptAttr(gstate, *(SubscriptAttr *) &sa);
 	break;
     }
+    /* paths */
+    case GR_BEGIN_PATH:
+	GrBeginPath(gstate, (PathCombineType) U(e + 1));
+	break;
+    case GR_END_PATH:
+	GrEndPath(gstate);
+	break;
+    case GR_CLOSE_SUB_PATH:
+	GrCloseSubPath(gstate);
+	break;
+    case GR_FILL_PATH:
+	GrFillPath(gstate, e[1]);
+	break;
+    case GR_DRAW_PATH:
+	GrDrawPath(gstate);
+	break;
     default:			/* not yet: see the top */
 	break;
     }
@@ -901,7 +917,7 @@ static GSRetType Play(GStateHandle gstate, GStateHandle gstring,
 	    if (destString)
 		GrGSStore(destString, g->GSS_elem, g->GSS_lastSize);
 	    else if (gstate)
-		PlayElement(gstate, g->GSS_elem);
+		GrPlayElement(gstate, g->GSS_elem);
 	    /* an element may have used the GString block: g stays */
 	}
     done:

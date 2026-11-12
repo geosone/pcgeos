@@ -11,8 +11,8 @@
  * when the matrix mirrors), and the four are joined, with their ends,
  * into one closed polyline.  It is drawn in the line attributes or
  * filled as a convex polygon.  The "to" forms go from the pen, which
- * stays; the others leave the pen at the first corner.  Not yet:
- * graphics strings and paths.
+ * stays; the others leave the pen at the first corner.  Graphics
+ * strings store the element; not yet: in a path.
  */
 #include "graphicsInt.h"
 #include <stdlib.h>

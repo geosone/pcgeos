@@ -156,6 +156,7 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsText.c
   Graphics/graphicsFontDriver.c
   Graphics/graphicsSpline.c
+  Graphics/graphicsPath.c
   Graphics/graphicsString.c
   Graphics/graphicsStringMisc.c
   Graphics/graphicsStringStore.c)

@@ -29,7 +29,11 @@
  * the segment and offset of GrLoadGString; GrLoadGStringPtr loads one,
  * GrLoadGString(..., GST_PTR, ...) fails.
  *
- * Not yet: GST_PATH (paths), the stream truncation after a full disk.
+ * GST_PATH (graphicsPath.c) keeps the elements of a path being defined
+ * in the C heap (GSS_buf); only output, transformation, pen and path
+ * elements go into it (InPath).
+ *
+ * Not yet: the stream truncation after a full disk.
  */
 #include "graphicsInt.h"
 #include <gstring.h>
@@ -95,6 +99,17 @@ Boolean GrGSStore(Handle gstring, const void *data, word size)
 	g->GSS_curPos++;
 	ok = TRUE;
 	break;
+    case GST_PATH: {
+	byte *n = realloc(g->GSS_buf, (size_t) g->GSS_bufLen + size);
+	if (n && (dword) g->GSS_bufLen + size <= 0xffff) {
+	    memcpy(n + g->GSS_bufLen, data, size);
+	    g->GSS_buf = n;
+	    g->GSS_bufLen = (word) (g->GSS_bufLen + size);
+	    ok = TRUE;
+	} else if (n)
+	    g->GSS_buf = n;
+	break;
+    }
     default:					/* GST_PTR: read only */
 	break;
     }
@@ -114,16 +129,36 @@ static byte *Put(byte *p, dword v, int n)
     return p;
 }
 
+/* the elements a path keeps: output, the transformation, the pen, the
+ * path's own; not the attributes (the asm's LockDI_DS_check) */
+static Boolean InPath(byte op)
+{
+    return (Boolean) ((op >= GR_APPLY_ROTATION && op <= GR_RESTORE_TRANSFORM) ||
+		      (op >= GR_DRAW_LINE && op <= 0x5f) ||
+		      op == GR_MOVE_TO || op == GR_REL_MOVE_TO ||
+		      op == GR_MOVE_TO_WWFIXED || op >= GR_BEGIN_PATH ||
+		      op == GR_END_GSTRING);
+}
+
 Boolean GrGSRecord(GStateHandle gstate, byte opcode, const char *fmt, ...)
 {
-    Handle gstring = GrGStringOf(gstate);
+    Handle gstring;
     byte local[64], *buf = local, *p;
     const char *f;
     size_t size = 1;
     va_list ap;
-    Boolean ok;
+    Boolean ok, path;
+    GState *gs;
 
+    if (!gstate)
+	return FALSE;
+    gs = MemLock(gstate);
+    gstring = gs->GS_gstring;
+    path = (Boolean) ((gs->GS_pathFlags & PF_DEFINING_PATH) != 0);
+    MemUnlock(gstate);
     if (!gstring)
+	return FALSE;
+    if (path && !InPath(opcode))
 	return FALSE;
     va_start(ap, fmt);				/* the size */
     for (f = fmt; *f; f++)
@@ -248,6 +283,35 @@ static GStateHandle AllocGString(Handle han, GStringType type, word *block,
     return gstate;
 }
 
+/* AllocGString of GST_PATH: the GString block alone, the elements in
+ * GSS_buf (the asm: a chunk of the GString block) */
+MemHandle GrAllocPathString(void)
+{
+    MemHandle mh = MemAlloc(sizeof(GStringBlock), HF_SWAPABLE | HF_SHARABLE,
+			    HAF_ZERO_INIT);
+    GStringBlock *g;
+
+    if (mh) {
+	g = MemLock(mh);
+	g->GSS_flags = GST_PATH;
+	MemUnlock(mh);
+    }
+    return mh;
+}
+
+/* the path's elements taken out (C heap, *size bytes) and its block
+ * freed */
+byte *GrFreePathString(MemHandle mh, word *size)
+{
+    GStringBlock *g = MemLock(mh);
+    byte *b = g->GSS_buf;
+
+    *size = (g->GSS_flags & GSF_ERROR) ? 0 : g->GSS_bufLen;
+    free(g->GSS_elem);
+    MemFree(mh);
+    return b;
+}
+
 GStateHandle GrCreateGString(Handle han, GStringType hanType, word *vmBlock)
 {
     word block = 0;
@@ -320,6 +384,7 @@ void GrDestroyGString(GStateHandle gstring, GStateHandle gstate,
 		break;
 	    }
 	free(g->GSS_elem);
+	free(g->GSS_buf);
 	MemFree(mh);
     }
     if (!path)

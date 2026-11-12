@@ -37,6 +37,8 @@
  *   - dashes on a line and along a polyline;
  *   - graphics strings: recorded (the DOS16 bytes), played, in parts,
  *     from memory, copied into a huge array and a file, parsed;
+ *   - paths: filled, combined (union, intersection), stroked, bounds,
+ *     filled from a graphics string;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -1317,6 +1319,95 @@ int main(int argc, char **argv)
 
 	GrDestroyGString(ld, g, GSKT_KILL_DATA);
 	MemFree(blk);
+    }
+
+    /* paths: defined without drawing, filled (a square, its union with
+     * an ellipse, an intersection), stroked, bounded, removed; filled
+     * from a graphics string */
+    {
+	Rectangle rb;
+	XYValueAsDWord cp;
+	MemHandle blk = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+	word ch = 0;
+	GStateHandle gs, ld;
+
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	SetCol(g, RED);
+	CHECK(!GrTestPath(g, GPT_CURRENT));
+	GrBeginPath(g, PCT_REPLACE);
+	GrMoveTo(g, 10, 10);
+	GrDrawLineTo(g, 50, 10);
+	GrDrawLineTo(g, 50, 50);
+	GrDrawLineTo(g, 10, 50);
+	GrCloseSubPath(g);
+	GrFillRect(g, 60, 60, 70, 70);	/* in the path, not drawn */
+	GrEndPath(g);
+	CHECK(Pixel(85, 85) == WHITE && Pixel(40, 40) == WHITE);
+	CHECK(GrTestPath(g, GPT_CURRENT));
+	GrMoveTo(g, 3, 4);
+	GrFillPath(g, ODD_EVEN);
+	CHECK(Pixel(30, 30) == RED && Pixel(60, 60) == RED &&
+	      Pixel(28, 40) == WHITE && Pixel(75, 40) == WHITE &&
+	      Pixel(85, 85) == RED && Pixel(60, 75) == WHITE);
+	cp = GrGetCurPos(g);
+	CHECK(DWORD_X(cp) == 3 && DWORD_Y(cp) == 4);
+
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	GrBeginPath(g, PCT_REPLACE);
+	GrFillRect(g, 10, 10, 40, 40);
+	GrEndPath(g);
+	GrBeginPath(g, PCT_UNION);
+	GrDrawEllipse(g, 30, 30, 70, 70);
+	GrEndPath(g);
+	SetCol(g, BLUE);
+	GrFillPath(g, WINDING);
+	CHECK(Pixel(35, 35) == BLUE && Pixel(70, 70) == BLUE &&
+	      Pixel(58, 32) == BLUE && Pixel(88, 38) == WHITE &&
+	      Pixel(25, 85) == WHITE);
+	CHECK(!GrGetPathBounds(g, GPT_CURRENT, &rb) && rb.R_left == 10 &&
+	      rb.R_top == 10 && rb.R_right >= 69 && rb.R_right <= 71 &&
+	      rb.R_bottom >= 69 && rb.R_bottom <= 71);
+
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	GrBeginPath(g, PCT_REPLACE);
+	GrFillRect(g, 10, 10, 50, 50);
+	GrEndPath(g);
+	GrBeginPath(g, PCT_INTERSECTION);
+	GrFillRect(g, 30, 30, 70, 70);
+	GrEndPath(g);
+	SetCol(g, GREEN);
+	GrFillPath(g, ODD_EVEN);
+	CHECK(Pixel(60, 60) == GREEN && Pixel(40, 40) == WHITE &&
+	      Pixel(80, 80) == WHITE);
+
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	GrBeginPath(g, PCT_REPLACE);
+	GrDrawRect(g, 10, 10, 40, 40);
+	GrEndPath(g);
+	SetCol(g, RED);
+	GrDrawPath(g);
+	CHECK(Pixel(30, 45) == RED && Pixel(45, 30) == RED &&
+	      Pixel(45, 45) == WHITE && Pixel(60, 45) == RED);
+
+	/* a path filled by a graphics string */
+	gs = GrCreateGString(blk, GST_CHUNK, &ch);
+	GrSetAreaColor(gs, CF_RGB, 0, 0, 0xff);
+	GrFillPath(gs, ODD_EVEN);
+	GrEndGString(gs);
+	GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+	ld = GrLoadGString(blk, GST_CHUNK, ch);
+	CHECK(GrDrawGString(g, ld, 0, 0, 0, NULL) == GSRT_COMPLETE &&
+	      Pixel(30, 45) == BLUE && Pixel(45, 45) == BLUE);
+	GrDestroyGString(ld, g, GSKT_KILL_DATA);
+	MemFree(blk);
+
+	GrBeginPath(g, PCT_NULL);
+	CHECK(!GrTestPath(g, GPT_CURRENT) &&
+	      GrGetPathBounds(g, GPT_CURRENT, &rb));
     }
 
     /* an update: only the invalid area is drawn */

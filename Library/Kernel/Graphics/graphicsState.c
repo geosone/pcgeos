@@ -10,8 +10,8 @@
  *
  * Differences from the asm:
  *   - no cache of free GStates: the heap is the host's;
- *   - no graphics strings and paths yet: the attributes are only set
- *     in the GState;
+ *   - a graphics string stores the attributes as it sets them
+ *     (GrGSRecord); a path does not keep them;
  *   - the font: GrInvalidateFont (graphicsChars.c) where the font
  *     changes; GrSetFont and the kerning there too.
  * Not yet: the pen position and the transformations (with
