@@ -16,6 +16,10 @@ HAD_data or HAB_next, the directory entries name the data blocks in
 chain order, with HAB_prev, HAB_dir and the element counts right; a
 bitmap of GrCreateBitmap (an EditableBitmap: B_type with BMT_HUGE) has
 its CBitmap at 26, CB_devInfo 24, and scan lines of the right size.
+Databases (dbaseInt.def): the DB map block, and in each group the free
+lists, the item blocks (their DBIBH_vmHandle and DBIBH_infoStruct) with
+as many chunks as their DBIBI_refCount, DBGH_numItems of the new
+ungroup groups, and the map item.
 Exit code 1 if a file is broken.  An independent reading of
 vmemConstant.def, used to check the files of the C kernel (Port32 VMem).
 """
@@ -99,6 +103,84 @@ def chunk(blk, handle):
 
 BMT_HUGE = 0x20
 BMT_MASK = 0x10
+
+
+DB_MAP_ID = 0xff00
+DB_GROUP_ID = 0xff01
+DB_ITEM_BLOCK_ID = 0xff02
+GF_NEW_UNGROUP = 0x4000
+
+
+def check_db(blocks, uids, lmem, db_map, err):
+    """the database of a file (dbaseInt.def): map block, groups, item
+    blocks; the chunk handles of DBII_chunk are those of the file"""
+    if db_map not in blocks or uids[db_map] != DB_MAP_ID or \
+            len(blocks[db_map]) != 16:
+        err("DB map block %#x not a DB map" % db_map)
+        return
+    (mself, _, mgroup, mitem, ungrouped, new_ungrouped) = \
+        struct.unpack_from("<6H", blocks[db_map], 0)
+    if mself != db_map:
+        err("DB map: DBMB_vmemHandle %#x" % mself)
+    for g in (ungrouped, new_ungrouped, mgroup):
+        if g and (g not in blocks or uids[g] != DB_GROUP_ID):
+            err("DB map: group %#x not a group" % g)
+    for g in [h for h in blocks if uids[h] == DB_GROUP_ID]:
+        blk = blocks[g]
+        what = "DB group %#x" % g
+        if len(blk) < 16:
+            err("%s: %d bytes" % (what, len(blk)))
+            continue
+        (gself, _, flags, iblocks, ifree, bfree, bsize, nitems) = \
+            struct.unpack_from("<8H", blk, 0)
+        if gself != g or bsize > len(blk) or bsize < 14:
+            err("%s: DBGH_vmemHandle %#x, DBGH_blockSize %d"
+                % (what, gself, bsize))
+            continue
+
+        def w(off):
+            return struct.unpack_from("<H", blk, off)[0]
+        for head, size, name in ((ifree, 4, "item"), (bfree, 6, "block")):
+            f, n = head, 0
+            while f and n < 20000:
+                if f < 14 or f + size > bsize:
+                    err("%s: free %s %#x outside" % (what, name, f))
+                    break
+                f, n = w(f), n + 1
+        info, refs, n, infos = iblocks, 0, 0, {}
+        while info and n < 2000:
+            if info < 14 or info + 6 > bsize:
+                err("%s: item block info %#x outside" % (what, info))
+                break
+            nxt, ib, ref = struct.unpack_from("<HHh", blk, info)
+            ibb = blocks.get(ib)
+            if ibb is None or uids[ib] != DB_ITEM_BLOCK_ID or \
+                    not lmem(ib) or len(ibb) < 20:
+                err("%s: item block %#x not one" % (what, ib))
+            else:
+                (ioff, nh) = struct.unpack_from("<H", ibb, 2)[0], \
+                    struct.unpack_from("<H", ibb, 10)[0]
+                if struct.unpack_from("<2H", ibb, 16) != (ib, info):
+                    err("%s: item block %#x: DBIBH_vmHandle/infoStruct %r"
+                        % (what, ib, struct.unpack_from("<2H", ibb, 16)))
+                chunks = sum(1 for i in range(nh)
+                             if struct.unpack_from("<H", ibb, ioff + 2 * i)[0])
+                if chunks != ref:
+                    err("%s: item block %#x has %d chunks, refCount %d"
+                        % (what, ib, chunks, ref))
+                infos[info] = ibb
+            refs += ref
+            info, n = nxt, n + 1
+        if flags & GF_NEW_UNGROUP and nitems != refs:
+            err("%s: DBGH_numItems %d, items %d" % (what, nitems, refs))
+        if g == mgroup and mitem:
+            if mitem < 14 or mitem + 4 > bsize or w(mitem) not in infos:
+                err("DB map item %#x of group %#x not an item" % (mitem, g))
+            else:
+                ibb, ch = infos[w(mitem)], w(mitem + 2)
+                if ch + 2 > len(ibb) or not struct.unpack_from("<H", ibb,
+                                                               ch)[0]:
+                    err("DB map item %#x: chunk %#x not used" % (mitem, ch))
 
 
 def line_size(width, btype):
@@ -268,6 +350,8 @@ def check(path):
     for h in blocks:
         if uids[h] == SVMID_HA_DIR_ID and hdr[h + 3] & VMBF_LMEM:
             check_huge_array(blocks, uids, h, err)
+    if db_map:
+        check_db(blocks, uids, lambda h: hdr[h + 3] & VMBF_LMEM, db_map, err)
     hdr_entry = u16(TABLE + 6)
     real_used = sum(u16(h + 6) for h in handles if used(h))
     if STRICT and used_size != real_used:

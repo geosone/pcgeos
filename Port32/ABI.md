@@ -3424,6 +3424,82 @@ the mismatch offset, `LocalIsDateChar`/`LocalIsTimeChar`, comparing,
 normalizing across a day, month, year and leap day, in place; time zone
 and formats written to geos.ini and read at `LocalInit`.
 
+### 13t. The database manager
+
+`Library/Kernel/DBase` in C beside the asm: `dbaseGroup.c` (group
+blocks, the DB map block, the "ungrouped" groups, `DBCheckDBFile`),
+`dbaseStructure.c` (the item and item-block structures of a group and
+their free lists), `dbaseItemBlock.c` (item blocks), `dbaseCode.c` (the
+routines of `CInclude/dbase.h`), `dbaseInt.h`. `VMem/vmemHigh.c` has
+`VMGetDBMap`, `VMSetDBMap`, `VMMarkUngroupAvail`, `VMFindAvailUngroup`;
+`VMOpen` refuses a file whose DB blocks are not sane
+(`VM_OPEN_INVALID_VM_FILE`), as the asm did.
+
+The database is in the DOS16 format of the file:
+
+- A group is a VM block (`DB_GROUP_ID`) with a `DBGroupHeader` and a
+  heap of `DBItemInfo` (4 bytes) and `DBItemBlockInfo` (6 bytes)
+  structures, each kind on its own free list. Group blocks of older
+  files have a 14-byte header (without `DBGH_numItems`); their
+  structures start at 14. An item is the offset of its `DBItemInfo`.
+- The group and map blocks stay in memory as they are in the file
+  (16-bit fields, little endian like the hosts). Their memory handle
+  fields (`DBGH_handle`, `DBMB_handle`) cannot hold Port32 handles and
+  are written as 0. The code keeps the handle beside the block.
+- An item block is an LMem VM block (`DB_ITEM_BLOCK_ID`) with a
+  `DBItemBlockHeader`, in the DOS16 LMem layout in the file (§13b).
+  `DBII_chunk` holds the chunk handle of the file, which is
+  `LMEM_DOS16_DELTA` (4) lower than in memory. The code converts it
+  both ways.
+
+Behaviour as in the asm:
+
+- `DB_UNGROUPED` items go to the current "new ungroup" group. When its
+  block reaches 8K and it has no free structures, it is full; one of
+  that set with room again (`VMBF_UNGROUPED_AVAIL`, set when a full one
+  drops to 1536 items) is taken, else a new group.
+- An item that grows past the 8K an item block should have moves to
+  another block, unless it is alone in its block. An item block goes
+  away with its last item.
+- `DBInsertAt` grows the item (perhaps into another block) and zeroes
+  the new bytes.
+- A pointer from `DBLock` stays good until `DBUnlock`, or until an item
+  of the same block grows or is added (`DBAlloc`, `DBReAlloc`,
+  `DBInsertAt`). The asm fixed up `ds` and `es` when that happened; C
+  callers lock again, as with LMem.
+- One nesting kernel lock serializes the DB routines. The asm relied on
+  the VM file and the DB map block.
+- The VM override (file 0) is not supported. Register/notify
+  (`dbaseRegister.asm`) was empty and is not ported.
+- VM chains (`vmemChain.c`) take DB items: a chain with an item in the
+  low word is copied to `DB_UNGROUPED` of the other file, freed,
+  compared byte for byte, and counted as an item by `VMInfoVMChain`.
+- The asm register entries of `geos.gp` (`DBLock`, `DBAlloc`, ...) have
+  no meaning without registers. C callers use the `*Ungrouped`
+  functions behind the macros of `dbase.h`.
+
+**Tests.** ctest `kernel.db`:
+
+- the DB map made on first use; groups and items; lock, dirty, resize
+  in a block and into another one; insert and delete; free, with the
+  item block going with its last item;
+- copies within a file and to another file; `DBInfo` of good and bad
+  items; the map item;
+- 4200 ungrouped items filling two ungroup groups, then the first
+  group, with room again, reused;
+- freeing a group; DB items as VM chains;
+- everything written and read again; a file with a broken DB map
+  refused;
+- two files of DOS16 GEOS from the repository (`Graph___.000` with an
+  old 14-byte group, `FCHELP.000`): the map item compared with the
+  file's bytes, grown, an item added, read again.
+
+ctests `kernel.db.format` and `kernel.db.format16` check the resulting
+files with `vmcheck.py`. It now checks databases too: the DB map,
+groups, free lists, item blocks and their back links, chunks against
+`DBIBI_refCount`, `DBGH_numItems` and the map item. It finds all 2217
+VM files of the repository with a database sound.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

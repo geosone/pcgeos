@@ -198,6 +198,12 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
     }
     f->VF_next = vmFiles;
     vmFiles = f;
+    /* make sure that any DB stuff is also sane */
+    if (!create && !DBCheckDBFile(f->VF_handle)) {
+	VMClose(f->VF_handle, TRUE);
+	KernelSetError(VM_OPEN_INVALID_VM_FILE);
+	return 0;
+    }
     KernelSetError(create ? VM_CREATE_OK : readOnly ? VM_OPEN_OK_READ_ONLY
 				      : VM_OPEN_OK_READ_WRITE_NOT_SHARED);
     return f->VF_handle;
@@ -414,6 +420,41 @@ void VMSetMapBlock(VMFileHandle file, VMBlockHandle block)
     if (block)
 	VMCheckBlock(f, block);
     VHSet16(f, VMH_MAP_BLOCK, block);
+}
+
+VMBlockHandle VMGetDBMap(VMFileHandle file)
+{
+    return VHGet16(VMFileOf(file), VMH_DB_MAP_BLOCK);
+}
+
+void VMSetDBMap(VMFileHandle file, VMBlockHandle block)
+{
+    VHSet16(VMFileOf(file), VMH_DB_MAP_BLOCK, block);
+}
+
+void VMMarkUngroupAvail(VMFileHandle file, VMBlockHandle block)
+{
+    KVMFile *f = VMFileOf(file);
+
+    VMCheckBlock(f, block);
+    VHSet8(f, block + VMBH_FLAGS,
+	   (byte) (f->VF_hdr[block + VMBH_FLAGS] | VMBF_UNGROUPED_AVAIL));
+}
+
+VMBlockHandle VMFindAvailUngroup(VMFileHandle file)
+{
+    KVMFile *f = VMFileOf(file);
+    word h;
+
+    for (h = VM_HEADER_BLOCK + VMBH_SIZE; h < VHGet16(f, VMH_LAST_HANDLE);
+	 h += VMBH_SIZE)
+	if (VMIsUsed(f, h) &&
+	    (f->VF_hdr[h + VMBH_FLAGS] & VMBF_UNGROUPED_AVAIL)) {
+	    VHSet8(f, h + VMBH_FLAGS, (byte) (f->VF_hdr[h + VMBH_FLAGS] &
+					      ~VMBF_UNGROUPED_AVAIL));
+	    return h;
+	}
+    return 0;
 }
 
 word VMGetAttributes(VMFileHandle file)

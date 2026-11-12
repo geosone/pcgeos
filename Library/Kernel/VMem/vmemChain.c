@@ -11,10 +11,13 @@
  * HAB_next; a copied huge array gets its own handles
  * (FixupHugeArrayChain), and two are compared element by element.
  *
- * Not yet: chains of DB items (a chunk in the low word).
+ * A VMChain with an item in the low word is a DB item (group and item):
+ * it is copied to DB_UNGROUPED of the other file, freed, compared byte
+ * for byte, and counted as an item by VMInfoVMChain.
  */
 #include "vmemInt.h"
 #include "ghal.h"
+#include <dbase.h>
 
 #include <string.h>
 
@@ -60,10 +63,10 @@ static void SetLink(VMFileHandle file, VMBlockHandle b, byte *p, word l)
 	Put16(p, l);
 }
 
+#define IS_DB_ITEM(chain)	((word) (chain) != 0)
+
 static VMBlockHandle BlockOf(VMChain chain)
 {
-    if ((word) chain)
-	KernelFatal(VM_CHAIN_NOT_SUPPORTED);
     return VMCHAIN_GET_VM_BLOCK(chain);
 }
 
@@ -99,6 +102,11 @@ void VMFreeVMChain(VMFileHandle file, VMChain chain)
 {
     VMBlockHandle b = BlockOf(chain), next;
 
+    if (IS_DB_ITEM(chain)) {
+	if (DBInfoUngrouped(file, chain, NULL))
+	    DBFreeUngrouped(file, chain);
+	return;
+    }
     while (b) {
 	if (IsTree(file, b, &next)) {
 	    dword *br;
@@ -119,6 +127,9 @@ VMChain VMCopyVMChain(VMFileHandle sourceFile, VMChain sourceChain,
     MemHandle mh;
     byte *p;
 
+    if (IS_DB_ITEM(sourceChain))
+	return DBRawCopyDBItem(sourceFile, sourceChain, destFile,
+			       DB_UNGROUPED);
     while (b) {
 	Boolean tree = IsTree(sourceFile, b, &next);
 	nb = VMCopyVMBlock(sourceFile, b, destFile);
@@ -164,6 +175,22 @@ Boolean VMCompareVMChains(VMFileHandle sourceFile, VMChain sourceChain,
     VMBlockHandle a = BlockOf(sourceChain), b = BlockOf(destChain);
     VMBlockHandle na, nb;
 
+    if (IS_DB_ITEM(sourceChain) || IS_DB_ITEM(destChain)) {
+	const byte *pa, *pb;
+	word sa, sb;
+	Boolean same;
+
+	if (!IS_DB_ITEM(sourceChain) || !IS_DB_ITEM(destChain) ||
+	    !DBInfoUngrouped(sourceFile, sourceChain, &sa) ||
+	    !DBInfoUngrouped(destFile, destChain, &sb) || sa != sb)
+	    return FALSE;
+	pa = DBLockUngrouped(sourceFile, sourceChain);
+	pb = DBLockUngrouped(destFile, destChain);
+	same = memcmp(pa, pb, sa) == 0;
+	DBUnlock((void *) pb);
+	DBUnlock((void *) pa);
+	return same;
+    }
     if (a && b && (Uid(sourceFile, a) == SVMID_HA_DIR_ID ||
 		   Uid(destFile, b) == SVMID_HA_DIR_ID))
 	return Uid(sourceFile, a) == Uid(destFile, b) &&
@@ -219,11 +246,19 @@ Boolean VMCompareVMChains(VMFileHandle sourceFile, VMChain sourceChain,
 }
 
 static Boolean InfoChain(VMFileHandle file, VMChain chain, dword *size,
-			 word *blocks)
+			 word *blocks, word *items)
 {
     VMBlockHandle b = BlockOf(chain), next;
     VMInfoStruct info;
 
+    if (IS_DB_ITEM(chain)) {
+	word n;
+	if (!DBInfoUngrouped(file, chain, &n))
+	    return FALSE;
+	*size += n;
+	(*items)++;
+	return TRUE;
+    }
     while (b) {
 	if (!VMInfo(file, b, &info))
 	    return FALSE;
@@ -234,7 +269,7 @@ static Boolean InfoChain(VMFileHandle file, VMChain chain, dword *size,
 	    word n = Branches(file, b, &br), i;
 	    Boolean ok = TRUE;
 	    for (i = 0; i < n && ok; i++)
-		ok = !br[i] || InfoChain(file, br[i], size, blocks);
+		ok = !br[i] || InfoChain(file, br[i], size, blocks, items);
 	    ghal_mem_free(br);
 	    if (!ok)
 		return FALSE;
@@ -249,14 +284,14 @@ Boolean VMInfoVMChain(VMFileHandle sourceFile, VMChain sourceChain,
 		      word *dbItemCount)
 {
     dword size = 0;
-    word blocks = 0;
-    Boolean ok = InfoChain(sourceFile, sourceChain, &size, &blocks);
+    word blocks = 0, items = 0;
+    Boolean ok = InfoChain(sourceFile, sourceChain, &size, &blocks, &items);
 
     if (chainSize)
 	*chainSize = size;
     if (vmBlockCount)
 	*vmBlockCount = blocks;
     if (dbItemCount)
-	*dbItemCount = 0;
+	*dbItemCount = items;
     return ok;
 }

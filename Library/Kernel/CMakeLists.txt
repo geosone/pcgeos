@@ -72,6 +72,8 @@
 #                      cmap*.asm) and strings (localStrings.asm) become
 #                      localTables.c and localStrings.h at build time
 #                      (Port32/tools/localgen.py)
+#   DBase/dbaseGroup.c, dbaseStructure.c, dbaseItemBlock.c,
+#   dbaseCode.c      <- the database manager (dbase*.asm)
 add_library(geos_kernel_objs OBJECT
   Sys/sysError.c
   Heap/heapHandle.c
@@ -190,6 +192,10 @@ add_library(geos_kernel_objs OBJECT
   Local/dateTimeFormat.c
   Local/dateTimeFields.c
   Local/dateTimeParse.c
+  DBase/dbaseGroup.c
+  DBase/dbaseStructure.c
+  DBase/dbaseItemBlock.c
+  DBase/dbaseCode.c
   Local/localInit.c
   ${CMAKE_CURRENT_BINARY_DIR}/localTables.c)
 # The tables of the localization code, from the asm

@@ -112,7 +112,6 @@
     X(VM_NOT_A_VM_BLOCK)		/* memory handle not of a VM file */ \
     X(VM_HEADER_FULL)		/* the block table cannot grow */ \
     X(VM_ALLOC_FAILED)		/* no memory for a block */ \
-    X(VM_CHAIN_NOT_SUPPORTED)	/* DB item chains */ \
     X(CANNOT_ALLOCATE_CORRECT_CHUNK_HANDLE)	/* LMemAllocAt: handle taken */ \
     X(OBJ_LOAD_ERROR)		/* a state file that cannot be used */ \
     X(INIT_FILE_ERROR)		/* no memory for the init file */ \
@@ -126,7 +125,9 @@
     X(EC_BAD_HANDLE)		/* ECCheck*Handle: not of that type */ \
     X(OBJ_FLUSH_INPUT_QUEUE_BAD_NEXT_STOP) \
     X(DISABLE_APO_COUNT_OVERFLOW)	/* SysDisableAPO/SysEnableAPO */ \
-    X(LOCAL_BAD_STRING)	/* Local/localStrings.c: no such string */
+    X(LOCAL_BAD_STRING)	/* Local/localStrings.c: no such string */ \
+    X(DB_LOCK_FAILED)	/* DBase: a group or item block not readable */ \
+    X(DB_BAD_ITEM)	/* DBase: no such item in the group (EC) */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -864,6 +865,9 @@ word ElementArrayAddElementSized(optr arr, void *element, word size,
  * image (0 if it is not a valid LMem block); gapLen bytes at gapAt of
  * the header are not in the file (0: none) */
 ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize);
+/* chunk handles in the file are this much lower than in memory (the
+ * Port32 LMemBlockHeader is larger than the 16 bytes of DOS16) */
+#define LMEM_DOS16_DELTA	((word) (sizeof(LMemBlockHeader) - 16))
 word LMemDOS16Size(MemHandle mh, word gapLen);
 word LMemToDOS16(MemHandle mh, byte *out, word gapAt, word gapLen);
 /* Heap/heapCompress.c: one LZG stream, at most cap bytes written; the
@@ -874,6 +878,18 @@ MemHandle LMemFromDOS16(const byte *img, word size, Handle owner,
 			word gapAt, word gapLen);
 MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
 				  HeapFlags hf, HeapAllocFlags haf);
+
+/* ---------------------------------------------------------------------
+ * The database manager on VM files (DBase/, VMem/vmemHigh.c)
+ * ------------------------------------------------------------------- */
+VMBlockHandle VMGetDBMap(VMFileHandle file);
+void VMSetDBMap(VMFileHandle file, VMBlockHandle block);
+/* VMBF_UNGROUPED_AVAIL: an ungroup group with room again, and finding
+ * one (the flag is cleared; 0 if none) */
+void VMMarkUngroupAvail(VMFileHandle file, VMBlockHandle block);
+VMBlockHandle VMFindAvailUngroup(VMFileHandle file);
+/* DBCheckDBFile: whether the DB blocks of a file just opened are sane */
+Boolean DBCheckDBFile(VMFileHandle file);
 
 /* ---------------------------------------------------------------------
  * Starting the kernel (Boot/bootInit.c)

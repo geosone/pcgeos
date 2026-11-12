@@ -78,6 +78,16 @@ add_test(NAME kernel.im COMMAND test_kernel_im)
 add_executable(test_kernel_vm test_kernel_vm.c)
 target_link_libraries(test_kernel_vm PRIVATE geos_kernel)
 add_test(NAME kernel.vm COMMAND test_kernel_vm)
+add_executable(test_kernel_db test_kernel_db.c)
+target_link_libraries(test_kernel_db PRIVATE geos_kernel)
+# files of DOS16 GEOS with databases (not inside the DOS machine)
+if(GEOS_HOST STREQUAL "dos32")
+  add_test(NAME kernel.db COMMAND test_kernel_db)
+else()
+  add_test(NAME kernel.db COMMAND test_kernel_db
+    ${PROJECT_SOURCE_DIR}/Appl/Breadbox/Graph/Graph___.000
+    ${PROJECT_SOURCE_DIR}/Appl/Installers/fcinst/Release/FCHELP.000)
+endif()
 # the files it leaves, checked by an independent reader of the format
 # (not on dos32: the files stay inside the DOS machine)
 find_package(Python3 COMPONENTS Interpreter)
@@ -94,6 +104,17 @@ if(Python3_FOUND AND NOT GEOS_HOST STREQUAL "dos32")
     ${CMAKE_CURRENT_BINARY_DIR}/GVTOP/REF.VM)
   set_tests_properties(kernel.vm.format kernel.vm.format16
     PROPERTIES FIXTURES_REQUIRED vmfiles)
+  set_tests_properties(kernel.db PROPERTIES FIXTURES_SETUP dbfiles)
+  add_test(NAME kernel.db.format COMMAND ${Python3_EXECUTABLE}
+    ${PROJECT_SOURCE_DIR}/Port32/tools/vmcheck.py --strict
+    ${CMAKE_CURRENT_BINARY_DIR}/GDTOP/DB.VM
+    ${CMAKE_CURRENT_BINARY_DIR}/GDTOP/DB2.VM)
+  # the DOS16 files, changed (their unassigned entries are not cleared)
+  add_test(NAME kernel.db.format16 COMMAND ${Python3_EXECUTABLE}
+    ${PROJECT_SOURCE_DIR}/Port32/tools/vmcheck.py
+    ${CMAKE_CURRENT_BINARY_DIR}/GDTOP/D16_1.VM
+    ${CMAKE_CURRENT_BINARY_DIR}/GDTOP/D16_2.VM)
+  set_tests_properties(kernel.db.format kernel.db.format16 PROPERTIES FIXTURES_REQUIRED dbfiles)
   # GEOS trees between DOS names and long names (Driver/IFS/HostFS)
   add_test(NAME tools.geostree COMMAND ${Python3_EXECUTABLE}
     ${PROJECT_SOURCE_DIR}/Port32/tools/geostree.py selftest)

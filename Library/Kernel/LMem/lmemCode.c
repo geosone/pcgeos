@@ -664,7 +664,7 @@ MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
  * ------------------------------------------------------------------- */
 
 #define DOS16_LMBH_SIZE	16u
-#define LMBH_DELTA	((word) (sizeof(LMemBlockHeader) - DOS16_LMBH_SIZE))
+#define LMBH_DELTA	LMEM_DOS16_DELTA
 #define ALIGN4(n)	(((n) + 3u) & ~(dword) 3u)
 
 static void Put16(byte *p, word v)
