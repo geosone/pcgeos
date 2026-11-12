@@ -13,11 +13,14 @@
  * the start to the end of the text in the text attributes.  The pen
  * ends after the text.
  *
- * Graphics strings store the text (graphicsString*.c).  Not yet: text
- * in paths (the pen moves, nothing is kept), the bars of rotated text (a polygon in the asm), right to
- * left text, GrDrawTextField.
+ * Graphics strings and paths store the text (graphicsString*.c); a path
+ * gets the outlines of the characters from the font driver when it is
+ * used (GrTextOutline, graphicsPath.c).  Not yet: the bars of rotated
+ * text (a polygon in the asm), right to left text, GrDrawTextField.
  */
 #include "graphicsInt.h"
+#include <Internal/fontDr.h>
+#include <stdlib.h>
 
 #define TEXT	((word) offsetof(GState, GS_textAttr))
 
@@ -107,6 +110,83 @@ static void DrawText(GStateHandle gstate, int64_t x, int64_t y,
     /* UpdateTextPos */
     GrSetDocWWFPenPos(gs, (sdword) (x + ((int64_t) width << 8)), (sdword) y);
     GrExitGraphics(&d);
+}
+
+/*
+ * DrawTextToPath: the outlines of size characters (0: to the null) at
+ * x, y (doc, 1/65536) as path elements (C heap, *len bytes; NULL if
+ * none): each character's from the font driver (DR_FONT_GEN_PATH, the
+ * driver drawing it with GrMoveTo, GrDrawLineTo, GrDrawCurveTo and
+ * transformations), recorded as a path is, between GR_SAVE_TRANSFORM
+ * and GR_RESTORE_TRANSFORM.  The characters are where DrawText puts
+ * them (the widths with kerning); the pen ends after the text.
+ */
+byte *GrTextOutline(GStateHandle gstate, int64_t x, int64_t y,
+		    const char *str, word size, word *len)
+{
+    GState *gs = MemLock(gstate);
+    FontBuf *fb = GrLockFont(gs, &gs->GS_TMatrix);
+    sdword *at, top, width;
+    MemHandle path;
+    Handle saved;
+    PathFlags flags;
+    byte *elems = NULL;
+    word n, i;
+
+    *len = 0;
+    if (!fb) {
+	MemUnlock(gstate);
+	return NULL;
+    }
+    for (n = 0; (!size || n < size) && str[n]; n++)
+	;
+    at = malloc(((size_t) n + 1) * sizeof(sdword));
+    for (i = 0; at && i <= n; i++)	/* (0 would be to the null) */
+	at[i] = i ? GrTextWidthLow(gs, fb, str, i) : 0;
+    top = (sdword) (y >> 8);
+    if (gs->GS_textMode & TM_DRAW_BASE)
+	top -= W256(&fb->FB_baselinePos);
+    else if (gs->GS_textMode & TM_DRAW_ACCENT)
+	top -= W256(&fb->FB_accent);
+    else if (gs->GS_textMode & TM_DRAW_BOTTOM)
+	top -= W256(&fb->FB_height);
+    width = GrTextWidthLow(gs, fb, str, n);
+    GrUnlockFont(gs);
+    path = at ? GrAllocPathString() : 0;
+    if (path) {
+	saved = gs->GS_gstring;
+	flags = gs->GS_pathFlags;
+	gs->GS_gstring = path;
+	gs->GS_pathFlags = PF_DEFINING_PATH;
+	MemUnlock(gstate);
+	for (i = 0; i < n; i++) {
+	    DriverRegs r;
+	    GrSaveTransform(gstate);
+	    gs = MemLock(gstate);
+	    GrSetDocWWFPenPos(gs, (sdword) (x + ((int64_t) at[i] << 8)),
+			      top << 8);
+	    MemUnlock(gstate);
+	    GrMoveToWWFixed(gstate, (sdword) (x + ((int64_t) at[i] << 8)),
+			    top << 8);
+	    memset(&r, 0, sizeof(r));
+	    r.DR_bx = gstate;
+	    r.DR_dx = (byte) str[i];
+	    (void) GrCallFontDriver(gstate, DR_FONT_GEN_PATH, &r);
+	    GrRestoreTransform(gstate);
+	}
+	gs = MemLock(gstate);
+	gs->GS_gstring = saved;
+	gs->GS_pathFlags = flags;
+	elems = GrFreePathString(path, len);
+    }
+    free(at);
+    GrSetDocWWFPenPos(gs, (sdword) (x + ((int64_t) width << 8)), (sdword) y);
+    MemUnlock(gstate);
+    if (elems && !*len) {
+	free(elems);
+	elems = NULL;
+    }
+    return elems;
 }
 
 /* the length of a string (size 0: null terminated) */

@@ -2885,8 +2885,22 @@ Rounded rectangles are closed subpaths (`GrRoundRectDevPoints`). 3-point
 arcs are now stored in graphics strings and played (`GR_*_ARC_3POINT*`).
 In paths, an open "to" arc continues the subpath at the pen.
 
-**Not yet:** text and bitmaps in paths (they are skipped), a path
-defined inside a graphics string.
+**Text in paths.** A path stores text as the text element. When the
+path is used, the kernel asks the font driver for the outline of each
+character (`DR_FONT_GEN_PATH`, `GrTextOutline`), where `GrDrawText`
+would have put it:
+- the advance widths include kerning;
+- the text mode decides top, baseline, accent or bottom.
+
+The driver draws the outline with `GrMoveTo`, `GrDrawLineTo`,
+`GrDrawCurveTo` and transformations. Its calls are recorded like a path,
+between `GR_SAVE_TRANSFORM` and `GR_RESTORE_TRANSFORM`, and walked. Each
+contour is a closed subpath. The pen ends after the text, as when it is
+drawn. Only outline fonts give outlines (TrueType; a bitmap font gives
+nothing).
+
+**Not yet:** bitmaps in paths (they are skipped), a path defined inside
+a graphics string, `DR_FONT_GEN_IN_REGION`.
 
 **Tests.** ctest `kernel.draw`:
 - a path defined from lines with nothing drawn, filled, with the pen
@@ -2897,6 +2911,8 @@ defined inside a graphics string.
 - an intersection of two rectangles;
 - a stroked rectangle;
 - a filled rounded rectangle and a filled 3-point chord;
+- a TrueType "I" in a path, filled where the drawn one is, and the pen
+  after the text;
 - a path filled from a graphics string;
 - `PCT_NULL`;
 - a clip rectangle that stays when the transformation changes, an

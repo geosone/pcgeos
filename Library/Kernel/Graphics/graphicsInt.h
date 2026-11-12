@@ -240,6 +240,7 @@ Boolean GrConvertBitmapFont(const byte *img, word size, MemHandle mh);
 Boolean GrLoadBitmapFont(FileHandle fh, const PointSizeEntry *pse,
 			 MemHandle mh);
 Boolean GrCallFontDriverID(FontMaker maker, word function, DriverRegs *r);
+Boolean GrCallFontDriver(GStateHandle gstate, word function, DriverRegs *r);
 void GrInvalidateFont(GState *gs);
 FontBuf *GrLockFont(GState *gs, const TMatrix *m);	/* NULL: no font */
 void GrUnlockFont(GState *gs);
@@ -310,6 +311,8 @@ sword *GrSplineDevPoints(const GrDraw *d, const Point *points, word n,
 			 word *count);
 sword *GrRoundRectDevPoints(const GrDraw *d, sword l, sword t, sword r,
 			   sword b, word radius, word *count);
+byte *GrTextOutline(GStateHandle gstate, int64_t x, int64_t y,
+		    const char *str, word size, word *len);
 Boolean GrCloseArc(sword **pts, word *count, const GrArcParams *ap);
 void GrPlayElement(GStateHandle gstate, const byte *e);
 MemHandle GrAllocPathString(void);

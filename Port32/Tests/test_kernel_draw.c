@@ -39,7 +39,8 @@
  *     from memory, copied into a huge array and a file, parsed;
  *   - paths: filled, combined (union, intersection), stroked, bounds,
  *     filled from a graphics string; asked about (point, region, as a
- *     graphics string); clip rectangles and clip paths, the clip region;
+ *     graphics string); text in a path (a TrueType outline); clip
+ *     rectangles and clip paths, the clip region;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -1172,6 +1173,45 @@ int main(int argc, char **argv)
 	    }
 	CHECK(black >= 250 && black <= 450 && black + white == 60 * 30);
 	CHECK(Pixel(22, 50) == WHITE && Pixel(60, 50) == WHITE);
+
+	/* the "I" in a path: its outline from the driver (DR_FONT_GEN_PATH),
+	 * filled about where the text was drawn; the pen after it */
+	{
+	    word red = 0, both = 0;
+	    XYValueAsDWord cp;
+	    byte *seen = calloc(60 * 30, 1);
+	    for (y = 25; y < 85; y++)
+		for (x = 25; x < 55; x++)
+		    if (seen && Pixel(x, y) == BLACK)
+			seen[(y - 25) * 30 + (x - 25)] = 1;
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 99, 79);
+	    GrBeginPath(g, PCT_REPLACE);
+	    GrDrawText(g, 5, 5, "I", 0);
+	    GrEndPath(g);
+	    CHECK(Pixel(40, 50) == WHITE);	/* nothing drawn yet */
+	    SetCol(g, RED);
+	    GrMoveTo(g, 0, 0);
+	    GrFillPath(g, WINDING);
+	    for (y = 25; y < 85; y++)
+		for (x = 25; x < 55; x++)
+		    if (Pixel(x, y) == RED) {
+			red++;
+			both += seen && seen[(y - 25) * 30 + (x - 25)];
+		    }
+	    CHECK(red >= 250 && red <= 450 && both * 10 >= red * 8);
+	    CHECK(Pixel(22, 50) == WHITE && Pixel(60, 50) == WHITE);
+	    free(seen);
+	    /* the pen while defining: after the text (GrEndPath restores
+	     * the GState, and so the pen) */
+	    GrBeginPath(g, PCT_REPLACE);
+	    GrDrawText(g, 5, 5, "II", 0);
+	    cp = GrGetCurPos(g);
+	    CHECK(DWORD_X(cp) == 5 + (sword) (GrTextWidth(g, "II", 0)) &&
+		  DWORD_Y(cp) == 5);
+	    GrEndPath(g);
+	    GrBeginPath(g, PCT_NULL);
+	}
 	GrSetFont(g, FID_BERKELEY, 10UL << 16);
     }
 

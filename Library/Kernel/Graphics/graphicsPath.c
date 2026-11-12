@@ -42,8 +42,12 @@
  * returns a path as a graphics string.  GrSetStrokePath and
  * GrGetPathPoints do nothing, as in the asm.
  *
- * Not yet: text and bitmaps in paths (skipped), a path defined in a
- * graphics string.
+ * Text in a path is the outline of its characters, which the font
+ * driver gives when the path is used (GrTextOutline, graphicsText.c);
+ * each contour is a closed subpath.
+ *
+ * Not yet: bitmaps in paths (skipped), a path defined in a graphics
+ * string.
  */
 #include "graphicsInt.h"
 #include <gstring.h>
@@ -429,6 +433,54 @@ static void Arc3(PathWalk *w, GStateHandle gstate, const byte *e)
     GrSetDocWWFPenPos(w->PW_d->GD_gs, px, py);
 }
 
+static const byte *Walk(PathWalk *w, GStateHandle gstate, const byte *e,
+			const byte *end);
+
+/* DrawTextToPath: the outlines of the characters (GrTextOutline), each
+ * contour a closed subpath */
+static void Text(PathWalk *w, GStateHandle gstate, const byte *e)
+{
+    int64_t x, y;
+    const char *str;
+    char c;
+    word size, len, first, i;
+    byte *outline;
+    PointDWFixed pen;
+
+    if (*e == GR_DRAW_TEXT || *e == GR_DRAW_CHAR) {
+	word at = (word) (*e == GR_DRAW_TEXT ? 1 : 2);
+	x = (int64_t) S(e + at) * 65536;
+	y = (int64_t) S(e + at + 2) * 65536;
+    } else {
+	PointWWFixed cp;
+	GrGetCurPosWWFixed(gstate, &cp);
+	x = (int64_t) cp.PF_x.WWF_int * 65536 + cp.PF_x.WWF_frac;
+	y = (int64_t) cp.PF_y.WWF_int * 65536 + cp.PF_y.WWF_frac;
+    }
+    switch (*e) {
+    case GR_DRAW_TEXT: size = U(e + 5); str = (const char *) e + 7; break;
+    case GR_DRAW_TEXT_CP: size = U(e + 1); str = (const char *) e + 3; break;
+    case GR_DRAW_CHAR: c = (char) e[1]; str = &c; size = 1; break;
+    default: c = (char) e[1]; str = &c; size = 1; break;
+    }
+    if (!size)
+	return;
+    outline = GrTextOutline(gstate, x, y, str, size, &len);
+    w->PW_d->GD_gs = MemDeref(gstate);
+    if (!outline)
+	return;
+    pen = w->PW_d->GD_gs->GS_penPos;	/* after the text */
+    w->PW_open = FALSE;
+    first = w->PW_count;
+    (void) Walk(w, gstate, outline, outline + len);
+    w->PW_d->GD_gs = MemDeref(gstate);
+    w->PW_d->GD_gs->GS_penPos = pen;
+    for (i = first; i < w->PW_count; i++)
+	w->PW_subs[i].SB_closed = TRUE;
+    w->PW_open = FALSE;
+    free(outline);
+}
+
 /* the elements from e to GR_END_PATH (or end) as subpaths; returns the
  * end */
 static const byte *Walk(PathWalk *w, GStateHandle gstate, const byte *e,
@@ -589,6 +641,12 @@ static const byte *Walk(PathWalk *w, GStateHandle gstate, const byte *e,
 	case GR_FILL_ARC_3POINT_TO:
 	case GR_DRAW_REL_ARC_3POINT_TO:
 	    Arc3(w, gstate, e);
+	    break;
+	case GR_DRAW_TEXT:
+	case GR_DRAW_TEXT_CP:
+	case GR_DRAW_CHAR:
+	case GR_DRAW_CHAR_CP:
+	    Text(w, gstate, e);
 	    break;
 	case GR_DRAW_CURVE:
 	    if ((pts = Points(e + 1, 4)) != NULL) {
