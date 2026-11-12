@@ -1521,6 +1521,57 @@ int main(int argc, char **argv)
 	    GrSetTextColor(g, CF_RGB, 0, 0, 0);
 	}
 
+	/* elements that point at their data: text and a bitmap by offset
+	 * from the string's start (GST_PTR) and by optr (a chunk);
+	 * drawn and bounded as the elements they stand for */
+	{
+	    static byte ps[64];
+	    ChunkHandle tc;
+	    optr to;
+	    GStateHandle pl;
+	    RectDWord rd;
+	    word k2 = 0, i;
+
+	    MemLock(blk);
+	    tc = LMemAlloc(blk, 2);
+	    memcpy(LMemDerefHandles(blk, tc), "H", 2);
+	    MemUnlock(blk);
+	    to = ConstructOptr(blk, tc);
+	    ps[k2++] = GR_DRAW_TEXT_PTR;		/* "Hi" at 0, 25 */
+	    ps[k2++] = 0; ps[k2++] = 0; ps[k2++] = 25; ps[k2++] = 0;
+	    ps[k2++] = 40; ps[k2++] = 0;
+	    ps[k2++] = GR_DRAW_TEXT_OPTR;		/* "H" at 40, 25 */
+	    ps[k2++] = 40; ps[k2++] = 0; ps[k2++] = 25; ps[k2++] = 0;
+	    for (i = 0; i < 8; i++)
+		ps[k2++] = (byte) (to >> (8 * i));
+	    ps[k2++] = GR_DRAW_BITMAP_PTR;		/* at 0, 50 */
+	    ps[k2++] = 0; ps[k2++] = 0; ps[k2++] = 50; ps[k2++] = 0;
+	    ps[k2++] = 44; ps[k2++] = 0;
+	    ps[k2++] = GR_END_GSTRING;
+	    CHECK(k2 <= 40);
+	    memcpy(ps + 40, "Hi", 3);
+	    {				/* 16 x 2, monochrome */
+		static const byte bm[] = { 16, 0, 2, 0, BMC_UNCOMPACTED,
+					   BMF_MONO, 0xf0, 0x0f, 0x80, 0x01 };
+		memcpy(ps + 44, bm, sizeof(bm));
+	    }
+
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 80, 80);
+	    pl = GrLoadGStringPtr(ps);
+	    CHECK(GrDrawGString(g, pl, 0, 0, 0, NULL) == GSRT_COMPLETE);
+	    CHECK(Pixel(20, 47) == BLACK && Pixel(27, 47) == BLACK &&
+		  Pixel(60, 47) == BLACK && Pixel(59, 47) == WHITE);
+	    CHECK(Pixel(20, 70) == BLACK && Pixel(24, 70) == WHITE &&
+		  Pixel(35, 71) == BLACK);
+	    GrSetGStringPos(pl, GSSPT_BEGINNING, 0);
+	    GrGetGStringBoundsDWord(pl, 0, 0, &rd);
+	    CHECK(rd.RD_left == 0 && rd.RD_top == 25 && rd.RD_right >= 47 &&
+		  rd.RD_bottom == 52);
+	    GrDestroyGString(pl, 0, GSKT_LEAVE_DATA);
+	    LMemFreeHandles(blk, tc);
+	}
+
 	/* palettes: the window's own, mapped to, copied out; recorded
 	 * and played */
 	{

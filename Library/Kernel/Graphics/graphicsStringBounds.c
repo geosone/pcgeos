@@ -27,7 +27,8 @@
  * font's box otherwise; paths are bounded by their elements as they are
  * defined (GR_DRAW_PATH and GR_FILL_PATH add nothing, the asm asked
  * GrGetPathBounds too).  A text field is bounded run by run, as the
- * text.  Not yet: the *_PTR and *_OPTR elements.
+ * text.  The *_PTR and *_OPTR elements come as the elements they stand
+ * for (graphicsString.c).
  */
 #include "graphicsInt.h"
 #include <gstring.h>

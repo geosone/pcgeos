@@ -23,7 +23,7 @@
  * counts make the field's characters; it plays with a callback giving
  * the runs (PETextField, TextFieldCB).
  *
- * Not yet: the *_PTR and *_OPTR elements, bitmap slices, palettes.
+ * Not yet: bitmap slices.
  * GrGetGStringBounds plays the elements with their bounds
  * (graphicsStringBounds.c).
  */
@@ -99,7 +99,7 @@ const GSElemInfo grGSElemInfo[GS_NUM_ELEMENTS] = {
     {  3, GSV_BYTES, 1},	/* 0x3d GR_DRAW_TEXT_CP */
     { 15, 0, 0},	/* 0x3e GR_DRAW_TEXT_FIELD */
     {  7, 0, 0},	/* 0x3f GR_DRAW_TEXT_PTR */
-    {  9, 0, 0},	/* 0x40 GR_DRAW_TEXT_OPTR */
+    { 13, 0, 0},	/* 0x40 GR_DRAW_TEXT_OPTR */
     {  1, 0, 0},	/* 0x41 GR_DRAW_PATH */
     {  9, 0, 0},	/* 0x42 GR_FILL_RECT */
     {  5, 0, 0},	/* 0x43 GR_FILL_RECT_TO */
@@ -113,11 +113,11 @@ const GSElemInfo grGSElemInfo[GS_NUM_ELEMENTS] = {
     { 19, 0, 0},	/* 0x4b GR_FILL_ARC_3POINT_TO */
     {  7, GSV_BYTES, 5},	/* 0x4c GR_FILL_BITMAP */
     {  3, GSV_BYTES, 1},	/* 0x4d GR_FILL_BITMAP_CP */
-    {  9, 0, 0},	/* 0x4e GR_FILL_BITMAP_OPTR */
+    { 13, 0, 0},	/* 0x4e GR_FILL_BITMAP_OPTR */
     {  7, 0, 0},	/* 0x4f GR_FILL_BITMAP_PTR */
     {  7, GSV_BYTES, 5},	/* 0x50 GR_DRAW_BITMAP */
     {  3, GSV_BYTES, 1},	/* 0x51 GR_DRAW_BITMAP_CP */
-    {  9, 0, 0},	/* 0x52 GR_DRAW_BITMAP_OPTR */
+    { 13, 0, 0},	/* 0x52 GR_DRAW_BITMAP_OPTR */
     {  7, 0, 0},	/* 0x53 GR_DRAW_BITMAP_PTR */
     {  3, GSV_BYTES, 1},	/* 0x54 GSE_BITMAP_SLICE */
     {  1, 0, 0},	/* 0x55 GR_OUTPUT_55 */
@@ -484,6 +484,75 @@ static word TextFieldCB(GDF_vars *v, TextAttr *ta, word offset,
     *text = (const char *) r + GR_FIELD_RUN;
     v->GDFV_other = (void *) (r + GR_FIELD_RUN + n);
     return n;
+}
+
+/*
+ * The *_PTR and *_OPTR elements name their text (null terminated) or
+ * bitmap: an optr (8 bytes, Port32) or an offset from the start of the
+ * graphics string (a chunk or GST_PTR; in the asm, from the segment).
+ * Played and bounded as the GR_DRAW_TEXT, GR_DRAW_BITMAP or
+ * GR_FILL_BITMAP element with the data (PETextPtr, PETextOptr,
+ * PEBitmapPtr, PEBitmapOptr); copied as they are.  *e: that element
+ * (C heap) or NULL if there is no data; FALSE: not such an element.
+ */
+static Boolean Resolve(GStringBlock *g, const byte *el, byte **e)
+{
+    byte op = *el, to;
+    Boolean text, isOptr;
+    const byte *data = NULL, *base = NULL;
+    MemHandle locked = 0;
+    word n;
+
+    switch (op) {
+    case GR_DRAW_TEXT_PTR:	to = GR_DRAW_TEXT; break;
+    case GR_DRAW_TEXT_OPTR:	to = GR_DRAW_TEXT; break;
+    case GR_DRAW_BITMAP_PTR:	to = GR_DRAW_BITMAP; break;
+    case GR_DRAW_BITMAP_OPTR:	to = GR_DRAW_BITMAP; break;
+    case GR_FILL_BITMAP_PTR:	to = GR_FILL_BITMAP; break;
+    case GR_FILL_BITMAP_OPTR:	to = GR_FILL_BITMAP; break;
+    default:
+	return FALSE;
+    }
+    *e = NULL;
+    text = (Boolean) (to == GR_DRAW_TEXT);
+    isOptr = (Boolean) (op == GR_DRAW_TEXT_OPTR || op == GR_DRAW_BITMAP_OPTR ||
+			op == GR_FILL_BITMAP_OPTR);
+    if (isOptr) {
+	optr o = ((optr) D(el + 9) << 32) | D(el + 5);
+	if (!OptrToHandle(o))
+	    return TRUE;
+	locked = OptrToHandle(o);
+	MemLock(locked);
+	data = LMemDeref(o);
+    } else {
+	switch (g->GSS_flags & GSF_HANDLE_TYPE) {
+	case GST_CHUNK:
+	    locked = (MemHandle) g->GSS_hString;
+	    MemLock(locked);
+	    base = LMemDerefHandles(locked, (ChunkHandle) g->GSS_firstBlock);
+	    break;
+	case GST_PTR:
+	    base = g->GSS_ptr;
+	    break;
+	default:
+	    return TRUE;		/* no memory to point into */
+	}
+	data = base + U(el + 5);
+    }
+    if (data) {
+	n = text ? (word) strlen((const char *) data)
+		 : GrBitmapStringSize((const Bitmap *) data);
+	if (n <= 0xfff0 && (*e = malloc((size_t) n + 7)) != NULL) {
+	    (*e)[0] = to;
+	    memcpy(*e + 1, el + 1, 4);		/* x, y */
+	    (*e)[5] = (byte) n;
+	    (*e)[6] = (byte) (n >> 8);
+	    memcpy(*e + 7, data, n);
+	}
+    }
+    if (locked)
+	MemUnlock(locked);
+    return TRUE;
 }
 
 /* PE*: play e into gstate */
@@ -1092,10 +1161,18 @@ static GSRetType Play(GStateHandle gstate, GStateHandle gstring,
 	    if (destString)
 		GrGSStore(destString, g->GSS_elem, g->GSS_lastSize);
 	    else {
-		if (bound)		/* GSF_FIGURE_BOUNDS: before it */
-		    bound(ctx, g->GSS_elem, g->GSS_lastSize);
-		if (gstate)
-		    GrPlayElement(gstate, g->GSS_elem);
+		byte *r = NULL;
+		const byte *e = g->GSS_elem;
+		word size = g->GSS_lastSize;
+		if (Resolve(g, e, &r)) {
+		    e = r;
+		    size = r ? (word) (7 + U(r + 5)) : 0;
+		}
+		if (e && bound)		/* GSF_FIGURE_BOUNDS: before it */
+		    bound(ctx, e, size);
+		if (e && gstate)
+		    GrPlayElement(gstate, e);
+		free(r);
 	    }
 	    /* an element may have used the GString block: g stays */
 	}
