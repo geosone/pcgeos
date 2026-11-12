@@ -3247,8 +3247,13 @@ The asm's `ScaleBitmapSide` multiplied by resolution/72, where drawing
 divides by it. A bitmap element that reaches a path some other way (a
 graphics string played into it) is skipped. ctest `kernel.draw`.
 
-**Not yet:** a path defined inside a graphics string,
-`DR_FONT_GEN_IN_REGION`.
+A path defined while the GState writes a graphics string goes into the
+string as well: `GrEndPath` stores the elements from `GR_BEGIN_PATH` to
+`GR_END_PATH` there, so the string defines the same path when played
+(`WritePathBackToGString`). The asm stored them by playing them into the
+GState; the C kernel stores them as they are. ctest `kernel.draw`.
+
+**Not yet:** `DR_FONT_GEN_IN_REGION`.
 
 **Tests.** ctest `kernel.draw`:
 - a path defined from lines with nothing drawn, filled, with the pen

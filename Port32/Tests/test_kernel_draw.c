@@ -1664,6 +1664,33 @@ int main(int argc, char **argv)
 	cp = GrGetCurPos(g);
 	CHECK(DWORD_X(cp) == 3 && DWORD_Y(cp) == 4);
 
+	/* a path defined while writing a graphics string goes into the
+	 * string: played, it defines the path again */
+	gs = GrCreateGString(blk, GST_CHUNK, &ch);
+	GrBeginPath(gs, PCT_REPLACE);
+	GrFillRect(gs, 10, 10, 40, 40);
+	GrEndPath(gs);
+	CHECK(GrTestPath(gs, GPT_CURRENT));
+	GrFillPath(gs, ODD_EVEN);
+	CHECK(GrEndGString(gs) == GSET_NO_ERROR);
+	GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+	ld = GrLoadGString(blk, GST_CHUNK, ch);
+	{
+	    byte buf[16];
+	    word n = 0;
+	    CHECK(GrGetGStringElement(g, ld, sizeof(buf), buf, &n) ==
+		  GR_BEGIN_PATH && n == 5 && buf[1] == PCT_REPLACE);
+	}
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	GrBeginPath(g, PCT_NULL);
+	SetCol(g, GREEN);
+	CHECK(GrDrawGString(g, ld, 0, 0, 0, NULL) == GSRT_COMPLETE);
+	CHECK(Pixel(30, 30) == GREEN && Pixel(59, 59) == GREEN &&
+	      Pixel(61, 61) == WHITE && Pixel(29, 45) == WHITE);
+	CHECK(GrTestPath(g, GPT_CURRENT));
+	GrDestroyGString(ld, 0, GSKT_KILL_DATA);
+
 	SetCol(g, WHITE);
 	GrFillRect(g, 0, 0, 80, 80);
 	GrBeginPath(g, PCT_REPLACE);

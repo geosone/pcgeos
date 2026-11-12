@@ -50,7 +50,11 @@
  * it covers (graphicsRaster.c: PathRect).  A bitmap element that comes
  * into a path otherwise (a graphics string played into it) is skipped.
  *
- * Not yet: a path defined in a graphics string.
+ * A path defined while the GState writes a graphics string goes into
+ * that string too (WritePathBackToGString): GrEndPath stores its
+ * elements, GR_BEGIN_PATH to GR_END_PATH, after defining it, so that the
+ * string defines the same path when played.  The asm played them into
+ * the GState to store them; the C stores them as they are.
  */
 #include "graphicsInt.h"
 #include <gstring.h>
@@ -159,6 +163,23 @@ static void Combine(GStateHandle gstate, GetPathType ptype,
     MemUnlock(gstate);
 }
 
+/* WritePathBackToGString: the path's elements into the graphics string
+ * the GState wrote before (one at a time: in a VM string each is an
+ * element of the huge array) */
+static void WriteBack(Handle gstring, const byte *e, word size)
+{
+    const byte *end = e + size;
+    word n;
+
+    for (; e < end; e += n) {
+	n = GrGSElemSize(e, (dword) (end - e));
+	if (!n || !GrGSStore(gstring, e, n))
+	    break;
+	if (*e == GR_END_PATH)
+	    break;
+    }
+}
+
 void GrEndPath(GStateHandle gstate)
 {
     GState *gs = MemLock(gstate);
@@ -178,8 +199,15 @@ void GrEndPath(GStateHandle gstate)
     MemUnlock(gstate);
     GrRestoreState(gstate);
     elems = GrFreePathString(path, &size);
-    if (elems && size > 5 && elems[0] == GR_BEGIN_PATH)
+    if (elems && size > 5 && elems[0] == GR_BEGIN_PATH) {
+	Handle outer;
+	gs = MemLock(gstate);
+	outer = gs->GS_pathData;
+	MemUnlock(gstate);
+	if (outer)
+	    WriteBack(outer, elems, size);
 	Combine(gstate, GPT_CURRENT, elems, size);
+    }
     free(elems);
     gs = MemLock(gstate);
     gs->GS_gstring = gs->GS_pathData;
