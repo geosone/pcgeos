@@ -3,7 +3,8 @@
  * WinTLocateInsertionPoint, FindExistingLayer, FindLayerInsertPos,
  * FindWindowInsertPos, WinTInsertHere, WinTRemove, WinTValidate,
  * WinCalcUnivReg, WinMove, WinMoveHere, WinResize, WinNULLVisReg,
- * WinChangePriority, WinLocatePoint).
+ * WinChangePriority, WinLocatePoint, WinScroll, WinSetMaskReg,
+ * ShiftRegion).
  *
  * The children of a window are in order from the front: the first
  * child is on top.  Within its parent a window goes behind every
@@ -29,6 +30,7 @@
  * (DR_VID_SAVE_UNDER), so the window system never has one.
  */
 #include "winInt.h"
+#include "../Graphics/graphicsInt.h"
 
 /* ---------------------------------------------------------------------
  * Inserting and removing
@@ -478,4 +480,91 @@ WindowHandle WinLocatePointC(WindowHandle root, sword x, sword y)
     MemUnlock(root);
     WinTreeV();
     return found;
+}
+
+/* ---------------------------------------------------------------------
+ * Scrolling
+ * ------------------------------------------------------------------- */
+
+/*
+ * WinScroll: the document moved by xMove, yMove (document units) in the
+ * window: the move rounded to whole pixels, applied to W_TMatrix as a
+ * translation, and what is on the screen moved with it (BltCommon,
+ * BLTM_MOVE: what comes into view becomes invalid).  An update going
+ * on has its region moved too (ShiftRegion).  scrollAmt: the
+ * translation applied, in document units (with no move at all, the
+ * asm returned the move in device units; so does this).
+ */
+void WinScroll(WindowHandle win, WWFixedAsDWord xMove, WWFixedAsDWord yMove,
+	       PointWWFixed *scrollAmt)
+{
+    WindowHandle wh;
+    Window *w;
+    WWFixedAsDWord tx = xMove, ty = yMove;
+    sword sx, sy, dx, dy;
+
+    WinTreeP();
+    w = WinLockFromHandle(win, &wh);
+    if (!w) {
+	WinTreeV();
+	return;
+    }
+    if (w->W_TMatrix.TM_flags & TM_SCALED) {
+	tx = GrMulWWFixed(tx, *(const WWFixedAsDWord *) &w->W_TMatrix.TM_11);
+	ty = GrMulWWFixed(ty, *(const WWFixedAsDWord *) &w->W_TMatrix.TM_22);
+    }
+    /* the source: the window's corner less the move, rounded */
+    {
+	sdword v = ((sdword) w->W_winRect.R_left << 16) - (sdword) tx;
+	sx = (sword) ((v >> 16) + ((v >> 15) & 1));
+	v = ((sdword) w->W_winRect.R_top << 16) - (sdword) ty;
+	sy = (sword) ((v >> 16) + ((v >> 15) & 1));
+    }
+    dx = (sword) (w->W_winRect.R_left - sx);
+    dy = (sword) (w->W_winRect.R_top - sy);
+    if (dx || dy) {
+	tx = (WWFixedAsDWord) ((sdword) dx << 16);
+	ty = (WWFixedAsDWord) ((sdword) dy << 16);
+	if (w->W_TMatrix.TM_flags & TM_SCALED) {
+	    tx = GrSDivWWFixed(tx,
+			       *(const WWFixedAsDWord *) &w->W_TMatrix.TM_11);
+	    ty = GrSDivWWFixed(ty,
+			       *(const WWFixedAsDWord *) &w->W_TMatrix.TM_22);
+	}
+	GrMatTranslate(&w->W_TMatrix, (sdword) tx, (sdword) ty);
+	w->W_TMatrix.TM_flags &= (TransFlags) ~TF_INV_VALID;
+	GrMatCalcInverse(&w->W_TMatrix);
+	w->W_TMatrix.TM_flags |= TM_TRANSLATED;
+	w->W_grFlags &= (WinGrFlags) ~WGF_XFORM_VALID;
+	if (!(w->W_regFlags & WRF_CLOSED)) {
+	    word width = (word) (w->W_winRect.R_right - w->W_winRect.R_left + 1);
+	    word height = (word) (w->W_winRect.R_bottom - w->W_winRect.R_top +
+				  1);
+	    sword left = w->W_winRect.R_left, top = w->W_winRect.R_top;
+
+	    /* ShiftRegion: the update region moved, within the visible */
+	    GrMoveReg(WinReg(wh, w->W_updateReg), dx, dy);
+	    WinRegAnd(WIN_REG(wh, w->W_updateReg), WIN_REG(wh, w->W_visReg),
+		      WIN_REG(wh, w->W_updateReg));
+	    w = MemDeref(wh);
+	    /* WinSetMaskReg: the visible region less the invalid */
+	    WinRegSub(WIN_REG(wh, w->W_visReg), WIN_REG(wh, w->W_invalReg),
+		      WIN_REG(wh, w->W_maskReg), WIN_REG(wh, w->W_temp1Reg));
+	    w = MemDeref(wh);
+	    WinRegSmall(wh, w->W_temp1Reg);
+	    w = MemDeref(wh);
+	    WinSetupMaskFlags(w);
+	    GrBltCommon(wh, sx, sy, left, top, width, height, BLTM_MOVE);
+	    w = MemDeref(wh);
+	    w->W_grFlags &= (WinGrFlags) ~WGF_MASK_VALID;
+	    w->W_grRegFlags &= (WinGrRegFlags) ~(WGRF_PATH_VALID |
+						 WGRF_WIN_PATH_VALID);
+	}
+    }
+    if (scrollAmt) {
+	*(WWFixedAsDWord *) &scrollAmt->PF_x = tx;
+	*(WWFixedAsDWord *) &scrollAmt->PF_y = ty;
+    }
+    MemUnlock(wh);
+    WinTreeV();
 }

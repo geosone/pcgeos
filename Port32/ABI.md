@@ -2439,6 +2439,16 @@ than a pixel is a six-point polygon.
   washed out with `BLTM_CLEAR`.
 - Under a scaled matrix, the size is scaled by `TM_11`/`TM_22`.
 
+**WinScroll** (`winWindows.c`):
+- The move is rounded to whole device pixels and applied to
+  `W_TMatrix` as a translation.
+- What is on the screen moves along with it through `GrBltCommon`
+  (`BLTM_MOVE`), so what comes into view becomes invalid.
+- The region of an update in progress moves too.
+- The translation applied is returned in document units. With no move
+  at all (less than half a pixel), the asm returned the move in device
+  units, and so does the C port.
+
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
 - area patterns (the asm filled them through a path);
@@ -2467,6 +2477,8 @@ the pixels back. It checks:
   and y, at 144 dpi; rotated by 90 degrees, and by 45 degrees without
   holes;
 - `GrBitBlt`: copy, move, clear, and from a source partly hidden;
+- `WinScroll`: the screen and the document move, and the rest is
+  washed out;
 - drawing during an update;
 - exposure after moving and closing windows.
 

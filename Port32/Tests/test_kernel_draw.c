@@ -25,6 +25,7 @@
  *     complex one with a palette in two slices; scaled twice, half,
  *     mirrored in x and y, at 144 dpi, and rotated;
  *   - GrBitBlt: copy, move, clear, and from a source partly hidden;
+ *   - WinScroll: the screen and the document moved, the rest washed;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
@@ -688,6 +689,32 @@ int main(int argc, char **argv)
     CHECK(Pixel(21, 85) == RED && Pixel(24, 85) == RED &&
 	  Pixel(26, 85) == WHITE && Pixel(29, 85) == WHITE &&
 	  Pixel(97, 85) == RED);
+    /* WinScroll: the document 5 right, 3 down; what comes into view
+     * washed white; then back */
+    {
+	PointWWFixed amt;
+	SetCol(g, BLUE);
+	GrFillRect(g, 0, 0, 40, 30);
+	SetCol(g, RED);
+	GrFillRect(g, 0, 0, 10, 10);		/* 20..29, 20..29 */
+	WinScroll(a, 5L << 16, 3L << 16, &amt);
+	CHECK(amt.PF_x.WWF_int == 5 && amt.PF_x.WWF_frac == 0 &&
+	      amt.PF_y.WWF_int == 3);
+	CHECK(Pixel(22, 30) == WHITE && Pixel(30, 21) == WHITE &&
+	      Pixel(25, 23) == RED && Pixel(34, 32) == RED &&
+	      Pixel(35, 32) == BLUE && Pixel(34, 33) == BLUE &&
+	      Pixel(60, 40) == BLUE);
+	SetCol(g, GREEN);
+	GrFillRect(g, 0, 0, 1, 1);		/* the document moved too */
+	CHECK(Pixel(25, 23) == GREEN && Pixel(24, 23) == WHITE);
+	WinScroll(a, -(5L << 16), -(3L << 16), &amt);
+	CHECK(amt.PF_x.WWF_int == -5 && Pixel(20, 20) == GREEN &&
+	      Pixel(29, 29) == RED);
+	WinScroll(a, 1L << 15, 0, &amt);	/* half a pixel: no move */
+	CHECK(amt.PF_x.WWF_int == 0 && amt.PF_x.WWF_frac == 0x8000 &&
+	      Pixel(20, 20) == GREEN);
+    }
+
     /* an update: only the invalid area is drawn */
     SetCol(g, BLUE);
     GrFillRect(g, 0, 0, 100, 100);
