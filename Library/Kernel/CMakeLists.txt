@@ -138,6 +138,7 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsCalcEllipse.c
   Graphics/graphicsCalcConic.c
   Graphics/graphicsRoundedRect.c
+  Graphics/graphicsWin.c
   Graphics/graphicsLineStyles.c
   Graphics/graphicsColor.c
   Graphics/graphicsState.c

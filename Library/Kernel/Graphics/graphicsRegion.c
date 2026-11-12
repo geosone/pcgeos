@@ -1,10 +1,13 @@
 /*
  * graphicsRegion.c -- region arithmetic (after graphicsRegion.asm:
  * GrChunkRegOp, GrPtrRegOp, GrNOTPtrReg, GrMoveReg, GrTestPointInReg,
- * GrTestRectInReg, GrGetPtrRegBounds).
+ * GrTestRectInReg, GrGetPtrRegBounds, GrDrawRegion, GrDrawRegionAtCP,
+ * DoRegion).
  *
- * The regions have no bounds words (CInclude/Internal/grWinInt.h).
- * GrDrawRegion, GrSetClipRect and the rest come with the GState.
+ * The regions have no bounds words (CInclude/Internal/grWinInt.h),
+ * except the ones GrDrawRegion draws: those go to the video driver as
+ * they are, at the pen, with the four parameters of the call
+ * (PARAM_0 .. PARAM_3).
  *
  * The asm had a routine for each of AND, OR and NOT; here one walk does
  * all three: it steps down the bands of both regions at once and
@@ -13,7 +16,7 @@
  * (ElimRedundant), touching pairs one, an empty last band is left out;
  * so the result may be shorter than the asm's, for the same area.
  */
-#include "kernelC.h"
+#include "graphicsInt.h"
 #include <Internal/grWinInt.h>
 #include <lmem.h>
 #include <string.h>
@@ -314,4 +317,58 @@ TestRectReturnType GrTestRectInReg(const Region *reg, sword left, sword top,
     }
     /* below the region: out */
     return first || so == TRRT_OUT ? TRRT_OUT : TRRT_PARTIAL;
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing a region
+ * ------------------------------------------------------------------- */
+
+/* DoRegion: at the pen, in the area attributes */
+static void DoRegion(const GrDraw *d, const Region *reg, sword *params)
+{
+    DriverRegs r;
+    sword x, y;
+
+    if (!GrGetDevPenPos(d, &x, &y))
+	return;
+    memset(&r, 0, sizeof(r));
+    r.DR_ax = (word) x;
+    r.DR_bx = (word) y;
+    r.DR_farPtr = (void *) reg;
+    r.DR_bpPtr = params;
+    GrCallDriver(d, DR_VID_REGION, &r,
+		 (word) offsetof(GState, GS_areaAttr));
+}
+
+void GrDrawRegion(GStateHandle gstate, sword xPos, sword yPos,
+		  const Region *reg, word cxParam, word dxParam)
+{
+    GrDraw d;
+    sword params[4];
+
+    params[0] = xPos;
+    params[1] = yPos;
+    params[2] = (sword) cxParam;
+    params[3] = (sword) dxParam;
+    GrEnterGraphics(gstate, &d);
+    GrSetDocPenPos(d.GD_gs, xPos, yPos);
+    if (!GrTrivialReject(&d))
+	DoRegion(&d, reg, params);
+    GrExitGraphics(&d);
+}
+
+void GrDrawRegionAtCP(GStateHandle gstate, const Region *reg, word axParam,
+		      word bxParam, word cxParam, word dxParam)
+{
+    GrDraw d;
+    sword params[4];
+
+    params[0] = (sword) axParam;
+    params[1] = (sword) bxParam;
+    params[2] = (sword) cxParam;
+    params[3] = (sword) dxParam;
+    GrEnterGraphics(gstate, &d);
+    if (!GrTrivialReject(&d))
+	DoRegion(&d, reg, params);
+    GrExitGraphics(&d);
 }

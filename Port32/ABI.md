@@ -2381,6 +2381,20 @@ than a pixel is a six-point polygon.
 - The radius is at most half the width and half the height.
 - It is filled as a convex polygon.
 
+**Regions and the window** (`graphicsRegion.c`, `graphicsWin.c`):
+- `GrDrawRegion` passes the region, with its bounds, to the driver as
+  `DR_VID_REGION` at the pen. The four parameters of the call are
+  `PARAM_0` to `PARAM_3` (`DR_bpPtr`).
+- `GrInvalRect` invalidates in window coordinates. When rotated, it
+  invalidates the region of the four corners.
+- The window's and the mask's bounds go back to document coordinates:
+  - without scaling or rotation, as the device rectangle less the
+    translation (the asm's rounding is kept);
+  - otherwise, as the box round the four corners untransformed.
+- Without a window:
+  - the bounds are the whole coordinate space;
+  - `GrTestRectInMask` gives `TRRT_OUT`.
+
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
 - area patterns (the asm filled them through a path);
@@ -2402,6 +2416,8 @@ the pixels back. It checks:
   line ends;
 - arcs (pie, chord, open, 3-point, from the pen, through a mirroring
   matrix) and rounded rectangles;
+- regions, with a parameter; window and mask bounds,
+  `GrTestRectInMask`, `GrInvalRect` (rotated too), `GrInvalRectDWord`;
 - drawing during an update;
 - exposure after moving and closing windows.
 

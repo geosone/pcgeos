@@ -19,6 +19,8 @@
  *     the pen;
  *   - rounded rectangles filled, drawn and from the pen;
  *   - a pie through a mirroring matrix;
+ *   - regions, with a parameter; the window's and the mask's bounds,
+ *     GrTestRectInMask, GrInvalRect (rotated too), GrInvalRectDWord;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
@@ -431,6 +433,71 @@ int main(int argc, char **argv)
     GrSetNullTransform(g);
     CHECK(Pixel(65, 55) == WHITE && Pixel(65, 45) == BLUE &&
 	  Pixel(55, 55) == BLUE && Pixel(55, 45) == BLUE);
+
+    /* regions: two bands, and one with a parameter for its right edge */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, WHITE);
+    {
+	static const word bands[] = {
+	    0, 0, 9, 9, (word) -1, EOREGREC,
+	    4, 0, 9, EOREGREC,
+	    9, 0, 2, 7, 9, EOREGREC,
+	    EOREGREC
+	};
+	static const word param[] = {
+	    0, 0, 0x9000, 4, (word) -1, EOREGREC,
+	    4, 0, 0x9000, EOREGREC,
+	    EOREGREC
+	};
+	GrDrawRegion(g, 50, 10, (const Region *) bands, 0, 0);
+	CHECK(Pixel(70, 30) == WHITE && Pixel(79, 34) == WHITE &&
+	      Pixel(80, 34) == BLUE && Pixel(72, 39) == WHITE &&
+	      Pixel(73, 39) == BLUE && Pixel(77, 39) == WHITE &&
+	      Pixel(70, 40) == BLUE && Pixel(69, 30) == BLUE);
+	GrMoveTo(g, 10, 50);
+	GrDrawRegionAtCP(g, (const Region *) param, 0, 0, 19, 0);
+	CHECK(Pixel(30, 70) == WHITE && Pixel(49, 74) == WHITE &&
+	      Pixel(50, 70) == BLUE && Pixel(30, 75) == BLUE);
+    }
+
+    /* the window's bounds, the mask, invalidation */
+    {
+	Rectangle rb;
+	RectDWord rd;
+
+	CHECK(GrGetWinHandle(g) == a);
+	CHECK(GrGetWinBounds(g, &rb) && rb.R_left == 0 && rb.R_top == 0 &&
+	      rb.R_right == 100 && rb.R_bottom == 80);
+	GrApplyTranslation(g, 10L << 16, 5L << 16);
+	GrGetWinBoundsDWord(g, &rd);
+	CHECK(rd.RD_left == -10 && rd.RD_top == -5 && rd.RD_right == 90 &&
+	      rd.RD_bottom == 75);
+	GrSetNullTransform(g);
+	CHECK(GrGetMaskBounds(g, &rb) && rb.R_left == 0 && rb.R_top == 0 &&
+	      rb.R_right == 100 && rb.R_bottom == 80);
+	CHECK(GrTestRectInMask(g, 10, 10, 20, 20) == TRRT_IN &&
+	      GrTestRectInMask(g, 70, 30, 90, 50) == TRRT_PARTIAL &&
+	      GrTestRectInMask(g, 200, 200, 210, 210) == TRRT_OUT);
+
+	/* A is plain: what is invalidated is washed white at once */
+	SetCol(g, BLUE);
+	GrFillRect(g, 0, 0, 100, 100);
+	GrInvalRect(g, 10, 10, 19, 19);
+	CHECK(Pixel(30, 30) == WHITE && Pixel(39, 39) == WHITE &&
+	      Pixel(40, 40) == BLUE && Pixel(29, 30) == BLUE);
+	rd.RD_left = 60; rd.RD_top = 10; rd.RD_right = 69; rd.RD_bottom = 19;
+	GrInvalRectDWord(g, &rd);
+	CHECK(Pixel(80, 30) == WHITE && Pixel(89, 39) == WHITE &&
+	      Pixel(90, 39) == BLUE);
+	GrApplyTranslation(g, 50L << 16, 40L << 16);
+	GrApplyRotation(g, 45L << 16);
+	GrInvalRect(g, -5, -5, 5, 5);		/* a diamond */
+	GrSetNullTransform(g);
+	CHECK(Pixel(70, 60) == WHITE && Pixel(76, 60) == WHITE &&
+	      Pixel(70, 54) == WHITE && Pixel(75, 65) == BLUE &&
+	      Pixel(65, 55) == BLUE);
+    }
 
     /* an update: only the invalid area is drawn */
     SetCol(g, BLUE);
