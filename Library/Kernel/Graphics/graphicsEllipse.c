@@ -1,15 +1,36 @@
 /*
- * graphicsEllipse.c -- ellipses (after graphicsEllipse.asm and
- * graphicsArcLow.asm).
+ * graphicsEllipse.c -- ellipses (after graphicsEllipse.asm: GrDrawEllipse,
+ * GrFillEllipse).
  *
- * For now only the entry the fat line code uses for round ends and
- * joins (FillArcEllipseLow with SetupEllipseLineLow), which draws
- * nothing until CalcEllipse and CalcConic are ported.
+ * The bounds are document coordinates; the pen goes to the first
+ * corner.  Not yet: graphics strings and paths.
  */
 #include "graphicsInt.h"
 
-void GrFillEllipseDev(const GrDraw *d, sword l, sword t, sword r, sword b,
-		      word attr)
+#define AREA	((word) offsetof(GState, GS_areaAttr))
+
+void GrDrawEllipse(GStateHandle gstate, sword left, sword top, sword right,
+		   sword bottom)
 {
-    (void) d; (void) l; (void) t; (void) r; (void) b; (void) attr;
+    GrDraw d;
+
+    GrEnterGraphics(gstate, &d);
+    GrSetDocPenPos(d.GD_gs, left, top);
+    if (!GrTrivialReject(&d))
+	GrDrawArcEllipseLow(&d, left, top, right, bottom, GR_CET_ELLIPSE,
+			    NULL);
+    GrExitGraphics(&d);
+}
+
+void GrFillEllipse(GStateHandle gstate, sword left, sword top, sword right,
+		   sword bottom)
+{
+    GrDraw d;
+
+    GrEnterGraphics(gstate, &d);
+    GrSetDocPenPos(d.GD_gs, left, top);
+    if (!GrTrivialReject(&d))
+	GrFillArcEllipseLow(&d, left, top, right, bottom, GR_CET_ELLIPSE,
+			    NULL, AREA);
+    GrExitGraphics(&d);
 }

@@ -14,6 +14,7 @@
  *     vertical lines, GrDrawLineTo from the pen, GrDrawPoint;
  *   - filled polygons by both rules, GrTestPointInPolygon, polylines,
  *     polygon outlines, a brushed polyline;
+ *   - ellipses filled and outlined, rotated, fat, and round line ends;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
@@ -305,6 +306,48 @@ int main(int argc, char **argv)
 	      Pixel(60, 95) == WHITE && Pixel(60, 96) == BLUE);
     }
     GrSetLineStyle(g, LS_SOLID, 0, NULL, 0);
+
+    /* ellipses */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, WHITE);
+    GrFillEllipse(g, 10, 10, 30, 24);
+    GrDrawEllipse(g, 40, 10, 60, 24);
+    GrFillEllipse(g, 10, 40, 13, 50);
+    GrSetLineWidth(g, 5L << 16);
+    GrSetLineEnd(g, LE_ROUNDCAP);
+    GrDrawLine(g, 50, 50, 70, 50);
+    GrSetLineWidth(g, 1L << 16);
+    GrSetLineEnd(g, LE_BUTTCAP);
+    CHECK(Pixel(40, 37) == WHITE && Pixel(30, 37) == WHITE &&
+	  Pixel(29, 37) == BLUE && Pixel(50, 37) == WHITE &&
+	  Pixel(51, 37) == BLUE && Pixel(38, 30) == WHITE &&
+	  Pixel(37, 30) == BLUE && Pixel(40, 29) == BLUE &&
+	  Pixel(40, 44) == WHITE && Pixel(40, 45) == BLUE &&
+	  Pixel(31, 31) == BLUE);
+    CHECK(Pixel(70, 37) == BLUE && Pixel(60, 37) == WHITE &&
+	  Pixel(61, 37) == BLUE && Pixel(80, 37) == WHITE &&
+	  Pixel(70, 30) == WHITE && Pixel(70, 44) == WHITE);
+    CHECK(Pixel(68, 70) == WHITE && Pixel(67, 70) == BLUE &&	/* round */
+	  Pixel(92, 70) == WHITE && Pixel(93, 70) == BLUE);
+
+    /* rotated by 45 degrees, filled and a fat outline */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, WHITE);
+    GrApplyTranslation(g, 25L << 16, 40L << 16);
+    GrApplyRotation(g, 45L << 16);
+    GrFillEllipse(g, -20, -8, 20, 8);
+    GrSetNullTransform(g);
+    GrSetLineWidth(g, 3L << 16);
+    GrDrawEllipse(g, 55, 20, 90, 60);
+    GrSetLineWidth(g, 1L << 16);
+    CHECK(Pixel(45, 60) == WHITE && Pixel(58, 47) == WHITE &&
+	  Pixel(53, 68) == BLUE && Pixel(37, 52) == BLUE);
+    CHECK(Pixel(92, 39) == WHITE && Pixel(92, 41) == WHITE &&
+	  Pixel(92, 38) == BLUE && Pixel(92, 42) == BLUE &&
+	  Pixel(75, 60) == WHITE && Pixel(73, 60) == BLUE &&
+	  Pixel(77, 60) == BLUE);
 
     /* an update: only the invalid area is drawn */
     SetCol(g, BLUE);

@@ -2329,8 +2329,7 @@ than a pixel is a six-point polygon.
 - Ends: butt, square or round.
 - Joins: beveled, mitered (beveled under the miter limit) or round.
 - The arithmetic is the asm's WWFixed arithmetic.
-- A round end or join is a filled circle (`GrFillEllipseDev`), which
-  draws nothing until ellipses are ported.
+- A round end or join is a filled circle (`GrFillEllipseDev`).
 
 **Dashes** (`graphicsLineStyles.c`):
 - A single thin line goes to the driver as `DR_VID_DASH_LINE`, with
@@ -2341,10 +2340,27 @@ than a pixel is a six-point polygon.
   and a skip distance past the pattern length is taken modulo that
   length.
 
+**Ellipses** (`graphicsEllipse.c`, `graphicsArcLow.c`,
+`graphicsCalcEllipse.c`, `graphicsCalcConic.c`):
+- `CalcEllipse` transforms the bounding box and doubles the
+  coordinates, so a center between pixels is a whole number.
+- The ellipse is its center and two conjugate radii (with rotation, to
+  the midpoints of the transformed box's sides). From them come the
+  coefficients of `Ax^2 + Bxy + Cy^2 + Dx + Ey + F = 0`, with the origin
+  on the curve.
+- `CalcConic` steps along it octant by octant with the midpoint
+  algorithm, in 64 bits. The halves and quarters the asm carried in `cl`
+  and `ch` are carried the same way, so the pixels are the same.
+- The points form one polyline in the separator format. Rows outside
+  the mask (widened by the line width) are left out.
+- An outline is that polyline drawn closed in the line attributes. A
+  filled ellipse goes to the driver as a convex `DR_VID_POLYGON`.
+- An ellipse at most two pixels thick is its four extreme points.
+
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
 - area patterns (the asm filled them through a path);
-- arcs, ellipses, rounded rectangles, splines, regions, bitmaps, text.
+- arcs, rounded rectangles, splines, regions, bitmaps, text.
 
 **Tests.** ctest `kernel.draw` runs on the host video driver and reads
 the pixels back. It checks:
@@ -2358,6 +2374,8 @@ the pixels back. It checks:
   polygon outlines, a brushed polyline;
 - fat lines with butt and square ends and mitered joins;
 - dashes on a line and along a polyline;
+- filled and outlined ellipses, a rotated one, a fat outline and round
+  line ends;
 - drawing during an update;
 - exposure after moving and closing windows.
 

@@ -114,9 +114,59 @@ void GrDrawPolygonDev(const GrDraw *d, const sword *sep, word n,
 /* graphicsMath.c, not in graphics.h */
 WWFixedAsDWord GrSqrWWFixed(WWFixedAsDWord i);
 
-/* graphicsEllipse.c: a filled ellipse in device coordinates */
+/* graphicsCalcConic.c: the conic section scan converter (ConicParams) */
+#define GR_CT_ELLIPSE		0
+#define GR_CT_ARC		1
+#define GR_CAI_FIND_START	0
+#define GR_CAI_FIND_END		1
+#define GR_CAI_DONE		2
+typedef struct {
+    Point	C_center;	/* doubled device coordinates, as are all */
+    Point	C_beg;		/* where the algorithm starts */
+    Point	C_end;		/* and ends */
+    int64_t	C_A, C_B, C_C, C_D, C_E, C_F;	/* Ax^2+Bxy+Cy^2+Dx+Ey+F */
+    sword	C_winTop;	/* device: points outside these rows */
+    sword	C_winBot;	/*   are left out */
+    Rectangle	C_bounds;	/* the even octants stop outside */
+    byte	C_conicType;	/* GR_CT_ */
+    byte	C_conicInfo;	/* GR_CAI_ */
+    Point	C_conicBeg;	/* an arc's ends, device */
+    Point	C_conicEnd;
+} GrConic;
+sword *GrCalcConic(GrConic *c, word *count);
+
+/* graphicsCalcEllipse.c: CalcEllipseFlags */
+#define GR_CET_ELLIPSE		0
+#define GR_CET_BOUNDED_ARC	2
+#define GR_CET_BOUNDED_ARC_RR	4
+#define GR_CET_3PT_ARC		6
+#define GR_CEF_TYPE		0x0007
+#define GR_CEF_COLINEAR		0x4000
+#define GR_CEF_DONT_TRANSFORM	0x8000
+/* the arc parameters CalcEllipse takes and returns (the asm's
+ * BoundedArcParams, ThreePointArcParams and ArcReturnParams over one
+ * stack buffer) */
+typedef struct {
+    Point	GA_startPoint;	/* bounded arcs: device, doubled */
+    Point	GA_endPoint;
+    PointWWFixed GA_point1;	/* 3-point arcs: document */
+    PointWWFixed GA_point2;
+    PointWWFixed GA_point3;
+    Point	GA_start;	/* returned: the arc's ends and center, */
+    Point	GA_end;		/*   device */
+    Point	GA_center;
+} GrArcParams;
+sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
+		     word flags, GrArcParams *ap, word *count, sword *top,
+		     sword *bot);
+
+/* graphicsArcLow.c */
 void GrFillEllipseDev(const GrDraw *d, sword l, sword t, sword r, sword b,
 		      word attr);
+void GrDrawArcEllipseLow(const GrDraw *d, sword l, sword t, sword r,
+			 sword b, word flags, GrArcParams *ap);
+void GrFillArcEllipseLow(const GrDraw *d, sword l, sword t, sword r,
+			 sword b, word flags, GrArcParams *ap, word attr);
 
 /* graphicsFatLine.c */
 void GrDrawFatLines(const GrDraw *d, const sword *sep, Boolean connected);
