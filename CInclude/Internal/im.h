@@ -158,5 +158,11 @@ extern void ImSetPtrWin(WindowHandle root, sword x, sword y);
  * the current one again); the first level with an image is shown, the
  * video driver's default if none */
 extern void ImSetPtrImage(word level, optr ptrDef);
+/* ImSetPtrFlags: set, then clear PtrFlags; returns the old ones */
+typedef ByteFlags PtrFlags;
+#define PF_DISEMBODIED_PTR			0x80
+#define PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE	0x40
+extern PtrFlags ImSetPtrFlags(PtrFlags set, PtrFlags clear);
+extern PtrFlags ImGetPtrFlags(void);
 
 #endif /* __IM_H */

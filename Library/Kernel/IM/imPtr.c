@@ -13,8 +13,13 @@
  * An image is an optr to a PointerDef chunk, locked while the driver
  * takes it.
  *
- * Not yet: ImSetPtrFlags (PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE, the
- * disembodied pointer), re-centering a pen's pointer.
+ * ImSetPtrFlags: with PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE the pointer
+ * is hidden (DR_VID_HIDEPTR) unless its image has PDW_ALWAYS_SHOW_PTR
+ * (the busy pointer); a disembodied pointer (PF_DISEMBODIED_PTR) does
+ * not follow the mouse, only the save under areas under it are checked
+ * (DR_VID_CHECK_UNDER).
+ *
+ * Not yet: re-centering a pen's pointer.
  */
 #include "kernelC.h"
 #include "imInt.h"
@@ -35,17 +40,48 @@ static Boolean CallPtrDriver(word function, DriverRegs *r)
     return s(function, r);
 }
 
-/* CallMovePtr: the save under areas under the pointer */
+/* CallMovePtr: the save under areas under the pointer; a disembodied
+ * one stays, the areas at x, y are checked */
 word ImCallMovePtr(sword x, sword y)
 {
     DriverRegs r;
+    word function = DR_VID_MOVEPTR;
 
     memset(&r, 0, sizeof(r));
     r.DR_ax = (word) x;
     r.DR_bx = (word) y;
-    if (CallPtrDriver(DR_VID_MOVEPTR, &r))
+    if (im.ptrFlags & PF_DISEMBODIED_PTR) {
+	function = DR_VID_CHECK_UNDER;
+	r.DR_cx = (word) x;
+	r.DR_dx = (word) y;
+    }
+    if (CallPtrDriver(function, &r))
 	return 0;
     return (word) r.DR_ax;
+}
+
+/* ShowPtrCommon, HidePtrIfWarrantedCommon (def: the image, NULL for the
+ * default) */
+static void ShowPtr(void)
+{
+    DriverRegs r;
+
+    if (!im.hidingPtr)
+	return;
+    memset(&r, 0, sizeof(r));
+    (void) CallPtrDriver(DR_VID_SHOWPTR, &r);
+    im.hidingPtr = FALSE;
+}
+
+static void HidePtrIfWarranted(const PointerDef *def)
+{
+    DriverRegs r;
+
+    if ((def && (def->PD_width & PDW_ALWAYS_SHOW_PTR)) || im.hidingPtr)
+	return;
+    memset(&r, 0, sizeof(r));
+    (void) CallPtrDriver(DR_VID_HIDEPTR, &r);
+    im.hidingPtr = TRUE;
 }
 
 void ImSetPtrWin(WindowHandle root, sword x, sword y)
@@ -87,9 +123,47 @@ static void SetPtrImageLow(optr image)
 	MemLock(h);
 	r.DR_dsSi = LMemDerefHandles(h, OptrToChunk(image));
     }
+    if (im.ptrFlags & PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE)
+	HidePtrIfWarranted(r.DR_dsSi);
     (void) CallPtrDriver(DR_VID_SETPTR, &r);
+    if ((im.ptrFlags & PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE) && h &&
+	(((const PointerDef *) LMemDerefHandles(h, OptrToChunk(image)))->
+	 PD_width & PDW_ALWAYS_SHOW_PTR))
+	ShowPtr();
     if (h)
 	MemUnlock(h);
+}
+
+PtrFlags ImSetPtrFlags(PtrFlags set, PtrFlags clear)
+{
+    PtrFlags old;
+    byte now;
+
+    KSemP(&semPtrImage, KSEM_FOREVER);
+    old = im.ptrFlags;
+    now = (byte) ((old | set) & ~clear);
+    im.ptrFlags = now;
+    if ((old ^ now) & PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE) {
+	if (now & PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE) {
+	    MemHandle h = OptrToHandle(im.curPtrImage);
+	    const PointerDef *def = NULL;
+	    if (h) {
+		MemLock(h);
+		def = LMemDerefHandles(h, OptrToChunk(im.curPtrImage));
+	    }
+	    HidePtrIfWarranted(def);
+	    if (h)
+		MemUnlock(h);
+	} else
+	    ShowPtr();
+    }
+    KSemV(&semPtrImage);
+    return old;
+}
+
+PtrFlags ImGetPtrFlags(void)
+{
+    return im.ptrFlags;
 }
 
 void ImSetPtrImage(word level, optr ptrDef)

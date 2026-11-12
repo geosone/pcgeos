@@ -43,6 +43,8 @@ typedef struct {
     optr		ptrImages[IM_NUM_PTR_IMAGE_LEVELS];
     optr		curPtrImage;
     Boolean		curPtrValid;
+    byte		ptrFlags;	/* PtrFlags (imPtrFlags) */
+    Boolean		hidingPtr;	/* PS_HIDING_PTR */
     /* the buttons */
     byte		buttonState;	/* BI_B*_DOWN */
     byte		dragState;	/* armed for a drag */

@@ -19,6 +19,8 @@
  */
 #include "kernelC.h"
 #include "Win/winInt.h"
+#include "IM/imInt.h"
+#include <Internal/videoDr.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -31,7 +33,7 @@ static int fails;
 #define XY(x, y)	(((dword) (word) (y) << 16) | (word) (x))
 
 /* the fake driver: the washes, the pointer */
-static int movePtrs, setPtrs;
+static int movePtrs, setPtrs, hides, shows, checks;
 static int palettes;			/* DR_VID_SET_PALETTE */
 static word palFirst, palCount;
 static byte palCopy[256 * 3];
@@ -67,6 +69,12 @@ static Boolean Strategy(word function, DriverRegs *r)
 	palCount = (word) r->DR_cx;
 	memcpy(palCopy, r->DR_dsSi, sizeof(palCopy));
     }
+    if (function == DR_VID_HIDEPTR)
+	hides++;
+    if (function == DR_VID_SHOWPTR)
+	shows++;
+    if (function == DR_VID_CHECK_UNDER)
+	checks++;
     if (function == DR_VID_SETPTR) {
 	setPtrs++;
 	lastPtrDef = r->DR_dsSi;
@@ -349,6 +357,38 @@ static void PtrTest(WindowHandle root, optr od)
     CHECK(MoveAndAck(root, 225, 225, &iod) == d);	/* D: none */
     CHECK(setPtrs == 2 && lastPtrDef == NULL);
     Drain();
+
+    /* ImSetPtrFlags: hidden but for an image that always shows (the
+     * busy one); a disembodied pointer only checks the areas */
+    {
+	ChunkHandle bch;
+	optr busy;
+	MemLock(ib);
+	bch = LMemAlloc(ib, 40);
+	((PointerDef *) LMemDerefHandles(ib, bch))->PD_width =
+	    PDW_ALWAYS_SHOW_PTR | 16;
+	((PointerDef *) LMemDerefHandles(ib, ich))->PD_width = 16;
+	MemUnlock(ib);
+	busy = ConstructOptr(ib, bch);
+	hides = shows = checks = movePtrs = 0;
+	CHECK(ImSetPtrFlags(PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE, 0) == 0);
+	CHECK(hides == 1 && shows == 0 &&
+	      ImGetPtrFlags() == PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE);
+	ImSetPtrImage(PIL_SYSTEM, busy);
+	CHECK(hides == 1 && shows == 1);
+	ImSetPtrImage(PIL_SYSTEM, img);
+	CHECK(hides == 2 && shows == 1);
+	CHECK(ImSetPtrFlags(0, PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE) ==
+	      PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE && shows == 2);
+	ImSetPtrImage(PIL_SYSTEM, 0);
+	(void) ImSetPtrFlags(PF_DISEMBODIED_PTR, 0);
+	(void) ImCallMovePtr(10, 10);
+	CHECK(checks == 1 && movePtrs == 0);
+	(void) ImSetPtrFlags(0, PF_DISEMBODIED_PTR);
+	(void) ImCallMovePtr(225, 225);
+	CHECK(movePtrs == 1 && ImGetPtrFlags() == 0);
+	Drain();
+    }
 
     /* closing D under the pointer: its leave, then C */
     Drain();

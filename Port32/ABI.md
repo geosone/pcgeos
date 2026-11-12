@@ -607,7 +607,7 @@ has no custom combining, so the changes go out as they come. The
 combine mode is only stored; the input manager combines what it sends
 on (§13j).
 
-**Not yet:** `ImSetPtrFlags`, calibration, the coordinate buffer
+**Not yet:** calibration, the coordinate buffer
 escapes, wheel keys, and rates (`MOUSE_CANT_SET_RATE`).
 
 **The host pointer** is `Driver/Mouse/Host` (`hostmse.geo`). It has no
@@ -2183,12 +2183,22 @@ driver's default if there is none. `ConstructOptr(0, PIV_UPDATE)` loads
 the current image again. `PIV_VIDEO_DRIVER_DEFAULT` counts as no image,
 as in the asm.
 
+`ImSetPtrFlags(set, clear)` returns the old `PtrFlags`; `ImGetPtrFlags`
+reads them (`Internal/im.h`).
+- `PF_HIDE_PTR_IF_NOT_OF_ALWAYS_SHOW_TYPE` hides the pointer
+  (`DR_VID_HIDEPTR`) unless its image has `PDW_ALWAYS_SHOW_PTR`, as the
+  busy pointer has. It is shown again for such an image, or when the
+  flag is cleared.
+- With `PF_DISEMBODIED_PTR` the pointer does not follow the mouse. Only
+  the save under areas at the mouse are checked (`DR_VID_CHECK_UNDER`),
+  for `WinMovePtr`.
+- ctest `kernel.win` checks both through its pointer driver.
+
 **Not yet:**
 - the screen saver;
 - the move/resize xor;
 - pen and ink;
-- `ImSetPtrFlags` (hiding, the disembodied pointer), re-centering a
-  pen's pointer, `ImBumpMouse`.
+- re-centering a pen's pointer, `ImBumpMouse`.
 
 DOS16 built without `QUIET_PTR_SUPPORT` and `INPUT_MESSAGE_RECEIPT`, and
 so does the C kernel.
@@ -3040,10 +3050,29 @@ Bounds and paths take the runs as text with their attributes. The test
 records a field into a chunk and checks its bytes, plays it, bounds it,
 copies it into a file and plays it from there.
 
-**Not yet:** the `*_PTR` and `*_OPTR` elements, bitmap slices after the
-first (callbacks), the truncation of a full stream.
 `GR_SET_PALETTE` holds three bytes for each of its entries (the C table
 had counted bytes).
+
+**Elements that point at their data** (`GR_DRAW_TEXT_PTR`/`_OPTR`,
+`GR_DRAW_BITMAP_PTR`/`_OPTR`, `GR_FILL_BITMAP_PTR`/`_OPTR`). The kernel
+never records them; code builds them, for example monikers made at run
+time.
+- In Port32 the `_OPTR` ones carry a whole optr: opcode, x, y, then the
+  optr as a little-endian 64-bit value (13 bytes; DOS16 had 9 with a
+  16-bit handle). Handles are not data, so no DOS16 file holds a usable
+  one.
+- The `_PTR` ones keep the 16-bit offset. It counts from the start of
+  the graphics string, that is, the chunk, or the pointer of `GST_PTR`.
+  The asm counted it from the segment, which Port32 does not have. In a
+  huge array or a file it points nowhere, and the element is skipped.
+- Played and bounded as the `GR_DRAW_TEXT`, `GR_DRAW_BITMAP` or
+  `GR_FILL_BITMAP` element with the text (null terminated) or the bitmap
+  (`PETextPtr`, `PEBitmapOptr`, ...). Copied byte for byte.
+- ctest `kernel.draw` plays a `GST_PTR` string with text by offset and
+  by optr and a bitmap by offset, and bounds it.
+
+**Not yet:** bitmap slices after the first (callbacks), the truncation
+of a full stream.
 (`GST_PATH` and the other path and clip elements: §13q.)
 
 **Bounds** (`graphicsStringBounds.c`). `GrGetGStringBoundsDWord` and
