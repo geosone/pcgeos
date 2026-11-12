@@ -8,7 +8,8 @@
  * reads and writes them per geode.  The map has a word per slot: the
  * geode that allocated it, or 0 for a free one.  An offset is the byte
  * offset of the range plus 2 (FIRST_GEODE_PRIV_OFFSET), so it is never
- * 0, as in the asm.
+ * 0, as in the asm.  Slots allocated for geode 0 belong to the kernel
+ * (the asm passed the kernel's handle) and are never freed with a geode.
  *
  * Each geode's words are a block of the kernel's heap (malloc) that
  * the core block points to; it grows on writes and goes when the geode
@@ -23,9 +24,10 @@
 
 #define FIRST_GEODE_PRIV_OFFSET		2
 #define PRIV_DATA_SLOT_INCREMENT	8
+#define PRIV_KERNEL			((GeodeHandle) ~0u)	/* geode 0 */
 
 static KSem privSem = { 1, 0 };
-static word *privMap;			/* owner per slot, 0: free */
+static GeodeHandle *privMap;		/* owner per slot, 0: free */
 static word privMapWords;
 
 static void PrivP(void)
@@ -61,18 +63,20 @@ word GeodePrivAlloc(GeodeHandle gh, word numWords)
 
     if (!numWords)
 	return 0;
+    if (!gh)
+	gh = PRIV_KERNEL;
     PrivP();
     while ((first = FindFree(numWords, gh)) < 0) {
 	word grow = (word) ((numWords + PRIV_DATA_SLOT_INCREMENT - 1) /
 			    PRIV_DATA_SLOT_INCREMENT * PRIV_DATA_SLOT_INCREMENT);
-	word *m;
+	GeodeHandle *m;
 	if ((dword) privMapWords + grow > 0x7fff ||
 	    !(m = realloc(privMap, (size_t) (privMapWords + grow) *
-			  sizeof(word)))) {
+			  sizeof(GeodeHandle)))) {
 	    PrivV();
 	    return 0;
 	}
-	memset(m + privMapWords, 0, grow * sizeof(word));
+	memset(m + privMapWords, 0, grow * sizeof(GeodeHandle));
 	privMap = m;
 	privMapWords = (word) (privMapWords + grow);
     }
