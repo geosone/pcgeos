@@ -109,6 +109,7 @@ void GrSaveState(GStateHandle gstate)
     MemHandle copy = MemAlloc(size, HF_SWAPABLE, HAF_NO_ERR | HAF_LOCK);
     GState *saved = MemDeref(copy);
 
+    (void) GrGSRecord(gstate, GR_SAVE_STATE, "");
     memcpy(saved, gs, size);
     saved->GS_fontHandle = 0;
     gs->GS_saveStateLink = copy;
@@ -122,6 +123,7 @@ void GrRestoreState(GStateHandle gstate)
     Handle link = gs->GS_saveStateLink;
     word size;
 
+    (void) GrGSRecord(gstate, GR_RESTORE_STATE, "");
     if (!link) {
 	MemUnlock(gstate);
 	return;
@@ -173,6 +175,7 @@ void GrSetMixMode(GStateHandle gstate, MixMode mode)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_MIX_MODE, "b", mode);
     gs->GS_mixMode = mode;
     RectOpts(&gs->GS_lineAttr, mode);
     RectOpts(&gs->GS_areaAttr, mode);
@@ -204,6 +207,19 @@ void GrUpdateOpts(GState *gs)
 				      GO_SPECIAL_CASE : GO_FALL_THRU);
 }
 
+/* colors: CF_GRAY as RGB, CF_INDEX as the _INDEX element */
+static void RecordColor(GStateHandle gstate, byte op, byte opIndex,
+			ColorFlag flag, word redOrIndex, word green, word blue)
+{
+    if (flag == CF_INDEX)
+	(void) GrGSRecord(gstate, opIndex, "b", redOrIndex);
+    else if (flag == CF_GRAY)
+	(void) GrGSRecord(gstate, op, "bbb", redOrIndex, redOrIndex,
+			  redOrIndex);
+    else
+	(void) GrGSRecord(gstate, op, "bbb", redOrIndex, green, blue);
+}
+
 /* colors */
 static void SetColor(GStateHandle gstate, word attr, ColorFlag flag,
 		     word redOrIndex, word green, word blue)
@@ -218,6 +234,8 @@ static void SetColor(GStateHandle gstate, word attr, ColorFlag flag,
 void GrSetLineColor(GStateHandle gstate, ColorFlag flag, word redOrIndex,
 		    word green, word blue)
 {
+    RecordColor(gstate, GR_SET_LINE_COLOR, GR_SET_LINE_COLOR_INDEX,
+		flag, redOrIndex, green, blue);
     SetColor(gstate, offsetof(GState, GS_lineAttr), flag, redOrIndex,
 	     green, blue);
 }
@@ -225,6 +243,8 @@ void GrSetLineColor(GStateHandle gstate, ColorFlag flag, word redOrIndex,
 void GrSetAreaColor(GStateHandle gstate, ColorFlag flag, word redOrIndex,
 		    word green, word blue)
 {
+    RecordColor(gstate, GR_SET_AREA_COLOR, GR_SET_AREA_COLOR_INDEX,
+		flag, redOrIndex, green, blue);
     SetColor(gstate, offsetof(GState, GS_areaAttr), flag, redOrIndex,
 	     green, blue);
 }
@@ -232,6 +252,8 @@ void GrSetAreaColor(GStateHandle gstate, ColorFlag flag, word redOrIndex,
 void GrSetTextColor(GStateHandle gstate, ColorFlag flag, word redOrIndex,
 		    word green, word blue)
 {
+    RecordColor(gstate, GR_SET_TEXT_COLOR, GR_SET_TEXT_COLOR_INDEX,
+		flag, redOrIndex, green, blue);
     SetColor(gstate, offsetof(GState, GS_textAttr), flag, redOrIndex,
 	     green, blue);
 }
@@ -246,16 +268,19 @@ static void SetColorMap(GStateHandle gstate, word attr, word colorMap)
 
 void GrSetLineColorMap(GStateHandle gstate, word colorMap)
 {
+    (void) GrGSRecord(gstate, GR_SET_LINE_COLOR_MAP, "b", colorMap);
     SetColorMap(gstate, offsetof(GState, GS_lineAttr), colorMap);
 }
 
 void GrSetAreaColorMap(GStateHandle gstate, word colorMap)
 {
+    (void) GrGSRecord(gstate, GR_SET_AREA_COLOR_MAP, "b", colorMap);
     SetColorMap(gstate, offsetof(GState, GS_areaAttr), colorMap);
 }
 
 void GrSetTextColorMap(GStateHandle gstate, word colorMap)
 {
+    (void) GrGSRecord(gstate, GR_SET_TEXT_COLOR_MAP, "b", colorMap);
     SetColorMap(gstate, offsetof(GState, GS_textAttr), colorMap);
 }
 
@@ -328,31 +353,37 @@ static void SetMask(GStateHandle gstate, word attr, SysDrawMask sdm,
 
 void GrSetLineMaskSys(GStateHandle gstate, word sysDM)
 {
+    (void) GrGSRecord(gstate, GR_SET_LINE_MASK, "b", sysDM);
     SetMask(gstate, offsetof(GState, GS_lineAttr), (SysDrawMask) sysDM, NULL);
 }
 
 void GrSetLineMaskCustom(GStateHandle gstate, const DrawMask *dm)
 {
+    (void) GrGSRecord(gstate, GR_SET_CUSTOM_LINE_MASK, "r", dm, 8);
     SetMask(gstate, offsetof(GState, GS_lineAttr), SDM_CUSTOM, dm);
 }
 
 void GrSetAreaMaskSys(GStateHandle gstate, word sysDM)
 {
+    (void) GrGSRecord(gstate, GR_SET_AREA_MASK, "b", sysDM);
     SetMask(gstate, offsetof(GState, GS_areaAttr), (SysDrawMask) sysDM, NULL);
 }
 
 void GrSetAreaMaskCustom(GStateHandle gstate, const DrawMask *dm)
 {
+    (void) GrGSRecord(gstate, GR_SET_CUSTOM_AREA_MASK, "r", dm, 8);
     SetMask(gstate, offsetof(GState, GS_areaAttr), SDM_CUSTOM, dm);
 }
 
 void GrSetTextMaskSys(GStateHandle gstate, SysDrawMask sysDM)
 {
+    (void) GrGSRecord(gstate, GR_SET_TEXT_MASK, "b", sysDM);
     SetMask(gstate, offsetof(GState, GS_textAttr), sysDM, NULL);
 }
 
 void GrSetTextMaskCustom(GStateHandle gstate, const DrawMask *dm)
 {
+    (void) GrGSRecord(gstate, GR_SET_CUSTOM_TEXT_MASK, "r", dm, 8);
     SetMask(gstate, offsetof(GState, GS_textAttr), SDM_CUSTOM, dm);
 }
 
@@ -361,6 +392,7 @@ void GrSetLineWidth(GStateHandle gstate, WWFixedAsDWord width)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_LINE_WIDTH, "d", width);
     gs->GS_lineWidth.WWF_frac = (word) width;
     gs->GS_lineWidth.WWF_int = (sword) (width >> 16);
     MemUnlock(gstate);
@@ -370,6 +402,7 @@ void GrSetLineEnd(GStateHandle gstate, LineEnd end)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_LINE_END, "b", end);
     gs->GS_lineEnd = end;
     MemUnlock(gstate);
 }
@@ -378,6 +411,7 @@ void GrSetLineJoin(GStateHandle gstate, LineJoin join)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_LINE_JOIN, "b", join);
     gs->GS_lineJoin = join;
     MemUnlock(gstate);
 }
@@ -387,6 +421,7 @@ void GrSetMiterLimit(GStateHandle gstate, WWFixedAsDWord limit)
     GState *gs = MemLock(gstate);
     word inv = (word) GrReciprocal32(limit);
 
+    (void) GrGSRecord(gstate, GR_SET_MITER_LIMIT, "d", limit);
     gs->GS_inverseMiterLimit = inv ? inv : 0xffff;
     MemUnlock(gstate);
 }
@@ -417,6 +452,12 @@ void GrSetLineStyle(GStateHandle gstate, LineStyle style, word skipDistance,
 {
     GState *gs = MemLock(gstate);
 
+    if (style == LS_CUSTOM)
+	(void) GrGSRecord(gstate, GR_SET_CUSTOM_LINE_STYLE, "wwr", skipDistance,
+			  numPairs, dpa, 2 * numPairs);
+    else
+	(void) GrGSRecord(gstate, GR_SET_LINE_STYLE, "bb", style,
+			  skipDistance);
     SetLineStyle(gs, style, (byte) skipDistance, (const byte *) dpa,
 		 (byte) numPairs);
     MemUnlock(gstate);
@@ -435,6 +476,11 @@ void GrSetLineAttr(GStateHandle gstate, const LineAttr *la)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_LINE_ATTR, "bbbbbbbbbd",
+		      la->LA_colorFlag, la->LA_color.RGB_red,
+		      la->LA_color.RGB_green, la->LA_color.RGB_blue,
+		      la->LA_mask, la->LA_mapMode, la->LA_end, la->LA_join,
+		      la->LA_style, GR_WWF_D(la->LA_width));
     SetCommonAttr(gs, &gs->GS_lineAttr, (const AreaAttr *) la);
     gs->GS_lineEnd = la->LA_end;
     gs->GS_lineJoin = la->LA_join;
@@ -447,6 +493,10 @@ void GrSetAreaAttr(GStateHandle gstate, const AreaAttr *aa)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_AREA_ATTR, "bbbbbb",
+		      aa->AA_colorFlag, aa->AA_color.RGB_red,
+		      aa->AA_color.RGB_green, aa->AA_color.RGB_blue,
+		      aa->AA_mask, aa->AA_mapMode);
     SetCommonAttr(gs, &gs->GS_areaAttr, aa);
     MemUnlock(gstate);
 }
@@ -467,6 +517,8 @@ void GrSetTextStyle(GStateHandle gstate, TextStyle bitsToSet,
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_TEXT_STYLE, "bb", bitsToSet,
+		      bitsToClear);
     SetStyle(gs, bitsToSet, bitsToClear);
     MemUnlock(gstate);
 }
@@ -476,6 +528,8 @@ void GrSetTextMode(GStateHandle gstate, TextMode bitsToSet,
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_TEXT_MODE, "bb", bitsToSet,
+		      bitsToClear);
     bitsToSet &= (TextMode) ~GR_TM_INTERNAL;
     bitsToClear &= (TextMode) ~GR_TM_INTERNAL;
     gs->GS_textMode = (TextMode) ((gs->GS_textMode & ~bitsToClear) |
@@ -498,6 +552,7 @@ void GrSetTextSpacePad(GStateHandle gstate, WWFixedAsDWord padding)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_TEXT_SPACE_PAD, "f", padding);
     gs->GS_textSpacePad.WBF_int = (sword) (padding >> 16);
     gs->GS_textSpacePad.WBF_frac = (byte) (padding >> 8);
     GrUpdateOpts(gs);
@@ -510,6 +565,15 @@ void GrSetTextAttr(GStateHandle gstate, const TextAttr *ta)
     GState *gs = MemLock(gstate);
     TextMode set, clear;
 
+    (void) GrGSRecord(gstate, GR_SET_TEXT_ATTR, "bbbbbbbbbbbfwfwbbb",
+		      ta->TA_color.CQ_redOrIndex, ta->TA_color.CQ_info,
+		      ta->TA_color.CQ_green, ta->TA_color.CQ_blue,
+		      ta->TA_mask, ta->TA_pattern.HP_type,
+		      ta->TA_pattern.HP_data, ta->TA_styleSet,
+		      ta->TA_styleClear, ta->TA_modeSet, ta->TA_modeClear,
+		      GR_WBF_D(ta->TA_spacePad), ta->TA_font,
+		      GR_WBF_D(ta->TA_size), ta->TA_trackKern,
+		      ta->TA_fontWeight, ta->TA_fontWidth, 0);
     GrSetColorIn(gs, &gs->GS_textAttr, ta->TA_color.CQ_info,
 		 ta->TA_color.CQ_redOrIndex, ta->TA_color.CQ_green,
 		 ta->TA_color.CQ_blue);

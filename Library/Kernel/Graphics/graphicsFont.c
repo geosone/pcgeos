@@ -217,11 +217,13 @@ static void GetAttr(GStateHandle gstate, size_t offset, byte *v, word n)
 
 void GrSetFontWeight(GStateHandle gstate, FontWeight weight)
 {
+    (void) GrGSRecord(gstate, GR_SET_FONT_WEIGHT, "b", weight);
     SetAttr(gstate, offsetof(FontCommonAttrs, FCA_weight), &weight, 1);
 }
 
 void GrSetFontWidth(GStateHandle gstate, FontWidth width)
 {
+    (void) GrGSRecord(gstate, GR_SET_FONT_WIDTH, "b", width);
     SetAttr(gstate, offsetof(FontCommonAttrs, FCA_width), &width, 1);
 }
 
@@ -229,6 +231,8 @@ void GrSetSuperscriptAttr(GStateHandle gstate, SuperscriptAttr attrs)
 {
     byte v[2];
 
+    (void) GrGSRecord(gstate, GR_SET_SUPERSCRIPT_ATTR, "bb", attrs.position,
+		      attrs.size);
     v[0] = attrs.position;
     v[1] = attrs.size;
     SetAttr(gstate, offsetof(FontCommonAttrs, FCA_superPos), v, 2);
@@ -238,6 +242,8 @@ void GrSetSubscriptAttr(GStateHandle gstate, SubscriptAttr attrs)
 {
     byte v[2];
 
+    (void) GrGSRecord(gstate, GR_SET_SUBSCRIPT_ATTR, "bb", attrs.position,
+		      attrs.size);
     v[0] = attrs.position;
     v[1] = attrs.size;
     SetAttr(gstate, offsetof(FontCommonAttrs, FCA_subPos), v, 2);

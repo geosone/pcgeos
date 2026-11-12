@@ -427,6 +427,49 @@ static void Unpack(byte compact, const byte **src, byte *dst, dword n)
     }
 }
 
+/* SliceToString: the bytes of a bitmap (its first slice) as a graphics
+ * string keeps it, the header, a complex bitmap's palette and the data
+ * (packed: as far as its scan lines go); 0 if too large */
+word GrBitmapStringSize(const Bitmap *bm)
+{
+    word lines, line = GrBitmapLineSize(bm->B_width, bm->B_type);
+    const byte *data;
+    dword size;
+
+    if (bm->B_type & BMT_COMPLEX) {
+	lines = Complex(bm)->CB_numScans;
+	data = (const byte *) bm + Complex(bm)->CB_data;
+    } else {
+	lines = bm->B_height;
+	data = (const byte *) (bm + 1);
+    }
+    if (bm->B_compact == BMC_PACKBITS || bm->B_compact == BMC_LZG) {
+	byte *scratch = malloc((size_t) line * lines + 1);
+	const byte *src = data;
+	if (!scratch)
+	    return 0;
+	Unpack(bm->B_compact, &src, scratch, (dword) line * lines);
+	free(scratch);
+	size = (dword) (src - (const byte *) bm);
+    } else
+	size = (dword) (data - (const byte *) bm) + (dword) line * lines;
+    return (word) (size <= 0xfff0 ? size : 0);
+}
+
+/* the element of a bitmap: at x, y or (atCP) at the pen */
+static void RecordBitmap(GStateHandle gstate, byte op, Boolean atCP, sword x,
+			 sword y, const Bitmap *bm)
+{
+    word n;
+
+    if (!GrGStringOf(gstate) || !(n = GrBitmapStringSize(bm)))
+	return;
+    if (atCP)
+	(void) GrGSRecord(gstate, op, "wr", n, bm, n);
+    else
+	(void) GrGSRecord(gstate, op, "wwwr", x, y, n, bm, n);
+}
+
 /* UncompactPackBits: n bytes from *src to dst */
 void GrUnpackBits(const byte **src, byte *dst, dword n)
 {
@@ -1313,6 +1356,7 @@ void GrDrawBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 {
     GrDraw d;
 
+    RecordBitmap(gstate, GR_DRAW_BITMAP, FALSE, x, y, bm);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
     DrawBitmap(&d, x, y, bm, callback, FALSE);
@@ -1324,6 +1368,7 @@ void GrFillBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 {
     GrDraw d;
 
+    RecordBitmap(gstate, GR_FILL_BITMAP, FALSE, x, y, bm);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
     DrawBitmap(&d, x, y, bm, callback, TRUE);
@@ -1346,12 +1391,14 @@ static void AtCP(GStateHandle gstate, const Bitmap *bm,
 void GrDrawBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 		      Bitmap *(*callback)(Bitmap *bm))
 {
+    RecordBitmap(gstate, GR_DRAW_BITMAP_CP, TRUE, 0, 0, bm);
     AtCP(gstate, bm, callback, FALSE);
 }
 
 void GrFillBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 		      Bitmap *(*callback)(Bitmap *bm))
 {
+    RecordBitmap(gstate, GR_FILL_BITMAP_CP, TRUE, 0, 0, bm);
     AtCP(gstate, bm, callback, TRUE);
 }
 

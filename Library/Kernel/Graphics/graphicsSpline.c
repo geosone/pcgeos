@@ -12,8 +12,8 @@
  * are a polyline, drawn with the line attributes.  The pen ends on the
  * last point.
  *
- * Not yet: graphics strings and paths (the pen moves, nothing is
- * stored), the EC check of the number of points.
+ * Not yet: paths (the pen moves, nothing is stored), the EC check of
+ * the number of points.
  */
 #include "graphicsInt.h"
 #include <stdlib.h>
@@ -158,21 +158,27 @@ static void Curve(GStateHandle gstate, const Point *points, word n,
 
 void GrDrawCurve(GStateHandle gstate, const Point *points)
 {
+    (void) GrGSRecord(gstate, GR_DRAW_CURVE, "r", points, 16);
     Curve(gstate, points, 4, FALSE);
 }
 
 void GrDrawCurveTo(GStateHandle gstate, const Point *points)
 {
+    (void) GrGSRecord(gstate, GR_DRAW_CURVE_TO, "r", points, 12);
     Curve(gstate, points, 3, TRUE);
 }
 
 void GrDrawSpline(GStateHandle gstate, const Point *points, word numPoints)
 {
+    (void) GrGSRecord(gstate, GR_DRAW_SPLINE, "wr", numPoints, points,
+		      4 * numPoints);
     Curve(gstate, points, numPoints, FALSE);
 }
 
 void GrDrawSplineTo(GStateHandle gstate, const Point *points,
 		    word numPoints)
 {
+    (void) GrGSRecord(gstate, GR_DRAW_SPLINE_TO, "wr", numPoints, points,
+		      4 * numPoints);
     Curve(gstate, points, numPoints, TRUE);
 }

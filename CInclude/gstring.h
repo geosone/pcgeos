@@ -118,6 +118,11 @@ typedef ByteEnum GStringType;
 
 extern GStateHandle	/*XXX*/
     _pascal GrLoadGString(Handle han, GStringType hanType, word vmBlock);
+#ifdef GEOS_PORT32
+/* GST_PTR: a pointer does not fit in han and vmBlock (Port32/ABI.md 13p) */
+extern GStateHandle
+    _pascal GrLoadGStringPtr(const void *gstring);
+#endif
 
 /***/
 

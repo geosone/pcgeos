@@ -14,6 +14,7 @@ void GrDrawEllipse(GStateHandle gstate, sword left, sword top, sword right,
 {
     GrDraw d;
 
+    (void) GrGSRecord(gstate, GR_DRAW_ELLIPSE, "wwww", left, top, right, bottom);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, left, top);
     if (!GrTrivialReject(&d))
@@ -27,6 +28,7 @@ void GrFillEllipse(GStateHandle gstate, sword left, sword top, sword right,
 {
     GrDraw d;
 
+    (void) GrGSRecord(gstate, GR_FILL_ELLIPSE, "wwww", left, top, right, bottom);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, left, top);
     if (!GrTrivialReject(&d))

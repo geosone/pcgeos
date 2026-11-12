@@ -35,6 +35,8 @@
  *   - WinScroll: the screen and the document moved, the rest washed;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
+ *   - graphics strings: recorded (the DOS16 bytes), played, in parts,
+ *     from memory, copied into a huge array and a file, parsed;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -45,6 +47,8 @@
 #include <file.h>
 #include <vm.h>
 #include <hugearr.h>
+#include <gstring.h>
+#include <object.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -118,6 +122,15 @@ static WindowHandle Open(Handle parent, word flags, unsigned long rgb,
 }
 
 static Bitmap *nextSlice;
+
+/* GrParseGString: count the output elements, go on */
+static int nOutput;
+static Boolean CountOutput(void *element)
+{
+    (void) element;
+    nOutput++;
+    return FALSE;
+}
 
 /* a bitmap callback: the next slice once */
 static Bitmap *NextSlice(Bitmap *bm)
@@ -1157,6 +1170,153 @@ int main(int argc, char **argv)
 	CHECK(black >= 250 && black <= 450 && black + white == 60 * 30);
 	CHECK(Pixel(22, 50) == WHITE && Pixel(60, 50) == WHITE);
 	GrSetFont(g, FID_BERKELEY, 10UL << 16);
+    }
+
+    /* graphics strings: recorded into a chunk as the DOS16 elements,
+     * played at a position (the transformation moved there and back),
+     * in parts (GSC_OUTPUT), from a pointer, copied byte for byte into
+     * a huge array and a file (the metafile header first), parsed */
+    {
+	static const byte expect[] = {
+	    GR_SET_AREA_COLOR, 0xff, 0, 0,
+	    GR_FILL_RECT, 0, 0, 0, 0, 10, 0, 10, 0,
+	    GR_SET_LINE_COLOR, 0, 0xff, 0,
+	    GR_DRAW_LINE, 0, 0, 20, 0, 20, 0, 20, 0,
+	    GR_DRAW_TEXT, 0, 0, 25, 0, 2, 0, 'H', 'i',
+	    GR_END_GSTRING
+	};
+	static const byte blueBox[] = {		/* as goc writes one */
+	    GR_SET_AREA_COLOR, 0, 0, 0xff,
+	    GR_FILL_RECT, 0, 0, 0, 0, 4, 0, 4, 0,
+	    GR_END_GSTRING
+	};
+	MemHandle blk = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+	GStateHandle gs, ld, lp, vs, lv, fs, lf;
+	VMFileHandle vm;
+	VMBlockHandle vb = 0;
+	FileHandle f;
+	TransMatrix tm;
+	byte buf[32];
+	const byte *p;
+	word ch = 0, last = 0xffff, n = 0, k;
+	dword pos;
+
+	gs = GrCreateGString(blk, GST_CHUNK, &ch);
+	CHECK(gs && ch);
+	GrSetAreaColor(gs, CF_RGB, 0xff, 0, 0);
+	GrFillRect(gs, 0, 0, 10, 10);
+	GrSetLineColor(gs, CF_RGB, 0, 0xff, 0);
+	GrDrawLine(gs, 0, 20, 20, 20);
+	GrDrawText(gs, 0, 25, "Hi", 0);
+	CHECK(GrEndGString(gs) == GSET_NO_ERROR);
+	GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+	MemLock(blk);
+	p = LMemDerefHandles(blk, ch);
+	CHECK(LMemGetChunkSizeHandles(blk, ch) == sizeof(expect) &&
+	      !memcmp(p, expect, sizeof(expect)));
+	MemUnlock(blk);
+
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	ld = GrLoadGString(blk, GST_CHUNK, ch);
+	CHECK(GrDrawGString(g, ld, 30, 10, 0, &last) == GSRT_COMPLETE &&
+	      last == GR_END_GSTRING);
+	CHECK(Pixel(50, 30) == RED && Pixel(59, 39) == RED &&
+	      Pixel(60, 30) == WHITE && Pixel(50, 40) == WHITE);
+	CHECK(Pixel(55, 50) == GREEN && Pixel(55, 51) == WHITE);
+	CHECK(Pixel(50, 57) == BLACK);			/* the H */
+	GrGetTransform(g, &tm);
+	CHECK(tm.TM_e31.DWF_int == 0 && tm.TM_e32.DWF_int == 0);
+
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(GrDrawGString(g, ld, 10, 10, GSC_OUTPUT, &last) == GSRT_OUTPUT &&
+	      last == GR_FILL_RECT && Pixel(30, 30) == WHITE);
+	CHECK(GrDrawGStringAtCP(g, ld, GSC_OUTPUT, &last) == GSRT_OUTPUT &&
+	      last == GR_DRAW_LINE && Pixel(30, 30) == RED &&
+	      Pixel(35, 50) == WHITE);
+	CHECK(GrDrawGStringAtCP(g, ld, 0, &last) == GSRT_COMPLETE &&
+	      Pixel(35, 50) == GREEN);
+	GrGetTransform(g, &tm);
+	CHECK(tm.TM_e31.DWF_int == 0 && tm.TM_e32.DWF_int == 0);
+
+	CHECK(GrGetGStringElement(g, ld, sizeof(buf), buf, &n) ==
+	      GR_SET_AREA_COLOR && n == 4 && buf[1] == 0xff);
+	GrSetGStringPos(ld, GSSPT_SKIP_1, 0);
+	CHECK(GrGetGStringElement(g, ld, sizeof(buf), buf, &n) ==
+	      GR_FILL_RECT && n == 9);
+	GrSetGStringPos(ld, GSSPT_RELATIVE, 3);
+	CHECK(GrGetGStringElement(g, ld, sizeof(buf), buf, &n) ==
+	      GR_DRAW_TEXT && n == 9);
+	GrSetGStringPos(ld, GSSPT_BEGINNING, 0);
+	nOutput = 0;
+	GrParseGString(0, ld, GSC_OUTPUT, CountOutput);
+	CHECK(nOutput == 3);
+	GrSetGStringPos(ld, GSSPT_BEGINNING, 0);
+
+	lp = GrLoadGStringPtr(blueBox);
+	CHECK(GrDrawGString(g, lp, 60, 60, 0, NULL) == GSRT_COMPLETE &&
+	      Pixel(80, 80) == BLUE && Pixel(83, 83) == BLUE &&
+	      Pixel(84, 80) == WHITE);
+	GrDestroyGString(lp, g, GSKT_LEAVE_DATA);
+
+	/* a huge array: an element each */
+	FileSetStandardPath(SP_TOP);
+	vm = VMOpen("GS.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	CHECK(vm != 0);
+	vs = GrCreateGString(vm, GST_VMEM, &vb);
+	CHECK(vs && vb);
+	CHECK(GrCopyGString(ld, vs, 0) == GSRT_COMPLETE);
+	CHECK(GrEndGString(vs) == GSET_NO_ERROR);
+	GrDestroyGString(vs, 0, GSKT_LEAVE_DATA);
+	CHECK(HugeArrayGetCount(vm, vb) == 6);
+	for (k = 0, pos = 0; k < 6; k++) {
+	    void *e;
+	    word size;
+	    HugeArrayLock(vm, vb, k, &e, &size);
+	    CHECK(e && pos + size <= sizeof(expect) &&
+		  !memcmp(e, expect + pos, size));
+	    pos += size;
+	    if (e)
+		HugeArrayUnlock(e);
+	}
+	CHECK(pos == sizeof(expect));
+	lv = GrLoadGString(vm, GST_VMEM, vb);
+	GrSetGStringPos(lv, GSSPT_RELATIVE, 4);
+	CHECK(GrGetGStringElement(g, lv, sizeof(buf), buf, &n) ==
+	      GR_DRAW_TEXT && n == 9);
+	GrSetGStringPos(lv, GSSPT_BEGINNING, 0);
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(GrDrawGString(g, lv, 0, 0, 0, NULL) == GSRT_COMPLETE &&
+	      Pixel(20, 20) == RED && Pixel(25, 40) == GREEN);
+	GrDestroyGString(lv, g, GSKT_KILL_DATA);
+	CHECK(VMClose(vm, FALSE) == 0);
+
+	/* a file: the metafile header, then the elements */
+	f = FileCreate("GS.MF", FILE_CREATE_TRUNCATE | FCF_NATIVE |
+		       FILE_ACCESS_RW, 0);
+	CHECK(f != 0);
+	fs = GrCreateGString(f, GST_STREAM, NULL);
+	CHECK(GrCopyGString(ld, fs, 0) == GSRT_COMPLETE);
+	CHECK(GrEndGString(fs) == GSET_NO_ERROR);
+	GrDestroyGString(fs, 0, GSKT_LEAVE_DATA);
+	FilePos(f, 0, FILE_POS_START);
+	CHECK(FileRead(f, buf, 20, FALSE) == 20 && buf[0] == GR_COMMENT &&
+	      buf[1] == 17 && !memcmp(buf + 3, "GEOS METAFILE 2.0", 17));
+	FilePos(f, 0, FILE_POS_START);
+	lf = GrLoadGString(f, GST_STREAM, 0);
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(GrDrawGString(g, lf, 40, 0, 0, NULL) == GSRT_COMPLETE &&
+	      Pixel(60, 20) == RED && Pixel(65, 40) == GREEN &&
+	      Pixel(60, 47) == BLACK);
+	GrDestroyGString(lf, g, GSKT_LEAVE_DATA);
+	FileClose(f, FALSE);
+	FileSetStandardPath(SP_VIDEO_DRIVERS);
+
+	GrDestroyGString(ld, g, GSKT_KILL_DATA);
+	MemFree(blk);
     }
 
     /* an update: only the invalid area is drawn */

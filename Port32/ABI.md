@@ -2723,8 +2723,8 @@ strategy, the bitmap and variable blocks, and the wrappers of
 `CFatalError` (fatal `C_FATAL_ERROR`, the code logged) and
 `CWarningNotice` (logged), Bezier curves (`graphicsSpline.c`:
 `GrDrawCurve`, `GrDrawCurveTo`, `GrDrawSpline`, `GrDrawSplineTo`,
-halved in the device until flat) and `GrComment` (nothing without
-graphics strings).
+halved in the device until flat) and `GrComment` (stored in graphics
+strings, §13p).
 
 **Not yet:** `DR_FONT_GEN_IN_REGION` (no region paths in the kernel; it
 fails), the escape functions, greyscale text, `GrCharMetrics` in the
@@ -2735,6 +2735,80 @@ and `FontData/Ttf/cooper.ttf` into `USERDATA/FONT/TTF`. It checks the
 enumeration of the outline font by name, its height and the width of
 "I" at 40 point, and the pixels of a drawn "I", which the driver builds
 when it is drawn (on every host, arm64 and armhf in qemu too).
+
+## 13p. Graphics strings (`Graphics/graphicsString.c`, `graphicsStringStore.c`, `graphicsStringMisc.c`, P6)
+
+**The elements stay DOS16.** A graphics string holds the elements of
+`gstring.def` byte packed and little endian, as goc writes static
+graphics strings (`GS*` macros of `gstring.h`) and as documents and
+metafiles hold them. The kernel builds them field by field
+(`GrGSRecord`) and reads them field by field when it plays them; no
+host structure is stored. The size of an element comes from the
+element table (`grGSElemInfo`, after `GSElemInfoTab`): a fixed size
+and, for a variable element, the offset of its count and what it counts
+(bytes, words, coordinate pairs).
+
+**A graphics string is a GState** without a window whose `GS_gstring`
+is the handle of a block with the `GString` state (type, the handle
+and chunk or VM block, the position, the element read). Every `Gr*`
+routine that has an element stores it when `GS_gstring` is set; the
+attribute and transformation routines also set the GState, and the
+drawing routines move the pen as they would when drawing. Wrappers that
+call another routine with an element (`GrDrawHLine`, `GrDrawCharAtCP`,
+`GrDrawRelLineTo`) use internal routines, so each call stores one
+element.
+
+| Type | Kept in | Position |
+|---|---|---|
+| `GST_CHUNK` | a chunk of an LMem block, appended | bytes |
+| `GST_STREAM` | a file; created with the metafile header (a `GR_COMMENT` "GEOS METAFILE 2.0") | the file position |
+| `GST_VMEM` | a huge array of variable size, one element each | elements |
+| `GST_PTR` | memory, read only | bytes |
+
+The asm buffered stream and VM elements until a flush; here each
+element is written whole when it is stored. A failed write sets
+`GSF_ERROR`, and `GrEndGString` returns `GSET_DISK_FULL`.
+
+**`GST_PTR`.** `GrLoadGString(PtrToSegment(p), GST_PTR, PtrToOffset(p))`
+cannot carry a host pointer, and `geosport.h` has no segment macros.
+Port32 adds `GrLoadGStringPtr(const void *gstring)` (`gstring.h`, under
+`GEOS_PORT32`, a Port32 kernel export); `GrLoadGString` with `GST_PTR`
+returns 0.
+
+**Playing** (`GrDrawGString`, `GrDrawGStringAtCP`): the element at the
+position is copied to the C heap, the variable part (points, text,
+bitmaps) to an aligned buffer, and the `Gr*` routine of the opcode is
+called. Drawing moves the transformation to the pen and makes it the
+default (`GrSaveTransform`, `GrApplyTranslation`,
+`GrInitDefaultTransform`) until the string is complete, faults or
+reaches a new page. `GSControl` stops before an element of the asked
+kind; that element stays read and is played first the next time, as
+in the asm. The end of the data reads as `GR_END_GSTRING`. A complete
+string goes back to its start. `GrParseGString` calls the callback for
+the elements of the asked kind and plays all into the GState if one is
+given. `GrCopyGString` into a graphics string copies the elements byte
+for byte; into a GState it plays them. `GrGetGStringElement`,
+`GrSetGStringPos` (skip, relative, beginning, end) and
+`GrDeleteGStringElement` (VM only) work on the position.
+`GrComment`, `GrEscape`, `GrLabel`, `GrNewPage`, `GrNullOp` and
+`GrSetGStringBounds` store their elements only.
+
+**Bitmaps** are stored whole, as `SliceToString` stores the first
+slice: the header, a complex bitmap's palette and the data, packed data
+as far as its scan lines go (`GrBitmapStringSize`).
+
+**Not yet:** `GR_DRAW_TEXT_FIELD` (style runs; reading one is a
+fault), the `*_PTR` and `*_OPTR` elements, bitmap slices after the
+first (callbacks), palettes, patterns, clip rectangles and path
+elements (skipped when played), `GST_PATH`, `GrGetGStringBounds` and
+`GSF_FIGURE_BOUNDS`, the truncation of a full stream.
+
+**Tests.** ctest `kernel.draw` records into a chunk and compares the
+bytes with the DOS16 elements, plays the string at a position, in parts
+with `GSC_OUTPUT`, and from a goc-style byte array (`GrLoadGStringPtr`);
+reads elements and moves the position; parses; copies it into a huge
+array (one element each, the bytes again) and into a file (the
+metafile header), and plays both.
 
 ## 14. Open
 

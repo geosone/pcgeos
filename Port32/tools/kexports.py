@@ -30,6 +30,10 @@ import sys
 PORT32_EXPORTS = [
     "CObjMessageP", "CObjCallSuperP", "CMessageDispatchP",
 ]
+# more of them, numbered after the lists below (their entry numbers stay)
+PORT32_LATE_EXPORTS = [
+    "GrLoadGStringPtr",
+]
 # GHAL host services the drivers on the GHAL use (Port32/GHAL-Concept.md
 # section 4, level 2): exported always, as they live in the ghal library
 # beside the kernel.  New names go at the end (their entry numbers).
@@ -104,8 +108,10 @@ def main():
     wanted = gp_names(a.gp)
     extra = PORT32_EXPORTS + [e for e in a.extra if e not in PORT32_EXPORTS]
     syms = defined_symbols(a.nm, a.objects, a.underscore)
-    names = [n for n in syms if n.upper() in wanted or n in extra]
-    extra += [g for g in GHAL_EXPORTS + COMPILER_EXPORTS if g not in extra]
+    names = [n for n in syms if n.upper() in wanted or n in extra or
+             n in PORT32_LATE_EXPORTS]
+    extra += [g for g in GHAL_EXPORTS + COMPILER_EXPORTS + PORT32_LATE_EXPORTS
+              if g not in extra]
     names = sorted(set(names) | set(GHAL_EXPORTS) | set(COMPILER_EXPORTS))
 
     with open(a.out, "w") as f:

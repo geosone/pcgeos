@@ -574,6 +574,8 @@ void GrFillPolygon(GStateHandle gstate, RegionFillRule windingRule,
 {
     GrDraw d;
 
+    (void) GrGSRecord(gstate, GR_FILL_POLYGON, "wbr", numPoints, windingRule,
+		      points, 4 * numPoints);
     GrEnterGraphics(gstate, &d);
     if (numPoints)
 	GrSetDocPenPos(d.GD_gs, points[0].P_x, points[0].P_y);

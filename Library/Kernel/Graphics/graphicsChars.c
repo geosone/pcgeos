@@ -706,6 +706,7 @@ void GrSetTrackKern(GStateHandle gstate, word tk)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_SET_TRACK_KERN, "w", tk);
     if ((sword) tk != gs->GS_trackKernDegree) {
 	gs->GS_trackKernDegree = (sword) tk;
 	RecalcKern(gs);
@@ -729,6 +730,7 @@ void GrSetFont(GStateHandle gstate, FontID id, WWFixedAsDWord pointSize)
     sword si = (sword) (pointSize >> 16);
     byte sf = (byte) (pointSize >> 8);
 
+    (void) GrGSRecord(gstate, GR_SET_FONT, "fw", pointSize, id);
     if (gs->GS_fontAttr.FCA_fontID != id ||
 	gs->GS_fontAttr.FCA_pointsize.WBF_int != si ||
 	gs->GS_fontAttr.FCA_pointsize.WBF_frac != sf) {

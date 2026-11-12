@@ -102,7 +102,7 @@ static void DrawLine(const GrDraw *d, sword x1, sword y1, sword x2, sword y2)
 	GrDrawLineLow(d, a, b, c, e, LINE);
 }
 
-void GrDrawLine(GStateHandle gstate, sword x1, sword y1, sword x2, sword y2)
+static void Line(GStateHandle gstate, sword x1, sword y1, sword x2, sword y2)
 {
     GrDraw d;
 
@@ -113,14 +113,22 @@ void GrDrawLine(GStateHandle gstate, sword x1, sword y1, sword x2, sword y2)
     GrExitGraphics(&d);
 }
 
+void GrDrawLine(GStateHandle gstate, sword x1, sword y1, sword x2, sword y2)
+{
+    (void) GrGSRecord(gstate, GR_DRAW_LINE, "wwww", x1, y1, x2, y2);
+    Line(gstate, x1, y1, x2, y2);
+}
+
 void GrDrawHLine(GStateHandle gstate, sword x1, sword y, sword x2)
 {
-    GrDrawLine(gstate, x1, y, x2, y);
+    (void) GrGSRecord(gstate, GR_DRAW_HLINE, "www", x1, y, x2);
+    Line(gstate, x1, y, x2, y);
 }
 
 void GrDrawVLine(GStateHandle gstate, sword x, sword y1, sword y2)
 {
-    GrDrawLine(gstate, x, y1, x, y2);
+    (void) GrGSRecord(gstate, GR_DRAW_VLINE, "www", x, y1, y2);
+    Line(gstate, x, y1, x, y2);
 }
 
 /* from the pen (in the device) to x, y; a fat line from the pen in
@@ -151,6 +159,7 @@ static void LineTo(GStateHandle gstate, sword x, sword y)
 
 void GrDrawLineTo(GStateHandle gstate, sword x, sword y)
 {
+    (void) GrGSRecord(gstate, GR_DRAW_LINE_TO, "ww", x, y);
     LineTo(gstate, x, y);
 }
 
@@ -158,6 +167,7 @@ void GrDrawHLineTo(GStateHandle gstate, sword x)
 {
     XYValueAsDWord p = GrGetCurPos(gstate);
 
+    (void) GrGSRecord(gstate, GR_DRAW_HLINE_TO, "w", x);
     LineTo(gstate, x, DWORD_Y(p));
 }
 
@@ -165,6 +175,7 @@ void GrDrawVLineTo(GStateHandle gstate, sword y)
 {
     XYValueAsDWord p = GrGetCurPos(gstate);
 
+    (void) GrGSRecord(gstate, GR_DRAW_VLINE_TO, "w", y);
     LineTo(gstate, DWORD_X(p), y);
 }
 
@@ -175,10 +186,11 @@ void GrDrawRelLineTo(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y)
     sword px, py, nx, ny;
     Boolean ok;
 
+    (void) GrGSRecord(gstate, GR_DRAW_REL_LINE_TO, "dd", x, y);
     GrEnterGraphics(gstate, &d);
     ok = (Boolean) (!GrTrivialReject(&d) && GrGetDevPenPos(&d, &px, &py));
-    MemUnlock(gstate);			/* GrRelMoveTo locks it itself */
-    GrRelMoveTo(gstate, x, y);
+    MemUnlock(gstate);			/* GrRelMovePen locks it itself */
+    GrRelMovePen(gstate, x, y);
     MemLock(gstate);
     if (ok && GrGetDevPenPos(&d, &nx, &ny))
 	GrDrawLineLow(&d, px, py, nx, ny, LINE);

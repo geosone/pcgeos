@@ -162,6 +162,7 @@ void GrMoveTo(GStateHandle gstate, sword x, sword y)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_MOVE_TO, "ww", x, y);
     SetPen(gs, (int64_t) x * 65536, (int64_t) y * 65536);
     MemUnlock(gstate);
 }
@@ -170,6 +171,7 @@ void GrMoveToWWFixed(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y)
 {
     GState *gs = MemLock(gstate);
 
+    (void) GrGSRecord(gstate, GR_MOVE_TO_WWFIXED, "dd", x, y);
     SetPen(gs, (sdword) x, (sdword) y);
     MemUnlock(gstate);
 }
@@ -177,6 +179,13 @@ void GrMoveToWWFixed(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y)
 /* SetRelDocPenPos: the offset through the 2x2 part only
  * (TransformRelVector) */
 void GrRelMoveTo(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y)
+{
+    (void) GrGSRecord(gstate, GR_REL_MOVE_TO, "dd", x, y);
+    GrRelMovePen(gstate, x, y);
+}
+
+/* GrRelMoveTo, not stored in a graphics string */
+void GrRelMovePen(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y)
 {
     GState *gs = MemLock(gstate);
     TMatrix m = gs->GS_TMatrix;
@@ -238,8 +247,9 @@ void GrSetDocWWFPenPos(GState *gs, sdword x, sdword y)
 /*
  * EnterGraphics: the GState locked and, if it has a window, the tree
  * lock taken, the window locked and made ready for this GState
- * (WinValWinStruct).  Graphics strings and paths are not kept yet:
- * drawing to one does nothing.
+ * (WinValWinStruct).  A graphics string (GS_gstring) has no window:
+ * the routines stored their element before (GrGSRecord) and draw
+ * nothing.
  */
 void GrEnterGraphics(GStateHandle gstate, GrDraw *d)
 {

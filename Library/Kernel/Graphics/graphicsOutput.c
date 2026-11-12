@@ -124,6 +124,7 @@ void GrFillRect(GStateHandle gstate, sword left, sword top, sword right,
 {
     GrDraw d;
 
+    (void) GrGSRecord(gstate, GR_FILL_RECT, "wwww", left, top, right, bottom);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, left, top);
     if (!GrTrivialReject(&d)) {
@@ -156,6 +157,7 @@ void GrFillRectTo(GStateHandle gstate, sword x, sword y)
     GrDraw d;
     sword px, py;
 
+    (void) GrGSRecord(gstate, GR_FILL_RECT_TO, "ww", x, y);
     GrEnterGraphics(gstate, &d);
     if (!GrTrivialReject(&d)) {
 	DocPen(&d, &px, &py);
@@ -170,6 +172,7 @@ void GrDrawRect(GStateHandle gstate, sword left, sword top, sword right,
 {
     GrDraw d;
 
+    (void) GrGSRecord(gstate, GR_DRAW_RECT, "wwww", left, top, right, bottom);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, left, top);
     if (!GrTrivialReject(&d))
@@ -182,6 +185,7 @@ void GrDrawRectTo(GStateHandle gstate, sword x, sword y)
     GrDraw d;
     sword px, py;
 
+    (void) GrGSRecord(gstate, GR_DRAW_RECT_TO, "ww", x, y);
     GrEnterGraphics(gstate, &d);
     if (!GrTrivialReject(&d)) {
 	DocPen(&d, &px, &py);
@@ -195,6 +199,7 @@ void GrDrawPoint(GStateHandle gstate, sword x, sword y)
     GrDraw d;
     sword dx, dy;
 
+    (void) GrGSRecord(gstate, GR_DRAW_POINT, "ww", x, y);
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
     if (!GrTrivialReject(&d) && GrTransDev(&d, x, y, &dx, &dy))
@@ -207,6 +212,7 @@ void GrDrawPointAtCP(GStateHandle gstate)
     GrDraw d;
     sword dx, dy;
 
+    (void) GrGSRecord(gstate, GR_DRAW_POINT_CP, "");
     GrEnterGraphics(gstate, &d);
     if (!GrTrivialReject(&d) && GrGetDevPenPos(&d, &dx, &dy))
 	GrFillRectLow(&d, dx, dy, dx, dy, AREA);

@@ -204,6 +204,8 @@ void GrDrawPolyline(GStateHandle gstate, const Point *points, word numPoints)
 {
     GrDraw d;
 
+    (void) GrGSRecord(gstate, GR_DRAW_POLYLINE, "wr", numPoints, points,
+		      4 * numPoints);
     GrEnterGraphics(gstate, &d);
     if (numPoints)			/* SetPolyPenPos: the last point */
 	GrSetDocPenPos(d.GD_gs, points[numPoints - 1].P_x,
@@ -217,6 +219,8 @@ void GrDrawPolygon(GStateHandle gstate, const Point *points, word numPoints)
 {
     GrDraw d;
 
+    (void) GrGSRecord(gstate, GR_DRAW_POLYGON, "wr", numPoints, points,
+		      4 * numPoints);
     GrEnterGraphics(gstate, &d);
     if (numPoints)
 	GrSetDocPenPos(d.GD_gs, points[0].P_x, points[0].P_y);
@@ -240,6 +244,8 @@ void GrBrushPolyline(GStateHandle gstate, const Point *points,
     word count;
     Rectangle b;
 
+    (void) GrGSRecord(gstate, GR_BRUSH_POLYLINE, "wbbr", numPoints, brushW,
+		      brushH, points, 4 * numPoints);
     GrEnterGraphics(gstate, &d);
     if (numPoints)
 	GrSetDocPenPos(d.GD_gs, points[numPoints - 1].P_x,

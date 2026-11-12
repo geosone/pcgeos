@@ -53,6 +53,8 @@ void GrDrawArc(GStateHandle gstate, sword left, sword top, sword right,
 	       sword bottom, word startAngle, word endAngle,
 	       ArcCloseType closeType)
 {
+    (void) GrGSRecord(gstate, GR_DRAW_ARC, "wwwwwww", closeType, left, top,
+		      right, bottom, startAngle, endAngle);
     Bounded(gstate, left, top, right, bottom, startAngle, endAngle,
 	    closeType, FALSE);
 }
@@ -61,6 +63,8 @@ void GrFillArc(GStateHandle gstate, sword left, sword top, sword right,
 	       sword bottom, word startAngle, word endAngle,
 	       ArcCloseType closeType)
 {
+    (void) GrGSRecord(gstate, GR_FILL_ARC, "wwwwwww", closeType, left, top,
+		      right, bottom, startAngle, endAngle);
     Bounded(gstate, left, top, right, bottom, startAngle, endAngle,
 	    closeType, TRUE);
 }

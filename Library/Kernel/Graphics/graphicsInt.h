@@ -253,4 +253,57 @@ sdword GrCharAdvance(const GState *gs, const FontBuf *fb, byte ch,
 sdword GrTextWidthLow(const GState *gs, const FontBuf *fb, const char *str,
 		      word size);
 
+
+/* graphicsString*.c: a graphics string (GString of graphicsConstant.def,
+ * in the host layout).  The elements are bytes in the DOS16 layout
+ * (gstring.def) wherever they are kept. */
+#define GSF_HANDLE_TYPE		0x0007	/* GStringType */
+#define GSF_ELEMENT_READY	0x0008	/* read, not played */
+#define GSF_ERROR		0x0010	/* a write failed */
+#define GSF_XFORM_SAVED		0x0020
+#define GSF_CONTINUING		0x0040	/* a partial play goes on */
+#define GSF_COMPACT_BITMAPS	0x0100
+#define GSF_FIGURE_BOUNDS	0x0200
+
+typedef struct {
+    word	GSS_flags;
+    Handle	GSS_hString;	/* block, file or VM file */
+    word	GSS_firstBlock;	/* chunk or VM block */
+    dword	GSS_curPos;	/* chunk, ptr, stream: bytes; VM: elements */
+    dword	GSS_filePos;	/* stream: its start */
+    const byte	*GSS_ptr;	/* GST_PTR */
+    byte	*GSS_elem;	/* the element read (C heap) */
+    word	GSS_elemCap;
+    word	GSS_lastSize;
+} GStringBlock;
+
+/* the element table (gstring.def): fixed size, and for a variable one
+ * the offset of its count and what it counts */
+#define GSV_BYTES	1
+#define GSV_WORDS	2
+#define GSV_COORDS	3
+typedef struct {
+    byte	GSEI_size;
+    byte	GSEI_var;
+    byte	GSEI_varOff;
+} GSElemInfo;
+#define GS_NUM_ELEMENTS	0xb0
+#define GSE_INVALID	0xff
+extern const GSElemInfo grGSElemInfo[GS_NUM_ELEMENTS];
+/* the size of the element at e (avail bytes there); 0 if not valid */
+word GrGSElemSize(const byte *e, dword avail);
+
+/* GSStore: the element (data, size bytes) into the graphics string of
+ * a GState; TRUE if it has one.  The format of GrGSRecord: b byte, w
+ * word, d dword, f WBFixed (from a WWFixedAsDWord), D DWFixed (a
+ * pointer), r bytes (a pointer and a word count). */
+Boolean GrGSStore(Handle gstring, const void *data, word size);
+Boolean GrGSRecord(GStateHandle gstate, byte opcode, const char *fmt, ...);
+Handle GrGStringOf(GStateHandle gstate);	/* 0: not a graphics string */
+#define GR_WWF_D(w)	(((dword) (word) (w).WWF_int << 16) | (word) (w).WWF_frac)
+#define GR_WBF_D(w)	(((dword) (word) (w).WBF_int << 16) | \
+			 ((dword) (byte) (w).WBF_frac << 8))
+word GrBitmapStringSize(const Bitmap *bm);
+void GrRelMovePen(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y);
+
 #endif

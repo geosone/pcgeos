@@ -109,13 +109,30 @@ static void DrawText(GStateHandle gstate, int64_t x, int64_t y,
     GrExitGraphics(&d);
 }
 
+/* the length of a string (size 0: null terminated) */
+static word TextLen(const char *str, word size)
+{
+    return size ? size : (word) strlen(str);
+}
+
 void GrDrawText(GStateHandle gstate, sword x, sword y, const char *str,
 		word size)
 {
+    (void) GrGSRecord(gstate, GR_DRAW_TEXT, "wwwr", x, y, TextLen(str, size),
+		      str, TextLen(str, size));
     DrawText(gstate, (int64_t) x * 65536, (int64_t) y * 65536, str, size);
 }
 
+static void TextAtCP(GStateHandle gstate, const char *str, word size);
+
 void GrDrawTextAtCP(GStateHandle gstate, const char *str, word size)
+{
+    (void) GrGSRecord(gstate, GR_DRAW_TEXT_CP, "wr", TextLen(str, size), str,
+		      TextLen(str, size));
+    TextAtCP(gstate, str, size);
+}
+
+static void TextAtCP(GStateHandle gstate, const char *str, word size)
 {
     PointWWFixed cp;
 
@@ -129,6 +146,7 @@ void GrDrawChar(GStateHandle gstate, sword x, sword y, word ch)
 {
     char c = (char) ch;
 
+    (void) GrGSRecord(gstate, GR_DRAW_CHAR, "bww", ch, x, y);
     DrawText(gstate, (int64_t) x * 65536, (int64_t) y * 65536, &c, 1);
 }
 
@@ -136,5 +154,6 @@ void GrDrawCharAtCP(GStateHandle gstate, word ch)
 {
     char c = (char) ch;
 
-    GrDrawTextAtCP(gstate, &c, 1);
+    (void) GrGSRecord(gstate, GR_DRAW_CHAR_CP, "b", ch);
+    TextAtCP(gstate, &c, 1);
 }
