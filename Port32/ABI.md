@@ -2516,6 +2516,14 @@ than a pixel is a six-point polygon.
   palette. The mask is kept. The asm kept the line number across a
   draw too; it converted slices, the C code converts what goes to the
   driver, so the dither rows of scaled bitmaps follow the drawn lines.
+- `GrDrawImage` and `GrDrawHugeImage` (graphicsImage.asm) draw a bitmap
+  in the device's pixels: only the position is transformed, each pixel
+  is 1, 2, 4, 8 or 16 device pixels square. At size 1 it is the bitmap
+  unscaled. Larger, each run of one color is a rectangle in the area
+  attributes (dithered), `IF_BORDER` gives the last row and column of
+  each pixel to a grid in the line attributes, and masked pixels are
+  left out unless `IF_IGNORE_MASK`. A 24-bit pixel is R, G, B together;
+  the asm read the three a width apart.
 - LZG compacted bitmaps (`BMC_LZG`): the data of a slice is LZG streams
   one after another, unpacked like PackBits. LZG itself
   (`Library/Kernel/Heap/heapCompress.c`) writes the asm's format and,

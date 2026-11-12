@@ -22,7 +22,8 @@
  *   - regions, with a parameter; the window's and the mask's bounds,
  *     GrTestRectInMask, GrInvalRect (rotated too), GrInvalRectDWord;
  *   - bitmaps: monochrome drawn and filled, 24 bits, PackBits, LZG, a
- *     complex one with a palette in two slices; scaled twice, half,
+ *     complex one with a palette in two slices; GrDrawImage 4 by 4,
+ *     with a border; scaled twice, half,
  *     mirrored in x and y, at 144 dpi, and rotated; huge bitmaps
  *     (a slice per block of the huge array), scaled, and PackBits;
  *   - bitmaps to draw into (the memory video driver vidmem.geo): 24
@@ -631,6 +632,28 @@ int main(int argc, char **argv)
 	    CHECK(Pixel(80, 90) == RED && Pixel(83, 90) == RED &&
 		  Pixel(84, 90) == GREEN && Pixel(87, 90) == GREEN &&
 		  Pixel(80, 91) == BLUE && Pixel(87, 91) == BLUE);
+	}
+
+	/* GrDrawImage: pixels 4 by 4, a border in the line color */
+	{
+	    static union { Bitmap b; byte raw[6 + 6]; } im;
+	    im.b.B_width = 2; im.b.B_height = 2;
+	    im.b.B_compact = BMC_UNCOMPACTED; im.b.B_type = BMF_MONO;
+	    im.raw[6] = 0x80; im.raw[7] = 0x40;
+	    GrDrawImage(g, 5, 60, IBS_4, &im.b);
+	    CHECK(Pixel(25, 80) == BLACK && Pixel(28, 83) == BLACK &&
+		  Pixel(29, 80) == WHITE && Pixel(32, 83) == WHITE &&
+		  Pixel(25, 84) == WHITE && Pixel(29, 87) == BLACK &&
+		  Pixel(33, 80) != BLACK);
+	    im.b.B_height = 1; im.b.B_type = BMF_24BIT;
+	    im.raw[6] = 0xff; im.raw[7] = 0; im.raw[8] = 0;
+	    im.raw[9] = 0; im.raw[10] = 0; im.raw[11] = 0xff;
+	    GrSetLineColor(g, CF_INDEX, C_BLACK, 0, 0);
+	    GrDrawImage(g, 40, 64, IBS_4 | IF_BORDER, &im.b);
+	    CHECK(Pixel(60, 84) == RED && Pixel(62, 86) == RED &&
+		  Pixel(63, 85) == BLACK && Pixel(62, 87) == BLACK &&
+		  Pixel(64, 84) == BLUE && Pixel(66, 86) == BLUE &&
+		  Pixel(67, 84) == BLACK && Pixel(66, 87) == BLACK);
 	}
 
 	/* complex, 4 bits with a palette, in two slices */

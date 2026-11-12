@@ -54,6 +54,7 @@
 #include <hugearr.h>
 
 #define AREA	((word) offsetof(GState, GS_areaAttr))
+#define LINE_ATTR	((word) offsetof(GState, GS_lineAttr))
 #define DEF_BITMAP_RES	72
 
 typedef struct {
@@ -82,6 +83,11 @@ typedef struct {
     word		fscan;		/* BF_formatScan */
     byte		*cbuf;
     dword		csize;
+    /* GrDrawImage */
+    ImageFlags		image;		/* BF_imageFlags; 0: a bitmap */
+    word		bump;		/* BF_ybump: a pixel's size */
+    const byte		*imgPal;	/* the bitmap's palette (RGB) */
+    word		imgPalN;
 } BMFrame;
 
 /* the huge bitmap's slice from scan line first on; FALSE past the end */
@@ -369,9 +375,17 @@ static void CallConverted(BMFrame *f, word function, DriverRegs *r,
     f->args.PBA_bm.B_type = type;
 }
 
+static void ImageSection(BMFrame *f, sword y);
+static void DoneConvert(BMFrame *f);
+
 static void PutBits(BMFrame *f, sword y)
 {
     DriverRegs r;
+
+    if (f->bump > 1) {
+	ImageSection(f, y);
+	return;
+    }
 
     memset(&r, 0, sizeof(r));
     r.DR_ax = (word) f->x;
@@ -952,8 +966,14 @@ static void Draw(BMFrame *f, sword x, sword y)
 			(d->GD_w->W_curTMatrix.TM_flags & TM_SCALED) ||
 			(complexBM && (c->CB_xres != DEF_BITMAP_RES ||
 				       c->CB_yres != DEF_BITMAP_RES)));
-    if ((scaled ? ComplexReject(f, x, y) : Reject(f, x, y)) ||
-	!SetDrawPoint(f, x, y))
+    if (f->image) {			/* the device's pixels, n by n */
+	rotated = scaled = FALSE;
+	if (!SetDrawPoint(f, x, y) ||
+	    f->x > d->GD_w->W_winRect.R_right ||
+	    f->y > d->GD_w->W_winRect.R_bottom)
+	    return;
+    } else if ((scaled ? ComplexReject(f, x, y) : Reject(f, x, y)) ||
+	       !SetDrawPoint(f, x, y))
 	return;
     memset(&r, 0, sizeof(r));
     WinCallVidDriver(d->GD_w, DR_VID_INFO, &r);
@@ -965,7 +985,13 @@ static void Draw(BMFrame *f, sword x, sword y)
     f->args.PBA_bm.B_compact = bm->B_compact;
     f->args.PBA_bm.B_type = (byte) (bm->B_type & ~BMT_COMPLEX);
     f->args.PBA_size = GrBitmapLineSize(bm->B_width, bm->B_type);
-    if (!fill && (bm->B_type & BMT_FORMAT) < BMF_4CMYK &&
+    if (f->bump > 1) {			/* the pixels' colors as they are */
+	if (complexBM && (bm->B_type & BMT_PALETTE) && c->CB_palette) {
+	    const byte *p = (const byte *) bm + c->CB_palette;
+	    f->imgPalN = (word) (p[0] | (p[1] << 8));
+	    f->imgPal = p + 2;
+	}
+    } else if (!fill && (bm->B_type & BMT_FORMAT) < BMF_4CMYK &&
 	(bm->B_type & BMT_FORMAT) > f->devType) {
 	InitConvert(f, bm);			/* checkFormatChange */
 	f->args.PBA_bm.B_type &= (byte) ~BMT_PALETTE;
@@ -1015,6 +1041,177 @@ static void Draw(BMFrame *f, sword x, sword y)
 	if (!bm)
 	    break;
     }
+}
+
+/* ---------------------------------------------------------------------
+ * GrDrawImage (graphicsImage.asm): a bitmap in the device's pixels,
+ * each pixel 1, 2, 4, 8 or 16 of them square, whatever the
+ * transformation; only the position is transformed.  At size 1 it is
+ * the bitmap unscaled.  Larger, each run of pixels of one color is a
+ * rectangle in the area attributes with that color (dithered), and
+ * IF_BORDER leaves the last row and column of each pixel to a grid in
+ * the line attributes.  Masked pixels are left out, unless
+ * IF_IGNORE_MASK.  Monochrome: 1 black, 0 white; 4 and 8 bits: the
+ * index, or the bitmap's palette entry; 24 bits: R, G, B a pixel (the
+ * asm's Get24BitPixelRun read the three a width apart, which no 24-bit
+ * bitmap is).
+ * ------------------------------------------------------------------- */
+
+#ifndef IF_IGNORE_MASK
+#define IF_IGNORE_MASK	0x10
+#endif
+#define IF_HUGE_C	0x40
+
+static const byte imageSizes[] = { 1, 2, 4, 8, 16, 1, 1, 1 };
+
+/* the color of pixel x of a scan line (after the mask) into the area
+ * attributes; a key to compare runs with */
+static dword ImageColor(const BMFrame *f, const byte *pix, word x,
+			Boolean set)
+{
+    GState *gs = f->d->GD_gs;
+    byte fmt = (byte) (f->args.PBA_bm.B_type & BMT_FORMAT), i;
+    const byte *e;
+
+    switch (fmt) {
+    case BMF_MONO:
+	i = (byte) ((pix[x >> 3] & (0x80 >> (x & 7))) ? C_BLACK : C_WHITE);
+	break;
+    case BMF_4BIT:
+	i = (byte) ((x & 1) ? pix[x >> 1] & 0x0f : pix[x >> 1] >> 4);
+	break;
+    case BMF_8BIT:
+	i = pix[x];
+	break;
+    default:
+	e = pix + 3 * x;
+	if (set)
+	    GrSetColorIn(gs, &gs->GS_areaAttr, CF_RGB, e[0], e[1], e[2]);
+	return 0x1000000UL | ((dword) e[0] << 16) | ((dword) e[1] << 8) |
+	       e[2];
+    }
+    if (f->imgPal && fmt != BMF_MONO) {
+	e = f->imgPal + 3 * (i < f->imgPalN ? i : 0);
+	if (set)
+	    GrSetColorIn(gs, &gs->GS_areaAttr, CF_RGB, e[0], e[1], e[2]);
+    } else if (set)
+	GrSetColorIn(gs, &gs->GS_areaAttr, CF_INDEX, i, 0, 0);
+    return i;
+}
+
+/* DrawImageScan: one scan line at x0, y */
+static void ImageScan(BMFrame *f, const byte *line, sword x0, sword y)
+{
+    const GrDraw *d = f->d;
+    word w = f->args.PBA_bm.B_width, n = f->bump, count = 0;
+    Boolean masked = (Boolean) ((f->args.PBA_bm.B_type & BMT_MASK) != 0);
+    const byte *pix = line + (masked ? (w + 7) >> 3 : 0);
+    Boolean border = (Boolean) ((f->image & IF_BORDER) != 0);
+    sword x = x0;
+
+    if (f->image & IF_IGNORE_MASK)
+	masked = FALSE;
+    while (count < w) {
+	word run = 1;
+	if (masked && !(line[count >> 3] & (0x80 >> (count & 7)))) {
+	    while (count + run < w &&
+		   !(line[(count + run) >> 3] & (0x80 >> ((count + run) & 7))))
+		run++;				/* CheckMaskedPixels: skip */
+	} else {
+	    dword key = ImageColor(f, pix, count, TRUE);
+	    while (count + run < w &&
+		   (!masked || (line[(count + run) >> 3] &
+				(0x80 >> ((count + run) & 7)))) &&
+		   ImageColor(f, pix, (word) (count + run), FALSE) == key)
+		run++;
+	    GrFillRectLow(d, x, y, (sword) (x + run * n - border),
+			  (sword) (y + n - border), AREA);
+	}
+	count = (word) (count + run);
+	x = (sword) (x + run * n);
+	if (x > d->GD_w->W_maskRect.R_right)
+	    break;
+    }
+    if (border) {				/* handleBorder */
+	word k;
+	GrFillRectLow(d, x0, (sword) (y + n - 1), (sword) (x0 + count * n),
+		      (sword) (y + n - 1), LINE_ATTR);
+	for (k = 0; k < count; k++) {
+	    sword bx = (sword) (x0 + n - 1 + k * n);
+	    GrFillRectLow(d, bx, y, bx, (sword) (y + n - 1), LINE_ATTR);
+	}
+    }
+}
+
+/* ImageHugeSection: the scan lines of the slice at device line sy (the
+ * bitmap's line sy - f->y) */
+static void ImageSection(BMFrame *f, sword sy)
+{
+    const Window *w = f->d->GD_w;
+    const byte *line = f->args.PBA_data;
+    sword y = (sword) (f->y + (sy - f->y) * (sword) f->bump);
+    word k;
+
+    for (k = 0; k < f->args.PBA_bm.B_height; k++) {
+	if (y > w->W_maskRect.R_bottom)
+	    break;
+	if (y + (sword) f->bump > w->W_maskRect.R_top)
+	    ImageScan(f, line, f->x, y);
+	y = (sword) (y + f->bump);
+	line += f->args.PBA_size;
+    }
+}
+
+static void DrawImage(GrDraw *d, sword x, sword y, ImageFlags flags,
+		      const Bitmap *bm, VMFileHandle file, VMBlockHandle block)
+{
+    GState *gs = d->GD_gs;
+    CommonAttr area = gs->GS_areaAttr;
+    BMFrame f;
+    void *dir = NULL;
+
+    if (GrTrivialReject(d))
+	return;
+    memset(&f, 0, sizeof(f));
+    f.d = d;
+    f.image = (ImageFlags) (flags | 0x80);	/* IF_DRAW_IMAGE */
+    f.bump = imageSizes[flags & IF_BITSIZE];
+    gs->GS_areaAttr.CA_mapMode |= CMM_MAP_TYPE;
+    if (file) {
+	HugeArrayLockDir(file, block, &dir);
+	bm = (const Bitmap *) ((byte *) dir + sizeof(HugeArrayDirectory));
+	f.hfile = file;
+	f.hblock = block;
+    }
+    f.bm = bm;
+    Draw(&f, x, y);
+    DoneConvert(&f);
+    if (f.hdata)
+	HugeArrayUnlock((void *) f.hdata);
+    if (dir)
+	HugeArrayUnlockDir(dir);
+    gs->GS_areaAttr = area;
+}
+
+void GrDrawImage(GStateHandle gstate, sword x, sword y, ImageFlags flags,
+		 const Bitmap *bm)
+{
+    GrDraw d;
+
+    GrEnterGraphics(gstate, &d);
+    DrawImage(&d, x, y, (ImageFlags) (flags & ~IF_HUGE_C), bm, 0, 0);
+    GrExitGraphics(&d);
+}
+
+void GrDrawHugeImage(GStateHandle gstate, sword x, sword y, ImageFlags flags,
+		     VMFileHandle vmFile, VMBlockHandle vmBlk)
+{
+    GrDraw d;
+
+    GrEnterGraphics(gstate, &d);
+    DrawImage(&d, x, y, (ImageFlags) (flags | IF_HUGE_C), NULL, vmFile,
+	      vmBlk);
+    GrExitGraphics(&d);
 }
 
 static void DoneConvert(BMFrame *f)
