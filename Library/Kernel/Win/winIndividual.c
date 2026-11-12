@@ -17,8 +17,12 @@
  * The mask the video driver draws through (W_maskReg) is the visible
  * region without the invalid one, for the update GState within the
  * update region (WinValWinStruct), and within the clip paths of the
- * GState (GS_clipPath, GS_winClipPath: GrClipMask).  Not yet:
- * WCF_MASKED windows.
+ * GState (GS_clipPath, GS_winClipPath: GrClipMask).
+ *
+ * A WCF_MASKED window (a disabled one, darkened by the specific UI) is
+ * drawn by the video driver through a 50% checker; washing it out also
+ * draws the other half black (WCF_DRAW_MASK), even if it is
+ * transparent (WashOutInval).
  */
 #include "winInt.h"
 
@@ -152,7 +156,8 @@ void WinWashOutReg(WindowHandle wh, ChunkHandle reg)
     DriverRegs r;
 
     if ((word) *WinReg(wh, reg) == EOREGREC ||
-	(w->W_regFlags & WRF_CLOSED) || (w->W_color & WCF_TRANSPARENT))
+	(w->W_regFlags & WRF_CLOSED) ||
+	(w->W_color & (WCF_TRANSPARENT | WCF_MASKED)) == WCF_TRANSPARENT)
 	return;
     mask = w->W_maskReg;		/* SwapInvalMask */
     w->W_maskReg = reg;
@@ -175,7 +180,18 @@ void WinWashOutReg(WindowHandle wh, ChunkHandle reg)
     r.DR_dx = (word) w->W_maskRect.R_bottom;
     r.DR_dsSi = gs;
     r.DR_si = (word) offsetof(GState, GS_areaAttr);
-    WinCallVidDriver(w, DR_VID_RECT, &r);
+    if (!(w->W_color & WCF_TRANSPARENT))
+	WinCallVidDriver(w, DR_VID_RECT, &r);
+    if (w->W_color & WCF_MASKED) {	/* the mask: the other half, black */
+	MemUnlock(gh);
+	GrSetAreaColor(gh, CF_INDEX, C_BLACK, 0, 0);
+	gs = MemLock(gh);
+	w = MemDeref(wh);
+	r.DR_dsSi = gs;
+	w->W_color |= WCF_DRAW_MASK;
+	WinCallVidDriver(w, DR_VID_RECT, &r);
+	w->W_color &= (WinColorFlags) ~WCF_DRAW_MASK;
+    }
     gs->GS_window = 0;
     MemUnlock(gh);
     GrDestroyState(gh);

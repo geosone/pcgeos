@@ -40,6 +40,7 @@ typedef struct {
     dword	VDS_color;	/* 0x00RRGGBB */
     MixMode	VDS_mix;
     const byte	*VDS_mask;	/* 8 bytes, a byte a line (y & 7) */
+    byte	VDS_maskBuf[8];	/* a masked window's: VDS_mask there */
 } VidDrawState;
 
 /* vidcomPalette.c */

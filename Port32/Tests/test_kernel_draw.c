@@ -43,6 +43,7 @@
  *     rectangles and clip paths, the clip region;
  *   - patterns: system and custom hatches, a tiled bitmap, in a path,
  *     text in a hatch;
+ *   - a masked window: drawn through a checker, its mask washed black;
  *   - an update: only the update region drawn;
  *   - a window moved away: what it covered washed with the root's
  *     background.
@@ -1737,6 +1738,31 @@ int main(int argc, char **argv)
 	SetCol(g, WHITE);
 	GrFillRect(g, 0, 0, 80, 80);
 	CHECK(Pixel(40, 33) == WHITE);
+    }
+
+    /* a masked window (WCF_MASKED, how the specific UI darkens a
+     * disabled one): drawn through a 50% checker aligned to the window
+     * (A at 20,20: where x + y is even); washing it out draws the other
+     * half black */
+    {
+	optr col = (optr) (0xff | ((dword) (WCF_RGB | WCF_PLAIN | WCF_MASKED)
+				   << 8) | (0xffUL << 16) | (0xffUL << 24));
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	WinSetInfo(a, WIT_COLOR, col);
+	SetCol(g, RED);
+	GrFillRect(g, 10, 10, 50, 50);
+	CHECK(Pixel(40, 40) == RED && Pixel(41, 41) == RED &&
+	      Pixel(41, 40) == WHITE && Pixel(40, 41) == WHITE);
+	GrInvalRect(g, 10, 10, 50, 50);	/* washed: white, mask black */
+	CHECK(Pixel(40, 40) == WHITE && Pixel(41, 40) == BLACK &&
+	      Pixel(40, 41) == BLACK && Pixel(41, 41) == WHITE);
+	WinSetInfo(a, WIT_COLOR, (optr) (0xff | ((dword) (WCF_RGB | WCF_PLAIN)
+						  << 8) | (0xffUL << 16) |
+					 (0xffUL << 24)));
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 80, 80);
+	CHECK(Pixel(41, 40) == WHITE && Pixel(40, 40) == WHITE);
     }
 
     /* an update: only the invalid area is drawn */

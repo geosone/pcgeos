@@ -28,7 +28,7 @@
 
 static SemaphoreHandle videoSem;
 sword vidPtrX, vidPtrY;
-const VidDrawState vidInvertState = { 0, MM_INVERT, NULL };
+const VidDrawState vidInvertState = { 0, MM_INVERT, NULL, { 0 } };
 static Handle exclusiveGState;
 static Boolean exclusiveCausedAbort;
 static Rectangle exclBound;

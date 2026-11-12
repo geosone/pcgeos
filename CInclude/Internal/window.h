@@ -46,6 +46,9 @@ typedef ByteFlags WinGrFlags;
 #ifndef WCF_MASKED
 #define WCF_MASKED		0x10	/* the window is masked (internal) */
 #endif
+#ifndef WCF_DRAW_MASK
+#define WCF_DRAW_MASK		0x08	/* drawing the window's mask (internal) */
+#endif
 
 typedef struct {
     word	WPD_ax;

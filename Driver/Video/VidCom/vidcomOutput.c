@@ -68,6 +68,21 @@ void VidSetupDraw(const GState *gs, const CommonAttr *ca, const Window *w,
 	ds->VDS_mix = gs->GS_mixMode;
 	ds->VDS_mask = (ca->CA_flags & AO_MASK_1) ? NULL : ca->CA_mask;
     }
+    if (w->W_color & WCF_MASKED) {
+	/* CopyMask of vidcomMacro.def: a masked window draws through a
+	 * 50% checker (SDM_50 | SDM_INVERSE) aligned to the window, its
+	 * other half when drawing the window's mask (WCF_DRAW_MASK) */
+	byte even = 0xaa;
+	int i;
+	if ((w->W_ditherX ^ w->W_ditherY) & 1)
+	    even = 0x55;
+	if (w->W_color & WCF_DRAW_MASK)
+	    even = (byte) ~even;
+	for (i = 0; i < 8; i++)
+	    ds->VDS_maskBuf[i] = (byte) ((ds->VDS_mask ? ds->VDS_mask[i] : 0xff) &
+					 (i & 1 ? (byte) ~even : even));
+	ds->VDS_mask = ds->VDS_maskBuf;
+    }
 }
 
 /* clip to the mask's bounds; FALSE: nothing left */

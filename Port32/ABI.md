@@ -2295,7 +2295,15 @@ The window system in C lies beside the asm: `winCreDest.c`,
   `MSG_META_WIN_UPDATE_COMPLETE` (71) to the input object.
 - The mask for a GState (`WinValWinStruct`) is the visible region
   without the invalid one, and for the update GState also within the
-  update region.
+  update region. The GState's clip paths are ANDed into it (§13q).
+- A `WCF_MASKED` window is how the specific UI darkens a disabled
+  window. The video driver (`VidSetupDraw`) draws such a window through
+  a 50% checker (`SDM_50 | SDM_INVERSE`), aligned by the parity of
+  `W_ditherX ^ W_ditherY`. With `WCF_DRAW_MASK` set, it uses the other
+  half. Washing the window out (`WashOutInval`) fills the background on
+  one half and black on the other half, even when the window is
+  transparent. ctest `kernel.draw` checks both. Bitmaps (not filled
+  ones) are not yet drawn through the checker.
 
 **Locking.** The asm took the tree semaphore and P-locked each window.
 The C code has one recursive tree lock for all of it (`WinTreeP`,
@@ -2305,8 +2313,6 @@ The C code has one recursive tree lock for all of it (`WinTreeP`,
 - save-under areas (the C drivers refuse them, so none ever exists);
 - pointer enter/leave notification (`winNotification.asm`);
 - `WinScroll`;
-- the GState's clip paths in the mask;
-- `WCF_MASKED`;
 - flushing the input and exposure objects' queues before a window is
   freed. `WinClose` frees the window at once, so a queued
   `MSG_META_EXPOSED` for a closed window must not be answered;
