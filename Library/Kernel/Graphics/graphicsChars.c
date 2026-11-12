@@ -526,24 +526,6 @@ Boolean GrLoadBitmapFont(FileHandle fh, const PointSizeEntry *pse,
     return ok;
 }
 
-/* GrCallFontDriverID: the driver of a maker */
-Boolean GrCallFontDriverID(FontMaker maker, word function, DriverRegs *r)
-{
-    word size, i;
-    DriversAvailEntry *d;
-    FontDriverStrategy *strat = NULL;
-
-    FontDrLockInfoBlock();
-    d = GrFontChunk(FONT_DRIVERS_HANDLE, &size);
-    for (i = 0; i < size / sizeof(DriversAvailEntry); i++)
-	if (d[i].DAE_makerID == maker)
-	    strat = d[i].DAE_strategy;
-    FontDrUnlockInfoBlock();
-    if (!strat)
-	return TRUE;
-    return strat(function, r);
-}
-
 /* ReallocFont: the data of a discarded font */
 static Boolean ReallocFont(GState *gs, const TMatrix *m, Handle h)
 {
@@ -575,8 +557,17 @@ static Boolean ReallocFont(GState *gs, const TMatrix *m, Handle h)
 	    r.DR_esDi = gs;
 	    r.DR_bpPtr = (void *) m;
 	    r.DR_cx = id;
+	    if (gs->GS_window) {
+		Window *w = MemDeref(gs->GS_window);
+		r.DR_dsSi = w ? &w->W_TMatrix : NULL;
+	    }
 	    FontDrUnlockInfoBlock();
+	    /* the driver fills h and leaves it locked (DR_bx) */
 	    ok = (Boolean) !GrCallFontDriverID(maker, DR_FONT_GEN_WIDTHS, &r);
+	    EC_CHECK(!ok || (Handle) r.DR_bx == h,
+		     GRAPHICS_GR_INIT_FONTS_ERROR);
+	    if (ok)
+		MemUnlock(h);
 	    return ok;
 	}
     }
@@ -672,18 +663,6 @@ void FontDrUnlockFont(GStateHandle gstate)
 
     GrUnlockFont(gs);
     MemUnlock(gstate);
-}
-
-word FontDrCharDataSize(const FontBuf *fb, word dataOffset)
-{
-    const byte *p = (const byte *) fb + dataOffset;
-
-    if (fb->FB_flags & FBF_IS_REGION)
-	return (word) (((const RegionCharData *) p)->RCD_size +
-		       offsetof(RegionCharData, RCD_data));
-    if (fb->FB_flags & FBF_IS_GREY)
-	return (word) (SIZE_CHAR_HEADER + p[1] * ((p[0] + 1) >> 1));
-    return (word) (SIZE_CHAR_HEADER + p[1] * ((p[0] + 7) >> 3));
 }
 
 /* ---------------------------------------------------------------------

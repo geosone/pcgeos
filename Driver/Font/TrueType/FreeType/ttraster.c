@@ -80,6 +80,8 @@ extern TEngine_Instance engineInstance;
 #define LOCK_RENDER_POOL    Lock_Render_Pool( RAS_VAR )
 #define UNLOCK_RENDER_POOL  MemUnlock( ras.buffer )
 
+static void Lock_Render_Pool( RAS_ARG );
+
 
 /* The rasterizer is a very general purpose component, please leave */
 /* the following redefinitions there (you never know your target    */
@@ -152,8 +154,23 @@ extern TEngine_Instance engineInstance;
   typedef struct TBand_  TBand;
 
 
+#ifdef GEOS_PORT32
+/* Port32: the pool is of Storage (32 bits); a profile takes whole
+ * pointers of it and starts on a pointer boundary (ARM) */
+#define PROFILE_ALIGN   sizeof(void*)
+#define AlignProfileSize \
+          (( sizeof(TProfile)+PROFILE_ALIGN-1 ) / PROFILE_ALIGN * \
+           ( PROFILE_ALIGN / sizeof(Storage) ))
+#define AlignProfile( p ) \
+          ((PStorage)( ((__UINTPTR_TYPE__)(p) + PROFILE_ALIGN-1) & \
+                       ~(__UINTPTR_TYPE__)(PROFILE_ALIGN-1) ))
+#define ProfileSlack    ( PROFILE_ALIGN / sizeof(Storage) )
+#else
 #define AlignProfileSize \
           (( sizeof(TProfile)+sizeof(long)-1 ) / sizeof(long))
+#define AlignProfile( p )  (p)
+#define ProfileSlack    0
+#endif
 
 
   /* prototypes used for sweep function dispatch */
@@ -301,6 +318,7 @@ extern TEngine_Instance engineInstance;
   {
     if ( !ras.fProfile )
     {
+      ras.top       = AlignProfile( ras.top );
       ras.cProfile  = (PProfile)ras.top;
       ras.fProfile  = ras.cProfile;
       ras.top      += AlignProfileSize;
@@ -357,6 +375,7 @@ extern TEngine_Instance engineInstance;
     {
       oldProfile           = ras.cProfile;
       ras.cProfile->height = h;
+      ras.top              = AlignProfile( ras.top );
       ras.cProfile         = (PProfile)ras.top;
 
       ras.top             += AlignProfileSize;
@@ -450,7 +469,7 @@ extern TEngine_Instance engineInstance;
       while ( n > 0 )
       {
         if ( n > 1 )
-          p->link = (PProfile)( p->offset + p->height );
+          p->link = (PProfile)AlignProfile( p->offset + p->height );
         else
           p->link = NULL;
 
@@ -1123,8 +1142,9 @@ extern TEngine_Instance engineInstance;
 
 
     ras.fProfile         = NULL;
-    ras.maxBuff          = ras.sizeBuff - AlignProfileSize;
+    ras.maxBuff          = ras.sizeBuff - AlignProfileSize - ProfileSlack;
     ras.numTurns         = 0;
+    ras.top              = AlignProfile( ras.top );
     ras.cProfile         = (PProfile)ras.top;
     ras.cProfile->offset = ras.top;
     ras.num_Profs        = 0;

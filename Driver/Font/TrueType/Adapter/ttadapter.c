@@ -27,6 +27,10 @@
 #include <geode.h>
 #include <heap.h>
 
+#ifdef GEOS_PORT32	/* the C library has it; ours stays ours */
+#define strcmp  ttStrCmp
+#endif
+
 static int strcmp( const char* s1, const char* s2 );
 static void TrueType_Free_Face(TRUETYPE_VARS);
 

@@ -93,6 +93,7 @@ static void DrawText(GStateHandle gstate, int64_t x, int64_t y,
 	    r.DR_dx = (word) ((((py >> 8) & 0xff) << 8) | ((px >> 8) & 0xff));
 	    r.DR_bpPtr = &a;
 	    GrCallDriver(&d, DR_VID_PUTSTRING, &r, TEXT);
+	    fb = a.VPS_font;	/* characters built: it may have moved */
 	}
 	/* LibDrawKernelStyles */
 	if (gs->GS_fontAttr.FCA_textStyle & TS_UNDERLINE)

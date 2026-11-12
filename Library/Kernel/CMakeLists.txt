@@ -66,6 +66,7 @@ add_library(geos_kernel_objs OBJECT
   Sys/sysError.c
   Heap/heapHandle.c
   Heap/heapHigh.c
+  Heap/heapErrorCheck.c
   Heap/heapCompress.c
   Thread/threadThread.c
   Thread/threadSem.c
@@ -152,7 +153,10 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsChars.c
   Graphics/graphicsFont.c
   Graphics/graphicsTextMetrics.c
-  Graphics/graphicsText.c)
+  Graphics/graphicsText.c
+  Graphics/graphicsFontDriver.c
+  Graphics/graphicsSpline.c
+  Graphics/graphicsStringMisc.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/CInclude)

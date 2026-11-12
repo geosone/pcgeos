@@ -15,7 +15,8 @@
  *   3. the primary file system driver and its drives (LoadFSDriver,
  *      FSDLoadPrimary); the init file is read on first use;
  *   4. the standard paths of [paths] (GetPaths of the loader); the
- *      fonts of SP_FONT and the default font (GrInitFonts,
+ *      fonts of SP_FONT, the font drivers of [system] font and the
+ *      default font (GrInitFonts, GrLoadFontDrivers,
  *      GrInitDefaultFont);
  *   5. the input manager's thread (InitIM), which runs once the
  *      drivers are loaded;
@@ -41,9 +42,8 @@
  * (CANNOT_LOAD_KEYBOARD_DRIVER).  Without the key, none is loaded yet:
  * a host without keys (the tests) needs none.
  *
- * Not yet: the drivers (memory, power, mouse, video, font),
- * fonts, graphics and windows, patches, the log
- * file, documentIsTop, FSDInitComplete.
+ * Not yet: the drivers (memory, power, mouse, video), graphics and
+ * windows, patches, the log file, documentIsTop, FSDInitComplete.
  */
 #include "kernelC.h"
 
@@ -157,6 +157,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     FSDLoadPrimary();
     FileInitStdPaths();
     GrInitFonts();
+    GrLoadFontDrivers();
     GrInitDefaultFont();
     KernelImInit();
     LoadKeyboardDriver();

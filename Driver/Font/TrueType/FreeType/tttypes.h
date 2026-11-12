@@ -39,8 +39,8 @@
   typedef unsigned short  UShort;
   typedef signed   short  Short;
 
-  typedef unsigned long   ULong;
-  typedef signed   long   Long;
+  typedef unsigned TT_LONG_ ULong;
+  typedef signed   TT_LONG_ Long;
 
   typedef TT_Int32        Fixed;
 

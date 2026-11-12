@@ -230,7 +230,9 @@
 /* use assembler implemented funcions. These implementations use regs    */
 /* and instructions of 80386 processors.                                 */
 
+#ifndef GEOS_PORT32  /* 32-bit: plain C, one code space */
 #define TT_CONFIG_OPTION_USE_ASSEMBLER_IMPLEMENTATION
+#endif
 
 
 /*************************************************************************/
@@ -260,7 +262,9 @@
 /* - extra: Other infrequent called functions that are independent       */
 /*          "InterpExtra"                                                */
 
+#ifndef GEOS_PORT32  /* 32-bit: plain C, one code space */
 #define   TT_CONFIG_GEOS_REAL_MODE_SEGMENTING
+#endif
 
 
 /*************************************************************************/
@@ -322,7 +326,7 @@
 #error "no 32bit type found"
 #endif
 
-#if SIZEOF_LONG == 8
+#if SIZEOF_LONG == 8 && !defined(GEOS_PORT32)
 
 /* LONG64 must be defined when a 64-bit type is available */
 /* INT64 must then be defined to this type..              */

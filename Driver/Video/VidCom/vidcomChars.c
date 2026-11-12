@@ -10,8 +10,11 @@
  * positive), in 1/256 pixel.  A character outside the font, or not in
  * it, is the default character.
  *
- * Not yet: characters the font driver builds (CHAR_NOT_BUILT,
- * CHAR_NOT_LOADED: the default character instead), region and
+ * A character the font driver has not built yet (CHAR_NOT_BUILT) is
+ * built first (VidBuildChar: DR_FONT_GEN_CHAR of the font's maker); the
+ * font block may move, the new address goes back in VPS_font.
+ *
+ * Not yet: CHAR_NOT_LOADED (the default character instead), region and
  * greyscale characters (FBF_IS_REGION, FBF_IS_GREY), rotated text
  * (GS_complexOpcode), control characters (TM_DRAW_CONTROL_CHARS),
  * GS_textDrawOffset.
@@ -19,6 +22,21 @@
 #include "vidcom.h"
 #include <Internal/fontDr.h>
 #include <char.h>
+
+/* VidBuildChar: the font driver builds ch into the font */
+static const FontBuf *BuildChar(GState *gs, const FontBuf *fb, byte ch)
+{
+    DriverRegs r;
+
+    memset(&r, 0, sizeof(r));
+    r.DR_dx = ch;
+    r.DR_esDi = (void *) fb;
+    r.DR_bpPtr = gs;
+    if (GrCallFontDriverID(fb->FB_maker, DR_FONT_GEN_CHAR, &r) ||
+	!r.DR_esDi)
+	return fb;
+    return r.DR_esDi;
+}
 
 static CharTableEntry *Entry(const FontBuf *fb, byte ch)
 {
@@ -109,6 +127,12 @@ void VidPutString(DriverRegs *r)
 		(n != 1 && s[1]))
 		continue;
 	    ch = C_HYPHEN;
+	}
+	if (ch >= fb->FB_firstChar && ch <= fb->FB_lastChar &&
+	    FB_CHAR_TABLE(fb)[ch - fb->FB_firstChar].CTE_dataOffset ==
+	    CHAR_NOT_BUILT) {
+	    fb = BuildChar(gs, fb, ch);
+	    a->VPS_font = (FontBuf *) fb;
 	}
 	cte = Entry(fb, ch);
 	adv = ((sdword) cte->CTE_width.WBF_int << 8) +

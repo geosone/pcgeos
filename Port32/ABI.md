@@ -2648,9 +2648,8 @@ ends after the text.
 `FEF_ALPHABETIZE` on ASCII), not with the localization's collation. No
 greyscale text, no deleting of fonts, no DBCS.
 
-**Not yet:** the font drivers (`GrInitFontDriver`, the TrueType driver),
-`GrCharMetrics`, text in graphics strings and paths, the bars of
-rotated text, right to left text, `GrDrawTextField`.
+**Not yet:** `GrCharMetrics`, text in graphics strings and paths, the
+bars of rotated text, right to left text, `GrDrawTextField`.
 
 **Tests.** ctest `kernel.draw` boots with `FontData/Berkeley.fnt` in
 `USERDATA/FONT`. It checks:
@@ -2660,6 +2659,82 @@ rotated text, right to left text, `GrDrawTextField`.
 - the sizes of the file and the nearest one;
 - the pixels of drawn text, the pen after it, text at the pen,
   underlined text, text at its baseline.
+
+## 13o. Font drivers (`Graphics/graphicsFontDriver.c`, `Driver/Font/TrueType`, P6)
+
+**Loading.** At the boot, after the font files, the kernel loads the
+drivers named in `[system] font` (a list; `truetype.geo` without the
+key) from `SP_FONT_DRIVERS` (`SYSTEM/FONT`) with `FONT_PROTO` 3.0. Each
+one that loads (`GrInitFontDriver`) goes into the `FONT_DRIVERS` chunk
+(`DriversAvailEntry`: maker, geode, strategy) and gets
+`DR_FONT_INIT_FONTS` to add its fonts to the font info block. Then the
+default font is chosen, so it may be an outline font.
+
+**Calls.** The kernel calls a driver by its maker (`GrCallFontDriverID`)
+while it holds the font info block locked, as the asm did with ds. The
+registers, as `DriverRegs`:
+
+| Function | In | Out |
+|---|---|---|
+| `DR_FONT_INIT_FONTS` | `DR_bx` the font info block | |
+| `DR_FONT_GEN_WIDTHS` | `DR_bx` the `FontBuf` block (discarded), `DR_esDi` the `GState`, `DR_bpPtr` the matrix (`TMatrix`), `DR_dsSi` the window's `W_TMatrix` or NULL | `DR_bx`, the block locked |
+| `DR_FONT_GEN_CHAR` | `DR_dx` the character, `DR_esDi` the locked `FontBuf`, `DR_bpPtr` the `GState` | `DR_esDi`, the block may have moved |
+| `DR_FONT_CHAR_METRICS` | `DR_dx` the character, `DR_cx` `GCM_info`, `DR_esDi` the `GState` | `DR_dx.DR_ax` |
+| `DR_FONT_GEN_PATH` | `DR_bx` the GState handle, `DR_cx` `FontGenPathFlags`, `DR_dx` the character | |
+
+The kernel unlocks the block of `DR_FONT_GEN_WIDTHS` itself. A
+character that is `CHAR_NOT_BUILT` is built by the video driver
+(`VidBuildChar` in `vidcomChars.c`): `DR_FONT_GEN_CHAR` through
+`GrCallFontDriverID`, and the new address of the font goes back in
+`VPS_font`, which the kernel takes over after `DR_VID_PUTSTRING`.
+
+`FontDrFindOutlineData` returns the `OutlineEntry` (header, first or
+second part) of the richest style that is a subset of the one asked
+for, and the styles still to do. `FontDrGetMaxBufSize` and
+`FontDrCharDataSize` are those of the asm.
+
+**The TrueType driver** (`truetype.geo`): the FreeType 1 engine and the
+GEOS adapter were C already and are unchanged in their logic.
+`Main/mainManager.c` (beside `mainManager.asm`) has `DriverTable`, the
+strategy, the bitmap and variable blocks, and the wrappers of
+`truetype*.asm`. Port32 changes:
+- `TT_Long` and the other FreeType "long" types are 32 bits
+  (`TT_LONG_` in `freetype.h`, `tttypes.h`), and `LONG64` is not used:
+  the engine was written for a 32-bit `long`.
+- The render pool is of 32-bit `Storage`; a profile takes whole
+  pointers of it and starts on a pointer boundary (`AlignProfile` in
+  `ttraster.c`). The engine counted the profile in `sizeof(long)`,
+  which overlapped the profiles where `long` is 64 bits.
+- The driver is compiled with `-funsigned-char`, as HighC and ARM have
+  it: the adapter counts the GEOS characters 128-255 in `char`.
+- `TT_Alloc`/`TT_Free` are the C ones of `ttmemory.c` (a locked block
+  each), not `ttmemory_asm.asm`; `TrueType_GrMulWWFixed` is the middle
+  32 bits of the 64-bit product, as `ansic_runtime.asm`.
+- The adapter takes the kernel's structures (`Internal/fontDr.h`); its
+  `FontMatrix` is the `TMatrix` (checked at compile time).
+- Without `PRIVDATA` there is no `TTF Cache` file; the cache functions
+  then do nothing (they took a null handle before).
+- `GeodeGetCodeProcessHandle` is a macro in a geode (`geode.h`): entry
+  0 of its own resource handles.
+
+**Kernel routines the driver needs** came along: the EC handle checks
+(`Heap/heapErrorCheck.c`: by the handle's type; `ECCheckBounds` and
+`ECCheckStack` do nothing, the host guards memory and stacks),
+`CFatalError` (fatal `C_FATAL_ERROR`, the code logged) and
+`CWarningNotice` (logged), Bezier curves (`graphicsSpline.c`:
+`GrDrawCurve`, `GrDrawCurveTo`, `GrDrawSpline`, `GrDrawSplineTo`,
+halved in the device until flat) and `GrComment` (nothing without
+graphics strings).
+
+**Not yet:** `DR_FONT_GEN_IN_REGION` (no region paths in the kernel; it
+fails), the escape functions, greyscale text, `GrCharMetrics` in the
+kernel.
+
+**Tests.** ctest `kernel.draw` puts `truetype.geo` into `SYSTEM/FONT`
+and `FontData/Ttf/cooper.ttf` into `USERDATA/FONT/TTF`. It checks the
+enumeration of the outline font by name, its height and the width of
+"I" at 40 point, and the pixels of a drawn "I", which the driver builds
+when it is drawn (on every host, arm64 and armhf in qemu too).
 
 ## 14. Open
 

@@ -27,6 +27,8 @@
 #include <unicode.h>
 #include <Ansi/stdlib.h>
 
+static void SortLookupTable(LookupEntry* table, int count);
+
 #define NUM_CHARMAPENTRIES      ( sizeof(geosCharMap) / sizeof(word) )
 #define MIN_GEOS_CHAR           ( C_SPACE )
 #define MAX_GEOS_CHAR           ( NUM_CHARMAPENTRIES + MIN_GEOS_CHAR )

@@ -121,7 +121,9 @@
     X(CANNOT_START_INPUT_MANAGER)	/* no thread for it */ \
     X(BAD_SHUTDOWN_TYPE)		/* SysShutdown: no such type */ \
     X(GRAPHICS_BAD_BITMAP_FORMAT)	/* GrCreateBitmap: not drawable */ \
-    X(GRAPHICS_GR_INIT_FONTS_ERROR)	/* the font info block's chunks */
+    X(GRAPHICS_GR_INIT_FONTS_ERROR)	/* the font info block's chunks */ \
+    X(C_FATAL_ERROR)		/* CFatalError of a geode (code logged) */ \
+    X(EC_BAD_HANDLE)		/* ECCheck*Handle: not of that type */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -811,6 +813,8 @@ void KernelImInit(void);
 /* Graphics/graphicsInit.c: the fonts (after the standard paths) */
 void GrInitFonts(void);
 void GrInitDefaultFont(void);
+/* Graphics/graphicsFontDriver.c: [system] font */
+void GrLoadFontDrivers(void);
 void KernelImStart(void);
 
 /* ---------------------------------------------------------------------

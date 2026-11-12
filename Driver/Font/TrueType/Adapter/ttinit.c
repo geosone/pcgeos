@@ -32,6 +32,11 @@
 #include <unicode.h>
 #include <fontID.h>
 
+#ifdef GEOS_PORT32	/* the C library has these; ours stay ours */
+#define strlen  ttStrLen
+#define strcmp  ttStrCmp
+#endif
+
 
 static word DetectFontFiles(    MemHandle*  fileEnumBlock );
 
@@ -66,7 +71,7 @@ static word toHash( const char* str );
 
 static word strlen( const char* str );
 
-static void strcpoy( char* dest, const char* source );
+static void strcopy( char* dest, const char* source );
 
 static int strcmp( const char* s1, const char* s2 );
 
@@ -239,7 +244,7 @@ EC(     ECCheckMemHandle( fileEnumBlock ) );
         /* iterate over all filenames and try to register a font */
         ptrFileName = MemLock( fileEnumBlock );
         while( numFiles-- )
-                ProcessFont( trueTypeVars, ptrFileName++, fontInfoBlock );
+                ProcessFont( trueTypeVars, *ptrFileName++, fontInfoBlock );
 
         MemFree( fileEnumBlock );
 
@@ -386,7 +391,7 @@ EC(     ECCheckFileHandle( truetypeFile ) );
         if ( getNameFromNameTable( trueTypeVars, familyName, FAMILY_NAME_ID ) == 0 )
                 goto Fail;
 
-        if ( getNameFromNameTable( trueTypeVars, &styleName, STYLE_NAME_ID ) == 0 )
+        if ( getNameFromNameTable( trueTypeVars, styleName, STYLE_NAME_ID ) == 0 )
                 goto Fail;
 
         mappedFont = getFontID( trueTypeVars, familyName, &fontID );
@@ -459,7 +464,7 @@ EC(     ECCheckFileHandle( truetypeFile ) );
     
                 /* fill OutlineDataEntry */
                 outlineDataEntry = (OutlineDataEntry*) (fontInfo + 1);
-                outlineDataEntry->ODE_style  = mapTextStyle( &styleName );
+                outlineDataEntry->ODE_style  = mapTextStyle( styleName );
                 outlineDataEntry->ODE_weight = mapFontWeight( FACE_PROPERTIES.os2->usWeightClass );
                 outlineDataEntry->ODE_header.OE_handle = trueTypeOutlineChunk;
                 outlineDataEntry->ODE_first.OE_handle = fontHeaderChunk;
@@ -488,7 +493,7 @@ EC(     ECCheckFileHandle( truetypeFile ) );
 
         while( outlineData < outlineDataEnd)
 		{
-                        if( ( mapTextStyle( &styleName ) == outlineData->ODE_style ) &&
+                        if( ( mapTextStyle( styleName ) == outlineData->ODE_style ) &&
 	                    ( mapFontWeight( FACE_PROPERTIES.os2->usWeightClass ) == outlineData->ODE_weight ) )
 			{
 				goto Fail;
@@ -527,7 +532,7 @@ EC(     ECCheckFileHandle( truetypeFile ) );
                 /* fill OutlineDataEntry */
                 fontInfo = LMemDeref( ConstructOptr(fontInfoBlock, fontInfoChunk) );
                 outlineData = (OutlineDataEntry*) (fontInfo + 1);
-                outlineData->ODE_style  = mapTextStyle( &styleName );
+                outlineData->ODE_style  = mapTextStyle( styleName );
                 outlineData->ODE_weight = mapFontWeight( FACE_PROPERTIES.os2->usWeightClass );
                 outlineData->ODE_header.OE_handle = trueTypeOutlineChunk;
                 outlineData->ODE_first.OE_handle = fontHeaderChunk;

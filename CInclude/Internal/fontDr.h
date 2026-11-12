@@ -16,6 +16,8 @@
 #include <graphics.h>
 #include <file.h>
 #include <driver.h>
+#include <geosdriver.h>
+#include <Internal/gstate.h>
 
 /* characters that are not there (CTE_dataOffset) */
 #define CHAR_NOT_EXIST		0	/* doesn't exist at all */
@@ -151,7 +153,9 @@ typedef struct {
 } OutlineDataEntry;
 #define DOS16_OUTLINE_DATA_ENTRY 26
 
-typedef word OutlineDataFlag;		/* which part of the outline */
+/* which part of the outline: here the index of the OutlineEntry (the
+ * asm had its offset) */
+typedef word OutlineDataFlag;
 #define ODF_HEADER	0
 #define ODF_PART1	1
 #define ODF_PART2	2
@@ -217,6 +221,10 @@ typedef struct {
     dword		FMI_fileSize;
 } FontModificationInfo;
 
+/* FONT_PROTO of fontDr.def */
+#define FONT_PROTO_MAJOR	(DRIVER_PROTO_MAJOR + 1)
+#define FONT_PROTO_MINOR	(DRIVER_PROTO_MINOR + 0)
+
 /* the font driver functions */
 #define DR_FONT_GEN_CHAR	8
 #define DR_FONT_GEN_WIDTHS	10
@@ -248,5 +256,15 @@ void FontDrUnlockFont(GStateHandle gstate);
 FontInfo *FontDrFindFontInfo(void *infoBlock, FontID id);
 /* the size of a character's data in a FontBuf */
 word FontDrCharDataSize(const FontBuf *fb, word dataOffset);
+/* the largest a FontBuf may grow (MAX_FONT_SIZE, _GREY) */
+word FontDrGetMaxBufSize(const FontBuf *fb);
+/* the outline of a font nearest the style (the richest subset, the
+ * first if none): its part; the styles still to do in *toDo */
+OutlineEntry *FontDrFindOutlineData(FontInfo *fi, TextStyle style,
+				    OutlineDataFlag part, TextStyle *toDo);
+/* a call to the font driver of a maker (with the info block locked);
+ * TRUE: no such driver, or the driver's carry */
+Boolean GrCallFontDriverID(FontMaker maker, word function,
+			   DriverRegs *regs);
 
 #endif /* __INTERNAL_FONTDR_H */

@@ -34,6 +34,13 @@
 #include <geos.h>
 #endif  /* __GEOS__ */
 
+/* Port32: the engine keeps its 32-bit longs on LP64 hosts too */
+#ifdef GEOS_PORT32
+#define TT_LONG_  int
+#else
+#define TT_LONG_  long
+#endif
+
 /* To make freetype.h independent from configuration files we check */
 /* whether EXPORT_DEF has been defined already.                     */
 
@@ -66,7 +73,7 @@
 
   typedef int             TT_Bool;
 
-  typedef signed long     TT_Fixed;   /* signed fixed 16.16 float */
+  typedef signed TT_LONG_ TT_Fixed;   /* signed fixed 16.16 float */
 
   typedef signed short    TT_FWord;   /* distance in FUnits */
   typedef unsigned short  TT_UFWord;  /* unsigned distance  */
@@ -78,8 +85,8 @@
   typedef unsigned short  TT_UShort;
   typedef int             TT_Int;
   typedef unsigned int    TT_UInt;
-  typedef signed long     TT_Long;
-  typedef unsigned long   TT_ULong;
+  typedef signed TT_LONG_ TT_Long;
+  typedef unsigned TT_LONG_ TT_ULong;
 
   typedef signed short    TT_F2Dot14; /* Signed fixed float 2.14 used for */
                                       /* unit vectors, with layout        */
@@ -92,10 +99,10 @@
                                       /* value to which the positive      */
                                       /* fractional part should be added. */
 
-  typedef signed long     TT_F26Dot6; /* 26.6 fixed float, used for       */
+  typedef signed TT_LONG_ TT_F26Dot6; /* 26.6 fixed float, used for       */
                                       /* glyph points pixel coordinates.  */
 
-  typedef signed long     TT_Pos;     /* Point position, expressed either */
+  typedef signed TT_LONG_ TT_Pos;     /* Point position, expressed either */
                                       /* in fractional pixels or notional */
                                       /* units, depending on context.     */
                                       /* For example, glyph coordinates   */

@@ -56,6 +56,10 @@ extern const unsigned char vidmem_geode[];
 extern const unsigned long vidmem_geode_size;
 extern const unsigned char berkeley_fnt[];
 extern const unsigned long berkeley_fnt_size;
+extern const unsigned char truetype_geode[];
+extern const unsigned long truetype_geode_size;
+extern const unsigned char cooper_ttf[];
+extern const unsigned long cooper_ttf_size;
 
 static int fails;
 #define CHECK(c) \
@@ -196,6 +200,10 @@ int main(int argc, char **argv)
     Put("USERDATA", NULL, 0);
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
+    Put("USERDATA/FONT/TTF", NULL, 0);
+    Put("USERDATA/FONT/TTF/cooper.ttf", cooper_ttf, cooper_ttf_size);
+    Put("SYSTEM/FONT", NULL, 0);
+    Put("SYSTEM/FONT/truetype.geo", truetype_geode, truetype_geode_size);
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     FileSetStandardPath(SP_VIDEO_DRIVERS);
     drv = GeodeUseDriver("hostvid.geo", VIDEO_PROTO_MAJOR,
@@ -1118,6 +1126,37 @@ int main(int argc, char **argv)
 	CHECK(Pixel(90, 32) == BLACK && Pixel(90, 31) == WHITE &&
 	      Pixel(90, 39) == BLACK && Pixel(90, 40) == WHITE);
 	GrSetTextMode(g, 0, TM_DRAW_BASE);
+    }
+
+    /* TrueType: the driver found Cooper Black in USERDATA/FONT/TTF (the
+     * default font driver, truetype.geo); its "I" at 40 point is a
+     * black bar, built when drawn */
+    {
+	FontEnumStruct fes[4];
+	FontID id;
+	word n, x, y, black = 0, white = 0;
+
+	n = GrEnumFonts(fes, 4, FEF_OUTLINES, 0);
+	CHECK(n == 1);
+	id = n ? fes[0].FES_ID : FID_INVALID;
+	CHECK(n && !strcmp(fes[0].FES_name, "Cooper* Black"));
+	CHECK(GrCheckFontAvailName(FEF_OUTLINES, 0, "Cooper* Black") == id);
+	GrSetFont(g, id, 40UL << 16);
+	CHECK(GrFontMetrics(g, GFMI_HEIGHT_ROUNDED) >= 36 &&
+	      GrFontMetrics(g, GFMI_HEIGHT_ROUNDED) <= 60);
+	CHECK(GrCharWidth(g, 'I') > (8UL << 16) &&
+	      GrCharWidth(g, 'I') < (30UL << 16));
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 99, 79);
+	GrDrawText(g, 5, 5, "I", 0);
+	for (y = 25; y < 85; y++)
+	    for (x = 25; x < 55; x++) {
+		black += Pixel(x, y) == BLACK;
+		white += Pixel(x, y) == WHITE;
+	    }
+	CHECK(black >= 250 && black <= 450 && black + white == 60 * 30);
+	CHECK(Pixel(22, 50) == WHITE && Pixel(60, 50) == WHITE);
+	GrSetFont(g, FID_BERKELEY, 10UL << 16);
     }
 
     /* an update: only the invalid area is drawn */

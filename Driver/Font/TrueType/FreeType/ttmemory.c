@@ -30,7 +30,9 @@
 #include <lmem.h>
 #include <ec.h>
 
-#ifndef __GEOS__
+/* Port32: TT_Alloc and TT_Free in C (the 16-bit driver has them in
+ * ttmemory_asm.asm), the GEO_ functions as well */
+#if !defined(__GEOS__) || defined(GEOS_PORT32)
 
 /*******************************************************************
  *
@@ -141,7 +143,8 @@
     return TT_Err_Ok;
   }
 
-#else  // ifdef __GEOS__
+#endif
+#ifdef __GEOS__
 
 
 /*******************************************************************

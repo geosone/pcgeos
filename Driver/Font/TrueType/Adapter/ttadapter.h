@@ -29,6 +29,24 @@
 #include "../FreeType/ttengine.h"
 #include "../FreeType/ttcalc.h"
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: the structures the kernel shares with the font drivers are the
+ * kernel's (Internal/fontDr.h, the host layout; Port32/ABI.md section
+ * 13n); the names the adapter used for them map onto those.  The
+ * "FontMatrix" of the adapter is a window's TMatrix, not the kernel's
+ * FontMatrix.
+ */
+#include <Internal/fontDr.h>
+#include <Internal/tmatrix.h>
+#define FB_kernPairs    FB_kernPairPtr
+#define FB_kernValues   FB_kernValuePtr
+#define KP_charRight    KP_char1
+#define KP_charLeft     KP_char2
+#define FontMatrix      TT_FontMatrix
+#define TF_COMPLEX      TM_COMPLEX
+#endif
+
 
 /***********************************************************************
  *      global dgoup objects
@@ -38,12 +56,14 @@ extern TEngine_Instance engineInstance;
 
 
 #define TTF_DIRECTORY                       "TTF"
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 #define FONT_MAN_ID                         0x20
 
 #define CHAR_NOT_EXIST                      0
 #define CHAR_NOT_LOADED                     1
 #define CHAR_NOT_BUILT                      2
 #define CHAR_MISSING                        3	
+#endif /* GEOS_PORT32 */
 
 #define WWFIXED_0_POINT_5                   0x00008000
 #define WWFIXED_1_POINR_1                   0x00012000
@@ -94,6 +114,7 @@ extern TEngine_Instance engineInstance;
 /*
  * drivers FontsAvialEntry structure (see fontDr.def)
  */
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 typedef struct
 {
     FontID                      FAE_fontID;
@@ -129,6 +150,7 @@ typedef struct
     wchar                       FI_lastChar;
 #endif
 } FontInfo;
+#endif /* GEOS_PORT32 */
 
 
 /*
@@ -149,6 +171,7 @@ typedef struct
 /*
  * flags for describing rendered char (see fontDr.def)
  */
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 typedef ByteFlags CharTableFlags;
 #define CTF_NEGATIVE_LSB    0x40    //set is negativ left side bearing
 #define	CTF_ABOVE_ASCENT    0x20
@@ -171,6 +194,7 @@ typedef struct
     word                        CTE_usage;
 #endif
 } CharTableEntry;
+#endif /* GEOS_PORT32 */
 
 
 /*
@@ -184,6 +208,7 @@ typedef ByteFlags FontGenPathFlags;
 /*
  * flags for font information (see fontDr.def)
  */
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 typedef ByteFlags FontBufFlags;
 #define FBF_DEFAULT_FONT    0x80
 #define FBF_MAPPED_FONT     0x40
@@ -244,6 +269,7 @@ typedef	struct
 /* of the fontbuf; the size of a char's data depends on the data format.  */
 extern word _pascal FontDrGetMaxBufSize( FontBuf* fontBuf );
 extern word _pascal FontDrCharDataSize( FontBuf* fontBuf, word charDataOffset );
+#endif /* GEOS_PORT32 */
 
 
 /*
@@ -262,6 +288,7 @@ typedef ByteEnum AdjustedWeight;
 #define AW_BLACK                125
 
 
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 typedef struct 
 {
     dword                       OE_offset;      /* offset in file */
@@ -293,6 +320,7 @@ typedef struct
     char                        KP_charRight;
     char                        KP_charLeft;
 } KernPair;
+#endif /* GEOS_PORT32 */
 
 /*
  * drivers TransformMatrix structure
@@ -308,6 +336,7 @@ typedef struct
     byte                        TM_greyRequest;    /* FBF_IS_GREY if greyscale was requested */
 } TransformMatrix;
 
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 typedef ByteFlags TransFlags;
 #define TF_INV_VALID    0x08
 #define TF_ROTATED      0x04
@@ -315,6 +344,7 @@ typedef ByteFlags TransFlags;
 #define TF_TRANSLATED   0x01
 
 #define TF_COMPLEX      ( TF_ROTATED | TF_SCALED )
+#endif /* GEOS_PORT32 */
 
 typedef struct
 {
@@ -333,6 +363,7 @@ typedef struct
 /*
  * drivers CharData structure (see fontDr.def)
  */
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 typedef struct 
 {
     byte                        CD_pictureWidth;
@@ -341,6 +372,7 @@ typedef struct
     sbyte                       CD_xoff;
     byte                        CD_data;
 } CharData;
+#endif /* GEOS_PORT32 */
 
 /*
  * Greyscale character data (FBF_IS_GREY), see fontDr.def: same header as
@@ -375,12 +407,15 @@ extern byte trueTypeForceGrey;
 /* FALSE: greyscale glyphs are loaded without hinting (ttinit.c) */
 extern Boolean trueTypeGreyHinting;
 
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 #define SIZE_CHAR_HEADER        ( sizeof( CharData ) - 1 )
+#endif /* GEOS_PORT32 */
 
 
 /*
  * drivers RegionCharData structure (see fontDr.def)
  */
+#ifndef GEOS_PORT32	/* Port32: the kernel's, Internal/fontDr.h */
 typedef struct
 {
     sword                       RCD_yoff;       /* (signed) offset to first row */
@@ -392,6 +427,7 @@ typedef struct
     Rectangle                   RCD_bounds;     /* bounding box of region */
     word                        RCD_data;       /* data for region */
 } RegionCharData;
+#endif /* GEOS_PORT32 */
 
 #define SIZE_REGION_HEADER	    ( sizeof( RegionCharData) - 2 )
 

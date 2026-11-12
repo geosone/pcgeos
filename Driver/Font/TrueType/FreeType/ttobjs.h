@@ -725,6 +725,14 @@
   LOCAL_DEF
   TT_Error  Instance_Reset( PInstance  ins );
 
+  /* the constructors and destructors of the objects (ttobjs.c) */
+  LOCAL_DEF TT_Error  Face_Create( void*  _face, void*  _input );
+  LOCAL_DEF void      Face_Destroy( void*  _face );
+  LOCAL_DEF TT_Error  Instance_Create( void*  _instance, void*  _face );
+  LOCAL_DEF void      Instance_Destroy( void*  _instance );
+  LOCAL_DEF TT_Error  Glyph_Create( void*  _glyph, void*  _face );
+  LOCAL_DEF void      Glyph_Destroy( void*  _glyph );
+
 
   /********************************************************************/
   /*                                                                  */

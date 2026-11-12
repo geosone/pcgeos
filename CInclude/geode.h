@@ -149,6 +149,12 @@ extern optr GeodeResolveOptrAt(const void *where, optr o);
 
 extern GeodeHandle
     _pascal GeodeGetCodeProcessHandle(void);
+#ifdef GEOS_PORT32
+/* Port32: the geode of the calling code is the one compiled in; entry 0
+ * of its resource handles is its core block (geosport.h) */
+#define GeodeGetCodeProcessHandle() \
+	((GeodeHandle) __goc_resource_handles[0])
+#endif
 
 /***/
 

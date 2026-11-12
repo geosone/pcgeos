@@ -300,9 +300,14 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
   geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
              berkeley_fnt)
+  # the TrueType font driver (Driver/Font) and a font for it
+  geos_embed(_truetype_c ${truetype_GEO} truetype_geode)
+  geos_embed(_cooper_c ${PROJECT_SOURCE_DIR}/FontData/Ttf/cooper.ttf
+             cooper_ttf)
   add_executable(test_kernel_draw test_kernel_draw.c ${_hostvid_c}
-                 ${_vidmem_c} ${_berkeley_c})
-  add_dependencies(test_kernel_draw geode_hostvid geode_vidmem)
+                 ${_vidmem_c} ${_berkeley_c} ${_truetype_c} ${_cooper_c})
+  add_dependencies(test_kernel_draw geode_hostvid geode_vidmem
+                   geode_truetype)
   target_include_directories(test_kernel_draw PRIVATE
     ${PROJECT_SOURCE_DIR}/Library/Kernel)
   target_link_libraries(test_kernel_draw PRIVATE geos_kernel)

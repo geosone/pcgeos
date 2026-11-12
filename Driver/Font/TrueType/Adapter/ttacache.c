@@ -5,6 +5,10 @@
 #include "ttacache.h"
 #include <Ansi/string.h>
 
+#ifdef GEOS_PORT32	/* the C library has it; ours stays ours */
+#define strcmp  ttStrCmp
+#endif
+
 #define TTF_CACHE_MAJOR_VERSION 3
 #define TTF_CACHE_MINOR_VERSION 4	/* 2.1: RCD_size incl. header, 2.2: TTCBS_flags, 2.3/2.4: grey phases */
 
@@ -73,6 +77,8 @@ Boolean _pascal TrueType_Cache_LoadFontBlock(VMFileHandle cacheFile, const TCHAR
 		dword fontFileSize, word fontFileMagic, TrueTypeCacheBufSpec* bufSpec, MemHandle* fontHandle) {
     VMBlockHandle dirBlock;
 
+    if( cacheFile == NullHandle )	/* no cache: no PRIVDATA */
+        return FALSE;
     dirBlock = VMGetMapBlock(cacheFile);
     if( dirBlock != NullHandle ) {
 
@@ -170,6 +176,8 @@ void _pascal TrueType_Cache_UpdateFontBlock(VMFileHandle cacheFile, const TCHAR*
 
     VMBlockHandle dirBlock;
 
+    if( cacheFile == NullHandle )	/* no cache: no PRIVDATA */
+        return;
     dirBlock = VMGetMapBlock(cacheFile);
     if( dirBlock != NullHandle ) {
 
@@ -271,6 +279,8 @@ Boolean _pascal TrueType_Cache_ReadHeader(VMFileHandle cacheFile, const TCHAR* f
     VMBlockHandle dirBlock;
     Boolean result = FALSE;
 
+    if( cacheFile == NullHandle )	/* no cache: no PRIVDATA */
+        return FALSE;
     dirBlock = VMGetMapBlock(cacheFile);
     if ( dirBlock != NullHandle ) {
 	VMInfoStruct vmInfo;
@@ -308,6 +318,8 @@ void _pascal TrueType_Cache_WriteHeader(VMFileHandle cacheFile, const TCHAR* fon
     
     VMBlockHandle dirBlock;
 
+    if( cacheFile == NullHandle )	/* no cache: no PRIVDATA */
+        return;
     dirBlock = VMGetMapBlock(cacheFile);
     if ( dirBlock == NullHandle ) {
 	
