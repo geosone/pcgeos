@@ -1,0 +1,26 @@
+# mkmf.lst -- the files of this directory that the DOS16 build takes
+# (Tools/nmkmf reads only these).  The C ports of the 32-bit build
+# (CMake: vidcom*.c, vidcom.h) are left out.
+vidcomChars.asm
+vidcomColor.asm
+vidcomConstant.def
+vidcomDither.asm
+vidcomEntry.asm
+vidcomEscape.asm
+vidcomExclBounds.asm
+vidcomFont.asm
+vidcomGeode.def
+vidcomInfo.asm
+vidcomLine.asm
+vidcomMacro.def
+vidcomOutput.asm
+vidcomPalette.asm
+vidcomPolygon.asm
+vidcomPutLine.asm
+vidcomRaster.asm
+vidcomRegion.asm
+vidcomTables.asm
+vidcomUnder.asm
+vidcomUtils.asm
+vidcomVariable.def
+vidcomXOR.asm

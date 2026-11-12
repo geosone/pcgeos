@@ -265,4 +265,19 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   add_dependencies(test_mouse geode_hostmse)
   target_link_libraries(test_mouse PRIVATE geos_kernel)
   add_test(NAME driver.mouse COMMAND test_mouse)
+
+  # the C host video driver (Driver/Video) on ghal_display; where the
+  # display is X11, on a screen of its own (Xvfb)
+  geos_embed(_hostvid_c ${hostvid_GEO} hostvid_geode)
+  add_executable(test_video test_video.c ${_hostvid_c})
+  add_dependencies(test_video geode_hostvid)
+  target_link_libraries(test_video PRIVATE geos_kernel)
+  if(GEOS_HOST STREQUAL "linux" AND GHAL_HAVE_X11 AND
+     GEOS_LINUX_DISPLAY STREQUAL "x11" AND GEOS_XVFB)
+    add_test(NAME driver.video
+             COMMAND ${PROJECT_SOURCE_DIR}/Port32/tools/geos-xserver.sh
+                     $<TARGET_FILE:test_video>)
+  else()
+    add_test(NAME driver.video COMMAND test_video)
+  endif()
 endif()

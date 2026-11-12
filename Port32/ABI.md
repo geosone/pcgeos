@@ -614,6 +614,104 @@ reads the input manager's output. It checks:
 - `DR_MOUSE_CHANGE_OUTPUT` (the raw `MSG_IM_*`);
 - no events after `DR_EXIT`.
 
+### 7.5 The video drivers (`Driver/Video`, P4)
+
+As in DOS16, a video driver is the common part plus a device part.
+
+**The common part** is `VidCom/*.c`, the C port beside `vidcom*.asm`:
+- `vidcomEntry.c`: the strategy routine, init/exit, the device, the
+  exclusive and the escapes;
+- `vidcomOutput.c`: `DR_VID_RECT`;
+- `vidcomPalette.c`: the palette.
+
+**The device part** draws into its frame buffer and owns the pointer.
+
+**Registers.** `CInclude/Internal/videoDr.h` is the C form of
+`videoDr.def`:
+- The function numbers follow `DRE_SET_DEVICE` (`DR_VID_INFO` is 12),
+  and the escapes start at `0x8100`.
+- `VideoDriverInfo` is the driver table. The protocol is 5.3, as in
+  DOS16.
+- The `DriverRegs` registers carry what the `.def` passes. Segments
+  become pointers:
+  - `ds` (the GState) is `DR_dsSi` and `si` is `DR_si`, the offset of
+    the `CommonAttr` in it;
+  - `es` (the Window) is `DR_esDi`;
+  - a far pointer in `dx:si` (`DR_VID_INFO`, the palette, a
+    `PointerDef`, a device name) is `DR_dsSi`.
+
+**Window and GState.** The driver reads the Window and the GState as
+the graphics system will keep them:
+- `CInclude/Internal/window.h`, `gstate.h` and `tmatrix.h` are the C
+  forms of `window.def`, `gstate.def` and `tmatrix.def`, with 32-bit
+  handles.
+- The `GOpt` fields of the GState were opcodes the asm patched into its
+  code; here they are flags.
+- A window's regions are chunks of its block (`WinRegionOf`). A region
+  is lines of words: the bottom y of a band, its on/off pairs, then
+  `EOREGREC`; one more `EOREGREC` ends it. The mask region has no
+  bounds words; `W_maskRect` holds its bounds.
+
+**As in DOS16:**
+- Functions up to `DR_VID_END_EXCLUSIVE` run without the driver's
+  semaphore; the rest run with it.
+- While another GState holds the exclusive, a drawing function is not
+  done. Its bounds, clipped to the mask, are collected and returned by
+  `DR_VID_END_EXCLUSIVE`; the caller invalidates them.
+- The video functions fail until `DRE_SET_DEVICE`.
+- `DR_VID_RECT` clips to `W_maskRect`. A rectangular mask
+  (`WGF_MASK_SIMPLE`) is filled at once. Any other mask is filled line
+  by line through the clip line: the band that holds the line, from the
+  kernel's `WinValClipLine` (`Library/Kernel/Win/winIndividual.c`, the
+  first piece of the window system). The pointer is hidden while it is
+  in the way.
+
+**Colours and mix modes.** `DR_VID_RECT` draws with the `CommonAttr`'s
+RGB value (the kernel maps an index to it), the draw mask (unless
+`AO_MASK_1`), and the GState's mix mode (`MM_COPY` for
+`AO_MASK_1_COPY`).
+
+**Not yet:**
+- `GETBITS`, `PUTBITS`, `MOVBITS`;
+- `PUTSTRING`, `LINE`, `REGION`, `PUTLINE`, `POLYGON`, `POLYLINE`, the
+  dashed lines;
+- the save under areas (`DR_VID_SAVE_UNDER` says it is not possible);
+- the XOR region;
+- the escapes (all unsupported, `di` 0).
+
+These functions do nothing for now.
+
+**The host display** is `Driver/Video/Host` (`hostvid.geo`). It has no
+asm original: on a host the screen is the `ghal_display` surface, 32
+bits per pixel, whether that is a window, the whole screen or a frame
+buffer.
+- The device name gives the size, either `"<anything>: WxH"` or
+  `"WxH"`; the default is 640x480. Full screen takes the screen's size.
+- The driver flushes what changed at the end of each function.
+  `DR_VID_SCREEN_OFF` keeps drawing but shows nothing until the screen
+  is on again.
+- To GEOS it is a 24-bit device (`BMF_24BIT`, `DC_CF_RGB`).
+- The pointer (`hostPointer.c`, after `vga24Pointer.asm`) starts hidden
+  with the default arrow (`pBasic`). It can be up to 32x32; DOS16 took
+  16x16.
+
+Who tells the input manager the screen's size is the window system's
+business, as `ImSetPtrWin` did in DOS16. Until there is one, it is
+`ImSetScreenLimits` (§13j).
+
+ctest `driver.video` loads `hostvid.geo` from `SP_VIDEO_DRIVERS` and
+draws with a Window and GState of its own. It reads the pixels back
+from the display, under Xvfb where the display is X11. It checks:
+- the device and `DR_VID_INFO`;
+- rectangles in a rectangular mask, and the clipping;
+- a mask region with a hole;
+- a draw mask with `MM_XOR`;
+- the exclusive and its bounds;
+- the pointer: shown, moved, nested hide, kept over drawing, and a
+  pointer of the test's own;
+- `DR_VID_GETPIXEL`, the palette, an escape, and the screen off and
+  on.
+
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 
 The C kernel starts with the handle table and the memory block API of
