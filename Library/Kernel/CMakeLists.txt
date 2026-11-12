@@ -147,7 +147,12 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsLineStyles.c
   Graphics/graphicsColor.c
   Graphics/graphicsState.c
-  Graphics/graphicsGetState.c)
+  Graphics/graphicsGetState.c
+  Graphics/graphicsInit.c
+  Graphics/graphicsChars.c
+  Graphics/graphicsFont.c
+  Graphics/graphicsTextMetrics.c
+  Graphics/graphicsText.c)
 target_include_directories(geos_kernel_objs PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/CInclude)

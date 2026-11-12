@@ -298,8 +298,10 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
 
   # drawing through the window system to the host video driver
   geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
+  geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
+             berkeley_fnt)
   add_executable(test_kernel_draw test_kernel_draw.c ${_hostvid_c}
-                 ${_vidmem_c})
+                 ${_vidmem_c} ${_berkeley_c})
   add_dependencies(test_kernel_draw geode_hostvid geode_vidmem)
   target_include_directories(test_kernel_draw PRIVATE
     ${PROJECT_SOURCE_DIR}/Library/Kernel)

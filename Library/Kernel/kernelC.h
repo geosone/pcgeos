@@ -120,7 +120,8 @@
     X(CANNOT_LOAD_KEYBOARD_DRIVER)	/* [keyboard] driver, kbd.geo */ \
     X(CANNOT_START_INPUT_MANAGER)	/* no thread for it */ \
     X(BAD_SHUTDOWN_TYPE)		/* SysShutdown: no such type */ \
-    X(GRAPHICS_BAD_BITMAP_FORMAT)	/* GrCreateBitmap: not drawable */
+    X(GRAPHICS_BAD_BITMAP_FORMAT)	/* GrCreateBitmap: not drawable */ \
+    X(GRAPHICS_GR_INIT_FONTS_ERROR)	/* the font info block's chunks */
 
 #define KFE_ENUM(name) name,
 typedef enum {
@@ -807,6 +808,9 @@ void KernelThreadRun(ThreadHandle th);
 /* The input manager (IM/imInit.c): its thread, made stopped at the boot
  * before the drivers, and started once they are loaded. */
 void KernelImInit(void);
+/* Graphics/graphicsInit.c: the fonts (after the standard paths) */
+void GrInitFonts(void);
+void GrInitDefaultFont(void);
 void KernelImStart(void);
 
 /* ---------------------------------------------------------------------

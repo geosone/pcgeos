@@ -17,8 +17,8 @@
  * (CheckXORCollision) and follows the pointer (UpdateXORForPtr).
  *
  * Save under areas: none, as on the 24-bit VGA (vga24Under.asm):
- * DR_VID_SAVE_UNDER says it cannot.  Not yet: PUTSTRING (does nothing);
- * the escapes (all "not supported", di 0).
+ * DR_VID_SAVE_UNDER says it cannot.  Not yet: the escapes (all "not
+ * supported", di 0).
  */
 #include "vidcom.h"
 
@@ -148,7 +148,7 @@ static Boolean OpBounds(word function, DriverRegs *r, Rectangle *b)
 	}
 	return FALSE;
     default:
-	return FALSE;			/* PUTSTRING: not there yet */
+	return FALSE;			/* PUTSTRING: all of the window */
     }
 }
 
@@ -298,6 +298,9 @@ static Boolean VidCall(word function, DriverRegs *r)
 	return FALSE;
     case DR_VID_PUTLINE:
 	VidPutLine(r);
+	return FALSE;
+    case DR_VID_PUTSTRING:
+	VidPutString(r);
 	return FALSE;
     case DR_VID_POLYGON:
 	VidPolygon(r);

@@ -750,8 +750,15 @@ moved or resized.
 `DR_VID_SAVE_UNDER` says it is not possible.
 
 **Not yet:**
-- `PUTSTRING`, which does nothing for now;
 - the escapes (all unsupported, `di` 0).
+
+**`PUTSTRING`** (`vidcomChars.c`): the position (WBFixed, device) in
+`ax.dl` and `bx.dh` (`dl`, `dh` the low and high byte of `DR_dx`), the
+string, its length and the locked `FontBuf` in a `VidPutStringArgs`
+(`videoDr.h`) at `DR_bpPtr`. The position after the text comes back as
+it came in (`DR_ax`, `DR_bx`, `DR_dx`). Bitmap characters only: what the font driver would build,
+region, greyscale and rotated characters, control characters and
+`GS_textDrawOffset` are not done yet.
 
 **The host display** is `Driver/Video/Host` (`hostvid.geo`). It has no
 asm original: on a host the screen is the `ghal_display` surface, 32
@@ -784,8 +791,8 @@ with the C vidcom). It draws into the bitmaps of `GrCreateBitmap`
   default one, the mix modes work on the indices), 24 bits; the mask
   with `BM_EDIT_MASK`. A monochrome bitmap gets black where a color is
   dark; DOS16 dithered.
-- Not yet: CMYK, dithering, color transfer, the palette functions,
-  `PUTSTRING`. There is no device to set, no pointer, no XOR region.
+- Not yet: CMYK, dithering, color transfer, the palette functions.
+  There is no device to set, no pointer, no XOR region.
 
 The host display got `VidDevInfo` and `VidDevBegin` too; they do
 nothing there.
@@ -2189,8 +2196,7 @@ rectangles point by point.
 
 Not yet:
 - graphics strings and paths: a setter only changes the GState;
-- the fonts: `GS_fontHandle` is only cleared, and there is no
-  `GrSetFont` yet;
+- the fonts: see §13n;
 - devices with 16 colors or fewer.
 
 ctest `kernel.gstate` checks:
@@ -2553,7 +2559,7 @@ than a pixel is a six-point polygon.
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
 - area patterns (the asm filled them through a path);
-- splines, text.
+- splines; text is §13n.
 
 **Tests.** ctest `kernel.draw` runs on the host video driver and reads
 the pixels back. It checks:
@@ -2581,7 +2587,79 @@ the pixels back. It checks:
 - `WinScroll`: the screen and the document move, and the rest is
   washed out;
 - drawing during an update;
-- exposure after moving and closing windows.
+- exposure after moving and closing windows;
+- text (§13n).
+
+## 13n. Fonts and text (`Graphics/graphicsInit.c`, `graphicsChars.c`, `graphicsFont.c`, `graphicsTextMetrics.c`, `graphicsText.c`, P6)
+
+`CInclude/Internal/fontDr.h` has the font structures of `fontDr.def`
+and `graphicsConstant.def` in the host layout.
+
+**Font files** stay the DOS16 files (`*.fnt` in `SP_FONT`). At the boot
+(`GrInitFonts`, after the standard paths) the kernel reads each header:
+`FontFileInfo` (`"BSWF"`, major version up to 1, the header size), then
+the `FontInfo` from `FI_fontID` on, packed (33 bytes), and its tables
+(`PointSizeEntry` 10 bytes, `OutlineDataEntry` 26 bytes) at offsets
+that count the 2-byte `FI_fileHandle`. Each becomes a `FontInfo` chunk
+in the host layout with its offsets recomputed; old outline weights
+are adjusted (`AdjustFontWeight`). The font info block is an LMem block
+with the four chunks of the asm at their fixed handles; the
+modification data of the asm (for its font cache file) is not kept,
+and that chunk is the list of open font files (`[system]
+maxfontfiles`).
+
+**A bitmap face** in the file is a DOS16 `FontBuf` image: 71 bytes of
+header, `CharTableEntry` of 8 bytes, the kerning tables and the
+characters, all at offsets from its start. Loading converts the header
+and the table to the host layout and moves every offset by the
+difference (`GrConvertBitmapFont`); the `CharData` stays as it is.
+
+**The default font** is `[system] fontid` (a name, without case) at
+`fontsize`, the nearest size there is; else Berkeley 10, else the first
+font with bitmaps. It is loaded at the boot into a block that stays and
+is in use from the start. Without font files the kernel runs without
+fonts, and text draws nothing; DOS16 stopped there.
+
+**The font of a GState** (`FindFont`): a font in use with the same
+attributes (and the same matrix, if it is complex); else the font if it
+has the bitmap of the size and style (plain matrix, normal weight and
+width, no super- or subscript) or outlines; else the nearest
+(`LibFindBestFace`: the nearest bitmap size, else the outlines, else
+the default font, `FBF_MAPPED_FONT`). A new font in use is a discarded
+block, filled when first locked: from the file for a bitmap, by the
+font driver (`DR_FONT_GEN_WIDTHS`) for outlines. The GState keeps the
+block and the entry; the entry counts the GStates, `GrInvalidateFont`
+lets go. Locking sets the GState's font values (`UpdateFontOpts`).
+
+**Widths** (`GrTextWidth`, `GrCharWidth`): the character widths, the
+default character for one not there, the space padding, an optional
+hyphen at the end only, and with kerning the track value and the pair
+value, added to a width only while it stays positive. `GrFontMetrics`
+has the table of the asm.
+
+**Drawing** (`GrDrawText`, `GrDrawChar` and their `AtCP` forms): the
+position is the top of the font's box, or the baseline, accent or
+bottom (`TM_DRAW_*`). It goes through the window's matrix to
+`DR_VID_PUTSTRING`. The kernel draws the underline and the
+strike-through as a bar from the start to the end of the text. The pen
+ends after the text.
+
+**Port32 differences:** names compare as bytes (`FEF_DOWNCASE`,
+`FEF_ALPHABETIZE` on ASCII), not with the localization's collation. No
+greyscale text, no deleting of fonts, no DBCS.
+
+**Not yet:** the font drivers (`GrInitFontDriver`, the TrueType driver),
+`GrCharMetrics`, text in graphics strings and paths, the bars of
+rotated text, right to left text, `GrDrawTextField`.
+
+**Tests.** ctest `kernel.draw` boots with `FontData/Berkeley.fnt` in
+`USERDATA/FONT`. It checks:
+- `GrEnumFonts`, `GrCheckFontAvailID`/`Name`, `GrGetFontName`,
+  `GrFindNearestPointsize`, `GrGetDefFontID`;
+- `GrFontMetrics`, `GrCharWidth`, `GrTextWidth` with space padding;
+- the sizes of the file and the nearest one;
+- the pixels of drawn text, the pen after it, text at the pen,
+  underlined text, text at its baseline.
 
 ## 14. Open
 

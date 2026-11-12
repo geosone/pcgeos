@@ -54,6 +54,8 @@ extern const unsigned char hostvid_geode[];
 extern const unsigned long hostvid_geode_size;
 extern const unsigned char vidmem_geode[];
 extern const unsigned long vidmem_geode_size;
+extern const unsigned char berkeley_fnt[];
+extern const unsigned long berkeley_fnt_size;
 
 static int fails;
 #define CHECK(c) \
@@ -191,6 +193,9 @@ int main(int argc, char **argv)
     Put("SYSTEM/VIDEO", NULL, 0);
     Put("SYSTEM/VIDEO/hostvid.geo", hostvid_geode, hostvid_geode_size);
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
+    Put("USERDATA", NULL, 0);
+    Put("USERDATA/FONT", NULL, 0);
+    Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     FileSetStandardPath(SP_VIDEO_DRIVERS);
     drv = GeodeUseDriver("hostvid.geo", VIDEO_PROTO_MAJOR,
@@ -1044,6 +1049,75 @@ int main(int argc, char **argv)
 	}
 	GrDestroyBitmap(gm, BMD_KILL_DATA);
 	CHECK(VMClose(vm, FALSE) == 0);
+    }
+
+    /* text: Berkeley, the default font, 10 point: "H" is a 6x8 picture
+     * 2 below the top, 7 wide; "i" 3, a space 4; the underline 11 below
+     * the top, 1 high; the baseline 10 */
+    {
+	FontEnumStruct fes[4];
+	char name[FID_NAME_LEN];
+	dword size;
+	word style;
+	XYValueAsDWord cp;
+
+	CHECK(GrEnumFonts(NULL, 0, FEF_BITMAPS, 0) == 1);
+	CHECK(GrEnumFonts(fes, 4, FEF_BITMAPS | FEF_DOWNCASE, 0) == 1 &&
+	      fes[0].FES_ID == FID_BERKELEY &&
+	      !strcmp(fes[0].FES_name, "berkeley"));
+	CHECK(GrCheckFontAvailName(FEF_BITMAPS | FEF_DOWNCASE, 0,
+				   "BERKELEY") == FID_BERKELEY);
+	CHECK(GrCheckFontAvailName(FEF_BITMAPS, 0, "BERKELEY") ==
+	      FID_INVALID);
+	CHECK(GrCheckFontAvailID(FEF_OUTLINES, 0, FID_BERKELEY) ==
+	      FID_INVALID);
+	CHECK(GrGetFontName(FID_BERKELEY, name) == 8 &&
+	      !strcmp(name, "Berkeley"));
+	CHECK(GrFindNearestPointsize(FID_BERKELEY, 0xb8000UL, 0, &style,
+				     &size) && size == 12UL << 16);
+	CHECK(GrGetDefFontID(&size) == FID_BERKELEY && size == 10UL << 16);
+
+	CHECK(GrFontMetrics(g, GFMI_HEIGHT_ROUNDED) == 12 &&
+	      GrFontMetrics(g, GFMI_ASCENT_ROUNDED) == 9 &&
+	      GrFontMetrics(g, GFMI_STRIKE_POS) == 0x66600UL &&
+	      GrFontMetrics(g, GFMI_FIRST_CHAR) == (32UL << 16));
+	CHECK(GrCharWidth(g, 'H') == 7UL << 16);
+	CHECK(GrTextWidth(g, "Hi", 0) == 10 && GrTextWidth(g, "H i", 2) == 11);
+	GrSetTextSpacePad(g, 2UL << 16);
+	CHECK(GrTextWidth(g, "H i", 0) == 16);
+	GrSetTextSpacePad(g, 0);
+	GrSetFont(g, 0, 12UL << 16);
+	CHECK(GrFontMetrics(g, GFMI_HEIGHT_ROUNDED) == 15);
+	GrSetFont(g, 0, 11UL << 16);		/* none: the nearest */
+	CHECK(GrFontMetrics(g, GFMI_HEIGHT_ROUNDED) == 12 ||
+	      GrFontMetrics(g, GFMI_HEIGHT_ROUNDED) == 15);
+	GrSetFont(g, FID_BERKELEY, 10UL << 16);
+
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 99, 40);
+	GrDrawText(g, 5, 5, "Hi", 0);
+	CHECK(Pixel(25, 27) == BLACK && Pixel(30, 27) == BLACK &&
+	      Pixel(27, 27) == WHITE && Pixel(27, 30) == BLACK &&
+	      Pixel(25, 26) == WHITE && Pixel(25, 35) == WHITE &&
+	      Pixel(32, 27) == BLACK && Pixel(32, 28) == WHITE &&
+	      Pixel(33, 29) == BLACK && Pixel(34, 29) == WHITE);
+	cp = GrGetCurPos(g);
+	CHECK(DWORD_X(cp) == 15 && DWORD_Y(cp) == 5);
+	GrDrawTextAtCP(g, "H", 0);		/* on from there */
+	CHECK(Pixel(35, 27) == BLACK && Pixel(34, 27) == WHITE);
+
+	GrSetTextStyle(g, TS_UNDERLINE, 0);
+	GrDrawText(g, 40, 5, "H", 0);
+	CHECK(Pixel(60, 36) == BLACK && Pixel(66, 36) == BLACK &&
+	      Pixel(67, 36) == WHITE && Pixel(60, 37) == WHITE &&
+	      Pixel(62, 35) == WHITE);
+	GrSetTextStyle(g, 0, TS_UNDERLINE);
+
+	GrSetTextMode(g, TM_DRAW_BASE, 0);
+	GrDrawChar(g, 70, 20, 'H');
+	CHECK(Pixel(90, 32) == BLACK && Pixel(90, 31) == WHITE &&
+	      Pixel(90, 39) == BLACK && Pixel(90, 40) == WHITE);
+	GrSetTextMode(g, 0, TM_DRAW_BASE);
     }
 
     /* an update: only the invalid area is drawn */

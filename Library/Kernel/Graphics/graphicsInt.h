@@ -17,6 +17,7 @@
 #include <geosdriver.h>
 #include <Internal/videoDr.h>
 #include <Internal/tmatrix.h>
+#include <Internal/fontDr.h>
 
 /* graphicsTables.c */
 #define GR_NUM_SYS_DRAW_MASKS	90
@@ -209,9 +210,47 @@ void GrSetMaskIn(GState *gs, CommonAttr *ca, SysDrawMask sdm,
 		 const DrawMask *custom);
 void GrShiftMask(GState *gs, DrawMask m, byte xShift, byte yShift);
 void GrUpdateOpts(GState *gs);
-void GrInvalidateFont(GState *gs);
 /* IntExitGState: the window's cached flags for this GState, and'ed */
 void GrWinStateFlags(GStateHandle gstate, const GState *gs, WinGrFlags keep,
 		     WinGrRegFlags keepReg);
+
+/* graphicsInit.c: the fonts at the start */
+extern MemHandle grFontBlock;		/* the font info block, or 0 */
+extern FontID grDefaultFontID;
+extern word grDefaultFontSize;
+extern Handle grDefaultFontHandle;	/* the default font's FontBuf */
+extern TMatrix grIdentityMatrix;
+void GrDefaultFontAttrs(FontCommonAttrs *fa);
+
+/* graphicsChars.c: the font manager; the info block locked around the
+ * calls that take its chunks */
+void *GrFontChunk(ChunkHandle ch, word *size);
+FontsAvailEntry *GrFontAvailEntry(FontID id);
+FontInfo *GrFontAvailable(FontID *id);	/* or one of another maker */
+PointSizeEntry *GrPointSizeTab(FontInfo *fi, word *n);
+OutlineDataEntry *GrOutlineTab(FontInfo *fi, word *n);
+Boolean GrNearestBitmap(FontInfo *fi, sdword size, TextStyle style,
+			Boolean absolute, sdword *found, TextStyle *foundStyle);
+Boolean GrNearestOutline(FontInfo *fi, TextStyle style,
+			 TextStyle *foundStyle);
+word GrAddInUseEntry(const FontCommonAttrs *attrs, TextStyle style,
+		     const TMatrix *m);
+FileHandle GrEnsureFontFileOpen(FontID id);
+Boolean GrConvertBitmapFont(const byte *img, word size, MemHandle mh);
+Boolean GrLoadBitmapFont(FileHandle fh, const PointSizeEntry *pse,
+			 MemHandle mh);
+Boolean GrCallFontDriverID(FontMaker maker, word function, DriverRegs *r);
+void GrInvalidateFont(GState *gs);
+FontBuf *GrLockFont(GState *gs, const TMatrix *m);	/* NULL: no font */
+void GrUnlockFont(GState *gs);
+void GrRecalcKernValues(GState *gs);
+
+/* graphicsFont.c, graphicsTextMetrics.c: widths in 1/256 */
+CharTableEntry *GrCharEntry(const FontBuf *fb, word ch);
+sdword GrPairKern(const FontBuf *fb, byte prev, byte ch);
+sdword GrCharAdvance(const GState *gs, const FontBuf *fb, byte ch,
+		     byte prev, CharTableFlags *prevFlags);
+sdword GrTextWidthLow(const GState *gs, const FontBuf *fb, const char *str,
+		      word size);
 
 #endif

@@ -12,8 +12,8 @@
  *   - no cache of free GStates: the heap is the host's;
  *   - no graphics strings and paths yet: the attributes are only set
  *     in the GState;
- *   - the font: GS_fontHandle is cleared where the font changes; the
- *     fonts (GrSetFont, the kerning values) come later.
+ *   - the font: GrInvalidateFont (graphicsChars.c) where the font
+ *     changes; GrSetFont and the kerning there too.
  * Not yet: the pen position and the transformations (with
  * graphicsTransform), the clip routines, GrSetVMFile.
  */
@@ -50,6 +50,7 @@ static void DefaultState(GState *gs)
     gs->GS_pixelHeightM1 = 15;
     gs->GS_fontFirstChar = 32;
     gs->GS_fontLastChar = 252;
+    GrDefaultFontAttrs(&gs->GS_fontAttr);
 }
 
 GStateHandle GrCreateState(WindowHandle win)
@@ -61,11 +62,6 @@ GStateHandle GrCreateState(WindowHandle win)
     gs->GS_window = win;
     MemUnlock(mh);
     return mh;
-}
-
-void GrInvalidateFont(GState *gs)
-{
-    gs->GS_fontHandle = 0;
 }
 
 void GrWinStateFlags(GStateHandle gstate, const GState *gs, WinGrFlags keep,

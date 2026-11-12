@@ -188,6 +188,17 @@ typedef struct {
     sbyte	PD_hotY;
 } PointerDef;
 
+/* DR_VID_PUTSTRING: ax.dl the x position, bx.dh the y position of the
+ * text's top (WBFixed, device; dl the low byte of DR_dx, dh its high
+ * byte), ds the GState (GS_textAttr), es the window, the rest in
+ * DR_bpPtr.  Returns the position after the text in ax.dl, bx.dh and
+ * VPS_string after the last character drawn */
+typedef struct {
+    const char	*VPS_string;
+    word	VPS_numChars;	/* at most; a null ends it before */
+    void	*VPS_font;	/* the locked FontBuf (fontDr.h) */
+} VidPutStringArgs;
+
 #define STANDARD_CURSOR_IMAGE_SIZE	32
 
 /*

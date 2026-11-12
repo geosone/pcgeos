@@ -127,6 +127,9 @@ void VidPutBitmapPixel(const VidPutState *c, sword x, sword y, word bx,
 /* vidcomPutLine.c: DR_VID_PUTLINE */
 void VidPutLine(DriverRegs *r);
 
+/* vidcomChars.c: DR_VID_PUTSTRING */
+void VidPutString(DriverRegs *r);
+
 /*
  * The device part.
  */

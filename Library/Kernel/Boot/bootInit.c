@@ -14,7 +14,9 @@
  *      already, the last run did not end cleanly (SCF_CRASHED, InitSys);
  *   3. the primary file system driver and its drives (LoadFSDriver,
  *      FSDLoadPrimary); the init file is read on first use;
- *   4. the standard paths of [paths] (GetPaths of the loader);
+ *   4. the standard paths of [paths] (GetPaths of the loader); the
+ *      fonts of SP_FONT and the default font (GrInitFonts,
+ *      GrInitDefaultFont);
  *   5. the input manager's thread (InitIM), which runs once the
  *      drivers are loaded;
  *      the keyboard driver (LoadKeyboardDriver), from
@@ -154,6 +156,8 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     ActiveFile();
     FSDLoadPrimary();
     FileInitStdPaths();
+    GrInitFonts();
+    GrInitDefaultFont();
     KernelImInit();
     LoadKeyboardDriver();
     KernelImStart();
