@@ -2357,10 +2357,34 @@ than a pixel is a six-point polygon.
   filled ellipse goes to the driver as a convex `DR_VID_POLYGON`.
 - An ellipse at most two pixels thick is its four extreme points.
 
+**Arcs** (`graphicsArc.c`, `graphicsArcLow.c`):
+- A bounded arc runs counterclockwise from the point of the ellipse at
+  the start angle to the one at the end angle (degrees from 3 o'clock).
+  Its ends are swapped when the matrix mirrors (`TestFlip`).
+- `CalcConic` steps round the ellipse twice and keeps the part between
+  the ends.
+- A chord closes from the end to the start, a pie through the center.
+  An outline is drawn as a polyline. A filled arc is a polygon filled by
+  the odd-even rule.
+- A 3-point arc has its center where the perpendicular bisectors of
+  points 1-2 and 2-3 meet. Points 1 and 3 are swapped so that the arc
+  runs counterclockwise through point 2.
+- Three points on a line draw a line from point 1 to point 3. The asm
+  drew it untransformed; it is transformed here.
+- The pen ends at the end of an open bounded arc and at the start of a
+  closed one. For a 3-point arc it ends at point 1 if open and at point 3
+  if closed. The "to" forms start at the pen and leave it at point 3.
+
+**Rounded rectangles** (`graphicsRoundedRect.c`):
+- Four quarter arcs (`CET_BOUNDED_ARC_RR`) joined into one closed
+  polyline.
+- The radius is at most half the width and half the height.
+- It is filled as a convex polygon.
+
 **Not yet:**
 - graphics strings and paths (drawing to them does nothing);
 - area patterns (the asm filled them through a path);
-- arcs, rounded rectangles, splines, regions, bitmaps, text.
+- splines, regions, bitmaps, text.
 
 **Tests.** ctest `kernel.draw` runs on the host video driver and reads
 the pixels back. It checks:
@@ -2376,6 +2400,8 @@ the pixels back. It checks:
 - dashes on a line and along a polyline;
 - filled and outlined ellipses, a rotated one, a fat outline and round
   line ends;
+- arcs (pie, chord, open, 3-point, from the pen, through a mirroring
+  matrix) and rounded rectangles;
 - drawing during an update;
 - exposure after moving and closing windows.
 

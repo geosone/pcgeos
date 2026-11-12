@@ -133,9 +133,11 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsPolygon.c
   Graphics/graphicsFatLine.c
   Graphics/graphicsEllipse.c
+  Graphics/graphicsArc.c
   Graphics/graphicsArcLow.c
   Graphics/graphicsCalcEllipse.c
   Graphics/graphicsCalcConic.c
+  Graphics/graphicsRoundedRect.c
   Graphics/graphicsLineStyles.c
   Graphics/graphicsColor.c
   Graphics/graphicsState.c

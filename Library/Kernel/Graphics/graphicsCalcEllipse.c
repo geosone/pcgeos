@@ -3,7 +3,8 @@
  * (after graphicsCalcEllipse.asm: CalcEllipse, EllipseTrivialReject,
  * ConjugateEllipse, SetupEllipse, SimpleEllipse, SimpleArc,
  * TransCoordAndDouble, AvgTwoCoords, CheckXMinMax, CheckYMinMax,
- * MulSignedDWord, TestRotation).
+ * MulSignedDWord, TestRotation, SetupArc, Setup3PointArc, SetupArcCommon,
+ * TestFlip, PointToOctant).
  *
  * The bounding box is transformed (unless CEF_DONT_TRANSFORM) and its
  * coordinates doubled, so that a center between pixels is a whole
@@ -13,6 +14,10 @@
  * origin at J + P, where CalcConic (graphicsCalcConic.c) starts.  An
  * ellipse at most two pixels thick along one side is just its four
  * extreme points (SimpleEllipse).
+ *
+ * An arc is the same ellipse, from its start to its end point (device
+ * coordinates; swapped when the matrix mirrors), which CalcConic finds
+ * on the curve.  A 3-point arc brings its own center.
  */
 #include "graphicsInt.h"
 #include <stdlib.h>
@@ -137,6 +142,99 @@ static void SetupEllipse(Frame *f)
     f->conic.C_conicType = GR_CT_ELLIPSE;
 }
 
+/* PointToOctant: the octant a vector points into (as GetOctant) */
+static int Octant(sdword x, sdword y)
+{
+    if (x >= 0) {
+	if (y >= 0)
+	    return x >= y ? 7 : 8;
+	return x <= -y ? 5 : 6;
+    }
+    if (y >= 0)
+	return -x <= y ? 1 : 2;
+    return -x >= -y ? 3 : 4;
+}
+
+/* TestFlip: TRUE when the matrix mirrors, so that an arc's ends trade
+ * places (the octants of (1,1) and (-1,1) through its 2x2 part) */
+Boolean GrTestFlip(const GrDraw *d)
+{
+    const TMatrix *m = &d->GD_w->W_curTMatrix;
+    int64_t x1 = 1L << 16, y1 = 1L << 16, x2 = -(1L << 16), y2 = 1L << 16;
+    int a, b;
+
+    if (m->TM_flags & TM_COMPLEX) {
+	TMatrix c = *m;
+	memset(&c.TM_31, 0, sizeof(c.TM_31));
+	memset(&c.TM_32, 0, sizeof(c.TM_32));
+	GrMatTransDWF(&c, &x1, &y1);
+	GrMatTransDWF(&c, &x2, &y2);
+    }
+    a = Octant((sdword) x1, (sdword) y1);
+    b = Octant((sdword) x2, (sdword) y2);
+    a -= b;
+    return (Boolean) (a > 0 ? a < 4 : a < -4);
+}
+
+static sword Round(sdword v)
+{
+    return (sword) ((v + 0x8000L) >> 16);
+}
+
+/* SetupArcCommon: the arc's ends, device coordinates */
+static void SetupArcCommon(Frame *f, word type, GrArcParams *ap, sword ax,
+			   sword bx, sword cx, sword dx)
+{
+    f->conic.C_conicBeg.P_x = ap->GA_start.P_x = ax;
+    f->conic.C_conicBeg.P_y = ap->GA_start.P_y = bx;
+    f->conic.C_conicEnd.P_x = ap->GA_end.P_x = cx;
+    f->conic.C_conicEnd.P_y = ap->GA_end.P_y = dx;
+    SetupEllipse(f);
+    f->conic.C_conicInfo = GR_CAI_FIND_START;
+    f->conic.C_conicType = GR_CT_ARC;
+    if (type != GR_CET_BOUNDED_ARC_RR) {
+	ap->GA_center.P_x = Round(f->centerX);
+	ap->GA_center.P_y = Round(f->centerY);
+    }
+}
+
+/* SetupArc: a bounded arc, its ends in device coordinates */
+static void SetupArc(const GrDraw *d, Frame *f, word type, GrArcParams *ap)
+{
+    if (GrTestFlip(d))
+	SetupArcCommon(f, type, ap, ap->GA_endPoint.P_x, ap->GA_endPoint.P_y,
+		       ap->GA_startPoint.P_x, ap->GA_startPoint.P_y);
+    else
+	SetupArcCommon(f, type, ap, ap->GA_startPoint.P_x,
+		       ap->GA_startPoint.P_y, ap->GA_endPoint.P_x,
+		       ap->GA_endPoint.P_y);
+}
+
+static void TransFixed(const GrDraw *d, const PointWWFixed *p, sdword *x,
+		       sdword *y)
+{
+    int64_t vx = (sdword) (((dword) (word) p->PF_x.WWF_int << 16) |
+			   p->PF_x.WWF_frac);
+    int64_t vy = (sdword) (((dword) (word) p->PF_y.WWF_int << 16) |
+			   p->PF_y.WWF_frac);
+
+    GrMatTransDWF(&d->GD_w->W_curTMatrix, &vx, &vy);
+    *x = (sdword) vx;
+    *y = (sdword) vy;
+}
+
+/* Setup3PointArc: the center from point2, the ends from points 1 and 3 */
+static void Setup3PointArc(const GrDraw *d, Frame *f, word type,
+			   GrArcParams *ap)
+{
+    sdword x1, y1, x3, y3;
+
+    TransFixed(d, &ap->GA_point2, &f->centerX, &f->centerY);
+    TransFixed(d, &ap->GA_point1, &x1, &y1);
+    TransFixed(d, &ap->GA_point3, &x3, &y3);
+    SetupArcCommon(f, type, ap, Round(x1), Round(y1), Round(x3), Round(y3));
+}
+
 /* SimpleEllipse: the ends of the radii, P, -Q, -P, Q and P again */
 static word SimpleEllipse(const Frame *f, sword *o)
 {
@@ -183,9 +281,6 @@ sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
     word w, type = (word) (flags & GR_CEF_TYPE);
     sword *buf;
 
-    (void) ap;
-    if (type != GR_CET_ELLIPSE)		/* arcs: not yet */
-	return NULL;
     memset(&f, 0, sizeof(f));
     if (l > r) {
 	s = l; l = r; r = s;
@@ -227,7 +322,12 @@ sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
     }
 
     thin = (Boolean) (Near(&f.p1, &f.p2) || Near(&f.p2, &f.p3));
-    SetupEllipse(&f);
+    if (type == GR_CET_ELLIPSE)
+	SetupEllipse(&f);
+    else if (type == GR_CET_3PT_ARC)
+	Setup3PointArc(d, &f, type, ap);
+    else
+	SetupArc(d, &f, type, ap);
     if (TrivialReject(d, &f, &rb))
 	return NULL;
     {
@@ -244,6 +344,7 @@ sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
 	buf = malloc(12 * sizeof(sword));
 	if (!buf)
 	    return NULL;
+	/* SimpleArc: nothing (the asm left the count it had) */
 	*count = type == GR_CET_ELLIPSE ? SimpleEllipse(&f, buf) : 0;
 	buf[2 * *count] = buf[2 * *count + 1] = (sword) EOREGREC;
 	return buf;

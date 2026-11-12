@@ -78,6 +78,7 @@ Boolean GrTransDev(const GrDraw *d, sword x, sword y, sword *dx,
 		   sword *dy);			/* FALSE: overflow */
 Boolean GrGetDevPenPos(const GrDraw *d, sword *x, sword *y);
 void GrSetDocPenPos(GState *gs, sword x, sword y);
+void GrSetDocWWFPenPos(GState *gs, sdword x, sdword y);
 Boolean GrCallDriver(const GrDraw *d, word function, DriverRegs *r,
 		     word attr);
 
@@ -145,17 +146,19 @@ sword *GrCalcConic(GrConic *c, word *count);
 #define GR_CEF_DONT_TRANSFORM	0x8000
 /* the arc parameters CalcEllipse takes and returns (the asm's
  * BoundedArcParams, ThreePointArcParams and ArcReturnParams over one
- * stack buffer) */
+ * stack buffer, and the close type after it) */
 typedef struct {
-    Point	GA_startPoint;	/* bounded arcs: device, doubled */
+    word	GA_close;	/* ArcCloseType */
+    Point	GA_startPoint;	/* bounded arcs: device */
     Point	GA_endPoint;
-    PointWWFixed GA_point1;	/* 3-point arcs: document */
-    PointWWFixed GA_point2;
+    PointWWFixed GA_point1;	/* 3-point arcs: document, point2 the */
+    PointWWFixed GA_point2;	/*   center once converted to bounds */
     PointWWFixed GA_point3;
     Point	GA_start;	/* returned: the arc's ends and center, */
     Point	GA_end;		/*   device */
     Point	GA_center;
 } GrArcParams;
+Boolean GrTestFlip(const GrDraw *d);
 sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
 		     word flags, GrArcParams *ap, word *count, sword *top,
 		     sword *bot);
@@ -167,6 +170,12 @@ void GrDrawArcEllipseLow(const GrDraw *d, sword l, sword t, sword r,
 			 sword b, word flags, GrArcParams *ap);
 void GrFillArcEllipseLow(const GrDraw *d, sword l, sword t, sword r,
 			 sword b, word flags, GrArcParams *ap, word attr);
+void GrSetupArcLow(const GrDraw *d, sword l, sword t, sword r, sword b,
+		   sword angle1, sword angle2, GrArcParams *ap);
+word GrSetupArc3PointLow(const GrDraw *d, GrArcParams *ap, sword *l,
+			 sword *t, sword *r, sword *b);
+void GrArcAnglePos(sword l, sword t, sword r, sword b, sword angle,
+		   sword *x, sword *y);
 
 /* graphicsFatLine.c */
 void GrDrawFatLines(const GrDraw *d, const sword *sep, Boolean connected);

@@ -15,6 +15,10 @@
  *   - filled polygons by both rules, GrTestPointInPolygon, polylines,
  *     polygon outlines, a brushed polyline;
  *   - ellipses filled and outlined, rotated, fat, and round line ends;
+ *   - arcs: a pie, open and chord outlines, 3-point arcs, an arc from
+ *     the pen;
+ *   - rounded rectangles filled, drawn and from the pen;
+ *   - a pie through a mirroring matrix;
  *   - fat lines: butt and square ends, mitered joins;
  *   - dashes on a line and along a polyline;
  *   - an update: only the update region drawn;
@@ -348,6 +352,85 @@ int main(int argc, char **argv)
 	  Pixel(92, 38) == BLUE && Pixel(92, 42) == BLUE &&
 	  Pixel(75, 60) == WHITE && Pixel(73, 60) == BLUE &&
 	  Pixel(77, 60) == BLUE);
+
+    /* arcs */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, WHITE);
+    GrFillArc(g, 5, 5, 35, 35, 0, 90, ACT_PIE);
+    GrDrawArc(g, 40, 5, 70, 35, 0, 180, ACT_OPEN);
+    GrDrawArc(g, 40, 15, 70, 45, 180, 270, ACT_CHORD);
+    {
+	ThreePointArcParams tp;
+	memset(&tp, 0, sizeof(tp));
+	tp.TPAP_close = ACT_PIE;
+	tp.TPAP_point1.PF_x.WWF_int = 5;  tp.TPAP_point1.PF_y.WWF_int = 55;
+	tp.TPAP_point2.PF_x.WWF_int = 20; tp.TPAP_point2.PF_y.WWF_int = 40;
+	tp.TPAP_point3.PF_x.WWF_int = 35; tp.TPAP_point3.PF_y.WWF_int = 55;
+	GrFillArc3Point(g, &tp);
+	tp.TPAP_close = ACT_OPEN;
+	tp.TPAP_point1.PF_x.WWF_int = 45; tp.TPAP_point1.PF_y.WWF_int = 55;
+	tp.TPAP_point2.PF_x.WWF_int = 60; tp.TPAP_point2.PF_y.WWF_int = 70;
+	tp.TPAP_point3.PF_x.WWF_int = 75; tp.TPAP_point3.PF_y.WWF_int = 55;
+	GrDrawArc3Point(g, &tp);
+    }
+    CHECK(GrGetCurPos(g) == ((55UL << 16) | 45));	/* point 1, open */
+    {
+	ThreePointArcToParams tt;
+	memset(&tt, 0, sizeof(tt));
+	tt.TPATP_close = ACT_OPEN;
+	tt.TPATP_point2.PF_x.WWF_int = 90; tt.TPATP_point2.PF_y.WWF_int = 20;
+	tt.TPATP_point3.PF_x.WWF_int = 80; tt.TPATP_point3.PF_y.WWF_int = 30;
+	GrMoveTo(g, 80, 10);
+	GrDrawArc3PointTo(g, &tt);
+	CHECK(GrGetCurPos(g) == ((30UL << 16) | 80));
+    }
+    CHECK(Pixel(45, 35) == WHITE && Pixel(40, 25) == WHITE &&	/* pie */
+	  Pixel(39, 35) == BLUE && Pixel(45, 41) == BLUE &&
+	  Pixel(54, 27) == BLUE);
+    CHECK(Pixel(75, 25) == WHITE && Pixel(60, 40) == WHITE &&	/* open */
+	  Pixel(90, 40) == WHITE && Pixel(75, 30) == BLUE &&
+	  Pixel(75, 40) == BLUE);
+    CHECK(Pixel(70, 60) == WHITE && Pixel(64, 60) == WHITE &&	/* chord */
+	  Pixel(67, 60) == BLUE);
+    CHECK(Pixel(40, 70) == WHITE && Pixel(25, 75) == WHITE &&	/* 3 points */
+	  Pixel(40, 59) == BLUE && Pixel(40, 76) == BLUE);
+    CHECK(Pixel(80, 90) == WHITE && Pixel(65, 75) == WHITE &&
+	  Pixel(95, 75) == WHITE && Pixel(80, 85) == BLUE &&
+	  Pixel(80, 75) == BLUE);
+    CHECK(Pixel(110, 40) == WHITE && Pixel(100, 30) == WHITE &&	/* to */
+	  Pixel(100, 40) == BLUE && Pixel(91, 40) == BLUE);
+
+    /* rounded rectangles */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, WHITE);
+    GrFillRoundRect(g, 5, 5, 45, 35, 8);
+    GrDrawRoundRect(g, 50, 5, 90, 35, 10);
+    GrMoveTo(g, 5, 40);
+    GrDrawRoundRectTo(g, 30, 75, 100);	/* the radius cut to 12 */
+    CHECK(GrGetCurPos(g) == ((40UL << 16) | 5));	/* the pen stays */
+    CHECK(Pixel(45, 40) == WHITE && Pixel(25, 40) == WHITE &&	/* filled */
+	  Pixel(65, 40) == WHITE && Pixel(66, 40) == BLUE &&
+	  Pixel(25, 25) == BLUE && Pixel(26, 26) == BLUE &&
+	  Pixel(45, 25) == WHITE && Pixel(45, 24) == BLUE &&
+	  Pixel(45, 55) == WHITE && Pixel(45, 56) == BLUE);
+    CHECK(Pixel(90, 25) == WHITE && Pixel(70, 40) == WHITE &&	/* drawn */
+	  Pixel(110, 40) == WHITE && Pixel(73, 28) == WHITE &&
+	  Pixel(90, 40) == BLUE && Pixel(70, 26) == BLUE);
+    CHECK(Pixel(37, 60) == WHITE && Pixel(25, 80) == WHITE &&	/* to */
+	  Pixel(26, 80) == BLUE && Pixel(25, 61) == BLUE);
+
+    /* mirrored: the arc's ends trade places, the same quarter is filled */
+    SetCol(g, BLUE);
+    GrFillRect(g, 0, 0, 100, 100);
+    SetCol(g, WHITE);
+    GrApplyTranslation(g, 40L << 16, 30L << 16);
+    GrApplyScale(g, 1L << 16, -(1L << 16));
+    GrFillArc(g, -10, -10, 10, 10, 0, 90, ACT_PIE);
+    GrSetNullTransform(g);
+    CHECK(Pixel(65, 55) == WHITE && Pixel(65, 45) == BLUE &&
+	  Pixel(55, 55) == BLUE && Pixel(55, 45) == BLUE);
 
     /* an update: only the invalid area is drawn */
     SetCol(g, BLUE);

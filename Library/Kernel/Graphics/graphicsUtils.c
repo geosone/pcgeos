@@ -226,6 +226,11 @@ void GrSetDocPenPos(GState *gs, sword x, sword y)
     SetPen(gs, (int64_t) x * 65536, (int64_t) y * 65536);
 }
 
+void GrSetDocWWFPenPos(GState *gs, sdword x, sdword y)
+{
+    SetPen(gs, x, y);
+}
+
 /* ---------------------------------------------------------------------
  * Drawing
  * ------------------------------------------------------------------- */
