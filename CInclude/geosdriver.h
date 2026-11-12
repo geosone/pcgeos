@@ -36,6 +36,9 @@ typedef struct {
     void	*DR_esSi;	/* es:si as a pointer */
     void	*DR_bpPtr;	/* bp with its segment as a pointer: ss:bp
 			 * (a structure on the stack), ds:bp */
+    void	*DR_farPtr;	/* a far pointer in two other registers
+			 * (bx:dx, bx:si, dx:cx), as the function
+			 * says */
 } DriverRegs;
 
 /* TRUE: the carry flag, an error */

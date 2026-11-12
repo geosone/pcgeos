@@ -19,6 +19,8 @@
  *	    a far pointer in dx:si (DR_VID_INFO, the palette, a device
  *	        name): DR_dsSi
  *	    ss:bp (PutBitsArgs), ds:bp of DR_VID_GETBITS: DR_bpPtr
+ *	    the far pointer of DR_VID_POLYGON, POLYLINE, DASH_LINE,
+ *	        DASH_FILL (bx:dx, bx:si) and REGION (dx:cx): DR_farPtr
  *
  ***********************************************************************/
 #ifndef __INTERNAL_VIDEODR_H
@@ -151,6 +153,26 @@ typedef struct {
     word		PBA_size;	/* bytes a scan line */
     const byte		*PBA_pal;	/* the palette, if BMT_PALETTE */
 } PutBitsArgs;
+
+/* DR_VID_DASH_LINE, DR_VID_DASH_FILL */
+typedef struct {
+    Point	DI_pt1;
+    Point	DI_pt2;
+    const WWFixed *DI_patt;	/* on/off lengths in pixels; NULL: solid */
+    word	DI_pattIdx;	/* where in the pattern; updated */
+    word	DI_nPairs;
+} DashInfo;
+
+/* DR_VID_POLYLINE: separates polylines; two end the buffer */
+#define SEPARATOR	((sword) 0x8000)
+
+/* DR_VID_REGION: coordinates that take a parameter (graphics.def) */
+#ifndef PARAM_0
+#define PARAM_0		0x5000
+#define PARAM_1		0x7000
+#define PARAM_2		0x9000
+#define PARAM_3		0xb000
+#endif
 
 /* PointerDef of graphics.def: the mask, then the image follow, a bit a
  * pixel, (width + 7) / 8 bytes a line.  mask 0 image 0: unchanged,

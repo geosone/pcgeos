@@ -639,9 +639,13 @@ As in DOS16, a video driver is the common part plus a device part.
   - `es` (the Window) is `DR_esDi`;
   - a far pointer in `dx:si` (`DR_VID_INFO`, the palette, a
     `PointerDef`, a device name) is `DR_dsSi`.
-  - `ss:bp` (the `PutBitsArgs` of `DR_VID_PUTBITS`) and the `ds:bp` of
-    `DR_VID_GETBITS` are `DR_bpPtr`, a field `geosdriver.h` gained for
-    them.
+  - `ss:bp` (the `PutBitsArgs` of `DR_VID_PUTBITS` and
+    `DR_VID_PUTLINE`, the parameters of `DR_VID_REGION`) and the
+    `ds:bp` of `DR_VID_GETBITS` are `DR_bpPtr`.
+  - The far pointer in two other registers is `DR_farPtr`: `bx:dx` of
+    `POLYGON` and the dash functions, `bx:si` of `POLYLINE`, `dx:cx` of
+    `REGION`.
+  - `geosdriver.h` gained both fields at the end of `DriverRegs`.
 
 **Window and GState.** The driver reads the Window and the GState as
 the graphics system will keep them:
@@ -692,9 +696,42 @@ RGB value (the kernel maps an index to it), the draw mask (unless
   when it moves down.
 - All three walk the visible spans of each line (`VidForSpans`).
 
+**Lines from runs.** Lines and everything built on them step through
+`VidLineRuns`: Bresenham's line in horizontal or vertical runs, with
+the run's first pixel index along the line.
+- `DR_VID_POLYLINE`: the separator format (`SEPARATOR` between
+  polylines, two at the end).
+  - It draws with a brush (`al` wide, `ah` high, at least 1x1) in the
+    line attributes.
+  - It leaves out the first pixel of each line after the first.
+- `DR_VID_DASH_LINE` steps the on/off pattern (`WWFixed` pixels) along
+  the major axis.
+  - It starts at `DI_pattIdx` and leaves it where the line stopped.
+  - With `al` 1 the first pixel is left out and not counted.
+  - With no pattern the line is solid.
+  - Where a dash ends may differ from the asm's fixed-point stepping by
+    a pixel.
+- `DR_VID_DASH_FILL` fills each dash together with its copy moved by
+  `ax`, `cx`, as a four-point polygon.
+- `DR_VID_POLYGON` (`vidcomPolygon.c`): a convex polygon including its
+  outline.
+  - Each edge is stepped as a line; each row is filled from its
+    leftmost to its rightmost edge pixel.
+  - With `al` 1 it is drawn only when its points go clockwise (positive
+    area, y down).
+- `DR_VID_PUTLINE` (`vidcomPutLine.c`): pixel k of the line takes pixel
+  k of the bitmap's first scan line, as far as the bitmap reaches.
+
+**Regions.** `DR_VID_REGION` (`vidcomRegion.c`) draws a region (its
+bounds, then bands) moved by `ax`, `bx`:
+- each pair of a band is a rectangle through the mask;
+- coordinates from `0x4000` to `0xbfff` take `PARAM_0`...`PARAM_3` from
+  `DR_bpPtr`, as `TransRegCoord` did.
+
+The exclusive collects the bounds of all these functions.
+
 **Not yet:**
-- `PUTSTRING`, `REGION`, `PUTLINE`, `POLYGON`, `POLYLINE`, the dashed
-  lines;
+- `PUTSTRING`;
 - the save under areas (`DR_VID_SAVE_UNDER` says it is not possible);
 - the XOR region;
 - the escapes (all unsupported, `di` 0).
@@ -733,6 +770,13 @@ from the display, under Xvfb where the display is X11. It checks:
 - `GETBITS`;
 - `PUTBITS`: mono, filled, 4 and 24 bits, and with a mask;
 - `MOVBITS` over itself, in both directions;
+- polygons, also clockwise-only, and the bounds of an excluded one;
+- regions, also with a parameter;
+- polylines with a brush;
+- dashed lines with their pattern index, without the first pixel, and
+  solid;
+- fat dashes;
+- a scan line along a line;
 - `DR_VID_GETPIXEL`, the palette, an escape, and the screen off and
   on.
 

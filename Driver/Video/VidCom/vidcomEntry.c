@@ -14,8 +14,7 @@
  *   - the video functions fail until a device is set.
  * The device part shows what changed at the end of each function.
  *
- * Not yet: the save under areas, the XOR region, PUTSTRING, REGION,
- * PUTLINE, POLYGON, POLYLINE, the dash functions; the escapes (all "not supported", di 0).  The functions do
+ * Not yet: the save under areas, the XOR region, PUTSTRING; the escapes (all "not supported", di 0).  The functions do
  * nothing for now (the save under ones say "none").
  */
 #include "vidcom.h"
@@ -91,8 +90,56 @@ static void ExclBounds(word function, DriverRegs *r)
 			   r->DR_esDi);
 	}
 	break;
+    case DR_VID_PUTLINE:
+	ExclRectBounds(Coord(r->DR_ax), Coord(r->DR_bx), Coord(r->DR_cx),
+		       Coord(r->DR_dx), r->DR_esDi);
+	break;
+    case DR_VID_POLYGON:		/* ExclPolygonBounds */
+	if (r->DR_farPtr && (word) r->DR_cx) {
+	    Rectangle b;
+	    VidPointBounds(r->DR_farPtr, (word) r->DR_cx, &b);
+	    ExclRectBounds(b.R_left, b.R_top, b.R_right, b.R_bottom,
+			   r->DR_esDi);
+	}
+	break;
+    case DR_VID_POLYLINE:		/* ExclPolylineBounds */
+	if (r->DR_farPtr) {
+	    Rectangle b;
+	    sword bw = (sword) (byte) r->DR_ax;
+	    sword bh = (sword) (byte) (r->DR_ax >> 8);
+	    if (VidPolylineBounds(r->DR_farPtr, bw < 1 ? 1 : bw,
+				  bh < 1 ? 1 : bh, &b))
+		ExclRectBounds(b.R_left, b.R_top, b.R_right, b.R_bottom,
+			       r->DR_esDi);
+	}
+	break;
+    case DR_VID_REGION:			/* ExclRegionBounds */
+	{
+	    Rectangle b;
+	    if (VidRegionBounds(r, &b))
+		ExclRectBounds(b.R_left, b.R_top, b.R_right, b.R_bottom,
+			       r->DR_esDi);
+	}
+	break;
+    case DR_VID_DASH_LINE:		/* ExclDashBounds */
+    case DR_VID_DASH_FILL:
+	if (r->DR_farPtr) {
+	    const DashInfo *di = r->DR_farPtr;
+	    sword ddx = 0, ddy = 0;
+	    if (function == DR_VID_DASH_FILL) {
+		ddx = Coord(r->DR_ax);
+		ddy = Coord(r->DR_cx);
+	    }
+	    ExclRectBounds(di->DI_pt1.P_x, di->DI_pt1.P_y, di->DI_pt2.P_x,
+			   di->DI_pt2.P_y, r->DR_esDi);
+	    ExclRectBounds((sword) (di->DI_pt1.P_x + ddx),
+			   (sword) (di->DI_pt1.P_y + ddy),
+			   (sword) (di->DI_pt2.P_x + ddx),
+			   (sword) (di->DI_pt2.P_y + ddy), r->DR_esDi);
+	}
+	break;
     default:
-	/* the functions not there yet draw nothing */
+	/* PUTSTRING: not there yet */
 	break;
     }
 }
@@ -220,6 +267,24 @@ static Boolean VidCall(word function, DriverRegs *r)
 	return FALSE;
     case DR_VID_MOVBITS:
 	VidMovBits(r);
+	return FALSE;
+    case DR_VID_REGION:
+	VidDrawRegion(r);
+	return FALSE;
+    case DR_VID_PUTLINE:
+	VidPutLine(r);
+	return FALSE;
+    case DR_VID_POLYGON:
+	VidPolygon(r);
+	return FALSE;
+    case DR_VID_POLYLINE:
+	VidPolyline(r);
+	return FALSE;
+    case DR_VID_DASH_LINE:
+	VidDashLine(r);
+	return FALSE;
+    case DR_VID_DASH_FILL:
+	VidDashFill(r);
 	return FALSE;
     case DR_VID_SCREEN_ON:
 	VidDevScreen(TRUE);

@@ -61,12 +61,51 @@ typedef void VidSpanFn(sword y, sword left, sword right, void *ctx);
 void VidForSpans(Window *w, sword left, sword top, sword right,
 		 sword bottom, Boolean bottomUp, VidSpanFn *fn, void *ctx);
 
-/* vidcomLine.c: DR_VID_LINE */
+/* vidcomLine.c: lines.  VidLineRuns steps a line from point 1 to point
+ * 2 (both on) in runs, horizontal or vertical, in the line's direction;
+ * k is the run's first pixel along the line, from 0 */
+typedef void VidRunFn(sword x1, sword y1, sword x2, sword y2, word k,
+		      void *ctx);
+void VidLineRuns(sword x1, sword y1, sword x2, sword y2, Boolean skipFirst,
+		 VidRunFn *fn, void *ctx);
 void VidDrawLine(DriverRegs *r);
-/* vidcomRaster.c: DR_VID_GETBITS, DR_VID_PUTBITS, DR_VID_MOVBITS */
+void VidPolyline(DriverRegs *r);
+Boolean VidPolylineBounds(const sword *p, sword bw, sword bh, Rectangle *b);
+void VidDashLine(DriverRegs *r);
+void VidDashFill(DriverRegs *r);
+
+/* vidcomPolygon.c */
+void VidPolygon(DriverRegs *r);
+void VidFillPolygon(Window *w, const VidDrawState *ds, const Point *p,
+		    word n);
+void VidPointBounds(const Point *p, word n, Rectangle *b);
+
+/* vidcomRegion.c */
+void VidDrawRegion(DriverRegs *r);
+Boolean VidRegionBounds(DriverRegs *r, Rectangle *b);
+
+/* vidcomRaster.c: DR_VID_GETBITS, DR_VID_PUTBITS, DR_VID_MOVBITS, and
+ * the pixels of a bitmap */
 void VidGetBits(DriverRegs *r);
 void VidPutBits(DriverRegs *r);
 void VidMovBits(DriverRegs *r);
+#define VBP_SKIP	0		/* masked out, or a 0 when filling */
+#define VBP_COLOR	1		/* *color */
+#define VBP_FILL	2		/* in the area color (PBF_FILL_MASK) */
+int VidBitmapPixel(const PutBitsArgs *pba, word bx, word by, dword *color);
+typedef struct {
+    const PutBitsArgs	*VPS_pba;
+    MixMode		VPS_mix;
+    VidDrawState	VPS_fill;
+} VidPutState;
+void VidPutSetup(const GState *gs, const Window *w, const PutBitsArgs *pba,
+		 VidPutState *c);
+/* bitmap pixel bx, by at x, y */
+void VidPutBitmapPixel(const VidPutState *c, sword x, sword y, word bx,
+		       word by);
+
+/* vidcomPutLine.c: DR_VID_PUTLINE */
+void VidPutLine(DriverRegs *r);
 
 /*
  * The device part.

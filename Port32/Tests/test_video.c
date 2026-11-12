@@ -14,6 +14,9 @@
  *   - lines, through the mask region too;
  *   - GETBITS, PUTBITS (mono, filled, 4 and 24 bits, a mask), MOVBITS
  *     both ways over itself;
+ *   - polygons (clockwise only too), regions (with a parameter),
+ *     polylines with a brush, dashed lines and their pattern index,
+ *     fat dashes, a bitmap's scan line along a line;
  *   - DR_VID_GETPIXEL, the palette, an escape, the screen off and on;
  * and reads the pixels back from the display (ghal_display_read_back).
  */
@@ -119,6 +122,22 @@ static Boolean Line(int x1, int y1, int x2, int y2)
     regs.DR_si = offsetof(GState, GS_areaAttr);
     regs.DR_esDi = &win.w;
     return DriverCall(dis, DR_VID_LINE, &regs);
+}
+
+/* a function with a far pointer (DR_farPtr), the area attributes */
+static Boolean Far(word f, dword ax, dword cx, dword bx, void *p)
+{
+    DriverRegs regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.DR_ax = ax;
+    regs.DR_bx = bx;
+    regs.DR_cx = cx;
+    regs.DR_dsSi = &gs;
+    regs.DR_si = offsetof(GState, GS_areaAttr);
+    regs.DR_esDi = &win.w;
+    regs.DR_farPtr = p;
+    return DriverCall(dis, f, &regs);
 }
 
 static Boolean PutBits(int x, int y, PutBitsArgs *pba)
@@ -472,6 +491,158 @@ int main(int argc, char **argv)
     r.DR_dx = 20;
     CHECK(!DriverCall(dis, DR_VID_MOVBITS, &r));
     CHECK(Pixel(200, 20) == BLUE && Pixel(209, 29) == RED);
+
+    /* polygons, regions, polylines, dashes, bits along a line */
+    SetMask(0, 0, 319, 199, TRUE);
+    SetColor(WHITE);
+    Rect(0, 0, 319, 199);
+    SetColor(RED);
+    gs.GS_lineAttr = gs.GS_areaAttr;
+    {
+	static const Point tri[3] = { {100, 100}, {120, 100}, {100, 120} };
+	static const Point back[3] = { {200, 100}, {200, 120}, {220, 100} };
+	CHECK(!Far(DR_VID_POLYGON, 0, 3, 0, (void *) tri));
+	CHECK(Pixel(105, 105) == RED && Pixel(120, 100) == RED &&
+	      Pixel(100, 120) == RED && Pixel(110, 110) == RED &&
+	      Pixel(115, 115) == WHITE && Pixel(99, 100) == WHITE &&
+	      Pixel(100, 121) == WHITE);
+	/* only clockwise: these go the other way round */
+	Far(DR_VID_POLYGON, 1, 3, 0, (void *) back);
+	CHECK(Pixel(205, 105) == WHITE);
+	Far(DR_VID_POLYGON, 0, 3, 0, (void *) back);
+	CHECK(Pixel(205, 105) == RED);
+	/* the exclusive: not drawn, its bounds */
+	Call(DR_VID_START_EXCLUSIVE, 0, 0x4560);
+	Far(DR_VID_POLYGON, 0, 3, 0, (void *) tri);
+	memset(&r, 0, sizeof(r));
+	r.DR_bx = 0x4560;
+	DriverCall(dis, DR_VID_END_EXCLUSIVE, &r);
+	CHECK(r.DR_ax && r.DR_si == 100 && r.DR_di == 100 &&
+	      r.DR_cx == 120 && r.DR_dx == 120);
+    }
+    {
+	static const word rgn[] = {
+	    0, 0, 9, 9,
+	    (word) -1, EOREGREC,
+	    4, 0, 9, EOREGREC,
+	    9, 0, 4, EOREGREC,
+	    EOREGREC
+	};
+	static const word prgn[] = {		/* right: PARAM_0 */
+	    0, 0, PARAM_0, 4,
+	    (word) -1, EOREGREC,
+	    4, 0, PARAM_0, EOREGREC,
+	    EOREGREC
+	};
+	static sword params[4] = { 7, 0, 0, 0 };
+	Far(DR_VID_REGION, 50, 0, 150, (void *) rgn);
+	CHECK(Pixel(50, 150) == RED && Pixel(59, 154) == RED &&
+	      Pixel(59, 155) == WHITE && Pixel(54, 159) == RED &&
+	      Pixel(55, 159) == WHITE && Pixel(50, 149) == WHITE &&
+	      Pixel(50, 160) == WHITE);
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 200;
+	r.DR_bx = 50;
+	r.DR_dsSi = &gs;
+	r.DR_si = offsetof(GState, GS_areaAttr);
+	r.DR_esDi = &win.w;
+	r.DR_farPtr = (void *) prgn;
+	r.DR_bpPtr = params;
+	CHECK(!DriverCall(dis, DR_VID_REGION, &r));
+	CHECK(Pixel(207, 54) == RED && Pixel(208, 54) == WHITE &&
+	      Pixel(200, 50) == RED);
+    }
+    {
+	static const sword pl[] = {
+	    10, 10, 20, 10, 20, 15, SEPARATOR,
+	    30, 10, 30, 12, SEPARATOR, SEPARATOR
+	};
+	/* a brush 3 wide, 2 high */
+	CHECK(!Far(DR_VID_POLYLINE, (2 << 8) | 3, 0, 0, (void *) pl));
+	CHECK(Pixel(10, 10) == RED && Pixel(22, 11) == RED &&
+	      Pixel(23, 11) == WHITE && Pixel(10, 12) == WHITE &&
+	      Pixel(22, 16) == RED && Pixel(22, 17) == WHITE &&
+	      Pixel(32, 13) == RED && Pixel(29, 10) == WHITE &&
+	      Pixel(25, 12) == WHITE);
+    }
+    {
+	static const WWFixed patt[2] = { {0, 2}, {0, 3} };	/* on 2, off 3 */
+	static const char l0[] = "XX...XX...", l1[] = "X...XX...X",
+	    l2[] = ".XX...XX..";
+	DashInfo di;
+	int x, ok;
+
+	memset(&di, 0, sizeof(di));
+	di.DI_patt = patt;
+	di.DI_nPairs = 1;
+	di.DI_pt1.P_x = 10;
+	di.DI_pt1.P_y = 50;
+	di.DI_pt2.P_x = 19;
+	di.DI_pt2.P_y = 50;
+	CHECK(!Far(DR_VID_DASH_LINE, 0, 0, 0, &di));
+	for (ok = 1, x = 0; x < 10; x++)
+	    ok &= (Pixel(10 + x, 50) == RED) == (l0[x] == 'X');
+	CHECK(ok && di.DI_pattIdx == 0);
+	di.DI_pattIdx = 1;
+	di.DI_pt1.P_y = di.DI_pt2.P_y = 52;
+	Far(DR_VID_DASH_LINE, 0, 0, 0, &di);
+	for (ok = 1, x = 0; x < 10; x++)
+	    ok &= (Pixel(10 + x, 52) == RED) == (l1[x] == 'X');
+	CHECK(ok && di.DI_pattIdx == 1);
+	di.DI_pattIdx = 0;			/* without the first pixel */
+	di.DI_pt1.P_y = di.DI_pt2.P_y = 54;
+	Far(DR_VID_DASH_LINE, 1, 0, 0, &di);
+	for (ok = 1, x = 0; x < 10; x++)
+	    ok &= (Pixel(10 + x, 54) == RED) == (l2[x] == 'X');
+	CHECK(ok && di.DI_pattIdx == 4);
+	di.DI_patt = NULL;			/* solid */
+	di.DI_pt1.P_y = di.DI_pt2.P_y = 56;
+	Far(DR_VID_DASH_LINE, 0, 0, 0, &di);
+	CHECK(Pixel(10, 56) == RED && Pixel(19, 56) == RED);
+	/* fat: each dash and its copy 3 lower */
+	di.DI_patt = patt;
+	di.DI_pattIdx = 0;
+	di.DI_pt1.P_x = 40;
+	di.DI_pt2.P_x = 49;
+	di.DI_pt1.P_y = di.DI_pt2.P_y = 50;
+	CHECK(!Far(DR_VID_DASH_FILL, 0, 3, 0, &di));
+	CHECK(Pixel(40, 50) == RED && Pixel(41, 53) == RED &&
+	      Pixel(42, 51) == WHITE && Pixel(45, 53) == RED &&
+	      Pixel(47, 50) == WHITE && Pixel(41, 54) == WHITE);
+    }
+    {
+	static const byte rgb[4 * 3] = {
+	    0xff, 0, 0, 0, 0xff, 0, 0, 0, 0xff, 0xff, 0xff, 0xff
+	};
+	PutBitsArgs pba;
+
+	SetColor(BLUE);
+	Rect(100, 60, 110, 75);
+	memset(&pba, 0, sizeof(pba));
+	pba.PBA_bm.B_width = 4;
+	pba.PBA_bm.B_height = 1;
+	pba.PBA_bm.B_type = BMF_24BIT;
+	pba.PBA_data = rgb;
+	pba.PBA_size = 12;
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = 100;
+	r.DR_bx = 60;
+	r.DR_cx = 103;
+	r.DR_dx = 63;
+	r.DR_dsSi = &gs;
+	r.DR_esDi = &win.w;
+	r.DR_bpPtr = &pba;
+	CHECK(!DriverCall(dis, DR_VID_PUTLINE, &r));
+	CHECK(Pixel(100, 60) == RED && Pixel(101, 61) == 0x00ff00 &&
+	      Pixel(102, 62) == BLUE && Pixel(103, 63) == WHITE &&
+	      Pixel(101, 60) == BLUE);
+	r.DR_ax = 100;				/* longer than the bitmap */
+	r.DR_bx = 70;
+	r.DR_cx = 109;
+	r.DR_dx = 70;
+	DriverCall(dis, DR_VID_PUTLINE, &r);
+	CHECK(Pixel(103, 70) == WHITE && Pixel(104, 70) == BLUE);
+    }
 
     /* the palette */
     {
