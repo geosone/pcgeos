@@ -37,12 +37,18 @@
  * (BLTM_MOVE) or washed out (BLTM_CLEAR).
  *
  * Not yet: LZG compaction,
- * format conversion for devices of fewer colors than the bitmap, huge
- * bitmaps, graphics strings.
+ * format conversion for devices of fewer colors than the bitmap,
+ * graphics strings.
+ *
+ * Huge bitmaps (graphicsBitmapHuge.asm) are drawn like complex ones,
+ * each block of the huge array a slice (DrawSlice's note): the
+ * directory block stays locked, its CBitmap (EB_bm) is the bitmap, and
+ * the slice is the scan lines of one data block, locked in turn.
  */
 #include "graphicsInt.h"
 #include "Win/winInt.h"
 #include <stdlib.h>
+#include <hugearr.h>
 
 #define AREA	((word) offsetof(GState, GS_areaAttr))
 #define DEF_BITMAP_RES	72
@@ -57,7 +63,50 @@ typedef struct {
     sword		errX, errY;	/* BF_drawPointErrorX/Y */
     PutBitsArgs		args;		/* BF_args */
     byte		pal[256 * 3];
+    VMFileHandle	hfile;		/* a huge bitmap: its array */
+    VMBlockHandle	hblock;
+    const byte		*hdata;		/* the locked slice */
+    word		hfirst, hn;	/* its scan lines */
 } BMFrame;
+
+/* the huge bitmap's slice from scan line first on; FALSE past the end */
+static Boolean HugeSlice(BMFrame *f, word first)
+{
+    void *p;
+    word size;
+    dword r;
+
+    if (f->hdata)
+	HugeArrayUnlock((void *) f->hdata);
+    f->hdata = NULL;
+    f->hfirst = first;
+    f->hn = 0;
+    if (first >= f->bm->B_height)
+	return FALSE;
+    r = HugeArrayLock(f->hfile, f->hblock, first, &p, &size);
+    if (!HAL_COUNT(r))
+	return FALSE;
+    f->hdata = p;
+    f->hn = (word) HAL_COUNT(r);
+    if ((dword) first + f->hn > f->bm->B_height)
+	f->hn = (word) (f->bm->B_height - first);
+    return TRUE;
+}
+
+/* a slice's scan lines (n) and their data */
+static const byte *SliceData(const BMFrame *f, const Bitmap *bm, word *n)
+{
+    if (f->hfile) {
+	*n = f->hn;
+	return f->hdata;
+    }
+    if (bm->B_type & BMT_COMPLEX) {
+	*n = ((const CBitmap *) bm)->CB_numScans;
+	return (const byte *) bm + ((const CBitmap *) bm)->CB_data;
+    }
+    *n = bm->B_height;
+    return (const byte *) (bm + 1);
+}
 
 /* CalcLineSize: the bytes of a scan line of width pixels */
 word GrBitmapLineSize(word width, byte type)
@@ -169,6 +218,8 @@ static const Bitmap *NextSlice(BMFrame *f, const Bitmap *bm)
 {
     const CBitmap *c = Complex(bm);
 
+    if (f->hfile)
+	return HugeSlice(f, (word) (f->hfirst + f->hn)) ? bm : NULL;
     if ((word) (c->CB_startScan + c->CB_numScans) >= bm->B_height ||
 	!f->cb)
 	return NULL;
@@ -217,13 +268,7 @@ static void DrawUnpacked(BMFrame *f)
 	word n;
 	dword need;
 
-	if (bm->B_type & BMT_COMPLEX) {
-	    src = (const byte *) bm + Complex(bm)->CB_data;
-	    n = Complex(bm)->CB_numScans;
-	} else {
-	    src = (const byte *) (bm + 1);
-	    n = bm->B_height;
-	}
+	src = SliceData(f, bm, &n);
 	need = (dword) n * line;
 	if (need > size) {
 	    byte *nb = realloc(buf, need);
@@ -239,7 +284,9 @@ static void DrawUnpacked(BMFrame *f)
 	    PutBits(f, y);
 	    y = (sword) (y + n);
 	}
-	if (!(bm->B_type & BMT_COMPLEX) || y > f->d->GD_w->W_maskRect.R_bottom)
+	if (!(bm->B_type & BMT_COMPLEX) && !f->hfile)
+	    break;
+	if (y > f->d->GD_w->W_maskRect.R_bottom)
 	    break;
 	bm = NextSlice(f, bm);
     }
@@ -264,13 +311,7 @@ static Boolean SourceSlice(BMSource *s, const Bitmap *bm)
     dword need;
 
     s->bm = bm;
-    if (bm->B_type & BMT_COMPLEX) {
-	src = (const byte *) bm + Complex(bm)->CB_data;
-	s->n = Complex(bm)->CB_numScans;
-    } else {
-	src = (const byte *) (bm + 1);
-	s->n = bm->B_height;
-    }
+    src = SliceData(s->f, bm, &s->n);
     if (bm->B_compact != BMC_PACKBITS) {
 	s->data = src;
 	return TRUE;
@@ -293,7 +334,7 @@ static const byte *SourceScan(BMSource *s, word k)
 {
     while ((dword) k >= (dword) s->first + s->n) {
 	const Bitmap *next;
-	if (!(s->bm->B_type & BMT_COMPLEX))
+	if (!(s->bm->B_type & BMT_COMPLEX) && !s->f->hfile)
 	    return NULL;
 	next = NextSlice(s->f, s->bm);
 	if (!next)
@@ -707,14 +748,92 @@ static void DrawRotated(BMFrame *f, sword x, sword y)
     free(src.buf);
 }
 
+static void Draw(BMFrame *f, sword x, sword y)
+{
+    GrDraw *d = f->d;
+    const Bitmap *bm = f->bm;
+    DriverRegs r;
+    const CBitmap *c = Complex(bm);
+    Boolean complexBM = (Boolean) ((bm->B_type & BMT_COMPLEX) != 0 ||
+				   f->hfile);
+    Boolean fill = f->fill;
+    Boolean scaled, rotated;
+
+    rotated = (Boolean) ((d->GD_w->W_curTMatrix.TM_flags & TM_ROTATED) !=
+			 0);
+    scaled = (Boolean) (rotated ||
+			(d->GD_w->W_curTMatrix.TM_flags & TM_SCALED) ||
+			(complexBM && (c->CB_xres != DEF_BITMAP_RES ||
+				       c->CB_yres != DEF_BITMAP_RES)));
+    if ((scaled ? ComplexReject(f, x, y) : Reject(f, x, y)) ||
+	!SetDrawPoint(f, x, y))
+	return;
+    memset(&r, 0, sizeof(r));
+    WinCallVidDriver(d->GD_w, DR_VID_INFO, &r);
+    f->devType = r.DR_dsSi ?
+	(byte) (((const VideoDriverInfo *) r.DR_dsSi)->VDI_bmFormat &
+		BMT_FORMAT) : BMF_24BIT;
+    if ((bm->B_type & BMT_FORMAT) != BMF_MONO &&
+	(bm->B_type & BMT_FORMAT) < BMF_4CMYK &&
+	(bm->B_type & BMT_FORMAT) > f->devType && !fill)
+	return;					/* format change: not yet */
+
+    f->args.PBA_bm.B_width = bm->B_width;
+    f->args.PBA_bm.B_compact = bm->B_compact;
+    f->args.PBA_bm.B_type = (byte) (bm->B_type & ~BMT_COMPLEX);
+    f->args.PBA_size = GrBitmapLineSize(bm->B_width, bm->B_type);
+    if (bm->B_type & BMT_PALETTE) {
+	if (fill)
+	    f->args.PBA_flags |= PBF_FILL_MASK;
+	else
+	    InitPalette(f, bm);
+    } else if (fill)
+	f->args.PBA_flags |= PBF_FILL_MASK;
+
+    if (bm->B_compact != BMC_UNCOMPACTED && bm->B_compact != BMC_PACKBITS)
+	return;					/* LZG: not yet */
+    if (f->hfile && !HugeSlice(f, 0))
+	return;
+    if (rotated) {
+	DrawRotated(f, x, y);
+	return;
+    }
+    if (scaled) {
+	DrawScaled(f);
+	return;
+    }
+    if (bm->B_compact == BMC_PACKBITS) {
+	DrawUnpacked(f);
+	return;
+    }
+    if (!complexBM) {
+	f->args.PBA_data = (const byte *) (bm + 1);
+	f->args.PBA_bm.B_height = bm->B_height;
+	PutBits(f, f->y);
+	return;
+    }
+    for (;;) {					/* handleComplex */
+	sword sy = f->y;
+	word n;
+	if (f->hfile)
+	    sy = (sword) (f->y + f->hfirst);
+	else if (bm != f->bm)
+	    sy = (sword) (f->y + Complex(bm)->CB_startScan);
+	f->args.PBA_data = SliceData(f, bm, &n);
+	if (n) {
+	    f->args.PBA_bm.B_height = n;
+	    PutBits(f, sy);
+	}
+	bm = NextSlice(f, bm);			/* BMCallBack */
+	if (!bm)
+	    break;
+    }
+}
+
 static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
 		       Bitmap *(*cb)(Bitmap *), Boolean fill)
 {
     BMFrame f;
-    DriverRegs r;
-    const CBitmap *c = Complex(bm);
-    Boolean complexBM = (Boolean) ((bm->B_type & BMT_COMPLEX) != 0);
-    Boolean scaled, rotated;
 
     if (GrTrivialReject(d))
 	return;
@@ -723,70 +842,77 @@ static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
     f.bm = bm;
     f.cb = cb;
     f.fill = fill;
-    rotated = (Boolean) ((d->GD_w->W_curTMatrix.TM_flags & TM_ROTATED) !=
-			 0);
-    scaled = (Boolean) (rotated ||
-			(d->GD_w->W_curTMatrix.TM_flags & TM_SCALED) ||
-			(complexBM && (c->CB_xres != DEF_BITMAP_RES ||
-				       c->CB_yres != DEF_BITMAP_RES)));
-    if ((scaled ? ComplexReject(&f, x, y) : Reject(&f, x, y)) ||
-	!SetDrawPoint(&f, x, y))
-	return;
-    memset(&r, 0, sizeof(r));
-    WinCallVidDriver(d->GD_w, DR_VID_INFO, &r);
-    f.devType = r.DR_dsSi ?
-	(byte) (((const VideoDriverInfo *) r.DR_dsSi)->VDI_bmFormat &
-		BMT_FORMAT) : BMF_24BIT;
-    if ((bm->B_type & BMT_FORMAT) != BMF_MONO &&
-	(bm->B_type & BMT_FORMAT) < BMF_4CMYK &&
-	(bm->B_type & BMT_FORMAT) > f.devType && !fill)
-	return;					/* format change: not yet */
+    Draw(&f, x, y);
+}
 
-    f.args.PBA_bm.B_width = bm->B_width;
-    f.args.PBA_bm.B_compact = bm->B_compact;
-    f.args.PBA_bm.B_type = (byte) (bm->B_type & ~BMT_COMPLEX);
-    f.args.PBA_size = GrBitmapLineSize(bm->B_width, bm->B_type);
-    if (bm->B_type & BMT_PALETTE) {
-	if (fill)
-	    f.args.PBA_flags |= PBF_FILL_MASK;
-	else
-	    InitPalette(&f, bm);
-    } else if (fill)
-	f.args.PBA_flags |= PBF_FILL_MASK;
+/* graphicsBitmapHuge.asm: the bitmap in the huge array's directory
+ * block (EditableBitmap: EB_bm after the HugeArrayDirectory), one scan
+ * line per element */
+static void DrawHuge(GrDraw *d, sword x, sword y, VMFileHandle file,
+		     VMBlockHandle block, Boolean fill)
+{
+    BMFrame f;
+    void *dir;
 
-    if (bm->B_compact != BMC_UNCOMPACTED && bm->B_compact != BMC_PACKBITS)
-	return;					/* LZG: not yet */
-    if (rotated) {
-	DrawRotated(&f, x, y);
+    if (GrTrivialReject(d))
 	return;
-    }
-    if (scaled) {
-	DrawScaled(&f);
-	return;
-    }
-    if (bm->B_compact == BMC_PACKBITS) {
-	DrawUnpacked(&f);
-	return;
-    }
-    if (!complexBM) {
-	f.args.PBA_data = (const byte *) (bm + 1);
-	f.args.PBA_bm.B_height = bm->B_height;
-	PutBits(&f, f.y);
-	return;
-    }
-    for (;;) {					/* handleComplex */
-	sword sy = f.y;
-	if (bm != f.bm)
-	    sy = (sword) (f.y + Complex(bm)->CB_startScan);
-	if (Complex(bm)->CB_numScans) {
-	    f.args.PBA_data = (const byte *) bm + Complex(bm)->CB_data;
-	    f.args.PBA_bm.B_height = Complex(bm)->CB_numScans;
-	    PutBits(&f, sy);
-	}
-	bm = NextSlice(&f, bm);			/* BMCallBack */
-	if (!bm)
-	    break;
-    }
+    memset(&f, 0, sizeof(f));
+    HugeArrayLockDir(file, block, &dir);
+    f.d = d;
+    f.bm = (const Bitmap *) ((byte *) dir + sizeof(HugeArrayDirectory));
+    f.fill = fill;
+    f.hfile = file;
+    f.hblock = block;
+    Draw(&f, x, y);
+    if (f.hdata)
+	HugeArrayUnlock((void *) f.hdata);
+    HugeArrayUnlockDir(dir);
+}
+
+void GrDrawHugeBitmap(GStateHandle gstate, sword x, sword y,
+		      VMFileHandle vmFile, VMBlockHandle vmBlk)
+{
+    GrDraw d;
+
+    GrEnterGraphics(gstate, &d);
+    GrSetDocPenPos(d.GD_gs, x, y);
+    DrawHuge(&d, x, y, vmFile, vmBlk, FALSE);
+    GrExitGraphics(&d);
+}
+
+void GrFillHugeBitmap(GStateHandle gstate, sword x, sword y,
+		      VMFileHandle vmFile, VMBlockHandle vmBlk)
+{
+    GrDraw d;
+
+    GrEnterGraphics(gstate, &d);
+    GrSetDocPenPos(d.GD_gs, x, y);
+    DrawHuge(&d, x, y, vmFile, vmBlk, TRUE);
+    GrExitGraphics(&d);
+}
+
+static void HugeAtCP(GStateHandle gstate, VMFileHandle vmFile,
+		     VMBlockHandle vmBlk, Boolean fill)
+{
+    XYValueAsDWord pen = GrGetCurPos(gstate);
+    GrDraw d;
+
+    GrEnterGraphics(gstate, &d);
+    DrawHuge(&d, (sword) (word) pen, (sword) (word) (pen >> 16), vmFile,
+	     vmBlk, fill);
+    GrExitGraphics(&d);
+}
+
+void GrDrawHugeBitmapAtCP(GStateHandle gstate, VMFileHandle vmFile,
+			  VMBlockHandle vmBlk)
+{
+    HugeAtCP(gstate, vmFile, vmBlk, FALSE);
+}
+
+void GrFillHugeBitmapAtCP(GStateHandle gstate, VMFileHandle vmFile,
+			  VMBlockHandle vmBlk)
+{
+    HugeAtCP(gstate, vmFile, vmBlk, TRUE);
 }
 
 void GrDrawBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,

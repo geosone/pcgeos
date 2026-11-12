@@ -23,7 +23,8 @@
  *     GrTestRectInMask, GrInvalRect (rotated too), GrInvalRectDWord;
  *   - bitmaps: monochrome drawn and filled, 24 bits, PackBits, a
  *     complex one with a palette in two slices; scaled twice, half,
- *     mirrored in x and y, at 144 dpi, and rotated;
+ *     mirrored in x and y, at 144 dpi, and rotated; huge bitmaps
+ *     (a slice per block of the huge array), scaled, and PackBits;
  *   - GrBitBlt: copy, move, clear, and from a source partly hidden;
  *   - WinScroll: the screen and the document moved, the rest washed;
  *   - fat lines: butt and square ends, mitered joins;
@@ -36,6 +37,8 @@
 #include "ghal.h"
 #include "Win/winInt.h"
 #include <file.h>
+#include <vm.h>
+#include <hugearr.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -110,6 +113,46 @@ static Bitmap *NextSlice(Bitmap *bm)
     (void) bm;
     nextSlice = NULL;
     return n;
+}
+
+/* a huge bitmap (an EditableBitmap's header): 24 bits, w x h, scan
+ * line r of color HugeRow(r) */
+static unsigned long HugeRow(word r)
+{
+    return ((unsigned long) (r * 6) << 16) | 0x4000 | (word) (0xff - r * 6);
+}
+
+static VMBlockHandle HugeBitmap(VMFileHandle vm, word w, word h)
+{
+    VMBlockHandle ha = HugeArrayCreate(vm, (word) (w * 3),
+				       sizeof(HugeArrayDirectory) +
+				       sizeof(CBitmap));
+    CBitmap *c;
+    void *dir;
+    byte line[3 * 100];
+    word r, x;
+
+    HugeArrayLockDir(vm, ha, &dir);
+    c = (CBitmap *) ((byte *) dir + sizeof(HugeArrayDirectory));
+    memset(c, 0, sizeof(*c));
+    c->CB_simple.B_width = w;
+    c->CB_simple.B_height = h;
+    c->CB_simple.B_compact = BMC_UNCOMPACTED;
+    c->CB_simple.B_type = BMF_24BIT | BMT_COMPLEX;
+    c->CB_numScans = h;
+    c->CB_xres = c->CB_yres = 72;
+    HugeArrayDirty(dir);
+    HugeArrayUnlockDir(dir);
+    for (r = 0; r < h; r++) {
+	unsigned long col = HugeRow(r);
+	for (x = 0; x < w; x++) {
+	    line[3 * x] = (byte) (col >> 16);
+	    line[3 * x + 1] = (byte) (col >> 8);
+	    line[3 * x + 2] = (byte) col;
+	}
+	HugeArrayAppend(vm, ha, 1, line);
+    }
+    return ha;
 }
 
 int main(int argc, char **argv)
@@ -713,6 +756,63 @@ int main(int argc, char **argv)
 	WinScroll(a, 1L << 15, 0, &amt);	/* half a pixel: no move */
 	CHECK(amt.PF_x.WWF_int == 0 && amt.PF_x.WWF_frac == 0x8000 &&
 	      Pixel(20, 20) == GREEN);
+    }
+
+    /* huge bitmaps: each block of the huge array a slice */
+    {
+	VMFileHandle vm;
+	VMBlockHandle hb, hp;
+	CBitmap *c;
+	void *dir, *el;
+	word sz;
+	static const byte pk[3][3] = {
+	    { 0x01, 0xff, 0x00 }, { 0xff, 0x0f }, { 0x01, 0x00, 0xf0 }
+	};
+	word k;
+
+	FileSetStandardPath(SP_TOP);
+	vm = VMOpen("HB.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	CHECK(vm != 0);
+	hb = HugeBitmap(vm, 60, 40);
+	CHECK(HAL_COUNT(HugeArrayLock(vm, hb, 0, &el, &sz)) < 40);
+	HugeArrayUnlock(el);			/* more than one block */
+	GrDrawHugeBitmap(g, 2, 2, vm, hb);
+	CHECK(Pixel(27, 22) == HugeRow(0) && Pixel(27, 44) == HugeRow(22) &&
+	      Pixel(27, 45) == HugeRow(23) && Pixel(81, 61) == HugeRow(39) &&
+	      Pixel(82, 61) != HugeRow(39) && Pixel(27, 62) != HugeRow(39));
+	/* scaled: through the source scan lines */
+	GrApplyScale(g, 2L << 16, 2L << 16);
+	GrDrawHugeBitmap(g, 2, 2, vm, hb);
+	GrSetNullTransform(g);
+	CHECK(Pixel(34, 24) == HugeRow(0) && Pixel(34, 25) == HugeRow(0) &&
+	      Pixel(34, 70) == HugeRow(23) && Pixel(34, 84) == HugeRow(30));
+	/* PackBits: one packed scan line per element */
+	hp = HugeArrayCreate(vm, 0, sizeof(HugeArrayDirectory) +
+			     sizeof(CBitmap));
+	HugeArrayLockDir(vm, hp, &dir);
+	c = (CBitmap *) ((byte *) dir + sizeof(HugeArrayDirectory));
+	memset(c, 0, sizeof(*c));
+	c->CB_simple.B_width = 16;
+	c->CB_simple.B_height = 3;
+	c->CB_simple.B_compact = BMC_PACKBITS;
+	c->CB_simple.B_type = BMF_MONO | BMT_COMPLEX;
+	c->CB_numScans = 3;
+	c->CB_xres = c->CB_yres = 72;
+	HugeArrayDirty(dir);
+	HugeArrayUnlockDir(dir);
+	for (k = 0; k < 3; k++)
+	    HugeArrayAppend(vm, hp, (word) (k == 1 ? 2 : 3), pk[k]);
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 30, 10);
+	SetCol(g, BLACK);
+	GrMoveTo(g, 4, 4);
+	GrDrawHugeBitmapAtCP(g, vm, hp);
+	CHECK(Pixel(24, 24) == BLACK && Pixel(31, 24) == BLACK &&
+	      Pixel(32, 24) == WHITE && Pixel(24, 25) == WHITE &&
+	      Pixel(28, 25) == BLACK && Pixel(39, 25) == BLACK &&
+	      Pixel(32, 26) == BLACK && Pixel(36, 26) == WHITE &&
+	      Pixel(24, 27) == WHITE);
+	CHECK(VMClose(vm, FALSE) == 0);
     }
 
     /* an update: only the invalid area is drawn */

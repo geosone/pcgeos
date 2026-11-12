@@ -2452,8 +2452,14 @@ than a pixel is a six-point polygon.
   the asm drivers do (`PutLineSetup`). The kernel mirrors the line
   when it needs it the other way round. The C driver had started at
   point 1; it is fixed.
-- Not yet: LZG, format conversion for devices with fewer colors, huge
-  bitmaps.
+- Huge bitmaps (`GrDrawHugeBitmap`, `GrFillHugeBitmap`, the `AtCP`
+  forms; `graphicsBitmapHuge.asm`): the bitmap is the `CBitmap` after
+  the `HugeArrayDirectory` (`EB_bm` of `EditableBitmap`), one scan line
+  per element; drawn like a complex bitmap with each block of the huge
+  array a slice (the directory stays locked, the data blocks are
+  locked in turn), so scaling, rotation and PackBits work as for the
+  others.
+- Not yet: LZG, format conversion for devices with fewer colors.
 
 **GrBitBlt** (`graphicsRaster.c`, `GrBltCommon` for `WinScroll` too):
 - Only what is visible and valid at the source is copied, with
