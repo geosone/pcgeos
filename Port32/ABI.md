@@ -2115,6 +2115,42 @@ The routines:
 ctest `kernel.region` checks AND, OR and NOT of random unions of
 rectangles point by point.
 
+**Graphics states** (`graphicsState.c`, `graphicsGetState.c` and
+`graphicsColor.c`, beside their asm files):
+- A GState is an LMem block of type `LMEM_TYPE_GSTATE`, with the
+  `GState` structure (`CInclude/Internal/gstate.h`, 32-bit handles) as
+  its header.
+- `GrCreateState` fills in the defaults of `GState <>`. There is no
+  cache of free GStates.
+- `GrSaveState` copies the whole block into a block of its own, linked
+  by `GS_saveStateLink`. `GrRestoreState` copies it back and clears the
+  window's cached flags if the window's `W_curState` is this GState.
+- A color is kept as both a palette index and an RGB value. RGB maps to
+  the closest entry by the asm's distance (`MapRGBtoIndex`): on the
+  default palette, the first 32 entries and then one entry of the color
+  cube. The palette is the window's (`W_palette`) or the default.
+- Draw masks come from the system table (`graphicsTables.c`, taken from
+  `graphicsTables.asm`) and are lined up with `GS_xShift` and
+  `GS_yShift`, as in `GrShiftMask`.
+- The `AttrOpts` flags follow the asm (`CalcRectOpts`, `SetMask`).
+- The setters and getters have the C API of `graphics.h`.
+
+Not yet:
+- graphics strings and paths: a setter only changes the GState;
+- the pen position and the transformations;
+- the fonts: `GS_fontHandle` is only cleared, and there is no
+  `GrSetFont` yet;
+- devices with 16 colors or fewer.
+
+ctest `kernel.gstate` checks:
+- the defaults;
+- index, RGB, color cube, grey and CMY colors;
+- a window's palette;
+- masks with their `AttrOpts` and alignment;
+- line, area and text attributes;
+- nested save and restore;
+- destroying a GState whose window holds it in `W_curState`.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).
