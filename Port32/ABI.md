@@ -2799,9 +2799,10 @@ as far as its scan lines go (`GrBitmapStringSize`).
 
 **Not yet:** `GR_DRAW_TEXT_FIELD` (style runs; reading one is a
 fault), the `*_PTR` and `*_OPTR` elements, bitmap slices after the
-first (callbacks), palettes, patterns, clip rectangles and path
-elements (skipped when played), `GST_PATH`, `GrGetGStringBounds` and
-`GSF_FIGURE_BOUNDS`, the truncation of a full stream.
+first (callbacks), palettes, patterns, clip rectangles and clip
+paths (skipped when played), `GrGetGStringBounds` and
+`GSF_FIGURE_BOUNDS`, the truncation of a full stream. (`GST_PATH` and
+the other path elements: §13q.)
 
 **Tests.** ctest `kernel.draw` records into a chunk and compares the
 bytes with the DOS16 elements, plays the string at a position, in parts
