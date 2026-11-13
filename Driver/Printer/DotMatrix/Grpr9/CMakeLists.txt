@@ -1,5 +1,6 @@
-# The IBM Graphics 9-pin printer driver (grpr9.geo) in C: grpr9Manager.asm's PrintCom
-# files (the IBM job, MX cursor by tabs, color, FX graphics, its styles) and its control codes.
+# The IBM Graphics 9-pin printer driver (grpr9.geo) in C: grpr9Manager.asm's
+# PrintCom files (the IBM job, MX cursor by tabs, color, FX graphics, its
+# styles) and its control codes.
 include(${CMAKE_CURRENT_SOURCE_DIR}/../DotMatrix.cmake)
 geos_dotmatrix_driver(grpr9 GP grpr932.gp REV grpr9.rev
   FONTS Text/Font/fontIBMGrprInfo.asm

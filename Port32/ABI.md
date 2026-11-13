@@ -1011,6 +1011,20 @@ resolution is 360 x 360 dpi: two interleaves of 24 pins 1/360" apart,
 each in two passes across (`graphicsHi24IntXY.c`; the NEC's `FS Z`), or
 one pass of 48 pins (`graphicsHi48.c`, `rotate48.c`, `ESC * 73`).
 
+The IBM style drivers `prop9.geo` (Proprinter 9-pin), `propx24.geo`
+(Proprinter X24, 360 x 180 dpi), `ppds24.geo` (PPDS 24-pin, 360 x 360
+dpi in two interleaves, the custom exit `customPPDS24.c` back to the
+user settings, the page length on every path `pageStartForceLength.c`,
+`pageEnd.c`) and `canon48.geo` (BJ-130, 48 jets) share the IBM job and
+styles (`DOTMATRIX_IBM_COMMON`, `printcomIBMStyles.c` with overline,
+`printcomIBMPPDS24Styles.c` with shadow and outline) and the 24-pin
+graphics code `ESC [ g` (`graphicsIBMX24Common.c`: a byte count and the
+mode, the drivers' graphics codes are the mode alone) with the swaths in
+1/180" or 1/360" (`graphicsPrintSwath72To180.c`, `72To360.c`).
+`jobEndDotMatrix.c` runs a device's custom exit as the asm does. A
+driver may have several font files (Canon48: `FONTS` of
+`geos_dotmatrix_driver`, `--fonts` of `dmdevinfo2c.py` repeated).
+
 The control codes and the constants of these drivers come from the asm
 by `Port32/tools/ctlcodes2c.py` (`printcomDriver.h`,
 `*ControlCodes.c`, checked in). Labels without bytes of their own share

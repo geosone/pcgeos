@@ -74,6 +74,7 @@ extern const unsigned long pcl4_geode_size;
 NINEPIN(epmx9) NINEPIN(eplx9) NINEPIN(eprx9) NINEPIN(bchip9)
 NINEPIN(diconix9) NINEPIN(star9) NINEPIN(grpr9)
 NINEPIN(nec24) NINEPIN(epshi24) NINEPIN(epson48)
+NINEPIN(prop9) NINEPIN(propx24) NINEPIN(ppds24) NINEPIN(canon48)
 
 static int fails;
 #define CHECK(c) \
@@ -579,7 +580,8 @@ typedef struct {
     int vunit;
     int ibm;
     int lq;		/* 24 pins: ESC * 0 at 1/60", line feeds of the
-			 * spacing (ESC +, NEC FS 3) in 1/360" */
+			 * spacing (ESC +, NEC FS 3; IBM ESC 3) in 1/360" */
+    int absUnit;	/* ESC $ (IBM CR ESC d) units an inch, 0: 60 */
 } EpsonDialect;
 
 static void EpsonDot(EpsonDecode *d, int x, int y)
@@ -713,8 +715,45 @@ static void EpsonDecodeFileDialect(const byte *b, size_t n,
 		spacing = b[i] * dl->vunit / 360;
 	    i++;
 	    break;
+	case '3':
+	    if (dl && dl->lq && dl->ibm && i < n)
+		spacing = b[i] * dl->vunit / 360;
+	    i++;
+	    break;
+	case '[':		/* IBM: ESC [ c, a count, the bytes */
+	    if (i + 3 > n) {
+		d->bad++;
+		return;
+	    }
+	    c = b[i];
+	    cols = (size_t) (b[i + 1] | b[i + 2] << 8);
+	    i += 3;
+	    if (i + cols > n) {
+		d->bad++;
+		return;
+	    }
+	    if (c == 'g' && cols) {	/* graphics: the mode, the columns */
+		c = b[i];
+		colBytes = c >= 13 ? 6 : c >= 8 ? 3 : 1;
+		dpi = c == 0 ? 60 : c == 11 ? 180 : c == 12 || c == 16 ? 360 :
+		      0;
+		pitch = dl->vunit / (c >= 13 ? 360 : c >= 8 ? 180 : 72);
+		if (!dpi || hdpi % dpi || (cols - 1) % colBytes) {
+		    d->bad++;
+		    return;
+		}
+		scale = hdpi / dpi;
+		d->modes[c]++;
+		for (k = 0; k < (cols - 1) / colBytes; k++, x += scale)
+		    for (pin = 0; pin < 8 * colBytes; pin++)
+			if (b[i + 1 + k * colBytes + pin / 8] &
+			    (0x80 >> (pin % 8)))
+			    EpsonDot(d, x, y + pin * pitch);
+	    }
+	    i += cols;
+	    break;
 	case 't': case 'U': case 'r': case 'R': case 'x': case 'S':
-	case 'W': case 'w': case 'k': case 'p': case '3':
+	case 'W': case 'w': case 'k': case 'p':
 	case 0x19: case 'B': case 'I': case '_': case '7':
 	    i++;
 	    break;
@@ -748,9 +787,16 @@ static void EpsonDecodeFileDialect(const byte *b, size_t n,
 		y += b[i];
 	    i++;
 	    break;
+	case 'd':			/* IBM: after a CR */
+	    if (!dl || !dl->ibm) {
+		d->bad++;
+		return;
+	    }
+	    /* FALLTHROUGH */
 	case '$':
 	    if (i + 1 < n)
-		x = (b[i] | b[i + 1] << 8) * hdpi / 60;
+		x = (b[i] | b[i + 1] << 8) * hdpi /
+		    (dl && dl->absUnit ? dl->absUnit : 60);
 	    i += 2;
 	    if (!d->pages && d->textLen < (int) sizeof(d->text) - 1)
 		d->text[d->textLen++] = '|';
@@ -1574,8 +1620,9 @@ static void TestNinePin(const NinePin *np, int out)
 	printf("%s mode %d: %lu bytes, %d pages, %d rasters, %ld dots, "
 	       "%dx%d at %d,%d, page 2: %ld dots, %dx%d at %d,%d\n",
 	       np->device, modes[m], (unsigned long) n, d.pages,
-	       d.gfx + d.modes[0] + d.modes[1] + d.modes[3] + d.modes[39] +
-	       d.modes[40] + d.modes[73], d.dots, w, h,
+	       d.gfx + d.modes[0] + d.modes[1] + d.modes[3] + d.modes[11] +
+	       d.modes[12] + d.modes[16] + d.modes[39] + d.modes[40] +
+	       d.modes[73], d.dots, w, h,
 	       d.left, d.top, d.dots2, d.right2 - d.left2,
 	       d.bottom2 - d.top2, d.left2, d.top2);
 	CHECK(!d.bad);
@@ -1665,6 +1712,12 @@ int main(int argc, char **argv)
 	"device = Epson LQ-850\r\n"
 	"[Epson48 File]\r\ndriver = epson48.geo\r\n"
 	"device = Epson Stylus Color (Color)\r\n"
+	"[Prop9 File]\r\ndriver = prop9.geo\r\ndevice = IBM Proprinter II\r\n"
+	"[Propx24 File]\r\ndriver = propx24.geo\r\n"
+	"device = IBM Proprinter X24\r\n"
+	"[Ppds24 File]\r\ndriver = ppds24.geo\r\n"
+	"device = IBM Personal Printer Series II 2390\r\n"
+	"[Canon48 File]\r\ndriver = canon48.geo\r\ndevice = Canon BJ-130e\r\n"
 	"[spool]\r\nhostPrinters = false\r\n";
     static const char patch[] = "% devpatch\r\n";
     GeodeLoadError e;
@@ -1729,6 +1782,10 @@ int main(int argc, char **argv)
     Put("SYSTEM/PRINTER/nec24.geo", nec24_geode, nec24_geode_size);
     Put("SYSTEM/PRINTER/epshi24.geo", epshi24_geode, epshi24_geode_size);
     Put("SYSTEM/PRINTER/epson48.geo", epson48_geode, epson48_geode_size);
+    Put("SYSTEM/PRINTER/prop9.geo", prop9_geode, prop9_geode_size);
+    Put("SYSTEM/PRINTER/propx24.geo", propx24_geode, propx24_geode_size);
+    Put("SYSTEM/PRINTER/ppds24.geo", ppds24_geode, ppds24_geode_size);
+    Put("SYSTEM/PRINTER/canon48.geo", canon48_geode, canon48_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
@@ -1796,25 +1853,34 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "dotmatrix")) {
 	static const NinePin np[] = {
 	    { "Epmx9 File", "epmx9", "Epson MX-80 Type III",
-	      { "K60L120", 216, 0, 0 }, 1, 1, 0 },
-	    { "Eplx9 File", "eplx9", "Epson Apex 80", { "", 216, 0, 0 }, 1, 1, 0 },
+	      { "K60L120", 216, 0, 0, 0 }, 1, 1, 0 },
+	    { "Eplx9 File", "eplx9", "Epson Apex 80", { "", 216, 0, 0, 0 }, 1, 1, 0 },
 	    { "Eprx9 File", "eprx9", "Epson RX-80",
-	      { "K60L120Z240", 216, 0, 0 }, 0, 1, 0 },
+	      { "K60L120Z240", 216, 0, 0, 0 }, 0, 1, 0 },
 	    { "Bchip9 File", "bchip9", "Blue Chip M120",
-	      { "K80L160", 216, 0, 0 }, 1, 1, 0 },
+	      { "K80L160", 216, 0, 0, 0 }, 1, 1, 0 },
 	    { "Diconix9 File", "diconix9", "Diconix 150 (Epson Mode)",
-	      { "K80L160", 288, 0, 0 }, 1, 1, 0 },
+	      { "K80L160", 288, 0, 0, 0 }, 1, 1, 0 },
 	    { "Star9 File", "star9", "Star Gemini-10x",
-	      { "K60L120z240", 144, 0, 0 }, 1, 1, 0 },
+	      { "K60L120z240", 144, 0, 0, 0 }, 1, 1, 0 },
 	    /* no underline in the IBM Graphics fonts */
 	    { "Grpr9 File", "grpr9", "IBM Graphics Printer",
-	      { "K60L120Z240", 216, 1, 0 }, 1, 0, 0 },
-	    { "Nec24 File", "nec24", "NEC P2200", { "", 360, 0, 1 }, 0, 1,
+	      { "K60L120Z240", 216, 1, 0, 0 }, 1, 0, 0 },
+	    { "Nec24 File", "nec24", "NEC P2200", { "", 360, 0, 1, 0 }, 0, 1,
 	      360 },
 	    { "Epshi24 File", "epshi24", "Epson LQ-850",
-	      { "", 360, 0, 1 }, 0, 1, 360 },
+	      { "", 360, 0, 1, 0 }, 0, 1, 360 },
 	    { "Epson48 File", "epson48", "Epson Stylus Color (Color)",
-	      { "", 360, 0, 1 }, 0, 1, 360 }
+	      { "", 360, 0, 1, 0 }, 0, 1, 360 },
+	    { "Prop9 File", "prop9", "IBM Proprinter II",
+	      { "K60L120Z240", 216, 1, 0, 0 }, 1, 1, 0 },
+	    { "Propx24 File", "propx24", "IBM Proprinter X24",
+	      { "", 180, 1, 0, 0 }, 1, 1, 360 },
+	    { "Ppds24 File", "ppds24",
+	      "IBM Personal Printer Series II 2390",
+	      { "", 360, 1, 1, 120 }, 0, 1, 360 },
+	    { "Canon48 File", "canon48", "Canon BJ-130e",
+	      { "", 360, 1, 0, 120 }, 0, 1, 360 }
 	};
 	for (i = 0; i < (int) (sizeof(np) / sizeof(np[0])); i++)
 	    if (argc < 3 || !strcmp(argv[2], np[i].driver))

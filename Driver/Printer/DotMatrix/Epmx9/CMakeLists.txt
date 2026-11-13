@@ -1,5 +1,6 @@
-# The Epson MX 9-pin printer driver (epmx9.geo) in C: epmx9Manager.asm's PrintCom
-# files (MX cursor by tabs, MX text, 120 x 216 dpi graphics) and its control codes.
+# The Epson MX 9-pin printer driver (epmx9.geo) in C: epmx9Manager.asm's
+# PrintCom files (MX cursor by tabs, MX text, 120 x 216 dpi graphics) and its
+# control codes.
 include(${CMAKE_CURRENT_SOURCE_DIR}/../DotMatrix.cmake)
 geos_dotmatrix_driver(epmx9 GP epmx932.gp REV epmx9.rev
   FONTS Text/Font/fontEpsonMXInfo.asm

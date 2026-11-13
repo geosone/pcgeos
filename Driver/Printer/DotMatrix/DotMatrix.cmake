@@ -3,7 +3,7 @@
 # font tables come from the asm (Port32/tools/dmdevinfo2c.py).  Geodes
 # need gcc or clang (module loading).
 #
-# geos_dotmatrix_driver(<name> GP <gp> REV <rev> [FONTS <font info asm>]
+# geos_dotmatrix_driver(<name> GP <gp> REV <rev> [FONTS <font info asm>...]
 #                       [INFOS <info asm>...]
 #                       PRINTCOM <PrintCom files> SOURCES <own files>)
 # The driver's directory holds <name>DriverInfo.asm, its *Info.asm (or
@@ -15,7 +15,7 @@ include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
 find_package(Python3 COMPONENTS Interpreter)
 
 function(geos_dotmatrix_driver name)
-  cmake_parse_arguments(D "" "GP;REV;FONTS" "INFOS;PRINTCOM;SOURCES"
+  cmake_parse_arguments(D "" "GP;REV" "FONTS;INFOS;PRINTCOM;SOURCES"
                         ${ARGN})
   if(NOT (GEOS_GOC AND Python3_Interpreter_FOUND AND
           CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"))
@@ -34,10 +34,10 @@ function(geos_dotmatrix_driver name)
   endif()
   set(fonts)
   set(fontdep)
-  if(D_FONTS)
-    set(fonts --fonts ${pc}/${D_FONTS})
-    set(fontdep ${pc}/${D_FONTS})
-  endif()
+  foreach(f ${D_FONTS})
+    list(APPEND fonts --fonts ${pc}/${f})
+    list(APPEND fontdep ${pc}/${f})
+  endforeach()
   set(devices ${CMAKE_CURRENT_BINARY_DIR}/${name}Devices.c)
   add_custom_command(OUTPUT ${devices}
     COMMAND ${Python3_EXECUTABLE}
@@ -62,9 +62,8 @@ endfunction()
 # printcom*.asm: what they all share (entry, info, the DotMatrix page,
 # cursor basics, text, stream, buffer, the graphics' common part and the
 # low resolution)
-set(DOTMATRIX_BASE
+set(DOTMATRIX_CORE
     printcomEntry.c printcomInfo.c printcomAdmin.c printcomNoEscapes.c
-    Page/pageStartSetLength.c Page/pageEndLFSetLength.c
     Cursor/cursorDotMatrixCommon.c
     Text/textPrintText.c Text/textPrintRaw.c
     Text/textSetFont.c Text/textGetLineSpacing.c Text/textSetLineSpacing.c
@@ -75,8 +74,11 @@ set(DOTMATRIX_BASE
     Buffer/bufferScanBand.c Buffer/bufferSendOutput.c
     Buffer/bufferClearOutput.c
     Graphics/graphicsCommon.c Graphics/graphics3Resolutions.c
-    Graphics/graphicsEpsonCommon.c Graphics/graphicsLo8.c
-    Graphics/Rotate/rotate8.c)
+    Graphics/graphicsLo8.c Graphics/Rotate/rotate8.c)
+set(DOTMATRIX_PAGE
+    Page/pageStartSetLength.c Page/pageEndLFSetLength.c)
+set(DOTMATRIX_BASE
+    ${DOTMATRIX_CORE} ${DOTMATRIX_PAGE} Graphics/graphicsEpsonCommon.c)
 # printcomEpsonJob.asm, printcomIBMJob.asm
 set(DOTMATRIX_EPSON_JOB
     Job/jobStartDefeatPaperout.c Job/jobEndDotMatrix.c
@@ -134,4 +136,15 @@ set(DOTMATRIX_LQ2_COMMON
     Graphics/graphicsPrintSwath360.c)
 set(DOTMATRIX_LQ2_GRAPHICS
     Graphics/graphicsHi24IntXY.c Graphics/Rotate/rotate2pass24.c
+    Graphics/graphicsMed24.c Graphics/Rotate/rotate24.c)
+
+# the IBM style drivers: the IBM job (custom entry and exit routines) and
+# styles (overline), the graphics code ESC [ g with its byte count
+# (graphicsIBMX24Common.c); the dialogs are printcomPaperOnlyDialog.c
+set(DOTMATRIX_IBM_COMMON
+    ${DOTMATRIX_CORE} ${DOTMATRIX_IBM_JOB}
+    printcomPaperOnlyDialog.c
+    Text/textPrintStyleRun.c Text/textLoadNoISOSymbolSet.c)
+set(DOTMATRIX_IBMX24_GRAPHICS
+    Graphics/graphicsIBMX24Common.c
     Graphics/graphicsMed24.c Graphics/Rotate/rotate24.c)

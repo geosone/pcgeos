@@ -12,7 +12,10 @@ checked in like any other port.
     ctlcodes2c.py -n <name> -d <driver dir> [-t <title>]
 
 The control codes keep the asm's comments.  A code whose bytes do not
-match its count is refused, as are expressions the tool cannot read.
+match its count is refused (but for graphics codes of the mode byte
+alone, and bytes after a code from a line of their own, of a label
+commented out, which are dropped), as are expressions the tool cannot
+read.
 """
 
 import argparse
@@ -29,6 +32,7 @@ CHARS = {'C_NULL': 0, 'C_SOH': 1, 'C_STX': 2, 'C_ETX': 3, 'C_EOT': 4,
          'C_ETB': 23, 'C_CAN': 24, 'C_EM': 25, 'C_SUB': 26, 'C_ESC': 27,
          'C_FS': 28, 'C_GS': 29, 'C_RS': 30, 'C_US': 31, 'C_SPACE': 32,
          'C_DEL': 127}
+CHARS.update({'C_CTRL_' + chr(64 + k): k for k in range(1, 27)})
 # the constants a driver's C files use
 CONST_RE = re.compile(r'^(?:LO|MED|HI)_RES_(?:BAND_HEIGHT|INTERLEAVE_FACTOR|'
                       r'BUFF_HEIGHT|X_RES|Y_RES)$|^PR_|^ENOUGH_BLANK$|'
@@ -97,6 +101,7 @@ def evaluate(expr, consts):
     e = re.sub(r'\b([0-9][0-9a-fA-F]*)[hH]\b',
                lambda m: str(int(m.group(1), 16)), e)
     e = re.sub(r'\b0x[0-9a-fA-F]+\b', lambda m: str(int(m.group(0), 16)), e)
+    e = re.sub(r'\b([01]+)[bB]\b', lambda m: str(int(m.group(1), 2)), e)
 
     def name(m):
         n = m.group(0)
@@ -119,11 +124,16 @@ def evaluate(expr, consts):
 def c_item(tok, consts):
     """an asm byte operand as C items"""
     if tok[0] in '"\'' and tok[-1] == tok[0]:
-        out = []
-        for ch in tok[1:-1]:
-            out.append("'\\''" if ch == "'" else
-                       "'\\\\'" if ch == '\\' else "'%s'" % ch)
-        return out, len(tok) - 2
+        # Esp strings escape with a backslash ("[\\" is '[', '\\')
+        chars, body, k = [], tok[1:-1], 0
+        while k < len(body):
+            if body[k] == '\\' and k + 1 < len(body):
+                k += 1
+            chars.append(body[k])
+            k += 1
+        out = ["'\\''" if ch == "'" else
+               "'\\\\'" if ch == '\\' else "'%s'" % ch for ch in chars]
+        return out, len(out)
     if tok in CHARS:
         return [tok], 1
     if re.fullmatch(r'[A-Za-z_]\w*', tok) and tok in consts and \
@@ -187,13 +197,33 @@ def read_codes(path, consts):
     return codes
 
 
+# graphics codes that are the mode byte alone (the IBM drivers' ESC [ g)
+MODE_CODES = ('pr_codes_SetLoGraphics', 'pr_codes_SetMedGraphics',
+              'pr_codes_SetHiGraphics')
+
+
 def check_count(code, consts):
+    if sum(len(i) for i, _ in code['items']) == 1 and \
+            code['name'] in MODE_CODES:
+        return
     first = code['items'][0][0][0]
     try:
         count = int(first) if first not in CHARS else CHARS[first]
     except ValueError:
         fail('%s: the count is %s' % (code['name'], first))
     n = sum(len(i) for i, _ in code['items']) - 1
+    if n > count:
+        # bytes after the code, of a label commented out: dropped when
+        # they start a line of their own
+        k, m = 0, -1
+        while k < len(code['items']) and m < count:
+            m += len(code['items'][k][0])
+            k += 1
+        if m == count:
+            sys.stderr.write('ctlcodes2c: %s: %d bytes after it dropped\n'
+                             % (code['name'], n - count))
+            del code['items'][k:]
+            return
     if n != count:
         fail('%s: count %d, %d bytes' % (code['name'], count, n))
 

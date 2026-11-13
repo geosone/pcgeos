@@ -1,5 +1,6 @@
-# The BlueChip 9-pin printer driver (bchip9.geo) in C: bchip9Manager.asm's PrintCom
-# files (MX cursor by tabs, MX graphics, its country codes) and its control codes.
+# The BlueChip 9-pin printer driver (bchip9.geo) in C: bchip9Manager.asm's
+# PrintCom files (MX cursor by tabs, MX graphics, its country codes) and its
+# control codes.
 include(${CMAKE_CURRENT_SOURCE_DIR}/../DotMatrix.cmake)
 geos_dotmatrix_driver(bchip9 GP bchip932.gp REV bchip9.rev
   FONTS Text/Font/fontEpsonMXInfo.asm
