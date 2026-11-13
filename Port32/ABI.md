@@ -844,13 +844,25 @@ with the C vidcom). It draws into the bitmaps of `GrCreateBitmap`
   `ditherBlack`, by `CalcLuminance`), anchored at the bitmap's origin;
   otherwise black where a color is dark (DOS16's ordered dither is not
   ported).
+- CMYK and CMY (`BMF_4CMYK`, `BMF_3CMY`, the spooler's swaths for the
+  color printers): four planes of a bit a pixel in a scan line, yellow,
+  cyan, magenta, black, as the CMYK module. A color goes to 255 less
+  red, green, blue; in CMYK their minimum goes to black (the undercolor
+  removal of `SetDither`), and each ink is drawn in the clustered
+  pattern of its level (`CMYK/cmykDither.c`: cyan and magenta 40 pixels
+  by 10 lines, yellow 8 by 4, black 24 by 6, the 33 levels each). A
+  pixel reads back as the RGB of its inks, the mix modes work on it.
+  `DR_VID_INFO` gives the format as 24 bits, the colors the kernel
+  passes; `GrCreateBitmap` takes the CMYK formats (`IsFormatSupported`
+  asked the driver). ctests `driver.dj500c`, `driver.mercury`.
 - `DR_VID_SET_PALETTE` and `DR_VID_GET_PALETTE` work on the palette in
   the bitmap's header (`BMT_PALETTE`): `WinRealizePalette` on its window
   sets it, and indices drawn after take it. A bitmap without a palette
   keeps none; reading gives the default palette with a count of 0. The
   asm's `VidGetPalette` read from the header instead of the palette.
   The VidCom hook is `vidDevPalette`. ctest `kernel.draw`.
-- Not yet: CMYK, dithering, color transfer.
+- Not yet: the ordered dither, color transfer (the printer's color
+  correction, `EB_color`).
   There is no device to set, no pointer, no XOR region.
 
 The host display got `VidDevInfo` and `VidDevBegin` too; they do
@@ -1045,6 +1057,23 @@ asm multiplied its lines by 0). The spooler maps a graphics mode the
 device has not (the Okidata's and the C.Itoh's medium, offset 0) to one
 it has, better ones first (`AvailableMode`, `processThread.c`); in DOS16
 the print dialog offered only the device's modes.
+
+The color DeskJets: `dj500c.geo` (CMY: the DeskJets with
+three colors, 22 of them from the 500C to the 1600C, a CMY one without
+color correction, the PaintJet XL300 with the PJL entry and exit of
+`customPaintJetXL300PCL.c`) and `mercury.geo` (KCMY: 19 from the 550C to the 1600C
+with four), the PCL job, page and cursor of the DeskJet without text and
+styles (`printcomNoText.c` and `printcomNoStyles.c` give the routines the
+cursor and page code call, as the asm's stubs). A scan line goes as its
+planes, `ESC * b # V` each in the order of the palette (`ESC * r -3 U`
+cyan, magenta, yellow; `-4 U` black first), from the planes of the swath
+(yellow, cyan, magenta, black: `graphicsPrintSwathPCLCMY.c`,
+`graphicsPrintSwathPCLKCMY.c`), then `ESC * b 0 W` of
+`Pr1ScanlineFeed`, all TIFF compressed or not. A custom entry of
+`jobStartPCL.c` that went on past the reset (`InitPState`) returns
+`PR_CUSTOM_AT_INIT_PSTATE`. The color correction tables
+(`correctDJ500C.asm`, `correctDJ550C.asm`) are not ported, nor is the
+options box.
 
 The control codes and the constants of these drivers come from the asm
 by `Port32/tools/ctlcodes2c.py` (`printcomDriver.h`,
@@ -4102,9 +4131,9 @@ geode is built from `spool32.gp`.
   as DOS16 did: `vidmem.geo`, unless `[system] noVidMem`), the swath
   goes to `DR_PRINT_SWATH` with dx the VM file and cx the bitmap's
   block, and the page moves up a swath; tiling and the manual feed box
-  as for PDL. The kernel has no CMYK or CMY bitmaps: such a device
-  gets a monochrome swath and prints in black. The mode's color
-  correction is not used. `VMOpen` with `VMO_TEMP_FILE` now returns the
+  as for PDL. The swath has the mode's format: monochrome, or CMYK and
+  CMY for the color printers (the memory video driver's planes). The
+  mode's color correction is not used. `VMOpen` with `VMO_TEMP_FILE` now returns the
   file's name in the caller's buffer, as DOS16 did.
 - **Text modes** (`processText.c`): the text of a page is taken out of
   its graphics string (drawing it with `GSC_OUTPUT` on a gstate without

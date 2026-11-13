@@ -40,5 +40,8 @@ extern byte vmDefaultPalette[256 * 3];
 #define VM_DITHER_WIDTH		24
 #define VM_DITHER_LEVELS	33
 extern const byte (*const vidmemDitherBlack[VM_DITHER_LEVELS])[3];
+extern const byte (*const vidmemDitherCyan[VM_DITHER_LEVELS])[5];
+extern const byte (*const vidmemDitherMagenta[VM_DITHER_LEVELS])[5];
+extern const byte *const vidmemDitherYellow[VM_DITHER_LEVELS];
 
 #endif /* VIDMEM_H */

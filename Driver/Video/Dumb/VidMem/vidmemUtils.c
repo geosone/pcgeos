@@ -17,6 +17,15 @@
  * spooler's swaths), where the clustered dither of its luminance is
  * (CMYK/cmykDither.c).  Editing the mask (BM_EDIT_MASK) draws
  * monochrome into the mask.
+ *
+ * CMYK and CMY (the print spooler's swaths for the color printers): a
+ * scan line is four planes of a bit a pixel, yellow, cyan, magenta and
+ * black, as the CMYK module had them.  A color goes to cyan, magenta and
+ * yellow as 255 less red, green and blue; in CMYK their minimum goes to
+ * black (the undercolor removal of SetDither), and each is drawn in its
+ * clustered dither pattern.  A pixel reads back as the RGB of its inks.
+ * The mix modes work on that RGB.  Not ported: the color transfer
+ * (correction) table of the printer driver (EB_color).
  */
 #include "vidmem.h"
 
@@ -128,6 +137,63 @@ static byte *Line(sword y)
 	   vmBM.dataOffset;
 }
 
+/* the four planes of a CMYK scan line: yellow, cyan, magenta, black */
+#define CMYK_PLANE	((word) ((vmBM.width + 7) >> 3))
+
+static dword CmykGet(const byte *p, sword x)
+{
+    byte bit = (byte) (0x80 >> (x & 7));
+    word o = (word) (x >> 3);
+    int r = 255, g = 255, b = 255;
+
+    if (p[o + 3 * CMYK_PLANE] & bit)
+	return 0;			/* black */
+    if (p[o + CMYK_PLANE] & bit)
+	r = 0;				/* cyan */
+    if (p[o + 2 * CMYK_PLANE] & bit)
+	g = 0;				/* magenta */
+    if (p[o] & bit)
+	b = 0;				/* yellow */
+    return ((dword) r << 16) | ((dword) g << 8) | (dword) b;
+}
+
+/* SetDither's index of a level of 0 to 255: / 8, rounded */
+#define CMYK_LEVEL(v)	(((v) >> 3) + (((v) >> 2) & 1))
+
+static void CmykPut(byte *p, sword x, sword y, dword c)
+{
+    int cy = 255 - (int) ((c >> 16) & 0xff),
+	ma = 255 - (int) ((c >> 8) & 0xff),
+	ye = 255 - (int) (c & 0xff), k = 0;
+    byte bit = (byte) (0x80 >> (x & 7)), on[4];
+    word o = (word) (x >> 3), i;
+    int col = x >> 3, row;
+
+    if (vmBM.format == BMF_4CMYK) {	/* the undercolor removal */
+	k = cy < ma ? cy : ma;
+	if (ye < k)
+	    k = ye;
+	cy -= k;
+	ma -= k;
+	ye -= k;
+    }
+    row = y % 10;
+    on[0] = vidmemDitherYellow[CMYK_LEVEL(ye)][y & 3];
+    on[1] = vidmemDitherCyan[CMYK_LEVEL(cy)][row][col % 6 == 5 ? 0
+							     : col % 6];
+    on[2] = vidmemDitherMagenta[CMYK_LEVEL(ma)][row][col % 6 == 5 ? 0
+								: col % 6];
+    on[3] = vidmemDitherBlack[CMYK_LEVEL(k)][y % VM_DITHER_HEIGHT]
+	[(col & 3) == 3 ? 0 : col & 3];
+    for (i = 0; i < 4; i++) {
+	byte *q = p + o + i * CMYK_PLANE;
+	if (on[i] & bit)
+	    *q |= bit;
+	else
+	    *q &= (byte) ~bit;
+    }
+}
+
 static dword PalColor(byte i)
 {
     const byte *e = vmBM.pal + 3 * (i < vmBM.nPal ? i : 0);
@@ -193,6 +259,9 @@ dword VidDevGetPixel(sword x, sword y)
 	return PalColor((byte) ((x & 1) ? p[x >> 1] & 0x0f : p[x >> 1] >> 4));
     case BMF_8BIT:
 	return PalColor(p[x]);
+    case BMF_4CMYK:
+    case BMF_3CMY:
+	return CmykGet(p, x);
     default:
 	p += 3 * x;
 	return ((dword) p[0] << 16) | ((dword) p[1] << 8) | p[2];
@@ -258,6 +327,11 @@ static void Put(byte *p, sword x, sword y, dword c, MixMode m)
     }
     case BMF_8BIT:
 	p[x] = (byte) Mix(p[x], Nearest(c, 256), m, 0xff);
+	break;
+    case BMF_4CMYK:
+    case BMF_3CMY:
+	CmykPut(p, x, y, m == MM_COPY ? c
+		: Mix(CmykGet(p, x), c, m, 0xffffffUL));
 	break;
     default: {
 	byte *q = p + 3 * x;

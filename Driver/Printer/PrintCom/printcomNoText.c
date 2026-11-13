@@ -24,3 +24,16 @@ Boolean PrintRaw(PState *ps, DriverRegs *r)
 {
     return PrintStreamWrite(ps, r->DR_dsSi, (word) r->DR_cx);
 }
+
+/* PrintSetSymbolSet, PrintLoadSymbolSet: no symbol set without text */
+Boolean PrintSetSymbolSet(PState *ps)
+{
+    (void) ps;
+    return FALSE;
+}
+
+Boolean PrintLoadSymbolSet(PState *ps)
+{
+    (void) ps;
+    return FALSE;
+}

@@ -19,19 +19,23 @@ Boolean PrintStartJob(PState *ps, DriverRegs *r)
 {
     const PrinterInfo *pi = ps->PS_deviceInfo;
     word lines;
+    Boolean init;
 #ifdef PCL4MODE
     JobParameters *jp = PS_JOB_PARAMS(ps);
-    byte init;
+    byte mem;
 #endif
 
     (void) r;
     ps->PS_printerType = pi->PI_type;
     ps->PS_printerSmart = pi->PI_smarts;
-    /* the custom entry, then the standard start (BeginInit) */
-    if (pi->PI_customEntry &&
-	printCustomRoutines[pi->PI_customEntry](ps))
+    /* the custom entry, then the standard start (BeginInit), or past
+     * the reset (InitPState) */
+    init = pi->PI_customEntry ? printCustomRoutines[pi->PI_customEntry](ps)
+			      : FALSE;
+    if (init == TRUE)
 	return TRUE;
-    if (SendCodeOut(ps, pr_codes_ResetPrinter))
+    if (init != PR_CUSTOM_AT_INIT_PSTATE &&
+	SendCodeOut(ps, pr_codes_ResetPrinter))
 	return TRUE;
 #ifdef PCL4MODE
     if (jp->JP_spoolOpts & SO_COLLATE)
@@ -57,10 +61,10 @@ Boolean PrintStartJob(PState *ps, DriverRegs *r)
 	SendCodeOut(ps, pr_codes_InitPrinter))
 	return TRUE;
 #ifdef PCL4MODE
-    init = PS_UI_DATA(ps)->PUID_initMemory;
-    if (init <= HPFC_DELETE_TEMP_SOFT_FONTS &&
-	(WriteNumCommand(ps, pr_codes_FontControl, init) ||
-	 WriteNumCommand(ps, pr_codes_MacroControl, (word) (init + 6))))
+    mem = PS_UI_DATA(ps)->PUID_initMemory;
+    if (mem <= HPFC_DELETE_TEMP_SOFT_FONTS &&
+	(WriteNumCommand(ps, pr_codes_FontControl, mem) ||
+	 WriteNumCommand(ps, pr_codes_MacroControl, (word) (mem + 6))))
 	return TRUE;		/* the macros: all or the temporary ones */
     if (jp->JP_paperSizeInfo.PSR_layout.PL_paper & PT_ENVELOPE)
 	return FALSE;

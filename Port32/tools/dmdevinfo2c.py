@@ -346,6 +346,9 @@ def parse_devices(path):
                          r'\s*(\w+)', text, re.M):
         out.append((m.group(1), m.group(2), m.group(3)))
     pdi = sub_lists(inner(text[text.index('PrintDriverInfo'):])[0])
+    # older drivers (mercury) give only the first fields: the rest are 0,
+    # as Esp leaves them
+    pdi += ['0'] * (6 - len(pdi))
     words = []
     im = re.search(r'^(\w+)\s+chunk\.word(.*?)(?=^\s*$|^\S)', text,
                    re.M | re.S)

@@ -76,6 +76,7 @@ NINEPIN(diconix9) NINEPIN(star9) NINEPIN(grpr9)
 NINEPIN(nec24) NINEPIN(epshi24) NINEPIN(epson48)
 NINEPIN(prop9) NINEPIN(propx24) NINEPIN(ppds24) NINEPIN(canon48)
 NINEPIN(oki9) NINEPIN(citoh9) NINEPIN(tosh24)
+NINEPIN(dj500c) NINEPIN(mercury)
 
 static int fails;
 #define CHECK(c) \
@@ -1221,6 +1222,10 @@ typedef struct {
 					 * ESC * c # F */
     int headers, chars, inkChars, badChars, selects, moves;
     char downloaded[256];		/* the characters downloaded, page 1 */
+    /* color: the planes of a row (ESC * b # V, the last by W), their
+     * dots by plane (pages 1 and 2), the palette (ESC * r # U), PJL */
+    int planes, palette, pjl;
+    long planeDots[4], planeDots2[4];
 } PclDecode;
 
 static void PclDot(PclDecode *d, int x, int y)
@@ -1265,9 +1270,10 @@ static void PclRow(PclDecode *d, const byte *row, int n, int y)
 
 static void PclDecodeFile(const byte *b, size_t n, PclDecode *d, int abs)
 {
-    static byte row[4096];
+    static byte row[4096], acc[4096];
     size_t i = 0;
     int c, y = 0, mode = 0, val, neg, plus, rn, k, cnt, chr = 0, w, h;
+    int plane = 0, an = 0;
     char par, grp, term;
 
     memset(d, 0, sizeof(*d));
@@ -1281,6 +1287,12 @@ static void PclDecodeFile(const byte *b, size_t n, PclDecode *d, int abs)
 	    d->pages++;
 	    y = 0;
 	    d->posX = d->posY = 0;
+	    continue;
+	}
+	if (c == '@' && i + 3 <= n && !memcmp(b + i, "PJL", 3)) {
+	    d->pjl++;			/* a PJL line up to its LF */
+	    while (i < n && b[i] != '\n')
+		i++;
 	    continue;
 	}
 	if (c != 0x1b) {
@@ -1438,6 +1450,7 @@ static void PclDecodeFile(const byte *b, size_t n, PclDecode *d, int abs)
 	    case '*' << 16 | 'b' << 8 | 'm':
 		mode = val;
 		break;
+	    case '*' << 16 | 'b' << 8 | 'v':
 	    case '*' << 16 | 'b' << 8 | 'w':
 		if (val < 0 || i + (size_t) val > n) {
 		    d->bad++;
@@ -1473,9 +1486,34 @@ static void PclDecodeFile(const byte *b, size_t n, PclDecode *d, int abs)
 		    d->bad++;
 		    return;
 		}
-		PclRow(d, row, rn, y++);
-		d->rows++;
 		i += (size_t) val;
+		/* a plane: into the row of all planes */
+		for (k = 0; k < rn; k++) {
+		    acc[k] |= row[k];
+		    if (d->pages < 2)
+			for (cnt = 0; cnt < 8; cnt++)
+			    if (row[k] & (0x80 >> cnt))
+				(d->pages ? d->planeDots2 : d->planeDots)
+				    [plane < 4 ? plane : 3]++;
+		}
+		if (rn > an)
+		    an = rn;
+		plane++;
+		if ((term | 0x20) == 'v')
+		    break;
+		if (plane > d->planes)
+		    d->planes = plane;
+		PclRow(d, acc, an, y++);
+		memset(acc, 0, (size_t) an);
+		plane = an = 0;
+		d->rows++;
+		break;
+	    case '*' << 16 | 'r' << 8 | 'u':
+		d->palette = val;
+		break;
+	    case '*' << 16 | 'r' << 8 | 'c':	/* the end of a raster */
+	    case '*' << 16 | 'p' << 8 | 'n':	/* unidirectional */
+	    case '&' << 16 | 'a' << 8 | 'n':	/* no negative motion */
 		break;
 	    default:
 		printf("PCL: ESC %c%c%d%c\n", par, grp ? grp : ' ', val,
@@ -1491,7 +1529,9 @@ static void PclDecodeFile(const byte *b, size_t n, PclDecode *d, int abs)
  * in each graphics mode, as TIFF or uncompressed: two pages, the figures
  * of TestEpson at their places (the rows from the page's first, the
  * dots from the left edge of the printable area) */
-static void TestDeskjet(int out, int tiff)
+static void TestPclRaster(int out, int tiff, const char *section,
+			  const char *device, int planes, int palette,
+			  int pjl)
 {
     static const word modes[] = { PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES,
 				  PM_GRAPHICS_HI_RES };
@@ -1510,8 +1550,8 @@ static void TestDeskjet(int out, int tiff)
 	r = res[m];
 	snprintf(rel, sizeof(rel), "out%d.pcl", out + m);
 	MakeSpoolFile(name);
-	FillJob(&jp, name, "DeskJet File", PPT_FILE, rel);
-	strcpy(jp.JP_deviceName, "HP DeskJet 500");
+	FillJob(&jp, name, section, PPT_FILE, rel);
+	strcpy(jp.JP_deviceName, device);
 	jp.JP_printMode = modes[m];
 	ui->PUID_compressionMode = (byte) (tiff ? 2 : 0);
 	ui->PUID_symbolSet = PSS_ROMAN8;
@@ -1522,17 +1562,43 @@ static void TestDeskjet(int out, int tiff)
 	CHECK(b != NULL && n > 100);
 	if (!b)
 	    continue;
-	CHECK(n > 4 && b[0] == 0x1b && b[1] == 'E');
+	CHECK(n > 4 && b[0] == 0x1b &&
+	      b[1] == (pjl ? '%' : 'E'));
 	PclDecodeFile(b, n, &d, 0);
 	w = d.right - d.left;
 	h = d.bottom - d.top;
-	printf("DeskJet mode %d%s: %lu bytes, %d pages, %d rasters, %d rows "
+	printf("%s mode %d%s: %lu bytes, %d pages, %d rasters, %d rows "
 	       "(%d TIFF), %ld dots, %dx%d at %d,%d, page 2: %ld dots, "
-	       "%dx%d at %d,%d\n", modes[m], tiff ? " TIFF" : "",
+	       "%dx%d at %d,%d\n", device, modes[m], tiff ? " TIFF" : "",
 	       (unsigned long) n, d.pages, d.rasters, d.rows, d.tiff, d.dots,
 	       w, h, d.left, d.top, d.dots2, d.right2 - d.left2,
 	       d.bottom2 - d.top2, d.left2, d.top2);
+	printf("  %d planes (%ld %ld %ld %ld dots, page 2: %ld %ld %ld %ld), "
+	       "palette %d, %d UEL, %d PJL\n", d.planes, d.planeDots[0],
+	       d.planeDots[1], d.planeDots[2], d.planeDots[3],
+	       d.planeDots2[0], d.planeDots2[1], d.planeDots2[2],
+	       d.planeDots2[3], d.palette, d.uel, d.pjl);
 	CHECK(!d.bad);
+	/* a color row ends with the empty row of Pr1ScanlineFeed */
+	CHECK(d.planes == (planes > 1 ? planes + 1 : 1) &&
+	      d.palette == palette);
+	if (planes == 3) {
+	    /* page 1 black: all three (C, M, Y); page 2 the blue fill:
+	     * cyan and magenta, yellow for the black ellipse only */
+	    CHECK(d.planeDots[0] == d.dots && d.planeDots[1] == d.dots &&
+		  d.planeDots[2] == d.dots);
+	    CHECK(d.planeDots2[0] > 10 * d.planeDots2[2] &&
+		  d.planeDots2[1] > 10 * d.planeDots2[2] &&
+		  d.planeDots2[2] > 0);
+	} else if (planes == 4) {
+	    /* K, C, M, Y: black on black (the undercolor removal) */
+	    CHECK(d.planeDots[0] == d.dots && !d.planeDots[1] &&
+		  !d.planeDots[2] && !d.planeDots[3]);
+	    CHECK(d.planeDots2[1] > 10 * d.planeDots2[0] &&
+		  d.planeDots2[2] > 10 * d.planeDots2[0] &&
+		  d.planeDots2[0] > 0 && !d.planeDots2[3]);
+	}
+	CHECK(pjl ? d.uel == 2 && d.pjl == 2 : !d.uel && !d.pjl);
 	CHECK(d.pages == 2);
 	CHECK(d.res == r);
 	/* 792 pt in lines of 9 pt; tray 1 */
@@ -1549,6 +1615,11 @@ static void TestDeskjet(int out, int tiff)
 	free(b);
     }
 #undef PCL_NEAR
+}
+
+static void TestDeskjet(int out, int tiff)
+{
+    TestPclRaster(out, tiff, "DeskJet File", "HP DeskJet 500", 1, 0, 0);
 }
 
 /* a text page through the DeskJet driver in its NLQ mode: the strings
@@ -1915,6 +1986,12 @@ int main(int argc, char **argv)
 	"device = Epson LQ-800\r\n"
 	"[DeskJet File]\r\ndriver = deskjet.geo\r\n"
 	"device = HP DeskJet 500\r\n"
+	"[DeskJet CMY File]\r\ndriver = dj500c.geo\r\n"
+	"device = HP DeskJet 500C (Color)\r\n"
+	"[PaintJet File]\r\ndriver = dj500c.geo\r\n"
+	"device = HP PaintJet XL300 (3 Color)\r\n"
+	"[DeskJet KCMY File]\r\ndriver = mercury.geo\r\n"
+	"device = HP DeskJet 550C (4 Color)\r\n"
 	"[LaserJet File]\r\ndriver = pcl4.geo\r\n"
 	"device = HP LaserJet III\r\n"
 	"[Epmx9 File]\r\ndriver = epmx9.geo\r\ndevice = Epson MX-80 Type III\r\n"
@@ -2021,6 +2098,8 @@ int main(int argc, char **argv)
     Put("SYSTEM/PRINTER/oki9.geo", oki9_geode, oki9_geode_size);
     Put("SYSTEM/PRINTER/citoh9.geo", citoh9_geode, citoh9_geode_size);
     Put("SYSTEM/PRINTER/tosh24.geo", tosh24_geode, tosh24_geode_size);
+    Put("SYSTEM/PRINTER/dj500c.geo", dj500c_geode, dj500c_geode_size);
+    Put("SYSTEM/PRINTER/mercury.geo", mercury_geode, mercury_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
@@ -2126,6 +2205,23 @@ int main(int argc, char **argv)
 	for (i = 0; i < (int) (sizeof(np) / sizeof(np[0])); i++)
 	    if (argc < 3 || !strcmp(argv[2], np[i].driver))
 		TestNinePin(&np[i], 100 + 4 * i);
+	GeodeFreeLibrary(spool);
+	printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);
+	return fails != 0;
+    }
+    /* "test_spool color dj500c|mercury": the color DeskJets, a raster
+     * plane a color (driver.dj500c, driver.mercury) */
+    if (argc > 2 && !strcmp(argv[1], "color")) {
+	if (!strcmp(argv[2], "dj500c")) {
+	    TestPclRaster(200, 1, "DeskJet CMY File",
+			  "HP DeskJet 500C (Color)", 3, -3, 0);
+	    TestPclRaster(203, 0, "PaintJet File",
+			  "HP PaintJet XL300 (3 Color)", 3, -3, 1);
+	} else if (!strcmp(argv[2], "mercury"))
+	    TestPclRaster(206, 1, "DeskJet KCMY File",
+			  "HP DeskJet 550C (4 Color)", 4, -4, 0);
+	else
+	    CHECK(!"a color driver");
 	GeodeFreeLibrary(spool);
 	printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);
 	return fails != 0;

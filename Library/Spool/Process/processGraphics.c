@@ -7,15 +7,14 @@
  * larger than the paper is tiled, as in processPDL.c.
  *
  * Port32: the asm's labels, Tiramisu (fax) printing, the dual-threaded
- * printing and the non-spooling build are not ported.  The kernel draws
- * monochrome, 4, 8 and 24 bit bitmaps; a device whose mode is CMYK or
- * CMY (the color dot matrix printers) gets a monochrome swath, which the
- * drivers print in black.  The bitmap is dithered as the asm asked
- * (BM_CLUSTERED_DITHER); the color correction table of the mode
- * (GP_colorCorrection) is not used (graphicsBitmapCreate.c).
+ * printing and the non-spooling build are not ported.  The bitmap of a
+ * swath has the format of the mode (monochrome, CMYK or CMY: the planes
+ * of the color printers, drawn by the memory video driver, vidmem); it
+ * is dithered as the asm asked (BM_CLUSTERED_DITHER); the color
+ * correction table of the mode (GP_colorCorrection) is not used
+ * (graphicsBitmapCreate.c).
  */
 #include "spoolLocal.h"
-#include "ghal.h"
 #include <vm.h>
 #include <win.h>
 #include <hugearr.h>
@@ -51,10 +50,6 @@ word DoGraphicsInit(SpoolJobInfo *j)
     FilePopDir();
     if (err)
 	return 1;
-    if (fmt == BMF_4CMYK || fmt == BMF_3CMY) {
-	ghal_log(GHAL_LOG_INFO, "spool: no CMYK bitmaps; printing in black");
-	fmt = BMF_MONO;
-    }
     j->SJI_bmHan = GrCreateBitmap(fmt, j->SJI_bandW, j->SJI_swathH,
 				  j->SJI_bmFileHan,
 				  ConstructOptr(GeodeGetProcessHandle(), 0),

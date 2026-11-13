@@ -3,7 +3,7 @@
 
 Reads a driver's <name>ControlCodes.asm (the pr_codes_* tables: a count
 byte, then the bytes; labels without data of their own share the next
-label's) and <name>Constant.def (the "NAME = value" constants the
+label's; word tables as pr_graphic_Res_Values) and <name>Constant.def (the "NAME = value" constants the
 PrintCom C files use: band heights, interleaves, resolutions, PR_*) and
 writes the driver's printcomDriver.h and <name>ControlCodes.c, the C
 port beside the asm.  It is run once per driver; the output is read and
@@ -12,7 +12,8 @@ checked in like any other port.
     ctlcodes2c.py -n <name> -d <driver dir> [-t <title>]
 
 The control codes keep the asm's comments.  A code whose bytes do not
-match its count is refused (but for graphics codes of the mode byte
+match its count is refused (but for PCL commands with '#' for a number
+and a 0 at the end, which have none, for graphics codes of the mode byte
 alone, and bytes after a code from a line of their own, of a label
 commented out, which are dropped), as are expressions the tool cannot
 read.
@@ -168,14 +169,25 @@ def read_codes(path, consts):
         body = body.strip()
         if not body:
             continue
-        m = re.match(r'^(\w+)\s+label\s+byte$', body)
+        m = re.match(r'^(\w+)\s+label\s+(byte|word)$', body)
         if m:
             if cur is not None and not cur['items']:
                 pending = cur['aliases'] + [cur['name']]
             elif cur is not None:
                 codes.append(cur)
-            cur = {'name': m.group(1), 'items': [], 'aliases': pending}
+            cur = {'name': m.group(1), 'items': [], 'aliases': pending,
+                   'word': m.group(2) == 'word'}
             pending = []
+            continue
+        m = re.match(r'^word\s+(.+)$', body)
+        if m and cur is not None and cur['word']:
+            items = []
+            for a in split_args(m.group(1)):
+                v = evaluate(a, consts)
+                if v is None:
+                    fail('cannot read word "%s"' % a)
+                items.append(str(v & 0xffff))
+            cur['items'].append((items, comment))
             continue
         m = re.match(r'^byte\s+(.+)$', body)
         if m and cur is not None:
@@ -202,7 +214,16 @@ MODE_CODES = ('pr_codes_SetLoGraphics', 'pr_codes_SetMedGraphics',
               'pr_codes_SetHiGraphics')
 
 
+def is_template(code):
+    """a PCL command for WriteNumCommand: '#' for the number, a 0 at the
+    end, no count"""
+    allitems = [x for i, _ in code['items'] for x in i]
+    return allitems[-1] == '0' and "'#'" in allitems
+
+
 def check_count(code, consts):
+    if code.get('word') or is_template(code):
+        return
     if sum(len(i) for i, _ in code['items']) == 1 and \
             code['name'] in MODE_CODES:
         return
@@ -230,7 +251,11 @@ def check_count(code, consts):
 
 def emit_code(name, code):
     lines = []
-    head = 'const byte %s[] = {' % name
+    if code.get('word'):
+        head = 'const word %s[%d] = {' % (
+            name, sum(len(i) for i, _ in code['items']))
+    else:
+        head = 'const byte %s[] = {' % name
     simple = len(code['items']) == 1 and not code['items'][0][1]
     allitems = [x for i, _ in code['items'] for x in i]
     if simple or all(not c for _, c in code['items']):
@@ -274,10 +299,14 @@ def main():
     title = a.title or n
     consts = read_constants(os.path.join(d, n + 'Constant.def'))
     codes = read_codes(os.path.join(d, n + 'ControlCodes.asm'), consts)
-    names = []
+    names, words = [], []
     for c in codes:
         check_count(c, consts)
-        names += c['aliases'] + [c['name']]
+        if c.get('word'):
+            n_ = sum(len(i) for i, _ in c['items'])
+            words += ['%s[%d]' % (x, n_) for x in c['aliases'] + [c['name']]]
+        else:
+            names += c['aliases'] + [c['name']]
 
     h = ['/*'] + box('printcomDriver.h -- the %s driver\'s constants and '
                      'control codes for the PrintCom files (the C form of '
@@ -298,6 +327,8 @@ def main():
             line = '    '
         line += piece
     h.append(line)
+    for w in words:
+        h.append('extern const word %s;' % w)
     h += ['', '#endif /* PRINTCOMDRIVER_H */', '']
 
     c = ['/*'] + box('%sControlCodes.c -- the control codes of the %s '

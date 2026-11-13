@@ -46,11 +46,13 @@ static void Put16(byte *p, word v)
     p[1] = (byte) (v >> 8);
 }
 
-/* IsFormatSupported: what the memory video driver draws */
+/* IsFormatSupported: what the memory video driver draws (the asm asked
+ * it, VID_ESC_CHECK_IF_FORMAT_IS_SUPPORTED; the C vidmem draws all the
+ * formats, CMYK and CMY too) */
 static Boolean FormatSupported(byte format)
 {
     return (Boolean) (GeodeGetDefaultDriver(GDDT_MEMORY_VIDEO) != 0 &&
-		      format <= BMF_24BIT);
+		      format <= BMF_3CMY);
 }
 
 /* AllocBitmapInitDeviceInfo: EB_device, the DOS16 VideoDriverInfo

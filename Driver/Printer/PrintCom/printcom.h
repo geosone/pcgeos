@@ -60,6 +60,9 @@ typedef struct {
 /* a custom routine of a job (PI_customEntry, PI_customExit: indices into
  * printCustomRoutines, 0 none; the device tables declare it) */
 typedef Boolean PrintCustomRoutine(PState *ps);
+/* a custom entry of jobStartPCL.c that went on at InitPState, past the
+ * reset (customPaintJetXL300PCL.c), returns this: no error */
+#define PR_CUSTOM_AT_INIT_PSTATE	2
 extern PrintCustomRoutine *const printCustomRoutines[];
 
 /* the driver's own data */

@@ -32,3 +32,19 @@ Boolean PrintClearStyles(PState *ps)
     (void) ps;
     return FALSE;
 }
+
+/* PrSetStyles, PrTestStyles: the style words of the cursor and page code
+ * (PrintSetStyles, PrintTestStyles of the asm), none */
+Boolean PrSetStyles(PState *ps, PrintTextStyle style)
+{
+    (void) ps;
+    (void) style;
+    return FALSE;
+}
+
+PrintTextStyle PrTestStyles(PState *ps, PrintTextStyle style)
+{
+    (void) ps;
+    (void) style;
+    return 0;
+}
