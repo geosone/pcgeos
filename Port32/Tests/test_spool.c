@@ -68,6 +68,12 @@ extern const unsigned char deskjet_geode[];
 extern const unsigned long deskjet_geode_size;
 extern const unsigned char pcl4_geode[];
 extern const unsigned long pcl4_geode_size;
+#define NINEPIN(n) \
+    extern const unsigned char n##_geode[]; \
+    extern const unsigned long n##_geode_size;
+NINEPIN(epmx9) NINEPIN(eplx9) NINEPIN(eprx9) NINEPIN(bchip9)
+NINEPIN(diconix9) NINEPIN(star9) NINEPIN(grpr9)
+NINEPIN(nec24) NINEPIN(epshi24) NINEPIN(epson48)
 
 static int fails;
 #define CHECK(c) \
@@ -546,8 +552,8 @@ static void CheckOutput(const char *rel, int pages)
 
 /* the dots of a page at the high resolution across (240 dpi: 9 pins,
  * 360 dpi: 24 pins) and in line feed units down (1/216", 1/180") */
-#define EP_W	3200
-#define EP_H	2600
+#define EP_W	4200
+#define EP_H	3300
 
 typedef struct {
     int pages;
@@ -556,12 +562,25 @@ typedef struct {
     long dots;
     int left2, top2, right2, bottom2;	/* and of page 2 */
     long dots2;
-    int modes[41];		/* graphics codes per ESC * m */
+    int modes[80];		/* graphics codes per ESC * m */
     char text[256];		/* the text of page 1, '|' at ESC $ */
     int textLen;
     int underline;		/* ESC - 1 on page 1 */
     int absX[8];		/* the first ESC $ (not 0) of each page */
+    int tabs;			/* tabs taken (ESC D, HT) */
+    int gfx;			/* rasters of ESC K, L, Y, Z, z */
 } EpsonDecode;
+
+/* how the other 9-pin printers differ: the dots an inch of ESC K, L, Y,
+ * Z and z ("K60L120Z240"), the line feed units an inch (the pins 1/72"
+ * apart), ESC P with an argument (IBM) */
+typedef struct {
+    const char *gfx;
+    int vunit;
+    int ibm;
+    int lq;		/* 24 pins: ESC * 0 at 1/60", line feeds of the
+			 * spacing (ESC +, NEC FS 3) in 1/360" */
+} EpsonDialect;
 
 static void EpsonDot(EpsonDecode *d, int x, int y)
 {
@@ -590,17 +609,71 @@ static void EpsonDot(EpsonDecode *d, int x, int y)
     d->dots++;
 }
 
-/* hdpi: the dots across of the canvas */
-static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d,
-			    int hdpi)
+/* the dots an inch of a graphics letter of the dialect, 0 if none */
+static int EpsonGfxDpi(const EpsonDialect *dl, int c)
+{
+    const char *p;
+
+    for (p = dl ? dl->gfx : NULL; p && *p; p++)
+	if (*p == c)
+	    return atoi(p + 1);
+    return 0;
+}
+
+/* hdpi: the dots across of the canvas; dl: NULL for the Epson ESC/P of
+ * the FX and LQ printers */
+static void EpsonDecodeFileDialect(const byte *b, size_t n,
+				   EpsonDecode *d, int hdpi,
+				   const EpsonDialect *dl)
 {
     size_t i = 0, k, cols;
-    int x = 0, y = 0, scale, pin, c, dpi, colBytes, pitch;
+    int x = 0, y = 0, scale, pin, c, dpi, colBytes, pitch, tab = 0;
+    int spacing = 0;
 
     memset(d, 0, sizeof(*d));
     while (i < n) {
 	c = b[i++];
-	if (c == 0 || c == 0x0f || c == 0x12 || c == 0x09)
+	if (c == 0x09 && dl) {		/* to the tab stop, 10 pitch */
+	    x = tab * hdpi / 10;
+	    d->tabs++;
+	    if (!d->pages && d->textLen < (int) sizeof(d->text) - 1)
+		d->text[d->textLen++] = '|';
+	    if (x && d->pages < 8 && !d->absX[d->pages])
+		d->absX[d->pages] = x;
+	    continue;
+	}
+	if (c == '\n' && dl && dl->lq) {	/* a line of the spacing */
+	    y += spacing;
+	    x = 0;
+	    continue;
+	}
+	if (c == 0x1c && dl && dl->lq && i + 1 < n) {	/* NEC FS */
+	    c = b[i++];
+	    if (c == '3') {
+		spacing = b[i++] * dl->vunit / 360;
+		continue;
+	    }
+	    if (c == 'Z' && i + 2 <= n) {	/* 360 dpi, 24 pins */
+		cols = (size_t) (b[i] | b[i + 1] << 8);
+		i += 2;
+		if (i + cols * 3 > n || hdpi % 360) {
+		    d->bad++;
+		    return;
+		}
+		scale = hdpi / 360;
+		d->gfx++;
+		for (k = 0; k < cols; k++, x += scale)
+		    for (pin = 0; pin < 24; pin++)
+			if (b[i + k * 3 + pin / 8] & (0x80 >> (pin % 8)))
+			    EpsonDot(d, x, y + pin * dl->vunit / 180);
+		i += cols * 3;
+		continue;
+	    }
+	    d->bad++;
+	    return;
+	}
+	if (c == 0 || c == 0x0f || c == 0x12 || c == 0x09 ||
+	    (c == 0x01 && dl))	/* Star: the bin of an empty ASF code */
 	    continue;
 	if (c == '\r') {
 	    x = 0;
@@ -627,14 +700,43 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d,
 		d->underline++;
 	    i++;
 	    break;
+	case 'P':
+	    if (dl && dl->ibm)
+		i++;
+	    break;
 	case '@': case 'O': case '6': case '8': case '4': case '5':
-	case 'P': case 'M': case 'T': case 'E': case 'F': case 'G':
-	case 'H': case 'g':
+	case 'M': case 'T': case 'E': case 'F': case 'G':
+	case 'H': case 'g': case ':':
+	    break;
+	case '+':
+	    if (dl && dl->lq && i < n)
+		spacing = b[i] * dl->vunit / 360;
+	    i++;
 	    break;
 	case 't': case 'U': case 'r': case 'R': case 'x': case 'S':
 	case 'W': case 'w': case 'k': case 'p': case '3':
-	case 0x19:
+	case 0x19: case 'B': case 'I': case '_': case '7':
 	    i++;
+	    break;
+	case 'K': case 'L': case 'Y': case 'Z': case 'z':
+	    dpi = EpsonGfxDpi(dl, c);
+	    if (!dpi || hdpi % dpi || i + 2 > n) {
+		d->bad++;
+		return;
+	    }
+	    cols = (size_t) (b[i] | b[i + 1] << 8);
+	    i += 2;
+	    if (i + cols > n) {
+		d->bad++;
+		return;
+	    }
+	    scale = hdpi / dpi;
+	    d->gfx++;
+	    for (k = 0; k < cols; k++, x += scale)
+		for (pin = 0; pin < 8; pin++)
+		    if (b[i + k] & (0x80 >> pin))
+			EpsonDot(d, x, y + pin * dl->vunit / 72);
+	    i += cols;
 	    break;
 	case 'C':
 	    if (i < n && b[i] == 0)
@@ -656,6 +758,8 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d,
 		d->absX[d->pages] = x;
 	    break;
 	case 'D':
+	    if (i < n && b[i])
+		tab = b[i];
 	    while (i < n && b[i])
 		i++;
 	    i++;
@@ -671,9 +775,12 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d,
 	    /* 8 pins 1/72" (9-pin) or 1/60" (24-pin) apart: 3 units;
 	     * 24 pins: 1 unit */
 	    dpi = c == 0 ? 60 : c == 1 ? 120 : c == 3 ? 240 : c == 39 ? 180 :
-		  c == 40 ? 360 : 0;
-	    colBytes = c >= 39 ? 3 : 1;
+		  c == 40 || c == 73 ? 360 : 0;
+	    colBytes = c >= 72 ? 6 : c >= 39 ? 3 : 1;
 	    pitch = c >= 39 ? 1 : 3;
+	    if (dl && dl->vunit)	/* the pins' distance in units */
+		pitch = dl->vunit / (c >= 72 ? 360 : c >= 39 ? 180 :
+				     dl->lq ? 60 : 72);
 	    if (!dpi || hdpi % dpi || i + cols * colBytes > n) {
 		d->bad++;
 		return;
@@ -687,10 +794,17 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d,
 	    i += cols * colBytes;
 	    break;
 	default:
+	    printf("ESC/P: ESC %#x at %lu\n", c, (unsigned long) i);
 	    d->bad++;
 	    return;
 	}
     }
+}
+
+static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d,
+			    int hdpi)
+{
+    EpsonDecodeFileDialect(b, n, d, hdpi, NULL);
 }
 
 /* the spool file of MakeSpoolFile through an Epson driver to a file in
@@ -1410,6 +1524,116 @@ static void TestPcl4Custom(const char *out)
     free(b);
 }
 
+/* the other Epson style drivers: the spool file of MakeSpoolFile in
+ * each graphics mode (the figures of TestEpson at their places, on a
+ * canvas of 480 dpi across (360 for the 24-pin ones) and the line feed
+ * units down) and a text page in draft (the strings in order, underline
+ * once, two pages) */
+typedef struct {
+    const char *printer, *driver, *device;
+    EpsonDialect dl;
+    int tabs;				/* X by tabs, else by spaces */
+    int underline;			/* in the draft font */
+    int hdpi;				/* the canvas across, 0: 480 */
+} NinePin;
+
+static void TestNinePin(const NinePin *np, int out)
+{
+    static const word modes[] = { PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES,
+				  PM_GRAPHICS_HI_RES };
+    const int hdpi = np->hdpi ? np->hdpi : 480, vunit = np->dl.vunit;
+    JobParameters jp;
+    EpsonDecode d;
+    GStateHandle gs;
+    FileHandle fh;
+    char name[13], rel[40], text[256];
+    word ch;
+    size_t n;
+    byte *b;
+    int m, w, h, k, j;
+
+#define EP_NEAR(v, pt, res) \
+    ((v) > (pt) * (res) / 72 - 16 && (v) < (pt) * (res) / 72 + 16)
+    for (m = 0; m < 3; m++) {
+	snprintf(rel, sizeof(rel), "out%d.prn", out + m);
+	MakeSpoolFile(name);
+	FillJob(&jp, name, np->printer, PPT_FILE, rel);
+	strcpy(jp.JP_deviceName, np->device);
+	jp.JP_printMode = modes[m];
+	((PrintDriverUIData *) jp.JP_printerData)->PUID_countryCode = PCC_USA;
+	CHECK(pSpoolAddJob(&jp) != 0xffff);
+	CHECK(WaitIdle());
+	snprintf(rel, sizeof(rel), "DOCUMENT/out%d.prn", out + m);
+	b = (byte *) Get(rel, &n);
+	CHECK(b != NULL && n > 100);
+	if (!b)
+	    continue;
+	EpsonDecodeFileDialect(b, n, &d, hdpi, &np->dl);
+	w = d.right - d.left;
+	h = d.bottom - d.top;
+	printf("%s mode %d: %lu bytes, %d pages, %d rasters, %ld dots, "
+	       "%dx%d at %d,%d, page 2: %ld dots, %dx%d at %d,%d\n",
+	       np->device, modes[m], (unsigned long) n, d.pages,
+	       d.gfx + d.modes[0] + d.modes[1] + d.modes[3] + d.modes[39] +
+	       d.modes[40] + d.modes[73], d.dots, w, h,
+	       d.left, d.top, d.dots2, d.right2 - d.left2,
+	       d.bottom2 - d.top2, d.left2, d.top2);
+	CHECK(!d.bad);
+	CHECK(d.pages == 2);
+	CHECK(EP_NEAR(w, 428, hdpi) && EP_NEAR(h, 328, vunit));
+	CHECK(EP_NEAR(d.left, 54, hdpi) && EP_NEAR(d.top, 54, vunit));
+	CHECK(EP_NEAR(d.right2 - d.left2, 300, hdpi) &&
+	      EP_NEAR(d.bottom2 - d.top2, 500, vunit));
+	CHECK(EP_NEAR(d.left2, 82, hdpi) && EP_NEAR(d.top2, 82, vunit));
+	free(b);
+    }
+#undef EP_NEAR
+
+    fh = pSpoolCreateSpoolFile(name);
+    CHECK(fh != 0);
+    if (!fh)
+	return;
+    gs = GrCreateGString(fh, GST_STREAM, &ch);
+    GrDrawText(gs, 300, 100, "Right", 0);
+    GrDrawText(gs, 72, 100, "Hello World", 0);
+    GrSetTextStyle(gs, TS_UNDERLINE, 0);
+    GrDrawText(gs, 72, 150, "Under", 0);
+    GrSetTextStyle(gs, 0, TS_UNDERLINE);
+    GrNewPage(gs, PEC_FORM_FEED);
+    GrDrawText(gs, 72, 72, "Page2", 0);
+    GrNewPage(gs, PEC_FORM_FEED);
+    CHECK(GrEndGString(gs) == GSET_NO_ERROR);
+    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+    FileClose(fh, FALSE);
+    snprintf(rel, sizeof(rel), "out%d.prn", out + 3);
+    FillJob(&jp, name, np->printer, PPT_FILE, rel);
+    strcpy(jp.JP_deviceName, np->device);
+    jp.JP_printMode = PM_TEXT_DRAFT;
+    ((PrintDriverUIData *) jp.JP_printerData)->PUID_countryCode = PCC_USA;
+    CHECK(pSpoolAddJob(&jp) != 0xffff);
+    CHECK(WaitIdle());
+    snprintf(rel, sizeof(rel), "DOCUMENT/out%d.prn", out + 3);
+    b = (byte *) Get(rel, &n);
+    CHECK(b != NULL && n > 20);
+    if (!b)
+	return;
+    EpsonDecodeFileDialect(b, n, &d, hdpi, &np->dl);
+    d.text[d.textLen] = 0;
+    for (k = j = 0; d.text[k]; k++)		/* the words only */
+	if (d.text[k] != ' ' && d.text[k] != '|')
+	    text[j++] = d.text[k];
+    text[j] = 0;
+    printf("%s text: %lu bytes, %d pages, \"%s\", underline %d, %d tabs\n",
+	   np->device, (unsigned long) n, d.pages, d.text, d.underline,
+	   d.tabs);
+    CHECK(!d.bad);
+    CHECK(d.pages == 2);
+    CHECK(!strcmp(text, "HelloWorldRightUnder"));
+    CHECK(d.underline == np->underline);
+    CHECK(np->tabs ? d.tabs >= 3 : !d.tabs);
+    free(b);
+}
+
 int main(int argc, char **argv)
 {
     static const char ini[] =
@@ -1428,6 +1652,19 @@ int main(int argc, char **argv)
 	"device = HP DeskJet 500\r\n"
 	"[LaserJet File]\r\ndriver = pcl4.geo\r\n"
 	"device = HP LaserJet III\r\n"
+	"[Epmx9 File]\r\ndriver = epmx9.geo\r\ndevice = Epson MX-80 Type III\r\n"
+	"[Eplx9 File]\r\ndriver = eplx9.geo\r\ndevice = Epson Apex 80\r\n"
+	"[Eprx9 File]\r\ndriver = eprx9.geo\r\ndevice = Epson RX-80\r\n"
+	"[Bchip9 File]\r\ndriver = bchip9.geo\r\ndevice = Blue Chip M120\r\n"
+	"[Diconix9 File]\r\ndriver = diconix9.geo\r\n"
+	"device = Diconix 150 (Epson Mode)\r\n"
+	"[Star9 File]\r\ndriver = star9.geo\r\ndevice = Star Gemini-10x\r\n"
+	"[Grpr9 File]\r\ndriver = grpr9.geo\r\ndevice = IBM Graphics Printer\r\n"
+	"[Nec24 File]\r\ndriver = nec24.geo\r\ndevice = NEC P2200\r\n"
+	"[Epshi24 File]\r\ndriver = epshi24.geo\r\n"
+	"device = Epson LQ-850\r\n"
+	"[Epson48 File]\r\ndriver = epson48.geo\r\n"
+	"device = Epson Stylus Color (Color)\r\n"
 	"[spool]\r\nhostPrinters = false\r\n";
     static const char patch[] = "% devpatch\r\n";
     GeodeLoadError e;
@@ -1482,6 +1719,16 @@ int main(int argc, char **argv)
     Put("SYSTEM/PRINTER/epson24.geo", epson24_geode, epson24_geode_size);
     Put("SYSTEM/PRINTER/deskjet.geo", deskjet_geode, deskjet_geode_size);
     Put("SYSTEM/PRINTER/pcl4.geo", pcl4_geode, pcl4_geode_size);
+    Put("SYSTEM/PRINTER/epmx9.geo", epmx9_geode, epmx9_geode_size);
+    Put("SYSTEM/PRINTER/eplx9.geo", eplx9_geode, eplx9_geode_size);
+    Put("SYSTEM/PRINTER/eprx9.geo", eprx9_geode, eprx9_geode_size);
+    Put("SYSTEM/PRINTER/bchip9.geo", bchip9_geode, bchip9_geode_size);
+    Put("SYSTEM/PRINTER/diconix9.geo", diconix9_geode, diconix9_geode_size);
+    Put("SYSTEM/PRINTER/star9.geo", star9_geode, star9_geode_size);
+    Put("SYSTEM/PRINTER/grpr9.geo", grpr9_geode, grpr9_geode_size);
+    Put("SYSTEM/PRINTER/nec24.geo", nec24_geode, nec24_geode_size);
+    Put("SYSTEM/PRINTER/epshi24.geo", epshi24_geode, epshi24_geode_size);
+    Put("SYSTEM/PRINTER/epson48.geo", epson48_geode, epson48_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
@@ -1540,6 +1787,38 @@ int main(int argc, char **argv)
 	TestDeskjet(30, 1);
 	TestDeskjet(33, 0);
 	TestDeskjetText("out36.pcl");
+	GeodeFreeLibrary(spool);
+	printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);
+	return fails != 0;
+    }
+    /* "test_spool dotmatrix [driver]": the other Epson style drivers
+     * (driver.dotmatrix) */
+    if (argc > 1 && !strcmp(argv[1], "dotmatrix")) {
+	static const NinePin np[] = {
+	    { "Epmx9 File", "epmx9", "Epson MX-80 Type III",
+	      { "K60L120", 216, 0, 0 }, 1, 1, 0 },
+	    { "Eplx9 File", "eplx9", "Epson Apex 80", { "", 216, 0, 0 }, 1, 1, 0 },
+	    { "Eprx9 File", "eprx9", "Epson RX-80",
+	      { "K60L120Z240", 216, 0, 0 }, 0, 1, 0 },
+	    { "Bchip9 File", "bchip9", "Blue Chip M120",
+	      { "K80L160", 216, 0, 0 }, 1, 1, 0 },
+	    { "Diconix9 File", "diconix9", "Diconix 150 (Epson Mode)",
+	      { "K80L160", 288, 0, 0 }, 1, 1, 0 },
+	    { "Star9 File", "star9", "Star Gemini-10x",
+	      { "K60L120z240", 144, 0, 0 }, 1, 1, 0 },
+	    /* no underline in the IBM Graphics fonts */
+	    { "Grpr9 File", "grpr9", "IBM Graphics Printer",
+	      { "K60L120Z240", 216, 1, 0 }, 1, 0, 0 },
+	    { "Nec24 File", "nec24", "NEC P2200", { "", 360, 0, 1 }, 0, 1,
+	      360 },
+	    { "Epshi24 File", "epshi24", "Epson LQ-850",
+	      { "", 360, 0, 1 }, 0, 1, 360 },
+	    { "Epson48 File", "epson48", "Epson Stylus Color (Color)",
+	      { "", 360, 0, 1 }, 0, 1, 360 }
+	};
+	for (i = 0; i < (int) (sizeof(np) / sizeof(np[0])); i++)
+	    if (argc < 3 || !strcmp(argv[2], np[i].driver))
+		TestNinePin(&np[i], 100 + 4 * i);
 	GeodeFreeLibrary(spool);
 	printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);
 	return fails != 0;

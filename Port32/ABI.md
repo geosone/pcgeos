@@ -980,6 +980,44 @@ the LQ fonts (`fontEpsonLQInfo.asm`). Both Epson drivers are built by
 `geos_dotmatrix_driver` of `Driver/Printer/DotMatrix/DotMatrix.cmake`
 with the `PrintCom` files they share.
 
+**The other Epson style drivers** (`Driver/Printer/DotMatrix`), first
+the 9-pin ones:
+`epmx9.geo` (Epson MX), `eplx9.geo` (Epson LX, color), `eprx9.geo`
+(Epson RX), `bchip9.geo` (BlueChip), `diconix9.geo` (Diconix ink jets),
+`star9.geo` (Star) and `grpr9.geo` (IBM Graphics, color). Each takes
+the groups of `PrintCom` files its manager's `printcom*.asm` include,
+named alike in `DotMatrix.cmake` (`DOTMATRIX_BASE`, the Epson or IBM
+job, color or none, the 9-pin cursor, the FX or MX graphics), and the
+files that differ:
+- the X position by a tab stop at the column of 10 pitch
+  (`cursorSetCursorTab72.c`) or by spaces from where the head is
+  (`cursorSetCursorSpace72.c`, with `textPrintStyleRunAddX.c` keeping
+  the head's X), the units 1/144", 1/216" or 1/288"
+  (`cursorConvert144.c`, `cursorConvert288.c`);
+- the MX graphics: 8 pins a pass, interleaved down only
+  (`graphicsHi8IntY.c`, `graphicsMed8IntY.c`), the Star's swath in
+  1/144" (`graphicsPrintSwath144.c`);
+- the IBM job (`jobStartDotMatrix.c`: the device's custom entry routine,
+  no paper-out defeat; `jobPaperPathNoASFControl.c`), the BlueChip's
+  country codes (`textLoadBchipSymbolSet.c`), the IBM Graphics styles
+  (`grpr9Styles.c`: overline, no italic).
+
+The late model 24-pin drivers `nec24.geo` and `epshi24.geo` and the
+48-pin `epson48.geo` share the LQ2 cursor (`DOTMATRIX_LQ2_COMMON`: X
+absolute in 1/60", line feeds as line feed characters of the spacing
+`ESC +` or NEC `FS 3`, `cursorPrLineFeedSet.c`, 1/360"
+`cursorConvert360.c`, the swath `graphicsPrintSwath360.c`). Their high
+resolution is 360 x 360 dpi: two interleaves of 24 pins 1/360" apart,
+each in two passes across (`graphicsHi24IntXY.c`; the NEC's `FS Z`), or
+one pass of 48 pins (`graphicsHi48.c`, `rotate48.c`, `ESC * 73`).
+
+The control codes and the constants of these drivers come from the asm
+by `Port32/tools/ctlcodes2c.py` (`printcomDriver.h`,
+`*ControlCodes.c`, checked in). Labels without bytes of their own share
+the next label's codes; codes of count 0 send nothing, but routines
+that send an argument after them still do (the Star's empty ASF codes
+send the bin number alone, as the asm).
+
 **The HP DeskJet driver** (`Driver/Printer/HP/Deskjet`, `deskjet.geo`,
 protocol 5.0, from `deskjet32.gp`), the first PCL driver:
 `deskjetControlCodes.c` and the `PrintCom` files of

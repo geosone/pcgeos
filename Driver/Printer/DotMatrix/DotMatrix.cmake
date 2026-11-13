@@ -58,30 +58,80 @@ function(geos_dotmatrix_driver name)
   set(${name}_GEO ${${name}_GEO} PARENT_SCOPE)
 endfunction()
 
-# the PrintCom files all Epson style drivers share (printcomEpsonJob,
-# CountryDialog, DotMatrixPage, the text, styles, stream, buffer and
-# color files)
-set(DOTMATRIX_EPSON_COMMON
+# the PrintCom files of the dot matrix drivers, in the groups of the asm's
+# printcom*.asm: what they all share (entry, info, the DotMatrix page,
+# cursor basics, text, stream, buffer, the graphics' common part and the
+# low resolution)
+set(DOTMATRIX_BASE
     printcomEntry.c printcomInfo.c printcomAdmin.c printcomNoEscapes.c
-    Job/jobStartDefeatPaperout.c Job/jobEndDotMatrix.c
-    Job/jobPaperPathASFControl.c Job/jobPaperInfo.c
-    Job/jobResetPrinterAndWait.c
-    printcomCountryDialog.c
     Page/pageStartSetLength.c Page/pageEndLFSetLength.c
-    Cursor/cursorDotMatrixCommon.c Cursor/cursorSetCursorAbs72.c
-    Cursor/cursorPrLineFeedExe.c
-    Text/textPrintStyleRun.c Text/textPrintText.c Text/textPrintRaw.c
+    Cursor/cursorDotMatrixCommon.c
+    Text/textPrintText.c Text/textPrintRaw.c
     Text/textSetFont.c Text/textGetLineSpacing.c Text/textSetLineSpacing.c
-    Text/textSetSymbolSet.c Text/textLoadEpsonSymbolSet.c
-    printcomEpsonStyles.c Styles/stylesGet.c Styles/stylesSet.c
-    Styles/stylesTest.c
+    Text/textSetSymbolSet.c
+    Styles/stylesGet.c Styles/stylesSet.c Styles/stylesTest.c
     printcomStream.c
     Buffer/bufferCreate.c Buffer/bufferDestroy.c Buffer/bufferLoadBand.c
     Buffer/bufferScanBand.c Buffer/bufferSendOutput.c
     Buffer/bufferClearOutput.c
-    Color/colorSetNextCMYK.c Color/colorSetFirstCMYK.c
-    Color/colorGetFormat.c Color/colorSet.c Color/colorMapRGBToCMYK.c
-    Color/colorSetRibbon.c
     Graphics/graphicsCommon.c Graphics/graphics3Resolutions.c
     Graphics/graphicsEpsonCommon.c Graphics/graphicsLo8.c
     Graphics/Rotate/rotate8.c)
+# printcomEpsonJob.asm, printcomIBMJob.asm
+set(DOTMATRIX_EPSON_JOB
+    Job/jobStartDefeatPaperout.c Job/jobEndDotMatrix.c
+    Job/jobPaperPathASFControl.c Job/jobPaperInfo.c
+    Job/jobResetPrinterAndWait.c)
+set(DOTMATRIX_IBM_JOB
+    Job/jobStartDotMatrix.c Job/jobEndDotMatrix.c
+    Job/jobPaperPathNoASFControl.c Job/jobPaperInfo.c
+    Job/jobResetPrinterAndWait.c)
+# printcomEpsonColor.asm, printcomNoColor.asm
+set(DOTMATRIX_EPSON_COLOR
+    Color/colorSetNextCMYK.c Color/colorSetFirstCMYK.c
+    Color/colorGetFormat.c Color/colorSet.c Color/colorMapRGBToCMYK.c
+    Color/colorSetRibbon.c)
+set(DOTMATRIX_NO_COLOR
+    Color/colorSetNextMono.c Color/colorSetFirstMono.c
+    Color/colorGetFormat.c Color/colorSetNone.c)
+# the Epson 9-pin cursors (printcomEpson{FX,MX,RX}Cursor.asm): all but
+# the X positioning and the units
+set(DOTMATRIX_9PIN_CURSOR
+    Cursor/cursorPrLineFeedExe.c Cursor/cursorPrFormFeed72.c
+    Cursor/cursor1ScanlineFeed.c)
+# the Epson 9-pin graphics: printcomEpsonFXGraphics.asm (240 x 216 dpi
+# in two passes), printcomEpsonMXGraphics.asm (120 x 216)
+set(DOTMATRIX_FX_GRAPHICS
+    Graphics/graphicsPrintSwath216.c Graphics/graphicsHi8IntXY.c
+    Graphics/Rotate/rotate2pass8.c Graphics/graphicsMed8Int3Y.c
+    Graphics/Rotate/rotate3x4.c)
+set(DOTMATRIX_MX_GRAPHICS
+    Graphics/graphicsPrintSwath216.c Graphics/graphicsHi8IntY.c
+    Graphics/graphicsMed8Int3Y.c Graphics/Rotate/rotate3x4.c)
+
+# what the Epson drivers share (printcomEpsonJob, CountryDialog,
+# DotMatrixPage, the FX cursor's X, the text, styles, stream, buffer and
+# color files)
+set(DOTMATRIX_EPSON_COMMON
+    ${DOTMATRIX_BASE} ${DOTMATRIX_EPSON_JOB} ${DOTMATRIX_EPSON_COLOR}
+    printcomCountryDialog.c
+    Cursor/cursorSetCursorAbs72.c Cursor/cursorPrLineFeedExe.c
+    Text/textPrintStyleRun.c Text/textLoadEpsonSymbolSet.c
+    printcomEpsonStyles.c)
+
+# the late model 24-pin and the 48-pin drivers: the Epson job, color,
+# styles and text, the LQ2 cursor (printcomEpsonLQ2Cursor.asm: X
+# absolute, line feeds by the spacing, 1/360") and the swath in 1/360";
+# printcomEpsonLQ2Graphics.asm (360 dpi down in two interleaves of 24
+# pins, each in two passes across)
+set(DOTMATRIX_LQ2_COMMON
+    ${DOTMATRIX_BASE} ${DOTMATRIX_EPSON_JOB} ${DOTMATRIX_EPSON_COLOR}
+    printcomCountryDialog.c
+    Cursor/cursorSetCursorAbs72.c Cursor/cursorPrLineFeedSet.c
+    Cursor/cursorPrFormFeed60.c Cursor/cursorConvert360.c
+    Text/textPrintStyleRun.c Text/textLoadEpsonSymbolSet.c
+    printcomEpsonStyles.c
+    Graphics/graphicsPrintSwath360.c)
+set(DOTMATRIX_LQ2_GRAPHICS
+    Graphics/graphicsHi24IntXY.c Graphics/Rotate/rotate2pass24.c
+    Graphics/graphicsMed24.c Graphics/Rotate/rotate24.c)
