@@ -1226,6 +1226,25 @@ int main(int argc, char **argv)
 	    GrSetTextColor(gs, CF_RGB, 0xcc, 0, 0);
 	    GrSetFont(gs, FID_PS_TIMES_ROMAN, (WWFixedAsDWord) 14 << 16);
 	    GrDrawText(gs, 72, 190, "Red Times", 0);
+	    /* a bitmap: 48 by 24, 24 bits, a color ramp (grey on
+		 * this level 1 device) */
+	    {
+		static struct { Bitmap b; byte d[48 * 24 * 3]; } ramp;
+		word bx, by;
+
+		ramp.b.B_width = 48;
+		ramp.b.B_height = 24;
+		ramp.b.B_compact = BMC_UNCOMPACTED;
+		ramp.b.B_type = BMF_24BIT;
+		for (by = 0; by < 24; by++)
+		    for (bx = 0; bx < 48; bx++) {
+			byte *px = ramp.d + 3 * (by * 48 + bx);
+			px[0] = (byte) (bx * 5);
+			px[1] = (byte) (by * 10);
+			px[2] = (byte) (255 - bx * 5);
+		    }
+		GrDrawBitmap(gs, 72, 210, &ramp.b, NULL);
+	    }
 	    GrNewPage(gs, PEC_FORM_FEED);
 	    CHECK(GrEndGString(gs) == GSET_NO_ERROR);
 	    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
