@@ -86,14 +86,19 @@ static Boolean Strategy(word fn, DriverRegs *r)
 }
 
 /* where s is in the output, or -1 (no memmem in every C library) */
-static size_t At(const char *s)
+static size_t AtN(const char *s, size_t n)
 {
-    size_t n = strlen(s), i;
+    size_t i;
 
     for (i = 0; i + n <= outLen; i++)
 	if (!memcmp(out + i, s, n))
 	    return i;
     return (size_t) -1;
+}
+
+static size_t At(const char *s)
+{
+    return AtN(s, strlen(s));
 }
 
 static int Has(const char *s)
@@ -103,6 +108,10 @@ static int Has(const char *s)
 
 #define HAS(s) do { if (!Has(s)) { fails++; \
     printf("FAIL line %d: no \"%s\"\n", __LINE__, s); } } while (0)
+/* bytes with a 0 among them: a string literal */
+#define HASB(s) do { if (AtN(s, sizeof(s) - 1) == (size_t) -1) { fails++; \
+    printf("FAIL line %d: no bytes of \"%s\"\n", __LINE__, s); } } \
+    while (0)
 
 /* ---------------------------------------------------------------------
  * The library
@@ -193,6 +202,65 @@ static void DrawText(GStateHandle gs)
     GrDrawTextField(gs, &v);
 }
 
+/* a complex bitmap and its slice */
+typedef struct {
+    CBitmap c;
+    byte    d[6];
+} TestSlice;
+static Bitmap *nextSlice;
+
+static Bitmap *NextSlice(Bitmap *bm)
+{
+    Bitmap *n = nextSlice;
+
+    (void) bm;
+    nextSlice = NULL;
+    return n;
+}
+
+/* the bitmaps of a page: gray on page 1 (level 1), color on page 2 */
+static void DrawBitmaps(GStateHandle gs)
+{
+    /* 12 by 3 monochrome, the bits past 12 set; a 0x1b goes as hex */
+    static const struct { Bitmap b; byte d[6]; } mono = {
+	{ 12, 3, BMC_UNCOMPACTED, BMF_MONO },
+	{ 0xaa, 0xff, 0x1b, 0x00, 0x55, 0x0f }
+    };
+    /* 8 by 2 with a mask, PackBits: mask f0 data ff, then 0f twice */
+    static const struct { Bitmap b; byte d[5]; } masked = {
+	{ 8, 2, BMC_PACKBITS, BMF_MONO | BMT_MASK },
+	{ 0x01, 0xf0, 0xff, 0xff, 0x0f }
+    };
+    /* 4 by 2, 4 bits, the default palette: black, white, white, black */
+    static const struct { Bitmap b; byte d[4]; } four = {
+	{ 4, 2, BMC_UNCOMPACTED, BMF_4BIT },
+	{ 0x0f, 0xf0, 0x0f, 0xf0 }
+    };
+    static TestSlice s1, s2;
+
+    GrSetAreaColor(gs, CF_RGB, 0, 0, 0);
+    GrDrawBitmap(gs, 300, 420, &mono.b, NULL);
+    GrSetAreaColor(gs, CF_RGB, 0, 0, 0xff);
+    GrFillBitmap(gs, 340, 420, &masked.b, NULL);
+    GrDrawBitmap(gs, 360, 420, &four.b, NULL);
+    /* 2 by 2, 24 bits at 144 dpi, in two slices: red green, blue white */
+    memset(&s1, 0, sizeof(s1));
+    s1.c.CB_simple.B_width = 2;
+    s1.c.CB_simple.B_height = 2;
+    s1.c.CB_simple.B_compact = BMC_UNCOMPACTED;
+    s1.c.CB_simple.B_type = BMF_24BIT | BMT_COMPLEX;
+    s1.c.CB_numScans = 1;
+    s1.c.CB_data = sizeof(CBitmap);
+    s1.c.CB_xres = s1.c.CB_yres = 144;
+    s1.d[0] = 0xff; s1.d[4] = 0xff;
+    s2 = s1;
+    s2.c.CB_startScan = 1;
+    memset(s2.d, 0xff, sizeof(s2.d));
+    s2.d[0] = s2.d[1] = 0;
+    nextSlice = &s2.c.CB_simple;
+    GrDrawBitmap(gs, 380, 420, &s1.c.CB_simple, NextSlice);
+}
+
 /* the drawing of the page */
 static void Draw(GStateHandle gs)
 {
@@ -241,10 +309,12 @@ static void Draw(GStateHandle gs)
     GrFillRect(gs, 420, 220, 500, 260);
     GrSetAreaMaskSys(gs, SDM_100);
     DrawText(gs);
+    DrawBitmaps(gs);
     GrApplyScale(gs, WWF(1, 0x8000), WWF(1, 0x8000));
     GrDrawLine(gs, 10, 400, 100, 400);
     GrNewPage(gs, PEC_FORM_FEED);
     GrDrawLine(gs, 0, 0, 50, 50);			/* page 2 */
+    DrawBitmaps(gs);
 }
 
 /* Ghostscript runs the file without an error: 1, 0 if not, -1 if there
@@ -450,6 +520,15 @@ int main(int argc, char **argv)
     HAS("/Times-Bold true 12 ");
     HAS(" DSG\r\n");
 
+    /* bitmaps on a level 1 printer: monochrome in packets, binary or
+     * hex, the bits past the width cleared; the colors as grey */
+    HASB("16 3 2 16 3 300 420 DMB\r\n" "B\xaa\xf0\r\n" "H1B00\r\n"
+	"BU\0\r\n");
+    HAS("8 2 1 8 2 340 420 DMB\r\n" "B\xf0\r\n" "B\x0f\r\n");
+    HAS("4 2 2 4 2 360 420 DGB\r\n" "0FF0\r\n" "0FF0\r\n");
+    /* 144 dpi: 2 * 72 / 144 divided first, as the asm */
+    HAS("2 2 2 0.9998 0.9998 380 420 DXB\r\n" "5F80\r\n" "20FF\r\n");
+
     CHECK(END(opts, stream) == TE_NO_ERROR);
     HAS("EP\r\n");
     HAS("%%PageTrailer");
@@ -457,12 +536,20 @@ int main(int argc, char **argv)
     CHECK(o->PSEB_curPage == 2);
     MemUnlock(opts);
 
-    /* page 2: the rest of the string */
+    /* page 2: the rest of the string, level 2 */
+    o = MemLock(opts);
+    o->PSEB_public.PSEO_level = 2;
+    MemUnlock(opts);
     CHECK(BEGIN(opts, stream) == TE_NO_ERROR);
     HAS("%%Page: 2 2\r\n");
     CHECK(LOW(opts, gs, stream, 0, &ret) == TE_NO_ERROR &&
 	  ret == GSRT_COMPLETE);
     HAS("50 50 0 0  DL");
+    /* level 2: colors as PackBits runs of red, green and blue */
+    HAS("4 2 4 4 2 360 420 DCB\r\n"
+	"0000FFFF00000000FFFF00000000FFFF0000\r\n");
+    HAS("2 2 2 0.9998 0.9998 380 420 DCB\r\n" "01FF000100FFFF00\r\n"
+	"0100FF0100FFFFFF\r\n");
     CHECK(END(opts, stream) == TE_NO_ERROR);
     CHECK(TRAILER(opts, stream) == TE_NO_ERROR);
     CHECK(outLen > 10 && !memcmp(out + outLen - 12, "%%Trailer\r\n\x04", 12));

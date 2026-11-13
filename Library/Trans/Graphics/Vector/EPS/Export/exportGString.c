@@ -9,9 +9,10 @@
  * Paths are skipped here (GR_BEGIN_PATH to GR_END_PATH): what they do
  * reaches the output through the clip path (exportPath.c).
  *
- * Text goes through exportText.c.  Not ported yet: the download of fonts the printer lacks
- * (DownloadPageFonts) and bitmaps (EmitBitmap of exportBitmap.asm),
- * whose elements are skipped as EmitNothing skips the pointer forms.
+ * Text goes through exportText.c, bitmaps through exportBitmap.c.  Not
+ * ported yet: the download of fonts the printer lacks
+ * (DownloadPageFonts); the pointer forms of text and bitmaps are skipped
+ * (EmitNothing), as in the asm.
  */
 #include "exportInt.h"
 
@@ -804,12 +805,12 @@ static EmitRout *const emitRouts[] = {
     EmitFillPath,	/* FillPath */
     EmitFillArc,	/* FillArc3Pt */
     EmitFillArc,	/* FillArc3PtTo */
-    EmitNothingOp,	/* FillBitmap		(bitmaps: not yet) */
-    EmitNothingOp,	/* FillBitmapCP */
+    EmitBitmap,		/* FillBitmap */
+    EmitBitmap,		/* FillBitmapCP */
     EmitNothingOp,	/* FillBitmapOPtr */
     EmitNothingOp,	/* FillBitmapPtr */
-    EmitNothingOp,	/* DrawBitmap */
-    EmitNothingOp,	/* DrawBitmapCP */
+    EmitBitmap,		/* DrawBitmap */
+    EmitBitmap,		/* DrawBitmapCP */
     EmitNothingOp,	/* DrawBitmapOPtr */
     EmitNothingOp	/* DrawBitmapPtr */
 };

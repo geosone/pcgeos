@@ -3834,9 +3834,31 @@ by the prolog's `DSG` at the width GEOS measured.
   so CUPS) loads its fonts when asked and lists none, so every font
   became Courier (`exportProlog.asm`, shared with DOS16).
 
+**Bitmaps** (`exportBitmap.c`): `GR_DRAW_BITMAP`, `GR_FILL_BITMAP` and
+their `_CP` forms become "width height bytes scaledWidth scaledHeight x
+y" and the prolog's `DMB` (monochrome through `imagemask` in the area
+color, each line in packets sent binary unless a byte of `BadByteTable`
+is in them, else hex), `DGB`/`DXB` (4- and 8-bit grey) or `DCB` (color,
+each component of a line as PackBits runs in hex). Color becomes grey on
+level 1 without CMYK and where the palette has only greys. The slices of
+a complex bitmap (`GSE_BITMAP_SLICE`) are read in turn; PackBits lines
+are unpacked.
+- The palette is the default one with the bitmap's entries over it; the
+  asm took the bitmap's entry for the index `P_entries` too.
+- The bits of a monochrome line past its width are cleared (the asm's
+  edge mask was always `0xff`: it rounded the width up first); wide
+  lines with a mask are cut right.
+- `DCB`'s runs come from a plain PackBits encoder, not `CompactPixel`;
+  they decode the same.
+- A missing slice is sent as blank lines, so that the image does not
+  read the rest of the file.
+- LZG bitmaps and the CMYK formats (which the asm read as 24-bit) are
+  skipped. The size at other resolutions is divided first and then
+  multiplied, as the asm (`0.9998` for 2 pixels at 144 dpi).
+
 Not ported yet: the download of fonts the printer lacks as Type 3
 fonts (`DownloadPageFonts`, `exportType3Fonts.asm`), text in paths,
-bitmaps and `EPSExportBitmap` (`exportBitmap.asm`), embedded graphics,
+`EPSExportBitmap` (huge bitmaps, `TranslateBitmap`), embedded graphics,
 `TransExport` through the file stream driver, the export UI and the
 import side. Their elements are skipped, as `EmitNothing` skips the
 pointer forms.
@@ -3846,8 +3868,10 @@ graphics string of lines, rectangles, polylines, ellipses, rounded
 rectangles, arcs, a 3-point arc, a curve, a filled and a stroked path,
 a masked fill, a zero mask, text (Berkeley mapped to Times, Helvetica
 bold, Zapf Chancery with a bold matrix, an umlaut, underlined Courier, a
-text field of two runs with its hyphen), a scaled line and a second page
-to a stream
+text field of two runs with its hyphen), bitmaps (monochrome with a
+binary and a hex packet, masked PackBits, 4-bit, 24-bit at 144 dpi in
+two slices; grey on level 1, color on level 2), a scaled line and a
+second page to a stream
 of the test. It checks the header comments, the setup sections, the
 code of each element and the trailer. Where Ghostscript is installed
 (`gs` in the `PATH` on Linux, or `GEOS_TEST_GS`), the file must also run

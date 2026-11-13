@@ -41,7 +41,7 @@ geos_geode(eps
            ${_eps}/Export/exportMain.c ${_eps}/Export/exportHeader.c
            ${_eps}/Export/exportGString.c ${_eps}/Export/exportPath.c
            ${_eps}/Export/exportArc.c ${_eps}/Export/exportUtils.c
-           ${_eps}/Export/exportText.c
+           ${_eps}/Export/exportText.c ${_eps}/Export/exportBitmap.c
            ${_eps}/Lib/libMain.c ${_eps_strings} ${_eps_fonts}
            GP eps32.gp REV eps.rev
            INCLUDES ${_eps}/Export ${CMAKE_CURRENT_BINARY_DIR})

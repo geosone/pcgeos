@@ -164,6 +164,9 @@ void    FreePageFonts(TGSLocals *tgs);
 void    EmitText(TGSLocals *tgs, word op);
 void    EmitTextField(TGSLocals *tgs, word op);
 
+/* exportBitmap.c */
+void    EmitBitmap(TGSLocals *tgs, word op);
+
 /* exportArc.c */
 void    Convert3PointToNormalArc(TGSLocals *tgs, const byte *e,
                                  GStateHandle gs);
