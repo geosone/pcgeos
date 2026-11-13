@@ -35,9 +35,9 @@ CHARS = {'C_NULL': 0, 'C_SOH': 1, 'C_STX': 2, 'C_ETX': 3, 'C_EOT': 4,
          'C_DEL': 127}
 CHARS.update({'C_CTRL_' + chr(64 + k): k for k in range(1, 27)})
 # the constants a driver's C files use
-CONST_RE = re.compile(r'^(?:LO|MED|HI)_RES_(?:BAND_HEIGHT|INTERLEAVE_FACTOR|'
+CONST_RE = re.compile(r'^(?:LOW?|MED|HI)_RES_(?:BAND_HEIGHT|INTERLEAVE_FACTOR|'
                       r'BUFF_HEIGHT|X_RES|Y_RES)$|^PR_|^ENOUGH_BLANK$|'
-                      r'^NUM_PINS$')
+                      r'^NUM_PINS$|^CANON_BJC_')
 
 
 def fail(msg):
@@ -221,8 +221,34 @@ def is_template(code):
     return allitems[-1] == '0' and "'#'" in allitems
 
 
+def is_record_table(code):
+    """a table of codes of a stride each, a count and its bytes padded
+    with 0 (lbp's pr_codes_SetGraphics, indexed by the mode)"""
+    flat = [x for i, _ in code['items'] for x in i]
+    for stride in range(2, len(flat) // 2 + 1):
+        if len(flat) % stride:
+            continue
+        ok = True
+        for r in range(0, len(flat), stride):
+            try:
+                c = int(flat[r])
+            except ValueError:
+                ok = False
+                break
+            if c >= stride or any(x != '0' for x in flat[r + 1 + c:
+                                                          r + stride]):
+                ok = False
+                break
+        if ok:
+            return True
+    return False
+
+
 def check_count(code, consts):
-    if code.get('word') or is_template(code):
+    # word tables, PCL templates and the other byte tables (not pr_codes_*,
+    # as canonBJColorTable) have no count
+    if code.get('word') or is_template(code) or \
+            not code['name'].startswith('pr_codes_'):
         return
     if sum(len(i) for i, _ in code['items']) == 1 and \
             code['name'] in MODE_CODES:
@@ -233,6 +259,8 @@ def check_count(code, consts):
     except ValueError:
         fail('%s: the count is %s' % (code['name'], first))
     n = sum(len(i) for i, _ in code['items']) - 1
+    if n > count and is_record_table(code):
+        return
     if n > count:
         # bytes after the code, of a label commented out: dropped when
         # they start a line of their own

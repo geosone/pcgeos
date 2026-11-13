@@ -77,6 +77,7 @@ NINEPIN(nec24) NINEPIN(epshi24) NINEPIN(epson48)
 NINEPIN(prop9) NINEPIN(propx24) NINEPIN(ppds24) NINEPIN(canon48)
 NINEPIN(oki9) NINEPIN(citoh9) NINEPIN(tosh24)
 NINEPIN(dj500c) NINEPIN(mercury) NINEPIN(canonbjc) NINEPIN(quietjet)
+NINEPIN(lbp)
 
 static int fails;
 #define CHECK(c) \
@@ -1817,6 +1818,202 @@ static void TestBjc(int out, const char *section, const char *device,
 #undef BJC_NEAR
 }
 
+/* ---------------------------------------------------------------------
+ * Canon CaPSL: ISO 6429 control sequences (CSI params intermediates
+ * final), raster images CSI count ; width ; dpi . r, back into dots in
+ * 1/300"
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    int pages, bad, resets, copies, tray, paper, rasters, dpi;
+    int left, top, right, bottom;	/* the dots of page 1, 1/300" */
+    long dots, dots2;
+    int fonts, sizes, pitches, bold;	/* page 1: CSI n;n y, CSI n SP C,
+					 * CSI ? n SP K, CSI 1 m */
+    char text[256];
+    int textLen;
+} CapslDecode;
+
+static void CapslDot(CapslDecode *d, int x, int y)
+{
+    if (d->pages > 1)
+	return;
+    if (d->pages) {
+	d->dots2++;
+	return;
+    }
+    if (!d->dots || x < d->left)
+	d->left = x;
+    if (!d->dots || x > d->right)
+	d->right = x;
+    if (!d->dots || y < d->top)
+	d->top = y;
+    if (!d->dots || y > d->bottom)
+	d->bottom = y;
+    d->dots++;
+}
+
+static void CapslDecodeFile(const byte *b, size_t n, CapslDecode *d)
+{
+    size_t i = 0;
+    int c, par[4], np, x = 0, y = 0, k, row, bit, sc;
+    char inter, fin;
+
+    memset(d, 0, sizeof(*d));
+    while (i < n) {
+	c = b[i++];
+	if (c == 0x0c) {
+	    d->pages++;
+	    continue;
+	}
+	if (c == '\r' || c == '\n')
+	    continue;
+	if (c != 0x1b) {
+	    if (c >= ' ' && !d->pages &&
+		d->textLen < (int) sizeof(d->text) - 1)
+		d->text[d->textLen++] = (char) c;
+	    continue;
+	}
+	if (i >= n) {
+	    d->bad++;
+	    return;
+	}
+	c = b[i++];
+	if (c == ';' || c == '<') {
+	    d->resets += c == '<';
+	    continue;
+	}
+	if (c == '(' || c == ')') {	/* a character set: 3 bytes */
+	    i += 3;
+	    continue;
+	}
+	if (c != '[') {
+	    printf("CaPSL: ESC %c\n", c);
+	    d->bad++;
+	    return;
+	}
+	np = 0;
+	par[0] = par[1] = par[2] = par[3] = 0;
+	while (i < n && b[i] >= 0x30 && b[i] <= 0x3f) {
+	    if (b[i] == ';') {
+		if (np < 3)
+		    np++;
+	    } else if (b[i] >= '0' && b[i] <= '9')
+		par[np] = par[np] * 10 + (b[i] - '0');
+	    i++;
+	}
+	inter = 0;
+	while (i < n && b[i] >= 0x20 && b[i] <= 0x2f)
+	    inter = (char) b[i++];
+	if (i >= n) {
+	    d->bad++;
+	    return;
+	}
+	fin = (char) b[i++];
+	switch (fin) {
+	case 'f':
+	    y = par[0];
+	    x = par[1];
+	    break;
+	case '`':
+	    x = par[0];
+	    break;
+	case 'v':
+	    d->copies = par[0];
+	    break;
+	case 'q':
+	    d->tray = par[0];
+	    break;
+	case 'p':
+	    d->paper = par[0];
+	    break;
+	case 'r':
+	    if (inter != '.' || !par[1] || i + (size_t) par[0] > n) {
+		d->bad++;
+		return;
+	    }
+	    d->rasters++;
+	    d->dpi = par[2];
+	    sc = par[2] ? 300 / par[2] : 1;
+	    for (k = 0; k < par[0]; k++)
+		for (bit = 0; bit < 8; bit++)
+		    if (b[i + k] & (0x80 >> bit)) {
+			row = k / par[1];
+			CapslDot(d, x + ((k % par[1]) * 8 + bit) * sc,
+				 y + row * sc);
+		    }
+	    i += (size_t) par[0];
+	    break;
+	case 'y':
+	    d->fonts += !d->pages;
+	    break;
+	case 'C':
+	    d->sizes += !d->pages;
+	    break;
+	case 'K':
+	    d->pitches += !d->pages;
+	    break;
+	case 'm':
+	    d->bold += !d->pages && par[0] == 1;
+	    break;
+	case 'z': case 'h': case 'l': case 'I': case 'B':
+	    break;
+	default:
+	    printf("CaPSL: CSI %d;%d %c%c\n", par[0], par[1],
+		   inter ? inter : ' ', fin);
+	    d->bad++;
+	    return;
+	}
+    }
+}
+
+/* the spool file of MakeSpoolFile through the CaPSL driver in its three
+ * resolutions: the figures of page 1 at their places (as for the other
+ * drivers, from the job's margins of 18 points) */
+static void TestCapsl(int out)
+{
+    static const word modes[] = { PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES,
+				  PM_GRAPHICS_HI_RES };
+    static const int res[] = { 75, 150, 300 };
+    JobParameters jp;
+    CapslDecode d;
+    char name[13], rel[40];
+    size_t n;
+    byte *b;
+    int m;
+
+#define CAPSL_NEAR(v, pt) ((v) > (pt) * 300 / 72 - 12 && \
+			   (v) < (pt) * 300 / 72 + 12)
+    for (m = 0; m < 3; m++) {
+	snprintf(rel, sizeof(rel), "out%d.prn", out + m);
+	MakeSpoolFile(name);
+	FillJob(&jp, name, "LBP File", PPT_FILE, rel);
+	strcpy(jp.JP_deviceName, "Canon LBP-8 Mark III");
+	jp.JP_printMode = modes[m];
+	CHECK(pSpoolAddJob(&jp) != 0xffff);
+	CHECK(WaitIdle());
+	snprintf(rel, sizeof(rel), "DOCUMENT/out%d.prn", out + m);
+	b = (byte *) Get(rel, &n);
+	CHECK(b != NULL && n > 100);
+	if (!b)
+	    continue;
+	CapslDecodeFile(b, n, &d);
+	printf("CaPSL mode %d: %lu bytes, %d pages, %d rasters at %d dpi, "
+	       "paper %d, tray %d, copies %d, %ld dots, %dx%d at %d,%d, "
+	       "page 2: %ld\n", modes[m], (unsigned long) n, d.pages,
+	       d.rasters, d.dpi, d.paper, d.tray, d.copies, d.dots,
+	       d.right - d.left, d.bottom - d.top, d.left, d.top, d.dots2);
+	CHECK(!d.bad && d.pages == 2 && d.resets == 1);
+	CHECK(d.dpi == res[m] && d.paper == 30 && d.copies == 1);
+	CHECK(CAPSL_NEAR(d.right - d.left, 428) &&
+	      CAPSL_NEAR(d.bottom - d.top, 328));
+	CHECK(CAPSL_NEAR(d.left, 54) && CAPSL_NEAR(d.top, 54));
+	CHECK(d.dots2 > d.dots);
+	free(b);
+    }
+#undef CAPSL_NEAR
+}
+
 static void TestDeskjet(int out, int tiff)
 {
     TestPclRaster(out, tiff, "DeskJet File", "HP DeskJet 500", 1, 0, 0,
@@ -2197,6 +2394,8 @@ int main(int argc, char **argv)
 	"device = Canon BJC-2000\r\n"
 	"[QuietJet File]\r\ndriver = quietjet.geo\r\n"
 	"device = HP QuietJet (HP Mode)\r\n"
+	"[LBP File]\r\ndriver = lbp.geo\r\n"
+	"device = Canon LBP-8 Mark III\r\n"
 	"[LaserJet File]\r\ndriver = pcl4.geo\r\n"
 	"device = HP LaserJet III\r\n"
 	"[Epmx9 File]\r\ndriver = epmx9.geo\r\ndevice = Epson MX-80 Type III\r\n"
@@ -2307,6 +2506,7 @@ int main(int argc, char **argv)
     Put("SYSTEM/PRINTER/mercury.geo", mercury_geode, mercury_geode_size);
     Put("SYSTEM/PRINTER/canonbjc.geo", canonbjc_geode, canonbjc_geode_size);
     Put("SYSTEM/PRINTER/quietjet.geo", quietjet_geode, quietjet_geode_size);
+    Put("SYSTEM/PRINTER/lbp.geo", lbp_geode, lbp_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
@@ -2431,6 +2631,8 @@ int main(int argc, char **argv)
 	    TestPclRaster(206, 1, "DeskJet KCMY File",
 			  "HP DeskJet 550C (4 Color)", 4, -4, 0,
 			  pclRes);
+	else if (!strcmp(argv[2], "lbp"))
+	    TestCapsl(230);
 	else if (!strcmp(argv[2], "quietjet")) {
 	    static const int qjRes[3] = { 96, 192, 192 };
 	    TestPclRaster(220, 0, "QuietJet File", "HP QuietJet (HP Mode)",

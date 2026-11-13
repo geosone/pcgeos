@@ -155,6 +155,10 @@ def value(tok):
         return int(tok, 0)
     if re.fullmatch(r'[0-9][0-9a-fA-F]*h', tok, re.I):
         return int(tok[:-1], 16)
+    m = re.fullmatch(r'(.+?)\s+(shl|shr)\s+(.+)', tok)
+    if m:				# lbp: MED_RES_BAND_HEIGHT = LO_... shl 1
+        a, b = value(m.group(1)), value(m.group(3))
+        return a << b if m.group(2) == 'shl' else a >> b
     raise ValueError(f'unknown value "{tok}"')
 
 
@@ -237,7 +241,8 @@ def offset_of(tok):
 def read_constants(path):
     text = strip_comments(open(path, encoding='latin-1').read())
     for line in text.splitlines():
-        m = re.match(r'\s*(\w+)\s*=\s*(\S+)\s*$', line)
+        m = re.match(r'\s*(\w+)\s*=\s*(\S+(?:\s+sh[lr]\s+\S+)?)\s*$',
+                     line)
         if m:
             try:
                 ENUMS[m.group(1)] = value(m.group(2))

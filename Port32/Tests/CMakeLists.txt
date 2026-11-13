@@ -361,7 +361,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   set(_ninepin_c)
   foreach(_d epmx9 eplx9 eprx9 bchip9 diconix9 star9 grpr9 nec24 epshi24
           epson48 prop9 propx24 ppds24 canon48 oki9 citoh9 tosh24
-          dj500c mercury canonbjc quietjet)
+          dj500c mercury canonbjc quietjet lbp)
     geos_embed(_c ${${_d}_GEO} ${_d}_geode)
     list(APPEND _ninepin_c ${_c})
   endforeach()
@@ -379,7 +379,8 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
                    geode_epshi24 geode_epson48 geode_prop9 geode_propx24
                    geode_ppds24 geode_canon48 geode_oki9 geode_citoh9
                    geode_tosh24 geode_dj500c geode_mercury
-                   geode_canonbjc geode_quietjet geode_truetype)
+                   geode_canonbjc geode_quietjet
+                   geode_lbp geode_truetype)
   target_include_directories(test_spool PRIVATE
                              ${PROJECT_SOURCE_DIR}/CInclude/Internal)
   target_link_libraries(test_spool PRIVATE geos_kernel)
@@ -393,8 +394,9 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   # the DeskJet driver (Driver/Printer/HP/Deskjet) through the spooler
   add_test(NAME driver.deskjet COMMAND test_spool deskjet)
   # the color DeskJets (Driver/Printer/HP/Dj500c, Mercury): CMY, KCMY;
-  # the Canon BJC (Driver/Printer/DotMatrix/CanonBJC), the QuietJet
-  foreach(_d dj500c mercury canonbjc quietjet)
+  # the Canon BJC (Driver/Printer/DotMatrix/CanonBJC), the QuietJet,
+  # the Canon CaPSL lasers (Driver/Printer/HP/Lbp)
+  foreach(_d dj500c mercury canonbjc quietjet lbp)
     add_test(NAME driver.${_d} COMMAND test_spool color ${_d})
   endforeach()
   # the PCL 4 driver (Driver/Printer/HP/Pcl4): rasters, soft fonts

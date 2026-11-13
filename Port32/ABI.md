@@ -1097,6 +1097,22 @@ white one as a raster line of a zero byte). `dmdevinfo2c.py` knows
 `TP_21_3_PITCH`, and `TP_24_PITCH` has the value of
 `CInclude/Internal/printDr.h` (0xd6, not 0xc2).
 
+`lbp.geo` (the Canon LBP-4, -8 and -1260 in CaPSL): ISO 6429 control
+sequences with the numbers in ASCII. The job enters the ISO mode, sets
+the copies (`CSI n v`), the tray (`CSI n q`), the paper (letter, legal,
+A4 and B5 by their code, others by their size in dots, for which the
+printer asks the user) and the full paint mode in 1/300"; the cursor is
+absolute (`CSI y ; x f`); the fonts are scalable, with their size in
+dots and their pitch (`textSetFontCapsl.c`; the pitch is the
+`TextPitch` value of the spooler); seven styles (`lbpStyles.c`). A band
+goes as a raster image of its live bytes (`graphicsCapslCommon.c`): the
+cursor to the first byte with ink of any line (`CSI x \``), then `CSI
+count ; width ; dpi . r` and the lines from there to the last byte with
+ink of any line; after a band the cursor moves down absolutely
+(`graphicsPrintSwath300.c`). `ctlcodes2c.py` takes tables of codes of a
+stride (`pr_codes_SetGraphics`, indexed by the mode), `dmdevinfo2c.py`
+constants with `shl` and `shr`.
+
 The control codes and the constants of these drivers come from the asm
 by `Port32/tools/ctlcodes2c.py` (`printcomDriver.h`,
 `*ControlCodes.c`, checked in). Labels without bytes of their own share
