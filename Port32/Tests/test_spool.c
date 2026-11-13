@@ -832,6 +832,7 @@ int main(int argc, char **argv)
     char *cupsDoc, got[16];
     FakeCupsJob *cupsJob = NULL;
     pid_t cups;
+    static char hostCups[256];
 #endif
     PrinterStringInfo psi;
     JobParameters jp;
@@ -902,6 +903,10 @@ int main(int argc, char **argv)
     fakeCupsJob.name = "GEOS";
     fakeCupsJob.copies = NULL;
     fakeCupsJob.sides = "two-sided-long-edge";
+    /* the host's CUPS socket for GEOS_PRINT_QUEUE, before the stand-in
+     * takes $CUPS_SERVER */
+    if (getenv("CUPS_SERVER"))
+	snprintf(hostCups, sizeof(hostCups), "%s", getenv("CUPS_SERVER"));
     cupsJob = FakeCupsShared(CUPS_DOC_MAX, &cupsDoc);
     cups = cupsJob ? FakeCupsStart() : 0;
     CHECK(cups != 0);
@@ -1177,6 +1182,26 @@ int main(int argc, char **argv)
 	if (strcmp(got, "JLDJ"))
 	    printf("CUPS stand-in: \"%s\"\n", got);
 	CHECK(!strcmp(got, "JLDJ"));
+    }
+
+    /* by hand only (ctest never sets it): the PostScript job to a queue
+     * of the host's CUPS, such as a cups-pdf one; never to a real
+     * printer by a test */
+    if (getenv("GEOS_PRINT_QUEUE")) {
+	if (hostCups[0])
+	    setenv("CUPS_SERVER", hostCups, 1);
+	else
+	    unsetenv("CUPS_SERVER");
+	InitFileWriteString("Host Queue", "driver", "pscript.geo");
+	InitFileWriteString("Host Queue", "device", "PostScript Compatible");
+	InitFileWriteString("Host Queue", "portDriver", "cups.geo");
+	InitFileWriteString("Host Queue", "hostQueue",
+			    getenv("GEOS_PRINT_QUEUE"));
+	MakeSpoolFile(name1);
+	FillJob(&jp, name1, "Host Queue", PPT_CUSTOM, NULL);
+	CHECK(pSpoolAddJob(&jp) != 0xffff);
+	CHECK(WaitIdle());
+	printf("printed to the host queue %s\n", getenv("GEOS_PRINT_QUEUE"));
     }
 #endif
 
