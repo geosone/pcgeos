@@ -21,6 +21,7 @@
 #include <file.h>
 #include <graphics.h>
 #include <gstring.h>
+#include <fontID.h>
 #include <print.h>
 #include <timer.h>
 #include <initfile.h>
@@ -1201,6 +1202,39 @@ int main(int argc, char **argv)
 	FillJob(&jp, name1, "Host Queue", PPT_CUSTOM, NULL);
 	CHECK(pSpoolAddJob(&jp) != 0xffff);
 	CHECK(WaitIdle());
+	/* and a page of text */
+	{
+	    GStateHandle gs;
+	    FileHandle fh = pSpoolCreateSpoolFile(name1);
+	    word ch;
+
+	    CHECK(fh != 0);
+	    gs = GrCreateGString(fh, GST_STREAM, &ch);
+	    GrSetFont(gs, FID_PS_TIMES_ROMAN, (WWFixedAsDWord) 24 << 16);
+	    GrSetTextStyle(gs, TS_BOLD, 0);
+	    GrDrawText(gs, 72, 72, "PC/GEOS on Port32", 0);
+	    GrSetTextStyle(gs, 0, TS_BOLD);
+	    GrSetFont(gs, FID_PS_HELVETICA, (WWFixedAsDWord) 12 << 16);
+	    GrDrawText(gs, 72, 120, "Printed through spool.geo, pscript.geo "
+		       "and cups.geo.", 0);
+	    GrSetTextStyle(gs, TS_ITALIC, 0);
+	    GrDrawText(gs, 72, 140, "Helvetica Oblique", 0);
+	    GrSetTextStyle(gs, TS_UNDERLINE, TS_ITALIC);
+	    GrSetFont(gs, FID_PS_COURIER, (WWFixedAsDWord) 12 << 16);
+	    GrDrawText(gs, 72, 160, "Courier, underlined: Gr\x9f" "\xa7" "e", 0);
+	    GrSetTextStyle(gs, 0, TS_UNDERLINE);
+	    GrSetTextColor(gs, CF_RGB, 0xcc, 0, 0);
+	    GrSetFont(gs, FID_PS_TIMES_ROMAN, (WWFixedAsDWord) 14 << 16);
+	    GrDrawText(gs, 72, 190, "Red Times", 0);
+	    GrNewPage(gs, PEC_FORM_FEED);
+	    CHECK(GrEndGString(gs) == GSET_NO_ERROR);
+	    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+	    FileClose(fh, FALSE);
+	    FillJob(&jp, name1, "Host Queue", PPT_CUSTOM, NULL);
+	    jp.JP_numPages = 1;
+	    CHECK(pSpoolAddJob(&jp) != 0xffff);
+	    CHECK(WaitIdle());
+	}
 	printf("printed to the host queue %s\n", getenv("GEOS_PRINT_QUEUE"));
     }
 #endif
