@@ -570,9 +570,18 @@ int main(int argc, char **argv)
     CHECK(VMClose(vm, FALSE) == 0);
     CHECK(FileSetAttributes("A.VM", 0) == 0);
     CHECK(FileCreateDir("TMP") == 0);
-    vm = VMOpen("TMP", 0, VMO_TEMP_FILE, 0);
-    CHECK(vm && ThreadGetError() == VM_CREATE_OK);
-    CHECK(VMClose(vm, FALSE) == 0);
+    {
+	/* the directory in, the file's name out (DOS16: the buffer must
+	 * have room for it) */
+	char tmp[32] = "TMP";
+
+	vm = VMOpen(tmp, 0, VMO_TEMP_FILE, 0);
+	CHECK(vm && ThreadGetError() == VM_CREATE_OK);
+	CHECK(!strncmp(tmp, "TMP\\VM", 6) && strlen(tmp) == 14 &&
+	      !strcmp(tmp + 10, ".TMP"));
+	CHECK(VMClose(vm, FALSE) == 0);
+	CHECK(FileDelete(tmp) == 0);
+    }
 
     /* a file of the 16-bit tools */
     {

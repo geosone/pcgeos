@@ -22,7 +22,8 @@
  *   4. the standard paths of [paths] (GetPaths of the loader); the
  *      fonts of SP_FONT, the font drivers of [system] font and the
  *      default font (GrInitFonts, GrLoadFontDrivers,
- *      GrInitDefaultFont);
+ *      GrInitDefaultFont); the memory video driver vidmem.geo of
+ *      SP_VIDEO_DRIVERS (LoadMemVid), unless [system] noVidMem;
  *   5. the input manager's thread (InitIM), which runs once the
  *      drivers are loaded;
  *      the keyboard driver (LoadKeyboardDriver), from
@@ -47,7 +48,7 @@
  * (CANNOT_LOAD_KEYBOARD_DRIVER).  Without the key, none is loaded yet:
  * a host without keys (the tests) needs none.
  *
- * Not yet: the drivers (memory, power, mouse, video), graphics and
+ * Not yet: the drivers (memory, power, mouse, screen video), graphics and
  * windows, patches, the log file, documentIsTop, FSDInitComplete.
  */
 #include "kernelC.h"
@@ -57,6 +58,7 @@
 #include <system.h>
 #include <driver.h>
 #include <Internal/kbdDr.h>
+#include <Internal/videoDr.h>
 #include <string.h>
 
 GeodeHandle kernelUIHandle;
@@ -110,6 +112,23 @@ static void LoadKeyboardDriver(void)
     if (!gh)
 	KernelFatal(CANNOT_LOAD_KEYBOARD_DRIVER);
     GeodeSetDefaultDriver(GDDT_KEYBOARD, gh);
+}
+
+/* LoadMemVid: the memory video driver, which draws into bitmaps
+ * (GrCreateBitmap), unless "[system] noVidMem = true".  DOS16 found it
+ * fatal when it was missing (KR-25); here a GEOS without it (the tests)
+ * has no bitmaps. */
+static void LoadMemVid(void)
+{
+    Boolean no = FALSE;
+    GeodeHandle gh;
+
+    if (!InitFileReadBoolean("system", "noVidMem", &no) && no)
+	return;
+    gh = LoadDriver("vidmem.geo", SP_VIDEO_DRIVERS, VIDEO_PROTO_MAJOR,
+		    VIDEO_PROTO_MINOR);
+    if (gh)
+	GeodeSetDefaultDriver(GDDT_MEMORY_VIDEO, gh);
 }
 
 static void LoadUI(void)
@@ -183,6 +202,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     GrInitFonts();
     GrLoadFontDrivers();
     GrInitDefaultFont();
+    LoadMemVid();
     KernelImInit();
     LoadKeyboardDriver();
     KernelImStart();

@@ -52,6 +52,9 @@ static void FreeVM(KVMFile *f)
 }
 
 /* a name in directory `dir' that does not exist yet */
+/* a new file VMnnnn.TMP in the directory dir (VMO_TEMP_FILE); its path
+ * in name.  The caller's buffer gets it too (VMOpen), so it must have
+ * room for the 12 characters and a backslash after the directory. */
 static FileHandle CreateTemp(const char *dir, char *name, size_t size)
 {
     static word counter;
@@ -96,6 +99,9 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
 	    KernelSetError(OpenStatus(ThreadGetError()));
 	    return 0;
 	}
+	/* as DOS16: the name of the file into the caller's buffer (the
+	 * directory it passed, with the name appended) */
+	strcpy(name, tmp);
 	name = tmp;
 	create = TRUE;
     }
