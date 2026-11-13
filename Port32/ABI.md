@@ -930,6 +930,41 @@ The offsets within a device's info (`PI_hiRes`, `PSIS_prolog`) are
 kept. They count from the start of the `PrinterInfo`, as in the
 resource.
 
+**The raster drivers** (the dot matrix code of `PrintCom/`: `Buffer/`,
+`Graphics/`, `Cursor/`, `Text/`, `Styles/`, `Color/`):
+- The driver's constants and control codes come from its
+  `printcomDriver.h` (the C form of its `*Constant.def`); a control
+  code is a `const byte pr_codes_X[]`, a count and the bytes, as
+  `SendCodeOut` wants them.
+- **The swath.** `DR_PRINT_SWATH` gets dx the VM file (32 bits) and cx
+  the block of the bitmap's huge array; the PState keeps them in
+  `PS_bitmapFile` and `PS_bitmap`, the locked scan line's address in
+  `PS_curScanPtr` and the number of scan lines in `PS_bitmapCount`. A
+  scan line past the end of the array reads as zeros.
+- The band and output buffers are one block (`PS_bufSeg`): the 96 byte
+  output buffer, then the band buffer.
+- The style routines are tables (`printSetStyle[16]`,
+  `printResetStyle[16]`, by `PrintTextStyle` bit) of the driver's
+  style file (`printcomEpsonStyles.c`).
+- Deviations, each commented: `PrLineFeed` of 0 sends nothing (the asm
+  sent `ESC J` without its count); `PrMapRGBtoCMYKIndex` has the 7
+  entries of its table (the asm read an 8th past it).
+- The print UI (the options and country boxes) is not ported: the UI
+  routines return no tree; the paper path and country are what the
+  job's `JP_printerData` says.
+
+**The Epson 9-pin driver** (`Driver/Printer/DotMatrix/Epson9`,
+`epson9.geo`, protocol 5.0, from `epson932.gp`): `epson9ControlCodes.c`
+and the `PrintCom` files of `epson9Manager.asm`.
+`Port32/tools/dmdevinfo2c.py` makes the device and font tables of the
+asm at build time (`epson9DriverInfo.asm`, the `*Info.asm`,
+`fontEpsonFXInfo.asm`): per info resource a structure of the
+`PrinterInfo`, its `GraphicsProperties`, the font geometries and pitch
+tables, with the offsets kept; `printFontInfoBase` is the base of the
+font lists' offsets; the ISO substitutions and ASCII translations for
+`SpoolUpdateTranslationTable` (`printTransTables`). Color correction
+(gamma30, `CorrectInk`) is not ported.
+
 **The PostScript driver** (`Driver/Printer/PScript`, `pscript.geo`,
 protocol 5.0, built from `pscript32.gp`):
 - **Device tables.** `Port32/tools/psdevinfo2c.py` makes them from the
@@ -3826,9 +3861,19 @@ geode is built from `spool32.gp`.
   spool file loaded as a `GST_STREAM` graphics string, and
   `DR_PRINT_END_PAGE`. The document's place on the paper (centred,
   scaled to fit, rotated, tiled) is computed as the asm did, with the
-  kernel's fixed point routines. Only PDL printers so far: a graphics or
-  text mode printer ends the job with `SERROR_NO_MODE_AVAIL` until
-  `processGraphics.asm` and `processText.asm` are ported.
+  kernel's fixed point routines.
+- **Graphics modes** (`processGraphics.c`): the page is drawn into a
+  bitmap one swath high (`GrCreateBitmap` in a temporary VM file of
+  `SP_SPOOL`, through the memory video driver, which the boot now loads
+  as DOS16 did: `vidmem.geo`, unless `[system] noVidMem`), the swath
+  goes to `DR_PRINT_SWATH` with dx the VM file and cx the bitmap's
+  block, and the page moves up a swath; tiling and the manual feed box
+  as for PDL. The kernel has no CMYK or CMY bitmaps: such a device
+  gets a monochrome swath and prints in black. The mode's color
+  correction is not used. `VMOpen` with `VMO_TEMP_FILE` now returns the
+  file's name in the caller's buffer, as DOS16 did. A text mode
+  printer still ends the job with `SERROR_NO_MODE_AVAIL` until
+  `processText.asm` is ported.
 - **The end of a page.** `ProcessEndPage` compared bl with
   `PEC_FORM_FEED`: the low byte of the PState handle the driver left in
   bx, not the `GR_NEW_PAGE`'s data. The C printer drivers return no

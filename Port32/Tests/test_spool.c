@@ -49,6 +49,10 @@ extern const unsigned char eps_geode[];
 extern const unsigned long eps_geode_size;
 extern const unsigned char pscript_geode[];
 extern const unsigned long pscript_geode_size;
+extern const unsigned char vidmem_geode[];
+extern const unsigned long vidmem_geode_size;
+extern const unsigned char epson9_geode[];
+extern const unsigned long epson9_geode_size;
 
 static int fails;
 #define CHECK(c) \
@@ -520,6 +524,170 @@ static void CheckOutput(const char *rel, int pages)
     free(ps);
 }
 
+
+/* ---------------------------------------------------------------------
+ * The Epson 9-pin driver: ESC/P back into dots
+ * ------------------------------------------------------------------- */
+
+/* the dots of a page at 240 x 216 dpi (the high resolution) */
+#define EP_W	2048
+#define EP_H	2600
+
+typedef struct {
+    int pages;
+    int bad;			/* an unknown code or a truncated one */
+    int left, top, right, bottom;	/* the dots of page 1 */
+    long dots;
+    int modes[4];		/* graphics codes per ESC * m */
+} EpsonDecode;
+
+static void EpsonDot(EpsonDecode *d, int x, int y)
+{
+    if (d->pages != 0 || x < 0 || y < 0 || x >= EP_W || y >= EP_H)
+	return;
+    if (!d->dots || x < d->left)
+	d->left = x;
+    if (!d->dots || x > d->right)
+	d->right = x;
+    if (!d->dots || y < d->top)
+	d->top = y;
+    if (!d->dots || y > d->bottom)
+	d->bottom = y;
+    d->dots++;
+}
+
+static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d)
+{
+    size_t i = 0, k, cols;
+    int x = 0, y = 0, scale, pin, c;
+
+    memset(d, 0, sizeof(*d));
+    while (i < n) {
+	c = b[i++];
+	if (c == 0 || c == 0x0f || c == 0x12 || c == 0x09)
+	    continue;
+	if (c == '\r') {
+	    x = 0;
+	    continue;
+	}
+	if (c == 0x0c) {
+	    d->pages++;
+	    x = y = 0;
+	    continue;
+	}
+	if (c != 0x1b || i >= n) {
+	    if (c >= ' ')		/* text */
+		continue;
+	    d->bad++;
+	    return;
+	}
+	c = b[i++];
+	switch (c) {
+	case '@': case 'O': case '6': case '8': case '4': case '5':
+	case 'P': case 'M': case 'T': case 'E': case 'F': case 'G':
+	case 'H':
+	    break;
+	case 't': case 'U': case 'r': case 'R': case 'x': case 'S':
+	case '-': case 'W': case 'w': case 'k': case 'p': case '3':
+	case 0x19:
+	    i++;
+	    break;
+	case 'C':
+	    if (i < n && b[i] == 0)
+		i++;
+	    i++;
+	    break;
+	case 'J':
+	    if (i < n)
+		y += b[i];
+	    i++;
+	    break;
+	case '$':
+	    if (i + 1 < n)
+		x = (b[i] | b[i + 1] << 8) * 4;
+	    i += 2;
+	    break;
+	case 'D':
+	    while (i < n && b[i])
+		i++;
+	    i++;
+	    break;
+	case '*':
+	    if (i + 2 >= n) {
+		d->bad++;
+		return;
+	    }
+	    c = b[i];
+	    cols = (size_t) (b[i + 1] | b[i + 2] << 8);
+	    i += 3;
+	    scale = c == 0 ? 4 : c == 1 ? 2 : c == 3 ? 1 : 0;
+	    if (!scale || i + cols > n) {
+		d->bad++;
+		return;
+	    }
+	    d->modes[c]++;
+	    for (k = 0; k < cols; k++, x += scale)
+		for (pin = 0; pin < 8; pin++)
+		    if (b[i + k] & (0x80 >> pin))
+			EpsonDot(d, x, y + pin * 3);
+	    i += cols;
+	    break;
+	default:
+	    d->bad++;
+	    return;
+	}
+    }
+}
+
+/* the spool file of MakeSpoolFile through the Epson 9-pin driver to a
+ * file in each graphics mode: two pages; on the first the rectangle and
+ * the line, 72..500 by 72..400 points of the document */
+static void TestEpson(void)
+{
+    static const word modes[] = { PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES,
+				  PM_GRAPHICS_HI_RES };
+    JobParameters jp;
+    EpsonDecode d;
+    char name[13], rel[40];
+    size_t n;
+    byte *b;
+    int m, w, h;
+
+    for (m = 0; m < 3; m++) {
+	snprintf(rel, sizeof(rel), "out%d.prn", 10 + m);
+	MakeSpoolFile(name);
+	FillJob(&jp, name, "Epson File", PPT_FILE, rel);
+	strcpy(jp.JP_deviceName, "Epson FX-85 (Epson Mode)");
+	jp.JP_printMode = modes[m];
+	((PrintDriverUIData *) jp.JP_printerData)->PUID_countryCode = PCC_USA;
+	CHECK(pSpoolAddJob(&jp) != 0xffff);
+	CHECK(WaitIdle());
+	snprintf(rel, sizeof(rel), "DOCUMENT/out%d.prn", 10 + m);
+	b = (byte *) Get(rel, &n);
+	CHECK(b != NULL && n > 100);
+	if (!b)
+	    continue;
+	CHECK(n > 4 && b[0] == 0x1b && b[1] == '@');
+	EpsonDecodeFile(b, n, &d);
+	w = d.right - d.left;		/* 428 pt at 240 dpi: 1427 */
+	h = d.bottom - d.top;		/* 328 pt at 216 dpi: 984 */
+	printf("epson9 mode %d: %lu bytes, %d pages, %ld dots, %dx%d at "
+	       "%d,%d, codes %d/%d/%d\n", modes[m], (unsigned long) n,
+	       d.pages, d.dots, w, h, d.left, d.top, d.modes[0], d.modes[1],
+	       d.modes[3]);
+	CHECK(!d.bad);
+	CHECK(d.pages == 2);
+	CHECK(d.modes[m == 0 ? 0 : m == 1 ? 1 : 3] > 0);
+	CHECK(w > 1427 - 12 && w < 1427 + 12);
+	CHECK(h > 984 - 12 && h < 984 + 12);
+	/* the document's 72 pt, less its margins (18 pt), from where the
+	 * head starts: the printable area of the paper */
+	CHECK(d.left > 54 * 240 / 72 - 12 && d.left < 54 * 240 / 72 + 12);
+	CHECK(d.top > 54 * 3 - 12 && d.top < 54 * 3 + 12);
+	free(b);
+    }
+}
+
 int main(int argc, char **argv)
 {
     static const char ini[] =
@@ -530,6 +698,8 @@ int main(int argc, char **argv)
 	"[Host Laser]\r\ndriver = pscript.geo\r\n"
 	"device = PostScript Compatible\r\nportDriver = cups.geo\r\n"
 	"hostQueue = fake1\r\nhostDuplex = true\r\n"
+	"[Epson File]\r\ndriver = epson9.geo\r\n"
+	"device = Epson FX-85 (Epson Mode)\r\n"
 	"[spool]\r\nhostPrinters = false\r\n";
     static const char patch[] = "% devpatch\r\n";
     GeodeLoadError e;
@@ -580,6 +750,9 @@ int main(int argc, char **argv)
     Put("SYSTEM/spool.geo", spool_geode, spool_geode_size);
     Put("SYSTEM/filestr.geo", filestr_geode, filestr_geode_size);
     Put("SYSTEM/PRINTER/pscript.geo", pscript_geode, pscript_geode_size);
+    Put("SYSTEM/PRINTER/epson9.geo", epson9_geode, epson9_geode_size);
+    Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
+    Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("SYSTEM/IMPEX/eps.geo", eps_geode, eps_geode_size);
     Put("SYSTEM/devpatch.ps", patch, sizeof(patch) - 1);
     Put("geos.ini", ini, sizeof(ini) - 1);
@@ -719,6 +892,8 @@ int main(int argc, char **argv)
     CHECK(!SpoolFileExists("spool001.dat"));
     CHECK(!SpoolFileExists("spool002.dat"));
     CHECK(!SpoolFileExists("spool003.dat"));
+
+    TestEpson();
 
 #ifdef GEOS_TEST_CUPS
     /* the same document to the host's queue: the custom port loads

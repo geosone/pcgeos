@@ -192,6 +192,12 @@ typedef struct _SpoolJobInfo {
     word		SJI_printHeight;
     dword		SJI_docWidth;	/* printable area of the document */
     dword		SJI_docHeight;
+    /* graphics modes (processGraphics.c): the swath's bitmap in a
+     * temporary VM file of SP_SPOOL, its window */
+    char		SJI_bmFileName[16];
+    VMFileHandle	SJI_bmFileHan;
+    VMBlockHandle	SJI_bmHan;
+    WindowHandle	SJI_bmWinHan;
 } SpoolJobInfo;
 
 #define PAPER_INFO(j)	((j)->SJI_info.JP_paperSizeInfo)
@@ -262,6 +268,11 @@ extern Boolean CallPort(SpoolJobInfo *j, word function, DriverRegs *r);
 extern word DoPDLInit(SpoolJobInfo *j);
 extern void DoPDLCleanup(SpoolJobInfo *j);
 extern GSRetType PrintPDLPage(SpoolJobInfo *j);
+
+/* Process/processGraphics.c */
+extern word DoGraphicsInit(SpoolJobInfo *j);
+extern void DoGraphicsCleanup(SpoolJobInfo *j);
+extern GSRetType PrintGraphicsPage(SpoolJobInfo *j);
 
 /* processPort.c */
 extern Boolean LoadPortDriver(SpoolJobInfo *j);

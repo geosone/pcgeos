@@ -345,10 +345,12 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   # file stream driver (Driver/Stream/Filestr) with the PostScript driver
   geos_embed(_spool_c ${spool_GEO} spool_geode)
   geos_embed(_filestr_c ${filestr_GEO} filestr_geode)
+  geos_embed(_epson9_c ${epson9_GEO} epson9_geode)
+  geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
   add_executable(test_spool test_spool.c ${_spool_c} ${_filestr_c}
-                 ${_eps_c} ${_pscript_c})
+                 ${_eps_c} ${_pscript_c} ${_epson9_c} ${_vidmem_c})
   add_dependencies(test_spool geode_spool geode_filestr geode_eps
-                   geode_pscript)
+                   geode_pscript geode_epson9 geode_vidmem)
   target_include_directories(test_spool PRIVATE
                              ${PROJECT_SOURCE_DIR}/CInclude/Internal)
   target_link_libraries(test_spool PRIVATE geos_kernel)
@@ -382,8 +384,8 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     add_test(NAME driver.video COMMAND test_video)
   endif()
 
-  # drawing through the window system to the host video driver
-  geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
+  # drawing through the window system to the host video driver (vidmem
+  # embedded with test_spool)
   geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
              berkeley_fnt)
   # the TrueType font driver (Driver/Font) and a font for it

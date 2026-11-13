@@ -8,10 +8,10 @@
  * SpoolJobInfo); here they get a pointer to it.  The queue is locked
  * only for short times (LockQueue), as in the asm.
  *
- * Port32: PDL printing only.  A graphics or text mode printer is
- * reported (SERROR_NO_MODE_AVAIL) and the job ends with an error until
- * the graphics and text printing of the spooler are ported
- * (processGraphics.asm, processText.asm).  Tiramisu (fax) printing and
+ * Port32: PDL and graphics printing (processPDL.c, processGraphics.c).
+ * A text mode printer is reported (SERROR_NO_MODE_AVAIL) and the job
+ * ends with an error until the text printing of the spooler is ported
+ * (processText.asm).  Tiramisu (fax) printing and
  * labels are not built, as in the default spooler.  The asm never sets
  * SPS_ROTATED; neither does this.
  */
@@ -754,14 +754,19 @@ static void PrintDocument(SpoolJobInfo *j)
     GSRetType ret;
     byte e;
 
-    if (!IsPDL(j)) {
-	/* processGraphics.asm, processText.asm: not ported yet */
+    Boolean graphics = !IsPDL(j);
+
+    if (graphics && j->SJI_info.JP_printMode >= PM_FIRST_TEXT_MODE) {
+	/* processText.asm: not ported yet */
 	SpoolErrorBox(SERROR_NO_MODE_AVAIL, j->SJI_qHan);
 	StoppedByError(j);
 	return;
     }
-    if (DoPDLInit(j))
+    if (graphics ? DoGraphicsInit(j) : DoPDLInit(j)) {
+	SpoolErrorBox(SERROR_NO_MODE_AVAIL, j->SJI_qHan);
+	StoppedByError(j);
 	return;
+    }
     if (CheckForErrors(j, &e))
 	goto doneDoc;
 
@@ -778,7 +783,7 @@ static void PrintDocument(SpoolJobInfo *j)
 		SpoolErrorBox(SERROR_MANUAL_PAPER_FEED, 0) != SPOOL_IC_OK)
 		ret = GSRT_FAULT;
 	    else {
-		ret = PrintPDLPage(j);
+		ret = graphics ? PrintGraphicsPage(j) : PrintPDLPage(j);
 		if (CheckForErrors(j, &e))
 		    goto doneDoc;
 		/* uncollated copies: the page again */
@@ -808,7 +813,10 @@ static void PrintDocument(SpoolJobInfo *j)
 	BumpPageNumber(j);
     }
 doneDoc:
-    DoPDLCleanup(j);
+    if (graphics)
+	DoGraphicsCleanup(j);
+    else
+	DoPDLCleanup(j);
 }
 
 /* PrintFile: the job's spool file through the port to the printer */
