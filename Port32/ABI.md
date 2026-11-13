@@ -873,6 +873,112 @@ from the display, under Xvfb where the display is X11. It checks:
 - `DR_VID_GETPIXEL`, the palette, an escape, and the screen off and
   on.
 
+### 7.6 The printer drivers (`Driver/Printer`, P7)
+
+As in DOS16, a printer driver is the common code of `PrintCom/` plus
+its own. The C files are beside their asm. Each C file ports the asm
+file of the same name and what that file includes
+(`printcomPScriptJob.c` is `printcomPScriptJob.asm` with its `Job/`
+files). `PrintCom/printcom.h` is the common header. The common code
+calls the driver's routines and data by name:
+- `PrintInit`, `PrintExit`, `PrintInitStream`;
+- `printDevices[]`, `printDriverInfo`;
+- `printEscTable[]` (the escapes);
+- the `DR_PRINT_*` routines of the jump table.
+
+**The strategy routine** (`printcomEntry.c`) keeps the asm's rules:
+- From `DRE_SET_DEVICE` on, `bx` is the PState's handle, and that
+  includes `DR_PRINT_DRIVER_INFO`. The PState is locked around the call
+  and `PS_error` is cleared first.
+- A routine gets the PState as a pointer (the asm's `bp`) and the
+  registers, and returns the carry. The carry is the routine's: the
+  asm read `PS_error` and then popped the routine's flags over it.
+- An unknown escape returns `di` 0 and no carry.
+
+**PState** (`CInclude/Internal/printDr.h`, under `GEOS_PORT32`). Port32
+changes:
+- The handles are `MemHandle` and `PS_bufSeg` is a pointer.
+- `PS_streamToken` is a dword and `PS_streamStrategy` is a C strategy
+  pointer. `DR_PRINT_SET_STREAM` with `dx` 0 keeps the strategy that is
+  already there.
+- `PS_epsLibrary` is a field of its own; the asm kept it in the word
+  `PS_bandHeight`.
+- The JobParameters follow the PState (`PS_JOB_PARAMS`).
+- The records' masks (`PT_*`, `PC_*`, `PIO_*`, `POO_*`) replace the
+  `CHECKME` placeholders.
+
+**The device info is the driver's own data**, not resources:
+- `PS_deviceInfo` points to the device's `PrinterInfo`.
+- `DR_PRINT_DEVICE_INFO` returns a pointer in `DR_dsSi` (dx and si 0).
+- `DR_PRINT_DRIVER_INFO` returns a pointer to the `PrintDriverInfo`
+  itself. In DOS16 it pointed to a `DriverExtendedInfoTable` with the
+  `PrintDriverInfo` after it.
+- `DEIS_resource` is 0. The device list for the preferences comes with
+  the spooler's port.
+- `DRE_SET_DEVICE` matches names as `EnumerateDevice` did: the passed
+  name against the start of each table name.
+
+The offsets within a device's info (`PI_hiRes`, `PSIS_prolog`) are
+kept. They count from the start of the `PrinterInfo`, as in the
+resource.
+
+**The PostScript driver** (`Driver/Printer/PScript`, `pscript.geo`,
+protocol 5.0, built from `pscript32.gp`):
+- **Device tables.** `Port32/tools/psdevinfo2c.py` makes them from the
+  asm at build time (`pscriptDriverInfo.asm` without `GPC_ONLY`, and
+  the `*Info.asm`): 109 devices on 20 info resources. Each is a
+  `PrinterInfo`, its `GraphicsProperties`, the `PSInfoStruct` and the
+  prolog in a row, so there is one copy of the device data. A compile
+  time check keeps the `PSInfoStruct` right after the properties.
+- **Records are filled by position, as esp did.** The asm writes the
+  paper input as `<MF_x, TF_x, ASF_x>`, but the fields are `PIO_MANUAL`,
+  `PIO_ASF`, `PIO_TRACTOR`. So the TF value lands in `PIO_ASF` and the
+  ASF value in `PIO_TRACTOR` (`0x21` for most devices), and the tables
+  keep that.
+- **Custom routines.** `PI_customEntry` and `PI_customExit` are numbers
+  (`PSC_*`, `pscript.h`) instead of code offsets. The UI fields are 0:
+  the print UI is not ported, so `DR_PRINT_GET_MAIN_UI` and
+  `GET_OPTIONS_UI` return no tree, and `EVAL_UI` and `STUFF_UI` do
+  nothing.
+- **The job.** `eps.geo` is loaded from `SP_IMPORT_EXPORT_DRIVERS` per
+  job and called through `TR_*` (§13v). The job then writes:
+  - the header from the `JobParameters` (the copies are PostScript's
+    unless collated);
+  - the device's prolog;
+  - `SYSTEM/devpatch.ps`, which the asm wrote with `FileWrite` to the
+    stream block's handle and which now goes through `TR_EXPORT_RAW`;
+  - the PJL (LaserJet 4) and tray codes (IBM 4019) of the custom
+    routines;
+  - `DR_PRINT_ESC_SET_PAGE_TRANSFORM` (`SPT`, `SPS`) and
+    `DR_PRINT_ESC_PRINT_GSTRING` through `EPSExportLow`.
+- **Numbers.** The driver formats them itself, with its own fraction
+  tables (they differ from the library's in the last entries).
+- **Not ported:**
+  - `DR_PRINT_SWATH` is an error until the library has
+    `EPSExportBitmap`;
+  - the host integration printer's temp file and ps2pdf: the host
+    prints through the CUPS port driver (§13v, GAPI-Concept.md).
+
+`CInclude/Internal/streamDr.h` is the C form of `streamDr.def`, for the
+callers of stream drivers (the printer drivers, `eps.geo`, the CUPS
+driver).
+
+ctest `driver.pscript` loads `pscript.geo` from `SYSTEM/PRINTER`, with
+`eps.geo` in `SYSTEM/IMPEX` and a `devpatch.ps`. It drives a job as the
+spooler would and checks:
+- the device and its info, the mode, the stream, the color format and
+  the paper path;
+- the header, the device prolog, the patch;
+- the print area and the margins;
+- a page with a sheared page transform and a graphics string;
+- the ends;
+- an unknown escape, a swath and an unknown function;
+- a second job on the LaserJet 4 with PJL before and after and
+  collated copies left to the spooler.
+
+Where Ghostscript is installed, the output must run through it without
+an error.
+
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 
 The C kernel starts with the handle table and the memory block API of
@@ -3594,7 +3700,12 @@ The export side of `eps.geo` in C, beside the asm in `Export/`:
 asm routines shared (`TGSLocals`); the entry and the default options in
 `Lib/libMain.c`; the C interface in `CInclude/xlatPS.h`. The geode is
 built from `eps32.gp` (the routines ported so far). It is what the
-PostScript printer driver uses.
+PostScript printer driver uses (§7.6).
+
+- **Entry numbers.** `eps32.gp` keeps the numbers of `eps.gp`, the
+  `TransRoutine` numbers (`TR_*` in `xlatPS.h`): the printer drivers
+  call the library through `ProcGetLibraryEntry`, as the asm did. What
+  is not ported yet is a `skip`; its entry is empty (NULL).
 
 - **The PostScript text stays in the asm.** `exportPSCode.asm`,
   `exportComments.asm` and `exportProlog.asm` keep the procedures,

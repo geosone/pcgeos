@@ -331,6 +331,16 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   target_link_libraries(test_eps PRIVATE geos_kernel)
   add_test(NAME library.eps COMMAND test_eps)
 
+  # the PostScript printer driver (Driver/Printer/PScript, PrintCom) with
+  # the translation library
+  geos_embed(_pscript_c ${pscript_GEO} pscript_geode)
+  add_executable(test_pscript test_pscript.c ${_eps_c} ${_pscript_c})
+  add_dependencies(test_pscript geode_eps geode_pscript)
+  target_include_directories(test_pscript PRIVATE
+                             ${PROJECT_SOURCE_DIR}/CInclude/Internal)
+  target_link_libraries(test_pscript PRIVATE geos_kernel)
+  add_test(NAME driver.pscript COMMAND test_pscript)
+
   # the C host mouse driver (Driver/Mouse) through the input manager
   geos_embed(_hostmse_c ${hostmse_GEO} hostmse_geode)
   add_executable(test_mouse test_mouse.c ${_hostmse_c})

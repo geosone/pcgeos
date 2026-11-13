@@ -30,6 +30,19 @@ DESCRIPTION:
  * 		Print Driver Function Calls
  * ---------------------------------------------------------------------------*/
 
+#ifdef GEOS_PORT32
+/* what spoolInt.h and this file use */
+#include <geos.h>
+#include <file.h>
+#include <geode.h>
+#include <lmem.h>
+#include <chunkarr.h>
+#include <graphics.h>
+#include <font.h>
+#include <print.h>
+#include <driver.h>
+#include <geosdriver.h>
+#endif
 #include <spoolInt.h>
 /*
  *  Protocol number for this interface. Adjust the final numbers, below, if the
@@ -722,13 +735,12 @@ typedef ByteEnum PrinterTech;		/* CHECKME */
 /*  vector technology */
 #define PT_VECTOR	0x1
 
-typedef ByteFlags PrinterType;		/* CHECKME */
-/* 5 bits unused */
+typedef ByteFlags PrinterType;
 /* 4 bits unused */
-#define PrinterTech	(nil)
-/* in graphics.def */
-#define BMFormat	(nil | nil | nil)
-#define BMFormat_OFFSET	-5
+#define PT_TECH		0x08	/* PrinterTech */
+#define PT_TECH_OFFSET	3
+#define PT_COLOR	0x07	/* BMFormat, in graphics.def */
+#define PT_COLOR_OFFSET	0
 
 /*
  * Printer port information
@@ -783,24 +795,23 @@ typedef ByteEnum AppletalkConnection;		/* CHECKME */
  *  Printer Connection
  *  This record specifies the interfaces available for the device
  */
-typedef ByteFlags PrinterConnections;		/* CHECKME */
-/* 7 bits unused */
+typedef ByteFlags PrinterConnections;
 /*  future bits */
 /* 1 bit unused */
 /*  IEEE-488 device */
-#define IEEE488Connection	(nil)
+#define PC_IEEE488	0x40
 /*  printdriver custom port driver */
-#define CustomConnection	(nil)
+#define PC_CUSTOM	0x20
 /*  SCSI device */
-#define SCSIConnection	(nil)
+#define PC_SCSI		0x10
 /*  RS-232C serial device */
-#define RS232CConnection	(nil)
+#define PC_RS232C	0x08
 /*  Centronics parallel device */
-#define CentronicsConnection	(nil)
+#define PC_CENTRONICS	0x04
 /*  raw output to a file */
-#define FileConnection	(nil)
+#define PC_FILE		0x02
 /*  apple/flashtalk device */
-#define AppletalkConnection	(nil)
+#define PC_APPLETALK	0x01
 
 
 /*
@@ -869,6 +880,13 @@ typedef ByteFlags PaperInputOptions;
 #define AutoSheetFeed_OFFSET	2
 #define TractorFeed		0x03	/* tractor feed paths */
 #define TractorFeed_OFFSET	0
+/* the field names of printDr.def */
+#define PIO_MANUAL		ManualFeed
+#define PIO_MANUAL_OFFSET	ManualFeed_OFFSET
+#define PIO_ASF			AutoSheetFeed
+#define PIO_ASF_OFFSET		AutoSheetFeed_OFFSET
+#define PIO_TRACTOR		TractorFeed
+#define PIO_TRACTOR_OFFSET	TractorFeed_OFFSET
 
 /*
  *  Paper Output
@@ -928,6 +946,19 @@ typedef ByteFlags PaperOutputOptions;
 #define OutputSorter		0x04	/* # of sorters */
 #define OutputBin		0x03	/* # of output bins */
 #define OutputBin_OFFSET	0x00
+/* the field names of printDr.def */
+#define POO_COPIES		OutputCopies
+#define POO_COPIES_OFFSET	7
+#define POO_SORTED		PaperSorted
+#define POO_SORTED_OFFSET	6
+#define POO_DUPLEX		OutputDuplex
+#define POO_DUPLEX_OFFSET	OutputDuplex_OFFSET
+#define POO_STAPLER		StapledOutput
+#define POO_STAPLER_OFFSET	3
+#define POO_SORTER		OutputSorter
+#define POO_SORTER_OFFSET	2
+#define POO_CATCHER		OutputBin
+#define POO_CATCHER_OFFSET	OutputBin_OFFSET
 
 /* DO NOT CHANGE THE ORDER OF THESE! */
 typedef ByteEnum PrinterCountryCode;
@@ -1302,6 +1333,19 @@ typedef struct {
 /*  printers capabilities. */
     PrinterSmart	PS_printerSmart;
 
+#ifdef GEOS_PORT32
+/*
+ *  Port32: the device info is the driver's own data, not a resource
+ *  (Port32/ABI.md section 7.6), so this is a pointer to it
+ */
+    const PrinterInfo	*PS_deviceInfo;
+
+/*  handle ptr to info block */
+    MemHandle	PS_expansionInfo;
+
+/*  handle to the resource containing the printer fonts. */
+    MemHandle	PS_fontInfo;
+#else
 /*  handle ptr to info block */
     word	PS_deviceInfo;
 
@@ -1310,6 +1354,7 @@ typedef struct {
 
 /*  handle to the resource containing the printer fonts. */
     word	PS_fontInfo;
+#endif
 
 /*  input selections */
     PaperInputOptions 	PS_paperInput;
@@ -1331,16 +1376,34 @@ typedef struct {
     Point	PS_cursorPos;
 
 /*  buffer variables */
+#ifdef GEOS_PORT32
+/*  handle of working block */
+    MemHandle	PS_bufHan;
+
+/*  address of locked working blk */
+    void	*PS_bufSeg;
+#else
 /*  handle of working block */
     word	PS_bufHan;
 
 /*  segment of locked working blk */
     word	PS_bufSeg;
+#endif
 
 /*  size of allocated buffer */
     word	PS_bufSize;
 
 /*  stream variables */
+#ifdef GEOS_PORT32
+/*  stream interface token */
+    dword	PS_streamToken;
+
+/*  PrinterPortType enum */
+    word	PS_streamType;
+
+/*  strategy routine of the i/o driver */
+    DriverStrategy	*PS_streamStrategy;
+#else
 /*  stream interface token */
     word	PS_streamToken;
 
@@ -1349,6 +1412,7 @@ typedef struct {
 
 /*  far address of i/o driver  */
     dword	PS_streamStrategy;
+#endif
 
 /*  graphics mode variables */
 
@@ -1418,6 +1482,14 @@ typedef struct {
 /*  room for all of ascii  */
     byte 	PS_asciiTrans[256];
 
+#ifdef GEOS_PORT32
+/*
+ *  Port32: the PostScript driver's translation library.  The asm kept
+ *  its handle in PS_bandHeight (a word); handles are 32 bits wide here.
+ */
+    GeodeHandle	PS_epsLibrary;
+#endif
+
 /*  job parameters block. */
 /** JobParameters	PS_jobParams; **/
 
@@ -1429,6 +1501,9 @@ typedef struct {
  */
 
 } PState;
+
+/* the JobParameters block that follows the PState (PS_jobParams) */
+#define PS_JOB_PARAMS(ps)	((JobParameters *) ((byte *) (ps) + sizeof(PState)))
 
 /* ------------------------------------------------------------------------------
  *        Internal structure used by the Print Driver UI code.
@@ -1458,7 +1533,7 @@ typedef struct {		/* CHECKME */
  * 
  * 	Error and status codes
  * ___________________________________________________________________________
-
+ */
 
 /* ---------------------------------------------------------------------------
  * 		Possible Returned Error Codes 
