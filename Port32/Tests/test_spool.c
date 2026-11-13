@@ -743,13 +743,14 @@ static void TestEpson(const char *printer, const char *device, int out,
 /* a text page through the Epson 9-pin driver in its draft mode: the
  * strings in the order of their lines, then left to right, each at its
  * place; underline switched on for the underlined one; two pages */
-static void TestEpsonText(void)
+static void TestEpsonText(const char *printer, const char *device,
+			  const char *out, int hdpi, word mode)
 {
     JobParameters jp;
     EpsonDecode d;
     GStateHandle gs;
     FileHandle fh;
-    char name[13];
+    char name[13], rel[40];
     word ch;
     size_t n;
     byte *b;
@@ -775,20 +776,21 @@ static void TestEpsonText(void)
     GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
     FileClose(fh, FALSE);
 
-    FillJob(&jp, name, "Epson File", PPT_FILE, "out13.prn");
-    strcpy(jp.JP_deviceName, "Epson FX-85 (Epson Mode)");
-    jp.JP_printMode = PM_TEXT_DRAFT;
+    FillJob(&jp, name, printer, PPT_FILE, out);
+    strcpy(jp.JP_deviceName, device);
+    jp.JP_printMode = mode;
     ((PrintDriverUIData *) jp.JP_printerData)->PUID_countryCode = PCC_USA;
     CHECK(pSpoolAddJob(&jp) != 0xffff);
     CHECK(WaitIdle());
-    b = (byte *) Get("DOCUMENT/out13.prn", &n);
+    snprintf(rel, sizeof(rel), "DOCUMENT/%s", out);
+    b = (byte *) Get(rel, &n);
     CHECK(b != NULL && n > 20);
     if (!b)
 	return;
-    EpsonDecodeFile(b, n, &d, 240);
+    EpsonDecodeFile(b, n, &d, hdpi);
     d.text[d.textLen] = 0;
-    printf("epson9 text: %lu bytes, %d pages, \"%s\", underline %d, x %d %d\n",
-	   (unsigned long) n, d.pages, d.text, d.underline, d.absX[0], d.absX[1]);
+    printf("%s text %d: %lu bytes, %d pages, \"%s\", underline %d, "
+	   "x %d %d\n", device, mode, (unsigned long) n, d.pages, d.text, d.underline, d.absX[0], d.absX[1]);
     CHECK(!d.bad);
     CHECK(d.pages == 2);
     /* the last '|': the form feed's return to the left edge */
@@ -804,7 +806,7 @@ static void TestEpsonText(void)
     }
     CHECK(d.underline == 1);
     /* 72 pt less the document's margin, on both pages */
-    CHECK(d.absX[0] == 45 * 4 && d.absX[1] == 45 * 4);
+    CHECK(d.absX[0] == 45 * hdpi / 60 && d.absX[1] == 45 * hdpi / 60);
     free(b);
 }
 
@@ -1187,7 +1189,14 @@ int main(int argc, char **argv)
 		  fx);
 	TestEpson("Epson24 File", "Epson LQ-800", 20, 360, 180, lq);
     }
-    TestEpsonText();
+    TestEpsonText("Epson File", "Epson FX-85 (Epson Mode)", "out13.prn", 240,
+		  PM_TEXT_DRAFT);
+    TestEpsonText("Epson File", "Epson FX-85 (Epson Mode)", "out14.prn", 240,
+		  PM_TEXT_NLQ);
+    TestEpsonText("Epson24 File", "Epson LQ-800", "out23.prn", 360,
+		  PM_TEXT_DRAFT);
+    TestEpsonText("Epson24 File", "Epson LQ-800", "out24.prn", 360,
+		  PM_TEXT_NLQ);
 
     GeodeFreeLibrary(spool);
     printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);
