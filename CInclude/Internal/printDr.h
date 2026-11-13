@@ -1488,6 +1488,17 @@ typedef struct {
  *  its handle in PS_bandHeight (a word); handles are 32 bits wide here.
  */
     GeodeHandle	PS_epsLibrary;
+
+/*
+ *  Port32: the swath's huge bitmap.  The asm kept the VM file and block
+ *  in PS_bitmap (two words; the file handle is 32 bits wide here, so
+ *  PS_bitmap holds the block alone), the offset of the locked scan line
+ *  in PS_curScanOffset (an address here), and read past the bitmap's
+ *  last scan line into whatever followed (here: zeros).
+ */
+    VMFileHandle	PS_bitmapFile;
+    byte	*PS_curScanPtr;
+    dword	PS_bitmapCount;		/* scan lines in the huge array */
 #endif
 
 /*  job parameters block. */

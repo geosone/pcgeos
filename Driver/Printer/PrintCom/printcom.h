@@ -33,12 +33,14 @@
 #include <graphics.h>
 #include <gstring.h>
 #include <font.h>
+#include <char.h>
 #include <print.h>
 #include <driver.h>
 #include <geosdriver.h>
 #include <streamC.h>
 #include <Internal/streamDr.h>
 #include <Internal/printDr.h>
+#include <Internal/spoolDr.h>
 
 /* a module routine of the jump tables */
 typedef Boolean PrintRoutine(PState *ps, DriverRegs *r);
@@ -90,5 +92,87 @@ extern Boolean SendCodeOut(PState *ps, const byte *code);
 
 /* the PrintDriverUIData in JP_printerData */
 #define PS_UI_DATA(ps)	((PrintDriverUIData *) PS_JOB_PARAMS(ps)->JP_printerData)
+
+/* ---------------------------------------------------------------------
+ * The raster (dot matrix) drivers: the PrintCom routines they share,
+ * called by name as in the asm.  A driver of these gives its constants
+ * and control codes in printcomDriver.h (beside it), which the PrintCom
+ * files include, as the asm included the driver's Constant.def.
+ * ------------------------------------------------------------------- */
+
+/* the output buffer at the start of the print buffer (GPB_outputBuffer),
+ * the band buffer after it (GPB_bandBuffer) */
+#define PRINT_OUTPUT_BUFFER_SIZE	96
+#define PS_OUTPUT_BUFFER(ps)	((byte *) (ps)->PS_bufSeg)
+#define PS_BAND_BUFFER(ps)	((byte *) (ps)->PS_bufSeg + \
+				 PRINT_OUTPUT_BUFFER_SIZE)
+
+/* the driver's tables (Port32/tools/dmdevinfo2c.py): the font entries'
+ * control codes by FE_command, the printerFontInfo resource (PI_draft and
+ * PI_nlq are offsets into it), the tables of the ISO substitutions and
+ * translations */
+extern const byte *const printFontCommands[];
+extern const byte *const printFontInfoBase;
+extern const SpoolTransTables printTransTables;
+
+/* Cursor/ */
+extern word PrConvertToDriverCoordinates(WWFixedAsDWord points);
+extern WWFixedAsDWord PrConvertFromDriverCoordinates(word units);
+extern Boolean PrLineFeed(PState *ps, word units);
+extern Boolean PrFormFeed(PState *ps);
+extern Boolean Pr1ScanlineFeed(PState *ps);
+extern Boolean SendLineFeed(PState *ps);
+extern Boolean PrSetCursor(PState *ps, WWFixedAsDWord x, WWFixedAsDWord y);
+
+/* Job/ */
+extern Boolean PrintResetPrinterAndWait(PState *ps);
+extern Boolean PrSetPaperPath(PState *ps, PaperInputOptions in,
+			      PaperOutputOptions out);
+extern const PrinterMargins *PrJobMargins(PState *ps);
+
+/* Text/, Styles/ */
+extern Boolean PrSetFont(PState *ps, FontID id, word size, byte pitch);
+extern Boolean PrSetStyles(PState *ps, PrintTextStyle style);
+/* the routines that set and reset each style bit (bit 0 first): the
+ * driver's styles composite (printcomEpsonStyles.c, ...) */
+typedef Boolean PrintStyleRoutine(PState *ps);
+extern PrintStyleRoutine *const printSetStyle[16], *const printResetStyle[16];
+extern PrintTextStyle PrTestStyles(PState *ps, PrintTextStyle style);
+extern Boolean PrText(PState *ps, const char *text, word count);
+extern Boolean PrintSetSymbolSet(PState *ps);
+extern Boolean PrintLoadSymbolSet(PState *ps);
+
+/* Color/ */
+extern Boolean PrSetColorRGB(PState *ps, byte r, byte g, byte b);
+extern byte PrMapRGBtoCMYKIndex(byte r, byte g, byte b);
+extern Boolean PrSetRibbonColor(PState *ps, byte color);
+extern Boolean SetFirstCMYK(PState *ps);
+extern Boolean SetNextCMYK(PState *ps);
+
+/* Buffer/ */
+extern Boolean PrCreatePrintBuffers(PState *ps);
+extern void PrDestroyPrintBuffers(PState *ps);
+extern void PrLoadBandBuffer(PState *ps);
+extern word PrScanBandBuffer(PState *ps, word *bytes);
+extern Boolean PrSendOutputBuffer(PState *ps, word *count);
+extern void PrClearOutputBuffer(PState *ps);
+
+/* Graphics/ */
+extern void LoadSwathHeader(PState *ps, VMFileHandle file,
+			    VMBlockHandle block);
+extern void DerefFirstScanline(PState *ps);
+extern const byte *DerefAScanline(PState *ps);
+extern void ReleaseScanlines(PState *ps);
+extern word PrLoadPstateVars(PState *ps, word *left);
+extern Boolean PrPrintABand(PState *ps);
+extern Boolean PrSendGraphicControlCode(PState *ps, const byte *code,
+					word columns);
+extern Boolean PrPrintLowBand(PState *ps);
+extern Boolean PrPrintMediumBand(PState *ps);
+extern Boolean PrPrintHighBand(PState *ps);
+extern Boolean PrRotate8Lines(PState *ps, word bytes);
+extern Boolean PrRotate4LinesZeroTop(PState *ps, word bytes);
+extern Boolean PrRotate4LinesZeroBottom(PState *ps, word bytes);
+extern Boolean PrSend8HiresLines(PState *ps, word *bandStart);
 
 #endif /* PRINTCOM_H */

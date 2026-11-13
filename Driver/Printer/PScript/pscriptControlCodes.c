@@ -4,9 +4,6 @@
  */
 #include "pscript.h"
 
-#define C_ESC	0x1b
-#define C_CR	0x0d
-#define C_LF	0x0a
 
 /* PJL: the universal exit language code */
 const byte pr_codes_PJLUEL[] = { 9, C_ESC, '%', '-', '1', '2', '3', '4',
