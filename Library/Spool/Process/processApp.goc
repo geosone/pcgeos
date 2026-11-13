@@ -1,0 +1,162 @@
+/*
+ * processApp.goc -- the spooler's process (the C port of the
+ * SpoolProcClass methods of processApp.asm and processQueue.asm's
+ * messages), and the messages and notifications the library routines
+ * send.
+ *
+ * Port32: the process class is a ProcessClass, not the GenProcessClass
+ * of the asm: the spooler has no UI yet (no application object, no
+ * control panel, no detach confirmation).  So:
+ *   - MSG_META_ATTACH cleans up the spool files of an earlier session
+ *     (SpoolBirth);
+ *   - MSG_SPOOL_CREATE_THREAD makes a queue and its thread for a job
+ *     whose port has none;
+ *   - MSG_META_DETACH makes the queues' threads stop at the next page
+ *     (SI_DETACH) and lets no new job in.  The jobs are not saved to a
+ *     state file yet.
+ * The job added/removed notifications to the process updated the
+ * control panel: there is none, so they are not sent.
+ */
+#include <geos.h>
+#include <heap.h>
+#include <geode.h>
+@include <object.goh>
+#include <object.h>
+@include <Objects/metaC.goh>
+@include <Objects/processC.goh>
+#include <library.h>
+#include "spoolLocal.h"
+@include <gcnlist.goh>
+
+@class SpoolProcClass, ProcessClass;
+    @message void MSG_SPOOL_CREATE_THREAD(ChunkHandle job = cx);
+@endc;
+
+@classdecl SpoolProcClass, neverSaved;
+
+/* spoolVariable.def */
+MemHandle	queueHandle;
+SemaphoreHandle	queueSemaphore;
+word		spoolStateFlags;
+word		nextJobID;
+word		customQueueID;
+ThreadLockHandle errorThreadLock;
+word		errorBoxCount;
+
+/* the library entry: the semaphores of the queue and the error box
+ * (static Semaphores in the asm's idata) */
+Boolean SpoolLibraryEntry(LibraryCallType ty, GeodeHandle client)
+{
+    (void) client;
+    if (ty == LCT_ATTACH) {
+	queueSemaphore = ThreadAllocSem(1);
+	errorThreadLock = ThreadAllocThreadLock();
+	HandleModifyOwner(queueSemaphore, GeodeGetCodeProcessHandle());
+	HandleModifyOwner(errorThreadLock, GeodeGetCodeProcessHandle());
+    }
+    return FALSE;
+}
+
+@method SpoolProcClass, MSG_META_ATTACH_PROCESS
+{
+    (void) value1;
+    (void) value2;
+    SpoolBirth();
+}
+
+/* MSG_SPOOL_CREATE_THREAD: a queue for the job's port, unless one was
+ * made since the job was added (CreateThreadStart) */
+@method SpoolProcClass, MSG_SPOOL_CREATE_THREAD
+{
+    ChunkHandle queue;
+    JobInfoStruct *j;
+
+    if (LockQueue()) {
+	UnlockQueue();
+	return;
+    }
+    queue = FindRightQueue(&JOB(job)->JIS_info.JP_portInfo);
+    if (!queue)
+	queue = AllocDeviceQueue(job);
+    if (!queue) {
+	/* no thread: the job is dropped (the asm told the user) */
+	j = JOB(job);
+	if (j->JIS_info.JP_spoolOpts & SO_DELETE) {
+	    FilePushDir();
+	    FileSetStandardPath(SP_SPOOL);
+	    FileDelete(j->JIS_info.JP_fname);
+	    FilePopDir();
+	}
+	LMemFreeHandles(queueHandle, job);
+	if (!PQ()->PQ_numQueues) {
+	    MemHandle mh = queueHandle;
+	    MemUnlockV(mh);
+	    queueHandle = 0;
+	    MemFree(mh);
+	}
+	UnlockQueue();
+	return;
+    }
+    JOB(job)->JIS_queue = queue;
+    InsertJobIntoQueue(job, queue);
+    PQ()->PQ_numJobs++;
+    SendJobAddedNotification(job);
+    UnlockQueue();
+}
+
+@method SpoolProcClass, MSG_META_DETACH
+{
+    ChunkHandle ch;
+
+    ThreadPSem(queueSemaphore);
+    spoolStateFlags |= SS_DETACHING;
+    ThreadVSem(queueSemaphore);
+    if (!LockQueue())
+	for (ch = PQ()->PQ_firstQueue; ch; ch = QUEUE(ch)->QI_next)
+	    QUEUE(ch)->QI_error = SI_DETACH;
+    UnlockQueue();
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Sending
+ * ------------------------------------------------------------------- */
+
+void SpoolSendCreateThread(ChunkHandle job)
+{
+    optr spooler = ConstructOptr(GeodeGetCodeProcessHandle(), 0);
+
+    @send ,forceQueue spooler::MSG_SPOOL_CREATE_THREAD(job);
+}
+
+void SpoolSendJobNotification(Boolean added, word jobID,
+			      PrinterPortType type, word portNum)
+{
+    (void) added;
+    (void) jobID;
+    (void) type;
+    (void) portNum;
+}
+
+/* SpoolSendStatusChange: MSG_PRINT_STATUS_CHANGE to the print job status
+ * list of the system */
+void SpoolSendStatusChange(word type, word jobID, word data)
+{
+    EventHandle ev;
+
+    ev = @record null::MSG_PRINT_STATUS_CHANGE((PrintStatusChangeType) type,
+					       jobID, data);
+    GCNListSend(MANUFACTURER_ID_GEOWORKS, GCNSLT_PRINT_JOB_STATUS, ev, 0,
+		GCNLSF_FORCE_QUEUE);
+}
+
+/* SpoolSendPrintersChanged: MSG_PRINTER_INSTALLED_REMOVED to the
+ * installed printers list */
+void SpoolSendPrintersChanged(void)
+{
+    EventHandle ev;
+
+    ev = @record null::MSG_PRINTER_INSTALLED_REMOVED();
+    GCNListSend(MANUFACTURER_ID_GEOWORKS, GCNSLT_INSTALLED_PRINTERS, ev, 0,
+		GCNLSF_FORCE_QUEUE);
+}

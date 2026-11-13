@@ -64,7 +64,7 @@ The order follows what the Preferences need first and what can be tested:
 
 1. time (done)
 2. power (done)
-3. printing (the IPP client, the `Cups` port driver, the export side of the PostScript translation library `eps.geo` (without text and bitmaps) and the PostScript printer driver `pscript.geo` in C done; next the spooler)
+3. printing (the IPP client, the `Cups` port driver, the export side of the PostScript translation library `eps.geo` (without text and bitmaps) and the PostScript printer driver `pscript.geo` in C done; the spooler `spool.geo` in C with PDL printing to the file, custom and nothing ports done (ABI.md §13w); next a spooler job through the `Cups` port in a test, and the printer list from CUPS)
 4. locale and time zone
 5. network
 6. storage

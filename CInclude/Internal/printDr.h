@@ -1577,7 +1577,7 @@ typedef enum {		/* CHECKME */
 } PrinterError;
 	
 /*  no error detected */
-#define PERROR_NO_ERROR	(08000h)
+#define PERROR_NO_ERROR	(0x8000)
 
 /* ---------------------------------------------------------------------------
  * 		Possible Returned Status Codes 

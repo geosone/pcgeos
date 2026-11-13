@@ -3765,6 +3765,108 @@ code of each element and the trailer. Where Ghostscript is installed
 (`gs` in the `PATH` on Linux, or `GEOS_TEST_GS`), the file must also run
 through it without an error.
 
+### 13w. The print spooler (`Library/Spool`, `Driver/Stream/Filestr`)
+
+The spool library `spool.geo` in C, beside the asm: the queue routines
+in `Process/processQueue.c`, `processUtils.c`, `processLockQueue.c`,
+the queue's thread in `processLoop.c`, `processThread.c` and
+`processPDL.c`, the ports in `processPort.c`, `processFile.c`,
+`processCustom.c`, `processNothing.c`, errors and the start in
+`processError.c`, `processRestart.c`, the process class in
+`processApp.goc`, the printers and spool files in `Lib/libPrinter.c` and
+`Lib/libMisc.c`. `spoolLocal.h` holds the constants, the queue
+structures and the variables of the `.def` files; `CInclude/spoolC.h`
+is the C interface without the controller classes of `spool.goh`. The
+geode is built from `spool32.gp`.
+
+- **A library with a process**, as in DOS16, but a `ProcessClass`, not
+  a `GenProcessClass`: there is no UI yet. `MSG_META_ATTACH` deletes the
+  spool files of an earlier session (`SpoolBirth`; the state file of a
+  detach is not written yet), `MSG_SPOOL_CREATE_THREAD` makes a queue
+  and its thread for a job whose port has none, `MSG_META_DETACH` lets
+  no job in and stops the queues at the next page (`SI_DETACH`). The
+  semaphores of the queue and the error box are allocated in the
+  library entry (`LCT_ATTACH`).
+- **Entry numbers.** `spool32.gp` keeps the numbers of `spool.gp`: the
+  controller classes and the paper size routines (0–12) and
+  `SpoolSetDocSize` are skipped, so `SpoolGetNumPrinters` is 13 and
+  `SpoolAddJob` 22, as before.
+- **C routines** take what the registers held: `SpoolAddJob(&jp)`
+  returns the job ID (`SPOOL_INVALID_JOB_ID` while detaching),
+  `SpoolInfo(type, &params)` fills the `SpoolInfoParams` as the
+  `SPOOLINFO` stub did, `SpoolCreatePrinter` returns `0xffff` for a name
+  that exists (the asm's carry), `SpoolGetPrinterString(&info, n)`
+  fills a `PrinterStringInfo`.
+- **The queue** is one LMem block shared by all threads, guarded by
+  `queueSemaphore` and `MemPLock` as in the asm (`LockQueue` returns
+  with the semaphore held even when there is no queue, `UnlockQueue`
+  releases it). A queue's thread keeps its `SpoolJobInfo` on its stack
+  and passes a pointer where the asm routines shared the stack frame.
+  `QI_threadInfo` is a pointer.
+- **Printing** goes through the printer driver's C strategy (§7.6) with
+  bx the PState: `DRE_SET_DEVICE`, `DR_PRINT_DRIVER_INFO` and
+  `DR_PRINT_DEVICE_INFO` (pointers in `DR_dsSi`), `DR_PRINT_SET_MODE`,
+  `DR_PRINT_START_JOB`, per page `DR_PRINT_START_PAGE`,
+  `DR_PRINT_ESC_SET_PAGE_TRANSFORM`, `DR_PRINT_ESC_PRINT_GSTRING` on the
+  spool file loaded as a `GST_STREAM` graphics string, and
+  `DR_PRINT_END_PAGE`. The document's place on the paper (centred,
+  scaled to fit, rotated, tiled) is computed as the asm did, with the
+  kernel's fixed point routines. Only PDL printers so far: a graphics or
+  text mode printer ends the job with `SERROR_NO_MODE_AVAIL` until
+  `processGraphics.asm` and `processText.asm` are ported.
+- **The end of a page.** `ProcessEndPage` compared bl with
+  `PEC_FORM_FEED`: the low byte of the PState handle the driver left in
+  bx, not the `GR_NEW_PAGE`'s data. The C printer drivers return no
+  data, so the spooler passes `PEC_FORM_FEED`, which is what the asm
+  got in practice.
+- **Loading the printer driver** is what `UserLoadExtendedDriver` of the
+  UI did: the keys `driver` and `device` of the printer's category,
+  `GeodeUseDriver` with `PRINT_PROTO` from `SP_PRINTER_DRIVERS`,
+  `DRE_TEST_DEVICE` and `DRE_SET_DEVICE`.
+- **Ports.** The file port creates the output file in the directory of
+  the `FilePortParams` and writes it through the file stream driver;
+  the custom port loads the driver named by `portDriver` in the
+  printer's category (e.g. `cups.geo`) with `STREAM_ESC_LOAD_OPTIONS`;
+  the nothing port gets a stream of the spooler that takes everything
+  (the asm gave the driver none). Serial and parallel ports wait for
+  their stream drivers. The `StreamErrorHandler` notification is not
+  used: the C port drivers keep a write error with the unit and fail
+  the writes, so the job ends with an error.
+- **Errors.** Without the UI, `SpoolErrorBox` logs the error
+  (`ghal_log`, with the `SL-xx` code) and answers as a user most likely
+  would: `IC_OK` for a manual paper feed, `IC_DISMISS` for the rest, so
+  nothing is retried endlessly. The queue is paused while it runs, as
+  before.
+- **No heap reservation** (`GeodeRequestSpace`): the C kernel's heap has
+  no fixed size.
+- **Kept as the asm:** a digit of a spool file name runs up to 8 before
+  it rolls over (`SpoolCreateSpoolFile`'s `jl '9'`); `SPS_ROTATED` is
+  never set, so tiles of a rotated document move as upright ones.
+
+**The file stream driver** `filestr.geo` (`Driver/Stream/Filestr/
+filestrMain.c`, `filestr32.gp`) is self-contained: the asm opened a
+stream of the Stream driver per file and wrote it from the stream's
+notification; the C driver keeps a buffer per unit (`DR_STREAM_OPEN`:
+bx the file, dx the buffer size; up to 4 units), writes it with
+`FileWrite` when it is full, and on `DR_STREAM_CLOSE` with
+`STREAM_LINGER` (`STREAM_DISCARD` drops it). The file stays the
+caller's. Reads fail.
+
+Not ported yet: the PrintControl, the PageSizeControl and the paper
+sizes (`libPaper`), the printer control panel, the error boxes, the
+state file of a detach and restarting from it, graphics and text mode
+printing, labels, Tiramisu (fax) printing, serial and parallel ports,
+the mailbox's medium notifications.
+
+ctest `library.spool` boots a kernel with `spool.geo`, `filestr.geo`,
+`pscript.geo` and `eps.geo`, and checks the printers of the ini file
+(create, duplicates, counts per type, default, delete), the spool file
+names, `SpoolBirth` deleting an old spool file, and four jobs: two
+pages to a file, the same with two collated copies (four pages), the
+nothing port, and a printer without its driver (an error, no output).
+It waits for the queues to empty, checks the PostScript and the deleted
+spool files, and runs Ghostscript where it is installed.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

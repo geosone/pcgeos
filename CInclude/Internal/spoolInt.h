@@ -26,6 +26,32 @@
 #include    <parallDr.h>
 
 /*-----------------------------------------------------------------------------
+ *		Spooler error codes (spoolInt.def): after the PrinterError
+ *		codes of Internal/printDr.h
+ *---------------------------------------------------------------------------*/
+typedef enum /* word */ {
+    SERROR_NO_SPOOL_FILE = 0x1e,	/* can't find spool file */
+    SERROR_NO_PRINT_DRIVER = 0x20,	/* can't find print driver */
+    SERROR_NO_PORT_DRIVER = 0x22,	/* can't find port driver */
+    SERROR_NO_PRINTERS = 0x24,		/* no printers are available */
+    SERROR_NO_MODE_AVAIL = 0x26,	/* no possible print mode */
+    SERROR_CANT_ALLOC_BITMAP = 0x28,	/* cant allocate a bitmap */
+    SERROR_NO_VIDMEM_DRIVER = 0x2a,	/* cant find vidmem driver */
+    SERROR_MANUAL_PAPER_FEED = 0x2c,	/* ask user for next piece */
+    SERROR_CANT_LOAD_PORT_DRIVER = 0x2e, /* no port driver, verify test */
+    SERROR_PORT_BUSY = 0x30,		/* port is busy doing something */
+    SERROR_TEST_NO_PAPER = 0x32,	/* testing, but no paper */
+    SERROR_TEST_OFFLINE = 0x34,		/* testing, but offline */
+    SERROR_TEST_PARALLEL_ERROR = 0x36,	/* testing, but some error */
+    SERROR_MISSING_COM_PORT = 0x38,	/* com port not available */
+    SERROR_PRINT_ON_STARTUP = 0x3a,	/* continue suspended printing */
+    SERROR_CANNOT_OPEN_FILE = 0x3c,	/* Cannot open output file */
+    SERROR_CANNOT_CONVERT_PAGE = 0x3e,	/* the driver could not convert
+					 * a page */
+    SERROR_RESERVATION_ERROR = 0x40	/* Cannot reserve enough heapspace */
+} SpoolError;
+
+/*-----------------------------------------------------------------------------
  *		Port-dependent structures
  *---------------------------------------------------------------------------*/
 	
@@ -71,16 +97,25 @@ typedef struct {
 typedef struct {
     char    FPP_fileName[FILE_LONGNAME_BUFFER_SIZE];
     char    FPP_path[PATH_BUFFER_SIZE];	    	/* allow complete path */
+#ifdef GEOS_PORT32
+    Handle  FPP_diskHandle;			/* disk handle */
+    Handle  FPP_file;			    	/* file handle to close it */
+#else
     word    FPP_diskHandle;			/* disk handle */
     word    FPP_file;			    	/* file handle to close it */
+#endif
     word    FPP_unit;				/* unit number w/filestr driver */
 } FilePortParams;
 
 /*
- * custom port parameters
+ * custom port parameters (as spoolInt.def)
  */
+#define SPOOL_MAX_CUSTOM_PARAMS	128	/* bytes of parameters for a
+					 * custom port driver */
 typedef struct {
-    word    CPP_null;
+    word    CPP_unit;			/* when the port is open: the unit
+					 * DR_STREAM_OPEN returned */
+    byte    CPP_info[SPOOL_MAX_CUSTOM_PARAMS];
 } CustomPortParams;
 
 /*
@@ -176,7 +211,13 @@ typedef ByteFlags SpoolOptions;		/* CHECKME */
 #define SO_ODD_EVEN	(0x08)
 /*  scale to fit or not */
 #define SO_SCALE	(0x04)
-/* 2 bits unused */
+/*  on shutdown: save the job (SSJA_SAVE_JOB) or cancel it */
+#define SO_SHUTDOWN_ACTION	(0x02)
+/* 1 bit unused */
+
+typedef ByteEnum SpoolShutdownJobAction;
+#define SSJA_SAVE_JOB	0x0
+#define SSJA_CANCEL_JOB	0x1
 
 /*  this is the info passed to SpoolAddJob */
 typedef struct {		/* CHECKME */
@@ -189,8 +230,10 @@ typedef struct {		/* CHECKME */
     char JP_documentName[FILE_LONGNAME_LENGTH+1];
 /*  # pages in document */
     word	JP_numPages;
-    char JP_printerName[GEODE_MAX_DEVICE_NAME_SIZE+16+1];
 /*  INI file category holding the printer name */
+    char JP_printerName[GEODE_MAX_DEVICE_NAME_SIZE];
+/*  unused space from when JP_printerName was too big (spoolInt.def) */
+    char JP_unused[16+1];
 /*  name of device */
     char JP_deviceName[MAX_DEVICE_NAME_SIZE];
 /*  union for type of port info */
