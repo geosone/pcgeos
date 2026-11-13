@@ -1025,6 +1025,27 @@ mode, the drivers' graphics codes are the mode alone) with the swaths in
 driver may have several font files (Canon48: `FONTS` of
 `geos_dotmatrix_driver`, `--fonts` of `dmdevinfo2c.py` repeated).
 
+Three drivers speak no ESC/P: `oki9.geo` (Okidata: numbers in ASCII
+with leading zeros `streamHexToASCIILeading0.c`, whose C name
+`HexToAsciiStreamWrite0` takes the digits; tabs `cursorSetCursorTab72ASCII.c`;
+7-pin graphics between `CR 1C 03` and `03 02`, the top in bit 0,
+`rotate7Back.c`, every ETX doubled by `bufferOkiSendOutput.c`; no medium
+resolution), `citoh9.geo` (C.Itoh 8510 and the Apple printers: X
+absolute in 1/160" `cursorSetCursorAbsPitch.c`, line feeds in ASCII
+`cursorPrLineFeedSetASCII.c`, graphics `ESC S dddd` with the top in bit 0
+`rotate8Back.c`, the ribbon colors as ASCII digits
+`colorIWMapRGBToCMYK.c`) and `tosh24.geo` (Toshiba: the asm files are
+`toshiba24*`, `PREFIX` of `geos_dotmatrix_driver`; 1/48" `cursorConvert48.c`,
+columns of four six-pin bytes `rotate24Into4.c`, `rotate2pass24Into4.c`).
+As in the asm, the Toshiba rotation does not clear the byte between its
+groups of six lines (the two bits above them keep the lines before), the
+19 lines of a band end at the head's bottom pin, a band is followed by a
+line feed of 5/48" for its 19/180", and the last part band by none (the
+asm multiplied its lines by 0). The spooler maps a graphics mode the
+device has not (the Okidata's and the C.Itoh's medium, offset 0) to one
+it has, better ones first (`AvailableMode`, `processThread.c`); in DOS16
+the print dialog offered only the device's modes.
+
 The control codes and the constants of these drivers come from the asm
 by `Port32/tools/ctlcodes2c.py` (`printcomDriver.h`,
 `*ControlCodes.c`, checked in). Labels without bytes of their own share

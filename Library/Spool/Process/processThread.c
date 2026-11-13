@@ -267,6 +267,25 @@ static void CalcPageSizeInfo(SpoolJobInfo *j)
 /* InitPrinterDriver: the device, retries, smarts, mode and the printable
  * areas; then DR_PRINT_START_JOB.  TRUE on an error (StoppedByError
  * called). */
+/* AvailableMode: the graphics mode, or the nearest the device has
+ * (better ones first) */
+static word AvailableMode(const PrinterInfo *pi, word mode)
+{
+    static const word order[3][3] = {
+	{ PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES, PM_GRAPHICS_HI_RES },
+	{ PM_GRAPHICS_MED_RES, PM_GRAPHICS_HI_RES, PM_GRAPHICS_LOW_RES },
+	{ PM_GRAPHICS_HI_RES, PM_GRAPHICS_MED_RES, PM_GRAPHICS_LOW_RES }
+    };
+    const word *res = &pi->PI_lowRes;
+    int i, k = mode == PM_GRAPHICS_LOW_RES ? 0 :
+	       mode == PM_GRAPHICS_MED_RES ? 1 : 2;
+
+    for (i = 0; i < 3; i++)
+	if (res[order[k][i] / 2])
+	    return order[k][i];
+    return mode;
+}
+
 static Boolean InitPrinterDriver(SpoolJobInfo *j)
 {
     DriverRegs r;
@@ -297,6 +316,14 @@ static Boolean InitPrinterDriver(SpoolJobInfo *j)
     j->SJI_printState = (byte) (j->SJI_printState |
 				((pi ? pi->PI_smarts : 0) & SPS_SMARTS) |
 				SPS_FORM_FEED);
+
+    /* Port32: a graphics mode the device has not (its offset 0, as the
+     * Okidata's medium resolution) becomes one it has, the next better
+     * one first; in DOS16 the print dialog offered only the device's
+     * modes, and the spooler took the job's on trust */
+    if (pi && j->SJI_info.JP_printMode < PM_FIRST_TEXT_MODE)
+	j->SJI_info.JP_printMode = AvailableMode(pi,
+						 j->SJI_info.JP_printMode);
 
     /* the mode, with the paper size */
     memset(&r, 0, sizeof(r));

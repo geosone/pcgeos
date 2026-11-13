@@ -6,6 +6,7 @@ geos_dotmatrix_driver(canon48 GP canon4832.gp REV canon48.rev
   FONTS Text/Font/fontCanon48Info.asm Text/Font/fontIBMPPDSInfo.asm
   PRINTCOM
     ${DOTMATRIX_CORE}
+    ${DOTMATRIX_STD}
     ${DOTMATRIX_EPSON_JOB}
     ${DOTMATRIX_PAGE}
     ${DOTMATRIX_NO_COLOR}

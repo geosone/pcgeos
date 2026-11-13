@@ -192,6 +192,7 @@ extern Boolean PrSend24HiresLines(PState *ps, word *bandStart);
 /* Stream/streamHexToASCII.c, streamPCLCommand.c: a zero-terminated code,
  * each '#' the number */
 extern Boolean HexToAsciiStreamWrite(PState *ps, word n);
+extern Boolean HexToAsciiStreamWrite0(PState *ps, word n, word digits);
 extern Boolean WriteNumCommand(PState *ps, const byte *code, word n);
 /* Cursor/cursorSetCursorPCL.c: the cursor to PS_cursorPos */
 extern Boolean PrMoveCursor(PState *ps);

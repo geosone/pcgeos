@@ -4,10 +4,11 @@
 # need gcc or clang (module loading).
 #
 # geos_dotmatrix_driver(<name> GP <gp> REV <rev> [FONTS <font info asm>...]
-#                       [INFOS <info asm>...]
+#                       [INFOS <info asm>...] [PREFIX <prefix>]
 #                       PRINTCOM <PrintCom files> SOURCES <own files>)
-# The driver's directory holds <name>DriverInfo.asm, its *Info.asm (or
-# INFOS) and <name>Constant.def; the PCL drivers have no FONTS (their
+# The driver's directory holds <prefix>DriverInfo.asm, its *Info.asm (or
+# INFOS) and <prefix>Constant.def (the prefix is the name but where the
+# asm files are named otherwise: toshiba24 for tosh24); the PCL drivers have no FONTS (their
 # fonts are the printer's).  The result is ${<name>_GEO} in the parent
 # scope.  The raster PCL drivers (Driver/Printer/HP) are built the same
 # way.
@@ -15,7 +16,7 @@ include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
 find_package(Python3 COMPONENTS Interpreter)
 
 function(geos_dotmatrix_driver name)
-  cmake_parse_arguments(D "" "GP;REV" "FONTS;INFOS;PRINTCOM;SOURCES"
+  cmake_parse_arguments(D "" "GP;REV;PREFIX" "FONTS;INFOS;PRINTCOM;SOURCES"
                         ${ARGN})
   if(NOT (GEOS_GOC AND Python3_Interpreter_FOUND AND
           CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"))
@@ -23,13 +24,17 @@ function(geos_dotmatrix_driver name)
   endif()
   include(${PROJECT_SOURCE_DIR}/cmake/GeosGeode.cmake)
   set(pc ${PROJECT_SOURCE_DIR}/Driver/Printer/PrintCom)
+  set(pre ${name})			# the asm files' prefix
+  if(D_PREFIX)
+    set(pre ${D_PREFIX})
+  endif()
   set(dir ${CMAKE_CURRENT_SOURCE_DIR})
 
   if(D_INFOS)
     list(TRANSFORM D_INFOS PREPEND ${dir}/ OUTPUT_VARIABLE infos)
   else()
-    file(GLOB infos ${dir}/${name}*Info.asm)
-    list(REMOVE_ITEM infos ${dir}/${name}DriverInfo.asm)
+    file(GLOB infos ${dir}/${pre}*Info.asm)
+    list(REMOVE_ITEM infos ${dir}/${pre}DriverInfo.asm)
     list(SORT infos)
   endif()
   set(fonts)
@@ -42,9 +47,9 @@ function(geos_dotmatrix_driver name)
   add_custom_command(OUTPUT ${devices}
     COMMAND ${Python3_EXECUTABLE}
             ${PROJECT_SOURCE_DIR}/Port32/tools/dmdevinfo2c.py
-            -o ${devices} -D ${dir}/${name}Constant.def
-            ${fonts} ${dir}/${name}DriverInfo.asm ${infos}
-    DEPENDS ${dir}/${name}DriverInfo.asm ${infos} ${dir}/${name}Constant.def
+            -o ${devices} -D ${dir}/${pre}Constant.def
+            ${fonts} ${dir}/${pre}DriverInfo.asm ${infos}
+    DEPENDS ${dir}/${pre}DriverInfo.asm ${infos} ${dir}/${pre}Constant.def
             ${fontdep} ${PROJECT_SOURCE_DIR}/Port32/tools/dmdevinfo2c.py
     COMMENT "dmdevinfo2c ${name}"
     VERBATIM)
@@ -71,14 +76,17 @@ set(DOTMATRIX_CORE
     Styles/stylesGet.c Styles/stylesSet.c Styles/stylesTest.c
     printcomStream.c
     Buffer/bufferCreate.c Buffer/bufferDestroy.c Buffer/bufferLoadBand.c
-    Buffer/bufferScanBand.c Buffer/bufferSendOutput.c
-    Buffer/bufferClearOutput.c
-    Graphics/graphicsCommon.c Graphics/graphics3Resolutions.c
+    Buffer/bufferScanBand.c Buffer/bufferClearOutput.c
+    Graphics/graphicsCommon.c)
+# the output as it is, three resolutions, the 8-pin low one
+set(DOTMATRIX_STD
+    Buffer/bufferSendOutput.c Graphics/graphics3Resolutions.c
     Graphics/graphicsLo8.c Graphics/Rotate/rotate8.c)
 set(DOTMATRIX_PAGE
     Page/pageStartSetLength.c Page/pageEndLFSetLength.c)
 set(DOTMATRIX_BASE
-    ${DOTMATRIX_CORE} ${DOTMATRIX_PAGE} Graphics/graphicsEpsonCommon.c)
+    ${DOTMATRIX_CORE} ${DOTMATRIX_STD} ${DOTMATRIX_PAGE}
+    Graphics/graphicsEpsonCommon.c)
 # printcomEpsonJob.asm, printcomIBMJob.asm
 set(DOTMATRIX_EPSON_JOB
     Job/jobStartDefeatPaperout.c Job/jobEndDotMatrix.c
@@ -142,7 +150,7 @@ set(DOTMATRIX_LQ2_GRAPHICS
 # styles (overline), the graphics code ESC [ g with its byte count
 # (graphicsIBMX24Common.c); the dialogs are printcomPaperOnlyDialog.c
 set(DOTMATRIX_IBM_COMMON
-    ${DOTMATRIX_CORE} ${DOTMATRIX_IBM_JOB}
+    ${DOTMATRIX_CORE} ${DOTMATRIX_STD} ${DOTMATRIX_IBM_JOB}
     printcomPaperOnlyDialog.c
     Text/textPrintStyleRun.c Text/textLoadNoISOSymbolSet.c)
 set(DOTMATRIX_IBMX24_GRAPHICS

@@ -224,8 +224,9 @@ def routine_of(tok):
 
 
 def offset_of(tok):
-    """"offset x" / "offset res:x" -> x; NULL -> None"""
-    if tok == 'NULL':
+    """"offset x" / "offset res:x" -> x; NULL or 0 (Oki9: no medium
+    resolution) -> None"""
+    if tok in ('NULL', '0'):
         return None
     m = re.fullmatch(r'offset\s+(?:\w+:)?(\w+)', tok)
     if not m:

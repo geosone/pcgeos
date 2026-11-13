@@ -360,7 +360,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   geos_embed(_pcl4_c ${pcl4_GEO} pcl4_geode)
   set(_ninepin_c)
   foreach(_d epmx9 eplx9 eprx9 bchip9 diconix9 star9 grpr9 nec24 epshi24
-          epson48 prop9 propx24 ppds24 canon48)
+          epson48 prop9 propx24 ppds24 canon48 oki9 citoh9 tosh24)
     geos_embed(_c ${${_d}_GEO} ${_d}_geode)
     list(APPEND _ninepin_c ${_c})
   endforeach()
@@ -376,7 +376,8 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
                    geode_epmx9 geode_eplx9 geode_eprx9 geode_bchip9
                    geode_diconix9 geode_star9 geode_grpr9 geode_nec24
                    geode_epshi24 geode_epson48 geode_prop9 geode_propx24
-                   geode_ppds24 geode_canon48 geode_truetype)
+                   geode_ppds24 geode_canon48 geode_oki9 geode_citoh9
+                   geode_tosh24 geode_truetype)
   target_include_directories(test_spool PRIVATE
                              ${PROJECT_SOURCE_DIR}/CInclude/Internal)
   target_link_libraries(test_spool PRIVATE geos_kernel)
@@ -393,7 +394,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   add_test(NAME driver.pcl4 COMMAND test_spool pcl4)
   # the other Epson style drivers (Driver/Printer/DotMatrix), a test each
   foreach(_d epmx9 eplx9 eprx9 bchip9 diconix9 star9 grpr9 nec24 epshi24
-          epson48 prop9 propx24 ppds24 canon48)
+          epson48 prop9 propx24 ppds24 canon48 oki9 citoh9 tosh24)
     add_test(NAME driver.${_d} COMMAND test_spool dotmatrix ${_d})
   endforeach()
 
