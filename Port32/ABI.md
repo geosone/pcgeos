@@ -1075,6 +1075,28 @@ cyan, magenta, yellow; `-4 U` black first), from the planes of the swath
 (`correctDJ500C.asm`, `correctDJ550C.asm`) are not ported, nor is the
 options box.
 
+`canonbjc.geo` (Canon BJC-1000, -2000 and the GlobalPC ones, monochrome,
+CMY and CMYK): the raster mode of the BJ printers, each command `ESC (`
+with a letter and a 16-bit length, low byte first. The job resets the
+printer, sets PackBits and a CMYK raster of a bit, the resolution (180
+or 360 dpi, no medium one) and the quality (draft in the low
+resolution); a scan line goes as its planes (`ESC ( A` with the ink
+letter, yellow, cyan, magenta, black of the swath; black alone of a
+monochrome one), a plane without ink not at all, then the raster skip
+`ESC ( e` of a line (`graphicsCanonBJC.c`, PackBits counted as the
+asm). The paper comes from a sheet feeder (`pageStartASFOnly.c`).
+`canonrgb.geo` is not ported: it hands RGB rasters to Canon's library
+`rgb2cmyk` (`CLRGBData`, `CLRasterData`), whose source is not in the
+repository.
+
+`quietjet.geo` (HP QuietJet, QuietJet Plus): the PCL job, page and
+cursor in 1/192" (`cursorConvert192.c`), the dot matrix text with its
+fonts and the styles NLQ, bold and underline (`quietjetStyles.c`),
+raster lines uncompressed at 96 and 192 dpi (`graphicsPCLScanline.c`; a
+white one as a raster line of a zero byte). `dmdevinfo2c.py` knows
+`TP_21_3_PITCH`, and `TP_24_PITCH` has the value of
+`CInclude/Internal/printDr.h` (0xd6, not 0xc2).
+
 The control codes and the constants of these drivers come from the asm
 by `Port32/tools/ctlcodes2c.py` (`printcomDriver.h`,
 `*ControlCodes.c`, checked in). Labels without bytes of their own share

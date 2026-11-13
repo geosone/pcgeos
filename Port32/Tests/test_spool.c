@@ -76,7 +76,7 @@ NINEPIN(diconix9) NINEPIN(star9) NINEPIN(grpr9)
 NINEPIN(nec24) NINEPIN(epshi24) NINEPIN(epson48)
 NINEPIN(prop9) NINEPIN(propx24) NINEPIN(ppds24) NINEPIN(canon48)
 NINEPIN(oki9) NINEPIN(citoh9) NINEPIN(tosh24)
-NINEPIN(dj500c) NINEPIN(mercury)
+NINEPIN(dj500c) NINEPIN(mercury) NINEPIN(canonbjc) NINEPIN(quietjet)
 
 static int fails;
 #define CHECK(c) \
@@ -1529,13 +1529,14 @@ static void PclDecodeFile(const byte *b, size_t n, PclDecode *d, int abs)
  * in each graphics mode, as TIFF or uncompressed: two pages, the figures
  * of TestEpson at their places (the rows from the page's first, the
  * dots from the left edge of the printable area) */
+static const int pclRes[3] = { 75, 150, 300 };
+
 static void TestPclRaster(int out, int tiff, const char *section,
 			  const char *device, int planes, int palette,
-			  int pjl)
+			  int pjl, const int *res)
 {
     static const word modes[] = { PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES,
 				  PM_GRAPHICS_HI_RES };
-    static const int res[] = { 75, 150, 300 };
     JobParameters jp;
     PrintDriverUIData *ui = (PrintDriverUIData *) jp.JP_printerData;
     PclDecode d;
@@ -1617,9 +1618,209 @@ static void TestPclRaster(int out, int tiff, const char *section,
 #undef PCL_NEAR
 }
 
+/* ---------------------------------------------------------------------
+ * The Canon BJC raster mode: ESC [ K and ESC ( x, each with a 16-bit
+ * length (low byte first), back into dots
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    int pages, bad, resets, emulation;	/* ESC [ K, ESC @ */
+    int resX, resY, method, quality;	/* ESC ( d, ESC ( c */
+    int compression, format;		/* ESC ( b, ESC ( t: 1, 1 (CMYK) */
+    long dots[4], dots2[4];		/* Y C M K, pages 1 and 2 */
+    int left, top, right, bottom;	/* all dots of page 1 */
+    long all;				/* of all the planes */
+} BjcDecode;
+
+static void BjcDecodeFile(const byte *b, size_t n, BjcDecode *d)
+{
+    static const char inks[] = "YCMK";
+    size_t i = 0, len;
+    const byte *p;
+    int c, y = 0, k, rn, cnt, bit, plane;
+    byte row[4096];
+
+    memset(d, 0, sizeof(*d));
+    while (i < n) {
+	c = b[i++];
+	if (c == '\r')
+	    continue;
+	if (c == 0x0c) {
+	    d->pages++;
+	    y = 0;
+	    continue;
+	}
+	if (c != 0x1b || i >= n) {
+	    d->bad++;
+	    return;
+	}
+	c = b[i++];
+	if (c == '@') {
+	    d->emulation++;
+	    continue;
+	}
+	if ((c != '[' && c != '(') || i + 3 > n) {
+	    d->bad++;
+	    return;
+	}
+	k = b[i];
+	len = (size_t) (b[i + 1] | b[i + 2] << 8);
+	p = b + i + 3;
+	i += 3 + len;
+	if (i > n) {
+	    d->bad++;
+	    return;
+	}
+	if (c == '[') {
+	    if (k == 'K')
+		d->resets++;
+	    else
+		d->bad++;
+	    continue;
+	}
+	switch (k) {
+	case 'b':
+	    d->compression = p[0];
+	    break;
+	case 't':
+	    d->format = p[1] == 0 ? p[0] : -1;
+	    break;
+	case 'd':
+	    d->resY = p[0] << 8 | p[1];
+	    d->resX = p[2] << 8 | p[3];
+	    break;
+	case 'c':
+	    d->method = p[0];
+	    d->quality = len > 1 ? p[1] : -1;
+	    break;
+	case 'e':
+	    y += p[0] << 8 | p[1];
+	    break;
+	case 'A':
+	    plane = (int) (strchr(inks, p[0]) ? strchr(inks, p[0]) - inks
+						: -1);
+	    if (plane < 0 || !len) {
+		d->bad++;
+		return;
+	    }
+	    for (k = 1, rn = 0; k < (int) len; ) {
+		cnt = (signed char) p[k++];
+		if (cnt >= 0) {
+		    if (k + cnt + 1 > (int) len ||
+			rn + cnt + 1 > (int) sizeof(row)) {
+			d->bad++;
+			return;
+		    }
+		    memcpy(row + rn, p + k, (size_t) cnt + 1);
+		    rn += cnt + 1;
+		    k += cnt + 1;
+		} else if (cnt != -128) {
+		    if (k >= (int) len || rn + 1 - cnt > (int) sizeof(row)) {
+			d->bad++;
+			return;
+		    }
+		    memset(row + rn, p[k++], (size_t) (1 - cnt));
+		    rn += 1 - cnt;
+		}
+	    }
+	    if (d->pages > 1)
+		break;
+	    for (k = 0; k < rn; k++)
+		for (bit = 0; bit < 8; bit++)
+		    if (row[k] & (0x80 >> bit)) {
+			(d->pages ? d->dots2 : d->dots)[plane]++;
+			if (d->pages)
+			    continue;
+			cnt = k * 8 + bit;
+			if (!d->all || cnt < d->left)
+			    d->left = cnt;
+			if (!d->all || cnt > d->right)
+			    d->right = cnt;
+			if (!d->all || y < d->top)
+			    d->top = y;
+			if (!d->all || y > d->bottom)
+			    d->bottom = y;
+			d->all++;
+		    }
+	    break;
+	default:
+	    printf("BJC: ESC ( %c\n", k);
+	    d->bad++;
+	    return;
+	}
+    }
+}
+
+/* the spool file of MakeSpoolFile through the Canon BJC driver in its two
+ * resolutions (the medium one is the high one): the planes of its inks,
+ * the figures of page 1 at their places */
+static void TestBjc(int out, const char *section, const char *device,
+		    int inks)
+{
+    static const word modes[] = { PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES,
+				  PM_GRAPHICS_HI_RES };
+    static const int res[] = { 180, 360, 360 };
+    JobParameters jp;
+    BjcDecode d;
+    char name[13], rel[40];
+    size_t n;
+    byte *b;
+    int m, r;
+
+#define BJC_NEAR(v, pt) \
+    ((v) > (pt) * r / 72 - 8 && (v) < (pt) * r / 72 + 8)
+    for (m = 0; m < 3; m++) {
+	r = res[m];
+	snprintf(rel, sizeof(rel), "out%d.prn", out + m);
+	MakeSpoolFile(name);
+	FillJob(&jp, name, section, PPT_FILE, rel);
+	strcpy(jp.JP_deviceName, device);
+	jp.JP_printMode = modes[m];
+	CHECK(pSpoolAddJob(&jp) != 0xffff);
+	CHECK(WaitIdle());
+	snprintf(rel, sizeof(rel), "DOCUMENT/out%d.prn", out + m);
+	b = (byte *) Get(rel, &n);
+	CHECK(b != NULL && n > 100);
+	if (!b)
+	    continue;
+	BjcDecodeFile(b, n, &d);
+	printf("%s mode %d: %lu bytes, %d pages, %dx%d dpi, quality %d, "
+	       "dots Y C M K %ld %ld %ld %ld, page 2: %ld %ld %ld %ld, "
+	       "%dx%d at %d,%d\n", device, modes[m], (unsigned long) n,
+	       d.pages, d.resX, d.resY, d.quality, d.dots[0], d.dots[1],
+	       d.dots[2], d.dots[3], d.dots2[0], d.dots2[1], d.dots2[2],
+	       d.dots2[3], d.right - d.left, d.bottom - d.top, d.left, d.top);
+	CHECK(!d.bad && d.pages == 2);
+	CHECK(d.resets == 1 && d.emulation == 1);
+	CHECK(d.compression == 1 && d.format == 1 && d.method == 0x10);
+	CHECK(d.resX == r && d.resY == r);
+	CHECK(d.quality == (m ? 0 : 2));
+	CHECK(BJC_NEAR(d.right - d.left, 428) &&
+	      BJC_NEAR(d.bottom - d.top, 328));
+	CHECK(BJC_NEAR(d.left, 54) && BJC_NEAR(d.top, 54));
+	if (inks == 1)			/* black only */
+	    CHECK(d.dots[3] == d.all && !d.dots[0] && !d.dots[1] &&
+		  !d.dots[2] && d.dots2[3] > 0 && !d.dots2[0] &&
+		  !d.dots2[1] && !d.dots2[2]);
+	else if (inks == 3)		/* black of C, M, Y; blue C and M */
+	    CHECK(d.dots[0] * 3 == d.all && d.dots[1] == d.dots[0] &&
+		  d.dots[2] == d.dots[0] && !d.dots[3] &&
+		  d.dots2[1] > 10 * d.dots2[0] && d.dots2[0] > 0 &&
+		  !d.dots2[3]);
+	else				/* black of K; blue C and M */
+	    CHECK(d.dots[3] == d.all && !d.dots[0] && !d.dots[1] &&
+		  !d.dots[2] && d.dots2[1] > 10 * d.dots2[3] &&
+		  d.dots2[2] > 10 * d.dots2[3] && d.dots2[3] > 0 &&
+		  !d.dots2[0]);
+	free(b);
+    }
+#undef BJC_NEAR
+}
+
 static void TestDeskjet(int out, int tiff)
 {
-    TestPclRaster(out, tiff, "DeskJet File", "HP DeskJet 500", 1, 0, 0);
+    TestPclRaster(out, tiff, "DeskJet File", "HP DeskJet 500", 1, 0, 0,
+			  pclRes);
 }
 
 /* a text page through the DeskJet driver in its NLQ mode: the strings
@@ -1992,6 +2193,10 @@ int main(int argc, char **argv)
 	"device = HP PaintJet XL300 (3 Color)\r\n"
 	"[DeskJet KCMY File]\r\ndriver = mercury.geo\r\n"
 	"device = HP DeskJet 550C (4 Color)\r\n"
+	"[BJC File]\r\ndriver = canonbjc.geo\r\n"
+	"device = Canon BJC-2000\r\n"
+	"[QuietJet File]\r\ndriver = quietjet.geo\r\n"
+	"device = HP QuietJet (HP Mode)\r\n"
 	"[LaserJet File]\r\ndriver = pcl4.geo\r\n"
 	"device = HP LaserJet III\r\n"
 	"[Epmx9 File]\r\ndriver = epmx9.geo\r\ndevice = Epson MX-80 Type III\r\n"
@@ -2100,6 +2305,8 @@ int main(int argc, char **argv)
     Put("SYSTEM/PRINTER/tosh24.geo", tosh24_geode, tosh24_geode_size);
     Put("SYSTEM/PRINTER/dj500c.geo", dj500c_geode, dj500c_geode_size);
     Put("SYSTEM/PRINTER/mercury.geo", mercury_geode, mercury_geode_size);
+    Put("SYSTEM/PRINTER/canonbjc.geo", canonbjc_geode, canonbjc_geode_size);
+    Put("SYSTEM/PRINTER/quietjet.geo", quietjet_geode, quietjet_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
@@ -2209,18 +2416,30 @@ int main(int argc, char **argv)
 	printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);
 	return fails != 0;
     }
-    /* "test_spool color dj500c|mercury": the color DeskJets, a raster
-     * plane a color (driver.dj500c, driver.mercury) */
+    /* "test_spool color dj500c|mercury|canonbjc": the color printers,
+     * a raster plane a color (driver.dj500c, driver.mercury,
+     * driver.canonbjc) */
     if (argc > 2 && !strcmp(argv[1], "color")) {
 	if (!strcmp(argv[2], "dj500c")) {
 	    TestPclRaster(200, 1, "DeskJet CMY File",
-			  "HP DeskJet 500C (Color)", 3, -3, 0);
+			  "HP DeskJet 500C (Color)", 3, -3, 0,
+			  pclRes);
 	    TestPclRaster(203, 0, "PaintJet File",
-			  "HP PaintJet XL300 (3 Color)", 3, -3, 1);
+			  "HP PaintJet XL300 (3 Color)", 3, -3, 1,
+			  pclRes);
 	} else if (!strcmp(argv[2], "mercury"))
 	    TestPclRaster(206, 1, "DeskJet KCMY File",
-			  "HP DeskJet 550C (4 Color)", 4, -4, 0);
-	else
+			  "HP DeskJet 550C (4 Color)", 4, -4, 0,
+			  pclRes);
+	else if (!strcmp(argv[2], "quietjet")) {
+	    static const int qjRes[3] = { 96, 192, 192 };
+	    TestPclRaster(220, 0, "QuietJet File", "HP QuietJet (HP Mode)",
+			  1, 0, 0, qjRes);
+	} else if (!strcmp(argv[2], "canonbjc")) {
+	    TestBjc(210, "BJC File", "Canon BJC-1000 (B/W)", 1);
+	    TestBjc(213, "BJC File", "Canon BJC-1000 (Color)", 3);
+	    TestBjc(216, "BJC File", "Canon BJC-2000", 4);
+	} else
 	    CHECK(!"a color driver");
 	GeodeFreeLibrary(spool);
 	printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);

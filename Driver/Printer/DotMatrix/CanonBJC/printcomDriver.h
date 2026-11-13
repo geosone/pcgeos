@@ -1,0 +1,49 @@
+/*
+ * printcomDriver.h -- the Canon BJC driver's constants and control codes
+ * for the PrintCom files (the C form of canonBJCConstant.def; the codes are
+ * in canonBJCControlCodes.c).
+ */
+#ifndef PRINTCOMDRIVER_H
+#define PRINTCOMDRIVER_H
+
+#define LOW_RES_X_RES	180
+#define LOW_RES_Y_RES	180
+#define HI_RES_X_RES	360
+#define HI_RES_Y_RES	360
+#define PR_MARGIN_LEFT	18
+#define PR_MARGIN_RIGHT	18
+#define PR_MARGIN_TOP	18
+#define PR_MARGIN_BOTTOM	18
+#define PR_INIT_WAIT_PERIOD	60
+#define CANON_BJC_MEDIA_SOURCE_MANUAL_OFFLINE	0
+#define CANON_BJC_MEDIA_SOURCE_MANUAL_ONLINE	1
+#define CANON_BJC_MEDIA_SOURCE_CONTINUOUS	2
+#define CANON_BJC_MEDIA_SOURCE_ASF1	4
+#define CANON_BJC_MEDIA_SOURCE_ASF2	5
+#define CANON_BJC_MEDIA_SOURCE_CASSETTE1	8
+#define CANON_BJC_MEDIA_SOURCE_CASSETTE2	9
+#define CANON_BJC_MEDIA_SOURCE_AUTOMATIC	15
+#define CANON_BJC_MEDIA_TYPE_PLAIN_PAPER	0
+#define CANON_BJC_MEDIA_TYPE_COATED_PAPER	1
+#define CANON_BJC_MEDIA_TYPE_TRANSPARENCIES	2
+#define CANON_BJC_MEDIA_TYPE_BACK_PRINT_FILM	3
+#define CANON_BJC_MEDIA_TYPE_FABRIC_SHEET	4
+#define CANON_BJC_MEDIA_TYPE_GLOSSY_PAPER	5
+#define CANON_BJC_MEDIA_TYPE_HIGH_GLOSS_FILM	6
+#define CANON_BJC_MEDIA_TYPE_HIGH_RES_PAPER	7
+#define CANON_BJC_MEDIA_TYPE_ENVELOPES	8
+#define CANON_BJC_MEDIA_TYPE_POSTCARDS	9
+#define CANON_BJC_MEDIA_TYPE_FULL_BLEED_PAPER	10
+#define CANON_BJC_MEDIA_TYPE_BANNER_PAPER	11
+#define CANON_BJC_MEDIA_TYPE_OTHER	15
+#define CANON_BJC_PRINT_QUALITY_STANDARD	0
+#define CANON_BJC_PRINT_QUALITY_DRAFT	2
+#define CANON_BJC_CARTRIDGE_BLACK	0
+#define CANON_BJC_CARTRIDGE_COLOR	1
+
+extern const byte pr_codes_ResetPrinter[], pr_codes_InitPrinter[],
+    pr_codes_SetPrintResolution[], pr_codes_SetPrintingMethod[],
+    pr_codes_ReturnToEmulationMode[], pr_codes_DoLineFeed[],
+    pr_codes_SetGraphics[], canonBJColorTable[];
+
+#endif /* PRINTCOMDRIVER_H */
