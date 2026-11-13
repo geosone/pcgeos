@@ -9,8 +9,10 @@
  * prints them; the jobs go to the file port (DOCUMENT/out.ps ...), to
  * the nothing port, and to a printer whose driver is missing.  Where
  * Ghostscript is on the host (GEOS_TEST_GS, or gs in the PATH on
- * linux), it must run the output without an error.  Nothing is printed
- * on a real printer.
+ * linux), it must run the output without an error.  The raster drivers'
+ * output (ESC/P, PCL) is decoded back into dots and text.  Nothing is
+ * printed on a real printer.  "test_spool deskjet" (driver.deskjet)
+ * prints through the DeskJet driver only.
  */
 #define _GNU_SOURCE			/* popen */
 #include "kernelC.h"
@@ -62,6 +64,8 @@ extern const unsigned char epson24_geode[];
 extern const unsigned long epson24_geode_size;
 extern const unsigned char epson9_geode[];
 extern const unsigned long epson9_geode_size;
+extern const unsigned char deskjet_geode[];
+extern const unsigned long deskjet_geode_size;
 
 static int fails;
 #define CHECK(c) \
@@ -815,6 +819,339 @@ static void TestEpsonText(const char *printer, const char *device,
     free(b);
 }
 
+
+/* ---------------------------------------------------------------------
+ * The PCL drivers: PCL back into dots and text
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    int pages;
+    int bad;			/* an unknown code or a truncated one */
+    int res;			/* ESC * t #R */
+    int rasters, rows, tiff;	/* ESC * r 1A, rows, rows in mode 2 */
+    int left, top, right, bottom;	/* the dots of page 1 */
+    long dots;
+    int left2, top2, right2, bottom2;	/* and of page 2 */
+    long dots2;
+    char text[256];		/* the text of page 1, '|' at ESC * p */
+    int textLen;
+    int underline;		/* ESC & d 3 D on page 1 */
+    int curX, curY;		/* the first ESC * p (x, y) on page 1 */
+    char font[64];		/* the first ESC ( s ... T */
+    int pageLength, inputPath;	/* ESC & l # p, ESC & l # H */
+} PclDecode;
+
+static void PclDot(PclDecode *d, int x, int y)
+{
+    int *l, *t, *r, *b;
+    long *n;
+
+    if (d->pages > 1)
+	return;
+    l = d->pages ? &d->left2 : &d->left;
+    t = d->pages ? &d->top2 : &d->top;
+    r = d->pages ? &d->right2 : &d->right;
+    b = d->pages ? &d->bottom2 : &d->bottom;
+    n = d->pages ? &d->dots2 : &d->dots;
+    if (!*n || x < *l)
+	*l = x;
+    if (!*n || x > *r)
+	*r = x;
+    if (!*n || y < *t)
+	*t = y;
+    if (!*n || y > *b)
+	*b = y;
+    (*n)++;
+}
+
+/* a row of raster bytes at row y of the page */
+static void PclRow(PclDecode *d, const byte *row, int n, int y)
+{
+    int k, bit;
+
+    for (k = 0; k < n; k++)
+	for (bit = 0; bit < 8; bit++)
+	    if (row[k] & (0x80 >> bit))
+		PclDot(d, k * 8 + bit, y);
+}
+
+static void PclDecodeFile(const byte *b, size_t n, PclDecode *d)
+{
+    static byte row[4096];
+    size_t i = 0;
+    int c, y = 0, mode = 0, val, neg, rn, k, cnt;
+    char par, grp, term;
+
+    memset(d, 0, sizeof(*d));
+    d->curX = d->curY = -1;
+    while (i < n) {
+	c = b[i++];
+	if (c == 0x0f || c == '\r' || c == '\n')
+	    continue;
+	if (c == 0x0c) {
+	    d->pages++;
+	    y = 0;
+	    continue;
+	}
+	if (c != 0x1b) {
+	    if (c >= ' ') {
+		if (!d->pages && d->textLen < (int) sizeof(d->text) - 1)
+		    d->text[d->textLen++] = (char) c;
+		continue;
+	    }
+	    d->bad++;
+	    return;
+	}
+	if (i >= n) {
+	    d->bad++;
+	    return;
+	}
+	par = (char) b[i++];
+	if (par == 'E')
+	    continue;
+	/* a parameterized command: ESC par [group] (value letter)+, the
+	 * last letter upper case; ESC ( has no group but for s */
+	grp = 0;
+	if (i < n && (par != '(' || b[i] == 's') && b[i] >= 0x60 &&
+	    b[i] <= 0x7e)
+	    grp = (char) b[i++];
+	do {
+	    val = neg = 0;
+	    if (i < n && (b[i] == '-' || b[i] == '+'))
+		neg = b[i++] == '-';
+	    while (i < n && b[i] >= '0' && b[i] <= '9')
+		val = val * 10 + (b[i++] - '0');
+	    if (neg)
+		val = -val;
+	    if (i >= n) {
+		d->bad++;
+		return;
+	    }
+	    term = (char) b[i++];
+	    if (par == '(' && grp == 's' && !d->pages) {
+		k = (int) strlen(d->font);
+		if (!strchr(d->font, 'T') && k < (int) sizeof(d->font) - 8)
+		    snprintf(d->font + k, sizeof(d->font) - k, "%d%c", val,
+			     term);
+	    }
+	    switch (par << 16 | grp << 8 |
+		    (term >= 'A' && term <= 'Z' ? term | 0x20 : term)) {
+	    case '*' << 16 | 'p' << 8 | 'x':
+		if (!d->pages && d->curX < 0)
+		    d->curX = val;
+		if (!d->pages && d->textLen < (int) sizeof(d->text) - 1)
+		    d->text[d->textLen++] = '|';
+		break;
+	    case '*' << 16 | 'p' << 8 | 'y':
+		if (!d->pages && d->curY < 0)
+		    d->curY = val;
+		break;
+	    case '*' << 16 | 't' << 8 | 'r':
+		d->res = val;
+		break;
+	    case '*' << 16 | 'r' << 8 | 'a':
+		d->rasters++;
+		break;
+	    case '*' << 16 | 'r' << 8 | 'b':
+	    case '*' << 16 | 'c' << 8 | 'f':
+	    case '&' << 16 | 'a' << 8 | 'r':
+	    case '&' << 16 | 'l' << 8 | 'd':
+	    case '&' << 16 | 'l' << 8 | 'e':
+	    case '&' << 16 | 'l' << 8 | 'f':
+	    case '&' << 16 | 'l' << 8 | 'o':
+	    case '&' << 16 | 'l' << 8 | 'l':
+	    case '&' << 16 | 'd' << 8 | '@':
+	    case '(' << 16 | 0 << 8 | 'u':
+	    case '(' << 16 | 0 << 8 | 'n':
+	    case '(' << 16 | 's' << 8 | 'p':
+	    case '(' << 16 | 's' << 8 | 'h':
+	    case '(' << 16 | 's' << 8 | 'v':
+	    case '(' << 16 | 's' << 8 | 's':
+	    case '(' << 16 | 's' << 8 | 'b':
+	    case '(' << 16 | 's' << 8 | 't':
+		break;
+	    case '&' << 16 | 'l' << 8 | 'p':
+		d->pageLength = val;
+		break;
+	    case '&' << 16 | 'l' << 8 | 'h':
+		d->inputPath = val;
+		break;
+	    case '&' << 16 | 'd' << 8 | 'd':
+		if (!d->pages)
+		    d->underline++;
+		break;
+	    case '*' << 16 | 'b' << 8 | 'm':
+		mode = val;
+		break;
+	    case '*' << 16 | 'b' << 8 | 'w':
+		if (val < 0 || i + (size_t) val > n) {
+		    d->bad++;
+		    return;
+		}
+		rn = 0;
+		if (mode == 0) {
+		    memcpy(row, b + i, (size_t) val);
+		    rn = val;
+		} else if (mode == 2) {
+		    d->tiff++;
+		    for (k = 0; k < val; ) {
+			cnt = (signed char) b[i + k++];
+			if (cnt >= 0) {
+			    if (k + cnt + 1 > val ||
+				rn + cnt + 1 > (int) sizeof(row)) {
+				d->bad++;
+				return;
+			    }
+			    memcpy(row + rn, b + i + k, (size_t) cnt + 1);
+			    rn += cnt + 1;
+			    k += cnt + 1;
+			} else if (cnt != -128) {
+			    if (k >= val || rn + 1 - cnt > (int) sizeof(row)) {
+				d->bad++;
+				return;
+			    }
+			    memset(row + rn, b[i + k++], (size_t) (1 - cnt));
+			    rn += 1 - cnt;
+			}
+		    }
+		} else {
+		    d->bad++;
+		    return;
+		}
+		PclRow(d, row, rn, y++);
+		d->rows++;
+		i += (size_t) val;
+		break;
+	    default:
+		printf("PCL: ESC %c%c%d%c\n", par, grp ? grp : ' ', val,
+		       term);
+		d->bad++;
+		return;
+	    }
+	} while (term >= 0x60 && term <= 0x7e);
+    }
+}
+
+/* the spool file of MakeSpoolFile through the DeskJet driver to a file
+ * in each graphics mode, as TIFF or uncompressed: two pages, the figures
+ * of TestEpson at their places (the rows from the page's first, the
+ * dots from the left edge of the printable area) */
+static void TestDeskjet(int out, int tiff)
+{
+    static const word modes[] = { PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES,
+				  PM_GRAPHICS_HI_RES };
+    static const int res[] = { 75, 150, 300 };
+    JobParameters jp;
+    PrintDriverUIData *ui = (PrintDriverUIData *) jp.JP_printerData;
+    PclDecode d;
+    char name[13], rel[40];
+    size_t n;
+    byte *b;
+    int m, w, h, r;
+
+#define PCL_NEAR(v, pt) \
+    ((v) > (pt) * r / 72 - 8 && (v) < (pt) * r / 72 + 8)
+    for (m = 0; m < 3; m++) {
+	r = res[m];
+	snprintf(rel, sizeof(rel), "out%d.pcl", out + m);
+	MakeSpoolFile(name);
+	FillJob(&jp, name, "DeskJet File", PPT_FILE, rel);
+	strcpy(jp.JP_deviceName, "HP DeskJet 500");
+	jp.JP_printMode = modes[m];
+	ui->PUID_compressionMode = (byte) (tiff ? 2 : 0);
+	ui->PUID_symbolSet = PSS_ROMAN8;
+	CHECK(pSpoolAddJob(&jp) != 0xffff);
+	CHECK(WaitIdle());
+	snprintf(rel, sizeof(rel), "DOCUMENT/out%d.pcl", out + m);
+	b = (byte *) Get(rel, &n);
+	CHECK(b != NULL && n > 100);
+	if (!b)
+	    continue;
+	CHECK(n > 4 && b[0] == 0x1b && b[1] == 'E');
+	PclDecodeFile(b, n, &d);
+	w = d.right - d.left;
+	h = d.bottom - d.top;
+	printf("DeskJet mode %d%s: %lu bytes, %d pages, %d rasters, %d rows "
+	       "(%d TIFF), %ld dots, %dx%d at %d,%d, page 2: %ld dots, "
+	       "%dx%d at %d,%d\n", modes[m], tiff ? " TIFF" : "",
+	       (unsigned long) n, d.pages, d.rasters, d.rows, d.tiff, d.dots,
+	       w, h, d.left, d.top, d.dots2, d.right2 - d.left2,
+	       d.bottom2 - d.top2, d.left2, d.top2);
+	CHECK(!d.bad);
+	CHECK(d.pages == 2);
+	CHECK(d.res == r);
+	/* 792 pt in lines of 9 pt; tray 1 */
+	CHECK(d.pageLength == 88 && d.inputPath == 1);
+	if (d.pageLength != 88 || d.inputPath != 1)
+	    printf("page length %d, input path %d\n", d.pageLength,
+		   d.inputPath);
+	CHECK(tiff ? d.tiff > 0 : d.tiff == 0);
+	CHECK(PCL_NEAR(w, 428) && PCL_NEAR(h, 328));
+	CHECK(PCL_NEAR(d.left, 54) && PCL_NEAR(d.top, 54));
+	CHECK(PCL_NEAR(d.right2 - d.left2, 300) &&
+	      PCL_NEAR(d.bottom2 - d.top2, 500));
+	CHECK(PCL_NEAR(d.left2, 82) && PCL_NEAR(d.top2, 82));
+	free(b);
+    }
+#undef PCL_NEAR
+}
+
+/* a text page through the DeskJet driver in its NLQ mode: the strings
+ * at their places, the printer's fonts chosen */
+static void TestDeskjetText(const char *out)
+{
+    JobParameters jp;
+    PclDecode d;
+    GStateHandle gs;
+    FileHandle fh;
+    char name[13], rel[40];
+    word ch;
+    size_t n;
+    byte *b;
+
+    fh = pSpoolCreateSpoolFile(name);
+    CHECK(fh != 0);
+    if (!fh)
+	return;
+    gs = GrCreateGString(fh, GST_STREAM, &ch);
+    GrDrawText(gs, 300, 100, "Right", 0);
+    GrDrawText(gs, 72, 100, "Hello World", 0);
+    GrSetTextStyle(gs, TS_UNDERLINE, 0);
+    GrDrawText(gs, 72, 150, "Under", 0);
+    GrSetTextStyle(gs, 0, TS_UNDERLINE);
+    GrNewPage(gs, PEC_FORM_FEED);
+    GrDrawText(gs, 72, 72, "Page2", 0);
+    GrNewPage(gs, PEC_FORM_FEED);
+    CHECK(GrEndGString(gs) == GSET_NO_ERROR);
+    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+    FileClose(fh, FALSE);
+
+    FillJob(&jp, name, "DeskJet File", PPT_FILE, out);
+    strcpy(jp.JP_deviceName, "HP DeskJet 500");
+    jp.JP_printMode = PM_TEXT_NLQ;
+    ((PrintDriverUIData *) jp.JP_printerData)->PUID_symbolSet = PSS_ROMAN8;
+    CHECK(pSpoolAddJob(&jp) != 0xffff);
+    CHECK(WaitIdle());
+    snprintf(rel, sizeof(rel), "DOCUMENT/%s", out);
+    b = (byte *) Get(rel, &n);
+    CHECK(b != NULL && n > 20);
+    if (!b)
+	return;
+    PclDecodeFile(b, n, &d);
+    d.text[d.textLen] = 0;
+    printf("DeskJet text: %lu bytes, %d pages, \"%s\", underline %d, "
+	   "cursor %d,%d, font %s\n", (unsigned long) n, d.pages, d.text,
+	   d.underline, d.curX, d.curY, d.font);
+    CHECK(!d.bad);
+    CHECK(d.pages == 2);
+    CHECK(!strncmp(d.text, "|Hello World|Right|Under", 24));
+    CHECK(d.underline >= 1);
+    /* 72 pt less the document's margin (18) in 1/300" */
+    CHECK(d.curX == 225);
+    CHECK(Count((const char *) b, n, "\x1b(8U") == 1);	/* Roman-8 */
+    free(b);
+}
+
 int main(int argc, char **argv)
 {
     static const char ini[] =
@@ -829,6 +1166,8 @@ int main(int argc, char **argv)
 	"device = Epson FX-85 (Epson Mode)\r\n"
 	"[Epson24 File]\r\ndriver = epson24.geo\r\n"
 	"device = Epson LQ-800\r\n"
+	"[DeskJet File]\r\ndriver = deskjet.geo\r\n"
+	"device = HP DeskJet 500\r\n"
 	"[spool]\r\nhostPrinters = false\r\n";
     static const char patch[] = "% devpatch\r\n";
     GeodeLoadError e;
@@ -849,7 +1188,6 @@ int main(int argc, char **argv)
     word id1, id2, id3, id4;
     int i;
 
-    (void) argc;
     setvbuf(stdout, NULL, _IONBF, 0);
     strncpy(top, argv[0], sizeof(top) - 10);
     top[sizeof(top) - 10] = 0;
@@ -882,6 +1220,7 @@ int main(int argc, char **argv)
     Put("SYSTEM/PRINTER/pscript.geo", pscript_geode, pscript_geode_size);
     Put("SYSTEM/PRINTER/epson9.geo", epson9_geode, epson9_geode_size);
     Put("SYSTEM/PRINTER/epson24.geo", epson24_geode, epson24_geode_size);
+    Put("SYSTEM/PRINTER/deskjet.geo", deskjet_geode, deskjet_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
@@ -934,6 +1273,16 @@ int main(int argc, char **argv)
     for (i = 0; i < 100 && Exists("PRIVDATA/SPOOL/spool005.dat"); i++)
 	TimerSleep(6);
     CHECK(!Exists("PRIVDATA/SPOOL/spool005.dat"));
+
+    /* "test_spool deskjet": the DeskJet driver only (driver.deskjet) */
+    if (argc > 1 && !strcmp(argv[1], "deskjet")) {
+	TestDeskjet(30, 1);
+	TestDeskjet(33, 0);
+	TestDeskjetText("out36.pcl");
+	GeodeFreeLibrary(spool);
+	printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);
+	return fails != 0;
+    }
 
     /* the printers */
     CHECK(pSpoolGetNumPrinters(PDT_PRINTER, 0) == 0);

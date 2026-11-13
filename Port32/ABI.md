@@ -980,6 +980,34 @@ the LQ fonts (`fontEpsonLQInfo.asm`). Both Epson drivers are built by
 `geos_dotmatrix_driver` of `Driver/Printer/DotMatrix/DotMatrix.cmake`
 with the `PrintCom` files they share.
 
+**The HP DeskJet driver** (`Driver/Printer/HP/Deskjet`, `deskjet.geo`,
+protocol 5.0, from `deskjet32.gp`), the first PCL driver:
+`deskjetControlCodes.c` and the `PrintCom` files of
+`deskjetManager.asm`, built by the same `geos_dotmatrix_driver`.
+- **Tables.** `dmdevinfo2c.py` reads the symbol set list of an info
+  resource (the control codes by `PrinterSymbolSet`, indices into
+  `printFontCommands` as the font commands), drivers without a font
+  file (the PCL NLQ list is an empty list in the info resource; the
+  fonts are the printer's) and `ifdef`/`ifndef`/`else`/`endif` with no
+  symbol defined (`GPC_ONLY` lists one device only).
+- **PCL.** Positions in 1/300" (`cursorConvert300.c`, both coordinates
+  in `PS_cursorPos`, `ESC * p # x # Y`). A code with a number is
+  zero-terminated with `#` where the number goes in decimal
+  (`WriteNumCommand`, `HexToAsciiStreamWrite`). The job sets the page
+  length in lines of 1/8" from `PS_customHeight` and the input path
+  (manual 2, trays 1, 1, 4, 6). The text selects the printer's
+  resident fonts by spacing, pitch, height, style, weight and typeface
+  (`textSetFontPCL.c`, `fontPCLInfo.c`); the PCL style run sets the font
+  and its styles together (`PrSetFontStyle`).
+- **Raster.** One scan line a band: `ESC * t # R`, `ESC * r 1 A`, each
+  line without its trailing white bytes as `ESC * b 0 m # W` or, with
+  bit 1 of `PUID_compressionMode`, TIFF PackBits (`ESC * b 2 m # W`), a
+  white line one zero byte; `ESC * r B`. The PackBits runs come from a
+  plain encoder (`graphicsPCLTIFF.c`): they decode to the same bytes as
+  the asm's, the packets may differ.
+- Not ported: the options box and the gamma correction tables of the
+  medium and high resolutions (`GP_colorCorrection` 0).
+
 **The PostScript driver** (`Driver/Printer/PScript`, `pscript.geo`,
 protocol 5.0, built from `pscript32.gp`):
 - **Device tables.** `Port32/tools/psdevinfo2c.py` makes them from the

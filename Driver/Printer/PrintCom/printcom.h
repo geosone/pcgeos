@@ -179,4 +179,24 @@ extern Boolean PrRotate24Columns(PState *ps, word bytes, int columns);
 extern Boolean PrRotate24Lines(PState *ps, word bytes);
 extern Boolean PrSend24HiresLines(PState *ps, word *bandStart);
 
+/* ---------------------------------------------------------------------
+ * The PCL drivers (DeskJet, LaserJet): positions in 1/300", numbers in
+ * the commands in decimal.
+ * ------------------------------------------------------------------- */
+
+/* Stream/streamHexToASCII.c, streamPCLCommand.c: a zero-terminated code,
+ * each '#' the number */
+extern Boolean HexToAsciiStreamWrite(PState *ps, word n);
+extern Boolean WriteNumCommand(PState *ps, const byte *code, word n);
+/* Cursor/cursorSetCursorPCL.c: the cursor to PS_cursorPos */
+extern Boolean PrMoveCursor(PState *ps);
+/* Text/textSetFontPCL.c: the font with its styles */
+extern Boolean PrSetFontStyle(PState *ps, FontID id, word size, byte pitch,
+			      PrintTextStyle style);
+/* Text/Font/fontPCLInfo.c */
+extern const FontID pclFontIDTab[];
+extern const word pclTypefaceTab[];
+/* Graphics/graphicsPCLTIFF.c: a scan line (NULL: white) */
+extern Boolean PrSendScanline(PState *ps, const byte *line);
+
 #endif /* PRINTCOM_H */
