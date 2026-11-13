@@ -278,13 +278,22 @@ static void *Import(void *ctx, const char *name)
     return (void *) a;
 }
 
-/* the first load, only to read __geos_module: every import is valid */
+/* the first load, only to read __geos_module: every import is valid.
+ * Loading runs the module's constructors, and those of a DXE3 with
+ * unwind tables (64-bit division from libgcc, say) call
+ * __register_frame_info at once: the kernel's and the host's own
+ * routines are the real ones, only library imports are a dummy. */
 static void *ProbeImport(void *ctx, const char *name)
 {
     static dword dummy[4];
+    const void *a = KernelSymbol(name);
+    word i;
 
-    (void) ctx; (void) name;
-    return dummy;
+    (void) ctx;
+    for (i = 0; !a && i < sizeof(hostExports) / sizeof(hostExports[0]); i++)
+	if (strcmp(hostExports[i].name, name) == 0)
+	    a = hostExports[i].addr;
+    return a ? (void *) a : dummy;
 }
 
 static const GeosModuleInfo *ModuleInfo(ghal_module *m)
