@@ -275,6 +275,24 @@ static WWFixedAsDWord WW(const WWFixed *w)
     return ((dword) (word) w->WWF_int << 16) | w->WWF_frac;
 }
 
+/* MatrixToAscii: "[e11 e12 e21 e22 e31 e32]" into the buffer */
+void MatrixToAscii(TGSLocals *tgs, const TransMatrix *m)
+{
+    *tgs->p++ = '[';
+    tgs->p = WWFixedToAscii(tgs->p, WW(&m->TM_e11));
+    *tgs->p++ = ' ';
+    tgs->p = WWFixedToAscii(tgs->p, WW(&m->TM_e12));
+    *tgs->p++ = ' ';
+    tgs->p = WWFixedToAscii(tgs->p, WW(&m->TM_e21));
+    *tgs->p++ = ' ';
+    tgs->p = WWFixedToAscii(tgs->p, WW(&m->TM_e22));
+    *tgs->p++ = ' ';
+    tgs->p = DWFixedToAscii(tgs->p, &m->TM_e31);
+    *tgs->p++ = ' ';
+    tgs->p = DWFixedToAscii(tgs->p, &m->TM_e32);
+    *tgs->p++ = ']';
+}
+
 /* EmitTransform: "[matrix] SOT", or "[matrix] concat" inside a path,
  * where it is left out while it has not changed (and for identity) */
 void EmitTransform(TGSLocals *tgs)
@@ -313,21 +331,8 @@ void EmitTransform(TGSLocals *tgs)
 	}
     }
 
-    /* MatrixToAscii */
     ResetBuffer(tgs);
-    *tgs->p++ = '[';
-    tgs->p = WWFixedToAscii(tgs->p, WW(&m->TM_e11));
-    *tgs->p++ = ' ';
-    tgs->p = WWFixedToAscii(tgs->p, WW(&m->TM_e12));
-    *tgs->p++ = ' ';
-    tgs->p = WWFixedToAscii(tgs->p, WW(&m->TM_e21));
-    *tgs->p++ = ' ';
-    tgs->p = WWFixedToAscii(tgs->p, WW(&m->TM_e22));
-    *tgs->p++ = ' ';
-    tgs->p = DWFixedToAscii(tgs->p, &m->TM_e31);
-    *tgs->p++ = ' ';
-    tgs->p = DWFixedToAscii(tgs->p, &m->TM_e32);
-    *tgs->p++ = ']';
+    MatrixToAscii(tgs, m);
     if (EmitBuffer(tgs))
 	return;
     if (tgs->TGS_pathGState)
@@ -435,7 +440,7 @@ static const byte desiredR[16] = {
     0x00,0x00,0x55,0x33,0xcd,0x44,0xcd,0x9a,
     0x44,0x00,0x77,0x66,0xff,0x9a,0xff,0xff };
 
-static void MapRGBForPrinter(byte *r, byte *g, byte *b)
+void MapRGBForPrinter(byte *r, byte *g, byte *b)
 {
     int i;
 
@@ -496,6 +501,7 @@ byte *ExtractElement(TGSLocals *tgs)
     }
     (void) GrGetGStringElement(tgs->TGS_gstate, tgs->TGS_src, size,
 			       tgs->TGS_elem, &size);
+    tgs->TGS_elemLen = size;
     GrSetGStringPos(tgs->TGS_src, GSSPT_SKIP_1, 0);
     tgs->TGS_emitRetType = GSRT_ONE;
     return tgs->TGS_elem;

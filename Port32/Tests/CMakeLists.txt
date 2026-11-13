@@ -324,9 +324,12 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     add_test(NAME driver.cups COMMAND test_cups)
   endif()
 
-  # the PostScript translation library (Library/Trans/Graphics/Vector/EPS)
+  # the PostScript translation library (Library/Trans/Graphics/Vector/EPS),
+  # with Berkeley for the metrics of its text
   geos_embed(_eps_c ${eps_GEO} eps_geode)
-  add_executable(test_eps test_eps.c ${_eps_c})
+  geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
+             berkeley_fnt)
+  add_executable(test_eps test_eps.c ${_eps_c} ${_berkeley_c})
   add_dependencies(test_eps geode_eps)
   target_link_libraries(test_eps PRIVATE geos_kernel)
   add_test(NAME library.eps COMMAND test_eps)
@@ -348,8 +351,6 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   geos_embed(_epson9_c ${epson9_GEO} epson9_geode)
   geos_embed(_epson24_c ${epson24_GEO} epson24_geode)
   geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
-  geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
-             berkeley_fnt)
   add_executable(test_spool test_spool.c ${_spool_c} ${_filestr_c}
                  ${_eps_c} ${_pscript_c} ${_epson9_c} ${_epson24_c} ${_vidmem_c}
                  ${_berkeley_c})

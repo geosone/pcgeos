@@ -71,6 +71,15 @@ typedef struct TGSLocals {
     Boolean         TGS_pathgs;         /* building a path */
     GStateHandle    TGS_pathGState;
     word            TGS_writeErr;
+    word            TGS_elemLen;        /* the element's size */
+    MemHandle       TGS_pageFonts;      /* PageFont[1 + TGS_pfCount] */
+    word            TGS_pfCount;
+    TextStyle       TGS_newstyle;       /* styles the font leaves to us */
+    WWFixedAsDWord  TGS_locmot;         /* last run's local motion */
+    WWFixedAsDWord  TGS_runlen;         /* width of the current run */
+    WWFixedAsDWord  TGS_width;          /* of the text field */
+    WWFixedAsDWord  TGS_gwidth;         /* of the style group */
+    WWFixedAsDWord  TGS_gpos;           /* x of the style group */
     char           *p;                  /* into TGS_buffer */
     char            TGS_buffer[EPS_BUFFER_SIZE];
 } TGSLocals;
@@ -86,6 +95,24 @@ typedef struct TGSLocals {
  * and exportProlog.asm by Port32/tools/asmchars2c.py) */
 #define PS(name)        name, (word) (sizeof(name) - 1)
 #include "epsStrings.h"
+
+/* an AdobeFontEntry (exportConstant.def), the tables of epsFonts.c
+ * (Port32/tools/epsfonts2c.py) */
+typedef struct {
+    word        AFE_id;                 /* FontID */
+    byte        AFE_style;              /* TextStyle */
+    byte        AFE_encode;             /* AdobeFontEncoding */
+    byte        AFE_nlen;
+    const char *AFE_name;
+} EPSAdobeFont;
+#define AFE_STANDARD            0       /* AdobeFontEncoding */
+#define AFE_EXPERT              1
+#define AFE_SYMBOL              2
+#define AFE_SPECIAL             3
+#define EPS_NUM_FONT_MAPS       19
+extern const EPSAdobeFont *const *const *const epsFontMaps[EPS_NUM_FONT_MAPS];
+extern const byte epsFaces[];
+extern const word epsFaceStart[4];
 
 /* exportUtils.c */
 Boolean SendToStream(MemHandle stream, const void *data, word size,
@@ -107,6 +134,8 @@ void    EmitTransform(TGSLocals *tgs);
 void    EmitLineAttributes(TGSLocals *tgs, Boolean multi);
 void    EmitAreaAttributes(TGSLocals *tgs);
 void    EmitColor(TGSLocals *tgs, RGBColorAsDWord c);
+void    MapRGBForPrinter(byte *r, byte *g, byte *b);
+void    MatrixToAscii(TGSLocals *tgs, const TransMatrix *m);
 byte   *ExtractElement(TGSLocals *tgs);
 
 /* exportGString.c */
@@ -128,6 +157,12 @@ void    EmitNothing(TGSLocals *tgs);
 /* exportPath.c */
 void    EmitClipPath(TGSLocals *tgs, word op);
 Boolean EmitPath(TGSLocals *tgs, GetPathType type);
+
+/* exportText.c */
+void    InitPageFonts(TGSLocals *tgs);
+void    FreePageFonts(TGSLocals *tgs);
+void    EmitText(TGSLocals *tgs, word op);
+void    EmitTextField(TGSLocals *tgs, word op);
 
 /* exportArc.c */
 void    Convert3PointToNormalArc(TGSLocals *tgs, const byte *e,

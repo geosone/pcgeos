@@ -18,11 +18,15 @@
 #include <lmem.h>
 #include <file.h>
 #include <xlatPS.h>
+#include <font.h>
+#include <fontID.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+extern const unsigned char berkeley_fnt[];
+extern const unsigned long berkeley_fnt_size;
 extern const unsigned char eps_geode[];
 extern const unsigned long eps_geode_size;
 
@@ -138,6 +142,57 @@ static WWFixedAsDWord WWF(int i, word f)
     return ((dword) (word) i << 16) | f;
 }
 
+/* GrDrawTextField: "Hi " in Helvetica, then "Field" red, underlined, in
+ * Times bold */
+static word FieldStyle(GDF_vars *v, TextAttr *ta, word offset,
+		       Boolean first, const char **text)
+{
+    static const char field[] = "Hi Field";
+    Boolean second = (Boolean) (offset >= 3);
+
+    (void) v;
+    (void) first;
+    memset(ta, 0, sizeof(*ta));
+    ta->TA_color.CQ_info = CF_RGB;
+    ta->TA_color.CQ_redOrIndex = (byte) (second ? 0xff : 0);
+    ta->TA_mask = SDM_100;
+    ta->TA_styleSet = (TextStyle) (second ? TS_UNDERLINE | TS_BOLD : 0);
+    ta->TA_styleClear = (TextStyle) (second ? 0 : TS_UNDERLINE | TS_BOLD);
+    ta->TA_modeClear = TM_DRAW_BASE;
+    ta->TA_font = second ? FID_PS_TIMES_ROMAN : FID_PS_HELVETICA;
+    ta->TA_size.WBF_int = 12;
+    ta->TA_fontWeight = FW_NORMAL;
+    ta->TA_fontWidth = FWI_MEDIUM;
+    *text = field + offset;
+    return (word) (second ? 5 : 3);
+}
+
+/* the text of the page */
+static void DrawText(GStateHandle gs)
+{
+    GDF_vars v;
+
+    GrDrawText(gs, 10, 450, "Hello (World)", 0);	/* Berkeley */
+    GrSetFont(gs, FID_PS_HELVETICA, WWF(14, 0));
+    GrSetTextStyle(gs, TS_BOLD, 0);
+    GrDrawText(gs, 10, 480, "Bold", 0);
+    /* Zapf Chancery has only an italic: the bold is done by a matrix */
+    GrSetFont(gs, FID_PS_ZAPF_CHANCERY, WWF(14, 0));
+    GrDrawText(gs, 100, 480, "Chancery", 0);
+    GrSetFont(gs, FID_PS_COURIER, WWF(12, 0));
+    GrSetTextStyle(gs, TS_UNDERLINE, TS_BOLD);
+    GrDrawText(gs, 10, 510, "K\x8ase", 0);		/* "Kase" with a-umlaut */
+    GrSetTextStyle(gs, 0, TS_UNDERLINE);
+    memset(&v, 0, sizeof(v));
+    v.GDFV_saved.GDFS_nChars = 8;
+    v.GDFV_saved.GDFS_drawPos.PWBF_x.WBF_int = 10;
+    v.GDFV_saved.GDFS_drawPos.PWBF_y.WBF_int = 530;
+    v.GDFV_saved.GDFS_limit = 0xffff;
+    v.GDFV_saved.GDFS_flags = HF_AUTO_HYPHEN;
+    v.GDFV_styleCallback = FieldStyle;
+    GrDrawTextField(gs, &v);
+}
+
 /* the drawing of the page */
 static void Draw(GStateHandle gs)
 {
@@ -185,6 +240,7 @@ static void Draw(GStateHandle gs)
     GrSetAreaMaskSys(gs, SDM_0);			/* nothing */
     GrFillRect(gs, 420, 220, 500, 260);
     GrSetAreaMaskSys(gs, SDM_100);
+    DrawText(gs);
     GrApplyScale(gs, WWF(1, 0x8000), WWF(1, 0x8000));
     GrDrawLine(gs, 10, 400, 100, 400);
     GrNewPage(gs, PEC_FORM_FEED);
@@ -248,6 +304,9 @@ int main(int argc, char **argv)
     ghal_fs_mkdir(top);
     Put("SYSTEM", NULL, 0);
     Put("SYSTEM/eps.geo", eps_geode, eps_geode_size);
+    Put("USERDATA", NULL, 0);
+    Put("USERDATA/FONT", NULL, 0);
+    Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
 
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     FileSetStandardPath(SP_SYSTEM);
@@ -294,6 +353,7 @@ int main(int argc, char **argv)
     o->PSEB_public.PSEO_level = 1;
     o->PSEB_public.PSEO_common.GEO_pages = 2;
     o->PSEB_public.PSEO_common.GEO_copies = 2;
+    o->PSEB_public.PSEO_fonts = PSFL_STANDARD_35N;	/* Zapf Chancery */
     strcpy(o->PSEB_public.PSEO_common.GEO_appName, "Port32 Test");
     strcpy(o->PSEB_public.PSEO_common.GEO_docName, "Shapes");
     MemUnlock(opts);
@@ -373,6 +433,22 @@ int main(int argc, char **argv)
     HAS("[1.5 0 0 1.5 0 0] SOT");
     HAS("EO\r\n");
     CHECK(!Has("500 260 420 220"));	/* SDM_0: nothing */
+
+    /* text: a style group of style runs each, the fonts as the printer
+     * has them */
+    HAS("[(Hello \\(World\\)) \r\n");
+    HAS("/Times-Roman true 10 [1 0 0 1 0 0] ] ] ");	/* Berkeley 10 */
+    HAS("/Helvetica-Bold true 14 [1 0 0 1 0 0] ] ] ");
+    HAS("/ZapfChancery-MediumItalic true 14 [1.125 0 0 1 0 0] ] ] ");
+    HAS("[(K\\212se) \r\n");
+    HAS("/Courier true 12 ");
+    HAS(" UL}");			/* underlined */
+    HAS(" 10 460 DSG\r\n");		/* its top at 450 */
+    HAS("[(Hi ) \r\n");		/* the field */
+    HAS("[(Field-) \r\n");		/* its hyphen */
+    HAS("{255 0 0 SGC ");
+    HAS("/Times-Bold true 12 ");
+    HAS(" DSG\r\n");
 
     CHECK(END(opts, stream) == TE_NO_ERROR);
     HAS("EP\r\n");

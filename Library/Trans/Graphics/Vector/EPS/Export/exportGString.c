@@ -9,10 +9,9 @@
  * Paths are skipped here (GR_BEGIN_PATH to GR_END_PATH): what they do
  * reaches the output through the clip path (exportPath.c).
  *
- * Not ported yet: text (EmitText, EmitTextField of exportText.asm,
- * with the fonts the page needs, GetPageFonts and DownloadPageFonts) and
- * bitmaps (EmitBitmap of exportBitmap.asm).  Their elements are skipped
- * as EmitNothing skips the pointer forms.
+ * Text goes through exportText.c.  Not ported yet: the download of fonts the printer lacks
+ * (DownloadPageFonts) and bitmaps (EmitBitmap of exportBitmap.asm),
+ * whose elements are skipped as EmitNothing skips the pointer forms.
  */
 #include "exportInt.h"
 
@@ -787,11 +786,11 @@ static EmitRout *const emitRouts[] = {
     EmitFillRect,	/* DrawPoint */
     EmitFillRect,	/* DrawPointCP */
     EmitPolyline,	/* BrushPolyline */
-    EmitNothingOp,	/* DrawChar		(text: not yet) */
-    EmitNothingOp,	/* DrawCharCP */
-    EmitNothingOp,	/* DrawText */
-    EmitNothingOp,	/* DrawTextCP */
-    EmitNothingOp,	/* DrawTextField */
+    EmitText,		/* DrawChar */
+    EmitText,		/* DrawCharCP */
+    EmitText,		/* DrawText */
+    EmitText,		/* DrawTextCP */
+    EmitTextField,	/* DrawTextField */
     EmitNothingOp,	/* DrawTextPtr */
     EmitNothingOp,	/* DrawTextOPtr */
     EmitDrawPath,	/* DrawPath */
@@ -851,6 +850,7 @@ GSRetType TranslateGString(TGSLocals *tgs, GStateHandle gstring,
     tgs->TGS_elemSize = 256;
     tgs->TGS_elem = MemLock(tgs->TGS_elemBlock);
     ResetBuffer(tgs);
+    InitPageFonts(tgs);
 
     GrMoveTo(tgs->TGS_gstate, 0, 0);
     for (;;) {
@@ -901,6 +901,7 @@ GSRetType TranslateGString(TGSLocals *tgs, GStateHandle gstring,
 	}
     }
 done:
+    FreePageFonts(tgs);
     MemFree(tgs->TGS_elemBlock);
     GrDestroyState(tgs->TGS_gstate);
     if (ret != GSRT_FAULT && tgs->TGS_writeErr)

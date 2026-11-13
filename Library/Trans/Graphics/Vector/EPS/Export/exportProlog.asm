@@ -729,8 +729,12 @@ NOTE:
 	; FAF (FindAdobeFont)
 	; <PS font name> FAF <boolean>
 	; routine to find a font name in the fontlist (fl) that we've built.
-	; like FF, you pass a font name.
-	char	"/FAF {fl exch SAE} bdef", NL
+	; like FF, you pass a font name.  Port32: else, where the device
+	; has resources (level 2), a font it finds by name: Ghostscript
+	; loads its fonts when asked and lists none in fonts/*.
+	char	"/FAF {dup fl exch SAE {pop true}{/resourcestatus where", NL
+	char	"{pop /Font resourcestatus {pop pop true}{false}ifelse}", NL
+	char	"{pop false}ifelse}ifelse} bdef", NL
 
 	; new character encoding vector.
 	char	"/geosvec [30 /hyphen 128 /Adieresis/Aring", NL

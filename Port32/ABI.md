@@ -3807,9 +3807,36 @@ PostScript printer driver uses (§7.6).
   written "ang1 ang2 x2 x1 y2 y1" into a space whose y axis `SDT`
   flips, so they come out mirrored at the x axis.
 
-Not ported yet: text and fonts (`exportText.asm`, `exportType3Fonts.asm`,
-the font maps, `GetPageFonts`, `DownloadPageFonts`), bitmaps and
-`EPSExportBitmap` (`exportBitmap.asm`), embedded graphics,
+**Text** (`exportText.c`): `GR_DRAW_TEXT`, `_CP`, `GR_DRAW_CHAR`,
+`_CP` and `GR_DRAW_TEXT_FIELD` become style groups of style runs, drawn
+by the prolog's `DSG` at the width GEOS measured.
+- Each font and style becomes a page font: the closest PostScript font
+  of the printer's font list (`PSEO_fonts`) by `CalcFontDiff`, the
+  styles it lacks done by a matrix (bold, scripts, italic, weight,
+  width), standard encoded fonts re-encoded to the GEOS character set.
+  `Port32/tools/epsfonts2c.py` makes the tables at build time from
+  `exportFontTables.asm`, `exportMoreFonts.asm` and the face table of
+  `Include/fontID.def`.
+- The font, size and style are read before the metrics lock the font:
+  locking puts the font that stands in for a missing one into the
+  GState (`LibFindBestFace`, the asm too), and each text element is
+  emitted between `GrSaveState` and `GrRestoreState`. The asm read them
+  after, which gave the substitute's name where the font was not
+  installed.
+- The page fonts are found as the text comes, not before the page
+  (`GetPageFonts`): that is only needed to download fonts, and its
+  rewind to the string's beginning was the page's beginning only where
+  each page is a string of its own.
+- `GR_DRAW_CHAR` takes its y from `ODC_y1` (the asm used `ODC_x1`
+  twice); a TextAttr in a field run is 24 bytes (`align word`).
+- The prolog's `FAF` also asks for a font resource (`resourcestatus`,
+  level 2) when the font list built by `CFL` lacks it: Ghostscript (and
+  so CUPS) loads its fonts when asked and lists none, so every font
+  became Courier (`exportProlog.asm`, shared with DOS16).
+
+Not ported yet: the download of fonts the printer lacks as Type 3
+fonts (`DownloadPageFonts`, `exportType3Fonts.asm`), text in paths,
+bitmaps and `EPSExportBitmap` (`exportBitmap.asm`), embedded graphics,
 `TransExport` through the file stream driver, the export UI and the
 import side. Their elements are skipped, as `EmitNothing` skips the
 pointer forms.
@@ -3817,7 +3844,10 @@ pointer forms.
 ctest `library.eps` loads `eps.geo` in a booted kernel and exports a
 graphics string of lines, rectangles, polylines, ellipses, rounded
 rectangles, arcs, a 3-point arc, a curve, a filled and a stroked path,
-a masked fill, a zero mask, a scaled line and a second page to a stream
+a masked fill, a zero mask, text (Berkeley mapped to Times, Helvetica
+bold, Zapf Chancery with a bold matrix, an umlaut, underlined Courier, a
+text field of two runs with its hyphen), a scaled line and a second page
+to a stream
 of the test. It checks the header comments, the setup sections, the
 code of each element and the trailer. Where Ghostscript is installed
 (`gs` in the `PATH` on Linux, or `GEOS_TEST_GS`), the file must also run
