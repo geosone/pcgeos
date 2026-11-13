@@ -174,5 +174,9 @@ extern Boolean PrRotate8Lines(PState *ps, word bytes);
 extern Boolean PrRotate4LinesZeroTop(PState *ps, word bytes);
 extern Boolean PrRotate4LinesZeroBottom(PState *ps, word bytes);
 extern Boolean PrSend8HiresLines(PState *ps, word *bandStart);
+/* 24 pins (rotate24.c, rotate2pass24.c): columns -1 all, 0 even, 1 odd */
+extern Boolean PrRotate24Columns(PState *ps, word bytes, int columns);
+extern Boolean PrRotate24Lines(PState *ps, word bytes);
+extern Boolean PrSend24HiresLines(PState *ps, word *bandStart);
 
 #endif /* PRINTCOM_H */

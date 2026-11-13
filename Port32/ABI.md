@@ -838,8 +838,12 @@ with the C vidcom). It draws into the bitmaps of `GrCreateBitmap`
 - Formats: monochrome (1 = black), 4 and 8 bits (palette indices: a
   color is drawn as the nearest entry of the bitmap's palette or the
   default one, the mix modes work on the indices), 24 bits; the mask
-  with `BM_EDIT_MASK`. A monochrome bitmap gets black where a color is
-  dark; DOS16 dithered.
+  with `BM_EDIT_MASK`. A monochrome bitmap in `BM_CLUSTERED_DITHER`
+  (the spooler's swaths) gets the clustered dither of black of the
+  asm's Mono module (`CMYK/cmykDither.c`, the 33 levels of
+  `ditherBlack`, by `CalcLuminance`), anchored at the bitmap's origin;
+  otherwise black where a color is dark (DOS16's ordered dither is not
+  ported).
 - `DR_VID_SET_PALETTE` and `DR_VID_GET_PALETTE` work on the palette in
   the bitmap's header (`BMT_PALETTE`): `WinRealizePalette` on its window
   sets it, and indices drawn after take it. A bitmap without a palette
@@ -964,6 +968,17 @@ tables, with the offsets kept; `printFontInfoBase` is the base of the
 font lists' offsets; the ISO substitutions and ASCII translations for
 `SpoolUpdateTranslationTable` (`printTransTables`). Color correction
 (gamma30, `CorrectInk`) is not ported.
+
+**The Epson 24-pin driver** (`Driver/Printer/DotMatrix/Epson24`,
+`epson24.geo`, from `epson2432.gp`): `epson24ControlCodes.c` and the
+`PrintCom` files of `epson24Manager.asm`: the LQ cursor (1/180" line
+feeds, `cursorConvert180.c`, `cursorPrFormFeed60.c`), the swaths of
+`graphicsPrintSwath180.c`, 60 dpi in 8 pins, 180 dpi in 24
+(`ESC * 39`, `graphicsMed24.c`, `rotate24.c`) and 360 dpi in two
+passes of 24 (`ESC * 40`, `graphicsHi24IntX.c`, `rotate2pass24.c`),
+the LQ fonts (`fontEpsonLQInfo.asm`). Both Epson drivers are built by
+`geos_dotmatrix_driver` of `Driver/Printer/DotMatrix/DotMatrix.cmake`
+with the `PrintCom` files they share.
 
 **The PostScript driver** (`Driver/Printer/PScript`, `pscript.geo`,
 protocol 5.0, built from `pscript32.gp`):

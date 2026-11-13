@@ -53,6 +53,8 @@ extern const unsigned char vidmem_geode[];
 extern const unsigned long vidmem_geode_size;
 extern const unsigned char berkeley_fnt[];
 extern const unsigned long berkeley_fnt_size;
+extern const unsigned char epson24_geode[];
+extern const unsigned long epson24_geode_size;
 extern const unsigned char epson9_geode[];
 extern const unsigned long epson9_geode_size;
 
@@ -528,11 +530,12 @@ static void CheckOutput(const char *rel, int pages)
 
 
 /* ---------------------------------------------------------------------
- * The Epson 9-pin driver: ESC/P back into dots
+ * The Epson drivers: ESC/P back into dots
  * ------------------------------------------------------------------- */
 
-/* the dots of a page at 240 x 216 dpi (the high resolution) */
-#define EP_W	2048
+/* the dots of a page at the high resolution across (240 dpi: 9 pins,
+ * 360 dpi: 24 pins) and in line feed units down (1/216", 1/180") */
+#define EP_W	3200
 #define EP_H	2600
 
 typedef struct {
@@ -542,7 +545,7 @@ typedef struct {
     long dots;
     int left2, top2, right2, bottom2;	/* and of page 2 */
     long dots2;
-    int modes[4];		/* graphics codes per ESC * m */
+    int modes[41];		/* graphics codes per ESC * m */
     char text[256];		/* the text of page 1, '|' at ESC $ */
     int textLen;
     int underline;		/* ESC - 1 on page 1 */
@@ -576,10 +579,12 @@ static void EpsonDot(EpsonDecode *d, int x, int y)
     d->dots++;
 }
 
-static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d)
+/* hdpi: the dots across of the canvas */
+static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d,
+			    int hdpi)
 {
     size_t i = 0, k, cols;
-    int x = 0, y = 0, scale, pin, c;
+    int x = 0, y = 0, scale, pin, c, dpi, colBytes, pitch;
 
     memset(d, 0, sizeof(*d));
     while (i < n) {
@@ -613,7 +618,7 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d)
 	    break;
 	case '@': case 'O': case '6': case '8': case '4': case '5':
 	case 'P': case 'M': case 'T': case 'E': case 'F': case 'G':
-	case 'H':
+	case 'H': case 'g':
 	    break;
 	case 't': case 'U': case 'r': case 'R': case 'x': case 'S':
 	case 'W': case 'w': case 'k': case 'p': case '3':
@@ -632,7 +637,7 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d)
 	    break;
 	case '$':
 	    if (i + 1 < n)
-		x = (b[i] | b[i + 1] << 8) * 4;
+		x = (b[i] | b[i + 1] << 8) * hdpi / 60;
 	    i += 2;
 	    if (!d->pages && d->textLen < (int) sizeof(d->text) - 1)
 		d->text[d->textLen++] = '|';
@@ -652,17 +657,23 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d)
 	    c = b[i];
 	    cols = (size_t) (b[i + 1] | b[i + 2] << 8);
 	    i += 3;
-	    scale = c == 0 ? 4 : c == 1 ? 2 : c == 3 ? 1 : 0;
-	    if (!scale || i + cols > n) {
+	    /* 8 pins 1/72" (9-pin) or 1/60" (24-pin) apart: 3 units;
+	     * 24 pins: 1 unit */
+	    dpi = c == 0 ? 60 : c == 1 ? 120 : c == 3 ? 240 : c == 39 ? 180 :
+		  c == 40 ? 360 : 0;
+	    colBytes = c >= 39 ? 3 : 1;
+	    pitch = c >= 39 ? 1 : 3;
+	    if (!dpi || hdpi % dpi || i + cols * colBytes > n) {
 		d->bad++;
 		return;
 	    }
+	    scale = hdpi / dpi;
 	    d->modes[c]++;
 	    for (k = 0; k < cols; k++, x += scale)
-		for (pin = 0; pin < 8; pin++)
-		    if (b[i + k] & (0x80 >> pin))
-			EpsonDot(d, x, y + pin * 3);
-	    i += cols;
+		for (pin = 0; pin < 8 * colBytes; pin++)
+		    if (b[i + k * colBytes + pin / 8] & (0x80 >> (pin % 8)))
+			EpsonDot(d, x, y + pin * pitch);
+	    i += cols * colBytes;
 	    break;
 	default:
 	    d->bad++;
@@ -671,10 +682,15 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d)
     }
 }
 
-/* the spool file of MakeSpoolFile through the Epson 9-pin driver to a
- * file in each graphics mode: two pages; on the first the rectangle and
- * the line, 72..500 by 72..400 points of the document */
-static void TestEpson(void)
+/* the spool file of MakeSpoolFile through an Epson driver to a file in
+ * each graphics mode (codes: its ESC * modes); hdpi the dots across,
+ * vunit the line feed units an inch: two pages; on the first the
+ * rectangle and the line, 72..500 by 72..400 points of the document, on
+ * the second the filled rectangle and the ellipse, 100..400 by 100..600
+ * points, each less the document's margins (18 pt), from where the head
+ * starts: the printable area of the paper */
+static void TestEpson(const char *printer, const char *device, int out,
+		      int hdpi, int vunit, const int codes[3])
 {
     static const word modes[] = { PM_GRAPHICS_LOW_RES, PM_GRAPHICS_MED_RES,
 				  PM_GRAPHICS_HI_RES };
@@ -685,47 +701,43 @@ static void TestEpson(void)
     byte *b;
     int m, w, h;
 
+#define EP_NEAR(v, pt, res) \
+    ((v) > (pt) * (res) / 72 - 12 && (v) < (pt) * (res) / 72 + 12)
     for (m = 0; m < 3; m++) {
-	snprintf(rel, sizeof(rel), "out%d.prn", 10 + m);
+	snprintf(rel, sizeof(rel), "out%d.prn", out + m);
 	MakeSpoolFile(name);
-	FillJob(&jp, name, "Epson File", PPT_FILE, rel);
-	strcpy(jp.JP_deviceName, "Epson FX-85 (Epson Mode)");
+	FillJob(&jp, name, printer, PPT_FILE, rel);
+	strcpy(jp.JP_deviceName, device);
 	jp.JP_printMode = modes[m];
 	((PrintDriverUIData *) jp.JP_printerData)->PUID_countryCode = PCC_USA;
 	CHECK(pSpoolAddJob(&jp) != 0xffff);
 	CHECK(WaitIdle());
-	snprintf(rel, sizeof(rel), "DOCUMENT/out%d.prn", 10 + m);
+	snprintf(rel, sizeof(rel), "DOCUMENT/out%d.prn", out + m);
 	b = (byte *) Get(rel, &n);
 	CHECK(b != NULL && n > 100);
 	if (!b)
 	    continue;
 	CHECK(n > 4 && b[0] == 0x1b && b[1] == '@');
-	EpsonDecodeFile(b, n, &d);
-	w = d.right - d.left;		/* 428 pt at 240 dpi: 1427 */
-	h = d.bottom - d.top;		/* 328 pt at 216 dpi: 984 */
-	printf("epson9 mode %d: %lu bytes, %d pages, %ld dots, %dx%d at "
-	       "%d,%d, codes %d/%d/%d\n", modes[m], (unsigned long) n,
-	       d.pages, d.dots, w, h, d.left, d.top, d.modes[0], d.modes[1],
-	       d.modes[3]);
-	CHECK(!d.bad);
-	CHECK(d.pages == 2);
-	CHECK(d.modes[m == 0 ? 0 : m == 1 ? 1 : 3] > 0);
-	CHECK(w > 1427 - 12 && w < 1427 + 12);
-	CHECK(h > 984 - 12 && h < 984 + 12);
-	/* the document's 72 pt, less its margins (18 pt), from where the
-	 * head starts: the printable area of the paper */
-	CHECK(d.left > 54 * 240 / 72 - 12 && d.left < 54 * 240 / 72 + 12);
-	CHECK(d.top > 54 * 3 - 12 && d.top < 54 * 3 + 12);
-	/* page 2: the filled rectangle and the ellipse, 100..400 by
-	 * 100..600 points, in the same place */
+	EpsonDecodeFile(b, n, &d, hdpi);
+	w = d.right - d.left;
+	h = d.bottom - d.top;
+	printf("%s mode %d: %lu bytes, %d pages, %ld dots, %dx%d at %d,%d, "
+	       "ESC * %d: %d\n", device, modes[m], (unsigned long) n,
+	       d.pages, d.dots, w, h, d.left, d.top, codes[m],
+	       d.modes[codes[m]]);
 	printf("  page 2: %ld dots, %dx%d at %d,%d\n", d.dots2,
 	       d.right2 - d.left2, d.bottom2 - d.top2, d.left2, d.top2);
-	CHECK(d.left2 > 82 * 240 / 72 - 12 && d.left2 < 82 * 240 / 72 + 12);
-	CHECK(d.top2 > 82 * 3 - 12 && d.top2 < 82 * 3 + 12);
-	CHECK(d.right2 - d.left2 > 1000 - 12 && d.right2 - d.left2 < 1000 + 12);
-	CHECK(d.bottom2 - d.top2 > 1500 - 12 && d.bottom2 - d.top2 < 1500 + 12);
+	CHECK(!d.bad);
+	CHECK(d.pages == 2);
+	CHECK(d.modes[codes[m]] > 0);
+	CHECK(EP_NEAR(w, 428, hdpi) && EP_NEAR(h, 328, vunit));
+	CHECK(EP_NEAR(d.left, 54, hdpi) && EP_NEAR(d.top, 54, vunit));
+	CHECK(EP_NEAR(d.right2 - d.left2, 300, hdpi) &&
+	      EP_NEAR(d.bottom2 - d.top2, 500, vunit));
+	CHECK(EP_NEAR(d.left2, 82, hdpi) && EP_NEAR(d.top2, 82, vunit));
 	free(b);
     }
+#undef EP_NEAR
 }
 
 /* a text page through the Epson 9-pin driver in its draft mode: the
@@ -773,7 +785,7 @@ static void TestEpsonText(void)
     CHECK(b != NULL && n > 20);
     if (!b)
 	return;
-    EpsonDecodeFile(b, n, &d);
+    EpsonDecodeFile(b, n, &d, 240);
     d.text[d.textLen] = 0;
     printf("epson9 text: %lu bytes, %d pages, \"%s\", underline %d, x %d %d\n",
 	   (unsigned long) n, d.pages, d.text, d.underline, d.absX[0], d.absX[1]);
@@ -808,6 +820,8 @@ int main(int argc, char **argv)
 	"hostQueue = fake1\r\nhostDuplex = true\r\n"
 	"[Epson File]\r\ndriver = epson9.geo\r\n"
 	"device = Epson FX-85 (Epson Mode)\r\n"
+	"[Epson24 File]\r\ndriver = epson24.geo\r\n"
+	"device = Epson LQ-800\r\n"
 	"[spool]\r\nhostPrinters = false\r\n";
     static const char patch[] = "% devpatch\r\n";
     GeodeLoadError e;
@@ -859,6 +873,7 @@ int main(int argc, char **argv)
     Put("SYSTEM/filestr.geo", filestr_geode, filestr_geode_size);
     Put("SYSTEM/PRINTER/pscript.geo", pscript_geode, pscript_geode_size);
     Put("SYSTEM/PRINTER/epson9.geo", epson9_geode, epson9_geode_size);
+    Put("SYSTEM/PRINTER/epson24.geo", epson24_geode, epson24_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
@@ -1004,8 +1019,6 @@ int main(int argc, char **argv)
     CHECK(!SpoolFileExists("spool002.dat"));
     CHECK(!SpoolFileExists("spool003.dat"));
 
-    TestEpson();
-    TestEpsonText();
 
 #ifdef GEOS_TEST_CUPS
     /* the same document to the host's queue: the custom port loads
@@ -1164,6 +1177,17 @@ int main(int argc, char **argv)
 	CHECK(!strcmp(got, "JLDJ"));
     }
 #endif
+
+    /* the raster drivers last: their jobs take a while, longer than the
+     * CUPS stand-in waits */
+    {
+	static const int fx[3] = { 0, 1, 3 }, lq[3] = { 0, 39, 40 };
+
+	TestEpson("Epson File", "Epson FX-85 (Epson Mode)", 10, 240, 216,
+		  fx);
+	TestEpson("Epson24 File", "Epson LQ-800", 20, 360, 180, lq);
+    }
+    TestEpsonText();
 
     GeodeFreeLibrary(spool);
     printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);

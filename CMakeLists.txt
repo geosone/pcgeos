@@ -77,6 +77,7 @@ add_subdirectory(Driver/Stream/Filestr)
 add_subdirectory(Library/Trans/Graphics/Vector/EPS)
 add_subdirectory(Driver/Printer/PScript)
 add_subdirectory(Driver/Printer/DotMatrix/Epson9)
+add_subdirectory(Driver/Printer/DotMatrix/Epson24)
 add_subdirectory(Library/Spool)
 add_subdirectory(Port32/Tests)
 
