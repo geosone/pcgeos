@@ -67,6 +67,9 @@ int main(void)
     CHECK(!strcmp(p[1].name, "fake2") && !strcmp(p[1].location, "Office"));
     CHECK(p[1].state == 5 && !p[1].accepting && p[1].color &&
           p[1].duplex && p[1].isDefault);
+    /* media-default: US letter, A4 */
+    CHECK(p[0].mediaWidth == 612 && p[0].mediaHeight == 792);
+    CHECK(p[1].mediaWidth == 595 && p[1].mediaHeight == 842);
     CHECK(gapi_print_list(p, 1, &n) == GHAL_OK && n == 2);  /* only one fits */
     CHECK(gapi_print_default(def, sizeof def) == GHAL_OK &&
           !strcmp(def, "fake2"));

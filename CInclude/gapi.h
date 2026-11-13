@@ -105,6 +105,8 @@ typedef struct gapi_printer {
     int  state;             /* 3 idle, 4 printing, 5 stopped */
     int  color;
     int  duplex;            /* can print on both sides */
+    int  mediaWidth;        /* the default paper (media-default), in */
+    int  mediaHeight;       /* points, portrait; 0 if not known */
 } gapi_printer;
 
 /* The host's printers, at most max of them; *count is how many there

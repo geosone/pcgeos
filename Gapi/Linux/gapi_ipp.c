@@ -427,6 +427,49 @@ typedef struct {
     gapi_printer scratch;
 } ListCtx;
 
+/* The size of a media name in points, portrait: a PWG self-describing
+ * name ("iso_a4_210x297mm", "na_letter_8.5x11in": the dimensions after
+ * the last '_'), or a few names of older CUPS ("A4", "Letter").  0 if it
+ * is not known. */
+static void MediaSize(const char *m, int *w, int *h)
+{
+    static const struct { const char *name; int w, h; } legacy[] = {
+        { "A3", 842, 1191 }, { "A4", 595, 842 }, { "A5", 420, 595 },
+        { "Letter", 612, 792 }, { "Legal", 612, 1008 },
+        { "Executive", 540, 720 }
+    };
+    const char *d = strrchr(m, '_');
+    double a, b;
+    char unit[4];
+    size_t i;
+    int t;
+
+    *w = *h = 0;
+    for (i = 0; i < sizeof legacy / sizeof legacy[0]; i++)
+        if (!strcmp(m, legacy[i].name)) {
+            *w = legacy[i].w;
+            *h = legacy[i].h;
+            return;
+        }
+    if (!d || sscanf(d + 1, "%lfx%lf%3s", &a, &b, unit) != 3)
+        return;
+    if (!strcmp(unit, "mm")) {
+        a = a * 72.0 / 25.4;
+        b = b * 72.0 / 25.4;
+    } else if (!strcmp(unit, "in")) {
+        a *= 72.0;
+        b *= 72.0;
+    } else
+        return;
+    *w = (int)(a + 0.5);
+    *h = (int)(b + 0.5);
+    if (*w > *h) {
+        t = *w;
+        *w = *h;
+        *h = t;
+    }
+}
+
 static void ListAttr(void *ctx, int group, int tag, const char *name,
                      const uint8_t *v, size_t n)
 {
@@ -461,6 +504,11 @@ static void ListAttr(void *ctx, int group, int tag, const char *name,
     else if (!strcmp(name, "sides-supported") && n > 9 &&
              !memcmp(v, "two-sided", 9))
         p->duplex = 1;
+    else if (!strcmp(name, "media-default")) {
+        char m[GAPI_PRINT_NAME_SIZE];
+        Text(m, sizeof m, tag, v, n);
+        MediaSize(m, &p->mediaWidth, &p->mediaHeight);
+    }
 }
 
 ghal_status gapi_print_default(char *name, size_t size)
@@ -510,7 +558,8 @@ ghal_status gapi_print_list(gapi_printer *list, int max, int *count)
     static const char *const want[] = {
         "printer-name", "printer-info", "printer-location",
         "printer-make-and-model", "printer-state",
-        "printer-is-accepting-jobs", "color-supported", "sides-supported"
+        "printer-is-accepting-jobs", "color-supported", "sides-supported",
+        "media-default"
     };
     Buf req = { 0 }, body;
     ListCtx c;

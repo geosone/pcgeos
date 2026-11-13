@@ -220,6 +220,7 @@ static void Serve(int ls, int report)
             AttrB(&a, "printer-is-accepting-jobs", 1);
             AttrB(&a, "color-supported", 0);
             AttrS(&a, 0x44, "sides-supported", "one-sided");
+            AttrS(&a, 0x44, "media-default", "na_letter_8.5x11in");
             Add8(&a, 0x04);
             AttrS(&a, 0x42, "printer-name", "fake2");
             AttrS(&a, 0x41, "printer-location", "Office");
@@ -229,6 +230,7 @@ static void Serve(int ls, int report)
             AttrS(&a, 0x44, "sides-supported", "one-sided");
             Add8(&a, 0x44); Add16(&a, 0); Add16(&a, 19);
             Add(&a, "two-sided-long-edge", 19);
+            AttrS(&a, 0x44, "media-default", "iso_a4_210x297mm");
             Respond(fd, 0, &a);
             (void)!write(report, "L", 1);
         } else if (op == 0x4001) {
