@@ -84,6 +84,11 @@ GeodeHandle GeodeUseLibraryLow(const char *pname, word protoMajor,
 	    GeodeUnlock();
 	    return 0;
 	}
+	/* a library with a process (the spooler): the load's reference is
+	 * the client's, the process holds one of its own until its last
+	 * thread is gone (GeodeRemoveThread), as the asm's threads did */
+	if (GeodeCoreOf(gh)->GC_attrs & GA_PROCESS)
+	    GeodeCoreOf(gh)->GC_refCount++;
     }
     info = GeodeCoreOf(gh)->GC_info;
     *err = TestProtocol(protoMajor, protoMinor, info->GM_protoMajor,
@@ -149,8 +154,14 @@ GeodeHandle GeodeUseCommon(const char *name, Boolean permName,
 	    GeodeCoreOf(gh)->GC_refCount++;
 	else
 	    e = GLE_LIBRARY_NOT_FOUND;
-    } else
+    } else {
 	gh = GeodeLoadLow(name, attr, 0, 0, 0, &e);
+	/* loaded now (one reference, the client's): a process holds one of
+	 * its own, as in GeodeUseLibraryLow */
+	if (gh && GeodeCoreOf(gh)->GC_refCount == 1 &&
+	    (GeodeCoreOf(gh)->GC_attrs & GA_PROCESS))
+	    GeodeCoreOf(gh)->GC_refCount++;
+    }
     if (gh) {
 	const GeosModuleInfo *info;
 

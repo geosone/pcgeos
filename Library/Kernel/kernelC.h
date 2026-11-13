@@ -422,6 +422,7 @@ extern dword kernelTimerEventsDropped;
 #define KVD_TEMP_META_GCN			0	/* the first */
 #define KVD_TEMP_META_QUIT_LIST			4
 #define KVD_DETACH_DATA				8
+#define KMSG_PROCESS_NOTIFY_THREAD_EXIT	8193
 #define KMSG_PROCESS_INSTANTIATE		8197
 #define KMSG_PROCESS_EXIT			8198
 #define KMSG_PROCESS_FINAL_BLOCK_FREE		8204

@@ -446,6 +446,27 @@ void ThreadDestroy(word errorCode, optr ackObject, word ackData)
 	t->T_eventQueue = 0;
     }
     KernelDispatchAbandon(t);
+    /* a thread other than the first tells its process (threadThread.asm
+     * notFirstThread): MSG_PROCESS_NOTIFY_THREAD_EXIT(thread, exit code),
+     * queued */
+    {
+	GeodeHandle owner = HandleEntryOf(cur)->HE_owner;
+	GeodeCore *c = owner ? GeodeCoreOf(owner) : NULL;
+	ThreadHandle first = c && (c->GC_attrs & GA_PROCESS)
+	    ? ProcInfo(owner) : 0;
+
+	/* only while the first thread is there to take it */
+	if (first && first != cur && HandleEntryOf(first)->HE_type == SIG_THREAD
+	    && ThreadOf(first)->T_state != TS_DEAD
+	    && ThreadOf(first)->T_eventQueue) {
+	    struct { ThreadHandle thread; word exitCode; } n;
+	    n.thread = cur;
+	    n.exitCode = errorCode;
+	    CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(owner, 0),
+			 KMSG_PROCESS_NOTIFY_THREAD_EXIT, &n, sizeof(n),
+			 NULL, 0);
+	}
+    }
     /* the last thread of a process frees the geode */
     GeodeRemoveThread(HandleEntryOf(cur)->HE_owner);
     ghal_crit_enter();

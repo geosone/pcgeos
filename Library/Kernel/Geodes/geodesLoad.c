@@ -581,9 +581,14 @@ void GeodeRemoveThread(GeodeHandle gh)
 
     GeodeLock();
     c = GeodeCoreOf(gh);
+    /* the process is gone (KillProcess): its reference goes; the geode
+     * stays while its clients have it as a library */
     if (c && c->GC_threadCount && !--c->GC_threadCount &&
-	(c->GC_attrs & GA_PROCESS))
-	GeodeFreeLow(gh);
+	(c->GC_attrs & GA_PROCESS)) {
+	c->GC_attrs &= ~GA_PROCESS;
+	if (!--c->GC_refCount)
+	    GeodeFreeLow(gh);
+    }
     GeodeUnlock();
 }
 
