@@ -43,8 +43,9 @@ export	SpoolHurryJob
 export	SpoolDelayJob
 export	SpoolModifyPriority
 export	SpoolVerifyPrinterPort
-skip	3	# SpoolMapToPrinterFont, SpoolUpdateTranslationTable,
-		# SPOOLSETDOCSIZE
+export	SpoolMapToPrinterFont
+export	SpoolUpdateTranslationTable
+skip	1	# SPOOLSETDOCSIZE
 export	SpoolGetDefaultPageSizeInfo
 export	SpoolSetDefaultPageSizeInfo
 # the C stubs of the asm are the same C routines

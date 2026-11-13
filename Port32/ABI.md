@@ -3799,9 +3799,8 @@ geode is built from `spool32.gp`.
   semaphores of the queue and the error box are allocated in the
   library entry (`LCT_ATTACH`).
 - **Entry numbers.** `spool32.gp` keeps the numbers of `spool.gp`: the
-  controller classes (0–4), `SpoolSetDocSize` (21),
-  `SpoolMapToPrinterFont`, `SpoolUpdateTranslationTable` and
-  `SPOOLSETDOCSIZE` (29–31) are skipped, so `SpoolGetNumPaperSizes` is
+  controller classes (0–4) and the PageSizeControl's `SpoolSetDocSize`
+  (21) and `SPOOLSETDOCSIZE` (31) are skipped, so `SpoolGetNumPaperSizes` is
   5, `SpoolGetNumPrinters` 13, `SpoolAddJob` 22 and
   `SpoolGetDefaultPageSizeInfo` 32, as before. The C stubs of the asm
   (`SPOOLGETDEFAULTPAGESIZEINFO` 34, the `publish`ed `SPOOLGETNUMPAPERSIZES`
@@ -3876,6 +3875,20 @@ geode is built from `spool32.gp`.
   counts at once. `SpoolGetPaperSizeOrder` takes the `PageType`, which
   the asm's C stub never passed (it used whatever `bp` held;
   `spool.goh` declares the parameter under `GEOS_PORT32`).
+- **Routines for printer drivers** (`Lib/libDriver.c`,
+  `CInclude/Internal/spoolDr.h`): `SpoolMapToPrinterFont` (29) and
+  `SpoolUpdateTranslationTable` (30) for the text modes. The asm took
+  the PState in es, the device info resource in ds and the driver
+  info's handle in dx; C takes the `PrinterInfo` (whose
+  `PI_fontGeometries` and `FG_pitchTab` stay offsets from it), the
+  font as pointers, and the driver's ISO substitution and translation
+  tables (chunks in the asm) as a `SpoolTransTables`. The symbol set
+  tables come from `lib*Tab.asm` at build time
+  (`Port32/tools/symtabgen.py`). The Kanji font mapping of the Japanese
+  build is not ported. Of `libPrintControl.asm` only
+  `SpoolCreateSpoolFile` is ported: `SpoolGetPageSize`,
+  `SpoolConvertToPaperSizes` and `SpoolGetPaperSizeString` are neither
+  exported nor called.
 - **The host's printers** (`Lib/libHost.c`, new in Port32) join the
   printer list at the spooler's start, as if installed in Preferences:
   `gapi_print_list` gives the queues, and each becomes a printer with
@@ -3911,9 +3924,7 @@ bx the file, dx the buffer size; up to 4 units), writes it with
 caller's. Reads fail.
 
 Not ported yet: the PrintControl, the PageSizeControl, the printer
-control panel, `libPrintControl` (`SpoolGetPageSize`, the paper size
-strings of the PrintControl), `libDriver` (printer fonts, translation
-tables), the error boxes, the
+control panel, the error boxes, the
 detach confirmation (`SpoolApplicationDetachConfirm`), graphics and text mode
 printing, labels, Tiramisu (fax) printing, serial and parallel ports,
 the mailbox's medium notifications.
@@ -3940,7 +3951,9 @@ A4, and a job to "fake1" reaches its queue. On every host the test
 checks the page size routines: sizes, names and layouts of each
 `PageType`, the conversion upright and on the side, user-defined sizes,
 an order of the user, the default page size and the second entries of
-the C stubs.
+the C stubs; and the driver routines: font, size and pitch mapping
+against a device's font table, the translation table of a symbol set
+with a country's national characters and the driver's translations.
 
 ## 14. Open
 

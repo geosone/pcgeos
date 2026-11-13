@@ -27,6 +27,8 @@
 #include <object.h>
 #include <Internal/printDr.h>
 #include <spoolC.h>
+#include <Internal/spoolDr.h>
+#include <stddef.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -207,6 +209,95 @@ static GeodeHandle spool;
     ENTRY(32, void (*)(PageSizeReport *))
 #define pSpoolSetDefaultPageSizeInfo \
     ENTRY(33, void (*)(PageSizeReport *))
+
+#define pSpoolMapToPrinterFont \
+    ENTRY(29, void (*)(const PrinterInfo *, FontID *, word *, byte *))
+#define pSpoolUpdateTranslationTable \
+    ENTRY(30, void (*)(PState *, const SpoolTransTables *))
+
+/* the text modes' routines for printer drivers (libDriver) */
+static void TestDriver(void)
+{
+    static struct {
+	PrinterInfo pi;
+	FontGeometry fg[5];
+	byte pitch1[4], pitch2[2];
+    } dev;
+    static union {
+	long long align;
+	byte b[sizeof(PState) + sizeof(JobParameters)];
+    } st;
+    static const word subISO[32] = {
+	0x2323, 0x2424, 0x40a4, 0x5b80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0x2323, 0x40a4, 0x5b80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+    static const byte trans[] = { 'a', 'A', ';', ';' };
+    SpoolTransTables tt;
+    PState *ps = (PState *) st.b;
+    PrintDriverUIData *ui =
+	(PrintDriverUIData *) PS_JOB_PARAMS(ps)->JP_printerData;
+    FontID id;
+    word size;
+    byte pitch;
+    word p1 = (word) offsetof(__typeof__(dev), pitch1),
+	p2 = (word) offsetof(__typeof__(dev), pitch2);
+
+    dev.pi.PI_fontGeometries = (word) offsetof(__typeof__(dev), fg);
+    dev.fg[0].FG_fontID = FID_DTC_URW_ROMAN;
+    dev.fg[0].FG_pointSize = 10;
+    dev.fg[0].FG_pitchTab = p1;
+    dev.fg[1].FG_fontID = FID_DTC_URW_ROMAN;
+    dev.fg[1].FG_pointSize = 12;
+    dev.fg[1].FG_pitchTab = p1;
+    dev.fg[2].FG_fontID = FID_DTC_URW_ROMAN;
+    dev.fg[2].FG_pointSize = 24;
+    dev.fg[2].FG_pitchTab = p2;
+    dev.fg[3].FG_fontID = FID_DTC_URW_SANS;
+    dev.fg[3].FG_pointSize = 12;
+    dev.fg[3].FG_pitchTab = p1;
+    dev.fg[4].FG_fontID = FID_INVALID;
+    dev.pitch1[0] = 17;
+    dev.pitch1[1] = 12;
+    dev.pitch1[2] = 10;
+    dev.pitch2[0] = 5;
+#define MAP(f, s, p, ef, es, ep) \
+    (id = (f), size = (s), pitch = (p), \
+     pSpoolMapToPrinterFont(&dev.pi, &id, &size, &pitch), \
+     id == (ef) && size == (es) && pitch == (ep))
+    CHECK(MAP(FID_DTC_URW_SANS, 12, 10, FID_DTC_URW_SANS, 12, 10));
+    CHECK(MAP(FID_DTC_URW_SANS, 12, 11, FID_DTC_URW_SANS, 12, 12));
+    CHECK(MAP(FID_DTC_URW_ROMAN, 14, 0, FID_DTC_URW_ROMAN, 12, 0));
+    CHECK(MAP(FID_DTC_URW_ROMAN, 11, 0, FID_DTC_URW_ROMAN, 10, 0));
+    /* smaller than any: fixed, 1440 / 10 is beyond the widest pitch */
+    CHECK(MAP(FID_DTC_URW_ROMAN, 8, 0, FID_DTC_URW_ROMAN, 10, 17));
+    /* a font the printer lacks: its first */
+    CHECK(MAP(0x5555, 30, 18, FID_DTC_URW_ROMAN, 24, 5));
+#undef MAP
+
+    /* IBM 437, Germany: the upper half from the table, the national
+     * characters, the driver's own */
+    ps->PS_curFont.FE_symbolSet = PSS_IBM437;
+    ui->PUID_countryCode = PCC_GERMANY;
+    tt.STT_subISO = subISO;
+    tt.STT_trans = trans;
+    tt.STT_transSize = sizeof(trans);
+    pSpoolUpdateTranslationTable(ps, &tt);
+    CHECK(ps->PS_asciiTrans['b'] == 'b' && ps->PS_asciiTrans['a'] == 'A');
+    CHECK(ps->PS_asciiTrans[0x81] == 0x8f);	/* GEOS A ring */
+    CHECK(ps->PS_asciiTrans[0xa4] == 0x40 && ps->PS_asciiTrans[0x40] == ' ');
+    CHECK(ps->PS_asciiTrans[0x80] == 0x5b && ps->PS_asciiTrans[0x5b] == ' ');
+    CHECK(ps->PS_asciiTrans[0x24] == 0x24);
+    /* ASCII7 in the USA: no upper half, no national characters */
+    ps->PS_curFont.FE_symbolSet = PSS_ASCII7;
+    ui->PUID_countryCode = PCC_USA;
+    pSpoolUpdateTranslationTable(ps, &tt);
+    CHECK(ps->PS_asciiTrans[0x80] == ' ' && ps->PS_asciiTrans[0x5b] == 0x5b);
+    /* PC/GEOS: all of it as it is */
+    ps->PS_curFont.FE_symbolSet = PSS_PCGEOS;
+    ui->PUID_countryCode = PCC_GERMANY;
+    pSpoolUpdateTranslationTable(ps, NULL);
+    CHECK(ps->PS_asciiTrans[0x80] == 0x80 && ps->PS_asciiTrans['a'] == 'a');
+}
 
 /* the page sizes (libPaper): the tables of libTables.asm, the order,
  * user-defined sizes, the default page size */
@@ -552,6 +643,7 @@ int main(int argc, char **argv)
 	  psi.PSI_driverType == PDT_PRINTER);
 
     TestPaper();
+    TestDriver();
 
     /* the ports that need no checking */
     memset(&port, 0, sizeof(port));
