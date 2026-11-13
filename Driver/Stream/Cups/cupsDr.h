@@ -20,23 +20,7 @@
 #define CUPS_DR_H
 
 #include <driver.h>
-
-#define DR_STREAM_GET_DEVICE_MAP    8
-#define DR_STREAM_OPEN              10
-#define DR_STREAM_CLOSE             12
-#define DR_STREAM_SET_NOTIFY        14
-#define DR_STREAM_GET_ERROR         16
-#define DR_STREAM_SET_ERROR         18
-#define DR_STREAM_FLUSH             20
-#define DR_STREAM_SET_THRESHOLD     22
-#define DR_STREAM_READ              24
-#define DR_STREAM_READ_BYTE         26
-#define DR_STREAM_WRITE             28
-#define DR_STREAM_WRITE_BYTE        30
-#define DR_STREAM_QUERY             32
-
-#define STREAM_ESC_LOAD_OPTIONS     0x8100
-#define STREAM_ESC_RESTART_OUTPUT   0x8101
+#include <Internal/streamDr.h>
 
 #define CUPS_NUM_UNITS              4
 #define CUPS_BUFFER_SIZE            4096

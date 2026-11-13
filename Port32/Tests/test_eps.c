@@ -111,9 +111,11 @@ typedef TransError RawFn(MemHandle, const void *, word, MemHandle);
 typedef TransError OptFn(MemHandle);
 typedef MemHandle GetOptsFn(MemHandle);
 
-/* the order of eps32.gp */
-enum { E_LOW, E_RAW, E_HEADER, E_TRAILER, E_BEGIN, E_END, E_NORM,
-       E_OPTS };
+/* the entry numbers of eps.gp (xlatPS.h) */
+enum { E_LOW = TR_EXPORT_LOW, E_RAW = TR_EXPORT_RAW,
+       E_HEADER = TR_EXPORT_HEADER, E_TRAILER = TR_EXPORT_TRAILER,
+       E_BEGIN = TR_EXPORT_BEGIN_PAGE, E_END = TR_EXPORT_END_PAGE,
+       E_NORM = TR_NORMALIZE_FILENAME, E_OPTS = TR_GET_EXPORT_OPTIONS };
 
 static GeodeHandle lib;
 
@@ -255,6 +257,9 @@ int main(int argc, char **argv)
 	printf("eps.geo: GeodeLoadError %d\n", (int) e);
 	return 1;
     }
+    /* the numbers of eps.gp: what is not ported is an empty entry */
+    CHECK(Entry(0) == NULL && Entry(TR_EXPORT_BITMAP) == NULL);
+    CHECK(Entry(TR_EXPORT_LOW) != NULL && Entry(E_OPTS) != NULL);
 
     /* the defaults */
     opts = GETOPTS(0);

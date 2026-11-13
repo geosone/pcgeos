@@ -66,6 +66,24 @@ typedef WordFlags PSExportFlags;
 typedef word PSFontList;                /* PSFL_* of xlatPS.def */
 #define PSFL_STANDARD_13        0
 #define PSFL_STANDARD_35N       2
+#define PSFL_STANDARD_35C       4
+#define PSFL_AGFA_74            6
+#define PSFL_DEC_29             8
+#define PSFL_IBM_17             10
+#define PSFL_TI_17              12
+#define PSFL_IBM_39             14
+#define PSFL_IBM_43             16
+#define PSFL_IBM_47             18
+#define PSFL_MONOTYPE_8         20
+#define PSFL_MONOTYPE_70        22
+#define PSFL_JAPANESE_2         24
+#define PSFL_JAPANESE_5         26
+#define PSFL_WANG_14            28
+#define PSFL_WANG_32            30
+#define PSFL_ADOBE_TC1          32
+#define PSFL_ADOBE_TC2          34
+#define PSFL_ADOBE_FULL_SET     36
+#define PSFL_QMS_43             38
 
 /* PSLevel: the extensions in the high byte, the level in the low byte */
 typedef WordFlags PSLevel;
@@ -115,5 +133,25 @@ extern TransError EPSExportTrailer(MemHandle options, MemHandle stream);
 extern TransError EPSNormalizeFilename(MemHandle options);
 /* a PSExportBlock of the defaults (ui 0), unlocked; 0 for a ui block */
 extern MemHandle TransGetExportOptions(MemHandle ui);
+
+/* the entry numbers of eps.geo (TransRoutine, xlatLib.def and xlatPS.def):
+ * the printer drivers call the library through ProcGetLibraryEntry */
+#define TR_GET_EXPORT_OPTIONS   5
+#define TR_EXPORT_LOW           9
+#define TR_EXPORT_RAW           10
+#define TR_EXPORT_HEADER        11
+#define TR_EXPORT_TRAILER       12
+#define TR_EXPORT_BEGIN_PAGE    13
+#define TR_EXPORT_END_PAGE      14
+#define TR_NORMALIZE_FILENAME   15
+#define TR_EXPORT_BITMAP        16      /* not ported yet: no entry */
+
+typedef TransError EPSExportOptStreamFn(MemHandle options, MemHandle stream);
+typedef TransError EPSExportLowFn(MemHandle options, GStateHandle gstring,
+                                  MemHandle stream, GSControl flags,
+                                  GSRetType *ret);
+typedef TransError EPSExportRawFn(MemHandle options, const void *data,
+                                  word size, MemHandle stream);
+typedef MemHandle TransGetExportOptionsFn(MemHandle ui);
 
 #endif /* XLATPS_H */

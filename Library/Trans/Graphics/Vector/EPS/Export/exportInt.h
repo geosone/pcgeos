@@ -16,10 +16,10 @@
 #include <heap.h>
 #include <lmem.h>
 #include <streamC.h>
+#include <Internal/streamDr.h>
 #include <xlatPS.h>
 #include <string.h>               /* memcpy, memset */
 
-#define DR_STREAM_WRITE         28      /* Include/Internal/streamDr.def */
 
 #define EPS_BUFFER_SIZE         300     /* TGS_buffer */
 
