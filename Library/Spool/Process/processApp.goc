@@ -42,6 +42,9 @@ word		nextJobID;
 word		customQueueID;
 ThreadLockHandle errorThreadLock;
 word		errorBoxCount;
+word		spoolAckID;
+optr		spoolAckOD;
+Boolean		spoolDetachHeld;
 
 /* the library entry: the semaphores of the queue and the error box
  * (static Semaphores in the asm's idata) */
@@ -104,18 +107,79 @@ Boolean SpoolLibraryEntry(LibraryCallType ty, GeodeHandle client)
     UnlockQueue();
 }
 
+/* MSG_META_DETACH (SpoolDetach, KillPrinting): no job is let in any
+ * more.  While jobs are printing, their queues are written to the state
+ * file and stopped at the next page, and the detach is held back until
+ * the last thread is gone (MSG_PROCESS_NOTIFY_THREAD_EXIT). */
 @method SpoolProcClass, MSG_META_DETACH
 {
     ChunkHandle ch;
 
-    ThreadPSem(queueSemaphore);
+    if (LockQueue()) {
+	spoolStateFlags |= SS_DETACHING;
+	spoolDetachHeld = FALSE;
+	UnlockQueue();
+	@callsuper();
+	return;
+    }
     spoolStateFlags |= SS_DETACHING;
-    ThreadVSem(queueSemaphore);
-    if (!LockQueue())
-	for (ch = PQ()->PQ_firstQueue; ch; ch = QUEUE(ch)->QI_next)
-	    QUEUE(ch)->QI_error = SI_DETACH;
+    spoolAckID = callerID;
+    spoolAckOD = caller;
+    spoolDetachHeld = TRUE;
+    SaveQueueState();
+    for (ch = PQ()->PQ_firstQueue; ch; ch = QUEUE(ch)->QI_next)
+	QUEUE(ch)->QI_error = SI_DETACH;
     UnlockQueue();
-    @callsuper();
+}
+
+/* MSG_PROCESS_NOTIFY_THREAD_EXIT (SpoolThreadExit): when the last
+ * queue's thread is gone, the held-back detach goes on.  A thread still
+ * in a queue was killed by something else: its queue goes, with its
+ * jobs. */
+@method SpoolProcClass, MSG_PROCESS_NOTIFY_THREAD_EXIT
+{
+    ChunkHandle ch, prev = 0;
+    QueueInfo *q;
+
+    (void) exitCode;
+    if (!LockQueue()) {
+	for (ch = PQ()->PQ_firstQueue; ch; prev = ch, ch = q->QI_next) {
+	    q = QUEUE(ch);
+	    if (q->QI_thread == exitProcess)
+		break;
+	}
+	if (!ch) {				/* still printing */
+	    UnlockQueue();
+	    return;
+	}
+	if (q->QI_portHan)
+	    GeodeFreeDriver(q->QI_portHan);
+	if (q->QI_pdHan)
+	    GeodeFreeDriver(q->QI_pdHan);
+	if (PQ()->PQ_numQueues != 1) {
+	    if (prev)
+		QUEUE(prev)->QI_next = q->QI_next;
+	    else
+		PQ()->PQ_firstQueue = q->QI_next;
+	    PQ()->PQ_numQueues--;
+	    UnlockQueue();
+	    return;
+	}
+	{
+	    MemHandle mh = queueHandle;
+	    MemUnlockV(mh);
+	    queueHandle = 0;
+	    MemFree(mh);
+	}
+    }
+    /* no queue left */
+    if (spoolDetachHeld && (spoolStateFlags & SS_DETACHING)) {
+	spoolDetachHeld = FALSE;
+	UnlockQueue();
+	@send ,forceQueue oself::MSG_META_DETACH(spoolAckID, spoolAckOD);
+	return;
+    }
+    UnlockQueue();
 }
 
 /* ---------------------------------------------------------------------

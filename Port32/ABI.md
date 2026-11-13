@@ -360,9 +360,17 @@ from their modules:
      the queue but stopped (`KernelEventThreadCreate`).
   3. The core block and the object blocks get that thread as their
      exec thread, and only then does the thread start.
-  4. When the last thread of a process exits, it frees the geode. The
-     geode's blocks and queues go, the module is unloaded, and the
-     references to its libraries are dropped.
+  4. When the last thread of a process exits, the process's reference
+     to the geode goes and `GA_PROCESS` is cleared (`KillProcess`).
+     Without other references the geode is freed: its blocks and
+     queues go, the module is unloaded, and the references to its
+     libraries are dropped. A library with a process (the spooler)
+     that a client loaded with `GeodeUseLibrary` has two references,
+     the client's and the process's, so it stays a library after its
+     process is gone, as the asm's thread references kept it.
+  5. A thread other than the first tells its process when it exits:
+     `MSG_PROCESS_NOTIFY_THREAD_EXIT` (thread, exit code), queued, as
+     long as the first thread is there.
 - **Multiple launches.** A loaded library is shared. A process that is
   not multi-launchable fails a second time with
   `GLE_NOT_MULTI_LAUNCHABLE`.
@@ -3780,11 +3788,14 @@ is the C interface without the controller classes of `spool.goh`. The
 geode is built from `spool32.gp`.
 
 - **A library with a process**, as in DOS16, but a `ProcessClass`, not
-  a `GenProcessClass`: there is no UI yet. `MSG_META_ATTACH` deletes the
-  spool files of an earlier session (`SpoolBirth`; the state file of a
-  detach is not written yet), `MSG_SPOOL_CREATE_THREAD` makes a queue
-  and its thread for a job whose port has none, `MSG_META_DETACH` lets
-  no job in and stops the queues at the next page (`SI_DETACH`). The
+  a `GenProcessClass`: there is no UI yet. `MSG_META_ATTACH` restarts the
+  jobs of the state file or deletes the spool files of an earlier
+  session (`SpoolBirth`), `MSG_SPOOL_CREATE_THREAD` makes a queue and
+  its thread for a job whose port has none, `MSG_META_DETACH` lets no
+  job in; while jobs print it writes the state file, stops the queues
+  at the next page (`SI_DETACH`) and holds the detach back until
+  `MSG_PROCESS_NOTIFY_THREAD_EXIT` of the last queue's thread
+  (`SpoolThreadExit`). The
   semaphores of the queue and the error box are allocated in the
   library entry (`LCT_ATTACH`).
 - **Entry numbers.** `spool32.gp` keeps the numbers of `spool.gp`: the
@@ -3837,6 +3848,19 @@ geode is built from `spool32.gp`.
   would: `IC_OK` for a manual paper feed, `IC_DISMISS` for the rest, so
   nothing is retried endlessly. The queue is paused while it runs, as
   before.
+- **The state file** `spoolsta.dat` in the spool directory has a
+  format of its own: the asm wrote the PrintQueue block as it was (with
+  `nextJobID` in `LMBH_handle`), whose layout is not the DOS16 one in
+  C. A header (magic `GSPS`, version, `nextJobID`, the number of jobs,
+  `sizeof(JobParameters)`), then queue by queue each job's ID, its
+  `JP_size` and the `JobParameters`. Another file (a DOS16 one) is no
+  state file. The start restores it unless `SCF_CRASHED` is set, and in
+  the setup (`[system] continueSetup`) only after `SCF_RESTARTED`;
+  jobs with `SO_SHUTDOWN_ACTION` are dropped (`StripCanceledJobs`), the
+  user is asked with `SERROR_PRINT_ON_STARTUP` (logged, answered
+  `IC_YES`), and the jobs are queued again under their IDs.
+- **`[spool] noPrinting`** is looked at every second instead of every
+  15 seconds.
 - **No heap reservation** (`GeodeRequestSpace`): the C kernel's heap has
   no fixed size.
 - **Kept as the asm:** a digit of a spool file name runs up to 8 before
@@ -3854,7 +3878,7 @@ caller's. Reads fail.
 
 Not ported yet: the PrintControl, the PageSizeControl and the paper
 sizes (`libPaper`), the printer control panel, the error boxes, the
-state file of a detach and restarting from it, graphics and text mode
+detach confirmation (`SpoolApplicationDetachConfirm`), graphics and text mode
 printing, labels, Tiramisu (fax) printing, serial and parallel ports,
 the mailbox's medium notifications.
 
@@ -3865,7 +3889,13 @@ names, `SpoolBirth` deleting an old spool file, and four jobs: two
 pages to a file, the same with two collated copies (four pages), the
 nothing port, and a printer without its driver (an error, no output).
 It waits for the queues to empty, checks the PostScript and the deleted
-spool files, and runs Ghostscript where it is installed.
+spool files, and runs Ghostscript where it is installed. On Linux a job
+goes through the custom port to `cups.geo` and the stand-in for CUPS,
+which must get the same PostScript as the file. Then two jobs wait
+(`[spool] noPrinting`) while the spooler is detached: the state file
+is written and the spool files stay; loaded again, the spooler prints
+both under their IDs, deletes the state file, and the next ID follows
+them.
 
 ## 14. Open
 

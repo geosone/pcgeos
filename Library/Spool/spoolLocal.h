@@ -102,6 +102,8 @@
  * Objects/gInterC.h, which needs the UI */
 #define SPOOL_IC_DISMISS	1
 #define SPOOL_IC_OK		5
+#define SPOOL_IC_YES		6
+#define SPOOL_IC_NO		7
 
 /* the swath of graphics printing: 256K (processConstant.def) */
 #define SPOOL_SWATH_DATA_SIZE	0x40000UL
@@ -206,6 +208,9 @@ extern word		nextJobID;
 extern word		customQueueID;
 extern ThreadLockHandle	errorThreadLock;
 extern word		errorBoxCount;
+extern word		spoolAckID;	/* of the MSG_META_DETACH held back */
+extern optr		spoolAckOD;
+extern Boolean		spoolDetachHeld;	/* until the threads are gone */
 
 /* the queue, while it is locked */
 #define PQ()		((PrintQueue *) MemDeref(queueHandle))
@@ -275,8 +280,10 @@ extern void ExitNothingPort(SpoolJobInfo *j);
 /* processError.c: InteractionCommand of the answer */
 extern word SpoolErrorBox(word error, ChunkHandle queue);
 
-/* processRestart.c */
+/* processRestart.c: the start; the state file of a detach (SaveQueueState
+ * was in processApp.asm) */
 extern void SpoolBirth(void);
+extern void SaveQueueState(void);
 
 /* processApp.goc: messages to the spooler's process, notifications */
 extern void SpoolSendCreateThread(ChunkHandle job);

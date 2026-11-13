@@ -352,6 +352,12 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   target_include_directories(test_spool PRIVATE
                              ${PROJECT_SOURCE_DIR}/CInclude/Internal)
   target_link_libraries(test_spool PRIVATE geos_kernel)
+  if(GEOS_HOST STREQUAL "linux")
+    # and through the CUPS port driver to the stand-in for CUPS
+    target_sources(test_spool PRIVATE fakecups.c ${_cups_c})
+    add_dependencies(test_spool geode_cups)
+    target_compile_definitions(test_spool PRIVATE GEOS_TEST_CUPS)
+  endif()
   add_test(NAME library.spool COMMAND test_spool)
 
   # the C host mouse driver (Driver/Mouse) through the input manager

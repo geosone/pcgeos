@@ -23,12 +23,21 @@
 #include <gstring.h>
 #include <print.h>
 #include <timer.h>
+#include <initfile.h>
+#include <object.h>
 #include <Internal/printDr.h>
 #include <spoolC.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef GEOS_TEST_CUPS
+/* a job through the CUPS port driver to the stand-in for CUPS */
+#include "fakecups.h"
+extern const unsigned char cups_geode[];
+extern const unsigned long cups_geode_size;
+#endif
 
 extern const unsigned char spool_geode[];
 extern const unsigned long spool_geode_size;
@@ -299,9 +308,18 @@ int main(int argc, char **argv)
 	"[PS File]\r\ndriver = pscript.geo\r\n"
 	"device = PostScript Compatible\r\n"
 	"[No Driver]\r\ndriver = nosuch.geo\r\n"
-	"device = PostScript Compatible\r\n";
+	"device = PostScript Compatible\r\n"
+	"[Host Laser]\r\ndriver = pscript.geo\r\n"
+	"device = PostScript Compatible\r\nportDriver = cups.geo\r\n"
+	"hostQueue = fake1\r\nhostDuplex = true\r\n";
     static const char patch[] = "% devpatch\r\n";
     GeodeLoadError e;
+#ifdef GEOS_TEST_CUPS
+#define CUPS_DOC_MAX 65536
+    char *cupsDoc, got[16];
+    size_t *cupsDocLen;
+    pid_t cups;
+#endif
     PrinterStringInfo psi;
     JobParameters jp;
     SpoolInfoParams sip;
@@ -325,6 +343,15 @@ int main(int argc, char **argv)
     } else
 	strcpy(top, "GSPOOLTOP");
     ghal_fs_mkdir(top);
+    /* a fresh start: the test ends without a shutdown, so the last run
+     * left GEOS_ACT.IVE (a crash to the spooler's restart) */
+    {
+	char path[300];
+	HostPath(path, sizeof(path), "GEOS_ACT.IVE");
+	remove(path);
+	HostPath(path, sizeof(path), "PRIVDATA/SPOOL/spoolsta.dat");
+	remove(path);
+    }
     Put("SYSTEM", NULL, 0);
     Put("SYSTEM/PRINTER", NULL, 0);
     Put("SYSTEM/IMPEX", NULL, 0);
@@ -343,6 +370,22 @@ int main(int argc, char **argv)
 	snprintf(rel, sizeof(rel), "DOCUMENT/out%d.ps", i);
 	Put(rel, "x", 1);			/* truncated by the job */
     }
+
+#ifdef GEOS_TEST_CUPS
+    /* before the kernel's threads: the stand-in is a child process; the
+     * document it expects is the file job's output, known later */
+    Put("SYSTEM/cups.geo", cups_geode, cups_geode_size);
+    unsetenv("LPDEST");
+    unsetenv("PRINTER");
+    cupsDoc = FakeCupsShared(CUPS_DOC_MAX, &cupsDocLen);
+    fakeCupsJob.uri = "ipp://localhost/printers/fake1";
+    fakeCupsJob.format = "application/postscript";
+    fakeCupsJob.name = "GEOS";
+    fakeCupsJob.copies = NULL;
+    fakeCupsJob.sides = "two-sided-long-edge";
+    cups = cupsDoc ? FakeCupsStart() : 0;
+    CHECK(cups != 0);
+#endif
 
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     FileSetStandardPath(SP_SYSTEM);
@@ -454,6 +497,87 @@ int main(int argc, char **argv)
     CHECK(!SpoolFileExists("spool001.dat"));
     CHECK(!SpoolFileExists("spool002.dat"));
     CHECK(!SpoolFileExists("spool003.dat"));
+
+#ifdef GEOS_TEST_CUPS
+    /* the same document to the host's queue: the custom port loads
+     * cups.geo (portDriver), which sends the printer driver's output to
+     * CUPS as it is; the stand-in compares it with the file job's */
+    if (cups) {
+	size_t n;
+	char *b = Get("DOCUMENT/out1.ps", &n);
+
+	CHECK(b && n <= CUPS_DOC_MAX);
+	if (b && n <= CUPS_DOC_MAX) {
+	    memcpy(cupsDoc, b, n);
+	    *cupsDocLen = n;
+	}
+	free(b);
+	MakeSpoolFile(name1);
+	FillJob(&jp, name1, "Host Laser", PPT_CUSTOM, NULL);
+	CHECK(pSpoolAddJob(&jp) != 0xffff);
+	CHECK(WaitIdle());
+	CHECK(!SpoolFileExists(name1));
+	FakeCupsStop(cups, got, sizeof(got));
+	CHECK(!strcmp(got, "J"));
+	if (strcmp(got, "J"))
+	    printf("CUPS stand-in: \"%s\"\n", got);
+    }
+#endif
+
+    /* a detach while jobs wait ([spool] noPrinting): their queue goes
+     * into the state file, their spool files stay; the next start of the
+     * spooler prints them under their IDs */
+    InitFileWriteBoolean("spool", "noPrinting", TRUE);
+    MakeSpoolFile(name1);
+    MakeSpoolFile(name2);
+    FillJob(&jp, name1, "PS File", PPT_FILE, "out4.ps");
+    id1 = pSpoolAddJob(&jp);
+    FillJob(&jp, name2, "PS File", PPT_FILE, "out5.ps");
+    jp.JP_numPages = 3;			/* marks the job in the state */
+    id2 = pSpoolAddJob(&jp);
+    CHECK(id1 != 0xffff && id2 == (word) (id1 + 1));
+    {
+	struct { word callerID; optr ackOD; } d = { 0, 0 };
+	CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(spool, 0),
+		     KMSG_META_DETACH, &d, sizeof(d), NULL, 0);
+    }
+    for (i = 0; i < 100 && !SpoolFileExists("spoolsta.dat"); i++)
+	TimerSleep(6);
+    CHECK(SpoolFileExists("spoolsta.dat"));
+    CHECK(pSpoolAddJob(&jp) == 0xffff);		/* detaching */
+    InitFileWriteBoolean("spool", "noPrinting", FALSE);
+    CHECK(WaitIdle());				/* the thread is gone */
+    TimerSleep(30);
+    CHECK(SpoolFileExists(name1) && SpoolFileExists(name2));
+    CHECK(SpoolFileExists("spoolsta.dat"));
+    GeodeFreeLibrary(spool);
+
+    spool = GeodeUseLibrary("spool.geo", 0, 0, &e);
+    CHECK(spool != 0);
+    if (!spool) {
+	printf("spool.geo again: GeodeLoadError %d\n", (int) e);
+	return 1;
+    }
+    for (i = 0; i < 100 && SpoolFileExists("spoolsta.dat"); i++)
+	TimerSleep(6);
+    CHECK(!SpoolFileExists("spoolsta.dat"));
+    memset(&sip, 0, sizeof(sip));
+    sip.SIP_jobParams.SIJP_jobID = id2;
+    if (pSpoolInfo(SIT_JOB_PARAMETERS, &sip) ==
+	SPOOL_OPERATION_SUCCESSFUL) {
+	JobParameters *p = MemLock(sip.SIP_jobParams.SIJP_retBlock);
+	CHECK(p->JP_numPages == 3 && !strcmp(p->JP_fname, name2));
+	MemFree(sip.SIP_jobParams.SIJP_retBlock);
+    }
+    CHECK(WaitIdle());
+    CheckOutput("DOCUMENT/out4.ps", 2);
+    CheckOutput("DOCUMENT/out5.ps", 2);
+    CHECK(!SpoolFileExists(name1) && !SpoolFileExists(name2));
+    /* the IDs go on from the state file */
+    MakeSpoolFile(name3);
+    FillJob(&jp, name3, "PS File", PPT_NOTHING, NULL);
+    CHECK(pSpoolAddJob(&jp) == (word) (id2 + 1));
+    CHECK(WaitIdle());
 
     GeodeFreeLibrary(spool);
     printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);

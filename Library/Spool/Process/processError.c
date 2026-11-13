@@ -6,8 +6,9 @@
  * not use yet.  SpoolErrorBox keeps what the asm did around the box (one
  * error at a time, the queue paused while it is up) and logs the error
  * instead (ghal_log).  The answer is what a user would most likely give:
- * IC_OK (go on) for the manual paper feed, else IC_DISMISS (stop the
- * job), so no error is retried endlessly.  With the UI, the box comes
+ * IC_OK (go on) for the manual paper feed, IC_YES for printing the
+ * jobs of the last session, else IC_DISMISS (stop the job), so no error
+ * is retried endlessly.  With the UI, the box comes
  * back here (SpoolErrorBoxUI below is the hook).
  */
 #include "spoolLocal.h"
@@ -26,6 +27,7 @@ static const char *ErrorName(word error)
     case SERROR_NO_MODE_AVAIL:		return "the print mode is not supported";
     case SERROR_CANT_ALLOC_BITMAP:	return "out of memory";
     case SERROR_MANUAL_PAPER_FEED:	return "insert the next sheet";
+    case SERROR_PRINT_ON_STARTUP:	return "printing the jobs of the last session";
     case SERROR_CANT_LOAD_PORT_DRIVER:	return "cannot load the port driver";
     case SERROR_CANNOT_OPEN_FILE:	return "cannot open the output file";
     case SERROR_CANNOT_CONVERT_PAGE:	return "the driver could not convert a page";
@@ -73,9 +75,9 @@ word SpoolErrorBox(word error, ChunkHandle queue)
 	UnlockQueue();
 
     answer = error == SERROR_MANUAL_PAPER_FEED ? SPOOL_IC_OK
+	   : error == SERROR_PRINT_ON_STARTUP ? SPOOL_IC_YES
 					       : SPOOL_IC_DISMISS;
-    ghal_log(error == SERROR_MANUAL_PAPER_FEED ? GHAL_LOG_INFO
-					       : GHAL_LOG_WARN,
+    ghal_log(answer != SPOOL_IC_DISMISS ? GHAL_LOG_INFO : GHAL_LOG_WARN,
 	     "spool: %s%s%s (SL-%02x)", device, device[0] ? ": " : "",
 	     ErrorName(error), (unsigned) error);
 

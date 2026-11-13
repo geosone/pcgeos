@@ -79,9 +79,10 @@ static void SpoolerLoop(ChunkHandle queue)
     memset(j, 0, sizeof(*j));
     j->SJI_qHan = queue;
 
-    /* [spool] noPrinting: wait (used by "Print to Screen") */
+    /* [spool] noPrinting: wait (used by "Print to Screen"); Port32:
+     * looked at every second instead of every 15 (the ini is in memory) */
     while (!InitFileReadBoolean("spool", "noPrinting", &b) && b)
-	TimerSleep(60 * 15);
+	TimerSleep(60);
 
     j->SJI_pstate = MemAllocSetOwner(GeodeGetCodeProcessHandle(),
 				     sizeof(PState) + sizeof(JobParameters),

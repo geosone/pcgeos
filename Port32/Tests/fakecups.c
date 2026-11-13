@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -252,8 +253,8 @@ static void Serve(int ls, int report)
             else if (!Find(&body, "sides", v, sizeof v, &doc) ||
                      strcmp(v, e->sides))
                 ok = 's';
-            else if (body.n - doc != e->docLen ||
-                     memcmp(body.b + doc, e->doc, e->docLen))
+            else if (body.n - doc != (e->docLenp ? *e->docLenp : e->docLen) ||
+                     memcmp(body.b + doc, e->doc, body.n - doc))
                 ok = 'd';
             if (ok == 'J') {
                 Add8(&a, 0x02);
@@ -269,6 +270,20 @@ static void Serve(int ls, int report)
         }
         close(fd);
     }
+}
+
+void *FakeCupsShared(size_t size, size_t **lenp)
+{
+    char *p = mmap(NULL, sizeof(size_t) + size, PROT_READ | PROT_WRITE,
+                   MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+
+    if (p == MAP_FAILED)
+        return NULL;
+    *lenp = (size_t *)p;
+    **lenp = 0;
+    fakeCupsJob.docLenp = *lenp;
+    fakeCupsJob.doc = p + sizeof(size_t);
+    return p + sizeof(size_t);
 }
 
 pid_t FakeCupsStart(void)
