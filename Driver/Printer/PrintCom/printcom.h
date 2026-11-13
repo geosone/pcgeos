@@ -57,6 +57,11 @@ typedef struct {
     PrintRoutine	*PEE_routine;
 } PrintEscEntry;
 
+/* a custom routine of a job (PI_customEntry, PI_customExit: indices into
+ * printCustomRoutines, 0 none; the device tables declare it) */
+typedef Boolean PrintCustomRoutine(PState *ps);
+extern PrintCustomRoutine *const printCustomRoutines[];
+
 /* the driver's own data */
 extern const PrintDeviceEntry	printDevices[];
 extern const word		printNumDevices;
@@ -198,5 +203,27 @@ extern const FontID pclFontIDTab[];
 extern const word pclTypefaceTab[];
 /* Graphics/graphicsPCLTIFF.c: a scan line (NULL: white) */
 extern Boolean PrSendScanline(PState *ps, const byte *line);
+
+/* PCL 4 (LaserJet): Job/jobCopiesPCL4.c */
+extern Boolean PrintSetCopies(PState *ps, word copies);
+/* the HPFontControls of PUID_initMemory */
+#define HPFC_DELETE_ALL_SOFT_FONTS	0
+#define HPFC_DELETE_TEMP_SOFT_FONTS	1
+#define HPFC_DELETE_SOFT_FONT		2
+/* Text/textSetFontPCL4.c: the resident font of PS_curFont */
+extern Boolean PrintSetFontWayInt(PState *ps);
+/* Styles/stylesSetPCL4.c: underline as PS_asciiStyle says */
+extern Boolean PrintSetStylesInt(PState *ps);
+/* Text/textInitFontPCL4.c */
+extern void PrintSetURWMono12(PState *ps);
+extern Boolean PrInitFont(PState *ps);
+/* Text/Font/fontTopLevelPCL4.c: the soft fonts of a page */
+extern Boolean FontInit(PState *ps);
+extern Boolean FontExit(PState *ps);
+extern Boolean FontAddFace(PState *ps);
+extern Boolean FontAddChars(PState *ps, const byte *text, word count);
+extern Boolean FontSendSpace(PState *ps);
+/* Graphics/graphicsAdjustForResolution.c: 300 dpi dots of a mode's */
+extern word PrAdjustForResolution(PState *ps, word dots);
 
 #endif /* PRINTCOM_H */

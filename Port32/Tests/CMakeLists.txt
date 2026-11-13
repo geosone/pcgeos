@@ -357,14 +357,16 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   geos_embed(_epson9_c ${epson9_GEO} epson9_geode)
   geos_embed(_epson24_c ${epson24_GEO} epson24_geode)
   geos_embed(_deskjet_c ${deskjet_GEO} deskjet_geode)
+  geos_embed(_pcl4_c ${pcl4_GEO} pcl4_geode)
   geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
   add_executable(test_spool test_spool.c ${_spool_c} ${_filestr_c}
                  ${_eps_c} ${_pscript_c} ${_epson9_c} ${_epson24_c} ${_deskjet_c}
+                 ${_pcl4_c}
                  ${_vidmem_c}
                  ${_berkeley_c} ${_truetype_c} ${_cooper_c})
   add_dependencies(test_spool geode_spool geode_filestr geode_eps
                    geode_pscript geode_epson9 geode_epson24
-                   geode_deskjet geode_vidmem geode_truetype)
+                   geode_deskjet geode_pcl4 geode_vidmem geode_truetype)
   target_include_directories(test_spool PRIVATE
                              ${PROJECT_SOURCE_DIR}/CInclude/Internal)
   target_link_libraries(test_spool PRIVATE geos_kernel)
@@ -377,6 +379,8 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   add_test(NAME library.spool COMMAND test_spool)
   # the DeskJet driver (Driver/Printer/HP/Deskjet) through the spooler
   add_test(NAME driver.deskjet COMMAND test_spool deskjet)
+  # the PCL 4 driver (Driver/Printer/HP/Pcl4): rasters, soft fonts
+  add_test(NAME driver.pcl4 COMMAND test_spool pcl4)
 
   # the C host mouse driver (Driver/Mouse) through the input manager
   geos_embed(_hostmse_c ${hostmse_GEO} hostmse_geode)

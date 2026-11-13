@@ -1,7 +1,7 @@
 /*
  * jobPaperPCL.c -- the paper path of the PCL drivers (the C port of
- * jobPaperPCL.asm without PCL4MODE): the input path (manual 2, the
- * trays 1, 1, 4, 6), the margins of cut sheets.
+ * jobPaperPCL.asm): the duplex mode (PCL 4), the input path (manual 2,
+ * the trays 1, 1, 4, 6), the margins of cut sheets.
  */
 #include "printcom.h"
 #include "printcomDriver.h"
@@ -15,6 +15,12 @@ Boolean PrSetPaperPath(PState *ps, PaperInputOptions in,
 
     ps->PS_paperInput = in;
     ps->PS_paperOutput = out;
+#ifdef PCL4MODE
+    if ((out & POO_DUPLEX) &&
+	WriteNumCommand(ps, pr_codes_DuplexMode,
+			(word) ((out & POO_DUPLEX) >> POO_DUPLEX_OFFSET)))
+	return TRUE;
+#endif
     if (in & PIO_MANUAL)
 	path = 2;
     else

@@ -1008,6 +1008,45 @@ protocol 5.0, from `deskjet32.gp`), the first PCL driver:
 - Not ported: the options box and the gamma correction tables of the
   medium and high resolutions (`GP_colorCorrection` 0).
 
+**The HP PCL 4 driver** (`Driver/Printer/HP/Pcl4`, `pcl4.geo`, from
+`pcl432.gp`), the LaserJets and 63 other devices of 13 info resources:
+`pcl4ControlCodes.c`, `pcl4Tables.c` (the escape
+`DR_PRINT_ESC_SET_COPIES`) and the `PrintCom` files of
+`pcl4Manager.asm`; `printcomDriver.h` defines `PCL4MODE`, which turns on
+the PCL 4 parts of the shared job files.
+- **Job.** The device's custom entry routine before the reset and its
+  exit routine instead of the reset at the end (PPDS to PCL and back,
+  PJL with or without a message on the display, the total reset):
+  `PI_customEntry`/`PI_customExit` are indices into
+  `printCustomRoutines`, which `dmdevinfo2c.py` emits for every driver
+  (`PrintCustomRoutine`, `printcom.h`). Uncollated copies are the
+  printer's (`ESC & l # X`, the job's `JP_numCopies` set to 1), duplex
+  `ESC & l # S` before the input path, the soft fonts and macros deleted
+  by `PUID_initMemory` (0 all, 1 the temporary ones, 0FFh none), no
+  page length for envelopes.
+- **Raster.** By the printer's memory (`PUID_amountMemory`, megabytes
+  as BBFixed, plus the mode's share) and `PUID_initMemory`
+  (`printMethods`): a swath as one raster (`ESC * r 1 A`, each line
+  without its trailing white bytes) or as the runs of its lines, split
+  at 25 white bytes or more, each run a raster at its place
+  (`ESC * p # Y`, `ESC * p # X` in 1/300"), white lines not sent.
+- **Soft fonts.** On a printer of soft fonts (all but `PS_DUMB_RASTER`)
+  the text modes print in fonts GEOS draws: a font for each face, size,
+  style (underline is the printer's) and optional attributes, its
+  64-byte header from the font's metrics at the size in dots
+  (`GrFontMetrics`, `GrCharMetrics`), each character drawn by the font
+  driver into a monochrome bitmap the first time a page uses it and
+  sent as an HP character in bands of at most 16 KB (`ESC * c # E`,
+  `ESC ( s # W`), spaces as moves (`ESC * p + # X`), the fonts deleted at
+  the end of the page (`ESC * c # D`, `ESC * c 2 F`); within the limits of
+  the device's `DownloadProperties`, beyond them the resident font.
+  Port32 differences: the header's symbol set is big-endian (the asm
+  stored PC-8 little-endian) and its font ID 0 (never set in the asm);
+  a character's bands round up (the asm's sent fewer lines than its
+  header says); an empty character is 8 by 1; a character's flags are a
+  byte array; the bitmaps' VM file is a temporary file of `SP_SPOOL`.
+- Not ported: the main and options boxes.
+
 **The PostScript driver** (`Driver/Printer/PScript`, `pscript.geo`,
 protocol 5.0, built from `pscript32.gp`):
 - **Device tables.** `Port32/tools/psdevinfo2c.py` makes them from the
@@ -3177,8 +3216,12 @@ characters ends the field (the asm looped).
 `FEF_ALPHABETIZE` on ASCII), not with the localization's collation. No
 greyscale text, no deleting of fonts, no DBCS.
 
-**Not yet:** `GrCharMetrics`, the bars of rotated text, right to left
-text, hatch patterns in a text field.
+`GrCharMetrics` asks the font driver (`DR_FONT_CHAR_METRICS`): the
+rounded values as integers, the others as WBFixed in the high 24 bits
+(as `GrFontMetrics`); 0 if the driver fails.
+
+**Not yet:** the bars of rotated text, right to left text, hatch
+patterns in a text field.
 
 **Tests.** ctest `kernel.draw` boots with `FontData/Berkeley.fnt` in
 `USERDATA/FONT`. It checks:
@@ -3262,8 +3305,7 @@ strings, §13p).
 it only to put text into region paths, and the C kernel fills text in
 paths from the outlines (`DR_FONT_GEN_PATH`, §13q).
 
-**Not yet:** the escape functions, greyscale text, `GrCharMetrics` in
-the kernel.
+**Not yet:** the escape functions, greyscale text.
 
 **Tests.** ctest `kernel.draw` puts `truetype.geo` into `SYSTEM/FONT`
 and `FontData/Ttf/cooper.ttf` into `USERDATA/FONT/TTF`. It checks the

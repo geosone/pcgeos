@@ -26,7 +26,10 @@ tables of SpoolUpdateTranslationTable, Internal/spoolDr.h).
 
 Port32 differences: FE_command, the offset of a control code in the
 asm, is an index into printFontCommands[] (1 on; 0: none), as are the
-entries of a symbol set list.  The UI
+entries of a symbol set list.  PI_customEntry and PI_customExit, the
+offsets of a job's custom routines in the asm, are indices into
+printCustomRoutines[] (1 on), which the output declares.  The PCL4
+drivers' PI_fontGeometries is a DownloadProperties (two words).  The UI
 fields (PI_mainUI, PI_optionsUI, PI_evalRoutine) are 0, as is
 GP_colorCorrection (a handle of a correction table): the print UI and
 color correction are not ported.  Records are filled by position, as
@@ -113,12 +116,19 @@ def strip_comments(text):
 
 def conditionals(lines):
     """the lines of ifdef/ifndef/else/endif with no symbol defined (as
-    the standard build: no GPC_ONLY); other conditionals are refused"""
+    the standard build: no GPC_ONLY), "if <symbol>" false (no
+    ERROR_CHECK); other conditionals are refused"""
     out, stack = [], []
     for line in lines:
         w = line.split()
         if w and w[0] in ('ifdef', 'ifndef'):
             stack.append(w[0] == 'ifndef')
+            continue
+        if w and w[0] == 'if' and len(w) == 2 and \
+                re.fullmatch(r'\w+', w[1]):
+            # a symbol or number: the non-EC, SBCS build (ERROR_CHECK,
+            # DBCS_PCGEOS ... 0)
+            stack.append(w[1].isdigit() and int(w[1]) != 0)
             continue
         if w and w[0] in ('if', 'ife', 'elseif'):
             raise ValueError(f'conditional "{line.strip()}"')
@@ -202,6 +212,17 @@ def sub_lists(s):
     return items
 
 
+def routine_of(tok):
+    """a name, "offset name" or NULL (None)"""
+    if tok == 'NULL':
+        return None
+    if tok.startswith('offset'):
+        return offset_of(tok)
+    if not re.fullmatch(r'\w+', tok):
+        raise ValueError(f'not a name: "{tok}"')
+    return tok
+
+
 def offset_of(tok):
     """"offset x" / "offset res:x" -> x; NULL -> None"""
     if tok == 'NULL':
@@ -244,13 +265,12 @@ def parse_info(path):
         inf.type = record('type', ptype)
         inf.connect = record('connect', conn)
         inf.smarts = value(smarts)
-        if entry != 'NULL' or exit_ != 'NULL':
-            raise ValueError(f'{inf.name}: custom entry/exit routines')
+        inf.custom = [routine_of(entry), routine_of(exit_)]
         inf.syms = offset_of(syms)
         inf.modes = [offset_of(x) for x in (low, med, hi)]
         inf.draft = offset_of(draft)
         inf.nlq = offset_of(nlq)
-        inf.geom = offset_of(geom)
+        inf.geom = routine_of(geom)
         inf.margin_tractor = [value(x) for x in mtr]
         inf.margin_asf = [value(x) for x in masf]
         inf.input = record('input', pin)
@@ -264,7 +284,16 @@ def parse_info(path):
             gp = [x.strip() for x in pm.group(2).split(',')]
             vals = [value(x) for x in gp[:6]]
             inf.parts.append((pm.start(), 'gp', pm.group(1), vals))
-        if inf.geom:
+        dm = inf.geom and re.search(r'^' + inf.geom + r'\s+'
+                                    r'DownloadProperties\s*<(.*?)>', body,
+                                    re.M | re.S)
+        if dm:
+            # the PCL4 drivers: the soft fonts the printer takes, the
+            # largest point size of one
+            inf.parts.append((dm.start(), 'words', inf.geom,
+                              [('value', value(x))
+                               for x in dm.group(1).split(',')]))
+        elif inf.geom:
             gm = re.search(r'^' + inf.geom + r'\s+FontGeometry(.*?)'
                            r'word\s+FID_INVALID', body, re.M | re.S)
             ents = []
@@ -280,13 +309,23 @@ def parse_info(path):
                     re.finditer(r'^\s*byte\s+(\S+)\s*$', lm.group(2), re.M)]
             inf.parts.append((lm.start(), 'pitch', lm.group(1), vals))
         # lists of words: the symbol set list (control codes by
-        # PrinterSymbolSet) and empty font lists
+        # PrinterSymbolSet) and the PCL drivers' font lists (empty, or
+        # nptrs to labels of the resource)
         for lm in re.finditer(r'^(\w+)\s+label\s+word\s*$(.*?)(?=^\w+\s+'
-                              r'(?:label|ends)|\Z)', body, re.M | re.S):
-            vals = [offset_of(b.group(1)) for b in
-                    re.finditer(r'^\s*word\s+(.+?)\s*$', lm.group(2), re.M)]
-            if lm.group(1) != inf.syms and vals:
-                raise ValueError(f'{inf.name}: word list {lm.group(1)}')
+                              r'(?:label|ends|DownloadProperties)|\Z)', body,
+                              re.M | re.S):
+            vals = []
+            for b in re.finditer(r'^\s*(word|nptr)\s+(.+?)\s*$',
+                                 lm.group(2), re.M):
+                t = b.group(2)
+                if t in ('NULL', '0'):
+                    vals.append(None)
+                elif b.group(1) == 'nptr':
+                    vals.append(('label', t))
+                elif lm.group(1) == inf.syms:
+                    vals.append(('code', offset_of(t)))
+                else:
+                    raise ValueError(f'{inf.name}: word list {lm.group(1)}')
             inf.parts.append((lm.start(), 'words', lm.group(1), vals))
         inf.parts.sort(key=lambda p: p[0])
         names = {p[2] for p in inf.parts}
@@ -394,11 +433,24 @@ def main():
     for inf in infos.values():
         for _, kind, pname, vals in inf.parts:
             if kind == 'words':
-                cmds += [c for c in vals if c and c not in cmds]
+                cmds += [v[1] for v in vals if v and v[0] == 'code' and
+                         v[1] not in cmds]
     for c in cmds:
         o.append(f'extern const byte {c}[];')
     o.append('const byte *const printFontCommands[] = {\n    NULL,')
     for c in cmds:
+        o.append(f'    {c},')
+    o.append('};\n')
+
+    # the custom entry and exit routines of the jobs (PI_customEntry,
+    # PI_customExit: indices into printCustomRoutines, 1 on)
+    customs = []
+    for name in sorted(infos):
+        customs += [c for c in infos[name].custom if c and c not in customs]
+    for c in customs:
+        o.append(f'extern PrintCustomRoutine {c};')
+    o.append('PrintCustomRoutine *const printCustomRoutines[] = {\n    NULL,')
+    for c in customs:
         o.append(f'    {c},')
     o.append('};\n')
 
@@ -453,12 +505,15 @@ def main():
                 # NLQ list: the mode is there, its fonts the printer's)
                 return off(x)
             return f'offsetof(PrintFontInfo, {labels[x]})'
+        def cust(i):
+            c = inf.custom[i]
+            return str(customs.index(c) + 1) if c else '0'
         mt = ', '.join(str(x) for x in inf.margin_tractor)
         ma = ', '.join(str(x) for x in inf.margin_asf)
         o.append(f'static const {T} {name} = {{\n  {{\n'
                  f'    0x{inf.type:02x}, 0x{inf.connect:02x}, '
                  f'{inf.smarts},\t/* type, connect, smarts */\n'
-                 f'    0, 0,\t\t\t/* custom entry, exit */\n'
+                 f'    {cust(0)}, {cust(1)},\t\t\t/* custom entry, exit */\n'
                  f'    {off(inf.modes[0])}, {off(inf.modes[1])},\n'
                  f'    {off(inf.modes[2])},\n'
                  f'    {foff(inf.draft)}, {foff(inf.nlq)},\n'
@@ -479,8 +534,15 @@ def main():
                     o.append(f'    {{ 0x{fid:04x}, {size}, {off(pt)} }},')
                 o.append('    { 0, 0, 0 }\n  },')
             elif kind == 'words':
-                o.append('  { ' + (', '.join(str(cmds.index(c) + 1) if c
-                                             else '0' for c in vals) or '0')
+                def word(v):
+                    if not v:
+                        return '0'
+                    if v[0] == 'code':
+                        return str(cmds.index(v[1]) + 1)
+                    if v[0] == 'label':
+                        return off(v[1])
+                    return str(v[1])
+                o.append('  { ' + (', '.join(word(v) for v in vals) or '0')
                          + ' },\t/* ' + pname + ' */')
             else:
                 o.append('  { ' + ', '.join(f'0x{v:02x}' for v in vals) +
