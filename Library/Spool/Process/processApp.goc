@@ -65,6 +65,7 @@ Boolean SpoolLibraryEntry(LibraryCallType ty, GeodeHandle client)
     (void) value1;
     (void) value2;
     SpoolBirth();
+    SpoolSyncHostPrinters();
 }
 
 /* MSG_SPOOL_CREATE_THREAD: a queue for the job's port, unless one was

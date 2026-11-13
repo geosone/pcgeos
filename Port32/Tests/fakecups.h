@@ -24,19 +24,16 @@ typedef struct {
     const char *sides;
     const void *doc;
     size_t      docLen;
-    /* if set, the document and its length are read from here at each
-     * job: shared memory (FakeCupsShared) the test fills after the start */
-    const volatile size_t *docLenp;
 } FakeCupsJob;
 
 extern FakeCupsJob fakeCupsJob;     /* set before FakeCupsStart */
 
 /* Start it; sets $CUPS_SERVER to its socket.  0 on failure. */
 pid_t FakeCupsStart(void);
-/* A shared buffer of size bytes for the document, filled later; its
- * length is *lenp.  fakeCupsJob.doc and docLenp point to them.  Call
- * before FakeCupsStart.  NULL on failure. */
-void *FakeCupsShared(size_t size, size_t **lenp);
+/* The job it expects in shared memory, with a buffer of size bytes for
+ * the document (doc): the test may change both after the start.  A copy
+ * of fakeCupsJob; call before FakeCupsStart.  NULL on failure. */
+FakeCupsJob *FakeCupsShared(size_t size, char **doc);
 /* Stop it; the letters it reported, in got. */
 void  FakeCupsStop(pid_t child, char *got, size_t size);
 

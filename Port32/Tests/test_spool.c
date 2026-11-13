@@ -265,6 +265,25 @@ static Boolean WaitIdle(void)
     return FALSE;
 }
 
+#ifdef GEOS_TEST_CUPS
+/* the spooler detached (MSG_META_DETACH to its process): TRUE when the
+ * process is gone, within half a minute; the geode stays a library */
+static Boolean Detach(void)
+{
+    struct { word callerID; optr ackOD; } d = { 0, 0 };
+    int i;
+
+    CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(spool, 0),
+		 KMSG_META_DETACH, &d, sizeof(d), NULL, 0);
+    for (i = 0; i < 300; i++) {
+	if (!GeodeFind("spool", 5, GA_PROCESS, 0))
+	    return TRUE;
+	TimerSleep(6);
+    }
+    return FALSE;
+}
+#endif
+
 /* the output: PostScript of the pages; Ghostscript runs it */
 static void CheckOutput(const char *rel, int pages)
 {
@@ -311,13 +330,14 @@ int main(int argc, char **argv)
 	"device = PostScript Compatible\r\n"
 	"[Host Laser]\r\ndriver = pscript.geo\r\n"
 	"device = PostScript Compatible\r\nportDriver = cups.geo\r\n"
-	"hostQueue = fake1\r\nhostDuplex = true\r\n";
+	"hostQueue = fake1\r\nhostDuplex = true\r\n"
+	"[spool]\r\nhostPrinters = false\r\n";
     static const char patch[] = "% devpatch\r\n";
     GeodeLoadError e;
 #ifdef GEOS_TEST_CUPS
 #define CUPS_DOC_MAX 65536
     char *cupsDoc, got[16];
-    size_t *cupsDocLen;
+    FakeCupsJob *cupsJob = NULL;
     pid_t cups;
 #endif
     PrinterStringInfo psi;
@@ -377,13 +397,13 @@ int main(int argc, char **argv)
     Put("SYSTEM/cups.geo", cups_geode, cups_geode_size);
     unsetenv("LPDEST");
     unsetenv("PRINTER");
-    cupsDoc = FakeCupsShared(CUPS_DOC_MAX, &cupsDocLen);
     fakeCupsJob.uri = "ipp://localhost/printers/fake1";
     fakeCupsJob.format = "application/postscript";
     fakeCupsJob.name = "GEOS";
     fakeCupsJob.copies = NULL;
     fakeCupsJob.sides = "two-sided-long-edge";
-    cups = cupsDoc ? FakeCupsStart() : 0;
+    cupsJob = FakeCupsShared(CUPS_DOC_MAX, &cupsDoc);
+    cups = cupsJob ? FakeCupsStart() : 0;
     CHECK(cups != 0);
 #endif
 
@@ -509,7 +529,7 @@ int main(int argc, char **argv)
 	CHECK(b && n <= CUPS_DOC_MAX);
 	if (b && n <= CUPS_DOC_MAX) {
 	    memcpy(cupsDoc, b, n);
-	    *cupsDocLen = n;
+	    cupsJob->docLen = n;
 	}
 	free(b);
 	MakeSpoolFile(name1);
@@ -517,10 +537,6 @@ int main(int argc, char **argv)
 	CHECK(pSpoolAddJob(&jp) != 0xffff);
 	CHECK(WaitIdle());
 	CHECK(!SpoolFileExists(name1));
-	FakeCupsStop(cups, got, sizeof(got));
-	CHECK(!strcmp(got, "J"));
-	if (strcmp(got, "J"))
-	    printf("CUPS stand-in: \"%s\"\n", got);
     }
 #endif
 
@@ -546,8 +562,9 @@ int main(int argc, char **argv)
     CHECK(SpoolFileExists("spoolsta.dat"));
     CHECK(pSpoolAddJob(&jp) == 0xffff);		/* detaching */
     InitFileWriteBoolean("spool", "noPrinting", FALSE);
-    CHECK(WaitIdle());				/* the thread is gone */
-    TimerSleep(30);
+    for (i = 0; i < 300 && GeodeFind("spool", 5, GA_PROCESS, 0); i++)
+	TimerSleep(6);				/* the process is gone */
+    CHECK(!GeodeFind("spool", 5, GA_PROCESS, 0));
     CHECK(SpoolFileExists(name1) && SpoolFileExists(name2));
     CHECK(SpoolFileExists("spoolsta.dat"));
     GeodeFreeLibrary(spool);
@@ -578,6 +595,78 @@ int main(int argc, char **argv)
     FillJob(&jp, name3, "PS File", PPT_NOTHING, NULL);
     CHECK(pSpoolAddJob(&jp) == (word) (id2 + 1));
     CHECK(WaitIdle());
+
+#ifdef GEOS_TEST_CUPS
+    /* the host's printers at the next start: a host printer the host no
+     * longer has goes, a printer of the user keeps its name (the host's
+     * "Office" becomes "fake2"), and without a default the host's
+     * default printer becomes it */
+    if (cups) {
+	char buf[GEODE_MAX_DEVICE_NAME_SIZE];
+	word n;
+	Boolean b;
+	int def;
+
+	CHECK(pSpoolCreatePrinter("Old Host", PDT_PRINTER) != 0xffff);
+	InitFileWriteBoolean("Old Host", "hostPrinter", TRUE);
+	InitFileWriteString("Old Host", "hostQueue", "gone");
+	CHECK(pSpoolCreatePrinter("Office", PDT_PRINTER) != 0xffff);
+	CHECK(Detach());
+	GeodeFreeLibrary(spool);
+	InitFileDeleteEntry("printer", "defaultPrinter");
+	InitFileWriteBoolean("spool", "hostPrinters", TRUE);
+
+	spool = GeodeUseLibrary("spool.geo", 0, 0, &e);
+	CHECK(spool != 0);
+	if (!spool)
+	    return 1;
+	for (i = 0; i < 100 && pSpoolGetNumPrinters(PDT_PRINTER, 0) != 4;
+	     i++)
+	    TimerSleep(6);
+	CHECK(pSpoolGetNumPrinters(PDT_PRINTER, 0) == 4);
+	CHECK(!pSpoolGetPrinterString(&psi, 0) &&
+	      !strcmp(psi.PSI_stringBuf, "PS File"));
+	CHECK(!pSpoolGetPrinterString(&psi, 1) &&
+	      !strcmp(psi.PSI_stringBuf, "Office"));
+	CHECK(!pSpoolGetPrinterString(&psi, 2) &&
+	      !strcmp(psi.PSI_stringBuf, "Drucker 1"));
+	CHECK(!pSpoolGetPrinterString(&psi, 3) &&
+	      !strcmp(psi.PSI_stringBuf, "fake2"));
+	def = pSpoolGetDefaultPrinter();
+	CHECK(def == 3);
+	CHECK(!InitFileReadStringBuffer("Drucker 1", "hostQueue", buf,
+					sizeof(buf), &n) &&
+	      !strcmp(buf, "fake1"));
+	CHECK(!InitFileReadStringBuffer("Drucker 1", "device", buf,
+					sizeof(buf), &n) &&
+	      !strcmp(buf, "PostScript Compatible"));
+	CHECK(!InitFileReadBoolean("Drucker 1", "hostDuplex", &b) && !b);
+	CHECK(!InitFileReadStringBuffer("fake2", "device", buf,
+					sizeof(buf), &n) &&
+	      !strcmp(buf, "HP Color LaserJet (PostScript)"));
+	CHECK(!InitFileReadStringBuffer("fake2", "port", buf,
+					sizeof(buf), &n) &&
+	      !strcmp(buf, "CUSTOM"));
+	CHECK(!InitFileReadBoolean("fake2", "hostDuplex", &b) && b);
+	CHECK(InitFileReadBoolean("Office", "hostPrinter", &b));
+	CHECK(InitFileReadStringBuffer("Old Host", "hostQueue", buf,
+				       sizeof(buf), &n));
+
+	/* a job to the host printer as the list has it */
+	MakeSpoolFile(name1);
+	FillJob(&jp, name1, "Drucker 1", PPT_CUSTOM, NULL);
+	cupsJob->sides = "one-sided";
+	CHECK(pSpoolAddJob(&jp) != 0xffff);
+	CHECK(WaitIdle());
+
+	FakeCupsStop(cups, got, sizeof(got));
+	/* the first job, the list and the default at the start, the
+	 * second job */
+	if (strcmp(got, "JLDJ"))
+	    printf("CUPS stand-in: \"%s\"\n", got);
+	CHECK(!strcmp(got, "JLDJ"));
+    }
+#endif
 
     GeodeFreeLibrary(spool);
     printf("%s: %d failure(s)\n", fails ? "FAILED" : "OK", fails);

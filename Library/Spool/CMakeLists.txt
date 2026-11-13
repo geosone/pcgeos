@@ -17,7 +17,7 @@ geos_geode(spool
            ${sp}/Process/processPort.c ${sp}/Process/processFile.c
            ${sp}/Process/processCustom.c ${sp}/Process/processNothing.c
            ${sp}/Process/processError.c ${sp}/Process/processRestart.c
-           ${sp}/Lib/libPrinter.c ${sp}/Lib/libMisc.c
+           ${sp}/Lib/libPrinter.c ${sp}/Lib/libMisc.c ${sp}/Lib/libHost.c
            GP spool32.gp GOC ${sp}/Process/processApp.goc REV spool.rev
            INCLUDES ${sp} ${PROJECT_SOURCE_DIR}/CInclude/Internal)
 set(spool_GEO ${spool_GEO} PARENT_SCOPE)

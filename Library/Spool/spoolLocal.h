@@ -295,4 +295,7 @@ extern void SpoolSendPrintersChanged(void);
 /* Lib/libPrinter.c */
 extern PrinterDriverType ReadPrinterDriverType(const char *printer);
 
+/* Lib/libHost.c: the host's printers into the printer list */
+extern void SpoolSyncHostPrinters(void);
+
 #endif /* SPOOLLOCAL_H */

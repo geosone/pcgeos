@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 FakeCupsJob fakeCupsJob;
+static FakeCupsJob *sharedJob;   /* FakeCupsShared */
 
 static char sockPath[108];
 static int  reportFd = -1;
@@ -236,7 +237,8 @@ static void Serve(int ls, int report)
             Respond(fd, 0, &a);
             (void)!write(report, "D", 1);
         } else if (op == 0x0002) {
-            const FakeCupsJob *e = &fakeCupsJob;
+            const volatile FakeCupsJob *e = sharedJob ? sharedJob
+                                                      : &fakeCupsJob;
             if (!Find(&body, "printer-uri", v, sizeof v, &doc) ||
                 strcmp(v, e->uri))
                 ok = 'u';
@@ -253,8 +255,8 @@ static void Serve(int ls, int report)
             else if (!Find(&body, "sides", v, sizeof v, &doc) ||
                      strcmp(v, e->sides))
                 ok = 's';
-            else if (body.n - doc != (e->docLenp ? *e->docLenp : e->docLen) ||
-                     memcmp(body.b + doc, e->doc, body.n - doc))
+            else if (body.n - doc != e->docLen ||
+                     memcmp(body.b + doc, e->doc, e->docLen))
                 ok = 'd';
             if (ok == 'J') {
                 Add8(&a, 0x02);
@@ -272,18 +274,19 @@ static void Serve(int ls, int report)
     }
 }
 
-void *FakeCupsShared(size_t size, size_t **lenp)
+FakeCupsJob *FakeCupsShared(size_t size, char **doc)
 {
-    char *p = mmap(NULL, sizeof(size_t) + size, PROT_READ | PROT_WRITE,
-                   MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    char *p = mmap(NULL, sizeof(FakeCupsJob) + size,
+                   PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
     if (p == MAP_FAILED)
         return NULL;
-    *lenp = (size_t *)p;
-    **lenp = 0;
-    fakeCupsJob.docLenp = *lenp;
-    fakeCupsJob.doc = p + sizeof(size_t);
-    return p + sizeof(size_t);
+    sharedJob = (FakeCupsJob *)p;
+    *sharedJob = fakeCupsJob;
+    *doc = p + sizeof(FakeCupsJob);
+    sharedJob->doc = *doc;
+    sharedJob->docLen = 0;
+    return sharedJob;
 }
 
 pid_t FakeCupsStart(void)

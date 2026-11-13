@@ -3859,6 +3859,19 @@ geode is built from `spool32.gp`.
   jobs with `SO_SHUTDOWN_ACTION` are dropped (`StripCanceledJobs`), the
   user is asked with `SERROR_PRINT_ON_STARTUP` (logged, answered
   `IC_YES`), and the jobs are queued again under their IDs.
+- **The host's printers** (`Lib/libHost.c`, new in Port32) join the
+  printer list at the spooler's start, as if installed in Preferences:
+  `gapi_print_list` gives the queues, and each becomes a printer with
+  `driver = pscript.geo`, `device = PostScript Compatible` (a color
+  queue: `HP Color LaserJet (PostScript)`), `port = CUSTOM`,
+  `portDriver = cups.geo`, `hostQueue`, `hostDuplex` and
+  `hostPrinter = true`. The name is the one the user sees on the host
+  (printer-info), or the queue's when a printer of the user has it. A
+  host printer whose queue is gone is deleted; without a
+  `defaultPrinter`, the host's default becomes it. When the host cannot
+  be asked (dos32, no CUPS) the list stays as it is; `[spool]
+  hostPrinters = false` turns it off. The kernel exports
+  `gapi_print_list` for it.
 - **`[spool] noPrinting`** is looked at every second instead of every
   15 seconds.
 - **No heap reservation** (`GeodeRequestSpace`): the C kernel's heap has
@@ -3895,7 +3908,11 @@ which must get the same PostScript as the file. Then two jobs wait
 (`[spool] noPrinting`) while the spooler is detached: the state file
 is written and the spool files stay; loaded again, the spooler prints
 both under their IDs, deletes the state file, and the next ID follows
-them.
+them. Last, on Linux, the spooler starts again with the host's printers
+on: of the stand-in's two queues, `fake1` joins as "Drucker 1" (mono,
+one-sided) and `fake2` as "fake2" (its name "Office" is a printer of
+the user; color, duplex, the default), a host printer whose queue is
+gone is deleted, and a job to "Drucker 1" reaches `fake1`.
 
 ## 14. Open
 
