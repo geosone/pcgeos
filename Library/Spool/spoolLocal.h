@@ -298,4 +298,8 @@ extern PrinterDriverType ReadPrinterDriverType(const char *printer);
 /* Lib/libHost.c: the host's printers into the printer list */
 extern void SpoolSyncHostPrinters(void);
 
+/* Lib/libPaper.c: the pre-defined paper size of width x height, 0 if
+ * none */
+extern word SpoolFindPaperSize(word width, word height);
+
 #endif /* SPOOLLOCAL_H */

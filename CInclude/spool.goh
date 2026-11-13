@@ -1741,7 +1741,16 @@ typedef struct {
 extern void
     _pascal SpoolGetPaperSizeOrder(byte *orderBuf,
 				   byte *userDefBuf,
+#ifdef GEOS_PORT32
+			           PaperSizeOrderInfo *numBuf,
+				   PageType pageType);
+#else
 			           PaperSizeOrderInfo *numBuf);
+#endif
+/*
+ * Port32: with the PageType, which the asm stub did not pass (it used
+ * whatever was in bp).
+ */
 /*
  *  Pass:   	*orderBuf   = empty buffer of size MAX_PAPER_SIZES
  *  	    	*userDefBuf = empty buffer of size MAX_PAPER_SIZES

@@ -11,7 +11,11 @@
  * longer has is deleted again.  The printer's name is the name the user
  * sees on the host (printer-info), else the queue's; if a printer of the
  * ini has that name already, the queue's name is taken.  Without a
- * default printer in the ini, the host's default becomes it.
+ * default printer in the ini, the host's default becomes it.  Without a
+ * default page size in the ini ([spool] width ...), the default paper of
+ * the host's default printer (media-default) becomes it, portrait with
+ * the default margins; [spool] hostPaper marks it as the host's, so it
+ * follows the host until the user sets one.
  *
  * Nothing changes when the host cannot be asked (dos32, no CUPS): the
  * host printers of the last start stay.  [spool] hostPrinters = false
@@ -19,6 +23,7 @@
  */
 #include "spoolLocal.h"
 #include "gapi.h"
+#include "libPaper.h"
 
 #define HOST_MAX_PRINTERS	32
 
@@ -84,6 +89,37 @@ static void WriteHostPrinter(const char *name, const gapi_printer *p)
     InitFileWriteString(name, queueKey, p->name);
     InitFileWriteBoolean(name, "hostDuplex", p->duplex ? TRUE : FALSE);
     InitFileWriteBoolean(name, hostKey, TRUE);
+}
+
+/* the default page size from the host's default printer */
+static void HostPaper(const gapi_printer *list, int count)
+{
+    PageSizeReport psr;
+    Boolean host = FALSE;
+    word v, size;
+    int i;
+
+    (void) InitFileReadBoolean("spool", "hostPaper", &host);
+    if (!host && !InitFileReadInteger("spool", "width", &v))
+	return;					/* the user's */
+    for (i = 0; i < count && !list[i].isDefault; i++)
+	;
+    if (i == count || !list[i].mediaWidth || !list[i].mediaHeight)
+	return;
+    SpoolGetDefaultPageSizeInfo(&psr);
+    if (host && psr.PSR_width == (dword) list[i].mediaWidth &&
+	psr.PSR_height == (dword) list[i].mediaHeight)
+	return;
+    psr.PSR_width = (dword) list[i].mediaWidth;
+    psr.PSR_height = (dword) list[i].mediaHeight;
+    psr.PSR_layout.PL_paper = PO_PORTRAIT << 3 | PT_PAPER;
+    SpoolSetDefaultPageSizeInfo(&psr);
+    InitFileWriteBoolean("spool", "hostPaper", TRUE);
+    size = SpoolFindPaperSize((word) psr.PSR_width, (word) psr.PSR_height);
+    ghal_log(GHAL_LOG_INFO, "spool: default paper %s of %s (%lu x %lu)",
+	     size ? paperSizeTables[0].PST_sizes[size].PSE_name : "custom",
+	     list[i].name, (unsigned long) psr.PSR_width,
+	     (unsigned long) psr.PSR_height);
 }
 
 void SpoolSyncHostPrinters(void)
@@ -157,5 +193,6 @@ void SpoolSyncHostPrinters(void)
 	    hadDefault = TRUE;
 	}
     }
+    HostPaper(list, count);
     MemFree(mh);
 }

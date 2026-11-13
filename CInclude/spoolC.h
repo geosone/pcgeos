@@ -121,4 +121,55 @@ extern SpoolOpStatus SpoolModifyPriority(word jobID,
 					 ThreadPriority priority);
 extern SpoolOpStatus SpoolVerifyPrinterPort(PrintPortInfo *portInfo);
 
+/* ---------------------------------------------------------------------
+ * Page sizes (libPaper)
+ * ------------------------------------------------------------------- */
+
+#define MAX_PAPER_STRING_LENGTH 	48	/* includes NULL-terminator */
+#define MAX_PRE_DEFINED_PAPER_SIZES	128
+#define MAX_USER_DEFINED_PAPER_SIZES	128
+#define MAX_PAPER_SIZES			(MAX_PRE_DEFINED_PAPER_SIZES + \
+					 MAX_USER_DEFINED_PAPER_SIZES)
+
+typedef struct {
+    word	NPSI_numSizes;
+    word	NPSI_defaultSize;	/* always 0 */
+} NumPaperSizesInfo;
+
+typedef struct {
+    word	PSI_width;		/* points */
+    word	PSI_height;
+    PageLayout	PSI_defaultLayout;
+} PaperSizeInfo;
+
+typedef struct {
+    word	PSOI_numOrdered;
+    word	PSOI_numUnused;
+} PaperSizeOrderInfo;
+
+extern void SpoolGetDefaultPageSizeInfo(PageSizeReport *psr);
+extern void SpoolSetDefaultPageSizeInfo(PageSizeReport *psr);
+extern void SpoolGetNumPaperSizes(NumPaperSizesInfo *sizesInfo,
+				  PageType pageType);
+/* a paper size number: an index into the order, or (0xff << 8) | size */
+extern word SpoolGetPaperString(char *stringBuf, word paperSizeNum,
+				PageType pageType);
+extern void SpoolGetPaperSize(PaperSizeInfo *sizeInfo, word paperSizeNum,
+			      PageType pageType);
+/* the paper size number, or -1 */
+extern word SpoolConvertPaperSize(word width, word height,
+				  PageType pageType);
+/* Port32: with the PageType, which the asm's C stub did not pass */
+extern void SpoolGetPaperSizeOrder(byte *orderBuf, byte *userDefBuf,
+				   PaperSizeOrderInfo *numBuf,
+				   PageType pageType);
+extern void SpoolSetPaperSizeOrder(byte *orderArray, word numEntries,
+				   PageType pageType);
+/* the new size's number (128-255), 0 on failure */
+extern word SpoolCreatePaperSize(char *paperSizeString, word width,
+				 word height, PageLayout layout,
+				 PageType pageType);
+/* FALSE on success */
+extern Boolean SpoolDeletePaperSize(word paperSizeNum, PageType pageType);
+
 #endif /* SPOOLC_H */

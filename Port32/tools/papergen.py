@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""papergen.py -- the spooler's page size tables in C from the asm.
+
+Reads Library/Spool/Lib/libTables.asm (with libConstant.def's order of
+the AddPaperSize entries) and writes a C file with, per PageType (paper,
+envelope, label, postcard), the pre-defined sizes (width, height,
+default PageLayout, name) and the default order, and the default page
+size information.  Conditional parts (if _GPC, _NIKE_EUROPE, PZ_PCGEOS
+...) are taken as the standard PC/GEOS build has them: false, so the
+else branches count.
+
+    papergen.py -o libPaperTables.c libTables.asm
+"""
+import argparse
+import re
+import sys
+
+PT = {"PaperSizes": "paper", "EnvelopeSizes": "envelope",
+      "LabelSizes": "label", "PostcardSizes": "postcard"}
+TYPE_VALUE = {"PT_PAPER": 0, "PT_ENVELOPE": 2, "PT_LABEL": 4,
+              "PT_POSTCARD": 6}
+ORIENT = {"PO_PORTRAIT": 0, "PO_LANDSCAPE": 1, "EO_PORTRAIT": 0,
+          "EO_LANDSCAPE": 1, "PCO_PORTRAIT": 0, "PCO_LANDSCAPE": 1}
+ORDER_CHUNK = {"DefaultPaperOrder": "paper",
+               "DefaultEnvelopeOrder": "envelope",
+               "DefaultLabelOrder": "label",
+               "DefaultPostcardOrder": "postcard"}
+DEFAULTS = ["defaultWidthChunk", "defaultHeightChunk", "defaultLayoutChunk",
+            "defaultMarginLeftChunk", "defaultMarginTopChunk",
+            "defaultMarginRightChunk", "defaultMarginBottomChunk"]
+
+
+def lines_of(path):
+    """the lines without comments, continuations joined, conditionals
+    resolved (every condition false)"""
+    text = open(path, encoding="latin-1").read().replace("\r", "")
+    # COMMENT @ ... @ blocks
+    text = re.sub(r"COMMENT\s*@.*?@", "", text, flags=re.S)
+    raw = []
+    cont = ""
+    for line in text.split("\n"):
+        line = re.sub(r";.*$", "", line) if '"' not in line else \
+            re.sub(r';[^"]*$', "", line)
+        line = line.rstrip()
+        if line.endswith("\\"):
+            cont += line[:-1] + " "
+            continue
+        raw.append(cont + line)
+        cont = ""
+    out = []
+    stack = []          # per level: [taking now, a branch was taken]
+    for line in raw:
+        w = line.split()
+        if not w:
+            continue
+        kw = w[0].lower()
+        if kw == "if":
+            parent = all(s[0] for s in stack)
+            stack.append([False, False])
+            continue
+        if kw == "elseif":
+            stack[-1][0] = False
+            continue
+        if kw == "else":
+            stack[-1][0] = not stack[-1][1]
+            stack[-1][1] = True
+            continue
+        if kw == "endif":
+            stack.pop()
+            continue
+        if all(s[0] for s in stack):
+            out.append(line.strip())
+    return out
+
+
+def equates(lines):
+    """NAME equ Record<a, b> for the layouts"""
+    eq = {}
+    for line in lines:
+        m = re.match(r"(\w+)\s+equ\s+\w+<\s*(\w+)\s*,\s*(\w+)\s*>", line)
+        if m:
+            eq[m.group(1)] = (ORIENT[m.group(2)] << 3) | TYPE_VALUE[m.group(3)]
+    return eq
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-o", required=True)
+    ap.add_argument("tables")
+    a = ap.parse_args()
+
+    lines = lines_of(a.tables)
+    eq = equates(lines)
+    tables = {}
+    enums = {}
+    orders = {}
+    defaults = {}
+    cur = None
+    order = None
+    for line in lines:
+        m = re.match(r"AddPaperTable\s+(\w+)", line)
+        if m:
+            cur = PT[m.group(1)]
+            tables[cur] = []
+            continue
+        m = re.match(r"AddPaperSize\s+(\d+)\s*,\s*(\d+)\s*,\s*(<label>|\w+)"
+                     r"\s*,\s*(\w+)\s*,\s*\"([^\"]*)\"\s*(?:,\s*(\d+)\s*,"
+                     r"\s*(\d+))?", line)
+        if m:
+            w, h, lay, enum, name, la, ld = m.groups()
+            if lay == "<label>":
+                layout = (int(ld) << 9) | (int(la) << 3) | TYPE_VALUE["PT_LABEL"]
+            else:
+                layout = eq[lay]
+            enums[enum] = len(tables[cur])
+            tables[cur].append((int(w), int(h), layout, name))
+            continue
+        m = re.match(r"(\w+)\s+chunk\s+byte", line)
+        if m and m.group(1) in ORDER_CHUNK:
+            order = ORDER_CHUNK[m.group(1)]
+            orders[order] = []
+            continue
+        m = re.match(r"MakeDefaultOrderEntry\s+%(\w+)", line)
+        if m and order:
+            orders[order].append(enums[m.group(1)])
+            continue
+        if re.match(r"\w+\s+endc", line):
+            order = None
+            continue
+        m = re.match(r"LocalDefString\s+(\w+)\s*<\s*\"(\d+)\"", line)
+        if m:
+            defaults[m.group(1)] = int(m.group(2))
+
+    for k in ("paper", "envelope", "label", "postcard"):
+        if k not in tables or k not in orders:
+            sys.exit("papergen: no %s table or order" % k)
+    for d in DEFAULTS:
+        if d not in defaults:
+            sys.exit("papergen: no " + d)
+
+    o = ["/* generated by Port32/tools/papergen.py from libTables.asm;",
+         " * do not edit */",
+         '#include "libPaper.h"', ""]
+    for k in ("paper", "envelope", "label", "postcard"):
+        o.append("const PaperSizeEntry %sSizes[] = {" % k)
+        for i, (w, h, lay, name) in enumerate(tables[k]):
+            o.append('    { %4d, %4d, 0x%04x, "%s" },\t/* %d */'
+                     % (w, h, lay, name.replace('"', '\\"'), i))
+        o.append("};")
+        o.append("const byte %sDefaultOrder[] = { %s };"
+                 % (k, ", ".join(str(v) for v in orders[k])))
+        o.append("")
+    o.append("const PaperSizeTable paperSizeTables[4] = {")
+    for k in ("paper", "envelope", "label", "postcard"):
+        o.append("    { %sSizes, %d, %sDefaultOrder, %d },"
+                 % (k, len(tables[k]), k, len(orders[k])))
+    o.append("};")
+    o.append("")
+    o.append("/* width, height, layout, margins left, top, right, bottom */")
+    o.append("const word defaultPageSizeInfo[7] = { %s };"
+             % ", ".join(str(defaults[d]) for d in DEFAULTS))
+    open(a.o, "w").write("\n".join(o) + "\n")
+
+
+if __name__ == "__main__":
+    main()

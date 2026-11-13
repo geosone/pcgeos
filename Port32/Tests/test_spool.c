@@ -191,6 +191,114 @@ static GeodeHandle spool;
 #define pSpoolHurryJob		ENTRY(25, SpoolOpStatus (*)(word))
 #define pSpoolVerifyPrinterPort \
     ENTRY(28, SpoolOpStatus (*)(PrintPortInfo *))
+#define pSpoolGetNumPaperSizes \
+    ENTRY(5, void (*)(NumPaperSizesInfo *, PageType))
+#define pSpoolGetPaperString	ENTRY(6, word (*)(char *, word, PageType))
+#define pSpoolGetPaperSize \
+    ENTRY(7, void (*)(PaperSizeInfo *, word, PageType))
+#define pSpoolConvertPaperSize	ENTRY(8, word (*)(word, word, PageType))
+#define pSpoolGetPaperSizeOrder \
+    ENTRY(9, void (*)(byte *, byte *, PaperSizeOrderInfo *, PageType))
+#define pSpoolSetPaperSizeOrder	ENTRY(10, void (*)(byte *, word, PageType))
+#define pSpoolCreatePaperSize \
+    ENTRY(11, word (*)(char *, word, word, PageLayout, PageType))
+#define pSpoolDeletePaperSize	ENTRY(12, Boolean (*)(word, PageType))
+#define pSpoolGetDefaultPageSizeInfo \
+    ENTRY(32, void (*)(PageSizeReport *))
+#define pSpoolSetDefaultPageSizeInfo \
+    ENTRY(33, void (*)(PageSizeReport *))
+
+/* the page sizes (libPaper): the tables of libTables.asm, the order,
+ * user-defined sizes, the default page size */
+static void TestPaper(void)
+{
+    NumPaperSizesInfo num;
+    PaperSizeInfo info;
+    PaperSizeOrderInfo oi;
+    PageSizeReport psr;
+    PageLayout lay;
+    static byte order[MAX_PAPER_SIZES], unused[MAX_PAPER_SIZES];
+    byte mine[2];
+    char buf[MAX_PAPER_STRING_LENGTH];
+    word n;
+
+    /* the C stubs are the same routines */
+    CHECK(ProcGetLibraryEntry(spool, 34) == ProcGetLibraryEntry(spool, 32));
+    CHECK(ProcGetLibraryEntry(spool, 36) == ProcGetLibraryEntry(spool, 5));
+    CHECK(ProcGetLibraryEntry(spool, 55) == ProcGetLibraryEntry(spool, 28));
+
+    pSpoolGetNumPaperSizes(&num, PT_PAPER);
+    CHECK(num.NPSI_numSizes == 20 && num.NPSI_defaultSize == 0);
+    CHECK(pSpoolGetPaperString(buf, 0, PT_PAPER) == 9 &&
+	  !strcmp(buf, "US Letter"));
+    pSpoolGetPaperSize(&info, 2, PT_PAPER);		/* A4 */
+    CHECK(info.PSI_width == 595 && info.PSI_height == 842 &&
+	  info.PSI_defaultLayout.PL_paper == 0);
+    pSpoolGetPaperSize(&info, 0xff00 | 57, PT_PAPER);	/* E size */
+    CHECK(info.PSI_width == 3168 && info.PSI_height == 2448 &&
+	  info.PSI_defaultLayout.PL_paper == (PO_LANDSCAPE << 3));
+    pSpoolGetNumPaperSizes(&num, PT_ENVELOPE);
+    CHECK(num.NPSI_numSizes == 18);
+    CHECK(pSpoolGetPaperString(buf, 2, PT_ENVELOPE) &&
+	  !strcmp(buf, "Business Envelope (#10)"));
+    pSpoolGetPaperSize(&info, 0, PT_LABEL);		/* 4 across, 20 down */
+    CHECK(info.PSI_width == 126 && info.PSI_height == 36 &&
+	  info.PSI_defaultLayout.PL_paper == ((20 << 9) | (4 << 3) | 4));
+    pSpoolGetNumPaperSizes(&num, PT_POSTCARD);
+    CHECK(num.NPSI_numSizes == 2);
+
+    /* upright, on its side, none (no custom size in the order) */
+    CHECK(pSpoolConvertPaperSize(612, 792, PT_PAPER) == 0);
+    CHECK(pSpoolConvertPaperSize(842, 595, PT_PAPER) == 2);
+    CHECK(pSpoolConvertPaperSize(100, 100, PT_PAPER) == 0xffff);
+
+    /* a size of the user, and an order of the user */
+    lay.PL_paper = PT_PAPER;
+    CHECK(pSpoolCreatePaperSize("My Size", 300, 400, lay, PT_PAPER) == 128);
+    CHECK(pSpoolCreatePaperSize("Other", 310, 410, lay, PT_PAPER) == 129);
+    CHECK(pSpoolGetPaperString(buf, 0xff00 | 128, PT_PAPER) == 7 &&
+	  !strcmp(buf, "My Size"));
+    pSpoolGetPaperSize(&info, 0xff00 | 129, PT_PAPER);
+    CHECK(info.PSI_width == 310 && info.PSI_height == 410);
+    pSpoolGetPaperSizeOrder(order, unused, &oi, PT_PAPER);
+    CHECK(oi.PSOI_numOrdered == 20 && oi.PSOI_numUnused == 60 + 2 - 20);
+    CHECK(order[0] == 29 && order[2] == 24);
+    CHECK(unused[128] && unused[129] && !unused[29] && unused[1]);
+    mine[0] = 128;
+    mine[1] = 24;
+    pSpoolSetPaperSizeOrder(mine, 2, PT_PAPER);
+    pSpoolGetNumPaperSizes(&num, PT_PAPER);
+    CHECK(num.NPSI_numSizes == 2);
+    CHECK(pSpoolGetPaperString(buf, 0, PT_PAPER) && !strcmp(buf, "My Size"));
+    CHECK(pSpoolConvertPaperSize(300, 400, PT_PAPER) == 0);
+    CHECK(!pSpoolDeletePaperSize(0xff00 | 128, PT_PAPER));
+    CHECK(pSpoolDeletePaperSize(0xff00 | 128, PT_PAPER));
+    CHECK(!InitFileReadInteger("paper", "count", &n) && n == 1);
+    CHECK(InitFileReadInteger("paper128", "width", &n));
+    CHECK(pSpoolCreatePaperSize("Again", 320, 420, lay, PT_PAPER) == 128);
+    CHECK(!pSpoolDeletePaperSize(0xff00 | 128, PT_PAPER));
+    CHECK(!pSpoolDeletePaperSize(0xff00 | 129, PT_PAPER));
+    InitFileDeleteEntry("paper", "order");
+    pSpoolGetNumPaperSizes(&num, PT_PAPER);
+    CHECK(num.NPSI_numSizes == 20);
+
+    /* the default page size: libTables.asm's, then the user's */
+    pSpoolGetDefaultPageSizeInfo(&psr);
+    CHECK(psr.PSR_width == 612 && psr.PSR_height == 792 &&
+	  psr.PSR_layout.PL_paper == 0 && psr.PSR_margins.PCMP_left == 18 &&
+	  psr.PSR_margins.PCMP_bottom == 18);
+    psr.PSR_width = 420;
+    psr.PSR_height = 595;
+    psr.PSR_margins.PCMP_top = 36;
+    pSpoolSetDefaultPageSizeInfo(&psr);
+    memset(&psr, 0, sizeof(psr));
+    pSpoolGetDefaultPageSizeInfo(&psr);
+    CHECK(psr.PSR_width == 420 && psr.PSR_height == 595 &&
+	  psr.PSR_margins.PCMP_top == 36 && psr.PSR_margins.PCMP_left == 18);
+    /* back to none */
+    InitFileDeleteCategory("spool");
+    InitFileWriteBoolean("spool", "hostPrinters", FALSE);
+}
 
 /* a spool file of two pages; its name into name */
 static void MakeSpoolFile(char *name)
@@ -443,6 +551,8 @@ int main(int argc, char **argv)
 	  !strcmp(psi.PSI_stringBuf, "PS File") &&
 	  psi.PSI_driverType == PDT_PRINTER);
 
+    TestPaper();
+
     /* the ports that need no checking */
     memset(&port, 0, sizeof(port));
     port.PPI_type = PPT_FILE;
@@ -599,8 +709,9 @@ int main(int argc, char **argv)
 #ifdef GEOS_TEST_CUPS
     /* the host's printers at the next start: a host printer the host no
      * longer has goes, a printer of the user keeps its name (the host's
-     * "Office" becomes "fake2"), and without a default the host's
-     * default printer becomes it */
+     * "Drucker 1" becomes "fake1"; fake2 has no printer-info), without a
+     * default the host's default printer becomes it, and without a
+     * default page size its paper (A4) */
     if (cups) {
 	char buf[GEODE_MAX_DEVICE_NAME_SIZE];
 	word n;
@@ -610,7 +721,7 @@ int main(int argc, char **argv)
 	CHECK(pSpoolCreatePrinter("Old Host", PDT_PRINTER) != 0xffff);
 	InitFileWriteBoolean("Old Host", "hostPrinter", TRUE);
 	InitFileWriteString("Old Host", "hostQueue", "gone");
-	CHECK(pSpoolCreatePrinter("Office", PDT_PRINTER) != 0xffff);
+	CHECK(pSpoolCreatePrinter("Drucker 1", PDT_PRINTER) != 0xffff);
 	CHECK(Detach());
 	GeodeFreeLibrary(spool);
 	InitFileDeleteEntry("printer", "defaultPrinter");
@@ -627,20 +738,20 @@ int main(int argc, char **argv)
 	CHECK(!pSpoolGetPrinterString(&psi, 0) &&
 	      !strcmp(psi.PSI_stringBuf, "PS File"));
 	CHECK(!pSpoolGetPrinterString(&psi, 1) &&
-	      !strcmp(psi.PSI_stringBuf, "Office"));
-	CHECK(!pSpoolGetPrinterString(&psi, 2) &&
 	      !strcmp(psi.PSI_stringBuf, "Drucker 1"));
+	CHECK(!pSpoolGetPrinterString(&psi, 2) &&
+	      !strcmp(psi.PSI_stringBuf, "fake1"));
 	CHECK(!pSpoolGetPrinterString(&psi, 3) &&
 	      !strcmp(psi.PSI_stringBuf, "fake2"));
 	def = pSpoolGetDefaultPrinter();
 	CHECK(def == 3);
-	CHECK(!InitFileReadStringBuffer("Drucker 1", "hostQueue", buf,
+	CHECK(!InitFileReadStringBuffer("fake1", "hostQueue", buf,
 					sizeof(buf), &n) &&
 	      !strcmp(buf, "fake1"));
-	CHECK(!InitFileReadStringBuffer("Drucker 1", "device", buf,
+	CHECK(!InitFileReadStringBuffer("fake1", "device", buf,
 					sizeof(buf), &n) &&
 	      !strcmp(buf, "PostScript Compatible"));
-	CHECK(!InitFileReadBoolean("Drucker 1", "hostDuplex", &b) && !b);
+	CHECK(!InitFileReadBoolean("fake1", "hostDuplex", &b) && !b);
 	CHECK(!InitFileReadStringBuffer("fake2", "device", buf,
 					sizeof(buf), &n) &&
 	      !strcmp(buf, "HP Color LaserJet (PostScript)"));
@@ -648,13 +759,20 @@ int main(int argc, char **argv)
 					sizeof(buf), &n) &&
 	      !strcmp(buf, "CUSTOM"));
 	CHECK(!InitFileReadBoolean("fake2", "hostDuplex", &b) && b);
-	CHECK(InitFileReadBoolean("Office", "hostPrinter", &b));
+	CHECK(InitFileReadBoolean("Drucker 1", "hostPrinter", &b));
+	{
+	    PageSizeReport psr;
+	    pSpoolGetDefaultPageSizeInfo(&psr);
+	    CHECK(psr.PSR_width == 595 && psr.PSR_height == 842 &&
+		  psr.PSR_margins.PCMP_left == 18);
+	    CHECK(!InitFileReadBoolean("spool", "hostPaper", &b) && b);
+	}
 	CHECK(InitFileReadStringBuffer("Old Host", "hostQueue", buf,
 				       sizeof(buf), &n));
 
 	/* a job to the host printer as the list has it */
 	MakeSpoolFile(name1);
-	FillJob(&jp, name1, "Drucker 1", PPT_CUSTOM, NULL);
+	FillJob(&jp, name1, "fake1", PPT_CUSTOM, NULL);
 	cupsJob->sides = "one-sided";
 	CHECK(pSpoolAddJob(&jp) != 0xffff);
 	CHECK(WaitIdle());

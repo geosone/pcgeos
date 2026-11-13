@@ -64,7 +64,7 @@ The order follows what the Preferences need first and what can be tested:
 
 1. time (done)
 2. power (done)
-3. printing (the IPP client, the `Cups` port driver, the export side of the PostScript translation library `eps.geo` (without text and bitmaps) and the PostScript printer driver `pscript.geo` in C done; the spooler `spool.geo` in C with PDL printing to the file, custom and nothing ports done (ABI.md §13w); a spooler job through the `Cups` port to the stand-in in ctest `library.spool`; the host's printers join the spooler's printer list at its start (`Library/Spool/Lib/libHost.c`); next the printer's options and paper sizes from CUPS)
+3. printing (the IPP client, the `Cups` port driver, the export side of the PostScript translation library `eps.geo` (without text and bitmaps) and the PostScript printer driver `pscript.geo` in C done; the spooler `spool.geo` in C with PDL printing to the file, custom and nothing ports done (ABI.md §13w); a spooler job through the `Cups` port to the stand-in in ctest `library.spool`; the host's printers join the spooler's printer list at its start (`Library/Spool/Lib/libHost.c`); the default paper of the host's default printer (`media-default`) becomes the default page size; next the PrintControl UI with the host's options)
 4. locale and time zone
 5. network
 6. storage

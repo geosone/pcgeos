@@ -3799,9 +3799,14 @@ geode is built from `spool32.gp`.
   semaphores of the queue and the error box are allocated in the
   library entry (`LCT_ATTACH`).
 - **Entry numbers.** `spool32.gp` keeps the numbers of `spool.gp`: the
-  controller classes and the paper size routines (0–12) and
-  `SpoolSetDocSize` are skipped, so `SpoolGetNumPrinters` is 13 and
-  `SpoolAddJob` 22, as before.
+  controller classes (0–4), `SpoolSetDocSize` (21),
+  `SpoolMapToPrinterFont`, `SpoolUpdateTranslationTable` and
+  `SPOOLSETDOCSIZE` (29–31) are skipped, so `SpoolGetNumPaperSizes` is
+  5, `SpoolGetNumPrinters` 13, `SpoolAddJob` 22 and
+  `SpoolGetDefaultPageSizeInfo` 32, as before. The C stubs of the asm
+  (`SPOOLGETDEFAULTPAGESIZEINFO` 34, the `publish`ed `SPOOLGETNUMPAPERSIZES`
+  … `SPOOLVERIFYPRINTERPORT` 36–55) are the same C routines under a
+  second entry (`export x as y`).
 - **C routines** take what the registers held: `SpoolAddJob(&jp)`
   returns the job ID (`SPOOL_INVALID_JOB_ID` while detaching),
   `SpoolInfo(type, &params)` fills the `SpoolInfoParams` as the
@@ -3859,6 +3864,18 @@ geode is built from `spool32.gp`.
   jobs with `SO_SHUTDOWN_ACTION` are dropped (`StripCanceledJobs`), the
   user is asked with `SERROR_PRINT_ON_STARTUP` (logged, answered
   `IC_YES`), and the jobs are queued again under their IDs.
+- **Page sizes** (`Lib/libPaper.c`, the C port of `libPaper.asm`): the
+  pre-defined sizes of paper, envelopes, labels and postcards with their
+  names and default layouts and the default orders come from
+  `libTables.asm` at build time (`Port32/tools/papergen.py`, the
+  standard build's conditionals); user-defined sizes, the order and
+  the default page size live in the ini file as before (`[paper] order`,
+  `newSizes`, `count`, `paper128` …, `[spool] width` …). The asm built
+  the order arrays once in a discardable copy of its `PageSizeData`
+  resource; C reads them from the ini file each time, so a new order
+  counts at once. `SpoolGetPaperSizeOrder` takes the `PageType`, which
+  the asm's C stub never passed (it used whatever `bp` held;
+  `spool.goh` declares the parameter under `GEOS_PORT32`).
 - **The host's printers** (`Lib/libHost.c`, new in Port32) join the
   printer list at the spooler's start, as if installed in Preferences:
   `gapi_print_list` gives the queues, and each becomes a printer with
@@ -3870,7 +3887,11 @@ geode is built from `spool32.gp`.
   host printer whose queue is gone is deleted; without a
   `defaultPrinter`, the host's default becomes it. When the host cannot
   be asked (dos32, no CUPS) the list stays as it is; `[spool]
-  hostPrinters = false` turns it off. The kernel exports
+  hostPrinters = false` turns it off. Without a default page size in
+  the ini, the paper of the host's default printer (`media-default`,
+  read by `gapi_print_list` from the PWG media name) becomes it,
+  portrait with the default margins; `[spool] hostPaper` marks it as the
+  host's, so it follows the host until the user sets one. The kernel exports
   `gapi_print_list` for it.
 - **`[spool] noPrinting`** is looked at every second instead of every
   15 seconds.
@@ -3889,8 +3910,10 @@ bx the file, dx the buffer size; up to 4 units), writes it with
 `STREAM_LINGER` (`STREAM_DISCARD` drops it). The file stays the
 caller's. Reads fail.
 
-Not ported yet: the PrintControl, the PageSizeControl and the paper
-sizes (`libPaper`), the printer control panel, the error boxes, the
+Not ported yet: the PrintControl, the PageSizeControl, the printer
+control panel, `libPrintControl` (`SpoolGetPageSize`, the paper size
+strings of the PrintControl), `libDriver` (printer fonts, translation
+tables), the error boxes, the
 detach confirmation (`SpoolApplicationDetachConfirm`), graphics and text mode
 printing, labels, Tiramisu (fax) printing, serial and parallel ports,
 the mailbox's medium notifications.
@@ -3909,10 +3932,15 @@ which must get the same PostScript as the file. Then two jobs wait
 is written and the spool files stay; loaded again, the spooler prints
 both under their IDs, deletes the state file, and the next ID follows
 them. Last, on Linux, the spooler starts again with the host's printers
-on: of the stand-in's two queues, `fake1` joins as "Drucker 1" (mono,
-one-sided) and `fake2` as "fake2" (its name "Office" is a printer of
-the user; color, duplex, the default), a host printer whose queue is
-gone is deleted, and a job to "Drucker 1" reaches `fake1`.
+on: of the stand-in's two queues, `fake1` joins as "fake1" (its name
+"Drucker 1" is a printer of the user; mono, one-sided) and `fake2` as
+"fake2" (no printer-info; color, duplex, the default), a host printer
+whose queue is gone is deleted, the default page size becomes `fake2`'s
+A4, and a job to "fake1" reaches its queue. On every host the test
+checks the page size routines: sizes, names and layouts of each
+`PageType`, the conversion upright and on the side, user-defined sizes,
+an order of the user, the default page size and the second entries of
+the C stubs.
 
 ## 14. Open
 
