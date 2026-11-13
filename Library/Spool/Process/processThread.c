@@ -8,10 +8,8 @@
  * SpoolJobInfo); here they get a pointer to it.  The queue is locked
  * only for short times (LockQueue), as in the asm.
  *
- * Port32: PDL and graphics printing (processPDL.c, processGraphics.c).
- * A text mode printer is reported (SERROR_NO_MODE_AVAIL) and the job
- * ends with an error until the text printing of the spooler is ported
- * (processText.asm).  Tiramisu (fax) printing and
+ * Port32: PDL, graphics and text printing (processPDL.c,
+ * processGraphics.c, processText.c).  Tiramisu (fax) printing and
  * labels are not built, as in the default spooler.  The asm never sets
  * SPS_ROTATED; neither does this.
  */
@@ -397,7 +395,12 @@ Boolean ProcessEndPage(SpoolJobInfo *j, GSRetType *ret, word data)
     if (*ret == GSRT_NEW_PAGE) {
 	pos = FilePos(j->SJI_fHan, 0, FILE_POS_RELATIVE);
 	gs = GrLoadGString(j->SJI_fHan, GST_STREAM, 0);
+	/* Port32: the look leaves the gstate as it was; a drawing
+	 * stopped on an element (GSRT_ONE) keeps the translation to the
+	 * pen, which moved the next page */
+	GrSaveState(j->SJI_gstate);
 	*ret = GrDrawGStringAtCP(j->SJI_gstate, gs, GSC_ONE, &last);
+	GrRestoreState(j->SJI_gstate);
 	GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
 	FilePos(j->SJI_fHan, pos, FILE_POS_START);
 	if (data != PEC_FORM_FEED) {
@@ -754,15 +757,12 @@ static void PrintDocument(SpoolJobInfo *j)
     GSRetType ret;
     byte e;
 
-    Boolean graphics = !IsPDL(j);
+    /* PDL, graphics or text */
+    int kind = IsPDL(j) ? 0 :
+	j->SJI_info.JP_printMode >= PM_FIRST_TEXT_MODE ? 2 : 1;
 
-    if (graphics && j->SJI_info.JP_printMode >= PM_FIRST_TEXT_MODE) {
-	/* processText.asm: not ported yet */
-	SpoolErrorBox(SERROR_NO_MODE_AVAIL, j->SJI_qHan);
-	StoppedByError(j);
-	return;
-    }
-    if (graphics ? DoGraphicsInit(j) : DoPDLInit(j)) {
+    if (kind == 2 ? DoTextInit(j) : kind ? DoGraphicsInit(j)
+					  : DoPDLInit(j)) {
 	SpoolErrorBox(SERROR_NO_MODE_AVAIL, j->SJI_qHan);
 	StoppedByError(j);
 	return;
@@ -783,7 +783,8 @@ static void PrintDocument(SpoolJobInfo *j)
 		SpoolErrorBox(SERROR_MANUAL_PAPER_FEED, 0) != SPOOL_IC_OK)
 		ret = GSRT_FAULT;
 	    else {
-		ret = graphics ? PrintGraphicsPage(j) : PrintPDLPage(j);
+		ret = kind == 2 ? PrintTextPage(j) :
+		      kind ? PrintGraphicsPage(j) : PrintPDLPage(j);
 		if (CheckForErrors(j, &e))
 		    goto doneDoc;
 		/* uncollated copies: the page again */
@@ -813,7 +814,9 @@ static void PrintDocument(SpoolJobInfo *j)
 	BumpPageNumber(j);
     }
 doneDoc:
-    if (graphics)
+    if (kind == 2)
+	DoTextCleanup(j);
+    else if (kind)
 	DoGraphicsCleanup(j);
     else
 	DoPDLCleanup(j);

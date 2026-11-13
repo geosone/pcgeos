@@ -3871,9 +3871,22 @@ geode is built from `spool32.gp`.
   as for PDL. The kernel has no CMYK or CMY bitmaps: such a device
   gets a monochrome swath and prints in black. The mode's color
   correction is not used. `VMOpen` with `VMO_TEMP_FILE` now returns the
-  file's name in the caller's buffer, as DOS16 did. A text mode
-  printer still ends the job with `SERROR_NO_MODE_AVAIL` until
-  `processText.asm` is ported.
+  file's name in the caller's buffer, as DOS16 did.
+- **Text modes** (`processText.c`): the text of a page is taken out of
+  its graphics string (drawing it with `GSC_OUTPUT` on a gstate without
+  a window and reading each text element) into the `TextStrings` block,
+  sorted by line, then left to right, with its attributes in an element
+  array; then each string goes to `DR_PRINT_STYLE_RUN` (`DR_dsSi` the
+  `StyleRunInfo`, `DR_esDi` the `TextStrings` block, ax and cx the
+  sheet's place on the paper), cut at the right edge of a sheet. A
+  `GR_DRAW_TEXT_FIELD` is read whole and skipped instead of copied into
+  a graphics string of its own. The style run elements have an even
+  size. An optional hyphen at the end of a string is drawn when the
+  text mode says so (the asm compared the mode with
+  `TM_DRAW_OPTIONAL_HYPHENS` and had it the wrong way round).
+- **The look at the next page** (`ProcessEndPage`) saves and restores
+  the gstate around it: a drawing stopped on an element keeps the
+  translation to the pen in the C kernel, which moved the next page.
 - **The end of a page.** `ProcessEndPage` compared bl with
   `PEC_FORM_FEED`: the low byte of the PState handle the driver left in
   bx, not the `GR_NEW_PAGE`'s data. The C printer drivers return no

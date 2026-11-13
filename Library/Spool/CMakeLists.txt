@@ -45,7 +45,7 @@ geos_geode(spool
            ${sp}/Process/processPort.c ${sp}/Process/processFile.c
            ${sp}/Process/processCustom.c ${sp}/Process/processNothing.c
            ${sp}/Process/processError.c ${sp}/Process/processRestart.c
-           ${sp}/Process/processGraphics.c
+           ${sp}/Process/processGraphics.c ${sp}/Process/processText.c
            ${sp}/Lib/libPrinter.c ${sp}/Lib/libMisc.c ${sp}/Lib/libHost.c
            ${sp}/Lib/libPaper.c ${spool_paper}
            ${sp}/Lib/libDriver.c ${spool_sym}

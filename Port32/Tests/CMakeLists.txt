@@ -347,8 +347,11 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   geos_embed(_filestr_c ${filestr_GEO} filestr_geode)
   geos_embed(_epson9_c ${epson9_GEO} epson9_geode)
   geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
+  geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
+             berkeley_fnt)
   add_executable(test_spool test_spool.c ${_spool_c} ${_filestr_c}
-                 ${_eps_c} ${_pscript_c} ${_epson9_c} ${_vidmem_c})
+                 ${_eps_c} ${_pscript_c} ${_epson9_c} ${_vidmem_c}
+                 ${_berkeley_c})
   add_dependencies(test_spool geode_spool geode_filestr geode_eps
                    geode_pscript geode_epson9 geode_vidmem)
   target_include_directories(test_spool PRIVATE
@@ -385,9 +388,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   endif()
 
   # drawing through the window system to the host video driver (vidmem
-  # embedded with test_spool)
-  geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
-             berkeley_fnt)
+  # and Berkeley embedded with test_spool)
   # the TrueType font driver (Driver/Font) and a font for it
   geos_embed(_truetype_c ${truetype_GEO} truetype_geode)
   geos_embed(_cooper_c ${PROJECT_SOURCE_DIR}/FontData/Ttf/cooper.ttf

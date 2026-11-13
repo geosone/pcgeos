@@ -198,6 +198,13 @@ typedef struct _SpoolJobInfo {
     VMFileHandle	SJI_bmFileHan;
     VMBlockHandle	SJI_bmHan;
     WindowHandle	SJI_bmWinHan;
+    /* text modes (processText.c; the asm shared the graphics fields) */
+    MemHandle		SJI_tsHan;	/* the TextStrings block */
+    word		SJI_textTileX;	/* the sheet's left edge */
+    word		SJI_textTileXright; /* and right one */
+    dword		SJI_textTileY;	/* its top */
+    word		SJI_textXPosition; /* the place of a style run */
+    word		SJI_textYPosition;
 } SpoolJobInfo;
 
 #define PAPER_INFO(j)	((j)->SJI_info.JP_paperSizeInfo)
@@ -273,6 +280,11 @@ extern GSRetType PrintPDLPage(SpoolJobInfo *j);
 extern word DoGraphicsInit(SpoolJobInfo *j);
 extern void DoGraphicsCleanup(SpoolJobInfo *j);
 extern GSRetType PrintGraphicsPage(SpoolJobInfo *j);
+
+/* Process/processText.c */
+extern word DoTextInit(SpoolJobInfo *j);
+extern void DoTextCleanup(SpoolJobInfo *j);
+extern GSRetType PrintTextPage(SpoolJobInfo *j);
 
 /* processPort.c */
 extern Boolean LoadPortDriver(SpoolJobInfo *j);

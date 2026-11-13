@@ -51,6 +51,8 @@ extern const unsigned char pscript_geode[];
 extern const unsigned long pscript_geode_size;
 extern const unsigned char vidmem_geode[];
 extern const unsigned long vidmem_geode_size;
+extern const unsigned char berkeley_fnt[];
+extern const unsigned long berkeley_fnt_size;
 extern const unsigned char epson9_geode[];
 extern const unsigned long epson9_geode_size;
 
@@ -538,11 +540,29 @@ typedef struct {
     int bad;			/* an unknown code or a truncated one */
     int left, top, right, bottom;	/* the dots of page 1 */
     long dots;
+    int left2, top2, right2, bottom2;	/* and of page 2 */
+    long dots2;
     int modes[4];		/* graphics codes per ESC * m */
+    char text[256];		/* the text of page 1, '|' at ESC $ */
+    int textLen;
+    int underline;		/* ESC - 1 on page 1 */
+    int absX[8];		/* the first ESC $ (not 0) of each page */
 } EpsonDecode;
 
 static void EpsonDot(EpsonDecode *d, int x, int y)
 {
+    if (d->pages == 1 && x >= 0 && y >= 0 && x < EP_W && y < EP_H) {
+	if (!d->dots2 || x < d->left2)
+	    d->left2 = x;
+	if (!d->dots2 || x > d->right2)
+	    d->right2 = x;
+	if (!d->dots2 || y < d->top2)
+	    d->top2 = y;
+	if (!d->dots2 || y > d->bottom2)
+	    d->bottom2 = y;
+	d->dots2++;
+	return;
+    }
     if (d->pages != 0 || x < 0 || y < 0 || x >= EP_W || y >= EP_H)
 	return;
     if (!d->dots || x < d->left)
@@ -576,19 +596,27 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d)
 	    continue;
 	}
 	if (c != 0x1b || i >= n) {
-	    if (c >= ' ')		/* text */
+	    if (c >= ' ') {		/* text */
+		if (!d->pages && d->textLen < (int) sizeof(d->text) - 1)
+		    d->text[d->textLen++] = (char) c;
 		continue;
+	    }
 	    d->bad++;
 	    return;
 	}
 	c = b[i++];
 	switch (c) {
+	case '-':
+	    if (!d->pages && i < n && b[i] == 1)
+		d->underline++;
+	    i++;
+	    break;
 	case '@': case 'O': case '6': case '8': case '4': case '5':
 	case 'P': case 'M': case 'T': case 'E': case 'F': case 'G':
 	case 'H':
 	    break;
 	case 't': case 'U': case 'r': case 'R': case 'x': case 'S':
-	case '-': case 'W': case 'w': case 'k': case 'p': case '3':
+	case 'W': case 'w': case 'k': case 'p': case '3':
 	case 0x19:
 	    i++;
 	    break;
@@ -606,6 +634,10 @@ static void EpsonDecodeFile(const byte *b, size_t n, EpsonDecode *d)
 	    if (i + 1 < n)
 		x = (b[i] | b[i + 1] << 8) * 4;
 	    i += 2;
+	    if (!d->pages && d->textLen < (int) sizeof(d->text) - 1)
+		d->text[d->textLen++] = '|';
+	    if (x && d->pages < 8 && !d->absX[d->pages])
+		d->absX[d->pages] = x;
 	    break;
 	case 'D':
 	    while (i < n && b[i])
@@ -684,8 +716,84 @@ static void TestEpson(void)
 	 * head starts: the printable area of the paper */
 	CHECK(d.left > 54 * 240 / 72 - 12 && d.left < 54 * 240 / 72 + 12);
 	CHECK(d.top > 54 * 3 - 12 && d.top < 54 * 3 + 12);
+	/* page 2: the filled rectangle and the ellipse, 100..400 by
+	 * 100..600 points, in the same place */
+	printf("  page 2: %ld dots, %dx%d at %d,%d\n", d.dots2,
+	       d.right2 - d.left2, d.bottom2 - d.top2, d.left2, d.top2);
+	CHECK(d.left2 > 82 * 240 / 72 - 12 && d.left2 < 82 * 240 / 72 + 12);
+	CHECK(d.top2 > 82 * 3 - 12 && d.top2 < 82 * 3 + 12);
+	CHECK(d.right2 - d.left2 > 1000 - 12 && d.right2 - d.left2 < 1000 + 12);
+	CHECK(d.bottom2 - d.top2 > 1500 - 12 && d.bottom2 - d.top2 < 1500 + 12);
 	free(b);
     }
+}
+
+/* a text page through the Epson 9-pin driver in its draft mode: the
+ * strings in the order of their lines, then left to right, each at its
+ * place; underline switched on for the underlined one; two pages */
+static void TestEpsonText(void)
+{
+    JobParameters jp;
+    EpsonDecode d;
+    GStateHandle gs;
+    FileHandle fh;
+    char name[13];
+    word ch;
+    size_t n;
+    byte *b;
+
+    fh = pSpoolCreateSpoolFile(name);
+    CHECK(fh != 0);
+    if (!fh)
+	return;
+    gs = GrCreateGString(fh, GST_STREAM, &ch);
+    GrDrawText(gs, 300, 100, "Right", 0);
+    GrDrawText(gs, 72, 100, "Hello World", 0);
+    /* underlined: the FX-85 has bold only in 10 pitch, underline in
+     * every pitch (its font entries) */
+    GrSetTextStyle(gs, TS_UNDERLINE, 0);
+    GrDrawText(gs, 72, 150, "Under", 0);
+    GrSetTextStyle(gs, 0, TS_UNDERLINE);
+    /* past the right edge (594 pt less the margin): cut there */
+    GrDrawText(gs, 500, 200, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0);
+    GrNewPage(gs, PEC_FORM_FEED);
+    GrDrawText(gs, 72, 72, "Page2", 0);
+    GrNewPage(gs, PEC_FORM_FEED);
+    CHECK(GrEndGString(gs) == GSET_NO_ERROR);
+    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+    FileClose(fh, FALSE);
+
+    FillJob(&jp, name, "Epson File", PPT_FILE, "out13.prn");
+    strcpy(jp.JP_deviceName, "Epson FX-85 (Epson Mode)");
+    jp.JP_printMode = PM_TEXT_DRAFT;
+    ((PrintDriverUIData *) jp.JP_printerData)->PUID_countryCode = PCC_USA;
+    CHECK(pSpoolAddJob(&jp) != 0xffff);
+    CHECK(WaitIdle());
+    b = (byte *) Get("DOCUMENT/out13.prn", &n);
+    CHECK(b != NULL && n > 20);
+    if (!b)
+	return;
+    EpsonDecodeFile(b, n, &d);
+    d.text[d.textLen] = 0;
+    printf("epson9 text: %lu bytes, %d pages, \"%s\", underline %d, x %d %d\n",
+	   (unsigned long) n, d.pages, d.text, d.underline, d.absX[0], d.absX[1]);
+    CHECK(!d.bad);
+    CHECK(d.pages == 2);
+    /* the last '|': the form feed's return to the left edge */
+    {
+	static const char head[] = "|Hello World|Right|Under|";
+	const char *cut = d.text + sizeof(head) - 1;
+	size_t k = strlen(cut);
+
+	CHECK(!strncmp(d.text, head, sizeof(head) - 1));
+	/* "ABC...", then the form feed's '|'; not all of it */
+	CHECK(k > 2 && k < 27 && cut[k - 1] == '|' &&
+	      !strncmp(cut, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", k - 1));
+    }
+    CHECK(d.underline == 1);
+    /* 72 pt less the document's margin, on both pages */
+    CHECK(d.absX[0] == 45 * 4 && d.absX[1] == 45 * 4);
+    free(b);
 }
 
 int main(int argc, char **argv)
@@ -753,6 +861,9 @@ int main(int argc, char **argv)
     Put("SYSTEM/PRINTER/epson9.geo", epson9_geode, epson9_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
+    Put("USERDATA", NULL, 0);		/* a font for the text modes */
+    Put("USERDATA/FONT", NULL, 0);
+    Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
     Put("SYSTEM/IMPEX/eps.geo", eps_geode, eps_geode_size);
     Put("SYSTEM/devpatch.ps", patch, sizeof(patch) - 1);
     Put("geos.ini", ini, sizeof(ini) - 1);
@@ -894,6 +1005,7 @@ int main(int argc, char **argv)
     CHECK(!SpoolFileExists("spool003.dat"));
 
     TestEpson();
+    TestEpsonText();
 
 #ifdef GEOS_TEST_CUPS
     /* the same document to the host's queue: the custom port loads
