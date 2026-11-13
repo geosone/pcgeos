@@ -3,16 +3,18 @@
 dot matrix drivers of Driver/Printer/DotMatrix) from its asm sources, as
 C.
 
-    dmdevinfo2c.py -o devices.c [-D constants.def]... --fonts font.asm
+    dmdevinfo2c.py -o devices.c [-D constants.def]... [--fonts font.asm]
                    driverinfo.asm info.asm...
 
 driverinfo.asm lists the devices ("DefPrinter PD_X, "name", infoRes")
 and holds the PrintDriverInfo with the ISO substitution table and the
 ASCII translation list (chunks in the asm).  Each info.asm holds one or
 more device info resources: a PrinterInfo, its GraphicsProperties, a
-FontGeometry table and the pitch tables.  The font file (--fonts) holds
-the printerFontInfo resource: lists of FontEntry offsets and the
-FontEntries.  The -D files give the constants (NAME = value).
+FontGeometry table, the pitch tables and a symbol set list (the control
+codes by PrinterSymbolSet).  The font file (--fonts) holds the
+printerFontInfo resource: lists of FontEntry offsets and the
+FontEntries; the PCL drivers have none (their NLQ list is an empty list
+in the info resource, the fonts are the printer's).  The -D files give the constants (NAME = value).
 
 The output defines, for each info resource, a structure of its parts in
 the order of the asm, so that the offsets the asm stored (PI_lowRes,
@@ -23,7 +25,8 @@ in the order of the PD_ enum; printDriverInfo and printTransTables (the
 tables of SpoolUpdateTranslationTable, Internal/spoolDr.h).
 
 Port32 differences: FE_command, the offset of a control code in the
-asm, is an index into printFontCommands[] (1 on; 0: none).  The UI
+asm, is an index into printFontCommands[] (1 on; 0: none), as are the
+entries of a symbol set list.  The UI
 fields (PI_mainUI, PI_optionsUI, PI_evalRoutine) are 0, as is
 GP_colorCorrection (a handle of a correction table): the print UI and
 color correction are not ported.  Records are filled by position, as
@@ -103,8 +106,30 @@ def strip_comments(text):
             else:
                 res += c
         out.append(res)
+    out = conditionals(out)
     # line continuations
     return '\n'.join(out).replace('\\\n', ' ')
+
+
+def conditionals(lines):
+    """the lines of ifdef/ifndef/else/endif with no symbol defined (as
+    the standard build: no GPC_ONLY); other conditionals are refused"""
+    out, stack = [], []
+    for line in lines:
+        w = line.split()
+        if w and w[0] in ('ifdef', 'ifndef'):
+            stack.append(w[0] == 'ifndef')
+            continue
+        if w and w[0] in ('if', 'ife', 'elseif'):
+            raise ValueError(f'conditional "{line.strip()}"')
+        if w and w[0] == 'else':
+            stack[-1] = not stack[-1]
+            continue
+        if w and w[0] == 'endif':
+            stack.pop()
+            continue
+        out.append(line if all(stack) else '')
+    return out
 
 
 def value(tok):
@@ -221,8 +246,7 @@ def parse_info(path):
         inf.smarts = value(smarts)
         if entry != 'NULL' or exit_ != 'NULL':
             raise ValueError(f'{inf.name}: custom entry/exit routines')
-        if syms != 'NULL':
-            raise ValueError(f'{inf.name}: symbol set list')
+        inf.syms = offset_of(syms)
         inf.modes = [offset_of(x) for x in (low, med, hi)]
         inf.draft = offset_of(draft)
         inf.nlq = offset_of(nlq)
@@ -255,8 +279,19 @@ def parse_info(path):
             vals = [value(b.group(1)) for b in
                     re.finditer(r'^\s*byte\s+(\S+)\s*$', lm.group(2), re.M)]
             inf.parts.append((lm.start(), 'pitch', lm.group(1), vals))
+        # lists of words: the symbol set list (control codes by
+        # PrinterSymbolSet) and empty font lists
+        for lm in re.finditer(r'^(\w+)\s+label\s+word\s*$(.*?)(?=^\w+\s+'
+                              r'(?:label|ends)|\Z)', body, re.M | re.S):
+            vals = [offset_of(b.group(1)) for b in
+                    re.finditer(r'^\s*word\s+(.+?)\s*$', lm.group(2), re.M)]
+            if lm.group(1) != inf.syms and vals:
+                raise ValueError(f'{inf.name}: word list {lm.group(1)}')
+            inf.parts.append((lm.start(), 'words', lm.group(1), vals))
         inf.parts.sort(key=lambda p: p[0])
         names = {p[2] for p in inf.parts}
+        if inf.syms and inf.syms not in names:
+            raise ValueError(f'{inf.name}: no symbol set list {inf.syms}')
         for x in inf.modes:
             if x and x not in names:
                 raise ValueError(f'{inf.name}: no mode {x}')
@@ -331,7 +366,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-o', required=True)
     ap.add_argument('-D', action='append', default=[])
-    ap.add_argument('--fonts', required=True)
+    ap.add_argument('--fonts')
     ap.add_argument('--header', default='printcom.h')
     ap.add_argument('driverinfo')
     ap.add_argument('infos', nargs='+')
@@ -344,7 +379,8 @@ def main():
     for f in a.infos:
         for inf in parse_info(f):
             infos[inf.name] = inf
-    lists, labels, entries = parse_fonts(a.fonts)
+    lists, labels, entries = (parse_fonts(a.fonts) if a.fonts
+                              else ([], {}, []))
 
     o = ['/* generated by Port32/tools/dmdevinfo2c.py from the driver\'s '
          'info files;\n * do not edit */',
@@ -355,6 +391,10 @@ def main():
     for e in entries:
         if e[5] and e[5] not in cmds:
             cmds.append(e[5])
+    for inf in infos.values():
+        for _, kind, pname, vals in inf.parts:
+            if kind == 'words':
+                cmds += [c for c in vals if c and c not in cmds]
     for c in cmds:
         o.append(f'extern const byte {c}[];')
     o.append('const byte *const printFontCommands[] = {\n    NULL,')
@@ -394,6 +434,8 @@ def main():
                 o.append(f'    GraphicsProperties {pname};')
             elif kind == 'geom':
                 o.append(f'    FontGeometry {pname}[{len(vals) + 1}];')
+            elif kind == 'words':
+                o.append(f'    word {pname}[{max(len(vals), 1)}];')
             else:
                 o.append(f'    byte {pname}[{len(vals)}];')
         o.append(f'}} {T};\n')
@@ -401,9 +443,15 @@ def main():
         def off(x):
             return f'offsetof({T}, {x})' if x else '0'
 
+        names = {p[2] for p in inf.parts}
+
         def foff(x):
             if not x:
                 return '0'
+            if x in names:
+                # a font list in the info resource (the PCL drivers' empty
+                # NLQ list: the mode is there, its fonts the printer's)
+                return off(x)
             return f'offsetof(PrintFontInfo, {labels[x]})'
         mt = ', '.join(str(x) for x in inf.margin_tractor)
         ma = ', '.join(str(x) for x in inf.margin_asf)
@@ -414,7 +462,8 @@ def main():
                  f'    {off(inf.modes[0])}, {off(inf.modes[1])},\n'
                  f'    {off(inf.modes[2])},\n'
                  f'    {foff(inf.draft)}, {foff(inf.nlq)},\n'
-                 f'    {off(inf.geom)}, 0,\t/* fonts, symbol sets */\n'
+                 f'    {off(inf.geom)}, {off(inf.syms)},'
+                 f'\t/* fonts, symbol sets */\n'
                  f'    {{ {mt} }},\t/* tractor margins */\n'
                  f'    {{ {ma} }},\t/* ASF margins */\n'
                  f'    0x{inf.input:02x}, 0x{inf.output:02x}, {inf.width},'
@@ -429,6 +478,10 @@ def main():
                 for fid, size, pt in vals:
                     o.append(f'    {{ 0x{fid:04x}, {size}, {off(pt)} }},')
                 o.append('    { 0, 0, 0 }\n  },')
+            elif kind == 'words':
+                o.append('  { ' + (', '.join(str(cmds.index(c) + 1) if c
+                                             else '0' for c in vals) or '0')
+                         + ' },\t/* ' + pname + ' */')
             else:
                 o.append('  { ' + ', '.join(f'0x{v:02x}' for v in vals) +
                          ' },\t/* ' + pname + ' */')
