@@ -247,7 +247,21 @@ static void VMFileType(void)
 	  HostFSIsHeader(raw) && raw[GFH_SIZE] == 0xeb && raw[GFH_SIZE + 1] ==
 	  0xad);
     vm = VMOpen("FILE.VM", 0, VMO_OPEN, 0);
-    CHECK(vm != 0 && VMClose(vm, FALSE) == 0);
+    CHECK(vm != 0);
+    /* the VM file's handle stands for its file (DOS16: it was the file
+     * handle), as the TrueType driver uses its cache file's */
+    {
+	ProtocolNumber pn = { 3, 4 }, got = { 0, 0 };
+	type = 0;
+	CHECK(FileGetHandleExtAttributes(vm, FEA_FILE_TYPE, &type, 2) == 0 &&
+	      type == GFT_VM);
+	CHECK(FileSetHandleExtAttributes(vm, FEA_PROTOCOL, &pn,
+					 sizeof(pn)) == 0);
+	CHECK(FileGetHandleExtAttributes(vm, FEA_PROTOCOL, &got,
+					 sizeof(got)) == 0 &&
+	      got.PN_major == 3 && got.PN_minor == 4);
+    }
+    CHECK(VMClose(vm, FALSE) == 0);
     CHECK(FileDelete("FILE.VM") == 0);
 }
 

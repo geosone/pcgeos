@@ -3,7 +3,7 @@
  * fileOpenClose.asm).
  *
  * A file handle is a SIG_FILE handle owned by the process of the thread
- * that opened it; its HE_addr is the KFile with what the file system
+ * that opened it (a VM file's SIG_VM handle stands for its file, FileOf); its HE_addr is the KFile with what the file system
  * driver of its disk keeps (DR_FS_ALLOC_OP, DR_FS_HANDLE_OP).
  * FileDuplicateHandle gives another handle to the same KFile, so both
  * share the position as with DOS.  The files a geode still has open are
@@ -20,6 +20,11 @@ KFile *FileOf(FileHandle fh)
 {
     HandleEntry *he = HandleEntryOf(fh);
 
+    /* a VM file's handle stands for its file, as in DOS16, where it was
+     * the file handle (the TrueType driver asks its cache file's
+     * protocol so) */
+    if (he->HE_type == SIG_VM && ((KVMFile *) he->HE_addr)->VF_file)
+	he = HandleEntryOf(((KVMFile *) he->HE_addr)->VF_file);
     if (he->HE_type != SIG_FILE)
 	KernelFatal(ILLEGAL_HANDLE);
     return he->HE_addr;
