@@ -64,7 +64,7 @@ The order follows what the Preferences need first and what can be tested:
 
 1. time (done)
 2. power (done)
-3. printing (the IPP client and the `Cups` port driver done; next PScript in C)
+3. printing (the IPP client, the `Cups` port driver and the export side of the PostScript translation library `eps.geo` done, without text and bitmaps; next PScript in C)
 4. locale and time zone
 5. network
 6. storage

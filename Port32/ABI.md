@@ -317,7 +317,11 @@ from their modules:
   loaded. So `GeodeLoad` loads it once with dummy imports, reads the
   library list from `__geos_module` and unloads it again. Then it uses
   the libraries (found among the loaded geodes, or loaded) and loads
-  the module for good.
+  the module for good. Only the libraries' imports are dummies in that
+  first load: kernel and host names resolve to the real routines,
+  because loading runs the module's constructors, and a DXE3 with
+  unwind tables (from libgcc's 64-bit division, say) calls
+  `__register_frame_info` at once.
 - **Imports by name.** An import comes from one of three places:
   - the kernel's export table: every symbol of the kernel's objects
     that `Library/Kernel/geos.gp` exports, case ignored
@@ -3581,6 +3585,74 @@ ctest `kernel.sys` covers the numbers, flags, environment, `SysGetInfo`,
 the references, UI data, `ProcInfo` and the geode counts; and
 `kernel.thread` covers the shared locks between threads, upgrade,
 downgrade and the thread-private words.
+
+### 13v. The PostScript translation library (`Library/Trans/Graphics/Vector/EPS`)
+
+The export side of `eps.geo` in C, beside the asm in `Export/`:
+`exportMain.c`, `exportHeader.c`, `exportGString.c`, `exportPath.c`,
+`exportArc.c`, `exportUtils.c`, with `exportInt.h` for the locals the
+asm routines shared (`TGSLocals`); the entry and the default options in
+`Lib/libMain.c`; the C interface in `CInclude/xlatPS.h`. The geode is
+built from `eps32.gp` (the routines ported so far). It is what the
+PostScript printer driver uses.
+
+- **The PostScript text stays in the asm.** `exportPSCode.asm`,
+  `exportComments.asm` and `exportProlog.asm` keep the procedures,
+  comments and the prolog as `char` data. `Port32/tools/asmchars2c.py`
+  makes C arrays of them at build time, with a header that gives their
+  sizes (`epsStrings.c`, `epsStrings.h`), so there is one copy of the
+  text.
+- **Interface.** The routines take C parameters instead of registers:
+  `EPSExportHeader(options, stream)`, `EPSExportBeginPage`,
+  `EPSExportLow(options, gstring, stream, flags, &ret)`,
+  `EPSExportRaw(options, data, size, stream)`, `EPSExportEndPage`,
+  `EPSExportTrailer`, `EPSNormalizeFilename(options)`,
+  `TransGetExportOptions(ui)`. `options` is the handle of a
+  `PSExportBlock`; `stream` that of an `EPSExportLowStreamStruct`,
+  whose token and C strategy pointer take `DR_STREAM_WRITE` with
+  `STREAM_BLOCK`. A zero stream is `TE_EXPORT_ERROR`, as the asm had it.
+- **Graphics strings** are played into a GState of the library's own
+  with `GSC_OUTPUT | GSC_PATH`, as `TranslateGStringCommon` did. Each
+  output element is read with `GrGetGStringElement` and skipped with
+  `GrSetGStringPos`, instead of being copied into a chunk. Its fields
+  are read by byte offset in the DOS16 layout (the `Op*` structures of
+  `CInclude/gstring.h` do not all match it).
+- **Numbers** are formatted as the asm did, with the same fraction
+  tables, rounding and limits. Line widths, the miter limit (GEOS keeps
+  its inverse, so 10 is written 9.9994), colors (the 16 default colors
+  mapped for printing), dashes, draw masks and system hatches come out
+  as before.
+- **Paths** come from `GrGetPath`, are loaded with `GrLoadGStringPtr`,
+  and are played into a GState of their own. Clip paths are written
+  before objects whose mask is not solid. 3-point arcs become a circle's
+  bounds and two angles (`exportArc.c`). The distance uses a 64-bit
+  integer square root instead of `SqrRootDWFixed`.
+- **Fixes of asm bugs**, each with a comment: `Setup3PointRelArcTo`
+  stored the second point into the first; `CheckFullPageHack` tested
+  the width twice instead of the width and the height; a point in a
+  path was read as a rectangle; `EPSNormalizeFilename` fell through from
+  the forced `.PS` into the EPS check, compared one character three
+  times and returned no `TransError`; `EPSExportBeginPage` returned
+  `TE_NO_ERROR` after a write error.
+- **Kept as the asm**, to be checked against DOS16 output: arcs are
+  written "ang1 ang2 x2 x1 y2 y1" into a space whose y axis `SDT`
+  flips, so they come out mirrored at the x axis.
+
+Not ported yet: text and fonts (`exportText.asm`, `exportType3Fonts.asm`,
+the font maps, `GetPageFonts`, `DownloadPageFonts`), bitmaps and
+`EPSExportBitmap` (`exportBitmap.asm`), embedded graphics,
+`TransExport` through the file stream driver, the export UI and the
+import side. Their elements are skipped, as `EmitNothing` skips the
+pointer forms.
+
+ctest `library.eps` loads `eps.geo` in a booted kernel and exports a
+graphics string of lines, rectangles, polylines, ellipses, rounded
+rectangles, arcs, a 3-point arc, a curve, a filled and a stroked path,
+a masked fill, a zero mask, a scaled line and a second page to a stream
+of the test. It checks the header comments, the setup sections, the
+code of each element and the trailer. Where Ghostscript is installed
+(`gs` in the `PATH` on Linux, or `GEOS_TEST_GS`), the file must also run
+through it without an error.
 
 ## 14. Open
 

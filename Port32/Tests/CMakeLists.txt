@@ -324,6 +324,13 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     add_test(NAME driver.cups COMMAND test_cups)
   endif()
 
+  # the PostScript translation library (Library/Trans/Graphics/Vector/EPS)
+  geos_embed(_eps_c ${eps_GEO} eps_geode)
+  add_executable(test_eps test_eps.c ${_eps_c})
+  add_dependencies(test_eps geode_eps)
+  target_link_libraries(test_eps PRIVATE geos_kernel)
+  add_test(NAME library.eps COMMAND test_eps)
+
   # the C host mouse driver (Driver/Mouse) through the input manager
   geos_embed(_hostmse_c ${hostmse_GEO} hostmse_geode)
   add_executable(test_mouse test_mouse.c ${_hostmse_c})

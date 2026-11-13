@@ -73,6 +73,7 @@ add_subdirectory(Driver/Mouse)
 add_subdirectory(Driver/Video)
 add_subdirectory(Driver/Font)
 add_subdirectory(Driver/Stream/Cups)
+add_subdirectory(Library/Trans/Graphics/Vector/EPS)
 add_subdirectory(Port32/Tests)
 
 # Inventory of direct host contacts (plan P2).  Not part of 'all'.
