@@ -14,9 +14,11 @@
  * The DOS16 driver had a module per format (Mono, Clr4, Clr8, Clr24,
  * CMYK) beside the common code; here the common code is vidcom and the
  * formats are the pixel access of vidmemUtils.c: monochrome, 4, 8 and
- * 24 bits, and the mask.  Not yet: CMYK, dithering on monochrome
- * bitmaps (a color is black or white by its brightness), color
- * transfer, PUTSTRING.
+ * 24 bits, and the mask.  Monochrome bitmaps dither in
+ * BM_CLUSTERED_DITHER (the clustered patterns of black, as the Mono
+ * module); otherwise a color is black or white by its brightness.  Not
+ * yet: CMYK, the ordered dither of the Mono module, color transfer,
+ * PUTSTRING.
  *
  * DR_VID_SET_PALETTE and DR_VID_GET_PALETTE (VidSetPalette,
  * VidGetPalette) work on the palette in the bitmap's header; one

@@ -13,7 +13,9 @@
  * palette indices (the bitmap's palette, or the default one): a color
  * is drawn as its nearest entry, and the mix modes work on the indices
  * as on the DOS16 color drivers.  Monochrome: the mix on the colors,
- * black where the result is dark.  Editing the mask (BM_EDIT_MASK) draws
+ * black where the result is dark, or, in BM_CLUSTERED_DITHER (the print
+ * spooler's swaths), where the clustered dither of its luminance is
+ * (CMYK/cmykDither.c).  Editing the mask (BM_EDIT_MASK) draws
  * monochrome into the mask.
  */
 #include "vidmem.h"
@@ -59,9 +61,12 @@ void VMSelect(VMFileHandle file, VMBlockHandle block, void *dir)
     maskBytes = (word) ((vmBM.width + 7) >> 3);
     vmBM.format = (byte) (c->CB_simple.B_type & BMT_FORMAT);
     vmBM.dataOffset = (c->CB_simple.B_type & BMT_MASK) ? maskBytes : 0;
+    vmBM.cluster = (Boolean) ((eb->EB_flags & BM_CLUSTERED_DITHER) &&
+			      vmBM.format == BMF_MONO);
     if ((eb->EB_flags & BM_EDIT_MASK) && (c->CB_simple.B_type & BMT_MASK)) {
 	vmBM.format = BMF_MONO;
 	vmBM.dataOffset = 0;
+	vmBM.cluster = FALSE;
     }
     if (c->CB_palette) {
 	const byte *p = (const byte *) c + c->CB_palette;
@@ -194,14 +199,51 @@ dword VidDevGetPixel(sword x, sword y)
     }
 }
 
+/* CalcLuminance (graphicsUtils.asm): r/4 + r/16 + g/2 + g/16 + b/8, the
+ * bits shifted out rounding it as the asm's carries did */
+static byte Luminance(dword c)
+{
+    byte r = (byte) (c >> 16), g = (byte) (c >> 8), b = (byte) c;
+    byte l, carries = 0;
+
+    l = (byte) (r >> 2);
+    carries = (byte) (carries + ((r >> 3) & 1));
+    l = (byte) (l + (r >> 4));
+    l = (byte) (l + (g >> 1));
+    carries = (byte) (carries + ((g >> 3) & 1));
+    l = (byte) (l + (g >> 4));
+    carries = (byte) (carries + ((b >> 2) & 1));
+    l = (byte) (l + (b >> 3));
+    return (byte) (l + (carries >> 1) + (carries & 1));
+}
+
+/* Black on a monochrome bitmap: by the clustered dither of the color's
+ * luminance at x, y (SetDitherClustered: the pattern of (255 - lum) / 8,
+ * rounded, anchored at the bitmap's origin, W_ditherY 0), else by its
+ * brightness */
+static Boolean Black(dword c, sword x, sword y)
+{
+    word level;
+    const byte (*pat)[3];
+
+    if (!vmBM.cluster)
+	return Dark(c);
+    level = (word) (255 - Luminance(c));
+    level = (word) ((level >> 3) + ((level >> 2) & 1));
+    pat = vidmemDitherBlack[level];
+    x = (sword) (x % VM_DITHER_WIDTH);
+    y = (sword) (y % VM_DITHER_HEIGHT);
+    return (Boolean) ((pat[y][x >> 3] & (0x80 >> (x & 7))) != 0);
+}
+
 /* a pixel in color c (0x00RRGGBB) with mix mode m */
-static void Put(byte *p, sword x, dword c, MixMode m)
+static void Put(byte *p, sword x, sword y, dword c, MixMode m)
 {
     switch (vmBM.format) {
     case BMF_MONO: {
 	byte bit = (byte) (0x80 >> (x & 7));
 	dword d = (p[x >> 3] & bit) ? 0 : 0xffffffUL;
-	if (Dark(Mix(d, c, m, 0xffffffUL)))
+	if (Black(Mix(d, c, m, 0xffffffUL), x, y))
 	    p[x >> 3] |= bit;
 	else
 	    p[x >> 3] &= (byte) ~bit;
@@ -235,7 +277,7 @@ void VidDevPutPixel(sword x, sword y, dword color, MixMode mix)
     byte *p = Line(y);
 
     if (p && x >= 0 && (word) x < vmBM.width)
-	Put(p, x, color, mix);
+	Put(p, x, y, color, mix);
 }
 
 void VidDevFillRect(sword left, sword top, sword right, sword bottom,
@@ -260,7 +302,7 @@ void VidDevFillRect(sword left, sword top, sword right, sword bottom,
 	    break;
 	for (x = left; x <= right; x++)
 	    if (m & (0x80 >> (x & 7)))
-		Put(p, x, ds->VDS_color, ds->VDS_mix);
+		Put(p, x, y, ds->VDS_color, ds->VDS_mix);
     }
 }
 

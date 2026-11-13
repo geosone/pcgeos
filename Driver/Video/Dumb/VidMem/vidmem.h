@@ -24,6 +24,7 @@ typedef struct {
     byte		*line0;		/* the locked scan lines */
     word		first, count;
     Boolean		dirty;
+    Boolean		cluster;	/* BM_CLUSTERED_DITHER, monochrome */
 } VMBitmap;
 
 extern VMBitmap vmBM;
@@ -33,5 +34,11 @@ void VMSelect(VMFileHandle file, VMBlockHandle block, void *dir);
 void VMRelease(void);
 word VMLineSize(word width, byte type);
 extern byte vmDefaultPalette[256 * 3];
+
+/* CMYK/cmykDither.c: the clustered dither of BM_CLUSTERED_DITHER */
+#define VM_DITHER_HEIGHT	6
+#define VM_DITHER_WIDTH		24
+#define VM_DITHER_LEVELS	33
+extern const byte (*const vidmemDitherBlack[VM_DITHER_LEVELS])[3];
 
 #endif /* VIDMEM_H */

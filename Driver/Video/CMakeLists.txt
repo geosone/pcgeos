@@ -33,7 +33,7 @@ set(hostvid_GEO ${hostvid_GEO} PARENT_SCOPE)
 set(_vidmem ${CMAKE_CURRENT_SOURCE_DIR}/Dumb/VidMem)
 geos_geode(vidmem ${_vidcom}
            ${_vidmem}/Main/mainMain.c
-           ${_vidmem}/vidmemUtils.c
+           ${_vidmem}/vidmemUtils.c ${_vidmem}/CMYK/cmykDither.c
            GP Dumb/VidMem/vidmem.gp PROTOCOL 5.3
            INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/VidCom ${_vidmem})
 set(vidmem_GEO ${vidmem_GEO} PARENT_SCOPE)
