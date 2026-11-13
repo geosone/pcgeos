@@ -52,6 +52,10 @@ extern const unsigned char pscript_geode[];
 extern const unsigned long pscript_geode_size;
 extern const unsigned char vidmem_geode[];
 extern const unsigned long vidmem_geode_size;
+extern const unsigned char truetype_geode[];
+extern const unsigned long truetype_geode_size;
+extern const unsigned char cooper_ttf[];
+extern const unsigned long cooper_ttf_size;
 extern const unsigned char berkeley_fnt[];
 extern const unsigned long berkeley_fnt_size;
 extern const unsigned char epson24_geode[];
@@ -883,6 +887,10 @@ int main(int argc, char **argv)
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
+    Put("USERDATA/FONT/TTF", NULL, 0);
+    Put("USERDATA/FONT/TTF/cooper.ttf", cooper_ttf, cooper_ttf_size);
+    Put("SYSTEM/FONT", NULL, 0);
+    Put("SYSTEM/FONT/truetype.geo", truetype_geode, truetype_geode_size);
     Put("SYSTEM/IMPEX/eps.geo", eps_geode, eps_geode_size);
     Put("SYSTEM/devpatch.ps", patch, sizeof(patch) - 1);
     Put("geos.ini", ini, sizeof(ini) - 1);
@@ -1226,6 +1234,16 @@ int main(int argc, char **argv)
 	    GrSetTextColor(gs, CF_RGB, 0xcc, 0, 0);
 	    GrSetFont(gs, FID_PS_TIMES_ROMAN, (WWFixedAsDWord) 14 << 16);
 	    GrDrawText(gs, 72, 190, "Red Times", 0);
+	    /* Cooper Black, which the printer lacks: a Type 3 font */
+	    {
+		FontID coop = GrCheckFontAvailName(FEF_OUTLINES, 0,
+						   "Cooper* Black");
+		if (coop != FID_INVALID) {
+		    GrSetTextColor(gs, CF_RGB, 0, 0, 0);
+		    GrSetFont(gs, coop, (WWFixedAsDWord) 24 << 16);
+		    GrDrawText(gs, 200, 210, "Cooper Black", 0);
+		}
+	    }
 	    /* a bitmap: 48 by 24, 24 bits, a color ramp (grey on
 		 * this level 1 device) */
 	    {
