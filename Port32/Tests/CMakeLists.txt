@@ -329,8 +329,14 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   geos_embed(_eps_c ${eps_GEO} eps_geode)
   geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
              berkeley_fnt)
-  add_executable(test_eps test_eps.c ${_eps_c} ${_berkeley_c})
-  add_dependencies(test_eps geode_eps)
+  # the TrueType font driver (Driver/Font) and a font for it: Cooper
+  # Black, which no printer has, downloaded as a Type 3 font
+  geos_embed(_truetype_c ${truetype_GEO} truetype_geode)
+  geos_embed(_cooper_c ${PROJECT_SOURCE_DIR}/FontData/Ttf/cooper.ttf
+             cooper_ttf)
+  add_executable(test_eps test_eps.c ${_eps_c} ${_berkeley_c}
+                 ${_truetype_c} ${_cooper_c})
+  add_dependencies(test_eps geode_eps geode_truetype)
   target_link_libraries(test_eps PRIVATE geos_kernel)
   add_test(NAME library.eps COMMAND test_eps)
 
@@ -353,10 +359,10 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
   add_executable(test_spool test_spool.c ${_spool_c} ${_filestr_c}
                  ${_eps_c} ${_pscript_c} ${_epson9_c} ${_epson24_c} ${_vidmem_c}
-                 ${_berkeley_c})
+                 ${_berkeley_c} ${_truetype_c} ${_cooper_c})
   add_dependencies(test_spool geode_spool geode_filestr geode_eps
                    geode_pscript geode_epson9 geode_epson24
-                   geode_vidmem)
+                   geode_vidmem geode_truetype)
   target_include_directories(test_spool PRIVATE
                              ${PROJECT_SOURCE_DIR}/CInclude/Internal)
   target_link_libraries(test_spool PRIVATE geos_kernel)
@@ -392,10 +398,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
 
   # drawing through the window system to the host video driver (vidmem
   # and Berkeley embedded with test_spool)
-  # the TrueType font driver (Driver/Font) and a font for it
-  geos_embed(_truetype_c ${truetype_GEO} truetype_geode)
-  geos_embed(_cooper_c ${PROJECT_SOURCE_DIR}/FontData/Ttf/cooper.ttf
-             cooper_ttf)
+  # (the TrueType font driver and Cooper Black: embedded with test_eps)
   add_executable(test_kernel_draw test_kernel_draw.c ${_hostvid_c}
                  ${_vidmem_c} ${_berkeley_c} ${_truetype_c} ${_cooper_c})
   add_dependencies(test_kernel_draw geode_hostvid geode_vidmem

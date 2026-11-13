@@ -27,6 +27,10 @@
 
 extern const unsigned char berkeley_fnt[];
 extern const unsigned long berkeley_fnt_size;
+extern const unsigned char truetype_geode[];
+extern const unsigned long truetype_geode_size;
+extern const unsigned char cooper_ttf[];
+extern const unsigned long cooper_ttf_size;
 extern const unsigned char eps_geode[];
 extern const unsigned long eps_geode_size;
 
@@ -91,6 +95,16 @@ static size_t AtN(const char *s, size_t n)
     size_t i;
 
     for (i = 0; i + n <= outLen; i++)
+	if (!memcmp(out + i, s, n))
+	    return i;
+    return (size_t) -1;
+}
+
+static size_t AtFrom(const char *s, size_t from)
+{
+    size_t n = strlen(s), i;
+
+    for (i = from; i + n <= outLen; i++)
 	if (!memcmp(out + i, s, n))
 	    return i;
     return (size_t) -1;
@@ -176,6 +190,8 @@ static word FieldStyle(GDF_vars *v, TextAttr *ta, word offset,
     return (word) (second ? 5 : 3);
 }
 
+static FontID ttFont = FID_INVALID;	/* Cooper Black */
+
 /* the text of the page */
 static void DrawText(GStateHandle gs)
 {
@@ -192,6 +208,21 @@ static void DrawText(GStateHandle gs)
     GrSetTextStyle(gs, TS_UNDERLINE, TS_BOLD);
     GrDrawText(gs, 10, 510, "K\x8ase", 0);		/* "Kase" with a-umlaut */
     GrSetTextStyle(gs, 0, TS_UNDERLINE);
+    /* Cooper Black: no printer has it, GEOS has its outlines (TrueType):
+     * a Type 3 font, its characters as they are needed */
+    {
+	FontID coop = GrCheckFontAvailName(FEF_OUTLINES, 0, "Cooper* Black");
+	if (coop != FID_INVALID) {
+	    GrSetFont(gs, coop, WWF(20, 0));
+	    GrDrawText(gs, 200, 450, "Cooper", 0);
+	    GrDrawText(gs, 200, 480, "Cop!", 0);	/* only the ! is new */
+	    GrSetTextStyle(gs, TS_ITALIC, 0);	/* the driver's shear */
+	    GrDrawText(gs, 300, 450, "Cop", 0);
+	    GrSetTextStyle(gs, 0, TS_ITALIC);
+	    GrSetFont(gs, FID_PS_COURIER, WWF(12, 0));
+	}
+	ttFont = coop;
+    }
     memset(&v, 0, sizeof(v));
     v.GDFV_saved.GDFS_nChars = 8;
     v.GDFV_saved.GDFS_drawPos.PWBF_x.WBF_int = 10;
@@ -377,6 +408,10 @@ int main(int argc, char **argv)
     Put("USERDATA", NULL, 0);
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
+    Put("USERDATA/FONT/TTF", NULL, 0);
+    Put("USERDATA/FONT/TTF/cooper.ttf", cooper_ttf, cooper_ttf_size);
+    Put("SYSTEM/FONT", NULL, 0);
+    Put("SYSTEM/FONT/truetype.geo", truetype_geode, truetype_geode_size);
 
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     FileSetStandardPath(SP_SYSTEM);
@@ -519,6 +554,55 @@ int main(int argc, char **argv)
     HAS("{255 0 0 SGC ");
     HAS("/Times-Bold true 12 ");
     HAS(" DSG\r\n");
+
+    /* Cooper Black as a Type 3 font: defined before its first text,
+     * its characters added as they come, each once */
+    CHECK(ttFont != FID_INVALID);
+    if (ttFont != FID_INVALID) {
+	char name[16];
+	size_t def, first, add2;
+
+	snprintf(name, sizeof(name), "/X%04X00", (unsigned) ttFont);
+	HAS("12 dict begin\r\n/FontType 3 def\r\n");
+	HAS("/FontMatrix [0.001 0 0 0.001 0 0] def\r\n");
+	{
+	    char s[64];
+	    snprintf(s, sizeof(s), "%s exch definefont pop\r\n", name);
+	    def = At(s);
+	    CHECK(def != (size_t) -1);
+	    snprintf(s, sizeof(s), "%s findfont /CharProcs get begin\r\n"
+		     "/c45 <", name);			/* the hyphen first */
+	    first = At(s);
+	    CHECK(first != (size_t) -1 && first > def);
+	    snprintf(s, sizeof(s), "%s true 20 ", name);
+	    CHECK(!Has(s));
+	    snprintf(s, sizeof(s), "%s false 20 [1 0 0 1 0 0] ] ] ", name);
+	    HAS(s);
+	}
+	{
+	    char s[64];
+	    snprintf(s, sizeof(s), "/X%04X10 exch definefont pop\r\n",
+		     (unsigned) ttFont);
+	    HAS(s);				/* italic: a font of its own */
+	}
+	HAS("/FontMatrix [0.001 0 0.000");	/* sheared */
+	HAS("/c67 <");				/* C */
+	HAS("/c111 <");				/* o */
+	/* each character once in the font; the italic font (defined
+	 * after) has its own */
+	{
+	    char s[64];
+	    size_t it;
+	    snprintf(s, sizeof(s), "/X%04X10 exch definefont pop",
+		     (unsigned) ttFont);
+	    it = At(s);
+	    CHECK(it != (size_t) -1 && it > first);
+	    CHECK(AtFrom("/c111 <", At("/c111 <") + 1) > it);
+	    add2 = At("/c33 <");		/* ! */
+	    CHECK(add2 != (size_t) -1 && add2 > first && add2 < it);
+	    CHECK(AtFrom("/c67 <", add2) > it);	/* C not again */
+	}
+    }
 
     /* bitmaps on a level 1 printer: monochrome in packets, binary or
      * hex, the bits past the width cleared; the colors as grey */

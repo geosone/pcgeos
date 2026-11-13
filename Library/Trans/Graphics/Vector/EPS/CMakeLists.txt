@@ -15,7 +15,8 @@ include(${PROJECT_SOURCE_DIR}/cmake/GeosGeode.cmake)
 
 set(_eps ${CMAKE_CURRENT_SOURCE_DIR})
 set(_eps_text ${_eps}/Export/exportPSCode.asm ${_eps}/Export/exportComments.asm
-              ${_eps}/Export/exportProlog.asm)
+              ${_eps}/Export/exportProlog.asm
+              ${_eps}/Export/exportType3Fonts.asm)
 set(_eps_strings ${CMAKE_CURRENT_BINARY_DIR}/epsStrings.c)
 add_custom_command(OUTPUT ${_eps_strings} ${CMAKE_CURRENT_BINARY_DIR}/epsStrings.h
   COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/asmchars2c.py

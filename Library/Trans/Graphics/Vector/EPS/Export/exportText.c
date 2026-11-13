@@ -13,13 +13,24 @@
  *	[ [(string) {attrs} trackkern /Font reencode size [style matrix]] ...]
  *	spacepad width x y DSG
  *
- * Port32: fonts that the printer lacks are mapped to the closest one it
- * has; the asm downloaded the outlines of such a font as a Type 3 font
- * (DownloadPageFonts, DownloadFont) where the font driver had them: not
- * ported yet.  So the page fonts are found as the text comes (EmitFont)
- * instead of before the page (GetPageFonts, which set the string back to
- * its beginning after: the beginning of the page only where each page
- * is a string of its own, as the spooler's).  ConquerTheGreeks was
+ * A font the printer lacks (no exact match) whose outlines GEOS has is
+ * downloaded as a Type 3 font named /X<id><style> (DownloadFont), its
+ * characters' paths from the font driver (DR_FONT_GEN_PATH with
+ * FGPF_POSTSCRIPT) in the asm's compact hex form, drawn by BuildGlyph.
+ *
+ * Port32: the page fonts are found as the text comes (EmitFont) instead
+ * of before the page (GetPageFonts, which set the string back to its
+ * beginning after: the beginning of the page only where each page is a
+ * string of its own, as the spooler's).  So a downloaded font is defined
+ * before the first text in it, with an empty CharProcs and every code
+ * encoded, and the characters each text needs and the page has not yet
+ * are added to its CharProcs before that text ("/X.. findfont /CharProcs
+ * get begin ... end"), instead of all at the page's start.  Its
+ * FontMatrix is the driver's transformation of a 1000 point font divided
+ * by 1000 (the asm read it at 1 point, rounded to 1/65536), its bounding
+ * box 0 0 0 0 (unknown: the characters come later).  Bold and italic are
+ * left to the driver (in the FontMatrix), the other styles to the text
+ * as for the printer's fonts.  ConquerTheGreeks was
  * switched off in the asm and is left out.  Text in paths (the path
  * GState) is not drawn: paths are skipped (exportGString.c).  The font
  * and style are taken before the metrics lock the font (and put what
@@ -32,8 +43,10 @@
 #include <font.h>
 #include <fontID.h>
 #include <char.h>
+#include <Internal/fontDr.h>
 
 /* a PageFont (exportConstant.def) */
+#define PFF_DEFINED	0x04		/* Port32: downloaded, defined */
 #define PFF_DOWNLOAD	0x02
 #define PFF_REENCODE	0x01
 #define PF_NAME_SIZE	60
@@ -205,9 +218,22 @@ static word GetPageFontEntry(TGSLocals *tgs, FontID id, TextStyle style)
     /* printer and bitmap fonts: as Times */
     if (map >= FM_PRINTER || map < FM_NIMBUSQ)
 	map = FID_PS_TIMES_ROMAN;
-    (void) MapFontToPostScript(tgs, &pf[0], map, style);
-    /* Port32: no Type 3 download (PFF_DOWNLOAD) of a font the printer
-     * lacks; the closest one is used */
+    if (MapFontToPostScript(tgs, &pf[0], map, style) != FM_EXACT &&
+	map == id && GrCheckFontAvailID(FEF_OUTLINES, 0, id) != FID_INVALID) {
+	/* not the printer's own, but GEOS has the outlines: download */
+	static const char hex[] = "0123456789ABCDEF";
+	pf[0].PF_flags = PFF_DOWNLOAD;
+	pf[0].PF_newstyle = (TextStyle) (style & ~(TS_BOLD | TS_ITALIC));
+	pf[0].PF_nlen = 8;
+	pf[0].PF_name[0] = '/';
+	pf[0].PF_name[1] = 'X';
+	pf[0].PF_name[2] = hex[(id >> 12) & 15];
+	pf[0].PF_name[3] = hex[(id >> 8) & 15];
+	pf[0].PF_name[4] = hex[(id >> 4) & 15];
+	pf[0].PF_name[5] = hex[id & 15];
+	pf[0].PF_name[6] = hex[(style >> 4) & 15];
+	pf[0].PF_name[7] = hex[style & 15];
+    }
     for (i = 1; i <= n; i++)
 	if (pf[i].PF_id == id && pf[i].PF_style == style)
 	    return i;
@@ -234,6 +260,302 @@ void FreePageFonts(TGSLocals *tgs)
     if (tgs->TGS_pageFonts)
 	MemFree(tgs->TGS_pageFonts);
     tgs->TGS_pageFonts = 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Type 3 fonts (exportType3Fonts.asm, DownloadFont, EmitCharacter)
+ * ------------------------------------------------------------------- */
+
+#define HO_MOVETO	0
+#define HO_LINETO	2
+#define HO_CURVETO	6
+#define HO_FILL		8
+#define HO_SETCACHE	9
+#define HO_DIGITS_RANGE	110
+#define HO_DIGITS_ZERO	0x7c
+#define HO_110S_LOW	(-10)
+#define HO_110S_HIGH	10
+#define HO_110S_ZERO	0xf5
+#define T3_SIZE		1000		/* the size the paths are made at */
+#define T3_LINE		70		/* hex digits on a line */
+/* a string literal and its length */
+#define PSLIT(s)	s, (word) (sizeof(s) - 1)
+
+/* a byte of a character's procedure, in hex, lines broken */
+static void T3Byte(TGSLocals *tgs, byte b)
+{
+    static const char hex[] = "0123456789ABCDEF";
+
+    if (tgs->p + 4 > tgs->TGS_buffer + EPS_BUFFER_SIZE ||
+	tgs->p - tgs->TGS_buffer >= T3_LINE) {
+	PutChar(tgs, '\r');
+	PutChar(tgs, '\n');
+	EmitBuffer(tgs);
+    }
+    PutChar(tgs, hex[b >> 4]);
+    PutChar(tgs, hex[b & 15]);
+}
+
+/* HexEncodeSWord: v as a digit -110..110 and steps of 110 */
+static void HexEncodeSWord(TGSLocals *tgs, sword v)
+{
+    sword q = (sword) (v / HO_DIGITS_RANGE), r = (sword) (v % HO_DIGITS_RANGE);
+
+    T3Byte(tgs, (byte) (r + HO_DIGITS_ZERO));
+    if (!q)
+	return;
+    while (q < HO_110S_LOW) {
+	T3Byte(tgs, (byte) (HO_110S_LOW + HO_110S_ZERO));
+	q = (sword) (q - HO_110S_LOW);
+    }
+    while (q > HO_110S_HIGH) {
+	T3Byte(tgs, (byte) (HO_110S_HIGH + HO_110S_ZERO));
+	q = (sword) (q - HO_110S_HIGH);
+    }
+    T3Byte(tgs, (byte) (q + HO_110S_ZERO));
+}
+
+/* the path of character c in font and style as a graphics string in a
+ * chunk of blk (ch); FALSE if none */
+static GStateHandle CharPath(MemHandle blk, FontID font, TextStyle style,
+			     byte c)
+{
+    word ch = 0;
+    GStateHandle g = GrCreateGString(blk, GST_CHUNK, &ch);
+    DriverRegs r;
+
+    if (!g)
+	return 0;
+    GrSetFont(g, font, (WWFixedAsDWord) T3_SIZE << 16);
+    style = (TextStyle) (style & (TS_BOLD | TS_ITALIC));
+    GrSetTextStyle(g, style, (TextStyle) (~style & 0xff));
+    memset(&r, 0, sizeof(r));
+    r.DR_bx = g;
+    r.DR_cx = FGPF_POSTSCRIPT;
+    r.DR_dx = c;
+    (void) GrCallFontDriver(g, DR_FONT_GEN_PATH, &r);
+    (void) GrEndGString(g);
+    GrDestroyGString(g, 0, GSKT_LEAVE_DATA);
+    return GrLoadGString(blk, GST_CHUNK, ch);
+}
+
+/* the 1/1000 of a WWFixed, in six decimals */
+static char *ThousandthToAscii(char *p, sdword v)
+{
+    int64_t m = ((int64_t) v * 1000000 / 1000 + (v < 0 ? -32768 : 32768))
+		/ 65536;
+    char d[8];
+    int i;
+
+    if (m < 0) {
+	*p++ = '-';
+	m = -m;
+    }
+    p = UWordToAscii(p, (word) (m / 1000000));
+    m %= 1000000;
+    if (m) {
+	*p++ = '.';
+	for (i = 5; i >= 0; i--, m /= 10)
+	    d[i] = (char) ('0' + m % 10);
+	for (i = 6; i > 1 && d[i - 1] == '0'; i--)
+	    ;
+	memcpy(p, d, (size_t) i);
+	p += i;
+    }
+    return p;
+}
+
+/* EmitCharacter: "/cNN <procedure> def"; its path from the driver */
+static void EmitCharacter(TGSLocals *tgs, MemHandle blk, FontID font,
+			  TextStyle style, byte c)
+{
+    GStateHandle g = CharPath(blk, font, style, c);
+    byte e[32];
+    word size, op;
+    sword ox = 0, oy = 0, cx = (sword) 0x8000, cy = (sword) 0x8000;
+    Boolean any = FALSE;
+
+    ResetBuffer(tgs);
+    Put(tgs, PSLIT("/c"));
+    tgs->p = UWordToAscii(tgs->p, c);
+    Put(tgs, PSLIT(" <"));
+    while (g) {
+	op = GrGetGStringElement(tgs->TGS_gstate, g, sizeof(e), e, &size);
+	if (op == GR_END_GSTRING || !size)
+	    break;
+	GrSetGStringPos(g, GSSPT_SKIP_1, 0);
+	if (size > sizeof(e))
+	    continue;
+	switch (op) {
+	case GR_COMMENT:		/* CharSizeInfo: wx wy llx lly urx ury */
+	    if (size >= 3 + 12 && !any) {
+		word i;
+		for (i = 0; i < 6; i++)
+		    HexEncodeSWord(tgs, EL_W(e, 3 + 2 * i));
+		T3Byte(tgs, HO_SETCACHE);
+		any = TRUE;
+	    }
+	    break;
+	case GR_APPLY_TRANSLATION:
+	    ox = (sword) (ox + EL_W(e, 3));
+	    oy = (sword) (oy + EL_W(e, 7));
+	    break;
+	case GR_APPLY_TRANSLATION_DWORD:
+	    ox = (sword) (ox + EL_W(e, 1));
+	    oy = (sword) (oy + EL_W(e, 5));
+	    break;
+	case GR_MOVE_TO:
+	    if ((sword) (EL_W(e, 1) + ox) == cx &&
+		(sword) (EL_W(e, 3) + oy) == cy)
+		break;
+	    /* fall through */
+	case GR_DRAW_LINE_TO:
+	    cx = (sword) (EL_W(e, 1) + ox);
+	    cy = (sword) (EL_W(e, 3) + oy);
+	    HexEncodeSWord(tgs, cx);
+	    HexEncodeSWord(tgs, cy);
+	    T3Byte(tgs, op == GR_MOVE_TO ? HO_MOVETO : HO_LINETO);
+	    break;
+	case GR_DRAW_CURVE_TO: {
+	    word i;
+	    for (i = 0; i < 3; i++) {
+		HexEncodeSWord(tgs, (sword) (EL_W(e, 1 + 4 * i) + ox));
+		HexEncodeSWord(tgs, (sword) (EL_W(e, 3 + 4 * i) + oy));
+	    }
+	    cx = (sword) (EL_W(e, 9) + ox);
+	    cy = (sword) (EL_W(e, 11) + oy);
+	    T3Byte(tgs, HO_CURVETO);
+	    break;
+	}
+	default:			/* the transformation: FontMatrix */
+	    break;
+	}
+    }
+    if (any)
+	T3Byte(tgs, HO_FILL);
+    Put(tgs, PSLIT("> def\r\n"));
+    EmitBuffer(tgs);
+    if (g)
+	GrDestroyGString(g, 0, GSKT_KILL_DATA);
+}
+
+/* DownloadFont: the font's dictionary, without characters */
+static void DownloadFont(TGSLocals *tgs, MemHandle blk, const PageFont *pf)
+{
+    static const char define[] = " exch definefont pop\r\n";
+    TransMatrix tm;
+    GStateHandle g;
+    word c;
+    byte e[32];
+    word size;
+
+    EmitPSCode(tgs, PS(beginType3Header));
+    EmitPSCode(tgs, PS(emitCPstart));
+    EmitPSCode(tgs, PSLIT("257"));
+    EmitPSCode(tgs, PS(beginCPdefine));
+    EmitPSCode(tgs, PS(beginEVdefine));
+    /* every code but 0 named cNN (EmitEncoding) */
+    ResetBuffer(tgs);
+    PutChar(tgs, '<');
+    for (c = 1; c < 256; c++)
+	T3Byte(tgs, (byte) c);
+    EmitBuffer(tgs);
+    EmitPSCode(tgs, PS(emitEAend));
+
+    /* the FontMatrix: the transformation of 'a', at 1000 points */
+    memset(&tm, 0, sizeof(tm));
+    tm.TM_e11.WWF_int = tm.TM_e22.WWF_int = T3_SIZE;
+    g = CharPath(blk, pf->PF_id, pf->PF_style, 'a');
+    while (g) {
+	word op = GrGetGStringElement(tgs->TGS_gstate, g, sizeof(e), e, &size);
+	if (op == GR_END_GSTRING || !size)
+	    break;
+	GrSetGStringPos(g, GSSPT_SKIP_1, 0);
+	if (op == GR_APPLY_TRANSFORM && size >= 29) {
+	    tm.TM_e11.WWF_frac = (word) EL_W(e, 1);
+	    tm.TM_e11.WWF_int = EL_W(e, 3);
+	    tm.TM_e12.WWF_frac = (word) EL_W(e, 5);
+	    tm.TM_e12.WWF_int = EL_W(e, 7);
+	    tm.TM_e21.WWF_frac = (word) EL_W(e, 9);
+	    tm.TM_e21.WWF_int = EL_W(e, 11);
+	    tm.TM_e22.WWF_frac = (word) EL_W(e, 13);
+	    tm.TM_e22.WWF_int = EL_W(e, 15);
+	    break;
+	}
+    }
+    if (g)
+	GrDestroyGString(g, 0, GSKT_KILL_DATA);
+    ResetBuffer(tgs);
+    Put(tgs, PS(emitFontMatrix));
+    PutChar(tgs, '[');
+    tgs->p = ThousandthToAscii(tgs->p, (sdword) ((dword) (word) tm.TM_e11.WWF_int << 16 | tm.TM_e11.WWF_frac));
+    PutChar(tgs, ' ');
+    tgs->p = ThousandthToAscii(tgs->p, (sdword) ((dword) (word) tm.TM_e12.WWF_int << 16 | tm.TM_e12.WWF_frac));
+    PutChar(tgs, ' ');
+    tgs->p = ThousandthToAscii(tgs->p, (sdword) ((dword) (word) tm.TM_e21.WWF_int << 16 | tm.TM_e21.WWF_frac));
+    PutChar(tgs, ' ');
+    tgs->p = ThousandthToAscii(tgs->p, (sdword) ((dword) (word) tm.TM_e22.WWF_int << 16 | tm.TM_e22.WWF_frac));
+    Put(tgs, PSLIT(" 0 0]"));
+    Put(tgs, PS(emitFMDef));
+    Put(tgs, PSLIT("/FontBBox [0 0 0 0] def\r\n"));
+    EmitBuffer(tgs);
+    EmitPSCode(tgs, PS(cpend));
+    EmitPSCode(tgs, pf->PF_name, pf->PF_nlen);
+    EmitPSCode(tgs, define, sizeof(define) - 1);
+}
+
+/* DownloadChars: before a text in font and style, the characters of s
+ * (and the hyphen) that its page font, if downloaded, lacks */
+static void DownloadChars(TGSLocals *tgs, FontID font, TextStyle style,
+			  const byte *s, word n)
+{
+    PageFont *pf;
+    word i, k, need = 0;
+    byte want[32];
+    MemHandle blk;
+
+    if (tgs->TGS_pathgs)
+	return;
+    i = GetPageFontEntry(tgs, font, style);
+    pf = PageFonts(tgs);
+    if (!i || !(pf[i].PF_flags & PFF_DOWNLOAD))
+	return;
+    memset(want, 0, sizeof(want));
+    want['-' >> 3] |= (byte) (0x80 >> ('-' & 7));
+    for (k = 0; k < n; k++)
+	want[s[k] >> 3] |= (byte) (0x80 >> (s[k] & 7));
+    want[0] &= 0x7f;				/* not 0 */
+    for (k = 0; k < 32; k++) {
+	want[k] &= (byte) ~pf[i].PF_map[k];
+	if (want[k])
+	    need = 1;
+    }
+    if (!need)
+	return;
+    blk = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+    if (!blk)
+	return;
+    if (!(pf[i].PF_flags & PFF_DEFINED)) {
+	PageFont copy = pf[i];
+	DownloadFont(tgs, blk, &copy);
+	pf = PageFonts(tgs);
+	pf[i].PF_flags |= PFF_DEFINED;
+    }
+    {
+	PageFont copy = pf[i];
+	ResetBuffer(tgs);
+	Put(tgs, copy.PF_name, copy.PF_nlen);
+	Put(tgs, PSLIT(" findfont /CharProcs get begin\r\n"));
+	EmitBuffer(tgs);
+	for (k = 0; k < 256; k++)
+	    if (want[k >> 3] & (0x80 >> (k & 7)))
+		EmitCharacter(tgs, blk, copy.PF_id, copy.PF_style, (byte) k);
+	EmitPSCode(tgs, PSLIT("end\r\n"));
+    }
+    pf = PageFonts(tgs);
+    for (k = 0; k < 32; k++)
+	pf[i].PF_map[k] |= want[k];
+    MemFree(blk);
 }
 
 /* EmitFont: "/Name reencode " of the font full and style; the style
@@ -497,6 +819,7 @@ static void EmitDrawText(TGSLocals *tgs, const byte *s, word n,
      * what stands in for it into the GState (LibFindBestFace) */
     font = GrGetFont(gs, &ps);
     style = GrGetTextStyle(gs);
+    DownloadChars(tgs, font, style, s, n);
     GrSaveState(gs);
     EmitStartObject(tgs, GR_DRAW_TEXT);
     EmitTransform(tgs);
@@ -711,15 +1034,42 @@ static void HandleStyleGroup(TGSLocals *tgs, const byte *e, word size)
     EmitEndObject(tgs);
 }
 
+/* the characters of a field's runs to download, before it */
+static void DownloadFieldChars(TGSLocals *tgs, const byte *e, word size)
+{
+    GStateHandle gs = TextGS(tgs);
+    word left = (word) EL_W(e, ODTF_NCHARS), off = ODTF_SIZE, n;
+    TextAttr ta;
+
+    while (left && off + TFSR_SIZE <= size) {
+	n = (word) EL_W(e, off);
+	if (n > left)
+	    n = left;
+	if (off + TFSR_SIZE + n > size)
+	    break;
+	DecodeTextAttr(e + off + TFSR_ATTR, &ta);
+	GrSaveState(gs);
+	GrSetTextAttr(gs, &ta);
+	DownloadChars(tgs, ta.TA_font, GrGetTextStyle(gs),
+		      e + off + TFSR_SIZE, n);
+	GrRestoreState(gs);
+	left = (word) (left - n);
+	off = (word) (off + TFSR_SIZE + n);
+    }
+}
+
 void EmitTextField(TGSLocals *tgs, word op)
 {
     const byte *e;
 
-    EmitStartObject(tgs, op);
-    EmitTransform(tgs);
+    /* Port32: the element first, for the characters to download before
+     * the object (the asm took it after EmitStartObject) */
     e = ExtractElement(tgs);
     if (!e)
 	return;
+    DownloadFieldChars(tgs, e, tgs->TGS_elemLen);
+    EmitStartObject(tgs, op);
+    EmitTransform(tgs);
     tgs->TGS_locmot = 0;
     tgs->TGS_width = 0;
     tgs->TGS_gpos = WBF(e, ODTF_X);

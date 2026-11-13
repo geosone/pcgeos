@@ -9,10 +9,9 @@
  * Paths are skipped here (GR_BEGIN_PATH to GR_END_PATH): what they do
  * reaches the output through the clip path (exportPath.c).
  *
- * Text goes through exportText.c, bitmaps through exportBitmap.c.  Not
- * ported yet: the download of fonts the printer lacks
- * (DownloadPageFonts); the pointer forms of text and bitmaps are skipped
- * (EmitNothing), as in the asm.
+ * Text goes through exportText.c (with the Type 3 fonts it downloads),
+ * bitmaps through exportBitmap.c; the pointer forms of text and bitmaps
+ * are skipped (EmitNothing), as in the asm.
  */
 #include "exportInt.h"
 

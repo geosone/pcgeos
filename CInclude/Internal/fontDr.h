@@ -233,6 +233,12 @@ typedef struct {
 #define DR_FONT_GEN_PATH	16
 #define DR_FONT_GEN_IN_REGION	18
 
+/* FontGenPathFlags of DR_FONT_GEN_PATH (DR_cx) */
+#ifndef FGPF_POSTSCRIPT
+#define FGPF_POSTSCRIPT		0x01	/* for a PostScript Type 1 or 3 font */
+#define FGPF_SAVE_STATE		0x02	/* save and restore the GState */
+#endif
+
 typedef struct {
     DriverInfoStruct	FDIS_common;
     FontMaker		FDIS_maker;
@@ -264,6 +270,8 @@ OutlineEntry *FontDrFindOutlineData(FontInfo *fi, TextStyle style,
 				    OutlineDataFlag part, TextStyle *toDo);
 /* a call to the font driver of a maker (with the info block locked);
  * TRUE: no such driver, or the driver's carry */
+/* a call to the driver of the GState's font (its FontBuf locked) */
+Boolean GrCallFontDriver(GStateHandle gstate, word function, DriverRegs *r);
 Boolean GrCallFontDriverID(FontMaker maker, word function,
 			   DriverRegs *regs);
 

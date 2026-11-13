@@ -15,7 +15,8 @@ Every name with char data becomes a C array, e.g.
 
 and the bytes between "<name> label byte" and the next label become the
 array <name> (the prolog: beginPSProlog up to endPSProlog), with
-<name>Size, its length.  Lengths are sizeof - 1, as "length <name>" was
+<name>Size, its length; a label named end* only ends a block.  A line
+ending in a backslash goes on in the next.  Lengths are sizeof - 1, as "length <name>" was
 in the asm.
 
 Values: "strings" (with "" for a quote), NL (CR LF), C_CR, C_LF,
@@ -99,6 +100,17 @@ def values(s, where):
 def parse(path, arrays):
     with open(path, encoding="latin-1") as f:
         lines = f.read().split("\n")
+    # a line ending in a backslash goes on in the next (kept as one line,
+    # so that the line numbers stay right for the first)
+    for n in range(len(lines) - 1):
+        while strip_comment(lines[n].rstrip("\r")).endswith("\\"):
+            s = strip_comment(lines[n].rstrip("\r"))[:-1]
+            nxt = lines[n + 1].rstrip("\r").strip()
+            lines[n] = s + " " + nxt
+            lines[n + 1] = ""
+            for k in range(n + 1, len(lines) - 1):
+                if lines[k]:
+                    break
     in_comment = False
     cur = None          # name collecting data
     label = None        # name of an open label block
@@ -119,7 +131,9 @@ def parse(path, arrays):
         if m:
             if label:
                 arrays.append([label[0], label[1], True])
-            label = (m.group(1), b"")
+            # an end label only ends the block before it
+            label = (None if m.group(1).startswith("end")
+                     else (m.group(1), b""))
             cur = None
             continue
         m = DEF.match(s)

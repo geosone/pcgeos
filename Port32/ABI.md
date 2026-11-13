@@ -1749,7 +1749,10 @@ of type `GFT_VM` (section 13c): the VM data follow the 256-byte
   - **Handles.** A `VMFileHandle` is a `SIG_VM` handle owned by the
     opening process; it owns the memory of its blocks. `MemOwner` of a
     block returns the file's owner, as in `heapHigh.asm`. Opening an
-    open file returns the same handle again.
+    open file returns the same handle again. The file routines take it
+    for its file (`FileOf`), as DOS16, where it was the file handle:
+    e.g. `FileGetHandleExtAttributes` (the TrueType driver reads its
+    cache file's protocol so).
   - **Blocks** are read when first locked. `VMUpdate`/`VMClose` write
     the dirty blocks, then the header.
   - Implemented: `VMOpen` (open, create, create-only, truncate,
@@ -3856,8 +3859,26 @@ are unpacked.
   skipped. The size at other resolutions is divided first and then
   multiplied, as the asm (`0.9998` for 2 pixels at 144 dpi).
 
-Not ported yet: the download of fonts the printer lacks as Type 3
-fonts (`DownloadPageFonts`, `exportType3Fonts.asm`), text in paths,
+**Type 3 fonts** (`exportText.c`, `exportType3Fonts.asm`): a font
+without an exact match among the printer's whose outlines GEOS has is
+downloaded as a Type 3 font `/X<id><style>`. Its characters are the
+paths of the font driver (`DR_FONT_GEN_PATH` with `FGPF_POSTSCRIPT`) in
+the asm's compact hex code, drawn by the header's `BuildGlyph`.
+- The asm found the characters of a page before it (`GetPageFonts`) and
+  downloaded them at its start (`DownloadPageFonts`). Here the font is
+  defined before its first text, with an empty `CharProcs` and every
+  code encoded, and the characters a text needs that the page has not
+  yet are added before the text: `/X.. findfont /CharProcs get begin
+  /cNN <...> def ... end`. Each is sent once a page.
+- The paths are made at 1000 points and the `FontMatrix` is the driver's
+  transformation divided by 1000 in six decimals (the asm read it at 1
+  point, rounded to 1/65536). The bounding box is `0 0 0 0` (unknown).
+- Bold and italic are left to the driver (they are in the `FontMatrix`),
+  the other styles to the text, as for the printer's fonts.
+- `Port32/tools/asmchars2c.py` reads `exportType3Fonts.asm` too: lines
+  continued with a backslash, labels named `end*` only end a block.
+
+Not ported yet: text in paths,
 `EPSExportBitmap` (huge bitmaps, `TranslateBitmap`), embedded graphics,
 `TransExport` through the file stream driver, the export UI and the
 import side. Their elements are skipped, as `EmitNothing` skips the
@@ -3870,8 +3891,9 @@ a masked fill, a zero mask, text (Berkeley mapped to Times, Helvetica
 bold, Zapf Chancery with a bold matrix, an umlaut, underlined Courier, a
 text field of two runs with its hyphen), bitmaps (monochrome with a
 binary and a hex packet, masked PackBits, 4-bit, 24-bit at 144 dpi in
-two slices; grey on level 1, color on level 2), a scaled line and a
-second page to a stream
+two slices; grey on level 1, color on level 2), Cooper Black through
+`truetype.geo` as Type 3 fonts (plain and italic, characters added as
+they come), a scaled line and a second page to a stream
 of the test. It checks the header comments, the setup sections, the
 code of each element and the trailer. Where Ghostscript is installed
 (`gs` in the `PATH` on Linux, or `GEOS_TEST_GS`), the file must also run
