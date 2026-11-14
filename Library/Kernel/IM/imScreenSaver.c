@@ -19,8 +19,9 @@
  * GWNT_SCREEN_SAVER_STATUS_NOTIFICATION, the ScrSaverStatus); input that
  * unblanks does not, as in the asm.
  *
- * Not yet: the power driver (DR_POWER_LONG_TERM_IDLE), which may turn
- * the machine off instead.
+ * When the count reaches zero, the power management driver comes first
+ * (DR_POWER_LONG_TERM_IDLE): if it dealt with it (turned the machine
+ * off), the count starts again and the screens stay as they are.
  */
 #include "kernelC.h"
 #include "imInt.h"
@@ -29,6 +30,8 @@
 #include <timer.h>
 #include <system.h>
 #include <Internal/videoDr.h>
+#include <Internal/powerDr.h>
+#include <geosdriver.h>
 
 #define IM_DEFAULT_SCREEN_SAVER_COUNT		15	/* minutes */
 #define INTERVAL_BETWEEN_SCREEN_SAVER_COUNTDOWN_EVENTS (15 * 60) /* ticks */
@@ -130,6 +133,18 @@ static void ReachedZero(void)
     if (im.disableAPOCount) {
 	im.ssCurCount++;	/* an application is busy: again next time */
 	return;
+    }
+    {
+	GeodeHandle pwr = GeodeGetDefaultDriver(GDDT_POWER_MANAGEMENT);
+	DriverRegs r;
+	if (pwr) {
+	    memset(&r, 0, sizeof(r));
+	    if (DriverCall(GeodeInfoDriver(pwr), DR_POWER_LONG_TERM_IDLE,
+			   &r)) {
+		im.ssCurCount = im.ssMaxCount;
+		return;
+	    }
+	}
     }
     BlankScreens();
     im.ssState |= SSS_ACTIVE;

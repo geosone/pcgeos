@@ -49,6 +49,8 @@ GHAL_EXPORTS = [
     # driver, the spooler's host printers
     "gapi_print_list", "gapi_print_default", "gapi_print_job_open", "gapi_print_job_write",
     "gapi_print_job_close", "gapi_print_job_cancel", "gapi_last_error",
+    # the host power driver (Driver/Power/Host)
+    "gapi_power_status",
 ]
 
 # gcc and clang require these of a freestanding environment

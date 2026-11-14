@@ -20,6 +20,10 @@
  *   3. the primary file system driver and its drives (LoadFSDriver,
  *      FSDLoadPrimary); the init file is read on first use;
  *   4. the standard paths of [paths] (GetPaths of the loader); the
+ *      power management driver of [system] power, from
+ *      SP_POWER_DRIVERS (LoadPowerDriver), the default
+ *      GDDT_POWER_MANAGEMENT driver; device power notifications are
+ *      ignored unless it hooked them; the
  *      fonts of SP_FONT, the font drivers of [system] font and the
  *      default font (GrInitFonts, GrLoadFontDrivers,
  *      GrInitDefaultFont); the memory video driver vidmem.geo of
@@ -48,8 +52,15 @@
  * (CANNOT_LOAD_KEYBOARD_DRIVER).  Without the key, none is loaded yet:
  * a host without keys (the tests) needs none.
  *
- * Not yet: the drivers (memory, power, mouse, screen video), graphics and
- * windows, patches, the log file, documentIsTop, FSDInitComplete.
+ * The power driver: without "[system] power" there is none (DOS16
+ * looked for a Poqet then); one that does not load is not fatal, as in
+ * DOS16.  On a host, the host power driver hostpwr.geo.
+ *
+ * The memory drivers of "[system] memory" (EMS, XMS, extended memory)
+ * have no place in Port32: the host gives the memory.  The mouse and
+ * the screen video driver are the UI's to load, as in DOS16.
+ *
+ * Not yet: patches, the log file, documentIsTop, FSDInitComplete.
  */
 #include "kernelC.h"
 #include "gapi.h"
@@ -59,6 +70,7 @@
 #include <driver.h>
 #include <Internal/kbdDr.h>
 #include <Internal/videoDr.h>
+#include <Internal/powerDr.h>
 #include <string.h>
 
 GeodeHandle kernelUIHandle;
@@ -131,6 +143,24 @@ static void LoadMemVid(void)
 	GeodeSetDefaultDriver(GDDT_MEMORY_VIDEO, gh);
 }
 
+/* LoadPowerDriver */
+static void LoadPowerDriver(void)
+{
+    char name[FILE_LONGNAME_BUFFER_SIZE];
+    word n;
+    GeodeHandle gh;
+
+    if (!InitFileReadStringBuffer("system", "power", name, sizeof(name),
+				  &n)) {
+	gh = LoadDriver(name, SP_POWER_DRIVERS, POWER_PROTO_MAJOR,
+			POWER_PROTO_MINOR);
+	if (gh)
+	    GeodeSetDefaultDriver(GDDT_POWER_MANAGEMENT, gh);
+    }
+    /* a driver that wants them has hooked them */
+    (void) SysIgnoreNotification(SST_DEVICE_POWER);
+}
+
 static void LoadUI(void)
 {
     char name[FILE_LONGNAME_BUFFER_SIZE];
@@ -181,6 +211,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     ActiveFile();
     FSDLoadPrimary();
     FileInitStdPaths();
+    LoadPowerDriver();
     LocalInit();
     /* [system] hostRole: "guest" (default) leaves the host alone;
      * "session" (GEOS is the user's desktop) manages it through GAPI */

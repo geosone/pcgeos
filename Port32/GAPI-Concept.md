@@ -52,7 +52,7 @@ The GHAL does not cover this:
 | Group | Content | `dos32` | `linux` | GEOS side |
 |---|---|---|---|---|
 | `gapi_time` | set the date and time; later the time zone and whether NTP runs | int 21h/2Bh, 2Dh (as `RestoreMSDOSTime`) | `org.freedesktop.timedate1.SetTime` through our D-Bus client (polkit); without timedated `clock_settime` | `TimerSetDateAndTime`, Preferences Date & Time. **Implemented:** `gapi_time_set_local` |
-| `gapi_power` | switch off, reboot, suspend the machine | APM off, the reset through the keyboard controller | `org.freedesktop.login1` `Can*` and `PowerOff`/`Reboot`/`Suspend`/`Hibernate` | `EndGeos` after `SysShutdown` (`SST_POWER_OFF`, `SST_REBOOT`, `EF_RESET`). **Implemented** |
+| `gapi_power` | switch off, reboot, suspend the machine; the mains and the batteries | APM off and status, the reset through the keyboard controller | `org.freedesktop.login1` `Can*` and `PowerOff`/`Reboot`/`Suspend`/`Hibernate`; `/sys/class/power_supply` | `EndGeos` after `SysShutdown` (`SST_POWER_OFF`, `SST_REBOOT`, `EF_RESET`); the host power driver `hostpwr.geo`. **Implemented** |
 | `gapi_print` | list printers and queues, default printer, add or change one, its options; submit a job | GEOS printer drivers to LPT/COM/file, as today | CUPS (IPP): queues and options; jobs as PostScript or PDF | Spool library, printer control panel. GEOS renders PostScript/PDF, CUPS prints. **Listing and jobs implemented** (`gapi_ipp.c`) |
 | `gapi_locale` | keyboard layout, language, country formats, time zone | `COUNTRY`, code page, `geos.ini` | `org.freedesktop.locale1`, `timedate1` | `Local*`, keyboard driver, Preferences International |
 | `gapi_net` | interfaces, addresses, DNS, dial-up, Wi-Fi | GEOS's own TCP/IP and its configuration | NetworkManager over D-Bus (read first, change later) | Socket library, Preferences Network/Modem |
@@ -113,7 +113,8 @@ Still open: command-line tools (`timedatectl`, `lpstat`) as a stopgap before the
 - `gapi_power_can` asks logind's `CanPowerOff`, `CanReboot`, `CanSuspend` and `CanHibernate`. `yes` means `GHAL_OK`; `challenge` means `GHAL_OK` when interactive, else `GHAL_ERR_ACCESS`; `na` means unsupported. On DOS a reboot is always possible, and switching off is possible when APM is there.
 - `gapi_power_do` calls the action (with the interactive flag). On DOS, the reboot works as in `bootBoot.asm` in protected mode: the warm start flag at 40:72, then the reset line of the keyboard controller. Switching off uses APM 1.2 (int 15h/5301h, 530Eh, 5307h).
 - `EndGeos` calls it at the end of a shutdown with `KEF_RESET` or `KEF_POWER_OFF`, in the `session` role. That role is now the default where GEOS is the system (`gapi_host_is_geos`: dos32 yes, linux no).
-- The tests only call `gapi_power_can`.
+- `gapi_power_status` gives the mains, the batteries, the charge and the time left. On DOS that is APM's power status (int 15h/530Ah), on Linux `/sys/class/power_supply` (not the batteries of devices, scope `Device`). The host power driver `hostpwr.geo` answers `DR_POWER_GET_STATUS` from it (ABI.md §7.7).
+- The tests only call `gapi_power_can`; ctest `driver.power` reads `gapi_power_status` from a stand-in directory (`$GAPI_POWER_SUPPLY`).
 
 **Printing** (`gapi_print_*`, `Gapi/Linux/gapi_ipp.c`):
 - An IPP client of our own (RFC 8010/8011), as HTTP/1.1 on the CUPS socket (`$CUPS_SERVER` if it is a path, else `/run/cups/cups.sock`). No libcups.

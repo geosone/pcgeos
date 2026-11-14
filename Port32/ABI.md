@@ -1256,6 +1256,62 @@ spooler would and checks:
 Where Ghostscript is installed, the output must run through it without
 an error.
 
+### 7.7 The power management driver (`Driver/Power`, P4)
+
+The interface is `Internal/powerDr.h`, the C form of `powerDr.def`, with
+the function numbers and records of DOS16. DOS16 called the driver when
+the CPU had nothing to do (`DR_POWER_IDLE`) and after interrupts; in
+Port32 the host schedules the CPU, and those calls are not made. The
+screen saver still offers it the long term idle (§13j).
+
+`hostpwr.geo` (`Driver/Power/Host/hostPower.c`) is the host's, new in
+Port32. DOS16 had a driver per machine: APM BIOSes, palmtops, and
+NoPower as the template. On a host the power is the host's, and
+`gapi_power_status` (`gapi.h`) says what it is: on the mains or not,
+the machine's batteries, the charge and time left, and whether the host
+calls the battery low. On dos32 GAPI asks APM (int 15h/530Ah), as the
+APM drivers asked the BIOS. On Linux it reads `/sys/class/power_supply`:
+supplies of type `Mains` and `Battery`, without those of scope `Device`
+(a mouse's or a headset's battery). Several batteries count together:
+their energy (or charge) now over full, and the time left as energy
+over power while discharging; without energy values, the mean of their
+capacities.
+
+- **`DR_POWER_GET_STATUS`** reads GAPI on each call:
+  - `PGST_POWER_ON_WARNINGS`, `PGST_POLL_WARNINGS`: `PW_MAIN_BATTERY`
+    once when the battery became low away from the mains, again only
+    after it was not low; bx `PW_MAIN_BATTERY` when there is a battery;
+  - `PGST_STATUS`: `PS_AC_ADAPTER_CONNECTED`, `PS_CHARGING`; bx has the
+    bits the host knows;
+  - `PGST_BATTERY_CHARGE_MINUTES`, `PGST_BATTERY_CHARGE_PERCENT` (0 to
+    1000) in dx:ax; carry when the host does not know.
+- **`DR_POWER_DEVICE_ON_OFF`**: every device may be on, since the host
+  powers them. `DR_INIT` hooks `SST_DEVICE_POWER`, as `PowerInit` did,
+  and `DR_EXIT` unhooks it.
+- **`DR_POWER_ON_OFF_NOTIFY`, `DR_POWER_ON_OFF_UNREGISTER`** keep up to
+  eight routines (`DR_farPtr`, a `PowerNotifyRoutine`).
+- **`DR_POWER_LONG_TERM_IDLE`** returns carry clear, so the screen saver
+  blanks the screen; the host decides when to sleep.
+- `DR_POWER_SET_STATUS`, the passwords and `DR_POWER_ESC_COMMAND` return
+  carry: not supported.
+
+Not yet: the warning to the user. DOS16 polled the battery from a timer
+and showed a dialog in the UI thread; that comes with the UI library.
+Also not yet: calling the on/off routines when the host suspends.
+
+ctest `driver.power` boots with `[system] power = hostpwr.geo`. It
+checks the default driver and the hooked `SST_DEVICE_POWER`, and, on
+Linux, a stand-in for `/sys/class/power_supply` (`$GAPI_POWER_SUPPLY`):
+- the mains off, a low battery discharging, and a mouse's battery that
+  does not count;
+- the warning once, and again after it was not low;
+- on the mains and charging;
+- a battery with only a capacity, and no supplies at all.
+
+It also checks the eight on/off routines, the long term idle,
+unsupported calls, and that `GeodeFreeDriver` unhooks. The test covers
+the notifications too (§13u).
+
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 
 The C kernel starts with the handle table and the memory block API of
@@ -2592,14 +2648,28 @@ categories, `InitFileBackupLanguage`/`InitFileSwitchLanguages`, and
   2. the top as drive C, and the initial path `SP_TOP`;
   3. the primary file system driver (`FSDLoadPrimary`): the HostFS name
      layout (§13c) and its drives;
-  4. the standard paths of `[paths]` (§13a);
-  5. the UI (`LoadUI`);
-  6. the geode the command tail names (`ProcessCommandLine`).
+  4. the standard paths of `[paths]` (§13a), then the power management
+     driver of `[system] power` (below);
+  5. the fonts, the font drivers and the memory video driver (§13n,
+     §7.5);
+  6. the input manager and the keyboard driver (§13j, §7.3);
+  7. the UI (`LoadUI`);
+  8. the geode the command tail names (`ProcessCommandLine`).
 - **Drives.** DOS16's file system driver made a drive for each DOS
   drive. HostFS serves the top as drive C. `[hostfs] drives` gives it
   more: `D=/srv/geos E=/mnt/cd`, a letter, `=`, a host directory,
   separated by blanks or line ends. A host path with a blank cannot be
   given. The key is new in Port32.
+- **The power driver.** `[system] power` names it, loaded from
+  `SP_POWER_DRIVERS` with `POWER_PROTO` (3.0) and made the default
+  `GDDT_POWER_MANAGEMENT` driver (§7.7). Without the key there is none;
+  DOS16 then looked for a Poqet palmtop. A driver that does not load is
+  not fatal, as in DOS16. Then `SST_DEVICE_POWER` notifications are
+  ignored, unless the driver has hooked them.
+- **Other drivers.** The memory drivers of `[system] memory` (EMS, XMS,
+  extended memory) have no place in Port32: the host gives the memory.
+  The mouse and the screen video driver are the UI's to load, as in
+  DOS16.
 - **The UI.** `[ui] generic` names the UI geode, loaded from
   `SP_SYSTEM`. If it fails, `ui.geo` is tried, and if that fails too,
   `CANNOT_LOAD_UI` is fatal. Without the key no UI is loaded: there is
@@ -2694,8 +2764,6 @@ ctest `kernel.boot` checks the chain on every host that loads geodes
 
 Not yet:
 
-- the drivers (memory, power, keyboard, mouse, video, font);
-- the input manager, fonts, graphics and windows;
 - patches, the log file, `documentIsTop`, `FSDInitComplete`;
 - the loader's switches (`/p`, `/sp`, memory limits);
 - `ExitFSD`, the task driver, the power-off message, and the
@@ -2806,7 +2874,10 @@ seconds once `MSG_IM_ENABLE_SCREEN_SAVER` is sent; the delay is
 - `GCNSLT_SCREEN_SAVER_NOTIFICATIONS` gets `MSG_META_NOTIFY` with the
   `ScrSaverStatus` on enable, disable, blank and the deactivate message,
   not when input unblanks, as in the asm.
-- Not yet: the power driver's `DR_POWER_LONG_TERM_IDLE`.
+- When the count reaches zero, the power management driver comes first
+  (`DR_POWER_LONG_TERM_IDLE`). If it returns carry (it dealt with it,
+  turned the machine off), the count starts again and the screens stay
+  as they are.
 
 ctest `kernel.im` runs it with a queue as the saver.
 
@@ -4138,6 +4209,23 @@ VM files of the repository with a database sound.
   forced clean shutdown), else reboot. `kernelSysNotifyHook` may answer
   instead.
 - `SysGetPenMode` is `FALSE` (no digitizer yet). The ink size is kept.
+- **Subsystem notifications** (`Sys/sysNotification.c`, after
+  `sysNotification.asm`): `SysSendNotification`, `SysHookNotification`,
+  `SysUnhookNotification`, `SysIgnoreNotification`. Each
+  `SysSubsystemType` is hooked (a routine gets the notifications),
+  ignored (they are dropped), or neither. In the last case the
+  notifications wait in a queue of the kernel until the subsystem hooks
+  them (and gets them all, in order) or is ignored (and they are thrown
+  away with the memory blocks they carry).
+  - The four words are dwords in Port32, so a `MemHandle` fits
+    (`SNF_WORD<n>_MEM`). Such a block becomes sharable and the kernel's
+    (owner 0) until the subsystem has it.
+  - The routine is a `SysNotificationRoutine` (`system.h`). DOS16 also
+    had a register convention for asm routines.
+  - The lock is not held while the routine runs, as in the asm.
+  - `SysHookNotification` returns `TRUE` when hooked, and
+    `SysIgnoreNotification` returns `TRUE` when ignored, as their C
+    stubs in DOS16 did.
 - **Geodes**: `GeodeAddReference`, `GeodeRemoveReference` (`TRUE` when
   the geode went), `GeodeGet/SetUIData`, `ProcInfo` (the first thread).
   `IsMultiLanguageModeOn` is `FALSE`.
@@ -4146,7 +4234,9 @@ ctest `kernel.sys` covers the numbers, flags, environment, `SysGetInfo`,
 `SysStatistics` over a second and `SysNotify`; `kernel.geode` covers
 the references, UI data, `ProcInfo` and the geode counts; and
 `kernel.thread` covers the shared locks between threads, upgrade,
-downgrade and the thread-private words.
+downgrade and the thread-private words. `driver.power` covers the
+notifications: waiting, then in order with a block, hooked, unhooked by
+the wrong routine, and ignored.
 
 ### 13v. The PostScript translation library (`Library/Trans/Graphics/Vector/EPS`)
 

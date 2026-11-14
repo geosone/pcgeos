@@ -83,6 +83,23 @@ ghal_status gapi_power_can(gapi_power_action a);
  * returns: the host then ends the session and GEOS with it. */
 ghal_status gapi_power_do(gapi_power_action a);
 
+/* The machine's power: on the mains or a battery, how much is left.
+ * -1: the host does not know. */
+typedef struct gapi_power_info {
+    int ac;             /* 1 on the mains, 0 on the battery */
+    int battery;        /* 1 the machine has a battery (0: none known) */
+    int charging;       /* 1 the battery charges, 0 it does not */
+    int permille;       /* charge left, 0 (none) to 1000 (full) */
+    int minutes;        /* time left at this use */
+    int low;            /* 1 the battery is low (the host says so) */
+} gapi_power_info;
+
+/* Read it.  dos32: APM (int 15h/530Ah); GHAL_ERR_UNSUPPORTED without
+ * APM.  linux: /sys/class/power_supply (the batteries of the machine,
+ * not those of devices such as a mouse; $GAPI_POWER_SUPPLY names another
+ * directory, for tests). */
+ghal_status gapi_power_status(gapi_power_info *s);
+
 /* ---------------------------------------------------------------------
  * gapi_print -- the host's printers
  *

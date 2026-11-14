@@ -420,6 +420,13 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   target_link_libraries(test_mouse PRIVATE geos_kernel)
   add_test(NAME driver.mouse COMMAND test_mouse)
 
+  # the C host power driver (Driver/Power) on GAPI, the notifications
+  geos_embed(_hostpwr_c ${hostpwr_GEO} hostpwr_geode)
+  add_executable(test_power test_power.c ${_hostpwr_c})
+  add_dependencies(test_power geode_hostpwr)
+  target_link_libraries(test_power PRIVATE geos_kernel)
+  add_test(NAME driver.power COMMAND test_power)
+
   # the C host video driver (Driver/Video) on ghal_display; where the
   # display is X11, on a screen of its own (Xvfb)
   geos_embed(_hostvid_c ${hostvid_GEO} hostvid_geode)

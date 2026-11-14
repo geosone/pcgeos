@@ -79,31 +79,54 @@ ghal_status gapi_time_set_local(const ghal_datetime *dt)
  * Power
  * ------------------------------------------------------------------- */
 
-/* int 15h with ax, bx, cx in real mode; the carry flag */
-static int Int15(unsigned short *ax, unsigned short *bx, unsigned short cx)
+/* int 15h in real mode with r[] = ax, bx, cx, dx, which it returns;
+ * the carry flag */
+static int Int15Regs(unsigned short r4[4])
 {
 #ifdef __DJGPP__
     __dpmi_regs r;
     memset(&r, 0, sizeof r);
-    r.x.ax = *ax;
-    r.x.bx = *bx;
-    r.x.cx = cx;
+    r.x.ax = r4[0];
+    r.x.bx = r4[1];
+    r.x.cx = r4[2];
+    r.x.dx = r4[3];
     if (__dpmi_int(0x15, &r) != 0)
         return 1;
-    *ax = r.x.ax;
-    *bx = r.x.bx;
+    r4[0] = r.x.ax;
+    r4[1] = r.x.bx;
+    r4[2] = r.x.cx;
+    r4[3] = r.x.dx;
     return (r.x.flags & 1) != 0;
 #else
     union REGS r;               /* DOS/32A passes it to real mode */
     memset(&r, 0, sizeof r);
-    r.w.ax = *ax;
-    r.w.bx = *bx;
-    r.w.cx = cx;
+    r.w.ax = r4[0];
+    r.w.bx = r4[1];
+    r.w.cx = r4[2];
+    r.w.dx = r4[3];
     int386(0x15, &r, &r);
-    *ax = r.w.ax;
-    *bx = r.w.bx;
+    r4[0] = r.w.ax;
+    r4[1] = r.w.bx;
+    r4[2] = r.w.cx;
+    r4[3] = r.w.dx;
     return r.x.cflag != 0;
 #endif
+}
+
+/* int 15h with ax, bx, cx; the carry flag */
+static int Int15(unsigned short *ax, unsigned short *bx, unsigned short cx)
+{
+    unsigned short r[4];
+    int c;
+
+    r[0] = *ax;
+    r[1] = *bx;
+    r[2] = cx;
+    r[3] = 0;
+    c = Int15Regs(r);
+    *ax = r[0];
+    *bx = r[1];
+    return c;
 }
 
 /* APM there (installation check: "PM" in bx)? */
@@ -165,6 +188,53 @@ ghal_status gapi_power_do(gapi_power_action a)
     else
         PowerOff();
     return GHAL_ERR_HOST;       /* it did not happen */
+}
+
+/* APM's power status (int 15h/530Ah, all batteries: bx 1): bh the AC
+ * line (0 off, 1 on), bl the battery (0 high, 1 low, 2 critical, 3
+ * charging), ch flags (bit 7: no battery), cl percent, dx the time left
+ * (bit 15: minutes, else seconds); 0xff (0xffff) unknown */
+ghal_status gapi_power_status(gapi_power_info *s)
+{
+    unsigned short r[4];
+
+    if (!s)
+        return GHAL_ERR_INVAL;
+    s->ac = s->charging = s->permille = s->minutes = -1;
+    s->battery = 0;
+    s->low = 0;
+    if (!HaveApm())
+        return GHAL_ERR_UNSUPPORTED;
+    r[0] = 0x530a;
+    r[1] = 1;
+    r[2] = r[3] = 0;
+    if (Int15Regs(r))
+        return GHAL_ERR_UNSUPPORTED;
+    if ((r[1] >> 8) <= 1)
+        s->ac = r[1] >> 8;
+    if ((r[2] >> 8) == 0xff || !((r[2] >> 8) & 0x80)) {
+        if ((r[1] & 0xff) != 0xff || (r[2] & 0xff) != 0xff)
+            s->battery = 1;
+    }
+    if (s->battery) {
+        switch (r[1] & 0xff) {
+        case 1: case 2:
+            s->low = 1;
+            s->charging = 0;
+            break;
+        case 3:
+            s->charging = 1;
+            break;
+        case 0:
+            s->charging = 0;
+            break;
+        }
+        if ((r[2] & 0xff) <= 100)
+            s->permille = (r[2] & 0xff) * 10;
+        if (r[3] != 0xffff)
+            s->minutes = r[3] & 0x8000 ? r[3] & 0x7fff : (r[3] + 30) / 60;
+    }
+    return GHAL_OK;
 }
 
 /* ---------------------------------------------------------------------
