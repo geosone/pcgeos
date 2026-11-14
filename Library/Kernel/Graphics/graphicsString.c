@@ -1051,6 +1051,9 @@ void GrPlayElement(GStateHandle gstate, const byte *e)
     case GR_SET_TRACK_KERN:
 	GrSetTrackKern(gstate, U(e + 1));
 	break;
+    case GR_SET_TEXT_DIRECTION:
+	GrSetTextDirection(gstate, e[1]);
+	break;
     case GR_SET_FONT_WEIGHT:
 	GrSetFontWeight(gstate, e[1]);
 	break;

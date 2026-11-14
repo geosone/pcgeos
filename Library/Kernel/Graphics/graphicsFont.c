@@ -2,7 +2,7 @@
  * graphicsFont.c -- what fonts there are and the font attributes of a
  * GState (after graphicsFont.asm: GrEnumFonts, CheckFontType, AddFont,
  * GrCheckFontAvail, GrFindNearestPointsize, GrGetFontName, GrCharWidth,
- * GrCharMetrics,
+ * GrCharMetrics, GrGetCharInfo,
  * the weight, width, superscript and subscript attributes; GrGetFont of
  * graphicsGetState.asm).
  *
@@ -314,6 +314,21 @@ dword GrCharWidth(GStateHandle gstate, word ch)
 	((dword) cte->CTE_width.WBF_frac << 8);
     FontDrUnlockFont(gstate);
     return w;
+}
+
+/* GrGetCharInfo: the CharTableFlags of a character in the GState's
+ * font; CTF_NO_DATA for one outside the font's range (CharInfo) */
+CharInfo GrGetCharInfo(GStateHandle gstate, word ch)
+{
+    FontBuf *fb = FontDrLockFont(gstate);
+    CharInfo ci = CTF_NO_DATA;
+
+    if (!fb)
+	return ci;
+    if (ch >= fb->FB_firstChar && ch <= fb->FB_lastChar)
+	ci = FB_CHAR_TABLE(fb)[ch - fb->FB_firstChar].CTE_flags;
+    FontDrUnlockFont(gstate);
+    return ci;
 }
 
 /* GrCharMetrics: a metric of a character from the font's driver

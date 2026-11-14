@@ -48,6 +48,10 @@
  *   - the bounds of graphics strings;
  *   - save under areas: restored, exposed when drawn under, given up;
  *   - an update: only the update region drawn;
+ *   - text bounds (GrGetTextBounds) from the TrueType metrics and of a
+ *     bitmap font, GrGetCharInfo, GrGetInfo, GrGetGStringHandle,
+ *     right to left text (GrSetTextDirection, in a graphics string
+ *     too), exclusive access to the video driver, GrSetVMFile;
  *   - a window moved away: what it covered washed with the root's
  *     background.
  */
@@ -1035,6 +1039,23 @@ int main(int argc, char **argv)
 	CHECK(Pixel(22, 22) == WHITE && Pixel(27, 27) == RED &&
 	      Pixel(36, 31) == RED && Pixel(37, 31) == WHITE &&
 	      Pixel(50, 42) == BLUE && Pixel(61, 51) == WHITE);
+	/* GrSetVMFile: the bitmap window's VM file changed (after
+	 * VMSaveAs) and back */
+	{
+	    GState *gs24 = MemLock(g24);
+	    WindowHandle w24 = gs24->GS_window;
+	    Window *w;
+	    MemUnlock(g24);
+	    GrSetVMFile(g24, (VMFileHandle) 0x1234);
+	    w = MemLock(w24);
+	    CHECK(OptrToHandle(w->W_bitmap) == 0x1234 &&
+		  OptrToChunk(w->W_bitmap) == b24);
+	    MemUnlock(w24);
+	    GrSetVMFile(g24, vm);
+	    w = MemLock(w24);
+	    CHECK(OptrToHandle(w->W_bitmap) == vm);
+	    MemUnlock(w24);
+	}
 	/* the resolution: the size in points and the scale */
 	GrSetBitmapRes(g24, 144, 144);
 	CHECK(GrGetBitmapRes(g24) == ((144UL << 16) | 144));
@@ -1395,7 +1416,124 @@ int main(int argc, char **argv)
 	    GrEndPath(g);
 	    GrBeginPath(g, PCT_NULL);
 	}
+	/* GrGetTextBounds: the box of the characters from the driver's
+	 * metrics, about the ink of the text */
+	{
+	    Rectangle tb;
+	    int il = 999, it = 999, ir = -1, ib = -1;
+	    SetCol(g, WHITE);
+	    GrFillRect(g, 0, 0, 99, 79);
+	    GrDrawText(g, 5, 5, "II", 0);
+	    for (y = 20; y < 100; y++)
+		for (x = 20; x < 120; x++)
+		    if (Pixel(x, y) == BLACK) {
+			if (x < il) il = x;
+			if (x > ir) ir = x;
+			if (y < it) it = y;
+			if (y > ib) ib = y;
+		    }
+	    CHECK(!GrGetTextBounds(g, "II", 5, 5, 0, &tb));
+	    CHECK(abs(tb.R_left + 20 - il) <= 2 &&
+		  abs(tb.R_right + 20 - (ir + 1)) <= 2 &&
+		  abs(tb.R_top + 20 - it) <= 2 &&
+		  abs(tb.R_bottom + 20 - (ib + 1)) <= 2);
+	    /* one character of the two; from the baseline */
+	    {
+		Rectangle t1, tbase;
+		CHECK(!GrGetTextBounds(g, "II", 5, 5, 1, &t1));
+		CHECK(t1.R_left == tb.R_left && t1.R_top == tb.R_top &&
+		      t1.R_right < tb.R_right - 8);
+		GrSetTextMode(g, TM_DRAW_BASE, 0);
+		CHECK(!GrGetTextBounds(g, "II", 5, 5, 0, &tbase));
+		GrSetTextMode(g, 0, TM_DRAW_BASE);
+		CHECK(tbase.R_left == tb.R_left &&
+		      abs((tbase.R_bottom - tbase.R_top) -
+			  (tb.R_bottom - tb.R_top)) <= 1 &&
+		      tbase.R_bottom <= 5 + 2 && tbase.R_top < 5 - 20);
+	    }
+	}
 	GrSetFont(g, FID_BERKELEY, 10UL << 16);
+    }
+
+    /* GrGetTextBounds of a bitmap font: the font's height and the text's
+     * width; GrGetCharInfo; GrGetInfo, GrGetGStringHandle */
+    {
+	Rectangle tb;
+	word wd[4];
+	WindowHandle wh = 0;
+	XYValueAsDWord cp;
+	CHECK(!GrGetTextBounds(g, "AB", 5, 5, 0, &tb));
+	CHECK(tb.R_left == 5 && tb.R_top == 5 &&
+	      tb.R_right == 5 + (sword) GrTextWidth(g, "AB", 0) &&
+	      tb.R_bottom - tb.R_top ==
+	      (sword) GrFontMetrics(g, GFMI_HEIGHT_ROUNDED));
+	CHECK(!(GrGetCharInfo(g, 'A') & CI_NO_DATA) &&
+	      (GrGetCharInfo(g, 1) & CI_NO_DATA));
+	GrSetPrivateData(g, 1, 2, 3, 4);
+	GrGetInfo(g, GIT_PRIVATE_DATA, wd);
+	CHECK(wd[0] == 1 && wd[1] == 2 && wd[2] == 3 && wd[3] == 4);
+	GrGetInfo(g, GIT_WINDOW, &wh);
+	CHECK(wh == a);
+	cp = GrGetCurPos(g);
+	GrMoveTo(g, 7, 9);
+	GrGetInfo(g, GIT_PEN_POS, wd);
+	CHECK(wd[0] == 7 && wd[1] == 9);
+	GrMoveTo(g, DWORD_X(cp), DWORD_Y(cp));
+	CHECK(GrGetGStringHandle(g) == 0);
+    }
+
+    /* right to left text: the characters from the last to the first,
+     * ending at the position; the pen moves left */
+    {
+	word w = GrTextWidth(g, "AB", 0), x, y, same = 0, ink = 0;
+	unsigned long *ltr = malloc(40 * 20 * sizeof(unsigned long));
+	XYValueAsDWord cp;
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 99, 79);
+	GrDrawText(g, 5, 5, "BA", 0);
+	for (y = 0; y < 20; y++)
+	    for (x = 0; x < 40; x++) {
+		ltr[y * 40 + x] = Pixel(25 + x, 25 + y);
+		ink += ltr[y * 40 + x] == BLACK;
+	    }
+	GrFillRect(g, 0, 0, 99, 79);
+	GrSetTextDirection(g, TD_RIGHT_TO_LEFT);
+	GrDrawText(g, 5 + (sword) w, 5, "AB", 0);
+	cp = GrGetCurPos(g);
+	GrSetTextDirection(g, TD_LEFT_TO_RIGHT);
+	for (y = 0; y < 20; y++)
+	    for (x = 0; x < 40; x++)
+		same += Pixel(25 + x, 25 + y) == ltr[y * 40 + x];
+	CHECK(ink > 20 && same == 40 * 20);
+	CHECK(DWORD_X(cp) == 5 && DWORD_Y(cp) == 5);
+	free(ltr);
+    }
+
+    /* exclusive access to the video driver: what other GStates draw
+     * is not done; its bounds come back to be invalidated */
+    {
+	GStateHandle g2 = GrCreateState(a);
+	Rectangle r;
+	SetCol(g, WHITE);
+	GrFillRect(g, 0, 0, 99, 79);
+	CHECK(GrGetExclusive(drv) == 0);
+	GrGrabExclusive(drv, g);
+	CHECK(GrGetExclusive(drv) == g);
+	SetCol(g2, RED);
+	GrFillRect(g2, 10, 10, 20, 20);
+	CHECK(Pixel(35, 35) == WHITE);
+	SetCol(g, BLUE);
+	GrFillRect(g, 50, 10, 60, 20);
+	CHECK(Pixel(75, 35) == BLUE);
+	GrReleaseExclusive(drv, g, &r);
+	CHECK(GrGetExclusive(drv) == 0);
+	CHECK(r.R_left == 30 && r.R_top == 30 && r.R_right >= 39 &&
+	      r.R_right <= 40 && r.R_bottom >= 39 && r.R_bottom <= 40);
+	GrGrabExclusive(drv, g);
+	GrReleaseExclusive(drv, g, &r);
+	CHECK(r.R_left == -1 && r.R_top == -1 && r.R_right == -1 &&
+	      r.R_bottom == -1);
+	GrDestroyState(g2);
     }
 
     /* graphics strings: recorded into a chunk as the DOS16 elements,
@@ -1427,6 +1565,24 @@ int main(int argc, char **argv)
 	word ch = 0, last = 0xffff, n = 0, k;
 	dword pos;
 
+	/* a text direction: GR_SET_TEXT_DIRECTION and the byte; the
+	 * GState's graphics string */
+	{
+	    word tc = 0;
+	    GStateHandle td = GrCreateGString(blk, GST_CHUNK, &tc);
+	    const byte *tp;
+	    CHECK(GrGetGStringHandle(td) != 0);
+	    GrSetTextDirection(td, TD_RIGHT_TO_LEFT);
+	    CHECK(GrEndGString(td) == GSET_NO_ERROR);
+	    GrDestroyGString(td, 0, GSKT_LEAVE_DATA);
+	    MemLock(blk);
+	    tp = LMemDerefHandles(blk, tc);
+	    CHECK(LMemGetChunkSizeHandles(blk, tc) == 3 &&
+		  tp[0] == GR_SET_TEXT_DIRECTION && tp[1] == TD_RIGHT_TO_LEFT &&
+		  tp[2] == GR_END_GSTRING);
+	    MemUnlock(blk);
+	    LMemFreeHandles(blk, tc);
+	}
 	gs = GrCreateGString(blk, GST_CHUNK, &ch);
 	CHECK(gs && ch);
 	GrSetAreaColor(gs, CF_RGB, 0xff, 0, 0);

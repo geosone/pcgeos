@@ -180,6 +180,7 @@ add_library(geos_kernel_objs OBJECT
   Graphics/graphicsFont.c
   Graphics/graphicsTextMetrics.c
   Graphics/graphicsText.c
+  Graphics/graphicsTextObscure.c
   Graphics/graphicsFontDriver.c
   Graphics/graphicsSpline.c
   Graphics/graphicsPath.c

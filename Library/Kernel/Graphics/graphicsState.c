@@ -14,8 +14,9 @@
  *     (GrGSRecord); a path does not keep them;
  *   - the font: GrInvalidateFont (graphicsChars.c) where the font
  *     changes; GrSetFont and the kerning there too.
- * Not yet: the pen position and the transformations (with
- * graphicsTransform), the clip routines, GrSetVMFile.
+ * The pen position and the transformations are in graphicsUtils.c and
+ * graphicsTransform.c, the clip routines in graphicsPath.c, GrSetVMFile
+ * in graphicsUtils.c.
  */
 #include "graphicsInt.h"
 
@@ -520,6 +521,18 @@ void GrSetTextStyle(GStateHandle gstate, TextStyle bitsToSet,
     (void) GrGSRecord(gstate, GR_SET_TEXT_STYLE, "bb", bitsToSet,
 		      bitsToClear);
     SetStyle(gs, bitsToSet, bitsToClear);
+    MemUnlock(gstate);
+}
+
+/* GrSetTextDirection (SIMPLE_RTL_SUPPORT): TD_RIGHT_TO_LEFT draws the
+ * characters of a text from the last to the first, ending at the pen
+ * (graphicsText.c) */
+void GrSetTextDirection(GStateHandle gstate, TextDirection dir)
+{
+    GState *gs = MemLock(gstate);
+
+    (void) GrGSRecord(gstate, GR_SET_TEXT_DIRECTION, "b", dir);
+    gs->GS_textDirection = dir;
     MemUnlock(gstate);
 }
 

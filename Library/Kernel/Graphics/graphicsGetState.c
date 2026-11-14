@@ -2,8 +2,8 @@
  * graphicsGetState.c -- reading the attributes of a GState (after
  * graphicsGetState.asm, with the C conventions of graphicsC.asm).
  *
- * Not yet: GrGetCurPos and the transformation (with graphicsTransform),
- * GrGetInfo, GrGetFont and the other font attributes (with the fonts).
+ * The pen position and the transformation are in graphicsUtils.c and
+ * graphicsTransform.c, the font attributes in graphicsFont.c.
  */
 #include "graphicsInt.h"
 
@@ -179,4 +179,46 @@ WWFixedAsDWord GrGetMiterLimit(GStateHandle gstate)
 
     MemUnlock(gstate);
     return inv == 0xffff ? 0x10000UL : GrReciprocal32(inv);
+}
+
+/* GrGetInfo: GIT_PRIVATE_DATA the four words of GrSetPrivateData,
+ * GIT_WINDOW the window (a WindowHandle), GIT_PEN_POS the pen position
+ * as two words (GrGetCurPos; the asm's table lacks this entry) */
+void GrGetInfo(GStateHandle gstate, GrInfoType type, void *data)
+{
+    GState *gs = MemLock(gstate);
+    word *w = data;
+
+    switch (type) {
+    case GIT_PRIVATE_DATA:
+	w[0] = gs->GS_privData.GPD_ax;
+	w[1] = gs->GS_privData.GPD_bx;
+	w[2] = gs->GS_privData.GPD_cx;
+	w[3] = gs->GS_privData.GPD_dx;
+	break;
+    case GIT_WINDOW:
+	*(WindowHandle *) data = gs->GS_window;
+	break;
+    case GIT_PEN_POS: {
+	XYValueAsDWord p;
+	MemUnlock(gstate);
+	p = GrGetCurPos(gstate);
+	w[0] = (word) DWORD_X(p);
+	w[1] = (word) DWORD_Y(p);
+	return;
+    }
+    default:
+	break;
+    }
+    MemUnlock(gstate);
+}
+
+/* the graphics string the GState writes to, or 0 */
+Handle GrGetGStringHandle(GStateHandle gstate)
+{
+    GState *gs = MemLock(gstate);
+    Handle h = gs->GS_gstring;
+
+    MemUnlock(gstate);
+    return h;
 }

@@ -23,8 +23,14 @@
  * (StoreTextField: the 14 bytes of GDF_saved, then per run the count,
  * the TextAttr with the gstate's space padding, the characters).
  *
+ * Right to left text (GS_textDirection, SIMPLE_RTL_SUPPORT): the
+ * characters from the last to the first, so that the text ends at the
+ * position; the pen moves left by its width (UpdateTextPos; the asm
+ * leaves it at the position when the transformation is simple, which
+ * draws the next text over this one), the bars are not limited.
+ *
  * Not yet: the bars of rotated text (a polygon in the asm), right to
- * left text, hatch patterns in a text field.
+ * left text in paths, hatch patterns in a text field.
  */
 #include "graphicsInt.h"
 #include <Internal/fontDr.h>
@@ -67,6 +73,8 @@ static int64_t DrawText(GStateHandle gstate, int64_t x, int64_t y,
     const TMatrix *m;
     sdword width, top, end;
     word n;
+    Boolean rtl;
+    char *rev = NULL;
 
     GrEnterGraphics(gstate, &d);
     gs = d.GD_gs;
@@ -80,6 +88,18 @@ static int64_t DrawText(GStateHandle gstate, int64_t x, int64_t y,
     for (n = 0; (!size || n < size) && str[n]; n++)
 	;
     width = GrTextWidthLow(gs, fb, str, n);
+    rtl = (Boolean) (gs->GS_textDirection != TD_LEFT_TO_RIGHT);
+    if (rtl) {			/* RTLTextDraw */
+	x -= (int64_t) width << 8;
+	limit = 0xffff;
+	rev = n ? malloc(n) : NULL;
+	if (rev) {
+	    word i;
+	    for (i = 0; i < n; i++)
+		rev[i] = str[n - 1 - i];
+	    str = rev;
+	}
+    }
     end = (sdword) (x >> 8) + width;
     if (limit != 0xffff && (word) (end >> 8) >= limit)
 	end = (sdword) limit << 8;
@@ -122,7 +142,13 @@ static int64_t DrawText(GStateHandle gstate, int64_t x, int64_t y,
 		    W256(&fb->FB_strikePos), W256(&fb->FB_underThickness));
     }
     GrUnlockFont(gs);
+    free(rev);
     /* UpdateTextPos */
+    if (rtl) {
+	GrSetDocWWFPenPos(gs, (sdword) x, (sdword) y);
+	GrExitGraphics(&d);
+	return x;
+    }
     GrSetDocWWFPenPos(gs, (sdword) (x + ((int64_t) width << 8)), (sdword) y);
     GrExitGraphics(&d);
     return x + ((int64_t) width << 8);

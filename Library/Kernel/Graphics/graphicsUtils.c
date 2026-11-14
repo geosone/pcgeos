@@ -2,7 +2,8 @@
  * graphicsUtils.c -- coordinates and the pen position (after
  * graphicsUtils.asm: GrTransform, GrTransformWWFixed, GrTransformDWord,
  * GrTransformDWFixed, GrUntransform and the rest, SetDocWWFPenPos,
- * SetRelDocPenPos, GetDocPenPos).
+ * SetRelDocPenPos, GetDocPenPos; GrSetVMFile, GrGetExclusive,
+ * GrGrabExclusive, GrReleaseExclusive).
  *
  * The pen position (GS_penPos) is kept in page coordinates: the
  * document position through GS_TMatrix.
@@ -12,6 +13,7 @@
  */
 #include "graphicsInt.h"
 #include "../Win/winInt.h"
+#include <Internal/videoDr.h>
 
 #define OVER	((sword) 0x8000)
 
@@ -327,4 +329,81 @@ Boolean GrCallDriver(const GrDraw *d, word function, DriverRegs *r,
     r->DR_dsSi = d->GD_gs;
     r->DR_si = attr;
     return WinCallVidDriver(d->GD_w, function, r);
+}
+
+/* GrSetVMFile: the VM file of the GState's bitmap window or VM graphics
+ * string (after VMSaveAs); one that had none keeps none */
+void GrSetVMFile(GStateHandle gstate, VMFileHandle vmFile)
+{
+    GState *gs = MemLock(gstate);
+    WindowHandle win = gs->GS_window;
+    Handle gstring = gs->GS_gstring;
+
+    MemUnlock(gstate);
+    if (win) {
+	Window *w = MemPLock(win);
+	if (OptrToHandle(w->W_bitmap))
+	    w->W_bitmap = ConstructOptr(vmFile, OptrToChunk(w->W_bitmap));
+	MemUnlockV(win);
+    } else if (gstring) {
+	GStringBlock *g = MemLock(gstring);
+	if ((g->GSS_flags & GSF_HANDLE_TYPE) == GST_VMEM && g->GSS_hString)
+	    g->GSS_hString = vmFile;
+	MemUnlock(gstring);
+    }
+}
+
+/* the video driver's strategy (0: the default one) */
+static Boolean CallVideo(GeodeHandle driver, word function, DriverRegs *r)
+{
+    DriverInfoStruct *dis;
+
+    if (!driver)
+	driver = GeodeGetDefaultDriver(GDDT_VIDEO);
+    dis = driver ? GeodeInfoDriver(driver) : NULL;
+    if (!dis)
+	return TRUE;
+    return DriverCall(dis, function, r);
+}
+
+/* GrGetExclusive: the GState that has the driver's exclusive, or 0 */
+GStateHandle GrGetExclusive(GeodeHandle videoDriver)
+{
+    DriverRegs r;
+
+    memset(&r, 0, sizeof(r));
+    if (CallVideo(videoDriver, DR_VID_GET_EXCLUSIVE, &r))
+	return 0;
+    return (GStateHandle) r.DR_bx;
+}
+
+/* GrGrabExclusive: only this GState draws through the driver until
+ * GrReleaseExclusive; what the others draw is not done */
+void GrGrabExclusive(GeodeHandle videoDriver, GStateHandle gstate)
+{
+    DriverRegs r;
+
+    memset(&r, 0, sizeof(r));
+    r.DR_bx = gstate;
+    (void) CallVideo(videoDriver, DR_VID_START_EXCLUSIVE, &r);
+}
+
+/* GrReleaseExclusive: the bounds (device) of what was not drawn, for the
+ * caller to invalidate; all 0xffff (off the screen) if nothing was */
+void GrReleaseExclusive(GeodeHandle videoDriver, GStateHandle gstate,
+			Rectangle *bounds)
+{
+    DriverRegs r;
+
+    memset(&r, 0, sizeof(r));
+    r.DR_bx = gstate;
+    if (CallVideo(videoDriver, DR_VID_END_EXCLUSIVE, &r) || !r.DR_ax) {
+	bounds->R_left = bounds->R_top = bounds->R_right =
+	    bounds->R_bottom = (sword) 0xffff;
+	return;
+    }
+    bounds->R_left = (sword) r.DR_si;
+    bounds->R_top = (sword) r.DR_di;
+    bounds->R_right = (sword) r.DR_cx;
+    bounds->R_bottom = (sword) r.DR_dx;
 }

@@ -137,6 +137,7 @@ typedef struct {
     Handle		GS_pathData;
     GrCommonPattern	GS_areaPattern;
     GrCommonPattern	GS_textPattern;
+    TextDirection	GS_textDirection;	/* SIMPLE_RTL_SUPPORT */
 } GState;
 
 #endif /* __INTERNAL_GSTATE_H */

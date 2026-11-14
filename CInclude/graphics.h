@@ -659,6 +659,7 @@ typedef ByteEnum GStringElement;
 #define GR_SET_CUSTOM_TEXT_PATTERN 141
 #define GR_MOVE_TO_WWFIXED 142
 #define GR_ATTR_8F 143
+#define GR_SET_TEXT_DIRECTION 143
 #define GR_ATTR_90 144
 #define GR_ATTR_91 145
 #define GR_ATTR_92 146
