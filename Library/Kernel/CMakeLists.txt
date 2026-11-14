@@ -60,6 +60,8 @@
 #   Boot/bootBoot.c <- EndGeos of bootBoot.asm (RemoveGeodes, ExitFile)
 #   Sys/sysMisc.c   <- SysShutdown, exit flags, Util hex of sysMisc.asm
 #   Sys/sysStats.c  <- SysGetInfo, SysStatistics of Sys/sysStats.asm
+#   Sys/sysNotification.c <- SysSendNotification and the hooks of
+#                     Sys/sysNotification.asm
 #   IM/imInit.c, imMonitors.c, imMisc.c, imPtr.c, imScreenSaver.c <- the input
 #                      manager of imInit.asm, imMonitors.asm, imMisc.asm,
 #                      imPtr.asm and imScreenSaver.asm
@@ -136,6 +138,7 @@ add_library(geos_kernel_objs OBJECT
   Boot/bootInit.c
   Boot/bootBoot.c
   Sys/sysMisc.c
+  Sys/sysNotification.c
   Sys/sysStats.c
   IM/imInit.c
   IM/imMonitors.c

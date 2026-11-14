@@ -227,6 +227,29 @@ typedef enum {	    /* Steps by 9... */
     SST_SOCKET = 45
 }	SysSubsystemType;
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: the four words of a notification are dwords, so a MemHandle
+ * (SNF_WORD<n>_MEM) fits; the routine gets them so.  Port32/ABI.md
+ * section 13 (Sys).
+ */
+typedef void SysNotificationRoutine(SysSubsystemType subsys,
+				    SysNotificationType notif,
+				    dword word1, dword word2,
+				    dword word3, dword word4);
+
+extern void
+    SysSendNotification(SysSubsystemType subsys, SysNotificationType notif,
+			dword word1, dword word2, dword word3, dword word4);
+
+extern Boolean
+    SysHookNotification(SysSubsystemType subsys,
+			SysNotificationRoutine *routine);
+
+extern void
+    SysUnhookNotification(SysSubsystemType subsys,
+			  SysNotificationRoutine *routine);
+#else
 extern void
     _pascal SysSendNotification(SysSubsystemType subsys,
 				SysNotificationType notif,
@@ -254,6 +277,8 @@ extern void
 				       word word2,
 				       word word3,
 				       word word4)));
+
+#endif
 
 extern Boolean
     _pascal SysIgnoreNotification(SysSubsystemType subsys);
