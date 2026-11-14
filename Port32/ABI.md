@@ -2299,12 +2299,25 @@ functions (`CInclude/Internal/fsDriver.h`). Each function returns 0 or a
     `DiskGetVolumeInfo`, `DiskGetVolumeFreeSpace` (from
     `ghal_fs_space`), `DiskCheckWritable`, `DiskCheckInUse` (open
     files), `DiskCheckUnnamed`, `DiskForEach` and `DiskFind`.
+  - A disk without a volume name gets a made-up one, as in DOS16
+    (`FSDGenNameless`): "Unnamed" and the next number. The flag
+    `FDK_NAMELESS` marks it, and `DiskCheckUnnamed` tests that flag.
+  - `DiskSave` writes the DOS16 `FSSavedDisk`: name, `DiskFlags`,
+    media, the driver's name (empty for the primary one), ID, a private
+    word and the drive's name. A standard path saves as a zero byte and
+    the path. A buffer that is too small gives `FALSE` and the size
+    needed.
+  - `DiskRestore` finds the drive by name. A registered disk with the
+    saved ID is returned. Otherwise the disk in the drive is registered
+    and accepted if the drive is fixed or the ID matches. Failing that,
+    the callback is asked; without one the result is 0 and the thread
+    error is a `DiskRestoreError` (`DRE_*`).
 - **HostFS** (`Driver/IFS/HostFS/hostfsDriver.c`). A drive is a host
   directory (`HostFSDriveData`). The driver contains what section 13c
   describes: host names, the `GeosFileHeader`, `@DIRNAME.000` and
   extended attributes.
   - Its disk ID is a hash of the directory. The disk has no volume
-    name.
+    name, so the kernel makes one up.
   - `FEA_FILE_ID` is a hash of the host path, the same for every name
     the file is reached by. `VMOpen` uses the disk and this ID to find
     a VM file that is already open.
@@ -2317,8 +2330,8 @@ Not yet:
 - drivers as geodes, and their registration (`FSDRegister`);
 - the DOS file system driver (IFS) for dos32;
 - drive locks, aliases and removing drives;
-- removable media, `DiskSave`/`DiskRestore`, formatting, copying and
-  renaming disks, and volume names;
+- removable media (the `DiskRestore` callback is never asked to swap
+  disks), formatting, copying and renaming disks, and real volume names;
 - a current directory per drive (`C:NAME` is relative to the root);
 - links.
 

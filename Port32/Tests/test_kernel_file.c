@@ -269,7 +269,14 @@ int main(int argc, char **argv)
 	CHECK(DiskCheckWritable(disk) && DiskCheckUnnamed(disk));
 	CHECK(DiskGetVolumeInfo(disk, &info) == 0 && info.DIS_blockSize &&
 	      info.DIS_totalSpace > 0 && info.DIS_freeSpace >= 0);
-	CHECK(DiskFind("", &found) == disk && found == DFR_UNIQUE);
+	/* no volume name: a made-up one (FSDGenNameless) */
+	{
+	    char vol[VOLUME_NAME_LENGTH_ZT];
+
+	    DiskGetVolumeName(disk, vol);
+	    CHECK(!strncmp(vol, "Unnamed", 7) &&
+		  DiskFind(vol, &found) == disk && found == DFR_UNIQUE);
+	}
 	f = FileCreate("DISK.TXT", FILE_CREATE_ONLY | FILE_ACCESS_RW, 0);
 	CHECK(f && FileGetDiskHandle(f) == disk && DiskCheckInUse(disk));
 	CHECK(FileClose(f, FALSE) == 0 && !DiskCheckInUse(disk));
@@ -362,6 +369,30 @@ int main(int argc, char **argv)
 			   &hostFSDriver, HostFSDriveData(H("DDRIVE"))));
 	dd = DiskRegisterDisk(3);
 	CHECK(dd != 0 && dd != DiskRegisterDisk(2));
+	/* saved and restored, in the DOS16 FSSavedDisk layout */
+	{
+	    byte sv[64];
+	    word n = 10;
+
+	    CHECK(!DiskSave(dd, sv, &n) && n == 28 + 3);
+	    n = sizeof(sv);
+	    CHECK(DiskSave(dd, sv, &n) && n == 31 &&
+		  sv[28] == 'D' && sv[29] == ':' && sv[30] == 0 &&
+		  sv[14] == 0 &&		/* the primary driver */
+		  sv[26] == 31 && sv[27] == 0);	/* FSSD_private */
+	    CHECK(DiskRestore(sv, NULL) == dd && ThreadGetError() == 0);
+	    /* a made-up name, as DOS16 gave a disk without one */
+	    CHECK(!strncmp((char *) sv, "Unnamed", 7) &&
+		  DiskCheckUnnamed(dd));
+	    n = sizeof(sv);
+	    CHECK(DiskSave((DiskHandle) SP_DOCUMENT, sv, &n) && n == 3 &&
+		  sv[0] == 0 && DiskRestore(sv, NULL) == SP_DOCUMENT);
+	    n = sizeof(sv);
+	    CHECK(DiskSave(dd, sv, &n));
+	    sv[28] = 'Q';			/* no drive Q */
+	    CHECK(DiskRestore(sv, NULL) == 0 &&
+		  ThreadGetError() == DRE_DRIVE_NO_LONGER_EXISTS);
+	}
 	CHECK(FileMove("Geos Copy", "\\Geos On D", 0, dd) == 0);
 	CHECK(FileGetAttributes("Geos Copy") == 0 &&
 	      ThreadGetError() == ERROR_FILE_NOT_FOUND);

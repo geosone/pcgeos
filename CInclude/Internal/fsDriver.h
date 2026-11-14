@@ -35,6 +35,7 @@ typedef struct FSDDrive {
 
 /* DiskDesc: the disk in a drive */
 #define FDK_WRITABLE	0x0001
+#define FDK_NAMELESS	0x0002	/* the volume name is made up (FSDGenNameless) */
 typedef struct FSDDisk {
     DiskHandle		FDK_handle;
     FSDDrive		*FDK_drive;
