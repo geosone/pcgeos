@@ -24,7 +24,16 @@
  * does not say the file or path is not there, FileEnum goes over all.
  * The directories of [paths] are GEOS paths with a drive name.
  *
- * Not yet: links, a current directory per drive.
+ * Links (fileUtils.asm FileOpOnPathLow): a driver that meets a link on
+ * the way returns ERROR_LINK_ENCOUNTERED and gives the target, a saved
+ * disk and a path on it, with FSDLinkEncountered.  FileOpOnPath and
+ * FileLocate then go on from the target, at most MAX_LINK_COUNT times
+ * (ERROR_TOO_MANY_LINKS); FileSetCurrentPath makes the target the
+ * current path.  A link at the end of a path is followed by the
+ * operations that open or enter it, while FileLocate leaves it for those
+ * that work on the link itself (delete, rename, attributes).
+ *
+ * Not yet: a current directory per drive.
  */
 #include "kernelC.h"
 
@@ -32,6 +41,7 @@
 #include <string.h>
 
 #define TOP_DRIVE	2		/* C: */
+#define MAX_LINK_COUNT	16		/* fileConstant.def */
 
 static DiskHandle topDisk;
 
@@ -433,11 +443,90 @@ FSDDisk *FileResolvePlace(const char *path, word n, char *out, size_t size,
 			end);
 }
 
+/* ---------------------------------------------------------------------
+ * Links
+ * ------------------------------------------------------------------- */
+
+void FSDLinkEncountered(const void *savedDisk, word diskSize,
+			const char *path, word pathLen, const char *rest)
+{
+    KThread *t = ThreadOf(KernelThisThread());
+    KLink *l = t->T_link;
+
+    if (!l) {
+	l = t->T_link = ghal_mem_alloc(sizeof(KLink), 0);
+	if (!l)
+	    return;
+    }
+    l->KL_tooLong = diskSize > sizeof(l->KL_disk) ||
+		    (size_t) pathLen + strlen(rest) >= sizeof(l->KL_path);
+    if (l->KL_tooLong)
+	return;
+    l->KL_diskSize = diskSize;
+    memcpy(l->KL_disk, savedDisk, diskSize);
+    memcpy(l->KL_path, path, pathLen);
+    strcpy(l->KL_path + pathLen, rest);
+}
+
+/* the target of the link a driver met (FileGetLinkData): its disk (a
+ * standard path, a disk, or SP_TOP for a path with a drive name) and
+ * the path; 0 with the error set */
+DiskHandle FileLinkTarget(char *path, size_t size)
+{
+    KLink *l = ThreadOf(KernelThisThread())->T_link;
+    DiskHandle disk = SP_TOP;
+    word e;
+
+    if (!l || l->KL_tooLong || strlen(l->KL_path) >= size) {
+	KernelSetError(l ? ERROR_PATH_TOO_LONG : ERROR_INSUFFICIENT_MEMORY);
+	return 0;
+    }
+    strcpy(path, l->KL_path);
+    if (l->KL_diskSize) {
+	disk = DiskRestore(l->KL_disk, NULL);
+	if (!disk) {
+	    /* the DiskRestoreError as a FileError */
+	    e = ThreadGetError();
+	    KernelSetError(e == DRE_NOT_ATTACHED_TO_SERVER
+			   ? ERROR_NETWORK_NOT_LOGGED_IN
+			   : e == DRE_PERMISSION_DENIED ? ERROR_ACCESS_DENIED
+			   : ERROR_DISK_UNAVAILABLE);
+	    return 0;
+	}
+    }
+    return disk;
+}
+
 /* FileOpOnPath: op at each place of the path (from base, tail) until
  * one returns other than "not found"; that, else ERROR_FILE_NOT_FOUND
- * if a place had the directory, else ERROR_PATH_NOT_FOUND */
+ * if a place had the directory, else ERROR_PATH_NOT_FOUND.  A link met
+ * is followed unless depth is MAX_LINK_COUNT. */
+static word OpOnPlacesN(DiskHandle base, const char *tail, const char *path,
+			FileOpFunc *op, void *data, word depth);
+
+static word FollowOp(FileOpFunc *op, void *data, word depth)
+{
+    char path[FILE_DISK_PATH_SIZE];
+    DiskHandle disk;
+
+    if (depth == MAX_LINK_COUNT)
+	return ERROR_LINK_ENCOUNTERED;
+    if (depth + 1 == MAX_LINK_COUNT)
+	return ERROR_TOO_MANY_LINKS;
+    disk = FileLinkTarget(path, sizeof(path));
+    if (!disk)
+	return ThreadGetError();
+    return OpOnPlacesN(disk, "", path, op, data, depth + 1);
+}
+
 static word OpOnPlaces(DiskHandle base, const char *tail, const char *path,
 		       FileOpFunc *op, void *data)
+{
+    return OpOnPlacesN(base, tail, path, op, data, 0);
+}
+
+static word OpOnPlacesN(DiskHandle base, const char *tail, const char *path,
+			FileOpFunc *op, void *data, word depth)
 {
     char dp[FILE_DISK_PATH_SIZE];
     word n, e, notFound = ERROR_PATH_NOT_FOUND;
@@ -454,6 +543,8 @@ static word OpOnPlaces(DiskHandle base, const char *tail, const char *path,
 	    continue;
 	}
 	e = op(d, dp, data);
+	if (e == ERROR_LINK_ENCOUNTERED)
+	    return FollowOp(op, data, depth);
 	if (e == ERROR_FILE_NOT_FOUND)
 	    notFound = e;
 	else if (e != ERROR_PATH_NOT_FOUND)
@@ -471,9 +562,49 @@ word FileOpOnPath(const char *path, FileOpFunc *op, void *data)
 
 /* the first place of path (relative to the root of disk; 0: to the
  * current path) where it exists, else place 0 (an operation there then
- * finds it missing) */
+ * finds it missing).  Links on the way are followed, with `final' one
+ * at the end too. */
+static FSDDisk *LocateN(DiskHandle disk, const char *path, char *out,
+			size_t size, Boolean final, word depth);
+
 FSDDisk *FileLocate(DiskHandle disk, const char *path, char *out,
 		    size_t size)
+{
+    return LocateN(disk, path, out, size, FALSE, 0);
+}
+
+FSDDisk *FileLocateTarget(DiskHandle disk, const char *path, char *out,
+			  size_t size)
+{
+    return LocateN(disk, path, out, size, TRUE, 0);
+}
+
+/* d, out: a link on the way, or one at the end if final */
+static FSDDisk *LocateFollow(FSDDisk *d, char *out, size_t size,
+			     Boolean final, word depth)
+{
+    char path[FILE_DISK_PATH_SIZE];
+    DiskHandle target;
+    FileAttrs a = 0;
+    word e = FSD_OF(d)->FSD_getAttrs(d, out, &a);
+
+    if (!e && final && (a & FA_LINK))
+	e = FSD_OF(d)->FSD_readLink(d, out) ? 0 : ERROR_LINK_ENCOUNTERED;
+    if (e != ERROR_LINK_ENCOUNTERED) {
+	KernelSetError(0);
+	return d;
+    }
+    if (depth + 1 >= MAX_LINK_COUNT) {
+	KernelSetError(ERROR_TOO_MANY_LINKS);
+	return NULL;
+    }
+    target = FileLinkTarget(path, sizeof(path));
+    return target ? LocateN(target, path, out, size, final, depth + 1)
+		  : NULL;
+}
+
+static FSDDisk *LocateN(DiskHandle disk, const char *path, char *out,
+			size_t size, Boolean final, word depth)
 {
     KPath *cur = CurPath();
     DiskHandle base = disk ? disk : cur->KP_disk;
@@ -484,6 +615,8 @@ FSDDisk *FileLocate(DiskHandle disk, const char *path, char *out,
     Boolean end, probed = FALSE;
     word n;
 
+    word e;
+
     d0 = ResolvePlace(base, tail, path, 0, out, size, &end);
     if (!d0)
 	return NULL;
@@ -493,18 +626,19 @@ FSDDisk *FileLocate(DiskHandle disk, const char *path, char *out,
 	    break;
 	if (!probed) {
 	    probed = TRUE;
-	    if (!FSD_OF(d0)->FSD_getAttrs(d0, out, &a))
+	    e = FSD_OF(d0)->FSD_getAttrs(d0, out, &a);
+	    if (!e || e == ERROR_LINK_ENCOUNTERED)
 		break;
 	}
-	if (d && !FSD_OF(d)->FSD_getAttrs(d, dp, &a) &&
-	    strlen(dp) < size) {
-	    strcpy(out, dp);
-	    KernelSetError(0);
-	    return d;
+	if (d) {
+	    e = FSD_OF(d)->FSD_getAttrs(d, dp, &a);
+	    if ((!e || e == ERROR_LINK_ENCOUNTERED) && strlen(dp) < size) {
+		strcpy(out, dp);
+		return LocateFollow(d, out, size, final, depth);
+	    }
 	}
     }
-    KernelSetError(0);
-    return d0;
+    return LocateFollow(d0, out, size, final, depth);
 }
 
 /* ---------------------------------------------------------------------
@@ -532,6 +666,8 @@ void FileThreadInit(KThread *t, KThread *creator)
 
 void FileThreadExit(KThread *t)
 {
+    ghal_mem_free(t->T_link);
+    t->T_link = NULL;
     while (t->T_path) {
 	KPath *p = t->T_path;
 	t->T_path = p->KP_next;
@@ -553,41 +689,57 @@ static word CurPathSetAt(FSDDisk *d, const char *dp, void *full)
 }
 
 /* a path relative to a standard path stays relative to it unless it
- * leaves it: then it is relative to the top */
+ * leaves it: then it is relative to the top.  A link to the directory,
+ * or on the way to it, makes its target the current path. */
 DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
 {
     KPath *cur = CurPath();
     Comps c, full;
-    DiskHandle base = disk ? disk : cur->KP_disk;
-    const char *tail = disk ? "" : cur->KP_tail;
+    DiskHandle base;
+    const char *tail;
+    char target[FILE_DISK_PATH_SIZE];
     FSDDisk *d;
-    word e;
+    word e, depth = 0;
     Boolean end;
 
     if (!path)
 	path = "";
-    d = ResolveFrom(&base, &tail, &path, &full, 0, &end);
-    if (!d)
-	return 0;
-    c = full;
-    if (base & DISK_IS_STD_PATH_MASK) {
-	c.len = 0;
-	c.buf[0] = 0;
-	if (!AddPath(&c, tail) || !AddPath(&c, path)) {
-	    c = full;
-	    base = SP_TOP;
+    for (;;) {
+	base = disk ? disk : cur->KP_disk;
+	tail = disk ? "" : cur->KP_tail;
+	d = ResolveFrom(&base, &tail, &path, &full, 0, &end);
+	if (!d)
+	    return 0;
+	c = full;
+	if (base & DISK_IS_STD_PATH_MASK) {
+	    c.len = 0;
+	    c.buf[0] = 0;
+	    if (!AddPath(&c, tail) || !AddPath(&c, path)) {
+		c = full;
+		base = SP_TOP;
+	    }
 	}
-    }
-    /* a standard path itself need not exist; below it, the directory
-     * must be at one of its places */
-    if (c.len) {
-	e = (base & DISK_IS_STD_PATH_MASK)
-	    ? OpOnPlaces(base, "", c.buf, CurPathSetAt, NULL)
-	    : CurPathSetAt(d, NULL, &full);
+	/* a standard path itself need not exist; below it, the directory
+	 * must be at one of its places */
+	if (!c.len)
+	    break;
+	e = OpOnPlacesN(base, "", c.buf, CurPathSetAt, NULL, MAX_LINK_COUNT);
+	if (e == ERROR_LINK_ENCOUNTERED) {
+	    if (++depth == MAX_LINK_COUNT)
+		e = ERROR_TOO_MANY_LINKS;
+	    else {
+		disk = FileLinkTarget(target, sizeof(target));
+		if (!disk)
+		    return 0;
+		path = target;
+		continue;
+	    }
+	}
 	if (e) {
 	    KernelSetError(e);
 	    return 0;
 	}
+	break;
     }
     cur->KP_disk = base;
     strcpy(cur->KP_tail, c.buf);

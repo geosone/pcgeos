@@ -45,6 +45,7 @@
 #   File/fileEA.c   <- extended attributes (the FileGet/Set...ExtAttributes
 #                      of fileFile.asm, fileOpenClose.asm)
 #   File/fileEnum.c <- FileEnum of File/fileEnum.asm, fileC.asm
+#   File/fileLink.c <- links (File/fileLink.asm, fileUtils.asm)
 #   FSD/fsdDrive.c  <- the drive table of FSD/fsdDrive.asm (FSDInitDrive)
 #   FSD/fsdInit.c   <- the primary driver of FSD/fsdInit.asm (the HostFS
 #                      name layout from [system] primaryFSD)
@@ -118,6 +119,7 @@ add_library(geos_kernel_objs OBJECT
   File/fileFile.c
   File/fileEA.c
   File/fileEnum.c
+  File/fileLink.c
   FSD/fsdDrive.c
   FSD/fsdInit.c
   Drive/driveHigh.c

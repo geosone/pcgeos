@@ -277,6 +277,7 @@ typedef struct {
     struct DispatchRec *T_dispatching;	/* CMessageDispatchP */
     word	T_error;	/* ThreadGetError (TPD_error) */
     struct KPath *T_path;	/* current path, then FilePushDir's */
+    struct KLink *T_link;	/* the link a file system driver met */
     void	*T_fileEnum;	/* the FileEnum running (FileEnumWildcard) */
     word	T_fileReloc;	/* relocating an object block for a file
 				 * (objectReloc.c) */
@@ -849,6 +850,20 @@ word FileOpOnPath(const char *path, FileOpFunc *op, void *data);
  * current path) where it exists, else place 0 */
 FSDDisk *FileLocate(DiskHandle disk, const char *path, char *out,
 		    size_t size);
+/* FSPathLinkData: the target of the link a file system driver met
+ * (FSDLinkEncountered), per thread */
+typedef struct KLink {
+    word	KL_diskSize;		/* 0: the path has the drive */
+    Boolean	KL_tooLong;
+    byte	KL_disk[FSD_SAVED_DISK_MAX];
+    char	KL_path[FILE_DISK_PATH_SIZE];
+} KLink;
+/* its disk (restored; SP_TOP for a path with a drive name) and path; 0
+ * with the error set */
+DiskHandle FileLinkTarget(char *path, size_t size);
+/* the same, with a link at the end followed too */
+FSDDisk *FileLocateTarget(DiskHandle disk, const char *path, char *out,
+			  size_t size);
 /* the directories of the standard paths from [paths] of the init files */
 void FileInitStdPaths(void);
 /* the directory name of a standard path and its parent (NULL,

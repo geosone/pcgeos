@@ -107,7 +107,38 @@ typedef struct FSDriver {
 			 word (*cb)(void *data, void *entry), void *data);
     word (*FSD_enumAttr)(void *entry, FileExtendedAttribute attr,
 			 void *buf, word size);
+
+    /* Links (DOS16 dosLink.asm).  A path that leads through a link
+     * makes an operation return ERROR_LINK_ENCOUNTERED after the driver
+     * gave the kernel the target with FSDLinkEncountered; the kernel
+     * follows it.  A link at the end of the path is followed by open,
+     * create, curPathSet, createDir, deleteDir and fileEnum; deleteFile,
+     * rename, getAttrs, setAttrs and pathExtAttrs work on the link
+     * itself (its attributes are those it was given, FA_LINK set).
+     *
+     * FSPOF_CREATE_LINK: a new link `path' to `target' on the saved disk
+     * (DiskSave); ERROR_FILE_EXISTS if the name is taken. */
+    word (*FSD_createLink)(FSDDisk *disk, const char *path,
+			   const void *savedDisk, word diskSize,
+			   const char *target);
+    /* FSPOF_READ_LINK: gives the target with FSDLinkEncountered (rest
+     * "") and returns 0; ERROR_NOT_A_LINK for anything else */
+    word (*FSD_readLink)(FSDDisk *disk, const char *path);
+    /* FSPOF_GET/SET_LINK_EXTRA_DATA: getting, *size is the size of buf
+     * and becomes what was read (0: the size of the data); setting,
+     * the data replaces what the link had */
+    word (*FSD_linkExtraData)(FSDDisk *disk, const char *path, void *buf,
+			      word *size, Boolean set);
 } FSDriver;
+
+/* the most a saved disk (DiskSave) of a link may take */
+#define FSD_SAVED_DISK_MAX	64
+
+/* the kernel: the target of the link a driver met (FSPathLinkData): the
+ * saved disk, and the path on it followed by `rest' (what came after
+ * the link in the path; "" or starting with "\\") */
+void FSDLinkEncountered(const void *savedDisk, word diskSize,
+			const char *path, word pathLen, const char *rest);
 
 /* the kernel: a drive served by `fsd' (FSDInitDrive); replaces one with
  * the same number.  FALSE if the table is full. */

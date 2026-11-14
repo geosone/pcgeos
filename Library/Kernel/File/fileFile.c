@@ -14,7 +14,10 @@
  * directory goes to the first whose directory exists.  FileCopyLocal
  * and FileMoveLocal take the source from the first only.
  *
- * Not yet: links, the notification of file changes.
+ * Links on the way are followed (FileLocate); a link at the end is
+ * deleted, renamed or given attributes itself, as on DOS16.  Not yet:
+ * links in the destination of FileCopy or of a rename with a path, the
+ * notification of file changes.
  */
 #include "kernelC.h"
 

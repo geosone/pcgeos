@@ -69,6 +69,9 @@ typedef WordFlags FileError;
 #define ERROR_ARGS_INVALID  	    	145
 #define ERROR_CANNOT_FIND_COMMAND_INTERPRETER 146
 #define ERROR_NO_TASK_DRIVER_LOADED 	147
+#define ERROR_LINK_ENCOUNTERED		148
+#define ERROR_NOT_A_LINK		149
+#define ERROR_TOO_MANY_LINKS		150
 
 /*
  * Constants for file system routines
@@ -146,6 +149,7 @@ typedef enum /* word */ {
     FEA_DOS_NAME,
     FEA_OWNER,
     FEA_RIGHTS,
+    FEA_TARGET_FILE_ID,
     FEA_MULTIPLE=0xfffe,
     FEA_END_OF_LIST=0xffff,
 } FileExtendedAttribute;
@@ -625,13 +629,13 @@ extern word
 					const TCHAR *targetPath,
 					word targetAttrsFlag);
 extern DiskHandle
-    _pascal FileReadLink(const TCHAR *path, const TCHAR *targetPath);
+    _pascal FileReadLink(const TCHAR *path, TCHAR *targetPath);
 
-extern DiskHandle
+extern word
     _pascal FileSetLinkExtraData(const TCHAR *path,
 					TCHAR *buffer,
 					word bufSize);
-extern DiskHandle
+extern word
     _pascal FileGetLinkExtraData(const TCHAR *path,
 					TCHAR *buffer,
 					word bufSize);

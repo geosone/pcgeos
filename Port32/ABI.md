@@ -1952,12 +1952,39 @@ where it is with `FileSetTopHostPath`.
   only the first two). The kernel fetches them one by one through the
   driver. `FileCopyExtAttributes` and `FileCopyPathExtAttributes` set
   them on another file with `FEA_MULTIPLE`.
+- **Links** (`fileLink.c`, the link following of `filePath.c`). A link
+  names a target: a saved disk (`DiskSave`) and a path on it.
+  - `FileCreateLink` parses a standard path of the target down as far
+    as it goes ("." for the path itself), saves the disk, and lets the
+    driver make the link (`FSD_createLink`). Unless the flag says
+    otherwise, the link then gets the target's attributes (type, flags,
+    release, protocol, token, creator, desktop info, `FileAttrs`, geode
+    attributes); the target's `FEA_FILE_ID` becomes
+    `FEA_TARGET_FILE_ID`. If they cannot be set, the link is deleted.
+  - A driver that meets a link on a path returns
+    `ERROR_LINK_ENCOUNTERED` and gives the target, with what followed the
+    link, through `FSDLinkEncountered`. The kernel keeps it per thread
+    (`KLink`), restores the disk and goes on from there:
+    `FileOpOnPath` and `FileLocate` (so every routine by path), at most
+    16 times (`ERROR_TOO_MANY_LINKS`, as `MAX_LINK_COUNT`).
+  - A link at the end of a path is followed by opening, creating,
+    entering, `FileCreateDir`, `FileDeleteDir` and `FileEnum`. Deleting,
+    renaming and the attributes work on the link itself, as on DOS16.
+  - `FileSetCurrentPath` through a link makes the target the current
+    path (its standard path and the path below it).
+  - `FileReadLink` (the target's disk, 0 for a path with a drive name;
+    the path in a `PATH_BUFFER_SIZE` buffer), `FileGetLinkExtraData`,
+    `FileSetLinkExtraData`, `FileConstructActualPath` (links and the
+    places of standard paths resolved). The C prototypes now match what
+    the routines do: `FileReadLink` writes its `targetPath`, and the
+    extra data routines return a `FileError`.
 
 Not yet:
 
 - deny modes, and reading and writing a region another open file has
   locked;
-- links and change notification;
+- change notification; `FileComparePaths`; links in the destination of
+  `FileCopy` and of a rename with a path;
 - `SPA_DOES_NOT_EXIST_LOCALLY` (every standard path has its place
   below the top).
 
@@ -2255,7 +2282,26 @@ on the way to a FAT disk.
   included (DOS names, with and without LFN, are tested on Linux too;
   the QEMU DOS has no LFN).
 
-Not yet: links in `@DIRNAME.000`; the DOS code page for characters
+Links are records in the `@DIRNAME.000` of their directory after its
+header, in the format of the DOS driver (`dosLink.asm`,
+`dosConstant.def`):
+
+- `DOSLinkHeader` (107 bytes): "LN00", the long name, type, flags,
+  release, protocol, token, creator, desktop info, `FileAttrs` (with
+  `FA_LINK`), geode attributes, the target's file ID, 16 bytes unused;
+- `DOSLinkData`: the sizes of the saved disk, the path (no NUL) and the
+  extra data, which follow.
+
+A directory without `@DIRNAME.000` gets one for its first link, also
+with long names. A link is found by its name (case does not matter)
+when the host has no file of that name. `FileEnum` returns the links
+after the files. A new link goes to the end; setting its extra data
+moves it there, and deleting one moves the later ones up. A directory
+whose `@DIRNAME.000` holds links is not empty. A link's `FEA_FILE_ID`
+is made of the directory's path and its name. A damaged record ends the
+list (DOS16 also truncated the file there).
+
+Not yet: the DOS code page for characters
 above 0x7f in names; `FEA_GEODE_ATTR`, `FEA_CUSTOM` and the
 network attributes; `FileGetHandleAllExtAttributes`;
 `FileCopyPathExtAttributes`.
@@ -2332,8 +2378,10 @@ Not yet:
 - drive locks, aliases and removing drives;
 - removable media (the `DiskRestore` callback is never asked to swap
   disks), formatting, copying and renaming disks, and real volume names;
-- a current directory per drive (`C:NAME` is relative to the root);
-- links.
+- a current directory per drive (`C:NAME` is relative to the root).
+
+The link part of the interface (`FSD_createLink`, `FSD_readLink`,
+`FSD_linkExtraData`, `FSDLinkEncountered`) is described in section 13a.
 
 ## 13g. FileEnum (`File/fileEnum.c`, P4)
 
