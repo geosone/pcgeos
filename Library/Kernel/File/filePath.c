@@ -1094,3 +1094,140 @@ DiskHandle FileResolveStandardPath(char **buffer, word bufSize,
 	*attrsPtr = r.attrs;
     return r.disk;
 }
+
+/* ---------------------------------------------------------------------
+ * Changing the directories of a standard path (FSP_* of filePath.asm)
+ * ------------------------------------------------------------------- */
+
+static Boolean SameDir(const char *a, const char *b)
+{
+    while (*a && (*a == *b ||
+		  ((*a | 0x20) == (*b | 0x20) && (*a | 0x20) >= 'a' &&
+		   (*a | 0x20) <= 'z'))) {
+	a++;
+	b++;
+    }
+    return !*a && !*b;
+}
+
+/* FileAddStandardPathDirectory: the directory (a path with a drive
+ * name) becomes the first place of sp after the one below the top; one
+ * it has already is no error.  No flags are defined. */
+word FileAddStandardPathDirectory(const char *path, StandardPath sp,
+				  word flags)
+{
+    char *old, *e, *nd;
+    size_t n = strlen(path) + 1, have;
+
+    (void) flags;
+    if (!IsStdPath(sp) || n == 1) {
+	KernelSetError(ERROR_PATH_NOT_FOUND);
+	return ERROR_PATH_NOT_FOUND;
+    }
+    old = stdDirs[sp / 2];
+    for (e = old; e && *e; e += strlen(e) + 1)
+	if (SameDir(e, path)) {
+	    KernelSetError(0);
+	    return 0;
+	}
+    have = old ? (size_t) (e - old) : 0;
+    nd = ghal_mem_alloc(n + have + 1, 0);
+    if (!nd) {
+	KernelSetError(ERROR_INSUFFICIENT_MEMORY);
+	return ERROR_INSUFFICIENT_MEMORY;
+    }
+    memcpy(nd, path, n);
+    if (have)
+	memcpy(nd + n, old, have);
+    nd[n + have] = 0;
+    stdDirs[sp / 2] = nd;
+    ghal_mem_free(old);
+    KernelSetError(0);
+    return 0;
+}
+
+/* FileDeleteStandardPathDirectory: ERROR_PATH_NOT_FOUND if sp does not
+ * have the directory */
+word FileDeleteStandardPathDirectory(const char *path, StandardPath sp)
+{
+    char *dirs, *e;
+    size_t n, rest;
+
+    dirs = IsStdPath(sp) ? stdDirs[sp / 2] : NULL;
+    for (e = dirs; e && *e; e += strlen(e) + 1)
+	if (SameDir(e, path))
+	    break;
+    if (!e || !*e) {
+	KernelSetError(ERROR_PATH_NOT_FOUND);
+	return ERROR_PATH_NOT_FOUND;
+    }
+    n = strlen(e) + 1;
+    for (rest = 0; e[n + rest]; rest += strlen(e + n + rest) + 1)
+	;
+    memmove(e, e + n, rest + 1);
+    if (!*dirs) {
+	ghal_mem_free(dirs);
+	stdDirs[sp / 2] = NULL;
+    }
+    KernelSetError(0);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------
+ * The IDs of the current path
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    MemHandle	block;
+    ChunkHandle	chunk;
+} PathIDs;
+
+/* getID: the place's FilePathID added; "not found" to go on */
+static word PathIDAt(FSDDisk *d, const char *dp, void *data)
+{
+    PathIDs *p = data;
+    FilePathID *ids;
+    FileID id;
+    word size;
+
+    if (FSD_OF(d)->FSD_pathExtAttrs(d, dp, FEA_FILE_ID, &id, sizeof(id),
+				    FALSE))
+	return ERROR_PATH_NOT_FOUND;
+    size = LMemGetChunkSizeHandles(p->block, p->chunk);
+    if (LMemReAllocHandles(p->block, p->chunk, size + sizeof(FilePathID)))
+	return ERROR_INSUFFICIENT_MEMORY;
+    ids = (FilePathID *) ((byte *) LMemDerefHandles(p->block, p->chunk) +
+			  size);
+    ids->FPID_disk = d->FDK_handle;
+    ids->FPID_id = id;
+    return ERROR_FILE_NOT_FOUND;
+}
+
+/* a chunk in the (unlocked) LMem block with a FilePathID for each
+ * place of the current path that exists; 0 with the error set if none
+ * does */
+ChunkHandle FileGetCurrentPathIDs(MemHandle block)
+{
+    PathIDs p;
+    word e;
+
+    MemLock(block);
+    p.block = block;
+    p.chunk = LMemAlloc(block, 0);
+    if (!p.chunk) {
+	MemUnlock(block);
+	KernelSetError(ERROR_INSUFFICIENT_MEMORY);
+	return 0;
+    }
+    e = FileOpOnPath(".", PathIDAt, &p);
+    if (e == ERROR_FILE_NOT_FOUND &&
+	LMemGetChunkSizeHandles(block, p.chunk))
+	e = 0;
+    if (e) {
+	LMemFreeHandles(block, p.chunk);
+	p.chunk = 0;
+    }
+    MemUnlock(block);
+    KernelSetError(e);
+    return p.chunk;
+}

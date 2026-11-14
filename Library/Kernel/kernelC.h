@@ -866,6 +866,12 @@ FSDDisk *FileLocateTarget(DiskHandle disk, const char *path, char *out,
 			  size_t size);
 /* the directories of the standard paths from [paths] of the init files */
 void FileInitStdPaths(void);
+/* FileAddStandardPathDirectory / FileDeleteStandardPathDirectory (asm
+ * only, no C prototype in file.h): a directory with a drive name as
+ * the first place of sp after the one below the top, or no more */
+word FileAddStandardPathDirectory(const char *path, StandardPath sp,
+				  word flags);
+word FileDeleteStandardPathDirectory(const char *path, StandardPath sp);
 /* the directory name of a standard path and its parent (NULL,
  * SP_NOT_STANDARD_PATH if it is none) */
 const char *FileStdPathName(StandardPath sp);

@@ -356,6 +356,41 @@ int main(int argc, char **argv)
 	  ThreadGetError() == ERROR_PATH_NOT_FOUND);
     CHECK(Names(names) == 0);
 
+    /* a directory added to FS, and taken away again */
+    CHECK(FileAddStandardPathDirectory("D:\\DOCS", SP_FILE_SYSTEM_DRIVERS,
+				       0) == 0 &&
+	  FileAddStandardPathDirectory("d:\\docs", SP_FILE_SYSTEM_DRIVERS,
+				       0) == 0);
+    CHECK(!strcmp(Get("both.txt"), "remote both"));
+    CHECK(FileDeleteStandardPathDirectory("D:\\DOCS",
+					  SP_FILE_SYSTEM_DRIVERS) == 0 &&
+	  FileDeleteStandardPathDirectory("D:\\DOCS",
+					  SP_FILE_SYSTEM_DRIVERS) ==
+	  ERROR_PATH_NOT_FOUND);
+    CHECK(!FileOpen("both.txt", FILE_ACCESS_R) &&
+	  ThreadGetError() == ERROR_PATH_NOT_FOUND);
+
+    /* the IDs of the places of DOCUMENT: the top's, then D's three */
+    FileSetStandardPath(SP_DOCUMENT);
+    {
+	MemHandle mh = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+	ChunkHandle ch = FileGetCurrentPathIDs(mh);
+	FilePathID *ids;
+
+	CHECK(ch != 0);
+	if (ch) {
+	    MemLock(mh);
+	    ids = LMemDerefHandles(mh, ch);
+	    CHECK(LMemGetChunkSizeHandles(mh, ch) == 4 * sizeof(FilePathID) &&
+		  ids[0].FPID_disk == DiskRegisterDisk(2) &&
+		  ids[1].FPID_disk == DiskRegisterDisk(3) &&
+		  ids[3].FPID_disk == ids[1].FPID_disk &&
+		  ids[1].FPID_id != ids[2].FPID_id);
+	    MemUnlock(mh);
+	}
+	MemFree(mh);
+    }
+
     FileSetStandardPath(SP_TOP);
     CHECK(FileDelete("geos.ini") == 0);
     InitFileReset();

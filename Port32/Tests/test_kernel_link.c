@@ -165,6 +165,23 @@ int main(int argc, char **argv)
 				  "Doc Link\\IN.TXT", TRUE) != 0 &&
 	  !strcmp(buf, "C:\\DOCUMENT\\TARGET\\IN.TXT"));
 
+    /* comparing paths: links are not followed */
+    CHECK(FileComparePaths("TARGET", SP_DOCUMENT, "TARGET", SP_DOCUMENT) ==
+	  PCT_EQUAL);
+    CHECK(FileComparePaths("TARGET", SP_DOCUMENT, "TARGET\\IN.TXT",
+			   SP_DOCUMENT) == PCT_SUBDIR);
+    CHECK(FileComparePaths("TARGET\\IN.TXT", SP_DOCUMENT, "TARGET",
+			   SP_DOCUMENT) == PCT_UNRELATED);
+    CHECK(FileComparePaths("TAR", SP_DOCUMENT, "TARGET", SP_DOCUMENT) ==
+	  PCT_UNRELATED);
+    CHECK(FileComparePaths("", SP_TOP, "TARGET", SP_DOCUMENT) == PCT_SUBDIR);
+    CHECK(FileComparePaths("DOCUMENT", SP_TOP, "TARGET", SP_DOCUMENT) ==
+	  PCT_SUBDIR);
+    CHECK(FileComparePaths("", SP_SYSTEM, "", SP_DOCUMENT) ==
+	  PCT_UNRELATED);
+    CHECK(FileComparePaths("Doc Link", SP_TOP, "TARGET", SP_DOCUMENT) ==
+	  PCT_UNRELATED);
+
     /* a link to a GEOS file: its attributes are the target's */
     CHECK(FileCreateLink("File Link", SP_DOCUMENT, "Data File", 0) == 0);
     CHECK(Has("File Link", "data"));

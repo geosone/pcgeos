@@ -1978,13 +1978,29 @@ where it is with `FileSetTopHostPath`.
     places of standard paths resolved). The C prototypes now match what
     the routines do: `FileReadLink` writes its `targetPath`, and the
     extra data routines return a `FileError`.
+- **Comparing paths** (`FileComparePaths`, `fileLink.c`): both paths
+  become full paths parsed down to standard paths. On the same disk or
+  standard path the tails are compared (case matters, as in the asm).
+  Otherwise path 2 is `PCT_SUBDIR` of path 1 only when path 1 is a
+  standard path itself and path 2's standard path is below it. Links
+  are not followed; `FileConstructActualPath` does that first.
+- **Directories of standard paths at run time**
+  (`FileAddStandardPathDirectory`, `FileDeleteStandardPathDirectory`
+  in `filePath.c`; asm-only, so declared in `kernelC.h`): a directory
+  with a drive name becomes the first place after the one below the
+  top, or is taken away (`ERROR_PATH_NOT_FOUND` if it was not there).
+  No change notification is sent yet.
+- **`FileGetCurrentPathIDs`**: a chunk in the caller's LMem block with
+  a `FilePathID` (disk handle, `FEA_FILE_ID`) for each place of the
+  current path that exists.
 
 Not yet:
 
 - deny modes, and reading and writing a region another open file has
   locked;
-- change notification; `FileComparePaths`; links in the destination of
-  `FileCopy` and of a rename with a path;
+- change notification; links in the destination of `FileCopy` and of
+  a rename with a path; `FilePushTopLevelPath`,
+  `FileCreateDirWithNativeShortName`;
 - `SPA_DOES_NOT_EXIST_LOCALLY` (every standard path has its place
   below the top).
 

@@ -230,3 +230,59 @@ DiskHandle FileConstructActualPath(char **buffer, word bufSize,
     return FileConstructFullPath(buffer, bufSize, d->FDK_handle, dp,
 				 addDriveLetter);
 }
+
+/* ---------------------------------------------------------------------
+ * Comparing paths
+ * ------------------------------------------------------------------- */
+
+/* the full path of (disk, path), parsed down to a standard path */
+static DiskHandle ComparePrep(DiskHandle disk, const char *path, char *buf,
+			      word size, const char **tail)
+{
+    char *p = buf;
+    StandardPath sp;
+
+    disk = FileConstructFullPath(&p, size, disk, path ? path : "", FALSE);
+    if (!disk)
+	return 0;
+    *tail = buf;
+    sp = FileParseStandardPath(disk, tail);
+    return sp ? (DiskHandle) sp : disk;
+}
+
+/* fileLink.asm FileComparePathsReal: PCT_SUBDIR if path2 is below path1
+ * (not the other way round).  Links are not followed; the names are
+ * compared as they are (FileConstructActualPath first if links may be
+ * involved). */
+PathCompareType FileComparePaths(const char *path1, DiskHandle disk1,
+				 const char *path2, DiskHandle disk2)
+{
+    char b1[PATH_BUFFER_SIZE], b2[PATH_BUFFER_SIZE];
+    const char *t1, *t2;
+    StandardPath sp;
+    size_t n;
+
+    disk1 = ComparePrep(disk1, path1, b1, sizeof(b1), &t1);
+    if (!disk1)
+	return PCT_ERROR;
+    disk2 = ComparePrep(disk2, path2, b2, sizeof(b2), &t2);
+    if (!disk2)
+	return PCT_ERROR;
+    if (disk1 == disk2) {
+	n = strlen(t1);
+	if (strncmp(t1, t2, n))
+	    return PCT_UNRELATED;
+	if (!t2[n] || !strcmp(t2 + n, "\\"))
+	    return PCT_EQUAL;
+	return t2[n] == '\\' || !n ? PCT_SUBDIR : PCT_UNRELATED;
+    }
+    /* two standard paths: path1 must be one itself, above path2's */
+    if (!(disk1 & disk2 & DISK_IS_STD_PATH_MASK) ||
+	(*t1 && strcmp(t1, "\\")))
+	return PCT_UNRELATED;
+    for (sp = FileStdPathParent((StandardPath) disk2);
+	 sp != SP_NOT_STANDARD_PATH; sp = FileStdPathParent(sp))
+	if (sp == (StandardPath) disk1)
+	    return PCT_SUBDIR;
+    return PCT_UNRELATED;
+}
