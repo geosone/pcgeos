@@ -140,6 +140,7 @@ static word Close(FileHandle fh)
 
     HandleFree(fh);
     if (--kf->KF_refs == 0) {
+	FileUnlockAll(kf);
 	FSDDisk *d = kf->KF_file.FF_disk;
 	e = FSD_OF(d)->FSD_close(&kf->KF_file);
 	d->FDK_inUse--;
@@ -161,4 +162,34 @@ word FileClose(FileHandle fh, Boolean noErrorFlag)
 void FileFreeHandle(FileHandle fh)
 {
     Close(fh);
+}
+
+/* FileCreateTempFile: a new file in `dir' (a buffer with room for 14
+ * more characters, which get the name) named by eight hex digits, the
+ * timer count XOR'd with the process handle, and ".TMP"; the next number
+ * while one exists.  flags: FileCreateFlags (FCF_NATIVE) and the access
+ * (fileOpenClose.asm). */
+FileHandle FileCreateTempFile(const char *dir, FileCreateFlags flags,
+			      FileAttrs attributes)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char *path = (char *) dir, *name;
+    dword count;
+    FileHandle fh;
+    int i;
+
+    name = path + strlen(path);
+    if (name != path && name[-1] != '\\')
+	*name++ = '\\';
+    count = TimerGetCount() ^ ((dword) GeodeGetProcessHandle() << 16);
+    flags = (FileCreateFlags) ((flags & ~FCF_MODE) | FILE_CREATE_ONLY);
+    for (;;) {
+	for (i = 0; i < 8; i++)
+	    name[i] = hex[(count >> (28 - 4 * i)) & 15];
+	strcpy(name + 8, ".TMP");
+	fh = FileCreate(path, flags, attributes);
+	if (fh || ThreadGetError() != ERROR_FILE_EXISTS)
+	    return fh;
+	count++;
+    }
 }

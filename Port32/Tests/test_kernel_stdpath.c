@@ -229,6 +229,77 @@ int main(int argc, char **argv)
 	  ThreadGetError() == ERROR_PATH_NOT_FOUND);
     CHECK(Names(names) == 1);		/* still in SUB */
 
+    /* full paths: the logical path of a standard path from the top's
+     * root, "." and ".." taken out */
+    {
+	char buf[80], *b;
+	const char *q;
+	DiskHandle dh, dd;
+	FileAttrs fa;
+
+#define FCFP(disk, tail, drv) (b = buf, FileConstructFullPath(&b, \
+	sizeof(buf), disk, tail, drv))
+	dh = FCFP(0, "x.txt", TRUE);
+	CHECK(dh == FileTopDisk() && !strcmp(buf, "C:\\DOCUMENT\\SUB\\x.txt") &&
+	      *b == 0 && b == buf + strlen(buf));
+	CHECK(FCFP(SP_DOCUMENT, "A\\..\\B\\.\\c", FALSE) == FileTopDisk() &&
+	      !strcmp(buf, "\\DOCUMENT\\B\\c"));
+	CHECK(FCFP(SP_DOCUMENT, "..\\..\\..\\x", FALSE) &&
+	      !strcmp(buf, "\\x"));
+	/* absolute below a standard path: from the standard path */
+	CHECK(FCFP(SP_DOCUMENT, "\\y", FALSE) && !strcmp(buf, "\\DOCUMENT\\y"));
+	CHECK(FCFP(0, "\\y\\", FALSE) && !strcmp(buf, "\\DOCUMENT\\y"));
+	CHECK(FCFP(SP_TOP, "", FALSE) && !strcmp(buf, "\\"));
+	CHECK(FCFP(SP_FILE_SYSTEM_DRIVERS, "", TRUE) &&
+	      !strcmp(buf, "C:\\SYSTEM\\FS"));
+	dd = FCFP(0, "D:\\DOCS\\x", FALSE);
+	CHECK(dd && dd != FileTopDisk() && !strcmp(buf, "\\DOCS\\x"));
+	CHECK(FCFP(dd, "\\DOCS\\.\\x", TRUE) == dd &&
+	      !strcmp(buf, "D:\\DOCS\\x"));
+	CHECK(FCFP(0, "D:\\DOCS", TRUE) == 0 && !strcmp(buf, "D:\\DOCS"));
+	b = buf;
+	CHECK(FileConstructFullPath(&b, 8, SP_DOCUMENT, "LONGNAME", FALSE)
+	      == 0 && ThreadGetError() == ERROR_PATH_TOO_LONG);
+
+	/* the standard path a full path is in */
+	q = "C:\\SYSTEM\\FS\\foo";
+	CHECK(FileParseStandardPath(0, &q) == SP_FILE_SYSTEM_DRIVERS &&
+	      !strcmp(q, "foo"));
+	q = "\\DOCUMENT";
+	CHECK(FileParseStandardPath(FileTopDisk(), &q) == SP_DOCUMENT &&
+	      *q == 0);
+	q = "\\PRINTER\\x";
+	CHECK(FileParseStandardPath(SP_SYSTEM, &q) == SP_PRINTER_DRIVERS &&
+	      !strcmp(q, "x"));
+	q = "\\NOPE\\x";
+	CHECK(FileParseStandardPath(FileTopDisk(), &q) == SP_TOP &&
+	      !strcmp(q, "NOPE\\x"));
+	q = "D:\\DOCS";
+	CHECK(FileParseStandardPath(0, &q) == SP_NOT_STANDARD_PATH &&
+	      !strcmp(q, "D:\\DOCS"));
+	q = "\\DOCS";
+	CHECK(FileParseStandardPath(dd, &q) == SP_NOT_STANDARD_PATH);
+
+	/* the actual path: the first place that has it */
+	FileSetStandardPath(SP_DOCUMENT);
+#define FRSP(tail, fl) (b = buf, FileResolveStandardPath(&b, sizeof(buf), \
+	tail, fl, &fa))
+	CHECK(FRSP("remote.txt", FRSPF_ADD_DRIVE_NAME) == dd &&
+	      !strcmp(buf, "D:\\DOCS\\remote.txt") && !(fa & FA_SUBDIR));
+	CHECK(FRSP("local.txt", 0) == FileTopDisk() &&
+	      !strcmp(buf, "\\DOCUMENT\\local.txt"));
+	CHECK(FRSP("SUB", FRSPF_ADD_DRIVE_NAME) == dd &&
+	      !strcmp(buf, "D:\\DOCS\\SUB") && (fa & FA_SUBDIR));
+	CHECK(FRSP("net.txt", 0) == dd && !strcmp(buf, "\\NET\\DOCUMENT\\net.txt"));
+	CHECK(FRSP("nothere.txt", 0) == 0 &&
+	      ThreadGetError() == ERROR_FILE_NOT_FOUND);
+	CHECK(FRSP("nothere.txt", FRSPF_RETURN_FIRST_DIR) == FileTopDisk() &&
+	      !strcmp(buf, "\\DOCUMENT\\nothere.txt") && fa == 0);
+#undef FRSP
+#undef FCFP
+	CHECK(FileSetCurrentPath(SP_DOCUMENT, "SUB") == SP_DOCUMENT);
+    }
+
     /* new files: the first place whose directory exists */
     fh = FileCreate("new2.txt", FCF_NATIVE | FILE_CREATE_ONLY |
 		    FILE_ACCESS_RW, 0);

@@ -174,6 +174,59 @@ static void HeaderAndAttributes(void)
     CHECK(FileGetPathExtAttributes("NONE.TXT", FEA_TOKEN, &t2, 6) ==
 	  ERROR_FILE_NOT_FOUND);
 
+    /* all of them at once, and copied */
+    {
+	FileExtAttrDesc *all;
+	MemHandle mh;
+	FileHandle g;
+	word n = 0;
+
+	f = FileOpen("DATA.TXT", FILE_ACCESS_R);
+	CHECK(f != 0);
+	mh = FileGetHandleAllExtAttributes(f, &n);
+	CHECK(mh && n == 13);
+	if (mh) {
+	    all = MemDeref(mh);
+	    CHECK(all[0].FEAD_attr == FEA_MODIFICATION &&
+		  all[6].FEAD_attr == FEA_TOKEN &&
+		  !memcmp(all[6].FEAD_value, &token, 6) &&
+		  all[8].FEAD_attr == FEA_USER_NOTES &&
+		  !strcmp(all[8].FEAD_value, "some notes"));
+	    MemFree(mh);
+	}
+	g = FileCreate("DST.TXT", FILE_CREATE_ONLY | FILE_ACCESS_RW, 0);
+	CHECK(g && FileClose(g, FALSE) == 0);
+	CHECK(FileCopyExtAttributes(f, "DST.TXT") == 0);
+	CHECK(FileClose(f, FALSE) == 0);
+	CHECK(FileGetPathExtAttributes("DST.TXT", FEA_TOKEN, &t2, 6) == 0 &&
+	      !memcmp(&t2, &token, 6));
+	CHECK(FileGetPathExtAttributes("DST.TXT", FEA_USER_NOTES, buf,
+				       sizeof(buf)) == 0 &&
+	      !strcmp(buf, "some notes"));
+	/* the name stays its own */
+	CHECK(FileGetPathExtAttributes("DST.TXT", FEA_NAME, buf,
+				       sizeof(buf)) == 0 &&
+	      !strcmp(buf, "DST.TXT"));
+	g = FileCreate("DST2.TXT", FILE_CREATE_ONLY | FILE_ACCESS_RW, 0);
+	CHECK(g && FileClose(g, FALSE) == 0);
+	CHECK(FileCopyPathExtAttributes("DATA.TXT", 0, "DST2.TXT", 0) == 0);
+	CHECK(FileGetPathExtAttributes("DST2.TXT", FEA_PROTOCOL, &p2, 4) ==
+	      0 && p2.PN_major == 2 && p2.PN_minor == 5);
+	CHECK(FileCopyPathExtAttributes("NONE.TXT", 0, "DST2.TXT", 0) ==
+	      ERROR_FILE_NOT_FOUND);
+	/* a native file: its time and FileAttrs only */
+	g = FileCreate("NAT.TXT", FILE_CREATE_ONLY | FCF_NATIVE |
+		       FILE_ACCESS_RW, FA_ARCHIVE);
+	CHECK(g != 0);
+	mh = FileGetHandleAllExtAttributes(g, &n);
+	CHECK(mh && n == 2);
+	if (mh)
+	    MemFree(mh);
+	CHECK(g && FileClose(g, FALSE) == 0);
+	CHECK(FileDelete("DST.TXT") == 0 && FileDelete("DST2.TXT") == 0 &&
+	      FileDelete("NAT.TXT") == 0);
+    }
+
     /* opened again: a GEOS file, data from 0; truncating keeps the header */
     f = FileOpen("DATA.TXT", FILE_ACCESS_RW);
     CHECK(f && FileSize(f) == 3 && FileRead(f, buf, 3, FALSE) == 3 &&

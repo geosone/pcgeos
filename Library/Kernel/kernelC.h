@@ -865,6 +865,11 @@ FileDateAndTime FileNow(void);
 /* fileOpenClose.c: close a file handle of a geode that is freed */
 void FileFreeHandle(FileHandle fh);
 KFile *FileOf(FileHandle fh);
+/* the record locks of an open file freed (fileIO.c) */
+void FileUnlockAll(KFile *kf);
+/* FileCopyExtAttributes (fileIO.asm; no C binding): those of the open
+ * file to the named one (fileEA.c) */
+word FileCopyExtAttributes(FileHandle fh, const char *path);
 
 /* geodesLoad.c: the module data of resource `res' of a geode and its
  * RESF_* flags; NULL if it has none (not a loaded geode, code) */

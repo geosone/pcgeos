@@ -637,3 +637,308 @@ void FilePopDir(void)
     t->T_path = p->KP_next;
     ghal_mem_free(p);
 }
+
+/* ---------------------------------------------------------------------
+ * Full paths (FileConstructFullPath, FileParseStandardPath,
+ * FileResolveStandardPath)
+ *
+ * The full path of a standard path is its logical path from the root of
+ * the top's disk, as in 16-bit GEOS with KLV_topLevelPath: the top is
+ * the root here, so SP_DOCUMENT is "\\DOCUMENT" ("C:\\DOCUMENT" with the
+ * drive name).
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    char	*b;
+    word	size;		/* of b, the null included */
+    word	len;
+    word	root;		/* the root's backslash (bufStart) */
+    word	stdEnd;		/* the backslash after the standard path */
+    Boolean	std;
+    Boolean	full;		/* it did not fit */
+} FPBuf;
+
+static void FPPut(FPBuf *f, const char *s, size_t n)
+{
+    if (f->full || f->len + n + 1 > f->size) {
+	f->full = TRUE;
+	return;
+    }
+    memcpy(f->b + f->len, s, n);
+    f->len = (word) (f->len + n);
+    f->b[f->len] = 0;
+}
+
+static void FPSep(FPBuf *f)
+{
+    if (!f->len || f->b[f->len - 1] != '\\')
+	FPPut(f, "\\", 1);
+}
+
+/* the standard path's components below the top (CopyStandardPath-
+ * Components) */
+static void FPStdComps(FPBuf *f, StandardPath sp)
+{
+    if (sp == SP_TOP || sp == SP_NOT_STANDARD_PATH)
+	return;
+    FPStdComps(f, stdPaths[sp / 2].parent);
+    FPSep(f);
+    FPPut(f, stdPaths[sp / 2].name, strlen(stdPaths[sp / 2].name));
+}
+
+/* the leading part for a disk or standard path: the drive name if asked
+ * for, the root, a standard path's components; the real disk */
+static DiskHandle FPLeading(FPBuf *f, DiskHandle disk, Boolean addDrive)
+{
+    FSDDisk *d;
+
+    f->std = (disk & DISK_IS_STD_PATH_MASK) != 0;
+    if (f->std)
+	disk = FileTopDisk();
+    d = FSDDiskOf(disk);
+    if (!d) {
+	KernelSetError(ERROR_INVALID_VOLUME);
+	return 0;
+    }
+    if (addDrive) {
+	FPPut(f, d->FDK_drive->FDR_name, strlen(d->FDK_drive->FDR_name));
+	FPPut(f, ":", 1);
+    }
+    f->root = f->len;
+    FPPut(f, "\\", 1);
+    return disk;
+}
+
+/* the path tail into f without its "." and ".." components, no further
+ * up than the root; an absolute tail starts at the root, or after the
+ * standard path if f has one (CopyNTStringCXMaxCompressPointAtNull) */
+static void FPCompress(FPBuf *f, const char *src)
+{
+    const char *e;
+    size_t n;
+
+    if (*src == '\\') {
+	f->len = (word) ((f->std ? f->stdEnd : f->root) + 1);
+	f->b[f->len] = 0;
+	src++;
+    }
+    FPSep(f);
+    while (*src && !f->full) {
+	for (e = src; *e && *e != '\\'; e++)
+	    ;
+	n = (size_t) (e - src);
+	if (n == 2 && src[0] == '.' && src[1] == '.') {
+	    /* back to the backslash before the last component */
+	    if (f->len - 1 > f->root) {
+		f->len--;
+		while (f->len - 1 > f->root && f->b[f->len - 1] != '\\')
+		    f->len--;
+		f->b[f->len] = 0;
+	    }
+	} else if (n && !(n == 1 && src[0] == '.')) {
+	    FPPut(f, src, n);
+	    FPPut(f, "\\", 1);
+	}
+	src = *e ? e + 1 : e;
+    }
+    /* no backslash at the end but the root's */
+    if (!f->full && f->len - 1 > f->root && f->b[f->len - 1] == '\\')
+	f->b[--f->len] = 0;
+}
+
+/* the length of a drive name at the start of path ("name:"), 0 if none */
+static word FPDriveSpecLen(const char *path)
+{
+    const char *e = path;
+
+    while (*e && *e != ':' && *e != '\\' && *e != '/')
+	e++;
+    return (word) (*e == ':' && e != path ? e - path + 1 : 0);
+}
+
+DiskHandle FileConstructFullPath(char **buffer, word bufSize,
+				 DiskHandle disk, const char *tail,
+				 Boolean addDriveLetter)
+{
+    FPBuf f;
+    KPath *cur;
+    DiskHandle real;
+    const char *p;
+    Boolean spec;
+
+    memset(&f, 0, sizeof(f));
+    f.b = *buffer;
+    f.size = bufSize;
+    if (!tail)
+	tail = "";
+    if (!bufSize) {
+	KernelSetError(ERROR_PATH_TOO_LONG);
+	return 0;
+    }
+    f.b[0] = 0;
+    if (FPDriveSpecLen(tail) && !(disk & DISK_IS_STD_PATH_MASK)) {
+	/* the drive of the path, not the disk passed */
+	if (addDriveLetter) {
+	    FPPut(&f, tail, strlen(tail));
+	    real = disk;
+	} else {
+	    p = tail;
+	    real = 0;
+	    if (!DriveSpec(&p, &real, &spec))
+		return 0;
+	    FPPut(&f, p, strlen(p));
+	}
+    } else {
+	if (!disk) {
+	    /* the current path first */
+	    cur = CurPath();
+	    real = FPLeading(&f, cur->KP_disk, addDriveLetter);
+	    if (!real)
+		return 0;
+	    if (f.std)
+		FPStdComps(&f, (StandardPath) cur->KP_disk);
+	    f.stdEnd = f.len > f.root + 1 ? f.len : f.root;
+	    FPCompress(&f, cur->KP_tail);
+	} else {
+	    real = FPLeading(&f, disk, addDriveLetter);
+	    if (!real)
+		return 0;
+	    if (f.std)
+		FPStdComps(&f, (StandardPath) disk);
+	    f.stdEnd = f.len > f.root + 1 ? f.len : f.root;
+	    if (!f.std)
+		real = disk;
+	}
+	FPSep(&f);
+	FPCompress(&f, tail);
+    }
+    if (f.full) {
+	KernelSetError(ERROR_PATH_TOO_LONG);
+	return 0;
+    }
+    *buffer = f.b + f.len;
+    KernelSetError(0);
+    return real;
+}
+
+/* the deepest standard path that the absolute path starts with (disk 0:
+ * the path has the top's drive name; the top's disk; a standard path: the
+ * path is below it); *path is advanced past it.  SP_NOT_STANDARD_PATH,
+ * *path unchanged, if it is not in one. */
+StandardPath FileParseStandardPath(DiskHandle disk, const char **path)
+{
+    const char *p = *path;
+    StandardPath verdict, c;
+    size_t n;
+    word i;
+    sword drive;
+
+    if (disk & DISK_IS_STD_PATH_MASK) {
+	verdict = (StandardPath) disk;
+	if (*p == '\\')
+	    p++;
+    } else {
+	if (!disk) {
+	    n = FPDriveSpecLen(p);
+	    if (!n)
+		return SP_NOT_STANDARD_PATH;
+	    drive = FSDDriveByName(p, (word) (n - 1));
+	    if (drive != TOP_DRIVE)
+		return SP_NOT_STANDARD_PATH;
+	    p += n;
+	} else if (disk != FileTopDisk())
+	    return SP_NOT_STANDARD_PATH;
+	if (*p != '\\')
+	    return SP_NOT_STANDARD_PATH;
+	p++;
+	verdict = SP_TOP;
+    }
+    while (*p) {
+	for (i = 1; i < STD_PATH_COUNT; i++) {
+	    c = (StandardPath) (2 * i + 1);
+	    if (stdPaths[i].parent != verdict)
+		continue;
+	    n = strlen(stdPaths[i].name);
+	    if (!strncmp(p, stdPaths[i].name, n) &&
+		(p[n] == 0 || p[n] == '\\'))
+		break;
+	}
+	if (i == STD_PATH_COUNT)
+	    break;
+	verdict = c;
+	p += n;
+	if (*p == '\\')
+	    p++;
+    }
+    *path = p;
+    return verdict;
+}
+
+typedef struct {
+    char	**buffer;
+    word	size;
+    FileResolveStandardPathFlags flags;
+    const char	*tail;
+    DiskHandle	disk;
+    FileAttrs	attrs;
+} FRSPData;
+
+/* FRSP_callback: at a place of the path, the place's full path if the
+ * file is there (or at once for FRSPF_RETURN_FIRST_DIR) */
+static word FRSPAt(FSDDisk *d, const char *dp, void *data)
+{
+    FRSPData *r = data;
+    FPBuf f;
+    FileAttrs a = 0;
+    word e;
+
+    if (!(r->flags & FRSPF_RETURN_FIRST_DIR)) {
+	a = FA_SUBDIR;
+	if (*r->tail && strcmp(r->tail, ".")) {
+	    e = FSD_OF(d)->FSD_getAttrs(d, dp, &a);
+	    if (e)
+		return e;
+	}
+    }
+    memset(&f, 0, sizeof(f));
+    f.b = *r->buffer;
+    f.size = r->size;
+    if (r->flags & FRSPF_ADD_DRIVE_NAME) {
+	FPPut(&f, d->FDK_drive->FDR_name, strlen(d->FDK_drive->FDR_name));
+	FPPut(&f, ":", 1);
+    }
+    f.root = f.len;
+    FPPut(&f, "\\", 1);
+    FPCompress(&f, dp);
+    if (f.full)
+	return ERROR_PATH_TOO_LONG;
+    *r->buffer = f.b + f.len;
+    r->disk = d->FDK_handle;
+    r->attrs = a;
+    return 0;
+}
+
+/* the actual path of a file or directory relative to the current path:
+ * the first place of it that has it (FileOpOnPath); 0 if none has */
+DiskHandle FileResolveStandardPath(char **buffer, word bufSize,
+				   const char *tail,
+				   FileResolveStandardPathFlags flags,
+				   FileAttrs *attrsPtr)
+{
+    FRSPData r;
+    word e;
+
+    r.buffer = buffer;
+    r.size = bufSize;
+    r.flags = flags;
+    r.tail = tail ? tail : "";
+    r.disk = 0;
+    r.attrs = 0;
+    e = FileOpOnPath(r.tail, FRSPAt, &r);
+    KernelSetError(e);
+    if (e)
+	return 0;
+    if (attrsPtr)
+	*attrsPtr = r.attrs;
+    return r.disk;
+}

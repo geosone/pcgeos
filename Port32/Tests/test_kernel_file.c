@@ -386,6 +386,55 @@ int main(int argc, char **argv)
 	      FileDelete("MDIR\\Geos Moved") == 0 && FileDeleteDir("MDIR") == 0);
     }
 
+    /* temporary files, record locks, a file read into a block */
+    {
+	char tmp[40];
+	FileHandle g, h;
+	MemHandle mh;
+	char *b;
+
+	CHECK(FileSetCurrentPath((DiskHandle) SP_DOCUMENT, "") != 0);
+	strcpy(tmp, "");
+	f = FileCreateTempFile(tmp, FILE_ACCESS_RW, 0);
+	CHECK(f != 0 && strlen(tmp) == 12 && !strcmp(tmp + 8, ".TMP"));
+	strcpy(buf, tmp);
+	strcpy(tmp, "\\DOCUMENT");
+	g = FileCreateTempFile(tmp, FCF_NATIVE | FILE_ACCESS_RW, 0);
+	CHECK(g != 0 && strlen(tmp) == 9 + 1 + 12 && tmp[9] == '\\' &&
+	      strcmp(tmp + 10, buf));
+	CHECK(f && FileWrite(f, "line one\r\nline two", 18, FALSE) == 18);
+
+	/* a region is locked against the other opens of the file */
+	h = FileOpen(buf, FILE_ACCESS_RW | FILE_DENY_NONE);
+	CHECK(h != 0);
+	CHECK(FileLockRecord(f, 0, 10) == 0);
+	CHECK(FileLockRecord(h, 5, 10) == ERROR_ALREADY_LOCKED);
+	CHECK(FileLockRecord(h, 10, 5) == 0);
+	CHECK(FileUnlockRecord(h, 10, 4) == ERROR_ALREADY_LOCKED);
+	CHECK(FileUnlockRecord(h, 10, 5) == 0);
+	CHECK(FileLockRecord(g, 0, 10) == 0);	/* another file */
+	CHECK(h && FileClose(h, FALSE) == 0);
+	CHECK(FileClose(f, FALSE) == 0);	/* frees its lock */
+	h = FileOpen(buf, FILE_ACCESS_RW);
+	CHECK(h && FileLockRecord(h, 0, 100) == 0 &&
+	      FileClose(h, FALSE) == 0);
+	CHECK(g && FileClose(g, FALSE) == 0);
+
+	mh = FileOpenAndRead(FOARF_ADD_CRLF | FOARF_ADD_EOF |
+			     FOARF_NULL_TERMINATE | FILE_ACCESS_R, buf, &h);
+	CHECK(mh != 0 && h != 0);
+	if (mh) {
+	    b = MemLock(mh);
+	    CHECK(MemGetInfo(mh, MGIT_SIZE) >= 22 &&
+		  !memcmp(b, "line one\r\nline two\r\n\x1a", 21) && b[21] == 0);
+	    MemFree(mh);
+	}
+	CHECK(h && FileClose(h, FALSE) == 0);
+	CHECK(FileOpenAndRead(FILE_ACCESS_R, "NONE.TXT", &h) == 0 &&
+	      ThreadGetError() == ERROR_FILE_NOT_FOUND);
+	CHECK(FileDelete(buf) == 0 && FileDelete(tmp) == 0);
+    }
+
     /* every handle is gone again (the child thread's too) */
     f = FileOpen("\\SYSTEM\\FS\\D.TXT", FILE_ACCESS_R);
     CHECK(f != 0);

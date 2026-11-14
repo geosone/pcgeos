@@ -1924,10 +1924,40 @@ where it is with `FileSetTopHostPath`.
   A missing file is `ERROR_FILE_NOT_FOUND`. If its directory is
   missing too, the error is `ERROR_PATH_NOT_FOUND`.
 
+- **Full paths** (`filePath.c`, after `FileConstructFullPathReal`):
+  the full path of a standard path is its logical path from the root
+  of the top's disk, as with `KLV_topLevelPath`. The top is that root
+  here, so `SP_DOCUMENT` is `\DOCUMENT` (`C:\DOCUMENT` with the
+  drive name). `FileConstructFullPath` puts the current path, a
+  standard path or a disk's root before the tail and takes out `.`
+  and `..` (never above the root). An absolute tail after a standard
+  path stays below it, as in the asm (opening such a path takes it
+  from the top). `FileParseStandardPath` finds the deepest standard
+  path a full path is in. `FileResolveStandardPath` gives the actual
+  path of a file at the first place of the path that has it.
+- **Temporary files** (`FileCreateTempFile`, `fileOpenClose.c`): eight
+  hex digits from the timer count and the process handle, `.TMP`,
+  written into the caller's directory buffer; the next number while
+  the name exists.
+- **Record locks** (`fileIO.c`): DOS locked a region for its handle,
+  and other handles of the file were refused. The host's POSIX locks
+  are per process, and GEOS is one, so the kernel keeps the locks
+  itself: per open file (its duplicated handles share them), for the
+  file by its disk and `FEA_FILE_ID`. A region is unlocked exactly as
+  it was locked; closing the file frees its regions.
+- **`FileOpenAndRead`** (`fileIO.c`): the file in a new block, with CR
+  LF, `^Z` and a null added as the flags ask.
+- **All extended attributes** (`fileEA.c`): the list of the DOS driver
+  (`dosvceaAllAttrs`, 13 attributes; a file that is no GEOS file has
+  only the first two). The kernel fetches them one by one through the
+  driver. `FileCopyExtAttributes` and `FileCopyPathExtAttributes` set
+  them on another file with `FEA_MULTIPLE`.
+
 Not yet:
 
-- deny modes and record locks;
-- links, temporary files, and change notification;
+- deny modes, and reading and writing a region another open file has
+  locked;
+- links and change notification;
 - `SPA_DOES_NOT_EXIST_LOCALLY` (every standard path has its place
   below the top).
 
