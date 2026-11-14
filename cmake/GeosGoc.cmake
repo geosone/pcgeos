@@ -44,8 +44,13 @@ function(geos_goc out_var gp_file)
     set(out_c ${dir}/${base}.goc.c)
     set(xh ${dir}/${base}.goc.x.h)
     set(includes -I${goc_dir})
+    # the headers of the geode (beside the file and in INCLUDES): a change
+    # there runs goc again (the CInclude ones are not tracked)
+    file(GLOB local_headers ${goc_dir}/*.goh ${goc_dir}/*.h)
     foreach(inc IN LISTS ARG_INCLUDES)
       list(APPEND includes -I${inc})
+      file(GLOB inc_headers ${inc}/*.goh ${inc}/*.h)
+      list(APPEND local_headers ${inc_headers})
     endforeach()
     list(APPEND includes -I${PROJECT_SOURCE_DIR}/CInclude)
     add_custom_command(OUTPUT ${out_c} ${xh}
@@ -53,7 +58,7 @@ function(geos_goc out_var gp_file)
       COMMAND ${GEOS_GOC} -cg -D__GEOS__ ${includes} -o ${out_c} -x ${xh}
               ${goc_file}
       WORKING_DIRECTORY ${goc_dir}
-      DEPENDS ${goc_file} ${GEOS_GOC}
+      DEPENDS ${goc_file} ${GEOS_GOC} ${local_headers}
       COMMENT "goc -cg ${base}.goc"
       VERBATIM)
     list(APPEND xhs ${xh})
