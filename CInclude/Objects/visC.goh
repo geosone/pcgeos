@@ -906,4 +906,74 @@ typedef struct {
 pragma Alias(VisObjectHandlesInkReply, "VISOBJECTHANDLESINKREPLY");
 #endif
 
+#ifdef GEOS_PORT32
+/*
+ * The Vis routines of the UI library in C (Port32/ABI.md section 13x): the
+ * asm ones took the object in *ds:si and registers; these take the optr.
+ * The object's block must be run by the calling thread.
+ */
+extern Boolean VisCheckIfVisGrown(optr obj);
+extern Boolean VisCheckIfSpecBuilt(optr obj);
+extern SizeAsDWord VisGetSize(optr obj);
+extern void VisGetBounds(optr obj, Rectangle *r);
+extern void VisGetBoundsInsideMargins(optr obj, Rectangle *r);
+extern void VisSetSize(optr obj, sword width, sword height);
+extern void VisSetPosition(optr obj, sword x, sword y);
+extern void VisGetCenter(optr obj, GetCenterParams *c);
+extern Boolean VisTestPointInBounds(optr obj, sword x, sword y);
+extern optr VisFindParent(optr obj);
+extern optr VisFindParentOfVisType(optr obj, VisTypeFlags type);
+extern WindowHandle VisQueryWindow(optr obj);
+extern WindowHandle VisQueryParentWin(optr obj);
+extern word VisGetParentGeometry(optr obj);
+/* the message (with its goc -cg parameter structure) to the parent,
+ * MF_CALL; the reply zeroed first; FALSE if there is no parent */
+extern Boolean VisCallParent(optr obj, Message msg, const void *params,
+			     word paramSize, void *reply, word replySize);
+extern void VisSendToChildren(optr obj, Message msg, const void *params,
+			      word paramSize);
+/* to the children that are not win groups: all (flags 0), those with
+ * one of the VisOptFlags, or until one answers a Boolean TRUE
+ * (VIS_CALL_UNTIL_TRUE, then TRUE) */
+#define VIS_CALL_UNTIL_TRUE	0xff
+extern Boolean VisIfFlagSetCallVisChildren(optr obj, Message msg,
+					   const void *params,
+					   word paramSize, byte flags);
+extern void VisMarkInvalid(optr obj, VisOptFlags flags, VisUpdateMode mode);
+extern void VisMarkInvalidOnParent(optr obj, VisOptFlags flags,
+				   VisUpdateMode mode);
+extern void VisMarkFullyInvalid(optr obj);
+extern void VisRemove(optr obj, VisUpdateMode mode);
+/* a mouse message (MSG_META_PTR, MSG_UI_BUTTON) to the child under the
+ * point; FALSE if none */
+extern Boolean VisCallChildUnderPoint(optr obj, Message msg, sword x,
+				      sword y, word inputState,
+				      MouseReturnParams *ret);
+extern void VisGrabMouse(optr obj);
+extern void VisForceGrabMouse(optr obj);
+extern void VisGrabLargeMouse(optr obj);
+extern void VisForceGrabLargeMouse(optr obj);
+extern void VisReleaseMouse(optr obj);
+extern void VisGrabKbd(optr obj);
+extern void VisForceGrabKbd(optr obj);
+extern void VisReleaseKbd(optr obj);
+extern void VisTakeGadgetExclAndGrab(optr obj);
+/* monikers: a chunk in the object's block */
+typedef struct {
+    word		DMA_xInset;
+    word		DMA_yInset;
+    word		DMA_xMaximum;
+    word		DMA_yMaximum;
+    GStateHandle	DMA_gState;
+    word		DMA_textHeight;
+} DrawMonikerArgs;
+extern void VisDrawMoniker(optr obj, ChunkHandle moniker,
+			   DrawMonikerFlags flags, DrawMonikerArgs *a);
+extern XYValueAsDWord VisGetMonikerPos(optr obj, ChunkHandle moniker,
+				       DrawMonikerFlags flags,
+				       DrawMonikerArgs *a);
+extern SizeAsDWord VisGetMonikerSize(optr obj, ChunkHandle moniker,
+				     word textHeight, GStateHandle gstate);
+#endif
+
 @endlib

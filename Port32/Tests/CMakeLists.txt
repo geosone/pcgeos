@@ -303,6 +303,17 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   target_link_libraries(test_kernel_geode PRIVATE geos_kernel)
   add_test(NAME kernel.geode COMMAND test_kernel_geode)
 
+  # the visual classes of the UI library (Library/User/Vis) in a window
+  if(TARGET geode_ui)
+    geos_geode(uivis GP Geode/uivis.gp GOC Geode/uivis.goc)
+    geos_embed(_ui_c ${ui_GEO} ui_geode)
+    geos_embed(_uivis_c ${uivis_GEO} uivis_geode)
+    add_executable(test_ui_vis test_ui_vis.c ${_ui_c} ${_uivis_c})
+    add_dependencies(test_ui_vis geode_ui geode_uivis)
+    target_link_libraries(test_ui_vis PRIVATE geos_kernel)
+    add_test(NAME library.ui.vis COMMAND test_ui_vis)
+  endif()
+
   # starting the kernel: drives, [paths], the UI and a process from files
   add_executable(test_kernel_boot test_kernel_boot.c ${_kglib_c}
                  ${_kgapp_c})

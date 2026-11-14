@@ -1,0 +1,382 @@
+/*
+ * visComp.goc -- VisCompClass (after visComp.asm): a visual object with
+ * children, which may have a window (VCI_window) and be a win group,
+ * the top of an update.
+ *
+ * Here: the children (add, remove, move, find), the win group's update
+ * (MSG_VIS_VUP_UPDATE_WIN_GROUP: now, or queued on the UI or the
+ * application queue; MSG_VIS_UPDATE_WIN_GROUP: geometry, opening,
+ * windows and images), exposure and drawing of the children, the
+ * gadget exclusive, mouse events to the child under the point.
+ *
+ * Port32, not yet (Port32/ABI.md section 13x):
+ *   - the geometry manager of visCompGeometry.asm: a composite keeps
+ *     the size and position it is given, like a VisClass object;
+ *   - MSG_META_UPDATE_WINDOW and MSG_GEN_GUP_ENSURE_UPDATE_WINDOW (they
+ *     need the Generic UI), VisContentClass (VisContentGetVUM);
+ *   - MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK.
+ */
+@include "uiInt.goh"
+
+@classdecl VisCompClass, neverSaved;
+
+/* VisCompInitialize */
+@method VisCompClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    VisPart(oself)->VI_typeFlags |= VTF_IS_COMPOSITE;
+}
+
+/* the inval region goes with the object */
+@method VisCompClass, MSG_META_FINAL_OBJ_FREE
+{
+    ChunkHandle *ch = ObjVarFindData(oself, TEMP_VIS_INVAL_REGION);
+
+    if (ch)
+	LMemFree(ConstructOptr(OptrToHandle(oself), *ch));
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The children
+ * ------------------------------------------------------------------- */
+
+#define VIS_LINKS	word_offsetof(VisBase, Vis_offset), \
+			word_offsetof(VisCompInstance, VCI_comp), \
+			word_offsetof(VisInstance, VI_link)
+
+/* VisCompAddChild: linked in; a child with invalid or path bits marks
+ * them again up here (they are not set on the way up yet) */
+@method VisCompClass, MSG_VIS_ADD_CHILD
+{
+    VisInstance *c;
+    VisOptFlags f;
+
+    ObjCompAddChild(oself, child, flags, VIS_LINKS);
+    c = VisLock(child);
+    f = c->VI_optFlags & (VOF_PATH_BITS | VOF_INVALID_BITS);
+    if (f)
+	c->VI_optFlags = 0;
+    VisUnlock(child);
+    if (f)
+	VisMarkInvalid(child, f, VUM_MANUAL);
+}
+
+@method VisCompClass, MSG_VIS_REMOVE_CHILD
+{
+    ObjCompRemoveChild(oself, child, flags & CCF_MARK_DIRTY, VIS_LINKS);
+}
+
+@method VisCompClass, MSG_VIS_MOVE_CHILD
+{
+    ObjCompMoveChild(oself, child, flags, VIS_LINKS);
+}
+
+/* -1 if not a child */
+@method VisCompClass, MSG_VIS_FIND_CHILD
+{
+    return ObjCompFindChildByOptr(oself, object, VIS_LINKS);
+}
+
+@method VisCompClass, MSG_VIS_FIND_CHILD_AT_POSITION
+{
+    return ObjCompFindChildByNumber(oself, position, VIS_LINKS);
+}
+
+/* a child in a VM block that may not be discarded while it is ours */
+@method VisCompClass, MSG_VIS_ADD_NON_DISCARDABLE_VM_CHILD
+{
+    VisInstance *c;
+
+    ObjIncInUseCount(OptrToHandle(child));
+    c = VisLock(child);
+    c->VI_link.LP_next = 0;
+    VisUnlock(child);
+    @call oself::MSG_VIS_ADD_CHILD(child, flags);
+}
+
+@method VisCompClass, MSG_VIS_REMOVE_NON_DISCARDABLE_VM_CHILD
+{
+    @call oself::MSG_VIS_REMOVE_CHILD(child, 0);
+    ObjDecInUseCount(OptrToHandle(child));
+}
+
+/* ---------------------------------------------------------------------
+ * Windows
+ * ------------------------------------------------------------------- */
+
+@method VisCompClass, MSG_VIS_CLOSE_WIN
+{
+    WindowHandle w = pself->VCI_window;
+
+    pself->VCI_window = 0;
+    if (w)
+	WinClose(w);
+}
+
+/* VisCompMoveResizeWin: the window to the bounds (screen pixels) */
+@method VisCompClass, MSG_VIS_MOVE_RESIZE_WIN
+{
+    Rectangle b = pself->VI_bounds;
+
+    if (!pself->VCI_window)
+	return;
+    WinResize(pself->VCI_window, NULL, b.R_left, b.R_top, b.R_right - 1,
+	      b.R_bottom - 1, WPF_ABS);
+}
+
+/* ---------------------------------------------------------------------
+ * The win group's update
+ * ------------------------------------------------------------------- */
+
+/* VisCompVupUpdateWinGroup (static): at a win group the update, now or
+ * queued once (UPDATE_PENDING) as MSG_VIS_VUP_UPDATE_WIN_GROUP(VUM_NOW):
+ * to itself on its queue, or through MSG_META_DISPATCH_EVENT on the
+ * queue of the block's owner (VUM_DELAYED_VIA_APP_QUEUE); below one, up
+ * the tree */
+Boolean VisCompVupUpdateWinGroup(optr obj, VisUpdateMode mode)
+{
+    VisInstance *v;
+
+    if (mode == VUM_MANUAL)
+	return FALSE;
+    v = VisLock(obj);
+    if (!(v->VI_typeFlags & VTF_IS_WIN_GROUP)) {
+	optr p = VisFindParent(obj);
+	VisUnlock(obj);
+	return p ? VisVupUpdateWinGroup(p, mode) : FALSE;
+    }
+    if (mode == VUM_NOW) {
+	VisUnlock(obj);
+	VisCompUpdateWinGroup(obj);
+	return TRUE;
+    }
+    if (v->VI_optFlags & VOF_UPDATE_PENDING) {
+	VisUnlock(obj);
+	return TRUE;
+    }
+    v->VI_optFlags |= VOF_UPDATE_PENDING;
+    VisUnlock(obj);
+    if (mode == VUM_DELAYED_VIA_APP_QUEUE) {
+	EventHandle ev = @record obj::MSG_VIS_VUP_UPDATE_WIN_GROUP(VUM_NOW);
+	optr proc = ConstructOptr(MemOwner(OptrToHandle(obj)), 0);
+	@send ,forceQueue proc::MSG_META_DISPATCH_EVENT(ev, MF_FORCE_QUEUE);
+    } else
+	@send ,forceQueue obj::MSG_VIS_VUP_UPDATE_WIN_GROUP(VUM_NOW);
+    return TRUE;
+}
+
+@method VisCompClass, MSG_VIS_VUP_UPDATE_WIN_GROUP
+{
+    return VisCompVupUpdateWinGroup(oself, updateMode);
+}
+
+/* VisCompUpdateWinGroup (static): not visible -> closed; else the
+ * geometry, then opened or the windows and images brought up to date */
+void VisCompUpdateWinGroup(optr obj)
+{
+    VisInstance *v = VisLock(obj);
+
+    v->VI_optFlags &= ~VOF_UPDATE_PENDING;
+    v->VI_optFlags |= VOF_UPDATING;
+    if (!(v->VI_attrs & VA_VISIBLE)) {
+	VisAttrs a = v->VI_attrs;
+	VisUnlock(obj);
+	if (a & VA_REALIZED)
+	    @call obj::MSG_VIS_CLOSE();
+    } else {
+	VisOptFlags f = v->VI_optFlags;
+	VisUnlock(obj);
+	if (f & (VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH))
+	    @call obj::MSG_VIS_UPDATE_GEOMETRY();
+	v = VisLock(obj);
+	if (!(v->VI_attrs & VA_REALIZED)) {
+	    VisUnlock(obj);
+	    @call obj::MSG_VIS_OPEN(0);
+	} else {
+	    VisUnlock(obj);
+	    @call obj::MSG_VIS_UPDATE_WINDOWS_AND_IMAGE(0);
+	}
+    }
+    v = VisLock(obj);
+    v->VI_optFlags &= ~VOF_UPDATING;
+    VisUnlock(obj);
+}
+
+@method VisCompClass, MSG_VIS_UPDATE_WIN_GROUP
+{
+    (void) updateMode;
+    VisCompUpdateWinGroup(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Exposure and drawing
+ * ------------------------------------------------------------------- */
+
+/* VisCompExposed: our window drawn through an update, unless it will be
+ * invalidated again (then the update is only acknowledged) */
+@method VisCompClass, MSG_META_EXPOSED
+{
+    GStateHandle gs;
+
+    if (win != pself->VCI_window)
+	return;
+    if (!(pself->VI_attrs & VA_REALIZED) ||
+	(!(pself->VCI_geoAttrs & VCGA_ONLY_DRAWS_IN_MARGINS) &&
+	 pself->VI_optFlags & (VOF_IMAGE_INVALID | VOF_WINDOW_INVALID |
+			       VOF_GEOMETRY_INVALID))) {
+	WinAckUpdate(win);
+	return;
+    }
+    gs = @call oself::MSG_VIS_VUP_CREATE_GSTATE();
+    GrBeginUpdate(gs);
+    @call oself::MSG_VIS_DRAW(DF_EXPOSED, gs);
+    GrEndUpdate(gs);
+    GrDestroyState(gs);
+}
+
+@method VisCompClass, MSG_META_EXPOSED_FOR_PRINT
+{
+    (void) completionOD;
+    @call oself::MSG_VIS_DRAW(DF_EXPOSED | DF_PRINT, gstring);
+}
+
+typedef struct {
+    Rectangle		mask;
+    DrawFlags		flags;
+    GStateHandle	gstate;
+} DrawData;
+
+/* VCD_callBack: a child to draw that is within the mask */
+static Boolean DrawCallback(optr parent, optr child, void *data)
+{
+    DrawData *d = data;
+    Rectangle b;
+
+    (void) parent;
+    if (!VisShouldObjBeDrawn(child, d->flags))
+	return FALSE;
+    VisGetBounds(child, &b);
+    if (b.R_left > d->mask.R_right || b.R_right - 1 < d->mask.R_left ||
+	b.R_top > d->mask.R_bottom || b.R_bottom - 1 < d->mask.R_top)
+	return FALSE;
+    @call child::MSG_VIS_DRAW(d->flags, d->gstate);
+    return FALSE;
+}
+
+/* VisCompDraw (static): the children within the mask */
+@method VisCompClass, MSG_VIS_DRAW
+{
+    DrawData d;
+
+    if (drawFlags & DF_DONT_DRAW_CHILDREN ||
+	!(pself->VI_attrs & VA_DRAWABLE))
+	return;
+    if (!(drawFlags & DF_PRINT) &&
+	(!(pself->VI_attrs & VA_REALIZED) ||
+	 (!(pself->VCI_geoAttrs & VCGA_ONLY_DRAWS_IN_MARGINS) &&
+	  pself->VI_optFlags & VOF_IMAGE_INVALID)))
+	return;
+    if (!GrGetMaskBounds(gstate, &d.mask))
+	return;
+    d.flags = drawFlags;
+    d.gstate = gstate;
+    VisCallChildren(oself, DrawCallback, &d);
+}
+
+/* ---------------------------------------------------------------------
+ * The gadget exclusive
+ * ------------------------------------------------------------------- */
+
+/* VisCompTakeGadgetExcl: the child has it; the parent learns (not above
+ * a win group); the old owner has lost it */
+@method VisCompClass, MSG_VIS_TAKE_GADGET_EXCL
+{
+    optr old = pself->VCI_gadgetExcl;
+
+    if (old == child)
+	return;
+    pself->VCI_gadgetExcl = child;
+    if (!(pself->VI_typeFlags & VTF_IS_WIN_GROUP)) {
+	optr p = VisFindParent(oself);
+	if (p)
+	    @call p::MSG_VIS_TAKE_GADGET_EXCL(child ? oself : 0);
+    }
+    if (old)
+	@call old::MSG_VIS_LOST_GADGET_EXCL();
+}
+
+@method VisCompClass, MSG_VIS_RELEASE_GADGET_EXCL
+{
+    if (!child || pself->VCI_gadgetExcl != child)
+	return;
+    pself->VCI_gadgetExcl = 0;
+    if (!(pself->VI_typeFlags & VTF_IS_WIN_GROUP)) {
+	optr p = VisFindParent(oself);
+	if (p)
+	    @call p::MSG_VIS_RELEASE_GADGET_EXCL(oself);
+    }
+    @call child::MSG_VIS_LOST_GADGET_EXCL();
+}
+
+/* VisCompLostGadgetExcl: passed down to the child that has it */
+@method VisCompClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    optr c = pself->VCI_gadgetExcl;
+
+    if (pself->VI_typeFlags & VTF_IS_WIN_GROUP || !c)
+	return;
+    pself->VCI_gadgetExcl = 0;
+    @call c::MSG_VIS_LOST_GADGET_EXCL();
+}
+
+/* ---------------------------------------------------------------------
+ * Mouse and ink
+ * ------------------------------------------------------------------- */
+
+/* VisCallChildUnderPoint for the mouse messages */
+@method VisCompClass, MSG_META_PTR, MSG_META_START_SELECT,
+		      MSG_META_END_SELECT, MSG_META_DRAG_SELECT,
+		      MSG_META_START_MOVE_COPY, MSG_META_END_MOVE_COPY,
+		      MSG_META_DRAG_MOVE_COPY, MSG_META_START_FEATURES,
+		      MSG_META_END_FEATURES, MSG_META_DRAG_FEATURES,
+		      MSG_META_START_OTHER, MSG_META_END_OTHER,
+		      MSG_META_DRAG_OTHER
+{
+    VisCallChildUnderPoint(oself, message, xPosition, yPosition, inputState,
+			   retVal);
+}
+
+typedef struct {
+    sword		x, y;
+    InkReturnParams	*ret;
+} InkData;
+
+static Boolean InkCallback(optr parent, optr child, void *data)
+{
+    InkData *d = data;
+    VisInstance *v = VisLock(child);
+    Boolean ok = !(v->VI_typeFlags & VTF_IS_WINDOW) &&
+		 (v->VI_attrs & (VA_DETECTABLE | VA_REALIZED)) ==
+		 (VA_DETECTABLE | VA_REALIZED);
+
+    (void) parent;
+    VisUnlock(child);
+    if (!ok || !VisTestPointInBounds(child, d->x, d->y))
+	return FALSE;
+    @call child::MSG_META_QUERY_IF_PRESS_IS_INK(d->ret, d->x, d->y);
+    return TRUE;
+}
+
+/* VisCompMakePressesNotInk: the child under the point decides, else no
+ * ink */
+@method VisCompClass, MSG_META_QUERY_IF_PRESS_IS_INK
+{
+    InkData d;
+
+    d.x = xPosition;
+    d.y = yPosition;
+    d.ret = retVal;
+    if (!VisCallChildren(oself, InkCallback, &d))
+	retVal->inkType = IRV_NO_INK;
+}

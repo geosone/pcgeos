@@ -1,0 +1,267 @@
+/*
+ * uivis.goc -- a process geode for the library.ui.vis test (Port32/Tests):
+ * a visual tree of the UI library's VisClass and VisCompClass in a window.
+ *
+ * UVTop (a VisCompClass window and win group) has two rectangles, UVRectA
+ * and UVRectB, that count what they get.  The test (test_ui_vis.c) gives
+ * the root window in uvState and runs the steps one by one through
+ * UVStep, which calls the process (MSG_UV_STEP runs on its thread, which
+ * runs the objects); the exposures come after a step, on the queue.  The
+ * checks made here count in uvState (the first failing line kept).
+ */
+@include <stdapp.goh>
+@include <Objects/vCompC.goh>
+
+/* visC.def (uiInt.goh has them for the library) */
+#define VOF_PATH_BITS		(VOF_GEO_UPDATE_PATH | VOF_WINDOW_UPDATE_PATH | \
+				 VOF_IMAGE_UPDATE_PATH)
+#define VOF_INVALID_BITS	(VOF_GEOMETRY_INVALID | VOF_WINDOW_INVALID | \
+				 VOF_IMAGE_INVALID)
+#define VOF_UPDATING		VOF_EC_UPDATING
+
+typedef struct {
+    WindowHandle	UVS_root;	/* from the test */
+    GeodeHandle		UVS_process;
+    word		UVS_attached;
+    word		UVS_checks, UVS_fails, UVS_failLine;
+    word		UVS_drawsA, UVS_drawsB;
+    word		UVS_selectsA, UVS_selectsB;
+    word		UVS_lostA, UVS_lostB;
+    word		UVS_pings;
+    WindowHandle	UVS_win;	/* UVTop's window */
+} UVState;
+
+UVState uvState;
+
+#define UVCHECK(c) \
+    do { uvState.UVS_checks++; if (!(c)) { uvState.UVS_fails++; \
+	if (!uvState.UVS_failLine) uvState.UVS_failLine = __LINE__; } \
+    } while (0)
+
+@class UVProcessClass, ProcessClass;
+    @message void MSG_UV_STEP(word step);
+@endc
+@classdecl UVProcessClass, neverSaved;
+
+/* the window: opened on the root, with the bounds */
+@class UVWinClass, VisCompClass;
+    @message void MSG_UV_PING();
+@endc
+@classdecl UVWinClass;
+
+/* a rectangle of its colour */
+@class UVRectClass, VisClass;
+    @instance Color UVRI_color = C_BLACK;
+    @instance word UVRI_which = 0;
+@endc
+@classdecl UVRectClass;
+
+@start UVObjects;
+@object UVWinClass UVTop = {
+    VI_bounds = { 10, 10, 210, 110 };
+    VI_typeFlags = VTF_IS_COMPOSITE | VTF_IS_WINDOW | VTF_IS_WIN_GROUP;
+    VCI_comp = @UVRectA, @UVRectB;
+}
+@object UVRectClass UVRectA = {
+    VI_bounds = { 5, 5, 55, 45 };
+    UVRI_color = C_RED;
+    UVRI_which = 0;
+}
+@object UVRectClass UVRectB = {
+    VI_bounds = { 100, 20, 150, 60 };
+    UVRI_color = C_BLUE;
+    UVRI_which = 1;
+}
+@end UVObjects;
+
+@method UVWinClass, MSG_VIS_OPEN_WIN
+{
+    Rectangle b = pself->VI_bounds;
+
+    pself->VCI_window = WinOpen(parentWindow ? parentWindow
+					     : uvState.UVS_root,
+				oself, oself, CMT_CLOSEST, C_WHITE, 0, 0, 0,
+				0, 0, NULL, b.R_left, b.R_top, b.R_right - 1,
+				b.R_bottom - 1);
+    uvState.UVS_win = pself->VCI_window;
+}
+
+@method UVWinClass, MSG_UV_PING
+{
+    uvState.UVS_pings++;
+}
+
+@method UVRectClass, MSG_VIS_DRAW
+{
+    (void) drawFlags;
+    GrSetAreaColor(gstate, CF_INDEX, pself->UVRI_color, 0, 0);
+    GrFillRect(gstate, pself->VI_bounds.R_left, pself->VI_bounds.R_top,
+	       pself->VI_bounds.R_right, pself->VI_bounds.R_bottom);
+    if (pself->UVRI_which)
+	uvState.UVS_drawsB++;
+    else
+	uvState.UVS_drawsA++;
+}
+
+@method UVRectClass, MSG_META_START_SELECT
+{
+    (void) xPosition;
+    (void) yPosition;
+    (void) inputState;
+    if (pself->UVRI_which)
+	uvState.UVS_selectsB++;
+    else
+	uvState.UVS_selectsA++;
+    retVal->flags = MRF_PROCESSED;
+}
+
+@method UVRectClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    if (pself->UVRI_which)
+	uvState.UVS_lostB++;
+    else
+	uvState.UVS_lostA++;
+}
+
+@method UVProcessClass, MSG_META_ATTACH_PROCESS
+{
+    (void) value1;
+    (void) value2;
+    uvState.UVS_process = GeodeGetProcessHandle();
+    uvState.UVS_attached++;
+}
+
+static VisAttrs Attrs(optr o)
+{
+    return @call o::MSG_VIS_GET_ATTRS();
+}
+
+static VisOptFlags Opt(optr o)
+{
+    return @call o::MSG_VIS_GET_OPT_FLAGS();
+}
+
+static WindowHandle TopWin(void)
+{
+    VisCompInstance *v;
+    WindowHandle w;
+
+    ObjLockObjBlock(OptrToHandle(@UVTop));
+    v = ObjDerefVis(@UVTop);
+    w = v->VCI_window;
+    MemUnlock(OptrToHandle(@UVTop));
+    return w;
+}
+
+@method UVProcessClass, MSG_UV_STEP
+{
+    switch (step) {
+    case 1: {
+	/* the tree, then opened by making the win group visible */
+	GStateHandle gs;
+	EventHandle ev;
+
+	UVCHECK(@call UVRectA::MSG_VIS_FIND_PARENT() == @UVTop);
+	UVCHECK(@call UVTop::MSG_VIS_FIND_PARENT() == 0);
+	UVCHECK(@call UVTop::MSG_VIS_COUNT_CHILDREN() == 2);
+	UVCHECK(@call UVTop::MSG_VIS_FIND_CHILD(@UVRectB) == 1);
+	UVCHECK(@call UVTop::MSG_VIS_FIND_CHILD(@UVTop) == (word) -1);
+	UVCHECK(@call UVTop::MSG_VIS_FIND_CHILD_AT_POSITION(0) == @UVRectA);
+	UVCHECK(@call UVRectB::MSG_VIS_VUP_FIND_OBJECT_OF_CLASS(&UVWinClass)
+		== @UVTop);
+	UVCHECK(@call UVRectB::MSG_VIS_VUP_TEST_FOR_OBJECT_OF_CLASS(
+		    &UVRectClass));
+	UVCHECK(!@call UVTop::MSG_VIS_VUP_TEST_FOR_OBJECT_OF_CLASS(
+		    &UVRectClass));
+	UVCHECK(@call UVRectA::MSG_VIS_GET_SIZE() == MAKE_SIZE_DWORD(50, 40));
+	UVCHECK(@call UVTop::MSG_VIS_GET_TYPE_FLAGS() ==
+		(VTF_IS_COMPOSITE | VTF_IS_WINDOW | VTF_IS_WIN_GROUP));
+	UVCHECK(!(Attrs(@UVTop) & VA_REALIZED) && !TopWin());
+
+	/* a classed event up the tree to the window's class */
+	ev = @record UVWinClass::MSG_UV_PING();
+	@call UVRectA::MSG_META_SEND_CLASSED_EVENT(ev,
+						   (TravelOption) TO_VIS_PARENT);
+	UVCHECK(uvState.UVS_pings == 1);
+
+	@call UVTop::MSG_VIS_SET_ATTRS(VA_VISIBLE, 0, VUM_NOW);
+	UVCHECK(Attrs(@UVTop) & VA_REALIZED && TopWin() &&
+		TopWin() == uvState.UVS_win);
+	UVCHECK(Attrs(@UVRectA) & VA_REALIZED &&
+		Attrs(@UVRectB) & VA_REALIZED);
+	UVCHECK(!(Opt(@UVTop) & (VOF_INVALID_BITS | VOF_PATH_BITS |
+				 VOF_UPDATING | VOF_UPDATE_PENDING)));
+	UVCHECK(!(Opt(@UVRectA) & (VOF_IMAGE_INVALID | VOF_WINDOW_INVALID)));
+	/* VisQueryWindow wants a built object (VI_link set): UVTop has no
+	 * parent (the field, in a real UI), so there is none above A */
+	UVCHECK(@call UVRectA::MSG_VIS_QUERY_WINDOW() == 0);
+
+	/* a gstate of the win group's window */
+	gs = @call UVRectA::MSG_VIS_VUP_CREATE_GSTATE();
+	UVCHECK(gs && GrGetWinHandle(gs) == TopWin());
+	GrDestroyState(gs);
+	break;
+    }
+    case 2:
+	/* A's image invalid, updated now: only A is drawn again */
+	@call UVRectA::MSG_VIS_MARK_INVALID(VOF_IMAGE_INVALID, VUM_NOW);
+	UVCHECK(!(Opt(@UVRectA) & VOF_IMAGE_INVALID) &&
+		!(Opt(@UVTop) & (VOF_IMAGE_UPDATE_PATH | VOF_UPDATING)));
+	break;
+    case 3: {
+	/* the mouse to the child under the point */
+	MouseReturnParams r;
+
+	@call UVTop::MSG_META_START_SELECT(&r, 120, 30, 0);
+	UVCHECK(r.flags == MRF_PROCESSED && uvState.UVS_selectsB == 1 &&
+		!uvState.UVS_selectsA);
+	@call UVTop::MSG_META_START_SELECT(&r, 10, 10, 0);
+	UVCHECK(r.flags == MRF_PROCESSED && uvState.UVS_selectsA == 1);
+	@call UVTop::MSG_META_START_SELECT(&r, 80, 80, 0);
+	UVCHECK(r.flags == 0 && uvState.UVS_selectsA == 1 &&
+		uvState.UVS_selectsB == 1);
+	@call UVTop::MSG_META_PTR(&r, 80, 80, 0);
+	UVCHECK(r.flags == MRF_CLEAR_POINTER_IMAGE);
+
+	/* the gadget exclusive */
+	@call UVTop::MSG_VIS_TAKE_GADGET_EXCL(@UVRectA);
+	@call UVTop::MSG_VIS_TAKE_GADGET_EXCL(@UVRectB);
+	UVCHECK(uvState.UVS_lostA == 1 && !uvState.UVS_lostB);
+	@call UVTop::MSG_VIS_RELEASE_GADGET_EXCL(@UVRectA);
+	UVCHECK(!uvState.UVS_lostB);
+	@call UVTop::MSG_VIS_RELEASE_GADGET_EXCL(@UVRectB);
+	UVCHECK(uvState.UVS_lostB == 1);
+	break;
+    }
+    case 4:
+	/* B out of the tree: closed, its area exposed */
+	@call UVRectB::MSG_VIS_REMOVE(VUM_NOW);
+	UVCHECK(@call UVTop::MSG_VIS_COUNT_CHILDREN() == 1);
+	UVCHECK(!(Attrs(@UVRectB) & VA_REALIZED));
+	UVCHECK(@call UVRectB::MSG_VIS_FIND_PARENT() == 0);
+	break;
+    case 5:
+	/* B back: opened by the update, drawn */
+	@call UVTop::MSG_VIS_ADD_CHILD(@UVRectB, CCO_LAST);
+	@call UVRectB::MSG_VIS_MARK_INVALID(VOF_WINDOW_INVALID |
+					    VOF_IMAGE_INVALID, VUM_NOW);
+	UVCHECK(@call UVTop::MSG_VIS_FIND_CHILD(@UVRectB) == 1);
+	UVCHECK(Attrs(@UVRectB) & VA_REALIZED);
+	break;
+    case 6:
+	/* closed: the window goes */
+	@call UVTop::MSG_VIS_SET_ATTRS(0, VA_VISIBLE, VUM_NOW);
+	UVCHECK(!(Attrs(@UVTop) & VA_REALIZED) && !TopWin());
+	UVCHECK(!(Attrs(@UVRectA) & VA_REALIZED) &&
+		!(Attrs(@UVRectB) & VA_REALIZED));
+	break;
+    }
+}
+
+/* the test's way in: a step on the process thread */
+void UVStep(word step)
+{
+    optr p = ConstructOptr(uvState.UVS_process, 0);
+
+    @call p::MSG_UV_STEP(step);
+}

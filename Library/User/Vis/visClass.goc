@@ -1,0 +1,1252 @@
+/*
+ * visClass.goc -- VisClass (after visClass.asm, with the methods of
+ * visUtilsResident.asm, visUtilsClass.asm and visGeometry.asm: goc
+ * wants all methods of a class in the file of its @classdecl).
+ *
+ * VisClass is the base of the visual tree: bounds, the opening and
+ * closing of the visible branch (MSG_VIS_OPEN/CLOSE), the update
+ * mechanism (the invalid and path bits of VI_optFlags, the win group's
+ * update, the update region), drawing, the queries up the tree and the
+ * classed events.
+ *
+ * Port32:
+ *   - messages that answered with the carry return their value (0: not
+ *     answered), as the C prototypes of visC.goh have them;
+ *   - the Generic UI, the clipboard and the system object are not in the
+ *     library yet: VTF_IS_GEN is never set (no GenClass), and classed
+ *     events for the system (TO_SYS_*) and the quick transfer of
+ *     MSG_META_END_MOVE_COPY go nowhere (Port32/ABI.md section 13x);
+ *   - MSG_VIS_VUP_QUERY passes on no registers: it only goes up;
+ *   - MSG_VIS_CREATE_VIS_MONIKER and MSG_VIS_CALL_ROUTINE (registers and
+ *     a far routine) are not handled yet.
+ */
+@include "uiInt.goh"
+#include <string.h>
+#include <stdint.h>
+
+@classdecl VisEmptyClass, neverSaved;
+@classdecl VisClass, neverSaved;
+
+/* ---------------------------------------------------------------------
+ * Construction
+ * ------------------------------------------------------------------- */
+
+/* VisInitialize (static) */
+@method VisClass, MSG_META_INITIALIZE
+{
+    pself->VI_attrs = VA_INITIAL_BITS;
+    pself->VI_optFlags = VOF_INITIAL_BITS;
+    pself->VI_specAttrs = SA_INITIAL_BITS;
+}
+
+/* VisReloc: read from a state file, nothing is realized */
+@method VisClass, _reloc
+{
+    VisInstance *v = VisPart(oself);
+
+    if (message == MSG_META_RELOCATE &&
+	vmRelocType == VMRT_RELOCATE_AFTER_READ) {
+	v->VI_attrs &= ~VA_REALIZED;
+	if (v->VI_typeFlags & VTF_IS_COMPOSITE)
+	    ((VisCompInstance *) v)->VCI_window = 0;
+    }
+    return @callsuper();
+}
+
+/* VisDestroy: out of the tree, the children too, then freed */
+@method VisClass, MSG_VIS_DESTROY
+{
+    VisRemove(oself, updateMode);
+    if (VisPart(oself)->VI_typeFlags & VTF_IS_COMPOSITE) {
+	struct { VisUpdateMode m; } p;
+	p.m = updateMode;
+	VisSendToChildren(oself, MSG_VIS_DESTROY, &p, sizeof(p));
+    }
+    @call oself::MSG_META_OBJ_FREE();
+}
+
+@method VisClass, MSG_VIS_REMOVE
+{
+    VisRemove(oself, updateMode);
+}
+
+/* VisCompRemoveNonDiscardable */
+@method VisClass, MSG_VIS_REMOVE_NON_DISCARDABLE
+{
+    @call oself::MSG_VIS_REMOVE(updateMode);
+    ObjDecInUseCount(OptrToHandle(oself));
+}
+
+/* ---------------------------------------------------------------------
+ * Opening and closing
+ * ------------------------------------------------------------------- */
+
+/* OpenWindowHere: the window of a window or portal (MSG_VIS_OPEN_WIN),
+ * the composite's window (its own or the one passed); realized.  Returns
+ * the window for the children. */
+static WindowHandle OpenWindowHere(optr oself, WindowHandle win)
+{
+    VisInstance *v = VisPart(oself);
+
+    if (v->VI_typeFlags & (VTF_IS_WINDOW | VTF_IS_PORTAL)) {
+	ObjIncInUseCount(OptrToHandle(oself));
+	@call oself::MSG_VIS_OPEN_WIN(win);
+	v = VisPart(oself);
+	if (v->VI_typeFlags & VTF_IS_COMPOSITE &&
+	    !(v->VI_typeFlags & VTF_CHILDREN_OUTSIDE_PORTAL_WIN))
+	    win = ((VisCompInstance *) v)->VCI_window;
+    } else if (v->VI_typeFlags & VTF_IS_COMPOSITE)
+	((VisCompInstance *) v)->VCI_window = win;
+    v->VI_attrs |= VA_REALIZED;
+    return win;
+}
+
+/* VisOpen: realize this object and the branch below it.  The top of the
+ * branch (window 0) looks for the parent's window; there, a non-window
+ * object is part of an open window and only its image is invalid. */
+@method VisClass, MSG_VIS_OPEN
+{
+    VisInstance *v = VisPart(oself);
+    struct { WindowHandle w; } p;
+    Boolean top = !window;
+
+    ObjIncInteractibleCount(OptrToHandle(oself));
+    if (top && !(v->VI_typeFlags & VTF_IS_CONTENT))
+	window = VisQueryParentWin(oself);
+    v = VisPart(oself);
+    if (top && !(v->VI_typeFlags & VTF_IS_WINDOW)) {
+	p.w = OpenWindowHere(oself, window);
+	v = VisPart(oself);
+	v->VI_optFlags &= ~(VOF_WINDOW_INVALID | VOF_WINDOW_UPDATE_PATH);
+	VisMarkInvalid(oself, VOF_IMAGE_INVALID, VUM_MANUAL);
+    } else {
+	p.w = OpenWindowHere(oself, window);
+	v = VisPart(oself);
+	v->VI_optFlags &= ~(VOF_WINDOW_INVALID | VOF_WINDOW_UPDATE_PATH |
+			    VOF_IMAGE_INVALID | VOF_IMAGE_UPDATE_PATH);
+    }
+    VisIfFlagSetCallVisChildren(oself, MSG_VIS_OPEN, &p, sizeof(p), 0);
+}
+
+/* VisClose: the branch closed (the children first, then the window);
+ * not realized */
+@method VisClass, MSG_VIS_CLOSE
+{
+    VisInstance *v = VisPart(oself);
+
+    if (v->VI_attrs & VA_REALIZED) {
+	if (v->VI_typeFlags & VTF_IS_COMPOSITE) {
+	    if (v->VI_typeFlags & VTF_IS_WINDOW)
+		@call oself::MSG_VIS_WIN_ABOUT_TO_BE_CLOSED();
+	    VisIfFlagSetCallVisChildren(oself, MSG_VIS_CLOSE, NULL, 0, 0);
+	}
+	v = VisPart(oself);
+	if (v->VI_typeFlags & (VTF_IS_WINDOW | VTF_IS_PORTAL)) {
+	    @call oself::MSG_VIS_CLOSE_WIN();
+	    ObjDecInUseCount(OptrToHandle(oself));
+	    v = VisPart(oself);
+	    if (v->VI_typeFlags & VTF_IS_PORTAL &&
+		v->VI_typeFlags & VTF_CHILDREN_OUTSIDE_PORTAL_WIN &&
+		v->VI_typeFlags & VTF_IS_COMPOSITE)
+		((VisCompInstance *) v)->VCI_window = 0;
+	} else if (v->VI_typeFlags & VTF_IS_COMPOSITE)
+	    ((VisCompInstance *) v)->VCI_window = 0;
+	v->VI_attrs &= ~VA_REALIZED;
+	ObjDecInteractibleCount(OptrToHandle(oself));
+    }
+    v = VisPart(oself);
+    v->VI_optFlags &= ~(VOF_WINDOW_INVALID | VOF_WINDOW_UPDATE_PATH);
+}
+
+/* VisWindowAboutToBeClosed: a window with child windows moves off the
+ * screen first, so they are not exposed one by one */
+@method VisClass, MSG_VIS_WIN_ABOUT_TO_BE_CLOSED
+{
+    WindowHandle w = ((VisCompInstance *) pself)->VCI_window;
+    Handle child = 0;
+    Rectangle b;
+
+    if (!w)
+	return;
+    WinGetInfo(w, WIT_FIRST_CHILD_WIN, &child);
+    if (!child)
+	return;
+    WinGetWinScreenBounds(w, &b);
+    if (b.R_right < 0)
+	return;
+    WinMove(w, -b.R_right - 1, 0, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The update
+ * ------------------------------------------------------------------- */
+
+/* ReturnInvalidatedIfChildrenInWindow: the flags for the parent (high
+ * byte) and the children (low byte) once this window was invalidated */
+static word InvalidatedInWindow(VisInstance *v, word flags)
+{
+    flags &= ~(VUIF_ALREADY_INVALIDATED | (VUIF_ALREADY_INVALIDATED << 8));
+    if (v->VI_typeFlags & VTF_CHILDREN_OUTSIDE_PORTAL_WIN)
+	return flags;
+    flags |= VUIF_ALREADY_INVALIDATED;
+    if (!(v->VI_typeFlags & VTF_IS_PORTAL))
+	flags |= VUIF_ALREADY_INVALIDATED << 8;
+    return flags;
+}
+
+/* UpdateWindowHere: open if not realized, move and resize an invalid
+ * window.  Returns the flags for the parent (high byte, the "ch" of the
+ * asm) and the children (low byte). */
+static word UpdateWindowHere(optr oself, VisUpdateImageFlags f)
+{
+    VisInstance *v = VisPart(oself);
+    word flags = f | (f << 8);
+
+    if (v->VI_typeFlags & VTF_IS_WINDOW)
+	flags &= ~(VUIF_ALREADY_INVALIDATED | (VUIF_ALREADY_INVALIDATED << 8));
+    if (!(v->VI_attrs & VA_REALIZED)) {
+	@call oself::MSG_VIS_OPEN(0);
+	flags |= VUIF_JUST_OPENED << 8;
+	v = VisPart(oself);
+	if (v->VI_typeFlags & VTF_IS_WINDOW)
+	    flags = InvalidatedInWindow(v, flags);
+    }
+    v = VisPart(oself);
+    if (v->VI_typeFlags & (VTF_IS_WINDOW | VTF_IS_PORTAL) &&
+	!(v->VI_typeFlags & VTF_IS_CONTENT) &&
+	v->VI_optFlags & VOF_WINDOW_INVALID) {
+	@call oself::MSG_VIS_MOVE_RESIZE_WIN();
+	flags = InvalidatedInWindow(VisPart(oself), flags);
+    }
+    return flags;
+}
+
+/* DocInvalRegion: the region (document coordinates) invalidated in the
+ * window, moved by the window's translation */
+static void DocInvalRegion(WindowHandle win, optr region)
+{
+    TransMatrix tm;
+    sword x, y;
+    Region *r;
+
+    WinGetTransform(win, &tm);
+    x = (sword) (tm.TM_e31.DWF_int + (tm.TM_e31.DWF_frac >= 0x8000));
+    y = (sword) (tm.TM_e32.DWF_int + (tm.TM_e32.DWF_frac >= 0x8000));
+    r = LMemDeref(region);
+    if (x || y)
+	GrMoveReg(r, x, y);
+    WinInvalReg(win, r, 0, 0, 0, 0);
+}
+
+/* InvalUpdateRegionIfNeeded: the region of TEMP_VIS_INVAL_REGION
+ * invalidated in the window, then emptied */
+static void InvalUpdateRegionIfNeeded(optr oself)
+{
+    ChunkHandle *ch = ObjVarFindData(oself, TEMP_VIS_INVAL_REGION);
+    optr reg;
+
+    if (!ch)
+	return;
+    reg = ConstructOptr(OptrToHandle(oself), *ch);
+    if (!LMemGetChunkSize(reg))
+	return;
+    DocInvalRegion(VisCompPart(oself)->VCI_window, reg);
+    LMemReAlloc(reg, 0);
+}
+
+/* VisUpdateWindowsAndImage: the windows of the branch brought up to
+ * date and the invalid images invalidated (in the window, so they are
+ * exposed and drawn), along the path bits */
+@method VisClass, MSG_VIS_UPDATE_WINDOWS_AND_IMAGE
+{
+    VisInstance *v;
+    word flags = UpdateWindowHere(oself, updateImageFlags);
+    byte parentFlags = (byte) (flags >> 8), childFlags = (byte) flags;
+    byte test = 0;
+    Boolean toChildren = TRUE;
+    struct { VisUpdateImageFlags f; } p;
+
+    v = VisPart(oself);
+    if (!(parentFlags & VUIF_ALREADY_INVALIDATED) &&
+	v->VI_optFlags & VOF_IMAGE_INVALID) {
+	VisAddOurBoundsToUpdateRegion(oself,
+	    parentFlags & VUIF_JUST_OPENED ? 0 : VARF_ONLY_REDRAW_MARGINS);
+	v = VisPart(oself);
+	if (v->VI_typeFlags & VTF_IS_COMPOSITE &&
+	    ((VisCompInstance *) v)->VCI_geoAttrs &
+	    VCGA_ONLY_DRAWS_IN_MARGINS) {
+	    /* only the margins were invalidated: all children too */
+	    childFlags = VUIF_SEND_TO_ALL_CHILDREN;
+	    goto call;
+	}
+	childFlags = VUIF_ALREADY_INVALIDATED;
+    }
+    /* sending to all (the flags passed), or along the path bits */
+    if (parentFlags & VUIF_SEND_TO_ALL_CHILDREN)
+	test = 0;
+    else if (v->VI_optFlags & (VOF_WINDOW_UPDATE_PATH |
+			       VOF_IMAGE_UPDATE_PATH))
+	test = VOF_WINDOW_INVALID | VOF_WINDOW_UPDATE_PATH |
+	       VOF_IMAGE_INVALID | VOF_IMAGE_UPDATE_PATH;
+    else
+	toChildren = FALSE;
+call:
+    if (toChildren) {
+	p.f = childFlags;
+	VisIfFlagSetCallVisChildren(oself, MSG_VIS_UPDATE_WINDOWS_AND_IMAGE,
+				    &p, sizeof(p), test);
+    }
+    v = VisPart(oself);
+    v->VI_optFlags &= ~(VOF_IMAGE_INVALID | VOF_IMAGE_UPDATE_PATH |
+			VOF_WINDOW_INVALID | VOF_WINDOW_UPDATE_PATH);
+    if (v->VI_typeFlags & VTF_IS_WIN_GROUP)
+	InvalUpdateRegionIfNeeded(oself);
+}
+
+/* VisMarkInvalid (static) */
+@method VisClass, MSG_VIS_MARK_INVALID
+{
+    VisMarkInvalid(oself, flagsToSet, updateMode);
+}
+
+/* VisVupUpdateWinGroup (static) */
+@method VisClass, MSG_VIS_VUP_UPDATE_WIN_GROUP
+{
+    return VisVupUpdateWinGroup(oself, updateMode);
+}
+
+/* VisSetVisAttrs: the attributes changed; what depends on them marked
+ * invalid (geometry on the parent for VA_MANAGED, the window for
+ * VA_VISIBLE, the image for VA_DRAWABLE) */
+@method VisClass, MSG_VIS_SET_ATTRS
+{
+    VisAttrs old = pself->VI_attrs, now, changed;
+    VisOptFlags here = 0, parent = 0;
+
+    now = (old | attrsToSet) & ~attrsToClear;
+    changed = old ^ now;
+    if (changed & VA_MANAGED)
+	parent |= VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH;
+    if (changed & VA_VISIBLE)
+	here |= VOF_WINDOW_INVALID;
+    if (changed & VA_DRAWABLE)
+	here |= VOF_IMAGE_INVALID;
+    if (here)
+	VisMarkInvalid(oself, here, VUM_MANUAL);
+    if (parent)
+	VisMarkInvalidOnParent(oself, parent, VUM_MANUAL);
+    VisPart(oself)->VI_attrs = now;
+    if (updateMode != VUM_MANUAL)
+	VisVupUpdateWinGroup(oself, updateMode);
+}
+
+@method VisClass, MSG_VIS_GET_ATTRS
+{
+    return pself->VI_attrs;
+}
+
+@method VisClass, MSG_VIS_GET_OPT_FLAGS
+{
+    return pself->VI_optFlags;
+}
+
+@method VisClass, MSG_VIS_SET_TYPE_FLAGS
+{
+    pself->VI_typeFlags = (pself->VI_typeFlags | flagsToSet) & ~flagsToClear;
+}
+
+@method VisClass, MSG_VIS_GET_TYPE_FLAGS
+{
+    return pself->VI_typeFlags;
+}
+
+/* VisInvalidate: our bounds into the update region */
+@method VisClass, MSG_VIS_INVALIDATE
+{
+    VisAddOurBoundsToUpdateRegion(oself, VARF_ONLY_REDRAW_MARGINS);
+}
+
+/* AddOurBoundsToUpdateRegion: the bounds (a window's in its own
+ * coordinates) to MSG_VIS_ADD_RECT_TO_UPDATE_REGION */
+void VisAddOurBoundsToUpdateRegion(optr obj, VisAddRectFlags flags)
+{
+    VisInstance *v = VisLock(obj);
+    Rectangle b = v->VI_bounds;
+
+    if (!(v->VI_typeFlags & VTF_IS_CONTENT) &&
+	v->VI_typeFlags & VTF_IS_WINDOW) {
+	b.R_right -= b.R_left;
+	b.R_bottom -= b.R_top;
+	b.R_left = b.R_top = 0;
+    }
+    VisUnlock(obj);
+    @call obj::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0, flags, b.R_bottom,
+						 b.R_right, b.R_top, b.R_left);
+}
+
+/* InvalidateArea: the rectangle invalidated through a gstate */
+static void InvalidateArea(optr oself, const Rectangle *r)
+{
+    GStateHandle gs = @call oself::MSG_VIS_VUP_CREATE_GSTATE();
+    sword right = r->R_right, bottom = r->R_bottom;
+
+    if (!gs)
+	return;
+    if (r->R_left != right)
+	right--;
+    if (r->R_top != bottom)
+	bottom--;
+    GrInvalRect(gs, r->R_left, r->R_top, right, bottom);
+    GrDestroyState(gs);
+}
+
+void VisSaveAsInvalChunk(optr obj, ChunkHandle region)
+{
+    *(ChunkHandle *) ObjVarAddData(obj, TEMP_VIS_INVAL_REGION,
+				   sizeof(ChunkHandle)) = region;
+}
+
+/* AddToInvalRegion: the rectangle or'ed into the region of
+ * TEMP_VIS_INVAL_REGION (a rectangle region to start with) */
+static void AddToInvalRegion(optr oself, const Rectangle *r)
+{
+    MemHandle mh = OptrToHandle(oself);
+    ChunkHandle rect = LMemAlloc(mh, 11 * sizeof(word)), *old, dst;
+    sword *p = LMemDeref(ConstructOptr(mh, rect));
+    optr oldReg;
+
+    p[0] = r->R_top - 1;
+    p[1] = EOREGREC;
+    p[2] = r->R_bottom - 1;
+    p[3] = r->R_left;
+    p[4] = r->R_right - 1;
+    p[5] = EOREGREC;
+    p[6] = EOREGREC;
+    old = ObjVarFindData(oself, TEMP_VIS_INVAL_REGION);
+    if (!old) {
+	VisSaveAsInvalChunk(oself, rect);
+	return;
+    }
+    oldReg = ConstructOptr(mh, *old);
+    if (!LMemGetChunkSize(oldReg))
+	dst = rect;
+    else {
+	dst = LMemAlloc(mh, 0);
+	GrChunkRegOp(ROF_OR_OP, oldReg, ConstructOptr(mh, rect),
+		     ConstructOptr(mh, dst));
+	LMemFree(ConstructOptr(mh, rect));
+    }
+    LMemFree(oldReg);
+    VisSaveAsInvalChunk(oself, dst);
+}
+
+/* VisAddRectToUpdateRegion (static): up to the win group (or the top of
+ * a branch being removed); there invalidated, or kept in the update
+ * region while the win group updates (or will) */
+@method VisClass, MSG_VIS_ADD_RECT_TO_UPDATE_REGION
+{
+    optr o = oself, p;
+    Rectangle r;
+    VisInstance *v;
+
+    (void) unused;
+    r.R_left = left;
+    r.R_top = top;
+    r.R_right = right;
+    r.R_bottom = bottom;
+    for (;;) {
+	VisTypeFlags t = VisLock(o)->VI_typeFlags;
+	VisUnlock(o);
+	if (t & VTF_IS_WIN_GROUP)
+	    break;
+	p = VisFindParent(o);
+	if (!p) {
+	    addRectFlags &= ~VARF_UPDATE_WILL_HAPPEN;
+	    break;
+	}
+	addRectFlags &= ~VARF_ONLY_REDRAW_MARGINS;
+	if (OptrToHandle(p) != OptrToHandle(oself)) {
+	    @call p::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0, addRectFlags,
+						r.R_bottom, r.R_right,
+						r.R_top, r.R_left);
+	    return;
+	}
+	o = p;
+    }
+    if (r.R_left == r.R_right || r.R_top == r.R_bottom)
+	return;
+    v = VisLock(o);
+    if (addRectFlags & VARF_UPDATE_WILL_HAPPEN ||
+	v->VI_optFlags & VOF_UPDATING) {
+	VisUnlock(o);
+	AddToInvalRegion(o, &r);
+	return;
+    }
+    VisUnlock(o);
+    InvalidateArea(o, &r);
+}
+
+/* VisInvalTree: the window's tree invalidated */
+@method VisClass, MSG_VIS_INVAL_TREE
+{
+    WindowHandle w = VisQueryWindow(oself);
+    Rectangle b;
+    Region *none = NULL;
+
+    if (!w)
+	return;
+    VisGetBounds(oself, &b);
+    WinInvalTree(w, none, 0, 0, b.R_right - 1 - b.R_left,
+		 b.R_bottom - 1 - b.R_top);
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry (visGeometry.asm, visUtilsClass.asm)
+ * ------------------------------------------------------------------- */
+
+/* VisGetSize (static): MSG_VIS_RECALC_SIZE keeps the size */
+@method VisClass, MSG_VIS_RECALC_SIZE
+{
+    (void) width;
+    (void) height;
+    return VisGetSize(oself);
+}
+
+@method VisClass, MSG_VIS_GET_SIZE
+{
+    return VisGetSize(oself);
+}
+
+@method VisClass, MSG_VIS_SET_SIZE
+{
+    VisSetSize(oself, width, height);
+}
+
+@method VisClass, MSG_VIS_SET_POSITION, MSG_VIS_POSITION_BRANCH
+{
+    VisSetPosition(oself, xOrigin, yOrigin);
+}
+
+@method VisClass, MSG_VIS_GET_POSITION
+{
+    return MAKE_XY_DWORD(pself->VI_bounds.R_left, pself->VI_bounds.R_top);
+}
+
+@method VisClass, MSG_VIS_GET_BOUNDS
+{
+    *retValue = pself->VI_bounds;
+}
+
+@method VisClass, MSG_VIS_GET_CENTER
+{
+    VisGetCenter(oself, retValue);
+}
+
+/* VisUpdateGeometry: the children's geometry first (if only the path
+ * is set), then this object sized and placed where it is; the parent's
+ * geometry is invalid if the bounds changed */
+@method VisClass, MSG_VIS_UPDATE_GEOMETRY
+{
+    VisInstance *v = VisPart(oself);
+    SizeAsDWord s;
+    Rectangle b;
+
+    if (!(v->VI_optFlags & VOF_GEOMETRY_INVALID)) {
+	if (!(v->VI_typeFlags & VTF_IS_COMPOSITE))
+	    goto done;
+	VisIfFlagSetCallVisChildren(oself, MSG_VIS_UPDATE_GEOMETRY, NULL, 0,
+				    VOF_GEOMETRY_INVALID |
+				    VOF_GEO_UPDATE_PATH);
+	if (!(VisPart(oself)->VI_optFlags & VOF_GEOMETRY_INVALID))
+	    goto done;
+    }
+    s = VisGetSize(oself);
+    if (!DWORD_WIDTH(s) && !DWORD_HEIGHT(s))
+	s = MAKE_SIZE_DWORD(RSA_CHOOSE_OWN_SIZE, RSA_CHOOSE_OWN_SIZE);
+    s = @call oself::MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED(DWORD_WIDTH(s),
+							     DWORD_HEIGHT(s));
+    VisSetSize(oself, DWORD_WIDTH(s), DWORD_HEIGHT(s));
+    VisGetBounds(oself, &b);
+    if (@call oself::MSG_VIS_POSITION_AND_INVAL_IF_NEEDED(b.R_left,
+							    b.R_top) &&
+	!(VisPart(oself)->VI_typeFlags & VTF_IS_WIN_GROUP))
+	VisMarkInvalidOnParent(oself, VOF_GEOMETRY_INVALID, VUM_MANUAL);
+done:
+    VisPart(oself)->VI_optFlags &= ~(VOF_GEOMETRY_INVALID |
+				     VOF_GEO_UPDATE_PATH);
+}
+
+/* SaveOldBounds: the bounds before the geometry changes them */
+void VisSaveOldBounds(optr obj)
+{
+    VisInstance *v = VisLock(obj);
+    Rectangle *r;
+
+    if (!(v->VI_attrs & VA_OLD_BOUNDS_SAVED)) {
+	v->VI_attrs |= VA_OLD_BOUNDS_SAVED;
+	r = ObjVarAddData(obj, TEMP_VIS_OLD_BOUNDS, sizeof(Rectangle));
+	*r = VisPart(obj)->VI_bounds;
+    }
+    VisUnlock(obj);
+}
+
+/* VisRecalcSizeAndInvalIfNeeded: MSG_VIS_RECALC_SIZE unless the size
+ * passed is the one there (or the object only recalculates when
+ * invalid) */
+@method VisClass, MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED
+{
+    VisInstance *v = VisPart(oself);
+    SizeAsDWord s = VisGetSize(oself);
+    Boolean call;
+
+    if (v->VI_optFlags & (VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH) ||
+	v->VI_geoAttrs & VGA_ALWAYS_RECALC_SIZE)
+	call = TRUE;
+    else if (v->VI_geoAttrs & VGA_ONLY_RECALC_SIZE_WHEN_INVALID)
+	call = FALSE;
+    else
+	call = (!(width & RSA_CHOOSE_OWN_SIZE) && width != DWORD_WIDTH(s)) ||
+	       (!(height & RSA_CHOOSE_OWN_SIZE) &&
+		height != DWORD_HEIGHT(s));
+    if (call) {
+	if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
+	    VisSaveOldBounds(oself);
+	else
+	    VisMarkInvalid(oself, VOF_WINDOW_INVALID | VOF_IMAGE_INVALID,
+			   VUM_MANUAL);
+	s = @call oself::MSG_VIS_RECALC_SIZE(width, height);
+    }
+    VisPart(oself)->VI_optFlags &= ~(VOF_GEOMETRY_INVALID |
+				     VOF_GEO_UPDATE_PATH);
+    return s;
+}
+
+/* VisBoundsChanged (static, from CheckForBoundsChange): the old bounds
+ * invalidated (not for a win group: the window covers them), the new
+ * window and image invalid */
+static void BoundsChanged(optr oself, const Rectangle *old)
+{
+    VisInstance *v = VisPart(oself);
+
+    if (v->VI_attrs & VA_REALIZED) {
+	if (old->R_left == old->R_right || old->R_top == old->R_bottom ||
+	    old->R_right & RSA_CHOOSE_OWN_SIZE ||
+	    old->R_bottom & RSA_CHOOSE_OWN_SIZE)
+	    return;
+	if (v->VI_typeFlags & VTF_IS_CONTENT ||
+	    !(v->VI_typeFlags & VTF_IS_WIN_GROUP))
+	    @call oself::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0,
+		VARF_NOT_IF_ALREADY_INVALID | VARF_ONLY_REDRAW_MARGINS,
+		old->R_bottom, old->R_right, old->R_top, old->R_left);
+    }
+    VisMarkInvalid(oself, VOF_WINDOW_INVALID | VOF_IMAGE_INVALID,
+		   VUM_MANUAL);
+}
+
+@method VisClass, MSG_VIS_BOUNDS_CHANGED
+{
+    Rectangle old;
+
+    old.R_left = left;
+    old.R_top = top;
+    old.R_right = right;
+    old.R_bottom = bottom;
+    BoundsChanged(oself, &old);
+}
+
+/* CheckForBoundsChange: TRUE if the bounds changed since SaveOldBounds
+ * (or none were saved) */
+static Boolean CheckForBoundsChange(optr oself)
+{
+    Rectangle *saved, old, now;
+
+    VisPart(oself)->VI_attrs &= ~VA_OLD_BOUNDS_SAVED;
+    saved = ObjVarFindData(oself, TEMP_VIS_OLD_BOUNDS);
+    if (!saved)
+	return TRUE;
+    old = *saved;
+    ObjVarDeleteData(oself, TEMP_VIS_OLD_BOUNDS);
+    VisGetBounds(oself, &now);
+    if (!memcmp(&old, &now, sizeof(old)))
+	return FALSE;
+    BoundsChanged(oself, &old);
+    return TRUE;
+}
+
+/* VisSendPositionAndInvalIfNeeded: placed (MSG_VIS_POSITION_BRANCH, or
+ * VisSetPosition directly); TRUE if the bounds changed.  The composite
+ * case of VGA_USE_VIS_SET_POSITION (VisCompPosition) goes through the
+ * message until the geometry manager is here. */
+@method VisClass, MSG_VIS_POSITION_AND_INVAL_IF_NEEDED
+{
+    VisInstance *v = VisPart(oself);
+    Boolean changed;
+
+    if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
+	VisSaveOldBounds(oself);
+    v = VisPart(oself);
+    if (v->VI_geoAttrs & VGA_USE_VIS_SET_POSITION &&
+	!(v->VI_typeFlags & VTF_IS_COMPOSITE))
+	VisSetPosition(oself, xPosition, yPosition);
+    else
+	@call oself::MSG_VIS_POSITION_BRANCH(xPosition, yPosition);
+    VisPart(oself)->VI_geoAttrs |= VGA_GEOMETRY_CALCULATED;
+    changed = CheckForBoundsChange(oself);
+    if (VisPart(oself)->VI_geoAttrs & VGA_NOTIFY_GEOMETRY_VALID)
+	@call oself::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+    return changed;
+}
+
+/* VisResetToInitialSize: managed objects of the branch recalculate their
+ * geometry from scratch */
+@method VisClass, MSG_VIS_RESET_TO_INITIAL_SIZE,
+		  MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN
+{
+    struct { VisUpdateMode m; } p;
+
+    if (!(pself->VI_attrs & VA_MANAGED))
+	return;
+    VisSaveOldBounds(oself);
+    VisPart(oself)->VI_geoAttrs &= ~VGA_GEOMETRY_CALCULATED;
+    p.m = VUM_MANUAL;
+    VisIfFlagSetCallVisChildren(oself, message, &p, sizeof(p), 0);
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID |
+		   VOF_WINDOW_INVALID, updateMode);
+}
+
+@method VisClass, MSG_VIS_SET_GEO_ATTRS
+{
+    pself->VI_geoAttrs = (pself->VI_geoAttrs | attrsToSet) & ~attrsToClear;
+    if ((attrsToSet | attrsToClear) & (VGA_DONT_CENTER | VGA_NO_SIZE_HINTS))
+	VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, updateMode);
+}
+
+@method VisClass, MSG_VIS_GET_GEO_ATTRS
+{
+    return pself->VI_geoAttrs;
+}
+
+/* VisInvalAllGeometry: the geometry of the managed branch invalid */
+@method VisClass, MSG_VIS_INVAL_ALL_GEOMETRY
+{
+    struct { VisUpdateMode m; } p;
+
+    if (!(pself->VI_attrs & VA_MANAGED))
+	return;
+    if (pself->VI_typeFlags & VTF_IS_COMPOSITE) {
+	p.m = VUM_MANUAL;
+	VisSendToChildren(oself, MSG_VIS_INVAL_ALL_GEOMETRY, &p, sizeof(p));
+    }
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, updateMode);
+}
+
+/* ---------------------------------------------------------------------
+ * Removing from the tree (VisRemove of visUtilsClass.asm)
+ * ------------------------------------------------------------------- */
+
+/* VisSetNotRealized (visSpecUtils.asm): a realized win group is made not
+ * visible and updated now (it closes), another object closed */
+static void SetNotRealized(optr obj)
+{
+    VisInstance *v;
+
+    if (!VisCheckIfVisGrown(obj))
+	return;
+    v = VisLock(obj);
+    if (!(v->VI_attrs & VA_REALIZED)) {
+	VisUnlock(obj);
+	return;
+    }
+    if (v->VI_typeFlags & VTF_IS_WIN_GROUP) {
+	v->VI_attrs &= ~VA_VISIBLE;
+	VisUnlock(obj);
+	VisVupUpdateWinGroup(obj, VUM_NOW);
+	return;
+    }
+    VisUnlock(obj);
+    @call obj::MSG_VIS_CLOSE();
+}
+
+/* VisVupInvalGeoToHere: the geometry invalid up the managed path to the
+ * win group, updated there */
+static void InvalGeoToHere(optr obj, VisUpdateMode mode)
+{
+    while (obj) {
+	VisInstance *v = VisLock(obj);
+	Boolean up = v->VI_attrs & VA_MANAGED &&
+		     !(v->VI_typeFlags & VTF_IS_WIN_GROUP);
+	VisUnlock(obj);
+	VisMarkInvalid(obj, VOF_GEOMETRY_INVALID, up ? VUM_MANUAL : mode);
+	if (!up)
+	    return;
+	obj = VisFindParent(obj);
+    }
+}
+
+/* VisRemove: closed and out of the visual tree; the parent's geometry
+ * is invalid and updated with the mode */
+void VisRemove(optr obj, VisUpdateMode mode)
+{
+    VisInstance *v;
+    VisTypeFlags t;
+    VisAttrs a;
+    optr parent;
+
+    if (!VisCheckIfSpecBuilt(obj))
+	return;
+    parent = VisFindParent(obj);
+    if (parent)
+	@call parent::MSG_VIS_RELEASE_GADGET_EXCL(obj);
+    v = VisLock(obj);
+    t = v->VI_typeFlags;
+    VisUnlock(obj);
+    if (!(t & VTF_IS_CONTENT))
+	@call obj::MSG_META_MUP_ALTER_FTVMC_EXCL(obj, MAEF_FOCUS |
+						 MAEF_TARGET | MAEF_NOT_HERE);
+    if (!(t & VTF_IS_WIN_GROUP))
+	VisAddOurBoundsToUpdateRegion(obj, VARF_UPDATE_WILL_HAPPEN);
+    SetNotRealized(obj);
+
+    v = VisLock(obj);
+    if ((v->VI_typeFlags & VTF_IS_WIN_GROUP &&
+	 v->VI_specAttrs & SA_TREE_BUILT_BUT_NOT_REALIZED) ||
+	v->VI_typeFlags & VTF_IS_CONTENT) {
+	/* a one-way link: only cleared */
+	v->VI_link.LP_next = 0;
+	v->VI_specAttrs &= ~SA_TREE_BUILT_BUT_NOT_REALIZED;
+	VisUnlock(obj);
+	return;
+    }
+    t = v->VI_typeFlags;
+    a = v->VI_attrs;
+    VisUnlock(obj);
+    parent = VisFindParent(obj);
+    if (!parent)
+	return;
+    @call parent::MSG_VIS_REMOVE_CHILD(obj, 0);
+    if (!(t & VTF_IS_WIN_GROUP) && a & VA_MANAGED) {
+	VisCompInstance *p = (VisCompInstance *) VisLock(parent);
+	Boolean realized = p->VI_attrs & VA_REALIZED;
+	Boolean custom = p->VCI_geoAttrs & VCGA_CUSTOM_MANAGE_CHILDREN;
+	VisUnlock(parent);
+	if (!custom)
+	    InvalGeoToHere(parent, realized ? mode : VUM_MANUAL);
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Queries up the tree, the parent, the children
+ * ------------------------------------------------------------------- */
+
+/* VisVupCreateGState: the win group's window (or none) gets a gstate */
+@method VisClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    GStateHandle gs;
+
+    if (pself->VI_typeFlags & VTF_IS_WIN_GROUP)
+	return GrCreateState(((VisCompInstance *) pself)->VCI_window);
+    if (VisCallParent(oself, MSG_VIS_VUP_CREATE_GSTATE, NULL, 0, &gs,
+		      sizeof(gs)) && gs)
+	return gs;
+    return GrCreateState(0);
+}
+
+/* VisVupQueryClass: this object if of the class, else up the tree */
+@method VisClass, MSG_VIS_VUP_FIND_OBJECT_OF_CLASS
+{
+    struct { ClassStruct *c; } p;
+    optr found;
+
+    if (ObjIsObjectInClass(oself, class))
+	return oself;
+    p.c = class;
+    VisCallParent(oself, MSG_VIS_VUP_FIND_OBJECT_OF_CLASS, &p, sizeof(p),
+		  &found, sizeof(found));
+    return found;
+}
+
+@method VisClass, MSG_VIS_VUP_TEST_FOR_OBJECT_OF_CLASS
+{
+    struct { ClassStruct *c; } p;
+    Boolean found;
+
+    if (ObjIsObjectInClass(oself, class))
+	return TRUE;
+    p.c = class;
+    VisCallParent(oself, MSG_VIS_VUP_TEST_FOR_OBJECT_OF_CLASS, &p,
+		  sizeof(p), &found, sizeof(found));
+    return found;
+}
+
+/* VisVisVupQuery: up the tree (no registers to pass on in Port32) */
+@method VisClass, MSG_VIS_VUP_QUERY
+{
+    VisCallParent(oself, MSG_VIS_VUP_QUERY, NULL, 0, NULL, 0);
+}
+
+@method VisClass, MSG_VIS_FIND_PARENT
+{
+    return VisFindParent(oself);
+}
+
+@method VisClass, MSG_VIS_QUERY_WINDOW
+{
+    return VisQueryWindow(oself);
+}
+
+@method VisClass, MSG_VIS_COUNT_CHILDREN
+{
+    return pself->VI_typeFlags & VTF_IS_COMPOSITE ? VisCountChildren(oself)
+						  : 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Classed events (FlowMessageClassedEvent and
+ * FlowDispatchSendOnOrDestroyClassedEvent of userFlowUtils.asm)
+ * ------------------------------------------------------------------- */
+
+/* the event in a message to dest, or freed if there is none */
+static void MessageClassedEvent(optr dest, Message msg, EventHandle event,
+				MessageFlags flags)
+{
+    struct { EventHandle e; } p;
+
+    if (!dest) {
+	ObjFreeMessage(event);
+	return;
+    }
+    p.e = event;
+    CObjMessageP(flags, dest, msg, &p, sizeof(p), NULL, 0);
+}
+
+/* the event dispatched here if this object is of its class (or it has
+ * none and there is no next), else on to next with msg */
+static void DispatchSendOnOrDestroy(optr oself, EventHandle event,
+				    optr next, Message msg,
+				    MessageFlags flags)
+{
+    optr dest;
+    ClassStruct *cls;
+
+    ObjGetMessageInfo(event, &dest);
+    cls = (ClassStruct *) (uintptr_t) dest;
+    if (cls ? ObjIsObjectInClass(oself, cls) : !next) {
+	MessageSetDestination(event, oself);
+	CMessageDispatchP(event, flags & MF_CALL, NULL, 0);
+	return;
+    }
+    MessageClassedEvent(next, msg, event, flags);
+}
+
+/* VisSendClassedEvent: TO_VIS_PARENT up the visual tree, TO_APP_* to
+ * the application object, TO_SYS_* (no system object yet) nowhere */
+@method VisClass, MSG_META_SEND_CLASSED_EVENT
+{
+    word to = (word) whereTo;
+
+    if (to == (word) TO_VIS_PARENT) {
+	MessageClassedEvent(VisFindParent(oself),
+			    MSG_VIS_VUP_SEND_TO_OBJECT_OF_CLASS, event, 0);
+	return;
+    }
+    if (to >= (word) TO_APP_FOCUS && to <= (word) TO_APP_MODEL) {
+	optr app = GeodeGetAppObject(0);
+	if (!app) {
+	    ObjFreeMessage(event);
+	    return;
+	}
+	@call app::MSG_META_SEND_CLASSED_EVENT(event,
+				(TravelOption) (to - (TO_APP_FOCUS - TO_FOCUS)));
+	return;
+    }
+    if (to >= (word) TO_SYS_FOCUS && to <= (word) TO_SYS_MODEL) {
+	ObjFreeMessage(event);
+	return;
+    }
+    @callsuper();
+}
+
+@method VisClass, MSG_VIS_VUP_CALL_OBJECT_OF_CLASS
+{
+    DispatchSendOnOrDestroy(oself, event, VisFindParent(oself),
+			    MSG_VIS_VUP_CALL_OBJECT_OF_CLASS, MF_CALL);
+}
+
+@method VisClass, MSG_VIS_VUP_SEND_TO_OBJECT_OF_CLASS
+{
+    DispatchSendOnOrDestroy(oself, event, VisFindParent(oself),
+			    MSG_VIS_VUP_SEND_TO_OBJECT_OF_CLASS, 0);
+}
+
+/* VisVupWinGroupCommon: at the win group as a classed event, else to
+ * it */
+static void WinGroupCommon(optr oself, EventHandle event, Message msg,
+			   MessageFlags flags)
+{
+    VisTypeFlags t = VisPart(oself)->VI_typeFlags;
+
+    if (t & VTF_IS_WIN_GROUP)
+	DispatchSendOnOrDestroy(oself, event, VisFindParent(oself), msg,
+				flags);
+    else
+	MessageClassedEvent(VisFindParentOfVisType(oself, VTF_IS_WIN_GROUP),
+			    msg, event, flags);
+}
+
+@method VisClass, MSG_VIS_VUP_CALL_WIN_GROUP
+{
+    WinGroupCommon(oself, event, MSG_VIS_VUP_CALL_WIN_GROUP, MF_CALL);
+}
+
+@method VisClass, MSG_VIS_VUP_SEND_TO_WIN_GROUP
+{
+    WinGroupCommon(oself, event, MSG_VIS_VUP_SEND_TO_WIN_GROUP, 0);
+}
+
+/* VisParentCommon: the event to the parent, as is (TO_SELF) */
+@method VisClass, MSG_VIS_CALL_PARENT
+{
+    optr p = VisFindParent(oself);
+
+    if (!p)
+	ObjFreeMessage(event);
+    else
+	@call p::MSG_META_SEND_CLASSED_EVENT(event, TO_SELF);
+}
+
+@method VisClass, MSG_VIS_SEND_TO_PARENT
+{
+    optr p = VisFindParent(oself);
+
+    if (!p)
+	ObjFreeMessage(event);
+    else
+	@send p::MSG_META_SEND_CLASSED_EVENT(event, TO_SELF);
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/* ShouldObjBeDrawn?: drawable, realized (unless printing), the image
+ * valid (unless the composite only draws in its margins), not empty */
+Boolean VisShouldObjBeDrawn(optr obj, DrawFlags flags)
+{
+    VisInstance *v = VisLock(obj);
+    Boolean draw = FALSE;
+
+    if (!(v->VI_attrs & VA_DRAWABLE))
+	goto out;
+    if (!(flags & DF_PRINT)) {
+	if (!(v->VI_attrs & VA_REALIZED))
+	    goto out;
+	if (!(!(flags & DF_DONT_DRAW_CHILDREN) &&
+	      v->VI_typeFlags & VTF_IS_COMPOSITE &&
+	      ((VisCompInstance *) v)->VCI_geoAttrs &
+	      VCGA_ONLY_DRAWS_IN_MARGINS) &&
+	    v->VI_optFlags & VOF_IMAGE_INVALID)
+	    goto out;
+    }
+    draw = v->VI_bounds.R_left < v->VI_bounds.R_right;
+out:
+    VisUnlock(obj);
+    return draw;
+}
+
+/* VisRedrawEntireObject: drawn now through a gstate of its own */
+@method VisClass, MSG_VIS_REDRAW_ENTIRE_OBJECT
+{
+    GStateHandle gs;
+
+    if ((pself->VI_attrs & (VA_REALIZED | VA_DRAWABLE)) !=
+	(VA_REALIZED | VA_DRAWABLE))
+	return;
+    gs = @call oself::MSG_VIS_VUP_CREATE_GSTATE();
+    if (!gs)
+	return;
+    @call oself::MSG_VIS_DRAW(0, gs);
+    GrDestroyState(gs);
+}
+
+@method VisClass, MSG_VIS_DRAW_MONIKER
+{
+    DrawMonikerArgs a;
+
+    a.DMA_xInset = xInset;
+    a.DMA_yInset = yInset;
+    a.DMA_xMaximum = xMaximum;
+    a.DMA_yMaximum = yMaximum;
+    a.DMA_gState = gstate;
+    a.DMA_textHeight = textHeight;
+    VisDrawMoniker(oself, visMoniker, monikerFlags, &a);
+}
+
+@method VisClass, MSG_VIS_GET_MONIKER_POS
+{
+    DrawMonikerArgs a;
+
+    a.DMA_xInset = xInset;
+    a.DMA_yInset = yInset;
+    a.DMA_xMaximum = xMaximum;
+    a.DMA_yMaximum = yMaximum;
+    a.DMA_gState = gstate;
+    a.DMA_textHeight = textHeight;
+    return VisGetMonikerPos(oself, visMoniker, monikerFlags, &a);
+}
+
+@method VisClass, MSG_VIS_GET_MONIKER_SIZE
+{
+    (void) monikerFlags;
+    (void) yMaximum;
+    (void) xMaximum;
+    (void) yInset;
+    (void) xInset;
+    return VisGetMonikerSize(oself, visMoniker, textHeight, gstate);
+}
+
+/* ---------------------------------------------------------------------
+ * Input
+ * ------------------------------------------------------------------- */
+
+@method VisClass, MSG_VIS_GRAB_MOUSE
+{
+    VisGrabMouse(oself);
+}
+
+@method VisClass, MSG_VIS_FORCE_GRAB_MOUSE
+{
+    VisForceGrabMouse(oself);
+}
+
+@method VisClass, MSG_VIS_GRAB_LARGE_MOUSE
+{
+    VisGrabLargeMouse(oself);
+}
+
+@method VisClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE
+{
+    VisForceGrabLargeMouse(oself);
+}
+
+@method VisClass, MSG_VIS_RELEASE_MOUSE
+{
+    VisReleaseMouse(oself);
+}
+
+@method VisClass, MSG_META_GRAB_KBD
+{
+    VisGrabKbd(oself);
+}
+
+@method VisClass, MSG_META_FORCE_GRAB_KBD
+{
+    VisForceGrabKbd(oself);
+}
+
+@method VisClass, MSG_META_RELEASE_KBD
+{
+    VisReleaseKbd(oself);
+}
+
+@method VisClass, MSG_VIS_ADD_BUTTON_PRE_PASSIVE
+{
+    VisAlterInputFlow(oself, VIFGF_MOUSE | VIFGF_GRAB, VIFGT_PRE_PASSIVE);
+}
+
+@method VisClass, MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE
+{
+    VisAlterInputFlow(oself, VIFGF_MOUSE, VIFGT_PRE_PASSIVE);
+}
+
+@method VisClass, MSG_VIS_ADD_BUTTON_POST_PASSIVE
+{
+    VisAlterInputFlow(oself, VIFGF_MOUSE | VIFGF_GRAB, VIGFT_POST_PASSIVE);
+}
+
+@method VisClass, MSG_VIS_REMOVE_BUTTON_POST_PASSIVE
+{
+    VisAlterInputFlow(oself, VIFGF_MOUSE, VIGFT_POST_PASSIVE);
+}
+
+/* VisVupAlterInputFlow: on to the input node */
+@method VisClass, MSG_VIS_VUP_ALTER_INPUT_FLOW
+{
+    optr node = VisFindParentOfVisType(oself, VTF_IS_INPUT_NODE);
+
+    if (node)
+	@call node::MSG_VIS_VUP_ALTER_INPUT_FLOW(translation, window, object,
+						 grabType,
+						 grabFlags & ~VIFGF_NOT_HERE);
+}
+
+/* VisVupAlterFTVMCExcl: focus and target to the input node or win group
+ * up the tree; the model through the generic parent (none yet) */
+@method VisClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    optr up;
+
+    flags &= ~MAEF_NOT_HERE;
+    flags &= ~MAEF_MODEL;
+    if (!(flags & MAEF_MASK_OF_ALL_HIERARCHIES))
+	return;
+    up = VisFindParentOfVisType(oself, VTF_IS_INPUT_NODE |
+				VTF_IS_WIN_GROUP);
+    if (up)
+	@call up::MSG_META_MUP_ALTER_FTVMC_EXCL(objectWantingControl, flags);
+}
+
+/* VisFupQueryFocusExcl: asked of the input node or win group above */
+@method VisClass, MSG_VIS_FUP_QUERY_FOCUS_EXCL,
+		  MSG_VIS_VUP_QUERY_FOCUS_EXCL
+{
+    optr up = VisFindParentOfVisType(oself, VTF_IS_INPUT_NODE |
+				     VTF_IS_WIN_GROUP);
+    struct { ObjectAndGrabParams *r; } p;
+
+    memset(retValue, 0, sizeof(*retValue));
+    if (!up)
+	return;
+    p.r = retValue;
+    CObjMessageP(MF_CALL, up, message, &p, sizeof(p), NULL, 0);
+}
+
+/* VisKbdChar: to the focus parent */
+@method VisClass, MSG_META_KBD_CHAR
+{
+    (void) @call oself::MSG_META_FUP_KBD_CHAR(character, flags, state);
+}
+
+/* VisEnsureMouseNotActivelyTrespassing: a window that may not be
+ * interacted with lets go of the gadget exclusive */
+@method VisClass, MSG_META_ENSURE_MOUSE_NOT_ACTIVELY_TRESPASSING
+{
+    optr app, p;
+
+    if (!(pself->VI_typeFlags & (VTF_IS_WINDOW | VTF_IS_PORTAL)) ||
+	pself->VI_typeFlags & VTF_IS_WIN_GROUP)
+	return 0;
+    app = GeodeGetAppObject(0);
+    if (!app || @call app::MSG_META_TEST_WIN_INTERACTIBILITY(oself, 0))
+	return 0;
+    p = VisFindParent(oself);
+    if (p)
+	@call p::MSG_VIS_RELEASE_GADGET_EXCL(oself);
+    return 0;
+}
+
+/* VisEndMoveCopy: the quick transfer ends (no clipboard yet: nothing to
+ * end) */
+@method VisClass, MSG_META_END_MOVE_COPY
+{
+    (void) xPosition;
+    (void) yPosition;
+    (void) inputState;
+    retVal->flags = MRF_PROCESSED;
+}
+
+@method VisClass, MSG_META_QUERY_IF_PRESS_IS_INK
+{
+    (void) xPosition;
+    (void) yPosition;
+    retVal->inkType = IRV_NO_INK;
+}

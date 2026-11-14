@@ -1,0 +1,739 @@
+/*
+ * visUtilsResident.goc -- the Vis utility routines (after
+ * visUtilsResident.asm): bounds, the parent and children, the window,
+ * invalidation and the update path, the input grabs, monikers.
+ *
+ * Port32: the routines take the optr (uiInt.goh).  The messages they
+ * pass on to the parent or the children (VisCallParent,
+ * VisIfFlagSetCallVisChildren) take the message's parameters as the
+ * structure of goc -cg (Port32/ABI.md section 6): the registers of the
+ * asm are not there to pass on unchanged.  The stack borrowing of the
+ * asm (ThreadBorrowStackSpace) is not needed: threads have big stacks.
+ */
+@include "uiInt.goh"
+#include <Internal/grWinInt.h>
+#include <string.h>
+
+/* ---------------------------------------------------------------------
+ * The object
+ * ------------------------------------------------------------------- */
+
+VisInstance *VisLock(optr obj)
+{
+    ObjLockObjBlock(OptrToHandle(obj));
+    return VisPart(obj);
+}
+
+void VisUnlock(optr obj)
+{
+    MemUnlock(OptrToHandle(obj));
+}
+
+/* the Vis part has been grown */
+Boolean VisCheckIfVisGrown(optr obj)
+{
+    Boolean grown;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+    grown = ((VisBase *) ObjDeref(obj, 0))->Vis_offset != 0;
+    MemUnlock(OptrToHandle(obj));
+    return grown;
+}
+
+/* grown and in a visual tree */
+Boolean VisCheckIfSpecBuilt(optr obj)
+{
+    Boolean built = FALSE;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+    if (((VisBase *) ObjDeref(obj, 0))->Vis_offset)
+	built = OptrToHandle(VisPart(obj)->VI_link.LP_next) != 0;
+    MemUnlock(OptrToHandle(obj));
+    return built;
+}
+
+SizeAsDWord VisGetSize(optr obj)
+{
+    VisInstance *v = VisLock(obj);
+    SizeAsDWord s = MAKE_SIZE_DWORD(v->VI_bounds.R_right - v->VI_bounds.R_left,
+				    v->VI_bounds.R_bottom - v->VI_bounds.R_top);
+
+    VisUnlock(obj);
+    return s;
+}
+
+void VisGetBounds(optr obj, Rectangle *r)
+{
+    *r = VisLock(obj)->VI_bounds;
+    VisUnlock(obj);
+}
+
+/* the bounds less the margins of MSG_VIS_COMP_GET_MARGINS */
+void VisGetBoundsInsideMargins(optr obj, Rectangle *r)
+{
+    Rectangle m;
+
+    @call obj::MSG_VIS_COMP_GET_MARGINS(&m);
+    VisGetBounds(obj, r);
+    r->R_left += m.R_left;
+    r->R_top += m.R_top;
+    r->R_right -= m.R_right;
+    r->R_bottom -= m.R_bottom;
+}
+
+void VisSetSize(optr obj, sword width, sword height)
+{
+    VisInstance *v = VisLock(obj);
+
+    v->VI_bounds.R_right = v->VI_bounds.R_left + width;
+    v->VI_bounds.R_bottom = v->VI_bounds.R_top + height;
+    VisUnlock(obj);
+}
+
+void VisSetPosition(optr obj, sword x, sword y)
+{
+    VisInstance *v = VisLock(obj);
+    sword dx = x - v->VI_bounds.R_left, dy = y - v->VI_bounds.R_top;
+
+    v->VI_bounds.R_left += dx;
+    v->VI_bounds.R_right += dx;
+    v->VI_bounds.R_top += dy;
+    v->VI_bounds.R_bottom += dy;
+    VisUnlock(obj);
+}
+
+/* VisGetCenter: half of the size on each side */
+void VisGetCenter(optr obj, GetCenterParams *c)
+{
+    SizeAsDWord s = VisGetSize(obj);
+    word w = DWORD_WIDTH(s), h = DWORD_HEIGHT(s);
+
+    c->GCP_leftOfCenter = w >> 1;
+    c->GCP_rightOfCenter = w - (w >> 1);
+    c->GCP_aboveCenter = h >> 1;
+    c->GCP_belowCenter = h - (h >> 1);
+}
+
+/* inside the bounds (a window: its own coordinates, from 0, 0) */
+Boolean VisTestPointInBounds(optr obj, sword x, sword y)
+{
+    VisInstance *v = VisLock(obj);
+    Rectangle b = v->VI_bounds;
+    Boolean in;
+
+    if (v->VI_typeFlags & VTF_IS_WINDOW)
+	in = x >= 0 && y >= 0 && x <= b.R_right - b.R_left &&
+	     y <= b.R_bottom - b.R_top;
+    else
+	in = x >= b.R_left && x < b.R_right && y >= b.R_top &&
+	     y < b.R_bottom;
+    VisUnlock(obj);
+    return in;
+}
+
+/* ---------------------------------------------------------------------
+ * The parent
+ * ------------------------------------------------------------------- */
+
+optr VisFindParent(optr obj)
+{
+    return ObjLinkFindParent(obj, word_offsetof(VisBase, Vis_offset),
+			     word_offsetof(VisInstance, VI_link));
+}
+
+/* the first parent up the tree with one of the type flags (0: none) */
+optr VisFindParentOfVisType(optr obj, VisTypeFlags type)
+{
+    optr p;
+
+    for (p = VisFindParent(obj); p; p = VisFindParent(p)) {
+	VisTypeFlags t = VisLock(p)->VI_typeFlags;
+	VisUnlock(p);
+	if (t & type)
+	    return p;
+    }
+    return 0;
+}
+
+/* the window of a built composite, else the parent's */
+WindowHandle VisQueryWindow(optr obj)
+{
+    VisInstance *v;
+    WindowHandle w;
+
+    if (!VisCheckIfSpecBuilt(obj))
+	return 0;
+    v = VisLock(obj);
+    if (v->VI_typeFlags & VTF_IS_COMPOSITE) {
+	w = ((VisCompInstance *) v)->VCI_window;
+	VisUnlock(obj);
+	return w;
+    }
+    VisUnlock(obj);
+    return VisQueryParentWin(obj);
+}
+
+WindowHandle VisQueryParentWin(optr obj)
+{
+    optr p = VisFindParent(obj);
+
+    return p ? VisQueryWindow(p) : 0;
+}
+
+/* the VisCompGeoAttrs (low byte) and dimension attributes (high byte)
+ * of the parent */
+word VisGetParentGeometry(optr obj)
+{
+    optr p = VisFindParent(obj);
+    VisCompInstance *c;
+    word g;
+
+    if (!p)
+	return 0;
+    c = (VisCompInstance *) VisLock(p);
+    g = c->VCI_geoAttrs | (c->VCI_geoDimensionAttrs << 8);
+    VisUnlock(p);
+    return g;
+}
+
+Boolean VisCallParent(optr obj, Message msg, const void *params,
+		      word paramSize, void *reply, word replySize)
+{
+    optr p = VisFindParent(obj);
+
+    if (replySize)
+	memset(reply, 0, replySize);
+    if (!p)
+	return FALSE;
+    CObjMessageP(MF_CALL, p, msg, (void *) params, paramSize, reply,
+		 replySize);
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * The children
+ * ------------------------------------------------------------------- */
+
+Boolean VisCallChildren(optr obj, VisChildCallback *cb, void *data)
+{
+    return ObjCompProcessChildren(obj, 0, OCCT_SAVE_PARAMS_DONT_TEST_ABORT,
+				  data, word_offsetof(VisBase, Vis_offset),
+				  word_offsetof(VisCompInstance, VCI_comp),
+				  word_offsetof(VisInstance, VI_link), cb);
+}
+
+word VisCountChildren(optr obj)
+{
+    word n = 0;
+
+    ObjCompProcessChildren(obj, 0, OCCT_COUNT_CHILDREN, &n,
+			   word_offsetof(VisBase, Vis_offset),
+			   word_offsetof(VisCompInstance, VCI_comp),
+			   word_offsetof(VisInstance, VI_link), NULL);
+    return n;
+}
+
+optr VisFirstChild(optr obj)
+{
+    optr c = ((VisCompInstance *) VisLock(obj))->VCI_comp.CP_firstChild;
+
+    VisUnlock(obj);
+    return c;
+}
+
+typedef struct {
+    Message	msg;
+    const void	*params;
+    word	paramSize;
+    byte	flags;
+    Boolean	result;
+} CallChildData;
+
+static Boolean SendCallback(optr parent, optr child, void *data)
+{
+    CallChildData *d = data;
+
+    (void) parent;
+    CObjMessageP(MF_CALL, child, d->msg, (void *) d->params, d->paramSize,
+		 NULL, 0);
+    return FALSE;
+}
+
+void VisSendToChildren(optr obj, Message msg, const void *params,
+		       word paramSize)
+{
+    CallChildData d;
+
+    d.msg = msg;
+    d.params = params;
+    d.paramSize = paramSize;
+    VisCallChildren(obj, SendCallback, &d);
+}
+
+/* CVCWFS_callBack */
+static Boolean FlagCallback(optr parent, optr child, void *data)
+{
+    CallChildData *d = data;
+    VisInstance *v;
+    Boolean r = FALSE;
+
+    (void) parent;
+    ObjLockObjBlock(OptrToHandle(child));
+    if (!((VisBase *) ObjDeref(child, 0))->Vis_offset)
+	ObjInitializePart(child, word_offsetof(VisBase, Vis_offset));
+    v = VisPart(child);
+    if (v->VI_typeFlags & VTF_IS_WIN_GROUP ||
+	(d->flags && d->flags != VIS_CALL_UNTIL_TRUE &&
+	 !(v->VI_optFlags & d->flags))) {
+	MemUnlock(OptrToHandle(child));
+	return FALSE;
+    }
+    MemUnlock(OptrToHandle(child));
+    CObjMessageP(MF_CALL, child, d->msg, (void *) d->params, d->paramSize,
+		 &r, sizeof(r));
+    if (d->flags == VIS_CALL_UNTIL_TRUE && r) {
+	d->result = TRUE;
+	return TRUE;
+    }
+    return FALSE;
+}
+
+Boolean VisIfFlagSetCallVisChildren(optr obj, Message msg,
+				    const void *params, word paramSize,
+				    byte flags)
+{
+    CallChildData d;
+    VisTypeFlags t = VisLock(obj)->VI_typeFlags;
+
+    VisUnlock(obj);
+    if (!(t & VTF_IS_COMPOSITE))
+	return FALSE;
+    d.msg = msg;
+    d.params = params;
+    d.paramSize = paramSize;
+    d.flags = flags;
+    d.result = FALSE;
+    VisCallChildren(obj, FlagCallback, &d);
+    return d.result;
+}
+
+/* ---------------------------------------------------------------------
+ * Invalidation and the update path
+ * ------------------------------------------------------------------- */
+
+/* VisMarkInvalidOnParent: the parent marked, by message if another
+ * thread runs it */
+void VisMarkInvalidOnParent(optr obj, VisOptFlags flags, VisUpdateMode mode)
+{
+    optr p = VisFindParent(obj);
+
+    if (!p)
+	return;
+    if (ObjTestIfObjBlockRunByCurThread(OptrToHandle(p)))
+	VisMarkInvalid(p, flags, mode);
+    else
+	@call p::MSG_VIS_MARK_INVALID(flags, mode);
+}
+
+/* The invalid bits set here, the path bits up to the win group, then
+ * the update unless VUM_MANUAL. */
+void VisMarkInvalid(optr obj, VisOptFlags flags, VisUpdateMode mode)
+{
+    VisInstance *v = VisLock(obj);
+    byte old, path, had;
+
+    if (flags) {
+	old = v->VI_optFlags;
+	v->VI_optFlags |= flags;
+	if (!(v->VI_typeFlags & VTF_IS_WIN_GROUP)) {
+	    path = (flags | ((flags & VOF_INVALID_BITS) >> 1)) &
+		   VOF_PATH_BITS;
+	    had = (old | ((old & VOF_INVALID_BITS) >> 1)) & VOF_PATH_BITS;
+	    path &= ~had;
+	    if (path) {
+		optr p = VisFindParent(obj);
+		VisUnlock(obj);
+		if (p)
+		    VisMarkInvalid(p, path, VUM_MANUAL);
+		v = VisLock(obj);
+	    }
+	}
+    }
+    VisUnlock(obj);
+    if (mode != VUM_MANUAL)
+	VisVupUpdateWinGroup(obj, mode);
+}
+
+/* geometry, window and image invalid here, geometry on the parent */
+void VisMarkFullyInvalid(optr obj)
+{
+    VisInstance *v = VisLock(obj);
+    VisTypeFlags t = v->VI_typeFlags;
+    VisOptFlags f = VOF_GEOMETRY_INVALID | VOF_WINDOW_INVALID |
+		    VOF_IMAGE_INVALID;
+
+    VisUnlock(obj);
+    if (!(t & VTF_IS_WIN_GROUP))
+	VisMarkInvalidOnParent(obj, VOF_GEOMETRY_INVALID, VUM_MANUAL);
+    if (!(t & (VTF_IS_WINDOW | VTF_IS_PORTAL)))
+	f &= ~VOF_WINDOW_INVALID;
+    VisMarkInvalid(obj, f, VUM_MANUAL);
+}
+
+/* VisVupUpdateWinGroup (static): up to the win group, which updates
+ * (VisCompVupUpdateWinGroup); TRUE if one was reached */
+Boolean VisVupUpdateWinGroup(optr obj, VisUpdateMode mode)
+{
+    optr o = obj;
+
+    if (mode == VUM_MANUAL)
+	return FALSE;
+    while (o) {
+	VisTypeFlags t = VisLock(o)->VI_typeFlags;
+	VisUnlock(o);
+	if (t & VTF_IS_WIN_GROUP)
+	    return VisCompVupUpdateWinGroup(o, mode);
+	o = VisFindParent(o);
+    }
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * The children under a point (mouse), in bounds (ink)
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    Message		msg;
+    VisMouseParams	p;
+} UnderPointData;
+
+/* CallChildUnderPointCallBack: detectable and realized, not a window */
+static Boolean UnderPointCallback(optr parent, optr child, void *data)
+{
+    UnderPointData *d = data;
+    VisInstance *v = VisLock(child);
+    Boolean ok = !(v->VI_typeFlags & VTF_IS_WINDOW) &&
+		 (v->VI_attrs & (VA_DETECTABLE | VA_REALIZED)) ==
+		 (VA_DETECTABLE | VA_REALIZED);
+
+    (void) parent;
+    VisUnlock(child);
+    if (!ok || !VisTestPointInBounds(child, d->p.VMP_x, d->p.VMP_y))
+	return FALSE;
+    d->p.VMP_inputState |= UIFA_IN << 8;
+    CObjMessageP(MF_CALL, child, d->msg, &d->p, sizeof(d->p), NULL, 0);
+    return TRUE;
+}
+
+/* the mouse message to the first child under the point; else (FALSE)
+ * nothing processed, the pointer image cleared for MSG_META_PTR */
+Boolean VisCallChildUnderPoint(optr obj, Message msg, sword x, sword y,
+			       word inputState, MouseReturnParams *ret)
+{
+    UnderPointData d;
+
+    memset(ret, 0, sizeof(*ret));
+    d.msg = msg;
+    d.p.VMP_x = x;
+    d.p.VMP_y = y;
+    d.p.VMP_inputState = inputState;
+    d.p.VMP_ret = ret;
+    if (VisCallChildren(obj, UnderPointCallback, &d))
+	return TRUE;
+    if (msg == MSG_META_START_MOVE_COPY)
+	@call obj::MSG_SPEC_NO_INPUT_DESTINATION(x, y,
+						 MSG_META_START_MOVE_COPY);
+    ret->flags = msg == MSG_META_PTR ? MRF_CLEAR_POINTER_IMAGE : 0;
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * Input grabs (VisAlterInputFlowCommon)
+ * ------------------------------------------------------------------- */
+
+/* the grab up to the input node: through the object itself if it is one
+ * or the grab is a mouse one (which needs the window's translation).
+ * (SendMouseInteractionBounds of the asm sends nothing: its message is
+ * commented out.) */
+void VisAlterInputFlow(optr obj, byte flags, byte grabType)
+{
+    PointDWord tr;
+    WindowHandle win = 0;
+    VisTypeFlags t;
+    optr node;
+
+    tr.PD_x = tr.PD_y = 0;
+    if ((flags & (VIFGF_GRAB | VIFGF_MOUSE)) == (VIFGF_GRAB | VIFGF_MOUSE))
+	win = VisQueryWindow(obj);
+    t = VisLock(obj)->VI_typeFlags;
+    VisUnlock(obj);
+    if ((flags & (VIFGF_GRAB | VIFGF_MOUSE)) == (VIFGF_GRAB | VIFGF_MOUSE) ||
+	t & VTF_IS_INPUT_NODE) {
+	@call obj::MSG_VIS_VUP_ALTER_INPUT_FLOW(tr, win, obj, grabType, flags);
+	return;
+    }
+    node = VisFindParentOfVisType(obj, VTF_IS_INPUT_NODE);
+    if (node)
+	@call node::MSG_VIS_VUP_ALTER_INPUT_FLOW(tr, win, obj, grabType,
+						 flags & ~VIFGF_NOT_HERE);
+}
+
+void VisGrabMouse(optr obj)
+{
+    VisAlterInputFlow(obj, VIFGF_MOUSE | VIFGF_GRAB | VIFGF_PTR |
+		      VIFGF_NOT_HERE, VIFGT_ACTIVE);
+}
+
+void VisForceGrabMouse(optr obj)
+{
+    VisAlterInputFlow(obj, VIFGF_MOUSE | VIFGF_GRAB | VIFGF_FORCE |
+		      VIFGF_PTR | VIFGF_NOT_HERE, VIFGT_ACTIVE);
+}
+
+void VisGrabLargeMouse(optr obj)
+{
+    VisAlterInputFlow(obj, VIFGF_MOUSE | VIFGF_GRAB | VIFGF_LARGE |
+		      VIFGF_PTR | VIFGF_NOT_HERE, VIFGT_ACTIVE);
+}
+
+void VisForceGrabLargeMouse(optr obj)
+{
+    VisAlterInputFlow(obj, VIFGF_MOUSE | VIFGF_GRAB | VIFGF_FORCE |
+		      VIFGF_LARGE | VIFGF_PTR | VIFGF_NOT_HERE, VIFGT_ACTIVE);
+}
+
+void VisReleaseMouse(optr obj)
+{
+    VisAlterInputFlow(obj, VIFGF_MOUSE | VIFGF_NOT_HERE, VIFGT_ACTIVE);
+}
+
+void VisGrabKbd(optr obj)
+{
+    VisAlterInputFlow(obj, VIFGF_KBD | VIFGF_GRAB | VIFGF_NOT_HERE,
+		      VIFGT_ACTIVE);
+}
+
+void VisForceGrabKbd(optr obj)
+{
+    VisAlterInputFlow(obj, VIFGF_KBD | VIFGF_GRAB | VIFGF_FORCE |
+		      VIFGF_NOT_HERE, VIFGT_ACTIVE);
+}
+
+void VisReleaseKbd(optr obj)
+{
+    VisAlterInputFlow(obj, VIFGF_KBD | VIFGF_NOT_HERE, VIFGT_ACTIVE);
+}
+
+void VisTakeGadgetExclAndGrab(optr obj)
+{
+    optr p = VisFindParent(obj);
+
+    if (p)
+	@call p::MSG_VIS_TAKE_GADGET_EXCL(obj);
+    VisGrabMouse(obj);
+}
+
+/* ---------------------------------------------------------------------
+ * Monikers
+ * ------------------------------------------------------------------- */
+
+/* UserGetDefaultMonikerFont: the system font (Berkeley 10 for now) */
+static void DefaultMonikerFont(FontID *id, word *size)
+{
+    *id = FID_BERKELEY;
+    *size = 10;
+}
+
+/* GetMonikerSizeCommon: the cached width and height of the moniker,
+ * worked out and cached if not yet there; textHeight: the height to use
+ * for a text moniker (0: from the font) */
+SizeAsDWord VisGetMonikerSize(optr obj, ChunkHandle moniker,
+			      word textHeight, GStateHandle gstate)
+{
+    optr mo = ConstructOptr(OptrToHandle(obj), moniker);
+    VisMoniker *m;
+    word w, h;
+    Boolean own = FALSE;
+
+    if (!moniker)
+	return 0;
+    ObjLockObjBlock(OptrToHandle(obj));
+    m = LMemDeref(mo);
+    w = m->VM_width;
+    if (m->VM_type & VMT_GSTRING)
+	h = ((VisMonikerWithGString *) m)->VMWGS_height;
+    else {
+	h = textHeight;
+	if (w & VMCW_HINTED) {
+	    FontID id;
+	    word size;
+	    DefaultMonikerFont(&id, &size);
+	    if (id == FID_BERKELEY && (size == 9 || size == 10)) {
+		w = size == 9 ? (w & VMCW_BERKELEY_9) >> 8 :
+				w & VMCW_BERKELEY_10;
+		m->VM_width = w;
+	    } else
+		w = 0;
+	}
+    }
+    if (w && h) {
+	MemUnlock(OptrToHandle(obj));
+	return MAKE_SIZE_DWORD(w, h);
+    }
+    if (!gstate) {
+	FontID id;
+	word size;
+	gstate = GrCreateState(0);
+	DefaultMonikerFont(&id, &size);
+	GrSetFont(gstate, id, MakeWWFixed(size));
+	own = TRUE;
+    }
+    if (!(m->VM_type & VMT_GSTRING)) {
+	const char *text = (const char *) m + VMWT_text;
+	if (!w)
+	    w = GrTextWidth(gstate, text, 0);
+	if (!h)
+	    h = (word) GrFontMetrics(gstate, GFMI_HEIGHT_ROUNDED);
+    } else {
+	GStateHandle gs = GrLoadGStringPtr((byte *) m + VMWGS_gString);
+	Rectangle b;
+	XYValueAsDWord pos = GrGetCurPos(gstate);
+	GrMoveTo(gstate, 0, 0);
+	GrGetGStringBounds(gs, gstate, 0, &b);
+	GrMoveTo(gstate, DWORD_X(pos), DWORD_Y(pos));
+	GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+	w = b.R_right + 1;
+	h = b.R_bottom + 1;
+	m = LMemDeref(mo);
+    }
+    m = LMemDeref(mo);
+    m->VM_width = w;
+    if (m->VM_type & VMT_GSTRING)
+	((VisMonikerWithGString *) m)->VMWGS_height = h;
+    MemUnlock(OptrToHandle(obj));
+    if (own)
+	GrDestroyState(gstate);
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/* GetMonikerPos: where the moniker goes in the object, justified by the
+ * DMF_X_JUST/DMF_Y_JUST flags within the insets */
+static XYValueAsDWord MonikerPos(optr obj, ChunkHandle moniker,
+				 DrawMonikerFlags flags, DrawMonikerArgs *a)
+{
+    VisInstance *v;
+    VisMoniker *m;
+    word textHeight = a->DMA_textHeight, mw;
+    sword x, y, extra;
+    Rectangle b;
+    VisTypeFlags t;
+
+    if (!moniker)
+	return 0;
+    ObjLockObjBlock(OptrToHandle(obj));
+    m = LMemDeref(ConstructOptr(OptrToHandle(obj), moniker));
+    if (m->VM_type & VMT_GSTRING) {
+	textHeight = ((VisMonikerWithGString *) m)->VMWGS_height;
+	if (!m->VM_width || !textHeight) {
+	    MemUnlock(OptrToHandle(obj));
+	    textHeight = DWORD_HEIGHT(VisGetMonikerSize(obj, moniker,
+				      a->DMA_textHeight, a->DMA_gState));
+	    ObjLockObjBlock(OptrToHandle(obj));
+	}
+    } else {
+	MemUnlock(OptrToHandle(obj));
+	textHeight = DWORD_HEIGHT(VisGetMonikerSize(obj, moniker,
+				  a->DMA_textHeight, a->DMA_gState));
+	ObjLockObjBlock(OptrToHandle(obj));
+    }
+    m = LMemDeref(ConstructOptr(OptrToHandle(obj), moniker));
+    mw = m->VM_width;
+    v = VisPart(obj);
+    b = v->VI_bounds;
+    t = v->VI_typeFlags;
+    MemUnlock(OptrToHandle(obj));
+
+    x = t & VTF_IS_WINDOW ? 0 : b.R_left;
+    if (!(flags & DMF_X_JUST_MASK))
+	x += a->DMA_xInset;
+    else {
+	extra = (t & VTF_IS_WINDOW ? b.R_right - b.R_left : b.R_right) - x -
+		mw;
+	if ((flags & DMF_X_JUST_MASK) == (J_RIGHT << DMF_X_JUST_OFFSET))
+	    x += extra - a->DMA_xInset;
+	else
+	    x += extra >> 1;
+    }
+    y = t & VTF_IS_WINDOW ? 0 : b.R_top;
+    if (!(flags & DMF_Y_JUST_MASK))
+	y += a->DMA_yInset;
+    else {
+	/* the asm's "hack": one less for the height, one more centred */
+	sword top = y - 1;
+	extra = (t & VTF_IS_WINDOW ? b.R_bottom - b.R_top : b.R_bottom) -
+		top - textHeight;
+	if ((flags & DMF_Y_JUST_MASK) == (J_RIGHT << DMF_Y_JUST_OFFSET))
+	    y = top + extra - a->DMA_yInset;
+	else
+	    y = top + (extra >> 1) + 1;
+    }
+    return MAKE_XY_DWORD(x, y);
+}
+
+XYValueAsDWord VisGetMonikerPos(optr obj, ChunkHandle moniker,
+				DrawMonikerFlags flags, DrawMonikerArgs *a)
+{
+    if (!moniker)
+	return 0;
+    if (flags & DMF_NONE)
+	return GrGetCurPos(a->DMA_gState);
+    return MonikerPos(obj, moniker, flags, a);
+}
+
+/* the moniker (text or gstring) at its place or the pen position, clipped
+ * to the maximum size if DMF_CLIP_TO_MAX_WIDTH and too big */
+void VisDrawMoniker(optr obj, ChunkHandle moniker, DrawMonikerFlags flags,
+		    DrawMonikerArgs *a)
+{
+    GStateHandle gs = a->DMA_gState;
+    optr mo = ConstructOptr(OptrToHandle(obj), moniker);
+    Boolean clip = FALSE;
+    VisMoniker *m;
+
+    if (flags & DMF_CLIP_TO_MAX_WIDTH) {
+	SizeAsDWord s = VisGetMonikerSize(obj, moniker, a->DMA_textHeight,
+					  gs);
+	clip = DWORD_WIDTH(s) > a->DMA_xMaximum ||
+	       DWORD_HEIGHT(s) > a->DMA_yMaximum;
+    }
+    if (!(flags & DMF_NONE)) {
+	XYValueAsDWord p = MonikerPos(obj, moniker, flags, a);
+	GrMoveTo(gs, DWORD_X(p), DWORD_Y(p));
+    }
+    if (!moniker)
+	return;
+    if (clip) {
+	XYValueAsDWord p = GrGetCurPos(gs);
+	GrSaveState(gs);
+	GrSetClipRect(gs, PCT_REPLACE, DWORD_X(p), DWORD_Y(p),
+		      DWORD_X(p) + a->DMA_xMaximum,
+		      DWORD_Y(p) + a->DMA_yMaximum);
+    }
+    ObjLockObjBlock(OptrToHandle(obj));
+    m = LMemDeref(mo);
+    if (!(m->VM_type & VMT_GSTRING)) {
+	XYValueAsDWord p = GrGetCurPos(gs);
+	GrDrawText(gs, DWORD_X(p), DWORD_Y(p), (const char *) m + VMWT_text,
+		   0);
+    } else if (!(flags & DMF_TEXT_ONLY)) {
+	GStateHandle g;
+	GrSaveState(gs);
+	g = GrLoadGStringPtr((byte *) m + VMWGS_gString);
+	GrDrawGStringAtCP(gs, g, 0, NULL);
+	GrDestroyGString(g, 0, GSKT_LEAVE_DATA);
+	GrRestoreState(gs);
+    }
+    MemUnlock(OptrToHandle(obj));
+    if (clip)
+	GrRestoreState(gs);
+}

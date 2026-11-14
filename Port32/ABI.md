@@ -4589,6 +4589,79 @@ the C stubs; and the driver routines: font, size and pitch mapping
 against a device's font table, the translation table of a symbol set
 with a country's national characters and the driver's translations.
 
+### 13x. The UI library (`Library/User`)
+
+`ui.geo` in C beside the asm, built from `Library/User/ui32.gp` (the
+16-bit build keeps `ui.gp`); its exports grow with the port. So far the
+visual classes of `Library/User/Vis`:
+
+- **Files.** goc wants all methods of a class in the file of its
+  `@classdecl`, so `Vis/visClass.goc` has the `VisClass` methods of
+  `visClass.asm`, `visUtilsResident.asm`, `visUtilsClass.asm` and
+  `visGeometry.asm`, and `Vis/visComp.goc` those of `visComp.asm`.
+  The routines are in `Vis/visUtilsResident.goc`; `uiInt.goh` has the
+  library's internal ones. `VisEmptyClass` (no C header had it) is
+  declared in `uiInt.goh`.
+- **Routines.** The asm routines took the object in `*ds:si` and
+  registers. Their C forms take the optr (`visC.goh`, `#ifdef
+  GEOS_PORT32`): `VisMarkInvalid(obj, flags, mode)`,
+  `VisFindParent(obj)`, `VisGetBounds(obj, &r)`, `VisQueryWindow(obj)`,
+  `VisDrawMoniker(obj, moniker, flags, &args)` and so on. The object's
+  block must be run by the calling thread, as in the asm. A routine that
+  goes to another block locks it.
+- **Passing messages on.** `VisCallParent`, `VisSendToChildren` and
+  `VisIfFlagSetCallVisChildren` take the message with its goc -cg
+  parameter structure (section 6). A return structure travels as a
+  pointer in it (`MouseReturnParams *` of the mouse messages). There are
+  no registers to pass on unchanged, so the methods that pass a message
+  on do it per message, with its arguments.
+- **Carry.** Messages that answered with the carry return their value,
+  as the C prototypes of `visC.goh` have them
+  (`MSG_VIS_VUP_CREATE_GSTATE` the gstate, `MSG_VIS_VUP_UPDATE_WIN_GROUP`
+  a Boolean); 0 is "not answered". `VisIfFlagSetCallVisChildren` with
+  `VIS_CALL_UNTIL_TRUE` stops at the first child that answers TRUE.
+- **No stack borrowing.** `ThreadBorrowStackSpace` is not needed:
+  threads have big stacks.
+- **The update.** As in the asm:
+  - `VI_optFlags` holds the invalid and path bits;
+  - `VisMarkInvalid` sets the path up to the win group;
+  - the win group updates now, or once queued (`VOF_UPDATE_PENDING`) on
+    its own queue or, through `MSG_META_DISPATCH_EVENT`, on the queue
+    of the block's owner;
+  - the update is geometry, then opening or
+    `MSG_VIS_UPDATE_WINDOWS_AND_IMAGE`;
+  - rectangles invalidated while the win group updates go into its
+    `TEMP_VIS_INVAL_REGION` (`GrChunkRegOp`), which is invalidated in
+    the window at the end;
+  - exposure draws the children within the mask.
+- **Classed events.**
+  - `TO_VIS_PARENT` goes up the visual tree;
+  - `TO_APP_*` goes to the application object, `TO_SYS_*` (no system
+    object yet) nowhere;
+  - an event dispatched with `MF_CALL` has no reply in C, as in the
+    kernel's `MetaSendClassedEvent`.
+- **Not yet:**
+  - the geometry manager of `visCompGeometry.asm`: a composite keeps
+    the size and position it is given;
+  - `VisContentClass`;
+  - the Generic UI, so `VTF_IS_GEN` is never set, and
+    `MSG_META_UPDATE_WINDOW` and `MSG_GEN_GUP_ENSURE_UPDATE_WINDOW` are
+    not handled;
+  - `MSG_VIS_CREATE_VIS_MONIKER`, `MSG_VIS_CALL_ROUTINE`,
+    `MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK`;
+  - the quick transfer of `MSG_META_END_MOVE_COPY` (no clipboard);
+  - `UserGetDefaultMonikerFont`: Berkeley 10 for now;
+  - `MSG_VIS_VUP_QUERY` only goes up the tree.
+- **Test.** ctest `library.ui.vis`: the process geode
+  `Port32/Tests/Geode/uivis.goc` has a win group window with two
+  rectangles on a fake video driver. The test opens it, draws it,
+  invalidates one child (only that one is drawn again, at its place),
+  sends mouse events to the child under the point, takes and releases
+  the gadget exclusive, removes and adds a child, and closes the
+  window.
+- **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
+  its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

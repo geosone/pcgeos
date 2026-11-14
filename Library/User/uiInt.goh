@@ -1,0 +1,98 @@
+/*
+ * uiInt.goh -- internal definitions of the UI library in Port32.
+ *
+ * The asm routines of Library/User take an object in *ds:si and
+ * registers; their C forms here take the optr and arguments.  The
+ * object's block must be run by the current thread (as in the asm:
+ * the routines are called from methods); a routine that goes to
+ * another block of the thread locks it.  Pointers into object blocks
+ * (VisInstance *) are good until the next message or LMem change, as
+ * in the asm after an ObjCallInstanceNoLock.
+ *
+ * The public C forms are in visC.goh (GEOS_PORT32); Port32/ABI.md
+ * section 13x describes the library.
+ */
+#ifndef __UIINT_GOH
+#define __UIINT_GOH
+
+@include <stdapp.goh>
+@include <Objects/visC.goh>
+@include <Objects/vCompC.goh>
+
+#include <Internal/grWinInt.h>
+
+/* winC.goh's MSG_META_EXPOSED_FOR_PRINT has it; no C header defines it */
+typedef GStateHandle GStringHandle;
+
+/* winIndividual.c: not in the C API of win.h (screen coordinates) */
+void WinInvalTree(Handle win, const Region *reg, word axParam,
+		  word bxParam, word cxParam, word dxParam);
+
+/* visC.def: not in visC.goh */
+#define VA_INITIAL_BITS		(VA_MANAGED | VA_DRAWABLE | VA_DETECTABLE | \
+				 VA_FULLY_ENABLED)
+#define VOF_PATH_BITS		(VOF_GEO_UPDATE_PATH | VOF_WINDOW_UPDATE_PATH | \
+				 VOF_IMAGE_UPDATE_PATH)
+#define VOF_INVALID_BITS	(VOF_GEOMETRY_INVALID | VOF_WINDOW_INVALID | \
+				 VOF_IMAGE_INVALID)
+#define VOF_INITIAL_BITS	(VOF_INVALID_BITS | VOF_PATH_BITS)
+#define VOF_UPDATING		VOF_EC_UPDATING
+#define SA_INITIAL_BITS		SA_ATTACHED
+#define VARF_UPDATE_WILL_HAPPEN	0x20
+
+/* the parts of an object */
+#define VisPart(o)	((VisInstance *) ObjDerefVis(o))
+#define VisCompPart(o)	((VisCompInstance *) ObjDerefVis(o))
+
+/* ---------------------------------------------------------------------
+ * Vis/visUtilsResident.goc
+ * ------------------------------------------------------------------- */
+/* the Vis part, its block locked (VisUnlock: unlocked) */
+VisInstance *VisLock(optr obj);
+void VisUnlock(optr obj);
+
+/* the children: callback until it returns TRUE (then TRUE) */
+typedef Boolean VisChildCallback(optr parent, optr child, void *data);
+Boolean VisCallChildren(optr obj, VisChildCallback *cb, void *data);
+word VisCountChildren(optr obj);
+optr VisFirstChild(optr obj);
+
+Boolean VisVupUpdateWinGroup(optr obj, VisUpdateMode mode);
+
+/* the parameters of the mouse messages (MSG_UI_BUTTON, MSG_META_PTR)
+ * as goc -cg passes them: the return structure by pointer */
+typedef struct {
+    MouseReturnParams	*VMP_ret;
+    sword		VMP_x;
+    sword		VMP_y;
+    word		VMP_inputState;
+} VisMouseParams;
+
+/* input grabs (VisAlterInputFlowCommon) */
+void VisAlterInputFlow(optr obj, byte flags, byte grabType);
+
+/* ---------------------------------------------------------------------
+ * Vis/visClass.goc
+ * ------------------------------------------------------------------- */
+/* VisEmptyClass (visC.def; not in the C headers): a master class with
+ * no instance data, for objects that are not in a visual tree */
+@class VisEmptyClass, MetaClass, master;
+@endc
+
+/* AddOurBoundsToUpdateRegion */
+void VisAddOurBoundsToUpdateRegion(optr obj, VisAddRectFlags flags);
+Boolean VisShouldObjBeDrawn(optr obj, DrawFlags flags);
+void VisSaveAsInvalChunk(optr obj, ChunkHandle region);
+
+/* ---------------------------------------------------------------------
+ * Vis/visComp.goc
+ * ------------------------------------------------------------------- */
+Boolean VisCompVupUpdateWinGroup(optr obj, VisUpdateMode mode);
+void VisCompUpdateWinGroup(optr obj);
+
+/* ---------------------------------------------------------------------
+ * Vis/visUtilsClass.goc (static parts of the geometry)
+ * ------------------------------------------------------------------- */
+void VisSaveOldBounds(optr obj);
+
+#endif
