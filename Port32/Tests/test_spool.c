@@ -77,7 +77,7 @@ NINEPIN(nec24) NINEPIN(epshi24) NINEPIN(epson48)
 NINEPIN(prop9) NINEPIN(propx24) NINEPIN(ppds24) NINEPIN(canon48)
 NINEPIN(oki9) NINEPIN(citoh9) NINEPIN(tosh24)
 NINEPIN(dj500c) NINEPIN(mercury) NINEPIN(canonbjc) NINEPIN(quietjet)
-NINEPIN(lbp)
+NINEPIN(lbp) NINEPIN(dumb) NINEPIN(diablo)
 
 static int fails;
 #define CHECK(c) \
@@ -2014,6 +2014,163 @@ static void TestCapsl(int out)
 #undef CAPSL_NEAR
 }
 
+/* ---------------------------------------------------------------------
+ * the text only drivers: dumb (ASCII, the X by spaces) and diablo (the
+ * daisy wheels: ESC sequences, the X by an absolute tab)
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    int pages, bad, lines, resets, bold, underline, italic, tabs;
+    int col[4];			/* the first columns of text on page 1 */
+    int ncol;
+    char text[256];		/* the text of page 1, '|' a line's end */
+    int textLen;
+} AsciiDecode;
+
+static void AsciiDecodeFile(const byte *b, size_t n, AsciiDecode *d)
+{
+    size_t i = 0;
+    int c, x = 0, word = 0;
+
+    memset(d, 0, sizeof(*d));
+#define APUT(ch) do { if (!d->pages && d->textLen < 255) \
+			  d->text[d->textLen++] = (char) (ch); } while (0)
+    while (i < n) {
+	c = b[i++];
+	if (c == 0x1b && i < n) {
+	    c = b[i++];
+	    switch (c) {
+	    case 0x09:			/* ESC HT n: to column n - 1 */
+		if (i < n)
+		    x = b[i++] - 1;
+		d->tabs++;
+		break;
+	    case 0x1f:			/* ESC US n: the pitch */
+		i++;
+		break;
+	    case 0x1a:			/* ESC SUB I: reset */
+		i++;
+		d->resets++;
+		break;
+	    case 'O': d->bold += !d->pages; break;
+	    case 'E': d->underline += !d->pages; break;
+	    case 'A': d->italic += !d->pages; break;
+	    case '&': case 'R': case 'B': case 'Q': case 'P': case '/':
+		break;
+	    default:
+		printf("ascii: ESC 0x%02x\n", c);
+		d->bad++;
+		return;
+	    }
+	    word = 0;
+	    continue;
+	}
+	switch (c) {
+	case '\r':
+	    x = 0;
+	    word = 0;
+	    break;
+	case '\n':
+	    d->lines += !d->pages;
+	    if (d->textLen && d->text[d->textLen - 1] != '|')
+		APUT('|');
+	    word = 0;
+	    break;
+	case 0x0c:
+	    if (d->textLen && d->text[d->textLen - 1] != '|')
+		APUT('|');
+	    d->pages++;
+	    x = 0;
+	    word = 0;
+	    break;
+	case ' ':
+	    x++;
+	    word = 0;
+	    break;
+	default:
+	    if (c < ' ') {
+		printf("ascii: 0x%02x\n", c);
+		d->bad++;
+		return;
+	    }
+	    if (!word && !d->pages && d->ncol < 4 && x)
+		d->col[d->ncol++] = x;
+	    if (!word && d->textLen && d->text[d->textLen - 1] != '|' &&
+		d->text[d->textLen - 1] != ' ')
+		APUT(' ');
+	    APUT(c);
+	    word = 1;
+	    x++;
+	    break;
+	}
+    }
+#undef APUT
+}
+
+static void TestAsciiText(const char *section, const char *device,
+			  const char *out, int esc)
+{
+    JobParameters jp;
+    AsciiDecode d;
+    GStateHandle gs;
+    FileHandle fh;
+    char name[13], rel[40];
+    word ch;
+    size_t n;
+    byte *b;
+
+    fh = pSpoolCreateSpoolFile(name);
+    CHECK(fh != 0);
+    if (!fh)
+	return;
+    gs = GrCreateGString(fh, GST_STREAM, &ch);
+    /* an outline font: a bitmap one without a bold face drops the bold
+     * (FindBestFace) */
+    GrSetFont(gs, GrCheckFontAvailName(FEF_OUTLINES, 0, "Cooper* Black"),
+	      (WWFixedAsDWord) 12 << 16);
+    GrDrawText(gs, 72, 100, "Hello World", 0);
+    GrSetTextStyle(gs, TS_BOLD, 0);
+    GrDrawText(gs, 288, 100, "Right", 0);
+    GrSetTextStyle(gs, TS_UNDERLINE, TS_BOLD);
+    GrDrawText(gs, 72, 150, "Under", 0);
+    GrSetTextStyle(gs, 0, TS_UNDERLINE);
+    GrNewPage(gs, PEC_FORM_FEED);
+    GrDrawText(gs, 72, 72, "Page2", 0);
+    GrNewPage(gs, PEC_FORM_FEED);
+    CHECK(GrEndGString(gs) == GSET_NO_ERROR);
+    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+    FileClose(fh, FALSE);
+
+    FillJob(&jp, name, section, PPT_FILE, out);
+    strcpy(jp.JP_deviceName, device);
+    jp.JP_printMode = PM_TEXT_NLQ;
+    CHECK(pSpoolAddJob(&jp) != 0xffff);
+    CHECK(WaitIdle());
+    snprintf(rel, sizeof(rel), "DOCUMENT/%s", out);
+    b = (byte *) Get(rel, &n);
+    CHECK(b != NULL && n > 20);
+    if (!b)
+	return;
+    AsciiDecodeFile(b, n, &d);
+    printf("%s: %lu bytes, %d pages, %d lines, \"%s\", columns %d %d %d, "
+	   "bold %d, underline %d, tabs %d, resets %d\n", device,
+	   (unsigned long) n, d.pages, d.lines, d.text, d.col[0], d.col[1],
+	   d.col[2], d.bold, d.underline, d.tabs, d.resets);
+    CHECK(!d.bad && d.pages == 2);
+    CHECK(!strcmp(d.text, "Hello World Right|Under|"));
+    /* in 10 pitch columns: 72 pt less the document's margin, 216 pt
+     * further on */
+    CHECK(d.col[0] == 7 && d.col[2] - d.col[0] == 30);
+    /* the lines of 1/6": 100 to 150 pt is 50 / 12 lines, rounded */
+    CHECK(d.lines >= 8 && d.lines <= 20);
+    if (esc)
+	CHECK(d.bold == 1 && d.underline == 1 && d.tabs >= 3 &&
+	      d.resets == 2);		/* the job's start and end */
+    else
+	CHECK(!d.bold && !d.underline && !d.tabs);
+    free(b);
+}
+
 static void TestDeskjet(int out, int tiff)
 {
     TestPclRaster(out, tiff, "DeskJet File", "HP DeskJet 500", 1, 0, 0,
@@ -2396,6 +2553,10 @@ int main(int argc, char **argv)
 	"device = HP QuietJet (HP Mode)\r\n"
 	"[LBP File]\r\ndriver = lbp.geo\r\n"
 	"device = Canon LBP-8 Mark III\r\n"
+	"[Dumb File]\r\ndriver = dumb.geo\r\n"
+	"device = Text Only Printer (Unformatted)\r\n"
+	"[Diablo File]\r\ndriver = diablo.geo\r\n"
+	"device = Diablo 630\r\n"
 	"[LaserJet File]\r\ndriver = pcl4.geo\r\n"
 	"device = HP LaserJet III\r\n"
 	"[Epmx9 File]\r\ndriver = epmx9.geo\r\ndevice = Epson MX-80 Type III\r\n"
@@ -2507,6 +2668,8 @@ int main(int argc, char **argv)
     Put("SYSTEM/PRINTER/canonbjc.geo", canonbjc_geode, canonbjc_geode_size);
     Put("SYSTEM/PRINTER/quietjet.geo", quietjet_geode, quietjet_geode_size);
     Put("SYSTEM/PRINTER/lbp.geo", lbp_geode, lbp_geode_size);
+    Put("SYSTEM/PRINTER/dumb.geo", dumb_geode, dumb_geode_size);
+    Put("SYSTEM/PRINTER/diablo.geo", diablo_geode, diablo_geode_size);
     Put("SYSTEM/VIDEO", NULL, 0);	/* the bitmaps of the raster drivers */
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     Put("USERDATA", NULL, 0);		/* a font for the text modes */
@@ -2633,6 +2796,11 @@ int main(int argc, char **argv)
 			  pclRes);
 	else if (!strcmp(argv[2], "lbp"))
 	    TestCapsl(230);
+	else if (!strcmp(argv[2], "dumb"))
+	    TestAsciiText("Dumb File", "Text Only Printer (Unformatted)",
+			  "out240.prn", 0);
+	else if (!strcmp(argv[2], "diablo"))
+	    TestAsciiText("Diablo File", "Diablo 630", "out241.prn", 1);
 	else if (!strcmp(argv[2], "quietjet")) {
 	    static const int qjRes[3] = { 96, 192, 192 };
 	    TestPclRaster(220, 0, "QuietJet File", "HP QuietJet (HP Mode)",

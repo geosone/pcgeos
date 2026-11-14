@@ -1,0 +1,26 @@
+/*
+ * printcomDriver.h -- the Dumb ASCII driver's constants and control codes
+ * for the PrintCom files (the C form of dumbConstant.def; the codes are in
+ * dumbControlCodes.c).
+ */
+#ifndef PRINTCOMDRIVER_H
+#define PRINTCOMDRIVER_H
+
+#define PR_MARGIN_TRACTOR	18
+#define PR_MARGIN_LEFT	18
+#define PR_MARGIN_RIGHT	18
+#define PR_MARGIN_TOP	36
+#define PR_MARGIN_BOTTOM	36
+#define PR_MAX_LINE_FEED	99
+#define PR_X_CURSOR_INT	1
+#define PR_X_CURSOR_FRAC	43909
+#define PR_COND_X_CURSOR_INT	2
+#define PR_COND_X_CURSOR_FRAC	50972
+#define PR_INIT_WAIT_PERIOD	60
+
+extern const byte pr_codes_ResetPrinter[], pr_codes_InitPrinter[],
+    pr_codes_InitTextMode[], pr_codes_InitPaperLength[],
+    pr_codes_ASFControl[], pr_codes_EnableASF[], pr_codes_DisableASF[],
+    pr_codes_DefeatPaperOut[], pr_codes_Set10PitchRoman[];
+
+#endif /* PRINTCOMDRIVER_H */

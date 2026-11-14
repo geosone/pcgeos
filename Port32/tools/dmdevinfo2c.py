@@ -377,7 +377,7 @@ def parse_fonts(path):
     body = re.search(r'^printerFontInfo\s+segment\s+resource\s*$(.*?)'
                      r'^printerFontInfo\s+ends', text, re.M | re.S).group(1)
     lists, labels, pending, cur = [], {}, [], None
-    entries = []
+    entries, aliases = [], {}
     pos = 0
     for line in body.splitlines():
         w = line.split()
@@ -399,6 +399,14 @@ def parse_fonts(path):
         if w[0] == 'word' and cur is not None:
             cur = None
             continue
+        if len(w) >= 2 and w[1] == 'FontEntry':
+            # labels right before an entry name it too (fontDumbInfo's
+            # dumb_ROMAN12_PROP)
+            for p in pending:
+                aliases[p] = w[0]
+            pending = []
+    for l in lists:
+        l[1] = [aliases.get(n, n) for n in l[1]]
     for m in re.finditer(r'^(\w+)\s+FontEntry\s*<', body, re.M):
         t, _ = inner(body[m.end() - 1:])
         f = [x.strip() for x in t.split(',')]

@@ -221,6 +221,13 @@ def is_template(code):
     return allitems[-1] == '0' and "'#'" in allitems
 
 
+# codes whose asm count is one too big (diablo's pitches: ESC Q ESC 1fh
+# n is 5 bytes, counted 6; ESC P counted 3)
+SHORT_CODES = {'pr_codes_Set10PitchRoman', 'pr_codes_Set12PitchRoman',
+               'pr_codes_Set15PitchRoman', 'pr_codes_Set17PitchRoman',
+               'pr_codes_SetProportionalRoman'}
+
+
 def is_record_table(code):
     """a table of codes of a stride each, a count and its bytes padded
     with 0 (lbp's pr_codes_SetGraphics, indexed by the mode)"""
@@ -273,6 +280,13 @@ def check_count(code, consts):
                              % (code['name'], n - count))
             del code['items'][k:]
             return
+    if n < count and code['name'] in SHORT_CODES:
+        # the asm's count is too big, so it sent the next code's count
+        # byte as well: the count of the bytes there are
+        sys.stderr.write('ctlcodes2c: %s: count %d corrected to %d\n'
+                         % (code['name'], count, n))
+        code['items'][0][0][0] = str(n)
+        return
     if n != count:
         fail('%s: count %d, %d bytes' % (code['name'], count, n))
 

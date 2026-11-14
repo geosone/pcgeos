@@ -1113,6 +1113,18 @@ ink of any line; after a band the cursor moves down absolutely
 stride (`pr_codes_SetGraphics`, indexed by the mode), `dmdevinfo2c.py`
 constants with `shl` and `shr`.
 
+`dumb.geo` and `diablo.geo` (Driver/Printer/Ascii): text only, no
+graphics (`printcomNoGraphics.c`). Dumb sends the plain ASCII, the X by
+spaces, the Y by line feeds of 1/6" (`cursorPrLineFeedDumb6LPI.c`:
+1/48" units rounded to 8). The Diablo 630 adds the pitches of its wheels
+(`ESC Q ESC US n`, n the HMI + 1), bold, underline and italic as the
+second ribbon color, the X by an absolute tab (`ESC HT n`). Two asm
+bugs are not ported: the counts of the Diablo pitch codes are one too
+big (the asm sent the next code's count byte with them; `ctlcodes2c.py`
+corrects them, `SHORT_CODES`), and `PrSetPaperPath` sent the bin byte
+of the ASF without a code before it (now only after one). `dmdevinfo2c.py`
+takes a label right before a `FontEntry` as a second name of it.
+
 The control codes and the constants of these drivers come from the asm
 by `Port32/tools/ctlcodes2c.py` (`printcomDriver.h`,
 `*ControlCodes.c`, checked in). Labels without bytes of their own share
