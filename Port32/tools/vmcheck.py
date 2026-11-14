@@ -11,6 +11,10 @@ A file may start with a GEOS file header (256 bytes, signature
 relative to the data after it.  Checked: the VMFileHeader, the VM header,
 the lists of unassigned and assigned (free space) entries, the counts,
 and that used blocks and free space lie in the file without overlapping.
+Backup mode (vmemConstant.def): USED and DUP entries are the blocks
+(VMH_numUsed); a BACKUP entry names a DUP or ZOMBIE block with
+VMBF_HAS_BACKUP in VMBH_uid; ZOMBIE entries (freed blocks) are no
+blocks; all of them have their space in the file.
 Huge arrays (vmemHugeArray.asm): the chain link in LMBH_handle is
 HAD_data or HAB_next, the directory entries name the data blocks in
 chain order, with HAB_prev, HAB_dir and the element counts right; a
@@ -36,6 +40,8 @@ ENTRY = 12
 
 
 VMBF_LMEM = 0x01
+VMBF_HAS_BACKUP = 0x02
+VMBT_USED, VMBT_DUP, VMBT_BACKUP, VMBT_ZOMBIE = 0xff, 0xfd, 0xfb, 0xf9
 LMF_NO_HANDLES = 0x0080
 LMEM_EMPTY = 0xffff
 
@@ -332,7 +338,24 @@ def check(path):
     blocks, uids = {}, {}
     for h in handles:
         if used(h):
-            nused += 1
+            sig = hdr[h + 2]
+            if sig in (VMBT_USED, VMBT_DUP):
+                nused += 1
+            elif sig == VMBT_BACKUP:
+                b = u16(h + 4)
+                if (not valid(b) or hdr[b + 2] not in (VMBT_DUP, VMBT_ZOMBIE)
+                        or not hdr[b + 3] & VMBF_HAS_BACKUP):
+                    err("backup entry %#x of no block with a backup (%#x)"
+                        % (h, b))
+            elif sig != VMBT_ZOMBIE:
+                err("entry %#x has signature %#x" % (h, sig))
+            if sig not in (VMBT_USED, VMBT_DUP):
+                size, pos = u16(h + 6), u32(h + 8)
+                if h in seen:
+                    err("used entry %#x on a list" % h)
+                if size:
+                    spans.append((pos, size, "entry %#x" % h))
+                continue
             uids[h] = u16(h + 4)
             if u16(h + 6) and u32(h + 8) + u16(h + 6) <= len(data):
                 blocks[h] = data[u32(h + 8):u32(h + 8) + u16(h + 6)]

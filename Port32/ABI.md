@@ -2121,12 +2121,53 @@ of type `GFT_VM` (section 13c): the VM data follow the 256-byte
   `ECCheckHugeArray` checks nothing yet; `vmcheck.py` checks the
   structure in files.
 
+- **Backup mode** (`VMA_BACKUP`; `vmemBlkManip.c`, `vmemHigh.c` after
+  `VMBackupBlockIfNeeded`, `VMFree`, `VMSaveRevertCommon`, `VMSaveAs`):
+  the entries are those of DOS16.
+  - A USED block that is written or freed first gives its place in the
+    file to a new `VMBT_BACKUP` entry (`VMBH_uid`: the block). The
+    block becomes `VMBT_DUP` with `VMBF_HAS_BACKUP`.
+  - A block allocated in backup mode is a DUP block without a backup.
+  - A freed block stays as a `VMBT_ZOMBIE` until the next save or
+    revert, unless it is a DUP block without a backup or a place.
+  - BACKUP and ZOMBIE entries hold space (`VMH_usedSize`) but are not
+    blocks (`VMH_numUsed`).
+  - `VMSave` makes DUP blocks USED, frees the backups and zombies, and
+    writes the dirty blocks in place (`VMUpdateNoBackup`).
+  - `VMRevert` gives each backup's place back to its block and drops
+    that block's memory. It frees the blocks that are new since the
+    save (and the DB map if it is one of them), drops the dirty memory
+    of USED blocks, and writes the header.
+  - A block whose handle is preserved (`VMPreserveBlocksHandle`) keeps
+    its memory handle, discarded, and is read into it again when
+    locked.
+  - `VMSaveAs` opens the new file, copies the file header's attributes
+    (not the template or sharing flags), and gives it the block table
+    with the same handles. The blocks in memory move with their handles
+    (`VMTransfer`); the others are copied as they are in the file. It
+    writes the new file, then reverts and closes the old one. If
+    writing fails, the memory goes back and the new file is deleted.
+  - `VMDiscardDirtyBlocks` drops what was not written. A file not in
+    backup mode reads its header again; a backup file restores its
+    zombies.
+- **Exclusive access** (`VMGrabExclusive`, `VMReleaseExclusive`): a
+  lock of the file's handle for one thread, counted, with the timeout
+  in 1/10 s (`VMSERV_TIMEOUT` gives the owner's operation). The last
+  release updates a changed file.
+- **Update counter**: `VMFH_updateCounter` goes up with each update
+  (`VMFH_updateType` `VMO_READ`). `VMCheckForModifications` and
+  `VMGrabExclusive` (`VMSERV_CHANGES`) compare it with the value this
+  handle last read or wrote.
+- `VMGetHeaderInfo`: used blocks, the header's size, free entries.
+  `VMSetDirtyLimit` and `VMEnforceHandleLimits` are kept but not
+  enforced.
+
 Not yet:
 
-- backup mode (`VMSave`, `VMRevert`, `VMSaveAs`);
-- sharing between processes, `VMGrabExclusive`;
+- sharing with other GEOS systems (`VMA_SHARED_MULTIPLE`: the record
+  lock and rereading a file another one changed);
 - discarding clean blocks;
-- DB items, compression.
+- compression.
 
 ## 13d. Object blocks in files (`Object/objectReloc.c`, P4)
 
@@ -3479,8 +3520,33 @@ greyscale text, no deleting of fonts, no DBCS.
 rounded values as integers, the others as WBFixed in the high 24 bits
 (as `GrFontMetrics`); 0 if the driver fails.
 
-**Not yet:** the bars of rotated text, right to left text, hatch
-patterns in a text field.
+**Text bounds** (`GrGetTextBounds`, `graphicsTextObscure.c`): the text
+is laid out as for its width from the baseline, and each character's
+box comes from the font driver (`DR_FONT_CHAR_METRICS`). A bitmap or
+printer font has no metrics; its bounds are the font's height by the
+text's width. The bounds are rounded away from the text. TRUE (the C
+stub's error) without a font driver. `GrGetCharInfo` gives a
+character's `CharTableFlags`, and `CI_NO_DATA` for one outside the
+font's range.
+
+**Right to left** (`GrSetTextDirection`, `SIMPLE_RTL_SUPPORT` as the
+DOS16 kernel is built; `GS_textDirection`, `GR_SET_TEXT_DIRECTION`
+(0x8f) in graphics strings): the characters are drawn from the last to
+the first, so that the text ends at the position, and the pen moves
+left by the text's width. The bars are not limited. The asm left the
+pen at the position when the transformation was simple, so the next
+text drew over this one; the C kernel moves it left in both cases.
+
+**Other routines:** `GrGetInfo` (the private data, the window, and the
+pen position, which the asm's table lacked), `GrGetGStringHandle`,
+`GrSetVMFile` (the VM file of a bitmap window or a VM graphics string,
+after `VMSaveAs`), and `GrGetExclusive`/`GrGrabExclusive`/
+`GrReleaseExclusive` on the video driver's exclusive (§7.5; 0 is the
+default video driver). The release gives the device bounds of what was
+not drawn, or all 0xffff.
+
+**Not yet:** the bars of rotated text, right to left text in paths,
+hatch patterns in a text field.
 
 **Tests.** ctest `kernel.draw` boots with `FontData/Berkeley.fnt` in
 `USERDATA/FONT`. It checks:

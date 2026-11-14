@@ -132,6 +132,9 @@ word VMWriteBlock(KVMFile *f, VMBlockHandle h);		/* error */
  * bytes, in place if they fit */
 word VMWriteData(KVMFile *f, VMBlockHandle h, const void *data, word size);
 void VMFreeBlockLow(KVMFile *f, VMBlockHandle h);
+void VMFreeEntry(KVMFile *f, VMBlockHandle h);	/* numUsed: caller's */
+void VMDiscardMem(KVMFile *f, VMBlockHandle h);
+VMBlockHandle VMBackupBlock(KVMFile *f, VMBlockHandle h);
 
 /* vmemHeader.c */
 word VMCreateHeader(KVMFile *f);			/* error */

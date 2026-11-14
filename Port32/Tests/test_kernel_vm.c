@@ -11,8 +11,10 @@
  * (vm_reference.h), LMem blocks (the DOS16 layout in the file) and the
  * routine of VMSetReloc; huge arrays (fixed and variable size elements,
  * inserting, deleting, replacing, resizing, Next/Prev, Expand/Contract,
- * Enum, copied and compared as chains, written and read again).  A.VM,
- * B.VM, LM.VM, HA.VM and REF.VM stay for vmcheck.py (ctest
+ * Enum, copied and compared as chains, written and read again); backup
+ * mode (VMSave, VMRevert, VMSaveAs, zombies, preserved handles),
+ * VMDiscardDirtyBlocks, VMGrabExclusive.  A.VM, B.VM, LM.VM, HA.VM,
+ * BK.VM, BK2.VM and REF.VM stay for vmcheck.py (ctest
  * kernel.vm.format).
  */
 #include "kernelC.h"
@@ -712,6 +714,129 @@ int main(int argc, char **argv)
 	lh = VMLock(vm, b1, &mh);
 	ch[0] = LMemAlloc(mh, 77);
 	VMUnlock(mh);
+	CHECK(VMClose(vm, FALSE) == 0);
+    }
+
+    /* backup mode: what was written after VMSave keeps the saved version
+     * (BACKUP entries), freed blocks stay as zombies; VMRevert goes back,
+     * VMSave keeps the new one; VMSaveAs writes the current version to a
+     * new file and reverts the old one.  BK.VM (with a backup and a
+     * zombie left) and BK2.VM stay for vmcheck.py. */
+    {
+	VMBlockHandle k1, k2, k3, k4;
+	VMFileHandle nv;
+	MemHandle mh, pm;
+	VMHeaderInfoStruct hi;
+	VMOperation op = VMO_READ;
+
+	vm = VMOpen("BK.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	VMSetAttributes(vm, VMA_BACKUP, 0);
+	k1 = VMAlloc(vm, 100, 1);
+	k2 = VMAlloc(vm, 200, 2);
+	k3 = VMAlloc(vm, 50, 3);
+	Fill(vm, k1, 100, 1);
+	Fill(vm, k2, 200, 2);
+	Fill(vm, k3, 50, 3);
+	CHECK(!VMSave(vm));
+	CHECK(!VMCheckForModifications(vm));
+	VMGetHeaderInfo(vm, &hi);
+	CHECK(hi.usedBlocks == 4);
+
+	/* changed, freed, new, and dirty: all back to the save */
+	Fill(vm, k1, 100, 11);
+	CHECK(VMUpdate(vm) == 0);
+	VMFree(vm, k2);
+	CHECK(!VMInfo(vm, k2, NULL));
+	k4 = VMAlloc(vm, 30, 4);
+	Fill(vm, k4, 30, 4);
+	CHECK(VMUpdate(vm) == 0);
+	Fill(vm, k3, 50, 13);
+	VMGetHeaderInfo(vm, &hi);
+	CHECK(hi.usedBlocks == 4);
+	VMRevert(vm);
+	CHECK(Same(vm, k1, 100, 1) && Same(vm, k2, 200, 2) &&
+	      Same(vm, k3, 50, 3) && !VMInfo(vm, k4, NULL));
+	VMGetHeaderInfo(vm, &hi);
+	CHECK(hi.usedBlocks == 4);
+
+	/* saved: the new version stays, also after closing */
+	Fill(vm, k1, 100, 21);
+	CHECK(VMUpdate(vm) == 0);
+	VMFree(vm, k2);
+	k4 = VMAlloc(vm, 30, 4);
+	Fill(vm, k4, 30, 4);
+	CHECK(!VMSave(vm));
+	VMRevert(vm);
+	CHECK(Same(vm, k1, 100, 21) && !VMInfo(vm, k2, NULL) &&
+	      Same(vm, k4, 30, 4));
+	CHECK(VMClose(vm, FALSE) == 0);
+	vm = VMOpen("BK.VM", 0, VMO_OPEN, 0);
+	CHECK(vm && Same(vm, k1, 100, 21) && !VMInfo(vm, k2, NULL) &&
+	      Same(vm, k3, 50, 3) && Same(vm, k4, 30, 4));
+	CHECK(VMGetAttributes(vm) & VMA_BACKUP);
+
+	/* a preserved handle stays through a revert, with the old data */
+	VMPreserveBlocksHandle(vm, k1);
+	pm = VMVMBlockToMemBlock(vm, k1);
+	Fill(vm, k1, 100, 41);
+	CHECK(VMUpdate(vm) == 0);
+	VMRevert(vm);
+	CHECK(VMVMBlockToMemBlock(vm, k1) == pm && Same(vm, k1, 100, 21));
+
+	/* exclusive access, counted; an update counts as a change */
+	CHECK(VMGrabExclusive(vm, 0, VMO_WRITE, &op) == VMSERV_NO_CHANGES);
+	CHECK(VMGrabExclusive(vm, 10, VMO_WRITE, &op) == VMSERV_NO_CHANGES);
+	Fill(vm, k3, 50, 23);
+	VMReleaseExclusive(vm);
+	CHECK(VMGetDirtyState(vm) != 0);
+	VMReleaseExclusive(vm);		/* updates */
+	CHECK(VMGetDirtyState(vm) == 0 && !VMCheckForModifications(vm));
+	VMRevert(vm);
+	CHECK(Same(vm, k3, 50, 3));
+
+	/* save as: the current version to BK2.VM, BK.VM back to its save */
+	Fill(vm, k1, 100, 31);
+	CHECK(VMUpdate(vm) == 0);
+	Fill(vm, k3, 50, 33);
+	VMLock(vm, k4, &mh);
+	VMUnlock(mh);
+	nv = VMSaveAs(vm, "BK2.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	CHECK(nv != 0 && ThreadGetError() == VM_CREATE_OK);
+	CHECK(VMVMBlockToMemBlock(nv, k4) == mh);	/* moved */
+	CHECK(Same(nv, k1, 100, 31) && Same(nv, k3, 50, 33) &&
+	      Same(nv, k4, 30, 4) && !VMInfo(nv, k2, NULL));
+	CHECK(VMGetAttributes(nv) & VMA_BACKUP);
+	CHECK(VMClose(nv, FALSE) == 0);
+	nv = VMOpen("BK2.VM", 0, VMO_OPEN, 0);
+	CHECK(nv && Same(nv, k1, 100, 31) && Same(nv, k3, 50, 33));
+	CHECK(VMClose(nv, FALSE) == 0);
+	vm = VMOpen("BK.VM", 0, VMO_OPEN, 0);
+	CHECK(vm && Same(vm, k1, 100, 21) && Same(vm, k3, 50, 3));
+
+	/* dirty blocks discarded: backup mode and not */
+	Fill(vm, k3, 50, 43);
+	CHECK(VMDiscardDirtyBlocks(vm) == 0);
+	CHECK(Same(vm, k3, 50, 3));
+	VMSetAttributes(vm, 0, VMA_BACKUP);
+	CHECK(VMUpdate(vm) == 0);
+	Fill(vm, k4, 30, 44);
+	k2 = VMAlloc(vm, 10, 2);
+	CHECK(VMDiscardDirtyBlocks(vm) == 0);
+	CHECK(Same(vm, k4, 30, 4) && !VMInfo(vm, k2, NULL));
+	CHECK(VMDiscardDirtyBlocks(vm) == VM_UPDATE_NOTHING_DIRTY);
+
+	/* left with a backup and a zombie */
+	VMSetAttributes(vm, VMA_BACKUP, 0);
+	CHECK(!VMSave(vm));
+	Fill(vm, k1, 100, 51);
+	VMFree(vm, k3);
+	CHECK(VMClose(vm, FALSE) == 0);
+	vm = VMOpen("BK.VM", 0, VMO_OPEN, 0);
+	CHECK(vm && Same(vm, k1, 100, 51) && !VMInfo(vm, k3, NULL));
+	VMRevert(vm);
+	CHECK(Same(vm, k1, 100, 21) && Same(vm, k3, 50, 3));
+	Fill(vm, k1, 100, 61);
+	VMFree(vm, k3);
 	CHECK(VMClose(vm, FALSE) == 0);
     }
 

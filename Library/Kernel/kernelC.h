@@ -814,6 +814,13 @@ typedef struct KVMFile {
     void	(*VF_reloc)(VMFileHandle file, VMBlockHandle block,
 			    MemHandle mh, void *data, word type);
     ThreadHandle VF_execThread;	/* VMSetExecThread: runs object blocks */
+    word	VF_updateCount;	/* VMFH_updateCounter as last seen */
+    SemaphoreHandle VF_exclSem;	/* VMGrabExclusive (0 until used) */
+    ThreadHandle VF_exclOwner;
+    word	VF_exclCount;
+    word	VF_exclOp;	/* the owner's VMOperation */
+    word	VF_dirtyLimit;	/* VMSetDirtyLimit (not enforced) */
+    Boolean	VF_noBackup;	/* VMUpdateNoBackup: written in place */
 } KVMFile;
 
 void VMFreeHandle(Handle vm);	/* vmemHigh.c: close for a freed geode */

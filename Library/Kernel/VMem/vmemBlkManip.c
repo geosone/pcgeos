@@ -14,7 +14,15 @@
  * the end of the file.  Its size in the file is rounded up to 16 bytes,
  * as the 16-bit kernel wrote whole paragraphs.
  *
- * Not yet: backup mode (VMBT_DUP/BACKUP/ZOMBIE), compression, compaction.
+ * Backup mode (VMA_BACKUP, as DOS16 kept it in the file): a USED block
+ * written or freed first gives its place in the file to a new BACKUP
+ * entry (VMBH_uid: the block) and becomes a DUP block with
+ * VMBF_HAS_BACKUP; a block allocated in backup mode is a DUP block
+ * without one.  A freed block stays as a ZOMBIE until VMSave or
+ * VMRevert (vmemHigh.c) settles it.  BACKUP and ZOMBIE entries are in
+ * use (their space counts) but are no blocks (VMH_numUsed).
+ *
+ * Not yet: compression, compaction.
  */
 #include "vmemInt.h"
 #include <stdlib.h>
@@ -130,7 +138,11 @@ VMBlockHandle VMGetUnassignedBlk(KVMFile *f)
 void VMMarkBlkUsed(KVMFile *f, VMBlockHandle h)
 {
     memset(f->VF_hdr + h, 0, VMBH_SIZE);
-    VHSet8(f, h + VMBH_SIG, VMBT_USED);
+    /* in backup mode a new block is a duplicate: nothing to go back to */
+    VHSet8(f, h + VMBH_SIG,
+	   (byte) (h != VM_HEADER_BLOCK &&
+		   (f->VF_hdr[VMH_ATTRIBUTES] & VMA_BACKUP) ? VMBT_DUP
+							    : VMBT_USED));
     VHSet16(f, VMH_NUM_USED, (word) (VHGet16(f, VMH_NUM_USED) + 1));
 }
 
@@ -360,7 +372,7 @@ word VMWriteData(KVMFile *f, VMBlockHandle h, const void *data, word size)
 word VMWriteBlock(KVMFile *f, VMBlockHandle h)
 {
     MemHandle mh = f->VF_mem[VM_INDEX(h)];
-    byte flags = f->VF_hdr[h + VMBH_FLAGS] & (byte) ~VMBF_LMEM;
+    byte lmem = 0;
     byte *p, *img = NULL;
     word e, size;
 
@@ -383,9 +395,16 @@ word VMWriteBlock(KVMFile *f, VMBlockHandle h)
 	}
 	size = LMemToDOS16(mh, img, gapAt, gapLen);
 	VMHugeArrayToDOS16(VHGet16(f, h + VMBH_UID), img);
-	flags |= VMBF_LMEM;
+	lmem = VMBF_LMEM;
     }
-    VHSet8(f, h + VMBH_FLAGS, flags);
+    /* VMDoWriteBlk: in backup mode the last saved version stays (with
+     * the flags of its data) */
+    if ((f->VF_hdr[VMH_ATTRIBUTES] & VMA_BACKUP) && !f->VF_noBackup &&
+	f->VF_hdr[h + VMBH_SIG] == VMBT_USED &&
+	VHGet16(f, h + VMBH_FILE_SIZE))
+	VMBackupBlock(f, h);
+    VHSet8(f, h + VMBH_FLAGS,
+	   (byte) ((f->VF_hdr[h + VMBH_FLAGS] & ~VMBF_LMEM) | lmem));
     e = VMWriteData(f, h, img ? img : p, size);
     free(img);
     MemUnlock(mh);
@@ -395,7 +414,28 @@ word VMWriteBlock(KVMFile *f, VMBlockHandle h)
     return e;
 }
 
-void VMFreeBlockLow(KVMFile *f, VMBlockHandle h)
+/* VMDiscardMemBlk: the memory of an entry goes; a block whose handle is
+ * preserved (VMBF_PRESERVE_HANDLE) keeps it, discarded, and is read
+ * into it again when locked */
+void VMDiscardMem(KVMFile *f, VMBlockHandle h)
+{
+    word i = (word) VM_INDEX(h);
+    MemHandle mh = f->VF_mem[i];
+
+    f->VF_dirty[i] = FALSE;
+    if (!mh)
+	return;
+    if (f->VF_hdr[h + VMBH_FLAGS] & VMBF_PRESERVE_HANDLE)
+	(void) MemReAlloc(mh, 0, 0);
+    else {
+	MemFree(mh);
+	f->VF_mem[i] = 0;
+    }
+}
+
+/* VMFreeBlkHandle: an entry in use (a block, a BACKUP or a ZOMBIE)
+ * freed with its space and memory; VMH_numUsed is the caller's */
+void VMFreeEntry(KVMFile *f, VMBlockHandle h)
 {
     word i = (word) VM_INDEX(h);
     word size = VHGet16(f, h + VMBH_FILE_SIZE);
@@ -409,6 +449,31 @@ void VMFreeBlockLow(KVMFile *f, VMBlockHandle h)
 	VMReleaseSpace(f, VHGet32(f, h + VMBH_FILE_POS), size);
 	VHSet32(f, VMH_USED_SIZE, VHGet32(f, VMH_USED_SIZE) - size);
     }
-    VHSet16(f, VMH_NUM_USED, (word) (VHGet16(f, VMH_NUM_USED) - 1));
     VMUnassignBlk(f, h);
+}
+
+void VMFreeBlockLow(KVMFile *f, VMBlockHandle h)
+{
+    VMFreeEntry(f, h);
+    VHSet16(f, VMH_NUM_USED, (word) (VHGet16(f, VMH_NUM_USED) - 1));
+}
+
+/* VMBackupBlockIfNeeded in backup mode: a new BACKUP entry takes the
+ * place in the file of USED block h (VMDuplicateHandle: a copy of its
+ * entry, VMBH_uid the block), which becomes a DUP block with
+ * VMBF_HAS_BACKUP and no space */
+VMBlockHandle VMBackupBlock(KVMFile *f, VMBlockHandle h)
+{
+    VMBlockHandle b = VMGetUnassignedBlk(f);
+
+    memcpy(f->VF_hdr + b, f->VF_hdr + h, VMBH_SIZE);
+    VHSet16(f, b + VMBH_MEM_HANDLE, 0);
+    VHSet8(f, b + VMBH_SIG, VMBT_BACKUP);
+    VHSet16(f, b + VMBH_UID, h);
+    VHSet16(f, h + VMBH_FILE_SIZE, 0);
+    VHSet32(f, h + VMBH_FILE_POS, 0);
+    VHSet8(f, h + VMBH_SIG, VMBT_DUP);
+    VHSet8(f, h + VMBH_FLAGS,
+	   (byte) (f->VF_hdr[h + VMBH_FLAGS] | VMBF_HAS_BACKUP));
+    return b;
 }
