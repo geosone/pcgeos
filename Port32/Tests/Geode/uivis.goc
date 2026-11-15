@@ -16,10 +16,16 @@
  *
  * UVNode has a basic and a hierarchical grab for the Flow routines
  * (step 10), UVLeaf1 and UVLeaf2 count the messages they get from it.
+ *
+ * UVContent is a VisContentClass with the gadgets UVCA and UVCB, which
+ * record what they get; UVView stands in for its view (steps 11 to 14).
+ * Its window is opened here, on the root.
  */
 @include <stdapp.goh>
 @include <Objects/vCompC.goh>
+@include <Objects/vCntC.goh>
 #include <string.h>
+#include <chunkarr.h>
 
 /* visC.def (uiInt.goh has them for the library) */
 #define VOF_PATH_BITS		(VOF_GEO_UPDATE_PATH | VOF_WINDOW_UPDATE_PATH | \
@@ -27,6 +33,19 @@
 #define VOF_INVALID_BITS	(VOF_GEOMETRY_INVALID | VOF_WINDOW_INVALID | \
 				 VOF_IMAGE_INVALID)
 #define VOF_UPDATING		VOF_EC_UPDATING
+
+/* what a gadget of the content got */
+typedef struct {
+    word	UG_msg;			/* the last mouse message */
+    sword	UG_x, UG_y;
+    word	UG_state;
+    word	UG_selects, UG_ptrs, UG_others, UG_pre, UG_post;
+    word	UG_firstPtrX;
+    word	UG_mouse[2], UG_kbd[2], UG_focus[2];	/* gained, lost */
+    word	UG_chars, UG_pings;
+    word	UG_large;		/* large mouse messages */
+    sdword	UG_largeX, UG_largeY;
+} UVGad;
 
 typedef struct {
     WindowHandle	UVS_root;	/* from the test */
@@ -41,6 +60,15 @@ typedef struct {
     word		UVS_failLines[8];
     /* by UVNI_which: gained, lost, gained system, lost system */
     word		UVS_flow[3][4];
+    word		UVS_cdraws[2];	/* the content's gadgets drawn */
+    WindowHandle	UVS_cwin;	/* the content's ("the view's") window */
+    /* (the test does not look at what follows) */
+    UVGad		UVS_gad[2];
+    word		UVS_winChanged, UVS_unwantedMouse, UVS_unwantedKbd;
+    /* what the view was told */
+    sdword		UVS_doc[4];	/* bottom, right, top, left */
+    word		UVS_docSets, UVS_targetInfos;
+    ViewTargetInfo	UVS_targetInfo;
 } UVState;
 
 UVState uvState;
@@ -100,7 +128,180 @@ UVState uvState;
     uvState.UVS_flow[pself->UVNI_which][message - MSG_UVN_GAINED]++;
 }
 
+/* the content: counts what it tells itself */
+@class UVContentClass, VisContentClass;
+@endc
+@classdecl UVContentClass;
+
+@method UVContentClass, MSG_VIS_CONTENT_NOTIFY_ACTIVE_MOUSE_GRAB_WIN_CHANGED
+{
+    uvState.UVS_winChanged++;
+}
+
+@method UVContentClass, MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT
+{
+    (void) mouseGrab;
+    (void) inputState;
+    uvState.UVS_unwantedMouse++;
+}
+
+@method UVContentClass, MSG_VIS_CONTENT_UNWANTED_KBD_EVENT
+{
+    (void) character;
+    (void) flags;
+    (void) state;
+    uvState.UVS_unwantedKbd++;
+}
+
+/* a gadget in the content */
+@class UVGadClass, VisClass;
+    @message void MSG_UVG_PING();
+    /* what it returns for a pre-passive button; whether it lets go of
+     * the mouse at the next press and wants that replayed */
+    @message void MSG_UVG_SET(word preRet, Boolean replay);
+    @instance Color UVGI_color = C_BLACK;
+    @instance word UVGI_which = 0;
+    @instance word UVGI_preRet = 0;
+    @instance Boolean UVGI_replay = FALSE;
+@endc
+@classdecl UVGadClass;
+
+@method UVGadClass, MSG_UVG_PING
+{
+    uvState.UVS_gad[pself->UVGI_which].UG_pings++;
+}
+
+@method UVGadClass, MSG_UVG_SET
+{
+    pself->UVGI_preRet = preRet;
+    pself->UVGI_replay = replay;
+}
+
+@method UVGadClass, MSG_VIS_DRAW
+{
+    (void) drawFlags;
+    GrSetAreaColor(gstate, CF_INDEX, pself->UVGI_color, 0, 0);
+    GrFillRect(gstate, pself->VI_bounds.R_left, pself->VI_bounds.R_top,
+	       pself->VI_bounds.R_right, pself->VI_bounds.R_bottom);
+    uvState.UVS_cdraws[pself->UVGI_which]++;
+}
+
+@method UVGadClass, MSG_META_PTR, MSG_META_START_SELECT, MSG_META_END_OTHER,
+		    MSG_META_DRAG_OTHER, MSG_META_PRE_PASSIVE_BUTTON,
+		    MSG_META_POST_PASSIVE_BUTTON
+{
+    UVGad *g = &uvState.UVS_gad[pself->UVGI_which];
+    word ret = MRF_PROCESSED;
+
+    if (message == MSG_META_PRE_PASSIVE_BUTTON) {
+	g->UG_pre++;
+	retVal->flags = pself->UVGI_preRet;
+	return;
+    }
+    if (message == MSG_META_POST_PASSIVE_BUTTON) {
+	g->UG_post++;
+	retVal->flags = 0;
+	return;
+    }
+    g->UG_msg = message;
+    g->UG_x = xPosition;
+    g->UG_y = yPosition;
+    g->UG_state = inputState;
+    if (message == MSG_META_PTR) {
+	if (!g->UG_ptrs++)
+	    g->UG_firstPtrX = xPosition;
+    } else if (message == MSG_META_START_SELECT) {
+	g->UG_selects++;
+	if (pself->UVGI_replay) {
+	    pself->UVGI_replay = FALSE;
+	    @call oself::MSG_VIS_RELEASE_MOUSE();
+	    ret |= MRF_REPLAY;
+	}
+    } else
+	g->UG_others++;
+    retVal->flags = ret;
+}
+
+@method UVGadClass, MSG_META_LARGE_PTR, MSG_META_LARGE_START_SELECT
+{
+    UVGad *g = &uvState.UVS_gad[pself->UVGI_which];
+
+    g->UG_msg = message;
+    g->UG_large++;
+    g->UG_largeX = largeMouseDataStruct->LMD_location.PDF_x.DWF_int;
+    g->UG_largeY = largeMouseDataStruct->LMD_location.PDF_y.DWF_int;
+    g->UG_state = largeMouseDataStruct->LMD_buttonInfo |
+		  (largeMouseDataStruct->LMD_uiFunctionsActive << 8);
+    retVal->flags = MRF_PROCESSED;
+}
+
+@method UVGadClass, MSG_META_GAINED_MOUSE_EXCL, MSG_META_LOST_MOUSE_EXCL
+{
+    uvState.UVS_gad[pself->UVGI_which]
+	.UG_mouse[message - MSG_META_GAINED_MOUSE_EXCL]++;
+}
+
+@method UVGadClass, MSG_META_GAINED_KBD_EXCL, MSG_META_LOST_KBD_EXCL
+{
+    uvState.UVS_gad[pself->UVGI_which]
+	.UG_kbd[message - MSG_META_GAINED_KBD_EXCL]++;
+}
+
+@method UVGadClass, MSG_META_GAINED_FOCUS_EXCL, MSG_META_LOST_FOCUS_EXCL
+{
+    uvState.UVS_gad[pself->UVGI_which]
+	.UG_focus[message - MSG_META_GAINED_FOCUS_EXCL]++;
+}
+
+@method UVGadClass, MSG_META_KBD_CHAR
+{
+    (void) character;
+    (void) flags;
+    (void) state;
+    uvState.UVS_gad[pself->UVGI_which].UG_chars++;
+}
+
+/* stands in for the content's GenView: keeps what it is told */
+@class UVViewClass, MetaClass;
+    @uses GenViewClass;		/* handles some of its messages */
+@endc
+@classdecl UVViewClass;
+
+@method UVViewClass, MSG_GEN_VIEW_SET_DOC_BOUNDS
+{
+    uvState.UVS_doc[0] = bottom;
+    uvState.UVS_doc[1] = right;
+    uvState.UVS_doc[2] = top;
+    uvState.UVS_doc[3] = left;
+    uvState.UVS_docSets++;
+}
+
+@method UVViewClass, MSG_GEN_VIEW_UPDATE_CONTENT_TARGET_INFO
+{
+    uvState.UVS_targetInfo = *targetInfo;
+    uvState.UVS_targetInfos++;
+}
+
 @start UVObjects;
+@object UVContentClass UVContent = {
+    VCI_comp = @UVCA, @UVCB;
+    /* as MSG_META_INITIALIZE sets them */
+    VCI_geoAttrs = VCGA_ORIENT_CHILDREN_VERTICALLY;
+    VCI_geoDimensionAttrs = VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+			    VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+}
+@object UVGadClass UVCA = {
+    VI_bounds = { 0, 0, 50, 40 };
+    UVGI_color = C_GREEN;
+    UVGI_which = 0;
+}
+@object UVGadClass UVCB = {
+    VI_bounds = { 0, 0, 30, 20 };
+    UVGI_color = C_CYAN;
+    UVGI_which = 1;
+}
+@object UVViewClass UVView = {
+}
 @object UVWinClass UVTop = {
     VI_bounds = { 10, 10, 210, 110 };
     VI_typeFlags = VTF_IS_COMPOSITE | VTF_IS_WINDOW | VTF_IS_WIN_GROUP;
@@ -302,8 +503,56 @@ static Boolean Got(word which, word g, word l, word gs, word ls)
     return f[0] == g && f[1] == l && f[2] == gs && f[3] == ls;
 }
 
+/* a copy of the content's instance data */
+static VisContentInstance Content(void)
+{
+    VisContentInstance c;
+
+    ObjLockObjBlock(OptrToHandle(@UVContent));
+    c = *(VisContentInstance *) ObjDerefVis(@UVContent);
+    MemUnlock(OptrToHandle(@UVContent));
+    return c;
+}
+
+static Boolean ActiveGrab(optr o, WindowHandle w)
+{
+    VisContentInstance c = Content();
+
+    return c.VCNI_activeMouseGrab.VMG_object == o &&
+	   c.VCNI_activeMouseGrab.VMG_gWin == w;
+}
+
+static Boolean ImpliedGrab(optr o, WindowHandle w)
+{
+    VisContentInstance c = Content();
+
+    return c.VCNI_impliedMouseGrab.VMG_object == o &&
+	   c.VCNI_impliedMouseGrab.VMG_gWin == w;
+}
+
+/* the grabs of a passive list */
+static word Passive(ChunkHandle list)
+{
+    word n;
+
+    if (!list)
+	return 0;
+    ObjLockObjBlock(OptrToHandle(@UVContent));
+    n = ChunkArrayGetCount(ConstructOptr(OptrToHandle(@UVContent), list));
+    MemUnlock(OptrToHandle(@UVContent));
+    return n;
+}
+
+static Boolean Doc(sdword b, sdword r, sdword t, sdword l)
+{
+    return uvState.UVS_doc[0] == b && uvState.UVS_doc[1] == r &&
+	   uvState.UVS_doc[2] == t && uvState.UVS_doc[3] == l;
+}
+
 @method UVProcessClass, MSG_UV_STEP
 {
+    UVGad *ga = &uvState.UVS_gad[0], *gb = &uvState.UVS_gad[1];
+
     switch (step) {
     case 1: {
 	/* the tree, then opened by making the win group visible */
@@ -610,6 +859,312 @@ static Boolean Got(word which, word g, word l, word gs, word ls)
 	outer = @record UVNodeClass::MSG_META_SEND_CLASSED_EVENT(ev, TO_SELF);
 	FlowDestroyMessage(outer);
 	UVCHECK(Got(2, 0, 1, 0, 0) && uvState.UVS_pings == 1);
+	break;
+    }
+    case 11: {
+	/* a content made at run time: what MSG_META_INITIALIZE sets */
+	optr dyn = ObjInstantiate(OptrToHandle(@UVContent),
+				  &VisContentClass);
+	GeoAndDimensionAttrs a;
+	WindowHandle win;
+
+	UVCHECK(@call dyn::MSG_VIS_GET_TYPE_FLAGS() ==
+		(VTF_IS_COMPOSITE | VTF_IS_WINDOW | VTF_IS_WIN_GROUP |
+		 VTF_IS_CONTENT | VTF_IS_INPUT_NODE));
+	a = @call dyn::MSG_VIS_COMP_GET_GEO_ATTRS();
+	UVCHECK(a.GADA_geoAttrs == VCGA_ORIENT_CHILDREN_VERTICALLY &&
+		a.GADA_geoDimensionAttrs ==
+		(VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+		 VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT));
+	UVCHECK(@call dyn::MSG_VIS_CONTENT_GET_ATTRS() == 0);
+
+	/* the view, told who the content is (no target yet) */
+	@call UVContent::MSG_META_CONTENT_SET_VIEW(@UVView);
+	UVCHECK(uvState.UVS_targetInfos == 1 &&
+		uvState.UVS_targetInfo.VTI_content.TR_object == @UVContent &&
+		uvState.UVS_targetInfo.VTI_content.TR_class ==
+		&UVContentClass &&
+		!uvState.UVS_targetInfo.VTI_target.TR_object &&
+		!uvState.UVS_targetInfo.VTI_target.TR_class);
+
+	/* its window opened: the size known, nothing shown yet */
+	win = WinOpen(uvState.UVS_root, @UVContent, @UVContent, CMT_CLOSEST,
+		      C_WHITE, 0, 0, 0, 0, 0, NULL, 300, 100, 499, 249);
+	uvState.UVS_cwin = win;
+	@call UVContent::MSG_META_CONTENT_VIEW_WIN_OPENED(200, 150, win);
+	UVCHECK(@call UVContent::MSG_VIS_CONTENT_GET_WIN_SIZE() ==
+		MAKE_SIZE_DWORD(200, 150));
+	UVCHECK(!(Attrs(@UVContent) & VA_REALIZED) &&
+		Content().VCNI_window == win && !Content().VCI_window);
+	/* not linked to the view yet: no update, even "now" */
+	UVCHECK(!@call UVContent::MSG_VIS_VUP_UPDATE_WIN_GROUP(VUM_NOW) &&
+		Opt(@UVContent) & VOF_GEOMETRY_INVALID);
+
+	/* the view opens: linked up to it, the geometry done (the
+	 * gadgets one above the other), realized in the view's window,
+	 * the view told the document's bounds */
+	@call UVContent::MSG_META_CONTENT_VIEW_OPENING(@UVView);
+	UVCHECK(@call UVContent::MSG_VIS_FIND_PARENT() == @UVView);
+	UVCHECK(Attrs(@UVContent) & VA_REALIZED && Attrs(@UVCA) & VA_REALIZED);
+	UVCHECK(Content().VCI_window == win);
+	UVCHECK(At(@UVContent, 0, 0, 50, 63));
+	UVCHECK(At(@UVCA, 0, 0, 50, 40) && At(@UVCB, 0, 43, 30, 63));
+	UVCHECK(uvState.UVS_docSets && Doc(63, 50, 0, 0));
+	UVCHECK(ImpliedGrab(@UVContent, win));
+	UVCHECK(@call UVCA::MSG_VIS_QUERY_WINDOW() == win);
+	break;
+    }
+    case 12: {
+	MouseReturnParams r;
+	WindowHandle win = uvState.UVS_cwin;
+
+	/* as wide and high as the view */
+	@call UVContent::MSG_VIS_CONTENT_SET_ATTRS(VCNA_SAME_WIDTH_AS_VIEW |
+						   VCNA_SAME_HEIGHT_AS_VIEW,
+						   0);
+	UVCHECK(@call UVContent::MSG_VIS_CONTENT_GET_ATTRS() ==
+		(VCNA_SAME_WIDTH_AS_VIEW | VCNA_SAME_HEIGHT_AS_VIEW));
+	@call UVContent::MSG_META_CONTENT_VIEW_SIZE_CHANGED(220, 160, win);
+	UVCHECK(At(@UVContent, 0, 0, 220, 160) && Doc(160, 220, 0, 0));
+	UVCHECK(At(@UVCA, 0, 0, 50, 40) && At(@UVCB, 0, 43, 30, 63));
+
+	/* the implied grab is the content: the child under the point */
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 10, 0);
+	UVCHECK(r.flags == MRF_PROCESSED && ga->UG_selects == 1 &&
+		!gb->UG_selects && ga->UG_x == 10 && ga->UG_y == 10);
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 50, 0);
+	UVCHECK(gb->UG_selects == 1 && gb->UG_y == 50);
+	@call UVContent::MSG_META_START_SELECT(&r, 100, 100, 0);
+	UVCHECK(r.flags == MRF_PROCESSED && ga->UG_selects == 1 &&
+		gb->UG_selects == 1);
+	UVCHECK(!@call UVContent::MSG_VIS_CONTENT_TEST_IF_ACTIVE_OR_IMPLIED_WIN(
+		    win));
+	UVCHECK(@call UVContent::MSG_VIS_CONTENT_TEST_IF_ACTIVE_OR_IMPLIED_WIN(
+		    uvState.UVS_root));
+
+	/* B grabs the mouse: it gets everything, with UIFA_IN where the
+	 * point is in its bounds */
+	@call UVCB::MSG_VIS_GRAB_MOUSE();
+	UVCHECK(ActiveGrab(@UVCB, win) && gb->UG_mouse[0] == 1 &&
+		uvState.UVS_winChanged == 1);
+	UVCHECK(Content().VCNI_activeMouseGrab.VMG_flags ==
+		(VIFGF_MOUSE | VIFGF_GRAB | VIFGF_PTR));
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 10, 0);
+	UVCHECK(gb->UG_selects == 2 && ga->UG_selects == 1 &&
+		gb->UG_x == 10 && gb->UG_y == 10 && gb->UG_state == 0);
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 50, 0);
+	UVCHECK(gb->UG_selects == 3 && gb->UG_state == (UIFA_IN << 8));
+	@call UVContent::MSG_META_PTR(&r, 12, 52, 0);
+	UVCHECK(r.flags == MRF_PROCESSED && gb->UG_ptrs == 1 &&
+		gb->UG_x == 12);
+
+	/* A asks: B keeps it.  A forces it.  Released by its owner only */
+	@call UVCA::MSG_VIS_GRAB_MOUSE();
+	UVCHECK(ActiveGrab(@UVCB, win) && !ga->UG_mouse[0]);
+	@call UVCA::MSG_VIS_FORCE_GRAB_MOUSE();
+	UVCHECK(ActiveGrab(@UVCA, win) && gb->UG_mouse[1] == 1 &&
+		ga->UG_mouse[0] == 1 && uvState.UVS_winChanged == 1);
+	@call UVCB::MSG_VIS_RELEASE_MOUSE();
+	UVCHECK(ActiveGrab(@UVCA, win) && !ga->UG_mouse[1]);
+	@call UVCA::MSG_VIS_RELEASE_MOUSE();
+	UVCHECK(ActiveGrab(0, 0) && ga->UG_mouse[1] == 1 &&
+		uvState.UVS_winChanged == 2);
+
+	/* no active grab: ends and drags are those of "other" */
+	@call UVContent::MSG_META_END_SELECT(&r, 10, 10, 0);
+	UVCHECK(ga->UG_others == 1 && ga->UG_msg == MSG_META_END_OTHER);
+	@call UVContent::MSG_META_DRAG_SELECT(&r, 10, 50, 0);
+	UVCHECK(gb->UG_others == 1 && gb->UG_msg == MSG_META_DRAG_OTHER);
+
+	/* passive grabs: before and after whoever gets the press, not
+	 * for the pointer; an object is on a list once */
+	@call UVCA::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+	@call UVCA::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+	@call UVCB::MSG_VIS_ADD_BUTTON_POST_PASSIVE();
+	UVCHECK(Passive(Content().VCNI_prePassiveMouseGrabList) == 1 &&
+		Passive(Content().VCNI_postPassiveMouseGrabList) == 1);
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 50, 0);
+	UVCHECK(ga->UG_pre == 1 && gb->UG_post == 1 && gb->UG_selects == 4);
+	@call UVContent::MSG_META_PTR(&r, 10, 50, 0);
+	UVCHECK(ga->UG_pre == 1 && gb->UG_post == 1 && gb->UG_ptrs == 2);
+	/* the pre-passive grab keeps the press to itself */
+	@call UVCA::MSG_UVG_SET(MRF_PREVENT_PASS_THROUGH, FALSE);
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 50, 0);
+	UVCHECK(ga->UG_pre == 2 && gb->UG_post == 2 && gb->UG_selects == 4);
+	@call UVCA::MSG_UVG_SET(0, FALSE);
+	@call UVCA::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+	@call UVCB::MSG_VIS_REMOVE_BUTTON_POST_PASSIVE();
+	UVCHECK(!Passive(Content().VCNI_prePassiveMouseGrabList) &&
+		!Passive(Content().VCNI_postPassiveMouseGrabList));
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 50, 0);
+	UVCHECK(ga->UG_pre == 2 && gb->UG_post == 2 && gb->UG_selects == 5);
+
+	/* a replay: B lets go at the press and wants it sent again: it
+	 * goes to the child under the point */
+	@call UVCB::MSG_VIS_GRAB_MOUSE();
+	@call UVCB::MSG_UVG_SET(0, TRUE);
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 10, 0);
+	UVCHECK(r.flags == MRF_PROCESSED && gb->UG_selects == 6 &&
+		ga->UG_selects == 2 && ActiveGrab(0, 0) &&
+		uvState.UVS_winChanged == 4);
+
+	/* the mouse over a window that is nobody's */
+	@call UVContent::MSG_META_IMPLIED_WIN_CHANGE(0, uvState.UVS_root);
+	UVCHECK(ImpliedGrab(0, uvState.UVS_root));
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 10, 0);
+	UVCHECK(uvState.UVS_unwantedMouse == 1 && ga->UG_selects == 2);
+	/* back over its own: the content, whoever the view names */
+	@call UVContent::MSG_META_IMPLIED_WIN_CHANGE(@UVView, win);
+	UVCHECK(ImpliedGrab(@UVContent, win));
+
+	/* a large grab gets large events, in the document */
+	@call UVCA::MSG_VIS_GRAB_LARGE_MOUSE();
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 20, 0x0105);
+	UVCHECK(ga->UG_large == 1 &&
+		ga->UG_msg == MSG_META_LARGE_START_SELECT &&
+		ga->UG_largeX == 10 && ga->UG_largeY == 20 &&
+		ga->UG_state == 0x0105);
+	/* events in window coordinates: through the scale factor and
+	 * the document's origin */
+	@call UVContent::MSG_VIS_CONTENT_SET_ATTRS(
+	    VCNA_WINDOW_COORDINATE_MOUSE_EVENTS, 0);
+	@call UVContent::MSG_META_CONTENT_VIEW_ORIGIN_CHANGED(win, 2000, 1000);
+	@call UVContent::MSG_META_CONTENT_VIEW_SCALE_FACTOR_CHANGED(
+	    win, MakeWWFixed(2), MakeWWFixed(2));
+	@call UVContent::MSG_META_PTR(&r, 10, 20, 0);
+	UVCHECK(ga->UG_large == 2 && ga->UG_msg == MSG_META_LARGE_PTR &&
+		ga->UG_largeX == 1005 && ga->UG_largeY == 2010);
+	@call UVCA::MSG_VIS_RELEASE_MOUSE();
+	/* small ones too */
+	@call UVContent::MSG_META_START_SELECT(&r, 20, 40, 0);
+	UVCHECK(ga->UG_selects == 2 && gb->UG_selects == 6);
+	@call UVContent::MSG_META_CONTENT_VIEW_ORIGIN_CHANGED(win, 40, 0);
+	@call UVContent::MSG_META_START_SELECT(&r, 20, 20, 0);
+	UVCHECK(gb->UG_selects == 7 && gb->UG_x == 10 && gb->UG_y == 50);
+	@call UVContent::MSG_VIS_CONTENT_SET_ATTRS(
+	    0, VCNA_WINDOW_COORDINATE_MOUSE_EVENTS);
+	@call UVContent::MSG_META_CONTENT_VIEW_ORIGIN_CHANGED(win, 0, 0);
+	@call UVContent::MSG_META_CONTENT_VIEW_SCALE_FACTOR_CHANGED(
+	    win, MakeWWFixed(1), MakeWWFixed(1));
+	break;
+    }
+    case 13: {
+	MouseReturnParams r;
+	ObjectAndGrabParams og;
+	GetTargetParams t;
+	LargeMouseData l;
+	EventHandle ev;
+	optr o = 0;
+	word n;
+
+	memset(uvState.UVS_gad, 0, sizeof(uvState.UVS_gad));
+	/* a key nobody wants */
+	@call UVContent::MSG_META_KBD_CHAR('a', 0, 0);
+	UVCHECK(uvState.UVS_unwantedKbd == 1);
+
+	/* A has the focus below the content; it hears of it when the
+	 * content gains the focus itself.  Keys go to the focus */
+	MetaGrabFocusExclLow(@UVCA);
+	UVCHECK(@call UVContent::MSG_META_GET_FOCUS_EXCL(&o) &&
+		o == @UVCA && !ga->UG_focus[0]);
+	@call UVContent::MSG_META_GAINED_FOCUS_EXCL();
+	UVCHECK(ga->UG_focus[0] == 1);
+	@call UVCB::MSG_VIS_VUP_QUERY_FOCUS_EXCL(&og);
+	UVCHECK(og.OAGP_object == @UVCA && og.OAGP_grabFlags & HGF_APP_EXCL);
+	@call UVContent::MSG_META_KBD_CHAR('b', 0, 0);
+	UVCHECK(ga->UG_chars == 1 && uvState.UVS_unwantedKbd == 1);
+	/* a keyboard grab comes first */
+	@call UVCB::MSG_META_GRAB_KBD();
+	UVCHECK(gb->UG_kbd[0] == 1);
+	@call UVContent::MSG_META_KBD_CHAR('c', 0, 0);
+	UVCHECK(gb->UG_chars == 1 && ga->UG_chars == 1);
+	@call UVCB::MSG_META_RELEASE_KBD();
+	UVCHECK(gb->UG_kbd[1] == 1);
+	@call UVContent::MSG_META_KBD_CHAR('d', 0, 0);
+	UVCHECK(gb->UG_chars == 1 && ga->UG_chars == 2);
+	/* the focus to B; the content loses it */
+	MetaGrabFocusExclLow(@UVCB);
+	UVCHECK(ga->UG_focus[1] == 1 && gb->UG_focus[0] == 1);
+	@call UVContent::MSG_META_LOST_FOCUS_EXCL();
+	UVCHECK(gb->UG_focus[1] == 1);
+
+	/* the target: the view hears of it */
+	n = uvState.UVS_targetInfos;
+	MetaGrabTargetExclLow(@UVCA);
+	UVCHECK(@call UVContent::MSG_META_GET_TARGET_EXCL(&o) && o == @UVCA);
+	UVCHECK(uvState.UVS_targetInfos == n + 1 &&
+		uvState.UVS_targetInfo.VTI_target.TR_object == @UVCA &&
+		uvState.UVS_targetInfo.VTI_target.TR_class == &UVGadClass &&
+		uvState.UVS_targetInfo.VTI_content.TR_object == @UVContent);
+	@call UVContent::MSG_META_GET_TARGET_AT_TARGET_LEVEL(&t, TL_CONTENT);
+	UVCHECK(t.GTP_target == @UVContent && t.GTP_class == &UVContentClass);
+	@call UVContent::MSG_META_GET_TARGET_AT_TARGET_LEVEL(&t, TL_TARGET);
+	UVCHECK(t.GTP_target == @UVCA && t.GTP_class == &UVGadClass);
+
+	/* classed events to the target and to the focus */
+	ev = @record UVGadClass::MSG_UVG_PING();
+	@call UVContent::MSG_META_SEND_CLASSED_EVENT(ev,
+						     (TravelOption) TO_TARGET);
+	UVCHECK(ga->UG_pings == 1 && !gb->UG_pings);
+	ev = @record UVGadClass::MSG_UVG_PING();
+	@call UVContent::MSG_META_SEND_CLASSED_EVENT(ev,
+						     (TravelOption) TO_FOCUS);
+	UVCHECK(ga->UG_pings == 1 && gb->UG_pings == 1);
+
+	/* a large mouse event to the content goes to the target */
+	memset(&l, 0, sizeof(l));
+	l.LMD_location.PDF_x.DWF_int = 7;
+	@call UVContent::MSG_META_LARGE_START_SELECT(&r, &l);
+	UVCHECK(r.flags == MRF_PROCESSED && ga->UG_large == 1 &&
+		ga->UG_largeX == 7);
+
+	/* input held up: it waits (pointer events with the same buttons
+	 * as one), and comes after this step when it may flow again */
+	@call UVContent::MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW();
+	@call UVContent::MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW();
+	@call UVContent::MSG_META_START_SELECT(&r, 10, 10, 0);
+	UVCHECK(r.flags == MRF_PROCESSED);
+	@call UVContent::MSG_META_PTR(&r, 1, 1, 0);
+	@call UVContent::MSG_META_PTR(&r, 2, 2, 0);
+	@call UVContent::MSG_META_PTR(&r, 3, 3, 0x0100);
+	@call UVContent::MSG_META_KBD_CHAR('e', 0, 0);
+	UVCHECK(Content().VCNI_holdUpInputQueue &&
+		GeodeInfoQueue(Content().VCNI_holdUpInputQueue) == 4);
+	UVCHECK(!ga->UG_selects && !ga->UG_ptrs && gb->UG_chars == 1);
+	@call UVContent::MSG_VIS_CONTENT_RESUME_INPUT_FLOW();
+	UVCHECK(Content().VCNI_holdUpInputQueue && !ga->UG_selects);
+	@call UVContent::MSG_VIS_CONTENT_RESUME_INPUT_FLOW();
+	UVCHECK(!Content().VCNI_holdUpInputQueue && !ga->UG_selects);
+	break;
+    }
+    case 14: {
+	WindowHandle win = uvState.UVS_cwin;
+
+	/* what was held up has come, in order */
+	UVCHECK(ga->UG_selects == 1 && ga->UG_ptrs == 2 &&
+		ga->UG_firstPtrX == 2 && ga->UG_x == 3 &&
+		ga->UG_state == (0x0100 | (UIFA_IN << 8)));
+	UVCHECK(gb->UG_chars == 2);
+
+	/* held up, but not while that is disabled */
+	@call UVContent::MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW();
+	@call UVContent::MSG_VIS_CONTENT_DISABLE_HOLD_UP();
+	@call UVContent::MSG_META_KBD_CHAR('f', 0, 0);
+	UVCHECK(gb->UG_chars == 3);
+	@call UVContent::MSG_VIS_CONTENT_ENABLE_HOLD_UP();
+	@call UVContent::MSG_VIS_CONTENT_RESUME_INPUT_FLOW();
+
+	/* the view closes: not realized, unlinked, no window */
+	@call UVContent::MSG_META_CONTENT_VIEW_CLOSING();
+	UVCHECK(!(Attrs(@UVContent) & VA_REALIZED) &&
+		!(Attrs(@UVCA) & VA_REALIZED));
+	UVCHECK(@call UVContent::MSG_VIS_FIND_PARENT() == 0);
+	UVCHECK(!Content().VCI_window && Content().VCNI_window == win);
+	UVCHECK(ImpliedGrab(0, 0));
+	@call UVContent::MSG_META_CONTENT_VIEW_WIN_CLOSED(win);
+	UVCHECK(!Content().VCNI_window);
+	WinClose(win);
+	uvState.UVS_cwin = 0;
 	break;
     }
     }

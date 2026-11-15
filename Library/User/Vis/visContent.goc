@@ -1,0 +1,1269 @@
+/*
+ * visContent.goc -- VisContentClass (after visContentClass.asm and
+ * visContentCommon.asm): the top of a visual tree that is shown in the
+ * window of a view (VCNI_view, VCNI_window), and its input node.
+ *
+ * Here:
+ *   - the view: its window opened and closed, its size (the content's
+ *     geometry follows it), origin and scale factor, the document
+ *     bounds set in it;
+ *   - mouse events: to the pre-passive grabs, the active grab or else
+ *     the implied one (the object the window under the mouse belongs
+ *     to), the post-passive grabs, in the coordinates of the grab
+ *     (small ones, or large ones in the document); a replay when the
+ *     grab changed;
+ *   - the grabs themselves (MSG_VIS_VUP_ALTER_INPUT_FLOW), keyboard
+ *     events to the keyboard grab or the focus;
+ *   - input held up in a queue (MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW)
+ *     until it may flow again;
+ *   - the content as a node of the focus and target hierarchies.
+ *
+ * Port32 (Port32/ABI.md section 13x):
+ *   - a grab's coordinates are worked out on a copy of the VisMouseGrab
+ *     (chunks move); MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT gets that
+ *     copy;
+ *   - an event held up is recorded again with its parameter structure;
+ *     the MouseReturnParams of a mouse event do not come back to a
+ *     sender that has gone on meanwhile (the pointer is cleared);
+ *   - the pointer events combined in the hold-up queue (MF_CUSTOM in
+ *     the asm) use QueuePeekLastMessage and ObjSetMessageParams;
+ *   - not yet: ink (MSG_META_NOTIFY_WITH_DATA_BLOCK of GWNT_INK needs
+ *     VisCallChildrenInBounds), the quick transfer's end
+ *     (ClipboardHandleEndMoveCopy), UserStandardSound for an unwanted
+ *     press, the EC messages (MSG_VIS_VUP_EC_ENSURE_*);
+ *   - goc has no discardOnSave: the class is declared without
+ *     CLASSF_DISCARD_ON_SAVE (nothing is saved to state yet).
+ */
+@include "uiInt.goh"
+@include <Objects/vCntC.goh>
+#include <string.h>
+#include <chunkarr.h>
+#include <thread.h>
+
+@classdecl VisContentClass;
+
+/* the large messages follow the small ones in the same order */
+typedef char VisContentLargeOrder[
+    (MSG_META_LARGE_DRAG_OTHER - MSG_META_LARGE_START_SELECT ==
+     MSG_META_DRAG_OTHER - MSG_META_START_SELECT) ? 1 : -1];
+
+#define ContentPart(o)	((VisContentInstance *) ObjDerefVis(o))
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define CONTENT_OFFSET(f) word_offsetof(VisContentInstance, f)
+
+/* ---------------------------------------------------------------------
+ * Creation and the end
+ * ------------------------------------------------------------------- */
+
+/* VisContentInitialize */
+@method VisContentClass, MSG_META_INITIALIZE
+{
+    VisContentInstance *c;
+
+    @callsuper();
+    c = ContentPart(oself);
+    c->VI_typeFlags |= VTF_IS_WINDOW | VTF_IS_WIN_GROUP | VTF_IS_CONTENT |
+		       VTF_IS_INPUT_NODE;
+    /* to fill the view */
+    c->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+				VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+    c->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
+    c->VCNI_impliedMouseGrab.VMG_flags = VIFGF_MOUSE | VIFGF_PTR;
+}
+
+/* ViewUpdateContentTargetInfo: the view told the target here and its
+ * class (called: the structure is the caller's) */
+static void UpdateViewTargetInfo(optr oself)
+{
+    VisContentInstance *c = ContentPart(oself);
+    ViewTargetInfo info;
+    optr view = c->VCNI_view;
+
+    memset(&info, 0, sizeof(info));
+    info.VTI_content.TR_object = oself;
+    info.VTI_content.TR_class = @call oself::MSG_META_GET_CLASS();
+    info.VTI_target.TR_object = c->VCNI_targetExcl.FTVMC_OD;
+    if (info.VTI_target.TR_object)
+	info.VTI_target.TR_class =
+	    @call info.VTI_target.TR_object::MSG_META_GET_CLASS();
+    if (view)
+	@call view::MSG_GEN_VIEW_UPDATE_CONTENT_TARGET_INFO(&info);
+}
+
+/* VisContentSetView */
+@method VisContentClass, MSG_META_CONTENT_SET_VIEW
+{
+    pself->VCNI_view = view;
+    UpdateViewTargetInfo(oself);
+}
+
+/* VisContentReloc: nothing has the focus or target when saved; the GCN
+ * lists unrelocated */
+@method VisContentClass, _reloc
+{
+    VisContentInstance *c = ContentPart(oself);
+    TempMetaGCNData *d;
+
+    (void) vmRelocType;
+    if (message != MSG_META_RELOCATE) {
+	c->VCNI_focusExcl.FTVMC_OD = 0;
+	c->VCNI_targetExcl.FTVMC_OD = 0;
+	c->VCNI_view = 0;
+	d = ObjVarFindData(oself, TEMP_META_GCN);
+	if (d && d->TMGCND_flags & TMGCNF_RELOCATED) {
+	    d->TMGCND_flags &= ~TMGCNF_RELOCATED;
+	    if (GCNListUnRelocateBlock(OptrToHandle(oself),
+				       d->TMGCND_listOfLists,
+				       OptrToHandle(oself)))
+		ObjVarDeleteData(oself, TEMP_META_GCN);
+	}
+    }
+    return @callsuper();
+}
+
+/* VisContentFinalObjFree: the passive lists and the hold-up queue go,
+ * and the GCN lists */
+@method VisContentClass, MSG_META_FINAL_OBJ_FREE
+{
+    ChunkHandle pre = pself->VCNI_prePassiveMouseGrabList;
+    ChunkHandle post = pself->VCNI_postPassiveMouseGrabList;
+    QueueHandle q = pself->VCNI_holdUpInputQueue;
+
+    if (pre)
+	LMemFree(ConstructOptr(OptrToHandle(oself), pre));
+    if (post)
+	LMemFree(ConstructOptr(OptrToHandle(oself), post));
+    if (q)
+	GeodeFreeQueue(q);
+    CObjCallSuperP(&VisContentClass, oself, MSG_META_GCN_LIST_DESTROY, NULL,
+		   0, NULL, 0);
+    @callsuper();
+}
+
+/* VisContentBlockFree */
+@method VisContentClass, MSG_META_BLOCK_FREE
+{
+    CObjCallSuperP(&VisContentClass, oself, MSG_META_GCN_LIST_DESTROY, NULL,
+		   0, NULL, 0);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The view and its window
+ * ------------------------------------------------------------------- */
+
+/* VisContentGetVUM: updates happen now once the view's window is there
+ * and the content is linked to the view */
+VisUpdateMode VisContentGetVUM(optr obj)
+{
+    VisContentInstance *c;
+    VisUpdateMode mode;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+    c = ContentPart(obj);
+    mode = c->VCNI_window && OptrToHandle(c->VI_link.LP_next) ? VUM_NOW
+							     : VUM_MANUAL;
+    MemUnlock(OptrToHandle(obj));
+    return mode;
+}
+
+/* VisContentViewOpening: linked up to the view (not as its child) and
+ * made visible */
+@method VisContentClass, MSG_META_CONTENT_VIEW_OPENING
+{
+    VisUpdateMode mode;
+
+    pself->VCNI_view = view;
+    pself->VI_link.LP_next = view | LP_IS_PARENT;
+    mode = VisContentGetVUM(oself);
+    if (pself->VI_typeFlags & VTF_IS_GEN)
+	@call oself::MSG_SPEC_SET_ATTRS(SA_REALIZABLE, 0, mode);
+    else
+	@call oself::MSG_VIS_SET_ATTRS(VA_VISIBLE, 0, mode);
+}
+
+/* VisContentViewClosing */
+@method VisContentClass, MSG_META_CONTENT_VIEW_CLOSING
+{
+    VisUpdateMode mode = VisContentGetVUM(oself);
+
+    if (pself->VI_typeFlags & VTF_IS_GEN)
+	@call oself::MSG_SPEC_SET_ATTRS(0, SA_REALIZABLE, mode);
+    else
+	@call oself::MSG_VIS_SET_ATTRS(0, VA_VISIBLE, mode);
+    ContentPart(oself)->VI_link.LP_next = 0;
+}
+
+/* VisContentInvalidate: the whole window (it is the view's: nothing
+ * invalidates it for us) */
+static void ContentInvalidate(optr oself)
+{
+    WindowHandle win = ContentPart(oself)->VCI_window;
+    GStateHandle gs;
+    RectDWord r;
+
+    if (!win)
+	return;
+    gs = GrCreateState(win);
+    GrGetWinBoundsDWord(gs, &r);
+    GrInvalRectDWord(gs, &r);
+    GrDestroyState(gs);
+}
+
+@method VisContentClass, MSG_VIS_INVALIDATE
+{
+    ContentInvalidate(oself);
+}
+
+/* VisContentOpenWin: the view's window is ours; the content is the
+ * implied grab in it */
+@method VisContentClass, MSG_VIS_OPEN_WIN
+{
+    VisContentInstance *c;
+
+    (void) parentWindow;
+    pself->VCI_window = pself->VCNI_window;
+    ContentInvalidate(oself);
+    @call oself::MSG_META_IMPLIED_WIN_CHANGE(oself,
+					     ContentPart(oself)->VCNI_window);
+    c = ContentPart(oself);
+    if (c->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL)
+	c->VCNI_impliedMouseGrab.VMG_flags |= VIFGF_LARGE;
+}
+
+/* VisContentCloseWin: the window stays open (it is the view's) */
+@method VisContentClass, MSG_VIS_CLOSE_WIN
+{
+    ContentInvalidate(oself);
+    ContentPart(oself)->VCI_window = 0;
+    @call oself::MSG_META_IMPLIED_WIN_CHANGE(0, 0);
+}
+
+/* VisContentVisClose: whatever is active in the view lets go */
+@method VisContentClass, MSG_VIS_CLOSE
+{
+    @callsuper();
+    @call oself::MSG_VIS_TAKE_GADGET_EXCL(0);
+}
+
+/* VisContentSubviewLostGadgetExcl */
+@method VisContentClass, MSG_META_CONTENT_VIEW_LOST_GADGET_EXCL
+{
+    (void) viewWindow;
+    @call oself::MSG_VIS_TAKE_GADGET_EXCL(0);
+}
+
+/* VisContentViewWinOpened */
+@method VisContentClass, MSG_META_CONTENT_VIEW_WIN_OPENED
+{
+    pself->VCNI_window = viewWindow;
+    @call oself::MSG_META_CONTENT_VIEW_SIZE_CHANGED(viewWidth, viewHeight,
+						    viewWindow);
+}
+
+/* VisContentViewWinClosed */
+@method VisContentClass, MSG_META_CONTENT_VIEW_WIN_CLOSED
+{
+    (void) viewWindow;
+    pself->VCNI_window = 0;
+}
+
+/* SetViewDocBounds: the content's bounds are the view's document,
+ * unless the document is large or set by hand */
+static void SetViewDocBounds(optr oself)
+{
+    VisContentInstance *c = ContentPart(oself);
+    optr view = c->VCNI_view;
+    Rectangle b = c->VI_bounds;
+
+    if (c->VCNI_attrs & (VCNA_LARGE_DOCUMENT_MODEL |
+			 VCNA_VIEW_DOC_BOUNDS_SET_MANUALLY) ||
+	!OptrToChunk(view))
+	return;
+    @call view::MSG_GEN_VIEW_SET_DOC_BOUNDS(b.R_bottom, b.R_right, b.R_top,
+					    b.R_left);
+}
+
+/* VisContentSubviewSizeChanged: the geometry again if the size is
+ * another one; the children hear of it in any case */
+@method VisContentClass, MSG_META_CONTENT_VIEW_SIZE_CHANGED
+{
+    struct { word w, h; WindowHandle win; } p;
+
+    if (pself->VCNI_viewHeight != viewHeight ||
+	pself->VCNI_viewWidth != viewWidth)
+	VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, VUM_MANUAL);
+    pself = ContentPart(oself);
+    pself->VCNI_viewHeight = viewHeight;
+    pself->VCNI_viewWidth = viewWidth;
+    p.w = viewWidth;
+    p.h = viewHeight;
+    p.win = viewWindow;
+    VisSendToChildren(oself, message, &p, sizeof(p));
+    (void) @call oself::MSG_VIS_VUP_UPDATE_WIN_GROUP(VisContentGetVUM(oself));
+    SetViewDocBounds(oself);
+}
+
+/* VisContentPositionBranch: a position from the view while the geometry
+ * is not done is ignored */
+@method VisContentClass, MSG_VIS_POSITION_BRANCH
+{
+    if (pself->VI_optFlags & (VOF_GEOMETRY_INVALID | VOF_UPDATE_PENDING))
+	return;
+    @callsuper();
+}
+
+/* VisContentGetWinSize */
+@method VisContentClass, MSG_VIS_CONTENT_GET_WIN_SIZE
+{
+    return MAKE_SIZE_DWORD(pself->VCNI_viewWidth, pself->VCNI_viewHeight);
+}
+
+/* VisContentUpdateGeometry: as wide or high as the view where it
+ * follows it, else what the content wants; it stays where it is */
+@method VisContentClass, MSG_VIS_UPDATE_GEOMETRY
+{
+    word w = RSA_CHOOSE_OWN_SIZE, h = RSA_CHOOSE_OWN_SIZE;
+    SizeAsDWord s;
+    VisContentInstance *c;
+
+    if (pself->VCNI_attrs & VCNA_SAME_HEIGHT_AS_VIEW)
+	h = pself->VCNI_viewHeight;
+    if (pself->VCNI_attrs & VCNA_SAME_WIDTH_AS_VIEW)
+	w = pself->VCNI_viewWidth;
+    s = VisRecalcSizeAndInvalIfNeeded(oself, w, h);
+    VisSetSize(oself, DWORD_WIDTH(s), DWORD_HEIGHT(s));
+    SetViewDocBounds(oself);
+    c = ContentPart(oself);
+    VisSendPositionAndInvalIfNeeded(oself, c->VI_bounds.R_left,
+				    c->VI_bounds.R_top);
+}
+
+/* VisContentSendToLargeDocumentLayers */
+static void SendToLayers(optr oself, Message msg, const void *params,
+			 word size)
+{
+    if (ContentPart(oself)->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL)
+	VisSendToChildren(oself, msg, params, size);
+}
+
+/* VisContentScaleFactorChanged */
+@method VisContentClass, MSG_META_CONTENT_VIEW_SCALE_FACTOR_CHANGED
+{
+    struct { WindowHandle win; WWFixedAsDWord y, x; } p;
+
+    pself->VCNI_scaleFactor.PF_x.WWF_int = (word) (xScaleFactor >> 16);
+    pself->VCNI_scaleFactor.PF_x.WWF_frac = (word) xScaleFactor;
+    pself->VCNI_scaleFactor.PF_y.WWF_int = (word) (yScaleFactor >> 16);
+    pself->VCNI_scaleFactor.PF_y.WWF_frac = (word) yScaleFactor;
+    p.win = viewWindow;
+    p.y = yScaleFactor;
+    p.x = xScaleFactor;
+    SendToLayers(oself, message, &p, sizeof(p));
+}
+
+/* VisContentOriginChanged */
+@method VisContentClass, MSG_META_CONTENT_VIEW_ORIGIN_CHANGED
+{
+    struct { WindowHandle win; sdword y, x; } p;
+
+    pself->VCNI_docOrigin.PD_x = xOrigin;
+    pself->VCNI_docOrigin.PD_y = yOrigin;
+    p.win = viewWindow;
+    p.y = yOrigin;
+    p.x = xOrigin;
+    SendToLayers(oself, message, &p, sizeof(p));
+}
+
+/* VisContentSetDocBounds (large documents): to the view and the layers */
+@method VisContentClass, MSG_VIS_CONTENT_SET_DOC_BOUNDS
+{
+    optr view = pself->VCNI_view;
+    struct { long b, r, t, l; } p;
+
+    if (OptrToChunk(view))
+	@call view::MSG_GEN_VIEW_SET_DOC_BOUNDS(bottom, right, top, left);
+    p.b = bottom;
+    p.r = right;
+    p.t = top;
+    p.l = left;
+    VisSendToChildren(oself, MSG_VIS_LAYER_SET_DOC_BOUNDS, &p, sizeof(p));
+}
+
+/* VisContentAddRectToUpdateRegion: a content that only draws in its
+ * margins adds what the window shows right of and below the rectangle */
+@method VisContentClass, MSG_VIS_ADD_RECT_TO_UPDATE_REGION
+{
+    VisAddRectFlags f = addRectFlags & ~VARF_ONLY_REDRAW_MARGINS;
+    sword r = right, b = bottom;
+    WindowHandle win;
+
+    if ((addRectFlags & VARF_ONLY_REDRAW_MARGINS) &&
+	(pself->VCI_geoAttrs & VCGA_ONLY_DRAWS_IN_MARGINS) &&
+	(win = VisQueryWindow(oself)) != 0) {
+	GStateHandle gs = GrCreateState(win);
+	Rectangle w;
+
+	GrGetWinBounds(gs, &w);
+	GrDestroyState(gs);
+	if (r < w.R_right)
+	    VisInvalOldBounds(oself, f, r, w.R_top, w.R_right, w.R_bottom);
+	if (b < w.R_bottom)
+	    VisInvalOldBounds(oself, f, w.R_left, b, w.R_right, w.R_bottom);
+    }
+    @callsuper();
+}
+
+/* VisContentVupAllowGlobalTransfer */
+@method VisContentClass, MSG_VIS_VUP_ALLOW_GLOBAL_TRANSFER
+{
+    optr view = pself->VCNI_view;
+
+    if (OptrToChunk(view))
+	@send view::MSG_GEN_VIEW_ALLOW_GLOBAL_TRANSFER();
+}
+
+/* VisContentSetInteractionBounds */
+@method VisContentClass, MSG_VIS_VUP_SET_MOUSE_INTERACTION_BOUNDS
+{
+    optr view = pself->VCNI_view;
+
+    if (OptrToChunk(view))
+	@send view::MSG_GEN_VIEW_SET_DRAG_BOUNDS((sdword) (word) bottom,
+						 (sdword) (word) right,
+						 (sdword) (word) top,
+						 (sdword) (word) left);
+}
+
+@method VisContentClass, MSG_VIS_CONTENT_GET_ATTRS
+{
+    return pself->VCNI_attrs;
+}
+
+@method VisContentClass, MSG_VIS_CONTENT_SET_ATTRS
+{
+    pself->VCNI_attrs = (pself->VCNI_attrs | attrsToSet) & ~attrsToClear;
+}
+
+/* VisContentDraw: a large document's layers all draw (if anything is in
+ * the mask) */
+@method VisContentClass, MSG_VIS_DRAW
+{
+    struct { DrawFlags f; GStateHandle gs; } p;
+    RectDWord r;
+
+    if (!(pself->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL)) {
+	@callsuper();
+	return;
+    }
+    if (GrGetMaskBoundsDWord(gstate, &r))
+	return;
+    p.f = drawFlags;
+    p.gs = gstate;
+    VisSendToChildren(oself, MSG_VIS_DRAW, &p, sizeof(p));
+}
+
+/* VisContentDoNothing, VisContentWindowAboutToBeClosed (the window is
+ * the view's), VisContentConsumeMessage (the content has all grabs:
+ * the view sends it everything) */
+@method VisContentClass, MSG_VIS_MOVE_RESIZE_WIN,
+			 MSG_VIS_WIN_ABOUT_TO_BE_CLOSED,
+			 MSG_VIS_FORCE_GRAB_LARGE_MOUSE,
+			 MSG_VIS_FORCE_GRAB_MOUSE,
+			 MSG_VIS_GRAB_LARGE_MOUSE,
+			 MSG_VIS_GRAB_MOUSE,
+			 MSG_VIS_RELEASE_MOUSE
+{
+}
+
+@method VisContentClass, MSG_META_FORCE_GRAB_KBD, MSG_META_GRAB_KBD,
+			 MSG_META_RELEASE_KBD
+{
+}
+
+/* ---------------------------------------------------------------------
+ * Input held up
+ * ------------------------------------------------------------------- */
+
+/* VisContentCheckOnInputHoldUpLow: TRUE if the event went to the
+ * hold-up queue (recorded again for this object).  A pointer event
+ * replaces the last one waiting if that is one with the same buttons
+ * (CombineMouseEvent). */
+static Boolean HeldUp(optr oself, Message msg, const void *params,
+		      dword size)
+{
+    VisContentInstance *c = ContentPart(oself);
+    QueueHandle q;
+    EventHandle ev = 0;
+
+    if ((c->VCNI_holdUpInputFlags & HUIF_HOLD_UP_MODE_DISABLED) ||
+	!c->VCNI_holdUpInputCount)
+	return FALSE;
+    if (!c->VCNI_holdUpInputQueue)
+	c->VCNI_holdUpInputQueue = GeodeAllocQueue();
+    q = c->VCNI_holdUpInputQueue;
+    if (msg == MSG_META_PTR) {
+	EventHandle last = QueuePeekLastMessage(q);
+	optr dest;
+	dword lsize;
+	const VisMouseParams *lp;
+
+	if (last && ObjGetMessageInfo(last, &dest) == MSG_META_PTR) {
+	    lp = ObjGetMessageParams(last, &lsize);
+	    if (lsize == size && lp->VMP_inputState ==
+		((const VisMouseParams *) params)->VMP_inputState &&
+		ObjSetMessageParams(last, params, size))
+		return TRUE;
+	}
+    }
+    CObjMessageP(MF_RECORD, oself, msg, params, size, &ev, sizeof(ev));
+    QueuePostMessage(q, ev, 0);
+    return TRUE;
+}
+
+/* VisContentFlushHoldUpInputQueue: what waits goes to the front of this
+ * thread's queue, in order (unless input is held up again) */
+static void FlushHoldUp(optr oself)
+{
+    VisContentInstance *c = ContentPart(oself);
+    QueueHandle q;
+
+    if (!(c->VCNI_holdUpInputFlags & HUIF_HOLD_UP_MODE_DISABLED) &&
+	c->VCNI_holdUpInputCount)
+	return;
+    q = c->VCNI_holdUpInputQueue;
+    c->VCNI_holdUpInputQueue = 0;
+    if (!q)
+	return;
+    GeodeFlushQueue(q, (QueueHandle) ThreadGetInfo(0, TGIT_QUEUE_HANDLE), 0,
+		    MF_INSERT_AT_FRONT);
+    GeodeFreeQueue(q);
+}
+
+/* VisContentDisableHoldUpInput: input flows whatever the count (a
+ * system modal box is up) */
+@method VisContentClass, MSG_VIS_CONTENT_DISABLE_HOLD_UP
+{
+    pself->VCNI_holdUpInputFlags |= HUIF_HOLD_UP_MODE_DISABLED;
+    FlushHoldUp(oself);
+}
+
+@method VisContentClass, MSG_VIS_CONTENT_ENABLE_HOLD_UP
+{
+    pself->VCNI_holdUpInputFlags &= ~HUIF_HOLD_UP_MODE_DISABLED;
+}
+
+@method VisContentClass, MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW
+{
+    pself->VCNI_holdUpInputCount++;
+}
+
+@method VisContentClass, MSG_VIS_CONTENT_RESUME_INPUT_FLOW
+{
+    if (!--pself->VCNI_holdUpInputCount)
+	FlushHoldUp(oself);
+}
+
+/* VisContentObjFlushInputQueue: behind the input that is held up */
+@method VisContentClass, MSG_META_OBJ_FLUSH_INPUT_QUEUE
+{
+    struct { EventHandle ev; ObjFlushInputQueueNextStop next;
+	     MemHandle block; } p;
+
+    p.ev = event;
+    p.next = nextStop;
+    p.block = objBlock;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Mouse events to the grabs
+ * ------------------------------------------------------------------- */
+
+/* ConvertWinToDWFixed: a coordinate (y: isY) for a grab, as 32.16 in
+ * the document: from the window through the scale factor and the
+ * document's origin, or a document coordinate as it is; less the
+ * grab's translation */
+static void WinToDWFixed(const VisContentInstance *c, const VisMouseGrab *g,
+			 sword coord, Boolean isY, DWFixed *out)
+{
+    sdword tr = isY ? g->VMG_translation.PD_y : g->VMG_translation.PD_x;
+
+    if (c->VCNI_attrs & VCNA_WINDOW_COORDINATE_MOUSE_EVENTS) {
+	const WWFixed *sc = isY ? &c->VCNI_scaleFactor.PF_y
+				: &c->VCNI_scaleFactor.PF_x;
+	sdword origin = isY ? c->VCNI_docOrigin.PD_y : c->VCNI_docOrigin.PD_x;
+	WWFixedAsDWord v = MakeWWFixed(coord);
+
+	if (sc->WWF_int != 1 || sc->WWF_frac)
+	    v = GrSDivWWFixed(v, ((dword) sc->WWF_int << 16) | sc->WWF_frac);
+	out->DWF_frac = (word) v;
+	out->DWF_int = (sdword) (sword) (v >> 16) + origin - tr;
+    } else {
+	out->DWF_frac = 0;
+	out->DWF_int = (sdword) (sword) (word) (coord - (word) tr);
+    }
+}
+
+/* what a grab gets */
+typedef struct {
+    sword		GC_x, GC_y;	/* a small grab */
+    LargeMouseData	GC_large;	/* a large one */
+} GrabCoords;
+
+/*
+ * The first part of VisSendMouseDataToGrab: the event's position for
+ * the grab.  It comes for the content's window; a grab in another
+ * window has it relative to that (VisContentTransformCoords; FALSE if
+ * that window is going).  Then ConvertSmallWinMouseEventToSmallDoc or
+ * ConvertSmallMouseEventToLarge.
+ */
+static Boolean GrabConvert(optr oself, const VisMouseGrab *g, sword x,
+			   sword y, word inputState, GrabCoords *gc)
+{
+    const VisContentInstance *c = ContentPart(oself);
+
+    if (g->VMG_gWin && g->VMG_gWin != c->VCI_window) {
+	Rectangle r;
+	word wf = 0;
+
+	WinGetInfo(g->VMG_gWin, WIT_FLAGS, &wf);
+	if (wf & WRF_CLOSED)
+	    return FALSE;
+	WinGetWinScreenBounds(g->VMG_gWin, &r);
+	x -= r.R_left;
+	y -= r.R_top;
+    }
+    if (g->VMG_flags & VIFGF_LARGE) {
+	WinToDWFixed(c, g, x, FALSE, &gc->GC_large.LMD_location.PDF_x);
+	WinToDWFixed(c, g, y, TRUE, &gc->GC_large.LMD_location.PDF_y);
+	gc->GC_large.LMD_buttonInfo = (byte) inputState;
+	gc->GC_large.LMD_uiFunctionsActive = (byte) (inputState >> 8);
+    } else if (c->VCNI_attrs & VCNA_WINDOW_COORDINATE_MOUSE_EVENTS) {
+	DWFixed d;
+
+	WinToDWFixed(c, g, x, FALSE, &d);
+	gc->GC_x = (sword) d.DWF_int;
+	WinToDWFixed(c, g, y, TRUE, &d);
+	gc->GC_y = (sword) d.DWF_int;
+    } else {
+	gc->GC_x = x - (word) g->VMG_translation.PD_x;
+	gc->GC_y = y - (word) g->VMG_translation.PD_y;
+    }
+    return TRUE;
+}
+
+/* ConvertSmallMouseMethodToLarge */
+static Message LargeMessage(Message msg)
+{
+    if (msg == MSG_META_PTR)
+	return MSG_META_LARGE_PTR;
+    return msg + (MSG_META_LARGE_START_SELECT - MSG_META_START_SELECT);
+}
+
+/*
+ * VisSendMouseDataToGrab: the mouse event to one grab (a copy: chunks
+ * move), with the pointer image it asks for set on its window.  The
+ * flags it returned; 0 if it did not get the event.
+ */
+static word SendMouseToGrab(optr oself, const VisMouseGrab *grab,
+			    Message msg, sword x, sword y, word inputState,
+			    MouseReturnParams *ret)
+{
+    VisMouseGrab g = *grab;
+    GrabCoords gc;
+
+    memset(ret, 0, sizeof(*ret));
+    if (!g.VMG_object) {
+	/* nobody: the content may do something about it */
+	@call oself::MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT(&g, inputState);
+	return 0;
+    }
+    if (msg == MSG_META_PTR && !(g.VMG_flags & VIFGF_PTR))
+	return 0;
+    if (!GrabConvert(oself, &g, x, y, inputState, &gc))
+	return 0;
+
+    if (g.VMG_flags & VIFGF_LARGE) {
+	struct { MouseReturnParams *ret; LargeMouseData *l; } p;
+
+	if (msg != MSG_META_PTR && (msg < MSG_META_START_SELECT ||
+				    msg > MSG_META_DRAG_OTHER))
+	    return 0;			/* has no large form */
+	p.ret = ret;
+	p.l = &gc.GC_large;
+	CObjMessageP(MF_CALL, g.VMG_object, LargeMessage(msg), &p, sizeof(p),
+		     NULL, 0);
+    } else if (g.VMG_object == oself && msg != MSG_META_PRE_PASSIVE_BUTTON &&
+	       msg != MSG_META_POST_PASSIVE_BUTTON) {
+	/* the content itself: to the child under the point (sending it
+	 * the event again would not end) */
+	VisCallChildUnderPoint(oself, msg, gc.GC_x, gc.GC_y, inputState, ret);
+    } else {
+	VisMouseParams p;
+
+	/* UIFA_IN: in the object's bounds, and the mouse in the grab's
+	 * window (a grab that wanders gives up when it leaves that) */
+	inputState &= ~(UIFA_IN << 8);
+	if (ContentPart(oself)->VCNI_impliedMouseGrab.VMG_gWin ==
+	    g.VMG_gWin && VisTestPointInBounds(g.VMG_object, gc.GC_x,
+					       gc.GC_y))
+	    inputState |= UIFA_IN << 8;
+	p.VMP_ret = ret;
+	p.VMP_x = gc.GC_x;
+	p.VMP_y = gc.GC_y;
+	p.VMP_inputState = inputState;
+	CObjMessageP(MF_CALL, g.VMG_object, msg, &p, sizeof(p), NULL, 0);
+    }
+
+    if (g.VMG_gWin) {
+	if (ret->flags & MRF_SET_POINTER_IMAGE)
+	    WinSetPtrImage(g.VMG_gWin, PIL_GADGET, ret->ptrImage);
+	else if (ret->flags & MRF_CLEAR_POINTER_IMAGE)
+	    WinSetPtrImage(g.VMG_gWin, PIL_GADGET, 0);
+    }
+    return ret->flags;
+}
+
+/* VisSendMouseDataToPassiveGrab: to every grab of a list, the flags
+ * they returned or-ed */
+static word SendMouseToPassive(optr oself, ChunkHandle list, Message msg,
+			       sword x, sword y, word inputState)
+{
+    optr arr = ConstructOptr(OptrToHandle(oself), list);
+    MouseReturnParams r;
+    word i, flags = 0;
+
+    if (!list)
+	return 0;
+    for (i = 0; i < ChunkArrayGetCount(arr); i++) {
+	VisMouseGrab g = *(VisMouseGrab *) ChunkArrayElementToPtr(arr, i,
+								  NULL);
+	flags |= SendMouseToGrab(oself, &g, msg, x, y, inputState, &r);
+    }
+    return flags;
+}
+
+/* the active grab, or else the implied one */
+static VisMouseGrab ActiveOrImplied(optr oself, Boolean *active)
+{
+    VisContentInstance *c = ContentPart(oself);
+
+    *active = c->VCNI_activeMouseGrab.VMG_object != 0;
+    return *active ? c->VCNI_activeMouseGrab : c->VCNI_impliedMouseGrab;
+}
+
+/*
+ * VisSendMouseDataToActiveOrImpliedGrab.  Without an active grab the
+ * drags and ends are those of "other" (so as not to confuse whatever
+ * happens to be under the mouse).  A replay is only allowed if the
+ * grab's object changed.
+ */
+static word SendMouseToActiveOrImplied(optr oself, Message msg, sword x,
+				       sword y, word inputState,
+				       MouseReturnParams *ret)
+{
+    Boolean active;
+    VisMouseGrab g = ActiveOrImplied(oself, &active);
+    word flags;
+
+    if (!active)
+	switch (msg) {
+	case MSG_META_DRAG_SELECT:
+	case MSG_META_DRAG_MOVE_COPY:
+	case MSG_META_DRAG_FEATURES:
+	    msg = MSG_META_DRAG_OTHER;
+	    break;
+	case MSG_META_END_SELECT:
+	case MSG_META_END_FEATURES:
+	case MSG_META_END_MOVE_COPY:	/* (no quick transfer to end yet) */
+	    msg = MSG_META_END_OTHER;
+	    break;
+	}
+    flags = SendMouseToGrab(oself, &g, msg, x, y, inputState, ret);
+    if (flags & MRF_REPLAY) {
+	optr before = g.VMG_object;
+
+	g = ActiveOrImplied(oself, &active);
+	if (g.VMG_object == before) {
+	    flags &= ~MRF_REPLAY;
+	    ret->flags = flags;
+	}
+    }
+    return flags;
+}
+
+/* VisContentMouseEvent: held up, or to the pre-passive grabs, the
+ * active or implied one, the post-passive ones (the pointer only to
+ * the active or implied one) */
+static void MouseEvent(optr oself, Message msg, sword x, sword y,
+		       word inputState, MouseReturnParams *retVal)
+{
+    VisMouseParams hp;
+    MouseReturnParams r;
+    ChunkHandle post;
+    word flags;
+
+    /* waiting, it outlives its sender's return structure */
+    hp.VMP_ret = NULL;
+    hp.VMP_x = x;
+    hp.VMP_y = y;
+    hp.VMP_inputState = inputState;
+    memset(&r, 0, sizeof(r));
+    if (HeldUp(oself, msg, &hp, sizeof(hp)))
+	goto done;
+
+    if (msg == MSG_META_PTR) {
+	do
+	    flags = SendMouseToActiveOrImplied(oself, msg, x, y, inputState,
+					       &r);
+	while (flags & MRF_REPLAY);
+	goto done;
+    }
+    post = ContentPart(oself)->VCNI_postPassiveMouseGrabList;
+    flags = SendMouseToPassive(oself,
+			       ContentPart(oself)->VCNI_prePassiveMouseGrabList,
+			       MSG_META_PRE_PASSIVE_BUTTON, x, y, inputState);
+    if (!(flags & MRF_PREVENT_PASS_THROUGH))
+	do
+	    flags = SendMouseToActiveOrImplied(oself, msg, x, y, inputState,
+					       &r);
+	while (flags & MRF_REPLAY);
+    SendMouseToPassive(oself, post, MSG_META_POST_PASSIVE_BUTTON, x, y,
+		       inputState);
+done:
+    if (retVal) {
+	memset(retVal, 0, sizeof(*retVal));
+	retVal->flags = MRF_PROCESSED;
+    }
+}
+
+@method VisContentClass, MSG_META_PTR, MSG_META_START_SELECT,
+			 MSG_META_END_SELECT, MSG_META_DRAG_SELECT,
+			 MSG_META_START_MOVE_COPY, MSG_META_END_MOVE_COPY,
+			 MSG_META_DRAG_MOVE_COPY, MSG_META_START_FEATURES,
+			 MSG_META_END_FEATURES, MSG_META_DRAG_FEATURES,
+			 MSG_META_START_OTHER, MSG_META_END_OTHER,
+			 MSG_META_DRAG_OTHER
+{
+    MouseEvent(oself, message, xPosition, yPosition, inputState, retVal);
+}
+
+@method VisContentClass, MSG_META_SCROLL_VERTICAL
+{
+    MouseEvent(oself, message, xPosition, yPosition, inputState, retVal);
+}
+
+/* VisContentUnwantedMouseEvent (no sound for a press yet) */
+@method VisContentClass, MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT
+{
+    (void) mouseGrab;
+    (void) inputState;
+}
+
+/*
+ * VisContentQueryIfPressIsInk: the active or implied grab is asked, in
+ * its coordinates; the application gets the answer (unless the grab
+ * wants to answer later, IRV_WAIT).
+ */
+@method VisContentClass, MSG_META_QUERY_IF_PRESS_IS_INK
+{
+    Boolean active;
+    VisMouseGrab g = ActiveOrImplied(oself, &active);
+    InkReturnParams ink;
+    GrabCoords gc;
+    optr app;
+
+    memset(&ink, 0, sizeof(ink));
+    if (g.VMG_object && GrabConvert(oself, &g, xPosition, yPosition, 0,
+				    &gc)) {
+	if (g.VMG_flags & VIFGF_LARGE)
+	    @call g.VMG_object::MSG_META_LARGE_QUERY_IF_PRESS_IS_INK(
+		&ink, &gc.GC_large);
+	else if (g.VMG_object == oself) {
+	    /* the child under the point (VisCompClass) */
+	    struct { InkReturnParams *r; sword x, y; } p;
+
+	    p.r = &ink;
+	    p.x = gc.GC_x;
+	    p.y = gc.GC_y;
+	    CObjCallSuperP(&VisContentClass, oself, message, &p, sizeof(p),
+			   NULL, 0);
+	} else
+	    @call g.VMG_object::MSG_META_QUERY_IF_PRESS_IS_INK(&ink, gc.GC_x,
+							       gc.GC_y);
+    }
+    if (ink.inkType == IRV_NO_REPLY)
+	ink.inkType = IRV_NO_INK;
+    *retVal = ink;
+    if (ink.inkType == IRV_WAIT)
+	return;
+    app = GeodeGetAppObject(0);
+    if (app)
+	@send app::MSG_GEN_APPLICATION_INK_QUERY_REPLY(ink.inkType,
+						       ink.destInfo);
+}
+
+/* VisContentImpliedWinChange: the window under the mouse and its
+ * object; in the content's own window (the view passes itself) the
+ * content */
+@method VisContentClass, MSG_META_IMPLIED_WIN_CHANGE
+{
+    pself->VCNI_impliedMouseGrab.VMG_gWin = win;
+    pself->VCNI_impliedMouseGrab.VMG_object =
+	win == pself->VCNI_window ? oself : inputObj;
+}
+
+/* VisContentTestIfActiveOrImpliedWin: FALSE if `window' is the active
+ * (else the implied) grab's, TRUE if not (the asm's carry) */
+@method VisContentClass, MSG_VIS_CONTENT_TEST_IF_ACTIVE_OR_IMPLIED_WIN
+{
+    Boolean active;
+    VisMouseGrab g = ActiveOrImplied(oself, &active);
+
+    return g.VMG_gWin != window;
+}
+
+/* ---------------------------------------------------------------------
+ * The grabs
+ * ------------------------------------------------------------------- */
+
+/* CopyVupAlterInputFlowDataToVisMouseGrab */
+static void GrabSetData(VisMouseGrab *g, WindowHandle win, byte flags,
+			PointDWord translation)
+{
+    g->VMG_gWin = win;
+    g->VMG_flags = flags;
+    g->VMG_translation = translation;
+}
+
+/* ChangeGrab: released, requested or forced */
+static void ChangeGrab(optr oself, byte flags, word offset, Message gained,
+		       optr object, word data)
+{
+    if (!(flags & VIFGF_GRAB))
+	FlowReleaseGrab(oself, gained, VIS_MASTER, offset, object);
+    else if (flags & VIFGF_FORCE)
+	FlowForceGrab(oself, gained, VIS_MASTER, offset, object, data);
+    else
+	FlowRequestGrab(oself, gained, VIS_MASTER, offset, object, data);
+}
+
+/* FindPassiveGrabElement: the object's element number, or -1 */
+static sword FindPassive(optr arr, optr object)
+{
+    word i, n = ChunkArrayGetCount(arr);
+
+    for (i = 0; i < n; i++)
+	if (((VisMouseGrab *) ChunkArrayElementToPtr(arr, i, NULL))
+	    ->VMG_object == object)
+	    return i;
+    return -1;
+}
+
+/* a passive grab added (in front; an object's grab is kept once) or
+ * removed */
+static void AlterPassive(optr oself, word listOffset, optr object,
+			 WindowHandle win, byte flags, PointDWord translation)
+{
+    ChunkHandle *lp = (ChunkHandle *) ((byte *) ContentPart(oself) +
+				       listOffset);
+    VisMouseGrab *g;
+    optr arr;
+    sword i;
+
+    if (!(flags & VIFGF_GRAB)) {
+	if (!*lp)
+	    return;
+	arr = ConstructOptr(OptrToHandle(oself), *lp);
+	i = FindPassive(arr, object);
+	if (i >= 0)
+	    ChunkArrayDelete(arr, ChunkArrayElementToPtr(arr, i, NULL));
+	return;
+    }
+    if (!*lp) {
+	/* AllocateGrabList: as dirty as the content (a generic one's
+	 * list is never saved) */
+	ObjChunkFlags ocf =
+	    ContentPart(oself)->VI_typeFlags & VTF_IS_GEN
+	    ? OCF_IGNORE_DIRTY
+	    : (ObjGetFlags(oself) & OCF_IGNORE_DIRTY) | OCF_DIRTY;
+	ChunkHandle ch = ChunkArrayCreate(OptrToHandle(oself),
+					  sizeof(VisMouseGrab), 0, ocf);
+
+	lp = (ChunkHandle *) ((byte *) ContentPart(oself) + listOffset);
+	*lp = ch;
+    }
+    arr = ConstructOptr(OptrToHandle(oself), *lp);
+    i = FindPassive(arr, object);
+    if (i >= 0)
+	g = ChunkArrayElementToPtr(arr, i, NULL);
+    else if (ChunkArrayGetCount(arr))
+	g = ChunkArrayInsertAt(arr, ChunkArrayElementToPtr(arr, 0, NULL), 0);
+    else
+	g = ChunkArrayAppend(arr, 0);
+    memset(g, 0, sizeof(*g));
+    g->VMG_object = object;
+    GrabSetData(g, win, flags, translation);
+}
+
+/*
+ * VisContentVupAlterInputFlow: an object grabs or releases the mouse or
+ * the keyboard here, or a passive mouse grab.  An active mouse grab
+ * goes to one that asks while nobody has it, or forces it; the same
+ * object again only brings new data.  The content tells itself when
+ * the active grab's window changed.
+ */
+@method VisContentClass, MSG_VIS_VUP_ALTER_INPUT_FLOW
+{
+    WindowHandle oldWin = pself->VCNI_activeMouseGrab.VMG_gWin;
+    VisContentInstance *c;
+
+    if (grabFlags & VIFGF_NOT_HERE)
+	return;			/* the content cannot grab for itself */
+
+    if (grabType != VIFGT_ACTIVE) {
+	if (grabFlags & VIFGF_MOUSE)
+	    AlterPassive(oself, grabType == VIFGT_PRE_PASSIVE
+			 ? CONTENT_OFFSET(VCNI_prePassiveMouseGrabList)
+			 : CONTENT_OFFSET(VCNI_postPassiveMouseGrabList),
+			 object, window, grabFlags, translation);
+    } else if (grabFlags & VIFGF_MOUSE) {
+	VisMouseGrab *g = &pself->VCNI_activeMouseGrab;
+
+	if (grabFlags & VIFGF_GRAB) {
+	    if (g->VMG_object == object) {
+		GrabSetData(g, window, grabFlags, translation);
+		goto done;
+	    }
+	    if (g->VMG_object) {
+		if (!(grabFlags & VIFGF_FORCE))
+		    goto done;
+		FlowForceGrab(oself, MSG_META_GAINED_MOUSE_EXCL, VIS_MASTER,
+			      CONTENT_OFFSET(VCNI_activeMouseGrab), 0, 0);
+	    }
+	    GrabSetData(&ContentPart(oself)->VCNI_activeMouseGrab, window,
+			grabFlags, translation);
+	}
+	/* (the BasicGrab's data word is the low half of the window) */
+	ChangeGrab(oself, grabFlags, CONTENT_OFFSET(VCNI_activeMouseGrab),
+		   MSG_META_GAINED_MOUSE_EXCL, object, (word) window);
+	g = &ContentPart(oself)->VCNI_activeMouseGrab;
+	if (!g->VMG_object)
+	    g->VMG_gWin = 0;
+	else if (g->VMG_object == object && (grabFlags & VIFGF_GRAB))
+	    g->VMG_gWin = window;
+    } else if (grabFlags & VIFGF_KBD)
+	ChangeGrab(oself, grabFlags, CONTENT_OFFSET(VCNI_kbdGrab),
+		   MSG_META_GAINED_KBD_EXCL, object, 0);
+done:
+    c = ContentPart(oself);
+    if (c->VCNI_activeMouseGrab.VMG_gWin != oldWin)
+	@call oself::MSG_VIS_CONTENT_NOTIFY_ACTIVE_MOUSE_GRAB_WIN_CHANGED();
+}
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+/* VisContentKbdChar: to the keyboard grab, else the focus, else the
+ * content sees what to do with it */
+@method VisContentClass, MSG_META_KBD_CHAR
+{
+    struct { word c, f, s; } p;
+    optr dest;
+
+    p.c = character;
+    p.f = flags;
+    p.s = state;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    pself = ContentPart(oself);
+    dest = pself->VCNI_kbdGrab.KG_OD;
+    if (!dest)
+	dest = pself->VCNI_focusExcl.FTVMC_OD;
+    if (dest)
+	@call dest::MSG_META_KBD_CHAR(character, flags, state);
+    else
+	@call oself::MSG_VIS_CONTENT_UNWANTED_KBD_EVENT(character, flags,
+							state);
+}
+
+/* VisContentUnwantedKbdEvent: up the focus hierarchy */
+@method VisContentClass, MSG_VIS_CONTENT_UNWANTED_KBD_EVENT
+{
+    (void) @call oself::MSG_META_FUP_KBD_CHAR(character, flags, state);
+}
+
+/* ---------------------------------------------------------------------
+ * Focus and target
+ * ------------------------------------------------------------------- */
+
+/* VisContentUpdateFocusExcl: the node gained or lost the focus */
+@method VisContentClass, MSG_META_LOST_FOCUS_EXCL,
+			 MSG_META_LOST_SYS_FOCUS_EXCL,
+			 MSG_META_GAINED_FOCUS_EXCL,
+			 MSG_META_GAINED_SYS_FOCUS_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       CONTENT_OFFSET(VCNI_focusExcl), message);
+}
+
+/* VisContentUpdateTargetExcl, VisContentLostTargetExcl: the view's
+ * target information again after the target was lost */
+@method VisContentClass, MSG_META_GAINED_TARGET_EXCL,
+			 MSG_META_GAINED_SYS_TARGET_EXCL,
+			 MSG_META_LOST_SYS_TARGET_EXCL,
+			 MSG_META_LOST_TARGET_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+			       VIS_MASTER, CONTENT_OFFSET(VCNI_targetExcl),
+			       message);
+    if (message == MSG_META_LOST_TARGET_EXCL)
+	UpdateViewTargetInfo(oself);
+}
+
+/* VisContentAlterFTVMCExcl: focus and target are kept here, the other
+ * hierarchies go up */
+@method VisContentClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    if (flags & MAEF_FOCUS) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL,
+				  VIS_MASTER, CONTENT_OFFSET(VCNI_focusExcl),
+				  objectWantingControl,
+				  (flags & MAEF_GRAB) | MAEF_FOCUS);
+	flags &= ~MAEF_FOCUS;
+    }
+    if (flags & MAEF_TARGET) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+				  VIS_MASTER, CONTENT_OFFSET(VCNI_targetExcl),
+				  objectWantingControl,
+				  (flags & MAEF_GRAB) | MAEF_TARGET);
+	UpdateViewTargetInfo(oself);
+	flags &= ~MAEF_TARGET;
+    }
+    if (flags & MAEF_MASK_OF_ALL_HIERARCHIES) {
+	struct { optr o; MetaAlterFTVMCExclFlags f; } p;
+
+	p.o = objectWantingControl;
+	p.f = flags;
+	CObjCallSuperP(&VisContentClass, oself, message, &p, sizeof(p), NULL,
+		       0);
+    }
+}
+
+/* VisContentGetFocus */
+@method VisContentClass, MSG_META_GET_FOCUS_EXCL
+{
+    *focusObject = pself->VCNI_focusExcl.FTVMC_OD;
+    return TRUE;
+}
+
+@method VisContentClass, MSG_VIS_VUP_QUERY_FOCUS_EXCL,
+			 MSG_VIS_FUP_QUERY_FOCUS_EXCL
+{
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->OAGP_object = pself->VCNI_focusExcl.FTVMC_OD;
+    retValue->OAGP_grabFlags = pself->VCNI_focusExcl.FTVMC_flags;
+}
+
+/* VisContentGetTarget */
+@method VisContentClass, MSG_META_GET_TARGET_EXCL
+{
+    *targetObject = pself->VCNI_targetExcl.FTVMC_OD;
+    return TRUE;
+}
+
+/* VisContentGetTargetAtTargetLevel */
+@method VisContentClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER,
+			       CONTENT_OFFSET(VCNI_targetExcl), TL_CONTENT,
+			       level, retValue);
+}
+
+/* VisContentSendClassedEvent: to the focus or the target */
+@method VisContentClass, MSG_META_SEND_CLASSED_EVENT
+{
+    optr dest;
+
+    if (whereTo != (TravelOption) TO_FOCUS &&
+	whereTo != (TravelOption) TO_TARGET) {
+	@callsuper();
+	return;
+    }
+    dest = whereTo == (TravelOption) TO_FOCUS
+	   ? pself->VCNI_focusExcl.FTVMC_OD
+	   : pself->VCNI_targetExcl.FTVMC_OD;
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo, dest, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * Passed on down
+ * ------------------------------------------------------------------- */
+
+/* CallTargetOrFirstChild: the target gets it, else the first child (a
+ * tree of one object); FALSE if there is neither */
+static Boolean CallTargetOrFirstChild(optr oself, Message msg,
+				      const void *params, word size)
+{
+    optr dest = ContentPart(oself)->VCNI_targetExcl.FTVMC_OD;
+
+    if (!dest)
+	dest = VisFirstChild(oself);
+    if (!dest)
+	return FALSE;
+    CObjMessageP(MF_CALL, dest, msg, params, size, NULL, 0);
+    return TRUE;
+}
+
+/* VisContentDefaultPassOnDownBehavior */
+@method VisContentClass, MSG_META_CONTENT_TRACK_SCROLLING
+{
+    struct { TrackScrollingParams *a; } p;
+
+    p.a = args;
+    CallTargetOrFirstChild(oself, message, &p, sizeof(p));
+}
+
+@method VisContentClass, MSG_META_LARGE_PTR, MSG_META_LARGE_START_SELECT,
+			 MSG_META_LARGE_START_MOVE_COPY,
+			 MSG_META_LARGE_START_FEATURES,
+			 MSG_META_LARGE_START_OTHER,
+			 MSG_META_LARGE_DRAG_SELECT,
+			 MSG_META_LARGE_DRAG_MOVE_COPY,
+			 MSG_META_LARGE_DRAG_FEATURES,
+			 MSG_META_LARGE_DRAG_OTHER,
+			 MSG_META_LARGE_END_SELECT,
+			 MSG_META_LARGE_END_MOVE_COPY,
+			 MSG_META_LARGE_END_FEATURES,
+			 MSG_META_LARGE_END_OTHER
+{
+    struct { MouseReturnParams *r; LargeMouseData *l; } p;
+
+    memset(retVal, 0, sizeof(*retVal));
+    p.r = retVal;
+    p.l = largeMouseDataStruct;
+    CallTargetOrFirstChild(oself, message, &p, sizeof(p));
+}
+
+@method VisContentClass, MSG_META_LARGE_QUERY_IF_PRESS_IS_INK
+{
+    struct { InkReturnParams *r; LargeMouseData *l; } p;
+
+    memset(retVal, 0, sizeof(*retVal));
+    p.r = retVal;
+    p.l = largeMouseDataStruct;
+    CallTargetOrFirstChild(oself, message, &p, sizeof(p));
+}
+
+@method VisContentClass, MSG_META_CONTENT_ENTER, MSG_META_CONTENT_LEAVE
+{
+    struct { optr v; } p;
+
+    p.v = view;
+    CallTargetOrFirstChild(oself, message, &p, sizeof(p));
+}

@@ -19,6 +19,7 @@ tokenid		0
 export VisEmptyClass
 export VisClass
 export VisCompClass
+export VisContentClass
 
 # the Vis routines in C (visC.goh, GEOS_PORT32)
 export VisCheckIfVisGrown

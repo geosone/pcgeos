@@ -88,11 +88,22 @@ void VisSaveAsInvalChunk(optr obj, ChunkHandle region);
  * Vis/visComp.goc
  * ------------------------------------------------------------------- */
 Boolean VisCompVupUpdateWinGroup(optr obj, VisUpdateMode mode);
+/* VisInvalOldBounds: the rectangle (if it is one) added to the update
+ * region */
+void VisInvalOldBounds(optr oself, VisAddRectFlags flags, sword left,
+		       sword top, sword right, sword bottom);
 void VisCompUpdateWinGroup(optr obj);
 
 /* ---------------------------------------------------------------------
  * Vis/visUtilsClass.goc (static parts of the geometry)
  * ------------------------------------------------------------------- */
 void VisSaveOldBounds(optr obj);
+
+/* ---------------------------------------------------------------------
+ * Vis/visContent.goc
+ * ------------------------------------------------------------------- */
+/* VUM_NOW if the content may be updated (its view's window is there and
+ * it is linked to the view), else VUM_MANUAL */
+VisUpdateMode VisContentGetVUM(optr obj);
 
 #endif

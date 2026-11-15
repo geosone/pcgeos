@@ -1566,7 +1566,12 @@ the caller's buffer. A message to optr 0 is ignored.
   `GeodeFlushQueue`, `QueuePostMessage`, `QueueGetMessage`,
   `CMessageDispatchP`, `ObjDispatchMessage`, `ObjFreeMessage`,
   `ObjGetMessageInfo`, `MessageSetDestination`, `ObjDuplicateMessage`,
-  `ObjSetEventInfo`. `ObjGetMessageData` has no registers to return.
+  `ObjSetEventInfo`. `ObjGetMessageData` has no registers to return:
+  `ObjGetMessageParams(event, &size)` gives the parameter structure,
+  `ObjSetMessageParams(event, params, size)` replaces it by one of the
+  same size. `QueuePeekLastMessage(queue)` is the last event waiting on
+  a queue the caller alone posts to and empties (0: none). The two
+  stand in for the combine routine of `MF_CUSTOM`.
 
 **Method calls** (`ObjCallMethodTable`): from the object's class up the
 superclasses, through the thunks of section 5. `pself` is the chunk, or
@@ -4687,8 +4692,60 @@ visual classes of `Library/User/Vis`:
     `MSG_META_MUP_ALTER_FTVMC_EXCL` for an object;
   - not yet: the IACP completion message that
     `FlowDestroyMessageInMessage` dispatched instead of freeing.
+- **`VisContentClass`** (`Vis/visContent.goc`, after
+  `visContentClass.asm` and `visContentCommon.asm`): the top of a tree
+  shown in a view's window, and its input node.
+  - The view: `MSG_META_CONTENT_SET_VIEW`, `_VIEW_WIN_OPENED`,
+    `_VIEW_OPENING` (linked up to the view, made visible),
+    `_VIEW_SIZE_CHANGED`, `_VIEW_ORIGIN_CHANGED`,
+    `_VIEW_SCALE_FACTOR_CHANGED`, `_VIEW_CLOSING`, `_VIEW_WIN_CLOSED`.
+    The content's geometry follows the view where
+    `VCNA_SAME_WIDTH_AS_VIEW`/`_HEIGHT_` say so; the view is told the
+    document bounds. A content is only updated "now" once its view's
+    window is there and it is linked (`VisContentGetVUM`, also in
+    `VisCompClass`'s `MSG_VIS_VUP_UPDATE_WIN_GROUP`).
+  - Mouse events go to the pre-passive grabs, the active grab or else
+    the implied one, then the post-passive grabs; the pointer only to
+    the active or implied one. A grab gets them in its coordinates:
+    relative to its window, less its translation, small, or large
+    (32.16 in the document, through the view's scale factor and origin
+    with `VCNA_WINDOW_COORDINATE_MOUSE_EVENTS`). Without an active grab
+    drags and ends are those of "other"; a replay
+    (`MRF_REPLAY`) happens if the grab's object changed.
+  - `MSG_VIS_VUP_ALTER_INPUT_FLOW` keeps the grabs: the active mouse
+    grab and the keyboard grab through the Flow routines, the passive
+    lists as chunk arrays of `VisMouseGrab`.
+  - Focus and target below the content are `HierarchicalGrab`s
+    (`MSG_META_MUP_ALTER_FTVMC_EXCL`, the gained and lost messages, the
+    queries, classed events `TO_FOCUS` and `TO_TARGET`); the view gets
+    `MSG_GEN_VIEW_UPDATE_CONTENT_TARGET_INFO`.
+  - Input held up (`MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW`) waits in a
+    queue of the content and goes to the front of the thread's queue
+    when it may flow again.
+  - Port32:
+    - a `VisMouseGrab` has the 32-bit window handle, so the Flow
+      routines' data word is only its low half; the content sets the
+      whole handle itself;
+    - a grab is used as a copy while events are sent (chunks move);
+      `MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT` gets a pointer to that
+      copy;
+    - an event that is held up is recorded again with its parameter
+      structure. The `MouseReturnParams` pointer of a mouse event is
+      cleared in it: the sender has gone on (it got `MRF_PROCESSED`);
+    - pointer events are combined in the hold-up queue (the asm passed
+      a routine with `MF_CUSTOM`) with the kernel's new
+      `QueuePeekLastMessage(queue)` and `ObjSetMessageParams(event,
+      params, size)` (`object.h`);
+    - `MSG_GEN_VIEW_UPDATE_CONTENT_TARGET_INFO` is called, not sent:
+      its parameter is a pointer to the caller's structure;
+    - `MSG_VIS_CONTENT_TEST_IF_ACTIVE_OR_IMPLIED_WIN` returns the asm's
+      carry: FALSE for the window of the active (else implied) grab;
+    - not yet: ink (`MSG_META_NOTIFY_WITH_DATA_BLOCK` with `GWNT_INK`
+      needs `VisCallChildrenInBounds`), the end of a quick transfer
+      (`ClipboardHandleEndMoveCopy`), the sound for an unwanted press,
+      the EC messages `MSG_VIS_VUP_EC_ENSURE_*`; `CLASSF_DISCARD_ON_SAVE`
+      (goc has no keyword for it; nothing is saved to state yet).
 - **Not yet:**
-  - `VisContentClass`;
   - the Generic UI, so `VTF_IS_GEN` is never set, and
     `MSG_META_UPDATE_WINDOW` and `MSG_GEN_GUP_ENSURE_UPDATE_WINDOW` are
     not handled;
@@ -4710,6 +4767,13 @@ visual classes of `Library/User/Vis`:
   a composite in a composite. A node object with two leaves checks the
   Flow routines: who gets which message as grabs are asked for, forced
   and released, and as the node gains and loses its exclusives.
+  A `VisContentClass` with two gadgets and a stand-in for its view
+  (goc's `@uses GenViewClass` lets a class handle the view's messages)
+  is opened in a window: its geometry, the document bounds and target
+  information the view gets, mouse events to implied, active and
+  passive grabs with a replay, large and window coordinates, keys to
+  focus and keyboard grab, classed events, and input held up and let go
+  again (pointer events combined).
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 

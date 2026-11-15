@@ -1,6 +1,6 @@
 # The user interface library (ui.geo) in C, beside the asm: the visible
-# classes (Vis/) and the Flow utilities (User/) so far.  ui32.gp has the parameters; the 16-bit build
-# keeps ui.gp.  Geodes need gcc or clang (module loading).
+# classes (Vis/) and the Flow utilities (User/) so far.  ui32.gp has the
+# parameters; the 16-bit build keeps ui.gp.  Geodes need gcc or clang (module loading).
 include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
 find_package(Python3 COMPONENTS Interpreter)
 if(NOT (GEOS_GOC AND Python3_Interpreter_FOUND AND
@@ -14,6 +14,7 @@ geos_geode(ui GP ui32.gp
            GOC ${ui}/Vis/visClass.goc ${ui}/Vis/visComp.goc
                ${ui}/Vis/visUtilsResident.goc
                ${ui}/Vis/visCompGeometry.goc
+               ${ui}/Vis/visContent.goc
                ${ui}/User/userFlowUtils.goc
            INCLUDES ${ui})
 set(ui_GEO ${ui_GEO} PARENT_SCOPE)

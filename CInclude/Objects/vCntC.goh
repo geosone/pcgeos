@@ -44,7 +44,7 @@ typedef ByteFlags VisContentAttrs;
 @message void MSG_VIS_CONTENT_RESUME_INPUT_FLOW();  /*XXX*/
 @message void MSG_VIS_CONTENT_DISABLE_HOLD_UP();  /*XXX*/
 @message void MSG_VIS_CONTENT_ENABLE_HOLD_UP();  /*XXX*/
-@message Boolean MSG_VIS_CONTENT_TEST_IF_ACTIVE_OR_IMPLIED_WIN(WinHandle window =  bp) = carry;  /*XXX*/
+@message Boolean MSG_VIS_CONTENT_TEST_IF_ACTIVE_OR_IMPLIED_WIN(WindowHandle window =  bp) = carry;  /*XXX*/
 @message void MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT(VisMouseGrab *mouseGrab = cx:dx, word inputState = bp);  /*XXX*/
 @message void MSG_VIS_CONTENT_UNWANTED_KBD_EVENT(word character = cx, word flags = dx, word state = bp);  /*XXX*/
 @message void MSG_VIS_CONTENT_REMOTE_OBJ_MESSAGE_VIA_HOLD_UP_QUEUE();  /* Can't be accessed in C */

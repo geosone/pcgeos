@@ -1,8 +1,8 @@
 /*
  * test_ui_vis.c -- the visual classes of the UI library (Library/User/Vis:
- * VisClass, VisCompClass, the geometry manager) in a window, and the Flow
- * routines (Library/User/User), through the process geode uivis
- * (Geode/uivis.goc).
+ * VisClass, VisCompClass, the geometry manager, VisContentClass) in
+ * windows, and the Flow routines (Library/User/User), through the process
+ * geode uivis (Geode/uivis.goc).
  *
  * The root window is on a fake video driver that records the rectangles
  * (DR_VID_RECT).  The process's win group opens a window on it; the steps:
@@ -22,7 +22,15 @@
  *      a composite in a composite;
  *  10. the Flow routines: a basic grab, a node of a hierarchy gaining
  *      and losing its exclusives, the target at a level, classed
- *      events.
+ *      events;
+ *  11. a VisContentClass and its view: the view's window, the content
+ *      opened in it, its geometry, the document bounds, drawn;
+ *  12. as large as the view; mouse events to the implied grab, an
+ *      active one (asked for, forced, released), passive ones, a
+ *      replay, a large grab, window coordinates;
+ *  13. keys to the focus or the keyboard grab, focus and target below
+ *      the content, classed events to them, input held up;
+ *  14. the input that was held up has come; the view closed.
  */
 #include "kernelC.h"
 #include "Win/winInt.h"
@@ -48,6 +56,9 @@ typedef struct {
     WindowHandle	UVS_win;
     word		UVS_failLines[8];
     word		UVS_flow[3][4];
+    word		UVS_cdraws[2];
+    WindowHandle	UVS_cwin;
+    /* (more, for the geode only) */
 } UVState;
 
 static int fails;
@@ -202,6 +213,22 @@ int main(void)
     /* 10: the Flow routines (checked in the geode) */
     step(10);
 
+    /* 11: the content in its window at 300, 100: the gadgets drawn */
+    nRects = 0;
+    step(11);
+    CHECK(st->UVS_cwin != 0);
+    WAIT_FOR(st->UVS_cdraws[0] && st->UVS_cdraws[1]);
+    CHECK(st->UVS_cdraws[0] == 1 && st->UVS_cdraws[1] == 1);
+    CHECK(Within(C_GREEN, 300, 100, 350, 140));
+    CHECK(Within(C_CYAN, 300, 143, 330, 163));
+
+    /* 12 to 14: mouse, keyboard, focus and target, input held up, the
+     * view closed (checked in the geode) */
+    step(12);
+    step(13);
+    step(14);
+    CHECK(!st->UVS_cwin);
+
     printf("geode checks: %u, failed %u (first at uivis.goc line %u)\n",
 	   st->UVS_checks, st->UVS_fails, st->UVS_failLine);
     {
@@ -210,7 +237,7 @@ int main(void)
 	for (i = 0; i < st->UVS_fails && i < 8; i++)
 	    printf("  failed: uivis.goc line %u\n", st->UVS_failLines[i]);
     }
-    CHECK(st->UVS_checks >= 100 && !st->UVS_fails);
+    CHECK(st->UVS_checks >= 179 && !st->UVS_fails);
 
     /* detach: the process goes, and with it the library */
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,
