@@ -71,6 +71,27 @@ static void MetaGetOptr(void *pself, optr oself, Message m, void *params,
     *(optr *) reply = oself;
 }
 
+/* ObjMetaGetTargetAtTargetLevel: an object that has no target below
+ * it is the target at level 0 (TL_TARGET), with its class; the other
+ * levels are the UI's to recognize */
+static void MetaGetTargetAtTargetLevel(void *pself, optr oself, Message m,
+				       void *params, void *reply)
+{
+    struct {
+	struct { ClassStruct *cls; optr target; } *ret;
+	int level;
+    } *p = params;
+
+    (void) pself; (void) m; (void) reply;
+    if (p->level) {
+	p->ret->cls = NULL;
+	p->ret->target = 0;
+    } else {
+	p->ret->cls = ClassOfDest(oself);
+	p->ret->target = oself;
+    }
+}
+
 static void MetaBlockFree(void *pself, optr oself, Message m, void *params,
 			  void *reply)
 {
@@ -490,6 +511,7 @@ static const Message metaMessages[] = {
     KMSG_META_GET_CLASS,
     KMSG_META_IS_OBJECT_IN_CLASS,
     KMSG_META_GET_OPTR,
+    KMSG_META_GET_TARGET_AT_TARGET_LEVEL,
     KMSG_META_BLOCK_FREE,
     KMSG_META_OBJ_FREE,
     KMSG_META_FINAL_OBJ_FREE,
@@ -528,6 +550,7 @@ static GocMethodThunk *const metaMethods[] = {
     MetaGetClass,
     MetaIsObjectInClass,
     MetaGetOptr,
+    MetaGetTargetAtTargetLevel,
     MetaBlockFree,
     MetaObjFree,
     MetaFinalObjFree,

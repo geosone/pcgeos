@@ -266,6 +266,13 @@ const void *KernelEventParams(EventHandle event, dword *size)
     return e->E_params;
 }
 
+/* the same for geodes (object.h): what ObjGetMessageData was for the
+ * registers */
+const void *ObjGetMessageParams(EventHandle event, dword *size)
+{
+    return KernelEventParams(event, size);
+}
+
 /* ---------------------------------------------------------------------
  * Queues
  * ------------------------------------------------------------------- */

@@ -278,6 +278,9 @@ extern void *CObjCallSuperP(ClassStruct *superOf, optr dest, Message message,
 			    void *reply, dword replySize);
 extern void *CMessageDispatchP(EventHandle event, word flags,
 			       void *reply, dword replySize);
+/* the parameter structure of a recorded event (and its size), in place
+ * of ObjGetMessageData's registers */
+extern const void *ObjGetMessageParams(EventHandle event, dword *size);
 #endif
 
 extern dword
