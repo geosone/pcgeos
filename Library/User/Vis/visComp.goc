@@ -13,9 +13,11 @@
  * children of a composite that does not manage them itself
  * (VCGA_CUSTOM_MANAGE_CHILDREN).
  *
+ * A generic win group is shown and hidden by MSG_META_UPDATE_WINDOW
+ * (VisCompUpdateWindow): visible if its generic branch is usable, not
+ * minimized and the application not detaching, built first.
+ *
  * Port32, not yet (Port32/ABI.md section 13x):
- *   - MSG_META_UPDATE_WINDOW and MSG_GEN_GUP_ENSURE_UPDATE_WINDOW (they
- *     need the Generic UI);
  *   - MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK.
  */
 @include "uiInt.goh"
@@ -470,4 +472,150 @@ void VisInvalOldBounds(optr oself, VisAddRectFlags flags, sword left,
     VisInvalOldBounds(oself, f, l, t, r, t + m.R_top);
     VisInvalOldBounds(oself, f, r - m.R_right, t, r, b);
     VisInvalOldBounds(oself, f, l, b - m.R_bottom, r, b);
+}
+
+/* ---------------------------------------------------------------------
+ * A generic win group's window (MSG_META_UPDATE_WINDOW)
+ * ------------------------------------------------------------------- */
+
+/* EnsureGenWinGroupSpecBuilt: a tree built but not realized is linked
+ * into its visual parent again; else the branch is built */
+static void EnsureBuilt(optr obj)
+{
+    VisInstance *v = VisLock(obj);
+    SpecBuildFlags f;
+
+    if (v->VI_specAttrs & SA_TREE_BUILT_BUT_NOT_REALIZED) {
+	optr p = v->VI_link.LP_next;
+	Boolean content = (v->VI_typeFlags & VTF_IS_CONTENT) != 0;
+	v->VI_specAttrs &= ~SA_TREE_BUILT_BUT_NOT_REALIZED;
+	if (!content) {
+	    v->VI_link.LP_next = 0;
+	    p = ConstructOptr(OptrToHandle(p), OptrToChunk(p) & ~1);
+	}
+	VisUnlock(obj);
+	if (!content)
+	    @call p::MSG_VIS_ADD_CHILD(obj, CCO_FIRST);
+	return;
+    }
+    VisUnlock(obj);
+    if (VisCheckIfSpecBuilt(obj))
+	return;
+    f = SBF_WIN_GROUP | SBF_IN_UPDATE_WIN_GROUP | VUM_NOW;
+    if (GenCheckIfFullyEnabled(obj, TRUE))
+	f |= SBF_VIS_PARENT_FULLY_ENABLED;
+    @call obj::MSG_SPEC_BUILD_BRANCH(f);
+}
+
+/* SetGenWinGroupNotVisible: closed now; a usable one stays built but
+ * out of its visual parent (a one-way link, SA_TREE_BUILT_BUT_NOT_
+ * REALIZED) */
+static void SetNotVisible(optr obj, GenBranchInfo info)
+{
+    VisInstance *v = VisLock(obj);
+    optr parent;
+    Boolean content;
+
+    if (!(v->VI_attrs & VA_VISIBLE)) {
+	VisUnlock(obj);
+	return;
+    }
+    v->VI_attrs &= ~VA_VISIBLE;
+    VisUnlock(obj);
+    VisCompVupUpdateWinGroup(obj, VUM_NOW);
+    if (!(info & GBI_USABLE))
+	return;
+    v = VisLock(obj);
+    content = (v->VI_typeFlags & VTF_IS_CONTENT) != 0;
+    VisUnlock(obj);
+    parent = VisFindParent(obj);
+    if (!parent)
+	return;
+    if (!content)
+	@call parent::MSG_VIS_REMOVE_CHILD(obj, 0);
+    v = VisLock(obj);
+    v->VI_link.LP_next = ConstructOptr(OptrToHandle(parent),
+				       OptrToChunk(parent) | 1);
+    v->VI_specAttrs |= SA_TREE_BUILT_BUT_NOT_REALIZED;
+    VisUnlock(obj);
+}
+
+static void SetVisible(optr obj, VisUpdateMode mode)
+{
+    VisInstance *v = VisLock(obj);
+    Boolean visible = (v->VI_attrs & VA_VISIBLE) != 0;
+
+    VisUnlock(obj);
+    if (visible)
+	return;
+    EnsureBuilt(obj);
+    VisLock(obj)->VI_attrs |= VA_VISIBLE;
+    VisUnlock(obj);
+    VisCompVupUpdateWinGroup(obj, mode);
+}
+
+/*
+ * VisCompUpdateWindow: a generic win group visible if its branch is
+ * usable and not minimized, it is attached and realizable and the
+ * application is not detaching (the branch up made sure of first); else
+ * not visible (and not realizable if it is not usable).
+ */
+void VisCompUpdateWindow(optr obj, UpdateWindowFlags flags,
+			 VisUpdateMode mode)
+{
+    VisInstance *v = VisLock(obj);
+    GenBranchInfo info;
+    SpecAttrs sa;
+
+    if (!(v->VI_typeFlags & VTF_IS_WIN_GROUP)) {
+	VisUnlock(obj);
+	return;
+    }
+    VisUnlock(obj);
+    info = VisGetGenBranchInfo(obj);
+    v = VisLock(obj);
+    if (!(info & GBI_USABLE))
+	v->VI_specAttrs &= ~SA_REALIZABLE;
+    sa = v->VI_specAttrs;
+    VisUnlock(obj);
+    if (!(info & GBI_USABLE) || !(sa & SA_ATTACHED) ||
+	info & GBI_BRANCH_MINIMIZED || flags & UWF_DETACHING ||
+	!(sa & SA_REALIZABLE)) {
+	SetNotVisible(obj, info);
+	return;
+    }
+    {
+	struct { UpdateWindowFlags f; VisUpdateMode m; } p;
+	Boolean r;
+	p.f = flags;
+	p.m = mode;
+	GenCallParent(obj, MSG_GEN_GUP_ENSURE_UPDATE_WINDOW, &p, sizeof(p),
+		      &r, sizeof(r));
+    }
+    SetVisible(obj, mode);
+}
+
+@method VisCompClass, MSG_META_UPDATE_WINDOW
+{
+    VisCompUpdateWindow(oself, updateFlags, updateMode);
+}
+
+/* VisCompGenGupEnsureUpdateWindow: the parents first; an unrealized win
+ * group here is updated too.  Answered: the branch is built from here */
+@method VisCompClass, MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW
+{
+    struct { UpdateWindowFlags f; VisUpdateMode m; } p;
+    Boolean r;
+
+    if (pself->VI_attrs & VA_REALIZED)
+	return TRUE;
+    p.f = updateFlags;
+    p.m = updateMode;
+    GenCallParent(oself, message, &p, sizeof(p), &r, sizeof(r));
+    if (updateFlags & UWF_DETACHING ||
+	!(VisPart(oself)->VI_typeFlags & VTF_IS_WIN_GROUP))
+	return TRUE;
+    @call oself::MSG_META_UPDATE_WINDOW(updateFlags & ~UWF_FROM_WINDOWS_LIST,
+					updateMode);
+    return TRUE;
 }

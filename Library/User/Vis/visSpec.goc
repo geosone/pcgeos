@@ -1,0 +1,586 @@
+/*
+ * visSpec.goc -- the routines of the specific part of a generic object
+ * (after visSpecUtils.asm, and VisCreateMonikerChunk of visClass.asm):
+ * where its visual object goes in the visual tree, building the branch
+ * when it becomes usable, the generic branch's state, the position
+ * hints, and making moniker chunks.  VisClass's handlers of the
+ * MSG_SPEC_* messages are in visClass.goc.
+ *
+ * The routines take the generic object's optr; its block must be run by
+ * the calling thread (Port32/ABI.md section 13x).
+ *
+ * Port32, not yet: VMDT_TOKEN monikers (the token database), the size
+ * conversions (VisConvertSpecVisSize), navigation and mnemonics.
+ */
+@include "uiInt.goh"
+#include <string.h>
+#include <localize.h>
+#include <stdint.h>
+
+/* VisSpecBuildSetEnabledState: fully enabled if the visual parent is and
+ * the object is enabled */
+void VisSpecBuildSetEnabledState(optr obj, SpecBuildFlags flags)
+{
+    VisInstance *v = VisLock(obj);
+
+    v->VI_attrs &= ~VA_FULLY_ENABLED;
+    if (flags & SBF_VIS_PARENT_FULLY_ENABLED &&
+	(!(v->VI_typeFlags & VTF_IS_GEN) || GenPart(obj)->GI_states &
+					    GS_ENABLED))
+	VisPart(obj)->VI_attrs |= VA_FULLY_ENABLED;
+    VisUnlock(obj);
+}
+
+/*
+ * VisGetVisParent: the visual parent the object is added to: its
+ * generic parent unless the object (SA_CUSTOM_VIS_PARENT) or that parent
+ * (SA_CUSTOM_VIS_PARENT_FOR_CHILD) chooses another.  With the generic
+ * parent (and not for a win group), the object is added within the tree
+ * being built (SBF_VIS_PARENT_WITHIN_SCOPE_OF_TREE_BUILD).
+ */
+optr VisGetVisParent(optr obj, SpecBuildFlags *flags)
+{
+    optr gen = GenFindParent(obj), vp = gen, r;
+    SpecAttrs sa = VisLock(obj)->VI_specAttrs;
+    VisTypeFlags t;
+
+    VisUnlock(obj);
+    if (sa & SA_CUSTOM_VIS_PARENT) {
+	r = @call obj::MSG_SPEC_GET_VIS_PARENT(*flags);
+	if (r) {
+	    vp = r;
+	    goto compare;
+	}
+    }
+    if (!(*flags & SBF_WIN_GROUP) && gen) {
+	SpecAttrs psa = VisLock(gen)->VI_specAttrs;
+	VisUnlock(gen);
+	if (psa & SA_CUSTOM_VIS_PARENT_FOR_CHILD) {
+	    r = @call gen::MSG_SPEC_DETERMINE_VIS_PARENT_FOR_CHILD(obj);
+	    if (r) {
+		vp = r;
+		goto compare;
+	    }
+	}
+    }
+compare:
+    if (vp != gen)
+	return vp;
+    t = VisLock(obj)->VI_typeFlags;
+    VisUnlock(obj);
+    if (!(t & VTF_IS_WIN_GROUP))
+	*flags |= SBF_VIS_PARENT_WITHIN_SCOPE_OF_TREE_BUILD;
+    return vp;
+}
+
+/*
+ * VisGetSpecificVisObject: the visual object of the generic object for
+ * the win group part (SBF_WIN_GROUP) or the other part: the object
+ * itself if it is that part (unless MSG_SPEC_GET_SPECIFIC_VIS_OBJECT
+ * answers), else none.
+ */
+optr VisGetSpecificVisObject(optr obj, SpecBuildFlags flags)
+{
+    VisInstance *v;
+    Boolean wg;
+    optr r;
+
+    if (!VisCheckIfVisGrown(obj))
+	return 0;
+    v = VisLock(obj);
+    if (!(v->VI_specAttrs & SA_SIMPLE_GEN_OBJ)) {
+	VisUnlock(obj);
+	r = @call obj::MSG_SPEC_GET_SPECIFIC_VIS_OBJECT(flags);
+	if (r)
+	    return r;
+	v = VisLock(obj);
+    }
+    wg = (v->VI_typeFlags & VTF_IS_WIN_GROUP) != 0;
+    VisUnlock(obj);
+    return wg == ((flags & SBF_WIN_GROUP) != 0) ? obj : 0;
+}
+
+/* FindVisParentMatch: a generic sibling whose visual object is a child
+ * of the visual parent; its position there */
+typedef struct {
+    optr	visParent;
+    SpecBuildFlags flags;
+    sword	pos;		/* -1: none yet */
+} MatchData;
+
+static Boolean MatchCallback(optr parent, optr child, void *data)
+{
+    MatchData *d = data;
+    optr vo;
+
+    (void) parent;
+    if (d->flags & SBF_SKIP_CHILD) {
+	d->flags &= ~SBF_SKIP_CHILD;
+	return FALSE;
+    }
+    vo = VisGetSpecificVisObject(child, d->flags);
+    if (!vo || !VisCheckIfSpecBuilt(vo) || VisFindParent(vo) != d->visParent)
+	return FALSE;
+    d->pos = (sword) @call d->visParent::MSG_VIS_FIND_CHILD(vo);
+    return !(d->flags & SBF_FIND_LAST);
+}
+
+/*
+ * VisAddChildRelativeToGen: the visual object of genObj added to its
+ * visual parent in the order of the generic tree: before the first
+ * generic sibling to the right that is there already, else after the
+ * last one there, else last.  Within a tree build that goes in order,
+ * last.
+ */
+void VisAddChildRelativeToGen(optr genObj, optr visObj, optr visParent,
+			      SpecBuildFlags flags)
+{
+    word pos = CCO_LAST;
+
+    if (!(flags & SBF_TREE_BUILD &&
+	  flags & SBF_VIS_PARENT_WITHIN_SCOPE_OF_TREE_BUILD)) {
+	optr gp = GenFindParent(genObj);
+	MatchData d;
+
+	d.visParent = visParent;
+	d.pos = -1;
+	if (gp && !(flags & SBF_TREE_BUILD)) {
+	    d.flags = flags | SBF_SKIP_CHILD;
+	    ObjCompProcessChildren(gp, genObj,
+				   OCCT_SAVE_PARAMS_DONT_TEST_ABORT, &d,
+				   word_offsetof(GenBase, Gen_offset),
+				   word_offsetof(GenInstance, GI_comp),
+				   word_offsetof(GenInstance, GI_link),
+				   MatchCallback);
+	    if (d.pos >= 0)
+		pos = (word) d.pos;
+	}
+	if (gp && d.pos < 0) {
+	    d.flags = (flags & ~SBF_SKIP_CHILD) | SBF_FIND_LAST;
+	    ObjCompProcessChildren(gp, 0, OCCT_SAVE_PARAMS_DONT_TEST_ABORT,
+				   &d, word_offsetof(GenBase, Gen_offset),
+				   word_offsetof(GenInstance, GI_comp),
+				   word_offsetof(GenInstance, GI_link),
+				   MatchCallback);
+	    if (d.pos >= 0)
+		pos = (word) (d.pos + 1);
+	}
+    }
+    @call visParent::MSG_VIS_ADD_CHILD(visObj, pos);
+}
+
+/* ---------------------------------------------------------------------
+ * The position hints (VisSpecCheckForPosHints)
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    optr	obj;
+    sword	x, y;
+    Boolean	found;
+} PosData;
+
+/* MakePositionAbsolute: relative to the visual parent unless that is a
+ * window */
+static void Absolute(optr obj, sword *x, sword *y)
+{
+    VisTypeFlags t = 0;
+    XYValueAsDWord p = 0;
+
+    VisCallParent(obj, MSG_VIS_GET_TYPE_FLAGS, NULL, 0, &t, sizeof(t));
+    if (t & VTF_IS_WINDOW)
+	return;
+    VisCallParent(obj, MSG_VIS_GET_POSITION, NULL, 0, &p, sizeof(p));
+    *x = (sword) (*x + DWORD_X(p));
+    *y = (sword) (*y + DWORD_Y(p));
+}
+
+static void PosHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		    word dataType, void *handlerData)
+{
+    PosData *d = handlerData;
+    void *data = extra;
+    sword x, y;
+    optr other;
+    Rectangle r;
+    SizeAsDWord s;
+
+    (void) mh;
+    (void) chnk;
+    switch (dataType) {
+    case ATTR_GEN_POSITION:
+	x = ((Point *) data)->P_x;
+	y = ((Point *) data)->P_y;
+	Absolute(d->obj, &x, &y);
+	d->x = x;
+	d->y = y;
+	break;
+    case ATTR_GEN_POSITION_X:
+	x = *(sword *) data;
+	y = 0;
+	Absolute(d->obj, &x, &y);
+	d->x = x;
+	break;
+    case ATTR_GEN_POSITION_Y:
+	x = 0;
+	y = *(sword *) data;
+	Absolute(d->obj, &x, &y);
+	d->y = y;
+	break;
+    case HINT_ALIGN_LEFT_EDGE_WITH_OBJECT:
+    case HINT_ALIGN_TOP_EDGE_WITH_OBJECT: {
+	XYValueAsDWord p;
+	other = *(optr *) data;
+	p = @call other::MSG_VIS_GET_POSITION();
+	if (dataType == HINT_ALIGN_LEFT_EDGE_WITH_OBJECT)
+	    d->x = DWORD_X(p);
+	else
+	    d->y = DWORD_Y(p);
+	break;
+    }
+    case HINT_ALIGN_RIGHT_EDGE_WITH_OBJECT:
+    case HINT_ALIGN_BOTTOM_EDGE_WITH_OBJECT:
+	other = *(optr *) data;
+	@call other::MSG_VIS_GET_BOUNDS(&r);
+	s = VisGetSize(d->obj);
+	if (dataType == HINT_ALIGN_RIGHT_EDGE_WITH_OBJECT)
+	    d->x = (sword) (r.R_right - DWORD_WIDTH(s));
+	else
+	    d->y = (sword) (r.R_bottom - DWORD_HEIGHT(s));
+	break;
+    default:
+	return;
+    }
+    d->found = TRUE;
+}
+
+static VarDataCHandler posHints[] = {
+    { ATTR_GEN_POSITION, PosHint },
+    { ATTR_GEN_POSITION_X, PosHint },
+    { ATTR_GEN_POSITION_Y, PosHint },
+    { HINT_ALIGN_LEFT_EDGE_WITH_OBJECT, PosHint },
+    { HINT_ALIGN_TOP_EDGE_WITH_OBJECT, PosHint },
+    { HINT_ALIGN_RIGHT_EDGE_WITH_OBJECT, PosHint },
+    { HINT_ALIGN_BOTTOM_EDGE_WITH_OBJECT, PosHint },
+};
+
+/* the position the hints ask for (starting from the object's own);
+ * FALSE if it has none */
+Boolean VisSpecCheckForPosHints(optr obj, sword *x, sword *y)
+{
+    PosData d;
+    VisInstance *v = VisLock(obj);
+
+    d.obj = obj;
+    d.x = v->VI_bounds.R_left;
+    d.y = v->VI_bounds.R_top;
+    d.found = FALSE;
+    ObjVarScanData(obj, sizeof(posHints) / sizeof(posHints[0]), posHints,
+		   &d);
+    VisUnlock(obj);
+    *x = d.x;
+    *y = d.y;
+    return d.found;
+}
+
+/* ---------------------------------------------------------------------
+ * Building and unbuilding the branch
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    Message	msg;
+    const void	*params;
+    word	paramSize;
+    byte	flags;
+} GenFlagData;
+
+/* CCWFS_callBack: usable children (grown first), with one of the
+ * VisOptFlags if any are given; win groups only with a dual build */
+static Boolean GenFlagCallback(optr parent, optr child, void *data)
+{
+    GenFlagData *d = data;
+    VisInstance *v;
+    Boolean send;
+
+    (void) parent;
+    ObjLockObjBlock(OptrToHandle(child));
+    if (!((VisBase *) ObjDeref(child, 0))->Vis_offset)
+	ObjInitializePart(child, word_offsetof(VisBase, Vis_offset));
+    v = VisPart(child);
+    send = GenPart(child)->GI_states & GS_USABLE &&
+	   (!d->flags || v->VI_optFlags & d->flags) &&
+	   (!(v->VI_typeFlags & VTF_IS_WIN_GROUP) ||
+	    v->VI_specAttrs & SA_USES_DUAL_BUILD);
+    MemUnlock(OptrToHandle(child));
+    if (send)
+	CObjMessageP(MF_CALL, child, d->msg, (void *) d->params,
+		     d->paramSize, NULL, 0);
+    return FALSE;
+}
+
+void VisIfFlagSetCallGenChildren(optr obj, Message msg, const void *params,
+				 word paramSize, byte flags)
+{
+    GenFlagData d;
+
+    d.msg = msg;
+    d.params = params;
+    d.paramSize = paramSize;
+    d.flags = flags;
+    GenCallChildren(obj, GenFlagCallback, &d);
+}
+
+/*
+ * VisSetNonWinGroupUsable: a generic object that is not a win group
+ * becomes usable: if its visual parent is built, the branch is built,
+ * the parent's geometry marked invalid and, if the parent is realized
+ * (or usable), its window.
+ */
+void VisSetNonWinGroupUsable(optr obj, VisUpdateMode mode)
+{
+    SpecBuildFlags f = 0;
+    optr vp = VisGetVisParent(obj, &f), vo;
+    Boolean built;
+    VisAttrs a;
+    VisInstance *v;
+    EventHandle ev;
+
+    if (!vp)
+	return;
+    built = VisCheckIfSpecBuilt(vp);
+    v = VisLock(vp);
+    a = v->VI_attrs;
+    if (v->VI_typeFlags & VTF_IS_GEN && GenPart(vp)->GI_states & GS_USABLE)
+	a |= VA_REALIZED;
+    VisUnlock(vp);
+    if (!built)
+	return;
+    f = (SpecBuildFlags) (mode & SBF_UPDATE_MODE);
+    if (GenCheckIfFullyEnabled(obj, FALSE))
+	f |= SBF_VIS_PARENT_FULLY_ENABLED;
+    @call obj::MSG_SPEC_BUILD_BRANCH(f);
+    vo = VisGetSpecificVisObject(obj, 0);
+    if (!vo)
+	return;
+    ev = @record VisClass::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID,
+						VUM_MANUAL);
+    @call vo::MSG_VIS_CALL_PARENT(ev);
+    if (a & VA_REALIZED)
+	@call vo::MSG_VIS_MARK_INVALID(VOF_WINDOW_INVALID, mode);
+}
+
+/* UnbuildableCallBack: usable, grown children unbuilt */
+static Boolean UnbuildCallback(optr parent, optr child, void *data)
+{
+    SpecBuildFlags f = *(SpecBuildFlags *) data;
+    GenStates st;
+
+    (void) parent;
+    st = GenLock(child)->GI_states;
+    GenUnlock(child);
+    if (st & GS_USABLE && GenCheckIfSpecGrown(child))
+	@call child::MSG_SPEC_UNBUILD_BRANCH(f);
+    return FALSE;
+}
+
+/* VisUnbuildChildren: the generic children (unless the visual parent is
+ * being unbuilt), then the visual ones */
+void VisUnbuildChildren(optr obj, SpecBuildFlags flags)
+{
+    VisTypeFlags t;
+
+    if (!(flags & SBF_VIS_PARENT_UNBUILDING))
+	GenCallChildren(obj, UnbuildCallback, &flags);
+    t = VisLock(obj)->VI_typeFlags;
+    VisUnlock(obj);
+    if (t & VTF_IS_COMPOSITE) {
+	SpecBuildFlags f = flags | SBF_VIS_PARENT_UNBUILDING;
+	VisSendToChildren(obj, MSG_SPEC_UNBUILD_BRANCH, &f, sizeof(f));
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * The generic branch and the application
+ * ------------------------------------------------------------------- */
+
+static void BranchCheck(optr obj, GenBranchInfo *info);
+
+/* VisContinueRoutine: a minimized parent ends the walk */
+static void BranchContinue(optr obj, GenBranchInfo *info)
+{
+    SpecAttrs sa = 0;
+
+    if (VisCheckIfVisGrown(obj)) {
+	sa = VisLock(obj)->VI_specAttrs;
+	VisUnlock(obj);
+    }
+    if (sa & SA_BRANCH_MINIMIZED) {
+	*info |= GBI_BRANCH_MINIMIZED;
+	return;
+    }
+    BranchCheck(obj, info);
+}
+
+/* VisContinueGenBranchCheck */
+static void BranchCheck(optr obj, GenBranchInfo *info)
+{
+    VisAttrs a = 0;
+    GenStates st = GenLock(obj)->GI_states;
+    optr p;
+
+    GenUnlock(obj);
+    if (!(st & GS_USABLE)) {
+	*info &= ~GBI_USABLE;
+    } else {
+	if (VisCheckIfVisGrown(obj)) {
+	    a = VisLock(obj)->VI_attrs;
+	    VisUnlock(obj);
+	}
+	p = GenFindParent(obj);
+	if (p && ObjTestIfObjBlockRunByCurThread(OptrToHandle(p)))
+	    BranchContinue(p, info);
+    }
+    if (a & VA_BRANCH_NOT_MINIMIZABLE)
+	*info &= ~GBI_BRANCH_MINIMIZED;
+}
+
+/*
+ * VisGetGenBranchInfo: the branch from here up is usable (GBI_USABLE),
+ * or minimized (GBI_BRANCH_MINIMIZED, unless an object below the
+ * minimized one is VA_BRANCH_NOT_MINIMIZABLE).  Port32: the walk stops
+ * at a parent run by another thread (the asm called it there).
+ */
+GenBranchInfo VisGetGenBranchInfo(optr obj)
+{
+    GenBranchInfo info = GBI_USABLE;
+
+    BranchCheck(obj, &info);
+    return info;
+}
+
+Boolean QuickGenAppGetState(ApplicationStates *states)
+{
+    optr app = GeodeGetAppObject(0);
+
+    *states = 0;
+    if (!app)
+	return FALSE;
+    if (ObjTestIfObjBlockRunByCurThread(OptrToHandle(app))) {
+	ObjLockObjBlock(OptrToHandle(app));
+	*states = ((GenApplicationInstance *) ObjDerefGen(app))->GAI_states;
+	MemUnlock(OptrToHandle(app));
+    } else {
+	*states = @call app::MSG_GEN_APPLICATION_GET_STATE();
+    }
+    return TRUE;
+}
+
+UpdateWindowFlags VisAppUpdateWindowFlags(Boolean attaching)
+{
+    ApplicationStates st;
+    UpdateWindowFlags f = 0;
+
+    QuickGenAppGetState(&st);
+    if (attaching && st & AS_ATTACHING)
+	f |= UWF_ATTACHING;
+    if (st & AS_DETACHING)
+	f |= UWF_DETACHING;
+    return f;
+}
+
+/* ---------------------------------------------------------------------
+ * Moniker chunks (VisCreateMonikerChunk of visClass.asm)
+ * ------------------------------------------------------------------- */
+
+/* LockSource: the source's bytes (UnlockSource: unlocked) */
+static const byte *LockSource(VisMonikerSourceType st, VisMonikerSource src,
+			      word *chunkSize)
+{
+    *chunkSize = 0;
+    switch (st) {
+    case VMST_FPTR:
+	return (const byte *) (uintptr_t) src;
+    case VMST_OPTR: {
+	const byte *p;
+	MemLock(OptrToHandle(src));
+	p = LMemDeref(src);
+	*chunkSize = p ? LMemGetChunkSize(src) : 0;
+	return p;
+    }
+    default:
+	return (const byte *) MemLock(OptrToHandle(src)) + OptrToChunk(src);
+    }
+}
+
+static void UnlockSource(VisMonikerSourceType st, VisMonikerSource src)
+{
+    if (st != VMST_FPTR)
+	MemUnlock(OptrToHandle(src));
+}
+
+/*
+ * VisCreateMonikerChunk: a moniker made in the object's block from the
+ * source: a VisMoniker as it is, text or a gstring with the moniker
+ * header put in front; over `chunk' if it is not 0.  The chunk is marked
+ * dirty with CVMF_DIRTY.  Port32: the source is copied directly (the
+ * block is run by the calling thread), not by
+ * MSG_PROCESS_COPY_CHUNK_OVER; VMDT_TOKEN fails (*failed TRUE).
+ */
+ChunkHandle VisCreateMonikerChunk(optr obj, ChunkHandle chunk,
+				  CreateVisMonikerFlags flags, word height,
+				  word width, word length,
+				  VisMonikerDataType dataType,
+				  VisMonikerSourceType sourceType,
+				  VisMonikerSource source, Boolean *failed)
+{
+    MemHandle mh = OptrToHandle(obj);
+    word hdr = 0, size, csize;
+    const byte *s;
+    byte *d;
+    Boolean addNull = FALSE;
+
+    *failed = FALSE;
+    if (dataType == VMDT_NULL || dataType == VMDT_TOKEN) {
+	*failed = TRUE;
+	return chunk;
+    }
+    if (dataType == VMDT_TEXT)
+	hdr = VMWT_text;
+    else if (dataType == VMDT_GSTRING)
+	hdr = VMWGS_gString;
+    s = LockSource(sourceType, source, &csize);
+    size = sourceType == VMST_OPTR ? csize : length;
+    if (dataType == VMDT_TEXT) {
+	if (!size)
+	    size = (word) (LocalStringLength((const char *) s) + 1);
+	addNull = !size || s[size - 1] != 0;
+    }
+    UnlockSource(sourceType, source);
+    ObjLockObjBlock(mh);
+    if (chunk) {
+	LMemReAlloc(ConstructOptr(mh, chunk), (word) (hdr + size + addNull));
+    } else {
+	chunk = LMemAlloc(mh, (word) (hdr + size + addNull));
+    }
+    s = LockSource(sourceType, source, &csize);
+    d = LMemDeref(ConstructOptr(mh, chunk));
+    memset(d, 0, hdr);
+    memcpy(d + hdr, s, size);
+    UnlockSource(sourceType, source);
+    if (addNull)
+	d[hdr + size] = 0;
+    if (dataType == VMDT_TEXT) {
+	VisMonikerWithText *t = (VisMonikerWithText *) d;
+	t->VMWT_common.VM_type = 0;
+	t->VMWT_common.VM_width = 0;
+	t->VMWT_mnemonicOffset = (char) 0xff;	/* VMO_NO_MNEMONIC */
+    } else if (dataType == VMDT_GSTRING) {
+	VisMonikerWithGString *g = (VisMonikerWithGString *) d;
+	g->VMWGS_common.VM_type = VMT_GSTRING;
+	g->VMWGS_common.VM_width = width;
+	g->VMWGS_height = height;
+    }
+    if (flags & CVMF_DIRTY)
+	ObjSetFlags(ConstructOptr(mh, chunk), OCF_DIRTY, 0);
+    MemUnlock(mh);
+    return chunk;
+}

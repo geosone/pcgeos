@@ -132,4 +132,57 @@ extern Boolean uiFloatingKbdEnabled;
  * flags */
 void UserSetDefaultInputMap(void);
 
+/* ---------------------------------------------------------------------
+ * Gen/: the generic UI
+ * ------------------------------------------------------------------- */
+@include <Internal/specC.goh>
+#include <Internal/specUI.h>
+
+#define GenPart(o)	((GenInstance *) ObjDerefGen(o))
+/* the Gen part, its block locked (GenUnlock: unlocked) */
+GenInstance *GenLock(optr obj);
+void GenUnlock(optr obj);
+
+typedef Boolean GenChildCallback(optr parent, optr child, void *data);
+Boolean GenCallChildren(optr obj, GenChildCallback *cb, void *data);
+word GenCountChildren(optr obj);
+void GenRemoveGenChildLow(optr obj, optr child, CompChildFlags flags);
+void GenAddChildUpwardLinkOnly(optr obj, optr child);
+/* the application object of the current process (FALSE: none) */
+Boolean UserCallApplication(Message msg, const void *params,
+			    word paramSize, void *reply, word replySize);
+
+/* the UI's FatalErrors (uiConstant.def), as far as the C UI raises them */
+#define UI_ERROR_NO_SPECIFIC_UI	18
+
+/* ---------------------------------------------------------------------
+ * Vis/visSpec.goc: the specific part of a generic object
+ * ------------------------------------------------------------------- */
+void VisSpecBuildSetEnabledState(optr obj, SpecBuildFlags flags);
+optr VisGetVisParent(optr obj, SpecBuildFlags *flags);
+void VisAddChildRelativeToGen(optr genObj, optr visObj, optr visParent,
+			      SpecBuildFlags flags);
+Boolean VisSpecCheckForPosHints(optr obj, sword *x, sword *y);
+void VisIfFlagSetCallGenChildren(optr obj, Message msg, const void *params,
+				 word paramSize, byte flags);
+optr VisGetSpecificVisObject(optr obj, SpecBuildFlags flags);
+void VisSetNonWinGroupUsable(optr obj, VisUpdateMode mode);
+void VisUnbuildChildren(optr obj, SpecBuildFlags flags);
+void VisSetNotRealized(optr obj);
+GenBranchInfo VisGetGenBranchInfo(optr obj);
+/* GAI_states of the current process's application (FALSE: none) */
+Boolean QuickGenAppGetState(ApplicationStates *states);
+/* the UpdateWindowFlags of the application's state (attaching,
+ * detaching) */
+UpdateWindowFlags VisAppUpdateWindowFlags(Boolean attaching);
+ChunkHandle VisCreateMonikerChunk(optr obj, ChunkHandle chunk,
+				  CreateVisMonikerFlags flags, word height,
+				  word width, word length,
+				  VisMonikerDataType dataType,
+				  VisMonikerSourceType sourceType,
+				  VisMonikerSource source, Boolean *failed);
+/* MSG_META_UPDATE_WINDOW of VisCompClass */
+void VisCompUpdateWindow(optr obj, UpdateWindowFlags flags,
+			 VisUpdateMode mode);
+
 #endif

@@ -22,6 +22,8 @@ export VisClass
 export VisCompClass
 export VisContentClass
 export FlowClass
+export GenClass
+export GenApplicationClass
 
 # the Vis routines in C (visC.goh, GEOS_PORT32)
 export VisCheckIfVisGrown
@@ -86,3 +88,24 @@ export MetaReleaseFTExclLow
 export FlowTranslatePassiveButton
 export FlowCheckKbdShortcut
 export FlowGetUIButtonFlags
+
+# the Gen routines (genC.goh, GEOS_PORT32)
+export GenCopyChunk
+export GenInsertChild
+export GenSetUpwardLink
+export GenRemoveDownwardLink
+export GenSpecShrink
+export GenProcessGenAttrsBeforeAction
+export GenProcessGenAttrsAfterAction
+export GenFindObjectInTree
+export GenCheckIfSpecGrown
+export GenCallParent
+export GenSendToChildren
+export GenSpecShrinkBranch
+export GenSpecGrowParents
+export GenCheckIfFullyUsable
+export GenCheckIfFullyEnabled
+export GenCheckKbdAccelerator
+export GenQueryUICallSpecificUI
+export UserGetSpecificUI
+export UserFreeSpecificUI

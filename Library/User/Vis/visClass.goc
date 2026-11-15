@@ -12,13 +12,15 @@
  * Port32:
  *   - messages that answered with the carry return their value (0: not
  *     answered), as the C prototypes of visC.goh have them;
- *   - the Generic UI, the clipboard and the system object are not in the
- *     library yet: VTF_IS_GEN is never set (no GenClass), and classed
- *     events for the system (TO_SYS_*) and the quick transfer of
- *     MSG_META_END_MOVE_COPY go nowhere (Port32/ABI.md section 13x);
+ *   - the clipboard and the system object are not in the library yet:
+ *     classed events for the system (TO_SYS_*) and the quick transfer
+ *     of MSG_META_END_MOVE_COPY go nowhere (Port32/ABI.md section 13x);
+ *   - the handlers of the specific part of a generic object (the
+ *     MSG_SPEC_* messages, after visSpec.asm) are at the end; their
+ *     routines are in visSpec.goc;
  *   - MSG_VIS_VUP_QUERY passes on no registers: it only goes up;
- *   - MSG_VIS_CREATE_VIS_MONIKER and MSG_VIS_CALL_ROUTINE (registers and
- *     a far routine) are not handled yet.
+ *   - MSG_VIS_CALL_ROUTINE (registers and a far routine) is not handled
+ *     yet.
  */
 @include "uiInt.goh"
 #include <string.h>
@@ -37,6 +39,8 @@
     pself->VI_attrs = VA_INITIAL_BITS;
     pself->VI_optFlags = VOF_INITIAL_BITS;
     pself->VI_specAttrs = SA_INITIAL_BITS;
+    if (ObjIsObjectInClass(oself, &GenClass))
+	pself->VI_typeFlags = VTF_IS_GEN;
 }
 
 /* VisReloc: read from a state file, nothing is realized */
@@ -110,6 +114,11 @@ static WindowHandle OpenWindowHere(optr oself, WindowHandle win)
     struct { WindowHandle w; } p;
     Boolean top = !window;
 
+    if (v->VI_typeFlags & VTF_IS_GEN &&
+	GenPart(oself)->GI_attrs & GA_NOTIFY_VISIBILITY) {
+	@call oself::MSG_SPEC_VIS_OPEN_NOTIFY();
+	v = VisPart(oself);
+    }
     ObjIncInteractibleCount(OptrToHandle(oself));
     if (top && !(v->VI_typeFlags & VTF_IS_CONTENT))
 	window = VisQueryParentWin(oself);
@@ -134,6 +143,11 @@ static WindowHandle OpenWindowHere(optr oself, WindowHandle win)
 {
     VisInstance *v = VisPart(oself);
 
+    if (v->VI_typeFlags & VTF_IS_GEN &&
+	GenPart(oself)->GI_attrs & GA_NOTIFY_VISIBILITY) {
+	@call oself::MSG_SPEC_VIS_CLOSE_NOTIFY();
+	v = VisPart(oself);
+    }
     if (v->VI_attrs & VA_REALIZED) {
 	if (v->VI_typeFlags & VTF_IS_COMPOSITE) {
 	    if (v->VI_typeFlags & VTF_IS_WINDOW)
@@ -747,7 +761,7 @@ static Boolean CheckForBoundsChange(optr oself)
 
 /* VisSetNotRealized (visSpecUtils.asm): a realized win group is made not
  * visible and updated now (it closes), another object closed */
-static void SetNotRealized(optr obj)
+void VisSetNotRealized(optr obj)
 {
     VisInstance *v;
 
@@ -806,7 +820,7 @@ void VisRemove(optr obj, VisUpdateMode mode)
 						 MAEF_TARGET | MAEF_NOT_HERE);
     if (!(t & VTF_IS_WIN_GROUP))
 	VisAddOurBoundsToUpdateRegion(obj, VARF_UPDATE_WILL_HAPPEN);
-    SetNotRealized(obj);
+    VisSetNotRealized(obj);
 
     v = VisLock(obj);
     if ((v->VI_typeFlags & VTF_IS_WIN_GROUP &&
@@ -1161,12 +1175,18 @@ out:
 }
 
 /* VisVupAlterFTVMCExcl: focus and target to the input node or win group
- * up the tree; the model through the generic parent (none yet) */
+ * up the tree; the model through the generic parent */
 @method VisClass, MSG_META_MUP_ALTER_FTVMC_EXCL
 {
     optr up;
 
     flags &= ~MAEF_NOT_HERE;
+    if (flags & MAEF_MODEL && pself->VI_typeFlags & VTF_IS_GEN) {
+	struct { optr o; MetaAlterFTVMCExclFlags f; } p;
+	p.o = objectWantingControl;
+	p.f = flags & (MAEF_GRAB | MAEF_MODEL);
+	GenCallParent(oself, message, &p, sizeof(p), NULL, 0);
+    }
     flags &= ~MAEF_MODEL;
     if (!(flags & MAEF_MASK_OF_ALL_HIERARCHIES))
 	return;
@@ -1230,4 +1250,335 @@ out:
     (void) xPosition;
     (void) yPosition;
     retVal->inkType = IRV_NO_INK;
+}
+
+/* ---------------------------------------------------------------------
+ * The specific part of a generic object (visSpec.asm)
+ * ------------------------------------------------------------------- */
+
+/* the defaults: up the visual tree (or the generic one) */
+@method VisClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD,
+		  MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD,
+		  MSG_SPEC_UPDATE_MENU_SEPARATORS
+{
+    VisCallParent(oself, message, NULL, 0, NULL, 0);
+}
+
+@method VisClass, MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT
+{
+    Boolean r = FALSE;
+
+    VisCallParent(oself, message, NULL, 0, &r, sizeof(r));
+    return r;
+}
+
+/* (MSG_GEN_MAKE_APPLYABLE and _NOT_APPLYABLE up the visual tree: not
+ * yet, goc gives VisClass no Gen messages) */
+
+@method VisClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO
+{
+    VisCallParent(oself, message, &retValue, sizeof(retValue), NULL, 0);
+}
+
+@method VisClass, MSG_SPEC_P32_GUP_QUERY
+{
+    struct { GenReturnParams *r; GenUpwardQueryType t; } p;
+    Boolean r = FALSE;
+
+    p.r = retValue;
+    p.t = queryType;
+    GenCallParent(oself, message, &p, sizeof(p), &r, sizeof(r));
+    return r;
+}
+
+/*
+ * VisSpecBuild: a generic object that is not built yet is added to its
+ * visual parent (in the generic order) and, with position hints, asks
+ * to hear when its geometry is valid.
+ */
+@method VisClass, MSG_SPEC_BUILD
+{
+    optr vp;
+    sword x, y;
+
+    if (!(pself->VI_typeFlags & VTF_IS_GEN) || VisCheckIfSpecBuilt(oself))
+	return;
+    VisSpecBuildSetEnabledState(oself, flags);
+    vp = VisGetVisParent(oself, &flags);
+    if (!vp)
+	return;
+    VisAddChildRelativeToGen(oself, oself, vp, flags);
+    /* (GenFindMoniker would resolve a moniker list here: not yet) */
+    if (VisSpecCheckForPosHints(oself, &x, &y))
+	VisPart(oself)->VI_geoAttrs |= VGA_NOTIFY_GEOMETRY_VALID;
+}
+
+/* VisSpecBuildBranch: this object (unless the win group part is built
+ * already), then the generic children */
+@method VisClass, MSG_SPEC_BUILD_BRANCH
+{
+    if (!(pself->VI_typeFlags & VTF_IS_GEN))
+	return;
+    flags &= ~SBF_VIS_PARENT_FULLY_ENABLED;
+    if (GenCheckIfFullyEnabled(oself, TRUE))
+	flags |= SBF_VIS_PARENT_FULLY_ENABLED;
+    if (!(flags & SBF_WIN_GROUP) || !VisCheckIfSpecBuilt(oself)) {
+	SpecBuildFlags f = flags;
+	if (!(GenPart(oself)->GI_states & GS_ENABLED))
+	    f &= ~SBF_VIS_PARENT_FULLY_ENABLED;
+	@call oself::MSG_SPEC_BUILD(f);
+    }
+    if (!(flags & SBF_WIN_GROUP) &&
+	VisPart(oself)->VI_specAttrs & SA_USES_DUAL_BUILD)
+	return;
+    flags = (flags & ~SBF_WIN_GROUP) | SBF_TREE_BUILD;
+    VisIfFlagSetCallGenChildren(oself, MSG_SPEC_BUILD_BRANCH, &flags,
+				sizeof(flags), 0);
+}
+
+/* VisSpecUnbuild: the generic object's visual object out of the tree */
+@method VisClass, MSG_SPEC_UNBUILD
+{
+    VisUpdateMode mode = (VisUpdateMode) (flags & SBF_UPDATE_MODE);
+    optr vo;
+
+    if (!(pself->VI_typeFlags & VTF_IS_GEN)) {
+	VisRemove(oself, mode);
+	return;
+    }
+    vo = VisGetSpecificVisObject(oself, flags);
+    if (vo)
+	VisRemove(vo, mode);
+}
+
+/*
+ * VisSpecUnbuildBranch: the generic object closed (a win group through
+ * MSG_META_UPDATE_WINDOW), its children unbuilt, then itself (both
+ * parts of a dual build).  A plain visual object is destroyed.
+ */
+@method VisClass, MSG_SPEC_UNBUILD_BRANCH
+{
+    VisInstance *v = pself;
+
+    if (!(v->VI_typeFlags & VTF_IS_GEN)) {
+	if (v->VI_typeFlags & VTF_IS_COMPOSITE) {
+	    SpecBuildFlags f = flags | SBF_VIS_PARENT_UNBUILDING;
+	    VisSendToChildren(oself, MSG_SPEC_UNBUILD_BRANCH, &f, sizeof(f));
+	}
+	@call oself::MSG_VIS_DESTROY((VisUpdateMode) (flags &
+						      SBF_UPDATE_MODE));
+	return;
+    }
+    if (v->VI_typeFlags & VTF_IS_WIN_GROUP)
+	VisCompUpdateWindow(oself, VisAppUpdateWindowFlags(FALSE) &
+			    UWF_DETACHING,
+			    (VisUpdateMode) (flags & SBF_UPDATE_MODE));
+    else
+	VisSetNotRealized(oself);
+    VisUnbuildChildren(oself, flags);
+    v = VisPart(oself);
+    if (v->VI_typeFlags & VTF_IS_WIN_GROUP) {
+	if (v->VI_specAttrs & SA_USES_DUAL_BUILD &&
+	    !(flags & SBF_VIS_PARENT_UNBUILDING))
+	    @call oself::MSG_SPEC_UNBUILD(flags & ~SBF_WIN_GROUP);
+	@call oself::MSG_SPEC_UNBUILD(flags | SBF_WIN_GROUP);
+    } else {
+	@call oself::MSG_SPEC_UNBUILD(flags & ~SBF_WIN_GROUP);
+    }
+}
+
+/*
+ * VisSpecSetUsable: a win group is updated as a window (built and
+ * opened if its branch allows; a tree that was built but not realized
+ * is linked in again); another object is built into its parent.
+ */
+@method VisClass, MSG_SPEC_SET_USABLE
+{
+    VisInstance *v = pself;
+
+    if (!(v->VI_typeFlags & VTF_IS_WIN_GROUP)) {
+	VisSetNonWinGroupUsable(oself, updateMode);
+	return;
+    }
+    if (v->VI_specAttrs & SA_TREE_BUILT_BUT_NOT_REALIZED) {
+	v->VI_specAttrs &= ~SA_TREE_BUILT_BUT_NOT_REALIZED;
+	v->VI_link.LP_next = 0;
+    }
+    if (v->VI_specAttrs & SA_USES_DUAL_BUILD)
+	VisSetNonWinGroupUsable(oself, updateMode);
+    VisCompUpdateWindow(oself, VisAppUpdateWindowFlags(TRUE), updateMode);
+}
+
+@method VisClass, MSG_SPEC_SET_NOT_USABLE
+{
+    @call oself::MSG_SPEC_UNBUILD_BRANCH((SpecBuildFlags) updateMode);
+}
+
+@method VisClass, MSG_SPEC_UPDATE_VISUAL
+{
+    VisVupUpdateWinGroup(oself, updateMode);
+}
+
+/* VisSpecSetAttrs: a change of the branch's minimization updates the
+ * application's windows */
+@method VisClass, MSG_SPEC_SET_ATTRS
+{
+    SpecAttrs old = pself->VI_specAttrs;
+    UpdateWindowFlags uwf = VisAppUpdateWindowFlags(TRUE);
+
+    pself->VI_specAttrs = (SpecAttrs) ((old | attrsToSet) & ~attrsToClear);
+    if ((old ^ pself->VI_specAttrs) & SA_BRANCH_MINIMIZED) {
+	optr app = GeodeGetAppObject(0);
+	if (app) {
+	    EventHandle ev = @record null::MSG_META_UPDATE_WINDOW(uwf,
+								  updateMode);
+	    @call app::MSG_META_GCN_LIST_SEND(0, ev, 0, GAGCNLT_WINDOWS,
+					      MANUFACTURER_ID_GEOWORKS);
+	}
+    }
+    VisCompUpdateWindow(oself, uwf, updateMode);
+}
+
+@method VisClass, MSG_SPEC_GET_ATTRS
+{
+    return pself->VI_specAttrs;
+}
+
+/* HandleEnabledStateChange: drawn again (now, or invalid) if it is
+ * drawn */
+static void EnabledStateChange(optr oself, VisUpdateMode mode)
+{
+    GStateHandle gs;
+
+    if (!VisShouldObjBeDrawn(oself, DF_DONT_DRAW_CHILDREN) || mode & 0x80)
+	return;
+    if (mode != VUM_NOW) {
+	@call oself::MSG_VIS_MARK_INVALID(VOF_IMAGE_INVALID, mode);
+	return;
+    }
+    gs = @call oself::MSG_VIS_VUP_CREATE_GSTATE();
+    if (!gs)
+	return;
+    @call oself::MSG_VIS_DRAW(DF_DONT_DRAW_CHILDREN, gs);
+    GrDestroyState(gs);
+}
+
+/* VisSpecNotifyEnabled: fully enabled if the generic branch is; a
+ * realized object then may take the focus.  TRUE if the state changed. */
+@method VisClass, MSG_SPEC_NOTIFY_ENABLED
+{
+    ObjectAndGrabParams q;
+
+    (void) flags;
+    if (pself->VI_typeFlags & VTF_IS_GEN &&
+	!GenCheckIfFullyEnabled(oself, TRUE))
+	return FALSE;
+    if (VisPart(oself)->VI_attrs & VA_FULLY_ENABLED)
+	return FALSE;
+    VisPart(oself)->VI_attrs |= VA_FULLY_ENABLED;
+    EnabledStateChange(oself, updateMode);
+    if (!(VisPart(oself)->VI_attrs & VA_REALIZED))
+	return TRUE;
+    memset(&q, 0, sizeof(q));
+    {
+	struct { ObjectAndGrabParams *r; } p;
+	p.r = &q;
+	VisCallParent(oself, MSG_VIS_FUP_QUERY_FOCUS_EXCL, &p, sizeof(p),
+		      NULL, 0);
+    }
+    if (q.OAGP_object)
+	return TRUE;
+    @call oself::MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS(&q);
+    if (q.OAGP_object)
+	MetaGrabFocusExclLow(oself);
+    return TRUE;
+}
+
+@method VisClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    if (!(flags & NEF_STATE_CHANGING) && pself->VI_typeFlags & VTF_IS_GEN &&
+	!(GenPart(oself)->GI_states & GS_ENABLED))
+	return FALSE;
+    if (!(VisPart(oself)->VI_attrs & VA_FULLY_ENABLED))
+	return FALSE;
+    VisPart(oself)->VI_attrs &= ~VA_FULLY_ENABLED;
+    EnabledStateChange(oself, updateMode);
+    return TRUE;
+}
+
+/* VisSpecUpdateVisMoniker: the image invalid if the size stays, else
+ * the geometry too and the win group updated */
+@method VisClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    if (!VisCheckIfSpecBuilt(oself))
+	return;
+    if (pself->VI_typeFlags & VTF_IS_GEN) {
+	ChunkHandle m = GenPart(oself)->GI_visMoniker;
+	SizeAsDWord s = m ? VisGetMonikerSize(oself, m, 0, 0) : 0;
+	if (DWORD_WIDTH(s) == oldMonikerWidth &&
+	    DWORD_HEIGHT(s) == oldMonikerHeight) {
+	    VisMarkInvalid(oself, VOF_IMAGE_INVALID, updateMode);
+	    return;
+	}
+    }
+    VisMarkFullyInvalid(oself);
+    VisVupUpdateWinGroup(oself, updateMode);
+}
+
+@method VisClass, MSG_SPEC_UPDATE_KBD_ACCELERATOR
+{
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID,
+		   updateMode);
+}
+
+@method VisClass, MSG_SPEC_GUP_QUERY_VIS_PARENT
+{
+    optr r = 0;
+
+    GenCallParent(oself, message, &parentType, sizeof(parentType), &r,
+		  sizeof(r));
+    return r;
+}
+
+/* VisNotifyGeometryValid: a generic object placed where its position
+ * hints say */
+@method VisClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
+{
+    sword x, y;
+
+    if (pself->VI_typeFlags & VTF_IS_GEN &&
+	VisSpecCheckForPosHints(oself, &x, &y))
+	@call oself::MSG_VIS_POSITION_BRANCH(x, y);
+}
+
+/*
+ * VisSpecRescanGeoAndUpdate: the geometry hints scanned again (the
+ * size hints may apply again), then both visual parts marked invalid.
+ */
+@method VisClass, MSG_SPEC_P32_RESCAN_GEO_AND_UPDATE
+{
+    optr a, b;
+
+    @call oself::MSG_VIS_SET_GEO_ATTRS(0, VGA_NO_SIZE_HINTS, VUM_MANUAL);
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    a = VisGetSpecificVisObject(oself, 0);
+    b = VisGetSpecificVisObject(oself, SBF_WIN_GROUP);
+    if (a && a != b)
+	@call a::MSG_VIS_MARK_INVALID(flags, updateMode);
+    if (b)
+	@call b::MSG_VIS_MARK_INVALID(flags, updateMode);
+}
+
+/* Port32: moniker lists not yet (the list stays) */
+@method VisClass, MSG_SPEC_RESOLVE_MONIKER_LIST
+{
+    (void) monikerList;
+}
+
+@method VisClass, MSG_VIS_CREATE_VIS_MONIKER
+{
+    Boolean failed;
+
+    return VisCreateMonikerChunk(oself, 0, flags, height, width, length,
+				 dataType, sourceType, source, &failed);
 }

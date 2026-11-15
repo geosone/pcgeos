@@ -1,0 +1,492 @@
+/*
+ * genUtils.goc -- the routines of the generic UI (after genUtils.asm):
+ * the generic tree, the specific part (growing, shrinking, the specific
+ * UI library that resolves a Gen class), the usable and enabled checks
+ * up the tree, the attributes' actions and keyboard accelerators.
+ *
+ * The asm routines took the object in *ds:si; these take its optr
+ * (Port32/ABI.md section 13x).  The object's block must be run by the
+ * calling thread; a routine that goes to another block of the thread
+ * locks it, and calls an object of another thread.
+ *
+ * The specific UI (UserGetSpecificUI): the asm UI loaded it when it
+ * attached (UserAttach of userMain.asm) and freed it when it detached.
+ * Port32 loads the library of [ui] specific (default "motif") on the
+ * first call and keeps it until UserFreeSpecificUI.
+ *
+ * Port32, not yet: moniker lists (GenFindMoniker leaves a list where it
+ * is), the GenView's generic content in GenSpecShrinkBranch,
+ * UserSendToApplicationViaProcess (the app gets the messages from the
+ * queue directly).
+ */
+@include "uiInt.goh"
+#include <initfile.h>
+#include <library.h>
+#include <string.h>
+
+/* the character of a KeyboardShortcut (KS_CHAR of the asm record) */
+#define KS_CHAR_ONLY	0x00ff
+
+GenInstance *GenLock(optr obj)
+{
+    ObjLockObjBlock(OptrToHandle(obj));
+    return GenPart(obj);
+}
+
+void GenUnlock(optr obj)
+{
+    MemUnlock(OptrToHandle(obj));
+}
+
+/* ---------------------------------------------------------------------
+ * The specific UI
+ * ------------------------------------------------------------------- */
+
+static GeodeHandle uiSpecUILibrary;
+
+GeodeHandle UserGetSpecificUI(void)
+{
+    char name[FILE_LONGNAME_BUFFER_SIZE];
+    word size;
+
+    if (uiSpecUILibrary)
+	return uiSpecUILibrary;
+    if (InitFileReadStringBuffer("ui", "specific", name,
+				 sizeof(name) & IFRF_SIZE, &size) || !size)
+	memcpy(name, "motif", sizeof("motif"));
+    uiSpecUILibrary = GeodeUseLibrary(name, SPUI_PROTO_MAJOR,
+				      SPUI_PROTO_MINOR, NULL);
+    if (!uiSpecUILibrary)
+	FatalError(UI_ERROR_NO_SPECIFIC_UI);
+    return uiSpecUILibrary;
+}
+
+void UserFreeSpecificUI(void)
+{
+    GeodeHandle gh = uiSpecUILibrary;
+
+    uiSpecUILibrary = 0;
+    if (gh)
+	GeodeFreeLibrary(gh);
+}
+
+/*
+ * GenQueryUICallSpecificUI: the class the specific UI builds the object
+ * into, from its build routine for the object's type.  The generic
+ * parents are grown first (the routine may look at them).
+ */
+ClassStruct *GenQueryUICallSpecificUI(optr obj, word routine,
+				      word masterOffset)
+{
+    SpecBuildRoutine *r;
+
+    GenSpecGrowParents(obj);
+    r = (SpecBuildRoutine *) ProcGetLibraryEntry(UserGetSpecificUI(),
+						 routine);
+    return r ? r(obj, masterOffset) : NULL;
+}
+
+/* ---------------------------------------------------------------------
+ * The generic tree
+ * ------------------------------------------------------------------- */
+
+Boolean GenCheckIfSpecGrown(optr obj)
+{
+    return VisCheckIfVisGrown(obj);
+}
+
+Boolean GenCallParent(optr obj, Message msg, const void *params,
+		      word paramSize, void *reply, word replySize)
+{
+    optr p = GenFindParent(obj);
+
+    if (replySize)
+	memset(reply, 0, replySize);
+    if (!p)
+	return FALSE;
+    CObjMessageP(MF_CALL, p, msg, (void *) params, paramSize, reply,
+		 replySize);
+    return TRUE;
+}
+
+Boolean GenCallChildren(optr obj, GenChildCallback *cb, void *data)
+{
+    return ObjCompProcessChildren(obj, 0, OCCT_SAVE_PARAMS_DONT_TEST_ABORT,
+				  data, word_offsetof(GenBase, Gen_offset),
+				  word_offsetof(GenInstance, GI_comp),
+				  word_offsetof(GenInstance, GI_link), cb);
+}
+
+word GenCountChildren(optr obj)
+{
+    word n = 0;
+
+    ObjCompProcessChildren(obj, 0, OCCT_COUNT_CHILDREN, &n,
+			   word_offsetof(GenBase, Gen_offset),
+			   word_offsetof(GenInstance, GI_comp),
+			   word_offsetof(GenInstance, GI_link), NULL);
+    return n;
+}
+
+typedef struct {
+    Message	msg;
+    const void	*params;
+    word	paramSize;
+} GenSendData;
+
+static Boolean SendCallback(optr parent, optr child, void *data)
+{
+    GenSendData *d = data;
+
+    (void) parent;
+    CObjMessageP(MF_CALL, child, d->msg, (void *) d->params, d->paramSize,
+		 NULL, 0);
+    return FALSE;
+}
+
+void GenSendToChildren(optr obj, Message msg, const void *params,
+		       word paramSize)
+{
+    GenSendData d;
+
+    d.msg = msg;
+    d.params = params;
+    d.paramSize = paramSize;
+    GenCallChildren(obj, SendCallback, &d);
+}
+
+/* GenCopyChunk: a copy of chunk chnk of blk in destBlock (0: none) */
+word GenCopyChunk(MemHandle destBlock, MemHandle blk, ChunkHandle chnk,
+		  CompChildFlags flags)
+{
+    optr src = ConstructOptr(blk, chnk);
+    word size;
+    ChunkHandle ch;
+
+    if (!chnk)
+	return 0;
+    ObjLockObjBlock(blk);
+    ObjLockObjBlock(destBlock);
+    size = LMemDeref(src) ? LMemGetChunkSize(src) : 0;
+    ch = LMemAlloc(destBlock, size);
+    if (size)
+	memcpy(LMemDeref(ConstructOptr(destBlock, ch)), LMemDeref(src),
+	       size);
+    ObjSetFlags(ConstructOptr(destBlock, ch),
+		flags & CCF_MARK_DIRTY ? OCF_DIRTY : OCF_IGNORE_DIRTY, 0);
+    MemUnlock(destBlock);
+    MemUnlock(blk);
+    return ch;
+}
+
+/*
+ * GenInsertChild: childToAdd added to the object (mh, chnk) first,
+ * last, or before or after referenceChild (InsertChildFlags; last if
+ * the reference is not a child).
+ */
+void GenInsertChild(MemHandle mh, ChunkHandle chnk, optr childToAdd,
+		    optr referenceChild, CompChildFlags flags)
+{
+    optr obj = ConstructOptr(mh, chnk);
+    word opt = flags & ICF_OPTIONS;
+    word pos = CCO_LAST;
+
+    if (opt == ICO_FIRST) {
+	pos = CCO_FIRST;
+    } else if (opt != ICO_LAST) {
+	word n = ObjCompFindChildByOptr(obj, referenceChild,
+					word_offsetof(GenBase, Gen_offset),
+					word_offsetof(GenInstance, GI_comp),
+					word_offsetof(GenInstance, GI_link));
+	if (n != (word) -1)
+	    pos = (word) (opt == ICO_BEFORE_REFERENCE ? n : n + 1);
+    }
+    if (flags & ICF_MARK_DIRTY)
+	pos |= CCF_MARK_DIRTY;
+    ObjCompAddChild(obj, childToAdd, pos,
+		    word_offsetof(GenBase, Gen_offset),
+		    word_offsetof(GenInstance, GI_comp),
+		    word_offsetof(GenInstance, GI_link));
+}
+
+/* GenSetUpwardLink: the object's link points to the parent (a parent
+ * link), the parent does not know it */
+void GenSetUpwardLink(MemHandle mh, ChunkHandle chnk, optr parent)
+{
+    optr obj = ConstructOptr(mh, chnk);
+    GenInstance *g = GenLock(obj);
+
+    g->GI_link.LP_next = parent ? ConstructOptr(OptrToHandle(parent),
+						OptrToChunk(parent) | 1)
+				: 0;
+    GenUnlock(obj);
+}
+
+void GenAddChildUpwardLinkOnly(optr obj, optr child)
+{
+    GenSetUpwardLink(OptrToHandle(child), OptrToChunk(child), obj);
+}
+
+void GenRemoveGenChildLow(optr obj, optr child, CompChildFlags flags)
+{
+    ObjCompRemoveChild(obj, child, flags,
+		       word_offsetof(GenBase, Gen_offset),
+		       word_offsetof(GenInstance, GI_comp),
+		       word_offsetof(GenInstance, GI_link));
+}
+
+/* GenRemoveDownwardLink: out of the parent's children, but still
+ * pointing to the parent */
+void GenRemoveDownwardLink(MemHandle mh, ChunkHandle chnk,
+			   CompChildFlags flags)
+{
+    optr obj = ConstructOptr(mh, chnk);
+    optr parent = GenFindParent(obj);
+
+    if (!parent)
+	return;
+    GenRemoveGenChildLow(parent, obj, flags);
+    GenSetUpwardLink(mh, chnk, parent);
+}
+
+/* ---------------------------------------------------------------------
+ * The specific part: growing and shrinking
+ * ------------------------------------------------------------------- */
+
+/*
+ * GenSpecShrink: the Vis part and its variable data go, and the class
+ * of the specific UI is forgotten (the next message resolves it again).
+ */
+void GenSpecShrink(MemHandle mh, ChunkHandle chnk)
+{
+    optr obj = ConstructOptr(mh, chnk);
+    byte *p;
+
+    ObjLockObjBlock(mh);
+    if (((VisBase *) ObjDeref(obj, 0))->Vis_offset) {
+	ObjResizeMaster(obj, word_offsetof(VisBase, Vis_offset), 0);
+	ObjVarDeleteDataRange(obj, _FIRST_VisClass, _FIRST_GenClass - 1,
+			      FALSE);
+    }
+    ((VisBase *) ObjDeref(obj, 0))->Vis_offset = 0;
+    p = ObjDeref(obj, word_offsetof(GenBase, Gen_offset));
+    *(ClassStruct **) p = NULL;
+    MemUnlock(mh);
+}
+
+static Boolean ShrinkCallback(optr parent, optr child, void *data)
+{
+    (void) parent;
+    (void) data;
+    GenSpecShrinkBranch(child);
+    return FALSE;
+}
+
+/* GenSpecShrinkBranch: the object and the generic branch below it */
+void GenSpecShrinkBranch(optr obj)
+{
+    if (!GenCheckIfSpecGrown(obj))
+	return;
+    GenCallChildren(obj, ShrinkCallback, NULL);
+    GenSpecShrink(OptrToHandle(obj), OptrToChunk(obj));
+}
+
+/*
+ * GenSpecGrowParents: the Vis parts of the generic parents, from the
+ * top down (a parent's specific class may depend on its own parents).
+ * A parent of another thread grows its parents by a message.
+ */
+void GenSpecGrowParents(optr obj)
+{
+    optr p = GenFindParent(obj);
+
+    if (!p)
+	return;
+    if (OptrToHandle(p) != OptrToHandle(obj) &&
+	!ObjTestIfObjBlockRunByCurThread(OptrToHandle(p))) {
+	@call p::MSG_GEN_GROW_PARENTS();
+	return;
+    }
+    if (GenCheckIfSpecGrown(p))
+	return;
+    GenSpecGrowParents(p);
+    ObjInitializePart(p, word_offsetof(VisBase, Vis_offset));
+}
+
+/* ---------------------------------------------------------------------
+ * Usable and enabled up the tree
+ * ------------------------------------------------------------------- */
+
+/* GenCheckIfFullyXXCommon: the top of the walk is the application (or
+ * the system), or is asked by message (another thread), or has no
+ * parent (then not) */
+static Boolean FullyCommon(optr top, optr parent, Message msg)
+{
+    Boolean r = FALSE;
+
+    if (ObjIsObjectInClass(top, &GenApplicationClass))
+	return TRUE;
+    if (!parent)
+	return FALSE;
+    CObjMessageP(MF_CALL, parent, msg, NULL, 0, &r, sizeof(r));
+    return r;
+}
+
+/*
+ * GenCheckIfFullyUsable: the object and all its generic parents up to
+ * the application are usable.  noOpt FALSE: a realized object is taken
+ * to be fully usable (the asm's cx = 0).
+ */
+Boolean GenCheckIfFullyUsable(optr obj, Boolean noOpt)
+{
+    for (;;) {
+	GenInstance *g = GenLock(obj);
+	optr p;
+
+	if (!(g->GI_states & GS_USABLE)) {
+	    GenUnlock(obj);
+	    return FALSE;
+	}
+	if (!noOpt && ((VisBase *) ObjDeref(obj, 0))->Vis_offset &&
+	    VisPart(obj)->VI_attrs & VA_REALIZED) {
+	    GenUnlock(obj);
+	    return TRUE;
+	}
+	GenUnlock(obj);
+	p = GenFindParent(obj);
+	if (!p || !ObjTestIfObjBlockRunByCurThread(OptrToHandle(p)))
+	    return FullyCommon(obj, p, MSG_GEN_CHECK_IF_FULLY_USABLE);
+	obj = p;
+    }
+}
+
+Boolean GenCheckIfFullyEnabled(optr obj, Boolean noOpt)
+{
+    for (;;) {
+	GenInstance *g = GenLock(obj);
+	optr p;
+
+	if (!(g->GI_states & GS_ENABLED)) {
+	    GenUnlock(obj);
+	    return FALSE;
+	}
+	GenUnlock(obj);
+	if (!noOpt && VisCheckIfSpecBuilt(obj)) {
+	    Boolean fe = VisLock(obj)->VI_attrs & VA_FULLY_ENABLED;
+	    VisUnlock(obj);
+	    if (fe)
+		return TRUE;
+	}
+	p = GenFindParent(obj);
+	if (!p || !ObjTestIfObjBlockRunByCurThread(OptrToHandle(p)))
+	    return FullyCommon(obj, p, MSG_GEN_CHECK_IF_FULLY_ENABLED);
+	obj = p;
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * The application and the system
+ * ------------------------------------------------------------------- */
+
+/* UserCallApplication: the message to the application object of the
+ * current process (FALSE if there is none) */
+Boolean UserCallApplication(Message msg, const void *params,
+			    word paramSize, void *reply, word replySize)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (replySize)
+	memset(reply, 0, replySize);
+    if (!app)
+	return FALSE;
+    CObjMessageP(MF_CALL, app, msg, (void *) params, paramSize, reply,
+		 replySize);
+    return TRUE;
+}
+
+static void SendToApplication(Message msg)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (app)
+	CObjMessageP(MF_FORCE_QUEUE, app, msg, NULL, 0, NULL, 0);
+}
+
+/*
+ * GenProcessGenAttrsBeforeAction: what the GenAttrs ask for before an
+ * object acts (busy, input held up or ignored, the interaction told the
+ * action completes it).
+ */
+void GenProcessGenAttrsBeforeAction(MemHandle mh, ChunkHandle chnk)
+{
+    optr obj = ConstructOptr(mh, chnk);
+    GenAttrs a = GenLock(obj)->GI_attrs;
+
+    GenUnlock(obj);
+    if (a & GA_INITIATES_BUSY_STATE)
+	UserCallApplication(MSG_GEN_APPLICATION_MARK_BUSY, NULL, 0, NULL, 0);
+    if (a & GA_INITIATES_INPUT_HOLD_UP)
+	UserCallApplication(MSG_GEN_APPLICATION_HOLD_UP_INPUT, NULL, 0,
+			    NULL, 0);
+    if (a & GA_INITIATES_INPUT_IGNORE)
+	UserCallApplication(MSG_GEN_APPLICATION_IGNORE_INPUT, NULL, 0,
+			    NULL, 0);
+    if (a & GA_SIGNAL_INTERACTION_COMPLETE) {
+	InteractionCommand c = IC_INTERACTION_COMPLETE;
+	Boolean r;
+	GenCallParent(obj, MSG_GEN_GUP_INTERACTION_COMMAND, &c, sizeof(c),
+		      &r, sizeof(r));
+    }
+}
+
+/* GenProcessGenAttrsAfterAction: undone after the action, through the
+ * queue (after what the action sent) */
+void GenProcessGenAttrsAfterAction(MemHandle mh, ChunkHandle chnk)
+{
+    optr obj = ConstructOptr(mh, chnk);
+    GenAttrs a = GenLock(obj)->GI_attrs;
+
+    GenUnlock(obj);
+    if (a & GA_INITIATES_BUSY_STATE)
+	SendToApplication(MSG_GEN_APPLICATION_MARK_NOT_BUSY);
+    if (a & GA_INITIATES_INPUT_HOLD_UP)
+	SendToApplication(MSG_GEN_APPLICATION_RESUME_INPUT);
+    if (a & GA_INITIATES_INPUT_IGNORE)
+	SendToApplication(MSG_GEN_APPLICATION_ACCEPT_INPUT);
+}
+
+/* GenFindObjectInTree: down from startObject by the child numbers of
+ * the table, to its 0xff */
+optr GenFindObjectInTree(optr startObject, const byte *childTable)
+{
+    optr o = startObject;
+
+    for (; o && *childTable != 0xff; childTable++)
+	o = @call o::MSG_GEN_FIND_CHILD_AT_POSITION(*childTable);
+    return o;
+}
+
+/*
+ * GenCheckKbdAccelerator: the key press is the object's accelerator or
+ * one of its ATTR_GEN_EXTRA_KBD_ACCELERATORS.
+ */
+Boolean GenCheckKbdAccelerator(optr obj, word character, word flags,
+			       word state)
+{
+    KeyboardShortcut ks = GenLock(obj)->GI_kbdAccelerator;
+    KeyboardShortcut *extra;
+    word n;
+
+    GenUnlock(obj);
+    if (!(ks & KS_CHAR_ONLY))
+	return FALSE;
+    if (FlowCheckKbdShortcut(&ks, 1, character, flags, state) != (word) -1)
+	return TRUE;
+    ObjLockObjBlock(OptrToHandle(obj));
+    extra = ObjVarFindData(obj, ATTR_GEN_EXTRA_KBD_ACCELERATORS);
+    n = extra ? (word) (VarDataSizePtr(extra) / sizeof(KeyboardShortcut))
+	      : 0;
+    MemUnlock(OptrToHandle(obj));
+    return n && FlowCheckKbdShortcut(extra, n, character, flags, state) !=
+		(word) -1;
+}

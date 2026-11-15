@@ -1,0 +1,31 @@
+/*
+ * genApplication.goc -- GenApplicationClass (after genAppAttDet.asm and
+ * genAppMisc.asm), so far only what the generic tree needs of it: the
+ * top of the usable and enabled checks (GenCheckIfFullyUsable), the
+ * class of the specific UI it is built into, and its state.
+ *
+ * Port32 (Port32/ABI.md section 13x): the application asks no field for
+ * its specific UI (MSG_SPEC_GUP_QUERY's GenReturnParams hold no 32-bit
+ * handle); it takes GAI_specificUI, else the UI's own (UserGetSpecificUI).
+ * Attaching, detaching, the busy state and the rest are not yet.
+ */
+@include "uiInt.goh"
+
+@classdecl GenApplicationClass;
+
+/* GenAppBuild */
+@method GenApplicationClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    GeodeHandle ui = (GeodeHandle) pself->GAI_specificUI;
+    SpecBuildRoutine *r;
+
+    if (!ui)
+	ui = UserGetSpecificUI();
+    r = (SpecBuildRoutine *) ProcGetLibraryEntry(ui, SPIR_BUILD_APPLICATION);
+    return r ? r(oself, MasterOffset) : NULL;
+}
+
+@method GenApplicationClass, MSG_GEN_APPLICATION_GET_STATE
+{
+    return pself->GAI_states;
+}
