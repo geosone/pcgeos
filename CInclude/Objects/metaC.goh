@@ -372,10 +372,13 @@ typedef enum {
 @message void MSG_META_WIN_DEC_REF_COUNT(MemHandle win = cx);
 
 typedef WordFlags UpdateWindowFlags;
-#define UWF_ATTACHING			0x8000;
-#define UWF_DETACHING			0x4000;
-#define UWF_RESTORING_FROM_STATE	0x2000;
-#define UWF_TOP_LEVEL_WINDOW		0x1000;
+#define UWF_ATTACHING			0x8000
+#define UWF_DETACHING			0x4000
+#define UWF_RESTORING_FROM_STATE	0x2000
+/* the asm's UWF_FROM_WINDOWS_LIST (metaC.def); the semicolons after
+ * these values made them unusable in expressions */
+#define UWF_FROM_WINDOWS_LIST		0x1000
+#define UWF_TOP_LEVEL_WINDOW		UWF_FROM_WINDOWS_LIST
 
 @message void MSG_META_UPDATE_WINDOW(UpdateWindowFlags updateFlags = cx,
 					VisUpdateMode updateMode = dl);

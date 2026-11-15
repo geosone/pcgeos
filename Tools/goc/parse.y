@@ -2282,6 +2282,7 @@ aliasLine  	:
 	    if($3 != NullSymbol){
 		if (($3->data.symMessage.class != NullSymbol) &&
 		    ($3->data.symMessage.class != classBeingParsed) &&
+		    classBeingParsed != NullSymbol &&	/* an alias outside a class */
 		    !($3->flags & SYM_IMPORTED))
 		{
 		    yywarning("%s is not a message for the class being defined now",

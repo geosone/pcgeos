@@ -68,7 +68,7 @@
 				word height, word width, word length,
 				VisMonikerDataType dataType,
 				VisMonikerSourceType sourceType,
-				dword source) = ax;
+				VisMonikerSource source) = ax;
 
 @message ChunkHandle MSG_GEN_REPLACE_VIS_MONIKER_OPTR(optr source = cx:dx,
 				VisUpdateMode updateMode = bp) = ax;
@@ -81,7 +81,7 @@
 				word height, word width, word length,
 				VisMonikerDataType dataType,
 				VisMonikerSourceType sourceType,
-				dword source) = ax;
+				VisMonikerSource source) = ax;
 
 @message void MSG_GEN_DRAW_MONIKER(@stack DrawMonikerFlags monikerFlags,
 			word textHeight, GStateHandle gState, word yMaximum,
@@ -198,12 +198,23 @@ typedef enum /* word */ {
 /*** Window Size and Position Methods ***/
 
 #define GET_MM_AND_TYPE(M,T) 	((M) | (((word) (T)) << 8))
+@ifdef GEOS_PORT32
+/* Port32: modeAndType is GET_MM_AND_TYPE's word (a WinPositionType
+ * parameter would lose the type in the high byte) */
+@message void MSG_GEN_SET_WIN_POSITION(word modeAndType = dx,
+					SpecWinSizeSpec xPosSpec = cx,
+					SpecWinSizeSpec yPosSpec = bp);
+@message void MSG_GEN_SET_WIN_SIZE(word modeAndType = dx,
+					SpecWinSizeSpec xSizeSpec = cx,
+					SpecWinSizeSpec ySizeSpec = bp);
+@else
 @message void MSG_GEN_SET_WIN_POSITION(WinPositionType modeAndType = dx,
 					SpecWinSizeSpec xPosSpec = cx,
 					SpecWinSizeSpec yPosSpec = bp);	/* XXX */
 @message void MSG_GEN_SET_WIN_SIZE(WinPositionType modeAndType = dx,
 					SpecWinSizeSpec xSizeSpec = cx,
 					SpecWinSizeSpec ySizeSpec = bp);	/* XXX */
+@endif
 @message void MSG_GEN_RESET_TO_INITIAL_SIZE(VisUpdateMode updateMode = dl); /* XXX */
 @message void MSG_GEN_SET_WIN_CONSTRAIN(VisUpdateMode updateMode = dl,
 					WinConstrainType constrainType = dh); /* XXX */
@@ -781,8 +792,8 @@ typedef struct {
 } ShortLongTouchParams;
 
 @vardata ShortLongTouchParams HINT_SHORT_LONG_TOUCH;
-@reloc HINT_SHORT_LONG_TOUCH, 2, optr;
-@reloc HINT_SHORT_LONG_TOUCH, 6, optr;
+@reloc HINT_SHORT_LONG_TOUCH, SLTP_shortDestination, optr;
+@reloc HINT_SHORT_LONG_TOUCH, SLTP_longDestination, optr;
 
 @protoreset
 
@@ -896,9 +907,44 @@ extern void
     _pascal GenProcessGenAttrsAfterAction(
 				MemHandle mh, ChunkHandle chnk); /* XXX */
 
+#ifdef GEOS_PORT32
+/* the table of child numbers, ended by 0xff */
+extern optr GenFindObjectInTree(optr startObject, const byte *childTable);
+#else
 extern optr
     _pascal GenFindObjectInTree(optr startObject,
 					dword childTable); /* XXX */
+#endif
+
+#ifdef GEOS_PORT32
+/*
+ * The other Gen routines of the UI library in C (Port32/ABI.md section
+ * 13x): the asm ones took the object in *ds:si; these take the optr.
+ * The object's block must be run by the calling thread.
+ */
+extern Boolean GenCheckIfSpecGrown(optr obj);
+/* the message (goc -cg parameters) to the generic parent, MF_CALL; the
+ * reply zeroed first; FALSE if there is no parent */
+extern Boolean GenCallParent(optr obj, Message msg, const void *params,
+			     word paramSize, void *reply, word replySize);
+extern void GenSendToChildren(optr obj, Message msg, const void *params,
+			      word paramSize);
+extern void GenSpecShrinkBranch(optr obj);
+extern void GenSpecGrowParents(optr obj);
+/* noOpt FALSE: a realized (fully enabled) object is taken to be fully
+ * usable (enabled) */
+extern Boolean GenCheckIfFullyUsable(optr obj, Boolean noOpt);
+extern Boolean GenCheckIfFullyEnabled(optr obj, Boolean noOpt);
+extern Boolean GenCheckKbdAccelerator(optr obj, word character, word flags,
+				      word state);
+/* the class the specific UI builds obj into (SpecificUIRoutine,
+ * Internal/specUI.h), for MSG_META_RESOLVE_VARIANT_SUPERCLASS */
+extern ClassStruct *GenQueryUICallSpecificUI(optr obj, word routine,
+					     word masterOffset);
+/* the specific UI library ([ui] specific), loaded on first use */
+extern GeodeHandle UserGetSpecificUI(void);
+extern void UserFreeSpecificUI(void);
+#endif
 
 #define GenFindParent(oself)	\
     ObjLinkFindParent(oself, word_offsetof(GenBase, Gen_offset), \

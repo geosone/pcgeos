@@ -1,0 +1,33 @@
+/*
+ * specC.goh -- Port32: the messages between the generic and the
+ * specific UI whose C prototypes (visC.goh, genC.goh) lack what the asm
+ * passes, as goc aliases with the parameters the C UI sends
+ * (Port32/ABI.md section 13x).  The generic UI and the specific UIs
+ * handle and send these forms.
+ */
+#ifndef __SPECC_GOH
+#define __SPECC_GOH
+
+@include <ui.goh>
+
+@deflib ui
+
+/* the generic upward query, passed on as it came (MSG_GEN_GUP_QUERY's
+ * parameters); TRUE if answered */
+@alias (MSG_SPEC_GUP_QUERY) Boolean MSG_SPEC_P32_GUP_QUERY(
+				GenReturnParams *retValue = axbpcxdx,
+				GenUpwardQueryType queryType = cx) = carry;
+
+/* the asm passed the VisOptFlags to mark invalid in cl */
+@alias (MSG_SPEC_RESCAN_GEO_AND_UPDATE) void
+	MSG_SPEC_P32_RESCAN_GEO_AND_UPDATE(VisOptFlags flags,
+					   VisUpdateMode updateMode);
+
+/* TRUE (the asm's carry) if answered: the branch from here up is built */
+@alias (MSG_GEN_GUP_ENSURE_UPDATE_WINDOW) Boolean
+	MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW(UpdateWindowFlags updateFlags,
+					     VisUpdateMode updateMode);
+
+@endlib
+
+#endif

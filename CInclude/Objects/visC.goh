@@ -420,7 +420,7 @@ typedef WordFlags VisMonikerSearchFlags;
 				word height, word width, word length,
 				VisMonikerDataType dataType,
 				VisMonikerSourceType sourceType,
-				dword source) = ax;
+				VisMonikerSource source) = ax;
 
 /* Error checking */
 
@@ -617,6 +617,18 @@ typedef struct {
 
 typedef ByteFlags CreateVisMonikerFlags;
 #define CVMF_DIRTY		0x80
+
+/*
+ * The source of MSG_VIS_CREATE_VIS_MONIKER and MSG_GEN_*_VIS_MONIKER.
+ * Port32: an optr (VMST_OPTR), a pointer in one ((optr) (uintptr_t)
+ * ptr, VMST_FPTR) or a handle and offset (ConstructOptr(handle,
+ * offset), VMST_HPTR); a dword holds none of them on a 64-bit host.
+ */
+#ifdef GEOS_PORT32
+typedef optr VisMonikerSource;
+#else
+typedef dword VisMonikerSource;
+#endif
 
 typedef ByteEnum VisMonikerSourceType;
 #define VMST_FPTR 0

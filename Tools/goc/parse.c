@@ -4773,6 +4773,7 @@ yyreduce:
 	    if((yyvsp[-11].sym) != NullSymbol){
 		if (((yyvsp[-11].sym)->data.symMessage.class != NullSymbol) &&
 		    ((yyvsp[-11].sym)->data.symMessage.class != classBeingParsed) &&
+		    classBeingParsed != NullSymbol &&	/* an alias outside a class */
 		    !((yyvsp[-11].sym)->flags & SYM_IMPORTED))
 		{
 		    yywarning("%s is not a message for the class being defined now",

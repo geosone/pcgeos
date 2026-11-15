@@ -20,8 +20,15 @@
 @deflib ui
 
 @include <Objects/visC.goh>
+@ifdef GEOS_PORT32
+@include <Objects/genC.goh>
+@endif
 
 @class 	VisCompClass, VisClass;
+@ifdef GEOS_PORT32
+/* the specific part of a generic win group handles some Gen messages */
+@uses GenClass;
+@endif
 
 /* VCI_geoDimensionAttrs */
 
