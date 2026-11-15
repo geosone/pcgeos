@@ -62,3 +62,21 @@ export VisGetParentCenter
 export VisCompRecalcSize
 export VisCompPosition
 export VisCompGetCenter
+
+# the Flow routines (uiInputC.goh)
+export FlowForceGrab
+export FlowRequestGrab
+export FlowReleaseGrab
+export FlowAlterHierarchicalGrab
+export FlowUpdateHierarchicalGrab
+export FlowGetTargetAtTargetLevel
+export FlowDestroyMessage
+export FlowMessageClassedEvent
+export FlowDispatchSendOnOrDestroyClassedEvent
+export MetaGrabFocusExclLow
+export MetaReleaseFocusExclLow
+export MetaGrabTargetExclLow
+export MetaReleaseTargetExclLow
+export MetaGrabModelExclLow
+export MetaReleaseModelExclLow
+export MetaReleaseFTExclLow

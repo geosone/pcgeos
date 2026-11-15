@@ -902,41 +902,21 @@ void VisRemove(optr obj, VisUpdateMode mode)
 }
 
 /* ---------------------------------------------------------------------
- * Classed events (FlowMessageClassedEvent and
- * FlowDispatchSendOnOrDestroyClassedEvent of userFlowUtils.asm)
+ * Classed events (the Flow routines are in User/userFlowUtils.goc)
  * ------------------------------------------------------------------- */
 
-/* the event in a message to dest, or freed if there is none */
 static void MessageClassedEvent(optr dest, Message msg, EventHandle event,
 				MessageFlags flags)
 {
-    struct { EventHandle e; } p;
-
-    if (!dest) {
-	ObjFreeMessage(event);
-	return;
-    }
-    p.e = event;
-    CObjMessageP(flags, dest, msg, &p, sizeof(p), NULL, 0);
+    FlowMessageClassedEvent(dest, msg, event, 0, flags);
 }
 
-/* the event dispatched here if this object is of its class (or it has
- * none and there is no next), else on to next with msg */
 static void DispatchSendOnOrDestroy(optr oself, EventHandle event,
 				    optr next, Message msg,
 				    MessageFlags flags)
 {
-    optr dest;
-    ClassStruct *cls;
-
-    ObjGetMessageInfo(event, &dest);
-    cls = (ClassStruct *) (uintptr_t) dest;
-    if (cls ? ObjIsObjectInClass(oself, cls) : !next) {
-	MessageSetDestination(event, oself);
-	CMessageDispatchP(event, flags & MF_CALL, NULL, 0);
-	return;
-    }
-    MessageClassedEvent(next, msg, event, flags);
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, msg, event, 0,
+					    next, flags);
 }
 
 /* VisSendClassedEvent: TO_VIS_PARENT up the visual tree, TO_APP_* to
@@ -953,7 +933,7 @@ static void DispatchSendOnOrDestroy(optr oself, EventHandle event,
     if (to >= (word) TO_APP_FOCUS && to <= (word) TO_APP_MODEL) {
 	optr app = GeodeGetAppObject(0);
 	if (!app) {
-	    ObjFreeMessage(event);
+	    FlowDestroyMessage(event);
 	    return;
 	}
 	@call app::MSG_META_SEND_CLASSED_EVENT(event,
@@ -961,7 +941,7 @@ static void DispatchSendOnOrDestroy(optr oself, EventHandle event,
 	return;
     }
     if (to >= (word) TO_SYS_FOCUS && to <= (word) TO_SYS_MODEL) {
-	ObjFreeMessage(event);
+	FlowDestroyMessage(event);
 	return;
     }
     @callsuper();

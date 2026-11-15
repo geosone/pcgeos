@@ -13,9 +13,13 @@
  * manager sizes and places (steps 7 to 9): three rectangles of fixed
  * sizes, and UVGeo2 with a rectangle and a child that takes the length
  * it is offered.
+ *
+ * UVNode has a basic and a hierarchical grab for the Flow routines
+ * (step 10), UVLeaf1 and UVLeaf2 count the messages they get from it.
  */
 @include <stdapp.goh>
 @include <Objects/vCompC.goh>
+#include <string.h>
 
 /* visC.def (uiInt.goh has them for the library) */
 #define VOF_PATH_BITS		(VOF_GEO_UPDATE_PATH | VOF_WINDOW_UPDATE_PATH | \
@@ -35,6 +39,8 @@ typedef struct {
     word		UVS_pings;
     WindowHandle	UVS_win;	/* UVTop's window */
     word		UVS_failLines[8];
+    /* by UVNI_which: gained, lost, gained system, lost system */
+    word		UVS_flow[3][4];
 } UVState;
 
 UVState uvState;
@@ -74,6 +80,24 @@ UVState uvState;
 {
     return MAKE_SIZE_DWORD(width & RSA_CHOOSE_OWN_SIZE ? 10 : width,
 			   height & RSA_CHOOSE_OWN_SIZE ? 10 : height);
+}
+
+/* a node of a hierarchy, and what is below it */
+@class UVNodeClass, VisClass;
+    @message void MSG_UVN_GAINED();	/* the four in this order */
+    @message void MSG_UVN_LOST();
+    @message void MSG_UVN_GAINED_SYS();
+    @message void MSG_UVN_LOST_SYS();
+    @instance BasicGrab UVNI_grab = { 0, 0 };
+    @instance HierarchicalGrab UVNI_excl = { 0, 0 };
+    @instance word UVNI_which = 0;
+@endc
+@classdecl UVNodeClass;
+
+@method UVNodeClass, MSG_UVN_GAINED, MSG_UVN_LOST, MSG_UVN_GAINED_SYS,
+		     MSG_UVN_LOST_SYS
+{
+    uvState.UVS_flow[pself->UVNI_which][message - MSG_UVN_GAINED]++;
 }
 
 @start UVObjects;
@@ -116,6 +140,15 @@ UVState uvState;
     VI_bounds = { 0, 0, 50, 40 };
 }
 @object UVFlexClass UVFlex = {
+}
+@object UVNodeClass UVNode = {
+    UVNI_which = 0;
+}
+@object UVNodeClass UVLeaf1 = {
+    UVNI_which = 1;
+}
+@object UVNodeClass UVLeaf2 = {
+    UVNI_which = 2;
 }
 @end UVObjects;
 
@@ -231,6 +264,43 @@ static Boolean At(optr o, sword l, sword t, sword r, sword b)
 }
 
 #define OWN	RSA_CHOOSE_OWN_SIZE
+
+/* UVNode's grabs */
+#define NODE_MASTER	word_offsetof(VisBase, Vis_offset)
+#define NODE_GRAB	word_offsetof(UVNodeInstance, UVNI_grab)
+#define NODE_EXCL	word_offsetof(UVNodeInstance, UVNI_excl)
+
+static Boolean NodeGrab(optr od, word data)
+{
+    UVNodeInstance *n;
+    Boolean ok;
+
+    ObjLockObjBlock(OptrToHandle(@UVNode));
+    n = ObjDerefVis(@UVNode);
+    ok = n->UVNI_grab.BG_OD == od && n->UVNI_grab.BG_data == data;
+    MemUnlock(OptrToHandle(@UVNode));
+    return ok;
+}
+
+static Boolean NodeExcl(optr od, word flags)
+{
+    UVNodeInstance *n;
+    Boolean ok;
+
+    ObjLockObjBlock(OptrToHandle(@UVNode));
+    n = ObjDerefVis(@UVNode);
+    ok = n->UVNI_excl.HG_OD == od && n->UVNI_excl.HG_flags == flags;
+    MemUnlock(OptrToHandle(@UVNode));
+    return ok;
+}
+
+/* what a leaf has got: gained, lost, gained system, lost system */
+static Boolean Got(word which, word g, word l, word gs, word ls)
+{
+    word *f = uvState.UVS_flow[which];
+
+    return f[0] == g && f[1] == l && f[2] == gs && f[3] == ls;
+}
 
 @method UVProcessClass, MSG_UV_STEP
 {
@@ -449,6 +519,99 @@ static Boolean At(optr o, sword l, sword t, sword r, sword b)
 	UVCHECK(At(@UVGeo2, 0, 129, 63, 169) && At(@UVGeoD, 0, 129, 50, 169) &&
 		At(@UVFlex, 53, 129, 63, 169));
 	break;
+    case 10: {
+	/* the Flow routines.  A basic grab: asked for, forced, released */
+	GetTargetParams t;
+	EventHandle ev, outer;
+
+	UVCHECK(FlowRequestGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				NODE_GRAB, @UVLeaf1, 7));
+	UVCHECK(NodeGrab(@UVLeaf1, 7) && Got(1, 1, 0, 0, 0));
+	UVCHECK(!FlowRequestGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				 NODE_GRAB, @UVLeaf2, 8));
+	UVCHECK(NodeGrab(@UVLeaf1, 7) && Got(2, 0, 0, 0, 0));
+	UVCHECK(FlowForceGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER, NODE_GRAB,
+			      @UVLeaf2, 8));
+	UVCHECK(NodeGrab(@UVLeaf2, 8) && Got(1, 1, 1, 0, 0) &&
+		Got(2, 1, 0, 0, 0));
+	UVCHECK(!FlowForceGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+			       NODE_GRAB, @UVLeaf2, 9));
+	UVCHECK(NodeGrab(@UVLeaf2, 9) && Got(2, 1, 0, 0, 0));
+	UVCHECK(!FlowReleaseGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				 NODE_GRAB, @UVLeaf1));
+	UVCHECK(FlowReleaseGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				NODE_GRAB, @UVLeaf2));
+	UVCHECK(NodeGrab(0, 0) && Got(2, 1, 1, 0, 0));
+	memset(uvState.UVS_flow, 0, sizeof(uvState.UVS_flow));
+
+	/* a hierarchical grab.  The node has no exclusive: only noted */
+	FlowAlterHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				  NODE_EXCL, @UVLeaf1, HGF_GRAB | 5);
+	UVCHECK(NodeExcl(@UVLeaf1, HGF_GRAB | 5) && Got(1, 0, 0, 0, 0));
+	/* the node gains the exclusive: so does the one below */
+	FlowUpdateHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				   NODE_EXCL, MSG_UVN_GAINED);
+	UVCHECK(NodeExcl(@UVLeaf1, HGF_APP_EXCL | HGF_GRAB | 5) &&
+		Got(1, 1, 0, 0, 0));
+	/* another one below */
+	FlowAlterHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				  NODE_EXCL, @UVLeaf2, HGF_GRAB);
+	UVCHECK(NodeExcl(@UVLeaf2, HGF_APP_EXCL | HGF_GRAB) &&
+		Got(1, 1, 1, 0, 0) && Got(2, 1, 0, 0, 0));
+	/* the system exclusive, and a change under it */
+	FlowUpdateHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				   NODE_EXCL, MSG_UVN_GAINED_SYS);
+	UVCHECK(NodeExcl(@UVLeaf2, HGF_SYS_EXCL | HGF_APP_EXCL | HGF_GRAB) &&
+		Got(2, 1, 0, 1, 0));
+	FlowAlterHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				  NODE_EXCL, @UVLeaf1, HGF_GRAB);
+	UVCHECK(NodeExcl(@UVLeaf1, HGF_SYS_EXCL | HGF_APP_EXCL | HGF_GRAB) &&
+		Got(2, 1, 1, 1, 1) && Got(1, 2, 1, 1, 0));
+
+	/* the target at a level: the node's own, the leaf, none */
+	FlowGetTargetAtTargetLevel(@UVNode, NODE_MASTER, NODE_EXCL, 5, 5, &t);
+	UVCHECK(t.GTP_target == @UVNode && t.GTP_class == &UVNodeClass);
+	FlowGetTargetAtTargetLevel(@UVNode, NODE_MASTER, NODE_EXCL, 5, 0, &t);
+	UVCHECK(t.GTP_target == @UVLeaf1 && t.GTP_class == &UVNodeClass);
+	FlowGetTargetAtTargetLevel(@UVNode, NODE_MASTER, NODE_EXCL, 5, 7, &t);
+	UVCHECK(!t.GTP_target && !t.GTP_class);
+
+	/* released by one that does not have it, by the one that has */
+	FlowAlterHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				  NODE_EXCL, @UVLeaf2, 0);
+	UVCHECK(Got(1, 2, 1, 1, 0));
+	FlowAlterHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				  NODE_EXCL, @UVLeaf1, 0);
+	UVCHECK(NodeExcl(0, HGF_SYS_EXCL | HGF_APP_EXCL) &&
+		Got(1, 2, 2, 1, 1));
+	FlowGetTargetAtTargetLevel(@UVNode, NODE_MASTER, NODE_EXCL, 5, 0, &t);
+	UVCHECK(t.GTP_target == @UVNode);
+	FlowUpdateHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				   NODE_EXCL, MSG_UVN_LOST_SYS);
+	FlowUpdateHierarchicalGrab(@UVNode, MSG_UVN_GAINED, NODE_MASTER,
+				   NODE_EXCL, MSG_UVN_LOST);
+	UVCHECK(NodeExcl(0, 0) && Got(1, 2, 2, 1, 1) && Got(2, 1, 1, 1, 1));
+
+	/* classed events: dispatched at an object of the class, sent on,
+	 * destroyed (with the event it carries) */
+	memset(uvState.UVS_flow, 0, sizeof(uvState.UVS_flow));
+	ev = @record UVNodeClass::MSG_UVN_GAINED();
+	UVCHECK(FlowDispatchSendOnOrDestroyClassedEvent(NULL, @UVLeaf1,
+		    MSG_META_SEND_CLASSED_EVENT, ev, TO_SELF, 0, 0));
+	UVCHECK(Got(1, 1, 0, 0, 0));
+	ev = @record UVWinClass::MSG_UV_PING();
+	UVCHECK(!FlowDispatchSendOnOrDestroyClassedEvent(NULL, @UVLeaf1,
+		    MSG_META_SEND_CLASSED_EVENT, ev, TO_SELF, 0, 0));
+	ev = @record UVNodeClass::MSG_UVN_LOST();
+	UVCHECK(FlowMessageClassedEvent(@UVLeaf2, MSG_META_SEND_CLASSED_EVENT,
+					ev, TO_SELF, 0));
+	UVCHECK(Got(2, 0, 1, 0, 0));
+	ev = @record UVNodeClass::MSG_UVN_LOST();
+	outer = @record UVNodeClass::MSG_META_SEND_CLASSED_EVENT(ev, TO_SELF);
+	FlowDestroyMessage(outer);
+	UVCHECK(Got(2, 0, 1, 0, 0) && uvState.UVS_pings == 1);
+	break;
+    }
     }
 }
 

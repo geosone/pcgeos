@@ -279,5 +279,41 @@ pragma Alias (FlowDispatchSendOnOrDestroyClassedEvent,
 		"FLOWDISPATCHSENDONORDESTROYCLASSEDEVENT");
 #endif
 
+#ifdef GEOS_PORT32
+/*
+ * The other Flow routines in C (Port32/ABI.md section 13x): the grab is
+ * at offsetToGrab in the master part whose offset word is at
+ * offsetToMasterInstance (0: in the chunk).  gainedMessage is the first
+ * of the grab's messages (gained, lost; for a hierarchical grab also
+ * gained system, lost system), 0 for none.
+ */
+extern Boolean FlowForceGrab(optr objectOptr, Message gainedMessage,
+			     word offsetToMasterInstance, word offsetToGrab,
+			     optr grabber, word data);
+extern Boolean FlowRequestGrab(optr objectOptr, Message gainedMessage,
+			       word offsetToMasterInstance,
+			       word offsetToGrab, optr grabber, word data);
+extern Boolean FlowReleaseGrab(optr objectOptr, Message gainedMessage,
+			       word offsetToMasterInstance,
+			       word offsetToGrab, optr grabber);
+/* ret is a GetTargetParams (metaC.goh), the levels are TargetLevels */
+extern void FlowGetTargetAtTargetLevel(optr objectOptr,
+				       word offsetToMasterInstance,
+				       word offsetToHierarchicalGrab,
+				       word thisLevel, word level, void *ret);
+extern void FlowDestroyMessage(EventHandle event);
+extern Boolean FlowMessageClassedEvent(optr objectToSendTo,
+				       Message messageToSend,
+				       EventHandle classedEvent,
+				       word otherData, MessageFlags flags);
+extern void MetaGrabFocusExclLow(optr obj);
+extern void MetaReleaseFocusExclLow(optr obj);
+extern void MetaGrabTargetExclLow(optr obj);
+extern void MetaReleaseTargetExclLow(optr obj);
+extern void MetaGrabModelExclLow(optr obj);
+extern void MetaReleaseModelExclLow(optr obj);
+extern void MetaReleaseFTExclLow(optr obj);
+#endif
+
 @endlib
 

@@ -4662,6 +4662,31 @@ visual classes of `Library/User/Vis`:
     laid out in a line from its origin); one that places them itself
     sets `VCGA_CUSTOM_MANAGE_CHILDREN`, and then removing a child
     starts no update (as in the asm).
+- **The Flow routines** (`User/userFlowUtils.goc`, after
+  `userFlowUtils.asm`): grabs kept in an object's instance data.
+  - `FlowForceGrab`, `FlowRequestGrab` and `FlowReleaseGrab` work on a
+    `BasicGrab`; `FlowAlterHierarchicalGrab` and
+    `FlowUpdateHierarchicalGrab` on a `HierarchicalGrab`, a node of the
+    focus, target or model hierarchy;
+  - they take the optr, the offset of the master part's offset word
+    (0: in the chunk) and the offset in the part, with the C prototypes
+    `uiInputC.goh` always had (the `Segment` they returned is 0);
+  - the gained and lost messages go out without the grab's data word
+    (the asm had it in `bp`): their C prototypes have no parameters;
+  - `FlowGetTargetAtTargetLevel` answers
+    `MSG_META_GET_TARGET_AT_TARGET_LEVEL` for a node; `MetaClass`
+    answers it for a leaf (now in the C kernel);
+  - `FlowDispatchSendOnOrDestroyClassedEvent` and
+    `FlowMessageClassedEvent` handle classed events at a node;
+    `FlowDestroyMessage` frees an event with what it carries (a nested
+    event, the reference to a notification's data block). It reads the
+    event's parameter structure through the kernel's new
+    `ObjGetMessageParams(event, &size)` (`object.h`), which stands in
+    for the registers of `ObjGetMessageData`;
+  - `MetaGrabFocusExclLow` and its six relatives send
+    `MSG_META_MUP_ALTER_FTVMC_EXCL` for an object;
+  - not yet: the IACP completion message that
+    `FlowDestroyMessageInMessage` dispatched instead of freeing.
 - **Not yet:**
   - `VisContentClass`;
   - the Generic UI, so `VTF_IS_GEN` is never set, and
@@ -4682,7 +4707,9 @@ visual classes of `Library/User/Vis`:
   positions worked out by hand: horizontal and vertical lines, the
   justifications along and across, expanding, spacing and margins,
   wrapping, unmanaged children, a child that takes the extra length,
-  a composite in a composite.
+  a composite in a composite. A node object with two leaves checks the
+  Flow routines: who gets which message as grabs are asked for, forced
+  and released, and as the node gains and loses its exclusives.
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 

@@ -1,0 +1,461 @@
+/*
+ * userFlowUtils.goc -- the Flow utility routines (after
+ * userFlowUtils.asm): grabs kept in an object's instance data.
+ *
+ * A BasicGrab is an object and a word of data (the mouse grab of a
+ * content, a gadget exclusive).  A HierarchicalGrab is a node of the
+ * focus, target or model hierarchy: the object that has the exclusive
+ * below this node, and whether the node itself has the exclusive of
+ * its application (HGF_APP_EXCL) and of the system (HGF_SYS_EXCL).
+ * The object below is told when it gains or loses either, with four
+ * consecutive messages: gained, lost, gained system, lost system
+ * (MSG_META_GAINED_FOCUS_EXCL and the three after it, and so on).
+ *
+ * The grab is at an offset in a master part of the object, given as
+ * the offset of the part's offset word (0: in the chunk) and the
+ * offset in the part, as for ObjCompProcessChildren.
+ *
+ * Port32: the routines take the optr and have the C prototypes of
+ * uiInputC.goh (the Segment they returned for the 16-bit C stubs is 0).
+ * The messages go out without the grab's data word, which the asm had
+ * in bp: their C prototypes have no parameters.
+ */
+@include "uiInt.goh"
+#include <string.h>
+
+/* FlowPointToField */
+static BasicGrab *Field(optr obj, word masterOffset, word offset)
+{
+    byte *p = LMemDeref(obj);
+
+    if (masterOffset)
+	p += *(word *) (p + masterOffset);
+    return (BasicGrab *) (p + offset);
+}
+
+/* FlowSendMessageToGrab */
+static void SendToGrab(optr obj, word masterOffset, word offset, Message msg)
+{
+    optr od = Field(obj, masterOffset, offset)->BG_OD;
+
+    if (msg && od)
+	CObjMessageP(0, od, msg, NULL, 0, NULL, 0);
+}
+
+/* FlowReleaseLow: the grab's owner told (gained + 1) and the grab
+ * cleared */
+static void ReleaseLow(optr obj, Message gained, word masterOffset,
+		       word offset)
+{
+    BasicGrab *g = Field(obj, masterOffset, offset);
+
+    if (!g->BG_OD)
+	return;
+    if (gained) {
+	SendToGrab(obj, masterOffset, offset, gained + 1);
+	g = Field(obj, masterOffset, offset);
+    }
+    g->BG_OD = 0;
+    g->BG_data = 0;
+}
+
+/* FlowGrabLow */
+static void GrabLow(optr obj, Message gained, word masterOffset, word offset,
+		    optr grabber, word data)
+{
+    BasicGrab *g = Field(obj, masterOffset, offset);
+
+    g->BG_OD = grabber;
+    g->BG_data = data;
+    SendToGrab(obj, masterOffset, offset, gained);
+}
+
+/*
+ * FlowForceGrab: the grab to `grabber' (0: to nobody), whoever has it:
+ * the old owner gets gained + 1, the new one gained (0: no messages).
+ * The same owner again only gets the data updated.  TRUE if the owner
+ * changed.
+ */
+Boolean FlowForceGrab(optr obj, Message gained, word masterOffset,
+		      word offset, optr grabber, word data)
+{
+    BasicGrab *g;
+    Boolean had;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+    g = Field(obj, masterOffset, offset);
+    had = g->BG_OD != 0;
+    if (!grabber) {
+	ReleaseLow(obj, gained, masterOffset, offset);
+	MemUnlock(OptrToHandle(obj));
+	return had;
+    }
+    if (g->BG_OD == grabber) {
+	g->BG_data = data;
+	MemUnlock(OptrToHandle(obj));
+	return FALSE;
+    }
+    if (had)
+	ReleaseLow(obj, gained, masterOffset, offset);
+    GrabLow(obj, gained, masterOffset, offset, grabber, data);
+    MemUnlock(OptrToHandle(obj));
+    return TRUE;
+}
+
+/* FlowRequestGrab: the grab to `grabber' if nobody has it; TRUE if it
+ * got it */
+Boolean FlowRequestGrab(optr obj, Message gained, word masterOffset,
+			word offset, optr grabber, word data)
+{
+    BasicGrab *g;
+    Boolean got = FALSE;
+
+    if (!grabber)
+	return FALSE;
+    ObjLockObjBlock(OptrToHandle(obj));
+    g = Field(obj, masterOffset, offset);
+    if (g->BG_OD == grabber)
+	g->BG_data = data;
+    else if (!g->BG_OD) {
+	GrabLow(obj, gained, masterOffset, offset, grabber, data);
+	got = TRUE;
+    }
+    MemUnlock(OptrToHandle(obj));
+    return got;
+}
+
+/* FlowReleaseGrab: released if `grabber' has it; TRUE if it had */
+Boolean FlowReleaseGrab(optr obj, Message gained, word masterOffset,
+			word offset, optr grabber)
+{
+    Boolean had = FALSE;
+
+    if (!grabber)
+	return FALSE;
+    ObjLockObjBlock(OptrToHandle(obj));
+    if (Field(obj, masterOffset, offset)->BG_OD == grabber) {
+	ReleaseLow(obj, gained, masterOffset, offset);
+	had = TRUE;
+    }
+    MemUnlock(OptrToHandle(obj));
+    return had;
+}
+
+/* ---------------------------------------------------------------------
+ * Hierarchical grabs
+ * ------------------------------------------------------------------- */
+
+static HierarchicalGrab *Node(optr obj, word masterOffset, word offset)
+{
+    return (HierarchicalGrab *) Field(obj, masterOffset, offset);
+}
+
+/* FlowGainedAppExcl, FlowLostAppExcl, FlowGainedSysExcl,
+ * FlowLostSysExcl: the node's flag set before the object below hears
+ * of a gain, cleared after it has heard of a loss */
+static void NodeGained(optr obj, word masterOffset, word offset,
+		       HierarchicalGrabFlags flag, Message msg)
+{
+    Node(obj, masterOffset, offset)->HG_flags |= flag;
+    SendToGrab(obj, masterOffset, offset, msg);
+}
+
+static void NodeLost(optr obj, word masterOffset, word offset,
+		     HierarchicalGrabFlags flag, Message msg)
+{
+    SendToGrab(obj, masterOffset, offset, msg);
+    Node(obj, masterOffset, offset)->HG_flags &= ~flag;
+}
+
+/*
+ * FlowUpdateHierarchicalGrab: the node gained or lost the exclusive
+ * itself: `update' is one of the four messages from `gained' on; the
+ * node's flags follow and the object below is told.
+ */
+Segment FlowUpdateHierarchicalGrab(optr obj, Message gained,
+				   word masterOffset, word offset,
+				   Message update)
+{
+    ObjLockObjBlock(OptrToHandle(obj));
+    switch (update - gained) {
+    case 0:
+	NodeGained(obj, masterOffset, offset, HGF_APP_EXCL, update);
+	break;
+    case 1:
+	NodeLost(obj, masterOffset, offset, HGF_APP_EXCL, update);
+	break;
+    case 2:
+	NodeGained(obj, masterOffset, offset, HGF_SYS_EXCL, update);
+	break;
+    case 3:
+	NodeLost(obj, masterOffset, offset, HGF_SYS_EXCL, update);
+	break;
+    }
+    MemUnlock(OptrToHandle(obj));
+    return 0;
+}
+
+/* FlowGrabWithinLevel: `grabber' is the object below this node.  If the
+ * node has the exclusive, the old one loses it and the new one gains
+ * it; else it is only noted, for when the node gains it. */
+static void GrabWithinLevel(optr obj, Message gained, word masterOffset,
+			    word offset, optr grabber,
+			    HierarchicalGrabFlags flags)
+{
+    HierarchicalGrab *n = Node(obj, masterOffset, offset);
+    Boolean sys;
+
+    if (!(n->HG_flags & HGF_APP_EXCL) || n->HG_OD == grabber) {
+	n->HG_OD = grabber;
+	n->HG_flags &= ~HGF_OTHER_INFO;
+	n->HG_flags |= (flags & HGF_OTHER_INFO) | (grabber ? HGF_GRAB : 0);
+	return;
+    }
+    sys = (n->HG_flags & HGF_SYS_EXCL) != 0;
+    if (sys)
+	NodeLost(obj, masterOffset, offset, HGF_SYS_EXCL, gained + 3);
+    NodeLost(obj, masterOffset, offset, HGF_APP_EXCL, gained + 1);
+    /* (the grab's data word is the node's flags) */
+    FlowForceGrab(obj, 0, masterOffset, offset, grabber,
+		  (flags & HGF_OTHER_INFO) | HGF_GRAB);
+    NodeGained(obj, masterOffset, offset, HGF_APP_EXCL, gained);
+    if (sys)
+	NodeGained(obj, masterOffset, offset, HGF_SYS_EXCL, gained + 2);
+}
+
+/* FlowReleaseWithinLevel: `grabber' is no longer the object below this
+ * node, if it was */
+static void ReleaseWithinLevel(optr obj, Message gained, word masterOffset,
+			       word offset, optr grabber)
+{
+    HierarchicalGrab *n = Node(obj, masterOffset, offset);
+    Boolean sys;
+
+    if (n->HG_OD != grabber)
+	return;
+    if (!(n->HG_flags & HGF_APP_EXCL)) {
+	n->HG_OD = 0;
+	n->HG_flags &= ~HGF_OTHER_INFO;
+	return;
+    }
+    sys = (n->HG_flags & HGF_SYS_EXCL) != 0;
+    if (sys)
+	NodeLost(obj, masterOffset, offset, HGF_SYS_EXCL, gained + 3);
+    NodeLost(obj, masterOffset, offset, HGF_APP_EXCL, gained + 1);
+    ReleaseLow(obj, 0, masterOffset, offset);
+    /* the node keeps its exclusives */
+    Node(obj, masterOffset, offset)->HG_flags |=
+	HGF_APP_EXCL | (sys ? HGF_SYS_EXCL : 0);
+}
+
+/*
+ * FlowAlterHierarchicalGrab: `grabber' grabs (HGF_GRAB in flags, with
+ * HGF_OTHER_INFO to keep) or releases the exclusive below this node.
+ */
+Segment FlowAlterHierarchicalGrab(optr obj, Message gained,
+				  word masterOffset, word offset,
+				  optr grabber, HierarchicalGrabFlags flags)
+{
+    ObjLockObjBlock(OptrToHandle(obj));
+    if (flags & HGF_GRAB)
+	GrabWithinLevel(obj, gained, masterOffset, offset, grabber, flags);
+    else
+	ReleaseWithinLevel(obj, gained, masterOffset, offset, grabber);
+    MemUnlock(OptrToHandle(obj));
+    return 0;
+}
+
+/*
+ * FlowGetTargetAtTargetLevel: for a node at level `thisLevel' of the
+ * target hierarchy handling MSG_META_GET_TARGET_AT_TARGET_LEVEL: the
+ * node itself if that level is asked for (or nothing is below it, and
+ * the leaf is), else what the object below answers.
+ */
+void FlowGetTargetAtTargetLevel(optr obj, word masterOffset, word offset,
+				word thisLevel, word level, void *retValue)
+{
+    GetTargetParams *ret = retValue;
+    optr below;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+    below = Node(obj, masterOffset, offset)->HG_OD;
+    if (level == thisLevel || !below) {
+	/* MetaClass's answer */
+	if (level != thisLevel && level) {
+	    ret->GTP_class = NULL;
+	    ret->GTP_target = 0;
+	} else {
+	    ret->GTP_class = *(ClassStruct **) LMemDeref(obj);
+	    ret->GTP_target = obj;
+	}
+	MemUnlock(OptrToHandle(obj));
+	return;
+    }
+    MemUnlock(OptrToHandle(obj));
+    @call below::MSG_META_GET_TARGET_AT_TARGET_LEVEL(ret, (TargetLevel) level);
+}
+
+/* ---------------------------------------------------------------------
+ * Classed events
+ * ------------------------------------------------------------------- */
+
+/* the first word of an event's parameters: the nested event of the
+ * messages that carry one */
+static EventHandle NestedEvent(EventHandle event)
+{
+    dword size;
+    const EventHandle *p = ObjGetMessageParams(event, &size);
+
+    return size >= sizeof(EventHandle) ? *p : 0;
+}
+
+/*
+ * FlowDestroyMessage: an event nobody will get is freed with what it
+ * carries: the event in a message that passes one on, the data block's
+ * reference of a notification.
+ * (FlowDestroyMessageInMessage dispatched an IACP completion message
+ * instead of freeing it; that comes with IACP.)
+ */
+void FlowDestroyMessage(EventHandle event)
+{
+    optr dest;
+    Message msg = ObjGetMessageInfo(event, &dest);
+    ClassStruct *cls = (ClassStruct *) (uintptr_t) dest;
+    dword size;
+    const void *params = ObjGetMessageParams(event, &size);
+    Boolean nested = FALSE;
+
+    for (; cls; cls = cls->Class_superClass) {
+	if (cls == &VisClass) {
+	    nested = msg == MSG_VIS_VUP_CALL_OBJECT_OF_CLASS ||
+		     msg == MSG_VIS_VUP_SEND_TO_OBJECT_OF_CLASS ||
+		     msg == MSG_VIS_VUP_CALL_WIN_GROUP ||
+		     msg == MSG_VIS_VUP_SEND_TO_WIN_GROUP ||
+		     msg == MSG_VIS_CALL_PARENT ||
+		     msg == MSG_VIS_SEND_TO_PARENT ||
+		     msg == MSG_VIS_SEND_TO_CHILDREN;
+	    break;
+	}
+	if (cls->Class_flags & CLASSF_VARIANT_CLASS)
+	    break;
+    }
+    if (msg == MSG_META_SEND_CLASSED_EVENT || msg == MSG_META_DISPATCH_EVENT)
+	nested = TRUE;
+    if (nested) {
+	EventHandle inner = NestedEvent(event);
+
+	if (inner)
+	    FlowDestroyMessage(inner);
+    } else if (msg == MSG_META_NOTIFY_WITH_DATA_BLOCK) {
+	const struct { ManufacturerID manuf; word type; MemHandle data; } *n =
+	    params;
+
+	if (size >= sizeof(*n) && n->data)
+	    MemDecRefCount(n->data);
+    } else if (msg == MSG_META_GCN_LIST_SEND) {
+	const struct { GCNListSendFlags flags; EventHandle event;
+		       MemHandle block; } *g = params;
+
+	if (size >= sizeof(*g)) {
+	    if (g->event)
+		ObjFreeMessage(g->event);
+	    if (g->block)
+		MemDecRefCount(g->block);
+	}
+    }
+    ObjFreeMessage(event);
+}
+
+/*
+ * FlowMessageClassedEvent: the classed event on to `dest' in the
+ * message `msg' (with the travel option, for
+ * MSG_META_SEND_CLASSED_EVENT), or destroyed if there is none.  TRUE
+ * if it was sent on.
+ */
+Boolean FlowMessageClassedEvent(optr dest, Message msg, EventHandle event,
+				word other, MessageFlags flags)
+{
+    struct { EventHandle event; word other; } p;
+
+    if (!dest) {
+	FlowDestroyMessage(event);
+	return FALSE;
+    }
+    p.event = event;
+    p.other = other;
+    CObjMessageP(flags, dest, msg, &p, sizeof(p), NULL, 0);
+    return TRUE;
+}
+
+/*
+ * FlowDispatchSendOnOrDestroyClassedEvent: the usual handling of a
+ * classed event at a node: dispatched here if this object is of the
+ * event's class (or it has none and there is nowhere to send it on),
+ * else on to `dest' in `msg', or destroyed.  TRUE if it was dispatched
+ * or sent on.  (retvals: the registers of a call; not filled in C,
+ * where a dispatched event has no reply.)
+ */
+Boolean FlowDispatchSendOnOrDestroyClassedEvent(MessageReturnValues *retvals,
+						optr obj, Message msg,
+						EventHandle event, word other,
+						optr dest, MessageFlags flags)
+{
+    optr edest;
+    ClassStruct *cls;
+
+    if (retvals)
+	memset(retvals, 0, sizeof(*retvals));
+    ObjGetMessageInfo(event, &edest);
+    cls = (ClassStruct *) (uintptr_t) edest;
+    if (cls ? ObjIsObjectInClass(obj, cls) : !dest) {
+	MessageSetDestination(event, obj);
+	CMessageDispatchP(event, flags & MF_CALL, NULL, 0);
+	return TRUE;
+    }
+    return FlowMessageClassedEvent(dest, msg, event, other, flags);
+}
+
+/* ---------------------------------------------------------------------
+ * The focus, target and model exclusives of an object
+ * (MetaGrabFocusExclLow and the others)
+ * ------------------------------------------------------------------- */
+
+static void AlterFTVMC(optr obj, MetaAlterFTVMCExclFlags flags)
+{
+    @call obj::MSG_META_MUP_ALTER_FTVMC_EXCL(obj, flags | MAEF_NOT_HERE);
+}
+
+void MetaGrabFocusExclLow(optr obj)
+{
+    AlterFTVMC(obj, MAEF_GRAB | MAEF_FOCUS);
+}
+
+void MetaReleaseFocusExclLow(optr obj)
+{
+    AlterFTVMC(obj, MAEF_FOCUS);
+}
+
+void MetaGrabTargetExclLow(optr obj)
+{
+    AlterFTVMC(obj, MAEF_GRAB | MAEF_TARGET);
+}
+
+void MetaReleaseTargetExclLow(optr obj)
+{
+    AlterFTVMC(obj, MAEF_TARGET);
+}
+
+void MetaGrabModelExclLow(optr obj)
+{
+    AlterFTVMC(obj, MAEF_GRAB | MAEF_MODEL);
+}
+
+void MetaReleaseModelExclLow(optr obj)
+{
+    AlterFTVMC(obj, MAEF_MODEL);
+}
+
+void MetaReleaseFTExclLow(optr obj)
+{
+    AlterFTVMC(obj, MAEF_FOCUS | MAEF_TARGET);
+}

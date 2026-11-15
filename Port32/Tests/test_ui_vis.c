@@ -1,6 +1,7 @@
 /*
  * test_ui_vis.c -- the visual classes of the UI library (Library/User/Vis:
- * VisClass, VisCompClass) in a window, through the process geode uivis
+ * VisClass, VisCompClass, the geometry manager) in a window, and the Flow
+ * routines (Library/User/User), through the process geode uivis
  * (Geode/uivis.goc).
  *
  * The root window is on a fake video driver that records the rectangles
@@ -18,7 +19,10 @@
  *   8. expanding, justified along (end, center, full), spacing and
  *      margins;
  *   9. wrapping, unmanaged children, a child taking the extra length,
- *      a composite in a composite.
+ *      a composite in a composite;
+ *  10. the Flow routines: a basic grab, a node of a hierarchy gaining
+ *      and losing its exclusives, the target at a level, classed
+ *      events.
  */
 #include "kernelC.h"
 #include "Win/winInt.h"
@@ -43,6 +47,7 @@ typedef struct {
     word		UVS_pings;
     WindowHandle	UVS_win;
     word		UVS_failLines[8];
+    word		UVS_flow[3][4];
 } UVState;
 
 static int fails;
@@ -194,6 +199,9 @@ int main(void)
     step(8);
     step(9);
 
+    /* 10: the Flow routines (checked in the geode) */
+    step(10);
+
     printf("geode checks: %u, failed %u (first at uivis.goc line %u)\n",
 	   st->UVS_checks, st->UVS_fails, st->UVS_failLine);
     {
@@ -202,7 +210,7 @@ int main(void)
 	for (i = 0; i < st->UVS_fails && i < 8; i++)
 	    printf("  failed: uivis.goc line %u\n", st->UVS_failLines[i]);
     }
-    CHECK(st->UVS_checks >= 70 && !st->UVS_fails);
+    CHECK(st->UVS_checks >= 100 && !st->UVS_fails);
 
     /* detach: the process goes, and with it the library */
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,
