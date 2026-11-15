@@ -1,0 +1,1040 @@
+/*
+ * visCompGeometry.goc -- the geometry manager (after
+ * visCompGeometry.asm): a composite sizes its managed children along
+ * its length (VisCompRecalcSize) and places them (VisCompPosition).
+ *
+ * The length is the dimension the children go along (the width of a
+ * horizontal composite), the width the other one.  The sizes are the
+ * 16-bit words of the asm, with its unsigned and signed comparisons:
+ * RSA_CHOOSE_OWN_SIZE (0x8000) is a negative length.
+ *
+ * Sizing, in two passes:
+ *   1. every child chooses its length for the width passed; the widest
+ *      gives the line width.  Repeated while the width changes (and
+ *      once more when centering, for the parts before and after the
+ *      center).
+ *   2. the extra length (passed less needed, which may be negative) is
+ *      offered child by child; the children wrap to a new line where
+ *      the composite allows it.  A child wider than the line sends the
+ *      composite back to pass 1.
+ * The line width and the center parts are kept for the positioning in
+ * ATTR_VIS_GEOMETRY_DATA.
+ *
+ * Port32: the callbacks of ObjCompProcessChildren got their state in
+ * registers; here it is in GeoVars and PosVars.  The methods of
+ * VisCompClass that call this are in visComp.goc (goc wants a class's
+ * methods in the file of its @classdecl).
+ */
+@include "uiInt.goh"
+#include <string.h>
+
+/* GenericJustifications: the justification along either dimension */
+#define GJ_BEGIN_JUSTIFIED	0
+#define GJ_END_JUSTIFIED	1
+#define GJ_CENTERED		2
+#define GJ_FULL_JUSTIFIED	3
+
+/* DimensionAttrs: one half of VisCompGeoDimensionAttrs */
+#define DA_JUSTIFICATION	0x0c
+#define DA_EXPAND_TO_FIT_PARENT	0x02
+#define DA_DIVIDE_SPACE_EQUALLY	0x01
+
+#define NEGATIVE(w)	(((w) & 0x8000) != 0)
+#define GA(comp)	(VisCompPart(comp)->VCI_geoAttrs)
+#define VERTICAL(comp)	((GA(comp) & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0)
+
+typedef struct {
+    optr	comp;
+    word	longestLine;		/* the longest line of a wrap */
+    word	passedWidth;
+    word	lengthSpacing;
+    word	widthSpacing;
+    word	returnWidth;
+    word	minWidth;
+    word	minLength;
+    byte	numPasses;		/* first passes when centering */
+    byte	lengthJust;
+    byte	widthJust;
+    byte	lengthAttrs;
+    byte	widthAttrs;
+    word	wrapCount;
+    word	childCount;
+    word	lineWidth;		/* kept for the positioning */
+    word	centerOffset;
+    word	secondWidth;
+    word	spacingStuff;		/* VisCompSpacingMarginsInfo */
+    word	lengthToPassKids;	/* RSA_CHOOSE_OWN_SIZE, usually */
+    word	passedLength;		/* the length used in pass 2 */
+    /* from child to child (the asm's ax, cx, dx) */
+    word	ax;			/* return length */
+    word	cx;			/* passed length */
+    word	dx;			/* passed width, or extra length */
+    Boolean	abort;			/* pass 2 given up */
+} GeoVars;
+
+/* GetDimensionAttrs: the attributes along the length and the width */
+static void GetDimensionAttrs(optr comp, byte *length, byte *width)
+{
+    byte a = VisCompPart(comp)->VCI_geoDimensionAttrs;
+
+    if (VERTICAL(comp)) {
+	*length = a & 0x0f;
+	*width = a >> 4;
+    } else {
+	*length = a >> 4;
+	*width = a & 0x0f;
+    }
+}
+
+/* GetVisCompSpacing: between children, between lines */
+static void Spacing(optr comp, word info, word *child, word *wrap)
+{
+    SpacingAsDWord s;
+
+    if (info & VCSMI_USE_THIS_INFO) {
+	*child = *wrap = info & VCSMI_CHILD_SPACING;
+	return;
+    }
+    s = @call comp::MSG_VIS_COMP_GET_CHILD_SPACING();
+    *child = DWORD_CHILD_SPACING(s);
+    *wrap = DWORD_WRAP_SPACING(s);
+}
+
+/* GetVisCompMarginsAndAdjust: the margins at the beginning and the end
+ * of the length and of the width */
+static void Margins(optr comp, word info, word *lenBegin, word *widBegin,
+		    word *lenEnd, word *widEnd)
+{
+    Rectangle m;
+
+    if (info & VCSMI_USE_THIS_INFO) {
+	m.R_bottom = (info >> 3) & 7;
+	m.R_right = (info >> 6) & 7;
+	m.R_top = (info >> 9) & 7;
+	m.R_left = (info >> 12) & 7;
+    } else
+	@call comp::MSG_VIS_COMP_GET_MARGINS(&m);
+    if (VERTICAL(comp)) {
+	*lenBegin = m.R_top;
+	*widBegin = m.R_left;
+	*lenEnd = m.R_bottom;
+	*widEnd = m.R_right;
+    } else {
+	*lenBegin = m.R_left;
+	*widBegin = m.R_top;
+	*lenEnd = m.R_right;
+	*widEnd = m.R_bottom;
+    }
+}
+
+/* GetLength, GetWidth: of a child, as the composite is oriented */
+static word ChildLength(optr comp, optr child)
+{
+    SizeAsDWord s = VisGetSize(child);
+
+    return VERTICAL(comp) ? DWORD_HEIGHT(s) : DWORD_WIDTH(s);
+}
+
+static word ChildWidth(optr comp, optr child)
+{
+    SizeAsDWord s = VisGetSize(child);
+
+    return VERTICAL(comp) ? DWORD_WIDTH(s) : DWORD_HEIGHT(s);
+}
+
+static Boolean ChildManaged(optr child)
+{
+    Boolean m = (VisLock(child)->VI_attrs & VA_MANAGED) != 0;
+
+    VisUnlock(child);
+    return m;
+}
+
+static Boolean ChildDontCenter(optr child)
+{
+    Boolean d = (VisLock(child)->VI_geoAttrs & VGA_DONT_CENTER) != 0;
+
+    VisUnlock(child);
+    return d;
+}
+
+/* VisCompSaveTempGeoData, VisCompRestoreTempGeoData */
+static void SaveGeoData(optr comp, word lineWidth, word centerOffset,
+			word secondWidth)
+{
+    VarGeoData *d = ObjVarAddData(comp, ATTR_VIS_GEOMETRY_DATA |
+					VDF_SAVE_TO_STATE, sizeof(VarGeoData));
+
+    d->VGD_lineWidth = lineWidth;
+    d->VGD_centerOffset = centerOffset;
+    d->VGD_secondWidth = secondWidth;
+}
+
+/* (the asm left the registers as they were if there is no data; -1,
+ * "not known", as its EC version) */
+static void RestoreGeoData(optr comp, word *lineWidth, word *centerOffset,
+			   word *secondWidth)
+{
+    VarGeoData *d = ObjVarFindData(comp, ATTR_VIS_GEOMETRY_DATA);
+
+    *lineWidth = d ? d->VGD_lineWidth : (word) -1;
+    *centerOffset = d ? d->VGD_centerOffset : (word) -1;
+    *secondWidth = d ? d->VGD_secondWidth : (word) -1;
+}
+
+/* SaveTempGeoData: what the positioning will need, -1 for the rest */
+static void SaveTempGeoData(GeoVars *g)
+{
+    word line = g->lineWidth, center = g->centerOffset,
+	 second = g->secondWidth;
+
+    if (!(GA(g->comp) & VCGA_ALLOW_CHILDREN_TO_WRAP) &&
+	g->widthJust != GJ_END_JUSTIFIED)
+	line = (word) -1;
+    if (g->widthJust != GJ_CENTERED &&
+	!(!(GA(g->comp) & VCGA_ALLOW_CHILDREN_TO_WRAP) &&
+	  g->widthJust == GJ_END_JUSTIFIED)) {
+	if (line == (word) -1)
+	    return;
+	center = second = (word) -1;
+    }
+    SaveGeoData(g->comp, line, center, second);
+}
+
+/* ResizeChild: the child sized for the length and width offered;
+ * what it took */
+static void ResizeChild(optr comp, optr child, word *length, word *width)
+{
+    Boolean vert = VERTICAL(comp);
+    SizeAsDWord s;
+
+    s = VisRecalcSizeAndInvalIfNeeded(child, vert ? *width : *length,
+				      vert ? *length : *width);
+    VisSetSize(child, DWORD_WIDTH(s), DWORD_HEIGHT(s));
+    *length = vert ? DWORD_HEIGHT(s) : DWORD_WIDTH(s);
+    *width = vert ? DWORD_WIDTH(s) : DWORD_HEIGHT(s);
+}
+
+/* CountManagedChildren (SetupLengthToPassKids) */
+static Boolean CountManaged(optr parent, optr child, void *data)
+{
+    GeoVars *g = data;
+
+    (void) parent;
+    if (ChildManaged(child)) {
+	g->ax++;
+	g->dx += g->lengthSpacing;
+    }
+    return FALSE;
+}
+
+/* SetupLengthToPassKids: what the children are offered in pass 1: their
+ * choice, or with DIVIDE_..._EQUALLY an equal share of the length */
+static void SetupLengthToPassKids(GeoVars *g, word length)
+{
+    g->lengthToPassKids = RSA_CHOOSE_OWN_SIZE;
+    if (!(g->lengthAttrs & DA_DIVIDE_SPACE_EQUALLY) || NEGATIVE(length))
+	return;
+    g->ax = 0;
+    g->dx = -g->lengthSpacing;
+    VisCallChildren(g->comp, CountManaged, g);
+    length -= g->dx;
+    if (NEGATIVE(length))
+	length = 0;
+    if (g->ax)
+	g->lengthToPassKids = length / g->ax;
+}
+
+/* DoDesiredResize: pass 1 for a child */
+static Boolean DoDesiredResize(optr parent, optr child, void *data)
+{
+    GeoVars *g = data;
+    word bx = g->returnWidth, cx, dx;
+
+    (void) parent;
+    if (!ChildManaged(child))
+	return FALSE;
+    cx = g->lengthToPassKids;
+    dx = g->dx;
+    ResizeChild(g->comp, child, &cx, &dx);
+    g->ax += cx;
+    if (cx)			/* no spacing after an empty child */
+	g->ax += g->lengthSpacing;
+
+    /* centering: the most needed before the center and after it; their
+     * sum may widen the composite */
+    if (g->widthJust == GJ_CENTERED && !ChildDontCenter(child)) {
+	GetCenterParams c;
+	word before, after, sum;
+
+	VisSendCenter(child, &c);
+	if (VERTICAL(g->comp)) {
+	    before = c.GCP_leftOfCenter;
+	    after = c.GCP_rightOfCenter;
+	} else {
+	    before = c.GCP_aboveCenter;
+	    after = c.GCP_belowCenter;
+	}
+	if (before > g->centerOffset)
+	    g->centerOffset = before;
+	if (after > g->secondWidth)
+	    g->secondWidth = after;
+	sum = g->centerOffset + g->secondWidth;
+	if (bx <= sum)
+	    bx = sum;
+	SaveTempGeoData(g);
+    }
+    if (bx <= dx)
+	bx = dx;
+    g->returnWidth = bx;
+    return FALSE;
+}
+
+/* BumpReturnWidth: another line */
+static word BumpReturnWidth(GeoVars *g, word width)
+{
+    if (width < g->lineWidth)
+	width = g->lineWidth;
+    return width + g->lineWidth + g->widthSpacing;
+}
+
+/* DoFinalResize: pass 2 for a child: offered its length plus the extra
+ * length; wrapping */
+static Boolean DoFinalResize(optr parent, optr child, void *data)
+{
+    GeoVars *g = data;
+    optr comp = g->comp;
+    word ax = g->ax, passed = g->cx, extra = g->dx, bx = g->returnWidth;
+    word oldLen, cx, dx, si;
+    Boolean squeezed;
+
+    (void) parent;
+    if (!ChildManaged(child))
+	return FALSE;
+    for (;;) {
+	g->childCount++;
+	oldLen = ChildLength(comp, child);
+	cx = oldLen + extra;
+	/* offered less than the composite has: it may be squeezed */
+	squeezed = (sword) cx < (sword) g->passedLength;
+	if (NEGATIVE(cx))
+	    cx = 1;
+	g->lengthToPassKids = g->passedLength;
+	dx = g->lineWidth;
+	ResizeChild(comp, child, &cx, &dx);
+	if (dx <= g->lineWidth)
+	    break;
+
+	/* wider than the line (wrapped itself for the length offered,
+	 * perhaps).  A wrapping composite tries it with the end of the
+	 * line or on a line of its own; else back to pass 1 with the new
+	 * width. */
+	if (!squeezed || !(GA(comp) & VCGA_ALLOW_CHILDREN_TO_WRAP)) {
+	    g->passedWidth = dx;
+	    g->returnWidth = dx;
+	    g->cx = passed;
+	    g->dx = dx;
+	    g->abort = TRUE;
+	    return TRUE;
+	}
+	si = passed - cx - ax;
+	if (si == extra) {
+	    si += ax;
+	    bx = BumpReturnWidth(g, bx);
+	    ax = 0;
+	}
+	extra = si;
+	g->childCount--;
+    }
+    if (dx > bx)
+	bx = dx;
+    extra = extra - cx + oldLen;
+    ax += cx;
+    if (cx)
+	ax += g->lengthSpacing;
+
+    si = passed;
+    if (GA(comp) & VCGA_ALLOW_CHILDREN_TO_WRAP) {
+	Boolean check = TRUE;
+
+	/* wrapping after a child count: the line's length is forced to
+	 * what the first children take */
+	if (GA(comp) & VCGA_WRAP_AFTER_CHILD_COUNT) {
+	    if (g->childCount < g->wrapCount)
+		check = FALSE;
+	    else if (g->childCount == g->wrapCount)
+		si = ax;
+	}
+	if (check && !NEGATIVE(si) && (sword) ax > (sword) si) {
+	    bx = BumpReturnWidth(g, bx);
+	    ax = cx;
+	    /* the spacing at both ends of the new line */
+	    if (GA(comp) & VCGA_INCLUDE_ENDS_IN_CHILD_SPACING)
+		ax += 2 * g->lengthSpacing;
+	}
+    }
+    if (ax >= g->longestLine)
+	g->longestLine = ax;
+    g->ax = ax;
+    g->cx = si;
+    g->dx = extra;
+    g->returnWidth = bx;
+    return FALSE;
+}
+
+/* AdjustCenterToPassedWidth: the width left over beyond the two center
+ * parts: halved between them, or, if the parent centers the same way,
+ * given to the sides as the parent's center has room */
+static void AdjustCenterToPassedWidth(GeoVars *g, word width)
+{
+    optr comp = g->comp;
+    word left = width - g->centerOffset, parent, t;
+    word lenBegin, widBegin, lenEnd, widEnd, avail;
+    Boolean parentVert, centering;
+    Rectangle m;
+    GetCenterParams c;
+    word parentBefore, parentAfter;
+
+    if (left <= g->secondWidth)
+	return;
+    left -= g->secondWidth;
+    parent = VisGetParentGeometry(comp);
+    parentVert = (parent & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+    if (parentVert)
+	centering = ((parent >> 8) & VCGDA_WIDTH_JUSTIFICATION) ==
+		    WJ_CENTER_CHILDREN_HORIZONTALLY;
+    else
+	centering = ((parent >> 8) & VCGDA_HEIGHT_JUSTIFICATION) ==
+		    HJ_CENTER_CHILDREN_VERTICALLY;
+    if (parentVert != VERTICAL(comp) || !centering) {
+	if (!g->numPasses)	/* put off in the first pass */
+	    return;
+	t = left >> 1;
+	g->centerOffset += t;
+	g->secondWidth += left - t;
+	return;
+    }
+
+    /* centered by the parent: this needs the size recalculated always */
+    VisCompPart(comp)->VI_geoAttrs |= VGA_ALWAYS_RECALC_SIZE;
+    VisCompPart(comp)->VI_geoAttrs &= ~VGA_ONLY_RECALC_SIZE_WHEN_INVALID;
+    VisCallParent(comp, MSG_VIS_COMP_GET_MARGINS,
+		  &(struct { Rectangle *r; }) { &m }, sizeof(Rectangle *),
+		  NULL, 0);
+    VisGetParentCenter(comp, &c);
+    if (parentVert) {
+	parentBefore = c.GCP_leftOfCenter - m.R_left;
+	parentAfter = c.GCP_rightOfCenter - m.R_right;
+    } else {
+	parentBefore = c.GCP_aboveCenter - m.R_top;
+	parentAfter = c.GCP_belowCenter - m.R_bottom;
+    }
+    @call comp::MSG_VIS_COMP_GET_MARGINS(&m);
+    if (VERTICAL(comp)) {
+	lenBegin = m.R_top; widBegin = m.R_left;
+	lenEnd = m.R_bottom; widEnd = m.R_right;
+    } else {
+	lenBegin = m.R_left; widBegin = m.R_top;
+	lenEnd = m.R_right; widEnd = m.R_bottom;
+    }
+    (void) lenBegin;
+    (void) lenEnd;
+
+    /* before the center */
+    if (widBegin <= parentBefore) {
+	avail = parentBefore - widBegin;
+	if (avail >= g->centerOffset) {
+	    avail -= g->centerOffset;
+	    if (left <= avail)
+		avail = left;
+	    g->centerOffset += avail;
+	    left -= avail;
+	}
+    }
+    /* after it */
+    if (widEnd > parentAfter)
+	return;
+    avail = parentAfter - widEnd;
+    if (avail < g->secondWidth)
+	return;
+    avail -= g->secondWidth;
+    if (left <= avail)
+	avail = left;
+    g->secondWidth += avail;
+}
+
+/*
+ * VisCompRecalcSize: the size the composite wants for the size passed
+ * (either may be RSA_CHOOSE_OWN_SIZE), its managed children sized.
+ * info is a VisCompSpacingMarginsInfo, or 0 for the spacing and margins
+ * of MSG_VIS_COMP_GET_CHILD_SPACING and MSG_VIS_COMP_GET_MARGINS.
+ */
+SizeAsDWord VisCompRecalcSize(optr obj, word width, word height, word info)
+{
+    GeoVars g;
+    word ax, bx, cx = width, dx = height, t;
+    word lenBegin, widBegin, lenEnd, widEnd, lenMargins, widMargins;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+
+    /* not managing: the current size, or with EXPAND_..._TO_FIT_PARENT
+     * the one passed */
+    if (GA(obj) & VCGA_CUSTOM_MANAGE_CHILDREN) {
+	SizeAsDWord s = VisGetSize(obj);
+	byte dim = VisCompPart(obj)->VCI_geoDimensionAttrs;
+
+	if (!(dim & VCGDA_EXPAND_WIDTH_TO_FIT_PARENT) ||
+	    width & RSA_CHOOSE_OWN_SIZE)
+	    cx = DWORD_WIDTH(s);
+	if (!(dim & VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT) ||
+	    height & RSA_CHOOSE_OWN_SIZE)
+	    dx = DWORD_HEIGHT(s);
+	MemUnlock(OptrToHandle(obj));
+	return MAKE_SIZE_DWORD(cx, dx);
+    }
+
+    memset(&g, 0, sizeof(g));
+    g.comp = obj;
+    g.spacingStuff = info;
+    GetDimensionAttrs(obj, &g.lengthAttrs, &g.widthAttrs);
+    g.lengthJust = (g.lengthAttrs & DA_JUSTIFICATION) >> 2;
+    g.widthJust = (g.widthAttrs & DA_JUSTIFICATION) >> 2;
+
+    if (VERTICAL(obj)) {
+	t = cx; cx = dx; dx = t;
+    }
+    /* cx is the length, dx the width, from here */
+
+    if (GA(obj) & VCGA_HAS_MINIMUM_SIZE) {
+	SizeAsDWord s = @call obj::MSG_VIS_COMP_GET_MINIMUM_SIZE();
+
+	if (VERTICAL(obj)) {
+	    g.minLength = DWORD_HEIGHT(s);
+	    g.minWidth = DWORD_WIDTH(s);
+	} else {
+	    g.minLength = DWORD_WIDTH(s);
+	    g.minWidth = DWORD_HEIGHT(s);
+	}
+    }
+    Spacing(obj, info, &g.lengthSpacing, &g.widthSpacing);
+
+    /* the margins come off what was passed and off the minimum */
+    Margins(obj, info, &lenBegin, &widBegin, &lenEnd, &widEnd);
+    lenMargins = lenBegin + lenEnd;
+    widMargins = widBegin + widEnd;
+    g.minLength -= lenMargins;
+    if (NEGATIVE(g.minLength))
+	g.minLength = 0;
+    if (!NEGATIVE(cx)) {
+	if (lenMargins >= cx)
+	    cx++;			/* minimal length */
+	else
+	    cx -= lenMargins;
+    }
+    g.minWidth -= widMargins;
+    if (NEGATIVE(g.minWidth))
+	g.minWidth = 0;
+    if (!NEGATIVE(dx)) {
+	if (widMargins >= dx)
+	    dx++;
+	else
+	    dx -= widMargins;
+    }
+    g.passedWidth = dx;
+
+    if (GA(obj) & VCGA_WRAP_AFTER_CHILD_COUNT)
+	g.wrapCount = @call obj::MSG_VIS_COMP_GET_WRAP_COUNT();
+    SetupLengthToPassKids(&g, cx);
+
+    /* DoVisCompGeometry.  The width passed is used by a composite that
+     * expands to it, or if it is smaller than the current width; a
+     * wrapping one never uses it (one line would take it all). */
+    if (GA(obj) & VCGA_ALLOW_CHILDREN_TO_WRAP)
+	dx = RSA_CHOOSE_OWN_SIZE;
+    else if (!(g.widthAttrs & DA_EXPAND_TO_FIT_PARENT) &&
+	     dx > ChildWidth(obj, obj))
+	dx = RSA_CHOOSE_OWN_SIZE;
+
+anotherFirstPass:
+    bx = 0;
+    if (g.widthAttrs & DA_EXPAND_TO_FIT_PARENT && !NEGATIVE(dx))
+	bx = dx;
+
+startPass1:
+    /* (the minimum width is not for the lines of a wrap) */
+    if (!(GA(obj) & VCGA_ALLOW_CHILDREN_TO_WRAP) && bx < g.minWidth)
+	bx = g.minWidth;
+    ax = g.lengthSpacing;
+    if (!(GA(obj) & VCGA_INCLUDE_ENDS_IN_CHILD_SPACING))
+	ax = -ax;
+    g.returnWidth = bx;
+    SaveTempGeoData(&g);
+    g.ax = ax;
+    g.cx = cx;
+    g.dx = dx;
+    VisCallChildren(obj, DoDesiredResize, &g);
+    ax = g.ax;
+    bx = g.returnWidth;
+    if (g.widthJust == GJ_CENTERED)
+	AdjustCenterToPassedWidth(&g, bx);
+    g.lineWidth = bx;
+
+    if (GA(obj) & VCGA_ONE_PASS_OPTIMIZATION)
+	goto finishUp;
+
+    /* centering: always a second pass, with the center offset known */
+    if (g.widthJust == GJ_CENTERED && !g.numPasses) {
+	g.numPasses++;
+	g.secondWidth = 0;
+	goto anotherFirstPass;
+    }
+    /* the children needed another width: again, as it may change
+     * their lengths */
+    if (dx != bx) {
+	Boolean smaller = (sword) dx < (sword) bx;
+
+	dx = bx;
+	if (smaller)
+	    goto anotherFirstPass;
+    }
+
+    /* pass 2: the extra length: what was passed (what the children
+     * want, if that was for the composite to choose; the minimum at
+     * least) less what they took */
+    t = cx;
+    if (NEGATIVE(t))
+	t = ax;
+    if (t < g.minLength)
+	t = g.minLength;
+    g.passedLength = t;
+    dx = t - ax;
+    /* not expanding: no extra space is offered, only taken */
+    if (!(g.lengthAttrs & DA_EXPAND_TO_FIT_PARENT) && !NEGATIVE(dx))
+	dx = 0;
+    g.longestLine = 0;
+
+    /* no length (no children): 0, or 1 if it will expand */
+    if (!ax || NEGATIVE(ax)) {
+	ax = (g.lengthAttrs & DA_EXPAND_TO_FIT_PARENT) ? 1 : 0;
+	goto finishUp;
+    }
+    ax = g.lengthSpacing;
+    if (!(GA(obj) & VCGA_INCLUDE_ENDS_IN_CHILD_SPACING))
+	ax = -ax;
+    /* the width is the widest returned now (children may shrink in
+     * this pass), but when centering: the two parts make it */
+    if (g.widthJust != GJ_CENTERED)
+	bx = (GA(obj) & VCGA_ALLOW_CHILDREN_TO_WRAP) ? 0 : g.minWidth;
+    g.returnWidth = bx;
+    g.childCount = 0;
+    SaveTempGeoData(&g);
+    g.ax = ax;
+    g.cx = cx;
+    g.dx = dx;
+    g.abort = FALSE;
+    VisCallChildren(obj, DoFinalResize, &g);
+    bx = g.returnWidth;
+    if (g.abort) {
+	/* a child got wider than the line: pass 1 with that width */
+	dx = g.dx;
+	goto startPass1;
+    }
+    ax = g.ax;
+
+finishUp:
+    /* the length: the longest line of a wrap; what was passed if
+     * expanding (or if a wrap fits in it); else the calculated one */
+    if (GA(obj) & VCGA_WRAP_AFTER_CHILD_COUNT)
+	ax = g.longestLine;
+    else if (NEGATIVE(cx))
+	goto useCalcedLength;
+    else if (GA(obj) & VCGA_ALLOW_CHILDREN_TO_WRAP) {
+	if ((sword) g.longestLine <= (sword) cx &&
+	    g.lengthAttrs & DA_EXPAND_TO_FIT_PARENT)
+	    goto usePassedLength;
+	ax = g.longestLine;
+    }
+    if (!NEGATIVE(cx) && ax <= cx &&
+	g.lengthAttrs & DA_EXPAND_TO_FIT_PARENT)
+	goto usePassedLength;
+useCalcedLength:
+    cx = ax;
+usePassedLength:
+    if (cx < g.minLength)
+	cx = g.minLength;
+
+    /* the width: what was passed if expanding and it is larger */
+    dx = g.passedWidth;
+    if (!(g.widthAttrs & DA_EXPAND_TO_FIT_PARENT) || dx <= bx ||
+	NEGATIVE(dx))
+	dx = bx;
+    if (!dx && g.widthAttrs & DA_EXPAND_TO_FIT_PARENT)
+	dx = 1;
+    if (dx < g.minWidth)
+	dx = g.minWidth;
+
+    dx += widMargins;
+    cx += lenMargins;
+    if (VERTICAL(obj)) {
+	t = cx; cx = dx; dx = t;
+    }
+    SaveTempGeoData(&g);
+    MemUnlock(OptrToHandle(obj));
+    return MAKE_SIZE_DWORD(cx, dx);
+}
+
+/* ---------------------------------------------------------------------
+ * Positioning
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    optr	comp;
+    word	passedLeft;		/* where a line begins */
+    word	lengthSpacing;
+    word	widthSpacing;
+    word	childSpacing;		/* between children on this line */
+    byte	lengthJust;
+    byte	widthJust;
+    byte	lengthAttrs;
+    byte	widthAttrs;
+    word	lineWidth;		/* from ATTR_VIS_GEOMETRY_DATA */
+    word	centerOffset;
+    word	secondWidth;
+    word	childCount;
+    word	wrapCount;
+    word	fractionalSpacing;	/* of full justification */
+    word	fractionalPosition;
+    Boolean	first;			/* at the first child */
+    word	cx;			/* current length position */
+    word	dx;			/* current width position */
+    /* CalcLineStartAndSpacing */
+    optr	lineChild;		/* the line's first child */
+    Boolean	lineStarted;
+    word	tempLength;
+    word	minLength;
+    word	spaces;
+} PosVars;
+
+/* GetRight: the composite's end along the length */
+static word CompRight(optr comp)
+{
+    return VERTICAL(comp) ? VisCompPart(comp)->VI_bounds.R_bottom
+			  : VisCompPart(comp)->VI_bounds.R_right;
+}
+
+/* DoSpacing: the children of a line summed, until it is full */
+static Boolean DoSpacing(optr parent, optr child, void *data)
+{
+    PosVars *p = data;
+    optr comp = p->comp;
+    word len, t;
+
+    (void) parent;
+    if (!p->lineStarted) {
+	if (child != p->lineChild)
+	    return FALSE;
+	p->lineStarted = TRUE;
+    }
+    if (!ChildManaged(child))
+	return FALSE;
+    p->childCount++;
+    len = ChildLength(comp, child);
+    t = p->tempLength + len;
+    if (len)
+	t += p->lengthSpacing;
+    if (t > CompRight(comp))
+	return TRUE;
+    if (GA(comp) & VCGA_WRAP_AFTER_CHILD_COUNT &&
+	(sword) p->wrapCount < (sword) p->childCount)
+	return TRUE;
+    p->tempLength = t;
+    if (len) {
+	p->minLength += len;
+	p->spaces++;
+    }
+    return FALSE;
+}
+
+/* CalcLineStartAndSpacing: where the line beginning with the child
+ * starts (from the composite's edge passed), by the justification
+ * along the length; sets the spacing between its children */
+static word CalcLineStartAndSpacing(PosVars *p, optr child, word edge)
+{
+    optr comp = p->comp;
+    word cx = edge, bx;
+
+    p->minLength = 0;
+    p->spaces = (word) -1;
+    if (p->lengthJust != GJ_BEGIN_JUSTIFIED) {
+	if (GA(comp) & VCGA_INCLUDE_ENDS_IN_CHILD_SPACING) {
+	    p->spaces += 2;
+	    cx += p->lengthSpacing;
+	} else
+	    cx -= p->lengthSpacing;
+	p->fractionalPosition = 0;
+	p->childCount = 0;
+	p->lineChild = child;
+	p->lineStarted = FALSE;
+	p->tempLength = cx;
+	VisCallChildren(comp, DoSpacing, p);
+	cx = p->tempLength;
+    }
+
+    if (p->lengthJust == GJ_END_JUSTIFIED || p->lengthJust == GJ_CENTERED) {
+	cx = CompRight(comp) - cx;
+	if (p->lengthJust == GJ_CENTERED)
+	    cx >>= 1;
+    } else
+	cx = 0;
+
+    if (p->lengthJust == GJ_FULL_JUSTIFIED && (byte) p->spaces) {
+	/* the space left over divided among the gaps, with a fraction */
+	word space = CompRight(comp) - p->passedLeft - p->minLength;
+	dword q = ((dword) (NEGATIVE(space) ? (word) -space : space) << 16) /
+		  (byte) p->spaces;
+
+	if (NEGATIVE(space))
+	    q = (dword) -(sdword) q;
+	bx = (word) (q >> 16);
+	p->fractionalSpacing = (word) q;
+    } else {
+	bx = p->lengthSpacing;
+	p->fractionalSpacing = 0;
+    }
+    cx += edge;
+    if (GA(comp) & VCGA_INCLUDE_ENDS_IN_CHILD_SPACING)
+	cx += bx;
+    p->childSpacing = bx;
+    return cx;
+}
+
+/* MoveChild */
+static void MoveChild(optr comp, optr child, word length, word width)
+{
+    if (VERTICAL(comp))
+	VisSendPositionAndInvalIfNeeded(child, width, length);
+    else
+	VisSendPositionAndInvalIfNeeded(child, length, width);
+}
+
+/* DoAddSize: a child placed at the current position, wrapping first if
+ * it does not fit; the position moved on by its length */
+static Boolean DoAddSize(optr parent, optr child, void *data)
+{
+    PosVars *p = data;
+    optr comp = p->comp;
+    word cx = p->cx, dx = p->dx, width, len;
+    dword f;
+
+    (void) parent;
+    if (p->first) {
+	p->first = FALSE;
+	cx = CalcLineStartAndSpacing(p, child, cx);
+	p->childCount = 0;
+	p->fractionalPosition = 0;
+    }
+    if (!ChildManaged(child)) {
+	p->cx = cx;
+	return FALSE;
+    }
+    if (GA(comp) & VCGA_ALLOW_CHILDREN_TO_WRAP &&
+	(word) (cx + ChildLength(comp, child)) > CompRight(comp)) {
+	dx += p->lineWidth + p->widthSpacing;
+	p->fractionalPosition = 0;
+	cx = CalcLineStartAndSpacing(p, child, p->passedLeft);
+    }
+
+    /* the place along the width */
+    width = dx;
+    if (p->widthJust == GJ_END_JUSTIFIED)
+	width = dx + p->lineWidth - ChildWidth(comp, child);
+    if (p->widthJust == GJ_CENTERED && !ChildDontCenter(child)) {
+	GetCenterParams c;
+
+	VisSendCenter(child, &c);
+	width = width + p->centerOffset -
+		(VERTICAL(comp) ? c.GCP_leftOfCenter : c.GCP_aboveCenter);
+    }
+    MoveChild(comp, child, cx, width);
+
+    len = ChildLength(comp, child);
+    cx += len;
+    if (len) {			/* no spacing after an empty child */
+	f = (dword) p->fractionalPosition + p->fractionalSpacing;
+	p->fractionalPosition = (word) f;
+	cx += p->childSpacing + (word) (f >> 16);
+	if (p->fractionalPosition > 0xfffd) {
+	    p->fractionalPosition = 0;
+	    cx++;
+	}
+    }
+    p->cx = cx;
+    p->dx = dx;
+    return FALSE;
+}
+
+/* DoPositionGeometry: the composite at (x, y) (a window or portal: its
+ * children from 0, 0), its managed children placed */
+static void DoPositionGeometry(optr obj, word x, word y, word info)
+{
+    PosVars p;
+    VisCompInstance *v;
+    Boolean window;
+    sword oldLeft = 0, oldTop = 0, right, bottom;
+    word cx, dx, t, lenBegin, widBegin, lenEnd, widEnd;
+
+    memset(&p, 0, sizeof(p));
+    p.comp = obj;
+    GetDimensionAttrs(obj, &p.lengthAttrs, &p.widthAttrs);
+    p.lengthJust = (p.lengthAttrs & DA_JUSTIFICATION) >> 2;
+    p.widthJust = (p.widthAttrs & DA_JUSTIFICATION) >> 2;
+    if (p.widthJust == GJ_CENTERED ||
+	GA(obj) & VCGA_ALLOW_CHILDREN_TO_WRAP ||
+	p.widthJust == GJ_END_JUSTIFIED)
+	RestoreGeoData(obj, &p.lineWidth, &p.centerOffset, &p.secondWidth);
+
+    v = VisCompPart(obj);
+    window = (v->VI_typeFlags & (VTF_IS_WINDOW | VTF_IS_PORTAL)) != 0;
+    if (window) {
+	oldLeft = v->VI_bounds.R_left;
+	oldTop = v->VI_bounds.R_top;
+	x = y = 0;
+    }
+    VisSetPosition(obj, x, y);
+
+    if (!(GA(obj) & VCGA_CUSTOM_MANAGE_CHILDREN)) {
+	v = VisCompPart(obj);
+	right = v->VI_bounds.R_right;
+	bottom = v->VI_bounds.R_bottom;
+	cx = v->VI_bounds.R_left;
+	dx = v->VI_bounds.R_top;
+	if (VERTICAL(obj)) {
+	    t = cx; cx = dx; dx = t;
+	}
+	Spacing(obj, info, &p.lengthSpacing, &p.widthSpacing);
+	Margins(obj, info, &lenBegin, &widBegin, &lenEnd, &widEnd);
+	cx += lenBegin;
+	dx += widBegin;
+	/* the bounds less the end margins, while placing */
+	v = VisCompPart(obj);
+	if (VERTICAL(obj)) {
+	    v->VI_bounds.R_right -= widEnd;
+	    v->VI_bounds.R_bottom -= lenEnd;
+	} else {
+	    v->VI_bounds.R_right -= lenEnd;
+	    v->VI_bounds.R_bottom -= widEnd;
+	}
+	p.passedLeft = cx;
+	if (GA(obj) & VCGA_WRAP_AFTER_CHILD_COUNT)
+	    p.wrapCount = @call obj::MSG_VIS_COMP_GET_WRAP_COUNT();
+	p.first = TRUE;
+	p.cx = cx;
+	p.dx = dx;
+	VisCallChildren(obj, DoAddSize, &p);
+	v = VisCompPart(obj);
+	v->VI_bounds.R_right = right;
+	v->VI_bounds.R_bottom = bottom;
+    }
+    if (window)
+	VisSetPosition(obj, oldLeft, oldTop);
+}
+
+/* DoMove: a child moved along with its parent */
+typedef struct {
+    sword	dx;
+    sword	dy;
+} MoveData;
+
+static Boolean DoMove(optr parent, optr child, void *data)
+{
+    MoveData *m = data;
+    Rectangle b;
+
+    (void) parent;
+    VisGetBounds(child, &b);
+    VisSendPositionAndInvalIfNeeded(child, b.R_left + m->dx,
+				    b.R_top + m->dy);
+    return FALSE;
+}
+
+/*
+ * VisCompPosition: the composite placed at (x, y) and its children by
+ * the geometry manager (info as for VisCompRecalcSize).  A composite
+ * that manages its children itself, and is no window, takes them along
+ * as it moves.
+ */
+void VisCompPosition(optr obj, sword x, sword y, word info)
+{
+    VisCompInstance *v;
+    MoveData m;
+    Boolean window, custom;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+    v = VisCompPart(obj);
+    m.dx = x - v->VI_bounds.R_left;
+    m.dy = y - v->VI_bounds.R_top;
+    VisSetPosition(obj, x, y);
+    v = VisCompPart(obj);
+    window = (v->VI_typeFlags & (VTF_IS_WINDOW | VTF_IS_PORTAL)) != 0;
+    custom = (v->VCI_geoAttrs & VCGA_CUSTOM_MANAGE_CHILDREN) != 0;
+    if (!custom)
+	DoPositionGeometry(obj, x, y, info);
+    else if (!window)
+	VisCallChildren(obj, DoMove, &m);
+    MemUnlock(OptrToHandle(obj));
+}
+
+/*
+ * VisCompGetCenter: a composite centering its children across (and
+ * not wrapping) has its center where theirs are: the center offset
+ * and the second width of the last size calculation, with the margins.
+ * Along its length, and for the others, the middle.
+ */
+void VisCompGetCenter(optr obj, GetCenterParams *c)
+{
+    SizeAsDWord s;
+    word line, center, second, w, h;
+    word lenBegin, widBegin, lenEnd, widEnd;
+    byte dim;
+    Boolean centering;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+    memset(c, 0, sizeof(*c));
+    s = VisGetSize(obj);
+    w = DWORD_WIDTH(s);
+    h = DWORD_HEIGHT(s);
+    if (NEGATIVE(w) || NEGATIVE(h))
+	goto done;
+    dim = VisCompPart(obj)->VCI_geoDimensionAttrs;
+    if (VERTICAL(obj))
+	centering = (dim & VCGDA_WIDTH_JUSTIFICATION) ==
+		    WJ_CENTER_CHILDREN_HORIZONTALLY;
+    else
+	centering = (dim & VCGDA_HEIGHT_JUSTIFICATION) ==
+		    HJ_CENTER_CHILDREN_VERTICALLY;
+    if (GA(obj) & (VCGA_ALLOW_CHILDREN_TO_WRAP |
+		   VCGA_CUSTOM_MANAGE_CHILDREN) || !centering) {
+	VisGetCenter(obj, c);
+	goto done;
+    }
+    Margins(obj, 0, &lenBegin, &widBegin, &lenEnd, &widEnd);
+    /* (asked during the size calculation too: nothing known is 0) */
+    RestoreGeoData(obj, &line, &center, &second);
+    if (NEGATIVE(center))
+	center = 0;
+    if (NEGATIVE(second))
+	second = 0;
+    if (VERTICAL(obj)) {
+	c->GCP_aboveCenter = h >> 1;
+	c->GCP_belowCenter = h - (h >> 1);
+	c->GCP_leftOfCenter = center + widBegin;
+	c->GCP_rightOfCenter = second + widEnd;
+    } else {
+	c->GCP_leftOfCenter = w >> 1;
+	c->GCP_rightOfCenter = w - (w >> 1);
+	c->GCP_aboveCenter = center + widBegin;
+	c->GCP_belowCenter = second + widEnd;
+    }
+done:
+    MemUnlock(OptrToHandle(obj));
+}

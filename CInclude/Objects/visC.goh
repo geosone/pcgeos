@@ -921,6 +921,13 @@ extern void VisSetSize(optr obj, sword width, sword height);
 extern void VisSetPosition(optr obj, sword x, sword y);
 extern void VisGetCenter(optr obj, GetCenterParams *c);
 extern Boolean VisTestPointInBounds(optr obj, sword x, sword y);
+/* MSG_VIS_RECALC_SIZE unless the size is known; placed, TRUE if the
+ * bounds changed; the center by VGA_USE_VIS_CENTER or the message */
+extern SizeAsDWord VisRecalcSizeAndInvalIfNeeded(optr obj, word width,
+						 word height);
+extern Boolean VisSendPositionAndInvalIfNeeded(optr obj, sword x, sword y);
+extern void VisSendCenter(optr obj, GetCenterParams *c);
+extern void VisGetParentCenter(optr obj, GetCenterParams *c);
 extern optr VisFindParent(optr obj);
 extern optr VisFindParentOfVisType(optr obj, VisTypeFlags type);
 extern WindowHandle VisQueryWindow(optr obj);

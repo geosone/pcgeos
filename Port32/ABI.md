@@ -4598,7 +4598,8 @@ visual classes of `Library/User/Vis`:
 - **Files.** goc wants all methods of a class in the file of its
   `@classdecl`, so `Vis/visClass.goc` has the `VisClass` methods of
   `visClass.asm`, `visUtilsResident.asm`, `visUtilsClass.asm` and
-  `visGeometry.asm`, and `Vis/visComp.goc` those of `visComp.asm`.
+  `visGeometry.asm`, and `Vis/visComp.goc` those of `visComp.asm`
+  and `visCompGeometry.asm`.
   The routines are in `Vis/visUtilsResident.goc`; `uiInt.goh` has the
   library's internal ones. `VisEmptyClass` (no C header had it) is
   declared in `uiInt.goh`.
@@ -4640,9 +4641,28 @@ visual classes of `Library/User/Vis`:
     object yet) nowhere;
   - an event dispatched with `MF_CALL` has no reply in C, as in the
     kernel's `MetaSendClassedEvent`.
+- **The geometry manager** (`Vis/visCompGeometry.goc`):
+  - `VisCompRecalcSize(obj, width, height, info)` sizes the managed
+    children along the composite's length in the two passes of the asm
+    (their choice for the width passed, then the extra length offered
+    child by child, with wrapping); `VisCompPosition(obj, x, y, info)`
+    places them by the justifications. `info` is a
+    `VisCompSpacingMarginsInfo` (`vCompC.goh`), or 0 for the messages;
+  - the sizes stay 16-bit words with the asm's unsigned and signed
+    comparisons (`RSA_CHOOSE_OWN_SIZE` is a negative length), so the
+    results are those of DOS16;
+  - the state the callbacks of `ObjCompProcessChildren` had in
+    registers is in a structure;
+  - the line width and the center parts go from sizing to positioning
+    in `ATTR_VIS_GEOMETRY_DATA`, as in the asm;
+  - `VisRecalcSizeAndInvalIfNeeded`, `VisSendPositionAndInvalIfNeeded`,
+    `VisSendCenter`, `VisGetParentCenter` and `VisCompGetCenter` are
+    routines too;
+  - a composite with `VCI_geoAttrs` 0 manages its children (they are
+    laid out in a line from its origin); one that places them itself
+    sets `VCGA_CUSTOM_MANAGE_CHILDREN`, and then removing a child
+    starts no update (as in the asm).
 - **Not yet:**
-  - the geometry manager of `visCompGeometry.asm`: a composite keeps
-    the size and position it is given;
   - `VisContentClass`;
   - the Generic UI, so `VTF_IS_GEN` is never set, and
     `MSG_META_UPDATE_WINDOW` and `MSG_GEN_GUP_ENSURE_UPDATE_WINDOW` are
@@ -4658,7 +4678,11 @@ visual classes of `Library/User/Vis`:
   invalidates one child (only that one is drawn again, at its place),
   sends mouse events to the child under the point, takes and releases
   the gadget exclusive, removes and adds a child, and closes the
-  window.
+  window. A second tree checks the geometry manager against sizes and
+  positions worked out by hand: horizontal and vertical lines, the
+  justifications along and across, expanding, spacing and margins,
+  wrapping, unmanaged children, a child that takes the extra length,
+  a composite in a composite.
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 

@@ -12,7 +12,13 @@
  *   3. mouse events to the child under the point, the gadget exclusive;
  *   4. a child removed: closed, its area washed with the window's colour;
  *   5. added again: opened by the update and drawn;
- *   6. not visible: the branch closed, the window gone.
+ *   6. not visible: the branch closed, the window gone;
+ *   7. the geometry manager: a line of children, horizontal and
+ *      vertical, justified across;
+ *   8. expanding, justified along (end, center, full), spacing and
+ *      margins;
+ *   9. wrapping, unmanaged children, a child taking the extra length,
+ *      a composite in a composite.
  */
 #include "kernelC.h"
 #include "Win/winInt.h"
@@ -36,6 +42,7 @@ typedef struct {
     word		UVS_lostA, UVS_lostB;
     word		UVS_pings;
     WindowHandle	UVS_win;
+    word		UVS_failLines[8];
 } UVState;
 
 static int fails;
@@ -182,9 +189,20 @@ int main(void)
     WAIT_FOR(Count(C_DARK_GRAY));
     CHECK(Count(C_DARK_GRAY) >= 1 && st->UVS_drawsA == last);
 
+    /* 7 to 9: the geometry manager (checked in the geode) */
+    step(7);
+    step(8);
+    step(9);
+
     printf("geode checks: %u, failed %u (first at uivis.goc line %u)\n",
 	   st->UVS_checks, st->UVS_fails, st->UVS_failLine);
-    CHECK(st->UVS_checks >= 30 && !st->UVS_fails);
+    {
+	int i;
+
+	for (i = 0; i < st->UVS_fails && i < 8; i++)
+	    printf("  failed: uivis.goc line %u\n", st->UVS_failLines[i]);
+    }
+    CHECK(st->UVS_checks >= 70 && !st->UVS_fails);
 
     /* detach: the process goes, and with it the library */
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,

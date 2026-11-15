@@ -674,9 +674,8 @@ static Boolean CheckForBoundsChange(optr oself)
 }
 
 /* VisSendPositionAndInvalIfNeeded: placed (MSG_VIS_POSITION_BRANCH, or
- * VisSetPosition directly); TRUE if the bounds changed.  The composite
- * case of VGA_USE_VIS_SET_POSITION (VisCompPosition) goes through the
- * message until the geometry manager is here. */
+ * VisSetPosition or VisCompPosition directly); TRUE if the bounds
+ * changed */
 @method VisClass, MSG_VIS_POSITION_AND_INVAL_IF_NEEDED
 {
     VisInstance *v = VisPart(oself);
@@ -685,10 +684,12 @@ static Boolean CheckForBoundsChange(optr oself)
     if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
 	VisSaveOldBounds(oself);
     v = VisPart(oself);
-    if (v->VI_geoAttrs & VGA_USE_VIS_SET_POSITION &&
-	!(v->VI_typeFlags & VTF_IS_COMPOSITE))
-	VisSetPosition(oself, xPosition, yPosition);
-    else
+    if (v->VI_geoAttrs & VGA_USE_VIS_SET_POSITION) {
+	if (v->VI_typeFlags & VTF_IS_COMPOSITE)
+	    VisCompPosition(oself, xPosition, yPosition, 0);
+	else
+	    VisSetPosition(oself, xPosition, yPosition);
+    } else
 	@call oself::MSG_VIS_POSITION_BRANCH(xPosition, yPosition);
     VisPart(oself)->VI_geoAttrs |= VGA_GEOMETRY_CALCULATED;
     changed = CheckForBoundsChange(oself);

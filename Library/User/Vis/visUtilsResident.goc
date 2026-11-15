@@ -114,6 +114,43 @@ void VisGetCenter(optr obj, GetCenterParams *c)
     c->GCP_belowCenter = h - (h >> 1);
 }
 
+/* VisSendCenter: the center, directly if the object says so
+ * (VGA_USE_VIS_CENTER) */
+void VisSendCenter(optr obj, GetCenterParams *c)
+{
+    VisInstance *v = VisLock(obj);
+    Boolean direct = (v->VI_geoAttrs & VGA_USE_VIS_CENTER) != 0;
+    Boolean comp = (v->VI_typeFlags & VTF_IS_COMPOSITE) != 0;
+
+    VisUnlock(obj);
+    if (!direct)
+	@call obj::MSG_VIS_GET_CENTER(c);
+    else if (comp)
+	VisCompGetCenter(obj, c);
+    else
+	VisGetCenter(obj, c);
+}
+
+void VisGetParentCenter(optr obj, GetCenterParams *c)
+{
+    optr p = VisFindParent(obj);
+
+    memset(c, 0, sizeof(*c));
+    if (p)
+	VisSendCenter(p, c);
+}
+
+/* the methods of VisClass (visClass.goc) as routines */
+SizeAsDWord VisRecalcSizeAndInvalIfNeeded(optr obj, word width, word height)
+{
+    return @call obj::MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED(width, height);
+}
+
+Boolean VisSendPositionAndInvalIfNeeded(optr obj, sword x, sword y)
+{
+    return @call obj::MSG_VIS_POSITION_AND_INVAL_IF_NEEDED(x, y);
+}
+
 /* inside the bounds (a window: its own coordinates, from 0, 0) */
 Boolean VisTestPointInBounds(optr obj, sword x, sword y)
 {

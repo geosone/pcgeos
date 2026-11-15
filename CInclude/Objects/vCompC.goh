@@ -102,4 +102,29 @@ typedef dword SpacingAsDWord;
 
 @endc
 
+#ifdef GEOS_PORT32
+/*
+ * The geometry manager in C (Port32/ABI.md section 13x).
+ *
+ * VisCompSpacingMarginsInfo: spacing and margins (0 to 7 each) for
+ * VisCompRecalcSize and VisCompPosition, instead of
+ * MSG_VIS_COMP_GET_CHILD_SPACING and MSG_VIS_COMP_GET_MARGINS; 0 for
+ * the messages.
+ */
+typedef WordFlags VisCompSpacingMarginsInfo;
+#define VCSMI_USE_THIS_INFO	0x8000
+#define VCSMI_LEFT_MARGIN	0x7000
+#define VCSMI_TOP_MARGIN	0x0e00
+#define VCSMI_RIGHT_MARGIN	0x01c0
+#define VCSMI_BOTTOM_MARGIN	0x0038
+#define VCSMI_CHILD_SPACING	0x0007
+
+#define VIS_COMP_DEFAULT_SPACING	3
+
+extern SizeAsDWord VisCompRecalcSize(optr obj, word width, word height,
+				     word info);
+extern void VisCompPosition(optr obj, sword x, sword y, word info);
+extern void VisCompGetCenter(optr obj, GetCenterParams *c);
+#endif
+
 @endlib

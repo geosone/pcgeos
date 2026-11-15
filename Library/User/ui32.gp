@@ -55,3 +55,10 @@ export VisTakeGadgetExclAndGrab
 export VisDrawMoniker
 export VisGetMonikerPos
 export VisGetMonikerSize
+export VisRecalcSizeAndInvalIfNeeded
+export VisSendPositionAndInvalIfNeeded
+export VisSendCenter
+export VisGetParentCenter
+export VisCompRecalcSize
+export VisCompPosition
+export VisCompGetCenter

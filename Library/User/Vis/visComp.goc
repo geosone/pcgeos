@@ -9,14 +9,17 @@
  * windows and images), exposure and drawing of the children, the
  * gadget exclusive, mouse events to the child under the point.
  *
+ * The geometry manager (visCompGeometry.goc) sizes and places the
+ * children of a composite that does not manage them itself
+ * (VCGA_CUSTOM_MANAGE_CHILDREN).
+ *
  * Port32, not yet (Port32/ABI.md section 13x):
- *   - the geometry manager of visCompGeometry.asm: a composite keeps
- *     the size and position it is given, like a VisClass object;
  *   - MSG_META_UPDATE_WINDOW and MSG_GEN_GUP_ENSURE_UPDATE_WINDOW (they
  *     need the Generic UI), VisContentClass (VisContentGetVUM);
  *   - MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK.
  */
 @include "uiInt.goh"
+#include <string.h>
 
 @classdecl VisCompClass, neverSaved;
 
@@ -379,4 +382,87 @@ static Boolean InkCallback(optr parent, optr child, void *data)
     d.ret = retVal;
     if (!VisCallChildren(oself, InkCallback, &d))
 	retVal->inkType = IRV_NO_INK;
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry (visCompGeometry.asm; the manager is in visCompGeometry.goc)
+ * ------------------------------------------------------------------- */
+
+@method VisCompClass, MSG_VIS_RECALC_SIZE
+{
+    return VisCompRecalcSize(oself, width, height, 0);
+}
+
+@method VisCompClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, xOrigin, yOrigin, 0);
+}
+
+@method VisCompClass, MSG_VIS_GET_CENTER
+{
+    VisCompGetCenter(oself, retValue);
+}
+
+@method VisCompClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    return MAKE_SPACING_DWORD(VIS_COMP_DEFAULT_SPACING,
+			      VIS_COMP_DEFAULT_SPACING);
+}
+
+@method VisCompClass, MSG_VIS_COMP_GET_MARGINS
+{
+    memset(retValue, 0, sizeof(*retValue));
+}
+
+@method VisCompClass, MSG_VIS_COMP_GET_MINIMUM_SIZE
+{
+    return 0;
+}
+
+@method VisCompClass, MSG_VIS_COMP_SET_GEO_ATTRS
+{
+    pself->VCI_geoAttrs = (pself->VCI_geoAttrs | attrsToSet.GADA_geoAttrs) &
+			  ~attrsToClear.GADA_geoAttrs;
+    pself->VCI_geoDimensionAttrs =
+	(pself->VCI_geoDimensionAttrs | attrsToSet.GADA_geoDimensionAttrs) &
+	~attrsToClear.GADA_geoDimensionAttrs;
+}
+
+@method VisCompClass, MSG_VIS_COMP_GET_GEO_ATTRS
+{
+    GeoAndDimensionAttrs a;
+
+    a.GADA_geoAttrs = pself->VCI_geoAttrs;
+    a.GADA_geoDimensionAttrs = pself->VCI_geoDimensionAttrs;
+    return a;
+}
+
+/* VisInvalOldBounds */
+static void InvalOldBounds(optr oself, VisAddRectFlags flags, sword left,
+			   sword top, sword right, sword bottom)
+{
+    if (left != right && top != bottom)
+	@call oself::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0, flags, bottom,
+						       right, top, left);
+}
+
+/* VisCompAddRectToUpdateRegion: a composite that only draws in its
+ * margins adds those four parts of the rectangle (its children add
+ * theirs) */
+@method VisCompClass, MSG_VIS_ADD_RECT_TO_UPDATE_REGION
+{
+    Rectangle m;
+    VisAddRectFlags f = addRectFlags & ~VARF_ONLY_REDRAW_MARGINS;
+    sword l = left, t = top, r = right, b = bottom;
+
+    if (!(addRectFlags & VARF_ONLY_REDRAW_MARGINS) ||
+	!(pself->VCI_geoAttrs & VCGA_ONLY_DRAWS_IN_MARGINS)) {
+	@callsuper();
+	return;
+    }
+    @call oself::MSG_VIS_COMP_GET_MARGINS(&m);
+    InvalOldBounds(oself, f, l, t, l + m.R_left, b);
+    InvalOldBounds(oself, f, l, t, r, t + m.R_top);
+    InvalOldBounds(oself, f, r - m.R_right, t, r, b);
+    InvalOldBounds(oself, f, l, b - m.R_bottom, r, b);
 }
