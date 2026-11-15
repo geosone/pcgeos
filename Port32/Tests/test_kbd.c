@@ -91,6 +91,7 @@ typedef struct {
     byte flags;		/* CharFlags */
     byte shift;		/* ShiftState */
     byte toggle;	/* ToggleState */
+    word bp;		/* ToggleState, scan code */
 } Key;
 
 /* DR_KBD_XLATE_SCAN of the next scan code */
@@ -111,7 +112,22 @@ static Key Xlate(void)
     k.flags = (byte) r.DR_dx;
     k.shift = (byte) (r.DR_dx >> 8);
     k.toggle = (byte) r.DR_bp;
+    k.bp = (word) r.DR_bp;
     return k;
+}
+
+/* DR_KBD_CHECK_SHORTCUT of a key press: the offset in the table, or -1 */
+static int Shortcut(Key k, const word *tab, word n)
+{
+    DriverRegs r;
+
+    memset(&r, 0, sizeof(r));
+    r.DR_ax = n;
+    r.DR_cx = k.ch;
+    r.DR_dx = (word) (k.flags | (k.shift << 8));
+    r.DR_bp = k.bp;
+    r.DR_dsSi = (void *) tab;
+    return DriverCall(dis, DR_KBD_CHECK_SHORTCUT, &r) ? (int) r.DR_si : -1;
 }
 
 /* post a HID key event */
@@ -158,6 +174,7 @@ static Key Tap(word usage)
 #define H_KP8	0x60
 #define H_LCTRL	0xe0
 #define H_LSHIFT 0xe1
+#define H_LALT	0xe2
 #define H_RALT	0xe6
 
 static GeodeHandle Load(const char *file)
@@ -247,6 +264,52 @@ static void TestUS(void)
     k = Tap(H_KP8);
     CHECK((k.ch & 0xff) == '8');
     Tap(H_NUM);
+
+    /* shortcuts: by character and modifiers, or (KS_PHYSICAL) by key */
+    {
+	static const word tab[] = {
+	    KS_CTRL | 'a',
+	    KS_PHYSICAL | KS_CTRL | 'q',
+	    KS_PHYSICAL | ((CS_CONTROL & 0x0f) << 8) | VC_UP,
+	    KS_SHIFT | 'A',
+	    KS_PHYSICAL | KS_ALT | '1'
+	};
+	Key ui;
+
+	CHECK(Shortcut(Tap(H_A), tab, 5) == -1);
+	Hid(H_LCTRL, 1);
+	Xlate();
+	CHECK(Shortcut(Tap(H_A), tab, 5) == 0);
+	CHECK(Shortcut(Tap(H_Q), tab, 5) == 2);
+	CHECK(Shortcut(Tap(H_1), tab, 5) == -1);
+	CHECK(Shortcut(Tap(H_UP), tab, 5) == -1);	/* <Ctrl> is extra */
+	Hid(H_LCTRL, 0);
+	Xlate();
+	/* <Shift>-a is the character A, <Shift> listed */
+	Hid(H_LSHIFT, 1);
+	Xlate();
+	CHECK(Shortcut(Tap(H_A), tab, 5) == 6);
+	/* the key of 1 with <Alt> and <Shift>: <Shift> is extra */
+	Hid(H_LSHIFT, 0);
+	Xlate();
+	Hid(H_LALT, 1);
+	Xlate();
+	CHECK(Shortcut(Tap(H_1), tab, 5) == 8);
+	CHECK(Shortcut(Tap(H_1), tab, 4) == -1);	/* a shorter table */
+	Hid(H_LALT, 0);
+	Xlate();
+	/* the cursor key, and the keypad's unless it means the digit */
+	CHECK(Shortcut(Tap(H_UP), tab, 5) == 4);
+	CHECK(Shortcut(Tap(H_KP8), tab, 5) == 4);
+	Tap(H_NUM);
+	CHECK(Shortcut(Tap(H_KP8), tab, 5) == -1);
+	CHECK(Shortcut(Tap(H_UP), tab, 5) == 4);
+	Tap(H_NUM);
+	/* a UI function is never one */
+	ui = Tap(H_A);
+	ui.ch = (CS_UI_FUNCS << 8) | 'a';
+	CHECK(Shortcut(ui, tab, 5) == -1);
+    }
 
     /* <Pause>: e1 1d 45 e1 9d c5, nothing on the release */
     Hid(H_PAUSE, 1);

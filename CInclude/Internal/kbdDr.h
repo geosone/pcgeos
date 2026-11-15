@@ -75,7 +75,8 @@ typedef struct {
  * DR_KBD_MAP_KEY	pass dsSi = KeyMapStruct to fill, al = scan code
  * DR_KBD_CHECK_SHORTCUT pass cx, dx, bp as MSG_META_KBD_CHAR,
  *			dsSi = KeyboardShortcut table, ax = its length;
- *			return si = index, carry if found
+ *			return si = the entry's offset in the table,
+ *			carry if found
  * DR_KBD_PASS_HOTKEY, DR_KBD_CANCEL_HOTKEY
  */
 #define DR_KBD_GET_KBD_STATE	8
