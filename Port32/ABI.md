@@ -562,8 +562,16 @@ The C keyboard driver keeps the design of the asm driver
 - the BIOS shift and toggle bytes;
 - the LEDs and the typematic rate of the 8042 (the states are kept; the
   host repeats keys itself);
-- hotkeys, `DR_KBD_MAP_KEY` and `DR_KBD_CHECK_SHORTCUT` (not yet);
+- hotkeys and `DR_KBD_MAP_KEY` (not yet);
 - DBCS.
+
+`DR_KBD_CHECK_SHORTCUT` (`KbdCheckShortcut`, `IsCharOnKey` of
+`keyboardUtils.asm`): a key press as `MSG_META_KBD_CHAR` has it against
+a table of `KeyboardShortcut` words at `DR_dsSi`, `DR_ax` entries; TRUE
+and `DR_si` the entry's offset if one matches. An entry matches by
+character and the modifiers not used up to make it, or with
+`KS_PHYSICAL` by key (the character is on the key pressed; a keypad key
+that means its digit under <NumLock> does not match).
 
 **Output.** As in DOS16, `DR_INIT` adds the driver as a monitor of the
 input manager at `ML_DRIVER` (`KbdMonRoutine`, §13j). `ImAddMonitor`
@@ -4692,6 +4700,12 @@ visual classes of `Library/User/Vis`:
     `MSG_META_MUP_ALTER_FTVMC_EXCL` for an object;
   - not yet: the IACP completion message that
     `FlowDestroyMessageInMessage` dispatched instead of freeing.
+  - `User/userFlowMisc.goc`: `FlowTranslatePassiveButton(message,
+    inputState)` gives the passive message of the active button
+    function; `FlowCheckKbdShortcut` asks the keyboard driver
+    (`DR_KBD_CHECK_SHORTCUT`, section 7.3) and returns the entry's
+    offset in the table or -1. `FlowGetUIButtonFlags` comes with the
+    input map.
 - **`VisContentClass`** (`Vis/visContent.goc`, after
   `visContentClass.asm` and `visContentCommon.asm`): the top of a tree
   shown in a view's window, and its input node.

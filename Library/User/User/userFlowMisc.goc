@@ -1,0 +1,66 @@
+/*
+ * userFlowMisc.goc -- small Flow routines (after userFlowMisc.asm).
+ *
+ * Port32, not yet: FlowGetUIButtonFlags (the flags come from the input
+ * map that the UI sets up at its start, with FlowClass).
+ */
+@include "uiInt.goh"
+#include <string.h>
+#include <driver.h>
+#include <geosdriver.h>
+#include <Internal/kbdDr.h>
+
+/*
+ * FlowTranslatePassiveButton: MSG_META_PRE_PASSIVE_BUTTON or
+ * MSG_META_POST_PASSIVE_BUTTON as the passive message of the button
+ * function that is active (inputState: ButtonInfo, and
+ * UIFunctionsActive in the high byte): MSG_META_PRE_PASSIVE_START_SELECT
+ * and so on, the END message for a release.
+ */
+Message FlowTranslatePassiveButton(Message msg, word inputState)
+{
+    byte active = (byte) (inputState >> 8);
+    Message m = msg == MSG_META_PRE_PASSIVE_BUTTON
+		? MSG_META_PRE_PASSIVE_START_SELECT - MSG_META_START_SELECT
+		: MSG_META_POST_PASSIVE_START_SELECT - MSG_META_START_SELECT;
+
+    if (active & UIFA_SELECT)
+	m += MSG_META_START_SELECT;
+    else if (active & UIFA_MOVE_COPY)
+	m += MSG_META_START_MOVE_COPY;
+    else if (active & UIFA_FEATURES)
+	m += MSG_META_START_FEATURES;
+    else
+	m += MSG_META_START_OTHER;
+    if (!(inputState & BI_PRESS))
+	m++;				/* the END message */
+    return m;
+}
+
+/*
+ * FlowCheckKbdShortcut: is the key press (as MSG_META_KBD_CHAR has it)
+ * one of the shortcuts of the table?  The keyboard driver knows which
+ * characters are on which key (DR_KBD_CHECK_SHORTCUT).  The offset of
+ * the entry in the table, or -1.
+ */
+word FlowCheckKbdShortcut(KeyboardShortcut *shortcutTable,
+			  word numEntriesInTable, word character, word flags,
+			  word state)
+{
+    GeodeHandle drv = GeodeGetDefaultDriver(GDDT_KEYBOARD);
+    DriverInfoStruct *dis = drv ? GeodeInfoDriver(drv) : NULL;
+    DriverRegs r;
+
+    if (!dis || !dis->DIS_strategy)
+	return (word) -1;
+    memset(&r, 0, sizeof(r));
+    r.DR_ax = numEntriesInTable;
+    r.DR_cx = character;
+    r.DR_dx = flags;
+    r.DR_bp = state;
+    r.DR_dsSi = shortcutTable;
+    if (!((DriverStrategy *) (void *) dis->DIS_strategy)(
+	    DR_KBD_CHECK_SHORTCUT, &r))
+	return (word) -1;
+    return (word) r.DR_si;
+}

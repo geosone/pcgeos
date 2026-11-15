@@ -859,6 +859,29 @@ static Boolean Doc(sdword b, sdword r, sdword t, sdword l)
 	outer = @record UVNodeClass::MSG_META_SEND_CLASSED_EVENT(ev, TO_SELF);
 	FlowDestroyMessage(outer);
 	UVCHECK(Got(2, 0, 1, 0, 0) && uvState.UVS_pings == 1);
+
+	/* the passive message of the button function that is active */
+	UVCHECK(FlowTranslatePassiveButton(MSG_META_PRE_PASSIVE_BUTTON,
+					   BI_PRESS | (UIFA_SELECT << 8)) ==
+		MSG_META_PRE_PASSIVE_START_SELECT);
+	UVCHECK(FlowTranslatePassiveButton(MSG_META_PRE_PASSIVE_BUTTON,
+					   UIFA_SELECT << 8) ==
+		MSG_META_PRE_PASSIVE_END_SELECT);
+	UVCHECK(FlowTranslatePassiveButton(MSG_META_POST_PASSIVE_BUTTON,
+					   BI_PRESS | (UIFA_MOVE_COPY << 8)) ==
+		MSG_META_POST_PASSIVE_START_MOVE_COPY);
+	UVCHECK(FlowTranslatePassiveButton(MSG_META_POST_PASSIVE_BUTTON,
+					   BI_PRESS | (UIFA_FEATURES << 8)) ==
+		MSG_META_POST_PASSIVE_START_FEATURES);
+	UVCHECK(FlowTranslatePassiveButton(MSG_META_POST_PASSIVE_BUTTON, 0) ==
+		MSG_META_POST_PASSIVE_END_OTHER);
+	/* no keyboard driver here: no shortcut */
+	{
+	    KeyboardShortcut ks[1];
+
+	    memset(ks, 0, sizeof(ks));
+	    UVCHECK(FlowCheckKbdShortcut(ks, 1, 'a', 0, 0) == (word) -1);
+	}
 	break;
     }
     case 11: {

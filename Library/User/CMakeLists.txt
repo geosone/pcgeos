@@ -16,5 +16,6 @@ geos_geode(ui GP ui32.gp
                ${ui}/Vis/visCompGeometry.goc
                ${ui}/Vis/visContent.goc
                ${ui}/User/userFlowUtils.goc
+               ${ui}/User/userFlowMisc.goc
            INCLUDES ${ui})
 set(ui_GEO ${ui_GEO} PARENT_SCOPE)

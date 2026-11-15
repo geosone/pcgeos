@@ -306,6 +306,11 @@ extern Boolean FlowMessageClassedEvent(optr objectToSendTo,
 				       Message messageToSend,
 				       EventHandle classedEvent,
 				       word otherData, MessageFlags flags);
+/* the passive message of the button function active in inputState
+ * (MSG_META_PRE_PASSIVE_START_SELECT ...) for MSG_META_PRE_PASSIVE_BUTTON
+ * or MSG_META_POST_PASSIVE_BUTTON */
+extern Message FlowTranslatePassiveButton(Message passiveButton,
+					  word inputState);
 extern void MetaGrabFocusExclLow(optr obj);
 extern void MetaReleaseFocusExclLow(optr obj);
 extern void MetaGrabTargetExclLow(optr obj);

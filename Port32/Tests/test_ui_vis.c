@@ -237,7 +237,7 @@ int main(void)
 	for (i = 0; i < st->UVS_fails && i < 8; i++)
 	    printf("  failed: uivis.goc line %u\n", st->UVS_failLines[i]);
     }
-    CHECK(st->UVS_checks >= 179 && !st->UVS_fails);
+    CHECK(st->UVS_checks >= 185 && !st->UVS_fails);
 
     /* detach: the process goes, and with it the library */
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,
