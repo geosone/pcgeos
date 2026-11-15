@@ -102,6 +102,12 @@ static Message Get(word *w)
     ev = QueueGetMessage(q);
     m = ObjGetMessageInfo(ev, NULL);
     p = KernelEventParams(ev, &size);
+    if (m == IM_META_MOUSE_WHEEL_VERTICAL && size == sizeof(ImWheelParams)) {
+	/* after the pointer to the return values (NULL) */
+	CHECK(!((const ImWheelParams *) p)->IWP_retVal);
+	p = &((const ImWheelParams *) p)->IWP_xPosition;
+	size = 3 * sizeof(word);
+    }
     memset(w, 0, 3 * sizeof(word));
     memcpy(w, p, size < 3 * sizeof(word) ? size : 3 * sizeof(word));
     ObjFreeMessage(ev);

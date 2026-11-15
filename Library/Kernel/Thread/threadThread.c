@@ -528,7 +528,9 @@ dword ThreadGetInfo(ThreadHandle th, ThreadGetInfoType info)
     t = ThreadOf(th);
     switch (info) {
     case TGIT_PRIORITY_AND_USAGE:
-	return t->T_curPriority | ((dword) t->T_cpuUsage << 8);
+	/* the base priority, as the asm (HT_basePriority and HT_cpuUsage
+	 * as a word); the current one ages with the usage */
+	return t->T_basePriority | ((dword) t->T_cpuUsage << 8);
     case TGIT_THREAD_HANDLE:
 	return th;
     case TGIT_QUEUE_HANDLE:

@@ -413,7 +413,8 @@ byte ImPtrPerturbMonitor(Monitor *mon, ImEvent *ev)
  * ML_OUTPUT
  */
 
-/* the message to the output: cx, dx, bp (goc's three words) */
+/* the message to the output: cx, dx, bp (goc's three words), the wheel
+ * as ImWheelParams */
 static void Send(const ImEvent *ev, word flags)
 {
     struct { word cx, dx, bp; } p;
@@ -421,6 +422,15 @@ static void Send(const ImEvent *ev, word flags)
 
     if (!od)
 	return;
+    if (ev->IE_message == IM_META_MOUSE_WHEEL_VERTICAL) {
+	ImWheelParams wp;
+	wp.IWP_retVal = NULL;
+	wp.IWP_xPosition = ev->IE_cx;
+	wp.IWP_yPosition = ev->IE_dx;
+	wp.IWP_inputState = ev->IE_bp;
+	CObjMessageP(flags, od, ev->IE_message, &wp, sizeof(wp), NULL, 0);
+	return;
+    }
     p.cx = ev->IE_cx;
     p.dx = ev->IE_dx;
     p.bp = ev->IE_bp;

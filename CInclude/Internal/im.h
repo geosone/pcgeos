@@ -66,6 +66,19 @@ typedef struct {
 #define IM_META_LEAVE_CONSTRAIN	22
 
 /*
+ * The output gets cx, dx, bp as three words, except for
+ * MSG_META_MOUSE_WHEEL_VERTICAL: its prototype (inputC.goh) returns
+ * MouseReturnParams, so goc's parameters start with the pointer to them
+ * (NULL from the input manager).
+ */
+typedef struct {
+    void	*IWP_retVal;
+    word	IWP_xPosition;
+    word	IWP_yPosition;
+    word	IWP_inputState;
+} ImWheelParams;
+
+/*
  * MSG_IM_KBD_SCAN: cx = scan code (high byte the extension, 0xe0 or
  * 0xe1, low byte the code with 0x80 on a release), dx, bp = 0,
  * si = driver handle (0); laid out as IMParams

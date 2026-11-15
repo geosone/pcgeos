@@ -142,7 +142,12 @@ static word Spinner(word which)
 	byte p;
 	spins[which]++;
 	TimerGetCount();			/* a kernel entry */
-	p = TGI_PRIORITY(ThreadGetInfo(0, TGIT_PRIORITY_AND_USAGE));
+	{
+	    dword i = ThreadGetInfo(0, TGIT_PRIORITY_AND_USAGE);
+	    /* the current priority: the base and the usage */
+	    word cur = (word) (TGI_PRIORITY(i) + TGI_RECENT_CPU_USAGE(i));
+	    p = (byte) (cur > 255 ? 255 : cur);
+	}
 	if (p > maxPrio[which])
 	    maxPrio[which] = p;
     }
