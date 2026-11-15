@@ -281,6 +281,12 @@ extern void *CMessageDispatchP(EventHandle event, word flags,
 /* the parameter structure of a recorded event (and its size), in place
  * of ObjGetMessageData's registers */
 extern const void *ObjGetMessageParams(EventHandle event, dword *size);
+/* new parameters of the same size for a recorded event (FALSE if the
+ * size differs), and the last event waiting on a queue of the caller's
+ * own (0: none): in place of ObjMessage's MF_CUSTOM combine routine */
+extern Boolean ObjSetMessageParams(EventHandle event, const void *params,
+				   dword size);
+extern EventHandle QueuePeekLastMessage(QueueHandle qh);
 #endif
 
 extern dword

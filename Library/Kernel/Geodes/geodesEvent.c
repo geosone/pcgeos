@@ -273,6 +273,22 @@ const void *ObjGetMessageParams(EventHandle event, dword *size)
     return KernelEventParams(event, size);
 }
 
+/* New parameters for a recorded event, of the size it has (FALSE if
+ * not): how the owner of a queue combines a new event with one that
+ * waits there (the MF_CUSTOM routine of the asm ObjMessage changed the
+ * registers in the event). */
+Boolean ObjSetMessageParams(EventHandle event, const void *params,
+			    dword size)
+{
+    KEvent *e = EventOf(event);
+
+    if (size != e->E_size)
+	return FALSE;
+    if (size)
+	memcpy(e->E_params, params, size);
+    return TRUE;
+}
+
 /* ---------------------------------------------------------------------
  * Queues
  * ------------------------------------------------------------------- */
@@ -372,6 +388,21 @@ void QueuePostMessage(QueueHandle qh, EventHandle event, word flags)
     Link(q, event, (flags & MF_INSERT_AT_FRONT) != 0);
     KSemV(&q->Q_sem);
     ghal_crit_leave();
+}
+
+/* The last event of a queue, which stays on it (0: the queue is empty).
+ * For a queue that only the caller's thread posts to and empties (the
+ * hold-up queue of a VisContent): any other queue's last event may be
+ * gone at once. */
+EventHandle QueuePeekLastMessage(QueueHandle qh)
+{
+    KQueue *q = QueueOf(qh);
+    EventHandle ev;
+
+    ghal_crit_enter();
+    ev = q->Q_tail;
+    ghal_crit_leave();
+    return ev;
 }
 
 EventHandle QueueGetMessage(QueueHandle qh)

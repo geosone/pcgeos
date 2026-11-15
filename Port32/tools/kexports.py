@@ -33,6 +33,7 @@ PORT32_EXPORTS = [
 # more of them, numbered after the lists below (their entry numbers stay)
 PORT32_LATE_EXPORTS = [
     "GrLoadGStringPtr", "ThreadPrivData", "ObjGetMessageParams",
+    "ObjSetMessageParams", "QueuePeekLastMessage",
 ]
 # GHAL host services the drivers on the GHAL use (Port32/GHAL-Concept.md
 # section 4, level 2): exported always, as they live in the ghal library

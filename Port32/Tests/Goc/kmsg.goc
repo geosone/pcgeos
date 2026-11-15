@@ -263,14 +263,30 @@ int KMsgFlush(optr proc, optr other)
 						 TGIT_QUEUE_HANDLE);
 
     kmsgLogCount = 0;
+    CHECK(!QueuePeekLastMessage(q));
     QueuePostMessage(q, @record proc::MSG_KP_LOG(7), 0);
     QueuePostMessage(q, @record other::MSG_KV_ADD(1), 0);
     QueuePostMessage(q, @record proc::MSG_KP_LOG(8), 0);
     CHECK(GeodeInfoQueue(q) == 3);
+    /* the last event waiting gets other parameters (of its size only) */
+    {
+	EventHandle last = QueuePeekLastMessage(q);
+	word nine[8] = { 9 };
+	dword size = 0;
+	optr dest = 0;
+
+	CHECK(last && ObjGetMessageInfo(last, &dest) == MSG_KP_LOG &&
+	      dest == proc);
+	(void) ObjGetMessageParams(last, &size);
+	CHECK(size && size < sizeof(nine));
+	CHECK(!ObjSetMessageParams(last, nine, size + 1));
+	CHECK(ObjSetMessageParams(last, nine, size));
+	CHECK(GeodeInfoQueue(q) == 3);
+    }
     GeodeFlushQueue(q, pq, proc, 0);
     CHECK(GeodeInfoQueue(q) == 1);
     (void) @call proc::MSG_KP_PING(0);
-    CHECK(kmsgLogCount == 2 && kmsgLog[0] == 7 && kmsgLog[1] == 8);
+    CHECK(kmsgLogCount == 2 && kmsgLog[0] == 7 && kmsgLog[1] == 9);
     GeodeFreeQueue(q);
     return fails - before;
 }
