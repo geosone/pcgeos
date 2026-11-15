@@ -320,6 +320,17 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     add_dependencies(test_ui_flow geode_ui geode_uiflow)
     target_link_libraries(test_ui_flow PRIVATE geos_kernel)
     add_test(NAME library.ui.flow COMMAND test_ui_flow)
+
+    # the generic classes, built by a specific UI library of the test
+    geos_geode(tspui GP Geode/tspui.gp GOC Geode/tspui.goc PROTOCOL 727.0)
+    geos_geode(uigen GP Geode/uigen.gp GOC Geode/uigen.goc)
+    geos_embed(_tspui_c ${tspui_GEO} tspui_geode)
+    geos_embed(_uigen_c ${uigen_GEO} uigen_geode)
+    add_executable(test_ui_gen test_ui_gen.c ${_ui_c} ${_uigen_c}
+                   ${_tspui_c})
+    add_dependencies(test_ui_gen geode_ui geode_uigen geode_tspui)
+    target_link_libraries(test_ui_gen PRIVATE geos_kernel)
+    add_test(NAME library.ui.gen COMMAND test_ui_gen)
   endif()
 
   # starting the kernel: drives, [paths], the UI and a process from files

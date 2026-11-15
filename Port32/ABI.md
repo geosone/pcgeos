@@ -4825,12 +4825,81 @@ visual classes of `Library/User/Vis`:
       (`ClipboardHandleEndMoveCopy`), the sound for an unwanted press,
       the EC messages `MSG_VIS_VUP_EC_ENSURE_*`; `CLASSF_DISCARD_ON_SAVE`
       (goc has no keyword for it; nothing is saved to state yet).
+- **GenClass** (`Gen/genClass.goc` after `genClassBuild.asm`,
+  `genClassCommon.asm`, `genClassMisc.asm`; the routines in
+  `Gen/genUtils.goc`, the specific part's in `Vis/visSpec.goc`, the
+  `MSG_SPEC_*` handlers at the end of `Vis/visClass.goc`):
+  - the generic tree (add, remove, move, find, copy, destroy), the
+    usable and enabled states with their checks up to the application
+    and the notification of a built branch, monikers (use, replace,
+    create from text, a gstring or a `VisMoniker` through
+    `VisCreateMonikerChunk`), the keyboard accelerator and its search
+    path, size and window hints, the output action, the geometry hints,
+    upward queries, classed events (`TO_GEN_PARENT`, `TO_APP_*`), init
+    file options, the help file and type, detach abort;
+  - messages the specific part may answer only once it is grown go to
+    `MetaClass` before (the asm's `GenCallMeta`): `CallMeta` calls the
+    super from `VisClass`, past the unresolved variant;
+  - the specific UI: a Gen subclass resolves its variant with
+    `GenQueryUICallSpecificUI(obj, SPIR_BUILD_*, masterOffset)`, which
+    grows the parents first and calls the routine the library exports
+    as entry `SPIR_*` (`CInclude/Internal/specUI.h`, protocol 727.0):
+    `ClassStruct *routine(optr obj, word masterOffset)`. The library is
+    `[ui] specific` (default `motif`), loaded on first use by
+    `UserGetSpecificUI`, freed by `UserFreeSpecificUI`.
+    `GenApplicationClass` (`Gen/genApplication.goc`, only the resolve
+    and its state so far) takes `GAI_specificUI` or that library;
+  - becoming usable builds the branch from scratch
+    (`GenSpecShrinkBranch`, then `MSG_SPEC_SET_USABLE`): a win group is
+    shown by `MSG_META_UPDATE_WINDOW` (`VisCompUpdateWindow` in
+    `visComp.goc`: visible if the branch is usable and not minimized,
+    attached and realizable, the application not detaching; built
+    first, `MSG_GEN_GUP_ENSURE_UPDATE_WINDOW` up the tree), any other
+    object is built into its visual parent in the generic order
+    (`VisAddChildRelativeToGen`) and that parent's geometry marked
+    invalid. Not usable unbuilds the branch; a win group that stays
+    usable keeps its tree and a one-way link
+    (`SA_TREE_BUILT_BUT_NOT_REALIZED`);
+  - `VisClass`: `MSG_META_INITIALIZE` sets `VTF_IS_GEN` for a generic
+    object, `MSG_VIS_OPEN`/`CLOSE` send the visibility notifications,
+    `MSG_META_MUP_ALTER_FTVMC_EXCL` sends the model up the generic tree;
+  - Port32:
+    - `MSG_SPEC_GUP_QUERY` has `MSG_GEN_GUP_QUERY`'s parameters and
+      return (`MSG_SPEC_P32_GUP_QUERY`), `MSG_SPEC_RESCAN_GEO_AND_UPDATE`
+      the `VisOptFlags` (`MSG_SPEC_P32_RESCAN_GEO_AND_UPDATE`),
+      `MSG_GEN_GUP_ENSURE_UPDATE_WINDOW` returns its carry
+      (`MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW`); the aliases are in
+      `CInclude/Internal/specC.goh`;
+    - a moniker's source is a `VisMonikerSource` (an optr): a pointer
+      for `VMST_FPTR`, `ConstructOptr(handle, offset)` for `VMST_HPTR`;
+    - `MSG_GEN_SET_WIN_POSITION`/`_SIZE` take the mode and type in one
+      word, as the asm's `dx` (`@ifdef GEOS_PORT32` in `genC.goh`);
+    - `GenFindObjectInTree(startObject, childTable)` returns the optr;
+    - `UWF_FROM_WINDOWS_LIST` is in `metaC.goh` (the `UWF_*` lost their
+      stray semicolons);
+    - `VisCompClass` uses `GenClass` (`@uses` under `GEOS_PORT32` in
+      `vCompC.goh`), so it may handle its messages;
+    - the state walks of the generic branch (`VisGetGenBranchInfo`)
+      stop at a parent of another thread;
+    - the moniker of `VisCreateMonikerChunk` is copied directly (the
+      block is the caller's thread's), not by
+      `MSG_PROCESS_COPY_CHUNK_OVER`;
+  - goc: no warning for an `@alias` outside a class (`Tools/goc`); the
+    vardata relocations of `HINT_SHORT_LONG_TOUCH` name their fields
+    (`genC.goh`; offsetof of a number is no C).
 - **Not yet:**
-  - the Generic UI, so `VTF_IS_GEN` is never set, and
-    `MSG_META_UPDATE_WINDOW` and `MSG_GEN_GUP_ENSURE_UPDATE_WINDOW` are
-    not handled;
-  - `MSG_VIS_CREATE_VIS_MONIKER`, `MSG_VIS_CALL_ROUTINE`,
-    `MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK`;
+  - in `GenClass`: moniker lists (`VisFindMoniker`,
+    `MSG_SPEC_RESOLVE_MONIKER_LIST`, their relocation, the
+    application's list), `VMDT_TOKEN` monikers,
+    `MSG_GEN_BRANCH_REPLACE_PARAMS` (dword optrs), `ATTR_GEN_PATH_DATA`,
+    `MSG_META_BRING_UP_HELP`, navigation and mnemonics, the size
+    conversions (`VisConvertSpecVisSize`), the GenView's content in
+    `GenSpecShrinkBranch`, `UserSendToApplicationViaProcess`;
+    `MSG_GEN_MAKE_APPLYABLE`/`_NOT_APPLYABLE` up the visual tree (goc
+    gives `VisClass` no Gen messages);
+  - `GenSystemClass`: `MSG_GEN_CALL_SYSTEM` and `TO_SYS_*` destroy the
+    event; the rest of `GenApplicationClass` (attach, detach, busy);
+  - `MSG_VIS_CALL_ROUTINE`, `MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK`;
   - the quick transfer of `MSG_META_END_MOVE_COPY` (no clipboard);
   - `UserGetDefaultMonikerFont`: Berkeley 10 for now;
   - `MSG_VIS_VUP_QUERY` only goes up the tree.
@@ -4863,6 +4932,21 @@ visual classes of `Library/User/Vis`:
   double press, the keyboard grab with the thread's priority, `<Shift>`
   constraining, a system modal geode, input held up and let go, the
   bump, notifications, no-ink windows and an ended function.
+- **Test.** ctest `library.ui.gen`: the process geode
+  `Port32/Tests/Geode/uigen.goc` has a GenApplication with a display
+  and its triggers; the specific UI is the test's library
+  `Port32/Tests/Geode/tspui.goc` (`[ui] specific = tspui`), whose build
+  routines count their calls and give a window class for the display
+  and a rectangle class for a trigger. Without a specific part: the
+  tree, usable and enabled, monikers (found by their text), size
+  hints, the accelerator's search path, upward queries and classed
+  events (one to the display itself resolves its variant and loads the
+  specific UI, as in the asm). Made usable, the display is built into
+  its window with its triggers, which are drawn (black when enabled,
+  grey not); enabling, disabling the display and a new moniker tell the
+  built objects; a trigger added and made usable is built and drawn,
+  not usable unbuilt; the display not usable closes the window; at the
+  end the specific parts are shrunk and the library freed.
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 

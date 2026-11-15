@@ -1,0 +1,304 @@
+/*
+ * uigen.goc -- a process geode for the library.ui.gen test (Port32/Tests):
+ * a generic tree of the UI library's GenClass, built into the classes of
+ * a specific UI (tspui.goc) when it becomes usable.
+ *
+ * UGApp (GenApplicationClass) has the display UGDisplay (not usable at
+ * first) with the triggers UGTrig1 ("Alpha") and UGTrig2 ("Beta");
+ * UGTrig3 is outside the tree.  UGDisplayClass and UGTriggerClass are
+ * built by the specific UI's routines for a display and a trigger: when
+ * a message passes GenClass for the first time, or the object becomes
+ * usable (then built from scratch).  The
+ * test (test_ui_gen.c) runs the steps through UGStep on the process
+ * thread; the checks made here count in ugState.
+ */
+@include <stdapp.goh>
+@include <Objects/vCompC.goh>
+#include <Internal/specUI.h>
+#include <localize.h>
+
+typedef struct {
+    GeodeHandle	UGS_process;
+    word	UGS_attached;
+    word	UGS_checks, UGS_fails, UGS_failLine;
+    word	UGS_pings;
+    word	UGS_failLines[8];
+} UGState;
+
+UGState ugState;
+
+#define UGCHECK(c) \
+    do { ugState.UGS_checks++; if (!(c)) { \
+	if (ugState.UGS_fails < 8) \
+	    ugState.UGS_failLines[ugState.UGS_fails] = __LINE__; \
+	ugState.UGS_fails++; \
+	if (!ugState.UGS_failLine) ugState.UGS_failLine = __LINE__; } \
+    } while (0)
+
+@class UGProcessClass, ProcessClass;
+    @message void MSG_UG_STEP(word step);
+@endc
+@classdecl UGProcessClass, neverSaved;
+
+@class UGDisplayClass, GenClass;
+    @message void MSG_UG_PING();
+@endc
+@classdecl UGDisplayClass;
+
+@class UGTriggerClass, GenClass;
+@endc
+@classdecl UGTriggerClass;
+
+@method UGDisplayClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_DISPLAY, MasterOffset);
+}
+
+@method UGDisplayClass, MSG_UG_PING
+{
+    ugState.UGS_pings++;
+}
+
+@method UGTriggerClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_TRIGGER, MasterOffset);
+}
+
+@start UGObjects;
+@object GenApplicationClass UGApp = {
+    GI_states = GS_USABLE | GS_ENABLED;	/* (the attach would) */
+    GI_comp = @UGDisplay;
+}
+@object UGDisplayClass UGDisplay = {
+    GI_states = GS_ENABLED;
+    GI_comp = @UGTrig1, @UGTrig2;
+}
+@object UGTriggerClass UGTrig1 = {
+    GI_visMoniker = "Alpha";
+}
+@object UGTriggerClass UGTrig2 = {
+    GI_visMoniker = "Beta";
+}
+@object UGTriggerClass UGTrig3 = {
+    GI_visMoniker = "Gamma";
+    GI_states = GS_ENABLED;
+}
+@end UGObjects;
+
+@method UGProcessClass, MSG_META_ATTACH_PROCESS
+{
+    (void) value1;
+    (void) value2;
+    ugState.UGS_process = GeodeGetProcessHandle();
+    ugState.UGS_attached++;
+}
+
+static Boolean Grown(optr o)
+{
+    Boolean g;
+
+    ObjLockObjBlock(OptrToHandle(o));
+    g = GenCheckIfSpecGrown(o);
+    MemUnlock(OptrToHandle(o));
+    return g;
+}
+
+static GenAttrs Attrs(optr o)
+{
+    return @call o::MSG_GEN_GET_ATTRIBUTES();
+}
+
+static VisAttrs VAttrs(optr o)
+{
+    return @call o::MSG_VIS_GET_ATTRS();
+}
+
+/* the text of the object's moniker */
+static Boolean MonikerIs(optr o, const char *text)
+{
+    ChunkHandle m = @call o::MSG_GEN_GET_VIS_MONIKER();
+    Boolean r = FALSE;
+
+    if (!m)
+	return FALSE;
+    ObjLockObjBlock(OptrToHandle(o));
+    {
+	VisMoniker *vm = LMemDeref(ConstructOptr(OptrToHandle(o), m));
+	r = !(vm->VM_type & (VMT_GSTRING | VMT_MONIKER_LIST)) &&
+	    !LocalCmpStrings((const char *) vm + VMWT_text, text, 0);
+    }
+    MemUnlock(OptrToHandle(o));
+    return r;
+}
+
+@method UGProcessClass, MSG_UG_STEP
+{
+    switch (step) {
+    case 1: {
+	/* the generic tree, without a specific part */
+	GetSizeArgs gs;
+	EventHandle ev;
+
+	UGCHECK(@call UGTrig1::MSG_GEN_FIND_PARENT() == @UGDisplay);
+	UGCHECK(@call UGDisplay::MSG_GEN_FIND_PARENT() == @UGApp);
+	UGCHECK(@call UGApp::MSG_GEN_FIND_PARENT() == 0);
+	UGCHECK(@call UGDisplay::MSG_GEN_COUNT_CHILDREN() == 2);
+	UGCHECK(@call UGDisplay::MSG_GEN_FIND_CHILD(@UGTrig2) == 1);
+	UGCHECK(@call UGDisplay::MSG_GEN_FIND_CHILD(@UGTrig3) == (word) -1);
+	UGCHECK(@call UGDisplay::MSG_GEN_FIND_CHILD_AT_POSITION(0) ==
+		@UGTrig1);
+	UGCHECK(@call UGTrig1::MSG_GEN_GET_USABLE() &&
+		@call UGTrig1::MSG_GEN_GET_ENABLED());
+	UGCHECK(!@call UGDisplay::MSG_GEN_GET_USABLE());
+	UGCHECK(!@call UGTrig1::MSG_GEN_CHECK_IF_FULLY_USABLE());
+	UGCHECK(@call UGApp::MSG_GEN_CHECK_IF_FULLY_USABLE());
+	UGCHECK(!Grown(@UGApp) && !Grown(@UGDisplay) && !Grown(@UGTrig1));
+
+	/* monikers */
+	UGCHECK(MonikerIs(@UGTrig1, "Alpha") && MonikerIs(@UGTrig2, "Beta"));
+	UGCHECK(@call UGApp::MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER("Be", 0)
+		== @UGTrig2);
+	UGCHECK(@call UGApp::MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER("Be",
+		    GFTMF_EXACT_MATCH) == 0);
+	UGCHECK(@call UGApp::MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER("Alpha",
+		    GFTMF_EXACT_MATCH) == @UGTrig1);
+	(void) @call UGTrig2::MSG_GEN_REPLACE_VIS_MONIKER_TEXT("Delta", VUM_MANUAL);
+	UGCHECK(MonikerIs(@UGTrig2, "Delta"));
+	UGCHECK(@call UGApp::MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER("Del", 0)
+		== @UGTrig2);
+
+	/* size hints */
+	@call UGTrig1::MSG_GEN_SET_FIXED_SIZE(VUM_MANUAL, 0, 20, 40);
+	@call UGTrig1::MSG_GEN_GET_FIXED_SIZE(&gs);
+	UGCHECK(gs.GSA_width == 40 && gs.GSA_height == 20 && !gs.GSA_count);
+	@call UGDisplay::MSG_GEN_SET_MINIMUM_SIZE(VUM_MANUAL, 3, 50, 100);
+	@call UGDisplay::MSG_GEN_GET_MINIMUM_SIZE(&gs);
+	UGCHECK(gs.GSA_width == 100 && gs.GSA_count == 3);
+	@call UGTrig1::MSG_GEN_SET_FIXED_SIZE(VUM_MANUAL, 0, 0, 0);
+	UGCHECK(!ObjVarFindData(@UGTrig1, HINT_FIXED_SIZE));
+
+	/* adding, moving, removing a child */
+	@call UGDisplay::MSG_GEN_ADD_CHILD(@UGTrig3, CCO_LAST);
+	UGCHECK(@call UGDisplay::MSG_GEN_COUNT_CHILDREN() == 3 &&
+		@call UGTrig3::MSG_GEN_FIND_PARENT() == @UGDisplay);
+	@call UGDisplay::MSG_GEN_MOVE_CHILD(@UGTrig3, CCO_FIRST);
+	UGCHECK(@call UGDisplay::MSG_GEN_FIND_CHILD(@UGTrig3) == 0);
+	@call UGDisplay::MSG_GEN_REMOVE_CHILD(@UGTrig3, 0);
+	UGCHECK(@call UGDisplay::MSG_GEN_COUNT_CHILDREN() == 2 &&
+		@call UGTrig3::MSG_GEN_FIND_PARENT() == 0 &&
+		@call UGDisplay::MSG_GEN_FIND_CHILD(@UGTrig1) == 0);
+
+	/* the keyboard accelerator puts the parents on the search path */
+	@call UGTrig2::MSG_GEN_SET_KBD_ACCELERATOR('b', VUM_MANUAL);
+	UGCHECK(@call UGTrig2::MSG_GEN_GET_KBD_ACCELERATOR() == 'b');
+	UGCHECK(Attrs(@UGTrig2) & GA_KBD_SEARCH_PATH &&
+		Attrs(@UGDisplay) & GA_KBD_SEARCH_PATH &&
+		Attrs(@UGApp) & GA_KBD_SEARCH_PATH &&
+		!(Attrs(@UGTrig1) & GA_KBD_SEARCH_PATH));
+
+	/* upward queries and classed events */
+	UGCHECK(@call UGTrig1::MSG_GEN_GUP_FIND_OBJECT_OF_CLASS(
+		    &GenApplicationClass) == @UGApp);
+	UGCHECK(@call UGTrig1::MSG_GEN_GUP_TEST_FOR_OBJECT_OF_CLASS(
+		    &UGDisplayClass));
+	UGCHECK(!@call UGDisplay::MSG_GEN_GUP_TEST_FOR_OBJECT_OF_CLASS(
+		    &UGTriggerClass));
+	ev = @record UGDisplayClass::MSG_UG_PING();
+	@call UGTrig1::MSG_META_SEND_CLASSED_EVENT(ev,
+				(TravelOption) TO_GEN_PARENT);
+	UGCHECK(ugState.UGS_pings == 1);
+	/* (to the display itself: past GenClass, as the asm, which resolves
+	 * the display's variant: the specific UI is loaded for it) */
+	UGCHECK(!Grown(@UGDisplay));
+	ev = @record UGDisplayClass::MSG_UG_PING();
+	@call UGTrig2::MSG_GEN_CALL_PARENT(ev);
+	UGCHECK(ugState.UGS_pings == 2 && Grown(@UGApp) && Grown(@UGDisplay) &&
+		!Grown(@UGTrig1));
+	ev = @record UGDisplayClass::MSG_UG_PING();
+	@call UGDisplay::MSG_GEN_SEND_TO_CHILDREN(ev);	/* not theirs */
+	UGCHECK(ugState.UGS_pings == 2);
+
+	/* Trig1 not enabled: no specific part to tell */
+	@call UGTrig1::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+	UGCHECK(!@call UGTrig1::MSG_GEN_GET_ENABLED() && !Grown(@UGTrig1));
+	break;
+    }
+    case 2:
+	/* usable: built by the specific UI, the window opened */
+	@call UGDisplay::MSG_GEN_SET_USABLE(VUM_NOW);
+	UGCHECK(Grown(@UGApp) && Grown(@UGDisplay) && Grown(@UGTrig1) &&
+		Grown(@UGTrig2) && !Grown(@UGTrig3));
+	UGCHECK(ObjIsObjectInClass(@UGDisplay, &VisCompClass) &&
+		ObjIsObjectInClass(@UGTrig1, &VisClass) &&
+		!ObjIsObjectInClass(@UGTrig1, &VisCompClass));
+	UGCHECK(@call UGDisplay::MSG_GEN_CHECK_IF_FULLY_USABLE());
+	UGCHECK(VAttrs(@UGDisplay) & VA_REALIZED &&
+		VAttrs(@UGTrig1) & VA_REALIZED &&
+		VAttrs(@UGTrig2) & VA_REALIZED);
+	UGCHECK(@call UGDisplay::MSG_VIS_COUNT_CHILDREN() == 2 &&
+		@call UGDisplay::MSG_VIS_FIND_CHILD(@UGTrig2) == 1 &&
+		@call UGDisplay::MSG_VIS_FIND_PARENT() == @UGApp);
+	UGCHECK(!(VAttrs(@UGTrig1) & VA_FULLY_ENABLED) &&
+		VAttrs(@UGTrig2) & VA_FULLY_ENABLED);
+	break;
+    case 3:
+	/* Trig1 enabled: told, drawn again (black) */
+	@call UGTrig1::MSG_GEN_SET_ENABLED(VUM_NOW);
+	UGCHECK(VAttrs(@UGTrig1) & VA_FULLY_ENABLED);
+	break;
+    case 4:
+	/* the display not enabled: the triggers too, drawn grey */
+	@call UGDisplay::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+	UGCHECK(!(VAttrs(@UGDisplay) & VA_FULLY_ENABLED) &&
+		!(VAttrs(@UGTrig1) & VA_FULLY_ENABLED) &&
+		!(VAttrs(@UGTrig2) & VA_FULLY_ENABLED));
+	UGCHECK(!@call UGTrig1::MSG_GEN_CHECK_IF_FULLY_ENABLED() &&
+		@call UGTrig1::MSG_GEN_GET_ENABLED());
+	@call UGDisplay::MSG_GEN_SET_ENABLED(VUM_NOW);
+	UGCHECK(VAttrs(@UGTrig1) & VA_FULLY_ENABLED &&
+		VAttrs(@UGTrig2) & VA_FULLY_ENABLED);
+	/* a new moniker for a built object */
+	(void) @call UGTrig2::MSG_GEN_REPLACE_VIS_MONIKER_TEXT("Epsilon", VUM_NOW);
+	UGCHECK(MonikerIs(@UGTrig2, "Epsilon"));
+	break;
+    case 5:
+	/* a child added and made usable: built into the window */
+	@call UGDisplay::MSG_GEN_ADD_CHILD(@UGTrig3, CCO_LAST);
+	UGCHECK(!Grown(@UGTrig3));
+	@call UGTrig3::MSG_GEN_SET_USABLE(VUM_NOW);
+	UGCHECK(Grown(@UGTrig3) && VAttrs(@UGTrig3) & VA_REALIZED);
+	UGCHECK(@call UGDisplay::MSG_VIS_COUNT_CHILDREN() == 3 &&
+		@call UGDisplay::MSG_VIS_FIND_CHILD(@UGTrig3) == 2);
+	break;
+    case 6:
+	/* and not usable again: out of the visual tree */
+	@call UGTrig3::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	UGCHECK(!(VAttrs(@UGTrig3) & VA_REALIZED) &&
+		!VisCheckIfSpecBuilt(@UGTrig3));
+	UGCHECK(@call UGDisplay::MSG_VIS_COUNT_CHILDREN() == 2);
+	UGCHECK(@call UGDisplay::MSG_GEN_COUNT_CHILDREN() == 3);
+	break;
+    case 7:
+	/* the display not usable: closed */
+	@call UGDisplay::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	UGCHECK(!(VAttrs(@UGDisplay) & VA_REALIZED) &&
+		!(VAttrs(@UGTrig1) & VA_REALIZED));
+	UGCHECK(!@call UGDisplay::MSG_GEN_GET_USABLE());
+	break;
+    case 8:
+	/* the specific parts gone, the specific UI freed */
+	ObjLockObjBlock(OptrToHandle(@UGApp));
+	GenSpecShrinkBranch(@UGApp);
+	MemUnlock(OptrToHandle(@UGApp));
+	UGCHECK(!Grown(@UGApp) && !Grown(@UGDisplay) && !Grown(@UGTrig1));
+	UserFreeSpecificUI();
+	break;
+    }
+}
+
+void UGStep(word step)
+{
+    optr p = ConstructOptr(ugState.UGS_process, 0);
+
+    @call p::MSG_UG_STEP(step);
+}

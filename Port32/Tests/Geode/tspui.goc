@@ -1,0 +1,118 @@
+/*
+ * tspui.goc -- a specific UI library for the library.ui.gen test
+ * (Port32/Tests): what the generic objects of uigen are built into.
+ * Each build routine counts its calls in tspState and gives a class:
+ * TSButtonClass for a trigger, TSWinClass for a display, TSAppClass for
+ * the application.  The buttons count their drawings.
+ */
+@include <stdapp.goh>
+@include <Objects/vCompC.goh>
+#include <Internal/specUI.h>
+@include "tspui.goh"
+
+@classdecl TSWinClass;
+@classdecl TSButtonClass;
+@classdecl TSAppClass;
+
+TSState tspState;
+
+ClassStruct *TSBuildTrigger(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    tspState.TSS_builds[0]++;
+    return &TSButtonClass;
+}
+
+ClassStruct *TSBuildDisplay(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    tspState.TSS_builds[1]++;
+    return &TSWinClass;
+}
+
+ClassStruct *TSBuildApplication(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    tspState.TSS_builds[2]++;
+    return &TSAppClass;
+}
+
+/* a window and win group, attached and realizable from the start (the
+ * application's attach does it in a real UI) */
+@method TSWinClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    pself = ObjDerefVis(oself);
+    pself->VI_typeFlags |= VTF_IS_COMPOSITE | VTF_IS_WINDOW |
+			   VTF_IS_WIN_GROUP;
+    pself->VI_specAttrs |= SA_ATTACHED | SA_REALIZABLE;
+    pself->VI_bounds.R_left = 20;
+    pself->VI_bounds.R_top = 20;
+    pself->VI_bounds.R_right = 220;
+    pself->VI_bounds.R_bottom = 120;
+    pself->VCI_geoAttrs |= VCGA_CUSTOM_MANAGE_CHILDREN;
+}
+
+@method TSWinClass, MSG_VIS_OPEN_WIN
+{
+    Rectangle b = pself->VI_bounds;
+
+    pself->VCI_window = WinOpen(parentWindow ? parentWindow
+					     : tspState.TSS_root,
+				oself, oself, CMT_CLOSEST, C_WHITE, 0, 0, 0,
+				0, 0, NULL, b.R_left, b.R_top, b.R_right - 1,
+				b.R_bottom - 1);
+    tspState.TSS_win = pself->VCI_window;
+}
+
+@method TSWinClass, MSG_VIS_CLOSE_WIN
+{
+    @callsuper();
+    tspState.TSS_win = 0;
+}
+
+/* placed by their number: 50 apart */
+@method TSButtonClass, MSG_META_INITIALIZE
+{
+    word n = tspState.TSS_buttons++;
+
+    @callsuper();
+    pself = ObjDerefVis(oself);
+    pself->TSBI_which = n;
+}
+
+@method TSButtonClass, MSG_SPEC_BUILD
+{
+    word x;
+
+    @callsuper();
+    pself = ObjDerefVis(oself);
+    x = (word) (10 + 50 * pself->TSBI_which);
+    pself->VI_bounds.R_left = (sword) x;
+    pself->VI_bounds.R_top = 10;
+    pself->VI_bounds.R_right = (sword) (x + 40);
+    pself->VI_bounds.R_bottom = 30;
+}
+
+@method TSButtonClass, MSG_VIS_DRAW
+{
+    Boolean en = (pself->VI_attrs & VA_FULLY_ENABLED) != 0;
+
+    (void) drawFlags;
+    GrSetAreaColor(gstate, CF_INDEX, en ? C_BLACK : C_LIGHT_GRAY, 0, 0);
+    GrFillRect(gstate, pself->VI_bounds.R_left, pself->VI_bounds.R_top,
+	       pself->VI_bounds.R_right, pself->VI_bounds.R_bottom);
+    if (pself->TSBI_which < 3)
+	tspState.TSS_draws[pself->TSBI_which]++;
+    if (!en)
+	tspState.TSS_greyDraws++;
+}
+
+@method TSButtonClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    tspState.TSS_monikers++;
+    @callsuper();
+}

@@ -1,0 +1,32 @@
+/*
+ * tspui.goh -- the specific UI library of the library.ui.gen test
+ * (Port32/Tests): the state the test and uigen share with it.
+ */
+@deflib tspui
+
+typedef struct {
+    WindowHandle	TSS_root;	/* the root window, from the test */
+    WindowHandle	TSS_win;	/* the display's window */
+    word		TSS_builds[3];	/* trigger, display, application */
+    word		TSS_draws[3];	/* the buttons, by TSBI_which */
+    word		TSS_greyDraws;	/* drawn not enabled */
+    word		TSS_monikers;	/* MSG_SPEC_UPDATE_VIS_MONIKER */
+    word		TSS_buttons;	/* buttons made */
+} TSState;
+
+extern TSState tspState;
+
+/* a generic display: a window and win group on the test's root */
+@class TSWinClass, VisCompClass;
+@endc
+
+/* a generic trigger: a 40x20 rectangle, black if enabled, grey if not */
+@class TSButtonClass, VisClass;
+    @instance word TSBI_which = 0;
+@endc
+
+/* the application: a composite above the displays */
+@class TSAppClass, VisCompClass;
+@endc
+
+@endlib
