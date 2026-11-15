@@ -1,0 +1,564 @@
+/*
+ * uiflow.goc -- a process geode for the library.ui.flow test
+ * (Port32/Tests): the UI library's FlowClass between the input manager,
+ * the window system and two geodes.
+ *
+ * The flow object is made here (as the UI makes it) and gets the input
+ * manager's events and the window system's pointer messages.  Window A
+ * belongs to this geode, whose input object is UFAppA; window B to the
+ * ui library, whose input object is UFAppB for the test.  The input
+ * objects (and the windows' own input objects UFWinA and UFWinB, which
+ * must get nothing) log what they get.  test_ui_flow.c moves the
+ * pointer, presses buttons and keys through the input manager and runs
+ * the steps through UFStep on the process's thread; the checks of the
+ * log count in ufState.
+ */
+@include <stdapp.goh>
+@include <Internal/flowC.goh>
+#include <string.h>
+#include <win.h>
+#include <thread.h>
+#include <geoworks.h>
+#include <Internal/im.h>
+
+enum { UF_A = 1, UF_B, UF_WA, UF_WB };
+
+typedef struct {
+    word		UL_who;
+    Message		UL_msg;
+    sword		UL_x, UL_y;
+    word		UL_state;
+    optr		UL_od;
+    WindowHandle	UL_win;
+} UFLog;
+
+#define UF_LOG	128
+
+typedef struct {
+    WindowHandle	UFS_root;	/* from the test */
+    void		*UFS_strategy;	/* the root's video driver */
+    GeodeHandle		UFS_process;
+    word		UFS_attached;
+    word		UFS_checks, UFS_fails, UFS_failLine;
+    word		UFS_failLines[8];
+    word		UFS_n;		/* log entries */
+    /* (the test does not look at what follows) */
+    UFLog		UFS_log[UF_LOG];
+    optr		UFS_flow;
+    WindowHandle	UFS_winA, UFS_winB;
+    GeodeHandle		UFS_ui;
+    byte		UFS_prio;	/* the process's priority at first */
+} UFState;
+
+UFState ufState;
+
+#define UFCHECK(c) \
+    do { ufState.UFS_checks++; if (!(c)) { \
+	if (ufState.UFS_fails < 8) \
+	    ufState.UFS_failLines[ufState.UFS_fails] = __LINE__; \
+	ufState.UFS_fails++; \
+	if (!ufState.UFS_failLine) ufState.UFS_failLine = __LINE__; } \
+    } while (0)
+
+static void Log(word who, Message msg, sword x, sword y, word state,
+		optr od, WindowHandle win)
+{
+    UFLog *l;
+
+    if (ufState.UFS_n >= UF_LOG)
+	return;
+    l = &ufState.UFS_log[ufState.UFS_n++];
+    l->UL_who = who;
+    l->UL_msg = msg;
+    l->UL_x = x;
+    l->UL_y = y;
+    l->UL_state = state;
+    l->UL_od = od;
+    l->UL_win = win;
+}
+
+@class UFProcessClass, ProcessClass;
+    @message void MSG_UF_STEP(word step);
+@endc
+@classdecl UFProcessClass, neverSaved;
+
+/* an input object: logs what it gets */
+@class UFAppClass, MetaClass;
+    @instance word UFAI_who = 0;
+@endc
+@classdecl UFAppClass;
+
+@method UFAppClass, MSG_META_START_SELECT, MSG_META_END_SELECT,
+		    MSG_META_START_MOVE_COPY, MSG_META_END_MOVE_COPY,
+		    MSG_META_START_FEATURES, MSG_META_END_FEATURES,
+		    MSG_META_START_OTHER, MSG_META_END_OTHER,
+		    MSG_META_DRAG_SELECT, MSG_META_DRAG_MOVE_COPY,
+		    MSG_META_DRAG_FEATURES, MSG_META_DRAG_OTHER
+{
+    UFCHECK(!retVal);
+    Log(pself->UFAI_who, message, xPosition, yPosition, inputState, 0, 0);
+}
+
+@method UFAppClass, MSG_META_PTR
+{
+    UFCHECK(!retVal);
+    Log(pself->UFAI_who, message, xPosition, yPosition, inputState, 0, 0);
+}
+
+@method UFAppClass, MSG_META_SCROLL_VERTICAL
+{
+    UFCHECK(!retVal);
+    Log(pself->UFAI_who, message, (sword) xPosition, (sword) yPosition,
+	inputState, 0, 0);
+}
+
+@method UFAppClass, MSG_META_IMPLIED_WIN_CHANGE
+{
+    Log(pself->UFAI_who, message, 0, 0, 0, inputObj, win);
+}
+
+@method UFAppClass, MSG_META_P32_RAW_UNIV_ENTER, MSG_META_P32_RAW_UNIV_LEAVE
+{
+    Log(pself->UFAI_who, message, 0, 0, 0, inputObj, win);
+}
+
+@method UFAppClass, MSG_META_KBD_CHAR
+{
+    Log(pself->UFAI_who, message, (sword) character, (sword) flags, state,
+	0, 0);
+}
+
+@method UFAppClass, MSG_META_GAINED_KBD_EXCL, MSG_META_LOST_KBD_EXCL
+{
+    Log(pself->UFAI_who, message, 0, 0, 0, 0, 0);
+}
+
+@method UFAppClass, MSG_META_NOTIFY
+{
+    Log(pself->UFAI_who, message, (sword) manufID, (sword) notificationType,
+	data, 0, 0);
+}
+
+/* the event's message as the x */
+@method UFAppClass, MSG_META_GCN_LIST_SEND
+{
+    optr dest;
+    Message m = ObjGetMessageInfo(event, &dest);
+
+    (void) flags;
+    (void) block;
+    Log(pself->UFAI_who, message, (sword) m, (sword) listType, listManuf,
+	dest, 0);
+    ObjFreeMessage(event);
+}
+
+@start UFObjects;
+@object UFAppClass UFAppA = {
+    UFAI_who = UF_A;
+}
+@object UFAppClass UFAppB = {
+    UFAI_who = UF_B;
+}
+@object UFAppClass UFWinA = {
+    UFAI_who = UF_WA;
+}
+@object UFAppClass UFWinB = {
+    UFAI_who = UF_WB;
+}
+@end UFObjects;
+
+@method UFProcessClass, MSG_META_ATTACH_PROCESS
+{
+    (void) value1;
+    (void) value2;
+    ufState.UFS_process = GeodeGetProcessHandle();
+    ufState.UFS_attached++;
+}
+
+/* ---------------------------------------------------------------------
+ * The log
+ * ------------------------------------------------------------------- */
+
+/* the first entry of who (0: anyone) and msg (0: any) from `from' on,
+ * or -1 */
+static int Find(int from, word who, Message msg)
+{
+    int i;
+
+    for (i = from; i < ufState.UFS_n; i++)
+	if ((!who || ufState.UFS_log[i].UL_who == who) &&
+	    (!msg || ufState.UFS_log[i].UL_msg == msg))
+	    return i;
+    return -1;
+}
+
+static int Count(word who, Message msg)
+{
+    int i, n = 0;
+
+    for (i = 0; i < ufState.UFS_n; i++)
+	if ((!who || ufState.UFS_log[i].UL_who == who) &&
+	    (!msg || ufState.UFS_log[i].UL_msg == msg))
+	    n++;
+    return n;
+}
+
+static const UFLog *At(int i)
+{
+    static UFLog none;
+
+    return i >= 0 && i < ufState.UFS_n ? &ufState.UFS_log[i] : &none;
+}
+
+/* the last entry of who and msg */
+static const UFLog *Last(word who, Message msg)
+{
+    int i;
+
+    for (i = ufState.UFS_n - 1; i >= 0; i--)
+	if (ufState.UFS_log[i].UL_who == who &&
+	    (!msg || ufState.UFS_log[i].UL_msg == msg))
+	    return &ufState.UFS_log[i];
+    return At(-1);
+}
+
+/* a mouse message of who with this position and state */
+static Boolean Mouse(int i, word who, Message msg, sword x, sword y,
+		     word state)
+{
+    const UFLog *l = At(i);
+
+    return i >= 0 && l->UL_who == who && l->UL_msg == msg && l->UL_x == x &&
+	   l->UL_y == y && l->UL_state == state;
+}
+
+static Boolean Win(int i, word who, Message msg, optr od, WindowHandle win)
+{
+    const UFLog *l = At(i);
+
+    return i >= 0 && l->UL_who == who && l->UL_msg == msg &&
+	   l->UL_od == od && l->UL_win == win;
+}
+
+static void Clear(void)
+{
+    ufState.UFS_n = 0;
+}
+
+static FlowInstance *Flow(void)
+{
+    return (FlowInstance *) LMemDeref(ufState.UFS_flow);
+}
+
+static word MouseStatus(void)
+{
+    optr f = ufState.UFS_flow;
+
+    return @call f::MSG_VIS_VUP_GET_MOUSE_STATUS();
+}
+
+static void Kbd(optr obj, VisInputFlowGrabFlags flags)
+{
+    optr f = ufState.UFS_flow;
+    PointDWord tr = { 0, 0 };
+
+    @call f::MSG_VIS_VUP_ALTER_INPUT_FLOW(tr, 0, obj, VIFGT_ACTIVE,
+					  VIFGF_KBD | flags);
+}
+
+static byte Prio(void)
+{
+    return TGI_PRIORITY(ThreadGetInfo(ProcInfo(ufState.UFS_process),
+				      TGIT_PRIORITY_AND_USAGE));
+}
+
+#define IN	(UIFA_IN << 8)
+
+/* ---------------------------------------------------------------------
+ * The steps
+ * ------------------------------------------------------------------- */
+
+@method UFProcessClass, MSG_UF_STEP
+{
+    optr f = ufState.UFS_flow;
+    WindowHandle wa = ufState.UFS_winA, wb = ufState.UFS_winB;
+    GeodeHandle g;
+    int i, j;
+
+    switch (step) {
+    case 0:
+	break;			/* the test waits for the queue */
+    case 1:
+	/* the flow object, as the UI makes it */
+	f = ObjInstantiate(OptrToHandle(@UFAppA), (ClassStruct *) &FlowClass);
+	ufState.UFS_flow = f;
+	UFCHECK(Flow()->FI_holdUpInputQueue != 0);
+	UFCHECK(Flow()->FI_activeMouseButton == 0xff);
+	UFCHECK(ImGrabInput(f));
+	UFCHECK(WinGrabChange(ufState.UFS_root, f));
+	ufState.UFS_ui = GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0);
+	UFCHECK(ufState.UFS_ui != 0);
+	/* (the C kernel's MemAlloc gives blocks to the kernel: the owner
+	 * given) */
+	wa = WinOpen(ufState.UFS_root, @UFWinA, 0, CMT_CLOSEST, C_WHITE, 0,
+		     0, 0, 0, ufState.UFS_process, NULL, 100, 100, 199, 199);
+	wb = WinOpen(ufState.UFS_root, @UFWinB, 0, CMT_CLOSEST, C_WHITE, 0,
+		     0, 0, 0, ufState.UFS_ui, NULL, 300, 100, 399, 199);
+	ufState.UFS_winA = wa;
+	ufState.UFS_winB = wb;
+	UFCHECK(MemOwner((MemHandle) wa) == ufState.UFS_process);
+	UFCHECK(MemOwner((MemHandle) wb) == ufState.UFS_ui);
+	WinGeodeSetInputObj(ufState.UFS_process, @UFAppA);
+	WinGeodeSetInputObj(ufState.UFS_ui, @UFAppB);
+	@call f::MSG_FLOW_SET_SCREEN(ufState.UFS_strategy, 0);
+	UFCHECK(Flow()->FI_curVideoStrategy == ufState.UFS_strategy);
+	/* the default map of three buttons; no mouse driver: keyboard
+	 * only */
+	UFCHECK(FlowGetUIButtonFlags() ==
+		(UIBF_CLICK_TO_TYPE | UIBF_SELECT_ALWAYS_RAISES |
+		 UIBF_BLINKING_CURSOR | UIBF_KEYBOARD_ONLY));
+	ufState.UFS_prio = Prio();
+	break;
+    case 2:
+	/* into A (from the root, which counts as this geode's: its owner
+	 * is 0): its geode hears where the mouse is, and the pointer */
+	for (i = Find(0, UF_A, MSG_META_IMPLIED_WIN_CHANGE);
+	     i >= 0 && At(i)->UL_win != wa;
+	     i = Find(i + 1, UF_A, MSG_META_IMPLIED_WIN_CHANGE))
+	    ;
+	UFCHECK(Win(i, UF_A, MSG_META_IMPLIED_WIN_CHANGE, @UFWinA, wa));
+	UFCHECK(Win(Find(i, UF_A, MSG_META_RAW_UNIV_ENTER), UF_A,
+		    MSG_META_RAW_UNIV_ENTER, @UFWinA, wa));
+	j = Find(i, UF_A, MSG_META_PTR);
+	UFCHECK(Mouse(j, UF_A, MSG_META_PTR, 150, 150, IN));
+	UFCHECK(!Count(UF_B, 0) && Flow()->FI_impliedWin.MG_gWin == wa &&
+		Flow()->FI_impliedMouseGrab.GG_OD == @UFAppA &&
+		Flow()->FI_impliedMouseGrab.GG_geode == ufState.UFS_process);
+	Clear();
+	break;
+    case 3:
+	/* select pressed: A has the mouse */
+	i = Find(0, UF_A, MSG_META_START_SELECT);
+	UFCHECK(Mouse(i, UF_A, MSG_META_START_SELECT, 150, 150,
+		      BI_PRESS | BI_B0_DOWN | ((UIFA_SELECT | UIFA_IN) << 8)));
+	UFCHECK(MouseStatus() == (BI_PRESS | BI_B0_DOWN | (UIFA_SELECT << 8)));
+	UFCHECK(Flow()->FI_activeMouseGrab.GG_OD == @UFAppA &&
+		Flow()->FI_activeMouseFunction == MSG_META_START_SELECT &&
+		Flow()->FI_activeMouseButton == 0);
+	UFCHECK(!@call f::MSG_FLOW_TEST_WIN_INTERACTIBILITY(0, wa));
+	UFCHECK(@call f::MSG_FLOW_TEST_WIN_INTERACTIBILITY(0, wb));
+	Clear();
+	break;
+    case 4:
+	/* dragged into B (the first move is the drag, the next one the
+	 * pointer event): still A's, which hears the mouse is gone; B only
+	 * gets the enter */
+	i = Find(0, UF_A, MSG_META_DRAG_SELECT);
+	UFCHECK(Mouse(i, UF_A, MSG_META_DRAG_SELECT, 350, 150,
+		      BI_B0_DOWN | ((UIFA_SELECT | UIFA_IN) << 8)));
+	UFCHECK(Win(Find(0, UF_A, MSG_META_RAW_UNIV_LEAVE), UF_A,
+		    MSG_META_RAW_UNIV_LEAVE, @UFWinA, wa));
+	UFCHECK(Win(Find(0, UF_A, MSG_META_IMPLIED_WIN_CHANGE), UF_A,
+		    MSG_META_IMPLIED_WIN_CHANGE, 0, 0));
+	UFCHECK(Mouse(Find(0, UF_A, MSG_META_PTR) >= 0
+		      ? (int) (Last(UF_A, MSG_META_PTR) - ufState.UFS_log) : -1,
+		      UF_A, MSG_META_PTR, 352, 150,
+		      BI_B0_DOWN | ((UIFA_SELECT | UIFA_IN) << 8)));
+	UFCHECK(Win(Find(0, UF_B, 0), UF_B, MSG_META_RAW_UNIV_ENTER,
+		    @UFWinB, wb));
+	UFCHECK(Count(UF_B, 0) == 1);
+	UFCHECK(Flow()->FI_impliedWin.MG_gWin == wb &&
+		!Flow()->FI_impliedMouseGrab.GG_OD);
+	Clear();
+	break;
+    case 5:
+	/* released: the function ends, B is the implied geode now */
+	i = Find(0, UF_A, MSG_META_END_SELECT);
+	UFCHECK(Mouse(i, UF_A, MSG_META_END_SELECT, 352, 150, IN));
+	UFCHECK(Win(Find(0, UF_B, MSG_META_IMPLIED_WIN_CHANGE), UF_B,
+		    MSG_META_IMPLIED_WIN_CHANGE, @UFWinB, wb));
+	UFCHECK(!Flow()->FI_activeMouseGrab.GG_OD &&
+		!Flow()->FI_activeMouseFunction && MouseStatus() == 0);
+	Clear();
+	break;
+    case 6:
+	/* <Ctrl> button 2: copy; button 0 meanwhile is "other" */
+	i = Find(0, UF_B, MSG_META_START_MOVE_COPY);
+	UFCHECK(Mouse(i, UF_B, MSG_META_START_MOVE_COPY, 352, 150,
+		      BI_PRESS | BI_B2_DOWN | 2 |
+		      ((UIFA_MOVE_COPY | UIFA_COPY | UIFA_IN) << 8)));
+	i = Find(i, UF_B, MSG_META_START_OTHER);
+	UFCHECK(Mouse(i, UF_B, MSG_META_START_OTHER, 352, 150,
+		      BI_PRESS | BI_B2_DOWN | BI_B0_DOWN |
+		      ((UIFA_MOVE_COPY | UIFA_COPY | UIFA_IN) << 8)));
+	i = Find(i, UF_B, MSG_META_END_OTHER);
+	UFCHECK(Mouse(i, UF_B, MSG_META_END_OTHER, 352, 150,
+		      BI_B2_DOWN | ((UIFA_MOVE_COPY | UIFA_COPY | UIFA_IN) << 8)));
+	i = Find(i, UF_B, MSG_META_END_MOVE_COPY);
+	UFCHECK(Mouse(i, UF_B, MSG_META_END_MOVE_COPY, 352, 150,
+		      2 | ((UIFA_COPY | UIFA_IN) << 8)));
+	UFCHECK(!Count(UF_A, 0) && !Flow()->FI_activeMouseFunction);
+	Clear();
+	break;
+    case 7:
+	/* button 1: features, popup */
+	i = Find(0, UF_B, MSG_META_START_FEATURES);
+	UFCHECK(Mouse(i, UF_B, MSG_META_START_FEATURES, 352, 150,
+		      BI_PRESS | BI_B1_DOWN | 1 |
+		      ((UIFA_FEATURES | UIFA_POPUP | UIFA_IN) << 8)));
+	UFCHECK(Find(i, UF_B, MSG_META_END_FEATURES) > i);
+	Clear();
+	break;
+    case 8:
+	/* a double press in B; the first press in A is none */
+	i = Find(0, UF_B, MSG_META_START_SELECT);
+	UFCHECK(i >= 0 && !(At(i)->UL_state & BI_DOUBLE_PRESS));
+	i = Find(i + 1, UF_B, MSG_META_START_SELECT);
+	UFCHECK(i >= 0 && (At(i)->UL_state & BI_DOUBLE_PRESS));
+	i = Find(0, UF_A, MSG_META_START_SELECT);
+	UFCHECK(Mouse(i, UF_A, MSG_META_START_SELECT, 150, 150,
+		      BI_PRESS | BI_B0_DOWN | ((UIFA_SELECT | UIFA_IN) << 8)));
+	UFCHECK(Find(i, UF_A, MSG_META_END_SELECT) > i);
+	Clear();
+	/* the keyboard to A: its thread runs at PRIORITY_UI */
+	Kbd(@UFAppA, VIFGF_GRAB);
+	UFCHECK(Flow()->FI_activeKbdGrab.KG_OD == @UFAppA);
+	UFCHECK(Prio() == PRIORITY_UI && Flow()->FI_prevPriority ==
+		ufState.UFS_prio);
+	break;
+    case 9:
+	/* the keys came; <Shift> constrained the mouse meanwhile */
+	UFCHECK(Find(0, UF_A, MSG_META_GAINED_KBD_EXCL) == 0);
+	i = Find(0, UF_A, MSG_META_KBD_CHAR);
+	UFCHECK(i >= 0 && At(i)->UL_x == 'a' && At(i)->UL_y == CF_FIRST_PRESS);
+	UFCHECK(Count(UF_A, MSG_META_KBD_CHAR) == 3);
+	j = Find(0, UF_A, MSG_META_PTR);
+	UFCHECK(j >= 0 && (At(j)->UL_state & (UIFA_CONSTRAIN << 8)));
+	UFCHECK(!(MouseStatus() & (UIFA_CONSTRAIN << 8)));
+	Clear();
+	/* forced to B (an object of the same geode here: the priority
+	 * stays) */
+	Kbd(@UFAppB, VIFGF_GRAB | VIFGF_FORCE);
+	UFCHECK(Flow()->FI_activeKbdGrab.KG_OD == @UFAppB);
+	UFCHECK(Prio() == PRIORITY_UI);
+	/* asked for by A: B keeps it; released by A: nothing */
+	Kbd(@UFAppA, VIFGF_GRAB);
+	Kbd(@UFAppA, 0);
+	UFCHECK(Flow()->FI_activeKbdGrab.KG_OD == @UFAppB);
+	/* released by B: nobody has it, the geode's priority as before */
+	Kbd(@UFAppB, 0);
+	UFCHECK(!Flow()->FI_activeKbdGrab.KG_OD);
+	UFCHECK(Prio() == ufState.UFS_prio);
+	break;
+    case 10:
+	UFCHECK(Find(0, UF_A, MSG_META_LOST_KBD_EXCL) >= 0 &&
+		Count(UF_A, 0) == 1);
+	i = Find(0, UF_B, MSG_META_GAINED_KBD_EXCL);
+	UFCHECK(i >= 0 && Find(i, UF_B, MSG_META_LOST_KBD_EXCL) > i &&
+		Count(UF_B, 0) == 2);
+	Clear();
+	/* B system modal: A (under the mouse) may not be used */
+	@call f::MSG_FLOW_SET_MODAL_GEODE(@UFAppB, ufState.UFS_ui);
+	UFCHECK(@call f::MSG_FLOW_GET_MODAL_GEODE(&g) == @UFAppB &&
+		g == ufState.UFS_ui);
+	UFCHECK(@call f::MSG_FLOW_TEST_WIN_INTERACTIBILITY(0, wa));
+	UFCHECK(!@call f::MSG_FLOW_TEST_WIN_INTERACTIBILITY(0, wb));
+	UFCHECK(!Flow()->FI_impliedMouseGrab.GG_OD);
+	break;
+    case 11:
+	/* A heard the mouse left it, then got nothing for the moves and
+	 * the press */
+	UFCHECK(Win(0, UF_A, MSG_META_IMPLIED_WIN_CHANGE, 0, 0));
+	UFCHECK(Count(UF_A, 0) == 1 && !Count(UF_B, 0));
+	Clear();
+	@call f::MSG_FLOW_SET_MODAL_GEODE(0, 0);
+	UFCHECK(!@call f::MSG_FLOW_TEST_WIN_INTERACTIBILITY(0, wa));
+	break;
+    case 12:
+	UFCHECK(Win(0, UF_A, MSG_META_IMPLIED_WIN_CHANGE, @UFWinA, wa));
+	Clear();
+	/* input held up */
+	@call f::MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW();
+	break;
+    case 13:
+	/* nothing came; the moves wait as one */
+	UFCHECK(!ufState.UFS_n);
+	UFCHECK(GeodeInfoQueue(Flow()->FI_holdUpInputQueue) == 3);
+	@call f::MSG_VIS_CONTENT_RESUME_INPUT_FLOW();
+	break;
+    case 14:
+	/* the pointer where it was last, then the click */
+	i = Find(0, UF_A, MSG_META_PTR);
+	UFCHECK(Mouse(i, UF_A, MSG_META_PTR, 172, 172, IN));
+	j = Find(0, UF_A, MSG_META_START_SELECT);
+	UFCHECK(j > i && Count(UF_A, MSG_META_PTR) == 1 &&
+		Mouse(j, UF_A, MSG_META_START_SELECT, 172, 172,
+		      BI_PRESS | BI_B0_DOWN | ((UIFA_SELECT | UIFA_IN) << 8)));
+	UFCHECK(Find(j, UF_A, MSG_META_END_SELECT) > j);
+	UFCHECK(!GeodeInfoQueue(Flow()->FI_holdUpInputQueue));
+	Clear();
+	/* the mouse bumped 5 to the right */
+	@call f::MSG_VIS_VUP_BUMP_MOUSE(5, 0);
+	UFCHECK(Flow()->FI_mouseBump.XYO_x == 5);
+	break;
+    case 15:
+	/* the bump done; the wheel */
+	UFCHECK(Flow()->FI_mouseBump.XYO_x == 0);
+	UFCHECK(Mouse((int) (Last(UF_A, MSG_META_PTR) - ufState.UFS_log),
+		      UF_A, MSG_META_PTR, 177, 172, IN));
+	i = Find(0, UF_A, MSG_META_SCROLL_VERTICAL);
+	UFCHECK(i >= 0 && (sbyte) (At(i)->UL_state & 0xff) == -1 &&
+		(At(i)->UL_state & IN));
+	Clear();
+	/* a notification to the geode with the mouse (nobody has the
+	 * keyboard); the trespassing check to its windows */
+	@call f::MSG_META_NOTIFY(MANUFACTURER_ID_GEOWORKS, GWNT_INK_GESTURE,
+				 7);
+	(void) @call f::MSG_META_ENSURE_MOUSE_NOT_ACTIVELY_TRESPASSING();
+	/* windows that take no ink */
+	@call f::MSG_FLOW_REGISTER_NO_INK_WIN(TRUE, wa);
+	@call f::MSG_FLOW_REGISTER_NO_INK_WIN(TRUE, wb);
+	@call f::MSG_FLOW_REGISTER_NO_INK_WIN(TRUE, wa);
+	UFCHECK(Flow()->FI_numNoInkWin == 2);
+	@call f::MSG_FLOW_REGISTER_NO_INK_WIN(FALSE, wa);
+	UFCHECK(Flow()->FI_numNoInkWin == 1 && Flow()->FI_noInkWin[0] == wb);
+	break;
+    case 16:
+	i = Find(0, UF_A, MSG_META_NOTIFY);
+	UFCHECK(i >= 0 && At(i)->UL_y == GWNT_INK_GESTURE &&
+		At(i)->UL_state == 7);
+	i = Find(0, UF_A, MSG_META_GCN_LIST_SEND);
+	UFCHECK(i >= 0 && At(i)->UL_x ==
+		(sword) MSG_META_ENSURE_MOUSE_NOT_ACTIVELY_TRESPASSING &&
+		At(i)->UL_y == (sword) GAGCNLT_WINDOWS && !At(i)->UL_od);
+	Clear();
+	/* select pressed: ended without its END */
+	UFCHECK(Flow()->FI_activeMouseFunction == MSG_META_START_SELECT);
+	@call f::MSG_VIS_VUP_TERMINATE_ACTIVE_MOUSE_FUNCTION();
+	UFCHECK(!Flow()->FI_activeMouseFunction &&
+		!(MouseStatus() & (UIFA_SELECT << 8)));
+	break;
+    case 17:
+	/* the release is "other" now */
+	UFCHECK(Find(0, UF_A, MSG_META_END_OTHER) >= 0 &&
+		Find(0, UF_A, MSG_META_END_SELECT) < 0);
+	/* the windows' own input objects got nothing */
+	UFCHECK(!Count(UF_WA, 0) && !Count(UF_WB, 0));
+	Clear();
+	ImReleaseInput(f);
+	WinReleaseChange(ufState.UFS_root, f);
+	WinGeodeSetInputObj(ufState.UFS_ui, 0);
+	WinClose(wa);
+	WinClose(wb);
+	@call f::MSG_META_OBJ_FREE();
+	ufState.UFS_flow = 0;
+	break;
+    }
+}
+
+void UFStep(word step)
+{
+    optr p = ConstructOptr(ufState.UFS_process, 0);
+
+    @call p::MSG_UF_STEP(step);
+}

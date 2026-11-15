@@ -106,4 +106,30 @@ void VisSaveOldBounds(optr obj);
  * it is linked to the view), else VUM_MANUAL */
 VisUpdateMode VisContentGetVUM(optr obj);
 
+/* ---------------------------------------------------------------------
+ * User/userMain.goc: the input map (userConstant.def)
+ * ------------------------------------------------------------------- */
+/* a button with exactly these modifiers starts this function */
+typedef struct {
+    byte		BME_button;
+    ShiftState		BME_shiftState;
+    Message		BME_genericMethod;	/* MSG_META_START_* */
+    UIFunctionsActive	BME_preferences;	/* UIFA_PREF_* bits */
+} ButtonMapEntry;
+
+typedef struct {
+    const ButtonMapEntry *IMH_buttonMapTable;
+    word		IMH_buttonMapCount;
+    ShiftState		IMH_constrain1;
+    ShiftState		IMH_constrain2;
+    UIButtonFlags	IMH_flags;
+} InputMapHeader;
+
+extern InputMapHeader uiInputMap;
+extern UIButtonFlags uiButtonFlags;
+extern Boolean uiFloatingKbdEnabled;
+/* SetDefaultInputMap: the map for the mouse's buttons, the [input]
+ * flags */
+void UserSetDefaultInputMap(void);
+
 #endif

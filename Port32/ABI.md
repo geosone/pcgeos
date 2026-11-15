@@ -1392,7 +1392,9 @@ contexts (`ghal_ctx`).
   by priority. Timeouts are in ticks (1/60 s) of the GHAL clock;
   timeout 0 does not block.
 - **`ThreadGetInfo` returns a `dword`** under `GEOS_PORT32` (thread and
-  queue handles are 32 bits).
+  queue handles are 32 bits). `TGIT_PRIORITY_AND_USAGE` gives the base
+  priority and the recent CPU usage, as the asm; the current priority
+  is their sum (at most `PRIORITY_IDLE`).
 - **Thread-private words** (`Thread/threadPrivate.c`): `ThreadPrivAlloc`
   gives a geode a range of the 16 words every thread has, first fit.
   The words of an exiting geode are freed. The asm read them at
@@ -2800,8 +2802,10 @@ monitors and send to it. It starts when the drivers are loaded. Its
 - What goes out are `MSG_META_KBD_CHAR` (119), `MSG_META_MOUSE_BUTTON`
   (117), `_PTR` (118), `_DRAG` (123), `_WHEEL_VERTICAL` (124) and
   `MSG_META_LEAVE_CONSTRAIN` (22). Their parameters are goc's three
-  words `cx`, `dx` and `bp`. ctest `kernel.obj` checks all these
-  numbers against goc.
+  words `cx`, `dx` and `bp`. The wheel's prototype returns
+  `MouseReturnParams`, so its parameters start with that pointer:
+  `ImWheelParams` (`im.h`), the pointer NULL. ctest `kernel.obj` checks
+  all these numbers against goc.
 
 **The monitor chain** (`IM/imMonitors.c`). Every event goes through the
 monitors in the order of their levels:
@@ -4704,8 +4708,70 @@ visual classes of `Library/User/Vis`:
     inputState)` gives the passive message of the active button
     function; `FlowCheckKbdShortcut` asks the keyboard driver
     (`DR_KBD_CHECK_SHORTCUT`, section 7.3) and returns the entry's
-    offset in the table or -1. `FlowGetUIButtonFlags` comes with the
-    input map.
+    offset in the table or -1. `FlowGetUIButtonFlags` returns the
+    input map's flags.
+- **The input map** (`User/userMain.goc`, after `userMain.asm`): the
+  button maps of one, two and three buttons (which function a button
+  starts with which modifiers) and the `UIButtonFlags` of `[input]`
+  (`clickToType`, `selectRaises`, ..., `keyboardOnly`, by default set
+  without a mouse driver or if the driver says so, not in pen mode;
+  `floatingKbd`). Port32: the map is a structure of the library, not a
+  block; the library entry (`User/userLibrary.goc`, `UILibraryEntry`)
+  sets it up on `LCT_ATTACH` until the UI's process does.
+- **`FlowClass`** (`User/userFlowInput.goc`, after `userFlowInput.asm`;
+  `CInclude/Internal/flowC.goh`): the one flow object. It gets the input
+  manager's events (`ImGrabInput`) and the window system's pointer
+  messages (`WinGrabChange`).
+  - The mouse: a button press becomes the UI function of the input map
+    (`MSG_META_START_SELECT`, `_MOVE_COPY`, `_FEATURES`, `_OTHER` with
+    the `UIFunctionsActive` bits in the high byte of the state); the
+    geode under the pointer (the implied grab) gets it, or the one that
+    pressed it until all buttons are up (the active grab); drags and
+    pointer events alike, with `UIFA_IN` when the pointer is in a window
+    of that geode. A press may only go to a geode that is allowed
+    (`MSG_FLOW_TEST_WIN_INTERACTIBILITY`: the active grab's, the system
+    modal geode's). `<Shift>` (the map's constrain keys) sets
+    `UIFA_CONSTRAIN`. The wheel becomes `MSG_META_SCROLL_VERTICAL`.
+    `MSG_VIS_VUP_GET_MOUSE_STATUS`, `_TERMINATE_ACTIVE_MOUSE_FUNCTION`,
+    `_BUMP_MOUSE` (`ImBumpMouse`, the next pointer event moved),
+    `MSG_FLOW_GRAB_MOUSE`/`_RELEASE_MOUSE`/`_RELEASE_MOUSE_IF_GRABBED`.
+  - The windows: `MSG_META_WIN_CHANGE` is acknowledged
+    (`WinChangeAck`); raw universe enters and leaves go to the input
+    object (`WinGeodeSetInputObj`) of the window's owner; the implied
+    window changes the implied geode, which hears it with
+    `MSG_META_IMPLIED_WIN_CHANGE`; the geode with the mouse is the
+    window system's active geode (`WinSysSetActiveGeode`).
+  - The keyboard: one active grab (`MSG_VIS_VUP_ALTER_INPUT_FLOW` with
+    `VIFGF_KBD`) through the Flow routines; keys go to it, repeats may
+    be dropped when the queue is full. The thread of the geode with the
+    keyboard or the mouse runs at `PRIORITY_UI`, as before afterwards.
+  - Input held up (`MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW`) waits in a
+    queue of the flow object, pointer events combined, and goes to the
+    front of the thread's queue when let go.
+  - `MSG_FLOW_SET_MODAL_GEODE`/`_GET_MODAL_GEODE`,
+    `MSG_FLOW_SET_SCREEN` (the video driver of the pointer's screen;
+    the pointer image updated and shown),
+    `MSG_FLOW_REGISTER_NO_INK_WIN`,
+    `MSG_META_ENSURE_MOUSE_NOT_ACTIVELY_TRESPASSING` (to the
+    `GAGCNLT_WINDOWS` list of the geode with the mouse), notifications
+    to the geode with the keyboard, else the mouse.
+  - Port32:
+    - the window system's pointer messages have the parameters it sends
+      (`WinChangeParams`, `WinPtrEventParams`): goc aliases
+      `MSG_META_P32_WIN_CHANGE`, `_RAW_UNIV_ENTER`, `_RAW_UNIV_LEAVE`
+      in `flowC.goh`;
+    - a mouse event's `MouseReturnParams` pointer is NULL: the events
+      are sent, not called;
+    - pointer events are combined with the last one sent to the same
+      object (`FI_lastPtrDest`; the asm passed a routine with
+      `MF_CUSTOM`);
+    - the window of a geode has to be opened with its owner: the C
+      kernel's `MemAlloc` gives blocks to the kernel.
+  - Not yet: ink (`MSG_FLOW_INK_REPLY`, the press and hold timer), the
+    quick transfer's cursor (`UpdateMoveCopy`), the sound for a press
+    that is not allowed, the duplicate check of hard icons, and what
+    needs `GenSystemClass`: raising the window clicked, the default
+    field, the application object as fallback.
 - **`VisContentClass`** (`Vis/visContent.goc`, after
   `visContentClass.asm` and `visContentCommon.asm`): the top of a tree
   shown in a view's window, and its input node.
@@ -4788,6 +4854,15 @@ visual classes of `Library/User/Vis`:
   passive grabs with a replay, large and window coordinates, keys to
   focus and keyboard grab, classed events, and input held up and let go
   again (pointer events combined).
+- **Test.** ctest `library.ui.flow`: the process geode
+  `Port32/Tests/Geode/uiflow.goc` makes the flow object and opens two
+  windows, A its own and B the ui library's, with an input object each.
+  The test sends the input manager pointer moves, buttons, keys and the
+  wheel: the implied geode as the pointer moves, a drag from A into B
+  (still A's), the functions of all three buttons with modifiers, a
+  double press, the keyboard grab with the thread's priority, `<Shift>`
+  constraining, a system modal geode, input held up and let go, the
+  bump, notifications, no-ink windows and an ended function.
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 

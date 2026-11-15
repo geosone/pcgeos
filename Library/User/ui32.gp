@@ -11,6 +11,7 @@
 ##############################################################################
 name ui.lib
 type	library, single
+entry	UILibraryEntry
 library	geos
 longname	"Generic User Interface"
 tokenchars	"UI00"
@@ -20,6 +21,7 @@ export VisEmptyClass
 export VisClass
 export VisCompClass
 export VisContentClass
+export FlowClass
 
 # the Vis routines in C (visC.goh, GEOS_PORT32)
 export VisCheckIfVisGrown
@@ -83,3 +85,4 @@ export MetaReleaseModelExclLow
 export MetaReleaseFTExclLow
 export FlowTranslatePassiveButton
 export FlowCheckKbdShortcut
+export FlowGetUIButtonFlags

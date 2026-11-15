@@ -1,0 +1,102 @@
+/*
+ * flowC.goh -- FlowClass, the UI's flow object, in C (Port32; the asm
+ * definition is Include/Internal/flowC.def).
+ *
+ * The one flow object of the system gets the input manager's events
+ * (ImGrabInput) and the window system's pointer messages (WinGrabChange)
+ * and passes them on as the UI's messages: the mouse to the geode the
+ * mouse is over or the one that has it grabbed, keys to the geode with
+ * the keyboard grab.  Port32/ABI.md section 13x describes it.
+ */
+#ifndef __FLOWC_GOH
+#define __FLOWC_GOH
+
+@include <ui.goh>
+@include <Objects/vCntC.goh>
+
+@deflib ui
+
+/* a geode's input object as a grab (uiInputC.def) */
+typedef struct {
+    optr		GG_OD;
+    GeodeHandle		GG_geode;
+} GeodeGrab;
+
+typedef ByteFlags FlowFlags;
+#define FF_IGNORE_PTR_EVENTS_WHEN_USING_IMPLIED_GRAB	0x80
+#define FF_WIN_CHANGE_SINCE_LAST_MSG_META_BUTTON	0x40
+#define FF_PROCESSING_INK				0x20
+#define FF_LAST_PRESS_WAS_NOT_INK			0x10
+#define FF_HAS_INK_OVERRIDE				0x08
+#define FF_AWAITING_PRESS_AND_HOLD_TIMER		0x04
+#define FF_MOUSE_DOWN					0x02
+
+#define MAX_NO_INK_WIN	16
+
+/*
+ * The window system's pointer messages with the parameters it sends
+ * (win.h: WinChangeParams, WinPtrEventParams); the prototypes of
+ * winC.goh have none.
+ */
+@alias (MSG_META_WIN_CHANGE) void MSG_META_P32_WIN_CHANGE(sword x, sword y,
+							  WindowHandle tree);
+@alias (MSG_META_RAW_UNIV_ENTER) void MSG_META_P32_RAW_UNIV_ENTER(
+				optr inputObj, WindowHandle win);
+@alias (MSG_META_RAW_UNIV_LEAVE) void MSG_META_P32_RAW_UNIV_LEAVE(
+				optr inputObj, WindowHandle win);
+
+@class FlowClass, MetaClass;
+@uses VisContentClass;
+
+/* the video driver of the screen the pointer is on, the field on it */
+@message void MSG_FLOW_SET_SCREEN(void *videoStrategy, optr field);
+/* ink: not in Port32 yet (the timeout is private) */
+@message void MSG_FLOW_INK_REPLY(word inkReturnValue, MemHandle destInfo);
+@message void MSG_FLOW_INK_PRESS_AND_HOLD_TIMEOUT(word timerID);
+/* the mouse released if obj has it grabbed */
+@message void MSG_FLOW_RELEASE_MOUSE_IF_GRABBED(optr obj);
+/* the mouse grabbed for the geode it is over, released again */
+@message void MSG_FLOW_GRAB_MOUSE();
+@message void MSG_FLOW_RELEASE_MOUSE();
+@message void MSG_FLOW_ALLOW_GLOBAL_TRANSFER();
+/* the geode of the top system modal window (inputObj 0: none) */
+@message void MSG_FLOW_SET_MODAL_GEODE(optr inputObj, GeodeHandle geode);
+/* TRUE if the mouse may NOT interact with the window (the asm's carry) */
+@message Boolean MSG_FLOW_TEST_WIN_INTERACTIBILITY(optr inputObj,
+						   WindowHandle win);
+@message optr MSG_FLOW_GET_MODAL_GEODE(GeodeHandle *geode);
+/* add (TRUE) or remove a window that never takes ink */
+@message void MSG_FLOW_REGISTER_NO_INK_WIN(Boolean add, WindowHandle win);
+
+    @instance KbdGrab		FI_activeKbdGrab = {0, 0};
+    @instance byte		FI_prevPriority = 0;
+    @instance byte		FI_prevUIPriority = 0;
+    @instance MouseGrab		FI_impliedWin = {0, 0};
+    @instance GeodeGrab		FI_impliedMouseGrab = {0, 0};
+    @instance GeodeGrab		FI_activeMouseGrab = {0, 0};
+    @instance GeodeGrab		FI_modalGeode = {0, 0};
+    @instance FlowFlags		FI_flowFlags = 0;
+    @instance QueueHandle	FI_holdUpInputQueue = 0;
+    @instance HoldUpInputFlags	FI_holdUpInputFlags = 0;
+    @instance word		FI_holdUpInputCount = 0;
+    @instance XYOffset		FI_mouseBump = {0, 0};
+    /* the button of the active function (-1: none) */
+    @instance byte		FI_activeMouseButton = 0xff;
+    /* MSG_META_START_SELECT ... of the function in progress, 0: none */
+    @instance Message		FI_activeMouseFunction = 0;
+    @instance Message		FI_activeMouseMethod = 0;
+    @instance ButtonInfo	FI_activeMouseButtonInfo = 0;
+    @instance UIFunctionsActive	FI_activeMouseUIFunctionsActive = 0;
+    @instance void		*FI_curVideoStrategy = 0;
+    @instance word		FI_numNoInkWin = 0;
+    @instance WindowHandle	FI_noInkWin[MAX_NO_INK_WIN];
+    /* Port32: the last MSG_META_PTR sent and to whom, to combine the
+     * next one with it (the asm's MF_CUSTOM CombineMouseEvent) */
+    @instance optr		FI_lastPtrDest = 0;
+    @instance word		FI_lastPtrState = 0;
+
+@endc
+
+@endlib
+
+#endif

@@ -1,0 +1,18 @@
+/*
+ * userLibrary.goc -- the UI library's entry (after userLibrary.asm,
+ * whose LibraryEntry is not assembled).
+ *
+ * Port32: until the UI's process starts the system (UserAttach in
+ * userMain.asm), the library sets up the input map when it is loaded,
+ * which the asm did first thing in UserAttach.
+ */
+@include "uiInt.goh"
+#include <library.h>
+
+Boolean UILibraryEntry(LibraryCallType ty, GeodeHandle client)
+{
+    (void) client;
+    if (ty == LCT_ATTACH)
+	UserSetDefaultInputMap();
+    return FALSE;
+}

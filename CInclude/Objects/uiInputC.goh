@@ -215,6 +215,10 @@ typedef struct {
     MetaAlterFTVMCExclFlags	FTVMC_flags;
 } FTVMCGrab;
 
+/* the UIButtonFlags of the input map ([input] in the .ini file) */
+extern UIButtonFlags
+    _pascal FlowGetUIButtonFlags(void);
+
 extern word
     _pascal FlowCheckKbdShortcut(KeyboardShortcut *shortcutTable,
 				 word numEntriesInTable,

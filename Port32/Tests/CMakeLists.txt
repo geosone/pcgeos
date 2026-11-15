@@ -312,6 +312,14 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     add_dependencies(test_ui_vis geode_ui geode_uivis)
     target_link_libraries(test_ui_vis PRIVATE geos_kernel)
     add_test(NAME library.ui.vis COMMAND test_ui_vis)
+
+    # the flow object between the input manager and two geodes
+    geos_geode(uiflow GP Geode/uiflow.gp GOC Geode/uiflow.goc)
+    geos_embed(_uiflow_c ${uiflow_GEO} uiflow_geode)
+    add_executable(test_ui_flow test_ui_flow.c ${_ui_c} ${_uiflow_c})
+    add_dependencies(test_ui_flow geode_ui geode_uiflow)
+    target_link_libraries(test_ui_flow PRIVATE geos_kernel)
+    add_test(NAME library.ui.flow COMMAND test_ui_flow)
   endif()
 
   # starting the kernel: drives, [paths], the UI and a process from files

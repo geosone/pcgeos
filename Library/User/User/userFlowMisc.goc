@@ -1,8 +1,5 @@
 /*
  * userFlowMisc.goc -- small Flow routines (after userFlowMisc.asm).
- *
- * Port32, not yet: FlowGetUIButtonFlags (the flags come from the input
- * map that the UI sets up at its start, with FlowClass).
  */
 @include "uiInt.goh"
 #include <string.h>
@@ -63,4 +60,10 @@ word FlowCheckKbdShortcut(KeyboardShortcut *shortcutTable,
 	    DR_KBD_CHECK_SHORTCUT, &r))
 	return (word) -1;
     return (word) r.DR_si;
+}
+
+/* FlowGetUIButtonFlags: the UIButtonFlags of the input map */
+UIButtonFlags FlowGetUIButtonFlags(void)
+{
+    return uiButtonFlags;
 }

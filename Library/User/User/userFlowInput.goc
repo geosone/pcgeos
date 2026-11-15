@@ -1,0 +1,841 @@
+/*
+ * userFlowInput.goc -- FlowClass, the UI's flow object (after userFlow.asm
+ * and userFlowInput.asm).
+ *
+ * The flow object gets what the input manager sends its output
+ * (MSG_META_MOUSE_BUTTON, _PTR, _DRAG, _WHEEL_VERTICAL, MSG_META_KBD_CHAR)
+ * and the window system's pointer messages (MSG_META_WIN_CHANGE, the
+ * implied window, entering and leaving windows).  It keeps:
+ *   - the implied window (the one under the mouse) and the geode it
+ *     belongs to, if the mouse may interact with it: not while a
+ *     system modal geode or a geode that has the mouse grabbed is
+ *     another one (MSG_FLOW_TEST_WIN_INTERACTIBILITY);
+ *   - the active mouse grab: the geode the mouse was pressed in, until
+ *     all buttons are up;
+ *   - the UI function a button started (select, move/copy, features,
+ *     or "other"), by the input map (userMain.goc);
+ *   - the keyboard grab, whose geode's thread runs at PRIORITY_UI;
+ *   - the input held up in a queue while asked to.
+ * Mouse events go to the geode's input object as MSG_META_PTR,
+ * MSG_META_START_SELECT and so on, keys to the keyboard grab.
+ *
+ * Port32 (Port32/ABI.md section 13x):
+ *   - the mouse messages carry the pointer to their MouseReturnParams
+ *     first (goc's parameters); the flow object sends NULL, as it never
+ *     waited for the answer;
+ *   - pointer events combined in the hold-up queue use
+ *     QueuePeekLastMessage and ObjSetMessageParams; one sent to a geode
+ *     replaces the last one in its queue (MF_REPLACE) if that is the
+ *     last one the flow object sent, with the same button state (the
+ *     asm's CombineMouseEvent, MF_CUSTOM);
+ *   - the window system's messages have the parameters of win.h
+ *     (MSG_META_P32_WIN_CHANGE and the other aliases of flowC.goh);
+ *   - priorities: a geode has no second (UI) thread yet; its first
+ *     thread is only touched if it is a process;
+ *   - the hold-up queue is freed with the object;
+ *   - not yet: ink (pen mode, MSG_FLOW_INK_REPLY and the press-and-hold
+ *     timer; ink notifications go to the current geode like the
+ *     others), the quick transfer's move/copy keys (UpdateMoveCopy),
+ *     UserStandardSound for input nobody takes, the hard icon events'
+ *     duplicate check (MF_CUSTOM), and what needs GenSystemClass: the
+ *     geode clicked in brought to the top (DefaultBehaviorOnMousePress
+ *     only grabs the mouse), the default field of MSG_FLOW_SET_SCREEN,
+ *     notifications nobody takes sent to the UI's application object.
+ */
+@include "uiInt.goh"
+@include <Internal/flowC.goh>
+#include <string.h>
+#include <thread.h>
+#include <win.h>
+#include <geoworks.h>
+#include <geosdriver.h>
+#include <Internal/im.h>
+#include <Internal/videoDr.h>
+
+@classdecl FlowClass, neverSaved;
+
+#define FlowPart(o)	((FlowInstance *) LMemDeref(o))
+#define FLOW_OFFSET(f)	word_offsetof(FlowInstance, f)
+
+/* the input manager's three words (cx, dx, bp) */
+typedef struct {
+    word	FIP_cx;
+    word	FIP_dx;
+    word	FIP_bp;
+} FlowInputParams;
+
+#define BUTTONS_DOWN	(BI_B3_DOWN | BI_B2_DOWN | BI_B1_DOWN | BI_B0_DOWN)
+
+/* the START, END and DRAG messages follow each other in this order */
+typedef char FlowMouseOrder[
+    (MSG_META_END_SELECT == MSG_META_START_SELECT + 1 &&
+     MSG_META_START_OTHER == MSG_META_START_SELECT + 6 &&
+     MSG_META_DRAG_OTHER == MSG_META_DRAG_SELECT + 3) ? 1 : -1];
+
+static void UpdateImpliedMouseGrab(optr oself);
+
+/* ---------------------------------------------------------------------
+ * Creation and the end
+ * ------------------------------------------------------------------- */
+
+/* FlowInitialize: no superclass (the end of the master class) */
+@method FlowClass, MSG_META_INITIALIZE
+{
+    pself->FI_activeMouseButton = 0xff;
+    pself->FI_curVideoStrategy = NULL;
+    pself->FI_holdUpInputQueue = GeodeAllocQueue();
+}
+
+@method FlowClass, MSG_META_FINAL_OBJ_FREE
+{
+    QueueHandle q = pself->FI_holdUpInputQueue;
+
+    pself->FI_holdUpInputQueue = 0;
+    if (q)
+	GeodeFreeQueue(q);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The geode of a window
+ * ------------------------------------------------------------------- */
+
+/* GetOwningInputObj: the input object of the geode owning the window
+ * (*geode that geode); 0 without a window */
+static optr OwningInputObj(WindowHandle win, GeodeHandle *geode)
+{
+    GeodeHandle g;
+
+    *geode = 0;
+    if (!win)
+	return 0;
+    g = MemOwner((MemHandle) win);
+    *geode = g;
+    return WinGeodeGetInputObj(g);
+}
+
+/* ---------------------------------------------------------------------
+ * Input held up
+ * ------------------------------------------------------------------- */
+
+/* CheckOnInputHoldUpLow: TRUE if the event went to the hold-up queue
+ * (recorded again for this object).  A pointer event replaces the last
+ * one waiting if that is one with the same button state
+ * (CombineMouseEvent). */
+static Boolean HeldUp(optr oself, Message msg, const void *params,
+		      dword size)
+{
+    FlowInstance *f = FlowPart(oself);
+    QueueHandle q = f->FI_holdUpInputQueue;
+    EventHandle ev = 0;
+
+    if ((f->FI_holdUpInputFlags & HUIF_HOLD_UP_MODE_DISABLED) ||
+	!f->FI_holdUpInputCount || !q)
+	return FALSE;
+    if (msg == MSG_META_MOUSE_PTR) {
+	EventHandle last = QueuePeekLastMessage(q);
+	optr dest;
+	dword lsize;
+	const FlowInputParams *lp;
+
+	if (last && ObjGetMessageInfo(last, &dest) == MSG_META_MOUSE_PTR) {
+	    lp = ObjGetMessageParams(last, &lsize);
+	    if (lsize == size && lp->FIP_bp ==
+		((const FlowInputParams *) params)->FIP_bp &&
+		ObjSetMessageParams(last, params, size))
+		return TRUE;
+	}
+    }
+    CObjMessageP(MF_RECORD, oself, msg, params, size, &ev, sizeof(ev));
+    QueuePostMessage(q, ev, 0);
+    return TRUE;
+}
+
+/* FlowFlushHoldUpInputQueue: what waits goes to the front of this
+ * thread's queue, in order (unless input is held up again) */
+static void FlushHoldUp(optr oself)
+{
+    FlowInstance *f = FlowPart(oself);
+
+    if (!(f->FI_holdUpInputFlags & HUIF_HOLD_UP_MODE_DISABLED) &&
+	f->FI_holdUpInputCount)
+	return;
+    if (f->FI_holdUpInputQueue)
+	GeodeFlushQueue(f->FI_holdUpInputQueue,
+			(QueueHandle) ThreadGetInfo(0, TGIT_QUEUE_HANDLE), 0,
+			MF_INSERT_AT_FRONT);
+}
+
+/* FlowDisableHoldUpInput: input flows whatever the count (a system
+ * modal box is up) */
+@method FlowClass, MSG_VIS_CONTENT_DISABLE_HOLD_UP
+{
+    pself->FI_holdUpInputFlags |= HUIF_HOLD_UP_MODE_DISABLED;
+    FlushHoldUp(oself);
+}
+
+@method FlowClass, MSG_VIS_CONTENT_ENABLE_HOLD_UP
+{
+    pself->FI_holdUpInputFlags &= ~HUIF_HOLD_UP_MODE_DISABLED;
+}
+
+@method FlowClass, MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW
+{
+    pself->FI_holdUpInputCount++;
+}
+
+@method FlowClass, MSG_VIS_CONTENT_RESUME_INPUT_FLOW
+{
+    if (!pself->FI_holdUpInputCount)
+	return;			/* an EC error in the asm */
+    if (!--pself->FI_holdUpInputCount)
+	FlushHoldUp(oself);
+}
+
+/* FlowObjFlushInputQueue: behind the input that is held up */
+@method FlowClass, MSG_META_OBJ_FLUSH_INPUT_QUEUE
+{
+    struct { EventHandle ev; ObjFlushInputQueueNextStop next;
+	     MemHandle block; } p;
+
+    p.ev = event;
+    p.next = nextStop;
+    p.block = objBlock;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Mouse events to the geodes
+ * ------------------------------------------------------------------- */
+
+/* AdjustMousePosForBump */
+static void AdjustForBump(optr oself, sword *x, sword *y)
+{
+    FlowInstance *f = FlowPart(oself);
+
+    *x = (sword) (*x + f->FI_mouseBump.XYO_x);
+    *y = (sword) (*y + f->FI_mouseBump.XYO_y);
+}
+
+/* UpdateBPHighWithFunctionsActive */
+static word WithFunctionsActive(optr oself, word state)
+{
+    return (word) ((state & 0xff) |
+		   (FlowPart(oself)->FI_activeMouseUIFunctionsActive << 8));
+}
+
+/* SendMouseToActiveOrImpliedGrab: to the geode that has the mouse
+ * grabbed, else the one the mouse is over; UIFA_IN always set */
+static void SendMouse(optr oself, Message msg, sword x, sword y, word state)
+{
+    FlowInstance *f = FlowPart(oself);
+    optr dest = f->FI_activeMouseGrab.GG_OD ? f->FI_activeMouseGrab.GG_OD
+					    : f->FI_impliedMouseGrab.GG_OD;
+    VisMouseParams p;
+    word mf = MF_FORCE_QUEUE;
+
+    state |= UIFA_IN << 8;
+    if (!dest)
+	return;		/* UserStandardSound(SST_NO_INPUT) on a press */
+    p.VMP_ret = NULL;
+    p.VMP_x = x;
+    p.VMP_y = y;
+    p.VMP_inputState = state;
+    if (msg == MSG_META_PTR) {
+	if (f->FI_lastPtrDest == dest && f->FI_lastPtrState == state)
+	    mf |= MF_CHECK_DUPLICATE | MF_REPLACE | MF_CHECK_LAST_ONLY;
+	f->FI_lastPtrDest = dest;
+	f->FI_lastPtrState = state;
+    } else
+	f->FI_lastPtrDest = 0;
+    CObjMessageP(mf, dest, msg, &p, sizeof(p), NULL, 0);
+}
+
+/* FlowGetActiveOrImpliedMouseGrab */
+static optr ActiveOrImplied(optr oself)
+{
+    FlowInstance *f = FlowPart(oself);
+
+    return f->FI_activeMouseGrab.GG_OD ? f->FI_activeMouseGrab.GG_OD
+				       : f->FI_impliedMouseGrab.GG_OD;
+}
+
+/* TranslateButton (of MSG_META_MOUSE_BUTTON): the function a press
+ * starts by the input map (*prefs its preferences), or the END of the
+ * one a release ends; OTHER for a button that is not the function's or
+ * a press while one is active */
+static Message TranslateButton(optr oself, word state,
+			       UIFunctionsActive *prefs)
+{
+    FlowInstance *f = FlowPart(oself);
+    byte button = (byte) (state & BI_BUTTON);
+    word i;
+
+    *prefs = 0;
+    if (state & BI_PRESS) {
+	if (f->FI_activeMouseFunction)
+	    return MSG_META_START_OTHER;
+	for (i = 0; i < uiInputMap.IMH_buttonMapCount; i++) {
+	    const ButtonMapEntry *e = &uiInputMap.IMH_buttonMapTable[i];
+	    if (e->BME_button == button &&
+		e->BME_shiftState == (ShiftState) (state >> 8)) {
+		*prefs = e->BME_preferences;
+		return e->BME_genericMethod;
+	    }
+	}
+	return MSG_META_START_OTHER;
+    }
+    if (button == f->FI_activeMouseButton && f->FI_activeMouseFunction)
+	return (Message) (f->FI_activeMouseFunction + 1);
+    return MSG_META_END_OTHER;
+}
+
+/* activeFunctionMasks: by (message - MSG_META_START_SELECT) / 2 */
+static const UIFunctionsActive activeFunctionMasks[4] = {
+    UIFA_SELECT, UIFA_MOVE_COPY, UIFA_FEATURES, 0
+};
+
+/* UpdateFunctionsActive: the message of the button event, the active
+ * function and UIFunctionsActive updated; the state returned has the
+ * ButtonInfo and the UIFunctionsActive */
+static word UpdateFunctionsActive(optr oself, word state)
+{
+    UIFunctionsActive prefs;
+    Message msg = TranslateButton(oself, state, &prefs);
+    word n = (word) (msg - MSG_META_START_SELECT);
+    word mask = (word) (activeFunctionMasks[(n >> 1) & 3] << 8);
+    FlowInstance *f = FlowPart(oself);
+
+    state = WithFunctionsActive(oself, state);
+    if (!(n & 1)) {
+	state |= mask;
+	if (msg != MSG_META_START_OTHER) {
+	    /* a function starts: its preferences, its button */
+	    state &= (word) ~((UIFA_PREF_A | UIFA_PREF_B | UIFA_PREF_C) << 8);
+	    state |= (word) (prefs << 8);
+	    f->FI_activeMouseButton = (byte) (state & BI_BUTTON);
+	    f->FI_activeMouseFunction = msg;
+	}
+    } else {
+	state &= (word) ~mask;
+	if (msg != MSG_META_END_OTHER) {
+	    f->FI_activeMouseButton = 0xff;
+	    f->FI_activeMouseFunction = 0;
+	}
+    }
+    f->FI_activeMouseButtonInfo = (ButtonInfo) state;
+    f->FI_activeMouseUIFunctionsActive = (UIFunctionsActive) (state >> 8);
+    f->FI_activeMouseMethod = msg;
+    return state;
+}
+
+/* CheckForFlowGrabMouse: the first button down grabs the mouse for the
+ * geode it is over (DefaultBehaviorOnMousePress; raising the geode
+ * clicked in needs GenSystemClass) */
+static void CheckForGrabMouse(optr oself, word state)
+{
+    FlowInstance *f = FlowPart(oself);
+
+    if (!(state & BUTTONS_DOWN) || (f->FI_flowFlags & FF_MOUSE_DOWN))
+	return;
+    f->FI_flowFlags |= FF_MOUSE_DOWN;
+    @call oself::MSG_FLOW_GRAB_MOUSE();
+}
+
+/* CheckForFlowReleaseMouse: the last button up releases it */
+static void CheckForReleaseMouse(optr oself, word state)
+{
+    FlowInstance *f = FlowPart(oself);
+
+    if ((state & BUTTONS_DOWN) || !(f->FI_flowFlags & FF_MOUSE_DOWN))
+	return;
+    f->FI_flowFlags &= ~FF_MOUSE_DOWN;
+    @call oself::MSG_FLOW_RELEASE_MOUSE();
+}
+
+/* FlowButton */
+@method FlowClass, MSG_META_MOUSE_BUTTON
+{
+    FlowInputParams p;
+    word state = inputState;
+    sword x = (sword) xPosition, y = (sword) yPosition;
+
+    if (pself->FI_flowFlags & FF_PROCESSING_INK)
+	return;
+    p.FIP_cx = xPosition;
+    p.FIP_dx = yPosition;
+    p.FIP_bp = inputState;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    CheckForGrabMouse(oself, state);
+    pself = FlowPart(oself);
+    if ((state & BI_PRESS) &&
+	(pself->FI_flowFlags & FF_WIN_CHANGE_SINCE_LAST_MSG_META_BUTTON)) {
+	/* the first press in another window is no double press */
+	pself->FI_flowFlags &= ~FF_WIN_CHANGE_SINCE_LAST_MSG_META_BUTTON;
+	state &= ~BI_DOUBLE_PRESS;
+    }
+    state = UpdateFunctionsActive(oself, state);
+    AdjustForBump(oself, &x, &y);
+    SendMouse(oself, FlowPart(oself)->FI_activeMouseMethod, x, y, state);
+    CheckForReleaseMouse(oself, state);
+}
+
+/* FlowPtr */
+@method FlowClass, MSG_META_MOUSE_PTR
+{
+    FlowInputParams p;
+    sword x = (sword) xPosition, y = (sword) yPosition;
+
+    if (pself->FI_flowFlags & FF_PROCESSING_INK)
+	return;
+    p.FIP_cx = xPosition;
+    p.FIP_dx = yPosition;
+    p.FIP_bp = inputState;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    AdjustForBump(oself, &x, &y);
+    SendMouse(oself, MSG_META_PTR, x, y,
+	      WithFunctionsActive(oself, inputState));
+}
+
+/* FlowDrag: the DRAG message of the active function if its button
+ * drags, else MSG_META_DRAG_OTHER */
+@method FlowClass, MSG_META_MOUSE_DRAG
+{
+    FlowInputParams p;
+    sword x = (sword) xPosition, y = (sword) yPosition;
+    Message fn;
+
+    if (pself->FI_flowFlags & FF_PROCESSING_INK)
+	return;
+    p.FIP_cx = xPosition;
+    p.FIP_dx = yPosition;
+    p.FIP_bp = inputState;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    AdjustForBump(oself, &x, &y);
+    pself = FlowPart(oself);
+    fn = ((inputState & BI_BUTTON) == pself->FI_activeMouseButton &&
+	  pself->FI_activeMouseFunction) ? pself->FI_activeMouseFunction
+					 : MSG_META_START_OTHER;
+    SendMouse(oself, (Message) ((fn - MSG_META_START_SELECT) / 2 +
+				MSG_META_DRAG_SELECT),
+	      x, y, WithFunctionsActive(oself, inputState));
+}
+
+/* FlowWheel: as MSG_META_SCROLL_VERTICAL, the wheel and the shift state
+ * as they came */
+@method FlowClass, MSG_META_MOUSE_WHEEL_VERTICAL
+{
+    (void) retVal;
+    SendMouse(oself, MSG_META_SCROLL_VERTICAL, (sword) xPosition,
+	      (sword) yPosition, inputState);
+}
+
+/* FlowVupGetMouseStatus: ButtonInfo, UIFunctionsActive above it */
+@method FlowClass, MSG_VIS_VUP_GET_MOUSE_STATUS
+{
+    return (word) (pself->FI_activeMouseButtonInfo |
+		   (pself->FI_activeMouseUIFunctionsActive << 8));
+}
+
+/* FlowTerminateActiveMouseFunction: the function ends without its END
+ * message */
+@method FlowClass, MSG_VIS_VUP_TERMINATE_ACTIVE_MOUSE_FUNCTION
+{
+    Message fn = pself->FI_activeMouseFunction;
+
+    if (fn != MSG_META_START_SELECT && fn != MSG_META_START_MOVE_COPY &&
+	fn != MSG_META_START_FEATURES)
+	return;
+    pself->FI_activeMouseButton = 0xff;
+    pself->FI_activeMouseFunction = 0;
+    pself->FI_activeMouseUIFunctionsActive &=
+	~(UIFA_SELECT | UIFA_MOVE_COPY | UIFA_FEATURES);
+}
+
+/* FlowVupBumpMouse: events coming before the notification are moved by
+ * the bump (the input manager's position is moved at once) */
+@method FlowClass, MSG_VIS_VUP_BUMP_MOUSE
+{
+    pself->FI_mouseBump.XYO_x = (sword) (pself->FI_mouseBump.XYO_x + xBump);
+    pself->FI_mouseBump.XYO_y = (sword) (pself->FI_mouseBump.XYO_y + yBump);
+    ImBumpMouse(MSG_META_MOUSE_BUMP_NOTIFICATION, (sword) xBump,
+		(sword) yBump);
+}
+
+/* FlowMouseBumpNotify */
+@method FlowClass, MSG_META_MOUSE_BUMP_NOTIFICATION
+{
+    struct { sword x, y; } p;
+
+    p.x = xBump;
+    p.y = yBump;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    pself = FlowPart(oself);
+    pself->FI_mouseBump.XYO_x = (sword) (pself->FI_mouseBump.XYO_x - xBump);
+    pself->FI_mouseBump.XYO_y = (sword) (pself->FI_mouseBump.XYO_y - yBump);
+}
+
+/* FlowEnsureMouseNotActivelyTrespassing: to the windows of the geode
+ * that has the mouse (its GAGCNLT_WINDOWS list) */
+@method FlowClass, MSG_META_ENSURE_MOUSE_NOT_ACTIVELY_TRESPASSING
+{
+    optr dest = ActiveOrImplied(oself);
+    EventHandle ev = 0;
+
+    CObjMessageP(MF_RECORD, 0, message, NULL, 0, &ev, sizeof(ev));
+    if (!dest) {
+	ObjFreeMessage(ev);
+	return 0;
+    }
+    @send ,forceQueue dest::MSG_META_GCN_LIST_SEND(0, ev, 0,
+				GAGCNLT_WINDOWS, MANUFACTURER_ID_GEOWORKS);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------
+ * The windows
+ * ------------------------------------------------------------------- */
+
+/* FlowWinChange: the window system walks the tree; its messages come
+ * here (WinChangeAck) */
+@method FlowClass, MSG_META_P32_WIN_CHANGE
+{
+    WinChangeParams p;
+    optr od;
+
+    p.WCP_x = x;
+    p.WCP_y = y;
+    p.WCP_tree = tree;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    (void) WinChangeAck(tree, x, y, &od);
+}
+
+/* FlowEnterLeave: on to the geode owning the window */
+@method FlowClass, MSG_META_P32_RAW_UNIV_ENTER, MSG_META_P32_RAW_UNIV_LEAVE
+{
+    WinPtrEventParams p;
+    GeodeHandle g;
+    optr dest = OwningInputObj(win, &g);
+
+    if (!dest)
+	return;
+    p.WPEP_inputObj = inputObj;
+    p.WPEP_win = win;
+    CObjMessageP(MF_FORCE_QUEUE, dest, message, &p, sizeof(p), NULL, 0);
+}
+
+/* FlowImpliedWinChange: the window under the mouse; a pointer event
+ * follows for it */
+@method FlowClass, MSG_META_IMPLIED_WIN_CHANGE
+{
+    if (win != pself->FI_impliedWin.MG_gWin) {
+	pself->FI_flowFlags |= FF_WIN_CHANGE_SINCE_LAST_MSG_META_BUTTON;
+	ImForcePtrMethod();
+    }
+    pself->FI_impliedWin.MG_OD = inputObj;
+    pself->FI_impliedWin.MG_gWin = win;
+    UpdateImpliedMouseGrab(oself);
+    ImForcePtrMethod();
+}
+
+/* FlowSetImpliedMouseGrabFromWin: the geode of the window the mouse is
+ * in (0: none); a geode the mouse left hears it is nowhere, the new one
+ * where it is */
+static void SetImpliedFromWin(optr oself, optr winOD, WindowHandle win)
+{
+    GeodeHandle g;
+    optr iobj = OwningInputObj(win, &g);
+    FlowInstance *f = FlowPart(oself);
+    optr old = f->FI_impliedMouseGrab.GG_OD;
+
+    f->FI_impliedMouseGrab.GG_OD = iobj;
+    f->FI_impliedMouseGrab.GG_geode = g;
+    if (old && old != iobj)
+	@send ,forceQueue old::MSG_META_IMPLIED_WIN_CHANGE(0, 0);
+    if (iobj)
+	@send ,forceQueue iobj::MSG_META_IMPLIED_WIN_CHANGE(winOD, win);
+}
+
+/* FlowUpdateImpliedMouseGrab: the implied window's geode if the mouse
+ * may interact with it */
+static void UpdateImpliedMouseGrab(optr oself)
+{
+    FlowInstance *f = FlowPart(oself);
+    optr od = f->FI_impliedWin.MG_OD;
+    WindowHandle win = f->FI_impliedWin.MG_gWin;
+
+    if (@call oself::MSG_FLOW_TEST_WIN_INTERACTIBILITY(od, win)) {
+	od = 0;
+	win = 0;
+    }
+    SetImpliedFromWin(oself, od, win);
+}
+
+/* FlowUpdateWinGeodeActive: the window system's active geode is the
+ * modal one, else the one with the mouse grabbed */
+static void UpdateWinGeodeActive(optr oself)
+{
+    FlowInstance *f = FlowPart(oself);
+    GeodeHandle g = 0;
+
+    if (f->FI_modalGeode.GG_OD)
+	g = f->FI_modalGeode.GG_geode;
+    else if (f->FI_activeMouseGrab.GG_OD)
+	g = f->FI_activeMouseGrab.GG_geode;
+    WinSysSetActiveGeode(g);
+}
+
+/* FlowTestWinInteractibility: TRUE if not (a system modal geode or a
+ * geode with the mouse grabbed is another than the window's) */
+@method FlowClass, MSG_FLOW_TEST_WIN_INTERACTIBILITY
+{
+    GeodeHandle g;
+    optr iobj = OwningInputObj(win, &g);
+
+    (void) inputObj;
+    pself = FlowPart(oself);
+    if (pself->FI_modalGeode.GG_OD && iobj != pself->FI_modalGeode.GG_OD)
+	return TRUE;
+    if (pself->FI_activeMouseGrab.GG_OD &&
+	iobj != pself->FI_activeMouseGrab.GG_OD)
+	return TRUE;
+    return FALSE;
+}
+
+/* FlowGrabMouseHandler: for the geode the mouse is over */
+@method FlowClass, MSG_FLOW_GRAB_MOUSE
+{
+    pself->FI_activeMouseGrab = pself->FI_impliedMouseGrab;
+    UpdateWinGeodeActive(oself);
+    UpdateImpliedMouseGrab(oself);
+}
+
+/* FlowReleaseMouseHandler */
+@method FlowClass, MSG_FLOW_RELEASE_MOUSE, MSG_FLOW_ALLOW_GLOBAL_TRANSFER
+{
+    if (!pself->FI_activeMouseGrab.GG_OD)
+	return;
+    pself->FI_activeMouseGrab.GG_OD = 0;
+    pself->FI_activeMouseGrab.GG_geode = 0;
+    UpdateWinGeodeActive(oself);
+    UpdateImpliedMouseGrab(oself);
+}
+
+@method FlowClass, MSG_FLOW_RELEASE_MOUSE_IF_GRABBED
+{
+    if (obj == pself->FI_activeMouseGrab.GG_OD)
+	@call oself::MSG_FLOW_RELEASE_MOUSE();
+}
+
+/* FlowSetModalGeode */
+@method FlowClass, MSG_FLOW_SET_MODAL_GEODE
+{
+    if (inputObj == pself->FI_modalGeode.GG_OD &&
+	geode == pself->FI_modalGeode.GG_geode)
+	return;
+    pself->FI_modalGeode.GG_OD = inputObj;
+    pself->FI_modalGeode.GG_geode = geode;
+    UpdateWinGeodeActive(oself);
+    UpdateImpliedMouseGrab(oself);
+}
+
+@method FlowClass, MSG_FLOW_GET_MODAL_GEODE
+{
+    if (geode)
+	*geode = pself->FI_modalGeode.GG_geode;
+    return pself->FI_modalGeode.GG_OD;
+}
+
+/* FlowRegisterNoInkWin: a list of windows that never take ink */
+@method FlowClass, MSG_FLOW_REGISTER_NO_INK_WIN
+{
+    word i, n = pself->FI_numNoInkWin;
+
+    for (i = 0; i < n && pself->FI_noInkWin[i] != win; i++)
+	;
+    if (add) {
+	if (i == n && n < MAX_NO_INK_WIN)
+	    pself->FI_noInkWin[pself->FI_numNoInkWin++] = win;
+    } else if (i < n) {
+	/* the last one into its place */
+	pself->FI_noInkWin[i] = pself->FI_noInkWin[--pself->FI_numNoInkWin];
+    }
+}
+
+/* FlowSetScreen: the screen's video driver shows the pointer (the
+ * default field goes to the system object: not yet) */
+@method FlowClass, MSG_FLOW_SET_SCREEN
+{
+    DriverRegs r;
+
+    (void) field;
+    pself->FI_curVideoStrategy = videoStrategy;
+    ImSetPtrImage(PIL_FLOW, ConstructOptr(0, PIV_UPDATE));
+    if (videoStrategy) {
+	memset(&r, 0, sizeof(r));
+	(void) ((DriverStrategy *) videoStrategy)(DR_VID_SHOWPTR, &r);
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+/* RaisePriorities: the geode's thread to PRIORITY_UI (a second thread
+ * would get PRIORITY_FOCUS; Port32 has none), its old one kept */
+static void RaisePriorities(optr oself, GeodeHandle g)
+{
+    ThreadHandle th;
+    byte prev;
+
+    if (!g || !(GeodeGetInfo(g, GGIT_ATTRIBUTES, NULL) & GA_PROCESS))
+	return;
+    th = ProcInfo(g);
+    if (!th)
+	return;
+    prev = TGI_PRIORITY(ThreadGetInfo(th, TGIT_PRIORITY_AND_USAGE));
+    FlowPart(oself)->FI_prevPriority = prev;
+    if (prev > PRIORITY_UI)
+	ThreadModify(th, PRIORITY_UI, TMF_BASE_PRIO);
+}
+
+/* RestorePriorities */
+static void RestorePriorities(GeodeHandle g, byte prio)
+{
+    ThreadHandle th;
+
+    if (!g || !prio || !(GeodeGetInfo(g, GGIT_ATTRIBUTES, NULL) & GA_PROCESS))
+	return;
+    th = ProcInfo(g);
+    if (th)
+	ThreadModify(th, prio, TMF_BASE_PRIO);
+}
+
+/* UpdateGeodeCPUPriorities: the geode with the keyboard runs faster; the
+ * one that lost it as before */
+static void UpdateGeodeCPUPriorities(optr oself, MemHandle oldBlock)
+{
+    FlowInstance *f = FlowPart(oself);
+    MemHandle newBlock = OptrToHandle(f->FI_activeKbdGrab.KG_OD);
+    GeodeHandle oldG = oldBlock ? MemOwner(oldBlock) : 0;
+    GeodeHandle newG = newBlock ? MemOwner(newBlock) : 0;
+    byte prio;
+
+    if (oldG == newG)
+	return;
+    prio = f->FI_prevPriority;
+    f->FI_prevPriority = 0;
+    f->FI_prevUIPriority = 0;
+    RaisePriorities(oself, newG);
+    RestorePriorities(oldG, prio);
+}
+
+/* FlowVupGrabWithinView: only the active keyboard grab is kept here (a
+ * mouse or passive grab was an EC error) */
+@method FlowClass, MSG_VIS_VUP_ALTER_INPUT_FLOW
+{
+    MemHandle oldBlock = OptrToHandle(pself->FI_activeKbdGrab.KG_OD);
+    word off = FLOW_OFFSET(FI_activeKbdGrab);
+
+    (void) translation;
+    (void) window;
+    if ((grabFlags & VIFGF_MOUSE) || !(grabFlags & VIFGF_KBD) ||
+	grabType != VIFGT_ACTIVE)
+	return;
+    if (!(grabFlags & VIFGF_GRAB))
+	(void) FlowReleaseGrab(oself, MSG_META_GAINED_KBD_EXCL, 0, off,
+			       object);
+    else if (grabFlags & VIFGF_FORCE)
+	(void) FlowForceGrab(oself, MSG_META_GAINED_KBD_EXCL, 0, off, object,
+			     0);
+    else
+	(void) FlowRequestGrab(oself, MSG_META_GAINED_KBD_EXCL, 0, off,
+			       object, 0);
+    UpdateGeodeCPUPriorities(oself, oldBlock);
+}
+
+/* UpdateConstrainState: <Shift> pressed or released constrains the
+ * mouse; a pointer event tells the grab */
+static void UpdateConstrainState(optr oself, word character, word flags)
+{
+    FlowInstance *f = FlowPart(oself);
+    UIFunctionsActive old = f->FI_activeMouseUIFunctionsActive;
+
+    if ((character >> 8) != VC_ISCTRL ||
+	((byte) character != VC_LSHIFT && (byte) character != VC_RSHIFT))
+	return;
+    if (flags & CF_FIRST_PRESS)
+	f->FI_activeMouseUIFunctionsActive |= UIFA_CONSTRAIN;
+    else if (flags & CF_RELEASE)
+	f->FI_activeMouseUIFunctionsActive &= ~UIFA_CONSTRAIN;
+    if (old != f->FI_activeMouseUIFunctionsActive)
+	ImForcePtrMethod();
+}
+
+/* FlowKbd: to the keyboard grab; a repeated press is dropped if one is
+ * still waiting */
+@method FlowClass, MSG_META_KBD_CHAR
+{
+    FlowInputParams p;
+    optr dest;
+
+    if (pself->FI_flowFlags & FF_PROCESSING_INK)
+	return;
+    p.FIP_cx = character;
+    p.FIP_dx = flags;
+    p.FIP_bp = state;
+    if (HeldUp(oself, message, &p, sizeof(p)))
+	return;
+    UpdateConstrainState(oself, character, flags);
+    dest = FlowPart(oself)->FI_activeKbdGrab.KG_OD;
+    if (!dest)
+	return;		/* UserStandardSound(SST_NO_INPUT) on a first press */
+    CObjMessageP((flags & CF_REPEAT_PRESS)
+		 ? MF_FORCE_QUEUE | MF_CAN_DISCARD_IF_DESPERATE |
+		   MF_CHECK_DUPLICATE
+		 : MF_FORCE_QUEUE,
+		 dest, MSG_META_KBD_CHAR, &p, sizeof(p), NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * Notifications
+ * ------------------------------------------------------------------- */
+
+/* FlowNotify: to the current geode, the one with the keyboard, else the
+ * one with the mouse (the UI's application object without either: not
+ * yet) */
+static optr CurrentGeode(optr oself)
+{
+    FlowInstance *f = FlowPart(oself);
+
+    if (f->FI_activeKbdGrab.KG_OD)
+	return f->FI_activeKbdGrab.KG_OD;
+    return ActiveOrImplied(oself);
+}
+
+@method FlowClass, MSG_META_NOTIFY
+{
+    optr dest = CurrentGeode(oself);
+
+    if (dest)
+	@send dest::MSG_META_NOTIFY(manufID, notificationType, data);
+}
+
+@method FlowClass, MSG_META_NOTIFY_WITH_DATA_BLOCK
+{
+    optr dest = CurrentGeode(oself);
+
+    if (!dest) {
+	@callsuper();		/* the block's reference dropped */
+	return;
+    }
+    @send dest::MSG_META_NOTIFY_WITH_DATA_BLOCK(manufID, notificationType,
+						data);
+}

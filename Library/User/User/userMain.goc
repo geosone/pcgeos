@@ -1,0 +1,167 @@
+/*
+ * userMain.goc -- the start of the UI (after userMain.asm), so far the
+ * input map: SetDefaultInputMap, CheckNumMouseButtons, CheckKey and the
+ * button maps of one, two and three buttons.
+ *
+ * The input map says which UI function a button starts with which
+ * modifiers (the flow object's TranslateButton) and holds the
+ * UIButtonFlags of the [input] category.
+ *
+ * Port32: the map is a structure of the library, not a block; until the
+ * UI's process starts the system (UserAttach), the library sets it up
+ * when it is loaded (UILibraryEntry, userLibrary.goc).
+ */
+@include "uiInt.goh"
+#include <initfile.h>
+#include <system.h>
+#include <Internal/mouseDr.h>
+
+InputMapHeader uiInputMap;
+UIButtonFlags uiButtonFlags;
+Boolean uiFloatingKbdEnabled;
+
+#define BME(b, ss, msg, pref)	{ (b), (ss), (msg), (pref) }
+
+static const ButtonMapEntry oneButtonMap[] = {
+    BME(0, 0, MSG_META_START_SELECT, 0),
+    BME(0, SS_LSHIFT, MSG_META_START_SELECT, UIFA_EXTEND),
+    BME(0, SS_RSHIFT, MSG_META_START_SELECT, UIFA_EXTEND),
+    BME(0, SS_LCTRL, MSG_META_START_SELECT, UIFA_ADJUST),
+    BME(0, SS_RCTRL, MSG_META_START_SELECT, UIFA_ADJUST),
+    BME(0, SS_LSHIFT | SS_LCTRL, MSG_META_START_SELECT,
+	UIFA_EXTEND | UIFA_ADJUST),
+    BME(0, SS_RSHIFT | SS_RCTRL, MSG_META_START_SELECT,
+	UIFA_EXTEND | UIFA_ADJUST),
+    BME(0, SS_LALT | SS_LCTRL, MSG_META_START_MOVE_COPY, UIFA_MOVE),
+    BME(0, SS_RALT | SS_RCTRL, MSG_META_START_MOVE_COPY, UIFA_MOVE),
+    BME(0, SS_LALT, MSG_META_START_FEATURES, UIFA_POPUP),
+    BME(0, SS_RALT, MSG_META_START_FEATURES, UIFA_POPUP)
+};
+
+static const ButtonMapEntry twoButtonMap[] = {
+    BME(0, 0, MSG_META_START_SELECT, 0),
+    BME(0, SS_LSHIFT, MSG_META_START_SELECT, UIFA_EXTEND),
+    BME(0, SS_RSHIFT, MSG_META_START_SELECT, UIFA_EXTEND),
+    BME(0, SS_LCTRL, MSG_META_START_SELECT, UIFA_ADJUST),
+    BME(0, SS_RCTRL, MSG_META_START_SELECT, UIFA_ADJUST),
+    BME(0, SS_LSHIFT | SS_LCTRL, MSG_META_START_SELECT,
+	UIFA_EXTEND | UIFA_ADJUST),
+    BME(0, SS_RSHIFT | SS_RCTRL, MSG_META_START_SELECT,
+	UIFA_EXTEND | UIFA_ADJUST),
+    BME(0, SS_LALT, MSG_META_START_FEATURES, UIFA_POPUP),
+    BME(0, SS_RALT, MSG_META_START_FEATURES, UIFA_POPUP),
+    BME(2, 0, MSG_META_START_MOVE_COPY, 0),
+    BME(2, SS_LSHIFT, MSG_META_START_MOVE_COPY, 0),
+    BME(2, SS_RSHIFT, MSG_META_START_MOVE_COPY, 0),
+    BME(2, SS_LALT, MSG_META_START_MOVE_COPY, UIFA_MOVE),
+    BME(2, SS_RALT, MSG_META_START_MOVE_COPY, UIFA_MOVE),
+    BME(2, SS_LCTRL, MSG_META_START_MOVE_COPY, UIFA_COPY),
+    BME(2, SS_RCTRL, MSG_META_START_MOVE_COPY, UIFA_COPY)
+};
+
+static const ButtonMapEntry threeButtonMap[] = {
+    BME(0, 0, MSG_META_START_SELECT, 0),
+    BME(0, SS_LSHIFT, MSG_META_START_SELECT, UIFA_EXTEND),
+    BME(0, SS_RSHIFT, MSG_META_START_SELECT, UIFA_EXTEND),
+    BME(0, SS_LCTRL, MSG_META_START_SELECT, UIFA_ADJUST),
+    BME(0, SS_RCTRL, MSG_META_START_SELECT, UIFA_ADJUST),
+    BME(0, SS_LSHIFT | SS_LCTRL, MSG_META_START_SELECT,
+	UIFA_EXTEND | UIFA_ADJUST),
+    BME(0, SS_RSHIFT | SS_RCTRL, MSG_META_START_SELECT,
+	UIFA_EXTEND | UIFA_ADJUST),
+    BME(1, 0, MSG_META_START_FEATURES, UIFA_POPUP),
+    BME(1, SS_LALT, MSG_META_START_FEATURES, UIFA_PAN),
+    BME(1, SS_RALT, MSG_META_START_FEATURES, UIFA_PAN),
+    BME(2, 0, MSG_META_START_MOVE_COPY, 0),
+    BME(2, SS_LSHIFT, MSG_META_START_MOVE_COPY, 0),
+    BME(2, SS_RSHIFT, MSG_META_START_MOVE_COPY, 0),
+    BME(2, SS_LALT, MSG_META_START_MOVE_COPY, UIFA_MOVE),
+    BME(2, SS_RALT, MSG_META_START_MOVE_COPY, UIFA_MOVE),
+    BME(2, SS_LCTRL, MSG_META_START_MOVE_COPY, UIFA_COPY),
+    BME(2, SS_RCTRL, MSG_META_START_MOVE_COPY, UIFA_COPY)
+};
+
+#define DEFAULT_FLAGS	(UIBF_CLICK_TO_TYPE | UIBF_SELECT_ALWAYS_RAISES | \
+			 UIBF_BLINKING_CURSOR)
+#define MAP(t)		{ t, sizeof(t) / sizeof(t[0]), SS_LSHIFT, \
+			  SS_RSHIFT, DEFAULT_FLAGS }
+
+/* inputMapTable: by the number of buttons */
+static const InputMapHeader inputMapTable[] = {
+    MAP(oneButtonMap), MAP(twoButtonMap), MAP(threeButtonMap)
+};
+
+#define DEFAULT_NUM_BUTTONS	3
+
+static const char inputCategoryStr[] = "input";
+
+/* the mouse driver's information, if there is one */
+static const MouseDriverInfo *MouseInfo(void)
+{
+    GeodeHandle drv = GeodeGetDefaultDriver(GDDT_MOUSE);
+
+    return drv ? (const MouseDriverInfo *) GeodeInfoDriver(drv) : NULL;
+}
+
+/* CheckNumMouseButtons: the map for numberOfMouseButtons, else for the
+ * mouse driver's buttons */
+static const InputMapHeader *CheckNumMouseButtons(void)
+{
+    word n;
+
+    if (InitFileReadInteger(inputCategoryStr, "numberOfMouseButtons", &n)) {
+	const MouseDriverInfo *mi = MouseInfo();
+	n = mi ? mi->MDI_numButtons : DEFAULT_NUM_BUTTONS;
+    }
+    if (n < 1 || n > sizeof(inputMapTable) / sizeof(inputMapTable[0]))
+	n = DEFAULT_NUM_BUTTONS;
+    return &inputMapTable[n - 1];
+}
+
+/* CheckKey: the flag into in or out by the key's boolean; FALSE if the
+ * key is not there */
+static Boolean CheckKey(const char *key, UIButtonFlags flag,
+			UIButtonFlags *in, UIButtonFlags *out)
+{
+    Boolean b;
+
+    if (InitFileReadBoolean(inputCategoryStr, key, &b))
+	return FALSE;
+    if (b)
+	*in |= flag;
+    else
+	*out |= flag;
+    return TRUE;
+}
+
+/* SetDefaultInputMap */
+void UserSetDefaultInputMap(void)
+{
+    UIButtonFlags in = 0, out = 0;
+    const InputMapHeader *map = CheckNumMouseButtons();
+    Boolean b;
+
+    CheckKey("clickToType", UIBF_CLICK_TO_TYPE, &in, &out);
+    CheckKey("selectRaises", UIBF_SELECT_ALWAYS_RAISES, &in, &out);
+    CheckKey("selectDisplaysMenu", UIBF_SELECT_DISPLAYS_MENU, &in, &out);
+    CheckKey("clickGoesThrough", UIBF_CLICK_GOES_THRU, &in, &out);
+    CheckKey("specificUICompatible", UIBF_SPECIFIC_UI_COMPATIBLE, &in,
+	     &out);
+    CheckKey("blinkingCursor", UIBF_BLINKING_CURSOR, &in, &out);
+    if (!CheckKey("keyboardOnly", UIBF_KEYBOARD_ONLY, &in, &out) &&
+	!SysGetPenMode()) {
+	/* keyboard only without a mouse driver, or if it says so */
+	const MouseDriverInfo *mi = MouseInfo();
+	if (!mi || (mi->MDI_flags & MDIF_KEYBOARD_ONLY))
+	    in |= UIBF_KEYBOARD_ONLY;
+    }
+    CheckKey("noKeyboard", UIBF_NO_KEYBOARD, &in, &out);
+
+    if (InitFileReadBoolean(inputCategoryStr, "floatingKbd", &b))
+	b = FALSE;
+    uiFloatingKbdEnabled = b;
+
+    uiInputMap = *map;
+    uiInputMap.IMH_flags = (UIButtonFlags) ((map->IMH_flags | in) & ~out);
+    uiButtonFlags = uiInputMap.IMH_flags;
+}
