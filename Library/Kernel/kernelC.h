@@ -425,6 +425,7 @@ extern dword kernelTimerEventsDropped;
 #define KVD_TEMP_META_GCN			0	/* the first */
 #define KVD_TEMP_META_QUIT_LIST			4
 #define KVD_DETACH_DATA				8
+#define KMSG_PROCESS_NOTIFY_PROCESS_EXIT	8192
 #define KMSG_PROCESS_NOTIFY_THREAD_EXIT	8193
 #define KMSG_PROCESS_INSTANTIATE		8197
 #define KMSG_PROCESS_EXIT			8198
@@ -716,6 +717,8 @@ typedef struct {
     word		GC_uiData;	/* GeodeGet/SetUIData (PH_uiData) */
     word		*GC_privData;	/* geode private data (geodesPriv.c) */
     word		GC_privWords;
+    GeodeHandle		GC_parentProcess;	/* the process that loaded it
+						 * (GH_parentProcess) */
     word		GC_libraryCount;
     GeodeHandle		GC_libraries[1];	/* GC_libraryCount of them
 						 * (0: not loaded, noload) */
@@ -733,7 +736,7 @@ Boolean GeodeHasImage(const char *name);
 /* the threads of a geode (threadThread.c): the last thread of a process
  * to exit frees it */
 void GeodeAddThread(GeodeHandle gh);
-void GeodeRemoveThread(GeodeHandle gh);
+void GeodeRemoveThread(GeodeHandle gh, word exitCode);
 /* geodesLibrary.c: use a library by permanent name for a geode being
  * loaded (no LCT_NEW_CLIENT), and drop such a reference */
 GeodeHandle GeodeUseLibraryLow(const char *pname, word protoMajor,

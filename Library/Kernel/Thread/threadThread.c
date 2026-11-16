@@ -468,7 +468,7 @@ void ThreadDestroy(word errorCode, optr ackObject, word ackData)
 	}
     }
     /* the last thread of a process frees the geode */
-    GeodeRemoveThread(HandleEntryOf(cur)->HE_owner);
+    GeodeRemoveThread(HandleEntryOf(cur)->HE_owner, errorCode);
     ghal_crit_enter();
     t->T_exitCode = errorCode;
     t->T_state = TS_DEAD;

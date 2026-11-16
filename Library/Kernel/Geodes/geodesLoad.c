@@ -575,9 +575,10 @@ void GeodeAddThread(GeodeHandle gh)
     GeodeUnlock();
 }
 
-void GeodeRemoveThread(GeodeHandle gh)
+void GeodeRemoveThread(GeodeHandle gh, word exitCode)
 {
-    GeodeCore *c;
+    GeodeCore *c, *pc;
+    GeodeHandle parent = 0;
 
     GeodeLock();
     c = GeodeCoreOf(gh);
@@ -586,10 +587,23 @@ void GeodeRemoveThread(GeodeHandle gh)
     if (c && c->GC_threadCount && !--c->GC_threadCount &&
 	(c->GC_attrs & GA_PROCESS)) {
 	c->GC_attrs &= ~GA_PROCESS;
+	/* the parent is told, if it is a process still */
+	pc = c->GC_parentProcess != gh ? GeodeCoreOf(c->GC_parentProcess)
+				       : NULL;
+	if (pc && (pc->GC_attrs & GA_PROCESS))
+	    parent = c->GC_parentProcess;
 	if (!--c->GC_refCount)
 	    GeodeFreeLow(gh);
     }
     GeodeUnlock();
+    if (parent) {
+	struct { GeodeHandle exitProcess; word exitCode; } n;
+
+	n.exitProcess = gh;
+	n.exitCode = exitCode;
+	CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(parent, 0),
+		     KMSG_PROCESS_NOTIFY_PROCESS_EXIT, &n, sizeof(n), NULL, 0);
+    }
 }
 
 /* ---------------------------------------------------------------------
@@ -767,6 +781,7 @@ GeodeHandle GeodeLoadLow(const char *fileName, GeodeAttrs attrMatch,
     memcpy(c->GC_name, name, NAME_LEN);
     c->GC_attrs = attrs;
     c->GC_refCount = 2;			/* one for the duration of the load */
+    c->GC_parentProcess = GeodeGetProcessHandle();
     c->GC_libraryCount = nlibs;
     memcpy(c->GC_libraries, libs, nlibs * sizeof(GeodeHandle));
     nlibs = 0;				/* the core block has them now */
