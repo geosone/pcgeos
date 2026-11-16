@@ -27,6 +27,7 @@ export GenApplicationClass
 export GenFieldClass
 export GenScreenClass
 export GenSystemClass
+export GenProcessClass
 
 # the Vis routines in C (visC.goh, GEOS_PORT32)
 export VisCheckIfVisGrown

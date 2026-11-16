@@ -4,7 +4,8 @@
  *
  * Port32: until the UI's process starts the system (UserAttach in
  * userMain.asm), the library sets up the input map when it is loaded,
- * which the asm did first thing in UserAttach.
+ * which the asm did first thing in UserAttach.  It also allocates the
+ * geode private words of GenProcessClass (procClass.goc).
  */
 @include "uiInt.goh"
 #include <library.h>
@@ -12,7 +13,18 @@
 Boolean UILibraryEntry(LibraryCallType ty, GeodeHandle client)
 {
     (void) client;
-    if (ty == LCT_ATTACH)
+    switch (ty) {
+    case LCT_ATTACH:
 	UserSetDefaultInputMap();
+	/* GenProcessClass's words in each process */
+	genProcessPrivOffset = GeodePrivAlloc(GeodeGetCodeProcessHandle(),
+					      GEN_PROCESS_PRIV_WORDS);
+	return !genProcessPrivOffset;
+    case LCT_DETACH:
+	GeodePrivFree(genProcessPrivOffset, GEN_PROCESS_PRIV_WORDS);
+	break;
+    default:
+	break;
+    }
     return FALSE;
 }

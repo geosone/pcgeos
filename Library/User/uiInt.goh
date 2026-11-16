@@ -154,9 +154,12 @@ Boolean UserCallApplication(Message msg, const void *params,
 
 /* the UI's FatalErrors (uiConstant.def), as far as the C UI raises them */
 #define UI_ERROR_NO_SPECIFIC_UI	18
+#define UI_PROCESS_INVALID_QUIT_LEVEL	1
+#define UI_GEN_APPLICATION_COULDNT_FIND_A_VIS_PARENT	27
 /* these by their place among the FatalErrors of uiConstant.def */
 #define UI_STARTUP_DONE_MSG_RECEIVED_BEFORE_STARTUP_NOTIFY	184
 #define UI_GEN_FIELD_GEN_APPLICATION_LIST_CORRUPT		191
+#define UI_ERROR_SECOND_REAL_DETACH				355
 
 /* ---------------------------------------------------------------------
  * Gen/genSystem.goc: the UI's state (userVariable.def), the system
@@ -171,6 +174,27 @@ extern UIFlags uiFlags;
 extern byte uiDisplayType;
 /* the system object (0 until UserCreateSystemObject) */
 optr UserGetSystemObject(void);
+
+/* ---------------------------------------------------------------------
+ * Proc/procClass.goc: GenProcessClass
+ * ------------------------------------------------------------------- */
+/* a detach of the process in progress: who to ack at its end (the asm
+ * passed it on in registers); in the process's geode private data */
+typedef struct {
+    word	GPDD_flags;
+    word	GPDD_callerID;
+    optr	GPDD_ackOD;
+} GenProcessDetachData;
+#define GPDF_DETACHING		0x0001
+#define GEN_PROCESS_PRIV_WORDS	((sizeof(GenProcessDetachData) + 1) / 2)
+
+/* GenAppQuitCommon (genApplication.goc): the quit from that level */
+void GenAppQuitCommon(optr app, word quitLevel);
+
+/* the offset of the words (GeodePrivAlloc, in UILibraryEntry) */
+extern word genProcessPrivOffset;
+/* the current process's */
+void GenProcessGetDetach(GenProcessDetachData *d);
 
 /* ---------------------------------------------------------------------
  * Vis/visSpec.goc: the specific part of a generic object

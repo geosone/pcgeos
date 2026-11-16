@@ -1,0 +1,371 @@
+/*
+ * procClass.goc -- GenProcessClass (after procClass.asm), the process
+ * class of applications: the attach of the process and its application
+ * object (MSG_META_ATTACH with the AppLaunchBlock, the application mode
+ * message), the detach (the application detached, the CLOSE message, the
+ * application shut down, the process gone) and the quit levels
+ * (MSG_META_QUIT, MSG_META_QUIT_ACK).
+ *
+ * Port32 (Port32/ABI.md section 13x):
+ *  - MSG_META_ATTACH comes as MSG_META_ATTACH_PROCESS: the kernel passes
+ *    the 32-bit AppLaunchBlock handle as two words.  Without one the
+ *    process makes an empty one (the asm took that for an error).
+ *  - The asm hid the ack optr of a detach in the registers of the
+ *    messages that followed (dx = the process, cx:bp the optr).  Here
+ *    the process keeps it in its geode private data (genProcessPrivOffset,
+ *    allocated by the library entry) from MSG_META_DETACH to
+ *    MSG_GEN_PROCESS_FINAL_DETACH; the messages carry the process optr.
+ *  - Not yet: state files (a RESTORE_FROM_STATE launch opens the
+ *    application), transparent detach, UI threads, undo, the activation
+ *    dialog of the field, the application's instance reference sent to
+ *    the field.
+ */
+@include "uiInt.goh"
+@include <Objects/gSysC.goh>
+#include <file.h>
+#include <string.h>
+
+@classdecl GenProcessClass;
+
+word genProcessPrivOffset;
+
+/* ---------------------------------------------------------------------
+ * The detach in progress (geode private data of the process)
+ * ------------------------------------------------------------------- */
+
+void GenProcessGetDetach(GenProcessDetachData *d)
+{
+    word w[GEN_PROCESS_PRIV_WORDS];
+
+    GeodePrivRead(0, genProcessPrivOffset, GEN_PROCESS_PRIV_WORDS, w);
+    memcpy(d, w, sizeof(*d));
+}
+
+static void SetDetach(const GenProcessDetachData *d)
+{
+    word w[GEN_PROCESS_PRIV_WORDS];
+
+    memset(w, 0, sizeof(w));
+    memcpy(w, d, sizeof(*d));
+    GeodePrivWrite(0, genProcessPrivOffset, GEN_PROCESS_PRIV_WORDS, w);
+}
+
+static optr Self(void)
+{
+    return ConstructOptr(GeodeGetProcessHandle(), 0);
+}
+
+static optr App(void)
+{
+    return GeodeGetAppObject(0);
+}
+
+/* the message to the process after the input queue is flushed */
+static void AfterFlush(EventHandle ev)
+{
+    @call Self()::MSG_META_OBJ_FLUSH_INPUT_QUEUE(ev,
+		OFIQNS_SYSTEM_INPUT_OBJ, GeodeGetProcessHandle());
+}
+
+/* ---------------------------------------------------------------------
+ * Attach
+ * ------------------------------------------------------------------- */
+
+/* UI_Attach */
+@method GenProcessClass, MSG_META_ATTACH_PROCESS
+{
+    MemHandle alb = (MemHandle) (((dword) value1 << 16) | value2);
+    AppLaunchBlock *a;
+    Message mode;
+    AppAttachFlags flags = 0;
+    optr self = Self();
+    EventHandle ev;
+
+    UserCallSystem(MSG_GEN_SYSTEM_MARK_BUSY, NULL, 0, NULL, 0);
+    if (!alb)
+	alb = MemAlloc(sizeof(AppLaunchBlock), HF_SHARABLE | HF_SWAPABLE,
+		       HAF_ZERO_INIT);
+    a = MemLock(alb);
+    /* Port32: no state file to restore from yet */
+    if (!a->ALB_appMode || a->ALB_appMode == MSG_GEN_PROCESS_RESTORE_FROM_STATE)
+	a->ALB_appMode = MSG_GEN_PROCESS_OPEN_APPLICATION;
+    MemUnlock(alb);
+    FileSetStandardPath(SP_TOP);
+
+    /* the application object into the generic tree */
+    @call App()::MSG_META_APP_STARTUP(alb);
+
+    a = MemLock(alb);
+    mode = a->ALB_appMode;
+    if (a->ALB_dataFile[0])
+	flags |= AAF_DATA_FILE_PASSED;
+    MemUnlock(alb);
+    if (mode == MSG_GEN_PROCESS_OPEN_APPLICATION)
+	@call self::MSG_GEN_PROCESS_OPEN_APPLICATION(flags, alb, 0);
+    else if (mode == MSG_GEN_PROCESS_OPEN_ENGINE)
+	@call self::MSG_GEN_PROCESS_OPEN_ENGINE(flags, alb);
+    else {
+	struct { AppAttachFlags f; MemHandle alb, extra; } p;
+
+	p.f = flags;
+	p.alb = alb;
+	p.extra = 0;
+	CObjMessageP(MF_CALL, self, mode, &p, sizeof(p), NULL, 0);
+    }
+    MemFree(alb);
+
+    ev = @record null::MSG_NOTIFY_APP_STARTED(GeodeGetProcessHandle());
+    GCNListSend(MANUFACTURER_ID_GEOWORKS, GCNSLT_APPLICATION, ev, 0,
+		GCNLSF_FORCE_QUEUE);
+    UserCallSystem(MSG_GEN_SYSTEM_MARK_NOT_BUSY, NULL, 0, NULL, 0);
+}
+
+/* UI_OpenApplication: the application object attached, so usable */
+@method GenProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
+{
+    optr app = App();
+
+    @call app::MSG_GEN_APPLICATION_SET_APP_MODE_MESSAGE(
+	MSG_GEN_PROCESS_OPEN_APPLICATION);
+    @call app::MSG_META_ATTACH_OBJECT(attachFlags, launchBlock, extraState);
+}
+
+/* UI_RestoreFromState: the mode the application was in; Port32 has no
+ * state files, so it is the application's mode (or OPEN_APPLICATION) */
+@method GenProcessClass, MSG_GEN_PROCESS_RESTORE_FROM_STATE
+{
+    optr app = App();
+    Message mode = @call app::MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE();
+    struct { AppAttachFlags f; MemHandle alb, extra; } p;
+
+    if (!mode)
+	mode = MSG_GEN_PROCESS_OPEN_APPLICATION;
+    @call app::MSG_GEN_APPLICATION_SET_ATTACHED_TO_STATE_FILE();
+    p.f = attachFlags | AAF_RESTORING_FROM_STATE;
+    p.alb = launchBlock;
+    p.extra = mode == MSG_GEN_PROCESS_OPEN_APPLICATION ? extraState : 0;
+    CObjMessageP(MF_CALL, oself, mode, &p, sizeof(p), NULL, 0);
+}
+
+/* UI_OpenEngine: only the mode noted */
+@method GenProcessClass, MSG_GEN_PROCESS_OPEN_ENGINE
+{
+    (void) attachFlags;
+    (void) launchBlock;
+    @call App()::MSG_GEN_APPLICATION_SET_APP_MODE_MESSAGE(
+	MSG_GEN_PROCESS_OPEN_ENGINE);
+}
+
+/* UI_GetParentField */
+@method GenProcessClass, MSG_GEN_PROCESS_GET_PARENT_FIELD
+{
+    return @call App()::MSG_GEN_FIND_PARENT();
+}
+
+/* UI_InstallToken */
+@method GenProcessClass, MSG_GEN_PROCESS_INSTALL_TOKEN
+{
+    @call App()::MSG_GEN_APPLICATION_INSTALL_TOKEN();
+}
+
+/* UI_LazarusApplication: back to the application mode */
+@method GenProcessClass,
+	MSG_GEN_PROCESS_TRANSITION_FROM_ENGINE_TO_APPLICATION_MODE
+{
+    optr app = App();
+
+    if (@call app::MSG_GEN_APPLICATION_GET_STATE() & AS_QUITTING)
+	attachFlags |= AAF_RESTORING_FROM_QUIT;
+    @call oself::MSG_GEN_PROCESS_OPEN_APPLICATION(attachFlags, launchBlock,
+						  0);
+}
+
+/* ---------------------------------------------------------------------
+ * Detach
+ * ------------------------------------------------------------------- */
+
+/*
+ * UI_Detach: the application object detaches first and acks the
+ * process.  A detach while one is in progress takes over if the first
+ * had nobody to ack (a quit), else it is acked at once (GenAppNestedDetach
+ * of the asm); so is one while the application is not usable (not in
+ * application mode: it goes when its IACP connections do).
+ */
+@method GenProcessClass, MSG_META_DETACH
+{
+    GenProcessDetachData d;
+    optr app = App();
+
+    GenProcessGetDetach(&d);
+    if (d.GPDD_flags & GPDF_DETACHING) {
+	if (!d.GPDD_ackOD) {
+	    d.GPDD_callerID = callerID;
+	    d.GPDD_ackOD = caller;
+	    SetDetach(&d);
+	} else if (caller)
+	    @send, forceQueue caller::MSG_META_ACK(0, oself);
+	return;
+    }
+    if (!app) {				/* no application object: just go */
+	struct { word id; optr caller; } p;
+
+	p.id = callerID;
+	p.caller = caller;
+	CObjCallSuperP((ClassStruct *) &GenProcessClass, oself,
+		       MSG_META_DETACH, &p, sizeof(p), NULL, 0);
+	return;
+    }
+    if (!@call app::MSG_GEN_GET_USABLE()) {
+	if (caller)
+	    @send, forceQueue caller::MSG_META_ACK(0, oself);
+	return;
+    }
+    d.GPDD_flags = GPDF_DETACHING;
+    d.GPDD_callerID = callerID;
+    d.GPDD_ackOD = caller;
+    SetDetach(&d);
+    @call app::MSG_META_DETACH(0, Self());
+}
+
+/* UI_Ack: the application object is detached: the CLOSE message (in
+ * application mode), then the application goes on */
+@method GenProcessClass, MSG_META_ACK
+{
+    GenProcessDetachData d;
+    optr app = App();
+
+    (void) callerID;
+    GenProcessGetDetach(&d);
+    if (!(d.GPDD_flags & GPDF_DETACHING)) {
+	@callsuper();
+	return;
+    }
+    if (caller != app) {
+	/* the UI thread gone (Port32: there is none) */
+	@send, forceQueue oself::MSG_GEN_PROCESS_FINAL_DETACH();
+	return;
+    }
+    if (@call app::MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE() ==
+	MSG_GEN_PROCESS_OPEN_APPLICATION) {
+	MemHandle extra = @call oself::MSG_GEN_PROCESS_CLOSE_APPLICATION();
+
+	if (extra)			/* Port32: no state file for it */
+	    MemFree(extra);
+    }
+    @call app::MSG_GEN_APPLICATION_CLOSE_COMPLETE(d.GPDD_ackOD);
+}
+
+/* UI_GetStateToSave: no extra state */
+@method GenProcessClass, MSG_GEN_PROCESS_CLOSE_APPLICATION
+{
+    return 0;
+}
+
+@method GenProcessClass, MSG_GEN_PROCESS_CLOSE_ENGINE
+{
+}
+
+@method GenProcessClass, MSG_GEN_PROCESS_CLOSE_CUSTOM
+{
+    return 0;
+}
+
+/* UI_UIRealDetach: the CLOSE message of the engine or a custom mode, then
+ * the application shuts down (unlinks from its field) */
+@method GenProcessClass, MSG_GEN_PROCESS_REAL_DETACH
+{
+    optr app = App();
+    Message mode = @call app::MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE();
+
+    if (mode == MSG_GEN_PROCESS_OPEN_ENGINE)
+	@call oself::MSG_GEN_PROCESS_CLOSE_ENGINE();
+    else if (mode != MSG_GEN_PROCESS_OPEN_APPLICATION)
+	(void) @call oself::MSG_GEN_PROCESS_CLOSE_CUSTOM();
+    /* Port32: the instance reference for the field's restart list
+     * (MSG_GEN_APPLICATION_SEND_APP_INSTANCE_REFERENCE_TO_FIELD) waits
+     * for state files */
+    @call app::MSG_META_APP_SHUTDOWN(0, Self());
+}
+
+/* GenProcessShutdownAck: the application is off its field; the input
+ * goes to the process now; once the input queue is flushed, the final
+ * detach (or the next quit level) */
+@method GenProcessClass, MSG_META_SHUTDOWN_ACK
+{
+    ApplicationStates states;
+    GeodeHandle gh = GeodeGetProcessHandle();
+    EventHandle ev;
+
+    (void) callerID;
+    (void) ackOD;
+    states = @call App()::MSG_GEN_APPLICATION_GET_STATE();
+    WinGeodeSetInputObj(gh, Self());
+    if (states & AS_QUITTING)
+	ev = @record oself::MSG_META_QUIT_ACK(QL_DETACH, 0);
+    else
+	ev = @record oself::MSG_GEN_PROCESS_FINAL_DETACH();
+    AfterFlush(ev);
+}
+
+/* UI_UIFinalDetach: ProcessClass ends the process and acks the one that
+ * asked; the UI's own process only acks */
+@method GenProcessClass, MSG_GEN_PROCESS_FINAL_DETACH
+{
+    GenProcessDetachData d;
+    struct { word id; optr caller; } p;
+
+    GenProcessGetDetach(&d);
+    if (GeodeGetProcessHandle() == GeodeGetCodeProcessHandle()) {
+	if (d.GPDD_ackOD)
+	    @send, forceQueue d.GPDD_ackOD::MSG_META_ACK(0, oself);
+	return;
+    }
+    p.id = d.GPDD_callerID;
+    p.caller = d.GPDD_ackOD;
+    CObjCallSuperP((ClassStruct *) &GenProcessClass, oself, MSG_META_DETACH,
+		   &p, sizeof(p), NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * Quit
+ * ------------------------------------------------------------------- */
+
+/* UI_Quit: each QuitLevel acked with MSG_META_QUIT_ACK */
+@method GenProcessClass, MSG_META_QUIT_PROCESS
+{
+    (void) ackODChunk;
+    switch (quitLevel) {
+    case QL_BEFORE_UI:
+    case QL_AFTER_DETACH:
+	@send, forceQueue oself::MSG_META_QUIT_ACK(quitLevel, 0);
+	break;
+    case QL_UI:
+	@call App()::MSG_GEN_APPLICATION_INITIATE_UI_QUIT();
+	break;
+    case QL_AFTER_UI:
+	@call App()::MSG_GEN_APPLICATION_QUIT_AFTER_UI();
+	break;
+    case QL_DETACH:
+	@send, forceQueue oself::MSG_META_DETACH(0, NullOptr);
+	break;
+    default:
+	FatalError(UI_PROCESS_INVALID_QUIT_LEVEL);
+    }
+}
+
+/* UI_QuitAck: the next level, or the final detach after the last; an
+ * abort before the detach ends the quit */
+@method GenProcessClass, MSG_META_QUIT_ACK
+{
+    word next = (word) (quitLevel + 1);
+
+    if (next > QL_AFTER_DETACH) {
+	@send, forceQueue oself::MSG_GEN_PROCESS_FINAL_DETACH();
+	return;
+    }
+    if (next != QL_AFTER_DETACH && abortFlag) {
+	@call App()::MSG_GEN_APPLICATION_SET_NOT_QUITTING();
+	return;
+    }
+    @send, forceQueue oself::MSG_META_QUIT_PROCESS(next, 0);
+}
