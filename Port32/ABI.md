@@ -368,7 +368,11 @@ from their modules:
      that a client loaded with `GeodeUseLibrary` has two references,
      the client's and the process's, so it stays a library after its
      process is gone, as the asm's thread references kept it.
-  5. A thread other than the first tells its process when it exits:
+  5. A geode's parent process is the process that loaded it
+     (`GH_parentProcess`). When a process is gone, its parent, if still
+     a process, gets `MSG_PROCESS_NOTIFY_PROCESS_EXIT` (process, exit
+     code), queued.
+  6. A thread other than the first tells its process when it exits:
      `MSG_PROCESS_NOTIFY_THREAD_EXIT` (thread, exit code), queued, as
      long as the first thread is there.
 - **Multiple launches.** A loaded library is shared. A process that is
@@ -4938,6 +4942,59 @@ visual classes of `Library/User/Vis`:
   - fixed with them: `MSG_GEN_LOAD_OPTIONS` and `MSG_GEN_SAVE_OPTIONS`
     get a pointer to the `GenOptionsParams`, as their prototype says
     (`GenClass` passed the structure).
+- **The process and the application's life** (`Proc/procClass.goc`
+  after `procClass.asm`; `Gen/genApplication.goc` after
+  `genAppAttDet.asm`, `genAppCommonIACP.asm`):
+  - `GenProcessClass`: `MSG_META_ATTACH` with the AppLaunchBlock (the
+    system busy meanwhile, `SP_TOP` the path), `MSG_META_APP_STARTUP` to
+    the application object, then the mode message
+    (`MSG_GEN_PROCESS_OPEN_APPLICATION`, `_OPEN_ENGINE`, a custom one)
+    with the AppAttachFlags, the AppLaunchBlock freed,
+    `MSG_NOTIFY_APP_STARTED` on `GCNSLT_APPLICATION`;
+    `OPEN_APPLICATION` attaches the application object. The detach:
+    `MSG_META_DETACH` detaches the application object, its ack brings
+    the CLOSE message (application mode; an extra state block it
+    returns is freed), `MSG_GEN_APPLICATION_CLOSE_COMPLETE`; the
+    application, with nothing to stay for, asks for
+    `MSG_GEN_PROCESS_REAL_DETACH` (the CLOSE message of the engine or
+    custom mode, `MSG_META_APP_SHUTDOWN` to the application), its
+    `MSG_META_SHUTDOWN_ACK` gives the input to the process and, after
+    the input queue, `MSG_GEN_PROCESS_FINAL_DETACH`: `ProcessClass`
+    ends the process and acks. The quit levels (`MSG_META_QUIT`,
+    `MSG_META_QUIT_ACK`: before the UI, the UI, after the UI, the
+    detach, after it; an abort before the detach ends the quit);
+  - `GenApplicationClass`: the startup (the reference and launch flags
+    from the AppLaunchBlock, `AS_QUITTING` until attached, single
+    instance unless multi-launchable, the one-way link to the field and
+    `MSG_GEN_FIELD_ADD_GEN_APPLICATION`, the `MGCNLT_APP_STARTUP` list),
+    the attach (usable, the branch shrunk first, the Save Options
+    trigger, the specific UI, the options, the active list, the
+    windows, `MSG_GEN_BRING_TO_TOP` unless `ALF_DO_NOT_OPEN_ON_TOP`,
+    busy until the queue is through, `MSG_GEN_APPLICATION_OPEN_COMPLETE`),
+    the detach (the specific UI told, the windows, the active list
+    acked, the queue), the close, `MSG_GEN_APPLICATION_APP_MODE_COMPLETE`
+    (an application open for IACP only quits), the shutdown (the
+    startup list, the exclusives given up, off the field, the link
+    cut), the quit (`MSG_META_QUIT`: input ignored, the process's quit
+    levels; the windows quit, then the active list; the last chance to
+    abort), the state and the mode message;
+  - Port32: `MSG_META_ATTACH` of the process is
+    `MSG_META_ATTACH_PROCESS` (the 32-bit AppLaunchBlock handle comes as
+    two words); without one the process makes an empty one. The asm
+    hid the ack optr of a detach in the registers of the messages that
+    followed it; the process keeps it (with the detach in progress) in
+    its geode private data (`genProcessPrivOffset`, `GeodePrivAlloc` in
+    the library entry). A detach while one is in progress takes over
+    when the first had nobody to ack (a quit), else is acked at once,
+    as is one while the application is not usable. Without a field in
+    the AppLaunchBlock the application goes on the system's default
+    field (the asm asked the specific UI's system). There is no IACP
+    yet: the application has no connections, so it goes once it is not
+    usable;
+  - the kernel: a geode's parent process is the process that loaded
+    it; when a process exits its parent gets
+    `MSG_PROCESS_NOTIFY_PROCESS_EXIT` (process, exit code), as from the
+    asm's `KillProcess`.
 - **Not yet:**
   - in `GenClass`: moniker lists (`VisFindMoniker`,
     `MSG_SPEC_RESOLVE_MONIKER_LIST`, their relocation, the
@@ -4948,10 +5005,18 @@ visual classes of `Library/User/Vis`:
     `GenSpecShrinkBranch`, `UserSendToApplicationViaProcess`;
     `MSG_GEN_MAKE_APPLYABLE`/`_NOT_APPLYABLE` up the visual tree (goc
     gives `VisClass` no Gen messages);
-  - the UI as a process (`UserClass`, `GenProcessClass`) that makes
-    the system, screens and fields at its attach (`UserAttach`,
-    `UserMakeScreens`); the rest of `GenApplicationClass` (attach,
-    detach, busy);
+  - the UI as a process (`UserClass`) that makes the system, screens
+    and fields at its attach (`UserAttach`, `UserMakeScreens`), loads
+    applications (`UserLoadApplication`) and tells the fields of their
+    exit (`UserNotifyProcessExit`); its flow object (`uiFlowObj`: the
+    mouse grab let go at the close);
+  - in `GenProcessClass` and `GenApplicationClass`: state files (a
+    RESTORE_FROM_STATE launch opens the application), the instance
+    reference for the field's restart list, transparent detach, UI
+    threads, undo, IACP, Lazarus (launched again while detaching), the
+    activation dialog, the save options query on quit, the floating
+    keyboard, the removable disk list; the busy and input messages of
+    `genAppMisc.asm`;
   - in `GenFieldClass`: the system's help objects, restoring
     applications and their instance references (the reference holders
     of a shutdown), the default launcher
@@ -5022,6 +5087,24 @@ visual classes of `Library/User/Vis`:
   system detached (the fields' part of it, their notification, the ack
   to the caller); at the end the specific parts are shrunk and the
   library freed.
+- **Test.** ctest `library.ui.app`: the process geode
+  `Port32/Tests/Geode/uahost.goc` makes the system, a screen and a
+  field and launches the application `Port32/Tests/Geode/uiapp.goc` (a
+  `GenProcessClass` process with its application object and an object
+  on its active and startup lists each) on the field as the UI would:
+  the field told first, an AppLaunchBlock with the field, `GeodeLoad`.
+  uiapp reports each step of its process to uahost (`MSG_META_NOTIFY`
+  to the AppLaunchBlock's `ALB_userLoadAckOutput`); `tspui` counts what
+  the application tells its specific part. Launched, the application
+  comes up (attached, built twice: at the startup and after the shrink
+  of the attach, on the field's lists, usable, its mode, single
+  instance, on top, busy until the queue is through); quit by the user,
+  it goes through the five quit levels, the detach with its active
+  list, the close, the shutdown with its startup list and the final
+  detach; the process exits and uahost, its parent, tells the field.
+  Launched again (not on top), the system's detach takes it down
+  through the field (a detach, no quit), and the field and the system
+  are acked.
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 

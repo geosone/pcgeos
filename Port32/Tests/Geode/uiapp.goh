@@ -1,0 +1,22 @@
+/*
+ * uiapp.goh -- what the library.ui.app test's geodes uiapp and uahost
+ * share (Port32/Tests): the events uiapp reports to the process that
+ * launched it (MSG_META_NOTIFY to the ALB_userLoadAckOutput of its
+ * AppLaunchBlock, the event as the notification type).
+ */
+typedef enum {
+    UAE_ATTACH,			/* MSG_META_ATTACH of the process */
+    UAE_OPEN_APP,		/* MSG_GEN_PROCESS_OPEN_APPLICATION */
+    UAE_ACTIVE_ATTACH,		/* the active list: MSG_META_ATTACH */
+    UAE_ACTIVE_DETACH,		/* the active list: MSG_META_DETACH */
+    UAE_STARTUP_ATTACH,		/* the startup list: MSG_META_APP_STARTUP */
+    UAE_STARTUP_SHUTDOWN,	/* the startup list: MSG_META_APP_SHUTDOWN */
+    UAE_DETACH,			/* MSG_META_DETACH of the process */
+    UAE_CLOSE_APP,		/* MSG_GEN_PROCESS_CLOSE_APPLICATION */
+    UAE_REAL_DETACH,		/* MSG_GEN_PROCESS_REAL_DETACH */
+    UAE_FINAL_DETACH,		/* MSG_GEN_PROCESS_FINAL_DETACH */
+    UAE_QUIT,			/* MSG_META_QUIT of the process (a level) */
+    UAE_QUIT_ACK,		/* MSG_META_QUIT_ACK of the process */
+    UAE_COUNT
+} UAEvent;
+

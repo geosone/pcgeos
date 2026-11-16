@@ -1,0 +1,121 @@
+/*
+ * uiapp.goc -- an application for the library.ui.app test (Port32/Tests):
+ * UAProcessClass (GenProcessClass) with the application object UAApp,
+ * which has UAActive on its active list and UAStartup on its startup
+ * list.  The process tells the one that launched it what happens
+ * (uiapp.goh): the attach, the application mode, the lists, the detach
+ * and quit levels.  The specific UI tspui builds the application.
+ */
+@include <stdapp.goh>
+@include "uiapp.goh"
+
+@class UAProcessClass, GenProcessClass;
+@endc
+@classdecl UAProcessClass, neverSaved;
+
+/* an object on one of the application's lists: tells what it gets */
+@class UAListClass, MetaClass;
+@endc
+@classdecl UAListClass;
+
+static optr uaReporter;
+
+static void Report(UAEvent e, word data)
+{
+    if (OptrToHandle(uaReporter))
+	@send uaReporter::MSG_META_NOTIFY(MANUFACTURER_ID_GEOWORKS, e, data);
+}
+
+@start UAAppObjects;
+@object GenApplicationClass UAApp = {
+    GI_visMoniker = "UI App";
+    gcnList(MANUFACTURER_ID_GEOWORKS, MGCNLT_ACTIVE_LIST) = @UAActive;
+    gcnList(MANUFACTURER_ID_GEOWORKS, MGCNLT_APP_STARTUP) = @UAStartup;
+}
+@object UAListClass UAActive = {
+}
+@object UAListClass UAStartup = {
+}
+@end UAAppObjects;
+
+/* the reporter from the AppLaunchBlock first */
+@method UAProcessClass, MSG_META_ATTACH_PROCESS
+{
+    MemHandle alb = (MemHandle) (((dword) value1 << 16) | value2);
+
+    if (alb) {
+	AppLaunchBlock *a = MemLock(alb);
+	uaReporter = a->ALB_userLoadAckOutput;
+	MemUnlock(alb);
+    }
+    Report(UAE_ATTACH, 0);
+    @callsuper();
+}
+
+@method UAProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
+{
+    Report(UAE_OPEN_APP, attachFlags);
+    @callsuper();
+}
+
+/* a block of extra state, which GenProcessClass frees (no state file) */
+@method UAProcessClass, MSG_GEN_PROCESS_CLOSE_APPLICATION
+{
+    Report(UAE_CLOSE_APP, 0);
+    return MemAlloc(16, HF_SWAPABLE, 0);
+}
+
+@method UAProcessClass, MSG_META_DETACH
+{
+    Report(UAE_DETACH, callerID);
+    @callsuper();
+}
+
+@method UAProcessClass, MSG_GEN_PROCESS_REAL_DETACH
+{
+    Report(UAE_REAL_DETACH, 0);
+    @callsuper();
+}
+
+@method UAProcessClass, MSG_GEN_PROCESS_FINAL_DETACH
+{
+    Report(UAE_FINAL_DETACH, 0);
+    @callsuper();
+}
+
+@method UAProcessClass, MSG_META_QUIT_PROCESS
+{
+    Report(UAE_QUIT, quitLevel);
+    @callsuper();
+}
+
+@method UAProcessClass, MSG_META_QUIT_ACK
+{
+    Report(UAE_QUIT_ACK, quitLevel);
+    @callsuper();
+}
+
+@method UAListClass, MSG_META_ATTACH_OBJECT
+{
+    (void) appLaunchBlock;
+    (void) extraState;
+    Report(UAE_ACTIVE_ATTACH, flags);
+}
+
+/* acked by MetaClass */
+@method UAListClass, MSG_META_DETACH
+{
+    Report(UAE_ACTIVE_DETACH, 0);
+    @callsuper();
+}
+
+@method UAListClass, MSG_META_APP_STARTUP
+{
+    Report(UAE_STARTUP_ATTACH, appLaunchBlock != 0);
+}
+
+@method UAListClass, MSG_META_APP_SHUTDOWN
+{
+    Report(UAE_STARTUP_SHUTDOWN, 0);
+    @callsuper();
+}

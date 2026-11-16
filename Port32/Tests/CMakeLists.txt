@@ -342,6 +342,18 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
                      geode_vidmem)
     target_link_libraries(test_ui_system PRIVATE geos_kernel)
     add_test(NAME library.ui.system COMMAND test_ui_system)
+
+    # an application's life: GenProcessClass, GenApplicationClass
+    geos_geode(uahost GP Geode/uahost.gp GOC Geode/uahost.goc)
+    geos_geode(uiapp GP Geode/uiapp.gp GOC Geode/uiapp.goc)
+    geos_embed(_uahost_c ${uahost_GEO} uahost_geode)
+    geos_embed(_uiapp_c ${uiapp_GEO} uiapp_geode)
+    add_executable(test_ui_app test_ui_app.c ${_ui_c} ${_uahost_c}
+                   ${_uiapp_c} ${_tspui_c} ${_vidmem_c})
+    add_dependencies(test_ui_app geode_ui geode_uahost geode_uiapp
+                     geode_tspui geode_vidmem)
+    target_link_libraries(test_ui_app PRIVATE geos_kernel)
+    add_test(NAME library.ui.app COMMAND test_ui_app)
   endif()
 
   # starting the kernel: drives, [paths], the UI and a process from files

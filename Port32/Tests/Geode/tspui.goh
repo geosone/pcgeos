@@ -1,6 +1,6 @@
 /*
- * tspui.goh -- the specific UI library of the library.ui.gen and
- * library.ui.system tests (Port32/Tests): the state the tests, uigen and
+ * tspui.goh -- the specific UI library of the library.ui.gen,
+ * library.ui.system and library.ui.app tests (Port32/Tests): the state the tests, uigen and
  * uisys share with it.
  */
 @deflib tspui
@@ -21,6 +21,17 @@ typedef struct {
     word		TSS_sysExcls;	/* the system's MUP_ALTER_FTVMC_EXCL */
     word		TSS_busy, TSS_notBusy;	/* the system's MARK_(NOT_)BUSY */
     word		TSS_sysFocusEvents;	/* classed events TO_FOCUS */
+    /* the application's specific part (library.ui.app) */
+    word		TSS_appStartups;	/* MSG_META_APP_STARTUP */
+    word		TSS_appAttaches;	/* MSG_META_ATTACH */
+    word		TSS_appOpenCompletes;	/* ..._OPEN_COMPLETE */
+    word		TSS_appToTop;		/* MSG_GEN_BRING_TO_TOP */
+    word		TSS_appBusy, TSS_appNotBusy;	/* MARK_APP_(NOT_)
+						 * COMPLETELY_BUSY */
+    word		TSS_appDetachPending;	/* ..._DETACH_PENDING */
+    word		TSS_appCloseCompletes;	/* ..._CLOSE_COMPLETE */
+    word		TSS_appShutdowns;	/* MSG_META_APP_SHUTDOWN */
+    word		TSS_appIgnoreInput;	/* ..._IGNORE_INPUT */
 } TSState;
 
 extern TSState tspState;
@@ -34,8 +45,10 @@ extern TSState tspState;
     @instance word TSBI_which = 0;
 @endc
 
-/* the application: a composite above the displays */
+/* the application: a composite above the displays, which counts what
+ * the generic application tells it */
 @class TSAppClass, VisCompClass;
+    @uses GenApplicationClass;
 @endc
 
 /* a field, a screen and the system: composites that count */

@@ -1,7 +1,7 @@
 /*
- * tspui.goc -- a specific UI library for the library.ui.gen and
- * library.ui.system tests (Port32/Tests): what the generic objects of
- * uigen and uisys are built into.
+ * tspui.goc -- a specific UI library for the library.ui.gen,
+ * library.ui.system and library.ui.app tests (Port32/Tests): what the
+ * generic objects of uigen, uisys, uahost and uiapp are built into.
  * Each build routine counts its calls in tspState and gives a class:
  * TSButtonClass for a trigger, TSWinClass for a display, TSAppClass for
  * the application, TSFieldClass, TSScreenClass and TSSystemClass for
@@ -120,6 +120,60 @@ ClassStruct *TSBuildSystem(optr oself, word masterOffset)
 	return;
     }
     @callsuper();
+}
+
+@method TSAppClass, MSG_META_APP_STARTUP
+{
+    tspState.TSS_appStartups++;
+    @callsuper();
+}
+
+@method TSAppClass, MSG_META_ATTACH_OBJECT
+{
+    tspState.TSS_appAttaches++;
+    @callsuper();
+}
+
+@method TSAppClass, MSG_GEN_APPLICATION_OPEN_COMPLETE
+{
+    tspState.TSS_appOpenCompletes++;
+}
+
+@method TSAppClass, MSG_GEN_BRING_TO_TOP
+{
+    tspState.TSS_appToTop++;
+}
+
+@method TSAppClass, MSG_GEN_APPLICATION_MARK_APP_COMPLETELY_BUSY
+{
+    tspState.TSS_appBusy++;
+}
+
+@method TSAppClass, MSG_GEN_APPLICATION_MARK_APP_NOT_COMPLETELY_BUSY
+{
+    tspState.TSS_appNotBusy++;
+}
+
+@method TSAppClass, MSG_GEN_APPLICATION_DETACH_PENDING
+{
+    tspState.TSS_appDetachPending++;
+}
+
+@method TSAppClass, MSG_GEN_APPLICATION_CLOSE_COMPLETE
+{
+    (void) ackOD;
+    tspState.TSS_appCloseCompletes++;
+}
+
+@method TSAppClass, MSG_META_APP_SHUTDOWN
+{
+    tspState.TSS_appShutdowns++;
+    @callsuper();
+}
+
+@method TSAppClass, MSG_GEN_APPLICATION_IGNORE_INPUT
+{
+    tspState.TSS_appIgnoreInput++;
 }
 
 /* a window and win group, attached and realizable from the start (the
