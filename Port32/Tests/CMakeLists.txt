@@ -331,6 +331,17 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     add_dependencies(test_ui_gen geode_ui geode_uigen geode_tspui)
     target_link_libraries(test_ui_gen PRIVATE geos_kernel)
     add_test(NAME library.ui.gen COMMAND test_ui_gen)
+
+    # the system, screen and field classes, on the memory video driver
+    geos_geode(uisys GP Geode/uisys.gp GOC Geode/uisys.goc)
+    geos_embed(_uisys_c ${uisys_GEO} uisys_geode)
+    geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
+    add_executable(test_ui_system test_ui_system.c ${_ui_c} ${_uisys_c}
+                   ${_tspui_c} ${_vidmem_c})
+    add_dependencies(test_ui_system geode_ui geode_uisys geode_tspui
+                     geode_vidmem)
+    target_link_libraries(test_ui_system PRIVATE geos_kernel)
+    add_test(NAME library.ui.system COMMAND test_ui_system)
   endif()
 
   # starting the kernel: drives, [paths], the UI and a process from files
@@ -400,7 +411,9 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     geos_embed(_c ${${_d}_GEO} ${_d}_geode)
     list(APPEND _ninepin_c ${_c})
   endforeach()
-  geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
+  if(NOT _vidmem_c)	# (embedded for library.ui.system already)
+    geos_embed(_vidmem_c ${vidmem_GEO} vidmem_geode)
+  endif()
   add_executable(test_spool test_spool.c ${_spool_c} ${_filestr_c}
                  ${_eps_c} ${_pscript_c} ${_epson9_c} ${_epson24_c} ${_deskjet_c}
                  ${_pcl4_c} ${_ninepin_c}

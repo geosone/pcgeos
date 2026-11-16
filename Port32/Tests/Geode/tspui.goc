@@ -1,18 +1,26 @@
 /*
- * tspui.goc -- a specific UI library for the library.ui.gen test
- * (Port32/Tests): what the generic objects of uigen are built into.
+ * tspui.goc -- a specific UI library for the library.ui.gen and
+ * library.ui.system tests (Port32/Tests): what the generic objects of
+ * uigen and uisys are built into.
  * Each build routine counts its calls in tspState and gives a class:
  * TSButtonClass for a trigger, TSWinClass for a display, TSAppClass for
- * the application.  The buttons count their drawings.
+ * the application, TSFieldClass, TSScreenClass and TSSystemClass for
+ * the field, screen and system.  The buttons count their drawings, the
+ * others the messages they get.
  */
 @include <stdapp.goh>
 @include <Objects/vCompC.goh>
+@include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
 #include <Internal/specUI.h>
 @include "tspui.goh"
 
 @classdecl TSWinClass;
 @classdecl TSButtonClass;
 @classdecl TSAppClass;
+@classdecl TSFieldClass;
+@classdecl TSScreenClass;
+@classdecl TSSystemClass;
 
 TSState tspState;
 
@@ -38,6 +46,80 @@ ClassStruct *TSBuildApplication(optr oself, word masterOffset)
     (void) masterOffset;
     tspState.TSS_builds[2]++;
     return &TSAppClass;
+}
+
+ClassStruct *TSBuildField(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    tspState.TSS_sysBuilds[0]++;
+    return &TSFieldClass;
+}
+
+ClassStruct *TSBuildScreen(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    tspState.TSS_sysBuilds[1]++;
+    return &TSScreenClass;
+}
+
+ClassStruct *TSBuildSystem(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    tspState.TSS_sysBuilds[2]++;
+    return &TSSystemClass;
+}
+
+@method TSFieldClass, MSG_META_ATTACH
+{
+    tspState.TSS_fieldAttaches++;
+    @callsuper();
+}
+
+@method TSFieldClass, MSG_META_DETACH
+{
+    tspState.TSS_fieldDetaches++;
+    @callsuper();
+}
+
+@method TSFieldClass, MSG_GEN_FIELD_ORDER_GEN_APPLICATION_LIST
+{
+    tspState.TSS_orders++;
+}
+
+@method TSFieldClass, MSG_GEN_FIELD_ABOUT_TO_DETACH_COMPLETE
+{
+    tspState.TSS_aboutToDetach++;
+}
+
+@method TSSystemClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    (void) objectWantingControl;
+    (void) flags;
+    tspState.TSS_sysExcls++;
+}
+
+@method TSSystemClass, MSG_GEN_SYSTEM_MARK_BUSY
+{
+    tspState.TSS_busy++;
+}
+
+@method TSSystemClass, MSG_GEN_SYSTEM_MARK_NOT_BUSY
+{
+    tspState.TSS_notBusy++;
+}
+
+/* the system's focus: none here, the event counted */
+@method TSSystemClass, MSG_META_SEND_CLASSED_EVENT
+{
+    if ((word) whereTo == TO_FOCUS) {
+	tspState.TSS_sysFocusEvents++;
+	ObjFreeMessage(event);
+	return;
+    }
+    @callsuper();
 }
 
 /* a window and win group, attached and realizable from the start (the

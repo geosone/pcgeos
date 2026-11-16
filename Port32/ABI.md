@@ -4887,6 +4887,57 @@ visual classes of `Library/User/Vis`:
   - goc: no warning for an `@alias` outside a class (`Tools/goc`); the
     vardata relocations of `HINT_SHORT_LONG_TOUCH` name their fields
     (`genC.goh`; offsetof of a number is no C).
+- **The system, screens and fields** (`Gen/genSystem.goc`,
+  `Gen/genScreen.goc`, `Gen/genField.goc` after `genSystem.asm`,
+  `genScreen.asm`, `genField.asm`):
+  - `GenSystemClass`: the one system object, made by
+    `UserCreateSystemObject(block)` (the part of the asm's `UserAttach`
+    that made it; `gSysC.goh`, Port32 internal until the UI is a
+    process) with the specific UI of `UserGetSpecificUI`, usable and
+    enabled without a parent. `UserCallSystem(msg, params, size, reply,
+    replySize)` calls it (`genC.goh`), `MSG_GEN_CALL_SYSTEM` and
+    `TO_SYS_*` go to it. The default screen and field, the screens as
+    a composite of their own (`GSYI_screenComp`, generic upward links),
+    `MSG_GEN_SYSTEM_FOREACH_FIELD` with a C callback
+    (`Boolean callback(optr field, word data)`, the field it stopped at
+    returned), the pointer image, the detach: the fields first, then
+    (when the UI is a process) the UI process, the caller acked last;
+  - `GenScreenClass` (the new `CInclude/Objects/gScrnC.goh`): its video
+    driver (0: the default one); the first screen sets the UI's display
+    type (`UserGetDisplayType`), changed by `[ui] tinyScreen` and
+    `tvMode`, and `FakeScreen`'s page size `[ui] xScreenSize`,
+    `yScreenSize` (not with `[system] continueSetup`); without a video
+    driver `SysShutdown(SST_DIRTY)` with the asm's message;
+  - `GenFieldClass`: initialized targetable and with
+    `ATTR_GEN_INIT_FILE_KEY`; its attach loads the options (interface
+    and launch levels, launch model and options, interface options of
+    its category, default `uiFeatures`; `UserGetDefaultUILevel`,
+    `UserGetDefaultLaunchLevel`, `UserGetLaunchModel`,
+    `UserGetLaunchOptions`, `UserGetInterfaceOptions`), becomes the
+    system's first child and saves the default launcher's token
+    (`[<category>] defaultLauncher` in `SP_APPLICATION` or
+    `SP_SYS_APPLICATION`); applications starting (busy on the system),
+    the lists of processes (`GeodeHandle`s) and applications (`optr`s)
+    in chunks at the CompChildFlags' place, the process given to the
+    UI, a process exiting; no focus in the field (a launcher needed,
+    `GFI_notificationDestination` told, else lowered); the detach
+    (after the applications that are starting; the specific UI's part,
+    the system's exclusives given up, `MSG_META_DETACH` to each
+    application's process, waiting for the processes; then not usable,
+    out of the system, notified); `quitOnClose` through `SysShutdown`'s
+    shutdown control;
+  - Port32: the screen and the field take their specific UI as the
+    application does (`UserGetSpecificUI`), not from
+    `MSG_SPEC_GUP_QUERY` to the system (`GenReturnParams` hold no
+    32-bit handle); `MSG_GEN_SYSTEM_SET_SPECIFIC_UI`,
+    `_SET_DEFAULT_SCREEN`, `_ADD_SCREEN_CHILD`, `_REMOVE_SCREEN_CHILD`,
+    `MSG_GEN_FIELD_SET_VIS_PARENT` and
+    `MSG_GEN_FIELD_SHUTDOWN_CONTROL_RESPONSE` have the asm's parameters
+    (`@ifdef GEOS_PORT32` in `gSysC.goh`, `gFieldC.goh`);
+    `ObjAckDetach` is `ObjEnableDetach`;
+  - fixed with them: `MSG_GEN_LOAD_OPTIONS` and `MSG_GEN_SAVE_OPTIONS`
+    get a pointer to the `GenOptionsParams`, as their prototype says
+    (`GenClass` passed the structure).
 - **Not yet:**
   - in `GenClass`: moniker lists (`VisFindMoniker`,
     `MSG_SPEC_RESOLVE_MONIKER_LIST`, their relocation, the
@@ -4897,8 +4948,15 @@ visual classes of `Library/User/Vis`:
     `GenSpecShrinkBranch`, `UserSendToApplicationViaProcess`;
     `MSG_GEN_MAKE_APPLYABLE`/`_NOT_APPLYABLE` up the visual tree (goc
     gives `VisClass` no Gen messages);
-  - `GenSystemClass`: `MSG_GEN_CALL_SYSTEM` and `TO_SYS_*` destroy the
-    event; the rest of `GenApplicationClass` (attach, detach, busy);
+  - the UI as a process (`UserClass`, `GenProcessClass`) that makes
+    the system, screens and fields at its attach (`UserAttach`,
+    `UserMakeScreens`); the rest of `GenApplicationClass` (attach,
+    detach, busy);
+  - in `GenFieldClass`: the system's help objects, restoring
+    applications and their instance references (the reference holders
+    of a shutdown), the default launcher
+    (`MSG_GEN_FIELD_LOAD_DEFAULT_LAUNCHER`), the activation dialog,
+    exit to DOS, the express menu; the hard icon bars of `GenScreen`;
   - `MSG_VIS_CALL_ROUTINE`, `MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK`;
   - the quick transfer of `MSG_META_END_MOVE_COPY` (no clipboard);
   - `UserGetDefaultMonikerFont`: Berkeley 10 for now;
@@ -4947,6 +5005,23 @@ visual classes of `Library/User/Vis`:
   built objects; a trigger added and made usable is built and drawn,
   not usable unbuilt; the display not usable closes the window; at the
   end the specific parts are shrunk and the library freed.
+- **Test.** ctest `library.ui.system`: the process geode
+  `Port32/Tests/Geode/uisys.goc` makes the system object in its block;
+  `tspui` builds the system, screen and fields into counting classes,
+  and the memory video driver `vidmem` is the default video driver. A
+  screen as the system's screen child and default screen, its driver
+  and the display type (`tvMode`, `xScreenSize`); two fields attached
+  (one made at run time, one static with its own category and a
+  notification object): their options, the system's children in their
+  order, built with the system (the first field twice, as the system
+  that adds it is not built yet), the categories,
+  `MSG_GEN_SYSTEM_FOREACH_FIELD` past another child; applications
+  starting on a field, its lists as they are added, moved and removed,
+  the process the UI's for that time, exited; no focus in the field;
+  `MSG_GEN_CALL_SYSTEM`, `UserCallSystem` and `TO_SYS_FOCUS`; the
+  system detached (the fields' part of it, their notification, the ack
+  to the caller); at the end the specific parts are shrunk and the
+  library freed.
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 

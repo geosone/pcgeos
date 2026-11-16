@@ -1,6 +1,7 @@
 /*
- * tspui.goh -- the specific UI library of the library.ui.gen test
- * (Port32/Tests): the state the test and uigen share with it.
+ * tspui.goh -- the specific UI library of the library.ui.gen and
+ * library.ui.system tests (Port32/Tests): the state the tests, uigen and
+ * uisys share with it.
  */
 @deflib tspui
 
@@ -12,6 +13,14 @@ typedef struct {
     word		TSS_greyDraws;	/* drawn not enabled */
     word		TSS_monikers;	/* MSG_SPEC_UPDATE_VIS_MONIKER */
     word		TSS_buttons;	/* buttons made */
+    word		TSS_sysBuilds[3];	/* field, screen, system */
+    word		TSS_fieldAttaches;	/* MSG_META_ATTACH */
+    word		TSS_orders;	/* ORDER_GEN_APPLICATION_LIST */
+    word		TSS_aboutToDetach;	/* ABOUT_TO_DETACH_COMPLETE */
+    word		TSS_fieldDetaches;	/* MSG_META_DETACH */
+    word		TSS_sysExcls;	/* the system's MUP_ALTER_FTVMC_EXCL */
+    word		TSS_busy, TSS_notBusy;	/* the system's MARK_(NOT_)BUSY */
+    word		TSS_sysFocusEvents;	/* classed events TO_FOCUS */
 } TSState;
 
 extern TSState tspState;
@@ -27,6 +36,18 @@ extern TSState tspState;
 
 /* the application: a composite above the displays */
 @class TSAppClass, VisCompClass;
+@endc
+
+/* a field, a screen and the system: composites that count */
+@class TSFieldClass, VisCompClass;
+    @uses GenFieldClass;
+@endc
+
+@class TSScreenClass, VisCompClass;
+@endc
+
+@class TSSystemClass, VisCompClass;
+    @uses GenSystemClass;
 @endc
 
 @endlib

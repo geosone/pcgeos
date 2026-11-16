@@ -43,7 +43,7 @@ typedef struct {
     word	UGS_failLines[8];
 } UGState;
 
-/* as tspui.goh */
+/* as tspui.goh (the part this test uses) */
 typedef struct {
     WindowHandle	TSS_root;
     WindowHandle	TSS_win;
@@ -163,7 +163,7 @@ int main(void)
     CHECK(sp != 0);
     if (!sp)
 	return 1;
-    ts = ProcGetLibraryEntry(sp, 3);
+    ts = ProcGetLibraryEntry(sp, 6);
     ts->TSS_root = root;
     nRects = 0;
     step(2);

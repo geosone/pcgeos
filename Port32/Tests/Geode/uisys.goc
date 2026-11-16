@@ -1,0 +1,338 @@
+/*
+ * uisys.goc -- a process geode for the library.ui.system test
+ * (Port32/Tests): the UI's system object (GenSystemClass) made in this
+ * geode's block, with the screen USScreen (GenScreenClass), the fields
+ * USField1 (made at run time) and USField2 (category "myField", which
+ * notifies USNotify), the applications USApp and USApp2 on a field's
+ * lists, and USOther, a generic child of the system that is no field.
+ * The specific UI tspui (tspui.goc) builds the system, screen and fields.
+ * The test (test_ui_system.c) runs the steps through USStep on the
+ * process thread; the checks made here count in usState.
+ */
+@include <stdapp.goh>
+@include <Objects/vCompC.goh>
+@include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
+@include <Objects/gScrnC.goh>
+#include <Internal/specUI.h>
+#include <driver.h>
+#include <localize.h>
+#include <string.h>
+
+typedef struct {
+    GeodeHandle	USS_process;
+    word	USS_attached;
+    word	USS_checks, USS_fails, USS_failLine;
+    word	USS_acks;		/* USNotify: MSG_META_ACK */
+    word	USS_fieldDetached;	/* MSG_META_FIELD_NOTIFY_DETACH */
+    word	USS_noFocus;		/* MSG_META_FIELD_NOTIFY_NO_FOCUS */
+    word	USS_shutdownFlags;	/* the flags of the notifications */
+    word	USS_failLines[8];
+} USState;
+
+USState usState;
+
+#define USCHECK(c) \
+    do { usState.USS_checks++; if (!(c)) { \
+	if (usState.USS_fails < 8) \
+	    usState.USS_failLines[usState.USS_fails] = __LINE__; \
+	usState.USS_fails++; \
+	if (!usState.USS_failLine) usState.USS_failLine = __LINE__; } \
+    } while (0)
+
+@class USProcessClass, ProcessClass;
+    @message void MSG_US_STEP(word step);
+@endc
+@classdecl USProcessClass, neverSaved;
+
+/* the destination of the field's notifications and the system's ack */
+@class USNotifyClass, MetaClass;
+@endc
+@classdecl USNotifyClass;
+
+@method USNotifyClass, MSG_META_ACK
+{
+    (void) callerID;
+    (void) caller;
+    usState.USS_acks++;
+}
+
+@method USNotifyClass, MSG_META_FIELD_NOTIFY_DETACH
+{
+    (void) field;
+    usState.USS_fieldDetached++;
+    usState.USS_shutdownFlags |= shutdownFlag;
+}
+
+@method USNotifyClass, MSG_META_FIELD_NOTIFY_NO_FOCUS
+{
+    (void) field;
+    usState.USS_noFocus++;
+    usState.USS_shutdownFlags |= shutdownFlag;
+}
+
+@start USObjects;
+@object GenApplicationClass USApp = {
+    GI_states = GS_USABLE | GS_ENABLED;
+}
+@object GenApplicationClass USApp2 = {
+    GI_states = GS_USABLE | GS_ENABLED;
+}
+@object GenScreenClass USScreen = {
+}
+@object GenFieldClass USField2 = {
+    GFI_notificationDestination = @USNotify;
+    ATTR_GEN_INIT_FILE_KEY = "field";
+    ATTR_GEN_INIT_FILE_CATEGORY = "myField";
+}
+@object GenClass USOther = {
+    GI_states = 0;
+}
+@object USNotifyClass USNotify = {
+}
+@end USObjects;
+
+static optr usSystem, usField1;
+
+@method USProcessClass, MSG_META_ATTACH_PROCESS
+{
+    (void) value1;
+    (void) value2;
+    usState.USS_process = GeodeGetProcessHandle();
+    usState.USS_attached++;
+}
+
+static Boolean Grown(optr o)
+{
+    Boolean g;
+
+    ObjLockObjBlock(OptrToHandle(o));
+    g = GenCheckIfSpecGrown(o);
+    MemUnlock(OptrToHandle(o));
+    return g;
+}
+
+/* a copy of the object's Gen part (its block is ours) */
+static void GenData(optr o, void *buf, word size)
+{
+    ObjLockObjBlock(OptrToHandle(o));
+    memcpy(buf, ObjDerefGen(o), size);
+    MemUnlock(OptrToHandle(o));
+}
+
+/* the optrs (or handles) of a list chunk of the field */
+static word ListOf(optr field, ChunkHandle ch, void *buf, word max)
+{
+    word n = 0;
+
+    ObjLockObjBlock(OptrToHandle(field));
+    if (ch) {
+	optr l = ConstructOptr(OptrToHandle(field), ch);
+	n = LMemGetChunkSize(l);
+	if (n > max)
+	    n = max;
+	memcpy(buf, LMemDeref(l), n);
+    }
+    MemUnlock(OptrToHandle(field));
+    return n;
+}
+
+static word fieldsSeen;
+static optr stopAt;
+
+static Boolean CountFields(optr field, word data)
+{
+    fieldsSeen += data;
+    return field == stopAt;
+}
+
+static Boolean SameText(const char *a, const char *b)
+{
+    return !LocalCmpStrings(a, b, 0);
+}
+
+@method USProcessClass, MSG_US_STEP
+{
+    switch (step) {
+    case 1: {
+	/* the system object: usable, enabled, targetable, its UI */
+	GenSystemInstance g;
+	optr o = NullOptr;
+	usSystem = UserCreateSystemObject(OptrToHandle(@USApp));
+	USCHECK(OptrToHandle(usSystem) == OptrToHandle(@USApp));
+	USCHECK(@call usSystem::MSG_GEN_GET_USABLE() &&
+		@call usSystem::MSG_GEN_GET_ENABLED());
+	USCHECK(@call usSystem::MSG_GEN_GET_ATTRIBUTES() & GA_TARGETABLE);
+	GenData(usSystem, &g, sizeof(g));
+	USCHECK(g.GSYI_specificUI == UserGetSpecificUI() &&
+		g.GSYI_defaultUI == g.GSYI_specificUI && g.GSYI_specificUI);
+	USCHECK(UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_FIELD, NULL, 0,
+			       &o, sizeof(o)) && !o);
+	USCHECK(!Grown(usSystem));
+	break;
+    }
+    case 2: {
+	/* the screen: a screen child of the system, the default video
+	 * driver, the display type */
+	GenScreenInstance s;
+	USCHECK(@call USScreen::MSG_GEN_GET_USABLE());
+	@call usSystem::MSG_GEN_SYSTEM_ADD_SCREEN_CHILD(@USScreen, CCO_LAST);
+	@call usSystem::MSG_GEN_SYSTEM_SET_DEFAULT_SCREEN(@USScreen);
+	USCHECK(@call usSystem::MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN() ==
+		@USScreen);
+	USCHECK(@call usSystem::MSG_GEN_COUNT_CHILDREN() == 0);
+	USCHECK(@call USScreen::MSG_GEN_FIND_PARENT() == usSystem);
+	USCHECK((UserGetDisplayType() & 0xff) == 0);
+	@call USScreen::MSG_GEN_SCREEN_SET_VIDEO_DRIVER(0);
+	GenData(@USScreen, &s, sizeof(s));
+	USCHECK(s.GSCI_videoDriver &&
+		s.GSCI_videoDriver == GeodeGetDefaultDriver(GDDT_VIDEO));
+	USCHECK((UserGetDisplayType() & 0xff) == 0xff);
+	USCHECK(((UserGetDisplayType() >> 8) & DT_DISP_ASPECT_RATIO) ==
+		(DAR_TV << DT_DISP_ASPECT_RATIO_OFFSET));
+	/* a message past GenClass builds the screen (not the system) */
+	USCHECK(!Grown(@USScreen));
+	(void) @call USScreen::MSG_VIS_GET_ATTRS();
+	USCHECK(Grown(@USScreen) && !Grown(usSystem));
+	break;
+    }
+    case 3: {
+	/* the fields: options, the system's children, the categories */
+	GenFieldInstance f;
+	char cat[INI_CATEGORY_BUFFER_SIZE];
+	usField1 = ObjInstantiate(OptrToHandle(@USApp),
+				  (ClassStruct *) &GenFieldClass);
+	USCHECK(@call usField1::MSG_GEN_GET_ATTRIBUTES() & GA_TARGETABLE);
+	ObjLockObjBlock(OptrToHandle(usField1));
+	USCHECK(ObjVarFindData(usField1, ATTR_GEN_INIT_FILE_KEY) != NULL);
+	MemUnlock(OptrToHandle(usField1));
+	@call usField1::MSG_GEN_FIELD_SET_VIS_PARENT(@USScreen);
+	@call usField1::MSG_META_ATTACH();
+	USCHECK(UserGetLaunchModel() == UILM_SINGLE_INSTANCE &&
+		UserGetDefaultUILevel() == UIIL_INTERMEDIATE &&
+		UserGetLaunchOptions() == UILO_DESK_ACCESSORIES &&
+		UserGetInterfaceOptions() == UIIO_OPTIONS_MENU);
+	USCHECK(@call usSystem::MSG_GEN_COUNT_CHILDREN() == 1);
+	USCHECK(Grown(usField1) && Grown(usSystem));
+	GenData(usField1, &f, sizeof(f));
+	USCHECK(f.GFI_visParent == @USScreen);
+
+	@call USField2::MSG_META_ATTACH();
+	USCHECK(UserGetLaunchModel() == UILM_GURU &&
+		UserGetDefaultLaunchLevel() == UIIL_BEGINNING);
+	USCHECK(@call usSystem::MSG_GEN_FIND_CHILD(@USField2) == 0 &&
+		@call usSystem::MSG_GEN_FIND_CHILD(usField1) == 1);
+	@call USField2::MSG_META_ATTACH();	/* not added twice */
+	USCHECK(@call usSystem::MSG_GEN_COUNT_CHILDREN() == 2);
+	USCHECK(@call USField2::MSG_GEN_FIELD_GET_LAUNCH_MODEL() == UILM_GURU);
+
+	cat[0] = 0;
+	@call usField1::MSG_META_GET_INI_CATEGORY(cat);
+	USCHECK(SameText(cat, "uiFeatures"));
+	cat[0] = 0;
+	@call USField2::MSG_META_GET_INI_CATEGORY(cat);
+	USCHECK(SameText(cat, "myField"));
+
+	/* MSG_GEN_SYSTEM_FOREACH_FIELD over the fields only */
+	@call usSystem::MSG_GEN_ADD_CHILD(@USOther, CCO_LAST);
+	USCHECK(@call usSystem::MSG_GEN_COUNT_CHILDREN() == 3);
+	fieldsSeen = 0;
+	stopAt = NullOptr;
+	USCHECK(@call usSystem::MSG_GEN_SYSTEM_FOREACH_FIELD(CountFields, 1)
+		== NullOptr && fieldsSeen == 2);
+	fieldsSeen = 0;
+	stopAt = @USField2;
+	USCHECK(@call usSystem::MSG_GEN_SYSTEM_FOREACH_FIELD(CountFields, 1)
+		== @USField2 && fieldsSeen == 1);
+	break;
+    }
+    case 4: {
+	/* the applications of a field */
+	GeodeHandle p = usState.USS_process, procs[4];
+	MemHandle owner = MemOwner((MemHandle) p);
+	optr apps[4];
+	GenFieldInstance f;
+	USCHECK(@call USField2::MSG_GEN_FIELD_APP_STARTUP_NOTIFY() == 0);
+	GenData(@USField2, &f, sizeof(f));
+	USCHECK(f.GFI_numAttachingApps == 1);
+	@call USField2::MSG_GEN_FIELD_ADD_GEN_APPLICATION(@USApp, CCO_LAST);
+	USCHECK(MemOwner((MemHandle) p) ==
+		GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0));
+	USCHECK(@call USField2::MSG_GEN_FIELD_APP_STARTUP_NOTIFY() == 0);
+	@call USField2::MSG_GEN_FIELD_ADD_GEN_APPLICATION(@USApp2, CCO_FIRST);
+	GenData(@USField2, &f, sizeof(f));
+	USCHECK(f.GFI_numAttachingApps == 0);
+	USCHECK(ListOf(@USField2, f.GFI_genApplications, apps, sizeof(apps))
+		== 2 * sizeof(optr) && apps[0] == @USApp2 && apps[1] == @USApp);
+	USCHECK(ListOf(@USField2, f.GFI_processes, procs, sizeof(procs))
+		== 2 * sizeof(GeodeHandle) && procs[0] == p && procs[1] == p);
+	@call USField2::MSG_GEN_FIELD_MOVE_GEN_APPLICATION(@USApp2, CCO_LAST);
+	GenData(@USField2, &f, sizeof(f));
+	USCHECK(ListOf(@USField2, f.GFI_genApplications, apps, sizeof(apps))
+		== 2 * sizeof(optr) && apps[0] == @USApp && apps[1] == @USApp2);
+	@call USField2::MSG_GEN_FIELD_REMOVE_GEN_APPLICATION(@USApp);
+	USCHECK(ListOf(@USField2, f.GFI_genApplications, apps, sizeof(apps))
+		== sizeof(optr) && apps[0] == @USApp2);
+	@call USField2::MSG_GEN_FIELD_REMOVE_GEN_APPLICATION(@USApp2);
+	USCHECK(!ListOf(@USField2, f.GFI_genApplications, apps,
+			sizeof(apps)));
+	@call USField2::MSG_GEN_FIELD_PROCESS_EXIT(p);
+	@call USField2::MSG_GEN_FIELD_PROCESS_EXIT(p);
+	USCHECK(!ListOf(@USField2, f.GFI_processes, procs, sizeof(procs)));
+	HandleModifyOwner((Handle) p, (GeodeHandle) owner);
+
+	/* no focus in the field: it needs a launcher, tells USNotify */
+	@call USField2::MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE();
+	GenData(@USField2, &f, sizeof(f));
+	USCHECK(f.GFI_flags & GFF_NEED_DEFAULT_LAUNCHER);
+	break;
+    }
+    case 5: {
+	/* messages to the system: classed events, TO_SYS_* */
+	EventHandle ev;
+	ev = @record GenSystemClass::MSG_GEN_SYSTEM_MARK_BUSY();
+	@call USApp::MSG_GEN_CALL_SYSTEM(ev);
+	USCHECK(UserCallSystem(MSG_GEN_SYSTEM_MARK_NOT_BUSY, NULL, 0, NULL,
+			       0));
+	ev = @record VisClass::MSG_VIS_GET_ATTRS();
+	@call USApp::MSG_META_SEND_CLASSED_EVENT(ev,
+						(TravelOption) TO_SYS_FOCUS);
+	break;
+    }
+    case 6:
+	/* the system detaches: the fields first, USNotify acked */
+	@send usSystem::MSG_META_DETACH(0, @USNotify);
+	break;
+    case 7: {
+	/* detached: the fields out of the system, unbuilt by now */
+	GenFieldInstance f;
+	USCHECK(@call usSystem::MSG_GEN_COUNT_CHILDREN() == 1 &&
+		@call usSystem::MSG_GEN_FIND_CHILD(@USOther) == 0);
+	GenData(@USField2, &f, sizeof(f));
+	USCHECK(!(f.GFI_flags & GFF_DETACHING) && !f.GFI_visParent);
+	USCHECK(!@call USField2::MSG_GEN_GET_USABLE());
+	USCHECK(!@call usField1::MSG_GEN_GET_USABLE());
+	/* the specific parts and the specific UI go */
+	ObjLockObjBlock(OptrToHandle(usSystem));
+	GenSpecShrinkBranch(usSystem);
+	GenSpecShrinkBranch(@USScreen);
+	GenSpecShrinkBranch(@USField2);
+	GenSpecShrinkBranch(usField1);
+	MemUnlock(OptrToHandle(usSystem));
+	USCHECK(!Grown(usSystem) && !Grown(@USScreen) && !Grown(usField1));
+	@call usSystem::MSG_GEN_SYSTEM_REMOVE_SCREEN_CHILD(@USScreen);
+	USCHECK(@call USScreen::MSG_GEN_FIND_PARENT() == NullOptr);
+	UserDestroySystemObject();
+	USCHECK(!UserCallSystem(MSG_GEN_SYSTEM_MARK_BUSY, NULL, 0, NULL, 0));
+	UserFreeSpecificUI();
+	break;
+    }
+    }
+}
+
+void USStep(word step)
+{
+    optr p = ConstructOptr(usState.USS_process, 0);
+
+    @call p::MSG_US_STEP(step);
+}
