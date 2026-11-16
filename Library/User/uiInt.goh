@@ -154,6 +154,23 @@ Boolean UserCallApplication(Message msg, const void *params,
 
 /* the UI's FatalErrors (uiConstant.def), as far as the C UI raises them */
 #define UI_ERROR_NO_SPECIFIC_UI	18
+/* these by their place among the FatalErrors of uiConstant.def */
+#define UI_STARTUP_DONE_MSG_RECEIVED_BEFORE_STARTUP_NOTIFY	184
+#define UI_GEN_FIELD_GEN_APPLICATION_LIST_CORRUPT		191
+
+/* ---------------------------------------------------------------------
+ * Gen/genSystem.goc: the UI's state (userVariable.def), the system
+ * ------------------------------------------------------------------- */
+typedef ByteFlags UIFlags;
+#define UIF_DETACHING_SYSTEM	0x80
+#define UIF_DETACHING_APP	0x40
+#define UIF_HAVE_DISPLAY_TYPE	0x20
+#define UIF_INIT		0x10
+
+extern UIFlags uiFlags;
+extern byte uiDisplayType;
+/* the system object (0 until UserCreateSystemObject) */
+optr UserGetSystemObject(void);
 
 /* ---------------------------------------------------------------------
  * Vis/visSpec.goc: the specific part of a generic object

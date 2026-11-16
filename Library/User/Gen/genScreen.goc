@@ -1,0 +1,81 @@
+/*
+ * genScreen.goc -- GenScreenClass (after genScreen.asm): a screen of the
+ * system, with its video driver, whose display type the UI takes from
+ * the first screen ([ui] tinyScreen and tvMode change it; FakeScreen's
+ * [ui] xScreenSize and yScreenSize the page size, unless
+ * [system] continueSetup).
+ *
+ * Port32 (Port32/ABI.md section 13x): the screen takes its specific UI
+ * as the application does (UserGetSpecificUI), not by
+ * MSG_SPEC_GUP_QUERY to the system.  Not yet: the hard icon bars of
+ * [ui] hardIconsLibrary.
+ */
+@include "uiInt.goh"
+@include <Objects/gScrnC.goh>
+#include <initfile.h>
+#include <driver.h>
+#include <system.h>
+#include <Internal/videoDr.h>
+
+@classdecl GenScreenClass;
+
+/* userStrings.asm */
+static const char noVideoMessage[] =
+    "No working compatible video hardware found on this system.";
+
+/* FakeScreen: the page size of the ini file */
+static void FakeScreen(VideoDriverInfo *vdi)
+{
+    Boolean setup = FALSE;
+    word v;
+
+    InitFileReadBoolean("system", "continueSetup", &setup);
+    if (setup)
+	return;
+    if (!InitFileReadInteger("ui", "xScreenSize", &v))
+	vdi->VDI_pageW = v;
+    if (!InitFileReadInteger("ui", "yScreenSize", &v))
+	vdi->VDI_pageH = v;
+}
+
+@method GenScreenClass, MSG_GEN_SCREEN_SET_VIDEO_DRIVER
+{
+    VideoDriverInfo *vdi;
+    Boolean b;
+
+    if (!driver)
+	driver = GeodeGetDefaultDriver(GDDT_VIDEO);
+    if (!driver) {
+	SysShutdown(SST_DIRTY, noVideoMessage);
+	return;
+    }
+    pself->GSCI_videoDriver = driver;
+    if (uiFlags & UIF_HAVE_DISPLAY_TYPE)
+	return;
+    vdi = (VideoDriverInfo *) GeodeInfoDriver(driver);
+    FakeScreen(vdi);
+    b = FALSE;
+    InitFileReadBoolean("ui", "tinyScreen", &b);
+    if (b)
+	vdi->VDI_displayType = (DisplayType)
+	    ((vdi->VDI_displayType & ~DT_DISP_SIZE) |
+	     (DS_TINY << DT_DISP_SIZE_OFFSET));
+    b = FALSE;
+    InitFileReadBoolean("ui", "tvMode", &b);
+    if (b)
+	vdi->VDI_displayType = (DisplayType)
+	    ((vdi->VDI_displayType & ~DT_DISP_ASPECT_RATIO) |
+	     (DAR_TV << DT_DISP_ASPECT_RATIO_OFFSET));
+    uiDisplayType = vdi->VDI_displayType;
+    uiFlags |= UIF_HAVE_DISPLAY_TYPE;
+}
+
+/* GenScreenBuild */
+@method GenScreenClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    SpecBuildRoutine *r;
+
+    r = (SpecBuildRoutine *) ProcGetLibraryEntry(UserGetSpecificUI(),
+						 SPIR_BUILD_SCREEN);
+    return r ? r(oself, MasterOffset) : NULL;
+}

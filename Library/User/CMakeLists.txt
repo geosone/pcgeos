@@ -19,6 +19,9 @@ geos_geode(ui GP ui32.gp
                ${ui}/Gen/genUtils.goc
                ${ui}/Gen/genClass.goc
                ${ui}/Gen/genApplication.goc
+               ${ui}/Gen/genSystem.goc
+               ${ui}/Gen/genScreen.goc
+               ${ui}/Gen/genField.goc
                ${ui}/User/userFlowUtils.goc
                ${ui}/User/userFlowMisc.goc
                ${ui}/User/userFlowInput.goc

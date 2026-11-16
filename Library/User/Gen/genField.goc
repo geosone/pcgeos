@@ -1,0 +1,525 @@
+/*
+ * genField.goc -- GenFieldClass (after genField.asm): a field of the
+ * system, the parent of the applications in it.  Its options (the
+ * interface and launch levels, the launch model and options, the
+ * interface options of [uiFeatures] or its own category), the
+ * default launcher's token, the lists of its processes and
+ * applications, starting applications, the detach of the field (its
+ * applications' processes first), quitOnClose and the notifications of
+ * GFI_notificationDestination.
+ *
+ * The lists: GFI_processes is a chunk of GeodeHandles, GFI_genApplications
+ * one of optrs (the asm's words and dwords at their Port32 sizes).
+ *
+ * Port32 (Port32/ABI.md section 13x): the field takes its specific UI
+ * as the application does (UserGetSpecificUI).  Not yet: the system's
+ * help objects (UIApp's), restoring applications and their instance
+ * references (MSG_GEN_FIELD_RESTORE_APPS ..., the reference holders
+ * of a shutdown), the default launcher (MSG_GEN_FIELD_LOAD_DEFAULT_LAUNCHER,
+ * which a field in the transparent launch model sends itself), the
+ * activation dialog, exit to DOS, the express menu.
+ */
+@include "uiInt.goh"
+@include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
+#include <initfile.h>
+#include <file.h>
+#include <system.h>
+#include <win.h>
+#include <string.h>
+
+@classdecl GenFieldClass;
+
+/* userVariable.def: the options of the fields (GenFieldLoadOptions) */
+static UIInterfaceLevel uiInterfaceLevel = UIIL_ADVANCED;
+static UIInterfaceLevel uiDefaultLaunchLevel = UIIL_ADVANCED;
+static UILaunchModel uiLaunchModel = UILM_MULTIPLE_INSTANCES;
+static UILaunchOptions uiLaunchOptions = UILO_DESK_ACCESSORIES;
+static UIInterfaceOptions uiInterfaceOptions = UIIO_OPTIONS_MENU;
+
+UIInterfaceLevel UserGetDefaultUILevel(void)
+{
+    return uiInterfaceLevel;
+}
+
+UIInterfaceLevel UserGetDefaultLaunchLevel(void)
+{
+    return uiDefaultLaunchLevel;
+}
+
+UILaunchModel UserGetLaunchModel(void)
+{
+    return uiLaunchModel;
+}
+
+UILaunchOptions UserGetLaunchOptions(void)
+{
+    return uiLaunchOptions;
+}
+
+UIInterfaceOptions UserGetInterfaceOptions(void)
+{
+    return uiInterfaceOptions;
+}
+
+#define FieldPart(o)	((GenFieldInstance *) ObjDerefGen(o))
+
+/* ---------------------------------------------------------------------
+ * Attaching
+ * ------------------------------------------------------------------- */
+
+@method GenFieldClass, MSG_META_INITIALIZE
+{
+    pself->GI_attrs |= GA_TARGETABLE;
+    /* forces the options to be loaded */
+    ObjVarAddData(oself, ATTR_GEN_INIT_FILE_KEY | VDF_SAVE_TO_STATE, 0);
+    @callsuper();
+}
+
+/* GenFieldBuild */
+@method GenFieldClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_FIELD, MasterOffset);
+}
+
+@method GenFieldClass, MSG_GEN_FIELD_ENABLE_BITMAP
+{
+    pself->GFI_flags |= GFF_LOAD_BITMAP;
+}
+
+/* SaveDefaultLauncherInfo: the token of [<category>] defaultLauncher,
+ * from SP_APPLICATION or SP_SYS_APPLICATION */
+static void SaveDefaultLauncherInfo(optr oself)
+{
+    char cat[INI_CATEGORY_BUFFER_SIZE];
+    char name[FILE_LONGNAME_BUFFER_SIZE];
+    GeodeToken token;
+    word size, err;
+
+    if (ObjVarFindData(oself, TEMP_GEN_FIELD_DEFAULT_LAUNCHER_ID))
+	return;
+    cat[0] = 0;
+    @call oself::MSG_META_GET_INI_CATEGORY(cat);
+    if (InitFileReadStringBuffer(cat, "defaultLauncher", name,
+				 sizeof(name) & IFRF_SIZE, &size))
+	return;
+    FilePushDir();
+    FileSetStandardPath(SP_APPLICATION);
+    err = FileGetPathExtAttributes(name, FEA_TOKEN, &token, sizeof(token));
+    if (err == ERROR_FILE_NOT_FOUND) {
+	FileSetStandardPath(SP_SYS_APPLICATION);
+	err = FileGetPathExtAttributes(name, FEA_TOKEN, &token,
+				       sizeof(token));
+    }
+    FilePopDir();
+    if (!err)
+	*(GeodeToken *) ObjVarAddData(oself,
+				      TEMP_GEN_FIELD_DEFAULT_LAUNCHER_ID,
+				      sizeof(GeodeToken)) = token;
+}
+
+/* GenFieldAttach: the options first (the specific UI uses them), the
+ * field becomes the system's first child (the welcome field stays the
+ * last one) */
+@method GenFieldClass, MSG_META_ATTACH
+{
+    optr sys = UserGetSystemObject();
+
+    @call oself::MSG_META_LOAD_OPTIONS();
+    if (OptrToHandle(sys) &&
+	@call sys::MSG_GEN_FIND_CHILD(oself) == (word) -1)
+	@call sys::MSG_GEN_ADD_CHILD(oself, CCO_FIRST);
+    SaveDefaultLauncherInfo(oself);
+    @callsuper();
+}
+
+@method GenFieldClass, MSG_GEN_LOAD_OPTIONS
+{
+    const char *cat = params->GOP_category;
+    word v;
+
+    v = UIIL_ADVANCED;
+    InitFileReadInteger(cat, "interfaceLevel", &v);
+    uiInterfaceLevel = (UIInterfaceLevel) v;
+    v = UIIL_ADVANCED;
+    InitFileReadInteger(cat, "launchLevel", &v);
+    uiDefaultLaunchLevel = (UIInterfaceLevel) v;
+    v = UILM_MULTIPLE_INSTANCES;
+    InitFileReadInteger(cat, "launchModel", &v);
+    uiLaunchModel = (UILaunchModel) v;
+    v = UILO_DESK_ACCESSORIES;
+    InitFileReadInteger(cat, "launchOptions", &v);
+    uiLaunchOptions = v;
+    v = UIIO_OPTIONS_MENU;
+    InitFileReadInteger(cat, "interfaceOptions", &v);
+    uiInterfaceOptions = v;
+    @callsuper();
+}
+
+/* the category of the superclass, else "uiFeatures" */
+@method GenFieldClass, MSG_META_GET_INI_CATEGORY
+{
+    @callsuper();
+    if (!buf[0])
+	memcpy(buf, "uiFeatures", sizeof("uiFeatures"));
+}
+
+@method GenFieldClass, MSG_GEN_FIELD_SET_VIS_PARENT
+{
+    pself->GFI_visParent = visParent;
+}
+
+@method GenFieldClass, MSG_GEN_FIELD_GET_LAUNCH_MODEL
+{
+    return uiLaunchModel;
+}
+
+/* ---------------------------------------------------------------------
+ * The applications
+ * ------------------------------------------------------------------- */
+
+static void HandleFieldDetachLow(optr oself, word callerID, optr caller);
+
+/* 0 if an application may start, -1 if not (detaching, 255 starting) */
+@method GenFieldClass, MSG_GEN_FIELD_APP_STARTUP_NOTIFY
+{
+    if ((pself->GFI_flags & GFF_DETACHING) ||
+	(uiFlags & UIF_DETACHING_SYSTEM) || pself->GFI_numAttachingApps == 255)
+	return (word) -1;
+    pself->GFI_numAttachingApps++;
+    UserCallSystem(MSG_GEN_SYSTEM_MARK_BUSY, NULL, 0, NULL, 0);
+    return 0;
+}
+
+@method GenFieldClass, MSG_GEN_FIELD_APP_STARTUP_DONE
+{
+    if (!pself->GFI_numAttachingApps)
+	FatalError(UI_STARTUP_DONE_MSG_RECEIVED_BEFORE_STARTUP_NOTIFY);
+    pself->GFI_numAttachingApps--;
+    if (pself->GFI_flags & GFF_DETACHING)
+	HandleFieldDetachLow(oself, 0, NullOptr);
+    UserCallSystem(MSG_GEN_SYSTEM_MARK_NOT_BUSY, NULL, 0, NULL, 0);
+}
+
+/* AddChunkOrOptrToList: the item at the CompChildFlags' position (or
+ * the end) of the list chunk in *list */
+static void AddToList(optr oself, word listOffset, const void *item,
+		      word size, CompChildFlags flags)
+{
+    MemHandle mh = OptrToHandle(oself);
+    ChunkHandle list = *(ChunkHandle *) ((byte *) FieldPart(oself) +
+					 listOffset);
+    word end, at;
+    byte *p;
+
+    if (!list) {
+	list = LMemAlloc(mh, 0);
+	*(ChunkHandle *) ((byte *) FieldPart(oself) + listOffset) = list;
+    }
+    end = LMemGetChunkSize(ConstructOptr(mh, list));
+    at = end;
+    if ((flags & CCF_REFERENCE) != CCO_LAST &&
+	(word) ((flags & CCF_REFERENCE) * size) <= end)
+	at = (word) ((flags & CCF_REFERENCE) * size);
+    LMemInsertAt(ConstructOptr(mh, list), at, size);
+    p = LMemDeref(ConstructOptr(mh, list));
+    memcpy(p + at, item, size);
+}
+
+/* the item's offset in the list, -1 if it is not there */
+static sword FindInList(optr oself, ChunkHandle list, const void *item,
+			word size)
+{
+    optr l = ConstructOptr(OptrToHandle(oself), list);
+    word n, i;
+    byte *p;
+
+    if (!list)
+	return -1;
+    n = LMemGetChunkSize(l);
+    p = LMemDeref(l);
+    for (i = 0; i + size <= n; i += size)
+	if (!memcmp(p + i, item, size))
+	    return (sword) i;
+    return -1;
+}
+
+/* RemoveOptrFromAppList */
+static void RemoveFromAppList(optr oself, optr app)
+{
+    ChunkHandle list = FieldPart(oself)->GFI_genApplications;
+    sword at = FindInList(oself, list, &app, sizeof(app));
+
+    if (at < 0)
+	FatalError(UI_GEN_FIELD_GEN_APPLICATION_LIST_CORRUPT);
+    LMemDeleteAt(ConstructOptr(OptrToHandle(oself), list), (word) at,
+		 sizeof(app));
+}
+
+/* the application's process becomes the UI's; process and application
+ * go on the lists, and the application has started */
+@method GenFieldClass, MSG_GEN_FIELD_ADD_GEN_APPLICATION
+{
+    GeodeHandle process = MemOwner(OptrToHandle(genApp));
+
+    HandleModifyOwner(process, GeodeGetCodeProcessHandle());
+    AddToList(oself, word_offsetof(GenFieldInstance, GFI_processes),
+	      &process, sizeof(process), CCO_LAST);
+    AddToList(oself, word_offsetof(GenFieldInstance, GFI_genApplications),
+	      &genApp, sizeof(genApp), flags);
+    @call oself::MSG_GEN_FIELD_APP_STARTUP_DONE();
+}
+
+@method GenFieldClass, MSG_GEN_FIELD_REMOVE_GEN_APPLICATION
+{
+    RemoveFromAppList(oself, genApp);
+}
+
+@method GenFieldClass, MSG_GEN_FIELD_MOVE_GEN_APPLICATION
+{
+    RemoveFromAppList(oself, genApp);
+    AddToList(oself, word_offsetof(GenFieldInstance, GFI_genApplications),
+	      &genApp, sizeof(genApp), flags);
+}
+
+/* a process exited: off the list; the last one ends a detach */
+@method GenFieldClass, MSG_GEN_FIELD_PROCESS_EXIT
+{
+    GeodeHandle g = (GeodeHandle) process;
+    ChunkHandle list = pself->GFI_processes;
+    sword at = FindInList(oself, list, &g, sizeof(g));
+    optr l = ConstructOptr(OptrToHandle(oself), list);
+
+    if (at < 0)
+	return;
+    LMemDeleteAt(l, (word) at, sizeof(g));
+    pself = FieldPart(oself);
+    if (!LMemGetChunkSize(l) && (pself->GFI_flags & GFF_DETACHING))
+	ObjEnableDetach(oself);		/* ObjAckDetach */
+    pself = FieldPart(oself);
+    if (pself->GFI_flags & GFF_LOAD_DEFAULT_LAUNCHER_WHEN_NEXT_PROCESS_EXITS) {
+	pself->GFI_flags &= ~GFF_LOAD_DEFAULT_LAUNCHER_WHEN_NEXT_PROCESS_EXITS;
+	@call oself::MSG_GEN_FIELD_LOAD_DEFAULT_LAUNCHER();
+    }
+}
+
+/* GenFieldAlterFTVMCExcl: the default launcher being loaded has the
+ * focus now */
+@method GenFieldClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    GeodeHandle *launching;
+    optr focus;
+    Boolean handled;
+
+    @callsuper();
+    launching = ObjVarFindData(oself, TEMP_GEN_FIELD_LOADING_DEFAULT_LAUNCHER);
+    if (!launching)
+	return;
+    focus = NullOptr;
+    handled = @call oself::MSG_META_GET_FOCUS_EXCL(&focus);
+    (void) handled;
+    if (OptrToHandle(focus) &&
+	MemOwner(OptrToHandle(focus)) == *launching)
+	ObjVarDeleteData(oself, TEMP_GEN_FIELD_LOADING_DEFAULT_LAUNCHER);
+}
+
+/* ---------------------------------------------------------------------
+ * Notifications
+ * ------------------------------------------------------------------- */
+
+/* NotifyWithBP: FALSE if there is no destination */
+static Boolean NotifyWithFlag(optr oself, Message msg, word shutdownFlag)
+{
+    optr dest = FieldPart(oself)->GFI_notificationDestination;
+    struct { optr field; word flag; } p;
+
+    if (!OptrToHandle(dest))
+	return FALSE;
+    p.field = oself;
+    p.flag = shutdownFlag;
+    CObjMessageP(0, dest, msg, &p, sizeof(p), NULL, 0);
+    return TRUE;
+}
+
+static Boolean NotifyWithShutdownFlag(optr oself, Message msg)
+{
+    return NotifyWithFlag(oself, msg,
+			  (uiFlags & UIF_DETACHING_SYSTEM) ? (word) -1 : 0);
+}
+
+/* GenFieldNotifyNoFocusWithinNode: no application of the field has the
+ * focus */
+@method GenFieldClass, MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE
+{
+    ChunkHandle list = pself->GFI_genApplications;
+
+    if (pself->GFI_numAttachingApps)
+	return;
+    /* an application that will open a window yet */
+    if (list) {
+	optr l = ConstructOptr(OptrToHandle(oself), list);
+	word n = LMemGetChunkSize(l) / sizeof(optr), i;
+
+	for (i = 0; i < n; i++) {
+	    optr app = ((optr *) LMemDeref(l))[i];
+	    if (WinGeodeGetFlags(MemOwner(OptrToHandle(app))) &
+		(GWF_FOCUSABLE | GWF_TARGETABLE))
+		return;
+	}
+    }
+    if (uiLaunchModel == UILM_TRANSPARENT) {
+	if (!(FieldPart(oself)->GFI_flags &
+	      GFF_LOAD_DEFAULT_LAUNCHER_WHEN_NEXT_PROCESS_EXITS))
+	    @call oself::MSG_GEN_FIELD_LOAD_DEFAULT_LAUNCHER();
+	return;
+    }
+    if (ObjVarFindData(oself, TEMP_GEN_FIELD_EXIT_TO_DOS_PENDING)) {
+	SysShutdown(SST_CLEAN_FORCED);
+	NotifyWithFlag(oself, MSG_META_FIELD_NOTIFY_NO_FOCUS, (word) -1);
+	return;
+    }
+    pself = FieldPart(oself);
+    if (!(pself->GFI_flags & GFF_DETACHING))
+	pself->GFI_flags |= GFF_NEED_DEFAULT_LAUNCHER;
+    if (!NotifyWithShutdownFlag(oself, MSG_META_FIELD_NOTIFY_NO_FOCUS))
+	@send, forceQueue oself::MSG_GEN_LOWER_TO_BOTTOM();
+}
+
+/* ---------------------------------------------------------------------
+ * Detaching
+ * ------------------------------------------------------------------- */
+
+/* ShutdownField: the field gives up the system's exclusives and detaches
+ * its applications; it waits for their processes to exit */
+static void ShutdownField(optr oself)
+{
+    ChunkHandle list = FieldPart(oself)->GFI_processes;
+    optr sys = UserGetSystemObject();
+
+    if (list && LMemGetChunkSize(ConstructOptr(OptrToHandle(oself), list)))
+	ObjIncDetach(oself);
+    if (OptrToHandle(sys))
+	@call sys::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, MAEF_FOCUS |
+						 MAEF_TARGET | MAEF_MODEL);
+    @call oself::MSG_GEN_FIELD_SHUTDOWN_APPS();
+}
+
+/* HandleFieldDetachLow: once no application is starting, the specific
+ * UI detaches the field, then the field its applications */
+static void HandleFieldDetachLow(optr oself, word callerID, optr caller)
+{
+    struct { word id; optr caller; } p;
+
+    if (FieldPart(oself)->GFI_numAttachingApps)
+	return;
+    p.id = callerID;
+    p.caller = caller;
+    CObjCallSuperP((ClassStruct *) &GenFieldClass, oself, MSG_META_DETACH,
+		   &p, sizeof(p), NULL, 0);
+    ShutdownField(oself);
+}
+
+@method GenFieldClass, MSG_META_DETACH
+{
+    pself->GFI_flags &= ~(GFF_RESTORING_APPS | GFF_QUIT_ON_CLOSE);
+    if ((pself->GFI_flags & GFF_DETACHING) ||
+	!OptrToHandle(pself->GI_link.LP_next)) {
+	/* detached already (or not in the tree): just the ack */
+	@send caller::MSG_META_ACK(callerID, oself);
+	return;
+    }
+    pself->GFI_flags |= GFF_DETACHING;
+    pself->GFI_flags &= ~GFF_LOAD_DEFAULT_LAUNCHER_WHEN_NEXT_PROCESS_EXITS;
+    ObjInitDetach(message, oself, callerID, caller);
+    HandleFieldDetachLow(oself, callerID, caller);
+}
+
+@method GenFieldClass, MSG_META_DETACH_ABORT
+{
+    pself->GFI_flags &= ~GFF_DETACHING;
+    @callsuper();
+}
+
+/* GenFieldShutdownApps: MSG_META_DETACH to the process of each
+ * application, each one more ack */
+@method GenFieldClass, MSG_GEN_FIELD_SHUTDOWN_APPS
+{
+    ChunkHandle list;
+
+    @call oself::MSG_GEN_FIELD_ORDER_GEN_APPLICATION_LIST();
+    list = FieldPart(oself)->GFI_genApplications;
+    if (list) {
+	optr l = ConstructOptr(OptrToHandle(oself), list);
+	word n = LMemGetChunkSize(l) / sizeof(optr), i;
+
+	for (i = 0; i < n; i++) {
+	    optr app = ((optr *) LMemDeref(l))[i];
+	    ThreadHandle th = (ThreadHandle)
+		MemGetInfo(OptrToHandle(app), MGIT_EXEC_THREAD);
+	    GeodeHandle process = MemOwner((MemHandle) th);
+
+	    ObjIncDetach(oself);
+	    @send, forceQueue ConstructOptr(process, 0)::MSG_META_DETACH(
+		0, oself);
+	}
+    }
+    ObjEnableDetach(oself);
+}
+
+@method GenFieldClass, MSG_META_DETACH_COMPLETE
+{
+    if (pself->GFI_flags & GFF_DETACHING) {
+	optr parent;
+
+	@call oself::MSG_GEN_FIELD_ABOUT_TO_DETACH_COMPLETE();
+	@call oself::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	parent = GenFindParent(oself);
+	if (OptrToHandle(parent))
+	    @call parent::MSG_GEN_REMOVE_CHILD(oself, 0);
+	pself = FieldPart(oself);
+	pself->GFI_visParent = NullOptr;
+	pself->GFI_flags &= ~GFF_DETACHING;
+    }
+    @callsuper();
+    NotifyWithShutdownFlag(oself, MSG_META_FIELD_NOTIFY_DETACH);
+}
+
+/* ---------------------------------------------------------------------
+ * quitOnClose
+ * ------------------------------------------------------------------- */
+
+/* GenFieldAboutToClose: with [<category>] quitOnClose the field asks the
+ * shutdown control list, then quits its applications */
+@method GenFieldClass, MSG_GEN_FIELD_ABOUT_TO_CLOSE
+{
+    char cat[INI_CATEGORY_BUFFER_SIZE];
+    Boolean quit = FALSE;
+
+    cat[0] = 0;
+    @call oself::MSG_META_GET_INI_CATEGORY(cat);
+    if (InitFileReadBoolean(cat, "quitOnClose", &quit) || !quit)
+	return;
+    FieldPart(oself)->GFI_flags |= GFF_QUIT_ON_CLOSE;
+    SysShutdown(SST_CLEAN, oself, MSG_GEN_FIELD_SHUTDOWN_CONTROL_RESPONSE);
+}
+
+@method GenFieldClass, MSG_GEN_FIELD_SHUTDOWN_CONTROL_RESPONSE
+{
+    ChunkHandle list = pself->GFI_genApplications;
+    word n = 0, i;
+
+    if (!confirmed)
+	return;
+    if (list)
+	n = LMemGetChunkSize(ConstructOptr(OptrToHandle(oself), list)) /
+	    sizeof(optr);
+    if (!n) {
+	NotifyWithShutdownFlag(oself, MSG_META_FIELD_NOTIFY_NO_FOCUS);
+	return;
+    }
+    for (i = 0; i < n; i++) {
+	optr app = ((optr *) LMemDeref(ConstructOptr(OptrToHandle(oself),
+						      list)))[i];
+	@send, forceQueue app::MSG_META_QUIT();
+    }
+}

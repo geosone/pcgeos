@@ -23,8 +23,7 @@
  *   - not yet: moniker lists (the relocation of their entries,
  *     MSG_GEN_FIND_MONIKER of a list, the application's list),
  *     MSG_GEN_BRANCH_REPLACE_PARAMS (dword optrs), ATTR_GEN_PATH_DATA,
- *     MSG_GEN_CALL_SYSTEM and TO_SYS_* (no system object yet: the event
- *     is destroyed), MSG_META_BRING_UP_HELP, the view ranges.
+ *     MSG_META_BRING_UP_HELP, the view ranges.
  */
 @include "uiInt.goh"
 #include <initfile.h>
@@ -1099,7 +1098,12 @@ static Boolean SendEventCallback(optr parent, optr child, void *data)
 	return;
     }
     if (to >= TO_SYS_FOCUS && to <= TO_SYS_MODEL) {
-	FlowDestroyMessage(event);	/* Port32: no system object yet */
+	struct { EventHandle e; word w; } p;
+	p.e = event;
+	p.w = (word) (to - (TO_SYS_FOCUS - TO_FOCUS));
+	if (!UserCallSystem(MSG_META_SEND_CLASSED_EVENT, &p, sizeof(p),
+			    NULL, 0))
+	    FlowDestroyMessage(event);
 	return;
     }
     @callsuper();
@@ -1168,10 +1172,11 @@ static Boolean SendEventCallback(optr parent, optr child, void *data)
     CMessageDispatchP(event, 0, NULL, 0);
 }
 
-/* Port32: no system object yet */
 @method GenClass, MSG_GEN_CALL_SYSTEM
 {
-    FlowDestroyMessage(event);
+    FlowMessageClassedEvent(UserGetSystemObject(),
+			    MSG_META_SEND_CLASSED_EVENT, event, TO_SELF,
+			    MF_CALL);
 }
 
 @method GenClass, MSG_GEN_NAVIGATE_TO_NEXT_FIELD
@@ -1240,6 +1245,7 @@ static void LoadOrSaveOptions(optr oself, Message meta, Message gen)
 
     if (key) {
 	GenOptionsParams p;
+	GenOptionsParams *pp = &p;	/* the parameter is a pointer (ss:bp) */
 	word n = (word) VarDataSizePtr(key);
 
 	memset(&p, 0, sizeof(p));
@@ -1247,7 +1253,7 @@ static void LoadOrSaveOptions(optr oself, Message meta, Message gen)
 	    n = sizeof(p.GOP_key) - 1;
 	memcpy(p.GOP_key, key, n);
 	@call oself::MSG_META_GET_INI_CATEGORY(p.GOP_category);
-	CObjMessageP(MF_CALL, oself, gen, &p, sizeof(p), NULL, 0);
+	CObjMessageP(MF_CALL, oself, gen, &pp, sizeof(pp), NULL, 0);
     }
     if (OptrToHandle(GenLock(oself)->GI_comp.CP_firstChild)) {
 	GenUnlock(oself);

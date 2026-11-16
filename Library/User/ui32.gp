@@ -24,6 +24,9 @@ export VisContentClass
 export FlowClass
 export GenClass
 export GenApplicationClass
+export GenFieldClass
+export GenScreenClass
+export GenSystemClass
 
 # the Vis routines in C (visC.goh, GEOS_PORT32)
 export VisCheckIfVisGrown
@@ -109,3 +112,14 @@ export GenCheckKbdAccelerator
 export GenQueryUICallSpecificUI
 export UserGetSpecificUI
 export UserFreeSpecificUI
+export UserCallSystem
+
+# the system object and the UI's state (gSysC.goh, ui.goh)
+export UserCreateSystemObject
+export UserDestroySystemObject
+export UserGetDisplayType
+export UserGetDefaultUILevel
+export UserGetDefaultLaunchLevel
+export UserGetLaunchModel
+export UserGetLaunchOptions
+export UserGetInterfaceOptions

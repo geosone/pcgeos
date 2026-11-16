@@ -1,0 +1,211 @@
+/*
+ * genSystem.goc -- GenSystemClass (after genSystem.asm), the one system
+ * object of the UI at the top of the generic tree: the specific UI it is
+ * built with, the default screen and field, the screens (GSYI_screenComp)
+ * and the fields (its generic children), and the detach of the system
+ * (the fields, then the UI process).  Also the system object itself
+ * (UserAttach of userMain.asm creates it; UserCallSystem of genUtils.asm
+ * calls it) and the UI's global state (userVariable.def).
+ *
+ * Port32 (Port32/ABI.md section 13x): until the UI is a process
+ * (UserClass), UserCreateSystemObject makes the system object in the
+ * caller's block, and the detach ends when the fields are detached (the
+ * asm went on with the UI process).
+ */
+@include "uiInt.goh"
+@include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
+#include <Internal/im.h>
+#include <string.h>
+
+@classdecl GenSystemClass;
+
+#define GEN_MASTER	word_offsetof(GenBase, Gen_offset)
+#define GEN_LINK	word_offsetof(GenInstance, GI_link)
+#define SYS_SCREENS	word_offsetof(GenSystemInstance, GSYI_screenComp)
+
+/* userVariable.def */
+UIFlags uiFlags;
+byte uiDisplayType;
+
+static optr uiSystemObj;
+
+/* ---------------------------------------------------------------------
+ * The system object
+ * ------------------------------------------------------------------- */
+
+optr UserCreateSystemObject(MemHandle block)
+{
+    optr sys = ObjInstantiate(block, (ClassStruct *) &GenSystemClass);
+
+    uiSystemObj = sys;
+    @call sys::MSG_GEN_SYSTEM_SET_SPECIFIC_UI(UserGetSpecificUI());
+    return sys;
+}
+
+void UserDestroySystemObject(void)
+{
+    uiSystemObj = NullOptr;
+}
+
+Boolean UserCallSystem(Message msg, const void *params, word paramSize,
+		       void *reply, word replySize)
+{
+    if (replySize)
+	memset(reply, 0, replySize);
+    if (!uiSystemObj)
+	return FALSE;
+    CObjMessageP(MF_CALL, uiSystemObj, msg, (void *) params, paramSize,
+		 reply, replySize);
+    return TRUE;
+}
+
+optr UserGetSystemObject(void)
+{
+    return uiSystemObj;
+}
+
+/* UserGetDisplayType: the DisplayType in the high byte, TRUE in the low
+ * byte once a screen set it */
+word UserGetDisplayType(void)
+{
+    return (word) (((word) uiDisplayType << 8) |
+		   ((uiFlags & UIF_HAVE_DISPLAY_TYPE) ? 0xff : 0));
+}
+
+/* ---------------------------------------------------------------------
+ * GenSystemClass
+ * ------------------------------------------------------------------- */
+
+@method GenSystemClass, MSG_META_INITIALIZE
+{
+    pself->GI_attrs |= GA_TARGETABLE;
+    @callsuper();
+}
+
+/* the only object usable without a parent; enabled too */
+@method GenSystemClass, MSG_GEN_SYSTEM_SET_SPECIFIC_UI
+{
+    pself->GSYI_specificUI = specificUI;
+    pself->GSYI_defaultUI = specificUI;
+    pself->GI_states |= GS_USABLE | GS_ENABLED;
+}
+
+/* GenSystemBuild: the system's own specific UI */
+@method GenSystemClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    SpecBuildRoutine *r;
+
+    r = (SpecBuildRoutine *) ProcGetLibraryEntry(pself->GSYI_specificUI,
+						 SPIR_BUILD_SYSTEM);
+    return r ? r(oself, MasterOffset) : NULL;
+}
+
+@method GenSystemClass, MSG_GEN_SYSTEM_SET_DEFAULT_SCREEN
+{
+    pself->GSYI_defaultScreen = screen;
+}
+
+@method GenSystemClass, MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN
+{
+    return pself->GSYI_defaultScreen;
+}
+
+@method GenSystemClass, MSG_GEN_SYSTEM_SET_DEFAULT_FIELD
+{
+    pself->GSYI_defaultField = defaultField;
+}
+
+@method GenSystemClass, MSG_GEN_SYSTEM_GET_DEFAULT_FIELD
+{
+    return pself->GSYI_defaultField;
+}
+
+typedef struct {
+    GenSystemFieldCallback	*FFD_callback;
+    word			FFD_data;
+    optr			FFD_field;
+} ForeachFieldData;
+
+/* GSFF_callback: the caller's callback for a child that is a field */
+static Boolean ForeachFieldCB(optr parent, optr child, void *data)
+{
+    ForeachFieldData *d = data;
+
+    (void) parent;
+    if (!ObjIsObjectInClass(child, (ClassStruct *) &GenFieldClass) ||
+	!d->FFD_callback(child, d->FFD_data))
+	return FALSE;
+    d->FFD_field = child;
+    return TRUE;
+}
+
+@method GenSystemClass, MSG_GEN_SYSTEM_FOREACH_FIELD
+{
+    ForeachFieldData d;
+
+    d.FFD_callback = callback;
+    d.FFD_data = data;
+    d.FFD_field = NullOptr;
+    GenCallChildren(oself, ForeachFieldCB, &d);
+    return d.FFD_field;
+}
+
+/* screens: generic upward links, the system's own composite */
+@method GenSystemClass, MSG_GEN_SYSTEM_ADD_SCREEN_CHILD
+{
+    ObjCompAddChild(oself, screen, flags, GEN_MASTER, SYS_SCREENS,
+		    GEN_LINK);
+}
+
+@method GenSystemClass, MSG_GEN_SYSTEM_REMOVE_SCREEN_CHILD
+{
+    ObjCompRemoveChild(oself, screen, 0, GEN_MASTER, SYS_SCREENS, GEN_LINK);
+}
+
+/* GSD_callBack: MSG_META_DETACH queued to the child, one more ack */
+static Boolean DetachChildCB(optr parent, optr child, void *data)
+{
+    (void) data;
+    @send, forceQueue child::MSG_META_DETACH(0, parent);
+    ObjIncDetach(parent);
+    return FALSE;
+}
+
+/* GenSysDetach: the whole system goes down, the fields first */
+@method GenSystemClass, MSG_META_DETACH
+{
+    ObjInitDetach(message, oself, callerID, caller);
+    GenCallChildren(oself, DetachChildCB, NULL);
+    ObjEnableDetach(oself);
+}
+
+/*
+ * GenSysDetachComplete: the fields are detached; the asm detached the UI
+ * process next (with the system object as the source), and acked the
+ * caller after that.  Port32: without a UI process the caller is acked
+ * now.
+ */
+@method GenSystemClass, MSG_META_DETACH_COMPLETE
+{
+    GeodeHandle ui = GeodeGetCodeProcessHandle();
+
+    if (ObjVarFindData(oself, TEMP_GEN_SYSTEM_FIELDS_DETACHED)) {
+	@callsuper();
+	return;
+    }
+    if (!(GeodeGetInfo(ui, GGIT_ATTRIBUTES, NULL) & GA_PROCESS)) {
+	@callsuper();
+	return;
+    }
+    ObjVarAddData(oself, TEMP_GEN_SYSTEM_FIELDS_DETACHED, 0);
+    ObjInitDetach(MSG_META_DETACH, oself, callerID, ackOD);
+    @send, forceQueue ConstructOptr(ui, 0)::MSG_META_DETACH(0, oself);
+    ObjIncDetach(oself);
+    ObjEnableDetach(oself);
+}
+
+@method GenSystemClass, MSG_GEN_SYSTEM_SET_PTR_IMAGE
+{
+    ImSetPtrImage(level, ptrImage);
+}
