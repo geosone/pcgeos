@@ -1,0 +1,28 @@
+/***********************************************************************
+ *
+ * PROJECT:	PC GEOS
+ * FILE:	gScrnC.goh
+ *
+ * DECLARER:	UI
+ *
+ * DESCRIPTION:
+ *	GenScreenClass (Include/Objects/gScreenC.def), for the UI in C
+ *	(Port32/ABI.md section 13x).  As the other screen and system
+ *	classes, only the UI library itself has instances of it.
+ *
+ ***********************************************************************/
+@optimize
+@deflib ui
+
+@include <ui.goh>
+
+@class GenScreenClass, GenClass;
+
+/* the video driver of the screen (0: the default video driver) */
+@message void MSG_GEN_SCREEN_SET_VIDEO_DRIVER(GeodeHandle driver = bp);
+
+    @instance GeodeHandle	GSCI_videoDriver;
+
+@endc
+
+@endlib

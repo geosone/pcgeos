@@ -25,11 +25,21 @@
 
 @class GenSystemClass, GenClass;
 
+@ifdef GEOS_PORT32
+/* Port32 (Port32/ABI.md section 13x): the parameters of the asm */
+@message void MSG_GEN_SYSTEM_SET_SPECIFIC_UI(GeodeHandle specificUI = dx);
+@message void MSG_GEN_SYSTEM_SET_DEFAULT_SCREEN(optr screen = cx:dx);
+@message optr MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN() = cx:dx;
+@message void MSG_GEN_SYSTEM_ADD_SCREEN_CHILD(optr screen = cx:dx,
+					CompChildFlags flags = bp);
+@message void MSG_GEN_SYSTEM_REMOVE_SCREEN_CHILD(optr screen = cx:dx);
+@else
 @message void MSG_GEN_SYSTEM_SET_SPECIFIC_UI();		/* INTERNAL */
 @message void MSG_GEN_SYSTEM_SET_DEFAULT_SCREEN();	/* INTERNAL */
 @message optr MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN() = cx:dx;	/* XXX */
 @message void MSG_GEN_SYSTEM_ADD_SCREEN_CHILD();	/* INTERNAL */
 @message void MSG_GEN_SYSTEM_REMOVE_SCREEN_CHILD();	/* INTERNAL */
+@endif
 @message void MSG_GEN_SYSTEM_SET_DEFAULT_FIELD(
 				optr defaultField = cx:dx);	/* XXX */
 @message optr MSG_GEN_SYSTEM_GET_DEFAULT_FIELD() = cx:dx;	/* XXX */
@@ -48,7 +58,15 @@
 @message void MSG_GEN_SYSTEM_LOWER_GEODE_TO_BOTTOM(word geode = cx,
 				word layerID = dx,
 				Handle parentWindow = bp);	/* XXX */
+@ifdef GEOS_PORT32
+/* Port32: the callback is called for each field child until it returns
+ * TRUE; that field is returned, else 0 */
+typedef Boolean GenSystemFieldCallback(optr field, word data);
+@message optr MSG_GEN_SYSTEM_FOREACH_FIELD(GenSystemFieldCallback *callback,
+					   word data);
+@else
 @message void MSG_GEN_SYSTEM_FOREACH_FIELD();		/* INTERNAL */
+@endif
 @message void MSG_GEN_SYSTEM_MARK_BUSY();
 @message void MSG_GEN_SYSTEM_MARK_NOT_BUSY();
 
@@ -70,6 +88,17 @@
     @instance optr  	    GSYI_defaultField;
     @instance optr          GSYI_screenComp;
 @endc
+
+@ifdef GEOS_PORT32
+/*
+ * Port32, internal to the UI: the system object (UserAttach of
+ * userMain.asm): a GenSystemClass object in the block (run by the
+ * calling thread) with the specific UI of UserGetSpecificUI, the one
+ * UserCallSystem calls.  UserDestroySystemObject forgets it.
+ */
+extern optr UserCreateSystemObject(MemHandle block);
+extern void UserDestroySystemObject(void);
+@endif
 
 @endlib
 

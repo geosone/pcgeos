@@ -944,6 +944,13 @@ extern ClassStruct *GenQueryUICallSpecificUI(optr obj, word routine,
 /* the specific UI library ([ui] specific), loaded on first use */
 extern GeodeHandle UserGetSpecificUI(void);
 extern void UserFreeSpecificUI(void);
+/* the message (goc -cg parameters) to the UI's system object, MF_CALL;
+ * the reply zeroed first; FALSE if there is no system object yet */
+extern Boolean UserCallSystem(Message msg, const void *params,
+			      word paramSize, void *reply, word replySize);
+/* the DisplayType of the first screen in the high byte, 0xff in the
+ * low one once a screen set it (UserGetDisplayType of the asm) */
+extern word UserGetDisplayType(void);
 #endif
 
 #define GenFindParent(oself)	\

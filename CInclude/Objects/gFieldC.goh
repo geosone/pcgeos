@@ -24,7 +24,12 @@
 
 @class GenFieldClass, GenClass;
 
+@ifdef GEOS_PORT32
+/* Port32 (Port32/ABI.md section 13x): the parameter of the asm */
+@message void MSG_GEN_FIELD_SET_VIS_PARENT(optr visParent = cx:dx);
+@else
 @message void MSG_GEN_FIELD_SET_VIS_PARENT();		/* INTERNAL */
+@endif
 @message void MSG_GEN_FIELD_RESTORE_APPS();		/* INTERNAL */
 @message void MSG_GEN_FIELD_RESTORE_NEXT_APP();		/* INTERNAL */
 @message void MSG_GEN_FIELD_RESTORE_APP();		/* INTERNAL */
@@ -84,7 +89,12 @@
 
 @message optr MSG_GEN_FIELD_GET_TOP_GEN_APPLICATION() = cx:dx;	/* XXX */
 @message UILaunchModel MSG_GEN_FIELD_GET_LAUNCH_MODEL();
+@ifdef GEOS_PORT32
+/* Port32: SysShutdown's acknowledgement (non-zero: confirmed) */
+@message void MSG_GEN_FIELD_SHUTDOWN_CONTROL_RESPONSE(word confirmed = cx);
+@else
 @message void MSG_GEN_FIELD_SHUTDOWN_CONTROL_RESPONSE();    /* INTERNAL */
+@endif
 
 							    /* INTERNAL */
 @message void MSG_GEN_FIELD_ACTIVATE_UPDATE(	    	/* INTERNAL */
