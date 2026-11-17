@@ -371,7 +371,9 @@ from their modules:
   5. A geode's parent process is the process that loaded it
      (`GH_parentProcess`). When a process is gone, its parent, if still
      a process, gets `MSG_PROCESS_NOTIFY_PROCESS_EXIT` (process, exit
-     code), queued.
+     code), queued. `HandleModifyOwner` on a geode's handle changes its
+     parent, as in the asm (a geode owns its own handle): a field makes
+     the UI the parent of its applications' processes.
   6. A thread other than the first tells its process when it exits:
      `MSG_PROCESS_NOTIFY_THREAD_EXIT` (thread, exit code), queued, as
      long as the first thread is there.
@@ -2690,9 +2692,13 @@ categories, `InitFileBackupLanguage`/`InitFileSwitchLanguages`, and
   The mouse and the screen video driver are the UI's to load, as in
   DOS16.
 - **The UI.** `[ui] generic` names the UI geode, loaded from
-  `SP_SYSTEM`. If it fails, `ui.geo` is tried, and if that fails too,
-  `CANNOT_LOAD_UI` is fatal. Without the key no UI is loaded: there is
-  no C UI library yet to be the default. `kernelUIHandle` holds it.
+  `SP_SYSTEM` (`BootLoadUI`). If it fails, `ui.geo` is tried, and if
+  that fails too, `CANNOT_LOAD_UI` is fatal. Without the key no UI is
+  loaded. `kernelUIHandle` (`SGIT_UI_PROCESS`) holds it; the loader
+  sets it before the UI's process runs (`kernelLoadingUI`), so the UI
+  knows at its attach that it is the system's UI.
+- **Screens for errors.** `SysRegisterScreen` notes each screen the UI
+  registers, for the error boxes the C kernel does not show yet.
 - **The command tail.** The switches (`/x...`, up to a blank) are
   skipped. The rest is loaded as a process from `SP_SYSTEM`, the path
   `LoadUI` left, as DOS16 did. `KernelBoot` returns that process.
@@ -4995,6 +5001,55 @@ visual classes of `Library/User/Vis`:
     it; when a process exits its parent gets
     `MSG_PROCESS_NOTIFY_PROCESS_EXIT` (process, exit code), as from the
     asm's `KillProcess`.
+- **The UI's process** (`User/userMain.goc`, `userScreen.goc`,
+  `userUtils.goc`, `UI/uiMain.goc` after `userMain.asm`,
+  `userScreen.asm`, `userUtils.asm`, `uiMain.ui`): `ui.geo` is an
+  application, a library and a process (`UserClass`, a
+  `GenProcessClass`), as in DOS16:
+  - the attach (`UserAttach`): the UI's priority, the flow object
+    (`uiFlowObj`) with the input manager's and the window system's
+    events, the specific UI, the system object, the screens
+    (`UserMakeScreens`: `[ui] numberOfScreens`, one at most as in the
+    asm, on the extended video driver of `[screen 0]`
+    (`UserLoadExtendedDriver`), the default video driver; the specific
+    UI registers the screen's root window (`UserScreenRegister`), the
+    pointer goes on it), the input map; then the UI's application
+    `UIApp` opens below the default screen with a field of its own (its
+    notifications to the UI's process), the mouse driver of `[mouse]`
+    and `[secondMouse]`, the system field `SystemField0`
+    (`UserMakeScreenFields`), the default field, and the applications
+    of `[ui] execOnStartup` and `execOnStartupBG`;
+  - loading applications: `UserLoadApplication` (the AppLaunchBlock
+    prepared and given to the UI, the field told first, the file as a
+    full path or in `SP_APPLICATION`, then `SP_SYS_APPLICATION`, the
+    desk accessory flag, the acknowledgement; or left to the UI's
+    process with `ALF_SEND_LAUNCH_REQUEST_TO_UI_TO_HANDLE`),
+    `UserAllocObjBlock`;
+  - the exit of an application's process: the UI, its parent, tells
+    the fields and `GCNSLT_APPLICATION` (`UserNotifyProcessExit`);
+  - the detach (`UserDetach`, from `SysShutdown`): the system object
+    detaches the fields with their applications, then the UI's process
+    as an application (`UIApp` detached, its final detach acks the
+    system); the system's ack ends the UI (`UserAck`: the screens, the
+    input grabs and the specific UI let go, `ProcessClass` ends the
+    process and acks the caller);
+  - Port32: `ui.geo` is the system's UI when the kernel loads it
+    (`BootLoadUI`, `SGIT_UI_PROCESS`). Loaded as a library of another
+    geode, as the tests of its parts do, its process ends at once and
+    it is a library only. Without a field in the AppLaunchBlock an
+    application goes on the system's default field (the asm asked the
+    specific UI's system). The acknowledgement of a load has the
+    parameters of `MSG_GEN_FIELD_RESTORE_APP_ACK` (geode, error: 0 when
+    loaded, ID). Screen 0 without a driver in the init file takes the
+    default video driver, else the host's display driver
+    (`hostvid.geo`), for the loader's detected "simple graphics mode".
+    `UserClass`'s messages have the asm's parameters
+    (`CInclude/Internal/uProcC.goh`, `@ifdef GEOS_PORT32`); the
+    `GLE_OK` of the kernel and `ALF_NO_ACTIVATION_DIALOG` are in
+    `uiInt.goh`;
+  - fixed with it: `GenCheckIfFullyUsable` and `GenCheckIfFullyEnabled`
+    stop at the system object, as in the asm (the screens and fields
+    are usable below it).
 - **Not yet:**
   - in `GenClass`: moniker lists (`VisFindMoniker`,
     `MSG_SPEC_RESOLVE_MONIKER_LIST`, their relocation, the
@@ -5005,11 +5060,17 @@ visual classes of `Library/User/Vis`:
     `GenSpecShrinkBranch`, `UserSendToApplicationViaProcess`;
     `MSG_GEN_MAKE_APPLYABLE`/`_NOT_APPLYABLE` up the visual tree (goc
     gives `VisClass` no Gen messages);
-  - the UI as a process (`UserClass`) that makes the system, screens
-    and fields at its attach (`UserAttach`, `UserMakeScreens`), loads
-    applications (`UserLoadApplication`) and tells the fields of their
-    exit (`UserNotifyProcessExit`); its flow object (`uiFlowObj`: the
-    mouse grab let go at the close);
+  - in `UserClass`: state files (the delete state files dialog,
+    `UserCreateNewStateFile`), undo, overstrike, the activation dialog
+    and keyboard accelerator modes, sound, the busy timer, the token
+    database, the screen blanker, pen mode and handwriting, the spooler
+    and mailbox loaded at the start, the help objects, graphical setup
+    (`[system] continueSetup`), the clipboard file, the task driver,
+    passwords, `MSG_META_INVAL_TREE`, the log, the error box of a launch
+    that fails (`LoadApplicationWithErrorMessage`), the default
+    launcher replaced on a restart, more than one screen (the screen
+    monitor), the mouse released by the flow object at an
+    application's close;
   - in `GenProcessClass` and `GenApplicationClass`: state files (a
     RESTORE_FROM_STATE launch opens the application), the instance
     reference for the field's restart list, transparent detach, UI
@@ -5087,24 +5148,28 @@ visual classes of `Library/User/Vis`:
   system detached (the fields' part of it, their notification, the ack
   to the caller); at the end the specific parts are shrunk and the
   library freed.
-- **Test.** ctest `library.ui.app`: the process geode
-  `Port32/Tests/Geode/uahost.goc` makes the system, a screen and a
-  field and launches the application `Port32/Tests/Geode/uiapp.goc` (a
-  `GenProcessClass` process with its application object and an object
-  on its active and startup lists each) on the field as the UI would:
-  the field told first, an AppLaunchBlock with the field, `GeodeLoad`.
-  uiapp reports each step of its process to uahost (`MSG_META_NOTIFY`
-  to the AppLaunchBlock's `ALB_userLoadAckOutput`); `tspui` counts what
-  the application tells its specific part. Launched, the application
-  comes up (attached, built twice: at the startup and after the shrink
-  of the attach, on the field's lists, usable, its mode, single
-  instance, on top, busy until the queue is through); quit by the user,
-  it goes through the five quit levels, the detach with its active
-  list, the close, the shutdown with its startup list and the final
-  detach; the process exits and uahost, its parent, tells the field.
-  Launched again (not on top), the system's detach takes it down
-  through the field (a detach, no quit), and the field and the system
-  are acked.
+- **Test.** ctest `library.ui.app`: the test boots the UI as the kernel
+  does (`BootLoadUI`; before that, `tspui` loads the UI as a library
+  and its process ends at once). The UI's process starts the system
+  with the specific UI `tspui` (which opens and registers the screen's
+  root window), a screen on the memory video driver `vidmem` of
+  `[screen 0]`, its own application and field, the system field, and
+  the application `Port32/Tests/Geode/uiapp.goc` (a `GenProcessClass`
+  process with an object on its active and startup lists each) of
+  `[ui] execOnStartup`. The process geode
+  `Port32/Tests/Geode/uahost.goc` checks the system (two fields, the
+  default field and screen, the UI's application below the screen, its
+  field's notifications to the UI's process), quits the startup
+  application (the UI, its parent, tells the field and
+  `GCNSLT_APPLICATION`), and launches uiapp through the UI
+  (`UserLoadApplication`, its acknowledgement); uiapp reports each step
+  of its process to uahost, `tspui` counts what the applications tell
+  their specific parts. Quit by the user, uiapp goes through the five
+  quit levels, the detach with its active list, the close, the
+  shutdown with its startup list and the final detach. Launched again
+  (not on top), it goes down with the UI's detach (a detach, no quit),
+  the system, the fields and the UI's own application with it; the UI's
+  process ends and acks uahost, the library stays.
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 

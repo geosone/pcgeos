@@ -1,21 +1,18 @@
 /*
  * uahost.goc -- a process geode for the library.ui.app test
- * (Port32/Tests): it makes the UI's system object (GenSystemClass) with
- * the screen UAScreen and the field UAField, and launches the
- * application uiapp (uiapp.goc) on the field as the UI's
- * UserLoadApplication would: the field told first, an AppLaunchBlock
- * with the field, GeodeLoad.  It is the parent process of uiapp, so it
- * hears of its exit (MSG_PROCESS_NOTIFY_PROCESS_EXIT) and tells the
- * fields, as the UI's process does (UserNotifyProcessExit); uiapp
- * reports what happens to it here (MSG_META_NOTIFY).
+ * (Port32/Tests): it checks the system that the UI's process (UserClass)
+ * started, and launches the application uiapp (uiapp.goc) through the
+ * UI (UserLoadApplication) with itself as the AppLaunchBlock's
+ * acknowledgement output: it gets the load's acknowledgement, and uiapp
+ * reports what happens to it here (MSG_META_NOTIFY).  On
+ * GCNSLT_APPLICATION it hears of the applications that start and exit.
  * The test (test_ui_app.c) runs the steps through UAHostStep on the
  * process thread; the checks made here count in uaHostState.
  */
 @include <stdapp.goh>
 @include <Objects/gSysC.goh>
 @include <Objects/gFieldC.goh>
-@include <Objects/gScrnC.goh>
-#include <Internal/specUI.h>
+#include <sysstats.h>
 #include <string.h>
 @include "uiapp.goh"
 
@@ -25,10 +22,13 @@ typedef struct {
     word	UAH_checks, UAH_fails, UAH_failLine;
     word	UAH_events[UAE_COUNT];	/* uiapp's reports */
     word	UAH_lastData[UAE_COUNT];
-    word	UAH_exits;		/* MSG_PROCESS_NOTIFY_PROCESS_EXIT */
+    word	UAH_loads;		/* MSG_UA_HOST_LOADED */
+    GeodeHandle	UAH_loaded;		/* its geode */
+    word	UAH_loadError, UAH_loadID;
     GeodeHandle	UAH_app;		/* the launched process */
-    word	UAH_acks;		/* UANotify: MSG_META_ACK */
-    word	UAH_fieldDetached;	/* MSG_META_FIELD_NOTIFY_DETACH */
+    word	UAH_acks;		/* MSG_META_ACK of the UI's detach */
+    word	UAH_started, UAH_exited;	/* GCNSLT_APPLICATION */
+    GeodeHandle	UAH_lastExited;
     word	UAH_failLines[8];
 } UAHostState;
 
@@ -44,38 +44,18 @@ UAHostState uaHostState;
 
 @class UAHostClass, ProcessClass;
     @message void MSG_UA_HOST_STEP(word step);
+    /* the load's acknowledgement (LoadApplication) */
+    @message void MSG_UA_HOST_LOADED(GeodeHandle geode, word error,
+				     word ackID);
 @endc
 @classdecl UAHostClass, neverSaved;
 
-@class UANotifyClass, MetaClass;
-@endc
-@classdecl UANotifyClass;
+#define LOAD_ID		0x1234
 
-@method UANotifyClass, MSG_META_ACK
+static optr Self(void)
 {
-    (void) callerID;
-    (void) caller;
-    uaHostState.UAH_acks++;
+    return ConstructOptr(uaHostState.UAH_process, 0);
 }
-
-@method UANotifyClass, MSG_META_FIELD_NOTIFY_DETACH
-{
-    (void) field;
-    (void) shutdownFlag;
-    uaHostState.UAH_fieldDetached++;
-}
-
-@start UAHostObjects;
-@object GenScreenClass UAScreen = {
-}
-@object GenFieldClass UAField = {
-    GFI_notificationDestination = @UANotify;
-}
-@object UANotifyClass UANotify = {
-}
-@end UAHostObjects;
-
-static optr uaSystem;
 
 @method UAHostClass, MSG_META_ATTACH_PROCESS
 {
@@ -94,18 +74,35 @@ static optr uaSystem;
     uaHostState.UAH_lastData[notificationType] = data;
 }
 
-/* UserNotifyProcessExit: the fields hear of it */
-@method UAHostClass, MSG_PROCESS_NOTIFY_PROCESS_EXIT
+@method UAHostClass, MSG_UA_HOST_LOADED
 {
-    EventHandle ev;
-
-    (void) exitCode;
-    uaHostState.UAH_exits++;
-    ev = @record GenFieldClass::MSG_GEN_FIELD_PROCESS_EXIT(exitProcess);
-    UserCallSystem(MSG_GEN_SEND_TO_CHILDREN, &ev, sizeof(ev), NULL, 0);
+    uaHostState.UAH_loads++;
+    uaHostState.UAH_loaded = geode;
+    uaHostState.UAH_loadError = error;
+    uaHostState.UAH_loadID = ackID;
 }
 
-/* a copy of the object's Gen part (its block is ours) */
+/* the UI's detach is done */
+@method UAHostClass, MSG_META_ACK
+{
+    (void) callerID;
+    (void) caller;
+    uaHostState.UAH_acks++;
+}
+
+@method UAHostClass, MSG_NOTIFY_APP_STARTED
+{
+    (void) appStarted;
+    uaHostState.UAH_started++;
+}
+
+@method UAHostClass, MSG_NOTIFY_APP_EXITED
+{
+    uaHostState.UAH_exited++;
+    uaHostState.UAH_lastExited = (GeodeHandle) appExited;
+}
+
+/* a copy of an object's Gen part */
 static void GenData(optr o, void *buf, word size)
 {
     ObjLockObjBlock(OptrToHandle(o));
@@ -114,22 +111,35 @@ static void GenData(optr o, void *buf, word size)
 }
 
 /* the number of entries of a list chunk of the field, the first one */
-static word ListOf(ChunkHandle ch, void *first, word size)
+static word ListOf(optr field, ChunkHandle ch, void *first, word size)
 {
     word n = 0;
 
-    ObjLockObjBlock(OptrToHandle(@UAField));
+    ObjLockObjBlock(OptrToHandle(field));
     if (ch) {
-	optr l = ConstructOptr(OptrToHandle(@UAField), ch);
+	optr l = ConstructOptr(OptrToHandle(field), ch);
 	n = LMemGetChunkSize(l) / size;
 	if (n)
 	    memcpy(first, LMemDeref(l), size);
     }
-    MemUnlock(OptrToHandle(@UAField));
+    MemUnlock(OptrToHandle(field));
     return n;
 }
 
-/* UserLoadApplication, as far as the test needs it */
+static optr DefaultField(void)
+{
+    optr f = NullOptr;
+
+    UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_FIELD, NULL, 0, &f, sizeof(f));
+    return f;
+}
+
+static GeodeHandle UIProcess(void)
+{
+    return (GeodeHandle) SysGetInfo(SGIT_UI_PROCESS);
+}
+
+/* through the UI, with this process as the acknowledgement output */
 static GeodeHandle Launch(AppLaunchFlags flags)
 {
     MemHandle alb;
@@ -137,39 +147,39 @@ static GeodeHandle Launch(AppLaunchFlags flags)
     GeodeLoadError e;
     GeodeHandle gh;
 
-    UACHECK(@call UAField::MSG_GEN_FIELD_APP_STARTUP_NOTIFY() == 0);
     alb = MemAlloc(sizeof(AppLaunchBlock), HF_SHARABLE | HF_SWAPABLE,
 		   HAF_ZERO_INIT);
     a = MemLock(alb);
-    a->ALB_genParent = @UAField;
-    a->ALB_launchFlags = flags;
-    a->ALB_userLoadAckOutput = ConstructOptr(GeodeGetProcessHandle(), 0);
+    a->ALB_userLoadAckOutput = Self();
+    a->ALB_userLoadAckMessage = MSG_UA_HOST_LOADED;
+    a->ALB_userLoadAckID = LOAD_ID;
     MemUnlock(alb);
-    gh = GeodeLoad("uiapp", GA_PROCESS, 0, 0, alb, &e);
+    gh = UserLoadApplication(flags, MSG_GEN_PROCESS_OPEN_APPLICATION, alb,
+			     "uiapp", 0, &e);
     UACHECK(gh != 0);
     uaHostState.UAH_app = gh;
     return gh;
 }
 
-/* the application up on the field */
-static void CheckUp(void)
+/* the application up on the default field, the UI its parent */
+static void CheckUp(GeodeHandle gh)
 {
-    GeodeHandle gh = uaHostState.UAH_app;
     optr app = GeodeGetAppObject(gh), first = NullOptr;
+    optr field = DefaultField();
     GenFieldInstance f;
     GeodeHandle p = 0;
     ApplicationStates as;
 
     UACHECK(OptrToHandle(app) != 0);
-    GenData(@UAField, &f, sizeof(f));
-    UACHECK(ListOf(f.GFI_genApplications, &first, sizeof(optr)) == 1 &&
-	    first == app);
-    UACHECK(ListOf(f.GFI_processes, &p, sizeof(p)) == 1 && p == gh);
+    GenData(field, &f, sizeof(f));
+    UACHECK(ListOf(field, f.GFI_genApplications, &first, sizeof(optr)) == 1
+	    && first == app);
+    UACHECK(ListOf(field, f.GFI_processes, &p, sizeof(p)) == 1 && p == gh);
     UACHECK(f.GFI_numAttachingApps == 0);
     UACHECK(@call app::MSG_GEN_GET_USABLE());
-    UACHECK(@call app::MSG_GEN_FIND_PARENT() == @UAField);
+    UACHECK(@call app::MSG_GEN_FIND_PARENT() == field);
     UACHECK(@call ConstructOptr(gh, 0)::MSG_GEN_PROCESS_GET_PARENT_FIELD()
-	    == @UAField);
+	    == field);
     UACHECK(@call app::MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE() ==
 	    MSG_GEN_PROCESS_OPEN_APPLICATION);
     as = @call app::MSG_GEN_APPLICATION_GET_STATE();
@@ -177,69 +187,102 @@ static void CheckUp(void)
     UACHECK(as & AS_SINGLE_INSTANCE);
 }
 
-/* the application gone from the field */
+/* no application on the default field */
 static void CheckGone(void)
 {
+    optr field = DefaultField(), first;
     GenFieldInstance f;
-    optr first;
     GeodeHandle p;
 
-    GenData(@UAField, &f, sizeof(f));
-    UACHECK(!ListOf(f.GFI_genApplications, &first, sizeof(optr)));
-    UACHECK(!ListOf(f.GFI_processes, &p, sizeof(p)));
+    GenData(field, &f, sizeof(f));
+    UACHECK(!ListOf(field, f.GFI_genApplications, &first, sizeof(optr)));
+    UACHECK(!ListOf(field, f.GFI_processes, &p, sizeof(p)));
+}
+
+/* the system the UI started: two fields (its own, the system field), a
+ * screen, the UI's application below the screen */
+static void CheckSystem(void)
+{
+    GeodeHandle ui = UIProcess();
+    optr screen = NullOptr, field = DefaultField(), own = NullOptr;
+    optr uiApp = GeodeGetAppObject(ui);
+    word n = 0;
+    GenFieldInstance f;
+
+    UACHECK(ui && ui == GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0));
+    UACHECK(GeodeGetInfo(ui, GGIT_ATTRIBUTES, NULL) & GA_PROCESS);
+    UACHECK(UserCallSystem(MSG_GEN_COUNT_CHILDREN, NULL, 0, &n, sizeof(n)));
+    UACHECK(n == 2);
+    UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN, NULL, 0,
+		   &screen, sizeof(screen));
+    UACHECK(screen != NullOptr);
+    GenData(field, &f, sizeof(f));
+    UACHECK(f.GFI_flags & GFF_HAS_DEFAULT_LAUNCHER);	/* SystemField0 */
+    UACHECK(f.GFI_visParent == screen);
+    UACHECK(@call field::MSG_GEN_GET_USABLE());
+    /* the system field first (attached last), the UI's own field next,
+     * telling the UI's process */
+    UserCallSystem(MSG_GEN_FIND_CHILD_AT_POSITION, &(word) { 0 },
+		   sizeof(word), &own, sizeof(own));
+    UACHECK(own == field);
+    UserCallSystem(MSG_GEN_FIND_CHILD_AT_POSITION, &(word) { 1 },
+		   sizeof(word), &own, sizeof(own));
+    UACHECK(own != NullOptr && own != field);
+    GenData(own, &f, sizeof(f));
+    UACHECK(f.GFI_notificationDestination == ConstructOptr(ui, 0));
+    /* its application */
+    UACHECK(OptrToHandle(uiApp) != 0);
+    UACHECK(@call uiApp::MSG_GEN_GET_USABLE());
+    UACHECK(@call uiApp::MSG_GEN_FIND_PARENT() == screen);
+    UACHECK(@call uiApp::MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE() ==
+	    MSG_GEN_PROCESS_OPEN_APPLICATION);
 }
 
 @method UAHostClass, MSG_UA_HOST_STEP
 {
     switch (step) {
-    case 1:
-	/* the system, the screen and the field */
-	uaSystem = UserCreateSystemObject(OptrToHandle(@UAScreen));
-	@call uaSystem::MSG_GEN_SYSTEM_ADD_SCREEN_CHILD(@UAScreen, CCO_LAST);
-	@call uaSystem::MSG_GEN_SYSTEM_SET_DEFAULT_SCREEN(@UAScreen);
-	@call UAScreen::MSG_GEN_SCREEN_SET_VIDEO_DRIVER(0);
-	@call UAField::MSG_GEN_FIELD_SET_VIS_PARENT(@UAScreen);
-	@call UAField::MSG_META_ATTACH();
-	@call uaSystem::MSG_GEN_SYSTEM_SET_DEFAULT_FIELD(@UAField);
-	UACHECK(@call uaSystem::MSG_GEN_COUNT_CHILDREN() == 1);
+    case 1: {
+	/* the UI's system; uiapp of execOnStartup on the default field */
+	GeodeHandle gh = GeodeFind("uiapp   ", GEODE_NAME_SIZE, 0, 0);
+	CheckSystem();
+	UACHECK(gh != 0);
+	CheckUp(gh);
+	GCNListAdd(Self(), MANUFACTURER_ID_GEOWORKS, GCNSLT_APPLICATION);
+	/* the user quits it (the test waits for it to go) */
+	@send GeodeGetAppObject(gh)::MSG_META_QUIT();
 	break;
+    }
     case 2:
-	/* uiapp launched (the test waits for it to come up) */
+	/* gone; launched through the UI */
+	CheckGone();
 	Launch(0);
 	break;
     case 3:
-	CheckUp();
-	break;
-    case 4:
-	/* the user quits it (the test waits for the process to go) */
+	/* up, the load acknowledged; quit (the test waits) */
+	CheckUp(uaHostState.UAH_app);
+	UACHECK(uaHostState.UAH_loads == 1 &&
+		uaHostState.UAH_loaded == uaHostState.UAH_app &&
+		uaHostState.UAH_loadError == 0 &&
+		uaHostState.UAH_loadID == LOAD_ID);
 	@send GeodeGetAppObject(uaHostState.UAH_app)::MSG_META_QUIT();
 	break;
-    case 5:
+    case 4:
+	/* gone; again, not on top this time */
 	CheckGone();
-	/* again, not on top this time */
 	Launch(ALF_DO_NOT_OPEN_ON_TOP);
 	break;
+    case 5:
+	/* up; the UI detached (the test waits for its ack) */
+	CheckUp(uaHostState.UAH_app);
+	@send ConstructOptr(UIProcess(), 0)::MSG_META_DETACH(0, Self());
+	break;
     case 6:
-	CheckUp();
-	/* the system detaches: the field detaches its applications */
-	@send uaSystem::MSG_META_DETACH(0, @UANotify);
+	/* the UI's process gone, the library stays; no system */
+	UACHECK(!(GeodeGetInfo(GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0),
+			       GGIT_ATTRIBUTES, NULL) & GA_PROCESS));
+	UACHECK(!UserCallSystem(MSG_GEN_COUNT_CHILDREN, NULL, 0, NULL, 0));
+	GCNListRemove(Self(), MANUFACTURER_ID_GEOWORKS, GCNSLT_APPLICATION);
 	break;
-    case 7: {
-	/* detached: the field is out of the system, the specific parts
-	 * and the specific UI go */
-	CheckGone();
-	UACHECK(@call uaSystem::MSG_GEN_COUNT_CHILDREN() == 0);
-	UACHECK(!@call UAField::MSG_GEN_GET_USABLE());
-	ObjLockObjBlock(OptrToHandle(uaSystem));
-	GenSpecShrinkBranch(uaSystem);
-	GenSpecShrinkBranch(@UAScreen);
-	GenSpecShrinkBranch(@UAField);
-	MemUnlock(OptrToHandle(uaSystem));
-	@call uaSystem::MSG_GEN_SYSTEM_REMOVE_SCREEN_CHILD(@UAScreen);
-	UserDestroySystemObject();
-	UserFreeSpecificUI();
-	break;
-    }
     }
 }
 

@@ -1,33 +1,43 @@
 /*
- * test_ui_app.c -- the life of an application (Library/User:
- * GenProcessClass, GenApplicationClass): the process geode uahost
- * (Geode/uahost.goc) makes the UI's system object, a screen and a field
- * and launches the application uiapp (Geode/uiapp.goc, a GenProcessClass
- * process) on the field; the specific UI tspui (Geode/tspui.goc) builds
- * them and counts what the generic application tells it; uiapp reports
- * the steps of its process to uahost.  The kernel tells uahost, the
- * parent process, when uiapp exits.
+ * test_ui_app.c -- the UI as a process and the life of an application
+ * (Library/User: UserClass, GenProcessClass, GenApplicationClass,
+ * UserLoadApplication): the test boots the UI as the kernel does
+ * (BootLoadUI); its process starts the system with the specific UI
+ * tspui (Geode/tspui.goc), a screen on the memory video driver vidmem
+ * whose root window is the test's, its own application and field, the
+ * system field, and the application uiapp (Geode/uiapp.goc, a
+ * GenProcessClass process) of "[ui] execOnStartup".  The process geode
+ * uahost (Geode/uahost.goc) checks the system and launches uiapp
+ * through the UI; uiapp reports the steps of its process to uahost.
  *
  * The steps:
- *   1. the system, the screen and the field;
- *   2. uiapp launched: the process attaches, the application starts up
- *      on the field, opens in application mode (usable, on the field's
- *      lists, its startup and active lists told, brought to the top);
- *   3. it is up: the field's lists, its state;
- *   4. the user quits it: the quit levels, the detach (the active list),
- *      the close, the shutdown (the startup list, off the field), the
- *      final detach; the process exits, uahost hears of it;
- *   5. off the field; launched again, not on top;
- *   6. up again; the system detaches: the field detaches the process
- *      (not a quit), which exits, and the field and system detach;
- *   7. the specific parts shrunk, the system object gone, the specific
- *      UI freed.
+ *   - booted: the flow object, the specific UI, the system with a
+ *     screen (registered by the specific UI: the pointer on its root
+ *     window), the UI's own field and application, the system field,
+ *     the mouse driver; uiapp of execOnStartup on the default field,
+ *     the UI its parent;
+ *   1. the system checked; uiapp quit by the user: it exits, the UI
+ *      hears of it and tells the field and GCNSLT_APPLICATION;
+ *   2. uiapp launched through the UI with an acknowledgement;
+ *   3. it is up (the field's lists, its state, the acknowledgement);
+ *      quit by the user: the quit levels, the detach, the close, the
+ *      shutdown, the final detach; it exits;
+ *   4. launched again, not on top;
+ *   5. up; the UI's process detached: the system detaches the fields
+ *      (uiapp's process detached, not quit), then the UI as an
+ *      application; the UI lets go of the system and ends its process,
+ *      the caller acked;
+ *   6. the library stays without its process and system.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
+#include <Internal/im.h>
+#include <geosdriver.h>
 #include <initfile.h>
+#include <sysstats.h>
 
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 extern const unsigned char ui_geode[], uahost_geode[], uiapp_geode[],
@@ -50,10 +60,13 @@ typedef struct {
     word	UAH_checks, UAH_fails, UAH_failLine;
     word	UAH_events[UAE_COUNT];
     word	UAH_lastData[UAE_COUNT];
-    word	UAH_exits;
+    word	UAH_loads;
+    GeodeHandle	UAH_loaded;
+    word	UAH_loadError, UAH_loadID;
     GeodeHandle	UAH_app;
     word	UAH_acks;
-    word	UAH_fieldDetached;
+    word	UAH_started, UAH_exited;
+    GeodeHandle	UAH_lastExited;
     word	UAH_failLines[8];
 } UAHostState;
 
@@ -83,6 +96,8 @@ typedef struct {
     word		TSS_appCloseCompletes;
     word		TSS_appShutdowns;
     word		TSS_appIgnoreInput;
+    word		TSS_screenBuilds;
+    word		TSS_ptrShows, TSS_ptrHides;
 } TSState;
 
 static int fails;
@@ -114,9 +129,14 @@ static void Events(void)
     printf("\n");
 }
 
+static GeodeHandle Find(const char *name)
+{
+    return GeodeFind(name, GEODE_NAME_SIZE, 0, 0);
+}
+
 int main(void)
 {
-    GeodeHandle host, sp, vm;
+    GeodeHandle host, sp, ui;
     GeodeLoadError e;
     TSState *ts;
     void (*step)(word);
@@ -131,15 +151,47 @@ int main(void)
     GeodeRegisterImage("uiapp", uiapp_geode, uiapp_geode_size);
     GeodeRegisterImage("tspui", tspui_geode, tspui_geode_size);
     GeodeRegisterImage("vidmem", vidmem_geode, vidmem_geode_size);
+    InitFileWriteString("ui", "generic", "ui");
     InitFileWriteString("ui", "specific", "tspui");
+    InitFileWriteString("ui", "execOnStartup", "uiapp");
+    InitFileWriteString("screen 0", "driver", "vidmem");
+    InitFileWriteString("screen 0", "device", "memory");
 
-    vm = GeodeUseDriver("vidmem", VIDEO_PROTO_MAJOR, VIDEO_PROTO_MINOR, &e);
-    CHECK(vm != 0);
-    if (!vm) {
-	printf("GeodeUseDriver error %d\n", (int) e);
+    /* tspui has the UI as a library: a library only, its process ends */
+    sp = GeodeUseLibrary("tspui", 0, 0, NULL);
+    CHECK(sp != 0);
+    if (!sp)
 	return 1;
-    }
-    GeodeSetDefaultDriver(GDDT_VIDEO, vm);
+    WAIT_FOR(!(GeodeGetInfo(Find("ui      "), GGIT_ATTRIBUTES, NULL) &
+	       GA_PROCESS));
+    CHECK(!(GeodeGetInfo(Find("ui      "), GGIT_ATTRIBUTES, NULL) &
+	    GA_PROCESS));
+    CHECK(!SysGetInfo(SGIT_UI_PROCESS));
+    GeodeFreeLibrary(sp);
+    CHECK(!Find("ui      ") && !Find("tspui   "));
+
+    /* booted: the system started, uiapp of execOnStartup up */
+    BootLoadUI();
+    ui = (GeodeHandle) SysGetInfo(SGIT_UI_PROCESS);
+    CHECK(ui != 0 && ui == Find("ui      "));
+    WAIT_FOR(Find("tspui   "));
+    sp = GeodeUseLibrary("tspui", 0, 0, NULL);
+    ts = ProcGetLibraryEntry(sp, 6);
+    WAIT_FOR(Find("uiapp   ") && ts->TSS_appOpenCompletes == 2 &&
+	     ts->TSS_appNotBusy == 2);
+    printf("booted: screens %u, opens %u\n", ts->TSS_screenBuilds,
+	   ts->TSS_appOpenCompletes);
+    CHECK(ts->TSS_screenBuilds == 1);
+    CHECK(ts->TSS_sysBuilds[2] >= 1);
+    CHECK(GeodeGetDefaultDriver(GDDT_VIDEO) == Find("vidmem  "));
+    /* the screen's root window, the pointer hidden, then shown by the
+     * flow object */
+    CHECK(ts->TSS_root != 0);
+    CHECK(ts->TSS_ptrHides >= 1 && ts->TSS_ptrShows >= 1);
+    CHECK(Find("uiapp   ") != 0);
+    /* the UI's application and uiapp: started, attached, opened */
+    CHECK(ts->TSS_appStartups == 2 && ts->TSS_appAttaches == 2);
+    CHECK(ts->TSS_appToTop == 2);
 
     host = GeodeLoad("uahost", GA_PROCESS, GA_LIBRARY, 0, 0, &e);
     CHECK(host != 0);
@@ -150,44 +202,28 @@ int main(void)
     st = ProcGetLibraryEntry(host, 0);
     step = (void (*)(word)) ProcGetLibraryEntry(host, 1);
     WAIT_FOR(st->UAH_attached);
-    CHECK(st->UAH_attached == 1 && st->UAH_process == host);
 
-    /* 1: the system, screen and field */
+    /* 1: the system; uiapp quit: the UI hears of the exit */
     step(1);
-    sp = GeodeUseLibrary("tspui", 0, 0, NULL);
-    CHECK(sp != 0);
-    if (!sp)
-	return 1;
-    ts = ProcGetLibraryEntry(sp, 6);
-    CHECK(ts->TSS_fieldAttaches == 1);
+    WAIT_FOR(!Find("uiapp   ") && st->UAH_exited);
+    CHECK(!Find("uiapp   "));
+    CHECK(st->UAH_exited == 1 && st->UAH_lastExited != 0);
+    CHECK(st->UAH_events[UAE_ATTACH] == 0);	/* not ours to hear */
 
-    /* 2: launched; up once the open is complete and the busy state is
-     * through the queue */
+    /* 2, 3: through the UI; up, acknowledged, quit */
     step(2);
-    CHECK(st->UAH_app != 0);
-    WAIT_FOR(ts->TSS_appOpenCompletes && ts->TSS_appNotBusy);
+    WAIT_FOR(ts->TSS_appOpenCompletes == 3 && ts->TSS_appNotBusy == 3 &&
+	     st->UAH_loads && st->UAH_events[UAE_ACTIVE_ATTACH]);
     CHECK(st->UAH_events[UAE_ATTACH] == 1 && st->UAH_events[UAE_OPEN_APP] == 1);
-    CHECK(st->UAH_lastData[UAE_OPEN_APP] == 0);		/* AppAttachFlags */
     CHECK(st->UAH_events[UAE_STARTUP_ATTACH] == 1 &&
-	  st->UAH_lastData[UAE_STARTUP_ATTACH] == 1);	/* with the ALB */
-    CHECK(st->UAH_events[UAE_ACTIVE_ATTACH] == 1);
-    /* built at the startup, shrunk and built again by the attach */
-    CHECK(ts->TSS_builds[2] == 2 && ts->TSS_appStartups == 1 &&
-	  ts->TSS_appAttaches == 1);
-    CHECK(ts->TSS_appOpenCompletes == 1 && ts->TSS_appToTop == 1);
-    CHECK(ts->TSS_appBusy == 1 && ts->TSS_appNotBusy == 1);
-    CHECK(ts->TSS_busy == ts->TSS_notBusy && ts->TSS_busy >= 3);
-
-    /* 3: up */
+	  st->UAH_events[UAE_ACTIVE_ATTACH] == 1);
+    CHECK(ts->TSS_appToTop == 3);
+    CHECK(st->UAH_started >= 1);
     step(3);
-
-    /* 4: quit: the process goes, the host hears of it */
-    step(4);
-    WAIT_FOR(!GeodeFind("uiapp   ", GEODE_NAME_SIZE, 0, 0) && st->UAH_exits);
-    CHECK(!GeodeFind("uiapp   ", GEODE_NAME_SIZE, 0, 0));
-    CHECK(st->UAH_exits == 1);
+    WAIT_FOR(!Find("uiapp   ") && st->UAH_exited == 2);
+    CHECK(!Find("uiapp   ") && st->UAH_exited == 2);
+    CHECK(st->UAH_lastExited == st->UAH_app);
     Events();
-    /* QL_BEFORE_UI .. QL_AFTER_DETACH, each acked */
     CHECK(st->UAH_events[UAE_QUIT] == 5 && st->UAH_events[UAE_QUIT_ACK] == 5);
     CHECK(st->UAH_events[UAE_DETACH] == 1 &&
 	  st->UAH_events[UAE_ACTIVE_DETACH] == 1);
@@ -195,32 +231,30 @@ int main(void)
 	  st->UAH_events[UAE_REAL_DETACH] == 1 &&
 	  st->UAH_events[UAE_FINAL_DETACH] == 1);
     CHECK(st->UAH_events[UAE_STARTUP_SHUTDOWN] == 1);
-    CHECK(ts->TSS_appIgnoreInput == 1 && ts->TSS_appDetachPending == 1 &&
-	  ts->TSS_appCloseCompletes == 1 && ts->TSS_appShutdowns == 1);
 
-    /* 5, 6: again, not on top; detached with the system */
-    step(5);
-    WAIT_FOR(ts->TSS_appOpenCompletes == 2 && ts->TSS_appNotBusy == 2);
-    CHECK(ts->TSS_appOpenCompletes == 2 && ts->TSS_appToTop == 1);
+    /* 4, 5: again, not on top; the UI detached */
+    step(4);
+    WAIT_FOR(ts->TSS_appOpenCompletes == 4 && ts->TSS_appNotBusy == 4 &&
+	     st->UAH_events[UAE_OPEN_APP] == 2);
+    CHECK(ts->TSS_appToTop == 3);
     CHECK(st->UAH_events[UAE_OPEN_APP] == 2);
-    step(6);
-    WAIT_FOR(st->UAH_acks && st->UAH_exits == 2);
-    CHECK(st->UAH_acks == 1 && st->UAH_exits == 2);
-    CHECK(st->UAH_fieldDetached == 1);
-    CHECK(!GeodeFind("uiapp   ", GEODE_NAME_SIZE, 0, 0));
+    step(5);
+    WAIT_FOR(st->UAH_acks && !(GeodeGetInfo(ui, GGIT_ATTRIBUTES, NULL) &
+			       GA_PROCESS));
+    CHECK(st->UAH_acks == 1);
+    CHECK(!Find("uiapp   ") && st->UAH_exited == 3);
+    CHECK(!(GeodeGetInfo(ui, GGIT_ATTRIBUTES, NULL) & GA_PROCESS));
     Events();
-    /* a detach, not a quit */
+    /* uiapp detached, not quit */
     CHECK(st->UAH_events[UAE_QUIT] == 5 && st->UAH_events[UAE_DETACH] == 2);
-    CHECK(st->UAH_events[UAE_ACTIVE_DETACH] == 2 &&
-	  st->UAH_events[UAE_CLOSE_APP] == 2 &&
+    CHECK(st->UAH_events[UAE_CLOSE_APP] == 2 &&
 	  st->UAH_events[UAE_FINAL_DETACH] == 2);
-    CHECK(ts->TSS_appIgnoreInput == 1 && ts->TSS_appShutdowns == 2);
+    /* the UI's application and the three uiapps shut down */
+    CHECK(ts->TSS_appShutdowns == 4);
+    CHECK(ts->TSS_fieldDetaches == 2);
 
-    /* 7: gone */
-    step(7);
-    GeodeFreeLibrary(sp);
-    CHECK(!GeodeFind("tspui   ", GEODE_NAME_SIZE, 0, 0));
-
+    /* 6: the library stays */
+    step(6);
     printf("geode checks: %u, failed %u (first at uahost.goc line %u)\n",
 	   st->UAH_checks, st->UAH_fails, st->UAH_failLine);
     {
@@ -229,14 +263,14 @@ int main(void)
 	for (i = 0; i < st->UAH_fails && i < 8; i++)
 	    printf("  failed: uahost.goc line %u\n", st->UAH_failLines[i]);
     }
-    CHECK(st->UAH_checks >= 25 && !st->UAH_fails);
+    CHECK(st->UAH_checks >= 40 && !st->UAH_fails);
 
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(host, 0), KMSG_META_DETACH,
 		 &dp, sizeof(dp), NULL, 0);
-    WAIT_FOR(!GeodeFind("uahost  ", GEODE_NAME_SIZE, 0, 0));
-    CHECK(!GeodeFind("uahost  ", GEODE_NAME_SIZE, 0, 0));
-    CHECK(!GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0));
-    GeodeFreeDriver(vm);
+    WAIT_FOR(!Find("uahost  "));
+    CHECK(!Find("uahost  "));
+    GeodeFreeLibrary(sp);
+    CHECK(!Find("ui      ") && !Find("tspui   "));
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

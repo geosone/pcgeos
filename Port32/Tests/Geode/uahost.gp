@@ -1,8 +1,8 @@
 ##############################################################################
 #
 # uahost.gp -- a process geode for the library.ui.app test (Port32/Tests):
-# the UI's system object with a screen and a field, on which it launches
-# the application uiapp.
+# it checks the system the UI's process started and launches the
+# application uiapp through the UI (UserLoadApplication).
 #
 ##############################################################################
 name     uahost.app
@@ -13,6 +13,5 @@ type   process, single
 class  UAHostClass
 library geos
 library ui
-resource UAHostObjects object
 export uaHostState
 export UAHostStep

@@ -249,15 +249,14 @@ static Boolean SameText(const char *a, const char *b)
     case 4: {
 	/* the applications of a field */
 	GeodeHandle p = usState.USS_process, procs[4];
-	MemHandle owner = MemOwner((MemHandle) p);
 	optr apps[4];
 	GenFieldInstance f;
 	USCHECK(@call USField2::MSG_GEN_FIELD_APP_STARTUP_NOTIFY() == 0);
 	GenData(@USField2, &f, sizeof(f));
 	USCHECK(f.GFI_numAttachingApps == 1);
 	@call USField2::MSG_GEN_FIELD_ADD_GEN_APPLICATION(@USApp, CCO_LAST);
-	USCHECK(MemOwner((MemHandle) p) ==
-		GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0));
+	/* the UI the process's parent now; the geode still its own */
+	USCHECK(MemOwner((MemHandle) p) == (MemHandle) p);
 	USCHECK(@call USField2::MSG_GEN_FIELD_APP_STARTUP_NOTIFY() == 0);
 	@call USField2::MSG_GEN_FIELD_ADD_GEN_APPLICATION(@USApp2, CCO_FIRST);
 	GenData(@USField2, &f, sizeof(f));
@@ -279,7 +278,7 @@ static Boolean SameText(const char *a, const char *b)
 	@call USField2::MSG_GEN_FIELD_PROCESS_EXIT(p);
 	@call USField2::MSG_GEN_FIELD_PROCESS_EXIT(p);
 	USCHECK(!ListOf(@USField2, f.GFI_processes, procs, sizeof(procs)));
-	HandleModifyOwner((Handle) p, (GeodeHandle) owner);
+	HandleModifyOwner((Handle) p, p);	/* no parent again */
 
 	/* no focus in the field: it needs a launcher, tells USNotify */
 	@call USField2::MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE();

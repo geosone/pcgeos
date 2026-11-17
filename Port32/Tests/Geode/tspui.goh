@@ -32,6 +32,10 @@ typedef struct {
     word		TSS_appCloseCompletes;	/* ..._CLOSE_COMPLETE */
     word		TSS_appShutdowns;	/* MSG_META_APP_SHUTDOWN */
     word		TSS_appIgnoreInput;	/* ..._IGNORE_INPUT */
+    word		TSS_screenBuilds;	/* screens made usable: */
+    /* registered with the UI (UserScreenRegister) on TSS_root (made
+     * then if not set, on the counting video functions below) */
+    word		TSS_ptrShows, TSS_ptrHides;
 } TSState;
 
 extern TSState tspState;

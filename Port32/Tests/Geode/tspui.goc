@@ -12,7 +12,11 @@
 @include <Objects/vCompC.goh>
 @include <Objects/gSysC.goh>
 @include <Objects/gFieldC.goh>
+@include <Objects/gScrnC.goh>
 #include <Internal/specUI.h>
+#include <Internal/videoDr.h>
+#include <geosdriver.h>
+#include <stdint.h>
 @include "tspui.goh"
 
 @classdecl TSWinClass;
@@ -70,6 +74,36 @@ ClassStruct *TSBuildSystem(optr oself, word masterOffset)
     (void) masterOffset;
     tspState.TSS_sysBuilds[2]++;
     return &TSSystemClass;
+}
+
+/* the root window's video functions: the pointer shown and hidden */
+static Boolean TSRootStrategy(word function, DriverRegs *r)
+{
+    (void) r;
+    if (function == DR_VID_SHOWPTR)
+	tspState.TSS_ptrShows++;
+    else if (function == DR_VID_HIDEPTR)
+	tspState.TSS_ptrHides++;
+    return FALSE;
+}
+
+/* the screen made usable: its root window, as OLScreen's build opens
+ * one (the test's, else one on TSRootStrategy), registered with the UI */
+@method TSScreenClass, MSG_SPEC_SET_USABLE
+{
+    GeodeHandle driver;
+
+    (void) updateMode;
+    tspState.TSS_screenBuilds++;
+    driver = ((GenScreenInstance *) ObjDerefGen(oself))->GSCI_videoDriver;
+    if (!tspState.TSS_root) {
+	tspState.TSS_root = WinOpen(0, 0, 0, WCF_PLAIN | CMT_CLOSEST,
+				    C_DARK_GRAY, 0, 0, WPF_ROOT, 0, 0, NULL,
+				    0, 0, 639, 479);
+	WinSetInfo(tspState.TSS_root, WIT_STRATEGY,
+		   (optr) (uintptr_t) (void *) TSRootStrategy);
+    }
+    UserScreenRegister(tspState.TSS_root, driver);
 }
 
 @method TSFieldClass, MSG_META_ATTACH
