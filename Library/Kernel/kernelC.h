@@ -986,8 +986,11 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
 		       GeodeLoadError *err);
 /* wait until no process is left or GEOS has ended; the exit flags */
 word KernelRun(void);
-/* the UI library (LoadUI), or 0; the thread that booted */
+/* the UI library (BootLoadUI, also for the tests of the UI process), or
+ * 0; set while BootLoadUI loads it; the thread that booted */
 extern GeodeHandle kernelUIHandle;
+extern Boolean kernelLoadingUI;
+void BootLoadUI(void);
 extern ThreadHandle kernelBootThread;
 
 /* Ending GEOS (Boot/bootBoot.c, Sys/sysMisc.c): EndGeos with KEF_* and

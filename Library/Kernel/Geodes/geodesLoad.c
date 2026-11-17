@@ -811,6 +811,8 @@ GeodeHandle GeodeLoadLow(const char *fileName, GeodeAttrs attrMatch,
 	CORE(gh)->GC_attrs |= GA_LIBRARY_INITIALIZED;
     }
     if (attrs & GA_PROCESS) {
+	if (kernelLoadingUI && !kernelUIHandle)
+	    kernelUIHandle = gh;	/* BootLoadUI: known at its attach */
 	th = StartProcess(gh, info, priority, appInfo);
 	if (!th) {
 	    *err = GLE_MEMORY_ALLOCATION_ERROR;

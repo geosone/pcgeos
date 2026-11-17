@@ -163,9 +163,23 @@ void MemModifyFlags(MemHandle mh, HeapFlags bitsToSet, HeapFlags bitsToClear)
     he->HE_flags = (byte) ((he->HE_flags | bitsToSet) & ~bitsToClear);
 }
 
+/* a geode owns its own handle: for a geode the parent process changes
+ * (heapHigh.asm), which hears of its exit (GeodeRemoveThread) */
 void HandleModifyOwner(Handle h, GeodeHandle owner)
 {
-    HandleEntryOf(h)->HE_owner = owner;
+    HandleEntry *he = HandleEntryOf(h);
+    GeodeCore *c;
+
+    if (he->HE_owner == h) {
+	GeodeLock();
+	c = GeodeCoreOf((GeodeHandle) h);
+	if (c)
+	    c->GC_parentProcess = owner;
+	GeodeUnlock();
+	if (c)
+	    return;
+    }
+    he->HE_owner = owner;
 }
 
 void MemModifyOtherInfo(MemHandle mh, dword otherInfo)

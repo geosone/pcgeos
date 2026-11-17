@@ -12,6 +12,10 @@
  * abort, else continue, else retry, else exit, else reboot.  Exit asks
  * for a forced clean shutdown and returns SNF_EXIT; reboot ends GEOS and
  * does not return (only the boot thread comes back).
+ *
+ * SysRegisterScreen (sysScreen.asm): the UI tells the kernel of each
+ * screen, whose window the error boxes would go into.  The C kernel
+ * notes the screens for them.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -61,4 +65,23 @@ word SysNotify(SysNotifyFlags flags, const char *string1, const char *string2)
     else if (answer == SNF_REBOOT)
 	(void) SysShutdown(SST_REBOOT);
     return answer;
+}
+
+#define MAX_ERROR_SCREENS	4
+
+static struct {
+    GeodeHandle		driver;
+    WindowHandle	root;
+} errorScreens[MAX_ERROR_SCREENS];
+
+void SysRegisterScreen(GeodeHandle driver, WindowHandle root)
+{
+    word i;
+
+    for (i = 0; i < MAX_ERROR_SCREENS; i++)
+	if (!errorScreens[i].root || errorScreens[i].root == root) {
+	    errorScreens[i].driver = driver;
+	    errorScreens[i].root = root;
+	    return;
+	}
 }

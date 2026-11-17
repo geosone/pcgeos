@@ -44,8 +44,9 @@
  *
  * The UI: "[ui] generic" names its geode, as in DOS16; if it does not
  * load, the default ui.geo is tried and its failure is fatal
- * (CANNOT_LOAD_UI).  Without the key, no UI is loaded yet: there is no
- * C UI library to be the default.
+ * (CANNOT_LOAD_UI).  Without the key, no UI is loaded yet.  The UI's
+ * handle (SGIT_UI_PROCESS) is set before its process runs, so that the
+ * UI knows at its attach that it is the system's UI (BootLoadUI).
  *
  * The keyboard driver: "[keyboard] driver" names it, as in DOS16; if it
  * does not load, kbd.geo is tried and its failure is fatal
@@ -74,6 +75,7 @@
 #include <string.h>
 
 GeodeHandle kernelUIHandle;
+Boolean kernelLoadingUI;
 ThreadHandle kernelBootThread;
 
 /* InitSys: GEOS_ACT.IVE in the top tells of a start that did not end
@@ -161,19 +163,31 @@ static void LoadPowerDriver(void)
     (void) SysIgnoreNotification(SST_DEVICE_POWER);
 }
 
-static void LoadUI(void)
+/* the geode loader sets kernelUIHandle to the first process it starts
+ * while kernelLoadingUI is set: the UI's (it imports no library with a
+ * process), before its thread runs */
+static GeodeHandle LoadUIGeode(const char *name)
+{
+    GeodeLoadError e;
+    GeodeHandle gh;
+
+    kernelUIHandle = 0;
+    kernelLoadingUI = TRUE;
+    gh = GeodeLoad(name, 0, 0, 0, 0, &e);
+    kernelLoadingUI = FALSE;
+    kernelUIHandle = gh;
+    return gh;
+}
+
+void BootLoadUI(void)
 {
     char name[FILE_LONGNAME_BUFFER_SIZE];
     word n;
-    GeodeLoadError e;
 
     FileSetStandardPath(SP_SYSTEM);
     if (InitFileReadStringBuffer("ui", "generic", name, sizeof(name), &n))
 	return;
-    kernelUIHandle = GeodeLoad(name, 0, 0, 0, 0, &e);
-    if (!kernelUIHandle)
-	kernelUIHandle = GeodeLoad("ui.geo", 0, 0, 0, 0, &e);
-    if (!kernelUIHandle)
+    if (!LoadUIGeode(name) && !LoadUIGeode("ui.geo"))
 	KernelFatal(CANNOT_LOAD_UI);
 }
 
@@ -237,7 +251,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     KernelImInit();
     LoadKeyboardDriver();
     KernelImStart();
-    LoadUI();
+    BootLoadUI();
     gh = ProcessCommandLine(cmdTail, &e);
     if (err)
 	*err = e;
