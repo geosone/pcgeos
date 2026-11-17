@@ -27,6 +27,9 @@ geos_geode(ui GP ui32.gp
                ${ui}/User/userFlowMisc.goc
                ${ui}/User/userFlowInput.goc
                ${ui}/User/userMain.goc
+               ${ui}/User/userScreen.goc
+               ${ui}/User/userUtils.goc
+               ${ui}/UI/uiMain.goc
                ${ui}/User/userLibrary.goc
            INCLUDES ${ui})
 set(ui_GEO ${ui_GEO} PARENT_SCOPE)

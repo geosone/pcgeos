@@ -25,6 +25,28 @@ DESCRIPTION:
 
 @deflib	ui
 
+@ifdef GEOS_PORT32
+/*
+ * Port32 (Port32/ABI.md section 13x): UserClass, with the parameters of
+ * the asm's messages.
+ */
+@class	UserClass, GenProcessClass;
+
+@message void MSG_USER_FREE_SPECIFIC_UI(GeodeHandle specificUI);
+@message void MSG_USER_LAUNCH_APPLICATION(MemHandle appLaunchBlock);
+@message void MSG_USER_USE_LIBRARY();
+@message void MSG_USER_UPDATE_SOUND_PARAMS();
+/* TRUE if the system is to shut down */
+@message Boolean MSG_USER_STARTUP_APPLS(word extraData);
+@message void MSG_USER_DELETE_STATE_FILES_DIALOG_RESPONSE(
+				InteractionCommand response);
+@message void MSG_USER_CONTINUE_STARTUP();
+@message void MSG_USER_FREE_SOUND_HANDLE();
+@message void MSG_USER_PROMPT_FOR_PASSWORD();
+@message void MSG_USER_PASSWORD_ENTERED();
+@message void MSG_USER_IS_PASSWORD_DIALOG_ACTIVE();
+
+@else
 @class	Userclass, GenProcessClass;
 
 /*
@@ -91,6 +113,8 @@ DESCRIPTION:
  * Message NOT available in GOC
  */
 
+
+@endif
 
 @endc
 

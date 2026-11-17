@@ -1,0 +1,35 @@
+/*
+ * uiMain.goc -- the UI as an application (after uiMain.ui): its
+ * application object UIApp, which the UI's process opens below the
+ * default screen, and the system field of the first screen,
+ * SystemField0 (userScreen.goc).
+ *
+ * Port32: UIApp is a GenApplicationClass (UIApplicationClass adds
+ * nothing); not yet its children and active list (the help objects
+ * SysHelpObject, SysModalHelpObject), the handwriting box, the dialogs
+ * of uiMain.ui (state files, shutdown status, remote transfer).
+ */
+@include "uiInt.goh"
+@include <Objects/gFieldC.goh>
+
+@start ApplicationUI;
+
+@object GenApplicationClass UIApp = {
+    GI_attrs = 0;			/* not targetable */
+    GAI_states = AS_AVOID_TRANSPARENT_DETACH;	/* not focusable, modelable */
+    GAI_optFlags = AOF_MULTIPLE_INIT_FILE_CATEGORIES;
+}
+
+@end ApplicationUI;
+
+@start SystemFieldUI;
+
+@object GenFieldClass SystemField0 = {
+    GFI_flags = GFF_NEEDS_WORKSPACE_MENU | GFF_LOAD_BITMAP |
+		GFF_HAS_DEFAULT_LAUNCHER;
+    /* no data: the default of "uiFeatures"; the key loads the options */
+    ATTR_GEN_INIT_FILE_CATEGORY = "";
+    ATTR_GEN_INIT_FILE_KEY = "";
+}
+
+@end SystemFieldUI;

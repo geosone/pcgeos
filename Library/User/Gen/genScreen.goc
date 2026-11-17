@@ -38,6 +38,12 @@ static void FakeScreen(VideoDriverInfo *vdi)
 	vdi->VDI_pageH = v;
 }
 
+/* UserScreenNoVideoDriverError (userScreen.asm): no video, no GEOS */
+void UserScreenNoVideoDriverError(void)
+{
+    SysShutdown(SST_DIRTY, noVideoMessage);
+}
+
 @method GenScreenClass, MSG_GEN_SCREEN_SET_VIDEO_DRIVER
 {
     VideoDriverInfo *vdi;
@@ -46,7 +52,7 @@ static void FakeScreen(VideoDriverInfo *vdi)
     if (!driver)
 	driver = GeodeGetDefaultDriver(GDDT_VIDEO);
     if (!driver) {
-	SysShutdown(SST_DIRTY, noVideoMessage);
+	UserScreenNoVideoDriverError();
 	return;
     }
     pself->GSCI_videoDriver = driver;

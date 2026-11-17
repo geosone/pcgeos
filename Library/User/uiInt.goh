@@ -226,4 +226,34 @@ ChunkHandle VisCreateMonikerChunk(optr obj, ChunkHandle chunk,
 void VisCompUpdateWindow(optr obj, UpdateWindowFlags flags,
 			 VisUpdateMode mode);
 
+/* ---------------------------------------------------------------------
+ * The UI's process (User/userMain.goc, userScreen.goc, userUtils.goc)
+ * ------------------------------------------------------------------- */
+
+/* alb.def: AppLaunchFlags the C header lacks (it has an older name for
+ * the IACP bit) */
+#ifndef ALF_OPEN_FOR_IACP_ONLY
+#define ALF_OPEN_FOR_IACP_ONLY		0x04
+#endif
+#define ALF_NO_ACTIVATION_DIALOG	0x02
+
+/* no error from GeodeLoad, as the kernel has it (kernelC.h) */
+#ifndef GLE_OK
+#define GLE_OK	GLE_LAST_GEODE_LOAD_ERROR
+#endif
+
+/* the flow object of the UI's process (0 while there is none) */
+extern optr uiFlowObj;
+
+GeodeLoadError PrepAppLaunchBlock(MemHandle *albp, AppLaunchFlags alf,
+				  Message attachMethod, const char *filename,
+				  DiskHandle disk, optr genParent);
+GeodeHandle UserLoadExtendedDriver(const char *category, StandardPath sp,
+				   word protoMajor, word protoMinor,
+				   word testAndSetBX, GeodeLoadError *err);
+void UserScreenNoVideoDriverError(void);
+void UserMakeScreens(MemHandle block);
+void UserMakeScreenFields(void);
+void UserScreenExit(void);
+
 #endif

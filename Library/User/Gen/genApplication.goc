@@ -46,11 +46,6 @@
     return pself->GAI_states;
 }
 
-/* alb.def (the C header has an older name for the bit) */
-#ifndef ALF_OPEN_FOR_IACP_ONLY
-#define ALF_OPEN_FOR_IACP_ONLY	0x04
-#endif
-
 #define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
 
 static optr ProcessOptr(void)

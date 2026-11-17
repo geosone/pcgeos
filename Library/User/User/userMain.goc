@@ -1,20 +1,58 @@
 /*
- * userMain.goc -- the start of the UI (after userMain.asm), so far the
- * input map: SetDefaultInputMap, CheckNumMouseButtons, CheckKey and the
- * button maps of one, two and three buttons.
+ * userMain.goc -- the UI's process (after userMain.asm): UserClass and
+ * the input map.
+ *
+ * UserClass, the process of ui.geo (a GenProcessClass), starts the
+ * system at its attach (UserAttach): the flow object with the input
+ * manager's and the window system's events, the specific UI, the system
+ * object, the screens (userScreen.goc), the input map; then its own
+ * application object UIApp (UI/uiMain.goc) is opened below the default
+ * screen, with a field of its own, and the startup goes on
+ * (UserContinueStartup): the mouse driver, the system fields, the
+ * applications of "[ui] execOnStartup" and "execOnStartupBG".  The
+ * UI's process hears of the exit of the applications' processes (the
+ * fields make it their parent) and tells the fields and
+ * GCNSLT_APPLICATION.  Its detach (from SysShutdown) detaches the
+ * system object, which detaches the fields with their applications and
+ * then the UI's process as an application; the system's ack ends the
+ * process (the screens, the input grabs and the specific UI let go).
  *
  * The input map says which UI function a button starts with which
  * modifiers (the flow object's TranslateButton) and holds the
  * UIButtonFlags of the [input] category.
  *
- * Port32: the map is a structure of the library, not a block; until the
- * UI's process starts the system (UserAttach), the library sets it up
- * when it is loaded (UILibraryEntry, userLibrary.goc).
+ * Port32:
+ *  - ui.geo is the system's UI when the kernel loads it (BootLoadUI,
+ *    SGIT_UI_PROCESS).  Loaded as a library of another geode, as the
+ *    tests of its parts do, its process ends at once and it is a
+ *    library only;
+ *  - the input map is a structure of the library, not a block; the
+ *    library also sets it up when it is loaded (UILibraryEntry,
+ *    userLibrary.goc), for the library only UI;
+ *  - no state files: the UI opens its application without one and
+ *    never asks to delete them (DeleteStateConfirmBox);
+ *  - not yet: undo, overstrike, the activation dialog and keyboard
+ *    accelerator modes, sound, the busy timer, the token database, the
+ *    screen blanker, pen mode and handwriting, the spooler and mailbox
+ *    loaded at the start, the help objects, the graphical setup of
+ *    "[system] continueSetup", the clipboard file, the task driver,
+ *    passwords, MSG_META_INVAL_TREE and _BOUNDS, the log; the mouse
+ *    driver without "[mouse] driver" (the asm's kbmouse.geo).
  */
 @include "uiInt.goh"
+@include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
+@include <Internal/uProcC.goh>
+@include <Internal/flowC.goh>
 #include <initfile.h>
 #include <system.h>
+#include <sysstats.h>
+#include <driver.h>
+#include <geosdriver.h>
+#include <Internal/im.h>
 #include <Internal/mouseDr.h>
+#include <Internal/videoDr.h>
+#include <string.h>
 
 InputMapHeader uiInputMap;
 UIButtonFlags uiButtonFlags;
@@ -164,4 +202,288 @@ void UserSetDefaultInputMap(void)
     uiInputMap = *map;
     uiInputMap.IMH_flags = (UIButtonFlags) ((map->IMH_flags | in) & ~out);
     uiButtonFlags = uiInputMap.IMH_flags;
+}
+
+
+/* ---------------------------------------------------------------------
+ * UserClass, the UI's process
+ * ------------------------------------------------------------------- */
+
+@classdecl UserClass, neverSaved;
+
+
+optr uiFlowObj;
+static word uiAckID;
+static optr uiAckOD;
+
+static optr Self(void)
+{
+    return ConstructOptr(GeodeGetProcessHandle(), 0);
+}
+
+/* the system's UI (BootLoadUI), not a library of another geode */
+static Boolean SystemUI(void)
+{
+    return (GeodeHandle) SysGetInfo(SGIT_UI_PROCESS) ==
+	GeodeGetProcessHandle();
+}
+
+/* UserAttach: the system started */
+@method UserClass, MSG_META_ATTACH_PROCESS
+{
+    MemHandle block, alb = 0;
+    optr screen = NullOptr;
+    struct { word value1, value2; } p;
+
+    (void) value1;
+    (void) value2;
+    if (!SystemUI()) {
+	/* Port32: a library only; the process ends */
+	@send, forceQueue Self()::MSG_META_DETACH(0, NullOptr);
+	return;
+    }
+    uiFlags |= UIF_INIT;
+    uiFlags &= ~(UIF_DETACHING_SYSTEM | UIF_DETACHING_APP);
+    /* between "focus" and "high" */
+    ThreadModify(0, PRIORITY_HIGH + (PRIORITY_FOCUS - PRIORITY_HIGH) / 2,
+		 TMF_BASE_PRIO);
+
+    /* the flow object, for the user's input */
+    block = UserAllocObjBlock(0);
+    uiFlowObj = ObjInstantiate(block, (ClassStruct *) &FlowClass);
+    ImGrabInput(uiFlowObj);
+    WinGrabChange(0, uiFlowObj);
+
+    /* the specific UI and the system object */
+    FileSetStandardPath(SP_SYSTEM);
+    UserCreateSystemObject(block);
+
+    UserMakeScreens(block);
+    UserSetDefaultInputMap();
+
+    /* the UI as an application, below the default screen */
+    UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN, NULL, 0,
+		   &screen, sizeof(screen));
+    (void) PrepAppLaunchBlock(&alb, 0, MSG_GEN_PROCESS_RESTORE_FROM_STATE,
+			      "ui", SP_SYSTEM, screen);
+    p.value1 = (word) ((dword) alb >> 16);
+    p.value2 = (word) alb;
+    CObjCallSuperP((ClassStruct *) &UserClass, oself,
+		   MSG_META_ATTACH_PROCESS, &p, sizeof(p), NULL, 0);
+    uiFlags &= ~UIF_INIT;
+}
+
+/* UserOpenApplication: the UI's own field, then the rest of the start */
+@method UserClass, MSG_GEN_PROCESS_OPEN_APPLICATION
+{
+    optr screen = NullOptr, field;
+    GenFieldInstance *g;
+
+    @callsuper();
+    UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN, NULL, 0,
+		   &screen, sizeof(screen));
+    field = ObjInstantiate(OptrToHandle(UserGetSystemObject()),
+			   (ClassStruct *) &GenFieldClass);
+    @call field::MSG_META_ATTACH();
+    ObjLockObjBlock(OptrToHandle(field));
+    g = (GenFieldInstance *) ObjDerefGen(field);
+    g->GFI_notificationDestination = Self();
+    MemUnlock(OptrToHandle(field));
+    @call field::MSG_GEN_FIELD_SET_VIS_PARENT(screen);
+    @call field::MSG_GEN_SET_USABLE(VUM_NOW);
+    @call field::MSG_GEN_BRING_TO_TOP();
+    UserCallSystem(MSG_GEN_SYSTEM_SET_DEFAULT_FIELD, &field, sizeof(field),
+		   NULL, 0);
+    @call Self()::MSG_USER_CONTINUE_STARTUP();
+}
+
+/* ShowDefaultPtr: the default video driver shows the pointer */
+static void ShowDefaultPtr(void)
+{
+    GeodeHandle vid = GeodeGetDefaultDriver(GDDT_VIDEO);
+    DriverRegs r;
+
+    if (!vid)
+	return;
+    memset(&r, 0, sizeof(r));
+    (void) DriverCall(GeodeInfoDriver(vid), DR_VID_SHOWPTR, &r);
+}
+
+/* LoadMouseDriver: "[mouse]" unless there is a mouse driver, then
+ * "[secondMouse]" */
+static void LoadMouseDriver(void)
+{
+    GeodeHandle gh;
+    GeodeLoadError e;
+
+    if (!GeodeGetDefaultDriver(GDDT_MOUSE)) {
+	gh = UserLoadExtendedDriver("mouse", SP_MOUSE_DRIVERS,
+				    MOUSE_PROTO_MAJOR, MOUSE_PROTO_MINOR, 0,
+				    &e);
+	if (gh) {
+	    GeodeSetDefaultDriver(GDDT_MOUSE, gh);
+	    ShowDefaultPtr();
+	}
+    }
+    (void) UserLoadExtendedDriver("secondMouse", SP_MOUSE_DRIVERS,
+				  MOUSE_PROTO_MAJOR, MOUSE_PROTO_MINOR, 0, &e);
+}
+
+/* UserContinueStartup: the mouse, the input map again, the state files
+ * left alone (none) */
+@method UserClass, MSG_USER_CONTINUE_STARTUP
+{
+    LoadMouseDriver();
+    UserSetDefaultInputMap();
+    @call Self()::MSG_USER_DELETE_STATE_FILES_DIALOG_RESPONSE(IC_YES);
+}
+
+/* UserDeleteStateFilesDialogResponse: Port32 has no state files; the
+ * system fields, the applications to start */
+@method UserClass, MSG_USER_DELETE_STATE_FILES_DIALOG_RESPONSE
+{
+    (void) response;
+    UserMakeScreenFields();
+    (void) @call Self()::MSG_USER_STARTUP_APPLS(0);
+}
+
+typedef struct {
+    AppLaunchFlags	SAD_flags;
+    word		SAD_extraData;
+    Boolean		SAD_shutdown;
+} StartupApplsData;
+
+/* LoadApplicationWithErrorMessage: Port32 shows no error yet */
+static Boolean StartupApplsCB(const char *name, word sectionNum,
+			      void *data)
+{
+    StartupApplsData *d = data;
+    MemHandle alb;
+    AppLaunchBlock *a;
+    GeodeLoadError e;
+
+    (void) sectionNum;
+    alb = MemAlloc(sizeof(AppLaunchBlock), HF_SHARABLE | HF_SWAPABLE,
+		   HAF_ZERO_INIT);
+    if (!alb)
+	return FALSE;
+    a = MemLock(alb);
+    a->ALB_extraData = d->SAD_extraData;
+    MemUnlock(alb);
+    (void) UserLoadApplication(d->SAD_flags,
+			       MSG_GEN_PROCESS_OPEN_APPLICATION, alb,
+			       (char *) name, 0, &e);
+    return FALSE;
+}
+
+/* StartupAppls: "[ui] execOnStartup", then "execOnStartupBG" in the
+ * back */
+@method UserClass, MSG_USER_STARTUP_APPLS
+{
+    StartupApplsData d;
+
+    d.SAD_extraData = extraData;
+    d.SAD_shutdown = FALSE;
+    d.SAD_flags = ALF_NO_ACTIVATION_DIALOG;
+    InitFileEnumStringSection("ui", "execOnStartup", IFRF_READ_ALL,
+			      StartupApplsCB, &d);
+    d.SAD_flags = ALF_NO_ACTIVATION_DIALOG | ALF_OPEN_IN_BACK |
+		  ALF_DO_NOT_OPEN_ON_TOP;
+    InitFileEnumStringSection("ui", "execOnStartupBG", IFRF_READ_ALL,
+			      StartupApplsCB, &d);
+    return d.SAD_shutdown;
+}
+
+/* UserLaunchApplication: a launch left to the UI */
+@method UserClass, MSG_USER_LAUNCH_APPLICATION
+{
+    GeodeLoadError e;
+
+    (void) UserLoadApplication(0, 0, appLaunchBlock, NULL, 0, &e);
+}
+
+/*
+ * UserDetach: the first detach detaches the system object (its ack
+ * comes to UserAck); the system's detach of the UI as an application
+ * goes to GenProcessClass; others are acked
+ */
+@method UserClass, MSG_META_DETACH
+{
+    optr self = Self();
+
+    if (!SystemUI()) {
+	/* Port32: a library only, the process just ends */
+	struct { word id; optr caller; } d;
+
+	d.id = callerID;
+	d.caller = caller;
+	CObjCallSuperP((ClassStruct *) &GenProcessClass, oself,
+		       MSG_META_DETACH, &d, sizeof(d), NULL, 0);
+	return;
+    }
+    if (uiFlags & UIF_DETACHING_SYSTEM) {
+	if (!caller)
+	    return;
+	if (caller != UserGetSystemObject() ||
+	    (uiFlags & UIF_DETACHING_APP)) {
+	    @send caller::MSG_META_ACK(callerID, self);
+	    return;
+	}
+	uiFlags |= UIF_DETACHING_APP;
+	@callsuper();
+	return;
+    }
+    uiFlags |= UIF_DETACHING_SYSTEM;
+    uiAckID = callerID;
+    uiAckOD = caller;
+    {
+	struct { word id; optr caller; } d;
+
+	d.id = 0;
+	d.caller = self;
+	UserCallSystem(MSG_META_DETACH, &d, sizeof(d), NULL, 0);
+    }
+}
+
+@method UserClass, MSG_META_DETACH_ABORT
+{
+    uiFlags &= ~UIF_DETACHING_SYSTEM;
+}
+
+/* UserAck: the system object detached: the UI lets go and ends */
+@method UserClass, MSG_META_ACK
+{
+    struct { word id; optr caller; } d;
+
+    if (!SystemUI() || caller != UserGetSystemObject() || !caller) {
+	@callsuper();
+	return;
+    }
+    UserDestroySystemObject();
+    UserScreenExit();
+    ImReleaseInput(uiFlowObj);
+    WinReleaseChange(0, uiFlowObj);
+    @send, forceQueue Self()::MSG_USER_FREE_SPECIFIC_UI(UserGetSpecificUI());
+    d.id = uiAckID;
+    d.caller = uiAckOD;
+    CObjCallSuperP((ClassStruct *) &GenProcessClass, oself, MSG_META_DETACH,
+		   &d, sizeof(d), NULL, 0);
+}
+
+@method UserClass, MSG_USER_FREE_SPECIFIC_UI
+{
+    (void) specificUI;
+    UserFreeSpecificUI();
+}
+
+/* UserNotifyProcessExit: the fields and GCNSLT_APPLICATION told */
+@method UserClass, MSG_PROCESS_NOTIFY_PROCESS_EXIT
+{
+    EventHandle ev;
+
+    (void) exitCode;
+    ev = @record GenFieldClass::MSG_GEN_FIELD_PROCESS_EXIT(exitProcess);
+    UserCallSystem(MSG_GEN_SEND_TO_CHILDREN, &ev, sizeof(ev), NULL, 0);
+    ev = @record null::MSG_NOTIFY_APP_EXITED(exitProcess);
+    GCNListSend(MANUFACTURER_ID_GEOWORKS, GCNSLT_APPLICATION, ev, 0, 0);
 }

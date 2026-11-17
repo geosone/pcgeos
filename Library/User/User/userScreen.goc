@@ -1,0 +1,217 @@
+/*
+ * userScreen.goc -- the screens of the UI's process (after
+ * userScreen.asm): at its attach a screen object for each screen of
+ * "[ui] numberOfScreens" (MAX_SCREENS: 1, as in the asm), on the video
+ * driver of "[screen <n>]", the initial one ("[ui] initialScreen") the
+ * system's default screen and the pointer's; after the startup a field
+ * for each screen (SystemField0 for the first), the default field.  The
+ * specific UI registers the root window of a screen it builds
+ * (UserScreenRegister).
+ *
+ * Port32:
+ *  - when screen 0 has no driver in the init file, the video driver
+ *    the loader would have detected (SGIT_DEFAULT_SIMPLE_GRAPHICS_MODE
+ *    and its table of drivers) is the default video driver if one is
+ *    set, else the host's display driver (hostvid.geo, "[screen 0]
+ *    device" its size);
+ *  - the pointer is not placed at the start (InitMousePosition):
+ *    ImSetPtrWin puts it on the screen;
+ *  - "[ui] haveEnvironmentApp" is not read (no express menu or
+ *    background bitmap yet).
+ */
+@include "uiInt.goh"
+@include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
+@include <Objects/gScrnC.goh>
+@include <Internal/flowC.goh>
+#include <Internal/im.h>
+#include <Internal/videoDr.h>
+#include <driver.h>
+#include <geosdriver.h>
+#include <initfile.h>
+#include <system.h>
+#include <string.h>
+
+#define MAX_SCREENS	1
+
+@extern object SystemField0;		/* UI/uiMain.goc */
+
+static WindowHandle screenHandles[MAX_SCREENS];
+static GeodeHandle screenDrivers[MAX_SCREENS];
+static optr screenFields[MAX_SCREENS];
+static optr screenScreens[MAX_SCREENS];
+static word nextScreenIdx;		/* screens registered */
+static word screensMade;		/* screen objects made */
+static word curScreen;
+
+/* fieldTable */
+static optr FieldOf(word n)
+{
+    return n == 0 ? @SystemField0 : NullOptr;
+}
+
+/*
+ * UserScreenRegister: the specific UI built a screen: its root window
+ * and video driver (the pointer hidden until it is placed)
+ */
+void UserScreenRegister(WindowHandle root, GeodeHandle driver)
+{
+    void *strategy = NULL;
+    DriverRegs r;
+
+    SysRegisterScreen(driver, root);
+    if (nextScreenIdx >= MAX_SCREENS)
+	return;
+    screenHandles[nextScreenIdx] = root;
+    screenDrivers[nextScreenIdx] = driver;
+    nextScreenIdx++;
+    WinGetInfo(root, WIT_STRATEGY, &strategy);
+    if (strategy) {
+	memset(&r, 0, sizeof(r));
+	(void) ((DriverStrategy *) strategy)(DR_VID_HIDEPTR, &r);
+    }
+}
+
+/* UserScreenCreate: a screen object on the driver, the system's screen
+ * child, usable (built: registered by the specific UI) */
+static optr UserScreenCreate(MemHandle block, GeodeHandle driver)
+{
+    optr screen = ObjInstantiate(block, (ClassStruct *) &GenScreenClass);
+    struct { optr screen; CompChildFlags flags; } p;
+
+    @call screen::MSG_GEN_SCREEN_SET_VIDEO_DRIVER(driver);
+    screenScreens[screensMade++] = screen;
+    p.screen = screen;
+    p.flags = CCO_LAST;
+    UserCallSystem(MSG_GEN_SYSTEM_ADD_SCREEN_CHILD, &p, sizeof(p), NULL, 0);
+    @call screen::MSG_GEN_SET_USABLE(VUM_NOW);
+    return screen;
+}
+
+/* UserScreenMakeOne: the driver of "[screen <n>]" (the default video
+ * driver for screen 0), then the screen */
+static Boolean UserScreenMakeOne(word n, MemHandle block)
+{
+    char cat[] = "screen 0";
+    GeodeHandle drv;
+    GeodeLoadError e;
+
+    cat[7] = (char) (n < 10 ? '0' + n : 'A' + n - 10);
+    drv = UserLoadExtendedDriver(cat, SP_VIDEO_DRIVERS, VIDEO_PROTO_MAJOR,
+				 VIDEO_PROTO_MINOR, 0, &e);
+    if (!drv) {
+	if ((e != GLE_DRIVER_INIT_ERROR && e != GLE_FILE_NOT_FOUND) ||
+	    n != 0)
+	    return FALSE;
+	/* Port32: the "simple graphics mode" of the host */
+	drv = GeodeGetDefaultDriver(GDDT_VIDEO);
+	if (!drv) {
+	    char dev[32];
+	    word len;
+	    DriverRegs r;
+
+	    FilePushDir();
+	    FileSetStandardPath(SP_VIDEO_DRIVERS);
+	    drv = GeodeUseDriver("hostvid.geo", VIDEO_PROTO_MAJOR,
+				 VIDEO_PROTO_MINOR, &e);
+	    FilePopDir();
+	    if (!drv)
+		return FALSE;
+	    if (InitFileReadStringBuffer(cat, "device", dev, sizeof(dev),
+					 &len))
+		memcpy(dev, "640x480", sizeof("640x480"));
+	    memset(&r, 0, sizeof(r));
+	    r.DR_dsSi = dev;
+	    (void) DriverCall(GeodeInfoDriver(drv), DRE_SET_DEVICE, &r);
+	}
+    }
+    if (n == 0)
+	GeodeSetDefaultDriver(GDDT_VIDEO, drv);
+    UserScreenCreate(block, drv);
+    return TRUE;
+}
+
+/*
+ * UserScreenSetCur: the current screen: the pointer on its root window,
+ * the flow object told (its driver shows the pointer), the system's
+ * default screen and, once there is one, field
+ */
+static void UserScreenSetCur(sword x, sword y)
+{
+    void *strategy = NULL;
+    word i = curScreen;
+
+    ImSetPtrWin(screenHandles[i], x, y);
+    WinGetInfo(screenHandles[i], WIT_STRATEGY, &strategy);
+    @send, forceQueue uiFlowObj::MSG_FLOW_SET_SCREEN(strategy,
+						      screenFields[i]);
+    @send, forceQueue UserGetSystemObject()::
+	MSG_GEN_SYSTEM_SET_DEFAULT_SCREEN(screenScreens[i]);
+    if (screenFields[i])
+	@send, forceQueue UserGetSystemObject()::
+	    MSG_GEN_SYSTEM_SET_DEFAULT_FIELD(screenFields[i]);
+}
+
+/* UserMakeScreens: the screens, the initial one current */
+void UserMakeScreens(MemHandle block)
+{
+    word n = 1, i, initial;
+
+    InitFileReadInteger("ui", "numberOfScreens", &n);
+    if (n > MAX_SCREENS)
+	n = MAX_SCREENS;
+    for (i = 0; i < n; i++)
+	if (!UserScreenMakeOne(i, block))
+	    break;
+    if (!nextScreenIdx) {
+	UserScreenNoVideoDriverError();
+	return;
+    }
+    if (!InitFileReadInteger("ui", "initialScreen", &initial) &&
+	initial < nextScreenIdx)
+	curScreen = initial;
+    UserCallSystem(MSG_GEN_SYSTEM_SET_DEFAULT_SCREEN,
+		   &screenScreens[curScreen], sizeof(optr), NULL, 0);
+    UserScreenSetCur(0, 0);
+}
+
+/* UserScreenCreateField: the screen's field attached to the system, on
+ * the screen, usable, on top */
+static void UserScreenCreateField(word n)
+{
+    optr field = FieldOf(n);
+
+    if (!field)
+	return;
+    @call field::MSG_META_ATTACH();
+    @call field::MSG_GEN_FIELD_SET_VIS_PARENT(screenScreens[n]);
+    @call field::MSG_GEN_SET_USABLE(VUM_NOW);
+    @call field::MSG_GEN_BRING_TO_TOP();
+    screenFields[n] = field;
+}
+
+/* UserMakeScreenFields: the fields, the current screen's the default */
+void UserMakeScreenFields(void)
+{
+    word i;
+
+    for (i = 0; i < screensMade; i++)
+	UserScreenCreateField(i);
+    UserCallSystem(MSG_GEN_SYSTEM_SET_DEFAULT_FIELD,
+		   &screenFields[curScreen], sizeof(optr), NULL, 0);
+}
+
+/* UserScreenExit: with more than one screen, the drivers freed and the
+ * fields not usable (MAX_SCREENS is 1: nothing) */
+void UserScreenExit(void)
+{
+    word i;
+
+    if (nextScreenIdx <= 1)
+	return;
+    for (i = 0; i < nextScreenIdx; i++) {
+	GeodeFreeDriver(screenDrivers[i]);
+	if (screenFields[i])
+	    @call screenFields[i]::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    }
+}

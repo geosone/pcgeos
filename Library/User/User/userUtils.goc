@@ -1,0 +1,328 @@
+/*
+ * userUtils.goc -- utility routines of the UI (after userUtils.asm):
+ * object blocks for the UI, loading applications (UserLoadApplication,
+ * PrepAppLaunchBlock, LoadApplication) and extended drivers
+ * (UserLoadExtendedDriver).
+ *
+ * Port32:
+ *  - an application without a field in its AppLaunchBlock goes on the
+ *    system's default field; the asm asked the specific UI's system
+ *    (MSG_SPEC_GUP_QUERY_VIS_PARENT, SQT_VIS_PARENT_FOR_APPLICATION),
+ *    whose answer is that field;
+ *  - the acknowledgement of a load (ALB_userLoadAckOutput, its message)
+ *    takes the parameters of MSG_GEN_FIELD_RESTORE_APP_ACK: the geode,
+ *    the error (0 when loaded), the caller's ID; it is sent when there
+ *    is a message;
+ *  - the log entries of the asm (LogWriteInitEntry) are not written.
+ *  - Not yet: the default launcher replaced on a restart
+ *    (DefaultLauncherCheck), multi-language paths.
+ */
+@include "uiInt.goh"
+@include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
+@include <Internal/uProcC.goh>
+#include <file.h>
+#include <driver.h>
+#include <geosdriver.h>
+#include <initfile.h>
+#include <string.h>
+
+/* userStrings.asm */
+static const char deskAccessoryPathname[] = "Desk Accessories";
+
+/*
+ * UserAllocObjBlock: an object block run by the thread (0: the current
+ * one)
+ */
+MemHandle UserAllocObjBlock(ThreadHandle thread)
+{
+    MemHandle mh = MemAllocLMem(LMEM_TYPE_OBJ_BLOCK,
+				sizeof(ObjLMemBlockHeader));
+
+    MemModifyFlags(mh, HF_SHARABLE, 0);
+    if (thread)
+	MemModifyOtherInfo(mh, thread);
+    return mh;
+}
+
+/*
+ * PrepAppLaunchBlock: the AppLaunchBlock for a launch (a new one for
+ * 0), owned by the UI, with the flags, the mode (0: the block's, else
+ * OPEN_APPLICATION), the file (unless NULL: the one in the block), the
+ * current path when none is set, the field.  GLE_FIELD_DETACHING when
+ * there is no field.
+ */
+GeodeLoadError PrepAppLaunchBlock(MemHandle *albp,
+					 AppLaunchFlags alf,
+					 Message attachMethod,
+					 const char *filename,
+					 DiskHandle disk, optr genParent)
+{
+    MemHandle alb = *albp;
+    AppLaunchBlock *a;
+    GeodeLoadError e = GLE_OK;
+
+    if (!alb) {
+	alb = MemAlloc(sizeof(AppLaunchBlock), HF_SHARABLE | HF_SWAPABLE,
+		       HAF_ZERO_INIT);
+	if (!alb)
+	    return GLE_MEMORY_ALLOCATION_ERROR;
+	*albp = alb;
+    }
+    HandleModifyOwner(alb, GeodeGetCodeProcessHandle());
+    a = MemLock(alb);
+    if (!a->ALB_genParent)
+	a->ALB_genParent = genParent;
+    if (alf)
+	a->ALB_launchFlags = alf;
+    if (attachMethod)
+	a->ALB_appMode = attachMethod;
+    if (!a->ALB_appMode)
+	a->ALB_appMode = MSG_GEN_PROCESS_OPEN_APPLICATION;
+    if (filename) {
+	word n = 0;
+
+	while (filename[n] && n < sizeof(a->ALB_appRef.AIR_fileName) - 1)
+	    n++;
+	memcpy(a->ALB_appRef.AIR_fileName, filename, n);
+	a->ALB_appRef.AIR_fileName[n] = '\0';
+	a->ALB_appRef.AIR_diskHandle = disk;
+    }
+    if (!a->ALB_diskHandle)
+	a->ALB_diskHandle = FileGetCurrentPath(a->ALB_path,
+					       sizeof(a->ALB_path));
+    if (!a->ALB_genParent) {
+	optr field = NullOptr;
+
+	/* Port32: the default field (the specific UI's answer) */
+	UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_FIELD, NULL, 0,
+		       &field, sizeof(field));
+	if (!field)
+	    e = GLE_FIELD_DETACHING;
+	a->ALB_genParent = field;
+    }
+    MemUnlock(alb);
+    return e;
+}
+
+/*
+ * SetDeskAccessoryFlag: ALF_DESK_ACCESSORY for an application in
+ * WORLD/Desk Accessories, where the launch options allow them
+ */
+static void SetDeskAccessoryFlag(MemHandle alb)
+{
+    char cur[PATH_BUFFER_SIZE];
+    DiskHandle disk;
+    AppLaunchBlock *a;
+
+    if (!(UserGetLaunchOptions() & UILO_DESK_ACCESSORIES))
+	return;
+    disk = FileGetCurrentPath(cur, sizeof(cur));
+    if (FileComparePaths(cur, disk, deskAccessoryPathname,
+			 SP_APPLICATION) != PCT_EQUAL)
+	return;
+    a = MemLock(alb);
+    a->ALB_launchFlags |= ALF_DESK_ACCESSORY;
+    MemUnlock(alb);
+}
+
+/*
+ * LoadApplication: the field told (it may say no), the activation, the
+ * path of the file, GeodeLoad; on an error the field told again; the
+ * acknowledgement sent.  The block goes to the application.
+ */
+static GeodeHandle LoadApplication(MemHandle alb, const char *name,
+				   Boolean ignoreFileNotFound,
+				   GeodeLoadError *err)
+{
+    AppLaunchBlock *a = MemLock(alb);
+    optr ackOD = a->ALB_userLoadAckOutput;
+    Message ackMsg = a->ALB_userLoadAckMessage;
+    word ackID = a->ALB_userLoadAckID;
+    optr field = a->ALB_genParent;
+    DiskHandle disk = a->ALB_appRef.AIR_diskHandle;
+    GeodeHandle gh = 0;
+    GeodeLoadError e = GLE_OK;
+    const char *file = name, *p;
+
+    MemUnlock(alb);
+    if (@call field::MSG_GEN_FIELD_APP_STARTUP_NOTIFY())
+	e = GLE_FIELD_DETACHING;
+    else {
+	char dir[PATH_BUFFER_SIZE];
+
+	@call field::MSG_GEN_FIELD_ACTIVATE_INITIATE(alb);
+	if (disk & DISK_IS_STD_PATH_MASK)
+	    FileSetStandardPath((StandardPath) disk);
+	for (p = name; *p; p++)
+	    if (*p == '\\')
+		file = p + 1;
+	if (file != name) {
+	    word n = (word) (file - name - 1);
+
+	    if (n >= sizeof(dir))
+		n = sizeof(dir) - 1;
+	    memcpy(dir, name, n);
+	    dir[n] = '\0';
+	    if (!n)
+		memcpy(dir, "\\", sizeof("\\"));
+	    if (!FileSetCurrentPath(0, dir))
+		e = (GeodeLoadError) ThreadGetError();
+	}
+	if (e == GLE_OK) {
+	    SetDeskAccessoryFlag(alb);
+	    gh = GeodeLoad(file, GA_PROCESS | GA_APPLICATION, 0,
+			   PRIORITY_STANDARD, (dword) alb, &e);
+	}
+    }
+    if (!gh) {
+	if (e != GLE_FIELD_DETACHING) {
+	    @call field::MSG_GEN_FIELD_APP_STARTUP_DONE();
+	    if (!ignoreFileNotFound || e != GLE_FILE_NOT_FOUND)
+		@call field::MSG_GEN_FIELD_ACTIVATE_DISMISS(0, alb);
+	}
+    } else
+	e = GLE_OK;
+    if (ackMsg && OptrToHandle(ackOD) &&
+	(!ignoreFileNotFound || e != GLE_FILE_NOT_FOUND)) {
+	struct { GeodeHandle geode; word error; word ackID; } ack;
+
+	ack.geode = gh;
+	ack.error = gh ? 0 : (word) e;	/* 0: loaded */
+	ack.ackID = ackID;
+	CObjMessageP(MF_FORCE_QUEUE, ackOD, ackMsg, &ack, sizeof(ack),
+		     NULL, 0);
+    }
+    *err = e;
+    return gh;
+}
+
+/*
+ * UserLoadApplication: an application loaded with its AppLaunchBlock
+ * (0 for a new one): the file as given (a full path, or a name in
+ * SP_APPLICATION, then SP_SYS_APPLICATION, or the standard path), or
+ * the block's (filename NULL).  ALF_SEND_LAUNCH_REQUEST_TO_UI_TO_HANDLE
+ * leaves the load to the UI's process (0 returned).
+ */
+GeodeHandle UserLoadApplication(AppLaunchFlags alf, Message attachMethod,
+				MemHandle appLaunchBlock, char *filename,
+				StandardPath sPath, GeodeLoadError *err)
+{
+    MemHandle alb = appLaunchBlock;
+    AppLaunchBlock *a;
+    GeodeLoadError e;
+    GeodeHandle gh = 0;
+    char name[PATH_BUFFER_SIZE];
+    DiskHandle disk;
+
+    e = PrepAppLaunchBlock(&alb, alf, attachMethod, filename,
+			   (DiskHandle) sPath, NullOptr);
+    if (e != GLE_OK) {
+	if (alb)
+	    MemFree(alb);
+	if (err)
+	    *err = e;
+	return 0;
+    }
+    a = MemLock(alb);
+    if (a->ALB_launchFlags & ALF_NO_ACTIVATION_DIALOG)
+	uiFlags |= UIF_INIT;
+    if (a->ALB_launchFlags & ALF_SEND_LAUNCH_REQUEST_TO_UI_TO_HANDLE) {
+	a->ALB_launchFlags &= ~ALF_SEND_LAUNCH_REQUEST_TO_UI_TO_HANDLE;
+	MemUnlock(alb);
+	@send ConstructOptr(GeodeGetCodeProcessHandle(), 0)::
+	    MSG_USER_LAUNCH_APPLICATION(alb);
+	uiFlags &= ~UIF_INIT;
+	if (err)
+	    *err = GLE_OK;
+	return 0;
+    }
+    memcpy(name, a->ALB_appRef.AIR_fileName, sizeof(name));
+    name[sizeof(name) - 1] = '\0';
+    disk = a->ALB_appRef.AIR_diskHandle;
+    MemUnlock(alb);
+
+    FilePushDir();
+    if (disk && !(disk & DISK_IS_STD_PATH_MASK)) {
+	/* a disk: the name is a full path */
+	FileSetCurrentPath(disk, "\\");
+	gh = LoadApplication(alb, name, FALSE, &e);
+    } else {
+	e = GLE_FILE_NOT_FOUND;
+	if (disk) {
+	    gh = LoadApplication(alb, name, TRUE, &e);
+	    if (!gh && e != GLE_FILE_NOT_FOUND)
+		goto done;
+	}
+	if (!gh) {
+	    a = MemLock(alb);
+	    a->ALB_appRef.AIR_diskHandle = SP_APPLICATION;
+	    MemUnlock(alb);
+	    gh = LoadApplication(alb, name, TRUE, &e);
+	}
+	if (!gh && e == GLE_FILE_NOT_FOUND) {
+	    a = MemLock(alb);
+	    a->ALB_appRef.AIR_diskHandle = SP_SYS_APPLICATION;
+	    MemUnlock(alb);
+	    gh = LoadApplication(alb, name, FALSE, &e);
+	}
+    }
+done:
+    if (!gh)
+	MemFree(alb);
+    FilePopDir();
+    uiFlags &= ~UIF_INIT;
+    if (err)
+	*err = e;
+    return gh;
+}
+
+/*
+ * UserLoadExtendedDriver: the driver of "driver" in the category, from
+ * the standard path, with the device of "device" tested and set
+ * (testAndSetBX in bx).  GLE_FILE_NOT_FOUND without a driver,
+ * GLE_DRIVER_INIT_ERROR when the device is missing or not there.
+ */
+GeodeHandle UserLoadExtendedDriver(const char *category, StandardPath sp,
+				   word protoMajor, word protoMinor,
+				   word testAndSetBX, GeodeLoadError *err)
+{
+    char name[FILE_LONGNAME_BUFFER_SIZE], device[128];
+    word n;
+    GeodeHandle gh;
+    DriverInfoStruct *dis;
+    DriverRegs r;
+
+    if (InitFileReadStringBuffer(category, "driver", name, sizeof(name),
+				 &n) || !n) {
+	*err = GLE_FILE_NOT_FOUND;
+	return 0;
+    }
+    FilePushDir();
+    FileSetStandardPath(sp);
+    gh = GeodeUseDriver(name, protoMajor, protoMinor, err);
+    FilePopDir();
+    if (!gh)
+	return 0;
+    dis = GeodeInfoDriver(gh);
+    if (InitFileReadStringBuffer(category, "device", device, sizeof(device),
+				 &n))
+	goto cannotInit;
+    memset(&r, 0, sizeof(r));
+    r.DR_dsSi = device;
+    r.DR_bx = testAndSetBX;
+    if (DriverCall(dis, DRE_TEST_DEVICE, &r) ||
+	(word) r.DR_ax == (word) DP_NOT_PRESENT)
+	goto cannotInit;
+    memset(&r, 0, sizeof(r));
+    r.DR_dsSi = device;
+    r.DR_bx = testAndSetBX;
+    (void) DriverCall(dis, DRE_SET_DEVICE, &r);
+    *err = GLE_OK;
+    return gh;
+
+cannotInit:
+    GeodeFreeDriver(gh);
+    *err = GLE_DRIVER_INIT_ERROR;
+    return 0;
+}

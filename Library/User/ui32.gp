@@ -10,7 +10,9 @@
 #
 ##############################################################################
 name ui.lib
-type	library, single
+type	appl, library, process, single
+class	UserClass
+appobj	UIApp
 entry	UILibraryEntry
 library	geos
 longname	"Generic User Interface"
@@ -28,6 +30,7 @@ export GenFieldClass
 export GenScreenClass
 export GenSystemClass
 export GenProcessClass
+export UserClass
 
 # the Vis routines in C (visC.goh, GEOS_PORT32)
 export VisCheckIfVisGrown
@@ -124,3 +127,11 @@ export UserGetDefaultLaunchLevel
 export UserGetLaunchModel
 export UserGetLaunchOptions
 export UserGetInterfaceOptions
+
+# the UI's process (userMain.goc, userScreen.goc, userUtils.goc)
+export UserLoadApplication
+export UserAllocObjBlock
+export UserScreenRegister
+
+resource ApplicationUI object
+resource SystemFieldUI object

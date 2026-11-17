@@ -25,4 +25,11 @@
 
 @endc
 
+/*
+ * UserScreenRegister (userScreen.asm): the specific UI built a screen:
+ * its root window and video driver, for the UI's screens and pointer
+ * and the kernel's error boxes
+ */
+extern void UserScreenRegister(WindowHandle root, GeodeHandle driver);
+
 @endlib
