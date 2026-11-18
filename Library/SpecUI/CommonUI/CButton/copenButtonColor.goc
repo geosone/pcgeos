@@ -10,9 +10,11 @@
  * with their bounds, as the video driver takes them (PARAM_2 the
  * width, PARAM_3 the height, at the pen).
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the menu marks
- * (DrawColorButtonMenuMark's bitmaps), a reply popup's default trigger
- * (OLBSS_DEFAULT_TRIGGER: InsetBoundsIfReplyPopup).
+ * The menu marks (a menu button's down mark, a sub menu's right mark)
+ * are copenData.asm's Motif bitmaps, a light and a dark part.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: a reply popup's default
+ * trigger (OLBSS_DEFAULT_TRIGGER: InsetBoundsIfReplyPopup).
  */
 @include "cGeode.goh"
 
@@ -259,6 +261,67 @@ static void SetDrawColors(optr oself, GStateHandle gs)
     GrSetAreaColor(gs, CF_INDEX, c, 0, 0);
 }
 
+/* the mark bitmaps (OL_MARK_WIDTH x OL_MARK_HEIGHT, mono) */
+typedef struct {
+    Bitmap	MB_header;
+    byte	MB_data[2 * OL_MARK_HEIGHT];
+} MarkBitmap;
+
+#define MARK_HEADER	{ OL_MARK_WIDTH, OL_MARK_HEIGHT, BMC_UNCOMPACTED, \
+			  BMF_MONO }
+
+static const MarkBitmap downMarkLight = { MARK_HEADER, {
+    0x00, 0x00,  0x00, 0x00,  0x00, 0x00,  0x7f, 0x80,
+    0x40, 0x00,  0x00, 0x00,  0x00, 0x00,  0x00, 0x00 } };
+static const MarkBitmap downMarkDark = { MARK_HEADER, {
+    0x00, 0x00,  0x00, 0x00,  0x00, 0x00,  0x00, 0x40,
+    0x00, 0x40,  0x7f, 0xc0,  0x00, 0x00,  0x00, 0x00 } };
+static const MarkBitmap rightMarkLight = { MARK_HEADER, {
+    0x00, 0x00,  0x18, 0x00,  0x16, 0x00,  0x11, 0x80,
+    0x10, 0x00,  0x10, 0x00,  0x10, 0x00,  0x00, 0x00 } };
+static const MarkBitmap rightMarkDark = { MARK_HEADER, {
+    0x00, 0x00,  0x00, 0x00,  0x00, 0x00,  0x00, 0x00,
+    0x00, 0x60,  0x01, 0x80,  0x06, 0x00,  0x18, 0x00 } };
+
+/*
+ * DrawColorButtonMenuMark: a menu mark at the right of the button,
+ * centered vertically: the first part in the dark color (black when
+ * depressed), the other in white; depressed the light part first (the
+ * mark looks pressed in)
+ */
+static void DrawMenuMark(optr oself, GStateHandle gs, word w, word h)
+{
+    OLButtonInstance *b = Btn(oself);
+    word ss = b->OLBI_specState;
+    const MarkBitmap *first, *second;
+    sword x, y;
+
+    if (!(ss & (OLBSS_MENU_DOWN_MARK | OLBSS_MENU_RIGHT_MARK)))
+	return;
+    if (ss & OLBSS_MENU_DOWN_MARK) {
+	first = &downMarkDark;
+	second = &downMarkLight;
+    } else {
+	first = &rightMarkDark;
+	second = &rightMarkLight;
+    }
+    if (ss & OLBSS_DEPRESSED) {
+	const MarkBitmap *t = first;
+
+	first = second;
+	second = t;
+    }
+    x = b->VI_bounds.R_left + (sword) w - (OL_MARK_WIDTH + MO_BUTTON_INSET_X);
+    if (ss & OLBSS_MENU_DOWN_MARK)
+	x += OL_EXTRA_DOWN_MARK_SPACING;
+    y = b->VI_bounds.R_top + (sword) ((h - OL_MARK_HEIGHT) >> 1);
+    GrSetAreaColor(gs, CF_INDEX,
+		   (ss & OLBSS_DEPRESSED) ? C_BLACK : moCS_dsDarkColor, 0, 0);
+    GrFillBitmap(gs, x, y, &first->MB_header, NULL);
+    GrSetAreaColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    GrFillBitmap(gs, x, y, &second->MB_header, NULL);
+}
+
 /*
  * DrawColorButton: the border alone if only it changed (but for a menu
  * button with a mouse); else the background, border, interior, the
@@ -294,6 +357,7 @@ void DrawColorButton(optr oself, GStateHandle gs, DrawFlags df,
     DrawBorder(oself, gs, cbr, df, w, h);
     DrawInterior(oself, gs, cbr, w, h);
     SetDrawColors(oself, gs);
+    DrawMenuMark(oself, gs, w, h);
     b = Btn(oself);
     if (!(b->VI_attrs & VA_FULLY_ENABLED))
 	mono = moCS_dsDarkColor;
