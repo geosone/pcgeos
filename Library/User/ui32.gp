@@ -77,6 +77,9 @@ export VisApplyInitialSizeArgs
 export VisApplySizeArgsToWidth
 export VisApplySizeArgsToHeight
 export VisApplySizeHints
+export VisSpecBuildSetEnabledState
+export VisGetVisParent
+export VisConvertRatioToCoords
 export VisRecalcSizeAndInvalIfNeeded
 export VisSendPositionAndInvalIfNeeded
 export VisSendCenter

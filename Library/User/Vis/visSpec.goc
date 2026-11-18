@@ -13,6 +13,7 @@
  * and mnemonics.
  */
 @include "uiInt.goh"
+@include <Objects/gFieldC.goh>
 #include <string.h>
 #include <localize.h>
 #include <stdint.h>
@@ -785,4 +786,67 @@ void VisApplySizeHints(optr obj, sword *width, sword *height)
     VisApplyInitialSizeArgs(obj, &a, width, height);
     VisApplySizeArgsToWidth(&a, width);
     VisApplySizeArgsToHeight(&a, height);
+}
+
+/* ---------------------------------------------------------------------
+ * Window position and size pairs (visSpecUtils.asm)
+ * ------------------------------------------------------------------- */
+
+/* GetSizeOfFieldOrWinGroup: the size of the win group above the object
+ * (MSG_VIS_VUP_CALL_WIN_GROUP from its parent) or of the field above
+ * it; 0 without a parent */
+static SizeAsDWord GetSizeOfFieldOrWinGroup(optr obj, Boolean field)
+{
+    optr p = VisFindParent(obj);
+
+    while (p) {
+	Boolean is;
+
+	ObjLockObjBlock(OptrToHandle(p));
+	is = field ? ObjIsObjectInClass(p, &GenFieldClass)
+		   : (VisPart(p)->VI_typeFlags & VTF_IS_WIN_GROUP) != 0;
+	MemUnlock(OptrToHandle(p));
+	if (is)
+	    return @call p::MSG_VIS_GET_SIZE();
+	p = VisFindParent(p);
+    }
+    return 0;
+}
+
+/* VisConvertRatioToCoord: size * ratio / 1024, rounded (one more for
+ * an odd ratio, as the asm), negative with SWSS_SIGN */
+static SpecWinSizeSpec RatioToCoord(SpecWinSizeSpec v, word size)
+{
+    word r = v & (SWSS_MANTISSA | SWSS_FRACTION), c;
+
+    if (r & PCT_50)
+	r++;
+    c = (word) (((dword) r * size) >> 8);
+    c = (word) ((c >> 2) + ((c >> 1) & 1));
+    return (v & SWSS_SIGN) ? (SpecWinSizeSpec) -(sword) c : c;
+}
+
+/*
+ * VisConvertRatioToCoords: a pair of ratios (x decides) in coordinates
+ * of the win group's or the field's size (FALSE if that is empty); a
+ * pair of coordinates gets its sign extended
+ */
+Boolean VisConvertRatioToCoords(optr obj, SpecWinSizeSpec *x,
+				SpecWinSizeSpec *y, Boolean ofField)
+{
+    SizeAsDWord s;
+
+    if (!(*x & SWSS_RATIO)) {
+	if (*x & SWSS_SIGN)
+	    *x |= 0x8000;
+	if (*y & SWSS_SIGN)
+	    *y |= 0x8000;
+	return TRUE;
+    }
+    s = GetSizeOfFieldOrWinGroup(obj, ofField);
+    if (!DWORD_WIDTH(s) && !DWORD_HEIGHT(s))
+	return FALSE;
+    *x = RatioToCoord(*x, DWORD_WIDTH(s));
+    *y = RatioToCoord(*y, DWORD_HEIGHT(s));
+    return TRUE;
 }

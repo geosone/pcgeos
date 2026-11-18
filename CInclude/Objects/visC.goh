@@ -1024,6 +1024,14 @@ extern void VisApplyInitialSizeArgs(optr obj, const SpecSizeArgs *a,
 extern void VisApplySizeArgsToWidth(const SpecSizeArgs *a, sword *width);
 extern void VisApplySizeArgsToHeight(const SpecSizeArgs *a, sword *height);
 extern void VisApplySizeHints(optr obj, sword *width, sword *height);
+/* the specific part of a generic object (Vis/visSpec.goc): enabled as
+ * the generic object is; the visual parent it is added to */
+extern void VisSpecBuildSetEnabledState(optr obj, SpecBuildFlags flags);
+extern optr VisGetVisParent(optr obj, SpecBuildFlags *flags);
+/* a SpecWinSizePair (x decides if ratios) in coordinates of the size of
+ * the win group or field above the object; FALSE if that is empty */
+extern Boolean VisConvertRatioToCoords(optr obj, SpecWinSizeSpec *x,
+				       SpecWinSizeSpec *y, Boolean ofField);
 #endif
 
 @endlib
