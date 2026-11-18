@@ -2,9 +2,10 @@
 #
 # uimotif.gp -- a process geode for the library.ui.motif test
 # (Port32/Tests): the UI's system object with a screen and a field,
-# built by the Motif specific UI (motif.geo).  No application object:
-# the specific UI asks the geode's for its size (OLApplicationClass is
-# not ported yet); UMApp only holds the objects.
+# built by the Motif specific UI (motif.geo), and an application on the
+# field.  No application object for the geode: the specific UI asks it
+# for its size while the field comes up, before the field is there for
+# it; UMApp only holds the objects.
 #
 ##############################################################################
 name     uimotif.app

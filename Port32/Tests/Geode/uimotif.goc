@@ -16,6 +16,7 @@
 @include <Internal/SpecUI/olSystemClass.goh>
 @include <Internal/SpecUI/olScreenClass.goh>
 @include <Internal/SpecUI/olFieldClass.goh>
+@include <Internal/SpecUI/olApplicationClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/videoDr.h>
 #include <initfile.h>
@@ -28,6 +29,7 @@ typedef struct {
     word		UMS_failLines[8];
     WindowHandle	UMS_screenWin;
     WindowHandle	UMS_fieldWin;
+    word		UMS_timerExpired;
 } UMState;
 
 UMState umState;
@@ -51,7 +53,21 @@ UMState umState;
 }
 @end UMObjects;
 
-static optr umSystem, umScreen, umField;
+static optr umSystem, umScreen, umField, umApp;
+
+/* the specific UI's SGQT_BUILD_INFO, OLBF_MENUABLE, OLBR_TOP_MENU
+ * (CommonUI/cGeode.goh) */
+#define UM_SGQT_BUILD_INFO	2000
+#define UM_OLBF_MENUABLE	0x8000
+#define UM_OLBR_TOP_MENU	1
+
+/* the application's gadget timer, started for the process */
+@method UMProcessClass, MSG_TIMER_EXPIRED
+{
+    (void) tick;
+    (void) timerID;
+    umState.UMS_timerExpired++;
+}
 
 @method UMProcessClass, MSG_META_ATTACH_PROCESS
 {
@@ -226,6 +242,130 @@ static word Slot(byte req, sword *x, sword *y)
 	UMCHECK(o == umField);
 	VisData(umField, &f, sizeof(f));
 	UMCHECK((f.VI_attrs & VA_REALIZED) && f.VCI_window);
+	break;
+    }
+    case 7: {
+	/* an application on the field (not the geode's application
+	 * object: the specific UI asked that for its size while the field
+	 * came up): an OLApplication, the geode's input object, the
+	 * field's and the screen's windows; built: on the field (an
+	 * upward link), its window and size */
+	OLApplicationInstance a;
+	OLFieldInstance f;
+	GenReturnParams r;
+	WholeMeasurementType w;
+	DisplayScheme ds;
+
+	umApp = ObjInstantiate(OptrToHandle(@UMApp),
+			       (ClassStruct *) &GenApplicationClass);
+	/* its generic part built before the field links it (as a message
+	 * to it would) */
+	ObjInitializePart(umApp, word_offsetof(GenBase, Gen_offset));
+	/* focusable and modelable (the @default of a declared one) */
+	@call umApp::MSG_GEN_APPLICATION_SET_STATE(AS_FOCUSABLE |
+						   AS_MODELABLE, 0);
+	@call umField::MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY(umApp);
+	UMCHECK(@call umField::MSG_GEN_FIELD_APP_STARTUP_NOTIFY() == 0);
+	@call umField::MSG_GEN_FIELD_ADD_GEN_APPLICATION(umApp, CCO_LAST);
+	/* its specific part grown (MSG_META_ATTACH would do it with an
+	 * AppLaunchBlock) */
+	ObjInitializePart(umApp, word_offsetof(VisBase, Vis_offset));
+	UMCHECK(InClass(umApp, (ClassStruct *) &OLApplicationClass));
+	UMCHECK(WinGeodeGetInputObj(umState.UMS_process) == umApp);
+	UMCHECK((WinGeodeGetFlags(umState.UMS_process) &
+		 (GWF_FOCUSABLE | GWF_TARGETABLE | GWF_MODELABLE)) ==
+		(GWF_FOCUSABLE | GWF_TARGETABLE | GWF_MODELABLE));
+	VisData(umApp, &a, sizeof(a));
+	UMCHECK(a.OLAI_fieldWin == umState.UMS_fieldWin &&
+		a.OLAI_screenWin == umState.UMS_screenWin);
+	UMCHECK(a.OLAI_units == AMT_DEFAULT &&
+		(a.VCNI_focusExcl.FTVMC_flags & HGF_APP_EXCL) &&
+		(a.OLAI_modelExcl.FTVMC_flags & HGF_APP_EXCL));
+
+	@call umApp::MSG_SPEC_BUILD(0);
+	VisData(umApp, &a, sizeof(a));
+	VisData(umField, &f, sizeof(f));
+	UMCHECK(@call umApp::MSG_VIS_FIND_PARENT() == umField);
+	UMCHECK(a.VCNI_window == umState.UMS_fieldWin);
+	UMCHECK(a.VI_bounds.R_right == f.VI_bounds.R_right &&
+		a.VI_bounds.R_bottom == f.VI_bounds.R_bottom);
+	UMCHECK(WinGeodeGetParentObj(umState.UMS_process) == umField);
+	/* the queries: the vis parents, the display scheme (the field's),
+	 * the build info, the units */
+	UMCHECK(@call umApp::MSG_SPEC_GUP_QUERY_VIS_PARENT(
+		    SQT_VIS_PARENT_FOR_PRIMARY) == umApp);
+	UMCHECK(@call umApp::MSG_SPEC_GUP_QUERY_VIS_PARENT(
+		    SQT_VIS_PARENT_FOR_SYS_MODAL) == umApp);
+	UMCHECK(@call umApp::MSG_SPEC_GUP_QUERY_VIS_PARENT(
+		    SQT_VIS_PARENT_FOR_APPLICATION) == umField);
+	memset(&r, 0, sizeof(r));
+	UMCHECK(@call umApp::MSG_VIS_P32_VUP_QUERY(&r, VUQ_DISPLAY_SCHEME,
+						   0, 0) &&
+		((r.GRP_ax >> 16) & 0xff) == C_LIGHT_GREY);
+	memset(&r, 0, sizeof(r));
+	r.GRP_bp = UM_OLBF_MENUABLE;
+	UMCHECK(@call umApp::MSG_SPEC_P32_GUP_QUERY(&r, UM_SGQT_BUILD_INFO) &&
+		r.GRP_bp == (UM_OLBF_MENUABLE | UM_OLBR_TOP_MENU) &&
+		!r.GRP_cx && !r.GRP_dx);
+	w = @call umApp::MSG_GEN_APPLICATION_GET_MEASUREMENT_TYPE();
+	UMCHECK(w.WMT_appMeasurementType == AMT_DEFAULT);
+	memset(&ds, 0, sizeof(ds));
+	@call umApp::MSG_GEN_APPLICATION_GET_DISPLAY_SCHEME(&ds);
+	UMCHECK(ds.DS_lightColor == C_LIGHT_GREY &&
+		ds.DS_darkColor == C_DARK_GREY);
+	break;
+    }
+    case 8: {
+	/* on top: the field's focus and target, the focus application
+	 * (the system's focus within it); busy and ignoring input; the
+	 * gadget timer for the process */
+	OLApplicationInstance a;
+	optr o = 0;
+
+	@call umApp::MSG_GEN_BRING_TO_TOP();
+	(void) @call umField::MSG_META_GET_FOCUS_EXCL(&o);
+	UMCHECK(o == umApp);
+	o = 0;
+	(void) @call umField::MSG_META_GET_TARGET_EXCL(&o);
+	UMCHECK(o == umApp);
+	VisData(umApp, &a, sizeof(a));
+	UMCHECK(a.OLAI_flowFlags & AFF_FOCUS_APP);
+	UMCHECK(a.VCNI_focusExcl.FTVMC_flags & HGF_SYS_EXCL);
+
+	@call umApp::MSG_GEN_APPLICATION_MARK_BUSY();
+	@call umApp::MSG_GEN_APPLICATION_HOLD_UP_INPUT();
+	VisData(umApp, &a, sizeof(a));
+	UMCHECK(a.OLAI_busyCount == 1 && a.OLAI_holdUpInputCount == 1 &&
+		(a.OLAI_flowFlags & AFF_FLOW_HOLDING_INPUT_FOR_APP));
+	@call umApp::MSG_GEN_APPLICATION_RESUME_INPUT();
+	@call umApp::MSG_GEN_APPLICATION_MARK_NOT_BUSY();
+	VisData(umApp, &a, sizeof(a));
+	UMCHECK(!a.OLAI_busyCount && !a.OLAI_holdUpInputCount &&
+		!(a.OLAI_flowFlags & AFF_FLOW_HOLDING_INPUT_FOR_APP));
+	@call umApp::MSG_GEN_APPLICATION_IGNORE_INPUT();
+	VisData(umApp, &a, sizeof(a));
+	UMCHECK(a.OLAI_ignoreInputCount == 1 &&
+		!(a.VCNI_focusExcl.FTVMC_flags & HGF_SYS_EXCL));
+	@call umApp::MSG_GEN_APPLICATION_ACCEPT_INPUT();
+	VisData(umApp, &a, sizeof(a));
+	UMCHECK(!a.OLAI_ignoreInputCount &&
+		(a.VCNI_focusExcl.FTVMC_flags & HGF_SYS_EXCL));
+
+	@call umApp::MSG_OL_APP_START_TIMER(
+		ConstructOptr(umState.UMS_process, 0), 1);
+	break;
+    }
+    case 9: {
+	/* no longer targetable: the target leaves the application */
+	optr o = 0;
+
+	@call umApp::MSG_GEN_SET_ATTRS(0, GA_TARGETABLE);
+	UMCHECK(!(WinGeodeGetFlags(umState.UMS_process) & GWF_TARGETABLE));
+	(void) @call umField::MSG_META_GET_TARGET_EXCL(&o);
+	UMCHECK(o != umApp);
+	o = 0;
+	(void) @call umField::MSG_META_GET_FOCUS_EXCL(&o);
+	UMCHECK(o == umApp);
 	break;
     }
     }

@@ -17,7 +17,13 @@
  *      vis parents); the field's window washed blue;
  *   4. the stagger slots of windows on the field;
  *   5. the background color changed (green), the field reset;
- *   6. lowered: the system finds it again as its focus and target.
+ *   6. lowered: the system finds it again as its focus and target;
+ *   7. an application on the field: an OLApplication, the geode's input
+ *      object; built on the field (its window and size); the queries;
+ *   8. on top: the field's focus and target, the focus application;
+ *      busy, input held up and ignored; the gadget timer (the process
+ *      gets MSG_TIMER_EXPIRED);
+ *   9. no longer targetable: the target leaves it, the focus stays.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -41,6 +47,7 @@ typedef struct {
     word		UMS_failLines[8];
     WindowHandle	UMS_screenWin;
     WindowHandle	UMS_fieldWin;
+    word		UMS_timerExpired;
 } UMState;
 
 static int fails;
@@ -125,11 +132,16 @@ int main(void)
     CHECK(Pixel(0, 0) == GREEN && Pixel(319, 199) == GREEN);
     step(6);
     CHECK(Pixel(160, 100) == GREEN);
+    step(7);
+    step(8);
+    WAIT_FOR(st->UMS_timerExpired);
+    CHECK(st->UMS_timerExpired == 1);
+    step(9);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 30 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 60 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

@@ -5187,10 +5187,10 @@ are left out), the constants, the variables and the routines.
   keeps `motif.gp`'s order; a build routine not ported yet is a `skip`
   (an object of that type cannot be built yet: its
   `MSG_META_RESOLVE_VARIANT_SUPERCLASS` gets NULL, a fatal error). So
-  far: `OLBuildField`, `OLBuildScreen`, `OLBuildSystem`,
-  `SpecGetDisplayScheme`, `SpecGetWindowOptions`, and the classes
-  `OLSystemClass`, `OLScreenClass`, `OLFieldClass`
-  (`CInclude/Internal/SpecUI/ol*Class.goh`).
+  far: `OLBuildApplication`, `OLBuildField`, `OLBuildScreen`,
+  `OLBuildSystem`, `SpecGetDisplayScheme`, `SpecGetWindowOptions`, and
+  the classes `OLSystemClass`, `OLScreenClass`, `OLFieldClass`,
+  `OLApplicationClass` (`CInclude/Internal/SpecUI/ol*Class.goh`).
 - **Ported.**
   - `CMain/cmainCode.goc`, `cmainVariable.goc`: the options the field
     reads (`[ui]`, `[motif options]`), the color scheme (the monochrome
@@ -5221,6 +5221,21 @@ are left out), the constants, the variables and the routines.
     focus kept while a system modal geode is within), hands out the
     stagger slots of windows and icons, raises and lowers itself and
     orders its applications by their windows.
+  - `CUtils/copenAppAttDet.goc`, `copenAppCommon.goc`,
+    `copenAppMisc.goc` (`OLApplicationClass`): the geode's input
+    object and its `GeodeWinFlags`, built on the field (its window and
+    size as an upward link, the geode's parent object), opening and
+    closing, detach; the vis parents of its windows, the build info;
+    the implied window and the pointer image (busy, modal); the focus,
+    target and model exclusives below and above it, the modal window,
+    the field's focus application; raising and lowering (the desk
+    accessory layer); busy, held up and ignored input (the screen
+    saver kept off while busy); the keyboard (the accelerators,
+    `Alt-Esc`, `Alt-F6`, `F3`), the navigation to the next application,
+    one gadget timer (`MSG_OL_APP_START_TIMER`, `MSG_TIMER_EXPIRED`),
+    the measurement type, the host's field size changes. Methods
+    outside the file with the `@classdecl` are `@extern method` there
+    (as goc wants).
 - **Port32 changes in the C API.**
   - `WinOpen` and `WinChangePriority` take the layer as a `Handle` (a
     word cut 32-bit handles); `WinOpen`'s colorFlags is the
@@ -5243,13 +5258,26 @@ are left out), the constants, the variables and the routines.
     `UIEO_DOCUMENTS_LIST` (`ui.goh`), `GCNSLT_HOST_NOTIFICATIONS`
     (`gcnlist.goh`).
   - The UI exports `UserGetFlowObject`, `UserGetSystemObject`,
-    `UserSetDefaultMonikerFont` and `UserGetDefaultMonikerFont`.
+    `UserSetDefaultMonikerFont`, `UserGetDefaultMonikerFont`,
+    `UserSendToApplicationViaProcess` and `UserGetKbdAcceleratorMode`
+    (`genC.goh`).
+  - `MSG_TIMER_EXPIRED(dword tick, word timerID)` is a MetaUI message
+    (`olApplicationClass.goh`) with the parameters every event timer
+    sends; `MSG_OL_APP_GET_IMPLIED_WIN` answers a `MouseGrab`;
+    `MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP(optr currentApp, EventHandle
+    event)`.
+  - `GenApplicationClass` handles `MSG_META_INITIALIZE` (targetable)
+    and passes a change of `GA_TARGETABLE` to the specific UI, as the
+    asm.
   - `VisClass` handles `MSG_META_GRAB_FOCUS_EXCL` and the other grab
     and release messages of the exclusives with `MetaGrabFocusExclLow`
     and the others, as the asm's VisClass.
-- **Not yet.** The applications (`OLApplicationClass`, and so every
-  window and gadget class); the express menu, the tool area, the
-  window list and the task bar; the field's background picture; the
+- **Not yet.** The window and gadget classes (and so the windows of
+  an application, its standard dialogs, the navigation between its
+  windows, the menu bar); the application's express menu entries
+  (`OLAppTaskItemClass`); the beep of an unwanted key (no sound driver
+  in C); the express menu, the tool area, the window list and the task
+  bar; the field's background picture; the
   options of a field's own category (the specific UI reads `[ui]`);
   the document control's variables.
 - **Test.** ctest `library.ui.motif`: the process geode
@@ -5263,9 +5291,14 @@ are left out), the constants, the variables and the routines.
   reassigned, freed); the field's window read back from the display
   in `[ui] backgroundcolor` (blue), then green after
   `MSG_GEN_FIELD_RESET_BG`; lowered, the field gets the system's focus
-  and target back. The geode has no application object: the specific
-  UI asks the geode's for its size, and Motif cannot build
-  applications yet.
+  and target back. Then an application on the field: an
+  `OLApplication`, the geode's input object with its `GeodeWinFlags`,
+  built on the field (window, size, parent object); its queries
+  (vis parents, display scheme, build info, measurement type); on top
+  the field's focus and target; busy, held up and ignored input; the
+  gadget timer reaching the process; no longer targetable, the target
+  leaves it. The geode has no application object of its own: the
+  specific UI asks it for its size while the field comes up.
 
 ## 14. Open
 
