@@ -25,6 +25,7 @@
 @include <Internal/SpecUI/olGadgetAreaClass.goh>
 @include <Internal/SpecUI/olBaseWinClass.goh>
 @include <Internal/SpecUI/olPopupWinClass.goh>
+@include <Internal/SpecUI/olButtonClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/im.h>
 #include <Internal/videoDr.h>
@@ -306,6 +307,86 @@ extern void VisOpenNotifyCommon(optr obj);
  * no mouse (OpenCheckIfKeyboardOnly) */
 extern Boolean CheckIfKeyboardRequired(void);
 extern Boolean OpenCheckIfKeyboardOnly(void);
+/* OLMonikerAttrs (cConstant.def): how OpenDrawMoniker draws */
+typedef WordFlags OLMonikerAttrs;
+#define OLMA_DRAW_CURSOR_INSIDE_BOUNDS		0x8000
+#define OLMA_DISP_SELECTION_CURSOR		0x4000
+#define OLMA_USE_TOOLBOX_SELECTION_CURSOR	0x2000
+#define OLMA_IS_MENU_ITEM			0x1000
+#define OLMA_DRAW_SHORTCUT_BELOW		0x0800
+#define OLMA_DRAW_SHORTCUT_TO_RIGHT		0x0400
+#define OLMA_BLACK_MONOCHROME_BACKGROUND	0x0200
+#define OLMA_DARK_COLOR_BACKGROUND		0x0100
+#define OLMA_DISP_DOWN_ARROW			0x0080
+#define OLMA_DISP_RT_ARROW			0x0040
+#define OLMA_DISP_WIN_MARK			0x0020
+#define OLMA_SELECTION_CURSOR_ON		0x0010
+#define OLMA_LIGHT_COLOR_BACKGROUND		0x0008
+#define OLMA_USE_LIST_SELECTION_CURSOR		0x0004
+#define OLMA_USE_CHECKBOX_SELECTION_CURSOR	0x0002
+#define OLMA_DISP_KBD_MONIKER			0x0001
+
+/* OpenMonikerArgs (cConstant.def) */
+typedef struct {
+    word		OMA_leftInset;
+    word		OMA_topInset;
+    word		OMA_xMaximum;
+    word		OMA_yMaximum;
+    GStateHandle	OMA_gState;
+    word		OMA_textHeight;
+    OLMonikerAttrs	OMA_monikerAttrs;
+    DrawMonikerFlags	OMA_drawMonikerFlags;
+    word		OMA_bottomInset;
+    word		OMA_rightInset;
+} OpenMonikerArgs;
+
+/* the button inset (cConstant.def) */
+#define MO_BUTTON_INSET_X		6
+
+/* the marks (cConstant.def, Motif) */
+#define OL_MARK_WIDTH			12
+#define OL_MARK_HEIGHT			8
+#define OL_MARK_SPACING			4
+#define OL_DOWN_MARK_WIDTH		8
+#define OL_EXTRA_DOWN_MARK_SPACING	(OL_MARK_WIDTH - OL_DOWN_MARK_WIDTH)
+
+/* CUtils/copenMoniker.goc: obj is the visible object, gen the one with
+ * the moniker (in the same block) */
+extern SizeAsDWord OpenGetMonikerSize(optr obj, optr gen,
+				      OpenMonikerArgs *a);
+extern SizeAsDWord OpenGetMonikerExtraSize(OpenMonikerArgs *a);
+extern XYValueAsDWord OpenGetMonikerPos(optr obj, optr gen,
+					OpenMonikerArgs *a);
+extern void OpenDrawMoniker(optr obj, optr gen, OpenMonikerArgs *a);
+
+extern Boolean OpenCheckIfKeyboard(void);
+extern Boolean OpenCheckIfKeyboardNavigation(void);
+extern void OpenDoClickSound(void);
+extern optr OpenFindOLWin(optr o);
+
+/* CButton: OLButtonClass */
+extern void OLButtonUpdateState(optr oself);
+extern Boolean OpenButtonCheckIfFullyEnabled(optr oself);
+extern void OLButtonResetMasterDefault(optr oself);
+extern void OLButtonReleaseDefaultExclusive(optr oself);
+extern Boolean OLButtonReleaseMouseGrab(optr oself);
+extern void OLButtonCallWin(optr oself, VisUpwardQueryType q);
+extern void OLButtonDrawLaterIfNewState(optr oself);
+extern void OLButtonSaveStateSetBorderedAndOrDepressed(optr oself);
+extern void OLButtonRestoreBorderedAndDepressed(optr oself);
+extern void OLButtonRestoreBorderedAndDepressedAndDrawNow(optr oself);
+extern void OLButtonActivate(optr oself, Boolean doublePress);
+extern OLMonikerAttrs OLButtonSetupMonikerAttrs(optr oself);
+extern void OLButtonDrawMoniker(optr oself, GStateHandle gs,
+				DrawMonikerFlags f, OLMonikerAttrs attrs,
+				word xInset, word yInset);
+extern void DrawColorButton(optr oself, GStateHandle gs, DrawFlags df,
+			    OLButtonOptFlags old);
+/* CSpec/cspecInteraction.goc: the hints of ScanMapGroupHintHandlers */
+extern void OLScanMapGroupHints(optr o, OLBuildFlags *flags);
+extern ClassStruct *OLBuildTrigger(optr oself, word masterOffset);
+extern word OpenGetBackgroundColor(optr o, Boolean selected);
+extern Boolean OpenGetTextColor(optr o, Color *c);
 /* HINT_DEFAULT_FOCUS and HINT_DEFAULT_TARGET (grabbed if fully
  * enabled); TRUE with the focus hint */
 extern Boolean ScanFocusTargetHintHandlers(optr obj);

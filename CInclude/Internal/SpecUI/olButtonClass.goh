@@ -1,0 +1,112 @@
+/*
+ * olButtonClass.goh -- OLButtonClass, the button of a specific UI: a
+ * GenTrigger, or the activator of a popup window (after
+ * Include/Internal/SpecUI/olButtonClass.def), for Port32.
+ *
+ * Motif: no bubble help, no rounded corners, no draw styles, no Legos
+ * looks, no MSG_OL_BUTTON_SET_BORDERED (OPEN LOOK only), no
+ * HINT_CLOSE_BUTTON (stylus).
+ */
+#ifndef __OLBUTTONCLASS_GOH
+#define __OLBUTTONCLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Objects/gTrigC.goh>
+
+@deflib motif
+
+/* OLButtonFixedAttrs */
+typedef ByteFlags OLButtonFixedAttrs;
+#define OLBFA_GCM_SYS_ICON			0x80
+#define OLBFA_DEFAULT_FOCUS			0x40	/* HINT_DEFAULT_FOCUS */
+#define OLBFA_MASTER_DEFAULT_TRIGGER		0x20	/* HINT_DEFAULT_DEFAULT_ACTION */
+#define OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER	0x10
+#define OLBFA_IMMEDIATE_ACTION			0x08	/* ATTR_GEN_TRIGGER_IMMEDIATE_ACTION */
+#define OLBFA_IN_REPLY_BAR			0x04
+#define OLBFA_FORCE_SHORTCUT			0x02
+#define OLBFA_FORCE_NO_SHORTCUT			0x01
+
+/* OLButtonMoreAttrs (the low five bits are OLGadgetDimensionFlags) */
+typedef ByteFlags OLButtonMoreAttrs;
+#define OLBMA_EXPAND_WIDTH_TO_FIT_PARENT	0x80
+#define OLBMA_EXPAND_HEIGHT_TO_FIT_PARENT	0x40
+#define OLBMA_CAN_CLIP_MONIKER_WIDTH		0x20
+#define OLBMA_CAN_CLIP_MONIKER_HEIGHT		0x10
+#define OLBMA_CENTER_MONIKER			0x08
+#define OLBMA_IN_TOOLBOX			0x04
+#define OLBMA_DRAW_SHORTCUT_BELOW		0x02
+#define OLBMA_WAS_DOUBLE_CLICKED		0x01
+
+/* OLButtonSpecState: the WAS_ flags are the drawn ones shifted up by 8 */
+typedef WordFlags OLButtonSpecState;
+#define OLBSS_IN_MENU		0x8000
+#define OLBSS_IN_MENU_BAR	0x4000
+#define OLBSS_SETTING		0x2000	/* an OLSettingClass */
+#define OLBSS_SYS_ICON		0x1000
+#define OLBSS_WAS_BORDERED	0x0800
+#define OLBSS_DEFAULT_TRIGGER	0x0400
+#define OLBSS_WAS_DEPRESSED	0x0200
+#define OLBSS_HAS_MOUSE_GRAB	0x0100
+#define OLBSS_MENU_DOWN_MARK	0x0080	/* = OLMA_DISP_DOWN_ARROW */
+#define OLBSS_MENU_RIGHT_MARK	0x0040	/* = OLMA_DISP_RT_ARROW */
+#define OLBSS_WINDOW_MARK	0x0020	/* = OLMA_DISP_WIN_MARK */
+#define OLBSS_DEFAULT		0x0010
+#define OLBSS_BORDERED		0x0008
+#define OLBSS_SELECTED		0x0004
+#define OLBSS_DEPRESSED		0x0002
+#define OLBSS_CURSORED		0x0001
+
+#define OLBSS_OPENS_POPUP_WINDOW_MASK \
+	(OLBSS_MENU_DOWN_MARK | OLBSS_MENU_RIGHT_MARK | OLBSS_WINDOW_MARK)
+#define OLBSS_NON_STD_BUTTON_MASK \
+	(OLBSS_IN_MENU | OLBSS_IN_MENU_BAR | OLBSS_SYS_ICON)
+
+/* OLButtonOptFlags: the DRAWN_ flags are the OLBSS_ ones of the low
+ * byte; OLBOF_ENABLED is VA_FULLY_ENABLED */
+typedef ByteFlags OLButtonOptFlags;
+#define OLBOF_ENABLED		0x40
+#define OLBOF_DRAW_STATE_KNOWN	0x20
+#define OLBOF_DRAWN_DEFAULT	0x10
+#define OLBOF_DRAWN_BORDERED	0x08
+#define OLBOF_DRAWN_SELECTED	0x04
+#define OLBOF_DRAWN_DEPRESSED	0x02
+#define OLBOF_DRAWN_CURSORED	0x01
+
+#define OLBOF_STATE_FLAGS_MASK	(OLBOF_DRAWN_DEFAULT | OLBOF_DRAWN_BORDERED | \
+				 OLBOF_DRAWN_SELECTED | \
+				 OLBOF_DRAWN_DEPRESSED | OLBOF_DRAWN_CURSORED)
+
+@class OLButtonClass, VisClass;
+@uses GenTriggerClass;
+
+/* drawn now if the state differs from the drawn one */
+@message void MSG_OL_BUTTON_REDRAW();
+@message void MSG_OL_BUTTON_SET_DRAW_STATE_UNKNOWN();
+/* a popup's button: its generic object (in this block) and the build
+ * flags the popup's query answered */
+@message void MSG_OL_BUTTON_SETUP(ChunkHandle genChunk,
+				  OLBuildFlags buildFlags);
+@message optr MSG_OL_BUTTON_GET_GEN_PART();
+@message Boolean MSG_OL_BUTTON_QUERY_IS_TRIGGER();
+@message void MSG_OL_BUTTON_SET_WIN_FLAG();
+@message void MSG_OL_BUTTON_CLEAR_WIN_FLAG();
+@message void MSG_OL_BUTTON_KBD_ACTIVATE();
+
+    @vardata void HINT_SYS_ICON;
+    @vardata void HINT_GCM_SYS_ICON;
+    /* the generic chunk in the same block, 0: this object */
+    @vardata ChunkHandle HINT_MDI_LIST_ENTRY;
+    @vardata void ATTR_OL_BUTTON_IN_TITLE_BAR;
+    @vardata void ATTR_SYSTEM_MENU_CLOSE;
+
+    @instance ChunkHandle	OLBI_genChunk = 0;
+    @instance OLButtonFixedAttrs OLBI_fixedAttrs = 0;
+    @instance OLButtonMoreAttrs	OLBI_moreAttrs = 0;
+    @instance OLButtonOptFlags	OLBI_optFlags = 0;
+    @instance OLButtonSpecState	OLBI_specState = 0;
+
+@endc;
+
+@endlib
+
+#endif

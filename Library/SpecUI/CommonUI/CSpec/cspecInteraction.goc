@@ -57,6 +57,13 @@ static VarDataCHandler mapGroupHints[] = {
     { HINT_CUSTOM_SYS_MENU, MapGroupHint },
 };
 
+/* ScanMapGroupHintHandlers: the build flags of the object's hints */
+void OLScanMapGroupHints(optr o, OLBuildFlags *flags)
+{
+    ObjVarScanData(o, sizeof(mapGroupHints) / sizeof(mapGroupHints[0]),
+		   mapGroupHints, flags);
+}
+
 /*
  * OLMapGroup: the build flags from the visibility (a popup is menuable)
  * and the hints; unless the object is a system, express or popup list

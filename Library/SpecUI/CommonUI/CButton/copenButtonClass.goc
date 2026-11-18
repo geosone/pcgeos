@@ -1,0 +1,521 @@
+/*
+ * copenButtonClass.goc -- OLButtonClass (after copenButtonClass.asm):
+ * the geometry of a button (its moniker with the insets of its region
+ * set, the reply bar's extra inset, the minimum size, the gadget
+ * hints), how its moniker is drawn (OLMonikerAttrs from its state), the
+ * keyboard (space activates; return in a menu), the mnemonic and
+ * accelerator, MSG_GEN_ACTIVATE (drawn depressed for a moment).
+ *
+ * The insets are those of the black and white region sets
+ * (copenButtonData.asm), which the asm takes for color too.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: menus (separators, the
+ * menu center, menu marks, the stay-up menus released after a key
+ * activation, the title bar height), VMO_CANCEL mnemonics
+ * (MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC), the keyboard
+ * accelerator text (copenMoniker.goc).
+ */
+@include "cGeode.goh"
+
+#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
+
+#define MO_BUTTON_INSET_Y		3	/* DOUBLE_BORDERED_GADGETS */
+#define MO_BUTTON_INSET_Y_CGA		2
+#define MO_BUTTON_MIN_WIDTH		5
+#define MO_BUTTON_MIN_HEIGHT		5
+#define MO_REPLY_BUTTON_INSET_X		MO_BUTTON_INSET_X
+#define MO_REPLY_BUTTON_INSET_Y		MO_BUTTON_INSET_Y
+#define MO_CGA_REPLY_BUTTON_INSET_Y	(MO_BUTTON_INSET_Y / 2 + 1)
+#define MO_BUTTON_INSET_X_NARROW	4
+#define MO_MENU_ITEM_INSET_X		7
+#define MO_MENU_ITEM_INSET_X_NARROW	4
+#define MO_MENU_ITEM_INSET_Y		2
+#define MO_MENU_ITEM_INSET_Y_CGA	1
+#define MO_MENU_ITEM_MIN_HEIGHT		5
+#define MO_MENU_BUTTON_INSET_X		7
+#define MO_MENU_BUTTON_INSET_X_NARROW	4
+#define MO_MENU_BUTTON_INSET_Y		2
+#define MO_MENU_BUTTON_INSET_Y_CGA	0
+#define MO_MENU_BUTTON_MIN_HEIGHT	5
+#define BUTTON_TOOLBOX_X_INSET		2
+
+/* the moniker part of BWButtonRegionSetStruct (the regions are drawn
+ * by copenButtonColor.goc) */
+typedef struct {
+    DrawMonikerFlags	BI_flags;
+    byte		BI_xInset;
+    byte		BI_yInset;
+    byte		BI_minHeight;
+    byte		BI_yInsetCGA;
+    byte		BI_xInsetNarrow;
+} ButtonInsets;
+
+#define LC	((J_LEFT << DMF_X_JUST_OFFSET) | (J_CENTER << DMF_Y_JUST_OFFSET))
+#define CC	((J_CENTER << DMF_X_JUST_OFFSET) | (J_CENTER << DMF_Y_JUST_OFFSET))
+
+static const ButtonInsets normButton = {
+    LC, MO_BUTTON_INSET_X, MO_BUTTON_INSET_Y, MO_BUTTON_MIN_HEIGHT,
+    MO_BUTTON_INSET_Y_CGA, MO_BUTTON_INSET_X_NARROW
+};
+static const ButtonInsets replyButton = {
+    CC, MO_REPLY_BUTTON_INSET_X, MO_BUTTON_INSET_Y,
+    MO_BUTTON_MIN_HEIGHT + MO_REPLY_BUTTON_INSET_Y,
+    MO_BUTTON_INSET_Y_CGA, MO_BUTTON_INSET_X_NARROW
+};
+static const ButtonInsets defReplyButton = {
+    CC, MO_REPLY_BUTTON_INSET_X, MO_REPLY_BUTTON_INSET_Y,
+    MO_BUTTON_MIN_HEIGHT + MO_REPLY_BUTTON_INSET_Y,
+    MO_BUTTON_INSET_Y_CGA, MO_BUTTON_INSET_X_NARROW
+};
+static const ButtonInsets cgaReplyButton = {
+    CC, MO_REPLY_BUTTON_INSET_X, MO_BUTTON_INSET_Y_CGA,
+    MO_BUTTON_MIN_HEIGHT + MO_REPLY_BUTTON_INSET_Y,
+    MO_BUTTON_INSET_Y_CGA, MO_BUTTON_INSET_X_NARROW
+};
+static const ButtonInsets systemMenuButton = {
+    LC, 0, 0, MO_BUTTON_MIN_HEIGHT, 0, 0
+};
+static const ButtonInsets menuItem = {
+    LC, MO_MENU_ITEM_INSET_X, MO_MENU_ITEM_INSET_Y, MO_MENU_ITEM_MIN_HEIGHT,
+    MO_MENU_ITEM_INSET_Y_CGA, MO_MENU_ITEM_INSET_X_NARROW
+};
+static const ButtonInsets menuButton = {
+    CC, MO_MENU_BUTTON_INSET_X, MO_MENU_BUTTON_INSET_Y,
+    MO_MENU_BUTTON_MIN_HEIGHT, MO_MENU_BUTTON_INSET_Y_CGA,
+    MO_MENU_BUTTON_INSET_X_NARROW
+};
+
+/* OLButtonChooseBWRegionSet: system icon, menu item, menu button,
+ * reply bar button (CGA), default or normal button; a toolbox's button
+ * has the system icon's */
+static const ButtonInsets *ChooseInsets(optr oself)
+{
+    OLButtonInstance *b = Btn(oself);
+    OLButtonSpecState s = b->OLBI_specState;
+
+    if (s & OLBSS_SYS_ICON)
+	return &systemMenuButton;
+    if (s & OLBSS_IN_MENU)
+	return &menuItem;
+    if (s & OLBSS_IN_MENU_BAR)
+	return &menuButton;
+    if (b->OLBI_fixedAttrs & (OLBFA_IN_REPLY_BAR |
+			      OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER)) {
+	if (OpenCheckIfCGA())
+	    return &cgaReplyButton;
+	return (s & OLBSS_DEFAULT) ? &defReplyButton : &replyButton;
+    }
+    if (s & OLBSS_DEFAULT)
+	return &normButton;		/* defButton: the same insets */
+    if (b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX)
+	return &systemMenuButton;
+    return &normButton;
+}
+
+/* ---------------------------------------------------------------------
+ * The moniker attributes
+ * ------------------------------------------------------------------- */
+
+/* OLButtonTestForCursored: depressed on black and white is drawn on
+ * black; cursored, the cursor is on; with a mouse, a cursor drawn
+ * before is erased */
+static OLMonikerAttrs TestForCursored(OLButtonSpecState s,
+				      OLButtonOptFlags opt)
+{
+    OLMonikerAttrs a = 0;
+
+    if ((s & OLBSS_DEPRESSED) && OpenCheckIfBW())
+	a |= OLMA_BLACK_MONOCHROME_BACKGROUND;
+    if (s & OLBSS_CURSORED)
+	a |= OLMA_DISP_SELECTION_CURSOR | OLMA_SELECTION_CURSOR_ON;
+    else if (!OpenCheckIfKeyboardOnly() && (opt & OLBOF_DRAWN_CURSORED))
+	a |= OLMA_DISP_SELECTION_CURSOR;
+    return a;
+}
+
+/*
+ * OLButtonSetupMonikerAttrs: the window mark (not in a toolbox), the
+ * menu marks, a menu item, the shortcut right of a menu button or
+ * system icon, the cursor of a standard button; the keyboard
+ * accelerator shown with keyboard navigation (with a mouse only in
+ * menus or when forced), below if asked for
+ */
+OLMonikerAttrs OLButtonSetupMonikerAttrs(optr oself)
+{
+    OLButtonInstance *b = Btn(oself);
+    OLButtonSpecState s = b->OLBI_specState;
+    OLMonikerAttrs a = 0;
+
+    if (!(b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) && (s & OLBSS_WINDOW_MARK))
+	a |= OLMA_DISP_WIN_MARK;
+    if (s & OLBSS_MENU_DOWN_MARK)
+	a |= OLMA_DISP_DOWN_ARROW | OLMA_DRAW_CURSOR_INSIDE_BOUNDS;
+    if (s & OLBSS_MENU_RIGHT_MARK)
+	a |= OLMA_DISP_RT_ARROW;
+    if (s & OLBSS_IN_MENU)
+	a |= OLMA_IS_MENU_ITEM;
+    if (s & (OLBSS_IN_MENU_BAR | OLBSS_SYS_ICON))
+	a |= OLMA_DRAW_SHORTCUT_TO_RIGHT;
+    if (!(s & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR | OLBSS_SYS_ICON)))
+	a |= TestForCursored(s, b->OLBI_optFlags);
+    if (OpenCheckIfKeyboardNavigation() &&
+	!(b->OLBI_fixedAttrs & OLBFA_FORCE_NO_SHORTCUT)) {
+	a |= OLMA_DISP_KBD_MONIKER;
+	if (!OpenCheckIfKeyboardOnly() &&
+	    !(b->OLBI_fixedAttrs & OLBFA_FORCE_SHORTCUT) &&
+	    !(s & OLBSS_IN_MENU))
+	    a &= ~OLMA_DISP_KBD_MONIKER;
+    }
+    if ((b->OLBI_moreAttrs & OLBMA_DRAW_SHORTCUT_BELOW) &&
+	!(s & OLBSS_IN_MENU))
+	a |= OLMA_DRAW_SHORTCUT_BELOW;
+    return a;
+}
+
+/*
+ * SetupMonikerArgs: the insets of the region set (narrow and CGA ones),
+ * a toolbox's; one more right and bottom on black and white for a
+ * standard button; the attributes.  Returns the minimum height.
+ */
+static word SetupMonikerArgs(optr oself, OpenMonikerArgs *a)
+{
+    const ButtonInsets *bi = ChooseInsets(oself);
+    OLButtonInstance *b;
+    word x, y;
+
+    x = OpenCheckIfNarrow() ? bi->BI_xInsetNarrow : bi->BI_xInset;
+    y = OpenCheckIfCGA() ? bi->BI_yInsetCGA : bi->BI_yInset;
+    b = Btn(oself);
+    if (b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX)
+	x = y = BUTTON_TOOLBOX_X_INSET;
+    memset(a, 0, sizeof(*a));
+    a->OMA_leftInset = x;
+    a->OMA_topInset = y;
+    if (!(b->OLBI_specState & (OLBSS_SYS_ICON | OLBSS_IN_MENU_BAR)) &&
+	!(b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) && OpenCheckIfBW()) {
+	x++;
+	y++;
+    }
+    a->OMA_rightInset = x;
+    a->OMA_bottomInset = y;
+    a->OMA_drawMonikerFlags = bi->BI_flags;
+    a->OMA_monikerAttrs = OLButtonSetupMonikerAttrs(oself);
+    return bi->BI_minHeight;
+}
+
+static optr GenPart(optr oself)
+{
+    return ConstructOptr(OptrToHandle(oself), Btn(oself)->OLBI_genChunk);
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry
+ * ------------------------------------------------------------------- */
+
+/* SetInReplyBarFlagBasedOnParent: with default rings, a parent with
+ * oversized children (a reply bar) */
+static void SetInReplyBarFlagBasedOnParent(optr oself)
+{
+    if (OpenCheckDefaultRings() &&
+	(OpenGetParentMoreFlagsIfCtrl(oself) & OLCOF_OVERSIZED_CHILDREN))
+	Btn(oself)->OLBI_fixedAttrs |= OLBFA_IN_REPLY_BAR;
+}
+
+static void ApplySizeHints(optr oself, sword *w, sword *h)
+{
+    VisApplySizeHints(GenPart(oself), w, h);
+}
+
+/* OpenChooseNewGadgetSize: the suggested size where the gadget hints
+ * allow it (a toolbox button only expands its height if the room is
+ * not twice its own, unless asked for) */
+static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
+				Boolean sysIcon, sword sugW, sword sugH,
+				sword *w, sword *h)
+{
+    if ((f & OLBMA_EXPAND_WIDTH_TO_FIT_PARENT) && sugW > *w)
+	*w = sugW;
+    if ((f & OLBMA_EXPAND_HEIGHT_TO_FIT_PARENT) && sugH > *h) {
+	if (sysIcon || !(f & OLBMA_IN_TOOLBOX) || sugH - *h <= *h ||
+	    ObjVarFindData(oself, HINT_EXPAND_HEIGHT_TO_FIT_PARENT))
+	    *h = sugH;
+    }
+    if ((f & OLBMA_CAN_CLIP_MONIKER_WIDTH) && (word) *w > (word) sugW)
+	*w = sugW;
+    if ((f & OLBMA_CAN_CLIP_MONIKER_HEIGHT) && (word) *h > (word) sugH)
+	*h = sugH;
+}
+
+/*
+ * OLButtonRerecalcSize: the moniker with its insets (a reply bar's
+ * inset around it), the gadget hints and size hints applied, at least
+ * the minimum width and the region set's height; in the title bar the
+ * title bar's height
+ */
+@extern method OLButtonClass, MSG_VIS_RECALC_SIZE
+{
+    OpenMonikerArgs a;
+    SizeAsDWord s;
+    sword w, h, sw = (sword) width, sh = (sword) height;
+    word minH;
+    OLButtonInstance *b;
+
+    SetInReplyBarFlagBasedOnParent(oself);
+    ApplySizeHints(oself, &sw, &sh);
+    minH = SetupMonikerArgs(oself, &a);
+    s = OpenGetMonikerSize(oself, GenPart(oself), &a);
+    w = (sword) DWORD_WIDTH(s);
+    h = (sword) DWORD_HEIGHT(s);
+    b = Btn(oself);
+    if (b->OLBI_fixedAttrs & (OLBFA_IN_REPLY_BAR |
+			      OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER)) {
+	w += MO_REPLY_BUTTON_INSET_X * 2;
+	h += MO_REPLY_BUTTON_INSET_Y * 2;
+	if (OpenCheckIfCGA())
+	    h -= 2 * (MO_REPLY_BUTTON_INSET_Y - MO_CGA_REPLY_BUTTON_INSET_Y);
+    }
+    b = Btn(oself);
+    ChooseNewGadgetSize(oself, b->OLBI_moreAttrs,
+			(b->OLBI_specState & OLBSS_SYS_ICON) != 0, sw, sh,
+			&w, &h);
+    ApplySizeHints(oself, &w, &h);
+    if (w < MO_BUTTON_MIN_WIDTH)
+	w = MO_BUTTON_MIN_WIDTH;
+    if ((word) h < minH)
+	h = (sword) minH;
+    if (ObjVarFindData(oself, ATTR_OL_BUTTON_IN_TITLE_BAR)) {
+	optr win = OpenFindOLWin(oself);
+
+	if (win)
+	    h = (sword) @call win::MSG_OL_WIN_GET_TITLE_BAR_HEIGHT();
+    }
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/* OLButtonGetExtraSize: what is not the moniker */
+@extern method OLButtonClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    OpenMonikerArgs a;
+    SizeAsDWord s;
+    word w, h;
+
+    (void) childCount;
+    (void) SetupMonikerArgs(oself, &a);
+    s = OpenGetMonikerExtraSize(&a);
+    w = DWORD_WIDTH(s);
+    h = DWORD_HEIGHT(s);
+    if (Btn(oself)->OLBI_fixedAttrs & (OLBFA_IN_REPLY_BAR |
+				       OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER)) {
+	w += MO_REPLY_BUTTON_INSET_X * 2;
+	h += MO_REPLY_BUTTON_INSET_Y * 2;
+    }
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->ESP_extraWidth = w;
+    retValue->ESP_extraHeight = h;
+}
+
+/* OLButtonMkrPos: where the moniker starts (FALSE: none) */
+@extern method OLButtonClass, MSG_GET_FIRST_MKR_POS
+{
+    OpenMonikerArgs a;
+    XYValueAsDWord p;
+
+    (void) SetupMonikerArgs(oself, &a);
+    p = OpenGetMonikerPos(oself, GenPart(oself), &a);
+    pos->P_x = DWORD_X(p);
+    pos->P_y = DWORD_Y(p);
+    return p != 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Usable, the moniker, opening
+ * ------------------------------------------------------------------- */
+
+@extern method OLButtonClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+/* OLButtonSpecChangeUsable: a menu item has the menu's separators
+ * updated */
+@extern method OLButtonClass, MSG_SPEC_SET_USABLE
+{
+    @callsuper();
+    if (Btn(oself)->OLBI_specState & OLBSS_IN_MENU)
+	VisCallParent(oself, MSG_SPEC_UPDATE_MENU_SEPARATORS, NULL, 0,
+		      NULL, 0);
+}
+
+@extern method OLButtonClass, MSG_SPEC_SET_NOT_USABLE
+{
+    optr p = VisFindParent(oself);
+
+    @callsuper();
+    if ((Btn(oself)->OLBI_specState & OLBSS_IN_MENU) && p)
+	@call p::MSG_SPEC_UPDATE_MENU_SEPARATORS();
+}
+
+/* OLButtonUpdateVisMoniker: a menu item's window, a title bar button's
+ * title group, updated */
+@extern method OLButtonClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    optr win = OpenFindOLWin(oself);
+
+    if (win) {
+	if (pself->OLBI_specState & OLBSS_IN_MENU)
+	    @call win::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID, VUM_MANUAL);
+	else if (ObjVarFindData(oself, ATTR_OL_BUTTON_IN_TITLE_BAR))
+	    @call win::MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP();
+    }
+    @callsuper();
+}
+
+@extern method OLButtonClass, MSG_SPEC_UPDATE_KBD_ACCELERATOR
+{
+    optr win = OpenFindOLWin(oself);
+
+    if (win) {
+	if (pself->OLBI_specState & OLBSS_IN_MENU)
+	    @call win::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID, VUM_MANUAL);
+	else if (ObjVarFindData(oself, ATTR_OL_BUTTON_IN_TITLE_BAR))
+	    @call win::MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP();
+    }
+    @callsuper();
+}
+
+@extern method OLButtonClass, MSG_SPEC_VIS_OPEN_NOTIFY
+{
+    VisOpenNotifyCommon(oself);
+}
+
+@extern method OLButtonClass, MSG_SPEC_VIS_CLOSE_NOTIFY
+{
+    VisCloseNotifyCommon(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Activating, the keyboard
+ * ------------------------------------------------------------------- */
+
+/* OLButtonGenActivate: enabled: drawn depressed, activated, shown so
+ * for olButtonActivateDelay, restored */
+@extern method OLButtonClass, MSG_GEN_ACTIVATE
+{
+    if (!OpenButtonCheckIfFullyEnabled(oself))
+	return;
+    OLButtonSaveStateSetBorderedAndOrDepressed(oself);
+    @call oself::MSG_OL_BUTTON_REDRAW();
+    OLButtonActivate(oself, FALSE);
+    if (olButtonActivateDelay)
+	TimerSleep(olButtonActivateDelay);
+    OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
+}
+
+/* OLButtonKbdActivate (Port32: no stay-up menus to release) */
+@extern method OLButtonClass, MSG_OL_BUTTON_KBD_ACTIVATE
+{
+    @call oself::MSG_GEN_ACTIVATE();
+}
+
+/*
+ * OLButtonKbdChar: enabled, a plain press of space (return in a menu)
+ * activates; anything else goes up.  TRUE if taken.
+ */
+static Boolean ButtonKbdChar(optr oself, word character, word flags,
+			     word state)
+{
+    OLButtonInstance *b = Btn(oself);
+    byte cf = (byte) flags, ss = (byte) (flags >> 8);
+    optr p;
+
+    if ((b->VI_attrs & VA_FULLY_ENABLED) &&
+	!(cf & (CF_STATE_KEY | CF_TEMP_ACCENT | CF_REPEAT_PRESS |
+		CF_RELEASE)) &&
+	!(ss & (SS_LALT | SS_RALT | SS_LCTRL | SS_RCTRL))) {
+	if (((b->OLBI_specState & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR)) &&
+	     character == ((VC_ISCTRL << 8) | VC_CTRL_M)) ||
+	    character == ((CS_BSW << 8) | VC_BLANK)) {
+	    @call oself::MSG_OL_BUTTON_KBD_ACTIVATE();
+	    return TRUE;
+	}
+    }
+    p = VisFindParent(oself);
+    return p ? @call p::MSG_META_FUP_KBD_CHAR(character, flags, state)
+	     : FALSE;
+}
+
+@extern method OLButtonClass, MSG_META_KBD_CHAR
+{
+    (void) ButtonKbdChar(oself, character, flags, state);
+}
+
+@extern method OLButtonClass, MSG_META_FUP_KBD_CHAR
+{
+    return ButtonKbdChar(oself, character, flags, state);
+}
+
+/* VisCheckMnemonic: the moniker's mnemonic is the character (case
+ * ignored) */
+static Boolean CheckMnemonic(optr g, word c)
+{
+    ChunkHandle m;
+    VisMonikerWithText *t;
+    const char *text;
+    byte off, mc;
+
+    if (!(((VisInstance *) ObjDerefVis(g))->VI_typeFlags & VTF_IS_GEN))
+	return FALSE;
+    m = ((GenInstance *) ObjDerefGen(g))->GI_visMoniker;
+    if (!m)
+	return FALSE;
+    t = LMemDeref(ConstructOptr(OptrToHandle(g), m));
+    if (t->VMWT_common.VM_type & VMT_GSTRING)
+	return FALSE;
+    off = (byte) t->VMWT_mnemonicOffset;
+    text = (const char *) t + VMWT_text;
+    if (off == 0xff || off == 0xfd)	/* VMO_NO_MNEMONIC, VMO_CANCEL */
+	return FALSE;
+    if (off == 0xfe) {			/* VMO_MNEMONIC_NOT_IN_MKR_TEXT */
+	while (*text)
+	    text++;
+	mc = (byte) text[1];
+    } else
+	mc = (byte) text[off];
+    if (c >= 'A' && c <= 'Z')
+	c += 'a' - 'A';
+    if (mc >= 'A' && mc <= 'Z')
+	mc += 'a' - 'A';
+    return (byte) c == mc;
+}
+
+/* OLButtonActivateObjectWithMnemonic: the mnemonic activates (a
+ * disabled one beeps) */
+@extern method OLButtonClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    (void) flags; (void) state;
+    if (!CheckMnemonic(GenPart(oself), character))
+	return FALSE;
+    if (OpenButtonCheckIfFullyEnabled(oself))
+	@call oself::MSG_OL_BUTTON_KBD_ACTIVATE();
+    /* else UserStandardSound(SST_NO_INPUT) (Port32: no sound yet) */
+    return TRUE;
+}
+
+/* OLButtonFindKbdAccelerator: the accelerator is the button's (a
+ * disabled one beeps) */
+@extern method OLButtonClass, MSG_GEN_FIND_KBD_ACCELERATOR
+{
+    if (!GenCheckKbdAccelerator(oself, charValue, charFlagsAndShiftState,
+				toggleStateAndScanCode))
+	return FALSE;
+    /* disabled: UserStandardSound(SST_NO_INPUT) (Port32: no sound
+     * yet) */
+    return TRUE;
+}
+
+/* OLButtonMakeDefaultAction: the window's default */
+@extern method OLButtonClass, MSG_GEN_TRIGGER_MAKE_DEFAULT_ACTION
+{
+    OLButtonCallWin(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
+    OLButtonDrawLaterIfNewState(oself);
+}

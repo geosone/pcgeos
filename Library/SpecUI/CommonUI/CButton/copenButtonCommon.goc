@@ -1,0 +1,568 @@
+/*
+ * copenButtonCommon.goc -- OLButtonClass (after copenButtonCommon.asm):
+ * what a button does.  A press in it depresses it and takes the gadget
+ * exclusive and the mouse (and the focus, and the default for a
+ * temporary default); the release in it activates it: a GenTrigger
+ * sends its action (MSG_GEN_TRIGGER_SEND_ACTION, through the queue
+ * unless ATTR_GEN_TRIGGER_IMMEDIATE_ACTION), a popup's button opens the
+ * popup (MSG_OL_POPUP_ACTIVATE).  The state flags (bordered, depressed,
+ * cursored, default) are saved and restored around it and the button
+ * is redrawn when they differ from the drawn ones (OLBI_optFlags).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the menu item behaviour
+ * (pointer over a menu, separators), the pen mode delay, focus on a
+ * text object (VisTextClass, GenViewClass: the focus is always taken),
+ * the navigation query (VisNavigateCommon), the black and white look
+ * (DrawBWButton: drawn in color).
+ */
+@include "cGeode.goh"
+
+#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
+
+/* ---------------------------------------------------------------------
+ * The state
+ * ------------------------------------------------------------------- */
+
+/* OLButtonDetermineIfNewState: the flags that differ from the drawn
+ * ones (the cursor only with the keyboard, not in a menu) */
+static Boolean DetermineIfNewState(optr oself)
+{
+    OLButtonInstance *b = Btn(oself);
+    byte diff = (byte) b->OLBI_specState ^ b->OLBI_optFlags;
+    byte mask = OLBSS_BORDERED | OLBSS_DEPRESSED | OLBSS_DEFAULT |
+		OLBSS_SELECTED;
+
+    if (OpenCheckIfKeyboard() &&
+	!(b->OLBI_specState & (OLBSS_IN_MENU | OLBSS_MENU_RIGHT_MARK)))
+	mask |= OLBSS_CURSORED;
+    return (diff & mask) != 0;
+}
+
+/* OLButtonDrawNOWIfNewState */
+@extern method OLButtonClass, MSG_OL_BUTTON_REDRAW
+{
+    if (DetermineIfNewState(oself))
+	@call oself::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+static void DrawNowIfNewState(optr oself)
+{
+    @call oself::MSG_OL_BUTTON_REDRAW();
+}
+
+/*
+ * OLButtonDrawLATERIfNewState: with an expose pending, the button is
+ * invalidated (drawn with it); else redrawn through the queue, first
+ */
+void OLButtonDrawLaterIfNewState(optr oself)
+{
+    WindowHandle win;
+    word wf = 0;
+
+    if (!DetermineIfNewState(oself))
+	return;
+    win = VisQueryWindow(oself);
+    if (win) {
+	WinGetInfo(win, WIT_FLAGS, &wf);
+	if (wf & WRF_EXPOSE_PENDING) {
+	    Rectangle r;
+
+	    OpenGetLineBounds(oself, &r);
+	    WinInvalReg(win, NULL, r.R_left, r.R_top, r.R_right,
+			r.R_bottom);
+	    return;
+	}
+    }
+    @send, forceQueue, insertAtFront oself::MSG_OL_BUTTON_REDRAW();
+}
+
+/* OLButtonSaveBorderedAndDepressedStatus: in the WAS_ flags */
+static void SaveBorderedAndDepressed(OLButtonInstance *b)
+{
+    b->OLBI_specState &= ~(OLBSS_WAS_BORDERED | OLBSS_WAS_DEPRESSED);
+    b->OLBI_specState |= (b->OLBI_specState &
+			  (OLBSS_BORDERED | OLBSS_DEPRESSED)) << 8;
+}
+
+/* OLButtonRestoreBorderedAndDepressedStatus */
+void OLButtonRestoreBorderedAndDepressed(optr oself)
+{
+    OLButtonInstance *b = Btn(oself);
+
+    b->OLBI_specState &= ~(OLBSS_BORDERED | OLBSS_DEPRESSED);
+    b->OLBI_specState |= (b->OLBI_specState >> 8) &
+			 (OLBSS_BORDERED | OLBSS_DEPRESSED);
+}
+
+/* OLButtonSaveStateSetBorderedAndOrDepressed: depressed (a menu item:
+ * bordered) */
+void OLButtonSaveStateSetBorderedAndOrDepressed(optr oself)
+{
+    OLButtonInstance *b = Btn(oself);
+
+    if (!(b->OLBI_specState & (OLBSS_CURSORED | OLBSS_HAS_MOUSE_GRAB)))
+	SaveBorderedAndDepressed(b);
+    b->OLBI_specState |= (b->OLBI_specState & OLBSS_IN_MENU) ?
+			 OLBSS_BORDERED : OLBSS_DEPRESSED;
+}
+
+void OLButtonRestoreBorderedAndDepressedAndDrawNow(optr oself)
+{
+    OLButtonRestoreBorderedAndDepressed(oself);
+    DrawNowIfNewState(oself);
+}
+
+/* UpdateButtonState: the drawn flags are the state's (and enabled) */
+void OLButtonUpdateState(optr oself)
+{
+    OLButtonInstance *b;
+    byte f;
+
+    b = Btn(oself);
+    f = (byte) b->OLBI_specState & OLBOF_STATE_FLAGS_MASK;
+    if (OpenButtonCheckIfFullyEnabled(oself))
+	f |= OLBOF_ENABLED;
+    f |= OLBOF_DRAW_STATE_KNOWN;
+    b = Btn(oself);
+    b->OLBI_optFlags &= ~(OLBOF_STATE_FLAGS_MASK | OLBOF_ENABLED);
+    b->OLBI_optFlags |= f;
+}
+
+/* OpenButtonCheckIfAlwaysEnabled: a menu's button, the pushpin */
+static Boolean CheckIfAlwaysEnabled(optr oself)
+{
+    optr g = ConstructOptr(OptrToHandle(oself), Btn(oself)->OLBI_genChunk);
+
+    if (OLQueryIsMenu(g))
+	return TRUE;
+    if ((Btn(oself)->VI_typeFlags & VTF_IS_GEN) &&
+	ObjIsObjectInClass(oself, &GenTriggerClass) &&
+	((GenTriggerInstance *) ObjDerefGen(oself))->GTI_actionMsg ==
+	MSG_OL_POPUP_TOGGLE_PUSHPIN)
+	return TRUE;
+    return FALSE;
+}
+
+Boolean OpenButtonCheckIfFullyEnabled(optr oself)
+{
+    return CheckIfAlwaysEnabled(oself) ||
+	   (Btn(oself)->VI_attrs & VA_FULLY_ENABLED);
+}
+
+/* ---------------------------------------------------------------------
+ * The grabs and exclusives
+ * ------------------------------------------------------------------- */
+
+static void EnsureMouseGrab(optr oself)
+{
+    if (Btn(oself)->OLBI_specState & OLBSS_HAS_MOUSE_GRAB)
+	return;
+    Btn(oself)->OLBI_specState |= OLBSS_HAS_MOUSE_GRAB;
+    VisGrabMouse(oself);
+}
+
+/* OLButtonReleaseMouseGrab: TRUE if it had it */
+Boolean OLButtonReleaseMouseGrab(optr oself)
+{
+    if (!(Btn(oself)->OLBI_specState & OLBSS_HAS_MOUSE_GRAB))
+	return FALSE;
+    Btn(oself)->OLBI_specState &= ~OLBSS_HAS_MOUSE_GRAB;
+    VisReleaseMouse(oself);
+    return TRUE;
+}
+
+/* OLButtonReleaseDefaultExclusive: a temporary default (not in a menu)
+ * gives it back */
+void OLButtonReleaseDefaultExclusive(optr oself)
+{
+    OLButtonInstance *b = Btn(oself);
+
+    if ((b->OLBI_fixedAttrs & OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER) &&
+	!(b->OLBI_specState & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR)))
+	OLButtonCallWin(oself, SVQT_RELEASE_DEFAULT_EXCLUSIVE);
+}
+
+static void ReleaseAllGrabs(optr oself)
+{
+    (void) OLButtonReleaseMouseGrab(oself);
+    OLButtonReleaseDefaultExclusive(oself);
+    MetaReleaseFocusExclLow(oself);
+}
+
+/* OLButtonResetMasterDefault: no longer its window's master default */
+void OLButtonResetMasterDefault(optr oself)
+{
+    optr win = OpenFindOLWin(oself);
+    Boolean is;
+
+    if (!win)
+	return;
+    ObjLockObjBlock(OptrToHandle(win));
+    is = ((OLWinInstance *) ObjDerefVis(win))->OLWI_masterDefault == oself;
+    MemUnlock(OptrToHandle(win));
+    if (is)
+	OLButtonCallWin(oself, SVQT_RESET_MASTER_DEFAULT);
+}
+
+/*
+ * OLButtonGrabExclusives: a temporary default takes the default; the
+ * gadget exclusive; for a press the mouse, and (not a system icon, in
+ * the menu bar or a toolbox) the focus
+ */
+static void GrabExclusives(optr oself, Boolean press)
+{
+    OLButtonInstance *b = Btn(oself);
+    optr p;
+
+    if ((b->OLBI_fixedAttrs & OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER) &&
+	!(b->OLBI_specState & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR |
+			       OLBSS_SYS_ICON)))
+	OLButtonCallWin(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
+    p = VisFindParent(oself);
+    if (p)
+	@call p::MSG_VIS_TAKE_GADGET_EXCL(oself);
+    if (!press)
+	return;
+    EnsureMouseGrab(oself);
+    b = Btn(oself);
+    if (!(b->OLBI_specState & (OLBSS_SYS_ICON | OLBSS_IN_MENU_BAR)) &&
+	!(b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX))
+	MetaGrabFocusExclLow(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The mouse and activation
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLButtonActivate: a GenTrigger sends its action, a popup's button
+ * activates the popup: called with ATTR_GEN_TRIGGER_IMMEDIATE_ACTION,
+ * else through the queue (first)
+ */
+void OLButtonActivate(optr oself, Boolean doublePress)
+{
+    Boolean now = (Btn(oself)->OLBI_fixedAttrs & OLBFA_IMMEDIATE_ACTION)
+		  != 0;
+
+    if (ObjIsObjectInClass(oself, &GenClass)) {
+	if (now)
+	    @call oself::MSG_GEN_TRIGGER_SEND_ACTION(doublePress);
+	else
+	    @send, forceQueue, insertAtFront
+		oself::MSG_GEN_TRIGGER_SEND_ACTION(doublePress);
+	return;
+    }
+    {
+	optr g = ConstructOptr(OptrToHandle(oself),
+			       Btn(oself)->OLBI_genChunk);
+
+	if (now)
+	    @call g::MSG_OL_POPUP_ACTIVATE();
+	else
+	    @send, forceQueue, insertAtFront g::MSG_OL_POPUP_ACTIVATE();
+    }
+}
+
+static void Processed(MouseReturnParams *retVal, MouseReturnFlags f)
+{
+    if (retVal) {
+	memset(retVal, 0, sizeof(*retVal));
+	retVal->flags = f;
+    }
+}
+
+/*
+ * OLButtonMouse: pressed in the button (enabled): depressed, the
+ * exclusives taken, drawn; released in it or moved out: as it was, the
+ * mouse released (out and not pressed: the event replayed if the
+ * button had the mouse)
+ */
+static void ButtonMouse(optr oself, word inputState,
+			MouseReturnParams *retVal)
+{
+    word ui = inputState >> 8;
+
+    if (ui & UIFA_IN) {
+	if (ui & UIFA_SELECT) {
+	    if (OpenButtonCheckIfFullyEnabled(oself)) {
+		if (inputState & BI_DOUBLE_PRESS)
+		    Btn(oself)->OLBI_moreAttrs |= OLBMA_WAS_DOUBLE_CLICKED;
+		OLButtonSaveStateSetBorderedAndOrDepressed(oself);
+		GrabExclusives(oself, TRUE);
+		DrawNowIfNewState(oself);
+	    }
+	} else {
+	    OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
+	    (void) OLButtonReleaseMouseGrab(oself);
+	}
+	Processed(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	return;
+    }
+    if (ui & UIFA_SELECT) {
+	if (!(Btn(oself)->OLBI_specState & (OLBSS_IN_MENU |
+					    OLBSS_IN_MENU_BAR))) {
+	    OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
+	    Processed(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	    return;
+	}
+	Btn(oself)->OLBI_specState &= ~OLBSS_CURSORED;
+    }
+    OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
+    if (OLButtonReleaseMouseGrab(oself))
+	Processed(retVal, MRF_REPLAY);
+    else
+	Processed(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+}
+
+@extern method OLButtonClass, MSG_META_START_SELECT
+{
+    (void) xPosition; (void) yPosition;
+    ButtonMouse(oself, inputState, retVal);
+}
+
+/* OLButtonPtr: a menu's button while the select button is down, else
+ * only while it has the mouse */
+@extern method OLButtonClass, MSG_META_PTR
+{
+    (void) xPosition; (void) yPosition;
+    if (pself->OLBI_specState & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR)) {
+	if ((inputState >> 8) & UIFA_SELECT) {
+	    ButtonMouse(oself, inputState, retVal);
+	    return;
+	}
+    } else if (pself->OLBI_specState & OLBSS_HAS_MOUSE_GRAB) {
+	ButtonMouse(oself, inputState, retVal);
+	return;
+    }
+    Processed(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+}
+
+/* OLButtonRelease: in the button: the click sound, activated (a double
+ * click as such) */
+@extern method OLButtonClass, MSG_META_END_SELECT
+{
+    (void) xPosition; (void) yPosition;
+    if ((inputState >> 8) & UIFA_IN) {
+	Boolean dbl = (pself->OLBI_moreAttrs & OLBMA_WAS_DOUBLE_CLICKED) != 0;
+
+	pself->OLBI_moreAttrs &= ~OLBMA_WAS_DOUBLE_CLICKED;
+	OpenDoClickSound();
+	OLButtonActivate(oself, dbl);
+    }
+    ButtonMouse(oself, inputState, retVal);
+}
+
+/* ---------------------------------------------------------------------
+ * The focus and default exclusives
+ * ------------------------------------------------------------------- */
+
+/* OLButtonSaveStateSetCursored: cursored (a menu item bordered too) */
+static void SaveStateSetCursored(optr oself)
+{
+    OLButtonInstance *b = Btn(oself);
+
+    if (!(b->OLBI_specState & (OLBSS_CURSORED | OLBSS_HAS_MOUSE_GRAB)))
+	SaveBorderedAndDepressed(b);
+    b->OLBI_specState |= OLBSS_CURSORED;
+    if (b->OLBI_specState & OLBSS_IN_MENU)
+	b->OLBI_specState |= OLBSS_BORDERED;
+}
+
+@extern method OLButtonClass, MSG_META_GAINED_SYS_FOCUS_EXCL
+{
+    if (!(pself->OLBI_specState & OLBSS_CURSORED)) {
+	SaveStateSetCursored(oself);
+	GrabExclusives(oself, FALSE);
+    }
+    OLButtonDrawLaterIfNewState(oself);
+}
+
+@extern method OLButtonClass, MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    if (!(pself->OLBI_specState & OLBSS_CURSORED))
+	return;
+    pself->OLBI_specState &= ~OLBSS_CURSORED;
+    OLButtonReleaseDefaultExclusive(oself);
+    OLButtonRestoreBorderedAndDepressed(oself);
+    if (OpenCheckIfKeyboardOnly())
+	Btn(oself)->OLBI_optFlags &= ~OLBOF_DRAW_STATE_KNOWN;
+    OLButtonDrawLaterIfNewState(oself);
+}
+
+@extern method OLButtonClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    (void) OLButtonReleaseMouseGrab(oself);
+    if (Btn(oself)->OLBI_specState & OLBSS_CURSORED)
+	return;
+    OLButtonRestoreBorderedAndDepressed(oself);
+    OLButtonDrawLaterIfNewState(oself);
+}
+
+/* OLButtonGainedDefaultExclusive: with default rings, drawn as the
+ * default */
+@extern method OLButtonClass, MSG_META_GAINED_DEFAULT_EXCL
+{
+    if (!OpenCheckDefaultRings() || (pself->OLBI_specState & OLBSS_DEFAULT))
+	return;
+    pself->OLBI_specState |= OLBSS_DEFAULT;
+    OLButtonDrawLaterIfNewState(oself);
+}
+
+@extern method OLButtonClass, MSG_META_LOST_DEFAULT_EXCL
+{
+    if (!OpenCheckDefaultRings() || !(pself->OLBI_specState & OLBSS_DEFAULT))
+	return;
+    pself->OLBI_specState &= ~OLBSS_DEFAULT;
+    OLButtonDrawLaterIfNewState(oself);
+}
+
+/* OLButtonBroadcastForDefaultFocus: HINT_DEFAULT_FOCUS answers */
+@extern method OLButtonClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    if (!(pself->OLBI_fixedAttrs & OLBFA_DEFAULT_FOCUS))
+	return;
+    retValue->OAGP_object = oself;
+    retValue->OAGP_grabFlags = 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Enabled, applyable
+ * ------------------------------------------------------------------- */
+
+/* CallMethodIfApplyOrReset: an apply or reset trigger enabled with its
+ * dialog's changes */
+static void CallIfApplyOrReset(optr oself, Boolean enable)
+{
+    InteractionCommand *ic = ObjVarFindData(oself,
+					ATTR_GEN_TRIGGER_INTERACTION_COMMAND);
+
+    if (!ic || !(VarDataFlagsPtr(ic) & VDF_EXTRA_DATA) ||
+	(*ic != IC_APPLY && *ic != IC_RESET))
+	return;
+    if (enable)
+	@call oself::MSG_GEN_SET_ENABLED(VUM_NOW);
+    else
+	@call oself::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+}
+
+@extern method OLButtonClass, MSG_OL_MAKE_APPLYABLE
+{
+    CallIfApplyOrReset(oself, TRUE);
+}
+
+@extern method OLButtonClass, MSG_OL_MAKE_NOT_APPLYABLE
+{
+    CallIfApplyOrReset(oself, FALSE);
+}
+
+/*
+ * FinishChangeEnabled: disabled, a cursored button moves the focus on
+ * and gives up its master default and grabs; enabled, a master default
+ * is the window's again
+ */
+static void FinishChangeEnabled(optr oself)
+{
+    if (!(Btn(oself)->VI_attrs & VA_FULLY_ENABLED)) {
+	if (Btn(oself)->OLBI_specState & OLBSS_CURSORED) {
+	    optr p = VisFindParent(oself);
+
+	    if (p)
+		@call p::MSG_GEN_NAVIGATE_TO_NEXT_FIELD();
+	}
+	OLButtonResetMasterDefault(oself);
+	ReleaseAllGrabs(oself);
+    } else if (Btn(oself)->OLBI_fixedAttrs & OLBFA_MASTER_DEFAULT_TRIGGER)
+	OLButtonCallWin(oself, SVQT_SET_MASTER_DEFAULT);
+}
+
+/* OLButtonNotifyEnabled: not for an always enabled button */
+@extern method OLButtonClass, MSG_SPEC_NOTIFY_ENABLED
+{
+    Boolean r;
+
+    if (CheckIfAlwaysEnabled(oself))
+	return FALSE;
+    r = @callsuper();
+    FinishChangeEnabled(oself);
+    return r;
+}
+
+@extern method OLButtonClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    Boolean r;
+
+    if (CheckIfAlwaysEnabled(oself))
+	return FALSE;
+    r = @callsuper();
+    FinishChangeEnabled(oself);
+    return r;
+}
+
+@extern method OLButtonClass, MSG_OL_BUTTON_QUERY_IS_TRIGGER
+{
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLButtonDraw: a drawable button in color (Port32: black and white
+ * too); the state drawn noted; the masks back to 100%
+ */
+@extern method OLButtonClass, MSG_VIS_DRAW
+{
+    if (pself->VI_attrs & VA_DRAWABLE)
+	DrawColorButton(oself, gstate, drawFlags,
+			Btn(oself)->OLBI_optFlags);
+    OLButtonUpdateState(oself);
+    GrSetAreaMaskSys(gstate, SDM_100);
+    GrSetTextMaskSys(gstate, SDM_100);
+    GrSetLineMaskSys(gstate, SDM_100);
+}
+
+/*
+ * OLButtonDrawMoniker: the moniker at the insets (one more right and
+ * bottom on black and white, but for system icons, the menu bar and
+ * toolboxes), centered or clipped as the button says
+ */
+void OLButtonDrawMoniker(optr oself, GStateHandle gs, DrawMonikerFlags f,
+			 OLMonikerAttrs attrs, word xInset, word yInset)
+{
+    OpenMonikerArgs a;
+    OLButtonInstance *b = Btn(oself);
+    optr g;
+
+    memset(&a, 0, sizeof(a));
+    a.OMA_gState = gs;
+    a.OMA_drawMonikerFlags = f;
+    a.OMA_monikerAttrs = attrs;
+    a.OMA_leftInset = xInset;
+    a.OMA_topInset = yInset;
+    if (!(b->OLBI_specState & (OLBSS_SYS_ICON | OLBSS_IN_MENU_BAR)) &&
+	!(b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) && OpenCheckIfBW()) {
+	xInset++;
+	yInset++;
+    }
+    a.OMA_rightInset = xInset;
+    a.OMA_bottomInset = yInset;
+    if (b->OLBI_moreAttrs & OLBMA_CENTER_MONIKER)
+	a.OMA_drawMonikerFlags |= J_CENTER << DMF_X_JUST_OFFSET;
+    if ((b->OLBI_specState & (OLBSS_MENU_DOWN_MARK | OLBSS_MENU_RIGHT_MARK)) ||
+	(b->OLBI_moreAttrs & (OLBMA_CAN_CLIP_MONIKER_WIDTH |
+			      OLBMA_CAN_CLIP_MONIKER_HEIGHT)))
+	a.OMA_drawMonikerFlags |= DMF_CLIP_TO_MAX_WIDTH;
+    g = ConstructOptr(OptrToHandle(oself), b->OLBI_genChunk);
+    OpenDrawMoniker(oself, g, &a);
+}
+
+@extern method OLButtonClass, MSG_OL_BUTTON_SET_DRAW_STATE_UNKNOWN
+{
+    pself->OLBI_optFlags &= ~OLBOF_DRAW_STATE_KNOWN;
+}
+
+@extern method OLButtonClass, MSG_OL_BUTTON_GET_GEN_PART
+{
+    return ConstructOptr(OptrToHandle(oself), pself->OLBI_genChunk);
+}

@@ -1,0 +1,12 @@
+/*
+ * cspecTrigger.goc -- the build routine of GenTriggerClass (after
+ * cspecTrigger.asm): a GenTrigger is an OLButton.
+ */
+@include "cGeode.goh"
+
+ClassStruct *OLBuildTrigger(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLButtonClass;
+}

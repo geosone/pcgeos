@@ -25,8 +25,7 @@ resource PointerImages lmem read-only shared
 #
 # Export routines called by UI, by offset (*must* be first)
 #
-skip 1
-# OLBuildTrigger
+export OLBuildTrigger
 skip 1
 # OLBuildDisplay
 export OLBuildApplication
@@ -70,3 +69,4 @@ export OLTitleGroupClass
 export OLPopupWinClass
 export OLDialogWinClass
 export OLReplyBarClass
+export OLButtonClass

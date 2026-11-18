@@ -21,12 +21,17 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CUtils/copenAppAttDet.goc
                ${c}/CUtils/copenAppCommon.goc
                ${c}/CUtils/copenAppMisc.goc
+               ${c}/CUtils/copenMoniker.goc
                ${c}/CComp/copenCtrlClass.goc
                ${c}/CComp/copenCtrlGeometry.goc
                ${c}/CComp/copenCtrlCommon.goc
                ${c}/CComp/copenGadgetArea.goc
                ${c}/CComp/copenTitleGroup.goc
                ${c}/CComp/copenReplyBar.goc
+               ${c}/CButton/copenButtonBuild.goc
+               ${c}/CButton/copenButtonClass.goc
+               ${c}/CButton/copenButtonCommon.goc
+               ${c}/CButton/copenButtonColor.goc
                ${c}/CWin/cwinScreen.goc
                ${c}/CWin/cwinField.goc
                ${c}/CWin/cwinClassCommonHigh.goc
@@ -46,6 +51,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CSpec/cspecApplication.goc
                ${c}/CSpec/cspecPrimary.goc
                ${c}/CSpec/cspecInteraction.goc
+               ${c}/CSpec/cspecTrigger.goc
            INCLUDES ${c}
            PROTOCOL 727.0)
 set(motif_GEO ${motif_GEO} PARENT_SCOPE)

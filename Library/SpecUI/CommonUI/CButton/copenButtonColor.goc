@@ -1,0 +1,330 @@
+/*
+ * copenButtonColor.goc -- OLButtonClass (after copenButtonColor.asm):
+ * a button drawn in color.  The light background, the etched border
+ * (white over dark, black over white when depressed; 50% when
+ * disabled; the light color when not bordered), the interior in the
+ * background color (the selected one when depressed), the moniker in
+ * the text color.  When only the border changed it alone is drawn.
+ *
+ * The regions are copenButtonData.asm's (Motif, DOUBLE_BORDERED_GADGETS)
+ * with their bounds, as the video driver takes them (PARAM_2 the
+ * width, PARAM_3 the height, at the pen).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the menu marks
+ * (DrawColorButtonMenuMark's bitmaps), a reply popup's default trigger
+ * (OLBSS_DEFAULT_TRIGGER: InsetBoundsIfReplyPopup).
+ */
+@include "cGeode.goh"
+
+#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
+
+#define MO_BUTTON_INSET_Y		3
+#define MO_REPLY_BUTTON_INSET_X		MO_BUTTON_INSET_X
+#define MO_REPLY_BUTTON_INSET_Y		MO_BUTTON_INSET_Y
+#define BUTTON_TOOLBOX_X_INSET		2
+#define BUTTON_TOOLBOX_Y_INSET		2
+#define RX	MO_REPLY_BUTTON_INSET_X
+#define RY	MO_REPLY_BUTTON_INSET_Y
+#define W	PARAM_2
+#define H	PARAM_3
+
+/* the bounds of every region */
+#define BOUNDS	0, 0, W - 1, H - 1
+
+static const Region borderLT[] = {
+    BOUNDS,
+    (Region) -1,				EOREGREC,
+    0,		0, W - 1,			EOREGREC,
+    1,		0, W - 2,			EOREGREC,
+    H - 3,	0, 1,				EOREGREC,
+    H - 2,	0, 0,				EOREGREC,
+    EOREGREC
+};
+
+static const Region borderRB[] = {
+    BOUNDS,
+    0,						EOREGREC,
+    1,		W - 1, W - 1,			EOREGREC,
+    H - 3,	W - 2, W - 1,			EOREGREC,
+    H - 2,	1, W - 1,			EOREGREC,
+    H - 1,	0, W - 1,			EOREGREC,
+    EOREGREC
+};
+
+static const Region interior[] = {
+    BOUNDS,
+    1,						EOREGREC,
+    H - 3,	2, W - 3,			EOREGREC,
+    EOREGREC
+};
+
+static const Region defInterior[] = {
+    BOUNDS,
+    0,						EOREGREC,
+    H - 2,	1, W - 2,			EOREGREC,
+    EOREGREC
+};
+
+static const Region replyDefBorderLT[] = {
+    BOUNDS,
+    0,						EOREGREC,
+    RY - 1,	W - 1, W - 1,			EOREGREC,
+    RY,		RX, W - RX - 2, W - 1, W - 1,	EOREGREC,
+    RY + 1,	RX, W - RX - 3, W - 1, W - 1,	EOREGREC,
+    H - RY - 2,	RX, RX + 1, W - 1, W - 1,	EOREGREC,
+    H - RY - 1,	RX, RX, W - 1, W - 1,		EOREGREC,
+    H - 2,	W - 1, W - 1,			EOREGREC,
+    H - 1,	0, W - 1,			EOREGREC,
+    EOREGREC
+};
+
+static const Region replyDefBorderRB[] = {
+    BOUNDS,
+    (Region) -1,				EOREGREC,
+    0,		0, W - 1,			EOREGREC,
+    RY - 1,	0, 0,				EOREGREC,
+    RY,		0, 0, W - RX - 1, W - RX - 1,	EOREGREC,
+    H - RY - 3,	0, 0, W - RX - 2, W - RX - 1,	EOREGREC,
+    H - RY - 2,	0, 0, RX + 2, W - RX - 1,	EOREGREC,
+    H - RY - 1,	0, 0, RX + 1, W - RX - 1,	EOREGREC,
+    H - 1,	0, 0,				EOREGREC,
+    EOREGREC
+};
+
+static const Region replyInterior[] = {
+    BOUNDS,
+    RY + 1,					EOREGREC,
+    H - RY - 3,	RX + 2, W - RX - 3,		EOREGREC,
+    EOREGREC
+};
+
+static const Region replyBorderLT[] = {
+    BOUNDS,
+    RY - 1,					EOREGREC,
+    RY,		RX, W - RX - 2,			EOREGREC,
+    RY + 1,	RX, W - RX - 3,			EOREGREC,
+    H - RY - 2,	RX, RX + 1,			EOREGREC,
+    H - RY - 1,	RX, RX,				EOREGREC,
+    EOREGREC
+};
+
+static const Region replyBorderRB[] = {
+    BOUNDS,
+    RY,						EOREGREC,
+    RY + 1,	W - RX - 1, W - RX - 1,		EOREGREC,
+    H - RY - 3,	W - RX - 2, W - RX - 1,		EOREGREC,
+    H - RY - 2,	RX + 2, W - RX - 1,		EOREGREC,
+    H - RY - 1,	RX + 1, W - RX - 1,		EOREGREC,
+    EOREGREC
+};
+
+/* ColorButtonRegions */
+typedef struct {
+    const Region	*CBR_leftTop;
+    const Region	*CBR_rightBottom;
+    const Region	*CBR_interior;
+} ColorButtonRegions;
+
+static const ColorButtonRegions normalCBR = { borderLT, borderRB, interior };
+static const ColorButtonRegions defaultCBR = {
+    borderLT, borderRB, defInterior		/* CBRdefBorder*: the same */
+};
+static const ColorButtonRegions replyNormalCBR = {
+    replyBorderLT, replyBorderRB, replyInterior
+};
+static const ColorButtonRegions replyDefaultCBR = {
+    replyDefBorderLT, replyDefBorderRB, replyInterior
+};
+
+/* OLButtonMovePenCalcSize: the pen at the top left, the size */
+static void MovePenCalcSize(optr oself, GStateHandle gs, word *w, word *h)
+{
+    OLButtonInstance *b = Btn(oself);
+
+    GrMoveTo(gs, b->VI_bounds.R_left, b->VI_bounds.R_top);
+    *w = (word) (b->VI_bounds.R_right - b->VI_bounds.R_left);
+    *h = (word) (b->VI_bounds.R_bottom - b->VI_bounds.R_top);
+}
+
+static void DrawRegion(GStateHandle gs, const Region *r, Color c, word w,
+		       word h)
+{
+    GrSetAreaColor(gs, CF_INDEX, c, 0, 0);
+    GrDrawRegionAtCP(gs, r, 0, 0, w, h);
+}
+
+/*
+ * DrawColorButtonBorder: bordered: white left and top, dark right and
+ * bottom (depressed: black and white), 50% if disabled; not bordered:
+ * erased in the light color (unless exposed)
+ */
+static void DrawBorder(optr oself, GStateHandle gs,
+		       const ColorButtonRegions *cbr, DrawFlags df,
+		       word w, word h)
+{
+    OLButtonSpecState s = Btn(oself)->OLBI_specState;
+    Color lt, rb;
+
+    if (!(s & OLBSS_BORDERED)) {
+	if (df & DF_EXPOSED)
+	    return;
+	lt = rb = moCS_dsLightColor;
+    } else {
+	if (!OpenButtonCheckIfFullyEnabled(oself))
+	    GrSetAreaMaskSys(gs, SDM_50);
+	if (s & OLBSS_DEPRESSED) {
+	    lt = C_BLACK;
+	    rb = C_WHITE;
+	} else {
+	    lt = C_WHITE;
+	    rb = moCS_dsDarkColor;
+	}
+    }
+    DrawRegion(gs, cbr->CBR_leftTop, lt, w, h);
+    DrawRegion(gs, cbr->CBR_rightBottom, rb, w, h);
+    GrSetAreaMaskSys(gs, SDM_100);
+}
+
+/*
+ * DrawColorButtonBackground: not exposed and the look changed (or not
+ * known): the bounds in the light color
+ */
+static void DrawBackground(optr oself, GStateHandle gs, DrawFlags df,
+			   OLButtonOptFlags old)
+{
+    OLButtonInstance *b = Btn(oself);
+    Rectangle r;
+
+    if (df & DF_EXPOSED)
+	return;
+    if ((old & OLBOF_DRAW_STATE_KNOWN) &&
+	!((b->VI_attrs ^ old) & OLBOF_ENABLED) &&
+	!(((byte) b->OLBI_specState ^ old) &
+	  (OLBSS_BORDERED | OLBSS_DEFAULT | OLBSS_DEPRESSED |
+	   OLBSS_SELECTED)))
+	return;
+    GrSetAreaColor(gs, CF_INDEX, moCS_dsLightColor, 0, 0);
+    VisGetBounds(oself, &r);
+    GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+}
+
+/*
+ * DrawColorButtonInterior: in the background color (the selected one
+ * when depressed); a second color over it at 50%
+ */
+static void DrawInterior(optr oself, GStateHandle gs,
+			 const ColorButtonRegions *cbr, word w, word h)
+{
+    OLButtonInstance *b = Btn(oself);
+    Boolean dep = (b->OLBI_specState & OLBSS_DEPRESSED) != 0;
+    optr g = ConstructOptr(OptrToHandle(oself), b->OLBI_genChunk);
+    word cc = OpenGetBackgroundColor(g, dep);
+    Color c1 = (Color) (cc & 0xff), c2 = (Color) (cc >> 8);
+
+    DrawRegion(gs, cbr->CBR_interior, c1, w, h);
+    if (c1 != c2) {
+	GrSetAreaMaskSys(gs, SDM_50);
+	DrawRegion(gs, cbr->CBR_interior, c2, w, h);
+	GrSetAreaMaskSys(gs, SDM_100);
+    }
+}
+
+/*
+ * OLButtonSetDrawColors: 50% if disabled; the text color
+ * (HINT_GADGET_TEXT_COLOR, else black, white when depressed but in a
+ * toolbox with a light selection) for text, lines and areas
+ */
+static void SetDrawColors(optr oself, GStateHandle gs)
+{
+    OLButtonInstance *b = Btn(oself);
+    optr g = ConstructOptr(OptrToHandle(oself), b->OLBI_genChunk);
+    TextColors *tc;
+    Color c, unsel = C_BLACK, sel = C_BLACK;
+
+    if (!OpenButtonCheckIfFullyEnabled(oself)) {
+	GrSetAreaMaskSys(gs, SDM_50);
+	GrSetTextMaskSys(gs, SDM_50);
+	GrSetLineMaskSys(gs, SDM_50);
+    }
+    if (OpenGetTextColor(g, &unsel)) {
+	tc = ObjVarFindData(g, HINT_GADGET_TEXT_COLOR);
+	sel = tc ? tc->TC_selectedColor : unsel;
+    } else if (!(Btn(oself)->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) ||
+	       moCS.CSV_selBkgdColor == C_DARK_GREY ||
+	       moCS.CSV_selBkgdColor == C_BLACK)
+	sel = C_WHITE;
+    c = (Btn(oself)->OLBI_specState & OLBSS_DEPRESSED) ? sel : unsel;
+    GrSetTextColor(gs, CF_INDEX, c, 0, 0);
+    GrSetLineColor(gs, CF_INDEX, c, 0, 0);
+    GrSetAreaColor(gs, CF_INDEX, c, 0, 0);
+}
+
+/*
+ * DrawColorButton: the border alone if only it changed (but for a menu
+ * button with a mouse); else the background, border, interior, the
+ * colors, the monochrome bitmap color and the moniker (left, centered
+ * vertically, at the button's insets: none for a system icon, the
+ * toolbox's, the reply bar's added)
+ */
+void DrawColorButton(optr oself, GStateHandle gs, DrawFlags df,
+		     OLButtonOptFlags old)
+{
+    OLButtonInstance *b = Btn(oself);
+    const ColorButtonRegions *cbr;
+    OLMonikerAttrs at;
+    word w, h, x, y;
+    Color mono;
+
+    if (b->OLBI_fixedAttrs & (OLBFA_IN_REPLY_BAR |
+			      OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER))
+	cbr = (b->OLBI_specState & OLBSS_DEFAULT) ? &replyDefaultCBR
+						  : &replyNormalCBR;
+    else
+	cbr = (b->OLBI_specState & OLBSS_DEFAULT) ? &defaultCBR : &normalCBR;
+    if (!(df & DF_EXPOSED) &&
+	(((byte) b->OLBI_specState ^ old) & OLBOF_DRAWN_BORDERED) &&
+	(!(b->OLBI_specState & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR)) ||
+	 !OpenCheckIfKeyboardOnly())) {
+	MovePenCalcSize(oself, gs, &w, &h);
+	DrawBorder(oself, gs, cbr, df, w, h);
+	return;
+    }
+    DrawBackground(oself, gs, df, old);
+    MovePenCalcSize(oself, gs, &w, &h);
+    DrawBorder(oself, gs, cbr, df, w, h);
+    DrawInterior(oself, gs, cbr, w, h);
+    SetDrawColors(oself, gs);
+    b = Btn(oself);
+    if (!(b->VI_attrs & VA_FULLY_ENABLED))
+	mono = moCS_dsDarkColor;
+    else
+	mono = (b->OLBI_specState & OLBSS_DEPRESSED) ? C_WHITE : C_BLACK;
+    GrSetAreaColor(gs, CF_INDEX, mono, 0, 0);
+    at = OLButtonSetupMonikerAttrs(oself);
+    if ((at & OLMA_DISP_SELECTION_CURSOR) &&
+	!(at & OLMA_SELECTION_CURSOR_ON)) {
+	if (at & OLMA_USE_TOOLBOX_SELECTION_CURSOR)
+	    at &= ~(OLMA_DISP_SELECTION_CURSOR | OLMA_SELECTION_CURSOR_ON |
+		    OLMA_USE_LIST_SELECTION_CURSOR |
+		    OLMA_USE_CHECKBOX_SELECTION_CURSOR);
+	else
+	    at |= OLMA_LIGHT_COLOR_BACKGROUND;
+    }
+    b = Btn(oself);
+    x = y = 0;
+    if (!(b->OLBI_specState & OLBSS_SYS_ICON)) {
+	x = MO_BUTTON_INSET_X;
+	if (b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) {
+	    x = BUTTON_TOOLBOX_X_INSET;
+	    y = BUTTON_TOOLBOX_Y_INSET;
+	}
+    }
+    if (b->OLBI_fixedAttrs & (OLBFA_IN_REPLY_BAR |
+			      OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER)) {
+	x += MO_REPLY_BUTTON_INSET_X;
+	y += MO_REPLY_BUTTON_INSET_Y;
+    }
+    OLButtonDrawMoniker(oself, gs,
+			(J_LEFT << DMF_X_JUST_OFFSET) |
+			(J_CENTER << DMF_Y_JUST_OFFSET), at, x, y);
+}
