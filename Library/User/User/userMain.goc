@@ -213,6 +213,13 @@ void UserSetDefaultInputMap(void)
 
 
 optr uiFlowObj;
+
+/* UserCallFlow's object (Port32) */
+optr UserGetFlowObject(void)
+{
+    return uiFlowObj;
+}
+
 static word uiAckID;
 static optr uiAckOD;
 

@@ -132,6 +132,10 @@ export UserGetInterfaceOptions
 export UserLoadApplication
 export UserAllocObjBlock
 export UserScreenRegister
+export UserGetFlowObject
+export UserGetSystemObject
+export UserSetDefaultMonikerFont
+export UserGetDefaultMonikerFont
 
 resource ApplicationUI object
 resource SystemFieldUI object

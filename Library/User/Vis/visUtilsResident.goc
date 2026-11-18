@@ -574,11 +574,29 @@ void VisTakeGadgetExclAndGrab(optr obj)
  * Monikers
  * ------------------------------------------------------------------- */
 
-/* UserGetDefaultMonikerFont: the system font (Berkeley 10 for now) */
+/* the UI's moniker font (userUtils.asm: uiDefaultMonikerFont and
+ * uiDefaultMonikerPointSize), set by the specific UI from its display
+ * scheme; Berkeley 10 until then */
+static FontID uiDefaultMonikerFont = FID_BERKELEY;
+static word uiDefaultMonikerPointSize = 10;
+
+void UserSetDefaultMonikerFont(FontID id, word pointSize)
+{
+    uiDefaultMonikerFont = id;
+    uiDefaultMonikerPointSize = pointSize;
+}
+
+/* UserGetDefaultMonikerFont: the UI's moniker font (the asm asked for an
+ * object; every object has the same) */
+void UserGetDefaultMonikerFont(FontID *id, word *pointSize)
+{
+    *id = uiDefaultMonikerFont;
+    *pointSize = uiDefaultMonikerPointSize;
+}
+
 static void DefaultMonikerFont(FontID *id, word *size)
 {
-    *id = FID_BERKELEY;
-    *size = 10;
+    UserGetDefaultMonikerFont(id, size);
 }
 
 /* GetMonikerSizeCommon: the cached width and height of the moniker,

@@ -18,7 +18,8 @@
  *   - the handlers of the specific part of a generic object (the
  *     MSG_SPEC_* messages, after visSpec.asm) are at the end; their
  *     routines are in visSpec.goc;
- *   - MSG_VIS_VUP_QUERY passes on no registers: it only goes up;
+ *   - MSG_VIS_VUP_QUERY goes up with its query
+ *     (MSG_VIS_P32_VUP_QUERY, Internal/specC.goh);
  *   - MSG_VIS_CALL_ROUTINE (registers and a far routine) is not handled
  *     yet.
  */
@@ -893,10 +894,16 @@ void VisRemove(optr obj, VisUpdateMode mode)
     return found;
 }
 
-/* VisVisVupQuery: up the tree (no registers to pass on in Port32) */
-@method VisClass, MSG_VIS_VUP_QUERY
+/* VisVisVupQuery: up the tree, unanswered at the top */
+@method VisClass, MSG_VIS_P32_VUP_QUERY
 {
-    VisCallParent(oself, MSG_VIS_VUP_QUERY, NULL, 0, NULL, 0);
+    optr p = VisFindParent(oself);
+
+    if (!p) {
+	memset(retValue, 0, sizeof(*retValue));
+	return FALSE;
+    }
+    return @call p::MSG_VIS_P32_VUP_QUERY(retValue, queryType, data1, data2);
 }
 
 @method VisClass, MSG_VIS_FIND_PARENT
@@ -1194,6 +1201,43 @@ out:
 				VTF_IS_WIN_GROUP);
     if (up)
 	@call up::MSG_META_MUP_ALTER_FTVMC_EXCL(objectWantingControl, flags);
+}
+
+/* the object grabs or releases an exclusive from the node above
+ * (MetaGrabFocusExclLow and the others, as the asm's VisClass) */
+@method VisClass, MSG_META_GRAB_FOCUS_EXCL
+{
+    MetaGrabFocusExclLow(oself);
+}
+
+@method VisClass, MSG_META_RELEASE_FOCUS_EXCL
+{
+    MetaReleaseFocusExclLow(oself);
+}
+
+@method VisClass, MSG_META_GRAB_TARGET_EXCL
+{
+    MetaGrabTargetExclLow(oself);
+}
+
+@method VisClass, MSG_META_RELEASE_TARGET_EXCL
+{
+    MetaReleaseTargetExclLow(oself);
+}
+
+@method VisClass, MSG_META_GRAB_MODEL_EXCL
+{
+    MetaGrabModelExclLow(oself);
+}
+
+@method VisClass, MSG_META_RELEASE_MODEL_EXCL
+{
+    MetaReleaseModelExclLow(oself);
+}
+
+@method VisClass, MSG_META_RELEASE_FT_EXCL
+{
+    MetaReleaseFTExclLow(oself);
 }
 
 /* VisFupQueryFocusExcl: asked of the input node or win group above */
