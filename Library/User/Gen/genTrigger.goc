@@ -1,0 +1,109 @@
+/*
+ * genTrigger.goc -- GenTriggerClass (after genTrigger.asm): a generic
+ * object that sends its action (GTI_actionMsg to GTI_destination) when
+ * activated.  What it looks like is the specific UI's
+ * (SPIR_BUILD_TRIGGER).  A trigger with no destination and an
+ * ATTR_GEN_TRIGGER_INTERACTION_COMMAND sends that command up to its
+ * interaction instead.
+ *
+ * Port32 (Port32/ABI.md section 13y): the action's parameters are a
+ * structure, as goc -cg passes them: the trigger's optr
+ * (GEN_TRIGGER_ACTION), or ATTR_GEN_TRIGGER_ACTION_DATA as it is (its
+ * size the structure's).  Not yet: MSG_GEN_BRANCH_REPLACE_PARAMS
+ * (BRPT_OUTPUT_OPTR).
+ */
+@include "uiInt.goh"
+@include <Objects/gTrigC.goh>
+
+@classdecl GenTriggerClass;
+
+static void CallSpecIfGrown(optr oself, Message msg, const void *p, word ps)
+{
+    if (GenCheckIfSpecGrown(oself))
+	CObjCallSuperP(&GenClass, oself, msg, p, ps, NULL, 0);
+}
+
+@method GenTriggerClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_TRIGGER, MasterOffset);
+}
+
+/*
+ * GenTriggerSendMessage: usable and enabled: the generic attributes'
+ * work before; the interaction command (no destination), or the action
+ * message (on a double press ATTR_GEN_TRIGGER_CUSTOM_DOUBLE_PRESS's)
+ * with ATTR_GEN_TRIGGER_ACTION_DATA (the action message only) or the
+ * trigger as parameters, through MSG_GEN_OUTPUT_ACTION; the work after
+ */
+@method GenTriggerClass, MSG_GEN_TRIGGER_SEND_ACTION
+{
+    Message msg;
+    Message *dp;
+    InteractionCommand *ic;
+    optr dest, self = oself;
+    const void *params = &self;
+    word size = sizeof(self);
+    void *data;
+    EventHandle ev;
+    MemHandle mh = OptrToHandle(oself);
+    ChunkHandle ch = OptrToChunk(oself);
+
+    if ((pself->GI_states & (GS_ENABLED | GS_USABLE)) !=
+	(GS_ENABLED | GS_USABLE))
+	return;
+    msg = pself->GTI_actionMsg;
+    if (doublePressFlag &&
+	(dp = ObjVarFindData(oself, ATTR_GEN_TRIGGER_CUSTOM_DOUBLE_PRESS))
+	!= NULL)
+	msg = *dp;
+    GenProcessGenAttrsBeforeAction(mh, ch);
+    pself = ObjDerefGen(oself);
+    dest = pself->GTI_destination;
+    if (!dest &&
+	(ic = ObjVarFindData(oself, ATTR_GEN_TRIGGER_INTERACTION_COMMAND))
+	!= NULL &&
+	(VarDataFlagsPtr(ic) & VDF_EXTRA_DATA)) {
+	(void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(*ic);
+	GenProcessGenAttrsAfterAction(mh, ch);
+	return;
+    }
+    if (msg == pself->GTI_actionMsg &&
+	(data = ObjVarFindData(oself, ATTR_GEN_TRIGGER_ACTION_DATA)) != NULL) {
+	params = data;
+	size = VarDataSizePtr(data);
+    }
+    /* GenProcessAction: the event recorded, sent on by the output */
+    CObjMessageP(MF_RECORD, 0, msg, params, size, &ev, sizeof(ev));
+    @call oself::MSG_GEN_OUTPUT_ACTION(ev, dest);
+    GenProcessGenAttrsAfterAction(mh, ch);
+}
+
+@method GenTriggerClass, MSG_GEN_TRIGGER_GET_ACTION_MSG
+{
+    return pself->GTI_actionMsg;
+}
+
+/* GenTriggerSetMessage: stored (dirty if it changed), the specific
+ * part told */
+@method GenTriggerClass, MSG_GEN_TRIGGER_SET_ACTION_MSG
+{
+    if (pself->GTI_actionMsg != actionMsg) {
+	pself->GTI_actionMsg = actionMsg;
+	ObjMarkDirty(oself);
+    }
+    CallSpecIfGrown(oself, MSG_GEN_TRIGGER_SET_ACTION_MSG, &actionMsg,
+		    sizeof(actionMsg));
+}
+
+@method GenTriggerClass, MSG_GEN_TRIGGER_SET_DESTINATION
+{
+    if (pself->GTI_destination != dest) {
+	pself->GTI_destination = dest;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenTriggerClass, MSG_GEN_TRIGGER_GET_DESTINATION
+{
+    return pself->GTI_destination;
+}

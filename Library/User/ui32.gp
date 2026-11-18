@@ -29,6 +29,7 @@ export GenApplicationClass
 export GenFieldClass
 export GenScreenClass
 export GenSystemClass
+export GenTriggerClass
 export GenInteractionClass
 export GenDisplayClass
 export GenPrimaryClass

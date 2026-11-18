@@ -26,7 +26,7 @@
 
 @message void MSG_GEN_TRIGGER_SEND_ACTION(Boolean doublePressFlag = cl); /*XXX*/
 @message Message MSG_GEN_TRIGGER_GET_ACTION_MSG() = cx;	/*XXX*/
-@message void MSG_GEN_TRIGGER_SET_ACTION_MSG(Message message = cx);	/*XXX*/
+@message void MSG_GEN_TRIGGER_SET_ACTION_MSG(Message actionMsg = cx);	/*XXX*/
 @message void MSG_GEN_TRIGGER_SET_DESTINATION(optr dest = cx:dx);  /*XXX*/
 @message optr MSG_GEN_TRIGGER_GET_DESTINATION() = cx:dx;   /*XXX*/
 @message void MSG_GEN_TRIGGER_MAKE_DEFAULT_ACTION();   /*XXX*/
