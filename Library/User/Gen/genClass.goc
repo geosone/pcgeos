@@ -616,18 +616,36 @@ static void MonikerArgs(DrawMonikerArgs *a, word textHeight,
 }
 
 /*
- * GenFindMoniker: the moniker itself if it is not a list (or there is
- * none: 0).  Port32: a list (and the application's) not yet.
+ * GenFindMoniker: the moniker of the object (or of the application,
+ * when its object block is run by this thread) if it is not a list;
+ * VMSF_COPY_CHUNK: a copy in destBlock.  0 if none.  Port32: a list
+ * (choosing by VisMonikerSearchFlags, VMSF_REPLACE_LIST) not yet.
  */
 @method GenClass, MSG_GEN_FIND_MONIKER
 {
-    ChunkHandle m = pself->GI_visMoniker;
+    optr src = oself, r = 0;
+    MemHandle sh;
+    ChunkHandle m;
 
-    (void) destBlock;
-    (void) searchFlags;
-    if (useAppMonikerList || !m)
+    if (useAppMonikerList) {
+	src = GeodeGetAppObject(0);
+	if (!src || !ObjTestIfObjBlockRunByCurThread(OptrToHandle(src)))
+	    return 0;
+    }
+    sh = OptrToHandle(src);
+    ObjLockObjBlock(sh);
+    m = ((GenInstance *) ObjDerefGen(src))->GI_visMoniker;
+    if (m && ((VisMoniker *) LMemDeref(ConstructOptr(sh, m)))->VM_type &
+	VMT_MONIKER_LIST)
+	m = 0;
+    MemUnlock(sh);
+    if (!m)
 	return 0;
-    return ConstructOptr(OptrToHandle(oself), m);
+    if ((searchFlags & VMSF_COPY_CHUNK) && destBlock)
+	r = ConstructOptr(destBlock, GenCopyChunk(destBlock, sh, m, 0));
+    else
+	r = ConstructOptr(sh, m);
+    return r;
 }
 
 /* GenFindKbdAccelerator: the specific part, then the accelerator, then
