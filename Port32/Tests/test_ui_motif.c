@@ -63,7 +63,13 @@
  *      up with its item, released on the button it stays up; the other
  *      button closes it and opens its own; a press outside closes a
  *      menu in stay up mode (replayed); activated, up in stay up mode;
- *      complete, down, the button as it was.
+ *      complete, down, the button as it was;
+ *  20. the mouse in a window: a press starts its grab and, on the
+ *      title, a move (a click moves nothing, dragged and released it
+ *      moves); on the bottom right corner a resize; all buttons up the
+ *      grab ends; the pointer in and out of it; a sub menu's button
+ *      with its right mark, its pixels checked here;
+ *  21. the menu down, the primary not usable.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -91,6 +97,7 @@ typedef struct {
     word		UMS_triggered;
     optr		UMS_trigger;
     word		UMS_trigData;
+    short		UMS_markX, UMS_markY;
 } UMState;
 
 static int fails;
@@ -113,6 +120,8 @@ static void Check(int ok, int line, const char *what)
 /* the standard palette */
 #define BLUE	0x0000aaUL
 #define GREEN	0x00aa00UL
+#define DARK_GREY	0x555555UL
+#define WHITE	0xffffffUL
 
 static unsigned long Pixel(int x, int y)
 {
@@ -191,11 +200,31 @@ int main(void)
     step(17);
     step(18);
     step(19);
+    step(20);
+    /* the sub menu's right mark: the dark part (row 4, columns 9 and
+     * 10), the light part in white (row 1, columns 3 and 4) */
+    WAIT_FOR(Pixel(st->UMS_markX + 3, st->UMS_markY) == WHITE ||
+	     Pixel(st->UMS_markX + 3, st->UMS_markY + 1) == WHITE);
+    /* the sub menu's right mark: the dark part (row 4, columns 9 and
+     * 10) in the dark grey, the light part (row 1, columns 3 and 4) in
+     * white; the row found within one of the center */
+    for (i = -1; i <= 1; i++)
+	if (Pixel(st->UMS_markX + 9, st->UMS_markY + 4 + i) == DARK_GREY)
+	    break;
+    printf("mark at %d,%d (row %+d)\n", st->UMS_markX, st->UMS_markY, i);
+    CHECK(i <= 1);
+    CHECK(Pixel(st->UMS_markX + 9, st->UMS_markY + 4 + i) == DARK_GREY &&
+	  Pixel(st->UMS_markX + 10, st->UMS_markY + 4 + i) == DARK_GREY &&
+	  Pixel(st->UMS_markX + 8, st->UMS_markY + 4 + i) != DARK_GREY);
+    CHECK(Pixel(st->UMS_markX + 3, st->UMS_markY + 1 + i) == WHITE &&
+	  Pixel(st->UMS_markX + 4, st->UMS_markY + 1 + i) == WHITE &&
+	  Pixel(st->UMS_markX + 5, st->UMS_markY + 1 + i) != WHITE);
+    step(21);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 259 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 277 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

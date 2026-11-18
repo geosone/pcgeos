@@ -42,6 +42,7 @@ typedef struct {
     word		UMS_triggered;		/* actions of the triggers */
     optr		UMS_trigger;		/* the last one's trigger */
     word		UMS_trigData;		/* ATTR_GEN_TRIGGER_ACTION_DATA */
+    sword		UMS_markX, UMS_markY;	/* a sub menu's mark (screen) */
 } UMState;
 
 UMState umState;
@@ -247,7 +248,7 @@ UMState umState;
     GI_comp = @UMEditMenu, @UMViewMenu;
 }
 @object GenInteractionClass UMEditMenu = {
-    GI_comp = @UMCopy;
+    GI_comp = @UMCopy, @UMMoreMenu;
     GII_visibility = GIV_POPUP;
     ATTR_GEN_INTERACTION_GROUP_TYPE = GIGT_EDIT_MENU;
 }
@@ -255,6 +256,10 @@ UMState umState;
     GI_visMoniker = "Copy";
     GTI_destination = process;
     GTI_actionMsg = MSG_UM_TRIGGERED;
+}
+@object GenInteractionClass UMMoreMenu = {
+    GI_visMoniker = "More";
+    GII_visibility = GIV_POPUP;
 }
 @object GenInteractionClass UMViewMenu = {
     GI_visMoniker = "View";
@@ -1345,6 +1350,131 @@ static word Slot(byte req, sword *x, sword *y)
 	VisData(eb, &b, sizeof(b));
 	UMCHECK(!(b.OLMBI_specState & OLMBSS_POPUP_OPEN) &&
 		!(b.OLBI_specState & OLBSS_BORDERED));
+	@call UMMenuPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	break;
+    }
+    case 20: {
+	/* the mouse in a window (cwinPtr): a press starts the window's
+	 * grab (post-passive) and, not taken on the title, a move: a
+	 * click without a drag moves nothing, dragged and released the
+	 * window moves by the pointer's way; on the bottom right corner
+	 * a resize of the two edges; all buttons up the grab ends; the
+	 * pointer in the window watches for a press (pre-passive); a sub
+	 * menu's button with its right mark (the test checks its pixels) */
+	OLWinInstance w;
+	OLMenuButtonInstance b;
+	OLMenuWinInstance m;
+	MouseReturnParams mr;
+	Rectangle r0;
+	sword tx, ty, wd, ht;
+	word sel = (UIFA_SELECT | UIFA_IN) << 8;
+	optr sb;
+	XYValueAsDWord s;
+
+	@call UMMenuPrim::MSG_GEN_SET_USABLE(VUM_NOW);
+	/* resizable as with a mouse (the test has none: keyboard only) */
+	ObjLockObjBlock(OptrToHandle(@UMMenuPrim));
+	((OLWinInstance *) ObjDerefVis(@UMMenuPrim))->OLWI_attrs |=
+	    OWA_RESIZABLE;
+	MemUnlock(OptrToHandle(@UMMenuPrim));
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK((w.VI_attrs & VA_REALIZED) && !(w.OLWI_specState &
+						 OLWSS_MAXIMIZED));
+	UMCHECK((w.OLWI_attrs & (OWA_MOVABLE | OWA_RESIZABLE | OWA_TITLED)) ==
+		(OWA_MOVABLE | OWA_RESIZABLE | OWA_TITLED));
+	r0 = w.VI_bounds;
+	tx = (w.OLWI_titleBarBounds.R_left + w.OLWI_titleBarBounds.R_right) / 2;
+	ty = (w.OLWI_titleBarBounds.R_top + w.OLWI_titleBarBounds.R_bottom) / 2;
+	@call UMMenuPrim::MSG_META_START_SELECT(&mr, tx, ty, sel | BI_PRESS);
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK((mr.flags & MRF_PROCESSED) &&
+		(w.OLWI_specState & OLWSS_GRABBED) &&
+		w.OLWI_moveResizeState == (OLWMRS_MOVING |
+					   OLWMRS_MOVE_RESIZE_PENDING));
+	@call UMMenuPrim::MSG_META_END_SELECT(&mr, tx, ty, sel);
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(!w.OLWI_moveResizeState &&
+		w.VI_bounds.R_left == r0.R_left && w.VI_bounds.R_top == r0.R_top);
+	/* all buttons up: the grab ends */
+	@call UMMenuPrim::MSG_META_POST_PASSIVE_BUTTON(&mr, tx, ty, 0);
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(!(w.OLWI_specState & OLWSS_GRABBED));
+
+	/* moved */
+	@call UMMenuPrim::MSG_META_START_SELECT(&mr, tx, ty, sel | BI_PRESS);
+	@call UMMenuPrim::MSG_META_DRAG_SELECT(&mr, tx, ty, sel);
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(w.OLWI_moveResizeState == OLWMRS_MOVING);
+	@call UMMenuPrim::MSG_META_END_SELECT(&mr, tx + 10, ty + 6, sel);
+	@call UMMenuPrim::MSG_META_POST_PASSIVE_BUTTON(&mr, tx, ty, 0);
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(!w.OLWI_moveResizeState &&
+		(w.OLWI_winPosSizeState & WPSS_HAS_MOVED_OR_RESIZED));
+	UMCHECK(w.VI_bounds.R_left == r0.R_left + 10 &&
+		w.VI_bounds.R_top == r0.R_top + 6 &&
+		w.VI_bounds.R_right == r0.R_right + 10 &&
+		w.VI_bounds.R_bottom == r0.R_bottom + 6);
+	r0 = w.VI_bounds;
+
+	/* resized at the bottom right corner */
+	wd = r0.R_right - r0.R_left;
+	ht = r0.R_bottom - r0.R_top;
+	@call UMMenuPrim::MSG_META_START_SELECT(&mr, wd - 2, ht - 2,
+						sel | BI_PRESS);
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(w.OLWI_moveResizeState == (OLWMRS_RESIZING_DOWN |
+					   OLWMRS_RESIZING_RIGHT |
+					   OLWMRS_MOVE_RESIZE_PENDING));
+	@call UMMenuPrim::MSG_META_DRAG_SELECT(&mr, wd - 2, ht - 2, sel);
+	@call UMMenuPrim::MSG_META_END_SELECT(&mr, wd + 18, ht + 8, sel);
+	@call UMMenuPrim::MSG_META_POST_PASSIVE_BUTTON(&mr, 0, 0, 0);
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(!w.OLWI_moveResizeState &&
+		!(w.OLWI_specState & OLWSS_GRABBED));
+	UMCHECK(w.VI_bounds.R_left == r0.R_left &&
+		w.VI_bounds.R_top == r0.R_top &&
+		w.VI_bounds.R_right == r0.R_right + 20 &&
+		w.VI_bounds.R_bottom == r0.R_bottom + 10);
+
+	/* the pointer in the window and out */
+	@call UMMenuPrim::MSG_META_RAW_UNIV_ENTER();
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(w.OLWI_specState & OLWSS_PTR_IN_RAW_UNIV);
+	@call UMMenuPrim::MSG_META_RAW_UNIV_LEAVE();
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(!(w.OLWI_specState & OLWSS_PTR_IN_RAW_UNIV));
+
+	/* the sub menu's button, in the Edit menu brought up */
+	VisData(@UMEditMenu, &m, sizeof(m));
+	sb = ConstructOptr(OptrToHandle(@UMEditMenu), m.OLPWI_button);
+	@call sb::MSG_GEN_ACTIVATE();
+	UMCHECK(InClass(@UMMoreMenu, (ClassStruct *) &OLMenuWinClass));
+	VisData(@UMMoreMenu, &m, sizeof(m));
+	UMCHECK(m.OLWI_type == MOWT_SUBMENU && m.OLPWI_button);
+	sb = ConstructOptr(OptrToHandle(@UMMoreMenu), m.OLPWI_button);
+	UMCHECK(@call sb::MSG_VIS_FIND_PARENT() == @UMEditMenu);
+	VisData(sb, &b, sizeof(b));
+	UMCHECK(b.OLMBI_popupType == MOWT_SUBMENU &&
+		(b.OLBI_specState & (OLBSS_MENU_RIGHT_MARK | OLBSS_IN_MENU)) ==
+		(OLBSS_MENU_RIGHT_MARK | OLBSS_IN_MENU) &&
+		(b.VI_attrs & VA_REALIZED));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	s = WinTransform(m.VCI_window,
+			 b.VI_bounds.R_right - (12 + 6),	/* the mark, inset */
+			 b.VI_bounds.R_top +
+			 (b.VI_bounds.R_bottom - b.VI_bounds.R_top -
+			  8) / 2);
+	umState.UMS_markX = (sword) DWORD_X(s);
+	umState.UMS_markY = (sword) DWORD_Y(s);
+	break;
+    }
+    case 21: {
+	/* the Edit menu down, the primary not usable */
+	OLMenuWinInstance m;
+
+	(void) @call UMEditMenu::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
 	@call UMMenuPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 	break;
     }

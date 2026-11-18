@@ -5466,7 +5466,23 @@ are left out), the constants, the variables and the routines.
     pressed again it closes it; activated the menu comes up in stay up
     mode. `OLButtonUseQueryResults`, `OLButtonSetToolboxBasedOnParent`,
     `OLButtonEnsureMouseGrab`, `OLButtonSaveBorderedAndDepressed` and
-    `OLButtonDrawNowIfNewState` are shared with it.
+    `OLButtonDrawNowIfNewState` are shared with it. The menu marks of
+    a button (down and right) are drawn from `copenData.asm`'s Motif
+    bitmaps, a dark and a light part (swapped when depressed).
+  - The mouse in a window (`CWin/cwinPtr.goc`, after `cwinPtr.asm`):
+    a press starts the window's grab (`MSG_OL_WIN_STARTUP_GRAB`: the
+    post-passive grab; all buttons up `MSG_OL_WIN_END_GRAB` ends it,
+    not for a menu in stay up mode) and goes to the child under the
+    pointer; a press no child takes on the resize border (the corners
+    an icon's size) or the title starts a resize or move, dragged the
+    xor frame follows (`ImStartMoveResize`, the frame region in the
+    `ResizeRegions` resource: the video driver locks it by handle and
+    offset), released the window moves (`MSG_VIS_MOVE_RESIZE_WIN`) or
+    its geometry is done again. The pointer image shows what a press
+    would start. The pre-passive grab while the pointer is in a window
+    (`MSG_META_RAW_UNIV_ENTER`) brings it to the top on a press; key
+    presses go to the window's focus. Menus start the grab when they
+    come up, as the asm.
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, the navigation
   (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons and the
@@ -5487,12 +5503,14 @@ are left out), the constants, the variables and the routines.
   keyboard accelerator text, the sounds (`UserStandardSound` is not in
   the C UI), the navigation (`VisNavigateCommon`) and
   `MSG_SPEC_CHECK_MNEMONIC`, the stay up menus released on activation,
-  `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `OLMenuWinClass`: the pushpin
+  `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `cwinPtr.goc`: moving and resizing by the keyboard
+  (the move/resize keys and their abort monitor, the system menu's
+  Move and Size), the toggle menu navigation, ink. In `OLMenuWinClass`: the pushpin
   (pinnable menus: the `PinMoniker` picture), the file menu's Exit
   trigger, cascading sub menus, the scrollers
   (`MenuWinScrollerClass`), menu separators, the keyboard, the remote
   gadget exclusive, the system and express menus, the menu centers,
-  the window's startup grab (`cwinPtr.asm`), menus in stay up mode
+  menus in stay up mode
   released through the application (`MSG_META_ENSURE_NO_MENUS_IN_
   STAY_UP_MODE` is answered by a menu, the generic tree does not pass
   it on). In `OLMenuButtonClass`: popup lists and the selection box,
@@ -5588,7 +5606,13 @@ are left out), the constants, the variables and the routines.
   button it stays up; the other button pressed closes it and opens its
   own; a press outside a menu in stay up mode closes it and is
   replayed; activated, the menu is up in stay up mode; complete it
-  goes and the button looks as before. The test loads no fonts, so monikers have no height
+  goes and the button looks as before. Then the mouse in a window
+  (made resizable: the test has no mouse, so the UI is keyboard only):
+  a click on the title moves nothing, a drag moves the window by the
+  pointer's way, a drag at the bottom right corner resizes it, all
+  buttons up end the grab; a sub menu's button in an open menu has its
+  right mark, whose pixels the test checks on the screen (it finds the
+  mark's row within one of the button's center). The test loads no fonts, so monikers have no height
   there.
 
 ## 14. Open
