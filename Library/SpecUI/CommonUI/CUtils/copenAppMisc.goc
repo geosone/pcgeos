@@ -1,0 +1,414 @@
+/*
+ * copenAppMisc.goc -- OLApplicationClass (after copenAppMisc.asm): the
+ * application's units, its exclusives asked for, the keyboard (the
+ * application's shortcuts, accelerators, input ignored), the navigation
+ * between windows and applications, the gadget timer, the host's
+ * display size.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet:
+ *   - the menus in stay-up mode (OLCountStayUpModeMenus,
+ *     OLReleaseAllStayUpModeMenus) and the icons of the primaries
+ *     (MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER): no menus or windows yet;
+ *   - the next window (MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW), the current
+ *     menu bar, the task bar's windows, the windows told of a new field
+ *     size (OLWinClass, OLBaseWinClass, OLDialogWinClass are not ported);
+ *   - the standard dialogs (MSG_GEN_APPLICATION_DO_STANDARD_DIALOG and
+ *     their responses).
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/specC.goh>
+#include <input.h>
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define APP_OFFSET(f)	word_offsetof(OLApplicationInstance, f)
+
+static OLApplicationInstance *App(optr oself)
+{
+    return (OLApplicationInstance *) ObjDerefVis(oself);
+}
+
+static GenApplicationInstance *GenApp(optr oself)
+{
+    return (GenApplicationInstance *) ObjDerefGen(oself);
+}
+
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_SET_MEASUREMENT_TYPE
+{
+    pself->OLAI_units = measurementType;
+}
+
+/* OLApplicationQueryIfPressIsInk: only the focus application's windows
+ * take ink */
+@extern method OLApplicationClass, MSG_META_QUERY_IF_PRESS_IS_INK
+{
+    if (pself->OLAI_flowFlags & AFF_FOCUS_APP) {
+	@callsuper();
+	return;
+    }
+    memset(retVal, 0, sizeof(*retVal));
+    retVal->inkType = IRV_NO_INK;
+    @call oself::MSG_GEN_APPLICATION_INK_QUERY_REPLY(IRV_NO_INK, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The exclusives asked for
+ * ------------------------------------------------------------------- */
+
+@extern method OLApplicationClass, MSG_META_GET_FOCUS_EXCL
+{
+    *focusObject = pself->VCNI_focusExcl.FTVMC_OD;
+    return TRUE;
+}
+
+@extern method OLApplicationClass, MSG_META_GET_MODEL_EXCL
+{
+    *modelObject = pself->OLAI_modelExcl.FTVMC_OD;
+    return TRUE;
+}
+
+@extern method OLApplicationClass, MSG_META_GET_TARGET_EXCL
+{
+    *targetObject = pself->VCNI_targetExcl.FTVMC_OD;
+    return TRUE;
+}
+
+@extern method OLApplicationClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER,
+			       APP_OFFSET(VCNI_targetExcl), TL_GEN_APPLICATION,
+			       level, retValue);
+}
+
+/* OLApplicationSpecResolveMonikerList: the application keeps its list
+ * (for the icons of its primaries) */
+@extern method OLApplicationClass, MSG_SPEC_RESOLVE_MONIKER_LIST
+{
+    (void) monikerList;
+}
+
+/* OLApplicationSpecUpdateVisMoniker: (the primaries' icons: not yet) */
+@extern method OLApplicationClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    @callsuper();
+}
+
+/* OLApplicationUnwantedKbdEvent: no one takes the key: a beep on the
+ * first press (not yet) */
+@extern method OLApplicationClass, MSG_VIS_CONTENT_UNWANTED_KBD_EVENT
+{
+    (void) character;
+    (void) state;
+    (void) flags;	/* UserStandardSound(SST_NO_INPUT) on the first
+			 * press: not yet in the C UI (no sound driver) */
+}
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+/* the application's shortcuts (Motif, not ISUI) and their messages */
+static const KeyboardShortcut appShortcuts[4] = {
+    KS_ALT | (KS_CHAR_SET_CONTROL << 8) | VC_ESCAPE,	/* next application */
+    KS_ALT | (KS_CHAR_SET_CONTROL << 8) | VC_F6,	/* next window */
+    (KS_CHAR_SET_CONTROL << 8) | VC_F3,			/* quit */
+    (KS_CHAR_SET_CONTROL << 8) | VC_F1			/* help */
+};
+
+/* HardIconBarFunction (Internal/im.def) */
+#define HIBF_TOGGLE_EXPRESS_MENU	0
+
+/* LOW_ON_FREE_HANDLES_THRESHOLD (heapInt.def) */
+#define LOW_ON_FREE_HANDLES_THRESHOLD	400
+
+/*
+ * OLApplicationKbdChar: with input ignored (and no modal window
+ * overriding it) the key goes to the field; low on handles, input is
+ * ignored until the process caught up
+ */
+@extern method OLApplicationClass, MSG_META_KBD_CHAR
+{
+    struct { word c, f, s; } p;
+
+    if (!(pself->OLAI_flowFlags & AFF_OVERRIDE_INPUT_RESTRICTIONS) &&
+	pself->OLAI_ignoreInputCount) {
+	Boolean done = FALSE;
+
+	p.c = character;
+	p.f = flags;
+	p.s = state;
+	GenCallParent(oself, MSG_META_FUP_KBD_CHAR, &p, sizeof(p), &done,
+		      sizeof(done));
+	return;
+    }
+    if (SysGetInfo(SGIT_NUMBER_OF_FREE_HANDLES) <=
+	LOW_ON_FREE_HANDLES_THRESHOLD && !pself->OLAI_ignoreInputCount) {
+	@call oself::MSG_GEN_APPLICATION_IGNORE_INPUT();
+	UserSendToApplicationViaProcess(MSG_GEN_APPLICATION_ACCEPT_INPUT,
+					NULL, 0);
+    }
+    @callsuper();
+}
+
+/*
+ * OLApplicationFupKbdChar: a key no one in the application took: the
+ * accelerators of the modal window, else of the application (the menus
+ * in stay-up mode let go then); the application's shortcuts; else the
+ * field's
+ */
+@extern method OLApplicationClass, MSG_META_FUP_KBD_CHAR
+{
+    static const Message appShortcutMsgs[4] = {
+	MSG_OL_APP_NAVIGATE_TO_NEXT_APP,
+	MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW,
+	MSG_OL_APPLICATION_QUIT,
+	MSG_GEN_APPLICATION_BRING_UP_HELP
+    };
+    struct { word c, f, s; } p;
+    Boolean done = FALSE;
+    word off;
+
+    if ((character >> 8) == CS_UI_FUNCS)
+	goto callField;
+    if (!(pself->OLAI_flowFlags & AFF_OVERRIDE_INPUT_RESTRICTIONS) &&
+	pself->OLAI_ignoreInputCount)
+	goto callField;
+    if (!(flags & (CF_RELEASE | CF_STATE_KEY | CF_TEMP_ACCENT))) {
+	if (!UserGetKbdAcceleratorMode())
+	    goto afterLocalShortcuts;
+	if (character != (word) ((CS_CONTROL << 8) | VC_F1)) {
+	    optr m = pself->OLAI_modalWin;
+
+	    if (m) {
+		(void) @call m::MSG_GEN_FIND_KBD_ACCELERATOR(character, flags,
+							      state);
+		return TRUE;
+	    }
+	    if (@call oself::MSG_GEN_FIND_KBD_ACCELERATOR(character, flags,
+							  state))
+		return TRUE;
+	}
+    }
+    if (flags & (CF_STATE_KEY | CF_TEMP_ACCENT) ||
+	!(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)))
+	goto afterLocalShortcuts;
+    off = FlowCheckKbdShortcut((KeyboardShortcut *) appShortcuts, 4,
+			       character, flags, state);
+    if (off != (word) -1 && off / sizeof(KeyboardShortcut) < 4) {
+	Message msg = appShortcutMsgs[off / sizeof(KeyboardShortcut)];
+
+	if (msg == MSG_OL_APP_NAVIGATE_TO_NEXT_APP)
+	    @call oself::MSG_OL_APP_NAVIGATE_TO_NEXT_APP(0);
+	else
+	    CObjMessageP(MF_CALL, oself, msg, NULL, 0, NULL, 0);
+	return TRUE;
+    }
+afterLocalShortcuts:
+callField:
+    p.c = character;
+    p.f = flags;
+    p.s = state;
+    GenCallParent(oself, MSG_META_FUP_KBD_CHAR, &p, sizeof(p), &done,
+		  sizeof(done));
+    return done;
+}
+
+/* OLApplicationTestForCancelMnemonic: Escape, without shift, control or
+ * alt */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC
+{
+    (void) state;
+    if (flags.CFASS_shiftState & (SS_LSHIFT | SS_RSHIFT | SS_LCTRL |
+				  SS_RCTRL | SS_LALT | SS_RALT))
+	return FALSE;
+    return (character & 0xff) == VC_ESCAPE;
+}
+
+/* ---------------------------------------------------------------------
+ * Navigation
+ * ------------------------------------------------------------------- */
+
+/* the next window of the application: not yet (OLDialogWinClass,
+ * OLBaseWinClass) */
+@extern method OLApplicationClass, MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW
+{
+}
+
+/*
+ * OLApplicationNavigateToNextApp: the field finds the next application
+ * (this one lowered then, unless an event is passed)
+ */
+@extern method OLApplicationClass, MSG_OL_APP_NAVIGATE_TO_NEXT_APP
+{
+    EventHandle ev;
+
+    if (!event)
+	event = @record oself::MSG_GEN_LOWER_TO_BOTTOM();
+    ev = @record OLFieldClass::MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP(oself,
+								    event);
+    @call oself::MSG_GEN_GUP_SEND_TO_OBJECT_OF_CLASS(ev);
+}
+
+/*
+ * OLApplicationTryNavigateToApp: to this application if it can take
+ * the focus (then the event: the previous one lowered, unless it is
+ * this one), else on to the next
+ */
+@extern method OLApplicationClass, MSG_OL_APP_TRY_NAVIGATE_TO_APP
+{
+    optr dest = 0;
+
+    if (!(GenApp(oself)->GAI_states & AS_FOCUSABLE) ||
+	(GenApp(oself)->GAI_states & AS_NOT_USER_INTERACTABLE)) {
+	@call oself::MSG_OL_APP_NAVIGATE_TO_NEXT_APP(event);
+	return;
+    }
+    @call oself::MSG_GEN_BRING_TO_TOP();
+    if (!event)
+	return;
+    (void) ObjGetMessageInfo(event, &dest);
+    if (dest == oself)
+	ObjFreeMessage(event);
+    else
+	CMessageDispatchP(event, 0, NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The gadget timer
+ * ------------------------------------------------------------------- */
+
+/* OLApplicationStartTimer: a one-shot timer for the object (with the
+ * gadget exclusive); MSG_TIMER_EXPIRED goes to it */
+@extern method OLApplicationClass, MSG_OL_APP_START_TIMER
+{
+    word id = 0;
+    TimerHandle t;
+
+    if (!ticks)
+	ticks = olGadgetRepeatDelay;
+    pself->OLAI_timerOD = od;
+    t = TimerStart(TIMER_EVENT_ONE_SHOT, oself, ticks, MSG_TIMER_EXPIRED, 0,
+		   &id);
+    pself = App(oself);
+    pself->OLAI_timerID = id;
+    pself->OLAI_timerHandle = t;
+}
+
+@extern method OLApplicationClass, MSG_OL_APP_STOP_TIMER
+{
+    TimerHandle t;
+    word id;
+
+    if (od != pself->OLAI_timerOD)
+	return;
+    t = pself->OLAI_timerHandle;
+    id = pself->OLAI_timerID;
+    pself->OLAI_timerID = 0;
+    pself->OLAI_timerHandle = 0;
+    pself->OLAI_timerOD = 0;
+    if (t)
+	TimerStop(t, id);
+}
+
+/* OLApplicationTimerExpired: on to the object, unless the timer is an
+ * old one or was stopped */
+@extern method OLApplicationClass, MSG_TIMER_EXPIRED
+{
+    optr od;
+
+    if (pself->OLAI_timerID != timerID)
+	return;
+    od = pself->OLAI_timerOD;
+    pself->OLAI_timerOD = 0;
+    if (!od || !pself->OLAI_timerHandle)
+	return;
+    pself->OLAI_timerHandle = 0;
+    pself->OLAI_timerID = 0;
+    @send od::MSG_TIMER_EXPIRED(tick, timerID);
+}
+
+/* ---------------------------------------------------------------------
+ * Notifications
+ * ------------------------------------------------------------------- */
+
+/* NukeExpressMenu: the field's express menu down */
+static void NukeExpressMenu(optr oself)
+{
+    EventHandle ev = @record OLFieldClass::
+			MSG_OL_FIELD_RELEASE_EXPRESS_MENU();
+
+    @call oself::MSG_VIS_VUP_CALL_OBJECT_OF_CLASS(ev);
+}
+
+/* OLApplicationStartSelect: a press in the application takes the
+ * express menu down */
+@extern method OLApplicationClass, MSG_META_START_SELECT, MSG_META_START_MOVE_COPY
+{
+    NukeExpressMenu(oself);
+    @callsuper();
+}
+
+/*
+ * OLApplicationNotify: the host's display (the field) changed size: the
+ * application's size follows (the windows told: not yet); an indexed
+ * application starting or a hard icon bar function takes the express
+ * menu down
+ */
+@extern method OLApplicationClass, MSG_META_NOTIFY
+{
+    if (manufID == MANUFACTURER_ID_GEOWORKS) {
+	if (notificationType == GWNT_HOST_SCREEN_FIELD_SIZE_CHANGE) {
+	    SizeAsDWord ps = 0, s;
+
+	    VisCallParent(oself, MSG_VIS_GET_SIZE, NULL, 0, &ps, sizeof(ps));
+	    s = @call oself::MSG_VIS_GET_SIZE();
+	    if (s != ps)
+		@call oself::MSG_VIS_SET_SIZE(DWORD_WIDTH(ps),
+					      DWORD_HEIGHT(ps));
+	} else if (notificationType == GWNT_STARTUP_INDEXED_APP ||
+		   (notificationType == GWNT_HARD_ICON_BAR_FUNCTION &&
+		    data != HIBF_TOGGLE_EXPRESS_MENU))
+	    NukeExpressMenu(oself);
+    }
+    @callsuper();
+}
+
+@extern method OLApplicationClass, MSG_META_NOTIFY_WITH_DATA_BLOCK
+{
+    if (manufID == MANUFACTURER_ID_GEOWORKS &&
+	(notificationType == GWNT_STARTUP_INDEXED_APP ||
+	 (notificationType == GWNT_HARD_ICON_BAR_FUNCTION &&
+	  (word) data != HIBF_TOGGLE_EXPRESS_MENU)))
+	NukeExpressMenu(oself);
+    @callsuper();
+}
+
+/* the target's menu bar: not yet (OLBaseWinClass) */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_TOGGLE_CURRENT_MENU_BAR
+{
+}
+
+/* OLApplicationToggleExpressMenu: the field's (else the default
+ * field's) express menu */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_TOGGLE_EXPRESS_MENU
+{
+    Boolean isField = FALSE;
+    ClassStruct *c = (ClassStruct *) &OLFieldClass;
+    optr field = 0;
+
+    if (GenCallParent(oself, MSG_META_IS_OBJECT_IN_CLASS, &c, sizeof(c),
+		      &isField, sizeof(isField)) && isField) {
+	GenCallParent(oself, MSG_OL_FIELD_TOGGLE_EXPRESS_MENU, NULL, 0, NULL,
+		      0);
+	return;
+    }
+    UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_FIELD, NULL, 0, &field,
+		   sizeof(field));
+    if (field)
+	@send field::MSG_OL_FIELD_TOGGLE_EXPRESS_MENU();
+}
+
+/* the windows' positions for the task bar: not yet (OLWinClass) */
+@extern method OLApplicationClass, MSG_OL_APP_UPDATE_WINDOWS_FOR_TASK_BAR
+{
+}

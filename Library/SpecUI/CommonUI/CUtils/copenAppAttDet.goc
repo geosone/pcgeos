@@ -1,0 +1,435 @@
+/*
+ * copenAppAttDet.goc -- OLApplicationClass (after copenAppAttDet.asm):
+ * the application object's start and end.  The application is the
+ * geode's input object and the node of its focus, target and model
+ * hierarchies; it lives on its field (a visual upward link only, no
+ * visual child of it), opens no window of its own (it takes its
+ * field's) and comes up when attached.
+ *
+ * Port32 (Port32/ABI.md section 13y):
+ *   - the vis parent's window is asked of the vis parent
+ *     (MSG_VIS_QUERY_WINDOW; MSG_SPEC_GUP_QUERY_VIS_PARENT returns the
+ *     optr only);
+ *   - GeodeSetUIData is not set (a word; nothing reads it);
+ *   - not yet: the application's entries in the express menus
+ *     (OLAppTaskItemClass, MSG_OL_APPLICATION_ADD_TO_FIELD_TASK_LIST),
+ *     the standard dialogs (MSG_GEN_APPLICATION_DO_STANDARD_DIALOG).
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/specC.goh>
+@include <Objects/gInterC.goh>
+
+@classdecl OLApplicationClass, neverSaved;
+
+/* the methods in copenAppCommon.goc and copenAppMisc.goc */
+@extern method OLApplicationClass, MSG_VIS_P32_VUP_QUERY;
+@extern method OLApplicationClass, MSG_SPEC_GUP_QUERY_VIS_PARENT;
+@extern method OLApplicationClass, MSG_SPEC_P32_GUP_QUERY;
+@extern method OLApplicationClass, MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW;
+@extern method OLApplicationClass, MSG_META_P32_RAW_UNIV_ENTER,
+		MSG_META_P32_RAW_UNIV_LEAVE;
+@extern method OLApplicationClass, MSG_META_IMPLIED_WIN_CHANGE;
+@extern method OLApplicationClass,
+		MSG_VIS_CONTENT_NOTIFY_ACTIVE_MOUSE_GRAB_WIN_CHANGED;
+@extern method OLApplicationClass, MSG_OL_APP_GET_IMPLIED_WIN;
+@extern method OLApplicationClass, MSG_META_ENSURE_ACTIVE_FT;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_NOTIFY_MODAL_WIN_CHANGE;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_GET_MODAL_WIN;
+@extern method OLApplicationClass, MSG_META_NOTIFY_TASK_SELECTED;
+@extern method OLApplicationClass, MSG_GEN_BRING_TO_TOP;
+@extern method OLApplicationClass, MSG_GEN_LOWER_TO_BOTTOM;
+@extern method OLApplicationClass, MSG_META_GRAB_FOCUS_EXCL,
+		MSG_META_GRAB_TARGET_EXCL, MSG_META_GRAB_MODEL_EXCL;
+@extern method OLApplicationClass, MSG_META_GAINED_FOCUS_EXCL;
+@extern method OLApplicationClass, MSG_META_LOST_FOCUS_EXCL;
+@extern method OLApplicationClass, MSG_META_FORCE_GRAB_KBD, MSG_META_GRAB_KBD,
+		MSG_META_RELEASE_KBD;
+@extern method OLApplicationClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE,
+		MSG_VIS_FORCE_GRAB_MOUSE, MSG_VIS_GRAB_LARGE_MOUSE, MSG_VIS_GRAB_MOUSE,
+		MSG_VIS_RELEASE_MOUSE;
+@extern method OLApplicationClass, MSG_META_GAINED_TARGET_EXCL,
+		MSG_META_LOST_TARGET_EXCL;
+@extern method OLApplicationClass, MSG_META_GAINED_MODEL_EXCL,
+		MSG_META_LOST_MODEL_EXCL;
+@extern method OLApplicationClass, MSG_META_MUP_ALTER_FTVMC_EXCL;
+@extern method OLApplicationClass, MSG_META_SEND_CLASSED_EVENT;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_MARK_BUSY;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_MARK_NOT_BUSY;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_HOLD_UP_INPUT;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_RESUME_INPUT;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_IGNORE_INPUT;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_ACCEPT_INPUT;
+@extern method OLApplicationClass,
+		MSG_GEN_APPLICATION_MARK_APP_COMPLETELY_BUSY;
+@extern method OLApplicationClass,
+		MSG_GEN_APPLICATION_MARK_APP_NOT_COMPLETELY_BUSY;
+@extern method OLApplicationClass,
+		MSG_GEN_APPLICATION_CHECK_IF_ALWAYS_INTERACTABLE_OBJECT;
+@extern method OLApplicationClass, MSG_META_TEST_WIN_INTERACTIBILITY;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_GET_DISPLAY_SCHEME;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_SET_TASK_ENTRY_MONIKER;
+@extern method OLApplicationClass, MSG_OL_APP_UPDATE_TASK_ENTRY;
+@extern method OLApplicationClass, MSG_VIS_VUP_TERMINATE_ACTIVE_MOUSE_FUNCTION;
+@extern method OLApplicationClass, MSG_VIS_VUP_GET_MOUSE_STATUS;
+@extern method OLApplicationClass, MSG_VIS_VUP_BUMP_MOUSE;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_GET_MEASUREMENT_TYPE;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_SET_MEASUREMENT_TYPE;
+@extern method OLApplicationClass, MSG_META_QUERY_IF_PRESS_IS_INK;
+@extern method OLApplicationClass, MSG_META_GET_FOCUS_EXCL;
+@extern method OLApplicationClass, MSG_META_GET_MODEL_EXCL;
+@extern method OLApplicationClass, MSG_META_GET_TARGET_EXCL;
+@extern method OLApplicationClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL;
+@extern method OLApplicationClass, MSG_SPEC_RESOLVE_MONIKER_LIST;
+@extern method OLApplicationClass, MSG_SPEC_UPDATE_VIS_MONIKER;
+@extern method OLApplicationClass, MSG_VIS_CONTENT_UNWANTED_KBD_EVENT;
+@extern method OLApplicationClass, MSG_META_KBD_CHAR;
+@extern method OLApplicationClass, MSG_META_FUP_KBD_CHAR;
+@extern method OLApplicationClass,
+		MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC;
+@extern method OLApplicationClass, MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW;
+@extern method OLApplicationClass, MSG_OL_APP_NAVIGATE_TO_NEXT_APP;
+@extern method OLApplicationClass, MSG_OL_APP_TRY_NAVIGATE_TO_APP;
+@extern method OLApplicationClass, MSG_OL_APP_START_TIMER;
+@extern method OLApplicationClass, MSG_OL_APP_STOP_TIMER;
+@extern method OLApplicationClass, MSG_TIMER_EXPIRED;
+@extern method OLApplicationClass, MSG_META_START_SELECT,
+		MSG_META_START_MOVE_COPY;
+@extern method OLApplicationClass, MSG_META_NOTIFY;
+@extern method OLApplicationClass, MSG_META_NOTIFY_WITH_DATA_BLOCK;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_TOGGLE_CURRENT_MENU_BAR;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_TOGGLE_EXPRESS_MENU;
+@extern method OLApplicationClass, MSG_OL_APP_UPDATE_WINDOWS_FOR_TASK_BAR;
+
+static OLApplicationInstance *App(optr oself)
+{
+    return (OLApplicationInstance *) ObjDerefVis(oself);
+}
+
+static GenApplicationInstance *GenApp(optr oself)
+{
+    return (GenApplicationInstance *) ObjDerefGen(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Attach
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLAppInitialize: the geode's input object; realizable, no geometry of
+ * its own; the exclusives within the application; the field's and the
+ * default screen's windows
+ */
+@method OLApplicationClass, MSG_META_INITIALIZE
+{
+    GenReturnParams r;
+
+    @callsuper();
+    WinGeodeSetInputObj(MemOwner(OptrToHandle(oself)), oself);
+    OLAppUpdateGeodeWinFlags(oself);
+
+    pself = App(oself);
+    pself->VI_specAttrs |= SA_REALIZABLE;
+    pself->VI_attrs &= ~VA_MANAGED;
+    pself->VCI_geoAttrs |= VCGA_CUSTOM_MANAGE_CHILDREN;
+    pself->OLAI_units = AMT_DEFAULT;
+    pself->VCNI_focusExcl.FTVMC_flags |= HGF_APP_EXCL | MAEF_OD_IS_WINDOW;
+    pself->VCNI_targetExcl.FTVMC_flags |= HGF_APP_EXCL;
+    pself->OLAI_modelExcl.FTVMC_flags |= HGF_APP_EXCL;
+
+    memset(&r, 0, sizeof(r));
+    (void) @call oself::MSG_SPEC_P32_GUP_QUERY(&r, GUQT_FIELD);
+    App(oself)->OLAI_fieldWin = (WindowHandle) r.GRP_bp;
+    memset(&r, 0, sizeof(r));
+    (void) @call oself::MSG_SPEC_P32_GUP_QUERY(&r, GUQT_SCREEN);
+    App(oself)->OLAI_screenWin = (WindowHandle) r.GRP_bp;
+}
+
+/*
+ * OLAppUpdateGeodeWinFlags: the geode's GeodeWinFlags from the
+ * application's attributes; the full screen exclusive for an
+ * interactable application (not a desk accessory) on a field in the
+ * transparent launch mode
+ */
+void OLAppUpdateGeodeWinFlags(optr oself)
+{
+    GenApplicationInstance *g = GenApp(oself);
+    word f = 0;
+
+    if (g->GI_attrs & GA_TARGETABLE)
+	f |= GWF_TARGETABLE;
+    if (g->GAI_states & AS_FOCUSABLE)
+	f |= GWF_FOCUSABLE;
+    if (g->GAI_states & AS_MODELABLE)
+	f |= GWF_MODELABLE;
+    if (!(g->GAI_states & AS_NOT_USER_INTERACTABLE) &&
+	!(g->GAI_launchFlags & ALF_DESK_ACCESSORY) &&
+	UserGetLaunchModel() == UILM_TRANSPARENT) {
+	Boolean isField = FALSE;
+	ClassStruct *c = (ClassStruct *) &GenFieldClass;
+
+	if (GenCallParent(oself, MSG_META_IS_OBJECT_IN_CLASS, &c, sizeof(c),
+			  &isField, sizeof(isField)) && isField)
+	    f |= GWF_FULL_SCREEN;
+    }
+    WinGeodeSetFlags(GeodeGetProcessHandle(), f);
+}
+
+/*
+ * OLApplicationAttach: the counts cleared (the application may come
+ * back after quitting), the geode's flags again, a desk accessory on
+ * top (unless its layer priority comes from state); attached, so it
+ * comes up
+ */
+@method OLApplicationClass, MSG_META_ATTACH_OBJECT
+{
+    (void) flags;
+    (void) appLaunchBlock;
+    (void) extraState;
+    pself->OLAI_busyCount = 0;
+    pself->OLAI_holdUpInputCount = 0;
+    pself->OLAI_ignoreInputCount = 0;
+    pself->OLAI_completelyBusyCount = 0;
+    OLAppUpdateGeodeWinFlags(oself);
+    if (!ObjVarFindData(oself, ATTR_GEN_WINDOW_CUSTOM_LAYER_PRIORITY))
+	OLAppRaiseLayerPrioIfDeskAccessory(oself);
+    @call oself::MSG_SPEC_SET_ATTRS(SA_ATTACHED, 0, VUM_NOW);
+}
+
+/*
+ * OLAppReleaseSomething: the exclusives (MetaAlterFTVMCExclFlags) let go
+ * of one level up, and the vis parent sees that someone has them
+ */
+static void OLAppReleaseSomething(optr oself, MetaAlterFTVMCExclFlags f)
+{
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, f | MAEF_NOT_HERE);
+    VisCallParent(oself, MSG_META_ENSURE_ACTIVE_FT, NULL, 0, NULL, 0);
+}
+
+/* OLApplicationSetState: no longer focusable or modelable: those
+ * exclusives go */
+@method OLApplicationClass, MSG_GEN_APPLICATION_SET_STATE
+{
+    MetaAlterFTVMCExclFlags f = 0;
+
+    OLAppUpdateGeodeWinFlags(oself);
+    if ((clear & AS_FOCUSABLE) && !(set & AS_FOCUSABLE))
+	f |= MAEF_FOCUS;
+    if ((clear & AS_MODELABLE) && !(set & AS_MODELABLE))
+	f |= MAEF_MODEL;
+    if (f)
+	OLAppReleaseSomething(oself, f);
+}
+
+/* OLApplicationGenSetAttrs: no longer targetable: the target goes */
+@method OLApplicationClass, MSG_GEN_SET_ATTRS
+{
+    OLAppUpdateGeodeWinFlags(oself);
+    if ((attrsToClear & GA_TARGETABLE) && !(attrsToSet & GA_TARGETABLE))
+	OLAppReleaseSomething(oself, MAEF_TARGET);
+}
+
+/* OLAppSpecBuildBranch: the application only; its children are built
+ * as their windows come up */
+@method OLApplicationClass, MSG_SPEC_BUILD_BRANCH
+{
+    @call oself::MSG_SPEC_BUILD(flags);
+}
+
+/*
+ * OLAppSpecBuild: the vis parent for the application's windows (the
+ * field) as an upward link only, its window, the field's size as the
+ * application's bounds; the geode's parent object; the host's display
+ * size changes heard
+ */
+@method OLApplicationClass, MSG_SPEC_BUILD
+{
+    optr vp = 0, field;
+    SpecQueryVisParentType t = SQT_VIS_PARENT_FOR_APPLICATION;
+    GenReturnParams r;
+    SizeAsDWord size;
+
+    (void) flags;
+    if (pself->VI_link.LP_next) {
+	GCNListAdd(oself, MANUFACTURER_ID_GEOWORKS,
+		   GCNSLT_HOST_NOTIFICATIONS);
+	return;
+    }
+    if (!GenCallParent(oself, MSG_SPEC_GUP_QUERY_VIS_PARENT, &t, sizeof(t),
+		       &vp, sizeof(vp)) || !vp)
+	return;		/* (the asm's EC build: OL_QUERY_NOT_ANSWERED) */
+    App(oself)->VCNI_window = @call vp::MSG_VIS_QUERY_WINDOW();
+
+    memset(&r, 0, sizeof(r));
+    (void) @call oself::MSG_SPEC_P32_GUP_QUERY(&r, GUQT_FIELD);
+    field = ConstructOptr(r.GRP_cx, r.GRP_dx);
+    size = OptrToHandle(field) ? @call field::MSG_VIS_GET_SIZE() : 0;
+    pself = App(oself);
+    pself->VI_bounds.R_right = DWORD_WIDTH(size);
+    pself->VI_bounds.R_bottom = DWORD_HEIGHT(size);
+    pself->VI_optFlags &= ~(VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH);
+    pself->VI_link.LP_next = vp | LP_IS_PARENT;
+    WinGeodeSetParentObj(MemOwner(OptrToHandle(oself)), vp);
+
+    /* the application's entry in its field's task list: not yet (the
+     * express menu is not ported) */
+    GCNListAdd(oself, MANUFACTURER_ID_GEOWORKS, GCNSLT_HOST_NOTIFICATIONS);
+}
+
+@method OLApplicationClass, MSG_SPEC_UNBUILD
+{
+    GCNListRemove(oself, MANUFACTURER_ID_GEOWORKS, GCNSLT_HOST_NOTIFICATIONS);
+    @callsuper();
+}
+
+/* the express menu's entries: not yet */
+@method OLApplicationClass, MSG_OL_APPLICATION_ADD_TO_FIELD_TASK_LIST
+{
+    (void) field;
+}
+
+@method OLApplicationClass, MSG_OL_APPLICATION_GEOS_TASKS_LIST_ITEM_CREATED
+{
+}
+
+/* OLApplicationOpenWin: the field's window is the application's; the
+ * application the implied grab on it */
+@method OLApplicationClass, MSG_VIS_OPEN_WIN
+{
+    (void) parentWindow;
+    pself->VCI_window = pself->VCNI_window;
+    @call oself::MSG_META_IMPLIED_WIN_CHANGE(oself, pself->VCNI_window);
+}
+
+/* OLApplicationOpenComplete: a modal window gets the focus and target */
+@method OLApplicationClass, MSG_GEN_APPLICATION_OPEN_COMPLETE
+{
+    optr w = AppFindTopSysModalWin(oself);
+
+    if (!w)
+	w = AppFindTopWinOfPriority(oself, WIN_PRIO_MODAL);
+    if (w)
+	@send, forceQueue w::MSG_GEN_BRING_TO_TOP();
+}
+
+/* ---------------------------------------------------------------------
+ * Detach
+ * ------------------------------------------------------------------- */
+
+/* OLApplicationCloseWin: the window and the implied grab gone, without
+ * an invalidation */
+@method OLApplicationClass, MSG_VIS_CLOSE_WIN
+{
+    pself->VCI_window = 0;
+    @call oself::MSG_META_IMPLIED_WIN_CHANGE(0, 0);
+}
+
+/* Get_GAGCNLT_USER_DO_DIALOGS_List: the list (0: none) */
+static ChunkHandle GetUserDoDialogsList(optr oself)
+{
+    TempMetaGCNData *d = ObjVarFindData(oself, TEMP_META_GCN);
+
+    if (!d)
+	return 0;
+    return GCNListFindListInBlock(MANUFACTURER_ID_GEOWORKS,
+				  GAGCNLT_USER_DO_DIALOGS,
+				  OptrToHandle(oself), d->TMGCND_listOfLists,
+				  FALSE);
+}
+
+@method OLApplicationClass,
+	MSG_GEN_APPLICATION_CHECK_IF_RUNNING_USER_DO_DIALOG
+{
+    ChunkHandle list = GetUserDoDialogsList(oself);
+
+    return list && ChunkArrayGetCount(ConstructOptr(OptrToHandle(oself),
+						    list));
+}
+
+/*
+ * OLApplicationDetachPending: the blocking dialogs down, the express
+ * menu entries gone; input ignored for good, the geode neither
+ * focusable nor targetable; the exclusives to another application
+ */
+@method OLApplicationClass, MSG_GEN_APPLICATION_DETACH_PENDING
+{
+    @call oself::MSG_GEN_APPLICATION_REMOVE_ALL_BLOCKING_DIALOGS();
+    App(oself)->OLAI_appMenuItems = 0;	/* (none made yet) */
+    GCNListRemove(oself, MANUFACTURER_ID_GEOWORKS,
+		  GCNSLT_EXPRESS_MENU_CHANGE);
+    @call oself::MSG_GEN_APPLICATION_IGNORE_INPUT();
+    WinGeodeSetFlags(GeodeGetProcessHandle(), 0);
+    @call oself::MSG_GEN_LOWER_TO_BOTTOM();
+}
+
+/* OLApplicationLostFullScreenExcl: hidden: the blocking dialogs down */
+@method OLApplicationClass, MSG_META_LOST_FULL_SCREEN_EXCL
+{
+    @call oself::MSG_GEN_APPLICATION_REMOVE_ALL_BLOCKING_DIALOGS();
+}
+
+/*
+ * OLApplicationRemoveAllBlockingDialogs: the standard dialogs answer
+ * IC_NULL; every UserDoDialog released with IC_NULL and dismissed
+ */
+@method OLApplicationClass, MSG_GEN_APPLICATION_REMOVE_ALL_BLOCKING_DIALOGS
+{
+    ChunkHandle d = pself->OLAI_stdDialogs, list;
+    word i, n;
+
+    while (d) {
+	ChunkHandle next = ((OLAStdDialog *) LMemDerefHandles(
+				OptrToHandle(oself), d))->OLASD_next;
+
+	@call oself::MSG_OL_APP_DO_DIALOG_RESPONSE(IC_NULL, d);
+	d = next;
+    }
+    list = GetUserDoDialogsList(oself);
+    if (!list)
+	return;
+    n = ChunkArrayGetCount(ConstructOptr(OptrToHandle(oself), list));
+    for (i = 0; i < n; i++) {
+	GCNListElement *e;
+	optr dlg;
+	word command = IC_NULL;
+
+	list = GetUserDoDialogsList(oself);
+	if (!list ||
+	    i >= ChunkArrayGetCount(ConstructOptr(OptrToHandle(oself), list)))
+	    break;
+	e = ChunkArrayElementToPtr(ConstructOptr(OptrToHandle(oself), list),
+				   i, NULL);
+	memcpy(&dlg, &e->GCNLE_item, sizeof(dlg));
+	@call dlg::MSG_GEN_INTERACTION_RELEASE_BLOCKED_THREAD_WITH_RESPONSE(
+							&command);
+	@call dlg::MSG_GEN_INTERACTION_ACTIVATE_COMMAND(IC_DISMISS);
+    }
+}
+
+/* OLApplicationTransparentDetach: back as a desk accessory, not as one
+ * in the application cache */
+@method OLApplicationClass, MSG_META_TRANSPARENT_DETACH
+{
+    ObjVarDeleteData(oself, ATTR_GEN_WINDOW_CUSTOM_LAYER_PRIORITY);
+}
+
+/* OLApplicationDetach: no longer attached (it comes down) */
+@method OLApplicationClass, MSG_META_DETACH
+{
+    @callsuper();
+    @call oself::MSG_SPEC_SET_ATTRS(0, SA_ATTACHED, VUM_NOW);
+    GCNListRemove(oself, MANUFACTURER_ID_GEOWORKS, GCNSLT_HOST_NOTIFICATIONS);
+}
+
+/* OLApplicationQuit: F3: quit, or (transparent launch mode without
+ * closable applications) to the back */
+@method OLApplicationClass, MSG_OL_APPLICATION_QUIT
+{
+    if (UserGetLaunchModel() != UILM_TRANSPARENT ||
+	(UserGetLaunchOptions() & UILO_CLOSABLE_APPS)) {
+	@call oself::MSG_META_QUIT();
+	return;
+    }
+    OLAppLowerLayerPrioIfDeskAccessory(oself);
+    @send, forceQueue oself::MSG_GEN_LOWER_TO_BOTTOM();
+}

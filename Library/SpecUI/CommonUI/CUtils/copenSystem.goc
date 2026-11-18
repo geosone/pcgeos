@@ -277,8 +277,8 @@ static Boolean WinOfPrio(WindowHandle win, word prio)
  * if given) of the priority prio; its input object, and the window in
  * *win (both 0: none)
  */
-static optr FindWinOnWin(WindowHandle parentWin, word prio, GeodeHandle owner,
-			 Handle layerID, WindowHandle *win)
+optr FindWinOnWin(WindowHandle parentWin, word prio, GeodeHandle owner,
+		  Handle layerID, WindowHandle *win)
 {
     WinsOnWin w;
     word i;

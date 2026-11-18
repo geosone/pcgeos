@@ -48,7 +48,10 @@ typedef struct {
 @message SizeAsDWord MSG_OL_FIELD_GET_TOOL_AREA_SIZE();
 @message void MSG_OL_FIELD_SIZE_TOOL_AREA(word height);
 @message void MSG_OL_FIELD_TOGGLE_EXPRESS_MENU();
-@message void MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP(optr currentApp);
+/* the next application after currentApp (the event, from the
+ * application, dispatched once found) */
+@message void MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP(optr currentApp,
+						EventHandle event);
 @message optr MSG_OL_FIELD_CREATE_WINDOW_LIST_ENTRY();
 @message ChunkHandle MSG_OL_FIELD_SELECT_WINDOW_LIST_ENTRY();
 @message void MSG_OL_FIELD_WINDOW_LIST_CLOSE_WINDOW();

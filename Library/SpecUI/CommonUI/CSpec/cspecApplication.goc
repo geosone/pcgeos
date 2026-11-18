@@ -1,0 +1,13 @@
+/*
+ * cspecApplication.goc -- the build routine of GenApplicationClass
+ * (after cspecApplication.asm): a GenApplication is always an
+ * OLApplication.
+ */
+@include "cGeode.goh"
+
+ClassStruct *OLBuildApplication(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLApplicationClass;
+}

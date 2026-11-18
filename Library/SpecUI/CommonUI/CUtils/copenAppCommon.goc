@@ -1,0 +1,779 @@
+/*
+ * copenAppCommon.goc -- OLApplicationClass (after copenAppCommon.asm):
+ * the application as the node of its geode's focus, target and model
+ * hierarchies (the last non-modal focus kept while a modal window is
+ * up), its modal window, raising and lowering it, the busy and input
+ * states (busy pointer, input held up or ignored) and the window the
+ * mouse is over.
+ *
+ * Port32 (Port32/ABI.md section 13y):
+ *   - a system modal window's vis parent is the application
+ *     (SQT_VIS_PARENT_FOR_SYS_MODAL), its parent window the default
+ *     screen's (GUQT_SCREEN; MSG_SPEC_GUP_QUERY_VIS_PARENT returns the
+ *     optr only);
+ *   - SGQT_BUILD_INFO: the OLBuildFlags come and go in GRP_bp;
+ *   - not yet: the express menu (its entries, OLAppTaskItemClass:
+ *     MSG_NOTIFY_EXPRESS_MENU_CHANGE goes to the superclass only),
+ *     the print screen (not in Motif), the animated busy pointer (not
+ *     in Motif).
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/specC.goh>
+@include <Objects/gInterC.goh>
+#include <system.h>
+#include <localize.h>
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define APP_OFFSET(f)	word_offsetof(OLApplicationInstance, f)
+
+static OLApplicationInstance *App(optr oself)
+{
+    return (OLApplicationInstance *) ObjDerefVis(oself);
+}
+
+static GenApplicationInstance *GenApp(optr oself)
+{
+    return (GenApplicationInstance *) ObjDerefGen(oself);
+}
+
+static void SendOutModalChangeNotification(optr oself);
+
+static GeodeHandle AppGeode(optr oself)
+{
+    return MemOwner(OptrToHandle(oself));
+}
+
+/* ---------------------------------------------------------------------
+ * Queries
+ * ------------------------------------------------------------------- */
+
+/* OLAppVisUpwardQuery: every visual query goes to the field, not
+ * answered by the application as a content */
+@extern method OLApplicationClass, MSG_VIS_P32_VUP_QUERY
+{
+    struct {
+	GenReturnParams *r;
+	VisUpwardQueryType t;
+	dword d1, d2;
+    } p;
+    Boolean ok = FALSE;
+
+    p.r = retValue;
+    p.t = queryType;
+    p.d1 = data1;
+    p.d2 = data2;
+    if (!VisCallParent(oself, message, &p, sizeof(p), &ok, sizeof(ok))) {
+	memset(retValue, 0, sizeof(*retValue));
+	return FALSE;
+    }
+    return ok;
+}
+
+/* OLApplicationGupQueryVisParent: the application for its primaries,
+ * displays, popups, urgent and system modal windows; the others asked
+ * of the field */
+@extern method OLApplicationClass, MSG_SPEC_GUP_QUERY_VIS_PARENT
+{
+    switch (parentType) {
+    case SQT_VIS_PARENT_FOR_PRIMARY:
+    case SQT_VIS_PARENT_FOR_DISPLAY:
+    case SQT_VIS_PARENT_FOR_POPUP:
+    case SQT_VIS_PARENT_FOR_URGENT:
+    case SQT_VIS_PARENT_FOR_SYS_MODAL:
+	return oself;
+    default:
+	return @callsuper();
+    }
+}
+
+/* OLApplicationGupQuery: a menu or trigger directly below the
+ * application has no vis parent (it is a top menu) */
+@extern method OLApplicationClass, MSG_SPEC_P32_GUP_QUERY
+{
+    if (queryType != SGQT_BUILD_INFO)
+	return @callsuper();
+    retValue->GRP_cx = 0;
+    retValue->GRP_dx = 0;
+    retValue->GRP_bp |= OLBR_TOP_MENU << OLBF_REPLY_OFFSET;
+    return TRUE;
+}
+
+/* OLApplicationGenGupEnsureUpdateWindow: the query ends here */
+@extern method OLApplicationClass, MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW
+{
+    (void) updateFlags;
+    (void) updateMode;
+    return TRUE;
+}
+
+/* OLApplicationEnterLeave: on to the window's object */
+@extern method OLApplicationClass, MSG_META_P32_RAW_UNIV_ENTER,
+			    MSG_META_P32_RAW_UNIV_LEAVE
+{
+    struct { optr o; WindowHandle w; } p;
+
+    p.o = inputObj;
+    p.w = win;
+    CObjMessageP(0, inputObj, message, &p, sizeof(p), NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The implied window and the pointer
+ * ------------------------------------------------------------------- */
+
+/* OLApplicationImpliedWinChange: the window the mouse is over, kept;
+ * the content's implied grab if input may go there; the pointer */
+@extern method OLApplicationClass, MSG_META_IMPLIED_WIN_CHANGE
+{
+    pself->OLAI_impliedWin.MG_OD = inputObj;
+    pself->OLAI_impliedWin.MG_gWin = win;
+    OLAppUpdateImpliedWin(oself);
+    OLAppUpdatePtrImage(oself);
+}
+
+/* OLAppNotifyActiveMouseGrabWinChanged: the geode's active window; the
+ * pointer once the mouse grab is gone */
+@extern method OLApplicationClass,
+	MSG_VIS_CONTENT_NOTIFY_ACTIVE_MOUSE_GRAB_WIN_CHANGED
+{
+    WindowHandle w = pself->VCNI_activeMouseGrab.VMG_gWin;
+
+    WinGeodeSetActiveWin(AppGeode(oself), w);
+    if (!w)
+	OLAppUpdatePtrImage(oself);
+}
+
+/* OLAppUpdateImpliedWin: the implied window to the content, without its
+ * object if the mouse may not go there */
+void OLAppUpdateImpliedWin(optr oself)
+{
+    MouseGrab g = App(oself)->OLAI_impliedWin;
+    struct { optr o; WindowHandle w; } p;
+
+    if (!@call oself::MSG_META_TEST_WIN_INTERACTIBILITY(g.MG_OD, g.MG_gWin))
+	g.MG_OD = 0;
+    p.o = g.MG_OD;
+    p.w = g.MG_gWin;
+    CObjCallSuperP((ClassStruct *) &OLApplicationClass, oself,
+		   MSG_META_IMPLIED_WIN_CHANGE, &p, sizeof(p), NULL, 0);
+}
+
+@extern method OLApplicationClass, MSG_OL_APP_GET_IMPLIED_WIN
+{
+    *retValue = pself->OLAI_impliedWin;
+}
+
+/*
+ * OLAppUpdatePtrImage: the geode's pointer: busy if completely busy;
+ * the modal pointer outside a modal window (no mouse grab, not over an
+ * interactable window); busy if input is ignored or the application is
+ * busy (unless the modal window overrides input restrictions)
+ */
+void OLAppUpdatePtrImage(optr oself)
+{
+    OLApplicationInstance *a = App(oself);
+    OLPtrImage img = OLPI_NONE;
+
+    if (a->OLAI_completelyBusyCount)
+	img = OLPI_BUSY;
+    else {
+	if (a->OLAI_modalWin && !a->VCNI_activeMouseGrab.VMG_object &&
+	    !a->VCNI_impliedMouseGrab.VMG_object)
+	    img = OLPI_MODAL;
+	if (!(a->OLAI_flowFlags & AFF_OVERRIDE_INPUT_RESTRICTIONS) &&
+	    (a->OLAI_ignoreInputCount || a->OLAI_busyCount))
+	    img = OLPI_BUSY;
+    }
+    WinGeodeSetPtrImage(AppGeode(oself), OpenGetPtrImage(img));
+}
+
+/* ---------------------------------------------------------------------
+ * The focus and target within the application
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLApplicationEnsureActiveFT: a target (the top standard window, else
+ * the top command window); a focus if the application has the focus
+ * (the modal window, the last non-modal focus, the target, the top
+ * standard or command window); the focus activity, the implied window,
+ * the pointer and the input flow; no focus: the application told
+ */
+@extern method OLApplicationClass, MSG_META_ENSURE_ACTIVE_FT
+{
+    optr w;
+
+    if (!pself->VCNI_targetExcl.FTVMC_OD) {
+	w = AppFindTopWinOfPriority(oself, WIN_PRIO_STD);
+	if (!w)
+	    w = AppFindTopWinOfPriority(oself, WIN_PRIO_COMMAND);
+	if (w)
+	    @call w::MSG_META_GRAB_TARGET_EXCL();
+    }
+    pself = App(oself);
+    if ((pself->OLAI_flowFlags & AFF_FOCUS_APP) &&
+	!pself->VCNI_focusExcl.FTVMC_OD) {
+	w = pself->OLAI_modalWin;
+	if (!w)
+	    w = pself->OLAI_nonModalFocus;
+	if (!w)
+	    w = pself->VCNI_targetExcl.FTVMC_OD;
+	if (!w)
+	    w = AppFindTopWinOfPriority(oself, WIN_PRIO_STD);
+	if (!w)
+	    w = AppFindTopWinOfPriority(oself, WIN_PRIO_COMMAND);
+	if (w)
+	    @call w::MSG_META_GRAB_FOCUS_EXCL();
+    }
+    OLAppUpdateFocusActivity(oself);
+    OLAppUpdateImpliedWin(oself);
+    OLAppUpdatePtrImage(oself);
+    OLAppUpdateFlowHoldUpState(oself);
+    if (!App(oself)->VCNI_focusExcl.FTVMC_OD)
+	@send, forceQueue oself::MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE();
+}
+
+/*
+ * OLApplicationNotifyModalChange: the top system modal or modal window
+ * of the application; whether it overrides the input restrictions; the
+ * states again; the GCN lists told (GAGCNLT_MODAL_WIN_CHANGE, and the
+ * windows, which draw again)
+ */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_NOTIFY_MODAL_WIN_CHANGE
+{
+    optr w = AppFindTopSysModalWin(oself);
+
+    if (!w)
+	w = AppFindTopWinOfPriority(oself, WIN_PRIO_MODAL);
+    pself = App(oself);
+    pself->OLAI_modalWin = w;
+    pself->OLAI_flowFlags &= ~AFF_OVERRIDE_INPUT_RESTRICTIONS;
+    if (w && @call w::MSG_GEN_INTERACTION_TEST_INPUT_RESTRICTABILITY(w))
+	App(oself)->OLAI_flowFlags |= AFF_OVERRIDE_INPUT_RESTRICTIONS;
+    OLAppUpdateFocusActivity(oself);
+    OLAppUpdateFlowHoldUpState(oself);
+    OLAppUpdateImpliedWin(oself);
+    OLAppUpdatePtrImage(oself);
+    SendOutModalChangeNotification(oself);
+}
+
+/* SendOutModalChangeNotification: GWNT_MODAL_WIN_CHANGE to the
+ * application's GAGCNLT_MODAL_WIN_CHANGE and GAGCNLT_WINDOWS lists */
+static void SendOutModalChangeNotification(optr oself)
+{
+    static const word lists[2] = {
+	GAGCNLT_MODAL_WIN_CHANGE, GAGCNLT_WINDOWS
+    };
+    optr none = 0;
+    word i;
+
+    for (i = 0; i < 2; i++) {
+	EventHandle ev = @record none::MSG_META_NOTIFY(
+				MANUFACTURER_ID_GEOWORKS,
+				GWNT_MODAL_WIN_CHANGE, 0);
+
+	@call oself::MSG_META_GCN_LIST_SEND(0, ev, 0, lists[i],
+					    MANUFACTURER_ID_GEOWORKS);
+    }
+}
+
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_GET_MODAL_WIN
+{
+    return pself->OLAI_modalWin;
+}
+
+/* AppFindTopSysModalWin: the application's top system modal window on
+ * the default screen (its input object, 0: none) */
+optr AppFindTopSysModalWin(optr oself)
+{
+    WindowHandle win;
+
+    return FindWinOnWin(App(oself)->OLAI_screenWin,
+			(LAYER_PRIO_MODAL << 4) | WIN_PRIO_MODAL,
+			AppGeode(oself), 0, &win);
+}
+
+/* AppFindTopWinOfPriority: the application's top window of the window
+ * priority on its field (its layer is the geode) */
+optr AppFindTopWinOfPriority(optr oself, byte prio)
+{
+    WindowHandle win;
+
+    return FindWinOnWin(App(oself)->VCI_window, prio, 0, AppGeode(oself),
+			&win);
+}
+
+/* ---------------------------------------------------------------------
+ * Raising and lowering
+ * ------------------------------------------------------------------- */
+
+/* OLApplicationNotifyTaskSelected: chosen in the express menu: the
+ * primaries not minimized, a desk accessory on top, the field on top */
+@extern method OLApplicationClass, MSG_META_NOTIFY_TASK_SELECTED
+{
+    if (GenApp(oself)->GAI_states & (AS_DETACHING |
+				     AS_NOT_USER_INTERACTABLE))
+	return;
+    /* (the primaries not minimized: not yet, GenPrimaryClass is not
+     * ported) */
+    OLAppRaiseLayerPrioIfDeskAccessory(oself);
+    GenCallParent(oself, MSG_GEN_BRING_TO_TOP, NULL, 0, NULL, 0);
+}
+
+/* the layer priority of a desk accessory's windows, kept (to state) for
+ * the windows to come; the open windows moved to it */
+static void SetDeskAccessoryLayerPrio(optr oself, LayerPriority prio)
+{
+    WindowHandle win;
+
+    if (!(GenApp(oself)->GAI_launchFlags & ALF_DESK_ACCESSORY))
+	return;
+    *(LayerPriority *) ObjVarAddData(oself,
+		ATTR_GEN_WINDOW_CUSTOM_LAYER_PRIORITY | VDF_SAVE_TO_STATE,
+		sizeof(LayerPriority)) = prio;
+    win = VisQueryWindow(oself);
+    if (win)
+	WinChangePriority(win, WPF_LAYER |
+			  (prio << WPF_LAYER_PRIORITY_OFFSET),
+			  AppGeode(oself));
+}
+
+/* OLAppRaiseLayerPrioIfDeskAccessory: a desk accessory on top */
+void OLAppRaiseLayerPrioIfDeskAccessory(optr oself)
+{
+    SetDeskAccessoryLayerPrio(oself, LAYER_PRIO_ON_TOP);
+}
+
+/* OLAppLowerLayerPrioIfDeskAccessory: a desk accessory back with the
+ * other applications (in the application cache) */
+void OLAppLowerLayerPrioIfDeskAccessory(optr oself)
+{
+    SetDeskAccessoryLayerPrio(oself, LAYER_PRIO_STD);
+}
+
+/* OLAppRaiseLowerCommon: the system raises or lowers the geode (its
+ * layer is the geode) on the field's window */
+static void OLAppRaiseLowerCommon(optr oself, Message msg)
+{
+    struct {
+	GeodeHandle geode;
+	Handle layerID;
+	WindowHandle parentWindow;
+    } p;
+
+    p.geode = AppGeode(oself);
+    p.layerID = p.geode;
+    p.parentWindow = App(oself)->OLAI_fieldWin;
+    UserCallSystem(msg, &p, sizeof(p), NULL, 0);
+}
+
+@extern method OLApplicationClass, MSG_GEN_BRING_TO_TOP
+{
+    OLAppRaiseLowerCommon(oself, MSG_GEN_SYSTEM_BRING_GEODE_TO_TOP);
+}
+
+/*
+ * OLApplicationLowerToBottom: the geode's parent object is to prefer
+ * the application's layer (a desk accessory's or the standard one) and
+ * avoid the application; the system lowers it; the application last in
+ * its field's list
+ */
+@extern method OLApplicationClass, MSG_GEN_LOWER_TO_BOTTOM
+{
+    EnsureActiveFTPriorityPreferenceData d;
+    optr parent = WinGeodeGetParentObj(AppGeode(oself));
+    EventHandle ev;
+
+    d.EAFTPPD_priority = (GenApp(oself)->GAI_launchFlags &
+			  ALF_DESK_ACCESSORY ? LAYER_PRIO_ON_TOP
+					     : LAYER_PRIO_STD) << 4;
+    d.EAFTPPD_avoidOptr = oself;
+    if (parent)
+	@call parent::MSG_META_ADD_VAR_DATA(
+		TEMP_META_ENSURE_ACTIVE_FT_LAYER_PRIORITY_PREFERENCE,
+		sizeof(d), &d);
+    OLAppRaiseLowerCommon(oself, MSG_GEN_SYSTEM_LOWER_GEODE_TO_BOTTOM);
+    ev = @record GenFieldClass::MSG_GEN_FIELD_MOVE_GEN_APPLICATION(oself,
+								  CCO_LAST);
+    @call oself::MSG_GEN_GUP_CALL_OBJECT_OF_CLASS(ev);
+}
+
+/* OLApplicationCheckBeforeGrabbing: no exclusives while detaching or
+ * not interactable */
+@extern method OLApplicationClass, MSG_META_GRAB_FOCUS_EXCL,
+			    MSG_META_GRAB_TARGET_EXCL,
+			    MSG_META_GRAB_MODEL_EXCL
+{
+    if (GenApp(oself)->GAI_states & (AS_DETACHING |
+				     AS_NOT_USER_INTERACTABLE))
+	return;
+    @callsuper();
+}
+
+/*
+ * OLApplicationGainedFocusExcl: the focus application: the focus within
+ * it, a window on top found, the application first in its field's list
+ */
+@extern method OLApplicationClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    EventHandle ev;
+
+    pself->OLAI_flowFlags |= AFF_FOCUS_APP;
+    OLAppUpdateFocusActivity(oself);
+    @call oself::MSG_META_ENSURE_ACTIVE_FT();
+    ev = @record GenFieldClass::MSG_GEN_FIELD_MOVE_GEN_APPLICATION(oself,
+								  CCO_FIRST);
+    @call oself::MSG_GEN_GUP_CALL_OBJECT_OF_CLASS(ev);
+}
+
+@extern method OLApplicationClass, MSG_META_LOST_FOCUS_EXCL
+{
+    pself->OLAI_flowFlags &= ~AFF_FOCUS_APP;
+    OLAppUpdateFocusActivity(oself);
+}
+
+/*
+ * OLAppUpdateFocusActivity: the focus within the application has the
+ * system's focus if the application has the focus and input is not
+ * ignored (or the modal window overrides it)
+ */
+void OLAppUpdateFocusActivity(optr oself)
+{
+    OLApplicationInstance *a = App(oself);
+    Boolean allow, has;
+
+    allow = (a->OLAI_flowFlags & AFF_FOCUS_APP) &&
+	    ((a->OLAI_flowFlags & AFF_OVERRIDE_INPUT_RESTRICTIONS) ||
+	     !a->OLAI_ignoreInputCount);
+    has = (a->VCNI_focusExcl.FTVMC_flags & HGF_SYS_EXCL) != 0;
+    if (allow == has)
+	return;
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       APP_OFFSET(VCNI_focusExcl),
+			       allow ? MSG_META_GAINED_SYS_FOCUS_EXCL
+				     : MSG_META_LOST_SYS_FOCUS_EXCL);
+}
+
+/* OLAppConsumeMessage: the application takes no mouse or keyboard
+ * grab */
+@extern method OLApplicationClass, MSG_META_FORCE_GRAB_KBD, MSG_META_GRAB_KBD,
+			    MSG_META_RELEASE_KBD
+{
+}
+
+@extern method OLApplicationClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE,
+			    MSG_VIS_FORCE_GRAB_MOUSE,
+			    MSG_VIS_GRAB_LARGE_MOUSE, MSG_VIS_GRAB_MOUSE,
+			    MSG_VIS_RELEASE_MOUSE
+{
+}
+
+/* OLApplicationUpdateTargetExcl: the system's target within the
+ * application follows the application's */
+@extern method OLApplicationClass, MSG_META_GAINED_TARGET_EXCL,
+			    MSG_META_LOST_TARGET_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+			       VIS_MASTER, APP_OFFSET(VCNI_targetExcl),
+			       message + (MSG_META_GAINED_SYS_TARGET_EXCL -
+					  MSG_META_GAINED_TARGET_EXCL));
+}
+
+@extern method OLApplicationClass, MSG_META_GAINED_MODEL_EXCL,
+			    MSG_META_LOST_MODEL_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_MODEL_EXCL,
+			       VIS_MASTER, APP_OFFSET(OLAI_modelExcl),
+			       message + (MSG_META_GAINED_SYS_MODEL_EXCL -
+					  MSG_META_GAINED_MODEL_EXCL));
+}
+
+/*
+ * OLApplicationAlterFTVMCExcl: the hierarchies within the application
+ * (the focus with the non-modal cache); the application's own requests
+ * (MAEF_NOT_HERE) and the full screen go to the field
+ */
+@extern method OLApplicationClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    struct { optr o; MetaAlterFTVMCExclFlags f; } p;
+
+    if (!(flags & MAEF_NOT_HERE)) {
+	if (flags & MAEF_FOCUS) {
+	    AlterFExclWithNonModalCacheCommon(oself,
+				APP_OFFSET(VCNI_focusExcl),
+				APP_OFFSET(OLAI_nonModalFocus),
+				objectWantingControl, flags,
+				App(oself)->OLAI_modalWin != 0);
+	    flags &= ~MAEF_FOCUS;
+	}
+	if (flags & MAEF_TARGET) {
+	    FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+				      VIS_MASTER, APP_OFFSET(VCNI_targetExcl),
+				      objectWantingControl,
+				      (flags & MAEF_GRAB) | MAEF_TARGET);
+	    flags &= ~MAEF_TARGET;
+	}
+	if (flags & MAEF_MODEL) {
+	    FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_MODEL_EXCL,
+				      VIS_MASTER, APP_OFFSET(OLAI_modelExcl),
+				      objectWantingControl,
+				      (flags & MAEF_GRAB) | MAEF_MODEL);
+	    flags &= ~MAEF_MODEL;
+	}
+	if (!(flags & MAEF_MASK_OF_ALL_HIERARCHIES))
+	    return;
+    }
+    p.o = objectWantingControl;
+    p.f = flags & ~MAEF_NOT_HERE;
+    GenCallParent(oself, MSG_META_MUP_ALTER_FTVMC_EXCL, &p, sizeof(p), NULL,
+		  0);
+}
+
+/* OLApplicationSendClassedEvent: to the application's focus, target or
+ * model */
+@extern method OLApplicationClass, MSG_META_SEND_CLASSED_EVENT
+{
+    optr dest;
+
+    if (whereTo == (TravelOption) TO_FOCUS)
+	dest = pself->VCNI_focusExcl.FTVMC_OD;
+    else if (whereTo == (TravelOption) TO_TARGET)
+	dest = pself->VCNI_targetExcl.FTVMC_OD;
+    else if (whereTo == (TravelOption) TO_MODEL)
+	dest = pself->OLAI_modelExcl.FTVMC_OD;
+    else {
+	@callsuper();
+	return;
+    }
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo, dest, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * Busy and input
+ * ------------------------------------------------------------------- */
+
+/* OLAppMarkBusy: the busy pointer; no auto power off while busy */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_MARK_BUSY
+{
+    pself->OLAI_busyCount++;
+    SysDisableAPO();
+    OLAppUpdatePtrImage(oself);
+}
+
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_MARK_NOT_BUSY
+{
+    if (pself->OLAI_busyCount)
+	pself->OLAI_busyCount--;
+    SysEnableAPO();
+    OLAppUpdatePtrImage(oself);
+}
+
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_HOLD_UP_INPUT
+{
+    pself->OLAI_holdUpInputCount++;
+    OLAppUpdateFlowHoldUpState(oself);
+    OLAppUpdatePtrImage(oself);
+}
+
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_RESUME_INPUT
+{
+    if (pself->OLAI_holdUpInputCount)
+	pself->OLAI_holdUpInputCount--;
+    OLAppUpdateFlowHoldUpState(oself);
+    OLAppUpdatePtrImage(oself);
+}
+
+/* OLAppIgnoreInput: no keyboard (the focus), no mouse (the implied
+ * window), the busy pointer */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_IGNORE_INPUT
+{
+    pself->OLAI_ignoreInputCount++;
+    OLAppUpdateFocusActivity(oself);
+    OLAppUpdateImpliedWin(oself);
+    OLAppUpdatePtrImage(oself);
+}
+
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_ACCEPT_INPUT
+{
+    if (!pself->OLAI_ignoreInputCount || --pself->OLAI_ignoreInputCount)
+	return;
+    OLAppUpdateFocusActivity(oself);
+    OLAppUpdateImpliedWin(oself);
+    OLAppUpdatePtrImage(oself);
+}
+
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_MARK_APP_COMPLETELY_BUSY
+{
+    pself->OLAI_completelyBusyCount++;
+    SysDisableAPO();
+    OLAppUpdatePtrImage(oself);
+}
+
+@extern method OLApplicationClass,
+	MSG_GEN_APPLICATION_MARK_APP_NOT_COMPLETELY_BUSY
+{
+    if (pself->OLAI_completelyBusyCount)
+	pself->OLAI_completelyBusyCount--;
+    SysEnableAPO();
+    OLAppUpdatePtrImage(oself);
+}
+
+/*
+ * OLAppUpdateFlowHoldUpState: the content holds up the application's
+ * input while it is to be held up (unless the modal window overrides
+ * it)
+ */
+void OLAppUpdateFlowHoldUpState(optr oself)
+{
+    OLApplicationInstance *a = App(oself);
+    Boolean hold = !(a->OLAI_flowFlags & AFF_OVERRIDE_INPUT_RESTRICTIONS) &&
+		   a->OLAI_holdUpInputCount;
+
+    if (hold == ((a->OLAI_flowFlags & AFF_FLOW_HOLDING_INPUT_FOR_APP) != 0))
+	return;
+    if (hold) {
+	a->OLAI_flowFlags |= AFF_FLOW_HOLDING_INPUT_FOR_APP;
+	@call oself::MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW();
+    } else {
+	a->OLAI_flowFlags &= ~AFF_FLOW_HOLDING_INPUT_FOR_APP;
+	@call oself::MSG_VIS_CONTENT_RESUME_INPUT_FLOW();
+    }
+}
+
+/* the objects of one of the application's GCN lists (n of them, at
+ * most max) */
+static word GCNListItems(optr oself, word listType, optr *items, word max)
+{
+    TempMetaGCNData *d = ObjVarFindData(oself, TEMP_META_GCN);
+    ChunkHandle list;
+    optr l;
+    word i, n;
+
+    if (!d)
+	return 0;
+    list = GCNListFindListInBlock(MANUFACTURER_ID_GEOWORKS, listType,
+				  OptrToHandle(oself), d->TMGCND_listOfLists,
+				  FALSE);
+    if (!list)
+	return 0;
+    l = ConstructOptr(OptrToHandle(oself), list);
+    n = ChunkArrayGetCount(l);
+    if (n > max)
+	n = max;
+    for (i = 0; i < n; i++) {
+	GCNListElement *e = ChunkArrayElementToPtr(l, i, NULL);
+
+	memcpy(&items[i], &e->GCNLE_item, sizeof(optr));
+    }
+    return n;
+}
+
+#define MAX_GCN_ITEMS	32
+
+/*
+ * OLAppCheckIfAlwaysInteractableObject: an object on the
+ * GAGCNLT_CONTROLLERS_WITHIN_USER_DO_DIALOGS list or below one of them
+ * (MSG_META_CHECK_IF_INTERACTABLE_OBJECT), else the modal window's
+ */
+@extern method OLApplicationClass,
+	MSG_GEN_APPLICATION_CHECK_IF_ALWAYS_INTERACTABLE_OBJECT
+{
+    optr items[MAX_GCN_ITEMS], w;
+    word i, n;
+
+    n = GCNListItems(oself, GAGCNLT_CONTROLLERS_WITHIN_USER_DO_DIALOGS,
+		     items, MAX_GCN_ITEMS);
+    for (i = 0; i < n; i++)
+	if (items[i] == objToCheck ||
+	    @call items[i]::MSG_META_CHECK_IF_INTERACTABLE_OBJECT(objToCheck))
+	    return TRUE;
+    w = App(oself)->OLAI_modalWin;
+    return w && @call w::MSG_META_CHECK_IF_INTERACTABLE_OBJECT(objToCheck);
+}
+
+/*
+ * OLAppTestWinInteractibility: may the mouse go into the window of the
+ * input object?  With a modal window: its windows (unless input is
+ * ignored and the modal window keeps the restrictions) and those of the
+ * GAGCNLT_ALWAYS_INTERACTABLE_WINDOWS objects; else unless input is
+ * ignored.
+ */
+@extern method OLApplicationClass, MSG_META_TEST_WIN_INTERACTIBILITY
+{
+    optr m = pself->OLAI_modalWin;
+
+    if (!inputOD)
+	return FALSE;
+    if (m) {
+	if (!@call m::MSG_META_TEST_WIN_INTERACTIBILITY(inputOD, window)) {
+	    optr items[MAX_GCN_ITEMS];
+	    word i, n;
+
+	    n = GCNListItems(oself, GAGCNLT_ALWAYS_INTERACTABLE_WINDOWS,
+			     items, MAX_GCN_ITEMS);
+	    for (i = 0; i < n; i++)
+		if (@call items[i]::MSG_META_TEST_WIN_INTERACTIBILITY(
+							inputOD, window))
+		    return TRUE;
+	    return FALSE;
+	}
+	if (@call m::MSG_GEN_INTERACTION_TEST_INPUT_RESTRICTABILITY(m))
+	    return TRUE;
+    }
+    return !App(oself)->OLAI_ignoreInputCount;
+}
+
+/* OLAppGetDisplayScheme: the specific UI's one display scheme */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_GET_DISPLAY_SCHEME
+{
+    SpecGetDisplayScheme(displayScheme);
+}
+
+/* the express menu's entries: not yet */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_SET_TASK_ENTRY_MONIKER
+{
+    (void) entryMoniker;
+}
+
+@extern method OLApplicationClass, MSG_OL_APP_UPDATE_TASK_ENTRY
+{
+    (void) hasFocus;
+}
+
+/* OLAppSendToFlow: the mouse's state is the flow object's */
+@extern method OLApplicationClass, MSG_VIS_VUP_TERMINATE_ACTIVE_MOUSE_FUNCTION
+{
+    optr flow = UserGetFlowObject();
+
+    if (flow)
+	@call flow::MSG_VIS_VUP_TERMINATE_ACTIVE_MOUSE_FUNCTION();
+}
+
+@extern method OLApplicationClass, MSG_VIS_VUP_GET_MOUSE_STATUS
+{
+    optr flow = UserGetFlowObject();
+
+    return flow ? @call flow::MSG_VIS_VUP_GET_MOUSE_STATUS() : 0;
+}
+
+@extern method OLApplicationClass, MSG_VIS_VUP_BUMP_MOUSE
+{
+    optr flow = UserGetFlowObject();
+
+    if (flow)
+	@call flow::MSG_VIS_VUP_BUMP_MOUSE(xBump, yBump);
+}
+
+/* OLApplicationGetMeasurementType: the application's units, the
+ * system's for AMT_DEFAULT; the application's in the high byte */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_GET_MEASUREMENT_TYPE
+{
+    WholeMeasurementType w;
+
+    w.WMT_appMeasurementType = pself->OLAI_units;
+    w.WMT_measurementType = pself->OLAI_units == AMT_DEFAULT
+			    ? (MeasurementType) LocalGetMeasurementType()
+			    : (MeasurementType) pself->OLAI_units;
+    return w;
+}

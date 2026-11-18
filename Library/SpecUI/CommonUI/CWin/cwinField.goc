@@ -15,8 +15,9 @@
  *     in its background color ([ui] backgroundcolor);
  *   - the options of the field's category (the specific UI reads [ui]);
  *   - MSG_OL_APP_APPLY_FIELD_SIZE_CHANGE to the applications when the
- *     field's size changes (OLApplicationClass is not ported yet),
- *     MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP for the same reason.
+ *     field's size changes (no application handles it, as in the asm);
+ *   - MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP selects the window list's next
+ *     entry (the window list is not ported).
  */
 @include "cGeode.goh"
 @include <Internal/flowC.goh>
@@ -844,4 +845,13 @@ static void FieldCollectApps(WindowHandle parent, AppArray *a)
 @method OLFieldClass, MSG_OL_FIELD_MOVE_TOOL_AREA
 {
     (void) params;
+}
+
+/* the next application: the window list's next entry (not yet: the
+ * window list is not ported); the application's event freed */
+@method OLFieldClass, MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP
+{
+    (void) currentApp;
+    if (event)
+	ObjFreeMessage(event);
 }

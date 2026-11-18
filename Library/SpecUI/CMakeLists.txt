@@ -18,11 +18,15 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CUtils/copenUtils.goc
                ${c}/CUtils/cutilsPtrImages.goc
                ${c}/CUtils/copenSystem.goc
+               ${c}/CUtils/copenAppAttDet.goc
+               ${c}/CUtils/copenAppCommon.goc
+               ${c}/CUtils/copenAppMisc.goc
                ${c}/CWin/cwinScreen.goc
                ${c}/CWin/cwinField.goc
                ${c}/CSpec/cspecSystem.goc
                ${c}/CSpec/cspecScreen.goc
                ${c}/CSpec/cspecField.goc
+               ${c}/CSpec/cspecApplication.goc
            INCLUDES ${c}
            PROTOCOL 727.0)
 set(motif_GEO ${motif_GEO} PARENT_SCOPE)

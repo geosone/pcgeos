@@ -29,8 +29,7 @@ skip 1
 # OLBuildTrigger
 skip 1
 # OLBuildDisplay
-skip 1
-# OLBuildApplication
+export OLBuildApplication
 export OLBuildField
 export OLBuildScreen
 export OLBuildSystem
@@ -55,3 +54,4 @@ export SpecGetWindowOptions
 export OLSystemClass
 export OLScreenClass
 export OLFieldClass
+export OLApplicationClass

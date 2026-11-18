@@ -1,0 +1,108 @@
+/*
+ * olApplicationClass.goh -- OLApplicationClass, the application object
+ * of a specific UI (after Include/Internal/SpecUI/olApplicationClass.def),
+ * for Port32.
+ *
+ * The messages are in the asm's order (Motif: no print screen, no
+ * animated busy pointer; the task bar's message is in).  Port32: an
+ * optr is a dword pair of handle and chunk; MSG_TIMER_EXPIRED gets the
+ * parameters of every event timer (the tick and the timer's ID); the
+ * implied window comes back as a MouseGrab.  OLAppTaskItemClass (the
+ * application's entry in the express menu) is not ported yet.
+ */
+#ifndef __OLAPPLICATIONCLASS_GOH
+#define __OLAPPLICATIONCLASS_GOH
+
+@include <Objects/vCntC.goh>
+@include <Objects/gAppC.goh>
+@include <Objects/uiInputC.goh>
+
+@deflib motif
+
+/* sent to the object a MSG_OL_APP_START_TIMER started the timer for */
+@importMessage MetaUIMessages, void MSG_TIMER_EXPIRED(dword tick,
+						       word timerID);
+
+/* the flags of the application's input flow (OLAI_flowFlags) */
+typedef ByteFlags AppFlowFlags;
+#define AFF_FLOW_HOLDING_INPUT_FOR_APP	0x80
+#define AFF_FOCUS_APP			0x40
+#define AFF_OVERRIDE_INPUT_RESTRICTIONS	0x20
+
+/* a dialog of MSG_GEN_APPLICATION_DO_STANDARD_DIALOG (a chain in
+ * OLAI_stdDialogs): where its response goes, the summons, its timer */
+typedef struct {
+    ChunkHandle	OLASD_next;
+    optr	OLASD_responseOD;
+    Message	OLASD_responseMsg;
+    optr	OLASD_summons;
+    TimerHandle	OLASD_timerHandle;
+    word	OLASD_timerId;		/* 0 if not timed */
+} OLAStdDialog;
+
+@class OLApplicationClass, VisContentClass;
+@uses GenApplicationClass;
+
+/* the next window of the application (not while a modal one is up) */
+@message void MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW();
+/* a standard dialog's response (its OLAStdDialog chunk) */
+@message void MSG_OL_APP_DO_DIALOG_RESPONSE(word response,
+					    ChunkHandle stdDialog);
+@message void MSG_OL_APP_TIMED_DIALOG_TIMER_EXPIRED(dword tick,
+						    word timerID);
+/* the application's express menu entries (selected if it has the
+ * focus) */
+@message void MSG_OL_APP_UPDATE_TASK_ENTRY(Boolean hasFocus);
+/* a one-shot timer sending MSG_TIMER_EXPIRED to od (ticks 0: the
+ * gadget repeat delay); one at a time */
+@message void MSG_OL_APP_START_TIMER(optr od, word ticks);
+@message void MSG_OL_APP_STOP_TIMER(optr od);
+@message void MSG_OL_APPLICATION_GEOS_TASKS_LIST_ITEM_CREATED();
+@message void MSG_OL_APPLICATION_ADD_TO_FIELD_TASK_LIST(optr field);
+/* F3: quit (in the transparent launch mode: to the back) */
+@message void MSG_OL_APPLICATION_QUIT();
+/* the next application of the field (the event dispatched when found) */
+@message void MSG_OL_APP_NAVIGATE_TO_NEXT_APP(EventHandle event);
+@message void MSG_OL_APP_TRY_NAVIGATE_TO_APP(EventHandle event);
+@message void MSG_OL_APP_UPDATE_WINDOWS_FOR_TASK_BAR();
+/* the window the mouse is over */
+@message void MSG_OL_APP_GET_IMPLIED_WIN(MouseGrab *retValue);
+@message void MSG_OL_APP_APPLY_FIELD_SIZE_CHANGE(word width, word height);
+
+    /* the window of the application the mouse is over */
+    @instance MouseGrab		OLAI_impliedWin = {0, 0};
+    /* the input object of the modal window (system or application
+     * modal), 0 if none */
+    @instance optr		OLAI_modalWin = 0;
+    /* the field's window the application is on, the default screen's
+     * (for system modal dialogs) */
+    @instance WindowHandle	OLAI_fieldWin = 0;
+    @instance WindowHandle	OLAI_screenWin = 0;
+    @instance AppFlowFlags	OLAI_flowFlags = 0;
+    /* outstanding requests: busy (the pointer), input held up, input
+     * ignored, every modal window busy */
+    @instance word		OLAI_busyCount = 0;
+    @instance word		OLAI_holdUpInputCount = 0;
+    @instance word		OLAI_ignoreInputCount = 0;
+    @instance byte		OLAI_completelyBusyCount = 0;
+    /* the last object to have or ask for the focus, not for a modal
+     * window */
+    @instance optr		OLAI_nonModalFocus = 0;
+    /* the focus and target exclusives are VCNI_focusExcl and
+     * VCNI_targetExcl; the model exclusive is here */
+    @instance FTVMCGrab		OLAI_modelExcl = {0, 0};
+    /* the express menu entries made for the application */
+    @instance ChunkHandle	OLAI_appMenuItems = 0;
+    /* the chain of standard dialogs */
+    @instance ChunkHandle	OLAI_stdDialogs = 0;
+    /* the timer of MSG_OL_APP_START_TIMER */
+    @instance optr		OLAI_timerOD = 0;
+    @instance word		OLAI_timerID = 0;
+    @instance TimerHandle	OLAI_timerHandle = 0;
+    @instance AppMeasurementType OLAI_units = 0;
+
+@endc;
+
+@endlib
+
+#endif

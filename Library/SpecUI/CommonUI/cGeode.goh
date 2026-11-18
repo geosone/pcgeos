@@ -19,6 +19,7 @@
 @include <Internal/SpecUI/olSystemClass.goh>
 @include <Internal/SpecUI/olScreenClass.goh>
 @include <Internal/SpecUI/olFieldClass.goh>
+@include <Internal/SpecUI/olApplicationClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/im.h>
 #include <Internal/videoDr.h>
@@ -53,6 +54,39 @@ extern void WinInvalTree(Handle win, const Region *reg, word axParam,
 /* ---------------------------------------------------------------------
  * Constants (cConstant.def, CWin/cwinConstant.def)
  * ------------------------------------------------------------------- */
+
+/* the specific UI's generic upward queries (cConstant.def
+ * SpecGenQueryTypes; MSG_SPEC_P32_GUP_QUERY) */
+#define SPEC_GEN_QUERY_START		2000
+#define SGQT_BUILD_INFO			(SPEC_GEN_QUERY_START + 0)
+	/* GRP_bp: the OLBuildFlags passed and answered; GRP_cx, GRP_dx:
+	 * the vis parent */
+#define SGQT_FIND_MENU_BAR		(SPEC_GEN_QUERY_START + 1)
+#define SGQT_IS_CHILD_OF_PRIMARY	(SPEC_GEN_QUERY_START + 2)
+#define SGQT_BRING_UP_KEYBOARD		(SPEC_GEN_QUERY_START + 3)
+#define SGQT_WIN_GROUP			(SPEC_GEN_QUERY_START + 4)
+
+/* OLBuildFlags (olCtrlClass.def): how a generic object is placed; the
+ * reply in the low bits */
+typedef WordFlags OLBuildFlags;
+#define OLBF_MENUABLE		0x8000
+#define OLBF_TRIGGER		0x4000
+#define OLBF_SEEK_MENU_BAR	0x2000
+#define OLBF_AVOID_MENU_BAR	0x1000
+#define OLBF_MENU_IN_DISPLAY	0x0800
+#define OLBF_ALWAYS_ADOPT	0x0400
+#define OLBF_TOOLBOX		0x0200
+#define OLBF_DELAYED_MODE	0x0100
+#define OLBF_TARGET		0x00f0
+#define OLBF_TARGET_OFFSET	4
+#define OLBF_ABOVE_DISP_CTRL	0x0008
+#define OLBF_REPLY		0x0007
+#define OLBF_REPLY_OFFSET	0
+/* OLBuildReplies */
+#define OLBR_NO_REPLY		0
+#define OLBR_TOP_MENU		1
+#define OLBR_SUB_MENU		2
+#define OLBR_REPLY_BAR		3
 
 /* SystemAttrs (genC.def) the C header lacks */
 #ifndef SA_PORTRAIT
@@ -203,9 +237,28 @@ extern void AlterFExclWithNonModalCacheCommon(optr oself, word focusOff,
 					      MetaAlterFTVMCExclFlags flags,
 					      Boolean modalActive);
 extern void OLSysUpdatePtrImage(optr system);
+/* the input object of the first child window of parentWin (of the
+ * owner and layer, if given) of the priority prio (the layer and window
+ * priority, GeodeWinFlags the geode must have in the high byte); its
+ * window in *win; 0 if none */
+extern optr FindWinOnWin(WindowHandle parentWin, word prio,
+			 GeodeHandle owner, Handle layerID,
+			 WindowHandle *win);
+
+/* CUtils/copenApp*.goc: the application object */
+extern void OLAppUpdateGeodeWinFlags(optr app);
+extern void OLAppRaiseLayerPrioIfDeskAccessory(optr app);
+extern void OLAppLowerLayerPrioIfDeskAccessory(optr app);
+extern optr AppFindTopSysModalWin(optr app);
+extern optr AppFindTopWinOfPriority(optr app, byte prio);
+extern void OLAppUpdateImpliedWin(optr app);
+extern void OLAppUpdatePtrImage(optr app);
+extern void OLAppUpdateFocusActivity(optr app);
+extern void OLAppUpdateFlowHoldUpState(optr app);
 
 /* the exported routines of the specific UI (motif32.gp: the first
  * entries, in SpecificUIRoutine order) */
 extern ClassStruct *OLBuildSystem(optr oself, word masterOffset);
 extern ClassStruct *OLBuildScreen(optr oself, word masterOffset);
+extern ClassStruct *OLBuildApplication(optr oself, word masterOffset);
 extern ClassStruct *OLBuildField(optr oself, word masterOffset);
