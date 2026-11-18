@@ -33,7 +33,13 @@
  *      its attributes and position flags; usable, its window on the
  *      field's, its gadget area holding a group and a title bar group
  *      a toolbox; maximized (the whole field) and restored, minimized
- *      (closed) and restored, not usable.
+ *      (closed) and restored, not usable;
+ *  13. OLDialogWin: a command dialog and a modal notification under the
+ *      application (OLBuildInteraction): built twice, centered, closed
+ *      until initiated; the gadget area, a title bar group and the reply
+ *      bar (its own, or one the dialog makes for a group seeking it);
+ *      dismissed and initiated again, complete (a single usage notice
+ *      closes), not usable.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -150,11 +156,12 @@ int main(void)
     step(10);
     step(11);
     step(12);
+    step(13);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 140 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 174 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

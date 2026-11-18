@@ -5380,6 +5380,27 @@ are left out), the constants, the variables and the routines.
     `MSG_GEN_FIND_MONIKER` finds the application's moniker (its block
     run by the caller's thread) and copies it (`VMSF_COPY_CHUNK`): a
     primary without a moniker gets the application's for its title.
+  - `OLPopupWinClass` (`CWin/cwinPopup.goc`), `OLDialogWinClass`
+    (`CWin/cwinDialog.goc`), `OLReplyBarClass` (`CComp/copenReplyBar.goc`,
+    all three in `Internal/SpecUI/olPopupWinClass.goh`) and the build
+    routine `OLBuildInteraction` (`CSpec/cspecInteraction.goc`, the
+    eighth export of `motif32.gp`): a GenInteraction is a dialog, a
+    reply bar or a group by its visibility and the build info its
+    generic parents give (OLMapGroup); a dialog is built twice (window
+    and button), centered, a command window or (modal) a notice,
+    brought up by `MSG_GEN_INTERACTION_INITIATE` and taken down by
+    `IC_DISMISS` (also on `IC_INTERACTION_COMPLETE` if single usage or
+    modal), its children in a gadget area, title bar groups and the
+    reply bar (its own `HINT_MAKE_REPLY_BAR` child, or one it makes for
+    a child with `HINT_SEEK_REPLY_BAR`: `OpenCreateChildObject`).
+    `OLPWI_udds` is a pointer; the response's ActionDescriptor is
+    `OLDWI_responseOD` and `OLDWI_responseMsg` (C has no type for it).
+    `MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(command)` returns the optr.
+    Like the asm, an interaction no generic parent answers the build
+    info for becomes a dialog window; a GIV_CONTROL_GROUP in a menu too.
+    A reply bar's standard trigger is known by
+    `ATTR_GEN_TRIGGER_INTERACTION_COMMAND` alone (GenTriggerClass is not
+    in the C UI).
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, the navigation
   (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons and the
@@ -5390,13 +5411,19 @@ are left out), the constants, the variables and the routines.
   the window list entry, the express tool area (the field has none),
   moniker lists, a double click on the title (the pointer code of
   `cwinPtr.asm`), `GenDisplayGroupClass` (not in the C UI). The display
-  and dialog classes and their build routines. In `OLGadgetAreaClass`:
+  classes and their build routine. In `OLPopupWinClass` and
+  `OLDialogWinClass`: the button that brings a popup up
+  (`OLButtonClass`, `OLMenuButtonClass`: a user initiatable dialog has
+  none), UserDoDialog and the action response, the standard triggers a
+  dialog's type adds, discarding the block, the pushpin, the focus of a
+  dialog run by the UI thread; `OLMenuWinClass` (a menu is a plain
+  `OLPopupWin`), `OLPopoutClass` and `OLMenuItemGroupClass` (plain
+  `OLCtrl`s). In `OLGadgetAreaClass`:
   the display controls its margins look for. In `OLCtrlClass`:
-  an OLCtrl in a menu window, the reply bar's notification of its dialog and its
-  line under a dialog (`OLDialogWinClass`, `OLReplyBarClass`), the
-  gadget area's margins, the menu center, mnemonics, the default
-  focus broadcast. The build routines of interactions and displays
-  (`OLBuildInteraction`, ...). The window and gadget classes (and so the windows of
+  an OLCtrl in a menu window, the reply bar's extra line when not under
+  a dialog, the menu center, mnemonics, the default
+  focus broadcast. The build routine of displays
+  (`OLBuildDisplay`, ...). The other window and gadget classes (and so the windows of
   an application, its standard dialogs, the navigation between its
   windows, the menu bar); the application's express menu entries
   (`OLAppTaskItemClass`); the beep of an unwanted key (no sound driver
@@ -5450,7 +5477,15 @@ are left out), the constants, the variables and the routines.
   covers the field from -1, -1 (the frame off it) and is neither
   movable nor resizable, restored it has its size again; minimized it
   is closed (the branch minimized), restored it opens again; not usable
-  it closes and frees its slot. The test loads no fonts, so monikers have no height
+  it closes and frees its slot. Then dialogs (`OLBuildInteraction`): a
+  command dialog under the application, built twice, centered on the
+  field, closed until initiated, its group in the gadget area, a
+  toolbox in the left title bar group and its own reply bar last (an
+  `OLReplyBar` under the dialog holding a group); dismissed it closes
+  and is not realizable, initiated it opens again and stays when
+  complete; a modal notification is a notice (not closable, not
+  minimizable, single usage) with a reply bar it made for a group
+  seeking one, and closes when complete. The test loads no fonts, so monikers have no height
   there.
 
 ## 14. Open

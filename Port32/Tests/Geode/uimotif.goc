@@ -21,6 +21,7 @@
 @include <Internal/SpecUI/olWinClass.goh>
 @include <Internal/SpecUI/olGadgetAreaClass.goh>
 @include <Internal/SpecUI/olBaseWinClass.goh>
+@include <Internal/SpecUI/olPopupWinClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/videoDr.h>
 #include <initfile.h>
@@ -51,8 +52,9 @@ UMState umState;
 @endc
 @classdecl UMProcessClass, neverSaved;
 
-/* generic groups built as OLCtrls (no build routine for interactions
- * yet) */
+/* generic groups built as OLCtrls whatever their parent (the steps
+ * look at them before they are in a tree: OLBuildInteraction would make
+ * a group no parent answers for a dialog window) */
 @class UMGroupClass, GenInteractionClass;
 @endc
 @classdecl UMGroupClass;
@@ -128,6 +130,45 @@ UMState umState;
 @object UMGroupClass UMPrimTool = {
     GII_visibility = GIV_SUB_GROUP;
     HINT_SEEK_TITLE_BAR_RIGHT;
+}
+/* a command dialog (built by OLBuildInteraction, as its children): a
+ * group, a toolbox seeking the title bar, a reply bar of its own */
+@object GenInteractionClass UMDialog = {
+    GI_visMoniker = "Dialog";
+    GI_states = GS_ENABLED;
+    GI_comp = @UMDlgGroup, @UMDlgTool, @UMDlgReply;
+    GII_type = GIT_COMMAND;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE;
+}
+@object GenInteractionClass UMDlgGroup = {
+    GII_visibility = GIV_SUB_GROUP;
+}
+@object GenInteractionClass UMDlgTool = {
+    GII_visibility = GIV_SUB_GROUP;
+    HINT_SEEK_TITLE_BAR_LEFT;
+}
+@object GenInteractionClass UMDlgReply = {
+    GI_comp = @UMDlgReplyGroup;
+    GII_visibility = GIV_SUB_GROUP;
+    HINT_MAKE_REPLY_BAR;
+}
+@object GenInteractionClass UMDlgReplyGroup = {
+    GII_visibility = GIV_SUB_GROUP;
+}
+/* a modal notification: a group seeking the reply bar (the dialog
+ * makes one) */
+@object GenInteractionClass UMNotice = {
+    GI_visMoniker = "Notice";
+    GI_states = GS_ENABLED;
+    GI_comp = @UMNoticeGroup;
+    GII_type = GIT_NOTIFICATION;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE | GIA_MODAL;
+}
+@object GenInteractionClass UMNoticeGroup = {
+    GII_visibility = GIV_SUB_GROUP;
+    HINT_SEEK_REPLY_BAR;
 }
 @end UMObjects;
 
@@ -730,6 +771,125 @@ static word Slot(byte req, sword *x, sword *y)
 	VisData(@UMPrimary, &b, sizeof(b));
 	UMCHECK(!(b.VI_attrs & VA_REALIZED));
 	UMCHECK(!((b.OLWI_winPosSizeState >> 8) & 0x3f));
+	break;
+    }
+    case 13: {
+	/* OLDialogWin: a command dialog under the application (built by
+	 * OLBuildInteraction): a popup built twice, centered; usable it
+	 * stays closed until initiated; its children in the gadget area,
+	 * the left title bar group and its reply bar (kept last);
+	 * dismissed, initiated again, complete (it stays); a modal
+	 * notification (a notice) with a reply bar it made, single usage:
+	 * complete closes it; not usable */
+	OLDialogWinInstance d;
+	OLReplyBarInstance rb;
+	OLFieldInstance f;
+	WindowHandle parent = 0;
+	optr ga, tg, rbo;
+	sword cx, fcx;
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMDialog, CCO_LAST);
+	(void) @call UMDialog::MSG_VIS_GET_ATTRS();
+	UMCHECK(InClass(@UMDialog, (ClassStruct *) &OLDialogWinClass));
+	VisData(@UMDialog, &d, sizeof(d));
+	UMCHECK(d.OLWI_type == MOWT_COMMAND_WINDOW);
+	UMCHECK((d.OLWI_attrs & (OWA_CLOSABLE | OWA_TITLED | OWA_MOVABLE)) ==
+		(OWA_CLOSABLE | OWA_TITLED | OWA_MOVABLE));
+	UMCHECK((d.OLWI_moreFixedAttr & OWMFA_IS_POPUP) &&
+		(d.VI_specAttrs & SA_USES_DUAL_BUILD) &&
+		!(d.OLPWI_flags & (OLPWF_APP_MODAL | OLPWF_SYS_MODAL)));
+	UMCHECK(!(d.OLDWI_optFlags & (OLDOF_SINGLE_USAGE |
+				      OLDOF_DELAYED_MODE)));
+	UMCHECK(d.OLWI_winPosSizeFlags ==
+		(WPSF_PERSIST | (WCT_KEEP_PARTIALLY_VISIBLE << 6) |
+		 (WPT_CENTER << 3) | WST_AS_DESIRED |
+		 WPSF_SHRINK_DESIRED_SIZE_TO_FIT_IN_PARENT));
+
+	/* usable: built, not open */
+	@call UMDialog::MSG_GEN_SET_USABLE(VUM_NOW);
+	VisData(@UMDialog, &d, sizeof(d));
+	UMCHECK(!(d.VI_attrs & VA_REALIZED));
+	/* initiated: open on the field, centered */
+	@call UMDialog::MSG_GEN_INTERACTION_INITIATE();
+	VisData(@UMDialog, &d, sizeof(d));
+	UMCHECK((d.VI_attrs & VA_REALIZED) && d.VCI_window &&
+		(d.VI_specAttrs & SA_REALIZABLE));
+	if (d.VCI_window)
+	    WinGetInfo(d.VCI_window, WIT_PARENT_WIN, &parent);
+	UMCHECK(parent == umState.UMS_fieldWin);
+	VisData(umField, &f, sizeof(f));
+	cx = (sword) ((d.VI_bounds.R_left + d.VI_bounds.R_right) / 2);
+	fcx = (sword) ((f.VI_bounds.R_left + f.VI_bounds.R_right) / 2);
+	UMCHECK(cx >= fcx - 1 && cx <= fcx + 1);
+	/* the children: the group in the gadget area, the toolbox in the
+	 * left title bar group, the reply bar ours and last */
+	UMCHECK(d.OLDWI_gadgetArea != 0);
+	ga = ConstructOptr(OptrToHandle(@UMDialog), d.OLDWI_gadgetArea);
+	UMCHECK(InClass(ga, (ClassStruct *) &OLGadgetAreaClass));
+	UMCHECK(InClass(@UMDlgGroup, (ClassStruct *) &OLCtrlClass));
+	UMCHECK(@call UMDlgGroup::MSG_VIS_FIND_PARENT() == ga);
+	tg = d.OLWI_titleBarLeftGroup;
+	UMCHECK(tg && @call UMDlgTool::MSG_VIS_FIND_PARENT() == tg);
+	UMCHECK(InClass(@UMDlgReply, (ClassStruct *) &OLReplyBarClass));
+	UMCHECK(d.OLDWI_replyBar == @UMDlgReply &&
+		!(d.OLDWI_optFlags & OLDOF_REPLY_BAR_CREATED));
+	VisData(@UMDlgReply, &rb, sizeof(rb));
+	UMCHECK(rb.OLRBI_dialog == @UMDialog &&
+		(rb.OLRBI_flags & OLRBF_UNDER_DIALOG));
+	UMCHECK(@call UMDlgReply::MSG_VIS_FIND_PARENT() == @UMDialog);
+	UMCHECK(@call UMDialog::MSG_VIS_FIND_CHILD(@UMDlgReply) ==
+		@call UMDialog::MSG_VIS_COUNT_CHILDREN() - 1);
+	UMCHECK(@call UMDlgReplyGroup::MSG_VIS_FIND_PARENT() == @UMDlgReply);
+
+	/* dismissed: closed, not realizable; initiated again: open */
+	(void) @call UMDialog::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	VisData(@UMDialog, &d, sizeof(d));
+	UMCHECK(!(d.VI_attrs & VA_REALIZED) &&
+		!(d.VI_specAttrs & SA_REALIZABLE));
+	@call UMDialog::MSG_GEN_INTERACTION_INITIATE();
+	VisData(@UMDialog, &d, sizeof(d));
+	UMCHECK(d.VI_attrs & VA_REALIZED);
+	/* a command dialog stays when complete */
+	(void) @call UMDialog::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+	VisData(@UMDialog, &d, sizeof(d));
+	UMCHECK(d.VI_attrs & VA_REALIZED);
+
+	/* the notice: modal, not closable, single usage */
+	@call umApp::MSG_GEN_ADD_CHILD(@UMNotice, CCO_LAST);
+	@call UMNotice::MSG_GEN_SET_USABLE(VUM_NOW);
+	UMCHECK(InClass(@UMNotice, (ClassStruct *) &OLDialogWinClass));
+	VisData(@UMNotice, &d, sizeof(d));
+	UMCHECK(d.OLWI_type == MOWT_NOTICE_WINDOW &&
+		(d.OLPWI_flags & OLPWF_APP_MODAL) &&
+		!(d.OLWI_attrs & (OWA_CLOSABLE | OWA_HAS_SYS_MENU)) &&
+		(d.VI_attrs & VA_BRANCH_NOT_MINIMIZABLE) &&
+		(d.OLDWI_optFlags & OLDOF_SINGLE_USAGE));
+	UMCHECK(d.OLWI_winPosSizeFlags == (WPSF_PERSIST |
+		(WCT_KEEP_VISIBLE << 6) | (WPT_CENTER << 3) | WST_AS_DESIRED));
+	@call UMNotice::MSG_GEN_INTERACTION_INITIATE();
+	VisData(@UMNotice, &d, sizeof(d));
+	UMCHECK(d.VI_attrs & VA_REALIZED);
+	/* the reply bar it made, last, holding the group */
+	rbo = d.OLDWI_replyBar;
+	UMCHECK(rbo && (d.OLDWI_optFlags & OLDOF_REPLY_BAR_CREATED));
+	if (rbo) {
+	    UMCHECK(InClass(rbo, (ClassStruct *) &OLReplyBarClass));
+	    UMCHECK(@call rbo::MSG_VIS_FIND_PARENT() == @UMNotice);
+	    UMCHECK(@call UMNotice::MSG_VIS_FIND_CHILD(rbo) ==
+		    @call UMNotice::MSG_VIS_COUNT_CHILDREN() - 1);
+	}
+	(void) @call UMNotice::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+	VisData(@UMNotice, &d, sizeof(d));
+	UMCHECK(!(d.VI_attrs & VA_REALIZED) &&
+		!(d.OLDWI_optFlags & OLDOF_DOING_COMPLETE));
+
+	/* not usable: closed */
+	@call UMDialog::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	VisData(@UMDialog, &d, sizeof(d));
+	UMCHECK(!(d.VI_attrs & VA_REALIZED));
+	@call UMNotice::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 	break;
     }
     }
