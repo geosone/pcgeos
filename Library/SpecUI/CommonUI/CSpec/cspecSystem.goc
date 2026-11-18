@@ -1,0 +1,12 @@
+/*
+ * cspecSystem.goc -- the build routine of GenSystemClass (after
+ * cspecSystem.asm): a GenSystem is always an OLSystem.
+ */
+@include "cGeode.goh"
+
+ClassStruct *OLBuildSystem(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLSystemClass;
+}

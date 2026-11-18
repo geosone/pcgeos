@@ -1,0 +1,12 @@
+/*
+ * cspecField.goc -- the build routine of GenFieldClass (after
+ * cspecField.asm): a GenField is always an OLField.
+ */
+@include "cGeode.goh"
+
+ClassStruct *OLBuildField(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLFieldClass;
+}

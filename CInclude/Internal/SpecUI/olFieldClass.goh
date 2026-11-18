@@ -1,0 +1,88 @@
+/*
+ * olFieldClass.goh -- OLFieldClass, the field object of a specific UI
+ * (after Include/Internal/SpecUI/olFieldClass.def), for Port32.
+ *
+ * The messages are in the asm's order (Motif: the window list's
+ * messages are in).  Port32: an optr is a dword pair of handle and
+ * chunk, OLFieldMoveToolAreaParams' geode and layer are handles.
+ */
+#ifndef __OLFIELDCLASS_GOH
+#define __OLFIELDCLASS_GOH
+
+@include <Objects/vCompC.goh>
+@include <Objects/gFieldC.goh>
+@include <Objects/uiInputC.goh>
+
+@deflib motif
+
+/* how the background picture is drawn (FieldBGFlags' FBGF_DRAW_ATTR) */
+typedef ByteEnum FieldBGDrawAttr;
+#define FBGDA_UPPER_LEFT	0
+#define FBGDA_CENTER		1
+#define FBGDA_TILE		2
+
+typedef ByteFlags FieldBGFlags;
+#define FBGF_DRAW_ATTR		0xf0
+#define FBGF_DRAW_ATTR_OFFSET	4
+
+/* MSG_OL_FIELD_MOVE_TOOL_AREA: the tool area to a position on the
+ * layer of a geode (0: the field's own, near its top left corner) */
+typedef struct {
+    GeodeHandle	OLFMTAP_geode;
+    word	OLFMTAP_xPos;
+    word	OLFMTAP_yPos;
+    Handle	OLFMTAP_layerID;
+    byte	OLFMTAP_layerPriority;
+    byte	OLFMTAP_dummy;
+} OLFieldMoveToolAreaParams;
+
+@class OLFieldClass, VisCompClass;
+@uses GenFieldClass;
+
+@message void MSG_OL_WORKSPACE_REFRESH();
+@message void MSG_OL_WORKSPACE_CLIPBOARD();
+@message void MSG_OL_WORKSPACE_PRINT_SCREEN();
+@message void MSG_OL_FIELD_RELEASE_EXPRESS_MENU();
+@message void MSG_OL_FIELD_POPUP_EXPRESS_MENU();
+@message void MSG_OL_FIELD_MOVE_TOOL_AREA(OLFieldMoveToolAreaParams *params);
+@message SizeAsDWord MSG_OL_FIELD_GET_TOOL_AREA_SIZE();
+@message void MSG_OL_FIELD_SIZE_TOOL_AREA(word height);
+@message void MSG_OL_FIELD_TOGGLE_EXPRESS_MENU();
+@message void MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP(optr currentApp);
+@message optr MSG_OL_FIELD_CREATE_WINDOW_LIST_ENTRY();
+@message ChunkHandle MSG_OL_FIELD_SELECT_WINDOW_LIST_ENTRY();
+@message void MSG_OL_FIELD_WINDOW_LIST_CLOSE_WINDOW();
+@message void MSG_OL_FIELD_UPDATE_TASK_BAR_LIST();
+/* the message (no parameters) sent to each of GFI_genApplications */
+@message void MSG_OL_FIELD_SEND_TO_GEN_APPLICATIONS(Message msg);
+
+    /* a bit per window stagger slot: 8 rows of 16 */
+    @instance word		OLFI_staggerSlotMap[8] = {0};
+    /* the background picture: its VM file, its GString, how drawn */
+    @instance VMFileHandle	OLFI_BGFile = 0;
+    @instance word		OLFI_BGData = 0;
+    @instance FieldBGFlags	OLFI_BGFlags = 0;
+    /* the floating tool area holding the express menu */
+    @instance ChunkHandle	OLFI_toolArea = 0;
+    @instance ChunkHandle	OLFI_eventToolArea = 0;
+    @instance ChunkHandle	OLFI_eventMenu = 0;
+    @instance ChunkHandle	OLFI_expressMenu = 0;
+    @instance ChunkHandle	OLFI_expressMenuButton = 0;
+    @instance ChunkHandle	OLFI_windowListDialog = 0;
+    @instance ChunkHandle	OLFI_windowListList = 0;
+    /* the primary with the focus */
+    @instance optr		OLFI_focusedAppPrimary = 0;
+    /* the field is a node of the focus, target and full screen
+     * hierarchies, in this order */
+    @instance HierarchicalGrab	OLFI_focusExcl = {0, 0};
+    @instance HierarchicalGrab	OLFI_targetExcl = {0, 0};
+    @instance HierarchicalGrab	OLFI_fullScreenExcl = {0, 0};
+    /* the last non-modal focus, back once the modal geode is gone */
+    @instance optr		OLFI_nonModalFocus = 0;
+    @instance ChunkHandle	OLFI_systemTray = 0;
+
+@endc;
+
+@endlib
+
+#endif

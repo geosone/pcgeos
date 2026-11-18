@@ -1,0 +1,54 @@
+/*
+ * copenUtils.goc -- utilities of the specific UI (after copenUtils.asm):
+ * so far the line bounds of an object, the display checks (CGA, black
+ * and white) and the screen's dimensions.  The pointer images of
+ * OpenGetPtrImage are in cutilsPtrImages.goc.
+ */
+@include "cGeode.goh"
+
+/* OpenGetLineBounds: the bounds of the object for drawing lines: the
+ * right and bottom one pixel in */
+void OpenGetLineBounds(optr obj, Rectangle *r)
+{
+    VisGetBounds(obj, r);
+    r->R_right--;
+    r->R_bottom--;
+}
+
+/* OpenCheckIfCGA: a very squished or tiny display */
+Boolean OpenCheckIfCGA(void)
+{
+    return (moCS_flags & (CSF_VERY_SQUISHED | CSF_TINY)) != 0;
+}
+
+/* OpenMinimizeIfCGA: 0 on a CGA, else the value */
+word OpenMinimizeIfCGA(word value)
+{
+    return OpenCheckIfCGA() ? 0 : value;
+}
+
+/* OpenCheckIfBW: a black and white display */
+Boolean OpenCheckIfBW(void)
+{
+    return (moCS_flags & CSF_BW) != 0;
+}
+
+/* OpenGetScreenDimensions: the default screen's size (cached once
+ * known) */
+void OpenGetScreenDimensions(word *width, word *height)
+{
+    if (!screenHeight) {
+	optr screen = 0;
+	Rectangle b;
+
+	UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN, NULL, 0, &screen,
+		       sizeof(screen));
+	if (screen) {
+	    @call screen::MSG_VIS_GET_BOUNDS(&b);
+	    screenWidth = b.R_right;
+	    screenHeight = b.R_bottom;
+	}
+    }
+    *width = screenWidth;
+    *height = screenHeight;
+}

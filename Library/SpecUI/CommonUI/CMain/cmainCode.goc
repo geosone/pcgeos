@@ -1,0 +1,308 @@
+/*
+ * cmainCode.goc -- the initialization of the specific UI (after
+ * cmainCode.asm), which the field calls when it is built: the window,
+ * express menu and help options, the display scheme (fonts and colors
+ * for the display type) and the gadget options of "[motif options]";
+ * the routines the UI asks the specific UI for the display scheme and
+ * the window options.
+ *
+ * Port32 (Port32/ABI.md section 13y): Motif only (no bubble help, no
+ * task bar, no right click help: those are ISUI's); the black and white
+ * color table has the asm's 21 colors and black for the second title
+ * bar color (the asm copied a byte beyond it).  Not yet: the floating
+ * keyboard of the library's attach (InitFloatingKbd).
+ */
+@include "cGeode.goh"
+
+#define NARROW_WIDTH			300
+#define DEFAULT_GADGET_REPEAT_DELAY	10
+#define DEFAULT_BUTTON_INVERT_DELAY	6
+#define MIN_ARROW_SIZE			8
+#define MAX_ARROW_SIZE			14
+
+extern const ColorSchemeVars moCSMonochrome;	/* cmainVariable.goc */
+
+static const char uiCat[] = "ui";
+static const char optionsCat[] = "motif options";
+
+/* ---------------------------------------------------------------------
+ * Window and express menu options
+ * ------------------------------------------------------------------- */
+
+/* GetDefaultWindowPreferences: from the display, the button flags, the
+ * user level and the pen mode */
+static UIWindowOptions GetDefaultWindowPreferences(void)
+{
+    UIWindowOptions o = 0;
+    word dt = UserGetDisplayType();
+    byte aspect = (byte) (dt >> 8) & DT_DISP_ASPECT_RATIO;
+    byte size = (byte) (dt >> 8) & DT_DISP_SIZE;
+    UIButtonFlags bf = FlowGetUIButtonFlags();
+
+    if (size == (DS_TINY << DT_DISP_SIZE_OFFSET) ||
+	aspect == (DAR_VERY_SQUISHED << DT_DISP_ASPECT_RATIO_OFFSET) ||
+	(bf & UIBF_KEYBOARD_ONLY))
+	o |= UIWO_MAXIMIZE_ON_STARTUP;
+    if (aspect == (DAR_VERY_SQUISHED << DT_DISP_ASPECT_RATIO_OFFSET) ||
+	size == (DS_TINY << DT_DISP_SIZE_OFFSET))
+	o |= UIWO_POPOUT_MENU_BAR;
+    if (UserGetDefaultUILevel() < UIIL_BEGINNING)
+	o |= UIWO_MAXIMIZE_ON_STARTUP;
+    else
+	o |= UIWO_PRIMARY_MIN_MAX_RESTORE_CONTROLS | UIWO_PINNABLE_MENUS |
+	     UIWO_KBD_NAVIGATION;
+    if (bf & UIBF_KEYBOARD_ONLY)
+	o |= UIWO_KBD_NAVIGATION;
+    if (bf & UIBF_NO_KEYBOARD)
+	o &= ~UIWO_KBD_NAVIGATION;
+    if (!SysGetPenMode())
+	o |= UIWO_WINDOW_MENU;
+    return o;
+}
+
+/* SpecInitWindowPreferences: "[ui] windowOptions": the low byte the
+ * options to set, the high byte those to take from it */
+void SpecInitWindowPreferences(void)
+{
+    UIWindowOptions o = GetDefaultWindowPreferences();
+    word v;
+
+    if (!InitFileReadInteger(uiCat, "windowOptions", &v)) {
+	byte set = (byte) v, mask = (byte) (v >> 8);
+	o |= set & mask;
+	o &= set | (byte) ~mask;
+    }
+    olWindowOptions = o;
+}
+
+UIWindowOptions SpecGetWindowOptions(void)
+{
+    return olWindowOptions;
+}
+
+UIExpressOptions SpecGetExpressOptions(void)
+{
+    return olExpressOptions;
+}
+
+/* SpecInitExpressPreferences: "[ui] expressOptions", else the lists for
+ * the user level */
+void SpecInitExpressPreferences(void)
+{
+    word v;
+    UIExpressOptions o = UIEO_DESK_ACCESSORY_LIST | UIEO_CONTROL_PANEL |
+			 UIEO_DOS_TASKS_LIST | UIEO_UTILITIES_PANEL |
+			 UIEO_EXIT_TO_DOS | UIEO_DOCUMENTS_LIST |
+			 UIEP_TOP_PRIMARY;
+
+    if (UserGetDefaultUILevel() > UIIL_BEGINNING)
+	o |= UIEO_MAIN_APPS_LIST | UIEO_OTHER_APPS_LIST;
+    if (!InitFileReadInteger(uiCat, "expressOptions", &v))
+	o = v;
+    olExpressOptions = o;
+}
+
+/* SpecInitHelpPreferences: "[ui] helpOptions" */
+void SpecInitHelpPreferences(void)
+{
+    word v = 0;
+
+    (void) InitFileReadInteger(uiCat, "helpOptions", &v);
+    olHelpOptions = v;
+}
+
+/* ---------------------------------------------------------------------
+ * The display scheme
+ * ------------------------------------------------------------------- */
+
+/* GetFontFromInitFile: the font of "[ui] <idKey>" (a name) if it is
+ * there, at the nearest size to "[ui] <sizeKey>"; the default font and
+ * size where the file has none */
+static void GetFontFromInitFile(const char *idKey, const char *sizeKey,
+				FontID defID, sword defSize, FontID *id,
+				sword *size)
+{
+    char name[FID_NAME_LEN + 1];
+    word len, s;
+    FontID f = FID_INVALID;
+    dword found;
+
+    if (!InitFileReadStringBuffer(uiCat, idKey, name, sizeof(name), &len))
+	f = GrCheckFontAvailName(FEF_BITMAPS | FEF_OUTLINES | FEF_DOWNCASE |
+				 FEF_STRING, 0, name);
+    if (f == FID_INVALID)
+	f = defID;
+    if (InitFileReadInteger(uiCat, sizeKey, &s) ||
+	!GrFindNearestPointsize(f, (dword) s << 16, 0, NULL, &found)) {
+	*id = defID;
+	*size = defSize;
+	return;
+    }
+    *id = f;
+    *size = (sword) (found >> 16);
+}
+
+/* GetFieldDimensions: the field's size, the screen's until known */
+static void GetFieldDimensions(word *w, word *h)
+{
+    if (!fieldHeight)
+	OpenGetScreenDimensions(&fieldWidth, &fieldHeight);
+    *w = fieldWidth;
+    *h = fieldHeight;
+}
+
+/* CalcSystemAttrs: the SystemAttrs of the display, the input and the
+ * field's orientation */
+static void CalcSystemAttrs(void)
+{
+    SystemAttrs a = SysGetPenMode() ? SA_PEN_BASED : 0;
+    UIButtonFlags bf;
+    word w, h;
+
+    if (!(moCS_flags & CSF_BW))
+	a |= SA_COLOR;
+    if (moCS_flags & (CSF_VERY_NARROW | CSF_VERY_SQUISHED | CSF_TINY))
+	a |= SA_TINY;
+    a |= (SystemAttrs) ((moCS_flags & (CSF_VERY_NARROW | CSF_VERY_SQUISHED))
+			<< 8);
+    bf = FlowGetUIButtonFlags();
+    if (bf & UIBF_KEYBOARD_ONLY)
+	a |= SA_KEYBOARD_ONLY;
+    if (bf & UIBF_NO_KEYBOARD)
+	a |= SA_NO_KEYBOARD;
+    GetFieldDimensions(&w, &h);
+    if ((sword) w <= (sword) h)
+	a |= SA_PORTRAIT;
+    olSystemAttrs = a;
+}
+
+/* AdjustForDisplayType: the colors of a black and white display, the
+ * flags of tiny, TV and very squished displays and narrow applications,
+ * the display scheme's colors */
+static void AdjustForDisplayType(byte displayType)
+{
+    optr app;
+
+    if ((displayType & DT_DISP_CLASS) == DC_GRAY_1) {
+	moCS = moCSMonochrome;
+	moCS_flags |= CSF_BW;
+    }
+    moCS_displayType = displayType;
+    if ((displayType & DT_DISP_SIZE) == (DS_TINY << DT_DISP_SIZE_OFFSET))
+	moCS_flags |= CSF_TINY;
+    if ((displayType & DT_DISP_ASPECT_RATIO) ==
+	(DAR_TV << DT_DISP_ASPECT_RATIO_OFFSET))
+	moCS_flags |= CSF_TV;
+    if ((displayType & DT_DISP_ASPECT_RATIO) ==
+	(DAR_VERY_SQUISHED << DT_DISP_ASPECT_RATIO_OFFSET)) {
+	moCS_flags |= CSF_VERY_SQUISHED;
+	olArrowSize = 10;
+	specDisplayScheme.DS_pointSize = 9;
+	editableTextFontsize = 9;
+    }
+    app = GeodeGetAppObject(0);
+    if (app && DWORD_WIDTH(@call app::MSG_VIS_GET_SIZE()) <= NARROW_WIDTH)
+	moCS_flags |= CSF_VERY_NARROW;
+    specDisplayScheme.DS_darkColor = moCS_dsDarkColor;
+    specDisplayScheme.DS_lightColor = moCS_dsLightColor;
+    specDisplayScheme.DS_colorScheme = (byte) ((moCS_dsLightColor << 4) |
+					       moCS_dsDarkColor);
+    specDisplayScheme.DS_displayType = displayType;
+}
+
+/*
+ * SpecInitDefaultDisplayScheme: once the display type is known: the
+ * font of "[ui] fontid" and "fontsize" (the system's default font
+ * else), the colors, the system attributes, the UI's moniker font; the
+ * editable text's font if "[ui] editableTextFontID" differs
+ */
+void SpecInitDefaultDisplayScheme(void)
+{
+    word dt = UserGetDisplayType();
+    dword defSize;
+    FontID defID, id;
+    sword size, esize;
+
+    if (!(byte) dt)
+	return;
+    defID = GrGetDefFontID(&defSize);
+    GetFontFromInitFile("fontid", "fontsize", defID,
+			(sword) (defSize >> 16), &id, &size);
+    specDisplayScheme.DS_fontID = id;
+    specDisplayScheme.DS_pointSize = size;
+    AdjustForDisplayType((byte) (dt >> 8));
+    CalcSystemAttrs();
+    UserSetDefaultMonikerFont(id, size);
+    GetFontFromInitFile("editableTextFontID", "editableTextFontsize", id,
+			size, &editableTextFontID, &esize);
+    if (editableTextFontID == id && esize == size)
+	editableTextFontID = FID_INVALID;
+    else
+	editableTextFontsize = esize;
+}
+
+/* SpecGetDisplayScheme: the display scheme (one display, one font) */
+void SpecGetDisplayScheme(DisplayScheme *ds)
+{
+    *ds = specDisplayScheme;
+}
+
+/* ---------------------------------------------------------------------
+ * The gadget options
+ * ------------------------------------------------------------------- */
+
+static Boolean ReadBool(const char *cat, const char *key, Boolean def)
+{
+    Boolean b;
+
+    return InitFileReadBoolean(cat, key, &b) ? def : (b != 0);
+}
+
+static word ReadInt(const char *cat, const char *key, word def)
+{
+    word v;
+
+    return InitFileReadInteger(cat, key, &v) ? def : v;
+}
+
+/* SpecInitGadgetPreferences: the keyboard, repeat and accelerate, the
+ * scroll arrows and resize borders, the file selector, the default
+ * ring, click sounds, the button delays, PDA mode and the window
+ * attributes of "[motif options]" */
+void SpecInitGadgetPreferences(void)
+{
+    word v;
+
+    kbdRequired = ReadBool("input", "floatingKbd", FALSE);
+    olGadgetRepeatDelay = ReadInt(optionsCat, "gadgetRepeatDelay",
+				  DEFAULT_GADGET_REPEAT_DELAY);
+    olGadgetAccelerate = ReadBool(optionsCat, "gadgetAccelerate", FALSE);
+    if (!InitFileReadInteger(optionsCat, "scroll arrow size", &v)) {
+	if (v & 1)
+	    v++;
+	if (v < MIN_ARROW_SIZE)
+	    v = MIN_ARROW_SIZE;
+	if (v > MAX_ARROW_SIZE)
+	    v = MAX_ARROW_SIZE;
+	olArrowSize = v;
+    }
+    resizeBarHeight = ReadInt(optionsCat, "tbResizeBorderThickness",
+			      resizeBarHeight);
+    resizeBarWidth = ReadInt(optionsCat, "lrResizeBorderThickness",
+			     resizeBarWidth);
+    olFileSelectorStaticDrivePopupMoniker =
+	ReadBool(optionsCat, "fsStaticDriveMoniker", FALSE);
+    olFileSelectorSingleClickToOpen =
+	ReadBool(optionsCat, "fsSingleClickToOpen", FALSE);
+    if (SysGetPenMode())
+	olNoDefaultRing = ReadBool(optionsCat, "noDefaultRing", FALSE);
+    specDoClickSound = ReadBool(optionsCat, "clickSounds", FALSE);
+    if (!InitFileReadInteger(optionsCat, "buttonInvertDelay", &v)) {
+	olButtonInvertDelay = v;
+	olButtonActivateDelay = v;
+    } else
+	olButtonInvertDelay = DEFAULT_BUTTON_INVERT_DELAY;
+    olPDA = ReadBool("system", "pda", FALSE);
+    olExtWinAttrs = ReadInt(optionsCat, "externalWinAttrs",
+			    EWA_MOVABLE | EWA_RESIZABLE);
+}

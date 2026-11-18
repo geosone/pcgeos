@@ -1,0 +1,847 @@
+/*
+ * cwinField.goc -- OLFieldClass (after cwinFieldInit.asm,
+ * cwinFieldCommon.asm, cwinFieldOther.asm, cwinFieldUncommon.asm): the
+ * field of the specific UI, a window group below the screen in which
+ * the applications run.  It reads the specific UI's options when the
+ * generic field loads its own, opens a plain window in the background
+ * color on the screen's, is a node of the focus, target and full screen
+ * hierarchies (remembering the last non-modal focus while a system
+ * modal geode is up) and hands out the stagger slots of new windows.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet:
+ *   - the express menu, the floating tool area, the window list and
+ *     the task bar (the messages are declared, the field has none);
+ *   - the background picture (OpenBGFile, OLFieldDrawBG): the field is
+ *     in its background color ([ui] backgroundcolor);
+ *   - the options of the field's category (the specific UI reads [ui]);
+ *   - MSG_OL_APP_APPLY_FIELD_SIZE_CHANGE to the applications when the
+ *     field's size changes (OLApplicationClass is not ported yet),
+ *     MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP for the same reason.
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/specC.goh>
+
+@classdecl OLFieldClass, neverSaved;
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define FIELD_OFFSET(f)	word_offsetof(OLFieldInstance, f)
+
+/* the Motif window geometry (cwinConstant.def, cConstant.def) */
+#define CUAS_WIN_RESIZE_BORDER_SIZE		5
+#define CUAS_WIN_RESIZE_BORDER_TINY_SIZE	3
+#define CUAS_WIN_ICON_WIDTH			27
+#define CUAS_WIN_ICON_HEIGHT			16
+#define STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
+				 CUAS_WIN_ICON_WIDTH - 1)
+#define STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
+				 CUAS_WIN_ICON_HEIGHT - 1)
+#define TINY_STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_TINY_SIZE + \
+				 CUAS_WIN_ICON_WIDTH - (1 + 7))
+#define TINY_STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_TINY_SIZE + \
+				 CUAS_WIN_ICON_HEIGHT - (1 + 3 + 8 - 4))
+#define FIRST_BASE_X_POS	10
+#define FIRST_BASE_Y_POS	8
+#define TINY_FIRST_BASE_X_POS	6
+#define TINY_FIRST_BASE_Y_POS	4
+#define CGA_WIN_ICON_PLOT_HEIGHT	35
+#define WIN_ICON_PLOT_MARGIN_X		10
+#define CGA_WIN_ICON_PLOT_MARGIN_Y	(-4)
+
+/* the stagger slot of a window (StaggerSlotPositionRequest): the slot
+ * is a row (the icon rows follow the window rows) and a column */
+#define SSPR_REASSIGN_IF_CONFLICT	0x80
+#define SSPR_ICON			0x40
+#define SSPR_SLOT			0x3f
+#define SSPR_ROW			0x30
+#define SSPR_COLUMN			0x0f
+#define INITIAL_SLOT			1
+#define OL_WINDOW_STAGGER_SLOT_MASK	0x07
+
+/* the specific UI's upward queries (cConstant.def SpecVisQueryTypes) */
+#define SVQT_REQUEST_STAGGER_SLOT	(SPEC_VIS_QUERY_START + 0)
+#define SVQT_REQUEST_NEAREST_ICON_SLOT	(SPEC_VIS_QUERY_START + 1)
+#define SVQT_FREE_STAGGER_SLOT		(SPEC_VIS_QUERY_START + 2)
+
+/* the background ([ui], backgrnd.def) */
+static const char backgroundCategory[] = "ui";
+static const char backgroundColorKey[] = "backgroundcolor";
+static const char backgroundDisabledOnField[] = "backgroundDisabledOnField";
+
+static OLFieldInstance *Field(optr oself)
+{
+    return (OLFieldInstance *) ObjDerefVis(oself);
+}
+
+static GenFieldInstance *GenField(optr oself)
+{
+    return (GenFieldInstance *) ObjDerefGen(oself);
+}
+
+static Boolean OpenCheckIfNarrow(void)
+{
+    return (moCS_flags & CSF_VERY_NARROW) != 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Initialization (cwinFieldInit.asm)
+ * ------------------------------------------------------------------- */
+
+/* OLFieldInitialize: a window, win group and input node; not managed,
+ * its children placed by themselves */
+@method OLFieldClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    pself = ObjDerefVis(oself);
+    pself->VI_typeFlags |= VTF_IS_WINDOW | VTF_IS_WIN_GROUP |
+			   VTF_IS_INPUT_NODE;
+    pself->VI_specAttrs |= SA_REALIZABLE;
+    pself->VI_attrs &= ~VA_MANAGED;
+    pself->VCI_geoAttrs |= VCGA_CUSTOM_MANAGE_CHILDREN;
+}
+
+/* OLFieldLoadOptions: the specific UI's options, read as the field
+ * loads its own */
+@method OLFieldClass, MSG_GEN_LOAD_OPTIONS
+{
+    (void) params;
+    SpecInitDefaultDisplayScheme();
+    SpecInitGadgetPreferences();
+    SpecInitWindowPreferences();
+    SpecInitExpressPreferences();
+    SpecInitHelpPreferences();
+}
+
+/*
+ * OLFieldSpecBuild: a visual child of its vis parent (the screen, asked
+ * of the generic parent unless set), its size; the resize borders for
+ * the display
+ */
+@method OLFieldClass, MSG_SPEC_BUILD
+{
+    optr visParent;
+    SizeAsDWord size;
+
+    (void) flags;
+    if (VisCheckIfSpecBuilt(oself))
+	return;
+    visParent = GenField(oself)->GFI_visParent;
+    if (!visParent) {
+	GenCallParent(oself, MSG_SPEC_GUP_QUERY_VIS_PARENT,
+		      &(word){ SQT_VIS_PARENT_FOR_FIELD }, sizeof(word),
+		      &visParent, sizeof(visParent));
+	GenField(oself)->GFI_visParent = visParent;
+    }
+    if (!visParent)
+	return;
+    @call visParent::MSG_VIS_ADD_CHILD(oself, CCO_LAST);
+    size = @call visParent::MSG_VIS_GET_SIZE();
+    pself = ObjDerefVis(oself);
+    pself->VI_bounds.R_right = pself->VI_bounds.R_left + DWORD_WIDTH(size);
+    pself->VI_bounds.R_bottom = pself->VI_bounds.R_top + DWORD_HEIGHT(size);
+    pself->VI_optFlags |= VOF_WINDOW_INVALID;
+
+    resizeBarHeight = resizeBarWidth = CUAS_WIN_RESIZE_BORDER_SIZE;
+    if (OpenCheckIfCGA())
+	resizeBarHeight = CUAS_WIN_RESIZE_BORDER_TINY_SIZE;
+    if (OpenCheckIfNarrow())
+	resizeBarWidth = CUAS_WIN_RESIZE_BORDER_TINY_SIZE;
+}
+
+/* GetBackgroundColorFromFile: [ui] backgroundcolor, if a color */
+static Boolean GetBackgroundColorFromFile(Color *c)
+{
+    word v;
+
+    if (InitFileReadInteger(backgroundCategory, backgroundColorKey, &v) ||
+	v > 0xff)
+	return FALSE;
+    *c = (Color) v;
+    return TRUE;
+}
+
+/* GetBackgroundColorNoPict: the field's color without a picture: grey
+ * on black and white, else the .ini's or the scheme's (dithered);
+ * the color flags in the high byte */
+static word GetBackgroundColorNoPict(void)
+{
+    Color c = C_BW_GREY;
+
+    if (!(moCS_flags & CSF_BW) && !GetBackgroundColorFromFile(&c))
+	c = moCS_screenBG;
+    return ((WCF_PLAIN | CMT_DITHER) << 8) | c;
+}
+
+/* GetBackgroundColorPict: behind a picture: white on black and white */
+static word GetBackgroundColorPict(void)
+{
+    Color c = C_WHITE;
+
+    if (!(moCS_flags & CSF_BW) && !GetBackgroundColorFromFile(&c))
+	c = moCS_screenBG;
+    return ((CMT_CLOSEST | CMM_ON_BLACK) << 8) | c;
+}
+
+/* the field's window color: the picture's background if it has one,
+ * plain if the background is off on fields */
+static word FieldWindowColor(optr oself)
+{
+    word color;
+    Boolean off;
+
+    color = Field(oself)->OLFI_BGFile ? GetBackgroundColorPict()
+				      : GetBackgroundColorNoPict();
+    if (!InitFileReadBoolean(backgroundCategory, backgroundDisabledOnField,
+			     &off) && off)
+	color |= WCF_PLAIN << 8;
+    return color;
+}
+
+/*
+ * OLFieldOpenWin: the field's window on the screen's, behind its other
+ * children, in the background color, owned by the field's process
+ */
+@method OLFieldClass, MSG_VIS_OPEN_WIN
+{
+    Rectangle b;
+    word color;
+    WindowHandle win;
+
+    if (pself->VCI_window)
+	return;
+    OpenGetLineBounds(oself, &b);
+    color = FieldWindowColor(oself);
+    win = WinOpen(parentWindow, oself, oself, color >> 8, color & 0xff, 0,
+		  0, WPF_PLACE_BEHIND, 0, GeodeGetProcessHandle(), NULL,
+		  b.R_left, b.R_top, b.R_right, b.R_bottom);
+    Field(oself)->VCI_window = win;
+}
+
+/* OLFieldResetBG: the background again (no picture yet), drawn again */
+@method OLFieldClass, MSG_GEN_FIELD_RESET_BG
+{
+    word color;
+    Rectangle b;
+
+    if (!pself->VCI_window)
+	return;
+    color = FieldWindowColor(oself);
+    WinSetInfo(pself->VCI_window, WIT_COLOR,
+	       ((optr) (color >> 8) << 8) | (color & 0xff));
+    VisGetBounds(oself, &b);
+    WinInvalTree(Field(oself)->VCI_window, NULL, b.R_left, b.R_top,
+		 b.R_right, b.R_bottom);
+}
+
+/* ---------------------------------------------------------------------
+ * Queries (cwinFieldCommon.asm)
+ * ------------------------------------------------------------------- */
+
+/* OLFieldGupQueryVisParent: the field itself, but the system's for a
+ * system modal window */
+@method OLFieldClass, MSG_SPEC_GUP_QUERY_VIS_PARENT
+{
+    optr p = 0;
+
+    if (parentType != SQT_VIS_PARENT_FOR_SYS_MODAL)
+	return oself;
+    GenCallParent(oself, MSG_SPEC_GUP_QUERY_VIS_PARENT, &parentType,
+		  sizeof(parentType), &p, sizeof(p));
+    return p;
+}
+
+/* OLFieldGetWinSizeInfo: the field's size, the margins for windows
+ * extended near its corner */
+@method OLFieldClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO
+{
+    SizeAsDWord s = VisGetSize(oself);
+
+    retValue->WSIP_windowWidth = DWORD_WIDTH(s);
+    retValue->WSIP_windowHeight = DWORD_HEIGHT(s);
+    retValue->WSIP_rightArea = EXTEND_NEAR_PARENT_MARGIN_X;
+    retValue->WSIP_bottomArea = OpenCheckIfCGA()
+				? CGA_EXTEND_NEAR_PARENT_MARGIN_Y
+				: NON_CGA_EXTEND_NEAR_PARENT_MARGIN_Y;
+}
+
+/* OLFieldGupQuery: the field (and its window); the screen is the vis
+ * parent's to answer */
+@method OLFieldClass, MSG_SPEC_P32_GUP_QUERY
+{
+    optr p;
+
+    if (queryType == GUQT_FIELD) {
+	retValue->GRP_cx = OptrToHandle(oself);
+	retValue->GRP_dx = OptrToChunk(oself);
+	retValue->GRP_bp = pself->VCI_window;
+	return TRUE;
+    }
+    if (queryType != GUQT_SCREEN)
+	return @callsuper();
+    p = GenField(oself)->GFI_visParent;
+    if (!p) {
+	memset(retValue, 0, sizeof(*retValue));
+	return FALSE;
+    }
+    return @call p::MSG_SPEC_P32_GUP_QUERY(retValue, queryType);
+}
+
+/*
+ * FieldRequestStaggerSlot: the requested slot of the map, else (if it
+ * may be reassigned) the next free one, row by row, around twice; the
+ * slot taken
+ */
+static byte FieldRequestStaggerSlot(word *map, byte req)
+{
+    byte row, col;
+    int tries = 2;
+
+    if (!(req & SSPR_SLOT))
+	req |= INITIAL_SLOT | SSPR_REASSIGN_IF_CONFLICT;
+    row = (req >> 4) & 7;
+    col = req & SSPR_COLUMN;
+    if (((map[row] >> col) & 1) && (req & SSPR_REASSIGN_IF_CONFLICT))
+	for (;;) {
+	    if (col < 15)
+		col++;
+	    else if ((row & 3) != 3) {
+		row++;
+		col = 0;
+	    } else {
+		row &= ~3;
+		col = 1;
+		if (!--tries)
+		    break;
+	    }
+	    if (!((map[row] >> col) & 1))
+		break;
+	}
+    map[row] |= 1 << col;
+    return (byte) ((row << 4) | col);
+}
+
+static void FieldFreeStaggerSlot(word *map, byte slot)
+{
+    map[(slot >> 4) & 7] &= ~(1 << (slot & SSPR_COLUMN));
+}
+
+/* FieldCalcStaggerPosition: the position of a window's slot, or of an
+ * icon's slot along the field's bottom */
+static void FieldCalcStaggerPosition(optr oself, byte slot, sword *x,
+				     sword *y)
+{
+    if (!(slot & SSPR_ICON)) {
+	word n = (slot - 1) & OL_WINDOW_STAGGER_SLOT_MASK;
+
+	*y = n * (OpenCheckIfCGA() ? TINY_STAGGER_Y_OFFSET
+				   : STAGGER_Y_OFFSET) +
+	     (OpenCheckIfCGA() ? TINY_FIRST_BASE_Y_POS : FIRST_BASE_Y_POS);
+	*x = n * (OpenCheckIfNarrow() ? TINY_STAGGER_X_OFFSET
+				      : STAGGER_X_OFFSET) +
+	     (OpenCheckIfNarrow() ? TINY_FIRST_BASE_X_POS : FIRST_BASE_X_POS);
+    } else {
+	SizeAsDWord s = VisGetSize(oself);
+	word perRow = (DWORD_WIDTH(s) - WIN_ICON_PLOT_MARGIN_X) /
+		      WIN_ICON_PLOT_WIDTH;
+	word n = (slot & SSPR_SLOT) - 1, row, col;
+	sword h, top;
+
+	if (!perRow)
+	    perRow = 1;
+	row = n / perRow + 1;
+	col = n % perRow;
+	h = OpenCheckIfCGA() ? CGA_WIN_ICON_PLOT_HEIGHT
+			     : NON_CGA_WIN_ICON_PLOT_HEIGHT;
+	top = (sword) DWORD_HEIGHT(s) -
+	      (row * h + (OpenCheckIfCGA() ? CGA_WIN_ICON_PLOT_MARGIN_Y
+					   : NON_CGA_WIN_ICON_PLOT_MARGIN_Y));
+	*y = top < 0 ? 0 : top;
+	*x = col * WIN_ICON_PLOT_WIDTH + WIN_ICON_PLOT_MARGIN_X;
+    }
+}
+
+/* FieldFindIconSlot: the icon slot nearest the position */
+static word FieldFindIconSlot(optr oself, sword x, sword y)
+{
+    SizeAsDWord s = VisGetSize(oself);
+    sword col, row, h, base;
+    word perRow, slot;
+
+    x -= WIN_ICON_PLOT_MARGIN_X - WIN_ICON_PLOT_WIDTH / 2;
+    if (x < 0)
+	x = 0;
+    col = x / WIN_ICON_PLOT_WIDTH;
+    perRow = (DWORD_WIDTH(s) - WIN_ICON_PLOT_MARGIN_X) / WIN_ICON_PLOT_WIDTH;
+    if (!perRow)
+	perRow = 1;
+    if (col >= perRow)
+	col = perRow - 1;
+    h = OpenCheckIfCGA() ? CGA_WIN_ICON_PLOT_HEIGHT
+			 : NON_CGA_WIN_ICON_PLOT_HEIGHT;
+    base = (OpenCheckIfCGA() ? CGA_WIN_ICON_PLOT_MARGIN_Y
+			     : NON_CGA_WIN_ICON_PLOT_MARGIN_Y) + h / 2;
+    row = (sword) DWORD_HEIGHT(s) - y - base;
+    if (row < 0)
+	row = 0;
+    slot = (row / h) * perRow + col + 1;
+    return slot > 63 ? 63 : slot;
+}
+
+/*
+ * OLFieldVisUpwardQuery: the display scheme; the stagger slots of the
+ * field's windows (data1: the request, the position for an icon slot
+ * in data2: x | y << 16; the answer GRP_bp the slot, GRP_cx, GRP_dx
+ * its position)
+ */
+@method OLFieldClass, MSG_VIS_P32_VUP_QUERY
+{
+    byte req, slot;
+    sword x, y;
+
+    switch (queryType) {
+    case VUQ_DISPLAY_SCHEME: {
+	DisplayScheme ds;
+
+	SpecGetDisplayScheme(&ds);
+	memset(retValue, 0, sizeof(*retValue));
+	retValue->GRP_ax = ds.DS_colorScheme |
+			   ((dword) ds.DS_displayType << 8) |
+			   ((dword) ds.DS_lightColor << 16) |
+			   ((dword) ds.DS_darkColor << 24);
+	retValue->GRP_cx = ds.DS_fontID;
+	retValue->GRP_dx = (word) ds.DS_pointSize;
+	return TRUE;
+    }
+    case SVQT_REQUEST_NEAREST_ICON_SLOT: {
+	word n = FieldFindIconSlot(oself, (sword) (data2 & 0xffff),
+				   (sword) (data2 >> 16));
+
+	req = (byte) n | SSPR_REASSIGN_IF_CONFLICT | SSPR_ICON;
+	break;
+    }
+    case SVQT_REQUEST_STAGGER_SLOT:
+	req = (byte) data1;
+	break;
+    case SVQT_FREE_STAGGER_SLOT:
+	FieldFreeStaggerSlot(pself->OLFI_staggerSlotMap,
+			     (byte) data1 & ~SSPR_REASSIGN_IF_CONFLICT);
+	memset(retValue, 0, sizeof(*retValue));
+	return TRUE;
+    default:
+	return @callsuper();
+    }
+    /* the icon rows follow the window rows: the slot keeps SSPR_ICON */
+    slot = FieldRequestStaggerSlot(Field(oself)->OLFI_staggerSlotMap, req);
+    FieldCalcStaggerPosition(oself, slot, &x, &y);
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->GRP_bp = slot;
+    retValue->GRP_cx = (word) x;
+    retValue->GRP_dx = (word) y;
+    return TRUE;
+}
+
+/* OLFieldVupGrabWithinView: the input flow is the application's (the
+ * UI's) to alter */
+@method OLFieldClass, MSG_VIS_VUP_ALTER_INPUT_FLOW
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (app)
+	@call app::MSG_VIS_VUP_ALTER_INPUT_FLOW(translation, window, object,
+						grabType, grabFlags);
+}
+
+/* ---------------------------------------------------------------------
+ * The hierarchies (cwinFieldCommon.asm, cwinFieldUncommon.asm)
+ * ------------------------------------------------------------------- */
+
+/* OLFieldEnsureActiveFT: the best windows of the field get its focus
+ * and target */
+@method OLFieldClass, MSG_META_ENSURE_ACTIVE_FT
+{
+    EnsureActiveFTCommon(oself, pself->VCI_window,
+			 FIELD_OFFSET(OLFI_focusExcl),
+			 FIELD_OFFSET(OLFI_nonModalFocus), TRUE);
+}
+
+/* FieldTestForModalGeodeWithin: a system modal geode is up and the
+ * system's focus is this field */
+static Boolean FieldTestForModalGeodeWithin(optr oself)
+{
+    GeodeHandle geode = 0;
+    optr focus = 0;
+
+    optr sys = UserGetSystemObject();
+
+    if (!sys)
+	return FALSE;
+    (void) @call sys::MSG_GEN_SYSTEM_GET_MODAL_GEODE(&geode);
+    if (!geode)
+	return FALSE;
+    (void) @call sys::MSG_META_GET_FOCUS_EXCL(&focus);
+    return focus == oself;
+}
+
+/*
+ * OLFieldAlterFTVMCExcl: the hierarchies at the field (the focus with
+ * the non-modal cache, a new focus gets the keyboard); with no target
+ * left, the tool area back to the field's layer
+ */
+@method OLFieldClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    optr hadTarget = pself->OLFI_targetExcl.HG_OD;
+
+    if (flags & MAEF_NOT_HERE) {
+	@callsuper();
+	return;
+    }
+    if (flags & MAEF_FOCUS) {
+	optr old = pself->OLFI_focusExcl.HG_OD;
+	Boolean modal = FieldTestForModalGeodeWithin(oself);
+
+	AlterFExclWithNonModalCacheCommon(oself,
+					  FIELD_OFFSET(OLFI_focusExcl),
+					  FIELD_OFFSET(OLFI_nonModalFocus),
+					  objectWantingControl, flags, modal);
+	pself = Field(oself);
+	if (pself->OLFI_focusExcl.HG_OD != old &&
+	    (pself->OLFI_focusExcl.HG_flags & HGF_APP_EXCL))
+	    SysUpdateKbdGrab(pself->OLFI_focusExcl.HG_OD);
+	flags &= ~MAEF_FOCUS;
+    }
+    if (flags & MAEF_TARGET) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+				  VIS_MASTER, FIELD_OFFSET(OLFI_targetExcl),
+				  objectWantingControl,
+				  (flags & MAEF_GRAB) | MAEF_TARGET);
+	flags &= ~MAEF_TARGET;
+    }
+    if (flags & MAEF_FULL_SCREEN) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_FULL_SCREEN_EXCL,
+				  VIS_MASTER,
+				  FIELD_OFFSET(OLFI_fullScreenExcl),
+				  objectWantingControl,
+				  (flags & MAEF_GRAB) | MAEF_FULL_SCREEN);
+	flags &= ~MAEF_FULL_SCREEN;
+    }
+    if (flags & MAEF_MASK_OF_ALL_HIERARCHIES)
+	@callsuper oself::OLFieldClass::MSG_META_MUP_ALTER_FTVMC_EXCL(
+				objectWantingControl, flags);
+    if (hadTarget && !Field(oself)->OLFI_targetExcl.HG_OD &&
+	Field(oself)->OLFI_toolArea) {
+	OLFieldMoveToolAreaParams p;
+
+	memset(&p, 0, sizeof(p));
+	@call oself::MSG_OL_FIELD_MOVE_TOOL_AREA(&p);
+    }
+}
+
+@method OLFieldClass, MSG_META_GET_FOCUS_EXCL
+{
+    *focusObject = pself->OLFI_focusExcl.HG_OD;
+    return TRUE;
+}
+
+@method OLFieldClass, MSG_META_GET_TARGET_EXCL
+{
+    *targetObject = pself->OLFI_targetExcl.HG_OD;
+    return TRUE;
+}
+
+/* OLFieldSendClassedEvent: to the field's focus or target */
+@method OLFieldClass, MSG_META_SEND_CLASSED_EVENT
+{
+    optr dest;
+
+    if (whereTo == (TravelOption) TO_FOCUS)
+	dest = pself->OLFI_focusExcl.HG_OD;
+    else if (whereTo == (TravelOption) TO_TARGET)
+	dest = pself->OLFI_targetExcl.HG_OD;
+    else {
+	@callsuper();
+	return;
+    }
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo, dest, 0);
+}
+
+@method OLFieldClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER,
+			       FIELD_OFFSET(OLFI_targetExcl), TL_GEN_FIELD,
+			       level, retValue);
+}
+
+/* OLFieldGainedFocusExcl: the applications restored; the focus below
+ * gets it, and the keyboard */
+@method OLFieldClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    @call oself::MSG_GEN_FIELD_RESTORE_APPS();
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       FIELD_OFFSET(OLFI_focusExcl), message);
+    SysUpdateKbdGrab(Field(oself)->OLFI_focusExcl.HG_OD);
+}
+
+@method OLFieldClass, MSG_META_LOST_FOCUS_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       FIELD_OFFSET(OLFI_focusExcl), message);
+    SysUpdateKbdGrab(0);
+}
+
+/* OLFieldGainedTargetExcl: the system's default field; the
+ * applications restored */
+@method OLFieldClass, MSG_META_GAINED_TARGET_EXCL
+{
+    optr sys = UserGetSystemObject();
+
+    if (sys)
+	@call sys::MSG_GEN_SYSTEM_SET_DEFAULT_FIELD(oself);
+    @call oself::MSG_GEN_FIELD_RESTORE_APPS();
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+			       VIS_MASTER, FIELD_OFFSET(OLFI_targetExcl),
+			       message);
+}
+
+@method OLFieldClass, MSG_META_LOST_TARGET_EXCL
+{
+    optr sys = UserGetSystemObject();
+
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+			       VIS_MASTER, FIELD_OFFSET(OLFI_targetExcl),
+			       message);
+    if (sys)
+	@call sys::MSG_GEN_SYSTEM_SET_DEFAULT_FIELD(0);
+}
+
+@method OLFieldClass, MSG_META_GAINED_FULL_SCREEN_EXCL,
+		      MSG_META_LOST_FULL_SCREEN_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FULL_SCREEN_EXCL,
+			       VIS_MASTER, FIELD_OFFSET(OLFI_fullScreenExcl),
+			       message);
+}
+
+/* OLFieldConsumeMessage: the field takes no mouse or keyboard grab */
+@method OLFieldClass, MSG_META_FORCE_GRAB_KBD, MSG_META_GRAB_KBD,
+		      MSG_META_RELEASE_KBD
+{
+}
+
+@method OLFieldClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE,
+		      MSG_VIS_FORCE_GRAB_MOUSE, MSG_VIS_GRAB_LARGE_MOUSE,
+		      MSG_VIS_GRAB_MOUSE, MSG_VIS_RELEASE_MOUSE
+{
+}
+
+/*
+ * OLFieldBringToTop: the field's window first, attached; the full
+ * screen, target and focus exclusives in the system; the model to the
+ * focus below
+ */
+@method OLFieldClass, MSG_GEN_BRING_TO_TOP
+{
+    WindowHandle win = VisQueryWindow(oself);
+    optr focus;
+
+    if (win)
+	WinChangePriority(win, 0, 0);
+    @call oself::MSG_META_ATTACH();
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, MAEF_GRAB |
+					       MAEF_FULL_SCREEN |
+					       MAEF_NOT_HERE);
+    @call oself::MSG_META_GRAB_TARGET_EXCL();
+    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+    focus = Field(oself)->OLFI_focusExcl.HG_OD;
+    if (focus)
+	@send focus::MSG_META_GRAB_MODEL_EXCL();
+}
+
+/* OLFieldLowerToBottom: the exclusives given up, the window behind the
+ * others; the system finds the new focus and target */
+@method OLFieldClass, MSG_GEN_LOWER_TO_BOTTOM
+{
+    WindowHandle win;
+    optr sys;
+
+    @call oself::MSG_META_RELEASE_FOCUS_EXCL();
+    @call oself::MSG_META_RELEASE_TARGET_EXCL();
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, MAEF_FULL_SCREEN |
+					       MAEF_NOT_HERE);
+    win = VisQueryWindow(oself);
+    if (!win)
+	return;
+    WinChangePriority(win, WPF_PLACE_BEHIND, 0);
+    sys = UserGetSystemObject();
+    if (sys)
+	@call sys::MSG_META_ENSURE_ACTIVE_FT();
+}
+
+/* OLFieldKbdChar: to the field's focus */
+@method OLFieldClass, MSG_META_KBD_CHAR
+{
+    optr focus = pself->OLFI_focusExcl.HG_OD;
+
+    if (!focus) {
+	@callsuper();
+	return;
+    }
+    @send focus::MSG_META_KBD_CHAR(character, flags, state);
+}
+
+/* ---------------------------------------------------------------------
+ * The applications (cwinFieldOther.asm, cwinFieldUncommon.asm)
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    optr	*apps;
+    word	count, max;
+    GeodeHandle	ui;
+} AppArray;
+
+/* FieldCreateAppArrayFromWindowsCallback: the application objects of
+ * the focusable geodes (not the UI) with standard windows on the field,
+ * front to back, each once */
+static void FieldCollectApps(WindowHandle parent, AppArray *a)
+{
+    optr child = 0;
+    WindowHandle w;
+
+    WinGetInfo(parent, WIT_FIRST_CHILD_WIN, &child);
+    for (w = (WindowHandle) child; w; ) {
+	optr prio = 0, next = 0;
+	GeodeHandle owner;
+
+	WinGetInfo(w, WIT_PRIORITY, &prio);
+	owner = MemOwner(w);
+	if ((((word) prio & WPD_LAYER) == (LAYER_PRIO_STD << 4)) &&
+	    owner != a->ui &&
+	    (WinGeodeGetFlags(owner) & GWF_FOCUSABLE)) {
+	    optr app = GeodeGetAppObject(owner);
+	    word i;
+
+	    if (app) {
+		for (i = 0; i < a->count && a->apps[i] != app; i++)
+		    ;
+		if (i == a->count && a->count < a->max)
+		    a->apps[a->count++] = app;
+	    }
+	}
+	WinGetInfo(w, WIT_NEXT_SIBLING_WIN, &next);
+	w = (WindowHandle) next;
+    }
+}
+
+#define MAX_FIELD_APPS	64
+
+/* OLFieldOrderGenApplicationList: GFI_genApplications in the order of
+ * the applications' windows */
+@method OLFieldClass, MSG_GEN_FIELD_ORDER_GEN_APPLICATION_LIST
+{
+    optr apps[MAX_FIELD_APPS];
+    AppArray a;
+    word i;
+
+    if (!pself->VCI_window)
+	return;
+    a.apps = apps;
+    a.count = 0;
+    a.max = MAX_FIELD_APPS;
+    a.ui = SysGetInfo(SGIT_UI_PROCESS);
+    FieldCollectApps(pself->VCI_window, &a);
+    for (i = 0; i < a.count; i++)
+	@call oself::MSG_GEN_FIELD_MOVE_GEN_APPLICATION(apps[i], i);
+}
+
+/* OLFieldGetTopGenApplication: the front application on the field */
+@method OLFieldClass, MSG_GEN_FIELD_GET_TOP_GEN_APPLICATION
+{
+    optr apps[1];
+    AppArray a;
+
+    if (!pself->VCI_window)
+	return 0;
+    a.apps = apps;
+    a.count = 0;
+    a.max = 1;
+    a.ui = SysGetInfo(SGIT_UI_PROCESS);
+    FieldCollectApps(pself->VCI_window, &a);
+    return a.count ? apps[0] : 0;
+}
+
+/* OLFieldSendToGenApplications: the message to each application */
+@method OLFieldClass, MSG_OL_FIELD_SEND_TO_GEN_APPLICATIONS
+{
+    ChunkHandle list = GenField(oself)->GFI_genApplications;
+    optr l;
+    word n, i;
+
+    if (!list)
+	return;
+    l = ConstructOptr(OptrToHandle(oself), list);
+    n = LMemGetChunkSize(l) / sizeof(optr);
+    for (i = 0; i < n; i++) {
+	optr app = ((optr *) LMemDeref(l))[i];
+
+	(void) CObjMessageP(0, app, msg, NULL, 0, NULL, 0);
+    }
+}
+
+/* OLFieldAppNoLongerExiting: a quit on close is off, the applications
+ * told */
+@method OLFieldClass, MSG_GEN_FIELD_APP_NO_LONGER_EXITING
+{
+    GenFieldInstance *gen = GenField(oself);
+    ChunkHandle list;
+    optr l;
+    word n, i;
+
+    if (!(gen->GFI_flags & GFF_QUIT_ON_CLOSE))
+	return;
+    gen->GFI_flags &= ~GFF_QUIT_ON_CLOSE;
+    list = gen->GFI_genApplications;
+    if (!list)
+	return;
+    l = ConstructOptr(OptrToHandle(oself), list);
+    n = LMemGetChunkSize(l) / sizeof(optr);
+    for (i = 0; i < n; i++) {
+	optr app = ((optr *) LMemDeref(l))[i];
+
+	@send, forceQueue app::MSG_GEN_APPLICATION_FIELD_QUIT_ABORTED();
+    }
+}
+
+/* OLFieldAboutToDetachComplete: the express menu and the tool area go
+ * (none yet) */
+@method OLFieldClass, MSG_GEN_FIELD_ABOUT_TO_DETACH_COMPLETE
+{
+    pself->OLFI_expressMenu = 0;
+    pself->OLFI_toolArea = 0;
+}
+
+/* OLFieldVisClose: the exclusives given up, closed; the system finds a
+ * new focus and target */
+@method OLFieldClass, MSG_VIS_CLOSE
+{
+    optr sys;
+
+    @call oself::MSG_META_RELEASE_FOCUS_EXCL();
+    @call oself::MSG_META_RELEASE_TARGET_EXCL();
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, MAEF_FULL_SCREEN |
+					       MAEF_NOT_HERE);
+    @callsuper();
+    sys = UserGetSystemObject();
+    if (sys)
+	@call sys::MSG_META_ENSURE_ACTIVE_FT();
+}
+
+/* the tool area (none yet): no size */
+@method OLFieldClass, MSG_OL_FIELD_GET_TOOL_AREA_SIZE
+{
+    return 0;
+}
+
+@method OLFieldClass, MSG_OL_FIELD_MOVE_TOOL_AREA
+{
+    (void) params;
+}

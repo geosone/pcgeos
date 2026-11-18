@@ -1,0 +1,71 @@
+/*
+ * cmainVariable.goc -- the variables of the specific UI (after
+ * cmainVariable.def), for Motif: the options read at the field's
+ * initialization (cmainCode.goc), the color scheme and the display
+ * scheme.
+ *
+ * Port32: the document control's variables are not here yet.
+ */
+@include "cGeode.goh"
+
+word olGadgetRepeatDelay;
+byte olGadgetAccelerate;
+byte olFileSelectorStaticDrivePopupMoniker = FALSE;
+byte olFileSelectorSingleClickToOpen = FALSE;
+byte olNoDefaultRing = FALSE;
+SystemAttrs olSystemAttrs;
+word olArrowSize = 12;			/* the scrollbar arrows */
+UIWindowOptions olWindowOptions;
+UIExpressOptions olExpressOptions;
+UIHelpOptions olHelpOptions;
+word olButtonInvertDelay;
+word olPDA;
+word olButtonActivateDelay = 0;
+word olExtWinAttrs;
+word resizeBarHeight = 4;
+word resizeBarWidth = 6;
+byte specDoClickSound = 0;
+
+/* CUA_ColorSchemeVars: Motif in color */
+ColorSchemeVars moCS = {
+    0,			/* flags: color, not CGA */
+    0,			/* the display type, not yet known */
+    C_LIGHT_GREY,	/* the display scheme's light color */
+    C_DARK_GREY,	/* and dark color */
+    C_DARK_GREY,	/* screenBG: the field */
+    C_DARK_GREY,	/* appWorkspace: behind views */
+    C_LIGHT_GREY,	/* windowBG: views */
+    C_BLACK,		/* windowText */
+    C_LIGHT_GREY,	/* menuBar */
+    C_BLACK,		/* menuText */
+    C_DARK_GREY,	/* activeTitleBar */
+    C_LIGHT_GREY,	/* inactiveTitleBar */
+    C_BLACK,		/* titleBarText */
+    C_LIGHT_GREY,	/* activeBorder */
+    C_LIGHT_GREY,	/* inactiveBorder */
+    C_DARK_GREY,	/* windowFrame: MO_ETCH_COLOR */
+    C_DARK_GREY,	/* scrollBars */
+    C_DARK_GREY,	/* menuSelection */
+    C_BLACK,		/* iconFG */
+    C_CYAN,		/* selBkgdColor */
+    C_BLACK,		/* textColor */
+    C_WHITE,		/* lightEdgeColor */
+    C_DARK_GREY,	/* darkEdgeColor */
+    C_DARK_GREY		/* titleBar2 */
+};
+
+/* CUA_MonochromeColorTable: the scheme on a black and white display */
+const ColorSchemeVars moCSMonochrome = {
+    CSF_BW, 0,
+    C_WHITE, C_BLACK,
+    C_WHITE, C_WHITE, C_WHITE, C_BLACK, C_WHITE, C_BLACK,
+    C_BLACK, C_WHITE, C_BLACK, C_DARK_GREY, C_DARK_GREY, C_BLACK,
+    C_DARK_GREY, C_BLACK, C_BLACK, C_BLACK, C_BLACK, C_BLACK,
+    C_BLACK, C_BLACK
+};
+
+DisplayScheme specDisplayScheme;
+Boolean kbdRequired;
+FontID editableTextFontID;
+sword editableTextFontsize;
+word fieldWidth = 0, fieldHeight = 0;

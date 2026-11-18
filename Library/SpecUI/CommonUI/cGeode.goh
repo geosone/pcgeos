@@ -1,0 +1,211 @@
+/*
+ * cGeode.goh -- the common header of the specific UI in C (after
+ * cGeode.def, cConstant.def, cGlobal.def and the variables of the
+ * modules): the includes, the build's configuration, the constants,
+ * the specific UI's variables and its routines.
+ *
+ * Port32 (Port32/ABI.md section 13y): the C port of CommonUI is built
+ * for Motif (motif.geo, Library/SpecUI/Motif/motif32.gp).  The asm's
+ * conditions for the other specific UIs (OPEN LOOK, CUA, ISUI, PM,
+ * Stylus, Rudy, Jedi, DUI, Odie) are left out; where one of them
+ * matters, the code has the Motif branch and says so.
+ */
+@include <stdapp.goh>
+@include <Objects/vCompC.goh>
+@include <Objects/gSysC.goh>
+@include <Objects/gScrnC.goh>
+@include <Objects/gFieldC.goh>
+@include <Objects/uiInputC.goh>
+@include <Internal/SpecUI/olSystemClass.goh>
+@include <Internal/SpecUI/olScreenClass.goh>
+@include <Internal/SpecUI/olFieldClass.goh>
+#include <Internal/specUI.h>
+#include <Internal/im.h>
+#include <Internal/videoDr.h>
+#include <geosdriver.h>
+#include <initfile.h>
+#include <chunkarr.h>
+#include <system.h>
+#include <font.h>
+#include <string.h>
+#include <sysstats.h>
+
+/* the kernel's WinInvalTree (geos.gp; not in win.h): the window and
+ * its children, in screen coordinates */
+extern void WinInvalTree(Handle win, const Region *reg, word axParam,
+			 word bxParam, word cxParam, word dxParam);
+
+/* ---------------------------------------------------------------------
+ * The build (cGeode.def): Motif
+ * ------------------------------------------------------------------- */
+
+#define _MOTIF			1
+#define _CUA_STYLE		1
+#define _OL_STYLE		0
+#define _ISUI			0
+#define ANIMATED_BUSY_CURSOR	0
+#define FIND_HIGHER_LAYER_PRIORITY 0
+
+/* WinPriorityData (window.def) */
+#define WPD_LAYER		0xf0
+#define WPD_WIN			0x0f
+
+/* ---------------------------------------------------------------------
+ * Constants (cConstant.def, CWin/cwinConstant.def)
+ * ------------------------------------------------------------------- */
+
+/* SystemAttrs (genC.def) the C header lacks */
+#ifndef SA_PORTRAIT
+#define SA_PORTRAIT		0x0080
+#endif
+
+/* ColorSchemeFlags: the display, as the specific UI sees it */
+typedef ByteFlags ColorSchemeFlags;
+#define CSF_BW			0x80	/* DC_GRAY_1 */
+#define CSF_TINY		0x40	/* a DS_TINY screen */
+#define CSF_VERY_NARROW		0x20	/* the application <= 300 wide */
+#define CSF_VERY_SQUISHED	0x10	/* DAR_VERY_SQUISHED */
+#define CSF_TV			0x08	/* DAR_TV */
+
+/* OLPtrImage (Motif): the pointer images of OpenGetPtrImage */
+typedef byte OLPtrImage;
+#define OLPI_NONE		0
+#define OLPI_BASIC		1	/* basic arrow */
+#define OLPI_X			2
+#define OLPI_CROSSHAIRS		3
+#define OLPI_BUSY		4	/* stopwatch */
+#define OLPI_MODAL		5	/* "?" */
+#define OLPI_MOVE		6
+#define OLPI_RESIZE_LEFT	7
+#define OLPI_RESIZE_RIGHT	8
+#define OLPI_RESIZE_UP		9
+#define OLPI_RESIZE_DOWN	10
+#define OLPI_RESIZE_UPL_DIAG	11
+#define OLPI_RESIZE_UPR_DIAG	12
+#define OLPI_RESIZE_DOWNL_DIAG	13
+#define OLPI_RESIZE_DOWNR_DIAG	14
+#define OLPI_SCROLL		OLPI_NONE
+#define OLPI_COPY		OLPI_NONE
+
+/* windows extended near their parent's bottom right corner keep these
+ * margins (cwinConstant.def) */
+#define WIN_ICON_PLOT_WIDTH			50
+#define NON_CGA_WIN_ICON_PLOT_HEIGHT		50
+#define NON_CGA_WIN_ICON_PLOT_MARGIN_Y		16
+#define EXTEND_NEAR_PARENT_MARGIN_X		0
+#define NON_CGA_EXTEND_NEAR_PARENT_MARGIN_Y \
+	(NON_CGA_WIN_ICON_PLOT_MARGIN_Y + NON_CGA_WIN_ICON_PLOT_HEIGHT + 4)
+#define CGA_EXTEND_NEAR_PARENT_MARGIN_Y		6
+
+/* ExtWinAttrs ([motif options] externalWinAttrs) */
+#define EWA_MOVABLE		0x8000
+#define EWA_RESIZABLE		0x4000
+
+/* ---------------------------------------------------------------------
+ * Variables (CMain/cmainVariable.def; CMain/cmainVariable.goc)
+ * ------------------------------------------------------------------- */
+
+/* the color scheme (CUA_ColorSchemeVars), in this order */
+typedef struct {
+    ColorSchemeFlags	CSV_flags;
+    byte		CSV_displayType;
+    Color		CSV_dsLightColor;	/* of the display scheme */
+    Color		CSV_dsDarkColor;
+    Color		CSV_screenBG;		/* the field */
+    Color		CSV_appWorkspace;	/* behind views */
+    Color		CSV_windowBG;		/* views */
+    Color		CSV_windowText;
+    Color		CSV_menuBar;
+    Color		CSV_menuText;
+    Color		CSV_activeTitleBar;
+    Color		CSV_inactiveTitleBar;
+    Color		CSV_titleBarText;
+    Color		CSV_activeBorder;
+    Color		CSV_inactiveBorder;
+    Color		CSV_windowFrame;
+    Color		CSV_scrollBars;
+    Color		CSV_menuSelection;
+    Color		CSV_iconFG;
+    Color		CSV_selBkgdColor;
+    Color		CSV_textColor;
+    Color		CSV_lightEdgeColor;
+    Color		CSV_darkEdgeColor;
+    Color		CSV_titleBar2;
+} ColorSchemeVars;
+
+extern ColorSchemeVars moCS;
+#define moCS_flags		moCS.CSV_flags
+#define moCS_displayType	moCS.CSV_displayType
+#define moCS_dsLightColor	moCS.CSV_dsLightColor
+#define moCS_dsDarkColor	moCS.CSV_dsDarkColor
+#define moCS_screenBG		moCS.CSV_screenBG
+#define moCS_windowFrame	moCS.CSV_windowFrame
+
+extern word olGadgetRepeatDelay;
+extern byte olGadgetAccelerate;
+extern byte olFileSelectorStaticDrivePopupMoniker;
+extern byte olFileSelectorSingleClickToOpen;
+extern byte olNoDefaultRing;
+extern SystemAttrs olSystemAttrs;
+extern word olArrowSize;
+extern UIWindowOptions olWindowOptions;
+extern UIExpressOptions olExpressOptions;
+extern UIHelpOptions olHelpOptions;
+extern word olButtonInvertDelay;
+extern word olPDA;
+extern word olButtonActivateDelay;
+extern word olExtWinAttrs;
+extern word resizeBarHeight;
+extern word resizeBarWidth;
+extern byte specDoClickSound;
+extern DisplayScheme specDisplayScheme;
+extern Boolean kbdRequired;
+extern FontID editableTextFontID;
+extern sword editableTextFontsize;
+extern word fieldWidth, fieldHeight;
+extern word screenWidth, screenHeight;	/* CWin/cwinScreen.goc */
+
+/* ---------------------------------------------------------------------
+ * Routines
+ * ------------------------------------------------------------------- */
+
+/* CMain/cmainCode.goc: the field's initialization of the specific UI;
+ * the display scheme and options for the UI */
+extern void SpecGetDisplayScheme(DisplayScheme *ds);
+extern UIWindowOptions SpecGetWindowOptions(void);
+extern UIExpressOptions SpecGetExpressOptions(void);
+extern void SpecInitWindowPreferences(void);
+extern void SpecInitExpressPreferences(void);
+extern void SpecInitHelpPreferences(void);
+extern void SpecInitDefaultDisplayScheme(void);
+extern void SpecInitGadgetPreferences(void);
+
+/* CUtils/copenUtils.goc */
+extern void OpenGetLineBounds(optr obj, Rectangle *r);
+extern Boolean OpenCheckIfCGA(void);
+extern Boolean OpenCheckIfBW(void);
+extern word OpenMinimizeIfCGA(word value);
+extern void OpenGetScreenDimensions(word *width, word *height);
+/* CUtils/cutilsPtrImages.goc (made by Port32/tools/ptrimg2c.py) */
+extern optr OpenGetPtrImage(OLPtrImage image);
+
+/* CUtils/copenSystem.goc: the focus and target of the system and
+ * field nodes (their grabs from focusOff: focus, target, full screen,
+ * model; the last non-modal focus at nonModalOff) */
+extern void EnsureActiveFTCommon(optr oself, WindowHandle parentWin,
+				 word focusOff, word nonModalOff,
+				 Boolean fromField);
+extern void GetOwningInputObj(WindowHandle win, optr *inputObj);
+extern WindowHandle GetDefaultScreenWin(optr system);
+extern void SysUpdateKbdGrab(optr newFocus);
+extern void AlterFExclWithNonModalCacheCommon(optr oself, word focusOff,
+					      word nonModalOff, optr obj,
+					      MetaAlterFTVMCExclFlags flags,
+					      Boolean modalActive);
+extern void OLSysUpdatePtrImage(optr system);
+
+/* the exported routines of the specific UI (motif32.gp: the first
+ * entries, in SpecificUIRoutine order) */
+extern ClassStruct *OLBuildSystem(optr oself, word masterOffset);
+extern ClassStruct *OLBuildScreen(optr oself, word masterOffset);
+extern ClassStruct *OLBuildField(optr oself, word masterOffset);

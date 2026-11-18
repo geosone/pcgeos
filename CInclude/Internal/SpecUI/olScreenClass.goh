@@ -1,0 +1,19 @@
+/*
+ * olScreenClass.goh -- OLScreenClass, the screen object of a specific
+ * UI (after Include/Internal/SpecUI/olScreenClass.def), for Port32.
+ */
+#ifndef __OLSCREENCLASS_GOH
+#define __OLSCREENCLASS_GOH
+
+@include <Objects/vCompC.goh>
+@include <Objects/gScrnC.goh>
+
+@deflib motif
+
+@class OLScreenClass, VisCompClass;
+@uses GenScreenClass;
+@endc;
+
+@endlib
+
+#endif

@@ -1,0 +1,40 @@
+/*
+ * olSystemClass.goh -- OLSystemClass, the system object of a specific
+ * UI (after Include/Internal/SpecUI/olSystemClass.def), for Port32.
+ */
+#ifndef __OLSYSTEMCLASS_GOH
+#define __OLSYSTEMCLASS_GOH
+
+@include <Objects/vCompC.goh>
+@include <Objects/gSysC.goh>
+@include <Objects/uiInputC.goh>
+@include <Internal/flowC.goh>
+
+@deflib motif
+
+@class OLSystemClass, VisCompClass;
+@uses GenSystemClass;
+
+    /* the system object is a node of every hierarchy; the field normally
+     * grabs the focus and the target (the full screen exclusive must
+     * come after the target, as in the asm) */
+    @instance HierarchicalGrab	OLSYI_focusExcl = {0, 0};
+    @instance HierarchicalGrab	OLSYI_targetExcl = {0, 0};
+    @instance HierarchicalGrab	OLSYI_fullScreenExcl = {0, 0};
+    @instance HierarchicalGrab	OLSYI_modelExcl = {0, 0};
+    /* the input object of the system modal geode, if any, its parent
+     * (Port32: a GeodeGrab, the asm's BasicGrab held the geode in its
+     * word of data) */
+    @instance GeodeGrab		OLSYI_modalGeode = {0, 0};
+    @instance optr		OLSYI_modalParentObj = 0;
+    /* the last non-modal geode to have the focus: it gets it back once
+     * the system modal dialogs are gone */
+    @instance optr		OLSYI_nonModalFocus = 0;
+    /* requests for the busy pointer */
+    @instance word		OLSYI_busyCount = 0;
+
+@endc;
+
+@endlib
+
+#endif

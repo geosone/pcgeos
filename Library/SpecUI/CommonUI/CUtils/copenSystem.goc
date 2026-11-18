@@ -1,0 +1,741 @@
+/*
+ * copenSystem.goc -- OLSystemClass (after copenSystem.asm): the system
+ * object of the specific UI, the top node of the focus, target, model
+ * and full screen hierarchies, the system modal geode, the busy
+ * pointer, the vis parent of the fields (the default screen) and of the
+ * applications (the default field), and the raising and lowering of
+ * geodes.  EnsureActiveFTCommon gives the focus, target and full
+ * screen exclusives of a node (the system's or a field's) to the best
+ * windows below it.
+ *
+ * Port32 (Port32/ABI.md section 13y): the system modal geode is a
+ * GeodeGrab (the geode handle does not fit BasicGrab's word); the UI's
+ * windows are those of the geode SGIT_UI_PROCESS (the asm's "handle
+ * ui"); the windows below a node are gathered into an array on the
+ * stack (CreateChunkArrayOnWindows made a chunk array).  Not yet: the
+ * animated busy pointer (ANIMATED_BUSY_CURSOR is off for Motif).
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/specC.goh>
+#include <sysstats.h>
+
+@classdecl OLSystemClass, neverSaved;
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define SYS_OFFSET(f)	word_offsetof(OLSystemInstance, f)
+
+/* the grabs of a node: focus, target, full screen, model, in this order
+ * from the focus (OLSYI_focusExcl, OLFI_focusExcl) */
+#define FT_FOCUS	0
+#define FT_TARGET	1
+#define FT_FULL_SCREEN	2
+
+static HierarchicalGrab *NodeGrab(optr node, word focusOff, word which)
+{
+    return (HierarchicalGrab *) ((byte *) ObjDerefVis(node) + focusOff) +
+	   which;
+}
+
+static optr *NodeOptr(optr node, word off)
+{
+    return (optr *) ((byte *) ObjDerefVis(node) + off);
+}
+
+/* ---------------------------------------------------------------------
+ * Initialization and queries
+ * ------------------------------------------------------------------- */
+
+/* OLSystemInitialize: an input node; the grabs are application ones */
+@method OLSystemClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    pself = ObjDerefVis(oself);
+    pself->OLSYI_focusExcl.HG_flags = HGF_APP_EXCL;
+    pself->OLSYI_targetExcl.HG_flags = HGF_APP_EXCL;
+    pself->OLSYI_modelExcl.HG_flags = HGF_APP_EXCL;
+    pself->OLSYI_fullScreenExcl.HG_flags = HGF_APP_EXCL;
+    pself->VI_typeFlags |= VTF_IS_INPUT_NODE;
+}
+
+/* OLSystemGupQueryVisParent: a field goes on the default screen, the
+ * others on the default field */
+@method OLSystemClass, MSG_SPEC_GUP_QUERY_VIS_PARENT
+{
+    GenSystemInstance *gen = (GenSystemInstance *) ObjDerefGen(oself);
+
+    return parentType == SQT_VIS_PARENT_FOR_FIELD ? gen->GSYI_defaultScreen
+						   : gen->GSYI_defaultField;
+}
+
+/* OLSystemConsumeMessage: the system takes no mouse or keyboard grab */
+@method OLSystemClass, MSG_META_FORCE_GRAB_KBD, MSG_META_GRAB_KBD,
+		       MSG_META_RELEASE_KBD
+{
+}
+
+@method OLSystemClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE,
+		       MSG_VIS_FORCE_GRAB_MOUSE, MSG_VIS_GRAB_LARGE_MOUSE,
+		       MSG_VIS_GRAB_MOUSE, MSG_VIS_RELEASE_MOUSE
+{
+}
+
+/* OLSystemGupQuery: the specific UI of applications, screens and fields
+ * is the system's default UI */
+@method OLSystemClass, MSG_SPEC_P32_GUP_QUERY
+{
+    switch (queryType) {
+    case GUQT_UI_FOR_MISC:
+    case GUQT_UI_FOR_APPLICATION:
+    case GUQT_UI_FOR_SCREEN:
+    case GUQT_UI_FOR_FIELD:
+	retValue->GRP_ax = ((GenSystemInstance *)
+			    ObjDerefGen(oself))->GSYI_defaultUI;
+	return TRUE;
+    default:
+	return FALSE;
+    }
+}
+
+/* OLSystemGenGupEnsureUpdateWindow: the top of the update */
+@method OLSystemClass, MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW
+{
+    (void) updateFlags;
+    (void) updateMode;
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * Raising and lowering geodes
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLSystemRaiseLowerCommon: the layer of the geode's windows below
+ * parentWin gets the priority of flags, then its input object asks its
+ * parent object for the exclusives of exclFlags (with MAEF_GRAB the
+ * parent itself grabs them in its own parent, else the parent makes
+ * sure there is an active focus and target).
+ */
+static void OLSystemRaiseLowerCommon(GeodeHandle geode, Handle layerID,
+				     WindowHandle parentWin,
+				     WinPassFlags flags,
+				     MetaAlterFTVMCExclFlags exclFlags)
+{
+    optr input, parent;
+
+    if (parentWin && layerID)
+	WinChangePriority(parentWin, flags, layerID);
+    if (!geode)
+	return;
+    input = WinGeodeGetInputObj(geode);
+    parent = WinGeodeGetParentObj(geode);
+    if (!parent)
+	return;
+    @call parent::MSG_META_MUP_ALTER_FTVMC_EXCL(input, exclFlags);
+    if (!(exclFlags & MAEF_GRAB)) {
+	@call parent::MSG_META_ENSURE_ACTIVE_FT();
+	return;
+    }
+    /* the parent grabs them in its own parent */
+    exclFlags &= ~MAEF_MODEL;
+    if (exclFlags & (MAEF_TARGET | MAEF_FOCUS))
+	@call parent::MSG_META_MUP_ALTER_FTVMC_EXCL(parent,
+						    exclFlags | MAEF_NOT_HERE);
+}
+
+/* OLSystemBringGeodeToTop: the geode's layer on top, and the exclusives
+ * its GeodeWinFlags allow */
+@method OLSystemClass, MSG_GEN_SYSTEM_BRING_GEODE_TO_TOP
+{
+    MetaAlterFTVMCExclFlags f = 0;
+
+    if (geode) {
+	word gwf = WinGeodeGetFlags(geode);
+
+	f = MAEF_GRAB;
+	if (gwf & GWF_FOCUSABLE)
+	    f |= MAEF_FOCUS;
+	if (gwf & GWF_TARGETABLE)
+	    f |= MAEF_TARGET;
+	if (gwf & GWF_MODELABLE)
+	    f |= MAEF_MODEL;
+	if (gwf & GWF_FULL_SCREEN)
+	    f |= MAEF_FULL_SCREEN;
+    }
+    OLSystemRaiseLowerCommon(geode, layerID, parentWindow, WPF_LAYER, f);
+}
+
+/* OLSystemLowerGeodeToBottom: the layer behind the others, the
+ * exclusives given up */
+@method OLSystemClass, MSG_GEN_SYSTEM_LOWER_GEODE_TO_BOTTOM
+{
+    OLSystemRaiseLowerCommon(geode, layerID, parentWindow,
+			     WPF_LAYER | WPF_PLACE_LAYER_BEHIND,
+			     MAEF_FOCUS | MAEF_TARGET | MAEF_MODEL |
+			     MAEF_FULL_SCREEN);
+}
+
+@method OLSystemClass, MSG_GEN_SYSTEM_GET_MODAL_GEODE
+{
+    if (geode)
+	*geode = pself->OLSYI_modalGeode.GG_geode;
+    return pself->OLSYI_modalGeode.GG_OD;
+}
+
+/* ---------------------------------------------------------------------
+ * Windows below a node
+ * ------------------------------------------------------------------- */
+
+#define MAX_WINS	128
+
+typedef struct {
+    Boolean		first;
+    GeodeHandle		owner;		/* 0: any */
+    Handle		layerID;	/* 0: any */
+    word		n;
+    WindowHandle	wins[MAX_WINS];
+} WinsOnWin;
+
+/* CreateChunkArrayOnWindowsInLayerCallBack: the children of the window,
+ * of the owner and layer if given */
+static Boolean CollectChildCallback(WindowHandle *win, void *data)
+{
+    WinsOnWin *w = data;
+    WindowHandle next = 0;
+
+    if (w->first) {
+	w->first = FALSE;
+	WinGetInfo(*win, WIT_FIRST_CHILD_WIN, &next);
+    } else {
+	Boolean ok = TRUE;
+
+	if (w->owner && MemOwner(*win) != w->owner)
+	    ok = FALSE;
+	if (ok && w->layerID) {
+	    Handle layer = 0;
+
+	    WinGetInfo(*win, WIT_LAYER_ID, &layer);
+	    ok = layer == w->layerID;
+	}
+	if (ok && w->n < MAX_WINS)
+	    w->wins[w->n++] = *win;
+	WinGetInfo(*win, WIT_NEXT_SIBLING_WIN, &next);
+    }
+    *win = next;
+    return FALSE;
+}
+
+/* TestIfCXDXGenFieldObject: a field of this thread */
+static Boolean TestIfGenFieldObject(optr obj)
+{
+    return obj && ObjTestIfObjBlockRunByCurThread(OptrToHandle(obj)) &&
+	   ObjIsObjectInClass(obj, (ClassStruct *) &GenFieldClass);
+}
+
+/*
+ * FindWinOfPrioInChunkArrayCallBack: the window has the priority prio
+ * asks for (its layer and window parts, where given) and, if prio has
+ * GeodeWinFlags in its high byte, its geode has them, or it is a field
+ * with a focus (GWF_FOCUSABLE) or target below it
+ */
+static Boolean WinOfPrio(WindowHandle win, word prio)
+{
+    word p = 0;
+    byte want = (byte) prio, gwf = (byte) (prio >> 8), have;
+
+    WinGetInfo(win, WIT_PRIORITY, &p);
+    have = (byte) p;
+    if (!(want & WPD_WIN))
+	have &= ~WPD_WIN;
+    if (!(want & WPD_LAYER))
+	have &= ~WPD_LAYER;
+    if (have != want)
+	return FALSE;
+    if (!gwf)
+	return TRUE;
+    if (((WinGeodeGetFlags(MemOwner(win)) >> 8) & gwf) == gwf)
+	return TRUE;
+    {
+	optr input = 0, excl = 0;
+
+	WinGetInfo(win, WIT_INPUT_OBJ, &input);
+	if (!TestIfGenFieldObject(input))
+	    return FALSE;
+	/* the focus below it if focusable is asked for and its geode is,
+	 * else the target */
+	if (WinGeodeGetFlags(MemOwner(win)) & ((word) gwf << 8) &
+	    GWF_FOCUSABLE)
+	    (void) @call input::MSG_META_GET_FOCUS_EXCL(&excl);
+	else
+	    (void) @call input::MSG_META_GET_TARGET_EXCL(&excl);
+	return excl != 0;
+    }
+}
+
+/*
+ * FindWinOnWin: the first child of parentWin (of the owner and layer,
+ * if given) of the priority prio; its input object, and the window in
+ * *win (both 0: none)
+ */
+static optr FindWinOnWin(WindowHandle parentWin, word prio, GeodeHandle owner,
+			 Handle layerID, WindowHandle *win)
+{
+    WinsOnWin w;
+    word i;
+    optr input = 0;
+
+    *win = 0;
+    if (!parentWin)
+	return 0;
+    w.first = TRUE;
+    w.owner = owner;
+    w.layerID = layerID;
+    w.n = 0;
+    WinForEach(parentWin, CollectChildCallback, &w);
+    for (i = 0; i < w.n; i++)
+	if (WinOfPrio(w.wins[i], prio)) {
+	    WinGetInfo(w.wins[i], WIT_INPUT_OBJ, &input);
+	    *win = w.wins[i];
+	    return input;
+	}
+    return 0;
+}
+
+/* GetOwningInputObj: the input object of the geode that owns the window
+ * (0 if none) */
+void GetOwningInputObj(WindowHandle win, optr *inputObj)
+{
+    *inputObj = win ? WinGeodeGetInputObj(MemOwner(win)) : 0;
+}
+
+/* FindFTObjectOfPrioOnWin: the object to get an exclusive: a field
+ * window's field, else the input object of the window's geode */
+static optr FindFTObjectOfPrioOnWin(WindowHandle parentWin, word prio,
+				    GeodeHandle owner)
+{
+    WindowHandle win;
+    optr obj = FindWinOnWin(parentWin, prio, owner, 0, &win);
+
+    if (TestIfGenFieldObject(obj))
+	return obj;
+    GetOwningInputObj(win, &obj);
+    return obj;
+}
+
+/*
+ * TryPreferredAndVariations: a targetable window of the layer priority
+ * asked for (then the other of LAYER_PRIO_STD and LAYER_PRIO_ON_TOP),
+ * standard window priority, then one more; not the object to avoid.
+ * Returns the object (0: none); *foundAvoid if only that was found.
+ */
+static optr TryPreferredAndVariations(WindowHandle parentWin, word priority,
+				      optr avoid, GeodeHandle owner,
+				      Boolean *foundAvoid)
+{
+    static const byte winPrio[2] = { WIN_PRIO_STD, WIN_PRIO_STD + 1 };
+    word i, j, p;
+    optr o;
+
+    *foundAvoid = FALSE;
+    if (!priority)
+	return 0;
+    for (i = 0; i < 2; i++)
+	for (j = 0; j < 2; j++) {
+	    p = priority ^ (j ? (4 << WPF_LAYER_PRIORITY_OFFSET) : 0);
+	    p |= winPrio[i] | GWF_TARGETABLE;
+	    o = FindFTObjectOfPrioOnWin(parentWin, p, owner);
+	    if (!o)
+		continue;
+	    if (o == avoid) {
+		*foundAvoid = TRUE;
+		continue;
+	    }
+	    return o;
+	}
+    return 0;
+}
+
+static void AlterExcl(optr oself, optr obj, MetaAlterFTVMCExclFlags flags)
+{
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(obj, flags);
+}
+
+/* the first object of the GeodeWinFlags gwf on parentWin: standard
+ * layer priority, then on bottom, then on top */
+static optr FindStdBottomTop(WindowHandle parentWin, word gwf,
+			     GeodeHandle owner)
+{
+    static const byte layers[3] = { LAYER_PRIO_STD, LAYER_PRIO_ON_BOTTOM,
+				    LAYER_PRIO_ON_TOP };
+    word i;
+    optr o;
+
+    for (i = 0; i < 3; i++) {
+	o = FindFTObjectOfPrioOnWin(parentWin, gwf |
+				    (layers[i] << WPF_LAYER_PRIORITY_OFFSET),
+				    owner);
+	if (o)
+	    return o;
+    }
+    return 0;
+}
+
+/*
+ * EnsureActiveFTCommon: the node (the system, or a field: fromField;
+ * its grabs at focusOff, its last non-modal focus at nonModalOff in the
+ * Vis master part)
+ * without a full screen, target or focus exclusive gives it to the best
+ * window below parentWin: one the TEMP_META_ENSURE_ACTIVE_FT_LAYER_
+ * PRIORITY_PREFERENCE asks for, else (the focus) the last non-modal
+ * focus or the target, else the standard, bottom, then top layer; the
+ * object to avoid if nothing else.  A node left without a focus (the
+ * system without a system modal geode too) is told.
+ */
+void EnsureActiveFTCommon(optr oself, WindowHandle parentWin, word focusOff,
+			  word nonModalOff, Boolean fromField)
+{
+    GeodeHandle owner = fromField ? 0
+				  : (GeodeHandle) SysGetInfo(SGIT_UI_PROCESS);
+    word priority = 0;
+    optr avoidTarget = 0, avoidFocus = 0, o;
+    EnsureActiveFTPriorityPreferenceData *pref;
+    Boolean foundAvoid;
+
+    pref = ObjVarFindData(oself,
+			  TEMP_META_ENSURE_ACTIVE_FT_LAYER_PRIORITY_PREFERENCE);
+    if (pref) {
+	priority = pref->EAFTPPD_priority;
+	avoidTarget = avoidFocus = pref->EAFTPPD_avoidOptr;
+	ObjVarDeleteData(oself,
+			 TEMP_META_ENSURE_ACTIVE_FT_LAYER_PRIORITY_PREFERENCE);
+    }
+
+    /* the full screen exclusive, in the transparent launch model */
+    if (UserGetLaunchModel() == UILM_TRANSPARENT &&
+	!NodeGrab(oself, focusOff, FT_FULL_SCREEN)->HG_OD) {
+	o = FindFTObjectOfPrioOnWin(parentWin, GWF_FULL_SCREEN |
+				    (LAYER_PRIO_STD <<
+				     WPF_LAYER_PRIORITY_OFFSET), owner);
+	AlterExcl(oself, o, MAEF_GRAB | MAEF_FULL_SCREEN);
+    }
+
+    /* the target */
+    if (!NodeGrab(oself, focusOff, FT_TARGET)->HG_OD) {
+	o = 0;
+	if (priority) {
+	    o = TryPreferredAndVariations(parentWin, priority, avoidTarget,
+					  owner, &foundAvoid);
+	    if (!o && !foundAvoid)
+		avoidTarget = 0;
+	}
+	if (!o)
+	    o = FindStdBottomTop(parentWin, GWF_TARGETABLE, owner);
+	if (!o)
+	    o = avoidTarget;
+	AlterExcl(oself, o, MAEF_GRAB | MAEF_TARGET | MAEF_MODEL);
+    }
+
+    /* the focus */
+    if (!NodeGrab(oself, focusOff, FT_FOCUS)->HG_OD) {
+	o = 0;
+	if (priority) {
+	    o = TryPreferredAndVariations(parentWin, priority, avoidFocus,
+					  owner, &foundAvoid);
+	    if (!o && !foundAvoid)
+		avoidFocus = 0;
+	}
+	if (!o)
+	    o = *NodeOptr(oself, nonModalOff);
+	if (!o)
+	    o = NodeGrab(oself, focusOff, FT_TARGET)->HG_OD;
+	if (!o)
+	    o = FindStdBottomTop(parentWin, GWF_FOCUSABLE, owner);
+	if (!o)
+	    o = avoidFocus;
+	AlterExcl(oself, o, MAEF_GRAB | MAEF_FOCUS);
+    }
+
+    if (!NodeGrab(oself, focusOff, FT_FOCUS)->HG_OD &&
+	(fromField ||
+	 !((OLSystemInstance *) ObjDerefVis(oself))->OLSYI_modalGeode.GG_OD))
+	@call oself::MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE();
+}
+
+/* GetDefaultScreenWin: the window of the system's default screen */
+WindowHandle GetDefaultScreenWin(optr system)
+{
+    optr screen = ((GenSystemInstance *)
+		   ObjDerefGen(system))->GSYI_defaultScreen;
+    GenReturnParams r;
+
+    if (!screen)
+	return 0;
+    memset(&r, 0, sizeof(r));
+    if (!@call screen::MSG_SPEC_P32_GUP_QUERY(&r, GUQT_SCREEN))
+	return 0;
+    return (WindowHandle) r.GRP_bp;
+}
+
+@method OLSystemClass, MSG_META_ENSURE_ACTIVE_FT
+{
+    EnsureActiveFTCommon(oself, GetDefaultScreenWin(oself),
+			 SYS_OFFSET(OLSYI_focusExcl),
+			 SYS_OFFSET(OLSYI_nonModalFocus), FALSE);
+}
+
+/* OLSystemNotifyNoFocusWithinNode: nothing left to have the focus: the
+ * system shuts down */
+@method OLSystemClass, MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE
+{
+    SysShutdown(SST_CLEAN_FORCED);
+}
+
+/* ---------------------------------------------------------------------
+ * The system modal geode
+ * ------------------------------------------------------------------- */
+
+/*
+ * ModalGrabReleaseCommon: the modal input object grabs or releases the
+ * focus (flags) in its parent object; a parent other than the system
+ * makes sure of its focus and gets or gives up the system's focus.
+ */
+static void ModalGrabReleaseCommon(optr oself, optr modal, optr parent,
+				   MetaAlterFTVMCExclFlags flags)
+{
+    if (!parent)
+	return;
+    @call parent::MSG_META_MUP_ALTER_FTVMC_EXCL(modal, flags);
+    if (parent == oself)
+	return;
+    @call parent::MSG_META_ENSURE_ACTIVE_FT();
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(parent, flags);
+}
+
+/*
+ * OLSystemNotifySysModalWinChange: the top system modal window on the
+ * default screen is the system modal geode's (the flow object told);
+ * the focus goes to it, or back when there is none any more.
+ */
+@method OLSystemClass, MSG_GEN_SYSTEM_NOTIFY_SYS_MODAL_WIN_CHANGE
+{
+    WindowHandle win;
+    optr input, parent = 0, oldInput, oldParent, focus = 0;
+    GeodeHandle geode, oldGeode;
+    OLSystemInstance *sys;
+
+    (void) FindWinOnWin(GetDefaultScreenWin(oself),
+			(LAYER_PRIO_MODAL << WPF_LAYER_PRIORITY_OFFSET) |
+			WIN_PRIO_MODAL, 0, 0, &win);
+    GetOwningInputObj(win, &input);
+    geode = win ? MemOwner(win) : 0;
+    if (UserGetFlowObject())
+	@call UserGetFlowObject()::MSG_FLOW_SET_MODAL_GEODE(input, geode);
+    if (geode)
+	parent = WinGeodeGetParentObj(geode);
+
+    sys = ObjDerefVis(oself);
+    oldInput = sys->OLSYI_modalGeode.GG_OD;
+    oldGeode = sys->OLSYI_modalGeode.GG_geode;
+    oldParent = sys->OLSYI_modalParentObj;
+    sys->OLSYI_modalGeode.GG_OD = input;
+    sys->OLSYI_modalGeode.GG_geode = geode;
+    sys->OLSYI_modalParentObj = parent;
+    if (oldGeode != geode) {
+	if (oldGeode && !geode) {
+	    /* out of the modal state: the focus back where it belongs */
+	    ModalGrabReleaseCommon(oself, oldInput, oldParent,
+				   MAEF_FOCUS | MAEF_MODAL);
+	    @call oself::MSG_META_ENSURE_ACTIVE_FT();
+	    if (@call oself::MSG_META_GET_FOCUS_EXCL(&focus) && focus)
+		@call focus::MSG_META_ENSURE_ACTIVE_FT();
+	} else {
+	    /* into it; from another geode below another parent, that one
+	     * lets go first */
+	    if (oldGeode && oldParent != parent)
+		ModalGrabReleaseCommon(oself, oldInput, oldParent,
+				       MAEF_FOCUS | MAEF_MODAL);
+	    ModalGrabReleaseCommon(oself, input, parent,
+				   MAEF_GRAB | MAEF_FOCUS | MAEF_MODAL);
+	}
+    }
+    OLSysUpdatePtrImage(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The hierarchies
+ * ------------------------------------------------------------------- */
+
+/* FlowGrabCommon: the keyboard to obj (0: nobody) in the flow object */
+static void FlowGrabKbdExcl(optr obj)
+{
+    optr flow = UserGetFlowObject();
+
+    if (flow) {
+	PointDWord t;
+
+	memset(&t, 0, sizeof(t));
+	@call flow::MSG_VIS_VUP_ALTER_INPUT_FLOW(t, 0, obj, VIFGT_ACTIVE,
+						 VIFGF_KBD | VIFGF_GRAB |
+						 VIFGF_FORCE);
+    }
+}
+
+/* SysUpdateKbdGrab: the system's new focus gets the keyboard, but an
+ * application of this thread takes it itself */
+void SysUpdateKbdGrab(optr newFocus)
+{
+    if (newFocus && ObjTestIfObjBlockRunByCurThread(OptrToHandle(newFocus))
+	&& ObjIsObjectInClass(newFocus, (ClassStruct *) &GenApplicationClass))
+	return;
+    FlowGrabKbdExcl(newFocus);
+}
+
+/*
+ * AlterFExclWithNonModalCacheCommon: the focus of the node (its grab at
+ * focusOff in the Vis part), the last non-modal focus (an optr at
+ * nonModalOff) kept: while a system modal geode is within the node, a
+ * non-modal grab is only remembered; forgotten when it lets go
+ */
+void AlterFExclWithNonModalCacheCommon(optr oself, word focusOff,
+				       word nonModalOff, optr obj,
+				       MetaAlterFTVMCExclFlags flags,
+				       Boolean modalActive)
+{
+    optr *nonModal = NodeOptr(oself, nonModalOff);
+
+    if (flags & MAEF_GRAB) {
+	if (!obj || !modalActive)
+	    *nonModal = obj;
+	else if (!(flags & MAEF_MODAL)) {
+	    *nonModal = obj;
+	    return;
+	}
+    } else if (*nonModal == obj)
+	*nonModal = 0;
+    FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			      focusOff, obj, (flags & MAEF_GRAB) | MAEF_FOCUS);
+}
+
+/* OLSystemAlterFTVMCExcl: the hierarchies at the system; a new focus
+ * gets the keyboard */
+@method OLSystemClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    static const struct {
+	MetaAlterFTVMCExclFlags flag;
+	Message gained;
+	word off;
+    } h[3] = {
+	{ MAEF_TARGET, MSG_META_GAINED_TARGET_EXCL,
+	  SYS_OFFSET(OLSYI_targetExcl) },
+	{ MAEF_MODEL, MSG_META_GAINED_MODEL_EXCL,
+	  SYS_OFFSET(OLSYI_modelExcl) },
+	{ MAEF_FULL_SCREEN, MSG_META_GAINED_FULL_SCREEN_EXCL,
+	  SYS_OFFSET(OLSYI_fullScreenExcl) },
+    };
+    word i;
+
+    if (flags & MAEF_FOCUS) {
+	optr old = pself->OLSYI_focusExcl.HG_OD;
+
+	AlterFExclWithNonModalCacheCommon(oself,
+				SYS_OFFSET(OLSYI_focusExcl),
+				SYS_OFFSET(OLSYI_nonModalFocus),
+				objectWantingControl, flags,
+				pself->OLSYI_modalGeode.GG_OD != 0);
+	pself = ObjDerefVis(oself);
+	if (pself->OLSYI_focusExcl.HG_OD != old)
+	    SysUpdateKbdGrab(pself->OLSYI_focusExcl.HG_OD);
+	flags &= ~MAEF_FOCUS;
+    }
+    for (i = 0; i < 3; i++)
+	if (flags & h[i].flag) {
+	    FlowAlterHierarchicalGrab(oself, h[i].gained, VIS_MASTER,
+				      h[i].off, objectWantingControl,
+				      (flags & MAEF_GRAB) | h[i].flag);
+	    flags &= ~h[i].flag;
+	}
+}
+
+/* OLSystemVupAlterInputFlow: on to the flow object, as here */
+@method OLSystemClass, MSG_VIS_VUP_ALTER_INPUT_FLOW
+{
+    optr flow = UserGetFlowObject();
+
+    if (flow)
+	@call flow::MSG_VIS_VUP_ALTER_INPUT_FLOW(translation, window, object,
+						 grabType,
+						 grabFlags & ~VIFGF_NOT_HERE);
+}
+
+@method OLSystemClass, MSG_META_GET_FOCUS_EXCL
+{
+    *focusObject = pself->OLSYI_focusExcl.HG_OD;
+    return TRUE;
+}
+
+@method OLSystemClass, MSG_META_GET_MODEL_EXCL
+{
+    *modelObject = pself->OLSYI_modelExcl.HG_OD;
+    return TRUE;
+}
+
+@method OLSystemClass, MSG_META_GET_TARGET_EXCL
+{
+    *targetObject = pself->OLSYI_targetExcl.HG_OD;
+    return TRUE;
+}
+
+/* OLSystemSendClassedEvent: to the focus, target or model */
+@method OLSystemClass, MSG_META_SEND_CLASSED_EVENT
+{
+    optr dest;
+
+    if (whereTo == (TravelOption) TO_FOCUS)
+	dest = pself->OLSYI_focusExcl.HG_OD;
+    else if (whereTo == (TravelOption) TO_TARGET)
+	dest = pself->OLSYI_targetExcl.HG_OD;
+    else if (whereTo == (TravelOption) TO_MODEL)
+	dest = pself->OLSYI_modelExcl.HG_OD;
+    else {
+	@callsuper();
+	return;
+    }
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo, dest, 0);
+}
+
+@method OLSystemClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER,
+			       SYS_OFFSET(OLSYI_targetExcl), TL_GEN_SYSTEM,
+			       level, retValue);
+}
+
+/* ---------------------------------------------------------------------
+ * The busy pointer
+ * ------------------------------------------------------------------- */
+
+@method OLSystemClass, MSG_GEN_SYSTEM_MARK_BUSY
+{
+    pself->OLSYI_busyCount++;
+    OLSysUpdatePtrImage(oself);
+}
+
+@method OLSystemClass, MSG_GEN_SYSTEM_MARK_NOT_BUSY
+{
+    if (pself->OLSYI_busyCount)
+	pself->OLSYI_busyCount--;
+    OLSysUpdatePtrImage(oself);
+}
+
+/* OLSysUpdatePtrImage: the busy pointer at the system level while busy
+ * and no system modal geode is up */
+void OLSysUpdatePtrImage(optr system)
+{
+    OLSystemInstance *sys = ObjDerefVis(system);
+    OLPtrImage image = OLPI_NONE;
+
+    if (!sys->OLSYI_modalGeode.GG_geode && sys->OLSYI_busyCount)
+	image = OLPI_BUSY;
+    ImSetPtrImage(PIL_SYSTEM, OpenGetPtrImage(image));
+}

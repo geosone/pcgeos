@@ -1,0 +1,12 @@
+/*
+ * cspecScreen.goc -- the build routine of GenScreenClass (after
+ * cspecScreen.asm): a GenScreen is always an OLScreen.
+ */
+@include "cGeode.goh"
+
+ClassStruct *OLBuildScreen(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLScreenClass;
+}

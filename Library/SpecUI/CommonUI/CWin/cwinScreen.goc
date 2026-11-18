@@ -1,0 +1,199 @@
+/*
+ * cwinScreen.goc -- OLScreenClass (after cwinScreen.asm): the screen
+ * object of the specific UI, a window group on the video driver of its
+ * GenScreen.  It is a visual child of the system, its window the root
+ * window on the driver (registered with the UI: UserScreenRegister), its
+ * size the driver's page; the window of last resort for the vis parent
+ * queries, and the screen and field of applications sitting on it.  A
+ * change of the host display's size (GWNT_HOST_DISPLAY_SIZE_CHANGE on
+ * GCNSLT_HOST_NOTIFICATIONS) gives the screen and its fields the new
+ * size.
+ * The screen answers VUQ_VIDEO_DRIVER with its GenScreen's driver.
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+
+@classdecl OLScreenClass, neverSaved;
+
+word screenWidth, screenHeight;
+
+/* the driver's information */
+static VideoDriverInfo *ScreenDriverInfo(optr oself)
+{
+    GeodeHandle drv = ((GenScreenInstance *) ObjDerefGen(oself))->GSCI_videoDriver;
+
+    return drv ? (VideoDriverInfo *) GeodeInfoDriver(drv) : NULL;
+}
+
+/* OLScreenInitialize: a window and win group, realizable */
+@method OLScreenClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    pself = ObjDerefVis(oself);
+    pself->VI_typeFlags |= VTF_IS_WINDOW | VTF_IS_WIN_GROUP;
+    pself->VI_specAttrs |= SA_REALIZABLE;
+}
+
+/*
+ * OLScreenSpecBuild: a visual child of the system (its generic parent)
+ * of the driver's size, its children not managed; on the host
+ * notifications
+ */
+@method OLScreenClass, MSG_SPEC_BUILD
+{
+    optr sys = GenFindParent(oself);
+    VideoDriverInfo *info;
+
+    (void) flags;
+    if (sys)
+	@call sys::MSG_VIS_ADD_CHILD(oself, CCO_LAST);
+    info = ScreenDriverInfo(oself);
+    pself = ObjDerefVis(oself);
+    if (info) {
+	pself->VI_bounds.R_right = info->VDI_pageW;
+	pself->VI_bounds.R_bottom = info->VDI_pageH;
+    }
+    pself->VI_optFlags |= VOF_IMAGE_INVALID | VOF_WINDOW_INVALID;
+    pself->VCI_geoAttrs |= VCGA_CUSTOM_MANAGE_CHILDREN;
+    GCNListAdd(oself, MANUFACTURER_ID_GEOWORKS, GCNSLT_HOST_NOTIFICATIONS);
+}
+
+@method OLScreenClass, MSG_SPEC_UNBUILD
+{
+    GCNListRemove(oself, MANUFACTURER_ID_GEOWORKS,
+		  GCNSLT_HOST_NOTIFICATIONS);
+    @callsuper();
+}
+
+static void CallDriver(GeodeHandle drv, word function)
+{
+    DriverRegs r;
+
+    if (!drv)
+	return;
+    memset(&r, 0, sizeof(r));
+    (void) DriverCall(GeodeInfoDriver(drv), function, &r);
+}
+
+/*
+ * OLScreenNotify: the host display's size changed: the driver updates
+ * its device, the screen and its fields take the new size and are drawn
+ * again (GWNT_HOST_SCREEN_FIELD_SIZE_CHANGE told), the pointer goes on
+ * the screen again, shown if there is a mouse driver
+ */
+@method OLScreenClass, MSG_META_NOTIFY
+{
+    GeodeHandle drv;
+    VideoDriverInfo *info;
+    EventHandle ev;
+    WindowHandle win;
+
+    if (manufID != MANUFACTURER_ID_GEOWORKS ||
+	notificationType != GWNT_HOST_DISPLAY_SIZE_CHANGE) {
+	@callsuper();
+	return;
+    }
+    drv = ((GenScreenInstance *) ObjDerefGen(oself))->GSCI_videoDriver;
+    CallDriver(drv, DR_VID_HIDEPTR);
+    CallDriver(drv, VID_ESC_UPDATE_DEVICE);
+    info = ScreenDriverInfo(oself);
+    if (info) {
+	screenWidth = info->VDI_pageW;
+	screenHeight = info->VDI_pageH;
+    }
+    @call oself::MSG_VIS_SET_SIZE(screenWidth, screenHeight);
+    ev = @record GenFieldClass::MSG_VIS_SET_SIZE(screenWidth, screenHeight);
+    @call oself::MSG_VIS_SEND_TO_CHILDREN(ev);
+    ev = @record GenFieldClass::MSG_VIS_MARK_INVALID(
+		VOF_IMAGE_INVALID | VOF_WINDOW_INVALID | VOF_IMAGE_UPDATE_PATH |
+		VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH,
+		VUM_DELAYED_VIA_UI_QUEUE);
+    @call oself::MSG_VIS_SEND_TO_CHILDREN(ev);
+    ev = @record null::MSG_META_NOTIFY(MANUFACTURER_ID_GEOWORKS,
+				       GWNT_HOST_SCREEN_FIELD_SIZE_CHANGE, 0);
+    GCNListSend(MANUFACTURER_ID_GEOWORKS, GCNSLT_HOST_NOTIFICATIONS, ev, 0,
+		0);
+    @call oself::MSG_VIS_MARK_INVALID(VOF_IMAGE_INVALID | VOF_WINDOW_INVALID |
+				      VOF_IMAGE_UPDATE_PATH, VUM_NOW);
+    win = ((VisCompInstance *) ObjDerefVis(oself))->VCI_window;
+    ImSetPtrWin(win, 0, 0);
+    if (GeodeGetDefaultDriver(GDDT_MOUSE)) {
+	CallDriver(drv, DR_VID_SHOWPTR);
+	CallDriver(drv, DR_VID_SHOWPTR);
+    }
+    @callsuper();
+}
+
+/*
+ * OLScreenOpenWin: the root window on the driver (plain and transparent:
+ * a field always covers it), owned by the screen's process, registered
+ * with the UI
+ */
+@method OLScreenClass, MSG_VIS_OPEN_WIN
+{
+    GeodeHandle drv;
+    Rectangle b;
+    WindowHandle win;
+
+    (void) parentWindow;
+    if (pself->VCI_window)
+	return;
+    drv = ((GenScreenInstance *) ObjDerefGen(oself))->GSCI_videoDriver;
+    OpenGetLineBounds(oself, &b);
+    win = WinOpen(drv, oself, oself, WCF_PLAIN | WCF_TRANSPARENT, 0,
+		  0, 0, WPF_ROOT, 0, GeodeGetProcessHandle(), NULL,
+		  b.R_left, b.R_top, b.R_right, b.R_bottom);
+    ((VisCompInstance *) ObjDerefVis(oself))->VCI_window = win;
+    UserScreenRegister(win, drv);
+}
+
+/* the window of a screen object, for its queries */
+static WindowHandle ScreenWin(optr oself)
+{
+    return ((VisCompInstance *) ObjDerefVis(oself))->VCI_window;
+}
+
+/* OLScreenGupQuery: the screen, and the field of applications sitting
+ * directly on it (the UI's): this object and its window */
+@method OLScreenClass, MSG_SPEC_P32_GUP_QUERY
+{
+    if (queryType != GUQT_FIELD && queryType != GUQT_SCREEN)
+	return @callsuper();
+    retValue->GRP_cx = OptrToHandle(oself);
+    retValue->GRP_dx = OptrToChunk(oself);
+    retValue->GRP_bp = ScreenWin(oself);
+    return TRUE;
+}
+
+/* OLScreenGupQueryVisParent: the window of last resort for every
+ * request */
+@method OLScreenClass, MSG_SPEC_GUP_QUERY_VIS_PARENT
+{
+    (void) parentType;
+    return oself;
+}
+
+/* OLScreenGetWinSizeInfo: the size, and the margins at the bottom and
+ * right for windows extended near the screen's corner */
+@method OLScreenClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO
+{
+    SizeAsDWord s = VisGetSize(oself);
+
+    retValue->WSIP_windowWidth = DWORD_WIDTH(s);
+    retValue->WSIP_windowHeight = DWORD_HEIGHT(s);
+    retValue->WSIP_rightArea = EXTEND_NEAR_PARENT_MARGIN_X;
+    retValue->WSIP_bottomArea = OpenCheckIfCGA()
+				? CGA_EXTEND_NEAR_PARENT_MARGIN_Y
+				: NON_CGA_EXTEND_NEAR_PARENT_MARGIN_Y;
+}
+
+/* OLScreenVupQuery: the video driver of the screen */
+@method OLScreenClass, MSG_VIS_P32_VUP_QUERY
+{
+    if (queryType != VUQ_VIDEO_DRIVER)
+	return @callsuper();
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->GRP_ax = ((GenScreenInstance *)
+			ObjDerefGen(oself))->GSCI_videoDriver;
+    return TRUE;
+}
