@@ -18,7 +18,7 @@
 @include <Internal/SpecUI/olFieldClass.goh>
 @include <Internal/SpecUI/olApplicationClass.goh>
 @include <Objects/gInterC.goh>
-@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Internal/SpecUI/olWinClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/videoDr.h>
 #include <initfile.h>
@@ -61,6 +61,34 @@ UMState umState;
     return (ClassStruct *) &OLCtrlClass;
 }
 
+/* a command window: OLWin with a command window's type and attributes
+ * (the subclasses of OLWinClass are not ported yet) */
+@class UMCmdWinClass, OLWinClass;
+@endc
+@classdecl UMCmdWinClass, neverSaved;
+
+@method UMCmdWinClass, MSG_META_INITIALIZE
+{
+    OLWinInstance *w;
+
+    @callsuper();
+    w = (OLWinInstance *) ObjDerefVis(oself);
+    w->OLWI_type = MOWT_COMMAND_WINDOW;
+    w->OLWI_attrs = MO_ATTRS_COMMAND_WINDOW;
+    /* the window classes scan their geometry hints here (cwinDialog) */
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+}
+
+@class UMWinClass, GenInteractionClass;
+@endc
+@classdecl UMWinClass;
+
+@method UMWinClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    (void) MasterOffset;
+    return (ClassStruct *) &UMCmdWinClass;
+}
+
 @start UMObjects;
 @object GenApplicationClass UMApp = {
     GI_states = GS_USABLE | GS_ENABLED;
@@ -79,6 +107,11 @@ UMState umState;
     HINT_CENTER_CHILDREN_ON_MONIKERS;
     HINT_LEFT_JUSTIFY_MONIKERS;
     ATTR_GEN_PROPERTY;
+}
+@object UMWinClass UMWin = {
+    GI_visMoniker = "Window";
+    GI_states = GS_ENABLED;
+    GII_visibility = GIV_DIALOG;
 }
 @end UMObjects;
 
@@ -481,6 +514,93 @@ static word Slot(byte req, sword *x, sword *y)
 		of == (OLCOF_CENTER_ON_MONIKER | OLCOF_LEFT_JUSTIFY_MONIKERS));
 	of = 0;
 	UMCHECK(@call UMGroup::MSG_QUERY_CENTER_BY_MONIKERS(&of) && !of);
+	break;
+    }
+    case 11: {
+	/* OLWin: a command window under the application: its defaults;
+	 * usable, attached and realizable (the application too): built on
+	 * the application, staggered in a slot of the field, as large as
+	 * it wants, its window opened on the field's */
+	OLWinInstance w;
+	OLFieldInstance f;
+	OLApplicationInstance a;
+	Rectangle m;
+	SizeAsDWord sz;
+	optr o = 0;
+	WindowHandle parent = 0;
+	byte slot;
+	sword x, y;
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMWin, CCO_LAST);
+	(void) @call UMWin::MSG_VIS_GET_ATTRS();
+	UMCHECK(InClass(@UMWin, (ClassStruct *) &OLWinClass));
+	VisData(@UMWin, &w, sizeof(w));
+	UMCHECK((w.VI_typeFlags & (VTF_IS_WIN_GROUP | VTF_IS_WINDOW)) ==
+		(VTF_IS_WIN_GROUP | VTF_IS_WINDOW));
+	UMCHECK(w.OLWI_type == MOWT_COMMAND_WINDOW &&
+		(w.OLWI_fixedAttr & OWFA_PRESERVE_FOCUS) &&
+		(w.OLWI_defaultExcl.HG_flags & HGF_APP_EXCL));
+	UMCHECK((w.OLWI_winPosSizeFlags & WPSF_POSITION_TYPE) ==
+		(WPT_STAGGER << 3) &&
+		(w.OLWI_winPosSizeFlags & WPSF_SIZE_TYPE) == WST_AS_DESIRED);
+	UMCHECK(w.OLWI_winPosSizeState &
+		(WPSS_POSITION_INVALID | WPSS_SIZE_INVALID));
+
+	ObjLockObjBlock(OptrToHandle(umApp));
+	((GenInstance *) ObjDerefGen(umApp))->GI_states |= GS_USABLE;
+	MemUnlock(OptrToHandle(umApp));
+	@call umApp::MSG_SPEC_SET_ATTRS(SA_REALIZABLE | SA_ATTACHED, 0,
+					VUM_NOW);
+	VisData(umApp, &a, sizeof(a));
+	UMCHECK((a.VI_attrs & VA_REALIZED) &&
+		a.VCI_window == umState.UMS_fieldWin);
+	@call UMWin::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMWin::MSG_SPEC_SET_ATTRS(SA_REALIZABLE | SA_ATTACHED, 0,
+					VUM_NOW);
+	VisData(@UMWin, &w, sizeof(w));
+	UMCHECK(@call UMWin::MSG_VIS_FIND_PARENT() == umApp);
+	UMCHECK(!(w.OLWI_winPosSizeState &
+		  (WPSS_POSITION_INVALID | WPSS_SIZE_INVALID)));
+	slot = (byte) (w.OLWI_winPosSizeState >> 8) & 0x3f;
+	UMCHECK(slot != 0);
+	/* the field's position for the slot (asked for as it is) */
+	UMCHECK(Slot(slot, &x, &y) == slot);
+	UMCHECK(w.VI_bounds.R_left == x && w.VI_bounds.R_top == y);
+	UMCHECK((w.VI_attrs & VA_REALIZED) && w.VCI_window);
+	if (w.VCI_window)
+	    WinGetInfo(w.VCI_window, WIT_PARENT_WIN, &parent);
+	UMCHECK(parent == umState.UMS_fieldWin);
+	/* at least its minimum size, a title bar in the header inside the
+	 * resize border; inside the field */
+	sz = @call UMWin::MSG_VIS_COMP_GET_MINIMUM_SIZE();
+	UMCHECK(DWORD_WIDTH(sz) >= 7 && DWORD_HEIGHT(sz) >= 7);
+	UMCHECK(w.VI_bounds.R_right - w.VI_bounds.R_left >=
+		(sword) DWORD_WIDTH(sz));
+	UMCHECK(w.OLWI_titleBarBounds.R_top == 5 &&
+		w.OLWI_titleBarBounds.R_bottom > w.OLWI_titleBarBounds.R_top);
+	VisData(umField, &f, sizeof(f));
+	UMCHECK(w.VI_bounds.R_right <= f.VI_bounds.R_right &&
+		w.VI_bounds.R_bottom <= f.VI_bounds.R_bottom);
+	/* the margins: a titled, resizable window in color */
+	@call UMWin::MSG_VIS_COMP_GET_MARGINS(&m);
+	UMCHECK(m.R_left == 6 && m.R_right == 6 && m.R_bottom == 6 &&
+		m.R_top > m.R_bottom);
+
+	/* on top: the application's focus */
+	@call UMWin::MSG_GEN_BRING_TO_TOP();
+	(void) @call umApp::MSG_META_GET_FOCUS_EXCL(&o);
+	UMCHECK(o == @UMWin);
+	VisData(@UMWin, &w, sizeof(w));
+	UMCHECK(w.OLWI_focusExcl.FTVMC_flags & HGF_APP_EXCL);
+
+	/* closed: the focus gone, the slot back */
+	@call UMWin::MSG_SPEC_SET_ATTRS(0, SA_REALIZABLE, VUM_NOW);
+	VisData(@UMWin, &w, sizeof(w));
+	UMCHECK(!(w.VI_attrs & VA_REALIZED) && !w.VCI_window);
+	UMCHECK(!((w.OLWI_winPosSizeState >> 8) & 0x3f));
+	o = 0;
+	(void) @call umApp::MSG_META_GET_FOCUS_EXCL(&o);
+	UMCHECK(o != @UMWin);
 	break;
     }
     }

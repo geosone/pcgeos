@@ -5339,8 +5339,30 @@ are left out), the constants, the variables and the routines.
   - An OLCtrl's moniker is drawn by the UI's `VisDrawMoniker` at the
     asm's insets and justification until `OpenDrawMoniker` (keyboard
     accelerators, mnemonics) is in C.
-- **Not yet.** In `OLCtrlClass`: an OLCtrl in a menu window (with
-  `OLWinClass`), the reply bar's notification of its dialog and its
+  - `OLWinClass` (`CWin/cwinClassCommon*.goc`, `cwinExcl.goc`,
+    `cwinClassOther.goc`, `cwinGeometry.goc`, Motif's
+    `Win/winDraw.goc`; `Internal/SpecUI/olWinClass.goh`): the hints,
+    the position and size (staggered in a slot the vis parent asks the
+    field for, centered, tiled, at the mouse, as desired, ratios of the
+    field through the UI's new `VisConvertRatioToCoords`), the build
+    on the application, the window opened with `WinOpen` on the
+    parent's (its colors and priorities from `GetCoreWinOpenParams`),
+    kept on the field, the header and title bar geometry, the frame,
+    resize border and title drawn, the focus, target and default
+    exclusives, the window list (`GAGCNLT_WINDOWS`), closed with its
+    slot given back. `MSG_SPEC_VUP_GET_WIN_SIZE_INFO` and the window
+    queries go through `MSG_VIS_P32_VUP_QUERY`; `WinOpen`'s parameters
+    are a `WinOpenParams` struct (`cGeode.goh`); `GenSaveWindowInfo`
+    has no C typedef yet (`OLGenSaveWindowInfo` locally). The UI
+    exports `VisSpecBuildSetEnabledState`, `VisGetVisParent` and
+    `VisConvertRatioToCoords` (`visC.goh`). A window class scans its
+    geometry hints in `MSG_META_INITIALIZE`, as `cwinDialog`.
+- **Not yet.** In `OLWinClass`: the popups, the system menu, the
+  title groups, the task bar adjustments, the state saved on detach,
+  the navigation (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons
+  and the dialog and menu checks in the spacing; `OLBaseWinClass`,
+  `OLMenuedWinClass`, the primary and dialog classes. In `OLCtrlClass`:
+  an OLCtrl in a menu window, the reply bar's notification of its dialog and its
   line under a dialog (`OLDialogWinClass`, `OLReplyBarClass`), the
   gadget area's margins, the menu center, mnemonics, the default
   focus broadcast. The build routines of interactions and displays
@@ -5378,8 +5400,17 @@ are left out), the constants, the variables and the routines.
   sizes, the build info, no spacing between oversized children, drawn
   into a GState) and a delayed toolbox centering its children on their
   monikers (orientation, build flags, spacing, the delayed operation
-  query, the centering it asks of its children). The test loads no
-  fonts, so monikers have no height there.
+  query, the centering it asks of its children). Then an `OLWin`
+  command window (a test class resolves to an `OLWinClass` subclass)
+  under the application: its defaults (type, attributes, stagger and
+  as-desired flags); usable with the application realized on the
+  field's window, it is built on the application, takes a stagger
+  slot at the field's position for it, gets at least its minimum size
+  inside the field, a title bar and the margins of a titled resizable
+  window, its window opened on the field's; brought to the top it has
+  the application's focus; closed, the focus leaves and the slot is
+  free again. The test loads no fonts, so monikers have no height
+  there.
 
 ## 14. Open
 

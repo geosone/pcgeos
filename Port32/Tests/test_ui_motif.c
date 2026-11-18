@@ -23,7 +23,12 @@
  *   8. on top: the field's focus and target, the focus application;
  *      busy, input held up and ignored; the gadget timer (the process
  *      gets MSG_TIMER_EXPIRED);
- *   9. no longer targetable: the target leaves it, the focus stays.
+ *   9. no longer targetable: the target leaves it, the focus stays;
+ *  10. OLCtrl: a framed group with a moniker above, a toolbox;
+ *  11. OLWin: a command window under the application: built on it,
+ *      staggered in a field slot, its window opened on the field's
+ *      with a title bar; on top it has the application's focus; closed
+ *      it gives its slot back.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -138,11 +143,12 @@ int main(void)
     CHECK(st->UMS_timerExpired == 1);
     step(9);
     step(10);
+    step(11);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 82 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 108 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
