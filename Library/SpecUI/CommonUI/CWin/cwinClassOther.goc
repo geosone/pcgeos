@@ -1,0 +1,115 @@
+/*
+ * cwinClassOther.goc -- OLWinClass (after cwinClassOther.asm): the
+ * window closed (its grabs given up, its stagger slot freed, ready to
+ * open again), lowered to the bottom, a menu's focus released.
+ *
+ * Port32: the system menu's window list entry, the state saved on
+ * detach (OpenWinSaveState) and menus kept beside their buttons
+ * (AvoidMenuOverlap) are not ported yet.
+ */
+@include "cGeode.goh"
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/* OpenWinCheckMenuState: a menu is not saved unless it is pinned and
+ * from a resource */
+static void CheckMenuState(optr o)
+{
+    OLWinInstance *w = Win(o);
+
+    if (!(w->OLWI_fixedAttr & OWFA_IS_MENU))
+	return;
+    w->OLWI_winPosSizeFlags |= WPSF_NEVER_SAVE_STATE;
+    if ((w->OLWI_specState & OLWSS_PINNED) &&
+	(ObjGetFlags(o) & OCF_IN_RESOURCE))
+	w->OLWI_winPosSizeFlags &= ~WPSF_NEVER_SAVE_STATE;
+}
+
+/* OpenWinFreeStaggeredSlot: the stagger slot back to the field */
+void OpenWinFreeStaggeredSlot(optr o)
+{
+    OLWinInstance *w = Win(o);
+    byte slot = (byte) ((w->OLWI_winPosSizeState & WPSS_STAGGERED_SLOT) >>
+			WPSS_STAGGERED_SLOT_OFFSET);
+    optr p;
+
+    if (!(slot & SSPR_SLOT))
+	return;
+    w->OLWI_winPosSizeState &= ~((word) SSPR_SLOT << WPSS_STAGGERED_SLOT_OFFSET);
+    p = VisFindParent(o);
+    if (p) {
+	GenReturnParams r;
+
+	(void) @call p::MSG_VIS_P32_VUP_QUERY(&r, SVQT_FREE_STAGGER_SLOT,
+					      slot, 0);
+    }
+}
+
+/* OpenWinPrepForReOpen: a window that does not persist and was moved
+ * or resized gets its position and size worked out again */
+static void PrepForReOpen(optr o)
+{
+    OLWinInstance *w = Win(o);
+
+    if (!(w->OLWI_winPosSizeFlags & WPSF_PERSIST) &&
+	(w->OLWI_winPosSizeState & WPSS_HAS_MOVED_OR_RESIZED)) {
+	w->OLWI_winPosSizeState |= WPSS_POSITION_INVALID | WPSS_SIZE_INVALID;
+	UpdateWinPosSize(o);
+    }
+    @call o::MSG_OL_WIN_PREPARE_FIELD_SIZE_CHANGE();
+}
+
+/*
+ * OpenWinVisClose: no focus or target, no move or resize, no gadget
+ * exclusive, no pre-passive grab; closed; the stagger slot freed (not a
+ * primary's or an icon's)
+ */
+@extern method OLWinClass, MSG_VIS_CLOSE
+{
+    OLWinType t;
+
+    @call oself::MSG_META_RELEASE_FT_EXCL();
+    @call oself::MSG_OL_WIN_END_GRAB(TRUE);
+    @call oself::MSG_VIS_TAKE_GADGET_EXCL(0);
+    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+    @callsuper();
+    CheckMenuState(oself);
+    t = Win(oself)->OLWI_type;
+    if (t != MOWT_PRIMARY_WINDOW && t != MOWT_WINDOW_ICON)
+	OpenWinFreeStaggeredSlot(oself);
+    PrepForReOpen(oself);
+}
+
+/*
+ * OpenWinLowerToBottom: the focus and target given up, the window
+ * behind the others, the application finds a new focus and target; the
+ * application told
+ */
+@extern method OLWinClass, MSG_GEN_LOWER_TO_BOTTOM
+{
+    WindowHandle win = VisQueryWindow(oself);
+    optr app = GeodeGetAppObject(0);
+
+    if (win) {
+	@call oself::MSG_META_RELEASE_FOCUS_EXCL();
+	@call oself::MSG_META_RELEASE_TARGET_EXCL();
+	WinChangePriority(win, WPF_PLACE_BEHIND, 0);
+	OpenWinUpdateModalStatus(oself);
+	if (app)
+	    @call app::MSG_META_ENSURE_ACTIVE_FT();
+    }
+    if (app)
+	@call app::MSG_GEN_APPLICATION_LOWER_WINDOW_TO_BOTTOM(oself);
+}
+
+/* OLWinReleaseMenuFocus: a menu with the focus gives it up */
+@extern method OLWinClass, MSG_VIS_VUP_RELEASE_MENU_FOCUS
+{
+    optr f = pself->OLWI_focusExcl.FTVMC_OD;
+
+    if (!(pself->OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED))
+	return;
+    if (f)
+	@call f::MSG_META_RELEASE_FOCUS_EXCL();
+    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+}

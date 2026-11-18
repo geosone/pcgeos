@@ -204,6 +204,18 @@ static void CheckCustomSpacing(optr o, Spacings *s)
 		   spacingHints, s);
 }
 
+/* OpenCtrlCheckCustomSpacing for the window classes */
+void OpenCtrlCheckCustomSpacing(optr o, word *spacing, word *wrapSpacing)
+{
+    Spacings s;
+
+    s.spacing = *spacing;
+    s.wrapSpacing = *wrapSpacing;
+    CheckCustomSpacing(o, &s);
+    *spacing = s.spacing;
+    *wrapSpacing = s.wrapSpacing;
+}
+
 /* OLCtrlGetSpacing: the control spacing, in a menu none, in a toolbox
  * (not in the title bar) the toolbox spacing */
 @extern method OLCtrlClass, MSG_VIS_COMP_GET_CHILD_SPACING
@@ -424,11 +436,12 @@ static void CalcMonikerOffsets(optr o)
 		(word) (p.P_y - c->VI_bounds.R_top));
 }
 
-/* OpenRecalcCtrlSize: our own spacing and margins; the centering; the
- * size hints (not for a reply bar); the composite's size */
-static SizeAsDWord RecalcCtrlSize(optr o, word width, word height)
+/* OpenRecalcCtrlSize: the centering; the size hints (not for a reply
+ * bar); the composite's size with the spacing and margins passed (the
+ * window classes pass their own) */
+SizeAsDWord OpenRecalcCtrlSize(optr o, word width, word height,
+			       VisCompSpacingMarginsInfo info)
 {
-    VisCompSpacingMarginsInfo info = PassSpacingArgs(o);
     sword w = (sword) width, h = (sword) height;
 
     SetExpandHeightInHorizToolbox(o);
@@ -439,6 +452,12 @@ static SizeAsDWord RecalcCtrlSize(optr o, word width, word height)
     }
     CalcMonikerOffsets(o);
     return VisCompRecalcSize(o, (word) w, (word) h, info);
+}
+
+/* our own spacing and margins */
+static SizeAsDWord RecalcCtrlSize(optr o, word width, word height)
+{
+    return OpenRecalcCtrlSize(o, width, height, PassSpacingArgs(o));
 }
 
 /* OLCtrlRerecalcSize */

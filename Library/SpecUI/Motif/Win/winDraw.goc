@@ -1,0 +1,353 @@
+/*
+ * winDraw.goc -- OLWinClass (after Motif/Win/winDraw.asm): the drawing
+ * of a Motif window: the resize border with its corner marks, the thick
+ * line border, the title bar (its background, a gradient to titleBar2
+ * if the colors differ, the highlight while it has the focus or target,
+ * the title centered in it), then the children.  The bounds of the
+ * window, inside its resize border and of its header.
+ */
+@include "cGeode.goh"
+@include <Objects/gPrimC.goh>
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/* ---------------------------------------------------------------------
+ * Bounds
+ * ------------------------------------------------------------------- */
+
+/* OpenWinGetBounds: the window at 0,0 (one less on black and white:
+ * its shadow) */
+void OpenWinGetBounds(optr o, Rectangle *r)
+{
+    OLWinInstance *w = Win(o);
+
+    r->R_left = r->R_top = 0;
+    r->R_right = (sword) (w->VI_bounds.R_right - w->VI_bounds.R_left);
+    r->R_bottom = (sword) (w->VI_bounds.R_bottom - w->VI_bounds.R_top);
+    if (!(w->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW) && OpenCheckIfBW()) {
+	r->R_right--;
+	r->R_bottom--;
+    }
+}
+
+/* OpenWinGetInsideResizeBorderBounds: inside the resize border (none
+ * while maximized) */
+void OpenWinGetInsideResizeBorderBounds(optr o, Rectangle *r)
+{
+    OLWinInstance *w;
+
+    OpenWinGetBounds(o, r);
+    if (!OpenWinHasResizeBorder(o))
+	return;
+    w = Win(o);
+    if ((w->OLWI_attrs & OWA_MAXIMIZABLE) &&
+	(w->OLWI_specState & OLWSS_MAXIMIZED))
+	return;
+    r->R_top = (sword) (r->R_top + resizeBarHeight);
+    r->R_bottom = (sword) (r->R_bottom - resizeBarHeight);
+    r->R_left = (sword) (r->R_left + resizeBarWidth);
+    r->R_right = (sword) (r->R_right - resizeBarWidth);
+}
+
+/* OpenWinGetHeaderBounds: the header at the top inside the resize
+ * border, as high as the font and its spacing (less when squished; a
+ * minimized title bar without the font) */
+void OpenWinGetHeaderBounds(optr o, Rectangle *r)
+{
+    word h = 0;
+
+    if (!(Win(o)->OLWI_moreFixedAttr & OMWFA_MINIMIZE_TITLE_BAR))
+	h = (byte) specDisplayScheme.DS_pointSize;
+    OpenWinGetInsideResizeBorderBounds(o, r);
+    r->R_bottom = (sword) (r->R_top + h + CUAS_WIN_HEADER_Y_SPACING);
+    if (OpenWinCheckIfSquished())
+	r->R_bottom -= CUAS_WIN_HEADER_Y_SPACING -
+		       CUAS_CGA_WIN_HEADER_Y_SPACING;
+}
+
+/* ---------------------------------------------------------------------
+ * Lines and frames
+ * ------------------------------------------------------------------- */
+
+#define CS(light, dark)		((byte) (((light) << 4) | (dark)))
+
+static void VLine(GStateHandle gs, Color c, sword x, sword y1, sword y2)
+{
+    GrSetLineColor(gs, CF_INDEX, c, 0, 0);
+    GrDrawVLine(gs, x, y1, y2);
+}
+
+static void HLine(GStateHandle gs, Color c, sword x1, sword y, sword x2)
+{
+    GrSetLineColor(gs, CF_INDEX, c, 0, 0);
+    GrDrawHLine(gs, x1, y, x2);
+}
+
+/* WinDrawWhite[VH]LineIfColor */
+static void WhiteVLine(GStateHandle gs, sword x, sword y1, sword y2)
+{
+    if (!OpenCheckIfBW())
+	VLine(gs, C_WHITE, x, y1, y2);
+}
+
+static void WhiteHLine(GStateHandle gs, sword x1, sword y, sword x2)
+{
+    if (!OpenCheckIfBW())
+	HLine(gs, C_WHITE, x1, y, x2);
+}
+
+/* WinDrawBoxFrame: the dark color top left, the light one bottom
+ * right; black on black and white */
+static void BoxFrame(optr o, GStateHandle gs, const Rectangle *r,
+		     byte scheme)
+{
+    word colors;
+
+    if (moCS.CSV_displayType == DC_GRAY_1)
+	colors = C_BLACK | (C_BLACK << 8);
+    else
+	colors = (word) ((scheme & 0x0f) | ((scheme >> 4) << 8));
+    OpenDrawRect(o, gs, r->R_left, r->R_top, r->R_right, r->R_bottom, colors);
+}
+
+/*
+ * OpenWinDrawResizeBorder: the frame (with the shadow on black and
+ * white); a resizable window gets the marks of its corners: etched
+ * lines across the border an icon's width from each corner
+ */
+static void DrawResizeBorder(optr o, GStateHandle gs)
+{
+    Rectangle r;
+    sword ax, bx, cx, dx, bp, tb, y, x;
+    Boolean bw = OpenCheckIfBW();
+
+    OpenWinGetBounds(o, &r);
+    BoxFrame(o, gs, &r, CS(MO_ETCH_COLOR, C_WHITE));
+    if (bw) {
+	VLine(gs, C_BLACK, r.R_right, r.R_top, r.R_bottom);
+	HLine(gs, C_BLACK, r.R_left, r.R_bottom, r.R_right);
+    }
+    ax = (sword) (r.R_left + 1);
+    bx = (sword) (r.R_top + 1);
+    cx = (sword) (r.R_right - 1);
+    dx = (sword) (r.R_bottom - 1);
+    if (!(Win(o)->OLWI_attrs & OWA_RESIZABLE))
+	return;
+    bp = (sword) (resizeBarHeight - 2);
+
+    /* the top: across the top border */
+    x = (sword) (ax + CUAS_WIN_ICON_WIDTH - 2 + resizeBarWidth);
+    VLine(gs, MO_ETCH_COLOR, x, bx, (sword) (bx + bp));
+    WhiteVLine(gs, (sword) (x + 1), bx, (sword) (bx + bp));
+    x = (sword) (cx - (CUAS_WIN_ICON_WIDTH - 1) - resizeBarWidth);
+    if (bw)
+	x++;
+    WhiteVLine(gs, x, bx, (sword) (bx + bp));
+    VLine(gs, MO_ETCH_COLOR, (sword) (x - 1), bx, (sword) (bx + bp));
+
+    /* the bottom */
+    dx--;
+    y = (sword) (dx - bp);
+    x = (sword) (ax + CUAS_WIN_ICON_WIDTH - 2 + resizeBarWidth);
+    if (bw)
+	x--;
+    VLine(gs, MO_ETCH_COLOR, x, y, dx);
+    WhiteVLine(gs, (sword) (x + 1), y, dx);
+    x = (sword) (cx - (CUAS_WIN_ICON_WIDTH - 1) - resizeBarWidth);
+    WhiteVLine(gs, x, y, dx);
+    VLine(gs, MO_ETCH_COLOR, (sword) (x - 1), y, dx);
+
+    /* the left and right: across the side borders, below the title bar
+     * and above the bottom corner */
+    bp = (sword) (resizeBarWidth - 2);
+    tb = (sword) (Win(o)->OLWI_titleBarBounds.R_bottom - 1);
+    if (!bw)
+	tb--;
+    y = (sword) (dx - (CUAS_WIN_RESIZE_BORDER_SIZE + CUAS_WIN_ICON_HEIGHT + 2));
+    HLine(gs, MO_ETCH_COLOR, ax, tb, (sword) (ax + bp));
+    WhiteHLine(gs, ax, (sword) (tb + 1), (sword) (ax + bp));
+    WhiteHLine(gs, ax, y, (sword) (ax + bp));
+    HLine(gs, MO_ETCH_COLOR, ax, (sword) (y - 1), (sword) (ax + bp));
+    cx--;
+    HLine(gs, MO_ETCH_COLOR, (sword) (cx - bp), tb, cx);
+    WhiteHLine(gs, (sword) (cx - bp), (sword) (tb + 1), cx);
+    WhiteHLine(gs, (sword) (cx - bp), y, cx);
+    HLine(gs, MO_ETCH_COLOR, (sword) (cx - bp), (sword) (y - 1), cx);
+}
+
+/* OpenWinDrawThickLineBorder: a raised frame inside the resize border
+ * (sunken with one), black's shadow without one on black and white */
+static void DrawThickLineBorder(optr o, GStateHandle gs)
+{
+    Rectangle r;
+    Boolean rb = OpenWinHasResizeBorder(o);
+
+    OpenWinGetInsideResizeBorderBounds(o, &r);
+    BoxFrame(o, gs, &r, rb ? CS(C_WHITE, MO_ETCH_COLOR)
+			   : CS(MO_ETCH_COLOR, C_WHITE));
+    if (!rb && OpenCheckIfBW()) {
+	VLine(gs, C_BLACK, r.R_right, r.R_top, r.R_bottom);
+	HLine(gs, C_BLACK, r.R_left, r.R_bottom, r.R_right);
+    }
+    GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    GrSetAreaColor(gs, CF_INDEX, C_BLACK, 0, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The title bar
+ * ------------------------------------------------------------------- */
+
+/* the title bar filled: plain, or the gradient to titleBar2 */
+static void FillTitle(GStateHandle gs, const Rectangle *r, Boolean active)
+{
+    if (moCS.CSV_activeTitleBar == moCS.CSV_titleBar2)
+	GrFillRect(gs, r->R_left, r->R_top, r->R_right, r->R_bottom);
+    else
+	DrawGradient(gs, r, active ? moCS.CSV_activeTitleBar
+				   : moCS.CSV_inactiveTitleBar,
+		     moCS.CSV_titleBar2);
+}
+
+/*
+ * OpenWinDrawHeaderTitleBackground: the title bar in the inactive
+ * color, in a frame; with the focus or target (not a pinned menu)
+ * highlighted inside it in the active color
+ */
+void OpenWinDrawHeaderTitleBackground(optr o, GStateHandle gs)
+{
+    OLWinInstance *w;
+    Rectangle r;
+    Boolean active;
+
+    if (OpenWinCheckMenusInHeader(o))
+	return;
+    OpenWinHeaderResetInvalid(o, OLWHS_HEADER_AREA_INVALID |
+				 OLWHS_FOCUS_AREA_INVALID |
+				 OLWHS_TITLE_AREA_INVALID);
+    w = Win(o);
+    if (!(w->OLWI_attrs & OWA_TITLED))
+	return;
+    if ((w->OLWI_fixedAttr & OWFA_IS_MENU) &&
+	(w->OLWI_specState & OLWSS_PINNED))
+	active = FALSE;
+    else
+	active = (OpenWinTestForFocusAndTarget(o) & HGF_SYS_EXCL) != 0;
+    GrSetAreaColor(gs, CF_INDEX, moCS.CSV_inactiveTitleBar, 0, 0);
+    GrSetLineColor(gs, CF_INDEX, moCS.CSV_windowFrame, 0, 0);
+    r = Win(o)->OLWI_titleBarBounds;
+    if (OpenCheckIfBW())
+	GrDrawLine(gs, r.R_left, (sword) (r.R_bottom - 1),
+		   (sword) (r.R_right - 1), (sword) (r.R_bottom - 1));
+    r.R_bottom--;
+    r.R_top++;
+    FillTitle(gs, &r, FALSE);
+    if (moCS.CSV_displayType != DC_GRAY_1)
+	BoxFrame(o, gs, &r, CS(MO_ETCH_COLOR, C_WHITE));
+    else {
+	r.R_top--;
+	r.R_bottom++;
+    }
+    if (!active)
+	return;
+    GrSetAreaColor(gs, CF_INDEX, moCS.CSV_activeTitleBar, 0, 0);
+    if (moCS.CSV_displayType != DC_GRAY_1) {
+	r.R_left += MO_WIN_HIGHLIGHT_INSET_X;
+	r.R_right -= MO_WIN_HIGHLIGHT_INSET_X;
+    }
+    r.R_top += MO_WIN_HIGHLIGHT_INSET_Y;
+    r.R_bottom -= MO_WIN_HIGHLIGHT_INSET_Y;
+    FillTitle(gs, &r, TRUE);
+}
+
+#define CGA_TITLE_TEXT_Y_OFFSET		(-1)
+#define TITLE_TEXT_Y_OFFSET		2
+
+/*
+ * OpenWinDrawHeaderTitle: the moniker centered in the title bar (white
+ * while it has the focus or target), clipped to it
+ */
+void OpenWinDrawHeaderTitle(optr o, GStateHandle gs)
+{
+    OLWinInstance *w;
+    Rectangle r;
+    DrawMonikerArgs a;
+    sword width, x, y, mw;
+
+    if (OpenWinCheckMenusInHeader(o))
+	return;
+    if (Win(o)->OLWI_moreFixedAttr & OMWFA_MINIMIZE_TITLE_BAR)
+	return;
+    OpenWinHeaderResetInvalid(o, OLWHS_TITLE_IMAGE_INVALID |
+				 OLWHS_FOCUS_AREA_INVALID);
+    w = Win(o);
+    if (!(w->OLWI_attrs & OWA_TITLED))
+	return;
+    GrSetAreaColor(gs, CF_INDEX, moCS.CSV_windowFrame, 0, 0);
+    GrSetTextColor(gs, CF_INDEX,
+		   (OpenWinTestForFocusAndTarget(o) & HGF_SYS_EXCL) ?
+			C_WHITE : moCS.CSV_titleBarText, 0, 0);
+    r = Win(o)->OLWI_titleBarBounds;
+    r.R_top++;
+    r.R_bottom--;
+    width = (sword) (r.R_right - r.R_left);
+    if (!((GenInstance *) ObjDerefGen(o))->GI_visMoniker)
+	return;
+    mw = (sword) DWORD_WIDTH(OpenWinGetMonikerSize(o, gs));
+    x = (sword) (width - mw - CUAS_TITLE_TEXT_MARGIN * 2);
+    if (x < 0)
+	x = 0;
+    x = (sword) (r.R_left + (x >> 1) + CUAS_TITLE_TEXT_MARGIN);
+    y = (sword) (r.R_top + TITLE_TEXT_Y_OFFSET);
+    if (OpenWinCheckIfSquished())
+	y -= (TITLE_TEXT_Y_OFFSET - CGA_TITLE_TEXT_Y_OFFSET) - 1;
+    a.DMA_gState = gs;
+    a.DMA_xInset = (word) x;
+    a.DMA_yInset = (word) y;
+    width = (sword) (width - CUAS_TITLE_TEXT_MARGIN * 2);
+    a.DMA_xMaximum = (word) (width < 0 ? 0 : width);
+    a.DMA_yMaximum = MAX_COORD;
+    a.DMA_textHeight = 0;
+    OpenWinDrawMoniker(o, (J_LEFT << DMF_X_JUST_OFFSET) |
+			  (J_LEFT << DMF_Y_JUST_OFFSET) |
+			  DMF_CLIP_TO_MAX_WIDTH | DMF_TEXT_ONLY, &a);
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * MSG_VIS_DRAW
+ * ------------------------------------------------------------------- */
+
+/* OpenWinInitGState: the UI's font */
+static void InitGState(GStateHandle gs)
+{
+    GrSetFont(gs, specDisplayScheme.DS_fontID,
+	      MakeWWFixed(specDisplayScheme.DS_pointSize));
+}
+
+/*
+ * OpenWinDraw: the frame (drawn as enabled), the title bar, then the
+ * children as a composite (not the OLCtrl's frame)
+ */
+@extern method OLWinClass, MSG_VIS_DRAW
+{
+    OLWinInstance *w = pself;
+    VisAttrs attrs = w->VI_attrs;
+
+    w->VI_attrs |= VA_FULLY_ENABLED;
+    InitGState(gstate);
+    if (OpenWinHasResizeBorder(oself) &&
+	!((w->OLWI_attrs & OWA_MAXIMIZABLE) &&
+	  (w->OLWI_specState & OLWSS_MAXIMIZED)))
+	DrawResizeBorder(oself, gstate);
+    if (Win(oself)->OLWI_attrs & OWA_THICK_LINE_BORDER)
+	DrawThickLineBorder(oself, gstate);
+    if (Win(oself)->OLWI_attrs & OWA_TITLED) {
+	OpenWinDrawHeaderTitleBackground(oself, gstate);
+	OpenWinDrawHeaderTitle(oself, gstate);
+	GrSetTextMaskSys(gstate, SDM_100);
+	GrSetLineMaskSys(gstate, SDM_100);
+    }
+    Win(oself)->VI_attrs = attrs;
+    /* VisCompClass, the superclass of OLCtrlClass */
+    @callsuper oself::OLCtrlClass::MSG_VIS_DRAW(drawFlags, gstate);
+}

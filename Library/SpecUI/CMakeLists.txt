@@ -26,6 +26,13 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CComp/copenCtrlCommon.goc
                ${c}/CWin/cwinScreen.goc
                ${c}/CWin/cwinField.goc
+               ${c}/CWin/cwinClassCommonHigh.goc
+               ${c}/CWin/cwinClassCommonMiddle.goc
+               ${c}/CWin/cwinClassCommonLow.goc
+               ${c}/CWin/cwinClassOther.goc
+               ${c}/CWin/cwinGeometry.goc
+               ${c}/CWin/cwinExcl.goc
+               ${CMAKE_CURRENT_SOURCE_DIR}/Motif/Win/winDraw.goc
                ${c}/CSpec/cspecSystem.goc
                ${c}/CSpec/cspecScreen.goc
                ${c}/CSpec/cspecField.goc

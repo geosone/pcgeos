@@ -28,11 +28,6 @@
 #define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
 #define FIELD_OFFSET(f)	word_offsetof(OLFieldInstance, f)
 
-/* the Motif window geometry (cwinConstant.def, cConstant.def) */
-#define CUAS_WIN_RESIZE_BORDER_SIZE		5
-#define CUAS_WIN_RESIZE_BORDER_TINY_SIZE	3
-#define CUAS_WIN_ICON_WIDTH			27
-#define CUAS_WIN_ICON_HEIGHT			16
 #define STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
 				 CUAS_WIN_ICON_WIDTH - 1)
 #define STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
@@ -49,20 +44,8 @@
 #define WIN_ICON_PLOT_MARGIN_X		10
 #define CGA_WIN_ICON_PLOT_MARGIN_Y	(-4)
 
-/* the stagger slot of a window (StaggerSlotPositionRequest): the slot
- * is a row (the icon rows follow the window rows) and a column */
-#define SSPR_REASSIGN_IF_CONFLICT	0x80
-#define SSPR_ICON			0x40
-#define SSPR_SLOT			0x3f
-#define SSPR_ROW			0x30
-#define SSPR_COLUMN			0x0f
 #define INITIAL_SLOT			1
 #define OL_WINDOW_STAGGER_SLOT_MASK	0x07
-
-/* the specific UI's upward queries (cConstant.def SpecVisQueryTypes) */
-#define SVQT_REQUEST_STAGGER_SLOT	(SPEC_VIS_QUERY_START + 0)
-#define SVQT_REQUEST_NEAREST_ICON_SLOT	(SPEC_VIS_QUERY_START + 1)
-#define SVQT_FREE_STAGGER_SLOT		(SPEC_VIS_QUERY_START + 2)
 
 /* the background ([ui], backgrnd.def) */
 static const char backgroundCategory[] = "ui";

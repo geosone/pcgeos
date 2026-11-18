@@ -17,6 +17,7 @@
 @include <Objects/gFieldC.goh>
 @include <Objects/uiInputC.goh>
 @include <Internal/SpecUI/olCtrlClass.goh>
+@include <Internal/SpecUI/olWinClass.goh>
 @include <Internal/SpecUI/olSystemClass.goh>
 @include <Internal/SpecUI/olScreenClass.goh>
 @include <Internal/SpecUI/olFieldClass.goh>
@@ -68,8 +69,54 @@ extern void WinInvalTree(Handle win, const Region *reg, word axParam,
 #define SGQT_WIN_GROUP			(SPEC_GEN_QUERY_START + 4)
 
 /* the specific UI's visual upward queries (cConstant.def
- * SpecVisQueryTypes; MSG_VIS_P32_VUP_QUERY) */
-#define SVQT_QUERY_FOR_REPLY_BAR	(SPEC_VIS_QUERY_START + 16)
+ * SpecVisQueryTypes; MSG_VIS_P32_VUP_QUERY): the optr passed in data1
+ * (the window's default queries) */
+#define SVQT_REQUEST_STAGGER_SLOT		(SPEC_VIS_QUERY_START + 0)
+#define SVQT_REQUEST_NEAREST_ICON_SLOT		(SPEC_VIS_QUERY_START + 1)
+#define SVQT_FREE_STAGGER_SLOT			(SPEC_VIS_QUERY_START + 2)
+#define SVQT_SET_MASTER_DEFAULT			(SPEC_VIS_QUERY_START + 3)
+#define SVQT_RESET_MASTER_DEFAULT		(SPEC_VIS_QUERY_START + 4)
+#define SVQT_TAKE_DEFAULT_EXCLUSIVE		(SPEC_VIS_QUERY_START + 5)
+#define SVQT_REQUEST_DEFAULT_EXCLUSIVE		(SPEC_VIS_QUERY_START + 6)
+#define SVQT_RELEASE_DEFAULT_EXCLUSIVE		(SPEC_VIS_QUERY_START + 7)
+#define SVQT_FORCE_RELEASE_DEFAULT_EXCLUSIVE	(SPEC_VIS_QUERY_START + 8)
+#define SVQT_ACTIVATE_DEFAULT			(SPEC_VIS_QUERY_START + 9)
+#define SVQT_HAS_MENU_IN_STAY_UP_MODE		(SPEC_VIS_QUERY_START + 10)
+#define SVQT_NO_MENU_IN_STAY_UP_MODE		(SPEC_VIS_QUERY_START + 11)
+#define SVQT_REMOTE_GRAB_GADGET_EXCL		(SPEC_VIS_QUERY_START + 12)
+#define SVQT_NOTIFY_MENU_BUTTON_AND_REMOTE_GRAB_GADGET_EXCL \
+						(SPEC_VIS_QUERY_START + 13)
+#define SVQT_REMOTE_RELEASE_GADGET_EXCL		(SPEC_VIS_QUERY_START + 14)
+#define SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL	(SPEC_VIS_QUERY_START + 15)
+#define SVQT_QUERY_FOR_REPLY_BAR		(SPEC_VIS_QUERY_START + 16)
+#define SVQT_GRAB_FOCUS_EXCL_FOR_MENU		(SPEC_VIS_QUERY_START + 17)
+#define SVQT_DELAYED_MODE			(SPEC_VIS_QUERY_START + 18)
+#define SVQT_BACKGROUND_COLORS			(SPEC_VIS_QUERY_START + 19)
+
+/* the stagger slot of a window (StaggerSlotPositionRequest): the slot
+ * is a row (the icon rows follow the window rows) and a column */
+#define SSPR_REASSIGN_IF_CONFLICT	0x80
+#define SSPR_ICON			0x40
+#define SSPR_SLOT			0x3f
+#define SSPR_ROW			0x30
+#define SSPR_COLUMN			0x0f
+
+/* the Motif window geometry (cwinConstant.def, cConstant.def) */
+#define CUAS_WIN_RESIZE_BORDER_SIZE		5
+#define CUAS_WIN_RESIZE_BORDER_TINY_SIZE	3
+#define CUAS_WIN_ICON_WIDTH			27
+#define CUAS_WIN_ICON_HEIGHT			16
+#define CUAS_WIN_LINE_BORDER_SIZE		1
+#define CUAS_WIN_HEADER_Y_SPACING		8
+#define CUAS_CGA_WIN_HEADER_Y_SPACING		4
+#define CUAS_TITLE_TEXT_MARGIN			3
+#define ABSOLUTE_WIN_MIN_SIZE			7
+#define MO_ETCH_COLOR				C_DARK_GREY
+#define MO_WIN_HIGHLIGHT_INSET_X		1
+#define MO_WIN_HIGHLIGHT_INSET_Y		1
+#define MO_BASE_WIN_CHILD_SPACING		0
+#define MO_WIN_CHILD_WRAP_SPACING		5
+#define TINY_SCREEN_WIDTH_THRESHOLD		512
 
 /* the spacing and margins of OLCtrls (CComp/ccompConstant.def,
  * cConstant.def; Motif) */
@@ -251,6 +298,22 @@ extern Boolean OpenCheckIfNarrow(void);
 /* the notification of ATTR_GEN_VISIBILITY_* (or to the application) when
  * the object comes up or goes away */
 extern void VisOpenNotifyCommon(optr obj);
+/* the keyboard: none or the floating one (CheckIfKeyboardRequired),
+ * no mouse (OpenCheckIfKeyboardOnly) */
+extern Boolean CheckIfKeyboardRequired(void);
+extern Boolean OpenCheckIfKeyboardOnly(void);
+/* HINT_DEFAULT_FOCUS and HINT_DEFAULT_TARGET (grabbed if fully
+ * enabled); TRUE with the focus hint */
+extern Boolean ScanFocusTargetHintHandlers(optr obj);
+extern Boolean ScanTargetHintHandler(optr obj);
+/* the parent window's size info; FALSE without a size */
+extern Boolean OpenGetParentWinSize(optr obj, WinSizeInfoParams *p);
+/* a frame in the bounds of a fill, colors low top left, high bottom
+ * right (OpenDrawRect); a gradient from left to right */
+extern void OpenDrawRect(optr obj, GStateHandle gs, sword left, sword top,
+			 sword right, sword bottom, word colors);
+extern void DrawGradient(GStateHandle gs, const Rectangle *r, Color start,
+			 Color end);
 extern void VisCloseNotifyCommon(optr obj);
 
 /* CUtils/copenUtils.goc (after copenMoniker.asm): the height of the
@@ -271,6 +334,76 @@ extern VisCompSpacingMarginsInfo OpenPassMarginInfo(optr obj,
 						    const Rectangle *m,
 						    word spacing,
 						    word wrapSpacing);
+/* ---------------------------------------------------------------------
+ * OLWinClass (CWin/cwin*.goc, Motif/Win/winDraw.goc)
+ * ------------------------------------------------------------------- */
+
+/* what a window opens with (GetWinColor, GetCoreWinOpenParams) */
+typedef struct {
+    WindowHandle	WOP_parent;
+    word		WOP_colorFlags;
+    word		WOP_color;
+    WinPassFlags	WOP_flags;
+    Handle		WOP_layerID;
+} WinOpenParams;
+
+/* cwinClassCommonHigh.goc: the window hints (called by the subclasses'
+ * MSG_META_INITIALIZE after their defaults), the position and size */
+extern void OpenWinProcessHints(optr o);
+extern void SetWinPosSizeAttr(WinPosSizeFlags *flags, WinPosSizeState *state,
+			      sword *bounds, word clear, word set,
+			      const SpecWinSizePair *pair);
+extern void UpdateWinPosSize(optr o);
+extern void OpenWinSwapState(optr o);
+extern void ConvertSpecWinSizePairsToPixels(optr o);
+extern optr GetVisParentForDialog(optr o);
+extern sword GetTaskBarPositionAdjustment(optr o);
+extern sword GetTaskBarSizeAdjustment(optr o);
+/* cwinClassCommonMiddle.goc */
+extern const Region *OpenWinGetRegionBW(void);
+extern Boolean OpenWinCheckMenusInHeader(optr o);
+extern void OpenWinEnsureOnWindowList(optr o);
+extern void OLWinTakeOffWindowList(optr o);
+extern Boolean OpenWinEnsureRealizableOnTop(optr o);
+extern void OpenWinNavigateCommon(optr o, NavigationFlags nf);
+extern void OpenWinHeaderMarkInvalid(optr o, OLWinHeaderState parts);
+extern void OpenWinHeaderResetInvalid(optr o, OLWinHeaderState parts);
+extern HierarchicalGrabFlags OpenWinTestForFocusAndTarget(optr o);
+extern void OpenWinCalcWinHdrGeometry(optr o);
+/* cwinClassCommonLow.goc */
+extern void GetWinColor(optr o, WinOpenParams *p);
+extern void GetCoreWinOpenParams(optr o, WinOpenParams *p);
+extern void OpenWinUpdateModalStatus(optr o);
+extern void EnsureWindowInParentWin(optr o, sword minW, sword minH);
+extern void OpenWinCheckVisibleConstraints(optr o);
+extern word OpenWinGetTitleBarGroupSize(optr o, Boolean right);
+extern word OpenWinGetSysMenuButtonWidth(optr o);
+extern Boolean OpenWinCheckIfMinMaxRestoreControls(optr o);
+extern word GetDividerStrLen(GStateHandle gs);
+extern SizeAsDWord OpenWinGetMonikerSize(optr o, GStateHandle gs);
+extern void OpenWinDrawMoniker(optr o, DrawMonikerFlags flags,
+			       DrawMonikerArgs *a);
+/* cwinClassOther.goc */
+extern void OpenWinFreeStaggeredSlot(optr o);
+/* cwinGeometry.goc */
+extern Boolean MoveWindowToKeepOnscreen(optr o, sword width, sword height);
+extern Boolean OpenWinCheckIfSquished(void);
+extern Boolean OpenWinHasResizeBorder(optr o);
+/* cwinExcl.goc */
+extern void SendKbdStatusNotification(optr o, KeyboardOverride override);
+extern void OpenWinUpdateFocusExcl(optr o, Message msg);
+/* Motif/Win/winDraw.goc */
+extern void OpenWinGetBounds(optr o, Rectangle *r);
+extern void OpenWinGetInsideResizeBorderBounds(optr o, Rectangle *r);
+extern void OpenWinGetHeaderBounds(optr o, Rectangle *r);
+extern void OpenWinDrawHeaderTitleBackground(optr o, GStateHandle gs);
+extern void OpenWinDrawHeaderTitle(optr o, GStateHandle gs);
+
+/* CComp/copenCtrlGeometry.goc */
+extern SizeAsDWord OpenRecalcCtrlSize(optr o, word width, word height,
+				      VisCompSpacingMarginsInfo info);
+extern void OpenCtrlCheckCustomSpacing(optr o, word *spacing,
+				       word *wrapSpacing);
 /* CUtils/cutilsPtrImages.goc (made by Port32/tools/ptrimg2c.py) */
 extern optr OpenGetPtrImage(OLPtrImage image);
 

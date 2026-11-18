@@ -1,0 +1,266 @@
+/*
+ * olWinClass.goh -- OLWinClass, the window of a specific UI (after
+ * Include/Internal/SpecUI/olWinClass.def), for Port32.  The superclass
+ * of the base, display, dialog, menu and popup windows.
+ *
+ * Motif's (_CUA_STYLE) records and window types; the messages in the
+ * asm's order (no _ROUND_THICK_DIALOGS or _DUI ones).  Port32: an optr
+ * is a dword pair of handle and chunk; a window's system menu block is a
+ * MemHandle.
+ */
+#ifndef __OLWINCLASS_GOH
+#define __OLWINCLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Objects/uiInputC.goh>
+
+@deflib motif
+
+/* OLWinFixedAttr */
+typedef ByteFlags OLWinFixedAttr;
+#define OWFA_IS_WIN_ICON		0x80
+#define OWFA_IS_MENU			0x40
+#define OWFA_GCM_TITLED			0x20
+#define OWFA_OPEN_ON_TOP		0x10
+#define OWFA_PREVENT_DEFAULT_OVERRIDES	0x08
+#define OWFA_RESTORABLE			0x04
+#define OWFA_LONG_TERM			0x02
+#define OWFA_PRESERVE_FOCUS		0x01
+
+/* OLWinMoreFixedAttr */
+typedef ByteFlags OLWinMoreFixedAttr;
+#define OWMFA_NO_DISTURB			0x80
+#define OWMFA_IS_POPUP				0x40
+#define OWMFA_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD 0x20
+#define OWMFA_CUSTOM_WINDOW			0x10
+#define OMWFA_MINIMIZE_TITLE_BAR		0x08
+#define OMWFA_DRAW_DISABLED			0x04
+
+/* OLWinAttr (_CUA_STYLE) */
+typedef WordFlags OLWinAttr;
+#define OWA_REAL_MARGINS		0x8000
+#define OWA_DISMISS_WHEN_DISABLED	0x4000
+#define OWA_MOVABLE			0x2000
+#define OWA_RESIZABLE			0x1000
+#define OWA_PINNABLE			0x0800
+#define OWA_MINIMIZABLE			0x0400
+#define OWA_MAXIMIZABLE			0x0200
+#define OWA_CLOSABLE			0x0100
+#define OWA_FOCUSABLE			0x0080
+#define OWA_TARGETABLE			0x0040
+#define OWA_HEADER			0x0020
+#define OWA_TITLED			0x0010
+#define OWA_THICK_LINE_BORDER		0x0008
+#define OWA_HAS_WIN_MENU		0x0004
+#define OWA_HAS_SYS_MENU		0x0002
+#define OWA_KIDS_INSIDE_BORDER		0x0001
+
+#define MO_ATTR1	(OWA_HEADER | OWA_TITLED | OWA_HAS_SYS_MENU | \
+			 OWA_MOVABLE)
+#define MO_ATTR2	(OWA_RESIZABLE | OWA_MINIMIZABLE | OWA_MAXIMIZABLE)
+#define MO_ATTRS_PRIMARY_WINDOW	(MO_ATTR1 | MO_ATTR2 | OWA_FOCUSABLE | \
+				 OWA_HAS_WIN_MENU | OWA_THICK_LINE_BORDER)
+#define MO_ATTRS_DISPLAY_WINDOW	((MO_ATTR1 | MO_ATTR2 | OWA_FOCUSABLE | \
+				  OWA_THICK_LINE_BORDER) & ~OWA_MINIMIZABLE)
+#define MO_ATTRS_NOTICE_WINDOW	(OWA_HEADER | OWA_CLOSABLE | OWA_FOCUSABLE | \
+				 OWA_THICK_LINE_BORDER | \
+				 OWA_KIDS_INSIDE_BORDER | OWA_REAL_MARGINS)
+#define MO_ATTRS_COMMAND_WINDOW	(MO_ATTR1 | OWA_CLOSABLE | OWA_FOCUSABLE | \
+				 OWA_THICK_LINE_BORDER | \
+				 OWA_KIDS_INSIDE_BORDER | OWA_REAL_MARGINS)
+#define OL_ATTRS_WIN_ICON	(OWA_FOCUSABLE | OWA_MOVABLE)
+
+/* OLWinSpecState */
+typedef ByteFlags OLWinSpecState;
+#define OLWSS_SYS_ICONS_ATTACHED	0x80
+#define OLWSS_MAXIMIZED			0x40
+#define OLWSS_MINIMIZED			0x20
+#define OLWSS_PTR_IN_RAW_UNIV		0x10
+#define OLWSS_GRABBED			0x08
+#define OLWSS_PINNED			0x04
+#define OLWSS_DRAWN_PINNED		0x02
+#define OLWSS_NOTIFY_TRIGGERS_IS_PINNED	0x01
+
+/* OLWinMenuState */
+typedef ByteFlags OLWinMenuState;
+#define OLWMS_MENU_WINDOW_GRABS_ARE_TEMPORARY	0x80
+#define OLWMS_OD_IS_OWNER_BEFORE_MENU		0x40
+#define OLWMS_HAS_MENU_IN_STAY_UP_MODE		0x20
+#define OLWMS_TOGGLE_MENU_NAV_PENDING		0x10
+#define OWA_SYS_MENU_IS_CLOSE_BUTTON		0x08
+
+/* OLWinHeaderState */
+typedef ByteFlags OLWinHeaderState;
+#define OLWHS_UPDATE_PENDING			0x80
+#define OLWHS_HEADER_AREA_INVALID		0x40
+#define OLWHS_FOCUS_AREA_INVALID		0x20
+#define OLWHS_TITLE_AREA_INVALID		0x10
+#define OLWHS_TITLE_IMAGE_INVALID		0x08
+#define OLWHS_HEADER_MARK_IMAGES_INVALID	0x04
+#define OLWHS_SYS_ICON_IMAGES_INVALID		0x02
+#define OLWHS_FIELD_ICON_IMAGES_INVALID		0x01
+#define OLWHS_FULLY_INVALID			0x7f
+
+/* OLWinMoveResizeState (_CUA_STYLE) */
+typedef ByteFlags OLWinMoveResizeState;
+#define OLWMRS_MOVE_RESIZE_PENDING	0x80
+#define OLWMRS_MOVING			0x40
+#define OLWMRS_RESIZING_UP		0x20
+#define OLWMRS_RESIZING_DOWN		0x10
+#define OLWMRS_RESIZING_LEFT		0x08
+#define OLWMRS_RESIZING_RIGHT		0x04
+#define OLWMRS_RESIZE_PENDING		0x02
+#define OLWMRS_RESIZING_MASK	(OLWMRS_RESIZING_UP | OLWMRS_RESIZING_DOWN | \
+				 OLWMRS_RESIZING_LEFT | OLWMRS_RESIZING_RIGHT)
+#define OLWMRS_MOVING_OR_RESIZING_MASK	(OLWMRS_RESIZING_MASK | OLWMRS_MOVING)
+
+/* WinPosSizeState: the high byte is the stagger slot (SSPR_*) */
+typedef WordFlags WinPosSizeState;
+#define WPSS_HAS_MOVED_OR_RESIZED		0x8000
+#define WPSS_STAGGERED_SLOT			0x7f00
+#define WPSS_STAGGERED_SLOT_OFFSET		8
+#define WPSS_HAS_RESTARTED			0x0080
+#define WPSS_VIS_POS_IS_SPEC_PAIR		0x0010
+#define WPSS_VIS_SIZE_IS_SPEC_PAIR_PARENT	0x0008
+#define WPSS_VIS_SIZE_IS_SPEC_PAIR_FIELD	0x0004
+#define WPSS_POSITION_INVALID			0x0002
+#define WPSS_SIZE_INVALID			0x0001
+#define WPSS_SPEC_PAIRS		(WPSS_VIS_POS_IS_SPEC_PAIR | \
+				 WPSS_VIS_SIZE_IS_SPEC_PAIR_PARENT | \
+				 WPSS_VIS_SIZE_IS_SPEC_PAIR_FIELD)
+
+/* OLWinType (_CUA_STYLE) */
+typedef ByteEnum OLWinType;
+#define MOWT_PRIMARY_WINDOW	0
+#define MOWT_DISPLAY_WINDOW	1
+#define MOWT_COMMAND_WINDOW	2
+#define MOWT_PROPERTIES_WINDOW	3
+#define MOWT_NOTICE_WINDOW	4
+#define MOWT_HELP_WINDOW	5
+#define MOWT_MENU		6
+#define MOWT_SUBMENU		7
+#define MOWT_SYSTEM_MENU	8
+#define MOWT_WINDOW_ICON	9
+
+/* MSG_OL_WIN_NOTIFY_OF_INTERACTION_COMMAND */
+typedef WordFlags NotifyOfInteractionCommandFlags;
+#define NOICF_TRIGGER_CREATED	0x8000
+#define NOICF_TRIGGER_DEMISE	0x4000
+
+typedef struct {
+    optr			NOICS_optr;
+    word			NOICS_ic;
+    NotifyOfInteractionCommandFlags NOICS_flags;
+} NotifyOfInteractionCommandStruct;
+
+/* TEMP_OL_WIN_SAVE_INFO_OBJECT */
+typedef struct {
+    optr	SIOS_object;
+    word	SIOS_tag;
+    word	SIOS_hiddenTag;
+} SaveInfoObjectStruct;
+
+/* MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS */
+typedef struct {
+    word	OLWHTB_left;		/* width of the icons left of it */
+    word	OLWHTB_right;		/* and right */
+} OLWinHeaderTitleBounds;
+
+@class OLWinClass, OLCtrlClass;
+@uses GenClass;
+
+/* the window's grabs for its controls (Pass: nothing) */
+@message void MSG_OL_WIN_STARTUP_GRAB();
+@message void MSG_OL_WIN_END_GRAB(Boolean force);
+@message void MSG_OL_BASE_WIN_SET_APPLICATION_MENU_BUTTON(optr button);
+@message void MSG_OL_WIN_UPDATE_HEADER();
+@message void MSG_OL_WIN_REDRAW_HEADER();
+@message void MSG_OL_POPUP_ACTIVATE(sword x, sword y);
+@message void MSG_OL_POPUP_REQUEST_DISMISS();
+@importMessage MetaSpecificUIMessages, void MSG_OL_POPUP_TOGGLE_PUSHPIN(
+						Boolean closeIfUnpinned);
+@message void MSG_MO_SYSMENU_MOVE();
+@message void MSG_MO_SYSMENU_SIZE();
+@message void MSG_MO_NEXT_WIN();
+@message void MSG_OL_RESTORE_WIN();
+@message void MSG_OL_WIN_MINIMIZE();
+@message void MSG_OL_WIN_MAXIMIZE();
+@message void MSG_OL_WIN_CLOSE();
+@message void MSG_OL_WINDOW_REFRESH();
+@message void MSG_OL_WINDOW_BACK();
+@importMessage VisSpecMessages, WindowHandle MSG_GET_MENU_BAR_WIN();
+/* the window of that type if it is visible; FALSE if not */
+@message Boolean MSG_OL_WIN_IS_VISIBLE_WIN_TYPE(OLWinType type,
+						optr *window);
+@message void MSG_OL_WIN_TOGGLE_MENU_NAVIGATION();
+@message optr MSG_OL_WIN_QUERY_MENU_BAR();
+@message void MSG_OL_WIN_RESTORE_PREVIOUS_FOCUS_EXCL();
+@importMessage VisSpecMessages, void MSG_VIS_VUP_RELEASE_MENU_FOCUS();
+@message Boolean MSG_OL_WIN_QUERY_MENU_BAR_HAS_FOCUS();
+@importMessage VisSpecMessages, void MSG_OL_VUP_MAKE_APPLYABLE();
+@importMessage VisSpecMessages, void MSG_OL_MAKE_APPLYABLE();
+@importMessage VisSpecMessages, void MSG_OL_MAKE_NOT_APPLYABLE();
+@message Boolean MSG_OL_WIN_IS_MAXIMIZED();
+@message void MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS(
+					OLWinHeaderTitleBounds *bounds);
+@message void MSG_OL_WIN_NOTIFY_OF_REPLY_BAR(optr replyBar);
+/* the window's size for the suggested one (as MSG_VIS_RECALC_SIZE);
+ * FALSE if not answered */
+@message Boolean MSG_OL_WIN_RECALC_DISPLAY_SIZE(word width, word height,
+						SizeAsDWord *size);
+@message Boolean MSG_OL_WIN_IS_DEFAULT_ACTION_NAVIGATE_TO_NEXT_FIELD();
+@message void MSG_OL_WIN_SET_CUSTOM_SYSTEM_MENU_MONIKER(optr moniker);
+@message optr MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP(word titleGroupType);
+@message word MSG_OL_WIN_GET_TITLE_BAR_HEIGHT();
+@message Boolean MSG_OL_WIN_CHECK_IF_POTENTIAL_NEXT_WINDOW();
+@message void MSG_OL_WIN_CLEAR_TOGGLE_MENU_NAV_PENDING();
+@message void MSG_OL_WIN_NOTIFY_OF_INTERACTION_COMMAND(
+			NotifyOfInteractionCommandStruct *params);
+@message void MSG_OL_WIN_TURN_ON_AND_BUMP_MOUSE(sword xBump,
+						 sword yBump);
+@message void MSG_OL_WIN_ABORT_MOVE_RESIZE();
+@message Boolean MSG_OL_WIN_ALLOWS_EXPRESS_MENU_SHORTCUTS_THROUGH();
+@message void MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP();
+/* TRUE: only the minimized windows */
+@message void MSG_OL_WIN_UPDATE_POSITION_FOR_TASK_BAR(Boolean minimizedOnly);
+@message void MSG_OL_WIN_PREPARE_FIELD_SIZE_CHANGE();
+@message void MSG_OL_WIN_FIELD_SIZE_CHANGED();
+
+    @vardata void HINT_EXPRESS_MENU;
+    @vardata SaveInfoObjectStruct TEMP_OL_WIN_SAVE_INFO_OBJECT;
+    @vardata void TEMP_POPUP_OPENING_TO_RIGHT;
+
+    @instance OLWinType		OLWI_type = MOWT_PRIMARY_WINDOW;
+    @instance OLWinFixedAttr	OLWI_fixedAttr = 0;
+    @instance OLWinMoreFixedAttr	OLWI_moreFixedAttr = 0;
+    @instance OLWinAttr		OLWI_attrs = 0;
+    @instance WinPosSizeFlags	OLWI_winPosSizeFlags = 0;
+    @instance WinPosSizeState	OLWI_winPosSizeState = 0;
+    @instance OLWinSpecState	OLWI_specState = 0;
+    @instance OLWinMenuState	OLWI_menuState = 0;
+    @instance OLWinHeaderState	OLWI_headerState = 0;
+    @instance OLWinMoveResizeState	OLWI_moveResizeState = 0;
+    @instance Rectangle		OLWI_titleBarBounds = {0, 0, 0, 0};
+    /* the block of the system menu (Port32: a MemHandle) and its
+     * button */
+    @instance MemHandle		OLWI_sysMenu = 0;
+    @instance ChunkHandle	OLWI_sysMenuButton = 0;
+    @instance FTVMCGrab		OLWI_focusExcl = {0, 0};
+    @instance FTVMCGrab		OLWI_targetExcl = {0, 0};
+    @instance HierarchicalGrab	OLWI_defaultExcl = {0, 0};
+    @instance optr		OLWI_masterDefault = 0;
+    /* the state before maximizing (swapped with OLWI_attrs and on, and
+     * the bounds) */
+    @instance OLWinAttr		OLWI_prevAttrs = 0;
+    @instance WinPosSizeFlags	OLWI_prevWinPosSizeFlags = 0;
+    @instance WinPosSizeState	OLWI_prevWinPosSizeState = 0;
+    @instance Rectangle		OLWI_prevWinBounds = {0, 0, 0, 0};
+    @instance FTVMCGrab		OLWI_prevFocusExcl = {0, 0};
+    @instance optr		OLWI_titleBarLeftGroup = 0;
+    @instance optr		OLWI_titleBarRightGroup = 0;
+
+@endc;
+
+@endlib
+
+#endif

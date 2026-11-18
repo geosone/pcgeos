@@ -1,0 +1,455 @@
+/*
+ * cwinClassCommonMiddle.goc -- OLWinClass (after
+ * cwinClassCommonMiddle.asm): the unbuild, the application's window
+ * list, the default action and navigation, the header marked invalid
+ * and updated, the title bar's geometry, the visual upward queries
+ * (the default exclusive, menus, gadget exclusives), the window opened.
+ *
+ * Port32: the system menu is not built yet (nothing to unbuild); the
+ * navigation query (MSG_SPEC_NAVIGATE) answers an object only, without
+ * its flags (no menu bar navigation); the focus being a button
+ * (OLButtonClass) is not activated as a default.
+ */
+@include "cGeode.goh"
+@include <Objects/gPrimC.goh>
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
+
+/* windowRegionBW (cwinClassMisc.asm): the window with its shadow */
+static const Region windowRegionBW[] = {
+    PARAM_1 - 1,				EOREGREC,
+    PARAM_1,	 PARAM_0,     PARAM_2 - 1,	EOREGREC,
+    PARAM_3 - 1, PARAM_0,     PARAM_2,		EOREGREC,
+    PARAM_3,	 PARAM_0 + 1, PARAM_2,		EOREGREC,
+    EOREGREC
+};
+
+const Region *OpenWinGetRegionBW(void)
+{
+    return windowRegionBW;
+}
+
+/* OpenWinCheckMenusInHeader: the menus in the header of a maximized
+ * window (OLMenuedWinClass; Port32: not yet) */
+Boolean OpenWinCheckMenusInHeader(optr o)
+{
+    (void) o;
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * Unbuild
+ * ------------------------------------------------------------------- */
+
+/* OpenWinVisUnbuild: a win group's position and size to be worked out
+ * again, off the window list, without focus and target */
+@extern method OLWinClass, MSG_SPEC_UNBUILD
+{
+    if (flags & SBF_WIN_GROUP) {
+	pself->OLWI_winPosSizeState |= WPSS_POSITION_INVALID |
+				       WPSS_SIZE_INVALID;
+	OLWinTakeOffWindowList(oself);
+	@call oself::MSG_META_RELEASE_FT_EXCL();
+	/* the system menu: Port32 none yet */
+    }
+    @callsuper();
+}
+
+/* OpenWinDestroyAndFreeBlock: dismissed (the system menu freed) */
+@extern method OLWinClass, MSG_GEN_DESTROY_AND_FREE_BLOCK
+{
+    (void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * The window list
+ * ------------------------------------------------------------------- */
+
+/* OpenWinEnsureOnWindowList: on the application's GAGCNLT_WINDOWS list
+ * (saved to state), HINT_INITIATED if it was added */
+void OpenWinEnsureOnWindowList(optr o)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (!app)
+	return;
+    if (@call app::MSG_META_GCN_LIST_ADD(o,
+				GAGCNLT_WINDOWS | GCNLTF_SAVE_TO_STATE,
+				MANUFACTURER_ID_GEOWORKS))
+	(void) ObjVarAddData(o, HINT_INITIATED | VDF_SAVE_TO_STATE, 0);
+}
+
+void OLWinTakeOffWindowList(optr o)
+{
+    optr app = GeodeGetAppObject(0);
+
+    (void) ObjVarDeleteData(o, HINT_INITIATED);
+    if (app)
+	(void) @call app::MSG_META_GCN_LIST_REMOVE(o, GAGCNLT_WINDOWS,
+						   MANUFACTURER_ID_GEOWORKS);
+}
+
+/* OpenWinEnsureRealizableOnTop: on the window list, realizable (opened
+ * on top), brought to the top; TRUE if visible */
+Boolean OpenWinEnsureRealizableOnTop(optr o)
+{
+    Boolean vis;
+
+    OpenWinEnsureOnWindowList(o);
+    if (!(Win(o)->VI_attrs & VA_VISIBLE)) {
+	Win(o)->OLWI_fixedAttr |= OWFA_OPEN_ON_TOP;
+	@call o::MSG_SPEC_SET_ATTRS(SA_REALIZABLE, 0, VUM_NOW);
+	Win(o)->OLWI_fixedAttr &= ~OWFA_OPEN_ON_TOP;
+    }
+    vis = (Win(o)->VI_attrs & VA_VISIBLE) != 0;
+    @call o::MSG_GEN_BRING_TO_TOP();
+    return vis;
+}
+
+/* ---------------------------------------------------------------------
+ * The default action and navigation
+ * ------------------------------------------------------------------- */
+
+/* OpenWinActivateInteractionDefault: the next field, or the default
+ * (the focus if it is a button: Port32 not yet); TRUE if done */
+@extern method OLWinClass, MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT
+{
+    optr d;
+
+    if (pself->OLWI_moreFixedAttr & OWMFA_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD) {
+	@call oself::MSG_GEN_NAVIGATE_TO_NEXT_FIELD();
+	return TRUE;
+    }
+    d = pself->OLWI_defaultExcl.HG_OD;
+    if (!d)
+	return FALSE;
+    @call d::MSG_GEN_ACTIVATE();
+    return TRUE;
+}
+
+/*
+ * OpenWinNavigateCommon: the navigation query from the focus (skipping
+ * it) or the window; the object found gets the focus, none releases it
+ */
+void OpenWinNavigateCommon(optr o, NavigationFlags nf)
+{
+    optr focus = Win(o)->OLWI_focusExcl.FTVMC_OD, found;
+
+    nf |= NF_SKIP_NODE | NF_INITIATE_QUERY;
+    if (!focus) {
+	focus = o;
+	nf &= ~NF_SKIP_NODE;
+    }
+    found = @call focus::MSG_SPEC_NAVIGATE(nf);
+    if (!found) {
+	optr cur = Win(o)->OLWI_focusExcl.FTVMC_OD;
+
+	if (cur)
+	    @call o::MSG_META_MUP_ALTER_FTVMC_EXCL(cur, MAEF_FOCUS);
+	return;
+    }
+    if (found == Win(o)->OLWI_focusExcl.FTVMC_OD)
+	return;
+    @call o::MSG_META_MUP_ALTER_FTVMC_EXCL(found, MAEF_GRAB | MAEF_FOCUS);
+}
+
+@extern method OLWinClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD
+{
+    OpenWinNavigateCommon(oself, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The header
+ * ------------------------------------------------------------------- */
+
+@extern method OLWinClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    (void) updateMode; (void) oldMonikerWidth; (void) oldMonikerHeight;
+    OpenWinHeaderMarkInvalid(oself, OLWHS_TITLE_IMAGE_INVALID);
+}
+
+/*
+ * OpenWinHeaderMarkInvalid: parts of the header of a titled window to
+ * be drawn again: with an expose pending their area is invalidated in
+ * the window, else MSG_OL_WIN_UPDATE_HEADER is queued (once)
+ */
+void OpenWinHeaderMarkInvalid(optr o, OLWinHeaderState parts)
+{
+    OLWinInstance *w = Win(o);
+    WindowHandle win;
+    Rectangle r;
+
+    if (!(w->OLWI_attrs & (OWA_TITLED | OWA_HEADER)))
+	return;
+    if ((w->OLWI_headerState & parts) == parts)
+	return;
+    win = VisQueryWindow(o);
+    if (win) {
+	byte f = 0;
+
+	WinGetInfo(win, WIT_FLAGS, &f);
+	if (f & WRF_EXPOSE_PENDING) {
+	    if (parts & OLWHS_HEADER_AREA_INVALID)
+		OpenWinGetHeaderBounds(o, &r);
+	    else if (parts & (OLWHS_TITLE_AREA_INVALID |
+			      OLWHS_TITLE_IMAGE_INVALID |
+			      OLWHS_FOCUS_AREA_INVALID))
+		r = Win(o)->OLWI_titleBarBounds;
+	    else
+		return;	/* the buttons of a primary: the asm leaves them */
+	    WinInvalReg(win, NULL, r.R_left, r.R_top, r.R_right, r.R_bottom);
+	    return;
+	}
+    }
+    w = Win(o);
+    w->OLWI_headerState |= parts;
+    if (!(w->VI_attrs & VA_VISIBLE) ||
+	(w->OLWI_headerState & OLWHS_UPDATE_PENDING))
+	return;
+    w->OLWI_headerState |= OLWHS_UPDATE_PENDING;
+    @send, forceQueue o::MSG_OL_WIN_UPDATE_HEADER();
+}
+
+/* OpenWinTestForFocusAndTarget: the focus and target flags (none for a
+ * menu) */
+HierarchicalGrabFlags OpenWinTestForFocusAndTarget(optr o)
+{
+    OLWinInstance *w = Win(o);
+
+    if (w->OLWI_fixedAttr & OWFA_IS_MENU)
+	return 0;
+    return (HierarchicalGrabFlags) (w->OLWI_focusExcl.FTVMC_flags |
+				    w->OLWI_targetExcl.FTVMC_flags);
+}
+
+void OpenWinHeaderResetInvalid(optr o, OLWinHeaderState parts)
+{
+    Win(o)->OLWI_headerState &= ~parts;
+}
+
+/* OpenWinUpdateHeader: the parts of the header marked drawn again */
+@extern method OLWinClass, MSG_OL_WIN_UPDATE_HEADER
+{
+    GStateHandle gs;
+    OLWinHeaderState s;
+
+    pself->OLWI_headerState &= ~OLWHS_UPDATE_PENDING;
+    gs = VupCreateGState(oself);
+    if (!gs)
+	return;
+    s = Win(oself)->OLWI_headerState;
+    if (s & OLWHS_HEADER_AREA_INVALID) {
+	OpenWinDrawHeaderTitleBackground(oself, gs);
+	OpenWinDrawHeaderTitle(oself, gs);
+	OpenWinHeaderResetInvalid(oself, OLWHS_FIELD_ICON_IMAGES_INVALID);
+    } else if (s & (OLWHS_TITLE_AREA_INVALID | OLWHS_TITLE_IMAGE_INVALID |
+		    OLWHS_FOCUS_AREA_INVALID)) {
+	OpenWinDrawHeaderTitleBackground(oself, gs);
+	OpenWinDrawHeaderTitle(oself, gs);
+    }
+    GrDestroyState(gs);
+}
+
+/* OpenWinCalcWinHdrGeometry: the title bar inside the header, after the
+ * window's image or window changed (the system menu icons and the
+ * express tool area: Port32 not yet) */
+void OpenWinCalcWinHdrGeometry(optr o)
+{
+    OLWinInstance *w = Win(o);
+    Rectangle r;
+
+    if (!(w->VI_optFlags & (VOF_IMAGE_INVALID | VOF_WINDOW_INVALID)))
+	return;
+    OpenWinGetHeaderBounds(o, &r);
+    r.R_left++;
+    r.R_right--;
+    Win(o)->OLWI_titleBarBounds = r;
+}
+
+/* ---------------------------------------------------------------------
+ * The visual upward queries
+ * ------------------------------------------------------------------- */
+
+/* OpenWinReleaseDefaultGrabAndFixFlag: the default released, still the
+ * application's exclusive */
+static void ReleaseDefaultGrab(optr o, optr obj)
+{
+    (void) FlowReleaseGrab(o, MSG_META_GAINED_DEFAULT_EXCL, VIS_MASTER,
+			   WIN_OFFSET(OLWI_defaultExcl), obj);
+    Win(o)->OLWI_defaultExcl.HG_flags |= HGF_APP_EXCL;
+}
+
+/* SVQT_RELEASE_DEFAULT_EXCLUSIVE: the master default asks for it again
+ * (later) when nothing has it */
+static void ReleaseDefaultExclusive(optr o, optr obj)
+{
+    OLWinInstance *w = Win(o);
+    optr md;
+
+    if (w->OLWI_fixedAttr & OWFA_PREVENT_DEFAULT_OVERRIDES)
+	return;
+    ReleaseDefaultGrab(o, obj);
+    w = Win(o);
+    md = w->OLWI_masterDefault;
+    if (w->OLWI_defaultExcl.HG_OD || !md)
+	return;
+    @send, forceQueue o::MSG_VIS_P32_VUP_QUERY(NULL,
+				SVQT_REQUEST_DEFAULT_EXCLUSIVE,
+				OptrToChunk(md), OptrToHandle(md));
+}
+
+/*
+ * OpenWinVupQuery: the display scheme; the default exclusive (the
+ * object in data2:data1, the asm's bp:dx); the menu in stay up mode;
+ * the gadget exclusive for a remote object; the focus of the win group;
+ * a menu's focus; no reply bar here
+ */
+@extern method OLWinClass, MSG_VIS_P32_VUP_QUERY
+{
+    optr obj = ConstructOptr((Handle) data2, (ChunkHandle) data1);
+    OLWinInstance *w = pself;
+
+    switch (queryType) {
+    case VUQ_DISPLAY_SCHEME: {
+	DisplayScheme ds;
+
+	SpecGetDisplayScheme(&ds);
+	if (retValue) {
+	    memset(retValue, 0, sizeof(*retValue));
+	    retValue->GRP_ax = ds.DS_colorScheme |
+			       ((dword) ds.DS_displayType << 8) |
+			       ((dword) ds.DS_lightColor << 16) |
+			       ((dword) ds.DS_darkColor << 24);
+	    retValue->GRP_cx = ds.DS_fontID;
+	    retValue->GRP_dx = (word) ds.DS_pointSize;
+	}
+	return TRUE;
+    }
+    case SVQT_SET_MASTER_DEFAULT:
+	/* one master default per window (the asm's EC error) */
+	w->OLWI_masterDefault = obj;
+	(void) FlowRequestGrab(oself, MSG_META_GAINED_DEFAULT_EXCL, VIS_MASTER,
+			       WIN_OFFSET(OLWI_defaultExcl), obj, 0);
+	return TRUE;
+    case SVQT_RESET_MASTER_DEFAULT:
+	if (w->OLWI_masterDefault == obj) {
+	    w->OLWI_masterDefault = 0;
+	    ReleaseDefaultGrab(oself, obj);
+	}
+	return TRUE;
+    case SVQT_TAKE_DEFAULT_EXCLUSIVE:
+	if (!(w->OLWI_fixedAttr & OWFA_PREVENT_DEFAULT_OVERRIDES))
+	    (void) FlowForceGrab(oself, MSG_META_GAINED_DEFAULT_EXCL,
+				 VIS_MASTER, WIN_OFFSET(OLWI_defaultExcl),
+				 obj, FALSE);
+	return TRUE;
+    case SVQT_REQUEST_DEFAULT_EXCLUSIVE:
+	if (!(w->OLWI_fixedAttr & OWFA_PREVENT_DEFAULT_OVERRIDES))
+	    (void) FlowRequestGrab(oself, MSG_META_GAINED_DEFAULT_EXCL,
+				   VIS_MASTER, WIN_OFFSET(OLWI_defaultExcl),
+				   obj, TRUE);
+	return TRUE;
+    case SVQT_RELEASE_DEFAULT_EXCLUSIVE:
+	ReleaseDefaultExclusive(oself, obj);
+	return TRUE;
+    case SVQT_FORCE_RELEASE_DEFAULT_EXCLUSIVE:
+	if (w->OLWI_defaultExcl.HG_OD != w->OLWI_masterDefault)
+	    ReleaseDefaultExclusive(oself, w->OLWI_defaultExcl.HG_OD);
+	return TRUE;
+    case SVQT_HAS_MENU_IN_STAY_UP_MODE:
+	w->OLWI_menuState |= OLWMS_HAS_MENU_IN_STAY_UP_MODE;
+	return TRUE;
+    case SVQT_NO_MENU_IN_STAY_UP_MODE:
+	w->OLWI_menuState &= ~OLWMS_HAS_MENU_IN_STAY_UP_MODE;
+	return TRUE;
+    case SVQT_REMOTE_GRAB_GADGET_EXCL:
+    case SVQT_NOTIFY_MENU_BUTTON_AND_REMOTE_GRAB_GADGET_EXCL:
+	@call oself::MSG_VIS_TAKE_GADGET_EXCL(obj);
+	return TRUE;
+    case SVQT_REMOTE_RELEASE_GADGET_EXCL:
+	@call oself::MSG_VIS_RELEASE_GADGET_EXCL(obj);
+	return TRUE;
+    case SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL:
+	if (retValue) {
+	    optr f = w->OLWI_focusExcl.FTVMC_OD;
+
+	    memset(retValue, 0, sizeof(*retValue));
+	    retValue->GRP_cx = OptrToHandle(f);
+	    retValue->GRP_dx = OptrToChunk(f);
+	    retValue->GRP_bp = (w->OLWI_focusExcl.FTVMC_flags & HGF_APP_EXCL)
+			       ? TRUE : FALSE;
+	}
+	return TRUE;
+    case SVQT_GRAB_FOCUS_EXCL_FOR_MENU:
+	if (w->OLWI_fixedAttr & OWFA_IS_MENU)
+	    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+	return TRUE;
+    case SVQT_QUERY_FOR_REPLY_BAR:
+	return FALSE;
+    }
+    return @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Opening
+ * ------------------------------------------------------------------- */
+
+/*
+ * OpenWinOpenWin: the position and size worked out (kept on screen,
+ * kept visible), the window opened in its color with its priority
+ * (rectangular, or with its shadow on black and white), put on the
+ * window list, brought to the top if it opens on top
+ */
+@extern method OLWinClass, MSG_VIS_OPEN_WIN
+{
+    OLWinInstance *w;
+    WinOpenParams p;
+    Rectangle b;
+    const Region *reg = NULL;
+    WindowHandle win;
+
+    ConvertSpecWinSizePairsToPixels(oself);
+    UpdateWinPosSize(oself);
+    w = Win(oself);
+    if ((w->OLWI_winPosSizeFlags & WPSF_SHRINK_DESIRED_SIZE_TO_FIT_IN_PARENT) &&
+	!(w->OLWI_winPosSizeState & WPSS_HAS_MOVED_OR_RESIZED)) {
+	WinSizeInfoParams s;
+
+	(void) OpenGetParentWinSize(oself, &s);
+	MoveWindowToKeepOnscreen(oself, (sword) s.WSIP_windowWidth,
+				 (sword) (s.WSIP_windowHeight -
+					  GetTaskBarSizeAdjustment(oself)));
+    }
+    OpenWinCheckVisibleConstraints(oself);
+    GetWinColor(oself, &p);
+    p.WOP_parent = parentWindow;
+    GetCoreWinOpenParams(oself, &p);
+    if (OpenCheckIfBW() &&
+	!(Win(oself)->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW))
+	reg = windowRegionBW;
+    OpenGetLineBounds(oself, &b);
+    win = WinOpen(p.WOP_parent, oself, oself, p.WOP_colorFlags,
+		  p.WOP_color, 0, 0, p.WOP_flags, p.WOP_layerID,
+		  GeodeGetProcessHandle(), reg,
+		  b.R_left, b.R_top, b.R_right, b.R_bottom);
+    Win(oself)->VCI_window = win;
+    OpenWinEnsureOnWindowList(oself);
+    w = Win(oself);
+    if (w->OLWI_fixedAttr & OWFA_OPEN_ON_TOP) {
+	optr app = GeodeGetAppObject(0);
+
+	w->OLWI_fixedAttr &= ~OWFA_OPEN_ON_TOP;
+	if (app)
+	    @call app::MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP(oself);
+    }
+}
+
+/* OLWinUpdateForTitleGroup: the geometry and image again */
+@extern method OLWinClass, MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP
+{
+    @call oself::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID,
+				      VUM_MANUAL);
+}

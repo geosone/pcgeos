@@ -1,0 +1,556 @@
+/*
+ * cwinClassCommonLow.goc -- OLWinClass (after cwinClassCommonLow.asm):
+ * the color and priority a window opens with, the window attached and
+ * detached, brought to the top, moved and resized, kept visible in its
+ * parent; the bounds of its title and the height of its title bar; its
+ * moniker in the title.
+ *
+ * Port32: popups (OLPopupWinClass) are not ported yet: no modal
+ * priorities or nearest win group's priority, no menus kept beside
+ * their buttons (AvoidMenuOverlap); no state saved or restored (the
+ * TEMP_GEN_SAVE_WINDOW_INFO a restored window brings is read); the
+ * system menu, its icons and the title bar groups have no width yet.
+ */
+@include "cGeode.goh"
+@include <Objects/gPrimC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gInterC.goh>
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/* ---------------------------------------------------------------------
+ * Opening
+ * ------------------------------------------------------------------- */
+
+/* GetWinColor: a menu in the menu bar's color, a window icon in the
+ * field's, else white on black and white, else the light color */
+void GetWinColor(optr o, WinOpenParams *p)
+{
+    OLWinInstance *w = Win(o);
+
+    if (w->OLWI_fixedAttr & OWFA_IS_MENU)
+	p->WOP_color = moCS.CSV_menuBar;
+    else if (w->OLWI_type == MOWT_WINDOW_ICON)
+	p->WOP_color = moCS.CSV_screenBG;
+    else if (moCS.CSV_flags & CSF_BW)
+	p->WOP_color = C_WHITE;
+    else
+	p->WOP_color = moCS.CSV_dsLightColor;
+    p->WOP_colorFlags = CMM_ON_BLACK | CMT_CLOSEST;
+}
+
+#define WPD(layer, win)		((byte) (((layer) << 4) | (win)))
+
+/* winPriorityTable: by OLWinType */
+static const byte winPriorityTable[] = {
+    WPD(0, WIN_PRIO_STD),	/* MOWT_PRIMARY_WINDOW */
+    WPD(0, WIN_PRIO_STD),	/* MOWT_DISPLAY_WINDOW */
+    WPD(0, WIN_PRIO_COMMAND),	/* MOWT_COMMAND_WINDOW */
+    WPD(0, WIN_PRIO_COMMAND),
+    WPD(0, WIN_PRIO_COMMAND),
+    WPD(0, WIN_PRIO_COMMAND),
+    WPD(0, WIN_PRIO_POPUP),
+    WPD(0, WIN_PRIO_POPUP),
+    WPD(0, WIN_PRIO_POPUP),
+    WPD(0, WIN_PRIO_STD + 1),	/* MOWT_WINDOW_ICON */
+};
+
+/* GetScreenWin: the window of the application's screen */
+static WindowHandle GetScreenWin(void)
+{
+    optr app = GeodeGetAppObject(0), scr;
+    GenReturnParams r;
+
+    if (!app)
+	return 0;
+    memset(&r, 0, sizeof(r));
+    (void) @call app::MSG_SPEC_P32_GUP_QUERY(&r, GUQT_SCREEN);
+    scr = ConstructOptr(r.GRP_cx, r.GRP_dx);
+    return scr ? @call scr::MSG_VIS_QUERY_WINDOW() : 0;
+}
+
+static void CustomLayerPriority(optr o, word *flags)
+{
+    LayerPriority *lp = ObjVarFindData(o, ATTR_GEN_WINDOW_CUSTOM_LAYER_PRIORITY);
+
+    if (lp)
+	*flags = (word) ((*flags & ~WPF_LAYER_PRIORITY) |
+			 ((*lp << 4) & WPF_LAYER_PRIORITY));
+}
+
+/*
+ * GetCoreWinOpenParams: the priority by the window's type (a popup
+ * saves under it, a pinned one is a command window), the application's
+ * and the window's custom layer priority, its custom window priority,
+ * layer ID (the window's block) and parent (the screen); behind unless
+ * it opens on top; its layer behind if the application opens in back
+ */
+void GetCoreWinOpenParams(optr o, WinOpenParams *p)
+{
+    OLWinInstance *w = Win(o);
+    word f;
+    optr app;
+    WinPriority *wp;
+    MemHandle *h;
+
+    p->WOP_layerID = GeodeGetProcessHandle();
+    f = winPriorityTable[w->OLWI_type];
+    if (f == WIN_PRIO_POPUP) {
+	f |= WPF_SAVE_UNDER;
+	if (w->OLWI_specState & OLWSS_PINNED)
+	    f = WIN_PRIO_COMMAND;
+    }
+    /* the application's custom layer priority (a desk accessory) */
+    app = GeodeGetAppObject(0);
+    if (app) {
+	ObjLockObjBlock(OptrToHandle(app));
+	CustomLayerPriority(app, &f);
+	MemUnlock(OptrToHandle(app));
+    }
+    /* OpenWinModifyWithNearestWinGroupPriority: popups only */
+    if ((wp = ObjVarFindData(o, ATTR_GEN_WINDOW_CUSTOM_WINDOW_PRIORITY)) != NULL)
+	f = (word) ((f & ~WPF_WIN_PRIORITY) | (*wp & WPF_WIN_PRIORITY));
+    CustomLayerPriority(o, &f);
+    w = Win(o);
+    if (w->OLWI_type != MOWT_WINDOW_ICON &&
+	(h = ObjVarFindData(o, ATTR_GEN_WINDOW_CUSTOM_LAYER_ID)) != NULL)
+	p->WOP_layerID = *h ? *h : OptrToHandle(o);
+    if ((h = ObjVarFindData(o, ATTR_GEN_WINDOW_CUSTOM_PARENT)) != NULL)
+	p->WOP_parent = *h ? *h : GetScreenWin();
+    if (!(Win(o)->OLWI_fixedAttr & OWFA_OPEN_ON_TOP))
+	f |= WPF_PLACE_BEHIND;
+    if (app &&
+	(@call app::MSG_GEN_APPLICATION_GET_LAUNCH_FLAGS() & ALF_OPEN_IN_BACK))
+	f |= WPF_PLACE_LAYER_BEHIND;
+    p->WOP_flags = f;
+}
+
+/* ---------------------------------------------------------------------
+ * Attaching and detaching
+ * ------------------------------------------------------------------- */
+
+/* GenSaveWindowInfo (genC.def), the data of TEMP_GEN_SAVE_WINDOW_INFO */
+typedef struct {
+    SpecWinSizePair	GSWI_winPosition;
+    SpecWinSizePair	GSWI_winSize;
+    word		GSWI_winPosSizeState;
+} OLGenSaveWindowInfo;
+
+/* OpenWinGetState: the position, size and state a restored window
+ * brings (TEMP_GEN_SAVE_WINDOW_INFO) */
+static void GetState(optr o)
+{
+    OLGenSaveWindowInfo *s = ObjVarFindData(o, TEMP_GEN_SAVE_WINDOW_INFO);
+    OLWinInstance *w;
+
+    if (!s)
+	return;
+    w = Win(o);
+    w->OLWI_winPosSizeState = s->GSWI_winPosSizeState;
+    w->VI_bounds.R_left = (sword) s->GSWI_winPosition.SWSP_x;
+    w->VI_bounds.R_top = (sword) s->GSWI_winPosition.SWSP_y;
+    w->VI_bounds.R_right = (sword) s->GSWI_winSize.SWSP_x;
+    w->VI_bounds.R_bottom = (sword) s->GSWI_winSize.SWSP_y;
+    (void) ObjVarDeleteData(o, TEMP_GEN_SAVE_WINDOW_INFO);
+}
+
+/*
+ * OpenWinAttaching: its state back, restarted; a minimized display
+ * minimized again; an interaction realizable if it was up (restored
+ * with HINT_INITIATED, or from the window list; a menu pinned); then
+ * attached
+ */
+static void Attaching(optr o, UpdateWindowFlags flags)
+{
+    OLWinInstance *w;
+
+    GetState(o);
+    w = Win(o);
+    w->OLWI_winPosSizeState |= WPSS_HAS_RESTARTED;
+    if (w->VI_specAttrs & SA_BRANCH_MINIMIZED) {
+	@call o::MSG_GEN_DISPLAY_SET_MINIMIZED();
+	return;
+    }
+    if (ObjIsObjectInClass(o, &GenInteractionClass)) {
+	Boolean up;
+
+	w->VI_specAttrs &= ~SA_REALIZABLE;
+	if (flags & UWF_RESTORING_FROM_STATE)
+	    up = ObjVarFindData(o, HINT_INITIATED) != NULL;
+	else
+	    up = (flags & UWF_FROM_WINDOWS_LIST) != 0;
+	w = Win(o);
+	if (up) {
+	    w->VI_specAttrs |= SA_REALIZABLE;
+	    if (w->OLWI_fixedAttr & OWFA_IS_MENU)
+		w->OLWI_specState |= OLWSS_PINNED |
+				     OLWSS_NOTIFY_TRIGGERS_IS_PINNED;
+	}
+    }
+    @call o::MSG_SPEC_SET_ATTRS(SA_ATTACHED, 0, VUM_NOW);
+}
+
+/*
+ * OpenWinDetaching: an attached window that will be saved (dirty, or
+ * in a resource and not ignoring dirty; not an icon) is restarted next
+ * time (Port32: its state is not saved yet); others leave the window
+ * list; then not attached
+ */
+static void Detaching(optr o)
+{
+    OLWinInstance *w = Win(o);
+    word f;
+
+    if (!(w->VI_specAttrs & SA_ATTACHED))
+	return;
+    if (w->OLWI_type != MOWT_WINDOW_ICON) {
+	f = ObjGetFlags(o);
+	if (!(f & (OCF_DIRTY | OCF_IN_RESOURCE)) ||
+	    !((f ^ OCF_IGNORE_DIRTY) & (OCF_IGNORE_DIRTY | OCF_IN_RESOURCE))) {
+	    OLWinTakeOffWindowList(o);
+	    @call o::MSG_SPEC_SET_ATTRS(0, SA_ATTACHED, VUM_NOW);
+	    return;
+	}
+    }
+    Win(o)->OLWI_winPosSizeState |= WPSS_HAS_RESTARTED;
+    /* OpenWinSaveState (the maximized state swapped around it) */
+    @call o::MSG_SPEC_SET_ATTRS(0, SA_ATTACHED, VUM_NOW);
+}
+
+@extern method OLWinClass, MSG_META_UPDATE_WINDOW
+{
+    if (updateFlags & UWF_ATTACHING)
+	Attaching(oself, updateFlags);
+    else if (updateFlags & UWF_DETACHING)
+	Detaching(oself);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Bringing to the top
+ * ------------------------------------------------------------------- */
+
+/* OpenWinUpdateModalStatus: a modal popup tells the application (and
+ * the system); Port32: no popups yet */
+void OpenWinUpdateModalStatus(optr o)
+{
+    (void) o;
+}
+
+/*
+ * OpenWinBringToTop: the window to the top of its layer; the target and
+ * focus taken (not a toolbox, not a window that does not disturb unless
+ * there is no mouse); the application told
+ */
+@extern method OLWinClass, MSG_GEN_BRING_TO_TOP
+{
+    WindowHandle win = VisQueryWindow(oself);
+    optr app;
+
+    if (win) {
+	WinChangePriority(win, 0, 0);
+	OpenWinUpdateModalStatus(oself);
+	if (!(Win(oself)->OLCI_buildFlags & OLBF_TOOLBOX) &&
+	    (OpenCheckIfKeyboardOnly() ||
+	     !(Win(oself)->OLWI_moreFixedAttr & OWMFA_NO_DISTURB))) {
+	    @call oself::MSG_META_GRAB_TARGET_EXCL();
+	    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+	}
+    }
+    app = GeodeGetAppObject(0);
+    if (app)
+	@call app::MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Moving and resizing
+ * ------------------------------------------------------------------- */
+
+#define WIN_VISIBLE_MARGIN	10
+
+/* OpenWinMoveResizeWin: the position and size worked out and kept
+ * visible, the window moved and resized there (the express tool area:
+ * Port32 not yet) */
+@extern method OLWinClass, MSG_VIS_MOVE_RESIZE_WIN
+{
+    WindowHandle win;
+    Rectangle b;
+    const Region *reg = NULL;
+
+    ConvertSpecWinSizePairsToPixels(oself);
+    UpdateWinPosSize(oself);
+    OpenWinCheckVisibleConstraints(oself);
+    win = Win(oself)->VCI_window;
+    if (!win)
+	return;
+    VisGetBounds(oself, &b);
+    if (!(Win(oself)->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW) &&
+	OpenCheckIfBW())
+	reg = OpenWinGetRegionBW();
+    WinResize(win, reg, b.R_left, b.R_top, (word) (b.R_right - 1),
+	      (word) (b.R_bottom - 1), WPF_ABS);
+}
+
+/*
+ * EnsureWindowInParentWin: the window moved into its parent window so
+ * that at least the width and height given stay visible
+ */
+void EnsureWindowInParentWin(optr o, sword minW, sword minH)
+{
+    WinSizeInfoParams s;
+    OLWinInstance *w;
+    sword x, y, lim;
+
+    if (!OpenGetParentWinSize(o, &s))
+	return;
+    s.WSIP_windowHeight -= GetTaskBarSizeAdjustment(o);
+    w = Win(o);
+    x = w->VI_bounds.R_left;
+    if (x >= 0 && x > (lim = (sword) (s.WSIP_windowWidth - minW + 1)))
+	x = lim;
+    else if (x <= (lim = (sword) (minW - w->VI_bounds.R_right +
+				  w->VI_bounds.R_left)))
+	x = lim;
+    y = w->VI_bounds.R_top;
+    if (y >= 0 && (lim = (sword) (s.WSIP_windowHeight - minH + 1)) < 0)
+	y = 0;
+    else if (y >= 0 && y > lim)
+	y = lim;
+    else if (y <= (lim = (sword) (minH - w->VI_bounds.R_bottom +
+				  w->VI_bounds.R_top)))
+	y = lim;
+    VisSetPosition(o, x, y);
+}
+
+#define MIN_WIN_TITLE_BAR_ONSCREEN_DIST	10
+
+/* EnsureTitleBarInParentWin: enough of the title bar stays in the
+ * parent window */
+static void EnsureTitleBarInParentWin(optr o)
+{
+    WinSizeInfoParams s;
+    OLWinInstance *w = Win(o);
+    sword x, y, lim;
+
+    if (!(w->OLWI_attrs & OWA_TITLED) || !OpenGetParentWinSize(o, &s))
+	return;
+    s.WSIP_windowHeight -= GetTaskBarSizeAdjustment(o);
+    w = Win(o);
+    x = w->VI_bounds.R_left;
+    if (x >= 0 &&
+	x > (lim = (sword) (s.WSIP_windowWidth - w->OLWI_titleBarBounds.R_left -
+			    (MIN_WIN_TITLE_BAR_ONSCREEN_DIST - 1))))
+	x = lim;
+    else if (x <= (lim = (sword) (MIN_WIN_TITLE_BAR_ONSCREEN_DIST -
+				  w->OLWI_titleBarBounds.R_right)))
+	x = lim;
+    y = w->VI_bounds.R_top;
+    if (y >= 0 &&
+	y > (lim = (sword) (s.WSIP_windowHeight - w->OLWI_titleBarBounds.R_top -
+			    (MIN_WIN_TITLE_BAR_ONSCREEN_DIST - 1))))
+	y = lim;
+    else if (y <= (lim = (sword) (MIN_WIN_TITLE_BAR_ONSCREEN_DIST -
+				  w->OLWI_titleBarBounds.R_bottom)))
+	y = lim;
+    VisSetPosition(o, x, y);
+}
+
+/*
+ * OpenWinCheckVisibleConstraints: partially visible (the title bar of a
+ * titled window, else a margin), entirely visible, or visible with a
+ * margin (a menu beside its button: Port32 not yet)
+ */
+void OpenWinCheckVisibleConstraints(optr o)
+{
+    OLWinInstance *w = Win(o);
+    word c = (word) ((w->OLWI_winPosSizeFlags & WPSF_CONSTRAIN_TYPE) >> 6);
+    sword cx, dx;
+
+    if (c == WCT_NONE)
+	return;
+    if (c == WCT_KEEP_PARTIALLY_VISIBLE) {
+	if (w->OLWI_attrs & OWA_TITLED) {
+	    EnsureTitleBarInParentWin(o);
+	    return;
+	}
+	cx = dx = WIN_VISIBLE_MARGIN;
+    } else {
+	cx = (sword) (w->VI_bounds.R_right - w->VI_bounds.R_left);
+	dx = (sword) (w->VI_bounds.R_bottom - w->VI_bounds.R_top);
+	if (c != WCT_KEEP_VISIBLE) {
+	    cx += WIN_VISIBLE_MARGIN;
+	    dx += WIN_VISIBLE_MARGIN;
+	}
+    }
+    EnsureWindowInParentWin(o, cx, dx);
+}
+
+/* ---------------------------------------------------------------------
+ * The title bar
+ * ------------------------------------------------------------------- */
+
+/* OpenWinGetTitleBarGroupSize: the width of a title bar group that is
+ * built (one less on black and white, to overlap) */
+word OpenWinGetTitleBarGroupSize(optr o, Boolean right)
+{
+    OLWinInstance *w = Win(o);
+    optr g = right ? w->OLWI_titleBarRightGroup : w->OLWI_titleBarLeftGroup;
+    word cx = 0;
+
+    if (!g)
+	return 0;
+    ObjLockObjBlock(OptrToHandle(g));
+    if (VisCheckIfSpecBuilt(g)) {
+	cx = DWORD_WIDTH(@call g::MSG_VIS_RECALC_SIZE(RSA_CHOOSE_OWN_SIZE,
+						      RSA_CHOOSE_OWN_SIZE));
+	if (OpenCheckIfBW() && cx)
+	    cx--;
+    }
+    MemUnlock(OptrToHandle(g));
+    return cx;
+}
+
+/* OpenWinGetSysMenuButtonWidth: Port32: no system menu button yet */
+word OpenWinGetSysMenuButtonWidth(optr o)
+{
+    (void) o;
+    return 0;
+}
+
+/* OpenWinCheckIfMinMaxRestoreControls: displays, primaries if the
+ * options say so */
+Boolean OpenWinCheckIfMinMaxRestoreControls(optr o)
+{
+    OLWinType t = Win(o)->OLWI_type;
+
+    if (t == MOWT_DISPLAY_WINDOW)
+	return TRUE;
+    return t == MOWT_PRIMARY_WINDOW &&
+	   (olWindowOptions & UIWO_PRIMARY_MIN_MAX_RESTORE_CONTROLS);
+}
+
+/*
+ * OLWinGetHeaderTitleBounds: the room the title leaves on the left (the
+ * system menu button, the left group) and on the right (the minimize
+ * and maximize or restore icons, the right group)
+ */
+@extern method OLWinClass, MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS
+{
+    word left, right = 0, cx;
+
+    left = OpenWinGetSysMenuButtonWidth(oself);
+    if (OpenCheckIfCGA())
+	left--;
+    cx = OpenWinGetTitleBarGroupSize(oself, FALSE);
+    left = (word) (left + cx - 1);
+    if (!OpenCheckIfKeyboardOnly()) {
+	if (OpenWinCheckIfMinMaxRestoreControls(oself)) {
+	    OLWinInstance *w = Win(oself);
+
+	    if (w->OLWI_attrs & OWA_MINIMIZABLE)
+		right += CUAS_WIN_ICON_WIDTH - 1;
+	    if (w->OLWI_specState & OLWSS_MAXIMIZED) {
+		if (w->OLWI_fixedAttr & OWFA_RESTORABLE)
+		    right += CUAS_WIN_ICON_WIDTH - 1;
+	    } else if (w->OLWI_attrs & OWA_MAXIMIZABLE)
+		right += CUAS_WIN_ICON_WIDTH - 1;
+	}
+	if (!OpenCheckIfBW() && right)
+	    right--;
+    }
+    cx = OpenWinGetTitleBarGroupSize(oself, TRUE);
+    right = (word) (right + cx - 1);
+    bounds->OLWHTB_left = left;
+    bounds->OLWHTB_right = right;
+}
+
+/* OLWinGetTitleBarHeight: the header's height (two less in color) */
+@extern method OLWinClass, MSG_OL_WIN_GET_TITLE_BAR_HEIGHT
+{
+    Rectangle r;
+    word h;
+
+    OpenWinGetHeaderBounds(oself, &r);
+    h = (word) (r.R_bottom - r.R_top);
+    if (!OpenCheckIfBW())
+	h -= 2;
+    return h;
+}
+
+/* ---------------------------------------------------------------------
+ * The moniker in the title
+ * ------------------------------------------------------------------- */
+
+static const char longTermStr[] = " - ";
+
+/* GetDividerStrLen */
+word GetDividerStrLen(GStateHandle gs)
+{
+    return (word) GrTextWidth(gs, longTermStr, 0);
+}
+
+static ChunkHandle LongTermMoniker(optr o)
+{
+    if (Win(o)->OLWI_type != MOWT_PRIMARY_WINDOW)
+	return 0;
+    return ((GenPrimaryInstance *) ObjDerefGen(o))->GPI_longTermMoniker;
+}
+
+static Boolean TinyScreen(void)
+{
+    word w, h;
+
+    OpenGetScreenDimensions(&w, &h);
+    return w <= TINY_SCREEN_WIDTH_THRESHOLD;
+}
+
+/*
+ * OpenWinGetMonikerSize: the moniker's size; a primary's with its long
+ * term moniker after " - " (on a tiny screen that one alone)
+ */
+SizeAsDWord OpenWinGetMonikerSize(optr o, GStateHandle gs)
+{
+    ChunkHandle m = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
+    ChunkHandle lt = LongTermMoniker(o);
+    SizeAsDWord s = VisGetMonikerSize(o, m, GetSystemFontHeight(), gs), l;
+    word w;
+
+    if (!lt)
+	return s;
+    l = VisGetMonikerSize(o, lt, GetSystemFontHeight(), gs);
+    if (TinyScreen())
+	return l;
+    w = (word) (DWORD_WIDTH(s) + GetDividerStrLen(gs) + DWORD_WIDTH(l));
+    return MAKE_SIZE_DWORD(w, DWORD_HEIGHT(l) > DWORD_HEIGHT(s)
+			      ? DWORD_HEIGHT(l) : DWORD_HEIGHT(s));
+}
+
+/*
+ * OpenWinDrawMoniker: the moniker; a primary's long term moniker after
+ * " - " (if it fits; on a tiny screen that one alone)
+ */
+void OpenWinDrawMoniker(optr o, DrawMonikerFlags flags, DrawMonikerArgs *a)
+{
+    ChunkHandle m = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
+    ChunkHandle lt = LongTermMoniker(o);
+    word x = a->DMA_xInset, y = a->DMA_yInset, mw, dw = 0;
+
+    if (lt && TinyScreen()) {
+	VisDrawMoniker(o, lt, flags, a);
+	return;
+    }
+    VisDrawMoniker(o, m, flags, a);
+    if (!lt)
+	return;
+    mw = (word) DWORD_WIDTH(SpecGetGenMonikerSize(o, a->DMA_gState));
+    if (((GenInstance *) ObjDerefGen(o))->GI_visMoniker) {
+	dw = GetDividerStrLen(a->DMA_gState);
+	if (a->DMA_xMaximum >= mw + dw)
+	    GrDrawText(a->DMA_gState, (sword) (x + mw), (sword) y,
+		       longTermStr, 0);
+    }
+    a->DMA_xInset = (word) (x + mw + dw);
+    if ((sword) (a->DMA_xMaximum -= (word) (mw + dw)) < 0)
+	return;
+    VisDrawMoniker(o, lt, flags, a);
+}

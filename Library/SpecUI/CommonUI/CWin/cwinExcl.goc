@@ -1,0 +1,426 @@
+/*
+ * cwinExcl.goc -- OLWinClass (after cwinExcl.asm): the focus and target
+ * of a window, its hierarchies, the floating keyboard told about the
+ * window with the focus.
+ *
+ * Port32: popups (OLPopupWinClass) are not ported yet: a popup's modal
+ * grabs and a menu's grabs through its button go to the vis parent.
+ */
+@include "cGeode.goh"
+@include <Objects/gPenICC.goh>
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
+
+/* ---------------------------------------------------------------------
+ * The floating keyboard
+ * ------------------------------------------------------------------- */
+
+/* SendFocusWindowKbdStatusNotification: the block (0: no keyboard) to
+ * the application's GAGCNLT_FOCUS_WINDOW_KBD_STATUS list */
+static void SendFocusWindowKbdStatus(MemHandle block)
+{
+    optr none = 0, app = GeodeGetAppObject(0);
+    EventHandle ev;
+    GCNListSendFlags f = GCNLSF_SET_STATUS;
+
+    if (!app) {
+	if (block)
+	    MemFree(block);
+	return;
+    }
+    ev = @record none::MSG_META_NOTIFY_WITH_DATA_BLOCK(
+			MANUFACTURER_ID_GEOWORKS,
+			GWNT_FOCUS_WINDOW_KBD_STATUS, block);
+    if (!block)
+	f |= GCNLSF_IGNORE_IF_STATUS_TRANSITIONING;
+    @call app::MSG_META_GCN_LIST_SEND(f, ev, block,
+				      GAGCNLT_FOCUS_WINDOW_KBD_STATUS,
+				      MANUFACTURER_ID_GEOWORKS);
+}
+
+/*
+ * SendKbdStatusNotification: the window with the focus wants the
+ * floating keyboard (where ATTR_GEN_WINDOW_KBD_POSITION says, else
+ * anywhere), or not (KO_NO_KEYBOARD)
+ */
+void SendKbdStatusNotification(optr o, KeyboardOverride override)
+{
+    MemHandle mh = 0;
+
+    if (override != KO_NO_KEYBOARD) {
+	NotifyFocusWindowKbdStatus *n;
+	Point *p;
+
+	mh = MemAlloc(sizeof(*n), HF_DYNAMIC | HF_SHARABLE,
+		      HAF_ZERO_INIT | HAF_LOCK | HAF_NO_ERR);
+	MemInitRefCount(mh, 1);
+	n = MemDeref(mh);
+	n->NFWKS_needsFloatingKbd = (Boolean) -1;
+	n->NFWKS_focusWindow = o;
+	n->NFWKS_sysModal = FALSE;
+	n->NFWKS_kbdPosition.P_x = -1;
+	n->NFWKS_kbdPosition.P_y = -1;
+	if ((p = ObjVarFindData(o, ATTR_GEN_WINDOW_KBD_POSITION)) != NULL)
+	    n->NFWKS_kbdPosition = *p;
+	MemUnlock(mh);
+    }
+    SendFocusWindowKbdStatus(mh);
+}
+
+/* the keyboard override of a window that wants one, if the keyboard is
+ * required at all */
+static Boolean WantsKbd(optr o)
+{
+    KeyboardOverride *k;
+
+    return CheckIfKeyboardRequired() &&
+	   (k = ObjVarFindData(o, ATTR_GEN_WINDOW_KBD_OVERRIDE)) != NULL &&
+	   *k != KO_NO_KEYBOARD;
+}
+
+/* ---------------------------------------------------------------------
+ * Gaining and losing
+ * ------------------------------------------------------------------- */
+
+/* OpenWinUpdateFocusExcl: the window's focus follows its own */
+void OpenWinUpdateFocusExcl(optr o, Message msg)
+{
+    FlowUpdateHierarchicalGrab(o, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       WIN_OFFSET(OLWI_focusExcl), msg);
+}
+
+static void ClearFocusExcl(OLWinInstance *w)
+{
+    w->OLWI_focusExcl.FTVMC_OD = 0;
+}
+
+/*
+ * OpenWinGainedFocusExcl: the focus within a menu, or the one kept,
+ * else the default focus (else the master default, else the first
+ * field) gets it; the default exclusive released; the floating keyboard
+ * told
+ */
+@extern method OLWinClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    OLWinInstance *w = pself;
+
+    if (w->OLWI_fixedAttr & OWFA_IS_MENU)
+	ClearFocusExcl(w);
+    else if (!w->OLWI_focusExcl.FTVMC_OD ||
+	     !(w->OLWI_fixedAttr & OWFA_PRESERVE_FOCUS)) {
+	ObjectAndGrabParams q;
+
+	w->OLWI_focusExcl.FTVMC_flags &= ~(MAEF_OD_IS_WINDOW |
+					    MAEF_OD_IS_MENU_RELATED);
+	ClearFocusExcl(w);
+	memset(&q, 0, sizeof(q));
+	@call oself::MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS(&q);
+	w = Win(oself);
+	if (!q.OAGP_object) {
+	    q.OAGP_object = w->OLWI_masterDefault;
+	    q.OAGP_grabFlags = 0;
+	}
+	if (q.OAGP_object) {
+	    w->OLWI_focusExcl.FTVMC_OD = q.OAGP_object;
+	    w->OLWI_focusExcl.FTVMC_flags |= q.OAGP_grabFlags;
+	} else
+	    @call oself::MSG_GEN_NAVIGATE_TO_NEXT_FIELD();
+    }
+    OpenWinUpdateFocusExcl(oself, MSG_META_GAINED_FOCUS_EXCL);
+    {
+	GenReturnParams r;
+
+	memset(&r, 0, sizeof(r));
+	(void) @call oself::MSG_VIS_P32_VUP_QUERY(&r,
+				SVQT_RELEASE_DEFAULT_EXCLUSIVE, 0, 0);
+    }
+    if (WantsKbd(oself))
+	SendKbdStatusNotification(oself,
+		*(KeyboardOverride *) ObjVarFindData(oself,
+					ATTR_GEN_WINDOW_KBD_OVERRIDE));
+}
+
+/*
+ * OpenWinMarkFocusAreaInvalidIfNoOtherExcl: the header shows the focus
+ * or target (not of a menu): if the other one is not there, its focus
+ * area is redrawn
+ */
+static void MarkFocusAreaInvalidIfNoOtherExcl(optr o, word otherOffset)
+{
+    OLWinInstance *w = Win(o);
+    FTVMCGrab *g = (FTVMCGrab *) ((byte *) w + otherOffset);
+
+    if (w->OLWI_fixedAttr & OWFA_IS_MENU)
+	return;
+    if (g->FTVMC_flags & HGF_SYS_EXCL)
+	return;
+    OpenWinHeaderMarkInvalid(o, OLWHS_FOCUS_AREA_INVALID);
+}
+
+/* OpenWinUpdateSystemFocusExcl: the header redrawn, the focus within
+ * follows; a move or resize stops when the focus goes */
+@extern method OLWinClass, MSG_META_GAINED_SYS_FOCUS_EXCL,
+		    MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    MarkFocusAreaInvalidIfNoOtherExcl(oself, WIN_OFFSET(OLWI_targetExcl));
+    OpenWinUpdateFocusExcl(oself, message);
+    if (message == MSG_META_LOST_SYS_FOCUS_EXCL)
+	@send, forceQueue, insertAtFront oself::MSG_OL_WIN_ABORT_MOVE_RESIZE();
+}
+
+/*
+ * OpenWinLostFocusExcl: the pointer in the window keeps watching the
+ * button (pre-passive); the focus within goes; the owner before a menu
+ * becomes the focus again; the floating keyboard is told there is none
+ */
+@extern method OLWinClass, MSG_META_LOST_FOCUS_EXCL
+{
+    OLWinInstance *w = pself;
+
+    if ((w->OLWI_specState & OLWSS_PTR_IN_RAW_UNIV) && w->VCI_window)
+	@call oself::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+    OpenWinUpdateFocusExcl(oself, MSG_META_LOST_FOCUS_EXCL);
+    w = Win(oself);
+    if (w->OLWI_menuState & OLWMS_OD_IS_OWNER_BEFORE_MENU) {
+	w->OLWI_focusExcl.FTVMC_OD = w->OLWI_prevFocusExcl.FTVMC_OD;
+	w->OLWI_focusExcl.FTVMC_flags =
+	    (w->OLWI_focusExcl.FTVMC_flags & ~HGF_OTHER_INFO) |
+	    (w->OLWI_prevFocusExcl.FTVMC_flags & HGF_OTHER_INFO);
+	w->OLWI_prevFocusExcl.FTVMC_OD = 0;
+	w->OLWI_prevFocusExcl.FTVMC_flags = 0;
+	w->OLWI_menuState &= ~OLWMS_OD_IS_OWNER_BEFORE_MENU;
+    }
+    if (WantsKbd(oself))
+	SendFocusWindowKbdStatus(0);
+}
+
+/* OpenWinUpdateSysTargetExcl: the header redrawn, the target within
+ * follows */
+@extern method OLWinClass, MSG_META_GAINED_SYS_TARGET_EXCL,
+		    MSG_META_LOST_SYS_TARGET_EXCL
+{
+    MarkFocusAreaInvalidIfNoOtherExcl(oself, WIN_OFFSET(OLWI_focusExcl));
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+			       VIS_MASTER, WIN_OFFSET(OLWI_targetExcl),
+			       message);
+}
+
+@extern method OLWinClass, MSG_META_GAINED_TARGET_EXCL, MSG_META_LOST_TARGET_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+			       VIS_MASTER, WIN_OFFSET(OLWI_targetExcl),
+			       message);
+}
+
+/* ---------------------------------------------------------------------
+ * Grabbing
+ * ------------------------------------------------------------------- */
+
+/* OpenWinGrabFocusExcl: a focusable window (not a toolbox) asks its
+ * parent for the focus, as a window, a menu one, modal */
+@extern method OLWinClass, MSG_META_GRAB_FOCUS_EXCL
+{
+    MetaAlterFTVMCExclFlags f;
+
+    if (!(pself->OLWI_attrs & OWA_FOCUSABLE) ||
+	(pself->OLCI_buildFlags & OLBF_TOOLBOX))
+	return;
+    f = MAEF_OD_IS_WINDOW | MAEF_GRAB | MAEF_FOCUS | MAEF_NOT_HERE;
+    if (pself->OLWI_fixedAttr & OWFA_IS_MENU)
+	f |= MAEF_OD_IS_MENU_RELATED;
+    /* a modal popup: MAEF_MODAL (Port32: no popups yet) */
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, f);
+}
+
+@extern method OLWinClass, MSG_META_GRAB_TARGET_EXCL
+{
+    if (pself->OLWI_attrs & OWA_TARGETABLE)
+	@callsuper();
+}
+
+static void AlterFocusCommon(optr o, optr obj, MetaAlterFTVMCExclFlags f)
+{
+    FlowAlterHierarchicalGrab(o, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			      WIN_OFFSET(OLWI_focusExcl), obj, f);
+}
+
+/*
+ * OpenWinSetFocusExcl: while a menu's grabs are temporary, a menu taking
+ * the focus remembers the owner before it; a gadget asking while a menu
+ * has it becomes that owner (the focus stays with the menu)
+ */
+static void SetFocusExcl(optr o, optr obj, MetaAlterFTVMCExclFlags f)
+{
+    OLWinInstance *w = Win(o);
+
+    if (w->OLWI_menuState & OLWMS_MENU_WINDOW_GRABS_ARE_TEMPORARY) {
+	if (f & MAEF_OD_IS_MENU_RELATED) {
+	    if (!(w->OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED)) {
+		w->OLWI_prevFocusExcl = w->OLWI_focusExcl;
+		w->OLWI_menuState |= OLWMS_OD_IS_OWNER_BEFORE_MENU;
+	    }
+	} else if ((w->OLWI_focusExcl.FTVMC_flags &
+		    MAEF_OD_IS_MENU_RELATED) && obj) {
+	    w->OLWI_prevFocusExcl.FTVMC_OD = obj;
+	    w->OLWI_prevFocusExcl.FTVMC_flags = f;
+	    w->OLWI_menuState |= OLWMS_OD_IS_OWNER_BEFORE_MENU;
+	    return;
+	}
+    }
+    AlterFocusCommon(o, obj, (f & ~MAEF_MASK_OF_ALL_HIERARCHIES) | MAEF_FOCUS);
+}
+
+/* OpenWinDelayedRestorePreviousFocusExcl: the owner before the menu
+ * gets the focus back later (the menu may be followed by another) */
+static void DelayedRestorePreviousFocusExcl(optr o)
+{
+    OLWinInstance *w = Win(o);
+
+    if (!(w->OLWI_menuState & OLWMS_OD_IS_OWNER_BEFORE_MENU))
+	return;
+    ClearFocusExcl(w);
+    w->OLWI_focusExcl.FTVMC_flags |= MAEF_OD_IS_MENU_RELATED;
+    @send, forceQueue o::MSG_OL_WIN_RESTORE_PREVIOUS_FOCUS_EXCL();
+}
+
+/*
+ * OpenWinUnsetFocusExcl: while a menu's grabs are temporary, the owner
+ * before the menu forgotten if it releases; the menu releasing the focus
+ * hands it back to that owner
+ */
+static void UnsetFocusExcl(optr o, optr obj)
+{
+    OLWinInstance *w = Win(o);
+    Boolean menu;
+
+    if (!(w->OLWI_menuState & OLWMS_MENU_WINDOW_GRABS_ARE_TEMPORARY)) {
+	AlterFocusCommon(o, obj, MAEF_FOCUS);
+	return;
+    }
+    if (obj == w->OLWI_prevFocusExcl.FTVMC_OD) {
+	w->OLWI_prevFocusExcl.FTVMC_OD = 0;
+	w->OLWI_prevFocusExcl.FTVMC_flags = 0;
+	w->OLWI_menuState &= ~OLWMS_OD_IS_OWNER_BEFORE_MENU;
+    }
+    if (obj != w->OLWI_focusExcl.FTVMC_OD)
+	return;
+    menu = (w->OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED) != 0;
+    AlterFocusCommon(o, obj, MAEF_FOCUS);
+    if (menu)
+	DelayedRestorePreviousFocusExcl(o);
+}
+
+/*
+ * OpenWinAlterFTVMCExcl: the focus and target within the window; the
+ * model (and the rest) as the superclass does; the window's own
+ * requests (MAEF_NOT_HERE) to its parent
+ */
+@extern method OLWinClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    if (flags & MAEF_NOT_HERE) {
+	struct { optr o; MetaAlterFTVMCExclFlags f; } p;
+
+	/* OpenWinCallParentOfWindow (Port32: a menu's button not yet) */
+	p.o = objectWantingControl;
+	p.f = flags & ~MAEF_NOT_HERE;
+	VisCallParent(oself, MSG_META_MUP_ALTER_FTVMC_EXCL, &p, sizeof(p),
+		      NULL, 0);
+	return;
+    }
+    while (flags & MAEF_MASK_OF_ALL_HIERARCHIES) {
+	if (flags & MAEF_FOCUS) {
+	    if (flags & MAEF_GRAB)
+		SetFocusExcl(oself, objectWantingControl, flags);
+	    else
+		UnsetFocusExcl(oself, objectWantingControl);
+	    flags &= ~MAEF_FOCUS;
+	} else if (flags & MAEF_TARGET) {
+	    FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+				      VIS_MASTER, WIN_OFFSET(OLWI_targetExcl),
+				      objectWantingControl,
+				      (flags & MAEF_GRAB) | MAEF_TARGET);
+	    flags &= ~MAEF_TARGET;
+	} else {
+	    @callsuper();
+	    return;
+	}
+    }
+}
+
+/* OpenWinRestorePreviousFocusExcl: the owner before the menu gets the
+ * focus back if nothing else took it */
+@extern method OLWinClass, MSG_OL_WIN_RESTORE_PREVIOUS_FOCUS_EXCL
+{
+    OLWinInstance *w = pself;
+    optr prev;
+    MetaAlterFTVMCExclFlags f;
+
+    if (!(w->OLWI_menuState & OLWMS_OD_IS_OWNER_BEFORE_MENU))
+	return;
+    if (w->OLWI_focusExcl.FTVMC_OD)
+	return;
+    if (!w->OLWI_prevFocusExcl.FTVMC_OD) {
+	w->OLWI_focusExcl.FTVMC_flags &= ~MAEF_OD_IS_MENU_RELATED;
+	return;
+    }
+    prev = w->OLWI_prevFocusExcl.FTVMC_OD;
+    f = w->OLWI_prevFocusExcl.FTVMC_flags;
+    w->OLWI_prevFocusExcl.FTVMC_OD = 0;
+    w->OLWI_prevFocusExcl.FTVMC_flags = 0;
+    w->OLWI_menuState &= ~OLWMS_OD_IS_OWNER_BEFORE_MENU;
+    f = (f & (MAEF_OD_IS_WINDOW | MAEF_OD_IS_MENU_RELATED)) |
+	MAEF_GRAB | MAEF_FOCUS;
+    AlterFocusCommon(oself, prev, f);
+}
+
+/* ---------------------------------------------------------------------
+ * Asking
+ * ------------------------------------------------------------------- */
+
+@extern method OLWinClass, MSG_META_GET_FOCUS_EXCL
+{
+    *focusObject = pself->OLWI_focusExcl.FTVMC_OD;
+    return TRUE;
+}
+
+@extern method OLWinClass, MSG_VIS_FUP_QUERY_FOCUS_EXCL, MSG_VIS_VUP_QUERY_FOCUS_EXCL
+{
+    retValue->OAGP_object = pself->OLWI_focusExcl.FTVMC_OD;
+    retValue->OAGP_grabFlags = pself->OLWI_focusExcl.FTVMC_flags;
+}
+
+@extern method OLWinClass, MSG_META_GET_TARGET_EXCL
+{
+    *targetObject = pself->OLWI_targetExcl.FTVMC_OD;
+    return TRUE;
+}
+
+/*
+ * OLWinSendClassedEvent: to the window's focus or target; with the
+ * floating keyboard required, its position set at the window itself
+ */
+@extern method OLWinClass, MSG_META_SEND_CLASSED_EVENT
+{
+    optr dest;
+
+    if (whereTo == (TravelOption) TO_TARGET)
+	dest = pself->OLWI_targetExcl.FTVMC_OD;
+    else if (whereTo == (TravelOption) TO_FOCUS) {
+	KeyboardOverride *k;
+	optr dummy;
+
+	dest = pself->OLWI_focusExcl.FTVMC_OD;
+	if (CheckIfKeyboardRequired() &&
+	    (k = ObjVarFindData(oself, ATTR_GEN_WINDOW_KBD_OVERRIDE)) != NULL &&
+	    *k == KO_KEYBOARD_REQUIRED &&
+	    ObjGetMessageInfo(event, &dummy) == MSG_GEN_SET_KBD_POSITION)
+	    dest = 0;
+    } else {
+	@callsuper();
+	return;
+    }
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo, dest, 0);
+}

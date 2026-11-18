@@ -1,0 +1,722 @@
+/*
+ * cwinClassCommonHigh.goc -- OLWinClass (after cwinClassCommonHigh.asm):
+ * the window of the specific UI.  Its initialization, the window hints,
+ * the specific build of the win group, the position and size of the
+ * window (WinPosSizeFlags), the vis parent.  The rest of the class is in
+ * cwinClassCommonMiddle.goc, cwinClassCommonLow.goc,
+ * cwinClassOther.goc, cwinGeometry.goc, cwinExcl.goc and (the drawing)
+ * Motif/Win/winDraw.goc.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the system menu and its
+ * icons (OpenWinEnsureSysMenu, OpenWinEnsureSysMenuIcons, with
+ * OLMenuWinClass and OLButtonClass), pinned menus, the title bar groups
+ * (OLTitleGroupClass: MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP answers a
+ * group only once one is there), moniker lists (GenFindMoniker), the
+ * task bar (taskBarPrefs: the adjustments are 0, as with no task bar).
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Objects/gPrimC.goh>
+@include <Objects/gPenICC.goh>
+
+@classdecl OLWinClass, neverSaved;
+
+/* cwinClassCommonMiddle.goc */
+@extern method OLWinClass, MSG_SPEC_UNBUILD;
+@extern method OLWinClass, MSG_GEN_DESTROY_AND_FREE_BLOCK;
+@extern method OLWinClass, MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT;
+@extern method OLWinClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD;
+@extern method OLWinClass, MSG_SPEC_UPDATE_VIS_MONIKER;
+@extern method OLWinClass, MSG_OL_WIN_UPDATE_HEADER;
+@extern method OLWinClass, MSG_VIS_P32_VUP_QUERY;
+@extern method OLWinClass, MSG_VIS_OPEN_WIN;
+@extern method OLWinClass, MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP;
+/* cwinClassCommonLow.goc */
+@extern method OLWinClass, MSG_META_UPDATE_WINDOW;
+@extern method OLWinClass, MSG_GEN_BRING_TO_TOP;
+@extern method OLWinClass, MSG_VIS_MOVE_RESIZE_WIN;
+@extern method OLWinClass, MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS;
+@extern method OLWinClass, MSG_OL_WIN_GET_TITLE_BAR_HEIGHT;
+/* cwinClassOther.goc */
+@extern method OLWinClass, MSG_VIS_CLOSE;
+@extern method OLWinClass, MSG_GEN_LOWER_TO_BOTTOM;
+@extern method OLWinClass, MSG_VIS_VUP_RELEASE_MENU_FOCUS;
+/* cwinGeometry.goc */
+@extern method OLWinClass, MSG_VIS_RECALC_SIZE;
+@extern method OLWinClass, MSG_VIS_POSITION_BRANCH;
+@extern method OLWinClass, MSG_VIS_COMP_GET_CHILD_SPACING;
+@extern method OLWinClass, MSG_VIS_COMP_GET_MARGINS;
+@extern method OLWinClass, MSG_VIS_COMP_GET_MINIMUM_SIZE;
+@extern method OLWinClass, MSG_VIS_UPDATE_GEOMETRY;
+@extern method OLWinClass, MSG_OL_GET_CHILDS_TREE_POS;
+@extern method OLWinClass, MSG_VIS_RESET_TO_INITIAL_SIZE;
+@extern method OLWinClass, MSG_OL_WIN_RECALC_DISPLAY_SIZE;
+@extern method OLWinClass, MSG_OL_WIN_IS_MAXIMIZED;
+@extern method OLWinClass, MSG_OL_WIN_IS_DEFAULT_ACTION_NAVIGATE_TO_NEXT_FIELD;
+/* cwinExcl.goc */
+@extern method OLWinClass, MSG_META_GAINED_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GAINED_SYS_FOCUS_EXCL,
+		    MSG_META_LOST_SYS_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_LOST_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GAINED_SYS_TARGET_EXCL,
+		    MSG_META_LOST_SYS_TARGET_EXCL;
+@extern method OLWinClass, MSG_META_GAINED_TARGET_EXCL,
+		    MSG_META_LOST_TARGET_EXCL;
+@extern method OLWinClass, MSG_META_GRAB_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GRAB_TARGET_EXCL;
+@extern method OLWinClass, MSG_META_MUP_ALTER_FTVMC_EXCL;
+@extern method OLWinClass, MSG_OL_WIN_RESTORE_PREVIOUS_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GET_FOCUS_EXCL;
+@extern method OLWinClass, MSG_VIS_FUP_QUERY_FOCUS_EXCL,
+		    MSG_VIS_VUP_QUERY_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GET_TARGET_EXCL;
+@extern method OLWinClass, MSG_META_SEND_CLASSED_EVENT;
+/* Motif/Win/winDraw.goc */
+@extern method OLWinClass, MSG_VIS_DRAW;
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+#define Gen(o)		((GenInstance *) ObjDerefGen(o))
+
+/* ---------------------------------------------------------------------
+ * Initialization (OpenWinInitialize)
+ * ------------------------------------------------------------------- */
+
+/* a win group and a window, its own vis parent and its children's; the
+ * focus kept; targetable as the generic object is */
+@method OLWinClass, MSG_META_INITIALIZE
+{
+    OLWinInstance *w;
+    Boolean targetable;
+
+    @callsuper();
+    targetable = (Gen(oself)->GI_attrs & GA_TARGETABLE) != 0;
+    w = Win(oself);
+    if (targetable)
+	w->OLWI_attrs |= OWA_TARGETABLE;
+    w->VI_typeFlags |= VTF_IS_WIN_GROUP | VTF_IS_WINDOW;
+    w->VI_specAttrs |= SA_CUSTOM_VIS_PARENT | SA_CUSTOM_VIS_PARENT_FOR_CHILD;
+    w->OLWI_fixedAttr = OWFA_RESTORABLE | OWFA_PRESERVE_FOCUS;
+    w->OLWI_defaultExcl.HG_flags = HGF_APP_EXCL;
+    w->OLWI_titleBarLeftGroup = 0;
+    w->OLWI_titleBarRightGroup = 0;
+}
+
+/*
+ * OLWinScanGeometryHints: OLCtrl's, then a minimum size, staggered,
+ * kept visible, as large as desired (position and size to be worked
+ * out); no moniker or frame of an OLCtrl, no desired size hints
+ */
+@method OLWinClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    OLWinInstance *w;
+
+    @callsuper();
+    w = Win(oself);
+    w->VCI_geoAttrs |= VCGA_HAS_MINIMUM_SIZE;
+    w->OLWI_winPosSizeFlags = WPSF_PERSIST |
+			      (WCT_KEEP_VISIBLE << 6) |
+			      (WPT_STAGGER << 3) |
+			      (WST_AS_DESIRED << 0);
+    w->OLWI_winPosSizeState |= WPSS_POSITION_INVALID | WPSS_SIZE_INVALID;
+    w->OLCI_optFlags &= ~(OLCOF_DISPLAY_MONIKER | OLCOF_DISPLAY_MKR_ABOVE |
+			  OLCOF_DISPLAY_BORDER);
+    w->OLCI_optFlags |= OLCOF_IGNORE_DESIRED_SIZE_HINTS;
+}
+
+/* ---------------------------------------------------------------------
+ * The window hints (OpenWinProcessHints)
+ * ------------------------------------------------------------------- */
+
+/*
+ * SetWinPosSizeAttrFromRegs: the field of the flags in clear replaced
+ * by set; a position at a ratio (WPT_AT_RATIO) or a size as a ratio of
+ * the parent or field takes the hint's SpecWinSizePair into the bounds
+ * (the left and top, the right and bottom) and says so in the state
+ */
+void SetWinPosSizeAttr(WinPosSizeFlags *flags, WinPosSizeState *state,
+		       sword *bounds, word clear, word set,
+		       const SpecWinSizePair *pair)
+{
+    word keep = (word) ~clear;
+    byte s;
+
+    *flags = (WinPosSizeFlags) ((*flags & keep) | set);
+    if (!(keep & WPSF_POSITION_TYPE) && !(set & WPSF_POSITION_TYPE)) {
+	/* EnsureRightBottomBoundsAreIndependent (the asm tests the size
+	 * as a ratio of the parent twice) */
+	if (!(*state & (WPSS_VIS_POS_IS_SPEC_PAIR |
+			WPSS_VIS_SIZE_IS_SPEC_PAIR_PARENT))) {
+	    bounds[2] -= bounds[0];
+	    bounds[3] -= bounds[1];
+	}
+	*state |= WPSS_VIS_POS_IS_SPEC_PAIR;
+	bounds[0] = (sword) pair->SWSP_x;
+	bounds[1] = (sword) pair->SWSP_y;
+    }
+    if (keep & WPSF_SIZE_TYPE)
+	return;
+    switch (set & WPSF_SIZE_TYPE) {
+    case WST_AS_RATIO_OF_PARENT:
+	s = WPSS_VIS_SIZE_IS_SPEC_PAIR_PARENT;
+	break;
+    case WST_AS_RATIO_OF_FIELD:
+	s = WPSS_VIS_SIZE_IS_SPEC_PAIR_FIELD;
+	break;
+    default:
+	return;
+    }
+    *state |= s;
+    bounds[2] = (sword) pair->SWSP_x;
+    bounds[3] = (sword) pair->SWSP_y;
+}
+
+static void WinPosSizeHint(optr o, word clear, word set,
+			   const SpecWinSizePair *pair)
+{
+    OLWinInstance *w = Win(o);
+
+    SetWinPosSizeAttr(&w->OLWI_winPosSizeFlags, &w->OLWI_winPosSizeState,
+		      &w->VI_bounds.R_left, clear, set, pair);
+}
+
+static void WinHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		    word dataType, void *handlerData)
+{
+    optr o = ConstructOptr(mh, chnk);
+    OLWinInstance *w = Win(o);
+    const SpecWinSizePair *pair = (const SpecWinSizePair *) (extra + 1);
+
+    (void) handlerData;
+    switch (dataType) {
+    case HINT_PREVENT_DEFAULT_OVERRIDES:
+	w->OLWI_fixedAttr |= OWFA_PREVENT_DEFAULT_OVERRIDES;
+	break;
+    case HINT_PRESERVE_FOCUS:
+	w->OLWI_fixedAttr |= OWFA_PRESERVE_FOCUS;
+	break;
+    case HINT_DO_NOT_PRESERVE_FOCUS:
+	w->OLWI_fixedAttr &= ~OWFA_PRESERVE_FOCUS;
+	break;
+    case HINT_DISMISS_WHEN_DISABLED:
+	w->OLWI_attrs |= OWA_DISMISS_WHEN_DISABLED;
+	break;
+    case HINT_USE_INITIAL_BOUNDS_WHEN_RESTORED:
+	w->OLWI_fixedAttr &= ~OWFA_RESTORABLE;
+	break;
+    case HINT_KEEP_INITIALLY_ONSCREEN:
+	WinPosSizeHint(o, 0, WPSF_SHRINK_DESIRED_SIZE_TO_FIT_IN_PARENT, pair);
+	break;
+    case HINT_DONT_KEEP_INITIALLY_ONSCREEN:
+	WinPosSizeHint(o, WPSF_SHRINK_DESIRED_SIZE_TO_FIT_IN_PARENT, 0, pair);
+	break;
+    case HINT_DONT_KEEP_PARTIALLY_ONSCREEN:
+    case HINT_WINDOW_NO_CONSTRAINTS:
+	WinPosSizeHint(o, WPSF_CONSTRAIN_TYPE, 0, pair);
+	break;
+    case HINT_KEEP_PARTIALLY_ONSCREEN:
+	WinPosSizeHint(o, WPSF_CONSTRAIN_TYPE,
+		       WCT_KEEP_PARTIALLY_VISIBLE << 6, pair);
+	break;
+    case HINT_KEEP_ENTIRELY_ONSCREEN:
+	WinPosSizeHint(o, WPSF_CONSTRAIN_TYPE, WCT_KEEP_VISIBLE << 6, pair);
+	break;
+    case HINT_KEEP_ENTIRELY_ONSCREEN_WITH_MARGIN:
+	WinPosSizeHint(o, WPSF_CONSTRAIN_TYPE,
+		       WCT_KEEP_VISIBLE_WITH_MARGIN << 6, pair);
+	break;
+    case HINT_POSITION_WINDOW_AT_RATIO_OF_PARENT:
+	WinPosSizeHint(o, WPSF_POSITION_TYPE, WPT_AT_RATIO << 3, pair);
+	break;
+    case HINT_STAGGER_WINDOW:
+	WinPosSizeHint(o, WPSF_POSITION_TYPE, WPT_STAGGER << 3, pair);
+	break;
+    case HINT_CENTER_WINDOW:
+	WinPosSizeHint(o, WPSF_POSITION_TYPE, WPT_CENTER << 3, pair);
+	break;
+    case HINT_TILE_WINDOW:
+	WinPosSizeHint(o, WPSF_POSITION_TYPE, WPT_TILED << 3, pair);
+	break;
+    case HINT_POSITION_WINDOW_AT_MOUSE:
+	WinPosSizeHint(o, WPSF_POSITION_TYPE, WPT_AT_MOUSE_POSITION << 3,
+		       pair);
+	break;
+    case HINT_EXTEND_WINDOW_TO_BOTTOM_RIGHT:
+	WinPosSizeHint(o, WPSF_SIZE_TYPE, WST_EXTEND_TO_BOTTOM_RIGHT, pair);
+	break;
+    case HINT_EXTEND_WINDOW_NEAR_BOTTOM_RIGHT:
+	WinPosSizeHint(o, WPSF_SIZE_TYPE, WST_EXTEND_NEAR_BOTTOM_RIGHT, pair);
+	break;
+    case HINT_SIZE_WINDOW_AS_DESIRED:
+	WinPosSizeHint(o, WPSF_SIZE_TYPE, WST_AS_DESIRED, pair);
+	break;
+    case HINT_SIZE_WINDOW_AS_RATIO_OF_PARENT:
+	WinPosSizeHint(o, WPSF_SIZE_TYPE, WST_AS_RATIO_OF_PARENT, pair);
+	break;
+    case HINT_SIZE_WINDOW_AS_RATIO_OF_FIELD:
+	WinPosSizeHint(o, WPSF_SIZE_TYPE, WST_AS_RATIO_OF_FIELD, pair);
+	break;
+    case HINT_NOT_MOVABLE:
+	w->OLWI_attrs &= ~OWA_MOVABLE;
+	break;
+    case ATTR_GEN_WINDOW_CUSTOM_WINDOW:
+	w->OLWI_attrs &= OWA_DISMISS_WHEN_DISABLED | OWA_FOCUSABLE |
+			 OWA_TARGETABLE | OWA_MAXIMIZABLE;
+	w->OLWI_moreFixedAttr |= OWMFA_CUSTOM_WINDOW;
+	break;
+    case HINT_WINDOW_NO_TITLE_BAR:
+	w->OLWI_attrs &= ~(OWA_HEADER | OWA_HAS_SYS_MENU | OWA_TITLED |
+			   OWA_MOVABLE);
+	break;
+    case HINT_WINDOW_NO_SYS_MENU:
+	w->OLWI_attrs &= ~OWA_HAS_SYS_MENU;
+	break;
+    case HINT_NO_TALLER_THAN_CHILDREN_REQUIRE:
+	w->VCI_geoDimensionAttrs &= ~VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+	break;
+    case HINT_NO_WIDER_THAN_CHILDREN_REQUIRE:
+	w->VCI_geoDimensionAttrs &= ~VCGDA_EXPAND_WIDTH_TO_FIT_PARENT;
+	break;
+    case HINT_WINDOW_MINIMIZE_TITLE_BAR:
+	w->OLWI_moreFixedAttr |= OMWFA_MINIMIZE_TITLE_BAR;
+	w->OLWI_attrs &= ~OWA_HAS_SYS_MENU;
+	break;
+    }
+}
+
+static VarDataCHandler winHints[] = {
+    { HINT_PREVENT_DEFAULT_OVERRIDES, WinHint },
+    { HINT_PRESERVE_FOCUS, WinHint },
+    { HINT_DO_NOT_PRESERVE_FOCUS, WinHint },
+    { HINT_DISMISS_WHEN_DISABLED, WinHint },
+    { HINT_USE_INITIAL_BOUNDS_WHEN_RESTORED, WinHint },
+    { HINT_KEEP_INITIALLY_ONSCREEN, WinHint },
+    { HINT_DONT_KEEP_INITIALLY_ONSCREEN, WinHint },
+    { HINT_DONT_KEEP_PARTIALLY_ONSCREEN, WinHint },
+    { HINT_KEEP_PARTIALLY_ONSCREEN, WinHint },
+    { HINT_KEEP_ENTIRELY_ONSCREEN, WinHint },
+    { HINT_WINDOW_NO_CONSTRAINTS, WinHint },
+    { HINT_KEEP_ENTIRELY_ONSCREEN_WITH_MARGIN, WinHint },
+    { HINT_POSITION_WINDOW_AT_RATIO_OF_PARENT, WinHint },
+    { HINT_STAGGER_WINDOW, WinHint },
+    { HINT_CENTER_WINDOW, WinHint },
+    { HINT_TILE_WINDOW, WinHint },
+    { HINT_POSITION_WINDOW_AT_MOUSE, WinHint },
+    { HINT_EXTEND_WINDOW_TO_BOTTOM_RIGHT, WinHint },
+    { HINT_EXTEND_WINDOW_NEAR_BOTTOM_RIGHT, WinHint },
+    { HINT_SIZE_WINDOW_AS_DESIRED, WinHint },
+    { HINT_SIZE_WINDOW_AS_RATIO_OF_PARENT, WinHint },
+    { HINT_SIZE_WINDOW_AS_RATIO_OF_FIELD, WinHint },
+    { HINT_NOT_MOVABLE, WinHint },
+    { ATTR_GEN_WINDOW_CUSTOM_WINDOW, WinHint },
+    { HINT_WINDOW_NO_TITLE_BAR, WinHint },
+    { HINT_WINDOW_NO_SYS_MENU, WinHint },
+    { HINT_NO_TALLER_THAN_CHILDREN_REQUIRE, WinHint },
+    { HINT_NO_WIDER_THAN_CHILDREN_REQUIRE, WinHint },
+    { HINT_WINDOW_MINIMIZE_TITLE_BAR, WinHint },
+};
+
+/*
+ * OpenWinProcessHints: called by the subclasses' MSG_META_INITIALIZE
+ * after their defaults: a window that is not a menu fits its parent;
+ * the hints; a window extended to the corner is not centered (the
+ * position it had before stays)
+ */
+void OpenWinProcessHints(optr o)
+{
+    OLWinInstance *w = Win(o);
+    WinPosSizeFlags old;
+    word f;
+
+    if (!(w->OLWI_fixedAttr & OWFA_IS_MENU))
+	w->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+				    VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+    old = w->OLWI_winPosSizeFlags;
+    OpenScanVarData(o, sizeof(winHints) / sizeof(winHints[0]), winHints,
+		    NULL);
+    /* AvoidCenteringIfExtending */
+    w = Win(o);
+    f = w->OLWI_winPosSizeFlags;
+    if (((f & WPSF_SIZE_TYPE) == WST_EXTEND_TO_BOTTOM_RIGHT ||
+	 (f & WPSF_SIZE_TYPE) == WST_EXTEND_NEAR_BOTTOM_RIGHT) &&
+	(f & WPSF_POSITION_TYPE) == (WPT_CENTER << 3))
+	w->OLWI_winPosSizeFlags = (WinPosSizeFlags)
+	    ((f & ~WPSF_POSITION_TYPE) | (old & WPSF_POSITION_TYPE));
+}
+
+/* ---------------------------------------------------------------------
+ * The specific build
+ * ------------------------------------------------------------------- */
+
+/* OpenWinUpdateSpecBuild: the system menu and its icons of a win group
+ * (Port32: not yet) */
+@method OLWinClass, MSG_SPEC_BUILD_BRANCH
+{
+    @callsuper();
+}
+
+/*
+ * OLWinGupQuery: the win group (the window and its object) of a window
+ * that is open; the floating keyboard asked for
+ */
+@method OLWinClass, MSG_SPEC_P32_GUP_QUERY
+{
+    switch ((word) queryType) {
+    case SGQT_WIN_GROUP:
+	if ((pself->VI_typeFlags & VTF_IS_WIN_GROUP) && pself->VCI_window) {
+	    retValue->GRP_cx = OptrToHandle(oself);
+	    retValue->GRP_dx = OptrToChunk(oself);
+	    retValue->GRP_bp = pself->VCI_window;
+	    return TRUE;
+	}
+	break;
+    case SGQT_BRING_UP_KEYBOARD:
+	if (!ObjVarFindData(oself, ATTR_GEN_WINDOW_KBD_OVERRIDE))
+	    @call oself::MSG_GEN_SET_KBD_OVERRIDE(KO_KEYBOARD_REQUIRED);
+	return TRUE;
+    }
+    return @callsuper();
+}
+
+@method OLWinClass, MSG_GEN_SET_KBD_POSITION
+{
+    Point *p = ObjVarAddData(oself, ATTR_GEN_WINDOW_KBD_POSITION |
+			     VDF_SAVE_TO_STATE, sizeof(Point));
+
+    p->P_x = xCoord;
+    p->P_y = yCoord;
+}
+
+/* the keyboard override; the floating keyboard told if we have the
+ * focus */
+@method OLWinClass, MSG_GEN_SET_KBD_OVERRIDE
+{
+    KeyboardOverride *k = ObjVarAddData(oself, ATTR_GEN_WINDOW_KBD_OVERRIDE |
+					VDF_SAVE_TO_STATE,
+					sizeof(KeyboardOverride));
+
+    *k = override;
+    if (!CheckIfKeyboardRequired())
+	return;
+    if (Win(oself)->OLWI_focusExcl.FTVMC_flags & MAEF_APP_EXCL)
+	SendKbdStatusNotification(oself, override);
+}
+
+/*
+ * OpenWinSpecBuild: the win group's build (the subclasses build the
+ * primary and display windows): enabled as the generic object is, added
+ * to its vis parent, its position and size, the default focus and target
+ */
+@method OLWinClass, MSG_SPEC_BUILD
+{
+    optr vp;
+
+    if (VisCheckIfSpecBuilt(oself))
+	return;
+    VisSpecBuildSetEnabledState(oself, flags);
+    /* OpenWinSetVisParent */
+    vp = VisGetVisParent(oself, &flags);
+    if (vp)
+	@call vp::MSG_VIS_ADD_CHILD(oself, CCO_LAST);
+    /* GenFindMoniker of a moniker list: Port32 not yet */
+    ConvertSpecWinSizePairsToPixels(oself);
+    UpdateWinPosSize(oself);
+    ScanFocusTargetHintHandlers(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The position and size (WinPosSizeFlags)
+ * ------------------------------------------------------------------- */
+
+/* GetParentWinSize: the size of the parent window and the margins for
+ * a window extended near its corner; FALSE if there is none */
+static Boolean GetParentWinSize(optr o, sword *w, sword *h, byte *right,
+				byte *bottom)
+{
+    WinSizeInfoParams p;
+
+    if (!OpenGetParentWinSize(o, &p))
+	return FALSE;
+    *w = (sword) p.WSIP_windowWidth;
+    *h = (sword) p.WSIP_windowHeight;
+    if (*w <= 0 || *h <= 0)
+	return FALSE;
+    *right = p.WSIP_rightArea;
+    *bottom = p.WSIP_bottomArea;
+    return TRUE;
+}
+
+/* the task bar (Port32: none) */
+sword GetTaskBarPositionAdjustment(optr o)
+{
+    (void) o;
+    return 0;
+}
+
+sword GetTaskBarSizeAdjustment(optr o)
+{
+    (void) o;
+    return 0;
+}
+
+#define MAXIMUM_HEIGHT_OF_FLOATING_KEYBOARD	116
+
+/*
+ * UpdateWinPosition: the position as the flags want it (a window that
+ * moved and persists keeps its own): staggered in a slot of the field,
+ * right of the window before it (tiled), centered in the parent, at the
+ * mouse; or as it is.  The state with the slot, the position valid.
+ */
+static void UpdateWinPosition(optr o, WinPosSizeFlags f,
+			      WinPosSizeState *state)
+{
+    OLWinInstance *w;
+    byte type = (byte) (f & WPSF_POSITION_TYPE);
+    sword x = 0, y = 0;
+
+    if ((*state & WPSS_HAS_MOVED_OR_RESIZED) && (f & WPSF_PERSIST))
+	goto useCurrentBounds;
+    if (type == (WPT_AT_SPECIFIC_POSITION << 3))
+	goto useCurrentPosition;
+    if (type == (WPT_AT_RATIO << 3)) {
+useCurrentBounds:
+	if (*state & WPSS_SPEC_PAIRS)
+	    return;
+useCurrentPosition:
+	w = Win(o);
+	x = w->VI_bounds.R_left;
+	y = w->VI_bounds.R_top;
+    } else if (type == (WPT_STAGGER << 3)) {
+	GenReturnParams r;
+	byte req = (byte) (*state >> WPSS_STAGGERED_SLOT_OFFSET);
+
+	if (*state & WPSS_HAS_RESTARTED)
+	    req |= SSPR_REASSIGN_IF_CONFLICT;
+	memset(&r, 0, sizeof(r));
+	{
+	    optr p = VisFindParent(o);
+
+	    if (p)
+		(void) @call p::MSG_VIS_P32_VUP_QUERY(&r,
+					SVQT_REQUEST_STAGGER_SLOT, req, 0);
+	}
+	x = (sword) r.GRP_cx;
+	y = (sword) (r.GRP_dx + GetTaskBarPositionAdjustment(o));
+	*state |= (WinPosSizeState) ((r.GRP_bp & 0xff) <<
+				     WPSS_STAGGERED_SLOT_OFFSET);
+    } else if (type == (WPT_TILED << 3)) {
+	optr p;
+	word i;
+
+	if (*state & WPSS_SIZE_INVALID)
+	    return;
+	p = VisFindParent(o);
+	i = p ? @call p::MSG_VIS_FIND_CHILD(o) : (word) -1;
+	if (i != (word) -1 && i != 0) {
+	    optr prev = @call p::MSG_VIS_FIND_CHILD_AT_POSITION(i - 1);
+	    Rectangle b;
+
+	    if (prev) {
+		ObjLockObjBlock(OptrToHandle(prev));
+		VisGetBounds(prev, &b);
+		MemUnlock(OptrToHandle(prev));
+		x = (sword) (b.R_right + 1);
+		y = b.R_top;
+	    }
+	}
+    } else if (type == (WPT_CENTER << 3)) {
+	sword pw, ph;
+	byte r, b;
+	KeyboardOverride *k;
+
+	if (*state & WPSS_SIZE_INVALID)
+	    return;
+	if (!GetParentWinSize(o, &pw, &ph, &r, &b))
+	    return;
+	w = Win(o);
+	x = (sword) ((pw - (w->VI_bounds.R_right - w->VI_bounds.R_left)) >> 1);
+	y = (sword) ((ph - (w->VI_bounds.R_bottom - w->VI_bounds.R_top)) >> 1);
+	/* room for the floating keyboard */
+	if (CheckIfKeyboardRequired() &&
+	    (k = ObjVarFindData(o, ATTR_GEN_WINDOW_KBD_OVERRIDE)) != NULL &&
+	    *k != KO_NO_KEYBOARD) {
+	    y -= MAXIMUM_HEIGHT_OF_FLOATING_KEYBOARD / 2;
+	    if (y < 0)
+		y = 0;
+	}
+    } else if (type == (WPT_AS_REQUIRED << 3)) {
+	*state &= ~WPSS_POSITION_INVALID;
+	return;
+    } else {
+	/* WPT_AT_MOUSE_POSITION */
+	if (VisQueryParentWin(o))
+	    ImGetMousePos(&x, &y);
+    }
+    VisSetPosition(o, x, y);
+    VisMarkInvalid(o, VOF_WINDOW_INVALID, VUM_MANUAL);
+    *state &= ~WPSS_POSITION_INVALID;
+}
+
+/*
+ * UpdateWinSize: the size as the flags want it (a window that persists
+ * keeps its own): as desired (its initial size, chosen by the
+ * geometry), extended to (or near) the parent's bottom right corner; or
+ * as it is.  The size valid.
+ */
+static void UpdateWinSize(optr o, WinPosSizeFlags f, WinPosSizeState *state)
+{
+    OLWinInstance *w;
+    byte type = (byte) (f & WPSF_SIZE_TYPE);
+    sword cx, dx, pw, ph;
+    byte r, b;
+
+    if (((*state & WPSS_HAS_MOVED_OR_RESIZED) && (f & WPSF_PERSIST)) ||
+	type <= WST_AS_RATIO_OF_FIELD) {
+	if (*state & WPSS_SPEC_PAIRS)
+	    return;
+	w = Win(o);
+	cx = (sword) (w->VI_bounds.R_right - w->VI_bounds.R_left);
+	dx = (sword) (w->VI_bounds.R_bottom - w->VI_bounds.R_top);
+    } else if (type == WST_AS_DESIRED) {
+	@callsuper o::OLWinClass::MSG_VIS_RESET_TO_INITIAL_SIZE(VUM_MANUAL);
+	cx = dx = (sword) RSA_CHOOSE_OWN_SIZE;
+    } else {
+	if (*state & WPSS_POSITION_INVALID)
+	    return;
+	if (!GetParentWinSize(o, &pw, &ph, &r, &b))
+	    return;
+	cx = pw;
+	dx = ph;
+	if (type == WST_EXTEND_TO_BOTTOM_RIGHT) {
+	    dx -= GetTaskBarSizeAdjustment(o);
+	    cx++;
+	    dx++;
+	    if (OpenCheckIfBW()) {
+		cx++;
+		dx++;
+	    }
+	    r = b = 0;
+	} else {
+	    b = (byte) (b - GetTaskBarPositionAdjustment(o));
+	    cx++;
+	    if (OpenCheckIfBW())
+		cx++;
+	}
+	w = Win(o);
+	cx = (sword) (cx - w->VI_bounds.R_left - r);
+	dx = (sword) (dx - w->VI_bounds.R_top - b);
+    }
+    VisSetSize(o, cx, dx);
+    VisMarkFullyInvalid(o);
+    *state &= ~WPSS_SIZE_INVALID;
+}
+
+/*
+ * UpdateWinPosSize: the position and size that are invalid (the
+ * position also after a restart) worked out as the flags want them
+ */
+void UpdateWinPosSize(optr o)
+{
+    OLWinInstance *w = Win(o);
+    WinPosSizeFlags f = w->OLWI_winPosSizeFlags;
+    WinPosSizeState s = w->OLWI_winPosSizeState;
+
+    if (s & (WPSS_POSITION_INVALID | WPSS_HAS_RESTARTED))
+	UpdateWinPosition(o, f, &s);
+    if (s & WPSS_SIZE_INVALID)
+	UpdateWinSize(o, f, &s);
+    Win(o)->OLWI_winPosSizeState = (WinPosSizeState) (s & ~WPSS_HAS_RESTARTED);
+}
+
+/* OpenWinSwapState: the attributes, flags, state and bounds swapped with
+ * the ones before maximizing */
+void OpenWinSwapState(optr o)
+{
+    OLWinInstance *w = Win(o);
+    OLWinAttr a = w->OLWI_attrs;
+    WinPosSizeFlags f = w->OLWI_winPosSizeFlags;
+    WinPosSizeState s = w->OLWI_winPosSizeState;
+    Rectangle b = w->VI_bounds;
+
+    w->OLWI_attrs = w->OLWI_prevAttrs;
+    w->OLWI_winPosSizeFlags = w->OLWI_prevWinPosSizeFlags;
+    w->OLWI_winPosSizeState = w->OLWI_prevWinPosSizeState;
+    w->VI_bounds = w->OLWI_prevWinBounds;
+    w->OLWI_prevAttrs = a;
+    w->OLWI_prevWinPosSizeFlags = f;
+    w->OLWI_prevWinPosSizeState = s;
+    w->OLWI_prevWinBounds = b;
+}
+
+/*
+ * OpenWinGetVisParent: a win group's vis parent: a dialog's by its
+ * modality (SA_USES_DUAL_BUILD), else the one OLCtrl found
+ */
+@method OLWinClass, MSG_SPEC_GET_VIS_PARENT
+{
+    if (!(flags & SBF_WIN_GROUP))
+	return 0;
+    if (pself->VI_specAttrs & SA_USES_DUAL_BUILD)
+	return GetVisParentForDialog(oself);
+    return pself->OLCI_visParent;
+}
+
+/* GetVisParentForDialog: the vis parent for a popup or a system modal
+ * dialog */
+optr GetVisParentForDialog(optr o)
+{
+    optr vp = 0;
+    word type = (((GenInteractionInstance *) ObjDerefGen(o))->GII_attrs &
+		 GIA_SYS_MODAL) ? SQT_VIS_PARENT_FOR_SYS_MODAL
+				: SQT_VIS_PARENT_FOR_POPUP;
+
+    (void) GenCallParent(o, MSG_SPEC_GUP_QUERY_VIS_PARENT, &type,
+			 sizeof(type), &vp, sizeof(vp));
+    return vp;
+}
+
+/*
+ * ConvertSpecWinSizePairsToPixels: a position and size given as ratios
+ * (of the win group's size; of the parent window) in pixels; the
+ * window (and for a new size its geometry) invalid
+ */
+void ConvertSpecWinSizePairsToPixels(optr o)
+{
+    OLWinInstance *w = Win(o);
+    WinPosSizeState s = w->OLWI_winPosSizeState;
+    SpecWinSizeSpec cx, dx, ax, bx;
+    VisOptFlags inval;
+
+    if (!(s & WPSS_SPEC_PAIRS))
+	return;
+    cx = (SpecWinSizeSpec) w->VI_bounds.R_right;
+    dx = (SpecWinSizeSpec) w->VI_bounds.R_bottom;
+    if (!VisConvertRatioToCoords(o, &cx, &dx, FALSE))
+	return;
+    w = Win(o);
+    if (s & WPSS_VIS_POS_IS_SPEC_PAIR) {
+	ax = (SpecWinSizeSpec) w->VI_bounds.R_left;
+	bx = (SpecWinSizeSpec) w->VI_bounds.R_top;
+	if (!VisConvertRatioToCoords(o, &ax, &bx, FALSE))
+	    return;
+	bx = (SpecWinSizeSpec) (bx + GetTaskBarPositionAdjustment(o));
+	w = Win(o);
+	w->VI_bounds.R_left = (sword) (ax - 1);
+	w->VI_bounds.R_top = (sword) (bx - 1);
+    }
+    w->VI_bounds.R_right = (sword) (w->VI_bounds.R_left + (sword) cx);
+    w->VI_bounds.R_bottom = (sword) (w->VI_bounds.R_top + (sword) dx);
+    w->OLWI_winPosSizeState &= ~WPSS_SPEC_PAIRS;
+    inval = VOF_WINDOW_INVALID;
+    if (s & (WPSS_VIS_SIZE_IS_SPEC_PAIR_PARENT |
+	     WPSS_VIS_SIZE_IS_SPEC_PAIR_FIELD))
+	inval |= VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID;
+    VisMarkInvalid(o, inval, VUM_MANUAL);
+}
+
+/* OLWinGetOrCreateTitleGroup: the title bar group of the type (0 left,
+ * 4 right, the asm's offsets); Port32: none is created yet */
+@method OLWinClass, MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP
+{
+    return titleGroupType ? pself->OLWI_titleBarRightGroup
+			  : pself->OLWI_titleBarLeftGroup;
+}

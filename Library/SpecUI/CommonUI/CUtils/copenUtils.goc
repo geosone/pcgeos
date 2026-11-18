@@ -340,3 +340,191 @@ SizeAsDWord SpecGetGenMonikerSize(optr obj, GStateHandle gs)
     return MAKE_SIZE_DWORD(DWORD_WIDTH(s) + addOnMnemonicWidth,
 			   DWORD_HEIGHT(s));
 }
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+/* CheckIfKeyboardRequired (cmainUtils.asm): no keyboard, or the
+ * floating keyboard wanted ([input] floatingKbd) */
+Boolean CheckIfKeyboardRequired(void)
+{
+    return (FlowGetUIButtonFlags() & UIBF_NO_KEYBOARD) || kbdRequired;
+}
+
+/* OpenCheckIfKeyboardOnly: no mouse */
+Boolean OpenCheckIfKeyboardOnly(void)
+{
+    return (FlowGetUIButtonFlags() & UIBF_KEYBOARD_ONLY) != 0;
+}
+
+/* ---------------------------------------------------------------------
+ * The default focus and target
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    Boolean	focus;
+    Boolean	target;
+} FocusTargetHints;
+
+static void FocusTargetHint(MemHandle mh, ChunkHandle chnk,
+			    VarDataEntry *extra, word dataType,
+			    void *handlerData)
+{
+    FocusTargetHints *h = handlerData;
+
+    (void) mh; (void) chnk; (void) extra;
+    if (dataType == HINT_DEFAULT_FOCUS)
+	h->focus = TRUE;
+    else
+	h->target = TRUE;
+}
+
+static VarDataCHandler focusTargetHints[] = {
+    { HINT_DEFAULT_FOCUS, FocusTargetHint },
+    { HINT_DEFAULT_TARGET, FocusTargetHint },
+};
+
+static Boolean FullyEnabled(optr obj)
+{
+    return (((VisInstance *) ObjDerefVis(obj))->VI_attrs &
+	    VA_FULLY_ENABLED) != 0;
+}
+
+/*
+ * ScanFocusTargetHintHandlers: HINT_DEFAULT_TARGET and then
+ * HINT_DEFAULT_FOCUS grab the target and focus if the object is fully
+ * enabled; TRUE if it has the focus hint (ScanTargetHintHandler: only
+ * the target grabbed)
+ */
+static Boolean ScanFocusTargetHints(optr obj, FocusTargetHints *h)
+{
+    h->focus = h->target = FALSE;
+    ObjVarScanData(obj, sizeof(focusTargetHints) / sizeof(focusTargetHints[0]),
+		   focusTargetHints, h);
+    if (h->target && FullyEnabled(obj))
+	@call obj::MSG_META_GRAB_TARGET_EXCL();
+    return h->focus;
+}
+
+Boolean ScanTargetHintHandler(optr obj)
+{
+    FocusTargetHints h;
+
+    return ScanFocusTargetHints(obj, &h);
+}
+
+Boolean ScanFocusTargetHintHandlers(optr obj)
+{
+    FocusTargetHints h;
+
+    if (ScanFocusTargetHints(obj, &h) && FullyEnabled(obj))
+	@call obj::MSG_META_GRAB_FOCUS_EXCL();
+    return h.focus;
+}
+
+/* ---------------------------------------------------------------------
+ * The parent window
+ * ------------------------------------------------------------------- */
+
+/* OpenGetParentWinSize: the size of the parent window (its info, with
+ * the margins for windows extended near its corner); FALSE if it has
+ * none */
+Boolean OpenGetParentWinSize(optr obj, WinSizeInfoParams *p)
+{
+    optr parent = VisFindParent(obj);
+
+    memset(p, 0, sizeof(*p));
+    if (parent)
+	@call parent::MSG_SPEC_VUP_GET_WIN_SIZE_INFO(p);
+    return p->WSIP_windowWidth && p->WSIP_windowHeight;
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/*
+ * OpenDrawRect (SetupDraw, DrawFrame): a frame in the rectangle (the
+ * bounds of a fill), the top left in the low color, the bottom right
+ * in the high one (the white one leaves the corners); a disabled object
+ * clears it first and draws it 50%
+ */
+void OpenDrawRect(optr obj, GStateHandle gs, sword left, sword top,
+		  sword right, sword bottom, word colors)
+{
+    Color br = (Color) (colors >> 8);
+
+    if (!FullyEnabled(obj)) {
+	GrSetLineColor(gs, CF_INDEX, moCS_dsLightColor, 0, 0);
+	GrSetLineMaskSys(gs, SDM_50 | SDM_INVERSE);
+	GrDrawRect(gs, left, top, (sword) (right - 1), (sword) (bottom - 1));
+	GrSetLineMaskSys(gs, SDM_50);
+    }
+    GrSetLineColor(gs, CF_INDEX, (byte) colors, 0, 0);
+    right--;
+    bottom--;
+    GrDrawVLine(gs, left, top, bottom);
+    GrDrawHLine(gs, left, top, right);
+    GrSetLineColor(gs, CF_INDEX, br, 0, 0);
+    if (br == C_WHITE) {
+	top++;
+	left++;
+    }
+    GrDrawVLine(gs, right, top, bottom);
+    GrDrawHLine(gs, left, bottom, right);
+    GrSetLineMaskSys(gs, SDM_100);
+}
+
+#define GRADIENT_STEP_SIZE	4
+
+/* CalcStep: a color component from start to end over the width, per
+ * step (8.8 fixed, as the asm rounds it) */
+static sdword CalcStep(byte start, byte end, sword width)
+{
+    sdword diff = (sdword) end - start;
+    WWFixedAsDWord q;
+
+    if (!diff || !width)
+	return 0;
+    q = GrSDivWWFixed((WWFixedAsDWord) (diff << 16),
+		      (WWFixedAsDWord) ((sdword) width << 16));
+    q = (WWFixedAsDWord) ((sdword) q * GRADIENT_STEP_SIZE);
+    return ((sdword) q + 0x80) >> 8;
+}
+
+/*
+ * DrawGradient: the rectangle filled from the start color (left) to
+ * the end color (right), in steps of GRADIENT_STEP_SIZE
+ */
+void DrawGradient(GStateHandle gs, const Rectangle *r, Color start,
+		  Color end)
+{
+    RGBColorAsDWord s = GrMapColorIndex(gs, start);
+    RGBColorAsDWord e = GrMapColorIndex(gs, end);
+    sword w = (sword) (r->R_right - r->R_left);
+    sdword cur[3], step[3];
+    sword x;
+    int i;
+
+    for (i = 0; i < 3; i++) {
+	byte sc = (byte) (s >> (8 * i)), ec = (byte) (e >> (8 * i));
+
+	cur[i] = (sdword) sc << 8;
+	step[i] = CalcStep(sc, ec, w);
+    }
+    /* the last piece in the color before it, as the asm */
+    for (x = r->R_left; ; ) {
+	GrSetAreaColor(gs, CF_RGB, (word) ((cur[0] >> 8) & 0xff),
+		       (word) ((cur[1] >> 8) & 0xff),
+		       (word) ((cur[2] >> 8) & 0xff));
+	GrFillRect(gs, x, r->R_top, (sword) (x + GRADIENT_STEP_SIZE + 1),
+		   r->R_bottom);
+	x += GRADIENT_STEP_SIZE;
+	for (i = 0; i < 3; i++)
+	    cur[i] += step[i];
+	if (x + GRADIENT_STEP_SIZE >= r->R_right)
+	    break;
+    }
+    GrFillRect(gs, x, r->R_top, r->R_right, r->R_bottom);
+}

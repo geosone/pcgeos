@@ -1,0 +1,379 @@
+/*
+ * cwinGeometry.goc -- OLWinClass (after cwinGeometry.asm): the geometry
+ * of a window: its child spacing, its margins (the resize border, the
+ * header, the line border), its minimum size (the title bar's pieces
+ * and its moniker), the geometry update that keeps it in its parent,
+ * the reset to its initial size, the display size recalculated, the
+ * window moved to stay on screen; the resize border and squished
+ * screens.
+ *
+ * Port32: the task bar (taskBarPrefs) is not ported: a window is not
+ * moved for it; dialogs and menued windows (OLDialogWinClass,
+ * OLMenuedWinClass) do not exist yet, every window takes the custom
+ * spacing hints.
+ */
+@include "cGeode.goh"
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/* ---------------------------------------------------------------------
+ * Spacing and margins
+ * ------------------------------------------------------------------- */
+
+/* OpenWinGetSpacing: no spacing between the children, wrapped ones
+ * apart (a toolbox: the toolbox spacing); on CGA the other one 1 (or
+ * -1 for none) */
+static SpacingAsDWord WinSpacing(optr o)
+{
+    OLWinInstance *w = Win(o);
+    word sp = MO_BASE_WIN_CHILD_SPACING, wrap = MO_WIN_CHILD_WRAP_SPACING;
+    Boolean vert;
+
+    if (w->OLCI_buildFlags & OLBF_TOOLBOX)
+	sp = TOOLBOX_SPACING;
+    /* not for dialogs and menued windows (Port32: none yet) */
+    OpenCtrlCheckCustomSpacing(o, &sp, &wrap);
+    vert = (Win(o)->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+    if (OpenCheckIfCGA()) {
+	word *d = vert ? &sp : &wrap;
+
+	*d = *d ? 1 : (word) -1;
+    }
+    return MAKE_SPACING_DWORD(sp, wrap);
+}
+
+@extern method OLWinClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    return WinSpacing(oself);
+}
+
+/*
+ * OpenWinGetMargins: 1 all around (none on CGA, none for a custom
+ * command window), the resize bars (not while maximized), the header
+ * (as high as the font and its spacing, one less in color, less when
+ * squished), the line border on black and white, the shadow on black
+ * and white (not a custom window)
+ */
+static void WinMargins(optr o, Rectangle *m)
+{
+    OLWinInstance *w = Win(o);
+    OLWinAttr a = w->OLWI_attrs;
+    sword top, bottom, left, right;
+
+    top = bottom = left = right = 1;
+    if (OpenCheckIfCGA())
+	top = bottom = left = right = 0;
+    if (w->OLWI_type == MOWT_COMMAND_WINDOW &&
+	(w->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW))
+	top = bottom = left = right = 0;
+    if (OpenWinHasResizeBorder(o) &&
+	!((a & OWA_MAXIMIZABLE) && (w->OLWI_specState & OLWSS_MAXIMIZED))) {
+	top = (sword) (top + (byte) resizeBarHeight);
+	bottom = (sword) (bottom + (byte) resizeBarHeight);
+	left = (sword) (left + (byte) resizeBarWidth);
+	right = (sword) (right + (byte) resizeBarWidth);
+    }
+    if (!OpenWinCheckMenusInHeader(o) && (a & OWA_TITLED)) {
+	top += CUAS_WIN_HEADER_Y_SPACING - 1;
+	if (!(Win(o)->OLWI_moreFixedAttr & OMWFA_MINIMIZE_TITLE_BAR))
+	    top = (sword) (top + specDisplayScheme.DS_pointSize);
+	if (!OpenCheckIfBW())
+	    top--;
+	if (OpenWinCheckIfSquished())
+	    top -= CUAS_WIN_HEADER_Y_SPACING - CUAS_CGA_WIN_HEADER_Y_SPACING;
+    }
+    if (OpenCheckIfBW() && (a & OWA_KIDS_INSIDE_BORDER)) {
+	top += CUAS_WIN_LINE_BORDER_SIZE;
+	bottom += CUAS_WIN_LINE_BORDER_SIZE;
+	left += CUAS_WIN_LINE_BORDER_SIZE;
+	right += CUAS_WIN_LINE_BORDER_SIZE;
+    }
+    /* each margin a signed byte, as the asm returns them */
+    m->R_left = (sbyte) left;
+    m->R_top = (sbyte) top;
+    m->R_right = (sbyte) right;
+    m->R_bottom = (sbyte) bottom;
+    if (!(Win(o)->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW) &&
+	OpenCheckIfBW()) {
+	m->R_right++;
+	m->R_bottom++;
+    }
+}
+
+@extern method OLWinClass, MSG_VIS_COMP_GET_MARGINS
+{
+    WinMargins(oself, retValue);
+}
+
+/* WinPassMarginInfo */
+static VisCompSpacingMarginsInfo WinPassMarginInfo(optr o)
+{
+    SpacingAsDWord s = WinSpacing(o);
+    Rectangle m;
+
+    WinMargins(o, &m);
+    return OpenPassMarginInfo(o, &m, DWORD_CHILD_SPACING(s),
+			      DWORD_WRAP_SPACING(s));
+}
+
+@extern method OLWinClass, MSG_VIS_RECALC_SIZE
+{
+    return OpenRecalcCtrlSize(oself, width, height, WinPassMarginInfo(oself));
+}
+
+@extern method OLWinClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
+		    WinPassMarginInfo(oself));
+}
+
+/* ---------------------------------------------------------------------
+ * The minimum size
+ * ------------------------------------------------------------------- */
+
+/* OpenWinCalcMinWidth: the line borders, the resize bars, the system
+ * menu button with the close, maximize and minimize icons, the title
+ * bar groups */
+static word CalcMinWidth(optr o)
+{
+    OLWinInstance *w;
+    word cx = CUAS_WIN_LINE_BORDER_SIZE * 2;
+
+    if (OpenWinHasResizeBorder(o))
+	cx = (word) (cx + resizeBarWidth * 2);
+    w = Win(o);
+    if (w->OLWI_attrs & OWA_HAS_SYS_MENU) {
+	cx = (word) (cx + OpenWinGetSysMenuButtonWidth(o));
+	w = Win(o);
+	if (w->OLWI_attrs & OWA_CLOSABLE)
+	    cx += CUAS_WIN_ICON_WIDTH;
+	if (w->OLWI_attrs & OWA_MAXIMIZABLE)
+	    cx += CUAS_WIN_ICON_WIDTH;
+	if (w->OLWI_attrs & OWA_MINIMIZABLE)
+	    cx += CUAS_WIN_ICON_WIDTH;
+    }
+    cx = (word) (cx + OpenWinGetTitleBarGroupSize(o, FALSE));
+    cx = (word) (cx + OpenWinGetTitleBarGroupSize(o, TRUE));
+    return cx;
+}
+
+/*
+ * OpenWinGetMinSize: the composite's, at least the title bar's pieces
+ * (and the moniker with its margins, unless it is resizable, maximized
+ * or an unpinned menu), at least ABSOLUTE_WIN_MIN_SIZE
+ */
+@extern method OLWinClass, MSG_VIS_COMP_GET_MINIMUM_SIZE
+{
+    SizeAsDWord s = @callsuper();
+    word w = DWORD_WIDTH(s), h = DWORD_HEIGHT(s), cx;
+    OLWinInstance *wi;
+
+    cx = CalcMinWidth(oself);
+    wi = Win(oself);
+    if (!(wi->OLWI_attrs & OWA_RESIZABLE) &&
+	!(wi->OLWI_specState & OLWSS_MAXIMIZED) &&
+	(!(wi->OLWI_fixedAttr & OWFA_IS_MENU) ||
+	 (wi->OLWI_specState & OLWSS_PINNED))) {
+	GStateHandle gs = ViewCreateCalcGState();
+
+	cx = (word) (cx + DWORD_WIDTH(OpenWinGetMonikerSize(oself, gs)) +
+		     CUAS_TITLE_TEXT_MARGIN * 2);
+	GrDestroyState(gs);
+    }
+    if (w > cx)
+	cx = w;
+    if (cx < ABSOLUTE_WIN_MIN_SIZE)
+	cx = ABSOLUTE_WIN_MIN_SIZE;
+    if (h < ABSOLUTE_WIN_MIN_SIZE)
+	h = ABSOLUTE_WIN_MIN_SIZE;
+    return MAKE_SIZE_DWORD(cx, h);
+}
+
+/* ---------------------------------------------------------------------
+ * Updating the geometry
+ * ------------------------------------------------------------------- */
+
+/*
+ * MoveWindowToKeepOnscreen: the window moved left and up to end within
+ * the width and height given, but not off the top left; TRUE if moved
+ */
+Boolean MoveWindowToKeepOnscreen(optr o, sword width, sword height)
+{
+    OLWinInstance *w = Win(o);
+    sword x = w->VI_bounds.R_left, y = w->VI_bounds.R_top;
+    Boolean moved = FALSE;
+
+    /* unsigned, as the asm compares */
+    if ((word) width < (word) w->VI_bounds.R_right) {
+	x = (sword) (x + width - w->VI_bounds.R_right);
+	moved = TRUE;
+    }
+    if ((word) height < (word) w->VI_bounds.R_bottom) {
+	y = (sword) (y + height - w->VI_bounds.R_bottom);
+	moved = TRUE;
+    }
+    if (x < 0) {
+	x = 0;
+	moved = TRUE;
+    }
+    if (y < 0) {
+	y = 0;
+	moved = TRUE;
+    }
+    VisSetPosition(o, x, y);
+    return moved;
+}
+
+/*
+ * OpenWinRefitToParent: a window larger than its parent shrinks to it
+ * (a popup list turns vertical, others shrink to stay on screen) and
+ * its geometry is done again; then it moves to stay on screen
+ */
+static void RefitToParent(optr o, sword pw, sword ph)
+{
+    SizeAsDWord s = VisGetSize(o);
+    sword cx = (sword) DWORD_WIDTH(s), dx = (sword) DWORD_HEIGHT(s);
+    Boolean resized = FALSE;
+
+    if ((word) cx > (word) pw) {
+	cx = pw;
+	resized = TRUE;
+    }
+    if ((word) dx > (word) ph) {
+	dx = ph;
+	resized = TRUE;
+    }
+    if (resized) {
+	OLWinInstance *w;
+
+	VisSetSize(o, cx, dx);
+	w = Win(o);
+	if ((w->OLCI_buildFlags & OLBF_TARGET) ==
+	    (OLBT_IS_POPUP_LIST << OLBF_TARGET_OFFSET) &&
+	    !(w->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY)) {
+	    struct { GeoAndDimensionAttrs set, clear; } p;
+
+	    w->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
+	    memset(&p, 0, sizeof(p));
+	    p.set.GADA_geoAttrs = VCGA_ORIENT_CHILDREN_VERTICALLY;
+	    VisSendToChildren(o, MSG_VIS_COMP_SET_GEO_ATTRS, &p, sizeof(p));
+	    @call o::MSG_VIS_RESET_TO_INITIAL_SIZE(VUM_MANUAL);
+	} else
+	    @call o::MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN(VUM_MANUAL);
+	@callsuper o::OLWinClass::MSG_VIS_UPDATE_GEOMETRY();
+    }
+    (void) MoveWindowToKeepOnscreen(o, pw, ph);
+    if (resized)
+	OpenWinCalcWinHdrGeometry(o);
+}
+
+/*
+ * OpenWinUpdateGeometry: the composite's update; the title bar again if
+ * the geometry was invalid or the width changed; a window that shrinks
+ * to fit refits its parent
+ */
+@extern method OLWinClass, MSG_VIS_UPDATE_GEOMETRY
+{
+    Boolean invalid = (pself->VI_optFlags & VOF_GEOMETRY_INVALID) != 0;
+    sword oldW = (sword) (pself->VI_bounds.R_right - pself->VI_bounds.R_left);
+    WinSizeInfoParams p;
+    OLWinInstance *w;
+
+    @callsuper();
+    (void) OpenGetParentWinSize(oself, &p);
+    p.WSIP_windowHeight -= GetTaskBarSizeAdjustment(oself);
+    w = Win(oself);
+    if (invalid || w->VI_bounds.R_left + oldW != w->VI_bounds.R_right)
+	OpenWinCalcWinHdrGeometry(oself);
+    if (Win(oself)->OLWI_winPosSizeFlags &
+	WPSF_SHRINK_DESIRED_SIZE_TO_FIT_IN_PARENT)
+	RefitToParent(oself, (sword) p.WSIP_windowWidth,
+		      (sword) p.WSIP_windowHeight);
+}
+
+/* OLWinGetChildsTreePos: in a window that is not a menu, if the child
+ * is the first (Port32: of the visual children) */
+@extern method OLWinClass, MSG_OL_GET_CHILDS_TREE_POS
+{
+    if (pself->OLWI_fixedAttr & OWFA_IS_MENU)
+	return FALSE;
+    *first = pself->VCI_comp.CP_firstChild == child;
+    return TRUE;
+}
+
+/* OLWinResetToInitialSize: the position and size to be worked out
+ * again (the size chosen anew unless maximized) */
+@extern method OLWinClass, MSG_VIS_RESET_TO_INITIAL_SIZE
+{
+    pself->OLWI_winPosSizeState |= WPSS_POSITION_INVALID | WPSS_SIZE_INVALID;
+    if (!((pself->OLWI_attrs & OWA_MAXIMIZABLE) &&
+	  (pself->OLWI_specState & OLWSS_MAXIMIZED)))
+	VisSetSize(oself, (sword) RSA_CHOOSE_OWN_SIZE,
+		   (sword) RSA_CHOOSE_OWN_SIZE);
+    UpdateWinPosSize(oself);
+    @callsuper();
+}
+
+/*
+ * OLWinRecalcDisplaySize: a maximizable window's geometry at the size
+ * passed, worked out now (attached, not left visible if it was not);
+ * the size it gets
+ */
+@extern method OLWinClass, MSG_OL_WIN_RECALC_DISPLAY_SIZE
+{
+    OLWinInstance *w;
+    Boolean visible, updating;
+
+    if (!(pself->OLWI_attrs & OWA_MAXIMIZABLE))
+	return TRUE;
+    visible = (pself->VI_attrs & VA_VISIBLE) != 0;
+    @call oself::MSG_SPEC_SET_ATTRS(SA_ATTACHED, 0, VUM_MANUAL);
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, VUM_DELAYED_VIA_UI_QUEUE);
+    VisSetSize(oself, (sword) width, (sword) height);
+    w = Win(oself);
+    updating = (w->VI_optFlags & VOF_EC_UPDATING) != 0;
+    w->VI_optFlags |= VOF_EC_UPDATING;
+    @call oself::MSG_VIS_UPDATE_GEOMETRY();
+    if (size)
+	*size = VisGetSize(oself);
+    w = Win(oself);
+    if (!updating)
+	w->VI_optFlags &= ~VOF_EC_UPDATING;
+    if (!visible)
+	w->VI_attrs &= ~VA_VISIBLE;
+    return TRUE;
+}
+
+@extern method OLWinClass, MSG_OL_WIN_IS_MAXIMIZED
+{
+    return (pself->OLWI_specState & OLWSS_MAXIMIZED) != 0;
+}
+
+@extern method OLWinClass, MSG_OL_WIN_IS_DEFAULT_ACTION_NAVIGATE_TO_NEXT_FIELD
+{
+    return (pself->OLWI_moreFixedAttr &
+	    OWMFA_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD) != 0;
+}
+
+/* ---------------------------------------------------------------------
+ * The resize border, squished screens
+ * ------------------------------------------------------------------- */
+
+Boolean OpenWinCheckIfSquished(void)
+{
+    return (moCS.CSV_flags & CSF_VERY_SQUISHED) != 0;
+}
+
+/* OpenWinHasResizeBorder: not a pinned menu; on CGA or a narrow screen
+ * if resizable, else if titled */
+Boolean OpenWinHasResizeBorder(optr o)
+{
+    OLWinInstance *w = Win(o);
+    OLWinAttr a = w->OLWI_attrs;
+
+    if (w->OLWI_specState & OLWSS_PINNED)
+	return FALSE;
+    if (OpenCheckIfCGA() || OpenCheckIfNarrow())
+	return (a & OWA_RESIZABLE) != 0;
+    return (a & OWA_TITLED) != 0;
+}
