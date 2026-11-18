@@ -48,8 +48,29 @@ word FlowCheckKbdShortcut(KeyboardShortcut *shortcutTable,
     DriverInfoStruct *dis = drv ? GeodeInfoDriver(drv) : NULL;
     DriverRegs r;
 
-    if (!dis || !dis->DIS_strategy)
+    if (!dis || !dis->DIS_strategy) {
+	/* no keyboard driver (a test): the plain match by character set,
+	 * character and the modifiers held (Shift only for the control
+	 * set: a printable character took it already); KS_PHYSICAL
+	 * entries never match */
+	word shift = flags >> 8, want, i;
+
+	if ((character >> 8) == CS_UI_FUNCS)
+	    return (word) -1;
+	want = (word) ((((character >> 8) & 0x0f) << 8) | (character & 0xff));
+	if (shift & (SS_LCTRL | SS_RCTRL))
+	    want |= KS_CTRL;
+	if (shift & (SS_LALT | SS_RALT))
+	    want |= KS_ALT;
+	if ((shift & (SS_LSHIFT | SS_RSHIFT)) &&
+	    (character >> 8) == CS_CONTROL)
+	    want |= KS_SHIFT;
+	(void) state;
+	for (i = 0; i < numEntriesInTable; i++)
+	    if (shortcutTable[i] == want)
+		return (word) (i * sizeof(KeyboardShortcut));
 	return (word) -1;
+    }
     memset(&r, 0, sizeof(r));
     r.DR_ax = numEntriesInTable;
     r.DR_cx = character;

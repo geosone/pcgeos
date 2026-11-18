@@ -344,6 +344,13 @@ static Boolean DrawCallback(optr parent, optr child, void *data)
  * Mouse and ink
  * ------------------------------------------------------------------- */
 
+/* VisCompNavigate: a composite, not focusable itself */
+@method VisCompClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags,
+			     NCF_IS_COMPOSITE, 0);
+}
+
 /* VisCallChildUnderPoint for the mouse messages */
 @method VisCompClass, MSG_META_PTR, MSG_META_START_SELECT,
 		      MSG_META_END_SELECT, MSG_META_DRAG_SELECT,

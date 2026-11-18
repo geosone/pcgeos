@@ -81,6 +81,7 @@ export VisApplySizeHints
 export VisSpecBuildSetEnabledState
 export VisGetVisParent
 export VisAddChildRelativeToGen
+export VisNavigateCommon
 export VisConvertRatioToCoords
 export VisRecalcSizeAndInvalIfNeeded
 export VisSendPositionAndInvalIfNeeded

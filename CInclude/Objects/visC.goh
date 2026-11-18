@@ -981,6 +981,16 @@ extern void VisGrabKbd(optr obj);
 extern void VisForceGrabKbd(optr obj);
 extern void VisReleaseKbd(optr obj);
 extern void VisTakeGadgetExclAndGrab(optr obj);
+/* navigation (VisNavigateCommon): the answer of obj to
+ * MSG_SPEC_NAVIGATION_QUERY from origin with its NavigateCommonFlags
+ * (NCF_IS_ROOT_NODE: the root of the tree) and the chunk of its generic
+ * part (0: none); TRUE if found, the object in NQP_nextObject, else the
+ * next object to query there (0: none) */
+#define NCF_IS_ROOT_NODE	0x10
+extern Boolean VisNavigateCommon(optr obj, NavigationQueryParams *ret,
+				 optr origin, NavigationFlags navFlags,
+				 NavigateCommonFlags ncFlags,
+				 ChunkHandle genPart);
 /* monikers: a chunk in the object's block */
 typedef struct {
     word		DMA_xInset;

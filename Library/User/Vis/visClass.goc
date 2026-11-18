@@ -1343,6 +1343,59 @@ out:
  * The specific part of a generic object (visSpec.asm)
  * ------------------------------------------------------------------- */
 
+/*
+ * VisSpecNavigate: the navigation query from here: each object queried
+ * names the next, until one answers (backtracking: the last focusable
+ * object before it); the answer told it is
+ */
+@method VisClass, MSG_SPEC_NAVIGATE
+{
+    NavigationQueryParams q;
+    NavigationFlags nf = navigateFlags;
+    optr cur = oself, last = 0, found;
+
+    for (;;) {
+	memset(&q, 0, sizeof(q));
+	if (@call cur::MSG_SPEC_NAVIGATION_QUERY(&q, oself, nf)) {
+	    nf = q.NQP_navFlags;
+	    found = (nf & NF_BACKTRACK_AFTER_TRAVELING) ? last
+							: q.NQP_nextObject;
+	    if (found)
+		@call found::MSG_SPEC_NOTIFY_NAVIGATION_COMPLETE(nf);
+	    return found;
+	}
+	nf = q.NQP_navFlags;
+	if (!q.NQP_nextObject)
+	    return 0;
+	if (q.NQP_backtrackFlag)
+	    last = cur;
+	cur = q.NQP_nextObject;
+    }
+}
+
+/* VisSpecNavigationQuery: a leaf, not focusable */
+@method VisClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, 0, 0);
+}
+
+/* VisNavigateCommon as a message: the answer in the parameters (the
+ * object found or next in NCP_object) */
+@method VisClass, MSG_SPEC_NAVIGATE_COMMON
+{
+    NavigationQueryParams q;
+    Boolean r;
+
+    r = VisNavigateCommon(oself, &q, navCommonParams->NCP_object,
+			  navCommonParams->NCP_navFlags,
+			  navCommonParams->NCP_navCommonFlags,
+			  navCommonParams->NCP_genPart);
+    navCommonParams->NCP_object = q.NQP_nextObject;
+    navCommonParams->NCP_navFlags = q.NQP_navFlags;
+    navCommonParams->NCP_backtrackFlag = q.NQP_backtrackFlag;
+    return r;
+}
+
 /* the defaults: up the visual tree (or the generic one) */
 @method VisClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD,
 		  MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD,

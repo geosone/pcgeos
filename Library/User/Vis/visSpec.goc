@@ -9,8 +9,12 @@
  * The routines take the generic object's optr; its block must be run by
  * the calling thread (Port32/ABI.md section 13x).
  *
- * Port32, not yet: VMDT_TOKEN monikers (the token database), navigation
- * and mnemonics.
+ * Navigation (VisNavigateCommon): the answer of an object to the
+ * navigation query that travels the visual tree to the next object to
+ * get the focus.
+ *
+ * Port32, not yet: VMDT_TOKEN monikers (the token database), mnemonics,
+ * HINT_NAVIGATION_NEXT_ID (the query goes to the visual sibling).
  */
 @include "uiInt.goh"
 @include <Objects/gFieldC.goh>
@@ -849,4 +853,108 @@ Boolean VisConvertRatioToCoords(optr obj, SpecWinSizeSpec *x,
     *x = RatioToCoord(*x, DWORD_WIDTH(s));
     *y = RatioToCoord(*y, DWORD_HEIGHT(s));
     return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * Navigation (visSpecUtils.asm)
+ * ------------------------------------------------------------------- */
+
+/* VisTestNode: focusable, and menu related as the query is */
+static Boolean TestNode(NavigateCommonFlags ncf, NavigationFlags nf)
+{
+    return (ncf & NCF_IS_FOCUSABLE) &&
+	   !(((byte) nf ^ ncf) & NCF_IS_MENU_RELATED);
+}
+
+static optr FirstChild(optr obj)
+{
+    optr c = ((VisCompInstance *) VisLock(obj))->VCI_comp.CP_firstChild;
+
+    VisUnlock(obj);
+    return c;
+}
+
+/*
+ * VisNavigateCommon: the query's step at obj.  Back at the origin (on
+ * the second pass, or after the root) the circuit is complete (the
+ * origin found if focusable).  A leaf that may have the focus is found
+ * (unless skipped, or the query travels the circuit); a composite sends
+ * the query to its first child unless it is focusable itself (and not
+ * skipped); else the next node: the root's first child (the root is
+ * reached), the visual sibling, or the parent (to be skipped).  The
+ * backtrack flag tells the object was focusable (for backtracking: the
+ * previous field is the last focusable one before the origin).
+ */
+Boolean VisNavigateCommon(optr obj, NavigationQueryParams *ret, optr origin,
+			  NavigationFlags nf, NavigateCommonFlags ncf,
+			  ChunkHandle genPart)
+{
+    byte back = 0;
+    optr next = origin;
+    Boolean found = FALSE;
+    const NavigationFlags clr = NF_INITIATE_QUERY | NF_SKIP_NODE;
+
+    (void) genPart;
+    if ((nf & NF_BACKTRACK_AFTER_TRAVELING) &&
+	((nf & NF_INITIATE_QUERY) || !(nf & NF_SKIP_NODE)) &&
+	TestNode(ncf, nf))
+	back = 0xff;
+    if (((nf & NF_REACHED_ROOT) || !(nf & clr)) && origin == obj) {
+	if (!(ncf & NCF_IS_FOCUSABLE))
+	    next = 0;
+	nf |= NF_COMPLETED_CIRCUIT;
+	found = TRUE;
+	goto done;
+    }
+    if (!(ncf & NCF_IS_COMPOSITE)) {
+	if (!TestNode(ncf, nf) || (nf & NF_SKIP_NODE))
+	    goto forward;
+	goto takeFocusIfNeeded;
+    }
+    if (TestNode(ncf, nf)) {
+	if (!(nf & NF_SKIP_NODE))
+	    goto takeFocusIfNeeded;
+	if (!(nf & NF_INITIATE_QUERY))
+	    goto forward;
+    } else if (nf & NF_SKIP_NODE)
+	goto forward;
+sendToFirstChild:
+    next = FirstChild(obj);
+    if (next) {
+	nf &= ~clr;
+	goto done;
+    }
+    if (!(ncf & NCF_IS_FOCUSABLE) || (nf & clr))
+	goto forward;
+    if (!(nf & NF_TRAVEL_CIRCUIT))
+	goto returnOD;
+    goto forward;
+takeFocusIfNeeded:
+    if (!(nf & NF_TRAVEL_CIRCUIT))
+	goto returnOD;
+    if (ncf & NCF_IS_COMPOSITE)
+	goto sendToFirstChild;
+forward:
+    nf &= ~clr;
+    if (ncf & NCF_IS_ROOT_NODE) {
+	nf |= NF_REACHED_ROOT;
+	next = FirstChild(obj);
+	goto done;
+    }
+    next = VisLock(obj)->VI_link.LP_next;
+    VisUnlock(obj);
+    if (next & LP_IS_PARENT) {
+	next &= ~(optr) LP_IS_PARENT;
+	nf |= NF_SKIP_NODE;
+    }
+    goto done;
+returnOD:
+    next = obj;
+    found = TRUE;
+done:
+    ret->NQP_nextObject = next;
+    ret->NQP_navFlags = nf;
+    ret->NQP_backtrackFlag = back;
+    ret->NQP_unused = 0;
+    return found;
 }
