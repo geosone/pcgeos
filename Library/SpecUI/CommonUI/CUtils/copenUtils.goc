@@ -358,6 +358,129 @@ Boolean OpenCheckIfKeyboardOnly(void)
     return (FlowGetUIButtonFlags() & UIBF_KEYBOARD_ONLY) != 0;
 }
 
+/* OpenCheckIfKeyboard: the user may navigate with the keyboard (no
+ * mouse, or a keyboard) */
+Boolean OpenCheckIfKeyboard(void)
+{
+    UIButtonFlags f = FlowGetUIButtonFlags();
+
+    return (f & UIBF_KEYBOARD_ONLY) || !(f & UIBF_NO_KEYBOARD);
+}
+
+/* OpenCheckIfKeyboardNavigation: [motif options] kbdNavigation */
+Boolean OpenCheckIfKeyboardNavigation(void)
+{
+    return (olWindowOptions & UIWO_KBD_NAVIGATION) != 0;
+}
+
+/* OpenDoClickSound: the key click, if wanted (Port32: no
+ * UserStandardSound yet, the sound library is not ported) */
+void OpenDoClickSound(void)
+{
+    if (specDoClickSound)
+	return;		/* UserStandardSound(SST_KEY_CLICK) */
+}
+
+/* ---------------------------------------------------------------------
+ * The window of an object, gadget colors
+ * ------------------------------------------------------------------- */
+
+/* OpenFindOLWin (FindOLWin): the OLWin the object is in (itself if it
+ * is one), up the vis tree as far as this thread runs it; 0 if none */
+optr OpenFindOLWin(optr o)
+{
+    while (o) {
+	VisInstance *v;
+	Boolean win;
+
+	if (!ObjTestIfObjBlockRunByCurThread(OptrToHandle(o)))
+	    return 0;
+	ObjLockObjBlock(OptrToHandle(o));
+	v = (VisInstance *) ObjDerefVis(o);
+	win = (v->VI_typeFlags & VTF_IS_WIN_GROUP) &&
+	      ObjIsObjectInClass(o, &OLWinClass);
+	MemUnlock(OptrToHandle(o));
+	if (win)
+	    return o;
+	o = VisFindParent(o);
+    }
+    return 0;
+}
+
+/* GetCtrlColors: an OLCtrl's HINT_GADGET_BACKGROUND_COLORS, or (in a
+ * toolbox) its parent's: the first and second color, unselected and
+ * selected */
+static Boolean GetCtrlColors(optr o, word *unsel, word *sel)
+{
+    while (o) {
+	BackgroundColors *bc;
+	Boolean toolbox;
+
+	ObjLockObjBlock(OptrToHandle(o));
+	if (!ObjIsObjectInClass(o, &OLCtrlClass)) {
+	    MemUnlock(OptrToHandle(o));
+	    return FALSE;
+	}
+	bc = ObjVarFindData(o, HINT_GADGET_BACKGROUND_COLORS);
+	if (bc) {
+	    *unsel = bc->BC_unselectedColor1 | (bc->BC_unselectedColor2 << 8);
+	    *sel = bc->BC_selectedColor1 | (bc->BC_selectedColor2 << 8);
+	    MemUnlock(OptrToHandle(o));
+	    return TRUE;
+	}
+	toolbox = (((OLCtrlInstance *) ObjDerefVis(o))->OLCI_buildFlags &
+		   OLBF_TOOLBOX) != 0;
+	MemUnlock(OptrToHandle(o));
+	if (!toolbox)
+	    return FALSE;
+	o = VisFindParent(o);
+    }
+    return FALSE;
+}
+
+/*
+ * OpenGetBackgroundColor: the object's HINT_GADGET_BACKGROUND_COLORS, a
+ * parent OLCtrl's, or the light color (selected: the selection's); the
+ * selected ones if asked for: the first color in the low byte, the
+ * second (drawn over it at 50%) in the high one
+ */
+word OpenGetBackgroundColor(optr o, Boolean selected)
+{
+    BackgroundColors *bc = ObjVarFindData(o, HINT_GADGET_BACKGROUND_COLORS);
+    word unsel, sel;
+
+    if (bc) {
+	unsel = bc->BC_unselectedColor1 | (bc->BC_unselectedColor2 << 8);
+	sel = bc->BC_selectedColor1 | (bc->BC_selectedColor2 << 8);
+    } else if (!GetCtrlColors(VisFindParent(o), &unsel, &sel)) {
+	unsel = moCS_dsLightColor | (moCS_dsLightColor << 8);
+	sel = moCS.CSV_selBkgdColor | (moCS.CSV_selBkgdColor << 8);
+    }
+    return selected ? sel : unsel;
+}
+
+/* OpenGetTextColor: the object's or its vis parent's
+ * HINT_GADGET_TEXT_COLOR (FALSE: none) */
+Boolean OpenGetTextColor(optr o, Color *c)
+{
+    TextColors *tc = ObjVarFindData(o, HINT_GADGET_TEXT_COLOR);
+    optr p;
+
+    if (tc) {
+	*c = tc->TC_unselectedColor;
+	return TRUE;
+    }
+    p = VisFindParent(o);
+    if (!p)
+	return FALSE;
+    ObjLockObjBlock(OptrToHandle(p));
+    tc = ObjVarFindData(p, HINT_GADGET_TEXT_COLOR);
+    if (tc)
+	*c = tc->TC_unselectedColor;
+    MemUnlock(OptrToHandle(p));
+    return tc != NULL;
+}
+
 /* ---------------------------------------------------------------------
  * The default focus and target
  * ------------------------------------------------------------------- */

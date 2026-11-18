@@ -1,0 +1,384 @@
+/*
+ * copenMoniker.goc -- the monikers of the specific UI's gadgets (after
+ * copenMoniker.asm): their size with the insets, the window mark
+ * ("...") and the menu marks; where they go (centered by hand, so the
+ * mark and cursor fit); drawing them with the mnemonic underlined, the
+ * window mark and the selection cursor (the dotted box of the focus).
+ *
+ * The asm passes the visible object in ds:*si and the generic one with
+ * the moniker in es:*bx; here obj and gen (the same block).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the keyboard accelerator
+ * text (OLMA_DISP_KBD_MONIKER: GetKbdAcceleratorString with the
+ * strings of cspecFile.ui), so nothing is drawn or measured for it, and
+ * menu items (OLMA_IS_MENU_ITEM: the moniker and accelerator spaces of
+ * the OLMenuWin).
+ */
+@include "cGeode.goh"
+
+#define MIN_UNDERLINE_WIDTH		3
+#define CLOSE_SHORTCUT_SPACING		5
+#define BELOW_SHORTCUT_SPACING		4
+#define CGA_BELOW_SHORTCUT_SPACING	1
+#define WINDOW_DOT_TEXT_WIDTH		10	/* not PZ */
+
+static word winMarkWidth;		/* "..." in the UI's font */
+static const char winMark[] = "...";
+
+#define JUST_X(f)	((f) & DMF_X_JUST_MASK)
+#define JUST_Y(f)	((f) & DMF_Y_JUST_MASK)
+
+static ChunkHandle Moniker(optr gen)
+{
+    return ((GenInstance *) ObjDerefGen(gen))->GI_visMoniker;
+}
+
+static void ToDrawArgs(const OpenMonikerArgs *a, DrawMonikerArgs *d)
+{
+    d->DMA_xInset = a->OMA_leftInset;
+    d->DMA_yInset = a->OMA_topInset;
+    d->DMA_xMaximum = a->OMA_xMaximum;
+    d->DMA_yMaximum = a->OMA_yMaximum;
+    d->DMA_gState = a->OMA_gState;
+    d->DMA_textHeight = GetSystemFontHeight();
+}
+
+/* ---------------------------------------------------------------------
+ * The size
+ * ------------------------------------------------------------------- */
+
+/* AddInsetsAndWinMark: the insets, and the window mark if shown */
+static void AddInsetsAndWinMark(const OpenMonikerArgs *a, word *w, word *h)
+{
+    if (!winMarkWidth) {
+	GStateHandle gs = ViewCreateCalcGState();
+
+	winMarkWidth = (word) (3 * (GrCharWidth(gs, '.') >> 16));
+	GrDestroyState(gs);
+    }
+    *w += a->OMA_leftInset + a->OMA_rightInset;
+    *h += a->OMA_topInset + a->OMA_bottomInset;
+    if (a->OMA_monikerAttrs & OLMA_DISP_WIN_MARK)
+	*w += winMarkWidth;
+}
+
+/* GetMkrSizeWithInsets: the moniker (a mnemonic after the text added);
+ * with a down mark at least the font's height; the insets and window
+ * mark */
+static void GetMkrSizeWithInsets(optr gen, const OpenMonikerArgs *a,
+				 word *w, word *h)
+{
+    SizeAsDWord s = SpecGetGenMonikerSize(gen, a->OMA_gState);
+
+    *w = DWORD_WIDTH(s);
+    *h = DWORD_HEIGHT(s);
+    if ((a->OMA_monikerAttrs & OLMA_DISP_DOWN_ARROW) &&
+	*h < GetSystemFontHeight())
+	*h = GetSystemFontHeight();
+    AddInsetsAndWinMark(a, w, h);
+}
+
+/* GetMonikerSizes: the moniker with its insets, and the width of what
+ * goes beside it (a menu mark) */
+static void GetMonikerSizes(optr gen, const OpenMonikerArgs *a, word *w,
+			    word *h, word *extra)
+{
+    GetMkrSizeWithInsets(gen, a, w, h);
+    *extra = 0;
+    if (a->OMA_monikerAttrs & OLMA_DISP_RT_ARROW)
+	*extra = OL_MARK_WIDTH + OL_MARK_SPACING;
+    else if (a->OMA_monikerAttrs & OLMA_DISP_DOWN_ARROW)
+	*extra = OL_DOWN_MARK_WIDTH + OL_MARK_SPACING;
+}
+
+/*
+ * OpenGetMonikerSize: the moniker's size with its insets and marks;
+ * what is beside it goes below it if OLMA_DRAW_SHORTCUT_BELOW (the
+ * wider of the two, a line of the font and the spacing more)
+ */
+SizeAsDWord OpenGetMonikerSize(optr obj, optr gen, OpenMonikerArgs *a)
+{
+    word w, h, extra;
+
+    (void) obj;
+    GetMonikerSizes(gen, a, &w, &h, &extra);
+    if ((a->OMA_monikerAttrs & OLMA_DRAW_SHORTCUT_BELOW) && extra) {
+	extra += a->OMA_leftInset + a->OMA_rightInset;
+	if (w < extra)
+	    w = extra;
+	h += GetSystemFontHeight() + (OpenCheckIfCGA() ?
+				      CGA_BELOW_SHORTCUT_SPACING :
+				      BELOW_SHORTCUT_SPACING);
+	return MAKE_SIZE_DWORD(w, h);
+    }
+    return MAKE_SIZE_DWORD(w + extra, h);
+}
+
+/* OpenGetMonikerExtraSize: what is not the moniker (insets, window
+ * mark) */
+SizeAsDWord OpenGetMonikerExtraSize(OpenMonikerArgs *a)
+{
+    word w = 0, h = 0;
+
+    AddInsetsAndWinMark(a, &w, &h);
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/* ---------------------------------------------------------------------
+ * The position
+ * ------------------------------------------------------------------- */
+
+/*
+ * FixupCenteredMonikers: centered monikers made left justified with
+ * the inset that centers them (so the marks fit); vertically only on
+ * black and white, or with the shortcut below
+ */
+static void FixupCenteredMonikers(optr obj, optr gen, OpenMonikerArgs *a)
+{
+    SizeAsDWord s, o;
+    sword extra;
+
+    if (JUST_X(a->OMA_drawMonikerFlags) == (J_CENTER << DMF_X_JUST_OFFSET)) {
+	s = OpenGetMonikerSize(obj, gen, a);
+	o = VisGetSize(obj);
+	extra = (sword) DWORD_WIDTH(o) - (sword) DWORD_WIDTH(s);
+	if (extra < 0)
+	    extra = 0;
+	a->OMA_leftInset += (word) extra >> 1;
+	a->OMA_drawMonikerFlags = (DrawMonikerFlags)
+	    ((a->OMA_drawMonikerFlags & ~DMF_X_JUST_MASK) |
+	     (J_LEFT << DMF_X_JUST_OFFSET));
+    }
+    if (!OpenCheckIfBW() &&
+	((a->OMA_monikerAttrs & (OLMA_IS_MENU_ITEM |
+				 OLMA_DRAW_SHORTCUT_TO_RIGHT)) ||
+	 !(a->OMA_monikerAttrs & OLMA_DRAW_SHORTCUT_BELOW)))
+	return;
+    if (JUST_Y(a->OMA_drawMonikerFlags) == (J_CENTER << DMF_Y_JUST_OFFSET)) {
+	s = OpenGetMonikerSize(obj, gen, a);
+	o = VisGetSize(obj);
+	extra = (sword) DWORD_HEIGHT(o) - (sword) DWORD_HEIGHT(s) - 1;
+	a->OMA_topInset += (word) ((extra >> 1) + 1);
+	a->OMA_drawMonikerFlags = (DrawMonikerFlags)
+	    ((a->OMA_drawMonikerFlags & ~DMF_Y_JUST_MASK) |
+	     (J_LEFT << DMF_Y_JUST_OFFSET));
+    }
+}
+
+/* SetupMaxWidth: clipped, the room inside the insets and beside the
+ * menu mark */
+static void SetupMaxWidth(optr obj, OpenMonikerArgs *a)
+{
+    SizeAsDWord o;
+    word w;
+
+    if (!(a->OMA_drawMonikerFlags & DMF_CLIP_TO_MAX_WIDTH))
+	return;
+    o = VisGetSize(obj);
+    w = DWORD_WIDTH(o) - a->OMA_rightInset - a->OMA_leftInset;
+    if (a->OMA_monikerAttrs & OLMA_DISP_RT_ARROW)
+	w -= OL_MARK_WIDTH + OL_MARK_SPACING;
+    else if (a->OMA_monikerAttrs & OLMA_DISP_DOWN_ARROW)
+	w -= OL_DOWN_MARK_WIDTH + OL_MARK_SPACING;
+    a->OMA_xMaximum = w;
+    a->OMA_yMaximum = DWORD_HEIGHT(o) - a->OMA_bottomInset -
+		      a->OMA_topInset;
+}
+
+/* OpenGetMonikerPos: where the moniker is drawn */
+XYValueAsDWord OpenGetMonikerPos(optr obj, optr gen, OpenMonikerArgs *a)
+{
+    DrawMonikerArgs d;
+
+    FixupCenteredMonikers(obj, gen, a);
+    ToDrawArgs(a, &d);
+    return VisGetMonikerPos(obj, Moniker(gen),
+			    (DrawMonikerFlags) (a->OMA_drawMonikerFlags &
+				(DMF_X_JUST_MASK | DMF_Y_JUST_MASK)), &d);
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/*
+ * DrawMnemonicUnderline: with keyboard navigation, the mnemonic of a
+ * text moniker drawn at x, y underlined (twice with no mouse); one
+ * that is not in the text is drawn after it as " (c)".  Returns the
+ * width added.
+ */
+static word DrawMnemonicUnderline(optr gen, GStateHandle gs, sword x,
+				  sword y, word width)
+{
+    VisMonikerWithText *m;
+    const char *text;
+    byte off;
+    word added = 0, n, w0, w1, len;
+    sword ux;
+
+    if (!OpenCheckIfKeyboardNavigation())
+	return 0;
+    m = LMemDeref(ConstructOptr(OptrToHandle(gen), Moniker(gen)));
+    if (m->VMWT_common.VM_type & VMT_GSTRING)
+	return 0;
+    text = (const char *) m + VMWT_text;
+    off = (byte) m->VMWT_mnemonicOffset;
+    if (off == 0xfe) {			/* VMO_MNEMONIC_NOT_IN_MKR_TEXT */
+	XYValueAsDWord p;
+	sword start = x + (sword) width;
+
+	while (*text)			/* the character after the text */
+	    text++;
+	text++;
+	GrDrawChar(gs, start, y, ' ');
+	GrDrawCharAtCP(gs, '(');
+	p = GrGetCurPos(gs);
+	GrDrawCharAtCP(gs, (byte) *text);
+	GrDrawCharAtCP(gs, ')');
+	added = (word) (DWORD_X(GrGetCurPos(gs)) - start);
+	ux = DWORD_X(p);
+	y = DWORD_Y(p);
+	n = 0;
+    } else if (off == 0xfd || off == 0xff)	/* VMO_CANCEL, VMO_NO_MNEMONIC */
+	return 0;
+    else {
+	ux = x;
+	n = off;
+    }
+    y += (sword) (GrFontMetrics(gs, GFMI_UNDER_POS_ROUNDED));
+    w0 = n ? GrTextWidth(gs, text, n) : 0;
+    w1 = GrTextWidth(gs, text, (word) (n + 1));
+    len = (word) (w1 - w0 - 2);
+    if ((sword) len < MIN_UNDERLINE_WIDTH - 1)
+	len = MIN_UNDERLINE_WIDTH - 1;
+    ux += (sword) w0;
+    GrDrawHLine(gs, ux, y, (sword) (ux + len));
+    if (!OpenCheckIfCGA() && OpenCheckIfKeyboardOnly())
+	GrDrawHLine(gs, ux, (sword) (y + 1), (sword) (ux + len));
+    return added;
+}
+
+static void InsetRect(sword *l, sword *t, sword *r, sword *b)
+{
+    (*l)++;
+    (*t)++;
+    (*r)--;
+    (*b)--;
+}
+
+/*
+ * OpenDrawSelectionCursor: the dotted box of the focus (drawn, or
+ * erased in the background if not OLMA_SELECTION_CURSOR_ON): around the
+ * moniker, or inside the bounds (lists, check boxes, toolboxes and
+ * clipped monikers); twice with no mouse
+ */
+static void OpenDrawSelectionCursor(optr obj, OpenMonikerArgs *a, sword l,
+				    sword t, sword r, sword b)
+{
+    GStateHandle gs = a->OMA_gState;
+    OLMonikerAttrs at = a->OMA_monikerAttrs;
+    Rectangle lb;
+    Color c;
+    Boolean colorSet = FALSE;
+
+    if (!OpenCheckIfKeyboard())
+	return;
+    if ((at & OLMA_DRAW_CURSOR_INSIDE_BOUNDS) ||
+	(!(at & (OLMA_USE_LIST_SELECTION_CURSOR |
+		 OLMA_USE_CHECKBOX_SELECTION_CURSOR |
+		 OLMA_USE_TOOLBOX_SELECTION_CURSOR)) &&
+	 (a->OMA_drawMonikerFlags & DMF_CLIP_TO_MAX_WIDTH))) {
+	OpenGetLineBounds(obj, &lb);
+	l = lb.R_left; t = lb.R_top; r = lb.R_right; b = lb.R_bottom;
+	InsetRect(&l, &t, &r, &b);
+	if (OpenCheckIfCGA()) {
+	    r--;
+	    b--;
+	} else
+	    InsetRect(&l, &t, &r, &b);
+    } else if (at & (OLMA_USE_LIST_SELECTION_CURSOR |
+		     OLMA_USE_CHECKBOX_SELECTION_CURSOR |
+		     OLMA_USE_TOOLBOX_SELECTION_CURSOR)) {
+	OpenGetLineBounds(obj, &lb);
+	l = lb.R_left; t = lb.R_top; r = lb.R_right; b = lb.R_bottom;
+	if (at & OLMA_USE_TOOLBOX_SELECTION_CURSOR) {
+	    GrSetMixMode(gs, MM_INVERT);
+	    InsetRect(&l, &t, &r, &b);
+	    colorSet = TRUE;
+	} else if (at & OLMA_USE_CHECKBOX_SELECTION_CURSOR) {
+	    InsetRect(&l, &t, &r, &b);
+	    InsetRect(&l, &t, &r, &b);
+	}
+    } else {
+	l -= 3;
+	r++;
+	b++;
+	t--;
+    }
+    if (!colorSet) {
+	c = (at & (OLMA_DARK_COLOR_BACKGROUND |
+		   OLMA_BLACK_MONOCHROME_BACKGROUND)) ?
+	    moCS_dsLightColor : moCS_dsDarkColor;
+	if (!(at & OLMA_SELECTION_CURSOR_ON)) {
+	    if (at & OLMA_BLACK_MONOCHROME_BACKGROUND)
+		c = C_BLACK;
+	    else if (at & OLMA_LIGHT_COLOR_BACKGROUND)
+		c = moCS_dsLightColor;
+	    else if (at & OLMA_DARK_COLOR_BACKGROUND)
+		c = C_DARK_GREY;
+	    else
+		c = C_WHITE;
+	}
+	GrSetLineColor(gs, CF_INDEX, c, 0, 0);
+    }
+    GrSetLineMaskSys(gs, SDM_50);
+    GrDrawRect(gs, l, t, r, b);
+    if (!OpenCheckIfCGA() && OpenCheckIfKeyboardOnly()) {
+	InsetRect(&l, &t, &r, &b);
+	GrDrawRect(gs, l, t, r, b);
+    }
+    GrSetLineMaskSys(gs, SDM_100);
+    GrSetMixMode(gs, MM_COPY);
+}
+
+/*
+ * OpenDrawMoniker: the moniker at its place (centered by hand), the
+ * mnemonic underlined, the window mark after it, the selection cursor
+ * around it
+ */
+void OpenDrawMoniker(optr obj, optr gen, OpenMonikerArgs *a)
+{
+    ChunkHandle mk = Moniker(gen);
+    DrawMonikerArgs d;
+    DrawMonikerFlags f;
+    XYValueAsDWord p;
+    SizeAsDWord s;
+    sword x, y, right, bottom;
+    word w;
+
+    if (!mk)
+	return;
+    FixupCenteredMonikers(obj, gen, a);
+    SetupMaxWidth(obj, a);
+    f = (DrawMonikerFlags) (a->OMA_drawMonikerFlags |
+			    DMF_UNDERLINE_ACCELERATOR);
+    ToDrawArgs(a, &d);
+    p = VisGetMonikerPos(obj, mk, f, &d);
+    x = DWORD_X(p);
+    y = DWORD_Y(p);
+    VisDrawMoniker(obj, mk, f, &d);
+    s = VisGetMonikerSize(obj, mk, d.DMA_textHeight, a->OMA_gState);
+    w = DWORD_WIDTH(s);
+    ObjLockObjBlock(OptrToHandle(gen));
+    w += DrawMnemonicUnderline(gen, a->OMA_gState, x, y, w);
+    MemUnlock(OptrToHandle(gen));
+    right = x + (sword) w;
+    if (a->OMA_monikerAttrs & OLMA_DISP_WIN_MARK) {
+	GrDrawText(a->OMA_gState, right, y, winMark, 3);
+	right += WINDOW_DOT_TEXT_WIDTH;
+    }
+    if (a->OMA_monikerAttrs & OLMA_DISP_SELECTION_CURSOR) {
+	bottom = y + (sword) DWORD_HEIGHT(s) - 1;
+	OpenDrawSelectionCursor(obj, a, x, y, right, bottom);
+    }
+}
