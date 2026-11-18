@@ -1478,6 +1478,108 @@ static word Slot(byte req, sword *x, sword *y)
 	@call UMMenuPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 	break;
     }
+    case 22: {
+	/* the keyboard in the menus: Alt pressed and released alone puts
+	 * the focus on the first menu button (menu related, drawn
+	 * cursored); right and left move along the bar; down opens the
+	 * menu with the focus (the menu the primary's focus, its first
+	 * item its own); down and up through the items; right on a sub
+	 * menu's button opens it, left in it back to its button; right
+	 * in a menu goes to the next menu of the bar (the menu opened);
+	 * Escape completes it */
+	OLWinInstance w;
+	OLMenuWinInstance m;
+	OLMenuButtonInstance b;
+	optr eb, vb, mb;
+	word alt = (CS_CONTROL << 8) | VC_LALT;
+#define K(c)	((CS_CONTROL << 8) | (c))
+
+	@call UMMenuPrim::MSG_GEN_SET_USABLE(VUM_NOW);
+	VisData(@UMEditMenu, &m, sizeof(m));
+	eb = ConstructOptr(OptrToHandle(@UMEditMenu), m.OLPWI_button);
+	VisData(@UMViewMenu, &m, sizeof(m));
+	vb = ConstructOptr(OptrToHandle(@UMViewMenu), m.OLPWI_button);
+
+	/* Alt */
+	UMCHECK(@call UMMenuPrim::MSG_META_FUP_KBD_CHAR(alt, CF_FIRST_PRESS,
+							0));
+	UMCHECK(@call UMMenuPrim::MSG_META_FUP_KBD_CHAR(alt, CF_RELEASE, 0));
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(w.OLWI_focusExcl.FTVMC_OD == eb &&
+		(w.OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED));
+	UMCHECK(@call UMMenuPrim::MSG_OL_WIN_QUERY_MENU_BAR_HAS_FOCUS());
+	VisData(eb, &b, sizeof(b));
+	UMCHECK((b.OLBI_specState & (OLBSS_CURSORED | OLBSS_BORDERED)) ==
+		(OLBSS_CURSORED | OLBSS_BORDERED));
+	/* right, left */
+	UMCHECK(@call UMMenuPrim::MSG_META_FUP_KBD_CHAR(K(VC_RIGHT),
+							CF_FIRST_PRESS, 0));
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(w.OLWI_focusExcl.FTVMC_OD == vb);
+	VisData(eb, &b, sizeof(b));
+	UMCHECK(!(b.OLBI_specState & (OLBSS_CURSORED | OLBSS_BORDERED)));
+	UMCHECK(@call UMMenuPrim::MSG_META_FUP_KBD_CHAR(K(VC_LEFT),
+							CF_FIRST_PRESS, 0));
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(w.OLWI_focusExcl.FTVMC_OD == eb);
+	/* down: the Edit menu up, its first item the focus */
+	UMCHECK(@call UMMenuPrim::MSG_META_FUP_KBD_CHAR(K(VC_DOWN),
+							CF_FIRST_PRESS, 0));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK((m.VI_attrs & VA_REALIZED) &&
+		(m.OLMWI_specState & OMWSS_IN_STAY_UP_MODE));
+	UMCHECK(m.OLWI_focusExcl.FTVMC_OD == @UMCopy);
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(w.OLWI_focusExcl.FTVMC_OD == @UMEditMenu);
+	/* (the sub menu's button: the Edit menu built now) */
+	VisData(@UMMoreMenu, &m, sizeof(m));
+	mb = ConstructOptr(OptrToHandle(@UMMoreMenu), m.OLPWI_button);
+	UMCHECK(m.OLPWI_button != 0);
+	/* down, up */
+	UMCHECK(@call UMEditMenu::MSG_META_FUP_KBD_CHAR(K(VC_DOWN),
+							CF_FIRST_PRESS, 0));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK(m.OLWI_focusExcl.FTVMC_OD == mb);
+	/* right on the sub menu's button: the sub menu up; left back */
+	UMCHECK(@call mb::MSG_META_FUP_KBD_CHAR(K(VC_RIGHT), CF_FIRST_PRESS,
+						0));
+	VisData(@UMMoreMenu, &m, sizeof(m));
+	UMCHECK(m.VI_attrs & VA_REALIZED);
+	VisData(mb, &b, sizeof(b));
+	UMCHECK(b.OLMBI_specState & OLMBSS_POPUP_OPEN);
+	UMCHECK(@call UMMoreMenu::MSG_META_FUP_KBD_CHAR(K(VC_LEFT),
+							CF_FIRST_PRESS, 0));
+	VisData(@UMMoreMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	VisData(mb, &b, sizeof(b));
+	UMCHECK(!(b.OLMBI_specState & OLMBSS_POPUP_OPEN));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK((m.VI_attrs & VA_REALIZED) && m.OLWI_focusExcl.FTVMC_OD == mb);
+	UMCHECK(@call UMEditMenu::MSG_META_FUP_KBD_CHAR(K(VC_UP),
+							CF_FIRST_PRESS, 0));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK(m.OLWI_focusExcl.FTVMC_OD == @UMCopy);
+	/* right: the View menu up, Edit down */
+	UMCHECK(@call UMEditMenu::MSG_META_FUP_KBD_CHAR(K(VC_RIGHT),
+							CF_FIRST_PRESS, 0));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK((m.VI_attrs & VA_REALIZED) &&
+		(m.OLMWI_specState & OMWSS_IN_STAY_UP_MODE));
+	VisData(vb, &b, sizeof(b));
+	UMCHECK(b.OLMBI_specState & OLMBSS_POPUP_OPEN);
+	/* Escape: down */
+	UMCHECK(@call UMViewMenu::MSG_META_FUP_KBD_CHAR(K(VC_ESCAPE),
+							CF_FIRST_PRESS, 0));
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	VisData(vb, &b, sizeof(b));
+	UMCHECK(!(b.OLMBI_specState & OLMBSS_POPUP_OPEN));
+	@call UMMenuPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+#undef K
+	break;
+    }
     }
 }
 

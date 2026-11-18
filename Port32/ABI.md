@@ -5483,9 +5483,39 @@ are left out), the constants, the variables and the routines.
     (`MSG_META_RAW_UNIV_ENTER`) brings it to the top on a press; key
     presses go to the window's focus. Menus start the grab when they
     come up, as the asm.
+  - Keyboard navigation (`Vis/visSpec.goc`, after `visSpecUtils.asm`):
+    `VisNavigateCommon` (exported by `ui.geo`, prototype in `visC.goh`)
+    answers `MSG_SPEC_NAVIGATION_QUERY` for leaves, composites
+    (`NCF_IS_COMPOSITE`) and the root of a window
+    (`NCF_IS_ROOT_NODE`), forwards and backwards, menu related or not;
+    `VisClass` `MSG_SPEC_NAVIGATE` runs the query round and tells the
+    object found (`MSG_SPEC_NOTIFY_NAVIGATION_COMPLETE`). Not yet:
+    `HINT_NAVIGATION_NEXT_ID`. In the specific UI
+    (`CWin/cwinClassMisc.goc`, after `cwinClassMisc.asm`) the window is
+    the root; its `MSG_META_FUP_KBD_CHAR` toggles the menu bar on Alt
+    pressed and released alone (the first menu button gets the focus,
+    menu related) and leaves it on Escape, moves along the bar with
+    left and right and opens a menu with up or down, Tab and the
+    arrows navigate the window, Enter activates the default; the rest
+    goes up to the window's parent (a menu not pinned: through its
+    button, `OpenWinCallParentOfWindow`). Buttons and menu buttons
+    answer the query (focusable with a keyboard, drawable and
+    enabled; in the menu bar menu related). A menu (`cwinMenu.goc`)
+    in stay up mode gives its first item the focus; up and down move
+    through the items, left and right go to the neighbouring menu of
+    the bar (its button gets the focus and is activated), in a sub
+    menu left closes it back to its button and right goes on along
+    the bar, Escape completes it; a menu not pinned asks for the
+    focus through its button, so the primary's focus is the menu
+    while it is up; it holds the remote gadget exclusive while in
+    stay up mode. A menu button (`copenMenuButton.goc`) activated by
+    the keyboard takes the focus and gadget exclusive first; with the
+    focus it is drawn cursored (bordered); right on a sub menu's
+    button opens the sub menu. `FlowCheckKbdShortcut` without a
+    keyboard driver (the tests) matches entries without `KS_PHYSICAL`
+    by character set, character and the modifiers held.
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
-  bar adjustments, the state saved on detach, the navigation
-  (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons and the
+  bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
   `OLBaseWinClass`: the window icon (`OLWinIconClass`: a minimized
   window is hidden, as with the task bar on), the trigger bar, the
@@ -5501,20 +5531,19 @@ are left out), the constants, the variables and the routines.
   dialog run by the UI thread. In `OLButtonClass`: the black and white
   buttons (`copenButtonBW`), the menu marks and menu items, the
   keyboard accelerator text, the sounds (`UserStandardSound` is not in
-  the C UI), the navigation (`VisNavigateCommon`) and
-  `MSG_SPEC_CHECK_MNEMONIC`, the stay up menus released on activation,
+  the C UI), the mnemonics (`MSG_SPEC_CHECK_MNEMONIC`,
+  `MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC`), the stay up menus released on activation,
   `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `cwinPtr.goc`: moving and resizing by the keyboard
   (the move/resize keys and their abort monitor, the system menu's
-  Move and Size), the toggle menu navigation, ink. In `OLMenuWinClass`: the pushpin
+  Move and Size), ink. In `OLMenuWinClass`: the pushpin
   (pinnable menus: the `PinMoniker` picture), the file menu's Exit
   trigger, cascading sub menus, the scrollers
-  (`MenuWinScrollerClass`), menu separators, the keyboard, the remote
-  gadget exclusive, the system and express menus, the menu centers,
+  (`MenuWinScrollerClass`), menu separators, the system and express menus, the menu centers,
   menus in stay up mode
   released through the application (`MSG_META_ENSURE_NO_MENUS_IN_
   STAY_UP_MODE` is answered by a menu, the generic tree does not pass
   it on). In `OLMenuButtonClass`: popup lists and the selection box,
-  the keyboard and the focus, the system menu icon, the default
+  the keys of popup lists, the focus on a text object, the system menu icon, the default
   function. `OLPopoutClass` and `OLMenuItemGroupClass` (plain
   `OLCtrl`s). In `OLGadgetAreaClass`:
   the display controls its margins look for. In `OLCtrlClass`:

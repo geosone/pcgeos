@@ -69,7 +69,12 @@
  *      moves); on the bottom right corner a resize; all buttons up the
  *      grab ends; the pointer in and out of it; a sub menu's button
  *      with its right mark, its pixels checked here;
- *  21. the menu down, the primary not usable.
+ *  21. the menu down, the primary not usable;
+ *  22. the keyboard in the menus: Alt alone puts the focus on the first
+ *      menu button (cursored); right and left along the bar; down opens
+ *      the menu (its first item the focus); down and up through the
+ *      items; right on a sub menu's button opens it, left closes it
+ *      back; right goes on to the next menu of the bar; Escape closes.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -220,11 +225,12 @@ int main(void)
 	  Pixel(st->UMS_markX + 4, st->UMS_markY + 1 + i) == WHITE &&
 	  Pixel(st->UMS_markX + 5, st->UMS_markY + 1 + i) != WHITE);
     step(21);
+    step(22);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 277 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 310 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
