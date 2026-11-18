@@ -17,6 +17,8 @@
 @include <Internal/SpecUI/olScreenClass.goh>
 @include <Internal/SpecUI/olFieldClass.goh>
 @include <Internal/SpecUI/olApplicationClass.goh>
+@include <Objects/gInterC.goh>
+@include <Internal/SpecUI/olCtrlClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/videoDr.h>
 #include <initfile.h>
@@ -47,9 +49,36 @@ UMState umState;
 @endc
 @classdecl UMProcessClass, neverSaved;
 
+/* generic groups built as OLCtrls (no build routine for interactions
+ * yet) */
+@class UMGroupClass, GenInteractionClass;
+@endc
+@classdecl UMGroupClass;
+
+@method UMGroupClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    (void) MasterOffset;
+    return (ClassStruct *) &OLCtrlClass;
+}
+
 @start UMObjects;
 @object GenApplicationClass UMApp = {
     GI_states = GS_USABLE | GS_ENABLED;
+}
+@object UMGroupClass UMGroup = {
+    GI_visMoniker = "Group";
+    GII_visibility = GIV_SUB_GROUP;
+    HINT_DRAW_IN_BOX;
+    HINT_CENTER_CHILDREN_HORIZONTALLY;
+    HINT_CUSTOM_CHILD_SPACING = SST_PIXELS | 3;
+}
+@object UMGroupClass UMGroup2 = {
+    GII_visibility = GIV_SUB_GROUP;
+    HINT_ORIENT_CHILDREN_HORIZONTALLY;
+    HINT_TOOLBOX;
+    HINT_CENTER_CHILDREN_ON_MONIKERS;
+    HINT_LEFT_JUSTIFY_MONIKERS;
+    ATTR_GEN_PROPERTY;
 }
 @end UMObjects;
 
@@ -366,6 +395,92 @@ static word Slot(byte req, sword *x, sword *y)
 	o = 0;
 	(void) @call umField::MSG_META_GET_FOCUS_EXCL(&o);
 	UMCHECK(o == umApp);
+	break;
+    }
+    case 10: {
+	/* OLCtrl: the hints of a framed group with a moniker above, its
+	 * margins, spacing and sizes; a horizontal toolbox */
+	OLCtrlInstance c;
+	Rectangle m;
+	SpacingAsDWord sp;
+	SizeAsDWord sz, mk;
+	OLCtrlOptFlags of = 0;
+	OLBuildFlags bf = 0;
+	GenReturnParams r;
+	GStateHandle gs;
+
+	(void) @call UMGroup::MSG_VIS_COMP_GET_CHILD_SPACING();
+	UMCHECK(InClass(@UMGroup, (ClassStruct *) &OLCtrlClass));
+	@call UMGroup::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+	VisData(@UMGroup, &c, sizeof(c));
+	UMCHECK(c.VI_typeFlags & VTF_IS_GEN);
+	UMCHECK((c.OLCI_optFlags & (OLCOF_DISPLAY_BORDER |
+				    OLCOF_DISPLAY_MKR_ABOVE |
+				    OLCOF_DISPLAY_MONIKER |
+				    OLCOF_CUSTOM_SPACING)) ==
+		(OLCOF_DISPLAY_BORDER | OLCOF_DISPLAY_MKR_ABOVE |
+		 OLCOF_DISPLAY_MONIKER | OLCOF_CUSTOM_SPACING));
+	UMCHECK(!(c.OLCI_moreFlags & OLCOF_LEFT_JUSTIFY_MONIKER));
+	UMCHECK((c.VCI_geoAttrs & (VCGA_ORIENT_CHILDREN_VERTICALLY |
+				   VCGA_ONLY_DRAWS_IN_MARGINS |
+				   VCGA_HAS_MINIMUM_SIZE)) ==
+		(VCGA_ORIENT_CHILDREN_VERTICALLY | VCGA_ONLY_DRAWS_IN_MARGINS |
+		 VCGA_HAS_MINIMUM_SIZE));
+	UMCHECK((c.VCI_geoDimensionAttrs & VCGDA_WIDTH_JUSTIFICATION) ==
+		WJ_CENTER_CHILDREN_HORIZONTALLY);
+	UMCHECK(c.VI_geoAttrs & VGA_USE_VIS_CENTER);
+	sp = @call UMGroup::MSG_VIS_COMP_GET_CHILD_SPACING();
+	UMCHECK(DWORD_CHILD_SPACING(sp) == 3 && DWORD_WRAP_SPACING(sp) == 2);
+	/* the moniker above, in the frame */
+	@call UMGroup::MSG_VIS_COMP_GET_MARGINS(&m);
+	UMCHECK(m.R_left == 7 && m.R_right == 7 && m.R_bottom == 7);
+	/* (at least the frame's: the test has no fonts, so no moniker
+	 * height) */
+	UMCHECK(m.R_top >= 7);
+	UMCHECK(@call UMGroup::MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE() ==
+		0x0812);
+	sz = @call UMGroup::MSG_SPEC_CONVERT_DESIRED_SIZE_HINT(
+						SST_PIXELS | 100, 0, 0);
+	UMCHECK(DWORD_WIDTH(sz) == 114 && DWORD_HEIGHT(sz) == 0);
+	mk = VisGetMonikerSize(@UMGroup,
+			       @call UMGroup::MSG_GEN_GET_VIS_MONIKER(), 0, 0);
+	UMCHECK(DWORD_WIDTH(mk) > 0);
+	sz = @call UMGroup::MSG_VIS_COMP_GET_MINIMUM_SIZE();
+	UMCHECK(DWORD_WIDTH(sz) == DWORD_WIDTH(mk) + 28 &&
+		DWORD_HEIGHT(sz) == (word) (m.R_top + m.R_bottom));
+	memset(&r, 0, sizeof(r));
+	UMCHECK(@call UMGroup::MSG_SPEC_P32_GUP_QUERY(&r, UM_SGQT_BUILD_INFO) &&
+		ConstructOptr(r.GRP_cx, r.GRP_dx) == @UMGroup);
+	/* oversized children: no spacing with default rings */
+	@call UMGroup::MSG_SPEC_CTRL_SET_MORE_FLAGS(OLCOF_OVERSIZED_CHILDREN,
+						    0);
+	sp = @call UMGroup::MSG_VIS_COMP_GET_CHILD_SPACING();
+	UMCHECK(DWORD_CHILD_SPACING(sp) == 3 && !DWORD_WRAP_SPACING(sp));
+	@call UMGroup::MSG_SPEC_CTRL_SET_MORE_FLAGS(0,
+						    OLCOF_OVERSIZED_CHILDREN);
+	gs = GrCreateState(0);
+	@call UMGroup::MSG_VIS_DRAW(0, gs);
+	GrDestroyState(gs);
+
+	/* the toolbox: centering on monikers orients it vertically after
+	 * all, the toolbox spacing, delayed */
+	@call UMGroup2::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+	VisData(@UMGroup2, &c, sizeof(c));
+	UMCHECK(c.VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY);
+	UMCHECK(@call UMGroup2::MSG_VUP_GET_BUILD_FLAGS(&bf) &&
+		(bf & (OLBF_TOOLBOX | OLBF_DELAYED_MODE)) ==
+		(OLBF_TOOLBOX | OLBF_DELAYED_MODE));
+	sp = @call UMGroup2::MSG_VIS_COMP_GET_CHILD_SPACING();
+	UMCHECK(DWORD_CHILD_SPACING(sp) >= 2 &&
+		DWORD_CHILD_SPACING(sp) <= 3 && DWORD_WRAP_SPACING(sp) == 1);
+	memset(&r, 0, sizeof(r));
+	UMCHECK(@call UMGroup2::MSG_SPEC_P32_GUP_QUERY(&r,
+						GUQT_DELAYED_OPERATION) &&
+		r.GRP_ax == OLBF_DELAYED_MODE);
+	UMCHECK(@call UMGroup2::MSG_QUERY_CENTER_BY_MONIKERS(&of) &&
+		of == (OLCOF_CENTER_ON_MONIKER | OLCOF_LEFT_JUSTIFY_MONIKERS));
+	of = 0;
+	UMCHECK(@call UMGroup::MSG_QUERY_CENTER_BY_MONIKERS(&of) && !of);
 	break;
     }
     }

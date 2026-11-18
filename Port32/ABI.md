@@ -5050,13 +5050,40 @@ visual classes of `Library/User/Vis`:
   - fixed with it: `GenCheckIfFullyUsable` and `GenCheckIfFullyEnabled`
     stop at the system object, as in the asm (the screens and fields
     are usable below it).
+- **Interactions, displays, primaries** (`Gen/genInteraction.goc`,
+  `genDisplay.goc`, `genPrimary.goc` after `genInteraction.asm`,
+  `genDisplay.asm`, `genPrimary.asm`): `GenInteractionClass` (type and
+  visibility at their defaults when made at run time, attributes, a
+  modal and system modal one is a fatal error
+  `INTERACTION_CANNOT_BE_MODAL_AND_SYS_MODAL`, discarding disabled by
+  `TEMP_INTERACTION_DISCARD_INFO`, `GenInteractionDiscardInfo` in
+  `gInterC.h`); `GenDisplayClass` (user dismissable and targetable,
+  on the application's `GAGCNLT_WINDOWS` list when usable, minimized as
+  `ATTR_GEN_DISPLAY_MINIMIZED_STATE`, maximized by its display group;
+  full sized and overlapping passed to the specific part);
+  `GenPrimaryClass` (maximized as `ATTR_GEN_DISPLAY_MAXIMIZED_STATE`,
+  the long term moniker kept until the specific part takes it;
+  `MSG_GEN_PRIMARY_REPLACE_LONG_TERM_MONIKER` takes a
+  `VisMonikerSource`). Each resolves to its specific UI's build routine.
+- **Size specifications** (`Vis/visSpec.goc`, after
+  `visSpecUtils.asm`): `VisConvertSpecVisSize` (pixels, percent of the
+  field's or the screen's size, average and widest characters and
+  lines of the font in the GState), `VisApplySizeHints` and its steps
+  `VisSetupSizeArgs` (`SpecSizeArgs`: `HINT_MINIMUM_SIZE`, `_MAXIMUM_`,
+  `_INITIAL_`, `_FIXED_` in pixels by
+  `MSG_SPEC_CONVERT_DESIRED_SIZE_HINT`; `VGA_NO_SIZE_HINTS` remembers
+  none), `VisApplyInitialSizeArgs`, `VisApplySizeArgsToWidth` and
+  `_Height` (`visC.goh`); `VisClass` answers
+  `MSG_SPEC_GET_EXTRA_SIZE`, `MSG_SPEC_CONVERT_SIZE` and
+  `MSG_SPEC_CONVERT_DESIRED_SIZE_HINT`. `VisIfFlagSetCallGenChildren`
+  is exported for the specific UI.
 - **Not yet:**
   - in `GenClass`: moniker lists (`VisFindMoniker`,
     `MSG_SPEC_RESOLVE_MONIKER_LIST`, their relocation, the
     application's list), `VMDT_TOKEN` monikers,
     `MSG_GEN_BRANCH_REPLACE_PARAMS` (dword optrs), `ATTR_GEN_PATH_DATA`,
-    `MSG_META_BRING_UP_HELP`, navigation and mnemonics, the size
-    conversions (`VisConvertSpecVisSize`), the GenView's content in
+    `MSG_META_BRING_UP_HELP`, navigation and mnemonics
+    (`VisCheckMnemonic`), the GenView's content in
     `GenSpecShrinkBranch`, `UserSendToApplicationViaProcess`;
     `MSG_GEN_MAKE_APPLYABLE`/`_NOT_APPLYABLE` up the visual tree (goc
     gives `VisClass` no Gen messages);
@@ -5130,7 +5157,10 @@ visual classes of `Library/User/Vis`:
   grey not); enabling, disabling the display and a new moniker tell the
   built objects; a trigger added and made usable is built and drawn,
   not usable unbuilt; the display not usable closes the window; at the
-  end the specific parts are shrunk and the library freed.
+  end the specific parts are shrunk and the library freed. A
+  GenInteraction and a GenPrimary made at run time (not usable): their
+  types, attributes, minimized and maximized states and the long term
+  moniker; `HINT_MINIMUM_SIZE` applied to a built trigger.
 - **Test.** ctest `library.ui.system`: the process geode
   `Port32/Tests/Geode/uisys.goc` makes the system object in its block;
   `tspui` builds the system, screen and fields into counting classes,
@@ -5236,6 +5266,32 @@ are left out), the constants, the variables and the routines.
     the measurement type, the host's field size changes. Methods
     outside the file with the `@classdecl` are `@extern method` there
     (as goc wants).
+  - `CComp/copenCtrlClass.goc`, `copenCtrlGeometry.goc`,
+    `copenCtrlCommon.goc` (`OLCtrlClass`, the superclass of the window
+    classes, `CInclude/Internal/SpecUI/olCtrlClass.goh`): the build
+    flags (a menu's vis parent from `MAP_GROUP_DATA`, toolbox, title
+    bar, reply bar, delayed mode), the geometry hints (orientation,
+    justification, expanding, wrapping, the moniker's place, a frame),
+    the build info query (a menu or reply bar object offered to the
+    parent), the centering of children on their monikers (the largest
+    moniker space of a centering node), the child spacing (controls,
+    toolboxes, CGA and narrow screens, the custom spacing hints), the
+    margins (the moniker, a frame, a reply bar,
+    `HINT_CUSTOM_EXTRA_MARGINS`), the recalculation with the size hints
+    and the spacing passed to the geometry manager
+    (`OpenPassMarginInfo`), the extra, desired and minimum sizes, the
+    wrap count, apply and reset to the generic children, the etched
+    frame with its top line around the moniker (`HINT_RAISED_FRAME`:
+    white and black lines) and the moniker drawn at its place (50% if
+    disabled), the reply bar query.
+  - `CUtils/copenUtils.goc` also has the TV, narrow, vertical screen
+    and limited length checks, GStates with the display scheme
+    (`ViewCreateGState`, `ViewCreateCalcGState`, `VupCreateGState`),
+    the conditional hints (`HINT_IF_SYSTEM_ATTRS`, `HINT_ELSE`,
+    `HINT_ENDIF`: `RemoveConditionalHintsIfNeeded`, `OpenScanVarData`),
+    the flags of a parent OLCtrl, the visibility notification
+    (`VisOpenNotifyCommon`) and the size of a generic moniker
+    (`SpecGetGenMonikerSize`, with the UI font's height).
 - **Port32 changes in the C API.**
   - `WinOpen` and `WinChangePriority` take the layer as a `Handle` (a
     word cut 32-bit handles); `WinOpen`'s colorFlags is the
@@ -5272,7 +5328,23 @@ are left out), the constants, the variables and the routines.
   - `VisClass` handles `MSG_META_GRAB_FOCUS_EXCL` and the other grab
     and release messages of the exclusives with `MetaGrabFocusExclLow`
     and the others, as the asm's VisClass.
-- **Not yet.** The window and gadget classes (and so the windows of
+  - The VisSpecMessages the specific UI imports
+    (`@importMessage VisSpecMessages`) get their numbers in the order of
+    the imports, so they are all imported in `olCtrlClass.goh` (and
+    the window class headers that include it); the build info query
+    passes the `OLBuildFlags` in `GRP_bp`;
+    `MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE` answers a word (x in the
+    low byte, y in the high); `SVQT_QUERY_FOR_REPLY_BAR` in
+    `cGeode.goh`.
+  - An OLCtrl's moniker is drawn by the UI's `VisDrawMoniker` at the
+    asm's insets and justification until `OpenDrawMoniker` (keyboard
+    accelerators, mnemonics) is in C.
+- **Not yet.** In `OLCtrlClass`: an OLCtrl in a menu window (with
+  `OLWinClass`), the reply bar's notification of its dialog and its
+  line under a dialog (`OLDialogWinClass`, `OLReplyBarClass`), the
+  gadget area's margins, the menu center, mnemonics, the default
+  focus broadcast. The build routines of interactions and displays
+  (`OLBuildInteraction`, ...). The window and gadget classes (and so the windows of
   an application, its standard dialogs, the navigation between its
   windows, the menu bar); the application's express menu entries
   (`OLAppTaskItemClass`); the beep of an unwanted key (no sound driver
@@ -5298,7 +5370,16 @@ are left out), the constants, the variables and the routines.
   the field's focus and target; busy, held up and ignored input; the
   gadget timer reaching the process; no longer targetable, the target
   leaves it. The geode has no application object of its own: the
-  specific UI asks it for its size while the field comes up.
+  specific UI asks it for its size while the field comes up. Last,
+  generic groups built as OLCtrls (a test class resolves to
+  `OLCtrlClass`, there is no build routine for interactions yet): a
+  framed group with its moniker above (the flags its hints set, the
+  custom spacing, the margins of the frame, the desired and minimum
+  sizes, the build info, no spacing between oversized children, drawn
+  into a GState) and a delayed toolbox centering its children on their
+  monikers (orientation, build flags, spacing, the delayed operation
+  query, the centering it asks of its children). The test loads no
+  fonts, so monikers have no height there.
 
 ## 14. Open
 

@@ -137,11 +137,12 @@ int main(void)
     WAIT_FOR(st->UMS_timerExpired);
     CHECK(st->UMS_timerExpired == 1);
     step(9);
+    step(10);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 60 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 82 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
