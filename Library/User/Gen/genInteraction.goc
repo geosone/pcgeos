@@ -1,0 +1,84 @@
+/*
+ * genInteraction.goc -- GenInteractionClass (after genInteraction.asm):
+ * a group of generic objects: organizational, a menu, a dialog, a
+ * popout (GII_type, GII_visibility, GII_attrs).  What it looks like is
+ * the specific UI's (SPIR_BUILD_INTERACTION_GROUP); the messages that
+ * bring it up go there.
+ */
+@include "uiInt.goh"
+@include <Objects/gInterC.goh>
+
+@classdecl GenInteractionClass;
+
+/* GenInteractionInitialize: organizational, a sub group */
+@method GenInteractionClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    pself = ObjDerefGen(oself);
+    pself->GII_type = GIT_ORGANIZATIONAL;
+    pself->GII_visibility = GIV_SUB_GROUP;
+}
+
+@method GenInteractionClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    if ((pself->GII_attrs & (GIA_MODAL | GIA_SYS_MODAL)) ==
+	(GIA_MODAL | GIA_SYS_MODAL))
+	FatalError(INTERACTION_CANNOT_BE_MODAL_AND_SYS_MODAL);
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_INTERACTION_GROUP,
+				    MasterOffset);
+}
+
+/* GenSetByte: a byte of the instance stored, the object dirty if it
+ * changed */
+static void SetByte(optr oself, byte *field, byte value)
+{
+    if (*field == value)
+	return;
+    *field = value;
+    ObjMarkDirty(oself);
+}
+
+@method GenInteractionClass, MSG_GEN_INTERACTION_GET_TYPE
+{
+    return pself->GII_type;
+}
+
+@method GenInteractionClass, MSG_GEN_INTERACTION_SET_TYPE
+{
+    SetByte(oself, &pself->GII_type, type);
+}
+
+@method GenInteractionClass, MSG_GEN_INTERACTION_GET_VISIBILITY
+{
+    return pself->GII_visibility;
+}
+
+@method GenInteractionClass, MSG_GEN_INTERACTION_SET_VISIBILITY
+{
+    SetByte(oself, &pself->GII_visibility, visibility);
+}
+
+@method GenInteractionClass, MSG_GEN_INTERACTION_GET_ATTRS
+{
+    return pself->GII_attrs;
+}
+
+@method GenInteractionClass, MSG_GEN_INTERACTION_SET_ATTRS
+{
+    SetByte(oself, &pself->GII_attrs,
+	    (byte) ((pself->GII_attrs & ~clearAttrs) | setAttrs));
+}
+
+/* GenInteractionDisableDiscarding: a discardable dialog kept in use */
+@method GenInteractionClass, MSG_GEN_INTERACTION_DISABLE_DISCARDING
+{
+    GenInteractionDiscardInfo *d;
+
+    if (!ObjVarFindData(oself, HINT_INTERACTION_DISCARD_WHEN_CLOSED))
+	FatalError(NOT_A_DISCARDABLE_OBJECT);
+    d = ObjVarFindData(oself, TEMP_INTERACTION_DISCARD_INFO);
+    if (!d)
+	d = ObjVarAddData(oself, TEMP_INTERACTION_DISCARD_INFO,
+			  sizeof(GenInteractionDiscardInfo));
+    d->GIDI_inUse = 0xffff;
+}

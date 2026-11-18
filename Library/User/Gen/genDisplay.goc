@@ -1,0 +1,128 @@
+/*
+ * genDisplay.goc -- GenDisplayClass (after genDisplay.asm): a window of
+ * the application's documents, in a GenDisplayGroup (its parent decides
+ * whether the displays are full sized or overlapping).  Minimized and
+ * maximized are vardata (ATTR_GEN_DISPLAY_*_STATE); the specific UI
+ * (SPIR_BUILD_DISPLAY) changes the window, once grown.
+ */
+@include "uiInt.goh"
+@include <Objects/gDispC.goh>
+@include <Objects/gDCtrlC.goh>
+
+@classdecl GenDisplayClass;
+
+/* GenCallSpecIfGrown: the specific part, if there is one */
+static void CallSpecIfGrown(optr oself, Message msg, const void *p, word ps)
+{
+    if (GenCheckIfSpecGrown(oself))
+	CObjCallSuperP(&GenClass, oself, msg, p, ps, NULL, 0);
+}
+
+/* the parent (a GenDisplayGroup) full sized */
+static Boolean ParentFullSized(optr oself)
+{
+    Boolean r = FALSE;
+
+    GenCallParent(oself, MSG_GEN_DISPLAY_GROUP_GET_FULL_SIZED, NULL, 0,
+		  &r, sizeof(r));
+    return r;
+}
+
+/* GenDisplayInitialize: dismissable by the user, targetable */
+@method GenDisplayClass, MSG_META_INITIALIZE
+{
+    pself->GDI_attributes |= GDA_USER_DISMISSABLE;
+    pself->GI_attrs |= GA_TARGETABLE;
+    @callsuper();
+}
+
+@method GenDisplayClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_DISPLAY,
+				    MasterOffset);
+}
+
+/* GenDisplaySetUsable: on the application's GAGCNLT_WINDOWS list */
+@method GenDisplayClass, MSG_GEN_SET_USABLE
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (app)
+	(void) @call app::MSG_META_GCN_LIST_ADD(oself,
+					GAGCNLT_WINDOWS | GCNLTF_SAVE_TO_STATE,
+					MANUFACTURER_ID_GEOWORKS);
+    @callsuper();
+}
+
+/* GenDisplayDummy: an interaction command stops here */
+@method GenDisplayClass, MSG_GEN_GUP_INTERACTION_COMMAND
+{
+    (void) command;
+    return TRUE;
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_SET_MAXIMIZED
+{
+    if (!ParentFullSized(oself))
+	GenCallParent(oself, MSG_GEN_DISPLAY_GROUP_SET_FULL_SIZED, NULL, 0,
+		      NULL, 0);
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_SET_NOT_MAXIMIZED
+{
+    if (ParentFullSized(oself))
+	GenCallParent(oself, MSG_GEN_DISPLAY_GROUP_SET_OVERLAPPING, NULL, 0,
+		      NULL, 0);
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_GET_MAXIMIZED
+{
+    return ParentFullSized(oself);
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_INTERNAL_SET_FULL_SIZED,
+		       MSG_GEN_DISPLAY_INTERNAL_SET_OVERLAPPING
+{
+    if (GenCheckIfFullyUsable(oself, FALSE))
+	CallSpecIfGrown(oself, message, &updateMode, sizeof(updateMode));
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_SET_MINIMIZED
+{
+    if (ObjVarFindData(oself, ATTR_GEN_DISPLAY_NOT_MINIMIZABLE) ||
+	ObjVarFindData(oself, ATTR_GEN_DISPLAY_MINIMIZED_STATE))
+	return;
+    (void) ObjVarAddData(oself, ATTR_GEN_DISPLAY_MINIMIZED_STATE |
+			 VDF_SAVE_TO_STATE, 0);
+    if (GenCheckIfFullyUsable(oself, FALSE))
+	CallSpecIfGrown(oself, message, NULL, 0);
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_SET_NOT_MINIMIZED
+{
+    if (ObjVarFindData(oself, ATTR_GEN_DISPLAY_NOT_RESTORABLE) ||
+	!ObjVarDeleteData(oself, ATTR_GEN_DISPLAY_MINIMIZED_STATE))
+	return;
+    if (GenCheckIfFullyUsable(oself, FALSE))
+	CallSpecIfGrown(oself, message, NULL, 0);
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_GET_MINIMIZED
+{
+    return ObjVarFindData(oself, ATTR_GEN_DISPLAY_MINIMIZED_STATE) != NULL;
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_SET_ATTRS
+{
+    if (attrs & ~GDA_USER_DISMISSABLE)
+	FatalError(UI_GEN_DISPLAY_BAD_ATTRS);
+    if (pself->GDI_attributes != attrs) {
+	pself->GDI_attributes = attrs;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenDisplayClass, MSG_GEN_DISPLAY_GET_ATTRS
+{
+    return pself->GDI_attributes;
+}

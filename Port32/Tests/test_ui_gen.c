@@ -203,6 +203,9 @@ int main(void)
     WAIT_FOR(Count(C_DARK_GRAY));
     CHECK(!ts->TSS_win && Count(C_DARK_GRAY) >= 1);
 
+    /* 9: GenInteraction, GenDisplay, GenPrimary; the size hints */
+    step(9);
+
     /* 8: the UI's use of the specific UI ends; ours too */
     step(8);
     GeodeFreeLibrary(sp);
@@ -216,7 +219,7 @@ int main(void)
 	for (i = 0; i < st->UGS_fails && i < 8; i++)
 	    printf("  failed: uigen.goc line %u\n", st->UGS_failLines[i]);
     }
-    CHECK(st->UGS_checks >= 54 && !st->UGS_fails);
+    CHECK(st->UGS_checks >= 70 && !st->UGS_fails);
 
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(app, 0), KMSG_META_DETACH,
 		 &dp, sizeof(dp), NULL, 0);

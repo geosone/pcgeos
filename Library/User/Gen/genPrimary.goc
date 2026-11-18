@@ -1,0 +1,123 @@
+/*
+ * genPrimary.goc -- GenPrimaryClass (after genPrimary.asm): the main
+ * window of an application, a GenDisplay of its own (maximized as
+ * ATTR_GEN_DISPLAY_MAXIMIZED_STATE, not by a display group), with the
+ * long term moniker (GPI_longTermMoniker) for its title.  The specific
+ * UI builds it (SPIR_BUILD_PRIMARY).
+ */
+@include "uiInt.goh"
+@include <Objects/gPrimC.goh>
+
+@classdecl GenPrimaryClass;
+
+#define PrimPart(o)	((GenPrimaryInstance *) ObjDerefGen(o))
+
+static void CallSpecIfGrown(optr oself, Message msg)
+{
+    if (GenCheckIfSpecGrown(oself))
+	CObjCallSuperP(&GenClass, oself, msg, NULL, 0, NULL, 0);
+}
+
+@method GenPrimaryClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_PRIMARY,
+				    MasterOffset);
+}
+
+/* GenPrimaryCopyTree: the long term moniker copied too */
+@method GenPrimaryClass, MSG_GEN_COPY_TREE
+{
+    optr copy = @callsuper();
+    ChunkHandle m;
+
+    if (!copy)
+	return copy;
+    m = GenCopyChunk(OptrToHandle(copy), OptrToHandle(oself),
+		     PrimPart(oself)->GPI_longTermMoniker,
+		     flags & CCF_MARK_DIRTY);
+    ObjLockObjBlock(OptrToHandle(copy));
+    PrimPart(copy)->GPI_longTermMoniker = m;
+    MemUnlock(OptrToHandle(copy));
+    return copy;
+}
+
+@method GenPrimaryClass, MSG_META_FINAL_OBJ_FREE
+{
+    if (pself->GPI_longTermMoniker)
+	ObjFreeChunk(ConstructOptr(OptrToHandle(oself),
+				   pself->GPI_longTermMoniker));
+    @callsuper();
+}
+
+@method GenPrimaryClass, MSG_GEN_DISPLAY_SET_MAXIMIZED
+{
+    if (ObjVarFindData(oself, ATTR_GEN_DISPLAY_NOT_MAXIMIZABLE) ||
+	ObjVarFindData(oself, ATTR_GEN_DISPLAY_MAXIMIZED_STATE))
+	return;
+    (void) ObjVarAddData(oself, ATTR_GEN_DISPLAY_MAXIMIZED_STATE |
+			 VDF_SAVE_TO_STATE, 0);
+    if (GenCheckIfFullyUsable(oself, FALSE))
+	CallSpecIfGrown(oself, message);
+}
+
+@method GenPrimaryClass, MSG_GEN_DISPLAY_SET_NOT_MAXIMIZED
+{
+    if (ObjVarFindData(oself, ATTR_GEN_DISPLAY_NOT_RESTORABLE) ||
+	!ObjVarDeleteData(oself, ATTR_GEN_DISPLAY_MAXIMIZED_STATE))
+	return;
+    if (GenCheckIfFullyUsable(oself, FALSE))
+	CallSpecIfGrown(oself, message);
+}
+
+@method GenPrimaryClass, MSG_GEN_DISPLAY_GET_MAXIMIZED
+{
+    return ObjVarFindData(oself, ATTR_GEN_DISPLAY_MAXIMIZED_STATE) != NULL;
+}
+
+@method GenPrimaryClass, MSG_GEN_PRIMARY_GET_LONG_TERM_MONIKER
+{
+    return pself->GPI_longTermMoniker;
+}
+
+/* the specific UI shows a new long term moniker and keeps it; before
+ * the primary is grown it is kept here */
+static void UseLongTermMoniker(optr oself, ChunkHandle m)
+{
+    if (GenCheckIfSpecGrown(oself))
+	@call oself::MSG_GEN_PRIMARY_USE_LONG_TERM_MONIKER(m);
+    else
+	PrimPart(oself)->GPI_longTermMoniker = m;
+}
+
+/*
+ * GenPrimaryReplaceLongTermMoniker: a new moniker made over the current
+ * one (or a new chunk); VMDT_NULL or a failure: none.  The specific UI
+ * shows it (MSG_GEN_PRIMARY_USE_LONG_TERM_MONIKER).
+ */
+@method GenPrimaryClass, MSG_GEN_PRIMARY_REPLACE_LONG_TERM_MONIKER
+{
+    ChunkHandle old = pself->GPI_longTermMoniker, m;
+    Boolean failed = TRUE;
+
+    ObjMarkDirty(oself);
+    (void) updateMode;
+    if (dateType != VMDT_NULL) {
+	m = VisCreateMonikerChunk(oself, old, CVMF_DIRTY, height, width,
+				  length, dateType, sourceType, source,
+				  &failed);
+	if (!failed) {
+	    PrimPart(oself)->GPI_longTermMoniker = 0;
+	    if (!old && (ObjGetFlags(oself) & OCF_IGNORE_DIRTY))
+		ObjSetFlags(ConstructOptr(OptrToHandle(oself), m),
+			    OCF_IGNORE_DIRTY, 0);
+	    UseLongTermMoniker(oself, m);
+	    return m;
+	}
+    }
+    old = PrimPart(oself)->GPI_longTermMoniker;
+    if (old) {
+	UseLongTermMoniker(oself, 0);
+	ObjFreeChunk(ConstructOptr(OptrToHandle(oself), old));
+    }
+    return 0;
+}

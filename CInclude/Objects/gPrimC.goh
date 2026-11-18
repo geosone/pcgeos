@@ -30,7 +30,7 @@
 				word height, word width, word length,
 				VisMonikerDataType dateType,
 				VisMonikerSourceType sourceType,
-				dword source);
+				VisMonikerSource source);
 
     @vardata	void HINT_PRIMARY_FULL_SCREEN;
     @vardata	void HINT_PRIMARY_NO_FILE_MENU;

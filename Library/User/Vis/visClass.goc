@@ -532,6 +532,49 @@ static void AddToInvalRegion(optr oself, const Rectangle *r)
     return VisGetSize(oself);
 }
 
+/* VisGetSize: the space besides the moniker is the whole object; no
+ * children left over */
+@method VisClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    SizeAsDWord s = VisGetSize(oself);
+
+    (void) childCount;
+    retValue->ESP_extraWidth = DWORD_WIDTH(s);
+    retValue->ESP_extraHeight = DWORD_HEIGHT(s);
+    retValue->ESP_leftoverChildren = 0;
+    retValue->ESP_unused = 0;
+}
+
+/* VisConvertSize */
+@method VisClass, MSG_SPEC_CONVERT_SIZE
+{
+    return VisConvertSpecVisSize(oself, specSize, gstate);
+}
+
+/*
+ * VisSpecConvertDesiredSizeHint: a desired size in pixels, with the
+ * object's extra size (by the font of its GState); 0 stays 0
+ */
+@method VisClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT
+{
+    ExtraSizeParams e;
+    GStateHandle gs;
+    word w = 0, h = 0;
+
+    memset(&e, 0, sizeof(e));
+    @call oself::MSG_SPEC_GET_EXTRA_SIZE(&e, childCount);
+    gs = @call oself::MSG_VIS_VUP_CREATE_GSTATE();
+    if (desiredWidth)
+	w = (word) (VisConvertSpecVisSize(oself, desiredWidth, gs) +
+		    e.ESP_extraWidth);
+    if (desiredHeight)
+	h = (word) (VisConvertSpecVisSize(oself, desiredHeight, gs) +
+		    e.ESP_extraHeight);
+    if (gs)
+	GrDestroyState(gs);
+    return MAKE_SIZE_DWORD(w, h);
+}
+
 @method VisClass, MSG_VIS_SET_SIZE
 {
     VisSetSize(oself, width, height);

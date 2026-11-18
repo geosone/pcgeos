@@ -14,8 +14,13 @@
  */
 @include <stdapp.goh>
 @include <Objects/vCompC.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/gPrimC.goh>
 #include <Internal/specUI.h>
 #include <localize.h>
+#include <stdint.h>
+
+#define VisPart(o)	((VisInstance *) ObjDerefVis(o))
 
 typedef struct {
     GeodeHandle	UGS_process;
@@ -285,6 +290,88 @@ static Boolean MonikerIs(optr o, const char *text)
 		!(VAttrs(@UGTrig1) & VA_REALIZED));
 	UGCHECK(!@call UGDisplay::MSG_GEN_GET_USABLE());
 	break;
+    case 9: {
+	/* GenInteraction, GenDisplay, GenPrimary (not usable, so not
+	 * grown); the size hints of a grown object */
+	optr in, pr;
+	ChunkHandle m;
+	sword w, h;
+	SizeAsDWord s;
+	CompSizeHintArgs *c;
+
+	in = ObjInstantiate(OptrToHandle(@UGApp),
+			    (ClassStruct *) &GenInteractionClass);
+	ObjInitializePart(in, word_offsetof(GenBase, Gen_offset));
+	UGCHECK(@call in::MSG_GEN_INTERACTION_GET_TYPE() ==
+		GIT_ORGANIZATIONAL &&
+		@call in::MSG_GEN_INTERACTION_GET_VISIBILITY() ==
+		GIV_SUB_GROUP);
+	@call in::MSG_GEN_INTERACTION_SET_TYPE(GIT_PROPERTIES);
+	@call in::MSG_GEN_INTERACTION_SET_VISIBILITY(GIV_DIALOG);
+	@call in::MSG_GEN_INTERACTION_SET_ATTRS(GIA_MODAL, 0);
+	UGCHECK(@call in::MSG_GEN_INTERACTION_GET_TYPE() == GIT_PROPERTIES &&
+		@call in::MSG_GEN_INTERACTION_GET_VISIBILITY() ==
+		GIV_DIALOG &&
+		@call in::MSG_GEN_INTERACTION_GET_ATTRS() == GIA_MODAL);
+	@call in::MSG_GEN_INTERACTION_SET_ATTRS(0, GIA_MODAL);
+	UGCHECK(!@call in::MSG_GEN_INTERACTION_GET_ATTRS());
+	UGCHECK(!Grown(in));
+
+	pr = ObjInstantiate(OptrToHandle(@UGApp),
+			    (ClassStruct *) &GenPrimaryClass);
+	ObjInitializePart(pr, word_offsetof(GenBase, Gen_offset));
+	UGCHECK((Attrs(pr) & GA_TARGETABLE) &&
+		@call pr::MSG_GEN_DISPLAY_GET_ATTRS() == GDA_USER_DISMISSABLE);
+	UGCHECK(!@call pr::MSG_GEN_DISPLAY_GET_MINIMIZED() &&
+		!@call pr::MSG_GEN_DISPLAY_GET_MAXIMIZED());
+	@call pr::MSG_GEN_DISPLAY_SET_MINIMIZED();
+	@call pr::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	UGCHECK(@call pr::MSG_GEN_DISPLAY_GET_MINIMIZED() &&
+		@call pr::MSG_GEN_DISPLAY_GET_MAXIMIZED());
+	@call pr::MSG_GEN_DISPLAY_SET_NOT_MINIMIZED();
+	@call pr::MSG_GEN_DISPLAY_SET_NOT_MAXIMIZED();
+	UGCHECK(!@call pr::MSG_GEN_DISPLAY_GET_MINIMIZED() &&
+		!@call pr::MSG_GEN_DISPLAY_GET_MAXIMIZED());
+	@call pr::MSG_GEN_DISPLAY_SET_ATTRS(0);
+	UGCHECK(!@call pr::MSG_GEN_DISPLAY_GET_ATTRS());
+	/* the long term moniker, kept by the primary while not grown */
+	m = @call pr::MSG_GEN_PRIMARY_REPLACE_LONG_TERM_MONIKER(VUM_NOW, 0,
+				0, 0, VMDT_TEXT, VMST_FPTR,
+				(VisMonikerSource) (uintptr_t) "Long Term");
+	UGCHECK(m && @call pr::MSG_GEN_PRIMARY_GET_LONG_TERM_MONIKER() == m);
+	ObjLockObjBlock(OptrToHandle(pr));
+	UGCHECK(!LocalCmpStrings((const char *) LMemDeref(ConstructOptr(
+				    OptrToHandle(pr), m)) + VMWT_text,
+				 "Long Term", 0));
+	MemUnlock(OptrToHandle(pr));
+	UGCHECK(!@call pr::MSG_GEN_PRIMARY_REPLACE_LONG_TERM_MONIKER(VUM_NOW,
+				0, 0, 0, VMDT_NULL, VMST_FPTR, 0));
+	UGCHECK(!@call pr::MSG_GEN_PRIMARY_GET_LONG_TERM_MONIKER());
+
+	/* HINT_MINIMUM_SIZE of 100 pixels: the object's own size added
+	 * (VisClass's extra size), applied to a smaller size; a larger
+	 * one stays */
+	ObjLockObjBlock(OptrToHandle(@UGTrig1));
+	s = VisGetSize(@UGTrig1);
+	c = ObjVarAddData(@UGTrig1, HINT_MINIMUM_SIZE,
+			  sizeof(CompSizeHintArgs));
+	c->CSHA_width = SST_PIXELS | 100;
+	c->CSHA_height = 0;
+	c->CSHA_count = 0;
+	VisPart(@UGTrig1)->VI_geoAttrs &= ~VGA_NO_SIZE_HINTS;
+	w = 10;
+	h = 7;
+	VisApplySizeHints(@UGTrig1, &w, &h);
+	UGCHECK(w == 100 + (sword) DWORD_WIDTH(s) && h == 7);
+	VisPart(@UGTrig1)->VI_geoAttrs &= ~VGA_NO_SIZE_HINTS;
+	w = 500;
+	VisApplySizeHints(@UGTrig1, &w, &h);
+	UGCHECK(w == 500);
+	(void) ObjVarDeleteData(@UGTrig1, HINT_MINIMUM_SIZE);
+	UGCHECK(VisConvertSpecVisSize(@UGTrig1, SST_PIXELS | 42, 0) == 42);
+	MemUnlock(OptrToHandle(@UGTrig1));
+	break;
+    }
     case 8:
 	/* the specific parts gone, the specific UI freed */
 	ObjLockObjBlock(OptrToHandle(@UGApp));

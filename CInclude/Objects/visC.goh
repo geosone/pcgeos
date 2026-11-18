@@ -993,6 +993,33 @@ extern XYValueAsDWord VisGetMonikerPos(optr obj, ChunkHandle moniker,
 				       DrawMonikerArgs *a);
 extern SizeAsDWord VisGetMonikerSize(optr obj, ChunkHandle moniker,
 				     word textHeight, GStateHandle gstate);
+/* size specifications (SpecSizeSpec) in pixels, by the font of gstate
+ * (the field's or screen's size for percentages) */
+extern word VisConvertSpecVisSize(optr obj, SpecSizeSpec size,
+				  GStateHandle gstate);
+/* the size hints of a generic object (HINT_MINIMUM_SIZE, ..._MAXIMUM_,
+ * ..._INITIAL_, ..._FIXED_) in pixels; VisApplySizeHints applies them to
+ * the size passed (VisSetupSizeArgs and the three steps it is made of) */
+typedef struct {
+    sword	SSA_minWidth;
+    sword	SSA_minHeight;
+    sword	SSA_minNumChildren;
+    sword	SSA_maxWidth;
+    sword	SSA_maxHeight;
+    sword	SSA_maxNumChildren;
+    sword	SSA_initWidth;
+    sword	SSA_initHeight;
+    sword	SSA_initNumChildren;
+    sword	SSA_fixedWidth;
+    sword	SSA_fixedHeight;
+    sword	SSA_fixedNumChildren;
+} SpecSizeArgs;
+extern void VisSetupSizeArgs(optr obj, SpecSizeArgs *a);
+extern void VisApplyInitialSizeArgs(optr obj, const SpecSizeArgs *a,
+				    sword *width, sword *height);
+extern void VisApplySizeArgsToWidth(const SpecSizeArgs *a, sword *width);
+extern void VisApplySizeArgsToHeight(const SpecSizeArgs *a, sword *height);
+extern void VisApplySizeHints(optr obj, sword *width, sword *height);
 #endif
 
 @endlib

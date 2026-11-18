@@ -29,6 +29,9 @@ export GenApplicationClass
 export GenFieldClass
 export GenScreenClass
 export GenSystemClass
+export GenInteractionClass
+export GenDisplayClass
+export GenPrimaryClass
 export GenProcessClass
 export UserClass
 
@@ -67,6 +70,12 @@ export VisTakeGadgetExclAndGrab
 export VisDrawMoniker
 export VisGetMonikerPos
 export VisGetMonikerSize
+export VisConvertSpecVisSize
+export VisSetupSizeArgs
+export VisApplyInitialSizeArgs
+export VisApplySizeArgsToWidth
+export VisApplySizeArgsToHeight
+export VisApplySizeHints
 export VisRecalcSizeAndInvalIfNeeded
 export VisSendPositionAndInvalIfNeeded
 export VisSendCenter

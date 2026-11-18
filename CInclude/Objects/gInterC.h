@@ -83,4 +83,11 @@ typedef ByteEnum GenInteractionGroupType;
 #define GIGT_HELP_MENU 5
 #define GIGT_PRINT_GROUP 6
 
+/* TEMP_INTERACTION_DISCARD_INFO: non-zero inUse while it is (about to
+ * be) on screen; the MSG_GEN_DESTROY_AND_DISCARD_BLOCK still to come */
+typedef struct {
+    word	GIDI_inUse;
+    word	GIDI_discardCount;
+} GenInteractionDiscardInfo;
+
 #endif

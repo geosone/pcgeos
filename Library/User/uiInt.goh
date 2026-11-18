@@ -159,7 +159,10 @@ Boolean UserCallApplication(Message msg, const void *params,
 /* these by their place among the FatalErrors of uiConstant.def */
 #define UI_STARTUP_DONE_MSG_RECEIVED_BEFORE_STARTUP_NOTIFY	184
 #define UI_GEN_FIELD_GEN_APPLICATION_LIST_CORRUPT		191
+#define UI_GEN_DISPLAY_BAD_ATTRS				275
 #define UI_ERROR_SECOND_REAL_DETACH				355
+#define NOT_A_DISCARDABLE_OBJECT				358
+#define INTERACTION_CANNOT_BE_MODAL_AND_SYS_MODAL		365
 
 /* ---------------------------------------------------------------------
  * Gen/genSystem.goc: the UI's state (userVariable.def), the system
