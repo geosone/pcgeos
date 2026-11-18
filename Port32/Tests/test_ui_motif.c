@@ -28,7 +28,12 @@
  *  11. OLWin: a command window under the application: built on it,
  *      staggered in a field slot, its window opened on the field's
  *      with a title bar; on top it has the application's focus; closed
- *      it gives its slot back.
+ *      it gives its slot back;
+ *  12. OLBaseWin: a GenPrimary under the application (OLBuildPrimary):
+ *      its attributes and position flags; usable, its window on the
+ *      field's, its gadget area holding a group and a title bar group
+ *      a toolbox; maximized (the whole field) and restored, minimized
+ *      (closed) and restored, not usable.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -144,11 +149,12 @@ int main(void)
     step(9);
     step(10);
     step(11);
+    step(12);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 108 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 140 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

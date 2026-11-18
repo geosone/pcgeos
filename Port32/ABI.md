@@ -5357,11 +5357,41 @@ are left out), the constants, the variables and the routines.
     exports `VisSpecBuildSetEnabledState`, `VisGetVisParent` and
     `VisConvertRatioToCoords` (`visC.goh`). A window class scans its
     geometry hints in `MSG_META_INITIALIZE`, as `cwinDialog`.
-- **Not yet.** In `OLWinClass`: the popups, the system menu, the
-  title groups, the task bar adjustments, the state saved on detach,
-  the navigation (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons
-  and the dialog and menu checks in the spacing; `OLBaseWinClass`,
-  `OLMenuedWinClass`, the primary and dialog classes. In `OLCtrlClass`:
+  - `OLMenuedWinClass` (`CWin/cwinMenuedWin.goc`,
+    `Internal/SpecUI/olMenuedWinClass.goh`), `OLBaseWinClass`
+    (`CWin/cwinBase.goc`, `olBaseWinClass.goh`), `OLGadgetAreaClass`
+    and `OLTitleGroupClass` (`CComp/copenGadgetArea.goc`,
+    `copenTitleGroup.goc`, `olGadgetAreaClass.goh`) and the build
+    routine `OLBuildPrimary` (`CSpec/cspecPrimary.goc`, the twelfth
+    export of `motif32.gp`): a GenPrimary is a primary window on its
+    application, its generic children in the gadget area, those seeking
+    the title bar in a title bar group; minimized, maximized and
+    restored as the GenDisplay's state says; Motif's primary attributes
+    and display hints, maximized on startup, closing (the application
+    quits). `MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP` takes a
+    `TitleGroupType` (`TGT_LEFT_GROUP`, `TGT_RIGHT_GROUP`: the asm's
+    offsets); `MSG_OL_MW_SET_ICON_POS(x, y, slot)`;
+    `MSG_SPEC_CHECK_IF_NEEDS_MARGINS(word *margin)` returns Boolean (its
+    VisSpecMessages and `MSG_SPEC_VUP_NUKE_GADGET_AREA_MARGINS` are
+    imported after those of `olWinClass.goh`). The C
+    `MSG_GEN_GUP_CALL_OBJECT_OF_CLASS` has no reply, so the tool area's
+    size is asked of the field found by
+    `MSG_GEN_GUP_FIND_OBJECT_OF_CLASS`. The UI's
+    `MSG_GEN_FIND_MONIKER` finds the application's moniker (its block
+    run by the caller's thread) and copies it (`VMSF_COPY_CHUNK`): a
+    primary without a moniker gets the application's for its title.
+- **Not yet.** In `OLWinClass`: the popups, the system menu, the task
+  bar adjustments, the state saved on detach, the navigation
+  (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons and the
+  dialog and menu checks in the spacing. In `OLMenuedWinClass` and
+  `OLBaseWinClass`: the window icon (`OLWinIconClass`: a minimized
+  window is hidden, as with the task bar on), the menu and trigger bars
+  (`OLMenuBarClass`), the help trigger and file menu a primary adds,
+  the window list entry, the express tool area (the field has none),
+  moniker lists, a double click on the title (the pointer code of
+  `cwinPtr.asm`), `GenDisplayGroupClass` (not in the C UI). The display
+  and dialog classes and their build routines. In `OLGadgetAreaClass`:
+  the display controls its margins look for. In `OLCtrlClass`:
   an OLCtrl in a menu window, the reply bar's notification of its dialog and its
   line under a dialog (`OLDialogWinClass`, `OLReplyBarClass`), the
   gadget area's margins, the menu center, mnemonics, the default
@@ -5409,7 +5439,18 @@ are left out), the constants, the variables and the routines.
   inside the field, a title bar and the margins of a titled resizable
   window, its window opened on the field's; brought to the top it has
   the application's focus; closed, the focus leaves and the slot is
-  free again. The test loads no fonts, so monikers have no height
+  free again. Last a GenPrimary under the application, built as an
+  `OLBaseWin` by `OLBuildPrimary`: its primary attributes (resizable
+  only with a mouse; the test has none) and position flags, its icon's
+  stagger slot; usable, its window on the field's, staggered and
+  extended to the field's right, its gadget area (an
+  `OLGadgetArea`, the window's children vertical) holding a generic
+  group and a right title bar group (an `OLTitleGroup`, a toolbox)
+  holding a group with `HINT_SEEK_TITLE_BAR_RIGHT`; maximized it
+  covers the field from -1, -1 (the frame off it) and is neither
+  movable nor resizable, restored it has its size again; minimized it
+  is closed (the branch minimized), restored it opens again; not usable
+  it closes and frees its slot. The test loads no fonts, so monikers have no height
   there.
 
 ## 14. Open

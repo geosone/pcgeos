@@ -19,6 +19,8 @@
 @include <Internal/SpecUI/olApplicationClass.goh>
 @include <Objects/gInterC.goh>
 @include <Internal/SpecUI/olWinClass.goh>
+@include <Internal/SpecUI/olGadgetAreaClass.goh>
+@include <Internal/SpecUI/olBaseWinClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/videoDr.h>
 #include <initfile.h>
@@ -112,6 +114,20 @@ UMState umState;
     GI_visMoniker = "Window";
     GI_states = GS_ENABLED;
     GII_visibility = GIV_DIALOG;
+}
+/* a primary with a group (for its gadget area) and a toolbox seeking
+ * the title bar */
+@object GenPrimaryClass UMPrimary = {
+    GI_visMoniker = "Primary";
+    GI_states = GS_ENABLED;
+    GI_comp = @UMPrimGroup, @UMPrimTool;
+}
+@object UMGroupClass UMPrimGroup = {
+    GII_visibility = GIV_SUB_GROUP;
+}
+@object UMGroupClass UMPrimTool = {
+    GII_visibility = GIV_SUB_GROUP;
+    HINT_SEEK_TITLE_BAR_RIGHT;
 }
 @end UMObjects;
 
@@ -601,6 +617,119 @@ static word Slot(byte req, sword *x, sword *y)
 	o = 0;
 	(void) @call umApp::MSG_META_GET_FOCUS_EXCL(&o);
 	UMCHECK(o != @UMWin);
+	break;
+    }
+    case 12: {
+	/* OLBaseWin: a GenPrimary under the application (built by
+	 * OLBuildPrimary): a primary window, staggered and extended near
+	 * the field's bottom right; usable: its gadget area holds the
+	 * group, a title bar group the toolbox; maximized and restored,
+	 * minimized and restored, not usable */
+	OLBaseWinInstance b;
+	OLCtrlInstance c;
+	OLFieldInstance f;
+	optr ga, tg;
+	sword w0, h0;
+	WindowHandle parent = 0;
+	OLWinAttr resizable;
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMPrimary, CCO_LAST);
+	(void) @call UMPrimary::MSG_VIS_GET_ATTRS();
+	UMCHECK(InClass(@UMPrimary, (ClassStruct *) &OLBaseWinClass));
+	VisData(@UMPrimary, &b, sizeof(b));
+	UMCHECK(b.OLWI_type == MOWT_PRIMARY_WINDOW && b.OLCI_visParent == umApp);
+	/* (resizable only with a mouse: the test has none, the UI is
+	 * keyboard only) */
+	resizable = (FlowGetUIButtonFlags() & UIBF_KEYBOARD_ONLY) ? 0
+							      : OWA_RESIZABLE;
+	UMCHECK((b.OLWI_attrs & (OWA_HEADER | OWA_TITLED | OWA_MOVABLE |
+				 OWA_RESIZABLE | OWA_MAXIMIZABLE |
+				 OWA_CLOSABLE)) ==
+		(OWA_HEADER | OWA_TITLED | OWA_MOVABLE | resizable |
+		 OWA_MAXIMIZABLE | OWA_CLOSABLE));
+	UMCHECK(b.OLWI_winPosSizeFlags == (WPSF_PERSIST |
+					   (WCT_KEEP_PARTIALLY_VISIBLE << 6) |
+					   (WPT_STAGGER << 3) |
+					   WST_EXTEND_NEAR_BOTTOM_RIGHT));
+	UMCHECK((b.OLMDWI_iconWinPosSizeState >> 8) == 0x40);	/* SSPR_ICON */
+	UMCHECK(b.VI_specAttrs & SA_REALIZABLE);
+
+	/* usable and attached: built, its window on the field's */
+	@call UMPrimary::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMPrimary::MSG_SPEC_SET_ATTRS(SA_REALIZABLE | SA_ATTACHED, 0,
+					    VUM_NOW);
+	VisData(@UMPrimary, &b, sizeof(b));
+	UMCHECK((b.VI_attrs & VA_REALIZED) && b.VCI_window);
+	if (b.VCI_window)
+	    WinGetInfo(b.VCI_window, WIT_PARENT_WIN, &parent);
+	UMCHECK(parent == umState.UMS_fieldWin);
+	UMCHECK(@call UMPrimary::MSG_VIS_FIND_PARENT() == umApp);
+	/* the gadget area: the window's children vertical, the group in
+	 * it; the toolbox in the right title bar group */
+	UMCHECK(b.OLMDWI_gadgetArea != 0);
+	ga = ConstructOptr(OptrToHandle(@UMPrimary), b.OLMDWI_gadgetArea);
+	UMCHECK(InClass(ga, (ClassStruct *) &OLGadgetAreaClass));
+	UMCHECK(@call ga::MSG_VIS_FIND_PARENT() == @UMPrimary);
+	UMCHECK(b.VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY);
+	UMCHECK(@call UMPrimGroup::MSG_VIS_FIND_PARENT() == ga);
+	tg = b.OLWI_titleBarRightGroup;
+	UMCHECK(tg != 0 && !b.OLWI_titleBarLeftGroup);
+	if (tg) {
+	    UMCHECK(InClass(tg, (ClassStruct *) &OLTitleGroupClass));
+	    UMCHECK(@call UMPrimTool::MSG_VIS_FIND_PARENT() == tg);
+	    UMCHECK(@call tg::MSG_VIS_FIND_PARENT() == @UMPrimary);
+	    VisData(tg, &c, sizeof(c));
+	    UMCHECK(((c.OLCI_buildFlags & OLBF_TARGET) >> OLBF_TARGET_OFFSET)
+		    == OLBT_FOR_TITLE_BAR_RIGHT &&
+		    (c.OLCI_buildFlags & OLBF_TOOLBOX));
+	}
+	/* staggered, extended near the field's bottom right (Motif keeps
+	 * no margin at the right: the window ends one past the field, as
+	 * a maximized one) */
+	VisData(umField, &f, sizeof(f));
+	w0 = b.VI_bounds.R_right - b.VI_bounds.R_left;
+	h0 = b.VI_bounds.R_bottom - b.VI_bounds.R_top;
+	UMCHECK(b.VI_bounds.R_right == f.VI_bounds.R_right + 1 &&
+		b.VI_bounds.R_bottom < f.VI_bounds.R_bottom &&
+		w0 > (f.VI_bounds.R_right - f.VI_bounds.R_left) / 2);
+	UMCHECK(((b.OLWI_winPosSizeState >> 8) & 0x3f) != 0);
+
+	/* maximized: the whole field, not movable or resizable */
+	@call UMPrimary::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	UMCHECK(@call UMPrimary::MSG_GEN_DISPLAY_GET_MAXIMIZED());
+	VisData(@UMPrimary, &b, sizeof(b));
+	UMCHECK(b.OLWI_specState & OLWSS_MAXIMIZED);
+	UMCHECK(!(b.OLWI_attrs & (OWA_MOVABLE | OWA_RESIZABLE)));
+	UMCHECK(b.VI_bounds.R_left == -1 && b.VI_bounds.R_top == -1 &&
+		b.VI_bounds.R_right == f.VI_bounds.R_right + 1 &&
+		b.VI_bounds.R_bottom == f.VI_bounds.R_bottom + 1);
+	/* restored: as before */
+	@call UMPrimary::MSG_GEN_DISPLAY_SET_NOT_MAXIMIZED();
+	VisData(@UMPrimary, &b, sizeof(b));
+	UMCHECK(!(b.OLWI_specState & OLWSS_MAXIMIZED) &&
+		(b.OLWI_attrs & (OWA_MOVABLE | OWA_RESIZABLE)) ==
+		(OWA_MOVABLE | resizable));
+	UMCHECK(b.VI_bounds.R_right - b.VI_bounds.R_left == w0 &&
+		b.VI_bounds.R_bottom - b.VI_bounds.R_top == h0);
+
+	/* minimized: closed; restored: open again */
+	@call UMPrimary::MSG_GEN_DISPLAY_SET_MINIMIZED();
+	UMCHECK(@call UMPrimary::MSG_GEN_DISPLAY_GET_MINIMIZED());
+	VisData(@UMPrimary, &b, sizeof(b));
+	UMCHECK((b.OLWI_specState & OLWSS_MINIMIZED) &&
+		(b.VI_specAttrs & SA_BRANCH_MINIMIZED) &&
+		!(b.VI_attrs & VA_REALIZED));
+	@call UMPrimary::MSG_GEN_DISPLAY_SET_NOT_MINIMIZED();
+	VisData(@UMPrimary, &b, sizeof(b));
+	UMCHECK(!(b.OLWI_specState & OLWSS_MINIMIZED) &&
+		!(b.VI_specAttrs & SA_BRANCH_MINIMIZED) &&
+		(b.VI_attrs & VA_REALIZED) && b.VCI_window);
+
+	/* not usable: closed, its slot back */
+	@call UMPrimary::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	VisData(@UMPrimary, &b, sizeof(b));
+	UMCHECK(!(b.VI_attrs & VA_REALIZED));
+	UMCHECK(!((b.OLWI_winPosSizeState >> 8) & 0x3f));
 	break;
     }
     }
