@@ -272,12 +272,23 @@ typedef struct {
 		optr queryOrigin = cx:dx,
 		NavigationFlags navFlags = bp) = carry; /* XXX */
 
+@ifdef GEOS_PORT32
+/* Port32: the registers hold handles, so 32 bits each (an optr
+ * returned in cx:dx is ConstructOptr(GRP_cx, GRP_dx)) */
+typedef struct {
+    dword	GRP_ax;
+    dword	GRP_bp;
+    dword	GRP_cx;
+    dword	GRP_dx;
+} GenReturnParams;
+@else
 typedef struct {
     word	GRP_ax;
     word	GRP_bp;
     word	GRP_cx;
     word	GRP_dx;
 } GenReturnParams;
+@endif
 
 /*** Generic Upward Queries ***/
 
@@ -951,6 +962,10 @@ extern Boolean UserCallSystem(Message msg, const void *params,
 /* the DisplayType of the first screen in the high byte, 0xff in the
  * low one once a screen set it (UserGetDisplayType of the asm) */
 extern word UserGetDisplayType(void);
+/* the UI's moniker font: the specific UI sets it from its display
+ * scheme (userUtils.asm) */
+extern void UserSetDefaultMonikerFont(FontID id, word pointSize);
+extern void UserGetDefaultMonikerFont(FontID *id, word *pointSize);
 #endif
 
 #define GenFindParent(oself)	\

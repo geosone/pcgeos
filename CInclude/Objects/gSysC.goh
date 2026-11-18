@@ -46,6 +46,16 @@
 @message void MSG_GEN_SYSTEM_SET_PTR_IMAGE(optr ptrImage = cx:dx,
 					PtrImageLevel level = bp);	/* XXX */
 @message void MSG_GEN_SYSTEM_NOTIFY_SYS_MODAL_WIN_CHANGE();	/* XXX */
+@ifdef GEOS_PORT32
+/* Port32: the input object of the system modal geode, if any, and the
+ * geode (the asm's cx:dx, bp) */
+@message optr MSG_GEN_SYSTEM_GET_MODAL_GEODE(GeodeHandle *geode);
+/* Port32: the layer ID is a handle */
+@message void MSG_GEN_SYSTEM_BRING_GEODE_TO_TOP(GeodeHandle geode,
+				Handle layerID, WindowHandle parentWindow);
+@message void MSG_GEN_SYSTEM_LOWER_GEODE_TO_BOTTOM(GeodeHandle geode,
+				Handle layerID, WindowHandle parentWindow);
+@else
 @message void MSG_GEN_SYSTEM_GET_MODAL_GEODE();		/* INTERNAL */
 @message void MSG_GEN_SYSTEM_BRING_GEODE_TO_TOP(
     	    	    	    	GeodeHandle geode = cx,
@@ -58,6 +68,7 @@
 @message void MSG_GEN_SYSTEM_LOWER_GEODE_TO_BOTTOM(word geode = cx,
 				word layerID = dx,
 				Handle parentWindow = bp);	/* XXX */
+@endif
 @ifdef GEOS_PORT32
 /* Port32: the callback is called for each field child until it returns
  * TRUE; that field is returned, else 0 */
@@ -98,6 +109,8 @@ typedef Boolean GenSystemFieldCallback(optr field, word data);
  */
 extern optr UserCreateSystemObject(MemHandle block);
 extern void UserDestroySystemObject(void);
+/* the system object (0 until made), for the specific UI */
+extern optr UserGetSystemObject(void);
 @endif
 
 @endlib

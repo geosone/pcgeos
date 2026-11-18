@@ -12,6 +12,16 @@
 
 @deflib ui
 
+/* the parents MSG_SPEC_GUP_QUERY_VIS_PARENT asks for (visC.def) */
+typedef word SpecQueryVisParentType;
+#define SQT_VIS_PARENT_FOR_FIELD	0
+#define SQT_VIS_PARENT_FOR_APPLICATION	1
+#define SQT_VIS_PARENT_FOR_PRIMARY	2
+#define SQT_VIS_PARENT_FOR_DISPLAY	3
+#define SQT_VIS_PARENT_FOR_POPUP	4
+#define SQT_VIS_PARENT_FOR_URGENT	5
+#define SQT_VIS_PARENT_FOR_SYS_MODAL	6
+
 /* the generic upward query, passed on as it came (MSG_GEN_GUP_QUERY's
  * parameters); TRUE if answered */
 @alias (MSG_SPEC_GUP_QUERY) Boolean MSG_SPEC_P32_GUP_QUERY(
@@ -27,6 +37,27 @@
 @alias (MSG_GEN_GUP_ENSURE_UPDATE_WINDOW) Boolean
 	MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW(UpdateWindowFlags updateFlags,
 					     VisUpdateMode updateMode);
+
+/* the visual upward query (visC.def: VisUpwardQueryType); the
+ * specific UI's queries start at SPEC_VIS_QUERY_START */
+typedef word VisUpwardQueryType;
+#define VUQ_DISPLAY_SCHEME	0
+#define VUQ_VIDEO_DRIVER	1
+#define SPEC_VIS_QUERY_START	2000
+#define APP_VIS_QUERY_START	4000
+
+/*
+ * MSG_VIS_VUP_QUERY with its registers (Port32): the query type, the
+ * asm's dx and bp passed on, the answer in retValue; TRUE (the asm's
+ * carry) if answered.  VUQ_DISPLAY_SCHEME answers GRP_ax = the
+ * DisplayScheme's colorScheme | displayType << 8 | lightColor << 16 |
+ * darkColor << 24, GRP_cx = the font ID, GRP_dx = the point size;
+ * VUQ_VIDEO_DRIVER answers the driver in GRP_ax.
+ */
+@alias (MSG_VIS_VUP_QUERY) Boolean MSG_VIS_P32_VUP_QUERY(
+				GenReturnParams *retValue = axbpcxdx,
+				VisUpwardQueryType queryType = cx,
+				dword data1 = dx, dword data2 = bp) = carry;
 
 @endlib
 

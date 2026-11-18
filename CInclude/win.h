@@ -71,7 +71,7 @@ extern WindowHandle	/*XXX*/
     _pascal WinOpen(Handle parentWinOrVidDr, 
 		optr inputRecipient, optr exposureRecipient,
 		word colorFlags, word redOrIndex,
-		word green, word blue, word flags, word layerID,
+		word green, word blue, word flags, Handle layerID,
 		GeodeHandle owner, const Region *winReg, word axParam,
 		word bxParam, word cxParam, word dxParam);
 
@@ -107,7 +107,7 @@ extern void	/*XXX*/
 
 
 extern void	/*XXX*/
-    _pascal WinChangePriority(WindowHandle win, WinPassFlags flags, word layerID);
+    _pascal WinChangePriority(WindowHandle win, WinPassFlags flags, Handle layerID);
 
 /***/
 

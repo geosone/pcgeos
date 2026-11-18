@@ -97,6 +97,10 @@ typedef ByteFlags FlowFlags;
 
 @endc
 
+/* Port32: the UI's flow object (uiFlowObj of userMain.asm), the object
+ * UserCallFlow sent to; the specific UI calls it with @call */
+extern optr UserGetFlowObject(void);
+
 @endlib
 
 #endif

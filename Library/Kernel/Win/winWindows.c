@@ -379,7 +379,7 @@ void WinResize(WindowHandle win, const Region *reg, word axParam,
  * their new place; else the window goes to its new place (and into
  * layer layerID, if not 0).
  */
-void WinChangePriority(WindowHandle win, WinPassFlags flags, word layerID)
+void WinChangePriority(WindowHandle win, WinPassFlags flags, Handle layerID)
 {
     WindowHandle wh, ch, next, moved[64], parent;
     Window *w = ChangeEnter(win, &wh), *c;
@@ -394,7 +394,7 @@ void WinChangePriority(WindowHandle win, WinPassFlags flags, word layerID)
 	for (ch = w->W_firstChild; ch; ch = next) {
 	    c = L(ch);
 	    next = c->W_nextSibling;
-	    if (c->W_layerID == (Handle) layerID && n < 64) {
+	    if (c->W_layerID == layerID && n < 64) {
 		if (prio & WPD_LAYER)
 		    c->W_priority = (byte) ((c->W_priority & WPD_WIN) |
 					    (prio & WPD_LAYER));

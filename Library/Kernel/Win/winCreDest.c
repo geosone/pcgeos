@@ -67,7 +67,7 @@ static WindowHandle AllocateWindow(GeodeHandle owner, word flags,
 WindowHandle WinOpen(Handle parentWinOrVidDr, optr inputRecipient,
 		     optr exposureRecipient, word colorFlags,
 		     word redOrIndex, word green, word blue, word flags,
-		     word layerID, GeodeHandle owner, const Region *winReg,
+		     Handle layerID, GeodeHandle owner, const Region *winReg,
 		     word axParam, word bxParam, word cxParam, word dxParam)
 {
     WindowHandle wh = AllocateWindow(owner, flags, exposureRecipient),
