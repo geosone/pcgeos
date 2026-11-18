@@ -1,0 +1,635 @@
+/*
+ * cwinMenuedWin.goc -- OLMenuedWinClass (after cwinMenuedWin.asm): the
+ * window of a GenDisplay or GenPrimary (OLBaseWinClass): its gadget
+ * area (OLGadgetAreaClass) for the generic children, the title bar
+ * groups (OLTitleGroupClass) for the children that seek the title bar,
+ * the menu bar (the build info of menus), minimized and maximized
+ * (the GenDisplay's states), the moniker for the title.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet:
+ *   - the window icon (OLWinIconClass): a minimized window is hidden,
+ *     as with the task bar on (OLMDWI_icon stays 0);
+ *   - the menu bar and the trigger bar (OLMenuBarClass, a popout): a
+ *     menu's build info finds no menu bar;
+ *   - the system menu and its icons (OLWI_sysMenu stays 0);
+ *   - moniker lists (MSG_GEN_FIND_MONIKER answers a plain moniker);
+ *   - a double click on the title (cwinPtr.asm's MSG_META_START_SELECT).
+ */
+@include "cGeode.goh"
+
+@classdecl OLMenuedWinClass, neverSaved;
+
+#define MWin(o)		((OLMenuedWinInstance *) ObjDerefVis(o))
+#define Gen(o)		((GenInstance *) ObjDerefGen(o))
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+
+/* ---------------------------------------------------------------------
+ * Bars
+ * ------------------------------------------------------------------- */
+
+/*
+ * OpenWinCreateBarObject: an object of the class in the window's block
+ * (not dirtied), the window its vis parent; built if the window is
+ */
+ChunkHandle OpenWinCreateBarObject(optr o, ClassStruct *class)
+{
+    optr bar = ObjInstantiate(OptrToHandle(o), class);
+    SpecBuildFlags f = 0;
+
+    ObjSetFlags(bar, OCF_IGNORE_DIRTY, 0);
+    @call bar::MSG_OL_CTRL_SET_VIS_PARENT(o);
+    if (VisCheckIfSpecBuilt(o)) {
+	if (((VisInstance *) ObjDerefVis(o))->VI_attrs & VA_FULLY_ENABLED)
+	    f |= SBF_VIS_PARENT_FULLY_ENABLED;
+	@call bar::MSG_SPEC_BUILD(f);
+    }
+    return OptrToChunk(bar);
+}
+
+/* CreateTitleBarGroup: a title bar group, managed later (by the UI
+ * queue) and for the left or right of the title bar */
+optr CreateTitleBarGroup(optr o, word titleGroupType)
+{
+    optr g = ConstructOptr(OptrToHandle(o),
+			   OpenWinCreateBarObject(o, (ClassStruct *)
+						     &OLTitleGroupClass));
+
+    @call g::MSG_VIS_SET_ATTRS(0, VA_MANAGED, VUM_DELAYED_VIA_UI_QUEUE);
+    ((OLCtrlInstance *) ObjDerefVis(g))->OLCI_buildFlags |=
+	titleGroupType == TGT_RIGHT_GROUP ? T(OLBT_FOR_TITLE_BAR_RIGHT)
+					  : T(OLBT_FOR_TITLE_BAR_LEFT);
+    return g;
+}
+
+/* ---------------------------------------------------------------------
+ * Initialization and build
+ * ------------------------------------------------------------------- */
+
+/* the window's moniker of a style (or the application's) */
+static optr FindMoniker(optr o, Boolean app, VisMonikerSearchFlags f,
+			MemHandle dest)
+{
+    return @call o::MSG_GEN_FIND_MONIKER(app, f, dest);
+}
+
+static Boolean MonikerIsGString(optr m)
+{
+    Boolean g;
+
+    ObjLockObjBlock(OptrToHandle(m));
+    g = (((VisMoniker *) LMemDeref(m))->VM_type & VMT_GSTRING) != 0;
+    MemUnlock(OptrToHandle(m));
+    return g;
+}
+
+/*
+ * FindIconMonikers: the icon's monikers (not for a display): the
+ * window's icon and abbreviated text, or the application's
+ * (HINT_DISPLAY_USE_APPLICATION_MONIKER_WHEN_MINIMIZED, or none of the
+ * window's own)
+ */
+static void FindIconMonikers(optr o)
+{
+    Boolean useApp;
+    optr icon = 0, caption;
+    OLMenuedWinInstance *w;
+
+    if (MWin(o)->OLWI_type == MOWT_DISPLAY_WINDOW)
+	return;
+    useApp = ObjVarFindData(o, HINT_DISPLAY_USE_APPLICATION_MONIKER_WHEN_MINIMIZED)
+	     != NULL;
+    if (!useApp) {
+	icon = FindMoniker(o, FALSE, VMSF_GSTRING |
+			   (VMS_ICON << VMSF_STYLE_OFFSET), 0);
+	if (icon && !MonikerIsGString(icon))
+	    icon = 0;
+    }
+    if (!icon)
+	icon = FindMoniker(o, TRUE, VMSF_GSTRING |
+			   (VMS_ICON << VMSF_STYLE_OFFSET), 0);
+    caption = useApp ? 0 : FindMoniker(o, FALSE,
+				       VMS_ABBREV_TEXT << VMSF_STYLE_OFFSET, 0);
+    if (!caption)
+	caption = FindMoniker(o, TRUE, VMS_ABBREV_TEXT << VMSF_STYLE_OFFSET,
+			      0);
+    w = MWin(o);
+    w->OLMDWI_iconCaptionMoniker = caption;
+    w->OLMDWI_iconMoniker = icon;
+}
+
+/* OLMenuedWinInitialize: the menu grabs are temporary; the icon's
+ * monikers */
+@method OLMenuedWinClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    MWin(oself)->OLWI_menuState |= OLWMS_MENU_WINDOW_GRABS_ARE_TEMPORARY;
+    FindIconMonikers(oself);
+}
+
+/*
+ * OLMenuedWinCheckForGensMinimized: the vardata there (minimized by the
+ * generic object, or on startup) and minimizable: not realizable, the
+ * branch minimized (TRUE).  The generic minimized state goes.
+ */
+static Boolean CheckForGensMinimized(optr o, word vardata)
+{
+    Boolean r = FALSE;
+    OLMenuedWinInstance *w;
+
+    if (ObjVarFindData(o, vardata)) {
+	w = MWin(o);
+	if (w->OLWI_attrs & OWA_MINIMIZABLE) {
+	    w->VI_specAttrs = (SpecAttrs) ((w->VI_specAttrs & ~SA_REALIZABLE) |
+					   SA_BRANCH_MINIMIZED);
+	    r = TRUE;
+	}
+    }
+    (void) ObjVarDeleteData(o, ATTR_GEN_DISPLAY_MINIMIZED_STATE);
+    return r;
+}
+
+/*
+ * OLMenuedWinUpdateWindow: attaching, minimized as the generic object
+ * was saved (or as HINT_DISPLAY_MINIMIZED_ON_STARTUP asks); else a
+ * generic minimized state is carried out
+ */
+@method OLMenuedWinClass, MSG_META_UPDATE_WINDOW
+{
+    if (updateFlags & UWF_ATTACHING)
+	(void) CheckForGensMinimized(oself,
+				     (updateFlags & UWF_RESTORING_FROM_STATE) ?
+				     ATTR_GEN_DISPLAY_MINIMIZED_STATE :
+				     HINT_DISPLAY_MINIMIZED_ON_STARTUP);
+    else if (!(updateFlags & UWF_DETACHING) &&
+	     CheckForGensMinimized(oself, ATTR_GEN_DISPLAY_MINIMIZED_STATE))
+	@call oself::MSG_GEN_DISPLAY_SET_MINIMIZED();
+    @callsuper();
+}
+
+/* OLMenuedWinUpdateSpecBuild: a gadget area (not in a custom window),
+ * then the branch */
+@method OLMenuedWinClass, MSG_SPEC_BUILD_BRANCH
+{
+    if (!(pself->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW) &&
+	!pself->OLMDWI_gadgetArea) {
+	ChunkHandle g = OpenWinCreateBarObject(oself, (ClassStruct *)
+						      &OLGadgetAreaClass);
+	MWin(oself)->OLMDWI_gadgetArea = g;
+    }
+    @callsuper();
+}
+
+/*
+ * OLMenuedWinFindTitleMoniker: the window's text moniker; without one
+ * (not a display) a copy of the application's
+ */
+static void FindTitleMoniker(optr o)
+{
+    optr m = FindMoniker(o, FALSE, VMSF_REPLACE_LIST |
+			 (VMS_TEXT << VMSF_STYLE_OFFSET), 0);
+
+    if (OptrToChunk(m) || MWin(o)->OLWI_type == MOWT_DISPLAY_WINDOW)
+	return;
+    m = FindMoniker(o, TRUE, VMSF_COPY_CHUNK | (VMS_TEXT << VMSF_STYLE_OFFSET),
+		    OptrToHandle(o));
+    Gen(o)->GI_visMoniker = OptrToChunk(m);
+}
+
+static void BuildBar(optr bar, SpecBuildFlags flags)
+{
+    if (OptrToChunk(bar))
+	@call bar::MSG_SPEC_BUILD(flags);
+}
+
+/*
+ * OLMenuedWinSpecBuild: as OpenWinSpecBuild with the title moniker,
+ * maximized as the generic object is; then the title bar groups, the
+ * menu bar, the trigger bar and the gadget area
+ */
+@method OLMenuedWinClass, MSG_SPEC_BUILD
+{
+    OLMenuedWinInstance *w;
+    MemHandle mh = OptrToHandle(oself);
+
+    if (VisCheckIfSpecBuilt(oself))
+	return;
+    VisSpecBuildSetEnabledState(oself, flags);
+    OpenWinSetVisParent(oself, flags);
+    FindTitleMoniker(oself);
+    ConvertSpecWinSizePairsToPixels(oself);
+    UpdateWinPosSize(oself);
+    ScanFocusTargetHintHandlers(oself);
+    if (@call oself::MSG_GEN_DISPLAY_GET_MAXIMIZED())
+	OLMenuedWinSetMaximized(oself, VUM_MANUAL);
+    w = MWin(oself);
+    BuildBar(w->OLWI_titleBarLeftGroup, flags);
+    w = MWin(oself);
+    BuildBar(w->OLWI_titleBarRightGroup, flags);
+    w = MWin(oself);
+    BuildBar(ConstructOptr(mh, w->OLMDWI_menuBar), flags);
+    w = MWin(oself);
+    BuildBar(ConstructOptr(mh, w->OLMDWI_triggerBar), flags);
+    w = MWin(oself);
+    BuildBar(ConstructOptr(mh, w->OLMDWI_gadgetArea), flags);
+}
+
+/* OLMenuedWinVisUnbuild: the bars are gone with the vis tree */
+@method OLMenuedWinClass, MSG_SPEC_UNBUILD
+{
+    pself->OLMDWI_menuBar = 0;
+    pself->OLMDWI_triggerBar = 0;
+    pself->OLMDWI_gadgetArea = 0;
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Minimized
+ * ------------------------------------------------------------------- */
+
+/* OLMenuedWinCallIconObject (Port32: there is no icon yet) */
+static void IconSetNotRealizable(optr o)
+{
+    optr icon = MWin(o)->OLMDWI_icon;
+
+    if (OptrToChunk(icon))
+	@call icon::MSG_SPEC_SET_ATTRS(0, SA_REALIZABLE, VUM_NOW);
+}
+
+/*
+ * OLMenuedWinGenSetMinimized: minimizable and not minimized yet: not
+ * realizable, the branch minimized.  Port32: no icon (as with the task
+ * bar on).
+ */
+@method OLMenuedWinClass, MSG_GEN_DISPLAY_SET_MINIMIZED
+{
+    if ((pself->OLWI_specState & OLWSS_MINIMIZED) ||
+	!(pself->OLWI_attrs & OWA_MINIMIZABLE))
+	return;
+    pself->OLWI_specState |= OLWSS_MINIMIZED;
+    @call oself::MSG_SPEC_SET_ATTRS(SA_BRANCH_MINIMIZED, SA_REALIZABLE,
+				    VUM_NOW);
+}
+
+/*
+ * OLMenuedWinSetNotMinimized: the icon goes, the window is realizable
+ * again (all of it invalid), no longer minimized; the application finds
+ * its focus and target
+ */
+@method OLMenuedWinClass, MSG_GEN_DISPLAY_SET_NOT_MINIMIZED
+{
+    optr app;
+
+    if (!(pself->OLWI_specState & OLWSS_MINIMIZED))
+	return;
+    pself->OLWI_specState &= ~OLWSS_MINIMIZED;
+    IconSetNotRealizable(oself);
+    @call oself::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID | VOF_WINDOW_INVALID |
+				      VOF_IMAGE_INVALID, VUM_MANUAL);
+    @call oself::MSG_SPEC_SET_ATTRS(SA_REALIZABLE, 0, VUM_NOW);
+    @call oself::MSG_SPEC_SET_ATTRS(0, SA_BRANCH_MINIMIZED, VUM_NOW);
+    app = GeodeGetAppObject(0);
+    if (app)
+	@call app::MSG_META_ENSURE_ACTIVE_FT();
+}
+
+/* ---------------------------------------------------------------------
+ * Maximized
+ * ------------------------------------------------------------------- */
+
+/*
+ * SetMaximized: built and maximizable: the state swapped, at the
+ * parent's top left (the resize border off it) extending to its bottom
+ * right, not movable or resizable; in a display group without header;
+ * the win group updated
+ */
+void OLMenuedWinSetMaximized(optr o, VisUpdateMode mode)
+{
+    OLMenuedWinInstance *w;
+    sword adj;
+    optr gp;
+
+    if (!VisCheckIfSpecBuilt(o))
+	return;
+    w = MWin(o);
+    if (!(w->OLWI_attrs & OWA_MAXIMIZABLE) ||
+	(w->OLWI_specState & OLWSS_MAXIMIZED))
+	return;
+    w->OLWI_specState |= OLWSS_MAXIMIZED;
+    OpenWinSwapState(o);
+    w = MWin(o);
+    w->OLWI_winPosSizeFlags = (WCT_NONE << 6) | (WPT_AT_RATIO << 3) |
+			      WST_EXTEND_TO_BOTTOM_RIGHT;
+    w->OLWI_winPosSizeState = WPSS_POSITION_INVALID | WPSS_SIZE_INVALID;
+    w->OLWI_attrs = w->OLWI_prevAttrs & ~(OWA_MOVABLE | OWA_RESIZABLE);
+    w->VI_bounds.R_left = w->VI_bounds.R_top = -1;
+    w->VI_bounds.R_right = w->VI_bounds.R_bottom = -1;
+    adj = GetTaskBarPositionAdjustment(o);
+    w = MWin(o);
+    w->VI_bounds.R_top += adj;
+    w->VI_bounds.R_bottom += adj;
+    UpdateWinPosSize(o);
+    /* in a GenDisplayGroup: no header, title or system menu (and the
+     * system menu's icons disabled).  Port32: GenDisplayGroupClass is
+     * not in C yet, no window is in one. */
+    gp = GenFindParent(o);
+    (void) gp;
+    (void) @call o::MSG_VIS_VUP_UPDATE_WIN_GROUP(mode);
+}
+
+/* SetNotMaximized: maximized: the state swapped back, the position
+ * and size worked out again, all invalid, the win group updated */
+static void SetNotMaximized(optr o, VisUpdateMode mode)
+{
+    OLMenuedWinInstance *w;
+
+    if (!VisCheckIfSpecBuilt(o))
+	return;
+    w = MWin(o);
+    if (!(w->OLWI_specState & OLWSS_MAXIMIZED))
+	return;
+    w->OLWI_specState &= ~OLWSS_MAXIMIZED;
+    OpenWinSwapState(o);
+    /* (OpenWinEnsureSysMenu and its icons: Port32 not yet) */
+    ConvertSpecWinSizePairsToPixels(o);
+    MWin(o)->OLWI_winPosSizeState |= WPSS_POSITION_INVALID | WPSS_SIZE_INVALID;
+    UpdateWinPosSize(o);
+    VisMarkFullyInvalid(o);
+    (void) @call o::MSG_VIS_VUP_UPDATE_WIN_GROUP(mode);
+}
+
+@method OLMenuedWinClass, MSG_GEN_DISPLAY_SET_MAXIMIZED
+{
+    OLMenuedWinSetMaximized(oself, VUM_NOW);
+}
+
+@method OLMenuedWinClass, MSG_GEN_DISPLAY_INTERNAL_SET_FULL_SIZED
+{
+    OLMenuedWinSetMaximized(oself, (VisUpdateMode) updateMode);
+}
+
+@method OLMenuedWinClass, MSG_GEN_DISPLAY_SET_NOT_MAXIMIZED
+{
+    SetNotMaximized(oself, VUM_NOW);
+}
+
+@method OLMenuedWinClass, MSG_GEN_DISPLAY_INTERNAL_SET_OVERLAPPING
+{
+    SetNotMaximized(oself, (VisUpdateMode) updateMode);
+}
+
+/* OLMenuedWinRestoreWin: restorable: not minimized, or not maximized */
+@method OLMenuedWinClass, MSG_OL_RESTORE_WIN
+{
+    if (!(pself->OLWI_fixedAttr & OWFA_RESTORABLE))
+	return;
+    if (pself->OLWI_specState & OLWSS_MINIMIZED)
+	@call oself::MSG_GEN_DISPLAY_SET_NOT_MINIMIZED();
+    else
+	@call oself::MSG_GEN_DISPLAY_SET_NOT_MAXIMIZED();
+}
+
+/* ---------------------------------------------------------------------
+ * Queries
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLMenuedWinGupQuery: the menu bar; the build info of a menu (or an
+ * object seeking the menu bar): the menu bar's, where it is a top or
+ * sub menu; else no vis parent from here (Port32: the menu bar is not
+ * made yet, OLMenuBarClass)
+ */
+@method OLMenuedWinClass, MSG_SPEC_P32_GUP_QUERY
+{
+    optr bar;
+
+    switch ((word) queryType) {
+    case SGQT_FIND_MENU_BAR:
+	retValue->GRP_cx = OptrToHandle(oself);
+	retValue->GRP_dx = pself->OLMDWI_menuBar;
+	return TRUE;
+    case SGQT_BUILD_INFO:
+	break;
+    default:
+	return @callsuper();
+    }
+    if (!(pself->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW) &&
+	(retValue->GRP_bp & (OLBF_MENUABLE | OLBF_SEEK_MENU_BAR)) &&
+	pself->OLMDWI_menuBar) {
+	word r;
+
+	bar = ConstructOptr(OptrToHandle(oself), pself->OLMDWI_menuBar);
+	(void) @call bar::MSG_BAR_BUILD_INFO(retValue, queryType);
+	r = retValue->GRP_bp & OLBF_REPLY;
+	if (r == (OLBR_TOP_MENU << OLBF_REPLY_OFFSET) ||
+	    r == (OLBR_SUB_MENU << OLBF_REPLY_OFFSET))
+	    return TRUE;
+    }
+    retValue->GRP_cx = 0;
+    return TRUE;
+}
+
+/* OLMenuedWinSpecNavigateToNextField: through the menu bar if a menu
+ * has the focus */
+@method OLMenuedWinClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD
+{
+    OpenWinNavigateCommon(oself, (pself->OLWI_focusExcl.FTVMC_flags &
+				  MAEF_OD_IS_MENU_RELATED) ? NF_NAV_MENU_BAR
+							   : 0);
+}
+
+@method OLMenuedWinClass, MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD
+{
+    NavigationFlags nf = NF_TRAVEL_CIRCUIT | NF_BACKTRACK_AFTER_TRAVELING;
+
+    if (pself->OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED)
+	nf |= NF_NAV_MENU_BAR;
+    OpenWinNavigateCommon(oself, nf);
+}
+
+@method OLMenuedWinClass, MSG_OL_WIN_QUERY_MENU_BAR
+{
+    return pself->OLMDWI_menuBar ?
+	   ConstructOptr(OptrToHandle(oself), pself->OLMDWI_menuBar) : 0;
+}
+
+/* OLMenuedWinSetIconPos: the icon's new position (if it has a slot)
+ * and slot */
+@method OLMenuedWinClass, MSG_OL_MW_SET_ICON_POS
+{
+    if (slot & (WPSS_STAGGERED_SLOT >> WPSS_STAGGERED_SLOT_OFFSET)) {
+	pself->OLMDWI_iconPosLeft = x;
+	pself->OLMDWI_iconPosTop = y;
+    }
+    pself->OLMDWI_iconWinPosSizeState = (WinPosSizeState)
+	((pself->OLMDWI_iconWinPosSizeState & ~0x7f00) |
+	 ((word) slot << WPSS_STAGGERED_SLOT_OFFSET));
+}
+
+/* the stagger slot of the icon back to the field */
+static void FreeIconSlot(optr o)
+{
+    byte slot = (byte) ((MWin(o)->OLMDWI_iconWinPosSizeState &
+			 WPSS_STAGGERED_SLOT) >> WPSS_STAGGERED_SLOT_OFFSET);
+    optr p;
+
+    if (!(slot & SSPR_SLOT) || !(p = VisFindParent(o)))
+	return;
+    {
+	GenReturnParams r;
+
+	(void) @call p::MSG_VIS_P32_VUP_QUERY(&r, SVQT_FREE_STAGGER_SLOT,
+					      slot, 0);
+    }
+}
+
+/* OLMenuedWinQuit: the slots of the window and its icon freed */
+@method OLMenuedWinClass, MSG_META_QUIT
+{
+    @callsuper();
+    OpenWinFreeStaggeredSlot(oself);
+    FreeIconSlot(oself);
+}
+
+/* OLMenuedWinLostSysExcl: no gadget exclusive (queued, first) */
+@method OLMenuedWinClass, MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    @send, forceQueue, insertAtFront oself::MSG_VIS_TAKE_GADGET_EXCL(0);
+    @callsuper();
+}
+
+/* MaybeInTitleBar: a child seeking the title bar goes into its group
+ * (made if needed); 0 if not */
+static optr MaybeInTitleBar(optr o, optr child)
+{
+    word type;
+    Boolean left, right;
+    optr g;
+
+    ObjLockObjBlock(OptrToHandle(child));
+    left = ObjVarFindData(child, HINT_SEEK_TITLE_BAR_LEFT) != NULL;
+    right = !left && ObjVarFindData(child, HINT_SEEK_TITLE_BAR_RIGHT) != NULL;
+    MemUnlock(OptrToHandle(child));
+    if (!left && !right)
+	return 0;
+    type = left ? TGT_LEFT_GROUP : TGT_RIGHT_GROUP;
+    g = left ? MWin(o)->OLWI_titleBarLeftGroup
+	     : MWin(o)->OLWI_titleBarRightGroup;
+    if (g)
+	return g;
+    g = CreateTitleBarGroup(o, type);
+    if (left)
+	MWin(o)->OLWI_titleBarLeftGroup = g;
+    else
+	MWin(o)->OLWI_titleBarRightGroup = g;
+    return g;
+}
+
+/*
+ * OLMenuedWinDetermineVisParentForChild: the title bar groups (and the
+ * system menu's icons) are ours; a child seeking the title bar goes
+ * into its group, the others into the gadget area
+ */
+@method OLMenuedWinClass, MSG_SPEC_DETERMINE_VIS_PARENT_FOR_CHILD
+{
+    optr g;
+
+    if (child == pself->OLWI_titleBarLeftGroup ||
+	child == pself->OLWI_titleBarRightGroup)
+	return 0;
+    g = MaybeInTitleBar(oself, child);
+    if (g)
+	return g;
+    return MWin(oself)->OLMDWI_gadgetArea ?
+	   ConstructOptr(OptrToHandle(oself), MWin(oself)->OLMDWI_gadgetArea)
+	   : 0;
+}
+
+/* OLMenuedWinTranslateToGenMessage: the system menu's close, minimize
+ * and maximize as the GenDisplay's */
+@method OLMenuedWinClass, MSG_OL_WIN_CLOSE, MSG_OL_WIN_MINIMIZE,
+			  MSG_OL_WIN_MAXIMIZE
+{
+    if (message == MSG_OL_WIN_CLOSE)
+	@call oself::MSG_GEN_DISPLAY_CLOSE();
+    else if (message == MSG_OL_WIN_MINIMIZE)
+	@call oself::MSG_GEN_DISPLAY_SET_MINIMIZED();
+    else
+	@call oself::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+}
+
+/* OLMenuedWinNotifyEnabled: changed: the gadget area, the menu bar and
+ * the trigger bar told too */
+@method OLMenuedWinClass, MSG_SPEC_NOTIFY_ENABLED, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    MemHandle mh = OptrToHandle(oself);
+    ChunkHandle bars[3];
+    int i;
+
+    if (!@callsuper())
+	return FALSE;
+    bars[0] = MWin(oself)->OLMDWI_gadgetArea;
+    bars[1] = MWin(oself)->OLMDWI_menuBar;
+    bars[2] = MWin(oself)->OLMDWI_triggerBar;
+    for (i = 0; i < 3; i++) {
+	optr b = ConstructOptr(mh, bars[i]);
+
+	if (!bars[i])
+	    continue;
+	if (message == MSG_SPEC_NOTIFY_ENABLED)
+	    (void) @call b::MSG_SPEC_NOTIFY_ENABLED(updateMode, flags);
+	else
+	    (void) @call b::MSG_SPEC_NOTIFY_NOT_ENABLED(updateMode, flags);
+    }
+    return TRUE;
+}
+
+/* OLMenuedWinSpecSetUsable: usable, on top */
+@method OLMenuedWinClass, MSG_SPEC_SET_USABLE
+{
+    @callsuper();
+    @call oself::MSG_GEN_BRING_TO_TOP();
+}
+
+/* OLMenuedWinSpecSetNotUsable: the slots of the window and its icon
+ * freed, the icon gone */
+@method OLMenuedWinClass, MSG_SPEC_SET_NOT_USABLE
+{
+    OpenWinFreeStaggeredSlot(oself);
+    FreeIconSlot(oself);
+    IconSetNotRealizable(oself);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Monikers
+ * ------------------------------------------------------------------- */
+
+/* OLMenuedWinSendIconMonikers (Port32: no icon yet) */
+static void SendIconMonikers(optr o)
+{
+    (void) o;
+}
+
+static void UpdateAllMonikers(optr o)
+{
+    FindIconMonikers(o);
+    SendIconMonikers(o);
+    FindTitleMoniker(o);
+}
+
+@method OLMenuedWinClass, MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER
+{
+    UpdateAllMonikers(oself);
+}
+
+@method OLMenuedWinClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    UpdateAllMonikers(oself);
+    @callsuper();
+}
+
+/* the moniker list stays (FindTitleMoniker replaced it) */
+@method OLMenuedWinClass, MSG_SPEC_RESOLVE_MONIKER_LIST
+{
+    (void) monikerList;
+}

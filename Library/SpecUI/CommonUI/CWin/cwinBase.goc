@@ -1,0 +1,625 @@
+/*
+ * cwinBase.goc -- OLBaseWinClass (after cwinBase.asm): the window of a
+ * GenPrimary.  Its attributes (Motif's primary window: titled, movable,
+ * resizable, minimizable, maximizable, closable if the GenDisplay is
+ * dismissable), the display hints, staggered and extended near the
+ * field's bottom right (HINT_PRIMARY_FULL_SCREEN: all of it), maximized
+ * on startup, the title bar removed where a transparent launch model
+ * needs none, the express tool area beside the title of the target
+ * primary, closing (the application quits, or goes to the back), the
+ * target at TL_GEN_PRIMARY, Ctrl+F1 for the menu bar.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet:
+ *   - the help trigger and the file menu the build adds (AddPrimaryHelp,
+ *     EnsureFileMenu: the specific UI builds no GenTrigger or
+ *     GenInteraction popup yet);
+ *   - the window list entry (OLWindowListItemClass,
+ *     MSG_OL_FIELD_CREATE_WINDOW_LIST_ENTRY), the task bar;
+ *   - the express tool area (the field has none yet: its size is 0).
+ */
+@include "cGeode.goh"
+
+@classdecl OLBaseWinClass, neverSaved;
+
+#define BWin(o)		((OLBaseWinInstance *) ObjDerefVis(o))
+#define Prim(o)		((GenPrimaryInstance *) ObjDerefGen(o))
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
+
+/* the application's launch flags (none without an application) */
+static AppLaunchFlags LaunchFlags(void)
+{
+    optr app = GeodeGetAppObject(0);
+
+    return app ? @call app::MSG_GEN_APPLICATION_GET_LAUNCH_FLAGS() : 0;
+}
+
+/* a transparent launch model whose applications cannot be closed */
+static Boolean TransparentNotClosable(void)
+{
+    return UserGetLaunchModel() == UILM_TRANSPARENT &&
+	   !(UserGetLaunchOptions() & UILO_CLOSABLE_APPS);
+}
+
+/* ---------------------------------------------------------------------
+ * Initialization
+ * ------------------------------------------------------------------- */
+
+static void BaseWinHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+			word dataType, void *handlerData)
+{
+    OLBaseWinInstance *w = BWin(ConstructOptr(mh, chnk));
+
+    (void) extra;
+    (void) handlerData;
+    switch (dataType) {
+    case ATTR_GEN_DISPLAY_NOT_MINIMIZABLE:
+	w->OLWI_attrs &= ~OWA_MINIMIZABLE;
+	break;
+    case ATTR_GEN_DISPLAY_NOT_MAXIMIZABLE:
+	w->OLWI_attrs &= ~OWA_MAXIMIZABLE;
+	break;
+    case ATTR_GEN_DISPLAY_NOT_RESTORABLE:
+	w->OLWI_fixedAttr &= ~OWFA_RESTORABLE;
+	break;
+    case HINT_DISPLAY_NOT_RESIZABLE:
+	w->OLWI_attrs &= ~OWA_RESIZABLE;
+	break;
+    case HINT_PRIMARY_NO_EXPRESS_MENU:
+	w->OLBWI_flags |= OLBWF_REJECT_EXPRESS_TOOL_AREA;
+	break;
+    }
+}
+
+static VarDataCHandler baseWinHints[] = {
+    { ATTR_GEN_DISPLAY_NOT_MINIMIZABLE, BaseWinHint },
+    { ATTR_GEN_DISPLAY_NOT_MAXIMIZABLE, BaseWinHint },
+    { ATTR_GEN_DISPLAY_NOT_RESTORABLE, BaseWinHint },
+    { HINT_DISPLAY_NOT_RESIZABLE, BaseWinHint },
+    { HINT_PRIMARY_NO_EXPRESS_MENU, BaseWinHint },
+};
+
+/*
+ * OLBaseWinInitialize: a primary window (no build target) with Motif's
+ * primary attributes; not resizable without a mouse, closable if the
+ * GenDisplay is dismissable; realizable; the hints; no minimize and
+ * restore without those controls (or with a minimized title bar), no
+ * maximize for a desk accessory, no close where applications cannot be
+ * closed
+ */
+@method OLBaseWinClass, MSG_META_INITIALIZE
+{
+    OLBaseWinInstance *w;
+    Boolean dismissable;
+
+    pself->OLWI_type = MOWT_PRIMARY_WINDOW;
+    @callsuper();
+    dismissable = (((GenDisplayInstance *) ObjDerefGen(oself))->GDI_attributes &
+		   GDA_USER_DISMISSABLE) != 0;
+    w = BWin(oself);
+    w->OLCI_buildFlags &= ~OLBF_TARGET;
+    w->OLWI_attrs |= MO_ATTRS_PRIMARY_WINDOW;
+    w->OLWI_type = MOWT_PRIMARY_WINDOW;
+    if (FlowGetUIButtonFlags() & UIBF_KEYBOARD_ONLY)
+	w->OLWI_attrs &= ~OWA_RESIZABLE;
+    if (dismissable)
+	w->OLWI_attrs |= OWA_CLOSABLE;
+    w->VI_specAttrs |= SA_REALIZABLE;
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    ObjVarScanData(oself, sizeof(baseWinHints) / sizeof(baseWinHints[0]),
+		   baseWinHints, NULL);
+    w = BWin(oself);
+    if ((w->OLWI_moreFixedAttr & OMWFA_MINIMIZE_TITLE_BAR) ||
+	!OpenWinCheckIfMinMaxRestoreControls(oself)) {
+	w = BWin(oself);
+	if (w->OLWI_moreFixedAttr & OMWFA_MINIMIZE_TITLE_BAR)
+	    w->OLWI_attrs &= ~OWA_CLOSABLE;
+	w->OLWI_attrs &= ~OWA_MINIMIZABLE;
+	w->OLWI_fixedAttr &= ~OWFA_RESTORABLE;
+    }
+    if (LaunchFlags() & ALF_DESK_ACCESSORY)
+	BWin(oself)->OLWI_attrs &= ~OWA_MAXIMIZABLE;
+    else if (TransparentNotClosable())
+	BWin(oself)->OLWI_attrs &= ~OWA_CLOSABLE;
+}
+
+/*
+ * OLBaseWinScanGeometryHints: OLWin's, then the primary's position and
+ * size (staggered, kept partly visible, extended near the bottom right),
+ * its icon's (staggered in an icon slot), the window hints;
+ * HINT_PRIMARY_FULL_SCREEN: at the parent's top left, extended near its
+ * bottom right
+ */
+@method OLBaseWinClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    OLBaseWinInstance *w;
+
+    @callsuper();
+    w = BWin(oself);
+    w->OLWI_winPosSizeFlags = WPSF_PERSIST |
+			      (WCT_KEEP_PARTIALLY_VISIBLE << 6) |
+			      (WPT_STAGGER << 3) |
+			      WST_EXTEND_NEAR_BOTTOM_RIGHT;
+    w->OLMDWI_iconWinPosSizeFlags = WPSF_PERSIST | (WCT_NONE << 6) |
+				    (WPT_STAGGER << 3) | WST_AS_DESIRED;
+    w->OLMDWI_iconWinPosSizeState =
+	((word) SSPR_ICON << WPSS_STAGGERED_SLOT_OFFSET) |
+	WPSS_POSITION_INVALID | WPSS_SIZE_INVALID;
+    OpenWinProcessHints(oself);
+    if (ObjVarFindData(oself, HINT_PRIMARY_FULL_SCREEN)) {
+	SpecWinSizePair p;
+
+	p.SWSP_x = SWSS_RATIO | PCT_0;
+	p.SWSP_y = SWSS_RATIO | PCT_0;
+	w = BWin(oself);
+	SetWinPosSizeAttr(&w->OLWI_winPosSizeFlags, &w->OLWI_winPosSizeState,
+			  &w->VI_bounds.R_left,
+			  WPSF_POSITION_TYPE | WPSF_SIZE_TYPE,
+			  (WPT_AT_RATIO << 3) | WST_EXTEND_NEAR_BOTTOM_RIGHT,
+			  &p);
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Build and attach
+ * ------------------------------------------------------------------- */
+
+/* OLBaseWinUpdateSpecBuild: the primary's children are built within the
+ * tree (Port32: no help trigger or file menu added yet) */
+@method OLBaseWinClass, MSG_SPEC_BUILD_BRANCH
+{
+    @callsuper oself::OLBaseWinClass::MSG_SPEC_BUILD_BRANCH(
+		flags | SBF_VIS_PARENT_WITHIN_SCOPE_OF_TREE_BUILD);
+}
+
+/* OLBaseWinSpecBuild (Port32: no window list entry yet) */
+@method OLBaseWinClass, MSG_SPEC_BUILD
+{
+    @callsuper();
+}
+
+/* OLBaseWinNotifyOfFileMenu: we have a file menu */
+@method OLBaseWinClass, MSG_OL_BASE_WIN_NOTIFY_OF_FILE_MENU
+{
+    (void) fileMenu;
+    (void) ObjVarAddData(oself, ATTR_OL_BASE_WIN_HAVE_FILE_MENU, 0);
+}
+
+/* OLBaseWinDetermineInitialMinimizedStatus: a transparent launch
+ * restores a minimized primary, unless it opens in the back */
+static void InitialMinimizedStatus(optr o, UpdateWindowFlags f)
+{
+    if (!(f & UWF_RESTORING_FROM_STATE) ||
+	(byte) UserGetLaunchModel() != UILM_TRANSPARENT ||
+	(LaunchFlags() & ALF_OPEN_IN_BACK))
+	return;
+    (void) ObjVarDeleteData(o, ATTR_GEN_DISPLAY_MINIMIZED_STATE);
+}
+
+/* OLBaseWinDetermineInitialMaximizedStatus: maximized on startup (the
+ * hint, or [ui] maximize on startup) if maximizable */
+static void InitialMaximizedStatus(optr o, UpdateWindowFlags f)
+{
+    if (f & UWF_RESTORING_FROM_STATE)
+	return;
+    if (!ObjVarFindData(o, HINT_DISPLAY_MAXIMIZED_ON_STARTUP) &&
+	!(olWindowOptions & UIWO_MAXIMIZE_ON_STARTUP))
+	return;
+    if (BWin(o)->OLWI_attrs & OWA_MAXIMIZABLE)
+	(void) ObjVarAddData(o, ATTR_GEN_DISPLAY_MAXIMIZED_STATE |
+			     VDF_SAVE_TO_STATE, 0);
+}
+
+/*
+ * RemoveTitleBarIfPossible: a maximized primary of a transparent launch
+ * model (whose applications cannot be closed) needs no title bar unless
+ * the express menu or a help button is there or there are controls in
+ * it (the window menu, close, minimize, maximize, restore)
+ */
+static void RemoveTitleBarIfPossible(optr o)
+{
+    OLBaseWinInstance *w;
+    UIWindowOptions wo;
+
+    if (!TransparentNotClosable() ||
+	!ObjVarFindData(o, ATTR_GEN_DISPLAY_MAXIMIZED_STATE))
+	return;
+    if ((SpecGetExpressOptions() & UIEO_POSITION) == UIEP_TOP_PRIMARY)
+	return;
+    if (!(olHelpOptions & UIHO_HIDE_HELP_BUTTONS) &&
+	!ObjVarFindData(o, HINT_PRIMARY_NO_HELP_BUTTON))
+	return;
+    w = BWin(o);
+    if (w->OLWI_attrs & OWA_HAS_SYS_MENU) {
+	wo = SpecGetWindowOptions();
+	w = BWin(o);
+	if ((wo & UIWO_WINDOW_MENU) || (w->OLWI_attrs & OWA_CLOSABLE))
+	    return;
+	if ((wo & UIWO_PRIMARY_MIN_MAX_RESTORE_CONTROLS) &&
+	    ((w->OLWI_attrs & (OWA_MAXIMIZABLE | OWA_MINIMIZABLE)) ||
+	     (w->OLWI_fixedAttr & OWFA_RESTORABLE)))
+	    return;
+    }
+    w->OLWI_attrs &= ~(OWA_HEADER | OWA_TITLED);
+}
+
+/* EnsureItemRemovedFromWindowList: the window list entry destroyed */
+static void RemoveWindowListEntry(optr o)
+{
+    optr e = BWin(o)->OLBWI_windowListEntry;
+
+    BWin(o)->OLBWI_windowListEntry = 0;
+    if (e)
+	@call e::MSG_GEN_DESTROY(VUM_NOW, 0);
+}
+
+/*
+ * OLBaseWinUpdateWindow: attaching, minimized and maximized as the
+ * launch wants, the title bar removed if possible; detaching, off the
+ * window list
+ */
+@method OLBaseWinClass, MSG_META_UPDATE_WINDOW
+{
+    if (updateFlags & UWF_ATTACHING) {
+	InitialMinimizedStatus(oself, updateFlags);
+	InitialMaximizedStatus(oself, updateFlags);
+	RemoveTitleBarIfPossible(oself);
+    }
+    @callsuper();
+    if (updateFlags & UWF_DETACHING)
+	RemoveWindowListEntry(oself);
+}
+
+/* the objects the build added destroyed */
+static void DestroyIfFound(optr o, word vardata)
+{
+    ChunkHandle *c = ObjVarFindData(o, vardata);
+    optr x;
+
+    if (!c)
+	return;
+    x = ConstructOptr(OptrToHandle(o), *c);
+    (void) ObjVarDeleteData(o, vardata);
+    @call x::MSG_GEN_DESTROY(VUM_NOW, 0);
+}
+
+/* OLBaseWinSpecUnbuild: the help trigger and the file menu gone, off
+ * the window list */
+@method OLBaseWinClass, MSG_SPEC_UNBUILD
+{
+    @callsuper();
+    DestroyIfFound(oself, TEMP_OL_BASE_WIN_HELP_TRIGGER);
+    DestroyIfFound(oself, TEMP_OL_BASE_WIN_FILE_MENU);
+    RemoveWindowListEntry(oself);
+}
+
+/* OLBaseWinGetMinSize: room for two more icons in the title bar */
+@method OLBaseWinClass, MSG_VIS_COMP_GET_MINIMUM_SIZE
+{
+    SizeAsDWord s = @callsuper();
+
+    return MAKE_SIZE_DWORD(DWORD_WIDTH(s) + CUAS_WIN_ICON_WIDTH * 2,
+			   DWORD_HEIGHT(s));
+}
+
+/* ---------------------------------------------------------------------
+ * Minimized
+ * ------------------------------------------------------------------- */
+
+/* OLWinMoveOffScreen: the window moved left off the screen */
+static void MoveOffScreen(optr o)
+{
+    WindowHandle win = ((OLWinInstance *) ObjDerefVis(o))->VCI_window;
+    Rectangle r;
+
+    if (!win)
+	return;
+    WinGetWinScreenBounds(win, &r);
+    if (r.R_right < 0)
+	return;
+    WinMove(win, (sword) (-r.R_right - 1), 0, 0);
+}
+
+/* OLBaseWinMoveOffScreen: minimizable and not minimized: off the
+ * screen first (Port32: no task bar) */
+@method OLBaseWinClass, MSG_GEN_DISPLAY_SET_MINIMIZED
+{
+    if (!(pself->OLWI_attrs & OWA_MINIMIZABLE) ||
+	(pself->OLWI_specState & OLWSS_MINIMIZED))
+	return;
+    MoveOffScreen(oself);
+    @callsuper();
+}
+
+/* OLBaseWinDisplaySetNotMinimized: the express tool area at our title
+ * again */
+@method OLBaseWinClass, MSG_GEN_DISPLAY_SET_NOT_MINIMIZED
+{
+    @callsuper();
+    @call oself::MSG_OL_BASE_WIN_UPDATE_EXPRESS_TOOL_AREA();
+}
+
+/* ---------------------------------------------------------------------
+ * The express tool area and the target
+ * ------------------------------------------------------------------- */
+
+/* a message for the field, through the application */
+static void CallField(optr o, EventHandle ev)
+{
+    GenCallParent(o, MSG_GEN_GUP_CALL_OBJECT_OF_CLASS, &ev, sizeof(ev),
+		  NULL, 0);
+}
+
+/* OLBaseWinGetExpressMenuButtonWidth: the tool area's width (one less
+ * on black and white) */
+static word ExpressMenuButtonWidth(optr o)
+{
+    SizeAsDWord s = 0;
+    optr f = @call o::MSG_GEN_GUP_FIND_OBJECT_OF_CLASS(
+					(ClassStruct *) &OLFieldClass);
+    word w;
+
+    /* (the asm records the query for MSG_GEN_GUP_CALL_OBJECT_OF_CLASS:
+     * the C message has no reply) */
+    if (f)
+	s = @call f::MSG_OL_FIELD_GET_TOOL_AREA_SIZE();
+    w = DWORD_WIDTH(s);
+    if (OpenCheckIfBW())
+	w--;
+    return w;
+}
+
+/* OLBaseWinHideExpressToolArea: the tool area back to the field */
+static void HideExpressToolArea(optr o)
+{
+    OLFieldMoveToolAreaParams p;
+
+    memset(&p, 0, sizeof(p));
+    CallField(o, @record OLFieldClass::MSG_OL_FIELD_MOVE_TOOL_AREA(&p));
+}
+
+/*
+ * OLBaseWinUpdateExpressToolArea: the tool area at the left of our
+ * title (in screen coordinates, in our layer), as high as the title bar
+ */
+@method OLBaseWinClass, MSG_OL_BASE_WIN_UPDATE_EXPRESS_TOOL_AREA
+{
+    OLBaseWinInstance *w = BWin(oself);
+    OLFieldMoveToolAreaParams p;
+    WindowHandle win;
+    sword x, y;
+    word h, prio = 0;
+    Handle layer = 0;
+
+    if (!(w->OLBWI_flags & OLBWF_HAS_EXPRESS_TOOL_AREA))
+	return;
+    x = w->OLWI_titleBarBounds.R_left;
+    y = w->OLWI_titleBarBounds.R_top;
+    x -= (sword) ExpressMenuButtonWidth(oself);
+    y++;
+    if (OpenCheckIfBW()) {
+	x--;
+	y--;
+    }
+    win = VisQueryWindow(oself);
+    if (!win)
+	return;
+    {
+	XYValueAsDWord xy = WinTransform(win, x, y);
+
+	x = (sword) DWORD_X(xy);
+	y = (sword) DWORD_Y(xy);
+    }
+    memset(&p, 0, sizeof(p));
+    p.OLFMTAP_geode = MemOwner(OptrToHandle(oself));
+    p.OLFMTAP_xPos = (word) x;
+    p.OLFMTAP_yPos = (word) y;
+    WinGetInfo(win, WIT_PRIORITY, &prio);
+    p.OLFMTAP_layerPriority = (byte) ((prio & WPD_LAYER) >> 4);
+    WinGetInfo(win, WIT_LAYER_ID, &layer);
+    p.OLFMTAP_layerID = layer;
+    CallField(oself, @record OLFieldClass::MSG_OL_FIELD_MOVE_TOOL_AREA(&p));
+    w = BWin(oself);
+    h = (word) (w->OLWI_titleBarBounds.R_bottom - w->OLWI_titleBarBounds.R_top);
+    if (!OpenWinCheckIfSquished() && OpenWinCheckMenusInHeader(oself))
+	h += 3;
+    if (!OpenCheckIfBW())
+	h -= 2;
+    CallField(oself, @record OLFieldClass::MSG_OL_FIELD_SIZE_TOOL_AREA(h));
+}
+
+/* the window list entry and the application's task entry */
+static void UpdateAppMenuItemCommon(optr o, Boolean target)
+{
+    optr app = GeodeGetAppObject(0);
+
+    @call o::MSG_OL_BASE_WIN_UPDATE_WINDOW_ENTRY(target);
+    if (app)
+	@call app::MSG_OL_APP_UPDATE_TASK_ENTRY(target);
+}
+
+/*
+ * OLBaseWinGainedSystemTargetExcl: the express tool area comes to our
+ * title (where the express menu is on the primary, unless we reject
+ * it: then it goes back to the field); the title redrawn; the entries
+ * updated
+ */
+@method OLBaseWinClass, MSG_META_GAINED_SYS_TARGET_EXCL
+{
+    word pos;
+    OLBaseWinInstance *w;
+
+    @callsuper();
+    pos = SpecGetExpressOptions() & UIEO_POSITION;
+    if (pos != UIEP_NONE && pos != UIEP_LOWER_LEFT) {
+	w = BWin(oself);
+	if (w->OLBWI_flags & OLBWF_REJECT_EXPRESS_TOOL_AREA)
+	    HideExpressToolArea(oself);
+	else {
+	    w->OLBWI_flags |= OLBWF_HAS_EXPRESS_TOOL_AREA;
+	    /* OLBaseWinAdjustTitleBoundsForExpressToolArea */
+	    BWin(oself)->OLWI_titleBarBounds.R_left +=
+		(sword) ExpressMenuButtonWidth(oself);
+	    @call oself::MSG_OL_BASE_WIN_UPDATE_EXPRESS_TOOL_AREA();
+	}
+    }
+    OpenWinHeaderMarkInvalid(oself, OLWHS_TITLE_IMAGE_INVALID);
+    UpdateAppMenuItemCommon(oself, TRUE);
+}
+
+/* OLBaseWinLostSystemTargetExcl: the express tool area no longer ours
+ * (the title as wide again); the title redrawn, the entry updated */
+@method OLBaseWinClass, MSG_META_LOST_SYS_TARGET_EXCL
+{
+    OLBaseWinInstance *w;
+
+    @callsuper();
+    w = BWin(oself);
+    if (w->OLBWI_flags & OLBWF_HAS_EXPRESS_TOOL_AREA) {
+	w->OLBWI_flags &= ~OLBWF_HAS_EXPRESS_TOOL_AREA;
+	BWin(oself)->OLWI_titleBarBounds.R_left -=
+	    (sword) ExpressMenuButtonWidth(oself);
+    }
+    OpenWinHeaderMarkInvalid(oself, OLWHS_TITLE_IMAGE_INVALID);
+    @call oself::MSG_OL_BASE_WIN_UPDATE_WINDOW_ENTRY(FALSE);
+}
+
+/* the window list entry (Port32: none yet) */
+@method OLBaseWinClass, MSG_OL_BASE_WIN_UPDATE_WINDOW_ENTRY
+{
+    (void) selected;
+}
+
+@method OLBaseWinClass, MSG_OL_BASE_WIN_SET_WINDOW_ENTRY_MONIKER
+{
+}
+
+/* OLBaseWinGetTargetAtTargetLevel: the primary's level */
+@method OLBaseWinClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER, WIN_OFFSET(OLWI_targetExcl),
+			       TL_GEN_PRIMARY, level, retValue);
+}
+
+/* OLBaseWinUpdateForTitleGroup: the express tool area follows (queued) */
+@method OLBaseWinClass, MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP
+{
+    @callsuper();
+    @send, forceQueue oself::MSG_OL_BASE_WIN_UPDATE_EXPRESS_TOOL_AREA();
+}
+
+/* OLBaseWinGetHeaderTitleBounds: the express tool area left of the
+ * title */
+@method OLBaseWinClass, MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS
+{
+    @callsuper();
+    if (BWin(oself)->OLBWI_flags & OLBWF_HAS_EXPRESS_TOOL_AREA)
+	bounds->OLWHTB_left += ExpressMenuButtonWidth(oself) - 1;
+}
+
+/* ---------------------------------------------------------------------
+ * Closing and the rest
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLBaseWinGenCloseInteraction: closable and dismissable: the
+ * application quits; where applications cannot be closed it goes to the
+ * back instead
+ */
+@method OLBaseWinClass, MSG_GEN_DISPLAY_CLOSE
+{
+    optr app;
+
+    if (!(pself->OLWI_attrs & OWA_CLOSABLE) ||
+	!(((GenDisplayInstance *) ObjDerefGen(oself))->GDI_attributes &
+	  GDA_USER_DISMISSABLE))
+	return;
+    app = GeodeGetAppObject(0);
+    if (!app)
+	return;
+    if (!TransparentNotClosable()) {
+	@call app::MSG_META_QUIT();
+	return;
+    }
+    OLAppLowerLayerPrioIfDeskAccessory(app);
+    @send, forceQueue app::MSG_GEN_LOWER_TO_BOTTOM();
+}
+
+/* OLBaseVisClose: closed, the application finds its focus and target */
+@method OLBaseWinClass, MSG_VIS_CLOSE
+{
+    optr app;
+
+    @callsuper();
+    app = GeodeGetAppObject(0);
+    if (app)
+	@call app::MSG_META_ENSURE_ACTIVE_FT();
+}
+
+/* OLBaseWinGetMenuBarWin: the menu bar (its object) */
+@method OLBaseWinClass, MSG_GET_MENU_BAR_WIN
+{
+    /* the asm answers the menu bar's optr in cx:dx; the C message has a
+     * window: 0 until the menu bar is in C */
+    return 0;
+}
+
+/* OLBaseWinGupQuery: we are a primary */
+@method OLBaseWinClass, MSG_SPEC_P32_GUP_QUERY
+{
+    if ((word) queryType != SGQT_IS_CHILD_OF_PRIMARY)
+	return @callsuper();
+    retValue->GRP_cx = TRUE;
+    return TRUE;
+}
+
+/* OLBaseWinUseLongTermMoniker: a new long term moniker for the title */
+@method OLBaseWinClass, MSG_GEN_PRIMARY_USE_LONG_TERM_MONIKER
+{
+    if (Prim(oself)->GPI_longTermMoniker == moniker)
+	return;
+    Prim(oself)->GPI_longTermMoniker = moniker;
+    @call oself::MSG_SPEC_RESOLVE_MONIKER_LIST(moniker);
+    OpenWinHeaderMarkInvalid(oself, OLWHS_TITLE_IMAGE_INVALID);
+}
+
+/* Ctrl+F1 (first press or repeat, not a state key or accent) toggles
+ * the menu bar */
+static Boolean ToggleMenuBarKey(optr o, word c, word f)
+{
+    byte flags = (byte) f, shift = (byte) (f >> 8);
+
+    if ((flags & (CF_STATE_KEY | CF_TEMP_ACCENT)) ||
+	!(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)) ||
+	!(shift & (SS_LCTRL | SS_RCTRL)) ||
+	c != ((CS_CONTROL << 8) | VC_F1) || !BWin(o)->OLMDWI_menuBar)
+	return FALSE;
+    @call o::MSG_OL_BASE_WIN_TOGGLE_MENU_BAR();
+    return TRUE;
+}
+
+@method OLBaseWinClass, MSG_META_KBD_CHAR
+{
+    if (!ToggleMenuBarKey(oself, character, flags))
+	@callsuper();
+}
+
+@method OLBaseWinClass, MSG_META_FUP_KBD_CHAR
+{
+    if (ToggleMenuBarKey(oself, character, flags))
+	return TRUE;
+    return @callsuper();
+}
+
+/* OLBaseWinSpecSetUsable: the title bar removed if possible first */
+@method OLBaseWinClass, MSG_SPEC_SET_USABLE
+{
+    RemoveTitleBarIfPossible(oself);
+    @callsuper();
+}
+
+/* OLBaseWinToggleMenuBar: the menu bar, if it is a popout (Port32: no
+ * menu bar yet) */
+@method OLBaseWinClass, MSG_OL_BASE_WIN_TOGGLE_MENU_BAR
+{
+}

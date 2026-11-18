@@ -1,0 +1,93 @@
+/*
+ * copenTitleGroup.goc -- OLTitleGroupClass (after copenTitleGroup.asm):
+ * a toolbox group in a window's title bar, left or right of the title
+ * (HINT_SEEK_TITLE_BAR_LEFT and _RIGHT; the window makes it with
+ * CreateTitleBarGroup).  The primary's help trigger goes last, the other
+ * children first; the window adjusts its title whenever the group
+ * changes.
+ */
+@include "cGeode.goh"
+
+@classdecl OLTitleGroupClass, neverSaved;
+
+#define Group(o)	((OLCtrlInstance *) ObjDerefVis(o))
+
+/* centered vertically, as high as the title bar; a toolbox */
+@method OLTitleGroupClass, MSG_META_INITIALIZE
+{
+    OLCtrlInstance *c;
+
+    @callsuper();
+    c = Group(oself);
+    c->VCI_geoDimensionAttrs |= HJ_CENTER_CHILDREN_VERTICALLY |
+				VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+    c->OLCI_buildFlags |= OLBF_TOOLBOX;
+}
+
+/* OLTitleGroupSpecBuild: enabled as the window is, added to it */
+@method OLTitleGroupClass, MSG_SPEC_BUILD
+{
+    optr p;
+
+    if (VisCheckIfSpecBuilt(oself))
+	return;
+    VisSpecBuildSetEnabledState(oself, flags);
+    p = pself->OLCI_visParent;
+    @call p::MSG_VIS_ADD_CHILD(oself, CCO_LAST);
+}
+
+/* OLTitleGroupAddChild: the primary's help trigger last, the others
+ * first; the window told */
+@method OLTitleGroupClass, MSG_VIS_ADD_CHILD
+{
+    GenDefaultMonikerType *t;
+    CompChildFlags where = CCO_FIRST;
+
+    (void) flags;
+    t = ObjVarFindData(child, ATTR_GEN_DEFAULT_MONIKER);
+    if (t && *t == GDMT_HELP_PRIMARY)
+	where = CCO_LAST;
+    @callsuper oself::OLTitleGroupClass::MSG_VIS_ADD_CHILD(child, where);
+    VisCallParent(oself, MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP, NULL, 0, NULL, 0);
+}
+
+@method OLTitleGroupClass, MSG_VIS_REMOVE_CHILD
+{
+    @callsuper();
+    VisCallParent(oself, MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP, NULL, 0, NULL, 0);
+}
+
+/* OLTitleGroupVisDestroy: the window forgets us */
+@method OLTitleGroupClass, MSG_VIS_DESTROY
+{
+    optr p = VisFindParent(oself);
+
+    if (p && ObjIsObjectInClass(p, (ClassStruct *) &OLWinClass)) {
+	OLWinInstance *w = (OLWinInstance *) ObjDerefVis(p);
+
+	if (w->OLWI_titleBarLeftGroup == oself)
+	    w->OLWI_titleBarLeftGroup = 0;
+	else if (w->OLWI_titleBarRightGroup == oself)
+	    w->OLWI_titleBarRightGroup = 0;
+    }
+    @callsuper();
+}
+
+/* OLTGVisUpdateGeometry: new bounds: the window adjusts its title and
+ * is updated (both queued) */
+@method OLTitleGroupClass, MSG_VIS_UPDATE_GEOMETRY
+{
+    Rectangle old = pself->VI_bounds, *b;
+    optr p;
+
+    @callsuper();
+    b = &Group(oself)->VI_bounds;
+    if (old.R_left == b->R_left && old.R_right == b->R_right &&
+	old.R_top == b->R_top && old.R_bottom == b->R_bottom)
+	return;
+    p = VisFindParent(oself);
+    if (!p)
+	return;
+    @send, forceQueue p::MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP();
+    @send, forceQueue p::MSG_VIS_VUP_UPDATE_WIN_GROUP(VUM_NOW);
+}

@@ -22,6 +22,8 @@
 @include <Internal/SpecUI/olScreenClass.goh>
 @include <Internal/SpecUI/olFieldClass.goh>
 @include <Internal/SpecUI/olApplicationClass.goh>
+@include <Internal/SpecUI/olGadgetAreaClass.goh>
+@include <Internal/SpecUI/olBaseWinClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/im.h>
 #include <Internal/videoDr.h>
@@ -121,6 +123,7 @@ extern void WinInvalTree(Handle win, const Region *reg, word axParam,
 /* the spacing and margins of OLCtrls (CComp/ccompConstant.def,
  * cConstant.def; Motif) */
 #define MO_WIN_CHILD_SPACING		5
+#define GADGET_AREA_MARGINS		3	/* Motif (ISUI: 0) */
 #define OL_CONTROL_SPACING		MO_WIN_CHILD_SPACING
 #define OL_CONTROL_WRAP_SPACING		2
 #define MENU_SPACING			0
@@ -383,6 +386,7 @@ extern word GetDividerStrLen(GStateHandle gs);
 extern SizeAsDWord OpenWinGetMonikerSize(optr o, GStateHandle gs);
 extern void OpenWinDrawMoniker(optr o, DrawMonikerFlags flags,
 			       DrawMonikerArgs *a);
+extern void OpenWinSetVisParent(optr o, SpecBuildFlags flags);
 /* cwinClassOther.goc */
 extern void OpenWinFreeStaggeredSlot(optr o);
 /* cwinGeometry.goc */
@@ -399,11 +403,20 @@ extern void OpenWinGetHeaderBounds(optr o, Rectangle *r);
 extern void OpenWinDrawHeaderTitleBackground(optr o, GStateHandle gs);
 extern void OpenWinDrawHeaderTitle(optr o, GStateHandle gs);
 
+/* CWin/cwinMenuedWin.goc: a bar (gadget area, title group) made in the
+ * window's block, its vis parent the window, built if the window is;
+ * its chunk.  A title bar group (TGT_RIGHT_GROUP or TGT_LEFT_GROUP). */
+extern ChunkHandle OpenWinCreateBarObject(optr o, ClassStruct *class);
+extern optr CreateTitleBarGroup(optr o, word titleGroupType);
+extern void OLMenuedWinSetMaximized(optr o, VisUpdateMode mode);
+
 /* CComp/copenCtrlGeometry.goc */
 extern SizeAsDWord OpenRecalcCtrlSize(optr o, word width, word height,
 				      VisCompSpacingMarginsInfo info);
 extern void OpenCtrlCheckCustomSpacing(optr o, word *spacing,
 				       word *wrapSpacing);
+extern void OpenCtrlCheckCGASpacing(optr o, word *spacing,
+				    word *wrapSpacing);
 /* CUtils/cutilsPtrImages.goc (made by Port32/tools/ptrimg2c.py) */
 extern optr OpenGetPtrImage(OLPtrImage image);
 
@@ -446,3 +459,4 @@ extern ClassStruct *OLBuildSystem(optr oself, word masterOffset);
 extern ClassStruct *OLBuildScreen(optr oself, word masterOffset);
 extern ClassStruct *OLBuildApplication(optr oself, word masterOffset);
 extern ClassStruct *OLBuildField(optr oself, word masterOffset);
+extern ClassStruct *OLBuildPrimary(optr oself, word masterOffset);

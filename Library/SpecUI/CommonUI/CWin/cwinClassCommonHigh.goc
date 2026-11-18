@@ -9,9 +9,8 @@
  *
  * Port32 (Port32/ABI.md section 13y), not yet: the system menu and its
  * icons (OpenWinEnsureSysMenu, OpenWinEnsureSysMenuIcons, with
- * OLMenuWinClass and OLButtonClass), pinned menus, the title bar groups
- * (OLTitleGroupClass: MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP answers a
- * group only once one is there), moniker lists (GenFindMoniker), the
+ * OLMenuWinClass and OLButtonClass), pinned menus, moniker lists
+ * (GenFindMoniker), the
  * task bar (taskBarPrefs: the adjustments are 0, as with no task bar).
  */
 @include "cGeode.goh"
@@ -401,6 +400,15 @@ void OpenWinProcessHints(optr o)
 	SendKbdStatusNotification(oself, override);
 }
 
+/* OpenWinSetVisParent: added to the vis parent of the win group */
+void OpenWinSetVisParent(optr o, SpecBuildFlags flags)
+{
+    optr vp = VisGetVisParent(o, &flags);
+
+    if (vp)
+	@call vp::MSG_VIS_ADD_CHILD(o, CCO_LAST);
+}
+
 /*
  * OpenWinSpecBuild: the win group's build (the subclasses build the
  * primary and display windows): enabled as the generic object is, added
@@ -408,15 +416,10 @@ void OpenWinProcessHints(optr o)
  */
 @method OLWinClass, MSG_SPEC_BUILD
 {
-    optr vp;
-
     if (VisCheckIfSpecBuilt(oself))
 	return;
     VisSpecBuildSetEnabledState(oself, flags);
-    /* OpenWinSetVisParent */
-    vp = VisGetVisParent(oself, &flags);
-    if (vp)
-	@call vp::MSG_VIS_ADD_CHILD(oself, CCO_LAST);
+    OpenWinSetVisParent(oself, flags);
     /* GenFindMoniker of a moniker list: Port32 not yet */
     ConvertSpecWinSizePairsToPixels(oself);
     UpdateWinPosSize(oself);
@@ -715,8 +718,19 @@ void ConvertSpecWinSizePairsToPixels(optr o)
 
 /* OLWinGetOrCreateTitleGroup: the title bar group of the type (0 left,
  * 4 right, the asm's offsets); Port32: none is created yet */
+/* OLWinGetOrCreateTitleGroup: the title bar group, made if there is
+ * none */
 @method OLWinClass, MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP
 {
-    return titleGroupType ? pself->OLWI_titleBarRightGroup
-			  : pself->OLWI_titleBarLeftGroup;
+    optr g = titleGroupType == TGT_RIGHT_GROUP ? pself->OLWI_titleBarRightGroup
+					       : pself->OLWI_titleBarLeftGroup;
+
+    if (g)
+	return g;
+    g = CreateTitleBarGroup(oself, titleGroupType);
+    if (titleGroupType == TGT_RIGHT_GROUP)
+	Win(oself)->OLWI_titleBarRightGroup = g;
+    else
+	Win(oself)->OLWI_titleBarLeftGroup = g;
+    return g;
 }

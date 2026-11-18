@@ -24,6 +24,8 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CComp/copenCtrlClass.goc
                ${c}/CComp/copenCtrlGeometry.goc
                ${c}/CComp/copenCtrlCommon.goc
+               ${c}/CComp/copenGadgetArea.goc
+               ${c}/CComp/copenTitleGroup.goc
                ${c}/CWin/cwinScreen.goc
                ${c}/CWin/cwinField.goc
                ${c}/CWin/cwinClassCommonHigh.goc
@@ -32,11 +34,14 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CWin/cwinClassOther.goc
                ${c}/CWin/cwinGeometry.goc
                ${c}/CWin/cwinExcl.goc
+               ${c}/CWin/cwinMenuedWin.goc
+               ${c}/CWin/cwinBase.goc
                ${CMAKE_CURRENT_SOURCE_DIR}/Motif/Win/winDraw.goc
                ${c}/CSpec/cspecSystem.goc
                ${c}/CSpec/cspecScreen.goc
                ${c}/CSpec/cspecField.goc
                ${c}/CSpec/cspecApplication.goc
+               ${c}/CSpec/cspecPrimary.goc
            INCLUDES ${c}
            PROTOCOL 727.0)
 set(motif_GEO ${motif_GEO} PARENT_SCOPE)

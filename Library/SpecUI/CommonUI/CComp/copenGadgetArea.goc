@@ -1,0 +1,231 @@
+/*
+ * copenGadgetArea.goc -- OLGadgetAreaClass (after copenGadgetArea.asm):
+ * the composite of a menued window (OLMenuedWinClass) that holds the
+ * window's gadgets.  It takes the window's geometry (the window then
+ * places it and its other bars vertically), its margins (none where a
+ * display control is) and spacing, and draws a raised frame when it
+ * fills the window.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the display controls the
+ * margins look for (OLDisplayGroupClass, OLMenuBarClass, a CGA's
+ * OLPaneClass: RecalcGadgetAreaFlags finds none yet).
+ */
+@include "cGeode.goh"
+
+@classdecl OLGadgetAreaClass, neverSaved;
+
+#define Area(o)		((OLGadgetAreaInstance *) ObjDerefVis(o))
+
+/*
+ * OLGadgetAreaSpecBuild: enabled as the window is, added to it; the
+ * window's moniker hints, its geometry (no minimum size; wrapping, not
+ * expanding across), the window's children then go vertically; the
+ * toolbox and delayed flags of the window
+ */
+@method OLGadgetAreaClass, MSG_SPEC_BUILD
+{
+    optr p;
+    OLGadgetAreaInstance *g;
+    VisCompInstance *pv;
+    VisCompGeoAttrs ga;
+    VisCompGeoDimensionAttrs gd;
+    VisGeoAttrs vga;
+    Boolean center, left;
+    GeoAndDimensionAttrs set, clear;
+
+    if (VisCheckIfSpecBuilt(oself))
+	return;
+    VisSpecBuildSetEnabledState(oself, flags);
+    p = pself->OLCI_visParent;
+    @call p::MSG_VIS_ADD_CHILD(oself, CCO_LAST);
+    p = VisFindParent(oself);
+    if (!p)
+	return;
+    center = ObjVarFindData(p, HINT_CENTER_CHILDREN_ON_MONIKERS) != NULL;
+    left = ObjVarFindData(p, HINT_LEFT_JUSTIFY_MONIKERS) != NULL;
+    pv = (VisCompInstance *) ObjDerefVis(p);
+    ga = pv->VCI_geoAttrs;
+    gd = pv->VCI_geoDimensionAttrs;
+    vga = pv->VI_geoAttrs;
+    if (center)
+	(void) ObjVarAddData(oself, HINT_CENTER_CHILDREN_ON_MONIKERS, 0);
+    if (left)
+	(void) ObjVarAddData(oself, HINT_LEFT_JUSTIFY_MONIKERS, 0);
+    ga &= ~VCGA_HAS_MINIMUM_SIZE;
+    vga &= VGA_ALWAYS_RECALC_SIZE;
+    if (ga & VCGA_ALLOW_CHILDREN_TO_WRAP) {
+	if (ga & VCGA_ORIENT_CHILDREN_VERTICALLY)
+	    gd &= ~VCGDA_EXPAND_WIDTH_TO_FIT_PARENT;
+	else
+	    gd &= ~VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+    }
+    g = Area(oself);
+    g->VCI_geoAttrs = ga;
+    g->VCI_geoDimensionAttrs = gd;
+    g->VI_geoAttrs = vga;
+    set.GADA_geoAttrs = VCGA_ORIENT_CHILDREN_VERTICALLY;
+    set.GADA_geoDimensionAttrs = 0;
+    clear.GADA_geoAttrs = VCGA_ALLOW_CHILDREN_TO_WRAP |
+			  VCGA_ONE_PASS_OPTIMIZATION |
+			  VCGA_CUSTOM_MANAGE_CHILDREN |
+			  VCGA_WRAP_AFTER_CHILD_COUNT;
+    clear.GADA_geoDimensionAttrs = VCGDA_HEIGHT_JUSTIFICATION |
+				   VCGDA_WIDTH_JUSTIFICATION |
+				   VCGDA_DIVIDE_WIDTH_EQUALLY |
+				   VCGDA_DIVIDE_HEIGHT_EQUALLY;
+    @call p::MSG_VIS_COMP_SET_GEO_ATTRS(set, clear);
+    Area(oself)->OLCI_buildFlags |= OpenGetParentBuildFlagsIfCtrl(oself) &
+				    (OLBF_TOOLBOX | OLBF_DELAYED_MODE);
+}
+
+@method OLGadgetAreaClass, MSG_SPEC_VUP_NUKE_GADGET_AREA_MARGINS
+{
+    pself->OLGAI_flags |= OLGAF_NO_MARGINS;
+}
+
+@method OLGadgetAreaClass, MSG_SPEC_GADGET_AREA_SET_FLAGS
+{
+    pself->OLGAI_flags = (OLGadgetAreaFlags) ((pself->OLGAI_flags | set) &
+					      ~clear);
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry
+ * ------------------------------------------------------------------- */
+
+/*
+ * RecalcGadgetAreaFlags: where the display controls are among the
+ * children (Port32: there is none yet, their classes are not in C)
+ */
+static void RecalcGadgetAreaFlags(optr o)
+{
+    Area(o)->OLGAI_flags &= ~(OLGAF_HAS_DISP_CTRL | OLGAF_DISP_CTRL_FIRST |
+			      OLGAF_DISP_CTRL_LAST);
+}
+
+/*
+ * OLGadgetAreaGetMargins: GADGET_AREA_MARGINS all around if there are
+ * children (less on CGA and narrow screens); none along the side of a
+ * display control (or with OLGAF_NO_MARGINS); the window's
+ * HINT_CUSTOM_EXTRA_MARGINS added
+ */
+static void GadgetAreaMargins(optr o, Rectangle *r)
+{
+    OLGadgetAreaInstance *g = Area(o);
+    word ax = 0, bp = 0, cx = 0, dx = 0, t;
+    Boolean vertical;
+    optr p;
+    Rectangle *x;
+
+    if (g->VI_optFlags & (VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH))
+	RecalcGadgetAreaFlags(o);
+    g = Area(o);
+    if (g->VCI_comp.CP_firstChild)
+	ax = bp = cx = dx = GADGET_AREA_MARGINS;
+    if (OpenCheckIfCGA()) {
+	bp = dx = 2;
+	cx++;
+	ax++;
+    }
+    if (OpenCheckIfNarrow())
+	cx = ax = 2;
+    g = Area(o);
+    vertical = (g->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+    if (!vertical) {
+	t = ax; ax = bp; bp = t;
+	t = cx; cx = dx; dx = t;
+    }
+    if (g->OLGAI_flags & (OLGAF_HAS_DISP_CTRL | OLGAF_NO_MARGINS))
+	ax = cx = 0;
+    if (g->OLGAI_flags & (OLGAF_DISP_CTRL_FIRST | OLGAF_NO_MARGINS))
+	bp = 0;
+    if (g->OLGAI_flags & (OLGAF_DISP_CTRL_LAST | OLGAF_NO_MARGINS))
+	dx = 0;
+    if (!vertical) {
+	t = ax; ax = bp; bp = t;
+	t = cx; cx = dx; dx = t;
+    }
+    p = VisFindParent(o);
+    if (p && (x = ObjVarFindData(p, HINT_CUSTOM_EXTRA_MARGINS)) != NULL) {
+	ax += x->R_left;
+	cx += x->R_right;
+	bp += x->R_top;
+	dx += x->R_bottom;
+    }
+    r->R_left = (sword) ax;
+    r->R_top = (sword) bp;
+    r->R_right = (sword) cx;
+    r->R_bottom = (sword) dx;
+}
+
+@method OLGadgetAreaClass, MSG_VIS_COMP_GET_MARGINS
+{
+    GadgetAreaMargins(oself, retValue);
+}
+
+/* OLGadgetAreaGetSpacing: the window's child spacing (and its custom
+ * spacing hints), less on CGA */
+static SpacingAsDWord GadgetAreaSpacing(optr o)
+{
+    word s = MO_WIN_CHILD_SPACING, w = MO_WIN_CHILD_WRAP_SPACING;
+    optr p = VisFindParent(o);
+
+    if (p)
+	OpenCtrlCheckCustomSpacing(p, &s, &w);
+    OpenCtrlCheckCGASpacing(o, &s, &w);
+    return MAKE_SPACING_DWORD(s, w);
+}
+
+@method OLGadgetAreaClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    return GadgetAreaSpacing(oself);
+}
+
+static VisCompSpacingMarginsInfo GadgetAreaPassMarginInfo(optr o)
+{
+    SpacingAsDWord s = GadgetAreaSpacing(o);
+    Rectangle m;
+
+    GadgetAreaMargins(o, &m);
+    return OpenPassMarginInfo(o, &m, DWORD_CHILD_SPACING(s),
+			      DWORD_WRAP_SPACING(s));
+}
+
+@method OLGadgetAreaClass, MSG_VIS_RECALC_SIZE
+{
+    return OpenRecalcCtrlSize(oself, width, height,
+			      GadgetAreaPassMarginInfo(oself));
+}
+
+@method OLGadgetAreaClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
+		    GadgetAreaPassMarginInfo(oself));
+}
+
+/* OLGadgetAreaCheckIfNeedsMargins: with a display control, the
+ * children's left and right margin */
+@method OLGadgetAreaClass, MSG_SPEC_CHECK_IF_NEEDS_MARGINS
+{
+    if (!(pself->OLGAI_flags & OLGAF_HAS_DISP_CTRL))
+	return FALSE;
+    *margin = GADGET_AREA_MARGINS;
+    return TRUE;
+}
+
+/* OLGadgetAreaDraw: filling the window (in color), a raised frame */
+@method OLGadgetAreaClass, MSG_VIS_DRAW
+{
+    VisCompGeoDimensionAttrs gd = pself->VCI_geoDimensionAttrs;
+    Rectangle b;
+
+    if ((gd & VCGDA_EXPAND_WIDTH_TO_FIT_PARENT) &&
+	(gd & VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT) && !OpenCheckIfBW()) {
+	/* OpenSetInsetRectColors, the colors swapped */
+	GrSetAreaColor(gstate, CF_INDEX, moCS_dsLightColor, 0, 0);
+	VisGetBounds(oself, &b);
+	OpenDrawRect(oself, gstate, b.R_left, b.R_top, b.R_right, b.R_bottom,
+		     (word) (C_WHITE | (moCS_dsDarkColor << 8)));
+    }
+    @callsuper();
+}

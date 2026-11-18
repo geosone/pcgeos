@@ -1,0 +1,58 @@
+/*
+ * olBaseWinClass.goh -- OLBaseWinClass, the window of a GenPrimary
+ * (after Include/Internal/SpecUI/olBaseWinClass.def), for Port32.
+ *
+ * Motif's: the window list (WINDOW_LIST_ACTIVE) and the task bar
+ * (TOOL_AREA_IS_TASK_BAR) messages and instance data; no _GCM, radio
+ * status icon, floating keyboard trigger or EVENT_MENU.  Port32: an optr
+ * is a dword pair of handle and chunk.
+ */
+#ifndef __OLBASEWINCLASS_GOH
+#define __OLBASEWINCLASS_GOH
+
+@include <Internal/SpecUI/olMenuedWinClass.goh>
+@include <Objects/gPrimC.goh>
+
+@deflib motif
+
+/* OLBaseWinFlags */
+typedef ByteFlags OLBaseWinFlags;
+/* this primary has the express tool area and keeps it at its title */
+#define OLBWF_HAS_EXPRESS_TOOL_AREA	0x80
+/* HINT_PRIMARY_NO_EXPRESS_MENU */
+#define OLBWF_REJECT_EXPRESS_TOOL_AREA	0x40
+
+@class OLBaseWinClass, OLMenuedWinClass;
+@uses GenPrimaryClass;
+
+@message void MSG_OL_BW_OPEN_CLOSE();
+@message void MSG_OL_BW_SIZE();
+@message void MSG_OL_BW_PROPERTIES();
+@message void MSG_OL_BASE_WIN_ADD_FIELD_ICONS();
+@message void MSG_OL_BASE_WIN_REMOVE_FIELD_ICONS();
+/* from the OLMenuWin of the file menu */
+@message void MSG_OL_BASE_WIN_NOTIFY_OF_FILE_MENU(optr fileMenu);
+@message void MSG_OL_BASE_WIN_TOGGLE_MENU_BAR();
+@message void MSG_OL_BASE_WIN_UPDATE_EXPRESS_TOOL_AREA();
+/* the window list entry's moniker; its selection (TRUE: we have the
+ * target) */
+@message void MSG_OL_BASE_WIN_SET_WINDOW_ENTRY_MONIKER();
+@message void MSG_OL_BASE_WIN_UPDATE_WINDOW_ENTRY(Boolean selected);
+
+    @vardata void ATTR_OL_BASE_WIN_HAVE_FILE_MENU;
+    /* the help trigger and the file menu the build added */
+    @vardata ChunkHandle TEMP_OL_BASE_WIN_HELP_TRIGGER;
+    @vardata ChunkHandle TEMP_OL_BASE_WIN_FILE_MENU;
+
+    @instance ChunkHandle	OLBWI_longTermString = 0;
+    @instance ChunkHandle	OLBWI_statusString = 0;
+    @instance ChunkHandle	OLBWI_modeString = 0;
+    @instance OLBaseWinFlags	OLBWI_flags = 0;
+    @instance optr		OLBWI_titleBarMenu = 0;
+    @instance optr		OLBWI_windowListEntry = 0;
+
+@endc;
+
+@endlib
+
+#endif

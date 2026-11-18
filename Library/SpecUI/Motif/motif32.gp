@@ -33,8 +33,12 @@ export OLBuildApplication
 export OLBuildField
 export OLBuildScreen
 export OLBuildSystem
-# OLBuildPane ... OLBuildValue
-skip 18
+# OLBuildPane, OLBuildInteraction, OLBuildGlyphDisplay, OLBuildText,
+# OLBuildDisplayControl
+skip 5
+export OLBuildPrimary
+# OLBuildGadget ... OLBuildValue
+skip 12
 
 #
 # exported routines to do specific UI stuff
@@ -57,3 +61,7 @@ export OLFieldClass
 export OLApplicationClass
 export OLCtrlClass
 export OLWinClass
+export OLMenuedWinClass
+export OLBaseWinClass
+export OLGadgetAreaClass
+export OLTitleGroupClass

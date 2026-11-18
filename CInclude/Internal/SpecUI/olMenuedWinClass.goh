@@ -1,0 +1,53 @@
+/*
+ * olMenuedWinClass.goh -- OLMenuedWinClass, a window with a title bar,
+ * menus and a gadget area that can be minimized and maximized (after
+ * Include/Internal/SpecUI/olMenuedWinClass.def), for Port32.  The
+ * superclass of the base (primary) and display windows.
+ *
+ * Motif's: no MENU_BAR_IS_A_MENU messages; window icons
+ * (_NO_WIN_ICONS is FALSE).  Port32: an optr is a dword pair of handle
+ * and chunk.
+ */
+#ifndef __OLMENUEDWINCLASS_GOH
+#define __OLMENUEDWINCLASS_GOH
+
+@include <Internal/SpecUI/olWinClass.goh>
+@include <Objects/gDispC.goh>
+
+@deflib motif
+
+/* TitleGroupType (MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP): the offset of
+ * the group's optr from OLWI_titleBarLeftGroup in the asm */
+#define TGT_LEFT_GROUP		0
+#define TGT_RIGHT_GROUP		4
+
+@class OLMenuedWinClass, OLWinClass;
+@uses GenDisplayClass;
+
+/* the window's icon has a new position (slot: the WPSS_STAGGERED_SLOT
+ * field, or 0) */
+@message void MSG_OL_MW_SET_ICON_POS(sword x, sword y, byte slot);
+/* the application's moniker changed: the icon's too */
+@message void MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER();
+
+    @instance ChunkHandle	OLMDWI_menuBar = 0;
+    @instance ChunkHandle	OLMDWI_triggerBar = 0;
+    /* the composite that holds the window's gadgets */
+    @instance ChunkHandle	OLMDWI_gadgetArea = 0;
+    /* the window's icon (OLWinIconClass, in the application's block)
+     * and where it goes */
+    @instance optr		OLMDWI_icon = 0;
+    @instance WinPosSizeFlags	OLMDWI_iconWinPosSizeFlags = 0;
+    @instance WinPosSizeState	OLMDWI_iconWinPosSizeState = 0;
+    @instance sword		OLMDWI_iconPosLeft = 0;
+    @instance sword		OLMDWI_iconPosTop = 0;
+    /* the icon's monikers, found before the window's moniker list is
+     * replaced by one moniker */
+    @instance optr		OLMDWI_iconMoniker = 0;
+    @instance optr		OLMDWI_iconCaptionMoniker = 0;
+
+@endc;
+
+@endlib
+
+#endif

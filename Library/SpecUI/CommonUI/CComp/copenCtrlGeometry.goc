@@ -5,9 +5,8 @@
  * the centering of children on their monikers and the moniker's
  * position.
  *
- * Port32 (Port32/ABI.md section 13z), not yet: the margins a gadget
- * area asks for (OLGadgetAreaClass, MSG_SPEC_CHECK_IF_NEEDS_MARGINS),
- * a reply bar's extra top line (OLReplyBarClass's OLRBF_UNDER_DIALOG),
+ * Port32 (Port32/ABI.md section 13y), not yet: a reply bar's extra top
+ * line (OLReplyBarClass's OLRBF_UNDER_DIALOG),
  * the menu center (MSG_SPEC_GET_MENU_CENTER: its C declaration has no
  * parameters yet).
  */
@@ -204,6 +203,18 @@ static void CheckCustomSpacing(optr o, Spacings *s)
 		   spacingHints, s);
 }
 
+/* OpenCtrlCheckCGASpacing for the gadget area */
+void OpenCtrlCheckCGASpacing(optr o, word *spacing, word *wrapSpacing)
+{
+    Spacings s;
+
+    s.spacing = *spacing;
+    s.wrapSpacing = *wrapSpacing;
+    CheckCGASpacing(o, &s);
+    *spacing = s.spacing;
+    *wrapSpacing = s.wrapSpacing;
+}
+
 /* OpenCtrlCheckCustomSpacing for the window classes */
 void OpenCtrlCheckCustomSpacing(optr o, word *spacing, word *wrapSpacing)
 {
@@ -244,6 +255,22 @@ void OpenCtrlCheckCustomSpacing(optr o, word *spacing, word *wrapSpacing)
  * ------------------------------------------------------------------- */
 
 /*
+ * CheckIfNeedsExtraMargins: the margin a gadget area above asks of its
+ * children (beside a display control); not in a reply bar
+ */
+static Boolean CheckIfNeedsExtraMargins(optr o, word *extra)
+{
+    optr p;
+
+    if (TARGET(Ctrl(o)->OLCI_buildFlags) == T(OLBT_REPLY_BAR))
+	return FALSE;
+    p = VisFindParent(o);
+    if (!p || !ObjIsObjectInClass(p, (ClassStruct *) &OLGadgetAreaClass))
+	return FALSE;
+    return @call p::MSG_SPEC_CHECK_IF_NEEDS_MARGINS(extra);
+}
+
+/*
  * CalcCtrlMargins: room for the moniker (left, or right, or above), a
  * frame, a reply bar and HINT_CUSTOM_EXTRA_MARGINS; an OLCtrl without
  * moniker and children that is not generic has none
@@ -255,8 +282,13 @@ static void CalcCtrlMargins(optr o, Rectangle *m)
 
     memset(m, 0, sizeof(*m));
     if (!(c->OLCI_optFlags & OLCOF_DISPLAY_MONIKER)) {
-	/* CheckIfNeedsExtraMargins: the gadget area's (Port32: with
-	 * OLGadgetAreaClass) */
+	/* the left and right margins a gadget area could not give (a
+	 * pane on CGA takes none: Port32, OLPaneClass not yet) */
+	word extra;
+
+	if (CheckIfNeedsExtraMargins(o, &extra))
+	    m->R_left = m->R_right = (sword) extra;
+	c = Ctrl(o);
 	if (!c->VCI_comp.CP_firstChild && !(c->VI_typeFlags & VTF_IS_GEN))
 	    return;
     } else {

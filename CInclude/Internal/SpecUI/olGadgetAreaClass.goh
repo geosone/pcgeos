@@ -1,0 +1,47 @@
+/*
+ * olGadgetAreaClass.goh -- OLGadgetAreaClass, the composite of a menued
+ * window that holds its gadgets (after
+ * Include/Internal/SpecUI/olGadgetAreaClass.def), and OLTitleGroupClass,
+ * a group of objects in a window's title bar (olTitleGroupClass.def),
+ * for Port32.
+ *
+ * The VisSpecMessages imported here are numbered after those of
+ * olCtrlClass.goh and olWinClass.goh (cGeode.goh includes this header
+ * after them).  No INDENT_BOXED_CHILDREN (Motif).
+ */
+#ifndef __OLGADGETAREACLASS_GOH
+#define __OLGADGETAREACLASS_GOH
+
+@include <Internal/SpecUI/olWinClass.goh>
+
+@deflib motif
+
+/* OLGadgetAreaFlags */
+typedef ByteFlags OLGadgetAreaFlags;
+#define OLGAF_HAS_DISP_CTRL	0x80	/* a display control is there */
+#define OLGAF_DISP_CTRL_FIRST	0x40	/* where it is */
+#define OLGAF_DISP_CTRL_LAST	0x20
+#define OLGAF_NO_MARGINS	0x10	/* no margins, whatever else */
+#define OLGAF_NEEDS_TOP_MARGIN	0x08	/* the primary draws its title */
+
+@class OLGadgetAreaClass, OLCtrlClass;
+
+/* TRUE if the children should add margins for a display control (the
+ * margin in *margin) */
+@importMessage VisSpecMessages, Boolean MSG_SPEC_CHECK_IF_NEEDS_MARGINS(
+							word *margin);
+/* no margins once an OLGadgetComp is found */
+@importMessage VisSpecMessages, void MSG_SPEC_VUP_NUKE_GADGET_AREA_MARGINS();
+@message void MSG_SPEC_GADGET_AREA_SET_FLAGS(OLGadgetAreaFlags set,
+					     OLGadgetAreaFlags clear);
+
+    @instance OLGadgetAreaFlags	OLGAI_flags = 0;
+
+@endc;
+
+@class OLTitleGroupClass, OLCtrlClass;
+@endc;
+
+@endlib
+
+#endif
