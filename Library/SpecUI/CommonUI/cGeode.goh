@@ -364,6 +364,7 @@ extern void OpenDrawMoniker(optr obj, optr gen, OpenMonikerArgs *a);
 
 extern Boolean OpenCheckIfKeyboard(void);
 extern Boolean OpenCheckIfKeyboardNavigation(void);
+extern Boolean OpenCheckIfMenusTakeFocus(void);
 extern void OpenDoClickSound(void);
 extern optr OpenFindOLWin(optr o);
 
@@ -459,6 +460,11 @@ extern void OpenWinEnsureOnWindowList(optr o);
 extern void OLWinTakeOffWindowList(optr o);
 extern Boolean OpenWinEnsureRealizableOnTop(optr o);
 extern void OpenWinNavigateCommon(optr o, NavigationFlags nf);
+/* to the window's parent: a menu's button, else the vis parent
+ * (cwinClassMisc.goc) */
+extern Boolean OpenWinCallParentOfWindow(optr o, Message msg,
+					 const void *params, word paramSize,
+					 void *reply, word replySize);
 extern void OpenWinHeaderMarkInvalid(optr o, OLWinHeaderState parts);
 extern void OpenWinHeaderResetInvalid(optr o, OLWinHeaderState parts);
 extern HierarchicalGrabFlags OpenWinTestForFocusAndTarget(optr o);

@@ -32,6 +32,7 @@
 @extern method OLButtonClass, MSG_OL_BUTTON_KBD_ACTIVATE;
 @extern method OLButtonClass, MSG_META_KBD_CHAR;
 @extern method OLButtonClass, MSG_META_FUP_KBD_CHAR;
+@extern method OLButtonClass, MSG_SPEC_NAVIGATION_QUERY;
 @extern method OLButtonClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
 @extern method OLButtonClass, MSG_GEN_FIND_KBD_ACCELERATOR;
 @extern method OLButtonClass, MSG_GEN_TRIGGER_MAKE_DEFAULT_ACTION;

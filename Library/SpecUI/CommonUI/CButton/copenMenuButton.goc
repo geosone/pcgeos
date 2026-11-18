@@ -7,11 +7,17 @@
  * menus of the bar close when one opens.  Activated (the keyboard) the
  * menu comes up in stay up mode.
  *
+ * The keyboard: activated by it, the button gets the focus (menu
+ * related in the menu bar) and the gadget exclusive and the menu comes
+ * up; with the focus it is drawn as cursored (bordered); Escape
+ * completes its menu (up to the window then), right on a sub menu's
+ * button opens the sub menu.
+ *
  * Port32 (Port32/ABI.md section 13y), not yet: popup lists
- * (OLMBSS_OPENS_POPUP_LIST: the selection box, the popup's size), the
- * keyboard (navigation, MSG_META_FUP_KBD_CHAR, the focus while the menu
- * is open), the system menu icon (a double press closes the window),
- * the default function (UIFA_FEATURES), the implied window check.
+ * (OLMBSS_OPENS_POPUP_LIST: the selection box, the popup's size, its
+ * keys), the system menu icon (a double press closes the window), the
+ * default function (UIFA_FEATURES), the implied window check, the focus
+ * on a text object (OpenTestIfFocusOnTextEditObject).
  */
 @include "cGeode.goh"
 
@@ -442,12 +448,173 @@ static void HandleEvent(optr o, sword x, word inputState,
     @call g::MSG_MO_MW_ENTER_STAY_UP_MODE(grab);
 }
 
+/*
+ * OLMenuButtonGrabFocusExcl: the focus (menus taking it, not in a
+ * toolbox): the window it is in gets it first if a menu; out of a menu
+ * the button's focus is menu related, in its window
+ */
+static void SaveStateSetCursored(optr o);
+
+static void GrabFocusExcl(optr o)
+{
+    optr p;
+    GenReturnParams r;
+    MetaAlterFTVMCExclFlags f = MAEF_GRAB | MAEF_FOCUS;
+
+    if (!OpenCheckIfMenusTakeFocus()) {
+	if (!(MBtn(o)->OLBI_specState & OLBSS_CURSORED)) {
+	    TakeGadgetExcl(o);
+	    SaveStateSetCursored(o);
+	    OLButtonDrawLaterIfNewState(o);
+	}
+	return;
+    }
+    if (MBtn(o)->OLBI_moreAttrs & OLBMA_IN_TOOLBOX)
+	return;
+    p = VisFindParent(o);
+    if (p)
+	(void) @call p::MSG_VIS_P32_VUP_QUERY(&r,
+					      SVQT_GRAB_FOCUS_EXCL_FOR_MENU,
+					      0, 0);
+    if (!(MBtn(o)->OLBI_specState & OLBSS_IN_MENU))
+	f |= MAEF_OD_IS_MENU_RELATED | MAEF_NOT_HERE;
+    @call o::MSG_META_MUP_ALTER_FTVMC_EXCL(o, f);
+}
+
+/* OLMenuButtonKbdActivate: the focus and gadget exclusive, activated */
 @method OLMenuButtonClass, MSG_OL_BUTTON_KBD_ACTIVATE
 {
+    GrabFocusExcl(oself);
+    TakeGadgetExcl(oself);
     @call oself::MSG_GEN_ACTIVATE();
 }
 
 @method OLMenuButtonClass, MSG_OL_MENU_BUTTON_KBD_ACTIVATE
 {
+    GrabFocusExcl(oself);
+    TakeGadgetExcl(oself);
     @call oself::MSG_GEN_ACTIVATE();
+}
+
+/*
+ * OLMenuButtonFupKbdChar: Escape completes the open menu of a button
+ * out of a menu, else completes it and goes up; right on a sub menu's
+ * button opens the sub menu; the rest up
+ */
+static Boolean MenuButtonKbdChar(optr o, word c, word flags)
+{
+    OLMenuButtonInstance *b = MBtn(o);
+    optr g;
+
+    if ((flags & (CF_STATE_KEY | CF_TEMP_ACCENT | CF_REPEAT_PRESS)) ||
+	!(flags & CF_FIRST_PRESS))
+	return FALSE;
+    if (c == ((CS_CONTROL << 8) | VC_ESCAPE)) {
+	Boolean own = (b->OLMBI_specState & OLMBSS_POPUP_OPEN) &&
+		      !(b->OLBI_specState & OLBSS_IN_MENU);
+
+	g = GenPart(o);
+	(void) @call g::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+	return own;
+    }
+    if (b->OLMBI_popupType == MOWT_SUBMENU &&
+	c == ((CS_CONTROL << 8) | VC_RIGHT)) {
+	@call o::MSG_OL_MENU_BUTTON_KBD_ACTIVATE();
+	return TRUE;
+    }
+    return FALSE;
+}
+
+@method OLMenuButtonClass, MSG_META_FUP_KBD_CHAR
+{
+    if (MenuButtonKbdChar(oself, character, flags))
+	return TRUE;
+    return @callsuper();
+}
+
+@method OLMenuButtonClass, MSG_META_KBD_CHAR
+{
+    if (!MenuButtonKbdChar(oself, character, flags))
+	@callsuper();
+}
+
+/* OLMenuButtonSendRightArrowToParentMenu: the menu closed, right to the
+ * menu the button is in (it goes on to the next of the bar) */
+@method OLMenuButtonClass, MSG_OL_MENU_BUTTON_SEND_RIGHT_ARROW_TO_PARENT_MENU
+{
+    optr p;
+
+    (void) @call oself::MSG_OL_MENU_BUTTON_CLOSE_MENU();
+    p = VisFindParent(oself);
+    if (p)
+	(void) @call p::MSG_META_FUP_KBD_CHAR((CS_CONTROL << 8) | VC_RIGHT,
+					      CF_FIRST_PRESS, 0);
+}
+
+/*
+ * OLMenuButtonSaveStateSetCursored: the looks saved (an interaction
+ * starting), cursored: bordered (in the menu bar on black and white
+ * also depressed; a system icon depressed)
+ */
+static void SaveStateSetCursored(optr o)
+{
+    OLMenuButtonInstance *b;
+    word f;
+
+    SaveIfStartingInteraction(o);
+    b = MBtn(o);
+    b->OLBI_specState |= OLBSS_CURSORED;
+    if (b->OLBI_specState & OLBSS_SYS_ICON)
+	f = OLBSS_DEPRESSED;
+    else {
+	f = OLBSS_BORDERED;
+	if ((b->OLBI_specState & OLBSS_IN_MENU_BAR) && OpenCheckIfBW())
+	    f |= OLBSS_DEPRESSED;
+    }
+    b->OLBI_specState |= f;
+}
+
+/* OLMenuButtonGainedFocusExcl: the gadget exclusive, cursored */
+@method OLMenuButtonClass, MSG_META_GAINED_SYS_FOCUS_EXCL
+{
+    if (!(pself->OLBI_specState & OLBSS_CURSORED)) {
+	TakeGadgetExcl(oself);
+	SaveStateSetCursored(oself);
+	OLButtonDrawLaterIfNewState(oself);
+    }
+    @callsuper oself::OLMenuButtonClass::MSG_META_GAINED_FOCUS_EXCL();
+}
+
+/* OLMenuButtonLostFocusExcl: no longer cursored; the looks back unless
+ * the menu is open */
+@method OLMenuButtonClass, MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    if (!(pself->OLBI_specState & OLBSS_CURSORED))
+	return;
+    pself->OLBI_specState &= ~OLBSS_CURSORED;
+    if (MBtn(oself)->OLMBI_specState & OLMBSS_POPUP_OPEN)
+	return;
+    OLButtonRestoreBorderedAndDepressed(oself);
+    OLButtonDrawLaterIfNewState(oself);
+}
+
+/*
+ * OLMenuButtonNavigate: with a keyboard, enabled (not in a toolbox) it
+ * may have the focus; menu related unless in a menu or a popup list's
+ */
+@method OLMenuButtonClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    OLMenuButtonInstance *b = pself;
+    NavigateCommonFlags f = 0;
+
+    if (!(b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) && OpenCheckIfKeyboard() &&
+	OpenButtonCheckIfFullyEnabled(oself))
+	f = NCF_IS_FOCUSABLE;
+    b = MBtn(oself);
+    if (!(b->OLBI_specState & (OLBSS_IN_MENU | OLBSS_MENU_DOWN_MARK)) &&
+	!(b->OLMBI_specState & OLMBSS_OPENS_POPUP_LIST))
+	f |= NCF_IS_MENU_RELATED;
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, f,
+			     b->OLBI_genChunk);
 }

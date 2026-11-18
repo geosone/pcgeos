@@ -6,8 +6,7 @@
  * (the default exclusive, menus, gadget exclusives), the window opened.
  *
  * Port32: the system menu is not built yet (nothing to unbuild); the
- * navigation query (MSG_SPEC_NAVIGATE) answers an object only, without
- * its flags (no menu bar navigation); the focus being a button
+ * focus being a button
  * (OLButtonClass) is not activated as a default.
  */
 @include "cGeode.goh"
@@ -132,7 +131,8 @@ Boolean OpenWinEnsureRealizableOnTop(optr o)
 
 /*
  * OpenWinNavigateCommon: the navigation query from the focus (skipping
- * it) or the window; the object found gets the focus, none releases it
+ * it) or the window; the object found gets the focus (menu related for
+ * the menu bar's navigation), none releases it
  */
 void OpenWinNavigateCommon(optr o, NavigationFlags nf)
 {
@@ -153,7 +153,8 @@ void OpenWinNavigateCommon(optr o, NavigationFlags nf)
     }
     if (found == Win(o)->OLWI_focusExcl.FTVMC_OD)
 	return;
-    @call o::MSG_META_MUP_ALTER_FTVMC_EXCL(found, MAEF_GRAB | MAEF_FOCUS);
+    @call o::MSG_META_MUP_ALTER_FTVMC_EXCL(found, MAEF_GRAB | MAEF_FOCUS |
+		((nf & NF_NAV_MENU_BAR) ? MAEF_OD_IS_MENU_RELATED : 0));
 }
 
 @extern method OLWinClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD

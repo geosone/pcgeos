@@ -576,3 +576,25 @@ void OLButtonDrawMoniker(optr oself, GStateHandle gs, DrawMonikerFlags f,
 {
     return ConstructOptr(OptrToHandle(oself), pself->OLBI_genChunk);
 }
+
+/*
+ * OLButtonNavigate: with a keyboard a button may have the focus if it
+ * is drawable and enabled (not in a toolbox, not a system icon); one
+ * in the menu bar is menu related
+ */
+@extern method OLButtonClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    OLButtonInstance *b = pself;
+    NavigateCommonFlags f = 0;
+
+    if (OpenCheckIfKeyboard() && !(b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) &&
+	!(b->OLBI_specState & OLBSS_SYS_ICON)) {
+	if (b->OLBI_specState & OLBSS_IN_MENU_BAR)
+	    f |= NCF_IS_MENU_RELATED;
+	if ((b->VI_attrs & VA_DRAWABLE) &&
+	    OpenButtonCheckIfFullyEnabled(oself))
+	    f |= NCF_IS_FOCUSABLE;
+    }
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, f,
+			     Btn(oself)->OLBI_genChunk);
+}

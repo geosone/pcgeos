@@ -1,0 +1,251 @@
+/*
+ * cwinClassMisc.goc -- OLWinClass (after cwinClassMisc.asm): the
+ * keyboard of a window.  The navigation query starts at the window (the
+ * root of its tree); Tab and the arrows go to the next or previous
+ * field, Enter activates the default; Alt alone (pressed and released)
+ * moves the focus into the menu bar and out again; with the focus in
+ * the menu bar the arrows move along it and up and down open the menu;
+ * the rest goes up the focus hierarchy (a menu's to its button).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: mnemonics
+ * (MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC is sent, nothing answers it
+ * yet), the system menu (its accelerators, the focus going to it when
+ * there is no menu bar), the window position and size messages, the
+ * legos look, rotating the display.
+ */
+@include "cGeode.goh"
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+#define CTRL_KEYS	(SS_LCTRL | SS_RCTRL)
+#define ANY_MODIFIER	(SS_LCTRL | SS_RCTRL | SS_LALT | SS_RALT | \
+			 SS_LSHIFT | SS_RSHIFT)
+#define KEY(k)		((KS_CHAR_SET_CONTROL << 8) | (k))
+#define CTRL_CHAR(k)	((CS_CONTROL << 8) | (k))
+
+/*
+ * OpenWinCallParentOfWindow: up from the window: a menu (not pinned)
+ * with a button through its button (an adopted button's query goes to
+ * the primary), else to the vis parent
+ */
+Boolean OpenWinCallParentOfWindow(optr o, Message msg, const void *params,
+				  word paramSize, void *reply, word replySize)
+{
+    OLPopupWinInstance *w = (OLPopupWinInstance *) Win(o);
+
+    if ((w->OLWI_fixedAttr & OWFA_IS_MENU) &&
+	!(w->OLWI_specState & OLWSS_PINNED) && w->OLPWI_button) {
+	optr b = ConstructOptr(OptrToHandle(o), w->OLPWI_button);
+
+	if (reply)
+	    memset(reply, 0, replySize);
+	CObjMessageP(MF_CALL, b, msg, params, paramSize, reply, replySize);
+	return TRUE;
+    }
+    return VisCallParent(o, msg, params, paramSize, reply, replySize);
+}
+
+/* OpenWinNavigate: the window is the root of its navigation tree */
+@extern method OLWinClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags,
+			     NCF_IS_ROOT_NODE | NCF_IS_COMPOSITE, 0);
+}
+
+@extern method OLWinClass, MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD
+{
+    OpenWinNavigateCommon(oself, NF_TRAVEL_CIRCUIT |
+				 NF_BACKTRACK_AFTER_TRAVELING);
+}
+
+@extern method OLWinClass, MSG_OL_WIN_QUERY_MENU_BAR
+{
+    return 0;
+}
+
+@extern method OLWinClass, MSG_OL_WIN_QUERY_MENU_BAR_HAS_FOCUS
+{
+    return (pself->OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED)
+	   != 0;
+}
+
+@extern method OLWinClass, MSG_OL_WIN_CLEAR_TOGGLE_MENU_NAV_PENDING
+{
+    pself->OLWI_menuState &= ~OLWMS_TOGGLE_MENU_NAV_PENDING;
+}
+
+/* ---------------------------------------------------------------------
+ * Menu navigation
+ * ------------------------------------------------------------------- */
+
+static Boolean AnyMouseButtonDown(optr o)
+{
+    return (@call o::MSG_VIS_VUP_GET_MOUSE_STATUS() &
+	    (BI_B3_DOWN | BI_B2_DOWN | BI_B1_DOWN | BI_B0_DOWN)) != 0;
+}
+
+/*
+ * MenuKeyToggles: 0 no toggle, 1 toggles on the release (Alt alone,
+ * no button down), 2 toggles now (Escape with the focus in the menu
+ * bar)
+ */
+static int MenuKeyToggles(optr o, word c, word flags)
+{
+    OLWinInstance *w = Win(o);
+    byte ss = (byte) (flags >> 8);
+    MetaAlterFTVMCExclFlags ff = w->OLWI_focusExcl.FTVMC_flags;
+
+    if ((ff & MAEF_OD_IS_MENU_RELATED) && (ff & MAEF_OD_IS_WINDOW))
+	return 0;
+    if ((c == CTRL_CHAR(VC_LALT) || c == CTRL_CHAR(VC_RALT)) &&
+	!(ss & (SS_LCTRL | SS_RCTRL | SS_LSHIFT | SS_RSHIFT)))
+	return AnyMouseButtonDown(o) ? 0 : 1;
+    if ((ff & MAEF_OD_IS_MENU_RELATED) && !(ss & ANY_MODIFIER) &&
+	c == CTRL_CHAR(VC_ESCAPE) && !AnyMouseButtonDown(o))
+	return 2;
+    return 0;
+}
+
+/*
+ * HandleMenuToggling: Alt pressed alone and released (or Escape in the
+ * menu bar) toggles the menu navigation; TRUE if the key was taken
+ */
+static Boolean HandleMenuToggling(optr o, word c, word flags)
+{
+    OLWinInstance *w;
+    int t;
+
+    if (c != CTRL_CHAR(VC_ESCAPE) &&
+	Win(o)->OLWI_type == MOWT_DISPLAY_WINDOW)
+	return FALSE;
+    t = MenuKeyToggles(o, c, flags);
+    w = Win(o);
+    if (!t) {
+	w->OLWI_menuState &= ~OLWMS_TOGGLE_MENU_NAV_PENDING;
+	return FALSE;
+    }
+    if (t == 1) {
+	if (flags & CF_FIRST_PRESS) {
+	    if (w->OLWI_menuState & OLWMS_TOGGLE_MENU_NAV_PENDING) {
+		w->OLWI_menuState &= ~OLWMS_TOGGLE_MENU_NAV_PENDING;
+		return FALSE;
+	    }
+	    w->OLWI_menuState |= OLWMS_TOGGLE_MENU_NAV_PENDING;
+	    return TRUE;
+	}
+	if (!(flags & CF_RELEASE) ||
+	    !(w->OLWI_menuState & OLWMS_TOGGLE_MENU_NAV_PENDING))
+	    return FALSE;
+    }
+    w->OLWI_menuState &= ~OLWMS_TOGGLE_MENU_NAV_PENDING;
+    @call o::MSG_OL_WIN_TOGGLE_MENU_NAVIGATION();
+    return TRUE;
+}
+
+/*
+ * HandleMenuNavigation: the focus in the menu bar: left and right move
+ * along it, up and down activate the menu button with the focus
+ */
+static Boolean HandleMenuNavigation(optr o, word c, word flags, word state)
+{
+    static const KeyboardShortcut keys[4] = {
+	KEY(VC_LEFT), KEY(VC_RIGHT), KEY(VC_UP), KEY(VC_DOWN)
+    };
+    word off, i;
+    optr f;
+
+    if (!(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)) ||
+	!(Win(o)->OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED))
+	return FALSE;
+    off = FlowCheckKbdShortcut((KeyboardShortcut *) keys, 4, c, flags,
+			       state);
+    if (off == (word) -1)
+	return FALSE;
+    i = off / sizeof(KeyboardShortcut);
+    if (i == 0)
+	@call o::MSG_GEN_NAVIGATE_TO_PREVIOUS_FIELD();
+    else if (i == 1)
+	@call o::MSG_GEN_NAVIGATE_TO_NEXT_FIELD();
+    else {
+	f = Win(o)->OLWI_focusExcl.FTVMC_OD;
+	if (f && ObjIsObjectInClass(f, &OLButtonClass))
+	    @call f::MSG_OL_BUTTON_KBD_ACTIVATE();
+    }
+    return TRUE;
+}
+
+/*
+ * OLWinToggleMenuNavigation: the focus into the menu bar (its first
+ * child, menu related), or back out of it to the previous focus
+ */
+@extern method OLWinClass, MSG_OL_WIN_TOGGLE_MENU_NAVIGATION
+{
+    optr bar, first;
+
+    if (!(pself->OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED)) {
+	bar = @call oself::MSG_OL_WIN_QUERY_MENU_BAR();
+	first = bar ? ((VisCompInstance *) ObjDerefVis(bar))->
+		      VCI_comp.CP_firstChild : 0;
+	if (!first)
+	    return;
+	@call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(first,
+			MAEF_OD_IS_MENU_RELATED | MAEF_GRAB | MAEF_FOCUS);
+	@call oself::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+	return;
+    }
+    if (!Win(oself)->OLWI_prevFocusExcl.FTVMC_OD)
+	return;
+    @call oself::MSG_VIS_VUP_RELEASE_MENU_FOCUS();
+    @call oself::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+}
+
+/*
+ * OpenWinFupKbdChar: the menu toggling and navigation; Tab (with shift
+ * backwards, with control too), the arrows: the next or previous field;
+ * Enter: the default; a mnemonic (no menu in stay up mode, no control,
+ * the window has the system focus); else up the focus hierarchy
+ */
+@extern method OLWinClass, MSG_META_FUP_KBD_CHAR
+{
+    static const KeyboardShortcut keys[9] = {
+	KEY(VC_TAB), KS_SHIFT | KEY(VC_TAB), KS_CTRL | KEY(VC_TAB),
+	KS_CTRL | KS_SHIFT | KEY(VC_TAB), KEY(VC_DOWN), KEY(VC_UP),
+	KEY(VC_RIGHT), KEY(VC_LEFT), KEY(VC_ENTER)
+    };
+    struct { word c, f, s; } p;
+    Boolean done = FALSE;
+    word off, i;
+    OLWinInstance *w;
+
+    if (HandleMenuToggling(oself, character, flags) ||
+	HandleMenuNavigation(oself, character, flags, state))
+	return TRUE;
+    if (!(flags & (CF_STATE_KEY | CF_TEMP_ACCENT)) &&
+	(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS))) {
+	off = FlowCheckKbdShortcut((KeyboardShortcut *) keys, 9, character,
+				   flags, state);
+	if (off != (word) -1) {
+	    i = off / sizeof(KeyboardShortcut);
+	    if (i == 8)
+		(void) @call oself::MSG_GEN_ACTIVATE_INTERACTION_DEFAULT();
+	    else if (i & 1)
+		@call oself::MSG_GEN_NAVIGATE_TO_PREVIOUS_FIELD();
+	    else
+		@call oself::MSG_GEN_NAVIGATE_TO_NEXT_FIELD();
+	    return TRUE;
+	}
+	w = Win(oself);
+	if (!(w->OLWI_menuState & OLWMS_HAS_MENU_IN_STAY_UP_MODE) &&
+	    !((flags >> 8) & CTRL_KEYS) &&
+	    (w->OLWI_focusExcl.FTVMC_flags & MAEF_SYS_EXCL) &&
+	    @call oself::MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(character,
+								flags, state))
+	    return TRUE;
+    }
+    p.c = character;
+    p.f = flags;
+    p.s = state;
+    (void) OpenWinCallParentOfWindow(oself, MSG_META_FUP_KBD_CHAR, &p,
+				     sizeof(p), &done, sizeof(done));
+    return done;
+}

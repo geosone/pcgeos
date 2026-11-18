@@ -36,6 +36,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CComp/copenMenuBar.goc
                ${c}/CWin/cwinMenu.goc
                ${c}/CWin/cwinPtr.goc
+               ${c}/CWin/cwinClassMisc.goc
                ${c}/CWin/cwinScreen.goc
                ${c}/CWin/cwinField.goc
                ${c}/CWin/cwinClassCommonHigh.goc

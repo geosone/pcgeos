@@ -10,10 +10,18 @@
  *
  * Port32 (Port32/ABI.md section 13y), not yet: the pushpin (pinnable
  * menus: the PinMoniker picture), the Exit trigger of the file menu,
- * cascading sub menus, the scrollers of a menu taller than the screen
- * (MenuWinScrollerClass), menu separators, the keyboard (navigation,
- * MSG_META_FUP_KBD_CHAR), the remote gadget exclusive, the system and
- * express menus, the menu centers (OLMenuCalcCenters).
+ * cascading sub menus (Motif has none: _CASCADING_MENUS), the scrollers
+ * of a menu taller than the screen (MenuWinScrollerClass), menu
+ * separators, the system and express menus, the menu centers
+ * (OLMenuCalcCenters), the navigation character kept for item groups
+ * (lastKbdCharCX).
+ *
+ * The keyboard: up and down move through the items (the first gets the
+ * focus when the menu stays up), left and right to the neighbouring
+ * menu of the bar (a sub menu: left back to its menu, right on), Escape
+ * goes up to the button; a menu in the primary has the focus window
+ * exclusive of the primary while up (with the remote gadget exclusive:
+ * another gadget taking it completes the menu).
  */
 @include "cGeode.goh"
 
@@ -33,6 +41,26 @@ static optr MenuButton(optr o)
     ChunkHandle b = MWin(o)->OLPWI_button;
 
     return b ? ConstructOptr(OptrToHandle(o), b) : 0;
+}
+
+/* OLMenuWinCallButtonOrGenParent: a visual query with this menu as the
+ * data, to the button (none: the generic parent) */
+static void QueryButtonOrGenParent(optr o, word q)
+{
+    optr b = MenuButton(o);
+    GenReturnParams r;
+
+    if (!b)
+	b = GenFindParent(o);
+    if (b)
+	(void) @call b::MSG_VIS_P32_VUP_QUERY(&r, q, OptrToChunk(o),
+					      OptrToHandle(o));
+}
+
+static Boolean IsPinnedOrWas(optr o)
+{
+    return (MWin(o)->OLWI_specState & OLWSS_PINNED) ||
+	   (MWin(o)->OLMWI_specState & OMWSS_WAS_PINNED);
 }
 
 static void HintNotPinnable(optr o)
@@ -237,16 +265,13 @@ static VarDataCHandler menuHints[] = {
  */
 @method OLMenuWinClass, MSG_MO_MW_ENTER_STAY_UP_MODE
 {
-    optr b = MenuButton(oself);
-    GenReturnParams r;
-
-    (void) grab;
     pself->OLMWI_specState |= OMWSS_IN_STAY_UP_MODE;
-    if (b)
-	(void) @call b::MSG_VIS_P32_VUP_QUERY(&r,
-					      SVQT_HAS_MENU_IN_STAY_UP_MODE,
-					      0, 0);
+    QueryButtonOrGenParent(oself, SVQT_HAS_MENU_IN_STAY_UP_MODE);
+    if (grab)
+	QueryButtonOrGenParent(oself,
+			SVQT_NOTIFY_MENU_BUTTON_AND_REMOTE_GRAB_GADGET_EXCL);
     @call oself::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+    @call oself::MSG_GEN_NAVIGATE_TO_NEXT_FIELD();
 }
 
 /*
@@ -256,17 +281,15 @@ static VarDataCHandler menuHints[] = {
 @method OLMenuWinClass, MSG_MO_MW_LEAVE_STAY_UP_MODE
 {
     optr b;
-    GenReturnParams r;
 
     if (!(pself->OLMWI_specState & OMWSS_IN_STAY_UP_MODE))
 	return FALSE;
     pself->OLMWI_specState &= ~OMWSS_IN_STAY_UP_MODE;
     @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+    QueryButtonOrGenParent(oself, SVQT_NO_MENU_IN_STAY_UP_MODE);
     b = MenuButton(oself);
     if (!b)
 	return FALSE;
-    (void) @call b::MSG_VIS_P32_VUP_QUERY(&r, SVQT_NO_MENU_IN_STAY_UP_MODE,
-					  0, 0);
     return @call b::MSG_MO_MB_LEAVE_STAY_UP_MODE(x, y, inputState);
 }
 
@@ -394,5 +417,192 @@ static VisCompSpacingMarginsInfo MenuWinPassMarginInfo(optr o)
     b = MenuButton(oself);
     if (b)
 	@send, forceQueue b::MSG_OL_BUTTON_KBD_ACTIVATE();
+    return TRUE;
+}
+
+/* OLMenuWinVisClose: the remote gadget exclusive given back */
+@method OLMenuWinClass, MSG_VIS_CLOSE
+{
+    QueryButtonOrGenParent(oself, SVQT_REMOTE_RELEASE_GADGET_EXCL);
+    @callsuper();
+}
+
+/*
+ * OLMenuWinVupQuery: the stay up mode and the remote gadget exclusive
+ * of a menu not pinned go to its button (or generic parent)
+ */
+@method OLMenuWinClass, MSG_VIS_P32_VUP_QUERY
+{
+    optr b;
+
+    switch (queryType) {
+    case SVQT_HAS_MENU_IN_STAY_UP_MODE:
+    case SVQT_NO_MENU_IN_STAY_UP_MODE:
+    case SVQT_REMOTE_GRAB_GADGET_EXCL:
+    case SVQT_REMOTE_RELEASE_GADGET_EXCL:
+	if (IsPinnedOrWas(oself))
+	    break;
+	b = MenuButton(oself);
+	if (!b)
+	    b = GenFindParent(oself);
+	return b ? @call b::MSG_VIS_P32_VUP_QUERY(retValue, queryType, data1,
+						  data2) : FALSE;
+    }
+    return @callsuper();
+}
+
+/*
+ * OLMenuWinBringToTop: on top, the focus (not the target) of the
+ * window it is in; the application told
+ */
+@method OLMenuWinClass, MSG_GEN_BRING_TO_TOP
+{
+    WindowHandle w = VisQueryWindow(oself);
+    optr app;
+
+    if (w) {
+	WinChangePriority(w, 0, 0);
+	if (!(MWin(oself)->OLWI_specState & OLWSS_PINNED) &&
+	    OpenCheckIfMenusTakeFocus())
+	    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+    }
+    app = GeodeGetAppObject(0);
+    if (app)
+	@call app::MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP(oself);
+}
+
+/*
+ * OLMenuWinAlterFTVMCExcl: a menu not pinned asks for (and gives up) the
+ * focus of its window through its button (or generic parent): the
+ * focus goes from the menu to the window and back
+ */
+@method OLMenuWinClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    struct { optr o; MetaAlterFTVMCExclFlags f; } p;
+    optr b;
+
+    if (!(flags & MAEF_NOT_HERE) && (flags & MAEF_FOCUS)) {
+	Boolean up;
+
+	if (flags & MAEF_GRAB)
+	    up = (flags & MAEF_OD_IS_WINDOW) &&
+		 (flags & MAEF_OD_IS_MENU_RELATED) && !IsPinnedOrWas(oself);
+	else
+	    up = !IsPinnedOrWas(oself) &&
+		 objectWantingControl != pself->OLWI_focusExcl.FTVMC_OD;
+	if (up) {
+	    b = MenuButton(oself);
+	    if (!b)
+		b = GenFindParent(oself);
+	    if (b) {
+		p.o = objectWantingControl;
+		p.f = flags;
+		CObjMessageP(MF_CALL, b, MSG_META_MUP_ALTER_FTVMC_EXCL, &p,
+			     sizeof(p), NULL, 0);
+	    }
+	    return;
+	}
+    }
+    @callsuper();
+}
+
+/*
+ * OLMenuWinFupKbdChar: a menu with a button: left and right to the
+ * neighbouring menu (its button gets the focus, the menu with the
+ * focus then is activated), a sub menu's left back to its menu, right
+ * on to the next of the bar, Escape to the button; up and down through
+ * the items; a menu without a button completes on Escape
+ */
+static const KeyboardShortcut menuKeys[3] = {
+    (KS_CHAR_SET_CONTROL << 8) | VC_LEFT,
+    (KS_CHAR_SET_CONTROL << 8) | VC_RIGHT,
+    (KS_CHAR_SET_CONTROL << 8) | VC_ESCAPE
+};
+static const KeyboardShortcut internalKeys[3] = {
+    (KS_CHAR_SET_CONTROL << 8) | VC_UP,
+    (KS_CHAR_SET_CONTROL << 8) | VC_DOWN,
+    (KS_CHAR_SET_CONTROL << 8) | VC_ESCAPE
+};
+
+/* OLMenuWinKbdCloseSubMenuToParentMenu: the button the focus of the
+ * parent menu, the sub menu dismissed */
+static void CloseSubMenuToParentMenu(optr o)
+{
+    optr b = MenuButton(o);
+    optr pm;
+
+    if (!b || (MWin(o)->OLWI_specState & OLWSS_PINNED))
+	return;
+    ((OLMenuButtonInstance *) ObjDerefVis(b))->OLMBI_specState &=
+	~OLMBSS_POPUP_OPEN;
+    OLButtonRestoreBorderedAndDepressedAndDrawNow(b);
+    pm = VisFindParentOfVisType(b, VTF_IS_WIN_GROUP);
+    if (pm)
+	@call pm::MSG_META_GRAB_FOCUS_EXCL();
+    (void) @call o::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+    @call b::MSG_META_GRAB_FOCUS_EXCL();
+}
+
+@method OLMenuWinClass, MSG_META_FUP_KBD_CHAR
+{
+    OLMenuWinInstance *m = pself;
+    word off, i;
+    optr b, f;
+
+    if (!(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)) ||
+	(flags & (CF_STATE_KEY | CF_TEMP_ACCENT)))
+	return @callsuper();
+    if (!(m->OLWI_specState & OLWSS_PINNED) && m->OLPWI_button) {
+	Boolean sub = (m->OLCI_buildFlags & OLBF_REPLY) ==
+		      (OLBR_SUB_MENU << OLBF_REPLY_OFFSET);
+
+	off = FlowCheckKbdShortcut((KeyboardShortcut *) menuKeys, 3,
+				   character, flags, state);
+	if (off != (word) -1) {
+	    i = off / sizeof(KeyboardShortcut);
+	    b = MenuButton(oself);
+	    if (i == 2 || ObjVarFindData(oself, HINT_IS_EXPRESS_MENU)) {
+		(void) @call b::MSG_META_FUP_KBD_CHAR(
+				i == 2 ? character
+				       : ((CS_CONTROL << 8) | VC_ESCAPE),
+				flags, state);
+		return TRUE;
+	    }
+	    if (sub && i == 0) {
+		CloseSubMenuToParentMenu(oself);
+		return TRUE;
+	    }
+	    if (sub) {
+		@call b::MSG_OL_MENU_BUTTON_SEND_RIGHT_ARROW_TO_PARENT_MENU();
+		return TRUE;
+	    }
+	    /* OLMenuWinFocusAndCallButton */
+	    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(b,
+			MAEF_OD_IS_MENU_RELATED | MAEF_GRAB | MAEF_FOCUS |
+			MAEF_NOT_HERE);
+	    if (i == 0)
+		@call b::MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD();
+	    else
+		@call b::MSG_SPEC_NAVIGATE_TO_NEXT_FIELD();
+	    f = VisFindParentOfVisType(b, VTF_IS_WIN_GROUP);
+	    f = f ? ((OLWinInstance *) ObjDerefVis(f))->OLWI_focusExcl.FTVMC_OD
+		  : 0;
+	    if (f && ObjIsObjectInClass(f, &OLMenuButtonClass))
+		@call f::MSG_OL_MENU_BUTTON_KBD_ACTIVATE();
+	    return TRUE;
+	}
+    }
+    off = FlowCheckKbdShortcut((KeyboardShortcut *) internalKeys, 3,
+			       character, flags, state);
+    if (off == (word) -1)
+	return @callsuper();
+    i = off / sizeof(KeyboardShortcut);
+    if (i == 0)
+	@call oself::MSG_GEN_NAVIGATE_TO_PREVIOUS_FIELD();
+    else if (i == 1)
+	@call oself::MSG_GEN_NAVIGATE_TO_NEXT_FIELD();
+    else
+	(void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
     return TRUE;
 }

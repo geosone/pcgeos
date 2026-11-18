@@ -5,7 +5,7 @@
  * window (WinPosSizeFlags), the vis parent.  The rest of the class is in
  * cwinClassCommonMiddle.goc, cwinClassCommonLow.goc,
  * cwinClassOther.goc, cwinGeometry.goc, cwinExcl.goc, cwinPtr.goc (the
- * mouse) and (the drawing)
+ * mouse), cwinClassMisc.goc (the keyboard) and (the drawing)
  * Motif/Win/winDraw.goc.
  *
  * Port32 (Port32/ABI.md section 13y), not yet: the system menu and its
@@ -73,6 +73,14 @@
 @extern method OLWinClass, MSG_META_SEND_CLASSED_EVENT;
 /* Motif/Win/winDraw.goc */
 @extern method OLWinClass, MSG_VIS_DRAW;
+/* cwinClassMisc.goc */
+@extern method OLWinClass, MSG_SPEC_NAVIGATION_QUERY;
+@extern method OLWinClass, MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD;
+@extern method OLWinClass, MSG_OL_WIN_QUERY_MENU_BAR;
+@extern method OLWinClass, MSG_OL_WIN_QUERY_MENU_BAR_HAS_FOCUS;
+@extern method OLWinClass, MSG_OL_WIN_CLEAR_TOGGLE_MENU_NAV_PENDING;
+@extern method OLWinClass, MSG_OL_WIN_TOGGLE_MENU_NAVIGATION;
+@extern method OLWinClass, MSG_META_FUP_KBD_CHAR;
 /* cwinPtr.goc */
 @extern method OLWinClass, MSG_OL_WIN_STARTUP_GRAB;
 @extern method OLWinClass, MSG_OL_WIN_END_GRAB;

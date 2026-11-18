@@ -322,11 +322,10 @@ static void UnsetFocusExcl(optr o, optr obj)
     if (flags & MAEF_NOT_HERE) {
 	struct { optr o; MetaAlterFTVMCExclFlags f; } p;
 
-	/* OpenWinCallParentOfWindow (Port32: a menu's button not yet) */
 	p.o = objectWantingControl;
 	p.f = flags & ~MAEF_NOT_HERE;
-	VisCallParent(oself, MSG_META_MUP_ALTER_FTVMC_EXCL, &p, sizeof(p),
-		      NULL, 0);
+	(void) OpenWinCallParentOfWindow(oself, MSG_META_MUP_ALTER_FTVMC_EXCL,
+					 &p, sizeof(p), NULL, 0);
 	return;
     }
     while (flags & MAEF_MASK_OF_ALL_HIERARCHIES) {

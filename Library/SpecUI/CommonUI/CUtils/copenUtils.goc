@@ -367,6 +367,18 @@ Boolean OpenCheckIfKeyboard(void)
     return (f & UIBF_KEYBOARD_ONLY) || !(f & UIBF_NO_KEYBOARD);
 }
 
+/* OpenCheckIfMenusTakeFocus: menus take the focus but on a pen system
+ * with no keyboard (PRESERVE_FOCUS_IF_PEN_ONLY) */
+Boolean OpenCheckIfMenusTakeFocus(void)
+{
+    UIButtonFlags f;
+
+    if (!SysGetPenMode())
+	return TRUE;
+    f = FlowGetUIButtonFlags();
+    return (f & UIBF_KEYBOARD_ONLY) || !(f & UIBF_NO_KEYBOARD);
+}
+
 /* OpenCheckIfKeyboardNavigation: [motif options] kbdNavigation */
 Boolean OpenCheckIfKeyboardNavigation(void)
 {
