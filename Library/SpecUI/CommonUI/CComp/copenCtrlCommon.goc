@@ -1,0 +1,310 @@
+/*
+ * copenCtrlCommon.goc -- OLCtrlClass (after copenCtrlCommon.asm): the
+ * generic messages it passes to its children (apply, reset), the
+ * interaction command of a dialog, drawing the frame and the moniker,
+ * the reply bar query.
+ *
+ * Port32 (Port32/ABI.md section 13z): the moniker is drawn by the UI's
+ * VisDrawMoniker at the asm's insets and justification (OpenDrawMoniker
+ * with its keyboard accelerators comes with copenMoniker.goc); not yet:
+ * the default focus broadcast (MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS).
+ * Motif has no draw styles, background colors, rounded corners, focus
+ * leaves or colored disabled gadgets (cConstant.def).
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+
+#define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
+#define TARGET(f)	((f) & OLBF_TARGET)
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+
+/* ---------------------------------------------------------------------
+ * Generic messages
+ * ------------------------------------------------------------------- */
+
+/* OLCtrlInteractionComplete: a dialog's own completion stops here */
+@extern method OLCtrlClass, MSG_GEN_GUP_INTERACTION_COMMAND
+{
+    if (command != IC_INTERACTION_COMPLETE ||
+	!ObjIsObjectInClass(oself, &GenInteractionClass))
+	return FALSE;
+    return ((GenInteractionInstance *) ObjDerefGen(oself))->GII_visibility ==
+	   GIV_DIALOG;
+}
+
+/* OLCtrlPropogateApplyReset: to the generic children (a reply bar's
+ * are triggers) */
+@extern method OLCtrlClass, MSG_GEN_APPLY, MSG_GEN_RESET, MSG_GEN_POST_APPLY
+{
+    if (TARGET(pself->OLCI_buildFlags) == T(OLBT_REPLY_BAR))
+	return;
+    VisIfFlagSetCallGenChildren(oself, message, NULL, 0, 0);
+}
+
+/* OLCtrlPropogatePreApply: to the usable generic children; TRUE if one
+ * of them refused */
+@extern method OLCtrlClass, MSG_GEN_PRE_APPLY
+{
+    Boolean refused = FALSE;
+    word i;
+
+    if (TARGET(pself->OLCI_buildFlags) == T(OLBT_REPLY_BAR))
+	return FALSE;
+    for (i = 0; ; i++) {
+	optr child = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(i);
+
+	if (!child)
+	    break;
+	if (@call child::MSG_GEN_GET_USABLE() &&
+	    @call child::MSG_GEN_PRE_APPLY())
+	    refused = TRUE;
+    }
+    return refused;
+}
+
+/* OLCtrlVupQuery: SVQT_QUERY_FOR_REPLY_BAR answered by a reply bar */
+@extern method OLCtrlClass, MSG_VIS_P32_VUP_QUERY
+{
+    if (queryType != SVQT_QUERY_FOR_REPLY_BAR)
+	return @callsuper();
+    return TARGET(pself->OLCI_buildFlags) == T(OLBT_REPLY_BAR);
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+static void SetLineColor(GStateHandle gs, Color c)
+{
+    GrSetLineColor(gs, CF_INDEX, c, 0, 0);
+}
+
+/* SetWhiteIfNotClearing: white for a black line (TRUE); a frame drawn
+ * in the wash color (clearing) stays so */
+static Boolean SetWhiteIfNotClearing(GStateHandle gs)
+{
+    if (GrGetLineColor(gs) & 0xffffffUL)
+	return FALSE;
+    SetLineColor(gs, C_WHITE);
+    return TRUE;
+}
+
+/* DrawEtchedVLine: black, and white right of it (not in black and
+ * white); fix: one to the left first */
+static void DrawEtchedVLine(GStateHandle gs, sword x, sword top,
+			    sword bottom, Boolean fix)
+{
+    if (fix && !OpenCheckIfBW())
+	x--;
+    GrDrawVLine(gs, x, top, bottom);
+    if (OpenCheckIfBW())
+	return;
+    x++;
+    if (SetWhiteIfNotClearing(gs)) {
+	GrDrawVLine(gs, x, top, bottom);
+	SetLineColor(gs, C_BLACK);
+    } else
+	GrDrawVLine(gs, x, top, bottom);
+}
+
+/* DrawEtchedHLine: black, and white below it */
+static void DrawEtchedHLine(GStateHandle gs, sword left, sword y,
+			    sword right, Boolean fix)
+{
+    if (fix && !OpenCheckIfBW())
+	y--;
+    GrDrawHLine(gs, left, y, right);
+    if (OpenCheckIfBW())
+	return;
+    y++;
+    if (SetWhiteIfNotClearing(gs)) {
+	GrDrawHLine(gs, left, y, right);
+	SetLineColor(gs, C_BLACK);
+    } else
+	GrDrawHLine(gs, left, y, right);
+}
+
+/*
+ * DrawCtrlFrameTopLines: the top line left and right of the moniker
+ * (by its justification: a bit at the end it is next to, else
+ * centered)
+ */
+static void DrawCtrlFrameTopLines(optr o, GStateHandle gs, sword left,
+				  sword right, sword top, word mkrWidth,
+				  word width)
+{
+    OLCtrlInstance *c = Ctrl(o);
+    sword len = (sword) width;
+
+    if (mkrWidth) {
+	if (c->OLCI_moreFlags & OLCOF_LEFT_JUSTIFY_MONIKER) {
+	    if (c->OLCI_moreFlags & OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD) {
+		len = c->OLCI_monikerPos.P_x - OL_CTRL_MKR_MARGIN;
+		if (!len)
+		    len = 0;
+	    } else
+		len = TOP_FRAME_AT_END_MARGIN;
+	} else {
+	    len = (sword) (width - mkrWidth - OL_CTRL_MKR_MARGIN * 2);
+	    if (len < 0)
+		len = 0;
+	    if (c->OLCI_moreFlags & OLCOF_RIGHT_JUSTIFY_MONIKER)
+		len -= TOP_FRAME_AT_END_MARGIN;
+	    else
+		len = (sword) ((word) len >> 1);
+	}
+    }
+    {
+	sword end = (sword) (left + len - 1);
+
+	DrawEtchedHLine(gs, (sword) (left + 1), top, end, FALSE);
+	if (!mkrWidth)
+	    return;
+	left = (sword) (end + mkrWidth + OL_CTRL_MKR_MARGIN * 2 - 1);
+    }
+    if (!OpenCheckIfBW())
+	right -= 2;
+    DrawEtchedHLine(gs, left, top, right, FALSE);
+}
+
+/*
+ * DrawCtrlFrame: HINT_RAISED_FRAME: white top and left, black bottom
+ * and right lines as asked; else an etched frame whose top runs
+ * through the middle of the moniker
+ */
+static void DrawCtrlFrame(optr o, GStateHandle gs)
+{
+    GenRaisedFrameInfo *rf;
+    Rectangle r;
+    SizeAsDWord sz, ms;
+    sword top;
+
+    if ((rf = ObjVarFindData(o, HINT_RAISED_FRAME)) != NULL) {
+	GenRaisedFrameInfo f = *rf;
+
+	SetLineColor(gs, C_WHITE);
+	VisGetBounds(o, &r);
+	if (f & GRFI_TOP)
+	    GrDrawHLine(gs, r.R_left, r.R_top, r.R_right);
+	if (f & GRFI_LEFT)
+	    GrDrawVLine(gs, r.R_left, r.R_top, r.R_bottom);
+	SetLineColor(gs, C_BLACK);
+	if (f & GRFI_BOTTOM)
+	    GrDrawHLine(gs, r.R_left, r.R_bottom, r.R_right);
+	if (f & GRFI_RIGHT)
+	    GrDrawVLine(gs, r.R_right, r.R_top, r.R_bottom);
+	return;
+    }
+    sz = VisGetSize(o);
+    ms = SpecGetGenMonikerSize(o, gs);
+    OpenGetLineBounds(o, &r);
+    top = r.R_top;
+    if (DWORD_HEIGHT(ms))
+	top += CTRL_MKR_INSET_Y;
+    top += DWORD_HEIGHT(ms) >> 1;
+    DrawEtchedVLine(gs, r.R_left, top, r.R_bottom, FALSE);
+    DrawEtchedVLine(gs, r.R_right, top, r.R_bottom, TRUE);
+    DrawEtchedHLine(gs, r.R_left, r.R_bottom, (sword) (r.R_right - 1), TRUE);
+    DrawCtrlFrameTopLines(o, gs, r.R_left, r.R_right, top,
+			  DWORD_WIDTH(ms), DWORD_WIDTH(sz));
+}
+
+static void FillIfAnything(GStateHandle gs, sword l, sword t, sword r,
+			   sword b)
+{
+    if (l < r && t < b)
+	GrFillRect(gs, l, t, r, b);
+}
+
+/*
+ * ClearMonikerArea: the frame and the moniker's area in the wash color
+ * (a disabled control is redrawn 50%)
+ */
+static void ClearMonikerArea(optr o, GStateHandle gs)
+{
+    OLCtrlInstance *c;
+    Rectangle in, b;
+
+    GrSetAreaColor(gs, CF_INDEX, moCS_dsLightColor, 0, 0);
+    SetLineColor(gs, moCS_dsLightColor);
+    c = Ctrl(o);
+    if (c->OLCI_optFlags & OLCOF_DISPLAY_BORDER)
+	DrawCtrlFrame(o, gs);
+    c = Ctrl(o);
+    if (!(c->OLCI_optFlags & OLCOF_DISPLAY_MONIKER))
+	return;
+    VisGetBoundsInsideMargins(o, &in);
+    c = Ctrl(o);
+    b = c->VI_bounds;
+    if (c->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE) {
+	FillIfAnything(gs, b.R_left, b.R_top, b.R_right, in.R_top);
+	return;
+    }
+    FillIfAnything(gs, b.R_left, b.R_top, in.R_left, b.R_bottom);
+    FillIfAnything(gs, in.R_right, b.R_top, b.R_right, b.R_bottom);
+}
+
+/*
+ * OpenDrawCtrlMoniker: the frame and the moniker (50% if disabled), at
+ * its position: left of a frame's end, centered on the parent's moniker
+ * space, aligned with the child
+ */
+static void OpenDrawCtrlMoniker(optr o, GStateHandle gs)
+{
+    OLCtrlInstance *c = Ctrl(o);
+    Boolean enabled = (c->VI_attrs & VA_FULLY_ENABLED) != 0;
+    sword dx = 0, cy;
+    DrawMonikerFlags flags;
+    DrawMonikerArgs a;
+
+    if (!enabled) {
+	ClearMonikerArea(o, gs);
+	GrSetLineMaskSys(gs, SDM_50);
+	GrSetTextMaskSys(gs, SDM_50);
+    }
+    SetLineColor(gs, C_BLACK);
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    c = Ctrl(o);
+    if (c->OLCI_optFlags & OLCOF_DISPLAY_BORDER) {
+	DrawCtrlFrame(o, gs);
+	dx = TOP_FRAME_AT_END_MARGIN + OL_CTRL_MKR_MARGIN;
+    }
+    c = Ctrl(o);
+    if (c->OLCI_optFlags & OLCOF_DISPLAY_MONIKER) {
+	cy = c->OLCI_monikerPos.P_y;
+	if ((c->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE) &&
+	    (c->OLCI_moreFlags & OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD))
+	    dx = c->OLCI_monikerPos.P_x;
+	if ((c->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER) &&
+	    !(c->OLCI_optFlags & OLCOF_LEFT_JUSTIFY_MONIKERS)) {
+	    dx += GetParentMonikerSpace(o);
+	    dx -= Ctrl(o)->OLCI_monikerSpace;
+	}
+	c = Ctrl(o);
+	if (c->OLCI_moreFlags & OLCOF_LEFT_JUSTIFY_MONIKER)
+	    flags = J_LEFT << DMF_X_JUST_OFFSET;
+	else if (c->OLCI_moreFlags & OLCOF_RIGHT_JUSTIFY_MONIKER)
+	    flags = J_RIGHT << DMF_X_JUST_OFFSET;
+	else
+	    flags = J_CENTER << DMF_X_JUST_OFFSET;
+	flags |= J_LEFT << DMF_Y_JUST_OFFSET;
+	memset(&a, 0, sizeof(a));
+	a.DMA_xInset = (word) dx;
+	a.DMA_yInset = (word) cy;
+	a.DMA_gState = gs;
+	a.DMA_textHeight = GetSystemFontHeight();
+	VisDrawMoniker(o, ((GenInstance *) ObjDerefGen(o))->GI_visMoniker,
+		       flags, &a);
+    }
+    if (!enabled) {
+	GrSetLineMaskSys(gs, SDM_100);
+	GrSetTextMaskSys(gs, SDM_100);
+    }
+}
+
+/* OLCtrlDraw: the children, then the frame and the moniker */
+@extern method OLCtrlClass, MSG_VIS_DRAW
+{
+    @callsuper();
+    OpenDrawCtrlMoniker(oself, gstate);
+}

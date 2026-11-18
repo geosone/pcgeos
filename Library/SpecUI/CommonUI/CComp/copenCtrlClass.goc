@@ -1,0 +1,686 @@
+/*
+ * copenCtrlClass.goc -- OLCtrlClass (after copenCtrlClass.asm): the
+ * composite of the specific UI for generic groups (GenInteractions of
+ * GIV_SUB_GROUP and the like), and the superclass of every window
+ * class.  Its initialization, the geometry hints, the specific build,
+ * the build info query, the centering on monikers and the routines
+ * its subclasses share.  The geometry is in copenCtrlGeometry.goc, the
+ * drawing and the generic messages in copenCtrlCommon.goc.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: an OLCtrl in a menu
+ * window (OLWinClass's OWFA_IS_MENU; it is treated as in a normal
+ * window), the reply bar's notification of its dialog
+ * (MSG_OL_WIN_NOTIFY_OF_REPLY_BAR, OLDialogWinClass), the messages of
+ * classes not in C yet (gadget area margins, menu buttons, applyable
+ * state, the menu focus), mnemonics (VisCheckMnemonic), the notebook
+ * look (NOTEBOOK_INTERACTION is FALSE in Motif).
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+
+@classdecl OLCtrlClass, neverSaved;
+
+@extern method OLCtrlClass, MSG_VIS_RECALC_SIZE;
+@extern method OLCtrlClass, MSG_VIS_POSITION_BRANCH;
+@extern method OLCtrlClass, MSG_VIS_COMP_GET_CHILD_SPACING;
+@extern method OLCtrlClass, MSG_VIS_COMP_GET_MARGINS;
+@extern method OLCtrlClass, MSG_VIS_COMP_GET_MINIMUM_SIZE;
+@extern method OLCtrlClass, MSG_VIS_COMP_GET_WRAP_COUNT;
+@extern method OLCtrlClass, MSG_SPEC_GET_EXTRA_SIZE;
+@extern method OLCtrlClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT;
+@extern method OLCtrlClass, MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN;
+@extern method OLCtrlClass, MSG_SPEC_VIS_OPEN_NOTIFY;
+@extern method OLCtrlClass, MSG_SPEC_VIS_CLOSE_NOTIFY;
+@extern method OLCtrlClass, MSG_SPEC_CTRL_GET_LARGEST_CENTER;
+@extern method OLCtrlClass, MSG_SPEC_CTRL_SET_MONIKER_OFFSET;
+@extern method OLCtrlClass, MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE;
+@extern method OLCtrlClass, MSG_GET_FIRST_MKR_POS;
+@extern method OLCtrlClass, MSG_GEN_GUP_INTERACTION_COMMAND;
+@extern method OLCtrlClass, MSG_GEN_APPLY;
+@extern method OLCtrlClass, MSG_GEN_PRE_APPLY;
+@extern method OLCtrlClass, MSG_VIS_DRAW;
+@extern method OLCtrlClass, MSG_VIS_P32_VUP_QUERY;
+
+#define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
+#define TARGET(f)	((f) & OLBF_TARGET)
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+
+/* VupCreateGState */
+@method OLCtrlClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Initialization
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLCtrlInitialize: a vis parent and build flags from MAP_GROUP_DATA
+ * (an OLCtrl made for a menu), the toolbox and title bar hints
+ */
+@method OLCtrlClass, MSG_META_INITIALIZE
+{
+    OLMapGroupDataEntry *m;
+    OLCtrlInstance *c;
+
+    @callsuper();
+    RemoveConditionalHintsIfNeeded(oself);
+    c = Ctrl(oself);
+    if ((m = ObjVarFindData(oself, MAP_GROUP_DATA)) != NULL) {
+	c->OLCI_visParent = m->OLMGDE_visParent;
+	c->OLCI_buildFlags = m->OLMGDE_flags;
+	(void) ObjVarDeleteData(oself, MAP_GROUP_DATA);
+    } else {
+	c->OLCI_visParent = 0;
+	c->OLCI_buildFlags = 0;
+    }
+    c = Ctrl(oself);
+    if (ObjVarFindData(oself, HINT_TOOLBOX))
+	c->OLCI_buildFlags |= OLBF_TOOLBOX;
+    if (ObjVarFindData(oself, HINT_SEEK_TITLE_BAR_LEFT))
+	c->OLCI_buildFlags |= T(OLBT_FOR_TITLE_BAR_LEFT);
+    if (ObjVarFindData(oself, HINT_SEEK_TITLE_BAR_RIGHT))
+	c->OLCI_buildFlags |= T(OLBT_FOR_TITLE_BAR_RIGHT);
+    /* HINT_MAKE_REPLY_BAR: MSG_OL_WIN_NOTIFY_OF_REPLY_BAR to the dialog
+     * (Port32: with OLDialogWinClass) */
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry hints
+ * ------------------------------------------------------------------- */
+
+static void Justify(optr o, byte clear, byte set)
+{
+    OLCtrlInstance *c = Ctrl(o);
+
+    c->VCI_geoDimensionAttrs = (byte) ((c->VCI_geoDimensionAttrs & ~clear) |
+				       set);
+}
+
+static void Orient(optr o, Boolean vertically)
+{
+    OLCtrlInstance *c = Ctrl(o);
+
+    if (vertically)
+	c->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
+    else
+	c->VCI_geoAttrs &= ~VCGA_ORIENT_CHILDREN_VERTICALLY;
+}
+
+/* the moniker placed: left, right or centered (or aligned with the
+ * child) */
+static void PlaceMoniker(optr o, OLCtrlMoreFlags set)
+{
+    OLCtrlInstance *c = Ctrl(o);
+
+    c->OLCI_moreFlags = (byte) ((c->OLCI_moreFlags &
+				 ~(OLCOF_LEFT_JUSTIFY_MONIKER |
+				   OLCOF_RIGHT_JUSTIFY_MONIKER |
+				   OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD)) | set);
+    c->VCI_geoAttrs |= VCGA_HAS_MINIMUM_SIZE;
+}
+
+static void PlaceMonikerAbove(optr o)
+{
+    OLCtrlInstance *c = Ctrl(o);
+
+    c->OLCI_optFlags |= OLCOF_DISPLAY_MKR_ABOVE;
+    c->VCI_geoAttrs |= VCGA_HAS_MINIMUM_SIZE;
+}
+
+static void WrapAfterChildCount(optr o)
+{
+    Ctrl(o)->VCI_geoAttrs |= VCGA_WRAP_AFTER_CHILD_COUNT |
+			     VCGA_ALLOW_CHILDREN_TO_WRAP;
+}
+
+/* CtrlMakeReplyBar: horizontal, as wide as the parent, the children
+ * spread out (Motif) and wrapping */
+static void MakeReplyBar(optr o)
+{
+    OLCtrlInstance *c;
+
+    Orient(o, FALSE);
+    c = Ctrl(o);
+    c->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT;
+    Justify(o, VCGDA_HEIGHT_JUSTIFICATION, HJ_CENTER_CHILDREN_VERTICALLY);
+    Justify(o, VCGDA_WIDTH_JUSTIFICATION,
+	    WJ_FULL_JUSTIFY_CHILDREN_HORIZONTALLY);
+    c = Ctrl(o);
+    c->VCI_geoAttrs |= VCGA_INCLUDE_ENDS_IN_CHILD_SPACING |
+		       VCGA_ALLOW_CHILDREN_TO_WRAP;
+    c->VI_geoAttrs |= VGA_DONT_CENTER;
+    c->OLCI_buildFlags |= T(OLBT_REPLY_BAR);
+    c->OLCI_optFlags &= ~OLCOF_DISPLAY_MONIKER;
+}
+
+/* CtrlDrawInBox: a frame with the moniker above, centered unless it
+ * goes left (Motif: HINT_RAISED_FRAME too) */
+static void DrawInBox(optr o)
+{
+    OLCtrlInstance *c = Ctrl(o);
+
+    c->OLCI_optFlags |= OLCOF_DISPLAY_BORDER | OLCOF_DISPLAY_MKR_ABOVE |
+			OLCOF_DISPLAY_MONIKER;
+    if (c->OLCI_moreFlags & OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD)
+	return;
+    if (ObjVarFindData(o, HINT_PLACE_MONIKER_TO_LEFT))
+	return;
+    Ctrl(o)->OLCI_moreFlags &= ~OLCOF_LEFT_JUSTIFY_MONIKER;
+}
+
+static void CtrlGeoHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+			word dataType, void *handlerData)
+{
+    optr o = ConstructOptr(mh, chnk);
+    OLCtrlInstance *c = Ctrl(o);
+
+    (void) extra;
+    (void) handlerData;
+    switch (dataType) {
+    case HINT_EXPAND_HEIGHT_TO_FIT_PARENT:
+	c->VCI_geoDimensionAttrs |= VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+	break;
+    case HINT_NO_TALLER_THAN_CHILDREN_REQUIRE:
+	c->VCI_geoDimensionAttrs &= ~VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+	break;
+    case HINT_EXPAND_WIDTH_TO_FIT_PARENT:
+	c->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT;
+	break;
+    case HINT_NO_WIDER_THAN_CHILDREN_REQUIRE:
+	c->VCI_geoDimensionAttrs &= ~VCGDA_EXPAND_WIDTH_TO_FIT_PARENT;
+	break;
+    case HINT_DIVIDE_WIDTH_EQUALLY:
+	c->VCI_geoDimensionAttrs |= VCGDA_DIVIDE_WIDTH_EQUALLY;
+	break;
+    case HINT_DIVIDE_HEIGHT_EQUALLY:
+	c->VCI_geoDimensionAttrs |= VCGDA_DIVIDE_HEIGHT_EQUALLY;
+	break;
+    case HINT_ALLOW_CHILDREN_TO_WRAP:
+	c->VCI_geoAttrs |= VCGA_ALLOW_CHILDREN_TO_WRAP;
+	break;
+    case HINT_DONT_ALLOW_CHILDREN_TO_WRAP:
+	c->VCI_geoAttrs &= ~VCGA_ALLOW_CHILDREN_TO_WRAP;
+	break;
+    case HINT_INCLUDE_ENDS_IN_CHILD_SPACING:
+	c->VCI_geoAttrs |= VCGA_INCLUDE_ENDS_IN_CHILD_SPACING;
+	break;
+    case HINT_DONT_INCLUDE_ENDS_IN_CHILD_SPACING:
+	c->VCI_geoAttrs &= ~VCGA_INCLUDE_ENDS_IN_CHILD_SPACING;
+	break;
+    case HINT_FULL_JUSTIFY_CHILDREN_HORIZONTALLY:
+	Justify(o, VCGDA_WIDTH_JUSTIFICATION,
+		WJ_FULL_JUSTIFY_CHILDREN_HORIZONTALLY);
+	break;
+    case HINT_FULL_JUSTIFY_CHILDREN_VERTICALLY:
+	Justify(o, VCGDA_HEIGHT_JUSTIFICATION,
+		HJ_FULL_JUSTIFY_CHILDREN_VERTICALLY);
+	break;
+    case HINT_DONT_FULL_JUSTIFY_CHILDREN:
+	Justify(o, VCGDA_WIDTH_JUSTIFICATION | VCGDA_HEIGHT_JUSTIFICATION, 0);
+	break;
+    case HINT_TOP_JUSTIFY_CHILDREN:
+	Justify(o, VCGDA_HEIGHT_JUSTIFICATION, HJ_TOP_JUSTIFY_CHILDREN);
+	break;
+    case HINT_CENTER_CHILDREN_VERTICALLY:
+	Justify(o, VCGDA_HEIGHT_JUSTIFICATION, HJ_CENTER_CHILDREN_VERTICALLY);
+	break;
+    case HINT_BOTTOM_JUSTIFY_CHILDREN:
+	Justify(o, VCGDA_HEIGHT_JUSTIFICATION, HJ_BOTTOM_JUSTIFY_CHILDREN);
+	break;
+    case HINT_LEFT_JUSTIFY_CHILDREN:
+	Justify(o, VCGDA_WIDTH_JUSTIFICATION, WJ_LEFT_JUSTIFY_CHILDREN);
+	break;
+    case HINT_CENTER_CHILDREN_HORIZONTALLY:
+	Justify(o, VCGDA_WIDTH_JUSTIFICATION,
+		WJ_CENTER_CHILDREN_HORIZONTALLY);
+	break;
+    case HINT_RIGHT_JUSTIFY_CHILDREN:
+	Justify(o, VCGDA_WIDTH_JUSTIFICATION, WJ_RIGHT_JUSTIFY_CHILDREN);
+	break;
+    case HINT_ORIENT_CHILDREN_VERTICALLY:
+    case HINT_CENTER_CHILDREN_ON_MONIKERS:
+	Orient(o, TRUE);
+	break;
+    case HINT_ORIENT_CHILDREN_HORIZONTALLY:
+	Orient(o, FALSE);
+	break;
+    case HINT_ORIENT_CHILDREN_ALONG_LARGER_DIMENSION:
+	Orient(o, OpenCheckIfVerticalScreen());
+	break;
+    case HINT_SAME_ORIENTATION_AS_PARENT: {
+	/* CtrlSameOrientationAsParent: kept without a parent */
+	optr p = VisFindParent(o);
+	byte v = c->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY;
+
+	if (p) {
+	    ObjLockObjBlock(OptrToHandle(p));
+	    v = ((VisCompInstance *) ObjDerefVis(p))->VCI_geoAttrs &
+		VCGA_ORIENT_CHILDREN_VERTICALLY;
+	    MemUnlock(OptrToHandle(p));
+	}
+	Orient(o, v != 0);
+	break;
+    }
+    case HINT_DO_NOT_USE_MONIKER:
+	c->OLCI_optFlags &= ~OLCOF_DISPLAY_MONIKER;
+	break;
+    case HINT_PLACE_MONIKER_TO_LEFT:
+	PlaceMoniker(o, OLCOF_LEFT_JUSTIFY_MONIKER);
+	break;
+    case HINT_PLACE_MONIKER_TO_RIGHT:
+	PlaceMoniker(o, OLCOF_RIGHT_JUSTIFY_MONIKER);
+	break;
+    case HINT_CENTER_MONIKER:
+	PlaceMoniker(o, 0);
+	break;
+    case HINT_ALIGN_LEFT_MONIKER_EDGE_WITH_CHILD:
+	PlaceMoniker(o, OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD |
+			OLCOF_LEFT_JUSTIFY_MONIKER);
+	break;
+    case HINT_PLACE_MONIKER_ABOVE:
+	PlaceMonikerAbove(o);
+	break;
+    case HINT_PLACE_MONIKER_ALONG_LARGER_DIMENSION:
+	if (OpenCheckIfVerticalScreen())
+	    PlaceMonikerAbove(o);
+	else
+	    PlaceMoniker(o, OLCOF_LEFT_JUSTIFY_MONIKER);
+	break;
+    case HINT_DRAW_IN_BOX:
+    case HINT_RAISED_FRAME:
+	DrawInBox(o);
+	break;
+    case HINT_CUSTOM_CHILD_SPACING:
+    case HINT_CUSTOM_CHILD_SPACING_IF_LIMITED_SPACE:
+    case HINT_MINIMIZE_CHILD_SPACING:
+	c->OLCI_optFlags |= OLCOF_CUSTOM_SPACING;
+	break;
+    case HINT_MAKE_REPLY_BAR:
+	MakeReplyBar(o);
+	break;
+    case HINT_MINIMUM_SIZE:
+    case HINT_FIXED_SIZE:
+    case HINT_INITIAL_SIZE:
+	c->VCI_geoAttrs |= VCGA_HAS_MINIMUM_SIZE;
+	break;
+    case HINT_WRAP_AFTER_CHILD_COUNT:
+	WrapAfterChildCount(o);
+	break;
+    case HINT_WRAP_AFTER_CHILD_COUNT_IF_VERTICAL_SCREEN:
+	if (OpenCheckIfVerticalScreen())
+	    WrapAfterChildCount(o);
+	break;
+    }
+}
+
+static VarDataCHandler ctrlGeoHints[] = {
+    { HINT_EXPAND_HEIGHT_TO_FIT_PARENT, CtrlGeoHint },
+    { HINT_NO_TALLER_THAN_CHILDREN_REQUIRE, CtrlGeoHint },
+    { HINT_ALLOW_CHILDREN_TO_WRAP, CtrlGeoHint },
+    { HINT_DONT_ALLOW_CHILDREN_TO_WRAP, CtrlGeoHint },
+    { HINT_FULL_JUSTIFY_CHILDREN_HORIZONTALLY, CtrlGeoHint },
+    { HINT_FULL_JUSTIFY_CHILDREN_VERTICALLY, CtrlGeoHint },
+    { HINT_INCLUDE_ENDS_IN_CHILD_SPACING, CtrlGeoHint },
+    { HINT_DONT_INCLUDE_ENDS_IN_CHILD_SPACING, CtrlGeoHint },
+    { HINT_DONT_FULL_JUSTIFY_CHILDREN, CtrlGeoHint },
+    { HINT_ORIENT_CHILDREN_VERTICALLY, CtrlGeoHint },
+    { HINT_ORIENT_CHILDREN_HORIZONTALLY, CtrlGeoHint },
+    { HINT_TOP_JUSTIFY_CHILDREN, CtrlGeoHint },
+    { HINT_CENTER_CHILDREN_VERTICALLY, CtrlGeoHint },
+    { HINT_BOTTOM_JUSTIFY_CHILDREN, CtrlGeoHint },
+    { HINT_LEFT_JUSTIFY_CHILDREN, CtrlGeoHint },
+    { HINT_CENTER_CHILDREN_HORIZONTALLY, CtrlGeoHint },
+    { HINT_RIGHT_JUSTIFY_CHILDREN, CtrlGeoHint },
+    { HINT_EXPAND_WIDTH_TO_FIT_PARENT, CtrlGeoHint },
+    { HINT_NO_WIDER_THAN_CHILDREN_REQUIRE, CtrlGeoHint },
+    { HINT_DO_NOT_USE_MONIKER, CtrlGeoHint },
+    { HINT_PLACE_MONIKER_TO_LEFT, CtrlGeoHint },
+    { HINT_PLACE_MONIKER_TO_RIGHT, CtrlGeoHint },
+    { HINT_CENTER_MONIKER, CtrlGeoHint },
+    { HINT_PLACE_MONIKER_ABOVE, CtrlGeoHint },
+    { HINT_PLACE_MONIKER_ALONG_LARGER_DIMENSION, CtrlGeoHint },
+    { HINT_DRAW_IN_BOX, CtrlGeoHint },
+    { HINT_RAISED_FRAME, CtrlGeoHint },
+    { HINT_CENTER_CHILDREN_ON_MONIKERS, CtrlGeoHint },
+    { HINT_CUSTOM_CHILD_SPACING, CtrlGeoHint },
+    { HINT_CUSTOM_CHILD_SPACING_IF_LIMITED_SPACE, CtrlGeoHint },
+    { HINT_MINIMIZE_CHILD_SPACING, CtrlGeoHint },
+    { HINT_MAKE_REPLY_BAR, CtrlGeoHint },
+    { HINT_MINIMUM_SIZE, CtrlGeoHint },
+    { HINT_FIXED_SIZE, CtrlGeoHint },
+    { HINT_INITIAL_SIZE, CtrlGeoHint },
+    { HINT_WRAP_AFTER_CHILD_COUNT, CtrlGeoHint },
+    { HINT_WRAP_AFTER_CHILD_COUNT_IF_VERTICAL_SCREEN, CtrlGeoHint },
+    { HINT_SAME_ORIENTATION_AS_PARENT, CtrlGeoHint },
+    { HINT_ORIENT_CHILDREN_ALONG_LARGER_DIMENSION, CtrlGeoHint },
+    { HINT_DIVIDE_WIDTH_EQUALLY, CtrlGeoHint },
+    { HINT_DIVIDE_HEIGHT_EQUALLY, CtrlGeoHint },
+    { HINT_ALIGN_LEFT_MONIKER_EDGE_WITH_CHILD, CtrlGeoHint },
+};
+
+static void DelayedHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+			word dataType, void *handlerData)
+{
+    OLCtrlInstance *c = Ctrl(ConstructOptr(mh, chnk));
+
+    (void) extra;
+    (void) handlerData;
+    if (dataType == ATTR_GEN_PROPERTY)
+	c->OLCI_buildFlags |= OLBF_DELAYED_MODE;
+    else
+	c->OLCI_buildFlags &= ~OLBF_DELAYED_MODE;
+}
+
+static VarDataCHandler delayedHints[] = {
+    { ATTR_GEN_PROPERTY, DelayedHint },
+    { ATTR_GEN_NOT_PROPERTY, DelayedHint },
+};
+
+/*
+ * DoCtrlHints: a generic OLCtrl only draws in its margins, a moniker
+ * goes left; the hints; centering asked by the parent; the toolbox and
+ * delayed mode of the parent; a reply bar's moniker not centered
+ */
+static void DoCtrlHints(optr oself)
+{
+    OLCtrlInstance *c = Ctrl(oself);
+    OLCtrlOptFlags f = 0;
+    optr parent;
+
+    if (c->VI_typeFlags & VTF_IS_GEN) {
+	c->VCI_geoAttrs |= VCGA_ONLY_DRAWS_IN_MARGINS;
+	c->OLCI_moreFlags |= OLCOF_LEFT_JUSTIFY_MONIKER;
+	if (((GenInstance *) ObjDerefGen(oself))->GI_visMoniker) {
+	    c = Ctrl(oself);
+	    c->OLCI_optFlags |= OLCOF_DISPLAY_MONIKER;
+	    c->VCI_geoAttrs |= VCGA_HAS_MINIMUM_SIZE;
+	}
+	OpenScanVarData(oself, sizeof(ctrlGeoHints) / sizeof(ctrlGeoHints[0]),
+			ctrlGeoHints, NULL);
+    }
+    /* in a menu window: OLCOF_IN_MENU and the menu's orientation
+     * (Port32: with OLWinClass) */
+    Ctrl(oself)->VI_geoAttrs |= VGA_USE_VIS_CENTER;
+    parent = GenFindParent(oself);
+    if (parent && @call parent::MSG_QUERY_CENTER_BY_MONIKERS(&f))
+	Ctrl(oself)->OLCI_optFlags |= f;
+    f = (OLCtrlOptFlags) 0;
+    {
+	OLBuildFlags b = OpenGetParentBuildFlagsIfCtrl(oself);
+
+	Ctrl(oself)->OLCI_buildFlags |= b & (OLBF_TOOLBOX | OLBF_DELAYED_MODE);
+    }
+    ObjVarScanData(oself, sizeof(delayedHints) / sizeof(delayedHints[0]),
+		   delayedHints, NULL);
+    c = Ctrl(oself);
+    if (TARGET(c->OLCI_buildFlags) == T(OLBT_REPLY_BAR))
+	c->OLCI_optFlags &= ~(OLCOF_CENTER_ON_MONIKER |
+			      OLCOF_LEFT_JUSTIFY_MONIKERS);
+}
+
+/* OLCtrlScanGeometryHints: vertical by default, then the hints */
+@method OLCtrlClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    pself->VCI_geoAttrs = VCGA_ORIENT_CHILDREN_VERTICALLY;
+    pself->VCI_geoDimensionAttrs = 0;
+    pself->VI_geoAttrs &= VGA_GEOMETRY_CALCULATED | VGA_NOTIFY_GEOMETRY_VALID;
+    pself->OLCI_optFlags &= ~(OLCOF_DISPLAY_BORDER | OLCOF_DISPLAY_MKR_ABOVE |
+			      OLCOF_CUSTOM_SPACING);
+    DoCtrlHints(oself);
+}
+
+@method OLCtrlClass, MSG_SPEC_CTRL_SET_MORE_FLAGS
+{
+    pself->OLCI_moreFlags = (byte) ((pself->OLCI_moreFlags | set) & ~clear);
+}
+
+/* ---------------------------------------------------------------------
+ * Usable, built
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLCtrlSpecChangeUsable: centered on monikers, the update waits for
+ * the parent's centering (VUM_MANUAL); then the centering is redone
+ * (by the parent the object had)
+ */
+@method OLCtrlClass, MSG_SPEC_SET_USABLE, MSG_SPEC_SET_NOT_USABLE
+{
+    optr parent = 0;
+    Boolean center = (pself->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER) != 0;
+    VisUpdateMode mode = (VisUpdateMode) updateMode;
+
+    if (message == MSG_SPEC_SET_NOT_USABLE)
+	parent = VisFindParent(oself);
+    if (center)
+	updateMode = VUM_MANUAL;	/* passed on to the superclass */
+    @callsuper();
+    if (!center)
+	return;
+    if (message == MSG_SPEC_SET_NOT_USABLE) {
+	if (parent)
+	    @call parent::MSG_SPEC_CTRL_UPDATE_CENTER_STUFF(mode);
+    } else {
+	VisCallParent(oself, MSG_SPEC_CTRL_UPDATE_CENTER_STUFF, &mode,
+		      sizeof(mode), NULL, 0);
+    }
+}
+
+/* OLCtrlUpdateCenterStuff: the node of the centering is invalid */
+@method OLCtrlClass, MSG_SPEC_CTRL_UPDATE_CENTER_STUFF
+{
+    if (pself->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER) {
+	VisCallParent(oself, MSG_SPEC_CTRL_UPDATE_CENTER_STUFF, &updateMode,
+		      sizeof(updateMode), NULL, 0);
+	return;
+    }
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, updateMode);
+}
+
+@method OLCtrlClass, MSG_OL_CTRL_SET_VIS_PARENT
+{
+    pself->OLCI_visParent = visParent;
+}
+
+/*
+ * OLCtrlSpecBuild: built once; without a target, a title bar target of
+ * the parent's; then the geometry hints
+ */
+@method OLCtrlClass, MSG_SPEC_BUILD
+{
+    OLBuildFlags pf;
+    OLCtrlInstance *c;
+
+    if (VisCheckIfSpecBuilt(oself))
+	return;
+    @callsuper();
+    pf = TARGET(OpenGetParentBuildFlagsIfCtrl(oself));
+    c = Ctrl(oself);
+    /* (the asm compares the whole flags with OLBT_NO_TARGET) */
+    if (c->OLCI_buildFlags == T(OLBT_NO_TARGET) &&
+	(pf == T(OLBT_FOR_TITLE_BAR_LEFT) || pf == T(OLBT_FOR_TITLE_BAR_RIGHT)))
+	c->OLCI_buildFlags |= pf;
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+}
+
+/* ---------------------------------------------------------------------
+ * Queries
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLCtrlGupQuery: SGQT_BUILD_INFO: a menu or reply bar object may be
+ * taken by a parent (a menu or a reply bar); else this is its vis
+ * parent.  GUQT_DELAYED_OPERATION: our delayed mode.
+ */
+@method OLCtrlClass, MSG_SPEC_P32_GUP_QUERY
+{
+    OLBuildFlags passed;
+    GenReturnParams r;
+
+    if (queryType == GUQT_DELAYED_OPERATION) {
+	retValue->GRP_ax = pself->OLCI_buildFlags & OLBF_DELAYED_MODE;
+	return TRUE;
+    }
+    if (queryType != SGQT_BUILD_INFO)
+	return @callsuper();
+    passed = retValue->GRP_bp;
+    if (!(pself->VI_typeFlags & VTF_IS_WIN_GROUP) &&
+	((passed & OLBF_MENUABLE) ||
+	 TARGET(passed) == T(OLBT_FOR_REPLY_BAR))) {
+	optr parent = GenFindParent(oself);
+
+	r = *retValue;
+	if (parent && @call parent::MSG_SPEC_P32_GUP_QUERY(&r, queryType)) {
+	    word reply = r.GRP_bp & OLBF_REPLY;
+
+	    if (reply == (OLBR_TOP_MENU << OLBF_REPLY_OFFSET) ||
+		reply == (OLBR_REPLY_BAR << OLBF_REPLY_OFFSET)) {
+		*retValue = r;
+		return TRUE;
+	    }
+	    if (reply != (OLBR_SUB_MENU << OLBF_REPLY_OFFSET))
+		passed = r.GRP_bp;
+	}
+    }
+    retValue->GRP_bp = passed;
+    retValue->GRP_cx = OptrToHandle(oself);
+    retValue->GRP_dx = OptrToChunk(oself);
+    return TRUE;
+}
+
+static void CenterHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		       word dataType, void *handlerData)
+{
+    OLCtrlOptFlags *f = handlerData;
+
+    (void) mh;
+    (void) chnk;
+    (void) extra;
+    *f |= dataType == HINT_CENTER_CHILDREN_ON_MONIKERS
+	? OLCOF_CENTER_ON_MONIKER : OLCOF_LEFT_JUSTIFY_MONIKERS;
+}
+
+static VarDataCHandler centerHints[] = {
+    { HINT_CENTER_CHILDREN_ON_MONIKERS, CenterHint },
+    { HINT_LEFT_JUSTIFY_MONIKERS, CenterHint },
+};
+
+/* OLCtrlQueryCenterByMonikers: what our hints ask of our children */
+@method OLCtrlClass, MSG_QUERY_CENTER_BY_MONIKERS
+{
+    OLCtrlOptFlags f = 0;
+
+    if (pself->VI_typeFlags & VTF_IS_GEN) {
+	ObjVarScanData(oself, sizeof(centerHints) / sizeof(centerHints[0]),
+		       centerHints, &f);
+	if (!(f & OLCOF_CENTER_ON_MONIKER))
+	    f &= ~OLCOF_LEFT_JUSTIFY_MONIKERS;
+    }
+    *flags = f;
+    return TRUE;
+}
+
+@method OLCtrlClass, MSG_VUP_GET_BUILD_FLAGS
+{
+    *flags = pself->OLCI_buildFlags;
+    return TRUE;
+}
+
+/*
+ * OLCtrlUpdateVisMoniker: the moniker shown if there is one; the
+ * centering parent updated; the superclass redraws all of us
+ */
+@method OLCtrlClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    VisCompGeoAttrs geo;
+    OLCtrlInstance *c;
+
+    pself->OLCI_optFlags &= ~OLCOF_DISPLAY_MONIKER;
+    if (((GenInstance *) ObjDerefGen(oself))->GI_visMoniker)
+	Ctrl(oself)->OLCI_optFlags |= OLCOF_DISPLAY_MONIKER;
+    if (Ctrl(oself)->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER) {
+	VisUpdateMode m = VUM_MANUAL;
+
+	VisCallParent(oself, MSG_SPEC_CTRL_UPDATE_CENTER_STUFF, &m,
+		      sizeof(m), NULL, 0);
+    }
+    c = Ctrl(oself);
+    geo = c->VCI_geoAttrs;
+    c->VCI_geoAttrs &= ~VCGA_ONLY_DRAWS_IN_MARGINS;
+    @callsuper();
+    Ctrl(oself)->VCI_geoAttrs = geo;
+}
+
+/* ---------------------------------------------------------------------
+ * Shared routines
+ * ------------------------------------------------------------------- */
+
+/* GetParentMonikerSpace: the moniker space of the vis parent (an
+ * OLCtrl) */
+word GetParentMonikerSpace(optr obj)
+{
+    optr p = VisFindParent(obj);
+    word s = 0;
+
+    if (!p)
+	return 0;
+    ObjLockObjBlock(OptrToHandle(p));
+    if (ObjIsObjectInClass(p, &OLCtrlClass))
+	s = ((OLCtrlInstance *) ObjDerefVis(p))->OLCI_monikerSpace;
+    MemUnlock(OptrToHandle(p));
+    return s;
+}
+
+/* GetNonMonikerMarginTotals */
+void GetNonMonikerMarginTotals(optr obj, word *length, word *width,
+			       word *spacing)
+{
+    OLCtrlInstance *c = Ctrl(obj);
+    word mw = 0, mh = 0;
+    Rectangle m;
+    Boolean vert;
+
+    if (c->OLCI_optFlags & OLCOF_DISPLAY_MONIKER) {
+	SizeAsDWord s = SpecGetGenMonikerSize(obj, 0);
+
+	c = Ctrl(obj);
+	if (c->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE)
+	    mh = DWORD_HEIGHT(s);
+	else
+	    mw = DWORD_WIDTH(s);
+    }
+    vert = (Ctrl(obj)->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+    *spacing = DWORD_CHILD_SPACING(
+		    @call obj::MSG_VIS_COMP_GET_CHILD_SPACING());
+    @call obj::MSG_VIS_COMP_GET_MARGINS(&m);
+    if (vert) {
+	*length = (word) (m.R_top + m.R_bottom - mh);
+	*width = (word) (m.R_left + m.R_right - mw);
+    } else {
+	*length = (word) (m.R_left + m.R_right - mw);
+	*width = (word) (m.R_top + m.R_bottom - mh);
+    }
+}
+
+/*
+ * OpenPassMarginInfo: margins and spacing in three bits each for
+ * VisCompRecalcSize and VisCompPosition; 0 (they ask again) if one is
+ * larger, or the wrap spacing differs while wrapping
+ */
+VisCompSpacingMarginsInfo OpenPassMarginInfo(optr obj, const Rectangle *m,
+					     word spacing, word wrapSpacing)
+{
+    word l = (word) m->R_left, t = (word) m->R_top;
+    word r = (word) m->R_right, b = (word) m->R_bottom;
+
+    if (spacing != wrapSpacing &&
+	(Ctrl(obj)->VCI_geoAttrs & (VCGA_ALLOW_CHILDREN_TO_WRAP |
+				    VCGA_WRAP_AFTER_CHILD_COUNT)))
+	return 0;
+    if ((l | t | r | b | spacing) > 7)
+	return 0;
+    return (VisCompSpacingMarginsInfo) (VCSMI_USE_THIS_INFO | (l << 12) |
+					(t << 9) | (r << 6) | (b << 3) |
+					spacing);
+}

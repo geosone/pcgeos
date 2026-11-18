@@ -53,6 +53,7 @@ export VisGetParentGeometry
 export VisCallParent
 export VisSendToChildren
 export VisIfFlagSetCallVisChildren
+export VisIfFlagSetCallGenChildren
 export VisMarkInvalid
 export VisMarkInvalidOnParent
 export VisMarkFullyInvalid

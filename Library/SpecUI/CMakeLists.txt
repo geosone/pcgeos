@@ -21,6 +21,9 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CUtils/copenAppAttDet.goc
                ${c}/CUtils/copenAppCommon.goc
                ${c}/CUtils/copenAppMisc.goc
+               ${c}/CComp/copenCtrlClass.goc
+               ${c}/CComp/copenCtrlGeometry.goc
+               ${c}/CComp/copenCtrlCommon.goc
                ${c}/CWin/cwinScreen.goc
                ${c}/CWin/cwinField.goc
                ${c}/CSpec/cspecSystem.goc

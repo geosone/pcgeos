@@ -55,3 +55,4 @@ export OLSystemClass
 export OLScreenClass
 export OLFieldClass
 export OLApplicationClass
+export OLCtrlClass

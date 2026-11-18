@@ -958,6 +958,10 @@ extern void VisSendToChildren(optr obj, Message msg, const void *params,
 extern Boolean VisIfFlagSetCallVisChildren(optr obj, Message msg,
 					   const void *params,
 					   word paramSize, byte flags);
+/* the same to the generic children that are specifically built */
+extern void VisIfFlagSetCallGenChildren(optr obj, Message msg,
+					const void *params, word paramSize,
+					byte flags);
 extern void VisMarkInvalid(optr obj, VisOptFlags flags, VisUpdateMode mode);
 extern void VisMarkInvalidOnParent(optr obj, VisOptFlags flags,
 				   VisUpdateMode mode);

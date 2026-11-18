@@ -1,0 +1,694 @@
+/*
+ * copenCtrlGeometry.goc -- the geometry of OLCtrlClass (after
+ * copenCtrlGeometry.asm): child spacing, margins (the moniker's space,
+ * a frame, a reply bar), the extra and desired sizes, the minimum size,
+ * the centering of children on their monikers and the moniker's
+ * position.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: the margins a gadget
+ * area asks for (OLGadgetAreaClass, MSG_SPEC_CHECK_IF_NEEDS_MARGINS),
+ * a reply bar's extra top line (OLReplyBarClass's OLRBF_UNDER_DIALOG),
+ * the menu center (MSG_SPEC_GET_MENU_CENTER: its C declaration has no
+ * parameters yet).
+ */
+@include "cGeode.goh"
+
+#define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
+#define TARGET(f)	((f) & OLBF_TARGET)
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+
+static Boolean Vertical(optr o)
+{
+    return (Ctrl(o)->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Extra size
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLCtrlGetExtraSize: the size besides the children's monikers: our
+ * margins, the spacing, and the extra sizes of up to childCount
+ * children (along the orientation summed, across it the largest); the
+ * children not there are left over
+ */
+@extern method OLCtrlClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    word length, width, spacing, n = childCount, most = 0, i;
+
+    GetNonMonikerMarginTotals(oself, &length, &width, &spacing);
+    if (n) {
+	Boolean vert = Vertical(oself);
+
+	length -= spacing;
+	for (i = 0; n; i++) {
+	    optr child = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(i);
+	    ExtraSizeParams e;
+	    word cl, cw;
+
+	    if (!child)
+		break;
+	    length += spacing;
+	    memset(&e, 0, sizeof(e));
+	    @call child::MSG_SPEC_GET_EXTRA_SIZE(&e, n);
+	    cl = vert ? e.ESP_extraHeight : e.ESP_extraWidth;
+	    cw = vert ? e.ESP_extraWidth : e.ESP_extraHeight;
+	    if (most < cw)
+		most = cw;
+	    length += cl;
+	    n--;
+	}
+    }
+    width += most;
+    if (Vertical(oself)) {
+	retValue->ESP_extraWidth = width;
+	retValue->ESP_extraHeight = length;
+    } else {
+	retValue->ESP_extraWidth = length;
+	retValue->ESP_extraHeight = width;
+    }
+    retValue->ESP_leftoverChildren = n;
+    retValue->ESP_unused = 0;
+}
+
+/* OLCtrlResetSizeToStayOnscreen: in a menu, HINT_ALLOW_CHILDREN_TO_WRAP
+ * works now */
+@extern method OLCtrlClass, MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN
+{
+    if ((pself->OLCI_optFlags & OLCOF_IN_MENU) &&
+	ObjVarFindData(oself, HINT_ALLOW_CHILDREN_TO_WRAP)) {
+	OLCtrlInstance *c = Ctrl(oself);
+
+	c->VCI_geoAttrs = (byte) ((c->VCI_geoAttrs |
+				   VCGA_ALLOW_CHILDREN_TO_WRAP) &
+				  ~VCGA_ONE_PASS_OPTIMIZATION);
+    }
+    @callsuper();
+}
+
+@extern method OLCtrlClass, MSG_SPEC_VIS_OPEN_NOTIFY
+{
+    VisOpenNotifyCommon(oself);
+}
+
+@extern method OLCtrlClass, MSG_SPEC_VIS_CLOSE_NOTIFY
+{
+    VisCloseNotifyCommon(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Spacing
+ * ------------------------------------------------------------------- */
+
+/* MinimizeChildSpacing: none (black and white toolboxes overlap their
+ * children's edges) */
+static word MinimizeChildSpacing(optr o)
+{
+    OLCtrlInstance *c;
+
+    if (!OpenCheckIfBW())
+	return 0;
+    c = Ctrl(o);
+    if ((c->OLCI_buildFlags & OLBF_TOOLBOX) &&
+	!(c->OLCI_moreFlags & OLCOF_CANT_OVERLAP_KIDS))
+	return (word) -1;
+    return 0;
+}
+
+typedef struct {
+    word	spacing;
+    word	wrapSpacing;
+} Spacings;
+
+static word CustomSpacing(optr o, void *data)
+{
+    GStateHandle gs = ViewCreateCalcGState();
+    word w = VisConvertSpecVisSize(o, *(SpecSizeSpec *) data, gs);
+
+    GrDestroyState(gs);
+    return w;
+}
+
+static void SpacingHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+			word dataType, void *handlerData)
+{
+    optr o = ConstructOptr(mh, chnk);
+    Spacings *s = handlerData;
+
+    switch (dataType) {
+    case HINT_CUSTOM_CHILD_SPACING_IF_LIMITED_SPACE:
+	if (OpenCheckIfLimitedLength(o))
+	    s->spacing = CustomSpacing(o, extra);
+	break;
+    case HINT_CUSTOM_CHILD_SPACING:
+	s->spacing = CustomSpacing(o, extra);
+	break;
+    case HINT_MINIMIZE_CHILD_SPACING:
+	s->spacing = MinimizeChildSpacing(o);
+	break;
+    case HINT_CUSTOM_CHILD_WRAP_SPACING:
+	s->wrapSpacing = CustomSpacing(o, extra);
+	break;
+    }
+}
+
+static VarDataCHandler spacingHints[] = {
+    { HINT_CUSTOM_CHILD_SPACING, SpacingHint },
+    { HINT_CUSTOM_CHILD_SPACING_IF_LIMITED_SPACE, SpacingHint },
+    { HINT_MINIMIZE_CHILD_SPACING, SpacingHint },
+    { HINT_CUSTOM_CHILD_WRAP_SPACING, SpacingHint },
+};
+
+/*
+ * OpenCtrlCheckCGASpacing: small on a CGA (across) or a narrow screen
+ * (along x); none between oversized children or in a reply bar (one
+ * without default rings)
+ */
+static void CheckCGASpacing(optr o, Spacings *s)
+{
+    word *x = &s->spacing, *y = &s->wrapSpacing;
+    OLCtrlInstance *c;
+
+    if (Vertical(o)) {
+	x = &s->wrapSpacing;
+	y = &s->spacing;
+    }
+    if (OpenCheckIfCGA() && (sword) *y > MINIMAL_Y_SPACING)
+	*y = MINIMAL_Y_SPACING;
+    if (OpenCheckIfNarrow() && (sword) *x > MINIMAL_X_SPACING)
+	*x = MINIMAL_X_SPACING;
+    c = Ctrl(o);
+    if ((c->OLCI_moreFlags & OLCOF_OVERSIZED_CHILDREN) ||
+	TARGET(c->OLCI_buildFlags) == T(OLBT_REPLY_BAR))
+	s->spacing = s->wrapSpacing = OpenCheckDefaultRings() ? 0 : 1;
+}
+
+/*
+ * OpenCtrlCheckCustomSpacing: the spacing hints; in the title bar (the
+ * asm tests the target bits of the title bar ones: any target) none
+ * without them
+ */
+static void CheckCustomSpacing(optr o, Spacings *s)
+{
+    OLCtrlInstance *c = Ctrl(o);
+    OLBuildFlags f = c->OLCI_buildFlags;
+
+    if ((f & T(OLBT_FOR_TITLE_BAR_LEFT)) || (f & T(OLBT_FOR_TITLE_BAR_RIGHT))) {
+	if (!(c->OLCI_optFlags & OLCOF_CUSTOM_SPACING)) {
+	    s->spacing = MinimizeChildSpacing(o);
+	    return;
+	}
+    } else if (!(c->OLCI_optFlags & OLCOF_CUSTOM_SPACING))
+	return;
+    ObjVarScanData(o, sizeof(spacingHints) / sizeof(spacingHints[0]),
+		   spacingHints, s);
+}
+
+/* OLCtrlGetSpacing: the control spacing, in a menu none, in a toolbox
+ * (not in the title bar) the toolbox spacing */
+@extern method OLCtrlClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    Spacings s;
+    OLBuildFlags f = pself->OLCI_buildFlags;
+
+    s.spacing = OL_CONTROL_SPACING;
+    s.wrapSpacing = OL_CONTROL_WRAP_SPACING;
+    if (pself->OLCI_optFlags & OLCOF_IN_MENU)
+	s.spacing = s.wrapSpacing = MENU_SPACING;
+    if (!(f & T(OLBT_FOR_TITLE_BAR_RIGHT)) &&
+	!(f & T(OLBT_FOR_TITLE_BAR_LEFT)) && (f & OLBF_TOOLBOX)) {
+	s.spacing = TOOLBOX_SPACING;
+	s.wrapSpacing = TOOLBOX_WRAP_SPACING;
+	if (OpenCheckIfLimitedLength(oself))
+	    s.spacing--;
+    }
+    CheckCGASpacing(oself, &s);
+    CheckCustomSpacing(oself, &s);
+    return MAKE_SPACING_DWORD(s.spacing, s.wrapSpacing);
+}
+
+/* ---------------------------------------------------------------------
+ * Margins
+ * ------------------------------------------------------------------- */
+
+/*
+ * CalcCtrlMargins: room for the moniker (left, or right, or above), a
+ * frame, a reply bar and HINT_CUSTOM_EXTRA_MARGINS; an OLCtrl without
+ * moniker and children that is not generic has none
+ */
+static void CalcCtrlMargins(optr o, Rectangle *m)
+{
+    OLCtrlInstance *c = Ctrl(o);
+    Rectangle *x;
+
+    memset(m, 0, sizeof(*m));
+    if (!(c->OLCI_optFlags & OLCOF_DISPLAY_MONIKER)) {
+	/* CheckIfNeedsExtraMargins: the gadget area's (Port32: with
+	 * OLGadgetAreaClass) */
+	if (!c->VCI_comp.CP_firstChild && !(c->VI_typeFlags & VTF_IS_GEN))
+	    return;
+    } else {
+	SizeAsDWord s = SpecGetGenMonikerSize(o, 0);
+	word w = DWORD_WIDTH(s), h = DWORD_HEIGHT(s);
+
+	if (w)
+	    w += OpenCheckIfNarrow() ? MO_CONTROL_MKR_X_SPACING_NARROW
+				     : MO_CONTROL_MKR_X_SPACING;
+	if (h)
+	    h += OpenCheckIfCGA() ? MO_CONTROL_MKR_Y_SPACING_CGA
+				  : MO_CONTROL_MKR_Y_SPACING;
+	c = Ctrl(o);
+	if (c->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE)
+	    m->R_top = h;
+	else
+	    m->R_left = w;
+	if (c->OLCI_moreFlags & OLCOF_RIGHT_JUSTIFY_MONIKER) {
+	    m->R_right = m->R_left;
+	    m->R_left = 0;
+	}
+    }
+    c = Ctrl(o);
+    if (c->OLCI_optFlags & OLCOF_DISPLAY_BORDER) {
+	if ((word) m->R_top < OL_CTRL_BOXED_MARGIN_TOP)
+	    m->R_top = OpenCheckIfCGA() ? OL_CTRL_BOXED_MARGIN_CGA
+				       : OL_CTRL_BOXED_MARGIN_TOP;
+	if (OpenCheckIfNarrow()) {
+	    m->R_left += OL_CTRL_BOXED_MARGIN_CGA;
+	    m->R_right += OL_CTRL_BOXED_MARGIN_CGA;
+	} else {
+	    m->R_left += OL_CTRL_BOXED_MARGIN_LEFT;
+	    m->R_right += OL_CTRL_BOXED_MARGIN_RIGHT;
+	}
+	m->R_bottom += OpenCheckIfCGA() ? OL_CTRL_BOXED_MARGIN_CGA
+					: OL_CTRL_BOXED_MARGIN_BOTTOM;
+    }
+    /* DoReplyBarMargins (Port32: the line more at the top of a reply bar
+     * not under a dialog comes with OLReplyBarClass) */
+    if (TARGET(Ctrl(o)->OLCI_buildFlags) == T(OLBT_REPLY_BAR)) {
+	m->R_top += OpenCheckIfCGA() ? OL_CGA_REPLY_BAR_SPACE
+				     : OL_REPLY_BAR_SPACE;
+	m->R_bottom += OL_REPLY_BAR_SPACE;
+	m->R_left += MO_REPLY_BAR_X_INSET;
+	m->R_right += MO_REPLY_BAR_X_INSET;
+    }
+    if ((x = ObjVarFindData(o, HINT_CUSTOM_EXTRA_MARGINS)) != NULL) {
+	m->R_left += x->R_left;
+	m->R_top += x->R_top;
+	m->R_right += x->R_right;
+	m->R_bottom += x->R_bottom;
+    }
+}
+
+/* OLCtrlGetMargins: centered on monikers, the left margin is the
+ * parent's moniker space (a nested centering node keeps it) */
+@extern method OLCtrlClass, MSG_VIS_COMP_GET_MARGINS
+{
+    CalcCtrlMargins(oself, retValue);
+    if (Ctrl(oself)->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER) {
+	word s = GetParentMonikerSpace(oself);
+
+	if (ObjVarFindData(oself, HINT_CENTER_CHILDREN_ON_MONIKERS))
+	    Ctrl(oself)->OLCI_monikerSpace = s;
+	else
+	    retValue->R_left = s;
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Size
+ * ------------------------------------------------------------------- */
+
+/* PassSpacingArgsIfWeCan */
+static VisCompSpacingMarginsInfo PassSpacingArgs(optr o)
+{
+    SpacingAsDWord s = @call o::MSG_VIS_COMP_GET_CHILD_SPACING();
+    Rectangle m;
+
+    @call o::MSG_VIS_COMP_GET_MARGINS(&m);
+    return OpenPassMarginInfo(o, &m, DWORD_CHILD_SPACING(s),
+			      DWORD_WRAP_SPACING(s));
+}
+
+/* SetExpandHeightInHorizToolbox: a toolbox without the hint in a
+ * horizontal parent is as high as it (with children) */
+static void SetExpandHeightInHorizToolbox(optr o)
+{
+    OLCtrlInstance *c = Ctrl(o);
+    optr p;
+    Boolean vert = FALSE;
+
+    if (!(c->OLCI_buildFlags & OLBF_TOOLBOX) ||
+	ObjVarFindData(o, HINT_TOOLBOX))
+	return;
+    if ((p = VisFindParent(o)) != 0) {
+	ObjLockObjBlock(OptrToHandle(p));
+	vert = (((VisCompInstance *) ObjDerefVis(p))->VCI_geoAttrs &
+		VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+	MemUnlock(OptrToHandle(p));
+    }
+    if (vert)
+	return;
+    c = Ctrl(o);
+    c->VCI_geoDimensionAttrs &= ~VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+    if (c->VCI_comp.CP_firstChild)
+	c->VCI_geoDimensionAttrs |= VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+}
+
+/* AddFullBoundsToUpdateRegion */
+static void AddFullBoundsToUpdateRegion(optr o)
+{
+    OLCtrlInstance *c = Ctrl(o);
+    Rectangle r = c->VI_bounds;
+
+    if (!(c->VI_typeFlags & VTF_IS_CONTENT) &&
+	(c->VI_typeFlags & VTF_IS_WINDOW)) {
+	r.R_right -= r.R_left;
+	r.R_bottom -= r.R_top;
+	r.R_left = r.R_top = 0;
+    }
+    @call o::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0, 0, r.R_bottom, r.R_right,
+					       r.R_top, r.R_left);
+}
+
+/*
+ * CalcCentersIfCenteringByMonikers: a centering node (the hint) with
+ * invalid geometry finds the largest moniker space of its children; if
+ * it changed, everything is redrawn and (if any child knew its size)
+ * the children start over
+ */
+static void CalcCentersIfCenteringByMonikers(optr o)
+{
+    OLCtrlInstance *c = Ctrl(o);
+    OLCtrlLargestCenter lc;
+
+    if (!(c->VI_optFlags & VOF_GEOMETRY_INVALID) ||
+	(c->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER) ||
+	!ObjVarFindData(o, HINT_CENTER_CHILDREN_ON_MONIKERS))
+	return;
+    lc.OLCLC_largest = 0;
+    lc.OLCLC_found = 0;
+    @call o::MSG_SPEC_CTRL_GET_LARGEST_CENTER(&lc);
+    c = Ctrl(o);
+    if (lc.OLCLC_largest == c->OLCI_monikerSpace)
+	return;
+    c->OLCI_monikerSpace = lc.OLCLC_largest;
+    AddFullBoundsToUpdateRegion(o);
+    if (lc.OLCLC_found) {
+	VisUpdateMode m = VUM_MANUAL;
+
+	VisSendToChildren(o, MSG_VIS_RESET_TO_INITIAL_SIZE, &m, sizeof(m));
+    }
+}
+
+/*
+ * OpenCtrlCalcMonikerOffsets: the moniker at the top, or (to the left,
+ * or aligned with the child) where the first child's moniker is
+ */
+static void CalcMonikerOffsets(optr o)
+{
+    OLCtrlInstance *c = Ctrl(o);
+    Point p;
+
+    c->OLCI_monikerPos.P_y = CTRL_MKR_INSET_Y;
+    c->OLCI_monikerPos.P_x = 0;
+    if (!(c->OLCI_optFlags & OLCOF_DISPLAY_MONIKER))
+	return;
+    if (!(c->OLCI_moreFlags & OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD) &&
+	(c->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE))
+	return;
+    if (!@call o::MSG_GET_FIRST_MKR_POS(&p))
+	return;
+    c = Ctrl(o);
+    @call o::MSG_SPEC_CTRL_SET_MONIKER_OFFSET(
+		(word) (p.P_x - c->VI_bounds.R_left),
+		(word) (p.P_y - c->VI_bounds.R_top));
+}
+
+/* OpenRecalcCtrlSize: our own spacing and margins; the centering; the
+ * size hints (not for a reply bar); the composite's size */
+static SizeAsDWord RecalcCtrlSize(optr o, word width, word height)
+{
+    VisCompSpacingMarginsInfo info = PassSpacingArgs(o);
+    sword w = (sword) width, h = (sword) height;
+
+    SetExpandHeightInHorizToolbox(o);
+    if (TARGET(Ctrl(o)->OLCI_buildFlags) != T(OLBT_REPLY_BAR)) {
+	CalcCentersIfCenteringByMonikers(o);
+	if (!(Ctrl(o)->OLCI_optFlags & OLCOF_IGNORE_DESIRED_SIZE_HINTS))
+	    VisApplySizeHints(o, &w, &h);
+    }
+    CalcMonikerOffsets(o);
+    return VisCompRecalcSize(o, (word) w, (word) h, info);
+}
+
+/* OLCtrlRerecalcSize */
+@extern method OLCtrlClass, MSG_VIS_RECALC_SIZE
+{
+    SizeAsDWord s = RecalcCtrlSize(oself, width, height);
+
+    Ctrl(oself)->OLCI_moreFlags &= ~OLCOF_SIZING_CHILDREN;
+    return s;
+}
+
+/*
+ * OLCtrlGetLargestCenter: a centering node asks its children; a child
+ * centered on monikers takes its left margin as moniker space and
+ * passes on the largest (found: one of them has valid geometry)
+ */
+@extern method OLCtrlClass, MSG_SPEC_CTRL_GET_LARGEST_CENTER
+{
+    Rectangle m;
+    word i;
+
+    if (ObjVarFindData(oself, HINT_CENTER_CHILDREN_ON_MONIKERS)) {
+	for (i = 0; ; i++) {
+	    optr child = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(i);
+
+	    if (!child)
+		break;
+	    @call child::MSG_SPEC_CTRL_GET_LARGEST_CENTER(lc);
+	}
+	return;
+    }
+    if (!(pself->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER))
+	return;
+    if (!lc->OLCLC_found && !(pself->VI_optFlags & VOF_GEOMETRY_INVALID))
+	lc->OLCLC_found = (word) -1;
+    CalcCtrlMargins(oself, &m);
+    Ctrl(oself)->OLCI_monikerSpace = m.R_left;
+    if (lc->OLCLC_largest < (word) m.R_left)
+	lc->OLCLC_largest = m.R_left;
+}
+
+/* OLCtrlSetMonikerOffset: x if aligned with the child, y unless above */
+@extern method OLCtrlClass, MSG_SPEC_CTRL_SET_MONIKER_OFFSET
+{
+    if (pself->OLCI_moreFlags & OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD)
+	pself->OLCI_monikerPos.P_x = x;
+    if (!(pself->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE))
+	pself->OLCI_monikerPos.P_y = y;
+}
+
+/*
+ * OLCtrlGetMinSize: the margins and the moniker (above: its width with
+ * the frame's ends; left: its height), at least the size hints'
+ */
+@extern method OLCtrlClass, MSG_VIS_COMP_GET_MINIMUM_SIZE
+{
+    Rectangle m;
+    word w = 0, h = 0;
+    sword hw = 0, hh = 0;
+    OLCtrlInstance *c;
+
+    @call oself::MSG_VIS_COMP_GET_MARGINS(&m);
+    c = Ctrl(oself);
+    if (!(c->OLCI_optFlags & OLCOF_IN_MENU)) {
+	SizeAsDWord s = SpecGetGenMonikerSize(oself, 0);
+
+	w = DWORD_WIDTH(s);
+	h = DWORD_HEIGHT(s) + CTRL_MKR_INSET_Y;
+	c = Ctrl(oself);
+	if (c->OLCI_optFlags & OLCOF_DISPLAY_BORDER)
+	    w += (TOP_FRAME_AT_END_MARGIN + OL_CTRL_MKR_MARGIN) * 2;
+	if (c->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE) {
+	    if (c->OLCI_moreFlags & OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD)
+		w += c->OLCI_monikerPos.P_x -
+		     (TOP_FRAME_AT_END_MARGIN + OL_CTRL_MKR_MARGIN);
+	    h = 0;
+	} else
+	    w = 0;
+    }
+    w += m.R_right + m.R_left;
+    h += m.R_top + m.R_bottom;
+    if (!(Ctrl(oself)->OLCI_optFlags & OLCOF_IGNORE_DESIRED_SIZE_HINTS))
+	VisApplySizeHints(oself, &hw, &hh);
+    if (w <= (word) hw)
+	w = hw;
+    if (h <= (word) hh)
+	h = hh;
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/*
+ * CalcExtraSize: our extra size for count children; children not there
+ * count as the first child (or, without children, as a typical one)
+ * plus the spacing, along the orientation
+ */
+static void CalcExtraSize(optr o, word count, word *ew, word *eh)
+{
+    ExtraSizeParams e;
+    word left;
+    byte xi, yi, n, sp;
+
+    memset(&e, 0, sizeof(e));
+    @call o::MSG_SPEC_GET_EXTRA_SIZE(&e, count);
+    *ew = e.ESP_extraWidth;
+    *eh = e.ESP_extraHeight;
+    left = e.ESP_leftoverChildren;
+    if (!left)
+	return;
+    if (count != left) {
+	optr first = @call o::MSG_VIS_FIND_CHILD_AT_POSITION(0);
+	ExtraSizeParams f;
+
+	memset(&f, 0, sizeof(f));
+	if (first)
+	    @call first::MSG_SPEC_GET_EXTRA_SIZE(&f, left);
+	xi = (byte) f.ESP_extraWidth;
+	yi = (byte) f.ESP_extraHeight;
+    } else {
+	word t = @call o::MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE();
+
+	xi = (byte) t;
+	yi = (byte) (t >> 8);
+    }
+    n = (byte) left;
+    {
+	word s = DWORD_CHILD_SPACING(
+		    @call o::MSG_VIS_COMP_GET_CHILD_SPACING());
+
+	sp = s > 255 ? 255 : (byte) s;
+    }
+    if (Vertical(o))
+	*eh += (word) (n * (byte) (yi + sp));
+    else
+	*ew += (word) (n * (byte) (xi + sp));
+}
+
+static Boolean IsType(SpecSizeSpec s, word t)
+{
+    return (s & 0xfc00) == t;
+}
+
+/*
+ * CalcDesiredCtrlSize: a desired size in pixels with our extra size:
+ * for widths in characters or pixels and heights in lines or pixels the
+ * children's extra sizes too, else just our margins; 0 stays 0
+ */
+@extern method OLCtrlClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT
+{
+    word length, across, spacing, ew, eh, w, h;
+    GStateHandle gs;
+
+    GetNonMonikerMarginTotals(oself, &length, &across, &spacing);
+    if (Vertical(oself)) {
+	ew = across;
+	eh = length;
+    } else {
+	ew = length;
+	eh = across;
+    }
+    if (IsType(desiredWidth, SST_AVG_CHAR_WIDTHS) ||
+	IsType(desiredWidth, SST_WIDE_CHAR_WIDTHS) ||
+	IsType(desiredWidth, SST_PIXELS) ||
+	IsType(desiredHeight, SST_PIXELS) ||
+	IsType(desiredHeight, SST_LINES_OF_TEXT)) {
+	word cw, ch;
+
+	CalcExtraSize(oself, childCount, &cw, &ch);
+	if (IsType(desiredWidth, SST_AVG_CHAR_WIDTHS) ||
+	    IsType(desiredWidth, SST_WIDE_CHAR_WIDTHS) ||
+	    IsType(desiredWidth, SST_PIXELS))
+	    ew = cw;
+	if (IsType(desiredHeight, SST_LINES_OF_TEXT) ||
+	    IsType(desiredHeight, SST_PIXELS))
+	    eh = ch;
+    }
+    gs = ViewCreateCalcGState();
+    w = VisConvertSpecVisSize(oself, desiredWidth, gs);
+    h = VisConvertSpecVisSize(oself, desiredHeight, gs);
+    GrDestroyState(gs);
+    if (w)
+	w += ew;
+    if (h)
+	h += eh;
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/* OLCtrlGetTypicalChildExtraSize: x in the low byte, y in the high */
+@extern method OLCtrlClass, MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE
+{
+    return (word) (((MO_TYPICAL_INSET_Y * 2) << 8) | (MO_TYPICAL_INSET_X * 2));
+}
+
+/* OLCtrlGetFirstMkrPos: the first child with valid geometry answers */
+@extern method OLCtrlClass, MSG_GET_FIRST_MKR_POS
+{
+    word i;
+
+    for (i = 0; ; i++) {
+	optr child = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(i);
+	Boolean valid;
+
+	if (!child)
+	    return FALSE;
+	ObjLockObjBlock(OptrToHandle(child));
+	valid = !(((VisInstance *) ObjDerefVis(child))->VI_optFlags &
+		  VOF_GEOMETRY_INVALID);
+	MemUnlock(OptrToHandle(child));
+	if (valid)
+	    return @call child::MSG_GET_FIRST_MKR_POS(pos);
+    }
+}
+
+typedef struct {
+    word	count;
+    Boolean	found;
+} WrapCount;
+
+static void WrapHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		     word dataType, void *handlerData)
+{
+    WrapCount *w = handlerData;
+
+    (void) mh;
+    (void) chnk;
+    (void) dataType;
+    w->count = *(word *) extra;
+    w->found = TRUE;
+}
+
+static VarDataCHandler wrapHints[] = {
+    { HINT_WRAP_AFTER_CHILD_COUNT_IF_VERTICAL_SCREEN, WrapHint },
+    { HINT_WRAP_AFTER_CHILD_COUNT, WrapHint },
+};
+
+/* OLCtrlGetWrapCount */
+@extern method OLCtrlClass, MSG_VIS_COMP_GET_WRAP_COUNT
+{
+    WrapCount w;
+
+    w.count = 0;
+    w.found = FALSE;
+    ObjVarScanData(oself, sizeof(wrapHints) / sizeof(wrapHints[0]),
+		   wrapHints, &w);
+    return w.count;
+}
+
+/* OLCtrlPositionBranch */
+@extern method OLCtrlClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
+		    PassSpacingArgs(oself));
+    CalcMonikerOffsets(oself);
+}

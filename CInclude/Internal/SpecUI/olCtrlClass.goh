@@ -1,0 +1,147 @@
+/*
+ * olCtrlClass.goh -- OLCtrlClass, the composite of a specific UI that
+ * groups generic objects (after Include/Internal/SpecUI/olCtrlClass.def),
+ * for Port32.  The superclass of every window class.
+ *
+ * The messages are in the asm's order; those of VisSpecMessages are
+ * imported there (this header is the only one of the specific UI to
+ * import them before olWinClass.goh, which includes it, so the numbers
+ * are the same everywhere).  Port32: an optr is a dword pair of handle
+ * and chunk; the build info query has the parameters of
+ * MSG_SPEC_P32_GUP_QUERY.
+ */
+#ifndef __OLCTRLCLASS_GOH
+#define __OLCTRLCLASS_GOH
+
+@include <Objects/vCompC.goh>
+@include <Objects/gInterC.goh>
+@include <Internal/specC.goh>
+
+@deflib motif
+
+/* OLBuildFlags: how a generic object is placed; the reply in the low
+ * bits */
+typedef WordFlags OLBuildFlags;
+#define OLBF_MENUABLE		0x8000	/* a GIV_POPUP interaction */
+#define OLBF_TRIGGER		0x4000	/* a GenTrigger's query */
+#define OLBF_SEEK_MENU_BAR	0x2000	/* HINT_SEEK_MENU_BAR */
+#define OLBF_AVOID_MENU_BAR	0x1000	/* HINT_AVOID_MENU_BAR */
+#define OLBF_MENU_IN_DISPLAY	0x0800
+#define OLBF_ALWAYS_ADOPT	0x0400
+#define OLBF_TOOLBOX		0x0200	/* HINT_TOOLBOX here or above */
+#define OLBF_DELAYED_MODE	0x0100	/* the parent's properties delayed */
+#define OLBF_TARGET		0x00f0	/* OLBuildTargets */
+#define OLBF_TARGET_OFFSET	4
+#define OLBF_ABOVE_DISP_CTRL	0x0008
+#define OLBF_REPLY		0x0007	/* OLBuildReplies */
+#define OLBF_REPLY_OFFSET	0
+
+/* OLBuildTargets */
+#define OLBT_NO_TARGET			0
+#define OLBT_SYS_MENU			1
+#define OLBT_REPLY_BAR			2
+#define OLBT_FOR_REPLY_BAR		3
+#define OLBT_IS_EXPRESS_MENU		4
+#define OLBT_IS_POPUP_LIST		5
+#define OLBT_FOR_TITLE_BAR_LEFT		6
+#define OLBT_FOR_TITLE_BAR_RIGHT	7
+
+/* OLBuildReplies */
+#define OLBR_NO_REPLY		0
+#define OLBR_TOP_MENU		1
+#define OLBR_SUB_MENU		2
+#define OLBR_REPLY_BAR		3
+
+typedef ByteFlags OLCtrlOptFlags;
+#define OLCOF_DISPLAY_MONIKER		0x80
+#define OLCOF_DISPLAY_MKR_ABOVE		0x40
+#define OLCOF_DISPLAY_BORDER		0x20
+#define OLCOF_IN_MENU			0x10
+#define OLCOF_CENTER_ON_MONIKER		0x08
+#define OLCOF_CUSTOM_SPACING		0x04
+#define OLCOF_IGNORE_DESIRED_SIZE_HINTS	0x02
+#define OLCOF_LEFT_JUSTIFY_MONIKERS	0x01
+
+typedef ByteFlags OLCtrlMoreFlags;
+#define OLCOF_LEFT_JUSTIFY_MONIKER		0x40
+#define OLCOF_RIGHT_JUSTIFY_MONIKER		0x20
+#define OLCOF_ALIGN_LEFT_MKR_EDGE_WITH_CHILD	0x10
+#define OLCOF_SIZING_CHILDREN			0x08
+#define OLCOF_OVERSIZED_CHILDREN		0x04
+#define OLCOF_IGNORE_MNEMONIC			0x02
+#define OLCOF_CANT_OVERLAP_KIDS			0x01
+
+/* MAP_GROUP_DATA: an OLCtrl made for a menu (its vis parent and build
+ * flags until it is initialized) */
+typedef struct {
+    optr		OLMGDE_visParent;
+    OLBuildFlags	OLMGDE_flags;
+    OLCtrlOptFlags	OLMGDE_optFlags;
+    byte		OLMGDE_unused;
+} OLMapGroupDataEntry;
+
+/* the margins of OLCtrls (olCtrlClass.def) */
+#define OL_CONTENT_MARGIN	3
+#define STD_OL_LEFT_MARGIN	7
+#define STD_OL_RIGHT_MARGIN	7
+
+/* MSG_SPEC_CTRL_GET_LARGEST_CENTER: the largest center so far, and if
+ * any object had valid geometry */
+typedef struct {
+    word	OLCLC_largest;
+    word	OLCLC_found;
+} OLCtrlLargestCenter;
+
+@class OLCtrlClass, VisCompClass;
+@uses GenInteractionClass;
+
+/* the build info query continued in a menu or trigger bar */
+@message Boolean MSG_BAR_BUILD_INFO(GenReturnParams *retValue,
+				    word queryType);
+@message void MSG_OL_CTRL_SET_VIS_PARENT(optr visParent);
+/* the OLCtrlOptFlags the parent wants for its children; FALSE if not
+ * handled */
+@importMessage VisSpecMessages, Boolean MSG_QUERY_CENTER_BY_MONIKERS(
+					OLCtrlOptFlags *flags);
+/* TRUE if the child is in a window that is not a menu; *first: if it
+ * is the first child */
+@message Boolean MSG_OL_GET_CHILDS_TREE_POS(optr child, Boolean *first);
+/* the OLBuildFlags of the control above; FALSE if none answered */
+@importMessage VisSpecMessages, Boolean MSG_VUP_GET_BUILD_FLAGS(
+					OLBuildFlags *flags);
+@importMessage VisSpecMessages, Boolean MSG_VUP_GET_MORE_FLAGS(
+					OLCtrlMoreFlags *flags);
+/* the moniker position of the first child; FALSE if no child handled
+ * it */
+@importMessage VisSpecMessages, Boolean MSG_GET_FIRST_MKR_POS(
+					Point *pos);
+/* the typical extra size of a child: x in the low byte, y in the high */
+@message word MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE();
+@message void MSG_SPEC_CTRL_SET_MONIKER_OFFSET(word x, word y);
+@importMessage VisSpecMessages, void MSG_SPEC_CTRL_SET_MORE_FLAGS(
+					OLCtrlMoreFlags set,
+					OLCtrlMoreFlags clear);
+@importMessage VisSpecMessages, void MSG_SPEC_CTRL_UPDATE_CENTER_STUFF(
+					VisUpdateMode updateMode);
+@importMessage VisSpecMessages, void MSG_SPEC_CTRL_GET_LARGEST_CENTER(
+					OLCtrlLargestCenter *lc);
+
+    @vardata void TEMP_OL_CTRL_DRAW_BOX_WITH_TOP_MARGIN;
+    @vardata OLMapGroupDataEntry MAP_GROUP_DATA;
+
+    /* the vis parent to use (a menu's), or 0 */
+    @instance optr		OLCI_visParent = 0;
+    @instance OLBuildFlags	OLCI_buildFlags = 0;
+    @instance OLCtrlOptFlags	OLCI_optFlags = 0;
+    @instance OLCtrlMoreFlags	OLCI_moreFlags = 0;
+    /* where the moniker is drawn */
+    @instance Point		OLCI_monikerPos = {0, 0};
+    /* HINT_CENTER_CHILDREN_ON_MONIKERS: the space left of the
+     * children's monikers */
+    @instance word		OLCI_monikerSpace = 0;
+
+@endc;
+
+@endlib
+
+#endif

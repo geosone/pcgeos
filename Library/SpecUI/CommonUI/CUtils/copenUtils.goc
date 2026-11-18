@@ -1,7 +1,9 @@
 /*
  * copenUtils.goc -- utilities of the specific UI (after copenUtils.asm):
  * so far the line bounds of an object, the display checks (CGA, black
- * and white) and the screen's dimensions.  The pointer images of
+ * and white, TV, the screen's dimensions), GStates for the UI, the
+ * conditional hints, the flags of a parent OLCtrl, the visibility
+ * notification and the size of a generic moniker.  The pointer images of
  * OpenGetPtrImage are in cutilsPtrImages.goc.
  */
 @include "cGeode.goh"
@@ -51,4 +53,290 @@ void OpenGetScreenDimensions(word *width, word *height)
     }
     *width = screenWidth;
     *height = screenHeight;
+}
+
+/* OpenCheckIfNarrow: a very narrow application */
+Boolean OpenCheckIfNarrow(void)
+{
+    return (moCS_flags & CSF_VERY_NARROW) != 0;
+}
+
+/* OpenCheckIfTV: a TV display */
+Boolean OpenCheckIfTV(void)
+{
+    return (moCS_flags & CSF_TV) != 0;
+}
+
+/* OpenCheckDefaultRings: if default rings are drawn */
+Boolean OpenCheckDefaultRings(void)
+{
+    return !olNoDefaultRing;
+}
+
+/* OpenCheckIfVerticalScreen: a screen higher than wide */
+Boolean OpenCheckIfVerticalScreen(void)
+{
+    word w, h;
+
+    OpenGetScreenDimensions(&w, &h);
+    return w < h;
+}
+
+/* OpenCheckIfLimitedLength: no room in the direction the composite
+ * orients its children (vertically: a CGA, else a very narrow
+ * application) */
+Boolean OpenCheckIfLimitedLength(optr obj)
+{
+    byte geo = ((VisCompInstance *) ObjDerefVis(obj))->VCI_geoAttrs;
+
+    if (geo & VCGA_ORIENT_CHILDREN_VERTICALLY)
+	return (moCS_flags & (CSF_VERY_SQUISHED | CSF_TINY)) != 0;
+    return (moCS_flags & CSF_VERY_NARROW) != 0;
+}
+
+/* ---------------------------------------------------------------------
+ * GStates
+ * ------------------------------------------------------------------- */
+
+/* ViewCreateGState: a GState on the window (or none) with the display
+ * scheme in its private data, the UI's font and square line ends */
+GStateHandle ViewCreateGState(WindowHandle win)
+{
+    GStateHandle gs = GrCreateState(win);
+    DisplayScheme d;
+
+    SpecGetDisplayScheme(&d);
+    GrSetPrivateData(gs, (word) (d.DS_colorScheme | (d.DS_displayType << 8)),
+		     (word) (d.DS_lightColor | (d.DS_darkColor << 8)),
+		     d.DS_fontID, (word) d.DS_pointSize);
+    GrSetFont(gs, d.DS_fontID, MakeWWFixed(d.DS_pointSize));
+    GrSetLineEnd(gs, LE_SQUARECAP);
+    return gs;
+}
+
+/* ViewCreateCalcGState: one without a window, for calculations */
+GStateHandle ViewCreateCalcGState(void)
+{
+    return ViewCreateGState(0);
+}
+
+/* VupCreateGState: one on the object's window */
+GStateHandle VupCreateGState(optr obj)
+{
+    return ViewCreateGState(VisQueryWindow(obj));
+}
+
+/* ---------------------------------------------------------------------
+ * Conditional hints
+ * ------------------------------------------------------------------- */
+
+/* the next entry of the variable data (offsets in the chunk) */
+static word NextVarEntry(const byte *p, word e, word end)
+{
+    word size = ((const VarDataEntry *) (p + e))->VDE_entrySize;
+
+    if (size < sizeof(VarDataEntry))
+	return end;
+    e = (word) ((e + size + 7u) & ~7u);
+    return e > end ? end : e;
+}
+
+static word VarEntryType(const byte *p, word e, word end)
+{
+    return e < end ?
+	(word) (((const VarDataEntry *) (p + e))->VDE_dataType & VDF_TYPE) : 0;
+}
+
+/*
+ * RemoveConditionalHintsIfNeeded: for each HINT_IF_SYSTEM_ATTRS, the
+ * hints up to its HINT_ELSE or HINT_ENDIF (just the next one without)
+ * are kept if the system has one of the attributes (none of them with
+ * SA_NOT), else those after HINT_ELSE up to HINT_ENDIF; the others and
+ * the conditional hints themselves are deleted (FindConditionalHints)
+ */
+void RemoveConditionalHintsIfNeeded(optr obj)
+{
+    SystemAttrs *sa;
+
+    while ((sa = ObjVarFindData(obj, HINT_IF_SYSTEM_ATTRS)) != NULL) {
+	byte *p = LMemDeref(obj);
+	word end = LMemGetChunkSize(obj);
+	word e = (word) ((byte *) sa - sizeof(VarDataEntry) - p);
+	word ifStart, ifEnd, elseStart = 0, elseEnd = 0, t;
+	Boolean met, endif = FALSE;
+
+	met = (*sa & SA_NOT) ? !(*sa & olSystemAttrs & ~SA_NOT)
+			     : (*sa & olSystemAttrs) != 0;
+	e = NextVarEntry(p, e, end);
+	ifStart = e;
+	t = VarEntryType(p, e, end);
+	if (t != HINT_ELSE && t != HINT_ENDIF)
+	    e = NextVarEntry(p, e, end);
+	ifEnd = e;
+	while ((t = VarEntryType(p, e, end)) != 0) {
+	    if (t == HINT_ELSE) {
+		elseStart = e;
+		e = NextVarEntry(p, e, end);
+		ifEnd = e;		/* HINT_ELSE goes with the "if" */
+		continue;
+	    }
+	    if (t == HINT_ENDIF) {
+		if (elseStart)
+		    elseEnd = e;
+		else
+		    ifEnd = e;
+		endif = TRUE;
+		break;
+	    }
+	    e = NextVarEntry(p, e, end);
+	}
+	if (met) {
+	    ifStart = elseStart;
+	    ifEnd = elseEnd;
+	}
+	if (ifStart && ifEnd > ifStart)
+	    LMemDeleteAt(obj, ifStart, (word) (ifEnd - ifStart));
+	if (endif)
+	    (void) ObjVarDeleteData(obj, HINT_ENDIF);
+	(void) ObjVarDeleteData(obj, HINT_IF_SYSTEM_ATTRS);
+    }
+}
+
+/* OpenScanVarData: ObjVarScanData after the conditional hints are
+ * resolved */
+void OpenScanVarData(optr obj, word numHandlers, VarDataCHandler *table,
+		     void *data)
+{
+    RemoveConditionalHintsIfNeeded(obj);
+    ObjVarScanData(obj, numHandlers, table, data);
+}
+
+/* ---------------------------------------------------------------------
+ * The flags of a parent OLCtrl
+ * ------------------------------------------------------------------- */
+
+/* OpenGetFlagsIfCtrl: the flags of the vis parent if it is an OLCtrl,
+ * else its answer to the message (0 if none); a window has none */
+static word GetFlagsIfCtrl(optr obj, Boolean more)
+{
+    optr parent;
+    word f = 0;
+
+    if (((VisInstance *) ObjDerefVis(obj))->VI_typeFlags & VTF_IS_WIN_GROUP)
+	return 0;
+    parent = VisFindParent(obj);
+    if (!parent)
+	return 0;
+    ObjLockObjBlock(OptrToHandle(parent));
+    if (ObjIsObjectInClass(parent, &OLCtrlClass)) {
+	OLCtrlInstance *c = (OLCtrlInstance *) ObjDerefVis(parent);
+
+	f = more ? c->OLCI_moreFlags : c->OLCI_buildFlags;
+	MemUnlock(OptrToHandle(parent));
+	return f;
+    }
+    MemUnlock(OptrToHandle(parent));
+    if (more) {
+	OLCtrlMoreFlags m = 0;
+
+	if (@call parent::MSG_VUP_GET_MORE_FLAGS(&m))
+	    f = m;
+    } else {
+	OLBuildFlags b = 0;
+
+	if (@call parent::MSG_VUP_GET_BUILD_FLAGS(&b))
+	    f = b;
+    }
+    return f;
+}
+
+OLBuildFlags OpenGetParentBuildFlagsIfCtrl(optr obj)
+{
+    return (OLBuildFlags) GetFlagsIfCtrl(obj, FALSE);
+}
+
+OLCtrlMoreFlags OpenGetParentMoreFlagsIfCtrl(optr obj)
+{
+    return (OLCtrlMoreFlags) GetFlagsIfCtrl(obj, TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * Visibility notification (copenButtonClass.asm)
+ * ------------------------------------------------------------------- */
+
+/* VisOpenCloseNotifyCommon: ATTR_GEN_VISIBILITY_MESSAGE (else
+ * MSG_GEN_APPLICATION_VISIBILITY_NOTIFICATION) with the object (or
+ * ATTR_GEN_VISIBILITY_DATA) to ATTR_GEN_VISIBILITY_DESTINATION (else
+ * the application) */
+static void VisOpenCloseNotifyCommon(optr obj, Boolean opening)
+{
+    optr data = obj, dest;
+    Message msg = MSG_GEN_APPLICATION_VISIBILITY_NOTIFICATION;
+    void *p;
+
+    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_DATA)) != NULL)
+	data = *(optr *) p;
+    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_MESSAGE)) != NULL)
+	msg = *(Message *) p;
+    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_DESTINATION)) != NULL)
+	dest = *(optr *) p;
+    else
+	dest = GeodeGetAppObject(0);
+    if (dest)
+	@send dest::{GEN_VISIBILITY_OUTPUT}(msg)(data, opening);
+}
+
+void VisOpenNotifyCommon(optr obj)
+{
+    VisOpenCloseNotifyCommon(obj, TRUE);
+}
+
+void VisCloseNotifyCommon(optr obj)
+{
+    VisOpenCloseNotifyCommon(obj, FALSE);
+}
+
+/* ---------------------------------------------------------------------
+ * Moniker sizes (copenMoniker.asm)
+ * ------------------------------------------------------------------- */
+
+static word systemFontHeight;
+static word addOnMnemonicWidth;
+
+/* GetSystemFontHeight: the height of the UI's font (cached;
+ * CalcAndCacheSystemFontHeight) */
+word GetSystemFontHeight(void)
+{
+    if (!systemFontHeight) {
+	GStateHandle gs = ViewCreateCalcGState();
+
+	systemFontHeight = (word) GrFontMetrics(gs, GFMI_HEIGHT_ROUNDED);
+	GrDestroyState(gs);
+    }
+    return systemFontHeight;
+}
+
+/* SpecGetGenMonikerSize: the generic moniker's size; a mnemonic not in
+ * the text is shown after it (as " (w)") */
+SizeAsDWord SpecGetGenMonikerSize(optr obj, GStateHandle gs)
+{
+    ChunkHandle m = ((GenInstance *) ObjDerefGen(obj))->GI_visMoniker;
+    SizeAsDWord s;
+    VisMonikerWithText *t;
+
+    s = VisGetMonikerSize(obj, m, GetSystemFontHeight(), gs);
+    if (!m)
+	return s;
+    t = LMemDeref(ConstructOptr(OptrToHandle(obj), m));
+    if ((t->VMWT_common.VM_type & VMT_GSTRING) ||
+	(byte) t->VMWT_mnemonicOffset != 0xfe)	/* VMO_MNEMONIC_NOT_IN_MKR_TEXT */
+	return s;
+    if (!addOnMnemonicWidth) {
+	GStateHandle cg = ViewCreateCalcGState();
+
+	addOnMnemonicWidth = GrTextWidth(cg, " (w)", 4);
+	GrDestroyState(cg);
+    }
+    return MAKE_SIZE_DWORD(DWORD_WIDTH(s) + addOnMnemonicWidth,
+			   DWORD_HEIGHT(s));
 }

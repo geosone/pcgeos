@@ -16,6 +16,7 @@
 @include <Objects/gScrnC.goh>
 @include <Objects/gFieldC.goh>
 @include <Objects/uiInputC.goh>
+@include <Internal/SpecUI/olCtrlClass.goh>
 @include <Internal/SpecUI/olSystemClass.goh>
 @include <Internal/SpecUI/olScreenClass.goh>
 @include <Internal/SpecUI/olFieldClass.goh>
@@ -66,27 +67,38 @@ extern void WinInvalTree(Handle win, const Region *reg, word axParam,
 #define SGQT_BRING_UP_KEYBOARD		(SPEC_GEN_QUERY_START + 3)
 #define SGQT_WIN_GROUP			(SPEC_GEN_QUERY_START + 4)
 
-/* OLBuildFlags (olCtrlClass.def): how a generic object is placed; the
- * reply in the low bits */
-typedef WordFlags OLBuildFlags;
-#define OLBF_MENUABLE		0x8000
-#define OLBF_TRIGGER		0x4000
-#define OLBF_SEEK_MENU_BAR	0x2000
-#define OLBF_AVOID_MENU_BAR	0x1000
-#define OLBF_MENU_IN_DISPLAY	0x0800
-#define OLBF_ALWAYS_ADOPT	0x0400
-#define OLBF_TOOLBOX		0x0200
-#define OLBF_DELAYED_MODE	0x0100
-#define OLBF_TARGET		0x00f0
-#define OLBF_TARGET_OFFSET	4
-#define OLBF_ABOVE_DISP_CTRL	0x0008
-#define OLBF_REPLY		0x0007
-#define OLBF_REPLY_OFFSET	0
-/* OLBuildReplies */
-#define OLBR_NO_REPLY		0
-#define OLBR_TOP_MENU		1
-#define OLBR_SUB_MENU		2
-#define OLBR_REPLY_BAR		3
+/* the specific UI's visual upward queries (cConstant.def
+ * SpecVisQueryTypes; MSG_VIS_P32_VUP_QUERY) */
+#define SVQT_QUERY_FOR_REPLY_BAR	(SPEC_VIS_QUERY_START + 16)
+
+/* the spacing and margins of OLCtrls (CComp/ccompConstant.def,
+ * cConstant.def; Motif) */
+#define MO_WIN_CHILD_SPACING		5
+#define OL_CONTROL_SPACING		MO_WIN_CHILD_SPACING
+#define OL_CONTROL_WRAP_SPACING		2
+#define MENU_SPACING			0
+#define TOOLBOX_SPACING			3
+#define TOOLBOX_WRAP_SPACING		1
+#define MINIMAL_X_SPACING		2
+#define MINIMAL_Y_SPACING		1
+#define MO_CONTROL_MKR_X_SPACING	10
+#define MO_CONTROL_MKR_X_SPACING_NARROW	4
+#define MO_CONTROL_MKR_Y_SPACING	5
+#define MO_CONTROL_MKR_Y_SPACING_CGA	2
+#define CTRL_MKR_INSET_Y		2
+#define MO_REPLY_BAR_X_INSET		1
+#define OL_REPLY_BAR_SPACE		2
+#define OL_CGA_REPLY_BAR_SPACE		2
+#define OL_CTRL_BOXED_MARGIN		7
+#define OL_CTRL_BOXED_MARGIN_LEFT	OL_CTRL_BOXED_MARGIN
+#define OL_CTRL_BOXED_MARGIN_TOP	OL_CTRL_BOXED_MARGIN
+#define OL_CTRL_BOXED_MARGIN_BOTTOM	OL_CTRL_BOXED_MARGIN
+#define OL_CTRL_BOXED_MARGIN_RIGHT	OL_CTRL_BOXED_MARGIN
+#define OL_CTRL_BOXED_MARGIN_CGA	2
+#define OL_CTRL_MKR_MARGIN		2
+#define TOP_FRAME_AT_END_MARGIN	(OL_CTRL_BOXED_MARGIN_LEFT - OL_CTRL_MKR_MARGIN)
+#define MO_TYPICAL_INSET_X		9
+#define MO_TYPICAL_INSET_Y		4
 
 /* SystemAttrs (genC.def) the C header lacks */
 #ifndef SA_PORTRAIT
@@ -220,6 +232,45 @@ extern Boolean OpenCheckIfCGA(void);
 extern Boolean OpenCheckIfBW(void);
 extern word OpenMinimizeIfCGA(word value);
 extern void OpenGetScreenDimensions(word *width, word *height);
+extern Boolean OpenCheckIfTV(void);
+extern Boolean OpenCheckDefaultRings(void);
+extern Boolean OpenCheckIfVerticalScreen(void);
+extern Boolean OpenCheckIfLimitedLength(optr obj);
+/* GStates with the display scheme, the UI's font, square line ends */
+extern GStateHandle ViewCreateGState(WindowHandle win);
+extern GStateHandle ViewCreateCalcGState(void);
+extern GStateHandle VupCreateGState(optr obj);
+/* HINT_IF_SYSTEM_ATTRS ... HINT_ELSE ... HINT_ENDIF resolved */
+extern void RemoveConditionalHintsIfNeeded(optr obj);
+extern void OpenScanVarData(optr obj, word numHandlers,
+			    VarDataCHandler *table, void *data);
+/* the flags of the vis parent if it is an OLCtrl (else its answer) */
+extern OLBuildFlags OpenGetParentBuildFlagsIfCtrl(optr obj);
+extern OLCtrlMoreFlags OpenGetParentMoreFlagsIfCtrl(optr obj);
+extern Boolean OpenCheckIfNarrow(void);
+/* the notification of ATTR_GEN_VISIBILITY_* (or to the application) when
+ * the object comes up or goes away */
+extern void VisOpenNotifyCommon(optr obj);
+extern void VisCloseNotifyCommon(optr obj);
+
+/* CUtils/copenUtils.goc (after copenMoniker.asm): the height of the
+ * UI's font; the size of the generic moniker, with the space for a
+ * mnemonic shown after the text */
+extern word GetSystemFontHeight(void);
+extern SizeAsDWord SpecGetGenMonikerSize(optr obj, GStateHandle gs);
+
+/* CComp/copenCtrlClass.goc: for OLCtrls and their children */
+extern word GetParentMonikerSpace(optr obj);
+/* the margins (and *spacing the child spacing) less the moniker's
+ * space: *length along the orientation, *width across it */
+extern void GetNonMonikerMarginTotals(optr obj, word *length, word *width,
+				      word *spacing);
+/* the margins and spacings as a VisCompSpacingMarginsInfo, 0 if they
+ * do not fit */
+extern VisCompSpacingMarginsInfo OpenPassMarginInfo(optr obj,
+						    const Rectangle *m,
+						    word spacing,
+						    word wrapSpacing);
 /* CUtils/cutilsPtrImages.goc (made by Port32/tools/ptrimg2c.py) */
 extern optr OpenGetPtrImage(OLPtrImage image);
 

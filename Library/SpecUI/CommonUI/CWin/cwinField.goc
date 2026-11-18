@@ -79,11 +79,6 @@ static GenFieldInstance *GenField(optr oself)
     return (GenFieldInstance *) ObjDerefGen(oself);
 }
 
-static Boolean OpenCheckIfNarrow(void)
-{
-    return (moCS_flags & CSF_VERY_NARROW) != 0;
-}
-
 /* ---------------------------------------------------------------------
  * Initialization (cwinFieldInit.asm)
  * ------------------------------------------------------------------- */
