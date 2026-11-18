@@ -30,6 +30,28 @@
 @classdecl GenApplicationClass;
 
 /* GenAppBuild */
+/* an application made at run time is targetable (as the @default of a
+ * declared one) */
+@method GenApplicationClass, MSG_META_INITIALIZE
+{
+    pself->GI_attrs |= GA_TARGETABLE;
+    @callsuper();
+}
+
+/* GenAppSetAttrs: a change of GA_TARGETABLE goes to the specific UI
+ * too, once grown (it lets the target go) */
+@method GenApplicationClass, MSG_GEN_SET_ATTRS
+{
+    if (!((attrsToSet | attrsToClear) & GA_TARGETABLE) ||
+	!GenCheckIfSpecGrown(oself)) {
+	@callsuper();
+	return;
+    }
+    pself->GI_attrs = (GenAttrs) ((pself->GI_attrs & ~attrsToClear) |
+				  attrsToSet);
+    @callsuper oself::GenClass::MSG_GEN_SET_ATTRS(attrsToSet, attrsToClear);
+}
+
 @method GenApplicationClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
 {
     GeodeHandle ui = (GeodeHandle) pself->GAI_specificUI;

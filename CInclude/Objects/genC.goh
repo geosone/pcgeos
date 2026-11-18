@@ -959,6 +959,13 @@ extern void UserFreeSpecificUI(void);
  * the reply zeroed first; FALSE if there is no system object yet */
 extern Boolean UserCallSystem(Message msg, const void *params,
 			      word paramSize, void *reply, word replySize);
+/* the message (goc -cg parameters) recorded for the geode's application
+ * object and sent to it through its process (MSG_META_DISPATCH_EVENT,
+ * queued): it arrives once the process caught up */
+extern void UserSendToApplicationViaProcess(Message msg, const void *params,
+					    word paramSize);
+/* TRUE if keyboard accelerators are on ([ui] kbdAcceleratorMode) */
+extern Boolean UserGetKbdAcceleratorMode(void);
 /* the DisplayType of the first screen in the high byte, 0xff in the
  * low one once a screen set it (UserGetDisplayType of the asm) */
 extern word UserGetDisplayType(void);

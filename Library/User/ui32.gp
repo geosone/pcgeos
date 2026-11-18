@@ -136,6 +136,8 @@ export UserGetFlowObject
 export UserGetSystemObject
 export UserSetDefaultMonikerFont
 export UserGetDefaultMonikerFont
+export UserSendToApplicationViaProcess
+export UserGetKbdAcceleratorMode
 
 resource ApplicationUI object
 resource SystemFieldUI object

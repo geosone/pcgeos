@@ -15,9 +15,7 @@
  * first call and keeps it until UserFreeSpecificUI.
  *
  * Port32, not yet: moniker lists (GenFindMoniker leaves a list where it
- * is), the GenView's generic content in GenSpecShrinkBranch,
- * UserSendToApplicationViaProcess (the app gets the messages from the
- * queue directly).
+ * is), the GenView's generic content in GenSpecShrinkBranch.
  */
 @include "uiInt.goh"
 @include <Objects/gSysC.goh>
@@ -37,6 +35,30 @@ GenInstance *GenLock(optr obj)
 void GenUnlock(optr obj)
 {
     MemUnlock(OptrToHandle(obj));
+}
+
+/* UserSendToApplicationViaProcess: the message recorded for the
+ * application object, dispatched by the process from its queue */
+void UserSendToApplicationViaProcess(Message msg, const void *params,
+				     word paramSize)
+{
+    EventHandle ev = 0;
+    optr proc = ConstructOptr(GeodeGetProcessHandle(), 0);
+
+    CObjMessageP(MF_RECORD, GeodeGetAppObject(0), msg, params, paramSize,
+		 &ev, sizeof(ev));
+    @send, forceQueue proc::MSG_META_DISPATCH_EVENT(ev, MF_FORCE_QUEUE);
+}
+
+/* UserGetKbdAcceleratorMode: [ui] kbdAcceleratorMode, on by default
+ * (the asm read it once when the UI attached) */
+Boolean UserGetKbdAcceleratorMode(void)
+{
+    Boolean on;
+
+    if (InitFileReadBoolean("ui", "kbdAcceleratorMode", &on))
+	return TRUE;
+    return on;
 }
 
 /* ---------------------------------------------------------------------
