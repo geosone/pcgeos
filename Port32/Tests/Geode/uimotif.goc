@@ -23,6 +23,9 @@
 @include <Internal/SpecUI/olBaseWinClass.goh>
 @include <Internal/SpecUI/olPopupWinClass.goh>
 @include <Internal/SpecUI/olButtonClass.goh>
+@include <Internal/SpecUI/olMenuWinClass.goh>
+@include <Internal/SpecUI/olMenuButtonClass.goh>
+@include <Internal/SpecUI/olMenuBarClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/videoDr.h>
 #include <initfile.h>
@@ -235,6 +238,27 @@ UMState umState;
     GI_states = GS_ENABLED | GS_USABLE;
     GII_type = GIT_COMMAND;
     GII_visibility = GIV_DIALOG;
+}
+/* a primary with two menus in its menu bar: an Edit menu (the group
+ * type's moniker) with an item, and a View menu */
+@object GenPrimaryClass UMMenuPrim = {
+    GI_visMoniker = "Menus";
+    GI_states = GS_ENABLED;
+    GI_comp = @UMEditMenu, @UMViewMenu;
+}
+@object GenInteractionClass UMEditMenu = {
+    GI_comp = @UMCopy;
+    GII_visibility = GIV_POPUP;
+    ATTR_GEN_INTERACTION_GROUP_TYPE = GIGT_EDIT_MENU;
+}
+@object GenTriggerClass UMCopy = {
+    GI_visMoniker = "Copy";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_UM_TRIGGERED;
+}
+@object GenInteractionClass UMViewMenu = {
+    GI_visMoniker = "View";
+    GII_visibility = GIV_POPUP;
 }
 @end UMObjects;
 
@@ -1210,6 +1234,118 @@ static word Slot(byte req, sword *x, sword *y)
 	@call UMHost::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 	VisData(@UMPopDlg, &pd, sizeof(pd));
 	UMCHECK(!pd.OLPWI_button);
+	break;
+    }
+
+    case 19: {
+	/* menus (OLMenuWin, OLMenuButton, OLMenuBar): the primary makes
+	 * its menu bar (first in it); each menu's button is in the bar
+	 * (the Edit menu with its group type's moniker); pressed, the
+	 * menu comes up below the button, its item in it; released on
+	 * the button, the menu stays up; the other menu's button pressed
+	 * closes it and opens its own; a press outside a menu in stay up
+	 * mode closes it (replayed); activated, the menu is up in stay up
+	 * mode; complete, it goes and the button is as it was */
+	OLMenuedWinInstance mw;
+	OLMenuWinInstance m;
+	OLMenuButtonInstance b;
+	OLButtonInstance it;
+	MouseReturnParams mr;
+	optr bar, eb, vb;
+	word press = (UIFA_SELECT | UIFA_IN) << 8;
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMMenuPrim, CCO_LAST);
+	@call UMMenuPrim::MSG_GEN_SET_USABLE(VUM_NOW);
+	VisData(@UMMenuPrim, &mw, sizeof(mw));
+	UMCHECK(mw.VI_attrs & VA_REALIZED);
+	UMCHECK(mw.OLMDWI_menuBar != 0);
+	bar = ConstructOptr(OptrToHandle(@UMMenuPrim), mw.OLMDWI_menuBar);
+	UMCHECK(InClass(bar, (ClassStruct *) &OLMenuBarClass));
+	UMCHECK(@call UMMenuPrim::MSG_VIS_FIND_CHILD(bar) == 0);
+	UMCHECK(@call UMMenuPrim::MSG_OL_WIN_QUERY_MENU_BAR() == bar);
+	UMCHECK(InClass(@UMEditMenu, (ClassStruct *) &OLMenuWinClass));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK(m.OLWI_type == MOWT_MENU &&
+		(m.OLWI_fixedAttr & OWFA_IS_MENU) &&
+		!(m.VI_attrs & VA_REALIZED));
+	UMCHECK(MonikerIs(@UMEditMenu, "Edit"));
+	UMCHECK(m.OLPWI_button != 0);
+	eb = ConstructOptr(OptrToHandle(@UMEditMenu), m.OLPWI_button);
+	VisData(@UMViewMenu, &m, sizeof(m));
+	vb = ConstructOptr(OptrToHandle(@UMViewMenu), m.OLPWI_button);
+	UMCHECK(InClass(eb, (ClassStruct *) &OLMenuButtonClass) &&
+		InClass(vb, (ClassStruct *) &OLMenuButtonClass));
+	UMCHECK(@call eb::MSG_VIS_FIND_PARENT() == bar &&
+		@call vb::MSG_VIS_FIND_PARENT() == bar);
+	UMCHECK(@call bar::MSG_VIS_FIND_CHILD(eb) == 0 &&
+		@call bar::MSG_VIS_FIND_CHILD(vb) == 1);
+	VisData(eb, &b, sizeof(b));
+	UMCHECK(b.OLMBI_popupType == MOWT_MENU &&
+		(b.OLBI_specState & OLBSS_IN_MENU_BAR) &&
+		(b.VI_attrs & VA_REALIZED) && (b.VI_attrs & VA_FULLY_ENABLED));
+
+	/* pressed: open, bordered, the mouse grabbed */
+	@call eb::MSG_META_START_SELECT(&mr, 2, 2, press);
+	UMCHECK(mr.flags & MRF_PROCESSED);
+	VisData(eb, &b, sizeof(b));
+	UMCHECK((b.OLMBI_specState & OLMBSS_POPUP_OPEN) &&
+		(b.OLBI_specState & OLBSS_BORDERED) &&
+		(b.OLBI_specState & OLBSS_HAS_MOUSE_GRAB));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK((m.VI_attrs & VA_REALIZED) && m.VCI_window &&
+		!(m.OLMWI_specState & OMWSS_IN_STAY_UP_MODE));
+	UMCHECK(InClass(@UMCopy, (ClassStruct *) &OLButtonClass) &&
+		@call UMCopy::MSG_VIS_FIND_PARENT() == @UMEditMenu);
+	VisData(@UMCopy, &it, sizeof(it));
+	UMCHECK(it.OLBI_specState & OLBSS_IN_MENU);
+	/* released on the button: stays up */
+	@call eb::MSG_META_END_SELECT(&mr, 2, 2, UIFA_IN << 8);
+	VisData(eb, &b, sizeof(b));
+	UMCHECK((b.OLMBI_specState & OLMBSS_POPUP_OPEN) &&
+		!(b.OLBI_specState & OLBSS_HAS_MOUSE_GRAB) &&
+		!(b.OLMBI_specState & OLMBSS_MENU_FUNCTION_PENDING));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK((m.VI_attrs & VA_REALIZED) &&
+		(m.OLMWI_specState & OMWSS_IN_STAY_UP_MODE));
+
+	/* the View menu's button pressed: Edit closes, View opens */
+	@call vb::MSG_META_START_SELECT(&mr, 2, 2, press);
+	VisData(eb, &b, sizeof(b));
+	UMCHECK(!(b.OLMBI_specState & OLMBSS_POPUP_OPEN) &&
+		!(b.OLBI_specState & OLBSS_BORDERED));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK(m.VI_attrs & VA_REALIZED);
+	@call vb::MSG_META_END_SELECT(&mr, 2, 2, UIFA_IN << 8);
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK(m.OLMWI_specState & OMWSS_IN_STAY_UP_MODE);
+	/* a press outside it: closed, replayed */
+	@call UMViewMenu::MSG_META_PRE_PASSIVE_BUTTON(&mr, -100, -100,
+						BI_PRESS | (UIFA_SELECT << 8));
+	UMCHECK(mr.flags & MRF_REPLAY);
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED) &&
+		!(m.OLMWI_specState & OMWSS_IN_STAY_UP_MODE));
+	VisData(vb, &b, sizeof(b));
+	UMCHECK(!(b.OLMBI_specState & OLMBSS_POPUP_OPEN));
+
+	/* activated: up in stay up mode; complete: down */
+	@call eb::MSG_GEN_ACTIVATE();
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK((m.VI_attrs & VA_REALIZED) &&
+		(m.OLMWI_specState & OMWSS_IN_STAY_UP_MODE));
+	VisData(eb, &b, sizeof(b));
+	UMCHECK((b.OLMBI_specState & OLMBSS_POPUP_OPEN) &&
+		(b.OLBI_specState & OLBSS_BORDERED));
+	(void) @call UMEditMenu::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	VisData(eb, &b, sizeof(b));
+	UMCHECK(!(b.OLMBI_specState & OLMBSS_POPUP_OPEN) &&
+		!(b.OLBI_specState & OLBSS_BORDERED));
+	@call UMMenuPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 	break;
     }
     }

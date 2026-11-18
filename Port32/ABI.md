@@ -5440,21 +5440,45 @@ are left out), the constants, the variables and the routines.
     a master default with `HINT_DEFAULT_DEFAULT_ACTION`, added beside
     the popup's generic siblings (`VisAddChildRelativeToGen`, now
     exported by the UI) in the vis parent the popup gives for its
-    button part (the button asks the popup: it has no generic parent
-    of its own); activated it initiates the popup.
+    button part (`VisGetVisParent` of the popup, as the asm: the
+    button has no generic parent of its own); activated it initiates
+    the popup. The popup's window type and fixed attributes go to the
+    button with `MSG_OL_BUTTON_SETUP(genChunk, winTypeAttrs,
+    buildFlags)` (low byte the type, high byte the attributes; the asm
+    passed them in dx).
+  - Menus (`Internal/SpecUI/olMenuWinClass.goh`,
+    `olMenuButtonClass.goh`, `olMenuBarClass.goh`):
+    `OLMenuBarClass` (`CComp/copenMenuBar.goc`, an `OLCtrl`: its
+    superclass `OLPopoutClass` is not ported) is made by a menued
+    window when a menu asks for the build info, first among its
+    children, horizontal and wrapping, the menus' build info (top
+    menus). `OLBuildInteraction` builds a `GIV_POPUP` there as an
+    `OLMenuWinClass` (`CWin/cwinMenu.goc`): a menu or sub menu window,
+    its items vertical without spacing (sub menu build info for them),
+    the group type's standard moniker; brought up by its button at the
+    button's corner (`MSG_OL_POPUP_ACTIVATE`, screen coordinates), stay
+    up mode with the pre-passive grab (a press outside completes it and
+    is replayed), complete on a release outside stay up mode
+    (post-passive), dismissed it tells its button. Its button is an
+    `OLMenuButtonClass` (`CButton/copenMenuButton.goc`): pressed it
+    takes the gadget exclusive and the mouse and opens the menu (the
+    parent's other menus closed), released on it the menu stays up,
+    pressed again it closes it; activated the menu comes up in stay up
+    mode. `OLButtonUseQueryResults`, `OLButtonSetToolboxBasedOnParent`,
+    `OLButtonEnsureMouseGrab`, `OLButtonSaveBorderedAndDepressed` and
+    `OLButtonDrawNowIfNewState` are shared with it.
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, the navigation
   (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
   `OLBaseWinClass`: the window icon (`OLWinIconClass`: a minimized
-  window is hidden, as with the task bar on), the menu and trigger bars
-  (`OLMenuBarClass`), the help trigger and file menu a primary adds,
+  window is hidden, as with the task bar on), the trigger bar, the
+  menus in the header of a maximized window, the help trigger and file menu a primary adds,
   the window list entry, the express tool area (the field has none),
   moniker lists, a double click on the title (the pointer code of
   `cwinPtr.asm`), `GenDisplayGroupClass` (not in the C UI). The display
   classes and their build routine. In `OLPopupWinClass` and
-  `OLDialogWinClass`: the button that brings a menu up
-  (`OLMenuButtonClass`), the file menu's place, the moniker list
+  `OLDialogWinClass`: the file menu's place, the moniker list
   reduced to an icon for the button, UserDoDialog and the action response, the help
   trigger (its moniker is a picture), the reply bar removed on tiny
   screens, discarding the block, the pushpin, the focus of a
@@ -5463,8 +5487,17 @@ are left out), the constants, the variables and the routines.
   keyboard accelerator text, the sounds (`UserStandardSound` is not in
   the C UI), the navigation (`VisNavigateCommon`) and
   `MSG_SPEC_CHECK_MNEMONIC`, the stay up menus released on activation,
-  `MSG_GEN_TRIGGER_REPLACE_PARAMS`; `OLMenuWinClass` (a menu is a plain
-  `OLPopupWin`), `OLPopoutClass` and `OLMenuItemGroupClass` (plain
+  `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `OLMenuWinClass`: the pushpin
+  (pinnable menus: the `PinMoniker` picture), the file menu's Exit
+  trigger, cascading sub menus, the scrollers
+  (`MenuWinScrollerClass`), menu separators, the keyboard, the remote
+  gadget exclusive, the system and express menus, the menu centers,
+  the window's startup grab (`cwinPtr.asm`), menus in stay up mode
+  released through the application (`MSG_META_ENSURE_NO_MENUS_IN_
+  STAY_UP_MODE` is answered by a menu, the generic tree does not pass
+  it on). In `OLMenuButtonClass`: popup lists and the selection box,
+  the keyboard and the focus, the system menu icon, the default
+  function. `OLPopoutClass` and `OLMenuItemGroupClass` (plain
   `OLCtrl`s). In `OLGadgetAreaClass`:
   the display controls its margins look for. In `OLCtrlClass`:
   an OLCtrl in a menu window, the reply bar's extra line when not under
@@ -5548,7 +5581,14 @@ are left out), the constants, the variables and the routines.
   and Close, each with its standard moniker. And a dialog the user
   brings up inside a dialog: its `OLButton` (window mark, enabled) in
   the host's gadget area, activated it opens the dialog; the host not
-  usable, the button goes. The test loads no fonts, so monikers have no height
+  usable, the button goes. Then menus: a primary with two menus gets
+  its menu bar (first among its children) holding their
+  `OLMenuButton`s (one menu named by its group type); pressed, a menu
+  comes up with its item (an `OLButton` in a menu), released on the
+  button it stays up; the other button pressed closes it and opens its
+  own; a press outside a menu in stay up mode closes it and is
+  replayed; activated, the menu is up in stay up mode; complete it
+  goes and the button looks as before. The test loads no fonts, so monikers have no height
   there.
 
 ## 14. Open

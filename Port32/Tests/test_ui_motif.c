@@ -57,7 +57,13 @@
  *  17. a dialog the user brings up, in a dialog: its OLButton (the
  *      window mark) in the host's gadget area, activated;
  *  18. the dialog came up; dismissed it closes; the host not usable,
- *      the button goes.
+ *      the button goes;
+ *  19. menus: a primary's menu bar (first in it) with the buttons of
+ *      two menus (one named by its group type); pressed, a menu comes
+ *      up with its item, released on the button it stays up; the other
+ *      button closes it and opens its own; a press outside closes a
+ *      menu in stay up mode (replayed); activated, up in stay up mode;
+ *      complete, down, the button as it was.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -184,11 +190,12 @@ int main(void)
     step(16);
     step(17);
     step(18);
+    step(19);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 228 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 259 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
