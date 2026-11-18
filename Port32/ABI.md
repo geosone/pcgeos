@@ -5399,8 +5399,33 @@ are left out), the constants, the variables and the routines.
     Like the asm, an interaction no generic parent answers the build
     info for becomes a dialog window; a GIV_CONTROL_GROUP in a menu too.
     A reply bar's standard trigger is known by
-    `ATTR_GEN_TRIGGER_INTERACTION_COMMAND` alone (GenTriggerClass is not
-    in the C UI).
+    `ATTR_GEN_TRIGGER_INTERACTION_COMMAND` alone.
+  - The UI's `GenTriggerClass` (`Library/User/Gen/genTrigger.goc`):
+    `MSG_GEN_TRIGGER_SEND_ACTION` sends the action message (with
+    `ATTR_GEN_TRIGGER_ACTION_DATA` or the trigger's optr) through
+    `MSG_GEN_OUTPUT_ACTION`, or without a destination the
+    `ATTR_GEN_TRIGGER_INTERACTION_COMMAND` up the tree, with the generic
+    attributes before and after; get and set of the action message and
+    destination. The parameter of `MSG_GEN_TRIGGER_SET_ACTION_MSG` is
+    `actionMsg` (`message` clashes with goc's own). Built by
+    `OLBuildTrigger` (`CSpec/cspecTrigger.goc`, the first export of
+    `motif32.gp`) as an `OLButtonClass` (`Internal/SpecUI/
+    olButtonClass.goh`, `CButton/copenButton{Build,Class,Common,Color}.goc`):
+    its hints (brings up a window, immediate action, default, system
+    icon, shortcut placement, expand and clip), its vis parent (a
+    title bar, a reply bar or the group the build info gives), the
+    Motif double bordered color button drawn from regions (with their
+    bounds, as `GrDrawRegionAtCP` takes them), the size from the
+    moniker and the insets of its kind, the press, pointer and release
+    with the mouse grab, the default and focus exclusives, enabled and
+    not, keyboard activation (space, return in a menu), mnemonics and
+    accelerators. The moniker code (`CUtils/copenMoniker.goc`:
+    `OpenGetMonikerSize`, `OpenGetMonikerPos`, `OpenDrawMoniker` with
+    the window mark, the mnemonic underline and the selection cursor)
+    and the colors (`OpenGetBackgroundColor` gives both colors in one
+    word) are shared with the other gadgets. Methods outside the file
+    with `@classdecl` are declared there with `@extern method`, else
+    goc puts no entry in the class's table.
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, the navigation
   (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons and the
@@ -5413,10 +5438,16 @@ are left out), the constants, the variables and the routines.
   `cwinPtr.asm`), `GenDisplayGroupClass` (not in the C UI). The display
   classes and their build routine. In `OLPopupWinClass` and
   `OLDialogWinClass`: the button that brings a popup up
-  (`OLButtonClass`, `OLMenuButtonClass`: a user initiatable dialog has
-  none), UserDoDialog and the action response, the standard triggers a
-  dialog's type adds, discarding the block, the pushpin, the focus of a
-  dialog run by the UI thread; `OLMenuWinClass` (a menu is a plain
+  (`OLMenuButtonClass`, the popup's `OLButton`: a user initiatable
+  dialog has none), UserDoDialog and the action response, the standard
+  triggers a dialog's type adds (they need the `StandardMonikers`
+  resource), discarding the block, the pushpin, the focus of a
+  dialog run by the UI thread. In `OLButtonClass`: the black and white
+  buttons (`copenButtonBW`), the menu marks and menu items, the
+  keyboard accelerator text, the sounds (`UserStandardSound` is not in
+  the C UI), the navigation (`VisNavigateCommon`) and
+  `MSG_SPEC_CHECK_MNEMONIC`, the stay up menus released on activation,
+  `MSG_GEN_TRIGGER_REPLACE_PARAMS`; `OLMenuWinClass` (a menu is a plain
   `OLPopupWin`), `OLPopoutClass` and `OLMenuItemGroupClass` (plain
   `OLCtrl`s). In `OLGadgetAreaClass`:
   the display controls its margins look for. In `OLCtrlClass`:
@@ -5485,7 +5516,16 @@ are left out), the constants, the variables and the routines.
   and is not realizable, initiated it opens again and stays when
   complete; a modal notification is a notice (not closable, not
   minimizable, single usage) with a reply bar it made for a group
-  seeking one, and closes when complete. The test loads no fonts, so monikers have no height
+  seeking one, and closes when complete. Then GenTriggers in a
+  dialog (`OLBuildTrigger`): `OLButton`s in the gadget area, bordered
+  and enabled, sized from moniker and insets, the window mark for
+  `HINT_TRIGGER_BRINGS_UP_WINDOW`; a dismiss trigger seeking the reply
+  bar is there and the dialog's standard trigger; pressed it is
+  depressed with the mouse grab, moved out it comes up, released in it
+  it sends its action (the test waits for it at the process, the
+  optr as parameter or the action data); disabled it sends none; the
+  action message and destination got and set; the immediate dismiss
+  trigger closes the dialog. The test loads no fonts, so monikers have no height
   there.
 
 ## 14. Open

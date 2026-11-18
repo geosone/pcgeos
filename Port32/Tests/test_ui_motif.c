@@ -39,7 +39,16 @@
  *      until initiated; the gadget area, a title bar group and the reply
  *      bar (its own, or one the dialog makes for a group seeking it);
  *      dismissed and initiated again, complete (a single usage notice
- *      closes), not usable.
+ *      closes), not usable;
+ *  14. OLButton: GenTriggers in a dialog (OLBuildTrigger): in the gadget
+ *      area, bordered, sized by the moniker (the window mark wider); a
+ *      dismiss trigger seeking the reply bar there, the dialog's
+ *      standard trigger; pressed (depressed, the mouse grabbed), moved
+ *      out and back, released (activated); MSG_GEN_ACTIVATE (the action
+ *      data); disabled it does nothing;
+ *  15. the actions arrived (the test waits for them); the trigger's
+ *      action message and destination; the dismiss trigger closes the
+ *      dialog at once (ATTR_GEN_TRIGGER_IMMEDIATE_ACTION).
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -64,6 +73,9 @@ typedef struct {
     WindowHandle	UMS_screenWin;
     WindowHandle	UMS_fieldWin;
     word		UMS_timerExpired;
+    word		UMS_triggered;
+    optr		UMS_trigger;
+    word		UMS_trigData;
 } UMState;
 
 static int fails;
@@ -157,11 +169,14 @@ int main(void)
     step(11);
     step(12);
     step(13);
+    step(14);
+    WAIT_FOR(st->UMS_triggered >= 2);
+    step(15);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 174 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 200 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

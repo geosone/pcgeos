@@ -22,6 +22,7 @@
 @include <Internal/SpecUI/olGadgetAreaClass.goh>
 @include <Internal/SpecUI/olBaseWinClass.goh>
 @include <Internal/SpecUI/olPopupWinClass.goh>
+@include <Internal/SpecUI/olButtonClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/videoDr.h>
 #include <initfile.h>
@@ -35,6 +36,9 @@ typedef struct {
     WindowHandle	UMS_screenWin;
     WindowHandle	UMS_fieldWin;
     word		UMS_timerExpired;
+    word		UMS_triggered;		/* actions of the triggers */
+    optr		UMS_trigger;		/* the last one's trigger */
+    word		UMS_trigData;		/* ATTR_GEN_TRIGGER_ACTION_DATA */
 } UMState;
 
 UMState umState;
@@ -49,6 +53,8 @@ UMState umState;
 
 @class UMProcessClass, ProcessClass;
     @message void MSG_UM_STEP(word step);
+    @message (GEN_TRIGGER_ACTION) MSG_UM_TRIGGERED;
+    @message void MSG_UM_TRIGGER_DATA(word data);
 @endc
 @classdecl UMProcessClass, neverSaved;
 
@@ -170,6 +176,34 @@ UMState umState;
     GII_visibility = GIV_SUB_GROUP;
     HINT_SEEK_REPLY_BAR;
 }
+/* a command dialog with triggers: one in its gadget area, one with
+ * data, a dismiss trigger seeking the reply bar (acting at once) */
+@object GenInteractionClass UMTrigDialog = {
+    GI_visMoniker = "Triggers";
+    GI_states = GS_ENABLED;
+    GI_comp = @UMTrig, @UMTrigData, @UMTrigClose;
+    GII_type = GIT_COMMAND;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE;
+}
+@object GenTriggerClass UMTrig = {
+    GI_visMoniker = "Press";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_UM_TRIGGERED;
+}
+@object GenTriggerClass UMTrigData = {
+    GI_visMoniker = "Data";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_UM_TRIGGER_DATA;
+    ATTR_GEN_TRIGGER_ACTION_DATA = 0x1234;
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenTriggerClass UMTrigClose = {
+    GI_visMoniker = "Close";
+    HINT_SEEK_REPLY_BAR;
+    ATTR_GEN_TRIGGER_INTERACTION_COMMAND = IC_DISMISS;
+    ATTR_GEN_TRIGGER_IMMEDIATE_ACTION;
+}
 @end UMObjects;
 
 static optr umSystem, umScreen, umField, umApp;
@@ -186,6 +220,18 @@ static optr umSystem, umScreen, umField, umApp;
     (void) tick;
     (void) timerID;
     umState.UMS_timerExpired++;
+}
+
+@method UMProcessClass, MSG_UM_TRIGGERED
+{
+    umState.UMS_triggered++;
+    umState.UMS_trigger = trigger;
+}
+
+@method UMProcessClass, MSG_UM_TRIGGER_DATA
+{
+    umState.UMS_triggered++;
+    umState.UMS_trigData = data;
 }
 
 @method UMProcessClass, MSG_META_ATTACH_PROCESS
@@ -890,6 +936,105 @@ static word Slot(byte req, sword *x, sword *y)
 	VisData(@UMDialog, &d, sizeof(d));
 	UMCHECK(!(d.VI_attrs & VA_REALIZED));
 	@call UMNotice::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	break;
+    }
+
+    case 14: {
+	/* GenTrigger as OLButton (OLBuildTrigger): in the dialog's
+	 * gadget area, bordered, sized by its moniker and insets; the
+	 * window mark of HINT_TRIGGER_BRINGS_UP_WINDOW makes it wider; a
+	 * dismiss trigger seeking the reply bar is there and the
+	 * dialog's standard trigger; a press depresses it and grabs the
+	 * mouse, the release in it activates it (through the queue, the
+	 * test waits for the action); MSG_GEN_ACTIVATE too (the data) */
+	OLDialogWinInstance d;
+	OLButtonInstance b, bd;
+	MouseReturnParams mr;
+	optr ga;
+	SizeAsDWord sz, szd;
+	word in;
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMTrigDialog, CCO_LAST);
+	@call UMTrigDialog::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMTrigDialog::MSG_GEN_INTERACTION_INITIATE();
+	VisData(@UMTrigDialog, &d, sizeof(d));
+	UMCHECK(d.VI_attrs & VA_REALIZED);
+	ga = ConstructOptr(OptrToHandle(@UMTrigDialog), d.OLDWI_gadgetArea);
+	UMCHECK(InClass(@UMTrig, (ClassStruct *) &OLButtonClass));
+	UMCHECK(@call UMTrig::MSG_VIS_FIND_PARENT() == ga);
+	VisData(@UMTrig, &b, sizeof(b));
+	UMCHECK(b.OLBI_genChunk == OptrToChunk(@UMTrig));
+	UMCHECK((b.OLBI_specState & OLBSS_BORDERED) &&
+		!(b.OLBI_specState & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR |
+				      OLBSS_SYS_ICON | OLBSS_WINDOW_MARK)));
+	UMCHECK((b.VI_specAttrs & SA_CUSTOM_VIS_PARENT) &&
+		(b.VI_attrs & VA_REALIZED) && (b.VI_attrs & VA_FULLY_ENABLED));
+	UMCHECK(b.OLBI_optFlags & OLBOF_ENABLED);
+	sz = @call UMTrig::MSG_VIS_GET_SIZE();
+	UMCHECK(DWORD_WIDTH(sz) > 2 * 6 &&
+		DWORD_HEIGHT(sz) >= 5);
+	VisData(@UMTrigData, &bd, sizeof(bd));
+	UMCHECK(bd.OLBI_specState & OLBSS_WINDOW_MARK);
+	szd = @call UMTrigData::MSG_VIS_GET_SIZE();
+	UMCHECK(DWORD_HEIGHT(szd) == DWORD_HEIGHT(sz));
+	/* the dismiss trigger in the reply bar the dialog made */
+	UMCHECK(InClass(@UMTrigClose, (ClassStruct *) &OLButtonClass));
+	UMCHECK(d.OLDWI_replyBar &&
+		@call UMTrigClose::MSG_VIS_FIND_PARENT() == d.OLDWI_replyBar);
+	UMCHECK(@call UMTrigDialog::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(
+						IC_DISMISS) == @UMTrigClose);
+	VisData(@UMTrigClose, &b, sizeof(b));
+	UMCHECK(b.OLBI_fixedAttrs & OLBFA_IMMEDIATE_ACTION);
+
+	/* pressed in it: depressed, the mouse grabbed */
+	in = (UIFA_SELECT | UIFA_IN) << 8;
+	@call UMTrig::MSG_META_START_SELECT(&mr, 0, 0, in);
+	UMCHECK(mr.flags & MRF_PROCESSED);
+	VisData(@UMTrig, &b, sizeof(b));
+	UMCHECK((b.OLBI_specState & (OLBSS_DEPRESSED | OLBSS_HAS_MOUSE_GRAB)) ==
+		(OLBSS_DEPRESSED | OLBSS_HAS_MOUSE_GRAB));
+	/* moved out while pressed: not depressed, still grabbed */
+	@call UMTrig::MSG_META_PTR(&mr, 0, 0, UIFA_SELECT << 8);
+	VisData(@UMTrig, &b, sizeof(b));
+	UMCHECK(!(b.OLBI_specState & OLBSS_DEPRESSED) &&
+		(b.OLBI_specState & OLBSS_HAS_MOUSE_GRAB));
+	@call UMTrig::MSG_META_PTR(&mr, 0, 0, in);
+	/* released in it: activated, back up, the mouse released */
+	@call UMTrig::MSG_META_END_SELECT(&mr, 0, 0, UIFA_IN << 8);
+	VisData(@UMTrig, &b, sizeof(b));
+	UMCHECK(!(b.OLBI_specState & (OLBSS_DEPRESSED |
+				      OLBSS_HAS_MOUSE_GRAB)));
+	/* the data trigger activated */
+	@call UMTrigData::MSG_GEN_ACTIVATE();
+	/* disabled: no action */
+	@call UMTrig::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+	VisData(@UMTrig, &b, sizeof(b));
+	UMCHECK(!(b.VI_attrs & VA_FULLY_ENABLED));
+	@call UMTrig::MSG_GEN_ACTIVATE();
+	@call UMTrig::MSG_GEN_SET_ENABLED(VUM_NOW);
+	break;
+    }
+
+    case 15: {
+	/* the actions arrived (the test waited); the trigger's generic
+	 * messages; the dismiss trigger closes the dialog at once */
+	OLDialogWinInstance d;
+
+	UMCHECK(umState.UMS_triggered == 2);
+	UMCHECK(umState.UMS_trigger == @UMTrig);
+	UMCHECK(umState.UMS_trigData == 0x1234);
+	UMCHECK(@call UMTrig::MSG_GEN_TRIGGER_GET_ACTION_MSG() ==
+		MSG_UM_TRIGGERED);
+	@call UMTrig::MSG_GEN_TRIGGER_SET_ACTION_MSG(MSG_UM_TRIGGER_DATA);
+	UMCHECK(@call UMTrig::MSG_GEN_TRIGGER_GET_ACTION_MSG() ==
+		MSG_UM_TRIGGER_DATA);
+	@call UMTrig::MSG_GEN_TRIGGER_SET_ACTION_MSG(MSG_UM_TRIGGERED);
+	UMCHECK(@call UMTrig::MSG_GEN_TRIGGER_GET_DESTINATION() ==
+		ConstructOptr(umState.UMS_process, 0));
+	@call UMTrigClose::MSG_GEN_ACTIVATE();
+	VisData(@UMTrigDialog, &d, sizeof(d));
+	UMCHECK(!(d.VI_attrs & VA_REALIZED));
+	@call UMTrigDialog::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 	break;
     }
     }
