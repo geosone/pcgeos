@@ -221,6 +221,21 @@ UMState umState;
     GII_attrs = GIA_NOT_USER_INITIATABLE;
     HINT_INTERACTION_COMPLEX_PROPERTIES;
 }
+/* a dialog with a dialog the user brings up (its button) */
+@object GenInteractionClass UMHost = {
+    GI_visMoniker = "Host";
+    GI_states = GS_ENABLED;
+    GI_comp = @UMPopDlg;
+    GII_type = GIT_COMMAND;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE;
+}
+@object GenInteractionClass UMPopDlg = {
+    GI_visMoniker = "Options";
+    GI_states = GS_ENABLED | GS_USABLE;
+    GII_type = GIT_COMMAND;
+    GII_visibility = GIV_DIALOG;
+}
 @end UMObjects;
 
 static optr umSystem, umScreen, umField, umApp;
@@ -1150,6 +1165,51 @@ static word Slot(byte req, sword *x, sword *y)
 		    @call t3::MSG_GEN_GET_ENABLED());
 	}
 	@call UMProps::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	break;
+    }
+
+    case 17: {
+	/* a dialog the user brings up: an OLButton made beside it (its
+	 * generic part the dialog, the window mark), in the host's
+	 * gadget area, the dialog closed; activated (queued) */
+	OLDialogWinInstance d, pd;
+	OLButtonInstance bi;
+	optr b, ga;
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMHost, CCO_LAST);
+	@call UMHost::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMHost::MSG_GEN_INTERACTION_INITIATE();
+	VisData(@UMHost, &d, sizeof(d));
+	UMCHECK(d.VI_attrs & VA_REALIZED);
+	ga = ConstructOptr(OptrToHandle(@UMHost), d.OLDWI_gadgetArea);
+	VisData(@UMPopDlg, &pd, sizeof(pd));
+	UMCHECK(pd.OLPWI_button != 0 && !(pd.VI_attrs & VA_REALIZED));
+	b = ConstructOptr(OptrToHandle(@UMPopDlg), pd.OLPWI_button);
+	UMCHECK(@call UMPopDlg::MSG_OL_POPUP_FIND_BUTTON() == b);
+	UMCHECK(InClass(b, (ClassStruct *) &OLButtonClass));
+	UMCHECK(@call b::MSG_VIS_FIND_PARENT() == ga);
+	UMCHECK(@call b::MSG_OL_BUTTON_GET_GEN_PART() == @UMPopDlg);
+	VisData(b, &bi, sizeof(bi));
+	UMCHECK((bi.OLBI_specState & OLBSS_WINDOW_MARK) &&
+		(bi.VI_attrs & VA_REALIZED) &&
+		(bi.VI_attrs & VA_FULLY_ENABLED));
+	@call b::MSG_GEN_ACTIVATE();
+	break;
+    }
+
+    case 18: {
+	/* the dialog came up; closed and the host not usable, the
+	 * button goes with it */
+	OLDialogWinInstance pd;
+
+	VisData(@UMPopDlg, &pd, sizeof(pd));
+	UMCHECK((pd.VI_attrs & VA_REALIZED) && pd.VCI_window);
+	(void) @call UMPopDlg::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	VisData(@UMPopDlg, &pd, sizeof(pd));
+	UMCHECK(!(pd.VI_attrs & VA_REALIZED));
+	@call UMHost::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	VisData(@UMPopDlg, &pd, sizeof(pd));
+	UMCHECK(!pd.OLPWI_button);
 	break;
     }
     }

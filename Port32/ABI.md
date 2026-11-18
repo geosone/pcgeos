@@ -5434,6 +5434,14 @@ are left out), the constants, the variables and the routines.
     (Cancel or Close, OK or Apply by modality and usage). The
     `StandardMonikers` resource of `cspecCUAS.ui` is in goc
     (`CSpec/cspecCUAS.goc`, a resource of `motif32.gp`).
+  - The button of a popup the user brings up (`PopupBuildButton` in
+    `CWin/cwinPopup.goc`, the popup's non win group build): an
+    `OLButton` in the popup's block with the popup as its generic part,
+    a master default with `HINT_DEFAULT_DEFAULT_ACTION`, added beside
+    the popup's generic siblings (`VisAddChildRelativeToGen`, now
+    exported by the UI) in the vis parent the popup gives for its
+    button part (the button asks the popup: it has no generic parent
+    of its own); activated it initiates the popup.
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, the navigation
   (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons and the
@@ -5445,9 +5453,9 @@ are left out), the constants, the variables and the routines.
   moniker lists, a double click on the title (the pointer code of
   `cwinPtr.asm`), `GenDisplayGroupClass` (not in the C UI). The display
   classes and their build routine. In `OLPopupWinClass` and
-  `OLDialogWinClass`: the button that brings a popup up
-  (`OLMenuButtonClass`, the popup's `OLButton`: a user initiatable
-  dialog has none), UserDoDialog and the action response, the help
+  `OLDialogWinClass`: the button that brings a menu up
+  (`OLMenuButtonClass`), the file menu's place, the moniker list
+  reduced to an icon for the button, UserDoDialog and the action response, the help
   trigger (its moniker is a picture), the reply bar removed on tiny
   screens, discarding the block, the pushpin, the focus of a
   dialog run by the UI thread. In `OLButtonClass`: the black and white
@@ -5537,7 +5545,10 @@ are left out), the constants, the variables and the routines.
   dialog's Close (last in its reply bar, gone when not usable), a
   notice's OK, an affirmation's Yes (the default, completing it) and
   No, delayed complex properties' Apply (first), Reset (both disabled)
-  and Close, each with its standard moniker. The test loads no fonts, so monikers have no height
+  and Close, each with its standard moniker. And a dialog the user
+  brings up inside a dialog: its `OLButton` (window mark, enabled) in
+  the host's gadget area, activated it opens the dialog; the host not
+  usable, the button goes. The test loads no fonts, so monikers have no height
   there.
 
 ## 14. Open

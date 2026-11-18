@@ -53,7 +53,11 @@
  *      standard monikers: Close of a command dialog (gone when not
  *      usable), OK of a notice, Yes and No of an affirmation (Yes sent
  *      completes and closes it), Apply, Reset (disabled) and Close of
- *      delayed complex properties.
+ *      delayed complex properties;
+ *  17. a dialog the user brings up, in a dialog: its OLButton (the
+ *      window mark) in the host's gadget area, activated;
+ *  18. the dialog came up; dismissed it closes; the host not usable,
+ *      the button goes.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -178,11 +182,13 @@ int main(void)
     WAIT_FOR(st->UMS_triggered >= 2);
     step(15);
     step(16);
+    step(17);
+    step(18);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 218 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 228 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

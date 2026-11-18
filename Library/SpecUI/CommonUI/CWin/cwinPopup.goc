@@ -33,6 +33,67 @@ static optr PopupButton(optr o)
     return b ? ConstructOptr(OptrToHandle(o), b) : 0;
 }
 
+/*
+ * PopupBuildButton: the button that brings the popup up: made the
+ * first time (an OLButton; a default one with HINT_DEFAULT_DEFAULT_
+ * ACTION is the window's master default), enabled as the popup is,
+ * added to its vis parent beside the generic siblings (a system icon
+ * or the express menu's to the generic parent, first).  Port32: menus
+ * (OLMenuButtonClass) and the file menu's place not yet; the moniker
+ * list is not reduced to an icon.
+ */
+static void PopupBuildButton(optr oself, SpecBuildFlags flags)
+{
+    OLPopupWinInstance *p = PWin(oself);
+    OLBuildFlags bf = p->OLCI_buildFlags;
+    Boolean isDefault;
+    optr b, vp;
+    VisInstance *v;
+    OLButtonInstance *bi;
+    SpecBuildFlags vf = flags;
+    GenReturnParams r;
+
+    if (!p->OLPWI_button) {
+	if (p->OLWI_fixedAttr & OWFA_IS_MENU)
+	    return;		/* OLMenuButtonClass: not yet */
+	isDefault = ObjVarFindData(oself, HINT_DEFAULT_DEFAULT_ACTION) != NULL;
+	b = ObjInstantiate(OptrToHandle(oself), (ClassStruct *) &OLButtonClass);
+	ObjSetFlags(b, OCF_IGNORE_DIRTY, 0);
+	@call b::MSG_OL_BUTTON_SETUP(OptrToChunk(oself), bf);
+	if (isDefault)
+	    ((OLButtonInstance *) ObjDerefVis(b))->OLBI_fixedAttrs |=
+					OLBFA_MASTER_DEFAULT_TRIGGER;
+	PWin(oself)->OLPWI_button = OptrToChunk(b);
+    }
+    b = PopupButton(oself);
+    if (VisCheckIfSpecBuilt(b))
+	return;
+    v = (VisInstance *) ObjDerefVis(b);
+    v->VI_attrs &= ~VA_FULLY_ENABLED;
+    if (OLQueryIsMenu(oself) ||
+	((flags & SBF_VIS_PARENT_FULLY_ENABLED) &&
+	 (((GenInstance *) ObjDerefGen(oself))->GI_states & GS_ENABLED)))
+	((VisInstance *) ObjDerefVis(b))->VI_attrs |= VA_FULLY_ENABLED;
+    vp = VisGetVisParent(b, &vf);
+    if (!vp)
+	return;
+    bi = (OLButtonInstance *) ObjDerefVis(b);
+    if ((bf & OLBF_TARGET) == T(OLBT_IS_EXPRESS_MENU) ||
+	(bi->OLBI_specState & OLBSS_SYS_ICON)) {
+	@call vp::MSG_VIS_ADD_CHILD(b, CCO_FIRST);
+	return;
+    }
+    VisAddChildRelativeToGen(oself, b, vp, flags);
+    VisMarkFullyInvalid(b);
+    if (((OLButtonInstance *) ObjDerefVis(b))->OLBI_fixedAttrs &
+	OLBFA_MASTER_DEFAULT_TRIGGER)
+	(void) @call b::MSG_VIS_P32_VUP_QUERY(&r, SVQT_SET_MASTER_DEFAULT,
+					      OptrToChunk(b),
+					      OptrToHandle(b));
+    if (PWin(oself)->OLCI_buildFlags & OLBF_ABOVE_DISP_CTRL)
+	(void) @call oself::MSG_VIS_VUP_UPDATE_WIN_GROUP(VUM_DELAYED_VIA_UI_QUEUE);
+}
+
 /* the application, called */
 static void EnsureAppActiveFT(void)
 {
@@ -120,8 +181,7 @@ void OpenSendSpecBuildBranch(optr o, SpecBuildFlags flags)
     if (Inter(oself)->GII_attrs & (GIA_NOT_USER_INITIATABLE |
 				   GIA_INITIATED_VIA_USER_DO_DIALOG))
 	return;
-    /* the OLButton or OLMenuButton made, set up and added beside the
-     * generic siblings: Port32 not yet */
+    PopupBuildButton(oself, flags);
 }
 
 /* OLPopupWinVisUnBuild: the button unbuilt; the window's pin trigger

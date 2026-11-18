@@ -80,6 +80,7 @@ export VisApplySizeArgsToHeight
 export VisApplySizeHints
 export VisSpecBuildSetEnabledState
 export VisGetVisParent
+export VisAddChildRelativeToGen
 export VisConvertRatioToCoords
 export VisRecalcSizeAndInvalIfNeeded
 export VisSendPositionAndInvalIfNeeded

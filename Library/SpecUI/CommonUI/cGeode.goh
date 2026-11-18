@@ -543,6 +543,9 @@ extern ClassStruct *OLBuildApplication(optr oself, word masterOffset);
 extern ClassStruct *OLBuildField(optr oself, word masterOffset);
 extern ClassStruct *OLBuildPrimary(optr oself, word masterOffset);
 extern ClassStruct *OLBuildInteraction(optr oself, word masterOffset);
+/* exported by the UI (uiInt.goh) */
+extern void VisAddChildRelativeToGen(optr genObj, optr visObj,
+				     optr visParent, SpecBuildFlags flags);
 extern optr OpenCreateChildObject(MemHandle block, optr parent,
 				  ClassStruct *class, word hint,
 				  Boolean usable, Boolean oneWay,

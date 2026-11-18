@@ -290,7 +290,6 @@ static void UseQueryResults(optr oself, OLBuildFlags f)
     optr gp = GenFindParent(oself), vp = 0;
     ChunkHandle g;
 
-    (void) flags;
     OLButtonUpdateState(oself);
     if (OpenCheckIfBW())
 	Btn(oself)->OLBI_optFlags &= ~OLBOF_DRAW_STATE_KNOWN;
@@ -302,9 +301,13 @@ static void UseQueryResults(optr oself, OLBuildFlags f)
 	g = pself->OLBI_genChunk;
 	if ((pself->OLBI_specState & OLBSS_OPENS_POPUP_WINDOW_MASK) &&
 	    g != OptrToChunk(oself)) {
-	    vp = ((OLCtrlInstance *) ObjDerefVis(
-		      ConstructOptr(OptrToHandle(oself), g)))->OLCI_visParent;
-	    return vp == gp ? 0 : vp;
+	    /* the popup's button: where the popup puts its button part
+	     * (its OLCI_visParent, else what its generic parent
+	     * determines; the button itself has no generic parent) */
+	    optr popup = ConstructOptr(OptrToHandle(oself), g);
+
+	    return @call popup::MSG_SPEC_GET_VIS_PARENT(
+					flags & ~SBF_WIN_GROUP);
 	}
     }
     OLScanMapGroupHints(oself, &f);
