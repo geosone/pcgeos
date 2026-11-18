@@ -5173,6 +5173,100 @@ visual classes of `Library/User/Vis`:
 - **Build.** goc runs again when a `.goh` or `.h` beside a `.goc`, or in
   its `INCLUDES`, changes (`cmake/GeosGoc.cmake`).
 
+### 13y. The specific UI (`Library/SpecUI`, Motif)
+
+`motif.geo` in C beside the asm of `Library/SpecUI/CommonUI` and
+`Library/SpecUI/Motif`, built from `Library/SpecUI/Motif/motif32.gp`
+(the 16-bit build keeps `motif.gp`) and `Library/SpecUI/CMakeLists.txt`.
+CommonUI is built for Motif only: `CommonUI/cGeode.goh` has the build's
+configuration (`_MOTIF`, `_CUA_STYLE`; the other specific UIs' branches
+are left out), the constants, the variables and the routines.
+
+- **Exports.** The UI calls the first exports by number
+  (`SpecificUIRoutine`, `CInclude/Internal/specUI.h`), so `motif32.gp`
+  keeps `motif.gp`'s order; a build routine not ported yet is a `skip`
+  (an object of that type cannot be built yet: its
+  `MSG_META_RESOLVE_VARIANT_SUPERCLASS` gets NULL, a fatal error). So
+  far: `OLBuildField`, `OLBuildScreen`, `OLBuildSystem`,
+  `SpecGetDisplayScheme`, `SpecGetWindowOptions`, and the classes
+  `OLSystemClass`, `OLScreenClass`, `OLFieldClass`
+  (`CInclude/Internal/SpecUI/ol*Class.goh`).
+- **Ported.**
+  - `CMain/cmainCode.goc`, `cmainVariable.goc`: the options the field
+    reads (`[ui]`, `[motif options]`), the color scheme (the monochrome
+    table on a black and white display), the display scheme, the
+    system attributes, the UI's moniker font
+    (`UserSetDefaultMonikerFont`).
+  - `CUtils/copenUtils.goc`: line bounds, the CGA and black and white
+    checks, the screen's size. `CUtils/cutilsPtrImages.goc` (the 15
+    pointer images and `OpenGetPtrImage`) is made from
+    `cutilsVariable.def` and `copenUtils.asm` by
+    `Port32/tools/ptrimg2c.py`.
+  - `CUtils/copenSystem.goc` (`OLSystemClass`): the system as a node of
+    the focus, target, model and full screen hierarchies, the system
+    modal geode, raising and lowering geodes (`WinChangePriority`), the
+    search for the best focus and target windows
+    (`EnsureActiveFTCommon`, shared with the field), the busy pointer.
+    No focus left in the system shuts it down (`SysShutdown`), as in
+    the asm.
+  - `CWin/cwinScreen.goc` (`OLScreenClass`): a visual child of the
+    system of the driver's page; its root window, plain and
+    transparent, is registered with the UI (`UserScreenRegister`); the
+    host display's size changes (`GWNT_HOST_DISPLAY_SIZE_CHANGE`).
+  - `CWin/cwinField.goc` (`OLFieldClass`): the field reads the options
+    as the generic field loads its own, is a visual child of its screen
+    of its size, opens its window in the background color
+    (`[ui] backgroundcolor`, `backgroundDisabledOnField`), is a node of
+    the focus, target and full screen hierarchies (the last non-modal
+    focus kept while a system modal geode is within), hands out the
+    stagger slots of windows and icons, raises and lowers itself and
+    orders its applications by their windows.
+- **Port32 changes in the C API.**
+  - `WinOpen` and `WinChangePriority` take the layer as a `Handle` (a
+    word cut 32-bit handles); `WinOpen`'s colorFlags is the
+    `WinColorFlags` byte, the index or red goes separately.
+  - `GenReturnParams` has dwords (`genC.goh`, `GEOS_PORT32`): an optr
+    answer is `ConstructOptr(GRP_cx, GRP_dx)`.
+  - `MSG_GEN_SYSTEM_GET_MODAL_GEODE`, `MSG_GEN_SYSTEM_BRING_GEODE_TO_TOP`
+    and `MSG_GEN_SYSTEM_LOWER_GEODE_TO_BOTTOM` pass geodes and layers
+    as handles (`gSysC.goh`).
+  - `MSG_VIS_VUP_QUERY` goes up with its query:
+    `MSG_VIS_P32_VUP_QUERY(GenReturnParams *retValue,
+    VisUpwardQueryType queryType, dword data1, dword data2)`
+    (`Internal/specC.goh`, with `VUQ_*` and `SPEC_VIS_QUERY_START`);
+    `VUQ_DISPLAY_SCHEME` answers the scheme's bytes in `GRP_ax`, the
+    font in `GRP_cx`, the size in `GRP_dx`; `VUQ_VIDEO_DRIVER` the
+    driver in `GRP_ax`; the stagger slot queries the slot in `GRP_bp`
+    and its position in `GRP_cx`, `GRP_dx` (an icon's position is
+    passed as `x | y << 16` in data2).
+  - `SpecQueryVisParentType` and the `SQT_*` values (`specC.goh`),
+    `UIEO_DOCUMENTS_LIST` (`ui.goh`), `GCNSLT_HOST_NOTIFICATIONS`
+    (`gcnlist.goh`).
+  - The UI exports `UserGetFlowObject`, `UserGetSystemObject`,
+    `UserSetDefaultMonikerFont` and `UserGetDefaultMonikerFont`.
+  - `VisClass` handles `MSG_META_GRAB_FOCUS_EXCL` and the other grab
+    and release messages of the exclusives with `MetaGrabFocusExclLow`
+    and the others, as the asm's VisClass.
+- **Not yet.** The applications (`OLApplicationClass`, and so every
+  window and gadget class); the express menu, the tool area, the
+  window list and the task bar; the field's background picture; the
+  options of a field's own category (the specific UI reads `[ui]`);
+  the document control's variables.
+- **Test.** ctest `library.ui.motif`: the process geode
+  `Port32/Tests/Geode/uimotif.goc` makes the system object with
+  `[ui] specific = motif`, a screen on the host video driver
+  `hostvid` (on Xvfb where the display is X11) and a field, as the UI
+  makes them. Checked: the classes; the screen of the driver's page
+  and its root window; the field's window on it, the system's focus
+  and target and default field; the queries (screen, field, video
+  driver, display scheme, vis parents); the stagger slots (taken,
+  reassigned, freed); the field's window read back from the display
+  in `[ui] backgroundcolor` (blue), then green after
+  `MSG_GEN_FIELD_RESET_BG`; lowered, the field gets the system's focus
+  and target back. The geode has no application object: the specific
+  UI asks the geode's for its size, and Motif cannot build
+  applications yet.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

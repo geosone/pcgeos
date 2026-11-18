@@ -525,4 +525,26 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     set_tests_properties(kernel.draw.format
       PROPERTIES FIXTURES_REQUIRED bmfiles)
   endif()
+
+  # the Motif specific UI (Library/SpecUI) on the host video driver: the
+  # system, a screen and a field; where the display is X11, on a screen
+  # of its own (Xvfb)
+  if(TARGET geode_motif AND TARGET geode_ui)
+    geos_geode(uimotif GP Geode/uimotif.gp GOC Geode/uimotif.goc)
+    geos_embed(_uimotif_c ${uimotif_GEO} uimotif_geode)
+    geos_embed(_motif_c ${motif_GEO} motif_geode)
+    add_executable(test_ui_motif test_ui_motif.c ${_ui_c} ${_uimotif_c}
+                   ${_motif_c} ${_hostvid_c})
+    add_dependencies(test_ui_motif geode_ui geode_uimotif geode_motif
+                     geode_hostvid)
+    target_link_libraries(test_ui_motif PRIVATE geos_kernel)
+    if(GEOS_HOST STREQUAL "linux" AND GHAL_HAVE_X11 AND
+       GEOS_LINUX_DISPLAY STREQUAL "x11" AND GEOS_XVFB)
+      add_test(NAME library.ui.motif
+               COMMAND ${PROJECT_SOURCE_DIR}/Port32/tools/geos-xserver.sh
+                       $<TARGET_FILE:test_ui_motif>)
+    else()
+      add_test(NAME library.ui.motif COMMAND test_ui_motif)
+    endif()
+  endif()
 endif()

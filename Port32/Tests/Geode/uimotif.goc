@@ -1,0 +1,239 @@
+/*
+ * uimotif.goc -- a process geode for the library.ui.motif test
+ * (Port32/Tests): the UI's system object made in this geode's block
+ * with the Motif specific UI (motif.geo), a screen on the default video
+ * driver and a field on it, as the UI makes them (userScreen.goc).  The
+ * test (test_ui_motif.c) runs the steps through UMStep on the process
+ * thread; the checks made here count in umState, the windows are there
+ * for the test to look at.
+ */
+@include <stdapp.goh>
+@include <Objects/vCompC.goh>
+@include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
+@include <Objects/gScrnC.goh>
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olSystemClass.goh>
+@include <Internal/SpecUI/olScreenClass.goh>
+@include <Internal/SpecUI/olFieldClass.goh>
+#include <Internal/specUI.h>
+#include <Internal/videoDr.h>
+#include <initfile.h>
+#include <string.h>
+
+typedef struct {
+    GeodeHandle		UMS_process;
+    word		UMS_attached;
+    word		UMS_checks, UMS_fails, UMS_failLine;
+    word		UMS_failLines[8];
+    WindowHandle	UMS_screenWin;
+    WindowHandle	UMS_fieldWin;
+} UMState;
+
+UMState umState;
+
+#define UMCHECK(c) \
+    do { umState.UMS_checks++; if (!(c)) { \
+	if (umState.UMS_fails < 8) \
+	    umState.UMS_failLines[umState.UMS_fails] = __LINE__; \
+	umState.UMS_fails++; \
+	if (!umState.UMS_failLine) umState.UMS_failLine = __LINE__; } \
+    } while (0)
+
+@class UMProcessClass, ProcessClass;
+    @message void MSG_UM_STEP(word step);
+@endc
+@classdecl UMProcessClass, neverSaved;
+
+@start UMObjects;
+@object GenApplicationClass UMApp = {
+    GI_states = GS_USABLE | GS_ENABLED;
+}
+@end UMObjects;
+
+static optr umSystem, umScreen, umField;
+
+@method UMProcessClass, MSG_META_ATTACH_PROCESS
+{
+    (void) value1;
+    (void) value2;
+    umState.UMS_process = GeodeGetProcessHandle();
+    umState.UMS_attached++;
+}
+
+/* the object's Vis instance, copied (its block is ours) */
+static void VisData(optr o, void *buf, word size)
+{
+    ObjLockObjBlock(OptrToHandle(o));
+    memcpy(buf, ObjDerefVis(o), size);
+    MemUnlock(OptrToHandle(o));
+}
+
+static Boolean InClass(optr o, ClassStruct *c)
+{
+    Boolean r;
+
+    ObjLockObjBlock(OptrToHandle(o));
+    r = ObjIsObjectInClass(o, c);
+    MemUnlock(OptrToHandle(o));
+    return r;
+}
+
+/* a stagger slot of the field: its slot, its position */
+static word Slot(byte req, sword *x, sword *y)
+{
+    GenReturnParams r;
+
+    UMCHECK(@call umField::MSG_VIS_P32_VUP_QUERY(&r,
+		    SPEC_VIS_QUERY_START + 0, req, 0));
+    *x = (sword) r.GRP_cx;
+    *y = (sword) r.GRP_dx;
+    return (word) r.GRP_bp;
+}
+
+@method UMProcessClass, MSG_UM_STEP
+{
+    switch (step) {
+    case 1: {
+	/* the system object, built by Motif */
+	umSystem = UserCreateSystemObject(OptrToHandle(@UMApp));
+	UMCHECK(umSystem != 0);
+	(void) @call umSystem::MSG_VIS_GET_ATTRS();
+	UMCHECK(InClass(umSystem, (ClassStruct *) &OLSystemClass));
+	break;
+    }
+    case 2: {
+	/* the screen: usable, built and opened: the root window on the
+	 * driver, of its size */
+	OLScreenInstance s;
+	VideoDriverInfo *info;
+	WindowHandle parent = 1;
+
+	umScreen = ObjInstantiate(OptrToHandle(@UMApp),
+				  (ClassStruct *) &GenScreenClass);
+	@call umScreen::MSG_GEN_SCREEN_SET_VIDEO_DRIVER(0);
+	@call umSystem::MSG_GEN_SYSTEM_ADD_SCREEN_CHILD(umScreen, CCO_LAST);
+	@call umSystem::MSG_GEN_SYSTEM_SET_DEFAULT_SCREEN(umScreen);
+	@call umScreen::MSG_GEN_SET_USABLE(VUM_NOW);
+	UMCHECK(InClass(umScreen, (ClassStruct *) &OLScreenClass));
+	VisData(umScreen, &s, sizeof(s));
+	info = (VideoDriverInfo *) GeodeInfoDriver(
+				GeodeGetDefaultDriver(GDDT_VIDEO));
+	UMCHECK(s.VI_bounds.R_right == info->VDI_pageW &&
+		s.VI_bounds.R_bottom == info->VDI_pageH);
+	UMCHECK(s.VCI_geoAttrs & VCGA_CUSTOM_MANAGE_CHILDREN);
+	umState.UMS_screenWin = s.VCI_window;
+	if (s.VCI_window)
+	    WinGetInfo(s.VCI_window, WIT_PARENT_WIN, &parent);
+	UMCHECK(s.VCI_window != 0 && parent == 0);
+	break;
+    }
+    case 3: {
+	/* the field: attached on the screen, usable, on top */
+	OLFieldInstance f;
+	optr o = 0;
+	WindowHandle parent = 0;
+	GenReturnParams r;
+
+	/* the windows of this geode take the focus and target (the
+	 * application object would say so) */
+	WinGeodeSetFlags(umState.UMS_process, WinGeodeGetFlags(
+			     umState.UMS_process) | GWF_FOCUSABLE |
+			 GWF_TARGETABLE);
+	umField = ObjInstantiate(OptrToHandle(@UMApp),
+				 (ClassStruct *) &GenFieldClass);
+	@call umField::MSG_META_ATTACH();
+	@call umField::MSG_GEN_FIELD_SET_VIS_PARENT(umScreen);
+	@call umField::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call umField::MSG_GEN_BRING_TO_TOP();
+	UMCHECK(InClass(umField, (ClassStruct *) &OLFieldClass));
+	VisData(umField, &f, sizeof(f));
+	UMCHECK(@call umField::MSG_VIS_FIND_PARENT() == umScreen);
+	{
+	    OLScreenInstance s;
+
+	    VisData(umScreen, &s, sizeof(s));
+	    UMCHECK(f.VI_bounds.R_right == s.VI_bounds.R_right &&
+		    f.VI_bounds.R_bottom == s.VI_bounds.R_bottom);
+	}
+	UMCHECK(f.VI_attrs & VA_REALIZED);
+	umState.UMS_fieldWin = f.VCI_window;
+	if (f.VCI_window)
+	    WinGetInfo(f.VCI_window, WIT_PARENT_WIN, &parent);
+	UMCHECK(f.VCI_window != 0 && parent == umState.UMS_screenWin);
+	/* the field in the system's hierarchies, the default field */
+	(void) @call umSystem::MSG_META_GET_TARGET_EXCL(&o);
+	UMCHECK(o == umField);
+	o = 0;
+	(void) @call umSystem::MSG_META_GET_FOCUS_EXCL(&o);
+	UMCHECK(o == umField);
+	UMCHECK(@call umSystem::MSG_GEN_SYSTEM_GET_DEFAULT_FIELD() ==
+		umField);
+	/* the queries: the field's screen, the video driver, the display
+	 * scheme */
+	memset(&r, 0, sizeof(r));
+	UMCHECK(@call umField::MSG_SPEC_P32_GUP_QUERY(&r, GUQT_SCREEN) &&
+		ConstructOptr(r.GRP_cx, r.GRP_dx) == umScreen &&
+		r.GRP_bp == umState.UMS_screenWin);
+	UMCHECK(@call umField::MSG_SPEC_P32_GUP_QUERY(&r, GUQT_FIELD) &&
+		ConstructOptr(r.GRP_cx, r.GRP_dx) == umField &&
+		r.GRP_bp == umState.UMS_fieldWin);
+	UMCHECK(@call umField::MSG_VIS_P32_VUP_QUERY(&r, VUQ_VIDEO_DRIVER,
+						     0, 0) &&
+		r.GRP_ax == GeodeGetDefaultDriver(GDDT_VIDEO));
+	UMCHECK(@call umField::MSG_VIS_P32_VUP_QUERY(&r, VUQ_DISPLAY_SCHEME,
+						     0, 0) &&
+		((r.GRP_ax >> 16) & 0xff) == C_LIGHT_GREY &&
+		((r.GRP_ax >> 24) & 0xff) == C_DARK_GREY);
+	UMCHECK(@call umField::MSG_SPEC_GUP_QUERY_VIS_PARENT(
+		    SQT_VIS_PARENT_FOR_APPLICATION) == umField);
+	UMCHECK(@call umSystem::MSG_SPEC_GUP_QUERY_VIS_PARENT(
+		    SQT_VIS_PARENT_FOR_FIELD) == umScreen);
+	break;
+    }
+    case 4: {
+	/* the stagger slots of the field's windows */
+	sword x, y;
+	GenReturnParams r;
+
+	UMCHECK(Slot(0, &x, &y) == 1 && x == 10 && y == 8);
+	UMCHECK(Slot(0, &x, &y) == 2 && x == 10 + 31 && y == 8 + 20);
+	UMCHECK(Slot(0x80 | 1, &x, &y) == 3);
+	UMCHECK(@call umField::MSG_VIS_P32_VUP_QUERY(&r,
+		    SPEC_VIS_QUERY_START + 2, 1, 0));
+	UMCHECK(Slot(0, &x, &y) == 1);
+	/* a slot asked for without reassigning is taken as it is */
+	UMCHECK(Slot(5, &x, &y) == 5 && x == 10 + 4 * 31);
+	break;
+    }
+    case 5:
+	/* a new background color */
+	InitFileWriteInteger("ui", "backgroundcolor", C_GREEN);
+	@call umField::MSG_GEN_FIELD_RESET_BG();
+	break;
+    case 6: {
+	/* the field lowered: it lets go of the system's hierarchies, which
+	 * the system gives back to the only field there is (closing the
+	 * last field would shut the system down, as in the asm) */
+	OLFieldInstance f;
+	optr o = 0;
+
+	@call umField::MSG_GEN_LOWER_TO_BOTTOM();
+	(void) @call umSystem::MSG_META_GET_TARGET_EXCL(&o);
+	UMCHECK(o == umField);
+	o = 0;
+	(void) @call umSystem::MSG_META_GET_FOCUS_EXCL(&o);
+	UMCHECK(o == umField);
+	VisData(umField, &f, sizeof(f));
+	UMCHECK((f.VI_attrs & VA_REALIZED) && f.VCI_window);
+	break;
+    }
+    }
+}
+
+void UMStep(word step)
+{
+    optr p = ConstructOptr(umState.UMS_process, 0);
+
+    @call p::MSG_UM_STEP(step);
+}

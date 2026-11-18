@@ -137,6 +137,7 @@ Ordered by dependency, each with host-side tests under `linux`:
 - Kernel `Graphics` / `Win` / `IM` (~130 k lines of asm) → C, plus the generic FB video driver on `ghal_display` and the software renderer.
 - `Library/User` (~169 k) → C.
 - `SpecUI/CommonUI` + Motif (~295 k) → C. Other SpecUIs later.
+  **Started 2026-11-18:** `motif.geo` in C (ABI.md §13y): initialization, color and display scheme, pointer images, `OLSystemClass`, `OLScreenClass`, `OLFieldClass`; ctest `library.ui.motif` shows a field in its background color on the host display. Next: `OLApplicationClass` (copenApp*), then the windows (`OLWinClass`, `OLBaseWin`, primary), so the UI boots with `[ui] specific = motif`.
 - `Library/Text` (~149 k) → C.
 - Hook up the FreeType driver (already C).
 
