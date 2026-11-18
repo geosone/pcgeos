@@ -1,0 +1,140 @@
+/*
+ * copenReplyBar.goc -- OLReplyBarClass (after copenReplyBar.asm): the
+ * bar of a dialog's response triggers (a GenInteraction with
+ * HINT_MAKE_REPLY_BAR).  Under a dialog it is the dialog's last child
+ * (its vis parent whatever its generic one is) and orders the standard
+ * triggers: stop, apply, yes and OK first, reset, no, dismiss and help
+ * last.  It draws a raised frame under a dialog, a line above it
+ * elsewhere.
+ */
+@include "cGeode.goh"
+@include <Objects/gTrigC.goh>
+
+@classdecl OLReplyBarClass, neverSaved;
+
+#define Bar(o)		((OLReplyBarInstance *) ObjDerefVis(o))
+
+/* Motif's MO_REPLY_BAR_INSET (ccompConstant.def) */
+#define MO_REPLY_BAR_INSET	0
+
+/* OLReplyBarInitialize: OLCtrl's, the vis parent ours to choose */
+@method OLReplyBarClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    Bar(oself)->VI_specAttrs |= SA_CUSTOM_VIS_PARENT;
+}
+
+/* OLReplyBarGetVisParent: the dialog (none: the usual one) */
+@method OLReplyBarClass, MSG_SPEC_GET_VIS_PARENT
+{
+    (void) flags;
+    return pself->OLRBI_dialog;
+}
+
+@method OLReplyBarClass, MSG_OL_REPLY_BAR_SET_DIALOG
+{
+    pself->OLRBI_dialog = dialog;
+    pself->OLRBI_flags |= OLRBF_UNDER_DIALOG;
+}
+
+/* the InteractionCommand of a standard trigger (IC_NULL if none).
+ * Port32: GenTriggerClass is not in the C UI yet, the vardata alone
+ * says so. */
+static word TriggerCommand(optr o)
+{
+    word ic = IC_NULL, *d;
+
+    ObjLockObjBlock(OptrToHandle(o));
+    if ((d = ObjVarFindData(o, ATTR_GEN_TRIGGER_INTERACTION_COMMAND)) != NULL)
+	ic = *d;
+    MemUnlock(OptrToHandle(o));
+    return ic;
+}
+
+/* MoveStandardTriggerIfFound: the standard trigger of the command (the
+ * one added, or the dialog's) moved, if it is ours */
+static void MoveTrigger(optr o, word ic, word addedIc, optr added,
+			CompChildFlags where)
+{
+    optr t, d;
+
+    if (ic == addedIc)
+	t = added;
+    else {
+	d = Bar(o)->OLRBI_dialog;
+	t = @call d::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(ic);
+	if (!t || @call o::MSG_VIS_FIND_CHILD(t) == 0xffff)
+	    return;
+    }
+    @call o::MSG_VIS_MOVE_CHILD(t, where);
+}
+
+/* OLReplyBarVisAddChild: under a dialog, the standard triggers in
+ * their order */
+@method OLReplyBarClass, MSG_VIS_ADD_CHILD
+{
+    word ic;
+
+    @callsuper();
+    if (!(Bar(oself)->OLRBI_flags & OLRBF_UNDER_DIALOG))
+	return;
+    ic = TriggerCommand(child);
+    MoveTrigger(oself, IC_STOP, ic, child, CCO_FIRST);
+    MoveTrigger(oself, IC_APPLY, ic, child, CCO_FIRST);
+    MoveTrigger(oself, IC_YES, ic, child, CCO_FIRST);
+    MoveTrigger(oself, IC_OK, ic, child, CCO_FIRST);
+    MoveTrigger(oself, IC_RESET, ic, child, CCO_LAST);
+    MoveTrigger(oself, IC_NO, ic, child, CCO_LAST);
+    MoveTrigger(oself, IC_DISMISS, ic, child, CCO_LAST);
+    MoveTrigger(oself, IC_HELP, ic, child, CCO_LAST);
+}
+
+/* OLReplyBarSpecSetNotUsable: the window has no reply bar any more */
+@method OLReplyBarClass, MSG_SPEC_SET_NOT_USABLE
+{
+    optr none = 0;
+
+    VisCallParent(oself, MSG_OL_WIN_NOTIFY_OF_REPLY_BAR, &none, sizeof(none),
+		  NULL, 0);
+    @callsuper();
+}
+
+/* OLReplyBarSpecSetUsable: the dialog's standard triggers again */
+@method OLReplyBarClass, MSG_SPEC_SET_USABLE
+{
+    optr d;
+
+    @callsuper();
+    d = Bar(oself)->OLRBI_dialog;
+    if (d)
+	@call d::MSG_OL_DIALOG_WIN_REBUILD_STANDARD_TRIGGERS();
+}
+
+/*
+ * OLReplyBarDraw: under a dialog (in color) a raised frame; else a dark
+ * line along the top (and a white one below it, in color)
+ */
+@method OLReplyBarClass, MSG_VIS_DRAW
+{
+    Rectangle b;
+
+    if ((pself->OLRBI_flags & OLRBF_UNDER_DIALOG) && !OpenCheckIfBW()) {
+	/* OpenSetInsetRectColors, the colors swapped */
+	GrSetAreaColor(gstate, CF_INDEX, moCS_dsLightColor, 0, 0);
+	VisGetBounds(oself, &b);
+	OpenDrawRect(oself, gstate, b.R_left, b.R_top, b.R_right, b.R_bottom,
+		     (word) (C_WHITE | (moCS_dsDarkColor << 8)));
+    } else {
+	sword y;
+
+	GrSetLineColor(gstate, CF_INDEX, moCS_dsDarkColor, 0, 0);
+	OpenGetLineBounds(oself, &b);
+	y = (sword) (b.R_top + MO_REPLY_BAR_INSET);
+	GrDrawHLine(gstate, b.R_left, y, b.R_right);
+	if (!OpenCheckIfBW()) {
+	    GrSetLineColor(gstate, CF_INDEX, C_WHITE, 0, 0);
+	    GrDrawHLine(gstate, b.R_left, (sword) (y + 1), b.R_right);
+	}
+    }
+    @callsuper();
+}

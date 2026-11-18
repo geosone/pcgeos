@@ -528,3 +528,31 @@ void DrawGradient(GStateHandle gs, const Rectangle *r, Color start,
     }
     GrFillRect(gs, x, r->R_top, r->R_right, r->R_bottom);
 }
+
+/*
+ * OpenCreateChildObject: an object of the class in the block, not
+ * dirtied (unless CCF_MARK_DIRTY), its generic part initialized, the
+ * hint added (if any); added to the parent (if any) as a child or only
+ * linked up to it; usable if asked for.
+ */
+optr OpenCreateChildObject(MemHandle block, optr parent, ClassStruct *class,
+			   word hint, Boolean usable, Boolean oneWay,
+			   CompChildFlags flags)
+{
+    optr o = ObjInstantiate(block, class);
+
+    ObjSetFlags(o, (flags & CCF_MARK_DIRTY) ? OCF_DIRTY : OCF_IGNORE_DIRTY,
+		0);
+    ObjInitializePart(o, word_offsetof(GenBase, Gen_offset));
+    if (hint)
+	(void) ObjVarAddData(o, hint, 0);
+    if (parent) {
+	if (oneWay)
+	    @call parent::MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY(o);
+	else
+	    @call parent::MSG_GEN_ADD_CHILD(o, flags);
+    }
+    if (usable)
+	((GenInstance *) ObjDerefGen(o))->GI_states |= GS_USABLE;
+    return o;
+}

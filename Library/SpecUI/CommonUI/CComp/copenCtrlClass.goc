@@ -82,8 +82,14 @@
 	c->OLCI_buildFlags |= T(OLBT_FOR_TITLE_BAR_LEFT);
     if (ObjVarFindData(oself, HINT_SEEK_TITLE_BAR_RIGHT))
 	c->OLCI_buildFlags |= T(OLBT_FOR_TITLE_BAR_RIGHT);
-    /* HINT_MAKE_REPLY_BAR: MSG_OL_WIN_NOTIFY_OF_REPLY_BAR to the dialog
-     * (Port32: with OLDialogWinClass) */
+    /* a reply bar tells its dialog (up the generic tree: the visual one
+     * is not built yet) */
+    if (ObjVarFindData(oself, HINT_MAKE_REPLY_BAR)) {
+	EventHandle ev = @record OLDialogWinClass::
+				MSG_OL_WIN_NOTIFY_OF_REPLY_BAR(oself);
+
+	@call oself::MSG_GEN_GUP_CALL_OBJECT_OF_CLASS(ev);
+    }
 }
 
 /* ---------------------------------------------------------------------

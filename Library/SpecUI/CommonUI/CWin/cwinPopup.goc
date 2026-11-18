@@ -1,0 +1,348 @@
+/*
+ * cwinPopup.goc -- OLPopupWinClass (after cwinPopup.asm): the window of
+ * a GenInteraction that pops up (a dialog, a menu).  It is built twice
+ * (SA_USES_DUAL_BUILD): as a window (its vis parent the one for popups
+ * or system modal windows) and as the button that brings it up; app or
+ * system modal by its hints and attributes; brought up by
+ * MSG_GEN_INTERACTION_INITIATE, taken down by IC_DISMISS (and the
+ * application's focus found again).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet:
+ *   - the button (OLButtonClass, OLMenuButtonClass): a popup that is
+ *     user initiatable gets none, it comes up by
+ *     MSG_GEN_INTERACTION_INITIATE only;
+ *   - UserDoDialog (MSG_GEN_INTERACTION_INITIATE_BLOCKING_THREAD_ON_RESPONSE:
+ *     the C UI has no UserDoDialog yet);
+ *   - discarding the block of HINT_INTERACTION_DISCARD_WHEN_CLOSED,
+ *     MSG_GEN_DESTROY_AND_FREE_BLOCK's clean up of the window list;
+ *   - the pushpin and the menus' messages (OLMenuWinClass).
+ */
+@include "cGeode.goh"
+
+@classdecl OLPopupWinClass, neverSaved;
+
+#define PWin(o)		((OLPopupWinInstance *) ObjDerefVis(o))
+#define Inter(o)	((GenInteractionInstance *) ObjDerefGen(o))
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+
+/* the button's optr (0 if none) */
+static optr PopupButton(optr o)
+{
+    ChunkHandle b = PWin(o)->OLPWI_button;
+
+    return b ? ConstructOptr(OptrToHandle(o), b) : 0;
+}
+
+/* the application, called */
+static void EnsureAppActiveFT(void)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (app)
+	@call app::MSG_META_ENSURE_ACTIVE_FT();
+}
+
+/*
+ * OLQueryIsMenu: an OLWin that is a menu (not one that avoids the menu
+ * bar, not a popup list)
+ */
+Boolean OLQueryIsMenu(optr o)
+{
+    OLWinInstance *w;
+
+    if (!ObjIsObjectInClass(o, (ClassStruct *) &OLWinClass))
+	return FALSE;
+    w = (OLWinInstance *) ObjDerefVis(o);
+    if (!(w->OLWI_fixedAttr & OWFA_IS_MENU) ||
+	(w->OLCI_buildFlags & OLBF_AVOID_MENU_BAR))
+	return FALSE;
+    return (w->OLCI_buildFlags & OLBF_TARGET) != T(OLBT_IS_POPUP_LIST);
+}
+
+/*
+ * OpenSendSpecBuildBranch (VisSendSpecBuildBranch): the branch built,
+ * fully enabled if the object is
+ */
+void OpenSendSpecBuildBranch(optr o, SpecBuildFlags flags)
+{
+    flags &= ~SBF_VIS_PARENT_FULLY_ENABLED;
+    if (GenCheckIfFullyEnabled(o, TRUE))
+	flags |= SBF_VIS_PARENT_FULLY_ENABLED;
+    @call o::MSG_SPEC_BUILD_BRANCH(flags);
+}
+
+/* ---------------------------------------------------------------------
+ * Initialization and build
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLPopupWinInitialize: app modal (HINT_INTERACTION_MODAL, GIA_MODAL)
+ * or system modal (GIA_SYS_MODAL); a popup, built twice
+ */
+@method OLPopupWinClass, MSG_META_INITIALIZE
+{
+    OLPopupWinFlags f = 0;
+    GenInteractionAttrs a;
+    OLPopupWinInstance *w;
+
+    @callsuper();
+    a = Inter(oself)->GII_attrs;
+    if (ObjVarFindData(oself, HINT_INTERACTION_MODAL) || (a & GIA_MODAL))
+	f |= OLPWF_APP_MODAL;
+    if (a & GIA_SYS_MODAL)
+	f |= OLPWF_SYS_MODAL;
+    w = PWin(oself);
+    w->OLPWI_flags = f;
+    w->OLWI_moreFixedAttr |= OWMFA_IS_POPUP;
+    w->VI_specAttrs |= SA_USES_DUAL_BUILD;
+}
+
+/* OLPopupWinUpdateSpecBuild: the window's children built within the
+ * tree */
+@method OLPopupWinClass, MSG_SPEC_BUILD_BRANCH
+{
+    if (flags & SBF_WIN_GROUP)
+	flags |= SBF_VIS_PARENT_WITHIN_SCOPE_OF_TREE_BUILD;
+    @callsuper oself::OLPopupWinClass::MSG_SPEC_BUILD_BRANCH(flags);
+}
+
+/*
+ * OLPopupWinSpecBuild: the window as OLWin builds it; the other part is
+ * the button, unless the popup is not user initiatable (Port32: there
+ * is no button yet)
+ */
+@method OLPopupWinClass, MSG_SPEC_BUILD
+{
+    if (flags & SBF_WIN_GROUP) {
+	@callsuper();
+	return;
+    }
+    if (Inter(oself)->GII_attrs & (GIA_NOT_USER_INITIATABLE |
+				   GIA_INITIATED_VIA_USER_DO_DIALOG))
+	return;
+    /* the OLButton or OLMenuButton made, set up and added beside the
+     * generic siblings: Port32 not yet */
+}
+
+/* OLPopupWinVisUnBuild: the button unbuilt; the window's pin trigger
+ * destroyed, then the window unbuilt */
+@method OLPopupWinClass, MSG_SPEC_UNBUILD
+{
+    optr b;
+    ChunkHandle pin;
+
+    if (!(flags & SBF_WIN_GROUP)) {
+	b = PopupButton(oself);
+	if (b) {
+	    @call b::MSG_SPEC_UNBUILD_BRANCH(flags);
+	    PWin(oself)->OLPWI_button = 0;
+	}
+	return;
+    }
+    pin = pself->OLPWI_pinTrigger;
+    pself->OLPWI_pinTrigger = 0;
+    if (pin) {
+	optr p = ConstructOptr(OptrToHandle(oself), pin);
+
+	@call p::MSG_GEN_DESTROY(VUM_NOW, 0);
+    }
+    @callsuper();
+}
+
+/*
+ * OLPopupGetVisParent: the window's as OLWin finds it; the button's is
+ * the generic parent's choice (SA_CUSTOM_VIS_PARENT_FOR_CHILD) or the
+ * generic parent
+ */
+@method OLPopupWinClass, MSG_SPEC_GET_VIS_PARENT
+{
+    optr vp, gp, r = 0;
+    SpecAttrs sa;
+
+    if (flags & SBF_WIN_GROUP)
+	return @callsuper();
+    vp = pself->OLCI_visParent;
+    gp = GenFindParent(oself);
+    if (vp != gp)
+	return vp;
+    if (gp) {
+	sa = ((VisInstance *) ObjDerefVis(gp))->VI_specAttrs;
+	if (sa & SA_CUSTOM_VIS_PARENT_FOR_CHILD)
+	    r = @call gp::MSG_SPEC_DETERMINE_VIS_PARENT_FOR_CHILD(oself);
+    }
+    if (!r)
+	r = gp;
+    PWin(oself)->OLCI_visParent = r;
+    return r;
+}
+
+/* OLPopupGetSpecificVisObj: the window, or the button */
+@method OLPopupWinClass, MSG_SPEC_GET_SPECIFIC_VIS_OBJECT
+{
+    if (flags & SBF_WIN_GROUP)
+	return oself;
+    return PopupButton(oself);
+}
+
+/* OLPWMetaCheckIfInteractableObject: everything below a system modal
+ * popup is */
+@method OLPopupWinClass, MSG_META_CHECK_IF_INTERACTABLE_OBJECT
+{
+    if (pself->OLPWI_flags & OLPWF_SYS_MODAL)
+	return TRUE;
+    return @callsuper();
+}
+
+@method OLPopupWinClass, MSG_OL_POPUP_FIND_BUTTON
+{
+    return PopupButton(oself);
+}
+
+/* OLPopupWinGenActivate: the button activated, or the popup initiated */
+@method OLPopupWinClass, MSG_GEN_ACTIVATE
+{
+    optr b = PopupButton(oself);
+
+    if (b)
+	@call b::MSG_GEN_ACTIVATE();
+    else
+	@call oself::MSG_GEN_INTERACTION_INITIATE();
+}
+
+@method OLPopupWinClass, MSG_OL_POPUP_ACTIVATE
+{
+    (void) x;
+    (void) y;
+    @call oself::MSG_GEN_INTERACTION_INITIATE();
+}
+
+/*
+ * OLPopupGenInitiate: usable (and enabled, if it goes when disabled):
+ * realizable and on top; a discardable popup is in use
+ */
+@method OLPopupWinClass, MSG_GEN_INTERACTION_INITIATE
+{
+    if (!GenCheckIfFullyUsable(oself, FALSE))
+	return;
+    if ((pself->OLWI_attrs & OWA_DISMISS_WHEN_DISABLED) &&
+	!GenCheckIfFullyEnabled(oself, FALSE))
+	return;
+    if (!OpenWinEnsureRealizableOnTop(oself))
+	return;
+    if (ObjVarFindData(oself, HINT_INTERACTION_DISCARD_WHEN_CLOSED))
+	@call oself::MSG_GEN_INTERACTION_DISABLE_DISCARDING();
+}
+
+/* OLPopupClose: closable: dismissed */
+@method OLPopupWinClass, MSG_OL_WIN_CLOSE
+{
+    if (pself->OLWI_attrs & OWA_CLOSABLE)
+	(void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+}
+
+/*
+ * OLPopupDismiss: not realizable any more (Port32: a discardable popup
+ * is not discarded yet, only out of use)
+ */
+void OLPopupDismiss(optr o)
+{
+    GenInteractionDiscardInfo *d;
+
+    @call o::MSG_SPEC_SET_ATTRS(0, SA_REALIZABLE, VUM_NOW);
+    if (ObjVarFindData(o, HINT_INTERACTION_DISCARD_WHEN_CLOSED) &&
+	(d = ObjVarFindData(o, TEMP_INTERACTION_DISCARD_INFO)) != NULL)
+	d->GIDI_inUse = 0;
+}
+
+/*
+ * OLPopupInteractionCommand: IC_INTERACTION_COMPLETE dismisses a popup
+ * that is not pinned; IC_DISMISS takes it down (not a pinned menu).
+ * The command stops here.
+ */
+@method OLPopupWinClass, MSG_GEN_GUP_INTERACTION_COMMAND
+{
+    OLPopupWinInstance *w;
+
+    if (command == IC_INTERACTION_COMPLETE) {
+	if (pself->OLWI_specState & OLWSS_PINNED)
+	    return TRUE;
+	command = IC_DISMISS;
+    }
+    if (command != IC_DISMISS)
+	return TRUE;
+    w = PWin(oself);
+    if ((w->OLWI_fixedAttr & OWFA_IS_MENU) &&
+	(w->OLWI_specState & OLWSS_PINNED))
+	return TRUE;
+    OLPopupDismiss(oself);
+    return TRUE;
+}
+
+/* OLPopupWinVisClose: the modal state of the application updated, its
+ * focus and target found again */
+@method OLPopupWinClass, MSG_VIS_CLOSE
+{
+    @callsuper();
+    OpenWinUpdateModalStatus(oself);
+    EnsureAppActiveFT();
+}
+
+/* OLPopupUpdateVisual: the button's win group and ours */
+@method OLPopupWinClass, MSG_SPEC_UPDATE_VISUAL
+{
+    optr b = PopupButton(oself);
+
+    if (b)
+	(void) @call b::MSG_VIS_VUP_UPDATE_WIN_GROUP(updateMode);
+    (void) @call oself::MSG_VIS_VUP_UPDATE_WIN_GROUP(updateMode);
+}
+
+/* OLPopupWinNotifyEnabled: the button too (if we are fully enabled) */
+@method OLPopupWinClass, MSG_SPEC_NOTIFY_ENABLED
+{
+    optr b;
+
+    if (!(pself->VI_typeFlags & VTF_IS_GEN) ||
+	GenCheckIfFullyEnabled(oself, TRUE)) {
+	b = PopupButton(oself);
+	if (b)
+	    (void) @call b::MSG_SPEC_NOTIFY_ENABLED(updateMode, flags);
+    }
+    return @callsuper();
+}
+
+/*
+ * OLPopupWinNotifyNotEnabled: not for a menu: the button too, and the
+ * popup dismissed (without a system menu, or if it goes when disabled)
+ */
+@method OLPopupWinClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    optr b;
+    OLPopupWinInstance *w;
+
+    if (!OLQueryIsMenu(oself)) {
+	b = PopupButton(oself);
+	if (b)
+	    (void) @call b::MSG_SPEC_NOTIFY_NOT_ENABLED(updateMode, flags);
+	w = PWin(oself);
+	if (!w->OLWI_sysMenu || (w->OLWI_attrs & OWA_DISMISS_WHEN_DISABLED))
+	    (void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+    }
+    return @callsuper();
+}
+
+/* OLPopupWinUpdateVisMoniker: the button's moniker too (later if it is
+ * not realized) */
+@method OLPopupWinClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    optr b;
+
+    @callsuper();
+    b = PopupButton(oself);
+    if (!b)
+	return;
+    if (!(((VisInstance *) ObjDerefVis(b))->VI_attrs & VA_REALIZED))
+	updateMode = VUM_DELAYED_VIA_UI_QUEUE;
+    @call b::MSG_SPEC_UPDATE_VIS_MONIKER(updateMode, oldMonikerWidth,
+					 oldMonikerHeight);
+}

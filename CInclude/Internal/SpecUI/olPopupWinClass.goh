@@ -1,0 +1,99 @@
+/*
+ * olPopupWinClass.goh -- OLPopupWinClass, the superclass of the popup
+ * windows (menus, dialogs: after
+ * Include/Internal/SpecUI/olPopupWinClass.def), OLDialogWinClass, the
+ * window of a GIV_DIALOG GenInteraction (olDialogWinClass.def), and
+ * OLReplyBarClass, the bar of a dialog's response triggers
+ * (olReplyBarClass.def), for Port32.
+ *
+ * Motif's: no BUBBLE_DIALOGS or DIALOGS_WITH_FOLDER_TABS messages, no
+ * FUNCTION_KEYS_MAPPED_TO_REPLY_BAR_BUTTONS.  Port32: an optr is a
+ * dword pair of handle and chunk; OLPWI_udds is a pointer.
+ */
+#ifndef __OLPOPUPWINCLASS_GOH
+#define __OLPOPUPWINCLASS_GOH
+
+@include <Internal/SpecUI/olWinClass.goh>
+@include <Objects/gInterC.goh>
+#include <Objects/gInterC.h>
+
+@deflib motif
+
+/* OLPopupWinFlags */
+typedef ByteFlags OLPopupWinFlags;
+#define OLPWF_APP_MODAL		0x80	/* HINT_INTERACTION_MODAL, GIA_MODAL */
+#define OLPWF_SYS_MODAL		0x40	/* GIA_SYS_MODAL */
+#define OLPWF_FORCED_MODAL	0x20	/* made modal by the specific UI */
+#define OLPWF_FILE_MENU		0x10	/* the "File" menu */
+#define OLPWF_HAS_ACTIVATOR	0x08	/* HINT_INTERACTION_ACTIVATED_BY */
+
+@class OLPopupWinClass, OLWinClass;
+@uses GenInteractionClass;
+
+/* the button that brings the popup up (0 if none) */
+@message optr MSG_OL_POPUP_FIND_BUTTON();
+/* a discardable popup closed: its block discarded if nothing uses it */
+@message void MSG_OL_POPUP_DISCARD_BLOCK();
+
+    /* the button (OLButtonClass, OLMenuButtonClass) in this block */
+    @instance ChunkHandle	OLPWI_button = 0;
+    /* a menu's pin trigger */
+    @instance ChunkHandle	OLPWI_pinTrigger = 0;
+    /* UserDoDialog's struct while it waits for the response */
+    @instance UserDoDialogStruct *OLPWI_udds = 0;
+    @instance OLPopupWinFlags	OLPWI_flags = 0;
+
+@endc;
+
+/* OLDialogOptFlags */
+typedef ByteFlags OLDialogOptFlags;
+#define OLDOF_BUILT		0x80	/* the window is built */
+#define OLDOF_SINGLE_USAGE	0x40	/* closed on IC_INTERACTION_COMPLETE */
+#define OLDOF_COMPLEX_PROPERTIES 0x20	/* a Reset trigger */
+#define OLDOF_DELAYED_MODE	0x10	/* an Apply trigger */
+#define OLDOF_REPLY_BAR_CREATED	0x08	/* we made the reply bar */
+#define OLDOF_DOING_COMPLETE	0x04	/* IC_DISMISS for completion */
+#define OLDOF_KBD_CREATED	0x02
+#define OLDOF_KBD_ADDED		0x01
+
+@class OLDialogWinClass, OLPopupWinClass;
+
+/* the standard trigger of an InteractionCommand (0 if none) */
+@message optr MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(word command);
+/* the standard triggers the type asks for, again */
+@message void MSG_OL_DIALOG_WIN_REBUILD_STANDARD_TRIGGERS();
+
+    @vardata void ATTR_ALLOWS_EXPRESS_MENU_SHORTCUTS_THROUGH;
+
+    /* the reply bar (a GenInteraction with HINT_MAKE_REPLY_BAR) */
+    @instance optr		OLDWI_replyBar = 0;
+    /* the standard triggers: a chunk array of
+     * NotifyOfInteractionCommandStruct */
+    @instance ChunkHandle	OLDWI_triggerList = 0;
+    @instance OLDialogOptFlags	OLDWI_optFlags = 0;
+    /* the composite that holds the dialog's gadgets */
+    @instance ChunkHandle	OLDWI_gadgetArea = 0;
+    @instance ChunkHandle	OLDWI_bottomArea = 0;
+    /* the response's action (the asm's ActionDescriptor: no C type) */
+    @instance optr		OLDWI_responseOD = 0;
+    @instance Message		OLDWI_responseMsg = 0;
+
+@endc;
+
+/* OLReplyBarFlags */
+typedef ByteFlags OLReplyBarFlags;
+#define OLRBF_UNDER_DIALOG	0x80	/* a dialog's (its vis parent) */
+
+@class OLReplyBarClass, OLCtrlClass;
+
+/* the dialog whose reply bar this is */
+@message void MSG_OL_REPLY_BAR_SET_DIALOG(optr dialog);
+
+    @instance optr		OLRBI_dialog = 0;
+    @instance OLReplyBarFlags	OLRBI_flags = 0;
+
+@endc;
+
+@endlib
+
+#endif

@@ -497,9 +497,9 @@ static void FreeIconSlot(optr o)
     @callsuper();
 }
 
-/* MaybeInTitleBar: a child seeking the title bar goes into its group
- * (made if needed); 0 if not */
-static optr MaybeInTitleBar(optr o, optr child)
+/* OpenWinMaybeInTitleBar (MaybeInTitleBar): a child seeking the title
+ * bar goes into its group (made if needed); 0 if not */
+optr OpenWinMaybeInTitleBar(optr o, optr child)
 {
     word type;
     Boolean left, right;
@@ -536,7 +536,7 @@ static optr MaybeInTitleBar(optr o, optr child)
     if (child == pself->OLWI_titleBarLeftGroup ||
 	child == pself->OLWI_titleBarRightGroup)
 	return 0;
-    g = MaybeInTitleBar(oself, child);
+    g = OpenWinMaybeInTitleBar(oself, child);
     if (g)
 	return g;
     return MWin(oself)->OLMDWI_gadgetArea ?

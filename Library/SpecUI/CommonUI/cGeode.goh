@@ -24,6 +24,7 @@
 @include <Internal/SpecUI/olApplicationClass.goh>
 @include <Internal/SpecUI/olGadgetAreaClass.goh>
 @include <Internal/SpecUI/olBaseWinClass.goh>
+@include <Internal/SpecUI/olPopupWinClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/im.h>
 #include <Internal/videoDr.h>
@@ -460,3 +461,12 @@ extern ClassStruct *OLBuildScreen(optr oself, word masterOffset);
 extern ClassStruct *OLBuildApplication(optr oself, word masterOffset);
 extern ClassStruct *OLBuildField(optr oself, word masterOffset);
 extern ClassStruct *OLBuildPrimary(optr oself, word masterOffset);
+extern ClassStruct *OLBuildInteraction(optr oself, word masterOffset);
+extern optr OpenCreateChildObject(MemHandle block, optr parent,
+				  ClassStruct *class, word hint,
+				  Boolean usable, Boolean oneWay,
+				  CompChildFlags flags);
+extern Boolean OLQueryIsMenu(optr o);
+extern void OpenSendSpecBuildBranch(optr o, SpecBuildFlags flags);
+extern void OLPopupDismiss(optr o);
+extern optr OpenWinMaybeInTitleBar(optr o, optr child);

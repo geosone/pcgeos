@@ -1,0 +1,724 @@
+/*
+ * cwinDialog.goc -- OLDialogWinClass (after cwinDialog.asm): the window
+ * of a GIV_DIALOG GenInteraction.  A command window (or a notice if it
+ * is modal) centered on its parent, its generic children in a gadget
+ * area, those seeking the title bar in a title bar group, those seeking
+ * the reply bar in one it makes; its GenInteractionType decides how it
+ * behaves (properties apply and reset, single usage dialogs go when
+ * complete); the standard triggers (IC_OK, IC_APPLY ...) the reply bar
+ * holds are noted for MSG_GEN_INTERACTION_ACTIVATE_COMMAND.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet:
+ *   - the standard triggers the type adds (AddStandardTriggerIfNeeded:
+ *     the specific UI builds no GenTrigger yet) and their monikers, the
+ *     removal of a reply bar with only a close trigger;
+ *   - TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE, UserDoDialog;
+ *   - the focus of a dialog run by the UI thread
+ *     (MSG_META_MUP_ALTER_FTVMC_EXCL);
+ *   - a trigger activated by MSG_GEN_INTERACTION_ACTIVATE_COMMAND (the
+ *     command goes up as MSG_GEN_GUP_INTERACTION_COMMAND).
+ */
+@include "cGeode.goh"
+
+@classdecl OLDialogWinClass, neverSaved;
+
+#define DWin(o)		((OLDialogWinInstance *) ObjDerefVis(o))
+#define Inter(o)	((GenInteractionInstance *) ObjDerefGen(o))
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+#define R(r)		((r) << OLBF_REPLY_OFFSET)
+#define MODAL		(OLPWF_APP_MODAL | OLPWF_SYS_MODAL)
+
+/* ---------------------------------------------------------------------
+ * Initialization
+ * ------------------------------------------------------------------- */
+
+static void AlignHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		      word dataType, void *handlerData)
+{
+    (void) extra;
+    (void) handlerData;
+    DWin(ConstructOptr(mh, chnk))->OLWI_attrs |=
+	dataType == HINT_INTERACTION_MAKE_RESIZABLE ? OWA_RESIZABLE
+						    : OWA_MAXIMIZABLE;
+}
+
+static VarDataCHandler alignHints[] = {
+    { HINT_INTERACTION_MAKE_RESIZABLE, AlignHint },
+    { HINT_INTERACTION_MAXIMIZABLE, AlignHint },
+};
+
+static void DialogHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		       word dataType, void *handlerData)
+{
+    OLDialogWinInstance *d = DWin(ConstructOptr(mh, chnk));
+
+    (void) extra;
+    (void) handlerData;
+    switch (dataType) {
+    case HINT_INTERACTION_SINGLE_USAGE:
+	d->OLDWI_optFlags |= OLDOF_SINGLE_USAGE;
+	break;
+    case HINT_INTERACTION_FREQUENT_USAGE:
+	d->OLDWI_optFlags &= ~OLDOF_SINGLE_USAGE;
+	break;
+    case HINT_INTERACTION_COMPLEX_PROPERTIES:
+	d->OLDWI_optFlags |= OLDOF_COMPLEX_PROPERTIES;
+	break;
+    case HINT_INTERACTION_SIMPLE_PROPERTIES:
+	d->OLDWI_optFlags &= ~OLDOF_COMPLEX_PROPERTIES;
+	break;
+    case HINT_INTERACTION_RELATED_PROPERTIES:
+    case HINT_INTERACTION_SLOW_RESPONSE_PROPERTIES:
+    case HINT_INTERACTION_REQUIRES_VALIDATION:
+	d->OLDWI_optFlags |= OLDOF_DELAYED_MODE;
+	break;
+    case HINT_INTERACTION_UNRELATED_PROPERTIES:
+    case HINT_INTERACTION_FAST_RESPONSE_PROPERTIES:
+	d->OLDWI_optFlags &= ~OLDOF_DELAYED_MODE;
+	break;
+    case HINT_INTERACTION_NO_DISTURB:
+	d->OLWI_moreFixedAttr |= OWMFA_NO_DISTURB;
+	break;
+    case HINT_INTERACTION_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD:
+	d->OLWI_moreFixedAttr |= OWMFA_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD;
+	break;
+    }
+}
+
+static VarDataCHandler dialogHints[] = {
+    { HINT_INTERACTION_SINGLE_USAGE, DialogHint },
+    { HINT_INTERACTION_FREQUENT_USAGE, DialogHint },
+    { HINT_INTERACTION_COMPLEX_PROPERTIES, DialogHint },
+    { HINT_INTERACTION_SIMPLE_PROPERTIES, DialogHint },
+    { HINT_INTERACTION_RELATED_PROPERTIES, DialogHint },
+    { HINT_INTERACTION_UNRELATED_PROPERTIES, DialogHint },
+    { HINT_INTERACTION_SLOW_RESPONSE_PROPERTIES, DialogHint },
+    { HINT_INTERACTION_FAST_RESPONSE_PROPERTIES, DialogHint },
+    { HINT_INTERACTION_REQUIRES_VALIDATION, DialogHint },
+    { HINT_INTERACTION_NO_DISTURB, DialogHint },
+    { HINT_INTERACTION_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD, DialogHint },
+};
+
+/*
+ * OLDialogWinInitialize: a command window (resizable or maximizable by
+ * the hints), or modal a notice (not closable, no system menu, not
+ * minimizable); not closable for a progress, affirmation, notification
+ * or multiple response; properties are delayed, all but properties and
+ * commands single usage; the hints
+ */
+@method OLDialogWinClass, MSG_META_INITIALIZE
+{
+    OLDialogWinInstance *d;
+    GenInteractionType type;
+
+    @callsuper();
+    d = DWin(oself);
+    d->OLWI_fixedAttr &= ~OWFA_PRESERVE_FOCUS;
+    if (!(d->OLPWI_flags & MODAL)) {
+	d->OLWI_attrs |= MO_ATTRS_COMMAND_WINDOW;
+	d->OLWI_type = MOWT_COMMAND_WINDOW;
+	@call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+	ObjVarScanData(oself, sizeof(alignHints) / sizeof(alignHints[0]),
+		       alignHints, NULL);
+    } else {
+	/* (the asm keeps only focusable and targetable, twice: the thick
+	 * line border it sets in between goes again) */
+	d->OLWI_attrs &= OWA_FOCUSABLE | OWA_TARGETABLE;
+	d->OLWI_attrs |= MO_ATTRS_COMMAND_WINDOW &
+			 ~(OWA_HAS_SYS_MENU | OWA_CLOSABLE);
+	d->OLWI_type = MOWT_NOTICE_WINDOW;
+	d->VI_attrs |= VA_BRANCH_NOT_MINIMIZABLE;
+	@call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    }
+    d = DWin(oself);
+    d->OLWI_menuState |= OLWMS_MENU_WINDOW_GRABS_ARE_TEMPORARY;
+    type = Inter(oself)->GII_type;
+    d = DWin(oself);
+    if (type == GIT_PROGRESS || type == GIT_AFFIRMATION ||
+	type == GIT_NOTIFICATION || type == GIT_MULTIPLE_RESPONSE)
+	d->OLWI_attrs &= ~OWA_CLOSABLE;
+    if (type == GIT_PROPERTIES)
+	d->OLDWI_optFlags = OLDOF_DELAYED_MODE;
+    else if (type != GIT_COMMAND)
+	d->OLDWI_optFlags |= OLDOF_SINGLE_USAGE;
+    ObjVarScanData(oself, sizeof(dialogHints) / sizeof(dialogHints[0]),
+		   dialogHints, NULL);
+    d = DWin(oself);
+    if (d->OLDWI_optFlags & OLDOF_DELAYED_MODE)
+	d->OLCI_buildFlags |= OLBF_DELAYED_MODE;
+}
+
+/*
+ * OLDialogWinScanGeometryHints: centered, as large as it wants (shrunk
+ * to fit its parent), kept partly visible; modal: kept visible
+ */
+@method OLDialogWinClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    OLDialogWinInstance *d;
+
+    @callsuper();
+    d = DWin(oself);
+    if (!(d->OLPWI_flags & MODAL))
+	d->OLWI_winPosSizeFlags = WPSF_PERSIST |
+				  (WCT_KEEP_PARTIALLY_VISIBLE << 6) |
+				  (WPT_CENTER << 3) | WST_AS_DESIRED |
+				  WPSF_SHRINK_DESIRED_SIZE_TO_FIT_IN_PARENT;
+    else
+	d->OLWI_winPosSizeFlags = WPSF_PERSIST | (WCT_KEEP_VISIBLE << 6) |
+				  (WPT_CENTER << 3) | WST_AS_DESIRED;
+    OpenWinProcessHints(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Build
+ * ------------------------------------------------------------------- */
+
+/* the reply bar and the area below it, built as branches */
+static void BuildBranchIfAny(optr o)
+{
+    if (o)
+	OpenSendSpecBuildBranch(o, 0);
+}
+
+/*
+ * HandleDialogResponses: the standard triggers of the type (Port32: not
+ * yet), then the reply bar built
+ */
+static void HandleDialogResponses(optr o)
+{
+    BuildBranchIfAny(DWin(o)->OLDWI_replyBar);
+}
+
+/*
+ * OLDialogWinUpdateSpecBuild: the window's gadget area (not for a
+ * custom window), the reply bar we made and the bottom area built with
+ * the window; the first time, the responses
+ */
+@method OLDialogWinClass, MSG_SPEC_BUILD_BRANCH
+{
+    OLDialogWinInstance *d;
+    MemHandle mh = OptrToHandle(oself);
+
+    if (flags & SBF_WIN_GROUP) {
+	d = DWin(oself);
+	if (!(d->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW) &&
+	    !d->OLDWI_gadgetArea) {
+	    ChunkHandle ga = OpenWinCreateBarObject(oself, (ClassStruct *)
+						    &OLGadgetAreaClass);
+
+	    DWin(oself)->OLDWI_gadgetArea = ga;
+	}
+	d = DWin(oself);
+	if (d->OLDWI_optFlags & OLDOF_REPLY_BAR_CREATED)
+	    BuildBranchIfAny(d->OLDWI_replyBar);
+	d = DWin(oself);
+	if (d->OLDWI_bottomArea)
+	    BuildBranchIfAny(ConstructOptr(mh, d->OLDWI_bottomArea));
+    }
+    @callsuper();
+    if (!(flags & SBF_WIN_GROUP))
+	return;
+    d = DWin(oself);
+    if (d->OLDWI_optFlags & OLDOF_BUILT)
+	return;
+    d->OLDWI_optFlags |= OLDOF_BUILT;
+    HandleDialogResponses(oself);
+}
+
+static void BuildBar(optr bar, SpecBuildFlags flags)
+{
+    if (bar && OptrToChunk(bar))
+	@call bar::MSG_SPEC_BUILD(flags);
+}
+
+/*
+ * OLDialogWinSpecBuild: the window: the title bar groups and the gadget
+ * area first (for the children to attach to); a UserDoDialog is not
+ * movable
+ */
+@method OLDialogWinClass, MSG_SPEC_BUILD
+{
+    OLDialogWinInstance *d;
+
+    if (flags & SBF_WIN_GROUP) {
+	d = DWin(oself);
+	BuildBar(d->OLWI_titleBarLeftGroup, flags);
+	d = DWin(oself);
+	BuildBar(d->OLWI_titleBarRightGroup, flags);
+	d = DWin(oself);
+	if (d->OLDWI_gadgetArea)
+	    BuildBar(ConstructOptr(OptrToHandle(oself), d->OLDWI_gadgetArea),
+		     flags);
+	if (Inter(oself)->GII_attrs & GIA_INITIATED_VIA_USER_DO_DIALOG)
+	    DWin(oself)->OLWI_attrs &= ~OWA_MOVABLE;
+    }
+    @callsuper();
+}
+
+/* OLDialogWinRecalcSize: choosing its own width, no wider than the
+ * screen (less two) */
+@method OLDialogWinClass, MSG_VIS_RECALC_SIZE
+{
+    SizeAsDWord s = @callsuper();
+    word sw, sh, max;
+
+    if (!(width & RSA_CHOOSE_OWN_SIZE))
+	return s;
+    OpenGetScreenDimensions(&sw, &sh);
+    max = (word) (sw - 2);
+    if (DWORD_WIDTH(s) <= max)
+	return s;
+    return @call oself::MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED(
+					max, RSA_CHOOSE_OWN_SIZE);
+}
+
+/* OLDialogWinVisAddChild: the reply bar and the bottom area stay last */
+@method OLDialogWinClass, MSG_VIS_ADD_CHILD
+{
+    OLDialogWinInstance *d;
+    optr x;
+
+    @callsuper();
+    d = DWin(oself);
+    x = d->OLDWI_replyBar;
+    if (x && @call oself::MSG_VIS_FIND_CHILD(x) != 0xffff)
+	@call oself::MSG_VIS_MOVE_CHILD(x, CCO_LAST);
+    d = DWin(oself);
+    if (d->OLDWI_bottomArea) {
+	x = ConstructOptr(OptrToHandle(oself), d->OLDWI_bottomArea);
+	if (@call oself::MSG_VIS_FIND_CHILD(x) != 0xffff)
+	    @call oself::MSG_VIS_MOVE_CHILD(x, CCO_LAST);
+    }
+}
+
+/*
+ * OLDialogWinDetermineVisParentForChild: the title bar groups, the
+ * bottom area and the reply bar are ours; a child seeking the title bar
+ * goes into its group, the others into the gadget area
+ */
+@method OLDialogWinClass, MSG_SPEC_DETERMINE_VIS_PARENT_FOR_CHILD
+{
+    optr g;
+
+    if (child == pself->OLWI_titleBarLeftGroup ||
+	child == pself->OLWI_titleBarRightGroup ||
+	(pself->OLDWI_bottomArea &&
+	 child == ConstructOptr(OptrToHandle(oself), pself->OLDWI_bottomArea)) ||
+	(pself->OLDWI_replyBar && child == pself->OLDWI_replyBar))
+	return 0;
+    g = OpenWinMaybeInTitleBar(oself, child);
+    if (g)
+	return g;
+    return DWin(oself)->OLDWI_gadgetArea ?
+	   ConstructOptr(OptrToHandle(oself), DWin(oself)->OLDWI_gadgetArea)
+	   : 0;
+}
+
+/*
+ * OLDialogWinSpecGetVisParent: a dual built window with a custom window
+ * priority of 0 goes where system modal windows go
+ */
+@method OLDialogWinClass, MSG_SPEC_GET_VIS_PARENT
+{
+    WinPriority *p;
+    optr vp = 0;
+    word type = SQT_VIS_PARENT_FOR_SYS_MODAL;
+
+    if (!(flags & SBF_WIN_GROUP) ||
+	!(pself->VI_specAttrs & SA_USES_DUAL_BUILD) ||
+	(p = ObjVarFindData(oself, ATTR_GEN_WINDOW_CUSTOM_WINDOW_PRIORITY))
+	== NULL || *p)
+	return @callsuper();
+    (void) GenCallParent(oself, MSG_SPEC_GUP_QUERY_VIS_PARENT, &type,
+			 sizeof(type), &vp, sizeof(vp));
+    return vp;
+}
+
+/*
+ * OLDialogWinTestInputRestrictability: a modal dialog overrides input
+ * restrictions (unless it abides by them)
+ */
+@method OLDialogWinClass, MSG_GEN_INTERACTION_TEST_INPUT_RESTRICTABILITY
+{
+    (void) modalWindow;
+    if (!(pself->OLPWI_flags & MODAL))
+	return FALSE;
+    if (ObjVarFindData(oself, ATTR_GEN_INTERACTION_OVERRIDE_INPUT_RESTRICTIONS))
+	return TRUE;
+    if (ObjVarFindData(oself, ATTR_GEN_INTERACTION_ABIDE_BY_INPUT_RESTRICTIONS))
+	return FALSE;
+    /* (dialogOverrideInputRestrictionsTable: every type overrides) */
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * The reply bar and the standard triggers
+ * ------------------------------------------------------------------- */
+
+/*
+ * EnsureReplyBar: our reply bar: one we make (a GenInteraction with
+ * HINT_MAKE_REPLY_BAR, usable, linked up to us only), built if we are
+ */
+static optr EnsureReplyBar(optr o)
+{
+    optr rb = DWin(o)->OLDWI_replyBar;
+
+    if (rb)
+	return rb;
+    rb = OpenCreateChildObject(OptrToHandle(o), o,
+			       (ClassStruct *) &GenInteractionClass,
+			       HINT_MAKE_REPLY_BAR | VDF_SAVE_TO_STATE,
+			       TRUE, TRUE, 0);
+    DWin(o)->OLDWI_replyBar = rb;
+    DWin(o)->OLDWI_optFlags |= OLDOF_REPLY_BAR_CREATED;
+    if (VisCheckIfSpecBuilt(o))
+	OpenSendSpecBuildBranch(rb, 0);
+    return rb;
+}
+
+/*
+ * OLDialogWinGupQuery: SGQT_BUILD_INFO: a menu below is a top menu (no
+ * vis parent here); an object seeking the reply bar goes into ours
+ */
+@method OLDialogWinClass, MSG_SPEC_P32_GUP_QUERY
+{
+    optr rb;
+    OLBuildFlags f;
+
+    if ((word) queryType != SGQT_BUILD_INFO)
+	return @callsuper();
+    f = retValue->GRP_bp;
+    if (f & OLBF_MENUABLE) {
+	retValue->GRP_bp = f | R(OLBR_TOP_MENU);
+	retValue->GRP_cx = 0;
+	return TRUE;
+    }
+    if ((f & OLBF_TARGET) != T(OLBT_FOR_REPLY_BAR) ||
+	(rb = EnsureReplyBar(oself)) == 0)
+	return @callsuper();
+    retValue->GRP_bp = f | R(OLBR_REPLY_BAR);
+    retValue->GRP_cx = OptrToHandle(rb);
+    retValue->GRP_dx = OptrToChunk(rb);
+    return TRUE;
+}
+
+/* OLDialogWinNotifyOfReplyBar: our reply bar (it learns its dialog), or
+ * none */
+@method OLDialogWinClass, MSG_OL_WIN_NOTIFY_OF_REPLY_BAR
+{
+    pself->OLDWI_replyBar = replyBar;
+    if (!replyBar) {
+	pself->OLDWI_optFlags &= ~OLDOF_REPLY_BAR_CREATED;
+	return;
+    }
+    @call replyBar::MSG_OL_REPLY_BAR_SET_DIALOG(oself);
+}
+
+/* FindStandardTriggerEntry: the entry of the command (NULL if none) */
+static NotifyOfInteractionCommandStruct *FindEntry(optr o, word ic)
+{
+    ChunkHandle list = DWin(o)->OLDWI_triggerList;
+    optr a;
+    word i, n;
+    NotifyOfInteractionCommandStruct *e;
+
+    if (!list)
+	return NULL;
+    a = ConstructOptr(OptrToHandle(o), list);
+    n = ChunkArrayGetCount(a);
+    for (i = 0; i < n; i++) {
+	e = ChunkArrayElementToPtr(a, i, NULL);
+	if (e->NOICS_ic == ic)
+	    return e;
+    }
+    return NULL;
+}
+
+/* FindStandardTriggerInfo: the standard trigger of the command */
+static optr FindStandardTrigger(optr o, word ic)
+{
+    NotifyOfInteractionCommandStruct *e = FindEntry(o, ic);
+
+    return e ? e->NOICS_optr : 0;
+}
+
+/*
+ * OLDialogWinNotifyOfInteractionCommand: a standard trigger noted (one
+ * per command), or forgotten when it goes
+ */
+@method OLDialogWinClass, MSG_OL_WIN_NOTIFY_OF_INTERACTION_COMMAND
+{
+    NotifyOfInteractionCommandStruct *e;
+    MemHandle mh = OptrToHandle(oself);
+    optr a;
+    ChunkHandle list;
+
+    e = FindEntry(oself, params->NOICS_ic);
+    if (params->NOICS_flags & NOICF_TRIGGER_DEMISE) {
+	list = DWin(oself)->OLDWI_triggerList;
+	if (e)
+	    ChunkArrayDelete(ConstructOptr(mh, list), e);
+	return;
+    }
+    if (e)
+	return;
+    list = DWin(oself)->OLDWI_triggerList;
+    if (!list) {
+	list = ChunkArrayCreate(mh, sizeof(NotifyOfInteractionCommandStruct),
+				0, 0);
+	DWin(oself)->OLDWI_triggerList = list;
+    }
+    a = ConstructOptr(mh, list);
+    e = ChunkArrayAppend(a, 0);
+    *e = *params;
+}
+
+@method OLDialogWinClass, MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER
+{
+    return FindStandardTrigger(oself, command);
+}
+
+@method OLDialogWinClass, MSG_OL_DIALOG_WIN_REBUILD_STANDARD_TRIGGERS
+{
+    HandleDialogResponses(oself);
+}
+
+/*
+ * OLDialogWinSpecUnbuild: the window: the triggers we made destroyed,
+ * our reply bar too; the gadget area forgotten (it goes with the vis
+ * tree), the bottom area unbuilt and destroyed
+ */
+@method OLDialogWinClass, MSG_SPEC_UNBUILD
+{
+    OLDialogWinInstance *d;
+    MemHandle mh = OptrToHandle(oself);
+
+    if (flags & SBF_WIN_GROUP) {
+	optr rb, x;
+	ChunkHandle list, bottom;
+
+	d = DWin(oself);
+	d->OLDWI_optFlags &= ~OLDOF_BUILT;
+	list = d->OLDWI_triggerList;
+	if (list) {
+	    optr a = ConstructOptr(mh, list);
+	    word i, n = ChunkArrayGetCount(a);
+	    NotifyOfInteractionCommandStruct *e;
+
+	    for (i = 0; i < n; i++) {
+		e = ChunkArrayElementToPtr(a, i, NULL);
+		if (e->NOICS_flags & NOICF_TRIGGER_CREATED) {
+		    x = e->NOICS_optr;
+		    @call x::MSG_GEN_DESTROY(VUM_NOW, 0);
+		}
+	    }
+	}
+	d = DWin(oself);
+	rb = d->OLDWI_replyBar;
+	d->OLDWI_replyBar = 0;
+	if (d->OLDWI_optFlags & OLDOF_REPLY_BAR_CREATED) {
+	    d->OLDWI_optFlags &= ~OLDOF_REPLY_BAR_CREATED;
+	    if (rb)
+		@call rb::MSG_GEN_DESTROY(VUM_NOW, 0);
+	}
+	d = DWin(oself);
+	list = d->OLDWI_triggerList;
+	d->OLDWI_triggerList = 0;
+	if (list)
+	    LMemFree(ConstructOptr(mh, list));
+	d = DWin(oself);
+	d->OLDWI_gadgetArea = 0;
+	bottom = d->OLDWI_bottomArea;
+	if (bottom) {
+	    x = ConstructOptr(mh, bottom);
+	    @call x::MSG_SPEC_UNBUILD_BRANCH(flags);
+	    DWin(oself)->OLDWI_bottomArea = 0;
+	    @call x::MSG_GEN_DESTROY(VUM_NOW, 0);
+	}
+    }
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Enabled, apply and reset
+ * ------------------------------------------------------------------- */
+
+/* OLDWNotifyCommon: the reply bar, the bottom area and the gadget area
+ * (not generic children of ours) told as generic objects */
+static void NotifyBars(optr o, Boolean enabled, VisUpdateMode mode, byte f)
+{
+    OLDialogWinInstance *d = DWin(o);
+    MemHandle mh = OptrToHandle(o);
+    optr x[3];
+    int i;
+
+    f &= ~NEF_STATE_CHANGING;
+    x[0] = d->OLDWI_replyBar;
+    x[1] = d->OLDWI_bottomArea ? ConstructOptr(mh, d->OLDWI_bottomArea) : 0;
+    x[2] = d->OLDWI_gadgetArea ? ConstructOptr(mh, d->OLDWI_gadgetArea) : 0;
+    for (i = 0; i < 3; i++) {
+	optr b = x[i];
+
+	if (!b || !OptrToChunk(b))
+	    continue;
+	if (enabled)
+	    (void) @call b::MSG_GEN_NOTIFY_ENABLED(mode, f);
+	else
+	    (void) @call b::MSG_GEN_NOTIFY_NOT_ENABLED(mode, f);
+    }
+}
+
+@method OLDialogWinClass, MSG_SPEC_NOTIFY_ENABLED
+{
+    (void) @callsuper();
+    NotifyBars(oself, TRUE, updateMode, flags);
+    return TRUE;
+}
+
+@method OLDialogWinClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    (void) @callsuper();
+    NotifyBars(oself, FALSE, updateMode, flags);
+    return TRUE;
+}
+
+/* OLDialogWinGenApply: applied: the focus given up (with a mouse), not
+ * applyable */
+@method OLDialogWinClass, MSG_GEN_APPLY
+{
+    optr app;
+
+    @callsuper();
+    if (!OpenCheckIfKeyboardOnly()) {
+	@call oself::MSG_META_RELEASE_FOCUS_EXCL();
+	app = GeodeGetAppObject(0);
+	if (app)
+	    @call app::MSG_META_ENSURE_ACTIVE_FT();
+    }
+    @call oself::MSG_OL_MAKE_NOT_APPLYABLE();
+}
+
+@method OLDialogWinClass, MSG_GEN_RESET
+{
+    @callsuper();
+    @call oself::MSG_OL_MAKE_NOT_APPLYABLE();
+}
+
+/* OLDialogWinHandleApplyable: the apply and reset triggers enabled or
+ * not */
+static void HandleApplyable(optr o, Boolean on)
+{
+    word ics[2];
+    int i;
+
+    ics[0] = IC_APPLY;
+    ics[1] = IC_RESET;
+    for (i = 0; i < 2; i++) {
+	optr t = FindStandardTrigger(o, ics[i]);
+
+	if (!t)
+	    continue;
+	if (on)
+	    @call t::MSG_GEN_SET_ENABLED(VUM_NOW);
+	else
+	    @call t::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+    }
+}
+
+@method OLDialogWinClass, MSG_GEN_MAKE_APPLYABLE, MSG_GEN_MAKE_NOT_APPLYABLE
+{
+    HandleApplyable(oself, message == MSG_GEN_MAKE_APPLYABLE);
+}
+
+@method OLDialogWinClass, MSG_OL_MAKE_APPLYABLE, MSG_OL_MAKE_NOT_APPLYABLE,
+			  MSG_OL_VUP_MAKE_APPLYABLE
+{
+    HandleApplyable(oself, message != MSG_OL_MAKE_NOT_APPLYABLE);
+}
+
+/* ---------------------------------------------------------------------
+ * Interaction commands
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDialogWinInteractionCommand: IC_APPLY applies (unless the pre-apply
+ * refuses), IC_RESET resets; IC_INTERACTION_COMPLETE dismisses a single
+ * usage or modal dialog; IC_HELP brings up help; IC_DISMISS takes it
+ * down (a modal properties dialog is reset, unless it completed) and
+ * lets the default go.  The command stops here.
+ */
+@method OLDialogWinClass, MSG_GEN_GUP_INTERACTION_COMMAND
+{
+    OLDialogWinInstance *d;
+
+    switch (command) {
+    case IC_APPLY:
+	if (!@call oself::MSG_GEN_PRE_APPLY())
+	    @call oself::MSG_GEN_APPLY();
+	@call oself::MSG_GEN_POST_APPLY();
+	return TRUE;
+    case IC_RESET:
+	@call oself::MSG_GEN_RESET();
+	return TRUE;
+    case IC_INTERACTION_COMPLETE:
+	d = DWin(oself);
+	if ((d->OLDWI_optFlags & OLDOF_SINGLE_USAGE) ||
+	    (d->OLPWI_flags & MODAL)) {
+	    d->OLDWI_optFlags |= OLDOF_DOING_COMPLETE;
+	    (void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	}
+	return TRUE;
+    case IC_HELP:
+	@call oself::MSG_META_BRING_UP_HELP();
+	return TRUE;
+    case IC_DISMISS: {
+	GenReturnParams r;
+
+	d = DWin(oself);
+	if (Inter(oself)->GII_type == GIT_PROPERTIES &&
+	    !(d->OLDWI_optFlags & OLDOF_DOING_COMPLETE) &&
+	    (d->OLPWI_flags & MODAL))
+	    @call oself::MSG_GEN_RESET();
+	OLPopupDismiss(oself);
+	(void) @call oself::MSG_VIS_P32_VUP_QUERY(&r,
+				SVQT_FORCE_RELEASE_DEFAULT_EXCLUSIVE, 0, 0);
+	DWin(oself)->OLDWI_optFlags &= ~OLDOF_DOING_COMPLETE;
+	return TRUE;
+    }
+    default:
+	return TRUE;
+    }
+}
+
+/* OLDialogWinActivateInteractionCommand: the command's trigger (Port32:
+ * no GenTrigger in C yet, so the command itself) */
+@method OLDialogWinClass, MSG_GEN_INTERACTION_ACTIVATE_COMMAND
+{
+    (void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(command);
+}
+
+/* OLDialogWinClose: closable: as the dismiss trigger */
+@method OLDialogWinClass, MSG_OL_WIN_CLOSE
+{
+    if (pself->OLWI_attrs & OWA_CLOSABLE)
+	@call oself::MSG_GEN_INTERACTION_ACTIVATE_COMMAND(IC_DISMISS);
+}
+
+/*
+ * OLDialogWinInitiateNoDisturb: usable (and enabled if it goes when
+ * disabled), not visible: on the window list, realizable without coming
+ * to the top
+ */
+@method OLDialogWinClass, MSG_GEN_INTERACTION_INITIATE_NO_DISTURB
+{
+    if (!GenCheckIfFullyUsable(oself, FALSE))
+	return;
+    if ((pself->OLWI_attrs & OWA_DISMISS_WHEN_DISABLED) &&
+	!GenCheckIfFullyEnabled(oself, FALSE))
+	return;
+    OpenWinEnsureOnWindowList(oself);
+    if (DWin(oself)->VI_attrs & VA_VISIBLE)
+	return;
+    DWin(oself)->OLWI_fixedAttr &= ~OWFA_OPEN_ON_TOP;
+    @call oself::MSG_SPEC_SET_ATTRS(SA_REALIZABLE, 0, VUM_NOW);
+}

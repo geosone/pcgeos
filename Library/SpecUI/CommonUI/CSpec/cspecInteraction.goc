@@ -1,0 +1,140 @@
+/*
+ * cspecInteraction.goc -- the build routine of GenInteractionClass
+ * (after cspecInteraction.asm): OLMapGroup asks the generic parents
+ * where the interaction goes (SGQT_BUILD_INFO: a menu bar, a menu, a
+ * reply bar) by its hints, and gives its class by its visibility: a
+ * dialog (OLDialogWinClass), a popout, a menu or a menu's group, a
+ * reply bar (OLReplyBarClass) or a plain group (OLCtrlClass).  The vis
+ * parent and build flags wait in MAP_GROUP_DATA for OLCtrl's
+ * MSG_META_INITIALIZE.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: OLPopoutClass and
+ * OLMenuItemGroupClass (an OLCtrl instead), OLMenuWinClass (an
+ * OLPopupWin instead: a popup with no menu behaviour) and its
+ * HINT_IS_EXPRESS_MENU.
+ */
+@include "cGeode.goh"
+
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+#define R(r)		((r) << OLBF_REPLY_OFFSET)
+
+static void MapGroupHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+			 word dataType, void *handlerData)
+{
+    OLBuildFlags *f = handlerData;
+
+    (void) mh;
+    (void) chnk;
+    (void) extra;
+    switch (dataType) {
+    case HINT_SEEK_MENU_BAR:
+	*f |= OLBF_SEEK_MENU_BAR;
+	break;
+    case HINT_AVOID_MENU_BAR:
+	*f |= OLBF_AVOID_MENU_BAR | R(OLBR_TOP_MENU);
+	break;
+    case HINT_SYS_MENU:
+	*f |= T(OLBT_SYS_MENU) | R(OLBR_TOP_MENU);
+	break;
+    case HINT_SEEK_REPLY_BAR:
+	*f |= T(OLBT_FOR_REPLY_BAR);
+	break;
+    case HINT_IS_POPUP_LIST:
+	*f |= T(OLBT_IS_POPUP_LIST) | R(OLBR_TOP_MENU);
+	break;
+    case HINT_CUSTOM_SYS_MENU:
+	/* (only ISU makes it a system menu) */
+	break;
+    }
+}
+
+static VarDataCHandler mapGroupHints[] = {
+    { HINT_SEEK_MENU_BAR, MapGroupHint },
+    { HINT_AVOID_MENU_BAR, MapGroupHint },
+    { HINT_SYS_MENU, MapGroupHint },
+    { HINT_SEEK_REPLY_BAR, MapGroupHint },
+    { HINT_IS_POPUP_LIST, MapGroupHint },
+    { HINT_CUSTOM_SYS_MENU, MapGroupHint },
+};
+
+/*
+ * OLMapGroup: the build flags from the visibility (a popup is menuable)
+ * and the hints; unless the object is a system, express or popup list
+ * menu, avoids the menu bar or is a dialog or popup the user cannot
+ * bring up, the generic parents are asked where it goes (no answer: no
+ * vis parent).  No vis parent given: the generic parent.  The class:
+ * a reply bar, a dialog, a popout; a control group that is a menu
+ * stays a group; a top menu popup is a menu window; a sub group of a
+ * sub menu is a menu's group, a popup there a menu window; else a
+ * plain group.
+ */
+ClassStruct *OLBuildInteraction(optr oself, word masterOffset)
+{
+    GenInteractionInstance *g;
+    GenInteractionVisibility vis;
+    OLBuildFlags flags = 0, target;
+    OLMapGroupDataEntry *m;
+    GenReturnParams r;
+    optr vp = 0;
+    word reply;
+    Boolean ask = TRUE;
+
+    (void) masterOffset;
+    m = ObjVarAddData(oself, MAP_GROUP_DATA, sizeof(OLMapGroupDataEntry));
+    memset(m, 0, sizeof(*m));
+    g = (GenInteractionInstance *) ObjDerefGen(oself);
+    vis = g->GII_visibility;
+    if (vis == GIV_POPUP)
+	flags |= OLBF_MENUABLE;
+    ObjVarScanData(oself, sizeof(mapGroupHints) / sizeof(mapGroupHints[0]),
+		   mapGroupHints, &flags);
+    target = flags & OLBF_TARGET;
+    g = (GenInteractionInstance *) ObjDerefGen(oself);
+    if ((flags & OLBF_AVOID_MENU_BAR) || target == T(OLBT_SYS_MENU) ||
+	target == T(OLBT_IS_EXPRESS_MENU) || target == T(OLBT_IS_POPUP_LIST) ||
+	((vis == GIV_POPUP || vis == GIV_DIALOG) &&
+	 (g->GII_attrs & (GIA_NOT_USER_INITIATABLE |
+			  GIA_INITIATED_VIA_USER_DO_DIALOG))))
+	ask = FALSE;
+    if (ask) {
+	optr gp = GenFindParent(oself);
+
+	memset(&r, 0, sizeof(r));
+	r.GRP_bp = flags;
+	if (!gp || !@call gp::MSG_GEN_GUP_QUERY(&r, SGQT_BUILD_INFO)) {
+	    /* not answered: no vis parent, the flags as they were */
+	    m = ObjVarFindData(oself, MAP_GROUP_DATA);
+	    m->OLMGDE_visParent = 0;
+	    return (ClassStruct *) &OLDialogWinClass;
+	}
+	flags = r.GRP_bp;
+	vp = ConstructOptr(r.GRP_cx, r.GRP_dx);
+	if (!r.GRP_cx)
+	    vp = 0;
+    }
+    if (!vp)
+	vp = GenFindParent(oself);
+    m = ObjVarFindData(oself, MAP_GROUP_DATA);
+    m->OLMGDE_flags = flags;
+    m->OLMGDE_visParent = vp;
+
+    if (ObjVarFindData(oself, HINT_MAKE_REPLY_BAR))
+	return (ClassStruct *) &OLReplyBarClass;
+    if (vis == GIV_DIALOG)
+	return (ClassStruct *) &OLDialogWinClass;
+    if (vis == GIV_POPOUT)
+	return (ClassStruct *) &OLCtrlClass;	/* OLPopoutClass */
+    reply = flags & OLBF_REPLY;
+    if (vis == GIV_CONTROL_GROUP &&
+	(reply == R(OLBR_TOP_MENU) || reply == R(OLBR_SUB_MENU)))
+	return (ClassStruct *) &OLDialogWinClass;
+    if (reply == R(OLBR_TOP_MENU) && vis == GIV_POPUP)
+	return (ClassStruct *) &OLPopupWinClass;	/* OLMenuWinClass */
+    if (reply == R(OLBR_SUB_MENU)) {
+	if (vis == GIV_SUB_GROUP)
+	    return (ClassStruct *) &OLCtrlClass;  /* OLMenuItemGroupClass */
+	if (vis == GIV_POPUP)
+	    return (ClassStruct *) &OLPopupWinClass;	/* OLMenuWinClass */
+    }
+    return (ClassStruct *) &OLCtrlClass;
+}
