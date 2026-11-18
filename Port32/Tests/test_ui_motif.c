@@ -48,7 +48,12 @@
  *      data); disabled it does nothing;
  *  15. the actions arrived (the test waits for them); the trigger's
  *      action message and destination; the dismiss trigger closes the
- *      dialog at once (ATTR_GEN_TRIGGER_IMMEDIATE_ACTION).
+ *      dialog at once (ATTR_GEN_TRIGGER_IMMEDIATE_ACTION);
+ *  16. the standard triggers dialogs add to their reply bars, with the
+ *      standard monikers: Close of a command dialog (gone when not
+ *      usable), OK of a notice, Yes and No of an affirmation (Yes sent
+ *      completes and closes it), Apply, Reset (disabled) and Close of
+ *      delayed complex properties.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -172,11 +177,12 @@ int main(void)
     step(14);
     WAIT_FOR(st->UMS_triggered >= 2);
     step(15);
+    step(16);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 200 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 218 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

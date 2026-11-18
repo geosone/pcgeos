@@ -204,6 +204,23 @@ UMState umState;
     ATTR_GEN_TRIGGER_INTERACTION_COMMAND = IC_DISMISS;
     ATTR_GEN_TRIGGER_IMMEDIATE_ACTION;
 }
+/* dialogs getting their standard triggers: an affirmation (Yes, No)
+ * and delayed complex properties (Apply, Reset, Close) */
+@object GenInteractionClass UMAffirm = {
+    GI_visMoniker = "Sure?";
+    GI_states = GS_ENABLED;
+    GII_type = GIT_AFFIRMATION;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE | GIA_MODAL;
+}
+@object GenInteractionClass UMProps = {
+    GI_visMoniker = "Properties";
+    GI_states = GS_ENABLED;
+    GII_type = GIT_PROPERTIES;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE;
+    HINT_INTERACTION_COMPLEX_PROPERTIES;
+}
 @end UMObjects;
 
 static optr umSystem, umScreen, umField, umApp;
@@ -248,6 +265,26 @@ static void VisData(optr o, void *buf, word size)
     ObjLockObjBlock(OptrToHandle(o));
     memcpy(buf, ObjDerefVis(o), size);
     MemUnlock(OptrToHandle(o));
+}
+
+/* the text of a generic object's moniker is that given */
+static Boolean MonikerIs(optr o, const char *text)
+{
+    ChunkHandle ch = @call o::MSG_GEN_GET_VIS_MONIKER();
+    MemHandle mh = OptrToHandle(o);
+    const char *t;
+    word i;
+    Boolean ok = FALSE;
+
+    if (!ch)
+	return FALSE;
+    ObjLockObjBlock(mh);
+    t = (const char *) LMemDeref(ConstructOptr(mh, ch)) + VMWT_text;
+    for (i = 0; text[i] && t[i] == text[i]; i++)
+	;
+    ok = !text[i] && !t[i];
+    MemUnlock(mh);
+    return ok;
 }
 
 static Boolean InClass(optr o, ClassStruct *c)
@@ -1035,6 +1072,84 @@ static word Slot(byte req, sword *x, sword *y)
 	VisData(@UMTrigDialog, &d, sizeof(d));
 	UMCHECK(!(d.VI_attrs & VA_REALIZED));
 	@call UMTrigDialog::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	break;
+    }
+
+    case 16: {
+	/* the standard triggers a dialog adds to its reply bar (in it,
+	 * noted, with the standard monikers): a command dialog's Close
+	 * (last in its own reply bar), a notice's OK, an affirmation's
+	 * Yes and No (Yes the default, signalling completion: sent, the
+	 * single usage dialog closes), delayed properties' Apply (first,
+	 * disabled), Reset and Close; not usable they go */
+	OLDialogWinInstance d;
+	optr t, t2, t3;
+	GenInstance g;
+
+	@call UMDialog::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMDialog::MSG_GEN_INTERACTION_INITIATE();
+	t = @call UMDialog::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(IC_DISMISS);
+	UMCHECK(t && InClass(t, (ClassStruct *) &OLButtonClass));
+	if (t) {
+	    UMCHECK(@call t::MSG_GEN_FIND_PARENT() == @UMDlgReply);
+	    UMCHECK(@call UMDlgReply::MSG_GEN_FIND_CHILD(t) ==
+		    @call UMDlgReply::MSG_GEN_COUNT_CHILDREN() - 1);
+	    UMCHECK(@call t::MSG_VIS_FIND_PARENT() == @UMDlgReply);
+	    UMCHECK(MonikerIs(t, "Close"));
+	}
+	@call UMDialog::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	UMCHECK(!@call UMDialog::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(
+								IC_DISMISS));
+
+	@call UMNotice::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMNotice::MSG_GEN_INTERACTION_INITIATE();
+	t = @call UMNotice::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(IC_OK);
+	UMCHECK(t && MonikerIs(t, "OK"));
+	(void) @call UMNotice::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	@call UMNotice::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMAffirm, CCO_LAST);
+	@call UMAffirm::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMAffirm::MSG_GEN_INTERACTION_INITIATE();
+	VisData(@UMAffirm, &d, sizeof(d));
+	UMCHECK(d.VI_attrs & VA_REALIZED);
+	t = @call UMAffirm::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(IC_YES);
+	t2 = @call UMAffirm::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(IC_NO);
+	UMCHECK(t && t2 && MonikerIs(t, "Yes") && MonikerIs(t2, "No"));
+	if (t && t2) {
+	    UMCHECK(@call t::MSG_VIS_FIND_PARENT() == d.OLDWI_replyBar);
+	    UMCHECK(ObjVarFindData(t, HINT_DEFAULT_DEFAULT_ACTION) != NULL);
+	    ObjLockObjBlock(OptrToHandle(t));
+	    g = *(GenInstance *) ObjDerefGen(t);
+	    MemUnlock(OptrToHandle(t));
+	    UMCHECK(g.GI_attrs & GA_SIGNAL_INTERACTION_COMPLETE);
+	    @call t::MSG_GEN_TRIGGER_SEND_ACTION(FALSE);
+	    VisData(@UMAffirm, &d, sizeof(d));
+	    UMCHECK(!(d.VI_attrs & VA_REALIZED));
+	}
+	@call UMAffirm::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMProps, CCO_LAST);
+	@call UMProps::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMProps::MSG_GEN_INTERACTION_INITIATE();
+	VisData(@UMProps, &d, sizeof(d));
+	UMCHECK((d.OLDWI_optFlags & (OLDOF_DELAYED_MODE |
+				     OLDOF_COMPLEX_PROPERTIES)) ==
+		(OLDOF_DELAYED_MODE | OLDOF_COMPLEX_PROPERTIES));
+	t = @call UMProps::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(IC_APPLY);
+	t2 = @call UMProps::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(IC_RESET);
+	t3 = @call UMProps::MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(
+								IC_DISMISS);
+	UMCHECK(t && t2 && t3);
+	if (t && t2 && t3) {
+	    UMCHECK(MonikerIs(t, "Apply") && MonikerIs(t2, "Reset") &&
+		    MonikerIs(t3, "Close"));
+	    UMCHECK(@call d.OLDWI_replyBar::MSG_GEN_FIND_CHILD(t) == 0);
+	    UMCHECK(!@call t::MSG_GEN_GET_ENABLED() &&
+		    !@call t2::MSG_GEN_GET_ENABLED() &&
+		    @call t3::MSG_GEN_GET_ENABLED());
+	}
+	@call UMProps::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 	break;
     }
     }

@@ -180,12 +180,121 @@ static void BuildBranchIfAny(optr o)
 	OpenSendSpecBuildBranch(o, 0);
 }
 
+static optr EnsureReplyBar(optr o);
+static NotifyOfInteractionCommandStruct *FindEntry(optr o, word ic);
+static void SaveStandardTriggerInfo(optr o,
+				    NotifyOfInteractionCommandStruct *info);
+
+/* AddStandardTriggerFlags (cwinDialog.asm) */
+#define ASTF_LAST				0x8000
+#define ASTF_HINT_DEFAULT			0x4000
+#define ASTF_SIGNAL_INTERACTION_COMPLETE	0x2000
+#define ASTF_DISABLE				0x1000
+#define ASTF_EXPAND_TO_FIT			0x0800
+
+static const word addFlagsTable[] = {
+    0,						/* IC_NULL */
+    ASTF_LAST,					/* IC_DISMISS */
+    0,						/* IC_INTERACTION_COMPLETE */
+    ASTF_HINT_DEFAULT | ASTF_SIGNAL_INTERACTION_COMPLETE | ASTF_DISABLE,
+						/* IC_APPLY */
+    ASTF_LAST | ASTF_DISABLE,			/* IC_RESET */
+    ASTF_HINT_DEFAULT | ASTF_SIGNAL_INTERACTION_COMPLETE,	/* IC_OK */
+    ASTF_HINT_DEFAULT | ASTF_SIGNAL_INTERACTION_COMPLETE,	/* IC_YES */
+    ASTF_LAST | ASTF_SIGNAL_INTERACTION_COMPLETE,	/* IC_NO */
+    ASTF_SIGNAL_INTERACTION_COMPLETE,		/* IC_STOP */
+    0,						/* IC_EXIT */
+    ASTF_LAST | ASTF_EXPAND_TO_FIT,		/* IC_HELP */
+    0, 0,					/* IC_INTERNAL_1, 2 */
+    ASTF_SIGNAL_INTERACTION_COMPLETE,		/* IC_NEXT */
+    ASTF_SIGNAL_INTERACTION_COMPLETE		/* IC_PREVIOUS */
+};
+
 /*
- * HandleDialogResponses: the standard triggers of the type (Port32: not
- * yet), then the reply bar built
+ * AddStandardTriggerIfNeeded: a GenTrigger for the command in the reply
+ * bar (made if need be), unless the dialog has one: seeking the reply
+ * bar, sending the command, its flags; noted as one we made
+ */
+static void AddStandardTriggerIfNeeded(optr o, word ic)
+{
+    word flags;
+    optr rb, t;
+    word *data;
+    GenInstance *g;
+    NotifyOfInteractionCommandStruct info;
+
+    if (ic >= sizeof(addFlagsTable) / sizeof(addFlagsTable[0]) ||
+	FindEntry(o, ic))
+	return;
+    flags = addFlagsTable[ic];
+    rb = EnsureReplyBar(o);
+    if (!rb)
+	return;
+    t = OpenCreateChildObject(OptrToHandle(rb), rb,
+			      (ClassStruct *) &GenTriggerClass,
+			      HINT_SEEK_REPLY_BAR | VDF_SAVE_TO_STATE,
+			      TRUE, FALSE,
+			      (flags & ASTF_LAST) ? CCO_LAST : CCO_FIRST);
+    data = ObjVarAddData(t, ATTR_GEN_TRIGGER_INTERACTION_COMMAND |
+			 VDF_SAVE_TO_STATE, sizeof(word));
+    *data = ic;
+    if (flags & ASTF_HINT_DEFAULT)
+	(void) ObjVarAddData(t, HINT_DEFAULT_DEFAULT_ACTION |
+			     VDF_SAVE_TO_STATE, 0);
+    g = (GenInstance *) ObjDerefGen(t);
+    if (flags & ASTF_SIGNAL_INTERACTION_COMPLETE)
+	g->GI_attrs |= GA_SIGNAL_INTERACTION_COMPLETE;
+    if (flags & ASTF_DISABLE)
+	g->GI_states &= ~GS_ENABLED;
+    if (flags & ASTF_EXPAND_TO_FIT)
+	(void) ObjVarAddData(t, HINT_EXPAND_HEIGHT_TO_FIT_PARENT |
+			     VDF_SAVE_TO_STATE, 0);
+    ObjSetFlags(t, OCF_DIRTY, 0);
+    info.NOICS_optr = t;
+    info.NOICS_ic = ic;
+    info.NOICS_flags = NOICF_TRIGGER_CREATED;
+    SaveStandardTriggerInfo(o, &info);
+}
+
+/*
+ * HandleDialogResponses: the standard triggers of the dialog's type
+ * (a notification OK, an affirmation Yes and No, progress Stop, a
+ * command Close or Cancel, delayed properties Reset, Apply and Close),
+ * then the reply bar built.  Port32: no help trigger yet (its moniker
+ * is a picture), no tiny screens (RemoveReplyBarIfPossible).
  */
 static void HandleDialogResponses(optr o)
 {
+    byte type = Inter(o)->GII_type;
+    byte opt;
+
+    switch (type) {
+    case GIT_MULTIPLE_RESPONSE:
+    case GIT_ORGANIZATIONAL:
+	break;
+    case GIT_NOTIFICATION:
+	AddStandardTriggerIfNeeded(o, IC_OK);
+	break;
+    case GIT_AFFIRMATION:
+	AddStandardTriggerIfNeeded(o, IC_YES);
+	AddStandardTriggerIfNeeded(o, IC_NO);
+	break;
+    case GIT_PROGRESS:
+	AddStandardTriggerIfNeeded(o, IC_STOP);
+	break;
+    case GIT_COMMAND:
+	AddStandardTriggerIfNeeded(o, IC_DISMISS);
+	break;
+    default:		/* GIT_PROPERTIES */
+	opt = DWin(o)->OLDWI_optFlags;
+	if (!(opt & OLDOF_DELAYED_MODE))
+	    break;
+	if (opt & OLDOF_COMPLEX_PROPERTIES)
+	    AddStandardTriggerIfNeeded(o, IC_RESET);
+	AddStandardTriggerIfNeeded(o, IC_APPLY);
+	AddStandardTriggerIfNeeded(o, IC_DISMISS);
+	break;
+    }
     BuildBranchIfAny(DWin(o)->OLDWI_replyBar);
 }
 
@@ -442,35 +551,100 @@ static optr FindStandardTrigger(optr o, word ic)
     return e ? e->NOICS_optr : 0;
 }
 
+/* the monikers of the standard triggers, by command (0: none) */
+@extern visMoniker StandardCloseMoniker;
+@extern visMoniker StandardCancelMoniker;
+@extern visMoniker StandardApplyMoniker;
+@extern visMoniker StandardResetMoniker;
+@extern visMoniker StandardOKMoniker;
+@extern visMoniker StandardYesMoniker;
+@extern visMoniker StandardNoMoniker;
+@extern visMoniker StandardStopMoniker;
+@extern visMoniker StandardNextMoniker;
+@extern visMoniker StandardPrevMoniker;
+
+static optr StandardTriggerMoniker(word ic, byte popupFlags, byte optFlags)
+{
+    switch (ic) {
+    case IC_DISMISS:
+	return (popupFlags & (OLPWF_APP_MODAL | OLPWF_SYS_MODAL)) ?
+		@StandardCancelMoniker : @StandardCloseMoniker;
+    case IC_APPLY:
+	return ((popupFlags & (OLPWF_APP_MODAL | OLPWF_SYS_MODAL)) ||
+		(optFlags & OLDOF_SINGLE_USAGE)) ?
+		@StandardOKMoniker : @StandardApplyMoniker;
+    case IC_RESET:	return @StandardResetMoniker;
+    case IC_OK:		return @StandardOKMoniker;
+    case IC_YES:	return @StandardYesMoniker;
+    case IC_NO:		return @StandardNoMoniker;
+    case IC_STOP:	return @StandardStopMoniker;
+    case IC_NEXT:	return @StandardNextMoniker;
+    case IC_PREVIOUS:	return @StandardPrevMoniker;
+    default:		return 0;
+    }
+}
+
 /*
- * OLDialogWinNotifyOfInteractionCommand: a standard trigger noted (one
- * per command), or forgotten when it goes
+ * EnsureStandardTriggerMoniker: a standard trigger without a moniker
+ * gets the standard one (Cancel or Close, OK or Apply by the dialog);
+ * Apply and Reset of a delayed mode dialog start disabled
+ */
+static void EnsureStandardTriggerMoniker(optr o, optr t, word ic)
+{
+    byte pf = DWin(o)->OLPWI_flags, of = DWin(o)->OLDWI_optFlags;
+    optr m;
+
+    if (!@call t::MSG_GEN_GET_VIS_MONIKER()) {
+	if (ic >= IC_PREVIOUS + 1)
+	    return;
+	m = StandardTriggerMoniker(ic, pf, of);
+	if (m)
+	    (void) @call t::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(m, VUM_MANUAL);
+    }
+    if ((ic == IC_APPLY || ic == IC_RESET) && (of & OLDOF_DELAYED_MODE))
+	@call t::MSG_GEN_SET_NOT_ENABLED(VUM_MANUAL);
+}
+
+/*
+ * SaveStandardTriggerInfo: a standard trigger noted (one per command),
+ * its moniker ensured
+ */
+static void SaveStandardTriggerInfo(optr o,
+				    NotifyOfInteractionCommandStruct *info)
+{
+    MemHandle mh = OptrToHandle(o);
+    NotifyOfInteractionCommandStruct *e;
+    ChunkHandle list;
+
+    if (FindEntry(o, info->NOICS_ic))
+	return;
+    list = DWin(o)->OLDWI_triggerList;
+    if (!list) {
+	list = ChunkArrayCreate(mh, sizeof(NotifyOfInteractionCommandStruct),
+				0, 0);
+	DWin(o)->OLDWI_triggerList = list;
+    }
+    e = ChunkArrayAppend(ConstructOptr(mh, list), 0);
+    *e = *info;
+    EnsureStandardTriggerMoniker(o, info->NOICS_optr, info->NOICS_ic);
+}
+
+/*
+ * OLDialogWinNotifyOfInteractionCommand: a standard trigger noted, or
+ * forgotten when it goes
  */
 @method OLDialogWinClass, MSG_OL_WIN_NOTIFY_OF_INTERACTION_COMMAND
 {
     NotifyOfInteractionCommandStruct *e;
-    MemHandle mh = OptrToHandle(oself);
-    optr a;
-    ChunkHandle list;
 
+    if (!(params->NOICS_flags & NOICF_TRIGGER_DEMISE)) {
+	SaveStandardTriggerInfo(oself, params);
+	return;
+    }
     e = FindEntry(oself, params->NOICS_ic);
-    if (params->NOICS_flags & NOICF_TRIGGER_DEMISE) {
-	list = DWin(oself)->OLDWI_triggerList;
-	if (e)
-	    ChunkArrayDelete(ConstructOptr(mh, list), e);
-	return;
-    }
-    if (e)
-	return;
-    list = DWin(oself)->OLDWI_triggerList;
-    if (!list) {
-	list = ChunkArrayCreate(mh, sizeof(NotifyOfInteractionCommandStruct),
-				0, 0);
-	DWin(oself)->OLDWI_triggerList = list;
-    }
-    a = ConstructOptr(mh, list);
-    e = ChunkArrayAppend(a, 0);
-    *e = *params;
+    if (e && e->NOICS_optr == params->NOICS_optr)
+	ChunkArrayDelete(ConstructOptr(OptrToHandle(oself),
+				       DWin(oself)->OLDWI_triggerList), e);
 }
 
 @method OLDialogWinClass, MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER

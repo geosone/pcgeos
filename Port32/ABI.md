@@ -5426,6 +5426,14 @@ are left out), the constants, the variables and the routines.
     word) are shared with the other gadgets. Methods outside the file
     with `@classdecl` are declared there with `@extern method`, else
     goc puts no entry in the class's table.
+  - The standard triggers (`HandleDialogResponses` in
+    `CWin/cwinDialog.goc`): by its type a dialog adds GenTriggers for
+    OK, Yes and No, Stop, Close, or Apply, Reset and Close (delayed
+    properties) to its reply bar unless it has a trigger for the
+    command, with the standard moniker if the trigger has none
+    (Cancel or Close, OK or Apply by modality and usage). The
+    `StandardMonikers` resource of `cspecCUAS.ui` is in goc
+    (`CSpec/cspecCUAS.goc`, a resource of `motif32.gp`).
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, the navigation
   (`MSG_SPEC_NAVIGATE`), menus kept beside their buttons and the
@@ -5439,9 +5447,9 @@ are left out), the constants, the variables and the routines.
   classes and their build routine. In `OLPopupWinClass` and
   `OLDialogWinClass`: the button that brings a popup up
   (`OLMenuButtonClass`, the popup's `OLButton`: a user initiatable
-  dialog has none), UserDoDialog and the action response, the standard
-  triggers a dialog's type adds (they need the `StandardMonikers`
-  resource), discarding the block, the pushpin, the focus of a
+  dialog has none), UserDoDialog and the action response, the help
+  trigger (its moniker is a picture), the reply bar removed on tiny
+  screens, discarding the block, the pushpin, the focus of a
   dialog run by the UI thread. In `OLButtonClass`: the black and white
   buttons (`copenButtonBW`), the menu marks and menu items, the
   keyboard accelerator text, the sounds (`UserStandardSound` is not in
@@ -5525,7 +5533,11 @@ are left out), the constants, the variables and the routines.
   it sends its action (the test waits for it at the process, the
   optr as parameter or the action data); disabled it sends none; the
   action message and destination got and set; the immediate dismiss
-  trigger closes the dialog. The test loads no fonts, so monikers have no height
+  trigger closes the dialog. Last the standard triggers: a command
+  dialog's Close (last in its reply bar, gone when not usable), a
+  notice's OK, an affirmation's Yes (the default, completing it) and
+  No, delayed complex properties' Apply (first), Reset (both disabled)
+  and Close, each with its standard moniker. The test loads no fonts, so monikers have no height
   there.
 
 ## 14. Open

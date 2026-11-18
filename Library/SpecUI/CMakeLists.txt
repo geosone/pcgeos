@@ -52,6 +52,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CSpec/cspecPrimary.goc
                ${c}/CSpec/cspecInteraction.goc
                ${c}/CSpec/cspecTrigger.goc
+               ${c}/CSpec/cspecCUAS.goc
            INCLUDES ${c}
            PROTOCOL 727.0)
 set(motif_GEO ${motif_GEO} PARENT_SCOPE)

@@ -21,6 +21,7 @@ tokenchars	"SPUI"
 tokenid		0
 
 resource PointerImages lmem read-only shared
+resource StandardMonikers lmem read-only shared
 
 #
 # Export routines called by UI, by offset (*must* be first)

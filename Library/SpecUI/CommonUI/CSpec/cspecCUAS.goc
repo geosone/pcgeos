@@ -1,0 +1,36 @@
+/*
+ * cspecCUAS.goc -- the StandardMonikers resource of cspecCUAS.ui in
+ * goc: the monikers of the standard triggers a dialog adds and of the
+ * standard groups (Motif, not keyboard only: no mnemonics for Apply
+ * and OK).
+ *
+ * Port32: the rest of cspecCUAS.ui (the application monikers, the
+ * pushpin and window menu pictures, the system menu objects) is not
+ * here yet.
+ */
+@include "cGeode.goh"
+
+@start StandardMonikers, data;
+
+@visMoniker StandardCloseMoniker = @VMO_CANCEL, "Close";
+@visMoniker StandardCancelMoniker = @VMO_CANCEL, "Cancel";
+@visMoniker StandardApplyMoniker = "Apply";
+@visMoniker StandardResetMoniker = "Reset";
+@visMoniker StandardOKMoniker = "OK";
+@visMoniker StandardYesMoniker = 'Y', "Yes";
+@visMoniker StandardNoMoniker = 'N', "No";
+@visMoniker StandardStopMoniker = "Stop";
+@visMoniker StandardKeyboardCloseMoniker = @VMO_CANCEL, "Esc - Close";
+@visMoniker StandardKeyboardCancelMoniker = @VMO_CANCEL, "Esc - Cancel";
+@visMoniker GroupTypeFileMoniker = 'F', "File";
+@visMoniker GroupTypeEditMoniker = 'E', "Edit";
+@visMoniker GroupTypeViewMoniker = 'V', "View";
+@visMoniker GroupTypeOptionsMoniker = 'O', "Options";
+@visMoniker GroupTypeWindowMoniker = 'W', "Window";
+@visMoniker GroupTypeHelpMoniker = 'H', "Help";
+@visMoniker GroupTypePrintMoniker = 'P', "Print";
+@visMoniker StandardNextMoniker = "Next";
+@visMoniker StandardPrevMoniker = "Previous";
+@visMoniker FileExitMoniker = 'x', "Exit";
+
+@end StandardMonikers;
