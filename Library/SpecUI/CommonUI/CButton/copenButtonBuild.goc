@@ -247,7 +247,7 @@ static VarDataCHandler gadgetHints[] = {
  * a bordered button with a down mark (not for the express menu); in the
  * menu bar or a menu, no border
  */
-static void UseQueryResults(optr oself, OLBuildFlags f)
+void OLButtonUseQueryResults(optr oself, OLBuildFlags f)
 {
     OLButtonInstance *b = Btn(oself);
     word reply = f & OLBF_REPLY;
@@ -314,11 +314,11 @@ static void UseQueryResults(optr oself, OLBuildFlags f)
     memset(&r, 0, sizeof(r));
     r.GRP_bp = f;
     if (gp && @call gp::MSG_GEN_GUP_QUERY(&r, SGQT_BUILD_INFO)) {
-	UseQueryResults(oself, (OLBuildFlags) r.GRP_bp);
+	OLButtonUseQueryResults(oself, (OLBuildFlags) r.GRP_bp);
 	if (r.GRP_cx)
 	    vp = ConstructOptr(r.GRP_cx, r.GRP_dx);
     } else
-	UseQueryResults(oself, f);
+	OLButtonUseQueryResults(oself, f);
     return vp == gp ? 0 : vp;
 }
 
@@ -333,7 +333,7 @@ static void UseQueryResults(optr oself, OLBuildFlags f)
  * menu; a narrow vertical one loses its down mark), its size
  * recalculated even when valid
  */
-static void SetToolboxBasedOnParent(optr oself)
+void OLButtonSetToolboxBasedOnParent(optr oself)
 {
     optr g, p;
     OLBuildFlags bf = 0;
@@ -382,7 +382,7 @@ static void InitFixedAttrs(optr oself)
     OLButtonInstance *b;
     Boolean can = FALSE;
 
-    SetToolboxBasedOnParent(oself);
+    OLButtonSetToolboxBasedOnParent(oself);
     b = Btn(oself);
     if (b->OLBI_fixedAttrs & OLBFA_MASTER_DEFAULT_TRIGGER)
 	can = !(b->OLBI_specState & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR));
@@ -551,12 +551,13 @@ void OLButtonCallWin(optr oself, VisUpwardQueryType q)
     ChunkHandle m;
     optr vp;
 
+    (void) winTypeAttrs;
     pself->OLBI_genChunk = genChunk;
     m = ((GenInstance *) ObjDerefGen(g))->GI_visMoniker;
     if (m && !(((VisMoniker *) LMemDeref(ConstructOptr(OptrToHandle(g), m)))
 		   ->VM_type & VMT_GSTRING))
 	Btn(oself)->OLBI_specState |= OLBSS_WINDOW_MARK;
-    UseQueryResults(oself, buildFlags);
+    OLButtonUseQueryResults(oself, buildFlags);
     vp = ((OLCtrlInstance *) ObjDerefVis(g))->OLCI_visParent;
     if (OpenCheckDefaultRings() && vp) {
 	GenReturnParams r;

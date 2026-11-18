@@ -9,8 +9,7 @@
  * Port32 (Port32/ABI.md section 13y), not yet:
  *   - the window icon (OLWinIconClass): a minimized window is hidden,
  *     as with the task bar on (OLMDWI_icon stays 0);
- *   - the menu bar and the trigger bar (OLMenuBarClass, a popout): a
- *     menu's build info finds no menu bar;
+ *   - the trigger bar (OLMDWI_triggerBar);
  *   - the system menu and its icons (OLWI_sysMenu stays 0);
  *   - moniker lists (MSG_GEN_FIND_MONIKER answers a plain moniker);
  *   - a double click on the title (cwinPtr.asm's MSG_META_START_SELECT).
@@ -394,9 +393,9 @@ static void SetNotMaximized(optr o, VisUpdateMode mode)
 
 /*
  * OLMenuedWinGupQuery: the menu bar; the build info of a menu (or an
- * object seeking the menu bar): the menu bar's, where it is a top or
- * sub menu; else no vis parent from here (Port32: the menu bar is not
- * made yet, OLMenuBarClass)
+ * object seeking the menu bar): the menu bar's (made the first time,
+ * the window's children then vertical), where it is a top or sub menu;
+ * else no vis parent from here
  */
 @method OLMenuedWinClass, MSG_SPEC_P32_GUP_QUERY
 {
@@ -413,9 +412,17 @@ static void SetNotMaximized(optr o, VisUpdateMode mode)
 	return @callsuper();
     }
     if (!(pself->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW) &&
-	(retValue->GRP_bp & (OLBF_MENUABLE | OLBF_SEEK_MENU_BAR)) &&
-	pself->OLMDWI_menuBar) {
+	(retValue->GRP_bp & (OLBF_MENUABLE | OLBF_SEEK_MENU_BAR))) {
 	word r;
+
+	if (!pself->OLMDWI_menuBar) {
+	    ChunkHandle mb = OpenWinCreateBarObject(oself, (ClassStruct *)
+						    &OLMenuBarClass);
+
+	    MWin(oself)->OLMDWI_menuBar = mb;
+	    MWin(oself)->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
+	}
+	pself = MWin(oself);
 
 	bar = ConstructOptr(OptrToHandle(oself), pself->OLMDWI_menuBar);
 	(void) @call bar::MSG_BAR_BUILD_INFO(retValue, queryType);

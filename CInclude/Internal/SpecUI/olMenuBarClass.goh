@@ -1,0 +1,24 @@
+/*
+ * olMenuBarClass.goh -- OLMenuBarClass, the bar of a menued window that
+ * holds its menu buttons (after
+ * Include/Internal/SpecUI/olMenuBarClass.def), for Port32.  Its
+ * superclass is OLPopoutClass there; OLPopoutClass is not here yet (a
+ * menu bar that pops out is not Motif's), so it is an OLCtrl.
+ */
+#ifndef __OLMENUBARCLASS_GOH
+#define __OLMENUBARCLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+
+@deflib motif
+
+@class OLMenuBarClass, OLCtrlClass;
+@uses GenClass;
+
+    @vardata word TEMP_MENU_ACTIVATOR_WIDTH;
+
+@endc;
+
+@endlib
+
+#endif

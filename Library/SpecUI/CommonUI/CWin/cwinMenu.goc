@@ -1,0 +1,397 @@
+/*
+ * cwinMenu.goc -- OLMenuWinClass (after cwinMenu.asm): the window of a
+ * menu.  Brought up by its button (MSG_OL_POPUP_ACTIVATE at the
+ * button's corner) or initiated; its items vertical, no spacing; the
+ * build info of its children (they are in a sub menu); stay up mode
+ * (after a click on its button the menu stays up until a press, its
+ * pre-passive grab watching for it); a release with no stay up mode
+ * completes it (the menu goes down, its button is told); a menu of a
+ * group type gets the standard moniker (File, Edit, ...).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the pushpin (pinnable
+ * menus: the PinMoniker picture), the Exit trigger of the file menu,
+ * cascading sub menus, the scrollers of a menu taller than the screen
+ * (MenuWinScrollerClass), menu separators, the keyboard (navigation,
+ * MSG_META_FUP_KBD_CHAR), the remote gadget exclusive, the system and
+ * express menus, the menu centers (OLMenuCalcCenters), the startup
+ * grab of the window (cwinPtr.asm: MSG_OL_WIN_STARTUP_GRAB).
+ */
+@include "cGeode.goh"
+
+@classdecl OLMenuWinClass, neverSaved;
+
+#define MWin(o)		((OLMenuWinInstance *) ObjDerefVis(o))
+#define R(r)		((r) << OLBF_REPLY_OFFSET)
+
+/* the menu's position and size: kept visible, placed as required,
+ * sized as desired */
+#define MENU_POS_SIZE_FLAGS	(WPSF_PERSIST | (WCT_KEEP_VISIBLE << 6) | \
+				 (WPT_AS_REQUIRED << 3) | WST_AS_DESIRED)
+
+/* the button's optr (0 if none) */
+static optr MenuButton(optr o)
+{
+    ChunkHandle b = MWin(o)->OLPWI_button;
+
+    return b ? ConstructOptr(OptrToHandle(o), b) : 0;
+}
+
+static void HintNotPinnable(optr o)
+{
+    MWin(o)->OLWI_attrs &= ~OWA_PINNABLE;
+}
+
+static void MenuHint(MemHandle mh, ChunkHandle ch, VarDataEntry *extra,
+		     word dataType, void *handlerData)
+{
+    optr o = ConstructOptr(mh, ch);
+    OLMenuWinInstance *m = MWin(o);
+
+    (void) extra;
+    (void) handlerData;
+    switch (dataType) {
+    case HINT_INFREQUENTLY_USED:
+	HintNotPinnable(o);
+	break;
+    case HINT_INTERACTION_INFREQUENT_USAGE:
+	m->OLMWI_specState |= OMWSS_INFREQUENT_USAGE;
+	break;
+    case HINT_CUSTOM_SYS_MENU:
+	m->OLMWI_specState |= OMWSS_CUSTOM_SYS_MENU;
+	break;
+    case HINT_SYS_MENU:
+    case HINT_IS_EXPRESS_MENU:
+	m->OLWI_fixedAttr |= OWFA_IS_MENU;
+	m->OLWI_type = MOWT_SYSTEM_MENU;
+	break;
+    }
+}
+
+static VarDataCHandler menuHints[] = {
+    { HINT_INFREQUENTLY_USED, MenuHint },
+    { HINT_SYS_MENU, MenuHint },
+    { HINT_IS_EXPRESS_MENU, MenuHint },
+    { HINT_CUSTOM_SYS_MENU, MenuHint },
+    { HINT_INTERACTION_INFREQUENT_USAGE, MenuHint },
+};
+
+/*
+ * OLMenuWinInitialize: a menu (a sub menu below a menu), with a thick
+ * border, the items inside it, focusable, closable; its position and
+ * size hints, its hints.  Port32: not pinnable (no pushpin yet).
+ */
+@method OLMenuWinClass, MSG_META_INITIALIZE
+{
+    OLMenuWinInstance *m;
+
+    @callsuper();
+    m = MWin(oself);
+    m->OLWI_fixedAttr |= OWFA_IS_MENU;
+    m->OLWI_attrs |= OWA_THICK_LINE_BORDER | OWA_KIDS_INSIDE_BORDER |
+		     OWA_FOCUSABLE | OWA_CLOSABLE;
+    m->OLWI_attrs &= ~OWA_PINNABLE;
+    m->OLWI_type = ((m->OLCI_buildFlags & OLBF_REPLY) == R(OLBR_SUB_MENU)) ?
+		   MOWT_SUBMENU : MOWT_MENU;
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    ObjVarScanData(oself, sizeof(menuHints) / sizeof(menuHints[0]),
+		   menuHints, NULL);
+}
+
+@method OLMenuWinClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    @callsuper();
+    MWin(oself)->OLWI_winPosSizeFlags = MENU_POS_SIZE_FLAGS;
+    OpenWinProcessHints(oself);
+}
+
+/*
+ * OLMenuWinUpdateSpecBuild: built with its vis parent fully enabled
+ * (the menu is enabled as its button), the items vertical
+ */
+@method OLMenuWinClass, MSG_SPEC_BUILD_BRANCH
+{
+    flags |= SBF_VIS_PARENT_FULLY_ENABLED;
+    @callsuper();
+    MWin(oself)->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
+}
+
+@extern visMoniker GroupTypeFileMoniker;
+@extern visMoniker GroupTypeEditMoniker;
+@extern visMoniker GroupTypeViewMoniker;
+@extern visMoniker GroupTypeOptionsMoniker;
+@extern visMoniker GroupTypeWindowMoniker;
+@extern visMoniker GroupTypeHelpMoniker;
+@extern visMoniker GroupTypePrintMoniker;
+
+/*
+ * OLMenuWinSpecBuild: a menu of a group type: the file menu noted (the
+ * primary told), the type's standard moniker if it has none
+ */
+@method OLMenuWinClass, MSG_SPEC_BUILD
+{
+    GenInteractionGroupType *gt =
+	ObjVarFindData(oself, ATTR_GEN_INTERACTION_GROUP_TYPE);
+    optr m = 0, gp;
+
+    if (gt) {
+	byte t = *gt;
+
+	if (t == GIGT_FILE_MENU) {
+	    MWin(oself)->OLMWI_specState |= OMWSS_FILE_MENU;
+	    MWin(oself)->OLPWI_flags |= OLPWF_FILE_MENU;
+	    gp = GenFindParent(oself);
+	    if (gp && ObjIsObjectInClass(gp, &GenPrimaryClass))
+		@call gp::MSG_OL_BASE_WIN_NOTIFY_OF_FILE_MENU(oself);
+	}
+	if (!((GenInstance *) ObjDerefGen(oself))->GI_visMoniker) {
+	    switch (t) {
+	    case GIGT_FILE_MENU:	m = @GroupTypeFileMoniker; break;
+	    case GIGT_EDIT_MENU:	m = @GroupTypeEditMoniker; break;
+	    case GIGT_VIEW_MENU:	m = @GroupTypeViewMoniker; break;
+	    case GIGT_OPTIONS_MENU:	m = @GroupTypeOptionsMoniker; break;
+	    case GIGT_WINDOW_MENU:	m = @GroupTypeWindowMoniker; break;
+	    case GIGT_HELP_MENU:	m = @GroupTypeHelpMoniker; break;
+	    case GIGT_PRINT_GROUP:	m = @GroupTypePrintMoniker; break;
+	    }
+	    if (m)
+		(void) @call oself::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(m,
+								 VUM_MANUAL);
+	}
+    }
+    @callsuper();
+}
+
+/* OLMenuWinGupQuery: the children of a menu are in a sub menu here */
+@method OLMenuWinClass, MSG_SPEC_P32_GUP_QUERY
+{
+    if ((word) queryType != SGQT_BUILD_INFO)
+	return @callsuper();
+    retValue->GRP_bp |= R(OLBR_SUB_MENU);
+    retValue->GRP_cx = OptrToHandle(oself);
+    retValue->GRP_dx = OptrToChunk(oself);
+    return TRUE;
+}
+
+/*
+ * OLMenuWinActivate: brought up by its button at x, y (screen): placed
+ * there as required and kept visible, not in stay up mode, initiated
+ */
+@method OLMenuWinClass, MSG_OL_POPUP_ACTIVATE
+{
+    OLMenuWinInstance *m = MWin(oself);
+
+    m->OLWI_winPosSizeFlags &= WPSF_SHRINK_DESIRED_SIZE_TO_FIT_IN_PARENT;
+    m->OLWI_winPosSizeFlags |= MENU_POS_SIZE_FLAGS;
+    m->OLMWI_specState &= ~OMWSS_IN_STAY_UP_MODE;
+    VisSetPosition(oself, x, y);
+    VisMarkInvalid(oself, VOF_WINDOW_INVALID, VUM_MANUAL);
+    @callsuper oself::OLMenuWinClass::MSG_GEN_INTERACTION_INITIATE();
+}
+
+/* OLMenuWinInitiate: initiated (not by its button): up in stay up mode */
+@method OLMenuWinClass, MSG_GEN_INTERACTION_INITIATE
+{
+    pself->OLMWI_specState &= ~OMWSS_IN_STAY_UP_MODE;
+    @callsuper();
+    @call oself::MSG_MO_MW_ENTER_STAY_UP_MODE(TRUE);
+}
+
+/*
+ * OLMenuWinInteractionCommand: dismissed (or complete, not pinned): down,
+ * the button told; IC_EXIT quits the application
+ */
+@method OLMenuWinClass, MSG_GEN_GUP_INTERACTION_COMMAND
+{
+    optr b;
+
+    if (command == IC_INTERACTION_COMPLETE &&
+	!(pself->OLWI_specState & OLWSS_PINNED))
+	command = IC_DISMISS;
+    switch (command) {
+    case IC_DISMISS:
+	if (pself->OLWI_specState & OLWSS_PINNED)
+	    return TRUE;
+	(void) @callsuper oself::OLMenuWinClass::
+		MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	b = MenuButton(oself);
+	if (b)
+	    @call b::MSG_OL_MENU_BUTTON_NOTIFY_MENU_DISMISSED();
+	return TRUE;
+    case IC_EXIT:
+	{
+	    optr app = GeodeGetAppObject(0);
+
+	    if (app)
+		@call app::MSG_META_QUIT();
+	}
+	return TRUE;
+    default:
+	return @callsuper();
+    }
+}
+
+/*
+ * OLMenuWinEnterStayUpMode: up until a press: its button (or generic
+ * parent) told, the pre-passive grab watching for the press
+ */
+@method OLMenuWinClass, MSG_MO_MW_ENTER_STAY_UP_MODE
+{
+    optr b = MenuButton(oself);
+    GenReturnParams r;
+
+    (void) grab;
+    pself->OLMWI_specState |= OMWSS_IN_STAY_UP_MODE;
+    if (b)
+	(void) @call b::MSG_VIS_P32_VUP_QUERY(&r,
+					      SVQT_HAS_MENU_IN_STAY_UP_MODE,
+					      0, 0);
+    @call oself::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+}
+
+/*
+ * OLMenuWinLeaveStayUpMode: the pre-passive grab gone; the button told
+ * of the press (TRUE if it is on the button)
+ */
+@method OLMenuWinClass, MSG_MO_MW_LEAVE_STAY_UP_MODE
+{
+    optr b;
+    GenReturnParams r;
+
+    if (!(pself->OLMWI_specState & OMWSS_IN_STAY_UP_MODE))
+	return FALSE;
+    pself->OLMWI_specState &= ~OMWSS_IN_STAY_UP_MODE;
+    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+    b = MenuButton(oself);
+    if (!b)
+	return FALSE;
+    (void) @call b::MSG_VIS_P32_VUP_QUERY(&r, SVQT_NO_MENU_IN_STAY_UP_MODE,
+					  0, 0);
+    return @call b::MSG_MO_MB_LEAVE_STAY_UP_MODE(x, y, inputState);
+}
+
+/*
+ * OLMenuWinPrePassiveButton: in stay up mode a press leaves it: in the
+ * menu (or on its button) it is processed there, elsewhere the menu
+ * goes and the press is replayed; outside the menu without a press,
+ * processed
+ */
+@method OLMenuWinClass, MSG_META_PRE_PASSIVE_BUTTON
+{
+    WindowHandle w;
+    XYValueAsDWord p;
+    Boolean onButton;
+
+    if (!(pself->OLMWI_specState & OMWSS_IN_STAY_UP_MODE)) {
+	@callsuper();
+	return;
+    }
+    if (!((inputState >> 8) & UIFA_IN) &&
+	VisTestPointInBounds(oself, xPosition, yPosition)) {
+	retVal->flags = MRF_PROCESSED;
+	return;
+    }
+    if (!(inputState & BI_PRESS)) {
+	@callsuper();
+	return;
+    }
+    w = VisQueryWindow(oself);
+    p = w ? WinTransform(w, xPosition, yPosition) :
+	    MAKE_XY_DWORD(xPosition, yPosition);
+    onButton = @call oself::MSG_MO_MW_LEAVE_STAY_UP_MODE(
+			(sword) DWORD_X(p), (sword) DWORD_Y(p), inputState);
+    if (((inputState >> 8) & UIFA_IN) || onButton) {
+	retVal->flags = MRF_PROCESSED;
+	return;
+    }
+    (void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+    retVal->flags = MRF_REPLAY;
+}
+
+/*
+ * OLMenuWinPostPassiveButton: all buttons up, not in stay up mode: the
+ * menu is complete (a release on an item has activated it)
+ */
+@method OLMenuWinClass, MSG_META_POST_PASSIVE_BUTTON
+{
+    if (!(inputState & BI_PRESS) &&
+	!(inputState & (BI_B3_DOWN | BI_B2_DOWN | BI_B1_DOWN | BI_B0_DOWN)) &&
+	!(pself->OLMWI_specState & OMWSS_IN_STAY_UP_MODE))
+	(void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+    @callsuper();
+}
+
+/*
+ * OLMenuWinEnsureNoMenusInStayUpMode: a menu in stay up mode (not
+ * pinned) is dismissed (or counted); its children too
+ */
+@method OLMenuWinClass, MSG_META_ENSURE_NO_MENUS_IN_STAY_UP_MODE
+{
+    if ((pself->OLWI_specState & OLWSS_PINNED) ||
+	!(pself->OLMWI_specState & OMWSS_IN_STAY_UP_MODE))
+	return 0;
+    if (params)
+	params->ENMISUMP_menuCount++;
+    else
+	(void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+    return 0;
+}
+
+/*
+ * OLMenuWinLostGadgetExcl: complete, unless its button has the mouse
+ * (the press on the button)
+ */
+@method OLMenuWinClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    optr b = MenuButton(oself);
+
+    if (b && (((OLButtonInstance *) ObjDerefVis(b))->OLBI_specState &
+	      OLBSS_HAS_MOUSE_GRAB))
+	return;
+    (void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+}
+
+/* the window's margins, no spacing between the items */
+static VisCompSpacingMarginsInfo MenuWinPassMarginInfo(optr o)
+{
+    Rectangle m;
+
+    @call o::MSG_VIS_COMP_GET_MARGINS(&m);
+    return OpenPassMarginInfo(o, &m, MENU_SPACING, MENU_SPACING);
+}
+
+@method OLMenuWinClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    return MAKE_SPACING_DWORD(MENU_SPACING, MENU_SPACING);
+}
+
+@method OLMenuWinClass, MSG_VIS_RECALC_SIZE
+{
+    return OpenRecalcCtrlSize(oself, width, height,
+			      MenuWinPassMarginInfo(oself));
+}
+
+@method OLMenuWinClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
+		    MenuWinPassMarginInfo(oself));
+}
+
+/*
+ * OLMenuWinFindKbdAccelerator: the menu's accelerator activates its
+ * button (through the queue)
+ */
+@method OLMenuWinClass, MSG_GEN_FIND_KBD_ACCELERATOR
+{
+    optr b;
+
+    if (!GenCheckKbdAccelerator(oself, charValue, charFlagsAndShiftState,
+				toggleStateAndScanCode))
+	return FALSE;
+    b = MenuButton(oself);
+    if (b)
+	@send, forceQueue b::MSG_OL_BUTTON_KBD_ACTIVATE();
+    return TRUE;
+}

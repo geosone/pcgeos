@@ -1,0 +1,53 @@
+/*
+ * olMenuButtonClass.goh -- OLMenuButtonClass, the button that drives a
+ * menu (after Include/Internal/SpecUI/olMenuButtonClass.def), for
+ * Port32: an OLButton whose press brings the menu up, released on it
+ * the menu stays up.  No SELECTION_BOX (Motif), no OLMBI_menuTimer
+ * (OPEN LOOK).
+ */
+#ifndef __OLMENUBUTTONCLASS_GOH
+#define __OLMENUBUTTONCLASS_GOH
+
+@include <Internal/SpecUI/olButtonClass.goh>
+
+@deflib motif
+
+/* OLMenuButtonSpecState (the pending functions as UIFunctionsActive) */
+typedef ByteFlags OLMenuButtonSpecState;
+#define OLMBSS_MENU_FUNCTION_PENDING		0x80	/* UIFA_SELECT */
+#define OLMBSS_OPENS_POPUP_LIST			0x40
+#define OLMBSS_DEFAULT_FUNCTION_PENDING		0x20	/* UIFA_FEATURES */
+#define OLMBSS_ORIENT_POPUP_HORIZONTALLY	0x10
+#define OLMBSS_POPUP_OPEN			0x08
+#define OLMBSS_CLOSING_MENU			0x04
+#define OLMBSS_CLOSE_MENU_ON_LOST_GADGET_EXCL	0x02
+#define OLMBSS_SYS_MENU_ICON			0x01
+
+/* OLMenuButtonFunctionsActive (UIFunctionsActive) */
+#define OLMBFA_MENU		0x80
+#define OLMBFA_DEFAULT		0x20
+#define OLMBFA_IN_BOUNDS	0x01
+
+@class OLMenuButtonClass, OLButtonClass;
+@uses GenClass;
+
+/* the menu leaves stay up mode (the press at x, y in the menu's window):
+ * TRUE if it is on this button */
+@message Boolean MSG_MO_MB_LEAVE_STAY_UP_MODE(sword x, sword y,
+					      word inputState);
+@message void MSG_OL_MENU_BUTTON_SET_IS_SYS_MENU_ICON();
+@message void MSG_OL_MENU_BUTTON_KBD_ACTIVATE();
+@message void MSG_OL_MENU_BUTTON_SEND_RIGHT_ARROW_TO_PARENT_MENU();
+@message void MSG_OL_MENU_BUTTON_NOTIFY_MENU_DISMISSED();
+/* TRUE if the menu was open */
+@message Boolean MSG_OL_MENU_BUTTON_CLOSE_MENU();
+@message Boolean MSG_OL_MENU_BUTTON_INIT_POPUP_ORIENTATION();
+
+    @instance OLWinType			OLMBI_popupType = 0;
+    @instance OLMenuButtonSpecState	OLMBI_specState = 0;
+
+@endc;
+
+@endlib
+
+#endif

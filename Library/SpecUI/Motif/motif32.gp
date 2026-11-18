@@ -71,3 +71,6 @@ export OLPopupWinClass
 export OLDialogWinClass
 export OLReplyBarClass
 export OLButtonClass
+export OLMenuWinClass
+export OLMenuButtonClass
+export OLMenuBarClass

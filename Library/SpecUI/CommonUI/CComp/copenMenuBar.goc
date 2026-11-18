@@ -1,0 +1,153 @@
+/*
+ * copenMenuBar.goc -- OLMenuBarClass (after copenMenuBar.asm): the bar
+ * of a menued window holding its menu buttons, horizontal, wrapping,
+ * as wide as the window, first in it; the build info of the menus
+ * (top menus), its spacing and margins, drawn as a raised frame.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the popout (its
+ * superclass OLPopoutClass), the menus in the header of a maximized
+ * window (OpenCheckMenusInHeaderOnMax), the navigation
+ * (VisNavigateCommon), mnemonics through the menu bar's focus.
+ */
+@include "cGeode.goh"
+
+@classdecl OLMenuBarClass, neverSaved;
+
+/* ccompConstant.def (Motif) */
+#define MENU_BAR_LEFT_MARGIN	1
+#define MENU_BAR_TOP_MARGIN	1
+#define MENU_BAR_BOTTOM_MARGIN	1
+#define MENU_BAR_RIGHT_MARGIN	1
+#define MENU_BAR_BETWEEN_LINES	0
+#define MENU_BAR_BETWEEN_KIDS	0
+
+#define Bar(o)		((OLMenuBarInstance *) ObjDerefVis(o))
+#define R(r)		((r) << OLBF_REPLY_OFFSET)
+
+/*
+ * OLMenuBarInitialize: expanding to the window's width, the children
+ * horizontal and wrapping, not centered
+ */
+@method OLMenuBarClass, MSG_META_INITIALIZE
+{
+    OLMenuBarInstance *b;
+
+    @callsuper();
+    b = Bar(oself);
+    b->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT;
+    b->VCI_geoAttrs |= VCGA_ALLOW_CHILDREN_TO_WRAP;
+    b->VCI_geoAttrs &= ~VCGA_ORIENT_CHILDREN_VERTICALLY;
+    b->VI_geoAttrs |= VGA_DONT_CENTER;
+}
+
+/*
+ * OLMenuBarSpecBuild: once: enabled as its parent, added first to its
+ * vis parent (the window), its geometry and image invalid
+ */
+@method OLMenuBarClass, MSG_SPEC_BUILD
+{
+    optr vp;
+
+    if (VisCheckIfSpecBuilt(oself))
+	return;
+    VisSpecBuildSetEnabledState(oself, flags);
+    vp = @call oself::MSG_SPEC_GET_VIS_PARENT(flags);
+    if (!vp)
+	vp = Bar(oself)->OLCI_visParent;
+    if (!vp)
+	return;
+    @call vp::MSG_VIS_ADD_CHILD(oself, CCO_FIRST);
+    VisMarkInvalid(oself, VOF_IMAGE_INVALID | VOF_GEOMETRY_INVALID,
+		   VUM_MANUAL);
+}
+
+/*
+ * OLMenuBarBuildInfo: a menu (or an object seeking the menu bar, or a
+ * display's menu) is a top menu here
+ */
+@method OLMenuBarClass, MSG_BAR_BUILD_INFO
+{
+    (void) queryType;
+    if (!(retValue->GRP_bp & (OLBF_MENU_IN_DISPLAY | OLBF_MENUABLE |
+			      OLBF_SEEK_MENU_BAR)))
+	return FALSE;
+    retValue->GRP_bp |= R(OLBR_TOP_MENU);
+    retValue->GRP_cx = OptrToHandle(oself);
+    retValue->GRP_dx = OptrToChunk(oself);
+    return TRUE;
+}
+
+@method OLMenuBarClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    return MAKE_SPACING_DWORD(MENU_BAR_BETWEEN_KIDS, MENU_BAR_BETWEEN_LINES);
+}
+
+/* OLMenuBarGetMargins: one all around (in black and white none at the
+ * top and left) */
+static void MenuBarMargins(Rectangle *m)
+{
+    m->R_left = MENU_BAR_LEFT_MARGIN;
+    m->R_top = MENU_BAR_TOP_MARGIN;
+    m->R_right = MENU_BAR_RIGHT_MARGIN;
+    m->R_bottom = MENU_BAR_BOTTOM_MARGIN;
+    if (OpenCheckIfBW() && !OpenCheckIfCGA()) {
+	m->R_top--;
+	m->R_left--;
+    }
+}
+
+@method OLMenuBarClass, MSG_VIS_COMP_GET_MARGINS
+{
+    MenuBarMargins(retValue);
+}
+
+static VisCompSpacingMarginsInfo MenuBarPassMarginInfo(optr o)
+{
+    Rectangle m;
+
+    MenuBarMargins(&m);
+    return OpenPassMarginInfo(o, &m, MENU_BAR_BETWEEN_KIDS,
+			      MENU_BAR_BETWEEN_LINES);
+}
+
+@method OLMenuBarClass, MSG_VIS_RECALC_SIZE
+{
+    return OpenRecalcCtrlSize(oself, width, height,
+			      MenuBarPassMarginInfo(oself));
+}
+
+@method OLMenuBarClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
+		    MenuBarPassMarginInfo(oself));
+}
+
+/* OLMenuBarDraw: a raised frame filled with the light color (in black
+ * and white a frame around the bar), then the buttons */
+@method OLMenuBarClass, MSG_VIS_DRAW
+{
+    Rectangle b;
+
+    VisGetBounds(oself, &b);
+    if (OpenCheckIfBW()) {
+	if (!OpenCheckIfCGA()) {
+	    b.R_top--;
+	    b.R_left--;
+	    b.R_right++;
+	}
+	GrSetAreaColor(gstate, CF_INDEX, C_WHITE, 0, 0);
+	OpenDrawRect(oself, gstate, b.R_left, b.R_top, b.R_right,
+		     b.R_bottom, (word) (C_BLACK | (C_BLACK << 8)));
+    } else {
+	GrSetAreaColor(gstate, CF_INDEX, moCS_dsLightColor, 0, 0);
+	OpenDrawRect(oself, gstate, b.R_left, b.R_top, b.R_right,
+		     b.R_bottom, (word) (C_WHITE | (moCS_dsDarkColor << 8)));
+    }
+    @callsuper();
+}
+
+/* OLMenuBarBroadcastForDefaultFocus: no default focus in a menu bar */
+@method OLMenuBarClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    (void) retValue;
+}

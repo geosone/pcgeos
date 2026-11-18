@@ -1,0 +1,453 @@
+/*
+ * copenMenuButton.goc -- OLMenuButtonClass (after copenMenuButton.asm):
+ * the button of a menu.  A press brings the menu up below it (to the
+ * right for a sub menu) and grabs the mouse; released on the button the
+ * menu stays up (stay up mode), released elsewhere the event goes on;
+ * pressed again while the menu is up it closes the menu.  The other
+ * menus of the bar close when one opens.  Activated (the keyboard) the
+ * menu comes up in stay up mode.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: popup lists
+ * (OLMBSS_OPENS_POPUP_LIST: the selection box, the popup's size), the
+ * keyboard (navigation, MSG_META_FUP_KBD_CHAR, the focus while the menu
+ * is open), the system menu icon (a double press closes the window),
+ * the default function (UIFA_FEATURES), the implied window check.
+ */
+@include "cGeode.goh"
+
+@classdecl OLMenuButtonClass, neverSaved;
+
+#define MBtn(o)		((OLMenuButtonInstance *) ObjDerefVis(o))
+
+/* the generic part: the menu (in this block) */
+static optr GenPart(optr o)
+{
+    return ConstructOptr(OptrToHandle(o), MBtn(o)->OLBI_genChunk);
+}
+
+/*
+ * OLMenuButtonSetup: the menu's button: its window type, the build
+ * flags' looks; a sub menu's has the right mark (and is enabled), a
+ * system menu's is a bordered system icon
+ */
+@method OLMenuButtonClass, MSG_OL_BUTTON_SETUP
+{
+    OLMenuButtonInstance *b = pself;
+    byte type = (byte) winTypeAttrs;
+    word mark;
+
+    b->OLBI_genChunk = genChunk;
+    b->OLMBI_popupType = type;
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    b = MBtn(oself);
+    if ((buildFlags & OLBF_ABOVE_DISP_CTRL) &&
+	!(buildFlags & OLBF_ALWAYS_ADOPT))
+	b->VI_attrs &= ~(VA_DRAWABLE | VA_DETECTABLE);
+    OLButtonUseQueryResults(oself, buildFlags);
+    b = MBtn(oself);
+    if (type == MOWT_SYSTEM_MENU) {
+	b->OLBI_specState &= ~OLBSS_IN_MENU_BAR;
+	b->OLBI_specState |= OLBSS_BORDERED | OLBSS_SYS_ICON;
+	b->VI_attrs &= ~VA_MANAGED;
+    } else if (type == MOWT_SUBMENU) {
+	b->VI_attrs |= VA_FULLY_ENABLED;
+	b->OLBI_specState |= OLBSS_MENU_RIGHT_MARK;
+    } else {
+	mark = (b->OLMBI_specState & OLMBSS_OPENS_POPUP_LIST) ?
+	       OLBSS_MENU_DOWN_MARK : 0;
+	if (!mark)
+	    b->VI_attrs |= VA_FULLY_ENABLED;
+	b->OLBI_specState |= mark;
+    }
+    OLButtonSetToolboxBasedOnParent(oself);
+    OLButtonUpdateState(oself);
+}
+
+@method OLMenuButtonClass, MSG_OL_MENU_BUTTON_SET_IS_SYS_MENU_ICON
+{
+    pself->OLMBI_specState |= OLMBSS_SYS_MENU_ICON;
+}
+
+/* OLMenuButtonGupQuery: the menu's */
+@method OLMenuButtonClass, MSG_SPEC_P32_GUP_QUERY
+{
+    optr g = GenPart(oself);
+
+    return @call g::MSG_SPEC_P32_GUP_QUERY(retValue, queryType);
+}
+
+/* OLMenuButtonInitPopupOrientation: a popup list's button in a vertical
+ * toolbox opens it to the right */
+@method OLMenuButtonClass, MSG_OL_MENU_BUTTON_INIT_POPUP_ORIENTATION
+{
+    optr p;
+
+    if (!(pself->OLBI_moreAttrs & OLBMA_IN_TOOLBOX))
+	return FALSE;
+    p = VisFindParent(oself);
+    if (!p || !(((VisCompInstance *) ObjDerefVis(p))->VCI_geoAttrs &
+		 VCGA_ORIENT_CHILDREN_VERTICALLY))
+	return FALSE;
+    MBtn(oself)->OLMBI_specState |= OLMBSS_ORIENT_POPUP_HORIZONTALLY;
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * The looks
+ * ------------------------------------------------------------------- */
+
+/* saved unless an interaction is going on (cursored, the mouse, open) */
+static void SaveIfStartingInteraction(optr o)
+{
+    OLMenuButtonInstance *b = MBtn(o);
+
+    if ((b->OLBI_specState & (OLBSS_CURSORED | OLBSS_HAS_MOUSE_GRAB)) ||
+	(b->OLMBI_specState & OLMBSS_POPUP_OPEN))
+	return;
+    OLButtonSaveBorderedAndDepressed(o);
+}
+
+/*
+ * OLMenuButtonSetBorderedAndOrDepressed: in the menu bar or a menu
+ * bordered (Motif: in the menu bar on black and white also depressed),
+ * else depressed
+ */
+static void SetBorderedAndOrDepressed(optr o)
+{
+    OLMenuButtonInstance *b = MBtn(o);
+    word f = OLBSS_DEPRESSED;
+
+    if (!(b->OLMBI_specState & OLMBSS_OPENS_POPUP_LIST) &&
+	!(b->OLBI_specState & OLBSS_SYS_ICON) &&
+	(b->OLBI_specState & (OLBSS_IN_MENU_BAR | OLBSS_IN_MENU))) {
+	f = OLBSS_DEPRESSED | OLBSS_BORDERED;
+	if (!((b->OLBI_specState & OLBSS_IN_MENU_BAR) && OpenCheckIfBW()))
+	    f = OLBSS_BORDERED;
+    }
+    MBtn(o)->OLBI_specState |= f;
+}
+
+static void EnsureIsDrawnDepressedNow(optr o)
+{
+    SaveIfStartingInteraction(o);
+    SetBorderedAndOrDepressed(o);
+    OLButtonDrawNowIfNewState(o);
+}
+
+/* ---------------------------------------------------------------------
+ * The menu
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLMenuButtonEnsureMenuOpen: the other menus of the parent closed; a
+ * sub menu's only when x (in the button) reaches its mark; the menu
+ * brought up at the button's bottom left (to the right: its top right)
+ */
+static void EnsureMenuOpen(optr o, sword x)
+{
+    OLMenuButtonInstance *b = MBtn(o);
+    optr p, c, g;
+    word i, n;
+    sword px, py;
+    WindowHandle w;
+    XYValueAsDWord s;
+    byte type;
+
+    if (b->OLMBI_specState & OLMBSS_POPUP_OPEN)
+	return;
+    p = VisFindParent(o);
+    if (p) {
+	n = @call p::MSG_VIS_COUNT_CHILDREN();
+	for (i = 0; i < n; i++) {
+	    c = @call p::MSG_VIS_FIND_CHILD_AT_POSITION(i);
+	    if (c && c != o && ObjIsObjectInClass(c, &OLMenuButtonClass))
+		(void) @call c::MSG_OL_MENU_BUTTON_CLOSE_MENU();
+	}
+    }
+    b = MBtn(o);
+    type = b->OLMBI_popupType;
+    if (type == MOWT_SUBMENU &&
+	x < b->VI_bounds.R_right - 2 * (OL_MARK_WIDTH + MO_BUTTON_INSET_X))
+	return;
+    b->OLMBI_specState |= OLMBSS_POPUP_OPEN;
+    px = b->VI_bounds.R_left;
+    py = b->VI_bounds.R_bottom;
+    if (!(b->OLBI_specState & (OLBSS_SYS_ICON | OLBSS_IN_MENU_BAR)) &&
+	!(b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX))
+	py--;
+    g = GenPart(o);
+    if (type == MOWT_SUBMENU ||
+	(b->OLMBI_specState & OLMBSS_ORIENT_POPUP_HORIZONTALLY) ||
+	ObjVarFindData(g, HINT_POPS_UP_TO_RIGHT)) {
+	(void) ObjVarAddData(g, TEMP_POPUP_OPENING_TO_RIGHT, 0);
+	b = MBtn(o);
+	px = b->VI_bounds.R_right;
+	py = b->VI_bounds.R_top;
+	if (type == MOWT_SUBMENU)
+	    px++;
+    }
+    w = VisQueryWindow(o);
+    if (w) {
+	s = WinTransform(w, px, py);
+	px = (sword) DWORD_X(s);
+	py = (sword) DWORD_Y(s);
+    }
+    @call g::MSG_OL_POPUP_ACTIVATE(px, py);
+}
+
+/* OLMenuButtonCloseMenu: an open menu completed, the button as it was;
+ * TRUE if it was open */
+@method OLMenuButtonClass, MSG_OL_MENU_BUTTON_CLOSE_MENU
+{
+    optr g;
+
+    if (!(pself->OLMBI_specState & OLMBSS_POPUP_OPEN))
+	return FALSE;
+    g = GenPart(oself);
+    (void) @call g::MSG_GEN_GUP_INTERACTION_COMMAND(IC_INTERACTION_COMPLETE);
+    MBtn(oself)->OLMBI_specState &= ~OLMBSS_POPUP_OPEN;
+    OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
+    return TRUE;
+}
+
+/* OLMenuButtonNotifyMenuDismissed: the menu went down */
+@method OLMenuButtonClass, MSG_OL_MENU_BUTTON_NOTIFY_MENU_DISMISSED
+{
+    if (!(pself->OLMBI_specState & OLMBSS_POPUP_OPEN))
+	return;
+    pself->OLMBI_specState &= ~OLMBSS_POPUP_OPEN;
+    OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The mouse
+ * ------------------------------------------------------------------- */
+
+static void TakeGadgetExcl(optr o)
+{
+    optr p = VisFindParent(o);
+
+    MBtn(o)->OLMBI_specState |= OLMBSS_CLOSE_MENU_ON_LOST_GADGET_EXCL;
+    if (p)
+	@call p::MSG_VIS_TAKE_GADGET_EXCL(o);
+}
+
+static void SetResult(MouseReturnParams *r, MouseReturnFlags f)
+{
+    if (r) {
+	memset(r, 0, sizeof(*r));
+	r->flags = f;
+    }
+}
+
+/*
+ * OLMenuButtonHandleMenuFunction: pressed on the button: depressed,
+ * the gadget exclusive and the mouse taken (closing if the menu was
+ * open), the menu opened; released on it: the menu closed (if the
+ * press was to close it) or in stay up mode; off it with the mouse:
+ * released, the event replayed
+ */
+static void HandleMenuFunction(optr o, sword x, word inputState,
+			       MouseReturnParams *retVal)
+{
+    byte fa = (byte) (inputState >> 8);
+    OLMenuButtonInstance *b;
+    optr g;
+
+    if (fa & OLMBFA_IN_BOUNDS) {
+	if (fa & OLMBFA_MENU) {
+	    b = MBtn(o);
+	    if (!(b->OLBI_specState & OLBSS_HAS_MOUSE_GRAB)) {
+		b->OLBI_specState |= OLBSS_HAS_MOUSE_GRAB;
+		TakeGadgetExcl(o);
+		MBtn(o)->OLBI_specState &= ~OLBSS_HAS_MOUSE_GRAB;
+		EnsureIsDrawnDepressedNow(o);
+		b = MBtn(o);
+		b->OLBI_specState |= OLBSS_HAS_MOUSE_GRAB;
+		b->OLMBI_specState &= ~OLMBSS_CLOSING_MENU;
+		if (b->OLMBI_specState & OLMBSS_POPUP_OPEN)
+		    b->OLMBI_specState |= OLMBSS_CLOSING_MENU;
+		VisGrabMouse(o);
+	    } else
+		EnsureIsDrawnDepressedNow(o);
+	    EnsureMenuOpen(o, x);
+	    SetResult(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	    return;
+	}
+	if (!OLButtonReleaseMouseGrab(o)) {
+	    SetResult(retVal, MRF_PROCESSED);
+	    return;
+	}
+	b = MBtn(o);
+	if (b->OLMBI_specState & OLMBSS_CLOSING_MENU) {
+	    b->OLMBI_specState &= ~OLMBSS_CLOSING_MENU;
+	    (void) @call o::MSG_OL_MENU_BUTTON_CLOSE_MENU();
+	} else {
+	    if (!(b->OLMBI_specState & OLMBSS_POPUP_OPEN)) {
+		SetBorderedAndOrDepressed(o);
+		OLButtonDrawNowIfNewState(o);
+		EnsureMenuOpen(o, 32767);
+	    }
+	    g = GenPart(o);
+	    @call g::MSG_MO_MW_ENTER_STAY_UP_MODE(TRUE);
+	}
+	SetResult(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	MBtn(o)->OLMBI_specState &= ~OLMBSS_MENU_FUNCTION_PENDING;
+	return;
+    }
+    if (!OLButtonReleaseMouseGrab(o)) {
+	SetResult(retVal, MRF_PROCESSED);
+	return;
+    }
+    SetResult(retVal, MRF_REPLAY);
+    MBtn(o)->OLMBI_specState &= ~OLMBSS_MENU_FUNCTION_PENDING;
+}
+
+/*
+ * OLMenuButtonHandleEvent: the select button is the menu function (only
+ * it and the bounds kept of the functions); pending until released
+ */
+static void HandleEvent(optr o, sword x, word inputState,
+			MouseReturnParams *retVal)
+{
+    OLMenuButtonInstance *b = MBtn(o);
+
+    inputState &= ((OLMBFA_MENU | OLMBFA_IN_BOUNDS) << 8) | 0xff;
+    if (b->OLMBI_specState & OLMBSS_DEFAULT_FUNCTION_PENDING) {
+	SetResult(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	return;
+    }
+    if (!(b->OLMBI_specState & OLMBSS_MENU_FUNCTION_PENDING)) {
+	if (!OpenButtonCheckIfFullyEnabled(o) ||
+	    !((inputState >> 8) & OLMBFA_MENU)) {
+	    SetResult(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	    return;
+	}
+	MBtn(o)->OLMBI_specState |= OLMBSS_MENU_FUNCTION_PENDING;
+    }
+    HandleMenuFunction(o, x, inputState, retVal);
+}
+
+@method OLMenuButtonClass, MSG_META_START_SELECT
+{
+    (void) yPosition;
+    OpenDoClickSound();
+    HandleEvent(oself, xPosition, inputState, retVal);
+}
+
+@method OLMenuButtonClass, MSG_META_PTR
+{
+    (void) yPosition;
+    HandleEvent(oself, xPosition, inputState, retVal);
+}
+
+@method OLMenuButtonClass, MSG_META_END_SELECT
+{
+    (void) yPosition;
+    HandleEvent(oself, xPosition, inputState, retVal);
+}
+
+/*
+ * OLMenuButtonLostGadgetExcl: another gadget took it while the button
+ * was working its menu: the menu closed, the button as it was
+ */
+@method OLMenuButtonClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    OLMenuButtonInstance *b = pself;
+
+    if (b->OLMBI_specState & OLMBSS_CLOSE_MENU_ON_LOST_GADGET_EXCL) {
+	b->OLMBI_specState &= ~(OLMBSS_CLOSE_MENU_ON_LOST_GADGET_EXCL |
+				OLMBSS_MENU_FUNCTION_PENDING |
+				OLMBSS_DEFAULT_FUNCTION_PENDING);
+	b->OLBI_specState |= OLBSS_HAS_MOUSE_GRAB;
+	if (!@call oself::MSG_OL_MENU_BUTTON_CLOSE_MENU())
+	    OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
+    }
+    (void) OLButtonReleaseMouseGrab(oself);
+}
+
+/*
+ * OLMenuButtonVupQuery: the menu in stay up mode keeps the menu when
+ * the gadget exclusive goes; so does a remote grab through the button
+ */
+@method OLMenuButtonClass, MSG_VIS_P32_VUP_QUERY
+{
+    if (queryType == SVQT_HAS_MENU_IN_STAY_UP_MODE)
+	pself->OLMBI_specState &= ~OLMBSS_CLOSE_MENU_ON_LOST_GADGET_EXCL;
+    else if (queryType == SVQT_NOTIFY_MENU_BUTTON_AND_REMOTE_GRAB_GADGET_EXCL) {
+	pself->OLMBI_specState &= ~OLMBSS_CLOSE_MENU_ON_LOST_GADGET_EXCL;
+	queryType = SVQT_REMOTE_GRAB_GADGET_EXCL;
+    }
+    return @callsuper();
+}
+
+/* OLMenuButtonGainedDefaultExclusive: the gadget exclusive too */
+@method OLMenuButtonClass, MSG_META_GAINED_DEFAULT_EXCL
+{
+    TakeGadgetExcl(oself);
+    @callsuper();
+}
+
+/*
+ * OLMenuButtonLeaveStayUpMode: the menu left stay up mode on a press at
+ * x, y (screen): on this button with the select function, TRUE (the
+ * press works the button); else the button as it was
+ */
+@method OLMenuButtonClass, MSG_MO_MB_LEAVE_STAY_UP_MODE
+{
+    WindowHandle w;
+    XYValueAsDWord p;
+
+    pself->OLMBI_specState &= ~(OLMBSS_MENU_FUNCTION_PENDING |
+				OLMBSS_DEFAULT_FUNCTION_PENDING);
+    w = VisQueryWindow(oself);
+    if (w) {
+	if ((inputState >> 8) & UIFA_IN)
+	    return FALSE;
+	p = WinUntransform(w, x, y);
+	if (VisTestPointInBounds(oself, (sword) DWORD_X(p),
+				 (sword) DWORD_Y(p)) &&
+	    ((inputState >> 8) & OLMBFA_MENU))
+	    return TRUE;
+    }
+    OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLMenuButtonGenActivate: realized and enabled, not working: depressed,
+ * the menu opened and in stay up mode (a sub menu's without the gadget
+ * exclusive)
+ */
+@method OLMenuButtonClass, MSG_GEN_ACTIVATE
+{
+    optr g;
+    Boolean grab;
+
+    if ((pself->OLMBI_specState & (OLMBSS_MENU_FUNCTION_PENDING |
+				   OLMBSS_DEFAULT_FUNCTION_PENDING)) ||
+	!OpenButtonCheckIfFullyEnabled(oself) ||
+	!(MBtn(oself)->VI_attrs & VA_REALIZED))
+	return;
+    MBtn(oself)->OLMBI_specState |= OLMBSS_MENU_FUNCTION_PENDING;
+    EnsureIsDrawnDepressedNow(oself);
+    EnsureMenuOpen(oself, 32767);
+    grab = !(MBtn(oself)->OLBI_specState & OLBSS_IN_MENU);
+    MBtn(oself)->OLMBI_specState &= ~OLMBSS_MENU_FUNCTION_PENDING;
+    g = GenPart(oself);
+    @call g::MSG_MO_MW_ENTER_STAY_UP_MODE(grab);
+}
+
+@method OLMenuButtonClass, MSG_OL_BUTTON_KBD_ACTIVATE
+{
+    @call oself::MSG_GEN_ACTIVATE();
+}
+
+@method OLMenuButtonClass, MSG_OL_MENU_BUTTON_KBD_ACTIVATE
+{
+    @call oself::MSG_GEN_ACTIVATE();
+}

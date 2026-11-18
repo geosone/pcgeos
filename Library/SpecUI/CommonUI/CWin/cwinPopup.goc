@@ -38,8 +38,8 @@ static optr PopupButton(optr o)
  * first time (an OLButton; a default one with HINT_DEFAULT_DEFAULT_
  * ACTION is the window's master default), enabled as the popup is,
  * added to its vis parent beside the generic siblings (a system icon
- * or the express menu's to the generic parent, first).  Port32: menus
- * (OLMenuButtonClass) and the file menu's place not yet; the moniker
+ * or the express menu's to the generic parent, first); a menu's is an
+ * OLMenuButton.  Port32: the file menu's place not yet; the moniker
  * list is not reduced to an icon.
  */
 static void PopupBuildButton(optr oself, SpecBuildFlags flags)
@@ -54,12 +54,16 @@ static void PopupBuildButton(optr oself, SpecBuildFlags flags)
     GenReturnParams r;
 
     if (!p->OLPWI_button) {
-	if (p->OLWI_fixedAttr & OWFA_IS_MENU)
-	    return;		/* OLMenuButtonClass: not yet */
-	isDefault = ObjVarFindData(oself, HINT_DEFAULT_DEFAULT_ACTION) != NULL;
-	b = ObjInstantiate(OptrToHandle(oself), (ClassStruct *) &OLButtonClass);
+	word ta = p->OLWI_type | ((word) p->OLWI_fixedAttr << 8);
+	Boolean menu = (p->OLWI_fixedAttr & OWFA_IS_MENU) != 0;
+
+	isDefault = !menu &&
+		    ObjVarFindData(oself, HINT_DEFAULT_DEFAULT_ACTION) != NULL;
+	b = ObjInstantiate(OptrToHandle(oself), menu ?
+			   (ClassStruct *) &OLMenuButtonClass :
+			   (ClassStruct *) &OLButtonClass);
 	ObjSetFlags(b, OCF_IGNORE_DIRTY, 0);
-	@call b::MSG_OL_BUTTON_SETUP(OptrToChunk(oself), bf);
+	@call b::MSG_OL_BUTTON_SETUP(OptrToChunk(oself), ta, bf);
 	if (isDefault)
 	    ((OLButtonInstance *) ObjDerefVis(b))->OLBI_fixedAttrs |=
 					OLBFA_MASTER_DEFAULT_TRIGGER;
@@ -74,7 +78,9 @@ static void PopupBuildButton(optr oself, SpecBuildFlags flags)
 	((flags & SBF_VIS_PARENT_FULLY_ENABLED) &&
 	 (((GenInstance *) ObjDerefGen(oself))->GI_states & GS_ENABLED)))
 	((VisInstance *) ObjDerefVis(b))->VI_attrs |= VA_FULLY_ENABLED;
-    vp = VisGetVisParent(b, &vf);
+    /* the popup's vis parent for its button part (as the asm: the
+     * popup asked, not the button) */
+    vp = VisGetVisParent(oself, &vf);
     if (!vp)
 	return;
     bi = (OLButtonInstance *) ObjDerefVis(b);

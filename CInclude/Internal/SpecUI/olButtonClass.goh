@@ -82,9 +82,10 @@ typedef ByteFlags OLButtonOptFlags;
 /* drawn now if the state differs from the drawn one */
 @message void MSG_OL_BUTTON_REDRAW();
 @message void MSG_OL_BUTTON_SET_DRAW_STATE_UNKNOWN();
-/* a popup's button: its generic object (in this block) and the build
- * flags the popup's query answered */
-@message void MSG_OL_BUTTON_SETUP(ChunkHandle genChunk,
+/* a popup's button: its generic object (in this block), the popup's
+ * window type (low byte, an OLWinType) and fixed attributes (high
+ * byte, OLWinFixedAttr), the build flags the popup's query answered */
+@message void MSG_OL_BUTTON_SETUP(ChunkHandle genChunk, word winTypeAttrs,
 				  OLBuildFlags buildFlags);
 @message optr MSG_OL_BUTTON_GET_GEN_PART();
 @message Boolean MSG_OL_BUTTON_QUERY_IS_TRIGGER();

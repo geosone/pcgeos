@@ -50,6 +50,11 @@ static void DrawNowIfNewState(optr oself)
     @call oself::MSG_OL_BUTTON_REDRAW();
 }
 
+void OLButtonDrawNowIfNewState(optr oself)
+{
+    DrawNowIfNewState(oself);
+}
+
 /*
  * OLButtonDrawLATERIfNewState: with an expose pending, the button is
  * invalidated (drawn with it); else redrawn through the queue, first
@@ -85,6 +90,11 @@ static void SaveBorderedAndDepressed(OLButtonInstance *b)
 }
 
 /* OLButtonRestoreBorderedAndDepressedStatus */
+void OLButtonSaveBorderedAndDepressed(optr oself)
+{
+    SaveBorderedAndDepressed(Btn(oself));
+}
+
 void OLButtonRestoreBorderedAndDepressed(optr oself)
 {
     OLButtonInstance *b = Btn(oself);
@@ -153,7 +163,7 @@ Boolean OpenButtonCheckIfFullyEnabled(optr oself)
  * The grabs and exclusives
  * ------------------------------------------------------------------- */
 
-static void EnsureMouseGrab(optr oself)
+void OLButtonEnsureMouseGrab(optr oself)
 {
     if (Btn(oself)->OLBI_specState & OLBSS_HAS_MOUSE_GRAB)
 	return;
@@ -223,7 +233,7 @@ static void GrabExclusives(optr oself, Boolean press)
 	@call p::MSG_VIS_TAKE_GADGET_EXCL(oself);
     if (!press)
 	return;
-    EnsureMouseGrab(oself);
+    OLButtonEnsureMouseGrab(oself);
     b = Btn(oself);
     if (!(b->OLBI_specState & (OLBSS_SYS_ICON | OLBSS_IN_MENU_BAR)) &&
 	!(b->OLBI_moreAttrs & OLBMA_IN_TOOLBOX))

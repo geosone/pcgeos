@@ -26,6 +26,9 @@
 @include <Internal/SpecUI/olBaseWinClass.goh>
 @include <Internal/SpecUI/olPopupWinClass.goh>
 @include <Internal/SpecUI/olButtonClass.goh>
+@include <Internal/SpecUI/olMenuWinClass.goh>
+@include <Internal/SpecUI/olMenuButtonClass.goh>
+@include <Internal/SpecUI/olMenuBarClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/im.h>
 #include <Internal/videoDr.h>
@@ -374,6 +377,11 @@ extern void OLButtonCallWin(optr oself, VisUpwardQueryType q);
 extern void OLButtonDrawLaterIfNewState(optr oself);
 extern void OLButtonSaveStateSetBorderedAndOrDepressed(optr oself);
 extern void OLButtonRestoreBorderedAndDepressed(optr oself);
+extern void OLButtonSaveBorderedAndDepressed(optr oself);
+extern void OLButtonDrawNowIfNewState(optr oself);
+extern void OLButtonEnsureMouseGrab(optr oself);
+extern void OLButtonUseQueryResults(optr oself, OLBuildFlags f);
+extern void OLButtonSetToolboxBasedOnParent(optr oself);
 extern void OLButtonRestoreBorderedAndDepressedAndDrawNow(optr oself);
 extern void OLButtonActivate(optr oself, Boolean doublePress);
 extern OLMonikerAttrs OLButtonSetupMonikerAttrs(optr oself);

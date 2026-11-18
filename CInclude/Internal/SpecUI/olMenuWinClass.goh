@@ -1,0 +1,76 @@
+/*
+ * olMenuWinClass.goh -- OLMenuWinClass, the window of a menu (a
+ * GIV_POPUP GenInteraction in a menu bar or a menu: after
+ * Include/Internal/SpecUI/olMenuWinClass.def), for Port32.
+ *
+ * Motif's: _CASCADING_MENUS.  MenuWinScrollerClass (the arrows of a
+ * menu taller than the screen) is not here yet.
+ */
+#ifndef __OLMENUWINCLASS_GOH
+#define __OLMENUWINCLASS_GOH
+
+@include <Internal/SpecUI/olPopupWinClass.goh>
+
+@deflib motif
+
+/* OLMenuWinSpecState */
+typedef ByteFlags OLMenuWinSpecState;
+#define OMWSS_WAS_PINNED	0x80
+#define OMWSS_RE_PINNING	0x40
+#define OMWSS_IN_STAY_UP_MODE	0x20	/* up after a click, until a press */
+#define OMWSS_FILE_MENU		0x10	/* GIGT_FILE_MENU */
+#define OMWSS_EXIT_CREATED	0x08	/* we made its Exit trigger */
+#define OMWSS_INFREQUENT_USAGE	0x04
+#define OMWSS_CUSTOM_SYS_MENU	0x02
+#define OMWSS_ADDING_SYS_MENU	0x01
+
+/* OLMenuWinMoreSpecState */
+typedef ByteFlags OLMenuWinMoreSpecState;
+#define OMWMSS_IS_CASCADING			0x80
+#define OMWMSS_IGNORE_SUBMENU_CLOSE_REQUEST	0x40
+#define OMWMSS_DONT_SEND_REQUEST		0x20
+
+/* OLMenuWinCascadeModeOptions */
+typedef ByteFlags OLMenuWinCascadeModeOptions;
+#define OMWCMO_CASCADE		0x80
+#define OMWCMO_START_GRAB	0x40
+
+/* TEMP_OL_MENU_WIN_SCROLLERS */
+typedef struct {
+    ChunkHandle	MWSS_upScroller;
+    ChunkHandle	MWSS_downScroller;
+} MenuWinScrollerStruct;
+
+@class OLMenuWinClass, OLPopupWinClass;
+@uses GenClass;
+
+/* up after a click (the pointer passes over the items without a press);
+ * grab: take the gadget exclusive for the menu */
+@message void MSG_MO_MW_ENTER_STAY_UP_MODE(Boolean grab);
+/* a press (at x, y in the menu's window, the input state): no longer;
+ * TRUE if the menu's button is pressed on again */
+@message Boolean MSG_MO_MW_LEAVE_STAY_UP_MODE(sword x, sword y,
+					      word inputState);
+@message word MSG_MO_MW_GET_MENU_CENTER();
+@message void MSG_MO_MW_CASCADE_MODE(OLMenuWinCascadeModeOptions options,
+				     optr submenu);
+@message void MSG_MO_MW_GUP_SUBMENU_REQUESTS_CLOSE(optr submenu,
+						   Boolean closeAll);
+@message void MSG_MO_MW_CLOSE_ALL_MENUS_IN_CASCADE();
+@message void MSG_OL_MENU_WIN_UPDATE_SCROLLABLE_MENU();
+
+    @vardata void HINT_IS_EXPRESS_MENU;
+    @vardata optr ATTR_OL_MENU_WIN_EXIT_TRIGGER;
+    @vardata optr ATTR_OL_MENU_WIN_CASCADED_MENU;
+    @vardata MenuWinScrollerStruct TEMP_OL_MENU_WIN_SCROLLERS;
+
+    @instance OLMenuWinSpecState	OLMWI_specState = 0;
+    @instance sword			OLMWI_monikerSpace = 0;
+    @instance sword			OLMWI_accelSpace = 0;
+    @instance OLMenuWinMoreSpecState	OLMWI_moreSpecState = 0;
+
+@endc;
+
+@endlib
+
+#endif

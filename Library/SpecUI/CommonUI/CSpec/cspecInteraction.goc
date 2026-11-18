@@ -9,9 +9,7 @@
  * MSG_META_INITIALIZE.
  *
  * Port32 (Port32/ABI.md section 13y), not yet: OLPopoutClass and
- * OLMenuItemGroupClass (an OLCtrl instead), OLMenuWinClass (an
- * OLPopupWin instead: a popup with no menu behaviour) and its
- * HINT_IS_EXPRESS_MENU.
+ * OLMenuItemGroupClass (an OLCtrl instead).
  */
 @include "cGeode.goh"
 
@@ -136,12 +134,12 @@ ClassStruct *OLBuildInteraction(optr oself, word masterOffset)
 	(reply == R(OLBR_TOP_MENU) || reply == R(OLBR_SUB_MENU)))
 	return (ClassStruct *) &OLDialogWinClass;
     if (reply == R(OLBR_TOP_MENU) && vis == GIV_POPUP)
-	return (ClassStruct *) &OLPopupWinClass;	/* OLMenuWinClass */
+	return (ClassStruct *) &OLMenuWinClass;
     if (reply == R(OLBR_SUB_MENU)) {
 	if (vis == GIV_SUB_GROUP)
 	    return (ClassStruct *) &OLCtrlClass;  /* OLMenuItemGroupClass */
 	if (vis == GIV_POPUP)
-	    return (ClassStruct *) &OLPopupWinClass;	/* OLMenuWinClass */
+	    return (ClassStruct *) &OLMenuWinClass;
     }
     return (ClassStruct *) &OLCtrlClass;
 }
