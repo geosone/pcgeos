@@ -1,0 +1,608 @@
+/*
+ * cwinPtr.goc -- OLWinClass (after cwinPtr.asm): the mouse in a window.
+ * A press in the window starts its grab (the post-passive grab: the
+ * window learns when all buttons are up) and goes to the child under
+ * the pointer; a press nobody takes on the resize border or the title
+ * starts a resize or move: dragged, the xor frame follows the pointer
+ * (ImStartMoveResize), released, the window is moved or resized.  The
+ * pointer image shows the move or resize it would start.  A press in a
+ * window not on top brings it to the top (the pre-passive grab while
+ * the pointer is in the window).  A key press goes to the window's
+ * focus.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: moving and resizing by
+ * the keyboard (the move/resize keys, the abort monitor, the system
+ * menu's Move and Size), the toggle menu navigation, ink
+ * (MSG_META_QUERY_IF_PRESS_IS_INK, MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK),
+ * the pushpin of Open Look.
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/im.h>
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/* the start of a move or resize: the press (window coordinates), from
+ * the first drag on the screen's; the xor flags of the resize */
+static Point olScreenStart;
+static XorFlags olXorFlags;
+
+/* the frame of a resize (and move): the border, RESIZE_WIDTH wide; a
+ * window icon's, a line at the bottom */
+#define RESIZE_WIDTH	5
+
+@start ResizeRegions, data;
+@chunk word PrimaryResizeRegion[] = {
+    PARAM_0, PARAM_1, PARAM_2 - 1, PARAM_3 - 1,
+    PARAM_1 - 1,						EOREGREC,
+    PARAM_1 + RESIZE_WIDTH - 1,	PARAM_0, PARAM_2 - 1,		EOREGREC,
+    PARAM_3 - RESIZE_WIDTH - 1,	PARAM_0, PARAM_0 + RESIZE_WIDTH - 1,
+				PARAM_2 - RESIZE_WIDTH, PARAM_2 - 1, EOREGREC,
+    PARAM_3 - 1,		PARAM_0, PARAM_2 - 1,		EOREGREC,
+    EOREGREC
+};
+@chunk word WinIconResizeRegion[] = {
+    0, 0, PARAM_2 - 1, PARAM_3 - 1,
+    (word) -1,							EOREGREC,
+    PARAM_3 - 1,		0, PARAM_2 - 1,			EOREGREC,
+    EOREGREC
+};
+@end ResizeRegions;
+
+/* ---------------------------------------------------------------------
+ * The grab
+ * ------------------------------------------------------------------- */
+
+/* OpenWinStartupGrab: the window learns when the buttons are all up */
+@extern method OLWinClass, MSG_OL_WIN_STARTUP_GRAB
+{
+    if (pself->OLWI_specState & OLWSS_GRABBED)
+	return;
+    pself->OLWI_specState |= OLWSS_GRABBED;
+    @call oself::MSG_VIS_ADD_BUTTON_POST_PASSIVE();
+}
+
+/* OpenWinCheckIfInteractableObject: its system menu is */
+@extern method OLWinClass, MSG_META_CHECK_IF_INTERACTABLE_OBJECT
+{
+    return pself->OLWI_sysMenu && OptrToHandle(obj) == pself->OLWI_sysMenu;
+}
+
+/* the window may be worked (the application asked); not without a
+ * window */
+static Boolean CheckIfInteractable(optr o)
+{
+    WindowHandle w = Win(o)->VCI_window;
+    optr app;
+
+    if (!w)
+	return FALSE;
+    app = GeodeGetAppObject(0);
+    return app && @call app::MSG_META_TEST_WIN_INTERACTIBILITY(o, w);
+}
+
+static void DispatchPassiveButton(optr o, Message msg,
+				  MouseReturnParams *retVal, sword x,
+				  sword y, word inputState)
+{
+    Message m = FlowTranslatePassiveButton(msg, inputState);
+
+    @call o::{MSG_UI_BUTTON}(m)(retVal, x, y, inputState);
+}
+
+static void SetResult(MouseReturnParams *r, MouseReturnFlags f)
+{
+    if (r) {
+	memset(r, 0, sizeof(*r));
+	r->flags = f;
+    }
+}
+
+/*
+ * OpenWinPrePassiveButton: in a window that may be worked, a menu with
+ * the focus gives it up; the passive message of the button's function
+ */
+@extern method OLWinClass, MSG_META_PRE_PASSIVE_BUTTON
+{
+    if (!CheckIfInteractable(oself)) {
+	SetResult(retVal, MRF_PROCESSED);
+	return;
+    }
+    if ((pself->OLWI_focusExcl.FTVMC_flags &
+	 (MAEF_OD_IS_MENU_RELATED | HGF_APP_EXCL)) ==
+	(MAEF_OD_IS_MENU_RELATED | HGF_APP_EXCL))
+	@call oself::MSG_VIS_VUP_RELEASE_MENU_FOCUS();
+    DispatchPassiveButton(oself, MSG_META_PRE_PASSIVE_BUTTON, retVal,
+			  xPosition, yPosition, inputState);
+}
+
+/* OpenWinPostPassiveButton: all buttons up, the grab ends */
+@extern method OLWinClass, MSG_META_POST_PASSIVE_BUTTON
+{
+    if (!(inputState & (BI_B3_DOWN | BI_B2_DOWN | BI_B1_DOWN | BI_B0_DOWN)))
+	@call oself::MSG_OL_WIN_END_GRAB(FALSE);
+    DispatchPassiveButton(oself, MSG_META_POST_PASSIVE_BUTTON, retVal,
+			  xPosition, yPosition, inputState);
+}
+
+/*
+ * OpenWinEnsureMouseNotActivelyTrespassing: a window that may not be
+ * worked lets go: a menu in stay up mode is dismissed, else the grab
+ * ends
+ */
+@extern method OLWinClass, MSG_META_ENSURE_MOUSE_NOT_ACTIVELY_TRESPASSING
+{
+    OLWinInstance *w;
+
+    if (CheckIfInteractable(oself))
+	return 0;
+    w = Win(oself);
+    if ((w->OLWI_fixedAttr & OWFA_IS_MENU) &&
+	(((OLMenuWinInstance *) w)->OLMWI_specState & OMWSS_IN_STAY_UP_MODE))
+	(void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+    else
+	@call oself::MSG_OL_WIN_END_GRAB(TRUE);
+    return 0;
+}
+
+/* OpenWinAllowGlobalTransfer: the grab ends, the flow allows it */
+@extern method OLWinClass, MSG_VIS_VUP_ALLOW_GLOBAL_TRANSFER
+{
+    optr f = UserGetFlowObject();
+
+    pself->OLWI_menuState &= ~OLWMS_TOGGLE_MENU_NAV_PENDING;
+    @call oself::MSG_OL_WIN_END_GRAB(FALSE);
+    if (f)
+	@call f::MSG_FLOW_ALLOW_GLOBAL_TRANSFER();
+}
+
+/* ---------------------------------------------------------------------
+ * Move and resize
+ * ------------------------------------------------------------------- */
+
+static void SetPtrImage(optr o, OLPtrImage img)
+{
+    WindowHandle w = Win(o)->VCI_window;
+
+    if (w)
+	WinSetPtrImage(w, PIL_WINDOW, OpenGetPtrImage(img));
+}
+
+/*
+ * FinishMoveResize: no move or resize, the xor gone, the pointer image
+ * of the window none; the mouse and keyboard released; a menu gives up
+ * the focus
+ */
+static void FinishMoveResize(optr o)
+{
+    optr f, app;
+
+    Win(o)->OLWI_moveResizeState &= ~(OLWMRS_MOVING_OR_RESIZING_MASK |
+				       OLWMRS_MOVE_RESIZE_PENDING |
+				       OLWMRS_RESIZE_PENDING);
+    ImStopMoveResize();
+    SetPtrImage(o, OLPI_NONE);
+    VisReleaseMouse(o);
+    VisReleaseKbd(o);
+    f = UserGetFlowObject();
+    if (f)
+	@call f::MSG_FLOW_RELEASE_MOUSE();
+    if (Win(o)->OLWI_fixedAttr & OWFA_IS_MENU) {
+	@call o::MSG_META_RELEASE_FOCUS_EXCL();
+	app = GeodeGetAppObject(0);
+	if (app)
+	    @call app::MSG_META_ENSURE_ACTIVE_FT();
+    }
+}
+
+static void AbortMoveResize(optr o)
+{
+    if (Win(o)->OLWI_moveResizeState & (OLWMRS_MOVING_OR_RESIZING_MASK |
+					OLWMRS_RESIZE_PENDING))
+	FinishMoveResize(o);
+}
+
+@extern method OLWinClass, MSG_OL_WIN_ABORT_MOVE_RESIZE
+{
+    AbortMoveResize(oself);
+}
+
+/*
+ * OpenWinEndGrab: the grab ends (unless, not forced, the window is a
+ * menu in stay up mode): the mouse and keyboard released, a move or
+ * resize stopped, the post-passive grab gone; forced or with no menu
+ * in stay up mode, no gadget exclusive
+ */
+@extern method OLWinClass, MSG_OL_WIN_END_GRAB
+{
+    OLWinInstance *w = pself;
+
+    if (!(w->OLWI_specState & OLWSS_GRABBED))
+	return;
+    if (!force && (w->OLWI_fixedAttr & OWFA_IS_MENU) &&
+	(((OLMenuWinInstance *) w)->OLMWI_specState & OMWSS_IN_STAY_UP_MODE))
+	return;
+    w->OLWI_specState &= ~OLWSS_GRABBED;
+    VisReleaseMouse(oself);
+    VisReleaseKbd(oself);
+    AbortMoveResize(oself);
+    @call oself::MSG_VIS_REMOVE_BUTTON_POST_PASSIVE();
+    if (force ||
+	!(Win(oself)->OLWI_menuState & OLWMS_HAS_MENU_IN_STAY_UP_MODE))
+	@call oself::MSG_VIS_TAKE_GADGET_EXCL(0);
+}
+
+/* MouseInTitleBounds: on the title (not of a maximized display) */
+static Boolean MouseInTitleBounds(optr o, sword x, sword y)
+{
+    OLWinInstance *w = Win(o);
+    Rectangle *r = &w->OLWI_titleBarBounds;
+
+    if (!(w->OLWI_attrs & OWA_TITLED) ||
+	(w->OLWI_type == MOWT_DISPLAY_WINDOW &&
+	 (w->OLWI_specState & OLWSS_MAXIMIZED)))
+	return FALSE;
+    return y >= r->R_top && y < r->R_bottom && x >= r->R_left &&
+	   x < r->R_right;
+}
+
+/* TestForMoveControl: a movable window pressed on its title (an icon
+ * anywhere): the move state (pending until dragged) */
+static Boolean TestForMoveControl(optr o, sword x, sword y,
+				  OLWinMoveResizeState *state, XorFlags *xf)
+{
+    OLWinInstance *w = Win(o);
+
+    if (!(w->OLWI_attrs & OWA_MOVABLE))
+	return FALSE;
+    if (!(w->OLWI_fixedAttr & OWFA_IS_WIN_ICON) &&
+	!MouseInTitleBounds(o, x, y))
+	return FALSE;
+    *state = OLWMRS_MOVING | OLWMRS_MOVE_RESIZE_PENDING;
+    *xf = 0;
+    return TRUE;
+}
+
+/*
+ * TestForResizeControl: a resizable window pressed on its border: the
+ * edges (within an icon's size of a corner both) to resize
+ */
+static Boolean TestForResizeControl(optr o, sword x, sword y,
+				    OLWinMoveResizeState *state,
+				    XorFlags *xf)
+{
+    OLWinInstance *w = Win(o);
+    sword wd, ht;
+    byte s = 0;
+    XorFlags f = 0;
+
+    if (!(w->OLWI_attrs & OWA_RESIZABLE))
+	return FALSE;
+    wd = w->VI_bounds.R_right - w->VI_bounds.R_left;
+    ht = w->VI_bounds.R_bottom - w->VI_bounds.R_top;
+    if (y < 0)
+	return FALSE;
+    if (y >= (sword) resizeBarHeight && y < ht - (sword) resizeBarHeight &&
+	(x < 0 || (x >= (sword) resizeBarWidth &&
+		   x < wd - (sword) resizeBarWidth)))
+	return FALSE;
+    if (y < CUAS_WIN_ICON_HEIGHT) {
+	s = OLWMRS_RESIZING_UP | OLWMRS_MOVE_RESIZE_PENDING;
+	f = XF_RESIZE_TOP;
+    } else if (y + CUAS_WIN_ICON_HEIGHT > ht) {
+	s = OLWMRS_RESIZING_DOWN | OLWMRS_MOVE_RESIZE_PENDING;
+	f = XF_RESIZE_BOTTOM;
+    }
+    if (x < CUAS_WIN_ICON_WIDTH) {
+	s |= OLWMRS_RESIZING_LEFT | OLWMRS_MOVE_RESIZE_PENDING;
+	f |= XF_RESIZE_LEFT;
+    } else if (x + CUAS_WIN_ICON_WIDTH > wd) {
+	s |= OLWMRS_RESIZING_RIGHT | OLWMRS_MOVE_RESIZE_PENDING;
+	f |= XF_RESIZE_RIGHT;
+    }
+    if (!(s & OLWMRS_RESIZING_MASK))
+	return FALSE;
+    *state = s;
+    *xf = f;
+    return TRUE;
+}
+
+/*
+ * OpenWinUpdatePtrImage: moving the move image, resizing the image of
+ * the edges; else the image of what a press would start (the move only
+ * while pressed on the title)
+ */
+static void UpdatePtrImage(optr o, sword x, sword y, word inputState)
+{
+    OLWinMoveResizeState s = Win(o)->OLWI_moveResizeState, ns;
+    XorFlags f = 0;
+    OLPtrImage img = OLPI_NONE;
+
+    if (s & OLWMRS_MOVING_OR_RESIZING_MASK) {
+	if (s & OLWMRS_MOVING)
+	    img = OLPI_MOVE;
+	else {
+	    if (s & OLWMRS_RESIZING_UP)
+		f |= XF_RESIZE_TOP;
+	    if (s & OLWMRS_RESIZING_DOWN)
+		f |= XF_RESIZE_BOTTOM;
+	    if (s & OLWMRS_RESIZING_LEFT)
+		f |= XF_RESIZE_LEFT;
+	    if (s & OLWMRS_RESIZING_RIGHT)
+		f |= XF_RESIZE_RIGHT;
+	}
+    } else if (TestForMoveControl(o, x, y, &ns, &f) &&
+	       ((inputState >> 8) & (UIFA_SELECT | UIFA_MOVE_COPY)))
+	img = OLPI_MOVE;
+    else if (!TestForResizeControl(o, x, y, &ns, &f))
+	f = 0;
+    if (img == OLPI_NONE && f) {
+	if (f == (XF_RESIZE_TOP | XF_RESIZE_LEFT))
+	    img = OLPI_RESIZE_UPL_DIAG;
+	else if (f == (XF_RESIZE_TOP | XF_RESIZE_RIGHT))
+	    img = OLPI_RESIZE_UPR_DIAG;
+	else if (f == (XF_RESIZE_BOTTOM | XF_RESIZE_LEFT))
+	    img = OLPI_RESIZE_DOWNL_DIAG;
+	else if (f == (XF_RESIZE_BOTTOM | XF_RESIZE_RIGHT))
+	    img = OLPI_RESIZE_DOWNR_DIAG;
+	else if (f & XF_RESIZE_LEFT)
+	    img = OLPI_RESIZE_LEFT;
+	else if (f & XF_RESIZE_RIGHT)
+	    img = OLPI_RESIZE_RIGHT;
+	else if (f & XF_RESIZE_TOP)
+	    img = OLPI_RESIZE_UP;
+	else
+	    img = OLPI_RESIZE_DOWN;
+    }
+    SetPtrImage(o, img);
+}
+
+/*
+ * OpenWinPtr: the pointer image (no button working); moving or
+ * resizing nothing more; else the child under the pointer
+ */
+@extern method OLWinClass, MSG_META_PTR
+{
+    if (!((inputState >> 8) & (UIFA_SELECT | UIFA_MOVE_COPY)))
+	UpdatePtrImage(oself, xPosition, yPosition, inputState);
+    if (Win(oself)->OLWI_moveResizeState & (OLWMRS_MOVING_OR_RESIZING_MASK |
+					    OLWMRS_RESIZE_PENDING)) {
+	SetResult(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	return;
+    }
+    if (!VisCallChildUnderPoint(oself, MSG_META_PTR, xPosition, yPosition,
+				inputState, retVal))
+	SetResult(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+}
+
+/* OpenWinStartButton: the grab started, the child under the pointer */
+static void StartButton(optr o, Message msg, MouseReturnParams *retVal,
+			sword x, sword y, word inputState)
+{
+    Win(o)->OLWI_menuState &= ~OLWMS_TOGGLE_MENU_NAV_PENDING;
+    @call o::MSG_OL_WIN_STARTUP_GRAB();
+    SetResult(retVal, 0);
+    (void) VisCallChildUnderPoint(o, msg, x, y, inputState, retVal);
+}
+
+/*
+ * OpenWinStartSelect: the grab, the child; a press it did not take on
+ * the border or title starts a resize or move (the mouse grabbed)
+ */
+@extern method OLWinClass, MSG_META_START_SELECT, MSG_META_START_MOVE_COPY
+{
+    OLWinMoveResizeState s;
+    XorFlags f;
+
+    UpdatePtrImage(oself, xPosition, yPosition, inputState);
+    StartButton(oself, message, retVal, xPosition, yPosition, inputState);
+    if (retVal->flags & MRF_PROCESSED)
+	return;
+    if (TestForResizeControl(oself, xPosition, yPosition, &s, &f) ||
+	TestForMoveControl(oself, xPosition, yPosition, &s, &f)) {
+	Win(oself)->OLWI_moveResizeState |= s;
+	olXorFlags = f;
+	VisGrabMouse(oself);
+	olScreenStart.P_x = xPosition;
+	olScreenStart.P_y = yPosition;
+    }
+    SetResult(retVal, MRF_PROCESSED);
+}
+
+@extern method OLWinClass, MSG_META_START_FEATURES
+{
+    StartButton(oself, message, retVal, xPosition, yPosition, inputState);
+}
+
+/*
+ * OpenWinDragSelect: dragged after a press on the border or title: the
+ * xor frame of the window (an icon's line) follows the pointer; a
+ * resize at least the window's minimum size
+ */
+@extern method OLWinClass, MSG_META_DRAG_SELECT, MSG_META_DRAG_MOVE_COPY
+{
+    OLWinInstance *w = pself;
+    StartMoveResizeParams p;
+    XYValueAsDWord s;
+    SizeAsDWord min;
+    optr rg;
+    void *blk;
+
+    (void) xPosition;
+    (void) yPosition;
+    (void) inputState;
+    SetResult(retVal, MRF_PROCESSED);
+    if (!(w->OLWI_moveResizeState & OLWMRS_MOVING_OR_RESIZING_MASK) ||
+	!w->VCI_window)
+	return;
+    w->OLWI_moveResizeState &= ~OLWMRS_MOVE_RESIZE_PENDING;
+    memset(&p, 0, sizeof(p));
+    if (!(w->OLWI_moveResizeState & OLWMRS_MOVING)) {
+	min = @call oself::MSG_VIS_COMP_GET_MINIMUM_SIZE();
+	p.SMRP_minWidth = (sword) DWORD_WIDTH(min);
+	p.SMRP_minHeight = (sword) DWORD_HEIGHT(min);
+	p.SMRP_maxWidth = 0x4000;
+	p.SMRP_maxHeight = 0x4000;
+    }
+    w = Win(oself);
+    p.SMRP_xPos = olScreenStart.P_x;
+    p.SMRP_yPos = olScreenStart.P_y;
+    s = WinTransform(w->VCI_window, olScreenStart.P_x, olScreenStart.P_y);
+    olScreenStart.P_x = (sword) DWORD_X(s);
+    olScreenStart.P_y = (sword) DWORD_Y(s);
+    w = Win(oself);
+    p.SMRP_bounds.R_left = 0;
+    p.SMRP_bounds.R_top = 0;
+    p.SMRP_bounds.R_right = w->VI_bounds.R_right - w->VI_bounds.R_left;
+    p.SMRP_bounds.R_bottom = w->VI_bounds.R_bottom - w->VI_bounds.R_top;
+    p.SMRP_win = w->VCI_window;
+    p.SMRP_boxFlags = olXorFlags;
+    p.SMRP_releaseFlags = 0;
+    rg = (w->OLWI_fixedAttr & OWFA_IS_WIN_ICON) ? @WinIconResizeRegion
+						 : @PrimaryResizeRegion;
+    blk = MemLock(OptrToHandle(rg));
+    p.SMRP_regionHandle = OptrToHandle(rg);
+    p.SMRP_regionOffset = (word) ((byte *) LMemDeref(rg) - (byte *) blk);
+    (void) ImStartMoveResize(&p);
+    MemUnlock(OptrToHandle(rg));
+}
+
+/*
+ * OpenWinHandleEndMoveResize: released: a move or resize that never
+ * dragged is forgotten; else the xor gone and the window moved by the
+ * pointer's way (screen), or its dragged edges moved and its geometry
+ * done again
+ */
+static void HandleEndMoveResize(optr o, sword x, sword y)
+{
+    OLWinInstance *w = Win(o);
+    XYValueAsDWord e;
+    sword dx, dy;
+    byte s;
+
+    if (!(w->OLWI_moveResizeState & OLWMRS_MOVING_OR_RESIZING_MASK))
+	return;
+    if (w->OLWI_moveResizeState & OLWMRS_MOVE_RESIZE_PENDING) {
+	w->OLWI_moveResizeState &= ~(OLWMRS_MOVING_OR_RESIZING_MASK |
+				     OLWMRS_MOVE_RESIZE_PENDING);
+	return;
+    }
+    if (!w->VCI_window)
+	return;
+    ImStopMoveResize();
+    w = Win(o);
+    e = WinTransform(w->VCI_window, x, y);
+    dx = (sword) DWORD_X(e) - olScreenStart.P_x;
+    dy = (sword) DWORD_Y(e) - olScreenStart.P_y;
+    w = Win(o);
+    w->OLWI_winPosSizeState |= WPSS_HAS_MOVED_OR_RESIZED;
+    if (w->OLWI_moveResizeState & OLWMRS_MOVING) {
+	w->OLWI_moveResizeState &= ~OLWMRS_MOVING;
+	if (dx || dy) {
+	    w->VI_bounds.R_left += dx;
+	    w->VI_bounds.R_top += dy;
+	    w->VI_bounds.R_right += dx;
+	    w->VI_bounds.R_bottom += dy;
+	    @call o::MSG_VIS_MOVE_RESIZE_WIN();
+	}
+	return;
+    }
+    s = w->OLWI_moveResizeState;
+    if (s & OLWMRS_RESIZING_UP)
+	w->VI_bounds.R_top += dy;
+    if (s & OLWMRS_RESIZING_DOWN)
+	w->VI_bounds.R_bottom += dy;
+    if (s & OLWMRS_RESIZING_LEFT)
+	w->VI_bounds.R_left += dx;
+    if (s & OLWMRS_RESIZING_RIGHT)
+	w->VI_bounds.R_right += dx;
+    if (w->VI_bounds.R_left > w->VI_bounds.R_right)
+	w->VI_bounds.R_right = w->VI_bounds.R_left;
+    if (w->VI_bounds.R_top > w->VI_bounds.R_bottom)
+	w->VI_bounds.R_bottom = w->VI_bounds.R_top;
+    w->OLWI_moveResizeState &= ~OLWMRS_RESIZING_MASK;
+    @call o::MSG_VIS_INVAL_ALL_GEOMETRY(VUM_MANUAL);
+    VisMarkInvalid(o, VOF_GEOMETRY_INVALID | VOF_WINDOW_INVALID |
+		      VOF_IMAGE_INVALID, VUM_NOW);
+}
+
+/* OpenWinEndSimpleButton: a move or resize ends, the mouse released */
+@extern method OLWinClass, MSG_META_END_SELECT, MSG_META_END_MOVE_COPY,
+		    MSG_META_END_FEATURES
+{
+    UpdatePtrImage(oself, xPosition, yPosition, inputState);
+    HandleEndMoveResize(oself, xPosition, yPosition);
+    VisReleaseMouse(oself);
+    SetResult(retVal, MRF_PROCESSED);
+}
+
+/*
+ * OpenWinPrePassStartSelect: pressed in a window not grabbed: it comes
+ * to the top; the pre-passive grab ends
+ */
+static void FinishPrePassive(optr o, MouseReturnParams *retVal)
+{
+    @call o::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+    SetResult(retVal, MRF_PROCESSED);
+}
+
+@extern method OLWinClass, MSG_META_PRE_PASSIVE_START_SELECT
+{
+    (void) xPosition;
+    (void) yPosition;
+    (void) inputState;
+    if (!(pself->OLWI_specState & OLWSS_GRABBED))
+	@call oself::MSG_GEN_BRING_TO_TOP();
+    FinishPrePassive(oself, retVal);
+}
+
+@extern method OLWinClass, MSG_META_PRE_PASSIVE_START_MOVE_COPY
+{
+    (void) xPosition;
+    (void) yPosition;
+    (void) inputState;
+    if (!(pself->OLWI_fixedAttr & OWFA_IS_MENU) &&
+	!(pself->OLWI_specState & OLWSS_GRABBED))
+	@call oself::MSG_GEN_BRING_TO_TOP();
+    FinishPrePassive(oself, retVal);
+}
+
+/* OpenWinRawUnivEnter: the pointer in the window: the pre-passive grab
+ * watches for a press */
+@extern method OLWinClass, MSG_META_RAW_UNIV_ENTER
+{
+    if (!pself->VCI_window)
+	return;
+    pself->OLWI_specState |= OLWSS_PTR_IN_RAW_UNIV;
+    @call oself::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+}
+
+/* OpenWinRawUnivLeave: gone (a menu in stay up mode keeps watching) */
+@extern method OLWinClass, MSG_META_RAW_UNIV_LEAVE
+{
+    OLWinInstance *w = pself;
+
+    w->OLWI_specState &= ~OLWSS_PTR_IN_RAW_UNIV;
+    if ((w->OLWI_fixedAttr & OWFA_IS_MENU) &&
+	(((OLMenuWinInstance *) w)->OLMWI_specState & OMWSS_IN_STAY_UP_MODE))
+	return;
+    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+}
+
+/*
+ * OpenWinKbdChar: eaten while moving or resizing (Port32: no keys move
+ * or resize yet); else to the focus of the window
+ */
+@extern method OLWinClass, MSG_META_KBD_CHAR
+{
+    optr f;
+
+    if (pself->OLWI_moveResizeState & (OLWMRS_RESIZE_PENDING |
+				       OLWMRS_MOVING_OR_RESIZING_MASK))
+	return;
+    f = pself->OLWI_focusExcl.FTVMC_OD;
+    if (f)
+	@send f::MSG_META_KBD_CHAR(character, flags, state);
+    else
+	@callsuper();
+}

@@ -13,8 +13,7 @@
  * cascading sub menus, the scrollers of a menu taller than the screen
  * (MenuWinScrollerClass), menu separators, the keyboard (navigation,
  * MSG_META_FUP_KBD_CHAR), the remote gadget exclusive, the system and
- * express menus, the menu centers (OLMenuCalcCenters), the startup
- * grab of the window (cwinPtr.asm: MSG_OL_WIN_STARTUP_GRAB).
+ * express menus, the menu centers (OLMenuCalcCenters).
  */
 @include "cGeode.goh"
 
@@ -186,6 +185,7 @@ static VarDataCHandler menuHints[] = {
     VisSetPosition(oself, x, y);
     VisMarkInvalid(oself, VOF_WINDOW_INVALID, VUM_MANUAL);
     @callsuper oself::OLMenuWinClass::MSG_GEN_INTERACTION_INITIATE();
+    @call oself::MSG_OL_WIN_STARTUP_GRAB();
 }
 
 /* OLMenuWinInitiate: initiated (not by its button): up in stay up mode */
@@ -193,6 +193,7 @@ static VarDataCHandler menuHints[] = {
 {
     pself->OLMWI_specState &= ~OMWSS_IN_STAY_UP_MODE;
     @callsuper();
+    @call oself::MSG_OL_WIN_STARTUP_GRAB();
     @call oself::MSG_MO_MW_ENTER_STAY_UP_MODE(TRUE);
 }
 

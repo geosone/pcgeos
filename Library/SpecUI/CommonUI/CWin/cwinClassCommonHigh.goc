@@ -4,7 +4,8 @@
  * the specific build of the win group, the position and size of the
  * window (WinPosSizeFlags), the vis parent.  The rest of the class is in
  * cwinClassCommonMiddle.goc, cwinClassCommonLow.goc,
- * cwinClassOther.goc, cwinGeometry.goc, cwinExcl.goc and (the drawing)
+ * cwinClassOther.goc, cwinGeometry.goc, cwinExcl.goc, cwinPtr.goc (the
+ * mouse) and (the drawing)
  * Motif/Win/winDraw.goc.
  *
  * Port32 (Port32/ABI.md section 13y), not yet: the system menu and its
@@ -72,6 +73,26 @@
 @extern method OLWinClass, MSG_META_SEND_CLASSED_EVENT;
 /* Motif/Win/winDraw.goc */
 @extern method OLWinClass, MSG_VIS_DRAW;
+/* cwinPtr.goc */
+@extern method OLWinClass, MSG_OL_WIN_STARTUP_GRAB;
+@extern method OLWinClass, MSG_OL_WIN_END_GRAB;
+@extern method OLWinClass, MSG_OL_WIN_ABORT_MOVE_RESIZE;
+@extern method OLWinClass, MSG_META_CHECK_IF_INTERACTABLE_OBJECT;
+@extern method OLWinClass, MSG_META_PRE_PASSIVE_BUTTON;
+@extern method OLWinClass, MSG_META_POST_PASSIVE_BUTTON;
+@extern method OLWinClass, MSG_META_ENSURE_MOUSE_NOT_ACTIVELY_TRESPASSING;
+@extern method OLWinClass, MSG_VIS_VUP_ALLOW_GLOBAL_TRANSFER;
+@extern method OLWinClass, MSG_META_PTR;
+@extern method OLWinClass, MSG_META_START_SELECT, MSG_META_START_MOVE_COPY;
+@extern method OLWinClass, MSG_META_START_FEATURES;
+@extern method OLWinClass, MSG_META_DRAG_SELECT, MSG_META_DRAG_MOVE_COPY;
+@extern method OLWinClass, MSG_META_END_SELECT, MSG_META_END_MOVE_COPY,
+		    MSG_META_END_FEATURES;
+@extern method OLWinClass, MSG_META_PRE_PASSIVE_START_SELECT;
+@extern method OLWinClass, MSG_META_PRE_PASSIVE_START_MOVE_COPY;
+@extern method OLWinClass, MSG_META_RAW_UNIV_ENTER;
+@extern method OLWinClass, MSG_META_RAW_UNIV_LEAVE;
+@extern method OLWinClass, MSG_META_KBD_CHAR;
 
 #define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 #define Gen(o)		((GenInstance *) ObjDerefGen(o))
