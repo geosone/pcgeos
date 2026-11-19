@@ -81,6 +81,13 @@
  *  25. in the Edit menu C activates Copy (the action arrives), M opens
  *      the sub menu; Escape there closes both;
  *  26. the focus out of the menu bar; not usable.
+ *  27. the window icon: a primary (with an icon moniker) minimized: its
+ *      icon (an OLWinIcon, a GenPrimary with HINT_WIN_ICON under the
+ *      application) on the field with its picture and the focus, its
+ *      caption below it (inverted: its pixels checked here);
+ *  28. Enter on the icon (the restore is queued);
+ *  29. restored: the primary open, the icon not realizable; minimized
+ *      again the same icon at the same place; not usable.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -109,6 +116,7 @@ typedef struct {
     optr		UMS_trigger;
     word		UMS_trigData;
     short		UMS_markX, UMS_markY;
+    short		UMS_iconX, UMS_iconY;
 } UMState;
 
 static int fails;
@@ -133,6 +141,7 @@ static void Check(int ok, int line, const char *what)
 #define GREEN	0x00aa00UL
 #define DARK_GREY	0x555555UL
 #define WHITE	0xffffffUL
+#define BLACK	0x000000UL
 
 static unsigned long Pixel(int x, int y)
 {
@@ -239,11 +248,26 @@ int main(void)
     WAIT_FOR(st->UMS_triggered > i);
     CHECK(st->UMS_triggered == i + 1);
     step(26);
+    step(27);
+    /* the icon's caption, inverted with the focus: black inside its
+     * white frame (the window's white first, then the drawing) */
+    WAIT_FOR(Pixel(st->UMS_markX + 1, st->UMS_markY + 1) == BLACK);
+    printf("glyph at %d,%d: %06lx %06lx\n", st->UMS_markX, st->UMS_markY,
+	   Pixel(st->UMS_markX, st->UMS_markY),
+	   Pixel(st->UMS_markX + 1, st->UMS_markY + 1));
+    CHECK(Pixel(st->UMS_markX, st->UMS_markY) == WHITE &&
+	  Pixel(st->UMS_markX + 1, st->UMS_markY + 1) == BLACK);
+    /* the icon's picture: a black square (its window on the field's
+     * green: the icon is drawn) */
+    CHECK(Pixel(st->UMS_iconX + 1, st->UMS_iconY + 1) == BLACK &&
+	  Pixel(st->UMS_iconX + 14, st->UMS_iconY + 14) == BLACK);
+    step(28);
+    step(29);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 337 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 361 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

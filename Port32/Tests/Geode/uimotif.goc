@@ -19,6 +19,7 @@
 @include <Internal/SpecUI/olScreenClass.goh>
 @include <Internal/SpecUI/olFieldClass.goh>
 @include <Internal/SpecUI/olApplicationClass.goh>
+@include <Internal/SpecUI/olWinIconClass.goh>
 @include <Objects/gInterC.goh>
 @include <Internal/SpecUI/olWinClass.goh>
 @include <Internal/SpecUI/olGadgetAreaClass.goh>
@@ -45,6 +46,7 @@ typedef struct {
     optr		UMS_trigger;		/* the last one's trigger */
     word		UMS_trigData;		/* ATTR_GEN_TRIGGER_ACTION_DATA */
     sword		UMS_markX, UMS_markY;	/* a sub menu's mark (screen) */
+    sword		UMS_iconX, UMS_iconY;	/* a window icon (screen) */
 } UMState;
 
 UMState umState;
@@ -135,6 +137,28 @@ UMState umState;
     GI_visMoniker = "Primary";
     GI_states = GS_ENABLED;
     GI_comp = @UMPrimGroup, @UMPrimTool;
+}
+/* a primary to minimize: its title, and for its icon the abbreviated
+ * text and a picture, a black square of 16 by 16 */
+@visMoniker UMIconText = "Iconic";
+@visMoniker UMIconAbbrev = {
+    style = abbrevText;
+    "Ico";
+}
+@visMoniker UMIconPicture = {
+    style = icon;
+    size = standard;
+    color = gray1;
+    cachedSize = 16, 16;
+    gstring {
+	GSSetAreaColorIndex(C_BLACK),
+	GSFillRect(0, 0, 16, 16),
+	GSEndString()
+    }
+}
+@object GenPrimaryClass UMIconPrim = {
+    GI_visMoniker = list { @UMIconText, @UMIconAbbrev, @UMIconPicture };
+    GI_states = GS_ENABLED;
 }
 @object UMGroupClass UMPrimGroup = {
     GII_visibility = GIV_SUB_GROUP;
@@ -925,6 +949,10 @@ static word Slot(byte req, sword *x, sword *y)
 	optr ga, tg, rbo;
 	sword cx, fcx;
 
+	/* the application on top again (minimized in step 12, it was
+	 * lowered, queued: the user brings it back) */
+	@call umApp::MSG_GEN_BRING_TO_TOP();
+
 	@call umApp::MSG_GEN_ADD_CHILD(@UMDialog, CCO_LAST);
 	(void) @call UMDialog::MSG_VIS_GET_ATTRS();
 	UMCHECK(InClass(@UMDialog, (ClassStruct *) &OLDialogWinClass));
@@ -1670,6 +1698,96 @@ static word Slot(byte req, sword *x, sword *y)
 	VisData(@UMMenuPrim, &w, sizeof(w));
 	UMCHECK(!(w.OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED));
 	@call UMMenuPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	break;
+    }
+    case 27: {
+	/* the window icon: the primary minimized makes a GenPrimary with
+	 * HINT_WIN_ICON under the application, built as an OLWinIcon on
+	 * the field for this primary, with the focus; its caption below
+	 * it in a window of its own (the glyph) */
+	OLBaseWinInstance b;
+	OLWinIconInstance ic;
+	OLWinGlyphDisplayInstance g;
+	optr icon, glyph;
+
+	@call umApp::MSG_GEN_ADD_CHILD(@UMIconPrim, CCO_LAST);
+	@call UMIconPrim::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UMIconPrim::MSG_GEN_DISPLAY_SET_MINIMIZED();
+	VisData(@UMIconPrim, &b, sizeof(b));
+	UMCHECK(!(b.VI_attrs & VA_REALIZED));
+	icon = b.OLMDWI_icon;
+	UMCHECK(icon != 0);
+	if (!icon)
+	    break;
+	UMCHECK(InClass(icon, (ClassStruct *) &GenPrimaryClass) &&
+		InClass(icon, (ClassStruct *) &OLWinIconClass));
+	UMCHECK(GenFindParent(icon) == umApp);
+	VisData(icon, &ic, sizeof(ic));
+	UMCHECK(ic.OLWII_window == @UMIconPrim);
+	UMCHECK(ic.OLWI_type == MOWT_WINDOW_ICON &&
+		(ic.OLWI_fixedAttr & OWFA_IS_WIN_ICON));
+	UMCHECK((ic.VI_attrs & VA_REALIZED) && ic.VCI_window);
+	UMCHECK(ic.OLWII_iconMoniker != 0 && ic.OLWII_iconCaptionMoniker != 0);
+	/* the size of its picture */
+	UMCHECK(ic.VI_bounds.R_right - ic.VI_bounds.R_left == 16 &&
+		ic.VI_bounds.R_bottom - ic.VI_bounds.R_top == 16);
+	UMCHECK(VisFindParent(icon) == umApp);
+	glyph = ConstructOptr(OptrToHandle(icon), ic.OLWII_titleGlyphWin);
+	UMCHECK(ic.OLWII_titleGlyphWin != 0);
+	VisData(glyph, &g, sizeof(g));
+	UMCHECK((g.VI_attrs & VA_REALIZED) && g.VCI_window);
+	UMCHECK(g.OLWGDI_icon == OptrToChunk(icon) &&
+		g.OLWGDI_glyph == ic.OLWII_iconCaptionMoniker);
+	/* centered below the icon */
+	UMCHECK(g.VI_bounds.R_top == ic.VI_bounds.R_bottom + 3);
+	UMCHECK(((g.VI_bounds.R_left + g.VI_bounds.R_right) >> 1) -
+		((ic.VI_bounds.R_left + ic.VI_bounds.R_right) >> 1) <= 1 &&
+		((ic.VI_bounds.R_left + ic.VI_bounds.R_right) >> 1) -
+		((g.VI_bounds.R_left + g.VI_bounds.R_right) >> 1) <= 1);
+	/* the focus (the caption inverted: the test looks) */
+	UMCHECK(ic.OLWI_focusExcl.FTVMC_flags & HGF_SYS_EXCL);
+	umState.UMS_iconX = ic.VI_bounds.R_left;
+	umState.UMS_iconY = ic.VI_bounds.R_top;
+	umState.UMS_markX = g.VI_bounds.R_left;
+	umState.UMS_markY = g.VI_bounds.R_top;
+	/* the primary told where the icon is */
+	VisData(@UMIconPrim, &b, sizeof(b));
+	UMCHECK(b.OLMDWI_iconPosLeft == ic.VI_bounds.R_left &&
+		b.OLMDWI_iconPosTop == ic.VI_bounds.R_top);
+	break;
+    }
+    case 28: {
+	/* Enter on the icon restores the primary (queued) */
+	OLBaseWinInstance b;
+
+	VisData(@UMIconPrim, &b, sizeof(b));
+	UMCHECK(UMPress(b.OLMDWI_icon, UM_K(VC_ENTER), 0));
+	break;
+    }
+    case 29: {
+	/* restored: the primary open again, the icon not realizable (its
+	 * glyph gone) */
+	OLBaseWinInstance b;
+	OLWinIconInstance ic;
+
+	VisData(@UMIconPrim, &b, sizeof(b));
+	UMCHECK(!(b.OLWI_specState & OLWSS_MINIMIZED) &&
+		(b.VI_attrs & VA_REALIZED));
+	VisData(b.OLMDWI_icon, &ic, sizeof(ic));
+	UMCHECK(!(ic.VI_attrs & VA_REALIZED) && !(ic.VI_specAttrs &
+						  SA_REALIZABLE));
+	UMCHECK(ic.OLWII_titleGlyphWin == 0);
+	/* minimized again: the same icon, at the same place */
+	@call UMIconPrim::MSG_GEN_DISPLAY_SET_MINIMIZED();
+	VisData(@UMIconPrim, &b, sizeof(b));
+	VisData(b.OLMDWI_icon, &ic, sizeof(ic));
+	UMCHECK((ic.VI_attrs & VA_REALIZED) && ic.OLWII_titleGlyphWin != 0);
+	UMCHECK(ic.VI_bounds.R_left == b.OLMDWI_iconPosLeft &&
+		ic.VI_bounds.R_top == b.OLMDWI_iconPosTop);
+	/* not usable: the icon goes too */
+	@call UMIconPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	VisData(b.OLMDWI_icon, &ic, sizeof(ic));
+	UMCHECK(!(ic.VI_attrs & VA_REALIZED));
 	break;
     }
     }

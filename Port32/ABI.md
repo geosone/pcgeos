@@ -119,6 +119,10 @@ to the resource handle. Without segments, `goc` does that work itself:
   - Checks: `goc.resources` checks the shadow of a moniker list and that
     chunks without optrs have none. `kernel.geode` checks the
     relocation (section 7.1).
+- **A gstring moniker** is written as a byte array (its header, then the
+  gstring). For goc -cg the header is `VisMonikerWithGString` as the C
+  compiler lays it out: `VM_type`, a pad byte, `VM_width`, `VMWGS_height`
+  (six bytes, `VMWGS_gString` = 6); the 16-bit output keeps its five.
 - **`ClassStruct` points to its tables** (`Class_messages`,
   `Class_methods`, `Class_htypes`, `Class_relocMethod`). The tables no
   longer have to follow the structure in a class segment, and the reloc
@@ -5078,12 +5082,11 @@ visual classes of `Library/User/Vis`:
   `MSG_SPEC_CONVERT_DESIRED_SIZE_HINT`. `VisIfFlagSetCallGenChildren`
   is exported for the specific UI.
 - **Not yet:**
-  - in `GenClass`: moniker lists (`VisFindMoniker`,
-    `MSG_SPEC_RESOLVE_MONIKER_LIST`, their relocation, the
-    application's list), `VMDT_TOKEN` monikers,
+  - in `GenClass`: `MSG_SPEC_RESOLVE_MONIKER_LIST` (`VisClass` keeps
+    the list), the icon and text combination moniker
+    (`HINT_USE_ICON_TEXT_COMBINATION_MONIKER`), `VMDT_TOKEN` monikers,
     `MSG_GEN_BRANCH_REPLACE_PARAMS` (dword optrs), `ATTR_GEN_PATH_DATA`,
-    `MSG_META_BRING_UP_HELP`, navigation and mnemonics
-    (`VisCheckMnemonic`), the GenView's content in
+    `MSG_META_BRING_UP_HELP`, the GenView's content in
     `GenSpecShrinkBranch`, `UserSendToApplicationViaProcess`;
     `MSG_GEN_MAKE_APPLYABLE`/`_NOT_APPLYABLE` up the visual tree (goc
     gives `VisClass` no Gen messages);
@@ -5377,9 +5380,14 @@ are left out), the constants, the variables and the routines.
     `MSG_GEN_GUP_CALL_OBJECT_OF_CLASS` has no reply, so the tool area's
     size is asked of the field found by
     `MSG_GEN_GUP_FIND_OBJECT_OF_CLASS`. The UI's
-    `MSG_GEN_FIND_MONIKER` finds the application's moniker (its block
-    run by the caller's thread) and copies it (`VMSF_COPY_CHUNK`): a
-    primary without a moniker gets the application's for its title.
+    `MSG_GEN_FIND_MONIKER` finds the moniker of the object or (by
+    `MSG_GEN_APPLICATION_FIND_MONIKER`) of the application; of a moniker
+    list it takes the entry that fits the search flags and the display
+    type best (`VisFindMoniker`, `Vis/visUtilsClass.goc`, exported, in
+    `visC.goh`: the score of `VisTestMoniker`, the display type limited
+    to standard size and not squished) and copies it as asked
+    (`VMSF_COPY_CHUNK`, `VMSF_REPLACE_LIST`): a primary without a
+    moniker gets the application's for its title.
   - `OLPopupWinClass` (`CWin/cwinPopup.goc`), `OLDialogWinClass`
     (`CWin/cwinDialog.goc`), `OLReplyBarClass` (`CComp/copenReplyBar.goc`,
     all three in `Internal/SpecUI/olPopupWinClass.goh`) and the build
@@ -5532,11 +5540,29 @@ are left out), the constants, the variables and the routines.
     to its window): the asm kept the window's
     `OLWMS_HAS_MENU_IN_STAY_UP_MODE` until the next mouse press, so no
     mnemonic worked after a menu closed by the keyboard.
+  - The window icon: `OLWinIconClass` (`CWin/cwinWinIcon.goc`, a
+    GenPrimary with `HINT_WIN_ICON`: `OLBuildPrimary` builds it so) and
+    `OLWinGlyphDisplayClass` (`CWin/cwinGlyphDisplay.goc`, its caption
+    in a window of its own; both in `olWinIconClass.goh`). A primary
+    minimized makes it the first time under the application (linked
+    up only, not saved) with its icon position, state and monikers (the
+    icon and abbreviated text the window found when initialized, else
+    the application's); the icon is made realizable, takes the focus,
+    and the application is lowered (queued). The icon shows its
+    picture, opens on top, stays on the field with its caption below,
+    tells the primary its place (`MSG_OL_MW_SET_ICON_POS`), and is on
+    the application's lists of windows always interactable; a double
+    press, Enter or Alt+F5 restores the primary (queued: it takes the
+    icon down), the caption is drawn inverted while the icon has the
+    focus. Where the geode names no application object (the test) the
+    application is the primary's generic parent. A primary built again
+    finds the text that replaced its moniker list, as in the asm: its
+    icon then comes from the application's list.
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
-  `OLBaseWinClass`: the window icon (`OLWinIconClass`: a minimized
-  window is hidden, as with the task bar on), the trigger bar, the
+  `OLBaseWinClass`: the icon's private data and its window list entry
+  (the task bar), the trigger bar, the
   menus in the header of a maximized window, the help trigger and file menu a primary adds,
   the window list entry, the express tool area (the field has none),
   moniker lists, a double click on the title (the pointer code of
