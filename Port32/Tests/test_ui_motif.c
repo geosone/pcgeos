@@ -74,7 +74,13 @@
  *      menu button (cursored); right and left along the bar; down opens
  *      the menu (its first item the focus); down and up through the
  *      items; right on a sub menu's button opens it, left closes it
- *      back; right goes on to the next menu of the bar; Escape closes.
+ *      back; right goes on to the next menu of the bar; Escape closes;
+ *  23. mnemonics: Alt+V opens the View menu; Escape;
+ *  24. the focus back (queued): V alone does nothing, with the menu
+ *      bar's focus (Alt alone) it opens the menu;
+ *  25. in the Edit menu C activates Copy (the action arrives), M opens
+ *      the sub menu; Escape there closes both;
+ *  26. the focus out of the menu bar; not usable.
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
@@ -226,11 +232,18 @@ int main(void)
 	  Pixel(st->UMS_markX + 5, st->UMS_markY + 1 + i) != WHITE);
     step(21);
     step(22);
+    step(23);
+    step(24);
+    i = st->UMS_triggered;
+    step(25);
+    WAIT_FOR(st->UMS_triggered > i);
+    CHECK(st->UMS_triggered == i + 1);
+    step(26);
 
     printf("geode checks: %u, failed %u\n", st->UMS_checks, st->UMS_fails);
     for (i = 0; i < st->UMS_fails && i < 8; i++)
 	printf("  failed: uimotif.goc line %u\n", st->UMS_failLines[i]);
-    CHECK(st->UMS_checks >= 310 && !st->UMS_fails);
+    CHECK(st->UMS_checks >= 337 && !st->UMS_fails);
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

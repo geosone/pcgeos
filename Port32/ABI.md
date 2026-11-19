@@ -5514,6 +5514,24 @@ are left out), the constants, the variables and the routines.
     button opens the sub menu. `FlowCheckKbdShortcut` without a
     keyboard driver (the tests) matches entries without `KS_PHYSICAL`
     by character set, character and the modifiers held.
+  - Mnemonics: `VisCheckMnemonic` (`Vis/visSpec.goc`, exported, in
+    `visC.goh`) compares the character with the mnemonic of a generic
+    object's text moniker without case (`VMO_CANCEL`: the
+    application's `MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC`);
+    `VisClass` `MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC` activates an
+    enabled generic object that is not a win group and matches, else
+    asks its visual children in turn. For Port32 the flags of
+    `MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC` and
+    `MSG_SPEC_CHECK_MNEMONIC` are a word (CharFlags and ShiftState), as
+    the asm's `dx`: the goc `byte` lost the ShiftState. A window looks
+    for a mnemonic with no menu in stay up mode, no Ctrl and the
+    system's focus; the menu bar only with Alt or while it has the
+    focus; a button or menu button matching is activated as by the
+    keyboard (a menu comes up with its first item focused). A menu
+    dismissed in stay up mode leaves it (`SVQT_NO_MENU_IN_STAY_UP_MODE`
+    to its window): the asm kept the window's
+    `OLWMS_HAS_MENU_IN_STAY_UP_MODE` until the next mouse press, so no
+    mnemonic worked after a menu closed by the keyboard.
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
@@ -5531,8 +5549,7 @@ are left out), the constants, the variables and the routines.
   dialog run by the UI thread. In `OLButtonClass`: the black and white
   buttons (`copenButtonBW`), the menu marks and menu items, the
   keyboard accelerator text, the sounds (`UserStandardSound` is not in
-  the C UI), the mnemonics (`MSG_SPEC_CHECK_MNEMONIC`,
-  `MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC`), the stay up menus released on activation,
+  the C UI), the sound of a disabled button's mnemonic, the stay up menus released on activation,
   `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `cwinPtr.goc`: moving and resizing by the keyboard
   (the move/resize keys and their abort monitor, the system menu's
   Move and Size), ink. In `OLMenuWinClass`: the pushpin

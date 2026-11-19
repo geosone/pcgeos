@@ -5,7 +5,9 @@
  * driver and a field on it, as the UI makes them (userScreen.goc).  The
  * test (test_ui_motif.c) runs the steps through UMStep on the process
  * thread; the checks made here count in umState, the windows are there
- * for the test to look at.
+ * for the test to look at.  The objects run on that thread too, so a
+ * message queued to them (MF_FORCE_QUEUE) is handled only after the
+ * step returns: what follows from it is checked in the next step.
  */
 @include <stdapp.goh>
 @include <Objects/vCompC.goh>
@@ -241,7 +243,8 @@ UMState umState;
     GII_visibility = GIV_DIALOG;
 }
 /* a primary with two menus in its menu bar: an Edit menu (the group
- * type's moniker) with an item, and a View menu */
+ * type's moniker) with an item, and a View menu; mnemonics on all but
+ * the Edit menu */
 @object GenPrimaryClass UMMenuPrim = {
     GI_visMoniker = "Menus";
     GI_states = GS_ENABLED;
@@ -253,16 +256,16 @@ UMState umState;
     ATTR_GEN_INTERACTION_GROUP_TYPE = GIGT_EDIT_MENU;
 }
 @object GenTriggerClass UMCopy = {
-    GI_visMoniker = "Copy";
+    GI_visMoniker = 'C', "Copy";
     GTI_destination = process;
     GTI_actionMsg = MSG_UM_TRIGGERED;
 }
 @object GenInteractionClass UMMoreMenu = {
-    GI_visMoniker = "More";
+    GI_visMoniker = 'M', "More";
     GII_visibility = GIV_POPUP;
 }
 @object GenInteractionClass UMViewMenu = {
-    GI_visMoniker = "View";
+    GI_visMoniker = 'V', "View";
     GII_visibility = GIV_POPUP;
 }
 @end UMObjects;
@@ -312,6 +315,13 @@ static void VisData(optr o, void *buf, word size)
 }
 
 /* the text of a generic object's moniker is that given */
+/* a key pressed, as the window gets it (flags: the ShiftState << 8) */
+#define UM_K(c)	((CS_CONTROL << 8) | (c))
+static Boolean UMPress(optr o, word c, word f)
+{
+    return @call o::MSG_META_FUP_KBD_CHAR(c, CF_FIRST_PRESS | f, 0);
+}
+
 static Boolean MonikerIs(optr o, const char *text)
 {
     ChunkHandle ch = @call o::MSG_GEN_GET_VIS_MONIKER();
@@ -1578,6 +1588,88 @@ static word Slot(byte req, sword *x, sword *y)
 	UMCHECK(!(b.OLMBI_specState & OLMBSS_POPUP_OPEN));
 	@call UMMenuPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 #undef K
+	break;
+    }
+    case 23: {
+	/* mnemonics: Alt+V opens the View menu (through the menu bar,
+	 * which takes a mnemonic with Alt); Escape closes it (the focus
+	 * before the menu comes back queued: step 24) */
+	OLMenuWinInstance m;
+	OLMenuButtonInstance b;
+	optr vb;
+
+	@call UMMenuPrim::MSG_GEN_SET_USABLE(VUM_NOW);
+	VisData(@UMViewMenu, &m, sizeof(m));
+	vb = ConstructOptr(OptrToHandle(@UMViewMenu), m.OLPWI_button);
+	UMCHECK(UMPress(@UMMenuPrim, UM_K(VC_LALT), SS_LALT << 8));
+	UMCHECK(UMPress(@UMMenuPrim, 'v', SS_LALT << 8));
+	(void) @call UMMenuPrim::MSG_META_FUP_KBD_CHAR(UM_K(VC_LALT),
+						       CF_RELEASE, 0);
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK((m.VI_attrs & VA_REALIZED) &&
+		(m.OLMWI_specState & OMWSS_IN_STAY_UP_MODE));
+	VisData(vb, &b, sizeof(b));
+	UMCHECK(b.OLMBI_specState & OLMBSS_POPUP_OPEN);
+	UMCHECK(UMPress(@UMViewMenu, UM_K(VC_ESCAPE), 0));
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	break;
+    }
+    case 24: {
+	/* the focus back where it was: not in the menu bar, no menu in
+	 * stay up mode, so V alone does nothing; Alt alone puts the
+	 * focus in the menu bar, then V alone opens the menu; Escape */
+	OLWinInstance w;
+	OLMenuWinInstance m;
+
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(!(w.OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED));
+	UMCHECK(!(w.OLWI_menuState & OLWMS_HAS_MENU_IN_STAY_UP_MODE));
+	(void) UMPress(@UMMenuPrim, 'v', 0);
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	UMCHECK(UMPress(@UMMenuPrim, UM_K(VC_LALT), 0));
+	UMCHECK(@call UMMenuPrim::MSG_META_FUP_KBD_CHAR(UM_K(VC_LALT),
+							CF_RELEASE, 0));
+	UMCHECK(@call UMMenuPrim::MSG_OL_WIN_QUERY_MENU_BAR_HAS_FOCUS());
+	UMCHECK(UMPress(@UMMenuPrim, 'V', SS_LSHIFT << 8));
+	VisData(@UMViewMenu, &m, sizeof(m));
+	UMCHECK(m.VI_attrs & VA_REALIZED);
+	UMCHECK(UMPress(@UMViewMenu, UM_K(VC_ESCAPE), 0));
+	break;
+    }
+    case 25: {
+	/* Alt alone: the menu bar; down opens Edit (Copy the focus); in
+	 * it C activates Copy (the action arrives, the test waits for
+	 * it), M opens the sub menu; Escape in the sub menu closes both */
+	OLMenuWinInstance m;
+
+	UMCHECK(UMPress(@UMMenuPrim, UM_K(VC_LALT), 0));
+	UMCHECK(@call UMMenuPrim::MSG_META_FUP_KBD_CHAR(UM_K(VC_LALT),
+							CF_RELEASE, 0));
+	UMCHECK(@call UMMenuPrim::MSG_OL_WIN_QUERY_MENU_BAR_HAS_FOCUS());
+	UMCHECK(UMPress(@UMMenuPrim, UM_K(VC_DOWN), 0));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK((m.VI_attrs & VA_REALIZED) &&
+		m.OLWI_focusExcl.FTVMC_OD == @UMCopy);
+	UMCHECK(UMPress(@UMEditMenu, 'c', 0));
+	UMCHECK(UMPress(@UMEditMenu, 'm', 0));
+	VisData(@UMMoreMenu, &m, sizeof(m));
+	UMCHECK(m.VI_attrs & VA_REALIZED);
+	UMCHECK(UMPress(@UMMoreMenu, UM_K(VC_ESCAPE), 0));
+	VisData(@UMMoreMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	VisData(@UMEditMenu, &m, sizeof(m));
+	UMCHECK(!(m.VI_attrs & VA_REALIZED));
+	break;
+    }
+    case 26: {
+	/* the focus back out of the menu bar; not usable */
+	OLWinInstance w;
+
+	VisData(@UMMenuPrim, &w, sizeof(w));
+	UMCHECK(!(w.OLWI_focusExcl.FTVMC_flags & MAEF_OD_IS_MENU_RELATED));
+	@call UMMenuPrim::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
 	break;
     }
     }
