@@ -2561,23 +2561,34 @@ OutputChunkLow(Symbol *chunk)
 		     * rest being the gstring data.
 		     *
 		     */
-		    char vmwgs[5];
+		    char vmwgs[6];
+		    int vmType =
+			(((chunk->data.symVisMoniker.vmType.gsColor<<
+			   VMT_GS_COLOR_OFFSET) & VMT_GS_COLOR) | VMT_GSTRING |
+			 ((chunk->data.symVisMoniker.vmType.aspectRatio<<
+			   VMT_GS_ASPECT_RATIO_OFFSET) & VMT_GS_ASPECT_RATIO));
 
 		    /* fill the VM_TYPE field for this vismoniker */
 
-
-		    FmtBytes(vmwgs,"bww",
-			     (((chunk->data.symVisMoniker.vmType.gsColor<<
-			       VMT_GS_COLOR_OFFSET) & VMT_GS_COLOR) | VMT_GSTRING |
-			      ((chunk->data.symVisMoniker.vmType.aspectRatio<<
-			       VMT_GS_ASPECT_RATIO_OFFSET) & VMT_GS_ASPECT_RATIO)),
-			     chunk->data.symVisMoniker.vmXSize,
-			     chunk->data.symVisMoniker.vmYSize);
+		    /*
+		     * Port32 (goc -cg): VisMonikerWithGString as the C
+		     * compiler lays it out, VM_width aligned (a pad byte
+		     * after VM_type): six bytes, the gstring right after.
+		     */
+		    if (compiler == COM_GCC) {
+			FmtBytes(vmwgs,"bbww", vmType, 0,
+				 chunk->data.symVisMoniker.vmXSize,
+				 chunk->data.symVisMoniker.vmYSize);
+		    } else {
+			FmtBytes(vmwgs,"bww", vmType,
+				 chunk->data.symVisMoniker.vmXSize,
+				 chunk->data.symVisMoniker.vmYSize);
+		    }
 
 		    Output("char %s _%s[] = {", lms,chunk->name);
 
 		    /* output the visMonikerWithGstring */
-		    OutputByteArray(vmwgs,5);
+		    OutputByteArray(vmwgs, compiler == COM_GCC ? 6 : 5);
 		    OutputLineNumber(chunk->data.symVisMoniker.startLine,
 				     chunk->fileName);
 		    Output(chunk->data.symVisMoniker.vmText);
