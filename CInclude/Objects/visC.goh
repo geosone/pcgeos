@@ -788,12 +788,23 @@ typedef struct {
 @message void MSG_SPEC_NOTIFY_NAVIGATION_COMPLETE(NavigationFlags
 					navigateFlags = bp); /*XXX*/
 
+@ifdef GEOS_PORT32
+/* Port32 (Port32/ABI.md section 13y): flags is the CharFlags and the
+ * ShiftState (dx), as MSG_META_KBD_CHAR has it */
+@message Boolean MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(word character = cx, 
+			word flags = dx, word state = bp) = carry;
+
+@message Boolean MSG_SPEC_CHECK_MNEMONIC(word character = cx, 
+					 word flags = dx, 
+					 word state = bp) = carry;
+@else
 @message Boolean MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(word character = cx, 
 			byte flags = dx, word state = bp) = carry;	/*XXX*/
 
 @message Boolean MSG_SPEC_CHECK_MNEMONIC(word character = cx, 
 					 byte flags = dx, 
 					 word state = bp) = carry;   /*XXX*/
+@endif
 
 typedef ByteFlags MenuSepFlags;
 #define MSF_SEP		0x80
@@ -991,6 +1002,10 @@ extern Boolean VisNavigateCommon(optr obj, NavigationQueryParams *ret,
 				 optr origin, NavigationFlags navFlags,
 				 NavigateCommonFlags ncFlags,
 				 ChunkHandle genPart);
+/* VisCheckMnemonic: the mnemonic of the generic object's moniker is the
+ * character (case ignored; VMO_CANCEL asks the application) */
+extern Boolean VisCheckMnemonic(optr obj, word character, word flags,
+				word state);
 /* monikers: a chunk in the object's block */
 typedef struct {
     word		DMA_xInset;

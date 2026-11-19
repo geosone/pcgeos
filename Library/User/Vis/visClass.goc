@@ -1396,6 +1396,49 @@ out:
     return r;
 }
 
+/* VisCheckMnemonic as a message */
+@method VisClass, MSG_SPEC_CHECK_MNEMONIC
+{
+    return VisCheckMnemonic(oself, character, flags, state);
+}
+
+/*
+ * VisSpecActivateObjectWithMnemonic: an enabled generic object, not a
+ * win group, whose mnemonic it is is activated (MSG_GEN_ACTIVATE); else
+ * the visual children are asked until one takes it
+ */
+@method VisClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    VisInstance *v = pself;
+    optr c, next;
+
+    if ((v->VI_typeFlags & VTF_IS_GEN) &&
+	!(v->VI_typeFlags & VTF_IS_WIN_GROUP) &&
+	GenCheckIfFullyEnabled(oself, FALSE) &&
+	VisCheckMnemonic(oself, character, flags, state)) {
+	@call oself::MSG_GEN_ACTIVATE();
+	return TRUE;
+    }
+    if (!(VisLock(oself)->VI_typeFlags & VTF_IS_COMPOSITE)) {
+	VisUnlock(oself);
+	return FALSE;
+    }
+    c = ((VisCompInstance *) VisLock(oself))->VCI_comp.CP_firstChild;
+    VisUnlock(oself);
+    VisUnlock(oself);
+    while (c) {
+	next = VisLock(c)->VI_link.LP_next;
+	VisUnlock(c);
+	if (@call c::MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(character, flags,
+							    state))
+	    return TRUE;
+	if (next & LP_IS_PARENT)
+	    break;
+	c = next;
+    }
+    return FALSE;
+}
+
 /* the defaults: up the visual tree (or the generic one) */
 @method VisClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD,
 		  MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD,

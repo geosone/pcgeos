@@ -958,3 +958,61 @@ done:
     ret->NQP_unused = 0;
     return found;
 }
+
+/*
+ * VisCheckMnemonic (MSG_SPEC_CHECK_MNEMONIC): a generic object whose
+ * text moniker has a mnemonic: the character stored at its offset (or
+ * after the text), compared without case; VMO_CANCEL is the specific
+ * UI's cancel (MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC).  The
+ * caller checks that it is enabled.
+ */
+Boolean VisCheckMnemonic(optr obj, word c, word flags, word state)
+{
+    ChunkHandle m;
+    VisMonikerWithText *t;
+    const char *text;
+    byte off, mc;
+
+    if (!(VisLock(obj)->VI_typeFlags & VTF_IS_GEN)) {
+	VisUnlock(obj);
+	return FALSE;
+    }
+    VisUnlock(obj);
+    m = ((GenInstance *) ObjDerefGen(obj))->GI_visMoniker;
+    if (!m)
+	return FALSE;
+    t = LMemDeref(ConstructOptr(OptrToHandle(obj), m));
+    if (t->VMWT_common.VM_type & VMT_GSTRING)
+	return FALSE;
+    off = (byte) t->VMWT_mnemonicOffset;
+    if (off == (byte) @VMO_NO_MNEMONIC)
+	return FALSE;
+    if (off == (byte) @VMO_CANCEL) {
+	/* GenCallApplication: the application of the block's owner */
+	optr app = GeodeGetAppObject(MemOwner(OptrToHandle(obj)));
+	CharFlagsAndShiftState f;
+	ToggleStateAndScanCode t;
+
+	if (!app)
+	    return FALSE;
+	f.CFASS_charFlags = (CharFlags) flags;
+	f.CFASS_shiftState = (ShiftState) (flags >> 8);
+	t.TSASC_toggleState = (ToggleState) state;
+	t.TSASC_scanCode = (byte) (state >> 8);
+	return @call app::MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC(c, f,
+								       t);
+    }
+    text = (const char *) t + VMWT_text;
+    if (off == (byte) @VMO_MNEMONIC_NOT_IN_MKR_TEXT) {
+	while (*text)
+	    text++;
+	mc = (byte) text[1];
+    } else
+	mc = (byte) text[off];
+    c &= 0xff;
+    if (c >= 'A' && c <= 'Z')
+	c += 'a' - 'A';
+    if (mc >= 'A' && mc <= 'Z')
+	mc += 'a' - 'A';
+    return c == mc;
+}
