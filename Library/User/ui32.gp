@@ -83,6 +83,7 @@ export VisGetVisParent
 export VisAddChildRelativeToGen
 export VisNavigateCommon
 export VisCheckMnemonic
+export VisFindMoniker
 export VisConvertRatioToCoords
 export VisRecalcSizeAndInvalIfNeeded
 export VisSendPositionAndInvalIfNeeded

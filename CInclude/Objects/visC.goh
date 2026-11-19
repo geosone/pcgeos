@@ -1006,6 +1006,11 @@ extern Boolean VisNavigateCommon(optr obj, NavigationQueryParams *ret,
  * character (case ignored; VMO_CANCEL asks the application) */
 extern Boolean VisCheckMnemonic(optr obj, word character, word flags,
 				word state);
+/* VisFindMoniker: of a moniker list the moniker that fits the search
+ * and the display type best (the moniker itself if not a list); copied
+ * as the flags ask (VMSF_COPY_CHUNK, VMSF_REPLACE_LIST) */
+extern optr VisFindMoniker(optr moniker, VisMonikerSearchFlags searchFlags,
+			   MemHandle destBlock, DisplayType displayType);
 /* monikers: a chunk in the object's block */
 typedef struct {
     word		DMA_xInset;

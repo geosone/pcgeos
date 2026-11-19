@@ -13,6 +13,7 @@ set(ui ${CMAKE_CURRENT_SOURCE_DIR})
 geos_geode(ui GP ui32.gp
            GOC ${ui}/Vis/visClass.goc ${ui}/Vis/visComp.goc
                ${ui}/Vis/visUtilsResident.goc
+               ${ui}/Vis/visUtilsClass.goc
                ${ui}/Vis/visCompGeometry.goc
                ${ui}/Vis/visContent.goc
                ${ui}/Vis/visSpec.goc

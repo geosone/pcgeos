@@ -1,0 +1,145 @@
+/*
+ * visUtilsClass.goc -- moniker lists (after VisFindMoniker,
+ * GetBestMonikerFromList and VisTestMoniker in visUtilsClass.asm): the
+ * moniker of a list that fits a search (text or gstring, the style) and
+ * a display type (a gstring's size, colors and aspect ratio) best, the
+ * moniker itself if it is none; copied into a block or over the list.
+ *
+ * Port32: the copy is made by the calling thread (the asm asked it by
+ * MSG_PROCESS_COPY_CHUNK_OVER): it must run the destination block, as
+ * the asm required.
+ */
+@include "uiInt.goh"
+#include <string.h>
+
+/* VisMonikerScore: the fields by priority (highest first) */
+#define SCORE_TEXT_OR_GSTRING	0x1000
+#define SCORE_STYLE		0x0f00
+#define SCORE_GS_ASPECT_RATIO	0x00c0
+#define SCORE_GS_SIZE		0x0030
+#define SCORE_GS_COLOR		0x000f
+#define SCORE_GS_SIZE_OFFSET	4
+
+/*
+ * VisTestMoniker: how well a list entry of type `t' fits the search
+ * flags (the DisplayType in their low byte, VisUpdateSearchSpec)
+ */
+static word TestMoniker(word t, word f)
+{
+    word score = 0;
+    int d;
+
+    if (((t & VMLET_GSTRING) != 0) == ((f & VMSF_GSTRING) != 0))
+	score |= SCORE_TEXT_OR_GSTRING;
+    if (((f & VMSF_STYLE) >> VMSF_STYLE_OFFSET) ==
+	((t & VMLET_STYLE) >> VMLET_STYLE_OFFSET))
+	score |= SCORE_STYLE;
+    if (!(t & VMLET_GSTRING))
+	return score;
+    /* the size: 3 matching, less for each size apart */
+    d = (int) ((f & DT_DISP_SIZE) >> DT_DISP_SIZE_OFFSET) -
+	(int) ((t & VMLET_GS_SIZE) >> VMLET_GS_SIZE_OFFSET);
+    if (d < 0)
+	d = -d;
+    score |= (word) (((word) d << SCORE_GS_SIZE_OFFSET) ^ SCORE_GS_SIZE);
+    /* the colors: none if the moniker needs more than the display has */
+    d = (int) ((f & DT_DISP_CLASS) >> DT_DISP_CLASS_OFFSET) -
+	(int) ((t & VMLET_GS_COLOR) >> VMLET_GS_COLOR_OFFSET);
+    if (d >= 0)
+	score |= (word) ((word) d ^ SCORE_GS_COLOR);
+    /* the aspect ratio: matching or nothing */
+    if (((f & DT_DISP_ASPECT_RATIO) >> DT_DISP_ASPECT_RATIO_OFFSET) ==
+	((t & VMLET_GS_ASPECT_RATIO) >> VMLET_GS_ASPECT_RATIO_OFFSET))
+	score |= SCORE_GS_ASPECT_RATIO;
+    return score;
+}
+
+/* GetBestMonikerFromList: the best entry (the first of equal ones) */
+static optr BestFromList(const VisMonikerListEntry *e, word n, word f)
+{
+    optr best = 0;
+    int bestScore = -1;
+    word s;
+
+    for (; n; n--, e++) {
+	s = TestMoniker(e->VMLE_type, f);
+	if ((int) s > bestScore) {
+	    bestScore = s;
+	    best = e->VMLE_moniker;
+	}
+    }
+    return best;
+}
+
+/* a copy of the moniker `m' in `dest' (over the chunk `over' if not 0;
+ * the chunk resized first, both chunks found again after) */
+static optr CopyMoniker(optr m, MemHandle dest, ChunkHandle over)
+{
+    MemHandle sh = OptrToHandle(m);
+    optr o = ConstructOptr(dest, over);
+    word size;
+
+    if (!over)
+	return ConstructOptr(dest, GenCopyChunk(dest, sh, OptrToChunk(m), 0));
+    ObjLockObjBlock(sh);
+    if (dest != sh)
+	ObjLockObjBlock(dest);
+    size = LMemGetChunkSize(m);
+    LMemReAlloc(o, size);
+    memmove(LMemDeref(o), LMemDeref(m), size);
+    if (dest != sh)
+	MemUnlock(dest);
+    MemUnlock(sh);
+    return o;
+}
+
+/*
+ * VisFindMoniker: the moniker or list `moniker' (0: none); of a list the
+ * entry that fits best (there always is one); then VMSF_REPLACE_LIST
+ * copies it over the list, VMSF_COPY_CHUNK into `destBlock'.  The
+ * moniker found (0 if none).
+ */
+optr VisFindMoniker(optr moniker, VisMonikerSearchFlags searchFlags,
+		    MemHandle destBlock, DisplayType displayType)
+{
+    MemHandle h = OptrToHandle(moniker);
+    VisMoniker *vm;
+    optr r;
+    word f = (word) ((searchFlags & 0xff00) | displayType);
+
+    if (!OptrToChunk(moniker))
+	return 0;
+    ObjLockObjBlock(h);
+    vm = LMemDeref(moniker);
+    if (!(vm->VM_type & VMT_MONIKER_LIST)) {
+	MemUnlock(h);
+	if (searchFlags & VMSF_COPY_CHUNK)
+	    return CopyMoniker(moniker, destBlock, 0);
+	return moniker;
+    }
+    r = BestFromList((const VisMonikerListEntry *) vm,
+		     (word) (LMemGetChunkSize(moniker) /
+			     sizeof(VisMonikerListEntry)), f);
+    MemUnlock(h);
+    if (!r)
+	return 0;
+    if (searchFlags & VMSF_REPLACE_LIST)
+	return CopyMoniker(r, h, OptrToChunk(moniker));
+    if (searchFlags & VMSF_COPY_CHUNK)
+	return CopyMoniker(r, destBlock, 0);
+    return r;
+}
+
+/* UserLimitDisplayTypeToStandard: no larger than standard, not
+ * squished (the monikers for bigger displays are scaled) */
+DisplayType UserLimitDisplayTypeToStandard(DisplayType t)
+{
+    if (((t & DT_DISP_SIZE) >> DT_DISP_SIZE_OFFSET) > DS_STANDARD)
+	t = (DisplayType) ((t & ~DT_DISP_SIZE) |
+			   (DS_STANDARD << DT_DISP_SIZE_OFFSET));
+    if (((t & DT_DISP_ASPECT_RATIO) >> DT_DISP_ASPECT_RATIO_OFFSET) ==
+	DAR_SQUISHED)
+	t = (DisplayType) ((t & ~DT_DISP_ASPECT_RATIO) |
+			   (DAR_NORMAL << DT_DISP_ASPECT_RATIO_OFFSET));
+    return t;
+}

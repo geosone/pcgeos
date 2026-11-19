@@ -63,6 +63,19 @@
     return r ? r(oself, MasterOffset) : NULL;
 }
 
+/* GenApplicationFindMoniker: of the application's moniker list the
+ * one fitting the search and the display type best (its list is never
+ * replaced) */
+@method GenApplicationClass, MSG_GEN_APPLICATION_FIND_MONIKER
+{
+    ChunkHandle m = pself->GI_visMoniker;
+
+    if (searchFlags & VMSF_REPLACE_LIST)
+	FatalError(UI_CANNOT_REPLACE_APPLICATION_MONIKER_LIST);
+    return VisFindMoniker(ConstructOptr(OptrToHandle(oself), m),
+			  searchFlags, destBlock, displayType);
+}
+
 @method GenApplicationClass, MSG_GEN_APPLICATION_GET_STATE
 {
     return pself->GAI_states;

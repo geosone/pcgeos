@@ -158,6 +158,7 @@ Boolean UserCallApplication(Message msg, const void *params,
 #define UI_GEN_APPLICATION_COULDNT_FIND_A_VIS_PARENT	27
 /* these by their place among the FatalErrors of uiConstant.def */
 #define UI_STARTUP_DONE_MSG_RECEIVED_BEFORE_STARTUP_NOTIFY	184
+#define UI_CANNOT_REPLACE_APPLICATION_MONIKER_LIST		187
 #define UI_GEN_FIELD_GEN_APPLICATION_LIST_CORRUPT		191
 #define UI_GEN_DISPLAY_BAD_ATTRS				275
 #define UI_ERROR_SECOND_REAL_DETACH				355
@@ -175,6 +176,8 @@ typedef ByteFlags UIFlags;
 
 extern UIFlags uiFlags;
 extern byte uiDisplayType;
+/* the display type for monikers: standard size at most, not squished */
+extern DisplayType UserLimitDisplayTypeToStandard(DisplayType t);
 /* the system object (0 until UserCreateSystemObject) */
 optr UserGetSystemObject(void);
 
