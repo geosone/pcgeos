@@ -240,6 +240,15 @@ static VarDataCHandler menuHints[] = {
     case IC_DISMISS:
 	if (pself->OLWI_specState & OLWSS_PINNED)
 	    return TRUE;
+	/* Port32: a menu closed in stay up mode (by the keyboard) leaves
+	 * it, so its window no longer thinks a menu is up (the asm left
+	 * OLWMS_HAS_MENU_IN_STAY_UP_MODE set until the next press: no
+	 * mnemonics there meanwhile) */
+	if (pself->OLMWI_specState & OMWSS_IN_STAY_UP_MODE) {
+	    pself->OLMWI_specState &= ~OMWSS_IN_STAY_UP_MODE;
+	    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+	    QueryButtonOrGenParent(oself, SVQT_NO_MENU_IN_STAY_UP_MODE);
+	}
 	(void) @callsuper oself::OLMenuWinClass::
 		MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
 	b = MenuButton(oself);

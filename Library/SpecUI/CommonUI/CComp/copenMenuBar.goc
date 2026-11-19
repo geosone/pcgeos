@@ -6,8 +6,10 @@
  *
  * Port32 (Port32/ABI.md section 13y), not yet: the popout (its
  * superclass OLPopoutClass), the menus in the header of a maximized
- * window (OpenCheckMenusInHeaderOnMax), the navigation
- * (VisNavigateCommon), mnemonics through the menu bar's focus.
+ * window (OpenCheckMenusInHeaderOnMax).
+ *
+ * A mnemonic opens a menu of the bar with Alt, or without it while the
+ * bar has the focus.
  */
 @include "cGeode.goh"
 
@@ -150,4 +152,17 @@ static VisCompSpacingMarginsInfo MenuBarPassMarginInfo(optr o)
 @method OLMenuBarClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
 {
     (void) retValue;
+}
+
+/* OLMenuBarActivateObjectWithMnemonic: with Alt, or the bar having the
+ * window's focus */
+@method OLMenuBarClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    Boolean has = FALSE;
+
+    if (!((flags >> 8) & (SS_LALT | SS_RALT)) &&
+	(!VisCallParent(oself, MSG_OL_WIN_QUERY_MENU_BAR_HAS_FOCUS, NULL, 0,
+			&has, sizeof(has)) || !has))
+	return FALSE;
+    return @callsuper();
 }

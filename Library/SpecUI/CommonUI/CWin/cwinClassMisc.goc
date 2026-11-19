@@ -7,9 +7,12 @@
  * the menu bar the arrows move along it and up and down open the menu;
  * the rest goes up the focus hierarchy (a menu's to its button).
  *
- * Port32 (Port32/ABI.md section 13y), not yet: mnemonics
- * (MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC is sent, nothing answers it
- * yet), the system menu (its accelerators, the focus going to it when
+ * A mnemonic (no menu in stay up mode, no Ctrl, the window in the
+ * system's focus) is looked for in the window's visual tree
+ * (MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC; the menu bar takes it with
+ * Alt or while it has the focus).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the system menu (its accelerators, the focus going to it when
  * there is no menu bar), the window position and size messages, the
  * legos look, rotating the display.
  */

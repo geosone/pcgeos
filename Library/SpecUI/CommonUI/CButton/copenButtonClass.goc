@@ -11,9 +11,7 @@
  *
  * Port32 (Port32/ABI.md section 13y), not yet: menus (separators, the
  * menu center, menu marks, the stay-up menus released after a key
- * activation, the title bar height), VMO_CANCEL mnemonics
- * (MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC), the keyboard
- * accelerator text (copenMoniker.goc).
+ * activation, the title bar height), the keyboard accelerator text (copenMoniker.goc).
  */
 @include "cGeode.goh"
 
@@ -454,46 +452,11 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
     return ButtonKbdChar(oself, character, flags, state);
 }
 
-/* VisCheckMnemonic: the moniker's mnemonic is the character (case
- * ignored) */
-static Boolean CheckMnemonic(optr g, word c)
-{
-    ChunkHandle m;
-    VisMonikerWithText *t;
-    const char *text;
-    byte off, mc;
-
-    if (!(((VisInstance *) ObjDerefVis(g))->VI_typeFlags & VTF_IS_GEN))
-	return FALSE;
-    m = ((GenInstance *) ObjDerefGen(g))->GI_visMoniker;
-    if (!m)
-	return FALSE;
-    t = LMemDeref(ConstructOptr(OptrToHandle(g), m));
-    if (t->VMWT_common.VM_type & VMT_GSTRING)
-	return FALSE;
-    off = (byte) t->VMWT_mnemonicOffset;
-    text = (const char *) t + VMWT_text;
-    if (off == 0xff || off == 0xfd)	/* VMO_NO_MNEMONIC, VMO_CANCEL */
-	return FALSE;
-    if (off == 0xfe) {			/* VMO_MNEMONIC_NOT_IN_MKR_TEXT */
-	while (*text)
-	    text++;
-	mc = (byte) text[1];
-    } else
-	mc = (byte) text[off];
-    if (c >= 'A' && c <= 'Z')
-	c += 'a' - 'A';
-    if (mc >= 'A' && mc <= 'Z')
-	mc += 'a' - 'A';
-    return (byte) c == mc;
-}
-
 /* OLButtonActivateObjectWithMnemonic: the mnemonic activates (a
  * disabled one beeps) */
 @extern method OLButtonClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
 {
-    (void) flags; (void) state;
-    if (!CheckMnemonic(GenPart(oself), character))
+    if (!VisCheckMnemonic(GenPart(oself), character, flags, state))
 	return FALSE;
     if (OpenButtonCheckIfFullyEnabled(oself))
 	@call oself::MSG_OL_BUTTON_KBD_ACTIVATE();
