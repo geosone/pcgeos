@@ -1,0 +1,71 @@
+/*
+ * olWinIconClass.goh -- OLWinIconClass, the icon of a minimized primary
+ * (after Include/Internal/SpecUI/olWinIconClass.def), and
+ * OLWinGlyphDisplayClass, the caption below it (after
+ * olWinGlyphDisplayClass.def), for Port32.
+ */
+#ifndef __OLWINICONCLASS_GOH
+#define __OLWINICONCLASS_GOH
+
+@include <Internal/SpecUI/olWinClass.goh>
+
+@deflib motif
+
+/* MSG_OL_WIN_ICON_SET_STATE */
+typedef struct {
+    optr		IPD_window;	/* the primary it opens */
+    sword		IPD_top;
+    sword		IPD_left;
+    WinPosSizeState	IPD_winPosSizeState;
+    WinPosSizeFlags	IPD_winPosSizeFlags;
+} IconPassData;
+
+/* MSG_OL_WIN_ICON_UPDATE_MONIKER */
+typedef struct {
+    optr		IMPD_iconMoniker;
+    optr		IMPD_iconCaptionMoniker;
+} IconMonikerPassData;
+
+@class OLWinIconClass, OLWinClass;
+@uses GenClass;
+
+/* made realizable, it takes the focus (its position from its pass data
+ * first, if built but not realized) */
+@message void MSG_OL_WIN_ICON_SET_USABLE();
+@message void MSG_OL_WIN_ICON_SET_STATE(IconPassData *data);
+/* copies of the monikers into the icon's block, the caption's too */
+@message void MSG_OL_WIN_ICON_UPDATE_MONIKER(IconMonikerPassData *data);
+@message void MSG_OL_MAXIMIZE_FROM_ICON();
+
+    /* on the GenPrimary the window makes for its icon */
+    @vardata void HINT_WIN_ICON;
+
+    @instance optr		OLWII_window = 0;	/* the primary */
+    @instance ChunkHandle	OLWII_titleGlyphWin = 0;
+    @instance ChunkHandle	OLWII_iconMoniker = 0;
+    @instance ChunkHandle	OLWII_iconCaptionMoniker = 0;
+
+@endc;
+
+/* OLWinGlyphDisplayClass: the caption of an icon in a window of its
+ * own below it */
+typedef ByteFlags OLWinGDAttr;
+
+@class OLWinGlyphDisplayClass, VisCompClass;
+
+/* the caption (glyph) and the icon (its chunk) */
+@message void MSG_OL_WIN_GLYPH_DISP_SET_MONIKER(ChunkHandle glyph,
+						ChunkHandle icon);
+/* centered below x, y (the icon's bottom middle) */
+@message void MSG_OL_WIN_GLYPH_DISP_MOVE(sword x, sword y);
+@message void MSG_OL_WIN_GLYPH_BRING_TO_TOP();
+
+    @instance OLWinGDAttr	OLWGDI_attrs = 0;
+    @instance ChunkHandle	OLWGDI_glyph = 0;
+    @instance ChunkHandle	OLWGDI_icon = 0;
+
+@endc;
+
+@endlib
+
+#endif

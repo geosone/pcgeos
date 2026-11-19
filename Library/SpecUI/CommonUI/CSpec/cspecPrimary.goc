@@ -2,9 +2,8 @@
  * cspecPrimary.goc -- the build routine of GenPrimaryClass (after
  * cspecPrimary.asm): a GenPrimary is an OLBaseWin, its vis parent the
  * one its generic parent (the application) gives primaries.
- *
- * Port32 (Port32/ABI.md section 13y), not yet: HINT_WIN_ICON
- * (OLWinIconClass): such a primary is an OLBaseWin too.
+ * The GenPrimary a minimized window makes for its icon (HINT_WIN_ICON)
+ * is an OLWinIcon.
  */
 @include "cGeode.goh"
 
@@ -27,5 +26,7 @@ ClassStruct *OLBuildPrimary(optr oself, word masterOffset)
 {
     (void) masterOffset;
     DoSimpleWinBuild(oself, SQT_VIS_PARENT_FOR_PRIMARY);
+    if (ObjVarFindData(oself, HINT_WIN_ICON))
+	return (ClassStruct *) &OLWinIconClass;
     return (ClassStruct *) &OLBaseWinClass;
 }

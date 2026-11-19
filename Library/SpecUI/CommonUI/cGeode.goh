@@ -29,6 +29,7 @@
 @include <Internal/SpecUI/olMenuWinClass.goh>
 @include <Internal/SpecUI/olMenuButtonClass.goh>
 @include <Internal/SpecUI/olMenuBarClass.goh>
+@include <Internal/SpecUI/olWinIconClass.goh>
 #include <Internal/specUI.h>
 #include <Internal/im.h>
 #include <Internal/videoDr.h>

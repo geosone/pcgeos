@@ -75,3 +75,5 @@ export OLButtonClass
 export OLMenuWinClass
 export OLMenuButtonClass
 export OLMenuBarClass
+export OLWinIconClass
+export OLWinGlyphDisplayClass

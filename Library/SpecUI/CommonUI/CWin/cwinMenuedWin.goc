@@ -3,12 +3,12 @@
  * window of a GenDisplay or GenPrimary (OLBaseWinClass): its gadget
  * area (OLGadgetAreaClass) for the generic children, the title bar
  * groups (OLTitleGroupClass) for the children that seek the title bar,
- * the menu bar (the build info of menus), minimized and maximized
- * (the GenDisplay's states), the moniker for the title.
+ * the menu bar (the build info of menus), minimized (its icon: a
+ * GenPrimary with HINT_WIN_ICON under the application, an OLWinIcon,
+ * cwinWinIcon.goc) and maximized (the GenDisplay's states), the moniker
+ * for the title and the icon's.
  *
  * Port32 (Port32/ABI.md section 13y), not yet:
- *   - the window icon (OLWinIconClass): a minimized window is hidden,
- *     as with the task bar on (OLMDWI_icon stays 0);
  *   - the trigger bar (OLMDWI_triggerBar);
  *   - the system menu and its icons (OLWI_sysMenu stays 0);
  *   - moniker lists (MSG_GEN_FIND_MONIKER answers a plain moniker);
@@ -254,19 +254,55 @@ static void IconSetNotRealizable(optr o)
 	@call icon::MSG_SPEC_SET_ATTRS(0, SA_REALIZABLE, VUM_NOW);
 }
 
+static void SendIconMonikers(optr o);
+
 /*
  * OLMenuedWinGenSetMinimized: minimizable and not minimized yet: not
- * realizable, the branch minimized.  Port32: no icon (as with the task
- * bar on).
+ * realizable, the branch minimized; the icon (made the first time: a
+ * GenPrimary with HINT_WIN_ICON in the application's block, linked up
+ * to it only, with the window's icon position and state and monikers)
+ * realizable with the focus, the application lowered (queued).  No task
+ * bar: Port32 has none (taskBarPrefs).
  */
 @method OLMenuedWinClass, MSG_GEN_DISPLAY_SET_MINIMIZED
 {
+    optr app, icon;
+    IconPassData d;
+    OLMenuedWinInstance *w;
+
     if ((pself->OLWI_specState & OLWSS_MINIMIZED) ||
 	!(pself->OLWI_attrs & OWA_MINIMIZABLE))
 	return;
     pself->OLWI_specState |= OLWSS_MINIMIZED;
     @call oself::MSG_SPEC_SET_ATTRS(SA_BRANCH_MINIMIZED, SA_REALIZABLE,
 				    VUM_NOW);
+    /* the application (a primary's generic parent, where the geode
+     * names none) */
+    app = GeodeGetAppObject(0);
+    if (!app)
+	app = GenFindParent(oself);
+    if (!app)
+	return;
+    if (!OptrToChunk(MWin(oself)->OLMDWI_icon)) {
+	ObjLockObjBlock(OptrToHandle(app));
+	icon = OpenCreateChildObject(OptrToHandle(app), app,
+				     (ClassStruct *) &GenPrimaryClass,
+				     HINT_WIN_ICON, TRUE, TRUE, 0);
+	MemUnlock(OptrToHandle(app));
+	w = MWin(oself);
+	w->OLMDWI_icon = icon;
+	d.IPD_window = oself;
+	d.IPD_top = w->OLMDWI_iconPosTop;
+	d.IPD_left = w->OLMDWI_iconPosLeft;
+	d.IPD_winPosSizeState = w->OLMDWI_iconWinPosSizeState;
+	d.IPD_winPosSizeFlags = w->OLMDWI_iconWinPosSizeFlags;
+	@call icon::MSG_OL_WIN_ICON_SET_STATE(&d);
+	SendIconMonikers(oself);
+    }
+    icon = MWin(oself)->OLMDWI_icon;
+    @call icon::MSG_OL_WIN_ICON_SET_USABLE();
+    @send, forceQueue app::MSG_GEN_LOWER_TO_BOTTOM();
+    @call icon::MSG_META_GRAB_FOCUS_EXCL();
 }
 
 /*
@@ -287,6 +323,8 @@ static void IconSetNotRealizable(optr o)
     @call oself::MSG_SPEC_SET_ATTRS(SA_REALIZABLE, 0, VUM_NOW);
     @call oself::MSG_SPEC_SET_ATTRS(0, SA_BRANCH_MINIMIZED, VUM_NOW);
     app = GeodeGetAppObject(0);
+    if (!app)
+	app = GenFindParent(oself);
     if (app)
 	@call app::MSG_META_ENSURE_ACTIVE_FT();
 }
@@ -611,10 +649,18 @@ optr OpenWinMaybeInTitleBar(optr o, optr child)
  * Monikers
  * ------------------------------------------------------------------- */
 
-/* OLMenuedWinSendIconMonikers (Port32: no icon yet) */
+/* OLMenuedWinSendIconMonikers: the icon's monikers to it (if made) */
 static void SendIconMonikers(optr o)
 {
-    (void) o;
+    OLMenuedWinInstance *w = MWin(o);
+    optr icon = w->OLMDWI_icon;
+    IconMonikerPassData d;
+
+    if (!OptrToChunk(icon))
+	return;
+    d.IMPD_iconMoniker = w->OLMDWI_iconMoniker;
+    d.IMPD_iconCaptionMoniker = w->OLMDWI_iconCaptionMoniker;
+    @call icon::MSG_OL_WIN_ICON_UPDATE_MONIKER(&d);
 }
 
 static void UpdateAllMonikers(optr o)

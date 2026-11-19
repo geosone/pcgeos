@@ -49,6 +49,8 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CWin/cwinBase.goc
                ${c}/CWin/cwinPopup.goc
                ${c}/CWin/cwinDialog.goc
+               ${c}/CWin/cwinWinIcon.goc
+               ${c}/CWin/cwinGlyphDisplay.goc
                ${CMAKE_CURRENT_SOURCE_DIR}/Motif/Win/winDraw.goc
                ${c}/CSpec/cspecSystem.goc
                ${c}/CSpec/cspecScreen.goc

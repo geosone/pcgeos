@@ -1,0 +1,425 @@
+/*
+ * cwinWinIcon.goc -- OLWinIconClass (after cwinWinIcon.asm): the icon
+ * of a minimized primary.  The primary makes it (a GenPrimary with
+ * HINT_WIN_ICON under the application, built as an OLWinIcon) when it
+ * is minimized: a small window on the field showing the primary's icon
+ * moniker, with its caption (the abbreviated text) in a window of its
+ * own below it (the glyph, OLWinGlyphDisplayClass in
+ * cwinGlyphDisplay.goc).  A double press on either, Enter or Alt+F5
+ * restores the primary; the icon has the focus (the caption is drawn
+ * inverted then), it moves like a window and stays on the field with
+ * its caption, and tells the primary where it is (its stagger slot).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the icon's private data
+ * (GIT_PRIVATE_DATA, unused by Motif), the window list entry (the task
+ * bar).
+ */
+@include "cGeode.goh"
+
+@classdecl OLWinIconClass, neverSaved;
+
+#define Icon(o)		((OLWinIconInstance *) ObjDerefVis(o))
+
+#define OL_WIN_ICON_MAX_WIDTH		1023
+#define WIN_ICON_GLYPH_Y_SPACING	3
+
+/* the glyph of an icon (0 if none yet) */
+static optr GlyphOf(optr o)
+{
+    ChunkHandle g = Icon(o)->OLWII_titleGlyphWin;
+
+    return g ? ConstructOptr(OptrToHandle(o), g) : 0;
+}
+
+/* the application: the icon's generic parent (linked upward only) */
+static optr AppOf(optr o)
+{
+    optr app = GeodeGetAppObject(0);
+
+    return app ? app : GenFindParent(o);
+}
+
+/* the application's task entry (UpdateAppMenuItemCommon: Motif has no
+ * window list) */
+static void UpdateTaskEntry(optr o)
+{
+    optr app = AppOf(o);
+
+    if (app)
+	@call app::MSG_OL_APP_UPDATE_TASK_ENTRY(TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * OLWinIconClass
+ * ------------------------------------------------------------------- */
+
+/* OLWinIconInitialize: a window icon (focusable and movable), not
+ * saved */
+@method OLWinIconClass, MSG_META_INITIALIZE
+{
+    OLWinIconInstance *w;
+
+    @callsuper();
+    w = Icon(oself);
+    w->OLWI_fixedAttr |= OWFA_IS_WIN_ICON;
+    w->OLWI_attrs = OL_ATTRS_WIN_ICON;
+    w->OLWI_type = MOWT_WINDOW_ICON;
+    ObjSetFlags(oself, OCF_IGNORE_DIRTY, 0);
+}
+
+/*
+ * OLWinIconSpecBuild: the position, size and state the primary kept for
+ * its icon (TEMP_GEN_SAVE_ICON_INFO, from a restored state), taken and
+ * deleted there
+ */
+@method OLWinIconClass, MSG_SPEC_BUILD
+{
+    optr p = Icon(oself)->OLWII_window;
+    struct {
+	SpecWinSizePair	GSWI_winPosition;
+	SpecWinSizePair	GSWI_winSize;
+	word		GSWI_winPosSizeState;
+    } info;
+    OLWinIconInstance *w;
+
+    if (p && @call p::MSG_META_GET_VAR_DATA(TEMP_GEN_SAVE_ICON_INFO,
+					    sizeof(info), &info)
+	     != (word) -1) {
+	w = Icon(oself);
+	w->OLWI_winPosSizeState = info.GSWI_winPosSizeState;
+	w->VI_bounds.R_left = (sword) info.GSWI_winPosition.SWSP_x;
+	w->VI_bounds.R_top = (sword) info.GSWI_winPosition.SWSP_y;
+	w->VI_bounds.R_right = (sword) info.GSWI_winSize.SWSP_x;
+	w->VI_bounds.R_bottom = (sword) info.GSWI_winSize.SWSP_y;
+	(void) @call p::MSG_META_DELETE_VAR_DATA(TEMP_GEN_SAVE_ICON_INFO);
+    }
+    @callsuper();
+}
+
+/* OLWinIconSetUsable: realizable (built but not shown: the position and
+ * size worked out first), the focus */
+@method OLWinIconClass, MSG_OL_WIN_ICON_SET_USABLE
+{
+    if (pself->VI_specAttrs & SA_TREE_BUILT_BUT_NOT_REALIZED) {
+	ConvertSpecWinSizePairsToPixels(oself);
+	UpdateWinPosSize(oself);
+    }
+    @call oself::MSG_SPEC_SET_ATTRS(SA_REALIZABLE, 0, VUM_NOW);
+    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+}
+
+/* OLWinIconSetState: the primary, the position and its state */
+@method OLWinIconClass, MSG_OL_WIN_ICON_SET_STATE
+{
+    OLWinIconInstance *w = pself;
+
+    w->OLWII_window = data->IPD_window;
+    w->OLWI_winPosSizeState = data->IPD_winPosSizeState;
+    w->OLWI_winPosSizeFlags = data->IPD_winPosSizeFlags;
+    w->VI_bounds.R_left = data->IPD_left;
+    w->VI_bounds.R_top = data->IPD_top;
+}
+
+/* a copy of the moniker in the icon's block (0 if none) */
+static ChunkHandle CopyMoniker(optr o, optr m)
+{
+    if (!m)
+	return 0;
+    return @call o::MSG_VIS_CREATE_VIS_MONIKER(0, 0, 0, 0, VMDT_VIS_MONIKER,
+					       VMST_OPTR, m);
+}
+
+/*
+ * OLWinIconUpdateMoniker: copies of the icon and caption monikers, the
+ * caption to the glyph; the old copies freed
+ */
+@method OLWinIconClass, MSG_OL_WIN_ICON_UPDATE_MONIKER
+{
+    ChunkHandle oldIcon = pself->OLWII_iconMoniker,
+		oldCaption = pself->OLWII_iconCaptionMoniker, c;
+    optr g;
+
+    c = CopyMoniker(oself, data->IMPD_iconMoniker);
+    Icon(oself)->OLWII_iconMoniker = c;
+    c = CopyMoniker(oself, data->IMPD_iconCaptionMoniker);
+    Icon(oself)->OLWII_iconCaptionMoniker = c;
+    g = GlyphOf(oself);
+    if (g)
+	@call g::MSG_OL_WIN_GLYPH_DISP_SET_MONIKER(c, OptrToChunk(oself));
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID, VUM_NOW);
+    if (oldCaption)
+	LMemFree(ConstructOptr(OptrToHandle(oself), oldCaption));
+    if (oldIcon)
+	LMemFree(ConstructOptr(OptrToHandle(oself), oldIcon));
+}
+
+/* OLWinIconEnsureTitleGlyphDisplay: the glyph, made in the icon's block
+ * (not saved) with the caption, a visual child of the icon's parent */
+static optr EnsureTitleGlyphDisplay(optr o)
+{
+    optr g = GlyphOf(o), p;
+
+    if (g)
+	return g;
+    g = ObjInstantiate(OptrToHandle(o), (ClassStruct *)
+					    &OLWinGlyphDisplayClass);
+    ObjSetFlags(g, OCF_IGNORE_DIRTY, 0);
+    @call g::MSG_OL_WIN_GLYPH_DISP_SET_MONIKER(
+		Icon(o)->OLWII_iconCaptionMoniker, OptrToChunk(o));
+    Icon(o)->OLWII_titleGlyphWin = OptrToChunk(g);
+    p = VisFindParent(o);
+    if (p)
+	@call p::MSG_VIS_ADD_CHILD(g, CCO_LAST);
+    return g;
+}
+
+/* OLWinIconUpdateTitleGlyphWin: the glyph below the icon's middle */
+static void UpdateTitleGlyphWin(optr o)
+{
+    OLWinIconInstance *w = Icon(o);
+    sword x = (sword) ((w->VI_bounds.R_left + w->VI_bounds.R_right) >> 1),
+	  y = w->VI_bounds.R_bottom;
+    optr g = GlyphOf(o);
+
+    if (g)
+	@call g::MSG_OL_WIN_GLYPH_DISP_MOVE(x, y);
+}
+
+/* OLWinIconRerecalcSize: the icon moniker's size */
+@method OLWinIconClass, MSG_VIS_RECALC_SIZE
+{
+    (void) width; (void) height;
+    return VisGetMonikerSize(oself, pself->OLWII_iconMoniker, 0, 0);
+}
+
+/* the icon and its glyph on (or off) the application's lists of the
+ * windows always interactable (and within UserDoDialogs) */
+static void AddOrRemoveOnLists(optr o, Boolean add)
+{
+    static const word lists[2] = {
+	GAGCNLT_ALWAYS_INTERACTABLE_WINDOWS,
+	GAGCNLT_CONTROLLERS_WITHIN_USER_DO_DIALOGS
+    };
+    optr app = AppOf(o), g = GlyphOf(o);
+    word i;
+
+    if (!app)
+	return;
+    for (i = 0; i < 3; i++) {
+	optr what = i < 2 ? o : g;
+	word list = lists[i < 2 ? i : 0];
+
+	if (!what)
+	    continue;
+	if (add)
+	    (void) @call app::MSG_META_GCN_LIST_ADD(what, list,
+						    MANUFACTURER_ID_GEOWORKS);
+	else
+	    (void) @call app::MSG_META_GCN_LIST_REMOVE(what, list,
+						MANUFACTURER_ID_GEOWORKS);
+    }
+}
+
+/* OLWinIconSendSlot: the position and stagger slot to the primary */
+static void SendSlot(optr o)
+{
+    OLWinIconInstance *w = Icon(o);
+    optr p = w->OLWII_window;
+    sword x = w->VI_bounds.R_left, y = w->VI_bounds.R_top;
+    byte slot = (byte) ((w->OLWI_winPosSizeState & WPSS_STAGGERED_SLOT) >>
+			WPSS_STAGGERED_SLOT_OFFSET);
+
+    if (p)
+	@call p::MSG_OL_MW_SET_ICON_POS(x, y, slot);
+}
+
+/*
+ * OLWinIconOpenWin: opened on top; the glyph made, placed below and
+ * shown; the slot to the primary, moved and resized to stay on the
+ * field; on the application's lists
+ */
+@method OLWinIconClass, MSG_VIS_OPEN_WIN
+{
+    optr g;
+
+    Icon(oself)->OLWI_fixedAttr |= OWFA_OPEN_ON_TOP;
+    @callsuper();
+    Icon(oself)->OLWI_fixedAttr &= ~OWFA_OPEN_ON_TOP;
+    g = EnsureTitleGlyphDisplay(oself);
+    UpdateTitleGlyphWin(oself);
+    @call g::MSG_VIS_SET_ATTRS(VA_VISIBLE, 0, VUM_NOW);
+    SendSlot(oself);
+    @call oself::MSG_VIS_MOVE_RESIZE_WIN();
+    AddOrRemoveOnLists(oself, TRUE);
+}
+
+/* OLWinIconCheckIfInteractableObject: the icon and its glyph */
+@method OLWinIconClass, MSG_META_CHECK_IF_INTERACTABLE_OBJECT
+{
+    return obj == oself ||
+	   (OptrToHandle(obj) == OptrToHandle(oself) &&
+	    OptrToChunk(obj) == pself->OLWII_titleGlyphWin &&
+	    OptrToChunk(obj) != 0);
+}
+
+/* OLWinIconCloseWin: off the lists, closed, the glyph destroyed */
+@method OLWinIconClass, MSG_VIS_CLOSE_WIN
+{
+    optr g;
+
+    AddOrRemoveOnLists(oself, FALSE);
+    @callsuper();
+    g = GlyphOf(oself);
+    if (g) {
+	Icon(oself)->OLWII_titleGlyphWin = 0;
+	@call g::MSG_VIS_DESTROY(VUM_NOW);
+    }
+}
+
+/*
+ * OLWinIconKeepOnScreen: the icon (and the glyph below it) within its
+ * parent: left and top at least the parent's, right and bottom (the
+ * glyph's height and spacing below) within it; the slot to the primary
+ */
+static void KeepOnScreen(optr o)
+{
+    Rectangle pb;
+    optr p = VisFindParent(o), g;
+    OLWinIconInstance *w;
+    sword x, y, gh = 0;
+
+    if (!p)
+	return;
+    @call p::MSG_VIS_GET_BOUNDS(&pb);
+    w = Icon(o);
+    x = w->VI_bounds.R_left;
+    y = w->VI_bounds.R_top;
+    if (x < pb.R_left)
+	x = pb.R_left;
+    if (y < pb.R_top)
+	y = pb.R_top;
+    if (w->VI_bounds.R_right > pb.R_right)
+	x = (sword) (pb.R_right - (w->VI_bounds.R_right - w->VI_bounds.R_left));
+    g = GlyphOf(o);
+    if (g)
+	gh = (sword) (DWORD_HEIGHT(VisGetSize(g)) + WIN_ICON_GLYPH_Y_SPACING);
+    w = Icon(o);
+    if ((sword) (w->VI_bounds.R_bottom + gh) > pb.R_bottom)
+	y = (sword) (pb.R_bottom - (w->VI_bounds.R_bottom + gh -
+				     w->VI_bounds.R_top));
+    VisSetPosition(o, x, y);
+    SendSlot(o);
+}
+
+/* OLWinIconMoveResizeWin: kept on the field, the glyph follows */
+@method OLWinIconClass, MSG_VIS_MOVE_RESIZE_WIN
+{
+    KeepOnScreen(oself);
+    @callsuper();
+    UpdateTitleGlyphWin(oself);
+}
+
+/* OLWinIconDraw: the icon moniker (in black where it has no colors) */
+@method OLWinIconClass, MSG_VIS_DRAW
+{
+    DrawMonikerArgs a;
+
+    (void) drawFlags;
+    GrSetAreaColor(gstate, CF_INDEX, C_BLACK, 0, 0);
+    memset(&a, 0, sizeof(a));
+    a.DMA_gState = gstate;
+    a.DMA_xMaximum = OL_WIN_ICON_MAX_WIDTH;
+    a.DMA_yMaximum = MAX_COORD;
+    a.DMA_xInset = 1;
+    a.DMA_yInset = 1;
+    VisDrawMoniker(oself, pself->OLWII_iconMoniker, DMF_NONE, &a);
+    GrSetAreaColor(gstate, CF_INDEX, C_BLACK, 0, 0);
+}
+
+/* OLWinIconGainedSystemFocusExcl: on top, the glyph too (drawn
+ * inverted) */
+@method OLWinIconClass, MSG_META_GAINED_SYS_FOCUS_EXCL
+{
+    optr g;
+
+    @callsuper();
+    @call oself::MSG_GEN_BRING_TO_TOP();
+    g = GlyphOf(oself);
+    if (g) {
+	@call g::MSG_OL_WIN_GLYPH_BRING_TO_TOP();
+	VisMarkInvalid(g, VOF_IMAGE_INVALID, VUM_NOW);
+    }
+}
+
+/* OLWinIconLostSystemFocusExcl: the glyph drawn plain again */
+@method OLWinIconClass, MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    optr g = GlyphOf(oself);
+
+    if (g)
+	VisMarkInvalid(g, VOF_IMAGE_INVALID, VUM_NOW);
+    @callsuper();
+}
+
+/* OLWinIconStartSelect: a double press restores the primary */
+@method OLWinIconClass, MSG_META_START_SELECT
+{
+    if (inputState & BI_DOUBLE_PRESS) {
+	@call oself::MSG_OL_RESTORE_WIN();
+	retVal->flags = MRF_PROCESSED;
+	return;
+    }
+    @callsuper();
+}
+
+/* OLWinIconMaximizeFromIcon: the primary maximized and restored */
+@method OLWinIconClass, MSG_OL_MAXIMIZE_FROM_ICON
+{
+    optr p = pself->OLWII_window;
+
+    if (p)
+	@call p::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+    @call oself::MSG_OL_RESTORE_WIN();
+}
+
+/* OLWinIconRestoreWin: the primary no longer minimized (queued: it
+ * takes this icon down) */
+@method OLWinIconClass, MSG_OL_RESTORE_WIN
+{
+    optr p = pself->OLWII_window;
+
+    if (p)
+	@send, forceQueue p::MSG_GEN_DISPLAY_SET_NOT_MINIMIZED();
+}
+
+/* OLWinIconFupKbdChar: Enter and Alt+F5 restore the primary */
+@method OLWinIconClass, MSG_META_FUP_KBD_CHAR
+{
+    static const KeyboardShortcut keys[2] = {
+	KS_ALT | (KS_CHAR_SET_CONTROL << 8) | VC_F5,
+	(KS_CHAR_SET_CONTROL << 8) | VC_ENTER
+    };
+
+    if (!(flags & (CF_STATE_KEY | CF_TEMP_ACCENT)) &&
+	(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)) &&
+	FlowCheckKbdShortcut((KeyboardShortcut *) keys, 2, character, flags,
+			     state) != (word) -1) {
+	@call oself::MSG_OL_RESTORE_WIN();
+	return TRUE;
+    }
+    return @callsuper();
+}
+
+/* OLWinIconGainedSysTargetExcl: the application's task entry */
+@method OLWinIconClass, MSG_META_GAINED_SYS_TARGET_EXCL
+{
+    @callsuper();
+    UpdateTaskEntry(oself);
+}
+
+/* OLWinIconTestWinInteractibility: only the icon itself */
+@method OLWinIconClass, MSG_META_TEST_WIN_INTERACTIBILITY
+{
+    (void) window;
+    return inputOD != 0 && inputOD == oself;
+}

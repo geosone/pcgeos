@@ -1,0 +1,176 @@
+/*
+ * cwinGlyphDisplay.goc -- OLWinGlyphDisplayClass (after
+ * cwinGlyphDisplay.asm): the caption of a window icon (cwinWinIcon.goc)
+ * in a window of its own, centered below the icon, framed, drawn
+ * inverted while the icon has the system's focus.  A double press on it
+ * is the icon's; any press brings the application, the icon and the
+ * caption to the top.
+ */
+@include "cGeode.goh"
+
+@classdecl OLWinGlyphDisplayClass, neverSaved;
+
+#define Glyph(o)	((OLWinGlyphDisplayInstance *) ObjDerefVis(o))
+
+#define WIN_ICON_GLYPH_MARGIN_X		4
+#define WIN_ICON_GLYPH_MARGIN_Y		4
+#define WIN_ICON_GLYPH_Y_SPACING	3
+
+/* the application: the icon's generic parent (linked upward only) */
+static optr AppOf(optr icon)
+{
+    optr app = GeodeGetAppObject(0);
+
+    return app ? app : GenFindParent(icon);
+}
+
+@method OLWinGlyphDisplayClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+/* OLWinGlyphDisplayInitialize: a window of its own, hidden until the
+ * icon shows it */
+@method OLWinGlyphDisplayClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    pself = Glyph(oself);
+    pself->VI_typeFlags |= VTF_IS_WIN_GROUP | VTF_IS_WINDOW;
+    pself->VI_attrs &= ~VA_VISIBLE;
+}
+
+/* OLWinGlyphDisplayStartSelect: a double press goes to the icon; the
+ * application, the icon and the glyph on top */
+@method OLWinGlyphDisplayClass, MSG_META_START_SELECT
+{
+    optr icon = ConstructOptr(OptrToHandle(oself), pself->OLWGDI_icon);
+    optr app = AppOf(icon);
+
+    if (inputState & BI_DOUBLE_PRESS)
+	@call icon::MSG_META_START_SELECT(retVal, xPosition, yPosition,
+					  inputState);
+    if (app)
+	@call app::MSG_GEN_BRING_TO_TOP();
+    @call icon::MSG_GEN_BRING_TO_TOP();
+    @call oself::MSG_OL_WIN_GLYPH_BRING_TO_TOP();
+    retVal->flags = MRF_PROCESSED;
+}
+
+@method OLWinGlyphDisplayClass, MSG_OL_WIN_GLYPH_BRING_TO_TOP
+{
+    WindowHandle w = VisQueryWindow(oself);
+
+    if (w)
+	WinChangePriority(w, 0, 0);
+}
+
+@method OLWinGlyphDisplayClass, MSG_OL_WIN_GLYPH_DISP_SET_MONIKER
+{
+    pself->OLWGDI_glyph = glyph;
+    pself->OLWGDI_icon = icon;
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID, VUM_NOW);
+}
+
+/* the caption's size with the margins */
+static SizeAsDWord GlyphSize(optr o)
+{
+    GStateHandle gs = ViewCreateCalcGState();
+    SizeAsDWord s = VisGetMonikerSize(o, Glyph(o)->OLWGDI_glyph,
+				      GetSystemFontHeight(), gs);
+
+    GrDestroyState(gs);
+    return MAKE_SIZE_DWORD(DWORD_WIDTH(s) + WIN_ICON_GLYPH_MARGIN_X,
+			   DWORD_HEIGHT(s) + WIN_ICON_GLYPH_MARGIN_Y);
+}
+
+@method OLWinGlyphDisplayClass, MSG_VIS_RECALC_SIZE
+{
+    (void) width; (void) height;
+    return GlyphSize(oself);
+}
+
+/* OLWinGlyphDisplayMove: centered below x, y, kept in its parent, its
+ * window moved */
+@method OLWinGlyphDisplayClass, MSG_OL_WIN_GLYPH_DISP_MOVE
+{
+    SizeAsDWord s = VisGetSize(oself);
+    sword w, h;
+    OLWinGlyphDisplayInstance *g;
+
+    if (!DWORD_WIDTH(s))
+	s = GlyphSize(oself);
+    w = (sword) DWORD_WIDTH(s);
+    h = (sword) DWORD_HEIGHT(s);
+    x = (sword) (x - (w >> 1));
+    y = (sword) (y + WIN_ICON_GLYPH_Y_SPACING);
+    g = Glyph(oself);
+    g->VI_bounds.R_left = x;
+    g->VI_bounds.R_top = y;
+    g->VI_bounds.R_right = (sword) (x + w);
+    g->VI_bounds.R_bottom = (sword) (y + h);
+    EnsureWindowInParentWin(oself, w, h);
+    VisMarkInvalid(oself, VOF_WINDOW_INVALID, VUM_NOW);
+}
+
+/* OLWinGlyphDisplayOpenWin: its window (white), above the standard
+ * windows */
+@method OLWinGlyphDisplayClass, MSG_VIS_OPEN_WIN
+{
+    Rectangle b;
+    GeodeHandle proc = GeodeGetProcessHandle();
+    WindowHandle win;
+
+    if (pself->VCI_window)
+	return;
+    OpenGetLineBounds(oself, &b);
+    win = WinOpen(parentWindow, oself, oself, CMM_ON_BLACK | CMT_CLOSEST,
+		  C_WHITE, 0, 0, WIN_PRIO_STD + 1, proc, proc, NULL,
+		  b.R_left, b.R_top, b.R_right, b.R_bottom);
+    Glyph(oself)->VCI_window = win;
+}
+
+/* OLWinGlyphDisplayDraw: framed, the caption centered; inverted while
+ * the icon has the system's focus */
+@method OLWinGlyphDisplayClass, MSG_VIS_DRAW
+{
+    optr icon = ConstructOptr(OptrToHandle(oself), pself->OLWGDI_icon);
+    Boolean focused = (((OLWinInstance *) ObjDerefVis(icon))->
+		       OLWI_focusExcl.FTVMC_flags & HGF_SYS_EXCL) != 0;
+    SizeAsDWord s = VisGetSize(oself);
+    sword w = (sword) DWORD_WIDTH(s), h = (sword) DWORD_HEIGHT(s);
+    Color c = focused ? C_WHITE : C_BLACK;
+    DrawMonikerArgs a;
+
+    (void) drawFlags;
+    if (focused) {
+	GrSetAreaColor(gstate, CF_INDEX, C_BLACK, 0, 0);
+	GrFillRect(gstate, 0, 0, w, h);
+    }
+    GrSetAreaColor(gstate, CF_INDEX, c, 0, 0);
+    GrSetLineColor(gstate, CF_INDEX, c, 0, 0);
+    GrSetTextColor(gstate, CF_INDEX, c, 0, 0);
+    GrDrawRect(gstate, 0, 0, w - 1, h - 1);
+    memset(&a, 0, sizeof(a));
+    a.DMA_gState = gstate;
+    a.DMA_xMaximum = (word) (h - 1);
+    a.DMA_yMaximum = MAX_COORD;
+    VisDrawMoniker(oself, Glyph(oself)->OLWGDI_glyph,
+		   (J_CENTER << DMF_X_JUST_OFFSET) |
+		   (J_CENTER << DMF_Y_JUST_OFFSET), &a);
+}
+
+/* the application's task entry (UpdateAppMenuItemCommon) */
+@method OLWinGlyphDisplayClass, MSG_META_GAINED_SYS_TARGET_EXCL
+{
+    optr app = AppOf(ConstructOptr(OptrToHandle(oself), pself->OLWGDI_icon));
+
+    @callsuper();
+    if (app)
+	@call app::MSG_OL_APP_UPDATE_TASK_ENTRY(TRUE);
+}
+
+@method OLWinGlyphDisplayClass, MSG_META_TEST_WIN_INTERACTIBILITY
+{
+    (void) window;
+    return inputOD != 0 && inputOD == oself;
+}
