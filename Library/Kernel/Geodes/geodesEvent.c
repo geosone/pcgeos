@@ -92,12 +92,7 @@ static KQueue *QueueOf(QueueHandle qh)
     return he->HE_addr;
 }
 
-static GeodeHandle OwnerNow(void)
-{
-    if (kernelCurrentThread && HandleEntryOf(kernelCurrentThread)->HE_owner)
-	return HandleEntryOf(kernelCurrentThread)->HE_owner;
-    return kernelCurrentGeode;
-}
+#define OwnerNow KernelOwnerNow
 
 /* a new event; 0 if there is no memory (or, in interrupt code, no
  * reserve) */

@@ -75,9 +75,18 @@ MemHandle MemAllocSetOwner(GeodeHandle owner, word byteSize,
     return h;
 }
 
+/* the owner of what the current thread allocates: its process (as the
+ * asm's TPD_processHandle), the program's geode before there are threads */
+GeodeHandle KernelOwnerNow(void)
+{
+    if (kernelCurrentThread && HandleEntryOf(kernelCurrentThread)->HE_owner)
+	return HandleEntryOf(kernelCurrentThread)->HE_owner;
+    return kernelCurrentGeode;
+}
+
 MemHandle MemAlloc(word byteSize, HeapFlags hf, HeapAllocFlags haf)
 {
-    return MemAllocSetOwner(kernelCurrentGeode, byteSize, hf, haf);
+    return MemAllocSetOwner(KernelOwnerNow(), byteSize, hf, haf);
 }
 
 MemHandle MemReAlloc(MemHandle mh, word byteSize, HeapAllocFlags haf)

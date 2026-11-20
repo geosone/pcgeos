@@ -169,10 +169,12 @@ void KernelFatal(KernelFatalError code);
 #endif
 
 /* ---------------------------------------------------------------------
- * The current geode: owner of new blocks.  Until threads exist, the
- * kernel itself (or a test) sets it.
+ * The current geode: owner of new blocks where the current thread has
+ * none (before there are threads); the kernel itself (or a test) sets it.
  * ------------------------------------------------------------------- */
 extern GeodeHandle kernelCurrentGeode;
+/* heapHigh.c: the current thread's process, else kernelCurrentGeode */
+GeodeHandle KernelOwnerNow(void);
 
 /* ---------------------------------------------------------------------
  * Handle table (Heap/heapHandle.c, after heapHandle.asm).

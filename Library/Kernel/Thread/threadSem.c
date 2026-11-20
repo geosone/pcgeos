@@ -52,7 +52,7 @@ static HandleEntry *SemOf(Handle h, byte lockFlag)
 
 static Handle AllocSem(word value, byte flags)
 {
-    Handle h = HandleAlloc(SIG_SEMAPHORE, kernelCurrentGeode);
+    Handle h = HandleAlloc(SIG_SEMAPHORE, KernelOwnerNow());
     HandleEntry *he;
 
     if (!h)
