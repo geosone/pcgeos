@@ -9,6 +9,8 @@
 #define __SPECC_GOH
 
 @include <ui.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gBoolGC.goh>
 
 @deflib ui
 
@@ -58,6 +60,56 @@ typedef word VisUpwardQueryType;
 				GenReturnParams *retValue = axbpcxdx,
 				VisUpwardQueryType queryType = cx,
 				dword data1 = dx, dword data2 = bp) = carry;
+
+/*
+ * The update of an item group's look (Port32): the asm passed a
+ * GenItemGroup's changed items as a block of identifiers (bp, its size
+ * in bytes in dx), a GenBooleanGroup's changed booleans in cx.  Here:
+ * the changed booleans, or the number of identifiers and the identifiers
+ * (good for the call only).
+ */
+@alias (MSG_SPEC_UPDATE_SPECIFIC_OBJECT) void
+	MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT(word changedBooleans,
+					    word numItems,
+					    const word *items);
+
+/*
+ * MSG_GEN_ITEM_GROUP_SCAN_ITEMS and MSG_GEN_BOOLEAN_GROUP_SCAN_BOOLEANS
+ * with what the asm returned: TRUE (the asm's carry) if a usable and
+ * enabled item was found; the item in retValue.  For GSIF_DYNAMIC_LIST
+ * the position instead, with the first and last usable and enabled
+ * items.
+ */
+typedef struct _GenScanItemsReturn {
+    word	GSIR_item;
+    word	GSIR_first;
+    word	GSIR_last;
+} GenScanItemsReturn;
+
+@alias (MSG_GEN_ITEM_GROUP_SCAN_ITEMS) Boolean
+	MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS(GenScanItemsReturn *retValue,
+					  GenScanItemsFlags flags,
+					  word initialItem,
+					  sword scanAmount) = carry;
+@alias (MSG_GEN_BOOLEAN_GROUP_SCAN_BOOLEANS) Boolean
+	MSG_GEN_BOOLEAN_GROUP_P32_SCAN_BOOLEANS(GenScanItemsReturn *retValue,
+						GenScanItemsFlags flags,
+						word initialItem,
+						sword scanAmount) = carry;
+
+/*
+ * MSG_GEN_ITEM_GROUP_UPDATE_EXTENDED_SELECTION's flags: ExtSelFlags in
+ * the low byte, the flags passed on to the set message in the high
+ * byte.  The set message (setSelMsg) takes the identifier and a word:
+ * the passed flags in the low byte, the high byte non-zero to select.
+ */
+#define ESF_INITIAL_SELECTION		0x80
+#define ESF_XOR_INDIVIDUAL_ITEMS	0x40
+#define ESF_CLEAR_UNSELECTED_ITEMS	0x20
+#define ESF_SELECT			0x10
+
+@prototype void GEN_ITEM_GROUP_SET_EXT_SEL_MSG(word identifier,
+					       word flags);
 
 @endlib
 

@@ -5117,6 +5117,40 @@ visual classes of `Library/User/Vis`:
   vardata; full sized, overlapping and tiling passed to the specific
   part when it is built and usable). Each resolves to its specific UI's
   build routine.
+- **Item groups** (`Gen/genItemGroup.goc`, `genItem.goc`,
+  `genBooleanGroup.goc`, `genBoolean.goc` after the asm of the same
+  names): `GenItemGroupClass` (none, one or several selected, several
+  in a chunk that `GIGI_selection` names; indeterminate and modified;
+  a set message clears modified and tells the specific UI of the items
+  whose state changed; set item state, the extended selection of a
+  drag, the unique identifier, the moniker selection, the options as an
+  integer or `ATTR_GEN_ITEM_GROUP_INIT_FILE_BOOLEAN`), `GenItemClass`,
+  `GenBooleanGroupClass` (each boolean a bit of the words of selected,
+  indeterminate and modified booleans) and `GenBooleanClass`. The apply
+  and status messages go out through `MSG_GEN_OUTPUT_ACTION` with the
+  prototype's parameters (`GEN_ITEM_GROUP_APPLY_MSG`: selection, count,
+  state flags; `GEN_BOOLEAN_GROUP_APPLY_MSG`: selected, indeterminate,
+  modified or changed). Port32 forms in `CInclude/Internal/specC.goh`:
+  - `MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT(changedBooleans, numItems,
+    items)`: the asm passed a block of identifiers (an item group) or
+    the changed booleans in cx (a boolean group); the identifiers are
+    good for the call;
+  - `MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS` and
+    `MSG_GEN_BOOLEAN_GROUP_P32_SCAN_BOOLEANS(GenScanItemsReturn *,
+    flags, initialItem, scanAmount)`: TRUE (the asm's carry) if a
+    usable and enabled item was found, the item (a dynamic list: the
+    position, the first and last items) in the structure;
+  - `MSG_GEN_ITEM_GROUP_UPDATE_EXTENDED_SELECTION`: `ExtSelFlags`
+    (`ESF_*`) in the low byte of its flags, the flags passed to the set
+    message in the high byte; the set message takes the identifier and
+    a word (the passed flags, the high byte non-zero to select),
+    `GEN_ITEM_GROUP_SET_EXT_SEL_MSG`;
+  - the parameter `message` of `MSG_GEN_ITEM_GROUP_SET_APPLY_MSG` and
+    `MSG_GEN_BOOLEAN_GROUP_SET_APPLY_MSG` is `applyMsg` (a method's
+    `message` is the message).
+
+  Not yet: `MSG_GEN_BRANCH_REPLACE_PARAMS` (`BRPT_OUTPUT_OPTR`), the
+  dynamic list (`GenDynamicListClass`).
 - **Size specifications** (`Vis/visSpec.goc`, after
   `visSpecUtils.asm`): `VisConvertSpecVisSize` (pixels, percent of the
   field's or the screen's size, average and widest characters and

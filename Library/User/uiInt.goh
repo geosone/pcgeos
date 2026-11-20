@@ -262,4 +262,15 @@ void UserMakeScreens(MemHandle block);
 void UserMakeScreenFields(void);
 void UserScreenExit(void);
 
+/* genItemGroup.goc, shared with GenBooleanGroupClass (the identifier of
+ * a GenItem and a GenBoolean in the same place) */
+struct _GenScanItemsReturn;
+optr GenItemGroupFindItem(optr obj, word identifier);
+Boolean GenItemGroupScan(optr obj, struct _GenScanItemsReturn *r,
+			 byte flags, word initial, sword amount);
+Boolean GenOptGetInteger(const GenOptionsParams *params, Boolean boolean,
+			 word *value);
+void GenOptWriteInteger(const GenOptionsParams *params, Boolean boolean,
+			word value);
+
 #endif

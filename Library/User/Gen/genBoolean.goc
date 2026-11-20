@@ -1,0 +1,27 @@
+/*
+ * genBoolean.goc -- GenBooleanClass (after genBoolean.asm): a boolean
+ * of a GenBooleanGroup, its identifier the boolean's bit.  What it
+ * looks like is the specific UI's (SPIR_BUILD_BOOLEAN: a check box).
+ */
+@include "uiInt.goh"
+@include <Objects/gBoolC.goh>
+
+@classdecl GenBooleanClass;
+
+@method GenBooleanClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_BOOLEAN, MasterOffset);
+}
+
+@method GenBooleanClass, MSG_GEN_BOOLEAN_GET_IDENTIFIER
+{
+    return pself->GBI_identifier;
+}
+
+@method GenBooleanClass, MSG_GEN_BOOLEAN_SET_IDENTIFIER
+{
+    if (pself->GBI_identifier != identifier) {
+	pself->GBI_identifier = identifier;
+	ObjMarkDirty(oself);
+    }
+}

@@ -23,7 +23,12 @@
 @include <Internal/SpecUI/olMenuItemGroupClass.goh>
 @include <Internal/SpecUI/olMenuWinClass.goh>
 @include <Internal/SpecUI/olMenuButtonClass.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gItemC.goh>
+@include <Objects/gBoolGC.goh>
+@include <Objects/gBoolC.goh>
 #include <string.h>
+#include <initfile.h>
 
 typedef struct {
     GeodeHandle		UBS_process;
@@ -47,6 +52,8 @@ typedef struct {
     optr		UBS_pin;
     sword		UBS_pinned[4];
     sword		UBS_long[4];
+    word		UBS_itemApplies, UBS_itemApply[3];
+    word		UBS_boolApplies, UBS_boolApply[3];
 } UBState;
 
 UBState ubState;
@@ -61,13 +68,15 @@ UBState ubState;
 
 @class UBProcessClass, GenProcessClass;
     @message void MSG_UB_STEP(word step);
+    @message (GEN_ITEM_GROUP_APPLY_MSG) MSG_UB_ITEMS_APPLIED;
+    @message (GEN_BOOLEAN_GROUP_APPLY_MSG) MSG_UB_BOOLEANS_APPLIED;
 @endc
 @classdecl UBProcessClass, neverSaved;
 
 @start UBAppObjects;
 @object GenApplicationClass UBApp = {
     GI_visMoniker = "Boot";
-    GI_comp = @UBPrimary;
+    GI_comp = @UBPrimary, @UBList, @UBBools;
     /* the displays on the windows list too, to come up with it */
     gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS) = @UBPrimary, @UBDoc1,
 						      @UBDoc2;
@@ -150,7 +159,61 @@ UBState ubState;
 @object GenDisplayClass UBDoc2 = {
     GI_visMoniker = "Doc 2";
 }
+/* not usable (not built): the generic item groups alone */
+@object GenItemGroupClass UBList = {
+    GI_states = @default & ~GS_USABLE;
+    GI_comp = @UBList1, @UBList2, @UBList3, @UBList5;
+    GIGI_behaviorType = GIGBT_NON_EXCLUSIVE;
+    GIGI_destination = process;
+    GIGI_applyMsg = MSG_UB_ITEMS_APPLIED;
+    ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED;
+}
+@object GenItemClass UBList1 = {
+    GII_identifier = 1;
+}
+@object GenItemClass UBList2 = {
+    GII_identifier = 2;
+}
+@object GenItemClass UBList3 = {
+    GI_states = @default & ~GS_ENABLED;
+    GII_identifier = 3;
+}
+@object GenItemClass UBList5 = {
+    GII_identifier = 5;
+}
+@object GenBooleanGroupClass UBBools = {
+    GI_states = @default & ~GS_USABLE;
+    GI_comp = @UBBool1, @UBBool2, @UBBool4;
+    GBGI_destination = process;
+    GBGI_applyMsg = MSG_UB_BOOLEANS_APPLIED;
+    ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED;
+}
+@object GenBooleanClass UBBool1 = {
+    GBI_identifier = 1;
+}
+@object GenBooleanClass UBBool2 = {
+    GBI_identifier = 2;
+}
+@object GenBooleanClass UBBool4 = {
+    GBI_identifier = 4;
+}
 @end UBAppObjects;
+
+@method UBProcessClass, MSG_UB_ITEMS_APPLIED
+{
+    ubState.UBS_itemApplies++;
+    ubState.UBS_itemApply[0] = selection;
+    ubState.UBS_itemApply[1] = numSelections;
+    ubState.UBS_itemApply[2] = stateFlags;
+}
+
+@method UBProcessClass, MSG_UB_BOOLEANS_APPLIED
+{
+    ubState.UBS_boolApplies++;
+    ubState.UBS_boolApply[0] = selectedBooleans;
+    ubState.UBS_boolApply[1] = indeterminateBooleans;
+    ubState.UBS_boolApply[2] = modifiedBooleans;
+}
 
 @method UBProcessClass, MSG_META_ATTACH_PROCESS
 {
@@ -868,6 +931,101 @@ static Rectangle ScreenBounds(WindowHandle w)
 	UBCHECK(!@call UBLong::MSG_VIS_QUERY_WINDOW());
 	UBCHECK(!ScrollerWin(@UBLong, FALSE, &up) && up);
 	UBCHECK(!ScrollerWin(@UBLong, TRUE, &down) && down);
+	break;
+    }
+    case 22: {
+	/* the generic item group: one, several, items added and taken,
+	 * none; the scan over the usable and enabled items (UBList3 is
+	 * disabled); a drag from 1 to 3 selects 1 and 2 (3 is disabled),
+	 * clears 5; applied */
+	word l[4] = { 1, 5, 2, 0 };
+	GenScanItemsReturn r;
+	GenOptionsParams op;
+	word v = 0;
+
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_SELECTION() ==
+		GIGS_NONE);
+	UBCHECK(!@call UBList::MSG_GEN_ITEM_GROUP_GET_NUM_SELECTIONS());
+	@call UBList::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(2, FALSE);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 2);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(2));
+	UBCHECK(!@call UBList::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(1));
+	@call UBList::MSG_GEN_ITEM_GROUP_SET_MULTIPLE_SELECTIONS(l, 3);
+	memset(l, 0, sizeof(l));
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_MULTIPLE_SELECTIONS(l,
+								4) == 3);
+	UBCHECK(l[0] == 1 && l[1] == 5 && l[2] == 2);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 1);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_MULTIPLE_SELECTIONS(l,
+								2) == 3);
+	@call UBList::MSG_GEN_ITEM_GROUP_SET_ITEM_STATE(5, FALSE);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_NUM_SELECTIONS() == 2);
+	UBCHECK(!@call UBList::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(5));
+	@call UBList::MSG_GEN_ITEM_GROUP_SET_ITEM_STATE(3, TRUE);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_NUM_SELECTIONS() == 3);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(3));
+	@call UBList::MSG_GEN_ITEM_GROUP_SET_NONE_SELECTED(TRUE);
+	UBCHECK(!@call UBList::MSG_GEN_ITEM_GROUP_GET_NUM_SELECTIONS());
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_IS_INDETERMINATE());
+	@call UBList::MSG_GEN_ITEM_GROUP_SET_INDETERMINATE_STATE(FALSE);
+	UBCHECK(!@call UBList::MSG_GEN_ITEM_GROUP_IS_INDETERMINATE());
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(5) ==
+		@UBList5);
+	UBCHECK(!@call UBList::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(4));
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_UNIQUE_IDENTIFIER() == 0);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS(&r,
+		    GSIF_FROM_START | GSIF_FORWARD, 0, 0) && r.GSIR_item == 1);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS(&r,
+		    GSIF_FORWARD, 2, 1) && r.GSIR_item == 5);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS(&r, 0, 5, 1) &&
+		r.GSIR_item == 2);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS(&r,
+		    GSIF_FORWARD, 5, 1) && r.GSIR_item == 5);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS(&r,
+		    GSIF_FORWARD | GSIF_WRAP_AROUND, 5, 1) && r.GSIR_item == 1);
+	@call UBList::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(5, FALSE);
+	@call UBList::MSG_GEN_ITEM_GROUP_UPDATE_EXTENDED_SELECTION(
+		ESF_INITIAL_SELECTION | ESF_SELECT | ESF_CLEAR_UNSELECTED_ITEMS,
+		MSG_GEN_ITEM_GROUP_SET_ITEM_STATE, 1, 3, 1);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_GET_NUM_SELECTIONS() == 2);
+	UBCHECK(@call UBList::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(1) &&
+		@call UBList::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(2));
+	UBCHECK(!@call UBList::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(5));
+	@call UBList::MSG_GEN_APPLY();
+	/* the options: the (first) selection saved */
+	memcpy(op.GOP_category, "ubtest", 7);
+	memcpy(op.GOP_key, "list", 5);
+	@call UBList::MSG_GEN_SAVE_OPTIONS(&op);
+	UBCHECK(!InitFileReadInteger("ubtest", "list", &v) && v == 1);
+
+	/* the generic boolean group */
+	@call UBBools::MSG_GEN_BOOLEAN_GROUP_SET_GROUP_STATE(5, 0);
+	UBCHECK(@call UBBools::MSG_GEN_BOOLEAN_GROUP_GET_SELECTED_BOOLEANS()
+		== 5);
+	UBCHECK(@call UBBools::MSG_GEN_BOOLEAN_GROUP_IS_BOOLEAN_SELECTED(4));
+	UBCHECK(!@call UBBools::MSG_GEN_BOOLEAN_GROUP_IS_BOOLEAN_SELECTED(2));
+	@call UBBools::MSG_GEN_BOOLEAN_GROUP_SET_BOOLEAN_STATE(2, TRUE);
+	@call UBBools::MSG_GEN_BOOLEAN_GROUP_SET_BOOLEAN_INDETERMINATE_STATE(
+								4, TRUE);
+	UBCHECK(@call UBBools::MSG_GEN_BOOLEAN_GROUP_GET_SELECTED_BOOLEANS()
+		== 7);
+	UBCHECK(@call
+		UBBools::MSG_GEN_BOOLEAN_GROUP_GET_INDETERMINATE_BOOLEANS() == 4);
+	UBCHECK(@call UBBools::MSG_GEN_BOOLEAN_GROUP_GET_BOOLEAN_OPTR(4) ==
+		@UBBool4);
+	UBCHECK(@call UBBools::MSG_GEN_BOOLEAN_GROUP_P32_SCAN_BOOLEANS(&r,
+		    GSIF_FROM_START | GSIF_FORWARD, 0, 0) && r.GSIR_item == 1);
+	@call UBBools::MSG_GEN_APPLY();
+	break;
+    }
+    case 23: {
+	/* the applies, queued */
+	UBCHECK(ubState.UBS_itemApplies == 1 &&
+		ubState.UBS_itemApply[0] == 1 &&
+		ubState.UBS_itemApply[1] == 2 && !ubState.UBS_itemApply[2]);
+	UBCHECK(ubState.UBS_boolApplies == 1 &&
+		ubState.UBS_boolApply[0] == 7 &&
+		ubState.UBS_boolApply[1] == 4 && !ubState.UBS_boolApply[2]);
 	break;
     }
     }

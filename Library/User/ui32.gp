@@ -34,6 +34,10 @@ export GenInteractionClass
 export GenDisplayClass
 export GenDisplayGroupClass
 export GenPrimaryClass
+export GenBooleanGroupClass
+export GenItemGroupClass
+export GenItemClass
+export GenBooleanClass
 export GenProcessClass
 export UserClass
 

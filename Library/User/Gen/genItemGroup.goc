@@ -1,0 +1,868 @@
+/*
+ * genItemGroup.goc -- GenItemGroupClass (after genItemGroup.asm): a
+ * group of GenItems of which none, one or several are selected
+ * (GIGI_behaviorType: exclusive, exclusive or none, extended
+ * selection, non exclusive).  One selection is GIGI_selection itself;
+ * several are a chunk of identifiers that GIGI_selection names.  The
+ * group sends its apply message (GIGI_applyMsg to GIGI_destination)
+ * on MSG_GEN_APPLY when modified, its status message
+ * (ATTR_GEN_ITEM_GROUP_STATUS_MSG) when asked.  What it looks like is
+ * the specific UI's (SPIR_BUILD_ITEM_GROUP), told of each change with
+ * the items whose state changed.
+ *
+ * Port32 (Port32/ABI.md section 13x): the specific UI is told with
+ * MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT, the scan answers through
+ * MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS (Internal/specC.goh).  Not yet:
+ * MSG_GEN_BRANCH_REPLACE_PARAMS (BRPT_OUTPUT_OPTR); for
+ * MSG_GEN_ITEM_GROUP_SET_MONIKER_SELECTION only the text form.
+ */
+@include "uiInt.goh"
+@include <Internal/specC.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gItemC.goh>
+#include <initfile.h>
+#include <string.h>
+
+@classdecl GenItemGroupClass;
+
+#define GIG(o)	((GenItemGroupInstance *) ObjDerefGen(o))
+
+@method GenItemGroupClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_ITEM_GROUP,
+				    MasterOffset);
+}
+
+/* GenItemGroupRelocOrUnReloc: an old object with one selection and no
+ * count gets its count */
+@method GenItemGroupClass, _reloc
+{
+    (void) vmRelocType;
+    if (message != MSG_META_UNRELOCATE && !pself->GIGI_numSelections &&
+	pself->GIGI_selection != GIGS_NONE)
+	pself->GIGI_numSelections++;
+    return @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The selection
+ * ------------------------------------------------------------------- */
+
+/* the selected identifiers (the instance's word, or the chunk) */
+static word *Selections(optr o)
+{
+    GenItemGroupInstance *p = GIG(o);
+
+    if (p->GIGI_numSelections <= 1)
+	return &p->GIGI_selection;
+    return LMemDeref(ConstructOptr(OptrToHandle(o),
+				   (ChunkHandle) p->GIGI_selection));
+}
+
+/* the items to tell the specific UI of: a block for n identifiers, the
+ * current selections in it (UpdateList.count); none for n = 0 */
+typedef struct {
+    MemHandle	mh;
+    word	*items;
+    word	count;
+} UpdateList;
+
+static void UpdateListAlloc(UpdateList *u, word n)
+{
+    u->count = 0;
+    u->items = NULL;
+    u->mh = n ? MemAlloc(n * sizeof(word), HF_DYNAMIC, HAF_LOCK) : 0;
+    if (u->mh)
+	u->items = MemDeref(u->mh);
+}
+
+/* CopyCurSelectionsToUpdateList */
+static void UpdateListAddSelections(UpdateList *u, optr o)
+{
+    word n = GIG(o)->GIGI_numSelections;
+
+    if (!u->mh)
+	return;
+    memcpy(u->items + u->count, Selections(o), n * sizeof(word));
+    u->count += n;
+}
+
+static void UpdateListFree(UpdateList *u)
+{
+    if (u->mh)
+	MemFree(u->mh);
+}
+
+/* UpdateSpecificObject: the specific UI told of the items */
+static void UpdateSpecific(optr o, word n, const word *items)
+{
+    if (n && GenCheckIfSpecGrown(o))
+	@callsuper o::GenClass::MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT(0, n,
+								     items);
+}
+
+/* GenSetBitInByte: the bits of mask set or cleared, the object dirty
+ * if they changed; TRUE if changed */
+static Boolean SetBits(optr o, byte *field, byte mask, Boolean set)
+{
+    byte v = set ? (*field | mask) : (*field & ~mask);
+
+    if (v == *field)
+	return FALSE;
+    *field = v;
+    ObjMarkDirty(o);
+    return TRUE;
+}
+
+/*
+ * SetSelection: the selection (an identifier, or the chunk for several)
+ * and its count stored, indeterminate as passed, not modified; TRUE if
+ * anything changed (or changed was passed)
+ */
+static Boolean SetSelection(optr o, word num, word sel,
+			    Boolean indeterminate, Boolean changed)
+{
+    GenItemGroupInstance *p = GIG(o);
+
+    if (SetBits(o, &p->GIGI_stateFlags, GIGSF_INDETERMINATE,
+		indeterminate))
+	changed = TRUE;
+    if (SetBits(o, &p->GIGI_stateFlags, GIGSF_MODIFIED, FALSE))
+	changed = TRUE;
+    if (p->GIGI_selection != sel || p->GIGI_numSelections != num) {
+	p->GIGI_selection = sel;
+	p->GIGI_numSelections = num;
+	ObjMarkDirty(o);
+	changed = TRUE;
+    }
+    return changed;
+}
+
+/* SetSingleSelection: one item (num 1) or none (num 0); a chunk of
+ * several freed */
+static Boolean SetSingleSelection(optr o, word num, word sel,
+				  Boolean indeterminate)
+{
+    GenItemGroupInstance *p = GIG(o);
+
+    if (p->GIGI_numSelections > 1)
+	ObjFreeChunk(ConstructOptr(OptrToHandle(o),
+				   (ChunkHandle) p->GIGI_selection));
+    return SetSelection(o, num, sel, indeterminate, FALSE);
+}
+
+/* SetMultiSelection: n items; two or more in a chunk (the
+ * indeterminate state kept) */
+static Boolean SetMultiSelection(optr o, const word *list, word n)
+{
+    GenItemGroupInstance *p = GIG(o);
+    MemHandle mh = OptrToHandle(o);
+    Boolean indeterminate, changed = FALSE;
+    ChunkHandle ch;
+    word *d, i;
+
+    if (n <= 1)
+	return SetSingleSelection(o, n, n ? list[0] : GIGS_NONE, FALSE);
+    indeterminate = (p->GIGI_stateFlags & GIGSF_INDETERMINATE) != 0;
+    ch = (ChunkHandle) p->GIGI_selection;
+    if (n != p->GIGI_numSelections) {
+	if (p->GIGI_numSelections > 1)
+	    LMemReAlloc(ConstructOptr(mh, ch), n * sizeof(word));
+	else
+	    ch = LMemAlloc(mh, n * sizeof(word));
+	changed = TRUE;
+    }
+    d = LMemDeref(ConstructOptr(mh, ch));
+    for (i = 0; i < n; i++) {
+	if (d[i] != list[i])
+	    changed = TRUE;
+	d[i] = list[i];
+    }
+    if (changed)
+	ObjMarkDirty(ConstructOptr(mh, ch));
+    return SetSelection(o, n, (word) ch, indeterminate, changed);
+}
+
+/*
+ * The set messages: the items selected before and after go to the
+ * specific UI (if anything changed)
+ */
+static void SetAndUpdate(optr o, word newCount, const word *list,
+			 word single, Boolean indeterminate)
+{
+    UpdateList u;
+    Boolean changed;
+
+    UpdateListAlloc(&u, GIG(o)->GIGI_numSelections + newCount);
+    UpdateListAddSelections(&u, o);
+    if (list)
+	changed = SetMultiSelection(o, list, newCount);
+    else
+	changed = SetSingleSelection(o, newCount, single, indeterminate);
+    if (changed) {
+	UpdateListAddSelections(&u, o);
+	UpdateSpecific(o, u.count, u.items);
+    }
+    UpdateListFree(&u);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_NONE_SELECTED
+{
+    SetAndUpdate(oself, 0, NULL, GIGS_NONE, indeterminate);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION
+{
+    SetAndUpdate(oself, 1, NULL, identifier, indeterminate);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_MULTIPLE_SELECTIONS
+{
+    SetAndUpdate(oself, numSelections, selectionList, 0, FALSE);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_SELECTION
+{
+    return *Selections(oself);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_NUM_SELECTIONS
+{
+    return pself->GIGI_numSelections;
+}
+
+/* the selections copied if they fit; their number */
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_MULTIPLE_SELECTIONS
+{
+    word n = pself->GIGI_numSelections;
+
+    if (n && maxSelections >= n)
+	memcpy(selectionList, Selections(oself), n * sizeof(word));
+    return n;
+}
+
+/* (the identifiers of all children, AddChildIdentifier) */
+typedef struct {
+    word	*items;
+    word	count;
+} ChildIds;
+
+static Boolean AddChildId(optr parent, optr child, void *data)
+{
+    ChildIds *c = data;
+
+    (void) parent;
+    c->items[c->count++] = ((GenItemInstance *)
+			    ObjDerefGen(child))->GII_identifier;
+    return FALSE;
+}
+
+/* UpdateAllChildren: the specific UI told of every item */
+static void UpdateAllChildren(optr o)
+{
+    UpdateList u;
+    ChildIds c;
+
+    UpdateListAlloc(&u, GenCountChildren(o));
+    if (!u.mh)
+	return;
+    c.items = u.items;
+    c.count = 0;
+    GenCallChildren(o, AddChildId, &c);
+    UpdateSpecific(o, c.count, c.items);
+    UpdateListFree(&u);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_INDETERMINATE_STATE
+{
+    if (SetBits(oself, &pself->GIGI_stateFlags, GIGSF_INDETERMINATE,
+		indeterminateState))
+	UpdateAllChildren(oself);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_IS_INDETERMINATE
+{
+    return (pself->GIGI_stateFlags & GIGSF_INDETERMINATE) != 0;
+}
+
+/* modified: the dialog's apply trigger enabled */
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_MODIFIED_STATE
+{
+    if (SetBits(oself, &pself->GIGI_stateFlags, GIGSF_MODIFIED,
+		modifiedState) && modifiedState)
+	@call oself::MSG_GEN_MAKE_APPLYABLE();
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_IS_MODIFIED
+{
+    return (pself->GIGI_stateFlags & GIGSF_MODIFIED) != 0;
+}
+
+/*
+ * GenItemSendMsg: msg (if any) to the destination with the (first)
+ * selection, the count and the state flags; the generic attributes'
+ * work around it for an apply
+ */
+static void SendMsg(optr o, Message msg, GenItemGroupStateFlags flags,
+		    Boolean apply)
+{
+    GenItemGroupInstance *p;
+    MemHandle mh = OptrToHandle(o);
+    ChunkHandle ch = OptrToChunk(o);
+    struct { word sel; word num; GenItemGroupStateFlags flags; } a;
+    optr dest;
+    EventHandle ev;
+
+    if (!msg)
+	return;
+    p = GIG(o);
+    dest = p->GIGI_destination;
+    a.num = p->GIGI_numSelections;
+    a.sel = *Selections(o);
+    a.flags = flags;
+    if (apply)
+	GenProcessGenAttrsBeforeAction(mh, ch);
+    CObjMessageP(MF_RECORD, 0, msg, &a, sizeof(a), &ev, sizeof(ev));
+    @call o::MSG_GEN_OUTPUT_ACTION(ev, dest);
+    if (apply)
+	GenProcessGenAttrsAfterAction(mh, ch);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SEND_STATUS_MSG
+{
+    Message *m = ObjVarFindData(oself, ATTR_GEN_ITEM_GROUP_STATUS_MSG);
+
+    if (m)
+	SendMsg(oself, *m, (pself->GIGI_stateFlags & GIGSF_INDETERMINATE) |
+		(modifiedState ? GIGSF_MODIFIED : 0), FALSE);
+}
+
+/* GenItemGroupApply: the apply message if modified (or always with
+ * ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED); then not
+ * modified */
+@method GenItemGroupClass, MSG_GEN_APPLY
+{
+    if (!(pself->GIGI_stateFlags & GIGSF_MODIFIED) &&
+	!ObjVarFindData(oself,
+			ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED))
+	return;
+    SendMsg(oself, pself->GIGI_applyMsg, pself->GIGI_stateFlags, TRUE);
+    GIG(oself)->GIGI_stateFlags &= ~GIGSF_MODIFIED;
+}
+
+/* FindChildIdentifier: the child with the identifier (GenItem and
+ * GenBoolean keep it in the same place) */
+typedef struct {
+    word	id;
+    optr	found;
+} FindId;
+
+static Boolean FindChildId(optr parent, optr child, void *data)
+{
+    FindId *f = data;
+
+    (void) parent;
+    if (((GenItemInstance *) ObjDerefGen(child))->GII_identifier != f->id)
+	return FALSE;
+    f->found = child;
+    return TRUE;
+}
+
+optr GenItemGroupFindItem(optr o, word identifier)
+{
+    FindId f;
+
+    f.id = identifier;
+    f.found = 0;
+    GenCallChildren(o, FindChildId, &f);
+    return f.found;
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR
+{
+    return GenItemGroupFindItem(oself, identifier);
+}
+
+/* the position of the identifier in the list, or -1 */
+static int ItemPosition(const word *list, word n, word identifier)
+{
+    word i;
+
+    for (i = 0; i < n; i++)
+	if (list[i] == identifier)
+	    return i;
+    return -1;
+}
+
+/* GenItemGroupSetItemState: the item added to or taken from the
+ * selections */
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_ITEM_STATE
+{
+    word n = pself->GIGI_numSelections;
+    MemHandle mh = MemAlloc((n + 1) * sizeof(word), HF_DYNAMIC, HAF_LOCK);
+    word *list;
+    int pos;
+
+    if (!mh)
+	return;
+    list = MemDeref(mh);
+    n = @call oself::MSG_GEN_ITEM_GROUP_GET_MULTIPLE_SELECTIONS(list, n);
+    pos = ItemPosition(list, n, identifier);
+    if (state && pos < 0)
+	list[n++] = identifier;
+    else if (!state && pos >= 0) {
+	memmove(list + pos, list + pos + 1, (n - pos - 1) * sizeof(word));
+	n--;
+    } else {
+	MemFree(mh);
+	return;
+    }
+    @call oself::MSG_GEN_ITEM_GROUP_SET_MULTIPLE_SELECTIONS(list, n);
+    MemFree(mh);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED
+{
+    return ItemPosition(Selections(oself), pself->GIGI_numSelections,
+			identifier) >= 0;
+}
+
+/* to the specific UI, once built */
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE
+{
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper oself::GenClass::MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE(
+								identifier);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_FOCUS_ITEM
+{
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper oself::GenClass::MSG_GEN_ITEM_GROUP_SET_FOCUS_ITEM(
+								identifier);
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_FOCUS_ITEM
+{
+    if (!VisCheckIfSpecBuilt(oself))
+	return GIGS_NONE;
+    return @callsuper oself::GenClass::MSG_GEN_ITEM_GROUP_GET_FOCUS_ITEM();
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_DESTINATION
+{
+    return pself->GIGI_destination;
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_DESTINATION
+{
+    if (pself->GIGI_destination != dest) {
+	pself->GIGI_destination = dest;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_APPLY_MSG
+{
+    return pself->GIGI_applyMsg;
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_APPLY_MSG
+{
+    if (pself->GIGI_applyMsg != applyMsg) {
+	pself->GIGI_applyMsg = applyMsg;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_BEHAVIOR_TYPE
+{
+    return pself->GIGI_behaviorType;
+}
+
+/* (the group must not be usable) */
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_BEHAVIOR_TYPE
+{
+    if (pself->GIGI_behaviorType != behaviorType) {
+	pself->GIGI_behaviorType = behaviorType;
+	ObjMarkDirty(oself);
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * The scan (keyboard navigation of the specific UI)
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    GenScanItemsFlags	flags;
+    word		initial;
+    word		pos;		/* position (then target position) */
+    word		count;		/* children seen */
+    word		first, last;	/* usable and enabled items */
+    word		item;		/* the item at the position */
+} ScanData;
+
+static byte UsableEnabled(optr child, word *id)
+{
+    GenItemInstance *g = (GenItemInstance *) ObjDerefGen(child);
+
+    *id = g->GII_identifier;
+    return g->GI_states & (GS_USABLE | GS_ENABLED);
+}
+
+/* GetChildUsablePosition: the initial item's position among the usable
+ * children, the first and last usable and enabled ones */
+static Boolean ChildUsablePosition(optr parent, optr child, void *data)
+{
+    ScanData *s = data;
+    word id;
+    byte st = UsableEnabled(child, &id);
+
+    (void) parent;
+    if (!(s->flags & GSIF_FROM_START) && id == s->initial) {
+	s->flags |= GSIF_INITIAL_ITEM_FOUND;
+	if (!(st & GS_USABLE) && !(s->flags & GSIF_FORWARD))
+	    s->pos++;
+    }
+    if (st & GS_USABLE) {
+	if (st & GS_ENABLED) {
+	    if (!(s->flags & GSIF_USABLE_AND_ENABLED_ITEM_FOUND)) {
+		s->first = id;
+		s->flags |= GSIF_USABLE_AND_ENABLED_ITEM_FOUND;
+	    }
+	    s->last = id;
+	}
+	if (!(s->flags & GSIF_INITIAL_ITEM_FOUND))
+	    s->pos++;
+    }
+    s->count++;
+    return FALSE;
+}
+
+/* GetItemAtPosition: the usable and enabled item at the position (a
+ * disabled one there: the next one forward, the last before it
+ * backward) */
+static Boolean ItemAtPosition(optr parent, optr child, void *data)
+{
+    ScanData *s = data;
+    word id;
+    byte st = UsableEnabled(child, &id);
+
+    (void) parent;
+    if (st == (GS_USABLE | GS_ENABLED)) {
+	s->item = id;
+	s->flags |= GSIF_USABLE_AND_ENABLED_ITEM_FOUND;
+    }
+    if (!(st & GS_USABLE))
+	return FALSE;
+    if (s->count == s->pos) {
+	if ((st & GS_ENABLED) || !(s->flags & GSIF_FORWARD))
+	    return TRUE;
+	return FALSE;		/* the next usable one, same position */
+    }
+    s->count++;
+    return FALSE;
+}
+
+/*
+ * GenItemGroupScanItems: the item scanAmount usable items from the
+ * initial one (or the start), forward or backward; at the end the
+ * first or last one (wrapping: the other end).  TRUE if a usable and
+ * enabled item was found.  A dynamic list gets the position instead
+ * when it is not among the children (GSIF_DYNAMIC_LIST).
+ */
+Boolean GenItemGroupScan(optr o, GenScanItemsReturn *r,
+			 GenScanItemsFlags flags, word initial,
+			 sword amount)
+{
+    ScanData s;
+    sword pos;
+    Boolean found;
+
+    memset(&s, 0, sizeof(s));
+    s.flags = flags;
+    s.initial = initial;
+    s.item = initial;
+    GenCallChildren(o, ChildUsablePosition, &s);
+    flags = s.flags;
+    if ((flags & GSIF_USABLE_AND_ENABLED_ITEM_FOUND) &&
+	(flags & GSIF_INITIAL_ITEM_FOUND)) {
+	pos = (sword) s.pos + ((flags & GSIF_FORWARD) ? amount : -amount);
+	if (pos < 0 || (word) pos >= s.count)
+	    goto notFound;
+	s.pos = pos;
+	s.count = 0;
+	s.flags = flags & ~GSIF_USABLE_AND_ENABLED_ITEM_FOUND;
+	found = GenCallChildren(o, ItemAtPosition, &s);
+	flags = s.flags;
+	if (found) {
+	    if (flags & GSIF_USABLE_AND_ENABLED_ITEM_FOUND) {
+		r->GSIR_item = s.item;
+		r->GSIR_first = s.first;
+		r->GSIR_last = s.last;
+		return TRUE;
+	    }
+	    flags |= GSIF_USABLE_AND_ENABLED_ITEM_FOUND;
+	}
+    }
+    /* notFoundReturnFirstOrLast */
+    pos = (flags & GSIF_FORWARD) ? (sword) s.count : -1;
+notFound:
+    if (flags & GSIF_DYNAMIC_LIST) {
+	r->GSIR_item = pos;
+	r->GSIR_first = s.first;
+	r->GSIR_last = s.last;
+	return FALSE;
+    }
+    r->GSIR_item = (flags & GSIF_FORWARD) ? s.last : s.first;
+    if (flags & (GSIF_WRAP_AROUND | GSIF_FROM_START))
+	r->GSIR_item = (flags & GSIF_FORWARD) ? s.first : s.last;
+    r->GSIR_first = s.first;
+    r->GSIR_last = s.last;
+    return (flags & GSIF_USABLE_AND_ENABLED_ITEM_FOUND) != 0;
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS
+{
+    return GenItemGroupScan(oself, retValue, flags, initialItem,
+			    scanAmount);
+}
+
+/* GetUniqueIdentifier: none of the children has it */
+typedef struct {
+    word	id;
+    Boolean	used;
+} UniqueId;
+
+static Boolean IdUsed(optr parent, optr child, void *data)
+{
+    UniqueId *u = data;
+
+    (void) parent;
+    if (((GenItemInstance *) ObjDerefGen(child))->GII_identifier == u->id) {
+	u->used = TRUE;
+	return TRUE;
+    }
+    return FALSE;
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_GET_UNIQUE_IDENTIFIER
+{
+    UniqueId u;
+
+    for (u.id = 0;; u.id++) {
+	u.used = FALSE;
+	GenCallChildren(oself, IdUsed, &u);
+	if (!u.used)
+	    return u.id;
+    }
+}
+
+/* GenItemGroupSetMonikerSelection: the item whose moniker the text is
+ * selected, modified, the status sent */
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_MONIKER_SELECTION
+{
+    optr item = @call oself::MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER(text,
+						GFTMF_SKIP_THIS_NODE);
+    word id;
+
+    if (!item || item == oself)
+	return;
+    id = @call item::MSG_GEN_ITEM_GET_IDENTIFIER();
+    @call oself::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(id, FALSE);
+    @call oself::MSG_GEN_ITEM_GROUP_SET_MODIFIED_STATE(TRUE);
+    @call oself::MSG_GEN_ITEM_GROUP_SEND_STATUS_MSG(TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * The options (the .ini file)
+ * ------------------------------------------------------------------- */
+
+/* GenOptGetInteger: TRUE if the key is there (a boolean for
+ * ATTR_..._INIT_FILE_BOOLEAN) */
+Boolean GenOptGetInteger(const GenOptionsParams *params, Boolean boolean,
+			 word *value)
+{
+    Boolean b;
+
+    if (boolean) {
+	if (InitFileReadBoolean(params->GOP_category, params->GOP_key, &b))
+	    return FALSE;
+	*value = b ? (word) TRUE : 0;
+	return TRUE;
+    }
+    return !InitFileReadInteger(params->GOP_category, params->GOP_key,
+				value);
+}
+
+void GenOptWriteInteger(const GenOptionsParams *params, Boolean boolean,
+			word value)
+{
+    if (boolean)
+	InitFileWriteBoolean(params->GOP_category, params->GOP_key,
+			     value != 0);
+    else
+	InitFileWriteInteger(params->GOP_category, params->GOP_key, value);
+}
+
+/* GenItemGroupLoadOptions: a different selection from the file
+ * selected, modified, its status sent, applied */
+@method GenItemGroupClass, MSG_GEN_LOAD_OPTIONS
+{
+    word v, cur = pself->GIGI_selection;
+
+    if (!GenOptGetInteger(params, ObjVarFindData(oself,
+			  ATTR_GEN_ITEM_GROUP_INIT_FILE_BOOLEAN) != NULL, &v) ||
+	v == cur)
+	return;
+    @call oself::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(v, FALSE);
+    @call oself::MSG_GEN_ITEM_GROUP_SET_MODIFIED_STATE(TRUE);
+    @call oself::MSG_GEN_ITEM_GROUP_SEND_STATUS_MSG(TRUE);
+    @call oself::MSG_GEN_APPLY();
+}
+
+@method GenItemGroupClass, MSG_GEN_SAVE_OPTIONS
+{
+    word sel = @call oself::MSG_GEN_ITEM_GROUP_GET_SELECTION();
+
+    GenOptWriteInteger(params, ObjVarFindData(oself,
+			ATTR_GEN_ITEM_GROUP_INIT_FILE_BOOLEAN) != NULL, sel);
+}
+
+/* ---------------------------------------------------------------------
+ * The extended selection (a drag over a list)
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    word	anchor, extent, prevExtent;	/* identifiers, then positions */
+    byte	flags;				/* ExtSelFlags */
+    byte	passFlags;
+    Message	setSelMsg;
+    word	pos;
+    byte	converted;
+    word	lo, hi;				/* the changing positions */
+    optr	group;
+} ExtSel;
+
+#define CPF_ANCHOR	0x80
+#define CPF_EXTENT	0x40
+#define CPF_PREV	0x20
+
+/* ConvertToPositions: the identifiers become the children's positions */
+static Boolean ConvertToPositions(optr parent, optr child, void *data)
+{
+    ExtSel *e = data;
+    word id = ((GenItemInstance *) ObjDerefGen(child))->GII_identifier;
+
+    (void) parent;
+    if (!(e->converted & CPF_ANCHOR) && id == e->anchor) {
+	e->anchor = e->pos;
+	e->converted |= CPF_ANCHOR;
+    }
+    if (!(e->converted & CPF_EXTENT) && id == e->extent) {
+	e->extent = e->pos;
+	e->converted |= CPF_EXTENT;
+    }
+    if (!(e->converted & CPF_PREV) && id == e->prevExtent) {
+	e->prevExtent = e->pos;
+	e->converted |= CPF_PREV;
+    }
+    e->pos++;
+    return FALSE;
+}
+
+/* SetupChangeItemArgs: the positions whose state changes; FALSE if
+ * none */
+static Boolean SetupChange(ExtSel *e)
+{
+    word lo = e->extent, hi = e->prevExtent, t;
+
+    if (e->flags & ESF_INITIAL_SELECTION) {
+	hi = e->anchor;
+	if (lo > hi) {
+	    t = lo; lo = hi; hi = t;
+	}
+    } else {
+	if (lo == hi)
+	    return FALSE;
+	if ((sword) lo > (sword) hi) {
+	    t = lo; lo = hi; hi = t;
+	}
+	if (lo < e->anchor) {
+	    if (hi <= e->anchor)
+		hi--;
+	} else if (hi >= e->anchor)
+	    lo++;
+    }
+    e->lo = lo;
+    e->hi = hi;
+    return TRUE;
+}
+
+/* ChangeItem: the item at pos selected or deselected by setSelMsg */
+static void ChangeItem(ExtSel *e, word id, Boolean changing, word pos)
+{
+    optr item = GenItemGroupFindItem(e->group, id);
+    word lo, hi;
+    Boolean select;
+    struct { word id; word flags; } a;
+
+    if (item && !GenCheckIfFullyEnabled(item, FALSE))
+	return;
+    if (!(e->flags & ESF_INITIAL_SELECTION) && pos == e->anchor)
+	return;
+    if (e->flags & ESF_XOR_INDIVIDUAL_ITEMS)
+	select = !@call e->group::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(id);
+    else {
+	lo = e->anchor;
+	hi = e->extent;
+	if (lo > hi) {
+	    lo = e->extent;
+	    hi = e->anchor;
+	}
+	if (pos >= lo && pos <= hi)
+	    select = (e->flags & ESF_SELECT) != 0;
+	else {
+	    if (!(e->flags & ESF_CLEAR_UNSELECTED_ITEMS) && !changing)
+		return;
+	    select = FALSE;
+	}
+    }
+    a.id = id;
+    a.flags = e->passFlags | (select ? 0xff00 : 0);
+    CObjMessageP(MF_CALL, e->group, e->setSelMsg, &a, sizeof(a), NULL, 0);
+}
+
+/* GenItemGroupChangeItem: each usable child */
+static Boolean ChangeChild(optr parent, optr child, void *data)
+{
+    ExtSel *e = data;
+    GenItemInstance *g = (GenItemInstance *) ObjDerefGen(child);
+    word pos = e->pos++;
+
+    (void) parent;
+    if (g->GI_states & GS_USABLE)
+	ChangeItem(e, g->GII_identifier,
+		   !(e->flags & ESF_INITIAL_SELECTION) &&
+		   pos >= e->lo && pos <= e->hi, pos);
+    return FALSE;
+}
+
+@method GenItemGroupClass, MSG_GEN_ITEM_GROUP_UPDATE_EXTENDED_SELECTION
+{
+    ExtSel e;
+
+    memset(&e, 0, sizeof(e));
+    e.anchor = anchorItem;
+    e.extent = extentItem;
+    e.prevExtent = prevExtentItem;
+    e.flags = (byte) flags;
+    e.passFlags = (byte) (flags >> 8);
+    e.setSelMsg = setSelMsg;
+    e.group = oself;
+    GenCallChildren(oself, ConvertToPositions, &e);
+    if (!SetupChange(&e))
+	return;
+    e.pos = 0;
+    GenCallChildren(oself, ChangeChild, &e);
+}

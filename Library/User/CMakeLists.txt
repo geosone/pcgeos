@@ -28,6 +28,10 @@ geos_geode(ui GP ui32.gp
                ${ui}/Gen/genDisplay.goc
                ${ui}/Gen/genDisplayControl.goc
                ${ui}/Gen/genPrimary.goc
+               ${ui}/Gen/genItemGroup.goc
+               ${ui}/Gen/genItem.goc
+               ${ui}/Gen/genBooleanGroup.goc
+               ${ui}/Gen/genBoolean.goc
                ${ui}/Proc/procClass.goc
                ${ui}/User/userFlowUtils.goc
                ${ui}/User/userFlowMisc.goc

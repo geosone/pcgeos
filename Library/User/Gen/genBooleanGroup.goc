@@ -1,0 +1,266 @@
+/*
+ * genBooleanGroup.goc -- GenBooleanGroupClass (after
+ * genBooleanGroup.asm): a group of GenBooleans, each one a bit (its
+ * identifier) of the words of selected, indeterminate and modified
+ * booleans.  The group sends its apply message (GBGI_applyMsg to
+ * GBGI_destination) on MSG_GEN_APPLY when modified, its status message
+ * (ATTR_GEN_BOOLEAN_GROUP_STATUS_MSG) when asked.  What it looks like
+ * is the specific UI's (SPIR_BUILD_BOOLEAN_GROUP), told of each change
+ * with the changed booleans.
+ *
+ * Port32 (Port32/ABI.md section 13x): the specific UI is told with
+ * MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT, the scan answers through
+ * MSG_GEN_BOOLEAN_GROUP_P32_SCAN_BOOLEANS (Internal/specC.goh); the
+ * scan is the item group's.  Not yet: MSG_GEN_BRANCH_REPLACE_PARAMS
+ * (BRPT_OUTPUT_OPTR).
+ */
+@include "uiInt.goh"
+@include <Internal/specC.goh>
+@include <Objects/gBoolGC.goh>
+@include <Objects/gBoolC.goh>
+
+@classdecl GenBooleanGroupClass;
+
+#define GBG(o)	((GenBooleanGroupInstance *) ObjDerefGen(o))
+
+@method GenBooleanGroupClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_BOOLEAN_GROUP,
+				    MasterOffset);
+}
+
+/* GenSetWord: stored, the object dirty; TRUE if changed */
+static Boolean SetWord(optr o, word *field, word value)
+{
+    if (*field == value)
+	return FALSE;
+    *field = value;
+    ObjMarkDirty(o);
+    return TRUE;
+}
+
+/* UpdateBooleanObject: the specific UI told of the changed booleans */
+static void UpdateBooleans(optr o, word changed)
+{
+    if (GenCheckIfSpecGrown(o))
+	@callsuper o::GenClass::MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT(changed,
+								     0, NULL);
+}
+
+/* GenBooleanGroupSetGroupState: the changed booleans updated; none
+ * modified */
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_SET_GROUP_STATE
+{
+    word changed = (pself->GBGI_selectedBooleans ^ selectedBooleans) |
+		   (pself->GBGI_indeterminateBooleans ^ indeterminateBooleans);
+
+    SetWord(oself, &pself->GBGI_selectedBooleans, selectedBooleans);
+    SetWord(oself, &pself->GBGI_indeterminateBooleans,
+	    indeterminateBooleans);
+    if (changed)
+	UpdateBooleans(oself, changed);
+    pself = GBG(oself);
+    SetWord(oself, &pself->GBGI_modifiedBooleans, 0);
+}
+
+/* modified ones: the dialog's apply trigger enabled */
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_SET_GROUP_MODIFIED_STATE
+{
+    if (SetWord(oself, &pself->GBGI_modifiedBooleans,
+		(pself->GBGI_modifiedBooleans | setBooleans) &
+		~clearBooleans) && setBooleans)
+	@call oself::MSG_GEN_MAKE_APPLYABLE();
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_GET_SELECTED_BOOLEANS
+{
+    return pself->GBGI_selectedBooleans;
+}
+
+@method GenBooleanGroupClass,
+	MSG_GEN_BOOLEAN_GROUP_GET_INDETERMINATE_BOOLEANS
+{
+    return pself->GBGI_indeterminateBooleans;
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_GET_MODIFIED_BOOLEANS
+{
+    return pself->GBGI_modifiedBooleans;
+}
+
+/*
+ * GenBooleanSendMsg: msg (if any) to the destination with the selected
+ * and indeterminate booleans and the third word (changed or modified
+ * ones); the generic attributes' work before it for an apply, after it
+ * always (as the asm)
+ */
+static void SendMsg(optr o, Message msg, word third, Boolean apply)
+{
+    GenBooleanGroupInstance *p;
+    MemHandle mh = OptrToHandle(o);
+    ChunkHandle ch = OptrToChunk(o);
+    struct { word sel; word ind; word third; } a;
+    optr dest;
+    EventHandle ev;
+
+    if (!msg)
+	return;
+    p = GBG(o);
+    dest = p->GBGI_destination;
+    a.sel = p->GBGI_selectedBooleans;
+    a.ind = p->GBGI_indeterminateBooleans;
+    a.third = third;
+    if (apply)
+	GenProcessGenAttrsBeforeAction(mh, ch);
+    CObjMessageP(MF_RECORD, 0, msg, &a, sizeof(a), &ev, sizeof(ev));
+    @call o::MSG_GEN_OUTPUT_ACTION(ev, dest);
+    GenProcessGenAttrsAfterAction(mh, ch);
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_SEND_STATUS_MSG
+{
+    Message *m = ObjVarFindData(oself, ATTR_GEN_BOOLEAN_GROUP_STATUS_MSG);
+
+    if (m)
+	SendMsg(oself, *m, changedBooleans, FALSE);
+}
+
+/* GenBooleanGroupApply: the apply message if any are modified (or
+ * always with ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED);
+ * then none modified */
+@method GenBooleanGroupClass, MSG_GEN_APPLY
+{
+    if (!pself->GBGI_modifiedBooleans &&
+	!ObjVarFindData(oself,
+			ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED))
+	return;
+    SendMsg(oself, pself->GBGI_applyMsg, pself->GBGI_modifiedBooleans,
+	    TRUE);
+    GBG(oself)->GBGI_modifiedBooleans = 0;
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_GET_BOOLEAN_OPTR
+{
+    return GenItemGroupFindItem(oself, identifier);
+}
+
+/* SetBooleanState: the boolean's bit set or cleared; TRUE if changed */
+static Boolean SetBoolean(optr o, word *field, word identifier,
+			  Boolean state)
+{
+    return SetWord(o, field, state ? (*field | identifier) :
+		   (*field & ~identifier));
+}
+
+/* the boolean's selected or indeterminate state; it is not modified */
+static void SetState(optr o, word *field, word identifier, Boolean state)
+{
+    if (SetBoolean(o, field, identifier, state))
+	UpdateBooleans(o, identifier);
+    field = &GBG(o)->GBGI_modifiedBooleans;
+    SetWord(o, field, *field & ~identifier);
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_SET_BOOLEAN_STATE
+{
+    SetState(oself, &pself->GBGI_selectedBooleans, identifier, state);
+}
+
+@method GenBooleanGroupClass,
+	MSG_GEN_BOOLEAN_GROUP_SET_BOOLEAN_INDETERMINATE_STATE
+{
+    SetState(oself, &pself->GBGI_indeterminateBooleans, identifier,
+	     indeterminateState);
+}
+
+@method GenBooleanGroupClass,
+	MSG_GEN_BOOLEAN_GROUP_SET_BOOLEAN_MODIFIED_STATE
+{
+    if (SetBoolean(oself, &pself->GBGI_modifiedBooleans, identifier,
+		   modifiedState) && GBG(oself)->GBGI_modifiedBooleans)
+	@call oself::MSG_GEN_MAKE_APPLYABLE();
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_IS_BOOLEAN_SELECTED
+{
+    return (pself->GBGI_selectedBooleans & identifier) != 0;
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_IS_BOOLEAN_INDETERMINATE
+{
+    return (pself->GBGI_indeterminateBooleans & identifier) != 0;
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_IS_BOOLEAN_MODIFIED
+{
+    return (pself->GBGI_modifiedBooleans & identifier) != 0;
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_GET_DESTINATION
+{
+    return pself->GBGI_destination;
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_SET_DESTINATION
+{
+    if (pself->GBGI_destination != dest) {
+	pself->GBGI_destination = dest;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_GET_APPLY_MSG
+{
+    return pself->GBGI_applyMsg;
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_SET_APPLY_MSG
+{
+    if (pself->GBGI_applyMsg != applyMsg) {
+	pself->GBGI_applyMsg = applyMsg;
+	ObjMarkDirty(oself);
+    }
+}
+
+/* the specific UI's item group makes it visible */
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_MAKE_BOOLEAN_VISIBLE
+{
+    struct { word id; } a;
+
+    a.id = identifier;
+    if (GenCheckIfSpecGrown(oself))
+	CObjCallSuperP(&GenClass, oself, MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE,
+		       &a, sizeof(a), NULL, 0);
+}
+
+@method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_P32_SCAN_BOOLEANS
+{
+    return GenItemGroupScan(oself, retValue, flags, initialItem,
+			    scanAmount);
+}
+
+/* GenBooleanGroupLoadOptions: booleans that differ from the file's
+ * set, modified, their status sent, applied */
+@method GenBooleanGroupClass, MSG_GEN_LOAD_OPTIONS
+{
+    word v, changed;
+
+    if (!GenOptGetInteger(params, ObjVarFindData(oself,
+			  ATTR_GEN_BOOLEAN_GROUP_INIT_FILE_BOOLEAN) != NULL,
+			  &v))
+	return;
+    changed = v ^ pself->GBGI_selectedBooleans;
+    if (!changed)
+	return;
+    @call oself::MSG_GEN_BOOLEAN_GROUP_SET_GROUP_STATE(v, 0);
+    @call oself::MSG_GEN_BOOLEAN_GROUP_SET_GROUP_MODIFIED_STATE(changed, 0);
+    @call oself::MSG_GEN_BOOLEAN_GROUP_SEND_STATUS_MSG(changed);
+    @call oself::MSG_GEN_APPLY();
+}
+
+@method GenBooleanGroupClass, MSG_GEN_SAVE_OPTIONS
+{
+    GenOptWriteInteger(params, ObjVarFindData(oself,
+			ATTR_GEN_BOOLEAN_GROUP_INIT_FILE_BOOLEAN) != NULL,
+		       pself->GBGI_selectedBooleans);
+}
