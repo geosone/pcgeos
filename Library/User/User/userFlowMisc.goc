@@ -51,8 +51,9 @@ word FlowCheckKbdShortcut(KeyboardShortcut *shortcutTable,
     if (!dis || !dis->DIS_strategy) {
 	/* no keyboard driver (a test): the plain match by character set,
 	 * character and the modifiers held (Shift only for the control
-	 * set: a printable character took it already); KS_PHYSICAL
-	 * entries never match */
+	 * set: a printable character took it already); a KS_PHYSICAL
+	 * entry matches only a key of the control set (a function key,
+	 * one key whatever the layout) */
 	word shift = flags >> 8, want, i;
 
 	if ((character >> 8) == CS_UI_FUNCS)
@@ -67,7 +68,9 @@ word FlowCheckKbdShortcut(KeyboardShortcut *shortcutTable,
 	    want |= KS_SHIFT;
 	(void) state;
 	for (i = 0; i < numEntriesInTable; i++)
-	    if (shortcutTable[i] == want)
+	    if (shortcutTable[i] == want ||
+		((character >> 8) == CS_CONTROL &&
+		 shortcutTable[i] == (want | KS_PHYSICAL)))
 		return (word) (i * sizeof(KeyboardShortcut));
 	return (word) -1;
     }

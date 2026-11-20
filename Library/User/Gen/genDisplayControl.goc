@@ -1,0 +1,63 @@
+/*
+ * genDisplayControl.goc -- GenDisplayGroupClass (after
+ * genDisplayControl.asm): the group of an application's GenDisplays,
+ * full sized (each display maximized in it) or overlapping (the
+ * vardata ATTR_GEN_DISPLAY_GROUP_OVERLAPPING_STATE); the specific UI
+ * (SPIR_BUILD_DISPLAY_CONTROL) arranges them, once grown.
+ */
+@include "uiInt.goh"
+@include <Objects/gDispC.goh>
+@include <Objects/gDCtrlC.goh>
+
+@classdecl GenDisplayGroupClass;
+
+/* GenCallSpecIfGrown, if fully usable */
+static void CallSpecIfUsable(optr oself, Message msg)
+{
+    if (GenCheckIfFullyUsable(oself, FALSE) && GenCheckIfSpecGrown(oself))
+	CObjCallSuperP(&GenClass, oself, msg, NULL, 0, NULL, 0);
+}
+
+/* GenDisplayGroupInitialize: targetable */
+@method GenDisplayGroupClass, MSG_META_INITIALIZE
+{
+    pself->GI_attrs |= GA_TARGETABLE;
+    @callsuper();
+}
+
+@method GenDisplayGroupClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_DISPLAY_CONTROL,
+				    MasterOffset);
+}
+
+/* GenDisplayGroupSetFullSized: unless it may not be; the state saved */
+@method GenDisplayGroupClass, MSG_GEN_DISPLAY_GROUP_SET_FULL_SIZED
+{
+    if (ObjVarFindData(oself, ATTR_GEN_DISPLAY_GROUP_NO_FULL_SIZED))
+	return;
+    if (ObjVarDeleteData(oself, ATTR_GEN_DISPLAY_GROUP_OVERLAPPING_STATE))
+	CallSpecIfUsable(oself, MSG_GEN_DISPLAY_GROUP_SET_FULL_SIZED);
+}
+
+@method GenDisplayGroupClass, MSG_GEN_DISPLAY_GROUP_SET_OVERLAPPING
+{
+    if (ObjVarFindData(oself, ATTR_GEN_DISPLAY_GROUP_NO_OVERLAPPING) ||
+	ObjVarFindData(oself, ATTR_GEN_DISPLAY_GROUP_OVERLAPPING_STATE))
+	return;
+    (void) ObjVarAddData(oself, ATTR_GEN_DISPLAY_GROUP_OVERLAPPING_STATE |
+			 VDF_SAVE_TO_STATE, 0);
+    CallSpecIfUsable(oself, MSG_GEN_DISPLAY_GROUP_SET_OVERLAPPING);
+}
+
+@method GenDisplayGroupClass, MSG_GEN_DISPLAY_GROUP_GET_FULL_SIZED
+{
+    return !ObjVarFindData(oself, ATTR_GEN_DISPLAY_GROUP_OVERLAPPING_STATE);
+}
+
+/* GenDisplayGroupTileDisplays: if they may overlap */
+@method GenDisplayGroupClass, MSG_GEN_DISPLAY_GROUP_TILE_DISPLAYS
+{
+    if (!ObjVarFindData(oself, ATTR_GEN_DISPLAY_GROUP_NO_OVERLAPPING))
+	CallSpecIfUsable(oself, MSG_GEN_DISPLAY_GROUP_TILE_DISPLAYS);
+}

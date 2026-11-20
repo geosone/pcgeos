@@ -100,7 +100,7 @@ typedef WordFlags GDICToolboxFeatures;
 #define GDC_DEFAULT_TOOLBOX_FEATURES  (GDCF_DISPLAY_LIST)
 
 typedef struct {
-    optr	NDC_display;
+    word	NDC_displayNum;	/* as the asm's (gDCtrlC.def) */
     TCHAR	NDC_name[MAX_DISPLAY_NAME_SIZE];
     byte	NDC_overlapping;
 } NotifyDisplayChange;

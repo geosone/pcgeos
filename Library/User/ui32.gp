@@ -32,6 +32,7 @@ export GenSystemClass
 export GenTriggerClass
 export GenInteractionClass
 export GenDisplayClass
+export GenDisplayGroupClass
 export GenPrimaryClass
 export GenProcessClass
 export UserClass
