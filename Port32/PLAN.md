@@ -155,6 +155,21 @@ Ordered by dependency, each with host-side tests under `linux`:
 - Components: GrObj, Spreadsheet, Chart, Math (rest), Parse, Spline, Impex.
 - Rebuild the GOC apps (~0.83 M lines, including Breadbox).
 - Translate or replace the asm apps: FileMgr, GeoWrite, Calendar …
+- The web browser (direction, 2026-11-20): Ladybird's engine with a
+  GEOS front end. A native GEOS app (GOC/C) is the shell: the address
+  bar, back and forward, bookmarks, tabs and menus as Gen objects, the
+  page in a GenView/VisContent drawn from the bitmap WebContent shares,
+  input, scrolling and the view's size passed to it. The Ladybird
+  processes (WebContent, RequestServer, ImageDecoder) are host
+  processes, not geodes, started through GAPI and spoken to over
+  Ladybird's own IPC; TLS is theirs. Ladybird is an external dependency
+  (BSD-2), built beside the tree, not copied into it. Hosts: `linux`
+  first, then `gonware` (it needs processes, threads, shared memory,
+  sockets, a C++ runtime and Skia there); not `dos32`, where Breadbox's
+  WebMagick (HTML 4, `Library/Breadbox/Html4Par`, `UrlDrv`) remains the
+  browser. The shell needs the text objects, GenView/VisContent and
+  dialogs first. Also the browser of the minimal server GEOS on
+  GonWare.
 
 ### P9: Host `win32` / `win64`
 
