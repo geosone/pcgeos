@@ -37,6 +37,14 @@ typedef struct {
     word		UBS_checks, UBS_fails, UBS_failLine;
     word		UBS_failLines[8];
     WindowHandle	UBS_primaryWin;
+    WindowHandle	UBS_groupWin;
+    unsigned short	UBS_displayNotices;
+    unsigned short	UBS_listNotices;
+    unsigned short	UBS_lastNum;
+    char		UBS_lastName[16];
+    unsigned char	UBS_lastOverlapping;
+    short		UBS_gw, UBS_gh;
+    short		UBS_dl, UBS_dt, UBS_dw, UBS_dh;
 } UBState;
 
 static int fails;
@@ -100,12 +108,18 @@ int main(void)
 
     step(1);
     CHECK(st->UBS_primaryWin != 0);
+    printf("group %dx%d, doc1 at %d,%d %dx%d; notices %u, lists %u\n",
+	   st->UBS_gw, st->UBS_gh, st->UBS_dl, st->UBS_dt, st->UBS_dw,
+	   st->UBS_dh, st->UBS_displayNotices, st->UBS_listNotices);
+    /* overlapping, selected, tiled, full sized, Ctrl+F6, not usable */
+    for (i = 2; i <= 7; i++)
+	step(i);
 
     printf("geode checks: %u, failed %u (first at uiboot.goc line %u)\n",
 	   st->UBS_checks, st->UBS_fails, st->UBS_failLine);
     for (i = 0; i < st->UBS_fails && i < 8; i++)
 	printf("  failed: uiboot.goc line %u\n", st->UBS_failLines[i]);
-    CHECK(st->UBS_checks >= 5 && !st->UBS_fails);
+    CHECK(st->UBS_checks >= 50 && !st->UBS_fails);
 
     /* the UI detached: uiboot goes, the UI's process ends */
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(ui, 0), KMSG_META_DETACH,

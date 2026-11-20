@@ -1,10 +1,15 @@
 /*
  * uiboot.goc -- an application for the library.ui.boot test
  * (Port32/Tests): UBProcessClass (GenProcessClass) with the application
- * object UBApp and its primary window UBPrimary.  The UI booted with
- * "[ui] specific = motif" starts it ("[ui] execOnStartup"); the test
+ * object UBApp and its primary window UBPrimary, which holds the
+ * display group UBGroup with the documents UBDoc1 (with a menu, adopted
+ * by the primary's menu bar) and UBDoc2.  The UI booted with "[ui]
+ * specific = motif" starts it ("[ui] execOnStartup"); the test
  * (test_ui_boot.c) runs the steps through UBStep on the process thread,
- * the checks made here count in ubState.
+ * the checks made here count in ubState.  The process is on the
+ * application's display notification lists.  The objects run on the
+ * process thread too: what follows from a queued message is checked in
+ * the next step.
  */
 @include <stdapp.goh>
 @include <Internal/specC.goh>
@@ -12,6 +17,10 @@
 @include <Objects/gInterC.goh>
 @include <Internal/SpecUI/olWinClass.goh>
 @include <Internal/SpecUI/olBaseWinClass.goh>
+@include <Internal/SpecUI/olDisplayGroupClass.goh>
+@include <Internal/SpecUI/olDisplayWinClass.goh>
+@include <Internal/SpecUI/olPopupWinClass.goh>
+@include <Internal/SpecUI/olMenuButtonClass.goh>
 #include <string.h>
 
 typedef struct {
@@ -21,6 +30,14 @@ typedef struct {
     word		UBS_checks, UBS_fails, UBS_failLine;
     word		UBS_failLines[8];
     WindowHandle	UBS_primaryWin;
+    WindowHandle	UBS_groupWin;
+    word		UBS_displayNotices;	/* GWNT_DISPLAY_CHANGE */
+    word		UBS_listNotices;	/* GWNT_DISPLAY_LIST_CHANGE */
+    word		UBS_lastNum;		/* the last display's */
+    char		UBS_lastName[16];
+    byte		UBS_lastOverlapping;
+    sword		UBS_gw, UBS_gh;		/* the group's size */
+    sword		UBS_dl, UBS_dt, UBS_dw, UBS_dh;	/* UBDoc1's */
 } UBState;
 
 UBState ubState;
@@ -42,10 +59,30 @@ UBState ubState;
 @object GenApplicationClass UBApp = {
     GI_visMoniker = "Boot";
     GI_comp = @UBPrimary;
-    gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS) = @UBPrimary;
+    /* the displays on the windows list too, to come up with it */
+    gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS) = @UBPrimary, @UBDoc1,
+						      @UBDoc2;
 }
 @object GenPrimaryClass UBPrimary = {
     GI_visMoniker = "Boot Test";
+    GI_comp = @UBGroup;
+}
+@object GenDisplayGroupClass UBGroup = {
+    GI_comp = @UBDoc1, @UBDoc2;
+    HINT_DEFAULT_FOCUS;
+    HINT_DEFAULT_TARGET;
+    HINT_INITIAL_SIZE = { SST_PIXELS | 300, SST_PIXELS | 200, 0 };
+}
+@object GenDisplayClass UBDoc1 = {
+    GI_visMoniker = "Doc 1";
+    GI_comp = @UBDocMenu;
+}
+@object GenInteractionClass UBDocMenu = {
+    GI_visMoniker = "Page";
+    GII_visibility = GIV_POPUP;
+}
+@object GenDisplayClass UBDoc2 = {
+    GI_visMoniker = "Doc 2";
 }
 @end UBAppObjects;
 
@@ -56,10 +93,41 @@ UBState ubState;
     @callsuper();
 }
 
+/* on the display lists before the displays open */
 @method UBProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
 {
+    optr self = ConstructOptr(GeodeGetProcessHandle(), 0);
+
+    (void) @call UBApp::MSG_META_GCN_LIST_ADD(self,
+		GAGCNLT_APP_TARGET_NOTIFY_DISPLAY_CHANGE,
+		MANUFACTURER_ID_GEOWORKS);
+    (void) @call UBApp::MSG_META_GCN_LIST_ADD(self,
+		GAGCNLT_APP_TARGET_NOTIFY_DISPLAY_LIST_CHANGE,
+		MANUFACTURER_ID_GEOWORKS);
     @callsuper();
     ubState.UBS_opened++;
+}
+
+/* the notifications: the display with the target, the list changed */
+@method UBProcessClass, MSG_META_NOTIFY_WITH_DATA_BLOCK
+{
+    if (manufID == MANUFACTURER_ID_GEOWORKS &&
+	notificationType == GWNT_DISPLAY_CHANGE) {
+	ubState.UBS_displayNotices++;
+	if (data) {
+	    NotifyDisplayChange *n = MemLock(data);
+
+	    ubState.UBS_lastNum = n->NDC_displayNum;
+	    memcpy(ubState.UBS_lastName, n->NDC_name,
+		   sizeof(ubState.UBS_lastName) - 1);
+	    ubState.UBS_lastOverlapping = n->NDC_overlapping;
+	    MemUnlock(data);
+	} else
+	    ubState.UBS_lastName[0] = 0;
+    } else if (manufID == MANUFACTURER_ID_GEOWORKS &&
+	       notificationType == GWNT_DISPLAY_LIST_CHANGE)
+	ubState.UBS_listNotices++;
+    @callsuper();
 }
 
 static Boolean InClass(optr o, ClassStruct *c)
@@ -74,13 +142,98 @@ static void VisData(optr o, void *buf, word size)
     MemUnlock(OptrToHandle(o));
 }
 
+static Rectangle Bounds(optr o)
+{
+    Rectangle r;
+
+    ObjLockObjBlock(OptrToHandle(o));
+    VisGetBounds(o, &r);
+    MemUnlock(OptrToHandle(o));
+    return r;
+}
+
+static WindowHandle ParentWin(WindowHandle w)
+{
+    WindowHandle p = 0;
+
+    if (w)
+	WinGetInfo(w, WIT_PARENT_WIN, &p);
+    return p;
+}
+
+/* a display maximized in the group: no header, the group's window */
+static Boolean Maximized(optr d)
+{
+    OLDisplayWinInstance w;
+
+    VisData(d, &w, sizeof(w));
+    return (w.OLWI_specState & OLWSS_MAXIMIZED) &&
+	   !(w.OLWI_attrs & (OWA_HEADER | OWA_TITLED));
+}
+
+static Boolean HasHeader(optr d)
+{
+    OLDisplayWinInstance w;
+
+    VisData(d, &w, sizeof(w));
+    return (w.OLWI_attrs & (OWA_HEADER | OWA_TITLED)) ==
+	   (OWA_HEADER | OWA_TITLED);
+}
+
+static OLDisplayGroupInstance ubGroup;
+
+static OLDisplayWinFlags DFlags(optr d)
+{
+    OLDisplayWinInstance w;
+
+    VisData(d, &w, sizeof(w));
+    return w.OLDW_flags;
+}
+
+/* the button of the display's menu (in the primary's menu bar) shown */
+static Boolean MenuShown(void)
+{
+    optr b = @call UBDocMenu::MSG_OL_POPUP_FIND_BUTTON();
+    VisInstance v;
+
+    if (!b)
+	return FALSE;
+    VisData(b, &v, sizeof(v));
+    return (v.VI_attrs & (VA_DRAWABLE | VA_DETECTABLE)) ==
+	   (VA_DRAWABLE | VA_DETECTABLE);
+}
+
+/* the last notice's display name (no strcmp in a geode) */
+static Boolean NameIs(const char *n)
+{
+    const char *p = ubState.UBS_lastName;
+
+    while (*n && *p == *n)
+	p++, n++;
+    return *p == *n;
+}
+
+static optr GroupTarget(void)
+{
+    optr t = 0;
+
+    (void) @call UBGroup::MSG_META_GET_TARGET_EXCL(&t);
+    return t;
+}
+
 @method UBProcessClass, MSG_UB_STEP
 {
     switch (step) {
     case 1: {
-	/* the application and its primary, built by Motif */
+	/* the application and its primary, built by Motif; the display
+	 * group in the primary with its window, full sized: both
+	 * displays maximized in it, the first with the target; its menu
+	 * in the primary's menu bar */
 	VisInstance v;
+	OLDisplayGroupInstance g;
 	optr app = GeodeGetAppObject(0);
+	WindowHandle w1, w2;
+	Rectangle gb, b1;
 
 	UBCHECK(app == @UBApp);
 	UBCHECK(InClass(app, (ClassStruct *) &OLApplicationClass));
@@ -89,8 +242,122 @@ static void VisData(optr o, void *buf, word size)
 	UBCHECK(v.VI_attrs & VA_REALIZED);
 	ubState.UBS_primaryWin = @call UBPrimary::MSG_VIS_QUERY_WINDOW();
 	UBCHECK(ubState.UBS_primaryWin != 0);
+	UBCHECK(InClass(@UBGroup, (ClassStruct *) &OLDisplayGroupClass));
+	UBCHECK(InClass(@UBDoc1, (ClassStruct *) &OLDisplayWinClass));
+	UBCHECK(InClass(@UBDoc2, (ClassStruct *) &OLDisplayWinClass));
+	VisData(@UBGroup, &g, sizeof(g));
+	UBCHECK(g.VI_attrs & VA_REALIZED);
+	UBCHECK(g.OLDGI_states & OLDGS_MAXIMIZED);
+	UBCHECK(@call UBGroup::MSG_GEN_DISPLAY_GROUP_GET_FULL_SIZED());
+	ubState.UBS_groupWin = g.VCI_window;
+	UBCHECK(g.VCI_window != 0 &&
+		ParentWin(g.VCI_window) == ubState.UBS_primaryWin);
+	UBCHECK(@call UBDoc1::MSG_VIS_FIND_PARENT() == @UBGroup);
+	w1 = @call UBDoc1::MSG_VIS_QUERY_WINDOW();
+	w2 = @call UBDoc2::MSG_VIS_QUERY_WINDOW();
+	UBCHECK(w1 != 0 && ParentWin(w1) == g.VCI_window);
+	UBCHECK(w2 != 0 && ParentWin(w2) == g.VCI_window);
+	UBCHECK(Maximized(@UBDoc1) && Maximized(@UBDoc2));
+	gb = Bounds(@UBGroup);
+	b1 = Bounds(@UBDoc1);
+	ubState.UBS_gw = gb.R_right - gb.R_left;
+	ubState.UBS_gh = gb.R_bottom - gb.R_top;
+	ubState.UBS_dl = b1.R_left;
+	ubState.UBS_dt = b1.R_top;
+	ubState.UBS_dw = b1.R_right - b1.R_left;
+	ubState.UBS_dh = b1.R_bottom - b1.R_top;
+	/* maximized: the group's size, the frame outside its window */
+	UBCHECK(b1.R_left == -1 && b1.R_top == -1 &&
+		ubState.UBS_dw == ubState.UBS_gw &&
+		ubState.UBS_dh == ubState.UBS_gh);
+	UBCHECK(GroupTarget() == @UBDoc1);
+	UBCHECK(DFlags(@UBDoc1) & OLDWF_TARGET);
+	UBCHECK(!(DFlags(@UBDoc2) & OLDWF_TARGET));
+	UBCHECK(ubState.UBS_displayNotices >= 1 && ubState.UBS_lastNum == 0 &&
+		NameIs("Doc 1") &&
+		!ubState.UBS_lastOverlapping);
+	UBCHECK(ubState.UBS_listNotices >= 1);
+	UBCHECK(MenuShown());
+	/* overlapping (the displays told through the UI queue) */
+	@call UBGroup::MSG_GEN_DISPLAY_GROUP_SET_OVERLAPPING();
+	VisData(@UBGroup, &g, sizeof(g));
+	UBCHECK(!(g.OLDGI_states & (OLDGS_MAXIMIZED | OLDGS_TILED)));
+	UBCHECK(!@call UBGroup::MSG_GEN_DISPLAY_GROUP_GET_FULL_SIZED());
 	break;
     }
+    case 2: {
+	/* overlapping: the displays with their headers, staggered in the
+	 * group's slots; the notice says so */
+	Rectangle b1, b2;
+
+	UBCHECK(!Maximized(@UBDoc1) && !Maximized(@UBDoc2));
+	UBCHECK(HasHeader(@UBDoc1) && HasHeader(@UBDoc2));
+	b1 = Bounds(@UBDoc1);
+	b2 = Bounds(@UBDoc2);
+	UBCHECK(b1.R_left != b2.R_left && b1.R_top != b2.R_top);
+	UBCHECK(b1.R_left >= 0 && b2.R_left >= 0 &&
+		b1.R_right < ubState.UBS_gw && b2.R_right < ubState.UBS_gw);
+	UBCHECK(GroupTarget() == @UBDoc1);
+	UBCHECK(ubState.UBS_lastOverlapping && NameIs("Doc 1"));
+	/* the second display selected */
+	ubState.UBS_displayNotices = 0;
+	@call UBGroup::MSG_GEN_DISPLAY_GROUP_SELECT_DISPLAY(1);
+	break;
+    }
+    case 3:
+	/* the second on top with the target; the first's menu hidden */
+	UBCHECK(GroupTarget() == @UBDoc2);
+	UBCHECK((DFlags(@UBDoc2) & OLDWF_TARGET) &&
+		!(DFlags(@UBDoc1) & OLDWF_TARGET));
+	UBCHECK(@call UBGroup::MSG_VIS_FIND_CHILD_AT_POSITION(0) == @UBDoc2);
+	UBCHECK(ubState.UBS_displayNotices >= 1 && ubState.UBS_lastNum == 1 &&
+		NameIs("Doc 2"));
+	UBCHECK(!MenuShown());
+	/* tiled */
+	@call UBGroup::MSG_GEN_DISPLAY_GROUP_TILE_DISPLAYS();
+	VisData(@UBGroup, &ubGroup, sizeof(ubGroup));
+	UBCHECK(ubGroup.OLDGI_states & OLDGS_TILED);
+	break;
+    case 4: {
+	/* tiled: side by side, each half the group's width and all its
+	 * height (a ratio position lands a pixel up and left, as the
+	 * asm's ConvertSpecWinSizePairsToPixels) */
+	Rectangle b1 = Bounds(@UBDoc1), b2 = Bounds(@UBDoc2);
+	Rectangle gb = Bounds(@UBGroup);
+	sword half = (gb.R_right - gb.R_left) / 2, gh = gb.R_bottom - gb.R_top;
+
+	UBCHECK(b1.R_left == -1 && b1.R_top == -1);
+	UBCHECK(b2.R_left == half - 1 && b2.R_top == -1);
+	UBCHECK(b1.R_right - b1.R_left == half &&
+		b2.R_right - b2.R_left == half);
+	UBCHECK(b1.R_bottom - b1.R_top == gh && b2.R_bottom - b2.R_top == gh);
+	/* full sized again */
+	@call UBGroup::MSG_GEN_DISPLAY_GROUP_SET_FULL_SIZED();
+	break;
+    }
+    case 5:
+	/* both maximized again, the second still with the target */
+	UBCHECK(Maximized(@UBDoc1) && Maximized(@UBDoc2));
+	UBCHECK(@call UBGroup::MSG_GEN_DISPLAY_GROUP_GET_FULL_SIZED());
+	UBCHECK(GroupTarget() == @UBDoc2);
+	UBCHECK(!ubState.UBS_lastOverlapping && NameIs("Doc 2"));
+	/* Ctrl+F6: the next display (queued) */
+	(void) @call UBDoc2::MSG_META_FUP_KBD_CHAR(VC_F6 | (CS_CONTROL << 8),
+			CF_FIRST_PRESS | (SS_LCTRL << 8), 0);
+	break;
+    case 6:
+	/* the second to the bottom, the first on top with the target */
+	UBCHECK(@call UBGroup::MSG_VIS_FIND_CHILD_AT_POSITION(0) == @UBDoc1);
+	UBCHECK(GroupTarget() == @UBDoc1);
+	UBCHECK(MenuShown());
+	/* the first not usable: the second on top */
+	@call UBDoc1::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	break;
+    case 7:
+	UBCHECK(GroupTarget() == @UBDoc2);
+	UBCHECK(!@call UBDoc1::MSG_VIS_QUERY_WINDOW());
+	UBCHECK(NameIs("Doc 2") && ubState.UBS_lastNum == 0);
+	break;
     }
 }
 

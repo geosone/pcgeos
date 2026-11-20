@@ -5068,7 +5068,13 @@ visual classes of `Library/User/Vis`:
   `GenPrimaryClass` (maximized as `ATTR_GEN_DISPLAY_MAXIMIZED_STATE`,
   the long term moniker kept until the specific part takes it;
   `MSG_GEN_PRIMARY_REPLACE_LONG_TERM_MONIKER` takes a
-  `VisMonikerSource`). Each resolves to its specific UI's build routine.
+  `VisMonikerSource`); `GenDisplayGroupClass` (`genDisplayControl.goc`
+  after `genDisplayControl.asm`: targetable, resolves to
+  `SPIR_BUILD_DISPLAY_CONTROL`; full sized unless
+  `HINT_DISPLAY_GROUP_NO_FULL_SIZED`, the overlapping state kept as
+  vardata; full sized, overlapping and tiling passed to the specific
+  part when it is built and usable). Each resolves to its specific UI's
+  build routine.
 - **Size specifications** (`Vis/visSpec.goc`, after
   `visSpecUtils.asm`): `VisConvertSpecVisSize` (pixels, percent of the
   field's or the screen's size, average and widest characters and
@@ -5520,8 +5526,10 @@ are left out), the constants, the variables and the routines.
     the keyboard takes the focus and gadget exclusive first; with the
     focus it is drawn cursored (bordered); right on a sub menu's
     button opens the sub menu. `FlowCheckKbdShortcut` without a
-    keyboard driver (the tests) matches entries without `KS_PHYSICAL`
-    by character set, character and the modifiers held.
+    keyboard driver (the tests) matches by character set, character
+    and the modifiers held; a `KS_PHYSICAL` entry only a key of the
+    control set (a function key is one key whatever the layout). It
+    returns the entry's offset in the table, as the asm.
   - Mnemonics: `VisCheckMnemonic` (`Vis/visSpec.goc`, exported, in
     `visC.goh`) compares the character with the mnemonic of a generic
     object's text moniker without case (`VMO_CANCEL`: the
@@ -5558,6 +5566,35 @@ are left out), the constants, the variables and the routines.
     application is the primary's generic parent. A primary built again
     finds the text that replaced its moniker list, as in the asm: its
     icon then comes from the application's list.
+  - The document windows: `OLDisplayGroupClass`
+    (`CWin/cwinDisplayControl.goc`, built by `OLBuildDisplayControl`)
+    and `OLDisplayWinClass` (`CWin/cwinDisplay.goc`, an
+    `OLMenuedWinClass` built by `OLBuildDisplay` on the group, the vis
+    parent its `SQT_VIS_PARENT_FOR_DISPLAY` query finds; both in
+    `olDisplayGroupClass.goh`, `olDisplayWinClass.goh`). The group has
+    a window of its own inside its frame (dark grey, a dither in black
+    and white), keeps the focus and target of its displays (target
+    level `TL_GEN_DISPLAY_CTRL`), their stagger slots (as the field
+    does) and navigation, accelerators and mnemonics. Full sized, its
+    displays are maximized in it (no header, the frame outside the
+    group's window, the group sized as the first display wants);
+    overlapping, they are staggered with their headers; tiled, they
+    are placed in columns of about the square root of their number
+    (`MSG_GEN_SET_WIN_POSITION` and `_SIZE` as ratios of the parent,
+    in pixels; a ratio position lands one pixel up and left as in
+    `ConvertSpecWinSizePairsToPixels`); a display selected or brought
+    to the top is first among the group's children and takes the
+    target. A display in a group has no header, title or system menu
+    when maximized; with the target it shows the buttons of its menus
+    (`MSG_SHOW_MENU_BUTTON`, adopted by the primary's menu bar) and
+    tells the application's `GAGCNLT_APP_TARGET_NOTIFY_DISPLAY_CHANGE`
+    list (`NotifyDisplayChange`: its number, name and overlapping) and
+    the group's list change; losing it, it hides them. Ctrl+F4 closes a
+    display, Ctrl+F6 lowers it and brings up the next. `OLWinClass`
+    has `MSG_GEN_SET_WIN_POSITION`, `_SIZE` and `_CONSTRAIN` now
+    (`cwinClassMisc.goc`: the previous bounds and flags while
+    maximized). `NotifyDisplayChange` names the display by its number,
+    as the asm's `gDCtrlC.def` (`NDC_displayNum`, not an optr).
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
@@ -5566,8 +5603,11 @@ are left out), the constants, the variables and the routines.
   menus in the header of a maximized window, the help trigger and file menu a primary adds,
   the window list entry, the express tool area (the field has none),
   moniker lists, a double click on the title (the pointer code of
-  `cwinPtr.asm`), `GenDisplayGroupClass` (not in the C UI). The display
-  classes and their build routine. In `OLPopupWinClass` and
+  `cwinPtr.asm`). In the display classes: the document (closing a
+  display does not ask one yet), `MSG_GEN_DISPLAY_GROUP_SET_MONIKER`,
+  the number of items for the display control, the document
+  control's options, `OLReleaseAllStayUpModeMenus` on a change of
+  target. In `OLPopupWinClass` and
   `OLDialogWinClass`: the file menu's place, the moniker list
   reduced to an icon for the button, UserDoDialog and the action response, the help
   trigger (its moniker is a picture), the reply bar removed on tiny
@@ -5592,8 +5632,7 @@ are left out), the constants, the variables and the routines.
   the display controls its margins look for. In `OLCtrlClass`:
   an OLCtrl in a menu window, the reply bar's extra line when not under
   a dialog, the menu center, mnemonics, the default
-  focus broadcast. The build routine of displays
-  (`OLBuildDisplay`, ...). The other window and gadget classes (and so the windows of
+  focus broadcast. The other window and gadget classes (and so the windows of
   an application, its standard dialogs, the navigation between its
   windows, the menu bar); the application's express menu entries
   (`OLAppTaskItemClass`); the beep of an unwanted key (no sound driver
@@ -5686,6 +5725,22 @@ are left out), the constants, the variables and the routines.
   right mark, whose pixels the test checks on the screen (it finds the
   mark's row within one of the button's center). The test loads no fonts, so monikers have no height
   there.
+- **Test.** ctest `library.ui.boot` (`test_ui_boot.c`, the process
+  geode `Port32/Tests/Geode/uiboot.goc`): the UI booted with `[ui]
+  specific = motif` and the host display starts `uiboot`
+  (`execOnStartup`); its application and primary are built by Motif
+  and realized. The primary holds a display group with two displays
+  (the first with a menu), all on the application's windows list.
+  Checked: full sized, both displays maximized in the group's window
+  (in the primary's), the first with the target, the notice naming it,
+  its menu's button shown; overlapping, staggered with headers; the
+  second selected takes the target and is on top, the first's menu
+  button hidden; tiled, side by side at half the group's width and its
+  full height; full sized again; Ctrl+F6 brings the first back on top;
+  the first not usable, the second has the target. Detached, `uiboot`
+  and the UI's process go and Motif is unloaded. New blocks (and
+  semaphores) belong to the current thread's process
+  (`KernelOwnerNow`), not to the geode last loaded.
 
 ## 14. Open
 
