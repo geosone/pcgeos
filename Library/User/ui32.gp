@@ -42,6 +42,7 @@ export GenBooleanClass
 export GenViewClass
 export GenContentClass
 export GenValueClass
+export GenGlyphClass
 export GenProcessClass
 export UserClass
 

@@ -1,6 +1,7 @@
 /*
  * test_ui_boot.c -- the UI booted as the kernel boots it (BootLoadUI)
- * with "[ui] specific = motif": the UI's process starts the system on
+ * from a GEOS top (GUBTOP, with Berkeley in USERDATA/FONT) with
+ * "[ui] specific = motif": the UI's process starts the system on
  * the host video driver hostvid ("[screen 0]"), its own application and
  * field, the system field, and the application uiboot (Geode/uiboot.goc)
  * of "[ui] execOnStartup", whose primary window holds a display group
@@ -26,9 +27,10 @@
 #include <string.h>
 
 extern const unsigned char ui_geode[], uiboot_geode[], motif_geode[],
-			   hostvid_geode[];
+			   hostvid_geode[], vidmem_geode[], berkeley_fnt[];
 extern const unsigned long ui_geode_size, uiboot_geode_size,
-			   motif_geode_size, hostvid_geode_size;
+			   motif_geode_size, hostvid_geode_size,
+			   vidmem_geode_size, berkeley_fnt_size;
 
 /* as uiboot.goc */
 typedef struct {
@@ -64,6 +66,7 @@ typedef struct {
     short		UBS_view[4];
     short		UBS_slist[5];
     unsigned short	UBS_dlist[4];
+    short		UBS_glyph[5];
 } UBState;
 
 static int fails;
@@ -83,6 +86,30 @@ static void Check(int ok, int line, const char *what)
 
 #define GEODE	0x2340
 
+static char top[260], sep = '/';
+
+/* a directory (no data) or a file of the GEOS top */
+static void Put(const char *rel, const void *data, unsigned long size)
+{
+    char path[300], *p;
+    ghal_file *f;
+    size_t done = 0;
+
+    snprintf(path, sizeof(path), "%s%c%s", top, sep, rel);
+    for (p = path; *p; p++)
+	if (*p == '/')
+	    *p = sep;
+    if (!size) {
+	ghal_fs_mkdir(path);
+	return;
+    }
+    CHECK(ghal_fs_open(path, GHAL_FS_WRITE | GHAL_FS_CREATE |
+				 GHAL_FS_TRUNCATE, &f) == GHAL_OK);
+    ghal_fs_write(f, data, size, &done);
+    CHECK(done == size);
+    ghal_fs_close(f);
+}
+
 static GeodeHandle Find(const char *name)
 {
     return GeodeFind(name, GEODE_NAME_SIZE, 0, 0);
@@ -99,7 +126,7 @@ static void Shot(int step)
     FILE *o;
     int x, y;
 
-    if (!f || step != (at ? atoi(at) : 38))
+    if (!f || step != (at ? atoi(at) : 39))
 	return;
     TimerSleep(60);
     o = fopen(f, "wb");
@@ -117,8 +144,18 @@ static void Shot(int step)
     fclose(o);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    /* a mouse, as it were (there is no mouse driver): not keyboard
+     * only, so the system menu has its icons and menus can be pinned */
+    static const char ini[] =
+	"[ui]\r\ngeneric = ui\r\nspecific = motif\r\n"
+	"execOnStartup = uiboot\r\n"
+	"[screen 0]\r\ndriver = hostvid\r\n"
+	"device = Host Display: 640x480\r\n"
+	"[input]\r\nkeyboardOnly = false\r\n";
+    GeodeLoadError e;
+    char *slash;
     GeodeHandle ui, app;
     UBState *st;
     void (*step)(word);
@@ -126,24 +163,39 @@ int main(void)
     int i;
 
     setvbuf(stdout, NULL, _IONBF, 0);
-    kernelCurrentGeode = GEODE;
-    KernelThreadInit(PRIORITY_STANDARD);
-    KernelTimerInit();
+    (void) argc;
+    strncpy(top, argv[0], sizeof(top) - 8);
+    top[sizeof(top) - 8] = 0;
+    slash = strrchr(top, '/');
+    if (!slash || (strrchr(top, '\\') && strrchr(top, '\\') > slash))
+	slash = strrchr(top, '\\');
+    if (slash) {
+	sep = *slash;
+	strcpy(slash + 1, "GUBTOP");
+    } else
+	strcpy(top, "GUBTOP");
+    ghal_fs_mkdir(top);
+    /* the test ends without a shutdown */
+    {
+	char path[300];
+
+	snprintf(path, sizeof(path), "%s%cGEOS_ACT.IVE", top, sep);
+	remove(path);
+    }
+    Put("SYSTEM", NULL, 0);
+    Put("SYSTEM/VIDEO", NULL, 0);
+    Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
+    Put("USERDATA", NULL, 0);
+    Put("USERDATA/FONT", NULL, 0);
+    Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
+    Put("geos.ini", ini, sizeof(ini) - 1);
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
     GeodeRegisterImage("uiboot", uiboot_geode, uiboot_geode_size);
     GeodeRegisterImage("motif", motif_geode, motif_geode_size);
     GeodeRegisterImage("hostvid", hostvid_geode, hostvid_geode_size);
-    InitFileWriteString("ui", "generic", "ui");
-    InitFileWriteString("ui", "specific", "motif");
-    InitFileWriteString("ui", "execOnStartup", "uiboot");
-    InitFileWriteString("screen 0", "driver", "hostvid");
-    InitFileWriteString("screen 0", "device", "Host Display: 640x480");
-    /* a mouse, as it were (there is no mouse driver): not keyboard
-     * only, so the system menu has its icons and menus can be pinned */
-    InitFileWriteBoolean("input", "keyboardOnly", FALSE);
 
-    /* booted: uiboot of execOnStartup up */
-    BootLoadUI();
+    /* booted, with the fonts of SP_FONT: uiboot of execOnStartup up */
+    CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     ui = (GeodeHandle) SysGetInfo(SGIT_UI_PROCESS);
     CHECK(ui != 0 && ui == Find("ui      "));
     WAIT_FOR(Find("uiboot  "));
@@ -169,8 +221,9 @@ int main(void)
      * pinned, opened by its button, closed by its system menu; a menu
      * taller than the screen scrolled by its scrollers and to its focus;
      * the generic item and boolean groups; Motif's radio group and
-     * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list */
-    for (i = 2; i <= 38; i++) {
+     * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
+     * a separator */
+    for (i = 2; i <= 39; i++) {
 	step(i);
 	Shot(i);
     }
@@ -197,6 +250,9 @@ int main(void)
     printf("dynamic list: %u monikers asked for, %u items, scrolled to "
 	   "top item %u (first item %u)\n", st->UBS_dlist[0],
 	   st->UBS_dlist[1], st->UBS_dlist[2], st->UBS_dlist[3]);
+    printf("glyph %dx%d, with a longer text %d wide; separator %dx%d\n",
+	   st->UBS_glyph[0], st->UBS_glyph[1], st->UBS_glyph[4],
+	   st->UBS_glyph[2], st->UBS_glyph[3]);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

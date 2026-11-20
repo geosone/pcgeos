@@ -1,0 +1,16 @@
+/*
+ * genGlyphDisplay.goc -- GenGlyphClass (after genGlyphDisplay.asm): a
+ * generic object that only shows its moniker.  What it looks like is
+ * the specific UI's (SPIR_BUILD_GLYPH_DISPLAY); HINT_GLYPH_SEPARATOR
+ * makes it a separator line.
+ */
+@include "uiInt.goh"
+@include <Objects/gGlyphC.goh>
+
+@classdecl GenGlyphClass;
+
+@method GenGlyphClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_GLYPH_DISPLAY,
+				    MasterOffset);
+}

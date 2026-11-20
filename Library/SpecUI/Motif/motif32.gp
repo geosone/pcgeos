@@ -43,8 +43,9 @@ export OLBuildScreen
 export OLBuildSystem
 export OLBuildPane
 export OLBuildInteraction
-# OLBuildGlyphDisplay, OLBuildText
-skip 2
+export OLBuildGlyphDisplay
+# OLBuildText
+skip 1
 export OLBuildDisplayControl
 export OLBuildPrimary
 # OLBuildGadget
@@ -104,4 +105,5 @@ export OLScrollbarClass
 export OLPaneClass
 export OLContentClass
 export OLScrollListClass
+export OLGlyphDisplayClass
 export OLScrollableItemClass

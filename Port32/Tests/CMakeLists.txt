@@ -552,9 +552,9 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     geos_geode(uiboot GP Geode/uiboot.gp GOC Geode/uiboot.goc)
     geos_embed(_uiboot_c ${uiboot_GEO} uiboot_geode)
     add_executable(test_ui_boot test_ui_boot.c ${_ui_c} ${_uiboot_c}
-                   ${_motif_c} ${_hostvid_c})
+                   ${_motif_c} ${_hostvid_c} ${_vidmem_c} ${_berkeley_c})
     add_dependencies(test_ui_boot geode_ui geode_uiboot geode_motif
-                     geode_hostvid)
+                     geode_hostvid geode_vidmem)
     target_link_libraries(test_ui_boot PRIVATE geos_kernel)
     if(GEOS_HOST STREQUAL "linux" AND GHAL_HAVE_X11 AND
        GEOS_LINUX_DISPLAY STREQUAL "x11" AND GEOS_XVFB)

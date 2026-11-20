@@ -5192,6 +5192,19 @@ visual classes of `Library/User/Vis`:
   `noInit` (dx in the asm: the caller validates the new items), the
   source of `MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER` is a
   `VisMonikerSource` (`gDListC.goh`).
+- **The glyph** (`Gen/genGlyphDisplay.goc` after `genGlyphDisplay.asm`):
+  `GenGlyphClass` only shows its moniker; the specific UI builds it
+  (`SPIR_BUILD_GLYPH_DISPLAY`). Motif's `OLGlyphDisplayClass`
+  (`CGadget/copenGlyphDisplay.goc`, `CSpec/cspecGlyphDisplay.goc`,
+  `Internal/SpecUI/olGlyphDisplayClass.goh`) is as large as the moniker,
+  larger or smaller where the gadget hints allow
+  (`HINT_EXPAND_WIDTH_TO_FIT_PARENT`, `HINT_EXPAND_HEIGHT_TO_FIT_PARENT`,
+  `HINT_CAN_CLIP_MONIKER_WIDTH`, `HINT_CAN_CLIP_MONIKER_HEIGHT`), with
+  the size hints applied; the moniker is drawn in black at the top left
+  or centered (`HINT_CENTER_MONIKER`), not enabled on the light color
+  in a 50% pattern. `HINT_GLYPH_SEPARATOR` makes it a line, black with a
+  white one beside it, along the side it expands to, at least two
+  pixels across.
 - **Views** (`Gen/genView.goc`, `genContent.goc` after the asm of the
   same names): `GenViewClass` keeps the generic data of a view (origin,
   document bounds, increment, scale factor, background color, the
@@ -6156,6 +6169,14 @@ are left out), the constants, the variables and the routines.
   wide as the list; down on the button selects "Very large" (applied,
   shown); space opens the list, its first item activated and the list
   closed: "Small" again, applied a second time.
+  The test boots from a GEOS top of its own (`GUBTOP` beside the
+  program: `geos.ini`, Berkeley in `USERDATA/FONT`, `vidmem.geo`)
+  through `KernelBoot`, so the monikers have their text and the
+  geometry its sizes; Doc 2 fits a screen of 640 x 480 (the scrollbar
+  and the lists side by side) as well as the 1024 x 768 of ctest.
+  Doc 2's glyph is an `OLGlyphDisplay` as large as its text, wider with
+  a longer moniker, not enabled; the separator below it two pixels high
+  and as wide as the display.
 
 ## 14. Open
 

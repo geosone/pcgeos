@@ -1,0 +1,232 @@
+/*
+ * copenGlyphDisplay.goc -- OLGlyphDisplayClass (after
+ * copenGlyphDisplay.asm): the specific side of a GenGlyph.  It is as
+ * large as its moniker, larger or smaller where the gadget hints
+ * (HINT_EXPAND_..._TO_FIT_PARENT, HINT_CAN_CLIP_MONIKER_...) allow it,
+ * and draws the moniker in black, at the top left or centered
+ * (HINT_CENTER_MONIKER); not enabled, on the light color in a 50%
+ * pattern.  With HINT_GLYPH_SEPARATOR it is a line, black and white,
+ * along the side it expands to.
+ *
+ * Motif: no background colors of its own, no bold monikers, no color
+ * for disabled gadgets, no bubble dialogs, no notebook rings
+ * (GLYPH_USES_BACKGROUND_COLOR, ASSUME_BOLD_STYLE_FOR_MONIKERS,
+ * USE_COLOR_FOR_DISABLED_GADGETS, BUBBLE_DIALOGS, NOTEBOOK_INTERACTION
+ * are FALSE).
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olGlyphDisplayClass.goh>
+
+@classdecl OLGlyphDisplayClass, neverSaved;
+
+#define Glyph(o)	((OLGlyphDisplayInstance *) ObjDerefVis(o))
+
+@method OLGlyphDisplayClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+static void GadgetHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		       word dataType, void *handlerData)
+{
+    OLGlyphDisplayFlags *f = handlerData;
+
+    (void) mh; (void) chnk; (void) extra;
+    switch (dataType) {
+    case HINT_EXPAND_WIDTH_TO_FIT_PARENT:
+	*f |= OLGDF_EXPAND_WIDTH_TO_FIT_PARENT;
+	break;
+    case HINT_EXPAND_HEIGHT_TO_FIT_PARENT:
+	*f |= OLGDF_EXPAND_HEIGHT_TO_FIT_PARENT;
+	break;
+    case HINT_CAN_CLIP_MONIKER_WIDTH:
+	*f |= OLGDF_CAN_CLIP_MONIKER_WIDTH;
+	break;
+    case HINT_CAN_CLIP_MONIKER_HEIGHT:
+	*f |= OLGDF_CAN_CLIP_MONIKER_HEIGHT;
+	break;
+    case HINT_CENTER_MONIKER:
+	*f |= OLGDF_CENTER_MONIKER;
+	break;
+    case HINT_GLYPH_SEPARATOR:
+	*f |= OLGDF_SEPARATOR;
+	break;
+    }
+}
+
+/* OLGlyphHints */
+static VarDataCHandler glyphHints[] = {
+    { HINT_EXPAND_WIDTH_TO_FIT_PARENT, GadgetHint },
+    { HINT_EXPAND_HEIGHT_TO_FIT_PARENT, GadgetHint },
+    { HINT_CAN_CLIP_MONIKER_WIDTH, GadgetHint },
+    { HINT_CAN_CLIP_MONIKER_HEIGHT, GadgetHint },
+    { HINT_CENTER_MONIKER, GadgetHint },
+    { HINT_GLYPH_SEPARATOR, GadgetHint },
+};
+
+/*
+ * OLGlyphDisplayScanGeometryHints: the geometry flags; the gadget hints
+ * (OpenSetupGadgetGeometryFlags; any: the size recalculated even when
+ * valid)
+ */
+@method OLGlyphDisplayClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    OLGlyphDisplayFlags f = 0;
+
+    OpenScanVarData(oself, sizeof(glyphHints) / sizeof(glyphHints[0]),
+		    glyphHints, &f);
+    pself = Glyph(oself);
+    pself->VI_geoAttrs |= VGA_ONLY_RECALC_SIZE_WHEN_INVALID |
+			  VGA_USE_VIS_CENTER | VGA_USE_VIS_SET_POSITION;
+    pself->OLGDI_flags &= ~(OLGDF_EXPAND_WIDTH_TO_FIT_PARENT |
+			    OLGDF_EXPAND_HEIGHT_TO_FIT_PARENT |
+			    OLGDF_CAN_CLIP_MONIKER_WIDTH |
+			    OLGDF_CAN_CLIP_MONIKER_HEIGHT);
+    if (f)
+	pself->VI_geoAttrs &= ~VGA_ONLY_RECALC_SIZE_WHEN_INVALID;
+    pself->OLGDI_flags |= f;
+}
+
+/* OLGlyphDisplaySpecBuild: the hints; black and white: the OLCtrls
+ * above cannot overlap their children */
+@method OLGlyphDisplayClass, MSG_SPEC_BUILD
+{
+    @callsuper();
+    @call self::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    if (OpenCheckIfBW())
+	SpecSetFlagsOnAllCtrlParents(oself);
+}
+
+@method OLGlyphDisplayClass, MSG_SPEC_VIS_OPEN_NOTIFY
+{
+    VisOpenNotifyCommon(oself);
+}
+
+@method OLGlyphDisplayClass, MSG_SPEC_VIS_CLOSE_NOTIFY
+{
+    VisCloseNotifyCommon(oself);
+}
+
+/* OpenChooseNewGadgetSize: the suggested size where the gadget hints
+ * allow it (as the button's, copenButtonClass.goc; a glyph is never in
+ * a toolbox) */
+static void ChooseNewGadgetSize(OLGlyphDisplayFlags f, sword sugW,
+				sword sugH, sword *w, sword *h)
+{
+    if ((f & OLGDF_EXPAND_WIDTH_TO_FIT_PARENT) && sugW > *w)
+	*w = sugW;
+    if ((f & OLGDF_EXPAND_HEIGHT_TO_FIT_PARENT) && sugH > *h)
+	*h = sugH;
+    if ((f & OLGDF_CAN_CLIP_MONIKER_WIDTH) && (word) *w > (word) sugW)
+	*w = sugW;
+    if ((f & OLGDF_CAN_CLIP_MONIKER_HEIGHT) && (word) *h > (word) sugH)
+	*h = sugH;
+}
+
+/*
+ * OLGlyphDisplayRecalcSize: the moniker's size (a separator at least
+ * two pixels across), the gadget hints and the size hints applied
+ */
+@method OLGlyphDisplayClass, MSG_VIS_RECALC_SIZE
+{
+    sword sw = (sword) width, sh = (sword) height, w, h;
+    GStateHandle gs;
+    SizeAsDWord s;
+    OLGlyphDisplayFlags f;
+
+    VisApplySizeHints(oself, &sw, &sh);
+    gs = ViewCreateCalcGState();
+    s = SpecGetGenMonikerSize(oself, gs);
+    GrDestroyState(gs);
+    w = (sword) DWORD_WIDTH(s);
+    h = (sword) DWORD_HEIGHT(s);
+    f = Glyph(oself)->OLGDI_flags;
+    if (f & OLGDF_SEPARATOR) {
+	if (f & OLGDF_EXPAND_WIDTH_TO_FIT_PARENT) {
+	    if ((word) h < 2)
+		h = 2;
+	} else if ((f & OLGDF_EXPAND_HEIGHT_TO_FIT_PARENT) && (word) w < 2)
+	    w = 2;
+    }
+    ChooseNewGadgetSize(f, sw, sh, &w, &h);
+    VisApplySizeHints(oself, &w, &h);
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/* OLGlyphDisplayGetExtraSize: all of it is the moniker */
+@method OLGlyphDisplayClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    (void) childCount;
+    memset(retValue, 0, sizeof(*retValue));
+}
+
+/* OLGlyphDisplayDrawSeparator: a black line and a white one beside it,
+ * along the top (expanding its width) or the left (its height) */
+static void DrawSeparator(optr oself, GStateHandle gs)
+{
+    OLGlyphDisplayFlags f = Glyph(oself)->OLGDI_flags;
+    Rectangle b;
+
+    VisGetBounds(oself, &b);
+    if (f & OLGDF_EXPAND_WIDTH_TO_FIT_PARENT) {
+	GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0);
+	GrDrawHLine(gs, b.R_left, b.R_top, b.R_right);
+	GrSetLineColor(gs, CF_INDEX, C_WHITE, 0, 0);
+	GrDrawHLine(gs, b.R_left, b.R_top + 1, b.R_right);
+    } else if (f & OLGDF_EXPAND_HEIGHT_TO_FIT_PARENT) {
+	GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0);
+	GrDrawVLine(gs, b.R_left, b.R_top, b.R_bottom);
+	GrSetLineColor(gs, CF_INDEX, C_WHITE, 0, 0);
+	GrDrawVLine(gs, b.R_left + 1, b.R_top, b.R_bottom);
+    }
+}
+
+/*
+ * OLGlyphDisplayDraw: not enabled: the bounds in the light color, and
+ * all in a 50% pattern; the separator; the moniker in black, clipped to
+ * the glyph where it can be, centered where asked
+ */
+@method OLGlyphDisplayClass, MSG_VIS_DRAW
+{
+    Boolean enabled = (pself->VI_attrs & VA_FULLY_ENABLED) != 0;
+    OLGlyphDisplayFlags f;
+    DrawMonikerFlags mf = 0;
+    DrawMonikerArgs a;
+    SizeAsDWord s;
+    Rectangle b;
+
+    (void) drawFlags;
+    if (!enabled) {
+	GrSetAreaColor(gstate, CF_INDEX, moCS_dsLightColor, 0, 0);
+	VisGetBounds(oself, &b);
+	GrFillRect(gstate, b.R_left, b.R_top, b.R_right, b.R_bottom);
+	GrSetAreaMaskSys(gstate, SDM_50);
+	GrSetLineMaskSys(gstate, SDM_50);
+	GrSetTextMaskSys(gstate, SDM_50);
+    }
+    f = Glyph(oself)->OLGDI_flags;
+    if (f & OLGDF_SEPARATOR)
+	DrawSeparator(oself, gstate);
+    GrSetAreaColor(gstate, CF_INDEX, C_BLACK, 0, 0);
+    GrSetLineColor(gstate, CF_INDEX, C_BLACK, 0, 0);
+    GrSetTextColor(gstate, CF_INDEX, C_BLACK, 0, 0);
+    s = VisGetSize(oself);
+    if (f & (OLGDF_CAN_CLIP_MONIKER_WIDTH | OLGDF_CAN_CLIP_MONIKER_HEIGHT))
+	mf |= DMF_CLIP_TO_MAX_WIDTH;
+    if (f & OLGDF_CENTER_MONIKER)
+	mf |= (J_CENTER << DMF_X_JUST_OFFSET) |
+	      (J_CENTER << DMF_Y_JUST_OFFSET);
+    memset(&a, 0, sizeof(a));
+    a.DMA_gState = gstate;
+    a.DMA_xMaximum = DWORD_WIDTH(s);
+    a.DMA_yMaximum = DWORD_HEIGHT(s);
+    a.DMA_textHeight = GetSystemFontHeight();
+    VisDrawMoniker(oself,
+		   ((GenInstance *) ObjDerefGen(oself))->GI_visMoniker,
+		   mf, &a);
+    if (!enabled) {
+	GrSetAreaMaskSys(gstate, SDM_100);
+	GrSetLineMaskSys(gstate, SDM_100);
+	GrSetTextMaskSys(gstate, SDM_100);
+    }
+}

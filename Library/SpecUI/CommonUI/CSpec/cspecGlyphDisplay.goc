@@ -1,0 +1,13 @@
+/*
+ * cspecGlyphDisplay.goc -- the build routine of the glyph (after
+ * cspecGlyphDisplay.asm): a GenGlyph is an OLGlyphDisplay.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olGlyphDisplayClass.goh>
+
+ClassStruct *OLBuildGlyphDisplay(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLGlyphDisplayClass;
+}

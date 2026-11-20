@@ -1,0 +1,32 @@
+/*
+ * olGlyphDisplayClass.goh -- OLGlyphDisplayClass, the specific UI's
+ * glyph: a GenGlyph, text or graphics that only shows itself (after
+ * Include/Internal/SpecUI/olGlyphDisplayClass.def), for Port32.
+ */
+#ifndef __OLGLYPHDISPLAYCLASS_GOH
+#define __OLGLYPHDISPLAYCLASS_GOH
+
+@include <Objects/visC.goh>
+@include <Objects/gGlyphC.goh>
+
+@deflib motif
+
+/* OLGlyphDisplayFlags: the first six as the OLButtonMoreAttrs */
+typedef ByteFlags OLGlyphDisplayFlags;
+#define OLGDF_EXPAND_WIDTH_TO_FIT_PARENT	0x80
+#define OLGDF_EXPAND_HEIGHT_TO_FIT_PARENT	0x40
+#define OLGDF_CAN_CLIP_MONIKER_WIDTH		0x20
+#define OLGDF_CAN_CLIP_MONIKER_HEIGHT		0x10
+#define OLGDF_CENTER_MONIKER			0x08
+#define OLGDF_IN_TOOLBOX			0x04
+#define OLGDF_SEPARATOR				0x02
+
+@class OLGlyphDisplayClass, VisClass;
+@uses GenGlyphClass;
+
+    @instance OLGlyphDisplayFlags	OLGDI_flags = 0;
+@endc;
+
+@endlib
+
+#endif

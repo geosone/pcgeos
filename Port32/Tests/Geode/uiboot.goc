@@ -3,7 +3,9 @@
  * (Port32/Tests): UBProcessClass (GenProcessClass) with the application
  * object UBApp and its primary window UBPrimary, which holds the
  * display group UBGroup with the documents UBDoc1 (with a menu, adopted
- * by the primary's menu bar) and UBDoc2.  The UI booted with "[ui]
+ * by the primary's menu bar) and UBDoc2 (item groups, a popup list, a
+ * glyph and a separator, views, a scrollbar, a scrolling and a dynamic
+ * list).  The UI booted with "[ui]
  * specific = motif" starts it ("[ui] execOnStartup"); the test
  * (test_ui_boot.c) runs the steps through UBStep on the process thread,
  * the checks made here count in ubState.  The process is on the
@@ -34,6 +36,8 @@
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Internal/SpecUI/olPaneClass.goh>
 @include <Internal/SpecUI/olContentClass.goh>
+@include <Internal/SpecUI/olGlyphDisplayClass.goh>
+@include <Objects/gGlyphC.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -77,6 +81,7 @@ typedef struct {
     /* the dynamic list: monikers asked for, items made, the top item
      * and the first item's number after scrolling to item 12 */
     word		UBS_dlist[4];
+    short		UBS_glyph[5];
 } UBState;
 
 UBState ubState;
@@ -193,8 +198,21 @@ UBState ubState;
 }
 @object GenDisplayClass UBDoc2 = {
     GI_visMoniker = "Doc 2";
-    GI_comp = @UBRadio, @UBChecks, @UBSize, @UBScroll, @UBView, @UBView2,
-	      @UBSList, @UBDList;
+    GI_comp = @UBRadio, @UBChecks, @UBSize, @UBLabel, @UBSep, @UBView,
+	      @UBView2, @UBRow;
+}
+/* in Doc 2: a glyph, and a separator as wide as the display */
+@object GenGlyphClass UBLabel = {
+    GI_visMoniker = "A label";
+}
+@object GenGlyphClass UBSep = {
+    HINT_GLYPH_SEPARATOR;
+    HINT_EXPAND_WIDTH_TO_FIT_PARENT;
+}
+/* side by side, so that Doc 2 fits a screen of 640 x 480 with a font */
+@object GenInteractionClass UBRow = {
+    GI_comp = @UBScroll, @UBSList, @UBDList;
+    HINT_ORIENT_CHILDREN_HORIZONTALLY;
 }
 /* in Doc 2: a view of a 2000 x 300 document that scrolls both ways
  * (its window fixed at 200 x 40: the screens of the tests differ) */
@@ -1424,10 +1442,12 @@ static Rectangle ScreenBounds(WindowHandle w)
 	VisData(@UBScroll, &sb, sizeof(sb));
 	UBCHECK(sb.OLSBI_scrArea ==
 		r.R_bottom - r.R_top - (sb.OLSBI_arrowSize + 3) * 2);
-	/* (the ratio a WWFixed fraction: a fifth rounded either way) */
+	/* (the ratio a WWFixed fraction: a fifth rounded either way; the
+	 * bar is as short as the lists beside it, where a fifth is less
+	 * than the default thumb) */
 	UBCHECK(sb.OLSBI_elevOffset == 0 &&
 		sb.OLSBI_elevLen >= sb.OLSBI_scrArea / 5 - 1 &&
-		sb.OLSBI_elevLen <= sb.OLSBI_scrArea / 5);
+		sb.OLSBI_elevLen <= sb.OLSBI_scrArea / 2);
 	UBCHECK(sb.OLSBI_state & OLSS_AT_TOP);
 	UBCHECK(r.R_right - r.R_left == sb.OLSBI_arrowSize + 2);
 	UBCHECK(r.R_bottom - r.R_top >= (sb.OLSBI_arrowSize + 3) * 2);
@@ -1698,6 +1718,45 @@ static Rectangle ScreenBounds(WindowHandle w)
 	UBCHECK(!(ii.OLII_state & OLIS_MONIKER_INVALID));
 	UBCHECK(ii.OLBI_specState & OLBSS_SELECTED);
 	UBCHECK(@call UBDList::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 12);
+	break;
+    }
+    case 39: {
+	/* Doc 2's glyph: Motif's OLGlyphDisplay, as large as its text;
+	 * the separator two pixels high, expanded to the display's
+	 * width; a longer moniker: wider; not enabled */
+	OLGlyphDisplayInstance g;
+	Rectangle r = Bounds(@UBLabel), sr = Bounds(@UBSep);
+	sword w = r.R_right - r.R_left;
+
+	UBCHECK(InClass(@UBLabel, (ClassStruct *) &OLGlyphDisplayClass));
+	UBCHECK(InClass(@UBSep, (ClassStruct *) &OLGlyphDisplayClass));
+	VisData(@UBLabel, &g, sizeof(g));
+	UBCHECK(!g.OLGDI_flags);
+	UBCHECK(g.VI_attrs & VA_FULLY_ENABLED);
+	ubState.UBS_glyph[0] = w;
+	ubState.UBS_glyph[1] = r.R_bottom - r.R_top;
+	UBCHECK(w >= 20 && w <= 80);
+	UBCHECK(ubState.UBS_glyph[1] >= 8 && ubState.UBS_glyph[1] <= 20);
+	VisData(@UBSep, &g, sizeof(g));
+	UBCHECK(g.OLGDI_flags ==
+		(OLGDF_SEPARATOR | OLGDF_EXPAND_WIDTH_TO_FIT_PARENT));
+	ubState.UBS_glyph[2] = sr.R_right - sr.R_left;
+	ubState.UBS_glyph[3] = sr.R_bottom - sr.R_top;
+	UBCHECK(ubState.UBS_glyph[3] == 2);
+	UBCHECK(ubState.UBS_glyph[2] > 200 && sr.R_left == r.R_left &&
+		sr.R_top >= r.R_bottom);
+	(void) @call UBLabel::MSG_GEN_REPLACE_VIS_MONIKER_TEXT(
+		"A label that is longer", VUM_NOW);
+	r = Bounds(@UBLabel);
+	ubState.UBS_glyph[4] = r.R_right - r.R_left;
+	UBCHECK(ubState.UBS_glyph[4] > w * 2);
+	@call UBLabel::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+	VisData(@UBLabel, &g, sizeof(g));
+	UBCHECK(!(g.VI_attrs & VA_FULLY_ENABLED));
+	@call UBSep::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+	@call UBSep::MSG_GEN_SET_ENABLED(VUM_NOW);
+	VisData(@UBSep, &g, sizeof(g));
+	UBCHECK(g.VI_attrs & VA_FULLY_ENABLED);
 	break;
     }
     }
