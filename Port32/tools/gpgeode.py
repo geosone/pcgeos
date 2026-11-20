@@ -228,13 +228,41 @@ class Gp:
             raise ValueError(f'unknown keyword "{kw}"')
 
 
-def goc_starts(path):
-    """(name, is_data) of the @start lines of a .goc file"""
+def local_includes(path, text):
+    """the files a goc file includes with @include "..." that exist next
+    to it or in a directory above it (art .goh files that start
+    resources of their own)"""
+    import os
+    found = []
+    for name in re.findall(r'^\s*@include\s+"([^"]+)"', text, re.MULTILINE):
+        d = os.path.dirname(os.path.abspath(path))
+        for _ in range(3):
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                found.append(p)
+                break
+            d = os.path.dirname(d)
+    return found
+
+
+def goc_starts(path, seen=None):
+    """(name, is_data) of the @start lines of a .goc file and of the
+    local files it includes"""
+    seen = set() if seen is None else seen
+    if path in seen:
+        return []
+    seen.add(path)
     with open(path, encoding='latin-1') as f:
         text = re.sub(r'/\*.*?\*/', '', f.read(), flags=re.DOTALL)
-    return [(m.group(1), 'data' in m.group(2).lower())
-            for m in re.finditer(r'^\s*@start\s+(\w+)([^;\n]*)', text,
-                                 re.MULTILINE)]
+    starts = []
+    for m in re.finditer(r'^\s*@include\s+"[^"]+"|^\s*@start\s+(\w+)([^;\n]*)',
+                         text, re.MULTILINE):
+        if m.group(1):
+            starts.append((m.group(1), 'data' in m.group(2).lower()))
+        else:
+            for inc in local_includes(path, m.group(0)):
+                starts.extend(goc_starts(inc, seen))
+    return starts
 
 
 def protocol(rev):

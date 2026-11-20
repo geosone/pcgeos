@@ -40,6 +40,9 @@ typedef struct {
     byte		UBS_lastOverlapping;
     sword		UBS_gw, UBS_gh;		/* the group's size */
     sword		UBS_dl, UBS_dt, UBS_dw, UBS_dh;	/* UBDoc1's */
+    /* the primary's system menu button (left, top, width, height) and
+     * the left and right of its title bar */
+    sword		UBS_sys[6];
 } UBState;
 
 UBState ubState;
@@ -503,6 +506,78 @@ static optr GroupTarget(void)
 	VisData(@UBFile, &m, sizeof(m));
 	UBCHECK(m.OLMWI_specState & (OMWSS_FILE_MENU | OMWSS_EXIT_CREATED));
 	(void) @call UBFile::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	break;
+    }
+    case 11: {
+	/* the primary's system menu: a copy of the standard one, its
+	 * output the primary, linked up to it; its button in the title
+	 * bar (under the gadget area, as the asm puts it), left, the
+	 * title bar starting after it */
+	OLWinInstance w;
+	optr b, m, it;
+	VisMoniker *vm;
+	Rectangle r;
+	VisInstance v;
+
+	VisData(@UBPrimary, &w, sizeof(w));
+	UBCHECK(w.OLWI_attrs & OWA_HAS_SYS_MENU);
+	UBCHECK(w.OLWI_sysMenu != 0 && w.OLWI_sysMenuButton != 0);
+	if (!w.OLWI_sysMenu || !w.OLWI_sysMenuButton)
+	    break;
+	b = ConstructOptr(w.OLWI_sysMenu, w.OLWI_sysMenuButton);
+	UBCHECK(InClass(b, (ClassStruct *) &OLMenuButtonClass));
+	UBCHECK(@call b::MSG_VIS_QUERY_WINDOW() == ubState.UBS_primaryWin);
+	VisData(b, &v, sizeof(v));
+	UBCHECK((v.VI_attrs & (VA_DRAWABLE | VA_DETECTABLE)) ==
+		(VA_DRAWABLE | VA_DETECTABLE));
+	r = Bounds(b);
+	ubState.UBS_sys[0] = r.R_left;
+	ubState.UBS_sys[1] = r.R_top;
+	ubState.UBS_sys[2] = r.R_right - r.R_left;
+	ubState.UBS_sys[3] = r.R_bottom - r.R_top;
+	ubState.UBS_sys[4] = w.OLWI_titleBarBounds.R_left;
+	ubState.UBS_sys[5] = w.OLWI_titleBarBounds.R_right;
+	UBCHECK(w.OLWI_titleBarBounds.R_left > r.R_left);
+	UBCHECK(w.OLWI_titleBarBounds.R_left == r.R_right);
+	ObjLockObjBlock(w.OLWI_sysMenu);
+	UBCHECK(ObjBlockGetOutput(w.OLWI_sysMenu) == @UBPrimary);
+	MemUnlock(w.OLWI_sysMenu);
+	/* the menu (the button's generic part): linked up only, its
+	 * moniker list reduced to one moniker */
+	{
+	    OLButtonInstance bi;
+
+	    VisData(b, &bi, sizeof(bi));
+	    m = ConstructOptr(w.OLWI_sysMenu, bi.OLBI_genChunk);
+	}
+	UBCHECK(@call m::MSG_GEN_FIND_PARENT() == @UBPrimary);
+	UBCHECK(@call UBPrimary::MSG_GEN_FIND_CHILD(m) == (word) -1);
+	UBCHECK(InClass(m, (ClassStruct *) &OLMenuWinClass));
+	UBCHECK(@call m::MSG_GEN_COUNT_CHILDREN() == 6);
+	ObjLockObjBlock(w.OLWI_sysMenu);
+	{
+	    ChunkHandle mk = ((GenInstance *) ObjDerefGen(m))->GI_visMoniker;
+
+	    vm = mk ? LMemDeref(ConstructOptr(w.OLWI_sysMenu, mk)) : NULL;
+	    UBCHECK(vm && !(vm->VM_type & VMT_MONIKER_LIST) &&
+		    (vm->VM_type & VMT_GSTRING));
+	}
+	MemUnlock(w.OLWI_sysMenu);
+	/* Restore off (not maximized), Close on, with Alt; keyboard only
+	 * (no mouse here): no icons, and Maximize, which goes with its
+	 * icon, off as well */
+	it = @call m::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+	UBCHECK(it && !@call it::MSG_GEN_CHECK_IF_FULLY_ENABLED());
+	UBCHECK(it && TextIs(it, "Restore"));
+	it = @call m::MSG_GEN_FIND_CHILD_AT_POSITION(5);
+	UBCHECK(it && TextIs(it, "Close"));
+	UBCHECK(it && @call it::MSG_GEN_CHECK_IF_FULLY_ENABLED());
+	UBCHECK(it && @call it::MSG_GEN_GET_KBD_ACCELERATOR() ==
+		(KS_ALT | (KS_CHAR_SET_CONTROL << 8) | VC_F4));
+	UBCHECK(!(w.OLWI_specState & OLWSS_SYS_ICONS_ATTACHED));
+	it = @call m::MSG_GEN_FIND_CHILD_AT_POSITION(4);
+	UBCHECK(it && TextIs(it, "Maximize") &&
+		!@call it::MSG_GEN_CHECK_IF_FULLY_ENABLED());
 	break;
     }
     }

@@ -1,14 +1,21 @@
 /*
- * cspecCUAS.goc -- the StandardMonikers resource of cspecCUAS.ui in
- * goc: the monikers of the standard triggers a dialog adds and of the
- * standard groups (Motif, not keyboard only: no mnemonics for Apply
- * and OK).
+ * cspecCUAS.goc -- cspecCUAS.ui in goc (Motif): the StandardMonikers
+ * resource (the monikers of the standard triggers a dialog adds and of
+ * the standard groups; not keyboard only: no mnemonics for Apply and
+ * OK), the system menus (StandardWindowMenuResource for primaries and
+ * dialogs, DisplayWindowMenuResource for displays, with Next) that
+ * OpenWinEnsureSysMenu (CWin/cwinClassCUAS.goc) copies for each window,
+ * and their pictures (cspecCUASArt.goh, generated from the mkr*.ui and
+ * bmPin.ui files by Port32/tools/uimkr2goc.py; goc needs the monikers
+ * of a list in the same file).
  *
- * Port32: the rest of cspecCUAS.ui (the application monikers, the
- * pushpin and window menu pictures, the system menu objects) is not
- * here yet.
+ * The icons' ATTR_GEN_TRIGGER_ACTION_DATA (0, VUM_NOW) is left out: the
+ * C messages they send take no arguments.
+ *
+ * Port32: the application monikers are not here yet.
  */
 @include "cGeode.goh"
+@include "CSpec/cspecCUASArt.goh"
 
 @start StandardMonikers, data;
 
@@ -34,3 +41,152 @@
 @visMoniker FileExitMoniker = 'x', "Exit";
 
 @end StandardMonikers;
+
+@start StandardWindowMenuResource, notDetachable;
+
+@object GenInteractionClass StandardWindowMenu = {
+    GI_kbdAccelerator = @specificUI shift ESCAPE;
+    GI_visMoniker = list { @MOWindowMenuColorMoniker, @MOWindowMenuBWMoniker, @MOWindowMenuCGAMoniker };
+    GI_comp = @SMI_Restore, @SMI_Move, @SMI_Size, @SMI_Minimize, @SMI_Maximize, @SMI_Close;
+    GII_visibility = GIV_POPUP;
+    HINT_SYS_MENU;
+    HINT_INFREQUENTLY_USED;
+}
+@object GenTriggerClass SMI_Restore = {
+    GI_visMoniker = 'R', "Restore";
+    GI_kbdAccelerator = @specificUI F5;
+    GTI_actionMsg = MSG_OL_RESTORE_WIN;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass SMI_Move = {
+    GI_visMoniker = 'M', "Move";
+    GI_kbdAccelerator = @specificUI F7;
+    GI_states = @default & ~GS_ENABLED;
+    GTI_actionMsg = MSG_MO_SYSMENU_MOVE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass SMI_Size = {
+    GI_visMoniker = 'S', "Size";
+    GI_kbdAccelerator = @specificUI F8;
+    GI_states = @default & ~GS_ENABLED;
+    GTI_actionMsg = MSG_MO_SYSMENU_SIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass SMI_Minimize = {
+    GI_visMoniker = 'n', "Minimize";
+    GI_kbdAccelerator = @specificUI F9;
+    GI_states = @default & ~GS_ENABLED;
+    GTI_actionMsg = MSG_OL_WIN_MINIMIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass SMI_Maximize = {
+    GI_visMoniker = 'x', "Maximize";
+    GI_kbdAccelerator = @specificUI F10;
+    GTI_actionMsg = MSG_OL_WIN_MAXIMIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass SMI_Close = {
+    GI_visMoniker = 'C', "Close";
+    GI_kbdAccelerator = @specificUI F4;
+    GTI_actionMsg = MSG_OL_WIN_CLOSE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass SMI_MinimizeIcon = {
+    GI_visMoniker = list { @MinimizeColorMoniker, @MinimizeBWMoniker, @MinimizeCGAMoniker };
+    GTI_actionMsg = MSG_OL_WIN_MINIMIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass SMI_MaximizeIcon = {
+    GI_visMoniker = list { @MaximizeColorMoniker, @MaximizeBWMoniker, @MaximizeCGAMoniker };
+    GTI_actionMsg = MSG_OL_WIN_MAXIMIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass SMI_RestoreIcon = {
+    GI_visMoniker = list { @RestoreColorMoniker, @RestoreBWMoniker, @RestoreCGAMoniker };
+    GTI_actionMsg = MSG_OL_RESTORE_WIN;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass StandardWindowMenuButton = {
+    GI_visMoniker = list { @MOWindowMenuButtonColorMoniker, @MOWindowMenuButtonBWMoniker, @MOWindowMenuButtonCGAMoniker };
+    GTI_actionMsg = MSG_OL_WIN_CLOSE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@end StandardWindowMenuResource;
+
+@start DisplayWindowMenuResource, notDetachable;
+
+@object GenInteractionClass DisplayWindowMenu = {
+    GI_kbdAccelerator = @specificUI alt MINUS;
+    GI_visMoniker = list { @MODisplayWindowMenuColorMoniker, @MODisplayWindowMenuBWMoniker, @MODisplayWindowMenuCGAMoniker };
+    GI_comp = @DSMI_Restore, @DSMI_Move, @DSMI_Size, @DSMI_Minimize, @DSMI_Maximize, @DSMI_Close, @DSMI_Next;
+    GII_visibility = GIV_POPUP;
+    HINT_SYS_MENU;
+    HINT_INFREQUENTLY_USED;
+}
+@object GenTriggerClass DSMI_Restore = {
+    GI_visMoniker = 'R', "Restore";
+    GI_kbdAccelerator = @specificUI F5;
+    GTI_actionMsg = MSG_OL_RESTORE_WIN;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DSMI_Move = {
+    GI_visMoniker = 'M', "Move";
+    GI_kbdAccelerator = @specificUI F7;
+    GI_states = @default & ~GS_ENABLED;
+    GTI_actionMsg = MSG_MO_SYSMENU_MOVE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DSMI_Size = {
+    GI_visMoniker = 'S', "Size";
+    GI_kbdAccelerator = @specificUI F8;
+    GI_states = @default & ~GS_ENABLED;
+    GTI_actionMsg = MSG_MO_SYSMENU_SIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DSMI_Minimize = {
+    GI_visMoniker = 'n', "Minimize";
+    GI_kbdAccelerator = @specificUI F9;
+    GI_states = @default & ~GS_ENABLED;
+    GTI_actionMsg = MSG_OL_WIN_MINIMIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DSMI_Maximize = {
+    GI_visMoniker = 'x', "Maximize";
+    GI_kbdAccelerator = @specificUI F10;
+    GTI_actionMsg = MSG_OL_WIN_MAXIMIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DSMI_Close = {
+    GI_visMoniker = 'C', "Close";
+    GI_kbdAccelerator = @specificUI F4;
+    GTI_actionMsg = MSG_OL_WIN_CLOSE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DSMI_MinimizeIcon = {
+    GI_visMoniker = list { @MinimizeColorMoniker, @MinimizeBWMoniker, @MinimizeCGAMoniker };
+    GTI_actionMsg = MSG_OL_WIN_MINIMIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DSMI_MaximizeIcon = {
+    GI_visMoniker = list { @MaximizeColorMoniker, @MaximizeBWMoniker, @MaximizeCGAMoniker };
+    GTI_actionMsg = MSG_OL_WIN_MAXIMIZE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DSMI_RestoreIcon = {
+    GI_visMoniker = list { @RestoreColorMoniker, @RestoreBWMoniker, @RestoreCGAMoniker };
+    GTI_actionMsg = MSG_OL_RESTORE_WIN;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+
+@object GenTriggerClass DSMI_Next = {
+    GI_visMoniker = 'N', "Next";
+    GI_kbdAccelerator = @specificUI F6;
+    GTI_actionMsg = MSG_MO_NEXT_WIN;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@object GenTriggerClass DisplayWindowMenuButton = {
+    GI_visMoniker = list { @MOWindowMenuButtonColorMoniker, @MOWindowMenuButtonBWMoniker, @MOWindowMenuButtonCGAMoniker };
+    GTI_actionMsg = MSG_OL_WIN_CLOSE;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+}
+@end DisplayWindowMenuResource;

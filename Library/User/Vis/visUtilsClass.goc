@@ -72,7 +72,8 @@ static optr BestFromList(const VisMonikerListEntry *e, word n, word f)
 }
 
 /* a copy of the moniker `m' in `dest' (over the chunk `over' if not 0;
- * the chunk resized first, both chunks found again after) */
+ * the chunk resized first, both chunks found again after).  The source
+ * may be a data block (the monikers of a list in their own resource). */
 static optr CopyMoniker(optr m, MemHandle dest, ChunkHandle over)
 {
     MemHandle sh = OptrToHandle(m);
@@ -81,15 +82,15 @@ static optr CopyMoniker(optr m, MemHandle dest, ChunkHandle over)
 
     if (!over)
 	return ConstructOptr(dest, GenCopyChunk(dest, sh, OptrToChunk(m), 0));
-    ObjLockObjBlock(sh);
+    ObjLockObjBlock(dest);
     if (dest != sh)
-	ObjLockObjBlock(dest);
+	(void) MemLock(sh);
     size = LMemGetChunkSize(m);
     LMemReAlloc(o, size);
     memmove(LMemDeref(o), LMemDeref(m), size);
     if (dest != sh)
-	MemUnlock(dest);
-    MemUnlock(sh);
+	MemUnlock(sh);
+    MemUnlock(dest);
     return o;
 }
 

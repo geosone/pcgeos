@@ -887,11 +887,14 @@ static word Slot(byte req, sword *x, sword *y)
 	}
 	/* staggered, extended near the field's bottom right (Motif keeps
 	 * no margin at the right: the window ends one past the field, as
-	 * a maximized one) */
+	 * a maximized one; on a small field, 320 wide, its minimum width,
+	 * the title bar with the system menu button, takes it further) */
 	VisData(umField, &f, sizeof(f));
 	w0 = b.VI_bounds.R_right - b.VI_bounds.R_left;
 	h0 = b.VI_bounds.R_bottom - b.VI_bounds.R_top;
-	UMCHECK(b.VI_bounds.R_right == f.VI_bounds.R_right + 1 &&
+	UMCHECK(b.VI_bounds.R_right >= f.VI_bounds.R_right + 1 &&
+		(b.VI_bounds.R_right == f.VI_bounds.R_right + 1 ||
+		 f.VI_bounds.R_right < 640) &&
 		b.VI_bounds.R_bottom < f.VI_bounds.R_bottom &&
 		w0 > (f.VI_bounds.R_right - f.VI_bounds.R_left) / 2);
 	UMCHECK(((b.OLWI_winPosSizeState >> 8) & 0x3f) != 0);

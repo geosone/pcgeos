@@ -39,8 +39,9 @@ static optr PopupButton(optr o)
  * ACTION is the window's master default), enabled as the popup is,
  * added to its vis parent beside the generic siblings (a system icon
  * or the express menu's to the generic parent, first); a menu's is an
- * OLMenuButton.  Port32: the file menu's place not yet; the moniker
- * list is not reduced to an icon.
+ * OLMenuButton.  The button uses the popup's moniker: a moniker list
+ * is reduced to the moniker fitting the display first (an icon if
+ * there is one).  Port32: the file menu's place not yet.
  */
 static void PopupBuildButton(optr oself, SpecBuildFlags flags)
 {
@@ -53,6 +54,10 @@ static void PopupBuildButton(optr oself, SpecBuildFlags flags)
     SpecBuildFlags vf = flags;
     GenReturnParams r;
 
+    (void) @call oself::MSG_GEN_FIND_MONIKER(FALSE, VMSF_REPLACE_LIST |
+				VMSF_GSTRING | (VMS_ICON << VMSF_STYLE_OFFSET),
+				0);
+    p = PWin(oself);
     if (!p->OLPWI_button) {
 	word ta = p->OLWI_type | ((word) p->OLWI_fixedAttr << 8);
 	Boolean menu = (p->OLWI_fixedAttr & OWFA_IS_MENU) != 0;

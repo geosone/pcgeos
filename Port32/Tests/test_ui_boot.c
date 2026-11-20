@@ -45,6 +45,7 @@ typedef struct {
     unsigned char	UBS_lastOverlapping;
     short		UBS_gw, UBS_gh;
     short		UBS_dl, UBS_dt, UBS_dw, UBS_dh;
+    short		UBS_sys[6];
 } UBState;
 
 static int fails;
@@ -112,15 +113,19 @@ int main(void)
 	   st->UBS_gw, st->UBS_gh, st->UBS_dl, st->UBS_dt, st->UBS_dw,
 	   st->UBS_dh, st->UBS_displayNotices, st->UBS_listNotices);
     /* overlapping, selected, tiled, full sized, Ctrl+F6, not usable;
-     * the separators in a menu, the File menu's Exit */
-    for (i = 2; i <= 10; i++)
+     * the separators in a menu, the File menu's Exit; the primary's
+     * system menu */
+    for (i = 2; i <= 11; i++)
 	step(i);
+    printf("system menu button at %d,%d %dx%d, title bar %d..%d\n",
+	   st->UBS_sys[0], st->UBS_sys[1], st->UBS_sys[2], st->UBS_sys[3],
+	   st->UBS_sys[4], st->UBS_sys[5]);
 
     printf("geode checks: %u, failed %u (first at uiboot.goc line %u)\n",
 	   st->UBS_checks, st->UBS_fails, st->UBS_failLine);
     for (i = 0; i < st->UBS_fails && i < 8; i++)
 	printf("  failed: uiboot.goc line %u\n", st->UBS_failLines[i]);
-    CHECK(st->UBS_checks >= 50 && !st->UBS_fails);
+    CHECK(st->UBS_checks >= 90 && !st->UBS_fails);
 
     /* the UI detached: uiboot goes, the UI's process ends */
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(ui, 0), KMSG_META_DETACH,

@@ -7,7 +7,8 @@ goc -cg refers to the resources of a geode as GOCR_RES_<NAME> (the name in
 upper case).  This script numbers them like glue does: first the
 "resource" lines of the geode parameter file in their order, then the
 resources the .goc files start (@start) but the .gp file does not list, in
-the order of the files and of their @start lines.  Numbers start at 2 (0 is
+the order of the files and of their @start lines (those of the local
+files a .goc file includes, @include "...", where it includes them).  Numbers start at 2 (0 is
 the core block, 1 the fixed data, as in the 16-bit geode format).  The
 header goes to OUT.h or to standard output.  See Port32/ABI.md.
 """
@@ -27,10 +28,40 @@ def gp_resources(text):
     return names
 
 
-def goc_resources(text):
-    # @start Name[, flags];  (not inside comments: good enough for goc files)
+def local_includes(path, text):
+    """the files a goc file includes with @include "..." that exist next
+    to it or in a directory above it (art .goh files that start
+    resources of their own)"""
+    import os
+    found = []
+    for name in re.findall(r'^\s*@include\s+"([^"]+)"', text, re.MULTILINE):
+        d = os.path.dirname(os.path.abspath(path))
+        for _ in range(3):
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                found.append(p)
+                break
+            d = os.path.dirname(d)
+    return found
+
+
+def goc_resources(path, text, seen=None):
+    # @start Name[, flags];  (not inside comments: good enough for goc
+    # files), in order with those of the local files included
+    seen = set() if seen is None else seen
+    seen.add(path)
     text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
-    return re.findall(r'^\s*@start\s+(\w+)', text, re.MULTILINE)
+    names = []
+    for m in re.finditer(r'^\s*@include\s+"[^"]+"|^\s*@start\s+(\w+)', text,
+                         re.MULTILINE):
+        if m.group(1):
+            names.append(m.group(1))
+            continue
+        for inc in local_includes(path, m.group(0)):
+            if inc not in seen:
+                with open(inc, encoding='latin-1') as f:
+                    names.extend(goc_resources(inc, f.read(), seen))
+    return names
 
 
 def main():
@@ -44,7 +75,7 @@ def main():
     for i, path in enumerate(args):
         with open(path, encoding='latin-1') as f:
             text = f.read()
-        found = gp_resources(text) if i == 0 else goc_resources(text)
+        found = gp_resources(text) if i == 0 else goc_resources(path, text)
         for name in found:
             if name.upper() not in names:
                 names.append(name.upper())

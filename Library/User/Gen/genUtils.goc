@@ -14,8 +14,7 @@
  * Port32 loads the library of [ui] specific (default "motif") on the
  * first call and keeps it until UserFreeSpecificUI.
  *
- * Port32, not yet: moniker lists (GenFindMoniker leaves a list where it
- * is), the GenView's generic content in GenSpecShrinkBranch.
+ * Port32, not yet: the GenView's generic content in GenSpecShrinkBranch.
  */
 @include "uiInt.goh"
 @include <Objects/gSysC.goh>
@@ -188,7 +187,7 @@ word GenCopyChunk(MemHandle destBlock, MemHandle blk, ChunkHandle chnk,
 
     if (!chnk)
 	return 0;
-    ObjLockObjBlock(blk);
+    (void) MemLock(blk);		/* (may be a data block: a moniker) */
     ObjLockObjBlock(destBlock);
     size = LMemDeref(src) ? LMemGetChunkSize(src) : 0;
     ch = LMemAlloc(destBlock, size);

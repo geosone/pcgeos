@@ -10,7 +10,6 @@
  *
  * Port32 (Port32/ABI.md section 13y), not yet:
  *   - the trigger bar (OLMDWI_triggerBar);
- *   - the system menu and its icons (OLWI_sysMenu stays 0);
  *   - moniker lists (MSG_GEN_FIND_MONIKER answers a plain moniker);
  *   - a double click on the title (cwinPtr.asm's MSG_META_START_SELECT).
  */
@@ -366,11 +365,13 @@ void OLMenuedWinSetMaximized(optr o, VisUpdateMode mode)
     w->VI_bounds.R_top += adj;
     w->VI_bounds.R_bottom += adj;
     UpdateWinPosSize(o);
-    /* in a GenDisplayGroup: no header, title or system menu (Port32:
-     * no system menu whose icons to disable yet) */
+    /* in a GenDisplayGroup: no header, title or system menu (its
+     * button and icons hidden) */
     gp = GenFindParent(o);
-    if (gp && ObjIsObjectInClass(gp, &GenDisplayGroupClass))
+    if (gp && ObjIsObjectInClass(gp, &GenDisplayGroupClass)) {
 	MWin(o)->OLWI_attrs &= ~(OWA_HEADER | OWA_TITLED | OWA_HAS_SYS_MENU);
+	OpenWinHideSysMenuIcons(o);
+    }
     (void) @call o::MSG_VIS_VUP_UPDATE_WIN_GROUP(mode);
 }
 
@@ -387,7 +388,10 @@ static void SetNotMaximized(optr o, VisUpdateMode mode)
 	return;
     w->OLWI_specState &= ~OLWSS_MAXIMIZED;
     OpenWinSwapState(o);
-    /* (OpenWinEnsureSysMenu and its icons: Port32 not yet) */
+    /* maximized when built: its system menu icons made now */
+    OpenWinEnsureSysMenu(o, SBF_IN_UPDATE_WIN_GROUP | SBF_WIN_GROUP | VUM_NOW);
+    OpenWinEnsureSysMenuIcons(o, SBF_IN_UPDATE_WIN_GROUP | SBF_WIN_GROUP |
+				 VUM_NOW);
     ConvertSpecWinSizePairsToPixels(o);
     MWin(o)->OLWI_winPosSizeState |= WPSS_POSITION_INVALID | WPSS_SIZE_INVALID;
     UpdateWinPosSize(o);

@@ -489,6 +489,21 @@ extern void EnsureWindowInParentWin(optr o, sword minW, sword minH);
 extern void OpenWinCheckVisibleConstraints(optr o);
 extern word OpenWinGetTitleBarGroupSize(optr o, Boolean right);
 extern word OpenWinGetSysMenuButtonWidth(optr o);
+/* the objects of a window's system menu block (CWin/cwinClassCUAS.goc) */
+typedef enum {
+    SMO_MENU, SMO_RESTORE, SMO_MOVE, SMO_SIZE, SMO_MINIMIZE, SMO_MAXIMIZE,
+    SMO_CLOSE, SMO_MINIMIZE_ICON, SMO_MAXIMIZE_ICON, SMO_RESTORE_ICON,
+    SMO_BUTTON
+} SysMenuObject;
+extern optr OpenWinSysMenuObject(optr o, SysMenuObject which);
+extern optr OpenWinSysMenuTop(optr o);
+extern void OpenWinEnsureSysMenu(optr o, SpecBuildFlags flags);
+extern void OpenWinEnsureSysMenuIcons(optr o, SpecBuildFlags flags);
+extern void OpenWinPositionSysMenuIcons(optr o);
+extern void OpenWinHideSysMenuIcons(optr o);
+extern void OpenWinFreeSysMenu(optr o, SpecBuildFlags flags, Boolean unbuild);
+extern void OpenWinSysMenuNotifyEnabled(optr o, Message msg, byte mode,
+					byte flags);
 extern Boolean OpenWinCheckIfMinMaxRestoreControls(optr o);
 extern word GetDividerStrLen(GStateHandle gs);
 extern SizeAsDWord OpenWinGetMonikerSize(optr o, GStateHandle gs);

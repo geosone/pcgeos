@@ -5616,7 +5616,39 @@ are left out), the constants, the variables and the routines.
     and the application's name with the mnemonic of "Exit", F3 as its
     shortcut, unless the launch model is transparent (without
     `UILO_CLOSABLE_APPS`) and the application is not a desk accessory.
-- **Not yet.** In `OLWinClass`: the popups, the system menu, the task
+  - The system menu (`CWin/cwinClassCUAS.goc`): a window with
+    `OWA_HAS_SYS_MENU` gets a copy of `StandardWindowMenuResource` (a
+    display: `DisplayWindowMenuResource`, with Next; `CSpec/cspecCUAS.goc`)
+    owned by the window's owner, its output the window. The menu (without
+    `UIWO_WINDOW_MENU` only the button that closes the window) is linked
+    up to the window and built as a tree; its items get Alt (a display's
+    Ctrl, a menu's none) as their shortcuts' modifier; its button,
+    unmanaged, goes into the title bar's left end (under the gadget area
+    of a primary, as in the asm). Unless there is only a keyboard, the
+    minimize, maximize and restore icons of the block are linked up and
+    built too. Each time the title bar's geometry is worked out the
+    title bar is narrowed by the button, the icons the window wants
+    (minimize; maximize, or restore when maximized) and the title bar
+    groups, they are sized and placed, the icons not wanted hidden, and
+    the items enabled as their icons are (Move and Size as the window
+    and `olExtWinAttrs` allow). Unbuilt or destroyed, the window frees
+    the block; enabled or not, it tells the button, the menu and the
+    icons. The asm used the chunks of the standard block in the display
+    one (the same offsets); C looks them up for the block
+    (`OpenWinSysMenuObject`). `HINT_SYS_ICON` and
+    `ATTR_SYSTEM_MENU_CLOSE` are `OLButtonClass` vardata goc does not take
+    on a `GenTrigger`: they are added to the copy. Its pictures
+    (`CSpec/cspecCUASArt.goh`) are generated from the `mkr*.ui` and
+    `bmPin.ui` files by `Port32/tools/uimkr2goc.py` and included where
+    the moniker lists are (goc needs a listed moniker's attributes);
+    `gpgeode.py` and `gpres.py` find the resources such a local
+    `@include` starts.
+  - Moniker lists are reduced to one moniker (an icon if there is one,
+    else a gstring, else the text) when a generic object is built
+    (`VisSpecBuild`) and before a popup's button is made, as in the asm;
+    the moniker copied may come from a data block (`CopyMoniker`,
+    `GenCopyChunk` lock it with `MemLock`).
+- **Not yet.** In `OLWinClass`: the popups, the pinned menus' system menu, the task
   bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
   `OLBaseWinClass`: the icon's private data and its window list entry
@@ -5629,8 +5661,7 @@ are left out), the constants, the variables and the routines.
   the number of items for the display control, the document
   control's options, `OLReleaseAllStayUpModeMenus` on a change of
   target. In `OLPopupWinClass` and
-  `OLDialogWinClass`: the file menu's place, the moniker list
-  reduced to an icon for the button, UserDoDialog and the action response, the help
+  `OLDialogWinClass`: the file menu's place, UserDoDialog and the action response, the help
   trigger (its moniker is a picture), the reply bar removed on tiny
   screens, discarding the block, the pushpin, the focus of a
   dialog run by the UI thread. In `OLButtonClass`: the black and white
@@ -5641,7 +5672,7 @@ are left out), the constants, the variables and the routines.
   (the move/resize keys and their abort monitor, the system menu's
   Move and Size), ink. In `OLMenuWinClass`: the pushpin
   (pinnable menus: the `PinMoniker` picture), cascading sub menus, the scrollers
-  (`MenuWinScrollerClass`), the system and express menus, the menu centers,
+  (`MenuWinScrollerClass`), the express menu, the menu centers,
   menus in stay up mode
   released through the application (`MSG_META_ENSURE_NO_MENUS_IN_
   STAY_UP_MODE` is answered by a menu, the generic tree does not pass
@@ -5762,7 +5793,11 @@ are left out), the constants, the variables and the routines.
   for them, a group with `HINT_SAME_CATEGORY_AS_PARENT` none; the items
   around it not usable, its separators go, one back, its one comes
   back (and the geometry after it). A File menu gets Exit last ("Exit
-  Boot", F3, `IC_EXIT`, not a generic child). Detached, `uiboot`
+  Boot", F3, `IC_EXIT`, not a generic child). The primary's system menu:
+  a copy whose output is the primary, its menu linked up only, its moniker
+  list reduced to a picture, six items with Alt, Restore and (keyboard
+  only: no icons) Maximize off, Close on; its button in the title bar's
+  left end, the title bar starting after it. Detached, `uiboot`
   and the UI's process go and Motif is unloaded. New blocks (and
   semaphores) belong to the current thread's process
   (`KernelOwnerNow`), not to the geode last loaded.

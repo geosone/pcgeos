@@ -9,7 +9,7 @@
  * priorities or nearest win group's priority, no menus kept beside
  * their buttons (AvoidMenuOverlap); no state saved or restored (the
  * TEMP_GEN_SAVE_WINDOW_INFO a restored window brings is read); the
- * system menu, its icons and the title bar groups have no width yet.
+ * title bar groups are not made yet.
  */
 @include "cGeode.goh"
 @include <Objects/gPrimC.goh>
@@ -408,13 +408,6 @@ word OpenWinGetTitleBarGroupSize(optr o, Boolean right)
     }
     MemUnlock(OptrToHandle(g));
     return cx;
-}
-
-/* OpenWinGetSysMenuButtonWidth: Port32: no system menu button yet */
-word OpenWinGetSysMenuButtonWidth(optr o)
-{
-    (void) o;
-    return 0;
 }
 
 /* OpenWinCheckIfMinMaxRestoreControls: displays, primaries if the

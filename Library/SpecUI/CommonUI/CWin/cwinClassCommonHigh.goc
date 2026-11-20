@@ -8,9 +8,9 @@
  * mouse), cwinClassMisc.goc (the keyboard) and (the drawing)
  * Motif/Win/winDraw.goc.
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the system menu and its
- * icons (OpenWinEnsureSysMenu, OpenWinEnsureSysMenuIcons, with
- * OLMenuWinClass and OLButtonClass), pinned menus, moniker lists
+ * The system menu and its icons: cwinClassCUAS.goc.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: pinned menus, moniker lists
  * (GenFindMoniker), the
  * task bar (taskBarPrefs: the adjustments are 0, as with no task bar).
  */
@@ -37,6 +37,8 @@
 @extern method OLWinClass, MSG_VIS_MOVE_RESIZE_WIN;
 @extern method OLWinClass, MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS;
 @extern method OLWinClass, MSG_OL_WIN_GET_TITLE_BAR_HEIGHT;
+/* cwinClassCUAS.goc */
+@extern method OLWinClass, MSG_SPEC_NOTIFY_ENABLED, MSG_SPEC_NOTIFY_NOT_ENABLED;
 /* cwinClassOther.goc */
 @extern method OLWinClass, MSG_VIS_CLOSE;
 @extern method OLWinClass, MSG_GEN_LOWER_TO_BOTTOM;
@@ -379,10 +381,15 @@ void OpenWinProcessHints(optr o)
  * ------------------------------------------------------------------- */
 
 /* OpenWinUpdateSpecBuild: the system menu and its icons of a win group
- * (Port32: not yet) */
+ * (not of a custom window; pinned menus: Port32 not yet) */
 @method OLWinClass, MSG_SPEC_BUILD_BRANCH
 {
     @callsuper();
+    if (!(flags & SBF_WIN_GROUP) ||
+	(Win(oself)->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW))
+	return;
+    OpenWinEnsureSysMenu(oself, flags);
+    OpenWinEnsureSysMenuIcons(oself, flags);
 }
 
 /*

@@ -1,0 +1,558 @@
+/*
+ * cwinClassCUAS.goc -- OLWinClass (after cwinClassCUAS.asm): the system
+ * menu of a CUA style window and its icons.
+ *
+ * A window with OWA_HAS_SYS_MENU gets a copy of StandardWindowMenuResource
+ * (a display: DisplayWindowMenuResource, cspecCUAS.goc), owned by the
+ * window's owner, its output the window: the menu (or, without
+ * UIWO_WINDOW_MENU, only the button that closes the window) is linked up
+ * to the window and built; its button in the title bar is the system
+ * menu button.  The minimize, maximize and restore icons of the same
+ * block are linked up to the window too.  Each time the title bar's
+ * geometry is worked out the button, the icons and the title bar groups
+ * are sized and placed, the icons not needed hidden, and the items of
+ * the menu enabled as the icons are.
+ *
+ * The asm used the chunks of the standard block in either block (the
+ * two keep their objects at the same offsets); here the chunks are
+ * looked up for the block the window has.  HINT_SYS_ICON (the icons, the
+ * button) and ATTR_SYSTEM_MENU_CLOSE (Close) are OLButtonClass vardata
+ * goc does not take on a GenTrigger: they are added to the copy.
+ */
+@include "cGeode.goh"
+@include <Objects/gTrigC.goh>
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+@extern object StandardWindowMenu;
+@extern object SMI_Restore;
+@extern object SMI_Move;
+@extern object SMI_Size;
+@extern object SMI_Minimize;
+@extern object SMI_Maximize;
+@extern object SMI_Close;
+@extern object SMI_MinimizeIcon;
+@extern object SMI_MaximizeIcon;
+@extern object SMI_RestoreIcon;
+@extern object StandardWindowMenuButton;
+@extern object DisplayWindowMenu;
+@extern object DSMI_Restore;
+@extern object DSMI_Move;
+@extern object DSMI_Size;
+@extern object DSMI_Minimize;
+@extern object DSMI_Maximize;
+@extern object DSMI_Close;
+@extern object DSMI_MinimizeIcon;
+@extern object DSMI_MaximizeIcon;
+@extern object DSMI_RestoreIcon;
+@extern object DisplayWindowMenuButton;
+
+/* OLWinSysIcons: the icons and items enabled (within
+ * OpenWinPositionSysMenuIcons only) */
+#define OLWSI_SYS_MENU	0x80
+#define OLWSI_MAXI	0x40
+#define OLWSI_MINI	0x20
+#define OLWSI_RESTORE	0x10
+#define OLWSI_CLOSABLE	0x08
+#define OLWSI_PINNED	0x04
+#define OLWSI_MOVE	0x02
+#define OLWSI_SIZE	0x01
+
+/* the template's object, the standard one's or the display one's */
+static optr Template(Boolean display, SysMenuObject which)
+{
+    switch (which) {
+    case SMO_MENU:
+	return display ? @DisplayWindowMenu : @StandardWindowMenu;
+    case SMO_RESTORE:
+	return display ? @DSMI_Restore : @SMI_Restore;
+    case SMO_MOVE:
+	return display ? @DSMI_Move : @SMI_Move;
+    case SMO_SIZE:
+	return display ? @DSMI_Size : @SMI_Size;
+    case SMO_MINIMIZE:
+	return display ? @DSMI_Minimize : @SMI_Minimize;
+    case SMO_MAXIMIZE:
+	return display ? @DSMI_Maximize : @SMI_Maximize;
+    case SMO_CLOSE:
+	return display ? @DSMI_Close : @SMI_Close;
+    case SMO_MINIMIZE_ICON:
+	return display ? @DSMI_MinimizeIcon : @SMI_MinimizeIcon;
+    case SMO_MAXIMIZE_ICON:
+	return display ? @DSMI_MaximizeIcon : @SMI_MaximizeIcon;
+    case SMO_RESTORE_ICON:
+	return display ? @DSMI_RestoreIcon : @SMI_RestoreIcon;
+    default:
+	return display ? @DisplayWindowMenuButton : @StandardWindowMenuButton;
+    }
+}
+
+/* OpenWinSysMenuObject: the object of the window's system menu block
+ * (0 without one) */
+optr OpenWinSysMenuObject(optr o, SysMenuObject which)
+{
+    OLWinInstance *w = Win(o);
+
+    if (!w->OLWI_sysMenu)
+	return 0;
+    return ConstructOptr(w->OLWI_sysMenu,
+			 OptrToChunk(Template(w->OLWI_type ==
+					      MOWT_DISPLAY_WINDOW, which)));
+}
+
+/* OpenWinSysMenuTop: what the window links up: the menu, or the button
+ * that closes the window */
+optr OpenWinSysMenuTop(optr o)
+{
+    OLWinInstance *w = Win(o);
+
+    if (!w->OLWI_sysMenu)
+	return 0;
+    if (w->OLWI_menuState & OWA_SYS_MENU_IS_CLOSE_BUTTON)
+	return ConstructOptr(w->OLWI_sysMenu, w->OLWI_sysMenuButton);
+    return OpenWinSysMenuObject(o, SMO_MENU);
+}
+
+/*
+ * OpenWinDuplicateBlock: a copy of the template's block owned by the
+ * window's owner, its output the window, the copy's object linked up
+ * to the window; the block kept in OLWI_sysMenu
+ */
+static optr OpenWinDuplicateBlock(optr o, optr tmpl)
+{
+    static const SysMenuObject icons[] = {
+	SMO_MINIMIZE_ICON, SMO_MAXIMIZE_ICON, SMO_RESTORE_ICON, SMO_BUTTON
+    };
+    Boolean display = Win(o)->OLWI_type == MOWT_DISPLAY_WINDOW;
+    MemHandle b = ObjDuplicateResource(OptrToHandle(tmpl),
+				       MemOwner(OptrToHandle(o)), 0);
+    optr n = ConstructOptr(b, OptrToChunk(tmpl));
+    int i;
+
+    ObjLockObjBlock(b);
+    ObjBlockSetOutput(b, o);
+    for (i = 0; i < 4; i++)
+	(void) ObjVarAddData(ConstructOptr(b, OptrToChunk(Template(display,
+							icons[i]))),
+			     HINT_SYS_ICON, 0);
+    (void) ObjVarAddData(ConstructOptr(b, OptrToChunk(Template(display,
+							SMO_CLOSE))),
+			 ATTR_SYSTEM_MENU_CLOSE, 0);
+    MemUnlock(b);
+    Win(o)->OLWI_sysMenu = b;
+    @call o::MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY(n);
+    return n;
+}
+
+/*
+ * CustomizeSysMenu: the items' shortcuts: none in a menu's, Alt in a
+ * window's, Ctrl in a display's
+ */
+static void CustomizeSysMenu(optr o, optr menu)
+{
+    OLWinType t = Win(o)->OLWI_type;
+    KeyboardShortcut clear = 0, set = KS_ALT;
+    word i, n;
+
+    if (t == MOWT_MENU || t == MOWT_SUBMENU) {
+	clear = 0xffff;
+	set = 0;
+    } else if (t == MOWT_DISPLAY_WINDOW)
+	set = KS_CTRL;
+    n = @call menu::MSG_GEN_COUNT_CHILDREN();
+    for (i = 0; i < n; i++) {
+	optr c = @call menu::MSG_GEN_FIND_CHILD_AT_POSITION(i);
+
+	if (c)
+	    @call c::MSG_GEN_CHANGE_ACCELERATOR(clear, set);
+    }
+}
+
+/*
+ * OpenWinEnsureSysMenu: the system menu made (once) and built as a tree
+ * (enabled if the window is), its button found
+ */
+void OpenWinEnsureSysMenu(optr o, SpecBuildFlags flags)
+{
+    OLWinInstance *w = Win(o);
+    Boolean display = w->OLWI_type == MOWT_DISPLAY_WINDOW;
+    optr top, button;
+
+    if (w->OLWI_attrs & OWA_HAS_SYS_MENU) {
+	if (!w->OLWI_sysMenu) {
+	    if (!(olWindowOptions & UIWO_WINDOW_MENU)) {
+		button = Template(display, SMO_BUTTON);
+		w->OLWI_sysMenuButton = OptrToChunk(button);
+		(void) OpenWinDuplicateBlock(o, button);
+		Win(o)->OLWI_menuState |= OWA_SYS_MENU_IS_CLOSE_BUTTON;
+	    } else
+		CustomizeSysMenu(o, OpenWinDuplicateBlock(o,
+					Template(display, SMO_MENU)));
+	}
+	flags = (flags & ~SBF_WIN_GROUP) | SBF_TREE_BUILD;
+	if (GenCheckIfFullyEnabled(o, TRUE))
+	    flags |= SBF_VIS_PARENT_FULLY_ENABLED;
+	top = OpenWinSysMenuTop(o);
+	@call top::MSG_SPEC_BUILD_BRANCH(flags);
+    }
+    w = Win(o);
+    if (!w->OLWI_sysMenu || w->OLWI_sysMenuButton)
+	return;
+    top = OpenWinSysMenuObject(o, SMO_MENU);
+    button = @call top::MSG_OL_POPUP_FIND_BUTTON();
+    Win(o)->OLWI_sysMenuButton = OptrToChunk(button);
+    if (button)
+	@call button::MSG_OL_MENU_BUTTON_SET_IS_SYS_MENU_ICON();
+}
+
+/*
+ * OpenWinEnsureSysMenuIcons: the minimize, maximize and restore icons
+ * linked up to the window and built (always enabled), once; not when
+ * there is only a keyboard
+ */
+void OpenWinEnsureSysMenuIcons(optr o, SpecBuildFlags flags)
+{
+    static const SysMenuObject icons[] = {
+	SMO_MINIMIZE_ICON, SMO_MAXIMIZE_ICON, SMO_RESTORE_ICON
+    };
+    OLWinInstance *w = Win(o);
+    int i;
+
+    if (!(w->OLWI_attrs & OWA_HAS_SYS_MENU) ||
+	(w->OLWI_specState & OLWSS_SYS_ICONS_ATTACHED) ||
+	OpenCheckIfKeyboardOnly() || !w->OLWI_sysMenu)
+	return;
+    w->OLWI_specState |= OLWSS_SYS_ICONS_ATTACHED;
+    flags = (flags & ~SBF_WIN_GROUP) | SBF_TREE_BUILD |
+	    SBF_VIS_PARENT_FULLY_ENABLED;
+    for (i = 0; i < 3; i++) {
+	optr c = OpenWinSysMenuObject(o, icons[i]);
+
+	@call o::MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY(c);
+	@call c::MSG_SPEC_BUILD_BRANCH(flags);
+    }
+}
+
+/* OpenWinGetSysMenuButtonWidth: the system menu button's width: the
+ * icon's, or its own if it shows its shortcut */
+word OpenWinGetSysMenuButtonWidth(optr o)
+{
+    OLWinInstance *w = Win(o);
+    optr b;
+    word cx = CUAS_WIN_ICON_WIDTH;
+
+    if (!w->OLWI_sysMenuButton || !w->OLWI_sysMenu)
+	return 0;
+    b = ConstructOptr(w->OLWI_sysMenu, w->OLWI_sysMenuButton);
+    ObjLockObjBlock(OptrToHandle(b));
+    if (OLButtonSetupMonikerAttrs(b) & OLMA_DISP_KBD_MONIKER)
+	cx = DWORD_WIDTH(@call b::MSG_VIS_RECALC_SIZE(RSA_CHOOSE_OWN_SIZE,
+						      RSA_CHOOSE_OWN_SIZE));
+    MemUnlock(OptrToHandle(b));
+    return cx;
+}
+
+/* the height a title bar object gets: the title bar's (two less in
+ * color), matching the menu bar when the menus are in the header */
+static word TitleBarObjectHeight(optr o)
+{
+    OLWinInstance *w = Win(o);
+    word h = (word) (w->OLWI_titleBarBounds.R_bottom -
+		     w->OLWI_titleBarBounds.R_top);
+
+    if (!OpenCheckIfBW())
+	h -= 2;		/* nested inside the resize bars in color */
+    if (!OpenWinCheckIfSquished() && OpenWinCheckMenusInHeader(o))
+	h += 3;
+    return h;
+}
+
+/* the object sized, placed, drawable and detectable (updated later) */
+static void ShowTitleBarObject(optr c, word width, word height, sword x,
+			       sword y)
+{
+    VisInstance *v;
+
+    VisSetSize(c, width, height);
+    @call c::MSG_VIS_POSITION_BRANCH(x, y);
+    v = (VisInstance *) ObjDerefVis(c);
+    v->VI_optFlags &= ~(VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH);
+    @call c::MSG_VIS_SET_ATTRS(VA_DRAWABLE | VA_DETECTABLE, 0, VUM_MANUAL);
+    VisMarkInvalid(c, VOF_WINDOW_INVALID, VUM_MANUAL);
+}
+
+/*
+ * OpenWinPositionTitleBarGroup: the title bar group (if built) at its
+ * own width and the title bar's height; FALSE if there is none
+ */
+static Boolean OpenWinPositionTitleBarGroup(optr o, Boolean right, sword x,
+					    sword y)
+{
+    OLWinInstance *w = Win(o);
+    optr g = right ? w->OLWI_titleBarRightGroup : w->OLWI_titleBarLeftGroup;
+    word h;
+    Boolean done = FALSE;
+
+    if (!g)
+	return FALSE;
+    h = TitleBarObjectHeight(o);
+    ObjLockObjBlock(OptrToHandle(g));
+    if (VisCheckIfSpecBuilt(g)) {
+	SizeAsDWord s = @call g::MSG_VIS_RECALC_SIZE(RSA_CHOOSE_OWN_SIZE, h);
+
+	VisSetSize(g, DWORD_WIDTH(s), DWORD_HEIGHT(s));
+	@call g::MSG_VIS_POSITION_BRANCH(x, y);
+	((VisInstance *) ObjDerefVis(g))->VI_optFlags &=
+	    ~(VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH);
+	@call g::MSG_VIS_SET_ATTRS(VA_DRAWABLE | VA_DETECTABLE, 0,
+				   VUM_MANUAL);
+	VisMarkInvalid(g, VOF_WINDOW_INVALID, VUM_MANUAL);
+	done = TRUE;
+    }
+    MemUnlock(OptrToHandle(g));
+    return done;
+}
+
+/*
+ * EnableDisableAndPosSysIcon: an icon (if there is one) shown at (x, y)
+ * at the button's width (one less in color, two less high) and the next
+ * position returned, or hidden
+ */
+static sword EnableDisableAndPosSysIcon(optr o, byte on, byte mask,
+					optr icon, sword x, sword y)
+{
+    word cw = 0, h = 0;
+
+    if (!icon)
+	return x;
+    if (on & mask) {
+	cw = OpenWinGetSysMenuButtonWidth(o);
+	h = TitleBarObjectHeight(o);
+    }
+    ObjLockObjBlock(OptrToHandle(icon));
+    ((VisInstance *) ObjDerefVis(icon))->VI_optFlags &=
+	~(VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH);
+    if (on & mask) {
+	/* one narrower in color, nested next to the resize bar */
+	ShowTitleBarObject(icon, OpenCheckIfBW() ? cw : cw - 1, h, x, y);
+	x += (sword) (cw - 1);
+    } else
+	@call icon::MSG_VIS_SET_ATTRS(0, VA_DRAWABLE | VA_DETECTABLE,
+				      VUM_MANUAL);
+    MemUnlock(OptrToHandle(icon));
+    return x;
+}
+
+/*
+ * OpenWinEnableAndPosSysMenuIcon: the icon (none if the window has no
+ * system menu) and the menu's item enabled or not with it (not when
+ * the menu is only a close button)
+ */
+static sword OpenWinEnableAndPosSysMenuIcon(optr o, byte on, byte mask,
+					    optr icon, optr item, sword x,
+					    sword y)
+{
+    if (!(Win(o)->OLWI_attrs & OWA_HAS_SYS_MENU))
+	on = 0;
+    x = EnableDisableAndPosSysIcon(o, on, mask, icon, x, y);
+    if (item && !(Win(o)->OLWI_menuState & OWA_SYS_MENU_IS_CLOSE_BUTTON)) {
+	if (on & mask)
+	    @call item::MSG_GEN_SET_ENABLED(VUM_NOW);
+	else
+	    @call item::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+    }
+    return x;
+}
+
+/*
+ * OpenWinPositionSysMenuIcons: the title bar's room taken by the system
+ * menu button on the left and the icons the window wants on the right
+ * (minimize; maximize, or restore when maximized), then by the title bar
+ * groups; the button, the left group, the right group and the icons
+ * placed; the items of the menu enabled as the window allows
+ */
+void OpenWinPositionSysMenuIcons(optr o)
+{
+    OLWinInstance *w = Win(o);
+    byte on = 0, b;
+    word cx;
+    sword x, y, right;
+
+    if (w->OLWI_sysMenu) {
+	if ((w->OLWI_attrs & OWA_MOVABLE) && (olExtWinAttrs & EWA_MOVABLE))
+	    on |= OLWSI_MOVE;
+	if ((w->OLWI_attrs & OWA_RESIZABLE) &&
+	    (olExtWinAttrs & EWA_RESIZABLE))
+	    on |= OLWSI_SIZE;
+	if ((w->OLWI_attrs & OWA_CLOSABLE) ||
+	    !(w->OLWI_menuState & OWA_SYS_MENU_IS_CLOSE_BUTTON)) {
+	    cx = OpenWinGetSysMenuButtonWidth(o);
+	    w = Win(o);
+	    w->OLWI_titleBarBounds.R_left += (sword) (cx - 1);
+	    on |= OLWSI_SYS_MENU;
+	}
+	if ((w->OLWI_specState & OLWSS_SYS_ICONS_ATTACHED) &&
+	    OpenWinCheckIfMinMaxRestoreControls(o)) {
+	    w = Win(o);
+	    if (w->OLWI_attrs & OWA_MAXIMIZABLE) {
+		b = OLWSI_MAXI;
+		if (w->OLWI_specState & OLWSS_MAXIMIZED)
+		    b = (w->OLWI_fixedAttr & OWFA_RESTORABLE) ? OLWSI_RESTORE
+							      : 0;
+		if (b && !OpenCheckIfKeyboardOnly())
+		    Win(o)->OLWI_titleBarBounds.R_right -=
+			CUAS_WIN_ICON_WIDTH - 1;
+		on |= b;
+	    }
+	    w = Win(o);
+	    if (w->OLWI_attrs & OWA_MINIMIZABLE) {
+		if (!OpenCheckIfKeyboardOnly())
+		    w->OLWI_titleBarBounds.R_right -= CUAS_WIN_ICON_WIDTH - 1;
+		on |= OLWSI_MINI;
+	    }
+	}
+	if (Win(o)->OLWI_attrs & OWA_CLOSABLE)
+	    on |= OLWSI_CLOSABLE;
+    }
+    cx = OpenWinGetTitleBarGroupSize(o, FALSE);
+    Win(o)->OLWI_titleBarBounds.R_left += (sword) cx;
+    cx = OpenWinGetTitleBarGroupSize(o, TRUE);
+    Win(o)->OLWI_titleBarBounds.R_right -= (sword) cx;
+
+    w = Win(o);
+    x = w->OLWI_titleBarBounds.R_left;
+    y = w->OLWI_titleBarBounds.R_top;
+    if (!OpenCheckIfBW()) {
+	x++;			/* next to the resize bar in color */
+	y++;
+    }
+    right = w->OLWI_titleBarBounds.R_right;
+    cx = OpenWinGetTitleBarGroupSize(o, FALSE);
+    if (cx) {
+	x -= (sword) cx + 1;
+	(void) OpenWinPositionTitleBarGroup(o, FALSE, x, y);
+	x++;
+    }
+    if (Win(o)->OLWI_sysMenu) {
+	optr button;
+
+	x -= (sword) OpenWinGetSysMenuButtonWidth(o);
+	w = Win(o);
+	button = w->OLWI_sysMenuButton
+		 ? ConstructOptr(w->OLWI_sysMenu, w->OLWI_sysMenuButton) : 0;
+	(void) OpenWinEnableAndPosSysMenuIcon(o, on, OLWSI_SYS_MENU, button,
+					      0, x, y);
+    }
+    x = right;
+    if (OpenWinPositionTitleBarGroup(o, TRUE, x, y))
+	x += (sword) OpenWinGetTitleBarGroupSize(o, TRUE);
+    if (!Win(o)->OLWI_sysMenu)
+	return;
+    x = OpenWinEnableAndPosSysMenuIcon(o, on, OLWSI_MOVE, 0,
+			OpenWinSysMenuObject(o, SMO_MOVE), x, y);
+    x = OpenWinEnableAndPosSysMenuIcon(o, on, OLWSI_SIZE, 0,
+			OpenWinSysMenuObject(o, SMO_SIZE), x, y);
+    x = OpenWinEnableAndPosSysMenuIcon(o, on, OLWSI_MINI,
+			OpenWinSysMenuObject(o, SMO_MINIMIZE_ICON),
+			OpenWinSysMenuObject(o, SMO_MINIMIZE), x, y);
+    x = OpenWinEnableAndPosSysMenuIcon(o, on, OLWSI_MAXI,
+			OpenWinSysMenuObject(o, SMO_MAXIMIZE_ICON),
+			OpenWinSysMenuObject(o, SMO_MAXIMIZE), x, y);
+    x = OpenWinEnableAndPosSysMenuIcon(o, on, OLWSI_RESTORE,
+			OpenWinSysMenuObject(o, SMO_RESTORE_ICON),
+			OpenWinSysMenuObject(o, SMO_RESTORE), x, y);
+    (void) OpenWinEnableAndPosSysMenuIcon(o, on, OLWSI_CLOSABLE, 0,
+			OpenWinSysMenuObject(o, SMO_CLOSE), x, y);
+}
+
+/*
+ * OpenWinFreeSysMenu: the system menu (or its close button) unbuilt and
+ * its block freed (the window unbuilt or destroyed)
+ */
+void OpenWinFreeSysMenu(optr o, SpecBuildFlags flags, Boolean unbuild)
+{
+    optr top = OpenWinSysMenuTop(o);
+    OLWinInstance *w;
+
+    if (!top)
+	return;
+    w = Win(o);
+    w->OLWI_sysMenu = 0;
+    w->OLWI_sysMenuButton = 0;
+    w->OLWI_specState &= ~OLWSS_SYS_ICONS_ATTACHED;
+    if (unbuild)
+	@call top::MSG_SPEC_UNBUILD_BRANCH((flags & ~SBF_UPDATE_MODE) |
+					   VUM_NOW);
+    else
+	@call top::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    @send top::MSG_META_BLOCK_FREE();
+}
+
+/* OpenWinHideSysMenuIcons: the button and the icons hidden (a display in
+ * a GenDisplayGroup, maximized: its menu bar holds them) */
+void OpenWinHideSysMenuIcons(optr o)
+{
+    static const SysMenuObject icons[] = {
+	SMO_MINIMIZE_ICON, SMO_MAXIMIZE_ICON, SMO_RESTORE_ICON
+    };
+    OLWinInstance *w = Win(o);
+    int i;
+
+    if (!w->OLWI_sysMenu)
+	return;
+    if (w->OLWI_sysMenuButton) {
+	optr b = ConstructOptr(w->OLWI_sysMenu, w->OLWI_sysMenuButton);
+
+	@call b::MSG_VIS_SET_ATTRS(0, VA_DRAWABLE | VA_DETECTABLE,
+				   VUM_MANUAL);
+    }
+    for (i = 0; i < 3; i++) {
+	optr c = OpenWinSysMenuObject(o, icons[i]);
+
+	@call c::MSG_VIS_SET_ATTRS(0, VA_DRAWABLE | VA_DETECTABLE,
+				   VUM_MANUAL);
+    }
+}
+
+/*
+ * OpenWinSysMenuNotifyEnabled: the window enabled or not: its system
+ * menu button, its menu (unless only the button) and its icons told
+ */
+void OpenWinSysMenuNotifyEnabled(optr o, Message msg, byte mode,
+				 byte flags)
+{
+    static const SysMenuObject icons[] = {
+	SMO_MINIMIZE_ICON, SMO_MAXIMIZE_ICON, SMO_RESTORE_ICON
+    };
+    OLWinInstance *w = Win(o);
+    MemHandle b = w->OLWI_sysMenu;
+    optr c[5];
+    int i, n = 0;
+
+    if (!b)
+	return;
+    if (w->OLWI_sysMenuButton)
+	c[n++] = ConstructOptr(b, w->OLWI_sysMenuButton);
+    if (!(w->OLWI_menuState & OWA_SYS_MENU_IS_CLOSE_BUTTON))
+	c[n++] = OpenWinSysMenuObject(o, SMO_MENU);
+    for (i = 0; i < 3; i++)
+	c[n++] = OpenWinSysMenuObject(o, icons[i]);
+    for (i = 0; i < n; i++) {
+	optr x = c[i];
+
+	if (msg == MSG_SPEC_NOTIFY_ENABLED)
+	    (void) @call x::MSG_SPEC_NOTIFY_ENABLED(mode, flags);
+	else
+	    (void) @call x::MSG_SPEC_NOTIFY_NOT_ENABLED(mode, flags);
+    }
+}
+
+/* OLWinNotifyEnabled: changed: the system menu, its button and its
+ * icons told too */
+@extern method OLWinClass, MSG_SPEC_NOTIFY_ENABLED, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    if (!@callsuper())
+	return FALSE;
+    OpenWinSysMenuNotifyEnabled(oself, message, updateMode, flags);
+    return TRUE;
+}

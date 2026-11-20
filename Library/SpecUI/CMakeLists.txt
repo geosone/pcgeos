@@ -44,6 +44,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CWin/cwinClassCommonMiddle.goc
                ${c}/CWin/cwinClassCommonLow.goc
                ${c}/CWin/cwinClassOther.goc
+               ${c}/CWin/cwinClassCUAS.goc
                ${c}/CWin/cwinGeometry.goc
                ${c}/CWin/cwinExcl.goc
                ${c}/CWin/cwinMenuedWin.goc

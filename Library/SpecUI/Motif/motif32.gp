@@ -23,6 +23,14 @@ tokenid		0
 resource PointerImages lmem read-only shared
 resource StandardMonikers lmem read-only shared
 resource ResizeRegions lmem read-only shared
+resource StandardWindowMenuResource read-only shared object
+resource DisplayWindowMenuResource read-only shared object
+resource AppSCMonikerResource read-only shared lmem
+resource AppSMMonikerResource read-only shared lmem
+resource AppSCGAMonikerResource read-only shared lmem
+resource DrawBitmapOptrSCResource read-only shared lmem
+resource DrawBitmapOptrSMResource read-only shared lmem
+resource DrawBitmapOptrSCGAResource read-only shared lmem
 
 #
 # Export routines called by UI, by offset (*must* be first)

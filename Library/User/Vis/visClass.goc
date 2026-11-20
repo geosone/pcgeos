@@ -1491,7 +1491,11 @@ out:
     if (!vp)
 	return;
     VisAddChildRelativeToGen(oself, oself, vp, flags);
-    /* (GenFindMoniker would resolve a moniker list here: not yet) */
+    /* a moniker list replaced by the moniker fitting the display (an
+     * icon if there is one, else a gstring, else the text) */
+    (void) @call oself::MSG_GEN_FIND_MONIKER(FALSE, VMSF_REPLACE_LIST |
+				VMSF_GSTRING | (VMS_ICON << VMSF_STYLE_OFFSET),
+				0);
     if (VisSpecCheckForPosHints(oself, &x, &y))
 	VisPart(oself)->VI_geoAttrs |= VGA_NOTIFY_GEOMETRY_VALID;
 }

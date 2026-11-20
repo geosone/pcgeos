@@ -5,8 +5,7 @@
  * and updated, the title bar's geometry, the visual upward queries
  * (the default exclusive, menus, gadget exclusives), the window opened.
  *
- * Port32: the system menu is not built yet (nothing to unbuild); the
- * focus being a button
+ * Port32: the focus being a button
  * (OLButtonClass) is not activated as a default.
  */
 @include "cGeode.goh"
@@ -51,7 +50,7 @@ Boolean OpenWinCheckMenusInHeader(optr o)
 				       WPSS_SIZE_INVALID;
 	OLWinTakeOffWindowList(oself);
 	@call oself::MSG_META_RELEASE_FT_EXCL();
-	/* the system menu: Port32 none yet */
+	OpenWinFreeSysMenu(oself, flags, TRUE);
     }
     @callsuper();
 }
@@ -60,6 +59,7 @@ Boolean OpenWinCheckMenusInHeader(optr o)
 @extern method OLWinClass, MSG_GEN_DESTROY_AND_FREE_BLOCK
 {
     (void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+    OpenWinFreeSysMenu(oself, 0, FALSE);
     return TRUE;
 }
 
@@ -255,8 +255,9 @@ void OpenWinHeaderResetInvalid(optr o, OLWinHeaderState parts)
 }
 
 /* OpenWinCalcWinHdrGeometry: the title bar inside the header, after the
- * window's image or window changed (the system menu icons and the
- * express tool area: Port32 not yet) */
+ * window's image or window changed, then the system menu's button and
+ * icons and the title bar groups placed in it (the express tool area:
+ * Port32 not yet) */
 void OpenWinCalcWinHdrGeometry(optr o)
 {
     OLWinInstance *w = Win(o);
@@ -268,6 +269,7 @@ void OpenWinCalcWinHdrGeometry(optr o)
     r.R_left++;
     r.R_right--;
     Win(o)->OLWI_titleBarBounds = r;
+    OpenWinPositionSysMenuIcons(o);
 }
 
 /* ---------------------------------------------------------------------
