@@ -1,0 +1,14 @@
+/*
+ * cspecDisplayControl.goc -- the build routine of GenDisplayGroupClass
+ * (after cspecDisplayControl.asm): a GenDisplayGroup is an
+ * OLDisplayGroup.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olDisplayGroupClass.goh>
+
+ClassStruct *OLBuildDisplayControl(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLDisplayGroupClass;
+}

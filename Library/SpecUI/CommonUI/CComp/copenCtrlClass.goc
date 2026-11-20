@@ -690,3 +690,10 @@ VisCompSpacingMarginsInfo OpenPassMarginInfo(optr obj, const Rectangle *m,
 					(t << 9) | (r << 6) | (b << 3) |
 					spacing);
 }
+
+/* OLCtrlSendToGenChildren: a GenDisplay's word to its menus' buttons
+ * goes on to the generic children */
+@method OLCtrlClass, MSG_SHOW_MENU_BUTTON, MSG_HIDE_MENU_BUTTON
+{
+    GenSendToChildren(oself, message, NULL, 0);
+}

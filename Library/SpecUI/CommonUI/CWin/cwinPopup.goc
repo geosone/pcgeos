@@ -412,3 +412,12 @@ void OLPopupDismiss(optr o)
     @call b::MSG_SPEC_UPDATE_VIS_MONIKER(updateMode, oldMonikerWidth,
 					 oldMonikerHeight);
 }
+
+/* OLPopupWinSendToButton: a GenDisplay's word to the popup's button */
+@method OLPopupWinClass, MSG_SHOW_MENU_BUTTON, MSG_HIDE_MENU_BUTTON
+{
+    optr b = PopupButton(oself);
+
+    if (b)
+	CObjMessageP(MF_CALL, b, message, NULL, 0, NULL, 0);
+}

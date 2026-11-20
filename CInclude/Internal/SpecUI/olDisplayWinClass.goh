@@ -1,0 +1,39 @@
+/*
+ * olDisplayWinClass.goh -- OLDisplayWinClass, the window of a
+ * GenDisplay in a GenDisplayGroup (after
+ * Include/Internal/SpecUI/olDisplayWinClass.def), for Port32.
+ */
+#ifndef __OLDISPLAYWINCLASS_GOH
+#define __OLDISPLAYWINCLASS_GOH
+
+@include <Internal/SpecUI/olMenuedWinClass.goh>
+
+@deflib motif
+
+/* OLDisplayWinFlags */
+typedef ByteFlags OLDisplayWinFlags;
+#define OLDWF_ON_FIELD				0x80
+/* HINT_ALWAYS_ADOPT_MENUS, HINT_NEVER_ADOPT_MENUS: the primary shows
+ * the display's menus always or never (else while it has the target) */
+#define OLDWF_ALWAYS_ADOPT_MENUS		0x40
+#define OLDWF_NEVER_ADOPT_MENUS			0x20
+#define OLDWF_TARGET				0x10
+/* the target gained before the document was attached */
+#define OLDWF_NEED_TO_GRAB_MODEL_FOR_DOCUMENT	0x08
+
+@class OLDisplayWinClass, OLMenuedWinClass;
+@uses GenDisplayClass;
+
+/* the display group resized: maximized again to fit */
+@message void MSG_OL_DISPLAY_RE_MAXIMIZE();
+/* the GCN notifications of the display list and the display */
+@message void MSG_OL_DISPLAY_SEND_NOTIFICATION();
+@message void MSG_OL_DISPLAY_RESIZE();
+
+    @instance OLDisplayWinFlags	OLDW_flags = 0;
+
+@endc;
+
+@endlib
+
+#endif

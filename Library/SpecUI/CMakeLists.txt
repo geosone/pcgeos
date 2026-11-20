@@ -50,6 +50,8 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CWin/cwinPopup.goc
                ${c}/CWin/cwinDialog.goc
                ${c}/CWin/cwinWinIcon.goc
+               ${c}/CWin/cwinDisplayControl.goc
+               ${c}/CWin/cwinDisplay.goc
                ${c}/CWin/cwinGlyphDisplay.goc
                ${CMAKE_CURRENT_SOURCE_DIR}/Motif/Win/winDraw.goc
                ${c}/CSpec/cspecSystem.goc
@@ -57,6 +59,8 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CSpec/cspecField.goc
                ${c}/CSpec/cspecApplication.goc
                ${c}/CSpec/cspecPrimary.goc
+               ${c}/CSpec/cspecDisplay.goc
+               ${c}/CSpec/cspecDisplayControl.goc
                ${c}/CSpec/cspecInteraction.goc
                ${c}/CSpec/cspecTrigger.goc
                ${c}/CSpec/cspecCUAS.goc

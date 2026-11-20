@@ -28,8 +28,7 @@ resource ResizeRegions lmem read-only shared
 # Export routines called by UI, by offset (*must* be first)
 #
 export OLBuildTrigger
-skip 1
-# OLBuildDisplay
+export OLBuildDisplay
 export OLBuildApplication
 export OLBuildField
 export OLBuildScreen
@@ -37,8 +36,9 @@ export OLBuildSystem
 # OLBuildPane
 skip 1
 export OLBuildInteraction
-# OLBuildGlyphDisplay, OLBuildText, OLBuildDisplayControl
-skip 3
+# OLBuildGlyphDisplay, OLBuildText
+skip 2
+export OLBuildDisplayControl
 export OLBuildPrimary
 # OLBuildGadget ... OLBuildValue
 skip 12
@@ -77,3 +77,5 @@ export OLMenuButtonClass
 export OLMenuBarClass
 export OLWinIconClass
 export OLWinGlyphDisplayClass
+export OLDisplayGroupClass
+export OLDisplayWinClass

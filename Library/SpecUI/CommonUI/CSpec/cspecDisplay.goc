@@ -1,0 +1,14 @@
+/*
+ * cspecDisplay.goc -- the build routine of GenDisplayClass (after
+ * cspecDisplay.asm): a GenDisplay is an OLDisplayWin, its vis parent the
+ * one its generic parent (a GenDisplayGroup) gives displays.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olDisplayWinClass.goh>
+
+ClassStruct *OLBuildDisplay(optr oself, word masterOffset)
+{
+    (void) masterOffset;
+    DoSimpleWinBuild(oself, SQT_VIS_PARENT_FOR_DISPLAY);
+    return (ClassStruct *) &OLDisplayWinClass;
+}

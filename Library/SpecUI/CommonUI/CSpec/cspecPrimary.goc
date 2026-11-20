@@ -10,7 +10,7 @@
 /* DoSimpleWinBuild: the vis parent asked of the generic parent for a
  * window of the type, kept in MAP_GROUP_DATA for OLCtrl's
  * MSG_META_INITIALIZE */
-static void DoSimpleWinBuild(optr oself, word parentType)
+void DoSimpleWinBuild(optr oself, word parentType)
 {
     optr vp = 0;
     OLMapGroupDataEntry *m;

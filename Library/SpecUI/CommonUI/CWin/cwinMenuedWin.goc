@@ -15,6 +15,7 @@
  *   - a double click on the title (cwinPtr.asm's MSG_META_START_SELECT).
  */
 @include "cGeode.goh"
+@include <Objects/gDCtrlC.goh>
 
 @classdecl OLMenuedWinClass, neverSaved;
 
@@ -365,11 +366,11 @@ void OLMenuedWinSetMaximized(optr o, VisUpdateMode mode)
     w->VI_bounds.R_top += adj;
     w->VI_bounds.R_bottom += adj;
     UpdateWinPosSize(o);
-    /* in a GenDisplayGroup: no header, title or system menu (and the
-     * system menu's icons disabled).  Port32: GenDisplayGroupClass is
-     * not in C yet, no window is in one. */
+    /* in a GenDisplayGroup: no header, title or system menu (Port32:
+     * no system menu whose icons to disable yet) */
     gp = GenFindParent(o);
-    (void) gp;
+    if (gp && ObjIsObjectInClass(gp, &GenDisplayGroupClass))
+	MWin(o)->OLWI_attrs &= ~(OWA_HEADER | OWA_TITLED | OWA_HAS_SYS_MENU);
     (void) @call o::MSG_VIS_VUP_UPDATE_WIN_GROUP(mode);
 }
 

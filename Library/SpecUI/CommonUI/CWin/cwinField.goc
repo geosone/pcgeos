@@ -270,7 +270,7 @@ static word FieldWindowColor(optr oself)
  * may be reassigned) the next free one, row by row, around twice; the
  * slot taken
  */
-static byte FieldRequestStaggerSlot(word *map, byte req)
+byte FieldRequestStaggerSlot(word *map, byte req)
 {
     byte row, col;
     int tries = 2;
@@ -299,15 +299,15 @@ static byte FieldRequestStaggerSlot(word *map, byte req)
     return (byte) ((row << 4) | col);
 }
 
-static void FieldFreeStaggerSlot(word *map, byte slot)
+void FieldFreeStaggerSlot(word *map, byte slot)
 {
     map[(slot >> 4) & 7] &= ~(1 << (slot & SSPR_COLUMN));
 }
 
 /* FieldCalcStaggerPosition: the position of a window's slot, or of an
  * icon's slot along the field's bottom */
-static void FieldCalcStaggerPosition(optr oself, byte slot, sword *x,
-				     sword *y)
+void FieldCalcStaggerPosition(optr oself, byte slot, sword *x,
+			      sword *y)
 {
     if (!(slot & SSPR_ICON)) {
 	word n = (slot - 1) & OL_WINDOW_STAGGER_SLOT_MASK;

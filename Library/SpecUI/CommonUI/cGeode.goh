@@ -395,6 +395,9 @@ extern void DrawColorButton(optr oself, GStateHandle gs, DrawFlags df,
 /* CSpec/cspecInteraction.goc: the hints of ScanMapGroupHintHandlers */
 extern void OLScanMapGroupHints(optr o, OLBuildFlags *flags);
 extern ClassStruct *OLBuildTrigger(optr oself, word masterOffset);
+/* CSpec/cspecPrimary.goc: the vis parent of a window asked of the
+ * generic parent (OLBuildPrimary, OLBuildDisplay) */
+extern void DoSimpleWinBuild(optr oself, word parentType);
 extern word OpenGetBackgroundColor(optr o, Boolean selected);
 extern Boolean OpenGetTextColor(optr o, Color *c);
 /* HINT_DEFAULT_FOCUS and HINT_DEFAULT_TARGET (grabbed if fully
@@ -486,6 +489,12 @@ extern void OpenWinDrawMoniker(optr o, DrawMonikerFlags flags,
 extern void OpenWinSetVisParent(optr o, SpecBuildFlags flags);
 /* cwinClassOther.goc */
 extern void OpenWinFreeStaggeredSlot(optr o);
+/* cwinField.goc: the stagger slots of a map (a field's, a display
+ * group's) and their positions in the object */
+extern byte FieldRequestStaggerSlot(word *map, byte req);
+extern void FieldFreeStaggerSlot(word *map, byte slot);
+extern void FieldCalcStaggerPosition(optr oself, byte slot, sword *x,
+				     sword *y);
 /* cwinGeometry.goc */
 extern Boolean MoveWindowToKeepOnscreen(optr o, sword width, sword height);
 extern Boolean OpenWinCheckIfSquished(void);

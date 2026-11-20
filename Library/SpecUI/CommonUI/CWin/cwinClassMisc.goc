@@ -252,3 +252,130 @@ static Boolean HandleMenuNavigation(optr o, word c, word flags, word state)
 				     sizeof(p), &done, sizeof(done));
     return done;
 }
+
+/* ---------------------------------------------------------------------
+ * The application's word on the window's position, size and constraint
+ * ------------------------------------------------------------------- */
+
+/* the flags, state and bounds set: the previous ones while maximized */
+typedef struct {
+    WinPosSizeFlags	*flags;
+    WinPosSizeState	*state;
+    Rectangle		*bounds;
+    Boolean		maximized;
+} WinPosSizeRefs;
+
+static WinPosSizeRefs PosSizeRefs(optr o)
+{
+    OLWinInstance *w = Win(o);
+    WinPosSizeRefs r;
+
+    r.maximized = (w->OLWI_specState & OLWSS_MAXIMIZED) != 0;
+    if (r.maximized) {
+	r.flags = &w->OLWI_prevWinPosSizeFlags;
+	r.state = &w->OLWI_prevWinPosSizeState;
+	r.bounds = &w->OLWI_prevWinBounds;
+    } else {
+	r.flags = &w->OLWI_winPosSizeFlags;
+	r.state = &w->OLWI_winPosSizeState;
+	r.bounds = &w->VI_bounds;
+    }
+    return r;
+}
+
+#define SIZE_PAIRS	(WPSS_VIS_POS_IS_SPEC_PAIR | \
+			 WPSS_VIS_SIZE_IS_SPEC_PAIR_PARENT)
+
+/* EnsureRightBottomBoundsAreIndependent: pixel bounds to a size */
+static void BoundsIndependent(WinPosSizeRefs *r)
+{
+    if (!(*r->state & SIZE_PAIRS)) {
+	r->bounds->R_right -= r->bounds->R_left;
+	r->bounds->R_bottom -= r->bounds->R_top;
+    }
+}
+
+/* EnsureBoundsAreDependent: back to pixel bounds */
+static void BoundsDependent(WinPosSizeRefs *r)
+{
+    if (!(*r->state & SIZE_PAIRS)) {
+	r->bounds->R_right += r->bounds->R_left;
+	r->bounds->R_bottom += r->bounds->R_top;
+    }
+}
+
+/* the window updated unless maximized (then for when it is restored) */
+static void PosSizeUpdate(optr o, WinPosSizeRefs *r, byte mode, byte inval)
+{
+    if (r->maximized)
+	return;
+    ConvertSpecWinSizePairsToPixels(o);
+    UpdateWinPosSize(o);
+    VisMarkInvalid(o, inval, mode);
+}
+
+/* OpenWinGenSetWinPosition: a specific position, a ratio, or a type */
+@extern method OLWinClass, MSG_GEN_SET_WIN_POSITION
+{
+    WinPosSizeRefs r = PosSizeRefs(oself);
+    byte type = (byte) (modeAndType >> 8);
+    byte mode = (byte) modeAndType;
+
+    if (type == WPT_AT_SPECIFIC_POSITION) {
+	Boolean same;
+
+	BoundsIndependent(&r);
+	*r.state &= ~WPSS_VIS_POS_IS_SPEC_PAIR;
+	same = r.bounds->R_left == (sword) xPosSpec &&
+	       r.bounds->R_top == (sword) yPosSpec;
+	r.bounds->R_left = (sword) xPosSpec;
+	r.bounds->R_top = (sword) yPosSpec;
+	BoundsDependent(&r);
+	if (same)
+	    return;
+    } else if (type == WPT_AT_RATIO) {
+	BoundsIndependent(&r);
+	*r.state |= WPSS_VIS_POS_IS_SPEC_PAIR;
+	r.bounds->R_left = (sword) xPosSpec;
+	r.bounds->R_top = (sword) yPosSpec;
+    }
+    *r.flags = (WinPosSizeFlags) ((*r.flags & ~WPSF_POSITION_TYPE) |
+				  ((type << 3) & WPSF_POSITION_TYPE));
+    *r.state |= WPSS_POSITION_INVALID | WPSS_HAS_MOVED_OR_RESIZED;
+    PosSizeUpdate(oself, &r, mode, VOF_WINDOW_INVALID);
+}
+
+/* OpenWinGenSetWinSize: a ratio of the parent or field, or a type */
+@extern method OLWinClass, MSG_GEN_SET_WIN_SIZE
+{
+    WinPosSizeRefs r = PosSizeRefs(oself);
+    byte type = (byte) (modeAndType >> 8);
+    byte mode = (byte) modeAndType;
+
+    if (type == WST_AS_RATIO_OF_FIELD || type == WST_AS_RATIO_OF_PARENT) {
+	*r.state |= type == WST_AS_RATIO_OF_FIELD ?
+			WPSS_VIS_SIZE_IS_SPEC_PAIR_FIELD :
+			WPSS_VIS_SIZE_IS_SPEC_PAIR_PARENT;
+	r.bounds->R_right = (sword) xSizeSpec;
+	r.bounds->R_bottom = (sword) ySizeSpec;
+    }
+    *r.flags = (WinPosSizeFlags) ((*r.flags & ~WPSF_SIZE_TYPE) |
+				  (type & WPSF_SIZE_TYPE));
+    *r.state |= WPSS_SIZE_INVALID | WPSS_HAS_MOVED_OR_RESIZED;
+    PosSizeUpdate(oself, &r, mode, VOF_GEOMETRY_INVALID |
+		  VOF_WINDOW_INVALID | VOF_IMAGE_INVALID);
+}
+
+/* OpenWinGenSetWinConstrain: the constraint type */
+@extern method OLWinClass, MSG_GEN_SET_WIN_CONSTRAIN
+{
+    WinPosSizeRefs r = PosSizeRefs(oself);
+
+    *r.flags = (WinPosSizeFlags) ((*r.flags & ~WPSF_CONSTRAIN_TYPE) |
+				  ((constrainType << 6) &
+				   WPSF_CONSTRAIN_TYPE));
+    if (r.maximized)
+	return;
+    UpdateWinPosSize(oself);
+    VisMarkInvalid(oself, VOF_WINDOW_INVALID, updateMode);
+}

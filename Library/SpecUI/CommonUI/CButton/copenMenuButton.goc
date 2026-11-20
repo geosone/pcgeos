@@ -618,3 +618,24 @@ static void SaveStateSetCursored(optr o)
     return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, f,
 			     b->OLBI_genChunk);
 }
+
+/* OLMenuButtonShowMenuButton: managed, drawn and detectable (delayed:
+ * not a nested visual update) */
+@method OLMenuButtonClass, MSG_SHOW_MENU_BUTTON
+{
+    @call oself::MSG_VIS_SET_ATTRS(VA_MANAGED | VA_DRAWABLE | VA_DETECTABLE,
+				   0, VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+/* OLMenuButtonHideMenuButton: the gadget exclusive released first (the
+ * mouse, focus and target with it), then not managed, drawn or
+ * detectable */
+@method OLMenuButtonClass, MSG_HIDE_MENU_BUTTON
+{
+    optr p = VisFindParent(oself);
+
+    if (p)
+	@call p::MSG_VIS_RELEASE_GADGET_EXCL(oself);
+    @call oself::MSG_VIS_SET_ATTRS(0, VA_MANAGED | VA_DRAWABLE |
+				   VA_DETECTABLE, VUM_DELAYED_VIA_UI_QUEUE);
+}

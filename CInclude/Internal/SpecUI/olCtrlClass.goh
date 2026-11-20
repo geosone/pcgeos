@@ -125,6 +125,10 @@ typedef struct {
 					VisUpdateMode updateMode);
 @importMessage VisSpecMessages, void MSG_SPEC_CTRL_GET_LARGEST_CENTER(
 					OLCtrlLargestCenter *lc);
+/* from a GenDisplay to its generic children (olPopupWinClass.def): a
+ * menu's button the primary adopted shown or hidden */
+@importMessage VisSpecMessages, void MSG_SHOW_MENU_BUTTON();
+@importMessage VisSpecMessages, void MSG_HIDE_MENU_BUTTON();
 
     @vardata void TEMP_OL_CTRL_DRAW_BOX_WITH_TOP_MARGIN;
     @vardata OLMapGroupDataEntry MAP_GROUP_DATA;

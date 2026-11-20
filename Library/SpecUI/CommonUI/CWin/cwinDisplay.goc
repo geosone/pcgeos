@@ -1,0 +1,599 @@
+/*
+ * cwinDisplay.goc -- OLDisplayWinClass (after cwinDisplay.asm): the
+ * window of a GenDisplay in a GenDisplayGroup (OLDisplayGroupClass,
+ * cwinDisplayControl.goc), staggered in the group or maximized in it
+ * (full sized); its menus in the primary's menu bar, shown while it has
+ * the target (HINT_ALWAYS_ADOPT_MENUS, HINT_NEVER_ADOPT_MENUS); its
+ * traveling objects moved to it when it gets the target; the GCN
+ * notifications of the display list and the display with the target;
+ * Ctrl+F4 closes it, Ctrl+F6 goes to the next one.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the document
+ * (GenDocumentClass is not in C: MSG_GEN_DISPLAY_UPDATE_FROM_DOCUMENT,
+ * the model grab for it, closing it), OLReleaseAllStayUpModeMenus.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olDisplayGroupClass.goh>
+@include <Internal/SpecUI/olDisplayWinClass.goh>
+
+@classdecl OLDisplayWinClass, neverSaved;
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
+#define DWin(o)		((OLDisplayWinInstance *) ObjDerefVis(o))
+#define Gen(o)		((GenInstance *) ObjDerefGen(o))
+#define GenDisp(o)	((GenDisplayInstance *) ObjDerefGen(o))
+
+/* ---------------------------------------------------------------------
+ * Initialization
+ * ------------------------------------------------------------------- */
+
+static void DisplayWinHint(MemHandle mh, ChunkHandle chnk,
+			   VarDataEntry *extra, word dataType,
+			   void *handlerData)
+{
+    OLDisplayWinInstance *w = DWin(ConstructOptr(mh, chnk));
+
+    (void) extra;
+    (void) handlerData;
+    switch (dataType) {
+    case HINT_NEVER_ADOPT_MENUS:
+	w->OLDW_flags |= OLDWF_NEVER_ADOPT_MENUS;
+	break;
+    case HINT_ALWAYS_ADOPT_MENUS:
+	w->OLDW_flags |= OLDWF_ALWAYS_ADOPT_MENUS;
+	break;
+    case ATTR_GEN_DISPLAY_NOT_MINIMIZABLE:
+	w->OLWI_attrs &= ~OWA_MINIMIZABLE;
+	break;
+    case ATTR_GEN_DISPLAY_NOT_MAXIMIZABLE:
+	w->OLWI_attrs &= ~OWA_MAXIMIZABLE;
+	break;
+    case ATTR_GEN_DISPLAY_NOT_RESTORABLE:
+	w->OLWI_fixedAttr &= ~OWFA_RESTORABLE;
+	break;
+    case HINT_DISPLAY_NOT_RESIZABLE:
+	w->OLWI_attrs &= ~OWA_RESIZABLE;
+	break;
+    case HINT_DISPLAY_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD:
+	w->OLWI_moreFixedAttr |= OWMFA_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD;
+	break;
+    }
+}
+
+static VarDataCHandler displayWinHints[] = {
+    { HINT_NEVER_ADOPT_MENUS, DisplayWinHint },
+    { HINT_ALWAYS_ADOPT_MENUS, DisplayWinHint },
+    { ATTR_GEN_DISPLAY_NOT_MINIMIZABLE, DisplayWinHint },
+    { ATTR_GEN_DISPLAY_NOT_MAXIMIZABLE, DisplayWinHint },
+    { ATTR_GEN_DISPLAY_NOT_RESTORABLE, DisplayWinHint },
+    { HINT_DISPLAY_NOT_RESIZABLE, DisplayWinHint },
+    { HINT_DISPLAY_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD,
+      DisplayWinHint },
+};
+
+/*
+ * OLDisplayWinInitialize: a display window with Motif's attributes,
+ * closable if the GenDisplay is dismissable; realizable; the geometry
+ * hints, then the others
+ */
+@method OLDisplayWinClass, MSG_META_INITIALIZE
+{
+    OLDisplayWinInstance *w;
+    Boolean dismissable;
+
+    pself->OLWI_type = MOWT_DISPLAY_WINDOW;
+    @callsuper();
+    w = DWin(oself);
+    w->OLWI_attrs |= MO_ATTRS_DISPLAY_WINDOW;
+    w->OLWI_type = MOWT_DISPLAY_WINDOW;
+    dismissable = (GenDisp(oself)->GDI_attributes & GDA_USER_DISMISSABLE) != 0;
+    w = DWin(oself);
+    if (dismissable)
+	w->OLWI_attrs |= OWA_CLOSABLE;
+    w->VI_specAttrs |= SA_REALIZABLE;
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    ObjVarScanData(oself, sizeof(displayWinHints) / sizeof(displayWinHints[0]),
+		   displayWinHints, NULL);
+}
+
+/*
+ * OLDisplayWinScanGeometryHints: OLWin's, then a display's position and
+ * size (staggered in the group, kept partly visible, as desired), its
+ * icon's (staggered in an icon slot), the window hints
+ */
+@method OLDisplayWinClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    OLDisplayWinInstance *w;
+
+    @callsuper();
+    w = DWin(oself);
+    w->OLWI_winPosSizeFlags = WPSF_PERSIST |
+			      (WCT_KEEP_PARTIALLY_VISIBLE << 6) |
+			      (WPT_STAGGER << 3) | WST_AS_DESIRED;
+    w->OLMDWI_iconWinPosSizeFlags = WPSF_PERSIST | (WCT_NONE << 6) |
+				    (WPT_STAGGER << 3) | WST_AS_DESIRED;
+    w->OLMDWI_iconWinPosSizeState =
+	((word) SSPR_ICON << WPSS_STAGGERED_SLOT_OFFSET) |
+	WPSS_POSITION_INVALID | WPSS_SIZE_INVALID;
+    OpenWinProcessHints(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Traveling objects
+ * ------------------------------------------------------------------- */
+
+/*
+ * TravelingObjectsCommon: the objects of ATTR_GEN_DISPLAY_TRAVELING_
+ * OBJECTS (a chunk of TravelingObjectReferences) moved to their parents
+ * in this display (toHere), or taken off them (their parent 0: removed
+ * only)
+ */
+static void TravelingObjectsCommon(optr oself, Boolean toHere)
+{
+    ChunkHandle *cp = ObjVarFindData(oself, ATTR_GEN_DISPLAY_TRAVELING_OBJECTS);
+    MemHandle mh = OptrToHandle(oself);
+    optr list;
+    word n, i;
+
+    if (!cp || !*cp)
+	return;
+    list = ConstructOptr(mh, *cp);
+    n = LMemGetChunkSize(list) / sizeof(TravelingObjectReference);
+    for (i = 0; i < n; i++) {
+	TravelingObjectReference r;
+	optr parent, cur;
+
+	r = ((TravelingObjectReference *) LMemDeref(list))[i];
+	parent = r.TIR_parent ? ConstructOptr(mh, r.TIR_parent) : 0;
+	if (!r.TIR_travelingObject)
+	    continue;
+	cur = @call r.TIR_travelingObject::MSG_GEN_FIND_PARENT();
+	/* moving here: not if it is here; taking off: only if it is */
+	if ((cur == parent) == toHere)
+	    continue;
+	@call r.TIR_travelingObject::MSG_GEN_SET_NOT_USABLE(
+					VUM_DELAYED_VIA_UI_QUEUE);
+	if (cur)
+	    @call cur::MSG_GEN_REMOVE_CHILD(r.TIR_travelingObject,
+				r.TIR_compChildFlags & CCF_MARK_DIRTY);
+	if (toHere && parent) {
+	    @call parent::MSG_GEN_ADD_CHILD(r.TIR_travelingObject,
+					    r.TIR_compChildFlags);
+	    @call r.TIR_travelingObject::MSG_GEN_SET_USABLE(
+					VUM_DELAYED_VIA_UI_QUEUE);
+	}
+    }
+}
+
+/* OLDisplayWinVisUnbuildBranch: the traveling objects taken off first */
+@method OLDisplayWinClass, MSG_SPEC_UNBUILD_BRANCH
+{
+    TravelingObjectsCommon(oself, FALSE);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The GCN notifications
+ * ------------------------------------------------------------------- */
+
+/* the application the display belongs to */
+static optr AppOf(optr o)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (app)
+	return app;
+    for (app = GenFindParent(o); app; app = GenFindParent(app))
+	if (ObjIsObjectInClass(app, &GenApplicationClass))
+	    return app;
+    return 0;
+}
+
+/* SendNotifyCommon: the block (0: none, ignored while the status is
+ * changing) to the application's list as MSG_META_NOTIFY_WITH_DATA_BLOCK */
+static void SendNotifyCommon(optr o, MemHandle block, word list, word type)
+{
+    optr none = 0, app = AppOf(o);
+    EventHandle ev;
+    GCNListSendFlags f = GCNLSF_SET_STATUS;
+
+    if (!app) {
+	if (block)
+	    MemFree(block);
+	return;
+    }
+    ev = @record none::MSG_META_NOTIFY_WITH_DATA_BLOCK(
+			MANUFACTURER_ID_GEOWORKS, type, block);
+    if (!block)
+	f |= GCNLSF_IGNORE_IF_STATUS_TRANSITIONING;
+    @call app::MSG_META_GCN_LIST_SEND(f, ev, block, list,
+				      MANUFACTURER_ID_GEOWORKS);
+}
+
+/* the number of the display among the group's usable displays before
+ * it */
+static word DisplayNumber(optr group, optr d)
+{
+    optr c;
+    word n = 0, i;
+
+    for (i = 0; (c = @call group::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0 &&
+		c != d; i++)
+	if (@call c::MSG_GEN_GET_USABLE())
+	    n++;
+    return n;
+}
+
+/*
+ * OLDisplayWinSendNotification: with the target (or with none, to clear
+ * it), the display's number, name (its text moniker) and whether the
+ * group overlaps to GAGCNLT_APP_TARGET_NOTIFY_DISPLAY_CHANGE
+ */
+static void SendNotification(optr oself, Boolean withData)
+{
+    MemHandle mh = 0;
+
+    if (withData) {
+	NotifyDisplayChange *n;
+	optr group;
+	ChunkHandle m;
+
+	if (!(DWin(oself)->OLDW_flags & OLDWF_TARGET))
+	    return;
+	mh = MemAlloc(sizeof(NotifyDisplayChange),
+		      HF_DYNAMIC | HF_SHARABLE, HAF_ZERO_INIT | HAF_LOCK);
+	n = MemDeref(mh);
+	group = GenFindParent(oself);
+	if (group) {
+	    ObjLockObjBlock(OptrToHandle(group));
+	    n->NDC_overlapping =
+		ObjVarFindData(group, ATTR_GEN_DISPLAY_GROUP_OVERLAPPING_STATE)
+		? 1 : 0;
+	    MemUnlock(OptrToHandle(group));
+	    n->NDC_displayNum = DisplayNumber(group, oself);
+	}
+	m = Gen(oself)->GI_visMoniker;
+	if (m) {
+	    optr mo = ConstructOptr(OptrToHandle(oself), m);
+	    VisMoniker *vm = LMemDeref(mo);
+	    word len = LMemGetChunkSize(mo) - (word) VMWT_text;
+
+	    if (!(vm->VM_type & VMT_GSTRING)) {
+		const char *t = (const char *) vm + VMWT_text;
+
+		if (len)
+		    len--;
+		if (len > MAX_DISPLAY_NAME_SIZE - 1)
+		    len = MAX_DISPLAY_NAME_SIZE - 1;
+		memcpy(n->NDC_name, t, len);
+	    }
+	}
+	MemUnlock(mh);
+	MemInitRefCount(mh, 1);
+    }
+    SendNotifyCommon(oself, mh, GAGCNLT_APP_TARGET_NOTIFY_DISPLAY_CHANGE,
+		     GWNT_DISPLAY_CHANGE);
+}
+
+/* OLDisplayWinSendCompleteNotification: the display list changed (its
+ * group's counter), then the display */
+@method OLDisplayWinClass, MSG_OL_DISPLAY_SEND_NOTIFICATION
+{
+    MemHandle mh = MemAlloc(sizeof(NotifyDisplayListChange),
+			    HF_DYNAMIC | HF_SHARABLE,
+			    HAF_ZERO_INIT | HAF_LOCK);
+    NotifyDisplayListChange *n = MemDeref(mh);
+    optr group = GenFindParent(oself);
+
+    if (group) {
+	OLDisplayGroupInstance *g;
+
+	ObjLockObjBlock(OptrToHandle(group));
+	g = (OLDisplayGroupInstance *) ObjDerefVis(group);
+	n->NDLC_counter = ++g->OLDGI_notifyCounter;
+	MemUnlock(OptrToHandle(group));
+	n->NDLC_group = group;
+    }
+    MemUnlock(mh);
+    MemInitRefCount(mh, 1);
+    SendNotifyCommon(oself, mh, GAGCNLT_APP_TARGET_NOTIFY_DISPLAY_LIST_CHANGE,
+		     GWNT_DISPLAY_LIST_CHANGE);
+    SendNotification(oself, TRUE);
+}
+
+/* OLDisplayWinSpecUpdateVisMoniker: the name in the notifications */
+@method OLDisplayWinClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    @callsuper();
+    @call oself::MSG_OL_DISPLAY_SEND_NOTIFICATION();
+}
+
+/* ---------------------------------------------------------------------
+ * Full sized and overlapping
+ * ------------------------------------------------------------------- */
+
+@method OLDisplayWinClass, MSG_GEN_DISPLAY_INTERNAL_SET_OVERLAPPING,
+	MSG_GEN_DISPLAY_INTERNAL_SET_FULL_SIZED
+{
+    @callsuper();
+    SendNotification(oself, TRUE);
+}
+
+/* OLDisplayWinReMaximize: the group resized, the size again */
+@method OLDisplayWinClass, MSG_OL_DISPLAY_RE_MAXIMIZE
+{
+    pself->OLWI_winPosSizeState |= WPSS_SIZE_INVALID;
+    if (!(pself->VI_attrs & VA_VISIBLE))
+	return;
+    UpdateWinPosSize(oself);
+    (void) @call oself::MSG_VIS_VUP_UPDATE_WIN_GROUP(VUM_NOW);
+}
+
+/* ---------------------------------------------------------------------
+ * The menus in the primary
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDisplayWinGupQuery: the build info of a menu (not a system or
+ * express menu): unless never adopted, from the primary's menu bar
+ * (OLBF_MENU_IN_DISPLAY; always adopted: OLBF_ALWAYS_ADOPT) above the
+ * display group; else as a window's
+ */
+@method OLDisplayWinClass, MSG_SPEC_P32_GUP_QUERY
+{
+    if (queryType == SGQT_BUILD_INFO &&
+	(retValue->GRP_bp & OLBF_MENUABLE) &&
+	!(pself->OLDW_flags & OLDWF_NEVER_ADOPT_MENUS)) {
+	GenReturnParams r = *retValue;
+	optr p = GenFindParent(oself);
+
+	if (pself->OLDW_flags & OLDWF_ALWAYS_ADOPT_MENUS)
+	    r.GRP_bp |= OLBF_ALWAYS_ADOPT;
+	r.GRP_bp |= OLBF_MENU_IN_DISPLAY;
+	if (p && @call p::MSG_SPEC_P32_GUP_QUERY(&r, SGQT_BUILD_INFO) &&
+	    (r.GRP_cx || r.GRP_dx)) {
+	    *retValue = r;
+	    retValue->GRP_bp |= OLBF_ABOVE_DISP_CTRL;
+	    return TRUE;
+	}
+    }
+    if (queryType == SGQT_BUILD_INFO)
+	retValue->GRP_bp &= ~OLBF_MENU_IN_DISPLAY;
+    return @callsuper();
+}
+
+/*
+ * OLDisplayWinOpenWin: the adopted menus' buttons shown unless always
+ * adopted (then shown already); not opened on top, it goes to the
+ * group's bottom
+ */
+@method OLDisplayWinClass, MSG_VIS_OPEN_WIN
+{
+    optr p;
+
+    @callsuper();
+    if (DWin(oself)->OLDW_flags & OLDWF_ALWAYS_ADOPT_MENUS)
+	return;
+    GenSendToChildren(oself, MSG_SHOW_MENU_BUTTON, NULL, 0);
+    if (DWin(oself)->OLWI_fixedAttr & OWFA_OPEN_ON_TOP)
+	return;
+    p = GenFindParent(oself);
+    if (p)
+	@call p::MSG_VIS_MOVE_CHILD(oself, CCO_LAST | CCF_MARK_DIRTY);
+}
+
+/* ---------------------------------------------------------------------
+ * Closing, usable, minimized
+ * ------------------------------------------------------------------- */
+
+/* OLDisplayWinGenCloseInteraction: a dismissable display closes its
+ * document (Port32: there is none yet) */
+@method OLDisplayWinClass, MSG_GEN_DISPLAY_CLOSE
+{
+}
+
+/* OLDisplayWinSpecSetUsable: the display list changed */
+@method OLDisplayWinClass, MSG_SPEC_SET_USABLE
+{
+    @callsuper();
+    @call oself::MSG_OL_DISPLAY_SEND_NOTIFICATION();
+}
+
+/* the display list's notification to the group's target (queued ahead:
+ * the display is no longer in the group's list) */
+static void NotifyGroupTarget(optr oself, Boolean front)
+{
+    optr p = GenFindParent(oself);
+    EventHandle ev;
+
+    if (!p)
+	return;
+    ev = @record OLDisplayWinClass::MSG_OL_DISPLAY_SEND_NOTIFICATION();
+    if (front)
+	@send, forceQueue, insertAtFront p::MSG_META_SEND_CLASSED_EVENT(ev,
+						(TravelOption) TO_TARGET);
+    else
+	@send, forceQueue p::MSG_META_SEND_CLASSED_EVENT(ev,
+						(TravelOption) TO_TARGET);
+}
+
+/* OLDisplayWinSpecSetNotUsable: another display on top; the display
+ * list changed (for the display with the target) */
+@method OLDisplayWinClass, MSG_SPEC_SET_NOT_USABLE
+{
+    optr p;
+
+    @callsuper();
+    p = GenFindParent(oself);
+    if (p)
+	@call p::MSG_OL_DISPLAY_GROUP_BRING_FIRST_DISPLAY_TO_TOP();
+    @call oself::MSG_OL_DISPLAY_SEND_NOTIFICATION();
+    NotifyGroupTarget(oself, TRUE);
+}
+
+/* OLDisplayMinimizeCommon: minimized (Port32: a display in a group has
+ * no icon), not realizable; another display on top; its slot free */
+static void MinimizeCommon(optr oself)
+{
+    optr p;
+
+    DWin(oself)->OLWI_specState |= OLWSS_MINIMIZED;
+    @call oself::MSG_SPEC_SET_ATTRS(SA_BRANCH_MINIMIZED, SA_REALIZABLE,
+				    VUM_NOW);
+    p = GenFindParent(oself);
+    if (p)
+	@call p::MSG_OL_DISPLAY_GROUP_BRING_FIRST_DISPLAY_TO_TOP();
+    OpenWinFreeStaggeredSlot(oself);
+}
+
+@method OLDisplayWinClass, MSG_GEN_DISPLAY_SET_MINIMIZED
+{
+    if (!(pself->OLWI_attrs & OWA_MINIMIZABLE) ||
+	(pself->OLWI_specState & OLWSS_MINIMIZED))
+	return;
+    MinimizeCommon(oself);
+}
+
+/* OLDisplayDestroyAndFreeBlock: minimized and off its parent first,
+ * the display list told; its block's objects off the application's
+ * lists; then destroyed */
+@method OLDisplayWinClass, MSG_GEN_DESTROY_AND_FREE_BLOCK
+{
+    optr p = GenFindParent(oself), app;
+
+    MinimizeCommon(oself);
+    GenRemoveDownwardLink(OptrToHandle(oself), OptrToChunk(oself), 0);
+    @call oself::MSG_OL_DISPLAY_SEND_NOTIFICATION();
+    if (p)
+	NotifyGroupTarget(oself, FALSE);
+    app = AppOf(oself);
+    if (app) {
+	optr blk = ConstructOptr(OptrToHandle(oself), 0);
+
+	(void) @call app::MSG_META_GCN_LIST_REMOVE(blk, GAGCNLT_WINDOWS,
+						   MANUFACTURER_ID_GEOWORKS);
+	(void) @call app::MSG_META_GCN_LIST_REMOVE(blk,
+				GAGCNLT_CONTROLLED_GEN_VIEW_OBJECTS,
+				MANUFACTURER_ID_GEOWORKS);
+    }
+    return TRUE;
+}
+
+/* OLDisplayWinNextWindow: to the bottom, the first on top */
+@method OLDisplayWinClass, MSG_MO_NEXT_WIN
+{
+    optr p;
+
+    @call oself::MSG_GEN_LOWER_TO_BOTTOM();
+    p = GenFindParent(oself);
+    if (p)
+	@call p::MSG_OL_DISPLAY_GROUP_BRING_FIRST_DISPLAY_TO_TOP();
+}
+
+/* ---------------------------------------------------------------------
+ * The target
+ * ------------------------------------------------------------------- */
+
+@method OLDisplayWinClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER, WIN_OFFSET(OLWI_targetExcl),
+			       TL_GEN_DISPLAY, level, retValue);
+}
+
+/*
+ * OLDisplayWinUpdPriFocusState: gained, the traveling objects here (the
+ * document's model grab: Port32 not yet), the display told; its menus'
+ * buttons shown, lost hidden, unless always or never adopted
+ */
+@method OLDisplayWinClass, MSG_META_GAINED_TARGET_EXCL,
+	MSG_META_LOST_TARGET_EXCL
+{
+    OLDisplayWinFlags f;
+
+    pself->OLDW_flags &= ~(OLDWF_TARGET | OLDWF_NEED_TO_GRAB_MODEL_FOR_DOCUMENT);
+    if (message == MSG_META_GAINED_TARGET_EXCL) {
+	pself->OLDW_flags |= OLDWF_TARGET;
+	TravelingObjectsCommon(oself, TRUE);
+	if (!GenDisp(oself)->GDI_document)
+	    DWin(oself)->OLDW_flags |= OLDWF_NEED_TO_GRAB_MODEL_FOR_DOCUMENT;
+	SendNotification(oself, TRUE);
+    } else
+	SendNotification(oself, FALSE);
+    f = DWin(oself)->OLDW_flags;
+    if (!(f & (OLDWF_NEVER_ADOPT_MENUS | OLDWF_ALWAYS_ADOPT_MENUS)))
+	GenSendToChildren(oself, message == MSG_META_GAINED_TARGET_EXCL
+				 ? MSG_SHOW_MENU_BUTTON : MSG_HIDE_MENU_BUTTON,
+			  NULL, 0);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+/* OLDisplayFupKbdChar: Ctrl+F4 closes the display, Ctrl+F6 the next
+ * (queued) */
+@method OLDisplayWinClass, MSG_META_FUP_KBD_CHAR
+{
+    static const KeyboardShortcut keys[2] = {
+	KS_PHYSICAL | KS_CTRL | (KS_CHAR_SET_CONTROL << 8) | VC_F4,
+	KS_PHYSICAL | KS_CTRL | (KS_CHAR_SET_CONTROL << 8) | VC_F6
+    };
+    word i;
+
+    if (!(flags & (CF_STATE_KEY | CF_TEMP_ACCENT)) &&
+	(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)) &&
+	(i = FlowCheckKbdShortcut((KeyboardShortcut *) keys, 2, character,
+				  flags, state)) != (word) -1) {
+	if (i == 0)		/* the offset in the table */
+	    @send, forceQueue oself::MSG_GEN_DISPLAY_CLOSE();
+	else
+	    @send, forceQueue oself::MSG_MO_NEXT_WIN();
+	return TRUE;
+    }
+    return @callsuper();
+}
+
+@method OLDisplayWinClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    if (!@callsuper())
+	return FALSE;
+    @call oself::MSG_OL_WIN_CLEAR_TOGGLE_MENU_NAV_PENDING();
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * The document, the stacking in the group
+ * ------------------------------------------------------------------- */
+
+@method OLDisplayWinClass, MSG_GEN_DISPLAY_GET_DOCUMENT
+{
+    return GenDisp(oself)->GDI_document;
+}
+
+/* OLDisplayWinBringToTop: first in the group too */
+@method OLDisplayWinClass, MSG_GEN_BRING_TO_TOP
+{
+    optr p;
+    word i;
+
+    @callsuper();
+    p = GenFindParent(oself);
+    if (!p)
+	return;
+    i = @call p::MSG_VIS_FIND_CHILD(oself);
+    if (i != (word) -1 && i != 0)
+	@call p::MSG_VIS_MOVE_CHILD(oself, CCO_FIRST | CCF_MARK_DIRTY);
+}
+
+/* OLDisplayWinLowerToBottom: last in the group too */
+@method OLDisplayWinClass, MSG_GEN_LOWER_TO_BOTTOM
+{
+    optr p;
+
+    @callsuper();
+    p = GenFindParent(oself);
+    if (p && @call p::MSG_VIS_FIND_CHILD(oself) != (word) -1)
+	@call p::MSG_VIS_MOVE_CHILD(oself, CCO_LAST | CCF_MARK_DIRTY);
+}

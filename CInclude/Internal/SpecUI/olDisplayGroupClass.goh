@@ -1,0 +1,42 @@
+/*
+ * olDisplayGroupClass.goh -- OLDisplayGroupClass, a GenDisplayGroup:
+ * the window of a primary's documents holding its GenDisplays (after
+ * Include/Internal/SpecUI/olDisplayGroupClass.def), for Port32.
+ */
+#ifndef __OLDISPLAYGROUPCLASS_GOH
+#define __OLDISPLAYGROUPCLASS_GOH
+
+@include <Objects/vCompC.goh>
+@include <Objects/gDCtrlC.goh>
+@include <Objects/uiInputC.goh>
+
+@deflib motif
+
+/* OLDisplayGroupStates */
+typedef ByteFlags OLDisplayGroupStates;
+#define OLDGS_MAXIMIZED				0x80	/* full sized */
+#define OLDGS_PTR_IN_RAW_UNIV			0x40
+#define OLDGS_DEFAULT_FOCUS			0x20	/* HINT_DEFAULT_FOCUS */
+#define OLDGS_TILED				0x10
+#define OLDGS_SIZE_INDEPENDENTLY_OF_DISPLAYS	0x08
+
+@class OLDisplayGroupClass, VisCompClass;
+@uses GenDisplayGroupClass;
+
+/* the first display brought to top if none has the target */
+@message void MSG_OL_DISPLAY_GROUP_BRING_FIRST_DISPLAY_TO_TOP();
+@message void MSG_OL_DISPLAY_GROUP_REFIT_DISPLAY();
+
+    @instance OLDisplayGroupStates	OLDGI_states = 0;
+    /* the stagger slots of the displays */
+    @instance word		OLDGI_staggerSlotMap[8] = {0};
+    /* the display with the focus and the one with the target */
+    @instance FTVMCGrab		OLDGI_focusExcl = {0, 0};
+    @instance FTVMCGrab		OLDGI_targetExcl = {0, 0};
+    @instance word		OLDGI_notifyCounter = 0;
+
+@endc;
+
+@endlib
+
+#endif

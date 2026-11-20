@@ -1,0 +1,649 @@
+/*
+ * cwinDisplayControl.goc -- OLDisplayGroupClass (after
+ * cwinDisplayControl.asm): a GenDisplayGroup, the window in a primary
+ * that holds its GenDisplays (OLDisplayWinClass, cwinDisplay.goc), full
+ * sized (OLDGS_MAXIMIZED: each display maximized in it) or overlapping
+ * (staggered in its slots, or tiled); the focus and target among them.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the display list of a
+ * GenDisplayControl (MSG_GEN_DISPLAY_GROUP_SET_MONIKER and
+ * _SET_NUM_ITEMS want a GenDynamicList), docControlOptions
+ * (HINT_DISPLAY_GROUP_FULL_SIZED_IF_TRANSPARENT_DOC_CTRL_MODE never
+ * applies).
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olDisplayGroupClass.goh>
+@include <Internal/SpecUI/olDisplayWinClass.goh>
+
+@classdecl OLDisplayGroupClass, neverSaved;
+
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define DG_OFFSET(f)	word_offsetof(OLDisplayGroupInstance, f)
+#define DGroup(o)	((OLDisplayGroupInstance *) ObjDerefVis(o))
+#define Gen(o)		((GenInstance *) ObjDerefGen(o))
+
+#define DISPLAY_CONTROL_MIN_WIDTH	20
+#define DISPLAY_CONTROL_MIN_HEIGHT	10
+
+/* ---------------------------------------------------------------------
+ * Initialization
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDisplayGroupInitialize: the hints; full sized unless it was saved
+ * overlapping (attached to a state file) or HINT_DISPLAY_GROUP_
+ * OVERLAPPING_ON_STARTUP asks; a portal whose children (the displays)
+ * it places itself, expanding to fit its parent
+ */
+@method OLDisplayGroupClass, MSG_META_INITIALIZE
+{
+    OLDisplayGroupInstance *g;
+    word state = 0;
+    VardataKey k;
+
+    @callsuper();
+    g = DGroup(oself);
+    if (ObjVarFindData(oself, HINT_DEFAULT_FOCUS))
+	g->OLDGI_states |= OLDGS_DEFAULT_FOCUS;
+    if (ObjVarFindData(oself, HINT_DISPLAY_GROUP_SIZE_INDEPENDENTLY_OF_DISPLAYS))
+	g->OLDGI_states |= OLDGS_SIZE_INDEPENDENTLY_OF_DISPLAYS;
+    g->OLDGI_states |= OLDGS_MAXIMIZED;
+    {
+	optr app = GenFindParent(oself);
+
+	while (app && !ObjIsObjectInClass(app, &GenApplicationClass))
+	    app = GenFindParent(app);
+	if (app)
+	    state = @call app::MSG_GEN_APPLICATION_GET_STATE();
+    }
+    k = (state & AS_ATTACHED_TO_STATE_FILE)
+	? ATTR_GEN_DISPLAY_GROUP_OVERLAPPING_STATE
+	: HINT_DISPLAY_GROUP_OVERLAPPING_ON_STARTUP;
+    if (ObjVarFindData(oself, k)) {
+	DGroup(oself)->OLDGI_states &= ~OLDGS_MAXIMIZED;
+	(void) ObjVarAddData(oself, ATTR_GEN_DISPLAY_GROUP_OVERLAPPING_STATE |
+			     VDF_SAVE_TO_STATE, 0);
+    }
+    g = DGroup(oself);
+    g->VI_typeFlags |= VTF_IS_PORTAL;
+    g->VI_geoAttrs |= VGA_USE_VIS_SET_POSITION | VGA_NOTIFY_GEOMETRY_VALID |
+		      VGA_ALWAYS_RECALC_SIZE;
+    g->VCI_geoAttrs |= VCGA_CUSTOM_MANAGE_CHILDREN;
+    g->VCI_geoAttrs &= ~VCGA_ONLY_DRAWS_IN_MARGINS;
+    g->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+				VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+}
+
+@method OLDisplayGroupClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+/* OLDisplayGroupSpecBuild: HINT_DEFAULT_FOCUS, HINT_DEFAULT_TARGET */
+@method OLDisplayGroupClass, MSG_SPEC_BUILD
+{
+    @callsuper();
+    (void) ScanFocusTargetHintHandlers(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The focus and target among the displays
+ * ------------------------------------------------------------------- */
+
+/* OLDisplayGroupGrabFocusExcl: as a window, from its parent */
+@method OLDisplayGroupClass, MSG_META_GRAB_FOCUS_EXCL
+{
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, MAEF_OD_IS_WINDOW |
+			MAEF_GRAB | MAEF_FOCUS | MAEF_NOT_HERE);
+}
+
+/* OLDisplayGroupAlterFTVMCExcl: the focus and target among the
+ * displays here; its own requests and the rest to the superclass */
+@method OLDisplayGroupClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    if (flags & MAEF_NOT_HERE) {
+	@callsuper();
+	return;
+    }
+    if (flags & MAEF_FOCUS) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL,
+				  VIS_MASTER, DG_OFFSET(OLDGI_focusExcl),
+				  objectWantingControl,
+				  (flags & MAEF_GRAB) | MAEF_FOCUS);
+	flags &= ~MAEF_FOCUS;
+    }
+    if (flags & MAEF_TARGET) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+				  VIS_MASTER, DG_OFFSET(OLDGI_targetExcl),
+				  objectWantingControl,
+				  (flags & MAEF_GRAB) | MAEF_TARGET);
+	flags &= ~MAEF_TARGET;
+    }
+    if (flags & MAEF_MASK_OF_ALL_HIERARCHIES)
+	@callsuper oself::OLDisplayGroupClass::MSG_META_MUP_ALTER_FTVMC_EXCL(
+				objectWantingControl, flags);
+}
+
+/* OLDisplayGroupLostFocusExcl: the pointer here, the press grabs the
+ * focus again */
+@method OLDisplayGroupClass, MSG_META_LOST_FOCUS_EXCL
+{
+    if (pself->OLDGI_states & OLDGS_PTR_IN_RAW_UNIV)
+	@call oself::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       DG_OFFSET(OLDGI_focusExcl),
+			       MSG_META_LOST_FOCUS_EXCL);
+}
+
+@method OLDisplayGroupClass, MSG_META_GAINED_FOCUS_EXCL,
+	MSG_META_GAINED_SYS_FOCUS_EXCL, MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       DG_OFFSET(OLDGI_focusExcl), message);
+}
+
+/* OLDisplayGroupUpdateTargetExcl: gained, the first display tells the
+ * display list */
+@method OLDisplayGroupClass, MSG_META_GAINED_TARGET_EXCL,
+	MSG_META_LOST_TARGET_EXCL, MSG_META_GAINED_SYS_TARGET_EXCL,
+	MSG_META_LOST_SYS_TARGET_EXCL
+{
+    optr first;
+
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL, VIS_MASTER,
+			       DG_OFFSET(OLDGI_targetExcl), message);
+    if (message != MSG_META_GAINED_TARGET_EXCL)
+	return;
+    first = Gen(oself)->GI_comp.CP_firstChild;
+    if (first)
+	@send first::MSG_OL_DISPLAY_SEND_NOTIFICATION();
+}
+
+@method OLDisplayGroupClass, MSG_META_GET_FOCUS_EXCL
+{
+    *focusObject = pself->OLDGI_focusExcl.FTVMC_OD;
+    return TRUE;
+}
+
+@method OLDisplayGroupClass, MSG_META_GET_TARGET_EXCL
+{
+    *targetObject = pself->OLDGI_targetExcl.FTVMC_OD;
+    return TRUE;
+}
+
+/* OLDisplayGroupSendClassedEvent: to the display with the focus or
+ * the target */
+@method OLDisplayGroupClass, MSG_META_SEND_CLASSED_EVENT
+{
+    optr dest;
+
+    if (whereTo == (TravelOption) TO_FOCUS)
+	dest = pself->OLDGI_focusExcl.FTVMC_OD;
+    else if (whereTo == (TravelOption) TO_TARGET)
+	dest = pself->OLDGI_targetExcl.FTVMC_OD;
+    else {
+	@callsuper();
+	return;
+    }
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo, dest, 0);
+}
+
+@method OLDisplayGroupClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER, DG_OFFSET(OLDGI_targetExcl),
+			       TL_GEN_DISPLAY_CTRL, level, retValue);
+}
+
+/* ---------------------------------------------------------------------
+ * The displays' vis parent, drawing, the mouse
+ * ------------------------------------------------------------------- */
+
+/* OLDisplayGroupGQVP: the group for its displays */
+@method OLDisplayGroupClass, MSG_SPEC_GUP_QUERY_VIS_PARENT
+{
+    if (parentType == SQT_VIS_PARENT_FOR_DISPLAY)
+	return oself;
+    return @callsuper();
+}
+
+/* OLDisplayGroupDraw: an inset frame */
+@method OLDisplayGroupClass, MSG_VIS_DRAW
+{
+    Rectangle b;
+    word colors;
+
+    (void) drawFlags;
+    if (OpenCheckIfBW()) {
+	GrSetAreaColor(gstate, CF_INDEX, C_WHITE, 0, 0);
+	colors = (word) (C_BLACK | (C_BLACK << 8));
+    } else {
+	GrSetAreaColor(gstate, CF_INDEX, moCS_dsLightColor, 0, 0);
+	colors = (word) (moCS_dsDarkColor | (C_WHITE << 8));
+    }
+    VisGetBounds(oself, &b);
+    OpenDrawRect(oself, gstate, b.R_left, b.R_top, b.R_right, b.R_bottom,
+		 colors);
+}
+
+@method OLDisplayGroupClass, MSG_META_RAW_UNIV_ENTER
+{
+    pself->OLDGI_states |= OLDGS_PTR_IN_RAW_UNIV;
+    @call oself::MSG_VIS_ADD_BUTTON_PRE_PASSIVE();
+}
+
+@method OLDisplayGroupClass, MSG_META_RAW_UNIV_LEAVE
+{
+    if (!(pself->OLDGI_states & OLDGS_PTR_IN_RAW_UNIV))
+	return;
+    pself->OLDGI_states &= ~OLDGS_PTR_IN_RAW_UNIV;
+    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+}
+
+/* the group may be worked (the application asked) */
+static Boolean CheckIfInteractable(optr o)
+{
+    WindowHandle w = DGroup(o)->VCI_window;
+    optr app;
+
+    if (!w)
+	return FALSE;
+    app = GeodeGetAppObject(0);
+    return !app || @call app::MSG_META_TEST_WIN_INTERACTIBILITY(o, w);
+}
+
+/* OLDisplayGroupPrePassiveButton: the passive message of the button's
+ * function, if the group may be worked */
+@method OLDisplayGroupClass, MSG_META_PRE_PASSIVE_BUTTON
+{
+    Message m;
+
+    if (retVal) {
+	memset(retVal, 0, sizeof(*retVal));
+	retVal->flags = MRF_PROCESSED;
+    }
+    if (!CheckIfInteractable(oself))
+	return;
+    m = FlowTranslatePassiveButton(MSG_META_PRE_PASSIVE_BUTTON, inputState);
+    @call oself::{MSG_UI_BUTTON}(m)(retVal, xPosition, yPosition,
+				     inputState);
+}
+
+/* OLDisplayGroupPrePassiveStartSelect: a press in the group gives it
+ * the focus and target */
+@method OLDisplayGroupClass, MSG_META_PRE_PASSIVE_START_SELECT,
+	MSG_META_PRE_PASSIVE_START_MOVE_COPY
+{
+    (void) xPosition;
+    (void) yPosition;
+    (void) inputState;
+    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+    @call oself::MSG_META_GRAB_TARGET_EXCL();
+    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+    if (retVal) {
+	memset(retVal, 0, sizeof(*retVal));
+	retVal->flags = MRF_PROCESSED;
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+/* OLDisplayGroupNavigate: a node that may take the focus */
+@method OLDisplayGroupClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags,
+			     NCF_IS_FOCUSABLE, OptrToChunk(oself));
+}
+
+/* OLDisplayGroupBroadcastForDefaultFocus: HINT_DEFAULT_FOCUS */
+@method OLDisplayGroupClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    if (!(pself->OLDGI_states & OLDGS_DEFAULT_FOCUS))
+	return;
+    retValue->OAGP_object = oself;
+    retValue->OAGP_grabFlags = MAEF_OD_IS_WINDOW;
+}
+
+/* OLDisplayGroupKbdChar: to the display with the focus */
+@method OLDisplayGroupClass, MSG_META_KBD_CHAR
+{
+    optr f = pself->OLDGI_focusExcl.FTVMC_OD;
+
+    if (f)
+	@send f::MSG_META_KBD_CHAR(character, flags, state);
+    else
+	@callsuper();
+}
+
+/* OLDisplayGroupFindKbdAccelerator: the display with the target first */
+@method OLDisplayGroupClass, MSG_GEN_FIND_KBD_ACCELERATOR
+{
+    optr t = pself->OLDGI_targetExcl.FTVMC_OD;
+
+    if (!(Gen(oself)->GI_states & GS_ENABLED))
+	return FALSE;
+    if (t && @call t::MSG_GEN_FIND_KBD_ACCELERATOR(charValue,
+						 charFlagsAndShiftState,
+						 toggleStateAndScanCode))
+	return TRUE;
+    return @callsuper();
+}
+
+/* OLDisplayGroupSpecActivateObjectWithMnemonic: the display with the
+ * target */
+@method OLDisplayGroupClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    optr t = pself->OLDGI_targetExcl.FTVMC_OD;
+
+    if (t)
+	(void) @call t::MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(character,
+							       flags, state);
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * The stagger slots of the displays
+ * ------------------------------------------------------------------- */
+
+/* OLDisplayGroupVupQuery: the displays' stagger slots (as the field's) */
+@method OLDisplayGroupClass, MSG_VIS_P32_VUP_QUERY
+{
+    byte slot;
+    sword x, y;
+
+    switch (queryType) {
+    case SVQT_REQUEST_STAGGER_SLOT:
+	slot = FieldRequestStaggerSlot(pself->OLDGI_staggerSlotMap,
+				       (byte) data1);
+	FieldCalcStaggerPosition(oself, slot, &x, &y);
+	memset(retValue, 0, sizeof(*retValue));
+	retValue->GRP_bp = slot;
+	retValue->GRP_cx = (word) x;
+	retValue->GRP_dx = (word) y;
+	return TRUE;
+    case SVQT_FREE_STAGGER_SLOT:
+	FieldFreeStaggerSlot(pself->OLDGI_staggerSlotMap, (byte) data1);
+	memset(retValue, 0, sizeof(*retValue));
+	return TRUE;
+    default:
+	return @callsuper();
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * The window
+ * ------------------------------------------------------------------- */
+
+/* OLDisplayGroupOpenWin: a window inside the frame, dark grey */
+@method OLDisplayGroupClass, MSG_VIS_OPEN_WIN
+{
+    Rectangle b;
+    GeodeHandle proc = GeodeGetProcessHandle();
+    word cf = CMT_CLOSEST | WCF_PLAIN;
+    Color c = C_DARK_GREY;
+
+    if (pself->VCI_window)
+	return;
+    if (OpenCheckIfBW()) {
+	c = C_BW_GREY;
+	cf = CMT_DITHER | WCF_PLAIN;
+    }
+    OpenGetLineBounds(oself, &b);
+    DGroup(oself)->VCI_window =
+	WinOpen(parentWindow, oself, oself, cf, c, 0, 0, 0, proc, proc, NULL,
+		b.R_left + 1, b.R_top + 1, b.R_right - 1, b.R_bottom - 1);
+}
+
+/* OLDisplayGroupVisOpen: then the first display to the top (ahead of
+ * the queue) */
+@method OLDisplayGroupClass, MSG_VIS_OPEN
+{
+    @callsuper();
+    @send, forceQueue, insertAtFront
+	oself::MSG_OL_DISPLAY_GROUP_BRING_FIRST_DISPLAY_TO_TOP();
+}
+
+/* OLDisplayGroupMoveResizeWin: inside the frame */
+@method OLDisplayGroupClass, MSG_VIS_MOVE_RESIZE_WIN
+{
+    Rectangle b;
+    WindowHandle w = pself->VCI_window;
+
+    if (!w)
+	return;
+    OpenGetLineBounds(oself, &b);
+    WinResize(w, NULL, b.R_left + 1, b.R_top + 1, b.R_right - 1,
+	      b.R_bottom - 1, WPF_ABS);
+}
+
+/* OLDisplayGroupGetWinSizeInfo: the window's size, no margins */
+@method OLDisplayGroupClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO
+{
+    SizeAsDWord s = VisGetSize(oself);
+
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->WSIP_windowWidth = DWORD_WIDTH(s) - 2;
+    retValue->WSIP_windowHeight = DWORD_HEIGHT(s) - 2;
+}
+
+/* ---------------------------------------------------------------------
+ * Full sized and overlapping
+ * ------------------------------------------------------------------- */
+
+/* the message (with VUM_DELAYED_VIA_UI_QUEUE) to the displays */
+static void SendModeToChildren(optr oself, Message msg)
+{
+    byte m = VUM_DELAYED_VIA_UI_QUEUE;
+
+    GenSendToChildren(oself, msg, &m, sizeof(m));
+}
+
+@method OLDisplayGroupClass, MSG_GEN_DISPLAY_GROUP_SET_FULL_SIZED
+{
+    pself->OLDGI_states |= OLDGS_MAXIMIZED;
+    pself->OLDGI_states &= ~OLDGS_TILED;
+    SendModeToChildren(oself, MSG_GEN_DISPLAY_INTERNAL_SET_FULL_SIZED);
+    if (!(DGroup(oself)->OLDGI_states & OLDGS_SIZE_INDEPENDENTLY_OF_DISPLAYS))
+	VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+@method OLDisplayGroupClass, MSG_GEN_DISPLAY_GROUP_SET_OVERLAPPING
+{
+    pself->OLDGI_states &= ~(OLDGS_MAXIMIZED | OLDGS_TILED);
+    SendModeToChildren(oself, MSG_GEN_DISPLAY_INTERNAL_SET_OVERLAPPING);
+}
+
+/* FindDisplayByNumber: the n-th usable display (0: none) */
+static optr FindDisplayByNumber(optr oself, word n)
+{
+    optr c;
+    word i;
+
+    for (i = 0; (c = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++)
+	if (@call c::MSG_GEN_GET_USABLE()) {
+	    if (!n)
+		return c;
+	    n--;
+	}
+    return 0;
+}
+
+/* FindNumDisplays: the usable displays */
+static word FindNumDisplays(optr oself)
+{
+    optr c;
+    word n = 0, i;
+
+    for (i = 0; (c = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++)
+	if (@call c::MSG_GEN_GET_USABLE())
+	    n++;
+    return n;
+}
+
+/* OLDisplayGroupSelectDisplay: the display restored, on top, with the
+ * focus and target; full sized, the geometry again */
+@method OLDisplayGroupClass, MSG_GEN_DISPLAY_GROUP_SELECT_DISPLAY
+{
+    optr d = FindDisplayByNumber(oself, displayNum);
+
+    if (!d)
+	return;
+    @call d::MSG_GEN_DISPLAY_SET_NOT_MINIMIZED();
+    @call d::MSG_GEN_BRING_TO_TOP();
+    @call d::MSG_META_GRAB_FOCUS_EXCL();
+    @call d::MSG_META_GRAB_TARGET_EXCL();
+    if ((DGroup(oself)->OLDGI_states &
+	 (OLDGS_MAXIMIZED | OLDGS_SIZE_INDEPENDENTLY_OF_DISPLAYS)) ==
+	OLDGS_MAXIMIZED)
+	VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+/* OLDisplayGroupBringDisplayToTop: none has the target: the first
+ * (visually) on top */
+@method OLDisplayGroupClass, MSG_OL_DISPLAY_GROUP_BRING_FIRST_DISPLAY_TO_TOP
+{
+    optr d;
+
+    if (pself->OLDGI_targetExcl.FTVMC_OD)
+	return;
+    d = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(0);
+    if (d)
+	@call d::MSG_GEN_BRING_TO_TOP();
+}
+
+/* OLDisplayGroupSpecSetUsable: the displays' windows updated */
+@method OLDisplayGroupClass, MSG_SPEC_SET_USABLE
+{
+    struct { UpdateWindowFlags f; VisUpdateMode m; } p;
+
+    @callsuper();
+    p.f = 0;
+    p.m = VUM_DELAYED_VIA_UI_QUEUE;
+    GenSendToChildren(oself, MSG_META_UPDATE_WINDOW, &p, sizeof(p));
+}
+
+/*
+ * OLDisplayGroupTileDisplays: overlapping and tiled, the displays in
+ * columns of about the square root of their number (the last column up
+ * to twice as many), each a column's width and a row's height (in
+ * pixels); HINT_DISPLAY_GROUP_TILE_VERTICALLY swaps the directions
+ */
+@method OLDisplayGroupClass, MSG_GEN_DISPLAY_GROUP_TILE_DISPLAYS
+{
+    Boolean vert;
+    word num, height, numCols, numRows, col, row, disp = 0;
+    word colWidth, rowHeight, dcW, dcH;
+    SizeAsDWord s;
+
+    @call oself::MSG_GEN_DISPLAY_GROUP_SET_OVERLAPPING();
+    DGroup(oself)->OLDGI_states |= OLDGS_TILED;
+    vert = !ObjVarFindData(oself, HINT_DISPLAY_GROUP_TILE_HORIZONTALLY) &&
+	   ObjVarFindData(oself, HINT_DISPLAY_GROUP_TILE_VERTICALLY);
+    num = FindNumDisplays(oself);
+    if (!num)
+	return;
+    s = VisGetSize(oself);
+    dcW = DWORD_WIDTH(s);
+    dcH = DWORD_HEIGHT(s);
+    height = IntegerOf(GrSqrRootWWFixed(MakeWWFixed(num)));
+    numCols = IntegerOf(GrUDivWWFixed(MakeWWFixed(num), MakeWWFixed(height)));
+    colWidth = IntegerOf(GrUDivWWFixed(MakeWWFixed(vert ? dcH : dcW),
+				       MakeWWFixed(numCols)));
+    for (col = 0; col < numCols; col++) {
+	word left = num - disp;
+
+	numRows = (left > height && left < height * 2) ? left : height;
+	rowHeight = IntegerOf(GrUDivWWFixed(MakeWWFixed(vert ? dcW : dcH),
+					    MakeWWFixed(numRows)));
+	for (row = 0; row < numRows; row++, disp++) {
+	    optr d = FindDisplayByNumber(oself, disp);
+	    word x = (word) (colWidth * col), y = (word) (rowHeight * row);
+
+	    if (!d)
+		continue;
+	    @call d::MSG_GEN_SET_WIN_POSITION(
+		GET_MM_AND_TYPE(VUM_DELAYED_VIA_UI_QUEUE, WPT_AT_RATIO),
+		vert ? y : x, vert ? x : y);
+	    @call d::MSG_GEN_SET_WIN_SIZE(
+		GET_MM_AND_TYPE(VUM_DELAYED_VIA_UI_QUEUE,
+				WST_AS_RATIO_OF_PARENT),
+		vert ? rowHeight : colWidth, vert ? colWidth : rowHeight);
+	}
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry
+ * ------------------------------------------------------------------- */
+
+/* OLDisplayGroupNotifyGeometryValid: full sized and drawn again, the
+ * displays maximized again to fit */
+@method OLDisplayGroupClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
+{
+    @callsuper();
+    pself = DGroup(oself);
+    if ((pself->OLDGI_states & OLDGS_MAXIMIZED) &&
+	(pself->VI_optFlags & VOF_IMAGE_INVALID))
+	GenSendToChildren(oself, MSG_OL_DISPLAY_RE_MAXIMIZE, NULL, 0);
+}
+
+/*
+ * OLDisplayGroupRerecalcSize: the size hints; full sized, the size the
+ * first display wants inside the frame; no smaller than the minimum
+ */
+@method OLDisplayGroupClass, MSG_VIS_RECALC_SIZE
+{
+    sword w = (sword) width, h = (sword) height;
+    OLDisplayGroupStates st = pself->OLDGI_states;
+
+    VisApplySizeHints(oself, &w, &h);
+    if ((st & (OLDGS_MAXIMIZED | OLDGS_SIZE_INDEPENDENTLY_OF_DISPLAYS)) ==
+	OLDGS_MAXIMIZED) {
+	optr d = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(0);
+	SizeAsDWord s;
+
+	if (d) {
+	    if (w > 2)
+		w -= 2;
+	    if (h > 2)
+		h -= 2;
+	    if (@call d::MSG_OL_WIN_RECALC_DISPLAY_SIZE((word) w, (word) h,
+							&s)) {
+		w = (sword) DWORD_WIDTH(s);
+		h = (sword) DWORD_HEIGHT(s);
+	    }
+	    w += 2;
+	    h += 2;
+	}
+    }
+    /* VisHandleMinResize: the desired size bit dropped (a size to
+     * choose becomes the minimum), unsigned as the asm compares */
+    w &= ~RSA_CHOOSE_OWN_SIZE;
+    h &= ~RSA_CHOOSE_OWN_SIZE;
+    if ((word) w < DISPLAY_CONTROL_MIN_WIDTH)
+	w = DISPLAY_CONTROL_MIN_WIDTH;
+    if ((word) h < DISPLAY_CONTROL_MIN_HEIGHT)
+	h = DISPLAY_CONTROL_MIN_HEIGHT;
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+@method OLDisplayGroupClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    (void) childCount;
+    memset(retValue, 0, sizeof(*retValue));
+}
+
+/* OLDisplayGroupInvalAllGeometry: full sized, the displays too */
+@method OLDisplayGroupClass, MSG_VIS_INVAL_ALL_GEOMETRY
+{
+    if ((pself->OLDGI_states &
+	 (OLDGS_MAXIMIZED | OLDGS_SIZE_INDEPENDENTLY_OF_DISPLAYS)) ==
+	OLDGS_MAXIMIZED)
+	VisSendToChildren(oself, MSG_VIS_INVAL_ALL_GEOMETRY,
+			  &updateMode, sizeof(updateMode));
+}
