@@ -46,6 +46,9 @@ typedef struct {
     short		UBS_gw, UBS_gh;
     short		UBS_dl, UBS_dt, UBS_dw, UBS_dh;
     short		UBS_sys[6];
+    optr		UBS_maxIcon, UBS_restoreIcon;
+    optr		UBS_pin;
+    short		UBS_pinned[4];
 } UBState;
 
 static int fails;
@@ -91,6 +94,9 @@ int main(void)
     InitFileWriteString("ui", "execOnStartup", "uiboot");
     InitFileWriteString("screen 0", "driver", "hostvid");
     InitFileWriteString("screen 0", "device", "Host Display: 640x480");
+    /* a mouse, as it were (there is no mouse driver): not keyboard
+     * only, so the system menu has its icons and menus can be pinned */
+    InitFileWriteBoolean("input", "keyboardOnly", FALSE);
 
     /* booted: uiboot of execOnStartup up */
     BootLoadUI();
@@ -114,12 +120,15 @@ int main(void)
 	   st->UBS_dh, st->UBS_displayNotices, st->UBS_listNotices);
     /* overlapping, selected, tiled, full sized, Ctrl+F6, not usable;
      * the separators in a menu, the File menu's Exit; the primary's
-     * system menu */
-    for (i = 2; i <= 11; i++)
+     * system menu, maximized and restored by its icons; the File menu
+     * pinned, opened by its button, closed by its system menu */
+    for (i = 2; i <= 18; i++)
 	step(i);
     printf("system menu button at %d,%d %dx%d, title bar %d..%d\n",
 	   st->UBS_sys[0], st->UBS_sys[1], st->UBS_sys[2], st->UBS_sys[3],
 	   st->UBS_sys[4], st->UBS_sys[5]);
+    printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
+	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 
     printf("geode checks: %u, failed %u (first at uiboot.goc line %u)\n",
 	   st->UBS_checks, st->UBS_fails, st->UBS_failLine);

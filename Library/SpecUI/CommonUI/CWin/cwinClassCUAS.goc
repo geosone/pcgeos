@@ -206,6 +206,37 @@ void OpenWinEnsureSysMenu(optr o, SpecBuildFlags flags)
 }
 
 /*
+ * OpenWinUpdatePinnedMenu: a pinnable menu that is pinned: movable,
+ * titled, with a system menu, kept partly visible, placed already; its
+ * system menu made and placed (once).  TRUE if so (the menu's own case).
+ */
+Boolean OpenWinUpdatePinnedMenu(optr o)
+{
+    OLWinInstance *w = Win(o);
+    optr b;
+
+    if (!(w->OLWI_attrs & OWA_PINNABLE) ||
+	!(w->OLWI_specState & OLWSS_PINNED))
+	return FALSE;
+    w->OLWI_attrs |= OWA_MOVABLE | OWA_TITLED | OWA_HAS_SYS_MENU;
+    w->OLWI_winPosSizeFlags = (WinPosSizeFlags)
+	((w->OLWI_winPosSizeFlags & ~WPSF_CONSTRAIN_TYPE) |
+	 (WCT_KEEP_PARTIALLY_VISIBLE << 6));
+    w->OLWI_winPosSizeState |= WPSS_HAS_MOVED_OR_RESIZED;
+    if (w->OLWI_sysMenu)
+	return TRUE;
+    OpenWinEnsureSysMenu(o, SBF_IN_UPDATE_WIN_GROUP | SBF_WIN_GROUP |
+			 VUM_NOW);
+    OpenWinPositionSysMenuIcons(o);
+    w = Win(o);
+    if (w->OLWI_sysMenu && w->OLWI_sysMenuButton) {
+	b = ConstructOptr(w->OLWI_sysMenu, w->OLWI_sysMenuButton);
+	VisMarkInvalid(b, VOF_WINDOW_INVALID, VUM_MANUAL);
+    }
+    return TRUE;
+}
+
+/*
  * OpenWinEnsureSysMenuIcons: the minimize, maximize and restore icons
  * linked up to the window and built (always enabled), once; not when
  * there is only a keyboard

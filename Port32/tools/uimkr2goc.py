@@ -4,9 +4,12 @@
 Reads .ui files that define visMonikers with a gstring of their own
 (GSSetAreaColorIndex, GSFillBitmapAtCP, GSDrawBitmapAtCP, Bitmap and the
 bytes after it, GSEndString) and data chunks holding a Bitmap, for one
-specific UI's conditions (#if NAME / #else / #endif), and writes them as
-goc: each @visMoniker with its attributes and its gstring as bytes, each
-chunk as an @chunk byte array, in data resources named as in the .ui.
+specific UI's conditions (#if NAME / #elif / #else / #endif), and writes
+them as goc: each @visMoniker with its attributes and its gstring as
+bytes, each chunk as an @chunk byte array, each moniker list as a list,
+in data resources named as in the .ui; text monikers are left out.  A
+GR_DRAW_BITMAP_OPTR at 0, 0 of a chunk of these files becomes the bitmap
+drawn inline (goc writes no optr in a gstring).
 Comments (/* */, //, and ; to the end of a line in a gstring) go.
 
 usage: uimkr2goc.py out.goh file.ui ... [NAME=value ...]
@@ -43,7 +46,7 @@ def cond(expr, names):
 
 def preprocess(path, names):
     """the lines of the file whose conditions hold (#include ignored)"""
-    out, stack = [], []
+    out, stack = [], []         # [this branch on, a branch taken] per level
     text = re.sub(r'/\*.*?\*/', lambda m: '\n' * m.group(0).count('\n'),
                   open(path, encoding='latin-1').read(), flags=re.S)
     for line in text.split('\n'):
@@ -52,24 +55,27 @@ def preprocess(path, names):
         m = re.match(r'(if|else|endif)\b(.*)', s)
         if m:
             s = '#' + m.group(1) + m.group(2)
+        outer = all(e[0] for e in stack[:-1]) if s.startswith(
+            ('#elif', '#else', '#endif')) else all(e[0] for e in stack)
         if s.startswith('#if'):
-            on = all(stack)
-            stack.append(on and cond(s[3:].replace('not ', '!'), names))
-            stack[-1] = stack[-1] if on else False
+            v = outer and cond(s[3:].replace('not ', '!'), names)
+            stack.append([v, v])
             continue
         if s.startswith('#elif'):
-            stack[-1] = False       # not used by the art files
+            v = outer and not stack[-1][1] and \
+                cond(s[5:].replace('not ', '!'), names)
+            stack[-1] = [v, stack[-1][1] or v]
             continue
         if s.startswith('#else'):
-            outer = all(stack[:-1])
-            stack[-1] = outer and not stack[-1]
+            v = outer and not stack[-1][1]
+            stack[-1] = [v, True]
             continue
         if s.startswith('#endif'):
             stack.pop()
             continue
         if s.startswith('#'):
             continue
-        if all(stack):
+        if all(e[0] for e in stack):
             out.append(line)
     return out
 
@@ -111,14 +117,22 @@ class Item:
         self.text, self.size = text, size
 
 
-def parse_data(lines):
+def parse_data(lines, chunks=None):
     """Bitmap and bytes (and gstring elements) into items; a
     GSFillBitmapAtCP/GSDrawBitmapAtCP takes the size of the bitmap
-    after it"""
+    after it.  A GR_DRAW_BITMAP_OPTR at 0, 0 of a bitmap chunk of these
+    files becomes a GSDrawBitmapAtCP of the bitmap itself (goc writes
+    no optr in a gstring)."""
     items = []
-    pending = None          # index of a bitmap element waiting for its size
     body = ' '.join(l.split(';')[0] for l in lines)
     body = re.sub(r'\b\w+\s+label\s+byte\b', ' ', body)
+    m = re.search(r'\bbyte\s+GR_DRAW_BITMAP_OPTR\s+word\s+0\s*,\s*0\s+'
+                  r'optr\s+(\w+)', body)
+    if m:
+        if not chunks or m.group(1) not in chunks:
+            raise SystemExit('no bitmap chunk ' + m.group(1))
+        body = body[:m.start()] + ' GSDrawBitmapAtCP ' + \
+            ' '.join(chunks[m.group(1)]) + ' ' + body[m.end():]
     # statements: split before each keyword
     toks = re.split(r'(?=\b(?:GSBeginString|GSEndString|GSSetAreaColorIndex|'
                     r'GSFillBitmapAtCP|GSDrawBitmapAtCP|Bitmap|db|byte)\b)',
@@ -133,7 +147,6 @@ def parse_data(lines):
             c = t.split(None, 1)[1].strip()
             items.append(Item('GSSetAreaColorIndex(%s)' % c, 2))
         elif t.startswith(('GSFillBitmapAtCP', 'GSDrawBitmapAtCP')):
-            pending = len(items)
             items.append(Item(t.split()[0], 3))
         elif t.startswith('Bitmap'):
             m = re.match(r'Bitmap\s*<\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*(.*)>\s*$', t)
@@ -163,9 +176,12 @@ def convert(paths, names, header=False):
     """the goc text of the files"""
     res = {}                # resource -> [text]
     order = []
+    chunks = {}             # chunk -> its lines (for GR_DRAW_BITMAP_OPTR)
+    files = []
     for path in paths:
         lines = preprocess(path, names)
         i, resource = 0, None
+        later = []
         while i < len(lines):
             s = lines[i].strip()
             m = re.match(r'start\s+(\w+)', s)
@@ -180,7 +196,7 @@ def convert(paths, names, header=False):
                 resource = None
                 i += 1
                 continue
-            m = re.match(r'(visMoniker|chunk)\s+(\w+)\s*=\s*(data\s*)?\{', s)
+            m = re.match(r'(visMoniker|chunk)\s+(\w+)\s*=\s*(data\s*|list\s*)?\{', s)
             if not m:
                 i += 1
                 continue
@@ -192,7 +208,18 @@ def convert(paths, names, header=False):
                 i += 1
                 if depth == 0:
                     break
-            res[resource].append(emit(m.group(1), m.group(2), block))
+            if m.group(1) == 'chunk':
+                text = '\n'.join(block)
+                chunks[m.group(2)] = [
+                    l.split(';')[0] for l in
+                    text[text.index('{') + 1:text.rindex('}')].split('\n')]
+            later.append((resource, m.group(1), m.group(2), block))
+        files.append(later)
+    for later in files:
+        for resource, kind, name, block in later:
+            e = emit(kind, name, block, chunks)
+            if e:
+                res[resource].append(e)
     out = ['/*', ' * Generated by Port32/tools/uimkr2goc.py -- do not edit.',
            ' * From:'] + [' *   ' + p.split('/')[-1] for p in paths] + [' */', '']
     if not header:
@@ -208,12 +235,20 @@ def convert(paths, names, header=False):
     return '\n'.join(out)
 
 
-def emit(kind, name, block):
+def emit(kind, name, block, chunks):
+    """the goc text of a chunk, a list or a picture moniker (a text
+    moniker: None)"""
     text = '\n'.join(block)
     inner = text[text.index('{') + 1:text.rindex('}')]
     if kind == 'chunk':
         items = parse_data(inner.split('\n'))
         return wrap('@chunk byte %s[] = {' % name, items, '};')
+    if re.match(r'visMoniker\s+\w+\s*=\s*list', text.strip()):
+        names = [n for n in re.split(r'[\s,]+', inner) if n]
+        return '@visMoniker %s = list { %s };\n' % (
+            name, ', '.join('@' + n for n in names))
+    if 'gstring' not in inner:
+        return None
     g = inner.index('gstring')
     attrs = inner[:g]
     gs = inner[inner.index('{', g) + 1:inner.rindex('}')]
@@ -222,7 +257,7 @@ def emit(kind, name, block):
         a = re.sub(r'\s+', ' ', a.split('//')[0]).strip()
         if a:
             head.append('    %s;' % a)
-    items = parse_data(gs.split('\n'))
+    items = parse_data(gs.split('\n'), chunks)
     return '\n'.join(head) + '\n' + wrap('    gstring {', items, '    }') + '\n}\n'
 
 

@@ -5,9 +5,13 @@
  * OK), the system menus (StandardWindowMenuResource for primaries and
  * dialogs, DisplayWindowMenuResource for displays, with Next) that
  * OpenWinEnsureSysMenu (CWin/cwinClassCUAS.goc) copies for each window,
- * and their pictures (cspecCUASArt.goh, generated from the mkr*.ui and
- * bmPin.ui files by Port32/tools/uimkr2goc.py; goc needs the monikers
- * of a list in the same file).
+ * and their pictures and the pushpin's PinMoniker (cspecCUASArt.goh,
+ * generated from the mkr*.ui and bmPin.ui files and cspecCUAS.ui by
+ * Port32/tools/uimkr2goc.py, run in CSpec:
+ *   uimkr2goc.py cspecCUASArt.goh mkrMinimize.ui mkrMaximize.ui
+ *     mkrRestore.ui mkrWindowMenu.ui mkrDisplayWindowMenu.ui
+ *     mkrWindowMenuButton.ui bmPin.ui cspecCUAS.ui
+ * goc needs the monikers of a list in the same file).
  *
  * The icons' ATTR_GEN_TRIGGER_ACTION_DATA (0, VUM_NOW) is left out: the
  * C messages they send take no arguments.

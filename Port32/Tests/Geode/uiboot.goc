@@ -43,6 +43,9 @@ typedef struct {
     /* the primary's system menu button (left, top, width, height) and
      * the left and right of its title bar */
     sword		UBS_sys[6];
+    optr		UBS_maxIcon, UBS_restoreIcon;
+    optr		UBS_pin;
+    sword		UBS_pinned[4];
 } UBState;
 
 UBState ubState;
@@ -81,11 +84,13 @@ UBState ubState;
 @object GenTriggerClass UBOpen = {
     GI_visMoniker = "Open";
 }
-/* a menu of items and groups of items: separators between them */
+/* a menu of items and groups of items: separators between them (not
+ * pinnable: no pin above them) */
 @object GenInteractionClass UBTools = {
     GI_visMoniker = "Tools";
     GI_comp = @UBFirst, @UBItems, @UBLast, @UBSame;
     GII_visibility = GIV_POPUP;
+    HINT_INFREQUENTLY_USED;
 }
 @object GenTriggerClass UBFirst = {
     GI_visMoniker = "First";
@@ -265,6 +270,21 @@ static OLMenuItemGroupSpecState MIGState(optr g)
     return m.OLMIGI_specState;
 }
 
+static sword Width(optr o)
+{
+    Rectangle r = Bounds(o);
+
+    return r.R_right - r.R_left;
+}
+
+static Boolean Drawable(optr o)
+{
+    VisInstance v;
+
+    VisData(o, &v, sizeof(v));
+    return (v.VI_attrs & VA_DRAWABLE) != 0;
+}
+
 static sword Height(optr o)
 {
     Rectangle r = Bounds(o);
@@ -298,6 +318,47 @@ static optr GroupTarget(void)
 
     (void) @call UBGroup::MSG_META_GET_TARGET_EXCL(&t);
     return t;
+}
+
+/*
+ * SysIcons: the system menu icons of the window shown (drawable): which
+ * (by their action), each in the title bar's right part at the button's
+ * top; the maximize and restore icons kept in ubState
+ */
+#define SI_MINIMIZE	1
+#define SI_MAXIMIZE	2
+#define SI_RESTORE	4
+static word SysIcons(OLWinInstance *w, sword top)
+{
+    word i, n = @call UBPrimary::MSG_VIS_COUNT_CHILDREN(), shown = 0;
+
+    for (i = 0; i < n; i++) {
+	optr c = @call UBPrimary::MSG_VIS_FIND_CHILD_AT_POSITION(i);
+	VisInstance v;
+	Rectangle r;
+	Message msg;
+	word bit;
+
+	if (!c || OptrToHandle(c) != w->OLWI_sysMenu ||
+	    OptrToChunk(c) == w->OLWI_sysMenuButton)
+	    continue;
+	msg = @call c::MSG_GEN_TRIGGER_GET_ACTION_MSG();
+	bit = msg == MSG_OL_WIN_MINIMIZE ? SI_MINIMIZE :
+	      msg == MSG_OL_WIN_MAXIMIZE ? SI_MAXIMIZE :
+	      msg == MSG_OL_RESTORE_WIN ? SI_RESTORE : 8;
+	if (bit == SI_MAXIMIZE)
+	    ubState.UBS_maxIcon = c;
+	if (bit == SI_RESTORE)
+	    ubState.UBS_restoreIcon = c;
+	VisData(c, &v, sizeof(v));
+	if (!(v.VI_attrs & VA_DRAWABLE))
+	    continue;
+	r = Bounds(c);
+	if (r.R_left < w->OLWI_titleBarBounds.R_right || r.R_top != top)
+	    bit = 8;
+	shown |= bit;
+    }
+    return shown;
 }
 
 @method UBProcessClass, MSG_UB_STEP
@@ -484,13 +545,13 @@ static optr GroupTarget(void)
 	break;
     case 10: {
 	/* Exit last in the File menu (not a generic child), named with
-	 * the application, F3, IC_EXIT */
-	optr e = @call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(1);
+	 * the application, F3, IC_EXIT; the pin first */
+	optr e = @call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(2);
 	InteractionCommand *ic;
 	OLMenuWinInstance m;
 
-	UBCHECK(@call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(0) == @UBOpen);
-	UBCHECK(e && !@call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(2));
+	UBCHECK(@call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(1) == @UBOpen);
+	UBCHECK(e && !@call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(3));
 	UBCHECK(e && InClass(e, (ClassStruct *) &GenTriggerClass));
 	UBCHECK(e && @call UBFile::MSG_GEN_FIND_CHILD(e) == (word) -1);
 	UBCHECK(e && @call e::MSG_GEN_FIND_PARENT() == @UBFile);
@@ -563,9 +624,8 @@ static optr GroupTarget(void)
 		    (vm->VM_type & VMT_GSTRING));
 	}
 	MemUnlock(w.OLWI_sysMenu);
-	/* Restore off (not maximized), Close on, with Alt; keyboard only
-	 * (no mouse here): no icons, and Maximize, which goes with its
-	 * icon, off as well */
+	/* Restore off (not maximized), Close and Maximize on, Close with
+	 * Alt */
 	it = @call m::MSG_GEN_FIND_CHILD_AT_POSITION(0);
 	UBCHECK(it && !@call it::MSG_GEN_CHECK_IF_FULLY_ENABLED());
 	UBCHECK(it && TextIs(it, "Restore"));
@@ -574,10 +634,138 @@ static optr GroupTarget(void)
 	UBCHECK(it && @call it::MSG_GEN_CHECK_IF_FULLY_ENABLED());
 	UBCHECK(it && @call it::MSG_GEN_GET_KBD_ACCELERATOR() ==
 		(KS_ALT | (KS_CHAR_SET_CONTROL << 8) | VC_F4));
-	UBCHECK(!(w.OLWI_specState & OLWSS_SYS_ICONS_ATTACHED));
 	it = @call m::MSG_GEN_FIND_CHILD_AT_POSITION(4);
 	UBCHECK(it && TextIs(it, "Maximize") &&
-		!@call it::MSG_GEN_CHECK_IF_FULLY_ENABLED());
+		@call it::MSG_GEN_CHECK_IF_FULLY_ENABLED());
+	/* with a mouse: the minimize and maximize icons at the right end
+	 * of the title bar, the restore icon hidden */
+	UBCHECK(w.OLWI_specState & OLWSS_SYS_ICONS_ATTACHED);
+	UBCHECK(SysIcons(&w, r.R_top) == (SI_MINIMIZE | SI_MAXIMIZE));
+	/* maximized by its icon */
+	if (ubState.UBS_maxIcon)
+	    @call ubState.UBS_maxIcon::MSG_GEN_TRIGGER_SEND_ACTION(FALSE);
+	break;
+    }
+    case 12: {
+	/* maximized: the restore icon instead of the maximize one, the
+	 * Restore item on; restored by the icon */
+	OLWinInstance w;
+	Rectangle r;
+
+	VisData(@UBPrimary, &w, sizeof(w));
+	UBCHECK(w.OLWI_specState & OLWSS_MAXIMIZED);
+	r = Bounds(ConstructOptr(w.OLWI_sysMenu, w.OLWI_sysMenuButton));
+	UBCHECK(SysIcons(&w, r.R_top) == (SI_MINIMIZE | SI_RESTORE));
+	if (ubState.UBS_restoreIcon)
+	    @call ubState.UBS_restoreIcon::MSG_GEN_TRIGGER_SEND_ACTION(FALSE);
+	break;
+    }
+    case 13: {
+	OLWinInstance w;
+	Rectangle r;
+
+	VisData(@UBPrimary, &w, sizeof(w));
+	UBCHECK(!(w.OLWI_specState & OLWSS_MAXIMIZED));
+	r = Bounds(ConstructOptr(w.OLWI_sysMenu, w.OLWI_sysMenuButton));
+	UBCHECK(SysIcons(&w, r.R_top) == (SI_MINIMIZE | SI_MAXIMIZE));
+	/* the File menu up again, for its pin */
+	@call UBFile::MSG_GEN_INTERACTION_INITIATE();
+	break;
+    }
+    case 14: {
+	/* the pin: a group first in the menu, shown, holding a trigger
+	 * that toggles the pushpin at once, its moniker the pin's
+	 * picture; pressed */
+	OLMenuWinInstance m;
+	optr g, t;
+
+	VisData(@UBFile, &m, sizeof(m));
+	UBCHECK(m.OLWI_attrs & OWA_PINNABLE);
+	UBCHECK(m.OLPWI_pinTrigger != 0);
+	if (!m.OLPWI_pinTrigger)
+	    break;
+	g = ConstructOptr(OptrToHandle(@UBFile), m.OLPWI_pinTrigger);
+	UBCHECK(@call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(0) == g);
+	UBCHECK(Drawable(g));
+	t = @call g::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+	UBCHECK(t && InClass(t, (ClassStruct *) &GenTriggerClass));
+	if (!t)
+	    break;
+	ubState.UBS_pin = t;
+	UBCHECK(@call t::MSG_GEN_TRIGGER_GET_ACTION_MSG() ==
+		MSG_OL_POPUP_TOGGLE_PUSHPIN);
+	UBCHECK(Drawable(t) && Width(t) >= 32);
+	ObjLockObjBlock(OptrToHandle(t));
+	{
+	    VisMoniker *vm = LMemDeref(ConstructOptr(OptrToHandle(t),
+			((GenInstance *) ObjDerefGen(t))->GI_visMoniker));
+
+	    UBCHECK(!(vm->VM_type & VMT_MONIKER_LIST) &&
+		    (vm->VM_type & VMT_GSTRING));
+	}
+	MemUnlock(OptrToHandle(t));
+	@call t::MSG_GEN_TRIGGER_SEND_ACTION(FALSE);
+	break;
+    }
+    case 15: {
+	/* pinned: still up, titled, movable, with its system menu; the
+	 * pin hidden.  Then opened by its button: not pinned meanwhile */
+	OLMenuWinInstance m;
+	Rectangle r = Bounds(@UBFile);
+
+	VisData(@UBFile, &m, sizeof(m));
+	UBCHECK(m.OLWI_specState & OLWSS_PINNED);
+	UBCHECK((m.OLWI_attrs & (OWA_MOVABLE | OWA_TITLED | OWA_HAS_SYS_MENU))
+		== (OWA_MOVABLE | OWA_TITLED | OWA_HAS_SYS_MENU));
+	UBCHECK(@call UBFile::MSG_VIS_QUERY_WINDOW() != 0);
+	UBCHECK(m.OLWI_sysMenu && m.OLWI_sysMenuButton);
+	if (m.OLWI_sysMenu && m.OLWI_sysMenuButton)
+	    UBCHECK(Drawable(ConstructOptr(m.OLWI_sysMenu,
+					   m.OLWI_sysMenuButton)));
+	UBCHECK(!Drawable(ubState.UBS_pin));
+	ubState.UBS_pinned[0] = r.R_left;
+	ubState.UBS_pinned[1] = r.R_top;
+	ubState.UBS_pinned[2] = r.R_right - r.R_left;
+	ubState.UBS_pinned[3] = r.R_bottom - r.R_top;
+	@call UBFile::MSG_OL_POPUP_ACTIVATE(20, 20);
+	break;
+    }
+    case 16: {
+	/* opened by its button: unpinned for the while, no title; closed:
+	 * pinned again */
+	OLMenuWinInstance m;
+
+	VisData(@UBFile, &m, sizeof(m));
+	UBCHECK(!(m.OLWI_specState & OLWSS_PINNED));
+	UBCHECK(m.OLMWI_specState & OMWSS_WAS_PINNED);
+	UBCHECK(!(m.OLWI_attrs & OWA_TITLED));
+	UBCHECK(m.OLWI_sysMenu && m.OLWI_sysMenuButton &&
+		!Drawable(ConstructOptr(m.OLWI_sysMenu,
+					m.OLWI_sysMenuButton)));
+	(void) @call UBFile::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	break;
+    }
+    case 17: {
+	/* pinned again, up; closed by its system menu: unpinned, down */
+	OLMenuWinInstance m;
+
+	VisData(@UBFile, &m, sizeof(m));
+	UBCHECK(m.OLWI_specState & OLWSS_PINNED);
+	UBCHECK(!(m.OLMWI_specState & OMWSS_WAS_PINNED));
+	UBCHECK((m.OLWI_attrs & (OWA_TITLED | OWA_PINNABLE)) ==
+		(OWA_TITLED | OWA_PINNABLE));
+	UBCHECK(@call UBFile::MSG_VIS_QUERY_WINDOW() != 0);
+	@call UBFile::MSG_OL_WIN_CLOSE();
+	break;
+    }
+    case 18: {
+	OLMenuWinInstance m;
+
+	VisData(@UBFile, &m, sizeof(m));
+	UBCHECK(!(m.OLWI_specState & OLWSS_PINNED));
+	UBCHECK(!(m.OLWI_attrs & OWA_TITLED));
+	UBCHECK(!@call UBFile::MSG_VIS_QUERY_WINDOW());
+	UBCHECK(Drawable(ubState.UBS_pin));
 	break;
     }
     }

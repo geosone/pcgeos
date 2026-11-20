@@ -500,6 +500,7 @@ extern optr OpenWinSysMenuTop(optr o);
 extern void OpenWinEnsureSysMenu(optr o, SpecBuildFlags flags);
 extern void OpenWinEnsureSysMenuIcons(optr o, SpecBuildFlags flags);
 extern void OpenWinPositionSysMenuIcons(optr o);
+extern Boolean OpenWinUpdatePinnedMenu(optr o);
 extern void OpenWinHideSysMenuIcons(optr o);
 extern void OpenWinFreeSysMenu(optr o, SpecBuildFlags flags, Boolean unbuild);
 extern void OpenWinSysMenuNotifyEnabled(optr o, Message msg, byte mode,

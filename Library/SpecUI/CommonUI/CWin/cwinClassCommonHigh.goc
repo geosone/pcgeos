@@ -381,12 +381,14 @@ void OpenWinProcessHints(optr o)
  * ------------------------------------------------------------------- */
 
 /* OpenWinUpdateSpecBuild: the system menu and its icons of a win group
- * (not of a custom window; pinned menus: Port32 not yet) */
+ * (not of a custom window); a pinned menu's its own way */
 @method OLWinClass, MSG_SPEC_BUILD_BRANCH
 {
     @callsuper();
     if (!(flags & SBF_WIN_GROUP) ||
 	(Win(oself)->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW))
+	return;
+    if (OpenWinUpdatePinnedMenu(oself))
 	return;
     OpenWinEnsureSysMenu(oself, flags);
     OpenWinEnsureSysMenuIcons(oself, flags);

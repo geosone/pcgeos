@@ -2521,6 +2521,46 @@ Not yet:
 The link part of the interface (`FSD_createLink`, `FSD_readLink`,
 `FSD_linkExtraData`, `FSDLinkEncountered`) is described in section 13a.
 
+**Drives per host (planned, not built yet).** The kernel already takes
+drive names of up to 32 characters (`DRIVE_NAME_MAX_LENGTH`) and up to
+255 drives; only HostFS's `[hostfs] drives` is letters only.
+
+- dos32: the DOS drive letters, as DOS16.
+- Linux: everything is mounted under `/`, so letters do not fit. `C:`
+  stays the GEOS top; named drives are added: `ROOT:` (`/`), `HOME:`
+  (`$HOME`), and each further mount under its file system label (from
+  `/proc/self/mountinfo`; hot plug later through udisks2 over the GAPI
+  D-Bus client). Volume name = label, disk ID = file system UUID.
+  `[hostfs] drives` takes names as well as letters. Letters keep the
+  numbers `A`=0 ...; named drives take the free numbers from 26 on.
+- GonWare (ring 3; GonWare phase 6, not built yet). Proposed by the
+  GonWare session, **pending the GonWare user's decision**:
+  1. A process sees the volumes GonWare gives it under their names
+     (`SYS:`, `HOME:`, mapped NCP volumes) and letters for removable
+     media while they exist; a `VOL_LIST`-style call gives name, label,
+     a stable volume ID (FAT serial or GPT partition GUID; NSS volume
+     GUID) and removable/hot-plug flags, with an event on arrival and
+     removal. GEOS volume name = volume name, disk ID = volume ID.
+  2. Paths `VOL:\path` (NWLIB style), `/` accepted as a separator, long
+     names, case-insensitive and case-preserving. GEOS uses `VOL:\`
+     directly, not the POSIX mapping.
+  3. GEOS runs as the logged-in GDS user; NSS trustees apply. Denied
+     rights come back as `GDOS_E*` codes mirroring the NetWare
+     completion codes (0x80 in use, 0x84 no create, 0x8A/0x8B no
+     delete/rename, 0x8C no modify, 0x9C invalid path), mapped 1:1 to
+     `FileError`; effective rights can be asked per file and directory.
+  4. The install at `SYS:\GEOS` (system part, read-only for users);
+     `geos.ini`, state files and documents per user on
+     `HOME:\<user>\GEOS`.
+  5. A stable file ID: volume ID and a 64-bit entry ID (the NSS zid; the
+     FAT rights overlay would keep one in its `TRUSTEE.DB`), used for
+     `FEA_FILE_ID` and so for `VMOpen`.
+  Our user's description, not yet written down on the GonWare side:
+  GonWare boots from `C:`, the rights overlay over it provides `SYS:`
+  (the content of `C:\GONWARE`), ring 3 probably has no `C:`. Where a
+  volume and a letter drive show the same files, the file ID must come
+  from the volume entry, and `DiskSave` should prefer the volume.
+
 ## 13g. FileEnum (`File/fileEnum.c`, P4)
 
 `FileEnum` works as in the asm kernel (`fileEnum.asm`):
@@ -5648,7 +5688,28 @@ are left out), the constants, the variables and the routines.
     (`VisSpecBuild`) and before a popup's button is made, as in the asm;
     the moniker copied may come from a data block (`CopyMoniker`,
     `GenCopyChunk` lock it with `MemLock`).
-- **Not yet.** In `OLWinClass`: the popups, the pinned menus' system menu, the task
+  - The pushpin (`CWin/cwinMenu.goc`, `OpenWinUpdatePinnedMenu` in
+    `cwinClassCUAS.goc`): a menu is pinnable unless the user wants the
+    specific UI's look only (`UIBF_SPECIFIC_UI_COMPATIBLE`), there is
+    only a keyboard, the window options say no, it is
+    `HINT_INFREQUENTLY_USED` (the system menu) or a popup list. Built as
+    a win group, it gets its pin once: a group linked up to the menu and
+    first in it, holding a trigger with `PinMoniker` (generated from
+    `cspecCUAS.ui`; the bitmap the asm's gstring pointed to with
+    `GR_DRAW_BITMAP_OPTR` is drawn inline, as goc writes no optr in a
+    gstring) and `ATTR_GEN_TRIGGER_IMMEDIATE_ACTION`, sending
+    `MSG_OL_POPUP_TOGGLE_PUSHPIN` to the menu. Pinned: a command window
+    with the focus, movable and titled with its system menu (a menu's,
+    without shortcuts), kept partly visible, the pin hidden, its button
+    told the menu is down, no grabs, out of stay up mode. Opened by its
+    button it is unpinned for the while (its pinned state swapped into
+    the previous one, `OMWSS_WAS_PINNED`); dismissed then it is pinned
+    again where it was. Dismissed (its system menu's Close) when pinned:
+    unpinned and down, the pin back. Port32: the pin group is moved
+    first again after the menu's children are built (they went in
+    before it); a pinned menu opened by its button is updated at once
+    (the asm passed `VUM_NOW` on through a register).
+- **Not yet.** In `OLWinClass`: the popups, the task
   bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
   `OLBaseWinClass`: the icon's private data and its window list entry
@@ -5663,15 +5724,15 @@ are left out), the constants, the variables and the routines.
   target. In `OLPopupWinClass` and
   `OLDialogWinClass`: the file menu's place, UserDoDialog and the action response, the help
   trigger (its moniker is a picture), the reply bar removed on tiny
-  screens, discarding the block, the pushpin, the focus of a
+  screens, discarding the block, pinning a dialog (OPEN LOOK only), the focus of a
   dialog run by the UI thread. In `OLButtonClass`: the black and white
   buttons (`copenButtonBW`), the menu marks and menu items, the
   keyboard accelerator text, the sounds (`UserStandardSound` is not in
   the C UI), the sound of a disabled button's mnemonic, the stay up menus released on activation,
   `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `cwinPtr.goc`: moving and resizing by the keyboard
   (the move/resize keys and their abort monitor, the system menu's
-  Move and Size), ink. In `OLMenuWinClass`: the pushpin
-  (pinnable menus: the `PinMoniker` picture), cascading sub menus, the scrollers
+  Move and Size), ink. In `OLMenuWinClass`: a pinned menu restored from
+  state (`HINT_INITIATED`: no state yet), cascading sub menus, the scrollers
   (`MenuWinScrollerClass`), the express menu, the menu centers,
   menus in stay up mode
   released through the application (`MSG_META_ENSURE_NO_MENUS_IN_
@@ -5797,7 +5858,16 @@ are left out), the constants, the variables and the routines.
   a copy whose output is the primary, its menu linked up only, its moniker
   list reduced to a picture, six items with Alt, Restore and (keyboard
   only: no icons) Maximize off, Close on; its button in the title bar's
-  left end, the title bar starting after it. Detached, `uiboot`
+  left end, the title bar starting after it. With a mouse
+  (`[input] keyboardOnly = false`): the minimize and maximize icons at
+  the title bar's right end; maximized by its icon the restore icon
+  shows instead, restored by that one. The File menu's pin: first,
+  shown, its moniker reduced to the picture; pressed, the menu stays up
+  pinned, titled, with its system menu, the pin hidden; opened by its
+  button it is not pinned and has no system menu button shown, closed
+  it is pinned again; closed by `MSG_OL_WIN_CLOSE` it goes down
+  unpinned, the pin back. The Tools menu is `HINT_INFREQUENTLY_USED`
+  (no pin). Detached, `uiboot`
   and the UI's process go and Motif is unloaded. New blocks (and
   semaphores) belong to the current thread's process
   (`KernelOwnerNow`), not to the geode last loaded.

@@ -105,7 +105,9 @@ static VarDataCHandler menuHints[] = {
 /*
  * OLMenuWinInitialize: a menu (a sub menu below a menu), with a thick
  * border, the items inside it, focusable, closable; its position and
- * size hints, its hints.  Port32: not pinnable (no pushpin yet).
+ * size hints, its hints.  Pinnable, unless the user asked for the
+ * specific UI's look only, or with only a keyboard, or the window options
+ * say no.
  */
 @method OLMenuWinClass, MSG_META_INITIALIZE
 {
@@ -116,7 +118,11 @@ static VarDataCHandler menuHints[] = {
     m->OLWI_fixedAttr |= OWFA_IS_MENU;
     m->OLWI_attrs |= OWA_THICK_LINE_BORDER | OWA_KIDS_INSIDE_BORDER |
 		     OWA_FOCUSABLE | OWA_CLOSABLE;
-    m->OLWI_attrs &= ~OWA_PINNABLE;
+    if (!(FlowGetUIButtonFlags() & UIBF_SPECIFIC_UI_COMPATIBLE))
+	m->OLWI_attrs |= OWA_PINNABLE;
+    if (OpenCheckIfKeyboardOnly() ||
+	!(olWindowOptions & UIWO_PINNABLE_MENUS))
+	m->OLWI_attrs &= ~OWA_PINNABLE;
     m->OLWI_type = ((m->OLCI_buildFlags & OLBF_REPLY) == R(OLBR_SUB_MENU)) ?
 		   MOWT_SUBMENU : MOWT_MENU;
     @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
@@ -220,6 +226,161 @@ static void EnsureFileExit(optr o)
 		(KS_CHAR_SET_CONTROL << 8) | VC_F3, VUM_MANUAL);
 }
 
+@extern visMoniker PinMoniker;
+
+/*
+ * OLMenuWinEnsurePinTrigger: a pinnable menu not pinned gets its pin
+ * (once): a group linked up to the menu and built, holding a trigger
+ * with the pin's moniker that toggles the pushpin at once; first in the
+ * menu
+ */
+static void EnsurePinTrigger(optr o)
+{
+    OLMenuWinInstance *m = MWin(o);
+    optr g, t;
+    GenTriggerInstance *ti;
+
+    if (!(m->OLWI_attrs & OWA_PINNABLE) ||
+	(m->OLWI_specState & OLWSS_PINNED) || m->OLPWI_pinTrigger)
+	return;
+    g = OpenCreateChildObject(OptrToHandle(o), o,
+			      (ClassStruct *) &GenInteractionClass, 0,
+			      TRUE, TRUE, 0);
+    MWin(o)->OLPWI_pinTrigger = OptrToChunk(g);
+    @call g::MSG_SPEC_BUILD_BRANCH(SBF_IN_UPDATE_WIN_GROUP |
+				    SBF_TREE_BUILD |
+				    SBF_VIS_PARENT_FULLY_ENABLED | VUM_NOW);
+    t = OpenCreateChildObject(OptrToHandle(o), g,
+			      (ClassStruct *) &GenTriggerClass,
+			      ATTR_GEN_TRIGGER_IMMEDIATE_ACTION, TRUE, FALSE,
+			      0);
+    ti = ObjDerefGen(t);
+    ti->GTI_actionMsg = MSG_OL_POPUP_TOGGLE_PUSHPIN;
+    ti->GTI_destination = o;
+    (void) @call t::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(@PinMoniker,
+						     VUM_MANUAL);
+    ObjSetFlags(ConstructOptr(OptrToHandle(t),
+		((GenInstance *) ObjDerefGen(t))->GI_visMoniker),
+		OCF_IGNORE_DIRTY, 0);
+    @call t::MSG_SPEC_BUILD_BRANCH(SBF_IN_UPDATE_WIN_GROUP |
+				    SBF_TREE_BUILD |
+				    SBF_VIS_PARENT_FULLY_ENABLED | VUM_NOW);
+    @call o::MSG_VIS_MOVE_CHILD(g, CCO_FIRST);
+}
+
+/* SendToObjectAndItsChildren: the pin group and its children shown or
+ * hidden (drawable, detectable, managed) */
+static void PinShown(optr o, Boolean on)
+{
+    ChunkHandle ch = MWin(o)->OLPWI_pinTrigger;
+    optr g;
+    word i, n;
+    VisAttrs a = VA_DRAWABLE | VA_DETECTABLE | VA_MANAGED;
+
+    if (!ch)
+	return;
+    g = ConstructOptr(OptrToHandle(o), ch);
+    @call g::MSG_VIS_SET_ATTRS(on ? a : 0, on ? 0 : a, VUM_MANUAL);
+    n = @call g::MSG_VIS_COUNT_CHILDREN();
+    for (i = 0; i < n; i++) {
+	optr c = @call g::MSG_VIS_FIND_CHILD_AT_POSITION(i);
+
+	if (c)
+	    @call c::MSG_VIS_SET_ATTRS(on ? a : 0, on ? 0 : a, VUM_MANUAL);
+    }
+}
+
+/*
+ * OLPopupTogglePushpin (a menu): pinned: up as a command window, the
+ * focus, a title and the system menu (OpenWinUpdatePinnedMenu), its
+ * button told it is down, the pin hidden, at its own size, no grabs and
+ * not in stay up mode.  Unpinned: a popup again, kept visible, no
+ * title; the pin back if pinnable; dismissed if asked.
+ */
+static void TogglePushpin(optr o, Boolean close)
+{
+    OLMenuWinInstance *m = MWin(o);
+    WindowHandle w = @call o::MSG_VIS_QUERY_WINDOW();
+    optr b;
+
+    if (!(m->OLWI_specState & OLWSS_PINNED)) {
+	if (w)
+	    WinChangePriority(w, WIN_PRIO_COMMAND, 0);
+	m = MWin(o);
+	m->OLWI_specState |= OLWSS_PINNED | OLWSS_NOTIFY_TRIGGERS_IS_PINNED;
+	b = MenuButton(o);
+	if (!b)
+	    b = GenFindParent(o);
+	if (b)
+	    @call b::MSG_META_MUP_ALTER_FTVMC_EXCL(o, MAEF_GRAB | MAEF_FOCUS);
+	(void) OpenWinUpdatePinnedMenu(o);
+	b = MenuButton(o);
+	if (b)
+	    @call b::MSG_OL_MENU_BUTTON_NOTIFY_MENU_DISMISSED();
+	PinShown(o, FALSE);
+	@call o::MSG_SPEC_UPDATE_MENU_SEPARATORS();
+	OpenWinHeaderMarkInvalid(o, OLWHS_SYS_ICON_IMAGES_INVALID);
+	@call o::MSG_VIS_RESET_TO_INITIAL_SIZE(VUM_NOW);
+	@call o::MSG_OL_WIN_END_GRAB(FALSE);
+	QueryButtonOrGenParent(o, SVQT_REMOTE_RELEASE_GADGET_EXCL);
+	if (MWin(o)->OLMWI_specState & OMWSS_IN_STAY_UP_MODE)
+	    (void) @call o::MSG_MO_MW_LEAVE_STAY_UP_MODE(0, 0, 0);
+	return;
+    }
+    if (w)
+	WinChangePriority(w, WIN_PRIO_POPUP, 0);
+    @call o::MSG_META_RELEASE_FOCUS_EXCL();
+    m = MWin(o);
+    m->OLWI_specState &= ~OLWSS_PINNED;
+    m->OLWI_attrs &= ~(OWA_MOVABLE | OWA_TITLED | OWA_HAS_SYS_MENU);
+    m->OLWI_winPosSizeFlags = (WinPosSizeFlags)
+	((m->OLWI_winPosSizeFlags & ~WPSF_CONSTRAIN_TYPE) |
+	 (WCT_KEEP_VISIBLE << 6));
+    if (!close)
+	@call o::MSG_META_GRAB_FOCUS_EXCL();
+    if (MWin(o)->OLWI_attrs & OWA_PINNABLE) {
+	EnsurePinTrigger(o);
+	VisMarkInvalid(ConstructOptr(OptrToHandle(o),
+		       MWin(o)->OLPWI_pinTrigger), VOF_WINDOW_INVALID,
+		       VUM_MANUAL);
+	PinShown(o, TRUE);
+	@call o::MSG_SPEC_UPDATE_MENU_SEPARATORS();
+    }
+    VisMarkInvalid(o, VOF_WINDOW_INVALID | VOF_GEOMETRY_INVALID, VUM_MANUAL);
+    if (close)
+	(void) @call o::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+}
+
+/* OLMenuWinTogglePushpin: see TogglePushpin */
+@method OLMenuWinClass, MSG_OL_POPUP_TOGGLE_PUSHPIN
+{
+    TogglePushpin(oself, closeIfUnpinned);
+}
+
+/*
+ * PinnedOpened: a pinned menu opened by its button: unpinned for the
+ * while (its pinned state kept as the previous one, so it comes back
+ * when it closes), at its own size
+ */
+static void PinnedOpened(optr o)
+{
+    OLMenuWinInstance *m = MWin(o);
+    OLWinAttr a;
+
+    m->OLWI_prevWinBounds.R_left = 0;
+    m->OLWI_prevWinBounds.R_top = 0;
+    m->OLWI_prevWinBounds.R_right = -1;
+    m->OLWI_prevWinBounds.R_bottom = -1;
+    m->OLMWI_specState |= OMWSS_WAS_PINNED;
+    a = m->OLWI_attrs;
+    OpenWinSwapState(o);
+    m = MWin(o);
+    m->OLWI_attrs = a & ~OWA_PINNABLE;
+    TogglePushpin(o, FALSE);
+    VisSetSize(o, RSA_CHOOSE_OWN_SIZE, RSA_CHOOSE_OWN_SIZE);
+    VisMarkInvalid(o, VOF_GEOMETRY_INVALID, VUM_MANUAL);
+}
+
 /*
  * OLMenuWinUpdateSpecBuild: built with its vis parent fully enabled
  * (the menu is enabled as its button), the items vertical
@@ -227,7 +388,16 @@ static void EnsureFileExit(optr o)
 @method OLMenuWinClass, MSG_SPEC_BUILD_BRANCH
 {
     flags |= SBF_VIS_PARENT_FULLY_ENABLED;
+    if ((flags & SBF_WIN_GROUP) &&
+	(pself->OLCI_buildFlags & OLBF_TARGET) !=
+	 (OLBT_IS_POPUP_LIST << OLBF_TARGET_OFFSET))
+	EnsurePinTrigger(oself);
     @callsuper();
+    /* Port32: the pin first again (its children went in before it) */
+    if (MWin(oself)->OLPWI_pinTrigger)
+	@call oself::MSG_VIS_MOVE_CHILD(ConstructOptr(OptrToHandle(oself),
+					MWin(oself)->OLPWI_pinTrigger),
+					CCO_FIRST);
     MWin(oself)->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
     if (flags & SBF_WIN_GROUP)
 	EnsureFileExit(oself);
@@ -331,13 +501,20 @@ static void EnsureFileExit(optr o)
  */
 @method OLMenuWinClass, MSG_OL_POPUP_ACTIVATE
 {
-    OLMenuWinInstance *m = MWin(oself);
+    OLMenuWinInstance *m;
+    VisUpdateMode um = VUM_MANUAL;
 
+    /* pinned (so up): unpinned for the while, updated at once */
+    if (pself->OLWI_specState & OLWSS_PINNED) {
+	PinnedOpened(oself);
+	um = VUM_NOW;
+    }
+    m = MWin(oself);
     m->OLWI_winPosSizeFlags &= WPSF_SHRINK_DESIRED_SIZE_TO_FIT_IN_PARENT;
     m->OLWI_winPosSizeFlags |= MENU_POS_SIZE_FLAGS;
     m->OLMWI_specState &= ~OMWSS_IN_STAY_UP_MODE;
     VisSetPosition(oself, x, y);
-    VisMarkInvalid(oself, VOF_WINDOW_INVALID, VUM_MANUAL);
+    VisMarkInvalid(oself, VOF_WINDOW_INVALID, um);
     @callsuper oself::OLMenuWinClass::MSG_GEN_INTERACTION_INITIATE();
     @call oself::MSG_OL_WIN_STARTUP_GRAB();
 }
@@ -364,8 +541,22 @@ static void EnsureFileExit(optr o)
 	command = IC_DISMISS;
     switch (command) {
     case IC_DISMISS:
-	if (pself->OLWI_specState & OLWSS_PINNED)
+	/* pinned: unpinned and down; was pinned (opened by its button):
+	 * pinned again where it was, not down */
+	if (pself->OLMWI_specState & OMWSS_RE_PINNING)
 	    return TRUE;
+	if (pself->OLWI_specState & OLWSS_PINNED) {
+	    TogglePushpin(oself, TRUE);
+	    return TRUE;
+	}
+	if (pself->OLMWI_specState & OMWSS_WAS_PINNED) {
+	    pself->OLMWI_specState = (pself->OLMWI_specState &
+				      ~OMWSS_WAS_PINNED) | OMWSS_RE_PINNING;
+	    OpenWinSwapState(oself);
+	    TogglePushpin(oself, FALSE);
+	    MWin(oself)->OLMWI_specState &= ~OMWSS_RE_PINNING;
+	    return TRUE;
+	}
 	/* Port32: a menu closed in stay up mode (by the keyboard) leaves
 	 * it, so its window no longer thinks a menu is up (the asm left
 	 * OLWMS_HAS_MENU_IN_STAY_UP_MODE set until the next press: no
