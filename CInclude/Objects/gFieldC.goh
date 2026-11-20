@@ -150,6 +150,8 @@ typedef ByteFlags GenFieldFlags;
     @instance byte		GFI_numAppsToCheck = 0;
     @instance optr		GFI_notificationDestination = 0;
 
+    @default GI_states = @default & ~GS_USABLE;
+
 @endc
 
 @endlib

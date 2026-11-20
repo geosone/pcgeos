@@ -22,6 +22,7 @@
 #include "ghal.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern const unsigned char ui_geode[], uiboot_geode[], motif_geode[],
@@ -85,6 +86,35 @@ static GeodeHandle Find(const char *name)
     return GeodeFind(name, GEODE_NAME_SIZE, 0, 0);
 }
 
+/*
+ * UIBOOT_SHOT=file: the screen (as GEOS drew it, read back from the
+ * display) written as a PPM after step UIBOOT_SHOT_AT (default the
+ * last), a second later (Port32/tools/uiboot-shot.sh)
+ */
+static void Shot(int step)
+{
+    const char *f = getenv("UIBOOT_SHOT"), *at = getenv("UIBOOT_SHOT_AT");
+    FILE *o;
+    int x, y;
+
+    if (!f || step != (at ? atoi(at) : 35))
+	return;
+    TimerSleep(60);
+    o = fopen(f, "wb");
+    if (!o)
+	return;
+    fprintf(o, "P6\n640 480\n255\n");
+    for (y = 0; y < 480; y++)
+	for (x = 0; x < 640; x++) {
+	    unsigned long p = ghal_display_read_back(x, y);
+
+	    fputc((int) (p >> 16) & 0xff, o);
+	    fputc((int) (p >> 8) & 0xff, o);
+	    fputc((int) p & 0xff, o);
+	}
+    fclose(o);
+}
+
 int main(void)
 {
     GeodeHandle ui, app;
@@ -126,6 +156,7 @@ int main(void)
     CHECK(st->UBS_attached == 1 && st->UBS_opened == 1);
 
     step(1);
+    Shot(1);
     CHECK(st->UBS_primaryWin != 0);
     printf("group %dx%d, doc1 at %d,%d %dx%d; notices %u, lists %u\n",
 	   st->UBS_gw, st->UBS_gh, st->UBS_dl, st->UBS_dt, st->UBS_dw,
@@ -137,8 +168,10 @@ int main(void)
      * taller than the screen scrolled by its scrollers and to its focus;
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view */
-    for (i = 2; i <= 35; i++)
+    for (i = 2; i <= 35; i++) {
 	step(i);
+	Shot(i);
+    }
     printf("system menu button at %d,%d %dx%d, title bar %d..%d\n",
 	   st->UBS_sys[0], st->UBS_sys[1], st->UBS_sys[2], st->UBS_sys[3],
 	   st->UBS_sys[4], st->UBS_sys[5]);
