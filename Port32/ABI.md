@@ -2533,8 +2533,8 @@ drive names of up to 32 characters (`DRIVE_NAME_MAX_LENGTH`) and up to
   D-Bus client). Volume name = label, disk ID = file system UUID.
   `[hostfs] drives` takes names as well as letters. Letters keep the
   numbers `A`=0 ...; named drives take the free numbers from 26 on.
-- GonWare (ring 3; GonWare phase 6, not built yet). Proposed by the
-  GonWare session, **pending the GonWare user's decision**:
+- GonWare (ring 3; GonWare phase 6, not built yet). Agreed with
+  GonWare (its CONCEPT.md, 2026-11-20):
   1. A process sees the volumes GonWare gives it under their names
      (`SYS:`, `HOME:`, mapped NCP volumes) and letters for removable
      media while they exist; a `VOL_LIST`-style call gives name, label,
@@ -2555,11 +2555,13 @@ drive names of up to 32 characters (`DRIVE_NAME_MAX_LENGTH`) and up to
   5. A stable file ID: volume ID and a 64-bit entry ID (the NSS zid; the
      FAT rights overlay would keep one in its `TRUSTEE.DB`), used for
      `FEA_FILE_ID` and so for `VMOpen`.
-  Our user's description, not yet written down on the GonWare side:
-  GonWare boots from `C:`, the rights overlay over it provides `SYS:`
-  (the content of `C:\GONWARE`), ring 3 probably has no `C:`. Where a
-  volume and a letter drive show the same files, the file ID must come
-  from the volume entry, and `DiskSave` should prefer the volume.
+  `C:\GONWARE` is only GonWare's ring-0 start area (as `C:\NWSERVER`
+  was for NetWare); `C:` is a ring-0 matter. `SYS:` is a volume of its
+  own (NSS later; until then the GWTRUST rights overlay presents a FAT
+  volume or directory tree as `SYS:` with trustees). The display: the
+  GHAL backend draws through GWVIDEO tier 1, the UEFI GOP frame buffer
+  as the baseline; mode-setting drivers come later (bochs-display,
+  virtio-gpu first).
 
 ## 13g. FileEnum (`File/fileEnum.c`, P4)
 
@@ -5709,6 +5711,22 @@ are left out), the constants, the variables and the routines.
     first again after the menu's children are built (they went in
     before it); a pinned menu opened by its button is updated at once
     (the asm passed `VUM_NOW` on through a register).
+  - The scrollers (`MenuWinScrollerClass` in `CWin/cwinMenu.goc`): a
+    menu not pinned that reaches above or below its parent window gets
+    an up or a down scroller, each a window of its own (the menu's
+    priority and color, 23 pixels high, as wide as the menu inside its
+    border) over that end of the parent window with an arrow drawn in
+    it; checked when the menu opens, moves or closes (closed then; not
+    while the button is down). A press on a scroller moves the menu a
+    step (23 pixels) and again after the gadget repeat delay while the
+    button stays down; entering it with the button down does the same.
+    Moving the focus (or `MSG_OL_MENU_WIN_UPDATE_SCROLLABLE_MENU`)
+    scrolls the menu until the focused item is clear of the scrollers.
+    The step moves the window past `OLWinClass`'s keeping it visible,
+    as the asm called the superclass of `OLWinClass`. Port32: one
+    repeat timer per step (the asm started a second one whose
+    expiry it then ignored); the item groups' request to scroll comes
+    when they are ported.
 - **Not yet.** In `OLWinClass`: the popups, the task
   bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
@@ -5732,8 +5750,7 @@ are left out), the constants, the variables and the routines.
   `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `cwinPtr.goc`: moving and resizing by the keyboard
   (the move/resize keys and their abort monitor, the system menu's
   Move and Size), ink. In `OLMenuWinClass`: a pinned menu restored from
-  state (`HINT_INITIATED`: no state yet), cascading sub menus, the scrollers
-  (`MenuWinScrollerClass`), the express menu, the menu centers,
+  state (`HINT_INITIATED`: no state yet), cascading sub menus, the express menu, the menu centers,
   menus in stay up mode
   released through the application (`MSG_META_ENSURE_NO_MENUS_IN_
   STAY_UP_MODE` is answered by a menu, the generic tree does not pass
@@ -5867,7 +5884,11 @@ are left out), the constants, the variables and the routines.
   button it is not pinned and has no system menu button shown, closed
   it is pinned again; closed by `MSG_OL_WIN_CLOSE` it goes down
   unpinned, the pin back. The Tools menu is `HINT_INFREQUENTLY_USED`
-  (no pin). Detached, `uiboot`
+  (no pin). A Long menu, 1000 pixels of it a group with `HINT_FIXED_SIZE`:
+  below the screen's bottom it has the down scroller over the bottom of
+  the field and no up one; pressed, it goes up a step and gets the up
+  scroller too; its last item focused, it scrolls up till that item is
+  clear; down, the scrollers' windows are closed. Detached, `uiboot`
   and the UI's process go and Motif is unloaded. New blocks (and
   semaphores) belong to the current thread's process
   (`KernelOwnerNow`), not to the geode last loaded.

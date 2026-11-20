@@ -8,13 +8,14 @@
  * completes it (the menu goes down, its button is told); a menu of a
  * group type gets the standard moniker (File, Edit, ...).
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the pushpin (pinnable
- * menus: the PinMoniker picture), the Exit trigger of the file menu,
- * cascading sub menus (Motif has none: _CASCADING_MENUS), the scrollers
- * of a menu taller than the screen (MenuWinScrollerClass), menu
- * separators, the system and express menus, the menu centers
- * (OLMenuCalcCenters), the navigation character kept for item groups
- * (lastKbdCharCX).
+ * The pushpin (pinnable menus; pinned: titled, with the system menu),
+ * the Exit trigger of the file menu, and the scrollers of a menu taller
+ * than the screen (MenuWinScrollerClass) are here.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the express menu, the
+ * menu centers (OLMenuCalcCenters), the navigation character kept for
+ * item groups (lastKbdCharCX).  Motif has no cascading sub menus
+ * (_CASCADING_MENUS).
  *
  * The keyboard: up and down move through the items (the first gets the
  * focus when the menu stays up), left and right to the neighbouring
@@ -26,6 +27,10 @@
 @include "cGeode.goh"
 
 @classdecl OLMenuWinClass, neverSaved;
+@classdecl MenuWinScrollerClass, neverSaved;
+
+static void UpdateScrollers(optr o, Boolean delayClose);
+static void ScrollersOnTop(optr o);
 
 #define MWin(o)		((OLMenuWinInstance *) ObjDerefVis(o))
 #define R(r)		((r) << OLBF_REPLY_OFFSET)
@@ -751,6 +756,7 @@ static VisCompSpacingMarginsInfo MenuWinPassMarginInfo(optr o)
 {
     QueryButtonOrGenParent(oself, SVQT_REMOTE_RELEASE_GADGET_EXCL);
     @callsuper();
+    UpdateScrollers(oself, FALSE);
 }
 
 /*
@@ -788,6 +794,7 @@ static VisCompSpacingMarginsInfo MenuWinPassMarginInfo(optr o)
 
     if (w) {
 	WinChangePriority(w, 0, 0);
+	ScrollersOnTop(oself);
 	if (!(MWin(oself)->OLWI_specState & OLWSS_PINNED) &&
 	    OpenCheckIfMenusTakeFocus())
 	    @call oself::MSG_META_GRAB_FOCUS_EXCL();
@@ -931,4 +938,356 @@ static void CloseSubMenuToParentMenu(optr o)
 	(void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(
 						IC_INTERACTION_COMPLETE);
     return TRUE;
+}
+
+
+/* ---------------------------------------------------------------------
+ * MenuWinScrollerClass: the arrows of a menu taller than the screen
+ * ------------------------------------------------------------------- */
+
+#define Scroller(o)	((MenuWinScrollerInstance *) LMemDeref(o))
+
+static const struct {
+    Bitmap	b;
+    byte	d[4];
+} scrollUpBitmap = {
+    { 7, 4, 0, BMF_MONO }, { 0x10, 0x38, 0x7c, 0xfe }
+}, scrollDownBitmap = {
+    { 7, 4, 0, BMF_MONO }, { 0xfe, 0x7c, 0x38, 0x10 }
+};
+
+/* the scrollers of the menu (made once, in its block: an up one moving
+ * the menu down, a down one moving it up) */
+static MenuWinScrollerStruct EnsureScrollers(optr o)
+{
+    MenuWinScrollerStruct *p = ObjVarFindData(o, TEMP_OL_MENU_WIN_SCROLLERS);
+    MenuWinScrollerStruct r;
+    int i;
+
+    if (p)
+	return *p;
+    for (i = 0; i < 2; i++) {
+	optr c = ObjInstantiate(OptrToHandle(o),
+				(ClassStruct *) &MenuWinScrollerClass);
+
+	ObjSetFlags(c, OCF_IGNORE_DIRTY, 0);
+	Scroller(c)->MWSI_menu = OptrToChunk(o);
+	Scroller(c)->MWSI_delta = i ? -MENU_WIN_SCROLL_DELTA
+				    : MENU_WIN_SCROLL_DELTA;
+	if (i)
+	    r.MWSS_downScroller = OptrToChunk(c);
+	else
+	    r.MWSS_upScroller = OptrToChunk(c);
+    }
+    p = ObjVarAddData(o, TEMP_OL_MENU_WIN_SCROLLERS, sizeof(r));
+    *p = r;
+    return r;
+}
+
+/* OpenMenuWinScrollerWindow: its window (once) over the top (the up one)
+ * or bottom of the parent window, as wide as the menu inside its
+ * border, with the menu's priority and color */
+static void OpenScrollerWindow(optr c, WindowHandle parentWin,
+			       WindowHandle menuWin, const Rectangle *parent,
+			       const Rectangle *menu)
+{
+    sword top, bottom;
+    word prio = 0;
+    dword color = 0;
+    GeodeHandle proc;
+    WindowHandle w;
+
+    if (Scroller(c)->MWSI_window)
+	return;
+    top = parent->R_top;
+    bottom = top + MENU_WIN_SCROLL_DELTA;
+    if (Scroller(c)->MWSI_delta <= 0) {
+	bottom = parent->R_bottom;
+	top = bottom - MENU_WIN_SCROLL_DELTA;
+    }
+    WinGetInfo(menuWin, WIT_PRIORITY, &prio);
+    WinGetInfo(menuWin, WIT_COLOR, &color);
+    proc = GeodeGetProcessHandle();
+    w = WinOpen(parentWin, c, c, (word) ((color >> 8) & 0xff),
+		(word) (color & 0xff), (word) ((color >> 16) & 0xff),
+		(word) ((color >> 24) & 0xff), prio & 0xff, proc, proc, NULL,
+		menu->R_left, top, menu->R_right, bottom);
+    Scroller(c)->MWSI_window = w;
+    Scroller(c)->MWSI_top = top;
+    Scroller(c)->MWSI_bottom = bottom;
+}
+
+/* CloseMenuWinScrollerWindow: its window closed (not while the button
+ * is down) */
+static void CloseScrollerWindow(optr c, Boolean delayClose)
+{
+    WindowHandle w;
+
+    if (delayClose)
+	return;
+    w = Scroller(c)->MWSI_window;
+    Scroller(c)->MWSI_window = 0;
+    if (w)
+	WinClose(w);
+}
+
+/*
+ * OLMenuWinUpdateUpDownScrollers: a menu not pinned reaching above the
+ * top of its parent window gets the up scroller, below its bottom the
+ * down one; those not needed closed (with delayClose, not while the
+ * button is down)
+ */
+static void UpdateScrollers(optr o, Boolean delayClose)
+{
+    WindowHandle pw, mw = 0;
+    Rectangle parent, menu;
+    Boolean up = FALSE, down = FALSE;
+    MenuWinScrollerStruct s;
+    optr c;
+
+    if (MWin(o)->OLWI_specState & OLWSS_PINNED)
+	return;
+    pw = VisQueryParentWin(o);
+    if (pw) {
+	WinGetWinScreenBounds(pw, &parent);
+	mw = VisQueryWindow(o);
+	if (mw) {
+	    WinGetWinScreenBounds(mw, &menu);
+	    menu.R_left += 2;
+	    menu.R_right -= 2;
+	    up = menu.R_top < parent.R_top;
+	    down = menu.R_bottom > parent.R_bottom;
+	}
+    }
+    if (!up && !down && !ObjVarFindData(o, TEMP_OL_MENU_WIN_SCROLLERS))
+	return;
+    s = EnsureScrollers(o);
+    c = ConstructOptr(OptrToHandle(o), s.MWSS_upScroller);
+    if (up)
+	OpenScrollerWindow(c, pw, mw, &parent, &menu);
+    else
+	CloseScrollerWindow(c, delayClose);
+    c = ConstructOptr(OptrToHandle(o), s.MWSS_downScroller);
+    if (down)
+	OpenScrollerWindow(c, pw, mw, &parent, &menu);
+    else
+	CloseScrollerWindow(c, delayClose);
+}
+
+/* MenuWinScrollerEnsureOnTop: the scrollers' windows on top again */
+static void ScrollersOnTop(optr o)
+{
+    MenuWinScrollerStruct *p = ObjVarFindData(o, TEMP_OL_MENU_WIN_SCROLLERS);
+    ChunkHandle ch[2];
+    int i;
+
+    if (!p)
+	return;
+    ch[0] = p->MWSS_upScroller;
+    ch[1] = p->MWSS_downScroller;
+    for (i = 0; i < 2; i++) {
+	WindowHandle w = ch[i] ? Scroller(ConstructOptr(OptrToHandle(o),
+							ch[i]))->MWSI_window
+			       : 0;
+
+	if (w)
+	    WinChangePriority(w, 0, 0);
+    }
+}
+
+/* MenuWinScrollerScrollOnly: the menu moved by the scroller's step if
+ * it still reaches beyond that end of its parent window; TRUE if so */
+static Boolean ScrollOnly(optr c)
+{
+    sword delta = Scroller(c)->MWSI_delta;
+    optr m = ConstructOptr(OptrToHandle(c), Scroller(c)->MWSI_menu);
+    WindowHandle pw = VisQueryParentWin(m), mw;
+    Rectangle p, w, b;
+
+    if (!pw)
+	return FALSE;
+    WinGetWinScreenBounds(pw, &p);
+    mw = VisQueryWindow(m);
+    if (!mw)
+	return FALSE;
+    WinGetWinScreenBounds(mw, &w);
+    if (delta < 0 ? w.R_bottom <= p.R_bottom : w.R_top >= p.R_top)
+	return FALSE;
+    VisGetBounds(m, &b);
+    VisSetPosition(m, b.R_left, b.R_top + delta);
+    /* moved as it is, not kept visible by OLWinClass */
+    @callsuper m::OLWinClass::MSG_VIS_MOVE_RESIZE_WIN();
+    return TRUE;
+}
+
+static void StartTimer(optr c)
+{
+    word id = 0;
+    TimerHandle t = TimerStart(TIMER_EVENT_ONE_SHOT, c, olGadgetRepeatDelay,
+			       MSG_MENU_WIN_SCROLLER_TIMER_EXPIRED, 0, &id);
+
+    Scroller(c)->MWSI_timerID = id;
+    Scroller(c)->MWSI_timerHandle = t;
+}
+
+/* MenuWinScrollerStopTimer: the timer stopped, the scrollers updated */
+static void StopTimer(optr c)
+{
+    TimerHandle t = Scroller(c)->MWSI_timerHandle;
+    word id = Scroller(c)->MWSI_timerID;
+
+    Scroller(c)->MWSI_timerHandle = 0;
+    Scroller(c)->MWSI_timerID = 0;
+    if (t)
+	TimerStop(t, id);
+    UpdateScrollers(ConstructOptr(OptrToHandle(c), Scroller(c)->MWSI_menu),
+		    FALSE);
+}
+
+/* MenuWinScrollerScroll: a step, the scrollers updated (none closed while
+ * the button is down), again after the repeat delay */
+static void Scroll(optr c)
+{
+    (void) ScrollOnly(c);
+    UpdateScrollers(ConstructOptr(OptrToHandle(c), Scroller(c)->MWSI_menu),
+		    ImGetButtonState() != 0);
+    StartTimer(c);
+}
+
+/* MenuWinScrollerStartSelect: pressed: a step */
+@method MenuWinScrollerClass, MSG_META_START_SELECT
+{
+    (void) xPosition;
+    (void) yPosition;
+    (void) inputState;
+    Scroll(oself);
+    retVal->flags = MRF_PROCESSED;
+}
+
+/* MenuWinScrollerEndSelect: released: no more steps */
+@method MenuWinScrollerClass, MSG_META_END_SELECT, MSG_META_END_OTHER
+{
+    (void) xPosition;
+    (void) yPosition;
+    (void) inputState;
+    StopTimer(oself);
+    retVal->flags = MRF_PROCESSED;
+}
+
+/* MenuWinScrollerRawUnivEnter: entered with the button down (dragged in
+ * from the menu): steps after the repeat delay */
+@method MenuWinScrollerClass, MSG_META_RAW_UNIV_ENTER
+{
+    @callsuper();
+    if (ImGetButtonState() & BI_B0_DOWN)
+	StartTimer(oself);
+}
+
+@method MenuWinScrollerClass, MSG_META_RAW_UNIV_LEAVE
+{
+    @callsuper();
+    StopTimer(oself);
+}
+
+/* MenuWinScrollerTimerExpired: our timer, the button still down: a
+ * step */
+@method MenuWinScrollerClass, MSG_MENU_WIN_SCROLLER_TIMER_EXPIRED
+{
+    word id = pself->MWSI_timerID;
+    TimerHandle t = pself->MWSI_timerHandle;
+
+    (void) tick;
+    pself->MWSI_timerID = 0;
+    pself->MWSI_timerHandle = 0;
+    if (id != timerID || !t || !(ImGetButtonState() & BI_B0_DOWN))
+	return;
+    Scroll(oself);
+}
+
+/* MenuWinScrollerExposed: its arrow in the middle */
+@method MenuWinScrollerClass, MSG_META_EXPOSED
+{
+    GStateHandle gs = GrCreateState(win);
+    Rectangle r;
+    const Bitmap *bm = pself->MWSI_delta > 0 ? &scrollUpBitmap.b
+					     : &scrollDownBitmap.b;
+
+    GrBeginUpdate(gs);
+    GrGetWinBounds(gs, &r);
+    GrFillBitmap(gs, (sword) ((r.R_right - r.R_left - 7) >> 1),
+		 (sword) ((r.R_bottom - r.R_top - 4) >> 1), bm, NULL);
+    GrEndUpdate(gs);
+    GrDestroyState(gs);
+}
+
+/* OLMenuWinVisOpen: open, the scrollers it needs */
+@method OLMenuWinClass, MSG_VIS_OPEN
+{
+    @callsuper();
+    UpdateScrollers(oself, FALSE);
+}
+
+/* OLMenuWinMoveResizeWin: a pinned menu kept partly visible; moved, the
+ * scrollers it needs (none closed while the button is down) */
+@method OLMenuWinClass, MSG_VIS_MOVE_RESIZE_WIN
+{
+    if (pself->OLWI_specState & OLWSS_PINNED)
+	pself->OLWI_winPosSizeFlags = (WinPosSizeFlags)
+	    ((pself->OLWI_winPosSizeFlags & ~WPSF_CONSTRAIN_TYPE) |
+	     (WCT_KEEP_PARTIALLY_VISIBLE << 6));
+    @callsuper();
+    UpdateScrollers(oself, ImGetButtonState() != 0);
+}
+
+/*
+ * OLMenuWinNavigate: the focus moved (or an item group's selection
+ * changed): while the focused item is under a scroller the menu
+ * scrolls toward it
+ */
+static void ScrollToFocus(optr o)
+{
+    for (;;) {
+	MenuWinScrollerStruct *p =
+	    ObjVarFindData(o, TEMP_OL_MENU_WIN_SCROLLERS);
+	OLMenuWinInstance *m = MWin(o);
+	optr f = m->OLWI_focusExcl.FTVMC_OD, c;
+	WindowHandle w = m->VCI_window;
+	ChunkHandle up, down;
+	Rectangle b;
+	XYValueAsDWord t;
+	sword top, bottom;
+
+	if (!p || !f || !w)
+	    return;
+	up = p->MWSS_upScroller;
+	down = p->MWSS_downScroller;
+	@call f::MSG_VIS_GET_BOUNDS(&b);
+	t = WinTransform(w, b.R_left, b.R_top);
+	top = DWORD_Y(t);
+	t = WinTransform(w, b.R_right, b.R_bottom);
+	bottom = DWORD_Y(t);
+	c = ConstructOptr(OptrToHandle(o), up);
+	if (!(Scroller(c)->MWSI_window && top < Scroller(c)->MWSI_bottom)) {
+	    c = ConstructOptr(OptrToHandle(o), down);
+	    if (!(Scroller(c)->MWSI_window && bottom > Scroller(c)->MWSI_top))
+		return;
+	}
+	if (!ScrollOnly(c)) {
+	    UpdateScrollers(o, FALSE);
+	    return;
+	}
+	UpdateScrollers(o, FALSE);
+    }
+}
+
+@method OLMenuWinClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD,
+			MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD
+{
+    @callsuper();
+    ScrollToFocus(oself);
+}
+
+@method OLMenuWinClass, MSG_OL_MENU_WIN_UPDATE_SCROLLABLE_MENU
+{
+    ScrollToFocus(oself);
 }

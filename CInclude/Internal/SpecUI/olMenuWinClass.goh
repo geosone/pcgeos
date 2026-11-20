@@ -3,8 +3,9 @@
  * GIV_POPUP GenInteraction in a menu bar or a menu: after
  * Include/Internal/SpecUI/olMenuWinClass.def), for Port32.
  *
- * Motif's: _CASCADING_MENUS.  MenuWinScrollerClass (the arrows of a
- * menu taller than the screen) is not here yet.
+ * Motif's: _CASCADING_MENUS.  MenuWinScrollerClass: the arrows of a
+ * menu taller than the screen (windows of their own over its top and
+ * bottom), scrolling it.
  */
 #ifndef __OLMENUWINCLASS_GOH
 #define __OLMENUWINCLASS_GOH
@@ -69,6 +70,24 @@ typedef struct {
     @instance sword			OLMWI_accelSpace = 0;
     @instance OLMenuWinMoreSpecState	OLMWI_moreSpecState = 0;
 
+@endc;
+
+/* the menu moves by this much a step */
+#define MENU_WIN_SCROLL_DELTA	23
+
+@class MenuWinScrollerClass, MetaClass;
+
+/* the repeat timer (the timer's ID) */
+@message void MSG_MENU_WIN_SCROLLER_TIMER_EXPIRED(dword tick, word timerID);
+
+    @instance ChunkHandle	MWSI_menu = 0;	/* its OLMenuWin */
+    @instance sword		MWSI_delta = 0;	/* > 0: the up arrow, < 0: down;
+					   its bitmap goes by it */
+    @instance WindowHandle	MWSI_window = 0;
+    @instance word		MWSI_timerID = 0;
+    @instance TimerHandle	MWSI_timerHandle = 0;
+    @instance sword		MWSI_top = 0;	/* its window's bounds */
+    @instance sword		MWSI_bottom = 0;
 @endc;
 
 @endlib

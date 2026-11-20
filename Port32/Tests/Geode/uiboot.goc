@@ -46,6 +46,7 @@ typedef struct {
     optr		UBS_maxIcon, UBS_restoreIcon;
     optr		UBS_pin;
     sword		UBS_pinned[4];
+    sword		UBS_long[4];
 } UBState;
 
 UBState ubState;
@@ -73,7 +74,7 @@ UBState ubState;
 }
 @object GenPrimaryClass UBPrimary = {
     GI_visMoniker = "Boot Test";
-    GI_comp = @UBGroup, @UBTools, @UBFile;
+    GI_comp = @UBGroup, @UBTools, @UBFile, @UBLong;
 }
 /* a File menu: the specific UI adds Exit */
 @object GenInteractionClass UBFile = {
@@ -83,6 +84,22 @@ UBState ubState;
 }
 @object GenTriggerClass UBOpen = {
     GI_visMoniker = "Open";
+}
+/* a menu taller than the screen: scrollers */
+@object GenInteractionClass UBLong = {
+    GI_visMoniker = "Long";
+    GI_comp = @UBLongFirst, @UBLongBox, @UBLongLast;
+    GII_visibility = GIV_POPUP;
+    HINT_INFREQUENTLY_USED;
+}
+@object GenTriggerClass UBLongFirst = {
+    GI_visMoniker = "First";
+}
+@object GenInteractionClass UBLongBox = {
+    HINT_FIXED_SIZE = { SST_PIXELS | 40, SST_PIXELS | 1000, 0 };
+}
+@object GenTriggerClass UBLongLast = {
+    GI_visMoniker = "Last";
 }
 /* a menu of items and groups of items: separators between them (not
  * pinnable: no pin above them) */
@@ -359,6 +376,33 @@ static word SysIcons(OLWinInstance *w, sword top)
 	shown |= bit;
     }
     return shown;
+}
+
+/* the scroller's window (up or down) of the menu (0: none) */
+static WindowHandle ScrollerWin(optr m, Boolean down, optr *sc)
+{
+    MenuWinScrollerStruct *p;
+    WindowHandle w = 0;
+
+    *sc = 0;
+    ObjLockObjBlock(OptrToHandle(m));
+    p = ObjVarFindData(m, TEMP_OL_MENU_WIN_SCROLLERS);
+    if (p) {
+	*sc = ConstructOptr(OptrToHandle(m),
+			    down ? p->MWSS_downScroller : p->MWSS_upScroller);
+	w = ((MenuWinScrollerInstance *) LMemDeref(*sc))->MWSI_window;
+    }
+    MemUnlock(OptrToHandle(m));
+    return w;
+}
+
+static Rectangle ScreenBounds(WindowHandle w)
+{
+    Rectangle r = { 0, 0, 0, 0 };
+
+    if (w)
+	WinGetWinScreenBounds(w, &r);
+    return r;
 }
 
 @method UBProcessClass, MSG_UB_STEP
@@ -766,6 +810,64 @@ static word SysIcons(OLWinInstance *w, sword top)
 	UBCHECK(!(m.OLWI_attrs & OWA_TITLED));
 	UBCHECK(!@call UBFile::MSG_VIS_QUERY_WINDOW());
 	UBCHECK(Drawable(ubState.UBS_pin));
+	/* the long menu up */
+	@call UBLong::MSG_GEN_INTERACTION_INITIATE();
+	break;
+    }
+    case 19: {
+	/* below the bottom of the screen: the down scroller over the
+	 * bottom, no up one; pressed, the menu goes up a step */
+	WindowHandle mw = @call UBLong::MSG_VIS_QUERY_WINDOW(), pw;
+	Rectangle m = ScreenBounds(mw), p, d;
+	optr up, down;
+	MouseReturnParams mr;
+
+	UBCHECK(mw != 0);
+	pw = mw ? VisQueryParentWin(@UBLong) : 0;
+	p = ScreenBounds(pw);
+	UBCHECK(m.R_top >= p.R_top && m.R_bottom > p.R_bottom);
+	UBCHECK(!ScrollerWin(@UBLong, FALSE, &up) && up);
+	d = ScreenBounds(ScrollerWin(@UBLong, TRUE, &down));
+	UBCHECK(d.R_bottom == p.R_bottom &&
+		d.R_bottom - d.R_top == MENU_WIN_SCROLL_DELTA);
+	UBCHECK(d.R_left == m.R_left + 2 && d.R_right == m.R_right - 2);
+	ubState.UBS_long[0] = m.R_top;
+	ubState.UBS_long[1] = m.R_bottom;
+	ubState.UBS_long[2] = d.R_top;
+	if (down)
+	    @call down::MSG_META_START_SELECT(&mr, 10, 5, 0);
+	break;
+    }
+    case 20: {
+	/* a step up: now the up scroller too; the last item focused: up
+	 * till it is above the down scroller */
+	Rectangle m = ScreenBounds(@call UBLong::MSG_VIS_QUERY_WINDOW()), d,
+		  l;
+	optr up, down;
+	WindowHandle mw;
+
+	UBCHECK(m.R_top == ubState.UBS_long[0] - MENU_WIN_SCROLL_DELTA);
+	UBCHECK(ScrollerWin(@UBLong, FALSE, &up) != 0);
+	UBCHECK(ScrollerWin(@UBLong, TRUE, &down) != 0);
+	@call UBLongLast::MSG_META_GRAB_FOCUS_EXCL();
+	@call UBLong::MSG_OL_MENU_WIN_UPDATE_SCROLLABLE_MENU();
+	mw = @call UBLong::MSG_VIS_QUERY_WINDOW();
+	m = ScreenBounds(mw);
+	l = Bounds(@UBLongLast);
+	d = ScreenBounds(ScrollerWin(@UBLong, TRUE, &down));
+	ubState.UBS_long[3] = m.R_top;
+	UBCHECK(m.R_top < ubState.UBS_long[0] - MENU_WIN_SCROLL_DELTA);
+	UBCHECK(!d.R_bottom || m.R_top + l.R_bottom <= d.R_top);
+	(void) @call UBLong::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	break;
+    }
+    case 21: {
+	/* down: the scrollers' windows closed */
+	optr up, down;
+
+	UBCHECK(!@call UBLong::MSG_VIS_QUERY_WINDOW());
+	UBCHECK(!ScrollerWin(@UBLong, FALSE, &up) && up);
+	UBCHECK(!ScrollerWin(@UBLong, TRUE, &down) && down);
 	break;
     }
     }

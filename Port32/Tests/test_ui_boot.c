@@ -49,6 +49,7 @@ typedef struct {
     optr		UBS_maxIcon, UBS_restoreIcon;
     optr		UBS_pin;
     short		UBS_pinned[4];
+    short		UBS_long[4];
 } UBState;
 
 static int fails;
@@ -121,12 +122,16 @@ int main(void)
     /* overlapping, selected, tiled, full sized, Ctrl+F6, not usable;
      * the separators in a menu, the File menu's Exit; the primary's
      * system menu, maximized and restored by its icons; the File menu
-     * pinned, opened by its button, closed by its system menu */
-    for (i = 2; i <= 18; i++)
+     * pinned, opened by its button, closed by its system menu; a menu
+     * taller than the screen scrolled by its scrollers and to its focus */
+    for (i = 2; i <= 21; i++)
 	step(i);
     printf("system menu button at %d,%d %dx%d, title bar %d..%d\n",
 	   st->UBS_sys[0], st->UBS_sys[1], st->UBS_sys[2], st->UBS_sys[3],
 	   st->UBS_sys[4], st->UBS_sys[5]);
+    printf("long menu %d..%d, down scroller at %d, scrolled to %d\n",
+	   st->UBS_long[0], st->UBS_long[1], st->UBS_long[2],
+	   st->UBS_long[3]);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 
