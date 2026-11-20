@@ -1,0 +1,283 @@
+/*
+ * citemScrollableItem.goc -- OLScrollableItemClass (after
+ * citemScrollableItem.asm): an item of a scrolling list.  It is as
+ * large as the list says (MSG_OL_SLIST_RECALC_ITEM_SIZE), unless asked
+ * with a zero size for the one it would choose (its moniker with the
+ * scroll item insets); drawn as a row: the background (the selection's
+ * colors when selected), the moniker at the left, centered vertically.
+ * An item not yet interactable (a dynamic list's, without its moniker)
+ * is drawn blank; the list counts them.
+ *
+ * Motif: in color (the black and white look is drawn in color too), no
+ * grid lines and spacing.
+ */
+@include "CItem/citemInt.goh"
+
+@classdecl OLScrollableItemClass, neverSaved;
+
+/* ---------------------------------------------------------------------
+ * Building, geometry
+ * ------------------------------------------------------------------- */
+
+@method OLScrollableItemClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    Item(oself)->VI_specAttrs |= SA_SIMPLE_GEN_OBJ;
+}
+
+/* OLScrollableItemSpecBuild: the item's; its size always recalculated,
+ * the list's item size */
+@method OLScrollableItemClass, MSG_SPEC_BUILD
+{
+    SizeAsDWord s;
+    optr vp;
+
+    @callsuper();
+    Item(oself)->VI_geoAttrs &= ~VGA_ONLY_RECALC_SIZE_WHEN_INVALID;
+    Item(oself)->VI_geoAttrs |= VGA_ALWAYS_RECALC_SIZE;
+    vp = VisFindParent(oself);
+    if (!vp)
+	return;
+    s = @call vp::MSG_OL_SLIST_RECALC_ITEM_SIZE();
+    VisSetSize(oself, (sword) DWORD_WIDTH(s), (sword) DWORD_HEIGHT(s));
+}
+
+/* AddExtraSpaceIfInMenu: a popup list's items a little wider */
+static word AddExtraSpaceIfInMenu(optr o, word w)
+{
+    if (Item(o)->OLBI_specState & OLBSS_IN_MENU)
+	w += MO_SCROLL_POPUP_ITEM_EXTRA_SPACE;
+    return w;
+}
+
+/*
+ * OLScrollableItemRecalcSize: the list's item size; asked with a zero
+ * size the moniker with the insets (at least CUAS_SCROLL_ITEM_MIN_WIDTH
+ * wide)
+ */
+@method OLScrollableItemClass, MSG_VIS_RECALC_SIZE
+{
+    SizeAsDWord s;
+    word w, h;
+    optr vp;
+
+    if (width || height) {
+	vp = VisFindParent(oself);
+	if (vp)
+	    return @call vp::MSG_OL_SLIST_RECALC_ITEM_SIZE();
+    }
+    s = SpecGetGenMonikerSize(oself, 0);
+    w = AddExtraSpaceIfInMenu(oself, (word) (DWORD_WIDTH(s) +
+					     MO_SCROLL_ITEM_INSET_X * 2));
+    h = (word) (DWORD_HEIGHT(s) + MO_SCROLL_ITEM_INSET_Y * 2);
+    if (w < CUAS_SCROLL_ITEM_MIN_WIDTH)
+	w = CUAS_SCROLL_ITEM_MIN_WIDTH;
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+@method OLScrollableItemClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    (void) childCount;
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->ESP_extraWidth = AddExtraSpaceIfInMenu(oself,
+						MO_SCROLL_ITEM_INSET_X * 2);
+    retValue->ESP_extraHeight = MO_SCROLL_ITEM_INSET_Y * 2;
+}
+
+/* OLScrollableItemMkrPos: the moniker's position, left justified and
+ * centered vertically (FALSE if not visible or without one) */
+@method OLScrollableItemClass, MSG_GET_FIRST_MKR_POS
+{
+    OpenMonikerArgs a;
+    XYValueAsDWord p;
+
+    if (!(pself->VI_attrs & VA_VISIBLE))
+	return FALSE;
+    OLItemSetupMkrArgs(oself, &a);
+    a.OMA_drawMonikerFlags = (J_LEFT << DMF_X_JUST_OFFSET) |
+			     (J_CENTER << DMF_Y_JUST_OFFSET);
+    p = OpenGetMonikerPos(oself, oself, &a);
+    pos->P_x = DWORD_X(p);
+    pos->P_y = DWORD_Y(p);
+    return DWORD_X(p) != 0;
+}
+
+/* OLScrollableItemUpdateVisMoniker: an item built redrawn now (a
+ * dynamic list's not yet interactable item waits for the others when
+ * enabled) */
+@method OLScrollableItemClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    (void) oldMonikerWidth;
+    (void) oldMonikerHeight;
+    (void) updateMode;
+    if (!VisCheckIfSpecBuilt(oself))
+	return;
+    if ((pself->OLII_state & OLIS_MONIKER_INVALID) &&
+	(pself->VI_attrs & VA_FULLY_ENABLED))
+	return;
+    VisMarkInvalid(oself, VOF_IMAGE_INVALID, VUM_NOW);
+}
+
+/*
+ * OLScrollableItemSetInteractableState: a change of the item's
+ * interactable state (its moniker valid or not) told to the list with
+ * the item's position
+ */
+@method OLScrollableItemClass, MSG_GEN_ITEM_SET_INTERACTABLE_STATE
+{
+    byte now = interactable ? 0 : OLIS_MONIKER_INVALID;
+    word pos = 0;
+    optr gp, vp;
+
+    if (!((pself->OLII_state ^ now) & OLIS_MONIKER_INVALID))
+	return;
+    @callsuper();
+    if ((gp = GenFindParent(oself)) != 0)
+	pos = @call gp::MSG_GEN_FIND_CHILD(oself);
+    if ((vp = VisFindParent(oself)) != 0)
+	@call vp::MSG_OL_IGROUP_NOTIFY_ITEM_CHANGED_INTERACTABLE_STATE(
+						interactable ? 1 : 0, pos);
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/* FillRectWithBGColors: the bounds in the background colors (the
+ * second at 50% if enabled) */
+static void FillBG(optr o, GStateHandle gs, Boolean selected)
+{
+    word cc = OpenGetBackgroundColor(o, selected);
+    Color c1 = (Color) (cc & 0xff), c2 = (Color) (cc >> 8);
+    Rectangle r;
+
+    VisGetBounds(o, &r);
+    GrSetAreaColor(gs, CF_INDEX, c1, 0, 0);
+    GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+    if (c1 != c2 && (Item(o)->VI_attrs & VA_FULLY_ENABLED)) {
+	GrSetAreaColor(gs, CF_INDEX, c2, 0, 0);
+	GrSetAreaMaskSys(gs, SDM_50);
+	GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+	GrSetAreaMaskSys(gs, SDM_100);
+    }
+}
+
+/* the selected color of HINT_GADGET_TEXT_COLOR (the item's or its
+ * parent's, as OpenGetTextColor) */
+static Boolean SelectedTextColor(optr o, Color *c)
+{
+    TextColors *tc = ObjVarFindData(o, HINT_GADGET_TEXT_COLOR);
+    optr p;
+
+    if (!tc && (p = VisFindParent(o)) != 0) {
+	ObjLockObjBlock(OptrToHandle(p));
+	tc = ObjVarFindData(p, HINT_GADGET_TEXT_COLOR);
+	if (tc)
+	    *c = tc->TC_selectedColor;
+	MemUnlock(OptrToHandle(p));
+	return tc != NULL;
+    }
+    if (tc)
+	*c = tc->TC_selectedColor;
+    return tc != NULL;
+}
+
+/*
+ * DrawColorScrollableItemBackground: a selected item in the selection's
+ * colors, its text white (or the hint's); one not selected erased on a
+ * full redraw, or if it was drawn selected (or without its moniker)
+ */
+static void DrawBackground(optr o, GStateHandle gs, Boolean full)
+{
+    OLItemInstance *i = Item(o);
+    Color c;
+
+    if (!(i->OLII_state & OLIS_MONIKER_INVALID) &&
+	(i->OLBI_specState & OLBSS_SELECTED)) {
+	FillBG(o, gs, TRUE);
+	c = C_WHITE;
+	(void) SelectedTextColor(o, &c);
+	GrSetTextColor(gs, CF_INDEX, c, 0, 0);
+	GrSetLineColor(gs, CF_INDEX, c, 0, 0);
+	return;
+    }
+    if ((i->OLII_state & OLIS_MONIKER_INVALID) || full ||
+	!(i->OLBI_optFlags & OLBOF_DRAW_STATE_KNOWN) ||
+	(i->OLBI_optFlags & OLBOF_DRAWN_SELECTED))
+	FillBG(o, gs, FALSE);
+}
+
+/*
+ * DrawColorScrollableItem: text and lines black (or the hint's color);
+ * an item only just disabled is washed with the light color, else the
+ * background and (if the moniker is valid and the item usable) the
+ * moniker with the list's selection cursor, inset at the left
+ */
+static void DrawColorScrollableItem(optr o, GStateHandle gs, DrawFlags df)
+{
+    OLItemInstance *i = Item(o);
+    byte was = i->OLBI_optFlags, now = (byte) i->OLBI_specState;
+    Boolean full = FALSE;
+    OLMonikerAttrs at;
+    Color c = C_BLACK;
+    Rectangle r;
+
+    (void) OpenGetTextColor(o, &c);
+    GrSetTextColor(gs, CF_INDEX, c, 0, 0);
+    GrSetLineColor(gs, CF_INDEX, c, 0, 0);
+    if ((df & DF_EXPOSED) || !(was & OLBOF_DRAW_STATE_KNOWN))
+	full = TRUE;
+    else if ((i->VI_attrs ^ was) & VA_FULLY_ENABLED) {
+	if ((now ^ was) & OLBOF_STATE_FLAGS_MASK)
+	    full = TRUE;
+	else if (!(i->VI_attrs & VA_FULLY_ENABLED) && (was & OLBOF_ENABLED)) {
+	    /* OLItemWash50Percent: just disabled, all of it */
+	    GrSetAreaColor(gs, CF_INDEX, moCS_dsLightColor, 0, 0);
+	    VisGetBounds(o, &r);
+	    GrSetAreaMaskSys(gs, SDM_INVERSE | SDM_50);
+	    GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+	    return;
+	} else
+	    full = TRUE;
+    }
+    DrawBackground(o, gs, full);
+    if (!(Item(o)->VI_attrs & VA_FULLY_ENABLED)) {
+	GrSetLineMaskSys(gs, SDM_50);
+	GrSetTextMaskSys(gs, SDM_50);
+	GrSetAreaMaskSys(gs, SDM_50);
+    }
+    i = Item(o);
+    if ((i->OLII_state & OLIS_MONIKER_INVALID) ||
+	!(((GenInstance *) ObjDerefGen(o))->GI_states & GS_USABLE))
+	return;
+    /* OLScrollableItemSetAreaColorBlackIfEnabled */
+    c = moCS_dsDarkColor;
+    if (i->VI_attrs & VA_FULLY_ENABLED)
+	c = (i->OLBI_specState & OLBSS_SELECTED) ? C_WHITE : C_BLACK;
+    GrSetAreaColor(gs, CF_INDEX, c, 0, 0);
+    at = OLButtonSetupMonikerAttrs(o);
+    if (at & OLMA_DISP_SELECTION_CURSOR) {
+	at |= OLMA_USE_LIST_SELECTION_CURSOR;
+	at |= (Item(o)->OLBI_specState & OLBSS_SELECTED)
+	      ? OLMA_DARK_COLOR_BACKGROUND : OLMA_LIGHT_COLOR_BACKGROUND;
+    }
+    OLButtonDrawMoniker(o, gs, (J_LEFT << DMF_X_JUST_OFFSET) |
+			       (J_CENTER << DMF_Y_JUST_OFFSET) |
+			       DMF_CLIP_TO_MAX_WIDTH, at,
+			AddExtraSpaceIfInMenu(o, MO_SCROLL_ITEM_INSET_X), 0);
+}
+
+/* OLScrollableItemDraw: a realized item, its drawn state noted; the
+ * navigation flags cleared once its moniker is valid */
+@method OLScrollableItemClass, MSG_VIS_DRAW
+{
+    if (!(pself->OLII_state & OLIS_MONIKER_INVALID))
+	pself->OLII_state &= ~(OLIS_NAVIGATE_IF_DISABLED |
+			       OLIS_NAVIGATE_BACKWARD);
+    if (!(pself->VI_attrs & VA_REALIZED))
+	return;
+    GrSaveState(gstate);
+    DrawColorScrollableItem(oself, gstate, drawFlags);
+    GrRestoreState(gstate);
+    UpdateItemState(oself);
+}

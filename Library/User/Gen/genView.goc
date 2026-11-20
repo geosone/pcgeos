@@ -18,10 +18,8 @@
  * Port32 (Port32/ABI.md section 13y): the events are recorded with
  * @record and dispatched with MF_DISPATCH_DONT_FREE; not yet:
  * MSG_GEN_BRANCH_REPLACE_PARAMS (BRPT_OUTPUT_OPTR, the content),
- * GenViewSetSimpleBounds,
- * GenSetupTrackingArgs and GenReturnTrackingArgs
- * (the tracking of a GVA_TRACK_SCROLLING view's content), the stack
- * borrowed for MSG_GEN_VIEW_CALL_WITHOUT_LINKS.
+ * GenViewSetSimpleBounds, the stack borrowed for
+ * MSG_GEN_VIEW_CALL_WITHOUT_LINKS.
  */
 @include "uiInt.goh"
 @include <Objects/gViewC.goh>
@@ -519,6 +517,32 @@ static void ScrollView(optr o, sdword dx, sdword dy)
     args->TSP_flags |= SF_EC_SETUP_CALLED;
     if (VisCheckIfSpecBuilt(oself))
 	@callsuper();
+}
+
+/*
+ * GenSetupTrackingArgs, GenReturnTrackingArgs: the content of a
+ * GVA_TRACK_SCROLLING view has the view (the caller) set up the
+ * arguments, then returns them; an absolute scroll's new origin is the
+ * old one and the change
+ */
+void GenSetupTrackingArgs(TrackScrollingParams *args)
+{
+    optr caller = args->TSP_caller;
+
+    @call caller::MSG_GEN_VIEW_SETUP_TRACKING_ARGS(args);
+}
+
+void GenReturnTrackingArgs(TrackScrollingParams *args)
+{
+    optr caller = args->TSP_caller;
+
+    if (args->TSP_flags & SF_ABSOLUTE) {
+	args->TSP_newOrigin.PD_x = args->TSP_oldOrigin.PD_x +
+				   args->TSP_change.PD_x;
+	args->TSP_newOrigin.PD_y = args->TSP_oldOrigin.PD_y +
+				   args->TSP_change.PD_y;
+    }
+    @call caller::MSG_GEN_VIEW_TRACKING_COMPLETE(args);
 }
 
 /* GenViewOnlyCallIfSpecBuilt (one method for each signature) */

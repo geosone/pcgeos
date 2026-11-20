@@ -1,0 +1,832 @@
+/*
+ * citemScrollList.goc -- OLScrollListClass (after citemScrollList.asm):
+ * a scrolling list, an item group (HINT_ITEM_GROUP_SCROLLABLE,
+ * HINT_BOOLEAN_GROUP_SCROLLABLE) that puts itself into a GenView of its
+ * own when built, as the only visual child of the view's GenContent.
+ * Its items (OLScrollableItemClass) are all as large: the content's
+ * width (by the wrap count) and the item length along the list.  The
+ * view scrolls by an item (its increment), tracks the scrolling (the
+ * origin on an item's edge) and is as large as the size hints of the
+ * list (moved to the view) or a default number of items.  The keys page
+ * through the list a view's worth at a time.
+ *
+ * Motif: no grid lines and spacing, lists not linked, no notice of
+ * scrolling out of bounds, no scrollers of the view in the title bar.
+ * Port32 (Port32/ABI.md section 13y), not yet: popup scrolling lists
+ * (MakePopupScrollListIfNeeded), the items of a dynamic list removed on
+ * an unbuild (RemoveDynamicListItems).
+ */
+@include "CItem/citemInt.goh"
+@include <Objects/gViewC.goh>
+@include <Objects/gContC.goh>
+@include <Objects/gDListC.goh>
+@include <Internal/SpecUI/olPaneClass.goh>
+#include <Internal/im.h>
+
+@classdecl OLScrollListClass, neverSaved;
+
+/* ScrollListScanArgs */
+#define SLSA_WIDTH_HINT_SPECIFIED		0x80
+#define SLSA_HEIGHT_HINT_SPECIFIED		0x40
+#define SLSA_INIT_WIDTH_HINT_SPECIFIED		0x20
+#define SLSA_INIT_HEIGHT_HINT_SPECIFIED		0x10
+#define SLSA_ENSURE_HINT_IS_NUKED_IN_VIEW	0x08
+#define SLSA_ITEM_LENGTH_CALCULATED		0x04
+
+#define VERTICAL(o)	((SL(o)->OLSLI_attrs & OLSLA_VERTICAL) != 0)
+
+static optr View(optr o)
+{
+    ChunkHandle v = SL(o)->OLSLI_view;
+
+    return v ? ConstructOptr(OptrToHandle(o), v) : 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+@method OLScrollListClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    SL(oself)->OLIGI_state |= OLIGS_SCROLLABLE;
+}
+
+/*
+ * OLScrollListSpecBuildBranch: first into a new view (its moniker the
+ * list's, which the list no longer draws; generic contents that track
+ * and drag scroll and get all keys; not focusable without a keyboard),
+ * so that the items are built before the geometry hints are scanned
+ */
+@method OLScrollListClass, MSG_SPEC_BUILD_BRANCH
+{
+    optr view = OpenCreateNewParentObject(oself,
+					  (ClassStruct *) &GenViewClass);
+    GenViewInstance *v;
+    OLScrollListInstance *p;
+
+    p = SL(oself);
+    p->OLSLI_view = OptrToChunk(view);
+    p->OLCI_optFlags &= ~OLCOF_DISPLAY_MONIKER;
+    if (p->OLIGI_state & OLIGS_DYNAMIC)
+	(void) ObjVarAddData(view, ATTR_GEN_VIEW_DO_NOT_WIN_SCROLL, 0);
+    v = (GenViewInstance *) ObjDerefGen(view);
+    v->GVI_attrs |= GVA_GENERIC_CONTENTS | GVA_SAME_COLOR_AS_PARENT_WIN |
+		    GVA_SEND_ALL_KBD_CHARS | GVA_DRAG_SCROLLING |
+		    GVA_TRACK_SCROLLING;
+    if (FlowGetUIButtonFlags() & UIBF_NO_KEYBOARD)
+	v->GVI_attrs &= ~GVA_FOCUSABLE;
+    if (CheckIfKeyboardRequired())
+	(void) ObjVarAddData(view, ATTR_GEN_VIEW_DOES_NOT_ACCEPT_TEXT_INPUT |
+				   VDF_SAVE_TO_STATE, 0);
+    OpenBuildNewParentObject(oself, view, flags, TRUE);
+    @callsuper();
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+}
+
+/* OLScrollListSpecBuild: not the group's (the list is in its view
+ * already): enabled as the generic object, the focus item */
+@method OLScrollListClass, MSG_SPEC_BUILD
+{
+    VisSpecBuildSetEnabledState(oself, flags);
+    InitFocusItem(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The geometry hints, the view's size
+ * ------------------------------------------------------------------- */
+
+/* GetWrapCount: the list's wrap count if it wraps after a count of
+ * children, else 1 */
+word GetWrapCount(optr o)
+{
+    if (!(SL(o)->VCI_geoAttrs & VCGA_WRAP_AFTER_CHILD_COUNT))
+	return 1;
+    return @call o::MSG_VIS_COMP_GET_WRAP_COUNT();
+}
+
+word MultByWrapCount(optr o, word v)
+{
+    return (word) (v * GetWrapCount(o));
+}
+
+/*
+ * CopySizeToViewIfSpecified: a size (width, height, count of children)
+ * of the list's size hints set on the view with msg (or, to be sure
+ * the view has none, a zero size); the flags of the hints found; the
+ * first size along the list (by the count) is the item length.  TRUE
+ * if there was a size.
+ */
+static Boolean CopySizeToView(optr o, Message msg, sword w, sword h,
+			      sword count, byte *flags)
+{
+    Boolean found = FALSE;
+    sword len;
+    optr view;
+
+    if (!w && !h && !count) {
+	if (!(*flags & SLSA_ENSURE_HINT_IS_NUKED_IN_VIEW))
+	    return FALSE;
+    } else {
+	if (w) {
+	    *flags |= SLSA_WIDTH_HINT_SPECIFIED;
+	    if (msg == MSG_GEN_SET_INITIAL_SIZE)
+		*flags |= SLSA_INIT_WIDTH_HINT_SPECIFIED;
+	}
+	if (h) {
+	    *flags |= SLSA_HEIGHT_HINT_SPECIFIED;
+	    if (msg == MSG_GEN_SET_INITIAL_SIZE)
+		*flags |= SLSA_INIT_HEIGHT_HINT_SPECIFIED;
+	}
+	found = TRUE;
+    }
+    len = VERTICAL(o) ? h : w;
+    if (len && !(*flags & SLSA_ITEM_LENGTH_CALCULATED)) {
+	*flags |= SLSA_ITEM_LENGTH_CALCULATED;
+	SL(o)->OLSLI_itemLength = count ? (word) ((word) len / (word) count)
+					: (word) len;
+    }
+    view = View(o);
+    switch (msg) {
+    case MSG_GEN_SET_FIXED_SIZE:
+	@call view::MSG_GEN_SET_FIXED_SIZE(VUM_MANUAL, 0, h, w);
+	break;
+    case MSG_GEN_SET_MINIMUM_SIZE:
+	@call view::MSG_GEN_SET_MINIMUM_SIZE(VUM_MANUAL, 0, h, w);
+	break;
+    case MSG_GEN_SET_MAXIMUM_SIZE:
+	@call view::MSG_GEN_SET_MAXIMUM_SIZE(VUM_MANUAL, 0, h, w);
+	break;
+    default:
+	@call view::MSG_GEN_SET_INITIAL_SIZE(VUM_MANUAL, 0, h, w);
+	break;
+    }
+    return found;
+}
+
+/* GetMinItemSizes: the largest size of the items with a moniker, as
+ * they would choose it */
+static void GetMinItemSizes(optr o, word *w, word *h)
+{
+    optr child;
+    word i;
+    SizeAsDWord s;
+
+    for (i = 0; (child = @call o::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++) {
+	if (!((GenInstance *) ObjDerefGen(child))->GI_visMoniker ||
+	    !VisCheckIfSpecBuilt(child))
+	    continue;
+	s = @call child::MSG_VIS_RECALC_SIZE(0, 0);
+	if (DWORD_WIDTH(s) > *w)
+	    *w = DWORD_WIDTH(s);
+	if (DWORD_HEIGHT(s) > *h)
+	    *h = DWORD_HEIGHT(s);
+    }
+}
+
+/*
+ * GetDefaultItemSize: a dynamic list's (or one without items) a line of
+ * text by 15 average characters and the insets; else the largest item
+ */
+static void GetDefaultItemSize(optr o, word *w, word *h)
+{
+    GStateHandle gs;
+
+    *w = *h = 0;
+    if (!(SL(o)->OLIGI_state & OLIGS_DYNAMIC)) {
+	GetMinItemSizes(o, w, h);
+	if (*w)
+	    return;
+    }
+    gs = ViewCreateCalcGState();
+    *h = VisConvertSpecVisSize(o, SST_LINES_OF_TEXT | 1, gs);
+    *w = VisConvertSpecVisSize(o, SST_AVG_CHAR_WIDTHS | 15, gs);
+    GrDestroyState(gs);
+    *w += MO_SCROLL_ITEM_INSET_X * 2;
+    *h += MO_SCROLL_ITEM_INSET_Y * 2;
+}
+
+/*
+ * MultByNumVisibleItems: the length of the default number of items
+ * (halved while larger than SLIST_MAXIMUM_DEFAULT_SIZE); *n that number
+ * (0 for no length)
+ */
+static word MultByNumVisibleItems(optr o, word len, word *n)
+{
+    word d = SLIST_DEFAULT_ITEMS_SHOWN, v;
+
+    if (VERTICAL(o)) {
+	if (OpenCheckIfCGA())
+	    d = CGA_SLIST_DEFAULT_ITEMS_SHOWN;
+    } else if (OpenCheckIfNarrow())
+	d = CGA_SLIST_DEFAULT_ITEMS_SHOWN;
+    *n = 0;
+    if (!len)
+	return d;
+    *n = d;
+    for (;;) {
+	v = (word) (*n * len);
+	if (v <= SLIST_MAXIMUM_DEFAULT_SIZE || *n == 1)
+	    return v;
+	*n = (word) ((*n + 1) >> 1);
+    }
+}
+
+/*
+ * SetDefaultListSizeIfNeeded: without a size hint across or along the
+ * list (and not expanding) the view gets a fixed size of the default
+ * item size there (the default number of items along the list),
+ * otherwise an initial one if none; the item length is the default
+ * item's unless a hint gave it
+ */
+static void SetDefaultListSizeIfNeeded(optr o, SpecSizeArgs *a, byte flags)
+{
+    word w, h, along, across, n, nw = 0, nh = 0, t;
+
+    GetDefaultItemSize(o, &w, &h);
+    if (!(flags & SLSA_ITEM_LENGTH_CALCULATED))
+	SL(o)->OLSLI_itemLength = VERTICAL(o) ? h : w;
+    along = VERTICAL(o) ? h : w;
+    across = VERTICAL(o) ? w : h;
+    along = MultByNumVisibleItems(o, along, &n);
+    across = MultByWrapCount(o, across);
+    if (VERTICAL(o)) {
+	h = along;
+	w = across;
+	nh = n;
+    } else {
+	w = along;
+	h = across;
+	nw = n;
+    }
+    (void) t;
+    if (!(flags & SLSA_HEIGHT_HINT_SPECIFIED)) {
+	a->SSA_fixedHeight = (sword) h;
+	a->SSA_fixedNumChildren |= (sword) nh;
+    } else if (!(flags & SLSA_INIT_HEIGHT_HINT_SPECIFIED)) {
+	a->SSA_initHeight = (sword) h;
+	a->SSA_initNumChildren |= (sword) nh;
+    }
+    if (!(flags & SLSA_WIDTH_HINT_SPECIFIED)) {
+	a->SSA_fixedWidth = (sword) w;
+	a->SSA_fixedNumChildren |= (sword) nw;
+    } else if (!(flags & SLSA_INIT_WIDTH_HINT_SPECIFIED)) {
+	a->SSA_initWidth = (sword) w;
+	a->SSA_initNumChildren |= (sword) nw;
+    }
+    flags &= ~SLSA_ENSURE_HINT_IS_NUKED_IN_VIEW;
+    (void) CopySizeToView(o, MSG_GEN_SET_FIXED_SIZE, a->SSA_fixedWidth,
+			  a->SSA_fixedHeight, a->SSA_fixedNumChildren,
+			  &flags);
+    (void) CopySizeToView(o, MSG_GEN_SET_INITIAL_SIZE, a->SSA_initWidth,
+			  a->SSA_initHeight, a->SSA_initNumChildren, &flags);
+}
+
+/*
+ * OLScrollListHandleSizeHints: an initial size counts as fixed where
+ * no expand hint is; the list's size hints go to the view
+ */
+static void HandleSizeHints(optr o, SpecSizeArgs *a, byte *flags)
+{
+    if (!(*flags & SLSA_WIDTH_HINT_SPECIFIED) && !a->SSA_fixedWidth)
+	a->SSA_fixedWidth = a->SSA_initWidth;
+    if (!(*flags & SLSA_HEIGHT_HINT_SPECIFIED) && !a->SSA_fixedHeight)
+	a->SSA_fixedHeight = a->SSA_initHeight;
+    if (!a->SSA_fixedNumChildren)
+	a->SSA_fixedNumChildren = a->SSA_initNumChildren;
+    (void) CopySizeToView(o, MSG_GEN_SET_FIXED_SIZE, a->SSA_fixedWidth,
+			  a->SSA_fixedHeight, a->SSA_fixedNumChildren, flags);
+    (void) CopySizeToView(o, MSG_GEN_SET_MINIMUM_SIZE, a->SSA_minWidth,
+			  a->SSA_minHeight, a->SSA_minNumChildren, flags);
+    (void) CopySizeToView(o, MSG_GEN_SET_MAXIMUM_SIZE, a->SSA_maxWidth,
+			  a->SSA_maxHeight, a->SSA_maxNumChildren, flags);
+    (void) CopySizeToView(o, MSG_GEN_SET_INITIAL_SIZE, a->SSA_initWidth,
+			  a->SSA_initHeight, a->SSA_initNumChildren, flags);
+}
+
+/*
+ * OLScrollListSetupViewStuff: the content as wide (high) as the view
+ * (a dynamic list's: both, the document set by hand, not scrolled by
+ * the window); the view scrolls by an item along the list only, its
+ * size a multiple of an item; the pane does not take the focus from
+ * text objects; the monikers of the items inset
+ */
+static void SetupViewStuff(optr o)
+{
+    OLScrollListInstance *p = SL(o);
+    VisContentAttrs ca = VCNA_SAME_WIDTH_AS_VIEW;
+    DimensionAttrsToSetClear on, off;
+    VisUpdateModeAsWord um;
+    GenViewInstance *v;
+    Boolean vert = VERTICAL(o);
+    optr content, view = View(o);
+
+    if (!vert)
+	ca = VCNA_SAME_HEIGHT_AS_VIEW;
+    if (p->OLIGI_state & OLIGS_DYNAMIC) {
+	p->VCI_geoAttrs |= VCGA_HAS_MINIMUM_SIZE;
+	ca = VCNA_SAME_WIDTH_AS_VIEW | VCNA_SAME_HEIGHT_AS_VIEW |
+	     VCNA_VIEW_DOC_BOUNDS_SET_MANUALLY | VCNA_VIEW_DOES_NOT_WIN_SCROLL;
+    }
+    content = VisFindParent(o);
+    if (content)
+	((VisContentInstance *) ObjDerefVis(content))->VCNI_attrs = ca;
+    v = (GenViewInstance *) ObjDerefGen(view);
+    v->GVI_increment.PD_x = vert ? 0 : SL(o)->OLSLI_itemLength;
+    v->GVI_increment.PD_y = vert ? SL(o)->OLSLI_itemLength : 0;
+    v->GVI_docBounds.RD_right = 0;
+    v->GVI_docBounds.RD_bottom = 0;
+    on.DATSC_attrsToSet = GVDA_SCROLLABLE | GVDA_SIZE_A_MULTIPLE_OF_INCREMENT;
+    on.DATSC_attrsToClear = 0;
+    off.DATSC_attrsToSet = 0;
+    off.DATSC_attrsToClear = on.DATSC_attrsToSet;
+    memset(&um, 0, sizeof(um));
+    um.VUMAW_mode = VUM_MANUAL;
+    @call view::MSG_GEN_VIEW_SET_DIMENSION_ATTRS(vert ? off : on,
+						 vert ? on : off, um);
+    @call view::MSG_SPEC_VIEW_SET_PANE_FLAGS(
+		OLPF_DONT_TAKE_FOCUS_FROM_TEXT_OBJECTS, 0);
+    @call view::MSG_SPEC_CTRL_SET_MONIKER_OFFSET(MO_SCROLL_ITEM_INSET_X,
+						 MO_SCROLL_ITEM_INSET_Y);
+}
+
+/*
+ * OLScrollListScanGeometryHints: the items vertical in one pass (unless
+ * oriented across or wrapped); the list's size hints are the view's,
+ * or a default size; the view set up for the list
+ */
+@method OLScrollListClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    SpecSizeArgs a;
+    byte flags = SLSA_ENSURE_HINT_IS_NUKED_IN_VIEW;
+    OLScrollListAttrs at = OLSLA_VERTICAL;
+
+    pself->VI_geoAttrs &= ~VGA_NO_SIZE_HINTS;
+    pself->VCI_geoAttrs = VCGA_ORIENT_CHILDREN_VERTICALLY |
+			  VCGA_ONE_PASS_OPTIMIZATION;
+    if (ObjVarFindData(oself, HINT_EXPAND_WIDTH_TO_FIT_PARENT))
+	flags |= SLSA_WIDTH_HINT_SPECIFIED;
+    if (ObjVarFindData(oself, HINT_EXPAND_HEIGHT_TO_FIT_PARENT))
+	flags |= SLSA_HEIGHT_HINT_SPECIFIED;
+    pself = SL(oself);
+    if (ObjVarFindData(oself, HINT_ORIENT_CHILDREN_HORIZONTALLY))
+	pself->VCI_geoAttrs &= ~VCGA_ORIENT_CHILDREN_VERTICALLY;
+    if (ObjVarFindData(oself, HINT_WRAP_AFTER_CHILD_COUNT)) {
+	pself = SL(oself);
+	pself->VCI_geoAttrs |= VCGA_WRAP_AFTER_CHILD_COUNT |
+			       VCGA_ALLOW_CHILDREN_TO_WRAP;
+	pself->VCI_geoAttrs &= ~VCGA_ONE_PASS_OPTIMIZATION;
+    }
+    VisSetupSizeArgs(oself, &a);
+    /* OLScrollListSetupViewOrientation */
+    pself = SL(oself);
+    if (!(pself->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY))
+	at = 0;
+    if (pself->VCI_geoAttrs & VCGA_WRAP_AFTER_CHILD_COUNT)
+	at ^= OLSLA_VERTICAL;
+    pself->OLSLI_attrs = (pself->OLSLI_attrs & ~OLSLA_VERTICAL) | at;
+    HandleSizeHints(oself, &a, &flags);
+    SetDefaultListSizeIfNeeded(oself, &a, flags);
+    SL(oself)->VI_geoAttrs |= VGA_NO_SIZE_HINTS;
+    SetupViewStuff(oself);
+    SL(oself)->VCI_geoAttrs |= VCGA_ONLY_DRAWS_IN_MARGINS;
+}
+
+/* OLScrollListViewWinOpened: a toolbox or delayed parent's look; the
+ * selection scrolled into view */
+@method OLScrollListClass, MSG_META_CONTENT_VIEW_WIN_OPENED
+{
+    (void) viewWidth;
+    (void) viewHeight;
+    (void) viewWindow;
+    SL(oself)->OLCI_buildFlags |= OpenGetParentBuildFlagsIfCtrl(oself) &
+				  (OLBF_TOOLBOX | OLBF_DELAYED_MODE);
+    if (!IsNonExclusive(oself))
+	EnsureCurrentSelectionVisible(oself);
+}
+
+/* OLScrollListVisUnbuild: out of the view, which goes away with its
+ * content */
+@method OLScrollListClass, MSG_SPEC_UNBUILD
+{
+    OpenUnbuildCreatedParent(oself, View(oself), flags, TRUE, TRUE);
+    SL(oself)->OLSLI_view = 0;
+}
+
+/* OLScrollListGetSpecVisObj: the view (none for the win group); a popup
+ * list's is its popup's */
+@method OLScrollListClass, MSG_SPEC_GET_SPECIFIC_VIS_OBJECT
+{
+    if (flags & SBF_WIN_GROUP)
+	return 0;
+    if (pself->OLIGI_moreState & OLIGMS_POPUP_LIST)
+	return @callsuper();
+    if (pself->OLSLI_view)
+	return View(oself);
+    return oself;
+}
+
+/* ---------------------------------------------------------------------
+ * Scrolling
+ * ------------------------------------------------------------------- */
+
+/* GetViewWinSize: the size of the view's window, as the content knows */
+static void GetViewWinSize(optr o, word *w, word *h)
+{
+    optr c = VisFindParent(o);
+    VisContentInstance *ci;
+
+    *w = *h = 0;
+    if (!c)
+	return;
+    ci = (VisContentInstance *) ObjDerefVis(c);
+    *w = ci->VCNI_viewWidth;
+    *h = ci->VCNI_viewHeight;
+}
+
+/*
+ * OLScrollListRecalcItemSize: an item is as wide as the content (by the
+ * wrap count) and the item length high; across that for a horizontal
+ * list
+ */
+@method OLScrollListClass, MSG_OL_SLIST_RECALC_ITEM_SIZE
+{
+    word w, h, across;
+
+    GetViewWinSize(oself, &w, &h);
+    across = (word) ((VERTICAL(oself) ? w : h) / GetWrapCount(oself));
+    if (VERTICAL(oself))
+	return MAKE_SIZE_DWORD(across, SL(oself)->OLSLI_itemLength);
+    return MAKE_SIZE_DWORD(SL(oself)->OLSLI_itemLength, across);
+}
+
+/*
+ * OLScrollListMakeItemVisible: an item above the top one or below the
+ * visible ones is scrolled into the view (a dynamic list passes its
+ * position)
+ */
+@method OLScrollListClass, MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE
+{
+    word pos = identifier, wrap, q, r, xm, ym;
+    SizeAsDWord s;
+    sdword top, left;
+    optr item, view;
+
+    if (!(pself->OLIGI_state & OLIGS_DYNAMIC)) {
+	item = GetItemOptr(oself, identifier);
+	if (!item)
+	    return;
+	pos = @call oself::MSG_GEN_FIND_CHILD(item);
+	if (pos == (word) -1)
+	    return;
+    }
+    pself = SL(oself);
+    if (pos >= pself->OLSLI_topItem &&
+	pos < pself->OLSLI_topItem + pself->OLSLI_numVisibleItems)
+	return;
+    wrap = GetWrapCount(oself);
+    q = pos / wrap;
+    r = pos % wrap;
+    ym = q;
+    xm = r;
+    if (!VERTICAL(oself)) {
+	ym = r;
+	xm = q;
+    }
+    s = @call oself::MSG_OL_SLIST_RECALC_ITEM_SIZE();
+    top = (sdword) ym * DWORD_HEIGHT(s);
+    left = (sdword) xm * DWORD_WIDTH(s);
+    view = View(oself);
+    if (view)
+	@call view::MSG_GEN_VIEW_MAKE_RECT_VISIBLE(0, 0, 0, 0,
+			top + DWORD_HEIGHT(s), left + DWORD_WIDTH(s), top,
+			left);
+}
+
+/* CalcTopItem: the item at the origin (along the list) */
+static word CalcTopItem(optr o, sdword x, sdword y)
+{
+    word len = SL(o)->OLSLI_itemLength;
+
+    if (!len)
+	return 0;
+    return MultByWrapCount(o, (word) ((dword) (VERTICAL(o) ? y : x) / len));
+}
+
+/*
+ * SendTopItemChanged: the new top item; a dynamic list leaves
+ * intermediate mode and is told, to move its monikers
+ */
+static void SendTopItemChanged(optr o, sdword x, sdword y)
+{
+    word top = CalcTopItem(o, x, y), old;
+    OLScrollListInstance *p = SL(o);
+
+    old = p->OLSLI_topItem;
+    p->OLSLI_topItem = top;
+    if (!(p->OLIGI_state & OLIGS_DYNAMIC))
+	return;
+    if (p->OLIGI_state & OLIGS_INTERMEDIATE)
+	@call o::MSG_OL_IGROUP_END_INTERMEDIATE_MODE(
+		OIENPF_RESTORE_SELECTION_TO_ORIGINAL_OWNER |
+		OIENPF_RESTORE_FOCUS_EXCL_STATE_TO_ORIGINAL_OWNER |
+		OIENPF_REDRAW_PRESSED_ITEM);
+    @call o::MSG_GEN_DYNAMIC_LIST_TOP_ITEM_CHANGED(top, old,
+					SL(o)->OLSLI_numVisibleItems);
+    @call o::MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE(0);
+}
+
+/*
+ * OLScrollListTrackScrolling: the new origin along the list on an
+ * item's edge (rounded down), the change from the old one; the top item
+ * from the new origin
+ */
+@method OLScrollListClass, MSG_META_CONTENT_TRACK_SCROLLING
+{
+    word len = pself->OLSLI_itemLength;
+    Boolean vert = VERTICAL(oself);
+    sdword n, *change;
+    dword q, r;
+
+    GenSetupTrackingArgs(args);
+    if (len) {
+	n = vert ? args->TSP_newOrigin.PD_y : args->TSP_newOrigin.PD_x;
+	q = (dword) n / len;
+	r = (dword) n % len;
+	if (r & 0x8000)
+	    q++;
+	change = vert ? &args->TSP_change.PD_y : &args->TSP_change.PD_x;
+	*change = (sdword) (q * len) -
+		  (vert ? args->TSP_oldOrigin.PD_y : args->TSP_oldOrigin.PD_x);
+    }
+    SendTopItemChanged(oself, args->TSP_newOrigin.PD_x,
+		       args->TSP_newOrigin.PD_y);
+    GenReturnTrackingArgs(args);
+}
+
+/*
+ * OLScrollListViewSizeChanged: as many items visible as fit (a partial
+ * one counts), by the wrap count; a dynamic list told; the selection
+ * scrolled into view
+ */
+@method OLScrollListClass, MSG_META_CONTENT_VIEW_SIZE_CHANGED
+{
+    word size = VERTICAL(oself) ? viewHeight : viewWidth, len, n = 0;
+
+    (void) viewWindow;
+    len = pself->OLSLI_itemLength;
+    if (len) {
+	n = size / len;
+	if (size % len)
+	    n++;
+    }
+    n = MultByWrapCount(oself, n);
+    pself = SL(oself);
+    pself->OLSLI_numVisibleItems = n;
+    if (pself->OLIGI_state & OLIGS_DYNAMIC) {
+	word top = pself->OLSLI_topItem, num;
+
+	@call oself::MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED(n, top);
+	num = @call oself::MSG_GEN_DYNAMIC_LIST_GET_NUM_ITEMS();
+	@call oself::MSG_GEN_DYNAMIC_LIST_NUM_ITEMS_CHANGED(num);
+    }
+    EnsureCurrentSelectionVisible(oself);
+}
+
+/* SendUpdateCompleteIfAllItemsInteractable: with every item
+ * interactable the view's update is complete (ahead of the queue);
+ * TRUE if so */
+static Boolean SendUpdateCompleteIfAllItemsInteractable(optr o)
+{
+    optr view;
+
+    if (SL(o)->OLSLI_nonInteractables || !(view = View(o)))
+	return FALSE;
+    @send ,forceQueue,insertAtFront view::MSG_META_WIN_UPDATE_COMPLETE();
+    return TRUE;
+}
+
+/*
+ * OLScrollListViewOriginChanged: the update complete if it can be; while
+ * the mouse extends the selection of a dynamic list, extended to where
+ * the pointer is now
+ */
+@method OLScrollListClass, MSG_META_CONTENT_VIEW_ORIGIN_CHANGED
+{
+    sword x, y;
+    XYValueAsDWord p;
+    WindowHandle win;
+
+    (void) viewWindow;
+    (void) yOrigin;
+    (void) xOrigin;
+    (void) SendUpdateCompleteIfAllItemsInteractable(oself);
+    if (!(ImGetButtonState() & BI_B0_DOWN))
+	return;
+    if (!(SL(oself)->OLIGI_state & OLIGS_DYNAMIC) ||
+	!CheckIfExtendingSelection(oself))
+	return;
+    win = SL(oself)->VCI_window;
+    ImGetMousePos(&x, &y);
+    if (win) {
+	p = WinUntransform(win, x, y);
+	x = DWORD_X(p);
+	y = DWORD_Y(p);
+    }
+    @call oself::MSG_OL_IGROUP_EXTEND_SELECTION(x, y, FALSE);
+}
+
+/*
+ * OLScrollListItemChangedInteractableState: the items not yet
+ * interactable counted, the topmost and bottommost of them noted; when
+ * all are again, the update is complete and a dynamic list redraws them
+ */
+@method OLScrollListClass, MSG_OL_IGROUP_NOTIFY_ITEM_CHANGED_INTERACTABLE_STATE
+{
+    word *last;
+
+    if (!interactable) {
+	pself->OLSLI_nonInteractables++;
+	if (pself->OLSLI_topInvalidItem > position)
+	    pself->OLSLI_topInvalidItem = position;
+	if ((sword) pself->OLSLI_bottomInvalidItem < (sword) position)
+	    pself->OLSLI_bottomInvalidItem = position;
+	return;
+    }
+    pself->OLSLI_nonInteractables--;
+    if (!SendUpdateCompleteIfAllItemsInteractable(oself) ||
+	!(SL(oself)->OLIGI_state & OLIGS_DYNAMIC))
+	return;
+    last = ObjVarAddData(oself, TEMP_OL_ITEM_GROUP_LAST_ITEM_TO_REDRAW,
+			 sizeof(word));
+    *last = SL(oself)->OLSLI_bottomInvalidItem;
+    @call oself::MSG_GEN_ITEM_GROUP_REDRAW_ITEMS(
+				SL(oself)->OLSLI_topInvalidItem);
+    (void) ObjVarDeleteData(oself, TEMP_OL_ITEM_GROUP_LAST_ITEM_TO_REDRAW);
+}
+
+/* OLScrollListRedrawItems: no item left invalid when all are
+ * interactable */
+@method OLScrollListClass, MSG_GEN_ITEM_GROUP_REDRAW_ITEMS
+{
+    if (!pself->OLSLI_nonInteractables) {
+	pself->OLSLI_topInvalidItem = 0xffff;
+	pself->OLSLI_bottomInvalidItem = 0xffff;
+    }
+    @callsuper();
+}
+
+/*
+ * OLScrollListNumItemsChanged: the document as long as the lines of
+ * items (by the wrap count) and as wide as the view
+ */
+@method OLScrollListClass, MSG_GEN_DYNAMIC_LIST_NUM_ITEMS_CHANGED
+{
+    word wrap, lines, w, h;
+    sdword len;
+    optr view;
+
+    if (!pself->VCI_window)
+	return;
+    wrap = GetWrapCount(oself);
+    lines = (word) (numItems / wrap + (numItems % wrap ? 1 : 0));
+    len = (sdword) lines * SL(oself)->OLSLI_itemLength;
+    GetViewWinSize(oself, &w, &h);
+    view = View(oself);
+    if (!view)
+	return;
+    if (VERTICAL(oself))
+	@call view::MSG_GEN_VIEW_SET_DOC_BOUNDS(len, w, 0, 0);
+    else
+	@call view::MSG_GEN_VIEW_SET_DOC_BOUNDS(h, len, 0, 0);
+}
+
+/* OLScrollListReselectExcl: a popup list leaving intermediate mode has
+ * its view drag scroll */
+@method OLScrollListClass, MSG_OL_IGROUP_RESELECT_EXCL
+{
+    optr view;
+
+    if (!(pself->OLIGI_state & OLIGS_INTERMEDIATE) &&
+	VisQueryWindow(oself) &&
+	(SL(oself)->OLIGI_moreState & OLIGMS_POPUP_LIST) &&
+	(view = View(oself)) != 0)
+	@call view::MSG_SPEC_VIEW_FORCE_INITIATE_DRAG_SCROLL();
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Keys, the focus, enabled, the moniker
+ * ------------------------------------------------------------------- */
+
+static const KeyboardShortcut slistKeys[] = {
+    (KS_CHAR_SET_CONTROL << 8) | VC_PREVIOUS,
+    (KS_CHAR_SET_CONTROL << 8) | VC_NEXT,
+};
+static const Message slistMsgs[] = {
+    MSG_OL_SLIST_PAGE_UP, MSG_OL_SLIST_PAGE_DOWN,
+};
+
+/* the page keys page (on a press); TRUE if one was */
+static Boolean PageKey(optr o, word character, word flags, word state)
+{
+    Message m;
+
+    if ((flags & (CF_STATE_KEY | CF_TEMP_ACCENT)) ||
+	!(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)))
+	return FALSE;
+    m = ConvertKeyToMethod(slistKeys, slistMsgs,
+			   sizeof(slistKeys) / sizeof(slistKeys[0]),
+			   character, flags, state);
+    if (m == MSG_OL_SLIST_PAGE_UP)
+	@call o::MSG_OL_SLIST_PAGE_UP();
+    else if (m == MSG_OL_SLIST_PAGE_DOWN)
+	@call o::MSG_OL_SLIST_PAGE_DOWN();
+    else
+	return FALSE;
+    return TRUE;
+}
+
+@method OLScrollListClass, MSG_META_KBD_CHAR
+{
+    if (!PageKey(oself, character, flags, state))
+	@callsuper();
+}
+
+@method OLScrollListClass, MSG_META_FUP_KBD_CHAR
+{
+    if (PageKey(oself, character, flags, state))
+	return TRUE;
+    return @callsuper();
+}
+
+/* OLScrollListPageUp, OLScrollListPageDown: a view's worth of items
+ * back or on (less one) */
+@method OLScrollListClass, MSG_OL_SLIST_PAGE_UP
+{
+    OLItemGroupSetUserCommon(oself, 0, 0,
+			     (word) (pself->OLSLI_numVisibleItems - 1));
+}
+
+@method OLScrollListClass, MSG_OL_SLIST_PAGE_DOWN
+{
+    OLItemGroupSetUserCommon(oself, GSIF_FORWARD, 0,
+			     (word) (pself->OLSLI_numVisibleItems - 1));
+}
+
+/* OLScrollListGrabFocusExcl: the list, then its view */
+@method OLScrollListClass, MSG_META_GRAB_FOCUS_EXCL
+{
+    optr view;
+
+    MetaGrabFocusExclLow(oself);
+    if ((view = View(oself)) != 0)
+	MetaGrabFocusExclLow(view);
+}
+
+/* OLScrollListNotifyEnabled, ...NotEnabled: the group's; if that
+ * changed something the view is enabled (not enabled) as well */
+static Boolean FinishNotify(optr o, Boolean changed, Boolean enable,
+			    byte updateMode, byte flags)
+{
+    optr view;
+
+    if (!changed || !(view = View(o)))
+	return changed;
+    if (enable) {
+	@call view::MSG_GEN_SET_ENABLED(updateMode);
+	(void) @call view::MSG_GEN_NOTIFY_ENABLED(updateMode, flags);
+    } else {
+	@call view::MSG_GEN_SET_NOT_ENABLED(updateMode);
+	(void) @call view::MSG_GEN_NOTIFY_NOT_ENABLED(updateMode, flags);
+    }
+    return TRUE;
+}
+
+@method OLScrollListClass, MSG_SPEC_NOTIFY_ENABLED
+{
+    return FinishNotify(oself, @callsuper(), TRUE, updateMode, flags);
+}
+
+@method OLScrollListClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    return FinishNotify(oself, @callsuper(), FALSE, updateMode, flags);
+}
+
+/* OLScrollListUpdateVisMoniker: the list's moniker is the view's */
+@method OLScrollListClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    ChunkHandle m = ((GenInstance *) ObjDerefGen(oself))->GI_visMoniker;
+    optr view = View(oself);
+
+    (void) oldMonikerWidth;
+    (void) oldMonikerHeight;
+    if (!view)
+	return;
+    if (m)
+	(void) @call view::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(
+			ConstructOptr(OptrToHandle(oself), m), updateMode);
+    else
+	@call view::MSG_GEN_USE_VIS_MONIKER(0, updateMode);
+}

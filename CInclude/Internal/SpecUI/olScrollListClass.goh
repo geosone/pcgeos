@@ -1,0 +1,51 @@
+/*
+ * olScrollListClass.goh -- OLScrollListClass, the specific UI's
+ * scrolling list: an item group in a view of its own (after
+ * Include/Internal/SpecUI/olScrollListClass.def), and
+ * OLScrollableItemClass (olScrollableItemClass.def), its items, for
+ * Port32.
+ *
+ * Motif: no grid lines and spacing, lists not linked, no notice of
+ * scrolling out of bounds (SCROLL_LIST_GRID_LINES_AND_SPACING,
+ * SCROLL_LISTS_CAN_BE_LINKED, SCROLL_LIST_NOTIFY_ON_SCROLL_OUT_OF_BOUNDS
+ * are FALSE); USE_REDRAW_ITEMS_OPTIMIZATION is TRUE.
+ */
+#ifndef __OLSCROLLLISTCLASS_GOH
+#define __OLSCROLLLISTCLASS_GOH
+
+@include <Internal/SpecUI/olItemGroupClass.goh>
+@include <Internal/SpecUI/olItemClass.goh>
+@include <Objects/gDListC.goh>
+
+@deflib motif
+
+/* OLScrollListAttrs */
+typedef ByteFlags OLScrollListAttrs;
+#define OLSLA_VERTICAL		0x80	/* the items scroll vertically */
+
+@class OLScrollListClass, OLItemGroupClass;
+@uses GenItemGroupClass, GenDynamicListClass;
+
+@message void MSG_OL_SLIST_PAGE_UP();
+@message void MSG_OL_SLIST_PAGE_DOWN();
+/* the size of an item: the content's width (by the wrap count) and the
+ * item length, vertically; the other way round horizontally */
+@message SizeAsDWord MSG_OL_SLIST_RECALC_ITEM_SIZE();
+
+    @instance OLScrollListAttrs	OLSLI_attrs = 0;
+    @instance word		OLSLI_numVisibleItems = 0;
+    @instance word		OLSLI_itemLength = 0;
+    @instance word		OLSLI_topItem = 0;
+    @instance ChunkHandle	OLSLI_view = 0;
+    @instance word		OLSLI_nonInteractables = 0;
+    @instance word		OLSLI_topInvalidItem = 0;
+    @instance word		OLSLI_bottomInvalidItem = 0;
+@endc;
+
+@class OLScrollableItemClass, OLItemClass;
+@uses GenItemClass;
+@endc;
+
+@endlib
+
+#endif

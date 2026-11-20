@@ -1,25 +1,27 @@
 /*
  * cspecItem.goc -- the build routines of the item groups and their
  * items (after cspecItem.asm): a GenItemGroup, GenBooleanGroup or
- * GenDynamicList is an OLItemGroup; an item of a non exclusive group (a
+ * GenDynamicList is an OLItemGroup, with HINT_ITEM_GROUP_SCROLLABLE
+ * (HINT_BOOLEAN_GROUP_SCROLLABLE) an OLScrollList; an item of a
+ * scrolling list is an OLScrollableItem, of a non exclusive group (a
  * boolean) an OLCheckedItem, else an OLItem.
- *
- * Port32 (Port32/ABI.md section 13y), not yet: scrolling lists
- * (HINT_ITEM_GROUP_SCROLLABLE, HINT_BOOLEAN_GROUP_SCROLLABLE:
- * OLScrollListClass, OLScrollableItemClass); they are plain groups.
  */
 @include "CItem/citemInt.goh"
 
 ClassStruct *OLBuildItemGroup(optr oself, word masterOffset)
 {
-    (void) oself;
     (void) masterOffset;
+    if (ObjVarFindData(oself, HINT_ITEM_GROUP_SCROLLABLE))
+	return (ClassStruct *) &OLScrollListClass;
     return (ClassStruct *) &OLItemGroupClass;
 }
 
 ClassStruct *OLBuildBooleanGroup(optr oself, word masterOffset)
 {
-    return OLBuildItemGroup(oself, masterOffset);
+    (void) masterOffset;
+    if (ObjVarFindData(oself, HINT_BOOLEAN_GROUP_SCROLLABLE))
+	return (ClassStruct *) &OLScrollListClass;
+    return (ClassStruct *) &OLItemGroupClass;
 }
 
 ClassStruct *OLBuildDynamicList(optr oself, word masterOffset)
@@ -33,6 +35,8 @@ ClassStruct *OLBuildItem(optr oself, word masterOffset)
 
     (void) masterOffset;
     (void) OLItemGetParentState(oself, &ps);
+    if (ps.PS_state & OLIGS_SCROLLABLE)
+	return (ClassStruct *) &OLScrollableItemClass;
     if (ps.PS_behavior == GIGBT_NON_EXCLUSIVE)
 	return (ClassStruct *) &OLCheckedItemClass;
     return (ClassStruct *) &OLItemClass;

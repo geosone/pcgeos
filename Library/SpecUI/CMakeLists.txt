@@ -41,6 +41,8 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CItem/citemItemCommon.goc
                ${c}/CItem/citemItemColor.goc
                ${c}/CItem/citemCheckedItem.goc
+               ${c}/CItem/citemScrollList.goc
+               ${c}/CItem/citemScrollableItem.goc
                ${c}/CButton/copenMenuButton.goc
                ${c}/CComp/copenMenuBar.goc
                ${c}/CWin/cwinMenu.goc

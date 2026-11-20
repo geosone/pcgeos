@@ -8,6 +8,8 @@
  */
 @include "cGeode.goh"
 @include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Objects/gViewC.goh>
+@include <Objects/gContC.goh>
 
 /* OpenGetLineBounds: the bounds of the object for drawing lines: the
  * right and bottom one pixel in */
@@ -691,6 +693,132 @@ optr OpenCreateChildObject(MemHandle block, optr parent, ClassStruct *class,
     if (usable)
 	((GenInstance *) ObjDerefGen(o))->GI_states |= GS_USABLE;
     return o;
+}
+
+/*
+ * OpenCreateNewParentObject: a new generic object of the class in the
+ * object's block (not dirtied), to become its parent: the object's
+ * generic hints (HINT_TOOLBOX dropped) and a copy of its moniker
+ */
+optr OpenCreateNewParentObject(optr o, ClassStruct *class)
+{
+    optr parent = ObjInstantiate(OptrToHandle(o), class);
+    ChunkHandle mkr;
+
+    ObjSetFlags(parent, OCF_IGNORE_DIRTY, 0);
+    ObjInitializePart(parent, word_offsetof(GenBase, Gen_offset));
+    ObjVarCopyDataRange(o, parent, HINT_DUMMY, ATTR_GEN_TEXT_STATUS_MSG - 1);
+    (void) ObjVarDeleteData(parent, HINT_TOOLBOX);
+    mkr = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
+    if (mkr)
+	(void) @call parent::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(
+			ConstructOptr(OptrToHandle(o), mkr), VUM_MANUAL);
+    return parent;
+}
+
+/*
+ * OpenBuildNewParentObject: the new parent (OpenCreateNewParentObject)
+ * enabled and targetable as the object; for a view a new GenContent
+ * (as wide as the view, usable) is its content, the object at its
+ * origin and as wide as the document.  Unless the object is built the
+ * parent is added to the object's generic parent after it, usable, the
+ * object visually under it (or the content), the parent built; then
+ * the parent keeps only its upward link.
+ */
+void OpenBuildNewParentObject(optr o, optr parent, SpecBuildFlags flags,
+			      Boolean view)
+{
+    GenInstance *g, *pg;
+    optr content = 0, gp;
+    Rectangle b;
+    word pos;
+
+    g = (GenInstance *) ObjDerefGen(o);
+    pg = (GenInstance *) ObjDerefGen(parent);
+    if (!(g->GI_states & GS_ENABLED))
+	pg->GI_states &= ~GS_ENABLED;
+    pg->GI_attrs &= ~GA_TARGETABLE;
+    pg->GI_attrs |= g->GI_attrs & GA_TARGETABLE;
+    if (view) {
+	GenViewInstance *v;
+
+	content = ObjInstantiate(OptrToHandle(o),
+				 (ClassStruct *) &GenContentClass);
+	ObjSetFlags(content, OCF_IGNORE_DIRTY, 0);
+	ObjInitializePart(content, word_offsetof(GenBase, Gen_offset));
+	ObjInitializePart(content, word_offsetof(VisBase, Vis_offset));
+	ObjInitializePart(parent, word_offsetof(VisBase, Vis_offset));
+	VisSetPosition(o, 0, 0);
+	v = (GenViewInstance *) ObjDerefGen(parent);
+	v->GVI_content = content;
+	VisMarkFullyInvalid(o);
+	VisGetBounds(o, &b);
+	v = (GenViewInstance *) ObjDerefGen(parent);
+	v->GVI_docBounds.RD_right = (word) (b.R_right - b.R_left) > SSS_DATA
+				    ? SSS_DATA : (word) (b.R_right - b.R_left);
+	((GenInstance *) ObjDerefGen(content))->GI_states |= GS_USABLE;
+	((VisContentInstance *) ObjDerefVis(content))->VCNI_attrs |=
+	    VCNA_SAME_WIDTH_AS_VIEW;
+    }
+    if (VisCheckIfSpecBuilt(o))
+	return;
+    gp = GenFindParent(o);
+    if (!gp)
+	return;
+    pos = @call gp::MSG_GEN_FIND_CHILD(o);
+    @call gp::MSG_GEN_ADD_CHILD(parent, (CompChildFlags) (pos + 1));
+    ((GenInstance *) ObjDerefGen(parent))->GI_states |= GS_USABLE;
+    if (VisCheckIfSpecBuilt(view ? content : parent))
+	return;
+    if (view)
+	@call content::MSG_VIS_ADD_CHILD(o, CCO_LAST);
+    else
+	@call parent::MSG_VIS_ADD_CHILD(o, CCO_LAST);
+    @call parent::MSG_SPEC_BUILD_BRANCH(flags);
+    GenRemoveDownwardLink(OptrToHandle(parent), OptrToChunk(parent), 0);
+}
+
+/*
+ * OpenDestroyGenericBranch: brought down without updating the parent,
+ * the moniker kept out of it unless keepMoniker, destroyed
+ */
+void OpenDestroyGenericBranch(optr o, Boolean keepMoniker)
+{
+    if (!o || !OptrToChunk(o))
+	return;
+    ((GenInstance *) ObjDerefGen(o))->GI_states &= ~GS_USABLE;
+    @call o::MSG_SPEC_SET_NOT_USABLE(VUM_MANUAL);
+    if (!keepMoniker)
+	((GenInstance *) ObjDerefGen(o))->GI_visMoniker = 0;
+    @call o::MSG_GEN_DESTROY(VUM_NOW, 0);
+}
+
+/*
+ * OpenUnbuildCreatedParent: the object out of its created parent (a
+ * view: with its content), which is destroyed (not when only the
+ * visual parent unbuilds); visually under its generic parent again,
+ * without a size, and removed with the update mode of flags
+ */
+void OpenUnbuildCreatedParent(optr o, optr parent, SpecBuildFlags flags,
+			      Boolean view, Boolean keepMoniker)
+{
+    optr gp;
+
+    VisRemove(o, VUM_MANUAL);
+    if (!(flags & SBF_VIS_PARENT_UNBUILDING) && parent) {
+	if (view) {
+	    optr content = @call parent::MSG_GEN_VIEW_GET_CONTENT();
+
+	    OpenDestroyGenericBranch(parent, keepMoniker);
+	    parent = content;
+	}
+	OpenDestroyGenericBranch(parent, keepMoniker);
+    }
+    gp = GenFindParent(o);
+    if (gp)
+	@call gp::MSG_VIS_ADD_CHILD(o, CCO_LAST);
+    VisSetSize(o, 0, 0);
+    VisRemove(o, (VisUpdateMode) (flags & SBF_UPDATE_MODE));
 }
 
 /*

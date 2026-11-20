@@ -388,12 +388,13 @@ static void SetNoneSelectedAndWraparoundState(optr o,
 }
 
 /*
- * OLItemGroupSetUserCommon: the item next to the focus item (from the
- * start without one): an exclusive group selects it (the anchor of a
- * list), an extending list extends to it, else (non exclusive, read
- * only, add mode) the focus moves to it
+ * OLItemGroupSetUserCommon: the item amount items from the focus item
+ * (from the start without one): an exclusive group selects it (the
+ * anchor of a list), an extending list extends to it, else (non
+ * exclusive, read only, add mode) the focus moves to it
  */
-static void SetUserCommon(optr o, GenScanItemsFlags flags, word kbdFlags)
+void OLItemGroupSetUserCommon(optr o, GenScanItemsFlags flags,
+			      word kbdFlags, word amount)
 {
     word id = 0, nid;
     optr item;
@@ -401,7 +402,7 @@ static void SetUserCommon(optr o, GenScanItemsFlags flags, word kbdFlags)
     if (!GetFocusItem(o, &id))
 	flags |= GSIF_FROM_START;
     SetNoneSelectedAndWraparoundState(o, &flags, kbdFlags);
-    if (!ScanItems(o, flags, id, 1, &nid, &item))
+    if (!ScanItems(o, flags, id, (sword) amount, &nid, &item))
 	return;
     if (item)
 	OLItemGroupAbortAllUserInteraction(o);
@@ -423,22 +424,24 @@ static void SetUserCommon(optr o, GenScanItemsFlags flags, word kbdFlags)
 
 @extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_NEXT
 {
-    SetUserCommon(oself, GSIF_FORWARD | GSIF_WRAP_AROUND, kbdFlags);
+    OLItemGroupSetUserCommon(oself, GSIF_FORWARD | GSIF_WRAP_AROUND,
+			     kbdFlags, 1);
 }
 
 @extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_PREVIOUS
 {
-    SetUserCommon(oself, GSIF_WRAP_AROUND, kbdFlags);
+    OLItemGroupSetUserCommon(oself, GSIF_WRAP_AROUND, kbdFlags, 1);
 }
 
 @extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_START
 {
-    SetUserCommon(oself, GSIF_FORWARD | GSIF_FROM_START, kbdFlags);
+    OLItemGroupSetUserCommon(oself, GSIF_FORWARD | GSIF_FROM_START,
+			     kbdFlags, 1);
 }
 
 @extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_END
 {
-    SetUserCommon(oself, GSIF_FROM_START, kbdFlags);
+    OLItemGroupSetUserCommon(oself, GSIF_FROM_START, kbdFlags, 1);
 }
 
 /*

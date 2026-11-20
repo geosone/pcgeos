@@ -165,6 +165,8 @@ export UserGetDefaultMonikerFont
 export UserSendToApplicationViaProcess
 export UserGetKbdAcceleratorMode
 export VisGetSpecificVisObject
+export GenSetupTrackingArgs
+export GenReturnTrackingArgs
 
 resource ApplicationUI object
 resource SystemFieldUI object

@@ -5476,9 +5476,7 @@ are left out), the constants, the variables and the routines.
     `ObjInstantiate`d (no `GenInstantiateIgnoreDirty`), its place found
     with `MSG_GEN_FIND_CHILD`.
     Not yet: popup lists in dialogs (`MSG_SPEC_POPUP_LIST_CANCEL`) and
-    in a view, the selection box, scrolling
-    lists (`OLScrollListClass`, `OLScrollableItemClass`: built as plain
-    groups), dynamic lists' items, tabs, the black and white look, the
+    in a view, the selection box, dynamic lists' items, tabs, the black and white look, the
     focus on a text object, `ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS`,
     the stay up menus released by a selection.
   - **The scrollbar** (`CView/cviewScrollbar.goc`,
@@ -5547,6 +5545,28 @@ are left out), the constants, the variables and the routines.
     the focus is kept in it and, with `HINT_CONTENT_KEEP_FOCUS_VISIBLE`,
     in view; generic objects below are built in it. Its default focus
     broadcast asks its visual children only.
+  - **The scrolling list** (`CItem/citemScrollList.goc`,
+    `citemScrollableItem.goc`; `Internal/SpecUI/olScrollListClass.goh`):
+    with `HINT_ITEM_GROUP_SCROLLABLE` (`HINT_BOOLEAN_GROUP_SCROLLABLE`)
+    `OLBuildItemGroup` (`OLBuildBooleanGroup`) makes the group an
+    `OLScrollListClass`, its items `OLScrollableItemClass`
+    (`OLIGS_SCROLLABLE`). When built the list makes a GenView of its own
+    in its place (`OpenCreateNewParentObject`, `OpenBuildNewParentObject`
+    in `CUtils/copenUtils.goc`, shared with the popup lists; the view
+    gets the list's moniker and its GenContent the list as the only
+    visual child): generic contents, track and drag scrolling, all keys.
+    The list's size hints go to the view; without them it is as wide as
+    the widest item and five items long (halved while longer than 400
+    points). The view scrolls by an item along the list and its size is
+    a multiple of one; `MSG_META_CONTENT_TRACK_SCROLLING` puts the
+    origin on an item's edge (`GenSetupTrackingArgs`,
+    `GenReturnTrackingArgs`, now in the UI) and gives the top item. The
+    items are as wide as the content and an item length high
+    (`MSG_OL_SLIST_RECALC_ITEM_SIZE`), drawn as rows with the moniker at
+    the left; the selected one in the selection's colors. The page keys
+    move a view's worth less one (`OLItemGroupSetUserCommon` with an
+    amount). Not yet: popup scrolling lists, the dynamic list's side
+    (the messages are sent, `GenDynamicListClass` is still asm only).
 - **Port32 changes in the C API.**
   - `WinOpen` and `WinChangePriority` take the layer as a `Handle` (a
     word cut 32-bit handles); `WinOpen`'s colorFlags is the

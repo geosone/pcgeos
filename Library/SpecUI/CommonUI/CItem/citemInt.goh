@@ -2,15 +2,15 @@
  * citemInt.goh -- the item module of the specific UI in C (after
  * citemConstant.def, citemMacro.def and the procedures the files of
  * CItem share): OLItemGroupClass (an item group or boolean group),
- * OLItemClass (its items, buttons with a state) and OLCheckedItemClass
- * (the check box of a non exclusive group).
+ * OLItemClass (its items, buttons with a state), OLCheckedItemClass
+ * (the check box of a non exclusive group), OLScrollListClass (a
+ * scrolling list, in a view of its own) and OLScrollableItemClass (its
+ * items).
  *
  * Motif: the diamond and the check box in color, no selection boxes, no
- * Legos looks.  Port32 (Port32/ABI.md section 13y), not yet: popup
- * lists (HINT_ITEM_GROUP_MINIMIZE_SIZE), scrolling lists
- * (OLScrollListClass, OLScrollableItemClass), dynamic lists
- * (GenDynamicListClass), tabs (HINT_ITEM_GROUP_TAB_STYLE), the black and
- * white look (drawn in color).
+ * Legos looks.  Port32 (Port32/ABI.md section 13y), not yet: dynamic
+ * lists (GenDynamicListClass), tabs (HINT_ITEM_GROUP_TAB_STYLE), the
+ * black and white look (drawn in color).
  */
 #ifndef __CITEMINT_GOH
 #define __CITEMINT_GOH
@@ -19,6 +19,7 @@
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olItemGroupClass.goh>
 @include <Internal/SpecUI/olItemClass.goh>
+@include <Internal/SpecUI/olScrollListClass.goh>
 
 /* citemConstant.def, Motif */
 #define CHECK_HEIGHT		9
@@ -43,6 +44,11 @@
 #define SCROLL_ITEM_INSET_X	2
 #define MO_SCROLL_ITEM_INSET_Y	1
 #define MO_SCROLL_ITEM_INSET_X	SCROLL_ITEM_INSET_X
+#define MO_SCROLL_POPUP_ITEM_EXTRA_SPACE 2
+#define CUAS_SCROLL_ITEM_MIN_WIDTH	6
+#define SLIST_DEFAULT_ITEMS_SHOWN	5
+#define CGA_SLIST_DEFAULT_ITEMS_SHOWN	5
+#define SLIST_MAXIMUM_DEFAULT_SIZE	400
 
 /* the "behavior" of SetupSelectionMsg past GenItemGroupBehaviorType */
 #define SSMBT_NON_EXCLUSIVE_ALWAYS_TOGGLE	(GIGBT_NON_EXCLUSIVE + 1)
@@ -52,6 +58,7 @@
 #define BGG(o)	((GenBooleanGroupInstance *) ObjDerefGen(o))
 #define Item(o)	((OLItemInstance *) ObjDerefVis(o))
 #define ItemG(o) ((GenItemInstance *) ObjDerefGen(o))
+#define SL(o)	((OLScrollListInstance *) ObjDerefVis(o))
 
 /* ---------------------------------------------------------------------
  * The item group (citemItemGroupClass.goc, citemItemGroupVeryCommon.goc,
@@ -142,5 +149,17 @@ extern void UpdateItemState(optr o);
 /* the box of a check box or diamond in the item's bounds */
 extern void GetCheckboxBounds(optr o, Rectangle *r);
 extern void ItemDrawColorItem(optr o, GStateHandle gs, DrawFlags df);
+
+/* ---------------------------------------------------------------------
+ * The scrolling list (citemScrollList.goc, citemScrollableItem.goc)
+ * ------------------------------------------------------------------- */
+
+/* the group's selection or focus moved by amount items (a page) */
+extern void OLItemGroupSetUserCommon(optr o, GenScanItemsFlags flags,
+				     word kbdFlags, word amount);
+/* the wrap count of a list that wraps after a count of children, else
+ * 1; a value multiplied by it */
+extern word GetWrapCount(optr o);
+extern word MultByWrapCount(optr o, word v);
 
 #endif

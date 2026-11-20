@@ -145,30 +145,16 @@ static void CopyHintIfSpecified(optr o, optr parent, word hint, word size)
 void MakePopupListIfNeeded(optr o, SpecBuildFlags flags)
 {
     GenInstance *g, *pg;
-    optr parent, gp;
-    ChunkHandle mkr;
-    word pos;
+    optr parent;
 
     if (!ObjVarFindData(o, HINT_ITEM_GROUP_MINIMIZE_SIZE) &&
 	(!OpenCheckIfVerticalScreen() ||
 	 !ObjVarFindData(o, HINT_ITEM_GROUP_MINIMIZE_SIZE_IF_VERTICAL_SCREEN)))
 	return;
-    if (VisCheckIfSpecBuilt(o))
+    if (VisCheckIfSpecBuilt(o) || !GenFindParent(o))
 	return;
-    gp = GenFindParent(o);
-    if (!gp)
-	return;
-
-    /* OpenCreateNewParentObject */
-    parent = ObjInstantiate(OptrToHandle(o),
-			    (ClassStruct *) &GenInteractionClass);
-    ObjInitializePart(parent, word_offsetof(GenBase, Gen_offset));
-    ObjVarCopyDataRange(o, parent, HINT_DUMMY, ATTR_GEN_TEXT_STATUS_MSG - 1);
-    (void) ObjVarDeleteData(parent, HINT_TOOLBOX);
-    mkr = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
-    if (mkr)
-	(void) @call parent::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(
-			ConstructOptr(OptrToHandle(o), mkr), VUM_MANUAL);
+    parent = OpenCreateNewParentObject(o,
+				       (ClassStruct *) &GenInteractionClass);
     g = (GenInstance *) ObjDerefGen(o);
     pg = (GenInstance *) ObjDerefGen(parent);
     pg->GI_kbdAccelerator = g->GI_kbdAccelerator;
@@ -176,20 +162,7 @@ void MakePopupListIfNeeded(optr o, SpecBuildFlags flags)
     (void) ObjVarAddData(parent, HINT_IS_POPUP_LIST, 0);
     CopyHintIfSpecified(o, parent, HINT_CAN_CLIP_MONIKER_WIDTH, 0);
     CopyHintIfSpecified(o, parent, HINT_GADGET_TEXT_COLOR, 2);
-
-    /* OpenBuildNewParentObject (no view) */
-    g = (GenInstance *) ObjDerefGen(o);
-    pg = (GenInstance *) ObjDerefGen(parent);
-    if (!(g->GI_states & GS_ENABLED))
-	pg->GI_states &= ~GS_ENABLED;
-    pg->GI_attrs &= ~GA_TARGETABLE;
-    pg->GI_attrs |= g->GI_attrs & GA_TARGETABLE;
-    pos = @call gp::MSG_GEN_FIND_CHILD(o);
-    @call gp::MSG_GEN_ADD_CHILD(parent, (CompChildFlags) (pos + 1));
-    ((GenInstance *) ObjDerefGen(parent))->GI_states |= GS_USABLE;
-    @call parent::MSG_VIS_ADD_CHILD(o, CCO_LAST);
-    @call parent::MSG_SPEC_BUILD_BRANCH(flags);
-    GenRemoveDownwardLink(OptrToHandle(parent), OptrToChunk(parent), 0);
+    OpenBuildNewParentObject(o, parent, flags, FALSE);
 
     IG(o)->OLIGI_moreState |= OLIGMS_POPUP_LIST;
     if (IsExtendedSelection(o) || IsNonExclusive(o) ||

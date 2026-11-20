@@ -29,6 +29,7 @@
 @include <Objects/gBoolC.goh>
 @include <Internal/SpecUI/olItemGroupClass.goh>
 @include <Internal/SpecUI/olItemClass.goh>
+@include <Internal/SpecUI/olScrollListClass.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Internal/SpecUI/olPaneClass.goh>
 @include <Internal/SpecUI/olContentClass.goh>
@@ -69,6 +70,9 @@ typedef struct {
     word		UBS_scrollDrag;
     /* the view's page (width, height) and window size */
     sword		UBS_view[4];
+    /* the scrolling list's item length, items shown, view window size
+     * and the top item after paging down */
+    sword		UBS_slist[5];
 } UBState;
 
 UBState ubState;
@@ -184,7 +188,8 @@ UBState ubState;
 }
 @object GenDisplayClass UBDoc2 = {
     GI_visMoniker = "Doc 2";
-    GI_comp = @UBRadio, @UBChecks, @UBSize, @UBScroll, @UBView, @UBView2;
+    GI_comp = @UBRadio, @UBChecks, @UBSize, @UBScroll, @UBView, @UBView2,
+	      @UBSList;
 }
 /* in Doc 2: a view of a 2000 x 300 document that scrolls both ways
  * (its window fixed at 200 x 40: the screens of the tests differ) */
@@ -313,6 +318,24 @@ UBState ubState;
 @object GenBooleanClass UBBool4 = {
     GBI_identifier = 4;
 }
+/* in Doc 2: a scrolling list of eight items (five shown), the third
+ * selected */
+@object GenItemGroupClass UBSList = {
+    GI_visMoniker = "Fonts";
+    GI_comp = @UBSL0, @UBSL1, @UBSL2, @UBSL3, @UBSL4, @UBSL5, @UBSL6,
+	      @UBSL7;
+    GIGI_selection = 2;
+    GIGI_numSelections = 1;
+    HINT_ITEM_GROUP_SCROLLABLE;
+}
+@object GenItemClass UBSL0 = { GI_visMoniker = "Berkeley"; GII_identifier = 0; }
+@object GenItemClass UBSL1 = { GI_visMoniker = "Roma"; GII_identifier = 1; }
+@object GenItemClass UBSL2 = { GI_visMoniker = "Sans"; GII_identifier = 2; }
+@object GenItemClass UBSL3 = { GI_visMoniker = "Mono"; GII_identifier = 3; }
+@object GenItemClass UBSL4 = { GI_visMoniker = "Script"; GII_identifier = 4; }
+@object GenItemClass UBSL5 = { GI_visMoniker = "Symbol"; GII_identifier = 5; }
+@object GenItemClass UBSL6 = { GI_visMoniker = "Bison"; GII_identifier = 6; }
+@object GenItemClass UBSL7 = { GI_visMoniker = "Unix"; GII_identifier = 7; }
 @end UBAppObjects;
 
 @method UBProcessClass, MSG_UB_ITEMS_APPLIED
@@ -1546,6 +1569,58 @@ static Rectangle ScreenBounds(WindowHandle w)
 	    UBCHECK(VisCheckIfSpecBuilt(@UBInside) &&
 		    @call UBInside::MSG_VIS_FIND_PARENT() == @UBGContent);
 	}
+	break;
+    }
+    case 36: {
+	/* the scrolling list: in a view of its own (the list's moniker),
+	 * as the only child of the view's content; its items as wide as
+	 * the content, five of them shown; page down moves the selection
+	 * four items on and scrolls it into view */
+	OLScrollListInstance l;
+	VisContentInstance c;
+	OLPaneInstance p;
+	GenViewInstance g;
+	optr view, content;
+	Rectangle r0, r1;
+
+	UBCHECK(InClass(@UBSList, (ClassStruct *) &OLScrollListClass));
+	UBCHECK(InClass(@UBSL0, (ClassStruct *) &OLScrollableItemClass));
+	VisData(@UBSList, &l, sizeof(l));
+	UBCHECK(l.OLSLI_view != 0 && (l.OLSLI_attrs & OLSLA_VERTICAL));
+	view = ConstructOptr(OptrToHandle(@UBSList), l.OLSLI_view);
+	UBCHECK(InClass(view, (ClassStruct *) &OLPaneClass));
+	content = @call UBSList::MSG_VIS_FIND_PARENT();
+	UBCHECK(InClass(content, (ClassStruct *) &OLContentClass));
+	VisData(view, &p, sizeof(p));
+	VisData(content, &c, sizeof(c));
+	UBCHECK(p.OLPI_window && c.VCNI_window == p.OLPI_window);
+	UBCHECK(l.OLSLI_itemLength > 0 && l.OLSLI_numVisibleItems == 5);
+	UBCHECK(c.VCNI_viewHeight == 5 * l.OLSLI_itemLength);
+	r0 = Bounds(@UBSL0);
+	r1 = Bounds(@UBSL1);
+	UBCHECK(r1.R_top == r0.R_bottom &&
+		r0.R_bottom - r0.R_top == l.OLSLI_itemLength);
+	UBCHECK(r0.R_right - r0.R_left == c.VCNI_viewWidth);
+	UBCHECK(@call UBSList::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 2);
+	@call UBSList::MSG_OL_SLIST_PAGE_DOWN();
+	UBCHECK(@call UBSList::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 6);
+	VisData(@UBSList, &l, sizeof(l));
+	UBCHECK(l.OLSLI_topItem > 1 && l.OLSLI_topItem <= 6);
+	ubState.UBS_slist[0] = l.OLSLI_itemLength;
+	ubState.UBS_slist[1] = l.OLSLI_numVisibleItems;
+	ubState.UBS_slist[2] = c.VCNI_viewWidth;
+	ubState.UBS_slist[3] = c.VCNI_viewHeight;
+	ubState.UBS_slist[4] = l.OLSLI_topItem;
+	/* (the content hears of the new origin later, from the queue) */
+	ObjLockObjBlock(OptrToHandle(view));
+	g = *(GenViewInstance *) ObjDerefGen(view);
+	MemUnlock(OptrToHandle(view));
+	UBCHECK(g.GVI_origin.PDF_y.DWF_int ==
+		(sdword) l.OLSLI_topItem * l.OLSLI_itemLength);
+	@call UBSList::MSG_OL_SLIST_PAGE_UP();
+	UBCHECK(@call UBSList::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 2);
+	VisData(@UBSList, &l, sizeof(l));
+	UBCHECK(l.OLSLI_topItem <= 2);
 	break;
     }
     }

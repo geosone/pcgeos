@@ -631,6 +631,15 @@ extern optr OpenCreateChildObject(MemHandle block, optr parent,
 				  ClassStruct *class, word hint,
 				  Boolean usable, Boolean oneWay,
 				  CompChildFlags flags);
+/* copenUtils.goc: a new parent for an object (a popup, a view with a
+ * content), built around it, and taken down again */
+extern optr OpenCreateNewParentObject(optr o, ClassStruct *class);
+extern void OpenBuildNewParentObject(optr o, optr parent,
+				     SpecBuildFlags flags, Boolean view);
+extern void OpenDestroyGenericBranch(optr o, Boolean keepMoniker);
+extern void OpenUnbuildCreatedParent(optr o, optr parent,
+				     SpecBuildFlags flags, Boolean view,
+				     Boolean keepMoniker);
 extern Boolean OLQueryIsMenu(optr o);
 extern void OpenSendSpecBuildBranch(optr o, SpecBuildFlags flags);
 extern void OLPopupDismiss(optr o);

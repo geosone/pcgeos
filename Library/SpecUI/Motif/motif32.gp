@@ -103,3 +103,5 @@ export OLDisplayWinClass
 export OLScrollbarClass
 export OLPaneClass
 export OLContentClass
+export OLScrollListClass
+export OLScrollableItemClass

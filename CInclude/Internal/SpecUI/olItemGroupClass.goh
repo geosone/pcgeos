@@ -97,8 +97,9 @@ typedef ByteFlags OLItemUpdateFlags;
 					     word initial);
 @message void MSG_OL_IGROUP_END_EXTENDED_SELECTION(word uiFuncs);
 @message void MSG_OL_IGROUP_SET_MODIFIED_AND_APPLY_IF_NEEDED(word flags);
+/* position: the item's among the group's generic children */
 @message void MSG_OL_IGROUP_NOTIFY_ITEM_CHANGED_INTERACTABLE_STATE(
-				word interactable);
+				word interactable, word position);
 
     @vardata word TEMP_OL_ITEM_GROUP_NAVIGATE_IF_DISABLED_ITEM;
     @vardata word TEMP_OL_ITEM_GROUP_LAST_ITEM_TO_REDRAW;

@@ -347,4 +347,10 @@ typedef struct {
     @reloc ATTR_GEN_VIEW_INK_DESTINATION_INFO, IDIP_dest, optr;
 @endc
 
+/* Port32: a GVA_TRACK_SCROLLING view's content (in its handler of
+ * MSG_META_CONTENT_TRACK_SCROLLING) has the view fill in the arguments,
+ * then gives them back, changed as it wants the scroll */
+extern void GenSetupTrackingArgs(TrackScrollingParams *args);
+extern void GenReturnTrackingArgs(TrackScrollingParams *args);
+
 @endlib
