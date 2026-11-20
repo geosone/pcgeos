@@ -2294,6 +2294,7 @@ aliasLine  	:
 		curMessage->data.symMessage.firstParam = $10;
 		curMessage->data.symMessage.returnType = TDS_CTYPE($6);
 		curMessage->data.symMessage.mpd = currentMPD;
+		curMessage->data.symMessage.aliasOf = $3;
 		/* 
 		 * We can't output this in an enum, because there is no class,
 		 * as this is just an alias. Luckily though, we know the name 

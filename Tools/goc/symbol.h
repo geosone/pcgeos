@@ -500,6 +500,7 @@ typedef struct _Symbol {
 	    MessageParam *firstParam;	    	/* List of parameters */
 	    char *returnType;	    	    	/* Return type */
 	    struct _Symbol *protoMinor;         /* Active protoMinor */
+	    struct _Symbol *aliasOf;		/* @alias: the message */
 	} symMessage;
 
 	/* Exported messages symbol (EXPORT_SYM) */

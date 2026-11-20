@@ -1248,24 +1248,77 @@ GccOutputDest(ObjDest *od)
     Output("GOCR_RESOLVE(%s)", DEST(od));
 }
 
+/*
+ * An @alias returning one word register of the dword its message returns
+ * (MSG_GEN_VALUE_GET_INTEGER_VALUE = dx of MSG_GEN_VALUE_GET_VALUE's
+ * dx.cx): the method writes the dword, so the reply buffer is the
+ * message's type and the word is taken from it.  The shift of that word
+ * (0 or 16), -1 if the alias returns what its message does.
+ */
+static int
+GccAliasShift(Symbol *msg, char *baseRt)
+{
+    static const int dwordReg[] = { 8, 9, 10, 11 };	/* MRBWT_AX ... BP */
+    Symbol *base;
+    int amp, bmp, reg;
+
+    if (msg == NullSymbol || msg->data.symMessage.aliasOf == NullSymbol) {
+	return -1;
+    }
+    base = msg->data.symMessage.aliasOf;
+    amp = msg->data.symMessage.mpd;
+    bmp = base->data.symMessage.mpd;
+    if (((amp & MPD_RETURN_TYPE) >> MPD_RETURN_TYPE_OFFSET) !=
+	    MRT_BYTE_OR_WORD ||
+	((bmp & MPD_RETURN_TYPE) >> MPD_RETURN_TYPE_OFFSET) != MRT_DWORD)
+    {
+	return -1;
+    }
+    reg = (amp & MPD_RET_WORD_REG) >> MPD_RET_WORD_OFFSET;
+    GccTrim(baseRt, base->data.symMessage.returnType);
+    if (reg == dwordReg[(bmp & MPD_RET_DWORD_HIGH) >>
+			MPD_RET_DWORD_HIGH_OFFSET]) {
+	return 16;
+    }
+    if (reg == dwordReg[(bmp & MPD_RET_DWORD_LOW) >>
+			MPD_RET_DWORD_LOW_OFFSET]) {
+	return 0;
+    }
+    return -1;
+}
+
 /* @send, @call, @record (also to @children) */
 void
 OutputGccMessage(MsgInvocType mit, Symbol *passMsg, Symbol *retMsg,
 		 ObjDest *od, char *args, int flags, char *msgOut)
 {
-    char rt[256], st[2048];
+    char rt[256], st[2048], brt[256];
+    int shift = -1;
 
     GccReplyType(rt, mit, retMsg, HAS_CHILDREN(od));
     GccParamStruct(st, passMsg);
+    if (strcmp(rt, "void") != 0 && strcmp(rt, "EventHandle") != 0) {
+	shift = GccAliasShift(retMsg, brt);
+    }
     if (HAS_CHILDREN(od)) {
 	Output("CObjSendToChildren(oself, ");
     }
-    GccOutputReplyStart(rt);
+    if (shift >= 0) {
+	Output("((%s) (", rt);
+	GccOutputReplyStart(brt);
+    } else {
+	GccOutputReplyStart(rt);
+    }
     Output("CObjMessageP(0x%x, ", flags);
     GccOutputDest(od);
     Output(", (Message) %s, ", msgOut);
     GccOutputParams(st, args, TRUE);
-    GccOutputReplyEnd(rt);
+    if (shift >= 0) {
+	GccOutputReplyEnd(brt);
+	Output(" >> %d))", shift);
+    } else {
+	GccOutputReplyEnd(rt);
+    }
     if (HAS_CHILDREN(od)) {
 	Output(", %s)", OBJ_CHILDREN(od));
     }

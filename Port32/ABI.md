@@ -1842,6 +1842,12 @@ Aliases (`@alias`) have parameters of their own, and the method gets
 the parameters of whichever alias the sender used. A method handles
 the alias it expects (`@method X, MSG_META_QUIT_OBJECT`). `@callsuper()`
 passes the parameters of the message the method was declared for.
+An alias that returns one word register of the dword its message
+returns (`MSG_GEN_VALUE_GET_INTEGER_VALUE() = dx` of
+`MSG_GEN_VALUE_GET_VALUE() = dx.cx`) gets the message's reply buffer
+from goc -cg, since the method writes the whole dword; the alias's
+word is the high half (the register of `MPD_RET_DWORD_HIGH`) or the
+low half (`Tools/goc/output.c`, `GccAliasShift`).
 
 ctest `kernel.obj` (with `Goc/kobj.goc`) covers:
 

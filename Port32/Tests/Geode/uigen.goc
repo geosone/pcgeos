@@ -526,6 +526,8 @@ static Boolean MonikerIs(optr o, const char *text)
 	@call v::MSG_GEN_VALUE_SET_INCREMENT(MakeWWFixed(5));
 	@call v::MSG_GEN_VALUE_DECREMENT();
 	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 95);
+	/* the alias: the integer word of the dword (goc -cg) */
+	UGCHECK(@call v::MSG_GEN_VALUE_GET_INTEGER_VALUE() == 95);
 	@call v::MSG_GEN_VALUE_INCREMENT();
 	@call v::MSG_GEN_VALUE_INCREMENT();
 	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 100);

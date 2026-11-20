@@ -4785,6 +4785,7 @@ yyreduce:
 		curMessage->data.symMessage.firstParam = (yyvsp[-4].param);
 		curMessage->data.symMessage.returnType = TDS_CTYPE((yyvsp[-8].tdecl));
 		curMessage->data.symMessage.mpd = currentMPD;
+		curMessage->data.symMessage.aliasOf = (yyvsp[-11].sym);
 		/* 
 		 * We can't output this in an enum, because there is no class,
 		 * as this is just an alias. Luckily though, we know the name 
