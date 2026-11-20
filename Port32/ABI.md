@@ -5509,8 +5509,44 @@ are left out), the constants, the variables and the routines.
     color is `C_WHITE` (Motif's `C_LIGHT_GREY` is overwritten).
     Not yet: `OLValueClass` (the spin gadget with its text) and
     `OLSliderClass` (every value is a scrollbar until then), floating
-    scrollers, CGA's wider bar, the pane (`OLPaneClass`) that places the
-    scrollers of a view.
+    scrollers, CGA's wider bar.
+  - **The view** (`CView/cviewPane.goc`, `cviewPaneGeometry.goc`,
+    `cviewPaneScroll.goc`, `cviewPaneWindow.goc`,
+    `CSpec/cspecPane.goc`; `Internal/SpecUI/olPaneClass.goh`):
+    `OLBuildPane` makes a GenView an `OLPaneClass` (an OLCtrl with a
+    window of its own). Its generic children and the scrollbars it makes
+    for scrollable dimensions (`OpenAddScrollbar`: a GenValue with
+    `HINT_VALUE_X_SCROLLER` or `_Y_`, its values document coordinates,
+    its range length the page) go into the areas left, above, right of
+    and below the window (`MSG_GEN_FIND_VIEW_RANGES`,
+    `MSG_GEN_QUERY_VIEW_AREA`, `HINT_SEEK_*_OF_VIEW`; a second object in
+    an area puts both into an OLCtrl). The window gets what the view is
+    given less the areas (a scrollbar margin apart; the window and areas
+    sized in turns, at most 8 passes), within the size hints and the
+    dimension attributes; the page is its size in document units. Every
+    scroll comes to `OLPaneScroll` as a change of the origin: kept in
+    the document, asked of a tracking content first
+    (`MSG_META_CONTENT_TRACK_SCROLLING`, answered with
+    `MSG_GEN_VIEW_TRACKING_COMPLETE`), then the window scrolled
+    (`WinScroll`, a large move as a new translation), the content told
+    (`MSG_META_CONTENT_VIEW_ORIGIN_CHANGED`, queued) and the scrollbars
+    set; a tail oriented dimension at its end stays there. The window is
+    opened suspended (input to the pane, exposures to the content) until
+    the content has its origin. Mouse events in the window go to the
+    content (queued, in document coordinates unless
+    `GVA_WINDOW_COORDINATE_MOUSE_EVENTS`; pointer events combined), the
+    mouse held from a press to the release; the keys page and scroll.
+    GenView passes `MSG_GEN_ADD_CHILD` and `MSG_GEN_REMOVE_CHILD` to the
+    specific UI before GenClass (as the asm). Not yet: linked views,
+    scaling beyond the scale passed to the window and the content (scale
+    to fit), drag scrolling, panning, ink, floating scrollers.
+  - **The content** (`CComp/copenContent.goc`, `CSpec/cspecContent.goc`;
+    `Internal/SpecUI/olContentClass.goh`): `OLBuildContent` makes a
+    GenContent an `OLContentClass` (a VisContent whose visual parent is
+    the view, as big as its window); the navigation keys navigate in it,
+    the focus is kept in it and, with `HINT_CONTENT_KEEP_FOCUS_VISIBLE`,
+    in view; generic objects below are built in it. Its default focus
+    broadcast asks its visual children only.
 - **Port32 changes in the C API.**
   - `WinOpen` and `WinChangePriority` take the layer as a `Handle` (a
     word cut 32-bit handles); `WinOpen`'s colorFlags is the
@@ -5535,7 +5571,11 @@ are left out), the constants, the variables and the routines.
   - The UI exports `UserGetFlowObject`, `UserGetSystemObject`,
     `UserSetDefaultMonikerFont`, `UserGetDefaultMonikerFont`,
     `UserSendToApplicationViaProcess` and `UserGetKbdAcceleratorMode`
-    (`genC.goh`).
+    (`genC.goh`), and `VisGetSpecificVisObject` (`visC.goh`).
+  - `MSG_GEN_FIND_VIEW_RANGES(GenFindViewRangesParams *params)` passes
+    the areas and ranges found so far in and out in the structure
+    (`genC.goh`); `MSG_GEN_VIEW_CALC_WIN_SIZE` returns the size it is
+    given; `SF_KBD_RELATED_SCROLL` is in `gViewC.goh`.
   - `MSG_TIMER_EXPIRED(dword tick, word timerID)` is a MetaUI message
     (`olApplicationClass.goh`) with the parameters every event timer
     sends; `MSG_OL_APP_GET_IMPLIED_WIN` answers a `MouseGrab`;

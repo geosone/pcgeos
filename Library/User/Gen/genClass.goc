@@ -1405,3 +1405,100 @@ static Boolean GetAttrString(optr oself, Message msg, word attr, char *buf)
     @send ,forceQueue oself::MSG_META_BLOCK_FREE();
     return TRUE;
 }
+
+/* ---------------------------------------------------------------------
+ * The place of an object under a view (genClassBuild.asm)
+ * ------------------------------------------------------------------- */
+
+static void _pascal ReturnAreaHint(MemHandle mh, ChunkHandle ch,
+				   VarDataEntry *e, word dataType,
+				   void *data)
+{
+    (void) mh;
+    (void) ch;
+    (void) e;
+    /* HINT_SEEK_X_SCROLLER_AREA, _Y_ ... LEFT_OF_VIEW ... BOTTOM_OF_VIEW
+     * are four apart, the scroller areas below the left one */
+    *(RequestedViewArea *) data = (RequestedViewArea) (RVA_LEFT_AREA +
+	((sword) (dataType & ~VDF_SAVE_TO_STATE) -
+	 (sword) HINT_SEEK_LEFT_OF_VIEW) / 4);
+}
+
+static const VarDataCHandler areaHints[] = {
+    { HINT_SEEK_LEFT_OF_VIEW, ReturnAreaHint },
+    { HINT_SEEK_TOP_OF_VIEW, ReturnAreaHint },
+    { HINT_SEEK_RIGHT_OF_VIEW, ReturnAreaHint },
+    { HINT_SEEK_BOTTOM_OF_VIEW, ReturnAreaHint },
+    { HINT_SEEK_X_SCROLLER_AREA, ReturnAreaHint },
+    { HINT_SEEK_Y_SCROLLER_AREA, ReturnAreaHint }
+};
+
+/* GetViewAreaRequest: the area the hints ask for (RVA_NO_AREA_CHOICE if
+ * none) */
+RequestedViewArea GetViewAreaRequest(optr obj)
+{
+    RequestedViewArea a = RVA_NO_AREA_CHOICE;
+
+    ObjVarScanData(obj, sizeof(areaHints) / sizeof(areaHints[0]),
+		   (VarDataCHandler *) areaHints, &a);
+    return a;
+}
+
+/* GetUnambiguousViewAreaRequest: the same, but no choice for just
+ * wanting to be with a scroller (used to place the scrollers) */
+RequestedViewArea GetUnambiguousViewAreaRequest(optr obj)
+{
+    RequestedViewArea a = GetViewAreaRequest(obj);
+
+    return (a == RVA_X_SCROLLER_AREA || a == RVA_Y_SCROLLER_AREA) ?
+	   RVA_NO_AREA_CHOICE : a;
+}
+
+static Boolean FindViewRangesCallback(optr parent, optr child, void *data)
+{
+    (void) parent;
+    @call child::MSG_GEN_FIND_VIEW_RANGES(data);
+    return FALSE;
+}
+
+/*
+ * GenFindViewRanges: the scrollbars at or below a usable object (the
+ * children asked in turn); a scrollbar found below takes this object's
+ * area hint if it had none
+ */
+@method GenClass, MSG_GEN_FIND_VIEW_RANGES
+{
+    ChunkHandle h = params->GFVRP_hRange, v = params->GFVRP_vRange;
+    RequestedViewArea a;
+
+    if (!(pself->GI_states & GS_USABLE))
+	return;
+    GenCallChildren(oself, FindViewRangesCallback, params);
+    a = GetUnambiguousViewAreaRequest(oself);
+    if (!h && params->GFVRP_hRange &&
+	params->GFVRP_hViewArea == RVA_NO_AREA_CHOICE)
+	params->GFVRP_hViewArea = a;
+    if (!v && params->GFVRP_vRange &&
+	params->GFVRP_vViewArea == RVA_NO_AREA_CHOICE)
+	params->GFVRP_vViewArea = a;
+}
+
+static Boolean QueryViewAreaCallback(optr parent, optr child, void *data)
+{
+    (void) parent;
+    *(RequestedViewArea *) data =
+	@call child::MSG_GEN_QUERY_VIEW_AREA(*(RequestedViewArea *) data);
+    return FALSE;
+}
+
+/* GenQueryViewArea: where the object wants to be under a view: its own
+ * hint, else the first choice of its children */
+@method GenClass, MSG_GEN_QUERY_VIEW_AREA
+{
+    if (viewArea != RVA_NO_AREA_CHOICE)
+	return viewArea;
+    viewArea = GetViewAreaRequest(oself);
+    if (viewArea == RVA_NO_AREA_CHOICE)
+	GenCallChildren(oself, QueryViewAreaCallback, &viewArea);
+    return viewArea;
+}

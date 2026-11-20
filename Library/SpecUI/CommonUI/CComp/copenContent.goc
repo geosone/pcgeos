@@ -1,0 +1,347 @@
+/*
+ * copenContent.goc -- OLContentClass, the specific UI's GenContent (after
+ * copenContent.asm): a VisContent whose visual parent is the view (the
+ * pane), that fills the view's window, passes the keyboard's navigation
+ * keys on as navigation, keeps the focus in itself and (with
+ * HINT_CONTENT_KEEP_FOCUS_VISIBLE) in view.
+ *
+ * Port32 (Port32/ABI.md section 13y): the default focus broadcast asks
+ * the visual children only (composites do not pass it on yet); not yet:
+ * a scrollable item with the focus made visible by its list
+ * (OLScrollableItemClass, MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE).
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olContentClass.goh>
+
+@classdecl OLContentClass, neverSaved;
+
+#define CVis(o)	((OLContentInstance *) ObjDerefVis(o))
+#define CGen(o)	((GenContentInstance *) ObjDerefGen(o))
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+/* MSG_OL_VUP_MAKE_APPLYABLE goes up to the view */
+@method OLContentClass, MSG_OL_VUP_MAKE_APPLYABLE
+{
+    (void) VisCallParent(oself, message, NULL, 0, NULL, 0);
+}
+
+@method OLContentClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+/* MSG_VUP_GET_BUILD_FLAGS: the view's */
+@method OLContentClass, MSG_VUP_GET_BUILD_FLAGS
+{
+    optr p = VisFindParent(oself);
+
+    return p ? @call p::MSG_VUP_GET_BUILD_FLAGS(flags) : FALSE;
+}
+
+/* OLContentInitialize: the generic attributes the content's; to be sized
+ * and given a window */
+@method OLContentClass, MSG_META_INITIALIZE
+{
+    byte a = CGen(oself)->GCI_attrs;
+
+    CVis(oself)->VCNI_attrs = a;
+    @callsuper();
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID | VOF_WINDOW_INVALID,
+		   VUM_MANUAL);
+}
+
+/* OLContentScanGeometryHints: as big as the view's window; draws only
+ * its children */
+static void ContentGeometryHints(optr oself)
+{
+    OLContentInstance *c = CVis(oself);
+
+    c->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+				VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+    c->VCI_geoAttrs |= VCGA_ONLY_DRAWS_IN_MARGINS;
+}
+
+@method OLContentClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    ContentGeometryHints(oself);
+}
+
+/* OLContentSpecBuild: the view is the visual parent (a parent link) */
+@method OLContentClass, MSG_SPEC_BUILD
+{
+    (void) flags;
+    pself->VI_link.LP_next = pself->VCNI_view | 1;
+    ContentGeometryHints(oself);
+}
+
+/* OLContentSetView: the view is the generic parent too, if none */
+@method OLContentClass, MSG_META_CONTENT_SET_VIEW
+{
+    GenContentInstance *g = CGen(oself);
+
+    g->GCI_genView = view;
+    ObjMarkDirty(oself);
+    if (!CGen(oself)->GI_link.LP_next)
+	GenSetUpwardLink(OptrToHandle(oself), OptrToChunk(oself), view);
+    @callsuper();
+}
+
+/* OLContentGupQuery: generic objects below are built in the content */
+@method OLContentClass, MSG_SPEC_P32_GUP_QUERY
+{
+    if (queryType != SGQT_BUILD_INFO)
+	return @callsuper();
+    retValue->GRP_cx = OptrToHandle(oself);
+    retValue->GRP_dx = OptrToChunk(oself);
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * Scrolling
+ * ------------------------------------------------------------------- */
+
+/* OLContentTrackScrolling: to the target, else the first generic child */
+@method OLContentClass, MSG_META_CONTENT_TRACK_SCROLLING
+{
+    optr t = pself->VCNI_targetExcl.FTVMC_OD;
+
+    if (!t)
+	t = CGen(oself)->GI_comp.CP_firstChild;
+    if (!t) {
+	@callsuper();
+	return;
+    }
+    @call t::MSG_META_CONTENT_TRACK_SCROLLING(args);
+}
+
+/*
+ * EnsureObjectOnscreen: a realized object asked to the view to be made
+ * visible (ahead of other messages)
+ */
+static void EnsureObjectOnscreen(optr oself, optr obj)
+{
+    Rectangle b;
+    optr view;
+
+    if (!obj || !OptrToChunk(obj))
+	return;
+    if (!(@call obj::MSG_VIS_GET_ATTRS() & VA_REALIZED))
+	return;
+    @call obj::MSG_VIS_GET_BOUNDS(&b);
+    view = CVis(oself)->VCNI_view;
+    if (!OptrToChunk(view))
+	return;
+    @send ,forceQueue,insertAtFront view::MSG_GEN_VIEW_MAKE_RECT_VISIBLE(
+		0, 0, 0, 0, b.R_bottom, b.R_right, b.R_top, b.R_left);
+}
+
+static void KeepFocusVisible(optr oself)
+{
+    if (ObjVarFindData(oself, HINT_CONTENT_KEEP_FOCUS_VISIBLE))
+	EnsureObjectOnscreen(oself, CVis(oself)->VCNI_focusExcl.FTVMC_OD);
+}
+
+@method OLContentClass, MSG_VIS_UPDATE_GEOMETRY
+{
+    @callsuper();
+    KeepFocusVisible(oself);
+}
+
+/* OLContentViewOriginChanged: the first child told too (unless the
+ * document is large: its objects know the origin themselves) */
+@method OLContentClass, MSG_META_CONTENT_VIEW_ORIGIN_CHANGED
+{
+    optr c;
+
+    @callsuper();
+    if (!(CVis(oself)->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL) &&
+	(c = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(0)) != 0)
+	@call c::MSG_META_CONTENT_VIEW_ORIGIN_CHANGED(viewWindow, yOrigin,
+						      xOrigin);
+    KeepFocusVisible(oself);
+}
+
+@method OLContentClass, MSG_META_CONTENT_VIEW_WIN_OPENED
+{
+    optr c;
+
+    @callsuper();
+    if (!(CVis(oself)->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL) &&
+	(c = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(0)) != 0)
+	@call c::MSG_META_CONTENT_VIEW_WIN_OPENED(viewWidth, viewHeight,
+						  viewWindow);
+    KeepFocusVisible(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The focus and navigation
+ * ------------------------------------------------------------------- */
+
+#define KEY(k)		((KS_CHAR_SET_CONTROL << 8) | (k))
+
+/* the keys that navigate: Tab (with Shift backwards, with Ctrl too) and
+ * the arrows */
+static const KeyboardShortcut contentKeys[] = {
+    KS_PHYSICAL | KEY(VC_TAB),
+    KS_PHYSICAL | KS_SHIFT | KEY(VC_TAB),
+    KS_PHYSICAL | KS_CTRL | KEY(VC_TAB),
+    KS_PHYSICAL | KS_CTRL | KS_SHIFT | KEY(VC_TAB),
+    KS_PHYSICAL | KEY(VC_DOWN),
+    KS_PHYSICAL | KEY(VC_UP),
+    KS_PHYSICAL | KEY(VC_RIGHT),
+    KS_PHYSICAL | KEY(VC_LEFT),
+};
+static const Message contentMsgs[] = {
+    MSG_GEN_NAVIGATE_TO_NEXT_FIELD, MSG_GEN_NAVIGATE_TO_PREVIOUS_FIELD,
+    MSG_GEN_NAVIGATE_TO_NEXT_FIELD, MSG_GEN_NAVIGATE_TO_PREVIOUS_FIELD,
+    MSG_GEN_NAVIGATE_TO_NEXT_FIELD, MSG_GEN_NAVIGATE_TO_PREVIOUS_FIELD,
+    MSG_GEN_NAVIGATE_TO_NEXT_FIELD, MSG_GEN_NAVIGATE_TO_PREVIOUS_FIELD,
+};
+
+/* OLContentFupKbdChar: the navigation keys navigate; the rest up */
+@method OLContentClass, MSG_META_FUP_KBD_CHAR
+{
+    Message m = 0;
+    optr p;
+
+    if (!(flags & (CF_STATE_KEY | CF_TEMP_ACCENT)) &&
+	(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)))
+	m = ConvertKeyToMethod(contentKeys, contentMsgs, 8, character,
+			       flags, state);
+    if (m) {
+	CObjMessageP(MF_CALL, oself, m, NULL, 0, NULL, 0);
+	return TRUE;
+    }
+    p = VisFindParent(oself);
+    return p ? @call p::MSG_META_FUP_KBD_CHAR(character, flags, state)
+	     : FALSE;
+}
+
+/*
+ * OLContentNavigateCommon: the navigation query from the focus (skipping
+ * it) or the content; the object found gets the focus; the content
+ * itself or none: the focus released, FALSE (not handled here)
+ */
+static Boolean ContentNavigateCommon(optr oself, NavigationFlags nf)
+{
+    optr focus = CVis(oself)->VCNI_focusExcl.FTVMC_OD, found;
+
+    nf |= NF_SKIP_NODE | NF_INITIATE_QUERY;
+    if (!focus) {
+	focus = oself;
+	nf &= ~NF_SKIP_NODE;
+    }
+    found = @call focus::MSG_SPEC_NAVIGATE(nf);
+    if (!found || found == oself) {
+	optr cur = CVis(oself)->VCNI_focusExcl.FTVMC_OD;
+
+	if (cur)
+	    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(cur, MAEF_FOCUS);
+	return FALSE;
+    }
+    if (found != CVis(oself)->VCNI_focusExcl.FTVMC_OD)
+	@call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(found,
+						   MAEF_GRAB | MAEF_FOCUS);
+    return TRUE;
+}
+
+/* OLContentApplyDefaultFocus: the default focus, else the first field
+ * (if there is no focus yet) */
+@method OLContentClass, MSG_META_CONTENT_APPLY_DEFAULT_FOCUS
+{
+    optr f;
+
+    if (pself->VCNI_focusExcl.FTVMC_OD)
+	return;
+    f = @call oself::MSG_GEN_START_BROADCAST_FOR_DEFAULT_FOCUS();
+    if (f)
+	@call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(f, MAEF_GRAB | MAEF_FOCUS);
+    else
+	(void) ContentNavigateCommon(oself, 0);
+}
+
+/* OLContentStartBroadcastForDefaultFocus: the first visual child with
+ * HINT_DEFAULT_FOCUS */
+@method OLContentClass, MSG_SPEC_START_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    ObjectAndGrabParams q;
+    optr c;
+    word i;
+
+    memset(&q, 0, sizeof(q));
+    for (i = 0; (c = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++) {
+	@call c::MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS(&q);
+	if (q.OAGP_object)
+	    break;
+    }
+    return q.OAGP_object;
+}
+
+/* OLContentNavigate: the root of the content's navigation; it answers
+ * itself when skipped (the navigation leaves the content) */
+@method OLContentClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    if (!(navFlags & NF_BACKTRACK_AFTER_TRAVELING) &&
+	(navFlags & NF_SKIP_NODE)) {
+	memset(retValue, 0, sizeof(*retValue));
+	retValue->NQP_navFlags = navFlags;
+	retValue->NQP_nextObject = oself;
+	return TRUE;
+    }
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags,
+			     NCF_IS_COMPOSITE | NCF_IS_ROOT_NODE, 0);
+}
+
+/* OLContentInitialNavigate: the view passes the navigation in: the
+ * object found gets the focus */
+@method OLContentClass, MSG_META_CONTENT_NAVIGATION_QUERY
+{
+    optr found;
+
+    (void) queryOrigin;
+    found = @call oself::MSG_SPEC_NAVIGATE((navFlags & ~NF_SKIP_NODE) |
+					   NF_INITIATE_QUERY);
+    if (found && found != oself)
+	@call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(found,
+						   MAEF_GRAB | MAEF_FOCUS);
+}
+
+@method OLContentClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD,
+		       MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD
+{
+    NavigationFlags nf = message == MSG_SPEC_NAVIGATE_TO_NEXT_FIELD ? 0 :
+			 NF_TRAVEL_CIRCUIT | NF_BACKTRACK_AFTER_TRAVELING;
+
+    if (!ContentNavigateCommon(oself, nf))
+	(void) VisCallParent(oself, message, NULL, 0, NULL, 0);
+}
+
+/* OLContentVupQuery: the focus within the content */
+@method OLContentClass, MSG_VIS_P32_VUP_QUERY
+{
+    if (queryType != SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL)
+	return @callsuper();
+    if (retValue) {
+	optr f = pself->VCNI_focusExcl.FTVMC_OD;
+
+	memset(retValue, 0, sizeof(*retValue));
+	retValue->GRP_cx = OptrToHandle(f);
+	retValue->GRP_dx = OptrToChunk(f);
+	retValue->GRP_bp = (pself->VCNI_focusExcl.FTVMC_flags & HGF_APP_EXCL)
+			   ? TRUE : FALSE;
+    }
+    return TRUE;
+}
+
+/* OLContentMupAlterFTVMCExcl: a new focus kept visible */
+@method OLContentClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    @callsuper();
+    if ((flags & (MAEF_FOCUS | MAEF_GRAB)) == (MAEF_FOCUS | MAEF_GRAB))
+	KeepFocusVisible(oself);
+}

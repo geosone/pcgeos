@@ -318,6 +318,33 @@ extern void VisOpenNotifyCommon(optr obj);
 /* the keyboard: none or the floating one (CheckIfKeyboardRequired),
  * no mouse (OpenCheckIfKeyboardOnly) */
 extern Boolean CheckIfKeyboardRequired(void);
+/* the arguments of a view's or list's scrollbar (OpenAddScrollbar,
+ * OpenSetScrollbarAttrs): the message sent when scrolled, vertical,
+ * the range, the value and the increment (dwords of the document as
+ * the GenValue's numbers) */
+typedef struct {
+    Message		OSA_actionMsg;
+    Boolean		OSA_vertical;
+    WWFixedAsDWord	OSA_minimum;
+    WWFixedAsDWord	OSA_maximum;
+    WWFixedAsDWord	OSA_value;
+    WWFixedAsDWord	OSA_increment;
+} OpenScrollbarArgs;
+extern void OpenSetScrollbarAttrs(optr sb, optr parent, Boolean creating,
+				  const OpenScrollbarArgs *a);
+extern optr OpenAddScrollbar(optr parent, word hint, Boolean dirty,
+			     Boolean immediateDrag,
+			     const OpenScrollbarArgs *a);
+/* OLCOF_CANT_OVERLAP_KIDS on the OLCtrls above, to the window group */
+extern void SpecSetFlagsOnAllCtrlParents(optr obj);
+/* the area color of an inset frame set; its colors for OpenDrawRect */
+extern word OpenSetInsetRectColors(GStateHandle gs);
+/* a key for the UI rather than the focus (Alt, F10, shortcuts) */
+extern Boolean SpecCheckIfSpecialUIChar(word c, word flags, word state);
+/* the message beside the key's shortcut in the table; 0 if none */
+extern Message ConvertKeyToMethod(const KeyboardShortcut *keys,
+				  const Message *msgs, word count, word c,
+				  word flags, word state);
 extern Boolean OpenCheckIfKeyboardOnly(void);
 /* OLMonikerAttrs (cConstant.def): how OpenDrawMoniker draws */
 typedef WordFlags OLMonikerAttrs;

@@ -41,16 +41,18 @@ export OLBuildApplication
 export OLBuildField
 export OLBuildScreen
 export OLBuildSystem
-# OLBuildPane
-skip 1
+export OLBuildPane
 export OLBuildInteraction
 # OLBuildGlyphDisplay, OLBuildText
 skip 2
 export OLBuildDisplayControl
 export OLBuildPrimary
-# OLBuildGadget, OLBuildContent, OLBuildUIDocumentControl,
-# OLBuildAppDocumentControl, OLBuildDocument, OLBuildFileSelector
-skip 6
+# OLBuildGadget
+skip 1
+export OLBuildContent
+# OLBuildUIDocumentControl, OLBuildAppDocumentControl, OLBuildDocument,
+# OLBuildFileSelector
+skip 4
 export OLBuildBooleanGroup
 export OLBuildItemGroup
 export OLBuildDynamicList
@@ -99,3 +101,5 @@ export OLWinGlyphDisplayClass
 export OLDisplayGroupClass
 export OLDisplayWinClass
 export OLScrollbarClass
+export OLPaneClass
+export OLContentClass

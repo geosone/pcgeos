@@ -1,0 +1,636 @@
+/*
+ * cviewPaneGeometry.goc -- the geometry of OLPaneClass (after
+ * cviewPaneGeometry.asm).  The view's window gets the size the view is
+ * given less its areas (left, above, right of and below the window, a
+ * scrollbar margin apart); the areas are as wide or high as the window.
+ * Sizing the areas changes the window's size, so the window and the
+ * areas are sized in turns until the size holds
+ * (VIEW_MAX_GEOMETRY_PASSES).  The window's size keeps to the hints and
+ * the dimension attributes (no smaller or larger than the document, a
+ * multiple of the increment, the aspect ratio); scrollbars that are not
+ * needed may be taken away.  The window's size in document coordinates
+ * (the page) is the scrollbars' range length.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: scale to fit
+ * (GVA_SCALE_TO_FIT).
+ */
+@include "CView/cviewInt.goh"
+
+/* ---------------------------------------------------------------------
+ * The window's place
+ * ------------------------------------------------------------------- */
+
+/* GetFrameWidth: one pixel, none with GVA_NO_WIN_FRAME */
+word GetFrameWidth(optr oself)
+{
+    return (PGen(oself)->GVI_attrs & GVA_NO_WIN_FRAME) ? 0 : 1;
+}
+
+/* AddMarginToAx: the space between the window and an area (none on CGA,
+ * where the frames meet, unless the window has no frame) */
+static sword AddMargin(optr oself, sword v)
+{
+    sword m = OpenCheckIfCGA() ? CGA_SCROLLBAR_MARGIN : SCROLLBAR_MARGIN;
+
+    if (m < 0 && (PGen(oself)->GVI_attrs & GVA_NO_WIN_FRAME))
+	return v;
+    return v + m;
+}
+
+/* GetSpecAndEnsureManaged: the area's built and managed object, 0 if
+ * none */
+static optr AreaObject(optr oself, PaneArea area)
+{
+    ChunkHandle c = PVis(oself)->OLPI_areaObj[area];
+    optr s;
+
+    if (!c)
+	return 0;
+    s = VisGetSpecificVisObject(ConstructOptr(OptrToHandle(oself), c), 0);
+    if (!s || !VisCheckIfSpecBuilt(s) ||
+	!(((VisInstance *) ObjDerefVis(s))->VI_attrs & VA_MANAGED))
+	return 0;
+    return s;
+}
+
+/* GetAreaDimension: the area's width or height (0 if empty) */
+static sword AreaDimension(optr oself, PaneArea area, Boolean height)
+{
+    optr s = AreaObject(oself, area);
+    SizeAsDWord sz;
+
+    if (!s)
+	return 0;
+    sz = VisGetSize(s);
+    return (sword) (height ? DWORD_HEIGHT(sz) : DWORD_WIDTH(sz));
+}
+
+/* GetAreaAndMargin: with the margin if not empty */
+static sword AreaAndMargin(optr oself, PaneArea area, Boolean height)
+{
+    sword d = AreaDimension(oself, area, height);
+
+    return d ? AddMargin(oself, d) : 0;
+}
+
+/* GetWinLeftTop: inside the margins, right of the left area, below the
+ * top one */
+void GetWinLeftTop(optr oself, sword *x, sword *y)
+{
+    Rectangle r;
+
+    VisGetBoundsInsideMargins(oself, &r);
+    *y = r.R_top + AreaAndMargin(oself, PA_TOP, TRUE);
+    *x = r.R_left + AreaAndMargin(oself, PA_LEFT, FALSE);
+}
+
+void GetPaneWinBounds(optr oself, Rectangle *r)
+{
+    sword x, y;
+    word f = GetFrameWidth(oself);
+
+    GetWinLeftTop(oself, &x, &y);
+    r->R_left = x + f;
+    r->R_top = y + f;
+    r->R_right = r->R_left + PVis(oself)->OLPI_winWidth - 1;
+    r->R_bottom = r->R_top + PVis(oself)->OLPI_winHeight - 1;
+}
+
+void GetFrameBounds(optr oself, Rectangle *r)
+{
+    word f = GetFrameWidth(oself);
+
+    GetPaneWinBounds(oself, r);
+    r->R_left -= f;
+    r->R_top -= f;
+    r->R_right += f;
+    r->R_bottom += f;
+}
+
+/* ---------------------------------------------------------------------
+ * The size
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    sword	totalWidth, totalHeight;	/* passed (negative: own) */
+    sword	winWidth, winHeight;		/* with the frame */
+} PaneSizes;
+
+/* LookupOpenSize: the size the hints give the window (FALSE: none) */
+static Boolean LookupOpenSize(optr oself, sword *w, sword *h)
+{
+    SpecSizeArgs a;
+
+    VisSetupSizeArgs(oself, &a);
+    *w = a.SSA_initWidth;
+    *h = a.SSA_initHeight;
+    return *w && *h;
+}
+
+/* ChooseInitialWinSize: the window's size so far (the hint's or a
+ * typical one the first time), with the frame */
+static void ChooseInitialWinSize(optr oself, PaneSizes *s)
+{
+    sword w, h, f2 = 2 * GetFrameWidth(oself);
+    Rectangle r;
+
+    if (!(PVis(oself)->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)) {
+	(void) LookupOpenSize(oself, &w, &h);
+	if (!w)
+	    w = VS_TYPICAL_HORIZONTAL;
+	if (!h)
+	    h = VS_TYPICAL_VERTICAL;
+	s->winWidth = w + f2;
+	s->winHeight = h + f2;
+    } else {
+	GetFrameBounds(oself, &r);
+	s->winWidth = r.R_right - r.R_left + 1;
+	s->winHeight = r.R_bottom - r.R_top + 1;
+    }
+}
+
+/* SizeArea: an area as wide (above, below) or high (at the sides) as
+ * the window, its own size the other way */
+static void SizeArea(optr oself, PaneArea area, const PaneSizes *s)
+{
+    ChunkHandle c = PVis(oself)->OLPI_areaObj[area];
+    optr o;
+    word w, h;
+    SizeAsDWord sz;
+    VisInstance *v;
+
+    if (!c)
+	return;
+    o = ConstructOptr(OptrToHandle(oself), c);
+    if (area & 1) {
+	w = s->winWidth;
+	h = RSA_CHOOSE_OWN_SIZE;
+    } else {
+	w = RSA_CHOOSE_OWN_SIZE;
+	h = s->winHeight;
+    }
+    sz = VisRecalcSizeAndInvalIfNeeded(o, w, h);
+    VisSetSize(o, DWORD_WIDTH(sz), DWORD_HEIGHT(sz));
+    v = (VisInstance *) ObjDerefVis(o);
+    if (v->VI_optFlags & (VOF_GEO_UPDATE_PATH | VOF_GEOMETRY_INVALID)) {
+	v->VI_optFlags &= ~(VOF_GEO_UPDATE_PATH | VOF_GEOMETRY_INVALID);
+	VisMarkInvalidOnParent(o, VOF_IMAGE_INVALID, VUM_MANUAL);
+    }
+}
+
+/* CalcWinSize: the space the areas leave (the window's own size if the
+ * view chooses its size), at least 1 */
+static sword CalcWinSize(optr oself, const PaneSizes *s, Boolean vertical)
+{
+    sword d = vertical ? s->totalHeight : s->totalWidth;
+
+    if (d < 0)
+	return vertical ? s->winHeight : s->winWidth;
+    d -= AreaAndMargin(oself, vertical ? PA_TOP : PA_LEFT, vertical);
+    d -= AreaAndMargin(oself, vertical ? PA_BOTTOM : PA_RIGHT, vertical);
+    return d > 0 ? d : 1;
+}
+
+/* KeepBiggerThanAreaMins: as wide as the areas above and below, as high
+ * as those at the sides */
+static sword KeepBiggerThanAreaMins(optr oself, sword d, Boolean vertical)
+{
+    sword a = AreaDimension(oself, vertical ? PA_LEFT : PA_TOP, vertical);
+
+    if ((word) d < (word) a)
+	d = a;
+    a = AreaDimension(oself, vertical ? PA_RIGHT : PA_BOTTOM, vertical);
+    if ((word) d < (word) a)
+	d = a;
+    return d;
+}
+
+/* SubtractFrameFromSize */
+static void SubtractFrame(optr oself, sword *w, sword *h)
+{
+    word f2 = 2 * GetFrameWidth(oself);
+
+    if ((word) *w > f2)
+	*w -= f2;
+    if ((word) *h > f2)
+	*h -= f2;
+}
+
+/* CheckAspectRatio: the aspect ratio of the hinted size kept: the height
+ * from the width (vertical), else the width from the height */
+static void CheckAspectRatio(optr oself, sword *w, sword *h)
+{
+    GenViewInstance *g = PGen(oself);
+    Boolean hk = (g->GVI_horizAttrs & GVDA_KEEP_ASPECT_RATIO) != 0;
+    sword iw, ih;
+    word n;
+
+    if (g->GVI_vertAttrs & GVDA_KEEP_ASPECT_RATIO) {
+	if (!LookupOpenSize(oself, &iw, &ih))
+	    return;
+	n = (word) ((dword) (word) *w * (word) ih / (word) iw);
+	if (!n)
+	    n = 1;
+	if (hk && n < (word) *h)
+	    n = *h;
+	*h = n;
+    } else if (hk) {
+	if (!LookupOpenSize(oself, &iw, &ih))
+	    return;
+	n = (word) ((dword) (word) *h * (word) iw / (word) ih);
+	*w = n ? n : 1;
+    }
+}
+
+/* OLPaneCalcContentSize: the content's size for a view that follows it
+ * (in a dimension that does not scroll) */
+static void CalcContentSize(optr oself, sword *w, sword *h)
+{
+    GenViewInstance *g = PGen(oself);
+    Boolean vs = (g->GVI_vertAttrs & GVDA_SCROLLABLE) != 0;
+    Boolean hs = (g->GVI_horizAttrs & GVDA_SCROLLABLE) != 0;
+    optr c = g->GVI_content;
+    SizeAsDWord sz;
+
+    if (!c)
+	return;
+    sz = @call c::MSG_VIS_RECALC_SIZE(hs ? RSA_CHOOSE_OWN_SIZE : (word) *w,
+				      vs ? RSA_CHOOSE_OWN_SIZE : (word) *h);
+    @call c::MSG_VIS_SET_SIZE(DWORD_WIDTH(sz), DWORD_HEIGHT(sz));
+    if (!hs)
+	*w = DWORD_WIDTH(sz);
+    if (!vs)
+	*h = DWORD_HEIGHT(sz);
+}
+
+/* MultByScaleFactor: a document size in screen pixels (rounded) */
+static word MultByScale(word d, WWFixedAsDWord scale)
+{
+    WWFixedAsDWord r;
+
+    if (d & 0x8000)
+	return d;
+    r = GrMulWWFixed((WWFixedAsDWord) d << 16, scale);
+    return (word) ((r >> 16) + ((r & 0x8000) ? 1 : 0));
+}
+
+/* RoundToIncrement: a multiple of the increment (at least one) */
+static word RoundToIncrement(word v, word inc)
+{
+    word n;
+
+    if (!inc)
+	return v;
+    n = v / inc;
+    return (n ? n : 1) * inc;
+}
+
+/* the document's size, at most 0xffff */
+static word DocDimension(sdword lo, sdword hi)
+{
+    dword d = (dword) (hi - lo);
+
+    return (d >> 16) ? 0xffff : (word) d;
+}
+
+/*
+ * CheckPaneMinMax: the size hints; no smaller or larger than the
+ * document if asked; a multiple of the increment; at least 1.  Returns
+ * whether the document fits across (high byte) and down (low byte).
+ */
+static word CheckPaneMinMax(optr oself, sword *pw, sword *ph)
+{
+    GenViewInstance *g;
+    word dw, dh, minW, minH, maxW, maxH, w, h, fits = 0;
+
+    VisApplySizeHints(oself, pw, ph);
+    g = PGen(oself);
+    dw = MultByScale(DocDimension(g->GVI_docBounds.RD_left,
+				  g->GVI_docBounds.RD_right),
+		     ScaleOf(&g->GVI_scaleFactor.PF_x));
+    dh = MultByScale(DocDimension(g->GVI_docBounds.RD_top,
+				  g->GVI_docBounds.RD_bottom),
+		     ScaleOf(&g->GVI_scaleFactor.PF_y));
+    minW = (g->GVI_horizAttrs & GVDA_NO_SMALLER_THAN_CONTENT) ? dw : 0;
+    minH = (g->GVI_vertAttrs & GVDA_NO_SMALLER_THAN_CONTENT) ? dh : 0;
+    w = (word) *pw & ~RSA_CHOOSE_OWN_SIZE;
+    h = (word) *ph & ~RSA_CHOOSE_OWN_SIZE;
+    if (w < minW)
+	w = minW;
+    if (h < minH)
+	h = minH;
+    if (w >= dw)
+	fits |= 0xff00;
+    if (h >= dh)
+	fits |= 0x00ff;
+    maxW = (dw && (g->GVI_horizAttrs & GVDA_NO_LARGER_THAN_CONTENT)) ?
+	   dw : 0xffff;
+    maxH = (dh && (g->GVI_vertAttrs & GVDA_NO_LARGER_THAN_CONTENT)) ?
+	   dh : 0xffff;
+    if (w > maxW)
+	w = maxW;
+    if (h > maxH)
+	h = maxH;
+    /* (the asm tests the horizontal increment's high word for both) */
+    if ((g->GVI_vertAttrs & GVDA_SIZE_A_MULTIPLE_OF_INCREMENT) &&
+	!(g->GVI_increment.PD_x >> 16))
+	h = RoundToIncrement(h, (word) g->GVI_increment.PD_y);
+    if ((g->GVI_horizAttrs & GVDA_SIZE_A_MULTIPLE_OF_INCREMENT) &&
+	!(g->GVI_increment.PD_x >> 16))
+	w = RoundToIncrement(w, (word) g->GVI_increment.PD_x);
+    *pw = w ? w : 1;
+    *ph = h ? h : 1;
+    return fits;
+}
+
+/* SetVisAttrs: a scrollbar shown or hidden (its image invalid) */
+static void SetBarShown(optr oself, ChunkHandle c, Boolean shown)
+{
+    const VisAttrs m = VA_MANAGED | VA_DRAWABLE | VA_DETECTABLE;
+    optr o;
+    VisInstance *v;
+    VisAttrs a;
+
+    if (!c)
+	return;
+    o = ConstructOptr(OptrToHandle(oself), c);
+    v = (VisInstance *) ObjDerefVis(o);
+    a = shown ? (v->VI_attrs | m) : (v->VI_attrs & ~m);
+    if (a == v->VI_attrs)
+	return;
+    v->VI_attrs = a;
+    VisMarkInvalid(o, VOF_IMAGE_INVALID, VUM_MANUAL);
+}
+
+/* TurnBarsOnOffIfNeeded: with HINT_VIEW_REMOVE_SCROLLERS_WHEN_NOT_
+ * SCROLLABLE the scrollbars only while the document does not fit */
+static void TurnBarsOnOffIfNeeded(optr oself, word fits)
+{
+    OLPaneInstance *p = PVis(oself);
+    ChunkHandle v = p->OLPI_vertScrollbar, h = p->OLPI_horizScrollbar;
+    OLPaneFlags f = p->OLPI_flags;
+
+    if (!(p->OLPI_attrs & OLPA_REMOVE_SCROLLBARS_WHEN_NOT_SCROLLABLE))
+	return;
+    if (!(f & OLPF_LEAVE_ROOM_FOR_VERT_SCROLLER))
+	SetBarShown(oself, v, !(fits & 0xff));
+    if (!(f & OLPF_LEAVE_ROOM_FOR_HORIZ_SCROLLER))
+	SetBarShown(oself, h, !(fits & 0xff00));
+}
+
+/* SizeViewWindow: the window's new size (without the frame) stored, the
+ * window and image invalid if it changed */
+static void SizeViewWindow(optr oself, sword w, sword h)
+{
+    OLPaneInstance *p;
+
+    SubtractFrame(oself, &w, &h);
+    p = PVis(oself);
+    if (p->OLPI_winWidth == w && p->OLPI_winHeight == h)
+	return;
+    VisMarkInvalid(oself, VOF_WINDOW_INVALID | VOF_IMAGE_INVALID,
+		   VUM_MANUAL);
+    p = PVis(oself);
+    p->OLPI_winWidth = w;
+    p->OLPI_winHeight = h;
+}
+
+/* CalcTotalSize: the window and its areas */
+static sword CalcTotalSize(optr oself, const PaneSizes *s, Boolean vertical)
+{
+    sword d = KeepBiggerThanAreaMins(oself, vertical ? s->winHeight
+						     : s->winWidth,
+				     vertical);
+
+    d += AreaAndMargin(oself, vertical ? PA_TOP : PA_LEFT, vertical);
+    d += AreaAndMargin(oself, vertical ? PA_BOTTOM : PA_RIGHT, vertical);
+    return d;
+}
+
+/*
+ * CalcSizeOfPaneChildren: the areas and the window sized in turns until
+ * the window's size holds; then (once) the window at least as big as
+ * its areas; the size of all
+ */
+static void CalcSizeOfPaneChildren(optr oself, sword *pw, sword *ph)
+{
+    PaneSizes s;
+    sword w, h;
+    word pass = 0, fits;
+    word f2 = 2 * GetFrameWidth(oself);
+    Boolean keptBigger = FALSE, changed;
+
+    s.totalWidth = *pw;
+    s.totalHeight = *ph;
+    ChooseInitialWinSize(oself, &s);
+    for (;;) {
+	SizeArea(oself, PA_LEFT, &s);
+	SizeArea(oself, PA_TOP, &s);
+	SizeArea(oself, PA_RIGHT, &s);
+	SizeArea(oself, PA_BOTTOM, &s);
+	w = CalcWinSize(oself, &s, FALSE);
+	h = CalcWinSize(oself, &s, TRUE);
+	SubtractFrame(oself, &w, &h);
+	CheckAspectRatio(oself, &w, &h);
+	if (PGen(oself)->GVI_attrs & GVA_VIEW_FOLLOWS_CONTENT_GEOMETRY)
+	    CalcContentSize(oself, &w, &h);
+	{
+	    SizeAsDWord sz = @call oself::MSG_GEN_VIEW_CALC_WIN_SIZE(w, h);
+
+	    w = DWORD_WIDTH(sz);
+	    h = DWORD_HEIGHT(sz);
+	}
+	fits = CheckPaneMinMax(oself, &w, &h);
+	TurnBarsOnOffIfNeeded(oself, fits);
+	w += f2;
+	h += f2;
+	for (;;) {
+	    changed = w != s.winWidth || h != s.winHeight;
+	    s.winWidth = w;
+	    s.winHeight = h;
+	    if (changed && ++pass < VIEW_MAX_GEOMETRY_PASSES)
+		break;
+	    /* the size holds (or the passes are used up) */
+	    if (keptBigger)
+		goto done;
+	    keptBigger = TRUE;
+	    w = KeepBiggerThanAreaMins(oself, w, FALSE);
+	    h = KeepBiggerThanAreaMins(oself, h, TRUE);
+	}
+    }
+done:
+    *pw = CalcTotalSize(oself, &s, FALSE);
+    *ph = CalcTotalSize(oself, &s, TRUE);
+    SizeViewWindow(oself, s.winWidth, s.winHeight);
+}
+
+/*
+ * OLPaneRecalcSize: the size passed less the margins for the window and
+ * its areas, the margins added back; at least the minimum size
+ */
+@extern method OLPaneClass, MSG_VIS_RECALC_SIZE
+{
+    Rectangle m;
+    sword w = (sword) width, h = (sword) height, mw, mh;
+    SizeAsDWord min;
+
+    memset(&m, 0, sizeof(m));
+    @call oself::MSG_VIS_COMP_GET_MARGINS(&m);
+    mw = m.R_left + m.R_right;
+    mh = m.R_top + m.R_bottom;
+    if (w >= 0 && (w -= mw) < 0)
+	w = 0;
+    if (h >= 0 && (h -= mh) < 0)
+	h = 0;
+    CalcSizeOfPaneChildren(oself, &w, &h);
+    w += mw;
+    h += mh;
+    if (PVis(oself)->VCI_geoAttrs & VCGA_HAS_MINIMUM_SIZE) {
+	min = @call oself::MSG_VIS_COMP_GET_MINIMUM_SIZE();
+	if ((word) w < DWORD_WIDTH(min))
+	    w = DWORD_WIDTH(min);
+	if ((word) h < DWORD_HEIGHT(min))
+	    h = DWORD_HEIGHT(min);
+    }
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/* MoveArea: an area's object placed (if built and managed) */
+static void MoveArea(optr oself, PaneArea area, sword x, sword y)
+{
+    optr s = AreaObject(oself, area);
+
+    if (s)
+	(void) VisSendPositionAndInvalIfNeeded(s, x, y);
+}
+
+/*
+ * OLPanePosition: the areas round the window's frame: above and below
+ * from its left edge, at the sides from its top; a content that the view
+ * follows at the document's origin
+ */
+@extern method OLPaneClass, MSG_VIS_POSITION_BRANCH
+{
+    sword wx, wy, right, bottom;
+    word f2;
+    optr c;
+
+    VisSetPosition(oself, (sword) xOrigin, (sword) yOrigin);
+    GetWinLeftTop(oself, &wx, &wy);
+    MoveArea(oself, PA_TOP, wx, (sword) yOrigin);
+    MoveArea(oself, PA_LEFT, (sword) xOrigin, wy);
+    f2 = AddMargin(oself, 2 * GetFrameWidth(oself));
+    right = wx + PVis(oself)->OLPI_winWidth + f2;
+    bottom = wy + PVis(oself)->OLPI_winHeight + f2;
+    MoveArea(oself, PA_RIGHT, right, wy);
+    MoveArea(oself, PA_BOTTOM, wx, bottom);
+    c = PGen(oself)->GVI_content;
+    if (c && (PGen(oself)->GVI_attrs & GVA_VIEW_FOLLOWS_CONTENT_GEOMETRY))
+	@call c::MSG_VIS_POSITION_BRANCH(0, 0);
+}
+
+/* OLPaneVisInvalidate: as a composite (not as an OLCtrl) */
+@extern method OLPaneClass, MSG_VIS_INVALIDATE
+{
+    @callsuper oself::OLCtrlClass::MSG_VIS_INVALIDATE();
+}
+
+/* ---------------------------------------------------------------------
+ * The page
+ * ------------------------------------------------------------------- */
+
+/* ConvertScreenToDocCoords: screen pixels as document units (rounded) */
+static word ScreenToDoc(word d, const WWFixed *scale)
+{
+    WWFixedAsDWord r = GrSDivWWFixed((WWFixedAsDWord) d << 16,
+				     ScaleOf(scale));
+
+    return (word) ((r >> 16) + ((r & 0x8000) ? 1 : 0));
+}
+
+/*
+ * OLPaneSetNewPageSize: the window's size in document units; if it
+ * changed, the scrollbars' range length; TRUE if changed
+ */
+Boolean OLPaneSetNewPageSize(optr oself)
+{
+    Rectangle r;
+    GenViewInstance *g;
+    OLPaneInstance *p;
+    word w, h;
+    optr sb;
+
+    GetPaneWinBounds(oself, &r);
+    g = PGen(oself);
+    w = ScreenToDoc(r.R_right - r.R_left + 1, &g->GVI_scaleFactor.PF_x);
+    h = ScreenToDoc(r.R_bottom - r.R_top + 1, &g->GVI_scaleFactor.PF_y);
+    p = PVis(oself);
+    if ((word) p->OLPI_pageWidth == w && (word) p->OLPI_pageHeight == h)
+	return FALSE;
+    p->OLPI_pageWidth = w;
+    p->OLPI_pageHeight = h;
+    if ((sb = OLPaneScrollbar(oself, TRUE)) != 0)
+	@call sb::MSG_GEN_VALUE_SET_RANGE_LENGTH(h);
+    if ((sb = OLPaneScrollbar(oself, FALSE)) != 0)
+	@call sb::MSG_GEN_VALUE_SET_RANGE_LENGTH(w);
+    return TRUE;
+}
+
+/*
+ * OLPaneGeometryValid: the new page; a window to be resized suspended
+ * until it is (cviewPaneWindow.goc); the origin kept in the document
+ */
+@extern method OLPaneClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
+{
+    OLPaneInstance *p;
+
+    @callsuper();
+    if (OLPaneSetNewPageSize(oself)) {
+	p = PVis(oself);
+	if (!(p->OLPI_flags & OLPF_SUSPENDED_FOR_SIZE_CHANGE) &&
+	    (p->VI_optFlags & (VOF_WINDOW_INVALID | VOF_WINDOW_UPDATE_PATH)) &&
+	    p->OLPI_window) {
+	    WinSuspendUpdate(p->OLPI_window);
+	    p->OLPI_flags |= OLPF_SUSPENDED_FOR_SIZE_CHANGE;
+	}
+    }
+    p = PVis(oself);
+    if (p->OLPI_flags & OLPF_SUSPENDED_FOR_SCALING) {
+	p->OLPI_flags &= ~OLPF_SUSPENDED_FOR_SCALING;
+	if (p->OLPI_window)
+	    WinUnSuspendUpdate(p->OLPI_window);
+    }
+    if (PVis(oself)->OLPI_window)
+	OLPaneAdjustOrigin(oself, OLPSF_DONT_REDRAW_SCROLLBARS |
+			   SA_SCROLL_FOR_SIZE_CHANGE);
+}
+
+/* FullyInvalidateView: the parent's geometry (now, from the queue) and
+ * ours invalid, ahead of other messages */
+void FullyInvalidateView(optr oself)
+{
+    EventHandle ev = @record null::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID,
+							 VUM_NOW);
+
+    @send ,forceQueue,insertAtFront oself::MSG_VIS_SEND_TO_PARENT(ev);
+    @send ,forceQueue,insertAtFront oself::MSG_VIS_MARK_INVALID(
+				VOF_GEOMETRY_INVALID, VUM_MANUAL);
+}
+
+/* InvalViewWindow: the document shown drawn anew */
+@extern method OLPaneClass, MSG_GEN_VIEW_REDRAW_CONTENT
+{
+    RectDWord r;
+    GenViewInstance *g = PGen(oself);
+    GStateHandle gs;
+
+    if (!pself->OLPI_window)
+	return;
+    r.RD_left = g->GVI_origin.PDF_x.DWF_int;
+    r.RD_top = g->GVI_origin.PDF_y.DWF_int;
+    r.RD_right = r.RD_left + (word) PVis(oself)->OLPI_pageWidth;
+    r.RD_bottom = r.RD_top + (word) PVis(oself)->OLPI_pageHeight;
+    gs = GrCreateState(PVis(oself)->OLPI_window);
+    GrInvalRectDWord(gs, &r);
+    GrDestroyState(gs);
+}

@@ -11,9 +11,7 @@
  *
  * Port32 (Port32/ABI.md section 13y): the messages' parameters are those
  * of gValueC.goh.  Not yet: MSG_GEN_BRANCH_REPLACE_PARAMS
- * (BRPT_OUTPUT_OPTR), MSG_GEN_FIND_VIEW_RANGES and
- * MSG_GEN_QUERY_VIEW_AREA (the scrollers' place in a view: GenClass has
- * neither yet).
+ * (BRPT_OUTPUT_OPTR).
  */
 @include "uiInt.goh"
 @include <Objects/gValueC.goh>
@@ -650,4 +648,52 @@ static WWFixedAsDWord Increment(optr o)
 
     @call oself::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_VALUE);
     InitFileWriteString(params->GOP_category, params->GOP_key, buf);
+}
+
+/* ---------------------------------------------------------------------
+ * A view's scrollers
+ * ------------------------------------------------------------------- */
+
+/* the scroller hint of the value (HINT_VALUE_X_SCROLLER or
+ * HINT_VALUE_Y_SCROLLER, the later one if both), 0 if none */
+static word ScrollerHint(optr o)
+{
+    word h = 0;
+
+    if (ObjVarFindData(o, HINT_VALUE_X_SCROLLER))
+	h = HINT_VALUE_X_SCROLLER;
+    if (ObjVarFindData(o, HINT_VALUE_Y_SCROLLER))
+	h = HINT_VALUE_Y_SCROLLER;
+    return h;
+}
+
+/* GenValueFindViewRanges: a value with a scroller hint is the view's
+ * horizontal or vertical scrollbar, if it has none yet */
+@method GenValueClass, MSG_GEN_FIND_VIEW_RANGES
+{
+    word h = ScrollerHint(oself);
+
+    if (!params->GFVRP_hRange && h == HINT_VALUE_X_SCROLLER) {
+	params->GFVRP_hRange = OptrToChunk(oself);
+	params->GFVRP_hViewArea = GetUnambiguousViewAreaRequest(oself);
+    } else if (!params->GFVRP_vRange && h == HINT_VALUE_Y_SCROLLER) {
+	params->GFVRP_vRange = OptrToChunk(oself);
+	params->GFVRP_vViewArea = GetUnambiguousViewAreaRequest(oself);
+    }
+}
+
+/* GenValueQueryViewArea: the generic choice, else a scroller's area */
+@method GenValueClass, MSG_GEN_QUERY_VIEW_AREA
+{
+    word h;
+
+    viewArea = @callsuper();
+    if (viewArea != RVA_NO_AREA_CHOICE)
+	return viewArea;
+    h = ScrollerHint(oself);
+    if (h == HINT_VALUE_X_SCROLLER)
+	return RVA_X_SCROLLER_AREA;
+    if (h == HINT_VALUE_Y_SCROLLER)
+	return RVA_Y_SCROLLER_AREA;
+    return RVA_NO_AREA_CHOICE;
 }

@@ -363,11 +363,17 @@ typedef struct {
 } GenFindViewRangesParams;
 
 #define GET_VIEW_AREAS(H,V) 	((H) | (((word) (V)) << 8))
+@ifdef GEOS_PORT32
+/* Port32: the areas and ranges found so far passed in and returned in
+ * the structure (Port32/ABI.md 13y) */
+@message void MSG_GEN_FIND_VIEW_RANGES(GenFindViewRangesParams *params);
+@else
 @message void MSG_GEN_FIND_VIEW_RANGES(
 			GenFindViewRangesParams *retValue = cxdxbpax,
 			word viewAreas = cx,
 			ChunkHandle hRange = dx,
 			ChunkHandle vRange = bp); /* XXX */
+@endif
 @message RequestedViewArea MSG_GEN_QUERY_VIEW_AREA(
 			RequestedViewArea viewArea = cl) = cl;	/* XXX */
 

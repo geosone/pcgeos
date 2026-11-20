@@ -1,0 +1,131 @@
+/*
+ * olPaneClass.goh -- OLPaneClass, the specific UI's view (after
+ * Include/Internal/SpecUI/olPaneClass.def), for Port32: a GenView as an
+ * OLCtrl with a window of its own (a portal) that shows the view's
+ * content, the scrollbars and other objects of the view in areas left,
+ * above, right of and below the window.
+ *
+ * Motif: no floating scrollers, no draw styles, no holistic scrollbar
+ * positioning (FLOATING_SCROLLERS, DRAW_STYLES and
+ * HOLISTIC_SCROLLBAR_POSITIONING are FALSE).  Port32: the areas are an
+ * array (OLPI_areaObj, by PaneArea) and the scrollers' areas indices to
+ * it (the asm keeps the offsets of the fields).
+ */
+#ifndef __OLPANECLASS_GOH
+#define __OLPANECLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Objects/gViewC.goh>
+
+@deflib motif
+
+/* OLPaneScrollFlags: how OLPaneScroll scrolls; the low byte is the
+ * ScrollFlags and ScrollAction of MSG_META_CONTENT_TRACK_SCROLLING */
+typedef WordFlags OLPaneScrollFlags;
+#define OLPSF_DONT_SEND_TO_SCROLLBARS	0x8000
+#define OLPSF_DONT_REDRAW_SCROLLBARS	0x4000
+#define OLPSF_ALWAYS_SEND_NORMALIZE	0x2000
+#define OLPSF_DONT_NORMALIZE		0x1000
+#define OLPSF_ALWAYS_UPDATE_SCROLLBARS	0x0800
+#define OLPSF_DONT_SEND_TO_LINKS	0x0400
+#define OLPSF_VERTICAL			0x0080	/* SF_VERTICAL */
+#define OLPSF_ABSOLUTE			0x0040	/* SF_ABSOLUTE */
+#define OLPSF_DOC_SIZE_CHANGE		0x0020	/* SF_DOC_SIZE_CHANGE */
+#define OLPSF_SCROLL_ACTION		0x000f	/* ScrollAction */
+
+/* OLPaneAttrs */
+typedef ByteFlags OLPaneAttrs;
+#define OLPA_SPECIAL_BORDER		0x80	/* an inset rect (Motif) */
+#define OLPA_WHITE_BORDER		0x40
+#define OLPA_NON_SCROLLING		0x20	/* never scrolls the window */
+#define OLPA_APP_TARGET			0x10
+#define OLPA_APP_FOCUS			0x08
+#define OLPA_SYS_TARGET			0x04
+#define OLPA_SYS_FOCUS			0x02
+#define OLPA_REMOVE_SCROLLBARS_WHEN_NOT_SCROLLABLE 0x01
+
+/* OLPaneFlags */
+typedef ByteFlags OLPaneFlags;
+#define OLPF_SUSPENDED_FOR_SCALING	0x80
+#define OLPF_SUSPENDED_FOR_SIZE_CHANGE	0x40
+#define OLPF_AT_RIGHT_EDGE		0x20
+#define OLPF_AT_BOTTOM_EDGE		0x10
+#define OLPF_LEAVE_ROOM_FOR_VERT_SCROLLER 0x08
+#define OLPF_LEAVE_ROOM_FOR_HORIZ_SCROLLER 0x04
+#define OLPF_MAKE_DEFAULT_FOCUS		0x02
+#define OLPF_DONT_TAKE_FOCUS_FROM_TEXT_OBJECTS 0x01
+
+/* OLPaneOptFlags */
+typedef WordFlags OLPaneOptFlags;
+#define OLPOF_PRESS_GRAB		0x8000
+#define OLPOF_PANNING_GRAB		0x4000
+#define OLPOF_DRAG_SCROLLING		0x2000
+#define OLPOF_DRAG_SCROLL_ON_ANY_BUTTON	0x1000
+#define OLPOF_WANDERING_GRAB		0x0800
+#define OLPOF_PTR_IN_RAW_UNIV		0x0400
+#define OLPOF_DRAG_SCROLL_PENDING	0x0200
+#define OLPOF_TIMER_EXPIRED_PENDING	0x0100
+#define OLPOF_LIMIT_DRAG_SCROLLING	0x0080
+#define OLPOF_CONSTRAIN			0x0040
+#define OLPOF_ENTERED			0x0020
+#define OLPOF_COULDNT_SUSPEND		0x0010
+#define OLPOF_KBD_CHAR_SCROLL		0x0008
+
+/* PaneArea: the areas round the window (RequestedViewArea less
+ * RVA_LEFT_AREA); odd ones are above and below it */
+typedef ByteEnum PaneArea;
+#define PA_LEFT		0
+#define PA_TOP		1
+#define PA_RIGHT	2
+#define PA_BOTTOM	3
+
+/* OLPaneScrollAbsolute: no scrolling in this dimension */
+#define DONT_SCROLL	((sdword) 0x80000000)
+
+@class OLPaneClass, OLCtrlClass;
+@uses GenViewClass;
+
+/* the window panned by x, y (screen pixels made document) */
+@message void MSG_SPEC_VIEW_PAN(sword x, sword y);
+/* the origin back at the start (the window opened) */
+@message void MSG_SPEC_VIEW_INIT_ORIGIN();
+/* scrolled while dragging out of the window */
+@message void MSG_SPEC_VIEW_DRAG_SCROLL(sword x, sword y);
+@message void MSG_SPEC_VIEW_GET_WIN_BOUNDS(Rectangle *bounds);
+@message void MSG_SPEC_VIEW_SET_PANE_FLAGS(OLPaneFlags set,
+					   OLPaneFlags clear);
+@message void MSG_SPEC_VIEW_FORCE_INITIATE_DRAG_SCROLL();
+/* the window opened suspended unsuspended (if it is still that one) */
+@message void MSG_SPEC_VIEW_UNSUSPEND_OPENED_WIN(word windowID);
+
+    @instance ChunkHandle	OLPI_horizScrollbar = 0;
+    @instance ChunkHandle	OLPI_vertScrollbar = 0;
+    @instance sword		OLPI_normalizeCount = 0;
+    /* the window's size in document coordinates */
+    @instance sword		OLPI_pageWidth = 0;
+    @instance sword		OLPI_pageHeight = 0;
+    @instance OLPaneFlags	OLPI_flags = 0;
+    @instance ViewTargetInfo	OLPI_targetInfo = {{0, 0}, {0, 0}};
+    @instance optr		OLPI_ptrImage = 0;
+    @instance OLPaneAttrs	OLPI_attrs = 0;
+    @instance WindowHandle	OLPI_window = 0;
+    @instance word		OLPI_windowID = 0;
+    @instance OLPaneOptFlags	OLPI_optFlags = 0;
+    @instance sword		OLPI_mouseX = 0;
+    @instance sword		OLPI_mouseY = 0;
+    /* the window's size (without its frame) */
+    @instance sword		OLPI_winWidth = 0;
+    @instance sword		OLPI_winHeight = 0;
+    /* the objects in the areas (by PaneArea; their chunks: goc drops an
+     * array of ChunkHandle) */
+    @instance word		OLPI_areaObj[4] = {0};
+    /* the areas of the horizontal and vertical scrollbar */
+    @instance PaneArea		OLPI_horizScrArea = 0;
+    @instance PaneArea		OLPI_vertScrArea = 0;
+    /* where drag scrolling stops (MSG_GEN_VIEW_SET_DRAG_BOUNDS) */
+    @instance RectDWord		OLPI_dragBounds = {0, 0, 0, 0};
+@endc;
+
+@endlib
+
+#endif

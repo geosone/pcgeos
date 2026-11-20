@@ -6,8 +6,9 @@
  * Motif: arrows of olArrowSize pixels with shadows
  * (_NO_SHADOWS_ON_SCROLL_ARROWS is FALSE), a square thumb
  * (_ROUNDED_SCROLL_BAR_THUMB is FALSE), a proportional thumb
- * (USE_PROPORTIONAL_THUMB).  Port32 (Port32/ABI.md section 13y), not
- * yet: OLPaneClass, OLContentClass, the splitter.
+ * (USE_PROPORTIONAL_THUMB).  OLPaneClass, the specific part of a
+ * GenView, and OLContentClass, of a GenContent.  Port32 (Port32/ABI.md
+ * section 13y), not yet: the splitter, OLPortClass.
  */
 #ifndef __CVIEWINT_GOH
 #define __CVIEWINT_GOH
@@ -16,12 +17,29 @@
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Internal/SpecUI/olApplicationClass.goh>
+@include <Internal/SpecUI/olPaneClass.goh>
+@include <Internal/SpecUI/olContentClass.goh>
+@include <Internal/SpecUI/olItemGroupClass.goh>
 
 /* cviewScrollbar.asm: how far the mouse may stray off the bar */
 #define SCROLLBAR_LATITUDE	10
 
 #define SBVis(o)	((OLScrollbarInstance *) ObjDerefVis(o))
 #define SBGen(o)	((GenValueInstance *) ObjDerefGen(o))
+#define PVis(o)		((OLPaneInstance *) ObjDerefVis(o))
+#define PGen(o)		((GenViewInstance *) ObjDerefGen(o))
+
+/* cviewConstant.def: the size of a view opened without a size hint;
+ * the space between the window and its scrollers (Motif; -1 on CGA:
+ * the frame shared, none without one) */
+#define VS_TYPICAL_HORIZONTAL	200
+#define VS_TYPICAL_VERTICAL	60
+#define SCROLLBAR_MARGIN	4
+#define CGA_SCROLLBAR_MARGIN	(-1)
+#define VIEW_MAX_GEOMETRY_PASSES 8
+
+/* a WWFixed scale factor as a WWFixedAsDWord */
+#define ScaleOf(f)	(((WWFixedAsDWord) (f)->WWF_int << 16) | (f)->WWF_frac)
 
 /* CView/cviewScrollbar.goc */
 /* the offset of the thumb for a document ratio */
@@ -38,5 +56,52 @@ extern void OLScrollbarRepeatPress(optr oself);
 /* Motif/View/viewScrollbarDraw.goc: the bar drawn (updating: only the
  * thumb and page areas) */
 extern void DrawScrollbar(optr oself, GStateHandle gs, Boolean updating);
+
+/* CView/cviewPane.goc */
+/* MSG_GEN_VIEW_SEND_NOTIFICATION if controlled (lost: the target gone) */
+extern void SendNotifyLow(optr oself, Boolean lost);
+#define SendNotifyCommon(o)	SendNotifyLow((o), FALSE)
+/* the scrollbars set: the minimum and maximum to the document bounds;
+ * the view's geometry invalid once built */
+extern void OLPaneFinishSetDocSize(optr oself);
+/* the horizontal or vertical scrollbar (0 if none) */
+extern optr OLPaneScrollbar(optr oself, Boolean vertical);
+/* the content told of the view, its tree built if generic */
+extern void SendViewHandle(optr oself, SpecBuildFlags flags);
+/* the scrollbars there if the dimensions want them */
+extern void EnsureScrollbars(optr oself);
+
+/* CView/cviewPaneGeometry.goc */
+extern word GetFrameWidth(optr oself);
+/* the left top of the window's frame */
+extern void GetWinLeftTop(optr oself, sword *x, sword *y);
+/* the window's bounds (inside the frame), the frame's */
+extern void GetPaneWinBounds(optr oself, Rectangle *r);
+extern void GetFrameBounds(optr oself, Rectangle *r);
+/* the window's size in document coordinates stored and passed to the
+ * scrollbars as their range length; TRUE if changed */
+extern Boolean OLPaneSetNewPageSize(optr oself);
+/* the view's geometry invalid now, its parent's from the queue */
+extern void FullyInvalidateView(optr oself);
+
+/* CView/cviewPaneScroll.goc */
+/* the origin rounded to whole pixels */
+extern void GetOrigin(optr oself, PointDWord *p);
+/* OLPaneScroll: scrolled by the change (relative to the origin) */
+extern void OLPaneScroll(optr oself, PointDWord *change,
+			 OLPaneScrollFlags flags);
+extern void OLPaneScrollAbsolute(optr oself, sdword x, sdword y,
+				 OLPaneScrollFlags flags);
+/* the tail oriented dimensions at their end kept there */
+extern void OLPaneAdjustOrigin(optr oself, OLPaneScrollFlags flags);
+extern void SendNewOriginToOD(optr oself, const PointDWord *origin);
+extern void SendNewScaleToOD(optr oself, WWFixedAsDWord x,
+			     WWFixedAsDWord y);
+
+/* CView/cviewPaneWindow.goc */
+extern void OLPaneWindowSetContent(optr oself);
+/* the window scrolled to the origin (absolute) */
+extern void OLPaneWindowScroll(optr oself, const PointDWord *origin);
+extern void SendPaneSizeMethod(optr oself, Message msg);
 
 #endif

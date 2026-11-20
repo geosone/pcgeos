@@ -1,0 +1,1127 @@
+/*
+ * cviewPane.goc -- OLPaneClass (after cviewPane.asm): the specific part
+ * of a GenView.  An OLCtrl with a window of its own (a portal, opened in
+ * cviewPaneWindow.goc) that shows the content; the view's scrollbars
+ * (GenValues it creates unless the application gave them) and the other
+ * generic children sit in four areas left, above, right of and below
+ * the window (an OLCtrl made for an area with more than one object).
+ * Building, the areas, the focus and target (passed on to the content),
+ * the keys that scroll, a new content, the scrollbars told of the
+ * document.  The size is cviewPaneGeometry.goc's, scrolling
+ * cviewPaneScroll.goc's.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: linked views
+ * (MSG_GEN_VIEW_SEND_TO_LINKS for scrolling), scaling
+ * (cviewPaneScale.asm: MSG_GEN_VIEW_SET_SCALE_FACTOR, scale to fit),
+ * ink, drag scrolling and the quick transfer's wandering grab.
+ */
+@include "CView/cviewInt.goh"
+@include <Internal/flowC.goh>
+
+@classdecl OLPaneClass, neverSaved;
+
+/* (in cviewPaneGeometry.goc, cviewPaneScroll.goc, cviewPaneWindow.goc) */
+@extern method OLPaneClass, MSG_VIS_RECALC_SIZE;
+@extern method OLPaneClass, MSG_VIS_POSITION_BRANCH;
+@extern method OLPaneClass, MSG_VIS_INVALIDATE;
+@extern method OLPaneClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
+@extern method OLPaneClass, MSG_GEN_VIEW_REDRAW_CONTENT;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_UP;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_DOWN;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_LEFT;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_RIGHT;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_PAGE_UP;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_PAGE_DOWN;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_PAGE_LEFT;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_PAGE_RIGHT;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_TOP;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_BOTTOM;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_LEFT_EDGE;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_RIGHT_EDGE;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_SET_X_ORIGIN;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL_SET_Y_ORIGIN;
+@extern method OLPaneClass, MSG_GEN_VIEW_SET_ORIGIN;
+@extern method OLPaneClass, MSG_GEN_VIEW_SCROLL;
+@extern method OLPaneClass, MSG_SPEC_VIEW_PAN;
+@extern method OLPaneClass, MSG_SPEC_VIEW_DRAG_SCROLL;
+@extern method OLPaneClass, MSG_GEN_VIEW_SET_ORIGIN_LOW;
+@extern method OLPaneClass, MSG_SPEC_VIEW_INIT_ORIGIN;
+@extern method OLPaneClass, MSG_GEN_VIEW_MAKE_RECT_VISIBLE;
+@extern method OLPaneClass, MSG_META_CONTENT_TRACK_SCROLLING;
+@extern method OLPaneClass, MSG_GEN_VIEW_SETUP_TRACKING_ARGS;
+@extern method OLPaneClass, MSG_GEN_VIEW_TRACKING_COMPLETE;
+@extern method OLPaneClass, MSG_VIS_OPEN_WIN;
+@extern method OLPaneClass, MSG_SPEC_VIEW_UNSUSPEND_OPENED_WIN;
+@extern method OLPaneClass, MSG_VIS_CLOSE_WIN;
+@extern method OLPaneClass, MSG_VIS_MOVE_RESIZE_WIN;
+@extern method OLPaneClass, MSG_VIS_DRAW;
+@extern method OLPaneClass, MSG_META_END_SELECT, MSG_META_DRAG_SELECT,
+	MSG_META_START_MOVE_COPY, MSG_META_DRAG_MOVE_COPY, MSG_META_DRAG_FEATURES,
+	MSG_META_START_OTHER, MSG_META_END_OTHER, MSG_META_DRAG_OTHER;
+@extern method OLPaneClass, MSG_META_END_MOVE_COPY;
+@extern method OLPaneClass, MSG_META_START_SELECT;
+@extern method OLPaneClass, MSG_META_START_FEATURES, MSG_META_END_FEATURES;
+@extern method OLPaneClass, MSG_META_PTR;
+@extern method OLPaneClass, MSG_VIS_LOST_GADGET_EXCL;
+@extern method OLPaneClass, MSG_META_RAW_UNIV_ENTER;
+@extern method OLPaneClass, MSG_META_RAW_UNIV_LEAVE;
+@extern method OLPaneClass, MSG_GEN_VIEW_ALLOW_GLOBAL_TRANSFER;
+@extern method OLPaneClass, MSG_META_WIN_UPDATE_COMPLETE;
+@extern method OLPaneClass, MSG_META_PRE_PASSIVE_BUTTON;
+
+/* the view's messages that do nothing here (only scaling would) */
+@method OLPaneClass, MSG_GET_FIRST_MKR_POS
+{
+    (void) pos;
+    return FALSE;
+}
+
+@method OLPaneClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    (void) childCount;
+    retValue->ESP_extraWidth = 0;
+    retValue->ESP_extraHeight = 0;
+}
+
+@method OLPaneClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT
+{
+    return @callsuper oself::OLCtrlClass::MSG_SPEC_CONVERT_DESIRED_SIZE_HINT(
+		desiredWidth, desiredHeight, childCount);
+}
+
+/* ---------------------------------------------------------------------
+ * The content
+ * ------------------------------------------------------------------- */
+
+#define Content(o)	(PGen(o)->GVI_content)
+
+/* MSG_GEN_VIEW_SEND_NOTIFICATION if controlled (the GenViewControl) */
+void SendNotifyLow(optr oself, Boolean lost)
+{
+    (void) lost;
+    if (PGen(oself)->GVI_attrs & GVA_CONTROLLED)
+	@call oself::MSG_GEN_VIEW_SEND_NOTIFICATION();
+}
+
+/* OLPaneSetFlagAndSendToApp: the focus or target flag set or cleared,
+ * the message passed on to the content now */
+static void SetFlagAndSendToApp(optr oself, OLPaneAttrs set,
+				OLPaneAttrs clear, Message msg)
+{
+    optr c;
+
+    PVis(oself)->OLPI_attrs = (PVis(oself)->OLPI_attrs | set) & ~clear;
+    c = Content(oself);
+    if (c)
+	CObjMessageP(0, c, msg, NULL, 0, NULL, 0);
+}
+
+/* the message queued for the content */
+static void QueueToContent(optr oself, Message msg)
+{
+    optr c = Content(oself);
+
+    if (c)
+	CObjMessageP(MF_FORCE_QUEUE, c, msg, NULL, 0, NULL, 0);
+}
+
+@method OLPaneClass, MSG_META_GAINED_TARGET_EXCL
+{
+    SetFlagAndSendToApp(oself, OLPA_APP_TARGET, 0, message);
+    SendNotifyCommon(oself);
+}
+
+@method OLPaneClass, MSG_META_LOST_TARGET_EXCL
+{
+    SetFlagAndSendToApp(oself, 0, OLPA_APP_TARGET, message);
+    SendNotifyLow(oself, TRUE);
+}
+
+@method OLPaneClass, MSG_META_GAINED_SYS_TARGET_EXCL
+{
+    SetFlagAndSendToApp(oself, OLPA_SYS_TARGET, 0, message);
+}
+
+@method OLPaneClass, MSG_META_LOST_SYS_TARGET_EXCL
+{
+    SetFlagAndSendToApp(oself, 0, OLPA_SYS_TARGET, message);
+}
+
+/* the focus: the keyboard grabbed for the content's keys */
+@method OLPaneClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    SetFlagAndSendToApp(oself, OLPA_APP_FOCUS, 0, message);
+    VisForceGrabKbd(oself);
+}
+
+@method OLPaneClass, MSG_META_LOST_FOCUS_EXCL
+{
+    VisReleaseKbd(oself);
+    SetFlagAndSendToApp(oself, 0, OLPA_APP_FOCUS, message);
+}
+
+@method OLPaneClass, MSG_META_GAINED_SYS_FOCUS_EXCL
+{
+    SetFlagAndSendToApp(oself, OLPA_SYS_FOCUS, 0, message);
+}
+
+@method OLPaneClass, MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    SetFlagAndSendToApp(oself, 0, OLPA_SYS_FOCUS, message);
+}
+
+/* OLPaneGrabFocusExcl: only a focusable view takes the focus */
+@method OLPaneClass, MSG_META_GRAB_FOCUS_EXCL
+{
+    if (PGen(oself)->GVI_attrs & GVA_FOCUSABLE)
+	@callsuper();
+}
+
+/* OLPaneGetFocusTarget: the content is the focus and target below */
+@method OLPaneClass, MSG_META_GET_FOCUS_EXCL, MSG_META_GET_TARGET_EXCL
+{
+    (void) message;
+    *focusObject = Content(oself);
+    return TRUE;
+}
+
+/* OLPaneGetTargetAtTargetLevel: the view itself, the content (if it is
+ * still the view's) or the target in it the content reported */
+@method OLPaneClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    TargetReference *r;
+
+    retValue->GTP_class = NULL;
+    retValue->GTP_target = 0;
+    switch (level) {
+    case TL_GEN_VIEW:
+	retValue->GTP_target = oself;
+	retValue->GTP_class = @call oself::MSG_META_GET_CLASS();
+	return;
+    case TL_CONTENT:
+	r = &pself->OLPI_targetInfo.VTI_content;
+	if (r->TR_object != Content(oself))
+	    return;
+	break;
+    case TL_TARGET:
+	r = &pself->OLPI_targetInfo.VTI_target;
+	break;
+    default:
+	return;
+    }
+    retValue->GTP_target = r->TR_object;
+    retValue->GTP_class = r->TR_class;
+}
+
+@method OLPaneClass, MSG_GEN_VIEW_UPDATE_CONTENT_TARGET_INFO
+{
+    pself->OLPI_targetInfo = *targetInfo;
+}
+
+/* OLPaneSendClassedEvent: the focus and the target are in the content */
+@method OLPaneClass, MSG_META_SEND_CLASSED_EVENT
+{
+    if (whereTo != (TravelOption) TO_FOCUS &&
+	whereTo != (TravelOption) TO_TARGET) {
+	@callsuper();
+	return;
+    }
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo, Content(oself), 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+#define KEY(k)		((KS_CHAR_SET_CONTROL << 8) | (k))
+
+static const KeyboardShortcut vertKeys[] = {
+    KS_PHYSICAL | KEY(VC_PREVIOUS), KS_PHYSICAL | KEY(VC_NEXT),
+    KS_PHYSICAL | KEY(VC_JOYSTICK_90), KS_PHYSICAL | KEY(VC_JOYSTICK_270)
+};
+static const Message vertMsgs[] = {
+    MSG_GEN_VIEW_SCROLL_PAGE_UP, MSG_GEN_VIEW_SCROLL_PAGE_DOWN,
+    MSG_GEN_VIEW_SCROLL_PAGE_UP, MSG_GEN_VIEW_SCROLL_PAGE_DOWN
+};
+static const KeyboardShortcut horizKeys[] = {
+    KS_PHYSICAL | KS_CTRL | KEY(VC_PREVIOUS),
+    KS_PHYSICAL | KS_CTRL | KEY(VC_NEXT),
+    KS_PHYSICAL | KEY(VC_JOYSTICK_180), KS_PHYSICAL | KEY(VC_JOYSTICK_0)
+};
+static const Message horizMsgs[] = {
+    MSG_GEN_VIEW_SCROLL_PAGE_LEFT, MSG_GEN_VIEW_SCROLL_PAGE_RIGHT,
+    MSG_GEN_VIEW_SCROLL_PAGE_LEFT, MSG_GEN_VIEW_SCROLL_PAGE_RIGHT
+};
+
+/* HandleScrollKey: page up and down (with Ctrl: left and right) scroll
+ * a scrollable dimension; TRUE if done */
+static Boolean HandleScrollKey(optr oself, word c, word flags, word state)
+{
+    GenViewInstance *g = PGen(oself);
+    Message m = 0;
+
+    if (!(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)))
+	return FALSE;
+    if (g->GVI_vertAttrs & GVDA_SCROLLABLE)
+	m = ConvertKeyToMethod(vertKeys, vertMsgs, 4, c, flags, state);
+    if (!m && (PGen(oself)->GVI_horizAttrs & GVDA_SCROLLABLE))
+	m = ConvertKeyToMethod(horizKeys, horizMsgs, 4, c, flags, state);
+    if (!m)
+	return FALSE;
+    PVis(oself)->OLPI_optFlags |= OLPOF_KBD_CHAR_SCROLL;
+    CObjMessageP(MF_CALL, oself, m, NULL, 0, NULL, 0);
+    return TRUE;
+}
+
+/*
+ * OLPaneKbdChar: everything to the content with GVA_SEND_ALL_KBD_CHARS;
+ * else the scroll keys, then the keys of the UI (unless the mouse is
+ * pressed in the window) up the focus hierarchy; the rest to the content
+ * (releases only without GVA_DONT_SEND_KBD_RELEASES)
+ */
+@method OLPaneClass, MSG_META_KBD_CHAR
+{
+    optr c;
+
+    if (!(PGen(oself)->GVI_attrs & GVA_SEND_ALL_KBD_CHARS)) {
+	if (HandleScrollKey(oself, character, flags, state))
+	    return;
+	if (!(PVis(oself)->OLPI_optFlags & OLPOF_PRESS_GRAB) &&
+	    SpecCheckIfSpecialUIChar(character, flags, state)) {
+	    optr p = VisFindParent(oself);
+
+	    if (p && @call p::MSG_META_FUP_KBD_CHAR(character, flags, state)
+		&& character != ((CS_CONTROL << 8) | VC_LALT) &&
+		character != ((CS_CONTROL << 8) | VC_RALT))
+		return;
+	}
+	if (!(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)) &&
+	    (PGen(oself)->GVI_attrs & GVA_DONT_SEND_KBD_RELEASES))
+	    return;
+    }
+    c = Content(oself);
+    if (c)
+	@send c::MSG_META_KBD_CHAR(character, flags, state);
+}
+
+/*
+ * OLPaneFupKbdChar: a key the content did not use: the scroll keys; Enter
+ * and Tab (and the UI's keys) to the superclass (the window's
+ * navigation), unless the mouse is pressed in the window
+ */
+@method OLPaneClass, MSG_META_FUP_KBD_CHAR
+{
+    if ((flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)) &&
+	HandleScrollKey(oself, character, flags, state))
+	return TRUE;
+    if (character != ((CS_CONTROL << 8) | VC_ENTER) &&
+	character != ((CS_CONTROL << 8) | VC_TAB) &&
+	!(PGen(oself)->GVI_attrs & GVA_SEND_ALL_KBD_CHARS) &&
+	SpecCheckIfSpecialUIChar(character, flags, state))
+	return FALSE;	/* BeepIfUnusedPress: no sound yet */
+    if (PVis(oself)->OLPI_optFlags & OLPOF_PRESS_GRAB)
+	return FALSE;
+    return @callsuper();
+}
+
+/* OLPaneActivateObjectWithMnemonic: a view of generic objects takes the
+ * focus for its mnemonic */
+@method OLPaneClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    optr c;
+
+    if (!(PGen(oself)->GVI_attrs & GVA_GENERIC_CONTENTS))
+	return FALSE;
+    if (!(PVis(oself)->VI_attrs & VA_FULLY_ENABLED) ||
+	!VisCheckMnemonic(oself, character, flags, state))
+	return @callsuper();
+    if (PVis(oself)->OLCI_buildFlags & OLBF_TOOLBOX)
+	return FALSE;
+    MetaGrabFocusExclLow(oself);
+    c = Content(oself);
+    if (c)
+	(void) @call c::MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(character,
+								flags, state);
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * Navigation and the default focus
+ * ------------------------------------------------------------------- */
+
+/* OLPaneNavigate: a node that takes the focus if focusable and enabled */
+@method OLPaneClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    NavigateCommonFlags f = 0;
+
+    if ((pself->VI_attrs & VA_FULLY_ENABLED) &&
+	(PGen(oself)->GVI_attrs & GVA_FOCUSABLE))
+	f = NCF_IS_COMPOSITE | NCF_IS_FOCUSABLE;
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, f,
+			     OptrToChunk(oself));
+}
+
+/* OLPaneNavigationComplete: the navigation goes on in the content */
+@method OLPaneClass, MSG_SPEC_NOTIFY_NAVIGATION_COMPLETE
+{
+    optr c = Content(oself);
+
+    if (c)
+	@send ,forceQueue c::MSG_META_CONTENT_NAVIGATION_QUERY(oself,
+		navigateFlags & ~(NF_REACHED_ROOT | NF_COMPLETED_CIRCUIT));
+}
+
+/* OLPaneBroadcastForDefaultFocus: the view with HINT_DEFAULT_FOCUS (and
+ * the focus in its content) */
+@method OLPaneClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    if (!(pself->OLPI_flags & OLPF_MAKE_DEFAULT_FOCUS) ||
+	!(PGen(oself)->GVI_attrs & GVA_FOCUSABLE))
+	return;
+    QueueToContent(oself, MSG_META_CONTENT_APPLY_DEFAULT_FOCUS);
+    retValue->OAGP_object = oself;
+    retValue->OAGP_grabFlags = 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+/* OLPaneInitialize: a portal whose children (the areas) are outside its
+ * window; the vis parent of the generic children chosen here */
+@method OLPaneClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    pself = PVis(oself);
+    pself->VI_typeFlags |= VTF_IS_PORTAL | VTF_CHILDREN_OUTSIDE_PORTAL_WIN;
+    pself->VI_specAttrs |= SA_CUSTOM_VIS_PARENT_FOR_CHILD;
+}
+
+/* PaneOnlyGeometryHints: positioned by the parent, told when the
+ * geometry is valid, the children managed here */
+static void PaneOnlyGeometryHints(optr oself)
+{
+    OLPaneInstance *p = PVis(oself);
+
+    p->VI_geoAttrs = (p->VI_geoAttrs & ~VGA_USE_VIS_SET_POSITION) |
+		     VGA_NOTIFY_GEOMETRY_VALID;
+    p->VCI_geoAttrs = (p->VCI_geoAttrs & VCGA_HAS_MINIMUM_SIZE) |
+		      VCGA_CUSTOM_MANAGE_CHILDREN;
+}
+
+@method OLPaneClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    @callsuper();
+    PaneOnlyGeometryHints(oself);
+}
+
+/* SetupPaneColor: the frame: an inset one (or white on black) in color
+ * unless the window is white; GVA_SAME_COLOR_AS_PARENT_WIN: the light
+ * color of the display scheme */
+static void SetupPaneColor(optr oself)
+{
+    GenViewInstance *g = PGen(oself);
+    ColorQuad c = g->GVI_color;
+    OLPaneInstance *p;
+
+    if (g->GVI_attrs & GVA_SAME_COLOR_AS_PARENT_WIN) {
+	c.CQ_redOrIndex = moCS_dsLightColor;
+	c.CQ_info = 0;
+	c.CQ_green = 0;
+	c.CQ_blue = 0;
+    }
+    p = PVis(oself);
+    p->OLPI_attrs &= ~OLPA_SPECIAL_BORDER;
+    if (!(moCS_flags & CSF_BW) && !(c.CQ_info & WCF_RGB)) {
+	if (c.CQ_redOrIndex == C_BLACK)
+	    p->OLPI_attrs |= OLPA_WHITE_BORDER;
+	else if (c.CQ_redOrIndex != C_WHITE)
+	    p->OLPI_attrs |= OLPA_SPECIAL_BORDER;
+    }
+    PGen(oself)->GVI_color = c;
+}
+
+/* AddRemoveCommon: a controlled view on the application's list of them */
+static void AddRemoveCommon(optr oself, Boolean add)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (!(PGen(oself)->GVI_attrs & GVA_CONTROLLED) || !app)
+	return;
+    if (add)
+	(void) @call app::MSG_META_GCN_LIST_ADD(oself,
+				GAGCNLT_CONTROLLED_GEN_VIEW_OBJECTS,
+				MANUFACTURER_ID_GEOWORKS);
+    else
+	(void) @call app::MSG_META_GCN_LIST_REMOVE(oself,
+				GAGCNLT_CONTROLLED_GEN_VIEW_OBJECTS,
+				MANUFACTURER_ID_GEOWORKS);
+}
+
+/*
+ * SendViewHandle: the content told of the view; a generic content's tree
+ * built (as a win group, enabled as the view)
+ */
+void SendViewHandle(optr oself, SpecBuildFlags flags)
+{
+    optr c = Content(oself);
+
+    if (!c)
+	return;
+    @send ,forceQueue c::MSG_META_CONTENT_SET_VIEW(oself);
+    flags |= SBF_WIN_GROUP | SBF_TREE_BUILD;
+    if (GenCheckIfFullyEnabled(oself, FALSE))
+	flags |= SBF_VIS_PARENT_FULLY_ENABLED;
+    if (PGen(oself)->GVI_attrs & GVA_GENERIC_CONTENTS)
+	@send ,forceQueue c::MSG_SPEC_BUILD_BRANCH(flags);
+}
+
+/*
+ * OLPaneSpecBuild: the focus: the floating keyboard brought up for a view
+ * that takes text, the default focus and target hints; the frame's
+ * color; the content told (its default focus applied)
+ */
+@method OLPaneClass, MSG_SPEC_BUILD
+{
+    GenReturnParams r;
+    optr p;
+
+    @callsuper();
+    PaneOnlyGeometryHints(oself);
+    if (!(PGen(oself)->GVI_attrs & GVA_FOCUSABLE))
+	(void) ScanTargetHintHandler(oself);
+    else {
+	if (CheckIfKeyboardRequired() &&
+	    !ObjVarFindData(oself, ATTR_GEN_VIEW_DOES_NOT_ACCEPT_TEXT_INPUT)) {
+	    p = GenFindParent(oself);
+	    if (p)
+		(void) @call p::MSG_SPEC_P32_GUP_QUERY(&r,
+						SGQT_BRING_UP_KEYBOARD);
+	}
+	if (ScanFocusTargetHintHandlers(oself))
+	    PVis(oself)->OLPI_flags |= OLPF_MAKE_DEFAULT_FOCUS;
+    }
+    SetupPaneColor(oself);
+    SendViewHandle(oself, flags);
+    if (PGen(oself)->GVI_attrs & GVA_FOCUSABLE)
+	QueueToContent(oself, MSG_META_CONTENT_APPLY_DEFAULT_FOCUS);
+    AddRemoveCommon(oself, TRUE);
+    if ((PGen(oself)->GVI_attrs & GVA_NO_WIN_FRAME) && OpenCheckIfBW())
+	SpecSetFlagsOnAllCtrlParents(oself);
+}
+
+/* OLPaneVisUnbuild: off the list, the scrollbars forgotten, the focus
+ * and target released */
+@method OLPaneClass, MSG_SPEC_UNBUILD
+{
+    AddRemoveCommon(oself, FALSE);
+    pself->OLPI_horizScrollbar = 0;
+    pself->OLPI_vertScrollbar = 0;
+    MetaReleaseFocusExclLow(oself);
+    MetaReleaseTargetExclLow(oself);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The areas round the window
+ * ------------------------------------------------------------------- */
+
+static PaneArea AreaOfRequest(RequestedViewArea a)
+{
+    return (PaneArea) (a - RVA_LEFT_AREA);
+}
+
+/*
+ * SetScrollbarAreas: the scrollbars among the generic children (or below
+ * them) and their areas (the horizontal one below the window, the
+ * vertical one to its right unless they ask otherwise)
+ */
+static void SetScrollbarAreas(optr oself)
+{
+    GenFindViewRangesParams r, *rp = &r;
+    OLPaneInstance *p;
+
+    memset(&r, 0, sizeof(r));
+    GenSendToChildren(oself, MSG_GEN_FIND_VIEW_RANGES, &rp, sizeof(rp));
+    p = PVis(oself);
+    if (r.GFVRP_hRange)
+	p->OLPI_horizScrollbar = r.GFVRP_hRange;
+    if (!r.GFVRP_hRange || r.GFVRP_hViewArea == RVA_NO_AREA_CHOICE)
+	r.GFVRP_hViewArea = RVA_BOTTOM_AREA;
+    p->OLPI_horizScrArea = AreaOfRequest(r.GFVRP_hViewArea);
+    if (r.GFVRP_vRange)
+	p->OLPI_vertScrollbar = r.GFVRP_vRange;
+    if (!r.GFVRP_vRange || r.GFVRP_vViewArea == RVA_NO_AREA_CHOICE)
+	r.GFVRP_vViewArea = RVA_RIGHT_AREA;
+    p->OLPI_vertScrArea = AreaOfRequest(r.GFVRP_vViewArea);
+}
+
+/* GetObjectAreaChoice: the area of a generic child (a scroller's that of
+ * its scrollbar; no choice: the vertical scrollbar's) */
+static PaneArea GetObjectAreaChoice(optr oself, optr child)
+{
+    RequestedViewArea a = @call child::MSG_GEN_QUERY_VIEW_AREA(
+						RVA_NO_AREA_CHOICE);
+
+    if (a == RVA_X_SCROLLER_AREA)
+	return PVis(oself)->OLPI_horizScrArea;
+    if (a == RVA_NO_AREA_CHOICE || a == RVA_Y_SCROLLER_AREA)
+	return PVis(oself)->OLPI_vertScrArea;
+    return AreaOfRequest(a);
+}
+
+/*
+ * CreateAreaOLCtrl: an OLCtrl for an area that gets a second object: the
+ * first object moved into it (out of the pane, closed, if built); a
+ * column at the sides, a row above and below, filling the area's
+ * width or height, its objects at the window's side
+ */
+static ChunkHandle CreateAreaOLCtrl(optr oself, PaneArea area, optr old)
+{
+    optr ctrl = ObjInstantiate(OptrToHandle(oself),
+			       (ClassStruct *) &OLCtrlClass);
+    Boolean built = old && VisCheckIfSpecBuilt(old);
+    word set = VCGA_ORIENT_CHILDREN_VERTICALLY |
+	       ((HJ_BOTTOM_JUSTIFY_CHILDREN | WJ_RIGHT_JUSTIFY_CHILDREN) << 8);
+    word clear = 0, j;
+
+    ObjSetFlags(ctrl, OCF_IGNORE_DIRTY, 0);
+    if (built) {
+	@call old::MSG_VIS_CLOSE();
+	@call oself::MSG_VIS_REMOVE_CHILD(old, 0);
+    }
+    ObjInitializePart(ctrl, word_offsetof(VisBase, Vis_offset));
+    @call oself::MSG_VIS_ADD_CHILD(ctrl, CCO_LAST);
+    @call ctrl::MSG_VIS_MARK_INVALID(VOF_WINDOW_INVALID, VUM_MANUAL);
+    @call ctrl::MSG_VIS_SET_ATTRS(VA_FULLY_ENABLED, 0, VUM_MANUAL);
+    if (built) {
+	@call ctrl::MSG_VIS_ADD_CHILD(old, CCO_LAST);
+	@call old::MSG_VIS_MARK_INVALID(VOF_WINDOW_INVALID, VUM_MANUAL);
+    }
+    /* at the window: right justified on the left, bottom justified
+     * above; left and top justified on the other sides (cleared) */
+    if (area >= PA_RIGHT) {
+	clear = set & 0xff00;
+	set &= 0x00ff;
+    }
+    if (area & 1) {
+	/* a row: the orientation cleared */
+	j = set & 0xff;
+	set = (set & 0xff00) | (clear & 0xff);
+	clear = (clear & 0xff00) | j;
+	set = (set & ((VCGDA_HEIGHT_JUSTIFICATION << 8) | 0xff)) |
+	      (VCGDA_EXPAND_WIDTH_TO_FIT_PARENT << 8);
+	clear &= (VCGDA_HEIGHT_JUSTIFICATION << 8) | 0xff;
+    } else {
+	set = (set & ((VCGDA_WIDTH_JUSTIFICATION << 8) | 0xff)) |
+	      (VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT << 8);
+	clear &= (VCGDA_WIDTH_JUSTIFICATION << 8) | 0xff;
+    }
+    {
+	GeoAndDimensionAttrs s, c;
+
+	s.GADA_geoAttrs = (VisCompGeoAttrs) set &
+			  ~VCGA_ONLY_DRAWS_IN_MARGINS;
+	s.GADA_geoDimensionAttrs = (VisCompGeoDimensionAttrs) (set >> 8);
+	c.GADA_geoAttrs = (VisCompGeoAttrs) clear;
+	c.GADA_geoDimensionAttrs = (VisCompGeoDimensionAttrs) (clear >> 8);
+	@call ctrl::MSG_VIS_COMP_SET_GEO_ATTRS(s, c);
+    }
+    return OptrToChunk(ctrl);
+}
+
+/*
+ * AddObjectToArea: the object is the area's; if it has one already that
+ * is not an OLCtrl (an item group is not one here), both go into a new
+ * OLCtrl
+ */
+static void AddObjectToArea(optr oself, optr child, PaneArea area)
+{
+    ChunkHandle have = PVis(oself)->OLPI_areaObj[area];
+    optr old;
+
+    if (have) {
+	old = ConstructOptr(OptrToHandle(oself), have);
+	if (VisCheckIfVisGrown(old)) {
+	    optr s = VisGetSpecificVisObject(old, 0);
+
+	    if (s && ObjIsObjectInClass(s, &OLCtrlClass) &&
+		!ObjIsObjectInClass(s, &OLItemGroupClass))
+		return;
+	}
+	have = CreateAreaOLCtrl(oself, area, old);
+    } else
+	have = OptrToChunk(child);
+    PVis(oself)->OLPI_areaObj[area] = have;
+}
+
+/* FindAreaObjects: every generic child gets an area */
+static void FindAreaObjects(optr oself)
+{
+    word i;
+    optr c;
+
+    for (i = 0; (c = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++)
+	AddObjectToArea(oself, c, GetObjectAreaChoice(oself, c));
+}
+
+/*
+ * OLPaneUpdateSpecBuild: the scrollbars and the areas found before the
+ * branch is built; the hints; the scrollbars made if needed
+ */
+static void PaneHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		     word dataType, void *data)
+{
+    OLPaneInstance *p = PVis(ConstructOptr(mh, chnk));
+
+    (void) extra;
+    (void) data;
+    switch (dataType) {
+    case HINT_VIEW_LEAVE_ROOM_FOR_VERT_SCROLLER:
+	p->OLPI_flags |= OLPF_LEAVE_ROOM_FOR_VERT_SCROLLER;
+	break;
+    case HINT_VIEW_LEAVE_ROOM_FOR_HORIZ_SCROLLER:
+	p->OLPI_flags |= OLPF_LEAVE_ROOM_FOR_HORIZ_SCROLLER;
+	break;
+    case ATTR_GEN_VIEW_DO_NOT_WIN_SCROLL:
+	p->OLPI_attrs |= OLPA_NON_SCROLLING;
+	break;
+    case HINT_VIEW_REMOVE_SCROLLERS_WHEN_NOT_SCROLLABLE:
+	p->OLPI_attrs |= OLPA_REMOVE_SCROLLBARS_WHEN_NOT_SCROLLABLE;
+	break;
+    }
+}
+
+static VarDataCHandler paneHints[] = {
+    { HINT_VIEW_LEAVE_ROOM_FOR_VERT_SCROLLER, PaneHint },
+    { HINT_VIEW_LEAVE_ROOM_FOR_HORIZ_SCROLLER, PaneHint },
+    { ATTR_GEN_VIEW_DO_NOT_WIN_SCROLL, PaneHint },
+    { HINT_VIEW_REMOVE_SCROLLERS_WHEN_NOT_SCROLLABLE, PaneHint }
+};
+
+@method OLPaneClass, MSG_SPEC_BUILD_BRANCH
+{
+    OLPaneInstance *p = pself;
+
+    p->OLPI_horizScrArea = 0;
+    p->OLPI_vertScrArea = 0;
+    memset(p->OLPI_areaObj, 0, sizeof(p->OLPI_areaObj));
+    SetScrollbarAreas(oself);
+    FindAreaObjects(oself);
+    @callsuper();
+    OpenScanVarData(oself, sizeof(paneHints) / sizeof(paneHints[0]),
+		    paneHints, NULL);
+    EnsureScrollbars(oself);
+}
+
+/*
+ * OLPaneGetVisParent: a generic child goes into the OLCtrl of its area,
+ * if it is not the area's object itself (then into the pane)
+ */
+@method OLPaneClass, MSG_SPEC_DETERMINE_VIS_PARENT_FOR_CHILD
+{
+    ChunkHandle a = pself->OLPI_areaObj[GetObjectAreaChoice(oself, child)];
+
+    if (!a || a == OptrToChunk(child))
+	return oself;
+    return ConstructOptr(OptrToHandle(oself), a);
+}
+
+/* OLPaneAddGenChild: a child added once built gets an area (GenView
+ * calls this before GenClass adds it) */
+@method OLPaneClass, MSG_GEN_ADD_CHILD
+{
+    (void) flags;
+    if (VisCheckIfSpecBuilt(oself))
+	AddObjectToArea(oself, child, GetObjectAreaChoice(oself, child));
+}
+
+/* OLPaneRemoveGenChild: the child out of the areas */
+@method OLPaneClass, MSG_GEN_REMOVE_CHILD
+{
+    int i;
+
+    (void) flags;
+    for (i = 0; i < 4; i++)
+	if (pself->OLPI_areaObj[i] == OptrToChunk(child))
+	    pself->OLPI_areaObj[i] = 0;
+}
+
+/* OLPaneSetMonikerOffset: the moniker at the window's left top */
+@method OLPaneClass, MSG_SPEC_CTRL_SET_MONIKER_OFFSET
+{
+    sword wx, wy;
+    word f = GetFrameWidth(oself);
+
+    GetWinLeftTop(oself, &wx, &wy);
+    pself = PVis(oself);
+    @callsuper oself::OLPaneClass::MSG_SPEC_CTRL_SET_MONIKER_OFFSET(
+		x + wx + f - pself->VI_bounds.R_left,
+		y + wy + f - pself->VI_bounds.R_top);
+}
+
+@method OLPaneClass, MSG_SPEC_VIEW_SET_PANE_FLAGS
+{
+    pself->OLPI_flags = (pself->OLPI_flags | set) & ~clear;
+}
+
+/* ---------------------------------------------------------------------
+ * The scrollbars
+ * ------------------------------------------------------------------- */
+
+optr OLPaneScrollbar(optr oself, Boolean vertical)
+{
+    ChunkHandle c = vertical ? PVis(oself)->OLPI_vertScrollbar
+			     : PVis(oself)->OLPI_horizScrollbar;
+
+    return c ? ConstructOptr(OptrToHandle(oself), c) : 0;
+}
+
+static Boolean LeavingSpace(optr oself, Boolean vertical)
+{
+    return (PVis(oself)->OLPI_flags &
+	    (vertical ? OLPF_LEAVE_ROOM_FOR_VERT_SCROLLER
+		      : OLPF_LEAVE_ROOM_FOR_HORIZ_SCROLLER)) != 0;
+}
+
+/*
+ * SetupScrollbarIfNeeded: a scrollable dimension (that displays its
+ * scrollbar, or leaves room for it) gets a scrollbar: the application's
+ * set up or a new one; hidden (not managed) until needed.  A dimension
+ * that leaves room has its scrollbar drawn but not managed.
+ */
+static void SetupScrollbarIfNeeded(optr oself, Boolean vertical)
+{
+    GenViewInstance *g = PGen(oself);
+    GenViewDimensionAttrs da = vertical ? g->GVI_vertAttrs
+					: g->GVI_horizAttrs;
+    OpenScrollbarArgs a;
+    optr sb = OLPaneScrollbar(oself, vertical);
+    PaneArea area;
+
+    if (sb)
+	((VisInstance *) ObjDerefVis(sb))->VI_attrs &=
+		~(VA_DRAWABLE | VA_DETECTABLE | VA_MANAGED);
+    if (!LeavingSpace(oself, vertical) &&
+	((da & GVDA_DONT_DISPLAY_SCROLLBAR) || !(da & GVDA_SCROLLABLE)))
+	return;
+    g = PGen(oself);
+    a.OSA_actionMsg = vertical ? VERTICAL_VIEW_BASE_MESSAGE
+			       : HORIZONTAL_VIEW_BASE_MESSAGE;
+    a.OSA_vertical = vertical;
+    if (vertical) {
+	a.OSA_minimum = g->GVI_docBounds.RD_top;
+	a.OSA_maximum = g->GVI_docBounds.RD_bottom;
+	a.OSA_value = g->GVI_origin.PDF_y.DWF_int;
+	a.OSA_increment = g->GVI_increment.PD_y;
+    } else {
+	a.OSA_minimum = g->GVI_docBounds.RD_left;
+	a.OSA_maximum = g->GVI_docBounds.RD_right;
+	a.OSA_value = g->GVI_origin.PDF_x.DWF_int;
+	a.OSA_increment = g->GVI_increment.PD_x;
+    }
+    if (sb)
+	OpenSetScrollbarAttrs(sb, oself, FALSE, &a);
+    else {
+	sb = OpenAddScrollbar(oself, vertical ? HINT_VALUE_Y_SCROLLER
+					      : HINT_VALUE_X_SCROLLER,
+			      FALSE,
+			      ObjVarFindData(oself,
+				  HINT_VIEW_IMMEDIATE_DRAG_UPDATES) != NULL,
+			      &a);
+	/* not saved if the view is not */
+	if (ObjGetFlags(oself) & OCF_IGNORE_DIRTY)
+	    ObjSetFlags(sb, OCF_IGNORE_DIRTY, 0);
+	if (vertical)
+	    PVis(oself)->OLPI_vertScrollbar = OptrToChunk(sb);
+	else
+	    PVis(oself)->OLPI_horizScrollbar = OptrToChunk(sb);
+    }
+    /* room left but not shown: managed, not drawn */
+    if (LeavingSpace(oself, vertical))
+	@call sb::MSG_VIS_SET_ATTRS(0, VA_DRAWABLE | VA_DETECTABLE,
+				    VUM_MANUAL);
+    /* the orientation of its area: vertical at the sides */
+    area = vertical ? PVis(oself)->OLPI_vertScrArea
+		    : PVis(oself)->OLPI_horizScrArea;
+    @call sb::MSG_SET_ORIENTATION(!(area & 1));
+}
+
+void EnsureScrollbars(optr oself)
+{
+    SetupScrollbarIfNeeded(oself, TRUE);
+    SetupScrollbarIfNeeded(oself, FALSE);
+}
+
+static void CallScrollbars(optr oself, Message msg, WWFixedAsDWord horiz,
+			   WWFixedAsDWord vert)
+{
+    optr h = OLPaneScrollbar(oself, FALSE), v = OLPaneScrollbar(oself, TRUE);
+
+    if (v)
+	CObjMessageP(MF_CALL, v, msg, &vert, sizeof(vert), NULL, 0);
+    if (h)
+	CObjMessageP(MF_CALL, h, msg, &horiz, sizeof(horiz), NULL, 0);
+}
+
+/* OLPaneFinishSetDocSize: the scrollbars' range; the geometry anew */
+void OLPaneFinishSetDocSize(optr oself)
+{
+    RectDWord b = PGen(oself)->GVI_docBounds;
+
+    CallScrollbars(oself, MSG_GEN_VALUE_SET_MINIMUM, b.RD_left, b.RD_top);
+    CallScrollbars(oself, MSG_GEN_VALUE_SET_MAXIMUM, b.RD_right,
+		   b.RD_bottom);
+    if (VisCheckIfSpecBuilt(oself))
+	FullyInvalidateView(oself);
+    SendNotifyCommon(oself);
+}
+
+/*
+ * OLPaneSetDocBounds: the origin kept in the new bounds (at the end if
+ * tail oriented); a tracking content finishes it when it answers
+ */
+@method OLPaneClass, MSG_GEN_VIEW_SET_DOC_BOUNDS
+{
+    (void) bottom; (void) right; (void) top; (void) left;
+    OLPaneAdjustOrigin(oself, SA_SCROLL | OLPSF_ALWAYS_SEND_NORMALIZE |
+		       OLPSF_DOC_SIZE_CHANGE | OLPSF_ABSOLUTE);
+    if ((PGen(oself)->GVI_attrs & GVA_TRACK_SCROLLING) &&
+	PVis(oself)->OLPI_window)
+	return;
+    OLPaneFinishSetDocSize(oself);
+}
+
+/* OLPaneSetIncrement: the scrollbars' increment (not a zero one) */
+@method OLPaneClass, MSG_GEN_VIEW_SET_INCREMENT
+{
+    optr h = OLPaneScrollbar(oself, FALSE), v = OLPaneScrollbar(oself, TRUE);
+    PointDWord i = PGen(oself)->GVI_increment;
+
+    (void) yIncrement; (void) xIncrement;
+    if (v && i.PD_y)
+	@call v::MSG_GEN_VALUE_SET_INCREMENT(i.PD_y);
+    if (h && i.PD_x)
+	@call h::MSG_GEN_VALUE_SET_INCREMENT(i.PD_x);
+}
+
+/*
+ * OLPaneSetDimensionAttrs: the scrollbars made or hidden for the new
+ * attributes, set to the origin and the page size
+ */
+@method OLPaneClass, MSG_GEN_VIEW_SET_DIMENSION_ATTRS
+{
+    const byte m = GVDA_SCROLLABLE | GVDA_DONT_DISPLAY_SCROLLBAR;
+    optr h, v;
+    PointDWord o;
+
+    (void) updateMode;
+    if (!(horizAttrsToSetClear.DATSC_attrsToSet & m) &&
+	!(horizAttrsToSetClear.DATSC_attrsToClear & m) &&
+	!(vertAttrsToSetClear.DATSC_attrsToSet & m) &&
+	!(vertAttrsToSetClear.DATSC_attrsToClear & m))
+	return;
+    h = OLPaneScrollbar(oself, FALSE);
+    v = OLPaneScrollbar(oself, TRUE);
+    if (h && ((horizAttrsToSetClear.DATSC_attrsToSet &
+	       GVDA_DONT_DISPLAY_SCROLLBAR) ||
+	      (horizAttrsToSetClear.DATSC_attrsToClear & GVDA_SCROLLABLE)))
+	@call h::MSG_VIS_INVALIDATE();
+    if (v && ((vertAttrsToSetClear.DATSC_attrsToSet &
+	       GVDA_DONT_DISPLAY_SCROLLBAR) ||
+	      (vertAttrsToSetClear.DATSC_attrsToClear & GVDA_SCROLLABLE)))
+	@call v::MSG_VIS_INVALIDATE();
+    EnsureScrollbars(oself);
+    h = OLPaneScrollbar(oself, FALSE);
+    v = OLPaneScrollbar(oself, TRUE);
+    if (h)
+	@call h::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID, VUM_MANUAL);
+    if (v)
+	@call v::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID, VUM_MANUAL);
+    GetOrigin(oself, &o);
+    if (h)
+	@call h::MSG_GEN_VALUE_SET_VALUE(o.PD_x, FALSE);
+    if (v)
+	@call v::MSG_GEN_VALUE_SET_VALUE(o.PD_y, FALSE);
+    PVis(oself)->OLPI_pageWidth = -1;
+    PVis(oself)->OLPI_pageHeight = -1;
+    (void) OLPaneSetNewPageSize(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Opening, closing, a new content
+ * ------------------------------------------------------------------- */
+
+/* OLPaneVisOpen: the content told the view opens */
+@method OLPaneClass, MSG_VIS_OPEN
+{
+    optr c = Content(oself);
+
+    if (c)
+	@send ,forceQueue c::MSG_META_CONTENT_VIEW_OPENING(oself);
+    @callsuper();
+}
+
+/* OLPaneVisClose: the content told, the mouse let go */
+@method OLPaneClass, MSG_VIS_CLOSE
+{
+    optr p = VisFindParent(oself);
+
+    QueueToContent(oself, MSG_META_CONTENT_VIEW_CLOSING);
+    if (p)
+	@call p::MSG_VIS_RELEASE_GADGET_EXCL(oself);
+    @callsuper();
+}
+
+/* OLPaneNotifyNotEnabled: the mouse let go once disabled */
+@method OLPaneClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    optr p;
+
+    if (!@callsuper())
+	return FALSE;
+    p = VisFindParent(oself);
+    if (p)
+	@call p::MSG_VIS_RELEASE_GADGET_EXCL(oself);
+    return TRUE;
+}
+
+/*
+ * OLPaneSetContent: the old content told it loses the focus, target,
+ * the view and its window; the new one gets the view, the origin, the
+ * scale, the window and (if open) the focus and target the view has
+ */
+@method OLPaneClass, MSG_GEN_VIEW_SET_CONTENT
+{
+    optr old = Content(oself);
+    OLPaneAttrs a;
+    GetScaleParams s;
+    PointDWord o;
+
+    if (old == content)
+	return;
+    memset(&pself->OLPI_targetInfo, 0, sizeof(pself->OLPI_targetInfo));
+    if (old) {
+	if (pself->VI_attrs & VA_REALIZED) {
+	    optr p = VisFindParent(oself);
+
+	    if (p)
+		@call p::MSG_VIS_RELEASE_GADGET_EXCL(oself);
+	    a = PVis(oself)->OLPI_attrs;
+	    if (a & OLPA_SYS_FOCUS)
+		@send ,forceQueue old::MSG_META_LOST_SYS_FOCUS_EXCL();
+	    if (a & OLPA_APP_FOCUS)
+		@send ,forceQueue old::MSG_META_LOST_FOCUS_EXCL();
+	    if (a & OLPA_SYS_TARGET)
+		@send ,forceQueue old::MSG_META_LOST_SYS_TARGET_EXCL();
+	    if (a & OLPA_APP_TARGET)
+		@send ,forceQueue old::MSG_META_LOST_TARGET_EXCL();
+	    @send ,forceQueue old::MSG_META_CONTENT_VIEW_CLOSING();
+	    @send ,forceQueue old::MSG_META_CONTENT_VIEW_WIN_CLOSED(
+			PVis(oself)->OLPI_window);
+	}
+	@send ,forceQueue old::MSG_META_CONTENT_SET_VIEW(0);
+    }
+    PGen(oself)->GVI_content = content;
+    SendViewHandle(oself, 0);
+    GetOrigin(oself, &o);
+    SendNewOriginToOD(oself, &o);
+    @call oself::MSG_GEN_VIEW_GET_SCALE_FACTOR(&s);
+    SendNewScaleToOD(oself, s.GSP_xScaleFactor, s.GSP_yScaleFactor);
+    OLPaneWindowSetContent(oself);
+    if (!(PVis(oself)->VI_attrs & VA_REALIZED) || !content)
+	return;
+    @send ,forceQueue content::MSG_META_CONTENT_VIEW_OPENING(oself);
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, VUM_NOW);
+    a = PVis(oself)->OLPI_attrs;
+    if (a & OLPA_APP_FOCUS)
+	@send ,forceQueue content::MSG_META_GAINED_FOCUS_EXCL();
+    if (a & OLPA_SYS_FOCUS)
+	@send ,forceQueue content::MSG_META_GAINED_SYS_FOCUS_EXCL();
+    if (a & OLPA_APP_TARGET)
+	@send ,forceQueue content::MSG_META_GAINED_TARGET_EXCL();
+    if (a & OLPA_SYS_TARGET)
+	@send ,forceQueue content::MSG_META_GAINED_SYS_TARGET_EXCL();
+}
+
+/* ---------------------------------------------------------------------
+ * The window's state
+ * ------------------------------------------------------------------- */
+
+@method OLPaneClass, MSG_GEN_VIEW_GET_WINDOW
+{
+    return pself->OLPI_window;
+}
+
+/* OLPaneGetVisibleRect: the document shown (right and bottom exclusive) */
+@method OLPaneClass, MSG_GEN_VIEW_GET_VISIBLE_RECT
+{
+    GStateHandle gs;
+
+    if (!pself->OLPI_window)
+	return;
+    gs = GrCreateState(pself->OLPI_window);
+    GrGetWinBoundsDWord(gs, rect);
+    GrDestroyState(gs);
+    rect->RD_right++;
+    rect->RD_bottom++;
+}
+
+/* OLPaneSuspendUpdate: the window's drawing suspended (remembered if it
+ * has none yet, so the unsuspend is skipped) */
+@method OLPaneClass, MSG_GEN_VIEW_SUSPEND_UPDATE
+{
+    if (!pself->OLPI_window) {
+	pself->OLPI_optFlags |= OLPOF_COULDNT_SUSPEND;
+	return;
+    }
+    WinSuspendUpdate(pself->OLPI_window);
+    PVis(oself)->OLPI_optFlags &= ~OLPOF_COULDNT_SUSPEND;
+}
+
+@method OLPaneClass, MSG_GEN_VIEW_UNSUSPEND_UPDATE
+{
+    if (!(pself->OLPI_optFlags & OLPOF_COULDNT_SUSPEND) &&
+	pself->OLPI_window)
+	WinUnSuspendUpdate(pself->OLPI_window);
+    PVis(oself)->OLPI_optFlags &= ~OLPOF_COULDNT_SUSPEND;
+}
+
+/* OLPaneSetPtrImage: the window's pointer (the window level one kept) */
+@method OLPaneClass, MSG_GEN_VIEW_SET_PTR_IMAGE
+{
+    if (level == PIL_WINDOW)
+	pself->OLPI_ptrImage = pointerDef;
+    if (pself->OLPI_window)
+	WinSetPtrImage(pself->OLPI_window, level, pointerDef);
+}
+
+/* OLPaneSetColor: the window's color (the generic part has it) */
+@method OLPaneClass, MSG_GEN_VIEW_SET_COLOR
+{
+    ColorQuad c = PGen(oself)->GVI_color;
+
+    (void) indexOrRed; (void) flags; (void) greenBlue;
+    if (!pself->OLPI_window)
+	return;
+    WinSetInfo(pself->OLPI_window, WIT_COLOR,
+	       (optr) (c.CQ_redOrIndex | ((word) c.CQ_info << 8) |
+		       ((dword) c.CQ_green << 16) |
+		       ((dword) c.CQ_blue << 24)));
+    @call oself::MSG_GEN_VIEW_REDRAW_CONTENT();
+}
+
+/* OLPaneSetDragBounds: where drag scrolling stops (none if all zero) */
+@method OLPaneClass, MSG_GEN_VIEW_SET_DRAG_BOUNDS
+{
+    pself->OLPI_dragBounds.RD_left = left;
+    pself->OLPI_dragBounds.RD_top = top;
+    pself->OLPI_dragBounds.RD_right = right;
+    pself->OLPI_dragBounds.RD_bottom = bottom;
+    if (left || top || right || bottom)
+	pself->OLPI_optFlags |= OLPOF_LIMIT_DRAG_SCROLLING;
+    else
+	pself->OLPI_optFlags &= ~OLPOF_LIMIT_DRAG_SCROLLING;
+}

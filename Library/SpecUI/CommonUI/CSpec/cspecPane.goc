@@ -1,0 +1,12 @@
+/*
+ * cspecPane.goc -- the build routine of the view (after cspecPane.asm):
+ * a GenView is an OLPane.
+ */
+@include "CView/cviewInt.goh"
+
+ClassStruct *OLBuildPane(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLPaneClass;
+}

@@ -145,6 +145,11 @@ void GenUnlock(optr obj);
 
 typedef Boolean GenChildCallback(optr parent, optr child, void *data);
 Boolean GenCallChildren(optr obj, GenChildCallback *cb, void *data);
+/* Gen/genClass.goc: the view area the hints of an object ask for
+ * (HINT_SEEK_*_OF_VIEW, HINT_SEEK_*_SCROLLER_AREA); the unambiguous one
+ * is no choice for a scroller area */
+RequestedViewArea GetViewAreaRequest(optr obj);
+RequestedViewArea GetUnambiguousViewAreaRequest(optr obj);
 word GenCountChildren(optr obj);
 void GenRemoveGenChildLow(optr obj, optr child, CompChildFlags flags);
 void GenAddChildUpwardLinkOnly(optr obj, optr child);
@@ -212,7 +217,6 @@ void VisAddChildRelativeToGen(optr genObj, optr visObj, optr visParent,
 Boolean VisSpecCheckForPosHints(optr obj, sword *x, sword *y);
 void VisIfFlagSetCallGenChildren(optr obj, Message msg, const void *params,
 				 word paramSize, byte flags);
-optr VisGetSpecificVisObject(optr obj, SpecBuildFlags flags);
 void VisSetNonWinGroupUsable(optr obj, VisUpdateMode mode);
 void VisUnbuildChildren(optr obj, SpecBuildFlags flags);
 void VisSetNotRealized(optr obj);

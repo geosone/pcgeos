@@ -76,8 +76,15 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CSpec/cspecItem.goc
                ${c}/CSpec/cspecCUAS.goc
                ${c}/CSpec/cspecValue.goc
+               ${c}/CSpec/cspecPane.goc
+               ${c}/CSpec/cspecContent.goc
+               ${c}/CComp/copenContent.goc
                ${c}/CView/cviewScrollbar.goc
                ${c}/CView/cviewScrollbarSelect.goc
+               ${c}/CView/cviewPane.goc
+               ${c}/CView/cviewPaneGeometry.goc
+               ${c}/CView/cviewPaneScroll.goc
+               ${c}/CView/cviewPaneWindow.goc
                ${CMAKE_CURRENT_SOURCE_DIR}/Motif/View/viewScrollbarDraw.goc
            INCLUDES ${c}
            PROTOCOL 727.0)

@@ -1,0 +1,21 @@
+/*
+ * olContentClass.goh -- OLContentClass, the specific part of a
+ * GenContent (after Include/Internal/SpecUI/olContentClass.def), for
+ * Port32: a VisContent in the view's window whose children are the
+ * generic content's children; the keyboard navigation inside it.
+ */
+#ifndef __OLCONTENTCLASS_GOH
+#define __OLCONTENTCLASS_GOH
+
+@include <Objects/vCntC.goh>
+@include <Objects/gContC.goh>
+
+@deflib motif
+
+@class OLContentClass, VisContentClass;
+@uses GenContentClass;
+@endc;
+
+@endlib
+
+#endif

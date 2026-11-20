@@ -30,6 +30,8 @@
 @include <Internal/SpecUI/olItemGroupClass.goh>
 @include <Internal/SpecUI/olItemClass.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Internal/SpecUI/olPaneClass.goh>
+@include <Internal/SpecUI/olContentClass.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -65,6 +67,8 @@ typedef struct {
     dword		UBS_scrollValue;
     sword		UBS_scrollBar[3];
     word		UBS_scrollDrag;
+    /* the view's page (width, height) and window size */
+    sword		UBS_view[4];
 } UBState;
 
 UBState ubState;
@@ -180,7 +184,34 @@ UBState ubState;
 }
 @object GenDisplayClass UBDoc2 = {
     GI_visMoniker = "Doc 2";
-    GI_comp = @UBRadio, @UBChecks, @UBSize, @UBScroll;
+    GI_comp = @UBRadio, @UBChecks, @UBSize, @UBScroll, @UBView, @UBView2;
+}
+/* in Doc 2: a view of a 2000 x 300 document that scrolls both ways
+ * (its window fixed at 200 x 40: the screens of the tests differ) */
+@object GenViewClass UBView = {
+    GVI_content = UBContent;
+    GVI_docBounds = {0, 0, 2000, 300};
+    GVI_increment = {10, 10};
+    GVI_horizAttrs = @default | GVDA_SCROLLABLE;
+    GVI_vertAttrs = @default | GVDA_SCROLLABLE;
+    HINT_FIXED_SIZE = { SST_PIXELS | 200, SST_PIXELS | 40, 0 };
+}
+/* in Doc 2: a view of generic objects (a GenContent with a trigger) */
+@object GenViewClass UBView2 = {
+    GVI_attrs = @default | GVA_GENERIC_CONTENTS;
+    GVI_content = UBGContent;
+    GVI_vertAttrs = @default | GVDA_SCROLLABLE;
+    HINT_FIXED_SIZE = { SST_PIXELS | 100, SST_PIXELS | 30, 0 };
+}
+@object GenContentClass UBGContent = {
+    GI_comp = @UBInside;
+    GCI_genView = UBView2;
+}
+@object GenTriggerClass UBInside = {
+    GI_visMoniker = "Inside";
+}
+@object VisContentClass UBContent = {
+    VCNI_attrs = VCNA_VIEW_DOC_BOUNDS_SET_MANUALLY;
 }
 /* in Doc 2: a radio group (an exclusive one) and check boxes */
 @object GenItemGroupClass UBRadio = {
@@ -1342,8 +1373,10 @@ static Rectangle ScreenBounds(WindowHandle w)
 	VisData(@UBScroll, &sb, sizeof(sb));
 	UBCHECK(sb.OLSBI_scrArea ==
 		r.R_bottom - r.R_top - (sb.OLSBI_arrowSize + 3) * 2);
+	/* (the ratio a WWFixed fraction: a fifth rounded either way) */
 	UBCHECK(sb.OLSBI_elevOffset == 0 &&
-		sb.OLSBI_elevLen == sb.OLSBI_scrArea / 5);
+		sb.OLSBI_elevLen >= sb.OLSBI_scrArea / 5 - 1 &&
+		sb.OLSBI_elevLen <= sb.OLSBI_scrArea / 5);
 	UBCHECK(sb.OLSBI_state & OLSS_AT_TOP);
 	UBCHECK(r.R_right - r.R_left == sb.OLSBI_arrowSize + 2);
 	UBCHECK(r.R_bottom - r.R_top >= (sb.OLSBI_arrowSize + 3) * 2);
@@ -1429,6 +1462,90 @@ static Rectangle ScreenBounds(WindowHandle w)
 	UBCHECK(ubState.UBS_scrollApplies == 3);
 	UBCHECK(ubState.UBS_scrollAction == OLSS_DRAG_AREA - 1);
 	UBCHECK(IntegerOf(ubState.UBS_scrollValue) == ubState.UBS_scrollDrag);
+	break;
+    }
+    case 34: {
+	/* Doc 2's view: Motif's OLPane with a scrollbar each way and a
+	 * window; its page the window's size (no scale); a step down, then
+	 * an origin past the document's end: kept at the end less the
+	 * page */
+	OLPaneInstance p;
+	GenViewInstance g;
+
+	UBCHECK(InClass(@UBView, (ClassStruct *) &OLPaneClass));
+	VisData(@UBView, &p, sizeof(p));
+	UBCHECK(p.OLPI_vertScrollbar && p.OLPI_horizScrollbar);
+	UBCHECK(InClass(ConstructOptr(OptrToHandle(@UBView),
+				      p.OLPI_vertScrollbar),
+			(ClassStruct *) &OLScrollbarClass));
+	UBCHECK(p.OLPI_window != 0);
+	UBCHECK(p.OLPI_pageWidth == p.OLPI_winWidth &&
+		p.OLPI_pageHeight == p.OLPI_winHeight);
+	UBCHECK(p.OLPI_winWidth > 0 && p.OLPI_winHeight > 0 &&
+		p.OLPI_winWidth < 2000 && p.OLPI_winHeight < 300);
+	ubState.UBS_view[0] = p.OLPI_pageWidth;
+	ubState.UBS_view[1] = p.OLPI_pageHeight;
+	{
+	    Rectangle r = Bounds(@UBView);
+
+	    ubState.UBS_view[2] = r.R_right - r.R_left;
+	    ubState.UBS_view[3] = r.R_bottom - r.R_top;
+	}
+	@call UBView::MSG_GEN_VIEW_SCROLL_DOWN();
+	ObjLockObjBlock(OptrToHandle(@UBView));
+	g = *(GenViewInstance *) ObjDerefGen(@UBView);
+	MemUnlock(OptrToHandle(@UBView));
+	UBCHECK(g.GVI_origin.PDF_y.DWF_int == 10 &&
+		g.GVI_origin.PDF_x.DWF_int == 0);
+	@call UBView::MSG_GEN_VIEW_SET_ORIGIN(5000, 5000);
+	ObjLockObjBlock(OptrToHandle(@UBView));
+	g = *(GenViewInstance *) ObjDerefGen(@UBView);
+	MemUnlock(OptrToHandle(@UBView));
+	UBCHECK(g.GVI_origin.PDF_x.DWF_int == 2000 - p.OLPI_pageWidth);
+	UBCHECK(g.GVI_origin.PDF_y.DWF_int == 300 - p.OLPI_pageHeight);
+	VisData(@UBView, &p, sizeof(p));
+	UBCHECK((p.OLPI_flags & (OLPF_AT_RIGHT_EDGE | OLPF_AT_BOTTOM_EDGE)) ==
+		(OLPF_AT_RIGHT_EDGE | OLPF_AT_BOTTOM_EDGE));
+	break;
+    }
+    case 35: {
+	/* the content was given the window and told the origin; the
+	 * scrollbars show it (a view's scrollbar values are document
+	 * coordinates, not WWFixed); to the top: the vertical origin 0 */
+	VisContentInstance c;
+	OLPaneInstance p;
+	optr sb;
+
+	VisData(@UBView, &p, sizeof(p));
+	VisData(@UBContent, &c, sizeof(c));
+	UBCHECK(c.VCNI_window == p.OLPI_window);
+	UBCHECK(c.VCNI_docOrigin.PD_x == 2000 - p.OLPI_pageWidth &&
+		c.VCNI_docOrigin.PD_y == 300 - p.OLPI_pageHeight);
+	sb = ConstructOptr(OptrToHandle(@UBView), p.OLPI_vertScrollbar);
+	UBCHECK((sdword) @call sb::MSG_GEN_VALUE_GET_VALUE() ==
+		300 - p.OLPI_pageHeight);
+	sb = ConstructOptr(OptrToHandle(@UBView), p.OLPI_horizScrollbar);
+	UBCHECK((sdword) @call sb::MSG_GEN_VALUE_GET_VALUE() ==
+		2000 - p.OLPI_pageWidth);
+	@call UBView::MSG_GEN_VIEW_SCROLL_TOP();
+	VisData(@UBView, &p, sizeof(p));
+	UBCHECK(!(p.OLPI_flags & OLPF_AT_BOTTOM_EDGE) &&
+		(p.OLPI_flags & OLPF_AT_RIGHT_EDGE));
+	sb = ConstructOptr(OptrToHandle(@UBView), p.OLPI_vertScrollbar);
+	UBCHECK(@call sb::MSG_GEN_VALUE_GET_VALUE() == 0);
+	/* the generic view: its content an OLContent in its window, the
+	 * trigger built inside it */
+	{
+	    OLPaneInstance p2;
+	    VisContentInstance c2;
+
+	    UBCHECK(InClass(@UBGContent, (ClassStruct *) &OLContentClass));
+	    VisData(@UBView2, &p2, sizeof(p2));
+	    VisData(@UBGContent, &c2, sizeof(c2));
+	    UBCHECK(p2.OLPI_window && c2.VCNI_window == p2.OLPI_window);
+	    UBCHECK(VisCheckIfSpecBuilt(@UBInside) &&
+		    @call UBInside::MSG_VIS_FIND_PARENT() == @UBGContent);
+	}
 	break;
     }
     }

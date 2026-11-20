@@ -1,0 +1,13 @@
+/*
+ * cspecContent.goc -- the build routine of the content (after
+ * cspecContent.asm): a GenContent is an OLContent.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olContentClass.goh>
+
+ClassStruct *OLBuildContent(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLContentClass;
+}

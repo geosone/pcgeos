@@ -83,6 +83,7 @@ typedef ByteFlags ScrollFlags;
 #define SF_SCALE_TO_FIT		0x08
 #define SF_SETUP_HAPPENED	0x04
 #define SF_EC_SETUP_CALLED	0x02	/*Internal*/
+#define SF_KBD_RELATED_SCROLL	0x01
 
 typedef struct {
     ScrollAction	TSP_action;

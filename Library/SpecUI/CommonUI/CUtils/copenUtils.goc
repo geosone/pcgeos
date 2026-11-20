@@ -7,6 +7,7 @@
  * OpenGetPtrImage are in cutilsPtrImages.goc.
  */
 @include "cGeode.goh"
+@include <Internal/SpecUI/olScrollbarClass.goh>
 
 /* OpenGetLineBounds: the bounds of the object for drawing lines: the
  * right and bottom one pixel in */
@@ -708,4 +709,207 @@ MenuSepFlags OpenForwardMenuSepQuery(optr obj, MenuSepFlags f)
 	f |= MSF_FROM_CHILD;
     }
     return @call next::MSG_SPEC_MENU_SEP_QUERY(f);
+}
+
+/* ---------------------------------------------------------------------
+ * Scrollbars of views and lists (copenUtils.asm)
+ * ------------------------------------------------------------------- */
+
+/*
+ * OpenSetScrollbarAttrs: the scrollbar's output (to parent), its message,
+ * orientation and range; values of zero not set when creating (the
+ * defaults); drawable, detectable and managed
+ */
+void OpenSetScrollbarAttrs(optr sb, optr parent, Boolean creating,
+			   const OpenScrollbarArgs *a)
+{
+    VisInstance *v;
+
+    @call sb::MSG_GEN_VALUE_SET_DESTINATION(parent);
+    @call sb::MSG_GEN_VALUE_SET_APPLY_MSG(a->OSA_actionMsg);
+    @call sb::MSG_SET_ORIENTATION(a->OSA_vertical);
+    if (!creating || a->OSA_maximum)
+	@call sb::MSG_GEN_VALUE_SET_MAXIMUM(a->OSA_maximum);
+    if (!creating || a->OSA_minimum)
+	@call sb::MSG_GEN_VALUE_SET_MINIMUM(a->OSA_minimum);
+    if (!creating || a->OSA_value)
+	@call sb::MSG_GEN_VALUE_SET_VALUE(a->OSA_value, FALSE);
+    if (!creating || a->OSA_increment)
+	@call sb::MSG_GEN_VALUE_SET_INCREMENT(a->OSA_increment);
+    v = (VisInstance *) ObjDerefVis(sb);
+    if ((v->VI_attrs & (VA_DRAWABLE | VA_DETECTABLE | VA_MANAGED)) !=
+	(VA_DRAWABLE | VA_DETECTABLE | VA_MANAGED))
+	@call sb::MSG_VIS_SET_ATTRS(VA_DRAWABLE | VA_DETECTABLE | VA_MANAGED,
+				    0, VUM_MANUAL);
+}
+
+/*
+ * OpenAddScrollbar: a GenValue with the hint made the last generic child
+ * of the parent (a one-way upward link only unless saved with it: dirty),
+ * built and set up as a scrollbar
+ */
+optr OpenAddScrollbar(optr parent, word hint, Boolean dirty,
+		      Boolean immediateDrag, const OpenScrollbarArgs *a)
+{
+    optr sb = OpenCreateChildObject(OptrToHandle(parent), parent,
+				    (ClassStruct *) &GenValueClass,
+				    hint | VDF_SAVE_TO_STATE, TRUE, FALSE,
+				    CCO_LAST | (dirty ? CCF_MARK_DIRTY : 0));
+    SpecBuildFlags f = 0;
+
+    if (immediateDrag)
+	(void) ObjVarAddData(sb, HINT_VALUE_IMMEDIATE_DRAG_NOTIFICATION, 0);
+    /* (a slider, HINT_SPEC_SLIDER, drags immediately unless delayed:
+     * with OLValueClass, not yet) */
+    if (!dirty) {
+	ObjSetFlags(sb, OCF_IGNORE_DIRTY, OCF_DIRTY);
+	GenRemoveDownwardLink(OptrToHandle(sb), OptrToChunk(sb), 0);
+    }
+    if (((VisInstance *) ObjDerefVis(parent))->VI_attrs & VA_FULLY_ENABLED)
+	f = SBF_VIS_PARENT_FULLY_ENABLED;
+    @call sb::MSG_SPEC_BUILD(f);
+    OpenSetScrollbarAttrs(sb, parent, TRUE, a);
+    return sb;
+}
+
+/*
+ * SpecSetFlagsOnAllCtrlParents: OLCOF_CANT_OVERLAP_KIDS on the OLCtrls
+ * above, up to the window group (or one that has it already)
+ */
+void SpecSetFlagsOnAllCtrlParents(optr obj)
+{
+    optr p = VisFindParent(obj);
+    OLCtrlInstance *c;
+
+    while (p && ObjIsObjectInClass(p, &OLCtrlClass)) {
+	c = (OLCtrlInstance *) ObjDerefVis(p);
+	if ((c->OLCI_moreFlags & OLCOF_CANT_OVERLAP_KIDS) ||
+	    (c->VI_typeFlags & VTF_IS_WIN_GROUP))
+	    break;
+	c->OLCI_moreFlags |= OLCOF_CANT_OVERLAP_KIDS;
+	p = VisFindParent(p);
+    }
+}
+
+/*
+ * OpenSetInsetRectColors: the colors of OpenDrawRect for an inset frame
+ * (dark top left, white bottom right; black in black and white) and the
+ * area color of its inside (white, the light color in color)
+ */
+word OpenSetInsetRectColors(GStateHandle gs)
+{
+    if (moCS_flags & CSF_BW) {
+	GrSetAreaColor(gs, CF_INDEX, C_WHITE, 0, 0);
+	return (C_BLACK << 8) | C_BLACK;
+    }
+    GrSetAreaColor(gs, CF_INDEX, moCS_dsLightColor, 0, 0);
+    return (C_WHITE << 8) | moCS_dsDarkColor;
+}
+
+#define UKEY(k)		((KS_CHAR_SET_CONTROL << 8) | (k))
+
+/* the text object's keys (cviewVariable.def, CUA style): not special */
+static const KeyboardShortcut textKbdBindings[] = {
+    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_LEFT),
+    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_RIGHT),
+    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_UP),
+    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_DOWN),
+    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_HOME),
+    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_END),
+    KS_PHYSICAL | KS_CTRL | UKEY(VC_LEFT),
+    KS_PHYSICAL | KS_CTRL | UKEY(VC_RIGHT),
+    KS_PHYSICAL | KS_CTRL | UKEY(VC_UP),
+    KS_PHYSICAL | KS_CTRL | UKEY(VC_DOWN),
+    KS_PHYSICAL | KS_CTRL | UKEY(VC_HOME),
+    KS_PHYSICAL | KS_CTRL | UKEY(VC_END),
+    KS_PHYSICAL | KS_SHIFT | UKEY(VC_LEFT),
+    KS_PHYSICAL | KS_SHIFT | UKEY(VC_RIGHT),
+    KS_PHYSICAL | KS_SHIFT | UKEY(VC_UP),
+    KS_PHYSICAL | KS_SHIFT | UKEY(VC_DOWN),
+    KS_PHYSICAL | KS_SHIFT | UKEY(VC_HOME),
+    KS_PHYSICAL | KS_SHIFT | UKEY(VC_END),
+    UKEY(VC_UP), UKEY(VC_DOWN), UKEY(VC_LEFT), UKEY(VC_RIGHT),
+    UKEY(VC_HOME), UKEY(VC_END), UKEY(VC_BACKSPACE), UKEY(VC_DEL),
+    KS_SHIFT | UKEY(VC_BACKSPACE), KS_SHIFT | UKEY(VC_DEL),
+    KS_CTRL | UKEY(VC_BACKSPACE), KS_CTRL | UKEY(VC_DEL),
+    KS_CTRL | KS_SHIFT | UKEY(VC_BACKSPACE),
+    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_DEL),
+    KS_PHYSICAL | KS_CTRL | (KS_CHAR_SET_PRINTABLE << 8) | ' ',
+    KS_PHYSICAL | KS_ALT | UKEY(VC_INS),
+    KS_PHYSICAL | UKEY(VC_INS),
+    KS_CTRL | KS_SHIFT | (KS_CHAR_SET_PRINTABLE << 8) | '"',
+    KS_CTRL | KS_SHIFT | (KS_CHAR_SET_PRINTABLE << 8) | '\'',
+    KS_CTRL | (KS_CHAR_SET_PRINTABLE << 8) | '"',
+    KS_CTRL | (KS_CHAR_SET_PRINTABLE << 8) | '\'',
+    KS_PHYSICAL | UKEY(VC_JOYSTICK_180),
+    KS_PHYSICAL | UKEY(VC_JOYSTICK_0)
+};
+
+/* UserCheckAcceleratorChar (userUtils.asm): a shortcut, not text */
+static Boolean CheckAcceleratorChar(word c, word flags)
+{
+    byte cs = c >> 8, ch = c & 0xff, ss = flags >> 8;
+
+    if (cs == CS_UI_FUNCS)
+	return TRUE;
+    if (flags & CF_TEMP_ACCENT)
+	return FALSE;
+    if (ss & (SS_LCTRL | SS_RCTRL))
+	return !(ss & (SS_LALT | SS_RALT)) || cs == CS_CONTROL;
+    if (ss & (SS_LALT | SS_RALT))
+	return TRUE;
+    return cs == CS_CONTROL && ch != VC_TAB && ch != VC_ENTER &&
+	   ch != VC_CTRL_L && ch != VC_BACKSPACE;
+}
+
+/* UserCheckInsertableCtrlChar: a keypad character that is text */
+static Boolean CheckInsertableCtrlChar(word c, word flags, word state)
+{
+    byte ch = c & 0xff;
+
+    if ((c >> 8) != CS_CONTROL || ((flags >> 8) & (SS_LCTRL | SS_RCTRL)))
+	return FALSE;
+    if ((ch >= '*' && ch <= '-') || ch == '/')
+	return TRUE;
+    return (state & TS_NUMLOCK) && !(flags & CF_EXTENDED) &&
+	   ch >= '.' && ch <= '9';
+}
+
+/*
+ * SpecCheckIfSpecialUIChar: a key for the UI rather than the object with
+ * the focus: Alt, F10, releases of control keys, shortcuts that are not
+ * the text object's keys (the keypad's joystick keys are not)
+ */
+Boolean SpecCheckIfSpecialUIChar(word c, word flags, word state)
+{
+    byte cs = c >> 8, ch = c & 0xff;
+
+    if (c == ((CS_CONTROL << 8) | VC_LALT) ||
+	c == ((CS_CONTROL << 8) | VC_RALT) ||
+	c == ((CS_CONTROL << 8) | VC_F10))
+	return TRUE;
+    if (cs == CS_CONTROL && ch >= VC_JOYSTICK_0 && ch <= VC_FIRE_BUTTON_2)
+	return FALSE;
+    if (flags & CF_RELEASE)
+	return ch >= 0x80;
+    if (!CheckAcceleratorChar(c, flags) ||
+	CheckInsertableCtrlChar(c, flags, state))
+	return FALSE;
+    return FlowCheckKbdShortcut((KeyboardShortcut *) textKbdBindings,
+				sizeof(textKbdBindings) /
+				sizeof(textKbdBindings[0]), c, flags,
+				state) == (word) -1;
+}
+
+/*
+ * ConvertKeyToMethod: the message for the key in a table of shortcuts
+ * and the messages beside it; 0 if not there
+ */
+Message ConvertKeyToMethod(const KeyboardShortcut *keys, const Message *msgs,
+			   word count, word c, word flags, word state)
+{
+    word off = FlowCheckKbdShortcut((KeyboardShortcut *) keys, count, c,
+				    flags, state);
+
+    return off == (word) -1 ? 0 : msgs[off / sizeof(KeyboardShortcut)];
 }

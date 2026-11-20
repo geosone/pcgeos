@@ -1058,6 +1058,9 @@ extern void VisApplySizeHints(optr obj, sword *width, sword *height);
  * the generic object is; the visual parent it is added to */
 extern void VisSpecBuildSetEnabledState(optr obj, SpecBuildFlags flags);
 extern optr VisGetVisParent(optr obj, SpecBuildFlags *flags);
+/* the visual object of a generic one built as a part of others (the
+ * object itself if it is that part), 0 if not grown */
+extern optr VisGetSpecificVisObject(optr obj, SpecBuildFlags flags);
 /* a SpecWinSizePair (x decides if ratios) in coordinates of the size of
  * the win group or field above the object; FALSE if that is empty */
 extern Boolean VisConvertRatioToCoords(optr obj, SpecWinSizeSpec *x,

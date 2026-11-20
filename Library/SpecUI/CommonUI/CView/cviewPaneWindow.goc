@@ -1,0 +1,531 @@
+/*
+ * cviewPaneWindow.goc -- the window of OLPaneClass (after
+ * cviewPaneWindow.asm).  The view's window is opened in the parent's,
+ * suspended until the content has its origin; its input goes to the
+ * pane, its exposures to the content.  The pane passes the mouse on to
+ * the content in document coordinates (the pointer combined in the
+ * queue), takes the mouse while a button is pressed in the window, and
+ * tells the content when the pointer enters and leaves.  The frame is
+ * drawn round the window.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: drag scrolling
+ * (OLPaneSelectScroll and its timer), panning, ink
+ * (MSG_META_QUERY_IF_PRESS_IS_INK, MSG_VIS_QUERY_IF_OBJECT_HANDLES_INK),
+ * the quick transfer's wandering grab (MSG_GEN_VIEW_ALLOW_GLOBAL_TRANSFER
+ * lets the mouse go).
+ */
+@include "CView/cviewInt.goh"
+@include <Internal/flowC.goh>
+@include <Internal/im.h>
+
+/* the windows opened so far (cviewPaneWindow.asm's windowID): a message
+ * for an older window of the view is ignored */
+static word windowID;
+
+/* ---------------------------------------------------------------------
+ * Opening and closing
+ * ------------------------------------------------------------------- */
+
+/* SendPaneSizeMethod: the page and the window to the content (queued) */
+void SendPaneSizeMethod(optr oself, Message msg)
+{
+    OLPaneInstance *p = PVis(oself);
+    optr c = PGen(oself)->GVI_content;
+    struct { word w; word h; WindowHandle win; } a;
+
+    if (!c)
+	return;
+    a.w = (word) p->OLPI_pageWidth;
+    a.h = (word) p->OLPI_pageHeight;
+    a.win = p->OLPI_window;
+    CObjMessageP(MF_FORCE_QUEUE, c, msg, &a, sizeof(a), NULL, 0);
+}
+
+/*
+ * OLPaneOpenWin: the window opened (suspended) where the frame leaves
+ * room, its exposures to the content; scaled; the origin set; the content
+ * told the scale and the window; drawing resumed from the queue unless a
+ * tracking content does it after the initial position
+ */
+@extern method OLPaneClass, MSG_VIS_OPEN_WIN
+{
+    GeodeHandle proc = GeodeGetProcessHandle();
+    GenViewInstance *g = PGen(oself);
+    ColorQuad c = g->GVI_color;
+    Rectangle r;
+    WindowHandle win;
+    GetScaleParams s;
+
+    GetPaneWinBounds(oself, &r);
+    win = WinOpen(parentWindow, oself, g->GVI_content, c.CQ_info,
+		  c.CQ_redOrIndex, c.CQ_green, c.CQ_blue, WPF_INIT_SUSPENDED,
+		  proc, proc, NULL, r.R_left, r.R_top, r.R_right, r.R_bottom);
+    pself = PVis(oself);
+    pself->OLPI_window = win;
+    pself->OLPI_windowID = windowID++;
+    g = PGen(oself);
+    WinApplyScale(win, ScaleOf(&g->GVI_scaleFactor.PF_x),
+		  ScaleOf(&g->GVI_scaleFactor.PF_y), WIF_INVALIDATE);
+    @call oself::MSG_SPEC_VIEW_INIT_ORIGIN();
+    @call oself::MSG_GEN_VIEW_GET_SCALE_FACTOR(&s);
+    SendNewScaleToOD(oself, s.GSP_xScaleFactor, s.GSP_yScaleFactor);
+    SendPaneSizeMethod(oself, MSG_META_CONTENT_VIEW_WIN_OPENED);
+    g = PGen(oself);
+    if (g->GVI_content && (g->GVI_attrs & GVA_TRACK_SCROLLING))
+	return;
+    @send ,forceQueue oself::MSG_SPEC_VIEW_UNSUSPEND_OPENED_WIN(
+		PVis(oself)->OLPI_windowID);
+}
+
+/* OLPaneUnsuspendOpenedWin: if it is still the same window */
+@extern method OLPaneClass, MSG_SPEC_VIEW_UNSUSPEND_OPENED_WIN
+{
+    if (windowID == pself->OLPI_windowID)
+	@call oself::MSG_GEN_VIEW_UNSUSPEND_UPDATE();
+}
+
+/* OLPaneCloseWin: closed (a new ID: messages for it ignored), the
+ * content told */
+@extern method OLPaneClass, MSG_VIS_CLOSE_WIN
+{
+    WindowHandle win = pself->OLPI_window;
+    optr c;
+
+    if (!win)
+	return;
+    pself->OLPI_window = 0;
+    pself->OLPI_windowID++;
+    WinClose(win);
+    c = PGen(oself)->GVI_content;
+    if (c)
+	@send ,forceQueue c::MSG_META_CONTENT_VIEW_WIN_CLOSED(win);
+}
+
+/*
+ * OLPaneMoveResizeWin: the window moved and sized to the frame's inside
+ * if invalid; the content told; a window suspended for the size change
+ * resumed from the queue
+ */
+@extern method OLPaneClass, MSG_VIS_MOVE_RESIZE_WIN
+{
+    Rectangle r;
+
+    if (!pself->OLPI_window || !(pself->VI_optFlags & VOF_WINDOW_INVALID))
+	return;
+    GetPaneWinBounds(oself, &r);
+    WinResize(PVis(oself)->OLPI_window, NULL, r.R_left, r.R_top,
+	      r.R_right, r.R_bottom, WPF_ABS);
+    SendPaneSizeMethod(oself, MSG_META_CONTENT_VIEW_SIZE_CHANGED);
+    pself = PVis(oself);
+    if (!(pself->OLPI_flags & OLPF_SUSPENDED_FOR_SIZE_CHANGE))
+	return;
+    pself->OLPI_flags &= ~OLPF_SUSPENDED_FOR_SIZE_CHANGE;
+    @send ,forceQueue oself::MSG_SPEC_VIEW_UNSUSPEND_OPENED_WIN(
+		pself->OLPI_windowID);
+}
+
+/* OLPaneWindowSetContent: a new content gets the window's exposures and
+ * the window */
+void OLPaneWindowSetContent(optr oself)
+{
+    WindowHandle win = PVis(oself)->OLPI_window;
+
+    if (!win)
+	return;
+    WinSetInfo(win, WIT_EXPOSURE_OBJ, PGen(oself)->GVI_content);
+    SendPaneSizeMethod(oself, MSG_META_CONTENT_VIEW_WIN_OPENED);
+}
+
+/* ---------------------------------------------------------------------
+ * Scrolling the window
+ * ------------------------------------------------------------------- */
+
+#define LARGE_TRANSLATION	0x2000
+
+/*
+ * OLPaneWindowScroll: the window scrolled to the origin: by moving what
+ * is shown (the origin follows the window, with its fraction), or by a
+ * new translation for large moves (all redrawn); not if the window does
+ * not scroll (ATTR_GEN_VIEW_DO_NOT_WIN_SCROLL)
+ */
+void OLPaneWindowScroll(optr oself, const PointDWord *origin)
+{
+    WindowHandle win = PVis(oself)->OLPI_window;
+    GenViewInstance *g;
+    sdword dx, dy;
+    WWFixedAsDWord fx, fy;
+    PointWWFixed amt;
+    sdword ix;
+
+    g = PGen(oself);
+    dx = origin->PD_x - (g->GVI_origin.PDF_x.DWF_int +
+			 ((g->GVI_origin.PDF_x.DWF_frac & 0x8000) ? 1 : 0));
+    dy = origin->PD_y - (g->GVI_origin.PDF_y.DWF_int +
+			 ((g->GVI_origin.PDF_y.DWF_frac & 0x8000) ? 1 : 0));
+    if ((!dx && !dy) || !win ||
+	(PVis(oself)->OLPI_attrs & OLPA_NON_SCROLLING))
+	return;
+    if (dx > LARGE_TRANSLATION || dx < -LARGE_TRANSLATION ||
+	dy > LARGE_TRANSLATION || dy < -LARGE_TRANSLATION) {
+	WinApplyTranslationDWord(win, -dx, -dy, WIF_INVALIDATE);
+	ImForcePtrMethod();
+	return;
+    }
+    /* MakeRelativeWWFixed: the move from the exact origin, negated */
+    fx = (WWFixedAsDWord) (((dword) (word) origin->PD_x << 16) -
+			   (((dword) (word) g->GVI_origin.PDF_x.DWF_int << 16) |
+			    g->GVI_origin.PDF_x.DWF_frac));
+    fy = (WWFixedAsDWord) (((dword) (word) origin->PD_y << 16) -
+			   (((dword) (word) g->GVI_origin.PDF_y.DWF_int << 16) |
+			    g->GVI_origin.PDF_y.DWF_frac));
+    memset(&amt, 0, sizeof(amt));
+    WinScroll(win, (WWFixedAsDWord) -(sdword) fx,
+	      (WWFixedAsDWord) -(sdword) fy, &amt);
+    /* the origin moved by what the window scrolled */
+    g = PGen(oself);
+    fx = -(sdword) ((WWFixedAsDWord) ((dword) (word) amt.PF_x.WWF_int << 16 |
+				      amt.PF_x.WWF_frac));
+    fy = -(sdword) ((WWFixedAsDWord) ((dword) (word) amt.PF_y.WWF_int << 16 |
+				      amt.PF_y.WWF_frac));
+    ix = (sdword) g->GVI_origin.PDF_x.DWF_frac + (word) fx;
+    g->GVI_origin.PDF_x.DWF_frac = (word) ix;
+    g->GVI_origin.PDF_x.DWF_int += (sword) (fx >> 16) + (ix >> 16);
+    ix = (sdword) g->GVI_origin.PDF_y.DWF_frac + (word) fy;
+    g->GVI_origin.PDF_y.DWF_frac = (word) ix;
+    g->GVI_origin.PDF_y.DWF_int += (sword) (fy >> 16) + (ix >> 16);
+    ImForcePtrMethod();
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/* OLPaneDraw: the frame round the window (inset in color, white on
+ * black), then the areas */
+@extern method OLPaneClass, MSG_VIS_DRAW
+{
+    Rectangle r;
+    word colors;
+    OLPaneAttrs a;
+
+    if (!(PGen(oself)->GVI_attrs & GVA_NO_WIN_FRAME)) {
+	colors = OpenSetInsetRectColors(gstate);
+	a = PVis(oself)->OLPI_attrs;
+	if (!(a & OLPA_SPECIAL_BORDER))
+	    colors = (a & OLPA_WHITE_BORDER) ? (C_WHITE << 8) | C_WHITE
+					      : (C_BLACK << 8) | C_BLACK;
+	GetFrameBounds(oself, &r);
+	OpenDrawRect(oself, gstate, r.R_left, r.R_top, r.R_right + 1,
+		     r.R_bottom + 1, colors);
+    }
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The mouse
+ * ------------------------------------------------------------------- */
+
+static Boolean ViewEnabled(optr oself)
+{
+    return (PVis(oself)->VI_attrs & VA_FULLY_ENABLED) != 0;
+}
+
+static void ReleaseGadgetExcl(optr oself)
+{
+    optr p = VisFindParent(oself);
+
+    if (p)
+	@call p::MSG_VIS_RELEASE_GADGET_EXCL(oself);
+}
+
+/*
+ * TestIfMouseImpliedOrActiveInPaneWindow: an event for the pane itself
+ * (not in its window: on the frame or an area) goes to the superclass;
+ * TRUE if so
+ */
+static Boolean OutsideWindow(optr oself, Message msg,
+			     MouseReturnParams *ret, sword x, sword y,
+			     word state)
+{
+    optr app = GeodeGetAppObject(0);
+    struct { MouseReturnParams *r; sword x; sword y; word s; } a;
+
+    if (app && @call app::MSG_VIS_CONTENT_TEST_IF_ACTIVE_OR_IMPLIED_WIN(
+				PVis(oself)->OLPI_window))
+	return FALSE;
+    a.r = ret;
+    a.x = x;
+    a.y = y;
+    a.s = state;
+    CObjCallSuperP((ClassStruct *) &OLPaneClass, oself, msg, &a, sizeof(a),
+		   NULL, 0);
+    return TRUE;
+}
+
+/* UpdateConstrain */
+static void UpdateConstrain(optr oself, word state)
+{
+    if (GET_UI_FUNCTIONS_ACTIVE(state) & UIFA_CONSTRAIN)
+	PVis(oself)->OLPI_optFlags |= OLPOF_CONSTRAIN;
+    else
+	PVis(oself)->OLPI_optFlags &= ~OLPOF_CONSTRAIN;
+}
+
+/* TransCoords: window coordinates as the document's (unless the content
+ * wants them in the window's) */
+static void TransCoords(optr oself, sword *x, sword *y)
+{
+    WindowHandle win = PVis(oself)->OLPI_window;
+    Rectangle b;
+    XYValueAsDWord d;
+
+    if ((PGen(oself)->GVI_attrs & GVA_WINDOW_COORDINATE_MOUSE_EVENTS) ||
+	!win)
+	return;
+    WinGetWinScreenBounds(win, &b);
+    d = WinUntransform(win, *x + b.R_left, *y + b.R_top);
+    *x = (sword) DWORD_X(d);
+    *y = (sword) DWORD_Y(d);
+}
+
+/* OLPaneGrabGadgetExclAndMouse: the mouse taken for the press in the
+ * window (the pane's events in the window's coordinates) */
+static void GrabGadgetExclAndMouse(optr oself)
+{
+    OLPaneInstance *p = PVis(oself);
+    optr par;
+    PointDWord t;
+
+    if (p->OLPI_optFlags & OLPOF_PRESS_GRAB)
+	return;
+    p->OLPI_optFlags = (p->OLPI_optFlags | OLPOF_PRESS_GRAB) &
+		       ~(OLPOF_DRAG_SCROLLING |
+			 OLPOF_DRAG_SCROLL_ON_ANY_BUTTON);
+    par = VisFindParent(oself);
+    if (par)
+	@call par::MSG_VIS_TAKE_GADGET_EXCL(oself);
+    memset(&t, 0, sizeof(t));
+    @call oself::MSG_VIS_VUP_ALTER_INPUT_FLOW(t, PVis(oself)->OLPI_window,
+				oself, VIFGT_ACTIVE,
+				VIFGF_MOUSE | VIFGF_GRAB | VIFGF_PTR |
+				VIFGF_NOT_HERE);
+}
+
+/* GrabTargetAndFocusIfPossible */
+static void GrabTargetAndFocus(optr oself)
+{
+    @call oself::MSG_META_GRAB_TARGET_EXCL();
+    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+}
+
+/* OLPaneContentLeave: the content told the pointer left */
+static void ContentLeave(optr oself)
+{
+    optr c;
+
+    if (!(PVis(oself)->OLPI_optFlags & OLPOF_ENTERED))
+	return;
+    PVis(oself)->OLPI_optFlags &= ~OLPOF_ENTERED;
+    c = PGen(oself)->GVI_content;
+    if (c)
+	@send ,forceQueue c::MSG_META_CONTENT_LEAVE(oself);
+}
+
+/*
+ * OLPaneButton: a button in the window: the mouse taken on a press, the
+ * event to the content (queued) in document coordinates; let go when no
+ * button is down
+ */
+static void PaneButton(optr oself, Message msg, MouseReturnParams *ret,
+		   sword x, sword y, word state)
+{
+    optr c;
+    struct { MouseReturnParams *r; sword x; sword y; word s; } a;
+
+    ret->flags = MRF_PROCESSED;
+    if (!ViewEnabled(oself) || OutsideWindow(oself, msg, ret, x, y, state))
+	return;
+    UpdateConstrain(oself, state);
+    if (GET_BUTTON_INFO(state) & BI_PRESS)
+	GrabGadgetExclAndMouse(oself);
+    PVis(oself)->OLPI_mouseX = x;
+    PVis(oself)->OLPI_mouseY = y;
+    TransCoords(oself, &x, &y);
+    c = PGen(oself)->GVI_content;
+    if (c) {
+	a.r = NULL;
+	a.x = x;
+	a.y = y;
+	a.s = state;
+	CObjMessageP(MF_FORCE_QUEUE, c, msg, &a, sizeof(a), NULL, 0);
+    }
+    if (!(GET_BUTTON_INFO(state) & (BI_B0_DOWN | BI_B1_DOWN | BI_B2_DOWN |
+				    BI_B3_DOWN)))
+	ReleaseGadgetExcl(oself);
+    ret->flags = MRF_PROCESSED;
+}
+
+@extern method OLPaneClass, MSG_META_END_SELECT, MSG_META_DRAG_SELECT,
+		     MSG_META_START_MOVE_COPY, MSG_META_DRAG_MOVE_COPY,
+		     MSG_META_DRAG_FEATURES, MSG_META_START_OTHER,
+		     MSG_META_END_OTHER, MSG_META_DRAG_OTHER
+{
+    PaneButton(oself, message, retVal, xPosition, yPosition, inputState);
+}
+
+@extern method OLPaneClass, MSG_META_END_MOVE_COPY
+{
+    GenProcessGenAttrsBeforeAction(OptrToHandle(oself), OptrToChunk(oself));
+    PaneButton(oself, message, retVal, xPosition, yPosition, inputState);
+    GenProcessGenAttrsAfterAction(OptrToHandle(oself), OptrToChunk(oself));
+}
+
+/* OLPaneStartSelect: the view takes the target and focus first */
+@extern method OLPaneClass, MSG_META_START_SELECT
+{
+    retVal->flags = MRF_PROCESSED;
+    if (!ViewEnabled(oself) ||
+	OutsideWindow(oself, message, retVal, xPosition, yPosition,
+		      inputState))
+	return;
+    GrabTargetAndFocus(oself);
+    PaneButton(oself, message, retVal, xPosition, yPosition, inputState);
+}
+
+/* OLPaneStartFeatures: panning not yet */
+@extern method OLPaneClass, MSG_META_START_FEATURES, MSG_META_END_FEATURES
+{
+    retVal->flags = MRF_PROCESSED;
+    if (message == MSG_META_START_FEATURES && !ViewEnabled(oself))
+	return;
+    if (OutsideWindow(oself, message, retVal, xPosition, yPosition,
+		      inputState))
+	return;
+    PVis(oself)->OLPI_optFlags &= ~OLPOF_PANNING_GRAB;
+    PaneButton(oself, message, retVal, xPosition, yPosition, inputState);
+}
+
+/*
+ * OLPanePtrMethod: the pointer in the window (or with the mouse taken)
+ * to the content, a pointer event still in the queue replaced; outside
+ * the window the superclass's
+ */
+@extern method OLPaneClass, MSG_META_PTR
+{
+    OLPaneInstance *p;
+    optr c;
+    struct { MouseReturnParams *r; sword x; sword y; word s; } a;
+
+    retVal->flags = MRF_PROCESSED;
+    if (!ViewEnabled(oself))
+	return;
+    p = PVis(oself);
+    if (!(p->OLPI_optFlags & (OLPOF_PRESS_GRAB | OLPOF_PTR_IN_RAW_UNIV))) {
+	@callsuper();
+	return;
+    }
+    UpdateConstrain(oself, inputState);
+    if (PGen(oself)->GVI_attrs & GVA_DONT_SEND_PTR_EVENTS)
+	return;
+    TransCoords(oself, &xPosition, &yPosition);
+    c = PGen(oself)->GVI_content;
+    if (!c)
+	return;
+    a.r = NULL;
+    a.x = xPosition;
+    a.y = yPosition;
+    a.s = inputState;
+    /* (OLCombineMouseEvent: the last pointer event replaced) */
+    CObjMessageP(MF_FORCE_QUEUE | MF_CHECK_DUPLICATE | MF_CHECK_LAST_ONLY |
+		 MF_REPLACE, c, message, &a, sizeof(a), NULL, 0);
+}
+
+/* OLPaneEndGrab: the grabs gone; the content told */
+@extern method OLPaneClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    WindowHandle win = pself->OLPI_window;
+    optr c;
+
+    pself->OLPI_optFlags &= ~(OLPOF_PRESS_GRAB | OLPOF_PANNING_GRAB |
+			      OLPOF_DRAG_SCROLL_ON_ANY_BUTTON |
+			      OLPOF_DRAG_SCROLLING | OLPOF_DRAG_SCROLL_PENDING |
+			      OLPOF_TIMER_EXPIRED_PENDING |
+			      OLPOF_WANDERING_GRAB);
+    VisReleaseMouse(oself);
+    if (!(PVis(oself)->OLPI_optFlags & OLPOF_PTR_IN_RAW_UNIV))
+	ContentLeave(oself);
+    c = PGen(oself)->GVI_content;
+    if (c)
+	@send ,forceQueue c::MSG_META_CONTENT_VIEW_LOST_GADGET_EXCL(win);
+}
+
+/* OLPaneRawEnter: the pointer in the window; the content told once */
+@extern method OLPaneClass, MSG_META_RAW_UNIV_ENTER
+{
+    optr c;
+
+    pself->OLPI_optFlags = (pself->OLPI_optFlags | OLPOF_PTR_IN_RAW_UNIV) &
+			   ~OLPOF_DRAG_SCROLLING;
+    if (pself->OLPI_optFlags & OLPOF_ENTERED)
+	return;
+    pself->OLPI_optFlags |= OLPOF_ENTERED;
+    c = PGen(oself)->GVI_content;
+    if (c)
+	@send ,forceQueue c::MSG_META_CONTENT_ENTER(oself);
+}
+
+/* OLPaneRawLeave: the pointer out of the window: the mouse let go
+ * (drag scrolling not yet); the content told unless the mouse is held */
+@extern method OLPaneClass, MSG_META_RAW_UNIV_LEAVE
+{
+    optr f;
+
+    pself->OLPI_optFlags &= ~OLPOF_PTR_IN_RAW_UNIV;
+    if (!(PVis(oself)->OLPI_optFlags & OLPOF_PRESS_GRAB)) {
+	ReleaseGadgetExcl(oself);
+	if (ViewEnabled(oself) && (f = UserGetFlowObject()) != 0)
+	    @call f::MSG_FLOW_ALLOW_GLOBAL_TRANSFER();
+    }
+    if (!(PVis(oself)->OLPI_optFlags & OLPOF_PRESS_GRAB))
+	ContentLeave(oself);
+}
+
+/* OLPaneAllowGlobalTransfer: the mouse let go for a quick transfer */
+@extern method OLPaneClass, MSG_GEN_VIEW_ALLOW_GLOBAL_TRANSFER
+{
+    optr f;
+
+    if (pself->OLPI_optFlags & OLPOF_WANDERING_GRAB)
+	return;
+    pself->OLPI_optFlags |= OLPOF_WANDERING_GRAB;
+    if (pself->OLPI_optFlags & (OLPOF_PTR_IN_RAW_UNIV | OLPOF_CONSTRAIN))
+	return;
+    ReleaseGadgetExcl(oself);
+    if ((f = UserGetFlowObject()) != 0)
+	@call f::MSG_FLOW_ALLOW_GLOBAL_TRANSFER();
+}
+
+/* OLPaneUpdateComplete: the window drawn: the scrollbars repeat */
+@extern method OLPaneClass, MSG_META_WIN_UPDATE_COMPLETE
+{
+    optr sb;
+
+    pself->OLPI_optFlags &= ~OLPOF_DRAG_SCROLL_PENDING;
+    if (pself->OLPI_optFlags & OLPOF_DRAG_SCROLLING)
+	return;
+    if ((sb = OLPaneScrollbar(oself, FALSE)) != 0)
+	@send ,forceQueue sb::MSG_REPEAT_SCROLL();
+    if ((sb = OLPaneScrollbar(oself, TRUE)) != 0)
+	@send ,forceQueue sb::MSG_REPEAT_SCROLL();
+}
+
+/* OLPanePrePassiveButton: a menu's focus released on a press */
+@extern method OLPaneClass, MSG_META_PRE_PASSIVE_BUTTON
+{
+    optr p = VisFindParent(oself);
+
+    if (p)
+	@call p::MSG_VIS_VUP_RELEASE_MENU_FOCUS();
+    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+    @callsuper();
+}

@@ -18,8 +18,7 @@
  * Port32 (Port32/ABI.md section 13y): the events are recorded with
  * @record and dispatched with MF_DISPATCH_DONT_FREE; not yet:
  * MSG_GEN_BRANCH_REPLACE_PARAMS (BRPT_OUTPUT_OPTR, the content),
- * the specific part's MSG_GEN_ADD_CHILD and MSG_GEN_REMOVE_CHILD (the
- * asm calls it before GenClass), GenViewSetSimpleBounds,
+ * GenViewSetSimpleBounds,
  * GenSetupTrackingArgs and GenReturnTrackingArgs
  * (the tracking of a GVA_TRACK_SCROLLING view's content), the stack
  * borrowed for MSG_GEN_VIEW_CALL_WITHOUT_LINKS.
@@ -100,6 +99,19 @@ static void SendToLink(optr link, Message msg, EventHandle ev,
 
 /* GenViewSendToLinks: handled here and along the vertical links, then
  * on to the horizontal link */
+/* GenViewAddGenChild: the specific UI first (it gives the child its
+ * area round the window), then GenClass */
+@method GenViewClass, MSG_GEN_ADD_CHILD, MSG_GEN_REMOVE_CHILD
+{
+    struct { optr c; CompChildFlags f; } p;
+
+    p.c = child;
+    p.f = flags;
+    CObjCallSuperP((ClassStruct *) &GenClass, oself, message, &p, sizeof(p),
+		   NULL, 0);
+    @callsuper();
+}
+
 @method GenViewClass, MSG_GEN_VIEW_SEND_TO_LINKS
 {
     @call oself::MSG_GEN_VIEW_SEND_TO_VLINK(event, originator);
@@ -478,6 +490,13 @@ static void ScrollView(optr o, sdword dx, sdword dy)
  * ------------------------------------------------------------------- */
 
 /* GenViewGetWindow: none until built */
+/* GenViewCalcWinSize: the size proposed (for subclasses to change;
+ * Port32: the asm left the registers as they were, a C reply is empty) */
+@method GenViewClass, MSG_GEN_VIEW_CALC_WIN_SIZE
+{
+    return MAKE_SIZE_DWORD(width, height);
+}
+
 @method GenViewClass, MSG_GEN_VIEW_GET_WINDOW
 {
     if (!VisCheckIfSpecBuilt(oself))
