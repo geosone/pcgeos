@@ -1,0 +1,653 @@
+/*
+ * genValue.goc -- GenValueClass (after genValue.asm): a number (a
+ * WWFixed, GVLI_value) between a minimum and a maximum (less the range
+ * length of HINT_VALUE_DISPLAYS_RANGE: a scroller's visible part), set
+ * by the user in steps of GVLI_increment.  It is shown as an integer, a
+ * decimal number, a distance or a percentage (GVLI_displayFormat), sends
+ * its apply message (GVLI_applyMsg to GVLI_destination) on MSG_GEN_APPLY
+ * when modified, its status message (ATTR_GEN_VALUE_STATUS_MSG) when
+ * asked.  What it looks like is the specific UI's (SPIR_BUILD_VALUE: a
+ * spin gadget, a slider, a view's scrollbar).
+ *
+ * Port32 (Port32/ABI.md section 13y): the messages' parameters are those
+ * of gValueC.goh.  Not yet: MSG_GEN_BRANCH_REPLACE_PARAMS
+ * (BRPT_OUTPUT_OPTR), MSG_GEN_FIND_VIEW_RANGES and
+ * MSG_GEN_QUERY_VIEW_AREA (the scrollers' place in a view: GenClass has
+ * neither yet).
+ */
+@include "uiInt.goh"
+@include <Objects/gValueC.goh>
+@include <Objects/gAppC.goh>
+#include <localize.h>
+#include <initfile.h>
+#include <string.h>
+
+@classdecl GenValueClass;
+
+#define GVL(o)	((GenValueInstance *) ObjDerefGen(o))
+
+/* GVT_VALUE_AS_RATIO_OF_AVAILABLE_RANGE (misspelled GVI_... in
+ * gValueC.goh) */
+#define GVT_VALUE_AS_RATIO	7
+
+@method GenValueClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_VALUE, MasterOffset);
+}
+
+/* GenCallSpecIfGrown: the message to the specific part, if there is
+ * one (written out in each method: goc wants @callsuper in a method) */
+
+/* ---------------------------------------------------------------------
+ * The value
+ * ------------------------------------------------------------------- */
+
+static WWFixedAsDWord RangeLength(optr o)
+{
+    WWFixedAsDWord *r = ObjVarFindData(o, HINT_VALUE_DISPLAYS_RANGE);
+
+    return r ? *r : 0;
+}
+
+/* KeepInRange: no more than the maximum less the range length, no less
+ * than the minimum */
+static WWFixedAsDWord KeepInRange(optr o, WWFixedAsDWord v)
+{
+    GenValueInstance *g = GVL(o);
+    sdword max = (sdword) g->GVLI_maximum - (sdword) RangeLength(o);
+
+    if ((sdword) v > max)
+	v = (WWFixedAsDWord) max;
+    if ((sdword) v < (sdword) g->GVLI_minimum)
+	v = g->GVLI_minimum;
+    return v;
+}
+
+static Boolean SetFlag(optr o, GenValueStateFlags mask, Boolean set)
+{
+    GenValueInstance *g = GVL(o);
+    GenValueStateFlags f = set ? (g->GVLI_stateFlags | mask)
+			       : (g->GVLI_stateFlags & ~mask);
+
+    if (f == g->GVLI_stateFlags)
+	return FALSE;
+    g->GVLI_stateFlags = f;
+    ObjMarkDirty(o);
+    return TRUE;
+}
+
+/* GenValueSetValue: in range; up to date, indeterminate as passed, not
+ * modified; then the specific part's */
+@method GenValueClass, MSG_GEN_VALUE_SET_VALUE
+{
+    value = KeepInRange(oself, value);
+    pself = GVL(oself);
+    if (pself->GVLI_value != value) {
+	pself->GVLI_value = value;
+	ObjMarkDirty(oself);
+    }
+    (void) SetFlag(oself, GVSF_OUT_OF_DATE, FALSE);
+    (void) SetFlag(oself, GVSF_INDETERMINATE, indeterminate);
+    (void) SetFlag(oself, GVSF_MODIFIED, FALSE);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper oself::GenClass::MSG_GEN_VALUE_SET_VALUE(value,
+							     indeterminate);
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_INTEGER_VALUE
+{
+    @call oself::MSG_GEN_VALUE_SET_VALUE((WWFixedAsDWord) ((dword) value << 16), indeterminate);
+}
+
+@method GenValueClass, MSG_GEN_VALUE_GET_VALUE
+{
+    if (GenCheckIfSpecGrown(oself))
+	(void) @callsuper();
+    return GVL(oself)->GVLI_value;
+}
+
+/* RedoValueForMinMax: the value kept in the new range, its state flags
+ * as they were; then the specific part's */
+static void RedoValue(optr o)
+{
+    GenValueInstance *g = GVL(o);
+    GenValueStateFlags f = g->GVLI_stateFlags;
+
+    @call o::MSG_GEN_VALUE_SET_VALUE(KeepInRange(o, g->GVLI_value),
+				     (f & GVSF_INDETERMINATE) != 0);
+    GVL(o)->GVLI_stateFlags = f;
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_MINIMUM
+{
+    if (pself->GVLI_minimum == value)
+	return;
+    pself->GVLI_minimum = value;
+    ObjMarkDirty(oself);
+    RedoValue(oself);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_MAXIMUM
+{
+    if (pself->GVLI_maximum == value)
+	return;
+    pself->GVLI_maximum = value;
+    ObjMarkDirty(oself);
+    RedoValue(oself);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenValueClass, MSG_GEN_VALUE_GET_MINIMUM
+{
+    return pself->GVLI_minimum;
+}
+
+@method GenValueClass, MSG_GEN_VALUE_GET_MAXIMUM
+{
+    return pself->GVLI_maximum;
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_INCREMENT
+{
+    if (pself->GVLI_increment != value) {
+	pself->GVLI_increment = value;
+	ObjMarkDirty(oself);
+    }
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenValueClass, MSG_GEN_VALUE_GET_INCREMENT
+{
+    return pself->GVLI_increment;
+}
+
+/* GenValueSetRangeLength: HINT_VALUE_DISPLAYS_RANGE; the specific
+ * part's; the value kept in the range */
+@method GenValueClass, MSG_GEN_VALUE_SET_RANGE_LENGTH
+{
+    WWFixedAsDWord *r = ObjVarAddData(oself, HINT_VALUE_DISPLAYS_RANGE,
+				      sizeof(WWFixedAsDWord));
+
+    *r = value;
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+    RedoValue(oself);
+}
+
+@method GenValueClass, MSG_GEN_VALUE_GET_RANGE_LENGTH
+{
+    return RangeLength(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The state
+ * ------------------------------------------------------------------- */
+
+@method GenValueClass, MSG_GEN_VALUE_SET_INDETERMINATE_STATE
+{
+    if (SetFlag(oself, GVSF_INDETERMINATE, indeterminateState) &&
+	GenCheckIfSpecGrown(oself)) {
+	GenValueInstance *g = GVL(oself);
+
+	@callsuper oself::GenClass::MSG_GEN_VALUE_SET_VALUE(g->GVLI_value,
+		(g->GVLI_stateFlags & GVSF_INDETERMINATE) != 0);
+    }
+}
+
+@method GenValueClass, MSG_GEN_VALUE_IS_INDETERMINATE
+{
+    return (pself->GVLI_stateFlags & GVSF_INDETERMINATE) != 0;
+}
+
+/* GenValueSetModifiedState: becoming modified makes the dialog
+ * applyable */
+@method GenValueClass, MSG_GEN_VALUE_SET_MODIFIED_STATE
+{
+    if (SetFlag(oself, GVSF_MODIFIED, modifiedState) && modifiedState)
+	@call oself::MSG_GEN_MAKE_APPLYABLE();
+}
+
+@method GenValueClass, MSG_GEN_VALUE_IS_MODIFIED
+{
+    return (pself->GVLI_stateFlags & GVSF_MODIFIED) != 0;
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_OUT_OF_DATE
+{
+    (void) SetFlag(oself, GVSF_OUT_OF_DATE, TRUE);
+}
+
+/*
+ * GenValueSendMsg: msg (if any) to the destination with the value and
+ * the state flags, the generic attributes' work around it
+ */
+static void SendMsg(optr o, Message msg, GenValueStateFlags flags)
+{
+    MemHandle mh = OptrToHandle(o);
+    ChunkHandle ch = OptrToChunk(o);
+    struct { WWFixedAsDWord value; GenValueStateFlagsAsWord flags; } a;
+    optr dest;
+    EventHandle ev;
+
+    if (!msg)
+	return;
+    dest = GVL(o)->GVLI_destination;
+    a.value = GVL(o)->GVLI_value;
+    a.flags.GVSFAW_flags = flags;
+    a.flags.GVSFAW_unused = 0;
+    GenProcessGenAttrsBeforeAction(mh, ch);
+    CObjMessageP(MF_RECORD, 0, msg, &a, sizeof(a), &ev, sizeof(ev));
+    @call o::MSG_GEN_OUTPUT_ACTION(ev, dest);
+    GenProcessGenAttrsAfterAction(mh, ch);
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SEND_STATUS_MSG
+{
+    Message *m = ObjVarFindData(oself, ATTR_GEN_VALUE_STATUS_MSG);
+
+    if (m)
+	SendMsg(oself, *m, (GenValueStateFlags)
+		((pself->GVLI_stateFlags & ~GVSF_MODIFIED) |
+		 (modifiedState ? GVSF_MODIFIED : 0)));
+}
+
+/* GenValueApply: the specific part's first (a value being typed); the
+ * apply message if modified (or always with ATTR_GEN_SEND_APPLY_MSG_ON_
+ * APPLY_EVEN_IF_NOT_MODIFIED); then not modified */
+@method GenValueClass, MSG_GEN_APPLY
+{
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+    pself = GVL(oself);
+    if (!(pself->GVLI_stateFlags & GVSF_MODIFIED) &&
+	!ObjVarFindData(oself,
+			ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED))
+	return;
+    SendMsg(oself, pself->GVLI_applyMsg, pself->GVLI_stateFlags);
+    GVL(oself)->GVLI_stateFlags &= ~GVSF_MODIFIED;
+}
+
+@method GenValueClass, MSG_GEN_VALUE_GET_DESTINATION
+{
+    return pself->GVLI_destination;
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_DESTINATION
+{
+    if (pself->GVLI_destination != dest) {
+	pself->GVLI_destination = dest;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenValueClass, MSG_GEN_VALUE_GET_APPLY_MSG
+{
+    return pself->GVLI_applyMsg;
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_APPLY_MSG
+{
+    if (pself->GVLI_applyMsg != applyMsg) {
+	pself->GVLI_applyMsg = applyMsg;
+	ObjMarkDirty(oself);
+    }
+}
+
+/* GenValueSetDisplayFormat: the specific part's maximum and value
+ * shown anew */
+@method GenValueClass, MSG_GEN_VALUE_SET_DISPLAY_FORMAT
+{
+    GenValueInstance *g;
+
+    if (pself->GVLI_displayFormat == format)
+	return;
+    pself->GVLI_displayFormat = format;
+    ObjMarkDirty(oself);
+    if (!GenCheckIfSpecGrown(oself))
+	return;
+    g = GVL(oself);
+    @callsuper oself::GenClass::MSG_GEN_VALUE_SET_MAXIMUM(g->GVLI_maximum);
+    g = GVL(oself);
+    @callsuper oself::GenClass::MSG_GEN_VALUE_SET_VALUE(g->GVLI_value,
+		(g->GVLI_stateFlags & GVSF_INDETERMINATE) != 0);
+}
+
+@method GenValueClass, MSG_GEN_VALUE_GET_DISPLAY_FORMAT
+{
+    return pself->GVLI_displayFormat;
+}
+
+/* ---------------------------------------------------------------------
+ * The values by type (GenValueType)
+ * ------------------------------------------------------------------- */
+
+/* AddAppropriateValue: the value, minimum, maximum or increment (they
+ * follow each other in the instance) */
+static WWFixedAsDWord TypedValue(optr o, GenValueType t)
+{
+    GenValueInstance *g = GVL(o);
+
+    switch (t) {
+    case GVT_MINIMUM:	return g->GVLI_minimum;
+    case GVT_MAXIMUM:	return g->GVLI_maximum;
+    case GVT_INCREMENT:	return g->GVLI_increment;
+    default:		return g->GVLI_value;
+    }
+}
+
+/* GetLongestValue: the minimum or the maximum, the larger in size (with
+ * its sign); with a fraction 0.5555 for the digits */
+static WWFixedAsDWord LongestValue(optr o)
+{
+    GenValueInstance *g = GVL(o);
+    sdword mn = (sdword) g->GVLI_minimum, mx = (sdword) g->GVLI_maximum;
+    Boolean neg = mn < 0 || mx < 0;
+    dword a = (dword) (mn < 0 ? -mn : mn), b = (dword) (mx < 0 ? -mx : mx);
+    dword v = a > b ? a : b;
+
+    if (g->GVLI_displayFormat)
+	v = (v & 0xffff0000UL) | 36408;
+    return (WWFixedAsDWord) (neg ? -(sdword) v : (sdword) v);
+}
+
+/* GetValueFromChoice */
+static WWFixedAsDWord ValueOfType(optr o, GenValueType t)
+{
+    if (t == GVT_LONG)
+	return LongestValue(o);
+    if (t == GVT_RANGE_LENGTH)
+	return RangeLength(o);
+    if (t == GVT_RANGE_END)
+	return RangeLength(o) + GVL(o)->GVLI_value;
+    return TypedValue(o, t);
+}
+
+/* GetValueRange: the maximum less the minimum (0 if negative), for the
+ * available range less the range length too */
+static WWFixedAsDWord ValueRange(optr o, GenValueType *t)
+{
+    GenValueInstance *g = GVL(o);
+    sdword r = (sdword) g->GVLI_maximum - (sdword) g->GVLI_minimum;
+
+    if (r < 0)
+	return 0;
+    if (*t == GVT_VALUE_AS_RATIO) {
+	r -= (sdword) RangeLength(o);
+	*t = GVT_VALUE;
+    }
+    return (WWFixedAsDWord) r;
+}
+
+static Boolean IsOffsetType(GenValueType t)
+{
+    return t != GVT_RANGE_LENGTH && t != GVT_INCREMENT && t != GVT_LONG;
+}
+
+/* GenValueGetValueRatio: (the value less the minimum) / the range */
+@method GenValueClass, MSG_GEN_VALUE_GET_VALUE_RATIO
+{
+    GenValueType t = valueType;
+    WWFixedAsDWord range = ValueRange(oself, &t);
+    sdword v = (sdword) ValueOfType(oself, t);
+
+    if (IsOffsetType(t)) {
+	v -= (sdword) GVL(oself)->GVLI_minimum;
+	if (v < 0)
+	    v = 0;
+    }
+    if (!range)
+	return 0;
+    return GrUDivWWFixed((WWFixedAsDWord) v, range);
+}
+
+/* SetValue: the value (for a type other than the value: the minimum,
+ * maximum or increment written with it) */
+static void SetTypedValue(optr o, GenValueType t, WWFixedAsDWord v)
+{
+    switch (t) {
+    case GVT_MINIMUM:
+	@call o::MSG_GEN_VALUE_SET_MINIMUM(v);
+	break;
+    case GVT_MAXIMUM:
+	@call o::MSG_GEN_VALUE_SET_MAXIMUM(v);
+	break;
+    case GVT_INCREMENT:
+	@call o::MSG_GEN_VALUE_SET_INCREMENT(v);
+	break;
+    default:
+	@call o::MSG_GEN_VALUE_SET_VALUE(v, FALSE);
+	break;
+    }
+}
+
+/* GenValueSetValueFromRatio: the ratio of the range, plus the minimum */
+@method GenValueClass, MSG_GEN_VALUE_SET_VALUE_FROM_RATIO
+{
+    GenValueType t = valueType;
+    WWFixedAsDWord range = ValueRange(oself, &t);
+    DWFixed a, b, r;
+    sdword v;
+
+    a.DWF_int = (sdword) IntegerOf(range);
+    a.DWF_frac = FractionOf(range);
+    b.DWF_int = (sdword) ratio.WWF_int;
+    b.DWF_frac = ratio.WWF_frac;
+    GrMulDWFixed(&a, &b, &r);
+    v = (sdword) (((dword) r.DWF_int << 16) | r.DWF_frac);
+    if (IsOffsetType(t))
+	v += (sdword) GVL(oself)->GVLI_minimum;
+    SetTypedValue(oself, t, (WWFixedAsDWord) v);
+}
+
+static word DecimalPlaces(optr o, word def)
+{
+    word *d = ObjVarFindData(o, ATTR_GEN_VALUE_DECIMAL_PLACES);
+
+    return d ? *d : def;
+}
+
+static WholeMeasurementType ValueMeasurementType(optr o)
+{
+    optr app = GeodeGetAppObject(MemOwner(OptrToHandle(o)));
+    WholeMeasurementType m = { 0, 0 };
+
+    if (app)
+	m = @call app::MSG_GEN_APPLICATION_GET_MEASUREMENT_TYPE();
+    return m;
+}
+
+/*
+ * GenValueGetValueText: the value of the type as text: an integer, a
+ * decimal number (3 places or ATTR_GEN_VALUE_DECIMAL_PLACES), a
+ * percentage (with "%"), else a distance in the format's units (for the
+ * longest value on a tiny squished screen in points)
+ */
+@method GenValueClass, MSG_GEN_VALUE_GET_VALUE_TEXT
+{
+    WWFixedAsDWord v = ValueOfType(oself, valueType);
+    GenValueDisplayFormat f = GVL(oself)->GVLI_displayFormat;
+    word places, flags = 0;
+    byte dt;
+    char *p;
+
+    if (f <= GVDF_DECIMAL) {
+	places = f == GVDF_DECIMAL ? DecimalPlaces(oself, 3) : 0;
+	LocalFixedToAscii(buffer, v, places);
+	return;
+    }
+    if (f == GVDF_PERCENTAGE) {
+	LocalFixedToAscii(buffer, v, DecimalPlaces(oself, v ? 3 : 0));
+	for (p = buffer; *p; p++)
+	    ;
+	p[0] = '%';
+	p[1] = 0;
+	return;
+    }
+    if (valueType == GVT_LONG) {
+	dt = (byte) (UserGetDisplayType() >> 8);
+	if ((dt & DT_DISP_SIZE) == (DS_TINY << DT_DISP_SIZE_OFFSET) &&
+	    (dt & DT_DISP_ASPECT_RATIO) ==
+	    (DAR_VERY_SQUISHED << DT_DISP_ASPECT_RATIO_OFFSET))
+	    f = GVDF_POINTS;
+    }
+    places = DecimalPlaces(oself, 0xffff);
+    if (places != 0xffff)
+	flags = LDF_PASSING_DECIMAL_PLACES |
+		(places > LDF_DECIMAL_PLACES ? LDF_DECIMAL_PLACES : places);
+    (void) LocalDistanceToAscii(buffer, v,
+				(DistanceUnit) (f - GVDF_POINTS + DU_POINTS),
+				ValueMeasurementType(oself).WMT_measurementType,
+				(LocalDistanceFlags) flags);
+}
+
+/* GenValueSetValueFromText: the number (a distance in the format's
+ * units) read */
+@method GenValueClass, MSG_GEN_VALUE_SET_VALUE_FROM_TEXT
+{
+    GenValueDisplayFormat f = pself->GVLI_displayFormat;
+    WWFixedAsDWord v;
+
+    if (f <= GVDF_DECIMAL)
+	v = LocalAsciiToFixed(text, NULL);
+    else
+	v = LocalDistanceFromAscii(text,
+				   (DistanceUnit) (f - GVDF_POINTS + DU_POINTS),
+				   ValueMeasurementType(oself).WMT_measurementType);
+    SetTypedValue(oself, valueType, v);
+}
+
+/* ---------------------------------------------------------------------
+ * Changing the value by steps
+ * ------------------------------------------------------------------- */
+
+static const WWFixedAsDWord metricIncTable[] = {
+    18577, 46443, 0x10000 | 27349, 0x20000 | 54700, 0x70000 | 5676,
+    0xe0000 | 11353, 0x1c0000 | 22706, 0x460000 | 56763,
+    0x8d0000 | 47991, 0x11b0000 | 30446
+};
+#define METRIC_INCS (sizeof(metricIncTable) / sizeof(metricIncTable[0]))
+
+/* RoundIncrementForMetric: the nearest of the metric steps */
+static WWFixedAsDWord RoundIncrementForMetric(WWFixedAsDWord inc)
+{
+    word i;
+
+    for (i = 0; i < METRIC_INCS - 1 && inc >= metricIncTable[i]; i++)
+	;
+    if (i && (sdword) (2 * inc - metricIncTable[i] - metricIncTable[i - 1])
+	< 0)
+	i--;
+    return metricIncTable[i];
+}
+
+/* GetIncrement: a metric format (or a metric application) steps by
+ * ATTR_GEN_VALUE_METRIC_INCREMENT, else the increment rounded to a
+ * metric step */
+static WWFixedAsDWord Increment(optr o)
+{
+    GenValueInstance *g = GVL(o);
+    WWFixedAsDWord inc = g->GVLI_increment;
+    GenValueDisplayFormat f = g->GVLI_displayFormat;
+    WWFixedAsDWord *m;
+
+    if (f != GVDF_CENTIMETERS && f != GVDF_MILLIMETERS) {
+	if (f != GVDF_INCHES_OR_CENTIMETERS &&
+	    f != GVDF_POINTS_OR_MILLIMETERS)
+	    return inc;
+	if (!ValueMeasurementType(o).WMT_measurementType)
+	    return inc;
+    }
+    m = ObjVarFindData(o, ATTR_GEN_VALUE_METRIC_INCREMENT);
+    return m ? *m : RoundIncrementForMetric(inc);
+}
+
+/* GenValueIncrementDecrement: the value plus or minus the increment; a
+ * HINT_VALUE_WRAP value goes round to the other end */
+@method GenValueClass, MSG_GEN_VALUE_INCREMENT, MSG_GEN_VALUE_DECREMENT
+{
+    sdword inc, v;
+
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+    inc = (sdword) Increment(oself);
+    if (message == MSG_GEN_VALUE_DECREMENT)
+	inc = -inc;
+    v = (sdword) GVL(oself)->GVLI_value + inc;
+    if (ObjVarFindData(oself, HINT_VALUE_WRAP) &&
+	(sdword) KeepInRange(oself, (WWFixedAsDWord) v) != v) {
+	if (message == MSG_GEN_VALUE_INCREMENT)
+	    @call oself::MSG_GEN_VALUE_SET_VALUE_TO_MINIMUM();
+	else
+	    @call oself::MSG_GEN_VALUE_SET_VALUE_TO_MAXIMUM();
+	return;
+    }
+    @call oself::MSG_GEN_VALUE_SET_VALUE((WWFixedAsDWord) v, FALSE);
+}
+
+@method GenValueClass, MSG_GEN_VALUE_ADD_RANGE_LENGTH,
+		       MSG_GEN_VALUE_SUBTRACT_RANGE_LENGTH
+{
+    sdword r;
+
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+    r = (sdword) RangeLength(oself);
+    if (message == MSG_GEN_VALUE_SUBTRACT_RANGE_LENGTH)
+	r = -r;
+    @call oself::MSG_GEN_VALUE_SET_VALUE(
+		(WWFixedAsDWord) ((sdword) GVL(oself)->GVLI_value + r), FALSE);
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_VALUE_TO_MINIMUM
+{
+    @call oself::MSG_GEN_VALUE_SET_VALUE(pself->GVLI_minimum, FALSE);
+}
+
+@method GenValueClass, MSG_GEN_VALUE_SET_VALUE_TO_MAXIMUM
+{
+    @call oself::MSG_GEN_VALUE_SET_VALUE(pself->GVLI_maximum, FALSE);
+}
+
+/* GenValueGetTextFilter: signed numbers, decimals, or (a distance)
+ * anything but tabs */
+@method GenValueClass, MSG_GEN_VALUE_GET_TEXT_FILTER
+{
+    GenValueDisplayFormat f = pself->GVLI_displayFormat;
+
+    if (f == GVDF_INTEGER)
+	return VTFC_SIGNED_NUMERIC | VTF_NO_SPACES | VTF_NO_TABS;
+    if (f == GVDF_DECIMAL)
+	return VTFC_SIGNED_DECIMAL | VTF_NO_SPACES | VTF_NO_TABS;
+    return VTF_NO_TABS;
+}
+
+/* ---------------------------------------------------------------------
+ * The options (the .ini file)
+ * ------------------------------------------------------------------- */
+
+/* GenValueLoadOptions: the value read as text, modified, applied */
+@method GenValueClass, MSG_GEN_LOAD_OPTIONS
+{
+    char buf[GEN_VALUE_MAX_TEXT_LEN + 1];
+    word size;
+
+    if (InitFileReadStringBuffer(params->GOP_category, params->GOP_key, buf,
+				 (InitFileReadFlags) (sizeof(buf) & IFRF_SIZE),
+				 &size))
+	return;
+    @call oself::MSG_GEN_VALUE_SET_VALUE_FROM_TEXT(buf, GVT_VALUE);
+    @call oself::MSG_GEN_VALUE_SET_MODIFIED_STATE(TRUE);
+    @call oself::MSG_GEN_APPLY();
+}
+
+@method GenValueClass, MSG_GEN_SAVE_OPTIONS
+{
+    char buf[GEN_VALUE_MAX_TEXT_LEN + 1];
+
+    @call oself::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_VALUE);
+    InitFileWriteString(params->GOP_category, params->GOP_key, buf);
+}

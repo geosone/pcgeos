@@ -18,6 +18,7 @@
 @include <Objects/gPrimC.goh>
 @include <Objects/gViewC.goh>
 @include <Objects/gContC.goh>
+@include <Objects/gValueC.goh>
 #include <Internal/specUI.h>
 #include <localize.h>
 #include <stdint.h>
@@ -30,6 +31,8 @@ typedef struct {
     word	UGS_checks, UGS_fails, UGS_failLine;
     word	UGS_pings;
     word	UGS_failLines[8];
+    word	UGS_valueApplies;
+    dword	UGS_lastValue;
 } UGState;
 
 UGState ugState;
@@ -49,6 +52,7 @@ UGState ugState;
 
 @class UGDisplayClass, GenClass;
     @message void MSG_UG_PING();
+    @message (GEN_VALUE_APPLY_MSG) MSG_UG_VALUE_APPLIED;
 @endc
 @classdecl UGDisplayClass;
 
@@ -59,6 +63,13 @@ UGState ugState;
 @method UGDisplayClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
 {
     return GenQueryUICallSpecificUI(oself, SPIR_BUILD_DISPLAY, MasterOffset);
+}
+
+@method UGDisplayClass, MSG_UG_VALUE_APPLIED
+{
+    (void) stateFlags;
+    ugState.UGS_valueApplies++;
+    ugState.UGS_lastValue = value;
 }
 
 @method UGDisplayClass, MSG_UG_PING
@@ -497,6 +508,82 @@ static Boolean MonikerIs(optr o, const char *text)
 	UGCHECK(((GenViewInstance *) ObjDerefGen(v))->GVI_vertLink == v2 &&
 		((GenViewInstance *) ObjDerefGen(v2))->GVI_vertLink == v);
 	MemUnlock(OptrToHandle(v));
+	break;
+    }
+    case 11: {
+	/* GenValue not usable: range, steps, wrap, text, ratio, apply */
+	optr v;
+	char buf[GEN_VALUE_MAX_TEXT_LEN + 1];
+
+	v = ObjInstantiate(OptrToHandle(@UGApp),
+			   (ClassStruct *) &GenValueClass);
+	ObjInitializePart(v, word_offsetof(GenBase, Gen_offset));
+	@call v::MSG_GEN_VALUE_SET_MAXIMUM(MakeWWFixed(100));
+	@call v::MSG_GEN_VALUE_SET_MINIMUM(MakeWWFixed(10));
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 10);
+	@call v::MSG_GEN_VALUE_SET_INTEGER_VALUE(150, FALSE);
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 100);
+	@call v::MSG_GEN_VALUE_SET_INCREMENT(MakeWWFixed(5));
+	@call v::MSG_GEN_VALUE_DECREMENT();
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 95);
+	@call v::MSG_GEN_VALUE_INCREMENT();
+	@call v::MSG_GEN_VALUE_INCREMENT();
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 100);
+	ObjLockObjBlock(OptrToHandle(v));
+	(void) ObjVarAddData(v, HINT_VALUE_WRAP, 0);
+	MemUnlock(OptrToHandle(v));
+	@call v::MSG_GEN_VALUE_INCREMENT();
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 10);
+	/* a range length of 20: no more than 80 */
+	@call v::MSG_GEN_VALUE_SET_RANGE_LENGTH(MakeWWFixed(20));
+	@call v::MSG_GEN_VALUE_SET_VALUE_TO_MAXIMUM();
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 80);
+	@call v::MSG_GEN_VALUE_SUBTRACT_RANGE_LENGTH();
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 60);
+	/* (60 - 10) / (100 - 10 - 20): 0.714 */
+	UGCHECK(@call v::MSG_GEN_VALUE_GET_VALUE_RATIO(
+			GVI_VALUE_AS_RATIO_OF_AVAILABLE_RANGE) ==
+		GrUDivWWFixed(MakeWWFixed(50), MakeWWFixed(70)));
+	{
+	    WWFixed half;
+
+	    half.WWF_int = 0;
+	    half.WWF_frac = 0x8000;
+	    @call v::MSG_GEN_VALUE_SET_VALUE_FROM_RATIO(half, GVT_VALUE);
+	}
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 55);
+	@call v::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_VALUE);
+	UGCHECK(!LocalCmpStrings(buf, "55", 0));
+	@call v::MSG_GEN_VALUE_SET_VALUE_FROM_TEXT("42", GVT_VALUE);
+	UGCHECK(IntegerOf(@call v::MSG_GEN_VALUE_GET_VALUE()) == 42);
+	@call v::MSG_GEN_VALUE_SET_DISPLAY_FORMAT(GVDF_DECIMAL);
+	@call v::MSG_GEN_VALUE_SET_VALUE(MakeWWFixed(12.5), FALSE);
+	@call v::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_VALUE);
+	UGCHECK(!LocalCmpStrings(buf, "12.5", 0) ||
+		!LocalCmpStrings(buf, "12,5", 0));
+	@call v::MSG_GEN_VALUE_SET_DISPLAY_FORMAT(GVDF_PERCENTAGE);
+	@call v::MSG_GEN_VALUE_SET_INTEGER_VALUE(50, FALSE);
+	@call v::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_VALUE);
+	UGCHECK(!LocalCmpStrings(buf, "50%", 0));
+	@call v::MSG_GEN_VALUE_SET_DISPLAY_FORMAT(GVDF_INTEGER);
+
+	/* modified, applied once to the process */
+	@call v::MSG_GEN_VALUE_SET_DESTINATION(@UGDisplay);
+	@call v::MSG_GEN_VALUE_SET_APPLY_MSG(MSG_UG_VALUE_APPLIED);
+	@call v::MSG_GEN_VALUE_SET_INTEGER_VALUE(33, FALSE);
+	UGCHECK(!@call v::MSG_GEN_VALUE_IS_MODIFIED());
+	/* not modified: nothing; applied even so with the attribute
+	 * (becoming modified makes it applyable: the specific part's) */
+	@call v::MSG_GEN_APPLY();
+	ObjLockObjBlock(OptrToHandle(v));
+	(void) ObjVarAddData(v,
+		ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED, 0);
+	MemUnlock(OptrToHandle(v));
+	@call v::MSG_GEN_APPLY();
+	UGCHECK(!@call v::MSG_GEN_VALUE_IS_MODIFIED());
+	@call v::MSG_GEN_VALUE_SET_INDETERMINATE_STATE(TRUE);
+	UGCHECK(@call v::MSG_GEN_VALUE_IS_INDETERMINATE());
+	UGCHECK(!Grown(v));
 	break;
     }
     case 8:

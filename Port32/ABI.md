@@ -5167,6 +5167,40 @@ visual classes of `Library/User/Vis`:
 
   Not yet: `MSG_GEN_BRANCH_REPLACE_PARAMS` (`BRPT_OUTPUT_OPTR`), the
   dynamic list (`GenDynamicListClass`).
+- **Views** (`Gen/genView.goc`, `genContent.goc` after the asm of the
+  same names): `GenViewClass` keeps the generic data of a view (origin,
+  document bounds, increment, scale factor, background color, the
+  attributes of the view and of each dimension, ink type, content);
+  once built the specific part (`SPIR_BUILD_VIEW`, Motif's `OLPane`)
+  scrolls and scales. Linked views (`GVI_horizLink`, `GVI_vertLink`: a
+  circle) get a change as an event recorded with `@record`, sent round
+  with `MSG_GEN_VIEW_SEND_TO_LINKS` (or only the vertical or horizontal
+  link) and handled by each view with `MSG_GEN_VIEW_CALL_WITHOUT_LINKS`
+  (dispatched with `MF_DISPATCH_DONT_FREE`) until it is back at the
+  originator. `GenContentClass` resolves to `SPIR_BUILD_CONTENT` and
+  gives its attributes to the specific part as
+  `MSG_VIS_CONTENT_SET_ATTRS`. `gViewC.goh` relocates
+  `ATTR_GEN_VIEW_INK_DESTINATION_INFO` by the field name (`IDIP_dest`).
+  Not yet: the tracking of a `GVA_TRACK_SCROLLING` content
+  (`GenSetupTrackingArgs`, `GenReturnTrackingArgs`), the specific part's
+  `MSG_GEN_ADD_CHILD`/`_REMOVE_CHILD` before GenClass,
+  `MSG_GEN_BRANCH_REPLACE_PARAMS`.
+- **The value** (`Gen/genValue.goc` after `genValue.asm`):
+  `GenValueClass`, a WWFixed between the minimum and the maximum less
+  the range length (`HINT_VALUE_DISPLAYS_RANGE`: a scroller's visible
+  part), stepped by the increment (metric formats by
+  `ATTR_GEN_VALUE_METRIC_INCREMENT` or the nearest metric step;
+  `HINT_VALUE_WRAP` goes round), as a ratio of the range, as text (an
+  integer, a decimal, a percentage or a distance through
+  `LocalFixedToAscii`/`LocalDistanceToAscii` and back), the options as
+  text. The apply message (`GEN_VALUE_APPLY_MSG`: value, state flags)
+  goes out on `MSG_GEN_APPLY` when modified, the status message
+  (`ATTR_GEN_VALUE_STATUS_MSG`) when asked, both through
+  `MSG_GEN_OUTPUT_ACTION`; what it looks like is the specific UI's
+  (`SPIR_BUILD_VALUE`). `GVT_VALUE_AS_RATIO_OF_AVAILABLE_RANGE` is
+  misspelled `GVI_...` in `gValueC.goh` and kept so. Not yet:
+  `MSG_GEN_FIND_VIEW_RANGES`, `MSG_GEN_QUERY_VIEW_AREA` (the scrollers'
+  place in a view).
 - **Size specifications** (`Vis/visSpec.goc`, after
   `visSpecUtils.asm`): `VisConvertSpecVisSize` (pixels, percent of the
   field's or the screen's size, average and widest characters and

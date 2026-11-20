@@ -40,6 +40,7 @@ export GenItemClass
 export GenBooleanClass
 export GenViewClass
 export GenContentClass
+export GenValueClass
 export GenProcessClass
 export UserClass
 

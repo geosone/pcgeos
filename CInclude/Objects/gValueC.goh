@@ -68,7 +68,7 @@ typedef ByteEnum GenValueDisplayFormat;
 @message void MSG_GEN_VALUE_SET_DESTINATION(optr dest = cx:dx);   
 
 @message Message MSG_GEN_VALUE_GET_APPLY_MSG() = ax;   
-@message void MSG_GEN_VALUE_SET_APPLY_MSG(Message message = cx);   
+@message void MSG_GEN_VALUE_SET_APPLY_MSG(Message applyMsg = cx);   
 
 typedef enum /* word */ {
 	GVT_VALUE,

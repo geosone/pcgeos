@@ -41,6 +41,8 @@ typedef struct {
     word	UGS_checks, UGS_fails, UGS_failLine;
     word	UGS_pings;
     word	UGS_failLines[8];
+    word	UGS_valueApplies;
+    dword	UGS_lastValue;
 } UGState;
 
 /* as tspui.goh (the part this test uses) */
@@ -208,6 +210,11 @@ int main(void)
 
     /* 10: GenView and GenContent, generic data, linked views */
     step(10);
+
+    /* 11: GenValue: range, steps, text, ratio; applied once */
+    step(11);
+    WAIT_FOR(st->UGS_valueApplies);
+    CHECK(st->UGS_valueApplies == 1 && st->UGS_lastValue == 33UL << 16);
 
     /* 8: the UI's use of the specific UI ends; ours too */
     step(8);
