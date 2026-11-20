@@ -111,8 +111,9 @@ int main(void)
     printf("group %dx%d, doc1 at %d,%d %dx%d; notices %u, lists %u\n",
 	   st->UBS_gw, st->UBS_gh, st->UBS_dl, st->UBS_dt, st->UBS_dw,
 	   st->UBS_dh, st->UBS_displayNotices, st->UBS_listNotices);
-    /* overlapping, selected, tiled, full sized, Ctrl+F6, not usable */
-    for (i = 2; i <= 7; i++)
+    /* overlapping, selected, tiled, full sized, Ctrl+F6, not usable;
+     * the separators in a menu, the File menu's Exit */
+    for (i = 2; i <= 10; i++)
 	step(i);
 
     printf("geode checks: %u, failed %u (first at uiboot.goc line %u)\n",

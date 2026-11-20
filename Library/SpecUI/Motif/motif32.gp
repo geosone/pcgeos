@@ -71,6 +71,7 @@ export OLTitleGroupClass
 export OLPopupWinClass
 export OLDialogWinClass
 export OLReplyBarClass
+export OLMenuItemGroupClass
 export OLButtonClass
 export OLMenuWinClass
 export OLMenuButtonClass

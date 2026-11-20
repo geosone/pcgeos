@@ -697,3 +697,22 @@ VisCompSpacingMarginsInfo OpenPassMarginInfo(optr obj, const Rectangle *m,
 {
     GenSendToChildren(oself, message, NULL, 0);
 }
+
+/*
+ * OLCtrlMenuSepQuery: a plain group in a menu passes the menu separator
+ * query through its children (not usable, past them)
+ */
+@method OLCtrlClass, MSG_SPEC_MENU_SEP_QUERY
+{
+    optr c;
+
+    if (!(((GenInstance *) ObjDerefGen(oself))->GI_states & GS_USABLE))
+	return OpenForwardMenuSepQuery(oself, flags);
+    if (flags & MSF_FROM_CHILD)
+	return OpenForwardMenuSepQuery(oself,
+				       (MenuSepFlags) (flags & ~MSF_FROM_CHILD));
+    c = Ctrl(oself)->VCI_comp.CP_firstChild;
+    if (c)
+	return @call c::MSG_SPEC_MENU_SEP_QUERY(flags);
+    return @call oself::MSG_SPEC_MENU_SEP_QUERY(flags | MSF_FROM_CHILD);
+}

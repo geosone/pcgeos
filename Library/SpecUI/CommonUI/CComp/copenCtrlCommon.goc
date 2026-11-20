@@ -108,7 +108,7 @@ static void DrawEtchedVLine(GStateHandle gs, sword x, sword top,
 }
 
 /* DrawEtchedHLine: black, and white below it */
-static void DrawEtchedHLine(GStateHandle gs, sword left, sword y,
+void DrawEtchedHLine(GStateHandle gs, sword left, sword y,
 			    sword right, Boolean fix)
 {
     if (fix && !OpenCheckIfBW())

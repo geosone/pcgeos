@@ -482,3 +482,20 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
     OLButtonCallWin(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
     OLButtonDrawLaterIfNewState(oself);
 }
+
+/*
+ * OLButtonSpecMenuSepQuery: a usable, drawn item (not a title bar icon)
+ * wants a separator before the next group and after itself on the way
+ * back
+ */
+@extern method OLButtonClass, MSG_SPEC_MENU_SEP_QUERY
+{
+    if ((pself->OLBI_specState & OLBSS_SYS_ICON) ||
+	!(((GenInstance *) ObjDerefGen(oself))->GI_states & GS_USABLE) ||
+	!(Btn(oself)->VI_attrs & VA_DRAWABLE))
+	return OpenForwardMenuSepQuery(oself, flags);
+    flags = OpenForwardMenuSepQuery(oself,
+				    (MenuSepFlags) (flags | MSF_SEP |
+						    MSF_USABLE));
+    return (MenuSepFlags) (flags | MSF_SEP);
+}

@@ -8,8 +8,8 @@
  * parent and build flags wait in MAP_GROUP_DATA for OLCtrl's
  * MSG_META_INITIALIZE.
  *
- * Port32 (Port32/ABI.md section 13y), not yet: OLPopoutClass and
- * OLMenuItemGroupClass (an OLCtrl instead).
+ * Port32 (Port32/ABI.md section 13y), not yet: OLPopoutClass (an
+ * OLCtrl instead).
  */
 @include "cGeode.goh"
 
@@ -137,7 +137,7 @@ ClassStruct *OLBuildInteraction(optr oself, word masterOffset)
 	return (ClassStruct *) &OLMenuWinClass;
     if (reply == R(OLBR_SUB_MENU)) {
 	if (vis == GIV_SUB_GROUP)
-	    return (ClassStruct *) &OLCtrlClass;  /* OLMenuItemGroupClass */
+	    return (ClassStruct *) &OLMenuItemGroupClass;
 	if (vis == GIV_POPUP)
 	    return (ClassStruct *) &OLMenuWinClass;
     }

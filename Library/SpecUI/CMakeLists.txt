@@ -28,6 +28,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CComp/copenGadgetArea.goc
                ${c}/CComp/copenTitleGroup.goc
                ${c}/CComp/copenReplyBar.goc
+               ${c}/CComp/copenMenuItemGroup.goc
                ${c}/CButton/copenButtonBuild.goc
                ${c}/CButton/copenButtonClass.goc
                ${c}/CButton/copenButtonCommon.goc

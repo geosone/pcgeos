@@ -1,0 +1,33 @@
+/*
+ * olMenuItemGroupClass.goh -- OLMenuItemGroupClass, a group of items in
+ * a menu with separators above and below it (after
+ * Include/Internal/SpecUI/olMenuItemGroupClass.def), for Port32.
+ */
+#ifndef __OLMENUITEMGROUPCLASS_GOH
+#define __OLMENUITEMGROUPCLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+
+@deflib motif
+
+/* OLMenuItemGroupSpecState */
+typedef ByteFlags OLMenuItemGroupSpecState;
+/* set by MSG_SPEC_MENU_SEP_QUERY on its way: the MenuSepFlags that came
+ * (the same bits), a usable child */
+#define OLMIGSS_ABOVE_SEP	 0x80
+#define OLMIGSS_ABOVE_USABLE	 0x40
+#define OLMIGSS_HAS_USABLE_CHILD 0x20
+#define OLMIGSS_MENU_PINNED	 0x10	/* OpenLook only */
+/* the separators to draw */
+#define OLMIGSS_TOP_SEP		 0x04
+#define OLMIGSS_BOTTOM_SEP	 0x02
+/* separators at all (not with HINT_SAME_CATEGORY_AS_PARENT) */
+#define OLMIGSS_SEPARATORS	 0x01
+
+@class OLMenuItemGroupClass, OLCtrlClass;
+    @instance OLMenuItemGroupSpecState	OLMIGI_specState = 0;
+@endc;
+
+@endlib
+
+#endif

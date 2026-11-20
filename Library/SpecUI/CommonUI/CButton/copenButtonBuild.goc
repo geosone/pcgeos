@@ -54,6 +54,7 @@
 @extern method OLButtonClass, MSG_VIS_DRAW;
 @extern method OLButtonClass, MSG_OL_BUTTON_SET_DRAW_STATE_UNKNOWN;
 @extern method OLButtonClass, MSG_OL_BUTTON_GET_GEN_PART;
+@extern method OLButtonClass, MSG_SPEC_MENU_SEP_QUERY;
 
 #define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
 #define T(t)		((t) << OLBF_TARGET_OFFSET)

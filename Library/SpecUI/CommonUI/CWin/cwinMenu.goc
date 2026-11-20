@@ -131,6 +131,95 @@ static VarDataCHandler menuHints[] = {
     OpenWinProcessHints(oself);
 }
 
+@extern visMoniker FileExitMoniker;
+
+/*
+ * ExitMoniker: "Exit" and the application's name ("Exit Draw"; the
+ * mnemonic of "Exit"), else plain "Exit"
+ */
+static void ExitMoniker(optr menu, optr t)
+{
+    optr m = @call t::MSG_GEN_FIND_MONIKER(TRUE,
+		(VMS_TEXT << VMSF_STYLE_OFFSET) | VMSF_COPY_CHUNK,
+		OptrToHandle(menu));
+
+    if (m) {
+	VisMonikerWithText *v = LMemDeref(m);
+
+	if (!(v->VMWT_common.VM_type & VMT_GSTRING)) {
+	    VisMonikerWithText *ex;
+	    const char *et;
+	    word n;
+	    char mn;
+
+	    MemLock(OptrToHandle(@FileExitMoniker));
+	    ex = LMemDeref(@FileExitMoniker);
+	    et = (const char *) ex + VMWT_text;
+	    for (n = 1; et[n - 1]; n++)
+		;
+	    mn = ex->VMWT_mnemonicOffset;
+	    LMemInsertAt(m, VMWT_text, n);
+	    v = LMemDeref(m);
+	    v->VMWT_common.VM_width = 0;	/* sized again */
+	    v->VMWT_mnemonicOffset = mn;
+	    memcpy((char *) v + VMWT_text, et, n);
+	    ((char *) v)[VMWT_text + n - 1] = ' ';
+	    MemUnlock(OptrToHandle(@FileExitMoniker));
+	    (void) @call t::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(m, VUM_MANUAL);
+	    LMemFree(m);
+	    return;
+	}
+	LMemFree(m);
+    }
+    (void) @call t::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(@FileExitMoniker,
+						     VUM_MANUAL);
+}
+
+/*
+ * EnsureFileExit: a File menu gets an Exit item (IC_EXIT, F3) at its
+ * end, unless the launch model is transparent (apps are not closed)
+ * and the application is no desk accessory; its moniker and shortcut
+ * unless it has them
+ */
+static void EnsureFileExit(optr o)
+{
+    optr *e, t, app;
+
+    if (!(MWin(o)->OLMWI_specState & OMWSS_FILE_MENU))
+	return;
+    if (UserGetLaunchModel() == UILM_TRANSPARENT &&
+	!(UserGetLaunchOptions() & UILO_CLOSABLE_APPS)) {
+	app = GeodeGetAppObject(0);
+	if (!app ||
+	    !(@call app::MSG_GEN_APPLICATION_GET_LAUNCH_FLAGS() &
+	      ALF_DESK_ACCESSORY))
+	    return;
+    }
+    e = ObjVarFindData(o, ATTR_OL_MENU_WIN_EXIT_TRIGGER);
+    if (e)
+	t = *e;
+    else {
+	InteractionCommand *ic;
+
+	t = OpenCreateChildObject(OptrToHandle(o), o,
+				  (ClassStruct *) &GenTriggerClass, 0,
+				  TRUE, TRUE, CCO_LAST);
+	ic = ObjVarAddData(t, ATTR_GEN_TRIGGER_INTERACTION_COMMAND |
+			   VDF_SAVE_TO_STATE, sizeof(InteractionCommand));
+	*ic = IC_EXIT;
+	ObjSetFlags(t, 0, OCF_DIRTY);
+	@call t::MSG_SPEC_BUILD(0);
+	e = ObjVarAddData(o, ATTR_OL_MENU_WIN_EXIT_TRIGGER, sizeof(optr));
+	*e = t;
+	MWin(o)->OLMWI_specState |= OMWSS_EXIT_CREATED;
+    }
+    if (!@call t::MSG_GEN_GET_VIS_MONIKER())
+	ExitMoniker(o, t);
+    if (!@call t::MSG_GEN_GET_KBD_ACCELERATOR())
+	@call t::MSG_GEN_SET_KBD_ACCELERATOR(
+		(KS_CHAR_SET_CONTROL << 8) | VC_F3, VUM_MANUAL);
+}
+
 /*
  * OLMenuWinUpdateSpecBuild: built with its vis parent fully enabled
  * (the menu is enabled as its button), the items vertical
@@ -140,6 +229,43 @@ static VarDataCHandler menuHints[] = {
     flags |= SBF_VIS_PARENT_FULLY_ENABLED;
     @callsuper();
     MWin(oself)->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
+    if (flags & SBF_WIN_GROUP)
+	EnsureFileExit(oself);
+    @call oself::MSG_SPEC_UPDATE_MENU_SEPARATORS();
+}
+
+/* OLMenuWinVisAddChild: the Exit trigger we made stays last */
+@method OLMenuWinClass, MSG_VIS_ADD_CHILD
+{
+    optr *e;
+
+    @callsuper();
+    if ((MWin(oself)->OLMWI_specState & OMWSS_EXIT_CREATED) &&
+	(e = ObjVarFindData(oself, ATTR_OL_MENU_WIN_EXIT_TRIGGER)) != NULL &&
+	*e != child)
+	@call oself::MSG_VIS_MOVE_CHILD(*e, CCO_LAST);
+}
+
+/* OLMenuWinUpdateMenuSeparators: the query through the menu, from
+ * here */
+@method OLMenuWinClass, MSG_SPEC_UPDATE_MENU_SEPARATORS
+{
+    (void) @call oself::MSG_SPEC_MENU_SEP_QUERY(0);
+}
+
+/*
+ * OLMenuWinSpecMenuSepQuery: started here, the query goes to the first
+ * child; back from the last child, nothing needs a separator below it
+ */
+@method OLMenuWinClass, MSG_SPEC_MENU_SEP_QUERY
+{
+    optr c;
+
+    if (flags & MSF_FROM_CHILD)
+	return (MenuSepFlags) (flags & ~(MSF_SEP | MSF_USABLE |
+					 MSF_FROM_CHILD));
+    c = MWin(oself)->VCI_comp.CP_firstChild;
+    return c ? @call c::MSG_SPEC_MENU_SEP_QUERY(flags) : flags;
 }
 
 @extern visMoniker GroupTypeFileMoniker;

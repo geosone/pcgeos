@@ -5595,6 +5595,27 @@ are left out), the constants, the variables and the routines.
     (`cwinClassMisc.goc`: the previous bounds and flags while
     maximized). `NotifyDisplayChange` names the display by its number,
     as the asm's `gDCtrlC.def` (`NDC_displayNum`, not an optr).
+  - Menu separators: `OLMenuItemGroupClass` (`CComp/copenMenuItemGroup.goc`,
+    `olMenuItemGroupClass.goh`), what `OLBuildInteraction` makes of a
+    `GIV_SUB_GROUP` in a menu. `MSG_SPEC_MENU_SEP_QUERY` walks the
+    menu's visible tree in order (`OLMenuWinClass` starts it after its
+    build and on `MSG_SPEC_UPDATE_MENU_SEPARATORS`; `OLCtrl`s pass it
+    through their children, items (`OLButton`) ask for a separator
+    after them and before the next group): a group with a usable child
+    gets a separator above it if something usable is above, and below
+    it if something usable follows; its margins make room for them (two
+    lines in color, etched; one in black and white; half on CGA), its
+    drawing draws them. `HINT_SAME_CATEGORY_AS_PARENT` draws none. An
+    item or group made usable or not usable updates the menu's
+    separators. In C the query returns the new `MenuSepFlags`; the
+    asm's carry (handled) is the existence of the next sibling or first
+    child, which the forwarding checks itself.
+  - The File menu's Exit: a menu of `GIGT_FILE_MENU` gets a
+    `GenTrigger` with `ATTR_GEN_TRIGGER_INTERACTION_COMMAND` `IC_EXIT`
+    (linked up only, kept last among its visual children), named "Exit"
+    and the application's name with the mnemonic of "Exit", F3 as its
+    shortcut, unless the launch model is transparent (without
+    `UILO_CLOSABLE_APPS`) and the application is not a desk accessory.
 - **Not yet.** In `OLWinClass`: the popups, the system menu, the task
   bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
@@ -5619,16 +5640,15 @@ are left out), the constants, the variables and the routines.
   `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `cwinPtr.goc`: moving and resizing by the keyboard
   (the move/resize keys and their abort monitor, the system menu's
   Move and Size), ink. In `OLMenuWinClass`: the pushpin
-  (pinnable menus: the `PinMoniker` picture), the file menu's Exit
-  trigger, cascading sub menus, the scrollers
-  (`MenuWinScrollerClass`), menu separators, the system and express menus, the menu centers,
+  (pinnable menus: the `PinMoniker` picture), cascading sub menus, the scrollers
+  (`MenuWinScrollerClass`), the system and express menus, the menu centers,
   menus in stay up mode
   released through the application (`MSG_META_ENSURE_NO_MENUS_IN_
   STAY_UP_MODE` is answered by a menu, the generic tree does not pass
-  it on). In `OLMenuButtonClass`: popup lists and the selection box,
+  it on, nor does `OLMenuItemGroupClass` yet). In `OLMenuButtonClass`: popup lists and the selection box,
   the keys of popup lists, the focus on a text object, the system menu icon, the default
-  function. `OLPopoutClass` and `OLMenuItemGroupClass` (plain
-  `OLCtrl`s). In `OLGadgetAreaClass`:
+  function. `OLPopoutClass` (a plain
+  `OLCtrl`). In `OLGadgetAreaClass`:
   the display controls its margins look for. In `OLCtrlClass`:
   an OLCtrl in a menu window, the reply bar's extra line when not under
   a dialog, the menu center, mnemonics, the default
@@ -5737,7 +5757,12 @@ are left out), the constants, the variables and the routines.
   second selected takes the target and is on top, the first's menu
   button hidden; tiled, side by side at half the group's width and its
   full height; full sized again; Ctrl+F6 brings the first back on top;
-  the first not usable, the second has the target. Detached, `uiboot`
+  the first not usable, the second has the target. A Tools menu: a
+  group between two items has separators above and below it and room
+  for them, a group with `HINT_SAME_CATEGORY_AS_PARENT` none; the items
+  around it not usable, its separators go, one back, its one comes
+  back (and the geometry after it). A File menu gets Exit last ("Exit
+  Boot", F3, `IC_EXIT`, not a generic child). Detached, `uiboot`
   and the UI's process go and Motif is unloaded. New blocks (and
   semaphores) belong to the current thread's process
   (`KernelOwnerNow`), not to the geode last loaded.

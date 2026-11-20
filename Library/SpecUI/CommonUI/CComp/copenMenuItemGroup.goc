@@ -1,0 +1,264 @@
+/*
+ * copenMenuItemGroup.goc -- OLMenuItemGroupClass (after
+ * copenMenuItemGroup.asm): a GIV_SUB_GROUP interaction in a menu, an
+ * OLCtrl drawn with a separator above and below where items of the menu
+ * are next to it.  MSG_SPEC_MENU_SEP_QUERY finds out where: it walks
+ * the menu's visible tree in order (OLMenuWinClass starts it) and on
+ * its way back each group learns whether a usable item is above it
+ * (its top separator) and below it (its bottom separator).
+ *
+ * Port32: the OpenLook spacing of a pinned menu (MSG_OL_BUTTON_SET_
+ * BORDERED; Motif has none), MSG_META_ENSURE_NO_MENUS_IN_STAY_UP_MODE
+ * passed to the generic children (Port32/ABI.md section 13y).
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+
+@classdecl OLMenuItemGroupClass, neverSaved;
+
+#define MIG(o)	((OLMenuItemGroupInstance *) ObjDerefVis(o))
+#define Gen(o)	((GenInstance *) ObjDerefGen(o))
+
+/* Motif's (ccompConstant.def) */
+#define OL_MENU_ITEM_SEP_HEIGHT		1
+#define OL_MENU_ITEM_ETCHED_SEP_HEIGHT	2
+
+/* OLMenuItemGroupInitialize: separators unless the same category as
+ * the parent; the vis parent ours to choose */
+@method OLMenuItemGroupClass, MSG_META_INITIALIZE
+{
+    pself->OLMIGI_specState |= OLMIGSS_SEPARATORS;
+    @callsuper();
+    pself = MIG(oself);
+    pself->VI_specAttrs |= SA_CUSTOM_VIS_PARENT;
+    if (ObjVarFindData(oself, HINT_SAME_CATEGORY_AS_PARENT))
+	pself->OLMIGI_specState &= ~OLMIGSS_SEPARATORS;
+}
+
+/* OLMenuItemGroupSpecBuild: always fully enabled (its items are not) */
+@method OLMenuItemGroupClass, MSG_SPEC_BUILD
+{
+    @callsuper();
+    MIG(oself)->VI_attrs |= VA_FULLY_ENABLED;
+}
+
+@method OLMenuItemGroupClass, MSG_SPEC_GET_VIS_PARENT
+{
+    (void) flags;
+    return pself->OLCI_visParent;
+}
+
+/* OLMenuItemGroupGupQuery: the build info of a sub menu, from here */
+@method OLMenuItemGroupClass, MSG_SPEC_P32_GUP_QUERY
+{
+    if ((word) queryType != SGQT_BUILD_INFO)
+	return @callsuper();
+    retValue->GRP_bp |= OLBR_SUB_MENU << OLBF_REPLY_OFFSET;
+    retValue->GRP_cx = OptrToHandle(oself);
+    retValue->GRP_dx = OptrToChunk(oself);
+    return TRUE;
+}
+
+/* OLMenuItemGroupSpecChangeUsable: the menu's separators updated (the
+ * old parent's when it goes) */
+@method OLMenuItemGroupClass, MSG_SPEC_SET_USABLE
+{
+    @callsuper();
+    VisCallParent(oself, MSG_SPEC_UPDATE_MENU_SEPARATORS, NULL, 0, NULL, 0);
+}
+
+@method OLMenuItemGroupClass, MSG_SPEC_SET_NOT_USABLE
+{
+    optr p = VisFindParent(oself);
+
+    @callsuper();
+    if (p)
+	@call p::MSG_SPEC_UPDATE_MENU_SEPARATORS();
+}
+
+/* ---------------------------------------------------------------------
+ * The separator query
+ * ------------------------------------------------------------------- */
+
+/* ForwardMenuSepQueryToFirstChildOrSelf: down to the first child, or
+ * back to itself as from its last child if it has none */
+static MenuSepFlags ForwardToFirstChildOrSelf(optr o, MenuSepFlags f)
+{
+    optr c = ((VisCompInstance *) ObjDerefVis(o))->VCI_comp.CP_firstChild;
+
+    if (c)
+	return @call c::MSG_SPEC_MENU_SEP_QUERY(f);
+    return @call o::MSG_SPEC_MENU_SEP_QUERY(f | MSF_FROM_CHILD);
+}
+
+/* the geometry again if a separator came or went */
+static void SepsChanged(optr o, OLMenuItemGroupSpecState old)
+{
+    if ((old ^ MIG(o)->OLMIGI_specState) &
+	(OLMIGSS_TOP_SEP | OLMIGSS_BOTTOM_SEP))
+	VisMarkInvalid(o, VOF_GEOMETRY_INVALID, VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+/*
+ * OLMenuItemGroupSpecMenuSepQuery: from the previous sibling or the
+ * parent, the flags above are kept and the query goes through the
+ * children; back, with a usable child, a separator above if something
+ * usable is above (else the next one needs one).  From the last child,
+ * a usable child is noted and the query goes on; back, a separator
+ * below if one is needed there.  Without usable children it passes on
+ * what came from above.  Not usable or not drawable, it only passes
+ * the query on.
+ */
+@method OLMenuItemGroupClass, MSG_SPEC_MENU_SEP_QUERY
+{
+    OLMenuItemGroupInstance *g;
+    OLMenuItemGroupSpecState old;
+
+    if (!(Gen(oself)->GI_states & GS_USABLE) ||
+	!(MIG(oself)->VI_attrs & VA_DRAWABLE))
+	return OpenForwardMenuSepQuery(oself, flags);
+    g = MIG(oself);
+    if (!(flags & MSF_FROM_CHILD)) {
+	old = g->OLMIGI_specState;
+	g->OLMIGI_specState = (OLMenuItemGroupSpecState)
+	    ((g->OLMIGI_specState & ~(OLMIGSS_BOTTOM_SEP | OLMIGSS_TOP_SEP |
+				      OLMIGSS_ABOVE_SEP |
+				      OLMIGSS_ABOVE_USABLE)) |
+	     (flags & (MSF_SEP | MSF_USABLE)));
+	flags = ForwardToFirstChildOrSelf(oself,
+				(MenuSepFlags) (flags & ~(MSF_SEP |
+							  MSF_USABLE)));
+	g = MIG(oself);
+	if (g->OLMIGI_specState & OLMIGSS_HAS_USABLE_CHILD) {
+	    if (g->OLMIGI_specState & OLMIGSS_ABOVE_SEP) {
+		g->OLMIGI_specState |= OLMIGSS_TOP_SEP;
+		flags &= ~MSF_SEP;
+	    } else
+		flags |= MSF_SEP;
+	}
+	SepsChanged(oself, old);
+	return flags;
+    }
+    flags &= ~MSF_FROM_CHILD;
+    if (flags & MSF_USABLE) {
+	g->OLMIGI_specState |= OLMIGSS_HAS_USABLE_CHILD;
+	flags = OpenForwardMenuSepQuery(oself, flags);
+	if (flags & MSF_SEP) {
+	    MIG(oself)->OLMIGI_specState |= OLMIGSS_BOTTOM_SEP;
+	    flags &= ~MSF_SEP;
+	}
+	return flags;
+    }
+    g->OLMIGI_specState &= ~OLMIGSS_HAS_USABLE_CHILD;
+    flags = (MenuSepFlags) ((flags & ~(MSF_SEP | MSF_USABLE)) |
+			    (g->OLMIGI_specState & (OLMIGSS_ABOVE_SEP |
+						    OLMIGSS_ABOVE_USABLE)));
+    return OpenForwardMenuSepQuery(oself, flags);
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry and drawing
+ * ------------------------------------------------------------------- */
+
+/* GetMenuSepHeight: etched (two lines) in color */
+static word SepHeight(void)
+{
+    return OpenCheckIfBW() ? OL_MENU_ITEM_SEP_HEIGHT
+			   : OL_MENU_ITEM_ETCHED_SEP_HEIGHT;
+}
+
+/* OLMenuItemGroupGetMargins: room for the separators (half on CGA) */
+static void MIGMargins(optr o, Rectangle *m)
+{
+    OLMenuItemGroupSpecState s = MIG(o)->OLMIGI_specState;
+
+    memset(m, 0, sizeof(*m));
+    if (!(s & OLMIGSS_SEPARATORS))
+	return;
+    if (s & OLMIGSS_TOP_SEP)
+	m->R_top = (sword) SepHeight();
+    if (s & OLMIGSS_BOTTOM_SEP)
+	m->R_bottom = (sword) SepHeight();
+    if (OpenCheckIfCGA()) {
+	m->R_top >>= 1;
+	m->R_bottom >>= 1;
+    }
+}
+
+@method OLMenuItemGroupClass, MSG_VIS_COMP_GET_MARGINS
+{
+    MIGMargins(oself, retValue);
+}
+
+/* OLMenuItemGroupGetSpacing: none (Motif) */
+@method OLMenuItemGroupClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    return 0;
+}
+
+/* MenuItemGroupPassMarginInfo */
+static VisCompSpacingMarginsInfo MIGMarginInfo(optr o)
+{
+    Rectangle m;
+
+    MIGMargins(o, &m);
+    return OpenPassMarginInfo(o, &m, 0, 0);
+}
+
+@method OLMenuItemGroupClass, MSG_VIS_RECALC_SIZE
+{
+    return OpenRecalcCtrlSize(oself, width, height, MIGMarginInfo(oself));
+}
+
+@method OLMenuItemGroupClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
+		    MIGMarginInfo(oself));
+}
+
+/*
+ * OLMenuItemGroupDraw (DrawBWMenuItemGroup): the separators in black,
+ * etched in color (the bottom one on the last line inside), then the
+ * children
+ */
+@method OLMenuItemGroupClass, MSG_VIS_DRAW
+{
+    OLMenuItemGroupSpecState s = pself->OLMIGI_specState;
+    Rectangle b;
+
+    GrSetLineColor(gstate, CF_INDEX, C_BLACK, 0, 0);
+    VisGetBounds(oself, &b);
+    b.R_right--;
+    b.R_bottom--;
+    if (s & OLMIGSS_SEPARATORS) {
+	if (s & OLMIGSS_TOP_SEP)
+	    DrawEtchedHLine(gstate, b.R_left, b.R_top, b.R_right, FALSE);
+	if (s & OLMIGSS_BOTTOM_SEP)
+	    DrawEtchedHLine(gstate, b.R_left, b.R_bottom, b.R_right, TRUE);
+    }
+    @callsuper();
+}
+
+/* OLMenuItemGroupNotifyEnabledState: nothing to do (always enabled) */
+@method OLMenuItemGroupClass, MSG_SPEC_NOTIFY_ENABLED, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    (void) updateMode;
+    (void) flags;
+    return TRUE;
+}
+
+/*
+ * OLMenuItemGroupResetSizeToStayOnscreen: a group with children and a
+ * moniker that does not fit becomes a sub menu (a popup, usable again
+ * through the queue)
+ */
+@method OLMenuItemGroupClass, MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN
+{
+    if (pself->VCI_comp.CP_firstChild && Gen(oself)->GI_visMoniker) {
+	Gen(oself)->GI_states &= ~GS_USABLE;
+	@call oself::MSG_SPEC_SET_NOT_USABLE(VUM_MANUAL);
+	@call oself::MSG_GEN_INTERACTION_SET_VISIBILITY(GIV_POPUP);
+	@send, forceQueue, insertAtFront oself::MSG_GEN_SET_USABLE(VUM_NOW);
+    }
+    @callsuper();
+}

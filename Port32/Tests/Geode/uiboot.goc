@@ -20,6 +20,8 @@
 @include <Internal/SpecUI/olDisplayGroupClass.goh>
 @include <Internal/SpecUI/olDisplayWinClass.goh>
 @include <Internal/SpecUI/olPopupWinClass.goh>
+@include <Internal/SpecUI/olMenuItemGroupClass.goh>
+@include <Internal/SpecUI/olMenuWinClass.goh>
 @include <Internal/SpecUI/olMenuButtonClass.goh>
 #include <string.h>
 
@@ -65,7 +67,46 @@ UBState ubState;
 }
 @object GenPrimaryClass UBPrimary = {
     GI_visMoniker = "Boot Test";
-    GI_comp = @UBGroup;
+    GI_comp = @UBGroup, @UBTools, @UBFile;
+}
+/* a File menu: the specific UI adds Exit */
+@object GenInteractionClass UBFile = {
+    GI_comp = @UBOpen;
+    GII_visibility = GIV_POPUP;
+    ATTR_GEN_INTERACTION_GROUP_TYPE = GIGT_FILE_MENU;
+}
+@object GenTriggerClass UBOpen = {
+    GI_visMoniker = "Open";
+}
+/* a menu of items and groups of items: separators between them */
+@object GenInteractionClass UBTools = {
+    GI_visMoniker = "Tools";
+    GI_comp = @UBFirst, @UBItems, @UBLast, @UBSame;
+    GII_visibility = GIV_POPUP;
+}
+@object GenTriggerClass UBFirst = {
+    GI_visMoniker = "First";
+}
+@object GenInteractionClass UBItems = {
+    GI_comp = @UBItemA, @UBItemB;
+    GII_visibility = GIV_SUB_GROUP;
+}
+@object GenTriggerClass UBItemA = {
+    GI_visMoniker = "A";
+}
+@object GenTriggerClass UBItemB = {
+    GI_visMoniker = "B";
+}
+@object GenTriggerClass UBLast = {
+    GI_visMoniker = "Last";
+}
+@object GenInteractionClass UBSame = {
+    GI_comp = @UBItemC;
+    GII_visibility = GIV_SUB_GROUP;
+    HINT_SAME_CATEGORY_AS_PARENT;
+}
+@object GenTriggerClass UBItemC = {
+    GI_visMoniker = "C";
 }
 @object GenDisplayGroupClass UBGroup = {
     GI_comp = @UBDoc1, @UBDoc2;
@@ -213,6 +254,41 @@ static Boolean NameIs(const char *n)
     return *p == *n;
 }
 
+static OLMenuItemGroupSpecState MIGState(optr g)
+{
+    OLMenuItemGroupInstance m;
+
+    VisData(g, &m, sizeof(m));
+    return m.OLMIGI_specState;
+}
+
+static sword Height(optr o)
+{
+    Rectangle r = Bounds(o);
+
+    return r.R_bottom - r.R_top;
+}
+
+/* the moniker's text is that given */
+static Boolean TextIs(optr o, const char *text)
+{
+    ChunkHandle c;
+    Boolean is = FALSE;
+
+    ObjLockObjBlock(OptrToHandle(o));
+    c = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
+    if (c) {
+	const char *t = (const char *)
+		LMemDerefHandles(OptrToHandle(o), c) + VMWT_text;
+
+	while (*text && *t == *text)
+	    t++, text++;
+	is = *t == *text;
+    }
+    MemUnlock(OptrToHandle(o));
+    return is;
+}
+
 static optr GroupTarget(void)
 {
     optr t = 0;
@@ -357,7 +433,78 @@ static optr GroupTarget(void)
 	UBCHECK(GroupTarget() == @UBDoc2);
 	UBCHECK(!@call UBDoc1::MSG_VIS_QUERY_WINDOW());
 	UBCHECK(NameIs("Doc 2") && ubState.UBS_lastNum == 0);
+	/* the Tools menu up */
+	@call UBTools::MSG_GEN_INTERACTION_INITIATE();
 	break;
+    case 8: {
+	/* a group between items: separators above and below, room for
+	 * them (two lines each in color) around its items */
+	OLMenuItemGroupSpecState g;
+	sword h;
+
+	UBCHECK(InClass(@UBItems, (ClassStruct *) &OLMenuItemGroupClass));
+	UBCHECK(InClass(@UBSame, (ClassStruct *) &OLMenuItemGroupClass));
+	UBCHECK(@call UBItems::MSG_VIS_FIND_PARENT() == @UBTools);
+	g = MIGState(@UBItems);
+	UBCHECK((g & (OLMIGSS_SEPARATORS | OLMIGSS_TOP_SEP |
+		      OLMIGSS_BOTTOM_SEP | OLMIGSS_HAS_USABLE_CHILD)) ==
+		(OLMIGSS_SEPARATORS | OLMIGSS_TOP_SEP | OLMIGSS_BOTTOM_SEP |
+		 OLMIGSS_HAS_USABLE_CHILD));
+	h = Height(@UBItems);
+	UBCHECK(h == Height(@UBItemA) + Height(@UBItemB) + 4);
+	UBCHECK(Bounds(@UBItemA).R_top == Bounds(@UBItems).R_top + 2);
+	/* the same category: no separators at all, though a group is
+	 * above it */
+	g = MIGState(@UBSame);
+	UBCHECK(!(g & OLMIGSS_SEPARATORS) && (g & OLMIGSS_TOP_SEP));
+	UBCHECK(Height(@UBSame) == Height(@UBItemC));
+	/* the items around it not usable: no separators */
+	@call UBLast::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	UBCHECK(!(MIGState(@UBItems) & OLMIGSS_BOTTOM_SEP));
+	UBCHECK(MIGState(@UBItems) & OLMIGSS_TOP_SEP);
+	@call UBFirst::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	UBCHECK(!(MIGState(@UBItems) & (OLMIGSS_TOP_SEP | OLMIGSS_BOTTOM_SEP)));
+	/* the last one usable again: below it again */
+	@call UBLast::MSG_GEN_SET_USABLE(VUM_NOW);
+	UBCHECK((MIGState(@UBItems) & (OLMIGSS_TOP_SEP | OLMIGSS_BOTTOM_SEP)) ==
+		OLMIGSS_BOTTOM_SEP);
+	break;
+    }
+    case 9:
+	/* the geometry done again (queued): only the bottom one's room */
+	UBCHECK(Height(@UBItems) ==
+		Height(@UBItemA) + Height(@UBItemB) + 2);
+	UBCHECK(Bounds(@UBItemA).R_top == Bounds(@UBItems).R_top);
+	(void) @call UBTools::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	/* the File menu up */
+	@call UBFile::MSG_GEN_INTERACTION_INITIATE();
+	break;
+    case 10: {
+	/* Exit last in the File menu (not a generic child), named with
+	 * the application, F3, IC_EXIT */
+	optr e = @call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(1);
+	InteractionCommand *ic;
+	OLMenuWinInstance m;
+
+	UBCHECK(@call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(0) == @UBOpen);
+	UBCHECK(e && !@call UBFile::MSG_VIS_FIND_CHILD_AT_POSITION(2));
+	UBCHECK(e && InClass(e, (ClassStruct *) &GenTriggerClass));
+	UBCHECK(e && @call UBFile::MSG_GEN_FIND_CHILD(e) == (word) -1);
+	UBCHECK(e && @call e::MSG_GEN_FIND_PARENT() == @UBFile);
+	UBCHECK(e && TextIs(e, "Exit Boot"));
+	UBCHECK(e && @call e::MSG_GEN_GET_KBD_ACCELERATOR() ==
+		((KS_CHAR_SET_CONTROL << 8) | VC_F3));
+	if (e) {
+	    ObjLockObjBlock(OptrToHandle(e));
+	    ic = ObjVarFindData(e, ATTR_GEN_TRIGGER_INTERACTION_COMMAND);
+	    UBCHECK(ic && *ic == IC_EXIT);
+	    MemUnlock(OptrToHandle(e));
+	}
+	VisData(@UBFile, &m, sizeof(m));
+	UBCHECK(m.OLMWI_specState & (OMWSS_FILE_MENU | OMWSS_EXIT_CREATED));
+	(void) @call UBFile::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	break;
+    }
     }
 }
 

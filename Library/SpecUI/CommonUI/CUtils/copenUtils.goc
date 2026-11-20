@@ -691,3 +691,21 @@ optr OpenCreateChildObject(MemHandle block, optr parent, ClassStruct *class,
 	((GenInstance *) ObjDerefGen(o))->GI_states |= GS_USABLE;
     return o;
 }
+
+/*
+ * ForwardMenuSepQueryToNextSiblingOrParent: the menu separator query
+ * on to the next visible sibling, else to the parent as from its last
+ * child
+ */
+MenuSepFlags OpenForwardMenuSepQuery(optr obj, MenuSepFlags f)
+{
+    optr next = ((VisInstance *) ObjDerefVis(obj))->VI_link.LP_next;
+
+    if (!next)
+	return f;
+    if (next & LP_IS_PARENT) {
+	next &= ~(optr) LP_IS_PARENT;
+	f |= MSF_FROM_CHILD;
+    }
+    return @call next::MSG_SPEC_MENU_SEP_QUERY(f);
+}
