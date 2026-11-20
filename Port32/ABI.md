@@ -5420,7 +5420,23 @@ are left out), the constants, the variables and the routines.
     `olItemClass.goh` take C arguments (`OLItemUpdateFlags` in the low
     byte of a flags word, the state or selection in the high byte, as
     the asm's dl and dh); `MSG_OL_ITEM_REDRAW` creates its own GState.
-    Not yet: popup lists (`HINT_ITEM_GROUP_MINIMIZE_SIZE`), scrolling
+    Popup lists: a group with `HINT_ITEM_GROUP_MINIMIZE_SIZE` (on a
+    vertical screen also `..._IF_VERTICAL_SCREEN`) is put into a new
+    popup GenInteraction (`MakePopupListIfNeeded`, after
+    `OpenCreateNewParentObject` and `OpenBuildNewParentObject`: its
+    moniker, generic hints, keyboard accelerator, enabled and
+    targetable state, `HINT_IS_POPUP_LIST`; added to the generic tree
+    after the group, built, then linked upward only). Its menu button
+    has `OLMBSS_OPENS_POPUP_LIST`: the down mark, not menu related;
+    space and Alt-down open the list, the arrows, Home and End go to
+    the list; with `HINT_ITEM_GROUP_DISPLAY_CURRENT_SELECTION` it shows
+    the selection's moniker (`SetPopupListMonikerIfNeeded`, again when
+    the list closes) and is as wide as the list. An item released in
+    the list closes it. Port32: the new interaction is
+    `ObjInstantiate`d (no `GenInstantiateIgnoreDirty`), its place found
+    with `MSG_GEN_FIND_CHILD`.
+    Not yet: popup lists in dialogs (`MSG_SPEC_POPUP_LIST_CANCEL`) and
+    in a view, the selection box, scrolling
     lists (`OLScrollListClass`, `OLScrollableItemClass`: built as plain
     groups), dynamic lists' items, tabs, the black and white look, the
     focus on a text object, `ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS`,
@@ -5980,7 +5996,12 @@ are left out), the constants, the variables and the routines.
   down selects the third, the second check box activated is selected;
   the radio group's two changes are applied once (the second apply
   finds it no longer modified), the check boxes' once; the items drawn
-  with their state.
+  with their state. Doc 2's popup list (minimize size, display current
+  selection) is in a menu window outside Doc 2's generic children; its
+  button opens a popup list, has the down mark, shows "Small" and is as
+  wide as the list; down on the button selects "Very large" (applied,
+  shown); space opens the list, its first item activated and the list
+  closed: "Small" again, applied a second time.
 
 ## 14. Open
 

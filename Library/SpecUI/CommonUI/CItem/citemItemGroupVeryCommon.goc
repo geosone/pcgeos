@@ -115,11 +115,55 @@ static void UpdateItem(optr o, word id, OLItemUpdateFlags uf)
     SetPopupListMonikerIfNeeded(oself);
 }
 
-/* SetPopupListMonikerIfNeeded: a popup list's button shows the list's
- * moniker or the selection's (Port32: no popup lists yet) */
+/*
+ * SetPopupListMonikerIfNeeded: a popup list's button shows the list's
+ * moniker, or (HINT_ITEM_GROUP_DISPLAY_CURRENT_SELECTION, not while the
+ * list is up) its selection's (none: the list's, without one blank).
+ * Only a change goes to the popup (through the UI queue).
+ */
 void SetPopupListMonikerIfNeeded(optr o)
 {
-    (void) o;
+    OLItemGroupInstance *p = IG(o);
+    optr win, sel, src = 0;
+    ChunkHandle m;
+    word id = GIGS_NONE;
+    byte disp = 0;
+
+    if (!(p->OLIGI_moreState & OLIGMS_POPUP_LIST))
+	return;
+    if (p->OLIGI_moreState & OLIGMS_DISPLAYS_CURRENT_SELECTION) {
+	if (p->VI_attrs & VA_REALIZED)
+	    return;
+	if (!(IGG(o)->GIGI_stateFlags & GIGSF_INDETERMINATE) &&
+	    (sel = GetCurrentSelectionOptr(o)) != 0 && sel != o) {
+	    m = @call sel::MSG_GEN_GET_VIS_MONIKER();
+	    if (m)
+		src = ConstructOptr(OptrToHandle(sel), m);
+	    (void) GetCurrentSelection(o, &id);
+	    disp = OLIGMS_DISPLAYING_SELECTION;
+	}
+    }
+    if (!disp) {
+	m = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
+	if (m)
+	    src = ConstructOptr(OptrToHandle(o), m);
+    }
+    p = IG(o);
+    if (!((disp ^ p->OLIGI_moreState) & OLIGMS_DISPLAYING_SELECTION)) {
+	if (!disp || id == p->OLIGI_displayedItem)
+	    return;
+    }
+    p->OLIGI_moreState &= ~OLIGMS_DISPLAYING_SELECTION;
+    p->OLIGI_moreState |= disp;
+    p->OLIGI_displayedItem = id;
+    win = VisFindParent(o);
+    if (!win)
+	return;
+    if (src)
+	(void) @call win::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(src,
+						VUM_DELAYED_VIA_UI_QUEUE);
+    else
+	@call win::MSG_GEN_USE_VIS_MONIKER(0, VUM_DELAYED_VIA_UI_QUEUE);
 }
 
 /* EnsureCurrentSelectionVisible: an exclusive list scrolls to its

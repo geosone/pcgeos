@@ -95,6 +95,7 @@
     if (gp)
 	(void) @call gp::MSG_VUP_GET_BUILD_FLAGS(&b);
     IG(oself)->OLCI_buildFlags |= b & OLBF_DELAYED_MODE;
+    MakePopupListIfNeeded(oself, flags);
     @callsuper();
     if (IG(oself)->OLCI_optFlags & OLCOF_IN_MENU) {
 	((GenInstance *) ObjDerefGen(oself))->GI_attrs |=
@@ -104,6 +105,109 @@
     InitFocusItem(oself);
     if (IGG(oself)->GIGI_stateFlags & GIGSF_MODIFIED)
 	@send, forceQueue, insertAtFront oself::MSG_GEN_MAKE_APPLYABLE();
+}
+
+/* OLItemGroupSpecBuildBranch: a popup list's button shows its moniker
+ * or selection */
+@method OLItemGroupClass, MSG_SPEC_BUILD_BRANCH
+{
+    @callsuper();
+    SetPopupListMonikerIfNeeded(oself);
+}
+
+/* CopyHintIfSpecified: a hint (with a word of data, or none) of the
+ * group on its new parent too */
+static void CopyHintIfSpecified(optr o, optr parent, word hint, word size)
+{
+    word *d = ObjVarFindData(o, hint), w = 0, *n;
+
+    if (!d)
+	return;
+    if (size)
+	w = *d;
+    n = ObjVarAddData(parent, hint, size);
+    if (size)
+	*n = w;
+}
+
+/*
+ * MakePopupListIfNeeded (with OpenCreateNewParentObject and
+ * OpenBuildNewParentObject, copenUtils.asm): with HINT_ITEM_GROUP_
+ * MINIMIZE_SIZE (on a vertical screen also ..._IF_VERTICAL_SCREEN) the
+ * group goes into a new popup GenInteraction (HINT_IS_POPUP_LIST: a
+ * menu with a button) that has its moniker, generic hints, keyboard
+ * accelerator, enabled and targetable state.  The interaction is added
+ * to the generic tree after the group and built; the group is its
+ * visual child; then the interaction keeps only its upward link.  An
+ * exclusive group with HINT_ITEM_GROUP_DISPLAY_CURRENT_SELECTION shows
+ * its selection on the button.
+ */
+void MakePopupListIfNeeded(optr o, SpecBuildFlags flags)
+{
+    GenInstance *g, *pg;
+    optr parent, gp;
+    ChunkHandle mkr;
+    word pos;
+
+    if (!ObjVarFindData(o, HINT_ITEM_GROUP_MINIMIZE_SIZE) &&
+	(!OpenCheckIfVerticalScreen() ||
+	 !ObjVarFindData(o, HINT_ITEM_GROUP_MINIMIZE_SIZE_IF_VERTICAL_SCREEN)))
+	return;
+    if (VisCheckIfSpecBuilt(o))
+	return;
+    gp = GenFindParent(o);
+    if (!gp)
+	return;
+
+    /* OpenCreateNewParentObject */
+    parent = ObjInstantiate(OptrToHandle(o),
+			    (ClassStruct *) &GenInteractionClass);
+    ObjInitializePart(parent, word_offsetof(GenBase, Gen_offset));
+    ObjVarCopyDataRange(o, parent, HINT_DUMMY, ATTR_GEN_TEXT_STATUS_MSG - 1);
+    (void) ObjVarDeleteData(parent, HINT_TOOLBOX);
+    mkr = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
+    if (mkr)
+	(void) @call parent::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(
+			ConstructOptr(OptrToHandle(o), mkr), VUM_MANUAL);
+    g = (GenInstance *) ObjDerefGen(o);
+    pg = (GenInstance *) ObjDerefGen(parent);
+    pg->GI_kbdAccelerator = g->GI_kbdAccelerator;
+    ((GenInteractionInstance *) pg)->GII_visibility = GIV_POPUP;
+    (void) ObjVarAddData(parent, HINT_IS_POPUP_LIST, 0);
+    CopyHintIfSpecified(o, parent, HINT_CAN_CLIP_MONIKER_WIDTH, 0);
+    CopyHintIfSpecified(o, parent, HINT_GADGET_TEXT_COLOR, 2);
+
+    /* OpenBuildNewParentObject (no view) */
+    g = (GenInstance *) ObjDerefGen(o);
+    pg = (GenInstance *) ObjDerefGen(parent);
+    if (!(g->GI_states & GS_ENABLED))
+	pg->GI_states &= ~GS_ENABLED;
+    pg->GI_attrs &= ~GA_TARGETABLE;
+    pg->GI_attrs |= g->GI_attrs & GA_TARGETABLE;
+    pos = @call gp::MSG_GEN_FIND_CHILD(o);
+    @call gp::MSG_GEN_ADD_CHILD(parent, (CompChildFlags) (pos + 1));
+    ((GenInstance *) ObjDerefGen(parent))->GI_states |= GS_USABLE;
+    @call parent::MSG_VIS_ADD_CHILD(o, CCO_LAST);
+    @call parent::MSG_SPEC_BUILD_BRANCH(flags);
+    GenRemoveDownwardLink(OptrToHandle(parent), OptrToChunk(parent), 0);
+
+    IG(o)->OLIGI_moreState |= OLIGMS_POPUP_LIST;
+    if (IsExtendedSelection(o) || IsNonExclusive(o) ||
+	!ObjVarFindData(o, HINT_ITEM_GROUP_DISPLAY_CURRENT_SELECTION))
+	return;
+    IG(o)->OLIGI_moreState |= OLIGMS_DISPLAYS_CURRENT_SELECTION;
+    ((GenInstance *) ObjDerefGen(parent))->GI_visMoniker = 0;
+}
+
+/* OLItemGroupGetSpecificVisObject: a popup list's is its popup */
+@method OLItemGroupClass, MSG_SPEC_GET_SPECIFIC_VIS_OBJECT
+{
+    optr vp;
+
+    if ((pself->OLIGI_moreState & OLIGMS_POPUP_LIST) &&
+	(vp = VisFindParent(oself)) != 0)
+	return @call vp::MSG_SPEC_GET_SPECIFIC_VIS_OBJECT(flags);
+    return @callsuper();
 }
 
 /* InitFocusItem: an exclusive group's selection, else the first item */
@@ -145,6 +249,11 @@ void InitFocusItem(optr o)
 	p->OLCI_buildFlags &= ~OLBF_DELAYED_MODE;
     if (!geo && !(p->OLCI_optFlags & OLCOF_IN_MENU))
 	p->VCI_geoAttrs &= ~VCGA_ORIENT_CHILDREN_VERTICALLY;
+    /* a popup list: vertical, no toolbox */
+    if (p->OLIGI_moreState & OLIGMS_POPUP_LIST) {
+	p->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
+	p->OLCI_buildFlags &= ~OLBF_TOOLBOX;
+    }
 }
 
 /* OLItemGroupVisOpen: an extended selection starts over */
@@ -153,6 +262,16 @@ void InitFocusItem(optr o)
     @callsuper();
     if (IsExtendedSelection(oself))
 	IG(oself)->OLIGI_displayedItem = 0;
+    SetPopupListMonikerIfNeeded(oself);
+}
+
+/* OLItemGroupVisClose: a popup list that shows its selection shows
+ * one changed while it was up */
+@method OLItemGroupClass, MSG_VIS_CLOSE
+{
+    @callsuper();
+    if (IG(oself)->OLIGI_moreState & OLIGMS_DISPLAYS_CURRENT_SELECTION)
+	SetPopupListMonikerIfNeeded(oself);
 }
 
 /* ---------------------------------------------------------------------
@@ -172,6 +291,9 @@ static VisCompSpacingMarginsInfo PassMarginInfo(optr o)
 
 @method OLItemGroupClass, MSG_VIS_RECALC_SIZE
 {
+    /* a popup list's size hints are its button's */
+    if (pself->OLIGI_moreState & OLIGMS_POPUP_LIST)
+	pself->VI_geoAttrs |= VGA_NO_SIZE_HINTS;
     return OpenRecalcCtrlSize(oself, width, height, PassMarginInfo(oself));
 }
 

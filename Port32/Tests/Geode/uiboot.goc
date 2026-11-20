@@ -58,6 +58,8 @@ typedef struct {
     word		UBS_boolApplies, UBS_boolApply[3];
     word		UBS_radioApplies, UBS_radioSel;
     word		UBS_checkApplies, UBS_checkSel;
+    word		UBS_sizeApplies, UBS_sizeSel;
+    sword		UBS_sizeButton[2];
 } UBState;
 
 UBState ubState;
@@ -74,6 +76,7 @@ UBState ubState;
     @message void MSG_UB_STEP(word step);
     @message (GEN_ITEM_GROUP_APPLY_MSG) MSG_UB_ITEMS_APPLIED;
     @message (GEN_ITEM_GROUP_APPLY_MSG) MSG_UB_RADIO_APPLIED;
+    @message (GEN_ITEM_GROUP_APPLY_MSG) MSG_UB_SIZE_APPLIED;
     @message (GEN_BOOLEAN_GROUP_APPLY_MSG) MSG_UB_CHECKS_APPLIED;
     @message (GEN_BOOLEAN_GROUP_APPLY_MSG) MSG_UB_BOOLEANS_APPLIED;
 @endc
@@ -164,7 +167,7 @@ UBState ubState;
 }
 @object GenDisplayClass UBDoc2 = {
     GI_visMoniker = "Doc 2";
-    GI_comp = @UBRadio, @UBChecks;
+    GI_comp = @UBRadio, @UBChecks, @UBSize;
 }
 /* in Doc 2: a radio group (an exclusive one) and check boxes */
 @object GenItemGroupClass UBRadio = {
@@ -185,6 +188,25 @@ UBState ubState;
 @object GenItemClass UBRadio3 = {
     GI_visMoniker = "Three";
     GII_identifier = 3;
+}
+/* in Doc 2: a popup list that shows its selection */
+@object GenItemGroupClass UBSize = {
+    GI_visMoniker = "Size";
+    GI_comp = @UBSize1, @UBSize2;
+    GIGI_selection = 1;
+    GIGI_numSelections = 1;
+    GIGI_destination = process;
+    GIGI_applyMsg = MSG_UB_SIZE_APPLIED;
+    HINT_ITEM_GROUP_MINIMIZE_SIZE;
+    HINT_ITEM_GROUP_DISPLAY_CURRENT_SELECTION;
+}
+@object GenItemClass UBSize1 = {
+    GI_visMoniker = "Small";
+    GII_identifier = 1;
+}
+@object GenItemClass UBSize2 = {
+    GI_visMoniker = "Very large";
+    GII_identifier = 2;
 }
 @object GenBooleanGroupClass UBChecks = {
     GI_comp = @UBCheck1, @UBCheck2;
@@ -254,6 +276,14 @@ UBState ubState;
     (void) stateFlags;
     ubState.UBS_radioApplies++;
     ubState.UBS_radioSel = selection;
+}
+
+@method UBProcessClass, MSG_UB_SIZE_APPLIED
+{
+    (void) numSelections;
+    (void) stateFlags;
+    ubState.UBS_sizeApplies++;
+    ubState.UBS_sizeSel = selection;
 }
 
 @method UBProcessClass, MSG_UB_CHECKS_APPLIED
@@ -326,6 +356,31 @@ static void VisData(optr o, void *buf, word size)
     ObjLockObjBlock(OptrToHandle(o));
     memcpy(buf, ObjDerefVis(o), size);
     MemUnlock(OptrToHandle(o));
+}
+
+/* the text of a generic object's moniker is t */
+static Boolean MonikerIs(optr o, const char *t)
+{
+    ChunkHandle m;
+    VisMoniker *v;
+    Boolean r = FALSE;
+
+    if (!o)
+	return FALSE;
+    ObjLockObjBlock(OptrToHandle(o));
+    m = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
+    if (m) {
+	v = LMemDerefHandles(OptrToHandle(o), m);
+	if (!(v->VM_type & VMT_GSTRING)) {
+	    const char *c = (const char *) v + VMWT_text;
+
+	    while (*c && *c == *t)
+		c++, t++;
+	    r = *c == *t;
+	}
+    }
+    MemUnlock(OptrToHandle(o));
+    return r;
 }
 
 static Rectangle Bounds(optr o)
@@ -1138,6 +1193,95 @@ static Rectangle ScreenBounds(WindowHandle w)
 	UBCHECK(it.OLBI_optFlags & OLBOF_DRAWN_SELECTED);
 	VisData(@UBCheck2, &it, sizeof(it));
 	UBCHECK(it.OLBI_optFlags & OLBOF_DRAW_STATE_KNOWN);
+	break;
+    }
+    case 26: {
+	/* Doc 2's popup list: the group in a new popup (a menu window,
+	 * not in the generic tree below Doc 2) with a popup list's
+	 * button, which shows the selection ("Small") and is as wide as
+	 * the list; down on the button: the next one */
+	OLItemGroupInstance ig;
+	OLMenuButtonInstance mb;
+	OLPopupWinInstance pw;
+	optr win, b;
+	Rectangle r;
+
+	VisData(@UBSize, &ig, sizeof(ig));
+	UBCHECK(ig.OLIGI_moreState & OLIGMS_POPUP_LIST);
+	UBCHECK(ig.OLIGI_moreState & OLIGMS_DISPLAYS_CURRENT_SELECTION);
+	win = @call UBSize::MSG_VIS_FIND_PARENT();
+	UBCHECK(InClass(win, (ClassStruct *) &OLMenuWinClass));
+	UBCHECK(@call UBDoc2::MSG_GEN_FIND_CHILD(win) == 0xffff);
+	UBCHECK(@call UBSize::MSG_GEN_FIND_PARENT() == @UBDoc2);
+	if (!win)
+	    break;
+	VisData(win, &pw, sizeof(pw));
+	b = ConstructOptr(OptrToHandle(win), pw.OLPWI_button);
+	UBCHECK(pw.OLPWI_button &&
+		InClass(b, (ClassStruct *) &OLMenuButtonClass));
+	if (!pw.OLPWI_button)
+	    break;
+	VisData(b, &mb, sizeof(mb));
+	UBCHECK(mb.OLMBI_specState & OLMBSS_OPENS_POPUP_LIST);
+	UBCHECK(mb.OLBI_specState & OLBSS_MENU_DOWN_MARK);
+	UBCHECK(MonikerIs(win, "Small"));
+	r = Bounds(b);
+	ubState.UBS_sizeButton[0] = r.R_right - r.R_left;
+	ubState.UBS_sizeButton[1] = r.R_bottom - r.R_top;
+	UBCHECK(r.R_right - r.R_left >= Width(@UBSize2));
+	@call b::MSG_META_KBD_CHAR((VC_ISCTRL << 8) | VC_DOWN,
+				   CF_FIRST_PRESS, 0);
+	UBCHECK(@call UBSize::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 2);
+	break;
+    }
+    case 27: {
+	/* applied once; the button shows the new selection; space on
+	 * the button opens the list */
+	OLPopupWinInstance pw;
+	OLMenuButtonInstance mb;
+	optr win, b;
+	Rectangle r;
+
+	UBCHECK(ubState.UBS_sizeApplies == 1 && ubState.UBS_sizeSel == 2);
+	win = @call UBSize::MSG_VIS_FIND_PARENT();
+	UBCHECK(MonikerIs(win, "Very large"));
+	VisData(win, &pw, sizeof(pw));
+	b = ConstructOptr(OptrToHandle(win), pw.OLPWI_button);
+	r = Bounds(b);
+	UBCHECK(r.R_right - r.R_left >= Width(@UBSize2));
+	@call b::MSG_META_KBD_CHAR(VC_BLANK, CF_FIRST_PRESS, 0);
+	VisData(b, &mb, sizeof(mb));
+	UBCHECK(mb.OLMBI_specState & OLMBSS_POPUP_OPEN);
+	break;
+    }
+    case 28: {
+	/* the list up (realized), then closed by its item: the
+	 * selection taken, the button again showing it */
+	OLMenuButtonInstance mb;
+	OLPopupWinInstance pw;
+	VisInstance v;
+	optr win, b;
+
+	win = @call UBSize::MSG_VIS_FIND_PARENT();
+	VisData(win, &v, sizeof(v));
+	UBCHECK(v.VI_attrs & VA_REALIZED);
+	@call UBSize1::MSG_GEN_ACTIVATE();
+	UBCHECK(@call UBSize::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 1);
+	(void) @call win::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+	VisData(win, &pw, sizeof(pw));
+	b = ConstructOptr(OptrToHandle(win), pw.OLPWI_button);
+	VisData(b, &mb, sizeof(mb));
+	UBCHECK(!(mb.OLMBI_specState & OLMBSS_POPUP_OPEN));
+	break;
+    }
+    case 29: {
+	/* closed: the button shows the selection again ("Small"),
+	 * applied a second time */
+	optr win = @call UBSize::MSG_VIS_FIND_PARENT();
+
+	UBCHECK(MonikerIs(win, "Small"));
+	UBCHECK(ubState.UBS_sizeApplies == 2 && ubState.UBS_sizeSel == 1);
 	break;
     }
     }

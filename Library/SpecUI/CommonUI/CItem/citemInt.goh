@@ -98,6 +98,7 @@ extern void OLItemGroupMoveFocusToNextField(optr o);
 extern void EnsureCurrentItemVisible(optr o, word id);
 extern void EnsureCurrentSelectionVisible(optr o);
 extern void SetPopupListMonikerIfNeeded(optr o);
+extern void MakePopupListIfNeeded(optr o, SpecBuildFlags flags);
 extern void InitFocusItem(optr o);
 
 /* the selection before intermediate mode (or an extended one) */

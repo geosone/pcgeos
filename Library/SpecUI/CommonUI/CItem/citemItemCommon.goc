@@ -315,7 +315,8 @@ static MouseReturnFlags ItemMouse(optr o, Boolean press, sword x, sword y,
  */
 @extern method OLItemClass, MSG_META_END_SELECT
 {
-    optr p;
+    optr p, win;
+    Boolean notPressed, popup;
 
     (void) xPosition;
     (void) yPosition;
@@ -333,7 +334,16 @@ static MouseReturnFlags ItemMouse(optr o, Boolean press, sword x, sword y,
 	return;
     }
     retVal->flags = MRF_PROCESSED;
-    if (@call oself::MSG_OL_ITEM_ENSURE_IS_RELEASED(0))
+    notPressed = @call oself::MSG_OL_ITEM_ENSURE_IS_RELEASED(0);
+    /* a popup list closes */
+    p = LockParent(oself);
+    popup = p && (IG(p)->OLIGI_moreState & OLIGMS_POPUP_LIST);
+    win = popup ? VisFindParent(p) : 0;
+    UnlockParent(oself, p);
+    if (win)
+	(void) @call win::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+    if (notPressed)
 	return;
     VisReleaseMouse(oself);
     if (CheckIfExtendingOrNonExcl(oself) &&

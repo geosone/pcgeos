@@ -13,13 +13,17 @@
  * completes its menu (up to the window then), right on a sub menu's
  * button opens the sub menu.
  *
- * Port32 (Port32/ABI.md section 13y), not yet: popup lists
- * (OLMBSS_OPENS_POPUP_LIST: the selection box, the popup's size, its
- * keys), the system menu icon (a double press closes the window), the
+ * A popup list's button (OLMBSS_OPENS_POPUP_LIST) shows the list's
+ * moniker or selection, opens it by the mouse, space or Alt-down and
+ * passes the arrows, Home and End to the list.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the selection box, the
+ * system menu icon (a double press closes the window), the
  * default function (UIFA_FEATURES), the implied window check, the focus
  * on a text object (OpenTestIfFocusOnTextEditObject).
  */
 @include "cGeode.goh"
+@include <Internal/SpecUI/olItemGroupClass.goh>
 
 @classdecl OLMenuButtonClass, neverSaved;
 
@@ -51,6 +55,9 @@ static optr GenPart(optr o)
 	b->VI_attrs &= ~(VA_DRAWABLE | VA_DETECTABLE);
     OLButtonUseQueryResults(oself, buildFlags);
     b = MBtn(oself);
+    if ((buildFlags & OLBF_TARGET) ==
+	(OLBT_IS_POPUP_LIST << OLBF_TARGET_OFFSET))
+	b->OLMBI_specState |= OLMBSS_OPENS_POPUP_LIST;
     if (type == MOWT_SYSTEM_MENU) {
 	b->OLBI_specState &= ~OLBSS_IN_MENU_BAR;
 	b->OLBI_specState |= OLBSS_BORDERED | OLBSS_SYS_ICON;
@@ -344,6 +351,12 @@ static void HandleEvent(optr o, sword x, word inputState,
 @method OLMenuButtonClass, MSG_META_PTR
 {
     (void) yPosition;
+    /* a popup list's button only while it has the mouse */
+    if ((pself->OLMBI_specState & OLMBSS_OPENS_POPUP_LIST) &&
+	!(pself->OLBI_specState & OLBSS_HAS_MOUSE_GRAB)) {
+	SetResult(retVal, 0);
+	return;
+    }
     HandleEvent(oself, xPosition, inputState, retVal);
 }
 
@@ -476,7 +489,8 @@ static void GrabFocusExcl(optr o)
 	(void) @call p::MSG_VIS_P32_VUP_QUERY(&r,
 					      SVQT_GRAB_FOCUS_EXCL_FOR_MENU,
 					      0, 0);
-    if (!(MBtn(o)->OLBI_specState & OLBSS_IN_MENU))
+    if (!(MBtn(o)->OLBI_specState & OLBSS_IN_MENU) &&
+	!(MBtn(o)->OLMBI_specState & OLMBSS_OPENS_POPUP_LIST))
 	f |= MAEF_OD_IS_MENU_RELATED | MAEF_NOT_HERE;
     @call o::MSG_META_MUP_ALTER_FTVMC_EXCL(o, f);
 }
@@ -501,7 +515,49 @@ static void GrabFocusExcl(optr o)
  * out of a menu, else completes it and goes up; right on a sub menu's
  * button opens the sub menu; the rest up
  */
-static Boolean MenuButtonKbdChar(optr o, word c, word flags)
+/* the item group of a popup list's button: its popup's first visual
+ * child */
+static optr PopupList(optr o)
+{
+    optr w = GenPart(o);
+    VisCompInstance *v = (VisCompInstance *) ObjDerefVis(w);
+
+    return v->VCI_comp.CP_firstChild;
+}
+
+/*
+ * OLPopupListKbdChar: on a popup list's button Alt-down and space open
+ * the list (Alt-down closes it again); the arrows, Home and End go to
+ * the list (the selection changes with the list closed)
+ */
+static Boolean PopupListKbdChar(optr o, word c, word flags, word state)
+{
+    byte ss = (byte) (flags >> 8), lo = (byte) c;
+    optr l, g;
+
+    if ((c >> 8) == VC_ISCTRL && lo == VC_DOWN && (ss & (SS_LALT | SS_RALT))) {
+	if (MBtn(o)->OLMBI_specState & OLMBSS_POPUP_OPEN) {
+	    g = GenPart(o);
+	    (void) @call g::MSG_GEN_GUP_INTERACTION_COMMAND(
+						IC_INTERACTION_COMPLETE);
+	    return FALSE;
+	}
+	@call o::MSG_OL_BUTTON_KBD_ACTIVATE();
+	return TRUE;
+    }
+    if (c == ((CS_BSW << 8) | VC_BLANK) && !(ss & ~(SS_LSHIFT | SS_RSHIFT))) {
+	@call o::MSG_OL_BUTTON_KBD_ACTIVATE();
+	return TRUE;
+    }
+    if ((c >> 8) == VC_ISCTRL && lo >= VC_UP && lo <= VC_END &&
+	!(ss & (SS_LALT | SS_RALT)) && (l = PopupList(o)) != 0) {
+	@call l::MSG_META_KBD_CHAR(c, flags, state);
+	return TRUE;
+    }
+    return FALSE;
+}
+
+static Boolean MenuButtonKbdChar(optr o, word c, word flags, word state)
 {
     OLMenuButtonInstance *b = MBtn(o);
     optr g;
@@ -509,6 +565,10 @@ static Boolean MenuButtonKbdChar(optr o, word c, word flags)
     if ((flags & (CF_STATE_KEY | CF_TEMP_ACCENT | CF_REPEAT_PRESS)) ||
 	!(flags & CF_FIRST_PRESS))
 	return FALSE;
+    if ((b->OLMBI_specState & OLMBSS_OPENS_POPUP_LIST) &&
+	PopupListKbdChar(o, c, flags, state))
+	return TRUE;
+    b = MBtn(o);
     if (c == ((CS_CONTROL << 8) | VC_ESCAPE)) {
 	Boolean own = (b->OLMBI_specState & OLMBSS_POPUP_OPEN) &&
 		      !(b->OLBI_specState & OLBSS_IN_MENU);
@@ -528,14 +588,14 @@ static Boolean MenuButtonKbdChar(optr o, word c, word flags)
 
 @method OLMenuButtonClass, MSG_META_FUP_KBD_CHAR
 {
-    if (MenuButtonKbdChar(oself, character, flags))
+    if (MenuButtonKbdChar(oself, character, flags, state))
 	return TRUE;
     return @callsuper();
 }
 
 @method OLMenuButtonClass, MSG_META_KBD_CHAR
 {
-    if (!MenuButtonKbdChar(oself, character, flags))
+    if (!MenuButtonKbdChar(oself, character, flags, state))
 	@callsuper();
 }
 
@@ -597,6 +657,50 @@ static void SaveStateSetCursored(optr o)
 	return;
     OLButtonRestoreBorderedAndDepressed(oself);
     OLButtonDrawLaterIfNewState(oself);
+}
+
+/*
+ * OLMenuButtonRecalcSize: a popup list's button that shows the current
+ * selection is as wide as its list (as high, opening to the side), so
+ * no selection needs more room; then its size hints
+ */
+@method OLMenuButtonClass, MSG_VIS_RECALC_SIZE
+{
+    SizeAsDWord s = @callsuper();
+    OLMenuButtonInstance *b = MBtn(oself);
+    sword w = (sword) DWORD_WIDTH(s), h = (sword) DWORD_HEIGHT(s);
+    Boolean horiz;
+    optr win, l;
+    VisInstance *v;
+    sword pw, ph;
+
+    if (!(b->OLMBI_specState & OLMBSS_OPENS_POPUP_LIST))
+	return s;
+    horiz = (b->OLMBI_specState & OLMBSS_ORIENT_POPUP_HORIZONTALLY) != 0;
+    if (horiz ? (b->OLBI_moreAttrs & OLBMA_EXPAND_HEIGHT_TO_FIT_PARENT)
+	      : (b->OLBI_moreAttrs & OLBMA_EXPAND_WIDTH_TO_FIT_PARENT))
+	goto hints;
+    win = GenPart(oself);
+    if (((((VisCompInstance *) ObjDerefVis(win))->VCI_geoAttrs &
+	   VCGA_ORIENT_CHILDREN_VERTICALLY) != 0) == horiz)
+	goto hints;
+    l = PopupList(oself);
+    if (!l || !ObjIsObjectInClass(l, (ClassStruct *) &OLItemGroupClass) ||
+	!(((OLItemGroupInstance *) ObjDerefVis(l))->OLIGI_moreState &
+	  OLIGMS_DISPLAYS_CURRENT_SELECTION))
+	goto hints;
+    @call win::MSG_VIS_UPDATE_GEOMETRY();
+    VisMarkInvalid(win, VOF_GEOMETRY_INVALID, VUM_MANUAL);
+    v = (VisInstance *) ObjDerefVis(win);
+    pw = v->VI_bounds.R_right - v->VI_bounds.R_left;
+    ph = v->VI_bounds.R_bottom - v->VI_bounds.R_top;
+    if (horiz)
+	h = ph;
+    else if (pw > w)
+	w = pw;
+hints:
+    VisApplySizeHints(oself, &w, &h);
+    return MAKE_SIZE_DWORD(w, h);
 }
 
 /*
