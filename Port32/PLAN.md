@@ -155,8 +155,8 @@ Ordered by dependency, each with host-side tests under `linux`:
 - Components: GrObj, Spreadsheet, Chart, Math (rest), Parse, Spline, Impex.
 - Rebuild the GOC apps (~0.83 M lines, including Breadbox).
 - Translate or replace the asm apps: FileMgr, GeoWrite, Calendar …
-- The web browser (direction, 2026-11-20): Ladybird's engine with a
-  GEOS front end. A native GEOS app (GOC/C) is the shell: the address
+- The web browser, GeosBird (direction, 2026-11-20): Ladybird's engine
+  with a GEOS front end. A native GEOS app (GOC/C) is the shell: the address
   bar, back and forward, bookmarks, tabs and menus as Gen objects, the
   page in a GenView/VisContent drawn from the bitmap WebContent shares,
   input, scrolling and the view's size passed to it. The Ladybird
