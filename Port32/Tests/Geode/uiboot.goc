@@ -1,0 +1,101 @@
+/*
+ * uiboot.goc -- an application for the library.ui.boot test
+ * (Port32/Tests): UBProcessClass (GenProcessClass) with the application
+ * object UBApp and its primary window UBPrimary.  The UI booted with
+ * "[ui] specific = motif" starts it ("[ui] execOnStartup"); the test
+ * (test_ui_boot.c) runs the steps through UBStep on the process thread,
+ * the checks made here count in ubState.
+ */
+@include <stdapp.goh>
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olApplicationClass.goh>
+@include <Objects/gInterC.goh>
+@include <Internal/SpecUI/olWinClass.goh>
+@include <Internal/SpecUI/olBaseWinClass.goh>
+#include <string.h>
+
+typedef struct {
+    GeodeHandle		UBS_process;
+    word		UBS_attached;
+    word		UBS_opened;
+    word		UBS_checks, UBS_fails, UBS_failLine;
+    word		UBS_failLines[8];
+    WindowHandle	UBS_primaryWin;
+} UBState;
+
+UBState ubState;
+
+#define UBCHECK(c) \
+    do { ubState.UBS_checks++; if (!(c)) { \
+	if (ubState.UBS_fails < 8) \
+	    ubState.UBS_failLines[ubState.UBS_fails] = __LINE__; \
+	ubState.UBS_fails++; \
+	if (!ubState.UBS_failLine) ubState.UBS_failLine = __LINE__; } \
+    } while (0)
+
+@class UBProcessClass, GenProcessClass;
+    @message void MSG_UB_STEP(word step);
+@endc
+@classdecl UBProcessClass, neverSaved;
+
+@start UBAppObjects;
+@object GenApplicationClass UBApp = {
+    GI_visMoniker = "Boot";
+    GI_comp = @UBPrimary;
+    gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS) = @UBPrimary;
+}
+@object GenPrimaryClass UBPrimary = {
+    GI_visMoniker = "Boot Test";
+}
+@end UBAppObjects;
+
+@method UBProcessClass, MSG_META_ATTACH_PROCESS
+{
+    ubState.UBS_process = GeodeGetProcessHandle();
+    ubState.UBS_attached++;
+    @callsuper();
+}
+
+@method UBProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
+{
+    @callsuper();
+    ubState.UBS_opened++;
+}
+
+static Boolean InClass(optr o, ClassStruct *c)
+{
+    return o && ObjIsObjectInClass(o, c);
+}
+
+static void VisData(optr o, void *buf, word size)
+{
+    ObjLockObjBlock(OptrToHandle(o));
+    memcpy(buf, ObjDerefVis(o), size);
+    MemUnlock(OptrToHandle(o));
+}
+
+@method UBProcessClass, MSG_UB_STEP
+{
+    switch (step) {
+    case 1: {
+	/* the application and its primary, built by Motif */
+	VisInstance v;
+	optr app = GeodeGetAppObject(0);
+
+	UBCHECK(app == @UBApp);
+	UBCHECK(InClass(app, (ClassStruct *) &OLApplicationClass));
+	UBCHECK(InClass(@UBPrimary, (ClassStruct *) &OLBaseWinClass));
+	VisData(@UBPrimary, &v, sizeof(v));
+	UBCHECK(v.VI_attrs & VA_REALIZED);
+	ubState.UBS_primaryWin = @call UBPrimary::MSG_VIS_QUERY_WINDOW();
+	UBCHECK(ubState.UBS_primaryWin != 0);
+	break;
+    }
+    }
+}
+
+/* a step on the process thread, from the test (MF_CALL) */
+void UBStep(word step)
+{
+    @call ConstructOptr(ubState.UBS_process, 0)::MSG_UB_STEP(step);
+}

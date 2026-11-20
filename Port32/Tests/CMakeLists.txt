@@ -546,5 +546,23 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     else()
       add_test(NAME library.ui.motif COMMAND test_ui_motif)
     endif()
+
+    # the UI booted with the Motif specific UI and an application of
+    # "[ui] execOnStartup" with a document window
+    geos_geode(uiboot GP Geode/uiboot.gp GOC Geode/uiboot.goc)
+    geos_embed(_uiboot_c ${uiboot_GEO} uiboot_geode)
+    add_executable(test_ui_boot test_ui_boot.c ${_ui_c} ${_uiboot_c}
+                   ${_motif_c} ${_hostvid_c})
+    add_dependencies(test_ui_boot geode_ui geode_uiboot geode_motif
+                     geode_hostvid)
+    target_link_libraries(test_ui_boot PRIVATE geos_kernel)
+    if(GEOS_HOST STREQUAL "linux" AND GHAL_HAVE_X11 AND
+       GEOS_LINUX_DISPLAY STREQUAL "x11" AND GEOS_XVFB)
+      add_test(NAME library.ui.boot
+               COMMAND ${PROJECT_SOURCE_DIR}/Port32/tools/geos-xserver.sh
+                       $<TARGET_FILE:test_ui_boot>)
+    else()
+      add_test(NAME library.ui.boot COMMAND test_ui_boot)
+    endif()
   endif()
 endif()
