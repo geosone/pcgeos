@@ -29,6 +29,7 @@
 @include <Objects/gBoolC.goh>
 @include <Internal/SpecUI/olItemGroupClass.goh>
 @include <Internal/SpecUI/olItemClass.goh>
+@include <Internal/SpecUI/olScrollbarClass.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -60,6 +61,10 @@ typedef struct {
     word		UBS_checkApplies, UBS_checkSel;
     word		UBS_sizeApplies, UBS_sizeSel;
     sword		UBS_sizeButton[2];
+    word		UBS_scrollApplies, UBS_scrollAction;
+    dword		UBS_scrollValue;
+    sword		UBS_scrollBar[3];
+    word		UBS_scrollDrag;
 } UBState;
 
 UBState ubState;
@@ -79,6 +84,14 @@ UBState ubState;
     @message (GEN_ITEM_GROUP_APPLY_MSG) MSG_UB_SIZE_APPLIED;
     @message (GEN_BOOLEAN_GROUP_APPLY_MSG) MSG_UB_CHECKS_APPLIED;
     @message (GEN_BOOLEAN_GROUP_APPLY_MSG) MSG_UB_BOOLEANS_APPLIED;
+    /* a scrollbar's apply message plus the part pressed less one */
+    @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_TOP;
+    @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_PAGE_UP;
+    @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_UP;
+    @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_DRAG;
+    @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_DOWN;
+    @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_PAGE_DOWN;
+    @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_BOTTOM;
 @endc
 @classdecl UBProcessClass, neverSaved;
 
@@ -167,7 +180,7 @@ UBState ubState;
 }
 @object GenDisplayClass UBDoc2 = {
     GI_visMoniker = "Doc 2";
-    GI_comp = @UBRadio, @UBChecks, @UBSize;
+    GI_comp = @UBRadio, @UBChecks, @UBSize, @UBScroll;
 }
 /* in Doc 2: a radio group (an exclusive one) and check boxes */
 @object GenItemGroupClass UBRadio = {
@@ -199,6 +212,15 @@ UBState ubState;
     GIGI_applyMsg = MSG_UB_SIZE_APPLIED;
     HINT_ITEM_GROUP_MINIMIZE_SIZE;
     HINT_ITEM_GROUP_DISPLAY_CURRENT_SELECTION;
+}
+/* in Doc 2: a vertical scrollbar of 0 to 100 showing 20 */
+@object GenValueClass UBScroll = {
+    GVLI_maximum = 0x640000;
+    GVLI_increment = 0x50000;
+    GVLI_destination = process;
+    GVLI_applyMsg = MSG_UB_SCROLL_TOP;
+    HINT_VALUE_Y_SCROLLER;
+    HINT_VALUE_DISPLAYS_RANGE = 0x140000;
 }
 @object GenItemClass UBSize1 = {
     GI_visMoniker = "Small";
@@ -276,6 +298,16 @@ UBState ubState;
     (void) stateFlags;
     ubState.UBS_radioApplies++;
     ubState.UBS_radioSel = selection;
+}
+
+@method UBProcessClass, MSG_UB_SCROLL_TOP, MSG_UB_SCROLL_PAGE_UP,
+		       MSG_UB_SCROLL_UP, MSG_UB_SCROLL_DRAG, MSG_UB_SCROLL_DOWN,
+		       MSG_UB_SCROLL_PAGE_DOWN, MSG_UB_SCROLL_BOTTOM
+{
+    (void) stateFlags;
+    ubState.UBS_scrollApplies++;
+    ubState.UBS_scrollAction = message - MSG_UB_SCROLL_TOP;
+    ubState.UBS_scrollValue = value;
 }
 
 @method UBProcessClass, MSG_UB_SIZE_APPLIED
@@ -1282,6 +1314,121 @@ static Rectangle ScreenBounds(WindowHandle w)
 
 	UBCHECK(MonikerIs(win, "Small"));
 	UBCHECK(ubState.UBS_sizeApplies == 2 && ubState.UBS_sizeSel == 1);
+	break;
+    }
+    case 30: {
+	/* Doc 2's scrollbar: Motif's OLScrollbar, vertical, the arrow
+	 * size; a press on its down arrow: one increment down, applied as
+	 * the down action; released: up again */
+	OLScrollbarInstance sb;
+	MouseReturnParams mr;
+	Rectangle r;
+
+	UBCHECK(InClass(@UBScroll, (ClassStruct *) &OLScrollbarClass));
+	VisData(@UBScroll, &sb, sizeof(sb));
+	UBCHECK(sb.OLSBI_attrs & OLSA_VERTICAL);
+	UBCHECK(sb.OLSBI_arrowSize >= 8 && sb.OLSBI_arrowSize <= 14);
+	r = Bounds(@UBScroll);
+	ubState.UBS_scrollBar[0] = r.R_right - r.R_left;
+	ubState.UBS_scrollBar[1] = r.R_bottom - r.R_top;
+	/* Doc 2 is behind Doc 1: drawn into a GState without a window
+	 * (the offsets figured: the thumb a fifth of the scroll area) */
+	{
+	    GStateHandle gs = GrCreateState(0);
+
+	    @call UBScroll::MSG_VIS_DRAW(DF_EXPOSED, gs);
+	    GrDestroyState(gs);
+	}
+	VisData(@UBScroll, &sb, sizeof(sb));
+	UBCHECK(sb.OLSBI_scrArea ==
+		r.R_bottom - r.R_top - (sb.OLSBI_arrowSize + 3) * 2);
+	UBCHECK(sb.OLSBI_elevOffset == 0 &&
+		sb.OLSBI_elevLen == sb.OLSBI_scrArea / 5);
+	UBCHECK(sb.OLSBI_state & OLSS_AT_TOP);
+	UBCHECK(r.R_right - r.R_left == sb.OLSBI_arrowSize + 2);
+	UBCHECK(r.R_bottom - r.R_top >= (sb.OLSBI_arrowSize + 3) * 2);
+	@call UBScroll::MSG_META_START_SELECT(&mr, r.R_left + 3, r.R_bottom - 3,
+		(UIFA_SELECT << 8) | BI_PRESS | BI_B0_DOWN);
+	UBCHECK(mr.flags & MRF_PROCESSED);
+	UBCHECK(IntegerOf(@call UBScroll::MSG_GEN_VALUE_GET_VALUE()) == 5);
+	VisData(@UBScroll, &sb, sizeof(sb));
+	UBCHECK((sb.OLSBI_state & OLSS_DOWN_FLAGS) == OLSS_INC_DOWN);
+	@call UBScroll::MSG_META_END_SELECT(&mr, r.R_left + 3, r.R_bottom - 3,
+					    0);
+	VisData(@UBScroll, &sb, sizeof(sb));
+	UBCHECK(!(sb.OLSBI_state & OLSS_DOWN_FLAGS));
+	break;
+    }
+    case 31: {
+	/* applied once as the down action with 5; the up arrow: back to
+	 * 0 */
+	OLScrollbarInstance sb;
+	MouseReturnParams mr;
+	Rectangle r;
+
+	UBCHECK(ubState.UBS_scrollApplies == 1);
+	UBCHECK(ubState.UBS_scrollAction == OLSS_INC_DOWN - 1);
+	UBCHECK(ubState.UBS_scrollValue == 0x50000UL);
+	VisData(@UBScroll, &sb, sizeof(sb));
+	ubState.UBS_scrollBar[2] = sb.OLSBI_scrArea;
+	r = Bounds(@UBScroll);
+	@call UBScroll::MSG_META_START_SELECT(&mr, r.R_left + 3, r.R_top + 3,
+		(UIFA_SELECT << 8) | BI_PRESS | BI_B0_DOWN);
+	@call UBScroll::MSG_META_END_SELECT(&mr, r.R_left + 3, r.R_top + 3, 0);
+	UBCHECK(IntegerOf(@call UBScroll::MSG_GEN_VALUE_GET_VALUE()) == 0);
+	/* set from outside: kept in 0 .. 100 - 20 */
+	@call UBScroll::MSG_GEN_VALUE_SET_INTEGER_VALUE(95, FALSE);
+	UBCHECK(IntegerOf(@call UBScroll::MSG_GEN_VALUE_GET_VALUE()) == 80);
+	break;
+    }
+    case 32: {
+	/* the up action applied; at the bottom now */
+	OLScrollbarInstance sb;
+
+	UBCHECK(ubState.UBS_scrollApplies == 2);
+	UBCHECK(ubState.UBS_scrollAction == OLSS_INC_UP - 1);
+	VisData(@UBScroll, &sb, sizeof(sb));
+	UBCHECK(sb.OLSBI_state & OLSS_AT_BOTTOM);
+	UBCHECK(!(sb.OLSBI_state & OLSS_AT_TOP));
+	/* back to the top, the thumb dragged half the scroll area down:
+	 * the value from the thumb's place set on the release */
+	@call UBScroll::MSG_GEN_VALUE_SET_INTEGER_VALUE(0, FALSE);
+	{
+	    GStateHandle gs = GrCreateState(0);
+	    MouseReturnParams mr;
+	    Rectangle r = Bounds(@UBScroll);
+	    sword y, d;
+
+	    @call UBScroll::MSG_VIS_DRAW(DF_EXPOSED, gs);
+	    GrDestroyState(gs);
+	    VisData(@UBScroll, &sb, sizeof(sb));
+	    y = r.R_top + sb.OLSBI_arrowSize + 3 + sb.OLSBI_elevLen / 2;
+	    d = sb.OLSBI_scrArea / 2;
+	    @call UBScroll::MSG_META_START_SELECT(&mr, r.R_left + 3, y,
+		(UIFA_SELECT << 8) | BI_PRESS | BI_B0_DOWN);
+	    VisData(@UBScroll, &sb, sizeof(sb));
+	    UBCHECK((sb.OLSBI_state & OLSS_DOWN_FLAGS) == OLSS_DRAG_AREA);
+	    @call UBScroll::MSG_META_PTR(&mr, r.R_left + 3, y + d,
+					 (UIFA_SELECT << 8) | BI_B0_DOWN);
+	    VisData(@UBScroll, &sb, sizeof(sb));
+	    UBCHECK(sb.OLSBI_xorElevOff == d);
+	    UBCHECK(IntegerOf(@call UBScroll::MSG_GEN_VALUE_GET_VALUE()) == 0);
+	    @call UBScroll::MSG_META_END_SELECT(&mr, r.R_left + 3, y + d, 0);
+	    /* d / (scroll area - thumb) of the 80 available */
+	    ubState.UBS_scrollDrag = IntegerOf(
+			@call UBScroll::MSG_GEN_VALUE_GET_VALUE());
+	    UBCHECK(ubState.UBS_scrollDrag >= 45 && ubState.UBS_scrollDrag <= 55);
+	    VisData(@UBScroll, &sb, sizeof(sb));
+	    UBCHECK(sb.OLSBI_xorElevOff == NO_XOR_ELEVATOR &&
+		    !(sb.OLSBI_state & OLSS_DOWN_FLAGS));
+	}
+	break;
+    }
+    case 33: {
+	/* the drag applied as such */
+	UBCHECK(ubState.UBS_scrollApplies == 3);
+	UBCHECK(ubState.UBS_scrollAction == OLSS_DRAG_AREA - 1);
+	UBCHECK(IntegerOf(ubState.UBS_scrollValue) == ubState.UBS_scrollDrag);
 	break;
     }
     }

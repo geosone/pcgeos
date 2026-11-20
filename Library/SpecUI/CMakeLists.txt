@@ -75,6 +75,10 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CSpec/cspecTrigger.goc
                ${c}/CSpec/cspecItem.goc
                ${c}/CSpec/cspecCUAS.goc
+               ${c}/CSpec/cspecValue.goc
+               ${c}/CView/cviewScrollbar.goc
+               ${c}/CView/cviewScrollbarSelect.goc
+               ${CMAKE_CURRENT_SOURCE_DIR}/Motif/View/viewScrollbarDraw.goc
            INCLUDES ${c}
            PROTOCOL 727.0)
 set(motif_GEO ${motif_GEO} PARENT_SCOPE)

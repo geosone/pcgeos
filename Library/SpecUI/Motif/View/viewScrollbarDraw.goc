@@ -1,0 +1,900 @@
+/*
+ * viewScrollbarDraw.goc -- Motif's scrollbar drawing (after
+ * Motif/View/viewScrollbarDraw.asm): the bar is drawn from tables of
+ * lines, rectangles and arrow bitmaps (vertScrollbar, horizScrollbar,
+ * the sliders' and gauges'), one part after the other: the up arrow,
+ * the thumb, the page up area, the page down area, the down arrow.  A
+ * coordinate in a table is a number or a parameter (P_*) plus a small
+ * offset: the arrow width, its height, the beginning and end of the
+ * region drawn (the thumb's, a page area's), the arrow's middle, the end
+ * less an arrow.  A pressed arrow is drawn in its selected colors; the
+ * page areas are 50% patterns of the dark and light colors; the arrows
+ * are bitmaps of 8, 10, 12 or 14 pixels (olArrowSize).
+ *
+ * Port32 (Port32/ABI.md section 13y): a part is a routine number and its
+ * table (the asm's nptr and the words after it); the bitmaps are C data.
+ */
+@include "CView/cviewInt.goh"
+
+/* the parameters of the tables */
+#define P_ARROW_WIDTH		0x5000
+#define P_ARROW_HEIGHT		0x6000
+#define P_BEGIN_REGION		0x7000
+#define P_END_REGION		0x8000
+#define P_ARROW_MID		0x9000
+#define P_END_MINUS_ARROW	0xa000
+
+/* ArrowBitmaps (the asm's word offsets halved) */
+#define AB_INSIDE_UP_ARROW	0
+#define AB_OUTSIDE_UP_ARROW	1
+#define AB_INSIDE_DOWN_ARROW	2
+#define AB_OUTSIDE_DOWN_ARROW	3
+#define AB_INSIDE_LEFT_ARROW	4
+#define AB_OUTSIDE_LEFT_ARROW	5
+#define AB_INSIDE_RIGHT_ARROW	6
+#define AB_OUTSIDE_RIGHT_ARROW	7
+
+/* the routines of the parts */
+typedef enum {
+    SBR_UP_ARROW, SBR_THUMB, SBR_PAGE, SBR_PAGE_AVOID_SHADOW,
+    SBR_PAGE_LIGHT, SBR_TEXT_PAGE_UP, SBR_TEXT_PAGE_DN, SBR_DN_ARROW
+} SBRoutine;
+
+typedef struct {
+    SBRoutine	SBP_routine;
+    const word	*SBP_data;
+} SBPart;
+
+/* the tables (vertScrollbar ... horizTextGauge of the asm) */
+static const word vertScrollbar_0[] = {
+    1, P_ARROW_WIDTH+1, P_ARROW_MID, 2,
+    P_ARROW_MID+1, 2, P_ARROW_WIDTH, P_ARROW_HEIGHT,
+    P_ARROW_MID+2, 2, P_ARROW_WIDTH+1, P_ARROW_HEIGHT,
+    2, P_ARROW_HEIGHT, P_ARROW_WIDTH, P_ARROW_HEIGHT,
+    2, P_ARROW_HEIGHT+1, P_ARROW_WIDTH+1, P_ARROW_HEIGHT+1,
+    1, 1, AB_INSIDE_UP_ARROW,
+    1, 1, AB_OUTSIDE_UP_ARROW
+};
+static const word vertScrollbar_1[] = {
+    1, P_BEGIN_REGION, (P_ARROW_WIDTH+2)-3, P_BEGIN_REGION,
+    1, P_BEGIN_REGION, 1, P_END_REGION-1,
+    (P_ARROW_WIDTH+2)-2, P_BEGIN_REGION, (P_ARROW_WIDTH+2)-2, P_END_REGION,
+    1, P_END_REGION, (P_ARROW_WIDTH+2)-2, P_END_REGION,
+    2, P_END_REGION+1, (P_ARROW_WIDTH+2)-2, P_END_REGION+1,
+    2, P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-2, P_END_REGION,
+    1, P_END_REGION+1, 1, P_END_REGION+1
+};
+static const word vertScrollbar_2[] = {
+    1, P_ARROW_HEIGHT+1, (P_ARROW_WIDTH+2)-1, P_BEGIN_REGION,
+    1, P_ARROW_HEIGHT+2, (P_ARROW_WIDTH+2)-1, P_BEGIN_REGION
+};
+static const word vertScrollbar_3[] = {
+    1, P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-1, P_END_MINUS_ARROW-1
+};
+static const word vertScrollbar_4[] = {
+    P_ARROW_WIDTH, P_END_MINUS_ARROW, P_ARROW_MID+1, P_END_REGION-2,
+    P_ARROW_WIDTH+1, P_END_MINUS_ARROW, P_ARROW_MID+2, P_END_REGION-2,
+    1, P_END_MINUS_ARROW, P_ARROW_WIDTH-1, P_END_MINUS_ARROW,
+    1, P_END_MINUS_ARROW, P_ARROW_MID, P_END_REGION-2,
+    1, P_END_MINUS_ARROW+1, AB_INSIDE_DOWN_ARROW,
+    1, P_END_MINUS_ARROW-1, AB_OUTSIDE_DOWN_ARROW
+};
+static const SBPart vertScrollbar[] = {
+    { SBR_UP_ARROW, vertScrollbar_0 },
+    { SBR_THUMB, vertScrollbar_1 },
+    { SBR_PAGE_AVOID_SHADOW, vertScrollbar_2 },
+    { SBR_PAGE, vertScrollbar_3 },
+    { SBR_DN_ARROW, vertScrollbar_4 }
+};
+static const word horizScrollbar_0[] = {
+    2, (P_ARROW_MID+2)-1-1, P_ARROW_HEIGHT, 1,
+    P_ARROW_HEIGHT, (P_ARROW_WIDTH+2)-1-1, 2, (P_ARROW_MID+2)-1,
+    P_ARROW_HEIGHT, (P_ARROW_WIDTH+2)-1, 2, (P_ARROW_MID+2),
+    P_ARROW_HEIGHT, (P_ARROW_WIDTH+2)-1-2, P_ARROW_HEIGHT, 2,
+    P_ARROW_HEIGHT+1, (P_ARROW_WIDTH+2)-1-1, P_ARROW_HEIGHT+1, 2,
+    1, 1, AB_INSIDE_LEFT_ARROW,
+    1, 1, AB_OUTSIDE_LEFT_ARROW
+};
+static const word horizScrollbar_1[] = {
+    P_BEGIN_REGION, (P_ARROW_WIDTH+2)-1-2, P_BEGIN_REGION, 1,
+    P_BEGIN_REGION, 1, P_END_REGION-1, 1,
+    P_BEGIN_REGION,(P_ARROW_WIDTH+2)-1-1,P_END_REGION, (P_ARROW_WIDTH+2)-1-1,
+    P_END_REGION, (P_ARROW_WIDTH+2)-1-1, P_END_REGION, 1,
+    P_END_REGION+1, (P_ARROW_WIDTH+2)-1-1, P_END_REGION+1, 2,
+    P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-1-1, P_END_REGION, 2,
+    P_END_REGION+1, 1, P_END_REGION+1, 1
+};
+static const word horizScrollbar_2[] = {
+    P_ARROW_HEIGHT+1, (P_ARROW_WIDTH+2)-1, P_BEGIN_REGION, 1,
+    P_ARROW_HEIGHT+2, (P_ARROW_WIDTH+2)-1, P_BEGIN_REGION, 1
+};
+static const word horizScrollbar_3[] = {
+    P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-1, P_END_MINUS_ARROW-1, 1
+};
+static const word horizScrollbar_4[] = {
+    P_END_MINUS_ARROW, (P_ARROW_WIDTH+2)-1-1, P_END_REGION-2, (P_ARROW_MID+2)-1,
+    P_END_MINUS_ARROW, (P_ARROW_WIDTH+2)-1, P_END_REGION-2, (P_ARROW_MID+2),
+    P_END_MINUS_ARROW, (P_ARROW_WIDTH+2)-1-2, P_END_MINUS_ARROW, 1,
+    P_END_MINUS_ARROW, 1, P_END_REGION-2, (P_ARROW_MID+2)-1-1,
+    P_END_MINUS_ARROW+1, 1, AB_INSIDE_RIGHT_ARROW,
+    P_END_MINUS_ARROW-1, 1, AB_OUTSIDE_RIGHT_ARROW
+};
+static const SBPart horizScrollbar[] = {
+    { SBR_UP_ARROW, horizScrollbar_0 },
+    { SBR_THUMB, horizScrollbar_1 },
+    { SBR_PAGE_AVOID_SHADOW, horizScrollbar_2 },
+    { SBR_PAGE, horizScrollbar_3 },
+    { SBR_DN_ARROW, horizScrollbar_4 }
+};
+static const word vertSlider_0[] = {
+    1, P_BEGIN_REGION, (P_ARROW_WIDTH+2)-3, P_BEGIN_REGION,
+    1, P_BEGIN_REGION, 1, P_END_REGION-1,
+    (P_ARROW_WIDTH+2)-2, P_BEGIN_REGION, (P_ARROW_WIDTH+2)-2, P_END_REGION,
+    1, P_END_REGION, (P_ARROW_WIDTH+2)-2, P_END_REGION,
+    2, P_END_REGION+1, (P_ARROW_WIDTH+2)-2, P_END_REGION+1,
+    2, P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-2, P_END_REGION,
+    1, P_END_REGION+1, 1, P_END_REGION+1
+};
+static const word vertSlider_1[] = {
+    1, 1, (P_ARROW_WIDTH+2)-1, P_BEGIN_REGION
+};
+static const word vertSlider_2[] = {
+    1, P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-1, P_END_REGION-1
+};
+static const SBPart vertSlider[] = {
+    { SBR_THUMB, vertSlider_0 },
+    { SBR_PAGE, vertSlider_1 },
+    { SBR_PAGE, vertSlider_2 }
+};
+static const word horizSlider_0[] = {
+    P_BEGIN_REGION, (P_ARROW_WIDTH+2)-1-2, P_BEGIN_REGION, 1,
+    P_BEGIN_REGION, 1, P_END_REGION-1, 1,
+    P_BEGIN_REGION,(P_ARROW_WIDTH+2)-1-1,P_END_REGION, (P_ARROW_WIDTH+2)-1-1,
+    P_END_REGION, (P_ARROW_WIDTH+2)-1-1, P_END_REGION, 1,
+    P_END_REGION+1, (P_ARROW_WIDTH+2)-1-1, P_END_REGION+1, 2,
+    P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-1-1, P_END_REGION, 2,
+    P_END_REGION+1, 1, P_END_REGION+1, 1
+};
+static const word horizSlider_1[] = {
+    1, (P_ARROW_WIDTH+2)-1, P_BEGIN_REGION, 1
+};
+static const word horizSlider_2[] = {
+    P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-1, P_END_REGION-1, 1
+};
+static const SBPart horizSlider[] = {
+    { SBR_THUMB, horizSlider_0 },
+    { SBR_PAGE, horizSlider_1 },
+    { SBR_PAGE, horizSlider_2 }
+};
+static const word vertGauge_0[] = {
+    3, 1, (P_ARROW_WIDTH+2)-3, P_BEGIN_REGION
+};
+static const word vertGauge_1[] = {
+    3, P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-3, P_END_REGION-1
+};
+static const SBPart vertGauge[] = {
+    { SBR_PAGE_LIGHT, vertGauge_0 },
+    { SBR_PAGE, vertGauge_1 }
+};
+static const word horizGauge_0[] = {
+    1, (P_ARROW_WIDTH+2)-3, P_BEGIN_REGION, 3
+};
+static const word horizGauge_1[] = {
+    P_BEGIN_REGION+1, (P_ARROW_WIDTH+2)-3, P_END_REGION-1, 3
+};
+static const SBPart horizGauge[] = {
+    { SBR_PAGE, horizGauge_0 },
+    { SBR_PAGE_LIGHT, horizGauge_1 }
+};
+static const word horizTextGauge_0[] = {
+    1, 1, P_BEGIN_REGION, (P_ARROW_WIDTH+2)-1
+};
+static const word horizTextGauge_1[] = {
+    P_BEGIN_REGION+1, 1, P_END_REGION, (P_ARROW_WIDTH+2)-1
+};
+static const SBPart horizTextGauge[] = {
+    { SBR_TEXT_PAGE_UP, horizTextGauge_0 },
+    { SBR_TEXT_PAGE_DN, horizTextGauge_1 }
+};
+
+/* ---------------------------------------------------------------------
+ * The arrow bitmaps (ScrollbarBitmaps8 ... 14)
+ * ------------------------------------------------------------------- */
+
+static const struct { Bitmap h; byte d[8]; } UpInside8 = {
+    { 8, 8, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x00, 0x18, 0x18, 0x3c, 0x3c, 0x7e }
+};
+
+static const struct { Bitmap h; byte d[10]; } UpOutside8 = {
+    { 8, 10, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xe7, 0xe7, 0xc3, 0xc3, 0x81, 0x81, 0x00, 0x00, 0xff }
+};
+
+static const struct { Bitmap h; byte d[5]; } DownInside8 = {
+    { 8, 5, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x7e, 0x3c, 0x3c, 0x18, 0x18 }
+};
+
+static const struct { Bitmap h; byte d[10]; } DownOutside8 = {
+    { 8, 10, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0x00, 0x00, 0x81, 0x81, 0xc3, 0xc3, 0xe7, 0xe7, 0xff }
+};
+
+static const struct { Bitmap h; byte d[8]; } LeftInside8 = {
+    { 8, 8, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x01, 0x07, 0x1f, 0x1f, 0x07, 0x01, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[16]; } LeftOutside8 = {
+    { 10, 8, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xfe, 0x40, 0xf8, 0x40, 0xe0, 0x40, 0x80, 0x40, 0x80, 0x40, 0xe0, 0x40, 0xf8, 0x40, 0xfe, 0x40 }
+};
+
+static const struct { Bitmap h; byte d[8]; } RightInside8 = {
+    { 5, 8, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x80, 0xe0, 0xf8, 0xf8, 0xe0, 0x80, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[16]; } RightOutside8 = {
+    { 10, 8, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x9f, 0xc0, 0x87, 0xc0, 0x81, 0xc0, 0x80, 0x40, 0x80, 0x40, 0x81, 0xc0, 0x87, 0xc0, 0x9f, 0xc0 }
+};
+
+static const Bitmap *const sbBitmaps8[] = {
+    &UpInside8.h,
+    &UpOutside8.h,
+    &DownInside8.h,
+    &DownOutside8.h,
+    &LeftInside8.h,
+    &LeftOutside8.h,
+    &RightInside8.h,
+    &RightOutside8.h
+};
+
+static const struct { Bitmap h; byte d[20]; } UpInside10 = {
+    { 10, 10, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x0c, 0x00, 0x1e, 0x00, 0x1e, 0x00, 0x3f, 0x00, 0x3f, 0x00, 0x7f, 0x80 }
+};
+
+static const struct { Bitmap h; byte d[24]; } UpOutside10 = {
+    { 10, 12, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xc0, 0xf3, 0xc0, 0xf3, 0xc0, 0xe1, 0xc0, 0xe1, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0x80, 0x40, 0x80, 0x40, 0x00, 0x00, 0x00, 0x00, 0xff, 0xc0 }
+};
+
+static const struct { Bitmap h; byte d[14]; } DownInside10 = {
+    { 10, 7, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x7f, 0x80, 0x3f, 0x00, 0x3f, 0x00, 0x1e, 0x00, 0x1e, 0x00, 0x0c, 0x00, 0x0c, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[24]; } DownOutside10 = {
+    { 10, 12, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x80, 0x40, 0x80, 0x40, 0xc0, 0xc0, 0xc0, 0xc0, 0xe1, 0xc0, 0xe1, 0xc0, 0xf3, 0xc0, 0xf3, 0xc0, 0xff, 0xc0 }
+};
+
+static const struct { Bitmap h; byte d[20]; } LeftInside10 = {
+    { 11, 10, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x00, 0x40, 0x01, 0xc0, 0x07, 0xc0, 0x1f, 0xc0, 0x1f, 0xc0, 0x07, 0xc0, 0x01, 0xc0, 0x00, 0x40, 0x00, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[20]; } LeftOutside10 = {
+    { 12, 10, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0x90, 0xfe, 0x10, 0xf8, 0x10, 0xe0, 0x10, 0x80, 0x10, 0x80, 0x10, 0xe0, 0x10, 0xf8, 0x10, 0xfe, 0x10, 0xff, 0x90 }
+};
+
+static const struct { Bitmap h; byte d[10]; } RightInside10 = {
+    { 7, 10, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x80, 0xe0, 0xf8, 0xfe, 0xfe, 0xf8, 0xe0, 0x80, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[20]; } RightOutside10 = {
+    { 12, 10, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x9f, 0xf0, 0x87, 0xf0, 0x81, 0xf0, 0x80, 0x70, 0x80, 0x10, 0x80, 0x10, 0x80, 0x70, 0x81, 0xf0, 0x87, 0xf0, 0x9f, 0xf0 }
+};
+
+static const Bitmap *const sbBitmaps10[] = {
+    &UpInside10.h,
+    &UpOutside10.h,
+    &DownInside10.h,
+    &DownOutside10.h,
+    &LeftInside10.h,
+    &LeftOutside10.h,
+    &RightInside10.h,
+    &RightOutside10.h
+};
+
+static const struct { Bitmap h; byte d[24]; } UpInside12 = {
+    { 12, 12, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x06, 0x00, 0x0f, 0x00, 0x0f, 0x00, 0x1f, 0x80, 0x1f, 0x80, 0x3f, 0xc0, 0x3f, 0xc0, 0x7f, 0xe0 }
+};
+
+static const struct { Bitmap h; byte d[28]; } UpOutside12 = {
+    { 12, 14, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xf0, 0xf9, 0xf0, 0xf9, 0xf0, 0xf0, 0xf0, 0xf0, 0xf0, 0xe0, 0x70, 0xe0, 0x70, 0xc0, 0x30, 0xc0, 0x30, 0x80, 0x10, 0x80, 0x10, 0x00, 0x00, 0x00, 0x00, 0xff, 0xf0 }
+};
+
+static const struct { Bitmap h; byte d[18]; } DownInside12 = {
+    { 12, 9, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x7f, 0xe0, 0x3f, 0xc0, 0x3f, 0xc0, 0x1f, 0x80, 0x1f, 0x80, 0x0f, 0x00, 0x0f, 0x00, 0x06, 0x00, 0x06, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[28]; } DownOutside12 = {
+    { 12, 14, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x80, 0x10, 0x80, 0x10, 0xc0, 0x30, 0xc0, 0x30, 0xe0, 0x70, 0xe0, 0x70, 0xf0, 0xf0, 0xf0, 0xf0, 0xf9, 0xf0, 0xf9, 0xf0, 0xff, 0xf0 }
+};
+
+static const struct { Bitmap h; byte d[24]; } LeftInside12 = {
+    { 13, 12, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x00, 0x10, 0x00, 0x70, 0x01, 0xf0, 0x07, 0xf0, 0x1f, 0xf0, 0x1f, 0xf0, 0x07, 0xf0, 0x01, 0xf0, 0x00, 0x70, 0x00, 0x10, 0x00, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[24]; } LeftOutside12 = {
+    { 14, 12, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xe4, 0xff, 0x84, 0xfe, 0x04, 0xf8, 0x04, 0xe0, 0x04, 0x80, 0x04, 0x80, 0x04, 0xe0, 0x04, 0xf8, 0x04, 0xfe, 0x04, 0xff, 0x84, 0xff, 0xe4 }
+};
+
+static const struct { Bitmap h; byte d[24]; } RightInside12 = {
+    { 9, 12, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x80, 0x00, 0xe0, 0x00, 0xf8, 0x00, 0xfe, 0x00, 0xff, 0x80, 0xff, 0x80, 0xfe, 0x00, 0xf8, 0x00, 0xe0, 0x00, 0x80, 0x00, 0x00, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[24]; } RightOutside12 = {
+    { 14, 12, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x9f, 0xfc, 0x87, 0xfc, 0x81, 0xfc, 0x80, 0x7c, 0x80, 0x1c, 0x80, 0x04, 0x80, 0x04, 0x80, 0x1c, 0x80, 0x7c, 0x81, 0xfc, 0x87, 0xfc, 0x9f, 0xfc }
+};
+
+static const Bitmap *const sbBitmaps12[] = {
+    &UpInside12.h,
+    &UpOutside12.h,
+    &DownInside12.h,
+    &DownOutside12.h,
+    &LeftInside12.h,
+    &LeftOutside12.h,
+    &RightInside12.h,
+    &RightOutside12.h
+};
+
+static const struct { Bitmap h; byte d[28]; } UpInside14 = {
+    { 14, 14, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x03, 0x00, 0x07, 0x80, 0x07, 0x80, 0x0f, 0xc0, 0x0f, 0xc0, 0x1f, 0xe0, 0x1f, 0xe0, 0x3f, 0xf0, 0x3f, 0xf0, 0x7f, 0xf8 }
+};
+
+static const struct { Bitmap h; byte d[32]; } UpOutside14 = {
+    { 14, 16, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xf8, 0x7c, 0xf8, 0x7c, 0xf0, 0x3c, 0xf0, 0x3c, 0xe0, 0x1c, 0xe0, 0x1c, 0xc0, 0x0c, 0xc0, 0x0c, 0x80, 0x04, 0x80, 0x04, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfc }
+};
+
+static const struct { Bitmap h; byte d[22]; } DownInside14 = {
+    { 14, 11, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x7f, 0xf8, 0x3f, 0xf0, 0x3f, 0xf0, 0x1f, 0xe0, 0x1f, 0xe0, 0x0f, 0xc0, 0x0f, 0xc0, 0x07, 0x80, 0x07, 0x80, 0x03, 0x00, 0x03, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[32]; } DownOutside14 = {
+    { 14, 16, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xfc, 0x00, 0x00, 0x00, 0x00, 0x80, 0x04, 0x80, 0x04, 0xc0, 0x0c, 0xc0, 0x0c, 0xe0, 0x1c, 0xe0, 0x1c, 0xf0, 0x3c, 0xf0, 0x3c, 0xf8, 0x7c, 0xf8, 0x7c, 0xfc, 0xfc, 0xfc, 0xfc, 0xff, 0xfc }
+};
+
+static const struct { Bitmap h; byte d[28]; } LeftInside14 = {
+    { 15, 14, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x00, 0x04, 0x00, 0x1c, 0x00, 0x7c, 0x01, 0xfc, 0x07, 0xfc, 0x1f, 0xfc, 0x1f, 0xfc, 0x07, 0xfc, 0x01, 0xfc, 0x00, 0x7c, 0x00, 0x1c, 0x00, 0x04, 0x00, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[28]; } LeftOutside14 = {
+    { 16, 14, BMC_UNCOMPACTED, BMF_MONO },
+    { 0xff, 0xf9, 0xff, 0xe1, 0xff, 0x81, 0xfe, 0x01, 0xf8, 0x01, 0xe0, 0x01, 0x80, 0x01, 0x80, 0x01, 0xe0, 0x01, 0xf8, 0x01, 0xfe, 0x01, 0xff, 0x81, 0xff, 0xe1, 0xff, 0xf9 }
+};
+
+static const struct { Bitmap h; byte d[28]; } RightInside14 = {
+    { 11, 14, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x00, 0x00, 0x80, 0x00, 0xe0, 0x00, 0xf8, 0x00, 0xfe, 0x00, 0xff, 0x80, 0xff, 0xe0, 0xff, 0xe0, 0xff, 0x80, 0xfe, 0x00, 0xf8, 0x00, 0xe0, 0x00, 0x80, 0x00, 0x00, 0x00 }
+};
+
+static const struct { Bitmap h; byte d[28]; } RightOutside14 = {
+    { 16, 14, BMC_UNCOMPACTED, BMF_MONO },
+    { 0x9f, 0xff, 0x87, 0xff, 0x81, 0xff, 0x80, 0x7f, 0x80, 0x1f, 0x80, 0x07, 0x80, 0x01, 0x80, 0x01, 0x80, 0x07, 0x80, 0x1f, 0x80, 0x7f, 0x81, 0xff, 0x87, 0xff, 0x9f, 0xff }
+};
+
+static const Bitmap *const sbBitmaps14[] = {
+    &UpInside14.h,
+    &UpOutside14.h,
+    &DownInside14.h,
+    &DownOutside14.h,
+    &LeftInside14.h,
+    &LeftOutside14.h,
+    &RightInside14.h,
+    &RightOutside14.h
+};
+
+/* ---------------------------------------------------------------------
+ * The interpreter (DrawSBPart and the routines of the parts)
+ * ------------------------------------------------------------------- */
+
+/* the frame of DrawScrollbar */
+typedef struct {
+    Color		SBD_ltColor, SBD_rbColor, SBD_fillColor,
+			SBD_fillSelColor, SBD_darkColor;
+    GStateHandle	SBD_gstate;
+    word		SBD_scrLen;
+    Boolean		SBD_notSelected;	/* the asm's selected? */
+    OLScrollbarAttrs	SBD_attrs;
+    Boolean		SBD_updating, SBD_readOnly, SBD_bw;
+    word		SBD_arrowSize;
+    sword		SBD_posX, SBD_posY;
+    word		SBD_param[6];
+    char		SBD_valueText[GEN_VALUE_MAX_TEXT_LEN + 1];
+    sword		SBD_valueTextPos;
+    const word		*SBD_si;		/* the table being drawn */
+} SBDraw;
+
+/* ApplySBParam: a coordinate of the table: a number or a parameter
+ * plus an offset of less than 100 either way */
+static word ApplySBParam(const SBDraw *d, word v)
+{
+    static const word p[] = {
+	P_ARROW_WIDTH, P_ARROW_HEIGHT, P_BEGIN_REGION, P_END_REGION,
+	P_ARROW_MID, P_END_MINUS_ARROW
+    };
+    word i;
+
+    if (v < P_ARROW_WIDTH - 100 || v >= P_END_MINUS_ARROW + 100)
+	return v;
+    for (i = 0; i < 5 && v >= p[i] + 100; i++)
+	;
+    return (word) (v - p[i] + d->SBD_param[i]);
+}
+
+/* GetSBRect: the next four words, the parameters applied, at the
+ * draw position */
+static void GetSBRect(SBDraw *d, sword *l, sword *t, sword *r, sword *b)
+{
+    const word *s = d->SBD_si;
+
+    *l = (sword) (ApplySBParam(d, s[0]) + d->SBD_posX);
+    *t = (sword) (ApplySBParam(d, s[1]) + d->SBD_posY);
+    *r = (sword) (ApplySBParam(d, s[2]) + d->SBD_posX);
+    *b = (sword) (ApplySBParam(d, s[3]) + d->SBD_posY);
+    d->SBD_si += 4;
+}
+
+static void DrawSBLine(SBDraw *d)
+{
+    sword l, t, r, b;
+
+    GetSBRect(d, &l, &t, &r, &b);
+    GrDrawLine(d->SBD_gstate, l, t, r, b);
+}
+
+/* only in black and white (color has no shadow) */
+static void DrawSBLineShadow(SBDraw *d)
+{
+    if (d->SBD_bw)
+	DrawSBLine(d);
+    else
+	d->SBD_si += 4;
+}
+
+static void DrawSBLineIfNotTwisted(SBDraw *d)
+{
+    if (d->SBD_attrs & OLSA_TWISTED)
+	d->SBD_si += 4;
+    else
+	DrawSBLineShadow(d);
+}
+
+static void FillSBRect(SBDraw *d)
+{
+    sword l, t, r, b;
+
+    GetSBRect(d, &l, &t, &r, &b);
+    GrFillRect(d->SBD_gstate, l, t, r, b);
+}
+
+/* the first rectangle in color, the second in black and white */
+static void FillSBRectCustomBW(SBDraw *d)
+{
+    if (d->SBD_bw)
+	d->SBD_si += 4;
+    FillSBRect(d);
+    if (!d->SBD_bw)
+	d->SBD_si += 4;
+}
+
+/* FillSBBitmap: the arrow bitmap of the arrow size at the next two
+ * words */
+static void FillSBBitmap(SBDraw *d)
+{
+    const word *s = d->SBD_si;
+    const Bitmap *const *tab;
+    sword x, y;
+
+    x = (sword) (ApplySBParam(d, s[0]) + d->SBD_posX);
+    y = (sword) (ApplySBParam(d, s[1]) + d->SBD_posY);
+    switch (d->SBD_arrowSize) {
+    case 14:	tab = sbBitmaps14; break;
+    case 12:	tab = sbBitmaps12; break;
+    case 10:	tab = sbBitmaps10; break;
+    default:	tab = sbBitmaps8; break;
+    }
+    GrFillBitmap(d->SBD_gstate, x, y, tab[s[2]], NULL);
+    d->SBD_si += 3;
+}
+
+/* SetLTColor ... SetRevDarkColor: the colors of a part, selected or
+ * not, enabled or not (50%) */
+static void SetLTColor(SBDraw *d)
+{
+    GrSetLineColor(d->SBD_gstate, CF_INDEX,
+		   d->SBD_notSelected ? d->SBD_ltColor : C_BLACK, 0, 0);
+    if (!(d->SBD_attrs & OLSA_ENABLED))
+	GrSetLineMaskSys(d->SBD_gstate, SDM_50);
+}
+
+static void SetRBColor(SBDraw *d)
+{
+    GrSetLineColor(d->SBD_gstate, CF_INDEX,
+		   d->SBD_notSelected ? d->SBD_rbColor : d->SBD_ltColor, 0, 0);
+    if (!(d->SBD_attrs & OLSA_ENABLED))
+	GrSetLineMaskSys(d->SBD_gstate, SDM_50);
+}
+
+static void SetFillColor(SBDraw *d)
+{
+    GrSetAreaColor(d->SBD_gstate, CF_INDEX,
+		   d->SBD_notSelected ? d->SBD_fillColor
+				      : d->SBD_fillSelColor, 0, 0);
+    GrSetAreaMaskSys(d->SBD_gstate,
+		     (d->SBD_attrs & OLSA_ENABLED) ? SDM_100 : SDM_50);
+}
+
+/* 50% dark (inverse, so the light dots are the reverse's); text too:
+ * solid; disabled: none */
+static void SetDarkColor(SBDraw *d)
+{
+    word m = SDM_0;
+
+    GrSetAreaColor(d->SBD_gstate, CF_INDEX, d->SBD_darkColor, 0, 0);
+    if (d->SBD_attrs & OLSA_ENABLED)
+	m = (d->SBD_attrs & OLSA_TEXT_TOO) ? SDM_100 : (SDM_50 | SDM_INVERSE);
+    GrSetAreaMaskSys(d->SBD_gstate, m);
+}
+
+static void SetRevDarkColor(SBDraw *d)
+{
+    GrSetAreaColor(d->SBD_gstate, CF_INDEX, d->SBD_fillColor, 0, 0);
+    GrSetAreaMaskSys(d->SBD_gstate,
+		     (d->SBD_attrs & OLSA_ENABLED) ? SDM_50 : SDM_0);
+}
+
+/* HVUpArrow, HVDnArrow: the bevel, the inside of the arrow in the fill
+ * color, the outside 50% dark (in color first the light dots) */
+static void ArrowBitmaps(SBDraw *d)
+{
+    const word *s;
+
+    SetFillColor(d);
+    FillSBBitmap(d);
+    if (!d->SBD_bw) {
+	s = d->SBD_si;
+	SetRevDarkColor(d);
+	FillSBBitmap(d);
+	d->SBD_si = s;
+    }
+    SetDarkColor(d);
+    FillSBBitmap(d);
+}
+
+static void HVUpArrow(SBDraw *d)
+{
+    SetLTColor(d);
+    DrawSBLine(d);
+    SetRBColor(d);
+    DrawSBLine(d);
+    DrawSBLineShadow(d);
+    DrawSBLine(d);
+    DrawSBLineIfNotTwisted(d);
+    ArrowBitmaps(d);
+}
+
+static void HVDnArrow(SBDraw *d)
+{
+    SetRBColor(d);
+    DrawSBLine(d);
+    DrawSBLineShadow(d);
+    SetLTColor(d);
+    DrawSBLine(d);
+    DrawSBLine(d);
+    ArrowBitmaps(d);
+}
+
+/* HVPageUpDn: 50% dark and light dots */
+static void HVPageUpDn(SBDraw *d)
+{
+    const word *s = d->SBD_si;
+
+    SetDarkColor(d);
+    FillSBRect(d);
+    d->SBD_si = s;
+    SetRevDarkColor(d);
+    FillSBRect(d);
+}
+
+static void HVPageUpDnAvoidShadow(SBDraw *d)
+{
+    const word *s = d->SBD_si;
+
+    SetDarkColor(d);
+    FillSBRectCustomBW(d);
+    d->SBD_si = s;
+    SetRevDarkColor(d);
+    FillSBRectCustomBW(d);
+}
+
+/* HVThumb: the bevel and the fill (black and white: the extra pixel) */
+static void HVThumb(SBDraw *d)
+{
+    SetLTColor(d);
+    DrawSBLine(d);
+    DrawSBLine(d);
+    SetRBColor(d);
+    DrawSBLine(d);
+    DrawSBLine(d);
+    DrawSBLineShadow(d);
+    SetFillColor(d);
+    FillSBRect(d);
+    if (d->SBD_bw) {
+	SetFillColor(d);
+	HVPageUpDn(d);
+    } else
+	d->SBD_si += 4;
+}
+
+/* HVPageUpDnLight: a gauge's empty part in the light color */
+static void HVPageUpDnLight(SBDraw *d)
+{
+    d->SBD_notSelected = TRUE;
+    SetFillColor(d);
+    FillSBRect(d);
+}
+
+/* HTextPageUp, HTextPageDn: a text gauge's parts with the value in
+ * them (white on dark, dark on light) */
+static void HTextPage(SBDraw *d, Boolean up)
+{
+    GStateHandle gs = d->SBD_gstate;
+    sword l, t, r, b;
+
+    if (up)
+	SetDarkColor(d);
+    else
+	SetFillColor(d);
+    GetSBRect(d, &l, &t, &r, &b);
+    GrSetClipRect(gs, PCT_REPLACE, l, t, r, b);
+    GrFillRect(gs, l, t, r, b);
+    GrSetTextColor(gs, CF_INDEX, up ? C_WHITE : d->SBD_darkColor, 0, 0);
+    GrDrawText(gs, (sword) (d->SBD_valueTextPos + d->SBD_posX), t,
+	       d->SBD_valueText, 0);
+    if (!up)
+	GrSetClipRect(gs, PCT_NULL, 0, 0, 0, 0);
+}
+
+/* DrawSBPart: the part drawn at x, y for the region from begin to end */
+static void DrawSBPart(SBDraw *d, const SBPart *p, sword x, sword y,
+		       word begin, word end)
+{
+    word a = d->SBD_arrowSize;
+
+    d->SBD_posX = x;
+    d->SBD_posY = y;
+    d->SBD_param[0] = a;
+    d->SBD_param[1] = (word) (a + 1);
+    d->SBD_param[2] = begin;
+    d->SBD_param[3] = end;
+    d->SBD_param[4] = (word) (a >> 1);
+    d->SBD_param[5] = (word) (end - (a + 1));
+    d->SBD_si = p->SBP_data;
+    switch (p->SBP_routine) {
+    case SBR_UP_ARROW:		HVUpArrow(d); break;
+    case SBR_THUMB:		HVThumb(d); break;
+    case SBR_PAGE:		HVPageUpDn(d); break;
+    case SBR_PAGE_AVOID_SHADOW:	HVPageUpDnAvoidShadow(d); break;
+    case SBR_PAGE_LIGHT:	HVPageUpDnLight(d); break;
+    case SBR_TEXT_PAGE_UP:	HTextPage(d, TRUE); break;
+    case SBR_TEXT_PAGE_DN:	HTextPage(d, FALSE); break;
+    case SBR_DN_ARROW:		HVDnArrow(d); break;
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * DrawScrollbar
+ * ------------------------------------------------------------------- */
+
+/* SetupDrawColors: black and white, or white and the dark color around
+ * the light one */
+static void SetupDrawColors(SBDraw *d)
+{
+    d->SBD_rbColor = d->SBD_ltColor = C_BLACK;
+    d->SBD_fillColor = C_WHITE;
+    d->SBD_fillSelColor = C_BLACK;
+    d->SBD_darkColor = C_BLACK;
+    if (!(moCS_flags & CSF_BW)) {
+	d->SBD_fillColor = moCS_dsLightColor;
+	d->SBD_fillSelColor = d->SBD_rbColor = d->SBD_darkColor =
+	    moCS_dsDarkColor;
+	d->SBD_ltColor = C_WHITE;
+    }
+}
+
+/* DrawOutline: the inset frame around the bar (across it only as wide
+ * as an arrow and its frame) */
+static void DrawOutline(optr oself, GStateHandle gs)
+{
+    OLScrollbarInstance *sb;
+    Rectangle r;
+    word colors = C_BLACK | (C_BLACK << 8);
+    Color fill = C_WHITE;
+
+    if (!(moCS_flags & CSF_BW)) {
+	colors = (word) (moCS_dsDarkColor | (C_WHITE << 8));
+	fill = moCS_dsLightColor;
+    }
+    GrSetAreaColor(gs, CF_INDEX, fill, 0, 0);
+    VisGetBounds(oself, &r);
+    sb = SBVis(oself);
+    if (!(sb->OLSBI_attrs & OLSA_TWISTED)) {
+	if (sb->OLSBI_attrs & OLSA_VERTICAL)
+	    r.R_right = (sword) (r.R_left + sb->OLSBI_arrowSize + 2);
+	else
+	    r.R_bottom = (sword) (r.R_top + sb->OLSBI_arrowSize + 2);
+    }
+    OpenDrawRect(oself, gs, r.R_left, r.R_top, r.R_right, r.R_bottom, colors);
+}
+
+/*
+ * DrawScrollbar: the outline (unless updating), then the parts: the up
+ * arrow (not when updating), the thumb (none read only, twisted or
+ * without room), the page up area (none with the thumb at the top), the
+ * page down area (none at the bottom or twisted), the down arrow (beside
+ * the up arrow when twisted)
+ */
+void DrawScrollbar(optr oself, GStateHandle gs, Boolean updating)
+{
+    OLScrollbarInstance *sb;
+    const SBPart *p;
+    SBDraw d;
+    sword x, y, beg, end, lim, top;
+    Boolean slider;
+    word c;
+
+    memset(&d, 0, sizeof(d));
+    d.SBD_gstate = gs;
+    d.SBD_updating = updating;
+    d.SBD_bw = OpenCheckIfBW();
+    if (!updating)
+	DrawOutline(oself, gs);
+    sb = SBVis(oself);
+    d.SBD_attrs = sb->OLSBI_attrs;
+    d.SBD_arrowSize = sb->OLSBI_arrowSize;
+    d.SBD_readOnly = (SBGen(oself)->GI_attrs & GA_READ_ONLY) != 0;
+    SetupDrawColors(&d);
+
+    /* SetupDrawParams: the thumb's beginning and end, the tables */
+    sb = SBVis(oself);
+    slider = (sb->OLSBI_attrs & OLSA_SLIDER) != 0;
+    beg = sb->OLSBI_elevOffset;
+    lim = 0;
+    if (!slider) {
+	beg = (sword) (beg + sb->OLSBI_arrowSize + 3);
+	lim = (sword) (sb->OLSBI_arrowSize + 3);
+    } else
+	beg++;
+    end = (sword) (beg + sb->OLSBI_elevLen);
+    lim = (sword) (lim + sb->OLSBI_scrArea);
+    if (slider)
+	lim++;
+    if ((word) end > (word) lim)
+	end = lim;
+    end--;
+    sb->OLSBI_attrs |= OLSA_DRAWN_ENABLED;
+    if (!(sb->OLSBI_attrs & OLSA_ENABLED))
+	sb->OLSBI_attrs &= ~OLSA_DRAWN_ENABLED;
+    x = sb->VI_bounds.R_left;
+    y = sb->VI_bounds.R_top;
+    if (sb->OLSBI_attrs & (OLSA_VERTICAL | OLSA_TWISTED)) {
+	p = vertScrollbar;
+	d.SBD_scrLen = (word) (sb->VI_bounds.R_bottom - 1 - y);
+	if (slider)
+	    p = d.SBD_readOnly ? vertGauge : vertSlider;
+    } else {
+	p = horizScrollbar;
+	d.SBD_scrLen = (word) (sb->VI_bounds.R_right - 1 - x);
+	if (slider) {
+	    p = horizSlider;
+	    if (d.SBD_readOnly) {
+		p = (sb->OLSBI_attrs & OLSA_TEXT_TOO) ? horizTextGauge
+						     : horizGauge;
+		if (sb->OLSBI_attrs & OLSA_TEXT_TOO) {
+		    @call oself::MSG_GEN_VALUE_GET_VALUE_TEXT(d.SBD_valueText,
+							      GVT_VALUE);
+		    d.SBD_valueTextPos = (sword) ((sword) (d.SBD_scrLen -
+			GrTextWidth(gs, d.SBD_valueText,
+				    0)) >> 1);
+		}
+	    }
+	}
+    }
+
+    /* DrawUpArrow */
+    sb = SBVis(oself);
+    if (!slider) {
+	if (!updating) {
+	    d.SBD_notSelected = (sb->OLSBI_state & OLSS_DOWN_FLAGS) !=
+				OLSS_INC_UP;
+	    DrawSBPart(&d, p, x, y, (word) beg, (word) end);
+	}
+	p++;
+    }
+    if (sb->OLSBI_attrs & OLSA_TWISTED)
+	x = (sword) (x + sb->OLSBI_arrowSize);
+
+    /* DrawThumb */
+    if (!d.SBD_readOnly) {
+	sb = SBVis(oself);
+	if ((sb->OLSBI_attrs & OLSA_TWISTED) || sb->OLSBI_elevOffset < 0)
+	    p++;
+	else {
+	    sword b2 = beg;
+
+	    d.SBD_notSelected = TRUE;
+	    if (slider) {
+		sword mid = (sword) ((word) (end - beg) >> 1) + beg;
+
+		DrawSBPart(&d, p, x, y, (word) beg, (word) mid);
+		b2 = (sword) (mid + 1);
+	    }
+	    DrawSBPart(&d, p, x, y, (word) b2, (word) end);
+	    p++;
+	}
+    }
+
+    /* the page up area */
+    sb = SBVis(oself);
+    c = (d.SBD_bw && !slider) ? 1 : 0;
+    if (sb->OLSBI_elevOffset > (sword) c)
+	DrawSBPart(&d, p, x, y, (word) beg, (word) end);
+    p++;
+
+    /* the page down area: from the thumb's end to the bar's */
+    sb = SBVis(oself);
+    beg = end;
+    end = (sword) d.SBD_scrLen;
+    if (!(sb->OLSBI_attrs & OLSA_TWISTED)) {
+	top = 1;
+	if (sb->OLSBI_elevOffset >= 0) {
+	    top = (sword) (sb->OLSBI_scrArea - sb->OLSBI_elevLen -
+			   sb->OLSBI_elevOffset);
+	    if (d.SBD_bw && !slider)
+		top--;
+	}
+	if (top > 0) {
+	    sword b2 = beg, e2 = end;
+
+	    if (d.SBD_bw) {
+		e2++;
+		if (sb->OLSBI_elevOffset >= 0)
+		    b2++;
+	    }
+	    DrawSBPart(&d, p, x, y, (word) b2, (word) e2);
+	}
+    }
+    p++;
+
+    /* DrawDownArrow */
+    sb = SBVis(oself);
+    if (!slider && !updating) {
+	d.SBD_notSelected = (sb->OLSBI_state & OLSS_DOWN_FLAGS) !=
+			    OLSS_INC_DOWN;
+	DrawSBPart(&d, p, x, y, (word) beg, (word) end);
+    }
+    GrSetLineMaskSys(gs, SDM_100);
+    GrSetAreaMaskSys(gs, SDM_100);
+}

@@ -1,0 +1,89 @@
+/*
+ * olScrollbarClass.goh -- OLScrollbarClass, the specific UI's scrollbar
+ * or slider: a GenValue with HINT_VALUE_X_SCROLLER, HINT_VALUE_Y_SCROLLER
+ * (a view's scrollers) or HINT_SPEC_SLIDER (after
+ * Include/Internal/SpecUI/olScrollbarClass.def), for Port32.
+ *
+ * Motif: no values or draw styles in sliders, no spinners, no floating
+ * scrollers (SLIDER_INCLUDES_VALUES, DRAW_STYLES, SPINNER_GEN_VALUE,
+ * FLOATING_SCROLLERS are FALSE); the xor elevator of CUA style.
+ */
+#ifndef __OLSCROLLBARCLASS_GOH
+#define __OLSCROLLBARCLASS_GOH
+
+@include <Objects/visC.goh>
+@include <Objects/gValueC.goh>
+
+@deflib motif
+
+/* OLScrollbarAttrs */
+typedef WordFlags OLScrollbarAttrs;
+#define OLSA_TEXT_TOO		0x0100
+#define OLSA_SUPPRESS_DRAW	0x0080
+#define OLSA_VERTICAL		0x0040
+#define OLSA_UPDATE_DURING_DRAGS 0x0020
+#define OLSA_SLIDER		0x0010
+#define OLSA_STUPID		0x0008
+#define OLSA_TWISTED		0x0004
+#define OLSA_ENABLED		0x0002
+#define OLSA_DRAWN_ENABLED	0x0001
+/* not in Motif's record (SLIDER_INCLUDES_VALUES): never set */
+#define OLSA_READ_ONLY		0
+
+/* DownFlags: what is pressed */
+typedef ByteEnum DownFlags;
+#define OLSS_NOTHING		0
+#define OLSS_BEG_ANCHOR		1
+#define OLSS_PAGE_UP		2
+#define OLSS_INC_UP		3
+#define OLSS_DRAG_AREA		4
+#define OLSS_INC_DOWN		5
+#define OLSS_PAGE_DOWN		6
+#define OLSS_END_ANCHOR		7
+#define OLSS_BOGUS		8
+
+/* OLScrollbarState */
+typedef ByteFlags OLScrollbarState;
+#define OLSS_SPLITTER_ON	0x80
+#define OLSS_INVALID_IMAGE	0x40
+#define OLSS_AT_TOP		0x20
+#define OLSS_AT_BOTTOM		0x10
+#define OLSS_INVALID_OFFSETS	0x08
+#define OLSS_DOWN_FLAGS		0x07
+
+/* OLScrollbarOptFlags */
+typedef ByteFlags OLScrollbarOptFlags;
+#define OLSOF_REPEAT_SCROLL_PENDING	0x80
+#define OLSOF_TIMER_EXPIRED_PENDING	0x40
+
+/* OLSBI_xorElevOff without an xor elevator */
+#define NO_XOR_ELEVATOR		(-1)
+
+@class OLScrollbarClass, VisClass;
+@uses GenValueClass;
+
+/* vertical: TRUE, else horizontal */
+@message void MSG_SET_ORIENTATION(Boolean vertical);
+/* scroll on while the mouse is held down (the content redrawn) */
+@message void MSG_REPEAT_SCROLL();
+@message void MSG_SPEC_SCROLLBAR_SUPPRESS_DRAW();
+
+    @instance WWFixedAsDWord	OLSBI_drawnDocRatio = 0;
+    @instance sword		OLSBI_elevOffset = 0;
+    @instance sword		OLSBI_elevLen = 0;
+    @instance sword		OLSBI_scrArea = 0;
+    @instance sword		OLSBI_mousePos = 0;
+    @instance sword		OLSBI_clickXOff = 0;
+    @instance sword		OLSBI_clickYOff = 0;
+    @instance OLScrollbarAttrs	OLSBI_attrs = 0;
+    @instance OLScrollbarState	OLSBI_state = 0;
+    @instance OLScrollbarOptFlags OLSBI_optFlags = 0;
+    @instance OLScrollbarState	OLSBI_startState = 0;
+    @instance sword		OLSBI_xorElevOff = 0;
+    @instance WWFixedAsDWord	OLSBI_xorDocRatio = 0;
+    @instance word		OLSBI_arrowSize = 0;
+@endc;
+
+@endlib
+
+#endif

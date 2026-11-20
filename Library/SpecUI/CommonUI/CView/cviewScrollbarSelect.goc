@@ -1,0 +1,532 @@
+/*
+ * cviewScrollbarSelect.goc -- the mouse of OLScrollbarClass (after
+ * cviewScrollbarSelect.asm): a press finds the part pressed (an arrow,
+ * a page area, the thumb), takes the gadget exclusive and the mouse and
+ * changes the value: by the increment (the arrows), by the range length
+ * (the page areas), repeated by the application's gadget timer while
+ * the button is held; dragging the thumb draws an xor outline that
+ * follows the mouse and sets the value from its ratio on the release
+ * (or at once with HINT_VALUE_IMMEDIATE_DRAG_NOTIFICATION).  Each
+ * change is applied: the apply message is the GenValue's plus the part
+ * pressed less one (a view's MSG_GEN_VIEW_SCROLL_TOP ... _BOTTOM).
+ *
+ * Port32 (Port32/ABI.md section 13y): the routines take the position
+ * and the ButtonInfo and return what the asm left in registers; the
+ * xor color is C_WHITE in Motif as in the asm (C_LIGHT_GREY is
+ * overwritten there).  Not yet: floating scrollers, spinners.
+ */
+@include "CView/cviewInt.goh"
+
+/* NO_THUMB_ELEV_OFFSET of Motif: -(MO_ARROW_HEIGHT - 1) */
+#define NO_THUMB_ELEV_OFFSET	(-12)
+
+void XorElevator(optr oself);
+
+static void SetResult(MouseReturnParams *r, MouseReturnFlags f)
+{
+    if (r) {
+	memset(r, 0, sizeof(*r));
+	r->flags = f;
+    }
+}
+
+static void SwapIfHorizontal(optr oself, sword *x, sword *y)
+{
+    sword t;
+
+    if (!(SBVis(oself)->OLSBI_attrs & OLSA_VERTICAL)) {
+	t = *x;
+	*x = *y;
+	*y = t;
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * The timer
+ * ------------------------------------------------------------------- */
+
+static optr AppOf(optr oself)
+{
+    return GeodeGetAppObject(MemOwner(OptrToHandle(oself)));
+}
+
+/* StartScrollbarTimer: a repeat and the timer pending (a stupid bar's
+ * spin gadget repeats by itself) */
+static void StartScrollbarTimer(optr oself)
+{
+    optr app;
+
+    if (SBVis(oself)->OLSBI_attrs & OLSA_STUPID)
+	return;
+    SBVis(oself)->OLSBI_optFlags |= OLSOF_REPEAT_SCROLL_PENDING |
+				    OLSOF_TIMER_EXPIRED_PENDING;
+    app = AppOf(oself);
+    if (!app)
+	return;
+    @call app::MSG_OL_APP_STOP_TIMER(oself);
+    @call app::MSG_OL_APP_START_TIMER(oself, 0);
+}
+
+static void CancelScrollbarTimer(optr oself)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    optr app;
+
+    if ((sb->OLSBI_attrs & OLSA_STUPID) ||
+	!(sb->OLSBI_optFlags & (OLSOF_REPEAT_SCROLL_PENDING |
+				OLSOF_TIMER_EXPIRED_PENDING)))
+	return;
+    sb->OLSBI_optFlags &= ~(OLSOF_REPEAT_SCROLL_PENDING |
+			    OLSOF_TIMER_EXPIRED_PENDING);
+    app = AppOf(oself);
+    if (app)
+	@call app::MSG_OL_APP_STOP_TIMER(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Where the mouse is
+ * ------------------------------------------------------------------- */
+
+/*
+ * DoScrollCriteria: the part at the position (x across, y along the
+ * bar, relative to the end of the up arrow) or 0 if off the bar (a
+ * little leeway around it counts); y made relative to the scrollable
+ * area
+ */
+static DownFlags DoScrollCriteria(optr oself, sword x, sword *y)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    sword h = (sword) sb->OLSBI_arrowSize, w = h, t, c;
+    sword dy = (sword) (*y + 1);
+    DownFlags f = 0;
+
+    h += 2;
+    if (sb->OLSBI_attrs & OLSA_TWISTED) {
+	t = h;
+	h = w;
+	w = t;
+    }
+    if (x < -SCROLLBAR_LATITUDE || x > w + SCROLLBAR_LATITUDE ||
+	dy < -(h + SCROLLBAR_LATITUDE))
+	goto exit;
+    f = OLSS_INC_UP;
+    if (dy < 0)
+	goto exit;
+    if (dy)
+	dy--;
+    c = sb->OLSBI_elevOffset;
+    if (c < 0) {
+	c = 0;
+	if (sb->OLSBI_attrs & OLSA_TWISTED)
+	    goto incDown;
+	goto pageDown;
+    }
+    f = OLSS_PAGE_UP;
+    if ((word) dy < (word) c)
+	goto exit;
+    f = OLSS_DRAG_AREA;
+    c = (sword) (c + sb->OLSBI_elevLen);
+    if ((word) dy < (word) c)
+	goto exit;
+pageDown:
+    f = OLSS_PAGE_DOWN;
+    c = sb->OLSBI_scrArea;
+    if ((word) dy <= (word) c)
+	goto exit;
+incDown:
+    f = OLSS_INC_DOWN;
+    c = sb->OLSBI_scrArea;
+    if (c < 0)
+	c = 0;
+    c = (sword) (c + h);
+    if ((word) dy <= (word) c)
+	goto exit;
+    c = (sword) (c + SCROLLBAR_LATITUDE);
+    if ((word) dy <= (word) c)
+	goto exit;
+    f = 0;
+exit:
+    /* no thumb: a press in the page area does nothing */
+    if (sb->OLSBI_elevOffset < 0 && f == OLSS_PAGE_DOWN)
+	f = 0;
+    *y = dy;
+    return f;
+}
+
+/* ---------------------------------------------------------------------
+ * The actions
+ * ------------------------------------------------------------------- */
+
+/*
+ * ValueSendMsg (SendMsgSetModifiedAndApplyIfNeeded of a scrollbar): the
+ * message to the GenValue without drawing (the scrollbar draws), then
+ * modified and applied, always.  A message with parameters is sent
+ * between ValueSendBegin and ValueSendEnd.
+ */
+static void ValueSendBegin(optr oself)
+{
+    SBVis(oself)->OLSBI_attrs |= OLSA_SUPPRESS_DRAW;
+}
+
+static void ValueSendEnd(optr oself)
+{
+    SBGen(oself)->GVLI_stateFlags |= GVSF_MODIFIED;
+    @call oself::MSG_GEN_APPLY();
+}
+
+static void ValueSendMsg(optr oself, Message msg)
+{
+    ValueSendBegin(oself);
+    CObjMessageP(MF_CALL, oself, msg, NULL, 0, NULL, 0);
+    ValueSendEnd(oself);
+}
+
+/* the drag ends: the xor thumb off, the value set from its ratio (as a
+ * drag: the apply message plus OLSS_DRAG_AREA less one); TRUE if there
+ * was a drag */
+static Boolean FinishDrag(optr oself, sword x, sword y)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    WWFixed ratio;
+    Message saved = 0;
+    Boolean update;
+    WWFixedAsDWord r;
+
+    if (sb->OLSBI_xorElevOff == NO_XOR_ELEVATOR)
+	return FALSE;
+    XorElevator(oself);
+    sb = SBVis(oself);
+    sb->OLSBI_xorElevOff = NO_XOR_ELEVATOR;
+    sb->OLSBI_state &= ~OLSS_DOWN_FLAGS;
+    update = (sb->OLSBI_attrs & OLSA_UPDATE_DURING_DRAGS) != 0;
+    if (!update) {
+	/* dragged off the bar: no change */
+	if (sb->OLSBI_startState == OLSS_DRAG_AREA &&
+	    !DoScrollCriteria(oself, x, &y))
+	    return TRUE;
+	saved = SBGen(oself)->GVLI_applyMsg;
+	SBGen(oself)->GVLI_applyMsg = (Message) (saved + OLSS_DRAG_AREA - 1);
+    }
+    r = SBVis(oself)->OLSBI_xorDocRatio;
+    ratio.WWF_int = (sword) IntegerOf(r);
+    ratio.WWF_frac = FractionOf(r);
+    ValueSendBegin(oself);
+    @call oself::MSG_GEN_VALUE_SET_VALUE_FROM_RATIO(ratio,
+				GVI_VALUE_AS_RATIO_OF_AVAILABLE_RANGE);
+    ValueSendEnd(oself);
+    if (!update)
+	SBGen(oself)->GVLI_applyMsg = saved;
+    return TRUE;
+}
+
+/*
+ * XorElevator: the outline of the thumb at OLSBI_xorElevOff drawn with
+ * xor (twice, the second one inset), unless the value follows the drag
+ */
+void XorElevator(optr oself)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    GStateHandle gs;
+    WindowHandle w;
+    Rectangle r;
+    sword off;
+
+    if ((sb->OLSBI_attrs & OLSA_UPDATE_DURING_DRAGS) ||
+	sb->OLSBI_xorElevOff == NO_XOR_ELEVATOR ||
+	!(sb->VI_attrs & VA_REALIZED))
+	return;
+    w = VisQueryWindow(oself);
+    if (!w)
+	return;
+    gs = ViewCreateGState(w);
+    GrSetLineColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    GrSetLineMaskSys(gs, SDM_50);
+    GrSetMixMode(gs, MM_XOR);
+    OpenGetLineBounds(oself, &r);
+    sb = SBVis(oself);
+    off = sb->OLSBI_xorElevOff;
+    if (!(sb->OLSBI_attrs & OLSA_SLIDER))
+	off = (sword) (off + sb->OLSBI_arrowSize + 3);
+    if (sb->OLSBI_attrs & OLSA_VERTICAL) {
+	r.R_top = (sword) (r.R_top + off);
+	r.R_bottom = (sword) (r.R_top + sb->OLSBI_elevLen - 1);
+    } else {
+	r.R_left = (sword) (r.R_left + off);
+	r.R_right = (sword) (r.R_left + sb->OLSBI_elevLen - 1);
+    }
+    GrDrawRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+    GrDrawRect(gs, r.R_left + 1, r.R_top + 1, r.R_right - 1, r.R_bottom - 1);
+    GrDestroyState(gs);
+}
+
+/* HandleDragXor: the xor thumb moved to the ratio (a press only takes
+ * the old one off) */
+static void HandleDragXor(optr oself, WWFixedAsDWord ratio, word bi)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    sword off;
+
+    if (!(bi & BI_PRESS) && sb->OLSBI_xorElevOff != NO_XOR_ELEVATOR &&
+	sb->OLSBI_xorDocRatio == ratio)
+	return;
+    XorElevator(oself);
+    if (bi & BI_PRESS)
+	return;
+    SBVis(oself)->OLSBI_xorDocRatio = ratio;
+    off = CalcElevPos(oself, ratio);
+    SBVis(oself)->OLSBI_xorElevOff = off;
+    XorElevator(oself);
+}
+
+/* DoDragArea: the thumb dragged to pos (where it was taken kept under
+ * the mouse): the ratio of the area it moves in */
+static void DoDragArea(optr oself, sword pos, word bi)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    sword p, limit;
+    WWFixedAsDWord r;
+
+    if (bi & BI_PRESS)
+	return;
+    p = (sword) (pos - sb->OLSBI_clickYOff);
+    if (p < 0)
+	p = 0;
+    limit = (sword) (sb->OLSBI_scrArea - sb->OLSBI_elevLen);
+    if ((word) p > (word) limit)
+	p = limit;
+    r = limit ? GrUDivWWFixed((WWFixedAsDWord) ((dword) (word) p << 16),
+			      (WWFixedAsDWord) ((dword) (word) limit << 16))
+	      : 0;
+    if ((sb->OLSBI_attrs & OLSA_SLIDER) && (sb->OLSBI_attrs & OLSA_VERTICAL))
+	r = 0x10000UL - r;
+    if (IntegerOf(r))
+	r = 0x10000UL;
+    HandleDragXor(oself, r, bi);
+    if (SBVis(oself)->OLSBI_attrs & OLSA_UPDATE_DURING_DRAGS)
+	(void) FinishDrag(oself, 0, 0);
+}
+
+/*
+ * DoScrollAction: what the pressed part does, the apply message the
+ * GenValue's plus the part less one meanwhile
+ */
+static void DoScrollAction(optr oself, sword pos, word bi)
+{
+    DownFlags f = SBVis(oself)->OLSBI_state & OLSS_DOWN_FLAGS;
+    Message saved;
+
+    if (!f)
+	return;
+    saved = SBGen(oself)->GVLI_applyMsg;
+    SBGen(oself)->GVLI_applyMsg = (Message) (saved + f - 1);
+    switch (f) {
+    case OLSS_INC_DOWN:
+	ValueSendMsg(oself, MSG_GEN_VALUE_INCREMENT);
+	break;
+    case OLSS_INC_UP:
+	ValueSendMsg(oself, MSG_GEN_VALUE_DECREMENT);
+	break;
+    case OLSS_PAGE_DOWN:
+	ValueSendMsg(oself, MSG_GEN_VALUE_ADD_RANGE_LENGTH);
+	break;
+    case OLSS_PAGE_UP:
+	ValueSendMsg(oself, MSG_GEN_VALUE_SUBTRACT_RANGE_LENGTH);
+	break;
+    case OLSS_DRAG_AREA:
+	DoDragArea(oself, pos, bi);
+	break;
+    default:
+	/* the anchors: nothing */
+	break;
+    }
+    SBGen(oself)->GVLI_applyMsg = saved;
+}
+
+/* HandlePress: the action; the timer for a repeat (not a drag, but at
+ * its press); drawn unless an xor thumb is up */
+static void HandlePress(optr oself, sword pos, word bi)
+{
+    DownFlags f;
+
+    DoScrollAction(oself, pos, bi);
+    f = SBVis(oself)->OLSBI_state & OLSS_DOWN_FLAGS;
+    if (f != OLSS_DRAG_AREA || (bi & BI_PRESS))
+	StartScrollbarTimer(oself);
+    if ((bi & BI_PRESS) ||
+	SBVis(oself)->OLSBI_xorElevOff == NO_XOR_ELEVATOR)
+	@call oself::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+/* RepeatScrollIfNeeded: both the timer and the content's redraw in,
+ * a part other than the thumb held: pressed again */
+void OLScrollbarRepeatPress(optr oself)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    DownFlags f;
+
+    if (sb->OLSBI_optFlags & (OLSOF_REPEAT_SCROLL_PENDING |
+			      OLSOF_TIMER_EXPIRED_PENDING))
+	return;
+    f = sb->OLSBI_state & OLSS_DOWN_FLAGS;
+    if (!f || f == OLSS_DRAG_AREA)
+	return;
+    HandlePress(oself, 0, (word) ((UIFA_SELECT << 8) | BI_PRESS));
+}
+
+/* ---------------------------------------------------------------------
+ * Press and release
+ * ------------------------------------------------------------------- */
+
+/* OLScrollbarEndPress: a drag finished, or the pressed part let go
+ * (redrawn); the mouse replayed */
+static MouseReturnFlags OLScrollbarEndPress(optr oself, sword x, sword y,
+					   word inputState)
+{
+    OLScrollbarInstance *sb;
+    DownFlags f;
+
+    if (FinishDrag(oself, x, y))
+	goto noChange;
+    sb = SBVis(oself);
+    f = sb->OLSBI_state & OLSS_DOWN_FLAGS;
+    if (!f)
+	goto noChange;
+    if (f != OLSS_DRAG_AREA)
+	sb->OLSBI_state |= OLSS_INVALID_IMAGE;
+    sb->OLSBI_state &= ~OLSS_DOWN_FLAGS;
+    @call oself::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+    return MRF_REPLAY;
+noChange:
+    if (inputState & (UIFA_IN << 8))
+	return MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE;
+    return 0;
+}
+
+/*
+ * OLScrollbarStartPress: a new press (or a pointer event with the
+ * button down): the gadget exclusive; the part under the mouse pressed
+ * (a pointer event: the same part as at the press, else let go; the
+ * thumb follows anywhere), the mouse grabbed, the action done
+ */
+static MouseReturnFlags OLScrollbarStartPress(optr oself, sword x, sword y,
+					     word inputState)
+{
+    OLScrollbarInstance *sb;
+    DownFlags f, cur;
+    optr p;
+
+    if (!(inputState & BI_PRESS) && !SBVis(oself)->OLSBI_startState)
+	return MRF_REPLAY;
+    p = VisFindParent(oself);
+    if (p)
+	@call p::MSG_VIS_TAKE_GADGET_EXCL(oself);
+    f = DoScrollCriteria(oself, x, &y);
+    if (!f)
+	return OLScrollbarEndPress(oself, x, y, inputState);
+    sb = SBVis(oself);
+    cur = sb->OLSBI_state & OLSS_DOWN_FLAGS;
+    if (inputState & BI_PRESS) {
+	sb->OLSBI_startState = f;
+	sb->OLSBI_xorElevOff = NO_XOR_ELEVATOR;
+	goto changeState;
+    }
+    if (sb->OLSBI_startState == OLSS_DRAG_AREA) {
+	if (cur == f)
+	    goto stillDown;
+	goto setState;
+    }
+    if (f != sb->OLSBI_startState)
+	return OLScrollbarEndPress(oself, x, y, inputState);
+    if (cur == f)
+	goto stillDown;
+changeState:
+    sb->OLSBI_clickXOff = x;
+    sb->OLSBI_clickYOff = (sword) (y - sb->OLSBI_elevOffset);
+setState:
+    sb->OLSBI_state = (OLScrollbarState)
+	((sb->OLSBI_state & ~OLSS_DOWN_FLAGS) | sb->OLSBI_startState);
+    if ((sb->OLSBI_startState & OLSS_DOWN_FLAGS) != OLSS_DRAG_AREA)
+	sb->OLSBI_state |= OLSS_INVALID_IMAGE;
+    VisGrabMouse(oself);
+    goto handlePress;
+stillDown:
+    if ((SBVis(oself)->OLSBI_startState & OLSS_DOWN_FLAGS) != OLSS_DRAG_AREA)
+	return MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE;
+handlePress:
+    HandlePress(oself, y, inputState);
+    return MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE;
+}
+
+/*
+ * OLScrollbarSelect: read only: nothing; the position relative to the
+ * bar (along it from the end of the up arrow); the select button down:
+ * pressed (unless nothing can scroll: the thumb fills the bar), up:
+ * the timer and the mouse let go
+ */
+static void OLScrollbarSelect(optr oself, Message msg, sword x, sword y,
+			      word inputState, MouseReturnParams *retVal)
+{
+    OLScrollbarInstance *sb;
+    sword a;
+
+    if (SBGen(oself)->GI_attrs & GA_READ_ONLY) {
+	SetResult(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	return;
+    }
+    if (msg == MSG_META_START_SELECT)
+	OpenDoClickSound();
+    sb = SBVis(oself);
+    y = (sword) (y - sb->VI_bounds.R_top);
+    x = (sword) (x - sb->VI_bounds.R_left);
+    SwapIfHorizontal(oself, &x, &y);
+    a = 0;
+    if (!(sb->OLSBI_attrs & OLSA_SLIDER))
+	a = (sword) (sb->OLSBI_arrowSize + 3);
+    if (sb->OLSBI_attrs & OLSA_TWISTED) {
+	sword t;
+
+	a = (sword) (sb->OLSBI_arrowSize + 1);
+	t = x;
+	x = y;
+	y = t;
+    }
+    y = (sword) (y - a);
+    if (inputState & (UIFA_SELECT << 8)) {
+	if (!(sb->OLSBI_attrs & OLSA_STUPID) &&
+	    sb->OLSBI_elevOffset != NO_THUMB_ELEV_OFFSET &&
+	    sb->OLSBI_elevLen == sb->OLSBI_scrArea) {
+	    SetResult(retVal, MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE);
+	    return;
+	}
+	SetResult(retVal, OLScrollbarStartPress(oself, x, y, inputState));
+	return;
+    }
+    SBVis(oself)->OLSBI_startState = 0;
+    CancelScrollbarTimer(oself);
+    VisReleaseMouse(oself);
+    SetResult(retVal, OLScrollbarEndPress(oself, x, y, inputState));
+}
+
+@extern method OLScrollbarClass, MSG_META_START_SELECT
+{
+    OLScrollbarSelect(oself, message, xPosition, yPosition, inputState,
+		      retVal);
+}
+
+@extern method OLScrollbarClass, MSG_META_END_SELECT
+{
+    OLScrollbarSelect(oself, message, xPosition, yPosition, inputState,
+		      retVal);
+}
+
+@extern method OLScrollbarClass, MSG_META_PTR
+{
+    OLScrollbarSelect(oself, message, xPosition, yPosition, inputState,
+		      retVal);
+}
+
+/* OLScrollbarLostGadgetExcl: as a release */
+@extern method OLScrollbarClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    (void) OLScrollbarEndPress(oself, 0, 0, 0);
+}

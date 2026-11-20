@@ -5481,6 +5481,36 @@ are left out), the constants, the variables and the routines.
     groups), dynamic lists' items, tabs, the black and white look, the
     focus on a text object, `ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS`,
     the stay up menus released by a selection.
+  - **The scrollbar** (`CView/cviewScrollbar.goc`,
+    `cviewScrollbarSelect.goc`, Motif `View/viewScrollbarDraw.goc`,
+    `CSpec/cspecValue.goc`; `Internal/SpecUI/olScrollbarClass.goh`):
+    `OLBuildValue` makes a GenValue an `OLScrollbarClass` (a VisClass
+    with the GenValue's data): vertical with `HINT_VALUE_Y_SCROLLER`, as
+    wide as an arrow (`olArrowSize`) plus two, as long as it is given
+    (at least two arrows; a vertical bar no longer than its arrows is
+    twisted: both arrows side by side). The thumb's place is the value's
+    ratio of the available range times the scroll area (the bar between
+    the arrows), its length the range length's share
+    (`HINT_VALUE_DISPLAYS_RANGE`), at least an arrow; both figured when
+    drawn (`OLSS_INVALID_OFFSETS`). A press finds the part (arrows, page
+    areas, thumb, a little leeway around the bar), takes the gadget
+    exclusive and the mouse; arrows step by the increment, page areas by
+    the range length, repeated by the application's gadget timer while
+    held; the thumb is dragged as an xor outline and sets the value from
+    its ratio on the release (at once with
+    `HINT_VALUE_IMMEDIATE_DRAG_NOTIFICATION`). Each change sets the value
+    modified and applies it; the apply message is the GenValue's plus
+    the part less one (a view's `MSG_GEN_VIEW_SCROLL_TOP` ... `_BOTTOM`).
+    Drawing is Motif's table interpreter: the parts (up arrow, thumb,
+    page areas, down arrow; the sliders' and gauges' tables too) are a
+    routine and its words, coordinates as numbers or parameters
+    (`P_ARROW_WIDTH` ... `P_END_MINUS_ARROW`) plus an offset; the arrow
+    bitmaps of 8, 10, 12 and 14 pixels are C data. As in the asm the xor
+    color is `C_WHITE` (Motif's `C_LIGHT_GREY` is overwritten).
+    Not yet: `OLValueClass` (the spin gadget with its text) and
+    `OLSliderClass` (every value is a scrollbar until then), floating
+    scrollers, CGA's wider bar, the pane (`OLPaneClass`) that places the
+    scrollers of a view.
 - **Port32 changes in the C API.**
   - `WinOpen` and `WinChangePriority` take the layer as a `Handle` (a
     word cut 32-bit handles); `WinOpen`'s colorFlags is the

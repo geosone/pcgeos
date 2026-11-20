@@ -1,0 +1,406 @@
+/*
+ * cviewScrollbar.goc -- OLScrollbarClass (after cviewScrollbar.asm): the
+ * specific part of a GenValue that is a scrollbar (HINT_VALUE_X_SCROLLER,
+ * HINT_VALUE_Y_SCROLLER: a view's scrollers) or a slider
+ * (HINT_SPEC_SLIDER).  The value is the document offset, the range
+ * length the visible part (the thumb's length); the thumb's place is
+ * the value's ratio of the available range times the scrollable area
+ * (the bar between the arrows).  Building (the orientation and the
+ * hints), the size (a thin bar of the arrow size; the vertical bar
+ * twisted into two arrows when too short), drawing (Motif's
+ * DrawScrollbar), the value, range and range length changed.  The
+ * mouse is cviewScrollbarSelect.goc's.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: CGA screens (the wider
+ * vertical bar), floating scrollers.
+ */
+@include "CView/cviewInt.goh"
+
+@classdecl OLScrollbarClass, neverSaved;
+
+@extern method OLScrollbarClass, MSG_META_START_SELECT;
+@extern method OLScrollbarClass, MSG_META_END_SELECT;
+@extern method OLScrollbarClass, MSG_META_PTR;
+@extern method OLScrollbarClass, MSG_VIS_LOST_GADGET_EXCL;
+
+@method OLScrollbarClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+/* the hints of VerticalHint */
+static void ScrollbarHint(MemHandle mh, ChunkHandle chnk,
+			  VarDataEntry *extra, word dataType, void *data)
+{
+    OLScrollbarInstance *sb = SBVis(ConstructOptr(mh, chnk));
+    word *vertical = data;
+
+    (void) extra;
+    switch (dataType) {
+    case HINT_VALUE_Y_SCROLLER:
+	*vertical = OLSA_VERTICAL;
+	break;
+    case HINT_VALUE_IMMEDIATE_DRAG_NOTIFICATION:
+	sb->OLSBI_attrs |= OLSA_UPDATE_DURING_DRAGS;
+	break;
+    case HINT_VALUE_DELAYED_DRAG_NOTIFICATION:
+	sb->OLSBI_attrs &= ~OLSA_UPDATE_DURING_DRAGS;
+	break;
+    case HINT_VALUE_MERGE_ANALOG_AND_DIGITAL_DISPLAYS:
+	sb->OLSBI_attrs |= OLSA_TEXT_TOO;
+	break;
+    }
+}
+
+static VarDataCHandler verticalHint[] = {
+    { HINT_VALUE_Y_SCROLLER, ScrollbarHint },
+    { HINT_VALUE_IMMEDIATE_DRAG_NOTIFICATION, ScrollbarHint },
+    { HINT_VALUE_DELAYED_DRAG_NOTIFICATION, ScrollbarHint },
+    { HINT_VALUE_MERGE_ANALOG_AND_DIGITAL_DISPLAYS, ScrollbarHint }
+};
+
+/*
+ * OLScrollbarSpecBuild: positioned by itself (the view sets its place),
+ * the offsets to be figured; vertical with HINT_VALUE_Y_SCROLLER; the
+ * arrow size of the display scheme (a slider: a sliders by its value
+ * kind; not in Motif)
+ */
+@method OLScrollbarClass, MSG_SPEC_BUILD
+{
+    OLScrollbarInstance *sb;
+    word vertical = 0;
+
+    @callsuper();
+    sb = SBVis(oself);
+    sb->VI_geoAttrs |= VGA_USE_VIS_SET_POSITION;
+    sb->OLSBI_state |= OLSS_INVALID_OFFSETS;
+    OpenScanVarData(oself, sizeof(verticalHint) / sizeof(verticalHint[0]),
+		    verticalHint, &vertical);
+    sb = SBVis(oself);
+    sb->OLSBI_attrs = (OLScrollbarAttrs) ((sb->OLSBI_attrs & ~OLSA_VERTICAL)
+					  | vertical);
+    sb->OLSBI_arrowSize = olArrowSize;
+}
+
+@method OLScrollbarClass, MSG_SET_ORIENTATION
+{
+    pself->OLSBI_attrs &= ~OLSA_VERTICAL;
+    if (vertical)
+	pself->OLSBI_attrs |= OLSA_VERTICAL;
+}
+
+/* ---------------------------------------------------------------------
+ * The size
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLScrollbarRecalcSize: the passed length (at least the arrows and a
+ * thumb), as wide as an arrow; a vertical bar no longer than its arrows
+ * (and visible) is twisted: the two arrows side by side
+ */
+@method OLScrollbarClass, MSG_VIS_RECALC_SIZE
+{
+    word w = width, l = height, minLen, size;
+    Boolean vertical;
+
+    pself->OLSBI_state |= OLSS_INVALID_OFFSETS | OLSS_INVALID_IMAGE;
+    pself->OLSBI_attrs &= ~OLSA_TWISTED;
+    size = pself->OLSBI_arrowSize;
+    vertical = (pself->OLSBI_attrs & OLSA_VERTICAL) != 0;
+    if (!(pself->OLSBI_attrs & OLSA_SLIDER) && vertical &&
+	(pself->VI_attrs & (VA_DRAWABLE | VA_DETECTABLE)) &&
+	(word) height <= (word) ((size + 3) * 2)) {
+	pself->OLSBI_attrs |= OLSA_TWISTED;
+	return MAKE_SIZE_DWORD((size + 1) * 2, size + 4);
+    }
+    if (!vertical) {
+	l = width;
+	w = height;
+    }
+    (void) w;
+    w = size + 2;
+    minLen = (size + 3) * 2;
+    l &= ~RSA_CHOOSE_OWN_SIZE;
+    if ((pself->VI_attrs & (VA_DRAWABLE | VA_DETECTABLE)) && l <= minLen)
+	l = minLen;
+    return vertical ? MAKE_SIZE_DWORD(w, l) : MAKE_SIZE_DWORD(l, w);
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/*
+ * SetScrAreaIfInvalid: the length of the bar between the arrows (a
+ * slider: all but two pixels; twisted: none, -1) -- the only place
+ * OLSBI_scrArea is set
+ */
+static void SetScrAreaIfInvalid(optr oself)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    SizeAsDWord s;
+    sword len;
+
+    if (sb->OLSBI_attrs & OLSA_TWISTED) {
+	sb->OLSBI_scrArea = -1;
+	return;
+    }
+    if (!(sb->OLSBI_state & OLSS_INVALID_OFFSETS))
+	return;
+    s = VisGetSize(oself);
+    sb = SBVis(oself);
+    len = (sword) ((sb->OLSBI_attrs & OLSA_VERTICAL) ? DWORD_HEIGHT(s)
+						     : DWORD_WIDTH(s));
+    if (sb->OLSBI_attrs & OLSA_SLIDER)
+	len -= 2;
+    else
+	len -= (sword) ((sb->OLSBI_arrowSize + 3) * 2);
+    sb->OLSBI_scrArea = len;
+}
+
+/*
+ * UpdateEnabledState: OLSA_ENABLED as the object (not enabled: a 50%
+ * light wash over it); the image invalid if it was drawn otherwise
+ */
+static void UpdateEnabledState(optr oself, GStateHandle gs)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    Rectangle r;
+    Boolean en;
+
+    sb->OLSBI_attrs |= OLSA_ENABLED;
+    if (!(sb->VI_attrs & VA_FULLY_ENABLED)) {
+	sb->OLSBI_attrs &= ~OLSA_ENABLED;
+	GrSetAreaColor(gs, CF_INDEX, moCS_dsLightColor, 0, 0);
+	GrSetAreaMaskSys(gs, SDM_INVERSE | SDM_50);
+	VisGetBounds(oself, &r);
+	GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+	sb = SBVis(oself);
+    }
+    en = (sb->OLSBI_attrs & OLSA_ENABLED) != 0;
+    if (en != ((sb->OLSBI_attrs & OLSA_DRAWN_ENABLED) != 0))
+	sb->OLSBI_state |= OLSS_INVALID_IMAGE;
+}
+
+/* NegateRatioIfVertSlider: a vertical slider measures from the bottom */
+WWFixedAsDWord NegateRatioIfVertSlider(optr oself, WWFixedAsDWord ratio)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+
+    if ((sb->OLSBI_attrs & OLSA_SLIDER) && (sb->OLSBI_attrs & OLSA_VERTICAL))
+	ratio = 0x10000UL - ratio;
+    return ratio;
+}
+
+/* GetDefaultThumbHeight: Motif: the arrow size, a slider's three times
+ * it */
+sword GetDefaultThumbHeight(optr oself)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    sword h = (sword) sb->OLSBI_arrowSize;
+
+    return (sb->OLSBI_attrs & OLSA_SLIDER) ? (sword) (h * 3) : h;
+}
+
+/*
+ * CalcElevPos: the ratio times the area the thumb moves in (the bar
+ * less the thumb), rounded; a thumb that does not fit (or a stupid
+ * bar's) is not shown: minus the arrow size
+ */
+sword CalcElevPos(optr oself, WWFixedAsDWord ratio)
+{
+    OLScrollbarInstance *sb;
+    sword area, whole = 0;
+    WWFixedAsDWord p;
+
+    ratio = NegateRatioIfVertSlider(oself, ratio);
+    sb = SBVis(oself);
+    area = sb->OLSBI_scrArea;
+    if (!(sb->OLSBI_attrs & OLSA_STUPID)) {
+	whole = area;
+	area = (sword) (area - sb->OLSBI_elevLen);
+	if (area > 0)
+	    goto mult;
+    }
+    if (whole > GetDefaultThumbHeight(oself))
+	goto mult;
+    return (sword) -(sword) SBVis(oself)->OLSBI_arrowSize;
+mult:
+    p = GrMulWWFixed(ratio, (WWFixedAsDWord) ((sdword) area << 16));
+    return (sword) (IntegerOf(p) + ((FractionOf(p) & 0x8000) ? 1 : 0));
+}
+
+/* SetElevOffset: the thumb's offset for the drawn ratio */
+static void SetElevOffset(optr oself)
+{
+    sword off = CalcElevPos(oself, SBVis(oself)->OLSBI_drawnDocRatio);
+
+    SBVis(oself)->OLSBI_elevOffset = off;
+    SetTopBottomFlags(oself);
+}
+
+/*
+ * SetElevLen: the thumb as long as the visible part's share of the bar
+ * (the range length's ratio; the whole bar at the maximum), at least
+ * the default thumb; read only: none
+ */
+static void SetElevLen(optr oself)
+{
+    WWFixedAsDWord r;
+    sword len = 0, def;
+
+    if (!(SBGen(oself)->GI_attrs & GA_READ_ONLY)) {
+	r = @call oself::MSG_GEN_VALUE_GET_VALUE_RATIO(GVT_RANGE_LENGTH);
+	if (IntegerOf(r))
+	    len = SBVis(oself)->OLSBI_scrArea;
+	else
+	    len = (sword) (((dword) FractionOf(r) *
+			    (word) SBVis(oself)->OLSBI_scrArea) >> 16);
+	def = GetDefaultThumbHeight(oself);
+	if (len < def)
+	    len = def;
+    }
+    SBVis(oself)->OLSBI_elevLen = len;
+}
+
+/* SetTopBottomFlags: at the top with a ratio of 0, at the bottom with
+ * 1 (a stupid bar: neither) */
+void SetTopBottomFlags(optr oself)
+{
+    OLScrollbarState st = SBVis(oself)->OLSBI_state &
+			  (OLScrollbarState) ~(OLSS_AT_TOP | OLSS_AT_BOTTOM);
+    WWFixedAsDWord r;
+
+    if (!(SBVis(oself)->OLSBI_attrs & OLSA_STUPID)) {
+	r = @call oself::MSG_GEN_VALUE_GET_VALUE_RATIO(
+			GVI_VALUE_AS_RATIO_OF_AVAILABLE_RANGE);
+	r = NegateRatioIfVertSlider(oself, r);
+	if (!r)
+	    st |= OLSS_AT_TOP;
+	if (IntegerOf(r))
+	    st |= OLSS_AT_BOTTOM;
+    }
+    SBVis(oself)->OLSBI_state = st;
+}
+
+/* XorElevator lives with the mouse */
+extern void XorElevator(optr oself);
+
+/*
+ * OLScrollbarDraw: not while the geometry is invalid; the xor thumb
+ * off; all of it on an exposure or an invalid image, else only what
+ * changes (twisted: nothing); the offsets figured first if invalid
+ */
+@method OLScrollbarClass, MSG_VIS_DRAW
+{
+    OLScrollbarInstance *sb;
+    Boolean updating = FALSE;
+    WWFixedAsDWord r;
+
+    if (pself->VI_optFlags & VOF_GEOMETRY_INVALID)
+	return;
+    if (pself->OLSBI_xorElevOff != NO_XOR_ELEVATOR) {
+	XorElevator(oself);
+	SBVis(oself)->OLSBI_xorElevOff = NO_XOR_ELEVATOR;
+    }
+    UpdateEnabledState(oself, gstate);
+    SetScrAreaIfInvalid(oself);
+    sb = SBVis(oself);
+    if (!(sb->OLSBI_state & OLSS_INVALID_IMAGE) &&
+	!(drawFlags & DF_EXPOSED)) {
+	if (sb->OLSBI_attrs & OLSA_TWISTED)
+	    goto done;
+	updating = TRUE;
+    }
+    r = @call oself::MSG_GEN_VALUE_GET_VALUE_RATIO(
+			GVI_VALUE_AS_RATIO_OF_AVAILABLE_RANGE);
+    sb = SBVis(oself);
+    sb->OLSBI_drawnDocRatio = r;
+    if (sb->OLSBI_state & OLSS_INVALID_OFFSETS) {
+	SetElevLen(oself);
+	SetElevOffset(oself);
+	SBVis(oself)->OLSBI_state &= ~OLSS_INVALID_OFFSETS;
+    }
+    DrawScrollbar(oself, gstate, updating);
+done:
+    GrSetAreaMaskSys(gstate, SDM_100);
+    GrSetLineMaskSys(gstate, SDM_100);
+    SBVis(oself)->OLSBI_state &= ~OLSS_INVALID_IMAGE;
+}
+
+/* ---------------------------------------------------------------------
+ * The value changed
+ * ------------------------------------------------------------------- */
+
+/* redrawn now unless the image or the geometry will be anyway */
+static void RedrawIfValid(optr oself)
+{
+    if (SBVis(oself)->VI_optFlags & (VOF_IMAGE_INVALID | VOF_GEOMETRY_INVALID))
+	return;
+    @call oself::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+/* OLScrollbarSetMaximum: the offsets to be figured and drawn (if
+ * built) */
+@method OLScrollbarClass, MSG_GEN_VALUE_SET_MAXIMUM, MSG_GEN_VALUE_SET_MINIMUM
+{
+    (void) value;
+    pself->OLSBI_state |= OLSS_INVALID_OFFSETS;
+    SetTopBottomFlags(oself);
+    if (!VisCheckIfSpecBuilt(oself))
+	return;
+    if (SBVis(oself)->OLSBI_state & OLSS_INVALID_IMAGE) {
+	@call oself::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+	return;
+    }
+    RedrawIfValid(oself);
+}
+
+/* OLScrollbarSetPageSize: the thumb's length to be figured */
+@method OLScrollbarClass, MSG_GEN_VALUE_SET_RANGE_LENGTH
+{
+    (void) value;
+    pself->OLSBI_state |= OLSS_INVALID_OFFSETS;
+    RedrawIfValid(oself);
+}
+
+/* OLScrollbarScroll: the thumb moved (drawn unless the scrollbar is
+ * changing the value itself) */
+@method OLScrollbarClass, MSG_GEN_VALUE_SET_VALUE
+{
+    (void) value;
+    (void) indeterminate;
+    if (!(pself->OLSBI_attrs & OLSA_SUPPRESS_DRAW)) {
+	pself->OLSBI_state |= OLSS_INVALID_OFFSETS;
+	RedrawIfValid(oself);
+    }
+    SBVis(oself)->OLSBI_attrs &= ~OLSA_SUPPRESS_DRAW;
+}
+
+@method OLScrollbarClass, MSG_SPEC_SCROLLBAR_SUPPRESS_DRAW
+{
+    pself->OLSBI_attrs |= OLSA_SUPPRESS_DRAW;
+}
+
+/* ---------------------------------------------------------------------
+ * Repeating
+ * ------------------------------------------------------------------- */
+
+/* OLScrollbarRepeatScroll: the content redrawn: scroll on */
+@method OLScrollbarClass, MSG_REPEAT_SCROLL
+{
+    pself->OLSBI_optFlags &= ~OLSOF_REPEAT_SCROLL_PENDING;
+    OLScrollbarRepeatPress(oself);
+}
+
+@method OLScrollbarClass, MSG_TIMER_EXPIRED
+{
+    (void) tick;
+    (void) timerID;
+    pself->OLSBI_optFlags &= ~OLSOF_TIMER_EXPIRED_PENDING;
+    OLScrollbarRepeatPress(oself);
+}

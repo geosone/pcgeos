@@ -56,8 +56,7 @@ export OLBuildItemGroup
 export OLBuildDynamicList
 export OLBuildItem
 export OLBuildBoolean
-# OLBuildValue
-skip 1
+export OLBuildValue
 
 #
 # exported routines to do specific UI stuff
@@ -99,3 +98,4 @@ export OLWinIconClass
 export OLWinGlyphDisplayClass
 export OLDisplayGroupClass
 export OLDisplayWinClass
+export OLScrollbarClass

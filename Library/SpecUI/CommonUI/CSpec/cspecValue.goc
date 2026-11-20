@@ -1,0 +1,18 @@
+/*
+ * cspecValue.goc -- the build routine of the value (after
+ * cspecValue.asm): a GenValue with HINT_VALUE_X_SCROLLER or
+ * HINT_VALUE_Y_SCROLLER is an OLScrollbar.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: OLValueClass (the spin
+ * gadget with its text), OLSliderClass (HINT_SPEC_SLIDER,
+ * HINT_VALUE_ANALOG_DISPLAY); until then every value is built as a
+ * scrollbar (horizontal without HINT_VALUE_Y_SCROLLER).
+ */
+@include "CView/cviewInt.goh"
+
+ClassStruct *OLBuildValue(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLScrollbarClass;
+}

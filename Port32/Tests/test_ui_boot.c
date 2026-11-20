@@ -56,6 +56,10 @@ typedef struct {
     unsigned short	UBS_checkApplies, UBS_checkSel;
     unsigned short	UBS_sizeApplies, UBS_sizeSel;
     short		UBS_sizeButton[2];
+    word		UBS_scrollApplies, UBS_scrollAction;
+    dword		UBS_scrollValue;
+    short		UBS_scrollBar[3];
+    word		UBS_scrollDrag;
 } UBState;
 
 static int fails;
@@ -131,8 +135,8 @@ int main(void)
      * pinned, opened by its button, closed by its system menu; a menu
      * taller than the screen scrolled by its scrollers and to its focus;
      * the generic item and boolean groups; Motif's radio group and
-     * check boxes; a popup list */
-    for (i = 2; i <= 29; i++)
+     * check boxes; a popup list; a scrollbar */
+    for (i = 2; i <= 33; i++)
 	step(i);
     printf("system menu button at %d,%d %dx%d, title bar %d..%d\n",
 	   st->UBS_sys[0], st->UBS_sys[1], st->UBS_sys[2], st->UBS_sys[3],
@@ -146,6 +150,9 @@ int main(void)
     printf("popup list button %dx%d, applied %u times (last %u)\n",
 	   st->UBS_sizeButton[0], st->UBS_sizeButton[1],
 	   st->UBS_sizeApplies, st->UBS_sizeSel);
+    printf("scrollbar %dx%d (scroll area %d), applied %u times, "
+	   "dragged to %u\n", st->UBS_scrollBar[0], st->UBS_scrollBar[1],
+	   st->UBS_scrollBar[2], st->UBS_scrollApplies, st->UBS_scrollDrag);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 
