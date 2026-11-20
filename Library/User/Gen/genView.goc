@@ -1,0 +1,548 @@
+/*
+ * genView.goc -- GenViewClass (after genView.asm): a window onto a
+ * document (its content, GVI_content: a VisContent, a GenContent or a
+ * process).  The generic part keeps the origin, the document bounds,
+ * the increment, the scale factor, the background color, the
+ * attributes of the view and of each dimension and the ink type; what
+ * the view is is the specific UI's (SPIR_BUILD_VIEW: Motif's OLPane),
+ * which scrolls and scales once built.  Before that only the generic
+ * data change.
+ *
+ * Linked views (GVI_horizLink, GVI_vertLink: a circle of views that
+ * scroll together) get the changes as events: the view records the
+ * message and sends it round with MSG_GEN_VIEW_SEND_TO_LINKS (or only
+ * the vertical or horizontal link for a scroll in one dimension); each
+ * view handles it with its links cleared (MSG_GEN_VIEW_CALL_WITHOUT_LINKS)
+ * and passes it on until it is back at the originator.
+ *
+ * Port32 (Port32/ABI.md section 13y): the events are recorded with
+ * @record and dispatched with MF_DISPATCH_DONT_FREE; not yet:
+ * MSG_GEN_BRANCH_REPLACE_PARAMS (BRPT_OUTPUT_OPTR, the content),
+ * the specific part's MSG_GEN_ADD_CHILD and MSG_GEN_REMOVE_CHILD (the
+ * asm calls it before GenClass), GenViewSetSimpleBounds,
+ * GenSetupTrackingArgs and GenReturnTrackingArgs
+ * (the tracking of a GVA_TRACK_SCROLLING view's content), the stack
+ * borrowed for MSG_GEN_VIEW_CALL_WITHOUT_LINKS.
+ */
+@include "uiInt.goh"
+@include <Objects/gViewC.goh>
+#include <string.h>
+
+@classdecl GenViewClass;
+
+#define GV(o)	((GenViewInstance *) ObjDerefGen(o))
+#define WWF(f)	((WWFixedAsDWord) (((dword) (f).WWF_int << 16) | (f).WWF_frac))
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+/* GenViewInitialize: targetable, focusable, white, not scaled, an
+ * increment of 20 by 15 */
+@method GenViewClass, MSG_META_INITIALIZE
+{
+    GenViewInstance *v;
+
+    @callsuper();
+    v = GV(oself);
+    v->GI_attrs |= GA_TARGETABLE;
+    v->GVI_attrs |= GVA_FOCUSABLE;
+    v->GVI_color.CQ_redOrIndex = C_WHITE;
+    v->GVI_scaleFactor.PF_x.WWF_int = 1;
+    v->GVI_scaleFactor.PF_y.WWF_int = 1;
+    v->GVI_increment.PD_x = 20;
+    v->GVI_increment.PD_y = 15;
+}
+
+@method GenViewClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_VIEW, MasterOffset);
+}
+
+/* ---------------------------------------------------------------------
+ * The links
+ * ------------------------------------------------------------------- */
+
+static Boolean HasLinks(optr o)
+{
+    GenViewInstance *v = GV(o);
+
+    return v->GVI_vertLink || v->GVI_horizLink;
+}
+
+/* SendInLinkMessage: the recorded event sent round by msg (SEND_TO_LINKS,
+ * _VLINK or _HLINK) from this view, then freed */
+static void SendInLinkMessage(optr o, EventHandle ev, Message msg)
+{
+    if (msg == MSG_GEN_VIEW_SEND_TO_VLINK)
+	@call o::MSG_GEN_VIEW_SEND_TO_VLINK(ev, o);
+    else if (msg == MSG_GEN_VIEW_SEND_TO_HLINK)
+	@call o::MSG_GEN_VIEW_SEND_TO_HLINK(ev, o);
+    else
+	@call o::MSG_GEN_VIEW_SEND_TO_LINKS(ev, o);
+    ObjFreeMessage(ev);
+}
+
+/* SendToLink: the message on to the link, unless it is back where it
+ * started */
+static void SendToLink(optr link, Message msg, EventHandle ev,
+		       optr originator)
+{
+    if (!link || link == originator)
+	return;
+    if (msg == MSG_GEN_VIEW_SEND_TO_VLINK)
+	@call link::MSG_GEN_VIEW_SEND_TO_VLINK(ev, originator);
+    else if (msg == MSG_GEN_VIEW_SEND_TO_HLINK)
+	@call link::MSG_GEN_VIEW_SEND_TO_HLINK(ev, originator);
+    else
+	@call link::MSG_GEN_VIEW_SEND_TO_LINKS(ev, originator);
+}
+
+/* GenViewSendToLinks: handled here and along the vertical links, then
+ * on to the horizontal link */
+@method GenViewClass, MSG_GEN_VIEW_SEND_TO_LINKS
+{
+    @call oself::MSG_GEN_VIEW_SEND_TO_VLINK(event, originator);
+    SendToLink(GV(oself)->GVI_horizLink, MSG_GEN_VIEW_SEND_TO_LINKS, event,
+	       originator);
+}
+
+@method GenViewClass, MSG_GEN_VIEW_SEND_TO_VLINK
+{
+    @call oself::MSG_GEN_VIEW_CALL_WITHOUT_LINKS(event, MF_RECORD | MF_CALL);
+    SendToLink(GV(oself)->GVI_vertLink, MSG_GEN_VIEW_SEND_TO_VLINK, event,
+	       originator);
+}
+
+@method GenViewClass, MSG_GEN_VIEW_SEND_TO_HLINK
+{
+    @call oself::MSG_GEN_VIEW_CALL_WITHOUT_LINKS(event, MF_RECORD | MF_CALL);
+    SendToLink(GV(oself)->GVI_horizLink, MSG_GEN_VIEW_SEND_TO_HLINK, event,
+	       originator);
+}
+
+/* GenViewCallWithoutLinks: the event handled by this view with its
+ * links cleared (kept with MF_RECORD, with its destination as before) */
+@method GenViewClass, MSG_GEN_VIEW_CALL_WITHOUT_LINKS
+{
+    optr v = pself->GVI_vertLink, h = pself->GVI_horizLink, dest = 0;
+
+    pself->GVI_vertLink = 0;
+    pself->GVI_horizLink = 0;
+    if (messageFlags & MF_RECORD)
+	(void) ObjGetMessageInfo(event, &dest);
+    MessageSetDestination(event, oself);
+    CMessageDispatchP(event, (word) ((messageFlags & MF_CALL) |
+		      ((messageFlags & MF_RECORD) ? MF_DISPATCH_DONT_FREE : 0)),
+		      NULL, 0);
+    if (messageFlags & MF_RECORD)
+	MessageSetDestination(event, dest);
+    pself = GV(oself);
+    pself->GVI_vertLink = v;
+    pself->GVI_horizLink = h;
+}
+
+/* ---------------------------------------------------------------------
+ * The attributes
+ * ------------------------------------------------------------------- */
+
+/* the geometry of the view and its parent redone (not with VUM_MANUAL,
+ * only when built) */
+static void FinishAttrChange(optr o, VisUpdateMode mode)
+{
+    optr p;
+
+    if (mode == VUM_MANUAL || !VisCheckIfSpecBuilt(o))
+	return;
+    VisMarkInvalid(o, VOF_GEOMETRY_INVALID, VUM_MANUAL);
+    p = VisFindParent(o);
+    if (p)
+	@call p::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID, mode);
+}
+
+/* GenViewSetAttrs: the bits changed; a frame or a view that follows its
+ * content's geometry changes the geometry; on to the specific part */
+@method GenViewClass, MSG_GEN_VIEW_SET_ATTRS
+{
+    GenViewAttrs a = pself->GVI_attrs;
+    GenViewAttrs n = (GenViewAttrs) ((a & ~attrsToClear) | attrsToSet);
+
+    if (n == a)
+	return;
+    pself->GVI_attrs = n;
+    ObjMarkDirty(oself);
+    if ((a ^ n) & (GVA_NO_WIN_FRAME | GVA_VIEW_FOLLOWS_CONTENT_GEOMETRY))
+	FinishAttrChange(oself, updateMode.VUMAW_mode);
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper oself::GenViewClass::MSG_GEN_VIEW_SET_ATTRS(
+		(GenViewAttrs) (n & ~a), (GenViewAttrs) (a & ~n), updateMode);
+}
+
+@method GenViewClass, MSG_GEN_VIEW_SET_DIMENSION_ATTRS
+{
+    GenViewDimensionAttrs h = pself->GVI_horizAttrs, v = pself->GVI_vertAttrs;
+    GenViewDimensionAttrs nh, nv;
+
+    nh = (GenViewDimensionAttrs) ((h & ~horizAttrsToSetClear.DATSC_attrsToClear)
+				  | horizAttrsToSetClear.DATSC_attrsToSet);
+    nv = (GenViewDimensionAttrs) ((v & ~vertAttrsToSetClear.DATSC_attrsToClear)
+				  | vertAttrsToSetClear.DATSC_attrsToSet);
+    if (nh == h && nv == v)
+	return;
+    pself->GVI_horizAttrs = nh;
+    pself->GVI_vertAttrs = nv;
+    ObjMarkDirty(oself);
+    if (VisCheckIfSpecBuilt(oself)) {
+	DimensionAttrsToSetClear hs, vs;
+
+	hs.DATSC_attrsToSet = (GenViewDimensionAttrs) (nh & ~h);
+	hs.DATSC_attrsToClear = (GenViewDimensionAttrs) (h & ~nh);
+	vs.DATSC_attrsToSet = (GenViewDimensionAttrs) (nv & ~v);
+	vs.DATSC_attrsToClear = (GenViewDimensionAttrs) (v & ~nv);
+	@callsuper oself::GenViewClass::MSG_GEN_VIEW_SET_DIMENSION_ATTRS(hs,
+								vs, updateMode);
+    }
+    FinishAttrChange(oself, updateMode.VUMAW_mode);
+}
+
+@method GenViewClass, MSG_GEN_VIEW_GET_ATTRS
+{
+    return pself->GVI_attrs;
+}
+
+@method GenViewClass, MSG_GEN_VIEW_GET_DIMENSION_ATTRS
+{
+    DimensionAttrs d;
+
+    d.DA_horizAttrs = pself->GVI_horizAttrs;
+    d.DA_verAttrs = pself->GVI_vertAttrs;
+    return d;
+}
+
+/* GenViewSetBGColor: round the links; the color, on to the specific
+ * part if it changed */
+@method GenViewClass, MSG_GEN_VIEW_SET_COLOR
+{
+    ColorQuad *c;
+
+    if (HasLinks(oself)) {
+	SendInLinkMessage(oself, @record oself::MSG_GEN_VIEW_SET_COLOR(
+			  indexOrRed, flags, greenBlue),
+			  MSG_GEN_VIEW_SEND_TO_LINKS);
+	return;
+    }
+    c = &pself->GVI_color;
+    if (c->CQ_redOrIndex == indexOrRed && c->CQ_info == flags &&
+	c->CQ_green == (byte) greenBlue && c->CQ_blue == (byte) (greenBlue >> 8))
+	return;
+    c->CQ_redOrIndex = indexOrRed;
+    c->CQ_info = flags;
+    c->CQ_green = (byte) greenBlue;
+    c->CQ_blue = (byte) (greenBlue >> 8);
+    ObjMarkDirty(oself);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenViewClass, MSG_GEN_VIEW_GET_COLOR
+{
+    ColorQuad *c = &pself->GVI_color;
+
+    return (dword) c->CQ_redOrIndex | ((dword) c->CQ_info << 8) |
+	   ((dword) c->CQ_green << 16) | ((dword) c->CQ_blue << 24);
+}
+
+/* GenViewSetInkType: round the links; the specific part's once built */
+@method GenViewClass, MSG_GEN_VIEW_SET_INK_TYPE
+{
+    if (HasLinks(oself)) {
+	SendInLinkMessage(oself, @record oself::MSG_GEN_VIEW_SET_INK_TYPE(
+			  inkType), MSG_GEN_VIEW_SEND_TO_LINKS);
+	return;
+    }
+    if (GenCheckIfSpecGrown(oself)) {
+	@callsuper();
+	return;
+    }
+    if (pself->GVI_inkType != inkType) {
+	pself->GVI_inkType = inkType;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenViewClass, MSG_GEN_VIEW_RESET_EXTENDED_INK_TYPE
+{
+    (void) ObjVarDeleteData(oself, ATTR_GEN_VIEW_INK_DESTINATION_INFO);
+}
+
+@method GenViewClass, MSG_GEN_VIEW_SET_EXTENDED_INK_TYPE
+{
+    InkDestinationInfoParams *p;
+
+    ObjSetFlags(oself, OCF_VARDATA_RELOC, 0);
+    p = ObjVarAddData(oself, ATTR_GEN_VIEW_INK_DESTINATION_INFO,
+		      sizeof(InkDestinationInfoParams));
+    p->IDIP_dest = destObj;
+    p->IDIP_brushSize = brushSize;
+    p->IDIP_color = inkColor;
+    p->IDIP_reserved1 = 0;
+    p->IDIP_createGState = createGState;
+}
+
+/* ---------------------------------------------------------------------
+ * The content
+ * ------------------------------------------------------------------- */
+
+/* GenViewSetContent: the specific part's once grown (it keeps
+ * GVI_content then), else stored */
+@method GenViewClass, MSG_GEN_VIEW_SET_CONTENT
+{
+    if (GenCheckIfSpecGrown(oself)) {
+	@callsuper();
+	return;
+    }
+    if (pself->GVI_content != content) {
+	pself->GVI_content = content;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenViewClass, MSG_GEN_VIEW_GET_CONTENT
+{
+    return pself->GVI_content;
+}
+
+/* ---------------------------------------------------------------------
+ * The document: bounds, increment, origin, scale
+ * ------------------------------------------------------------------- */
+
+/* GenViewSetDocBounds: round the links; stored if changed, then the
+ * specific part's */
+@method GenViewClass, MSG_GEN_VIEW_SET_DOC_BOUNDS
+{
+    RectDWord *b;
+
+    if (HasLinks(oself)) {
+	SendInLinkMessage(oself, @record oself::MSG_GEN_VIEW_SET_DOC_BOUNDS(
+			  bottom, right, top, left),
+			  MSG_GEN_VIEW_SEND_TO_LINKS);
+	return;
+    }
+    b = &pself->GVI_docBounds;
+    if (b->RD_left == left && b->RD_top == top && b->RD_right == right &&
+	b->RD_bottom == bottom)
+	return;
+    b->RD_left = left;
+    b->RD_top = top;
+    b->RD_right = right;
+    b->RD_bottom = bottom;
+    ObjMarkDirty(oself);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenViewClass, MSG_GEN_VIEW_GET_DOC_BOUNDS
+{
+    *bounds = pself->GVI_docBounds;
+}
+
+/* GenViewSetIncrement: round the links; a dimension's increment if not
+ * 0, then the specific part's */
+@method GenViewClass, MSG_GEN_VIEW_SET_INCREMENT
+{
+    if (HasLinks(oself)) {
+	SendInLinkMessage(oself, @record oself::MSG_GEN_VIEW_SET_INCREMENT(
+			  yIncrement, xIncrement), MSG_GEN_VIEW_SEND_TO_LINKS);
+	return;
+    }
+    if (xIncrement)
+	pself->GVI_increment.PD_x = xIncrement;
+    if (yIncrement)
+	pself->GVI_increment.PD_y = yIncrement;
+    ObjMarkDirty(oself);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenViewClass, MSG_GEN_VIEW_GET_INCREMENT
+{
+    *increment = pself->GVI_increment;
+}
+
+/* GenViewGetOrigin: the origin rounded to whole points */
+@method GenViewClass, MSG_GEN_VIEW_GET_ORIGIN
+{
+    origin->PD_x = pself->GVI_origin.PDF_x.DWF_int +
+		   ((pself->GVI_origin.PDF_x.DWF_frac & 0x8000) ? 1 : 0);
+    origin->PD_y = pself->GVI_origin.PDF_y.DWF_int +
+		   ((pself->GVI_origin.PDF_y.DWF_frac & 0x8000) ? 1 : 0);
+}
+
+/* GenViewSetOrigin: the specific part's once built, else the generic
+ * origin */
+@method GenViewClass, MSG_GEN_VIEW_SET_ORIGIN
+{
+    if (VisCheckIfSpecBuilt(oself)) {
+	@callsuper();
+	return;
+    }
+    ObjMarkDirty(oself);
+    pself->GVI_origin.PDF_x.DWF_int = xOrigin;
+    pself->GVI_origin.PDF_y.DWF_int = yOrigin;
+    pself->GVI_origin.PDF_x.DWF_frac = 0;
+    pself->GVI_origin.PDF_y.DWF_frac = 0;
+}
+
+/* ScrollView: the generic origin moved (GVSOL_NO_CHANGE: not in that
+ * dimension) */
+static void ScrollView(optr o, sdword dx, sdword dy)
+{
+    GenViewInstance *v = GV(o);
+
+    ObjMarkDirty(o);
+    if (dx != (sdword) GVSOL_NO_CHANGE)
+	v->GVI_origin.PDF_x.DWF_int += dx;
+    if (dy != (sdword) GVSOL_NO_CHANGE)
+	v->GVI_origin.PDF_y.DWF_int += dy;
+}
+
+@method GenViewClass, MSG_GEN_VIEW_SCROLL
+{
+    if (VisCheckIfSpecBuilt(oself)) {
+	@callsuper();
+	return;
+    }
+    if (HasLinks(oself)) {
+	SendInLinkMessage(oself, @record oself::MSG_GEN_VIEW_SCROLL(yOffset,
+			  xOffset), MSG_GEN_VIEW_SEND_TO_LINKS);
+	return;
+    }
+    ScrollView(oself, xOffset, yOffset);
+}
+
+/* GenViewScrollLow: the generic origin moved; the specific part's once
+ * built */
+@method GenViewClass, MSG_GEN_VIEW_SET_ORIGIN_LOW
+{
+    if (VisCheckIfSpecBuilt(oself)) {
+	@callsuper();
+	return;
+    }
+    ScrollView(oself, xOrigin, yOrigin);
+}
+
+/* GenViewScrollOnWheel: a vertically scrollable view scrolls up or down
+ * (wheel info in the low byte of inputState: > 0 down) */
+@method GenViewClass, MSG_META_SCROLL_VERTICAL
+{
+    (void) xPosition;
+    (void) yPosition;
+    if (pself->GVI_vertAttrs & GVDA_SCROLLABLE) {
+	if ((sbyte) inputState > 0)
+	    @send, canDiscardIfDesperate oself::MSG_GEN_VIEW_SCROLL_DOWN();
+	else
+	    @send, canDiscardIfDesperate oself::MSG_GEN_VIEW_SCROLL_UP();
+    }
+    retVal->flags = MRF_PROCESSED;
+    retVal->ptrImage = 0;
+}
+
+/* GenViewScale: the specific part's once built, else the generic scale
+ * factor */
+@method GenViewClass, MSG_GEN_VIEW_SET_SCALE_FACTOR
+{
+    PointWWFixed *s = &pself->GVI_scaleFactor;
+
+    if (WWF(s->PF_x) == xScaleFactor &&
+	WWF(s->PF_y) == yScaleFactor)
+	return;
+    ObjMarkDirty(oself);
+    if (VisCheckIfSpecBuilt(oself)) {
+	@callsuper();
+	return;
+    }
+    s->PF_x.WWF_int = IntegerOf(xScaleFactor);
+    s->PF_x.WWF_frac = FractionOf(xScaleFactor);
+    s->PF_y.WWF_int = IntegerOf(yScaleFactor);
+    s->PF_y.WWF_frac = FractionOf(yScaleFactor);
+}
+
+@method GenViewClass, MSG_GEN_VIEW_GET_SCALE_FACTOR
+{
+    retValue->GSP_xScaleFactor = WWF(pself->GVI_scaleFactor.PF_x);
+    retValue->GSP_yScaleFactor = WWF(pself->GVI_scaleFactor.PF_y);
+}
+
+/* ---------------------------------------------------------------------
+ * Only the specific part's
+ * ------------------------------------------------------------------- */
+
+/* GenViewGetWindow: none until built */
+@method GenViewClass, MSG_GEN_VIEW_GET_WINDOW
+{
+    if (!VisCheckIfSpecBuilt(oself))
+	return 0;
+    return @callsuper();
+}
+
+/* GenViewGetVisibleRect: empty until built */
+@method GenViewClass, MSG_GEN_VIEW_GET_VISIBLE_RECT
+{
+    memset(rect, 0, sizeof(*rect));
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper();
+}
+
+/* GenViewSetupTrackingArgs: set up (for the EC check), then the specific
+ * part's */
+@method GenViewClass, MSG_GEN_VIEW_SETUP_TRACKING_ARGS
+{
+    args->TSP_flags |= SF_EC_SETUP_CALLED;
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper();
+}
+
+/* GenViewOnlyCallIfSpecBuilt (one method for each signature) */
+@method GenViewClass, MSG_GEN_VIEW_MAKE_RECT_VISIBLE
+{
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper();
+}
+
+@method GenViewClass, MSG_GEN_VIEW_TRACKING_COMPLETE
+{
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper();
+}
+
+@method GenViewClass, MSG_GEN_VIEW_SCROLL_SET_X_ORIGIN
+{
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper();
+}
+
+@method GenViewClass, MSG_GEN_VIEW_SCROLL_SET_Y_ORIGIN
+{
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper();
+}
+
+@method GenViewClass, MSG_GEN_VIEW_INITIATE_DRAG_SCROLL,
+		      MSG_GEN_VIEW_SCROLL_TOP,
+		      MSG_GEN_VIEW_SCROLL_PAGE_UP,
+		      MSG_GEN_VIEW_SCROLL_UP,
+		      MSG_GEN_VIEW_SCROLL_DOWN,
+		      MSG_GEN_VIEW_SCROLL_PAGE_DOWN,
+		      MSG_GEN_VIEW_SCROLL_BOTTOM,
+		      MSG_GEN_VIEW_SCROLL_LEFT_EDGE,
+		      MSG_GEN_VIEW_SCROLL_PAGE_LEFT,
+		      MSG_GEN_VIEW_SCROLL_LEFT,
+		      MSG_GEN_VIEW_SCROLL_RIGHT,
+		      MSG_GEN_VIEW_SCROLL_PAGE_RIGHT,
+		      MSG_GEN_VIEW_SCROLL_RIGHT_EDGE,
+		      MSG_GEN_VIEW_SUSPEND_UPDATE,
+		      MSG_GEN_VIEW_UNSUSPEND_UPDATE
+{
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper();
+}

@@ -1,0 +1,39 @@
+/*
+ * genContent.goc -- GenContentClass (after genContent.asm): the generic
+ * content of a view (a tree of generic objects shown in a GenView).
+ * What it is is the specific UI's (SPIR_BUILD_CONTENT); its attributes
+ * are VisContentAttrs, given on to the specific part when grown.
+ */
+@include "uiInt.goh"
+@include <Objects/gContC.goh>
+@include <Objects/vCntC.goh>
+
+@classdecl GenContentClass;
+
+/* GenContentBuild: the generic master part is the specific UI's */
+@method GenContentClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    if (MasterOffset != word_offsetof(GenBase, Gen_offset))
+	return @callsuper();
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_CONTENT, MasterOffset);
+}
+
+/* GenContentSetAttrs: the bits set and cleared (if any change), on to
+ * the specific part as MSG_VIS_CONTENT_SET_ATTRS */
+@method GenContentClass, MSG_GEN_CONTENT_SET_ATTRS
+{
+    byte a = pself->GCI_attrs;
+    byte n = (byte) ((a | attrsToSet) & ~attrsToClear);
+
+    if (n == a)
+	return;
+    pself->GCI_attrs = n;
+    ObjMarkDirty(oself);
+    if (GenCheckIfSpecGrown(oself))
+	@call oself::MSG_VIS_CONTENT_SET_ATTRS(attrsToSet, attrsToClear);
+}
+
+@method GenContentClass, MSG_GEN_CONTENT_GET_ATTRS
+{
+    return pself->GCI_attrs;
+}

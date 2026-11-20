@@ -343,7 +343,7 @@ typedef struct {
 
     @default GI_attrs = @default | GA_TARGETABLE;
 
-    @reloc ATTR_GEN_VIEW_INK_DESTINATION_INFO, word_offsetof(InkDestinationInfoParams, IDIP_dest), optr;
+    @reloc ATTR_GEN_VIEW_INK_DESTINATION_INFO, IDIP_dest, optr;
 @endc
 
 @endlib

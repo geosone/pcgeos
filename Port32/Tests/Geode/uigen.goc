@@ -16,6 +16,8 @@
 @include <Objects/vCompC.goh>
 @include <Objects/gInterC.goh>
 @include <Objects/gPrimC.goh>
+@include <Objects/gViewC.goh>
+@include <Objects/gContC.goh>
 #include <Internal/specUI.h>
 #include <localize.h>
 #include <stdint.h>
@@ -370,6 +372,131 @@ static Boolean MonikerIs(optr o, const char *text)
 	(void) ObjVarDeleteData(@UGTrig1, HINT_MINIMUM_SIZE);
 	UGCHECK(VisConvertSpecVisSize(@UGTrig1, SST_PIXELS | 42, 0) == 42);
 	MemUnlock(OptrToHandle(@UGTrig1));
+	break;
+    }
+    case 10: {
+	/* GenView and GenContent not usable (not built): the generic
+	 * data only; two views linked vertically get the changes of
+	 * either */
+	optr v, v2, c;
+	GenViewInstance *vi;
+	PointDWord pt;
+	RectDWord r;
+	GetScaleParams sp;
+	DimensionAttrs da;
+	DimensionAttrsToSetClear hs, vs;
+	VisUpdateModeAsWord um;
+	InkDestinationInfoParams *ip;
+
+	v = ObjInstantiate(OptrToHandle(@UGApp),
+			   (ClassStruct *) &GenViewClass);
+	ObjInitializePart(v, word_offsetof(GenBase, Gen_offset));
+	UGCHECK((Attrs(v) & GA_TARGETABLE) &&
+		@call v::MSG_GEN_VIEW_GET_ATTRS() == GVA_FOCUSABLE);
+	UGCHECK(GVCD_INDEX(@call v::MSG_GEN_VIEW_GET_COLOR()) == C_WHITE);
+	@call v::MSG_GEN_VIEW_GET_SCALE_FACTOR(&sp);
+	UGCHECK(sp.GSP_xScaleFactor == 0x10000 &&
+		sp.GSP_yScaleFactor == 0x10000);
+	@call v::MSG_GEN_VIEW_GET_INCREMENT(&pt);
+	UGCHECK(pt.PD_x == 20 && pt.PD_y == 15);
+
+	um.VUMAW_mode = VUM_NOW;
+	um.VUMAW_unused = 0;
+	@call v::MSG_GEN_VIEW_SET_ATTRS(GVA_TRACK_SCROLLING, GVA_FOCUSABLE,
+					um);
+	UGCHECK(@call v::MSG_GEN_VIEW_GET_ATTRS() == GVA_TRACK_SCROLLING);
+	hs.DATSC_attrsToSet = GVDA_SCROLLABLE;
+	hs.DATSC_attrsToClear = 0;
+	vs.DATSC_attrsToSet = GVDA_SCROLLABLE | GVDA_TAIL_ORIENTED;
+	vs.DATSC_attrsToClear = 0;
+	@call v::MSG_GEN_VIEW_SET_DIMENSION_ATTRS(hs, vs, um);
+	da = @call v::MSG_GEN_VIEW_GET_DIMENSION_ATTRS();
+	UGCHECK(da.DA_horizAttrs == GVDA_SCROLLABLE &&
+		da.DA_verAttrs == (GVDA_SCROLLABLE | GVDA_TAIL_ORIENTED));
+	@call v::MSG_GEN_VIEW_SET_COLOR(C_LIGHT_GRAY, CF_INDEX, 0);
+	UGCHECK(GVCD_INDEX(@call v::MSG_GEN_VIEW_GET_COLOR()) ==
+		C_LIGHT_GRAY);
+	@call v::MSG_GEN_VIEW_SET_COLOR(10, CF_RGB, 0x3020);
+	UGCHECK(@call v::MSG_GEN_VIEW_GET_COLOR() ==
+		(10 | ((dword) CF_RGB << 8) | 0x30200000UL));
+
+	@call v::MSG_GEN_VIEW_SET_DOC_BOUNDS(400, 300, -10, -20);
+	@call v::MSG_GEN_VIEW_GET_DOC_BOUNDS(&r);
+	UGCHECK(r.RD_left == -20 && r.RD_top == -10 && r.RD_right == 300 &&
+		r.RD_bottom == 400);
+	@call v::MSG_GEN_VIEW_SET_INCREMENT(0, 8);
+	@call v::MSG_GEN_VIEW_GET_INCREMENT(&pt);
+	UGCHECK(pt.PD_x == 8 && pt.PD_y == 15);
+	@call v::MSG_GEN_VIEW_SET_ORIGIN(70, 50);
+	@call v::MSG_GEN_VIEW_SCROLL(5, -10);
+	@call v::MSG_GEN_VIEW_SET_ORIGIN_LOW(GVSOL_NO_CHANGE, 1);
+	@call v::MSG_GEN_VIEW_GET_ORIGIN(&pt);
+	UGCHECK(pt.PD_x == 41 && pt.PD_y == 75);
+	ObjLockObjBlock(OptrToHandle(v));
+	vi = ObjDerefGen(v);
+	vi->GVI_origin.PDF_x.DWF_frac = 0x8000;
+	MemUnlock(OptrToHandle(v));
+	@call v::MSG_GEN_VIEW_GET_ORIGIN(&pt);
+	UGCHECK(pt.PD_x == 42);
+	@call v::MSG_GEN_VIEW_SET_SCALE_FACTOR(0, 0, SVT_AROUND_UPPER_LEFT,
+					       0x18000, 0x20000);
+	@call v::MSG_GEN_VIEW_GET_SCALE_FACTOR(&sp);
+	UGCHECK(sp.GSP_xScaleFactor == 0x20000 &&
+		sp.GSP_yScaleFactor == 0x18000);
+	UGCHECK(!@call v::MSG_GEN_VIEW_GET_WINDOW());
+	r.RD_left = 5;
+	@call v::MSG_GEN_VIEW_GET_VISIBLE_RECT(&r);
+	UGCHECK(!r.RD_left && !r.RD_right && !r.RD_bottom);
+	@call v::MSG_GEN_VIEW_SET_INK_TYPE(GVIT_PRESSES_ARE_INK);
+	ObjLockObjBlock(OptrToHandle(v));
+	UGCHECK(((GenViewInstance *) ObjDerefGen(v))->GVI_inkType ==
+		GVIT_PRESSES_ARE_INK);
+	MemUnlock(OptrToHandle(v));
+	@call v::MSG_GEN_VIEW_SET_EXTENDED_INK_TYPE(TRUE, C_RED, 3, @UGTrig1);
+	ObjLockObjBlock(OptrToHandle(v));
+	ip = ObjVarFindData(v, ATTR_GEN_VIEW_INK_DESTINATION_INFO);
+	UGCHECK(ip && ip->IDIP_dest == @UGTrig1 && ip->IDIP_brushSize == 3 &&
+		ip->IDIP_color == C_RED && ip->IDIP_createGState);
+	MemUnlock(OptrToHandle(v));
+	@call v::MSG_GEN_VIEW_RESET_EXTENDED_INK_TYPE();
+	ObjLockObjBlock(OptrToHandle(v));
+	UGCHECK(!ObjVarFindData(v, ATTR_GEN_VIEW_INK_DESTINATION_INFO));
+	MemUnlock(OptrToHandle(v));
+
+	c = ObjInstantiate(OptrToHandle(@UGApp),
+			   (ClassStruct *) &GenContentClass);
+	ObjInitializePart(c, word_offsetof(GenBase, Gen_offset));
+	@call c::MSG_GEN_CONTENT_SET_ATTRS(VCNA_SAME_WIDTH_AS_VIEW |
+					   VCNA_SAME_HEIGHT_AS_VIEW, 0);
+	@call c::MSG_GEN_CONTENT_SET_ATTRS(0, VCNA_SAME_HEIGHT_AS_VIEW);
+	UGCHECK(@call c::MSG_GEN_CONTENT_GET_ATTRS() ==
+		VCNA_SAME_WIDTH_AS_VIEW);
+	@call v::MSG_GEN_VIEW_SET_CONTENT(c);
+	UGCHECK(@call v::MSG_GEN_VIEW_GET_CONTENT() == c);
+	UGCHECK(!Grown(v) && !Grown(c));
+
+	/* linked: v2 and v in a vertical circle */
+	v2 = ObjInstantiate(OptrToHandle(@UGApp),
+			    (ClassStruct *) &GenViewClass);
+	ObjInitializePart(v2, word_offsetof(GenBase, Gen_offset));
+	ObjLockObjBlock(OptrToHandle(v));
+	((GenViewInstance *) ObjDerefGen(v))->GVI_vertLink = v2;
+	((GenViewInstance *) ObjDerefGen(v2))->GVI_vertLink = v;
+	MemUnlock(OptrToHandle(v));
+	@call v2::MSG_GEN_VIEW_SET_DOC_BOUNDS(1000, 800, 0, 0);
+	@call v::MSG_GEN_VIEW_GET_DOC_BOUNDS(&r);
+	UGCHECK(r.RD_right == 800 && r.RD_bottom == 1000 && !r.RD_left);
+	@call v2::MSG_GEN_VIEW_GET_DOC_BOUNDS(&r);
+	UGCHECK(r.RD_right == 800 && r.RD_bottom == 1000);
+	@call v::MSG_GEN_VIEW_SCROLL(100, 0);
+	@call v2::MSG_GEN_VIEW_GET_ORIGIN(&pt);
+	UGCHECK(pt.PD_y == 100 && !pt.PD_x);
+	@call v::MSG_GEN_VIEW_GET_ORIGIN(&pt);
+	UGCHECK(pt.PD_y == 175);
+	ObjLockObjBlock(OptrToHandle(v));
+	UGCHECK(((GenViewInstance *) ObjDerefGen(v))->GVI_vertLink == v2 &&
+		((GenViewInstance *) ObjDerefGen(v2))->GVI_vertLink == v);
+	MemUnlock(OptrToHandle(v));
 	break;
     }
     case 8:

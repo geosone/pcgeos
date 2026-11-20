@@ -38,6 +38,8 @@ export GenBooleanGroupClass
 export GenItemGroupClass
 export GenItemClass
 export GenBooleanClass
+export GenViewClass
+export GenContentClass
 export GenProcessClass
 export UserClass
 

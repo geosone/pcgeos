@@ -206,6 +206,9 @@ int main(void)
     /* 9: GenInteraction, GenDisplay, GenPrimary; the size hints */
     step(9);
 
+    /* 10: GenView and GenContent, generic data, linked views */
+    step(10);
+
     /* 8: the UI's use of the specific UI ends; ours too */
     step(8);
     GeodeFreeLibrary(sp);
