@@ -1,0 +1,145 @@
+/*
+ * citemInt.goh -- the item module of the specific UI in C (after
+ * citemConstant.def, citemMacro.def and the procedures the files of
+ * CItem share): OLItemGroupClass (an item group or boolean group),
+ * OLItemClass (its items, buttons with a state) and OLCheckedItemClass
+ * (the check box of a non exclusive group).
+ *
+ * Motif: the diamond and the check box in color, no selection boxes, no
+ * Legos looks.  Port32 (Port32/ABI.md section 13y), not yet: popup
+ * lists (HINT_ITEM_GROUP_MINIMIZE_SIZE), scrolling lists
+ * (OLScrollListClass, OLScrollableItemClass), dynamic lists
+ * (GenDynamicListClass), tabs (HINT_ITEM_GROUP_TAB_STYLE), the black and
+ * white look (drawn in color).
+ */
+#ifndef __CITEMINT_GOH
+#define __CITEMINT_GOH
+
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olItemGroupClass.goh>
+@include <Internal/SpecUI/olItemClass.goh>
+
+/* citemConstant.def, Motif */
+#define CHECK_HEIGHT		9
+#define CHECK_WIDTH_REAL	9
+#define CHECK_LEFT_BORDER	2
+#define CHECK_RIGHT_BORDER	3
+#define CHECK_BOX_OFFSET	5
+#define CHECK_BOX_WIDTH		(CHECK_WIDTH_REAL + CHECK_LEFT_BORDER + \
+				 CHECK_BOX_OFFSET)
+#define CHECK_TOP_BORDER	1
+#define CHECK_BOTTOM_BORDER	CHECK_TOP_BORDER
+#define RADIO_HEIGHT		9
+#define RADIO_WIDTH_REAL	11
+#define RADIO_LEFT_BORDER	2
+#define MO_ITEM_INSET_LEFT	(RADIO_WIDTH_REAL + 3 + RADIO_LEFT_BORDER)
+#define MO_ITEM_INSET_RIGHT	7
+#define MO_ITEM_INSET_Y		2
+#define TOOLBOX_INSET_X		2
+#define TOOLBOX_INSET_Y		2
+#define MO_ITEM_SPACING		0
+#define OL_BW_TOOLBOX_SPACING	((word) -1)
+#define SCROLL_ITEM_INSET_X	2
+#define MO_SCROLL_ITEM_INSET_Y	1
+#define MO_SCROLL_ITEM_INSET_X	SCROLL_ITEM_INSET_X
+
+/* the "behavior" of SetupSelectionMsg past GenItemGroupBehaviorType */
+#define SSMBT_NON_EXCLUSIVE_ALWAYS_TOGGLE	(GIGBT_NON_EXCLUSIVE + 1)
+
+#define IG(o)	((OLItemGroupInstance *) ObjDerefVis(o))
+#define IGG(o)	((GenItemGroupInstance *) ObjDerefGen(o))
+#define BGG(o)	((GenBooleanGroupInstance *) ObjDerefGen(o))
+#define Item(o)	((OLItemInstance *) ObjDerefVis(o))
+#define ItemG(o) ((GenItemInstance *) ObjDerefGen(o))
+
+/* ---------------------------------------------------------------------
+ * The item group (citemItemGroupClass.goc, citemItemGroupVeryCommon.goc,
+ * citemItemGroupCommon.goc)
+ * ------------------------------------------------------------------- */
+
+/* the kinds of group: check boxes or non exclusive; extended selection
+ * (a non exclusive list counts, not in a menu) */
+extern Boolean IsNonExclusive(optr o);
+extern Boolean IsExtendedSelection(optr o);
+extern Boolean CheckIfInAddMode(optr o);
+extern Boolean CheckIfExtendingSelection(optr o);
+
+/* the focus item: its identifier (TRUE if there is one), its optr (the
+ * group if it is not a child: 0 if there is none) */
+extern Boolean GetFocusItem(optr o, word *id);
+extern optr GetFocusItemOptr(optr o);
+extern void SetFocusItem(optr o, word id, Boolean has);
+extern void SetFocusFromOptr(optr o, optr item);
+extern Boolean IsFocusItemOptr(optr o, optr item);
+extern void SetAnchorItem(optr o, word id);
+
+/* the child with the identifier, 0 if none; or the group itself */
+extern optr GetItemOptr(optr o, word id);
+extern optr GetOptrOrSelf(optr o, word id);
+/* the single selection (TRUE if there is exactly one) and its optr */
+extern Boolean GetCurrentSelection(optr o, word *id);
+extern optr GetCurrentSelectionOptr(optr o);
+
+/* MSG_GEN_ITEM_GROUP_SCAN_ITEMS (or _BOOLEANS): TRUE if an item was
+ * found, *id its identifier (else the first or last one), *item its
+ * optr (a dynamic list's item told to navigate if disabled) */
+extern Boolean ScanItems(optr o, GenScanItemsFlags flags, word initial,
+			 sword amount, word *id, optr *item);
+extern Boolean OLItemGroupGetFirstItemOptr(optr o, optr *item);
+extern optr OLItemGroupGetCurrentFocusExclOrFirst(optr o);
+
+extern void OLItemGroupAbortAllUserInteraction(optr o);
+/* the focus item set to id (item its optr or the group); the window's
+ * focus to it if the group has it */
+extern void OLItemGroupMoveFocusExclToItem(optr o, optr item, word id);
+extern void OLItemGroupVupGrabFocusExclForItem(optr o, optr item);
+extern void OLItemGroupMoveFocusToNextField(optr o);
+extern void EnsureCurrentItemVisible(optr o, word id);
+extern void EnsureCurrentSelectionVisible(optr o);
+extern void SetPopupListMonikerIfNeeded(optr o);
+extern void InitFocusItem(optr o);
+
+/* the selection before intermediate mode (or an extended one) */
+extern void SaveCurrentSelection(optr o);
+/* the extended selection to extent (OLItemUpdateFlags in passFlags) */
+extern void ExtendSelection(optr o, word extent, word passFlags);
+extern void SetToToggleAnchorItem(optr o);
+
+/* the message (0: none) with the update flags, then modified unless a
+ * temporary change, the status message and (not delayed) the apply */
+extern void CallSelfWithUpdateFlagsAndSetModified(optr o, Message msg,
+						  word id, word flags,
+						  OLItemUpdateFlags uf);
+extern void FinishSetModifiedState(optr o);
+
+/* citemBooleanGroup.goc */
+extern void OLBooleanGroupSetModifiedItemState(optr o, word id,
+					       word flags);
+extern void OLBooleanGroupUpdateSpecificObject(optr o, word changed);
+extern byte OLBooleanGroupGetItemState(optr o, word id);
+
+/* ---------------------------------------------------------------------
+ * The item (citemItemClass.goc, citemItemCommon.goc, citemItemColor.goc)
+ * ------------------------------------------------------------------- */
+
+/* the group's state: OLItemGroupState, the GI_attrs, the behavior (a
+ * boolean group's: non exclusive); TRUE with HINT_ITEM_GROUP_TOOLBOX_
+ * STYLE */
+typedef struct {
+    OLItemGroupState		PS_state;
+    GenAttrs			PS_attrs;
+    GenItemGroupBehaviorType	PS_behavior;
+} OLItemParentState;
+extern Boolean OLItemGetParentState(optr o, OLItemParentState *s);
+extern Boolean CheckIfBoolean(optr o);
+extern Boolean CheckIfExtendingOrNonExcl(optr o);
+extern void OLItemUpdateDrawState(optr o);
+extern void OLItemDrawIfNewState(optr o);
+extern void OLItemSetupMkrArgs(optr o, OpenMonikerArgs *a);
+extern void UpdateItemState(optr o);
+/* the box of a check box or diamond in the item's bounds */
+extern void GetCheckboxBounds(optr o, Rectangle *r);
+extern void ItemDrawColorItem(optr o, GStateHandle gs, DrawFlags df);
+
+#endif

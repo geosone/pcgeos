@@ -27,6 +27,8 @@
 @include <Objects/gItemC.goh>
 @include <Objects/gBoolGC.goh>
 @include <Objects/gBoolC.goh>
+@include <Internal/SpecUI/olItemGroupClass.goh>
+@include <Internal/SpecUI/olItemClass.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -54,6 +56,8 @@ typedef struct {
     sword		UBS_long[4];
     word		UBS_itemApplies, UBS_itemApply[3];
     word		UBS_boolApplies, UBS_boolApply[3];
+    word		UBS_radioApplies, UBS_radioSel;
+    word		UBS_checkApplies, UBS_checkSel;
 } UBState;
 
 UBState ubState;
@@ -69,6 +73,8 @@ UBState ubState;
 @class UBProcessClass, GenProcessClass;
     @message void MSG_UB_STEP(word step);
     @message (GEN_ITEM_GROUP_APPLY_MSG) MSG_UB_ITEMS_APPLIED;
+    @message (GEN_ITEM_GROUP_APPLY_MSG) MSG_UB_RADIO_APPLIED;
+    @message (GEN_BOOLEAN_GROUP_APPLY_MSG) MSG_UB_CHECKS_APPLIED;
     @message (GEN_BOOLEAN_GROUP_APPLY_MSG) MSG_UB_BOOLEANS_APPLIED;
 @endc
 @classdecl UBProcessClass, neverSaved;
@@ -158,6 +164,41 @@ UBState ubState;
 }
 @object GenDisplayClass UBDoc2 = {
     GI_visMoniker = "Doc 2";
+    GI_comp = @UBRadio, @UBChecks;
+}
+/* in Doc 2: a radio group (an exclusive one) and check boxes */
+@object GenItemGroupClass UBRadio = {
+    GI_comp = @UBRadio1, @UBRadio2, @UBRadio3;
+    GIGI_selection = 1;
+    GIGI_numSelections = 1;
+    GIGI_destination = process;
+    GIGI_applyMsg = MSG_UB_RADIO_APPLIED;
+}
+@object GenItemClass UBRadio1 = {
+    GI_visMoniker = "One";
+    GII_identifier = 1;
+}
+@object GenItemClass UBRadio2 = {
+    GI_visMoniker = "Two";
+    GII_identifier = 2;
+}
+@object GenItemClass UBRadio3 = {
+    GI_visMoniker = "Three";
+    GII_identifier = 3;
+}
+@object GenBooleanGroupClass UBChecks = {
+    GI_comp = @UBCheck1, @UBCheck2;
+    GBGI_selectedBooleans = 1;
+    GBGI_destination = process;
+    GBGI_applyMsg = MSG_UB_CHECKS_APPLIED;
+}
+@object GenBooleanClass UBCheck1 = {
+    GI_visMoniker = "Bold";
+    GBI_identifier = 1;
+}
+@object GenBooleanClass UBCheck2 = {
+    GI_visMoniker = "Italic";
+    GBI_identifier = 2;
 }
 /* not usable (not built): the generic item groups alone */
 @object GenItemGroupClass UBList = {
@@ -205,6 +246,22 @@ UBState ubState;
     ubState.UBS_itemApply[0] = selection;
     ubState.UBS_itemApply[1] = numSelections;
     ubState.UBS_itemApply[2] = stateFlags;
+}
+
+@method UBProcessClass, MSG_UB_RADIO_APPLIED
+{
+    (void) numSelections;
+    (void) stateFlags;
+    ubState.UBS_radioApplies++;
+    ubState.UBS_radioSel = selection;
+}
+
+@method UBProcessClass, MSG_UB_CHECKS_APPLIED
+{
+    (void) indeterminateBooleans;
+    (void) modifiedBooleans;
+    ubState.UBS_checkApplies++;
+    ubState.UBS_checkSel = selectedBooleans;
 }
 
 @method UBProcessClass, MSG_UB_BOOLEANS_APPLIED
@@ -1026,6 +1083,61 @@ static Rectangle ScreenBounds(WindowHandle w)
 	UBCHECK(ubState.UBS_boolApplies == 1 &&
 		ubState.UBS_boolApply[0] == 7 &&
 		ubState.UBS_boolApply[1] == 4 && !ubState.UBS_boolApply[2]);
+	break;
+    }
+    case 24: {
+	/* Doc 2's radio group and check boxes built by Motif: an
+	 * OLItemGroup each, OLItems and OLCheckedItems, the first radio
+	 * item and the first check box selected, at least a diamond high;
+	 * Doc 2 on top, drawn.  The user's choices: the second radio
+	 * item activated, then down: the third (each one applied
+	 * through the queue); the second check box activated */
+	OLItemInstance it;
+
+	UBCHECK(InClass(@UBRadio, (ClassStruct *) &OLItemGroupClass));
+	UBCHECK(InClass(@UBChecks, (ClassStruct *) &OLItemGroupClass));
+	UBCHECK(InClass(@UBRadio1, (ClassStruct *) &OLItemClass) &&
+		!InClass(@UBRadio1, (ClassStruct *) &OLCheckedItemClass));
+	UBCHECK(InClass(@UBCheck1, (ClassStruct *) &OLCheckedItemClass));
+	VisData(@UBRadio1, &it, sizeof(it));
+	UBCHECK(it.OLII_state & OLIS_SELECTED);
+	UBCHECK(!(it.OLII_state & OLIS_IS_CHECKBOX));
+	VisData(@UBRadio2, &it, sizeof(it));
+	UBCHECK(!(it.OLII_state & OLIS_SELECTED));
+	VisData(@UBCheck1, &it, sizeof(it));
+	UBCHECK((it.OLII_state & (OLIS_SELECTED | OLIS_IS_CHECKBOX)) ==
+		(OLIS_SELECTED | OLIS_IS_CHECKBOX));
+	UBCHECK(Height(@UBRadio1) >= 13 && Width(@UBRadio1) > 0);
+	UBCHECK(Height(@UBCheck1) >= 11);
+	@call UBDoc2::MSG_GEN_BRING_TO_TOP();
+	@call UBRadio2::MSG_GEN_ACTIVATE();
+	UBCHECK(@call UBRadio::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 2);
+	VisData(@UBRadio2, &it, sizeof(it));
+	UBCHECK(it.OLII_state & OLIS_SELECTED);
+	VisData(@UBRadio1, &it, sizeof(it));
+	UBCHECK(!(it.OLII_state & OLIS_SELECTED));
+	@call UBRadio::MSG_META_KBD_CHAR((VC_ISCTRL << 8) | VC_DOWN, 0, 0);
+	UBCHECK(@call UBRadio::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 3);
+	@call UBCheck2::MSG_GEN_ACTIVATE();
+	UBCHECK(@call UBChecks::MSG_GEN_BOOLEAN_GROUP_GET_SELECTED_BOOLEANS()
+		== 3);
+	VisData(@UBCheck2, &it, sizeof(it));
+	UBCHECK(it.OLII_state & OLIS_SELECTED);
+	break;
+    }
+    case 25: {
+	/* applied (the radio group's two changes by one apply: the
+	 * second finds it no longer modified); drawn (the state drawn
+	 * known) */
+	OLItemInstance it;
+
+	UBCHECK(ubState.UBS_radioApplies == 1 && ubState.UBS_radioSel == 3);
+	UBCHECK(ubState.UBS_checkApplies == 1 && ubState.UBS_checkSel == 3);
+	VisData(@UBRadio3, &it, sizeof(it));
+	UBCHECK(it.OLBI_optFlags & OLBOF_DRAW_STATE_KNOWN);
+	UBCHECK(it.OLBI_optFlags & OLBOF_DRAWN_SELECTED);
+	VisData(@UBCheck2, &it, sizeof(it));
+	UBCHECK(it.OLBI_optFlags & OLBOF_DRAW_STATE_KNOWN);
 	break;
     }
     }

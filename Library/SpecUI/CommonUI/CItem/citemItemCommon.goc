@@ -1,0 +1,639 @@
+/*
+ * citemItemCommon.goc -- OLItemClass (after citemItemCommon.asm): the
+ * mouse and the keyboard on an item, its focus, its state and drawing.
+ * A press on an item of an exclusive group shows it pressed (the
+ * group's selection taken away meanwhile, the intermediate mode); the
+ * release in it selects it.  An item of a non exclusive or extended
+ * selection list extends the group's selection while the mouse moves.
+ * A boolean toggles on the press.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: scrolling items
+ * (OLScrollableItemClass), popup lists closed on a release, tabs, the
+ * black and white look.
+ */
+@include "CItem/citemInt.goh"
+
+#define UIFA_OF(inputState)	((byte) ((inputState) >> 8))
+#define MRF_DONE		(MRF_PROCESSED | MRF_CLEAR_POINTER_IMAGE)
+
+/* the generic parent, locked if in another block: the caller unlocks
+ * with UnlockParent */
+static optr LockParent(optr o)
+{
+    optr p = GenFindParent(o);
+
+    if (p && OptrToHandle(p) != OptrToHandle(o))
+	ObjLockObjBlock(OptrToHandle(p));
+    return p;
+}
+
+static void UnlockParent(optr o, optr p)
+{
+    if (p && OptrToHandle(p) != OptrToHandle(o))
+	MemUnlock(OptrToHandle(p));
+}
+
+static word Identifier(optr o)
+{
+    return ItemG(o)->GII_identifier;
+}
+
+/* OLItemTestIfInteractable: enabled, with a moniker, not read only */
+static Boolean TestIfInteractable(optr o)
+{
+    if (!(Item(o)->VI_attrs & VA_FULLY_ENABLED))
+	return FALSE;
+    if (Item(o)->OLII_state & OLIS_MONIKER_INVALID)
+	return FALSE;
+    return !(((GenInstance *) ObjDerefGen(o))->GI_attrs & GA_READ_ONLY);
+}
+
+static Boolean TestIfParentHasGroupMouseGrab(optr o)
+{
+    OLItemParentState ps;
+
+    (void) OLItemGetParentState(o, &ps);
+    return (ps.PS_state & OLIGS_GROUP_HAS_MOUSE_GRAB) != 0;
+}
+
+/* ---------------------------------------------------------------------
+ * The selection message of a release
+ * ------------------------------------------------------------------- */
+
+/*
+ * SetupSelectionMsg: the message (0: none) and its flags for the item
+ * released with the behavior (or SSMBT_NON_EXCLUSIVE_ALWAYS_TOGGLE):
+ * an exclusive one selects it (a redundant selection only for now
+ * unless ATTR_GEN_ITEM_GROUP_SET_MODIFIED_ON_REDUNDANT_SELECTION; an
+ * exclusive-none one deselects a selected item); a non exclusive one
+ * toggles it (an indeterminate one is selected); an extending list's
+ * item: none, the list did it
+ */
+static Message SetupSelectionMsg(optr o, word behavior, word *flags)
+{
+    optr p = GenFindParent(o);
+    byte s;
+    word f = 1 << 8;
+    Boolean redundant;
+
+    if (!p)
+	return 0;
+    s = @call p::MSG_OL_IGROUP_GET_ITEM_STATE(Identifier(o));
+    if (behavior != GIGBT_EXCLUSIVE &&
+	behavior != SSMBT_NON_EXCLUSIVE_ALWAYS_TOGGLE) {
+	if (CheckIfExtendingOrNonExcl(o))
+	    return 0;
+	if (behavior == GIGBT_EXCLUSIVE_NONE) {
+	    if (s & OLIS_SELECTED) {
+		*flags = 0;
+		return MSG_OL_IGROUP_SET_MODIFIED_SELECTION;
+	    }
+	    goto excl;
+	}
+    }
+    if (behavior != GIGBT_EXCLUSIVE) {
+	/* toggle */
+	f = ((s & OLIS_INDETERMINATE) || !(s & OLIS_SELECTED)) ? 0xff00 : 0;
+	*flags = f;
+	return MSG_OL_IGROUP_SET_MODIFIED_ITEM_STATE;
+    }
+excl:
+    *flags = f;
+    if (s & OLIS_INDETERMINATE)
+	return MSG_OL_IGROUP_SET_MODIFIED_SELECTION;
+    p = LockParent(o);
+    redundant = @call p::MSG_OL_IGROUP_TEST_FOR_REDUNDANT_INTERMEDIATE_SELECTION(
+							Identifier(o), 0);
+    if (redundant &&
+	!ObjVarFindData(p, ATTR_GEN_ITEM_GROUP_SET_MODIFIED_ON_REDUNDANT_SELECTION))
+	*flags |= OLIUF_TEMPORARY_CHANGE;
+    UnlockParent(o, p);
+    return MSG_OL_IGROUP_SET_MODIFIED_SELECTION;
+}
+
+/* the message of SetupSelectionMsg to the group, the item redrawn */
+static void SendSelectionMsg(optr o, word behavior)
+{
+    word flags = 0;
+    Message m = SetupSelectionMsg(o, behavior, &flags);
+    optr p;
+
+    if (!m)
+	return;
+    p = GenFindParent(o);
+    if (m == MSG_OL_IGROUP_SET_MODIFIED_SELECTION)
+	@call p::MSG_OL_IGROUP_SET_MODIFIED_SELECTION(Identifier(o), flags);
+    else
+	@call p::MSG_OL_IGROUP_SET_MODIFIED_ITEM_STATE(Identifier(o), flags);
+    OLItemDrawIfNewState(o);
+}
+
+/* ---------------------------------------------------------------------
+ * Pressed and released
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLItemEnsureIsPressed: drawn pressed, the gadget exclusive taken;
+ * the group goes into intermediate mode; the item takes the focus if
+ * the group has it (not a tool, not an extending list's)
+ */
+@extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_PRESSED
+{
+    optr p;
+    Boolean noFocus = TRUE;
+
+    pself->OLII_state |= OLIS_PRESSING_ON_ITEM;
+    OLItemUpdateDrawState(oself);
+    {
+	optr vp = VisFindParent(oself);
+
+	if (vp)
+	    @call vp::MSG_VIS_TAKE_GADGET_EXCL(oself);
+    }
+    p = GenFindParent(oself);
+    if (p)
+	noFocus = @call p::MSG_OL_IGROUP_START_INTERMEDIATE_MODE(
+							Identifier(oself));
+    if (!noFocus && !(Item(oself)->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) &&
+	!CheckIfExtendingOrNonExcl(oself)) {
+	Boolean cursored = (Item(oself)->OLBI_specState & OLBSS_CURSORED) != 0;
+
+	MetaGrabFocusExclLow(oself);
+	if (!cursored)
+	    return;
+    }
+    OLItemDrawIfNewState(oself);
+}
+
+/*
+ * OLItemEnsureIsNotPressed: no longer pressed (redrawn if asked), the
+ * mouse let go (unless the group is extending); an exclusive group's
+ * intermediate mode ends (not for a menu's plain item).  TRUE if it
+ * was not pressed.
+ */
+@extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED
+{
+    optr p;
+    Boolean extending = FALSE;
+
+    if (!CheckIfExtendingOrNonExcl(oself) &&
+	!(pself->OLII_state & OLIS_PRESSING_ON_ITEM))
+	return TRUE;
+    pself->OLII_state &= ~OLIS_PRESSING_ON_ITEM;
+    OLItemUpdateDrawState(oself);
+    if (flags & OIENPF_REDRAW_PRESSED_ITEM)
+	OLItemDrawIfNewState(oself);
+    p = LockParent(oself);
+    if (p)
+	extending = (IG(p)->OLIGI_moreState & OLIGMS_EXTENDING_SELECTION) != 0;
+    UnlockParent(oself, p);
+    if (!extending)
+	VisReleaseMouse(oself);
+    pself = Item(oself);
+    if (pself->OLII_behavior == GIGBT_NON_EXCLUSIVE ||
+	(flags & OIENPF_MAINTAIN_INTERMEDIATE_MODE))
+	return FALSE;
+    if (!(pself->OLII_state & OLIS_DRAW_AS_TOOLBOX) &&
+	(pself->OLBI_specState & OLBSS_IN_MENU))
+	return FALSE;
+    if (p)
+	@call p::MSG_OL_IGROUP_END_INTERMEDIATE_MODE(flags);
+    return FALSE;
+}
+
+/*
+ * OLItemEnsureIsReleased: (pressed first if simulated) no longer
+ * pressed; then the item's selection: in a menu or simulated (a non
+ * exclusive one always toggles) by the behavior, a boolean by the
+ * mouse.  TRUE if it was not pressed.
+ */
+@extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_RELEASED
+{
+    word b;
+
+    if (flags & OIENPF_SIMULATE_PRESS_AND_RELEASE)
+	@call oself::MSG_OL_ITEM_ENSURE_IS_PRESSED();
+    if (@call oself::MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED(flags))
+	return TRUE;
+    pself = Item(oself);
+    b = pself->OLII_behavior;
+    if (!(pself->OLBI_specState & OLBSS_IN_MENU)) {
+	if (!(flags & OIENPF_SIMULATE_PRESS_AND_RELEASE)) {
+	    if (CheckIfBoolean(oself))
+		return FALSE;
+	} else if (b == GIGBT_NON_EXCLUSIVE)
+	    b = SSMBT_NON_EXCLUSIVE_ALWAYS_TOGGLE;
+    }
+    SendSelectionMsg(oself, b);
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * The mouse
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLItemMouse: a press (start) or a drag over the item: a double press
+ * goes to the group; a press clicks, starts an extended selection of a
+ * list, tells the group it has the mouse; a boolean (not in a menu)
+ * toggles at once; an extending list extends to the item, else the item
+ * is pressed
+ */
+static MouseReturnFlags ItemMouse(optr o, Boolean press, sword x, sword y,
+				  word inputState)
+{
+    optr p = GenFindParent(o);
+
+    if (!TestIfInteractable(o) || !p)
+	return 0;
+    if (inputState & BI_DOUBLE_PRESS) {
+	@call p::MSG_OL_IGROUP_NOTIFY_DOUBLE_PRESS(o);
+	return MRF_DONE;
+    }
+    if (press) {
+	OpenDoClickSound();
+	if (CheckIfExtendingOrNonExcl(o))
+	    @call p::MSG_OL_IGROUP_START_EXTENDED_SELECTION(Identifier(o),
+							    inputState);
+	@call p::MSG_OL_IGROUP_NOTIFY_GROUP_HAS_MOUSE_GRAB();
+    }
+    @call p::MSG_OL_IGROUP_NOTIFY_ITEM_WILL_GRAB_FOCUS_EXCL();
+    if (press && CheckIfBoolean(o) &&
+	!(Item(o)->OLBI_specState & OLBSS_IN_MENU))
+	SendSelectionMsg(o, Item(o)->OLII_behavior);
+    if (CheckIfExtendingOrNonExcl(o)) {
+	VisForceGrabMouse(o);
+	@call p::MSG_OL_IGROUP_EXTEND_SELECTION(x, y, press);
+	return MRF_DONE;
+    }
+    @call o::MSG_OL_ITEM_ENSURE_IS_PRESSED();
+    VisGrabMouse(o);
+    return MRF_DONE;
+}
+
+@extern method OLItemClass, MSG_META_START_SELECT
+{
+    retVal->flags = ItemMouse(oself, TRUE, xPosition, yPosition,
+			      inputState);
+}
+
+/*
+ * OLItemPtr: with the select button (in a menu, or while the group has
+ * the mouse): out of an item that is not a list's, it is not pressed
+ * (replayed); else as a drag onto it
+ */
+@extern method OLItemClass, MSG_META_PTR
+{
+    (void) xPosition;
+    (void) yPosition;
+    retVal->flags = 0;
+    if (!TestIfInteractable(oself))
+	return;
+    retVal->flags = MRF_DONE;
+    if (!(UIFA_OF(inputState) & UIFA_SELECT))
+	return;
+    if (!(Item(oself)->OLBI_specState & OLBSS_IN_MENU) &&
+	!TestIfParentHasGroupMouseGrab(oself))
+	return;
+    if (!CheckIfExtendingOrNonExcl(oself) &&
+	!(UIFA_OF(inputState) & UIFA_IN)) {
+	(void) @call oself::MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED(
+			OIENPF_RESTORE_SELECTION_TO_ORIGINAL_OWNER |
+			OIENPF_RESTORE_FOCUS_EXCL_STATE_TO_ORIGINAL_OWNER |
+			OIENPF_REDRAW_PRESSED_ITEM);
+	retVal->flags = MRF_REPLAY;
+	return;
+    }
+    retVal->flags = ItemMouse(oself, FALSE, xPosition, yPosition,
+			      inputState);
+}
+
+/*
+ * OLItemRelease: the select button up (enabled, not read only): out of
+ * an item that is not a list's, not pressed (the selection back);
+ * else released (selected); a list's extended selection ends
+ */
+@extern method OLItemClass, MSG_META_END_SELECT
+{
+    optr p;
+
+    (void) xPosition;
+    (void) yPosition;
+    retVal->flags = 0;
+    if ((UIFA_OF(inputState) & UIFA_SELECT) ||
+	!(pself->VI_attrs & VA_FULLY_ENABLED) ||
+	(((GenInstance *) ObjDerefGen(oself))->GI_attrs & GA_READ_ONLY))
+	return;
+    if (!CheckIfExtendingOrNonExcl(oself) &&
+	!(UIFA_OF(inputState) & UIFA_IN)) {
+	(void) @call oself::MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED(
+			OIENPF_RESTORE_SELECTION_TO_ORIGINAL_OWNER |
+			OIENPF_RESTORE_FOCUS_EXCL_STATE_TO_ORIGINAL_OWNER |
+			OIENPF_REDRAW_PRESSED_ITEM);
+	return;
+    }
+    retVal->flags = MRF_PROCESSED;
+    if (@call oself::MSG_OL_ITEM_ENSURE_IS_RELEASED(0))
+	return;
+    VisReleaseMouse(oself);
+    if (CheckIfExtendingOrNonExcl(oself) &&
+	(p = GenFindParent(oself)) != 0)
+	@call p::MSG_OL_IGROUP_END_EXTENDED_SELECTION(inputState);
+}
+
+/* ---------------------------------------------------------------------
+ * The focus and the keyboard
+ * ------------------------------------------------------------------- */
+
+@extern method OLItemClass, MSG_META_GAINED_SYS_FOCUS_EXCL
+{
+    optr p;
+
+    pself->OLBI_specState |= OLBSS_CURSORED;
+    OLItemUpdateDrawState(oself);
+    OLItemDrawIfNewState(oself);
+    if ((p = GenFindParent(oself)) != 0)
+	@call p::MSG_OL_IGROUP_NOTIFY_ITEM_GAINED_FOCUS_EXCL(oself);
+}
+
+/* OLItemLostSystemFocusExcl: no cursor; not pressed, the intermediate
+ * mode kept */
+@extern method OLItemClass, MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    optr p;
+
+    pself->OLBI_specState &= ~OLBSS_CURSORED;
+    pself->OLII_state |= OLIS_PRESSING_ON_ITEM;
+    if (OpenCheckIfKeyboardOnly())
+	Item(oself)->OLBI_optFlags &= ~OLBOF_DRAW_STATE_KNOWN;
+    (void) @call oself::MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED(
+		OIENPF_REDRAW_PRESSED_ITEM | OIENPF_MAINTAIN_INTERMEDIATE_MODE);
+    if ((p = GenFindParent(oself)) != 0)
+	@call p::MSG_OL_IGROUP_NOTIFY_ITEM_LOST_FOCUS_EXCL(oself);
+}
+
+@extern method OLItemClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    (void) @call oself::MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED(
+		OIENPF_RESTORE_SELECTION_TO_ORIGINAL_OWNER |
+		OIENPF_REDRAW_PRESSED_ITEM);
+}
+
+/* OLItemKbdChar: the group handles the keys */
+@extern method OLItemClass, MSG_META_KBD_CHAR
+{
+    optr vp = VisFindParent(oself);
+
+    if (vp)
+	(void) @call vp::MSG_META_FUP_KBD_CHAR(character, flags, state);
+}
+
+@extern method OLItemClass, MSG_META_FUP_KBD_CHAR
+{
+    optr vp = VisFindParent(oself);
+
+    return vp ? @call vp::MSG_META_FUP_KBD_CHAR(character, flags, state)
+	      : FALSE;
+}
+
+/* OLItemNavigate: the group navigates */
+@extern method OLItemClass, MSG_SPEC_NAVIGATE
+{
+    optr p = GenFindParent(oself);
+
+    return p ? @call p::MSG_SPEC_NAVIGATE(navigateFlags) : 0;
+}
+
+/* OLItemActivate: pressed and released */
+@extern method OLItemClass, MSG_GEN_ACTIVATE
+{
+    (void) @call oself::MSG_OL_ITEM_ENSURE_IS_RELEASED(
+					OIENPF_SIMULATE_PRESS_AND_RELEASE);
+}
+
+/*
+ * OLItemNavigateIfDisabled: the selection moved onto the item (flags:
+ * OLIS_NAVIGATE_BACKWARD): enabled, nothing; disabled the first time,
+ * the group noted it and navigates on (a second time, the round is
+ * over: no more)
+ */
+@extern method OLItemClass, MSG_OL_ITEM_NAVIGATE_IF_DISABLED
+{
+    optr p;
+    word id, *d;
+    Boolean go = TRUE;
+
+    pself->OLII_state &= ~OLIS_NAVIGATE_BACKWARD;
+    pself->OLII_state |= (flags & OLIS_NAVIGATE_BACKWARD) |
+			 OLIS_NAVIGATE_IF_DISABLED;
+    if (pself->OLII_state & OLIS_MONIKER_INVALID)
+	return;
+    p = LockParent(oself);
+    if (!p)
+	return;
+    if (GenCheckIfFullyEnabled(oself, FALSE)) {
+	(void) ObjVarDeleteData(p, TEMP_OL_ITEM_GROUP_NAVIGATE_IF_DISABLED_ITEM);
+	UnlockParent(oself, p);
+	return;
+    }
+    id = Identifier(oself);
+    d = ObjVarFindData(p, TEMP_OL_ITEM_GROUP_NAVIGATE_IF_DISABLED_ITEM);
+    if (d) {
+	if (*d == id) {
+	    (void) ObjVarDeleteData(p,
+				    TEMP_OL_ITEM_GROUP_NAVIGATE_IF_DISABLED_ITEM);
+	    go = FALSE;
+	}
+    } else {
+	d = ObjVarAddData(p, TEMP_OL_ITEM_GROUP_NAVIGATE_IF_DISABLED_ITEM,
+			  sizeof(word));
+	*d = id;
+    }
+    UnlockParent(oself, p);
+    if (go)
+	@call p::MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_ENABLED(oself,
+		Item(oself)->OLII_state & (OLIS_NAVIGATE_IF_DISABLED |
+					   OLIS_NAVIGATE_BACKWARD));
+}
+
+/* ---------------------------------------------------------------------
+ * The state and drawing
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLItemUpdateDrawState: the button's draw flags from the item's state:
+ * selected if selected (not indeterminate), or pressed on (an exclusive
+ * one; not a plain menu item); bordered if pressed on or cursored in a
+ * menu
+ */
+void OLItemUpdateDrawState(optr o)
+{
+    OLItemInstance *i = Item(o);
+    byte s = (byte) i->OLBI_specState;
+    OLItemState st = i->OLII_state;
+    Boolean menu = (i->OLBI_specState & OLBSS_IN_MENU) != 0;
+
+    s &= (byte) (~OLBOF_STATE_FLAGS_MASK | OLBSS_CURSORED);
+    if (!(st & OLIS_INDETERMINATE) && (st & OLIS_SELECTED))
+	s |= OLBSS_SELECTED;
+    else if (((st & OLIS_DRAW_AS_TOOLBOX) || !menu) &&
+	     i->OLII_behavior != GIGBT_NON_EXCLUSIVE &&
+	     (st & OLIS_PRESSING_ON_ITEM))
+	s |= OLBSS_SELECTED;
+    if ((st & OLIS_PRESSING_ON_ITEM) && menu)
+	s |= OLBSS_BORDERED;
+    if ((i->OLBI_specState & OLBSS_CURSORED) && menu)
+	s |= OLBSS_BORDERED;
+    i->OLBI_specState = (i->OLBI_specState & 0xff00) | s;
+}
+
+/*
+ * OLItemDrawIfNewState: drawn (MSG_VIS_REDRAW_ENTIRE_OBJECT) if the
+ * enabled state, default or selected changed; in a menu bordered; a
+ * non exclusive one's depressed; with a keyboard (not in a menu) the
+ * cursor
+ */
+void OLItemDrawIfNewState(optr o)
+{
+    OLItemInstance *i = Item(o);
+    byte now = (byte) i->OLBI_specState, was = i->OLBI_optFlags;
+    byte d = now ^ was;
+    Boolean menu = (i->OLBI_specState & OLBSS_IN_MENU) != 0;
+
+    if (i->OLII_state & OLIS_MONIKER_INVALID)
+	return;
+    if (((i->VI_attrs ^ was) & VA_FULLY_ENABLED) ||
+	(d & (OLBSS_DEFAULT | OLBSS_SELECTED)) ||
+	(menu && (d & OLBSS_BORDERED)) ||
+	(i->OLII_behavior == GIGBT_NON_EXCLUSIVE && (d & OLBSS_DEPRESSED)) ||
+	(OpenCheckIfKeyboard() && !menu && (d & OLBSS_CURSORED)))
+	@call o::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+/* OLItemDraw: realized and valid, drawn in color; the state drawn
+ * noted */
+@extern method OLItemClass, MSG_VIS_DRAW
+{
+    pself->OLII_state &= ~(OLIS_NAVIGATE_IF_DISABLED | OLIS_NAVIGATE_BACKWARD);
+    if (!(pself->VI_attrs & VA_REALIZED) ||
+	(pself->VI_optFlags & VOF_IMAGE_INVALID))
+	return;
+    GrSaveState(gstate);
+    ItemDrawColorItem(oself, gstate, drawFlags);
+    GrRestoreState(gstate);
+    UpdateItemState(oself);
+}
+
+/* UpdateItemState: the state drawn noted in OLBI_optFlags */
+void UpdateItemState(optr o)
+{
+    OLItemInstance *i = Item(o);
+    byte f = ((byte) i->OLBI_specState & OLBOF_STATE_FLAGS_MASK) |
+	     (i->VI_attrs & VA_FULLY_ENABLED) | OLBOF_DRAW_STATE_KNOWN;
+
+    i->OLBI_optFlags &= ~(OLBOF_STATE_FLAGS_MASK | OLBOF_ENABLED);
+    i->OLBI_optFlags |= f;
+}
+
+/* OLItemSetState: a new selected or indeterminate state, drawn unless
+ * suppressed (or cursored and suppressed then) */
+@extern method OLItemClass, MSG_OL_ITEM_SET_STATE
+{
+    byte s = (byte) state & (OLIS_SELECTED | OLIS_INDETERMINATE);
+
+    if (!((pself->OLII_state ^ s) & (OLIS_SELECTED | OLIS_INDETERMINATE)))
+	return;
+    pself->OLII_state &= ~(OLIS_SELECTED | OLIS_INDETERMINATE);
+    pself->OLII_state |= s;
+    OLItemUpdateDrawState(oself);
+    if (updateFlags & OLIUF_SUPPRESS_DRAW)
+	return;
+    if ((updateFlags & OLIUF_SUPPRESS_DRAW_IF_CURSORED) &&
+	(Item(oself)->OLBI_specState & OLBSS_CURSORED))
+	return;
+    OLItemDrawIfNewState(oself);
+}
+
+/*
+ * OLItemRedraw: the enabled state from the generic one, the state from
+ * the group, drawn in full
+ */
+@extern method OLItemClass, MSG_OL_ITEM_REDRAW
+{
+    optr p = GenFindParent(oself);
+    Boolean en;
+    byte s;
+
+    if (!p)
+	return;
+    en = GenCheckIfFullyEnabled(oself, FALSE);
+    if (en != ((Item(oself)->VI_attrs & VA_FULLY_ENABLED) != 0)) {
+	if (en)
+	    (void) @callsuper oself::OLItemClass::MSG_SPEC_NOTIFY_ENABLED(
+			VUM_NOW, NEF_STATE_CHANGING);
+	else
+	    (void) @callsuper oself::OLItemClass::MSG_SPEC_NOTIFY_NOT_ENABLED(
+			VUM_NOW, NEF_STATE_CHANGING);
+    }
+    s = @call p::MSG_OL_IGROUP_GET_ITEM_STATE(Identifier(oself));
+    @call oself::MSG_OL_ITEM_SET_STATE(s, OLIUF_SUPPRESS_DRAW);
+    Item(oself)->OLBI_optFlags &= ~OLBOF_DRAW_STATE_KNOWN;
+    @call oself::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+/* OLItemSetInteractableState: a dynamic list's item without its
+ * moniker yet is not */
+@extern method OLItemClass, MSG_GEN_ITEM_SET_INTERACTABLE_STATE
+{
+    pself->OLII_state &= ~OLIS_MONIKER_INVALID;
+    if (!interactable)
+	pself->OLII_state |= OLIS_MONIKER_INVALID;
+}
+
+/*
+ * OLItemSetupMkrArgs: the moniker of an item: a menu item's; the
+ * keyboard accelerator as for a button; left justified, centered
+ * vertically, the item's insets (a tool's)
+ */
+void OLItemSetupMkrArgs(optr o, OpenMonikerArgs *a)
+{
+    OLItemInstance *i = Item(o);
+    Boolean menu = (i->OLBI_specState & OLBSS_IN_MENU) != 0;
+
+    memset(a, 0, sizeof(*a));
+    if (menu)
+	a->OMA_monikerAttrs |= OLMA_IS_MENU_ITEM;
+    if (OpenCheckIfKeyboardNavigation() &&
+	!(i->OLBI_fixedAttrs & OLBFA_FORCE_NO_SHORTCUT)) {
+	a->OMA_monikerAttrs |= OLMA_DISP_KBD_MONIKER;
+	if (!OpenCheckIfKeyboardOnly() &&
+	    !(i->OLBI_fixedAttrs & OLBFA_FORCE_SHORTCUT) && !menu)
+	    a->OMA_monikerAttrs &= ~OLMA_DISP_KBD_MONIKER;
+    }
+    if ((i->OLBI_moreAttrs & OLBMA_DRAW_SHORTCUT_BELOW) && !menu)
+	a->OMA_monikerAttrs |= OLMA_DRAW_SHORTCUT_BELOW;
+    a->OMA_drawMonikerFlags = (J_LEFT << DMF_X_JUST_OFFSET) |
+			      (J_CENTER << DMF_Y_JUST_OFFSET);
+    a->OMA_leftInset = MO_ITEM_INSET_LEFT;
+    a->OMA_rightInset = MO_ITEM_INSET_RIGHT;
+    a->OMA_topInset = a->OMA_bottomInset = OpenMinimizeIfCGA(MO_ITEM_INSET_Y);
+    if (i->OLII_state & OLIS_DRAW_AS_TOOLBOX) {
+	a->OMA_leftInset = a->OMA_rightInset = TOOLBOX_INSET_X;
+	a->OMA_topInset = a->OMA_bottomInset = TOOLBOX_INSET_Y;
+    }
+}
+
+/* GetCheckboxBounds: the box of a check box or diamond, vertically
+ * centered at the item's left */
+void GetCheckboxBounds(optr o, Rectangle *r)
+{
+    Rectangle b;
+    sword d;
+
+    OpenGetLineBounds(o, &b);
+    r->R_left = b.R_left + CHECK_LEFT_BORDER;
+    r->R_right = r->R_left + CHECK_WIDTH_REAL - 1;
+    d = (sword) ((b.R_bottom - b.R_top - (CHECK_HEIGHT - 2)) >> 1);
+    r->R_top = b.R_top + d;
+    r->R_bottom = r->R_top + CHECK_HEIGHT - 1;
+}

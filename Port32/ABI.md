@@ -5393,6 +5393,38 @@ are left out), the constants, the variables and the routines.
     the flags of a parent OLCtrl, the visibility notification
     (`VisOpenNotifyCommon`) and the size of a generic moniker
     (`SpecGetGenMonikerSize`, with the UI font's height).
+  - `CItem/` (`citemItemGroupClass.goc`, `citemItemGroupVeryCommon.goc`,
+    `citemItemGroupCommon.goc`, `citemBooleanGroup.goc`: `OLItemGroupClass`,
+    `CInclude/Internal/SpecUI/olItemGroupClass.goh`; `citemItemClass.goc`,
+    `citemItemCommon.goc`, `citemItemColor.goc`, `citemCheckedItem.goc`:
+    `OLItemClass`, `OLCheckedItemClass`, `olItemClass.goh`;
+    `CSpec/cspecItem.goc`: `OLBuildItemGroup`, `OLBuildBooleanGroup`,
+    `OLBuildDynamicList`, `OLBuildItem`, `OLBuildBoolean`): a GenItemGroup,
+    GenBooleanGroup or GenDynamicList is an OLItemGroup, an item of a non
+    exclusive group (a boolean) an OLCheckedItem (a check box), else an
+    OLItem (a diamond; a tool in a toolbox). The group keeps the focus
+    item, the anchor and extent of an extended selection and the
+    selection saved while an item is pressed (the intermediate mode:
+    given back if the release is outside); the user's changes are
+    modified, the status message sent and applied through the queue
+    unless in delayed mode. The keyboard: arrows, Home and End move the
+    selection (in a list in add mode the focus), space toggles,
+    Shift-F8 add mode, Ctrl-backslash deselects all; in a menu up and
+    down move the pressed item, return and space select. The mouse:
+    press and release select, a boolean toggles on the press, a non
+    exclusive or extended list extends over the items dragged across.
+    Drawn in color: the diamond's regions (`citemItemColor.asm`), the
+    raised or sunken check box, the menu item's etched border; a
+    changed cursor or enabled state draws only what shows it.
+    Port32 forms: the messages of `olItemGroupClass.goh` and
+    `olItemClass.goh` take C arguments (`OLItemUpdateFlags` in the low
+    byte of a flags word, the state or selection in the high byte, as
+    the asm's dl and dh); `MSG_OL_ITEM_REDRAW` creates its own GState.
+    Not yet: popup lists (`HINT_ITEM_GROUP_MINIMIZE_SIZE`), scrolling
+    lists (`OLScrollListClass`, `OLScrollableItemClass`: built as plain
+    groups), dynamic lists' items, tabs, the black and white look, the
+    focus on a text object, `ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS`,
+    the stay up menus released by a selection.
 - **Port32 changes in the C API.**
   - `WinOpen` and `WinChangePriority` take the layer as a `Handle` (a
     word cut 32-bit handles); `WinOpen`'s colorFlags is the
@@ -5942,6 +5974,13 @@ are left out), the constants, the variables and the routines.
   and the UI's process go and Motif is unloaded. New blocks (and
   semaphores) belong to the current thread's process
   (`KernelOwnerNow`), not to the geode last loaded.
+  Doc 2 holds a radio group and two check boxes: OLItemGroups, OLItems
+  and OLCheckedItems, the initial selections shown, at least a diamond
+  high; the second radio item activated is selected (the first not),
+  down selects the third, the second check box activated is selected;
+  the radio group's two changes are applied once (the second apply
+  finds it no longer modified), the check boxes' once; the items drawn
+  with their state.
 
 ## 14. Open
 

@@ -33,6 +33,14 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CButton/copenButtonClass.goc
                ${c}/CButton/copenButtonCommon.goc
                ${c}/CButton/copenButtonColor.goc
+               ${c}/CItem/citemItemGroupClass.goc
+               ${c}/CItem/citemItemGroupVeryCommon.goc
+               ${c}/CItem/citemItemGroupCommon.goc
+               ${c}/CItem/citemBooleanGroup.goc
+               ${c}/CItem/citemItemClass.goc
+               ${c}/CItem/citemItemCommon.goc
+               ${c}/CItem/citemItemColor.goc
+               ${c}/CItem/citemCheckedItem.goc
                ${c}/CButton/copenMenuButton.goc
                ${c}/CComp/copenMenuBar.goc
                ${c}/CWin/cwinMenu.goc
@@ -65,6 +73,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CSpec/cspecDisplayControl.goc
                ${c}/CSpec/cspecInteraction.goc
                ${c}/CSpec/cspecTrigger.goc
+               ${c}/CSpec/cspecItem.goc
                ${c}/CSpec/cspecCUAS.goc
            INCLUDES ${c}
            PROTOCOL 727.0)

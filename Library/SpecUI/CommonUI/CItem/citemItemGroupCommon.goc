@@ -1,0 +1,869 @@
+/*
+ * citemItemGroupCommon.goc -- OLItemGroupClass (after
+ * citemItemGroupCommon.asm): what the user does with a group.  A
+ * change by the user is a modified one: the generic group is set, made
+ * modified, its status message sent and (not in delayed mode) applied.
+ * Pressing on an item of an exclusive group starts the intermediate
+ * mode: the selection is saved and taken away while the press lasts,
+ * and given back if the press ends outside.  The keyboard: the arrow
+ * keys, Home and End move the selection (or, in a list, the focus), the
+ * space bar toggles; in a menu up and down move between the items.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: popup lists, a focus on
+ * a text object (OpenTestIfFocusOnTextEditObject: taken as not),
+ * ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS, the stay up mode menus
+ * released by a selection in a menu.
+ */
+@include "CItem/citemInt.goh"
+
+/* ---------------------------------------------------------------------
+ * Modified changes
+ * ------------------------------------------------------------------- */
+
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_AND_APPLY_IF_NEEDED
+{
+    CallSelfWithUpdateFlagsAndSetModified(oself, 0, 0, 0,
+					  (OLItemUpdateFlags) flags);
+}
+
+/* OLItemGroupSetModifiedSelection: the item selected (the high byte of
+ * flags non-zero) or none */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_SELECTION
+{
+    CallSelfWithUpdateFlagsAndSetModified(oself,
+		(flags >> 8) ? MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION
+			     : MSG_GEN_ITEM_GROUP_SET_NONE_SELECTED,
+		identifier, 0, (OLItemUpdateFlags) flags);
+}
+
+/*
+ * CallSelfWithUpdateFlagsAndSetModified: the update flags kept for the
+ * update of the items; the message; modified (a temporary change keeps
+ * what was: the asm passes the old state flags); unless temporary, the
+ * status message and FinishSetModifiedState
+ */
+void CallSelfWithUpdateFlagsAndSetModified(optr o, Message msg, word id,
+					   word dx, OLItemUpdateFlags uf)
+{
+    GenItemGroupStateFlags old = IGG(o)->GIGI_stateFlags;
+    Boolean mod;
+
+    IG(o)->OLIGI_updateFlags = uf;
+    switch (msg) {
+    case MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION:
+	@call o::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(id, dx);
+	break;
+    case MSG_GEN_ITEM_GROUP_SET_NONE_SELECTED:
+	@call o::MSG_GEN_ITEM_GROUP_SET_NONE_SELECTED(dx);
+	break;
+    case MSG_GEN_ITEM_GROUP_SET_ITEM_STATE:
+	@call o::MSG_GEN_ITEM_GROUP_SET_ITEM_STATE(id, dx);
+	break;
+    default:
+	break;
+    }
+    mod = (uf & OLIUF_TEMPORARY_CHANGE) ? (old & GIGSF_MODIFIED) != 0
+					: TRUE;
+    @call o::MSG_GEN_ITEM_GROUP_SET_MODIFIED_STATE(mod);
+    if (uf & OLIUF_TEMPORARY_CHANGE)
+	return;
+    @call o::MSG_GEN_ITEM_GROUP_SEND_STATUS_MSG(mod);
+    FinishSetModifiedState(o);
+}
+
+/* FinishSetModifiedState: applied at once unless in delayed mode
+ * (through the queue, first) */
+void FinishSetModifiedState(optr o)
+{
+    if (!(IG(o)->OLCI_buildFlags & OLBF_DELAYED_MODE))
+	@send, forceQueue, insertAtFront o::MSG_GEN_APPLY();
+}
+
+/* OLItemGroupSetModifiedItemState: one item selected or not (the high
+ * byte of flags) */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_ITEM_STATE
+{
+    if (pself->OLIGI_state & OLIGS_CHECKBOXES) {
+	OLBooleanGroupSetModifiedItemState(oself, identifier, flags);
+	return;
+    }
+    CallSelfWithUpdateFlagsAndSetModified(oself,
+		MSG_GEN_ITEM_GROUP_SET_ITEM_STATE, identifier, flags >> 8,
+		(OLItemUpdateFlags) flags);
+}
+
+/* OLItemGroupSetMultipleSelections: the saved selection back with its
+ * indeterminate and modified state */
+static void SetMultipleSelections(optr o, const word *list, word n,
+				  OLItemUpdateFlags uf,
+				  GenItemGroupStateFlags state)
+{
+    GenItemGroupInstance *g;
+
+    IG(o)->OLIGI_updateFlags = uf;
+    g = IGG(o);
+    g->GIGI_stateFlags &= ~GIGSF_INDETERMINATE;
+    g->GIGI_stateFlags |= state & GIGSF_INDETERMINATE;
+    @call o::MSG_GEN_ITEM_GROUP_SET_MULTIPLE_SELECTIONS((word *) list, n);
+    @call o::MSG_GEN_ITEM_GROUP_SET_MODIFIED_STATE(
+				(state & GIGSF_MODIFIED) != 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The mouse
+ * ------------------------------------------------------------------- */
+
+/* OLItemGroupNotifyGroupHasMouseGrab: the release seen even outside */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_GROUP_HAS_MOUSE_GRAB
+{
+    if (pself->OLIGI_state & OLIGS_GROUP_HAS_MOUSE_GRAB)
+	return;
+    pself->OLIGI_state |= OLIGS_GROUP_HAS_MOUSE_GRAB;
+    @call oself::MSG_VIS_ADD_BUTTON_POST_PASSIVE();
+}
+
+/* all buttons up: the group lets go */
+@extern method OLItemGroupClass, MSG_META_POST_PASSIVE_BUTTON
+{
+    if (!(inputState & (BI_B3_DOWN | BI_B2_DOWN | BI_B1_DOWN |
+			BI_B0_DOWN))) {
+	pself->OLIGI_state &= ~OLIGS_GROUP_HAS_MOUSE_GRAB;
+	@call oself::MSG_VIS_REMOVE_BUTTON_POST_PASSIVE();
+    }
+    @callsuper();
+}
+
+@extern method OLItemGroupClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    if (pself->OLIGI_state & OLIGS_GROUP_HAS_MOUSE_GRAB) {
+	pself->OLIGI_state &= ~OLIGS_GROUP_HAS_MOUSE_GRAB;
+	@call oself::MSG_VIS_REMOVE_BUTTON_POST_PASSIVE();
+    }
+    @callsuper();
+}
+
+/* OLItemGroupNotifyItemWillGrabFocus: with the application's focus the
+ * list will have it */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_WILL_GRAB_FOCUS_EXCL
+{
+    GenReturnParams r;
+    optr vp = VisFindParent(oself);
+
+    memset(&r, 0, sizeof(r));
+    if (vp && @call vp::MSG_VIS_P32_VUP_QUERY(&r,
+				SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL, 0, 0) &&
+	r.GRP_bp)
+	IG(oself)->OLIGI_state |= OLIGS_LIST_HAS_FOCUS_EXCL;
+}
+
+/* ---------------------------------------------------------------------
+ * The intermediate mode
+ * ------------------------------------------------------------------- */
+
+/* the result: TRUE if the list does not have the focus */
+static Boolean NoListFocus(optr o)
+{
+    return !(IG(o)->OLIGI_state & OLIGS_LIST_HAS_FOCUS_EXCL);
+}
+
+/*
+ * OLItemGroupStartIntermediateMode: an exclusive group (a list, a
+ * toolbox, not in a menu) pressed on an item that is not selected: the
+ * selection saved and taken away for now (drawn unless the item has
+ * the cursor; the focus and grab left alone).  TRUE if the group does
+ * not have the focus.
+ */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_START_INTERMEDIATE_MODE
+{
+    OLItemUpdateFlags uf;
+    Boolean ret;
+
+    if (IsExtendedSelection(oself) || IsNonExclusive(oself) ||
+	(IG(oself)->OLIGI_state & OLIGS_INTERMEDIATE))
+	return NoListFocus(oself);
+    if (!(IG(oself)->OLIGI_state & OLIGS_SCROLLABLE) &&
+	!ObjVarFindData(oself, HINT_ITEM_GROUP_TOOLBOX_STYLE) &&
+	(IG(oself)->OLCI_optFlags & OLCOF_IN_MENU))
+	return NoListFocus(oself);
+    if (!(IG(oself)->OLIGI_moreState & OLIGMS_PREV_SELECTION_VALID) &&
+	(!IGG(oself)->GIGI_numSelections ||
+	 @call oself::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(identifier))) {
+	SaveCurrentSelection(oself);
+	IG(oself)->OLIGI_moreState &= ~OLIGMS_PREV_SELECTION_VALID;
+	return NoListFocus(oself);
+    }
+    IG(oself)->OLIGI_state |= OLIGS_INTERMEDIATE;
+    SaveCurrentSelection(oself);
+    uf = OLIUF_SUPPRESS_DRAW_IF_CURSORED;
+    ret = FALSE;
+    if (NoListFocus(oself)) {
+	uf = 0;
+	ret = TRUE;
+    }
+    @call oself::MSG_OL_IGROUP_SET_MODIFIED_SELECTION(0,
+		uf | OLIUF_TEMPORARY_CHANGE | OLIUF_LEAVE_FOCUS_AND_GRAB_ALONE);
+    return ret;
+}
+
+/* SaveCurrentSelection: once, the selection and the state flags in a
+ * chunk of our own */
+void SaveCurrentSelection(optr o)
+{
+    OLItemGroupInstance *p = IG(o);
+    MemHandle mh = OptrToHandle(o);
+    word n, buf[64], *list = buf;
+    ChunkHandle ch;
+    MemHandle tmp = 0;
+
+    if (p->OLIGI_moreState & OLIGMS_PREV_SELECTION_VALID)
+	return;
+    p->OLIGI_moreState |= OLIGMS_PREV_SELECTION_VALID;
+    if (p->OLIGI_prevSelections) {
+	LMemFree(ConstructOptr(mh, p->OLIGI_prevSelections));
+	IG(o)->OLIGI_prevSelections = 0;
+    }
+    n = IGG(o)->GIGI_numSelections;
+    if (n > sizeof(buf) / sizeof(buf[0])) {
+	tmp = MemAlloc(n * sizeof(word), HF_DYNAMIC, HAF_LOCK);
+	list = MemDeref(tmp);
+    }
+    if (n)
+	n = @call o::MSG_GEN_ITEM_GROUP_GET_MULTIPLE_SELECTIONS(list, n);
+    ch = LMemAlloc(mh, n * sizeof(word));
+    if (n)
+	memcpy(LMemDeref(ConstructOptr(mh, ch)), list, n * sizeof(word));
+    if (tmp)
+	MemFree(tmp);
+    p = IG(o);
+    p->OLIGI_prevSelections = ch;
+    p->OLIGI_prevState = IGG(o)->GIGI_stateFlags;
+}
+
+/*
+ * OLItemGroupEndIntermediateMode: the mode ends; asked to, the saved
+ * selection comes back (through the queue, first)
+ */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_END_INTERMEDIATE_MODE
+{
+    if ((pself->OLIGI_state & OLIGS_CHECKBOXES) ||
+	IGG(oself)->GIGI_behaviorType == GIGBT_EXTENDED_SELECTION)
+	return;
+    pself = IG(oself);
+    if ((pself->OLIGI_state & OLIGS_INTERMEDIATE)) {
+	pself->OLIGI_state &= ~OLIGS_INTERMEDIATE;
+	if (flags & OIENPF_RESTORE_SELECTION_TO_ORIGINAL_OWNER) {
+	    @send, forceQueue, insertAtFront
+		oself::MSG_OL_IGROUP_RESELECT_EXCL(flags);
+	    return;
+	}
+    }
+    pself->OLIGI_moreState &= ~OLIGMS_PREV_SELECTION_VALID;
+}
+
+/* OLItemGroupReselectExcl: out of intermediate mode, the saved
+ * selection set again (and the focus to it if asked and the list has
+ * it) */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_RESELECT_EXCL
+{
+    MemHandle mh = OptrToHandle(oself);
+    word n, buf[64], *list = buf;
+    MemHandle tmp = 0;
+    optr sel;
+
+    if ((pself->OLIGI_state & OLIGS_INTERMEDIATE) ||
+	!(pself->OLIGI_moreState & OLIGMS_PREV_SELECTION_VALID))
+	return;
+    n = LMemGetChunkSize(ConstructOptr(mh, pself->OLIGI_prevSelections)) /
+	sizeof(word);
+    if (n > sizeof(buf) / sizeof(buf[0])) {
+	tmp = MemAlloc(n * sizeof(word), HF_DYNAMIC, HAF_LOCK);
+	list = MemDeref(tmp);
+    }
+    memcpy(list, LMemDeref(ConstructOptr(mh, IG(oself)->OLIGI_prevSelections)),
+	   n * sizeof(word));
+    SetMultipleSelections(oself, list, n, OLIUF_LEAVE_FOCUS_AND_GRAB_ALONE,
+			  IG(oself)->OLIGI_prevState);
+    if (tmp)
+	MemFree(tmp);
+    if (flags & OIENPF_RESTORE_FOCUS_EXCL_STATE_TO_ORIGINAL_OWNER) {
+	if (NoListFocus(oself))
+	    return;
+	if ((sel = GetCurrentSelectionOptr(oself)) != 0)
+	    OLItemGroupVupGrabFocusExclForItem(oself, sel);
+    }
+    IG(oself)->OLIGI_moreState &= ~OLIGMS_PREV_SELECTION_VALID;
+}
+
+/*
+ * OLItemGroupTestForRedundantIntSelection: the selection (the item
+ * released, or the instance data's) is the one before intermediate
+ * mode (without one: the current single selection)
+ */
+@extern method OLItemGroupClass,
+	MSG_OL_IGROUP_TEST_FOR_REDUNDANT_INTERMEDIATE_SELECTION
+{
+    MemHandle mh = OptrToHandle(oself);
+    GenItemGroupInstance *g;
+    const word *list;
+    word one = identifier, n = 1, cur, m;
+    ChunkHandle prev = pself->OLIGI_prevSelections;
+
+    list = &one;
+    if (fromInstance) {
+	g = IGG(oself);
+	n = g->GIGI_numSelections;
+	one = g->GIGI_selection;
+	if (n > 1)
+	    list = LMemDeref(ConstructOptr(mh, (ChunkHandle) g->GIGI_selection));
+    }
+    if (!prev) {
+	if (!n || !GetCurrentSelection(oself, &cur))
+	    return FALSE;
+	return cur == list[0];
+    }
+    m = LMemGetChunkSize(ConstructOptr(mh, prev)) / sizeof(word);
+    if (m != n)
+	return FALSE;
+    return !n || !memcmp(LMemDeref(ConstructOptr(mh, prev)), list,
+			 n * sizeof(word));
+}
+
+/* ---------------------------------------------------------------------
+ * The selection moved by the keyboard
+ * ------------------------------------------------------------------- */
+
+Boolean GetFocusItem(optr o, word *id)
+{
+    OLItemGroupInstance *p = IG(o);
+
+    if (!(p->OLIGI_state & OLIGS_HAS_FOCUS_ITEM))
+	return FALSE;
+    *id = p->OLIGI_focusItem;
+    return TRUE;
+}
+
+/* IsJustMovingFocus: a list in add mode, not extending, moves the focus
+ * only */
+static Boolean IsJustMovingFocus(optr o)
+{
+    OLItemGroupMoreState m;
+
+    if (IsNonExclusive(o))
+	return TRUE;
+    m = IG(o)->OLIGI_moreState;
+    return (m & OLIGMS_XORING_SELECTION) &&
+	   !(m & OLIGMS_EXTENDING_SELECTION);
+}
+
+/* SetExtendingFromKbdFlags: shift extends (unless the flags are the
+ * previous ones) */
+static void SetExtendingFromKbdFlags(optr o, word kbdFlags)
+{
+    OLItemGroupInstance *p = IG(o);
+
+    if ((kbdFlags >> 8) & OLEKF_USE_PREVIOUS)
+	return;
+    p->OLIGI_moreState &= ~OLIGMS_EXTENDING_SELECTION;
+    if ((kbdFlags >> 8) & OLEKF_SHIFT_PRESSED)
+	p->OLIGI_moreState |= OLIGMS_EXTENDING_SELECTION;
+}
+
+/*
+ * SetNoneSelectedAndWraparoundState: extending: no wrapping around;
+ * else the selection is cleared first (and the extended one)
+ */
+static void SetNoneSelectedAndWraparoundState(optr o,
+					      GenScanItemsFlags *flags,
+					      word kbdFlags)
+{
+    SetExtendingFromKbdFlags(o, kbdFlags);
+    if (IsJustMovingFocus(o))
+	return;
+    if (CheckIfExtendingSelection(o)) {
+	*flags &= ~GSIF_WRAP_AROUND;
+	return;
+    }
+    IG(o)->OLIGI_displayedItem = 0;
+    @call o::MSG_GEN_ITEM_GROUP_SET_NONE_SELECTED(FALSE);
+}
+
+/*
+ * OLItemGroupSetUserCommon: the item next to the focus item (from the
+ * start without one): an exclusive group selects it (the anchor of a
+ * list), an extending list extends to it, else (non exclusive, read
+ * only, add mode) the focus moves to it
+ */
+static void SetUserCommon(optr o, GenScanItemsFlags flags, word kbdFlags)
+{
+    word id = 0, nid;
+    optr item;
+
+    if (!GetFocusItem(o, &id))
+	flags |= GSIF_FROM_START;
+    SetNoneSelectedAndWraparoundState(o, &flags, kbdFlags);
+    if (!ScanItems(o, flags, id, 1, &nid, &item))
+	return;
+    if (item)
+	OLItemGroupAbortAllUserInteraction(o);
+    if (!IsJustMovingFocus(o) &&
+	!(((GenInstance *) ObjDerefGen(o))->GI_attrs & GA_READ_ONLY)) {
+	if (!CheckIfExtendingSelection(o)) {
+	    @call o::MSG_OL_IGROUP_SET_MODIFIED_SELECTION(nid, 1 << 8);
+	    IG(o)->OLIGI_extentItem = nid;
+	    SetAnchorItem(o, nid);
+	    return;
+	}
+	IG(o)->OLIGI_moreState |= OLIGMS_SELECTING_ITEMS;
+	ExtendSelection(o, nid, 0);
+    }
+    SetFocusItem(o, nid, TRUE);
+    EnsureCurrentItemVisible(o, nid);
+    OLItemGroupVupGrabFocusExclForItem(o, item);
+}
+
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_NEXT
+{
+    SetUserCommon(oself, GSIF_FORWARD | GSIF_WRAP_AROUND, kbdFlags);
+}
+
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_PREVIOUS
+{
+    SetUserCommon(oself, GSIF_WRAP_AROUND, kbdFlags);
+}
+
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_START
+{
+    SetUserCommon(oself, GSIF_FORWARD | GSIF_FROM_START, kbdFlags);
+}
+
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_END
+{
+    SetUserCommon(oself, GSIF_FROM_START, kbdFlags);
+}
+
+/*
+ * OLItemGroupToggleFocusExclItem: a list toggles (or, not in add mode,
+ * selects alone) the focus item; else the focus item is pressed and
+ * released
+ */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_TOGGLE_FOCUS_EXCL_ITEM
+{
+    word id;
+    optr item;
+
+    (void) kbdFlags;
+    if (((GenInstance *) ObjDerefGen(oself))->GI_attrs & GA_READ_ONLY)
+	return;
+    if (IsExtendedSelection(oself)) {
+	if (!GetFocusItem(oself, &id))
+	    return;
+	if (!(IG(oself)->OLIGI_moreState & OLIGMS_EXTENDING_SELECTION)) {
+	    SetAnchorItem(oself, id);
+	    if (!CheckIfInAddMode(oself))
+		goto normalToggle;
+	}
+	if (!CheckIfInAddMode(oself))
+	    @call oself::MSG_GEN_ITEM_GROUP_SET_NONE_SELECTED(FALSE);
+	IG(oself)->OLIGI_moreState |= OLIGMS_SELECTING_ITEMS;
+	if (id == IG(oself)->OLIGI_anchorItem)
+	    SetToToggleAnchorItem(oself);
+	ExtendSelection(oself, id, OLIUF_LEAVE_FOCUS_AND_GRAB_ALONE);
+	return;
+    }
+normalToggle:
+    item = GetFocusItemOptr(oself);
+    if (item && item != oself)
+	(void) @call item::MSG_OL_ITEM_ENSURE_IS_RELEASED(
+					OIENPF_SIMULATE_PRESS_AND_RELEASE);
+}
+
+/* OLItemGroupGetCurrentFocusExclOrFirst: 0 if neither */
+optr OLItemGroupGetCurrentFocusExclOrFirst(optr o)
+{
+    optr item = GetFocusItemOptr(o);
+
+    if (!item)
+	(void) OLItemGroupGetFirstItemOptr(o, &item);
+    return item;
+}
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+#define CTRL_KEY(c)	((word) ((VC_ISCTRL << 8) | (c)))
+#define SPACE_KEY	((word) ((CS_BSW << 8) | VC_BLANK))
+
+/* OLItemGroupTestForShiftKeyEvent: shift down extends */
+static void TestForShiftKeyEvent(optr o, word character, word flags)
+{
+    OLItemGroupInstance *p;
+
+    if (character != CTRL_KEY(VC_LSHIFT) && character != CTRL_KEY(VC_RSHIFT))
+	return;
+    p = IG(o);
+    p->OLIGI_moreState &= ~OLIGMS_EXTENDING_SELECTION;
+    if (!(flags & CF_RELEASE))
+	p->OLIGI_moreState |= OLIGMS_EXTENDING_SELECTION;
+}
+
+/* OLItemGroupTestForSelectKeyEvent: in a menu, return or space toggles
+ * the focus item */
+static Boolean TestForSelectKeyEvent(optr o, word character)
+{
+    if (((GenInstance *) ObjDerefGen(o))->GI_attrs & GA_READ_ONLY)
+	return FALSE;
+    if (character != CTRL_KEY(VC_CTRL_M) && character != SPACE_KEY)
+	return FALSE;
+    @call o::MSG_OL_IGROUP_TOGGLE_FOCUS_EXCL_ITEM(0);
+    return TRUE;
+}
+
+/*
+ * OLItemGroupMoveFocusToNextOrPreviousItem: in a menu: the focus item
+ * no longer pressed, the next one (dir 1) or previous one (-1) pressed
+ * (a popup list wraps around); TRUE if it moved
+ */
+static Boolean MoveFocusToNextOrPreviousItem(optr o, sword dir)
+{
+    optr item = OLItemGroupGetCurrentFocusExclOrFirst(o), next;
+    GenScanItemsFlags f = 0;
+    word id = 0, nid;
+
+    SetFocusFromOptr(o, item);
+    if (item && item != o)
+	(void) @call item::MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED(
+			OIENPF_RESTORE_SELECTION_TO_ORIGINAL_OWNER |
+			OIENPF_REDRAW_PRESSED_ITEM);
+    (void) GetFocusItem(o, &id);
+    if (dir > 0)
+	f |= GSIF_FORWARD;
+    else
+	dir = -dir;
+    if (IG(o)->OLIGI_moreState & OLIGMS_POPUP_LIST)
+	f |= GSIF_WRAP_AROUND;
+    if (!ScanItems(o, f, id, dir, &nid, &next) || nid == id)
+	return FALSE;
+    if (next && next != o)
+	@call next::MSG_OL_ITEM_ENSURE_IS_PRESSED();
+    if (IG(o)->OLCI_optFlags & OLCOF_IN_MENU) {
+	EventHandle ev = @record OLMenuWinClass::
+				MSG_OL_MENU_WIN_UPDATE_SCROLLABLE_MENU();
+
+	@call o::MSG_VIS_VUP_CALL_OBJECT_OF_CLASS(ev);
+    }
+    return TRUE;
+}
+
+/* the extended keys (OLExtendedKbdBindings): the message and the
+ * OLExtendedKbdFlags of ctrl and shift; 0 if none */
+static Message ExtendedKey(word character, word flags, word *kbdFlags)
+{
+    byte ss = (byte) (flags >> 8);
+    byte k = 0;
+
+    if (ss & (SS_LALT | SS_RALT))
+	return 0;
+    if (ss & (SS_LCTRL | SS_RCTRL))
+	k |= OLEKF_CTRL_PRESSED;
+    if (ss & (SS_LSHIFT | SS_RSHIFT))
+	k |= OLEKF_SHIFT_PRESSED;
+    *kbdFlags = (word) k << 8;
+    switch (character) {
+    case SPACE_KEY:
+	return MSG_OL_IGROUP_TOGGLE_FOCUS_EXCL_ITEM;
+    case CTRL_KEY(VC_UP):
+    case CTRL_KEY(VC_LEFT):
+	return MSG_OL_IGROUP_SET_SELECTION_TO_PREVIOUS;
+    case CTRL_KEY(VC_DOWN):
+    case CTRL_KEY(VC_RIGHT):
+	return MSG_OL_IGROUP_SET_SELECTION_TO_NEXT;
+    case CTRL_KEY(VC_HOME):
+	return MSG_OL_IGROUP_SET_SELECTION_TO_START;
+    case CTRL_KEY(VC_END):
+	return MSG_OL_IGROUP_SET_SELECTION_TO_END;
+    case CTRL_KEY(VC_F8):
+	if (k == OLEKF_SHIFT_PRESSED)
+	    return MSG_OL_IGROUP_TOGGLE_ADD_MODE;
+	return 0;
+    case (CS_BSW << 8) | C_BACKSLASH:
+	if (k == OLEKF_CTRL_PRESSED)
+	    return MSG_OL_IGROUP_DESELECT_ALL;
+	return 0;
+    }
+    return 0;
+}
+
+/*
+ * OLItemGroupTestForArrowKeyEvent: in a menu up and down move the
+ * focus; in a window the extended keys
+ */
+static Boolean TestForArrowKeyEvent(optr o, word character, word flags)
+{
+    word kf;
+    Message m;
+
+    if (IG(o)->OLCI_optFlags & OLCOF_IN_MENU) {
+	if ((flags >> 8) & (SS_LALT | SS_RALT))
+	    return FALSE;
+	if (character == CTRL_KEY(VC_UP))
+	    return MoveFocusToNextOrPreviousItem(o, -1);
+	if (character == CTRL_KEY(VC_DOWN))
+	    return MoveFocusToNextOrPreviousItem(o, 1);
+	return FALSE;
+    }
+    m = ExtendedKey(character, flags, &kf);
+    if (!m)
+	return FALSE;
+    switch (m) {
+    case MSG_OL_IGROUP_TOGGLE_ADD_MODE:
+	@call o::MSG_OL_IGROUP_TOGGLE_ADD_MODE();
+	break;
+    case MSG_OL_IGROUP_DESELECT_ALL:
+	@call o::MSG_OL_IGROUP_DESELECT_ALL();
+	break;
+    case MSG_OL_IGROUP_TOGGLE_FOCUS_EXCL_ITEM:
+	@call o::MSG_OL_IGROUP_TOGGLE_FOCUS_EXCL_ITEM(kf);
+	break;
+    case MSG_OL_IGROUP_SET_SELECTION_TO_PREVIOUS:
+	@call o::MSG_OL_IGROUP_SET_SELECTION_TO_PREVIOUS(kf);
+	break;
+    case MSG_OL_IGROUP_SET_SELECTION_TO_NEXT:
+	@call o::MSG_OL_IGROUP_SET_SELECTION_TO_NEXT(kf);
+	break;
+    case MSG_OL_IGROUP_SET_SELECTION_TO_START:
+	@call o::MSG_OL_IGROUP_SET_SELECTION_TO_START(kf);
+	break;
+    case MSG_OL_IGROUP_SET_SELECTION_TO_END:
+	@call o::MSG_OL_IGROUP_SET_SELECTION_TO_END(kf);
+	break;
+    }
+    return TRUE;
+}
+
+/* a mnemonic of one of the items activates it */
+static Boolean ChildMnemonic(optr o, word character, word flags,
+			     word state)
+{
+    optr child;
+    word i;
+
+    for (i = 0; (child = @call o::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++)
+	if (@call child::MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(character,
+								  flags,
+								  state))
+	    return TRUE;
+    return FALSE;
+}
+
+/*
+ * OLItemGroupKbdChar: the shift key noted; presses: in a menu the
+ * select keys, the arrow keys, the items' mnemonics (not with ctrl);
+ * the rest (and down and escape, which open and close) up to the
+ * parent
+ */
+static Boolean ItemGroupKbdChar(optr o, word character, word flags,
+				word state)
+{
+    byte cf = (byte) flags;
+    optr vp;
+
+    TestForShiftKeyEvent(o, character, flags);
+    if (!(cf & (CF_STATE_KEY | CF_TEMP_ACCENT | CF_RELEASE))) {
+	if ((IG(o)->OLCI_optFlags & OLCOF_IN_MENU) &&
+	    TestForSelectKeyEvent(o, character))
+	    return TRUE;
+	if (TestForArrowKeyEvent(o, character, flags))
+	    return TRUE;
+	if (!((flags >> 8) & (SS_LCTRL | SS_RCTRL)) &&
+	    ChildMnemonic(o, character, flags, state))
+	    character = CTRL_KEY(VC_NULL);
+	if (character != CTRL_KEY(VC_DOWN) &&
+	    character != CTRL_KEY(VC_ESCAPE) &&
+	    (IG(o)->OLIGI_moreState & OLIGMS_POPUP_LIST))
+	    return TRUE;
+    }
+    vp = VisFindParent(o);
+    return vp ? @call vp::MSG_META_FUP_KBD_CHAR(character, flags, state)
+	      : FALSE;
+}
+
+@extern method OLItemGroupClass, MSG_META_KBD_CHAR
+{
+    (void) ItemGroupKbdChar(oself, character, flags, state);
+}
+
+@extern method OLItemGroupClass, MSG_META_FUP_KBD_CHAR
+{
+    return ItemGroupKbdChar(oself, character, flags, state);
+}
+
+/* OLItemGroupActivateObjectWithMnemonic: the group's mnemonic gives it
+ * the focus (not in a toolbox); else its items' */
+@extern method OLItemGroupClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    if ((pself->VI_attrs & VA_FULLY_ENABLED) &&
+	VisCheckMnemonic(oself, character, flags, state)) {
+	if (!(IG(oself)->OLCI_buildFlags & OLBF_TOOLBOX))
+	    MetaGrabFocusExclLow(oself);
+	return TRUE;
+    }
+    return @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The focus
+ * ------------------------------------------------------------------- */
+
+/* OLItemGroupNavigate: with a keyboard, an enabled group with an item
+ * takes the focus */
+@extern method OLItemGroupClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    NavigateCommonFlags f = 0;
+
+    if (OpenCheckIfKeyboard() && !(pself->OLCI_buildFlags & OLBF_TOOLBOX) &&
+	(pself->VI_attrs & VA_FULLY_ENABLED) &&
+	OLItemGroupGetCurrentFocusExclOrFirst(oself))
+	f = NCF_IS_FOCUSABLE;
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, f,
+			     OptrToChunk(oself));
+}
+
+/*
+ * OLItemGroupGainedFocusExcl: in a menu the first item (the last when
+ * coming up) is pressed, none: on to the next field; in a window the
+ * focus item (or the first) takes the focus
+ */
+@extern method OLItemGroupClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    optr item;
+    word id;
+
+    pself->OLIGI_state |= OLIGS_LIST_HAS_FOCUS_EXCL;
+    if ((pself->OLCI_optFlags & OLCOF_IN_MENU) &&
+	!(pself->OLIGI_moreState & OLIGMS_POPUP_LIST)) {
+	/* (Port32: OpenGetNavigationChar not yet: from the start) */
+	if (ScanItems(oself, GSIF_FORWARD | GSIF_FROM_START, 0, 0, &id,
+		      &item)) {
+	    if (item && item != oself)
+		@call item::MSG_OL_ITEM_ENSURE_IS_PRESSED();
+	} else
+	    OLItemGroupMoveFocusToNextField(oself);
+	return;
+    }
+    if ((item = OLItemGroupGetCurrentFocusExclOrFirst(oself)) != 0)
+	OLItemGroupVupGrabFocusExclForItem(oself, item);
+}
+
+@extern method OLItemGroupClass, MSG_META_LOST_FOCUS_EXCL
+{
+    pself->OLIGI_state &= ~OLIGS_LIST_HAS_FOCUS_EXCL;
+    @callsuper();
+}
+
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_GAINED_FOCUS_EXCL
+{
+    SetFocusFromOptr(oself, item);
+    IG(oself)->OLIGI_state |= OLIGS_LIST_HAS_FOCUS_EXCL;
+}
+
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_LOST_FOCUS_EXCL
+{
+    (void) item;
+    pself->OLIGI_state &= ~OLIGS_LIST_HAS_FOCUS_EXCL;
+}
+
+/* OLItemGroupMoveFocusElsewhere: to the first item, else on */
+static void MoveFocusElsewhere(optr o)
+{
+    optr item;
+
+    if (OLItemGroupGetFirstItemOptr(o, &item))
+	OLItemGroupVupGrabFocusExclForItem(o, item);
+    else
+	OLItemGroupMoveFocusToNextField(o);
+}
+
+/* OLItemGroupNotifyItemSetNotUsable: the focus item gone: none; the
+ * focus moves elsewhere if the list has it */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_USABLE
+{
+    if (!IsFocusItemOptr(oself, item))
+	return;
+    SetFocusItem(oself, IG(oself)->OLIGI_focusItem, FALSE);
+    if (IG(oself)->OLIGI_state & OLIGS_LIST_HAS_FOCUS_EXCL)
+	MoveFocusElsewhere(oself);
+}
+
+/*
+ * OLItemGroupNotifyItemSetNotEnabled: an item disabled: out of an
+ * extended selection; navigating, the selection moves on (through the
+ * queue); else as for one not usable
+ */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_ENABLED
+{
+    if (!(pself->VI_attrs & VA_FULLY_ENABLED))
+	return;
+    if (CheckIfExtendingSelection(oself))
+    {
+	word id = @call item::MSG_GEN_ITEM_GET_IDENTIFIER();
+
+	@call oself::MSG_GEN_ITEM_GROUP_SET_ITEM_STATE(id, FALSE);
+    }
+    if (navFlags & OLIS_NAVIGATE_IF_DISABLED) {
+	if (navFlags & OLIS_NAVIGATE_BACKWARD)
+	    @send, forceQueue oself::MSG_OL_IGROUP_SET_SELECTION_TO_PREVIOUS(
+						OLEKF_USE_PREVIOUS << 8);
+	else
+	    @send, forceQueue oself::MSG_OL_IGROUP_SET_SELECTION_TO_NEXT(
+						OLEKF_USE_PREVIOUS << 8);
+	return;
+    }
+    @call oself::MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_USABLE(item);
+}
+
+@extern method OLItemGroupClass, MSG_SPEC_SET_NOT_USABLE
+{
+    if (pself->OLIGI_state & OLIGS_LIST_HAS_FOCUS_EXCL)
+	OLItemGroupMoveFocusToNextField(oself);
+    @callsuper();
+}
+
+/* OLItemGroupMoveFocusToNextField: the window moves the focus on; if it
+ * stays here, the group lets go of it */
+void OLItemGroupMoveFocusToNextField(optr o)
+{
+    optr vp = VisFindParent(o);
+
+    IG(o)->OLIGI_state &= ~OLIGS_LIST_HAS_FOCUS_EXCL;
+    if (vp)
+	@call vp::MSG_SPEC_NAVIGATE_TO_NEXT_FIELD();
+    if (IG(o)->OLIGI_state & OLIGS_LIST_HAS_FOCUS_EXCL) {
+	MetaReleaseFocusExclLow(o);
+	IG(o)->OLIGI_state &= ~OLIGS_LIST_HAS_FOCUS_EXCL;
+    }
+}
+
+/*
+ * OLItemGroupNotifyDoublePress: an exclusive group (that has to have a
+ * selection) activates its dialog's default (with default rings, not in
+ * a menu)
+ */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_DOUBLE_PRESS
+{
+    (void) item;
+    if (IsNonExclusive(oself) ||
+	IGG(oself)->GIGI_behaviorType == GIGBT_EXCLUSIVE_NONE)
+	return;
+    if (!OpenCheckDefaultRings() ||
+	(IG(oself)->OLCI_optFlags & OLCOF_IN_MENU))
+	return;
+    (void) @call oself::MSG_GEN_ACTIVATE_INTERACTION_DEFAULT();
+}
+
+/* OLItemGroupActivate: the group takes the focus */
+@extern method OLItemGroupClass, MSG_GEN_ACTIVATE
+{
+    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+}

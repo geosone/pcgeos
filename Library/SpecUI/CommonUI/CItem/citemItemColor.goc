@@ -1,0 +1,412 @@
+/*
+ * citemItemColor.goc -- OLItemClass drawn in color (after
+ * citemItemColor.asm, Motif): an exclusive item is a diamond (white
+ * over black, black over white with a dark interior when selected), a
+ * non exclusive one a check box (raised, sunken with a dark interior
+ * when selected), a toolbox item a tool (a button raised or sunken in
+ * the background colors); the moniker right of the diamond or box.  In
+ * a menu the item has a border while it has the cursor or is pressed.
+ * When only the cursor or the enabled state changed, only what shows it
+ * is drawn.
+ *
+ * The diamond's regions are citemItemColor.asm's (fixed coordinates
+ * from the pen), the menu border's copenButtonData.asm's.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: tabs.
+ */
+@include "CItem/citemInt.goh"
+
+#define W	PARAM_2
+#define H	PARAM_3
+
+static const Region menuBorderLT[] = {
+    0, 0, W - 1, H - 1,
+    (Region) -1,				EOREGREC,
+    0,		0, W - 1,			EOREGREC,
+    1,		0, W - 2,			EOREGREC,
+    H - 3,	0, 1,				EOREGREC,
+    H - 2,	0, 0,				EOREGREC,
+    EOREGREC
+};
+
+static const Region menuBorderRB[] = {
+    0, 0, W - 1, H - 1,
+    0,						EOREGREC,
+    1,		W - 1, W - 1,			EOREGREC,
+    H - 3,	W - 2, W - 1,			EOREGREC,
+    H - 2,	1, W - 1,			EOREGREC,
+    H - 1,	0, W - 1,			EOREGREC,
+    EOREGREC
+};
+
+static const Region diamondTop[] = {
+    1, 0, 10, 5,
+    (Region) -1,				EOREGREC,
+    0,		6, 6,				EOREGREC,
+    1,		5, 5, 7, 7,			EOREGREC,
+    2,		4, 4, 8, 8,			EOREGREC,
+    3,		3, 3, 9, 9,			EOREGREC,
+    4,		2, 2, 10, 10,			EOREGREC,
+    5,		1, 1,				EOREGREC,
+    EOREGREC
+};
+
+static const Region diamondBottom[] = {
+    2, 5, 11, 10,
+    4,						EOREGREC,
+    5,		11, 11,				EOREGREC,
+    6,		2, 2, 10, 10,			EOREGREC,
+    7,		3, 3, 9, 9,			EOREGREC,
+    8,		4, 4, 8, 8,			EOREGREC,
+    9,		5, 5, 7, 7,			EOREGREC,
+    10,		6, 6,				EOREGREC,
+    EOREGREC
+};
+
+static const Region diamondIn[] = {
+    2, 1, 12, 9,
+    0,						EOREGREC,
+    1,		6, 6,				EOREGREC,
+    2,		5, 7,				EOREGREC,
+    3,		4, 8,				EOREGREC,
+    4,		3, 9,				EOREGREC,
+    5,		2, 10,				EOREGREC,
+    6,		3, 9,				EOREGREC,
+    7,		4, 8,				EOREGREC,
+    8,		5, 7,				EOREGREC,
+    9,		6, 6,				EOREGREC,
+    EOREGREC
+};
+
+static void AreaColor(GStateHandle gs, Color c)
+{
+    GrSetAreaColor(gs, CF_INDEX, c, 0, 0);
+}
+
+static void LineColor(GStateHandle gs, Color c)
+{
+    GrSetLineColor(gs, CF_INDEX, c, 0, 0);
+}
+
+static void TextColor(GStateHandle gs, Color c)
+{
+    GrSetTextColor(gs, CF_INDEX, c, 0, 0);
+}
+
+/* ItemDrawBottomRightEdges */
+static void BottomRightEdges(GStateHandle gs, sword l, sword t, sword r,
+			     sword b)
+{
+    GrDrawHLine(gs, l + 1, b, r);
+    GrDrawVLine(gs, r, t, b);
+}
+
+/* GetCorrect50PercentMask: a tool's or check box's 50%, else
+ * horizontal lines */
+static word Correct50PercentMask(OLItemState st)
+{
+    return (st & (OLIS_DRAW_AS_TOOLBOX | OLIS_IS_CHECKBOX)) ? SDM_50
+							    : SDM_HORIZONTAL;
+}
+
+/* OLItemSetMasksIfDisabled */
+static void SetMasksIfDisabled(optr o, GStateHandle gs, word mask)
+{
+    if (Item(o)->VI_attrs & VA_FULLY_ENABLED)
+	return;
+    GrSetLineMaskSys(gs, mask);
+    GrSetTextMaskSys(gs, (SysDrawMask) mask);
+    GrSetAreaMaskSys(gs, mask);
+}
+
+/*
+ * OLItemWash50Percent: an item just disabled washed in the area color
+ * (the mask set): the check box (a tool, a check box, a selected
+ * diamond) and the moniker
+ */
+static void Wash50Percent(optr o, GStateHandle gs, word mask)
+{
+    OLItemInstance *i = Item(o);
+    OLItemState st = i->OLII_state;
+    Rectangle r;
+    sword x;
+
+    if ((i->VI_attrs & VA_FULLY_ENABLED) ||
+	!(i->OLBI_optFlags & OLBOF_ENABLED))
+	return;
+    GrSetAreaMaskSys(gs, mask);
+    VisGetBounds(o, &r);
+    x = r.R_left + CHECK_BOX_WIDTH;
+    if ((st & (OLIS_IS_CHECKBOX | OLIS_DRAW_AS_TOOLBOX)) ||
+	((st & OLIS_SELECTED) && !(st & OLIS_INDETERMINATE)))
+	GrFillRect(gs, r.R_left, r.R_top, x, r.R_bottom);
+    GrSetAreaMaskSys(gs, SDM_50 | SDM_INVERSE);
+    GrFillRect(gs, x, r.R_top, r.R_right, r.R_bottom);
+}
+
+/*
+ * ItemDrawColorMotifItemBorderIfInMenu: in a menu, on a full redraw or
+ * a changed border: etched while bordered, else the light color.  TRUE
+ * if in a menu.
+ */
+static Boolean BorderIfInMenu(optr o, GStateHandle gs, byte changed,
+			      Boolean full)
+{
+    OLItemInstance *i = Item(o);
+    Color lt, rb;
+    word w, h;
+
+    if (!(i->OLBI_specState & OLBSS_IN_MENU))
+	return FALSE;
+    if (!full && !(changed & OLBSS_BORDERED))
+	return TRUE;
+    lt = rb = moCS_dsLightColor;
+    if (i->OLBI_specState & OLBSS_BORDERED) {
+	lt = C_WHITE;
+	rb = MO_ETCH_COLOR;
+    }
+    GrMoveTo(gs, i->VI_bounds.R_left, i->VI_bounds.R_top);
+    w = (word) (i->VI_bounds.R_right - i->VI_bounds.R_left);
+    h = (word) (i->VI_bounds.R_bottom - i->VI_bounds.R_top);
+    AreaColor(gs, lt);
+    GrDrawRegionAtCP(gs, menuBorderLT, 0, 0, w, h);
+    AreaColor(gs, rb);
+    GrDrawRegionAtCP(gs, menuBorderRB, 0, 0, w, h);
+    return TRUE;
+}
+
+/* ItemDrawColorDiamond: the top and bottom halves, the interior unless
+ * a full redraw */
+static void Diamond(optr o, GStateHandle gs, Color top, Color bottom,
+		    Color in, Boolean full)
+{
+    Rectangle r;
+
+    GetCheckboxBounds(o, &r);
+    GrMoveTo(gs, r.R_left - 1, r.R_top - 1);
+    AreaColor(gs, top);
+    GrDrawRegionAtCP(gs, diamondTop, 0, 0, 0, 0);
+    AreaColor(gs, bottom);
+    GrDrawRegionAtCP(gs, diamondBottom, 0, 0, 0, 0);
+    if (!full) {
+	AreaColor(gs, in);
+	GrDrawRegionAtCP(gs, diamondIn, 0, 0, 0, 0);
+    }
+    LineColor(gs, C_BLACK);
+    TextColor(gs, C_BLACK);
+}
+
+/* ItemDrawColorMotifDiamond: selected: black over white, the interior
+ * dark; else white over black (the interior light unless a full
+ * redraw) */
+static void MotifDiamond(optr o, GStateHandle gs, byte changed,
+			 Boolean full)
+{
+    (void) BorderIfInMenu(o, gs, changed, full);
+    if (Item(o)->OLBI_specState & OLBSS_SELECTED)
+	Diamond(o, gs, C_BLACK, C_WHITE, moCS_dsDarkColor, FALSE);
+    else
+	Diamond(o, gs, C_WHITE, C_BLACK, moCS_dsLightColor, full);
+}
+
+/*
+ * ItemDrawColorMotifNonExclBox: raised (white over black) or, selected,
+ * sunken with a dark interior; the interior light unless a full redraw
+ */
+static void MotifNonExclBox(optr o, GStateHandle gs, Boolean full)
+{
+    Rectangle r;
+    Color tl = C_WHITE, br = C_BLACK, c;
+    sword fill = full ? -1 : (sword) moCS_dsLightColor;
+
+    if (Item(o)->OLBI_specState & OLBSS_SELECTED) {
+	tl = C_BLACK;
+	br = C_WHITE;
+	fill = (sword) moCS_dsDarkColor;
+    }
+    GetCheckboxBounds(o, &r);
+    LineColor(gs, br);
+    BottomRightEdges(gs, r.R_left + 1, r.R_top, r.R_right + 1, r.R_bottom);
+    LineColor(gs, tl);
+    GrDrawHLine(gs, r.R_left + 1, r.R_top, r.R_right);
+    GrDrawVLine(gs, r.R_left + 1, r.R_top, r.R_bottom - 1);
+    if (fill != -1) {
+	c = (Color) fill;
+	AreaColor(gs, c);
+	GrFillRect(gs, r.R_left + 2, r.R_top + 1, r.R_right + 1, r.R_bottom);
+    }
+    LineColor(gs, C_BLACK);
+    TextColor(gs, C_BLACK);
+}
+
+/*
+ * ItemDrawColorNonExclusiveItem: in a menu the border; the box (in a
+ * menu with a mouse only on a full redraw).  TRUE: the moniker drawn.
+ */
+static Boolean NonExclusiveItem(optr o, GStateHandle gs, byte changed,
+				Boolean full)
+{
+    if (BorderIfInMenu(o, gs, changed, full) && !OpenCheckIfKeyboardOnly() &&
+	!full)
+	return FALSE;
+    MotifNonExclBox(o, gs, full);
+    return TRUE;
+}
+
+/* FillRectWithBGColors: the bounds in the background colors (the
+ * second at 50% if enabled) */
+static void FillBG(optr o, GStateHandle gs, Boolean selected, Rectangle *r)
+{
+    word cc = OpenGetBackgroundColor(o, selected);
+    Color c1 = (Color) (cc & 0xff), c2 = (Color) (cc >> 8);
+
+    VisGetBounds(o, r);
+    AreaColor(gs, c1);
+    GrFillRect(gs, r->R_left, r->R_top, r->R_right, r->R_bottom);
+    if (c1 != c2 && (Item(o)->VI_attrs & VA_FULLY_ENABLED)) {
+	AreaColor(gs, c2);
+	GrSetAreaMaskSys(gs, SDM_50);
+	GrFillRect(gs, r->R_left, r->R_top, r->R_right, r->R_bottom);
+	GrSetAreaMaskSys(gs, SDM_100);
+    }
+}
+
+/*
+ * ItemDrawColorTool: a tool: selected sunken (black over white, the text
+ * white on a dark selection in a toolbox), else raised (white over
+ * dark); a HINT_GADGET_TEXT_COLOR wins
+ */
+static void Tool(optr o, GStateHandle gs)
+{
+    OLItemInstance *i;
+    Rectangle r;
+    Color tc = C_BLACK, c;
+
+    if (Item(o)->OLBI_specState & OLBSS_SELECTED) {
+	FillBG(o, gs, TRUE, &r);
+	LineColor(gs, C_BLACK);
+	GrDrawHLine(gs, r.R_left, r.R_top, r.R_right - 1);
+	GrDrawVLine(gs, r.R_left, r.R_top, r.R_bottom - 1);
+	LineColor(gs, C_WHITE);
+	BottomRightEdges(gs, r.R_left, r.R_top, r.R_right - 1,
+			 r.R_bottom - 1);
+	i = Item(o);
+	if (!(i->OLBI_moreAttrs & OLBMA_IN_TOOLBOX) ||
+	    moCS.CSV_selBkgdColor == C_DARK_GREY ||
+	    moCS.CSV_selBkgdColor == C_BLACK)
+	    tc = C_WHITE;
+    } else {
+	FillBG(o, gs, FALSE, &r);
+	LineColor(gs, C_WHITE);
+	GrDrawHLine(gs, r.R_left, r.R_top, r.R_right - 1);
+	GrDrawVLine(gs, r.R_left, r.R_top, r.R_bottom - 1);
+	LineColor(gs, moCS_dsDarkColor);
+	BottomRightEdges(gs, r.R_left, r.R_top, r.R_right - 1,
+			 r.R_bottom - 1);
+    }
+    if (OpenGetTextColor(o, &c))
+	tc = c;
+    TextColor(gs, tc);
+    LineColor(gs, tc);
+}
+
+/*
+ * ItemDrawColorItem: the item in color.  A full redraw (exposed, the
+ * state not known, the selection changed) erases the background
+ * (unless exposed); a changed cursor draws the diamond's or box's
+ * state and the moniker (its cursor); a changed enabled state washes
+ * the item if only that changed.
+ */
+void ItemDrawColorItem(optr o, GStateHandle gs, DrawFlags df)
+{
+    OLItemInstance *i = Item(o);
+    byte now = (byte) i->OLBI_specState, was = i->OLBI_optFlags;
+    byte changed = now ^ was;
+    OLItemState st = i->OLII_state;
+    Boolean full = FALSE, moniker;
+    OLMonikerAttrs at;
+    DrawMonikerFlags f;
+    word cc, x, y;
+    Rectangle r;
+
+    if (df & DF_EXPOSED) {
+	full = TRUE;
+	goto drawCommon;
+    }
+    if (!(was & OLBOF_DRAW_STATE_KNOWN) || (changed & OLBSS_SELECTED))
+	goto fullRedraw;
+    if (changed & OLBSS_CURSORED) {
+	if (st & OLIS_DRAW_AS_TOOLBOX)
+	    goto fullRedraw;
+	SetMasksIfDisabled(o, gs, Correct50PercentMask(st));
+	if (st & OLIS_IS_CHECKBOX)
+	    moniker = NonExclusiveItem(o, gs, changed, FALSE);
+	else {
+	    MotifDiamond(o, gs, changed, FALSE);
+	    moniker = TRUE;
+	}
+	goto drawMoniker;
+    }
+    if ((i->VI_attrs ^ was) & VA_FULLY_ENABLED) {
+	if (changed & OLBOF_STATE_FLAGS_MASK)
+	    goto fullRedraw;
+	if ((i->VI_attrs & VA_FULLY_ENABLED) || !(was & OLBOF_ENABLED)) {
+	    full = TRUE;
+	    goto drawCommon;
+	}
+	cc = OpenGetBackgroundColor(o, (now & OLBSS_SELECTED) != 0);
+	if ((cc & 0xff) != (cc >> 8))
+	    goto fullRedraw;
+	AreaColor(gs, moCS_dsLightColor);
+	Wash50Percent(o, gs, Correct50PercentMask(st) | SDM_INVERSE);
+	return;
+    }
+    goto drawCommon;
+
+fullRedraw:
+    AreaColor(gs, moCS_dsLightColor);
+    VisGetBounds(o, &r);
+    GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+    full = TRUE;
+drawCommon:
+    SetMasksIfDisabled(o, gs, Correct50PercentMask(st));
+    if (st & OLIS_MONIKER_INVALID)
+	return;
+    moniker = full;
+    if (st & OLIS_DRAW_AS_TOOLBOX) {
+	Tool(o, gs);
+	moniker = TRUE;
+    } else if (st & OLIS_IS_CHECKBOX)
+	moniker = NonExclusiveItem(o, gs, changed, full);
+    else
+	MotifDiamond(o, gs, changed, full);
+
+drawMoniker:
+    if (!moniker)
+	return;
+    SetMasksIfDisabled(o, gs, SDM_50);
+    i = Item(o);
+    AreaColor(gs, (i->VI_attrs & VA_FULLY_ENABLED) ? C_BLACK
+						   : moCS_dsDarkColor);
+    at = OLButtonSetupMonikerAttrs(o);
+    i = Item(o);
+    if (!(i->OLBI_specState & OLBSS_IN_MENU) &&
+	(at & OLMA_DISP_SELECTION_CURSOR)) {
+	at |= OLMA_LIGHT_COLOR_BACKGROUND;
+	if (st & OLIS_DRAW_AS_TOOLBOX) {
+	    if (at & OLMA_SELECTION_CURSOR_ON)
+		at |= OLMA_USE_TOOLBOX_SELECTION_CURSOR;
+	    else
+		at &= ~(OLMA_DISP_SELECTION_CURSOR |
+			OLMA_LIGHT_COLOR_BACKGROUND);
+	}
+    }
+    f = (J_LEFT << DMF_X_JUST_OFFSET) | (J_CENTER << DMF_Y_JUST_OFFSET);
+    x = CHECK_BOX_WIDTH;
+    y = 0;
+    if (st & OLIS_DRAW_AS_TOOLBOX) {
+	x = TOOLBOX_INSET_X;
+	y = TOOLBOX_INSET_Y;
+    }
+    OLButtonDrawMoniker(o, gs, f, at, x, y);
+}

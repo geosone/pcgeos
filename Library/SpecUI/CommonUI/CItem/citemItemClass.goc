@@ -1,0 +1,304 @@
+/*
+ * citemItemClass.goc -- OLItemClass (after citemItemClass.asm): the
+ * specific part of a GenItem or GenBoolean, a button with a state
+ * (selected, indeterminate) that its group sets.  Building (the state
+ * and behavior asked of the group), the group told when an item comes,
+ * goes or is disabled, the size: the moniker beside the diamond or
+ * check box, at least the diamond's height.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: tabs, the title bar,
+ * a dynamic list's items not interactable (MSG_OL_IGROUP_NOTIFY_ITEM_
+ * CHANGED_INTERACTABLE_STATE), the centers (MSG_VIS_GET_CENTER,
+ * MSG_SPEC_GET_MENU_CENTER: the button's).
+ */
+@include "CItem/citemInt.goh"
+
+@classdecl OLItemClass, neverSaved;
+
+@extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_PRESSED;
+@extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED;
+@extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_RELEASED;
+@extern method OLItemClass, MSG_META_START_SELECT;
+@extern method OLItemClass, MSG_META_PTR;
+@extern method OLItemClass, MSG_META_END_SELECT;
+@extern method OLItemClass, MSG_META_GAINED_SYS_FOCUS_EXCL;
+@extern method OLItemClass, MSG_META_LOST_SYS_FOCUS_EXCL;
+@extern method OLItemClass, MSG_VIS_LOST_GADGET_EXCL;
+@extern method OLItemClass, MSG_META_KBD_CHAR;
+@extern method OLItemClass, MSG_META_FUP_KBD_CHAR;
+@extern method OLItemClass, MSG_SPEC_NAVIGATE;
+@extern method OLItemClass, MSG_GEN_ACTIVATE;
+@extern method OLItemClass, MSG_OL_ITEM_NAVIGATE_IF_DISABLED;
+@extern method OLItemClass, MSG_VIS_DRAW;
+@extern method OLItemClass, MSG_OL_ITEM_SET_STATE;
+@extern method OLItemClass, MSG_OL_ITEM_REDRAW;
+@extern method OLItemClass, MSG_GEN_ITEM_SET_INTERACTABLE_STATE;
+
+/* ---------------------------------------------------------------------
+ * What the item asks of its group
+ * ------------------------------------------------------------------- */
+
+/* OLItemGetParentState: TRUE with HINT_ITEM_GROUP_TOOLBOX_STYLE */
+Boolean OLItemGetParentState(optr o, OLItemParentState *s)
+{
+    optr p = GenFindParent(o);
+    Boolean toolbox;
+    MemHandle mh;
+
+    memset(s, 0, sizeof(*s));
+    if (!p)
+	return FALSE;
+    mh = OptrToHandle(p);
+    if (mh != OptrToHandle(o))
+	ObjLockObjBlock(mh);
+    toolbox = ObjVarFindData(p, HINT_ITEM_GROUP_TOOLBOX_STYLE) != NULL;
+    s->PS_behavior = ObjIsObjectInClass(p, &GenBooleanGroupClass)
+		     ? GIGBT_NON_EXCLUSIVE : IGG(p)->GIGI_behaviorType;
+    s->PS_attrs = ((GenInstance *) ObjDerefGen(p))->GI_attrs;
+    s->PS_state = IG(p)->OLIGI_state;
+    if (mh != OptrToHandle(o))
+	MemUnlock(mh);
+    return toolbox;
+}
+
+Boolean CheckIfBoolean(optr o)
+{
+    return ObjIsObjectInClass(o, &GenBooleanClass);
+}
+
+/*
+ * CheckIfExtendingOrNonExcl: an item of an extended selection or non
+ * exclusive list (not a boolean, not in a menu): the mouse extends a
+ * selection over it
+ */
+Boolean CheckIfExtendingOrNonExcl(optr o)
+{
+    OLItemInstance *i;
+
+    if (CheckIfBoolean(o))
+	return FALSE;
+    i = Item(o);
+    if (i->OLBI_specState & OLBSS_IN_MENU)
+	return FALSE;
+    return i->OLII_behavior == GIGBT_EXTENDED_SELECTION ||
+	   i->OLII_behavior == GIGBT_NON_EXCLUSIVE;
+}
+
+/* the message to the generic parent with this item */
+static void NotifyList(optr o, Message m)
+{
+    optr p = GenFindParent(o);
+
+    if (!p)
+	return;
+    switch (m) {
+    case MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE:
+	@call p::MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE(o);
+	break;
+    case MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_USABLE:
+	@call p::MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_USABLE(o);
+	break;
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLItemInitialize: a setting without a border; a toolbox group's look;
+ * the group's behavior and read only attribute
+ */
+@method OLItemClass, MSG_META_INITIALIZE
+{
+    OLItemParentState ps;
+    Boolean toolbox;
+    GenInstance *g;
+
+    @callsuper();
+    pself = Item(oself);
+    pself->OLBI_specState &= ~OLBSS_BORDERED;
+    pself->OLBI_specState |= OLBSS_SETTING;
+    toolbox = OLItemGetParentState(oself, &ps);
+    pself = Item(oself);
+    if (toolbox)
+	pself->OLII_state |= OLIS_DRAW_AS_TOOLBOX;
+    pself->OLII_behavior |= ps.PS_behavior;
+    g = (GenInstance *) ObjDerefGen(oself);
+    g->GI_attrs &= ~GA_READ_ONLY;
+    g->GI_attrs |= ps.PS_attrs & GA_READ_ONLY;
+}
+
+/*
+ * OLItemSpecBuild: the button's; in a menu as wide as it; the state the
+ * group gives it; a toolbox button looks like a tool; a selected item of
+ * an exclusive group may be a popup list's moniker
+ */
+@method OLItemClass, MSG_SPEC_BUILD
+{
+    optr gp, vp;
+    byte s = 0;
+
+    @callsuper();
+    pself = Item(oself);
+    if (pself->OLBI_specState & OLBSS_IN_MENU)
+	pself->OLBI_moreAttrs |= OLBMA_EXPAND_WIDTH_TO_FIT_PARENT;
+    gp = GenFindParent(oself);
+    if (gp)
+	s = @call gp::MSG_OL_IGROUP_GET_ITEM_STATE(ItemG(oself)->GII_identifier);
+    pself = Item(oself);
+    pself->OLII_state &= ~(OLIS_SELECTED | OLIS_INDETERMINATE);
+    pself->OLII_state |= s;
+    if (pself->OLBI_moreAttrs & OLBMA_IN_TOOLBOX)
+	pself->OLII_state |= OLIS_DRAW_AS_TOOLBOX;
+    if (s && pself->OLII_behavior != GIGBT_NON_EXCLUSIVE &&
+	(vp = VisFindParent(oself)) != 0)
+	@call vp::MSG_OL_IGROUP_RESET_POPUP_LIST_MONIKER();
+    OLItemUpdateDrawState(oself);
+}
+
+/*
+ * OLItemSpecNotifyNotEnabled: the button's; the group told (it may move
+ * the focus or navigate on); the mouse and default let go
+ */
+@method OLItemClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    Boolean r = @callsuper();
+    optr p = GenFindParent(oself);
+
+    if (p)
+	@call p::MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_ENABLED(oself,
+		Item(oself)->OLII_state & (OLIS_NAVIGATE_IF_DISABLED |
+					   OLIS_NAVIGATE_BACKWARD));
+    (void) OLButtonReleaseMouseGrab(oself);
+    OLButtonReleaseDefaultExclusive(oself);
+    return r;
+}
+
+@method OLItemClass, MSG_SPEC_SET_USABLE
+{
+    @callsuper();
+    NotifyList(oself, MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE);
+}
+
+/* OLItemNotifyEnabled: the group told (not for an item in a menu that
+ * is not up) */
+@method OLItemClass, MSG_SPEC_NOTIFY_ENABLED
+{
+    Boolean menu = (pself->OLBI_specState & OLBSS_IN_MENU) &&
+		   !(pself->VI_attrs & VA_REALIZED);
+    Boolean r = @callsuper();
+
+    if (!menu)
+	NotifyList(oself, MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE);
+    return r;
+}
+
+@method OLItemClass, MSG_SPEC_SET_NOT_USABLE
+{
+    NotifyList(oself, MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_USABLE);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry
+ * ------------------------------------------------------------------- */
+
+/*
+ * CalcSizeWithoutHints: the moniker with the item's insets, at least
+ * the diamond's height (not a tool); then the gadget hints with the
+ * suggested size
+ */
+static void CalcSizeWithoutHints(optr o, sword sugW, sword sugH,
+				 sword *w, sword *h)
+{
+    OpenMonikerArgs a;
+    SizeAsDWord s;
+    OLItemInstance *i;
+    OLButtonMoreAttrs f;
+
+    OLItemSetupMkrArgs(o, &a);
+    s = OpenGetMonikerSize(o, o, &a);
+    *w = (sword) DWORD_WIDTH(s);
+    *h = (sword) DWORD_HEIGHT(s);
+    i = Item(o);
+    if (!(i->OLII_state & OLIS_DRAW_AS_TOOLBOX) &&
+	*h <= RADIO_HEIGHT + MO_ITEM_INSET_Y * 2)
+	*h = RADIO_HEIGHT + MO_ITEM_INSET_Y * 2;
+    f = i->OLBI_moreAttrs;
+    if ((f & OLBMA_EXPAND_WIDTH_TO_FIT_PARENT) && sugW > *w)
+	*w = sugW;
+    if ((f & OLBMA_EXPAND_HEIGHT_TO_FIT_PARENT) && sugH > *h) {
+	if (!(f & OLBMA_IN_TOOLBOX) || sugH - *h <= *h ||
+	    ObjVarFindData(o, HINT_EXPAND_HEIGHT_TO_FIT_PARENT))
+	    *h = sugH;
+    }
+    if ((f & OLBMA_CAN_CLIP_MONIKER_WIDTH) && (word) *w > (word) sugW)
+	*w = sugW;
+    if ((f & OLBMA_CAN_CLIP_MONIKER_HEIGHT) && (word) *h > (word) sugH)
+	*h = sugH;
+}
+
+/* OLItemRerecalcSize: the size hints around the size without them */
+@method OLItemClass, MSG_VIS_RECALC_SIZE
+{
+    sword sw = (sword) width, sh = (sword) height, w, h;
+
+    VisApplySizeHints(oself, &sw, &sh);
+    CalcSizeWithoutHints(oself, sw, sh, &w, &h);
+    VisApplySizeHints(oself, &w, &h);
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/* OLItemGetExtraSize: the size beyond the moniker */
+@method OLItemClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    sword w, h, ew, eh;
+    SizeAsDWord m;
+
+    (void) childCount;
+    CalcSizeWithoutHints(oself, 0, 0, &w, &h);
+    m = SpecGetGenMonikerSize(oself, 0);
+    ew = w - (sword) DWORD_WIDTH(m);
+    eh = h - (sword) DWORD_HEIGHT(m);
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->ESP_extraWidth = ew < 0 ? 0 : (word) ew;
+    retValue->ESP_extraHeight = eh < 0 ? 0 : (word) eh;
+}
+
+/* OLItemMkrPos: the moniker's position; not in a menu its left edge is
+ * past the check box */
+@method OLItemClass, MSG_GET_FIRST_MKR_POS
+{
+    OpenMonikerArgs a;
+    XYValueAsDWord p;
+    OLItemInstance *i;
+    sword x;
+
+    OLItemSetupMkrArgs(oself, &a);
+    p = OpenGetMonikerPos(oself, oself, &a);
+    x = DWORD_X(p);
+    i = Item(oself);
+    if (!(i->OLBI_specState & OLBSS_IN_MENU)) {
+	x = i->VI_bounds.R_left + CHECK_BOX_WIDTH;
+	if (i->OLII_state & OLIS_DRAW_AS_TOOLBOX)
+	    x += TOOLBOX_INSET_X;
+    }
+    pos->P_x = x;
+    pos->P_y = DWORD_Y(p);
+    return x != 0;
+}
+
+/* OLItemUpdateVisMoniker: a selected item of an exclusive group may be
+ * its popup list's moniker */
+@method OLItemClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    optr vp;
+
+    @callsuper();
+    pself = Item(oself);
+    if ((pself->OLII_state & OLIS_SELECTED) &&
+	pself->OLII_behavior != GIGBT_NON_EXCLUSIVE &&
+	(vp = VisFindParent(oself)) != 0)
+	@call vp::MSG_OL_IGROUP_RESET_POPUP_LIST_MONIKER();
+}

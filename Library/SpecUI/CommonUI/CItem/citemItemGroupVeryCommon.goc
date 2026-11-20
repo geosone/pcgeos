@@ -1,0 +1,340 @@
+/*
+ * citemItemGroupVeryCommon.goc -- OLItemGroupClass (after
+ * citemItemGroupVeryCommon.asm): what happens all the time.  The
+ * generic group tells of changed items (MSG_SPEC_UPDATE_SPECIFIC_OBJECT,
+ * Port32: MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT) and each is set to its
+ * new state (MSG_OL_ITEM_SET_STATE); an exclusive group's focus follows
+ * its selection.  The state of an item, the selection, the scan for
+ * items, the focus moved to an item.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: popup lists (their
+ * button's moniker), dynamic lists (MSG_GEN_ITEM_GROUP_REDRAW_ITEMS,
+ * MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER), tabs (drawn by
+ * MSG_VIS_DRAW).
+ */
+@include "CItem/citemInt.goh"
+
+/* the window's focus: its optr; TRUE if answered (*app: the
+ * application's focus) */
+static Boolean QueryWinGroupFocus(optr o, optr *focus, Boolean *app)
+{
+    GenReturnParams r;
+    optr vp = VisFindParent(o);
+
+    *focus = 0;
+    *app = FALSE;
+    memset(&r, 0, sizeof(r));
+    if (!vp || !@call vp::MSG_VIS_P32_VUP_QUERY(&r,
+				SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL, 0, 0))
+	return FALSE;
+    *focus = ConstructOptr(r.GRP_cx, r.GRP_dx);
+    *app = r.GRP_bp != 0;
+    return TRUE;
+}
+
+/*
+ * OLItemGroupAbortAllUserInteraction: an item of ours with the window's
+ * focus is no longer pressed (redrawn unless it is the one passed)
+ */
+static void AbortAllUserInteraction(optr o, optr except)
+{
+    optr f;
+    Boolean app;
+
+    if (!(IG(o)->OLIGI_state & OLIGS_HAS_FOCUS_ITEM))
+	return;
+    (void) QueryWinGroupFocus(o, &f, &app);
+    if (!f || f == o || !@call f::MSG_META_IS_OBJECT_IN_CLASS(&OLItemClass))
+	return;
+    (void) @call f::MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED(
+		f == except ? 0 : OIENPF_REDRAW_PRESSED_ITEM);
+}
+
+void OLItemGroupAbortAllUserInteraction(optr o)
+{
+    AbortAllUserInteraction(o, 0);
+}
+
+/* UpdateItem: the item (if a child) set to its state */
+static void UpdateItem(optr o, word id, OLItemUpdateFlags uf)
+{
+    byte s = @call o::MSG_OL_IGROUP_GET_ITEM_STATE(id);
+    optr item = GetItemOptr(o, id);
+
+    if (item)
+	@call item::MSG_OL_ITEM_SET_STATE(s, uf);
+}
+
+/*
+ * OLItemGroupUpdateSpecificObject: built, each changed item set to its
+ * state; an exclusive group with the application's focus on another
+ * item draws nothing yet (the focus moves to the selection, which
+ * draws it); the user's press given up unless told to leave the focus
+ * alone; then the focus (and the visible part of a list) follows the
+ * selection
+ */
+@extern method OLItemGroupClass, MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT
+{
+    OLItemUpdateFlags uf;
+    optr f, sel;
+    Boolean app;
+    word i;
+
+    if (pself->OLIGI_state & OLIGS_CHECKBOXES) {
+	OLBooleanGroupUpdateSpecificObject(oself, changedBooleans);
+	return;
+    }
+    if (!VisCheckIfSpecBuilt(oself))
+	return;
+    uf = IG(oself)->OLIGI_updateFlags;
+    if (IGG(oself)->GIGI_numSelections && !IsNonExclusive(oself) &&
+	(IG(oself)->OLIGI_state & OLIGS_LIST_HAS_FOCUS_EXCL) &&
+	!IsExtendedSelection(oself) &&
+	!(IG(oself)->OLCI_buildFlags & OLBF_TOOLBOX) &&
+	QueryWinGroupFocus(oself, &f, &app) && app &&
+	f != GetCurrentSelectionOptr(oself))
+	uf |= OLIUF_SUPPRESS_DRAW;
+    if (!(uf & OLIUF_LEAVE_FOCUS_AND_GRAB_ALONE))
+	OLItemGroupAbortAllUserInteraction(oself);
+    for (i = 0; i < numItems; i++)
+	UpdateItem(oself, items[i], uf);
+    if (IsNonExclusive(oself) || CheckIfExtendingSelection(oself))
+	return;
+    pself = IG(oself);
+    uf = pself->OLIGI_updateFlags;
+    pself->OLIGI_updateFlags = 0;
+    if (!(uf & OLIUF_LEAVE_FOCUS_AND_GRAB_ALONE)) {
+	word id;
+
+	EnsureCurrentSelectionVisible(oself);
+	if (GetCurrentSelection(oself, &id)) {
+	    sel = GetOptrOrSelf(oself, id);
+	    OLItemGroupMoveFocusExclToItem(oself, sel, id);
+	}
+    }
+    SetPopupListMonikerIfNeeded(oself);
+}
+
+/* SetPopupListMonikerIfNeeded: a popup list's button shows the list's
+ * moniker or the selection's (Port32: no popup lists yet) */
+void SetPopupListMonikerIfNeeded(optr o)
+{
+    (void) o;
+}
+
+/* EnsureCurrentSelectionVisible: an exclusive list scrolls to its
+ * selection */
+void EnsureCurrentSelectionVisible(optr o)
+{
+    word id;
+
+    if (!IsNonExclusive(o) && GetCurrentSelection(o, &id))
+	EnsureCurrentItemVisible(o, id);
+}
+
+void EnsureCurrentItemVisible(optr o, word id)
+{
+    OLItemGroupState s = IG(o)->OLIGI_state;
+
+    if (!(s & OLIGS_SCROLLABLE))
+	return;
+    if (s & OLIGS_CHECKBOXES)
+	@call o::MSG_GEN_BOOLEAN_GROUP_MAKE_BOOLEAN_VISIBLE(id);
+    else
+	@call o::MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE(id);
+}
+
+/* OLItemGroupGetItemState: selected, indeterminate (a boolean group's
+ * own) */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_GET_ITEM_STATE
+{
+    GenItemGroupInstance *g;
+    byte s = 0;
+
+    if (pself->OLIGI_state & OLIGS_CHECKBOXES)
+	return OLBooleanGroupGetItemState(oself, identifier);
+    g = IGG(oself);
+    if (g->GIGI_numSelections == 1) {
+	if (identifier == g->GIGI_selection)
+	    s |= OLIS_SELECTED;
+    } else if (g->GIGI_numSelections > 1 &&
+	       @call oself::MSG_GEN_ITEM_GROUP_IS_ITEM_SELECTED(identifier))
+	s |= OLIS_SELECTED;
+    if (IGG(oself)->GIGI_stateFlags & GIGSF_INDETERMINATE)
+	s |= OLIS_INDETERMINATE;
+    return s;
+}
+
+/* GetCurrentSelection: TRUE with exactly one selected */
+Boolean GetCurrentSelection(optr o, word *id)
+{
+    GenItemGroupInstance *g = IGG(o);
+
+    if (g->GIGI_numSelections != 1)
+	return FALSE;
+    *id = g->GIGI_selection;
+    return TRUE;
+}
+
+optr GetCurrentSelectionOptr(optr o)
+{
+    word id;
+
+    if (!GetCurrentSelection(o, &id))
+	return 0;
+    return GetOptrOrSelf(o, id);
+}
+
+/*
+ * OLItemGroupMoveFocusExclToItem: the focus item; the window's focus
+ * to the item if the group or one of its items has it
+ */
+void OLItemGroupMoveFocusExclToItem(optr o, optr item, word id)
+{
+    optr f;
+    Boolean app, grab = FALSE;
+
+    if (QueryWinGroupFocus(o, &f, &app)) {
+	if (f == o)
+	    grab = TRUE;
+	else if (f && @call f::MSG_META_IS_OBJECT_IN_CLASS(&GenClass))
+	    grab = @call f::MSG_GEN_FIND_PARENT() == o;
+    }
+    SetFocusItem(o, id, TRUE);
+    if (grab)
+	OLItemGroupVupGrabFocusExclForItem(o, item);
+}
+
+/* OLItemGroupVupGrabFocusExclForItem: not in a toolbox */
+void OLItemGroupVupGrabFocusExclForItem(optr o, optr item)
+{
+    if (!item || (IG(o)->OLCI_buildFlags & OLBF_TOOLBOX))
+	return;
+    if (OptrToHandle(item) == OptrToHandle(o)) {
+	MetaGrabFocusExclLow(item);
+	return;
+    }
+    ObjLockObjBlock(OptrToHandle(item));
+    MetaGrabFocusExclLow(item);
+    MemUnlock(OptrToHandle(item));
+}
+
+/* CheckIfExtendingSelection: an extended selection under way */
+Boolean CheckIfExtendingSelection(optr o)
+{
+    return IsExtendedSelection(o) &&
+	   (IG(o)->OLIGI_moreState & OLIGMS_EXTENDING_SELECTION);
+}
+
+/*
+ * ScanItems: the generic group scans its items; found: the item's
+ * optr (0 if it is not a child; a dynamic list's item navigates on if
+ * it is disabled)
+ */
+Boolean ScanItems(optr o, GenScanItemsFlags flags, word initial,
+		  sword amount, word *id, optr *item)
+{
+    GenScanItemsReturn r;
+    Boolean found;
+
+    memset(&r, 0, sizeof(r));
+    if (IG(o)->OLIGI_state & OLIGS_CHECKBOXES)
+	found = @call o::MSG_GEN_BOOLEAN_GROUP_P32_SCAN_BOOLEANS(&r, flags,
+							      initial, amount);
+    else
+	found = @call o::MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS(&r, flags,
+							   initial, amount);
+    *id = r.GSIR_item;
+    *item = 0;
+    if (!found)
+	return FALSE;
+    *item = GetItemOptr(o, r.GSIR_item);
+    if (*item && (IG(o)->OLIGI_state & OLIGS_DYNAMIC))
+	@call (*item)::MSG_OL_ITEM_NAVIGATE_IF_DISABLED(
+			(flags & GSIF_FORWARD) ? 0 : OLIS_NAVIGATE_BACKWARD);
+    return TRUE;
+}
+
+Boolean OLItemGroupGetFirstItemOptr(optr o, optr *item)
+{
+    word id;
+
+    return ScanItems(o, GSIF_FROM_START | GSIF_FORWARD |
+			GSIF_EXISTING_ITEMS_ONLY, 0, 0, &id, item);
+}
+
+/* OLItemGroupBroadcastForDefaultFocus: HINT_DEFAULT_FOCUS answers */
+@extern method OLItemGroupClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    if (!(pself->OLIGI_state & OLIGS_DEFAULT_FOCUS))
+	return;
+    retValue->OAGP_object = oself;
+    retValue->OAGP_grabFlags = 0;
+}
+
+/* OLItemGroupNotifyItemSetUsable: an exclusive group's focus to its
+ * selection */
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE
+{
+    word id;
+
+    (void) item;
+    if (!IsNonExclusive(oself) && GetCurrentSelection(oself, &id))
+	OLItemGroupMoveFocusExclToItem(oself, GetOptrOrSelf(oself, id), id);
+}
+
+/* OLItemGroupNotifyNotEnabled: the focus goes on to the next field */
+@extern method OLItemGroupClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    if (pself->OLIGI_state & OLIGS_LIST_HAS_FOCUS_EXCL)
+	OLItemGroupMoveFocusToNextField(oself);
+    return @callsuper();
+}
+
+@extern method OLItemGroupClass, MSG_OL_IGROUP_RESET_POPUP_LIST_MONIKER
+{
+    if (!(pself->OLIGI_moreState & OLIGMS_DISPLAYS_CURRENT_SELECTION))
+	return;
+    pself->OLIGI_moreState &= ~OLIGMS_DISPLAYING_SELECTION;
+    SetPopupListMonikerIfNeeded(oself);
+}
+
+/*
+ * OLItemGroupGenMakeApplyable: only in delayed mode does a change
+ * enable the dialog's apply trigger (up the visual tree, OLCtrlClass)
+ */
+@extern method OLItemGroupClass, MSG_GEN_MAKE_APPLYABLE, MSG_GEN_MAKE_NOT_APPLYABLE
+{
+    if (pself->OLCI_buildFlags & OLBF_DELAYED_MODE)
+	@callsuper();
+}
+
+/* the focus item, GIGS_NONE without one */
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_GET_FOCUS_ITEM
+{
+    word id;
+
+    return GetFocusItem(oself, &id) ? id : GIGS_NONE;
+}
+
+/*
+ * OLItemGroupSetFocusItem: an item of ours: visible, the user's press
+ * given up; an extended selection's focus moves, an exclusive group
+ * selects it
+ */
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_SET_FOCUS_ITEM
+{
+    optr item;
+
+    EnsureCurrentItemVisible(oself, identifier);
+    item = GetItemOptr(oself, identifier);
+    if (!item)
+	return;
+    AbortAllUserInteraction(oself, item);
+    if (IsExtendedSelection(oself)) {
+	SetFocusFromOptr(oself, item);
+	OLItemGroupVupGrabFocusExclForItem(oself, item);
+	return;
+    }
+    @call oself::MSG_OL_IGROUP_SET_MODIFIED_SELECTION(identifier, 1 << 8);
+}

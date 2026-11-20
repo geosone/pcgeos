@@ -1,0 +1,44 @@
+/*
+ * cspecItem.goc -- the build routines of the item groups and their
+ * items (after cspecItem.asm): a GenItemGroup, GenBooleanGroup or
+ * GenDynamicList is an OLItemGroup; an item of a non exclusive group (a
+ * boolean) an OLCheckedItem, else an OLItem.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: scrolling lists
+ * (HINT_ITEM_GROUP_SCROLLABLE, HINT_BOOLEAN_GROUP_SCROLLABLE:
+ * OLScrollListClass, OLScrollableItemClass); they are plain groups.
+ */
+@include "CItem/citemInt.goh"
+
+ClassStruct *OLBuildItemGroup(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLItemGroupClass;
+}
+
+ClassStruct *OLBuildBooleanGroup(optr oself, word masterOffset)
+{
+    return OLBuildItemGroup(oself, masterOffset);
+}
+
+ClassStruct *OLBuildDynamicList(optr oself, word masterOffset)
+{
+    return OLBuildItemGroup(oself, masterOffset);
+}
+
+ClassStruct *OLBuildItem(optr oself, word masterOffset)
+{
+    OLItemParentState ps;
+
+    (void) masterOffset;
+    (void) OLItemGetParentState(oself, &ps);
+    if (ps.PS_behavior == GIGBT_NON_EXCLUSIVE)
+	return (ClassStruct *) &OLCheckedItemClass;
+    return (ClassStruct *) &OLItemClass;
+}
+
+ClassStruct *OLBuildBoolean(optr oself, word masterOffset)
+{
+    return OLBuildItem(oself, masterOffset);
+}

@@ -403,6 +403,11 @@ extern void DrawColorButton(optr oself, GStateHandle gs, DrawFlags df,
 /* CSpec/cspecInteraction.goc: the hints of ScanMapGroupHintHandlers */
 extern void OLScanMapGroupHints(optr o, OLBuildFlags *flags);
 extern ClassStruct *OLBuildTrigger(optr oself, word masterOffset);
+extern ClassStruct *OLBuildItemGroup(optr oself, word masterOffset);
+extern ClassStruct *OLBuildBooleanGroup(optr oself, word masterOffset);
+extern ClassStruct *OLBuildDynamicList(optr oself, word masterOffset);
+extern ClassStruct *OLBuildItem(optr oself, word masterOffset);
+extern ClassStruct *OLBuildBoolean(optr oself, word masterOffset);
 /* CSpec/cspecPrimary.goc: the vis parent of a window asked of the
  * generic parent (OLBuildPrimary, OLBuildDisplay) */
 extern void DoSimpleWinBuild(optr oself, word parentType);

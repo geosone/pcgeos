@@ -1,0 +1,554 @@
+/*
+ * citemItemGroupClass.goc -- OLItemGroupClass (after
+ * citemItemGroupClass.asm): the specific part of a GenItemGroup or
+ * GenBooleanGroup, an OLCtrl of items.  Building, the geometry (its
+ * items next to each other unless a hint orients them), the extended
+ * selection of a list (anchor and extent, add mode) and the questions
+ * the item code asks of the group (exclusive or not, the focus item,
+ * the item with an identifier).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: popup lists
+ * (MakePopupListIfNeeded, HINT_ITEM_GROUP_MINIMIZE_SIZE), dynamic lists
+ * (SetupDynamicListItems), scrolling lists (the extent above a list's
+ * top item), tabs.
+ */
+@include "CItem/citemInt.goh"
+
+@classdecl OLItemGroupClass, neverSaved;
+
+@extern method OLItemGroupClass, MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_GET_ITEM_STATE;
+@extern method OLItemGroupClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE;
+@extern method OLItemGroupClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_RESET_POPUP_LIST_MONIKER;
+@extern method OLItemGroupClass, MSG_GEN_MAKE_APPLYABLE, MSG_GEN_MAKE_NOT_APPLYABLE;
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_GET_FOCUS_ITEM;
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_SET_FOCUS_ITEM;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_AND_APPLY_IF_NEEDED;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_SELECTION;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_ITEM_STATE;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_GROUP_HAS_MOUSE_GRAB;
+@extern method OLItemGroupClass, MSG_META_POST_PASSIVE_BUTTON;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_TEST_FOR_REDUNDANT_INTERMEDIATE_SELECTION;
+@extern method OLItemGroupClass, MSG_VIS_LOST_GADGET_EXCL;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_WILL_GRAB_FOCUS_EXCL;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_START_INTERMEDIATE_MODE;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_END_INTERMEDIATE_MODE;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_RESELECT_EXCL;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_NEXT;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_PREVIOUS;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_START;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_SET_SELECTION_TO_END;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_TOGGLE_FOCUS_EXCL_ITEM;
+@extern method OLItemGroupClass, MSG_META_KBD_CHAR;
+@extern method OLItemGroupClass, MSG_META_FUP_KBD_CHAR;
+@extern method OLItemGroupClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
+@extern method OLItemGroupClass, MSG_SPEC_NAVIGATION_QUERY;
+@extern method OLItemGroupClass, MSG_META_GAINED_FOCUS_EXCL;
+@extern method OLItemGroupClass, MSG_META_LOST_FOCUS_EXCL;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_GAINED_FOCUS_EXCL;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_LOST_FOCUS_EXCL;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_USABLE;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_ENABLED;
+@extern method OLItemGroupClass, MSG_SPEC_SET_NOT_USABLE;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_DOUBLE_PRESS;
+@extern method OLItemGroupClass, MSG_GEN_ACTIVATE;
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLItemGroupInitialize: its own size; a boolean group has check
+ * boxes; HINT_DEFAULT_FOCUS; HINT_ITEM_GROUP_MINIMIZE_SIZE keeps it out
+ * of a toolbox
+ */
+@method OLItemGroupClass, MSG_META_INITIALIZE
+{
+    OLItemGroupInstance *p;
+
+    @callsuper();
+    VisSetSize(oself, RSA_CHOOSE_OWN_SIZE, RSA_CHOOSE_OWN_SIZE);
+    p = IG(oself);
+    if (ObjIsObjectInClass(oself, &GenBooleanGroupClass))
+	p->OLIGI_state |= OLIGS_CHECKBOXES;
+    if (ObjVarFindData(oself, HINT_DEFAULT_FOCUS))
+	p->OLIGI_state |= OLIGS_DEFAULT_FOCUS;
+    if (ObjVarFindData(oself, HINT_ITEM_GROUP_MINIMIZE_SIZE))
+	p->OLCI_buildFlags &= ~OLBF_TOOLBOX;
+}
+
+/*
+ * OLItemGroupSpecBuild: enabled as the generic object is; the generic
+ * parent's delayed mode; in a menu the interaction completes on a
+ * change; the geometry hints, the focus item; modified: the dialog's
+ * apply trigger enabled (through the queue, first)
+ */
+@method OLItemGroupClass, MSG_SPEC_BUILD
+{
+    OLBuildFlags b = 0;
+    optr gp;
+
+    VisSpecBuildSetEnabledState(oself, flags);
+    gp = GenFindParent(oself);
+    if (gp)
+	(void) @call gp::MSG_VUP_GET_BUILD_FLAGS(&b);
+    IG(oself)->OLCI_buildFlags |= b & OLBF_DELAYED_MODE;
+    @callsuper();
+    if (IG(oself)->OLCI_optFlags & OLCOF_IN_MENU) {
+	((GenInstance *) ObjDerefGen(oself))->GI_attrs |=
+	    GA_SIGNAL_INTERACTION_COMPLETE;
+    }
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    InitFocusItem(oself);
+    if (IGG(oself)->GIGI_stateFlags & GIGSF_MODIFIED)
+	@send, forceQueue, insertAtFront oself::MSG_GEN_MAKE_APPLYABLE();
+}
+
+/* InitFocusItem: an exclusive group's selection, else the first item */
+void InitFocusItem(optr o)
+{
+    word id;
+    optr item;
+
+    if (!IsNonExclusive(o)) {
+	Boolean has = GetCurrentSelection(o, &id);
+
+	SetFocusItem(o, has ? id : 0, has);
+	if (has)
+	    return;
+    }
+    if (OLItemGroupGetFirstItemOptr(o, &item))
+	SetFocusFromOptr(o, item);
+}
+
+/*
+ * OLItemGroupScanGeometryHints: the control's; without an orientation
+ * hint the items are side by side (not in a menu); ATTR_GEN_PROPERTY
+ * and ATTR_GEN_NOT_PROPERTY set the delayed mode
+ */
+@method OLItemGroupClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    OLItemGroupInstance *p;
+    Boolean geo;
+
+    @callsuper();
+    geo = ObjVarFindData(oself, HINT_ORIENT_CHILDREN_VERTICALLY) ||
+	  ObjVarFindData(oself, HINT_ORIENT_CHILDREN_HORIZONTALLY) ||
+	  ObjVarFindData(oself, HINT_SAME_ORIENTATION_AS_PARENT) ||
+	  ObjVarFindData(oself, HINT_ORIENT_CHILDREN_ALONG_LARGER_DIMENSION);
+    p = IG(oself);
+    if (ObjVarFindData(oself, ATTR_GEN_PROPERTY))
+	p->OLCI_buildFlags |= OLBF_DELAYED_MODE;
+    if (ObjVarFindData(oself, ATTR_GEN_NOT_PROPERTY))
+	p->OLCI_buildFlags &= ~OLBF_DELAYED_MODE;
+    if (!geo && !(p->OLCI_optFlags & OLCOF_IN_MENU))
+	p->VCI_geoAttrs &= ~VCGA_ORIENT_CHILDREN_VERTICALLY;
+}
+
+/* OLItemGroupVisOpen: an extended selection starts over */
+@method OLItemGroupClass, MSG_VIS_OPEN
+{
+    @callsuper();
+    if (IsExtendedSelection(oself))
+	IG(oself)->OLIGI_displayedItem = 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry
+ * ------------------------------------------------------------------- */
+
+/* ItemGroupPassMarginInfo: our spacing and the control's margins */
+static VisCompSpacingMarginsInfo PassMarginInfo(optr o)
+{
+    SpacingAsDWord s = @call o::MSG_VIS_COMP_GET_CHILD_SPACING();
+    Rectangle m;
+
+    @call o::MSG_VIS_COMP_GET_MARGINS(&m);
+    return OpenPassMarginInfo(o, &m, DWORD_CHILD_SPACING(s),
+			      DWORD_WRAP_SPACING(s));
+}
+
+@method OLItemGroupClass, MSG_VIS_RECALC_SIZE
+{
+    return OpenRecalcCtrlSize(oself, width, height, PassMarginInfo(oself));
+}
+
+@method OLItemGroupClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
+		    PassMarginInfo(oself));
+}
+
+/* the insets of an item (x in the low byte, y in the high one): the
+ * diamond's, a toolbox's */
+@method OLItemGroupClass, MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE
+{
+    word y = MO_ITEM_INSET_Y * 2, x = MO_ITEM_INSET_LEFT +
+				       MO_ITEM_INSET_RIGHT;
+
+    if (OpenCheckIfCGA())
+	y = 0;
+    if (pself->OLCI_buildFlags & OLBF_TOOLBOX) {
+	x = TOOLBOX_INSET_X * 2;
+	y = TOOLBOX_INSET_Y * 2;
+    }
+    if (pself->OLIGI_state & OLIGS_SCROLLABLE) {
+	x = MO_SCROLL_ITEM_INSET_X * 2;
+	y = MO_SCROLL_ITEM_INSET_Y * 2;
+    }
+    return (word) ((y << 8) | x);
+}
+
+/*
+ * OLItemGroupGetSpacing: none between items (a toolbox on black and
+ * white overlaps them by one); the spacing hints; small on CGA (across)
+ * and narrow screens (along x)
+ */
+@method OLItemGroupClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    word cx = MO_ITEM_SPACING, dx = MO_ITEM_SPACING, t;
+    Boolean vert;
+
+    if ((ObjVarFindData(oself, HINT_ITEM_GROUP_TOOLBOX_STYLE) ||
+	 (IG(oself)->OLCI_buildFlags & OLBF_TOOLBOX)) && OpenCheckIfBW())
+	cx = dx = OL_BW_TOOLBOX_SPACING;
+    OpenCtrlCheckCustomSpacing(oself, &cx, &dx);
+    vert = (IG(oself)->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+    if (vert) {
+	t = cx; cx = dx; dx = t;
+    }
+    if (OpenCheckIfCGA() && (sword) dx > MINIMAL_Y_SPACING)
+	dx = MINIMAL_Y_SPACING;
+    if (OpenCheckIfNarrow() && (sword) cx > MINIMAL_X_SPACING)
+	cx = MINIMAL_X_SPACING;
+    if (vert) {
+	t = cx; cx = dx; dx = t;
+    }
+    return MAKE_SPACING_DWORD(cx, dx);
+}
+
+/* ---------------------------------------------------------------------
+ * The extended selection
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    Rectangle	r;
+    Boolean	found;
+    word	first;
+    word	last;
+} ExtentScan;
+
+/* CheckChildInExtent: an enabled item in the rectangle: the first and
+ * last of them */
+static void CheckChildInExtent(optr child, ExtentScan *e)
+{
+    Rectangle b;
+    word id;
+
+    if (!GenCheckIfFullyEnabled(child, FALSE))
+	return;
+    VisGetBounds(child, &b);
+    if (b.R_left > e->r.R_right || b.R_right - 1 < e->r.R_left ||
+	b.R_top > e->r.R_bottom || b.R_bottom - 1 < e->r.R_top)
+	return;
+    id = ((GenItemInstance *) ObjDerefGen(child))->GII_identifier;
+    if (!e->found) {
+	e->found = TRUE;
+	e->first = id;
+    }
+    e->last = id;
+}
+
+/*
+ * CalcNewExtent: the items in the rectangle from the anchor item to the
+ * mouse; the extent is the one of them farthest from the anchor (the
+ * anchor if none)
+ */
+static word CalcNewExtent(optr o, sword x, sword y)
+{
+    OLItemGroupInstance *p = IG(o);
+    word anchor = p->OLIGI_anchorItem, i;
+    optr a = GetItemOptr(o, anchor), child;
+    sword ax = 0, ay = 0, t;
+    ExtentScan e;
+
+    if (a) {
+	XYValueAsDWord pos = @call a::MSG_VIS_GET_POSITION();
+
+	ax = DWORD_X(pos);
+	ay = DWORD_Y(pos);
+    }
+    if (ax > x) {
+	t = ax; ax = x; x = t;
+    }
+    if (ay > y) {
+	t = ay; ay = y; y = t;
+    }
+    e.r.R_left = ax;
+    e.r.R_top = ay;
+    e.r.R_right = x;
+    e.r.R_bottom = y;
+    e.found = FALSE;
+    e.first = e.last = 0;
+    for (i = 0; (child = @call o::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++) {
+	ObjLockObjBlock(OptrToHandle(child));
+	CheckChildInExtent(child, &e);
+	MemUnlock(OptrToHandle(child));
+    }
+    if (!e.found)
+	return anchor;
+    if (e.first == anchor)
+	return e.last;
+    if (e.last <= anchor)
+	return e.first;
+    return e.last;
+}
+
+@method OLItemGroupClass, MSG_OL_IGROUP_TOGGLE_ADD_MODE
+{
+    pself->OLIGI_moreState ^= OLIGMS_XORING_SELECTION;
+}
+
+/* OLItemGroupDeselectAll: none selected (not for an exclusive group) */
+@method OLItemGroupClass, MSG_OL_IGROUP_DESELECT_ALL
+{
+    if (!(pself->OLIGI_state & OLIGS_CHECKBOXES) &&
+	IGG(oself)->GIGI_behaviorType == GIGBT_EXCLUSIVE)
+	return;
+    @call oself::MSG_OL_IGROUP_SET_MODIFIED_SELECTION(0, 0);
+}
+
+/*
+ * OLItemGroupStartExtendedSelection: the selection saved; the anchor
+ * (unless adjusting); a non exclusive group toggles the anchor's state,
+ * else with the add mode (PREF_A) the items are xored, else selected
+ */
+@method OLItemGroupClass, MSG_OL_IGROUP_START_EXTENDED_SELECTION
+{
+    byte ui = uiFuncs >> 8;
+
+    SaveCurrentSelection(oself);
+    pself = IG(oself);
+    pself->OLIGI_moreState |= OLIGMS_EXTENDING_SELECTION;
+    if (!(ui & UIFA_PREF_B))
+	SetAnchorItem(oself, identifier);
+    if (IsNonExclusive(oself)) {
+	SetToToggleAnchorItem(oself);
+	return;
+    }
+    pself = IG(oself);
+    pself->OLIGI_moreState &= ~OLIGMS_XORING_SELECTION;
+    if (ui & UIFA_PREF_A) {
+	pself->OLIGI_moreState |= OLIGMS_XORING_SELECTION;
+	if (!(ui & UIFA_PREF_B))
+	    SetToToggleAnchorItem(oself);
+	return;
+    }
+    pself->OLIGI_moreState |= OLIGMS_SELECTING_ITEMS;
+}
+
+/*
+ * OLItemGroupExtendSelection: the extent at the mouse (changed, or the
+ * first time); the focus to it, the mouse to its item
+ */
+@method OLItemGroupClass, MSG_OL_IGROUP_EXTEND_SELECTION
+{
+    word ext = CalcNewExtent(oself, x, y);
+    optr item;
+
+    if (!initial && ext == IG(oself)->OLIGI_extentItem)
+	return;
+    ExtendSelection(oself, ext, OLIUF_TEMPORARY_CHANGE);
+    ext = IG(oself)->OLIGI_extentItem;
+    item = GetOptrOrSelf(oself, ext);
+    OLItemGroupMoveFocusExclToItem(oself, item, ext);
+    if (item && item != oself)
+	@call item::MSG_VIS_GRAB_MOUSE();
+}
+
+/*
+ * OLItemGroupEndExtendedSelection: the selection made a modified one
+ * (unless redundant, but for ATTR_GEN_ITEM_GROUP_SET_MODIFIED_ON_
+ * REDUNDANT_SELECTION); adjusting goes on extending
+ */
+@method OLItemGroupClass, MSG_OL_IGROUP_END_EXTENDED_SELECTION
+{
+    pself->OLIGI_moreState &= ~(OLIGMS_XORING_SELECTION |
+				OLIGMS_EXTENDING_SELECTION);
+    if (!@call oself::MSG_OL_IGROUP_TEST_FOR_REDUNDANT_INTERMEDIATE_SELECTION(
+						0, TRUE) ||
+	ObjVarFindData(oself,
+		       ATTR_GEN_ITEM_GROUP_SET_MODIFIED_ON_REDUNDANT_SELECTION))
+	CallSelfWithUpdateFlagsAndSetModified(oself, 0, 0, 0, 0);
+    pself = IG(oself);
+    pself->OLIGI_moreState &= ~OLIGMS_PREV_SELECTION_VALID;
+    if ((uiFuncs >> 8) & UIFA_PREF_B)
+	pself->OLIGI_moreState |= OLIGMS_EXTENDING_SELECTION;
+}
+
+/*
+ * ExtendSelection: MSG_GEN_ITEM_GROUP_UPDATE_EXTENDED_SELECTION from the
+ * anchor to the new extent: the initial selection when nothing is
+ * displayed yet, selecting or deselecting, the others cleared unless in
+ * add mode; each change through MSG_OL_IGROUP_SET_MODIFIED_ITEM_STATE
+ */
+void ExtendSelection(optr o, word extent, word passFlags)
+{
+    OLItemGroupInstance *p = IG(o);
+    byte f = 0;
+    word anchor = p->OLIGI_anchorItem, prev = p->OLIGI_extentItem;
+
+    if (!p->OLIGI_displayedItem)
+	f |= ESF_INITIAL_SELECTION;
+    if (p->OLIGI_moreState & OLIGMS_SELECTING_ITEMS)
+	f |= ESF_SELECT;
+    if (!CheckIfInAddMode(o))
+	f |= ESF_CLEAR_UNSELECTED_ITEMS;
+    @call o::MSG_GEN_ITEM_GROUP_UPDATE_EXTENDED_SELECTION(
+		(word) (f | ((passFlags & 0xff) << 8)),
+		MSG_OL_IGROUP_SET_MODIFIED_ITEM_STATE, prev, extent, anchor);
+    p = IG(o);
+    if (f & ESF_SELECT)
+	p->OLIGI_displayedItem = OptrToChunk(o);
+    p->OLIGI_extentItem = extent;
+}
+
+/* SetToToggleAnchorItem: the items get the opposite of the anchor's
+ * state */
+void SetToToggleAnchorItem(optr o)
+{
+    byte s = @call o::MSG_OL_IGROUP_GET_ITEM_STATE(IG(o)->OLIGI_anchorItem);
+    OLItemGroupInstance *p = IG(o);
+
+    p->OLIGI_moreState |= OLIGMS_SELECTING_ITEMS;
+    if (!(s & OLIS_INDETERMINATE) && (s & OLIS_SELECTED))
+	p->OLIGI_moreState &= ~OLIGMS_SELECTING_ITEMS;
+}
+
+/* ---------------------------------------------------------------------
+ * What the group is
+ * ------------------------------------------------------------------- */
+
+Boolean CheckIfInAddMode(optr o)
+{
+    return !IsNonExclusive(o) &&
+	   (IG(o)->OLIGI_moreState & OLIGMS_XORING_SELECTION) != 0;
+}
+
+Boolean IsNonExclusive(optr o)
+{
+    return (IG(o)->OLIGI_state & OLIGS_CHECKBOXES) ||
+	   IGG(o)->GIGI_behaviorType == GIGBT_NON_EXCLUSIVE;
+}
+
+/* IsExtendedSelection: an extended selection or non exclusive list (not
+ * check boxes, not in a menu) */
+Boolean IsExtendedSelection(optr o)
+{
+    OLItemGroupInstance *p = IG(o);
+    GenItemGroupBehaviorType t;
+
+    if ((p->OLIGI_state & OLIGS_CHECKBOXES) ||
+	(p->OLCI_optFlags & OLCOF_IN_MENU))
+	return FALSE;
+    t = IGG(o)->GIGI_behaviorType;
+    return t == GIGBT_EXTENDED_SELECTION || t == GIGBT_NON_EXCLUSIVE;
+}
+
+/* ---------------------------------------------------------------------
+ * The focus item, the items
+ * ------------------------------------------------------------------- */
+
+/* GetFocusItemOptr: the focus item's optr (the group's if it is not a
+ * child), 0 if there is none */
+optr GetFocusItemOptr(optr o)
+{
+    OLItemGroupInstance *p = IG(o);
+
+    if (!(p->OLIGI_state & OLIGS_HAS_FOCUS_ITEM))
+	return 0;
+    return GetOptrOrSelf(o, p->OLIGI_focusItem);
+}
+
+/* GetOptr: the generic child with the identifier (FindChildIdentifier) */
+optr GetItemOptr(optr o, word id)
+{
+    if (IG(o)->OLIGI_state & OLIGS_CHECKBOXES)
+	return @call o::MSG_GEN_BOOLEAN_GROUP_GET_BOOLEAN_OPTR(id);
+    return @call o::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(id);
+}
+
+/* GetOptrOrSelf: the item, or the group (a dynamic list's item not
+ * there) */
+optr GetOptrOrSelf(optr o, word id)
+{
+    optr item = GetItemOptr(o, id);
+
+    return item ? item : o;
+}
+
+void SetFocusItem(optr o, word id, Boolean has)
+{
+    OLItemGroupInstance *p = IG(o);
+
+    p->OLIGI_state &= ~OLIGS_HAS_FOCUS_ITEM;
+    if (has)
+	p->OLIGI_state |= OLIGS_HAS_FOCUS_ITEM;
+    p->OLIGI_focusItem = id;
+}
+
+/* GetIdentifierFromCxDx: an item's identifier; the group itself or none
+ * is no focus item */
+static Boolean GetIdentifier(optr o, optr item, word *id)
+{
+    *id = 0;
+    if (!item || item == o)
+	return FALSE;
+    *id = @call item::MSG_GEN_ITEM_GET_IDENTIFIER();
+    return TRUE;
+}
+
+void SetFocusFromOptr(optr o, optr item)
+{
+    word id;
+    Boolean has = GetIdentifier(o, item, &id);
+
+    SetFocusItem(o, id, has);
+}
+
+/* IsFocusItemOptr: the item is the focus item (or neither is one) */
+Boolean IsFocusItemOptr(optr o, optr item)
+{
+    word id;
+    Boolean has = GetIdentifier(o, item, &id);
+    OLItemGroupInstance *p = IG(o);
+
+    if (((p->OLIGI_state & OLIGS_HAS_FOCUS_ITEM) != 0) != has)
+	return FALSE;
+    return p->OLIGI_focusItem == id;
+}
+
+void SetAnchorItem(optr o, word id)
+{
+    OLItemGroupInstance *p = IG(o);
+
+    p->OLIGI_anchorItem = id;
+    p->OLIGI_displayedItem = 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Menus
+ * ------------------------------------------------------------------- */
+
+/* OLItemGroupSpecMenuSepQuery: a usable group is set off by separators
+ * from what is next to it in a menu */
+@method OLItemGroupClass, MSG_SPEC_MENU_SEP_QUERY
+{
+    if (!(((GenInstance *) ObjDerefGen(oself))->GI_states & GS_USABLE))
+	return OpenForwardMenuSepQuery(oself, flags);
+    flags = OpenForwardMenuSepQuery(oself, flags | MSF_SEP | MSF_USABLE);
+    return flags | MSF_SEP;
+}

@@ -1,0 +1,61 @@
+/*
+ * citemBooleanGroup.goc -- OLItemGroupClass for a GenBooleanGroup
+ * (after citemBooleanGroup.asm): its items are booleans, each one a bit
+ * of the selected, indeterminate and modified words.
+ */
+@include "CItem/citemInt.goh"
+
+/*
+ * OLBooleanGroupSetModifiedItemState: the boolean set (the high byte of
+ * flags) by the user: not indeterminate, modified, its status sent,
+ * applied unless in delayed mode
+ */
+void OLBooleanGroupSetModifiedItemState(optr o, word id, word flags)
+{
+    IG(o)->OLIGI_updateFlags = (OLItemUpdateFlags) flags;
+    @call o::MSG_GEN_BOOLEAN_GROUP_SET_BOOLEAN_STATE(id, (flags >> 8) != 0);
+    @call o::MSG_GEN_BOOLEAN_GROUP_SET_BOOLEAN_INDETERMINATE_STATE(id, FALSE);
+    @call o::MSG_GEN_BOOLEAN_GROUP_SET_GROUP_MODIFIED_STATE(id, 0);
+    @call o::MSG_GEN_BOOLEAN_GROUP_SEND_STATUS_MSG(id);
+    FinishSetModifiedState(o);
+}
+
+/*
+ * OLBooleanGroupUpdateSpecificObject: built, the user's press given up
+ * (unless told to leave it), each changed boolean set to its state
+ */
+void OLBooleanGroupUpdateSpecificObject(optr o, word changed)
+{
+    OLItemUpdateFlags uf;
+    optr child;
+    word i, id;
+    byte s;
+
+    if (!VisCheckIfSpecBuilt(o))
+	return;
+    uf = IG(o)->OLIGI_updateFlags;
+    if (!(uf & OLIUF_LEAVE_FOCUS_AND_GRAB_ALONE))
+	OLItemGroupAbortAllUserInteraction(o);
+    for (i = 0; (child = @call o::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++) {
+	id = @call child::MSG_GEN_BOOLEAN_GET_IDENTIFIER();
+	if (!(id & changed))
+	    continue;
+	s = OLBooleanGroupGetItemState(o, id);
+	@call child::MSG_OL_ITEM_SET_STATE(s, uf);
+    }
+    IG(o)->OLIGI_updateFlags = 0;
+}
+
+/* OLBooleanGroupGetItemState: selected, indeterminate */
+byte OLBooleanGroupGetItemState(optr o, word id)
+{
+    GenBooleanGroupInstance *g = BGG(o);
+    byte s = 0;
+
+    if (g->GBGI_selectedBooleans & id)
+	s |= OLIS_SELECTED;
+    if (g->GBGI_indeterminateBooleans & id)
+	s |= OLIS_INDETERMINATE;
+    return s;
+}

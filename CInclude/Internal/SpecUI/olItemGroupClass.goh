@@ -1,0 +1,120 @@
+/*
+ * olItemGroupClass.goh -- OLItemGroupClass, the specific UI's item
+ * group: a GenItemGroup or GenBooleanGroup (after
+ * Include/Internal/SpecUI/olItemGroupClass.def), for Port32.
+ *
+ * Motif: no selection boxes, no Legos looks, no short and long touch.
+ * The asm's register forms are parameters here: the update flags in
+ * the low byte of a flags word, the state (or select) in its high byte.
+ */
+#ifndef __OLITEMGROUPCLASS_GOH
+#define __OLITEMGROUPCLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gBoolGC.goh>
+
+@deflib motif
+
+/* OLItemGroupState */
+typedef ByteFlags OLItemGroupState;
+#define OLIGS_DYNAMIC			0x80	/* a GenDynamicList */
+#define OLIGS_CHECKBOXES		0x40	/* a GenBooleanGroup */
+#define OLIGS_SCROLLABLE		0x20	/* a scrolling list */
+#define OLIGS_DEFAULT_FOCUS		0x10	/* HINT_DEFAULT_FOCUS */
+#define OLIGS_HAS_FOCUS_ITEM		0x08	/* OLIGI_focusItem is good */
+#define OLIGS_GROUP_HAS_MOUSE_GRAB	0x04
+#define OLIGS_INTERMEDIATE		0x02	/* pressing on an item */
+#define OLIGS_LIST_HAS_FOCUS_EXCL	0x01
+
+/* OLItemGroupMoreState */
+typedef ByteFlags OLItemGroupMoreState;
+#define OLIGMS_POPUP_LIST			0x80
+#define OLIGMS_DISPLAYS_CURRENT_SELECTION	0x40
+#define OLIGMS_DISPLAYING_SELECTION		0x20
+#define OLIGMS_WRAPPED_AROUND_ON_LAST_NAVIGATE	0x10
+#define OLIGMS_PREV_SELECTION_VALID		0x08
+#define OLIGMS_XORING_SELECTION			0x04
+#define OLIGMS_EXTENDING_SELECTION		0x02
+#define OLIGMS_SELECTING_ITEMS			0x01
+
+/* OLItemUpdateFlags */
+typedef ByteFlags OLItemUpdateFlags;
+#define OLIUF_SUPPRESS_DRAW			0x80
+#define OLIUF_SUPPRESS_DRAW_IF_CURSORED		0x40
+#define OLIUF_TEMPORARY_CHANGE			0x20
+#define OLIUF_LEAVE_FOCUS_AND_GRAB_ALONE	0x10
+
+/* OLExtendedKbdFlags, in the high byte of a kbdFlags word */
+#define OLEKF_USE_PREVIOUS	0x04
+#define OLEKF_CTRL_PRESSED	0x02
+#define OLEKF_SHIFT_PRESSED	0x01
+
+@class OLItemGroupClass, OLCtrlClass;
+@uses GenItemGroupClass;
+
+@message void MSG_OL_IGROUP_NOTIFY_GROUP_HAS_MOUSE_GRAB();
+@message void MSG_OL_IGROUP_NOTIFY_ITEM_WILL_GRAB_FOCUS_EXCL();
+@message void MSG_OL_IGROUP_NOTIFY_ITEM_GAINED_FOCUS_EXCL(optr item);
+@message void MSG_OL_IGROUP_NOTIFY_ITEM_LOST_FOCUS_EXCL(optr item);
+@message void MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE(optr item);
+@message void MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_USABLE(optr item);
+/* navFlags: OLIS_NAVIGATE_IF_DISABLED, OLIS_NAVIGATE_BACKWARD */
+@message void MSG_OL_IGROUP_NOTIFY_ITEM_SET_NOT_ENABLED(optr item,
+							word navFlags);
+@message void MSG_OL_IGROUP_NOTIFY_DOUBLE_PRESS(optr item);
+/* TRUE (the asm's carry) if the group does not have the focus */
+@message Boolean MSG_OL_IGROUP_START_INTERMEDIATE_MODE(word identifier);
+/* flags: OLItemEnsureNotPressedFlags */
+@message void MSG_OL_IGROUP_END_INTERMEDIATE_MODE(word flags);
+@message void MSG_OL_IGROUP_RESELECT_EXCL(word flags);
+/* flags: OLItemUpdateFlags, the state in the high byte (as
+ * GEN_ITEM_GROUP_SET_EXT_SEL_MSG) */
+@message void MSG_OL_IGROUP_SET_MODIFIED_ITEM_STATE(word identifier,
+						    word flags);
+/* flags: OLItemUpdateFlags, the high byte non-zero to select */
+@message void MSG_OL_IGROUP_SET_MODIFIED_SELECTION(word identifier,
+						   word flags);
+/* kbdFlags: OLExtendedKbdFlags in the high byte */
+@message void MSG_OL_IGROUP_SET_SELECTION_TO_NEXT(word kbdFlags);
+@message void MSG_OL_IGROUP_SET_SELECTION_TO_PREVIOUS(word kbdFlags);
+@message void MSG_OL_IGROUP_SET_SELECTION_TO_START(word kbdFlags);
+@message void MSG_OL_IGROUP_SET_SELECTION_TO_END(word kbdFlags);
+@message void MSG_OL_IGROUP_DESELECT_ALL();
+@message void MSG_OL_IGROUP_TOGGLE_ADD_MODE();
+@message void MSG_OL_IGROUP_TOGGLE_FOCUS_EXCL_ITEM(word kbdFlags);
+/* OLIS_SELECTED, OLIS_INDETERMINATE */
+@message byte MSG_OL_IGROUP_GET_ITEM_STATE(word identifier);
+@message void MSG_OL_IGROUP_RESET_POPUP_LIST_MONIKER();
+/* fromInstance FALSE: the selection is the identifier; TRUE if the
+ * selection is the one before intermediate mode */
+@message Boolean MSG_OL_IGROUP_TEST_FOR_REDUNDANT_INTERMEDIATE_SELECTION(
+				word identifier, word fromInstance);
+/* uiFuncs: UIFunctionsActive in the high byte */
+@message void MSG_OL_IGROUP_START_EXTENDED_SELECTION(word identifier,
+						     word uiFuncs);
+@message void MSG_OL_IGROUP_EXTEND_SELECTION(sword x, sword y,
+					     word initial);
+@message void MSG_OL_IGROUP_END_EXTENDED_SELECTION(word uiFuncs);
+@message void MSG_OL_IGROUP_SET_MODIFIED_AND_APPLY_IF_NEEDED(word flags);
+@message void MSG_OL_IGROUP_NOTIFY_ITEM_CHANGED_INTERACTABLE_STATE(
+				word interactable);
+
+    @vardata word TEMP_OL_ITEM_GROUP_NAVIGATE_IF_DISABLED_ITEM;
+    @vardata word TEMP_OL_ITEM_GROUP_LAST_ITEM_TO_REDRAW;
+
+    @instance OLItemGroupState	   OLIGI_state = 0;
+    @instance OLItemGroupMoreState OLIGI_moreState = 0;
+    @instance word		   OLIGI_focusItem = 0;
+    @instance OLItemUpdateFlags	   OLIGI_updateFlags = 0;
+    @instance ChunkHandle	   OLIGI_prevSelections = 0;
+    @instance GenItemGroupStateFlags OLIGI_prevState = 0;
+    @instance word		   OLIGI_anchorItem = 0;
+    @instance word		   OLIGI_extentItem = 0;
+    @instance word		   OLIGI_displayedItem = 0;
+    @instance word		   OLIGI_nonInteractables = 0;
+@endc;
+
+@endlib
+
+#endif

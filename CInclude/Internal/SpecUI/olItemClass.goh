@@ -1,0 +1,71 @@
+/*
+ * olItemClass.goh -- OLItemClass, the specific UI's item: a GenItem or
+ * GenBoolean, a button with a state (after
+ * Include/Internal/SpecUI/olItemClass.def), and OLCheckedItemClass
+ * (olCheckedItemClass.def), the check box of a non exclusive group, for
+ * Port32.
+ *
+ * Motif: no bubble help.
+ */
+#ifndef __OLITEMCLASS_GOH
+#define __OLITEMCLASS_GOH
+
+@include <Internal/SpecUI/olButtonClass.goh>
+@include <Internal/SpecUI/olItemGroupClass.goh>
+@include <Objects/gItemC.goh>
+@include <Objects/gBoolC.goh>
+
+@deflib motif
+
+/* OLItemEnsureNotPressedFlags */
+typedef WordFlags OLItemEnsureNotPressedFlags;
+#define OIENPF_MAINTAIN_INTERMEDIATE_MODE		0x8000
+#define OIENPF_RESTORE_SELECTION_TO_ORIGINAL_OWNER	0x4000
+#define OIENPF_RESTORE_FOCUS_EXCL_STATE_TO_ORIGINAL_OWNER 0x2000
+#define OIENPF_REDRAW_PRESSED_ITEM			0x1000
+#define OIENPF_SIMULATE_PRESS_AND_RELEASE		0x0800
+
+/* OLItemState */
+typedef ByteFlags OLItemState;
+#define OLIS_IS_CHECKBOX		0x80
+#define OLIS_DRAW_AS_TOOLBOX		0x40
+#define OLIS_PRESSING_ON_ITEM		0x20
+#define OLIS_MONIKER_INVALID		0x10
+#define OLIS_SELECTED			0x08
+#define OLIS_INDETERMINATE		0x04
+#define OLIS_NAVIGATE_IF_DISABLED	0x02
+#define OLIS_NAVIGATE_BACKWARD		0x01
+
+/* OLItemExtraRecord: the tab style (tabs are not drawn yet) */
+typedef ByteFlags OLItemExtraRecord;
+#define OLIER_3D_TAB		0x08
+#define OLIER_TAB_STYLE		0x07
+#define OLITS_TAB_TOP		1
+#define OLITS_TAB_LEFT		2
+#define OLITS_TAB_RIGHT		3
+#define OLITS_TAB_BOTTOM	4
+
+@class OLItemClass, OLButtonClass;
+@uses GenItemClass;
+
+@message void MSG_OL_ITEM_ENSURE_IS_PRESSED();
+/* TRUE (the asm's carry) if it was not pressed */
+@message Boolean MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED(word flags);
+@message Boolean MSG_OL_ITEM_ENSURE_IS_RELEASED(word flags);
+/* state: OLIS_SELECTED, OLIS_INDETERMINATE; updateFlags:
+ * OLItemUpdateFlags */
+@message void MSG_OL_ITEM_SET_STATE(word state, word updateFlags);
+@message void MSG_OL_ITEM_NAVIGATE_IF_DISABLED(word flags);
+@message void MSG_OL_ITEM_REDRAW();
+
+    @instance OLItemState		OLII_state = 0;
+    @instance GenItemGroupBehaviorType	OLII_behavior = 0;
+    @instance OLItemExtraRecord		OLII_extraRecord = 0;
+@endc;
+
+@class OLCheckedItemClass, OLItemClass;
+@endc;
+
+@endlib
+
+#endif

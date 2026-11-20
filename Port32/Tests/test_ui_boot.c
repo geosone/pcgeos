@@ -52,6 +52,8 @@ typedef struct {
     short		UBS_long[4];
     unsigned short	UBS_itemApplies, UBS_itemApply[3];
     unsigned short	UBS_boolApplies, UBS_boolApply[3];
+    unsigned short	UBS_radioApplies, UBS_radioSel;
+    unsigned short	UBS_checkApplies, UBS_checkSel;
 } UBState;
 
 static int fails;
@@ -126,8 +128,9 @@ int main(void)
      * system menu, maximized and restored by its icons; the File menu
      * pinned, opened by its button, closed by its system menu; a menu
      * taller than the screen scrolled by its scrollers and to its focus;
-     * the generic item and boolean groups */
-    for (i = 2; i <= 23; i++)
+     * the generic item and boolean groups; Motif's radio group and
+     * check boxes */
+    for (i = 2; i <= 25; i++)
 	step(i);
     printf("system menu button at %d,%d %dx%d, title bar %d..%d\n",
 	   st->UBS_sys[0], st->UBS_sys[1], st->UBS_sys[2], st->UBS_sys[3],
@@ -135,6 +138,9 @@ int main(void)
     printf("long menu %d..%d, down scroller at %d, scrolled to %d\n",
 	   st->UBS_long[0], st->UBS_long[1], st->UBS_long[2],
 	   st->UBS_long[3]);
+    printf("radio applied %u times (last %u), check boxes %u (%u)\n",
+	   st->UBS_radioApplies, st->UBS_radioSel, st->UBS_checkApplies,
+	   st->UBS_checkSel);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

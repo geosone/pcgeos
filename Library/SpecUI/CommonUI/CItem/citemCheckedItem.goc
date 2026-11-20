@@ -1,0 +1,61 @@
+/*
+ * citemCheckedItem.goc -- OLCheckedItemClass (after
+ * citemCheckedItem.asm): an item of a non exclusive group (a boolean
+ * group's), drawn as a check box.  In a toolbox it is an item like any.
+ */
+@include "CItem/citemInt.goh"
+
+@classdecl OLCheckedItemClass, neverSaved;
+
+#define InToolbox(o)	(Item(o)->OLBI_moreAttrs & OLBMA_IN_TOOLBOX)
+
+@method OLCheckedItemClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    Item(oself)->OLII_state |= OLIS_IS_CHECKBOX;
+}
+
+/* OLCheckedItemRerecalcSize: at least the check box (two more in a
+ * menu) */
+@method OLCheckedItemClass, MSG_VIS_RECALC_SIZE
+{
+    SizeAsDWord s = @callsuper();
+    word w, h, mh;
+
+    if (InToolbox(oself))
+	return s;
+    w = DWORD_WIDTH(s);
+    h = DWORD_HEIGHT(s);
+    mh = CHECK_HEIGHT + CHECK_TOP_BORDER + CHECK_BOTTOM_BORDER;
+    if (Item(oself)->OLBI_specState & OLBSS_IN_MENU)
+	mh += 2;
+    if (w < CHECK_BOX_WIDTH)
+	w = CHECK_BOX_WIDTH;
+    if (h < mh)
+	h = mh;
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+@method OLCheckedItemClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    if (InToolbox(oself)) {
+	@callsuper();
+	return;
+    }
+    (void) childCount;
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->ESP_extraWidth = MO_BUTTON_INSET_X * 2;
+    retValue->ESP_extraHeight = 18 - 12;
+}
+
+/* OLCheckedItemLostGadgetExcl: not pressed, the mouse let go */
+@method OLCheckedItemClass, MSG_VIS_LOST_GADGET_EXCL
+{
+    if (InToolbox(oself)) {
+	@callsuper();
+	return;
+    }
+    pself->OLBI_specState &= ~(OLBSS_DEPRESSED | OLBSS_BORDERED);
+    OLButtonDrawNowIfNewState(oself);
+    VisReleaseMouse(oself);
+}

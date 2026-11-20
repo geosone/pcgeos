@@ -48,8 +48,16 @@ export OLBuildInteraction
 skip 2
 export OLBuildDisplayControl
 export OLBuildPrimary
-# OLBuildGadget ... OLBuildValue
-skip 12
+# OLBuildGadget, OLBuildContent, OLBuildUIDocumentControl,
+# OLBuildAppDocumentControl, OLBuildDocument, OLBuildFileSelector
+skip 6
+export OLBuildBooleanGroup
+export OLBuildItemGroup
+export OLBuildDynamicList
+export OLBuildItem
+export OLBuildBoolean
+# OLBuildValue
+skip 1
 
 #
 # exported routines to do specific UI stuff
@@ -81,6 +89,9 @@ export OLDialogWinClass
 export OLReplyBarClass
 export OLMenuItemGroupClass
 export OLButtonClass
+export OLItemGroupClass
+export OLItemClass
+export OLCheckedItemClass
 export OLMenuWinClass
 export OLMenuButtonClass
 export OLMenuBarClass
