@@ -2562,6 +2562,22 @@ drive names of up to 32 characters (`DRIVE_NAME_MAX_LENGTH`) and up to
   GHAL backend draws through GWVIDEO tier 1, the UEFI GOP frame buffer
   as the baseline; mode-setting drivers come later (bochs-display,
   virtio-gpu first).
+  Input and the user's settings: GonWare only delivers the devices and
+  their raw events (keyboard scan codes with press and release, mouse
+  motion relative or absolute, buttons, wheel; devices arriving and
+  leaving) and the display modes a driver offers. What they mean is
+  GEOS's, per user in the user's `geos.ini`: the screen resolution
+  (chosen from the offered modes), the keyboard layout (GEOS's keyboard
+  driver maps the scan codes, as on DOS), mouse speed and acceleration,
+  double click time, left-handed. GonWare's own console layout is a
+  separate matter. System settings (IP, IPX, NTP, time zone, drivers)
+  are not in `geos.ini`: the Preferences modules read and write them
+  through GAPI calls to GonWare, which checks the caller's GDS rights
+  (a refusal asks for elevation). GonWare sends events through one
+  queue: volumes arriving and leaving, input devices, display modes,
+  time, network configuration, shutdown and suspend requests, the lock.
+  The lock screen is GonWare's, one for console and GUI; GEOS may ask
+  for it and hears when it locks and unlocks (proposed, 2026-11-20).
 
 ## 13g. FileEnum (`File/fileEnum.c`, P4)
 
