@@ -270,6 +270,9 @@ void UserScreenExit(void);
  * a GenItem and a GenBoolean in the same place) */
 struct _GenScanItemsReturn;
 optr GenItemGroupFindItem(optr obj, word identifier);
+/* the selections set without telling the specific UI (a dynamic list's
+ * items added or removed) */
+void GenItemGroupSetSelectionsNoUpdate(optr obj, const word *list, word n);
 Boolean GenItemGroupScan(optr obj, struct _GenScanItemsReturn *r,
 			 byte flags, word initial, sword amount);
 Boolean GenOptGetInteger(const GenOptionsParams *params, Boolean boolean,

@@ -18,6 +18,7 @@
 
 @extern method OLItemGroupClass, MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT;
 @extern method OLItemGroupClass, MSG_OL_IGROUP_GET_ITEM_STATE;
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_REDRAW_ITEMS;
 @extern method OLItemGroupClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
 @extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE;
 @extern method OLItemGroupClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
@@ -73,6 +74,8 @@
     p = IG(oself);
     if (ObjIsObjectInClass(oself, &GenBooleanGroupClass))
 	p->OLIGI_state |= OLIGS_CHECKBOXES;
+    if (ObjIsObjectInClass(oself, &GenDynamicListClass))
+	p->OLIGI_state |= OLIGS_DYNAMIC;
     if (ObjVarFindData(oself, HINT_DEFAULT_FOCUS))
 	p->OLIGI_state |= OLIGS_DEFAULT_FOCUS;
     if (ObjVarFindData(oself, HINT_ITEM_GROUP_MINIMIZE_SIZE))
@@ -102,6 +105,13 @@
 	    GA_SIGNAL_INTERACTION_COMPLETE;
     }
     @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    /* SetupDynamicListItems: a dynamic list that does not scroll shows
+     * all its items (made first, through the queue) */
+    if ((IG(oself)->OLIGI_state & (OLIGS_DYNAMIC | OLIGS_SCROLLABLE)) ==
+	OLIGS_DYNAMIC)
+	@send, forceQueue, insertAtFront
+	    oself::MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED(0xffff, 0,
+								  FALSE);
     InitFocusItem(oself);
     if (IGG(oself)->GIGI_stateFlags & GIGSF_MODIFIED)
 	@send, forceQueue, insertAtFront oself::MSG_GEN_MAKE_APPLYABLE();
@@ -229,10 +239,33 @@ void InitFocusItem(optr o)
     }
 }
 
-/* OLItemGroupVisOpen: an extended selection starts over */
+/* RemoveDynamicListItems: a dynamic list's items go */
+void RemoveDynamicListItems(optr o)
+{
+    if (IG(o)->OLIGI_state & OLIGS_DYNAMIC)
+	@call o::MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED(0, 0, FALSE);
+}
+
+/* OLItemGroupUnbuild: a dynamic list's items removed (Port32, not yet:
+ * a popup list's interaction unbuilt) */
+@method OLItemGroupClass, MSG_SPEC_UNBUILD
+{
+    pself->OLIGI_moreState &= ~OLIGMS_DISPLAYING_SELECTION;
+    RemoveDynamicListItems(oself);
+    @callsuper();
+}
+
+/* OLItemGroupVisOpen: a scrolling dynamic list's document sized; an
+ * extended selection starts over */
 @method OLItemGroupClass, MSG_VIS_OPEN
 {
     @callsuper();
+    if ((IG(oself)->OLIGI_state & (OLIGS_DYNAMIC | OLIGS_SCROLLABLE)) ==
+	(OLIGS_DYNAMIC | OLIGS_SCROLLABLE)) {
+	word n = @call oself::MSG_GEN_DYNAMIC_LIST_GET_NUM_ITEMS();
+
+	@call oself::MSG_GEN_DYNAMIC_LIST_NUM_ITEMS_CHANGED(n);
+    }
     if (IsExtendedSelection(oself))
 	IG(oself)->OLIGI_displayedItem = 0;
     SetPopupListMonikerIfNeeded(oself);

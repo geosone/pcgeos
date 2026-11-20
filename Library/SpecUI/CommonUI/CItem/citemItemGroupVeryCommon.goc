@@ -8,8 +8,8 @@
  * items, the focus moved to an item.
  *
  * Port32 (Port32/ABI.md section 13y), not yet: popup lists (their
- * button's moniker), dynamic lists (MSG_GEN_ITEM_GROUP_REDRAW_ITEMS,
- * MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER), tabs (drawn by
+ * button's moniker), a popup dynamic list's moniker
+ * (MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER), tabs (drawn by
  * MSG_VIS_DRAW).
  */
 @include "CItem/citemInt.goh"
@@ -282,6 +282,7 @@ Boolean ScanItems(optr o, GenScanItemsFlags flags, word initial,
     Boolean found;
 
     memset(&r, 0, sizeof(r));
+    r.GSIR_flags = flags;
     if (IG(o)->OLIGI_state & OLIGS_CHECKBOXES)
 	found = @call o::MSG_GEN_BOOLEAN_GROUP_P32_SCAN_BOOLEANS(&r, flags,
 							      initial, amount);
@@ -295,7 +296,8 @@ Boolean ScanItems(optr o, GenScanItemsFlags flags, word initial,
     *item = GetItemOptr(o, r.GSIR_item);
     if (*item && (IG(o)->OLIGI_state & OLIGS_DYNAMIC))
 	@call (*item)::MSG_OL_ITEM_NAVIGATE_IF_DISABLED(
-			(flags & GSIF_FORWARD) ? 0 : OLIS_NAVIGATE_BACKWARD);
+			(r.GSIR_flags & GSIF_FORWARD) ? 0 :
+			OLIS_NAVIGATE_BACKWARD);
     return TRUE;
 }
 
@@ -305,6 +307,35 @@ Boolean OLItemGroupGetFirstItemOptr(optr o, optr *item)
 
     return ScanItems(o, GSIF_FROM_START | GSIF_FORWARD |
 			GSIF_EXISTING_ITEMS_ONLY, 0, 0, &id, item);
+}
+
+/*
+ * OLItemGroupRedraw: the items from visual child offset on (to the one
+ * TEMP_OL_ITEM_GROUP_LAST_ITEM_TO_REDRAW names, else the last) take
+ * their state from the group and are redrawn; a group that is not
+ * exclusive with one selection moves its focus now (its only chance)
+ */
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_REDRAW_ITEMS
+{
+    word *lp = ObjVarFindData(oself, TEMP_OL_ITEM_GROUP_LAST_ITEM_TO_REDRAW);
+    word last = lp ? *lp : 0xffff, n;
+    optr item;
+
+    if (!(offset & 0x8000)) {
+	for (n = offset;
+	     (item = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(n)) != 0;
+	     n++) {
+	    @call item::MSG_OL_ITEM_REDRAW();
+	    if (n >= last)
+		break;
+	}
+	if (IsNonExclusive(oself) || IGG(oself)->GIGI_numSelections != 1) {
+	    item = GetFocusItemOptr(oself);
+	    if (item)
+		OLItemGroupVupGrabFocusExclForItem(oself, item);
+	}
+    }
+    SetPopupListMonikerIfNeeded(oself);
 }
 
 /* OLItemGroupBroadcastForDefaultFocus: HINT_DEFAULT_FOCUS answers */

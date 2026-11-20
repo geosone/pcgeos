@@ -30,6 +30,7 @@ geos_geode(ui GP ui32.gp
                ${ui}/Gen/genPrimary.goc
                ${ui}/Gen/genItemGroup.goc
                ${ui}/Gen/genItem.goc
+               ${ui}/Gen/genDynamicList.goc
                ${ui}/Gen/genBooleanGroup.goc
                ${ui}/Gen/genBoolean.goc
                ${ui}/Gen/genView.goc

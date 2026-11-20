@@ -63,6 +63,7 @@ typedef struct {
     word		UBS_scrollDrag;
     short		UBS_view[4];
     short		UBS_slist[5];
+    unsigned short	UBS_dlist[4];
 } UBState;
 
 static int fails;
@@ -98,7 +99,7 @@ static void Shot(int step)
     FILE *o;
     int x, y;
 
-    if (!f || step != (at ? atoi(at) : 36))
+    if (!f || step != (at ? atoi(at) : 38))
 	return;
     TimerSleep(60);
     o = fopen(f, "wb");
@@ -168,8 +169,8 @@ int main(void)
      * pinned, opened by its button, closed by its system menu; a menu
      * taller than the screen scrolled by its scrollers and to its focus;
      * the generic item and boolean groups; Motif's radio group and
-     * check boxes; a popup list; a scrollbar; a view; a scrolling list */
-    for (i = 2; i <= 36; i++) {
+     * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list */
+    for (i = 2; i <= 38; i++) {
 	step(i);
 	Shot(i);
     }
@@ -193,6 +194,9 @@ int main(void)
     printf("scrolling list: items %d high, %d shown in %dx%d, paged to "
 	   "top item %d\n", st->UBS_slist[0], st->UBS_slist[1],
 	   st->UBS_slist[2], st->UBS_slist[3], st->UBS_slist[4]);
+    printf("dynamic list: %u monikers asked for, %u items, scrolled to "
+	   "top item %u (first item %u)\n", st->UBS_dlist[0],
+	   st->UBS_dlist[1], st->UBS_dlist[2], st->UBS_dlist[3]);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

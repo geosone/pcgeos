@@ -17,7 +17,7 @@ build=${1:-$top/build}
 out=${2:-$top/Local/shots/uiboot.png}
 mkdir -p "$(dirname "$out")"
 ppm=${out%.png}.ppm
-UIBOOT_SHOT=$ppm UIBOOT_SHOT_AT=${at:-36} \
+UIBOOT_SHOT=$ppm UIBOOT_SHOT_AT=${at:-38} \
     "$top/Port32/tools/geos-xserver.sh" -geometry 640x480 \
     "$build/Port32/Tests/test_ui_boot" >/dev/null
 magick "$ppm" "$out"

@@ -20,6 +20,7 @@
 @include <Internal/specC.goh>
 @include <Objects/gItemGC.goh>
 @include <Objects/gItemC.goh>
+@include <Objects/gDListC.goh>
 #include <initfile.h>
 #include <string.h>
 
@@ -181,6 +182,11 @@ static Boolean SetMultiSelection(optr o, const word *list, word n)
     if (changed)
 	ObjMarkDirty(ConstructOptr(mh, ch));
     return SetSelection(o, n, (word) ch, indeterminate, changed);
+}
+
+void GenItemGroupSetSelectionsNoUpdate(optr o, const word *list, word n)
+{
+    (void) SetMultiSelection(o, list, n);
 }
 
 /*
@@ -860,6 +866,19 @@ static Boolean ChangeChild(optr parent, optr child, void *data)
     e.passFlags = (byte) (flags >> 8);
     e.setSelMsg = setSelMsg;
     e.group = oself;
+    if (ObjIsObjectInClass(oself, (ClassStruct *) &GenDynamicListClass)) {
+	/* GenDynamicListUpdateExtendedSelection: the identifiers are
+	 * the positions, all the items of the list */
+	word n = ((GenDynamicListInstance *) ObjDerefGen(oself))->
+		 GDLI_numItems, pos;
+
+	if (!SetupChange(&e))
+	    return;
+	for (pos = 0; pos < n; pos++)
+	    ChangeItem(&e, pos, !(e.flags & ESF_INITIAL_SELECTION) &&
+				pos >= e.lo && pos <= e.hi, pos);
+	return;
+    }
     GenCallChildren(oself, ConvertToPositions, &e);
     if (!SetupChange(&e))
 	return;

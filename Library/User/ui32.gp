@@ -36,6 +36,7 @@ export GenDisplayGroupClass
 export GenPrimaryClass
 export GenBooleanGroupClass
 export GenItemGroupClass
+export GenDynamicListClass
 export GenItemClass
 export GenBooleanClass
 export GenViewClass

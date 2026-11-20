@@ -161,5 +161,7 @@ extern void OLItemGroupSetUserCommon(optr o, GenScanItemsFlags flags,
  * 1; a value multiplied by it */
 extern word GetWrapCount(optr o);
 extern word MultByWrapCount(optr o, word v);
+/* a dynamic list's items removed (unbuilt) */
+extern void RemoveDynamicListItems(optr o);
 
 #endif

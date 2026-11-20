@@ -30,6 +30,7 @@
 @include <Internal/SpecUI/olItemGroupClass.goh>
 @include <Internal/SpecUI/olItemClass.goh>
 @include <Internal/SpecUI/olScrollListClass.goh>
+@include <Objects/gDListC.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Internal/SpecUI/olPaneClass.goh>
 @include <Internal/SpecUI/olContentClass.goh>
@@ -73,6 +74,9 @@ typedef struct {
     /* the scrolling list's item length, items shown, view window size
      * and the top item after paging down */
     sword		UBS_slist[5];
+    /* the dynamic list: monikers asked for, items made, the top item
+     * and the first item's number after scrolling to item 12 */
+    word		UBS_dlist[4];
 } UBState;
 
 UBState ubState;
@@ -100,6 +104,7 @@ UBState ubState;
     @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_DOWN;
     @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_PAGE_DOWN;
     @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_BOTTOM;
+    @message (GEN_DYNAMIC_LIST_QUERY_MSG) MSG_UB_QUERY_ITEM;
 @endc
 @classdecl UBProcessClass, neverSaved;
 
@@ -189,7 +194,7 @@ UBState ubState;
 @object GenDisplayClass UBDoc2 = {
     GI_visMoniker = "Doc 2";
     GI_comp = @UBRadio, @UBChecks, @UBSize, @UBScroll, @UBView, @UBView2,
-	      @UBSList;
+	      @UBSList, @UBDList;
 }
 /* in Doc 2: a view of a 2000 x 300 document that scrolls both ways
  * (its window fixed at 200 x 40: the screens of the tests differ) */
@@ -336,7 +341,28 @@ UBState ubState;
 @object GenItemClass UBSL5 = { GI_visMoniker = "Symbol"; GII_identifier = 5; }
 @object GenItemClass UBSL6 = { GI_visMoniker = "Bison"; GII_identifier = 6; }
 @object GenItemClass UBSL7 = { GI_visMoniker = "Unix"; GII_identifier = 7; }
+/* in Doc 2: a scrolling dynamic list of twenty items, their monikers
+ * from the process */
+@object GenDynamicListClass UBDList = {
+    GIGI_destination = process;
+    GDLI_numItems = 20;
+    GDLI_queryMsg = MSG_UB_QUERY_ITEM;
+    HINT_ITEM_GROUP_SCROLLABLE;
+}
 @end UBAppObjects;
+
+/* the dynamic list's monikers: "Item n" */
+@method UBProcessClass, MSG_UB_QUERY_ITEM
+{
+    char t[12] = "Item ", *p = t + 5;
+
+    ubState.UBS_dlist[0]++;
+    if (item >= 10)
+	*p++ = (char) ('0' + item / 10 % 10);
+    *p++ = (char) ('0' + item % 10);
+    *p = 0;
+    @call list::MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_TEXT(item, t);
+}
 
 @method UBProcessClass, MSG_UB_ITEMS_APPLIED
 {
@@ -668,6 +694,8 @@ static Rectangle ScreenBounds(WindowHandle w)
 
 @method UBProcessClass, MSG_UB_STEP
 {
+    OLItemInstance ii;
+
     switch (step) {
     case 1: {
 	/* the application and its primary, built by Motif; the display
@@ -1621,6 +1649,55 @@ static Rectangle ScreenBounds(WindowHandle w)
 	UBCHECK(@call UBSList::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 2);
 	VisData(@UBSList, &l, sizeof(l));
 	UBCHECK(l.OLSLI_topItem <= 2);
+	/* the dynamic list: a scrolling list; its items made once its
+	 * view's size was known (done by the next step) */
+	UBCHECK(InClass(@UBDList, (ClassStruct *) &OLScrollListClass));
+	VisData(@UBDList, &l, sizeof(l));
+	UBCHECK(l.OLIGI_state & OLIGS_DYNAMIC);
+	break;
+    }
+    case 37: {
+	/* every item shown asked for and answered: numbered from 0,
+	 * interactable, with its moniker; then scrolled to item 12 */
+	OLScrollListInstance l;
+	optr i0, i4;
+
+	VisData(@UBDList, &l, sizeof(l));
+	ubState.UBS_dlist[1] = @call UBDList::MSG_GEN_COUNT_CHILDREN();
+	UBCHECK(ubState.UBS_dlist[1] == l.OLSLI_numVisibleItems &&
+		l.OLSLI_numVisibleItems == 5);
+	UBCHECK(ubState.UBS_dlist[0] >= 5);
+	i0 = @call UBDList::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+	i4 = @call UBDList::MSG_GEN_FIND_CHILD_AT_POSITION(4);
+	UBCHECK(InClass(i0, (ClassStruct *) &OLScrollableItemClass));
+	UBCHECK(@call i0::MSG_GEN_ITEM_GET_IDENTIFIER() == 0 &&
+		@call i4::MSG_GEN_ITEM_GET_IDENTIFIER() == 4);
+	UBCHECK(@call i0::MSG_GEN_GET_VIS_MONIKER() != 0);
+	VisData(i0, &ii, sizeof(ii));
+	UBCHECK(!(ii.OLII_state & OLIS_MONIKER_INVALID));
+	UBCHECK(@call UBDList::MSG_GEN_DYNAMIC_LIST_GET_NUM_ITEMS() == 20);
+	@call UBDList::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(12, FALSE);
+	@call UBDList::MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE(12);
+	break;
+    }
+    case 38: {
+	/* scrolled: the top item, the items renumbered from it, 12
+	 * among them, its new moniker answered */
+	OLScrollListInstance l;
+	optr i0, it;
+
+	VisData(@UBDList, &l, sizeof(l));
+	ubState.UBS_dlist[2] = l.OLSLI_topItem;
+	UBCHECK(l.OLSLI_topItem > 7 && l.OLSLI_topItem <= 12);
+	i0 = @call UBDList::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+	ubState.UBS_dlist[3] = @call i0::MSG_GEN_ITEM_GET_IDENTIFIER();
+	UBCHECK(ubState.UBS_dlist[3] == l.OLSLI_topItem);
+	it = @call UBDList::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(12);
+	UBCHECK(it != 0 && @call it::MSG_GEN_GET_VIS_MONIKER() != 0);
+	VisData(it, &ii, sizeof(ii));
+	UBCHECK(!(ii.OLII_state & OLIS_MONIKER_INVALID));
+	UBCHECK(ii.OLBI_specState & OLBSS_SELECTED);
+	UBCHECK(@call UBDList::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 12);
 	break;
     }
     }

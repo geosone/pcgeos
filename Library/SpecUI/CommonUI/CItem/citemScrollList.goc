@@ -13,8 +13,7 @@
  * Motif: no grid lines and spacing, lists not linked, no notice of
  * scrolling out of bounds, no scrollers of the view in the title bar.
  * Port32 (Port32/ABI.md section 13y), not yet: popup scrolling lists
- * (MakePopupScrollListIfNeeded), the items of a dynamic list removed on
- * an unbuild (RemoveDynamicListItems).
+ * (MakePopupScrollListIfNeeded).
  */
 @include "CItem/citemInt.goh"
 @include <Objects/gViewC.goh>
@@ -410,6 +409,7 @@ static void SetupViewStuff(optr o)
  * content */
 @method OLScrollListClass, MSG_SPEC_UNBUILD
 {
+    RemoveDynamicListItems(oself);
     OpenUnbuildCreatedParent(oself, View(oself), flags, TRUE, TRUE);
     SL(oself)->OLSLI_view = 0;
 }
@@ -587,7 +587,8 @@ static void SendTopItemChanged(optr o, sdword x, sdword y)
     if (pself->OLIGI_state & OLIGS_DYNAMIC) {
 	word top = pself->OLSLI_topItem, num;
 
-	@call oself::MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED(n, top);
+	@call oself::MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED(n, top,
+								    FALSE);
 	num = @call oself::MSG_GEN_DYNAMIC_LIST_GET_NUM_ITEMS();
 	@call oself::MSG_GEN_DYNAMIC_LIST_NUM_ITEMS_CHANGED(num);
     }

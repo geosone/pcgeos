@@ -1,0 +1,606 @@
+/*
+ * genDynamicList.goc -- GenDynamicListClass (after genDynamicList.asm):
+ * an item group whose items are made by the list itself, as many as
+ * are shown (GDLI_numItems in all, numbered from 0).  An item shown
+ * gets its moniker from the application: the list asks with
+ * GDLI_queryMsg (to GIGI_destination, with the item's number), the
+ * application answers with MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER
+ * (..._TEXT, ..._MONIKER_OPTR).  When a scrolling list scrolls
+ * (MSG_GEN_DYNAMIC_LIST_TOP_ITEM_CHANGED) the monikers of the items
+ * still shown move to their new items, only the new ones are asked
+ * for; items added or removed move the monikers after them.  An item
+ * past the end is not usable.  What it looks like is the specific UI's
+ * (SPIR_BUILD_DYNAMIC_LIST), which tells the list how many items it
+ * shows (MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED).
+ *
+ * Port32 (Port32/ABI.md section 13x): NUM_VISIBLE_ITEMS_CHANGED takes
+ * whether the caller validates the new items itself (dx in the asm);
+ * the scan returns the direction to go on in (GSIR_flags).
+ */
+@include "uiInt.goh"
+@include <Internal/specC.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gItemC.goh>
+@include <Objects/gDListC.goh>
+#include <string.h>
+
+@classdecl GenDynamicListClass;
+
+#define GDL(o)	((GenDynamicListInstance *) ObjDerefGen(o))
+
+@method GenDynamicListClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_DYNAMIC_LIST,
+				    MasterOffset);
+}
+
+/* GenDynamicListRelocOrUnReloc: the items (made not dirty) do not go
+ * to the state file, so neither does the link to them */
+@method GenDynamicListClass, _reloc
+{
+    (void) vmRelocType;
+    if (message == MSG_META_UNRELOCATE)
+	pself->GI_comp.CP_firstChild = 0;
+    return @callsuper();
+}
+
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_GET_ITEM_CLASS
+{
+    return (ClassStruct *) &GenItemClass;
+}
+
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_GET_NUM_ITEMS
+{
+    return pself->GDLI_numItems;
+}
+
+/* GenCallSpecIfGrown */
+static Boolean Grown(optr o)
+{
+    return ((VisBase *) ObjDeref(o, 0))->Vis_offset != 0;
+}
+
+/* ---------------------------------------------------------------------
+ * The items' monikers
+ * ------------------------------------------------------------------- */
+
+/* GenDynamicListQueryItemMoniker: the query message (if any) to the
+ * destination, with the list and the item */
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_QUERY_ITEM_MONIKER
+{
+    Message m = pself->GDLI_queryMsg;
+    optr dest = pself->GIGI_destination;
+    EventHandle ev;
+
+    (void) list;
+    if (!m)
+	return;
+    ev = @record {GEN_DYNAMIC_LIST_QUERY_MSG} NullOptr::m(oself, item);
+    @call oself::MSG_GEN_OUTPUT_ACTION(ev, dest);
+}
+
+/* NukeExistingMoniker */
+static void NukeMoniker(optr item)
+{
+    GenInstance *g = (GenInstance *) ObjDerefGen(item);
+    ChunkHandle m = g->GI_visMoniker;
+
+    g->GI_visMoniker = 0;
+    if (m)
+	LMemFree(ConstructOptr(OptrToHandle(item), m));
+}
+
+/* SetGenState: the item usable (not usable) if it is not yet */
+static void SetUsable(optr item, Boolean usable)
+{
+    GenInstance *g = (GenInstance *) ObjDerefGen(item);
+
+    if (!(g->GI_states & GS_USABLE) == !usable)
+	return;
+    if (usable)
+	@call item::MSG_GEN_SET_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+    else
+	@call item::MSG_GEN_SET_NOT_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+/* ItemEnsuredUsable: an item usable if its number is in the list;
+ * TRUE if so */
+static Boolean EnsureUsable(optr list, optr item, word id)
+{
+    Boolean usable = id < GDL(list)->GDLI_numItems;
+
+    SetUsable(item, usable);
+    return usable;
+}
+
+/*
+ * ValidateItem: the item numbered id (when moving the numbers), without
+ * its moniker, not interactable, enabled until the application says;
+ * its moniker asked for (via the queue, so that the specific UI sees
+ * all the items become interactable together)
+ */
+static void ValidateItem(optr list, optr item, word id, Boolean moveIds)
+{
+    if (moveIds)
+	@call item::MSG_GEN_ITEM_SET_IDENTIFIER(id);
+    if (!EnsureUsable(list, item, id))
+	return;
+    NukeMoniker(item);
+    if (Grown(item))
+	@call item::MSG_GEN_ITEM_SET_INTERACTABLE_STATE(FALSE);
+    @call item::MSG_GEN_SET_ENABLED(VUM_DELAYED_VIA_UI_QUEUE);
+    id = ((GenItemInstance *) ObjDerefGen(item))->GII_identifier;
+    @send ,forceQueue list::MSG_GEN_DYNAMIC_LIST_QUERY_ITEM_MONIKER(list,
+								      id);
+}
+
+/*
+ * GenDynamicListReplaceItemMoniker: the item (if shown) enabled or not
+ * as the flags say, its moniker replaced (the update delayed), then
+ * interactable again; the specific UI told too (a popup list may show
+ * the moniker)
+ */
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER
+{
+    optr i;
+
+    i = @call oself::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(item);
+    if (i) {
+	if (flags & RIMF_NOT_ENABLED) {
+	    @call i::MSG_GEN_SET_NOT_ENABLED(VUM_DELAYED_VIA_UI_QUEUE);
+	    /* (that may have scrolled the list) */
+	    i = @call oself::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(item);
+	} else
+	    @call i::MSG_GEN_SET_ENABLED(VUM_DELAYED_VIA_UI_QUEUE);
+    }
+    if (i) {
+	(void) @call i::MSG_GEN_REPLACE_VIS_MONIKER(
+			VUM_DELAYED_VIA_APP_QUEUE, height, width, length,
+			dataType, sourceType, source);
+	@call i::MSG_GEN_ITEM_SET_INTERACTABLE_STATE(TRUE);
+    }
+    if (Grown(oself))
+	@callsuper();
+}
+
+@method GenDynamicListClass,
+	MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER_OPTR
+{
+    @call oself::MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER(item, 0, 0, 0,
+			0, VMDT_VIS_MONIKER, VMST_OPTR, moniker);
+}
+
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_TEXT
+{
+    @call oself::MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER(item, 0, 0, 0,
+			0, VMDT_TEXT, VMST_FPTR,
+			(VisMonikerSource) (uintptr_t) text);
+}
+
+/* ---------------------------------------------------------------------
+ * Moving the monikers (scrolling, items added or removed)
+ * ------------------------------------------------------------------- */
+
+/* ItemInfo: a moniker and the enabled state moved to another item */
+typedef struct {
+    ChunkHandle	II_visMoniker;
+    byte	II_state;		/* GS_ENABLED */
+} ItemInfo;
+
+typedef struct {
+    optr	list;
+    word	numVis;		/* items shown */
+    sword	offset;		/* new top less the previous top */
+    word	leaveAlone;	/* the first items left as they are */
+    Boolean	moveIds;	/* the items get new numbers */
+    ItemInfo	*buf;
+    word	get, put;	/* buffer indexes */
+    word	pos, id;	/* the child's position, its number */
+} Scroll;
+
+/* GetItemInfo: the item's moniker (taken) and enabled state */
+static void GetItemInfo(Scroll *s, optr item)
+{
+    GenInstance *g = (GenInstance *) ObjDerefGen(item);
+
+    s->buf[s->get].II_visMoniker = g->GI_visMoniker;
+    s->buf[s->get].II_state = g->GI_states & GS_ENABLED;
+    g->GI_visMoniker = 0;
+    s->get++;
+}
+
+/*
+ * StoreItemInfo: an item still in the list gets the next moniker and
+ * enabled state, interactable if there was a moniker; without one
+ * (it was still awaited) and not moving numbers, asked for again
+ */
+static void StoreItemInfo(Scroll *s, optr item)
+{
+    ItemInfo *ii;
+    ChunkHandle m;
+    GenInstance *g;
+
+    if (!EnsureUsable(s->list, item, s->id)) {
+	if (s->moveIds)
+	    @call item::MSG_GEN_ITEM_SET_IDENTIFIER(s->id);
+	return;
+    }
+    ii = &s->buf[s->put++];
+    m = ii->II_visMoniker;
+    ii->II_visMoniker = 0;
+    ((GenInstance *) ObjDerefGen(item))->GI_visMoniker = m;
+    if (m) {
+	@call item::MSG_GEN_ITEM_SET_INTERACTABLE_STATE(TRUE);
+	if (s->moveIds)
+	    @call item::MSG_GEN_ITEM_SET_IDENTIFIER(s->id);
+    } else if (!s->moveIds)
+	ValidateItem(s->list, item, s->id, FALSE);
+    else
+	@call item::MSG_GEN_ITEM_SET_IDENTIFIER(s->id);
+    /* the enabled state set directly: the redraw keeps the specific
+     * state right */
+    g = (GenInstance *) ObjDerefGen(item);
+    g->GI_states |= GS_ENABLED;
+    if (!ii->II_state)
+	g->GI_states &= ~GS_ENABLED;
+}
+
+/* ForwardGetMkrs, BackwardGetMkrs: the monikers of the items scrolled
+ * off removed, the others' taken */
+static Boolean GetMkrs(optr parent, optr child, void *data)
+{
+    Scroll *s = data;
+    word pos = s->pos++;
+
+    (void) parent;
+    if (pos < s->leaveAlone)
+	return FALSE;
+    if (s->offset > 0 ? pos < s->offset + s->leaveAlone
+		      : (sword) pos >= (sword) s->numVis + s->offset)
+	NukeMoniker(child);
+    else
+	GetItemInfo(s, child);
+    return FALSE;
+}
+
+/* ForwardSetMkrs, BackwardSetMkrs: the items still shown get the
+ * monikers taken, the items scrolled on are asked for theirs */
+static Boolean SetMkrs(optr parent, optr child, void *data)
+{
+    Scroll *s = data;
+    word pos = s->pos++;
+    Boolean query;
+
+    (void) parent;
+    if (pos >= s->leaveAlone) {
+	if (s->offset > 0)
+	    query = (sword) pos >= (sword) s->numVis - s->offset;
+	else
+	    query = pos < s->leaveAlone - s->offset;
+	if (query)
+	    ValidateItem(s->list, child, s->id, s->moveIds);
+	else
+	    StoreItemInfo(s, child);
+    }
+    s->id++;
+    return FALSE;
+}
+
+/*
+ * GenDynamicListScroll: the top item moved from prevTop to newTop with
+ * numVis items shown (the first leaveAlone left alone); the items
+ * redrawn after the ones left alone
+ */
+static void DynScroll(optr o, word leaveAlone, Boolean moveIds,
+		      word newTop, word prevTop, word numVis)
+{
+    Scroll s;
+    sword n;
+    MemHandle mh = 0;
+    word i;
+
+    memset(&s, 0, sizeof(s));
+    s.list = o;
+    s.numVis = numVis;
+    s.offset = (sword) (newTop - prevTop);
+    s.leaveAlone = leaveAlone;
+    s.moveIds = moveIds;
+    if (!s.offset)
+	return;
+    n = (sword) numVis + (s.offset > 0 ? -s.offset : s.offset) -
+	(sword) leaveAlone;
+    if (n > 0) {
+	mh = MemAlloc(n * sizeof(ItemInfo), HF_DYNAMIC,
+		      HAF_LOCK | HAF_ZERO_INIT);
+	if (!mh)
+	    return;
+	s.buf = MemDeref(mh);
+    }
+    GenCallChildren(o, GetMkrs, &s);
+    s.pos = 0;
+    s.id = newTop;
+    GenCallChildren(o, SetMkrs, &s);
+    for (i = 0; i < s.get; i++)
+	if (s.buf[i].II_visMoniker)
+	    LMemFree(ConstructOptr(OptrToHandle(o),
+				   s.buf[i].II_visMoniker));
+    if (mh)
+	MemFree(mh);
+    @call o::MSG_GEN_ITEM_GROUP_REDRAW_ITEMS(leaveAlone);
+}
+
+/* GenDynamicListViewOriginChanged: a scrolling list scrolled, the items
+ * renumbered */
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_TOP_ITEM_CHANGED
+{
+    DynScroll(oself, 0, TRUE, topItem, prevTopItem, numVisibleItems);
+}
+
+/* ---------------------------------------------------------------------
+ * The number of items, the items shown
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    optr	list;
+    word	pos, first, id;
+} Changed;
+
+/* ItemsChangedCallback: the items from first on validated, numbered
+ * on from the top item */
+static Boolean ItemsChanged(optr parent, optr child, void *data)
+{
+    Changed *c = data;
+
+    (void) parent;
+    if (c->pos++ >= c->first)
+	ValidateItem(c->list, child, c->id, TRUE);
+    c->id++;
+    return FALSE;
+}
+
+/* InitItemChanges: the specific UI told the number of items; the top
+ * item's number and the number of items shown */
+static void InitItemChanges(optr o, word *top, word *numVis)
+{
+    optr first;
+
+    if (Grown(o))
+	@call o::MSG_GEN_DYNAMIC_LIST_NUM_ITEMS_CHANGED(
+					GDL(o)->GDLI_numItems);
+    *top = 0;
+    first = @call o::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+    if (first)
+	*top = @call first::MSG_GEN_ITEM_GET_IDENTIFIER();
+    *numVis = @call o::MSG_GEN_COUNT_CHILDREN();
+}
+
+/*
+ * GenDynamicListNumVisibleItemsChanged: as many items as shown (all of
+ * them for a list that does not scroll: -1); new items (the item
+ * class, not dirty) validated unless the caller does, items no longer
+ * needed destroyed
+ */
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED
+{
+    word prev, n;
+    ClassStruct *cls;
+    optr item;
+    Changed c;
+
+    if (numVisibleItems == 0xffff)
+	numVisibleItems = pself->GDLI_numItems;
+    prev = @call oself::MSG_GEN_COUNT_CHILDREN();
+    if (numVisibleItems == prev)
+	return;
+    if (numVisibleItems > prev) {
+	cls = @call oself::MSG_GEN_DYNAMIC_LIST_GET_ITEM_CLASS();
+	for (n = numVisibleItems - prev; n; n--) {
+	    item = ObjInstantiate(OptrToHandle(oself), cls);
+	    ObjSetFlags(item, OCF_IGNORE_DIRTY, 0);
+	    ObjInitializePart(item, word_offsetof(GenBase, Gen_offset));
+	    @call oself::MSG_GEN_ADD_CHILD(item, CCO_LAST);
+	}
+	if (noInit)
+	    return;
+	c.list = oself;
+	c.pos = 0;
+	c.first = prev;
+	c.id = curTopItem;
+	GenCallChildren(oself, ItemsChanged, &c);
+	return;
+    }
+    /* RemoveItemsCallback: the last ones (found first: destroying
+     * changes the children) */
+    for (n = prev; n > numVisibleItems; n--) {
+	item = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(n - 1);
+	if (item)
+	    @call item::MSG_GEN_DESTROY(VUM_DELAYED_VIA_UI_QUEUE, 0);
+    }
+}
+
+/*
+ * GenDynamicListInitialize: the number of items (GDLI_NO_CHANGE: as it
+ * is); a list that does not scroll shows them all; every item shown
+ * validated, none selected
+ */
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_INITIALIZE
+{
+    word old = pself->GDLI_numItems, top, numVis;
+    Changed c;
+
+    if (!ObjVarFindData(oself, HINT_ITEM_GROUP_SCROLLABLE))
+	@call oself::MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED(numItems,
+								    0, TRUE);
+    if (numItems == GDLI_NO_CHANGE)
+	numItems = old;
+    GDL(oself)->GDLI_numItems = numItems;
+    ObjMarkDirty(oself);
+    InitItemChanges(oself, &top, &numVis);
+    c.list = oself;
+    c.pos = 0;
+    c.first = 0;
+    c.id = top;
+    GenCallChildren(oself, ItemsChanged, &c);
+    @call oself::MSG_GEN_ITEM_GROUP_SET_NONE_SELECTED(FALSE);
+}
+
+/*
+ * AdjustSelectionsAsNeeded: the selections after the items added or
+ * removed (change: their number, negative for a remove) moved; the
+ * ones removed no longer selected (no update: the redraw follows)
+ */
+static void AdjustSelections(optr o, word at, sword change)
+{
+    word n = ((GenItemGroupInstance *) ObjDerefGen(o))->GIGI_numSelections, i, k = 0, removed, end, *sel;
+    MemHandle mh;
+
+    if (!n)
+	return;
+    mh = MemAlloc(n * sizeof(word), HF_DYNAMIC, HAF_LOCK);
+    if (!mh)
+	return;
+    sel = MemDeref(mh);
+    n = @call o::MSG_GEN_ITEM_GROUP_GET_MULTIPLE_SELECTIONS(sel, n);
+    removed = change < 0 ? (word) -change : 0;
+    end = at + removed;
+    for (i = 0; i < n; i++) {
+	word v = sel[i];
+
+	if (removed && v >= at && v < end)
+	    continue;
+	if (v >= end)
+	    v = (word) (v + change);
+	sel[k++] = v;
+    }
+    GenItemGroupSetSelectionsNoUpdate(o, sel, k);
+    MemFree(mh);
+}
+
+/*
+ * GenDynamicListAddItems, ...RemoveItems: numItems items added before
+ * (removed at) item (at most the end); the items shown from there on
+ * get the monikers moved, the new ones asked for, not renumbered
+ */
+static void AddRemove(optr o, word item, word num, Boolean add)
+{
+    sword change = add ? (sword) num : -(sword) num;
+    word limit, top, numVis, ignore;
+
+    limit = GDL(o)->GDLI_numItems - (add ? 0 : num);
+    if (item > limit)
+	item = limit;
+    GDL(o)->GDLI_numItems += change;
+    ObjMarkDirty(o);
+    AdjustSelections(o, item, change);
+    InitItemChanges(o, &top, &numVis);
+    if (item >= top && item > top + numVis - 1)
+	return;
+    ignore = item >= top ? item - top : 0;
+    /* scrolled "down" for a remove, "up" for an add: a previous top
+     * that gives that offset */
+    DynScroll(o, ignore, FALSE, top, (word) (top + change), numVis);
+    @call o::MSG_GEN_ITEM_GROUP_REDRAW_ITEMS(ignore);
+}
+
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_ADD_ITEMS
+{
+    AddRemove(oself, item, numItems, TRUE);
+}
+
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_REMOVE_ITEMS
+{
+    AddRemove(oself, item, numItems, FALSE);
+}
+
+/* GenDynamicListRemoveItemList: the items in the list (as numbered
+ * before any is removed) removed one by one */
+@method GenDynamicListClass, MSG_GEN_DYNAMIC_LIST_REMOVE_ITEM_LIST
+{
+    word i, j, id;
+
+    for (i = 0; i < numItems; i++) {
+	id = deletionList[i];
+	@call oself::MSG_GEN_DYNAMIC_LIST_REMOVE_ITEMS(id, 1);
+	for (j = i + 1; j < numItems; j++)
+	    if (deletionList[j] >= id)
+		deletionList[j]--;
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * The scan, the extended selection
+ * ------------------------------------------------------------------- */
+
+/* GetFirstLastItems: the numbers of the first and last usable items */
+typedef struct {
+    word	first, last;
+} FirstLast;
+
+static Boolean FirstLastUsable(optr parent, optr child, void *data)
+{
+    FirstLast *f = data;
+    GenItemInstance *g = (GenItemInstance *) ObjDerefGen(child);
+
+    (void) parent;
+    if (!(g->GI_states & GS_USABLE))
+	return FALSE;
+    if (f->first == 0xffff)
+	f->first = g->GII_identifier;
+    f->last = g->GII_identifier;
+    return FALSE;
+}
+
+/* SwapDirectionsIfNotWrapping: at an end of the list (its item's state
+ * not yet known) the way back if it turns out disabled */
+static GenScanItemsFlags SwapDirections(GenScanItemsFlags f)
+{
+    if (!(f & (GSIF_FROM_START | GSIF_WRAP_AROUND)))
+	f ^= GSIF_FORWARD;
+    return f;
+}
+
+/*
+ * GenDynamicListScanItems: the items shown first; past them a number
+ * in the whole list (at an end the end, or the other end when wrapping
+ * or from the start), made visible; an end item shown uses what the
+ * scan of the items found
+ */
+@method GenDynamicListClass, MSG_GEN_ITEM_GROUP_P32_SCAN_ITEMS
+{
+    FirstLast f;
+    word last, res, firstE, lastE;
+    sword pos;
+
+    retValue->GSIR_flags = flags;
+    if (flags & GSIF_EXISTING_ITEMS_ONLY)
+	return @callsuper();
+    flags |= GSIF_DYNAMIC_LIST;
+    if (GenItemGroupScan(oself, retValue, flags, initialItem, scanAmount))
+	return TRUE;
+    pos = (sword) retValue->GSIR_item;
+    firstE = retValue->GSIR_first;
+    lastE = retValue->GSIR_last;
+    f.first = f.last = 0xffff;
+    GenCallChildren(oself, FirstLastUsable, &f);
+    last = GDL(oself)->GDLI_numItems - 1;
+    res = (word) (pos + (sword) f.first);
+    if ((flags & GSIF_FROM_START) || (sword) res < 0 || res > last) {
+	/* outOfDynamicRange */
+	res = (flags & GSIF_FORWARD) ? last : 0;
+	if (flags & (GSIF_FROM_START | GSIF_WRAP_AROUND))
+	    res = (flags & GSIF_FORWARD) ? 0 : last;
+    }
+    if (res == 0) {
+	flags = SwapDirections(flags);
+	if (f.first == 0)
+	    res = firstE;
+    } else if (res == last) {
+	flags = SwapDirections(flags);
+	if (f.last == last)
+	    res = lastE;
+    }
+    @call oself::MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE(res);
+    retValue->GSIR_item = res;
+    retValue->GSIR_flags = flags & ~GSIF_DYNAMIC_LIST;
+    return TRUE;
+}

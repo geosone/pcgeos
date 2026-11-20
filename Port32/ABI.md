@@ -5161,7 +5161,9 @@ visual classes of `Library/User/Vis`:
     `MSG_GEN_BOOLEAN_GROUP_P32_SCAN_BOOLEANS(GenScanItemsReturn *,
     flags, initialItem, scanAmount)`: TRUE (the asm's carry) if a
     usable and enabled item was found, the item (a dynamic list: the
-    position, the first and last items) in the structure;
+    position, the first and last items) in the structure; the caller
+    sets `GSIR_flags`, a dynamic list turns `GSIF_FORWARD` round there
+    at an end of the list (the asm returned it in cl);
   - `MSG_GEN_ITEM_GROUP_UPDATE_EXTENDED_SELECTION`: `ExtSelFlags`
     (`ESF_*`) in the low byte of its flags, the flags passed to the set
     message in the high byte; the set message takes the identifier and
@@ -5171,8 +5173,25 @@ visual classes of `Library/User/Vis`:
     `MSG_GEN_BOOLEAN_GROUP_SET_APPLY_MSG` is `applyMsg` (a method's
     `message` is the message).
 
-  Not yet: `MSG_GEN_BRANCH_REPLACE_PARAMS` (`BRPT_OUTPUT_OPTR`), the
-  dynamic list (`GenDynamicListClass`).
+  Not yet: `MSG_GEN_BRANCH_REPLACE_PARAMS` (`BRPT_OUTPUT_OPTR`).
+- **The dynamic list** (`Gen/genDynamicList.goc` after
+  `genDynamicList.asm`): `GenDynamicListClass` makes its items itself
+  (the item class, not dirty, not saved), as many as the specific UI
+  shows (`MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED`; all of them
+  for a list that does not scroll); an item past `GDLI_numItems` is
+  not usable. A new item is not interactable until the application
+  answers `GDLI_queryMsg` (sent through `MSG_GEN_OUTPUT_ACTION`, after
+  the queue) with `MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER` (`_TEXT`,
+  `_MONIKER_OPTR`). Scrolling (`MSG_GEN_DYNAMIC_LIST_TOP_ITEM_CHANGED`)
+  moves the monikers and enabled states of the items still shown and
+  renumbers the items, only the new ones are asked for; items added or
+  removed move the monikers after them and the selections. The scan
+  goes on past the items shown in the whole list and makes the item
+  found visible; the extended selection runs over all the numbers.
+  Port32: `MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED` takes
+  `noInit` (dx in the asm: the caller validates the new items), the
+  source of `MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER` is a
+  `VisMonikerSource` (`gDListC.goh`).
 - **Views** (`Gen/genView.goc`, `genContent.goc` after the asm of the
   same names): `GenViewClass` keeps the generic data of a view (origin,
   document bounds, increment, scale factor, background color, the
@@ -5476,7 +5495,7 @@ are left out), the constants, the variables and the routines.
     `ObjInstantiate`d (no `GenInstantiateIgnoreDirty`), its place found
     with `MSG_GEN_FIND_CHILD`.
     Not yet: popup lists in dialogs (`MSG_SPEC_POPUP_LIST_CANCEL`) and
-    in a view, the selection box, dynamic lists' items, tabs, the black and white look, the
+    in a view, the selection box, tabs, the black and white look, the
     focus on a text object, `ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS`,
     the stay up menus released by a selection.
   - **The scrollbar** (`CView/cviewScrollbar.goc`,
@@ -5565,8 +5584,13 @@ are left out), the constants, the variables and the routines.
     (`MSG_OL_SLIST_RECALC_ITEM_SIZE`), drawn as rows with the moniker at
     the left; the selected one in the selection's colors. The page keys
     move a view's worth less one (`OLItemGroupSetUserCommon` with an
-    amount). Not yet: popup scrolling lists, the dynamic list's side
-    (the messages are sent, `GenDynamicListClass` is still asm only).
+    amount). A dynamic list (`OLIGS_DYNAMIC`) is told how many items
+    are shown when the view's size is known, its document is as long as
+    all its items, scrolling tells it the top item; items not yet
+    interactable are drawn blank and counted, the update completes and
+    they are redrawn (`MSG_GEN_ITEM_GROUP_REDRAW_ITEMS`) once all are;
+    the items go when the list is unbuilt. A dynamic list that does not
+    scroll shows all its items. Not yet: popup scrolling lists.
 - **Port32 changes in the C API.**
   - `WinOpen` and `WinChangePriority` take the layer as a `Handle` (a
     word cut 32-bit handles); `WinOpen`'s colorFlags is the

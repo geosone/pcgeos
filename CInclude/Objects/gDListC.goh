@@ -42,7 +42,7 @@ typedef WordFlags ReplaceItemMonikerFlags;
 		word height, word width, word length,
 		VisMonikerDataType dataType,
 		VisMonikerSourceType sourceType,
-		dword source);
+		VisMonikerSource source);	/* Port32: was a dword */
 
 @message void MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER_OPTR(word item = bp,
 					optr moniker = cx:dx);
@@ -77,9 +77,11 @@ typedef WordFlags ReplaceItemMonikerFlags;
 @message void MSG_GEN_DYNAMIC_LIST_TOP_ITEM_CHANGED(word topItem = cx,
 						  word prevTopItem = dx,
 						  word numVisibleItems = bp); /*XXX*/
+/* Port32: noInit (dx in the asm): the caller validates the new items */
 @message void MSG_GEN_DYNAMIC_LIST_NUM_VISIBLE_ITEMS_CHANGED(
 					 word numVisibleItems = cx,
-					 word curTopItem = bp);  /*XXX*/
+					 word curTopItem = bp,
+					 Boolean noInit = dx);  /*XXX*/
 @message void MSG_GEN_DYNAMIC_LIST_NUM_ITEMS_CHANGED(word numItems = cx); /*XXX*/
 
 

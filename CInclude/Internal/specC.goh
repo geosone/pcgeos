@@ -78,12 +78,14 @@ typedef word VisUpwardQueryType;
  * with what the asm returned: TRUE (the asm's carry) if a usable and
  * enabled item was found; the item in retValue.  For GSIF_DYNAMIC_LIST
  * the position instead, with the first and last usable and enabled
- * items.
+ * items.  GSIR_flags: the flags (the caller sets them; a dynamic list
+ * may turn GSIF_FORWARD round at an end of the list, the asm's cl).
  */
 typedef struct _GenScanItemsReturn {
     word	GSIR_item;
     word	GSIR_first;
     word	GSIR_last;
+    word	GSIR_flags;
 } GenScanItemsReturn;
 
 @alias (MSG_GEN_ITEM_GROUP_SCAN_ITEMS) Boolean
