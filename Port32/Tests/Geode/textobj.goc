@@ -27,6 +27,7 @@ typedef struct {
     char	TOS_text[40];		/* TOText at the end of a step */
     word	TOS_line[16];		/* of step 10, to print */
     word	TOS_geo[6];
+    word	TOS_filter[2];		/* characters asked, tabs refused */
 } TOState;
 
 TOState toState;
@@ -48,6 +49,49 @@ TOState toState;
 @endc
 @classdecl TOTextClass;
 
+/* (step 12) an x becomes a y, a # refuses the text */
+@method TOTextClass, MSG_VIS_TEXT_FILTER_VIA_CHARACTER
+{
+    (void) pself;
+    toState.TOS_filter[0]++;
+    return charToFilter == '#' ? 0 : charToFilter == 'x' ? 'y' : charToFilter;
+}
+
+@method TOTextClass, MSG_META_TEXT_TAB_FILTERED
+{
+    (void) pself; (void) character; (void) params;
+    toState.TOS_filter[1]++;
+}
+
+@start TOObjects;
+@object TOTextClass TOText = {
+    VTI_text = "Hello";
+}
+@object TOTextClass TOEmpty = {
+}
+@chunk char TOString[] = "from a chunk";
+@chunk char TOBuffer[] = "x";
+@end TOObjects;
+
+/* text at the end as the keyboard gives it (filtered, from a buffer of
+ * its own: upper case is written into it); TRUE if it was refused */
+static Boolean Typed(const char *s)
+{
+    VisTextReplaceParameters p;
+    char buf[16];
+    word n = 0;
+
+    while (s[n] && n < sizeof(buf) - 1)
+	buf[n] = s[n], n++;
+    memset(&p, 0, sizeof(p));
+    p.VTRP_range.VTR_start = p.VTRP_range.VTR_end = TEXT_ADDRESS_PAST_END;
+    p.VTRP_insCount = n;
+    p.VTRP_flags = VTRF_FILTER;
+    p.VTRP_textReference.TR_type = TRT_POINTER;
+    p.VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer = buf;
+    return @call TOText::MSG_VIS_TEXT_REPLACE_TEXT(&p);
+}
+
 @method TOTextClass, MSG_META_TEXT_USER_MODIFIED
 {
     (void) obj;
@@ -68,16 +112,6 @@ TOState toState;
     else
 	toState.TOS_empty++;
 }
-
-@start TOObjects;
-@object TOTextClass TOText = {
-    VTI_text = "Hello";
-}
-@object TOTextClass TOEmpty = {
-}
-@chunk char TOString[] = "from a chunk";
-@chunk char TOBuffer[] = "x";
-@end TOObjects;
 
 @method TOProcessClass, MSG_META_ATTACH_PROCESS
 {
@@ -728,6 +762,60 @@ static Boolean ChunkIs(optr c, const char *text)
 	TOCHECK(t->VTI_lines && t->VTI_height.WBF_int == 12 &&
 		ChunkArrayGetCountHandles(OptrToHandle(@TOText),
 					  t->VTI_lines) == 1);
+	break;
+    }
+    case 12: {
+	/* filters: one character refused refuses all of the text; not
+	 * for text set by the program.  The classes, no spaces, no
+	 * tabs (told to the object), upper case, a range of its own,
+	 * every character by a message */
+	VisTextCustomFilterData *d;
+	VisTextExtendedFilterType *x;
+	ChunkHandle *c, ranges;
+
+	@call TOText::MSG_VIS_TEXT_REPLACE_ALL_PTR("a", 0);
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(VTFC_NUMERIC);
+	TOCHECK(@call TOText::MSG_VIS_TEXT_GET_FILTER() == VTFC_NUMERIC);
+	TOCHECK(Typed("x") && Typed("1x") && Typed("-") && Typed("."));
+	TOCHECK(!Typed("12"));
+	@call TOText::MSG_VIS_TEXT_APPEND_PTR("b", 0);
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(VTFC_SIGNED_NUMERIC);
+	TOCHECK(!Typed("-") && Typed("+") && Typed("e"));
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(VTFC_ALPHA);
+	/* (a space is in none of the groups) */
+	TOCHECK(Typed("3") && Typed("_") && !Typed("cE") && !Typed(" "));
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(VTFC_ALPHA_NUMERIC);
+	TOCHECK(Typed("-") && Typed("a.b"));
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(VTFC_DASHED_ALPHA_NUMERIC);
+	TOCHECK(!Typed("-") && Typed("*"));
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(VTFC_DOS_FILENAMES);
+	TOCHECK(Typed("?") && Typed(":") && Typed("\\") && Typed("[") &&
+		Typed("+") && !Typed("."));
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(VTFC_NORMAL_ASCII);
+	TOCHECK(Typed("\344") && Typed("\r"));
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(VTF_NO_SPACES | VTF_NO_TABS |
+					      VTF_UPCASE_CHARS);
+	TOCHECK(Typed("a b") && !toState.TOS_filter[1] && Typed("\t") &&
+		toState.TOS_filter[1] == 1);
+	TOCHECK(!Typed("f1"));
+	/* its own range: no digits from 5 */
+	@call TOText::MSG_VIS_TEXT_SET_FILTER(0);
+	ranges = LMemAlloc(OptrToHandle(@TOText),
+			   sizeof(VisTextCustomFilterData));
+	d = LMemDerefHandles(OptrToHandle(@TOText), ranges);
+	d->VTCFD_startOfRange = '5';
+	d->VTCFD_endOfRange = '9';
+	c = ObjVarAddData(@TOText, ATTR_VIS_TEXT_CUSTOM_FILTER, sizeof(*c));
+	*c = ranges;
+	TOCHECK(Typed("5") && Typed("47") && !Typed("4"));
+	ObjVarDeleteData(@TOText, ATTR_VIS_TEXT_CUSTOM_FILTER);
+	/* by the object */
+	x = ObjVarAddData(@TOText, ATTR_VIS_TEXT_EXTENDED_FILTER, sizeof(*x));
+	*x = VTEFT_CHARACTER_LEVELER_LEVEL;
+	TOCHECK(!Typed("x") && toState.TOS_filter[0] == 1);
+	TOCHECK(Typed("z#z") && toState.TOS_filter[0] == 3);
+	ObjVarDeleteData(@TOText, ATTR_VIS_TEXT_EXTENDED_FILTER);
+	TOCHECK(!Typed("#") && toState.TOS_filter[0] == 3);
 	break;
     }
     }

@@ -15,6 +15,8 @@
  *  10. the lines (the system is booted from a GEOS top, GTXTOP, for
  *      Berkeley of USERDATA/FONT): word wrap, justification, a
  *      carriage return, a tab.
+ *  11. the sizes for the geometry.
+ *  12. the filters.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -39,6 +41,7 @@ typedef struct {
     char	TOS_text[40];
     word	TOS_line[16];
     word	TOS_geo[6];
+    word	TOS_filter[2];
 } TOState;
 
 static int fails;
@@ -87,7 +90,7 @@ int main(int argc, char **argv)
     static const char *const text[] = {
 	"Hello, world!", "bye, world!?", "!!?bye!!", "abcdefgh", "bh",
 	"in aa blockin", "aXYde", "aXYde", "aXYde", "Hi Hi Hi",
-	"Hi Hi Hi Hi Hi"
+	"Hi Hi Hi Hi Hi", "a12b-cE -.F14y#"
     };
     GeodeHandle app;
     GeodeLoadError e;
@@ -131,7 +134,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 11; i++) {
+    for (i = 1; i <= 12; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);

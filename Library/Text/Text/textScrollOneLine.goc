@@ -1,0 +1,111 @@
+/*
+ * textScrollOneLine.goc -- a one line object scrolls sideways (after
+ * textScrollOneLine.asm): VTI_leftOffset moves the line so that an
+ * offset of the text, the cursor as a rule, is inside the object.
+ *
+ * Text that fits lies where its justification puts it (a one line
+ * object's paragraph is VIS_TEXT_ONE_LINE_RIGHT_MARGIN wide).  Wider
+ * text leaves no room after its end; otherwise it moves only as far as
+ * the offset needs.
+ *
+ * Port32: the asm moves the bits on the screen (GrBitBlt) and lets the
+ * exposure draw the rest; here the line is drawn again.  The asm tells
+ * a left offset never set (INITIAL_LEFT_OFFSET, 0x8000) from 0; here it
+ * is 0 from the start, which is where text that fits on the left lies.
+ */
+@include "textInt.goh"
+
+@extern method VisTextClass, MSG_VIS_TEXT_SCROLL_ONE_LINE;
+
+/* VisTextSetNewOffset */
+static void SetNewOffset(optr o, sword off)
+{
+    VisTextInstance *t = VT(o);
+    Boolean hilited;
+
+    if (off == (sword) t->VTI_leftOffset)
+	return;
+    if (!TextCheckCanDraw(o)) {
+	t->VTI_leftOffset = off;
+	return;
+    }
+    hilited = (t->VTI_intFlags & VTIF_HILITED) != 0;
+    if (hilited)
+	EditUnHilite(o);
+    VT(o)->VTI_leftOffset = off;
+    TextDraw(o, TCBF_DRAW_ALL_LINES, FALSE);
+    if (hilited)
+	EditHilite(o);
+}
+
+/*
+ * TextScrollOneLine: the offset of the text into the object.  Nothing
+ * for an object of several lines or one without lines.
+ */
+void TextScrollOneLine(optr o, dword offset)
+{
+    VisTextInstance *t = VT(o);
+    VisTextMaxParaAttr pa;
+    sword display, text, left, x, y, off, adj;
+    dword size;
+    word just;
+
+    if (!(t->VTI_state & VTS_ONE_LINE) || !t->VTI_lines ||
+	!TL_LineGetCount(o))
+	return;
+    TextGStateCreate(o);
+    t = VT(o);
+    display = (sword) (t->VI_bounds.R_right - t->VI_bounds.R_left -
+		       2 * t->VTI_lrMargin);
+    size = TS_GetTextSize(o);
+    if (offset > size)
+	offset = size;
+    /* where the line starts and how wide its text is */
+    left = TL_LinePtr(o, 0, NULL)->LI_adjustment;
+    (void) TL_LineTextPosition(o, 0, 0x7fff, size, &text, NULL);
+    off = (sword) VT(o)->VTI_leftOffset;
+    if (text < display) {
+	TA_GetParaAttrForPosition(o, 0, &pa, &size, &offset);
+	just = (pa.VTMPA_paraAttr.VTPA_attributes & VTPAA_JUSTIFICATION) >>
+	       VTPAA_JUSTIFICATION_OFFSET;
+	adj = 0;
+	if (just == J_RIGHT)
+	    adj = (sword) (VIS_TEXT_ONE_LINE_RIGHT_MARGIN - display);
+	else if (just == J_CENTER)
+	    adj = (sword) ((VIS_TEXT_ONE_LINE_RIGHT_MARGIN - display) / 2);
+	off = (sword) -adj;
+    } else if (left + text + off < display) {
+	/* room after the end of the text: none */
+	off = (sword) (display - left - text);
+    } else {
+	TSL_ConvertOffsetToCoordinate(o, offset, &x, &y);
+	x = (sword) (x + off);
+	if (x < 0)
+	    off = (sword) (off - x);
+	else if (x > display)
+	    off = (sword) (off - (x - display));
+	/* (nor before its start) */
+	if (left + off > 0)
+	    off = (sword) -left;
+    }
+    SetNewOffset(o, off);
+    TextGStateDestroy(o);
+}
+
+/* VisTextScrollOneLine: position is the place to show, in the
+ * object's parent's coordinates (with the left offset in it) */
+@extern method VisTextClass, MSG_VIS_TEXT_SCROLL_ONE_LINE
+{
+    sword x, pos;
+    dword off;
+
+    if (!(pself->VTI_state & VTS_ONE_LINE) || !pself->VTI_lines ||
+	!TL_LineGetCount(oself))
+	return;
+    x = (sword) (position - pself->VI_bounds.R_left - pself->VTI_lrMargin -
+		 (sword) pself->VTI_leftOffset -
+		 TL_LinePtr(oself, 0, NULL)->LI_adjustment);
+    off = TL_LineTextPosition(oself, 0, x, TEXT_ADDRESS_PAST_END, &pos,
+			      NULL);
+    TextScrollOneLine(oself, off);
+}

@@ -92,6 +92,7 @@ typedef struct {
     word		UBS_text4[6];
     word		UBS_gtext[16];
     char		UBS_name[12];
+    sword		UBS_scroll[4];	/* left offset, cursor: typed, Home */
 } UBState;
 
 UBState ubState;
@@ -2214,6 +2215,45 @@ static Rectangle ScreenBounds(WindowHandle w)
 		r.R_right - r.R_left == 100);
 	VisData(@UBName, &t, sizeof(t));
 	UBCHECK(t.VTI_intSelFlags & VTISF_IS_FOCUS);
+	break;
+    }
+    case 51: {
+	/* one line scrolls: more text than fits moves the line left,
+	 * the cursor at its end stays inside (no room after the text);
+	 * Home brings the start back, End the end */
+	OLTextInstance t;
+	sword display, i;
+
+	VisData(@UBName, &t, sizeof(t));
+	display = t.VI_bounds.R_right - t.VI_bounds.R_left -
+		  2 * t.VTI_lrMargin;
+	UBCHECK(t.VTI_leftOffset == 0);
+	@call UBName::MSG_VIS_TEXT_SET_MAX_LENGTH(40);
+	@call UBName::MSG_VIS_TEXT_SELECT_RANGE(TEXT_ADDRESS_PAST_END,
+						TEXT_ADDRESS_PAST_END);
+	for (i = 0; i < 20; i++)
+	    @call UBName::MSG_META_KBD_CHAR('a' + i, CF_FIRST_PRESS, 0);
+	UBCHECK(@call UBName::MSG_VIS_TEXT_GET_TEXT_SIZE() == 30);
+	VisData(@UBName, &t, sizeof(t));
+	ubState.UBS_scroll[0] = (sword) t.VTI_leftOffset;
+	ubState.UBS_scroll[1] = t.VTI_cursorPos.P_x;
+	UBCHECK((sword) t.VTI_leftOffset < -50 &&
+		t.VTI_cursorPos.P_x == display);
+	@call UBName::MSG_META_KBD_CHAR(UKEY(VC_HOME), CF_FIRST_PRESS, 0);
+	VisData(@UBName, &t, sizeof(t));
+	ubState.UBS_scroll[2] = (sword) t.VTI_leftOffset;
+	ubState.UBS_scroll[3] = t.VTI_cursorPos.P_x;
+	UBCHECK(t.VTI_leftOffset == 0 && t.VTI_cursorPos.P_x == 0);
+	@call UBName::MSG_META_KBD_CHAR(UKEY(VC_END), CF_FIRST_PRESS, 0);
+	VisData(@UBName, &t, sizeof(t));
+	UBCHECK((sword) t.VTI_leftOffset == ubState.UBS_scroll[0] &&
+		t.VTI_cursorPos.P_x == display);
+	/* text deleted from the end: the room it leaves is filled */
+	@call UBName::MSG_META_KBD_CHAR(UKEY(VC_BACKSPACE), CF_FIRST_PRESS,
+					0);
+	VisData(@UBName, &t, sizeof(t));
+	UBCHECK((sword) t.VTI_leftOffset > ubState.UBS_scroll[0] &&
+		t.VTI_cursorPos.P_x == display);
 	break;
     }
     }

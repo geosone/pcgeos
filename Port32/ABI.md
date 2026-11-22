@@ -5240,11 +5240,10 @@ visual classes of `Library/User/Vis`:
   into a view (one under a `GenView`): it takes the height of its text
   from then on (`TDSS_STAY_OUT_OF_VIEW`). `GTA_INIT_SCROLLING`,
   `MSG_OL_PLACE_IN_VIEW` and the page scrolling messages wait for it.
-  Also not yet: the pen (larger margins, the floating keyboard), the
+  A one line text scrolls sideways (section 13z). Also not yet: the pen (larger margins, the floating keyboard), the
   item group a text runs (`ATTR_GEN_TEXT_RUNS_ITEM_GROUP`). The font of
   editable text (`editableTextFontID`) is set by the font and size
-  messages. The filter classes are stored but the text library does
-  not filter by them yet (section 13z).
+  messages.
 - **The glyph** (`Gen/genGlyphDisplay.goc` after `genGlyphDisplay.asm`):
   `GenGlyphClass` only shows its moniker; the specific UI builds it
   (`SPIR_BUILD_GLYPH_DISPLAY`). Motif's `OLGlyphDisplayClass`
@@ -6238,7 +6237,9 @@ are left out), the constants, the variables and the routines.
   show (no frame, wrapped at its width). The first takes the focus,
   text is typed up to its maximum length, the generic object is
   modified; Enter sends the status and then the apply message; not
-  enabled and enabled again; the second grows with more text.
+  enabled and enabled again; the second grows with more text. With
+  more text than fits (step 51) the one line scrolls: the cursor at
+  the right edge, Home and End, text deleted at the end.
 
 ## 13z. The text library (`Library/Text`, P6)
 
@@ -6394,6 +6395,31 @@ the modules of the asm; what is there:
   focus (click to type) and the target (`VTS_TARGETABLE`);
   `MSG_META_PTR` drags the selection, `MSG_META_END_SELECT` ends it; a
   double press selects the word.
+- **Filters** (`Text/textFilter.goc`): a replacement with
+  `VTRF_FILTER` (what the user types or deletes) is checked character
+  by character against `VTI_filters`: no spaces, no tabs
+  (`MSG_META_TEXT_TAB_FILTERED`), a Return in a one line object
+  (`MSG_META_TEXT_CR_FILTERED`), upper case, and the filter class
+  (`VTFC_ALPHA` to `VTFC_DOS_CHARACTER_SET`, the asm's groups of
+  characters; dates, times, numbers and DOS characters by the kernel's
+  `LocalIs...Char`); then against the ranges of
+  `ATTR_VIS_TEXT_CUSTOM_FILTER`. With `ATTR_VIS_TEXT_EXTENDED_FILTER`
+  the object decides: `MSG_VIS_TEXT_FILTER_VIA_REPLACE_PARAMS`,
+  `..._VIA_CHARACTER` (0 refuses, another character replaces) or
+  `..._VIA_BEFORE_AFTER` (the replacement made in a copy of the text
+  chunk). One character refused refuses the whole replacement. As in
+  the asm only text passed by a pointer is filtered, and upper case
+  (or a replaced character) is written into the caller's text.
+  `C_GRAPHIC` is always refused (no graphics yet).
+- **A one line object scrolls** (`Text/textScrollOneLine.goc`):
+  `VTI_leftOffset` moves the line so that the cursor (the end of the
+  selection that moves) is inside the object, after a replacement, a
+  change of the selection and when the geometry is valid. Text that
+  fits lies where its justification puts it; wider text leaves no room
+  after its end. `MSG_VIS_TEXT_SCROLL_ONE_LINE` does it for a position.
+  Port32: the line is drawn again (the asm moves the bits with
+  `GrBitBlt`); the left offset is 0 from the start (the asm's
+  `INITIAL_LEFT_OFFSET` 0x8000 only tells "never on the screen").
 - **Geometry** (`Text/textMethodGeometry.goc`): what the specific UI
   asks: `MSG_VIS_TEXT_GET_LINE_HEIGHT`, `..._GET_MIN_WIDTH`,
   `..._GET_SIMPLE_MIN_WIDTH`, `..._GET_AVERAGE_CHAR_WIDTH` (of the
@@ -6410,9 +6436,8 @@ the modules of the asm; what is there:
   the background.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
   paragraph attribute, borders and paragraph backgrounds, tab leaders,
-  extended styles, hyphenation, graphics, scrolling (of a one
-  line object, the selection into view), the character filters
-  (`VisTextFilters`: only tabs are refused), overstrike mode, smart
+  extended styles, hyphenation, graphics, scrolling (the selection
+  into a view: `MSG_VIS_TEXT_SHOW_SELECTION`), overstrike mode, smart
   quotes, the large mouse messages, selection by words and lines while
   dragging, quick transfer, the clipboard, the pointer image over
   text;
@@ -6431,7 +6456,8 @@ the modules of the asm; what is there:
   record and as a chunk; the lines (booted with Berkeley): word wrap,
   right, centered and full justification, a carriage return, a tab,
   lines going away; the sizes for the geometry and the height at a
-  width, asked and cached. ctest `kernel.draw` measures fields
+  width, asked and cached; the filters (classes, spaces, tabs, upper
+  case, a range, by character). ctest `kernel.draw` measures fields
   (`GrTextObjCalc`, `GrTextPosition`); `library.ui.boot` has a text
   object in a view's document (steps 40 to 45): drawn with it and
   after a change; with the focus its cursor, a range, typing over it;

@@ -85,6 +85,11 @@ extern dword TSL_LineCursorEnd(optr o, dword line);
 /* Text/textMethodSet.goc: the replacement all changes of the text go
  * through (VisTextReplaceNew); TRUE if it was not made */
 extern Boolean VisTextReplace(optr o, VisTextReplaceParameters *p);
+/* Text/textFilter.goc: TRUE to refuse */
+extern Boolean FilterReplacement(optr o, VisTextReplaceParameters *p);
+extern Boolean TF_CheckIfCharFiltered(optr o, word c);
+/* Text/textScrollOneLine.goc */
+extern void TextScrollOneLine(optr o, dword offset);
 extern void TextMarkUserModified(optr o);
 extern void TextMarkNotUserModified(optr o);
 

@@ -94,6 +94,8 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
 	return FALSE;
     if (!TS_CheckLegalChange(o, p))
 	return TRUE;
+    if ((p->VTRP_flags & VTRF_FILTER) && FilterReplacement(o, p))
+	return TRUE;
     hadText = size != 0;
     flags = p->VTRP_flags;
     /* the selection off the screen while the text changes */
@@ -108,6 +110,7 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     before = VT(o)->VTI_height;
     TextRecalc(o, start, inserted, deleted);
     TextScreenUpdate(o);
+    TextScrollOneLine(o, VT(o)->VTI_selectStart);
     EditHilite(o);
     TextGStateDestroy(o);
     if (VT(o)->VTI_lines)

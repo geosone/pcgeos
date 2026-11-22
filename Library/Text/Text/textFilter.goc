@@ -1,0 +1,275 @@
+/*
+ * textFilter.goc -- what may go into a text object (after
+ * textFilter.asm): FilterReplacement, called for a replacement with
+ * VTRF_FILTER, checks every character of the new text against
+ * VTI_filters (no spaces, no tabs, upper case, the filter class) and
+ * ATTR_VIS_TEXT_CUSTOM_FILTER, then lets the object itself decide if
+ * it has ATTR_VIS_TEXT_EXTENDED_FILTER.  One character refused refuses
+ * the whole replacement.
+ *
+ * As the asm, only text given by a pointer is filtered (what the
+ * keyboard and the clipboard give); upper case is written into the
+ * caller's text.
+ *
+ * Port32, not yet: graphics (C_GRAPHIC is always refused), large
+ * objects.
+ */
+@include "textInt.goh"
+#include <localize.h>
+#include <char.h>
+
+/* (the kernel exports these under the names of localize.h's macros) */
+#undef LocalIsAlpha
+#undef LocalIsSpace
+extern Boolean LocalIsAlpha(wchar ch);
+extern Boolean LocalIsSpace(wchar ch);
+
+/* (char.def's; char.h has no name for it) */
+#define C_COLUMN_BREAK	C_CTRL_L
+
+/* TextFilterGroups: the groups of characters a filter class refuses;
+ * from TFG_ALPHA to TFG_EXTENDED_NON_ALPHA no character is in two */
+#define TFG_NON_DOS_CHARS	0x8000
+#define TFG_NON_DATE		0x4000
+#define TFG_NON_TIME		0x2000
+#define TFG_NON_FLOAT_DECIMAL	0x1000
+#define TFG_NON_ASCII		0x0800
+#define TFG_EXTENDED_NON_ALPHA	0x0400
+#define TFG_OTHER_NON_EXTENDED	0x0200
+#define TFG_OTHER_NON_DOS	0x0100
+#define TFG_MINUS		0x0080
+#define TFG_PLUS		0x0040
+#define TFG_WILDCARDS		0x0020
+#define TFG_COLON_BS		0x0010
+#define TFG_PERIOD		0x0008
+#define TFG_NUMERIC		0x0004
+#define TFG_E			0x0002
+#define TFG_ALPHA		0x0001
+
+/* filterGroupFlags: by VisTextFilterClass - 1 */
+static const word filterGroupFlags[] = {
+    /* VTFC_ALPHA */
+    TFG_NUMERIC | TFG_PERIOD | TFG_WILDCARDS | TFG_PLUS | TFG_MINUS |
+    TFG_OTHER_NON_DOS | TFG_OTHER_NON_EXTENDED | TFG_COLON_BS |
+    TFG_EXTENDED_NON_ALPHA,
+    /* VTFC_NUMERIC */
+    TFG_ALPHA | TFG_E | TFG_WILDCARDS | TFG_PLUS | TFG_MINUS |
+    TFG_OTHER_NON_DOS | TFG_OTHER_NON_EXTENDED | TFG_COLON_BS |
+    TFG_EXTENDED_NON_ALPHA | TFG_PERIOD,
+    /* VTFC_SIGNED_NUMERIC */
+    TFG_ALPHA | TFG_E | TFG_PERIOD | TFG_PLUS | TFG_WILDCARDS |
+    TFG_OTHER_NON_DOS | TFG_OTHER_NON_EXTENDED | TFG_EXTENDED_NON_ALPHA |
+    TFG_COLON_BS,
+    /* VTFC_SIGNED_DECIMAL */
+    TFG_NON_FLOAT_DECIMAL | TFG_E,
+    /* VTFC_FLOAT_DECIMAL */
+    TFG_NON_FLOAT_DECIMAL,
+    /* VTFC_ALPHA_NUMERIC */
+    TFG_PERIOD | TFG_WILDCARDS | TFG_OTHER_NON_EXTENDED | TFG_PLUS |
+    TFG_MINUS | TFG_OTHER_NON_DOS | TFG_COLON_BS | TFG_EXTENDED_NON_ALPHA,
+    /* VTFC_FILENAMES */
+    TFG_WILDCARDS | TFG_COLON_BS,
+    /* VTFC_DOS_FILENAMES */
+    TFG_WILDCARDS | TFG_COLON_BS | TFG_OTHER_NON_DOS | TFG_PLUS |
+    TFG_NON_DOS_CHARS,
+    /* VTFC_DOS_PATH */
+    TFG_WILDCARDS | TFG_OTHER_NON_DOS | TFG_PLUS | TFG_EXTENDED_NON_ALPHA |
+    TFG_NON_DOS_CHARS,
+    /* VTFC_DATE */
+    TFG_NON_DATE,
+    /* VTFC_TIME */
+    TFG_NON_TIME,
+    /* VTFC_DASHED_ALPHA_NUMERIC */
+    TFG_PERIOD | TFG_WILDCARDS | TFG_OTHER_NON_EXTENDED | TFG_PLUS |
+    TFG_OTHER_NON_DOS | TFG_COLON_BS | TFG_EXTENDED_NON_ALPHA,
+    /* VTFC_NORMAL_ASCII */
+    TFG_NON_ASCII,
+    /* VTFC_DOS_VOLUME_NAMES */
+    TFG_WILDCARDS | TFG_COLON_BS | TFG_OTHER_NON_DOS | TFG_PLUS |
+    TFG_EXTENDED_NON_ALPHA | TFG_PERIOD | TFG_NON_DOS_CHARS,
+    /* VTFC_DOS_CHARACTER_SET */
+    TFG_NON_DOS_CHARS,
+    /* VTFC_ALLOW_COLUMN_BREAKS (not used) */
+    0
+};
+
+static Boolean CharInList(word c, const char *list)
+{
+    for (; *list; list++)
+	if ((byte) *list == c)
+	    return TRUE;
+    return FALSE;
+}
+
+/* the routines of filterGroupRoutines: whether c is in the group */
+static Boolean InGroup(word c, word group)
+{
+    switch (group) {
+    case TFG_ALPHA:
+	/* (an E is TFG_E's) */
+	return c != 'E' && c != 'e' && LocalIsAlpha(c);
+    case TFG_E:
+	return c == 'E' || c == 'e';
+    case TFG_NUMERIC:
+	return c >= '0' && c <= '9';
+    case TFG_PERIOD:
+	return c == '.';
+    case TFG_COLON_BS:
+	return c == '\\' || c == ':';
+    case TFG_WILDCARDS:
+	return c == '*' || c == '?';
+    case TFG_PLUS:
+	return c == '+';
+    case TFG_MINUS:
+	return c == '-';
+    case TFG_OTHER_NON_DOS:
+	return CharInList(c, "\",/;<=>[\\]|");
+    case TFG_OTHER_NON_EXTENDED:
+	return CharInList(c, "!#$%&'()@^_`{}~");
+    case TFG_EXTENDED_NON_ALPHA:
+	if (c < ' ')
+	    return TRUE;
+	return !LocalIsAlpha(c) && c > '~';
+    case TFG_NON_ASCII:
+	return c < ' ' || c > '~';
+    case TFG_NON_FLOAT_DECIMAL:
+	return c != 'E' && c != 'e' && !LocalIsNumChar(c);
+    case TFG_NON_TIME:
+	return !LocalIsTimeChar(c);
+    case TFG_NON_DATE:
+	return !LocalIsDateChar(c);
+    case TFG_NON_DOS_CHARS:
+	return !LocalIsDosChar(c);
+    }
+    return FALSE;
+}
+
+/*
+ * FilterCallback: TRUE to refuse the character; *c in upper case with
+ * VTF_UPCASE_CHARS.  A Return in a one line object and a tab that is
+ * not allowed are told to the object (MSG_META_TEXT_CR_FILTERED,
+ * MSG_META_TEXT_TAB_FILTERED; here without a key's state).
+ */
+static Boolean FilterChar(optr o, word *c)
+{
+    VisTextInstance *t = VT(o);
+    VisTextFilters f = t->VTI_filters;
+    byte fc = f & VTF_FILTER_CLASS;
+    MetaTextFilteredParameters p;
+    ChunkHandle *custom;
+    word group;
+
+    if (*c == C_GRAPHIC)
+	return TRUE;
+    /* (tabs and Returns are below the smallest space) */
+    if ((f & VTF_NO_SPACES) && *c >= C_THINSPACE && LocalIsSpace(*c))
+	return TRUE;
+    if ((f & VTF_UPCASE_CHARS) && *c >= 'a' && *c <= 'z')
+	*c = LocalUpcaseChar(*c);
+    if (fc != VTFC_ALLOW_COLUMN_BREAKS && *c == C_COLUMN_BREAK)
+	return TRUE;
+    memset(&p, 0, sizeof(p));
+    if ((t->VTI_state & VTS_ONE_LINE) && *c == C_ENTER) {
+	@call o::MSG_META_TEXT_CR_FILTERED(*c, p);
+	return TRUE;
+    }
+    if (*c == C_TAB) {
+	if (f & VTF_NO_TABS) {
+	    @call o::MSG_META_TEXT_TAB_FILTERED(*c, p);
+	    return TRUE;
+	}
+    } else if (fc && fc != VTFC_ALLOW_COLUMN_BREAKS &&
+	       fc <= sizeof(filterGroupFlags) / sizeof(filterGroupFlags[0])) {
+	for (group = 1; group; group <<= 1)
+	    if ((filterGroupFlags[fc - 1] & group) && InGroup(*c, group))
+		return TRUE;
+    }
+    custom = ObjVarFindData(o, ATTR_VIS_TEXT_CUSTOM_FILTER);
+    if (custom && *custom) {
+	optr chunk = ConstructOptr(OptrToHandle(o), *custom);
+	VisTextCustomFilterData *d = LMemDeref(chunk);
+	word n = LMemGetChunkSizeHandles(OptrToHandle(o), *custom) /
+		 sizeof(VisTextCustomFilterData);
+
+	for (; n; n--, d++)
+	    if (*c >= d->VTCFD_startOfRange && *c <= d->VTCFD_endOfRange)
+		return TRUE;
+    }
+    return FALSE;
+}
+
+/* TF_CheckIfCharFiltered */
+Boolean TF_CheckIfCharFiltered(optr o, word c)
+{
+    return FilterChar(o, &c);
+}
+
+/*
+ * ExtendedFilterBuffer: by the object's own messages: the parameters,
+ * every character (0 back refuses, another character replaces), or
+ * the text before and after (the replacement made in a copy of the
+ * text chunk)
+ */
+static Boolean ExtendedFilter(optr o, VisTextReplaceParameters *p)
+{
+    VisTextExtendedFilterType *type =
+	ObjVarFindData(o, ATTR_VIS_TEXT_EXTENDED_FILTER);
+    ChunkHandle text, copy;
+    Boolean refuse;
+    word size;
+    dword i;
+
+    if (!type)
+	return FALSE;
+    switch (*type) {
+    case VTEFT_REPLACE_PARAMS:
+	return @call o::MSG_VIS_TEXT_FILTER_VIA_REPLACE_PARAMS(p);
+    case VTEFT_CHARACTER_LEVELER_LEVEL:
+	if (p->VTRP_textReference.TR_type != TRT_POINTER)
+	    return FALSE;
+	for (i = 0; i < p->VTRP_insCount; i++) {
+	    char *s = p->VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer;
+	    word c = @call o::MSG_VIS_TEXT_FILTER_VIA_CHARACTER(
+							(byte) s[i]);
+
+	    if (!c)
+		return TRUE;
+	    s[i] = (char) c;
+	}
+	return FALSE;
+    default:
+	text = VT(o)->VTI_text;
+	size = LMemGetChunkSizeHandles(OptrToHandle(o), text);
+	copy = LMemAlloc(OptrToHandle(o), size);
+	memcpy(LMemDerefHandles(OptrToHandle(o), copy),
+	       LMemDerefHandles(OptrToHandle(o), text), size);
+	VT(o)->VTI_text = copy;
+	TS_ReplaceRange(o, p);
+	copy = VT(o)->VTI_text;
+	VT(o)->VTI_text = text;
+	refuse = @call o::MSG_VIS_TEXT_FILTER_VIA_BEFORE_AFTER(text, copy,
+							       0);
+	LMemFreeHandles(OptrToHandle(o), copy);
+	return refuse;
+    }
+}
+
+/* FilterReplacement: TRUE to refuse it */
+Boolean FilterReplacement(optr o, VisTextReplaceParameters *p)
+{
+    dword i;
+
+    if (p->VTRP_insCount &&
+	p->VTRP_textReference.TR_type == TRT_POINTER) {
+	for (i = 0; i < p->VTRP_insCount; i++) {
+	    /* (the pointer again: a filtered message may move things) */
+	    char *s = p->VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer;
+	    word c = (byte) s[i];
+
+	    if (FilterChar(o, &c))
+		return TRUE;
+	    s[i] = (char) c;
+	}
+    }
+    return ExtendedFilter(o, p);
+}

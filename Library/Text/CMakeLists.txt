@@ -38,5 +38,7 @@ geos_geode(text GP text32.gp
                ${t}/TextSelect/tslMethodMouse.goc
                ${t}/Text/textMethodInput.goc
                ${t}/Text/textMethodGeometry.goc
+               ${t}/Text/textFilter.goc
+               ${t}/Text/textScrollOneLine.goc
            INCLUDES ${t})
 set(text_GEO ${text_GEO} PARENT_SCOPE)

@@ -38,11 +38,12 @@ void TSL_SelectSetSelection(optr o, dword start, dword end)
 }
 
 /* the selection changed on the screen: the old one off, the new on
- * (the object has its gstate) */
-static void SetShown(optr o, dword start, dword end)
+ * (the object has its gstate); a one line object scrolls to show */
+static void SetShown(optr o, dword start, dword end, dword show)
 {
     EditUnHilite(o);
     TSL_SelectSetSelection(o, start, end);
+    TextScrollOneLine(o, show);
     EditHilite(o);
 }
 
@@ -58,7 +59,7 @@ void TSL_SelectCursor(optr o, dword offset, Boolean setGoal)
 
     if (offset > size)
 	offset = size;
-    SetShown(o, offset, offset);
+    SetShown(o, offset, offset, offset);
     t = VT(o);
     t->VTI_selectMinStart = t->VTI_selectMinEnd = offset;
     t->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
@@ -101,7 +102,7 @@ void TSL_SelectAdjust(optr o, dword offset)
 	start = offset;
     if (offset > end)
 	end = offset;
-    SetShown(o, start, end);
+    SetShown(o, start, end, offset);
     VT(o)->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
 }
 
@@ -128,6 +129,7 @@ static void SelectRange(optr o, dword start, dword end)
     TextGStateCreate(o);
     EditUnHilite(o);
     TSL_SelectSetSelection(o, r.VTR_start, r.VTR_end);
+    TextScrollOneLine(o, r.VTR_end);
     EditHilite(o);
     TextGStateDestroy(o);
     VT(o)->VTI_selectMinStart = r.VTR_start;

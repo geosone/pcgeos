@@ -16,6 +16,7 @@
 
 /* TextAttr/taRange.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_GET_RANGE;
+@extern method VisTextClass, MSG_VIS_TEXT_SCROLL_ONE_LINE;
 /* TextSelect/tslMain.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_RANGE;
 @extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE;

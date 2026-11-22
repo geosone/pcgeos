@@ -133,6 +133,7 @@ void TextCompleteRecalc(optr o)
 	TL_LineStorageCreate(oself);
     }
     TextCompleteRecalc(oself);
+    TextScrollOneLine(oself, VT(oself)->VTI_selectStart);
 }
 
 /*
