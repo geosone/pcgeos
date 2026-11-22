@@ -1,0 +1,178 @@
+/*
+ * tlSmallStorage.goc -- the lines of a small text object (after
+ * tlSmallStorage.asm, tlSmallUtils.asm, tlCommonInit.asm and the
+ * queries of tlSmallLineInfo.asm, tlSmallOffset.asm).
+ *
+ * The lines are a chunk array (VTI_lines) of LineInfo, each with as
+ * many fields as the line has tabs and one more.
+ *
+ * Port32 (Port32/ABI.md section 13z): a line is named by its number;
+ * a pointer to one holds until the lines change.
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+
+#define INIT_LINE_FLAGS \
+	(LF_STARTS_PARAGRAPH | LF_ENDS_PARAGRAPH | LF_ENDS_IN_NULL)
+#define INIT_FIELD_TAB_REFERENCE \
+	((TRT_OTHER << 7) | RULER_TAB_TO_LINE_LEFT)
+
+static optr Lines(optr o)
+{
+    return ConstructOptr(OptrToHandle(o), VT(o)->VTI_lines);
+}
+
+/* CommonInitLineAndField */
+static void InitLine(LineInfo *li)
+{
+    memset(li, 0, TL_LINE_SIZE(1));
+    li->LI_flags = INIT_LINE_FLAGS;
+    li->LI_firstField.FI_tab = INIT_FIELD_TAB_REFERENCE;
+}
+
+/* SmallStorageCreate: one line, empty */
+void TL_LineStorageCreate(optr o)
+{
+    ChunkHandle c;
+
+    c = ChunkArrayCreate(OptrToHandle(o), 0, 0,
+			 ObjGetFlags(o) & OCF_IGNORE_DIRTY);
+    VT(o)->VTI_lines = c;
+    InitLine(ChunkArrayAppend(Lines(o), TL_LINE_SIZE(1)));
+}
+
+/* SmallStorageDestroy */
+void TL_LineStorageDestroy(optr o)
+{
+    VisTextInstance *t = VT(o);
+
+    if (t->VTI_lines) {
+	LMemFreeHandles(OptrToHandle(o), t->VTI_lines);
+	VT(o)->VTI_lines = 0;
+    }
+}
+
+dword TL_LineGetCount(optr o)
+{
+    return VT(o)->VTI_lines ? ChunkArrayGetCount(Lines(o)) : 0;
+}
+
+/* SmallGetLinePointer: the line, *size its size with the fields */
+LineInfo *TL_LinePtr(optr o, dword line, word *size)
+{
+    word s;
+    LineInfo *li = ChunkArrayElementToPtr(Lines(o), (word) line, &s);
+
+    if (size)
+	*size = s;
+    return li;
+}
+
+/* SmallLineInsert: count new lines before a line (or at the end) */
+void TL_LineInsert(optr o, dword line, word count)
+{
+    optr arr = Lines(o);
+    word n = ChunkArrayGetCount(arr);
+
+    while (count--) {
+	if (line >= n)
+	    InitLine(ChunkArrayAppend(arr, TL_LINE_SIZE(1)));
+	else
+	    InitLine(ChunkArrayInsertAt(arr,
+			ChunkArrayElementToPtr(arr, (word) line, NULL),
+			TL_LINE_SIZE(1)));
+	n++;
+    }
+}
+
+/* SmallLineDelete */
+void TL_LineDelete(optr o, dword line, word count)
+{
+    ChunkArrayDeleteRange(Lines(o), (word) line, count);
+}
+
+/* the line with fields fields (SmallLineAddField,
+ * SmallLineTruncateFields); the new fields are cleared */
+void TL_LineSetFieldCount(optr o, dword line, word fields)
+{
+    optr arr = Lines(o);
+    word old;
+    LineInfo *li = ChunkArrayElementToPtr(arr, (word) line, &old);
+
+    if (old == TL_LINE_SIZE(fields))
+	return;
+    ChunkArrayElementResize(arr, (word) line, TL_LINE_SIZE(fields));
+    if (TL_LINE_SIZE(fields) > old) {
+	li = ChunkArrayElementToPtr(arr, (word) line, NULL);
+	memset((byte *) li + old, 0, TL_LINE_SIZE(fields) - old);
+    }
+}
+
+word TL_LineGetFieldCount(optr o, dword line)
+{
+    word size;
+
+    (void) TL_LinePtr(o, line, &size);
+    return (word) ((size - offsetof(LineInfo, LI_firstField)) /
+		   sizeof(FieldInfo));
+}
+
+dword TL_LineGetCharCount(const LineInfo *li)
+{
+    return ((dword) (byte) li->LI_count.WAAH_high << 16) |
+	   (word) li->LI_count.WAAH_low;
+}
+
+void TL_LineSetCharCount(LineInfo *li, dword count)
+{
+    li->LI_count.WAAH_low = (sword) count;
+    li->LI_count.WAAH_high = (sbyte) (count >> 16);
+}
+
+/* SmallLineToOffsetStart: where a line's text starts */
+dword TL_LineToOffsetStart(optr o, dword line)
+{
+    dword off = 0, i;
+
+    for (i = 0; i < line; i++)
+	off += TL_LineGetCharCount(TL_LinePtr(o, i, NULL));
+    return off;
+}
+
+/*
+ * SmallLineFromOffset: the line an offset is on; *start where that
+ * line starts.  An offset where one line ends and the next starts is
+ * on the first of them if first is set, else on the second.
+ */
+dword TL_LineFromOffset(optr o, dword offset, Boolean first, dword *start)
+{
+    dword n = TL_LineGetCount(o), i, off = 0, count;
+
+    for (i = 0; i < n; i++) {
+	count = TL_LineGetCharCount(TL_LinePtr(o, i, NULL));
+	if (offset < off + count || i == n - 1 ||
+	    (offset == off + count && first))
+	    break;
+	off += count;
+    }
+    if (start)
+	*start = off;
+    return i;
+}
+
+/* SmallLineGetTop: the top of a line from the top of the text */
+WBFixed TL_LineGetTop(optr o, dword line)
+{
+    sdword top = 0;
+    dword i;
+    WBFixed w;
+
+    for (i = 0; i < line; i++) {
+	const LineInfo *li = TL_LinePtr(o, i, NULL);
+
+	top += ((sdword) li->LI_hgt.WBF_int << 8) + li->LI_hgt.WBF_frac;
+    }
+    w.WBF_int = (word) (top >> 8);
+    w.WBF_frac = (byte) top;
+    return w;
+}

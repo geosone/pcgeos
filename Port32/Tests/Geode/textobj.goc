@@ -6,7 +6,8 @@
  * TOText is a text object of a resource with a text, TOEmpty one
  * without; a third is instantiated.  They are TOTextClass, which counts
  * what a text object tells itself (modified by the user or not, empty
- * or not).  The test (test_text.c) runs the steps through TOStep on the
+ * or not).  Step 10 calculates the lines of TOText (the system is
+ * booted with Berkeley then).  The test (test_text.c) runs the steps through TOStep on the
  * process thread; the checks made here count in toState.
  */
 @include <stdapp.goh>
@@ -24,6 +25,7 @@ typedef struct {
     word	TOS_modified, TOS_notModified;
     word	TOS_empty, TOS_notEmpty;
     char	TOS_text[40];		/* TOText at the end of a step */
+    word	TOS_line[16];		/* of step 10, to print */
 } TOState;
 
 TOState toState;
@@ -534,6 +536,152 @@ static Boolean ChunkIs(optr c, const char *text)
 	TOCHECK(ChunkCount(OptrToHandle(@TOText)) == chunks);
 	/* the text is as it was */
 	TOCHECK(Is(@TOText, "aXYde"));
+	break;
+    }
+    case 10: {
+	/* the lines: none before the geometry is valid.  Berkeley 10:
+	 * H is 7 wide, i 3, a space 4, a line 12 high with the baseline
+	 * at 10.  The text is 50 wide. */
+	struct { LineInfo li; FieldInfo more[2]; } b;
+	VisTextGetLineInfoParameters gp;
+	VisTextGetLineInfoReturnValues gr;
+	VisTextGetLineOffsetAndFlagsParameters op;
+	VisTextInstance *t;
+	WWFixed size;
+
+	TOCHECK(!((VisTextInstance *) ObjDerefVis(@TOText))->VTI_lines);
+	gp.VTGLIP_buffer = &b.li;
+	gp.VTGLIP_bsize = sizeof(b);
+	gp.VTGLIP_line = 0;
+	TOCHECK(@call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp));
+	size.WWF_int = 10;
+	size.WWF_frac = 0;
+	@call TOText::MSG_VIS_TEXT_SET_POINT_SIZE(size, TEXT_ADDRESS_PAST_END,
+						  0);
+	@call TOText::MSG_VIS_SET_SIZE(50, 40);
+	@call TOText::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+	t = ObjDerefVis(@TOText);
+	TOCHECK(t->VTI_lines && t->VTI_height.WBF_int == 12 &&
+		!t->VTI_gstate);
+	TOCHECK(!@call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp));
+	toState.TOS_line[0] = b.li.LI_flags;
+	toState.TOS_line[1] = b.li.LI_firstField.FI_width;
+	toState.TOS_line[2] = b.li.LI_firstField.FI_nChars;
+	toState.TOS_line[3] = b.li.LI_hgt.WBF_int;
+	TOCHECK(gr.VTGLIRV_byteCount ==
+		offsetof(LineInfo, LI_firstField) + sizeof(FieldInfo));
+	TOCHECK(b.li.LI_flags == (LF_STARTS_PARAGRAPH | LF_ENDS_PARAGRAPH |
+				  LF_ENDS_IN_NULL | LF_NEEDS_DRAW));
+	TOCHECK(b.li.LI_count.WAAH_low == 5 &&
+		b.li.LI_firstField.FI_nChars == 5 &&
+		b.li.LI_hgt.WBF_int == 12 && b.li.LI_blo.WBF_int == 10);
+	gp.VTGLIP_line = 1;
+	TOCHECK(@call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp));
+
+	/* word wrap: three words fit, the space after them stays */
+	@call TOText::MSG_VIS_TEXT_REPLACE_ALL_PTR("Hi Hi Hi Hi Hi", 0);
+	t = ObjDerefVis(@TOText);
+	TOCHECK(t->VTI_height.WBF_int == 24);
+	gp.VTGLIP_line = 0;
+	TOCHECK(!@call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp));
+	toState.TOS_line[4] = b.li.LI_flags;
+	toState.TOS_line[5] = b.li.LI_firstField.FI_width;
+	toState.TOS_line[6] = b.li.LI_lineEnd;
+	toState.TOS_line[7] = b.li.LI_count.WAAH_low;
+	TOCHECK(b.li.LI_flags == (LF_STARTS_PARAGRAPH | LF_NEEDS_DRAW));
+	TOCHECK(b.li.LI_count.WAAH_low == 9 &&
+		b.li.LI_firstField.FI_width == 42 &&
+		b.li.LI_lineEnd == 38 && b.li.LI_adjustment == 0);
+	gp.VTGLIP_line = 1;
+	TOCHECK(!@call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp));
+	TOCHECK(b.li.LI_flags == (LF_ENDS_PARAGRAPH | LF_ENDS_IN_NULL |
+				  LF_NEEDS_DRAW));
+	TOCHECK(b.li.LI_count.WAAH_low == 5 &&
+		b.li.LI_firstField.FI_width == 24 &&
+		b.li.LI_firstField.FI_position == 0);
+	gp.VTGLIP_line = 2;
+	TOCHECK(@call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp));
+	TOCHECK(@call TOText::MSG_VIS_TEXT_GET_LINE_FROM_OFFSET(8) == 0 &&
+		@call TOText::MSG_VIS_TEXT_GET_LINE_FROM_OFFSET(9) == 1 &&
+		@call TOText::MSG_VIS_TEXT_GET_LINE_FROM_OFFSET(14) == 1);
+	op.VTGLOAFP_line = 1;
+	TOCHECK(!@call TOText::MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS(&op) &&
+		op.VTGLOAFP_offset == 9 &&
+		(op.VTGLOAFP_flags & LF_ENDS_IN_NULL));
+	op.VTGLOAFP_line = 2;
+	TOCHECK(@call TOText::MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS(&op));
+
+	/* right justified, centered: the line moved (LI_adjustment) */
+	t = ObjDerefVis(@TOText);
+	t->VTI_paraAttrRuns = DEF_PARA_ATTR_JUST_TABS(J_RIGHT, VTDDT_HALF_INCH);
+	@call TOText::MSG_VIS_TEXT_RECALC_AND_DRAW();
+	gp.VTGLIP_line = 0;
+	(void) @call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp);
+	toState.TOS_line[8] = b.li.LI_adjustment;
+	TOCHECK(b.li.LI_adjustment == 12 && b.li.LI_lineEnd == 50);
+	gp.VTGLIP_line = 1;
+	(void) @call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp);
+	TOCHECK(b.li.LI_adjustment == 26);
+	t = ObjDerefVis(@TOText);
+	t->VTI_paraAttrRuns = DEF_PARA_ATTR_JUST_TABS(J_CENTER,
+						      VTDDT_HALF_INCH);
+	@call TOText::MSG_VIS_TEXT_RECALC_AND_DRAW();
+	(void) @call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp);
+	TOCHECK(b.li.LI_adjustment == 13);
+	/* fully justified: the spaces of a wrapped line padded (two
+	 * count, 12 to share), the last field as much wider; not the
+	 * paragraph's last line */
+	t = ObjDerefVis(@TOText);
+	t->VTI_paraAttrRuns = DEF_PARA_ATTR_JUST_TABS(J_FULL, VTDDT_HALF_INCH);
+	@call TOText::MSG_VIS_TEXT_RECALC_AND_DRAW();
+	gp.VTGLIP_line = 0;
+	(void) @call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp);
+	toState.TOS_line[9] = b.li.LI_spacePad.WBF_int;
+	toState.TOS_line[10] = b.li.LI_firstField.FI_width;
+	TOCHECK(b.li.LI_spacePad.WBF_int == 6 && b.li.LI_adjustment == 0 &&
+		b.li.LI_firstField.FI_width == 42 + 18 &&
+		b.li.LI_lineEnd == 50);
+	gp.VTGLIP_line = 1;
+	(void) @call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp);
+	TOCHECK(b.li.LI_spacePad.WBF_int == 0 && b.li.LI_adjustment == 0);
+	t = ObjDerefVis(@TOText);
+	t->VTI_paraAttrRuns = VIS_TEXT_INITIAL_PARA_ATTR;
+
+	/* a carriage return ends the paragraph; a tab starts a field at
+	 * the next default tab stop (every half inch) */
+	@call TOText::MSG_VIS_TEXT_REPLACE_ALL_PTR("H\ri\tH", 0);
+	t = ObjDerefVis(@TOText);
+	TOCHECK(t->VTI_height.WBF_int == 24);
+	gp.VTGLIP_line = 0;
+	(void) @call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp);
+	TOCHECK(b.li.LI_flags == (LF_STARTS_PARAGRAPH | LF_ENDS_PARAGRAPH |
+				  LF_ENDS_IN_CR | LF_NEEDS_DRAW) &&
+		b.li.LI_count.WAAH_low == 2 && b.li.LI_lineEnd == 7);
+	gp.VTGLIP_line = 1;
+	(void) @call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp);
+	toState.TOS_line[11] = gr.VTGLIRV_byteCount;
+	toState.TOS_line[12] = b.more[0].FI_position;
+	toState.TOS_line[13] = b.more[0].FI_tab;
+	TOCHECK(gr.VTGLIRV_byteCount ==
+		offsetof(LineInfo, LI_firstField) + 2 * sizeof(FieldInfo));
+	TOCHECK(b.li.LI_count.WAAH_low == 3 &&
+		b.li.LI_firstField.FI_nChars == 1 &&
+		b.li.LI_firstField.FI_width == 3 &&
+		b.more[0].FI_nChars == 2 && b.more[0].FI_position == 36 &&
+		b.more[0].FI_width == 7 && b.more[0].FI_tab == 0x81 &&
+		b.li.LI_lineEnd == 43);
+
+	/* less text: the lines left over go; one edited in the middle */
+	@call TOText::MSG_VIS_TEXT_REPLACE_ALL_PTR("Hi Hi Hi", 0);
+	t = ObjDerefVis(@TOText);
+	TOCHECK(t->VTI_height.WBF_int == 12 &&
+		ChunkArrayGetCountHandles(OptrToHandle(@TOText),
+					  t->VTI_lines) == 1);
+	gp.VTGLIP_line = 0;
+	(void) @call TOText::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp);
+	TOCHECK(gr.VTGLIRV_byteCount ==
+		offsetof(LineInfo, LI_firstField) + sizeof(FieldInfo) &&
+		b.li.LI_firstField.FI_width == 38);
 	break;
     }
     }

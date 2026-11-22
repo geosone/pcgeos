@@ -303,6 +303,10 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   target_link_libraries(test_kernel_geode PRIVATE geos_kernel)
   add_test(NAME kernel.geode COMMAND test_kernel_geode)
 
+  # Berkeley, for the tests that measure or draw text
+  geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
+             berkeley_fnt)
+
   # the visual classes of the UI library (Library/User/Vis) in a window
   if(TARGET geode_ui)
     geos_geode(uivis GP Geode/uivis.gp GOC Geode/uivis.goc)
@@ -319,7 +323,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
       geos_embed(_text_c ${text_GEO} text_geode)
       geos_embed(_textobj_c ${textobj_GEO} textobj_geode)
       add_executable(test_text test_text.c ${_ui_c} ${_text_c}
-                     ${_textobj_c})
+                     ${_textobj_c} ${_berkeley_c})
       add_dependencies(test_text geode_ui geode_text geode_textobj)
       target_link_libraries(test_text PRIVATE geos_kernel)
       add_test(NAME library.text COMMAND test_text)
@@ -397,8 +401,6 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   # the PostScript translation library (Library/Trans/Graphics/Vector/EPS),
   # with Berkeley for the metrics of its text
   geos_embed(_eps_c ${eps_GEO} eps_geode)
-  geos_embed(_berkeley_c ${PROJECT_SOURCE_DIR}/FontData/Berkeley.fnt
-             berkeley_fnt)
   # the TrueType font driver (Driver/Font) and a font for it: Cooper
   # Black, which no printer has, downloaded as a Type 3 font
   geos_embed(_truetype_c ${truetype_GEO} truetype_geode)
@@ -541,7 +543,7 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
   # the Motif specific UI (Library/SpecUI) on the host video driver: the
   # system, a screen and a field; where the display is X11, on a screen
   # of its own (Xvfb)
-  if(TARGET geode_motif AND TARGET geode_ui)
+  if(TARGET geode_motif AND TARGET geode_ui AND TARGET geode_text)
     geos_geode(uimotif GP Geode/uimotif.gp GOC Geode/uimotif.goc)
     geos_embed(_uimotif_c ${uimotif_GEO} uimotif_geode)
     geos_embed(_motif_c ${motif_GEO} motif_geode)
@@ -564,9 +566,10 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     geos_geode(uiboot GP Geode/uiboot.gp GOC Geode/uiboot.goc)
     geos_embed(_uiboot_c ${uiboot_GEO} uiboot_geode)
     add_executable(test_ui_boot test_ui_boot.c ${_ui_c} ${_uiboot_c}
-                   ${_motif_c} ${_hostvid_c} ${_vidmem_c} ${_berkeley_c})
+                   ${_motif_c} ${_hostvid_c} ${_vidmem_c} ${_berkeley_c}
+                   ${_text_c})
     add_dependencies(test_ui_boot geode_ui geode_uiboot geode_motif
-                     geode_hostvid geode_vidmem)
+                     geode_hostvid geode_vidmem geode_text)
     target_link_libraries(test_ui_boot PRIVATE geos_kernel)
     if(GEOS_HOST STREQUAL "linux" AND GHAL_HAVE_X11 AND
        GEOS_LINUX_DISPLAY STREQUAL "x11" AND GEOS_XVFB)

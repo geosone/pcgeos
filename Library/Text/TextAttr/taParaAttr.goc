@@ -1,0 +1,164 @@
+/*
+ * taParaAttr.goc -- the paragraph attributes of a text object (after
+ * taParaAttr.asm, and of taRunQuery.asm what the line calculation asks:
+ * the paragraph attribute and the drawing attributes at a position).
+ *
+ * Port32 (Port32/ABI.md section 13z): objects with a single paragraph
+ * attribute only so far: VTI_paraAttrRuns is a VisTextDefaultParaAttr
+ * (VTSF_DEFAULT_PARA_ATTR) or the chunk of a VisTextParaAttr with its
+ * tabs.  Not yet: runs (VTSF_MULTIPLE_PARA_ATTRS), changing the
+ * attribute by message, borders.
+ */
+@include "textInt.goh"
+#include <font.h>
+
+static const word defaultDefaultTabs[4] = {
+    0, (PIXELS_PER_INCH / 2) * 8, PIXELS_PER_INCH * 8, 227
+};
+
+/* TextMapDefaultParaAttr */
+void TA_MapDefaultParaAttr(VisTextDefaultParaAttr def, VisTextParaAttr *a)
+{
+    memset(a, 0, sizeof(*a));
+    a->VTPA_meta.SSEH_style = CA_NULL_ELEMENT;
+    a->VTPA_lineSpacing = 1 << 8;
+    a->VTPA_language = SL_ENGLISH;
+    a->VTPA_startingParaNumber = VIS_TEXT_DEFAULT_STARTING_NUMBER;
+    a->VTPA_leftMargin = ((def & VTDPA_LEFT_MARGIN) >>
+			  VTDPA_LEFT_MARGIN_OFFSET) * (PIXELS_PER_INCH / 2) * 8;
+    a->VTPA_rightMargin = ((def & VTDPA_RIGHT_MARGIN) >>
+			   VTDPA_RIGHT_MARGIN_OFFSET) * (PIXELS_PER_INCH / 2) * 8;
+    a->VTPA_paraMargin = ((def & VTDPA_PARA_MARGIN) >>
+			  VTDPA_PARA_MARGIN_OFFSET) * (PIXELS_PER_INCH / 2) * 8;
+    a->VTPA_defaultTabs = defaultDefaultTabs[(def & VTDPA_DEFAULT_TABS) >>
+					     VTDPA_DEFAULT_TABS_OFFSET];
+    a->VTPA_attributes = def & VTPAA_JUSTIFICATION;
+    a->VTPA_bgColor.CQ_redOrIndex = C_WHITE;
+    a->VTPA_bgGrayScreen = SDM_0;
+    a->VTPA_borderColor.CQ_redOrIndex = C_BLACK;
+    a->VTPA_borderGrayScreen = SDM_100;
+    a->VTPA_borderWidth = 1 * 8;
+    a->VTPA_borderSpacing = 2 * 8;
+    a->VTPA_borderShadow = 1 * 8;
+    a->VTPA_hyphenationInfo = VIS_TEXT_DEFAULT_HYPHENATION;
+    a->VTPA_dropCapInfo = VIS_TEXT_DEFAULT_DROP_CAP;
+    a->VTPA_nextStyle = CA_NULL_ELEMENT;
+}
+
+/* GetSingleParaAttr: the attribute with its tabs */
+void TA_GetSingleParaAttr(optr o, VisTextMaxParaAttr *a)
+{
+    VisTextInstance *t = VT(o);
+
+    memset(a, 0, sizeof(*a));
+    if (t->VTI_storageFlags & VTSF_DEFAULT_PARA_ATTR)
+	TA_MapDefaultParaAttr(t->VTI_paraAttrRuns, &a->VTMPA_paraAttr);
+    else {
+	MemHandle mh = OptrToHandle(o);
+	word size = LMemGetChunkSizeHandles(mh, t->VTI_paraAttrRuns);
+
+	if (size > sizeof(*a))
+	    size = sizeof(*a);
+	memcpy(a, LMemDerefHandles(mh, t->VTI_paraAttrRuns), size);
+    }
+}
+
+/* RoundParaAttrPos: points * 8 to pixels */
+static word RoundPos(word v)
+{
+    return (word) (v + 4) >> 3;
+}
+
+/*
+ * ParaAttrVirtualToPhysical: the margins and tabs in pixels from the
+ * left edge of the text (inside the object's left and right margin);
+ * the right margin, an inset in the attribute, a position.  The text
+ * is never narrower than VIS_TEXT_MIN_TEXT_FIELD_WIDTH; a one line
+ * object is as wide as a line may be.
+ */
+static void ParaAttrVirtualToPhysical(optr o, VisTextMaxParaAttr *m)
+{
+    VisTextParaAttr *a = &m->VTMPA_paraAttr;
+    VisTextInstance *t = VT(o);
+    VisInstance *v = (VisInstance *) t;
+    sword width, right, limit, min;
+    word i;
+
+    width = v->VI_bounds.R_right - v->VI_bounds.R_left -
+	    2 * t->VTI_lrMargin;
+    right = (t->VTI_state & VTS_ONE_LINE) ?
+	    VIS_TEXT_ONE_LINE_RIGHT_MARGIN : width;
+    a->VTPA_rightMargin = RoundPos(a->VTPA_rightMargin);
+    a->VTPA_paraMargin = RoundPos(a->VTPA_paraMargin);
+    a->VTPA_leftMargin = RoundPos(a->VTPA_leftMargin);
+    /* the left margins leave room for the narrowest text */
+    /* (the inset counts from the object's edge) */
+    i = (word) (width - right);
+    a->VTPA_rightMargin = i >= a->VTPA_rightMargin ? 0 :
+			  (word) (a->VTPA_rightMargin - i);
+    limit = right - VIS_TEXT_MIN_TEXT_FIELD_WIDTH;
+    if (limit < 0)
+	limit = 0;
+    if (a->VTPA_leftMargin > (word) limit)
+	a->VTPA_leftMargin = (word) limit;
+    if (a->VTPA_paraMargin > (word) limit)
+	a->VTPA_paraMargin = (word) limit;
+    min = (sword) (a->VTPA_leftMargin > a->VTPA_paraMargin ?
+		   a->VTPA_leftMargin : a->VTPA_paraMargin) +
+	  VIS_TEXT_MIN_TEXT_FIELD_WIDTH;
+    if (min > right)
+	min = right;
+    right -= (sword) a->VTPA_rightMargin;
+    if (right < min)
+	right = min;
+    a->VTPA_rightMargin = (word) right;
+    for (i = 0; i < a->VTPA_numberOfTabs && i < VIS_TEXT_MAX_TABS; i++)
+	m->VTMPA_tabs[i].T_position = RoundPos(m->VTMPA_tabs[i].T_position);
+}
+
+/*
+ * TA_GetParaAttrForPosition: the paragraph attribute at a position, in
+ * pixels; the range of the text it holds for
+ */
+void TA_GetParaAttrForPosition(optr o, dword pos, VisTextMaxParaAttr *a,
+			       dword *start, dword *end)
+{
+    (void) pos;
+    TA_GetSingleParaAttr(o, a);
+    *start = 0;
+    *end = TEXT_ADDRESS_PAST_END;
+    ParaAttrVirtualToPhysical(o, a);
+}
+
+/*
+ * TA_FillTextAttrForDraw: the drawing attributes at a position: the
+ * character attribute's, gray for an object that is not enabled or
+ * wants the 50% mask.  *count the characters they hold for; returns
+ * the extended styles.
+ */
+VisTextExtendedStyles TA_FillTextAttrForDraw(optr o, dword pos,
+					     TextAttr *ta, dword *count)
+{
+    VisTextCharAttr ca;
+    VisTextInstance *t;
+    Boolean gray;
+
+    TA_GetSingleCharAttr(o, &ca);
+    t = VT(o);
+    gray = !(((VisInstance *) t)->VI_attrs & VA_FULLY_ENABLED) ||
+	   (t->VTI_features & VTF_USE_50_PCT_TEXT_MASK);
+    ta->TA_font = ca.VTCA_fontID;
+    ta->TA_size = ca.VTCA_pointSize;
+    ta->TA_trackKern = ca.VTCA_trackKerning;
+    ta->TA_color = ca.VTCA_color;
+    ta->TA_pattern = ca.VTCA_pattern;
+    ta->TA_mask = gray ? SDM_50 : ca.VTCA_grayScreen;
+    ta->TA_styleSet = ca.VTCA_textStyles;
+    ta->TA_styleClear = 0xff;
+    ta->TA_modeSet = TM_DRAW_BASE;
+    ta->TA_modeClear = 0;
+    ta->TA_fontWeight = ca.VTCA_fontWeight;
+    ta->TA_fontWidth = ca.VTCA_fontWidth;
+    *count = TEXT_ADDRESS_PAST_END - pos;
+    return ca.VTCA_extendedStyles;
+}

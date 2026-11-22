@@ -27,10 +27,12 @@
 #include <string.h>
 
 extern const unsigned char ui_geode[], uiboot_geode[], motif_geode[],
-			   hostvid_geode[], vidmem_geode[], berkeley_fnt[];
+			   hostvid_geode[], vidmem_geode[], berkeley_fnt[],
+			   text_geode[];
 extern const unsigned long ui_geode_size, uiboot_geode_size,
 			   motif_geode_size, hostvid_geode_size,
-			   vidmem_geode_size, berkeley_fnt_size;
+			   vidmem_geode_size, berkeley_fnt_size,
+			   text_geode_size;
 
 /* as uiboot.goc */
 typedef struct {
@@ -67,6 +69,7 @@ typedef struct {
     short		UBS_slist[5];
     unsigned short	UBS_dlist[4];
     short		UBS_glyph[5];
+    word		UBS_text[6];
 } UBState;
 
 static int fails;
@@ -126,7 +129,7 @@ static void Shot(int step)
     FILE *o;
     int x, y;
 
-    if (!f || step != (at ? atoi(at) : 39))
+    if (!f || step != (at ? atoi(at) : 40))
 	return;
     TimerSleep(60);
     o = fopen(f, "wb");
@@ -191,6 +194,7 @@ int main(int argc, char **argv)
     Put("geos.ini", ini, sizeof(ini) - 1);
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
     GeodeRegisterImage("uiboot", uiboot_geode, uiboot_geode_size);
+    GeodeRegisterImage("text", text_geode, text_geode_size);
     GeodeRegisterImage("motif", motif_geode, motif_geode_size);
     GeodeRegisterImage("hostvid", hostvid_geode, hostvid_geode_size);
 
@@ -223,7 +227,7 @@ int main(int argc, char **argv)
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator */
-    for (i = 2; i <= 39; i++) {
+    for (i = 2; i <= 40; i++) {
 	step(i);
 	Shot(i);
     }
@@ -253,6 +257,9 @@ int main(int argc, char **argv)
     printf("glyph %dx%d, with a longer text %d wide; separator %dx%d\n",
 	   st->UBS_glyph[0], st->UBS_glyph[1], st->UBS_glyph[4],
 	   st->UBS_glyph[2], st->UBS_glyph[3]);
+    printf("text: lines %u, height %u, attrs %#x, line 2 at %u; then %u; view x was %u\n",
+	   st->UBS_text[0], st->UBS_text[1], st->UBS_text[2],
+	   st->UBS_text[3], st->UBS_text[4], st->UBS_text[5]);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

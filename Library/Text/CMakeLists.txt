@@ -18,11 +18,17 @@ geos_geode(text GP text32.gp
                ${t}/Text/textMethodSet.goc
                ${t}/Text/textMethodGet.goc
                ${t}/Text/textMethodInstance.goc
+               ${t}/Text/textGState.goc
+               ${t}/Text/textCalc.goc
+               ${t}/Text/textMethodDraw.goc
                ${t}/TextStorage/tsExternal.goc
                ${t}/TextStorage/tsParams.goc
                ${t}/TextStorage/tsReference.goc
                ${t}/TextAttr/taRange.goc
                ${t}/TextAttr/taCharAttr.goc
+               ${t}/TextAttr/taParaAttr.goc
+               ${t}/TextLine/tlSmallStorage.goc
+               ${t}/TextLine/tlCommonCalc.goc
                ${t}/TextSelect/tslMain.goc
            INCLUDES ${t})
 set(text_GEO ${text_GEO} PARENT_SCOPE)

@@ -1,0 +1,653 @@
+/*
+ * tlCommonCalc.goc -- the calculation of a line (after tlCommonCalc.asm,
+ * tlSmallCalc.asm, tlTabUtils.asm).
+ *
+ * A line is calculated field by field: a field is the text up to a tab
+ * or the end of the line, measured by the kernel (GrTextObjCalc) into
+ * the room from the end of the previous field (or the tab stop the
+ * field starts at) to the right margin.  The fields are placed by
+ * their tabs (left, center, right, anchored); the line's height is
+ * adjusted for leading, line spacing and the space around paragraphs;
+ * the line is justified (the adjustment, the padding of the spaces).
+ * What changed is noted (CF_LINE_CHANGED) and the line marked to draw.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects.  Not yet:
+ * borders, hyphenation, graphics, character justification.  (The asm
+ * marks every line as holding an extended style: its style callback
+ * notes the position whether there is one or not; here only a line
+ * with one is marked.)
+ */
+@include "textInt.goh"
+#include <font.h>
+#include <char.h>
+
+#define PA(l)	((l)->LICL_theParaAttr.VTMPA_paraAttr)
+#define EXT(v)	((v)->TOCV_ext)
+
+static sdword W(const WBFixed *w)
+{
+    return ((sdword) w->WBF_int << 8) + w->WBF_frac;
+}
+
+static void SetW(WBFixed *w, sdword v)
+{
+    w->WBF_int = (word) (v >> 8);
+    w->WBF_frac = (byte) v;
+}
+
+static word Rnd(sdword v)
+{
+    return (word) ((v + 0x80) >> 8);
+}
+
+static LineInfo *Line(LICL_vars *l)
+{
+    return TL_LinePtr(l->LICL_object, l->LICL_line, NULL);
+}
+
+static FieldInfo *Field(LICL_vars *l, word field)
+{
+    return &Line(l)->LI_firstField + field;
+}
+
+/* GetLineLeftFromTOCV: the paragraph margin on a paragraph's first
+ * line, else the left margin */
+static word LineLeft(LICL_vars *l, TOC_vars *v)
+{
+    return (EXT(v).TOCE_lineFlags & LF_STARTS_PARAGRAPH) ?
+	   PA(l).VTPA_paraMargin : PA(l).VTPA_leftMargin;
+}
+
+/* ComputeEndPrevField: where the field before a field ends (the
+ * line's left edge for the first) */
+static word EndPrevField(LICL_vars *l, TOC_vars *v, word field)
+{
+    word end = 0;
+
+    if (field) {
+	const FieldInfo *f = Field(l, (word) (field - 1));
+
+	end = (word) (f->FI_position + f->FI_width);
+    }
+    return (word) (end + LineLeft(l, v));
+}
+
+/* ---------------------------------------------------------------------
+ * tabs
+ * ------------------------------------------------------------------- */
+
+/* what a tab reference says */
+typedef struct {
+    word	position;
+    byte	attr;		/* TabAttributes */
+    byte	anchor;
+    TabReference ref;
+} TabFound;
+
+/* SearchRulerTabList: the first tab stop of the ruler after a
+ * position; the left (or paragraph) margin counts as one */
+static Boolean SearchRulerTabList(LICL_vars *l, word pos, TabFound *t)
+{
+    const Tab *tab = l->LICL_theParaAttr.VTMPA_tabs;
+    word n = PA(l).VTPA_numberOfTabs, i;
+
+    t->attr = TT_LEFT;
+    t->anchor = 0;
+    for (i = 0; i < n; i++, tab++) {
+	if (tab->T_position > l->LICL_realRightMargin)
+	    break;
+	if (tab->T_position > pos) {
+	    if (pos < PA(l).VTPA_leftMargin &&
+		tab->T_position > PA(l).VTPA_leftMargin)
+		goto useLeftMargin;
+	    t->ref = (TabReference) ((TRT_RULER << 7) | (n - i));
+	    t->position = tab->T_position;
+	    t->anchor = (byte) tab->T_anchor;
+	    t->attr = tab->T_attr;
+	    return TRUE;
+	}
+    }
+    if (pos < PA(l).VTPA_leftMargin) {
+useLeftMargin:
+	t->position = PA(l).VTPA_leftMargin;
+	t->ref = RULER_TAB_TO_LEFT_MARGIN;
+	return TRUE;
+    }
+    if (pos >= PA(l).VTPA_paraMargin)
+	return FALSE;
+    t->position = PA(l).VTPA_paraMargin;
+    t->ref = RULER_TAB_TO_PARA_MARGIN;
+    return TRUE;
+}
+
+/* ChooseDefaultTab: the next of the default tabs (every
+ * VTPA_defaultTabs, points * 8) */
+static Boolean ChooseDefaultTab(LICL_vars *l, word pos, TabFound *t)
+{
+    dword spacing = (dword) PA(l).VTPA_defaultTabs << 2, v;
+
+    if (!spacing)
+	return FALSE;
+    v = ((dword) (word) (pos + 1) << 5) + spacing;
+    t->ref = (TabReference) ((TRT_OTHER << 7) | (byte) (v / spacing));
+    t->position = (word) ((v - v % spacing) >> 5);
+    t->attr = TT_LEFT;
+    t->anchor = 0;
+    return t->position <= l->LICL_realRightMargin;
+}
+
+/* CheckNextLineHasUsableTab: a line that ends in a tab may wrap if the
+ * next one has a tab stop for it */
+static Boolean NextLineHasUsableTab(LICL_vars *l, word field)
+{
+    const Tab *tab = l->LICL_theParaAttr.VTMPA_tabs;
+    word n = PA(l).VTPA_numberOfTabs, i;
+    TabFound t;
+
+    if (!field)
+	return FALSE;
+    for (i = 0; i < n; i++, tab++) {
+	if (tab->T_position > l->LICL_realRightMargin)
+	    break;
+	if (tab->T_position > PA(l).VTPA_leftMargin)
+	    return TRUE;
+    }
+    if (PA(l).VTPA_leftMargin < PA(l).VTPA_paraMargin)
+	return TRUE;
+    return ChooseDefaultTab(l, PA(l).VTPA_leftMargin, &t);
+}
+
+/*
+ * FindNextTabStop: the tab stop for a field that starts with a tab: of
+ * the ruler, a default one, else the tab's own width; FALSE if none is
+ * left on the line (the field goes to the next line)
+ */
+static Boolean FindNextTabStop(LICL_vars *l, TOC_vars *v, word field,
+			       TabFound *t)
+{
+    word end = EndPrevField(l, v, field);
+
+    if (!SearchRulerTabList(l, end, t) && !ChooseDefaultTab(l, end, t)) {
+	if (NextLineHasUsableTab(l, field))
+	    return FALSE;
+	/* CheckIntrinsicTabWidth */
+	t->attr = TT_LEFT;
+	t->anchor = 0;
+	t->position = (word) (end + TAB_INTRINSIC_WIDTH);
+	t->ref = (TRT_OTHER << 7) | OTHER_INTRINSIC_TAB;
+	if (t->position >= l->LICL_realRightMargin) {
+	    if (end != LineLeft(l, v))
+		return FALSE;
+	    /* only a tab on the line, and too wide: no width */
+	    t->position = end;
+	    t->ref = (TRT_OTHER << 7) | OTHER_ZERO_WIDTH_TAB;
+	}
+    }
+    l->LICL_tabReference = t->ref;
+    EXT(v).TOCE_anchorChar = t->anchor;
+    return TRUE;
+}
+
+/* TabGetPositionAndAttributes: the position and the attributes of the
+ * tab a reference names */
+word TL_TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
+				    word endPrevField, TabReference ref,
+				    byte *attr)
+{
+    byte num = ref & TR_REF_NUMBER;
+
+    *attr = TT_LEFT;
+    if (!(ref & 0x80)) {
+	const Tab *tab;
+
+	if (num == RULER_TAB_TO_LEFT_MARGIN)
+	    return PA(l).VTPA_leftMargin;
+	if (num == RULER_TAB_TO_PARA_MARGIN)
+	    return PA(l).VTPA_paraMargin;
+	if (num == RULER_TAB_TO_LINE_LEFT)
+	    return paraStart ? PA(l).VTPA_paraMargin : PA(l).VTPA_leftMargin;
+	tab = &l->LICL_theParaAttr.VTMPA_tabs[PA(l).VTPA_numberOfTabs - num];
+	*attr = tab->T_attr;
+	return tab->T_position;
+    }
+    if (num == OTHER_INTRINSIC_TAB)
+	return (word) (endPrevField + TAB_INTRINSIC_WIDTH);
+    if (num == OTHER_ZERO_WIDTH_TAB)
+	return endPrevField;
+    return (word) (((dword) num * ((dword) PA(l).VTPA_defaultTabs << 2) +
+		    16) >> 5);
+}
+
+/* ---------------------------------------------------------------------
+ * the kernel's callbacks
+ * ------------------------------------------------------------------- */
+
+/* CalculateCharAttrCallback: the attributes and the text of the run
+ * at an offset into the field */
+static word CalcStyleCallback(TextMetricStyles *tms, word offset,
+			      const char **text)
+{
+    TOC_vars *v = (TOC_vars *) tms;
+    LICL_vars *l = EXT(v).TOCE_passBack;
+    dword pos = l->LICL_range.VTR_start + offset, count;
+    VisTextExtendedStyles es;
+    word after;
+
+    *text = TS_LockTextPtr(l->LICL_object, pos, &after);
+    es = TA_FillTextAttrForDraw(l->LICL_object, pos, &tms->TMS_textAttr,
+				&count);
+    if (es & VTES_NOWRAP)
+	tms->TMS_flags |= TMSF_NOWRAP;
+    else
+	tms->TMS_flags &= ~TMSF_NOWRAP;
+    if (es && l->LICL_extStylePos == 0xffff)
+	l->LICL_extStylePos = offset;
+    /* (the null counts: the field ends at it) */
+    after++;
+    return count < after ? (word) count : after;
+}
+
+/* CalculateHeightCallback: the line grows taller */
+static void CalcHeightCallback(TOC_vars *v, WBFixed height)
+{
+    LICL_vars *l = EXT(v).TOCE_passBack;
+
+    if (W(&height) > W(&l->LICL_lineHeight))
+	l->LICL_lineHeight = height;
+}
+
+/* CalculateTabCallback: a tab starts the field: a left tab stop gives
+ * the room from it to the right margin; TRUE if there is no stop */
+static Boolean CalcTabCallback(TOC_vars *v, const char *text)
+{
+    LICL_vars *l = EXT(v).TOCE_passBack;
+    TabFound t;
+
+    (void) text;
+    if (!FindNextTabStop(l, v, l->LICL_field, &t))
+	return TRUE;
+    if ((t.attr & TA_TYPE) == TT_LEFT)
+	EXT(v).TOCE_areaToFill = (sword) (l->LICL_realRightMargin -
+					  t.position);
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * a field
+ * ------------------------------------------------------------------- */
+
+/* FindFieldEnd: the field measured; FALSE if nothing fit (not for a
+ * field with only the null) */
+static Boolean FindFieldEnd(LICL_vars *l, TOC_vars *v, word field)
+{
+    VisTextInstance *t = VT(l->LICL_object);
+    TOCFlags flags = 0;
+
+    /* SetKernelCalculationFlags */
+    if ((PA(l).VTPA_attributes & VTPAA_DISABLE_WORD_WRAP) ||
+	(t->VTI_features & VTF_NO_WORD_WRAPPING))
+	flags |= TOCF_NO_WORD_WRAP;
+    if ((PA(l).VTPA_attributes & VTPAA_ALLOW_AUTO_HYPHENATION) ||
+	(t->VTI_features & VTF_AUTO_HYPHENATE))
+	flags |= TOCF_AUTO_HYPHENATE;
+    EXT(v).TOCE_flags = flags;
+    v->TOCV_int.TOCI_style.TMS_styleCallBack = CalcStyleCallback;
+    v->TOCV_int.TOCI_style.TMS_graphicCallBack = NULL;
+    EXT(v).TOCE_hyphenCallback = NULL;
+    EXT(v).TOCE_tabCallback = CalcTabCallback;
+    EXT(v).TOCE_heightCallback = CalcHeightCallback;
+    EXT(v).TOCE_passBack = l;
+    /* ComputeAreaToFill */
+    EXT(v).TOCE_areaToFill = (sword) (l->LICL_realRightMargin -
+				      EndPrevField(l, v, field));
+    EXT(v).TOCE_anchorChar = 0;
+    l->LICL_field = field;
+    GrTextObjCalc(t->VTI_gstate, v);
+    if ((word) EXT(v).TOCE_nChars > l->LICL_extStylePos)
+	EXT(v).TOCE_lineFlags |= LF_CONTAINS_EXTENDED_STYLE;
+    return (EXT(v).TOCE_lineFlags & LF_ENDS_IN_NULL) ||
+	   EXT(v).TOCE_nChars != 0;
+}
+
+/* CalcFieldPosition: the field placed by its tab; the line's end */
+static void CalcFieldPosition(LICL_vars *l, TOC_vars *v, word field)
+{
+    word left = LineLeft(l, v), prev = EndPrevField(l, v, field);
+    word just = (word) EXT(v).TOCE_justWidth, pos, tab, room, w;
+    byte attr;
+    FieldInfo *f;
+
+    tab = TL_TabGetPositionAndAttributes(l,
+		(EXT(v).TOCE_lineFlags & LF_STARTS_PARAGRAPH) != 0, prev,
+		l->LICL_tabReference, &attr);
+    l->LICL_lastFieldTabType = attr & TA_TYPE;
+    switch (attr & TA_TYPE) {
+    default:				/* TT_LEFT */
+	pos = tab;
+	break;
+    case TT_CENTER:
+	/* against the previous field if there is no room left of the
+	 * stop, against the right margin if none right of it */
+	if ((word) (tab - prev) < just / 2)
+	    pos = prev;
+	else if ((word) (l->LICL_realRightMargin - tab) <= just / 2)
+	    pos = (word) (l->LICL_realRightMargin - just);
+	else
+	    pos = (word) (tab - just / 2);
+	break;
+    case TT_RIGHT:
+	pos = just > (word) (tab - prev) ? prev : (word) (tab - just);
+	break;
+    case TT_ANCHORED:
+	w = (word) EXT(v).TOCE_widthToAnchor;
+	room = (word) (tab - prev);
+	if (room < w)
+	    pos = prev;
+	else if ((word) (l->LICL_realRightMargin - tab) < (word) (just - w))
+	    pos = (word) (l->LICL_realRightMargin - just);
+	else
+	    pos = (word) (tab - w);
+	break;
+    }
+    pos = (word) (pos - left);
+    f = Field(l, field);
+    if (f->FI_position != pos) {
+	f->FI_position = pos;
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+    l->LICL_lineJustEnd = (word) (just + pos);
+    l->LICL_lastFieldJustWidth = just;
+    w = (EXT(v).TOCE_lineFlags & (LF_ENDS_IN_CR | LF_ENDS_IN_AUTO_HYPHEN)) ?
+	just : Rnd(W(&EXT(v).TOCE_fieldWidth));
+    l->LICL_lineEnd = (word) (pos + w);
+}
+
+/* SaveNewFieldValues */
+static void SaveNewFieldValues(LICL_vars *l, TOC_vars *v, word field)
+{
+    FieldInfo *f = Field(l, field);
+    word width = Rnd(W(&EXT(v).TOCE_fieldWidth));
+
+    if (f->FI_tab != l->LICL_tabReference ||
+	f->FI_width != width || f->FI_nChars != (word) EXT(v).TOCE_nChars)
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    f->FI_tab = l->LICL_tabReference;
+    f->FI_width = width;
+    f->FI_nChars = (word) EXT(v).TOCE_nChars;
+}
+
+/* ---------------------------------------------------------------------
+ * the line's height
+ * ------------------------------------------------------------------- */
+
+/* AdjustForLeading: leading is the distance between baselines: the
+ * line as high, its baseline that far below the previous line's */
+static void AdjustForLeading(LICL_vars *l, TOC_vars *v)
+{
+    word leading, prevDesc;
+    const LineInfo *prev;
+
+    if (l->LICL_line == l->LICL_regionTopLine)
+	return;
+    leading = (word) (PA(l).VTPA_leading + 4) >> 3;
+    if (l->LICL_calcFlags & CF_SAVE_RESULTS) {
+	word blo = leading;
+
+	prev = TL_LinePtr(l->LICL_object, l->LICL_line - 1, NULL);
+	if (prev->LI_flags & LF_ENDS_PARAGRAPH)
+	    blo = Rnd(((sdword) blo << 8) + PA(l).VTPA_spaceOnBottom);
+	prevDesc = (word) (Rnd(W(&prev->LI_hgt)) - Rnd(W(&prev->LI_blo)));
+	EXT(v).TOCE_lineBLO.WBF_int = (word) (blo - prevDesc);
+	EXT(v).TOCE_lineBLO.WBF_frac = 0;
+    }
+    EXT(v).TOCE_lineHeight.WBF_int = leading;
+    EXT(v).TOCE_lineHeight.WBF_frac = 0;
+}
+
+/* AdjustLineHeight: leading, line spacing, the space above and below
+ * the paragraph, a one line object's own height */
+static void AdjustLineHeight(LICL_vars *l, TOC_vars *v)
+{
+    optr o = l->LICL_object;
+    VisTextInstance *t;
+    word *extra;
+
+    if (PA(l).VTPA_leading)
+	AdjustForLeading(l, v);
+    if (PA(l).VTPA_lineSpacing != 0x0100)
+	SetW(&EXT(v).TOCE_lineHeight,
+	     (sdword) (((dword) W(&EXT(v).TOCE_lineHeight) *
+			PA(l).VTPA_lineSpacing) >> 8));
+    if (EXT(v).TOCE_lineFlags & LF_STARTS_PARAGRAPH) {
+	/* AdjustParagraphStart: no space above the first line of the
+	 * text, unless the object asks for some */
+	word add = 0;
+
+	if (l->LICL_line == l->LICL_regionTopLine) {
+	    extra = ObjVarFindData(o,
+		ATTR_VIS_TEXT_ADD_SPACE_ON_TOP_TO_FIRST_LINE_OF_REGION);
+	    add = extra ? *extra : 0;
+	}
+	if (add || l->LICL_line != l->LICL_regionTopLine) {
+	    sdword s = ((sdword) add << 8) + PA(l).VTPA_spaceOnTop;
+
+	    SetW(&EXT(v).TOCE_lineHeight, W(&EXT(v).TOCE_lineHeight) + s);
+	    SetW(&EXT(v).TOCE_lineBLO, W(&EXT(v).TOCE_lineBLO) + s);
+	}
+    }
+    if (EXT(v).TOCE_lineFlags & LF_ENDS_PARAGRAPH)
+	SetW(&EXT(v).TOCE_lineHeight, W(&EXT(v).TOCE_lineHeight) +
+	     PA(l).VTPA_spaceOnBottom);
+    /* AdjustSingleLineObject: the font's tallest, whatever is in it */
+    t = VT(o);
+    if (t->VTI_state & VTS_ONE_LINE) {
+	WBFixed *min = ObjVarFindData(o,
+				ATTR_VIS_TEXT_MINIMUM_SINGLE_LINE_HEIGHT);
+	sdword minH = min ? W(min) : 0, h;
+	GStateHandle g = VT(o)->VTI_gstate;
+
+	SetW(&EXT(v).TOCE_lineBLO, W(&EXT(v).TOCE_lineBLO) +
+	     (sdword) (GrFontMetrics(g, GFMI_ABOVE_BOX) >> 8));
+	h = (sdword) (GrFontMetrics(g, GFMI_MAX_ADJUSTED_HEIGHT) >> 8);
+	SetW(&EXT(v).TOCE_lineHeight, h < minH ? minH : h);
+    }
+    extra = ObjVarFindData(o, ATTR_VIS_TEXT_ADD_SPACE_TO_ALL_LINES);
+    if (extra) {
+	EXT(v).TOCE_lineHeight.WBF_int += *extra;
+	EXT(v).TOCE_lineBLO.WBF_int += *extra;
+    }
+    /* a text too tall: no more of it */
+    if ((word) (l->LICL_lineBottom.WBF_int +
+		EXT(v).TOCE_lineHeight.WBF_int) > 32700) {
+	SetW(&EXT(v).TOCE_lineHeight, 0);
+	SetW(&EXT(v).TOCE_lineBLO, 0);
+    }
+}
+
+/*
+ * HandleJustification: the line was calculated left justified: the
+ * adjustment for a centered or right justified one, the padding of
+ * the spaces for a fully justified one (the last field as much wider)
+ */
+static void HandleJustification(LICL_vars *l, TOC_vars *v, word fields)
+{
+    LineInfo *li;
+    FieldInfo *last;
+    word end, left = LineLeft(l, v), just = J_LEFT;
+    sword adj = 0;
+    sdword pad = 0;			/* 1/256 */
+
+    if (!(l->LICL_calcFlags & CF_SAVE_RESULTS))
+	return;
+    last = Field(l, (word) (fields - 1));
+    end = (word) (last->FI_position + left + l->LICL_lastFieldJustWidth);
+    if ((sword) (l->LICL_realRightMargin - end) > 0)
+	just = (PA(l).VTPA_attributes & VTPAA_JUSTIFICATION) >>
+	       VTPAA_JUSTIFICATION_OFFSET;
+    switch (just) {
+    case J_RIGHT:
+	adj = (sword) (l->LICL_realRightMargin - end);
+	break;
+    case J_CENTER:
+	adj = (sword) (l->LICL_realRightMargin - end) >> 1;
+	break;
+    case J_FULL:
+	if (!(EXT(v).TOCE_lineFlags & LF_ENDS_PARAGRAPH) &&
+	    EXT(v).TOCE_nSpaces) {
+	    dword p16;			/* 1/65536 */
+	    word n = (word) (EXT(v).TOCE_nSpaces +
+			     EXT(v).TOCE_nExtraSpaces), width;
+
+	    l->LICL_lineJustEnd = (word) (l->LICL_realRightMargin - left);
+	    p16 = ((dword) (word) (l->LICL_realRightMargin - end) << 16) /
+		  (word) EXT(v).TOCE_nSpaces;
+	    width = (word) ((p16 >> 16) * n +
+			    (((p16 & 0xffff) * n + 0x8000) >> 16) +
+			    last->FI_width);
+	    if (last->FI_width != width) {
+		last->FI_width = width;
+		l->LICL_calcFlags |= CF_LINE_CHANGED;
+	    }
+	    pad = (sdword) (p16 >> 8);
+	}
+	break;
+    }
+    li = Line(l);
+    if (W(&li->LI_spacePad) != pad) {
+	SetW(&li->LI_spacePad, pad);
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+    if (li->LI_adjustment != (word) (left + adj)) {
+	li->LI_adjustment = (word) (left + adj);
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+}
+
+/* CheckForceDraw: a line the change touches is drawn */
+static void CheckForceDraw(LICL_vars *l, TOC_vars *v)
+{
+    dword cs = l->LICL_startPos, ce = l->LICL_range.VTR_end;
+    dword ls = l->LICL_lineStart, le = l->LICL_range.VTR_start;
+
+    if ((ls < cs && cs <= le) || (ls < ce && ce <= le) ||
+	(cs < ls && ls <= ce) || (cs < le && le <= ce) ||
+	(cs <= ls && ce >= le) || (ls <= cs && le >= ce))
+	EXT(v).TOCE_lineFlags |= LF_NEEDS_DRAW;
+}
+
+/* SaveNewLineValues: height, baseline, flags (a small object has no
+ * columns or sections: their breaks are carriage returns) */
+static void SaveNewLineValues(LICL_vars *l, TOC_vars *v)
+{
+    LineInfo *li = Line(l);
+    word flags = EXT(v).TOCE_lineFlags;
+    sdword d = W(&EXT(v).TOCE_lineHeight) - W(&li->LI_hgt);
+
+    if (d) {
+	l->LICL_insertedSpace += d;
+	li->LI_hgt = EXT(v).TOCE_lineHeight;
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+    if (W(&li->LI_blo) != W(&EXT(v).TOCE_lineBLO)) {
+	li->LI_blo = EXT(v).TOCE_lineBLO;
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+    if (flags & (LF_ENDS_IN_COLUMN_BREAK | LF_ENDS_IN_SECTION_BREAK)) {
+	flags &= ~(LF_ENDS_IN_COLUMN_BREAK | LF_ENDS_IN_SECTION_BREAK);
+	flags |= LF_ENDS_IN_CR;
+    }
+    /* SaveNewLineFlags: calculated now; to draw stays */
+    li->LI_flags &= ~LF_NEEDS_CALC;
+    if ((li->LI_flags & ~(LF_NEEDS_DRAW | LF_NEEDS_CALC)) != flags) {
+	li->LI_flags = flags | (li->LI_flags & LF_NEEDS_DRAW);
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+}
+
+/*
+ * CommonLineCalculate (TL_LineCalculate): the line LICL_line, starting
+ * at LICL_range.VTR_start, with the flags it starts with
+ * (LF_STARTS_PARAGRAPH); on return the start of the next line there,
+ * the line's flags, height and end in the LICL_vars, CF_LINE_CHANGED
+ * if anything of it changed (then it is marked to draw).
+ */
+void TL_LineCalculate(LICL_vars *l, LineFlags flags)
+{
+    optr o = l->LICL_object;
+    TOC_vars v;
+    word field = 0, old, *overflow;
+    LineInfo *li;
+    dword count;
+
+    memset(&v, 0, sizeof(v));
+    l->LICL_extStylePos = 0xffff;
+    v.TOCV_ext.TOCE_lineFlags = flags;
+    l->LICL_calcFlags &= ~CF_LINE_CHANGED;
+    v.TOCV_ext.TOCE_otherFlags = TOCOF_IS_FIRST_FIELD;
+    overflow = ObjVarFindData(o, ATTR_VIS_TEXT_WRAP_AFTER_OVERFLOW);
+    if (overflow) {
+	v.TOCV_ext.TOCE_otherFlags |= TOCOF_WRAP_AFTER_OVERFLOW;
+	v.TOCV_ext.TOCE_wrapAfterOverflowWidth =
+	    VarDataSizePtr(overflow) ? *overflow : 0;
+    }
+    l->LICL_lineStart = l->LICL_range.VTR_start;
+    l->LICL_oldLineHeight = Line(l)->LI_hgt;
+    old = TL_LineGetFieldCount(o, l->LICL_line);
+
+    for (;;) {
+	l->LICL_tabReference = RULER_TAB_TO_LINE_LEFT;
+	if (!FindFieldEnd(l, &v, field)) {
+	    /* the field went to the next line (never the first) */
+	    field--;
+	    break;
+	}
+	CalcFieldPosition(l, &v, field);
+	SaveNewFieldValues(l, &v, field);
+	l->LICL_range.VTR_start += (word) v.TOCV_ext.TOCE_nChars;
+	if (v.TOCV_ext.TOCE_flags & TOCF_LINE_TERMINATED)
+	    break;
+	/* AddFieldToLine */
+	field++;
+	if (field >= TL_LineGetFieldCount(o, l->LICL_line)) {
+	    TL_LineSetFieldCount(o, l->LICL_line, (word) (field + 1));
+	    l->LICL_calcFlags |= CF_LINE_CHANGED;
+	}
+	v.TOCV_ext.TOCE_otherFlags &= ~TOCOF_IS_FIRST_FIELD;
+    }
+    /* TruncateLineAtPosition */
+    if (TL_LineGetFieldCount(o, l->LICL_line) != (word) (field + 1)) {
+	TL_LineSetFieldCount(o, l->LICL_line, (word) (field + 1));
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+    (void) old;
+
+    l->LICL_lineFlags = v.TOCV_ext.TOCE_lineFlags;
+    AdjustLineHeight(l, &v);
+    HandleJustification(l, &v, (word) (field + 1));
+    l->LICL_oldLineFlags = Line(l)->LI_flags;
+    CheckForceDraw(l, &v);
+    /* the first line has none above it to interact with */
+    if (l->LICL_line == l->LICL_regionTopLine)
+	v.TOCV_ext.TOCE_lineFlags &= ~LF_INTERACTS_ABOVE;
+    SaveNewLineValues(l, &v);
+    li = Line(l);
+    l->LICL_lineFlags = li->LI_flags;
+    l->LICL_lineHeight = v.TOCV_ext.TOCE_lineHeight;
+    /* the line's end with the justification */
+    l->LICL_lineEnd = (word) (l->LICL_lineEnd + li->LI_adjustment);
+    if (li->LI_lineEnd != (word) (l->LICL_lineJustEnd +
+				  li->LI_adjustment)) {
+	li->LI_lineEnd = (word) (l->LICL_lineJustEnd + li->LI_adjustment);
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+    /* SaveNewLineCharCount */
+    count = l->LICL_range.VTR_start - l->LICL_lineStart;
+    if (TL_LineGetCharCount(li) != count) {
+	l->LICL_lineStartChange += (sdword) (TL_LineGetCharCount(li) -
+					     count);
+	TL_LineSetCharCount(li, count);
+	l->LICL_calcFlags |= CF_LINE_CHANGED;
+    }
+    if (l->LICL_calcFlags & (CF_LINE_CHANGED | CF_FORCE_CHANGED))
+	li->LI_flags |= LF_NEEDS_DRAW;
+}

@@ -66,6 +66,19 @@
 @extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN;
+/* Text/textGState.goc */
+@extern method VisTextClass, MSG_VIS_CREATE_CACHED_GSTATES;
+@extern method VisTextClass, MSG_VIS_DESTROY_CACHED_GSTATES;
+@extern method VisTextClass, MSG_VIS_RECREATE_CACHED_GSTATES;
+/* Text/textCalc.goc */
+@extern method VisTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
+@extern method VisTextClass, MSG_VIS_OPEN;
+@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_FROM_OFFSET;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS;
+/* Text/textMethodDraw.goc */
+@extern method VisTextClass, MSG_VIS_DRAW;
 
 /* VisTextInitialize */
 @method VisTextClass, MSG_META_INITIALIZE

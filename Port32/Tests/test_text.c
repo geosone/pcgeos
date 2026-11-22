@@ -11,13 +11,20 @@
  *   6. text from and to chunks and blocks;
  *   7. the maximum length;
  *   8. an object without a text, a new object, the instance data.
+ *   9. the character attribute;
+ *  10. the lines (the system is booted from a GEOS top, GTXTOP, for
+ *      Berkeley of USERDATA/FONT): word wrap, justification, a
+ *      carriage return, a tab.
  */
 #include "kernelC.h"
+#include "ghal.h"
 
 #include <stdio.h>
 #include <string.h>
 
-extern const unsigned char ui_geode[], text_geode[], textobj_geode[];
+extern const unsigned char ui_geode[], text_geode[], textobj_geode[],
+			   berkeley_fnt[];
+extern const unsigned long berkeley_fnt_size;
 extern const unsigned long ui_geode_size, text_geode_size,
 			   textobj_geode_size;
 
@@ -30,6 +37,7 @@ typedef struct {
     word	TOS_modified, TOS_notModified;
     word	TOS_empty, TOS_notEmpty;
     char	TOS_text[40];
+    word	TOS_line[16];
 } TOState;
 
 static int fails;
@@ -49,23 +57,62 @@ static void Check(int ok, int line, const char *what)
 
 #define GEODE	0x2340
 
-int main(void)
+static char top[260], sep = '/';
+
+/* a directory (no data) or a file of the GEOS top */
+static void Put(const char *rel, const void *data, unsigned long size)
+{
+    char path[300], *p;
+    ghal_file *f;
+    size_t done = 0;
+
+    snprintf(path, sizeof(path), "%s%c%s", top, sep, rel);
+    for (p = path; *p; p++)
+	if (*p == '/')
+	    *p = sep;
+    if (!size) {
+	ghal_fs_mkdir(path);
+	return;
+    }
+    CHECK(ghal_fs_open(path, GHAL_FS_WRITE | GHAL_FS_CREATE |
+				 GHAL_FS_TRUNCATE, &f) == GHAL_OK);
+    ghal_fs_write(f, data, size, &done);
+    CHECK(done == size);
+    ghal_fs_close(f);
+}
+
+int main(int argc, char **argv)
 {
     static const char *const text[] = {
 	"Hello, world!", "bye, world!?", "!!?bye!!", "abcdefgh", "bh",
-	"in aa blockin", "aXYde", "aXYde", "aXYde"
+	"in aa blockin", "aXYde", "aXYde", "aXYde", "Hi Hi Hi"
     };
     GeodeHandle app;
     GeodeLoadError e;
     TOState *st;
     void (*step)(word);
     struct { word callerID; optr ackOD; } dp = { 0, 0 };
+    char *slash;
     int i;
 
     setvbuf(stdout, NULL, _IONBF, 0);
+    (void) argc;
+    strncpy(top, argv[0], sizeof(top) - 8);
+    top[sizeof(top) - 8] = 0;
+    slash = strrchr(top, '/');
+    if (!slash || (strrchr(top, '\\') && strrchr(top, '\\') > slash))
+	slash = strrchr(top, '\\');
+    if (slash) {
+	sep = *slash;
+	strcpy(slash + 1, "GTXTOP");
+    } else
+	strcpy(top, "GTXTOP");
+    ghal_fs_mkdir(top);
+    Put("USERDATA", NULL, 0);
+    Put("USERDATA/FONT", NULL, 0);
+    Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
+    CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     kernelCurrentGeode = GEODE;
-    KernelThreadInit(PRIORITY_STANDARD);
-    KernelTimerInit();
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
     GeodeRegisterImage("text", text_geode, text_geode_size);
     GeodeRegisterImage("textobj", textobj_geode, textobj_geode_size);
@@ -82,12 +129,16 @@ int main(void)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 9; i++) {
+    for (i = 1; i <= 10; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);
 	CHECK(!strcmp(st->TOS_text, text[i - 1]));
     }
+    printf("lines:");
+    for (i = 0; i < 16; i++)
+	printf(" %u", st->TOS_line[i]);
+    printf("\n");
     printf("modified %u, not modified %u, empty %u, not empty %u\n",
 	   st->TOS_modified, st->TOS_notModified, st->TOS_empty,
 	   st->TOS_notEmpty);

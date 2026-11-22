@@ -1,0 +1,79 @@
+/*
+ * textGState.goc -- the gstate a text object calculates and draws with
+ * (after textGState.asm).
+ *
+ * VTI_gstate is made on first use and kept while anyone uses it
+ * (VTI_gsRefCount): of the object's window if it is on the screen
+ * (MSG_VIS_VUP_CREATE_GSTATE), else one with no window, which measures
+ * the same.
+ */
+@include "textInt.goh"
+
+@extern method VisTextClass, MSG_VIS_CREATE_CACHED_GSTATES;
+@extern method VisTextClass, MSG_VIS_DESTROY_CACHED_GSTATES;
+@extern method VisTextClass, MSG_VIS_RECREATE_CACHED_GSTATES;
+
+/* TextInitModeAndBorder */
+static void TextInitGState(GStateHandle g)
+{
+    GrSetTextMode(g, TM_DRAW_BASE, 0);
+    GrSetTextMaskSys(g, SDM_100);
+}
+
+void TextGStateCreate(optr o)
+{
+    VisTextInstance *t = VT(o);
+    GStateHandle g = NullHandle;
+
+    t->VTI_gsRefCount++;
+    if (t->VTI_gstate)
+	return;
+    if (((VisInstance *) t)->VI_attrs & VA_REALIZED)
+	g = @call o::MSG_VIS_VUP_CREATE_GSTATE();
+    if (!g)
+	g = GrCreateState(NullHandle);
+    TextInitGState(g);
+    t = VT(o);
+    t->VTI_gstate = g;
+    t->VTI_gstateRegion = (word) -1;
+}
+
+void TextGStateDestroy(optr o)
+{
+    VisTextInstance *t = VT(o);
+
+    t->VTI_gsRefCount--;
+    if (!(t->VTI_gsRefCount & GSRCAF_REF_COUNT)) {
+	GStateHandle g = t->VTI_gstate;
+
+	t->VTI_gstate = NullHandle;
+	if (g)
+	    GrDestroyState(g);
+    }
+}
+
+@extern method VisTextClass, MSG_VIS_CREATE_CACHED_GSTATES
+{
+    TextGStateCreate(oself);
+}
+
+@extern method VisTextClass, MSG_VIS_DESTROY_CACHED_GSTATES
+{
+    TextGStateDestroy(oself);
+}
+
+/* VisTextRecreateCachedGStates: the window changed: the gstate made
+ * anew for those who hold it */
+@extern method VisTextClass, MSG_VIS_RECREATE_CACHED_GSTATES
+{
+    VisTextInstance *t = VT(oself);
+    byte count = t->VTI_gsRefCount;
+
+    if (!t->VTI_gstate)
+	return;
+    GrDestroyState(t->VTI_gstate);
+    t->VTI_gstate = NullHandle;
+    t->VTI_gsRefCount &= ~GSRCAF_REF_COUNT;
+    TextGStateCreate(oself);
+    VT(oself)->VTI_gsRefCount = count;
+}

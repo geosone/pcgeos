@@ -33,6 +33,7 @@
 @include <Internal/SpecUI/olItemClass.goh>
 @include <Internal/SpecUI/olScrollListClass.goh>
 @include <Objects/gDListC.goh>
+@include <Objects/vTextC.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Internal/SpecUI/olPaneClass.goh>
 @include <Internal/SpecUI/olContentClass.goh>
@@ -82,6 +83,7 @@ typedef struct {
      * and the first item's number after scrolling to item 12 */
     word		UBS_dlist[4];
     short		UBS_glyph[5];
+    word		UBS_text[6];
 } UBState;
 
 UBState ubState;
@@ -240,6 +242,16 @@ UBState ubState;
 }
 @object VisContentClass UBContent = {
     VCNI_attrs = VCNA_VIEW_DOC_BOUNDS_SET_MANUALLY;
+    VCI_comp = @UBText;
+    VCI_geoAttrs = VCGA_CUSTOM_MANAGE_CHILDREN;
+}
+/* in the view's document: a text object of the text library, placed
+ * by hand (its geometry is valid as it is), 180 wide: two lines of
+ * Berkeley 12 */
+@object VisTextClass UBText = {
+    VI_bounds = {4, 2, 184, 36};
+    VI_optFlags = @default & ~(VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH);
+    VTI_text = "Text in C: the lines of a VisText, wrapped";
 }
 /* in Doc 2: a radio group (an exclusive one) and check boxes */
 @object GenItemGroupClass UBRadio = {
@@ -1757,6 +1769,43 @@ static Rectangle ScreenBounds(WindowHandle w)
 	@call UBSep::MSG_GEN_SET_ENABLED(VUM_NOW);
 	VisData(@UBSep, &g, sizeof(g));
 	UBCHECK(g.VI_attrs & VA_FULLY_ENABLED);
+	break;
+    }
+    case 40: {
+	/* the text object in the view's document: its lines calculated
+	 * when its geometry became valid (two of Berkeley 12), drawn
+	 * with the document; a change of the text drawn at once */
+	VisTextInstance t;
+	VisTextGetLineOffsetAndFlagsParameters op;
+
+	{
+	    GenViewInstance gv;
+
+	    ObjLockObjBlock(OptrToHandle(@UBView));
+	    gv = *(GenViewInstance *) ObjDerefGen(@UBView);
+	    MemUnlock(OptrToHandle(@UBView));
+	    ubState.UBS_text[5] = (word) gv.GVI_origin.PDF_x.DWF_int;
+	}
+	/* (the view was scrolled to the right before) */
+	@call UBView::MSG_GEN_VIEW_SET_ORIGIN(0, 0);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text[0] = t.VTI_lines;
+	ubState.UBS_text[1] = t.VTI_height.WBF_int;
+	ubState.UBS_text[2] = t.VI_attrs;
+	UBCHECK(t.VTI_lines != 0 && (t.VI_attrs & VA_REALIZED));
+	UBCHECK(t.VTI_height.WBF_int == 30 && !t.VTI_gstate);
+	op.VTGLOAFP_line = 1;
+	UBCHECK(!@call UBText::MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS(&op));
+	ubState.UBS_text[3] = (word) op.VTGLOAFP_offset;
+	UBCHECK(op.VTGLOAFP_offset > 20 && op.VTGLOAFP_offset < 45 &&
+		!(op.VTGLOAFP_flags & LF_NEEDS_DRAW));
+	@call UBText::MSG_VIS_TEXT_APPEND_PTR(" :-)", 0);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text[4] = t.VTI_height.WBF_int;
+	UBCHECK(t.VTI_height.WBF_int == 30 && !t.VTI_gstate);
+	op.VTGLOAFP_line = 1;
+	UBCHECK(!@call UBText::MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS(&op));
+	UBCHECK(!(op.VTGLOAFP_flags & LF_NEEDS_DRAW));
 	break;
     }
     }

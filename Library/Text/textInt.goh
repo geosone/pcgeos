@@ -80,4 +80,99 @@ extern void TextMarkNotUserModified(optr o);
 /* Text/textUtils.goc: a message to VTI_output with the object */
 extern void SendToTextOutput(optr o, Message msg);
 
+/* TextAttr/taParaAttr.goc: the paragraph attribute; the attributes to
+ * draw with */
+extern void TA_MapDefaultParaAttr(VisTextDefaultParaAttr def,
+				  VisTextParaAttr *a);
+extern void TA_GetSingleParaAttr(optr o, VisTextMaxParaAttr *a);
+extern void TA_GetParaAttrForPosition(optr o, dword pos,
+				      VisTextMaxParaAttr *a, dword *start,
+				      dword *end);
+extern VisTextExtendedStyles TA_FillTextAttrForDraw(optr o, dword pos,
+						    TextAttr *ta,
+						    dword *count);
+
+/* a one line object is as wide as a paragraph may be */
+#define VIS_TEXT_ONE_LINE_RIGHT_MARGIN	4000
+#define TA_TYPE				0x03	/* TabAttributes: TabType */
+
+/* Text/textGState.goc: the gstate the object calculates and draws
+ * with (VTI_gstate), counted */
+extern void TextGStateCreate(optr o);
+extern void TextGStateDestroy(optr o);
+
+/* TextLine/tlSmallStorage.goc: the lines */
+#define TL_LINE_SIZE(fields) \
+	(offsetof(LineInfo, LI_firstField) + (fields) * sizeof(FieldInfo))
+extern void TL_LineStorageCreate(optr o);
+extern void TL_LineStorageDestroy(optr o);
+extern dword TL_LineGetCount(optr o);
+extern LineInfo *TL_LinePtr(optr o, dword line, word *size);
+extern void TL_LineInsert(optr o, dword line, word count);
+extern void TL_LineDelete(optr o, dword line, word count);
+extern void TL_LineSetFieldCount(optr o, dword line, word fields);
+extern word TL_LineGetFieldCount(optr o, dword line);
+extern dword TL_LineGetCharCount(const LineInfo *li);
+extern void TL_LineSetCharCount(LineInfo *li, dword count);
+extern dword TL_LineToOffsetStart(optr o, dword line);
+extern dword TL_LineFromOffset(optr o, dword offset, Boolean first,
+			       dword *start);
+extern WBFixed TL_LineGetTop(optr o, dword line);
+
+/* the state of a calculation (texttext.def) */
+typedef ByteFlags CalcFlags;
+#define CF_SAVE_RESULTS		0x80
+#define CF_LINE_CHANGED		0x40	/* the line calculated changed */
+#define CF_LINE_SHORTER		0x20
+#define CF_TEXT_LOCKED		0x10
+#define CF_FORCE_CHANGED	0x08
+
+typedef struct {
+    optr		LICL_object;
+    VisTextRange	LICL_range;	/* start: the line to calculate
+					 * (then the next); end: of the
+					 * change */
+    dword		LICL_startPos;	/* the start of the change */
+    CalcFlags		LICL_calcFlags;
+    dword		LICL_line;
+    dword		LICL_regionTopLine;
+    WBFixed		LICL_lineBottom; /* the top of the line */
+    WBFixed		LICL_lineHeight;
+    WBFixed		LICL_oldLineHeight;
+    dword		LICL_lineStart;
+    sdword		LICL_lineStartChange;
+    sdword		LICL_insertedSpace;	/* 1/256 */
+    LineFlags		LICL_lineFlags;
+    LineFlags		LICL_oldLineFlags;
+    word		LICL_lineEnd;
+    word		LICL_lineJustEnd;
+    word		LICL_lastFieldJustWidth;
+    byte		LICL_lastFieldTabType;
+    TabReference	LICL_tabReference;
+    word		LICL_extStylePos;
+    word		LICL_field;	/* the field being measured */
+    word		LICL_realRightMargin;
+    dword		LICL_paraAttrStart;
+    dword		LICL_paraAttrEnd;
+    VisTextMaxParaAttr	LICL_theParaAttr;
+} LICL_vars;
+
+/* TextLine/tlCommonCalc.goc */
+extern void TL_LineCalculate(LICL_vars *l, LineFlags flags);
+extern word TL_TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
+					   word endPrevField,
+					   TabReference ref, byte *attr);
+
+/* Text/textCalc.goc: the lines calculated again */
+extern void T_GetNewParaAttr(LICL_vars *l, dword pos);
+extern void TextCompleteRecalc(optr o);
+extern void TextRecalc(optr o, dword start, dword inserted, dword deleted);
+
+/* Text/textMethodDraw.goc */
+#define TCBF_MSG_DRAW		0x80	/* answering MSG_VIS_DRAW */
+#define TCBF_DRAW_ALL_LINES	0x40
+#define TCBF_PRINT		0x20
+extern void TextDraw(optr o, byte flags, Boolean onlyMarked);
+extern void TextScreenUpdate(optr o);
+
 #endif

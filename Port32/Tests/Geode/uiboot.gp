@@ -16,6 +16,7 @@ appobj UBApp
 library geos
 library ui
 library motif
+library text
 resource UBAppObjects object
 export ubState
 export UBStep

@@ -6246,9 +6246,56 @@ the modules of the asm; what is there:
   `TRT_SEGMENT_CHUNK`. `MSG_VIS_TEXT_GET_TEXT_RANGE` takes its reference
   by value: a chunk or block it allocates is not seen by the caller
   (use `MSG_VIS_TEXT_GET_ALL_OPTR`, `MSG_VIS_TEXT_GET_ALL_BLOCK`).
-- **Not yet.** Everything on a screen: attribute runs, tokens and
-  styles, the paragraph attribute, lines and
-  regions, drawing, the cursor and the highlight, mouse and keyboard;
+- **The paragraph attribute** (`TextAttr/taParaAttr.goc`): one for the
+  whole object so far, a default record (`VisTextDefaultParaAttr`,
+  `VTSF_DEFAULT_PARA_ATTR`) or the chunk of a `VisTextParaAttr` with
+  its tabs. For a calculation it is made physical: margins and tabs in
+  pixels from the left edge of the text (inside `VTI_lrMargin`), the
+  right margin a position; the text is never narrower than
+  `VIS_TEXT_MIN_TEXT_FIELD_WIDTH`, a one line object as wide as a
+  paragraph may be. There are no messages to change it yet.
+- **Measuring in the kernel** (`Library/Kernel/Graphics/
+  graphicsTextObject.c`, `graphics.h`): `GrTextObjCalc(gstate,
+  TOC_vars *)` fits a field (the text up to a tab or the end of the
+  line) into `TOCE_areaToFill` and says where it breaks: at a tab, the
+  null, a carriage return, else at the last word start that fits, a
+  hyphen, or the character that overflowed; with the line's height and
+  baseline. `GrTextPosition` finds the character nearest a pixel
+  position. The structures are C ones; the callbacks are C functions
+  that get the structure: style (`TextMetricStyles *`, offset,
+  `const char **text`, returns the count), graphic, hyphen, tab
+  (returns TRUE for no tab stop), height. Not yet: kinsoku, DBCS,
+  character justification.
+- **Lines** (`TextLine/tlSmallStorage.goc`, `tlCommonCalc.goc`): the
+  chunk array `VTI_lines` of `LineInfo`, each with one `FieldInfo` per
+  tab and one more. A line is calculated field by field; fields are
+  placed by their tab (ruler tabs, the default tabs, a tab's own
+  width; left, center, right, anchored); the height adjusted for
+  leading, line spacing, the space around paragraphs, a one line
+  object; the line justified (`LI_adjustment`, `LI_spacePad`). A line
+  is named by its number; `TL_LineCalculate(LICL_vars *, flags)`.
+- **Calculation** (`Text/textCalc.goc`): the lines exist once the
+  geometry is valid (`MSG_VIS_NOTIFY_GEOMETRY_VALID`, or
+  `MSG_VIS_OPEN` for an object placed by hand whose geometry is not
+  invalid). Every replacement calculates them again
+  (`TextRecalc(o, start, inserted, deleted)`): all lines of the small
+  object, not only those from the change on; a line is marked
+  `LF_NEEDS_DRAW` if it changed, the change touches it, a line above
+  changed height or other text came to stand in it. `VTI_height` is
+  the sum. `MSG_VIS_TEXT_GET_LINE_INFO`, `..._GET_LINE_FROM_OFFSET`,
+  `..._GET_LINE_OFFSET_AND_FLAGS`, `MSG_VIS_TEXT_RECALC_AND_DRAW`.
+- **Drawing** (`Text/textGState.goc`, `textMethodDraw.goc`): the
+  cached gstate (`VTI_gstate`, counted; of the window when realized).
+  `MSG_VIS_DRAW` draws the lines in the mask with the gstate passed,
+  moved inside the margins and clipped there: each line on the wash
+  color (unless `VTF_TRANSPARENT`), field by field with
+  `GrDrawTextField`. After a calculation the marked lines are drawn at
+  once (`TextScreenUpdate`).
+- **Not yet.** Attribute runs, tokens and styles, messages for the
+  paragraph attribute, borders and paragraph backgrounds, tab leaders,
+  extended styles, hyphenation, graphics, geometry
+  (`MSG_VIS_RECALC_SIZE`, height notification), scrolling of a one
+  line object, the cursor and the highlight, mouse and keyboard;
   filters, undo, suspension, the notifications for the controllers,
   large objects (`VisLargeTextClass`, huge arrays), references to VM
   blocks, DB items and huge arrays, search and spelling, the
@@ -6261,7 +6308,12 @@ the modules of the asm; what is there:
   the user and not, deleted and filled again, ranges read, the
   selection set and deleted, text from and to chunks and blocks, the
   maximum length, the instance data, the character attribute as a
-  record and as a chunk.
+  record and as a chunk; the lines (booted with Berkeley): word wrap,
+  right, centered and full justification, a carriage return, a tab,
+  lines going away. ctest `kernel.draw` measures fields
+  (`GrTextObjCalc`, `GrTextPosition`); `library.ui.boot` has a text
+  object in a view's document (step 40), drawn with it and after a
+  change.
 
 ## 14. Open
 

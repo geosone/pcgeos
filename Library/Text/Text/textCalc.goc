@@ -1,0 +1,178 @@
+/*
+ * textCalc.goc -- the lines of a text object calculated again (after
+ * textCalc.asm and what textCalcObject.asm does for a small object;
+ * VisTextNotifyGeometryValid of textMethodInstance.asm).
+ *
+ * An object has lines once its geometry is valid (it knows how wide it
+ * is): MSG_VIS_NOTIFY_GEOMETRY_VALID makes them and calculates all the
+ * text.  A change of the text calculates them again: each line from
+ * where the one before ended, on a paragraph's first line if that one
+ * ended a paragraph, until the line with the null; lines left over are
+ * deleted.  A line is marked to draw (LF_NEEDS_DRAW) if anything of it
+ * changed, the change touches it, a line above it changed its height,
+ * or other text came to stand in it.  VTI_height is the sum of the
+ * lines.
+ *
+ * Port32 (Port32/ABI.md section 13z): a small object has one region,
+ * so nothing ripples between regions, and the lines are few: all of
+ * them are calculated, not only those from the change on (the asm
+ * stops where the lines meet the old ones again).
+ */
+@include "textInt.goh"
+
+@extern method VisTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
+@extern method VisTextClass, MSG_VIS_OPEN;
+@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_FROM_OFFSET;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS;
+
+/* T_GetNewParaAttr: the paragraph attribute for a position, the
+ * margin the lines end at */
+void T_GetNewParaAttr(LICL_vars *l, dword pos)
+{
+    TA_GetParaAttrForPosition(l->LICL_object, pos, &l->LICL_theParaAttr,
+			      &l->LICL_paraAttrStart, &l->LICL_paraAttrEnd);
+    l->LICL_realRightMargin =
+	l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_rightMargin;
+}
+
+/*
+ * TextRecalc: the lines again after a change: at start, inserted
+ * characters came for deleted ones
+ */
+void TextRecalc(optr o, dword start, dword inserted, dword deleted)
+{
+    LICL_vars l;
+    LineFlags prev = LF_ENDS_PARAGRAPH;
+    dword line, oldStart = 0, n;
+    sdword bottom = 0;
+    VisTextInstance *t;
+
+    if (!VT(o)->VTI_lines)
+	return;				/* no geometry yet */
+    ObjMarkDirty(o);
+    TextGStateCreate(o);
+    memset(&l, 0, sizeof(l));
+    l.LICL_object = o;
+    l.LICL_calcFlags = CF_SAVE_RESULTS;
+    l.LICL_startPos = start;
+    l.LICL_range.VTR_end = start + inserted;
+    if (l.LICL_range.VTR_end < start)
+	l.LICL_range.VTR_end = TEXT_ADDRESS_PAST_END;
+    T_GetNewParaAttr(&l, 0);
+    for (line = 0;; line++) {
+	dword oldCount = 0;
+
+	if (line >= TL_LineGetCount(o)) {
+	    TL_LineInsert(o, line, 1);
+	    l.LICL_calcFlags |= CF_FORCE_CHANGED;
+	} else
+	    oldCount = TL_LineGetCharCount(TL_LinePtr(o, line, NULL));
+	/* a line below a change of height, or other text in it */
+	if (l.LICL_insertedSpace ||
+	    (oldStart >= start + deleted &&
+	     oldStart + inserted - deleted != l.LICL_range.VTR_start))
+	    l.LICL_calcFlags |= CF_FORCE_CHANGED;
+	oldStart += oldCount;
+	l.LICL_line = line;
+	l.LICL_lineHeight.WBF_int = 0;
+	l.LICL_lineHeight.WBF_frac = 0;
+	TL_LineCalculate(&l, (prev & LF_ENDS_PARAGRAPH) ?
+			     LF_STARTS_PARAGRAPH : 0);
+	l.LICL_calcFlags &= ~CF_FORCE_CHANGED;
+	bottom += ((sdword) l.LICL_lineHeight.WBF_int << 8) +
+		  l.LICL_lineHeight.WBF_frac;
+	l.LICL_lineBottom.WBF_int = (word) (bottom >> 8);
+	l.LICL_lineBottom.WBF_frac = (byte) bottom;
+	prev = l.LICL_lineFlags;
+	if (prev & LF_ENDS_IN_NULL)
+	    break;
+    }
+    /* TruncateLines */
+    n = TL_LineGetCount(o);
+    if (n > line + 1)
+	TL_LineDelete(o, line + 1, (word) (n - line - 1));
+    t = VT(o);
+    t->VTI_height = l.LICL_lineBottom;
+    TextGStateDestroy(o);
+}
+
+/* TextCompleteRecalc: all of it, every line to draw */
+void TextCompleteRecalc(optr o)
+{
+    TextRecalc(o, 0, TEXT_ADDRESS_PAST_END, TEXT_ADDRESS_PAST_END);
+}
+
+/* VisTextNotifyGeometryValid: the bounds are valid: the lines */
+@extern method VisTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
+{
+    @callsuper();
+    pself = VT(oself);
+    if (!pself->VTI_lines) {
+	pself->VTI_height.WBF_int = 0;
+	pself->VTI_height.WBF_frac = 0;
+	TL_LineStorageCreate(oself);
+    }
+    TextCompleteRecalc(oself);
+}
+
+/*
+ * VisTextOpen (textMethodInstance.asm): on the screen: an object whose
+ * geometry is valid but has no lines yet (one placed by hand, not by
+ * the geometry manager) gets them now.  (Not yet: the cursor.)
+ */
+@extern method VisTextClass, MSG_VIS_OPEN
+{
+    @callsuper();
+    pself = VT(oself);
+    pself->VTI_timerHandle = NullHandle;
+    pself->VTI_intSelFlags &= ~(VTISF_CURSOR_ON | VTISF_DOING_SELECTION |
+				VTISF_DOING_DRAG_SELECTION);
+    if (!(pself->VI_optFlags & VOF_GEOMETRY_INVALID) && !pself->VTI_lines)
+	@call oself::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW
+{
+    TextCompleteRecalc(oself);
+    TextScreenUpdate(oself);
+}
+
+/* VisTextGetLineInfo: a line with its fields into a buffer (as much
+ * as fits); TRUE if there is no such line */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO
+{
+    word size;
+    const LineInfo *li;
+
+    retValue->VTGLIRV_unused = 0;
+    retValue->VTGLIRV_byteCount = 0;
+    if (!pself->VTI_lines || vtglip->VTGLIP_line >= TL_LineGetCount(oself))
+	return TRUE;
+    li = TL_LinePtr(oself, vtglip->VTGLIP_line, &size);
+    if (size > vtglip->VTGLIP_bsize)
+	size = vtglip->VTGLIP_bsize;
+    retValue->VTGLIRV_byteCount = size;
+    memcpy(vtglip->VTGLIP_buffer, li, size);
+    return FALSE;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_FROM_OFFSET
+{
+    if (!pself->VTI_lines)
+	return 0;
+    return TL_LineFromOffset(oself, offset, FALSE, NULL);
+}
+
+/* VisTextGetLineOffsetAndFlags: TRUE if there is no such line */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS
+{
+    if (!pself->VTI_lines || params->VTGLOAFP_line >= TL_LineGetCount(oself))
+	return TRUE;
+    params->VTGLOAFP_offset = TL_LineToOffsetStart(oself,
+						   params->VTGLOAFP_line);
+    params->VTGLOAFP_flags = TL_LinePtr(oself, params->VTGLOAFP_line,
+					NULL)->LI_flags;
+    return FALSE;
+}
