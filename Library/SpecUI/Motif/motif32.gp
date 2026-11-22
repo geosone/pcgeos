@@ -64,13 +64,11 @@ export OLBuildValue
 #
 # exported routines to do specific UI stuff
 #
-skip 1
-# SpecGetTextKbdBindings
+export SpecGetTextKbdBindings
 skip 1
 # SpecGetTextPointerImage
 export SpecGetDisplayScheme
-skip 1
-# SpecDrawTextCursor
+export SpecDrawTextCursor
 skip 1
 # SpecGetDocControlOptions
 export SpecGetWindowOptions

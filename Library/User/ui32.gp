@@ -169,6 +169,8 @@ export UserGetKbdAcceleratorMode
 export VisGetSpecificVisObject
 export GenSetupTrackingArgs
 export GenReturnTrackingArgs
+export UserCheckAcceleratorChar
+export UserCheckInsertableCtrlChar
 
 resource ApplicationUI object
 resource SystemFieldUI object

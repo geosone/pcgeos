@@ -275,6 +275,9 @@ extern word screenWidth, screenHeight;	/* CWin/cwinScreen.goc */
 /* CMain/cmainCode.goc: the field's initialization of the specific UI;
  * the display scheme and options for the UI */
 extern void SpecGetDisplayScheme(DisplayScheme *ds);
+extern const KeyboardShortcut *SpecGetTextKbdBindings(word *count,
+						      const word **functions);
+extern void SpecDrawTextCursor(optr o, GStateHandle gstate);
 extern UIWindowOptions SpecGetWindowOptions(void);
 extern UIExpressOptions SpecGetExpressOptions(void);
 extern void SpecInitWindowPreferences(void);

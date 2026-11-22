@@ -17,6 +17,10 @@
  * given; TextScreenUpdate those a calculation marked (LF_NEEDS_DRAW),
  * at once, with the object's own gstate.
  *
+ * After the lines MSG_VIS_DRAW shows the selection again (the cursor,
+ * the inverted range); TextScreenUpdate's callers take it away before
+ * the change and show it afterwards (EditUnHilite, EditHilite).
+ *
  * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: the
  * paragraph's own background and borders, tab leaders, extended
  * styles, graphics, hidden characters shown, right to left.
@@ -44,7 +48,7 @@ static void TextSize(optr o, sword *width, sword *height)
 
 /* SmallRegionTransformGState, SmallSetClip: the gstate at the text's
  * top left, clipped to the text unless printing */
-static void TR_RegionTransformGState(optr o, Boolean print)
+void TextGStateToText(optr o, Boolean print)
 {
     VisTextInstance *t = VT(o);
     VisInstance *v = (VisInstance *) t;
@@ -193,7 +197,7 @@ void TextDraw(optr o, byte flags, Boolean onlyMarked)
     if (!t->VTI_lines || !g)
 	return;				/* TextCheckCanDraw */
     GrSaveState(g);
-    TR_RegionTransformGState(o, (flags & TCBF_PRINT) != 0);
+    TextGStateToText(o, (flags & TCBF_PRINT) != 0);
     if (!all && !onlyMarked)
 	GrGetMaskBounds(g, &mask);
     n = TL_LineGetCount(o);
@@ -261,6 +265,18 @@ void TextScreenUpdate(optr o)
     GrSetTextMode(gstate, TM_DRAW_BASE, 0);
     GrSetTextMaskSys(gstate, SDM_100);
     TextDraw(oself, flags, FALSE);
+    if (!(drawFlags & DF_PRINT)) {
+	/* the selection over the text just drawn: the cursor if it is
+	 * on, the range of a selectable object */
+	dword start, end;
+
+	TSL_SelectGetSelection(oself, &start, &end);
+	if (start == end)
+	    TSL_CursorDrawIfOn(oself);
+	else if ((VT(oself)->VTI_state & VTS_SELECTABLE) &&
+		 TextCheckCanDraw(oself))
+	    TSL_DrawHilite(oself, start, end);
+    }
     pself = VT(oself);
     pself->VTI_gstateRegion = region;
     pself->VTI_gsRefCount = count;

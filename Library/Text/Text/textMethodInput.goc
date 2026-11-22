@@ -1,0 +1,121 @@
+/*
+ * textMethodInput.goc -- the keyboard (after textMethodInput.asm):
+ * MSG_META_KBD_CHAR.
+ *
+ * A press is either text, inserted in place of the selection as the
+ * user's change, or a key the specific UI binds to a function
+ * (SPIR_GET_TEXT_KBD_BINDINGS: the shortcuts, and for each the
+ * VisTextKeyFunction); what is neither goes up the visible tree
+ * (MSG_META_FUP_KBD_CHAR), as do releases of UI keys, Alt and F10.  A
+ * one line object reports Enter, an object without tabs Tab
+ * (MSG_META_TEXT_CR_FILTERED, MSG_META_TEXT_TAB_FILTERED) and passes
+ * them up.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: the FEP, smart quotes,
+ * overstrike mode, the error beep, right to left.
+ */
+@include "textInt.goh"
+#include <Internal/specUI.h>
+
+@extern method VisTextClass, MSG_META_KBD_CHAR;
+
+typedef const KeyboardShortcut *SpecGetTextKbdBindingsRoutine(
+				word *count, const word **functions);
+
+/* VTFInsert: a character in place of the selection; FALSE if the
+ * object is not editable */
+static Boolean Insert(optr o, char c)
+{
+    VisTextReplaceParameters p;
+
+    if (!(VT(o)->VTI_state & VTS_EDITABLE))
+	return FALSE;
+    memset(&p, 0, sizeof(p));
+    p.VTRP_range.VTR_start = VIS_TEXT_RANGE_SELECTION;
+    p.VTRP_insCount = 1;
+    p.VTRP_flags = VTRF_FILTER | VTRF_KEYBOARD_INPUT |
+		   VTRF_USER_MODIFICATION;
+    p.VTRP_textReference.TR_type = TRT_POINTER;
+    p.VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer = &c;
+    (void) VisTextReplace(o, &p);
+    return TRUE;
+}
+
+/* CallKeyBinding: TRUE if the key was text or bound to a function */
+static Boolean CallKeyBinding(optr o, word character, word flags,
+			      word state)
+{
+    SpecGetTextKbdBindingsRoutine *r;
+    const KeyboardShortcut *table;
+    const word *functions;
+    word count, i;
+
+    if (character != ((VC_ISCTRL << 8) | VC_BACKSPACE) &&
+	(!UserCheckAcceleratorChar(character, flags, state) ||
+	 UserCheckInsertableCtrlChar(character, flags, state)))
+	return Insert(o, (char) character);
+    r = (SpecGetTextKbdBindingsRoutine *)
+	ProcGetLibraryEntry(UserGetSpecificUI(), SPIR_GET_TEXT_KBD_BINDINGS);
+    if (!r)
+	return FALSE;
+    table = r(&count, &functions);
+    i = FlowCheckKbdShortcut((KeyboardShortcut *) table, count, character,
+			     flags, state);
+    if (i == (word) -1)
+	return FALSE;
+    i /= sizeof(KeyboardShortcut);	/* (the entry's offset) */
+    /* the moves by lines are not for a one line object */
+    if ((VT(o)->VTI_state & VTS_ONE_LINE) &&
+	functions[i] <= VTKF_SELECT_ADJUST_BACKWARD_LINE)
+	return FALSE;
+    return TSL_HandleKbdShortcut(o, (VisTextKeyFunction) functions[i]);
+}
+
+static void Filtered(optr o, Message msg, word character, word flags,
+		     word state)
+{
+    MetaTextFilteredParameters p;
+
+    p.MTFP_charFlags = (CharFlags) flags;
+    p.MTFP_shiftState = (ShiftState) (flags >> 8);
+    p.MTFP_toggleState = (ToggleState) state;
+    p.MTFP_scanCode = (byte) (state >> 8);
+    if (msg == MSG_META_TEXT_CR_FILTERED)
+	@call o::MSG_META_TEXT_CR_FILTERED(character, p);
+    else
+	@call o::MSG_META_TEXT_TAB_FILTERED(character, p);
+}
+
+/* VisTextKbd */
+@extern method VisTextClass, MSG_META_KBD_CHAR
+{
+    Boolean up = TRUE;
+
+    TextGStateCreate(oself);
+    pself = VT(oself);
+    if (character == ((CS_CONTROL << 8) | VC_LALT) ||
+	character == ((CS_CONTROL << 8) | VC_RALT) ||
+	character == ((CS_CONTROL << 8) | VC_F10))
+	;
+    else if (flags & CF_RELEASE)
+	up = (byte) character >= 0x80;
+    else if (flags & (CF_STATE_KEY | CF_TEMP_ACCENT))
+	;
+    else if ((pself->VTI_state & VTS_ONE_LINE) && (byte) character == C_CR)
+	Filtered(oself, MSG_META_TEXT_CR_FILTERED, character, flags, state);
+    else if ((byte) character == C_TAB &&
+	     (pself->VTI_filters & VTF_NO_TABS))
+	Filtered(oself, MSG_META_TEXT_TAB_FILTERED, character, flags, state);
+    else if (pself->VTI_intSelFlags & VTISF_DOING_SELECTION)
+	up = FALSE;
+    else
+	up = !CallKeyBinding(oself, character, flags, state);
+    if (up) {
+	optr parent = VisFindParent(oself);
+
+	if (parent)
+	    (void) @call parent::MSG_META_FUP_KBD_CHAR(character, flags,
+						       state);
+    }
+    TextGStateDestroy(oself);
+}

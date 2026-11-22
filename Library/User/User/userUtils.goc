@@ -326,3 +326,41 @@ cannotInit:
     *err = GLE_DRIVER_INIT_ERROR;
     return 0;
 }
+
+/* ---------------------------------------------------------------------
+ * Keys that are shortcuts, not text (userUtils.asm)
+ * ------------------------------------------------------------------- */
+
+/* UserCheckAcceleratorChar: a key that may be a shortcut rather than
+ * text: with Ctrl or Alt, a UI function, a control key (but Tab,
+ * Enter, Ctrl-L and Backspace) */
+Boolean UserCheckAcceleratorChar(word character, word flags, word state)
+{
+    byte cs = character >> 8, ch = character & 0xff, ss = flags >> 8;
+
+    (void) state;
+    if (cs == CS_UI_FUNCS)
+	return TRUE;
+    if (flags & CF_TEMP_ACCENT)
+	return FALSE;
+    if (ss & (SS_LCTRL | SS_RCTRL))
+	return !(ss & (SS_LALT | SS_RALT)) || cs == CS_CONTROL;
+    if (ss & (SS_LALT | SS_RALT))
+	return TRUE;
+    return cs == CS_CONTROL && ch != VC_TAB && ch != VC_ENTER &&
+	   ch != VC_CTRL_L && ch != VC_BACKSPACE;
+}
+
+/* UserCheckInsertableCtrlChar: a key of the keypad that is text */
+Boolean UserCheckInsertableCtrlChar(word character, word flags, word state)
+{
+    byte ch = character & 0xff;
+
+    if ((character >> 8) != CS_CONTROL ||
+	((flags >> 8) & (SS_LCTRL | SS_RCTRL)))
+	return FALSE;
+    if ((ch >= '*' && ch <= '-') || ch == '/')
+	return TRUE;
+    return (state & TS_NUMLOCK) && !(flags & CF_EXTENDED) &&
+	   ch >= '.' && ch <= '9';
+}

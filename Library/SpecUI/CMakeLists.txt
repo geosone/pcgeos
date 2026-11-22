@@ -80,6 +80,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CSpec/cspecValue.goc
                ${c}/CSpec/cspecGlyphDisplay.goc
                ${c}/CGadget/copenGlyphDisplay.goc
+               ${c}/CGadget/copenTextCommon.goc
                ${c}/CSpec/cspecPane.goc
                ${c}/CSpec/cspecContent.goc
                ${c}/CComp/copenContent.goc

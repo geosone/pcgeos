@@ -70,6 +70,9 @@ typedef struct {
     unsigned short	UBS_dlist[4];
     short		UBS_glyph[5];
     word		UBS_text[6];
+    word		UBS_text2[8];
+    word		UBS_text3[8];
+    word		UBS_text4[6];
 } UBState;
 
 static int fails;
@@ -121,7 +124,8 @@ static GeodeHandle Find(const char *name)
 /*
  * UIBOOT_SHOT=file: the screen (as GEOS drew it, read back from the
  * display) written as a PPM after step UIBOOT_SHOT_AT (default the
- * last), a second later (Port32/tools/uiboot-shot.sh)
+ * last), a second later or UIBOOT_SHOT_TICKS (a flashing cursor is
+ * on for 40 ticks, then off for 40; Port32/tools/uiboot-shot.sh)
  */
 static void Shot(int step)
 {
@@ -129,9 +133,10 @@ static void Shot(int step)
     FILE *o;
     int x, y;
 
-    if (!f || step != (at ? atoi(at) : 40))
+    if (!f || step != (at ? atoi(at) : 45))
 	return;
-    TimerSleep(60);
+    TimerSleep((word) (getenv("UIBOOT_SHOT_TICKS")
+		       ? atoi(getenv("UIBOOT_SHOT_TICKS")) : 60));
     o = fopen(f, "wb");
     if (!o)
 	return;
@@ -227,7 +232,7 @@ int main(int argc, char **argv)
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator */
-    for (i = 2; i <= 40; i++) {
+    for (i = 2; i <= 45; i++) {
 	step(i);
 	Shot(i);
     }
@@ -260,6 +265,21 @@ int main(int argc, char **argv)
     printf("text: lines %u, height %u, attrs %#x, line 2 at %u; then %u; view x was %u\n",
 	   st->UBS_text[0], st->UBS_text[1], st->UBS_text[2],
 	   st->UBS_text[3], st->UBS_text[4], st->UBS_text[5]);
+    printf("text focus: sel flags %#x, flags %#x, cursor %d,%d; at 5: %d,%d; "
+	   "typed: %d,%d\n",
+	   st->UBS_text2[0], st->UBS_text2[1], (short) st->UBS_text2[2],
+	   (short) st->UBS_text2[3], (short) st->UBS_text2[4],
+	   (short) st->UBS_text2[5], (short) st->UBS_text2[6],
+	   (short) st->UBS_text2[7]);
+    printf("text keys: line 2 at %u, selected %u-%u, End %u, word %u, "
+	   "down %u, height with Enter %u, end %u\n",
+	   st->UBS_text3[0], st->UBS_text3[1], st->UBS_text3[2],
+	   st->UBS_text3[3], st->UBS_text3[4], st->UBS_text3[5],
+	   st->UBS_text3[6], st->UBS_text3[7]);
+    printf("text mouse: press at %u (x %d), dragged to %u, back to %u; "
+	   "word %u-%u\n",
+	   st->UBS_text4[0], (short) st->UBS_text4[1], st->UBS_text4[2],
+	   st->UBS_text4[3], st->UBS_text4[4], st->UBS_text4[5]);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

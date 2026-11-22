@@ -5391,7 +5391,8 @@ are left out), the constants, the variables and the routines.
   (an object of that type cannot be built yet: its
   `MSG_META_RESOLVE_VARIANT_SUPERCLASS` gets NULL, a fatal error). So
   far: `OLBuildApplication`, `OLBuildField`, `OLBuildScreen`,
-  `OLBuildSystem`, `SpecGetDisplayScheme`, `SpecGetWindowOptions`, and
+  `OLBuildSystem`, `SpecGetDisplayScheme`, `SpecGetWindowOptions`,
+  `SpecGetTextKbdBindings`, `SpecDrawTextCursor` (section 13z), and
   the classes `OLSystemClass`, `OLScreenClass`, `OLFieldClass`,
   `OLApplicationClass` (`CInclude/Internal/SpecUI/ol*Class.goh`).
 - **Ported.**
@@ -6291,11 +6292,55 @@ the modules of the asm; what is there:
   color (unless `VTF_TRANSPARENT`), field by field with
   `GrDrawTextField`. After a calculation the marked lines are drawn at
   once (`TextScreenUpdate`).
+- **The selection on the screen** (`TextSelect/tslInvert.goc`,
+  `tslCursor.goc`, `TextLine/tlCommonPosition.goc`): a range is
+  inverted line by line if the object is the system's target or has
+  the focus; a cursor stands at `VTI_cursorPos` and is drawn by the
+  specific UI (`SPIR_DRAW_TEXT_CURSOR`:
+  `void SpecDrawTextCursor(optr, GStateHandle)`, the gstate at the
+  baseline with the font there; Motif inverts a line one pixel wide).
+  Every change of the text or the selection takes the selection off
+  the screen and shows it again (`EditUnHilite`, `EditHilite`,
+  `VTIF_HILITED`); `MSG_VIS_DRAW` draws it over the lines. The cursor
+  flashes by one-shot timers (`MSG_VIS_TEXT_FLASH_CURSOR_ON`/`_OFF`,
+  40 ticks each) if the UI wants that (`UIBF_BLINKING_CURSOR`).
+- **Focus and target** (`TextSelect/tslMethodFocus.goc`): with
+  `MSG_META_GAINED_SYS_FOCUS_EXCL` the object keeps its gstate, shows
+  its cursor and grabs the keyboard, till it loses the focus;
+  `MSG_META_GAINED`/`LOST_TARGET_EXCL` and `..._SYS_TARGET_EXCL`
+  (`TEMP_VIS_TEXT_SYS_TARGET`) show or hide the range. The output is
+  told (`MSG_META_TEXT_GAINED_FOCUS` and the others).
+- **Keys** (`Text/textMethodInput.goc`, `TextSelect/
+  tslKbdShortcuts.goc`): `MSG_META_KBD_CHAR` inserts text in place of
+  the selection as the user's change, or does the function the
+  specific UI binds the key to. `SPIR_GET_TEXT_KBD_BINDINGS` is
+  `const KeyboardShortcut *SpecGetTextKbdBindings(word *count, const
+  word **functions)`: the shortcuts for `FlowCheckKbdShortcut` and the
+  `VisTextKeyFunction` of each (not the asm's one table of both).
+  `UserCheckAcceleratorChar` and `UserCheckInsertableCtrlChar`
+  (character, flags, state; the UI library) tell text from shortcuts.
+  The functions: moves by character, word, line and paragraph, to the
+  ends of the line and the text, the same adjusting the selection,
+  deleting backward and forward by the same units, select word,
+  deselect; `MSG_VIS_TEXT_DO_KEY_FUNCTION`. A cursor is placed by its
+  offset, so at the end of a wrapped line it would be at the start of
+  the next: End and the moves up and down stop one character before.
+  What is not for the object goes up (`MSG_META_FUP_KBD_CHAR`); a one
+  line object reports Enter, one without tabs Tab.
+- **Mouse** (`TextSelect/tslMethodMouse.goc`): `MSG_META_START_SELECT`
+  puts the cursor at the press (or grows the selection to it with
+  adjust or extend), takes the gadget exclusive and the mouse, the
+  focus (click to type) and the target (`VTS_TARGETABLE`);
+  `MSG_META_PTR` drags the selection, `MSG_META_END_SELECT` ends it; a
+  double press selects the word.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
   paragraph attribute, borders and paragraph backgrounds, tab leaders,
   extended styles, hyphenation, graphics, geometry
-  (`MSG_VIS_RECALC_SIZE`, height notification), scrolling of a one
-  line object, the cursor and the highlight, mouse and keyboard;
+  (`MSG_VIS_RECALC_SIZE`, height notification), scrolling (of a one
+  line object, the selection into view), overstrike mode, smart
+  quotes, the large mouse messages, selection by words and lines while
+  dragging, quick transfer, the clipboard, the pointer image over
+  text;
   filters, undo, suspension, the notifications for the controllers,
   large objects (`VisLargeTextClass`, huge arrays), references to VM
   blocks, DB items and huge arrays, search and spelling, the
@@ -6312,8 +6357,11 @@ the modules of the asm; what is there:
   right, centered and full justification, a carriage return, a tab,
   lines going away. ctest `kernel.draw` measures fields
   (`GrTextObjCalc`, `GrTextPosition`); `library.ui.boot` has a text
-  object in a view's document (step 40), drawn with it and after a
-  change.
+  object in a view's document (steps 40 to 45): drawn with it and
+  after a change; with the focus its cursor, a range, typing over it;
+  keys passed to the content (text, cursor keys, selecting, deleting,
+  Enter and Backspace); the mouse (press, drag, release, double
+  press).
 
 ## 14. Open
 

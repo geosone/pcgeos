@@ -2,8 +2,10 @@
  * tslMain.goc -- the selection (after tslMain.asm, tslMethodSelect.asm):
  * VTI_selectStart to VTI_selectEnd, a cursor where they are the same.
  *
- * Port32, not yet: the cursor and the highlight on the screen, the
- * selection by mouse and keyboard, the context notifications.
+ * On the screen it is shown by tslInvert.goc and tslCursor.goc.
+ *
+ * Port32, not yet: the selection by mouse and keyboard, the context
+ * notifications.
  */
 @include "textInt.goh"
 
@@ -35,6 +37,74 @@ void TSL_SelectSetSelection(optr o, dword start, dword end)
     TSL_SelectSetSelectionWithoutNukingUndo(o, start, end);
 }
 
+/* the selection changed on the screen: the old one off, the new on
+ * (the object has its gstate) */
+static void SetShown(optr o, dword start, dword end)
+{
+    EditUnHilite(o);
+    TSL_SelectSetSelection(o, start, end);
+    EditHilite(o);
+}
+
+/*
+ * TSL_SelectCursor (SelectCursor): a cursor at an offset; a selection
+ * adjusted later grows from here.  setGoal: the cursor's place is
+ * where moves up and down aim for.
+ */
+void TSL_SelectCursor(optr o, dword offset, Boolean setGoal)
+{
+    VisTextInstance *t;
+    dword size = TS_GetTextSize(o);
+
+    if (offset > size)
+	offset = size;
+    SetShown(o, offset, offset);
+    t = VT(o);
+    t->VTI_selectMinStart = t->VTI_selectMinEnd = offset;
+    t->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
+    if (setGoal)
+	t->VTI_goalPosition = t->VTI_cursorPos.P_x;
+}
+
+/*
+ * SelectGetAdjustPosition: the end of the selection that moves when
+ * it is adjusted: the one away from where it started
+ * (VTI_selectMinStart to VTI_selectMinEnd); of a selection that is
+ * only that the end to adjust forward, the start to adjust backward
+ */
+dword TSL_SelectGetAdjustPosition(optr o, Boolean forward)
+{
+    VisTextInstance *t = VT(o);
+
+    if (t->VTI_selectStart != t->VTI_selectMinStart)
+	return t->VTI_selectStart;
+    if (t->VTI_selectEnd != t->VTI_selectMinEnd)
+	return t->VTI_selectEnd;
+    return forward ? t->VTI_selectEnd : t->VTI_selectStart;
+}
+
+/*
+ * TSL_SelectAdjust (StartSelectAdjust, character selection): the
+ * selection from where it started to an offset
+ */
+void TSL_SelectAdjust(optr o, dword offset)
+{
+    VisTextInstance *t = VT(o);
+    dword size = TS_GetTextSize(o), start, end;
+
+    if (offset > size)
+	offset = size;
+    t = VT(o);
+    start = t->VTI_selectMinStart;
+    end = t->VTI_selectMinEnd;
+    if (offset < start)
+	start = offset;
+    if (offset > end)
+	end = offset;
+    SetShown(o, start, end);
+    VT(o)->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
+}
+
 /* the range made real, kept within the text and in order */
 static void SelectRange(optr o, dword start, dword end)
 {
@@ -54,7 +124,12 @@ static void SelectRange(optr o, dword start, dword end)
 	r.VTR_start = r.VTR_end;
 	r.VTR_end = s;
     }
+    /* UpdateSelectedArea: the old one off the screen, the new one on */
+    TextGStateCreate(o);
+    EditUnHilite(o);
     TSL_SelectSetSelection(o, r.VTR_start, r.VTR_end);
+    EditHilite(o);
+    TextGStateDestroy(o);
     VT(o)->VTI_selectMinStart = r.VTR_start;
     VT(o)->VTI_selectMinEnd = r.VTR_start;
 }

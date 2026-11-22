@@ -84,6 +84,9 @@ typedef struct {
     word		UBS_dlist[4];
     short		UBS_glyph[5];
     word		UBS_text[6];
+    word		UBS_text2[8];
+    word		UBS_text3[8];
+    word		UBS_text4[6];
 } UBState;
 
 UBState ubState;
@@ -219,6 +222,7 @@ UBState ubState;
 /* in Doc 2: a view of a 2000 x 300 document that scrolls both ways
  * (its window fixed at 200 x 40: the screens of the tests differ) */
 @object GenViewClass UBView = {
+    GVI_attrs = @default | GVA_FOCUSABLE;
     GVI_content = UBContent;
     GVI_docBounds = {0, 0, 2000, 300};
     GVI_increment = {10, 10};
@@ -523,6 +527,21 @@ static Boolean MonikerIs(optr o, const char *t)
     }
     MemUnlock(OptrToHandle(o));
     return r;
+}
+
+/* a key for the text object in the view: to the content, as the view
+ * with the focus passes it; shift: ShiftState */
+#define UKEY(k)		((VC_ISCTRL << 8) | (k))
+static void TextKey(word c, word shift)
+{
+    @call UBContent::MSG_META_KBD_CHAR(c, CF_FIRST_PRESS | (shift << 8), 0);
+    @call UBContent::MSG_META_KBD_CHAR(c, CF_RELEASE | (shift << 8), 0);
+}
+
+static void TextKeys(const char *s)
+{
+    while (*s)
+	TextKey((byte) *s++, 0);
 }
 
 static Rectangle Bounds(optr o)
@@ -1806,6 +1825,189 @@ static Rectangle ScreenBounds(WindowHandle w)
 	op.VTGLOAFP_line = 1;
 	UBCHECK(!@call UBText::MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS(&op));
 	UBCHECK(!(op.VTGLOAFP_flags & LF_NEEDS_DRAW));
+	break;
+    }
+    case 41: {
+	/* editable, with the focus: the cursor at the selection (the
+	 * end of the text after the append), flashing; moved with the
+	 * selection; a range instead; back to a cursor */
+	VisTextInstance t;
+
+	@call UBText::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(
+		VTS_EDITABLE | VTS_SELECTABLE, 0);
+	/* (as a press in the display does: the display group, then the
+	 * view take the focus; the view tells its content) */
+	@call UBGroup::MSG_META_GRAB_FOCUS_EXCL();
+	@call UBView::MSG_META_GRAB_FOCUS_EXCL();
+	@call UBText::MSG_META_GRAB_FOCUS_EXCL();
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(t.VTI_intFlags & VTIF_HILITED);
+	break;
+    }
+    case 42: {
+	/* (the view told its content by the queue) */
+	VisTextInstance t;
+
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text2[0] = t.VTI_intSelFlags;
+	ubState.UBS_text2[1] = t.VTI_intFlags;
+	ubState.UBS_text2[2] = t.VTI_cursorPos.P_x;
+	ubState.UBS_text2[3] = t.VTI_cursorPos.P_y;
+	UBCHECK(t.VTI_intSelFlags & VTISF_IS_FOCUS);
+	UBCHECK(t.VTI_intSelFlags & VTISF_CURSOR_ENABLED);
+	UBCHECK(t.VTI_intSelFlags & VTISF_CURSOR_ON);
+	UBCHECK(t.VTI_intFlags & VTIF_HILITED);
+	UBCHECK(t.VTI_gstate != 0 && t.VTI_timerHandle != 0);
+	UBCHECK(t.VTI_cursorPos.P_y == 1 && t.VTI_cursorPos.P_x == 0);
+	@call UBText::MSG_VIS_TEXT_SELECT_RANGE_SMALL(5, 5);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text2[4] = t.VTI_cursorPos.P_x;
+	ubState.UBS_text2[5] = t.VTI_cursorPos.P_y;
+	UBCHECK(t.VTI_cursorPos.P_y == 1 && t.VTI_cursorPos.P_x > 30 &&
+		t.VTI_cursorPos.P_x < 50);
+	UBCHECK(t.VTI_intSelFlags & VTISF_CURSOR_ENABLED);
+	@call UBText::MSG_VIS_TEXT_SELECT_RANGE_SMALL(8, 30);
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(!(t.VTI_intSelFlags & VTISF_CURSOR_ENABLED) &&
+		(t.VTI_intFlags & VTIF_HILITED));
+	break;
+    }
+    case 43: {
+	/* typed over the range (as a replacement of the selection): a
+	 * cursor after it, on the second line now */
+	VisTextInstance t;
+
+	@call UBText::MSG_VIS_TEXT_REPLACE_SELECTION_PTR("C, in two lines", 0);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text2[6] = t.VTI_cursorPos.P_x;
+	ubState.UBS_text2[7] = t.VTI_cursorPos.P_y;
+	UBCHECK(t.VTI_selectStart == 23 && t.VTI_selectEnd == 23);
+	UBCHECK(t.VTI_intSelFlags & VTISF_CURSOR_ENABLED);
+	UBCHECK(t.VTI_cursorPos.P_y == 16 && t.VTI_cursorPos.P_x > 20 &&
+		t.VTI_cursorPos.P_x < 60);
+	UBCHECK(t.VTI_height.WBF_int == 30);
+	break;
+    }
+    case 44: {
+	/* keys, as the view passes them to its content: text typed at
+	 * the cursor; Home, Up, Right; Shift-Right selects, typing
+	 * replaces the range; End, Ctrl-Left, Ctrl-Shift-Right, Delete, text;
+	 * Down; Enter makes a line, Backspace takes it away; Ctrl-End */
+	VisTextInstance t;
+	VisTextGetLineOffsetAndFlagsParameters op;
+	char buf[64];
+	word n;
+
+	TextKeys(" VisT");
+	n = @call UBText::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+	UBCHECK(n == 44 &&
+		!memcmp(buf, "Text in C, in two lines VisText, wrapped :-)", 45));
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(t.VTI_selectStart == 28 && t.VTI_selectEnd == 28);
+	UBCHECK(t.VTI_state & VTS_USER_MODIFIED);
+	op.VTGLOAFP_line = 1;
+	(void) @call UBText::MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS(&op);
+	ubState.UBS_text3[0] = (word) op.VTGLOAFP_offset;
+	TextKey(UKEY(VC_HOME), 0);
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(t.VTI_selectStart == op.VTGLOAFP_offset &&
+		t.VTI_cursorPos.P_x == 0 && t.VTI_cursorPos.P_y == 16);
+	TextKey(UKEY(VC_UP), 0);
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(t.VTI_selectStart == 0 && t.VTI_cursorPos.P_y == 1);
+	TextKey(UKEY(VC_RIGHT), 0);
+	TextKey(UKEY(VC_RIGHT), 0);
+	TextKey(UKEY(VC_RIGHT), SS_LSHIFT);
+	TextKey(UKEY(VC_RIGHT), SS_LSHIFT);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text3[1] = (word) t.VTI_selectStart;
+	ubState.UBS_text3[2] = (word) t.VTI_selectEnd;
+	UBCHECK(t.VTI_selectStart == 2 && t.VTI_selectEnd == 4);
+	TextKey(UKEY(VC_LEFT), SS_LSHIFT);
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(t.VTI_selectStart == 2 && t.VTI_selectEnd == 3);
+	TextKeys("X");
+	n = @call UBText::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+	UBCHECK(n == 44 && !memcmp(buf, "TeXt in C", 9));
+	TextKey(UKEY(VC_END), 0);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text3[3] = (word) t.VTI_selectStart;
+	UBCHECK(t.VTI_selectStart == op.VTGLOAFP_offset - 1 &&
+		t.VTI_cursorPos.P_y == 1);
+	TextKey(UKEY(VC_LEFT), SS_LCTRL);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text3[4] = (word) t.VTI_selectStart;
+	UBCHECK(t.VTI_selectStart == 18);
+	TextKey(UKEY(VC_RIGHT), SS_LCTRL | SS_LSHIFT);
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(t.VTI_selectStart == 18 && t.VTI_selectEnd == 23);
+	TextKey(UKEY(VC_DEL), 0);
+	n = @call UBText::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+	UBCHECK(n == 39 && !memcmp(buf, "TeXt in C, in two  VisText", 26));
+	TextKeys("rows");
+	TextKey(UKEY(VC_DOWN), 0);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text3[5] = (word) t.VTI_selectStart;
+	UBCHECK(t.VTI_cursorPos.P_y == 16 && t.VTI_selectStart > 20);
+	TextKey(UKEY(VC_ENTER), 0);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text3[6] = t.VTI_height.WBF_int;
+	UBCHECK(t.VTI_height.WBF_int == 45 && t.VTI_cursorPos.P_y == 31 &&
+		t.VTI_cursorPos.P_x == 0);
+	TextKey(UKEY(VC_BACKSPACE), 0);
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(t.VTI_height.WBF_int == 30 && t.VTI_cursorPos.P_y == 16);
+	TextKey(UKEY(VC_END), SS_LCTRL);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text3[7] = (word) t.VTI_selectStart;
+	UBCHECK(t.VTI_selectStart == 43 && t.VTI_selectEnd == 43);
+	TextKeys("!");
+	n = @call UBText::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+	UBCHECK(n == 44 &&
+		!memcmp(buf, "TeXt in C, in two rows VisText, wrapped :-)!",
+			45));
+	break;
+    }
+    case 45: {
+	/* the mouse, as the content gets it from the view: a press in
+	 * the first line puts the cursor there and takes the mouse;
+	 * dragged into the second line: a range; the release ends it; a
+	 * double press selects the word */
+	VisTextInstance t;
+	MouseReturnParams mr;
+	dword at;
+
+	@call UBContent::MSG_META_START_SELECT(&mr, 50, 8,
+		BI_PRESS | BI_B0_DOWN | (UIFA_SELECT << 8));
+	VisData(@UBText, &t, sizeof(t));
+	at = t.VTI_selectStart;
+	ubState.UBS_text4[0] = (word) at;
+	ubState.UBS_text4[1] = t.VTI_cursorPos.P_x;
+	UBCHECK(at > 3 && at < 10 && t.VTI_selectEnd == at);
+	UBCHECK(t.VTI_intSelFlags & VTISF_DOING_SELECTION);
+	UBCHECK(t.VTI_cursorPos.P_y == 1 && t.VTI_cursorPos.P_x > 36 &&
+		t.VTI_cursorPos.P_x < 56);
+	@call UBContent::MSG_META_PTR(&mr, 70, 24,
+		BI_B0_DOWN | (UIFA_SELECT << 8));
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text4[2] = (word) t.VTI_selectEnd;
+	UBCHECK(t.VTI_selectStart == at && t.VTI_selectEnd > 26 &&
+		t.VTI_selectEnd < 36);
+	@call UBContent::MSG_META_PTR(&mr, 20, 8,
+		BI_B0_DOWN | (UIFA_SELECT << 8));
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text4[3] = (word) t.VTI_selectStart;
+	UBCHECK(t.VTI_selectStart < at && t.VTI_selectEnd == at);
+	@call UBContent::MSG_META_END_SELECT(&mr, 20, 8, UIFA_SELECT << 8);
+	VisData(@UBText, &t, sizeof(t));
+	UBCHECK(!(t.VTI_intSelFlags & VTISF_DOING_SELECTION));
+	@call UBContent::MSG_META_START_SELECT(&mr, 70, 24,
+		BI_PRESS | BI_DOUBLE_PRESS | BI_B0_DOWN | (UIFA_SELECT << 8));
+	@call UBContent::MSG_META_END_SELECT(&mr, 70, 24, UIFA_SELECT << 8);
+	VisData(@UBText, &t, sizeof(t));
+	ubState.UBS_text4[4] = (word) t.VTI_selectStart;
+	ubState.UBS_text4[5] = (word) t.VTI_selectEnd;
+	UBCHECK(t.VTI_selectStart == 32 && t.VTI_selectEnd == 39);
 	break;
     }
     }

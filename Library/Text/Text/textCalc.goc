@@ -22,6 +22,7 @@
 
 @extern method VisTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
 @extern method VisTextClass, MSG_VIS_OPEN;
+@extern method VisTextClass, MSG_VIS_CLOSE;
 @extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_FROM_OFFSET;
@@ -120,23 +121,56 @@ void TextCompleteRecalc(optr o)
 /*
  * VisTextOpen (textMethodInstance.asm): on the screen: an object whose
  * geometry is valid but has no lines yet (one placed by hand, not by
- * the geometry manager) gets them now.  (Not yet: the cursor.)
+ * the geometry manager) gets them now.  One that has the focus already
+ * takes a gstate of the new window, shows its cursor and flashes it.
  */
 @extern method VisTextClass, MSG_VIS_OPEN
 {
+    Boolean focus;
+
     @callsuper();
     pself = VT(oself);
     pself->VTI_timerHandle = NullHandle;
     pself->VTI_intSelFlags &= ~(VTISF_CURSOR_ON | VTISF_DOING_SELECTION |
 				VTISF_DOING_DRAG_SELECTION);
+    focus = (pself->VTI_intSelFlags & VTISF_IS_FOCUS) != 0;
+    if (focus) {
+	/* RecalcGStateIfNeeded */
+	TextGStateDestroy(oself);
+	TextGStateCreate(oself);
+    }
+    TextGStateCreate(oself);
+    pself = VT(oself);
     if (!(pself->VI_optFlags & VOF_GEOMETRY_INVALID) && !pself->VTI_lines)
 	@call oself::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+    if (focus) {
+	EditHilite(oself);
+	TSL_StartCursorCommon(oself);
+    }
+    TextGStateDestroy(oself);
+}
+
+/* VisTextClose: off the screen: no flashing; the gstate of one with
+ * the focus is of no window any more */
+@extern method VisTextClass, MSG_VIS_CLOSE
+{
+    TSL_StopCursorTimer(oself);
+    @callsuper();
+    pself = VT(oself);
+    if (pself->VTI_intSelFlags & VTISF_IS_FOCUS) {
+	TextGStateDestroy(oself);
+	TextGStateCreate(oself);
+    }
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW
 {
+    TextGStateCreate(oself);
+    EditUnHilite(oself);
     TextCompleteRecalc(oself);
     TextScreenUpdate(oself);
+    EditHilite(oself);
+    TextGStateDestroy(oself);
 }
 
 /* VisTextGetLineInfo: a line with its fields into a buffer (as much

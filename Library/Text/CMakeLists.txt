@@ -1,7 +1,7 @@
 # The text library (text.geo) in C, beside the asm: VisTextClass with
-# the text of small objects (TextStorage/), the replacement every change
-# goes through, reading the text, the selection as offsets and the single character
-# attribute so far.
+# the text of small objects (TextStorage/), the single character and
+# paragraph attribute (TextAttr/), the lines (TextLine/), the selection
+# with cursor, keys and mouse (TextSelect/) so far.
 # text32.gp has the parameters; the 16-bit build keeps text.gp.  Geodes
 # need gcc or clang (module loading).
 include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
@@ -29,6 +29,13 @@ geos_geode(text GP text32.gp
                ${t}/TextAttr/taParaAttr.goc
                ${t}/TextLine/tlSmallStorage.goc
                ${t}/TextLine/tlCommonCalc.goc
+               ${t}/TextLine/tlCommonPosition.goc
                ${t}/TextSelect/tslMain.goc
+               ${t}/TextSelect/tslCursor.goc
+               ${t}/TextSelect/tslInvert.goc
+               ${t}/TextSelect/tslMethodFocus.goc
+               ${t}/TextSelect/tslKbdShortcuts.goc
+               ${t}/TextSelect/tslMethodMouse.goc
+               ${t}/Text/textMethodInput.goc
            INCLUDES ${t})
 set(text_GEO ${text_GEO} PARENT_SCOPE)

@@ -1,0 +1,107 @@
+/*
+ * tslMethodMouse.goc -- selecting with the mouse (after
+ * tslMethodMouse.asm).
+ *
+ * A press puts the cursor where it was made (with the adjust or extend
+ * function held the selection is grown to it), takes the mouse and, as
+ * the UI is set up, the focus and the target; while the button is
+ * held the selection follows the pointer; the release ends it.  A
+ * double press selects the word.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects and the small
+ * mouse messages.  Not yet: the large ones, selection by words, lines
+ * and paragraphs while dragging (a triple press and more), quick
+ * transfer, ink, the pointer image over text, scrolling while
+ * selecting.
+ */
+@include "textInt.goh"
+
+@extern method VisTextClass, MSG_META_START_SELECT;
+@extern method VisTextClass, MSG_META_PTR;
+@extern method VisTextClass, MSG_META_END_SELECT;
+
+/* ComputeEventPositionAndOffset: the offset at a position in the
+ * object's parent's coordinates */
+static dword OffsetAtPosition(optr o, sword x, sword y)
+{
+    VisTextInstance *t = VT(o);
+    VisInstance *v = (VisInstance *) t;
+    dword line, off, end;
+    sword pos;
+
+    x = (sword) (x - v->VI_bounds.R_left - t->VTI_lrMargin -
+		 t->VTI_leftOffset);
+    y = (sword) (y - v->VI_bounds.R_top - t->VTI_tbMargin);
+    line = TL_LineFromPosition(o, (sword) (y < 0 ? 0 : y), NULL);
+    x = (sword) (x - TL_LinePtr(o, line, NULL)->LI_adjustment);
+    off = TL_LineTextPosition(o, line, x, TEXT_ADDRESS_PAST_END, &pos,
+			      NULL);
+    end = TSL_LineCursorEnd(o, line);
+    return off > end ? end : off;
+}
+
+/* VisTextStartSelect */
+@extern method VisTextClass, MSG_META_START_SELECT
+{
+    optr parent;
+    dword off;
+
+    retVal->flags = MRF_PROCESSED;
+    if (!(pself->VTI_state & VTS_SELECTABLE))
+	return;
+    TextGStateCreate(oself);
+    if (!TextCheckCanDraw(oself)) {
+	TextGStateDestroy(oself);
+	return;
+    }
+    VT(oself)->VTI_intSelFlags |= VTISF_DOING_SELECTION;
+    /* TextTakeGadgetExclAndGrab, TextMakeFocusAndTarget */
+    parent = VisFindParent(oself);
+    if (parent)
+	@call parent::MSG_VIS_TAKE_GADGET_EXCL(oself);
+    VisGrabMouse(oself);
+    if (FlowGetUIButtonFlags() & UIBF_CLICK_TO_TYPE)
+	@call oself::MSG_META_GRAB_FOCUS_EXCL();
+    if (VT(oself)->VTI_state & VTS_TARGETABLE)
+	@call oself::MSG_META_GRAB_TARGET_EXCL();
+    off = OffsetAtPosition(oself, xPosition, yPosition);
+    if ((inputState >> 8) & (UIFA_ADJUST | UIFA_EXTEND))
+	TSL_SelectAdjust(oself, off);
+    else {
+	TSL_SelectCursor(oself, off, TRUE);
+	if (inputState & BI_DOUBLE_PRESS)
+	    (void) TSL_HandleKbdShortcut(oself, VTKF_SELECT_WORD);
+    }
+    /* (a cursor just placed is to be seen) */
+    CursorForceOn(oself);
+    TextGStateDestroy(oself);
+}
+
+/* VisTextPtr: selecting: the selection to the pointer */
+@extern method VisTextClass, MSG_META_PTR
+{
+    (void) inputState;
+    retVal->flags = MRF_PROCESSED;
+    if (!(pself->VTI_intSelFlags & VTISF_DOING_SELECTION))
+	return;
+    TextGStateCreate(oself);
+    if (TextCheckCanDraw(oself)) {
+	VT(oself)->VTI_intSelFlags |= VTISF_DOING_DRAG_SELECTION;
+	TSL_SelectAdjust(oself, OffsetAtPosition(oself, xPosition,
+						 yPosition));
+    }
+    TextGStateDestroy(oself);
+}
+
+/* VisTextLargeEndSelect */
+@extern method VisTextClass, MSG_META_END_SELECT
+{
+    (void) xPosition; (void) yPosition; (void) inputState;
+    retVal->flags = MRF_PROCESSED;
+    if (!(pself->VTI_intSelFlags & VTISF_DOING_SELECTION))
+	return;
+    pself->VTI_goalPosition = pself->VTI_cursorPos.P_x;
+    pself->VTI_intSelFlags &= ~(VTISF_DOING_SELECTION |
+				VTISF_DOING_DRAG_SELECTION);
+    VisReleaseMouse(oself);
+}

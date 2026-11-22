@@ -1,0 +1,148 @@
+/*
+ * tslInvert.goc -- the selection on the screen (after tslInvert.asm,
+ * of tslMisc.asm InvertRange, of TextLine/tlCommonInvert.asm the range
+ * of a line inverted).
+ *
+ * VTIF_HILITED says the selection is shown: a range inverted (if the
+ * object is the target or has the focus), else the cursor placed and
+ * enabled.  Every change of the text or the selection takes it away
+ * first (EditUnHilite) and shows it again afterwards (EditHilite);
+ * both need the object's gstate.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: the
+ * overstrike mode's highlight, right to left.
+ */
+@include "textInt.goh"
+
+static sdword W(const WBFixed *w)
+{
+    return ((sdword) w->WBF_int << 8) + w->WBF_frac;
+}
+
+/* TextSetDrawMask: FALSE if the range is not shown: the object neither
+ * the target nor the focus */
+static Boolean ShowsRange(optr o)
+{
+    if (ObjVarFindData(o, TEMP_VIS_TEXT_SYS_TARGET))
+	return TRUE;
+    if (ObjVarFindData(o, ATTR_VIS_TEXT_CURSOR_NO_FOCUS))
+	return TRUE;
+    return (VT(o)->VTI_intSelFlags & VTISF_IS_FOCUS) != 0;
+}
+
+/*
+ * InvertRange (CommonLineInvertRange, LineInvertArea): the characters
+ * from start to end inverted, line by line: from the line's left edge
+ * or the start to the end of its last field or the end
+ */
+static void InvertRange(optr o, dword start, dword end)
+{
+    VisTextInstance *t = VT(o);
+    VisInstance *v = (VisInstance *) t;
+    GStateHandle g = t->VTI_gstate;
+    dword first, last, line, ls, s;
+    sdword top;
+    WBFixed wtop;
+    sword width = (sword) (v->VI_bounds.R_right - v->VI_bounds.R_left -
+			   2 * t->VTI_lrMargin);
+
+    if (start > end) {
+	s = start;
+	start = end;
+	end = s;
+    }
+    last = TL_LineFromOffset(o, end, TRUE, NULL);
+    first = TL_LineFromOffset(o, start, FALSE, &ls);
+    if (first > last)
+	return;
+    wtop = TL_LineGetTop(o, first);
+    top = W(&wtop);
+    GrSaveState(g);
+    TextGStateToText(o, FALSE);
+    GrSetAreaMaskSys(g, SDM_100);
+    GrSetMixMode(g, MM_INVERT);
+    for (line = first; line <= last; line++) {
+	const LineInfo *li = TL_LinePtr(o, line, NULL);
+	sdword hgt = W(&li->LI_hgt);
+	dword count = TL_LineGetCharCount(li);
+	word fields = TL_LineGetFieldCount(o, line);
+	sword adj = li->LI_adjustment, left, right, x;
+
+	if (hgt) {
+	    if (ls >= start)
+		left = adj;
+	    else {
+		(void) TL_LineTextPosition(o, line, 0x7fff, start, &x, NULL);
+		left = (sword) (x + adj);
+	    }
+	    li = TL_LinePtr(o, line, NULL);
+	    if (ls + count <= end) {
+		const FieldInfo *fi = &li->LI_firstField + (fields - 1);
+
+		right = (sword) (fi->FI_position + fi->FI_width + adj);
+	    } else {
+		(void) TL_LineTextPosition(o, line, 0x7fff, end, &x, NULL);
+		right = (sword) (x + adj);
+	    }
+	    left = (sword) (left + VT(o)->VTI_leftOffset);
+	    right = (sword) (right + VT(o)->VTI_leftOffset);
+	    if (right > width)
+		right = width;
+	    if (left < right)
+		GrFillRect(g, left, (sword) ((top + 0xff) >> 8), right,
+			   (sword) ((top + hgt + 0xff) >> 8));
+	}
+	top += hgt;
+	ls += count;
+    }
+    GrSetMixMode(g, MM_COPY);
+    GrRestoreState(g);
+}
+
+/* TSL_DrawHilite: a range shown, or taken away again */
+void TSL_DrawHilite(optr o, dword start, dword end)
+{
+    if (ShowsRange(o))
+	InvertRange(o, start, end);
+}
+
+void EditHilite(optr o)
+{
+    VisTextInstance *t;
+    dword start, end;
+    sword x, y;
+
+    if (!TextCheckCanDraw(o))
+	return;
+    t = VT(o);
+    if (t->VTI_intFlags & VTIF_HILITED)
+	return;
+    t->VTI_intFlags |= VTIF_HILITED;
+    t->VTI_intSelFlags &= ~VTISF_CURSOR_ENABLED;
+    TSL_SelectGetSelection(o, &start, &end);
+    if (start != end) {
+	TSL_DrawHilite(o, start, end);
+	return;
+    }
+    TSL_ConvertOffsetToCoordinate(o, start, &x, &y);
+    TSL_CursorPosition(o, (sword) (x + VT(o)->VTI_leftOffset), y);
+}
+
+void EditUnHilite(optr o)
+{
+    VisTextInstance *t = VT(o);
+    dword start, end;
+
+    if (!(t->VTI_intFlags & VTIF_SUSPENDED)) {
+	if (!(t->VTI_intFlags & VTIF_HILITED))
+	    return;
+	t->VTI_intFlags &= ~VTIF_HILITED;
+    }
+    if (!TextCheckCanDraw(o))
+	return;
+    TSL_SelectGetSelection(o, &start, &end);
+    if (start != end)
+	TSL_DrawHilite(o, start, end);
+    else
+	CursorDisable(o);
+}

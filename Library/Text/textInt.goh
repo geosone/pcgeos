@@ -70,6 +70,17 @@ extern Boolean TSL_SelectIsCursor(optr o);
 extern void TSL_SelectSetSelection(optr o, dword start, dword end);
 extern void TSL_SelectSetSelectionWithoutNukingUndo(optr o, dword start,
 						    dword end);
+/* on the screen too (with the object's gstate): a cursor, the
+ * selection grown from where it started */
+extern void TSL_SelectCursor(optr o, dword offset, Boolean setGoal);
+extern dword TSL_SelectGetAdjustPosition(optr o, Boolean forward);
+extern void TSL_SelectAdjust(optr o, dword offset);
+
+/* TextSelect/tslKbdShortcuts.goc: a key function (VisTextKeyFunction);
+ * FALSE if not done */
+extern Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f);
+/* where a line ends for the cursor */
+extern dword TSL_LineCursorEnd(optr o, dword line);
 
 /* Text/textMethodSet.goc: the replacement all changes of the text go
  * through (VisTextReplaceNew); TRUE if it was not made */
@@ -174,5 +185,34 @@ extern void TextRecalc(optr o, dword start, dword inserted, dword deleted);
 #define TCBF_PRINT		0x20
 extern void TextDraw(optr o, byte flags, Boolean onlyMarked);
 extern void TextScreenUpdate(optr o);
+/* the object's gstate moved to the text (inside the margins) and
+ * clipped to it; between GrSaveState and GrRestoreState */
+extern void TextGStateToText(optr o, Boolean print);
+
+/* TextLine/tlCommonPosition.goc: positions on a line (from its left
+ * edge, LI_adjustment), the line at a height */
+extern dword TL_LineTextPosition(optr o, dword line, sword pixel,
+				 dword stop, sword *x, Boolean *over);
+extern dword TL_LineFromPosition(optr o, sword y, Boolean *below);
+
+/* TextSelect/tslCursor.goc: the cursor */
+extern Boolean TextCheckCanDraw(optr o);
+extern Boolean TextCheckCanDrawEditable(optr o);
+extern void TSL_ConvertOffsetToCoordinate(optr o, dword offset, sword *x,
+					  sword *y);
+extern dword TSL_GetCursorLine(optr o);
+extern void CursorEnable(optr o);
+extern void CursorDisable(optr o);
+extern void CursorForceOn(optr o);
+extern void TSL_CursorDrawIfOn(optr o);
+extern void TSL_CursorPosition(optr o, sword x, sword y);
+extern void TSL_StartCursorCommon(optr o);
+extern void TSL_StopCursorTimer(optr o);
+
+/* TextSelect/tslInvert.goc: the selection on the screen, shown and
+ * taken away (with the object's gstate) */
+extern void TSL_DrawHilite(optr o, dword start, dword end);
+extern void EditHilite(optr o);
+extern void EditUnHilite(optr o);
 
 #endif

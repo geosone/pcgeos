@@ -1,0 +1,159 @@
+/*
+ * tlCommonPosition.goc -- positions on a line (after tlCommonPosition.asm,
+ * tlSmallPosition.asm): the character at a pixel position, the line at
+ * a height.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects; positions are in
+ * the text's coordinates (inside the object's margins), a line's
+ * relative to its left edge (LI_adjustment).  Not yet: graphics.
+ */
+@include "textInt.goh"
+
+/* FieldTextPositionCharAttrCallback: the attributes and the text of a
+ * run of the field */
+static word PositionStyleCallback(TextMetricStyles *tms, word offset,
+				  const char **text)
+{
+    GTP_vars *v = (GTP_vars *) tms;
+    optr o = *(optr *) v->GTPL_object;
+    dword pos = tms->TMS_fieldStart + offset, count;
+    word after;
+
+    *text = TS_LockTextPtr(o, pos, &after);
+    (void) TA_FillTextAttrForDraw(o, pos, &tms->TMS_textAttr, &count);
+    return count < after ? (word) count : after;
+}
+
+/*
+ * CommonFieldTextPosition: among max characters from start (after the
+ * field's tab) the one nearest pixel (from the field's left); *x its
+ * left edge.  Returns its offset into the field.
+ */
+static word FieldTextPosition(optr o, dword start, dword max, sword pixel,
+			      WWFixedAsDWord spacePad, sword *x)
+{
+    GStateHandle g = VT(o)->VTI_gstate;
+    GTP_vars v;
+    word pos = 0, n;
+
+    *x = 0;
+    if (!max || !g)
+	return 0;
+    memset(&v, 0, sizeof(v));
+    v.GTPL_object = &o;
+    v.GTPL_style.TMS_fieldStart = start;
+    v.GTPL_style.TMS_styleCallBack = PositionStyleCallback;
+    GrSetTextSpacePad(g, spacePad);
+    n = GrTextPosition(g, &v, max > 0xffff ? 0xffff : (word) max,
+		       (word) pixel, &pos);
+    GrSetTextSpacePad(g, 0);
+    *x = (sword) pos;
+    return n;
+}
+
+/*
+ * TL_LineTextPosition (CommonLineTextPosition): the offset nearest a
+ * pixel position on a line (from the line's left edge), not beyond
+ * stop; *x where that offset is.  *over (may be NULL): the position is
+ * over the line's text.  The object has its gstate.
+ */
+dword TL_LineTextPosition(optr o, dword line, sword pixel, dword stop,
+			  sword *x, Boolean *over)
+{
+    word size, fields, f;
+    LineInfo *li = TL_LinePtr(o, line, &size);
+    dword cur = TL_LineToOffsetStart(o, line);
+    LineFlags flags;
+    WWFixedAsDWord pad;
+    sword oldEnd = 0, width = 0, left;
+    word n = 0;
+    Boolean isOver = FALSE, dummy;
+    const FieldInfo *fi;
+
+    if (!over)
+	over = &dummy;
+    li = TL_LinePtr(o, line, &size);
+    flags = li->LI_flags;
+    pad = ((dword) li->LI_spacePad.WBF_int << 16) |
+	  ((dword) li->LI_spacePad.WBF_frac << 8);
+    fields = TL_LineGetFieldCount(o, line);
+    *x = 0;
+    *over = FALSE;
+    if (pixel <= 0)
+	return cur;
+    *over = isOver = TRUE;
+    if (stop <= cur)
+	return cur;
+    for (f = 0; ; f++) {
+	if (f == fields) {
+	    /* calcFieldEnd: beyond the last field */
+	    *over = FALSE;
+	    if (!(flags & LF_ENDS_IN_CR) || !fields) {
+		if (flags & (LF_ENDS_IN_CR | LF_ENDS_IN_COLUMN_BREAK |
+			     LF_ENDS_IN_SECTION_BREAK))
+		    cur--;
+		*x = oldEnd;
+		return cur;
+	    }
+	    f--;
+	    fi = &li->LI_firstField + f;
+	    width = fi->FI_width;
+	    n = fi->FI_nChars;
+	    break;
+	}
+	fi = &li->LI_firstField + f;
+	if ((word) pixel < fi->FI_position) {
+	    /* betweenFields: in the room a tab made */
+	    if ((word) (pixel - oldEnd) <= (word) (fi->FI_position - pixel)) {
+		*x = oldEnd;
+		return cur;
+	    }
+	    *x = fi->FI_position;
+	    return cur + 1;
+	}
+	width = fi->FI_width;
+	oldEnd = (sword) (fi->FI_position + width);
+	n = fi->FI_nChars;
+	cur += n;
+	if (pixel <= oldEnd || cur >= stop)
+	    break;
+    }
+    /* inThisField: only the last field is padded */
+    if (f != fields - 1)
+	pad = 0;
+    cur -= n;
+    left = (sword) (oldEnd - width);
+    if (fi->FI_tab != RULER_TAB_TO_LINE_LEFT)
+	cur++;
+    if (stop <= cur) {
+	*x = left;
+	return cur;
+    }
+    cur += FieldTextPosition(o, cur, stop - cur, (sword) (pixel - left), pad,
+			     x);
+    *x = (sword) (*x + left);
+    return cur;
+}
+
+/*
+ * TL_LineFromPosition (SmallLineFromPositionGetInfo): the line at a
+ * height in the text; the last one below them all (*below set)
+ */
+dword TL_LineFromPosition(optr o, sword y, Boolean *below)
+{
+    dword n = TL_LineGetCount(o), i;
+    sdword pos = (sdword) y << 8;
+
+    if (below)
+	*below = FALSE;
+    for (i = 0; i < n; i++) {
+	const LineInfo *li = TL_LinePtr(o, i, NULL);
+
+	pos -= ((sdword) li->LI_hgt.WBF_int << 8) + li->LI_hgt.WBF_frac;
+	if (pos < 0)
+	    return i;
+    }
+    if (below)
+	*below = TRUE;
+    return n ? n - 1 : 0;
+}

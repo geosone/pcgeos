@@ -79,6 +79,22 @@
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS;
 /* Text/textMethodDraw.goc */
 @extern method VisTextClass, MSG_VIS_DRAW;
+@extern method VisTextClass, MSG_VIS_CLOSE;
+
+@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_ON;
+@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_OFF;
+@extern method VisTextClass, MSG_META_GAINED_SYS_FOCUS_EXCL;
+@extern method VisTextClass, MSG_META_LOST_SYS_FOCUS_EXCL;
+@extern method VisTextClass, MSG_META_GAINED_TARGET_EXCL;
+@extern method VisTextClass, MSG_META_LOST_TARGET_EXCL;
+@extern method VisTextClass, MSG_META_GAINED_SYS_TARGET_EXCL;
+@extern method VisTextClass, MSG_META_LOST_SYS_TARGET_EXCL;
+
+@extern method VisTextClass, MSG_META_KBD_CHAR;
+@extern method VisTextClass, MSG_VIS_TEXT_DO_KEY_FUNCTION;
+@extern method VisTextClass, MSG_META_START_SELECT;
+@extern method VisTextClass, MSG_META_PTR;
+@extern method VisTextClass, MSG_META_END_SELECT;
 
 /* VisTextInitialize */
 @method VisTextClass, MSG_META_INITIALIZE

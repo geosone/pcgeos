@@ -7,6 +7,7 @@
  * OpenGetPtrImage are in cutilsPtrImages.goc.
  */
 @include "cGeode.goh"
+@include <Objects/vTextC.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Objects/gViewC.goh>
 @include <Objects/gContC.goh>
@@ -973,34 +974,41 @@ static const KeyboardShortcut textKbdBindings[] = {
     KS_PHYSICAL | UKEY(VC_JOYSTICK_0)
 };
 
-/* UserCheckAcceleratorChar (userUtils.asm): a shortcut, not text */
-static Boolean CheckAcceleratorChar(word c, word flags)
+/* what the keys do, in the order of the table (VisTextKeyFunction) */
+static const word textKbdFunctions[] = {
+    VTKF_SELECT_ADJUST_BACKWARD_WORD, VTKF_SELECT_ADJUST_FORWARD_WORD,
+    VTKF_SELECT_ADJUST_BACKWARD_PARAGRAPH,
+    VTKF_SELECT_ADJUST_FORWARD_PARAGRAPH,
+    VTKF_SELECT_ADJUST_TO_START, VTKF_SELECT_ADJUST_TO_END,
+    VTKF_BACKWARD_WORD, VTKF_FORWARD_WORD,
+    VTKF_BACKWARD_PARAGRAPH, VTKF_FORWARD_PARAGRAPH,
+    VTKF_START_OF_TEXT, VTKF_END_OF_TEXT,
+    VTKF_SELECT_ADJUST_BACKWARD_CHAR, VTKF_SELECT_ADJUST_FORWARD_CHAR,
+    VTKF_SELECT_ADJUST_BACKWARD_LINE, VTKF_SELECT_ADJUST_FORWARD_LINE,
+    VTKF_SELECT_ADJUST_START_OF_LINE, VTKF_SELECT_ADJUST_END_OF_LINE,
+    VTKF_BACKWARD_LINE, VTKF_FORWARD_LINE,
+    VTKF_BACKWARD_CHAR, VTKF_FORWARD_CHAR,
+    VTKF_START_OF_LINE, VTKF_END_OF_LINE,
+    VTKF_DELETE_BACKWARD_CHAR, VTKF_DELETE_CHAR,
+    VTKF_DELETE_BACKWARD_CHAR, VTKF_DELETE_CHAR,
+    VTKF_DELETE_BACKWARD_WORD, VTKF_DELETE_WORD,
+    VTKF_DELETE_BACKWARD_LINE, VTKF_DELETE_LINE,
+    VTKF_SELECT_WORD, VTKF_DESELECT, VTKF_TOGGLE_OVERSTRIKE_MODE,
+    VTKF_TOGGLE_SMART_QUOTES, VTKF_TOGGLE_SMART_QUOTES,
+    VTKF_TOGGLE_SMART_QUOTES, VTKF_TOGGLE_SMART_QUOTES,
+    VTKF_BACKWARD_CHAR, VTKF_FORWARD_CHAR
+};
+
+/*
+ * SpecGetTextKbdBindings (SPIR_GET_TEXT_KBD_BINDINGS): the text
+ * object's keys: the shortcuts, their count and the function of each
+ */
+const KeyboardShortcut *SpecGetTextKbdBindings(word *count,
+					       const word **functions)
 {
-    byte cs = c >> 8, ch = c & 0xff, ss = flags >> 8;
-
-    if (cs == CS_UI_FUNCS)
-	return TRUE;
-    if (flags & CF_TEMP_ACCENT)
-	return FALSE;
-    if (ss & (SS_LCTRL | SS_RCTRL))
-	return !(ss & (SS_LALT | SS_RALT)) || cs == CS_CONTROL;
-    if (ss & (SS_LALT | SS_RALT))
-	return TRUE;
-    return cs == CS_CONTROL && ch != VC_TAB && ch != VC_ENTER &&
-	   ch != VC_CTRL_L && ch != VC_BACKSPACE;
-}
-
-/* UserCheckInsertableCtrlChar: a keypad character that is text */
-static Boolean CheckInsertableCtrlChar(word c, word flags, word state)
-{
-    byte ch = c & 0xff;
-
-    if ((c >> 8) != CS_CONTROL || ((flags >> 8) & (SS_LCTRL | SS_RCTRL)))
-	return FALSE;
-    if ((ch >= '*' && ch <= '-') || ch == '/')
-	return TRUE;
-    return (state & TS_NUMLOCK) && !(flags & CF_EXTENDED) &&
-	   ch >= '.' && ch <= '9';
+    *count = sizeof(textKbdBindings) / sizeof(textKbdBindings[0]);
+    *functions = textKbdFunctions;
+    return textKbdBindings;
 }
 
 /*
@@ -1020,8 +1028,8 @@ Boolean SpecCheckIfSpecialUIChar(word c, word flags, word state)
 	return FALSE;
     if (flags & CF_RELEASE)
 	return ch >= 0x80;
-    if (!CheckAcceleratorChar(c, flags) ||
-	CheckInsertableCtrlChar(c, flags, state))
+    if (!UserCheckAcceleratorChar(c, flags, state) ||
+	UserCheckInsertableCtrlChar(c, flags, state))
 	return FALSE;
     return FlowCheckKbdShortcut((KeyboardShortcut *) textKbdBindings,
 				sizeof(textKbdBindings) /

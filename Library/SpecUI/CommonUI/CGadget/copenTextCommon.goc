@@ -1,0 +1,38 @@
+/*
+ * copenTextCommon.goc -- the specific UI's part of text objects (after
+ * copenTextCommon.asm): so far the text cursor.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: OLTextClass, the
+ * pointer image over text.
+ */
+@include "cGeode.goh"
+@include <Objects/vTextC.goh>
+#include <font.h>
+
+/*
+ * SpecDrawTextCursor (SPIR_DRAW_TEXT_CURSOR): the cursor of a text
+ * object, inverting: a line one pixel wide from the ascent to the
+ * descent of the font.  The gstate is at the cursor's place on the
+ * baseline, with the font of the text there.  Only an object with the
+ * focus or the target shows a cursor (unless it asks for one without).
+ */
+void SpecDrawTextCursor(optr o, GStateHandle gstate)
+{
+    VisTextInstance *t = ObjDerefVis(o);
+    XYValueAsDWord p;
+    sword x, y, ascent, descent;
+
+    if (!ObjVarFindData(o, ATTR_VIS_TEXT_CURSOR_NO_FOCUS) &&
+	!(t->VTI_intSelFlags & (VTISF_IS_FOCUS | VTISF_IS_TARGET)))
+	return;
+    GrSetAreaMaskSys(gstate, SDM_100);
+    GrSetMixMode(gstate, MM_INVERT);
+    ascent = (sword) GrFontMetrics(gstate, GFMI_ASCENT_ROUNDED);
+    descent = (sword) GrFontMetrics(gstate, GFMI_DESCENT_ROUNDED);
+    p = GrGetCurPos(gstate);
+    x = (sword) DWORD_X(p);
+    y = (sword) DWORD_Y(p);
+    GrFillRect(gstate, x, (sword) (y - ascent), (sword) (x + 1),
+	       (sword) (y + descent));
+    GrSetMixMode(gstate, MM_COPY);
+}

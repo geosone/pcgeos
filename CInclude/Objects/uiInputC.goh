@@ -284,6 +284,14 @@ pragma Alias (FlowDispatchSendOnOrDestroyClassedEvent,
 #endif
 
 #ifdef GEOS_PORT32
+/* a key that may be a shortcut rather than text; one of the keypad
+ * that is text all the same (flags: CharFlags, the ShiftState above;
+ * state: the ToggleState) */
+extern Boolean UserCheckAcceleratorChar(word character, word flags,
+					word state);
+extern Boolean UserCheckInsertableCtrlChar(word character, word flags,
+					   word state);
+
 /*
  * The other Flow routines in C (Port32/ABI.md section 13x): the grab is
  * at offsetToGrab in the master part whose offset word is at

@@ -1,0 +1,117 @@
+/*
+ * tslMethodFocus.goc -- the focus and the target (after
+ * tslMethodFocus.asm).
+ *
+ * The object with the system's focus shows its cursor (flashing) and
+ * gets the keyboard; it keeps its gstate as long.  The target shows
+ * its selection: the system's target (TEMP_VIS_TEXT_SYS_TARGET) also
+ * without the focus.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: the notifications (the
+ * focus text object for the application's GCN list, the controllers',
+ * the selection's context), showing the selection on gaining the
+ * target, undo, the FEP.
+ */
+@include "textInt.goh"
+
+@extern method VisTextClass, MSG_META_GAINED_SYS_FOCUS_EXCL;
+@extern method VisTextClass, MSG_META_LOST_SYS_FOCUS_EXCL;
+@extern method VisTextClass, MSG_META_GAINED_TARGET_EXCL;
+@extern method VisTextClass, MSG_META_LOST_TARGET_EXCL;
+@extern method VisTextClass, MSG_META_GAINED_SYS_TARGET_EXCL;
+@extern method VisTextClass, MSG_META_LOST_SYS_TARGET_EXCL;
+
+/* the focus flag changed: a range of the system's target looks the
+ * same with and without the focus */
+static void SetFocus(optr o, Boolean focus)
+{
+    Boolean same = ObjVarFindData(o, TEMP_VIS_TEXT_SYS_TARGET) &&
+		   !TSL_SelectIsCursor(o);
+
+    if (!same)
+	EditUnHilite(o);
+    if (focus)
+	VT(o)->VTI_intSelFlags |= VTISF_IS_FOCUS;
+    else
+	VT(o)->VTI_intSelFlags &= ~VTISF_IS_FOCUS;
+    if (!same)
+	EditHilite(o);
+}
+
+/* VisTextGainedFocusExcl */
+@extern method VisTextClass, MSG_META_GAINED_SYS_FOCUS_EXCL
+{
+    if (pself->VTI_intSelFlags & VTISF_IS_FOCUS)
+	return;
+    TextGStateCreate(oself);
+    SetFocus(oself, TRUE);
+    TSL_StartCursorCommon(oself);
+    SendToTextOutput(oself, MSG_META_TEXT_GAINED_FOCUS);
+    VisForceGrabKbd(oself);
+}
+
+/* VisTextLostFocusExcl */
+@extern method VisTextClass, MSG_META_LOST_SYS_FOCUS_EXCL
+{
+    if (!(pself->VTI_intSelFlags & VTISF_IS_FOCUS))
+	return;
+    TSL_StopCursorTimer(oself);
+    /* (the cursor as it stands when not flashing, then taken away) */
+    CursorForceOn(oself);
+    SetFocus(oself, FALSE);
+    TextGStateDestroy(oself);
+    SendToTextOutput(oself, MSG_META_TEXT_LOST_FOCUS);
+    VisReleaseKbd(oself);
+}
+
+/* ChangeSelectionFlags */
+static void SetTarget(optr o, Boolean target, Message msg)
+{
+    TextGStateCreate(o);
+    EditUnHilite(o);
+    if (target)
+	VT(o)->VTI_intSelFlags |= VTISF_IS_TARGET;
+    else
+	VT(o)->VTI_intSelFlags &= ~VTISF_IS_TARGET;
+    EditHilite(o);
+    TextGStateDestroy(o);
+    SendToTextOutput(o, msg);
+}
+
+@extern method VisTextClass, MSG_META_GAINED_TARGET_EXCL
+{
+    SetTarget(oself, TRUE, MSG_META_TEXT_GAINED_TARGET);
+}
+
+@extern method VisTextClass, MSG_META_LOST_TARGET_EXCL
+{
+    SetTarget(oself, FALSE, MSG_META_TEXT_LOST_TARGET);
+}
+
+static void SetSysTarget(optr o, Boolean target)
+{
+    Boolean focus = (VT(o)->VTI_intSelFlags & VTISF_IS_FOCUS) != 0;
+
+    if (!focus) {
+	TextGStateCreate(o);
+	EditUnHilite(o);
+    }
+    if (target)
+	(void) ObjVarAddData(o, TEMP_VIS_TEXT_SYS_TARGET, 0);
+    else
+	(void) ObjVarDeleteData(o, TEMP_VIS_TEXT_SYS_TARGET);
+    if (!focus) {
+	EditHilite(o);
+	TextGStateDestroy(o);
+    }
+}
+
+@extern method VisTextClass, MSG_META_GAINED_SYS_TARGET_EXCL
+{
+    SetSysTarget(oself, TRUE);
+}
+
+@extern method VisTextClass, MSG_META_LOST_SYS_TARGET_EXCL
+{
+    SetSysTarget(oself, FALSE);
+}

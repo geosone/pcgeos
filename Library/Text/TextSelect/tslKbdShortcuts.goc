@@ -1,0 +1,397 @@
+/*
+ * tslKbdShortcuts.goc -- what the keys of a text object do (after
+ * tslKbdShortcuts.asm, of tslUtils.asm the edges of words, lines and
+ * paragraphs): the VisTextKeyFunctions, which the specific UI binds
+ * keys to (SPIR_GET_TEXT_KBD_BINDINGS).
+ *
+ * Moving puts a cursor somewhere (at the end of a range towards which
+ * the move goes); moves up and down aim for VTI_goalPosition, which
+ * the other moves set.  Adjusting moves the end of the selection away
+ * from where it started.  Deleting replaces a range with nothing, as
+ * the user's change.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects.  A cursor at the
+ * end of a line that was wrapped would stand at the start of the next
+ * (the cursor is placed by its offset), so End and the moves up and
+ * down stop one character before.  Not yet: the selection scrolled
+ * into view, overstrike mode, smart quotes, pages, the notifications.
+ * As in the asm VTKF_SELECT_LINE, _PARAGRAPH and _OBJECT do nothing.
+ */
+@include "textInt.goh"
+
+@extern method VisTextClass, MSG_VIS_TEXT_DO_KEY_FUNCTION;
+
+#define C_CR_CHAR	0x0d
+
+/* CC_WORD_PART: letters, digits and the apostrophe */
+static Boolean IsWordPart(optr o, dword offset)
+{
+    byte c = (byte) TS_GetCharAtOffset(o, offset);
+
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+	   (c >= 'a' && c <= 'z') || c >= 0x80 || c == '\'';
+}
+
+/* FindNextWordEdge: the end of the word or of the room between words
+ * an offset is in */
+static dword FindNextWordEdge(optr o, dword off)
+{
+    dword size = TS_GetTextSize(o);
+    Boolean word;
+
+    if (off >= size)
+	return size;
+    word = IsWordPart(o, off);
+    while (off < size && IsWordPart(o, off) == word)
+	off++;
+    return off;
+}
+
+/* FindPreviousWordEdge: the start of the word or room before an
+ * offset */
+static dword FindPreviousWordEdge(optr o, dword off)
+{
+    Boolean word;
+
+    if (!off)
+	return 0;
+    off--;
+    word = IsWordPart(o, off);
+    while (off && IsWordPart(o, off - 1) == word)
+	off--;
+    return off;
+}
+
+/* FindPreviousParagraphEdge: the start of the paragraph before an
+ * offset */
+static dword FindPreviousParagraphEdge(optr o, dword off)
+{
+    if (!off)
+	return 0;
+    off--;
+    while (off && (byte) TS_GetCharAtOffset(o, off - 1) != C_CR_CHAR)
+	off--;
+    return off;
+}
+
+/* FindNextParagraphEdge: the start of the next paragraph, or the end
+ * of the text */
+static dword FindNextParagraphEdge(optr o, dword off)
+{
+    dword size = TS_GetTextSize(o);
+
+    while (off < size) {
+	if ((byte) TS_GetCharAtOffset(o, off++) == C_CR_CHAR)
+	    break;
+    }
+    return off;
+}
+
+/* where a line's text ends for the cursor: before its carriage
+ * return, before the last character of a line that was wrapped */
+dword TSL_LineCursorEnd(optr o, dword line)
+{
+    dword start = TL_LineToOffsetStart(o, line);
+    const LineInfo *li = TL_LinePtr(o, line, NULL);
+    dword count = TL_LineGetCharCount(li);
+
+    if (!count)
+	return start;
+    if ((li->LI_flags & (LF_ENDS_IN_CR | LF_ENDS_IN_COLUMN_BREAK |
+			 LF_ENDS_IN_SECTION_BREAK)) ||
+	line + 1 < TL_LineGetCount(o))
+	return start + count - 1;
+    return start + count;
+}
+
+/* ComputeEventPositionAndOffset: the offset on a line nearest the
+ * goal position */
+static dword LineOffsetAtGoal(optr o, dword line)
+{
+    VisTextInstance *t = VT(o);
+    sword x = (sword) (t->VTI_goalPosition - t->VTI_leftOffset -
+		       TL_LinePtr(o, line, NULL)->LI_adjustment), pos;
+    dword off, end = TSL_LineCursorEnd(o, line);
+
+    off = TL_LineTextPosition(o, line, x, TEXT_ADDRESS_PAST_END, &pos,
+			      NULL);
+    return off > end ? end : off;
+}
+
+/* ForwardOrBackwardLine: the cursor a line down or up; a range
+ * becomes a cursor at its end */
+static void MoveLine(optr o, Boolean forward)
+{
+    dword start, end, line;
+
+    TSL_SelectGetSelection(o, &start, &end);
+    if (start != end) {
+	TSL_SelectCursor(o, forward ? end : start, FALSE);
+	return;
+    }
+    line = TSL_GetCursorLine(o);
+    if (forward) {
+	if (line + 1 >= TL_LineGetCount(o))
+	    return;
+	line++;
+    } else {
+	if (!line)
+	    return;
+	line--;
+    }
+    TSL_SelectCursor(o, LineOffsetAtGoal(o, line), FALSE);
+}
+
+/* VTFSelectAdjustForwardLine, VTFSelectAdjustBackwardLine */
+static void AdjustLine(optr o, Boolean forward)
+{
+    dword adjust = TSL_SelectGetAdjustPosition(o, forward), off;
+    dword line = TL_LineFromOffset(o, adjust, forward, NULL);
+    dword n = TL_LineGetCount(o);
+
+    for (;;) {
+	if (forward) {
+	    if (line + 1 >= n) {
+		/* (the last line: to its end) */
+		off = TS_GetTextSize(o);
+		break;
+	    }
+	    line++;
+	} else {
+	    if (!line) {
+		off = 0;
+		break;
+	    }
+	    line--;
+	}
+	off = LineOffsetAtGoal(o, line);
+	if (off != adjust)
+	    break;
+    }
+    TSL_SelectAdjust(o, off);
+}
+
+/* DeleteRange: by the user */
+static void DeleteRange(optr o, dword start, dword end)
+{
+    VisTextReplaceParameters p;
+
+    if (!(VT(o)->VTI_state & VTS_EDITABLE) || start == end)
+	return;
+    memset(&p, 0, sizeof(p));
+    p.VTRP_range.VTR_start = start < end ? start : end;
+    p.VTRP_range.VTR_end = start < end ? end : start;
+    p.VTRP_flags = VTRF_FILTER | VTRF_KEYBOARD_INPUT |
+		   VTRF_USER_MODIFICATION;
+    (void) @call o::MSG_VIS_TEXT_REPLACE_TEXT(&p);
+}
+
+/* the word or the room between words at an offset */
+static void SelectWord(optr o, dword off)
+{
+    dword size = TS_GetTextSize(o), start = off, end = off;
+    VisTextInstance *t;
+    Boolean word;
+
+    if (off < size) {
+	word = IsWordPart(o, off);
+	while (start && IsWordPart(o, start - 1) == word)
+	    start--;
+	end = FindNextWordEdge(o, off);
+    }
+    EditUnHilite(o);
+    TSL_SelectSetSelection(o, start, end);
+    EditHilite(o);
+    t = VT(o);
+    t->VTI_selectMinStart = start;
+    t->VTI_selectMinEnd = end;
+}
+
+/*
+ * TSL_HandleKbdShortcut: a key function done; FALSE if the object is
+ * not on the screen or the function is not one of these
+ */
+Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
+{
+    dword start, end, size, line, off;
+    Boolean range;
+
+    if (!TextCheckCanDraw(o))
+	return FALSE;
+    TSL_SelectGetSelection(o, &start, &end);
+    range = start != end;
+    size = TS_GetTextSize(o);
+    switch (f) {
+    case VTKF_FORWARD_LINE:
+	MoveLine(o, TRUE);
+	break;
+    case VTKF_BACKWARD_LINE:
+	MoveLine(o, FALSE);
+	break;
+    case VTKF_SELECT_ADJUST_FORWARD_LINE:
+	AdjustLine(o, TRUE);
+	break;
+    case VTKF_SELECT_ADJUST_BACKWARD_LINE:
+	AdjustLine(o, FALSE);
+	break;
+    case VTKF_FORWARD_CHAR:
+	TSL_SelectCursor(o, range ? end : end + 1, TRUE);
+	break;
+    case VTKF_BACKWARD_CHAR:
+	TSL_SelectCursor(o, range || !start ? start : start - 1, TRUE);
+	break;
+    case VTKF_FORWARD_WORD:
+	TSL_SelectCursor(o, range ? end : FindNextWordEdge(o, end), TRUE);
+	break;
+    case VTKF_BACKWARD_WORD:
+	TSL_SelectCursor(o, range ? start : FindPreviousWordEdge(o, start),
+			 TRUE);
+	break;
+    case VTKF_FORWARD_PARAGRAPH:
+	TSL_SelectCursor(o, range ? end : FindNextParagraphEdge(o, end),
+			 TRUE);
+	break;
+    case VTKF_BACKWARD_PARAGRAPH:
+	TSL_SelectCursor(o, range ? start
+				  : FindPreviousParagraphEdge(o, start),
+			 TRUE);
+	break;
+    case VTKF_START_OF_LINE:
+	if (!range)
+	    start = TL_LineToOffsetStart(o, TSL_GetCursorLine(o));
+	TSL_SelectCursor(o, start, TRUE);
+	break;
+    case VTKF_END_OF_LINE:
+	if (!range)
+	    end = TSL_LineCursorEnd(o, TSL_GetCursorLine(o));
+	TSL_SelectCursor(o, end, TRUE);
+	break;
+    case VTKF_START_OF_TEXT:
+	TSL_SelectCursor(o, range ? start : 0, TRUE);
+	break;
+    case VTKF_END_OF_TEXT:
+	TSL_SelectCursor(o, range ? end : size, TRUE);
+	break;
+    case VTKF_SELECT_WORD:
+	SelectWord(o, start);
+	break;
+    case VTKF_SELECT_LINE:
+    case VTKF_SELECT_PARAGRAPH:
+    case VTKF_SELECT_OBJECT:
+	break;
+    case VTKF_SELECT_ADJUST_FORWARD_CHAR:
+	TSL_SelectAdjust(o, TSL_SelectGetAdjustPosition(o, TRUE) + 1);
+	break;
+    case VTKF_SELECT_ADJUST_BACKWARD_CHAR:
+	off = TSL_SelectGetAdjustPosition(o, FALSE);
+	TSL_SelectAdjust(o, off ? off - 1 : 0);
+	break;
+    case VTKF_SELECT_ADJUST_FORWARD_WORD:
+	TSL_SelectAdjust(o, FindNextWordEdge(o,
+			TSL_SelectGetAdjustPosition(o, TRUE)));
+	break;
+    case VTKF_SELECT_ADJUST_BACKWARD_WORD:
+	TSL_SelectAdjust(o, FindPreviousWordEdge(o,
+			TSL_SelectGetAdjustPosition(o, FALSE)));
+	break;
+    case VTKF_SELECT_ADJUST_FORWARD_PARAGRAPH:
+	TSL_SelectAdjust(o, FindNextParagraphEdge(o,
+			TSL_SelectGetAdjustPosition(o, TRUE)));
+	break;
+    case VTKF_SELECT_ADJUST_BACKWARD_PARAGRAPH:
+	TSL_SelectAdjust(o, FindPreviousParagraphEdge(o,
+			TSL_SelectGetAdjustPosition(o, FALSE)));
+	break;
+    case VTKF_SELECT_ADJUST_TO_START:
+	TSL_SelectAdjust(o, 0);
+	break;
+    case VTKF_SELECT_ADJUST_TO_END:
+	TSL_SelectAdjust(o, size);
+	break;
+    case VTKF_SELECT_ADJUST_START_OF_LINE:
+	/* FindPreviousLineEdge: of the line the offset ends or is on */
+	off = TSL_SelectGetAdjustPosition(o, FALSE);
+	(void) TL_LineFromOffset(o, off, TRUE, &off);
+	TSL_SelectAdjust(o, off);
+	break;
+    case VTKF_SELECT_ADJUST_END_OF_LINE:
+	/* FindNextLineEdge: of the line the offset starts or is on */
+	off = TSL_SelectGetAdjustPosition(o, TRUE);
+	line = TL_LineFromOffset(o, off, FALSE, &off);
+	TSL_SelectAdjust(o, off + TL_LineGetCharCount(
+					TL_LinePtr(o, line, NULL)));
+	break;
+    case VTKF_DELETE_BACKWARD_CHAR:
+	if (range || start)
+	    DeleteRange(o, range ? start : start - 1, end);
+	break;
+    case VTKF_DELETE_CHAR:
+	if (range || end < size)
+	    DeleteRange(o, start, range ? end : end + 1);
+	break;
+    case VTKF_DELETE_BACKWARD_WORD:
+	DeleteRange(o, range ? start : FindPreviousWordEdge(o, start), end);
+	break;
+    case VTKF_DELETE_WORD:
+	DeleteRange(o, start, range ? end : FindNextWordEdge(o, end));
+	break;
+    case VTKF_DELETE_BACKWARD_LINE:
+	if (!range)
+	    start = TL_LineToOffsetStart(o, TSL_GetCursorLine(o));
+	DeleteRange(o, start, end);
+	break;
+    case VTKF_DELETE_LINE:
+	if (!range) {
+	    /* to the line's carriage return; at it, or on a line that
+	     * was wrapped, to the next line */
+	    const LineInfo *li;
+
+	    line = TSL_GetCursorLine(o);
+	    off = TL_LineToOffsetStart(o, line);
+	    li = TL_LinePtr(o, line, NULL);
+	    end = off + TL_LineGetCharCount(li);
+	    if ((li->LI_flags & LF_ENDS_IN_CR) && start < end - 1)
+		end--;
+	}
+	DeleteRange(o, start, end);
+	break;
+    case VTKF_DELETE_BACKWARD_PARAGRAPH:
+	DeleteRange(o, range ? start : FindPreviousParagraphEdge(o, start),
+		    end);
+	break;
+    case VTKF_DELETE_PARAGRAPH:
+	if (!range) {
+	    start = start ? FindPreviousParagraphEdge(o, start + 1) : 0;
+	    end = FindNextParagraphEdge(o, end);
+	}
+	DeleteRange(o, start, end);
+	break;
+    case VTKF_DELETE_TO_START:
+	DeleteRange(o, 0, end);
+	break;
+    case VTKF_DELETE_TO_END:
+	DeleteRange(o, start, size);
+	break;
+    case VTKF_DELETE_EVERYTHING:
+	DeleteRange(o, 0, size);
+	break;
+    case VTKF_DESELECT:
+	TSL_SelectCursor(o, start, TRUE);
+	break;
+    case VTKF_TOGGLE_OVERSTRIKE_MODE:
+    case VTKF_TOGGLE_SMART_QUOTES:
+	break;
+    default:
+	return FALSE;
+    }
+    return TRUE;
+}
+
+/* VisTextDoKeyFunction */
+@extern method VisTextClass, MSG_VIS_TEXT_DO_KEY_FUNCTION
+{
+    (void) data;
+    TextGStateCreate(oself);
+    (void) TSL_HandleKbdShortcut(oself, func);
+    TextGStateDestroy(oself);
+}

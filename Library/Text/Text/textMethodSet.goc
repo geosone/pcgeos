@@ -95,6 +95,9 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
 	return TRUE;
     hadText = size != 0;
     flags = p->VTRP_flags;
+    /* the selection off the screen while the text changes */
+    TextGStateCreate(o);
+    EditUnHilite(o);
     AdjustSelectionForReplacement(o, p);
     start = p->VTRP_range.VTR_start;
     deleted = p->VTRP_range.VTR_end - start;
@@ -103,6 +106,8 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     /* the lines again, those that changed drawn */
     TextRecalc(o, start, inserted, deleted);
     TextScreenUpdate(o);
+    EditHilite(o);
+    TextGStateDestroy(o);
     t = VT(o);
     t->VTI_selectMinStart = t->VTI_selectMinEnd = t->VTI_selectStart;
     t->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
