@@ -38,6 +38,7 @@ typedef struct {
     word	TOS_empty, TOS_notEmpty;
     char	TOS_text[40];
     word	TOS_line[16];
+    word	TOS_geo[6];
 } TOState;
 
 static int fails;
@@ -85,7 +86,8 @@ int main(int argc, char **argv)
 {
     static const char *const text[] = {
 	"Hello, world!", "bye, world!?", "!!?bye!!", "abcdefgh", "bh",
-	"in aa blockin", "aXYde", "aXYde", "aXYde", "Hi Hi Hi"
+	"in aa blockin", "aXYde", "aXYde", "aXYde", "Hi Hi Hi",
+	"Hi Hi Hi Hi Hi"
     };
     GeodeHandle app;
     GeodeLoadError e;
@@ -129,7 +131,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 10; i++) {
+    for (i = 1; i <= 11; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);
@@ -139,6 +141,10 @@ int main(int argc, char **argv)
     for (i = 0; i < 16; i++)
 	printf(" %u", st->TOS_line[i]);
     printf("\n");
+    printf("geometry: line %u, average %u, min %u, simple min %u; "
+	   "height at 100: %u, cached %u\n",
+	   st->TOS_geo[0], st->TOS_geo[1], st->TOS_geo[2], st->TOS_geo[3],
+	   st->TOS_geo[4], st->TOS_geo[5]);
     printf("modified %u, not modified %u, empty %u, not empty %u\n",
 	   st->TOS_modified, st->TOS_notModified, st->TOS_empty,
 	   st->TOS_notEmpty);

@@ -1,0 +1,143 @@
+/*
+ * textMethodGeometry.goc -- the sizes a text object answers (after
+ * textMethodGeometry.asm; VisTextGetOneLineWidth of
+ * textMethodInstance.asm): for the specific UI's geometry.
+ *
+ * MSG_VIS_TEXT_CALC_HEIGHT gives the height the text needs at a width
+ * (with the object's top and bottom margins).  With cacheResult the
+ * object is to become that wide: the height and the width are kept
+ * (VTI_height, VTI_lastWidth), and lines of another height are thrown
+ * away (they are made again when the geometry is valid).  The same
+ * width again answers from VTI_height.
+ *
+ * Port32 (Port32/ABI.md section 13z): the height is taken from a
+ * calculation of all lines into a line storage of its own (the asm
+ * calculates line by line into a buffer).
+ */
+@include "textInt.goh"
+#include <font.h>
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_HEIGHT;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_MIN_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SIMPLE_MIN_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_AVERAGE_CHAR_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ONE_LINE_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_CALC_HEIGHT;
+
+#define VIS_TEXT_MIN_TEXT_FIELD_WIDTH	47
+
+/* TA_CharAttrRunSetupGStateForCalc: the object's gstate with the font
+ * of its character attribute; a metric of that font */
+static word FontMetric(optr o, GFM_info info)
+{
+    VisTextCharAttr ca;
+    GStateHandle g;
+    word v;
+
+    TextGStateCreate(o);
+    g = VT(o)->VTI_gstate;
+    TA_GetSingleCharAttr(o, &ca);
+    GrSetFont(g, ca.VTCA_fontID,
+	      ((dword) ca.VTCA_pointSize.WBF_int << 16) |
+	      ((dword) ca.VTCA_pointSize.WBF_frac << 8));
+    GrSetTextStyle(g, ca.VTCA_textStyles, (TextStyle) ~ca.VTCA_textStyles);
+    v = (word) GrFontMetrics(g, info);
+    TextGStateDestroy(o);
+    return v;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_HEIGHT
+{
+    return FontMetric(oself, GFMI_MAX_ADJUSTED_HEIGHT_ROUNDED);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_MIN_WIDTH
+{
+    word w = FontMetric(oself, GFMI_MAX_WIDTH_ROUNDED);
+
+    if (w < VIS_TEXT_MIN_TEXT_FIELD_WIDTH)
+	w = VIS_TEXT_MIN_TEXT_FIELD_WIDTH;
+    return (word) (w + 2 * VT(oself)->VTI_lrMargin);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SIMPLE_MIN_WIDTH
+{
+    word w = FontMetric(oself, GFMI_MAX_WIDTH_ROUNDED);
+
+    return (word) (w + 2 * VT(oself)->VTI_lrMargin);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_AVERAGE_CHAR_WIDTH
+{
+    return FontMetric(oself, GFMI_AVERAGE_WIDTH_ROUNDED);
+}
+
+/* VisTextGetOneLineWidth: the text (or its first characters) on one
+ * line */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ONE_LINE_WIDTH
+{
+    VisTextCharAttr ca;
+    GStateHandle g;
+    const char *text;
+    word after, w;
+
+    TextGStateCreate(oself);
+    g = VT(oself)->VTI_gstate;
+    TA_GetSingleCharAttr(oself, &ca);
+    GrSetFont(g, ca.VTCA_fontID,
+	      ((dword) ca.VTCA_pointSize.WBF_int << 16) |
+	      ((dword) ca.VTCA_pointSize.WBF_frac << 8));
+    GrSetTextStyle(g, ca.VTCA_textStyles, (TextStyle) ~ca.VTCA_textStyles);
+    text = TS_LockTextPtr(oself, 0, &after);
+    if (!charsToCalc || charsToCalc > after)
+	charsToCalc = after;
+    w = charsToCalc ? GrTextWidth(g, text, charsToCalc) : 0;
+    TextGStateDestroy(oself);
+    return w;
+}
+
+static sdword W(const WBFixed *w)
+{
+    return ((sdword) w->WBF_int << 8) + w->WBF_frac;
+}
+
+/* VisTextCalcHeight */
+@extern method VisTextClass, MSG_VIS_TEXT_CALC_HEIGHT
+{
+    VisInstance *v = (VisInstance *) pself;
+    WBFixed height = pself->VTI_height, old = pself->VTI_height;
+    sword right;
+    ChunkHandle lines;
+
+    if (width != pself->VTI_lastWidth) {
+	if (pself->VTI_state & VTS_ONE_LINE) {
+	    /* (one character attribute: its line) */
+	    height.WBF_int = @call oself::MSG_VIS_TEXT_GET_LINE_HEIGHT();
+	    height.WBF_frac = 0;
+	} else {
+	    /* all the lines at that width, in a storage of their own */
+	    right = v->VI_bounds.R_right;
+	    lines = pself->VTI_lines;
+	    v->VI_bounds.R_right = (sword) (v->VI_bounds.R_left + width);
+	    pself->VTI_lines = 0;
+	    TL_LineStorageCreate(oself);
+	    TextCompleteRecalc(oself);
+	    height = VT(oself)->VTI_height;
+	    TL_LineStorageDestroy(oself);
+	    pself = VT(oself);
+	    v = (VisInstance *) pself;
+	    pself->VTI_lines = lines;
+	    pself->VTI_height = old;
+	    v->VI_bounds.R_right = right;
+	}
+	if (cacheResult) {
+	    if (W(&old) != W(&height))
+		TL_LineStorageDestroy(oself);
+	    pself = VT(oself);
+	    pself->VTI_lastWidth = width;
+	    pself->VTI_height = height;
+	}
+    }
+    pself = VT(oself);
+    return (word) (((W(&height) + 0xff) >> 8) + 2 * pself->VTI_tbMargin);
+}

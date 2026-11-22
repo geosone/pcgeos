@@ -26,6 +26,7 @@ typedef struct {
     word	TOS_empty, TOS_notEmpty;
     char	TOS_text[40];		/* TOText at the end of a step */
     word	TOS_line[16];		/* of step 10, to print */
+    word	TOS_geo[6];
 } TOState;
 
 TOState toState;
@@ -682,6 +683,51 @@ static Boolean ChunkIs(optr c, const char *text)
 	TOCHECK(gr.VTGLIRV_byteCount ==
 		offsetof(LineInfo, LI_firstField) + sizeof(FieldInfo) &&
 		b.li.LI_firstField.FI_width == 38);
+	break;
+    }
+    case 11: {
+	/* the sizes for the geometry: of the font; of the text on one
+	 * line; the height at a width, asked only (nothing changes) and
+	 * to be cached (the lines of another height go, to be made
+	 * again when the geometry is valid) */
+	VisTextInstance *t = ObjDerefVis(@TOText);
+	word tb = 2 * t->VTI_tbMargin, lr = 2 * t->VTI_lrMargin;
+
+	toState.TOS_geo[0] = @call TOText::MSG_VIS_TEXT_GET_LINE_HEIGHT();
+	toState.TOS_geo[1] = @call TOText::MSG_VIS_TEXT_GET_AVERAGE_CHAR_WIDTH();
+	toState.TOS_geo[2] = @call TOText::MSG_VIS_TEXT_GET_MIN_WIDTH();
+	toState.TOS_geo[3] = @call TOText::MSG_VIS_TEXT_GET_SIMPLE_MIN_WIDTH();
+	TOCHECK(toState.TOS_geo[0] >= 12 && toState.TOS_geo[0] <= 14);
+	TOCHECK(toState.TOS_geo[1] >= 4 && toState.TOS_geo[1] <= 8);
+	TOCHECK(toState.TOS_geo[2] == 47 + lr &&
+		toState.TOS_geo[3] < toState.TOS_geo[2] &&
+		toState.TOS_geo[3] > lr + 6);
+	TOCHECK(@call TOText::MSG_VIS_TEXT_GET_ONE_LINE_WIDTH(0) == 38 &&
+		@call TOText::MSG_VIS_TEXT_GET_ONE_LINE_WIDTH(2) == 10);
+	@call TOText::MSG_VIS_TEXT_REPLACE_ALL_PTR("Hi Hi Hi Hi Hi", 0);
+	t = ObjDerefVis(@TOText);
+	TOCHECK(t->VTI_height.WBF_int == 24 && !t->VTI_gstate);
+	toState.TOS_geo[4] = @call TOText::MSG_VIS_TEXT_CALC_HEIGHT(100, FALSE);
+	t = ObjDerefVis(@TOText);
+	TOCHECK(toState.TOS_geo[4] == 12 + tb);
+	TOCHECK(t->VTI_height.WBF_int == 24 && t->VTI_lines &&
+		t->VTI_lastWidth != 100 && !t->VTI_gstate &&
+		t->VI_bounds.R_right - t->VI_bounds.R_left == 50);
+	TOCHECK(ChunkArrayGetCountHandles(OptrToHandle(@TOText),
+					  t->VTI_lines) == 2);
+	TOCHECK(@call TOText::MSG_VIS_TEXT_CALC_HEIGHT(50, FALSE) == 24 + tb);
+	toState.TOS_geo[5] = @call TOText::MSG_VIS_TEXT_CALC_HEIGHT(100, TRUE);
+	t = ObjDerefVis(@TOText);
+	TOCHECK(toState.TOS_geo[5] == 12 + tb && !t->VTI_lines &&
+		t->VTI_lastWidth == 100 && t->VTI_height.WBF_int == 12);
+	/* (the same width again: from the cache) */
+	TOCHECK(@call TOText::MSG_VIS_TEXT_CALC_HEIGHT(100, TRUE) == 12 + tb);
+	@call TOText::MSG_VIS_SET_SIZE(100, 40);
+	@call TOText::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+	t = ObjDerefVis(@TOText);
+	TOCHECK(t->VTI_lines && t->VTI_height.WBF_int == 12 &&
+		ChunkArrayGetCountHandles(OptrToHandle(@TOText),
+					  t->VTI_lines) == 1);
 	break;
     }
     }

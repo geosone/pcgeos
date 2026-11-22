@@ -177,6 +177,7 @@ extern word TL_TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
 /* Text/textCalc.goc: the lines calculated again */
 extern void T_GetNewParaAttr(LICL_vars *l, dword pos);
 extern void TextCompleteRecalc(optr o);
+void TextHeightNotify(optr o, WBFixed before);
 extern void TextRecalc(optr o, dword start, dword inserted, dword deleted);
 
 /* Text/textMethodDraw.goc */

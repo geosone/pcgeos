@@ -96,6 +96,13 @@
 @extern method VisTextClass, MSG_META_PTR;
 @extern method VisTextClass, MSG_META_END_SELECT;
 
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_HEIGHT;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_MIN_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SIMPLE_MIN_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_AVERAGE_CHAR_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ONE_LINE_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_CALC_HEIGHT;
+
 /* VisTextInitialize */
 @method VisTextClass, MSG_META_INITIALIZE
 {
@@ -125,6 +132,30 @@
 @method VisTextClass, MSG_VIS_TEXT_GET_FILTER
 {
     return pself->VTI_filters;
+}
+
+/* VisTextSetWashColor: the background; drawn again */
+@method VisTextClass, MSG_VIS_TEXT_SET_WASH_COLOR
+{
+    pself->VTI_washColor.CQ_redOrIndex = modeRed.VTWCMR_redOrIndex;
+    pself->VTI_washColor.CQ_info = modeRed.VTWCMR_mapMode;
+    pself->VTI_washColor.CQ_green = blueGreen.VTWCBG_green;
+    pself->VTI_washColor.CQ_blue = blueGreen.VTWCBG_blue;
+    TextGStateCreate(oself);
+    if (TextCheckCanDraw(oself)) {
+	EditUnHilite(oself);
+	TextDraw(oself, TCBF_DRAW_ALL_LINES, FALSE);
+	EditHilite(oself);
+    }
+    TextGStateDestroy(oself);
+}
+
+@method VisTextClass, MSG_VIS_TEXT_GET_WASH_COLOR
+{
+    retVal->VTGWC_modeRed.VTWCMR_redOrIndex = pself->VTI_washColor.CQ_redOrIndex;
+    retVal->VTGWC_modeRed.VTWCMR_mapMode = pself->VTI_washColor.CQ_info;
+    retVal->VTGWC_blueGreen.VTWCBG_green = pself->VTI_washColor.CQ_green;
+    retVal->VTGWC_blueGreen.VTWCBG_blue = pself->VTI_washColor.CQ_blue;
 }
 
 @method VisTextClass, MSG_VIS_TEXT_SET_OUTPUT

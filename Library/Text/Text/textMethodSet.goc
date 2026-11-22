@@ -79,6 +79,7 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     VisTextReplaceFlags flags;
     VisTextInstance *t;
     dword size, start, inserted, deleted;
+    WBFixed before;
 
     TA_GetTextRange(o, &p->VTRP_range, 0);
     TS_GetReplaceSize(o, p);
@@ -104,10 +105,13 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     inserted = p->VTRP_insCount;
     TS_ReplaceRange(o, p);
     /* the lines again, those that changed drawn */
+    before = VT(o)->VTI_height;
     TextRecalc(o, start, inserted, deleted);
     TextScreenUpdate(o);
     EditHilite(o);
     TextGStateDestroy(o);
+    if (VT(o)->VTI_lines)
+	TextHeightNotify(o, before);
     t = VT(o);
     t->VTI_selectMinStart = t->VTI_selectMinEnd = t->VTI_selectStart;
     t->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
