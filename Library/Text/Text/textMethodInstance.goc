@@ -1,0 +1,83 @@
+/*
+ * textMethodInstance.goc -- the states of a text object (after
+ * textMethodInstance.asm): its size, its maximum length, the features,
+ * the state and the modified flag.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: open and close, the
+ * cached GStates, the geometry, the wash color, the minimum dimensions,
+ * the cursor and notifications of MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE.
+ */
+@include "textInt.goh"
+
+/* VisTextSetMaxLength: a shorter maximum cuts the text and keeps the
+ * selection within it */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_MAX_LENGTH
+{
+    dword size = TS_GetTextSize(oself), start, end;
+
+    if (newMaxLength < pself->VTI_maxLength && newMaxLength < size) {
+	VisTextReplaceParameters p;
+
+	memset(&p, 0, sizeof(p));
+	p.VTRP_range.VTR_start = newMaxLength;
+	p.VTRP_range.VTR_end = size;
+	(void) @call self::MSG_VIS_TEXT_REPLACE_TEXT(&p);
+	TSL_SelectGetSelection(oself, &start, &end);
+	if (start > newMaxLength)
+	    start = newMaxLength;
+	if (end > newMaxLength)
+	    end = newMaxLength;
+	TSL_SelectSetSelection(oself, start, end);
+    }
+    VT(oself)->VTI_maxLength = newMaxLength;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_MAX_LENGTH
+{
+    return pself->VTI_maxLength;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_START
+{
+    return pself->VTI_selectStart;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_TEXT_SIZE
+{
+    return TS_GetTextSize(oself);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_NOT_USER_MODIFIED
+{
+    pself->VTI_state &= ~VTS_USER_MODIFIED;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_USER_MODIFIED
+{
+    pself->VTI_state |= VTS_USER_MODIFIED;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_STATE
+{
+    return pself->VTI_state;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_USER_MODIFIED_STATE
+{
+    return (pself->VTI_state & VTS_USER_MODIFIED) != 0;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_FEATURES
+{
+    return pself->VTI_features;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_FEATURES
+{
+    pself->VTI_features = (pself->VTI_features | bitsToSet) & ~bitsToClear;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE
+{
+    pself->VTI_state = (pself->VTI_state & ~clearBits) | setBits;
+}

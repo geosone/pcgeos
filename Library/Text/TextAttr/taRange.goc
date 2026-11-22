@@ -1,0 +1,28 @@
+/*
+ * taRange.goc -- virtual ranges (after taRange.asm): a range that
+ * starts at VIS_TEXT_RANGE_SELECTION is the selection, an offset of
+ * TEXT_ADDRESS_PAST_END the end of the text.
+ *
+ * Port32, not yet: the paragraph and attribute contexts
+ * (VIS_TEXT_RANGE_PARAGRAPH_SELECTION, VTRC_PARAGRAPH_CHANGE,
+ * VTRC_CHAR_ATTR_CHANGE), which need the paragraphs.
+ */
+@include "textInt.goh"
+
+void TA_GetTextRange(optr o, VisTextRange *range, VisTextRangeContext context)
+{
+    (void) context;
+    if ((range->VTR_start >> 16) == VIS_TEXT_RANGE_SELECTION_HIGH ||
+	(range->VTR_start >> 16) == VIS_TEXT_RANGE_PARAGRAPH_SELECTION_HIGH)
+	TSL_SelectGetSelection(o, &range->VTR_start, &range->VTR_end);
+    if ((range->VTR_start >> 16) == TEXT_ADDRESS_PAST_END_HIGH)
+	range->VTR_start = TS_GetTextSize(o);
+    if ((range->VTR_end >> 16) == TEXT_ADDRESS_PAST_END_HIGH)
+	range->VTR_end = TS_GetTextSize(o);
+}
+
+/* VisTextGetRange */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_RANGE
+{
+    TA_GetTextRange(oself, range, context);
+}

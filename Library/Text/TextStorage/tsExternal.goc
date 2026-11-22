@@ -1,0 +1,102 @@
+/*
+ * tsExternal.goc -- the text storage (after tsExternal.asm and the
+ * small object's tsSmallAccess.asm, tsSmallCreDest.asm,
+ * tsSmallModify.asm, tsSmallGetText.asm): the text of a small object is
+ * a chunk of its block, null terminated (VTI_text).
+ *
+ * Port32, not yet: large objects (VTSF_LARGE: the text in a huge array),
+ * the character classes, finding strings.
+ */
+@include "textInt.goh"
+
+/* the text chunk; an object of a resource that names no text gets its
+ * empty one on first use */
+static optr TextOptr(optr o)
+{
+    if (!VT(o)->VTI_text)
+	TS_SmallCreateTextStorage(o);
+    return ConstructOptr(OptrToHandle(o), VT(o)->VTI_text);
+}
+
+/* TS_SmallCreateTextStorage: an empty text, dirty unless the object
+ * ignores that */
+void TS_SmallCreateTextStorage(optr o)
+{
+    MemHandle mh = OptrToHandle(o);
+    ObjChunkFlags f = ObjGetFlags(o);
+    ChunkHandle c = LMemAlloc(mh, TEXT_INIT_STREAM);
+
+    *(char *) LMemDeref(ConstructOptr(mh, c)) = 0;
+    ObjSetFlags(ConstructOptr(mh, c),
+		(f & OCF_IGNORE_DIRTY) | OCF_DIRTY, 0);
+    VT(o)->VTI_text = c;
+}
+
+dword TS_GetTextSize(optr o)
+{
+    return (dword) LMemGetChunkSize(TextOptr(o)) - 1;
+}
+
+const char *TS_LockTextPtr(optr o, dword offset, word *after)
+{
+    optr t = TextOptr(o);
+    word size = LMemGetChunkSize(t) - 1;
+
+    if (after)
+	*after = (word) (size - offset);
+    return (const char *) LMemDeref(t) + offset;
+}
+
+word TS_GetCharAtOffset(optr o, dword offset)
+{
+    return (byte) *TS_LockTextPtr(o, offset, NULL);
+}
+
+/* SmallCheckLegalChange */
+Boolean TS_CheckLegalChange(optr o, VisTextReplaceParameters *p)
+{
+    dword size = TS_GetTextSize(o) + p->VTRP_insCount -
+		 (p->VTRP_range.VTR_end - p->VTRP_range.VTR_start);
+    word max = VT(o)->VTI_maxLength;
+
+    if (size <= max)
+	return TRUE;
+    if (!(p->VTRP_flags & VTRF_TRUNCATE) ||
+	size - max > p->VTRP_insCount)
+	return FALSE;
+    p->VTRP_insCount -= size - max;
+    return TRUE;
+}
+
+/* SmallReplaceRange: room made or taken at the range's start, the new
+ * text copied in */
+void TS_ReplaceRange(optr o, VisTextReplaceParameters *p)
+{
+    optr t = TextOptr(o);
+    word start = (word) p->VTRP_range.VTR_start;
+    word del = (word) (p->VTRP_range.VTR_end - p->VTRP_range.VTR_start);
+    word ins = (word) p->VTRP_insCount;
+
+    if (ins > del)
+	LMemInsertAt(t, start, ins - del);
+    else if (del > ins)
+	LMemDeleteAt(t, start, del - ins);
+    ObjMarkDirty(t);
+    if (ins)
+	TS_CopyTextReference((char *) LMemDeref(t) + start,
+			     &p->VTRP_textReference, ins);
+}
+
+/* SmallGetTextRange (the reference may be a chunk of the object's
+ * block: the text is found after that chunk has its size) */
+dword TS_GetTextRange(optr o, const VisTextRange *range, TextReference *ref)
+{
+    dword n = range->VTR_end - range->VTR_start;
+    MemHandle unlock;
+    char *d = TS_LockReferenceForWrite(ref, n + 1, &unlock);
+
+    memcpy(d, (const char *) LMemDeref(TextOptr(o)) + range->VTR_start, n);
+    d[n] = 0;
+    TS_UnlockReference(unlock);
+    return n;
+}

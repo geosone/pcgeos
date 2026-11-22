@@ -1960,8 +1960,14 @@ extern VMBlockHandle	/*XXX*/
 
 /**************************************************************************/
 
+@ifdef GEOS_PORT32
+/* Port32: the block is a handle */
+@message void MSG_VIS_TEXT_REPLACE_ALL_BLOCK(MemHandle block = dx,
+				       word textLen = cx);
+@else
 @message void MSG_VIS_TEXT_REPLACE_ALL_BLOCK(word block = dx,
 				       word textLen = cx);
+@endif
 /*
  * Replace the entire text of an object with text referenced by a block.
  *	PASS:	block	= Pointer to the text string
@@ -2031,8 +2037,14 @@ extern VMBlockHandle	/*XXX*/
 
 /**************************************************************************/
 
+@ifdef GEOS_PORT32
+/* Port32: the block is a handle */
+@message void MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK(MemHandle block = dx,
+				       word textLen = cx);
+@else
 @message void MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK(word block = dx,
 				       word textLen = cx);
+@endif
 /*
  * Replace the selection of an object with text referenced by a block.
  *	PASS:	block	= Pointer to the text string
@@ -2098,8 +2110,14 @@ extern VMBlockHandle	/*XXX*/
 
 /**************************************************************************/
 
+@ifdef GEOS_PORT32
+/* Port32: the block is a handle */
+@message void MSG_VIS_TEXT_APPEND_BLOCK(MemHandle block = dx,
+				       word textLen = cx);
+@else
 @message void MSG_VIS_TEXT_APPEND_BLOCK(word block = dx,
 				       word textLen = cx);
+@endif
 /*
  * Append to an object with text referenced by a block.
  *	PASS:	block	= Pointer to the text string
@@ -2168,7 +2186,12 @@ extern VMBlockHandle	/*XXX*/
 
 /**************************************************************************/
 
+@ifdef GEOS_PORT32
+/* Port32: the block is a handle */
+@message MemHandle MSG_VIS_TEXT_GET_ALL_BLOCK(MemHandle block = dx) = cx;
+@else
 @message MemHandle MSG_VIS_TEXT_GET_ALL_BLOCK(word block = dx) = cx;
+@endif
 /*
  * Get the entire text of an object into a buffer referenced by a block.
  * The block will always exist on return.  It will contain at least a NULL.

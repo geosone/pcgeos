@@ -1,0 +1,44 @@
+/*
+ * tsParams.goc -- the size of the text a reference names (after
+ * tsParams.asm): up to its null.
+ *
+ * Port32, not yet: references to VM blocks, DB items and huge arrays;
+ * there are no segments, so no TRT_SEGMENT_CHUNK.
+ */
+@include "textInt.goh"
+#include <localize.h>
+
+dword TS_ComputeReferenceSize(const TextReference *ref)
+{
+    dword n = 0;
+    MemHandle mh;
+
+    switch (ref->TR_type) {
+    case TRT_POINTER:
+	n = LocalStringSize(ref->TR_ref.TRU_pointer.TRP_pointer);
+	break;
+    case TRT_OPTR:
+	mh = OptrToHandle(ref->TR_ref.TRU_blockChunk.TRBC_ref);
+	ObjLockObjBlock(mh);
+	n = LocalStringSize(LMemDeref(ref->TR_ref.TRU_blockChunk.TRBC_ref));
+	MemUnlock(mh);
+	break;
+    case TRT_BLOCK:
+	mh = ref->TR_ref.TRU_block.TRB_handle;
+	n = LocalStringSize(MemLock(mh));
+	MemUnlock(mh);
+	break;
+    default:
+	EC_ERROR(-1);
+    }
+    return n;
+}
+
+/* TS_GetReplaceSize: INSERT_COMPUTE_TEXT_LENGTH in the high word of the
+ * count: the reference's size */
+void TS_GetReplaceSize(optr o, VisTextReplaceParameters *p)
+{
+    (void) o;
+    if ((p->VTRP_insCount >> 16) == INSERT_COMPUTE_TEXT_LENGTH)
+	p->VTRP_insCount = TS_ComputeReferenceSize(&p->VTRP_textReference);
+}

@@ -1,0 +1,123 @@
+/*
+ * textMethodGet.goc -- reading the text (after textMethodGet.asm): a
+ * range into a reference, null terminated; all of it or the selection
+ * into a buffer, a chunk or a block.
+ *
+ * A chunk or a block is allocated where none is given
+ * (VTGTRF_ALLOCATE, VTGTRF_ALLOCATE_ALWAYS) and made as large as the
+ * text where it is (VTGTRF_RESIZE_DEST: always, in Port32).
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: references to VM blocks,
+ * DB items and huge arrays, the selection into a chunk or block, the
+ * context notifications.
+ */
+@include "textInt.goh"
+
+/* AllocateDestBuffer: a chunk in the reference's block, or a block */
+static void AllocateDestBuffer(TextReference *ref)
+{
+    MemHandle mh;
+
+    switch (ref->TR_type) {
+    case TRT_OPTR:
+	mh = OptrToHandle(ref->TR_ref.TRU_blockChunk.TRBC_ref);
+	ObjLockObjBlock(mh);
+	ref->TR_ref.TRU_blockChunk.TRBC_ref =
+	    ConstructOptr(mh, LMemAlloc(mh, 1));
+	MemUnlock(mh);
+	break;
+    case TRT_BLOCK:
+	ref->TR_ref.TRU_block.TRB_handle =
+	    MemAlloc(1, HF_SWAPABLE, HAF_NO_ERR);
+	break;
+    default:
+	break;
+    }
+}
+
+/* VisTextGetTextRange: the range made real and cut to the text */
+static dword GetTextRange(optr o, VisTextRange *range, TextReference *ref,
+			  VisTextGetTextRangeFlags flags)
+{
+    dword size, n;
+
+    TA_GetTextRange(o, range, 0);
+    size = TS_GetTextSize(o);
+    if (range->VTR_start > size)
+	range->VTR_start = size;
+    if (range->VTR_end > size)
+	range->VTR_end = size;
+    n = range->VTR_end - range->VTR_start;
+    if ((flags & VTGTRF_ALLOCATE_ALWAYS) || (n && (flags & VTGTRF_ALLOCATE)))
+	AllocateDestBuffer(ref);
+    else if (!n && (flags & VTGTRF_ALLOCATE))
+	return 0;			/* nothing, and no buffer */
+    return TS_GetTextRange(o, range, ref);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_TEXT_RANGE
+{
+    VisTextRange r;
+
+    r.VTR_start = rangeStart;
+    r.VTR_end = rangeEnd;
+    return GetTextRange(oself, &r, &reference, flags);
+}
+
+/* GetAllIntoSomething, GetSelectionIntoSomething */
+static dword GetInto(optr o, Boolean selection, TextReference *ref,
+		     VisTextGetTextRangeFlags flags)
+{
+    VisTextRange r;
+
+    r.VTR_start = selection ? VIS_TEXT_RANGE_SELECTION : 0;
+    r.VTR_end = TEXT_ADDRESS_PAST_END;
+    return GetTextRange(o, &r, ref, flags);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_PTR
+{
+    TextReference r;
+
+    memset(&r, 0, sizeof(r));
+    r.TR_type = TRT_POINTER;
+    r.TR_ref.TRU_pointer.TRP_pointer = (char *) text;
+    return (word) GetInto(oself, FALSE, &r, 0);
+}
+
+/* VisTextGetAllOptr: no chunk given: one is allocated */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_OPTR
+{
+    TextReference r;
+
+    memset(&r, 0, sizeof(r));
+    r.TR_type = TRT_OPTR;
+    r.TR_ref.TRU_blockChunk.TRBC_ref = o;
+    (void) GetInto(oself, FALSE, &r,
+		   OptrToChunk(o) ? VTGTRF_RESIZE_DEST
+				  : VTGTRF_ALLOCATE_ALWAYS);
+    return OptrToChunk(r.TR_ref.TRU_blockChunk.TRBC_ref);
+}
+
+/* VisTextGetAllBlock: no block given: one is allocated */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_BLOCK
+{
+    TextReference r;
+
+    memset(&r, 0, sizeof(r));
+    r.TR_type = TRT_BLOCK;
+    r.TR_ref.TRU_block.TRB_handle = block;
+    (void) GetInto(oself, FALSE, &r,
+		   block ? VTGTRF_RESIZE_DEST : VTGTRF_ALLOCATE_ALWAYS);
+    return r.TR_ref.TRU_block.TRB_handle;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_PTR
+{
+    TextReference r;
+
+    memset(&r, 0, sizeof(r));
+    r.TR_type = TRT_POINTER;
+    r.TR_ref.TRU_pointer.TRP_pointer = text;
+    return (word) GetInto(oself, TRUE, &r, 0);
+}

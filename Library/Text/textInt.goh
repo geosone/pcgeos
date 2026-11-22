@@ -1,0 +1,83 @@
+/*
+ * textInt.goh -- the text library in C (Port32), internal: the routines
+ * the modules call in each other (after textstorage.def, texttext.def,
+ * textselect.def, textattr.def).
+ *
+ * Port32 (Port32/ABI.md section 13z): small text objects only so far
+ * (the text in a chunk of the object's block); the text is in bytes
+ * (no DBCS).
+ */
+#ifndef __TEXTINT_GOH
+#define __TEXTINT_GOH
+
+@include <stdapp.goh>
+@include <Objects/vTextC.goh>
+#include <string.h>
+
+#define VT(o)	((VisTextInstance *) ObjDerefVis(o))
+
+/* the first size of a text chunk: the null (TEXT_INIT_STREAM) */
+#define TEXT_INIT_STREAM	1
+#define INITIAL_LEFT_OFFSET	0
+
+/* TextStorage/tsExternal.goc: the text of an object */
+extern void TS_SmallCreateTextStorage(optr o);
+extern dword TS_GetTextSize(optr o);
+/* the text from an offset on (till the next change of the object's
+ * block), *after the characters from there */
+extern const char *TS_LockTextPtr(optr o, dword offset, word *after);
+extern word TS_GetCharAtOffset(optr o, dword offset);
+/* FALSE: the object would hold more than VTI_maxLength (VTRF_TRUNCATE
+ * cuts the insertion instead) */
+extern Boolean TS_CheckLegalChange(optr o, VisTextReplaceParameters *p);
+extern void TS_ReplaceRange(optr o, VisTextReplaceParameters *p);
+/* the range (real, within the text) into the reference, with a null;
+ * the characters copied */
+extern dword TS_GetTextRange(optr o, const VisTextRange *range,
+			     TextReference *ref);
+
+/* TextStorage/tsParams.goc: INSERT_COMPUTE_TEXT_LENGTH resolved; the
+ * size of the text of a reference, without its null */
+extern void TS_GetReplaceSize(optr o, VisTextReplaceParameters *p);
+extern dword TS_ComputeReferenceSize(const TextReference *ref);
+
+/* TextStorage/tsReference.goc: count characters of the reference to
+ * dest; the buffer of a reference to write size bytes to (a chunk or a
+ * block is made that large), and the block to unlock afterwards */
+extern void TS_CopyTextReference(char *dest, const TextReference *ref,
+				 dword count);
+extern char *TS_LockReferenceForWrite(TextReference *ref, dword size,
+				      MemHandle *unlock);
+extern void TS_UnlockReference(MemHandle unlock);
+
+/* TextAttr/taRange.goc: a virtual range (the selection, the end of the
+ * text) made real */
+extern void TA_GetTextRange(optr o, VisTextRange *range,
+			    VisTextRangeContext context);
+
+/* TextAttr/taCharAttr.goc: the single character attribute of an
+ * object, and the default records (VisTextDefaultCharAttr) */
+extern void TA_MapDefaultCharAttr(VisTextDefaultCharAttr def,
+				  VisTextCharAttr *a);
+extern Boolean TA_FindDefaultCharAttr(const VisTextCharAttr *a,
+				      VisTextDefaultCharAttr *def);
+extern void TA_GetSingleCharAttr(optr o, VisTextCharAttr *a);
+extern void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a);
+
+/* TextSelect/tslMain.goc: the selection */
+extern void TSL_SelectGetSelection(optr o, dword *start, dword *end);
+extern Boolean TSL_SelectIsCursor(optr o);
+extern void TSL_SelectSetSelection(optr o, dword start, dword end);
+extern void TSL_SelectSetSelectionWithoutNukingUndo(optr o, dword start,
+						    dword end);
+
+/* Text/textMethodSet.goc: the replacement all changes of the text go
+ * through (VisTextReplaceNew); TRUE if it was not made */
+extern Boolean VisTextReplace(optr o, VisTextReplaceParameters *p);
+extern void TextMarkUserModified(optr o);
+extern void TextMarkNotUserModified(optr o);
+
+/* Text/textUtils.goc: a message to VTI_output with the object */
+extern void SendToTextOutput(optr o, Message msg);
+
+#endif

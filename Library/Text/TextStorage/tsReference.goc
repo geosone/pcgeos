@@ -1,0 +1,71 @@
+/*
+ * tsReference.goc -- text copied from and to a reference (after
+ * tsReference.asm): a pointer, a chunk (an optr) or a block.  A chunk
+ * or a block written to is made as large as its text.
+ *
+ * Port32, not yet: references to VM blocks, DB items and huge arrays;
+ * no TRT_SEGMENT_CHUNK.
+ */
+@include "textInt.goh"
+
+/* CopyTextReference */
+void TS_CopyTextReference(char *dest, const TextReference *ref, dword count)
+{
+    MemHandle mh;
+
+    switch (ref->TR_type) {
+    case TRT_POINTER:
+	memmove(dest, ref->TR_ref.TRU_pointer.TRP_pointer, count);
+	break;
+    case TRT_OPTR:
+	/* (it may be a chunk of the block dest is in: no lock moves it) */
+	mh = OptrToHandle(ref->TR_ref.TRU_blockChunk.TRBC_ref);
+	ObjLockObjBlock(mh);
+	memmove(dest, LMemDeref(ref->TR_ref.TRU_blockChunk.TRBC_ref), count);
+	MemUnlock(mh);
+	break;
+    case TRT_BLOCK:
+	mh = ref->TR_ref.TRU_block.TRB_handle;
+	memcpy(dest, MemLock(mh), count);
+	MemUnlock(mh);
+	break;
+    default:
+	EC_ERROR(-1);
+    }
+}
+
+/*
+ * TS_LockReferenceForWrite: the buffer of a reference, a chunk or a
+ * block made size bytes large; *unlock is the block to unlock after
+ * writing (TS_UnlockReference)
+ */
+char *TS_LockReferenceForWrite(TextReference *ref, dword size,
+			       MemHandle *unlock)
+{
+    optr c;
+
+    *unlock = 0;
+    switch (ref->TR_type) {
+    case TRT_POINTER:
+	return ref->TR_ref.TRU_pointer.TRP_pointer;
+    case TRT_OPTR:
+	c = ref->TR_ref.TRU_blockChunk.TRBC_ref;
+	*unlock = OptrToHandle(c);
+	ObjLockObjBlock(*unlock);
+	LMemReAlloc(c, (word) size);
+	return LMemDeref(c);
+    case TRT_BLOCK:
+	*unlock = ref->TR_ref.TRU_block.TRB_handle;
+	MemReAlloc(*unlock, (word) size, HAF_NO_ERR);
+	return MemLock(*unlock);
+    default:
+	EC_ERROR(-1);
+	return NULL;
+    }
+}
+
+void TS_UnlockReference(MemHandle unlock)
+{
+    if (unlock)
+	MemUnlock(unlock);
+}

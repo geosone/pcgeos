@@ -1,0 +1,281 @@
+/*
+ * textMethodSet.goc -- changing the text (after textMethodSet.asm and
+ * TextReplace of textReplace.asm): every change is a replacement of a
+ * range (VisTextReplaceParameters) by the text of a reference;
+ * replacing all, the selection, appending and deleting set one up.
+ *
+ * A replacement moves the selection (a cursor after the change, by
+ * VTIF_ADJUST_TYPE), marks the object modified by the user or not
+ * (VTRF_USER_MODIFICATION; MSG_META_TEXT_USER_MODIFIED,
+ * MSG_META_TEXT_NOT_USER_MODIFIED to the object when that changes) and
+ * tells it when it becomes empty or no longer is
+ * (MSG_META_TEXT_EMPTY_STATUS_CHANGED).
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: filters, undo, the
+ * attribute runs, lines and regions, the recalculation and the screen,
+ * suspension, the notifications of the controllers, the character
+ * limit, section breaks.
+ */
+@include "textInt.goh"
+#include <localize.h>
+
+/* TextMarkUserModified */
+void TextMarkUserModified(optr o)
+{
+    if (VT(o)->VTI_state & VTS_USER_MODIFIED)
+	return;
+    VT(o)->VTI_state |= VTS_USER_MODIFIED;
+    @call o::MSG_META_TEXT_USER_MODIFIED(o);
+}
+
+void TextMarkNotUserModified(optr o)
+{
+    if (!(VT(o)->VTI_state & VTS_USER_MODIFIED))
+	return;
+    VT(o)->VTI_state &= ~VTS_USER_MODIFIED;
+    @call o::MSG_META_TEXT_NOT_USER_MODIFIED(o);
+}
+
+/* AdjustOffsetNormal: before the change as it is; in it, after the
+ * insertion; after it, moved by the change */
+static dword AdjustOffsetNormal(dword off, const VisTextReplaceParameters *p)
+{
+    if (off < p->VTRP_range.VTR_start)
+	return off;
+    if (off > p->VTRP_range.VTR_end)
+	return off - p->VTRP_range.VTR_end + p->VTRP_range.VTR_start +
+	       p->VTRP_insCount;
+    return p->VTRP_range.VTR_start + p->VTRP_insCount;
+}
+
+/* AdjustSelectionForReplacement: normal; a paste leaves a cursor after
+ * it; a quick move or copy selects what it put there */
+static void AdjustSelectionForReplacement(optr o,
+					  const VisTextReplaceParameters *p)
+{
+    dword start, end;
+
+    switch (VT(o)->VTI_intFlags & VTIF_ADJUST_TYPE) {
+    case AT_PASTE:
+	start = end = p->VTRP_range.VTR_start + p->VTRP_insCount;
+	break;
+    case AT_QUICK:
+	start = p->VTRP_range.VTR_start;
+	end = p->VTRP_range.VTR_end + p->VTRP_insCount;
+	break;
+    default:
+	TSL_SelectGetSelection(o, &start, &end);
+	start = AdjustOffsetNormal(start, p);
+	end = AdjustOffsetNormal(end, p);
+	break;
+    }
+    TSL_SelectSetSelectionWithoutNukingUndo(o, start, end);
+}
+
+/* VisTextReplaceNew, ReplaceWithoutCrossSectionCheck */
+Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
+{
+    Boolean hadText, hasText;
+    VisTextReplaceFlags flags;
+    VisTextInstance *t;
+    dword size;
+
+    TA_GetTextRange(o, &p->VTRP_range, 0);
+    TS_GetReplaceSize(o, p);
+    /* (the asm trusts the range; EC only) */
+    size = TS_GetTextSize(o);
+    if (p->VTRP_range.VTR_end > size)
+	p->VTRP_range.VTR_end = size;
+    if (p->VTRP_range.VTR_start > p->VTRP_range.VTR_end)
+	p->VTRP_range.VTR_start = p->VTRP_range.VTR_end;
+    if (p->VTRP_range.VTR_end == p->VTRP_range.VTR_start &&
+	!p->VTRP_insCount)
+	return FALSE;
+    if (!TS_CheckLegalChange(o, p))
+	return TRUE;
+    hadText = size != 0;
+    flags = p->VTRP_flags;
+    AdjustSelectionForReplacement(o, p);
+    TS_ReplaceRange(o, p);
+    t = VT(o);
+    t->VTI_selectMinStart = t->VTI_selectMinEnd = t->VTI_selectStart;
+    t->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
+    if (flags & VTRF_USER_MODIFICATION)
+	TextMarkUserModified(o);
+    else
+	TextMarkNotUserModified(o);
+    hasText = TS_GetTextSize(o) != 0;
+    if (hasText != hadText)
+	@call o::MSG_META_TEXT_EMPTY_STATUS_CHANGED(o, hasText);
+    return FALSE;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_TEXT
+{
+    return VisTextReplace(oself, params);
+}
+
+typedef enum { RW_ALL, RW_SELECTION, RW_APPEND } ReplaceWhat;
+
+/* ReplaceAllWithSomething, ReplaceSelectionWithSomething,
+ * AppendWithSomething: len 0 is up to the text's null */
+static void ReplaceWith(optr o, ReplaceWhat what, const TextReference *ref,
+			word len)
+{
+    VisTextReplaceParameters p;
+
+    memset(&p, 0, sizeof(p));
+    switch (what) {
+    case RW_ALL:
+	p.VTRP_range.VTR_end = TEXT_ADDRESS_PAST_END;
+	break;
+    case RW_SELECTION:
+	p.VTRP_range.VTR_start = VIS_TEXT_RANGE_SELECTION;
+	break;
+    case RW_APPEND:
+	p.VTRP_range.VTR_start = p.VTRP_range.VTR_end = TEXT_ADDRESS_PAST_END;
+	break;
+    }
+    p.VTRP_insCount = len ? len : (dword) INSERT_COMPUTE_TEXT_LENGTH << 16;
+    p.VTRP_textReference = *ref;
+    (void) VisTextReplace(o, &p);
+}
+
+static void RefPointer(TextReference *r, const char *text)
+{
+    memset(r, 0, sizeof(*r));
+    r->TR_type = TRT_POINTER;
+    r->TR_ref.TRU_pointer.TRP_pointer = (char *) text;
+}
+
+static void RefOptr(TextReference *r, optr o)
+{
+    memset(r, 0, sizeof(*r));
+    r->TR_type = TRT_OPTR;
+    r->TR_ref.TRU_blockChunk.TRBC_ref = o;
+}
+
+static void RefBlock(TextReference *r, MemHandle mh)
+{
+    memset(r, 0, sizeof(*r));
+    r->TR_type = TRT_BLOCK;
+    r->TR_ref.TRU_block.TRB_handle = mh;
+}
+
+/* VisTextReplaceAllPtr: the same text again changes nothing but the
+ * modified state */
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_PTR
+{
+    TextReference r;
+    word after;
+    const char *old = TS_LockTextPtr(oself, 0, &after);
+
+    if (!textLen)
+	textLen = LocalStringSize(text);
+    if (textLen == after && !memcmp(old, text, textLen)) {
+	TextMarkNotUserModified(oself);
+	return;
+    }
+    RefPointer(&r, text);
+    ReplaceWith(oself, RW_ALL, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_OPTR
+{
+    TextReference r;
+
+    RefOptr(&r, o);
+    ReplaceWith(oself, RW_ALL, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_BLOCK
+{
+    TextReference r;
+
+    RefBlock(&r, block);
+    ReplaceWith(oself, RW_ALL, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_PTR
+{
+    TextReference r;
+
+    RefPointer(&r, text);
+    ReplaceWith(oself, RW_SELECTION, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_OPTR
+{
+    TextReference r;
+
+    RefOptr(&r, o);
+    ReplaceWith(oself, RW_SELECTION, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK
+{
+    TextReference r;
+
+    RefBlock(&r, block);
+    ReplaceWith(oself, RW_SELECTION, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_PTR
+{
+    TextReference r;
+
+    RefPointer(&r, text);
+    ReplaceWith(oself, RW_APPEND, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_OPTR
+{
+    TextReference r;
+
+    RefOptr(&r, o);
+    ReplaceWith(oself, RW_APPEND, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_BLOCK
+{
+    TextReference r;
+
+    RefBlock(&r, block);
+    ReplaceWith(oself, RW_APPEND, &r, textLen);
+}
+
+static void DeleteRange(optr o, dword start, dword end,
+			VisTextReplaceFlags flags)
+{
+    VisTextReplaceParameters p;
+
+    memset(&p, 0, sizeof(p));
+    p.VTRP_range.VTR_start = start;
+    p.VTRP_range.VTR_end = end;
+    p.VTRP_flags = flags;
+    (void) VisTextReplace(o, &p);
+}
+
+/* VisTextDeleteRangeOfChars: by the user */
+@extern method VisTextClass, MSG_META_DELETE_RANGE_OF_CHARS
+{
+    DeleteRange(oself, rangeToDelete.VTR_start, rangeToDelete.VTR_end,
+		VTRF_FILTER | VTRF_USER_MODIFICATION);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_DELETE_ALL
+{
+    DeleteRange(oself, 0, TEXT_ADDRESS_PAST_END, 0);
+}
+
+/* VisTextDelete: the selection, by the user */
+@extern method VisTextClass, MSG_META_DELETE
+{
+    DeleteRange(oself, VIS_TEXT_RANGE_SELECTION, 0,
+		VTRF_FILTER | VTRF_USER_MODIFICATION);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_DELETE_SELECTION
+{
+    DeleteRange(oself, VIS_TEXT_RANGE_SELECTION, 0, 0);
+}

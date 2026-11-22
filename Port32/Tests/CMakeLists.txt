@@ -313,6 +313,18 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     target_link_libraries(test_ui_vis PRIVATE geos_kernel)
     add_test(NAME library.ui.vis COMMAND test_ui_vis)
 
+    # the text library (Library/Text): text objects off the screen
+    if(TARGET geode_text)
+      geos_geode(textobj GP Geode/textobj.gp GOC Geode/textobj.goc)
+      geos_embed(_text_c ${text_GEO} text_geode)
+      geos_embed(_textobj_c ${textobj_GEO} textobj_geode)
+      add_executable(test_text test_text.c ${_ui_c} ${_text_c}
+                     ${_textobj_c})
+      add_dependencies(test_text geode_ui geode_text geode_textobj)
+      target_link_libraries(test_text PRIVATE geos_kernel)
+      add_test(NAME library.text COMMAND test_text)
+    endif()
+
     # the flow object between the input manager and two geodes
     geos_geode(uiflow GP Geode/uiflow.gp GOC Geode/uiflow.goc)
     geos_embed(_uiflow_c ${uiflow_GEO} uiflow_geode)

@@ -1,0 +1,91 @@
+/*
+ * tslMain.goc -- the selection (after tslMain.asm, tslMethodSelect.asm):
+ * VTI_selectStart to VTI_selectEnd, a cursor where they are the same.
+ *
+ * Port32, not yet: the cursor and the highlight on the screen, the
+ * selection by mouse and keyboard, the context notifications.
+ */
+@include "textInt.goh"
+
+void TSL_SelectGetSelection(optr o, dword *start, dword *end)
+{
+    VisTextInstance *t = VT(o);
+
+    *start = t->VTI_selectStart;
+    *end = t->VTI_selectEnd;
+}
+
+Boolean TSL_SelectIsCursor(optr o)
+{
+    VisTextInstance *t = VT(o);
+
+    return t->VTI_selectStart == t->VTI_selectEnd;
+}
+
+void TSL_SelectSetSelectionWithoutNukingUndo(optr o, dword start, dword end)
+{
+    VisTextInstance *t = VT(o);
+
+    t->VTI_selectStart = start;
+    t->VTI_selectEnd = end;
+}
+
+void TSL_SelectSetSelection(optr o, dword start, dword end)
+{
+    TSL_SelectSetSelectionWithoutNukingUndo(o, start, end);
+}
+
+/* the range made real, kept within the text and in order */
+static void SelectRange(optr o, dword start, dword end)
+{
+    VisTextRange r;
+    dword size = TS_GetTextSize(o);
+
+    r.VTR_start = start;
+    r.VTR_end = end;
+    TA_GetTextRange(o, &r, 0);
+    if (r.VTR_start > size)
+	r.VTR_start = size;
+    if (r.VTR_end > size)
+	r.VTR_end = size;
+    if (r.VTR_end < r.VTR_start) {
+	dword s = r.VTR_start;
+
+	r.VTR_start = r.VTR_end;
+	r.VTR_end = s;
+    }
+    TSL_SelectSetSelection(o, r.VTR_start, r.VTR_end);
+    VT(o)->VTI_selectMinStart = r.VTR_start;
+    VT(o)->VTI_selectMinEnd = r.VTR_start;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_RANGE
+{
+    TSL_SelectGetSelection(oself, &vtr->VTR_start, &vtr->VTR_end);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE
+{
+    SelectRange(oself, start, end);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE_SMALL
+{
+    SelectRange(oself, start == 0xffff ? TEXT_ADDRESS_PAST_END : start,
+		end == 0xffff ? TEXT_ADDRESS_PAST_END : end);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_ALL
+{
+    SelectRange(oself, 0, TEXT_ADDRESS_PAST_END);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_START
+{
+    SelectRange(oself, 0, 0);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_END
+{
+    SelectRange(oself, TEXT_ADDRESS_PAST_END, TEXT_ADDRESS_PAST_END);
+}

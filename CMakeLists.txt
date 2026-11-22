@@ -108,6 +108,7 @@ add_subdirectory(Driver/Printer/HP/QuietJet)
 add_subdirectory(Library/Spool)
 add_subdirectory(Library/User)
 add_subdirectory(Library/SpecUI)
+add_subdirectory(Library/Text)
 add_subdirectory(Port32/Tests)
 
 # Inventory of direct host contacts (plan P2).  Not part of 'all'.

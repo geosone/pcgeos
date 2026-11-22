@@ -1,0 +1,346 @@
+/*
+ * taCharAttr.goc -- the character attributes of a text object (after
+ * taCharAttr.asm, the handlers of taAttr.asm that change one field).
+ *
+ * Port32 (Port32/ABI.md section 13z): objects with a single character
+ * attribute only so far: VTI_charAttrRuns is a VisTextDefaultCharAttr
+ * (VTSF_DEFAULT_CHAR_ATTR) or the chunk of a VisTextCharAttr.  An
+ * attribute that a default record can say is kept as one
+ * (SetSingleCharAttr).  The range of a change is the whole object.
+ * Not yet: runs (VTSF_MULTIPLE_CHAR_ATTRS), tokens, styles, undo; the
+ * change on the screen (ReflectChange).
+ */
+@include "textInt.goh"
+#include <font.h>
+#include <fontID.h>
+#include <chunkarr.h>
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_DEFAULT;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_CHAR_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_POINT_SIZE;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN;
+
+static const FontID defaultFonts[] = {
+    FID_BERKELEY, FID_CHICAGO, FID_BISON, FID_WINDOWS, FID_LED,
+    FID_ROMA, FID_UNIVERSITY,
+    FID_DTC_URW_ROMAN, FID_DTC_URW_SANS, FID_DTC_URW_MONO,
+    FID_DTC_URW_SYMBOLPS, FID_DTC_CENTURY_SCHOOLBOOK,
+    FID_PIZZA_KANJI, FID_BITSTREAM_KANJI_HON_MINCHO,
+    FID_BITSTREAM_KANJI_SQUARE_GOTHIC, FID_JSYS, FID_ESQUIRE
+};
+#define N_DEFAULT_FONTS	(sizeof(defaultFonts) / sizeof(defaultFonts[0]))
+
+static const byte defaultPointSizes[8] = { 8, 9, 10, 12, 14, 18, 24, 36 };
+
+/* TextMapDefaultCharAttr */
+void TA_MapDefaultCharAttr(VisTextDefaultCharAttr def, VisTextCharAttr *a)
+{
+    word font = def & VTDCA_FONT;
+
+    memset(a, 0, sizeof(*a));
+    a->VTCA_meta.SSEH_style = CA_NULL_ELEMENT;
+    /* (the asm reads past its table for a font it does not have) */
+    a->VTCA_fontID = font < N_DEFAULT_FONTS ? defaultFonts[font]
+					    : FID_BERKELEY;
+    a->VTCA_pointSize.WBF_int =
+	defaultPointSizes[(def & VTDCA_SIZE) >> VTDCA_SIZE_OFFSET];
+    if (def & VTDCA_UNDERLINE)
+	a->VTCA_textStyles |= TS_UNDERLINE;
+    if (def & VTDCA_BOLD)
+	a->VTCA_textStyles |= TS_BOLD;
+    if (def & VTDCA_ITALIC)
+	a->VTCA_textStyles |= TS_ITALIC;
+    a->VTCA_color.CQ_redOrIndex = (def & VTDCA_COLOR) >> VTDCA_COLOR_OFFSET;
+    a->VTCA_color.CQ_info = CF_INDEX;
+    a->VTCA_bgColor.CQ_redOrIndex = C_WHITE;
+    a->VTCA_bgColor.CQ_info = CF_INDEX;
+    a->VTCA_grayScreen = SDM_100;
+    a->VTCA_bgGrayScreen = SDM_0;
+    a->VTCA_fontWeight = FW_NORMAL;
+    a->VTCA_fontWidth = FWI_MEDIUM;
+}
+
+/* TextFindDefaultCharAttr: TRUE and the record if a default record says
+ * the attribute */
+Boolean TA_FindDefaultCharAttr(const VisTextCharAttr *a,
+			       VisTextDefaultCharAttr *def)
+{
+    word font, size, d;
+
+    if (a->VTCA_trackKerning || a->VTCA_extendedStyles ||
+	a->VTCA_fontWeight != FW_NORMAL || a->VTCA_fontWidth != FWI_MEDIUM ||
+	a->VTCA_grayScreen != SDM_100 || a->VTCA_bgGrayScreen != SDM_0 ||
+	a->VTCA_bgColor.CQ_redOrIndex != C_WHITE ||
+	a->VTCA_bgColor.CQ_info != CF_INDEX ||
+	a->VTCA_pattern.HP_type != PT_SOLID ||
+	a->VTCA_pattern.HP_data != 0 ||
+	a->VTCA_bgPattern.HP_type != PT_SOLID ||
+	a->VTCA_bgPattern.HP_data != 0)
+	return FALSE;
+    for (font = 0; font < N_DEFAULT_FONTS; font++)
+	if (defaultFonts[font] == a->VTCA_fontID)
+	    break;
+    if (font == N_DEFAULT_FONTS || a->VTCA_pointSize.WBF_frac)
+	return FALSE;
+    for (size = 0; size < 8; size++)
+	if (defaultPointSizes[size] == a->VTCA_pointSize.WBF_int)
+	    break;
+    if (size == 8)
+	return FALSE;
+    if (a->VTCA_textStyles & ~(TS_UNDERLINE | TS_BOLD | TS_ITALIC))
+	return FALSE;
+    /* (the color has four bits in the record) */
+    if (a->VTCA_color.CQ_info != CF_INDEX || a->VTCA_color.CQ_redOrIndex > 15)
+	return FALSE;
+    d = size << VTDCA_SIZE_OFFSET | font |
+	(word) a->VTCA_color.CQ_redOrIndex << VTDCA_COLOR_OFFSET;
+    if (a->VTCA_textStyles & TS_UNDERLINE)
+	d |= VTDCA_UNDERLINE;
+    if (a->VTCA_textStyles & TS_BOLD)
+	d |= VTDCA_BOLD;
+    if (a->VTCA_textStyles & TS_ITALIC)
+	d |= VTDCA_ITALIC;
+    *def = d;
+    return TRUE;
+}
+
+/* GetSingleCharAttr */
+void TA_GetSingleCharAttr(optr o, VisTextCharAttr *a)
+{
+    VisTextInstance *t = VT(o);
+
+    if (t->VTI_storageFlags & VTSF_DEFAULT_CHAR_ATTR)
+	TA_MapDefaultCharAttr(t->VTI_charAttrRuns, a);
+    else
+	memcpy(a, LMemDerefHandles(OptrToHandle(o), t->VTI_charAttrRuns),
+	       sizeof(*a));
+}
+
+/* SetSingleCharAttr */
+void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a)
+{
+    MemHandle mh = OptrToHandle(o);
+    VisTextInstance *t = VT(o);
+    VisTextDefaultCharAttr def;
+    ChunkHandle c;
+
+    ObjMarkDirty(o);
+    if (TA_FindDefaultCharAttr(a, &def)) {
+	c = t->VTI_charAttrRuns;
+	t->VTI_charAttrRuns = def;
+	if (!(t->VTI_storageFlags & VTSF_DEFAULT_CHAR_ATTR)) {
+	    t->VTI_storageFlags |= VTSF_DEFAULT_CHAR_ATTR;
+	    LMemFreeHandles(mh, c);
+	}
+	return;
+    }
+    if (t->VTI_storageFlags & VTSF_DEFAULT_CHAR_ATTR) {
+	c = LMemAlloc(mh, sizeof(VisTextCharAttr));
+	t = VT(o);
+	t->VTI_storageFlags &= ~VTSF_DEFAULT_CHAR_ATTR;
+	t->VTI_charAttrRuns = c;
+    }
+    memcpy(LMemDerefHandles(mh, t->VTI_charAttrRuns), a, sizeof(*a));
+}
+
+/* ReflectChangeUpdateGeneric: the change on the screen -- not yet */
+static void ReflectChange(optr o)
+{
+    (void) o;
+}
+
+/* SetCharAttrCommon */
+static void SetCharAttr(optr o, const VisTextCharAttr *a)
+{
+    TA_SetSingleCharAttr(o, a);
+    ReflectChange(o);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_DEFAULT
+{
+    VisTextCharAttr a;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_MapDefaultCharAttr(defCharAttrs, &a);
+    SetCharAttr(oself, &a);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR
+{
+    VisTextCharAttr a = *attrs;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    SetCharAttr(oself, &a);
+}
+
+/* VisTextGetCharAttr: the attribute of the range, here the object's;
+ * with VTGAF_MERGE_WITH_PASSED the passed attribute is compared with it
+ * (DiffCharAttr) */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_CHAR_ATTR
+{
+    VisTextCharAttr a;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_GetSingleCharAttr(oself, &a);
+    if (!(flags & VTGAF_MERGE_WITH_PASSED)) {
+	if (diffs)
+	    memset(diffs, 0, sizeof(*diffs));
+    } else if (diffs) {
+	const VisTextCharAttr *b = attrs;
+	word d = diffs->VTCAD_diffs;
+
+	if (a.VTCA_fontID != b->VTCA_fontID)
+	    d |= VTCAF_MULTIPLE_FONT_IDS;
+	if (a.VTCA_pointSize.WBF_int != b->VTCA_pointSize.WBF_int ||
+	    a.VTCA_pointSize.WBF_frac != b->VTCA_pointSize.WBF_frac)
+	    d |= VTCAF_MULTIPLE_POINT_SIZES;
+	if (memcmp(&a.VTCA_color, &b->VTCA_color, sizeof(ColorQuad)))
+	    d |= VTCAF_MULTIPLE_COLORS;
+	if (a.VTCA_grayScreen != b->VTCA_grayScreen)
+	    d |= VTCAF_MULTIPLE_GRAY_SCREENS;
+	if (memcmp(&a.VTCA_pattern, &b->VTCA_pattern, sizeof(GraphicPattern)))
+	    d |= VTCAF_MULTIPLE_PATTERNS;
+	if (a.VTCA_trackKerning != b->VTCA_trackKerning)
+	    d |= VTCAF_MULTIPLE_TRACK_KERNINGS;
+	if (a.VTCA_fontWeight != b->VTCA_fontWeight)
+	    d |= VTCAF_MULTIPLE_FONT_WEIGHTS;
+	if (a.VTCA_fontWidth != b->VTCA_fontWidth)
+	    d |= VTCAF_MULTIPLE_FONT_WIDTHS;
+	if (memcmp(&a.VTCA_bgColor, &b->VTCA_bgColor, sizeof(ColorQuad)))
+	    d |= VTCAF_MULTIPLE_BG_COLORS;
+	if (a.VTCA_bgGrayScreen != b->VTCA_bgGrayScreen)
+	    d |= VTCAF_MULTIPLE_BG_GRAY_SCREENS;
+	if (memcmp(&a.VTCA_bgPattern, &b->VTCA_bgPattern,
+		   sizeof(GraphicPattern)))
+	    d |= VTCAF_MULTIPLE_BG_PATTERNS;
+	if (a.VTCA_meta.SSEH_style != b->VTCA_meta.SSEH_style)
+	    d |= VTCAF_MULTIPLE_STYLES;
+	diffs->VTCAD_diffs = d;
+	diffs->VTCAD_textStyles |= a.VTCA_textStyles ^ b->VTCA_textStyles;
+	diffs->VTCAD_extendedStyles |=
+	    a.VTCA_extendedStyles ^ b->VTCA_extendedStyles;
+    }
+    *attrs = a;
+    return CA_NULL_ELEMENT;
+}
+
+/*
+ * CharAttrChangeCommon with its callbacks: one field of the attribute
+ */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID
+{
+    VisTextCharAttr a;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_GetSingleCharAttr(oself, &a);
+    a.VTCA_fontID = fid;
+    SetCharAttr(oself, &a);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT
+{
+    VisTextCharAttr a;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_GetSingleCharAttr(oself, &a);
+    a.VTCA_fontWeight = fontWeight;
+    SetCharAttr(oself, &a);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WIDTH
+{
+    VisTextCharAttr a;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_GetSingleCharAttr(oself, &a);
+    a.VTCA_fontWidth = fontWidth;
+    SetCharAttr(oself, &a);
+}
+
+/* SetWBFixedCallback: the WWFixed rounded to a WBFixed */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_POINT_SIZE
+{
+    VisTextCharAttr a;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_GetSingleCharAttr(oself, &a);
+    a.VTCA_pointSize.WBF_int = pointSize.WWF_int;
+    a.VTCA_pointSize.WBF_frac = pointSize.WWF_frac >> 8;
+    SetCharAttr(oself, &a);
+}
+
+/* SetTextStyleCallback: the same bits to set and to clear toggle them;
+ * superscript and subscript exclude each other, the new one wins */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE
+{
+    VisTextCharAttr a;
+    byte s;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_GetSingleCharAttr(oself, &a);
+    s = a.VTCA_textStyles;
+    if ((byte) styleBitsToClear == (byte) styleBitsToSet)
+	s ^= (byte) styleBitsToClear;
+    else
+	s = (s & ~(byte) styleBitsToClear) | (byte) styleBitsToSet;
+    if ((s & (TS_SUPERSCRIPT | TS_SUBSCRIPT)) ==
+	(TS_SUPERSCRIPT | TS_SUBSCRIPT)) {
+	if (a.VTCA_textStyles & TS_SUPERSCRIPT)
+	    s &= ~TS_SUPERSCRIPT;
+	else
+	    s &= ~TS_SUBSCRIPT;
+    }
+    a.VTCA_textStyles = s;
+    a.VTCA_extendedStyles =
+	(a.VTCA_extendedStyles & ~extBitsToClear) | extBitsToSet;
+    SetCharAttr(oself, &a);
+}
+
+/* SetColorCallback: an index has no green and blue */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR
+{
+    VisTextCharAttr a;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_GetSingleCharAttr(oself, &a);
+    a.VTCA_color = color;
+    if (color.CQ_info == CF_INDEX)
+	a.VTCA_color.CQ_green = a.VTCA_color.CQ_blue = 0;
+    SetCharAttr(oself, &a);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN
+{
+    VisTextCharAttr a;
+
+    /* (a single attribute: the whole object) */
+    (void) rangeStart;
+    (void) rangeEnd;
+    TA_GetSingleCharAttr(oself, &a);
+    a.VTCA_grayScreen = grayScreen;
+    SetCharAttr(oself, &a);
+}

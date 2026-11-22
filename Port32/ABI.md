@@ -6178,6 +6178,91 @@ are left out), the constants, the variables and the routines.
   a longer moniker, not enabled; the separator below it two pixels high
   and as wide as the display.
 
+## 13z. The text library (`Library/Text`, P6)
+
+`text.geo` in C, beside the asm (`text32.gp`; the files next to the asm
+they follow). `VisTextClass` is declared in `Objects/vTextC.goh` as in
+DOS16; the internals are in `Library/Text/textInt.goh`. The port goes by
+the modules of the asm; what is there:
+
+- **Storage** (`TextStorage/tsExternal.goc`, `tsParams.goc`,
+  `tsReference.goc`): the text of a small object is a chunk of the
+  object's block, null terminated (`VTI_text`), in bytes. An object of
+  a resource that names no text gets its empty chunk on first use. A
+  **text reference** (`TextReference`) names text to read or a buffer
+  to write: a pointer, a chunk (`TRT_OPTR`) or a block (`TRT_BLOCK`).
+  A chunk or block written to is made as large as the text with its
+  null (always, not only with `VTGTRF_RESIZE_DEST`); a chunk of the
+  object's own block is fine either way.
+- **The replacement** (`Text/textMethodSet.goc`: `VisTextReplace`,
+  `MSG_VIS_TEXT_REPLACE_TEXT`): every change replaces a range by the
+  text of a reference (`VisTextReplaceParameters`); a range starting at
+  `VIS_TEXT_RANGE_SELECTION` is the selection, `TEXT_ADDRESS_PAST_END`
+  the end of the text (`TextAttr/taRange.goc`), a count with
+  `INSERT_COMPUTE_TEXT_LENGTH` in its high word the reference's length.
+  A change that would pass `VTI_maxLength` is refused (the message
+  returns TRUE), or the insertion cut with `VTRF_TRUNCATE`. The
+  selection follows (`VTIF_ADJUST_TYPE`: normal, a paste, a quick
+  transfer). `VTRF_USER_MODIFICATION` marks the object modified by the
+  user, a replacement without it not modified; the object tells itself
+  when that changes (`MSG_META_TEXT_USER_MODIFIED`,
+  `MSG_META_TEXT_NOT_USER_MODIFIED`) and when it becomes empty or no
+  longer is (`MSG_META_TEXT_EMPTY_STATUS_CHANGED`). Replacing all, the
+  selection, appending (`..._PTR`, `..._OPTR`, `..._BLOCK`) and deleting
+  (`MSG_VIS_TEXT_DELETE_ALL`, `MSG_VIS_TEXT_DELETE_SELECTION`,
+  `MSG_META_DELETE`, `MSG_META_DELETE_RANGE_OF_CHARS`) set one up; the
+  same text set again by `MSG_VIS_TEXT_REPLACE_ALL_PTR` only clears the
+  modified state.
+- **Reading** (`Text/textMethodGet.goc`): `MSG_VIS_TEXT_GET_TEXT_RANGE`
+  (the range cut to the text), all the text into a buffer, a chunk or
+  a block (allocated where none is given), the selection into a buffer.
+- **The selection** (`TextSelect/tslMain.goc`) as offsets:
+  `MSG_VIS_TEXT_SELECT_RANGE` (`_SMALL`, `_ALL`, `_START`, `_END`),
+  kept within the text and in order; `MSG_VIS_TEXT_GET_SELECTION_RANGE`,
+  `MSG_VIS_TEXT_GET_RANGE`.
+- **The object** (`Text/textInstance.goc`, `textMethodInstance.goc`): a
+  new object is editable and selectable, empty, with the default
+  attributes and no limit; the maximum length (a shorter one cuts the
+  text and keeps the selection in it), features, state, filter, output,
+  margins.
+- **The character attribute** (`TextAttr/taCharAttr.goc`): one for the
+  whole object so far. `VTI_charAttrRuns` is a default record
+  (`VisTextDefaultCharAttr`: font, size, bold, italic, underline, one
+  of 16 colors; `VTSF_DEFAULT_CHAR_ATTR`) or the chunk of a
+  `VisTextCharAttr`; an attribute a record can say is kept as one and
+  its chunk freed. `MSG_VIS_TEXT_SET_CHAR_ATTR_BY_DEFAULT`,
+  `MSG_VIS_TEXT_SET_CHAR_ATTR`, one field (`MSG_VIS_TEXT_SET_FONT_ID`,
+  `..._POINT_SIZE`, `..._FONT_WEIGHT`, `..._FONT_WIDTH`, `..._COLOR`,
+  `..._GRAY_SCREEN`, `MSG_VIS_TEXT_SET_TEXT_STYLE`: the same bits to set
+  and to clear toggle them, superscript and subscript exclude each
+  other); `MSG_VIS_TEXT_GET_CHAR_ATTR`, with `VTGAF_MERGE_WITH_PASSED`
+  compared with the passed attribute (`VisTextCharAttrDiffs`). The range
+  of these messages is not looked at. A default record with a font
+  number beyond the table is Berkeley (the asm read past its table).
+- **Port32 changes in the C API.** The block of
+  `MSG_VIS_TEXT_REPLACE_ALL_BLOCK`, `MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK`,
+  `MSG_VIS_TEXT_APPEND_BLOCK` and `MSG_VIS_TEXT_GET_ALL_BLOCK` is a
+  `MemHandle` (a word cut 32-bit handles). There are no segments, so no
+  `TRT_SEGMENT_CHUNK`. `MSG_VIS_TEXT_GET_TEXT_RANGE` takes its reference
+  by value: a chunk or block it allocates is not seen by the caller
+  (use `MSG_VIS_TEXT_GET_ALL_OPTR`, `MSG_VIS_TEXT_GET_ALL_BLOCK`).
+- **Not yet.** Everything on a screen: attribute runs, tokens and
+  styles, the paragraph attribute, lines and
+  regions, drawing, the cursor and the highlight, mouse and keyboard;
+  filters, undo, suspension, the notifications for the controllers,
+  large objects (`VisLargeTextClass`, huge arrays), references to VM
+  blocks, DB items and huge arrays, search and spelling, the
+  controllers, the ruler.
+- **Test.** ctest `library.text` (`test_text.c`, the process geode
+  `Port32/Tests/Geode/textobj.goc`): text objects of a resource (with
+  and without a text) and an instantiated one, of a subclass that
+  counts what the object tells itself; the text read, appended to, the
+  selection replaced and moved by changes before it, replacements by
+  the user and not, deleted and filled again, ranges read, the
+  selection set and deleted, text from and to chunks and blocks, the
+  maximum length, the instance data, the character attribute as a
+  record and as a chunk.
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).
