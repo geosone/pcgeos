@@ -189,6 +189,44 @@ static void FieldVars(GDF_vars *v, sword x, word limit, HyphenFlags flags)
     v->GDFV_saved.GDFS_flags = flags;
     v->GDFV_styleCallback = FieldStyle;
 }
+/* GrTextObjCalc, GrTextPosition: one run of Berkeley 10 */
+static const char *calcText;
+static int calcHeights;
+static word CalcStyle(TextMetricStyles *tms, word offset, const char **text)
+{
+    TextAttr *ta = &tms->TMS_textAttr;
+
+    ta->TA_font = FID_BERKELEY;
+    ta->TA_size.WBF_int = 10;
+    ta->TA_size.WBF_frac = 0;
+    ta->TA_styleSet = 0;
+    ta->TA_trackKern = 0;
+    ta->TA_fontWeight = FW_NORMAL;
+    ta->TA_fontWidth = FWI_MEDIUM;
+    *text = calcText + offset;
+    return (word) (strlen(calcText) + 1 - offset);
+}
+
+static void CalcHeight(TOC_vars *v, WBFixed height)
+{
+    (void) v;
+    (void) height;
+    calcHeights++;
+}
+
+static void CalcField(GStateHandle g, TOC_vars *v, const char *text,
+		      sword area, TOCFlags flags)
+{
+    memset(v, 0, sizeof(*v));
+    calcText = text;
+    v->TOCV_int.TOCI_style.TMS_styleCallBack = CalcStyle;
+    v->TOCV_ext.TOCE_heightCallback = CalcHeight;
+    v->TOCV_ext.TOCE_areaToFill = area;
+    v->TOCV_ext.TOCE_flags = flags;
+    v->TOCV_ext.TOCE_otherFlags = TOCOF_IS_FIRST_FIELD;
+    GrTextObjCalc(g, v);
+}
+
 static Boolean CountOutput(void *element)
 {
     (void) element;
@@ -1345,6 +1383,70 @@ int main(int argc, char **argv)
 	    CHECK(v.GDFV_saved.GDFS_drawPos.PWBF_x.WBF_int == 22);
 	    GrSetTextStyle(g, 0, TS_UNDERLINE);
 	    GrSetTextColor(g, CF_RGB, 0, 0, 0);
+	}
+
+	/* the text object's measuring: H is 7 wide, i 3, a space 4.  A
+	 * field that fits ends the paragraph at the null; one that does
+	 * not breaks before the word that overflows (the space before
+	 * it stays on the line, unpadded), or at the character without
+	 * word wrap; a tab ends the field, a carriage return the line */
+	{
+	    TOC_vars v;
+	    GTP_vars p;
+	    word pos;
+
+	    calcHeights = 0;
+	    CalcField(g, &v, "Hi Hi Hi", 100, 0);
+	    CHECK(v.TOCV_ext.TOCE_nChars == 8 &&
+		  v.TOCV_ext.TOCE_fieldWidth.WBF_int == 38 &&
+		  v.TOCV_ext.TOCE_justWidth == 38);
+	    CHECK(v.TOCV_ext.TOCE_lineFlags ==
+		  (0x4000 | 0x0400));	/* LF_ENDS_PARAGRAPH, ..._IN_NULL */
+	    CHECK(v.TOCV_ext.TOCE_flags & TOCF_LINE_TERMINATED);
+	    CHECK(v.TOCV_ext.TOCE_nSpaces == 2);
+	    CHECK(v.TOCV_ext.TOCE_lineHeight.WBF_int == 12 &&
+		  v.TOCV_ext.TOCE_lineBLO.WBF_int == 10 && calcHeights >= 1);
+
+	    CalcField(g, &v, "Hi Hi Hi", 20, 0);
+	    CHECK(v.TOCV_ext.TOCE_nChars == 3 &&
+		  v.TOCV_ext.TOCE_fieldWidth.WBF_int == 14 &&
+		  v.TOCV_ext.TOCE_justWidth == 10 &&
+		  v.TOCV_ext.TOCE_lineFlags == 0 &&
+		  v.TOCV_ext.TOCE_nSpaces == 0);
+	    CHECK(v.TOCV_ext.TOCE_lineHeight.WBF_int == 12);
+
+	    CalcField(g, &v, "Hi Hi Hi", 20, TOCF_NO_WORD_WRAP);
+	    CHECK(v.TOCV_ext.TOCE_nChars == 3 &&
+		  v.TOCV_ext.TOCE_fieldWidth.WBF_int == 14);
+	    CalcField(g, &v, "HiHiHiHi", 20, 0);	/* one word: cut */
+	    CHECK(v.TOCV_ext.TOCE_nChars == 3 &&
+		  v.TOCV_ext.TOCE_fieldWidth.WBF_int == 17);
+	    CalcField(g, &v, "HHHH", 5, 0);	/* a character too wide */
+	    CHECK(v.TOCV_ext.TOCE_nChars == 1);
+
+	    CalcField(g, &v, "Hi\tH", 100, 0);
+	    CHECK(v.TOCV_ext.TOCE_nChars == 2 &&
+		  v.TOCV_ext.TOCE_fieldWidth.WBF_int == 10 &&
+		  !(v.TOCV_ext.TOCE_flags & TOCF_LINE_TERMINATED) &&
+		  v.TOCV_ext.TOCE_lineFlags == 0);
+	    CalcField(g, &v, "Hi\rH", 100, 0);
+	    CHECK(v.TOCV_ext.TOCE_nChars == 3 &&
+		  v.TOCV_ext.TOCE_justWidth == 10 &&
+		  v.TOCV_ext.TOCE_lineFlags == (0x4000 | 0x2000));
+	    CalcField(g, &v, "Hi-Hi", 20, 0);	/* at the hard hyphen */
+	    CHECK(v.TOCV_ext.TOCE_nChars == 3);
+
+	    /* the character nearest a position: past its middle the
+	     * next one */
+	    memset(&p, 0, sizeof(p));
+	    calcText = "Hi Hi";
+	    p.GTPL_style.TMS_styleCallBack = CalcStyle;
+	    CHECK(GrTextPosition(g, &p, 5, 8, &pos) == 1 && pos == 7);
+	    CHECK(GrTextPosition(g, &p, 5, 9, &pos) == 2 && pos == 10);
+	    CHECK(GrTextPosition(g, &p, 5, 3, &pos) == 0 && pos == 0);
+	    CHECK(GrTextPosition(g, &p, 5, 1000, &pos) == 5 && pos == 24);
+	    CHECK(GrTextPosition(g, &p, 2, 1000, &pos) == 2 && pos == 10);
+	    CHECK(GrTextPosition(g, &p, 0, 5, &pos) == 0 && pos == 0);
 	}
     }
 

@@ -1721,6 +1721,141 @@ typedef struct _GDF_vars {
 
 extern void
     _pascal GrDrawTextField(GStateHandle gstate, GDF_vars *vars);
+
+/*
+ * GrTextObjCalc, GrTextPosition: the measuring of a text object's
+ * fields.  Both walk the text in style runs: the style callback fills
+ * TMS_textAttr for the run at offset (characters into the field), sets
+ * *text to its characters and returns their count (TextMetricStyles is
+ * the start of both structures); the graphic callback gives the height
+ * (returned) and width of the graphic (C_GRAPHIC) at offset.
+ */
+typedef WordFlags TMSFlags;
+#define TMSF_IS_BREAK_CHARACTER	0x8000	/* last char was a break char */
+#define TMSF_IS_OPTIONAL_HYPHEN	0x4000	/* the break is an optional hyphen */
+#define TMSF_PAD_SPACES		0x2000	/* spaces are padded */
+#define TMSF_UPDATE_SIZE_ONLY	0x1000	/* internal */
+#define TMSF_OPT_HYPHENS	0x0800	/* deal with optional hyphens */
+#define TMSF_NEGATIVE_KERNING	0x0400	/* last char negatively kerned */
+#define TMSF_EXTENDS_ABOVE	0x0200	/* last char has a tall accent */
+#define TMSF_EXTENDS_BELOW	0x0100	/* last char has a large descender */
+#define TMSF_STYLE_CHANGED	0x0080	/* internal */
+#define TMSF_NOWRAP		0x0040	/* the run may not break (set by
+					 * the style callback) */
+
+struct _TextMetricStyles;
+typedef word TMSStyleCallback(struct _TextMetricStyles *tms, word offset,
+			      const char **text);
+typedef word TMSGraphicCallback(struct _TextMetricStyles *tms, word offset,
+				word *width);
+
+typedef struct _TextMetricStyles {
+    TMSStyleCallback	*TMS_styleCallBack;
+    TMSGraphicCallback	*TMS_graphicCallBack;	/* may be NULL */
+    dword		TMS_fieldStart;		/* the caller's */
+    /* cleared and used by the kernel from here on */
+    WBFixed		TMS_sizeSoFar;
+    WBFixed		TMS_lastCharWidth;
+    TextAttr		TMS_textAttr;		/* set by the style callback */
+    BBFixed		TMS_trackKernValue;
+    TMSFlags		TMS_flags;
+    GStateHandle	TMS_gstateHandle;
+    WBFixed		TMS_styleHeight;
+    WBFixed		TMS_styleBaseline;
+} TextMetricStyles;
+
+typedef ByteFlags TOCFlags;
+#define TOCF_NO_WORD_WRAP	0x80	/* pass: break at the overflow */
+#define TOCF_AUTO_HYPHENATE	0x40	/* pass: ask the hyphen callback */
+#define TOCF_FOUND_ANCHOR	0x20	/* ret: the anchor char was found */
+#define TOCF_IS_HARD_HYPHEN	0x10
+#define TOCF_FOUND_BREAK	0x08
+#define TOCF_LINE_TERMINATED	0x04	/* ret: the last field of the line */
+#define TOCF_ONE_TAB_TOO_LARGE	0x02	/* ret: only a tab, and no room */
+#define TOCF_OPT_HYPHEN_TOO_WIDE 0x01	/* ret */
+
+typedef ByteFlags TOCOtherFlags;
+#define TOCOF_IS_FIRST_FIELD	0x80	/* pass: the line's first field */
+#define TOCOF_PREV_CHAR_KERNED	0x40
+#define TOCOF_LAST_BREAK_KERNED	0x20
+#define TOCOF_WRAP_AFTER_OVERFLOW 0x10	/* pass: wrap after the word that
+					 * overflows */
+#define TOCOF_WAIT_FOR_WORD	0x08	/* internal */
+#define TOCOF_FOUND_WORD	0x04	/* internal */
+#define TOCOF_FIRST_CHAR_OVERFLOW 0x02	/* internal */
+
+typedef struct {
+    TextMetricStyles	TOCI_style;
+    WBFixed		TOCI_currentHgt;	/* the field's height */
+    WBFixed		TOCI_currentBlo;	/* and baseline */
+    word		TOCI_lastWordStart;
+    WBFixed		TOCI_lastWordPos;
+    word		TOCI_lastWordEndPos;
+    word		TOCI_lastHyphen;
+    WBFixed		TOCI_lastHyphenPos;
+    word		TOCI_tallCharHeightPos;
+    WBFixed		TOCI_tallCharHeight;
+    word		TOCI_tallCharBaselinePos;
+    WBFixed		TOCI_tallCharBaseline;
+    word		TOCI_suggestedHyphen;	/* set by the hyphen callback */
+    WBFixed		TOCI_suggestedHyphenPos;
+    TMSFlags		TOCI_lastMetricFlags;
+} TOC_int;
+
+struct _TOC_vars;
+/* a word (TOCI_lastWordStart, TOCI_lastWordPos) would be split at
+ * offset: sets TOCI_suggestedHyphen, TOCI_suggestedHyphenPos and
+ * TOCE_hyphenWidth */
+typedef void TOCHyphenCallback(struct _TOC_vars *vars, word offset);
+/* a tab starts the field (text at it): sets TOCE_areaToFill; TRUE if
+ * there is no tab stop within the margins */
+typedef Boolean TOCTabCallback(struct _TOC_vars *vars, const char *text);
+/* the line would be height high with the characters to come */
+typedef void TOCHeightCallback(struct _TOC_vars *vars, WBFixed height);
+
+typedef struct {
+    sword		TOCE_areaToFill;	/* pass: the width to fit */
+    TOCHyphenCallback	*TOCE_hyphenCallback;	/* may be NULL */
+    TOCTabCallback	*TOCE_tabCallback;	/* may be NULL */
+    TOCHeightCallback	*TOCE_heightCallback;	/* may be NULL */
+    void		*TOCE_passBack;		/* the caller's */
+    word		TOCE_anchorChar;	/* pass */
+    TOCFlags		TOCE_flags;		/* pass, returned */
+    WBFixed		TOCE_lineHeight;	/* pass, returned */
+    WBFixed		TOCE_lineBLO;		/* pass, returned */
+    word		TOCE_lineFlags;		/* LineFlags; pass, returned */
+    TOCOtherFlags	TOCE_otherFlags;
+    sword		TOCE_nSpaces;		/* ret: paddable spaces */
+    sword		TOCE_nExtraSpaces;	/* ret: spaces after the break */
+    sword		TOCE_widthToAnchor;	/* ret */
+    sword		TOCE_nChars;		/* ret: characters that fit */
+    sword		TOCE_break;
+    WBFixed		TOCE_hyphenWidth;
+    WBFixed		TOCE_fieldWidth;	/* ret: up to the break */
+    sword		TOCE_justWidth;		/* ret: for justification */
+    word		TOCE_wrapAfterOverflowWidth;	/* pass: 0 none */
+} TOC_ext;
+
+typedef struct _TOC_vars {
+    TOC_int		TOCV_int;
+    TOC_ext		TOCV_ext;
+} TOC_vars;
+
+extern void
+    _pascal GrTextObjCalc(GStateHandle gstate, TOC_vars *vars);
+
+typedef struct {
+    TextMetricStyles	GTPL_style;
+    void		*GTPL_object;		/* the caller's */
+    word		GTPL_startPosition;
+    word		GTPL_charCount;
+} GTP_vars;
+
+/* the offset of the character nearest pixel (from the field's start)
+ * among nChars; *pos the pixel position of its left edge */
+extern word
+    _pascal GrTextPosition(GStateHandle gstate, GTP_vars *vars, word nChars,
+			   word pixel, word *pos);
 #endif
 
 /***/
