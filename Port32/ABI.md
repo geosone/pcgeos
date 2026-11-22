@@ -5192,6 +5192,59 @@ visual classes of `Library/User/Vis`:
   `noInit` (dx in the asm: the caller validates the new items), the
   source of `MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER` is a
   `VisMonikerSource` (`gDListC.goh`).
+- **The text** (`Gen/genTextEdit.goc` after `genTextEdit.asm`):
+  `GenTextClass` is a `VisText` once built (`SPIR_BUILD_TEXT`); its
+  text chunk, maximum length and attributes are the generic ones. It
+  keeps the indeterminate and modified state, sends its status message
+  (`ATTR_GEN_TEXT_STATUS_MSG`) when asked and its apply message on
+  `MSG_GEN_APPLY` when modified, both with the state flags
+  (`GEN_TEXT_APPLY_MSG`), reads and writes its text as an option, and
+  copies its text with `MSG_GEN_COPY_TREE`. A generic object only takes
+  the target if it is `GA_TARGETABLE`, so a plain text field has the
+  focus (and its cursor) but not the target. Port32:
+  `MSG_GEN_TEXT_SET_APPLY_MSG`'s parameter is `applyMsg` in
+  `gTextC.goh` (`message` is every method's own); not yet
+  `MSG_GEN_BRANCH_REPLACE_PARAMS`.
+  Motif's `OLTextClass` (`CGadget/copenTextBuild.goc`,
+  `copenTextCommon.goc`, `CSpec/cspecText.goc`,
+  `Internal/SpecUI/olTextClass.goh`) is a subclass of `VisTextClass`,
+  so `motif.geo` imports the text library (`library text` in
+  `motif32.gp`; a program that registers Motif's image registers the
+  text library's too). Growing, it takes over the generic text chunk,
+  the character and paragraph attributes
+  (`ATTR_GEN_TEXT_DEFAULT_CHAR_ATTR` and the others) and the text's
+  variable data; a text that is not read-only is editable and
+  selectable, in an inset frame on the light color with a margin of
+  two. Building, it reads its hints (the filter classes, the wash
+  color, the frame, the cursor's place, `HINT_DEFAULT_FOCUS`); with a
+  moniker it goes into a `GenInteraction` made for it
+  (`OpenCreateNewParentObject`), which shows the moniker beside the
+  text, lined up with its first line (`MSG_GET_FIRST_MKR_POS`), and is
+  enabled with it. Its size: one line is as high as its line, an
+  editable one 220 wide (200 on a narrow screen) unless it expands, one
+  to show as wide as its text; several lines expand to their parent's
+  width and are as high as their text, an editable one four lines at
+  least, always whole lines; the size hints count the margins in
+  (`MSG_SPEC_GET_EXTRA_SIZE`). A height that changes with the text
+  asks for the geometry again. Keys: Enter in one line activates it
+  (the status message, then the apply message by the queue unless its
+  dialog is delayed) and goes on to the parent with Tab
+  (`GTA_USE_TAB_FOR_NAVIGATION`), as every key of a text that is not
+  editable. The first change by the user makes the generic object
+  modified and so applyable; not enabled, it gives up the focus and is
+  neither editable nor selectable. `MSG_VIS_TEXT_UPDATE_GENERIC` writes
+  the text's state back to the generic object.
+  Port32, not yet: the view. A text of several lines that gets less
+  height than its text needs would be put into a `GenView` of its own
+  and scroll; here it does what the asm does for a text that cannot go
+  into a view (one under a `GenView`): it takes the height of its text
+  from then on (`TDSS_STAY_OUT_OF_VIEW`). `GTA_INIT_SCROLLING`,
+  `MSG_OL_PLACE_IN_VIEW` and the page scrolling messages wait for it.
+  Also not yet: the pen (larger margins, the floating keyboard), the
+  item group a text runs (`ATTR_GEN_TEXT_RUNS_ITEM_GROUP`). The font of
+  editable text (`editableTextFontID`) is set by the font and size
+  messages. The filter classes are stored but the text library does
+  not filter by them yet (section 13z).
 - **The glyph** (`Gen/genGlyphDisplay.goc` after `genGlyphDisplay.asm`):
   `GenGlyphClass` only shows its moniker; the specific UI builds it
   (`SPIR_BUILD_GLYPH_DISPLAY`). Motif's `OLGlyphDisplayClass`
@@ -5392,7 +5445,8 @@ are left out), the constants, the variables and the routines.
   `MSG_META_RESOLVE_VARIANT_SUPERCLASS` gets NULL, a fatal error). So
   far: `OLBuildApplication`, `OLBuildField`, `OLBuildScreen`,
   `OLBuildSystem`, `SpecGetDisplayScheme`, `SpecGetWindowOptions`,
-  `SpecGetTextKbdBindings`, `SpecDrawTextCursor` (section 13z), and
+  `SpecGetTextKbdBindings`, `SpecDrawTextCursor` (section 13z),
+  `OLBuildText`, and
   the classes `OLSystemClass`, `OLScreenClass`, `OLFieldClass`,
   `OLApplicationClass` (`CInclude/Internal/SpecUI/ol*Class.goh`).
 - **Ported.**
@@ -6178,6 +6232,13 @@ are left out), the constants, the variables and the routines.
   Doc 2's glyph is an `OLGlyphDisplay` as large as its text, wider with
   a longer moniker, not enabled; the separator below it two pixels high
   and as wide as the display.
+  Doc 1, usable again (step 46), has two `GenText`s (steps 47 to 50):
+  one line to edit with a moniker (an `OLText` in a frame, in its
+  composite, as wide as its hint with the margins) and several lines to
+  show (no frame, wrapped at its width). The first takes the focus,
+  text is typed up to its maximum length, the generic object is
+  modified; Enter sends the status and then the apply message; not
+  enabled and enabled again; the second grows with more text.
 
 ## 13z. The text library (`Library/Text`, P6)
 
@@ -6333,11 +6394,25 @@ the modules of the asm; what is there:
   focus (click to type) and the target (`VTS_TARGETABLE`);
   `MSG_META_PTR` drags the selection, `MSG_META_END_SELECT` ends it; a
   double press selects the word.
+- **Geometry** (`Text/textMethodGeometry.goc`): what the specific UI
+  asks: `MSG_VIS_TEXT_GET_LINE_HEIGHT`, `..._GET_MIN_WIDTH`,
+  `..._GET_SIMPLE_MIN_WIDTH`, `..._GET_AVERAGE_CHAR_WIDTH` (of the
+  font of the character attribute), `..._GET_ONE_LINE_WIDTH`, and
+  `MSG_VIS_TEXT_CALC_HEIGHT`: the height the text needs at a width,
+  with the top and bottom margins. With `cacheResult` the object is to
+  become that wide: height and width are kept (`VTI_height`,
+  `VTI_lastWidth`), lines of another height are thrown away and made
+  again when the geometry is valid. Port32 calculates all lines into a
+  line storage of its own for it. After a change on the screen a
+  height other than before is told to the object itself
+  (`MSG_VIS_TEXT_HEIGHT_NOTIFY`, with the margins).
+  `MSG_VIS_TEXT_SET_WASH_COLOR` and `..._GET_WASH_COLOR` set and read
+  the background.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
   paragraph attribute, borders and paragraph backgrounds, tab leaders,
-  extended styles, hyphenation, graphics, geometry
-  (`MSG_VIS_RECALC_SIZE`, height notification), scrolling (of a one
-  line object, the selection into view), overstrike mode, smart
+  extended styles, hyphenation, graphics, scrolling (of a one
+  line object, the selection into view), the character filters
+  (`VisTextFilters`: only tabs are refused), overstrike mode, smart
   quotes, the large mouse messages, selection by words and lines while
   dragging, quick transfer, the clipboard, the pointer image over
   text;
@@ -6355,7 +6430,8 @@ the modules of the asm; what is there:
   maximum length, the instance data, the character attribute as a
   record and as a chunk; the lines (booted with Berkeley): word wrap,
   right, centered and full justification, a carriage return, a tab,
-  lines going away. ctest `kernel.draw` measures fields
+  lines going away; the sizes for the geometry and the height at a
+  width, asked and cached. ctest `kernel.draw` measures fields
   (`GrTextObjCalc`, `GrTextPosition`); `library.ui.boot` has a text
   object in a view's document (steps 40 to 45): drawn with it and
   after a change; with the focus its cursor, a range, typing over it;

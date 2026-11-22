@@ -171,6 +171,7 @@ export GenSetupTrackingArgs
 export GenReturnTrackingArgs
 export UserCheckAcceleratorChar
 export UserCheckInsertableCtrlChar
+export GenTextClass
 
 resource ApplicationUI object
 resource SystemFieldUI object

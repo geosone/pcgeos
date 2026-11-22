@@ -1,0 +1,579 @@
+/*
+ * copenTextBuild.goc -- OLTextClass built (after copenTextBuild.asm):
+ * the specific side of a GenText, a VisText.
+ *
+ * Growing (MSG_META_INITIALIZE) it takes over the generic text chunk,
+ * the maximum length, the attributes (one line, no word wrap), the
+ * character and paragraph attributes and the text's variable data; one
+ * that is not read-only is editable and selectable, in a frame with the
+ * frame's margins.  Building (MSG_SPEC_BUILD) it reads its hints; with
+ * a moniker it goes into a composite of its own (a GenInteraction made
+ * for it, the moniker beside the text).
+ *
+ * Port32 (Port32/ABI.md section 13z): no view yet (a text that does not
+ * fit is not scrolled; GTA_INIT_SCROLLING, MSG_OL_PLACE_IN_VIEW), no
+ * pen (margins, keyboard), no hint that runs an item group
+ * (ATTR_GEN_TEXT_RUNS_ITEM_GROUP).  The editable text font is set by
+ * the font and size messages (the asm maps a default record itself).
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olTextClass.goh>
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Internal/SpecUI/olWinClass.goh>
+@include <Objects/gInterC.goh>
+#include <string.h>
+
+@classdecl OLTextClass, neverSaved;
+
+@extern method OLTextClass, MSG_VIS_DRAW;
+@extern method OLTextClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
+@extern method OLTextClass, MSG_META_GRAB_FOCUS_EXCL;
+@extern method OLTextClass, MSG_META_GRAB_TARGET_EXCL;
+@extern method OLTextClass, MSG_SPEC_NOTIFY_ENABLED;
+@extern method OLTextClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
+@extern method OLTextClass, MSG_SPEC_NAVIGATION_QUERY;
+@extern method OLTextClass, MSG_META_TEXT_USER_MODIFIED;
+@extern method OLTextClass, MSG_META_TEXT_NOT_USER_MODIFIED;
+@extern method OLTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE;
+@extern method OLTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE;
+@extern method OLTextClass, MSG_GEN_APPLY;
+@extern method OLTextClass, MSG_SPEC_UPDATE_VIS_MONIKER;
+@extern method OLTextClass, MSG_SPEC_VIS_OPEN_NOTIFY;
+@extern method OLTextClass, MSG_SPEC_VIS_CLOSE_NOTIFY;
+@extern method OLTextClass, MSG_VIS_RECALC_SIZE;
+@extern method OLTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
+@extern method OLTextClass, MSG_SPEC_GET_EXTRA_SIZE;
+@extern method OLTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY;
+@extern method OLTextClass, MSG_GET_FIRST_MKR_POS;
+@extern method OLTextClass, MSG_VIS_TEXT_UPDATE_GENERIC;
+@extern method OLTextClass, MSG_META_KBD_CHAR;
+@extern method OLTextClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
+@extern method OLTextClass, MSG_GEN_FIND_KBD_ACCELERATOR;
+@extern method OLTextClass, MSG_META_GAINED_FOCUS_EXCL;
+@extern method OLTextClass, MSG_META_LOST_FOCUS_EXCL;
+@extern method OLTextClass, MSG_GEN_ACTIVATE;
+@extern method OLTextClass, MSG_GEN_MAKE_APPLYABLE;
+@extern method OLTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED;
+
+#define Txt(o)	((OLTextInstance *) ObjDerefVis(o))
+#define Gen(o)	((GenTextInstance *) ObjDerefGen(o))
+
+#define FRAME_TEXT_MARGIN	2	/* text in a frame */
+#define CGA_FRAME_TEXT_MARGIN	1
+
+/* a word of variable data copied to another type (copyVarData) */
+static void CopyVarData(optr o, word from, word to)
+{
+    word *p = ObjVarFindData(o, from), v;
+
+    if (!p)
+	return;
+    v = *p;
+    p = ObjVarAddData(o, to, sizeof(word));
+    *p = v;
+}
+
+static const word genToVis[][2] = {
+    { ATTR_GEN_TEXT_DOES_NOT_ACCEPT_INK, ATTR_VIS_TEXT_DOES_NOT_ACCEPT_INK },
+    { ATTR_GEN_TEXT_CUSTOM_FILTER, ATTR_VIS_TEXT_CUSTOM_FILTER },
+    { ATTR_GEN_TEXT_SEND_CONTEXT_NOTIFICATIONS_EVEN_IF_NOT_FOCUSED,
+      ATTR_VIS_TEXT_SEND_CONTEXT_NOTIFICATIONS_EVEN_IF_NOT_FOCUSED },
+    { ATTR_GEN_TEXT_TYPE_RUNS, ATTR_VIS_TEXT_TYPE_RUNS },
+    { ATTR_GEN_TEXT_GRAPHIC_RUNS, ATTR_VIS_TEXT_GRAPHIC_RUNS },
+    { ATTR_GEN_TEXT_STYLE_ARRAY, ATTR_VIS_TEXT_STYLE_ARRAY },
+    { ATTR_GEN_TEXT_NAME_ARRAY, ATTR_VIS_TEXT_NAME_ARRAY },
+    { ATTR_GEN_TEXT_EXTENDED_FILTER, ATTR_VIS_TEXT_EXTENDED_FILTER },
+    { ATTR_GEN_TEXT_DO_NOT_INTERACT_WITH_SEARCH_CONTROL,
+      ATTR_VIS_TEXT_DO_NOT_INTERACT_WITH_SEARCH_CONTROL },
+    { ATTR_GEN_TEXT_DONT_BEEP_ON_INSERTION_ERROR,
+      ATTR_VIS_TEXT_DONT_BEEP_ON_INSERTION_ERROR },
+    { ATTR_GEN_TEXT_CURSOR_NO_FOCUS, ATTR_VIS_TEXT_CURSOR_NO_FOCUS },
+    { ATTR_GEN_TEXT_NO_CURSOR, ATTR_VIS_TEXT_NO_CURSOR },
+};
+
+/*
+ * SetCharParaAttrsFromHints: the character and paragraph attributes
+ * of the generic object (a run array, one attribute in a chunk, a
+ * default record); TRUE if there are character attributes
+ */
+static Boolean SetCharParaAttrsFromHints(optr o)
+{
+    OLTextInstance *t;
+    word *p;
+    Boolean chars = FALSE;
+
+    if ((p = ObjVarFindData(o, ATTR_GEN_TEXT_MULTIPLE_CHAR_ATTR_RUNS))
+	!= NULL) {
+	t = Txt(o);
+	t->VTI_storageFlags |= VTSF_MULTIPLE_CHAR_ATTRS;
+	t->VTI_storageFlags &= ~VTSF_DEFAULT_CHAR_ATTR;
+	t->VTI_charAttrRuns = *p;
+	chars = TRUE;
+    } else if ((p = ObjVarFindData(o, ATTR_GEN_TEXT_CHAR_ATTR)) != NULL) {
+	t = Txt(o);
+	t->VTI_storageFlags &= ~VTSF_DEFAULT_CHAR_ATTR;
+	t->VTI_charAttrRuns = *p;
+	chars = TRUE;
+    } else if ((p = ObjVarFindData(o, ATTR_GEN_TEXT_DEFAULT_CHAR_ATTR))
+	       != NULL) {
+	t = Txt(o);
+	t->VTI_storageFlags |= VTSF_DEFAULT_CHAR_ATTR;
+	t->VTI_charAttrRuns = *p;
+	chars = TRUE;
+    }
+    if ((p = ObjVarFindData(o, ATTR_GEN_TEXT_MULTIPLE_PARA_ATTR_RUNS))
+	!= NULL) {
+	t = Txt(o);
+	t->VTI_storageFlags |= VTSF_MULTIPLE_PARA_ATTRS;
+	t->VTI_storageFlags &= ~VTSF_DEFAULT_PARA_ATTR;
+	t->VTI_paraAttrRuns = *p;
+    } else if ((p = ObjVarFindData(o, ATTR_GEN_TEXT_PARA_ATTR)) != NULL) {
+	t = Txt(o);
+	t->VTI_storageFlags &= ~VTSF_DEFAULT_PARA_ATTR;
+	t->VTI_paraAttrRuns = *p;
+    } else if ((p = ObjVarFindData(o, ATTR_GEN_TEXT_DEFAULT_PARA_ATTR))
+	       != NULL)
+	Txt(o)->VTI_paraAttrRuns = *p;
+    return chars;
+}
+
+/* SetTextMargins: the margins of a text in a frame, which it is in */
+static void SetTextMargins(optr o)
+{
+    OLTextInstance *t = Txt(o);
+
+    t->VTI_tbMargin = OpenCheckIfCGA() ? CGA_FRAME_TEXT_MARGIN
+				       : FRAME_TEXT_MARGIN;
+    t->VTI_lrMargin = FRAME_TEXT_MARGIN;
+    t->OLTDI_specState |= TDSS_IN_FRAME;
+}
+
+/* OLTextInitialize */
+@method OLTextClass, MSG_META_INITIALIZE
+{
+    GenTextInstance *g;
+    GenTextAttrs attrs;
+    Boolean chars;
+    word i;
+
+    @callsuper();
+    pself = Txt(oself);
+    g = Gen(oself);
+    pself->VTI_output = g->GTXI_destination;
+    /* the generic text is the text (none: the new one the generic) */
+    if (g->GTXI_text) {
+	ChunkHandle own = pself->VTI_text;
+
+	pself->VTI_text = g->GTXI_text;
+	if (own)
+	    LMemFreeHandles(OptrToHandle(oself), own);
+    } else {
+	g->GTXI_text = pself->VTI_text;
+	ObjMarkDirty(oself);
+    }
+    pself = Txt(oself);
+    g = Gen(oself);
+    pself->VTI_lrMargin = 0;
+    pself->VTI_tbMargin = 0;
+    pself->VTI_maxLength = g->GTXI_maxLength;
+    if (g->GI_attrs & GA_TARGETABLE)
+	pself->VTI_state |= VTS_TARGETABLE;
+    pself->VTI_state &= ~(VTS_EDITABLE | VTS_SELECTABLE);
+    pself->VI_geoAttrs |= VGA_USE_VIS_SET_POSITION;
+    attrs = g->GTXI_attrs;
+    if (attrs & GTA_SINGLE_LINE_TEXT)
+	pself->VTI_state |= VTS_ONE_LINE;
+    if (g->GTXI_stateFlags & GTSF_INDETERMINATE)
+	pself->VTI_features |= VTF_USE_50_PCT_TEXT_MASK;
+    if (attrs & GTA_NO_WORD_WRAPPING)
+	pself->VTI_features |= VTF_NO_WORD_WRAPPING;
+    for (i = 0; i < sizeof(genToVis) / sizeof(genToVis[0]); i++)
+	CopyVarData(oself, genToVis[i][0], genToVis[i][1]);
+    if (ObjVarFindData(oself, ATTR_GEN_TEXT_TYPE_RUNS))
+	Txt(oself)->VTI_storageFlags |= VTSF_TYPES;
+    if (ObjVarFindData(oself, ATTR_GEN_TEXT_GRAPHIC_RUNS))
+	Txt(oself)->VTI_storageFlags |= VTSF_GRAPHICS;
+    if (ObjVarFindData(oself, ATTR_GEN_TEXT_STYLE_ARRAY))
+	Txt(oself)->VTI_storageFlags |= VTSF_STYLES;
+    chars = SetCharParaAttrsFromHints(oself);
+
+    if (Gen(oself)->GI_attrs & GA_READ_ONLY)
+	return;
+    /* editable: the font for editable text (unless it has its own) */
+    if (!chars && editableTextFontID) {
+	WWFixed size;
+
+	size.WWF_int = (word) editableTextFontsize;
+	size.WWF_frac = 0;
+	@call oself::MSG_VIS_TEXT_SET_FONT_ID(editableTextFontID,
+					      TEXT_ADDRESS_PAST_END, 0);
+	@call oself::MSG_VIS_TEXT_SET_POINT_SIZE(size, TEXT_ADDRESS_PAST_END,
+						 0);
+    }
+    SetTextMargins(oself);
+    pself = Txt(oself);
+    pself->VTI_state |= VTS_SELECTABLE | VTS_EDITABLE;
+    pself->OLTDI_moreState |= TDSS_SELECTABLE;
+    pself->OLTDI_specState |= TDSS_EDITABLE;
+    if (Gen(oself)->GTXI_attrs & GTA_USE_TAB_FOR_NAVIGATION)
+	pself->VTI_filters |= VTF_NO_TABS;
+}
+
+/* ---------------------------------------------------------------------
+ * The hints
+ * ------------------------------------------------------------------- */
+
+/* what the hints ask to be done once they are all read */
+typedef struct {
+    Boolean	selectAll, cursorAtStart, cursorAtEnd, frame, wash;
+} BuildHints;
+
+static void SetFilterClass(OLTextInstance *t, byte class)
+{
+    t->VTI_filters = (VisTextFilters) ((t->VTI_filters & ~VTF_FILTER_CLASS) |
+				       class);
+}
+
+static void BuildHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		      word dataType, void *handlerData)
+{
+    optr o = ConstructOptr(mh, chnk);
+    OLTextInstance *t = Txt(o);
+    BuildHints *h = handlerData;
+    ColorQuad *c;
+
+    (void) extra;
+    switch (dataType) {
+    case HINT_DO_NOT_USE_MONIKER:
+	t->OLTDI_specState |= TDSS_NO_MONIKER;
+	break;
+    case HINT_TEXT_AUTO_HYPHENATE:
+	t->VTI_features |= VTF_AUTO_HYPHENATE;
+	break;
+    case HINT_TEXT_SELECT_TEXT:
+	h->selectAll = TRUE;
+	break;
+    case HINT_TEXT_CURSOR_AT_START:
+	h->cursorAtStart = TRUE;
+	break;
+    case HINT_TEXT_CURSOR_AT_END:
+	h->cursorAtEnd = TRUE;
+	break;
+    case HINT_TEXT_ALLOW_SMART_QUOTES:
+	t->VTI_features |= VTF_ALLOW_SMART_QUOTES;
+	break;
+    case HINT_TEXT_ALLOW_UNDO:
+	t->VTI_features |= VTF_ALLOW_UNDO;
+	break;
+    case ATTR_GEN_TEXT_ALPHA:
+	SetFilterClass(t, VTFC_ALPHA);
+	break;
+    case ATTR_GEN_TEXT_NUMERIC:
+	SetFilterClass(t, VTFC_NUMERIC);
+	break;
+    case ATTR_GEN_TEXT_SIGNED_NUMERIC:
+	SetFilterClass(t, VTFC_SIGNED_NUMERIC);
+	break;
+    case ATTR_GEN_TEXT_SIGNED_DECIMAL:
+	SetFilterClass(t, VTFC_SIGNED_DECIMAL);
+	break;
+    case ATTR_GEN_TEXT_FLOAT_DECIMAL:
+	SetFilterClass(t, VTFC_FLOAT_DECIMAL);
+	break;
+    case ATTR_GEN_TEXT_ALPHA_NUMERIC:
+	SetFilterClass(t, VTFC_ALPHA_NUMERIC);
+	break;
+    case ATTR_GEN_TEXT_LEGAL_FILENAMES:
+	SetFilterClass(t, VTFC_FILENAMES);
+	break;
+    case ATTR_GEN_TEXT_LEGAL_DOS_FILENAMES:
+	SetFilterClass(t, VTFC_DOS_FILENAMES);
+	t->VTI_filters |= VTF_NO_SPACES;
+	break;
+    case ATTR_GEN_TEXT_LEGAL_DOS_VOLUME_NAMES:
+	SetFilterClass(t, VTFC_DOS_VOLUME_NAMES);
+	t->VTI_filters |= VTF_NO_SPACES;
+	break;
+    case ATTR_GEN_TEXT_LEGAL_DOS_PATH:
+	SetFilterClass(t, VTFC_DOS_PATH);
+	t->VTI_filters |= VTF_NO_SPACES;
+	break;
+    case ATTR_GEN_TEXT_DATE:
+	SetFilterClass(t, VTFC_DATE);
+	break;
+    case ATTR_GEN_TEXT_TIME:
+	SetFilterClass(t, VTFC_TIME);
+	break;
+    case ATTR_GEN_TEXT_DASHED_ALPHA_NUMERIC:
+	SetFilterClass(t, VTFC_DASHED_ALPHA_NUMERIC);
+	t->VTI_filters |= VTF_NO_SPACES;
+	break;
+    case ATTR_GEN_TEXT_NORMAL_ASCII:
+	SetFilterClass(t, VTFC_NORMAL_ASCII);
+	break;
+    case ATTR_GEN_TEXT_DOS_CHARACTER_SET:
+	SetFilterClass(t, VTFC_DOS_CHARACTER_SET);
+	break;
+    case ATTR_GEN_TEXT_ALLOW_COLUMN_BREAKS:
+	SetFilterClass(t, VTFC_ALLOW_COLUMN_BREAKS);
+	break;
+    case ATTR_GEN_TEXT_MAKE_UPPERCASE:
+	t->VTI_filters |= VTF_UPCASE_CHARS;
+	break;
+    case ATTR_GEN_TEXT_NO_SPACES:
+	t->VTI_filters |= VTF_NO_SPACES;
+	break;
+    case ATTR_GEN_TEXT_ALLOW_SPACES:
+	t->VTI_filters &= ~VTF_NO_SPACES;
+	break;
+    case HINT_TEXT_WHITE_WASH_COLOR:
+	t->VTI_washColor.CQ_redOrIndex = C_WHITE;
+	h->wash = TRUE;
+	break;
+    case HINT_TEXT_WASH_COLOR:
+	c = ObjVarFindData(o, HINT_TEXT_WASH_COLOR);
+	t = Txt(o);
+	t->OLTDI_specState |= TDSS_COLOR_SET;
+	if (c)
+	    t->VTI_washColor = *c;
+	h->wash = TRUE;
+	break;
+    case HINT_DEFAULT_FOCUS:
+	t->OLTDI_moreState |= TDSS_MAKE_DEFAULT_FOCUS;
+	break;
+    case ATTR_GEN_TEXT_NEVER_MAKE_SCROLLABLE:
+	t->OLTDI_moreState |= TDSS_STAY_OUT_OF_VIEW;
+	break;
+    case HINT_TEXT_FRAME:
+	h->frame = TRUE;
+	break;
+    }
+}
+
+/* MkrVarDataHandler */
+static VarDataCHandler buildHints[] = {
+    { HINT_DO_NOT_USE_MONIKER, BuildHint },
+    { HINT_TEXT_AUTO_HYPHENATE, BuildHint },
+    { HINT_TEXT_SELECT_TEXT, BuildHint },
+    { HINT_TEXT_CURSOR_AT_START, BuildHint },
+    { HINT_TEXT_CURSOR_AT_END, BuildHint },
+    { HINT_TEXT_ALLOW_SMART_QUOTES, BuildHint },
+    { HINT_TEXT_ALLOW_UNDO, BuildHint },
+    { ATTR_GEN_TEXT_ALPHA, BuildHint },
+    { ATTR_GEN_TEXT_NUMERIC, BuildHint },
+    { ATTR_GEN_TEXT_SIGNED_NUMERIC, BuildHint },
+    { ATTR_GEN_TEXT_SIGNED_DECIMAL, BuildHint },
+    { ATTR_GEN_TEXT_FLOAT_DECIMAL, BuildHint },
+    { ATTR_GEN_TEXT_ALPHA_NUMERIC, BuildHint },
+    { ATTR_GEN_TEXT_LEGAL_FILENAMES, BuildHint },
+    { ATTR_GEN_TEXT_LEGAL_DOS_FILENAMES, BuildHint },
+    { ATTR_GEN_TEXT_LEGAL_DOS_PATH, BuildHint },
+    { ATTR_GEN_TEXT_NO_SPACES, BuildHint },
+    { ATTR_GEN_TEXT_ALLOW_SPACES, BuildHint },
+    { HINT_TEXT_WASH_COLOR, BuildHint },
+    { HINT_TEXT_WHITE_WASH_COLOR, BuildHint },
+    { ATTR_GEN_TEXT_DATE, BuildHint },
+    { ATTR_GEN_TEXT_TIME, BuildHint },
+    { ATTR_GEN_TEXT_DASHED_ALPHA_NUMERIC, BuildHint },
+    { ATTR_GEN_TEXT_NORMAL_ASCII, BuildHint },
+    { HINT_DEFAULT_FOCUS, BuildHint },
+    { ATTR_GEN_TEXT_LEGAL_DOS_VOLUME_NAMES, BuildHint },
+    { ATTR_GEN_TEXT_DOS_CHARACTER_SET, BuildHint },
+    { ATTR_GEN_TEXT_MAKE_UPPERCASE, BuildHint },
+    { ATTR_GEN_TEXT_ALLOW_COLUMN_BREAKS, BuildHint },
+    { ATTR_GEN_TEXT_NEVER_MAKE_SCROLLABLE, BuildHint },
+    { HINT_TEXT_FRAME, BuildHint },
+};
+
+static void SelectRange(optr o, dword start, dword end)
+{
+    @call o::MSG_VIS_TEXT_SELECT_RANGE(end, start);
+}
+
+/*
+ * OLTextScanGeometryHints: several lines expand to the parent's width;
+ * the expand hints; a fixed size that expands nowhere is only
+ * calculated when invalid
+ */
+@method OLTextClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    pself->OLTDI_moreState &= ~(TDSS_EXPAND_WIDTH_TO_FIT_PARENT |
+				TDSS_EXPAND_HEIGHT_TO_FIT_PARENT);
+    if (!(pself->VTI_state & VTS_ONE_LINE))
+	pself->OLTDI_moreState |= TDSS_EXPAND_WIDTH_TO_FIT_PARENT;
+    if (ObjVarFindData(oself, HINT_EXPAND_WIDTH_TO_FIT_PARENT))
+	Txt(oself)->OLTDI_moreState |= TDSS_EXPAND_WIDTH_TO_FIT_PARENT;
+    if (ObjVarFindData(oself, HINT_EXPAND_HEIGHT_TO_FIT_PARENT))
+	Txt(oself)->OLTDI_moreState |= TDSS_EXPAND_HEIGHT_TO_FIT_PARENT;
+    if (!(Txt(oself)->OLTDI_moreState & (TDSS_EXPAND_WIDTH_TO_FIT_PARENT |
+					 TDSS_EXPAND_HEIGHT_TO_FIT_PARENT)) &&
+	ObjVarFindData(oself, HINT_FIXED_SIZE))
+	Txt(oself)->VI_geoAttrs |= VGA_ONLY_RECALC_SIZE_WHEN_INVALID;
+}
+
+/*
+ * CreateComposite: a new GenInteraction (a sub group) around the text,
+ * with its moniker, enabled as the text; as wide as its parent if the
+ * text expands, its children at the bottom; it shows no mnemonic and
+ * ignores the size hints (they are the text's)
+ */
+static void CreateComposite(optr o, SpecBuildFlags flags)
+{
+    optr comp;
+    OLCtrlInstance *c;
+    Boolean expand;
+
+    if (Txt(o)->OLTDI_specState & TDSS_IN_COMPOSITE)
+	return;
+    comp = OpenCreateNewParentObject(o, (ClassStruct *) &GenInteractionClass);
+    OpenBuildNewParentObject(o, comp, flags, FALSE);
+    Txt(o)->OLTDI_specState |= TDSS_IN_COMPOSITE;
+    Txt(o)->OLTDI_viewObj = OptrToChunk(comp);
+    expand = (Txt(o)->OLTDI_moreState & TDSS_EXPAND_WIDTH_TO_FIT_PARENT) != 0;
+    c = ObjDerefVis(comp);
+    if (expand)
+	c->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+				    HJ_BOTTOM_JUSTIFY_CHILDREN;
+    c->OLCI_optFlags |= OLCOF_IGNORE_DESIRED_SIZE_HINTS;
+    c->OLCI_moreFlags |= OLCOF_IGNORE_MNEMONIC;
+}
+
+/*
+ * OLTextSpecBuild: enabled as the generic object; the default
+ * background (the light color); the hints; with a moniker into a
+ * composite, else under the generic parent's visual; delayed with its
+ * parent (or by ATTR_GEN_PROPERTY); selectable if not read-only (or
+ * ATTR_GEN_TEXT_SELECTABLE) and enabled, then the focus and target
+ * hints; a modified text makes its dialog applyable
+ */
+@method OLTextClass, MSG_SPEC_BUILD
+{
+    BuildHints h;
+    GenTextInstance *g;
+    optr win;
+
+    if (VisCheckIfSpecBuilt(oself))
+	goto done;
+    VisSpecBuildSetEnabledState(oself, flags);
+    /* SetDefaultBGColor */
+    if (!(Txt(oself)->OLTDI_specState & TDSS_COLOR_SET)) {
+	VisTextWashColorModeRed mr;
+	VisTextWashColorBlueGreen bg;
+
+	mr.VTWCMR_redOrIndex = moCS_dsLightColor;
+	mr.VTWCMR_mapMode = CF_INDEX;
+	bg.VTWCBG_green = bg.VTWCBG_blue = 0;
+	@call oself::MSG_VIS_TEXT_SET_WASH_COLOR(mr, bg);
+    }
+    memset(&h, 0, sizeof(h));
+    OpenScanVarData(oself, sizeof(buildHints) / sizeof(buildHints[0]),
+		    buildHints, &h);
+    /* a wash color, a frame hint: an editable text in its frame */
+    pself = Txt(oself);
+    if (h.wash && (pself->OLTDI_specState & TDSS_EDITABLE))
+	SetTextMargins(oself);
+    if (h.frame)
+	SetTextMargins(oself);
+    if (h.selectAll)
+	SelectRange(oself, 0, TEXT_ADDRESS_PAST_END);
+    if (h.cursorAtStart)
+	SelectRange(oself, 0, 0);
+    if (h.cursorAtEnd)
+	SelectRange(oself, TEXT_ADDRESS_PAST_END, TEXT_ADDRESS_PAST_END);
+    if (ObjVarFindData(oself, HINT_TEXT_NO_FRAME))
+	Txt(oself)->OLTDI_specState &= ~TDSS_IN_FRAME;
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+
+    g = Gen(oself);
+    if (g->GI_visMoniker &&
+	!(Txt(oself)->OLTDI_specState & TDSS_NO_MONIKER))
+	CreateComposite(oself, flags);
+    else
+	@callsuper();
+
+    /* SetupDelayedMode */
+    if (OpenGetParentBuildFlagsIfCtrl(oself) & OLBF_DELAYED_MODE)
+	Txt(oself)->OLTDI_moreState |= TDSS_DELAYED;
+    if (ObjVarFindData(oself, ATTR_GEN_PROPERTY))
+	Txt(oself)->OLTDI_moreState |= TDSS_DELAYED;
+    if (ObjVarFindData(oself, ATTR_GEN_NOT_PROPERTY))
+	Txt(oself)->OLTDI_moreState &= ~TDSS_DELAYED;
+
+    win = OpenFindOLWin(oself);
+    if (win && @call win::MSG_OL_WIN_IS_DEFAULT_ACTION_NAVIGATE_TO_NEXT_FIELD())
+	Txt(oself)->OLTDI_moreState |=
+	    TDSS_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD;
+
+    if ((!(Gen(oself)->GI_attrs & GA_READ_ONLY) ||
+	 ObjVarFindData(oself, ATTR_GEN_TEXT_SELECTABLE)) &&
+	(Txt(oself)->VI_attrs & VA_FULLY_ENABLED)) {
+	pself = Txt(oself);
+	pself->VTI_state |= VTS_SELECTABLE;
+	pself->OLTDI_moreState |= TDSS_SELECTABLE;
+    }
+    if (Txt(oself)->OLTDI_moreState & TDSS_SELECTABLE)
+	(void) ScanFocusTargetHintHandlers(oself);
+done:
+    if (Gen(oself)->GTXI_stateFlags & GTSF_MODIFIED)
+	@send, forceQueue, insertAtFront oself::MSG_GEN_MAKE_APPLYABLE();
+    if (OpenCheckIfBW())
+	SpecSetFlagsOnAllCtrlParents(oself);
+}
+
+/*
+ * OLTextVisUnbuild: the lines go (made again when built); a character
+ * attribute chunk made here (the editable font) too; out of the
+ * composite, which is destroyed
+ */
+@method OLTextClass, MSG_SPEC_UNBUILD
+{
+    ChunkHandle c;
+    optr comp = 0;
+
+    if ((c = pself->VTI_lines) != 0) {
+	pself->VTI_lines = 0;
+	LMemFreeHandles(OptrToHandle(oself), c);
+    }
+    pself = Txt(oself);
+    if (!(pself->VTI_storageFlags & (VTSF_DEFAULT_CHAR_ATTR |
+				     VTSF_MULTIPLE_CHAR_ATTRS))) {
+	word *p = ObjVarFindData(oself, ATTR_GEN_TEXT_CHAR_ATTR);
+
+	pself = Txt(oself);
+	c = pself->VTI_charAttrRuns;
+	pself->VTI_storageFlags |= VTSF_DEFAULT_CHAR_ATTR;
+	pself->VTI_charAttrRuns = VIS_TEXT_INITIAL_CHAR_ATTR;
+	if (!p || *p != c)
+	    LMemFreeHandles(OptrToHandle(oself), c);
+    }
+    pself = Txt(oself);
+    if (pself->OLTDI_specState & TDSS_IN_COMPOSITE)
+	comp = ConstructOptr(OptrToHandle(oself), pself->OLTDI_viewObj);
+    OpenUnbuildCreatedParent(oself, comp, flags, FALSE, TRUE);
+    pself = Txt(oself);
+    pself->OLTDI_specState &= ~(TDSS_IN_VIEW | TDSS_IN_COMPOSITE);
+    pself->OLTDI_viewObj = 0;
+}
+
+/* OLTextGetSpecVisObj: the composite if it is in one */
+@method OLTextClass, MSG_SPEC_GET_SPECIFIC_VIS_OBJECT
+{
+    if (flags & SBF_WIN_GROUP)
+	return 0;
+    if (pself->OLTDI_specState & (TDSS_IN_VIEW | TDSS_IN_COMPOSITE))
+	return ConstructOptr(OptrToHandle(oself), pself->OLTDI_viewObj);
+    return oself;
+}
+
+/* OLTextVupCreateGState: an editable text's gstate has the font for
+ * editable text */
+@method OLTextClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    GStateHandle g = @callsuper();
+
+    if (g && (Txt(oself)->OLTDI_specState & TDSS_EDITABLE) &&
+	editableTextFontID)
+	GrSetFont(g, editableTextFontID,
+		  (WWFixedAsDWord) ((dword) editableTextFontsize << 16));
+    return g;
+}

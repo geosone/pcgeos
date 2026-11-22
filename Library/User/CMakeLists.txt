@@ -37,6 +37,7 @@ geos_geode(ui GP ui32.gp
                ${ui}/Gen/genContent.goc
                ${ui}/Gen/genValue.goc
                ${ui}/Gen/genGlyphDisplay.goc
+               ${ui}/Gen/genTextEdit.goc
                ${ui}/Proc/procClass.goc
                ${ui}/User/userFlowUtils.goc
                ${ui}/User/userFlowMisc.goc

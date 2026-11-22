@@ -79,7 +79,9 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CSpec/cspecCUAS.goc
                ${c}/CSpec/cspecValue.goc
                ${c}/CSpec/cspecGlyphDisplay.goc
+               ${c}/CSpec/cspecText.goc
                ${c}/CGadget/copenGlyphDisplay.goc
+               ${c}/CGadget/copenTextBuild.goc
                ${c}/CGadget/copenTextCommon.goc
                ${c}/CSpec/cspecPane.goc
                ${c}/CSpec/cspecContent.goc

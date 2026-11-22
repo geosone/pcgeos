@@ -1,13 +1,62 @@
 /*
  * copenTextCommon.goc -- the specific UI's part of text objects (after
- * copenTextCommon.asm): so far the text cursor.
+ * copenTextCommon.asm): the text cursor, and OLTextClass at work: its
+ * frame, its size, the focus, the keys that leave it, its state.
  *
- * Port32 (Port32/ABI.md section 13y), not yet: OLTextClass, the
- * pointer image over text.
+ * An editable text is drawn in an inset frame on the light color.  One
+ * line is as high as its line; an editable one is 220 wide unless it
+ * expands, a text to show as wide as its text.  Several lines are as
+ * high as their text, an editable one four lines at least; always whole
+ * lines.  A change of the height asks for the geometry again.
+ *
+ * The first change by the user makes the generic object modified (and
+ * so applyable); Enter in a one line text activates it: the status
+ * message, and the apply message unless its dialog is delayed.  Enter
+ * and Tab (GTA_USE_TAB_FOR_NAVIGATION) go on to the parent, as all keys
+ * of a text that is not editable.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: the view (scrolling),
+ * the item group a text runs, the pointer image over text.
  */
 @include "cGeode.goh"
-@include <Objects/vTextC.goh>
+@include <Internal/SpecUI/olTextClass.goh>
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Internal/specC.goh>
 #include <font.h>
+#include <string.h>
+
+@extern method OLTextClass, MSG_VIS_DRAW;
+@extern method OLTextClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
+@extern method OLTextClass, MSG_META_GRAB_FOCUS_EXCL;
+@extern method OLTextClass, MSG_META_GRAB_TARGET_EXCL;
+@extern method OLTextClass, MSG_SPEC_NOTIFY_ENABLED;
+@extern method OLTextClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
+@extern method OLTextClass, MSG_SPEC_NAVIGATION_QUERY;
+@extern method OLTextClass, MSG_META_TEXT_USER_MODIFIED;
+@extern method OLTextClass, MSG_META_TEXT_NOT_USER_MODIFIED;
+@extern method OLTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE;
+@extern method OLTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE;
+@extern method OLTextClass, MSG_GEN_APPLY;
+@extern method OLTextClass, MSG_SPEC_UPDATE_VIS_MONIKER;
+@extern method OLTextClass, MSG_SPEC_VIS_OPEN_NOTIFY;
+@extern method OLTextClass, MSG_SPEC_VIS_CLOSE_NOTIFY;
+@extern method OLTextClass, MSG_VIS_RECALC_SIZE;
+@extern method OLTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
+@extern method OLTextClass, MSG_SPEC_GET_EXTRA_SIZE;
+@extern method OLTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY;
+@extern method OLTextClass, MSG_GET_FIRST_MKR_POS;
+@extern method OLTextClass, MSG_VIS_TEXT_UPDATE_GENERIC;
+@extern method OLTextClass, MSG_META_KBD_CHAR;
+@extern method OLTextClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
+@extern method OLTextClass, MSG_GEN_FIND_KBD_ACCELERATOR;
+@extern method OLTextClass, MSG_META_GAINED_FOCUS_EXCL;
+@extern method OLTextClass, MSG_META_LOST_FOCUS_EXCL;
+@extern method OLTextClass, MSG_GEN_ACTIVATE;
+@extern method OLTextClass, MSG_GEN_MAKE_APPLYABLE;
+@extern method OLTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED;
+
+#define Txt(o)	((OLTextInstance *) ObjDerefVis(o))
+#define Gen(o)	((GenTextInstance *) ObjDerefGen(o))
 
 /*
  * SpecDrawTextCursor (SPIR_DRAW_TEXT_CURSOR): the cursor of a text
@@ -35,4 +84,591 @@ void SpecDrawTextCursor(optr o, GStateHandle gstate)
     GrFillRect(gstate, x, (sword) (y - ascent), (sword) (x + 1),
 	       (sword) (y + descent));
     GrSetMixMode(gstate, MM_COPY);
+}
+
+/* ---------------------------------------------------------------------
+ * OLTextClass: drawing
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLTextDraw: a text in a frame: its bounds filled (the wash color if
+ * one is set, the frame black, white on black; else the inset frame's
+ * colors) and framed; then the text
+ */
+@extern method OLTextClass, MSG_VIS_DRAW
+{
+    if (pself->OLTDI_specState & TDSS_IN_FRAME) {
+	word colors = (C_BLACK << 8) | C_BLACK;
+	Rectangle b;
+
+	if (!(pself->OLTDI_specState & TDSS_COLOR_SET))
+	    colors = OpenSetInsetRectColors(gstate);
+	else if (pself->VTI_washColor.CQ_info != CF_RGB) {
+	    GrSetAreaColor(gstate, CF_INDEX,
+			   pself->VTI_washColor.CQ_redOrIndex, 0, 0);
+	    if (pself->VTI_washColor.CQ_redOrIndex == C_BLACK)
+		colors = (C_WHITE << 8) | C_WHITE;
+	}
+	VisGetBounds(oself, &b);
+	/* OpenDrawAndFillRect */
+	if (!(Txt(oself)->VI_attrs & VA_FULLY_ENABLED))
+	    GrSetAreaMaskSys(gstate, SDM_50);
+	GrFillRect(gstate, b.R_left, b.R_top, b.R_right, b.R_bottom);
+	GrSetAreaMaskSys(gstate, SDM_100);
+	OpenDrawRect(oself, gstate, b.R_left, b.R_top, b.R_right, b.R_bottom,
+		     colors);
+    }
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * OLTextClass: geometry
+ * ------------------------------------------------------------------- */
+
+#define DEFAULT_TEXT_WIDTH		220
+#define DEFAULT_NARROW_TEXT_WIDTH	200
+#define DEFAULT_TEXT_HEIGHT		4	/* lines */
+#define DEFAULT_TEXT_MIN_WIDTH		20
+
+/* GetTextObjectLineHeight: of the font of the text's start (the lines
+ * are not there before the geometry is valid) */
+static word LineHeight(optr o)
+{
+    VisTextCharAttr a;
+    VisTextCharAttrDiffs d;
+    GStateHandle g;
+    sdword h;
+
+    (void) @call o::MSG_VIS_TEXT_GET_CHAR_ATTR(0, &d, &a, 0, 0);
+    g = GrCreateState(NullHandle);
+    GrSetFont(g, a.VTCA_fontID,
+	      ((dword) a.VTCA_pointSize.WBF_int << 16) |
+	      ((dword) a.VTCA_pointSize.WBF_frac << 8));
+    GrSetTextStyle(g, a.VTCA_textStyles, (TextStyle) ~a.VTCA_textStyles);
+    h = (sdword) GrFontMetrics(g, GFMI_MAX_ADJUSTED_HEIGHT) -
+	(sdword) GrFontMetrics(g, GFMI_ABOVE_BOX) -
+	(sdword) GrFontMetrics(g, GFMI_BELOW_BOX);
+    GrDestroyState(g);
+    h = (h + 0x8000) >> 16;
+    return h > 0 ? (word) h : 1;
+}
+
+/* OLTextRerecalcSize */
+@extern method OLTextClass, MSG_VIS_RECALC_SIZE
+{
+    SpecSizeArgs a;
+    sword w = (sword) width, h = (sword) height;
+    word calc = 0, calcH, lineH, tb;
+    const char *text;
+    Boolean single, editable, expandW, expandH;
+
+    VisSetupSizeArgs(oself, &a);
+    VisApplyInitialSizeArgs(oself, &a, &w, &h);
+    pself = Txt(oself);
+    text = LMemDerefHandles(OptrToHandle(oself), pself->VTI_text);
+    if (*text)
+	calc = @call oself::MSG_VIS_TEXT_GET_ONE_LINE_WIDTH(0);
+    if (calc < DEFAULT_TEXT_MIN_WIDTH)
+	calc = DEFAULT_TEXT_MIN_WIDTH;
+    pself = Txt(oself);
+    single = (Gen(oself)->GTXI_attrs & GTA_SINGLE_LINE_TEXT) != 0;
+    editable = (pself->OLTDI_specState & TDSS_EDITABLE) != 0;
+    expandW = (pself->OLTDI_moreState & TDSS_EXPAND_WIDTH_TO_FIT_PARENT) != 0;
+    expandH = (pself->OLTDI_moreState & TDSS_EXPAND_HEIGHT_TO_FIT_PARENT) != 0;
+    tb = (word) (2 * pself->VTI_tbMargin);
+
+    /* one line to show is not narrower than its text */
+    if (single && !editable &&
+	!(Gen(oself)->GTXI_attrs & GTA_ALLOW_TEXT_OFF_END) &&
+	w >= 0 && (word) w < calc)
+	w = (sword) calc;
+    /* its own width: an editable text or several lines the default,
+     * one line to show its text */
+    if (w < 0 || !expandW) {
+	word lim = calc;
+
+	if (!single || editable)
+	    lim = OpenCheckIfNarrow() ? DEFAULT_NARROW_TEXT_WIDTH
+				      : DEFAULT_TEXT_WIDTH;
+	if ((word) w >= lim)
+	    w = (sword) lim;
+    }
+    VisApplySizeArgsToWidth(&a, &w);
+
+    calcH = @call oself::MSG_VIS_TEXT_CALC_HEIGHT((word) w, TRUE);
+    if (single) {
+	if (!(h >= 0 && expandH && (word) h >= calcH))
+	    h = (sword) calcH;
+	VisApplySizeArgsToHeight(&a, &h);
+	return MAKE_SIZE_DWORD(w, h);
+    }
+    lineH = LineHeight(oself);
+    if (Txt(oself)->OLTDI_moreState & TDSS_STAY_OUT_OF_VIEW)
+	h = (sword) RSA_CHOOSE_OWN_SIZE;
+    if (h < 0 || !expandH) {
+	/* an editable text is four lines at least */
+	if (editable && !ObjVarFindData(oself, HINT_MINIMUM_SIZE) &&
+	    (word) (lineH * DEFAULT_TEXT_HEIGHT + tb) > calcH)
+	    calcH = (word) (lineH * DEFAULT_TEXT_HEIGHT + tb);
+	if ((word) h >= calcH)
+	    h = (sword) calcH;
+    } else if ((word) h < calcH)
+	h = (sword) calcH;
+    VisApplySizeArgsToHeight(&a, &h);
+    /* whole lines */
+    h = (sword) (h - tb);
+    if (h < 0)
+	h = 0;
+    h = (sword) ((word) h / lineH);
+    if (!h)
+	h = 1;
+    h = (sword) ((word) h * lineH + tb);
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/*
+ * OLTextNotifyGeometryValid: the lines (not saved); while they are
+ * made a change of the height is no reason for new geometry.  Several
+ * lines that got less height than their text needs would go into a
+ * view; Port32 has none yet, so they do as the asm does for a text
+ * that cannot (one under a GenView): from now on they take the height
+ * of their text, and the geometry is done again.
+ */
+@extern method OLTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
+{
+    ChunkHandle lines;
+    word w, h;
+
+    pself->OLTDI_moreState |= TDSS_GEOMETRY_ALREADY_VALID;
+    @callsuper();
+    pself = Txt(oself);
+    pself->OLTDI_moreState &= ~TDSS_GEOMETRY_ALREADY_VALID;
+    if ((lines = pself->VTI_lines) != 0)
+	ObjSetFlags(ConstructOptr(OptrToHandle(oself), lines),
+		    OCF_IGNORE_DIRTY, 0);
+    pself = Txt(oself);
+    if ((pself->OLTDI_specState & (TDSS_IN_VIEW | TDSS_GOING_INTO_VIEW)) ||
+	(pself->VTI_state & VTS_ONE_LINE) ||
+	(pself->OLTDI_moreState & TDSS_STAY_OUT_OF_VIEW))
+	return;
+    w = (word) (pself->VI_bounds.R_right - pself->VI_bounds.R_left);
+    h = (word) (pself->VI_bounds.R_bottom - pself->VI_bounds.R_top);
+    if (!(Gen(oself)->GTXI_attrs & GTA_INIT_SCROLLING) &&
+	h >= @call oself::MSG_VIS_TEXT_CALC_HEIGHT(w, FALSE))
+	return;
+    Txt(oself)->OLTDI_moreState |= TDSS_STAY_OUT_OF_VIEW;
+    @send, forceQueue, insertAtFront oself::MSG_VIS_MARK_INVALID(
+					VOF_GEOMETRY_INVALID, VUM_NOW);
+}
+
+/* OLTextGetExtraSize: the margins */
+@extern method OLTextClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    (void) childCount;
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->ESP_extraWidth = (word) (2 * pself->VTI_lrMargin);
+    retValue->ESP_extraHeight = (word) (2 * pself->VTI_tbMargin);
+}
+
+/*
+ * OLTextHeightNotify: several lines whose text is another height than
+ * the object: the geometry again (by the queue), unless it is being
+ * made
+ */
+@extern method OLTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY
+{
+    GenTextAttrs attrs = Gen(oself)->GTXI_attrs;
+
+    if ((pself->OLTDI_specState & TDSS_GOING_INTO_VIEW) ||
+	(attrs & (GTA_SINGLE_LINE_TEXT | GTA_ALLOW_TEXT_OFF_END)))
+	return;
+    if (newHeight == (word) (pself->VI_bounds.R_bottom -
+			     pself->VI_bounds.R_top))
+	return;
+    if (!VisCheckIfSpecBuilt(oself) ||
+	(Txt(oself)->OLTDI_moreState & TDSS_GEOMETRY_ALREADY_VALID))
+	return;
+    @send, forceQueue oself::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID,
+						   VUM_NOW);
+}
+
+/* OLTextMkrPos: where the text starts (a moniker beside it lines up
+ * with its first line) */
+@extern method OLTextClass, MSG_GET_FIRST_MKR_POS
+{
+    pos->P_x = (sword) (pself->VI_bounds.R_left + pself->VTI_lrMargin);
+    pos->P_y = (sword) (pself->VI_bounds.R_top + pself->VTI_tbMargin);
+    return TRUE;
+}
+
+@extern method OLTextClass, MSG_SPEC_VIS_OPEN_NOTIFY
+{
+    VisOpenNotifyCommon(oself);
+}
+
+@extern method OLTextClass, MSG_SPEC_VIS_CLOSE_NOTIFY
+{
+    VisCloseNotifyCommon(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * OLTextClass: the focus, enabled
+ * ------------------------------------------------------------------- */
+
+static optr Composite(optr o)
+{
+    OLTextInstance *t = Txt(o);
+
+    if (!(t->OLTDI_specState & (TDSS_IN_VIEW | TDSS_IN_COMPOSITE)) ||
+	!t->OLTDI_viewObj)
+	return 0;
+    return ConstructOptr(OptrToHandle(o), t->OLTDI_viewObj);
+}
+
+/* OLTextBroadcastForDefaultFocus */
+@extern method OLTextClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    if ((pself->OLTDI_moreState & (TDSS_SELECTABLE | TDSS_MAKE_DEFAULT_FOCUS))
+	!= (TDSS_SELECTABLE | TDSS_MAKE_DEFAULT_FOCUS))
+	return;
+    retValue->OAGP_object = oself;
+    retValue->OAGP_grabFlags = 0;
+}
+
+/* only a selectable text takes the focus, the target */
+@extern method OLTextClass, MSG_META_GRAB_FOCUS_EXCL
+{
+    if (pself->OLTDI_moreState & TDSS_SELECTABLE)
+	MetaGrabFocusExclLow(oself);
+}
+
+@extern method OLTextClass, MSG_META_GRAB_TARGET_EXCL
+{
+    if (pself->OLTDI_moreState & TDSS_SELECTABLE)
+	MetaGrabTargetExclLow(oself);
+}
+
+/* OpenNavigateIfHaveFocus: with the window's focus: on to the next
+ * field */
+static void NavigateIfHaveFocus(optr o)
+{
+    optr vp = VisFindParent(o);
+    GenReturnParams r;
+
+    memset(&r, 0, sizeof(r));
+    if (vp && @call vp::MSG_VIS_P32_VUP_QUERY(&r,
+				SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL, 0, 0) &&
+	ConstructOptr(r.GRP_cx, r.GRP_dx) == o)
+	@call vp::MSG_SPEC_NAVIGATE_TO_NEXT_FIELD();
+}
+
+/* OLTextNotifyEnabled: editable and selectable again (unless
+ * read-only); the composite enabled too */
+@extern method OLTextClass, MSG_SPEC_NOTIFY_ENABLED
+{
+    GenInstance *g;
+    optr comp;
+
+    if (!@callsuper())
+	return FALSE;
+    g = (GenInstance *) ObjDerefGen(oself);
+    if ((g->GI_states & GS_ENABLED) && !(g->GI_attrs & GA_READ_ONLY))
+	@call oself::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(
+			VTS_EDITABLE | VTS_SELECTABLE, 0);
+    if ((comp = Composite(oself)) != 0) {
+	@call comp::MSG_GEN_SET_ENABLED(updateMode);
+	(void) @call comp::MSG_GEN_NOTIFY_ENABLED(updateMode, flags);
+    }
+    pself = Txt(oself);
+    if (pself->OLTDI_moreState & TDSS_SELECTABLE)
+	pself->VTI_state |= VTS_SELECTABLE;
+    return TRUE;
+}
+
+/* OLTextNotifyNotEnabled: the focus goes on, the grabs are given up,
+ * the text is neither editable nor selectable; the composite too */
+@extern method OLTextClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    optr comp;
+
+    NavigateIfHaveFocus(oself);
+    MetaReleaseFocusExclLow(oself);
+    MetaReleaseTargetExclLow(oself);
+    VisReleaseMouse(oself);
+    @call oself::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(
+			0, VTS_EDITABLE | VTS_SELECTABLE);
+    if (!@callsuper())
+	return FALSE;
+    if ((comp = Composite(oself)) != 0) {
+	@call comp::MSG_GEN_SET_NOT_ENABLED(updateMode);
+	(void) @call comp::MSG_GEN_NOTIFY_NOT_ENABLED(updateMode, flags);
+    }
+    return TRUE;
+}
+
+/* OLTextNavigate: an enabled editable text takes the focus */
+@extern method OLTextClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    NavigateCommonFlags f = 0;
+
+    if ((pself->OLTDI_specState & (TDSS_EDITABLE | TDSS_IN_VIEW)) &&
+	(pself->VI_attrs & VA_FULLY_ENABLED))
+	f = NCF_IS_FOCUSABLE;
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, f,
+			     OptrToChunk(oself));
+}
+
+/*
+ * OLTextChangeAlterExclIfSingleLineDefault: the window's default
+ * exclusive taken or released: by several lines (Enter is theirs), by
+ * one line in a window whose default action is the next field
+ */
+static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
+{
+    optr vp;
+    GenReturnParams r;
+
+    if ((Gen(o)->GTXI_attrs & GTA_SINGLE_LINE_TEXT) &&
+	!(Txt(o)->OLTDI_moreState &
+	  TDSS_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD))
+	return;
+    if (!(vp = VisFindParent(o)))
+	return;
+    memset(&r, 0, sizeof(r));
+    (void) @call vp::MSG_VIS_P32_VUP_QUERY(&r, q, OptrToChunk(o),
+					   OptrToHandle(o));
+}
+
+/* OLTextGainedFocusExcl: the target too */
+@extern method OLTextClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    @call oself::MSG_META_GRAB_TARGET_EXCL();
+    ChangeDefaultExcl(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
+}
+
+@extern method OLTextClass, MSG_META_LOST_FOCUS_EXCL
+{
+    ChangeDefaultExcl(oself, SVQT_RELEASE_DEFAULT_EXCLUSIVE);
+}
+
+/* OLTextActivateObjectWithMnemonic: the mnemonic of its moniker gives
+ * it the focus */
+@extern method OLTextClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    if ((pself->VI_attrs & VA_FULLY_ENABLED) &&
+	VisCheckMnemonic(oself, character, flags, state)) {
+	MetaGrabFocusExclLow(oself);
+	return TRUE;
+    }
+    return @callsuper();
+}
+
+/* OLTextFindKbdAccelerator: its accelerator gives it the focus */
+@extern method OLTextClass, MSG_GEN_FIND_KBD_ACCELERATOR
+{
+    if (!(((GenInstance *) ObjDerefGen(oself))->GI_states & GS_ENABLED) ||
+	!GenCheckKbdAccelerator(oself, charValue, charFlagsAndShiftState,
+				toggleStateAndScanCode))
+	return FALSE;
+    MetaGrabFocusExclLow(oself);
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * OLTextClass: keys, the state
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLTextKbdChar: not editable: to the parent.  Enter in one line
+ * activates it and goes on to the parent (the default action); Tab
+ * goes there with GTA_USE_TAB_FOR_NAVIGATION; all else is the text's.
+ */
+@extern method OLTextClass, MSG_META_KBD_CHAR
+{
+    optr vp;
+
+    if (pself->OLTDI_specState & TDSS_EDITABLE) {
+	GenTextAttrs attrs = Gen(oself)->GTXI_attrs;
+	Boolean up = FALSE;
+
+	if (flags & CF_RELEASE)
+	    ;
+	else if ((byte) character == C_ENTER) {
+	    if (attrs & GTA_SINGLE_LINE_TEXT) {
+		@call oself::MSG_GEN_ACTIVATE();
+		up = TRUE;
+	    }
+	} else if ((byte) character == C_TAB)
+	    up = (attrs & GTA_USE_TAB_FOR_NAVIGATION) != 0;
+	if (!up) {
+	    @callsuper();
+	    return;
+	}
+    }
+    if ((vp = VisFindParent(oself)) != 0)
+	(void) @call vp::MSG_META_FUP_KBD_CHAR(character, flags, state);
+}
+
+/* OLTextTextUserModified: no longer indeterminate; modified; the
+ * default exclusive */
+@extern method OLTextClass, MSG_META_TEXT_USER_MODIFIED
+{
+    @callsuper();
+    @call oself::MSG_GEN_TEXT_SET_INDETERMINATE_STATE(FALSE);
+    @call oself::MSG_GEN_TEXT_SET_MODIFIED_STATE(TRUE);
+    ChangeDefaultExcl(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
+}
+
+@extern method OLTextClass, MSG_META_TEXT_NOT_USER_MODIFIED
+{
+    @callsuper();
+    @call oself::MSG_GEN_TEXT_SET_MODIFIED_STATE(FALSE);
+}
+
+/* the generic state changed: the text's */
+@extern method OLTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE
+{
+    if (modifiedState)
+	@call oself::MSG_VIS_TEXT_SET_USER_MODIFIED();
+    else
+	@call oself::MSG_VIS_TEXT_SET_NOT_USER_MODIFIED();
+}
+
+/* indeterminate: the text in a 50% pattern */
+@extern method OLTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE
+{
+    if (indeterminateState)
+	pself->VTI_features |= VTF_USE_50_PCT_TEXT_MASK;
+    else
+	pself->VTI_features &= ~VTF_USE_50_PCT_TEXT_MASK;
+    @call oself::MSG_VIS_TEXT_RECALC_AND_DRAW();
+    @call oself::MSG_VIS_TEXT_SET_NOT_USER_MODIFIED();
+}
+
+@extern method OLTextClass, MSG_GEN_APPLY
+{
+    @call oself::MSG_VIS_TEXT_SET_NOT_USER_MODIFIED();
+}
+
+/* OLTextActivate: the status message; the apply message (by the
+ * queue) unless delayed */
+@extern method OLTextClass, MSG_GEN_ACTIVATE
+{
+    @call oself::MSG_GEN_TEXT_SEND_STATUS_MSG(TRUE);
+    if (!(Txt(oself)->OLTDI_moreState & TDSS_DELAYED))
+	@send, forceQueue, insertAtFront oself::MSG_GEN_APPLY();
+}
+
+/* OLTextGenMakeApplyable: a delayed text tells its dialog */
+@extern method OLTextClass, MSG_GEN_MAKE_APPLYABLE
+{
+    optr vp;
+
+    if ((pself->OLTDI_moreState & TDSS_DELAYED) &&
+	(vp = VisFindParent(oself)) != 0)
+	@call vp::MSG_GEN_MAKE_APPLYABLE();
+}
+
+/* OLTextEmptyStatusChanged: an object enabled while there is text
+ * (ATTR_GEN_TEXT_SET_OBJECT_ENABLED_WHEN_TEXT_EXISTS) */
+@extern method OLTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED
+{
+    optr *p = ObjVarFindData(oself,
+			ATTR_GEN_TEXT_SET_OBJECT_ENABLED_WHEN_TEXT_EXISTS);
+
+    if (p) {
+	optr dest = *p;
+
+	if (!OptrToHandle(dest))
+	    dest = ConstructOptr(OptrToHandle(oself), OptrToChunk(dest));
+	if (hasTextFlag)
+	    @send dest::MSG_GEN_SET_ENABLED(VUM_NOW);
+	else
+	    @send dest::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+    }
+    @callsuper();
+}
+
+/* OLTextUpdateVisMoniker: the moniker is the composite's */
+@extern method OLTextClass, MSG_SPEC_UPDATE_VIS_MONIKER
+{
+    optr comp = Composite(oself);
+    ChunkHandle m = ((GenInstance *) ObjDerefGen(oself))->GI_visMoniker;
+
+    if (!comp) {
+	@callsuper();
+	return;
+    }
+    (void) @call comp::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(
+		m ? ConstructOptr(OptrToHandle(oself), m) : 0, updateMode);
+}
+
+/* a word of variable data kept only under the type wanted
+ * (setOrClearHint) */
+static void SetOrClear(optr o, word type, word want, word value)
+{
+    if (type != want)
+	(void) ObjVarDeleteData(o, type);
+    else
+	*(word *) ObjVarAddData(o, (word) (type | VDF_SAVE_TO_STATE),
+				sizeof(word)) = value;
+}
+
+static const word visToGen[][2] = {
+    { ATTR_VIS_TEXT_TYPE_RUNS, ATTR_GEN_TEXT_TYPE_RUNS },
+    { ATTR_VIS_TEXT_GRAPHIC_RUNS, ATTR_GEN_TEXT_GRAPHIC_RUNS },
+    { ATTR_VIS_TEXT_STYLE_ARRAY, ATTR_GEN_TEXT_STYLE_ARRAY },
+    { ATTR_VIS_TEXT_NAME_ARRAY, ATTR_GEN_TEXT_NAME_ARRAY },
+    { ATTR_VIS_TEXT_EXTENDED_FILTER, ATTR_GEN_TEXT_EXTENDED_FILTER },
+    { ATTR_VIS_TEXT_DO_NOT_INTERACT_WITH_SEARCH_CONTROL,
+      ATTR_GEN_TEXT_DO_NOT_INTERACT_WITH_SEARCH_CONTROL },
+};
+
+/*
+ * OLTextUpdateGeneric: the generic object as the text is now (to be
+ * saved): the maximum length, the text chunk, the character and
+ * paragraph attributes as the hint for their kind, the variable data
+ */
+@extern method OLTextClass, MSG_VIS_TEXT_UPDATE_GENERIC
+{
+    GenTextInstance *g = Gen(oself);
+    word want, runs, i;
+
+    ObjMarkDirty(oself);
+    g->GTXI_maxLength = pself->VTI_maxLength;
+    g->GTXI_text = pself->VTI_text;
+
+    runs = pself->VTI_charAttrRuns;
+    if (pself->VTI_storageFlags & VTSF_DEFAULT_CHAR_ATTR)
+	want = runs == (VIS_TEXT_INITIAL_CHAR_ATTR)
+	       ? 0 : ATTR_GEN_TEXT_DEFAULT_CHAR_ATTR;
+    else if (pself->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS)
+	want = ATTR_GEN_TEXT_MULTIPLE_CHAR_ATTR_RUNS;
+    else
+	want = ATTR_GEN_TEXT_CHAR_ATTR;
+    SetOrClear(oself, ATTR_GEN_TEXT_DEFAULT_CHAR_ATTR, want, runs);
+    SetOrClear(oself, ATTR_GEN_TEXT_MULTIPLE_CHAR_ATTR_RUNS, want, runs);
+    SetOrClear(oself, ATTR_GEN_TEXT_CHAR_ATTR, want, runs);
+
+    pself = Txt(oself);
+    runs = pself->VTI_paraAttrRuns;
+    if (pself->VTI_storageFlags & VTSF_DEFAULT_PARA_ATTR)
+	want = runs == (VIS_TEXT_INITIAL_PARA_ATTR)
+	       ? 0 : ATTR_GEN_TEXT_DEFAULT_PARA_ATTR;
+    else if (pself->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS)
+	want = ATTR_GEN_TEXT_MULTIPLE_PARA_ATTR_RUNS;
+    else
+	want = ATTR_GEN_TEXT_PARA_ATTR;
+    SetOrClear(oself, ATTR_GEN_TEXT_DEFAULT_PARA_ATTR, want, runs);
+    SetOrClear(oself, ATTR_GEN_TEXT_MULTIPLE_PARA_ATTR_RUNS, want, runs);
+    SetOrClear(oself, ATTR_GEN_TEXT_PARA_ATTR, want, runs);
+
+    for (i = 0; i < sizeof(visToGen) / sizeof(visToGen[0]); i++) {
+	word *p = ObjVarFindData(oself, visToGen[i][0]), v;
+
+	if (!p)
+	    continue;
+	v = *p;
+	*(word *) ObjVarAddData(oself, visToGen[i][1], sizeof(word)) = v;
+    }
 }

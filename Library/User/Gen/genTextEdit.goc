@@ -1,0 +1,216 @@
+/*
+ * genTextEdit.goc -- GenTextClass (after genTextEdit.asm): a generic
+ * text object, one line or several, to edit or only to show.  Its text
+ * is a chunk (GTXI_text) that the specific part takes over: that is a
+ * VisText (SPIR_BUILD_TEXT), and the text messages are VisTextClass's.
+ * It sends its apply message (GTXI_applyMsg to GTXI_destination, with
+ * the state flags) on MSG_GEN_APPLY when modified, its status message
+ * (ATTR_GEN_TEXT_STATUS_MSG) when asked.
+ *
+ * Port32 (Port32/ABI.md section 13z): not yet
+ * MSG_GEN_BRANCH_REPLACE_PARAMS (BRPT_OUTPUT_OPTR).
+ */
+@include "uiInt.goh"
+@include <Objects/gTextC.goh>
+#include <initfile.h>
+#include <string.h>
+
+@classdecl GenTextClass;
+
+#define GTX(o)	((GenTextInstance *) ObjDerefGen(o))
+
+@method GenTextClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_TEXT, MasterOffset);
+}
+
+@method GenTextClass, MSG_META_INITIALIZE
+{
+    pself->GTXI_maxLength = 0xffff;
+    @callsuper();
+}
+
+/* GenTextCopyTree: the text copied too */
+@method GenTextClass, MSG_GEN_COPY_TREE
+{
+    optr copy = @callsuper();
+    ChunkHandle text;
+
+    if (!copy)
+	return copy;
+    text = GenCopyChunk(OptrToHandle(copy), OptrToHandle(oself),
+			GTX(oself)->GTXI_text, flags & CCF_MARK_DIRTY);
+    ObjLockObjBlock(OptrToHandle(copy));
+    GTX(copy)->GTXI_text = text;
+    MemUnlock(OptrToHandle(copy));
+    return copy;
+}
+
+/* GenTextFinalObjFree: the text chunk, unless the specific part has it */
+@method GenTextClass, MSG_META_FINAL_OBJ_FREE
+{
+    if (!VisCheckIfVisGrown(oself) && pself->GTXI_text)
+	ObjFreeChunk(ConstructOptr(OptrToHandle(oself), pself->GTXI_text));
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The state
+ * ------------------------------------------------------------------- */
+
+/* GenSetBitInByte */
+static Boolean SetFlag(optr o, GenTextStateFlags mask, Boolean set)
+{
+    GenTextInstance *g = GTX(o);
+    GenTextStateFlags f = set ? (g->GTXI_stateFlags | mask)
+			      : (g->GTXI_stateFlags & ~mask);
+
+    if (f == g->GTXI_stateFlags)
+	return FALSE;
+    g->GTXI_stateFlags = f;
+    ObjMarkDirty(o);
+    return TRUE;
+}
+
+/* a change is the specific part's too (the text drawn in a 50%
+ * pattern) */
+@method GenTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE
+{
+    if (SetFlag(oself, GTSF_INDETERMINATE, indeterminateState) &&
+	GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenTextClass, MSG_GEN_TEXT_IS_INDETERMINATE
+{
+    return (pself->GTXI_stateFlags & GTSF_INDETERMINATE) != 0;
+}
+
+/* a change is the specific part's too; modified now: applyable */
+@method GenTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE
+{
+    if (!SetFlag(oself, GTSF_MODIFIED, modifiedState))
+	return;
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+    if (modifiedState)
+	@call oself::MSG_GEN_MAKE_APPLYABLE();
+}
+
+@method GenTextClass, MSG_GEN_TEXT_IS_MODIFIED
+{
+    return (pself->GTXI_stateFlags & GTSF_MODIFIED) != 0;
+}
+
+/* GenTextSendMsg: a message with the state flags to the destination */
+static void SendMsg(optr o, Message msg, GenTextStateFlags flags)
+{
+    MemHandle mh = OptrToHandle(o);
+    ChunkHandle ch = OptrToChunk(o);
+    struct { word flags; } a;
+    optr dest;
+    EventHandle ev;
+
+    if (!msg)
+	return;
+    dest = GTX(o)->GTXI_destination;
+    a.flags = flags;
+    GenProcessGenAttrsBeforeAction(mh, ch);
+    CObjMessageP(MF_RECORD, 0, msg, &a, sizeof(a), &ev, sizeof(ev));
+    @call o::MSG_GEN_OUTPUT_ACTION(ev, dest);
+    GenProcessGenAttrsAfterAction(mh, ch);
+}
+
+@method GenTextClass, MSG_GEN_TEXT_SEND_STATUS_MSG
+{
+    Message *m = ObjVarFindData(oself, ATTR_GEN_TEXT_STATUS_MSG);
+
+    if (m)
+	SendMsg(oself, *m, (GenTextStateFlags)
+		((pself->GTXI_stateFlags & GTSF_INDETERMINATE) |
+		 (modifiedState ? GTSF_MODIFIED : 0)));
+}
+
+/* GenTextApply: the specific part's first; the apply message if
+ * modified (or always with ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_
+ * NOT_MODIFIED); then not modified */
+@method GenTextClass, MSG_GEN_APPLY
+{
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+    pself = GTX(oself);
+    if (!(pself->GTXI_stateFlags & GTSF_MODIFIED) &&
+	!ObjVarFindData(oself,
+			ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED))
+	return;
+    SendMsg(oself, pself->GTXI_applyMsg, pself->GTXI_stateFlags);
+    GTX(oself)->GTXI_stateFlags &= ~GTSF_MODIFIED;
+}
+
+@method GenTextClass, MSG_GEN_TEXT_GET_DESTINATION
+{
+    return pself->GTXI_destination;
+}
+
+@method GenTextClass, MSG_GEN_TEXT_SET_DESTINATION
+{
+    if (pself->GTXI_destination != dest) {
+	pself->GTXI_destination = dest;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenTextClass, MSG_GEN_TEXT_GET_APPLY_MSG
+{
+    return pself->GTXI_applyMsg;
+}
+
+@method GenTextClass, MSG_GEN_TEXT_SET_APPLY_MSG
+{
+    if (pself->GTXI_applyMsg != applyMsg) {
+	pself->GTXI_applyMsg = applyMsg;
+	ObjMarkDirty(oself);
+    }
+}
+
+@method GenTextClass, MSG_GEN_TEXT_GET_ATTRS
+{
+    return pself->GTXI_attrs;
+}
+
+@method GenTextClass, MSG_GEN_TEXT_SET_ATTRS
+{
+    GenTextAttrs a = (GenTextAttrs) ((pself->GTXI_attrs | attrsToSet) &
+				     ~attrsToClear);
+
+    if (a != pself->GTXI_attrs) {
+	pself->GTXI_attrs = a;
+	ObjMarkDirty(oself);
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Options
+ * ------------------------------------------------------------------- */
+
+/* the text is the key's string */
+@method GenTextClass, MSG_GEN_LOAD_OPTIONS
+{
+    MemHandle block;
+    word size;
+
+    if (InitFileReadStringBlock(params->GOP_category, params->GOP_key,
+				&block, 0, &size))
+	return;
+    @call oself::MSG_VIS_TEXT_REPLACE_ALL_BLOCK(block, 0);
+    MemFree(block);
+}
+
+@method GenTextClass, MSG_GEN_SAVE_OPTIONS
+{
+    ChunkHandle text = pself->GTXI_text;
+
+    if (text)
+	InitFileWriteString(params->GOP_category, params->GOP_key,
+			    LMemDerefHandles(OptrToHandle(oself), text));
+}

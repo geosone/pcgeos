@@ -99,9 +99,10 @@
 #include <string.h>
 
 extern const unsigned char ui_geode[], uimotif_geode[], motif_geode[],
-			   hostvid_geode[];
+			   hostvid_geode[], text_geode[];
 extern const unsigned long ui_geode_size, uimotif_geode_size,
-			   motif_geode_size, hostvid_geode_size;
+			   motif_geode_size, hostvid_geode_size,
+			   text_geode_size;
 
 /* as uimotif.goc */
 typedef struct {
@@ -163,6 +164,8 @@ int main(void)
     KernelTimerInit();
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
     GeodeRegisterImage("uimotif", uimotif_geode, uimotif_geode_size);
+    /* (Motif imports the text library) */
+    GeodeRegisterImage("text", text_geode, text_geode_size);
     GeodeRegisterImage("motif", motif_geode, motif_geode_size);
     GeodeRegisterImage("hostvid", hostvid_geode, hostvid_geode_size);
     InitFileWriteString("ui", "specific", "motif");

@@ -548,9 +548,9 @@ if(GEOS_GOC AND Python3_Interpreter_FOUND AND CMAKE_C_COMPILER_ID MATCHES "GNU|C
     geos_embed(_uimotif_c ${uimotif_GEO} uimotif_geode)
     geos_embed(_motif_c ${motif_GEO} motif_geode)
     add_executable(test_ui_motif test_ui_motif.c ${_ui_c} ${_uimotif_c}
-                   ${_motif_c} ${_hostvid_c})
+                   ${_motif_c} ${_hostvid_c} ${_text_c})
     add_dependencies(test_ui_motif geode_ui geode_uimotif geode_motif
-                     geode_hostvid)
+                     geode_hostvid geode_text)
     target_link_libraries(test_ui_motif PRIVATE geos_kernel)
     if(GEOS_HOST STREQUAL "linux" AND GHAL_HAVE_X11 AND
        GEOS_LINUX_DISPLAY STREQUAL "x11" AND GEOS_XVFB)

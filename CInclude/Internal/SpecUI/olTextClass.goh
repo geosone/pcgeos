@@ -1,0 +1,54 @@
+/*
+ * olTextClass.goh -- OLTextClass, the specific UI's text object: a
+ * GenText, a VisText in a frame, with a moniker beside it (after
+ * Include/Internal/SpecUI/olTextClass.def), for Port32.
+ */
+#ifndef __OLTEXTCLASS_GOH
+#define __OLTEXTCLASS_GOH
+
+@include <Objects/visC.goh>
+@include <Objects/vTextC.goh>
+@include <Objects/gTextC.goh>
+
+@deflib motif
+
+/* TextDisplaySpecificState */
+typedef ByteFlags TextDisplaySpecificState;
+#define TDSS_IN_VIEW		0x80	/* in a view (scrolling) */
+#define TDSS_IN_FRAME		0x40
+#define TDSS_EDITABLE		0x20
+#define TDSS_IN_COMPOSITE	0x10	/* in a composite with the moniker */
+#define TDSS_NO_MONIKER		0x08
+#define TDSS_GOING_INTO_VIEW	0x04
+#define TDSS_COLOR_SET		0x02	/* a wash color hint */
+#define TDSS_NEEDS_GADGET_EXCL	0x01
+
+/* TextDisplayMoreState (Motif: no focusable displays, no clipping, no
+ * draw styles) */
+typedef WordFlags TextDisplayMoreState;
+#define TDSS_MAKE_DEFAULT_FOCUS			0x8000
+#define TDSS_GENERAL_CONSUMER_MODE		0x4000
+#define TDSS_EXPAND_WIDTH_TO_FIT_PARENT		0x2000
+#define TDSS_EXPAND_HEIGHT_TO_FIT_PARENT	0x1000
+#define TDSS_STAY_OUT_OF_VIEW			0x0800
+#define TDSS_RUNS_ITEM_GROUP			0x0400
+#define TDSS_SELECTABLE				0x0200
+#define TDSS_DELAYED				0x0100
+#define TDSS_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD	0x0080
+#define TDSS_GEOMETRY_ALREADY_VALID		0x0040
+
+@class OLTextClass, VisTextClass;
+@uses GenTextClass;
+
+@message void MSG_OL_PLACE_IN_VIEW();
+@message void MSG_SPEC_TEXT_SET_FROM_ITEM_GROUP(word item);
+
+    @instance TextDisplaySpecificState	OLTDI_specState = 0;
+    @instance TextDisplayMoreState	OLTDI_moreState = 0;
+    /* the view or the composite the text is in */
+    @instance ChunkHandle		OLTDI_viewObj = 0;
+@endc;
+
+@endlib
+
+#endif

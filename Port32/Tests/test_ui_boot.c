@@ -73,6 +73,8 @@ typedef struct {
     word		UBS_text2[8];
     word		UBS_text3[8];
     word		UBS_text4[6];
+    word		UBS_gtext[16];
+    char		UBS_name[12];
 } UBState;
 
 static int fails;
@@ -133,7 +135,7 @@ static void Shot(int step)
     FILE *o;
     int x, y;
 
-    if (!f || step != (at ? atoi(at) : 45))
+    if (!f || step != (at ? atoi(at) : 50))
 	return;
     TimerSleep((word) (getenv("UIBOOT_SHOT_TICKS")
 		       ? atoi(getenv("UIBOOT_SHOT_TICKS")) : 60));
@@ -232,7 +234,7 @@ int main(int argc, char **argv)
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator */
-    for (i = 2; i <= 45; i++) {
+    for (i = 2; i <= 50; i++) {
 	step(i);
 	Shot(i);
     }
@@ -280,6 +282,17 @@ int main(int argc, char **argv)
 	   "word %u-%u\n",
 	   st->UBS_text4[0], (short) st->UBS_text4[1], st->UBS_text4[2],
 	   st->UBS_text4[3], st->UBS_text4[4], st->UBS_text4[5]);
+    printf("GenText: state %#x %#x, %ux%u at %u in its composite; note "
+	   "%ux%u (text %u), grown %u (text %u)\n",
+	   st->UBS_gtext[0], st->UBS_gtext[1], st->UBS_gtext[2],
+	   st->UBS_gtext[3], st->UBS_gtext[4], st->UBS_gtext[5],
+	   st->UBS_gtext[6], st->UBS_gtext[7], st->UBS_gtext[14],
+	   st->UBS_gtext[15]);
+    printf("GenText: focus %#x, typed \"%s\", status %u (%#x), applied %u "
+	   "(%#x), disabled %#x\n",
+	   st->UBS_gtext[12], st->UBS_name, st->UBS_gtext[10],
+	   st->UBS_gtext[11], st->UBS_gtext[8], st->UBS_gtext[9],
+	   st->UBS_gtext[13]);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

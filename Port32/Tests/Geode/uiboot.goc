@@ -39,6 +39,9 @@
 @include <Internal/SpecUI/olContentClass.goh>
 @include <Internal/SpecUI/olGlyphDisplayClass.goh>
 @include <Objects/gGlyphC.goh>
+@include <Objects/gTextC.goh>
+@include <Internal/SpecUI/olTextClass.goh>
+@include <Internal/SpecUI/olCtrlClass.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -87,6 +90,8 @@ typedef struct {
     word		UBS_text2[8];
     word		UBS_text3[8];
     word		UBS_text4[6];
+    word		UBS_gtext[16];
+    char		UBS_name[12];
 } UBState;
 
 UBState ubState;
@@ -115,6 +120,8 @@ UBState ubState;
     @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_PAGE_DOWN;
     @message (GEN_VALUE_APPLY_MSG) MSG_UB_SCROLL_BOTTOM;
     @message (GEN_DYNAMIC_LIST_QUERY_MSG) MSG_UB_QUERY_ITEM;
+    @message (GEN_TEXT_APPLY_MSG) MSG_UB_NAME_APPLIED;
+    @message (GEN_TEXT_STATUS_MSG) MSG_UB_NAME_STATUS;
 @endc
 @classdecl UBProcessClass, neverSaved;
 
@@ -195,7 +202,7 @@ UBState ubState;
 }
 @object GenDisplayClass UBDoc1 = {
     GI_visMoniker = "Doc 1";
-    GI_comp = @UBDocMenu;
+    GI_comp = @UBDocMenu, @UBTexts;
 }
 @object GenInteractionClass UBDocMenu = {
     GI_visMoniker = "Page";
@@ -218,6 +225,26 @@ UBState ubState;
 @object GenInteractionClass UBRow = {
     GI_comp = @UBScroll, @UBSList, @UBDList;
     HINT_ORIENT_CHILDREN_HORIZONTALLY;
+}
+/* in Doc 1: a text to edit, one line with a moniker, and a text to
+ * show, several lines */
+@object GenInteractionClass UBTexts = {
+    GI_comp = @UBName, @UBNote;
+}
+@object GenTextClass UBName = {
+    GI_visMoniker = "Name";
+    GTXI_text = "Geos";
+    GTXI_attrs = @default | GTA_SINGLE_LINE_TEXT;
+    GTXI_maxLength = 10;
+    GTXI_destination = process;
+    GTXI_applyMsg = MSG_UB_NAME_APPLIED;
+    ATTR_GEN_TEXT_STATUS_MSG = MSG_UB_NAME_STATUS;
+    HINT_FIXED_SIZE = { SST_PIXELS | 110, 0, 0 };
+}
+@object GenTextClass UBNote = {
+    GI_attrs = @default | GA_READ_ONLY;
+    GTXI_text = "A note of several words to show";
+    HINT_FIXED_SIZE = { SST_PIXELS | 100, 0, 0 };
 }
 /* in Doc 2: a view of a 2000 x 300 document that scrolls both ways
  * (its window fixed at 200 x 40: the screens of the tests differ) */
@@ -396,6 +423,18 @@ UBState ubState;
     *p++ = (char) ('0' + item % 10);
     *p = 0;
     @call list::MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_TEXT(item, t);
+}
+
+@method UBProcessClass, MSG_UB_NAME_APPLIED
+{
+    ubState.UBS_gtext[8]++;
+    ubState.UBS_gtext[9] = stateFlags;
+}
+
+@method UBProcessClass, MSG_UB_NAME_STATUS
+{
+    ubState.UBS_gtext[10]++;
+    ubState.UBS_gtext[11] = stateFlags;
 }
 
 @method UBProcessClass, MSG_UB_ITEMS_APPLIED
@@ -2008,6 +2047,173 @@ static Rectangle ScreenBounds(WindowHandle w)
 	ubState.UBS_text4[4] = (word) t.VTI_selectStart;
 	ubState.UBS_text4[5] = (word) t.VTI_selectEnd;
 	UBCHECK(t.VTI_selectStart == 32 && t.VTI_selectEnd == 39);
+	break;
+    }
+    case 46:
+	/* Doc 1 usable again: on top, with the texts in it */
+	@call UBDoc1::MSG_GEN_SET_USABLE(VUM_NOW);
+	break;
+    case 47: {
+	/* Doc 1's GenTexts are Motif's OLTexts.  The one to edit: one
+	 * line in a frame with the frame's margins, the generic text its
+	 * text, in a composite of its own that has the moniker; as wide
+	 * as its hint, one line high.  The one to show: no frame, no
+	 * margins, its text wrapped at its width, whole lines high. */
+	OLTextInstance t;
+	OLCtrlInstance c;
+	GenTextInstance g;
+	Rectangle r, cr;
+	optr comp, texts;
+
+	UBCHECK(GroupTarget() == @UBDoc1);
+	UBCHECK(InClass(@UBName, (ClassStruct *) &OLTextClass));
+	UBCHECK(InClass(@UBNote, (ClassStruct *) &OLTextClass));
+	VisData(@UBName, &t, sizeof(t));
+	ObjLockObjBlock(OptrToHandle(@UBName));
+	memcpy(&g, ObjDerefGen(@UBName), sizeof(g));
+	MemUnlock(OptrToHandle(@UBName));
+	ubState.UBS_gtext[0] = t.OLTDI_specState;
+	ubState.UBS_gtext[1] = t.OLTDI_moreState;
+	UBCHECK(t.OLTDI_specState == (TDSS_IN_FRAME | TDSS_EDITABLE |
+				      TDSS_IN_COMPOSITE));
+	UBCHECK((t.OLTDI_moreState & TDSS_SELECTABLE) &&
+		!(t.OLTDI_moreState & TDSS_EXPAND_WIDTH_TO_FIT_PARENT));
+	UBCHECK((t.VTI_state & (VTS_ONE_LINE | VTS_EDITABLE | VTS_SELECTABLE))
+		== (VTS_ONE_LINE | VTS_EDITABLE | VTS_SELECTABLE));
+	UBCHECK(t.VTI_lrMargin == 2 && t.VTI_tbMargin == 2 &&
+		t.VTI_maxLength == 10 && (t.VTI_filters & VTF_NO_TABS));
+	UBCHECK(t.VTI_text && t.VTI_text == g.GTXI_text && t.VTI_lines);
+	UBCHECK(t.VTI_washColor.CQ_info == CF_INDEX &&
+		t.VTI_washColor.CQ_redOrIndex != C_BLACK);
+	comp = @call UBName::MSG_VIS_FIND_PARENT();
+	texts = @call UBNote::MSG_VIS_FIND_PARENT();
+	UBCHECK(comp && OptrToChunk(comp) == t.OLTDI_viewObj &&
+		InClass(comp, (ClassStruct *) &OLCtrlClass));
+	UBCHECK(@call comp::MSG_VIS_FIND_PARENT() == texts);
+	UBCHECK(@call UBName::MSG_SPEC_GET_SPECIFIC_VIS_OBJECT(0) == comp);
+	UBCHECK(MonikerIs(comp, "Name"));
+	VisData(comp, &c, sizeof(c));
+	UBCHECK(c.OLCI_optFlags & OLCOF_DISPLAY_MONIKER);
+	r = Bounds(@UBName);
+	cr = Bounds(comp);
+	ubState.UBS_gtext[2] = r.R_right - r.R_left;
+	ubState.UBS_gtext[3] = r.R_bottom - r.R_top;
+	ubState.UBS_gtext[4] = r.R_left - cr.R_left;
+	UBCHECK(r.R_right - r.R_left == 110 + 4);	/* with the margins */
+	UBCHECK(r.R_bottom - r.R_top ==
+		@call UBName::MSG_VIS_TEXT_GET_LINE_HEIGHT() + 4);
+	UBCHECK(r.R_left - cr.R_left > 20 && r.R_right <= cr.R_right &&
+		r.R_top >= cr.R_top && r.R_bottom <= cr.R_bottom);
+
+	VisData(@UBNote, &t, sizeof(t));
+	UBCHECK(!t.OLTDI_specState);
+	UBCHECK(!(t.OLTDI_moreState & TDSS_SELECTABLE) &&
+		(t.OLTDI_moreState & TDSS_EXPAND_WIDTH_TO_FIT_PARENT));
+	UBCHECK(!(t.VTI_state & (VTS_ONE_LINE | VTS_EDITABLE |
+				 VTS_SELECTABLE)));
+	UBCHECK(!t.VTI_lrMargin && !t.VTI_tbMargin && t.VTI_lines);
+	UBCHECK(texts && InClass(texts, (ClassStruct *) &OLCtrlClass));
+	r = Bounds(@UBNote);
+	ubState.UBS_gtext[5] = r.R_right - r.R_left;
+	ubState.UBS_gtext[6] = r.R_bottom - r.R_top;
+	ubState.UBS_gtext[7] = t.VTI_height.WBF_int;
+	UBCHECK(r.R_right - r.R_left == 100);
+	UBCHECK(r.R_bottom - r.R_top == t.VTI_height.WBF_int &&
+		t.VTI_height.WBF_int >=
+		2 * @call UBNote::MSG_VIS_TEXT_GET_LINE_HEIGHT());
+	/* neither takes the focus unless selectable */
+	@call UBNote::MSG_META_GRAB_FOCUS_EXCL();
+	@call UBName::MSG_META_GRAB_FOCUS_EXCL();
+	break;
+    }
+    case 48: {
+	/* the text to edit has the focus: its cursor;
+	 * typed text makes the generic object modified; no more than
+	 * the maximum length; Enter sends the status message (modified)
+	 * and, by the queue, the apply message */
+	OLTextInstance t;
+	char buf[16];
+
+	VisData(@UBName, &t, sizeof(t));
+	ubState.UBS_gtext[12] = t.VTI_intSelFlags;
+	/* (not the target: a generic object takes that only if it is
+	 * GA_TARGETABLE) */
+	UBCHECK((t.VTI_intSelFlags & VTISF_IS_FOCUS) &&
+		!(t.VTI_intSelFlags & VTISF_IS_TARGET) && t.VTI_gstate);
+	UBCHECK(t.VTI_intSelFlags & VTISF_CURSOR_ENABLED);
+	VisData(@UBNote, &t, sizeof(t));
+	UBCHECK(!(t.VTI_intSelFlags & VTISF_IS_FOCUS));
+	UBCHECK(!@call UBName::MSG_GEN_TEXT_IS_MODIFIED());
+	@call UBName::MSG_VIS_TEXT_SELECT_RANGE(TEXT_ADDRESS_PAST_END,
+						TEXT_ADDRESS_PAST_END);
+	@call UBName::MSG_META_KBD_CHAR('3', CF_FIRST_PRESS, 0);
+	@call UBName::MSG_META_KBD_CHAR('3', CF_RELEASE, 0);
+	@call UBName::MSG_META_KBD_CHAR('2', CF_FIRST_PRESS, 0);
+	@call UBName::MSG_META_KBD_CHAR('2', CF_RELEASE, 0);
+	(void) @call UBName::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+	memcpy(ubState.UBS_name, buf, 7);
+	UBCHECK(!memcmp(buf, "Geos32", 7));
+	UBCHECK(@call UBName::MSG_GEN_TEXT_IS_MODIFIED());
+	UBCHECK(!ubState.UBS_gtext[8] && !ubState.UBS_gtext[10]);
+	@call UBName::MSG_META_KBD_CHAR('x', CF_FIRST_PRESS, 0);
+	@call UBName::MSG_META_KBD_CHAR('y', CF_FIRST_PRESS, 0);
+	@call UBName::MSG_META_KBD_CHAR('z', CF_FIRST_PRESS, 0);
+	@call UBName::MSG_META_KBD_CHAR('w', CF_FIRST_PRESS, 0);
+	@call UBName::MSG_META_KBD_CHAR('v', CF_FIRST_PRESS, 0);
+	UBCHECK(@call UBName::MSG_VIS_TEXT_GET_TEXT_SIZE() == 10);
+	@call UBName::MSG_META_KBD_CHAR(UKEY(VC_ENTER), CF_FIRST_PRESS, 0);
+	UBCHECK(ubState.UBS_gtext[10] == 1 &&
+		ubState.UBS_gtext[11] == GTSF_MODIFIED);
+	UBCHECK(!ubState.UBS_gtext[8]);
+	UBCHECK(@call UBName::MSG_VIS_TEXT_GET_TEXT_SIZE() == 10);
+	break;
+    }
+    case 49: {
+	/* applied (modified), and no longer modified; not enabled: not
+	 * editable, the focus gone, the composite not enabled either;
+	 * enabled again.  The text to show gets more text: by the queue
+	 * its geometry again. */
+	OLTextInstance t;
+	OLCtrlInstance c;
+	optr comp = @call UBName::MSG_VIS_FIND_PARENT();
+
+	UBCHECK(ubState.UBS_gtext[8] == 1 &&
+		ubState.UBS_gtext[9] == GTSF_MODIFIED);
+	UBCHECK(!@call UBName::MSG_GEN_TEXT_IS_MODIFIED());
+	UBCHECK(!@call UBName::MSG_VIS_TEXT_GET_USER_MODIFIED_STATE());
+	@call UBName::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+	VisData(@UBName, &t, sizeof(t));
+	ubState.UBS_gtext[13] = t.VTI_intSelFlags;
+	UBCHECK(!(t.VI_attrs & VA_FULLY_ENABLED) &&
+		!(t.VTI_state & (VTS_EDITABLE | VTS_SELECTABLE)) &&
+		!(t.VTI_intSelFlags & VTISF_IS_FOCUS));
+	VisData(comp, &c, sizeof(c));
+	UBCHECK(!(c.VI_attrs & VA_FULLY_ENABLED));
+	@call UBName::MSG_GEN_SET_ENABLED(VUM_NOW);
+	VisData(@UBName, &t, sizeof(t));
+	UBCHECK((t.VI_attrs & VA_FULLY_ENABLED) &&
+		(t.VTI_state & VTS_EDITABLE) && (t.VTI_state & VTS_SELECTABLE));
+	VisData(comp, &c, sizeof(c));
+	UBCHECK(c.VI_attrs & VA_FULLY_ENABLED);
+	@call UBName::MSG_META_GRAB_FOCUS_EXCL();
+	@call UBNote::MSG_VIS_TEXT_APPEND_PTR(
+		", and more words that make it taller", 0);
+	break;
+    }
+    case 50: {
+	/* the text to show grew with its text; the one to edit has the
+	 * focus again */
+	OLTextInstance t;
+	Rectangle r = Bounds(@UBNote);
+
+	VisData(@UBNote, &t, sizeof(t));
+	ubState.UBS_gtext[14] = r.R_bottom - r.R_top;
+	ubState.UBS_gtext[15] = t.VTI_height.WBF_int;
+	UBCHECK(r.R_bottom - r.R_top == t.VTI_height.WBF_int &&
+		(word) (r.R_bottom - r.R_top) > ubState.UBS_gtext[6] &&
+		r.R_right - r.R_left == 100);
+	VisData(@UBName, &t, sizeof(t));
+	UBCHECK(t.VTI_intSelFlags & VTISF_IS_FOCUS);
 	break;
     }
     }

@@ -16,6 +16,7 @@ name motif.spui
 type	library, single
 library	geos
 library	ui
+library	text
 longname	"Motif \xa8 Specific UI"
 tokenchars	"SPUI"
 tokenid		0
@@ -44,8 +45,7 @@ export OLBuildSystem
 export OLBuildPane
 export OLBuildInteraction
 export OLBuildGlyphDisplay
-# OLBuildText
-skip 1
+export OLBuildText
 export OLBuildDisplayControl
 export OLBuildPrimary
 # OLBuildGadget
@@ -105,3 +105,4 @@ export OLContentClass
 export OLScrollListClass
 export OLGlyphDisplayClass
 export OLScrollableItemClass
+export OLTextClass

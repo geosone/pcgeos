@@ -1,0 +1,13 @@
+/*
+ * cspecText.goc -- the build routine of the text object (after
+ * cspecText.asm): a GenText is an OLText.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olTextClass.goh>
+
+ClassStruct *OLBuildText(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLTextClass;
+}
