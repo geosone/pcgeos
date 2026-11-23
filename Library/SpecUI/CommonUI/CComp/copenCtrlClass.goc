@@ -36,6 +36,7 @@
 @extern method OLCtrlClass, MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE;
 @extern method OLCtrlClass, MSG_GET_FIRST_MKR_POS;
 @extern method OLCtrlClass, MSG_GEN_GUP_INTERACTION_COMMAND;
+@extern method OLCtrlClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
 @extern method OLCtrlClass, MSG_GEN_APPLY;
 @extern method OLCtrlClass, MSG_GEN_PRE_APPLY;
 @extern method OLCtrlClass, MSG_VIS_DRAW;

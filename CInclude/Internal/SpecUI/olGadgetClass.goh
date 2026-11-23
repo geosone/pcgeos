@@ -1,0 +1,27 @@
+/*
+ * olGadgetClass.goh -- OLGadgetClass and OLGadgetCompClass, the
+ * specific side of a GenGadget: a visible object, or a visible
+ * composite (GGA_COMPOSITE), of the application's own (after
+ * Include/Internal/SpecUI/olGadgetClass.def and olGadgetCompClass.def),
+ * for Port32.
+ */
+#ifndef __OLGADGETCLASS_GOH
+#define __OLGADGETCLASS_GOH
+
+@include <Objects/visC.goh>
+@include <Objects/vCompC.goh>
+@include <Objects/gGadgetC.goh>
+
+@deflib motif
+
+@class OLGadgetClass, VisClass;
+@uses GenGadgetClass;
+@endc;
+
+@class OLGadgetCompClass, VisCompClass;
+@uses GenGadgetClass;
+@endc;
+
+@endlib
+
+#endif

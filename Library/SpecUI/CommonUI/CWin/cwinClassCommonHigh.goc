@@ -26,6 +26,7 @@
 @extern method OLWinClass, MSG_GEN_DESTROY_AND_FREE_BLOCK;
 @extern method OLWinClass, MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT;
 @extern method OLWinClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD;
+@extern method OLWinClass, MSG_SPEC_START_BROADCAST_FOR_DEFAULT_FOCUS;
 @extern method OLWinClass, MSG_SPEC_UPDATE_VIS_MONIKER;
 @extern method OLWinClass, MSG_OL_WIN_UPDATE_HEADER;
 @extern method OLWinClass, MSG_VIS_P32_VUP_QUERY;

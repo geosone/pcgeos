@@ -1,0 +1,16 @@
+/*
+ * cspecGadget.goc -- the build routine of the gadget (after
+ * cspecGadget.asm): a GenGadget is an OLGadget, with GGA_COMPOSITE an
+ * OLGadgetComp.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olGadgetClass.goh>
+
+ClassStruct *OLBuildGadget(optr oself, word masterOffset)
+{
+    (void) masterOffset;
+    if (((GenGadgetInstance *) ObjDerefGen(oself))->GGI_attrs &
+	GGA_COMPOSITE)
+	return (ClassStruct *) &OLGadgetCompClass;
+    return (ClassStruct *) &OLGadgetClass;
+}

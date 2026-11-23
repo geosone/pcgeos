@@ -1,0 +1,116 @@
+/*
+ * copenGadget.goc -- OLGadgetClass and OLGadgetCompClass (after
+ * copenGadget.asm and copenGadgetComp.asm): the specific side of a
+ * GenGadget.  The application's subclass draws and sizes it; the
+ * specific UI only answers what an object in its visible tree is
+ * asked: the display scheme, and for the composite the visible parent
+ * of the generic children, the default focus among them, and what
+ * goes on to the parent.
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Internal/SpecUI/olWinClass.goh>
+@include <Internal/SpecUI/olGadgetClass.goh>
+
+@classdecl OLGadgetClass, neverSaved;
+@classdecl OLGadgetCompClass, neverSaved;
+
+/* OLGadgetVupQuery: the display scheme (as a window answers it) */
+static Boolean GadgetDisplayScheme(GenReturnParams *retValue)
+{
+    DisplayScheme ds;
+
+    SpecGetDisplayScheme(&ds);
+    if (retValue) {
+	memset(retValue, 0, sizeof(*retValue));
+	retValue->GRP_ax = ds.DS_colorScheme |
+			   ((dword) ds.DS_displayType << 8) |
+			   ((dword) ds.DS_lightColor << 16) |
+			   ((dword) ds.DS_darkColor << 24);
+	retValue->GRP_cx = ds.DS_fontID;
+	retValue->GRP_dx = (word) ds.DS_pointSize;
+    }
+    return TRUE;
+}
+
+@method OLGadgetClass, MSG_VIS_P32_VUP_QUERY
+{
+    if (queryType == VUQ_DISPLAY_SCHEME)
+	return GadgetDisplayScheme(retValue);
+    return @callsuper();
+}
+
+@method OLGadgetCompClass, MSG_VIS_P32_VUP_QUERY
+{
+    if (queryType == VUQ_DISPLAY_SCHEME)
+	return GadgetDisplayScheme(retValue);
+    return @callsuper();
+}
+
+@method OLGadgetCompClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+/*
+ * OLGadgetCompGupQuery: SGQT_BUILD_INFO: the visible parent of a
+ * generic child is this object, unless the child may go into a menu
+ * and a parent takes it there
+ */
+@method OLGadgetCompClass, MSG_SPEC_P32_GUP_QUERY
+{
+    if (queryType != SGQT_BUILD_INFO)
+	return @callsuper();
+    if (retValue->GRP_bp & OLBF_MENUABLE) {
+	GenReturnParams r = *retValue;
+	optr parent = GenFindParent(oself);
+
+	if (parent && @call parent::MSG_SPEC_P32_GUP_QUERY(&r, queryType)) {
+	    word reply = r.GRP_bp & OLBF_REPLY;
+
+	    if (reply == (OLBR_TOP_MENU << OLBF_REPLY_OFFSET) ||
+		reply == (OLBR_SUB_MENU << OLBF_REPLY_OFFSET)) {
+		*retValue = r;
+		return TRUE;
+	    }
+	}
+    }
+    retValue->GRP_cx = OptrToHandle(oself);
+    retValue->GRP_dx = OptrToChunk(oself);
+    return TRUE;
+}
+
+/* OLGadgetCompFupKbdChar: a key no child wanted: to the parent */
+@method OLGadgetCompClass, MSG_META_FUP_KBD_CHAR
+{
+    optr parent = VisFindParent(oself);
+
+    return parent ? @call parent::MSG_META_FUP_KBD_CHAR(character, flags,
+							state) : FALSE;
+}
+
+/* OLGadgetCompBroadcastForDefaultFocus: on into the gadget */
+@method OLGadgetCompClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    OLBroadcastForDefaultFocus(oself, retValue);
+}
+
+@method OLGadgetCompClass, MSG_VUP_GET_BUILD_FLAGS
+{
+    optr parent = VisFindParent(oself);
+
+    return parent ? @call parent::MSG_VUP_GET_BUILD_FLAGS(flags) : FALSE;
+}
+
+@method OLGadgetCompClass, MSG_VIS_VUP_RELEASE_MENU_FOCUS,
+			   MSG_OL_VUP_MAKE_APPLYABLE
+{
+    (void) VisCallParent(oself, message, NULL, 0, NULL, 0);
+}
+
+@method OLGadgetCompClass, MSG_OL_MAKE_APPLYABLE,
+			   MSG_OL_MAKE_NOT_APPLYABLE
+{
+    VisSendToChildren(oself, message, NULL, 0);
+}

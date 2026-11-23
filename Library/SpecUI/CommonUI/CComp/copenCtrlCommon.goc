@@ -6,8 +6,7 @@
  *
  * Port32 (Port32/ABI.md section 13z): the moniker is drawn by the UI's
  * VisDrawMoniker at the asm's insets and justification (OpenDrawMoniker
- * with its keyboard accelerators comes with copenMoniker.goc); not yet:
- * the default focus broadcast (MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS).
+ * with its keyboard accelerators comes with copenMoniker.goc).
  * Motif has no draw styles, background colors, rounded corners, focus
  * leaves or colored disabled gadgets (cConstant.def).
  */
@@ -21,6 +20,14 @@
 /* ---------------------------------------------------------------------
  * Generic messages
  * ------------------------------------------------------------------- */
+
+/* OLCtrlBroadcastForDefaultFocus: on to the children (not into a
+ * toolbox) */
+@extern method OLCtrlClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    if (!(pself->OLCI_buildFlags & OLBF_TOOLBOX))
+	OLBroadcastForDefaultFocus(oself, retValue);
+}
 
 /* OLCtrlInteractionComplete: a dialog's own completion stops here */
 @extern method OLCtrlClass, MSG_GEN_GUP_INTERACTION_COMMAND

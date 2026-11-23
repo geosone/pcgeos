@@ -1,0 +1,15 @@
+/*
+ * genGadget.goc -- GenGadgetClass (after genGadget.asm): a generic
+ * object that an application's own visible object stands in for; the
+ * specific UI gives it its visible class (SPIR_BUILD_GADGET), a
+ * composite with GGA_COMPOSITE.
+ */
+@include "uiInt.goh"
+@include <Objects/gGadgetC.goh>
+
+@classdecl GenGadgetClass;
+
+@method GenGadgetClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_GADGET, MasterOffset);
+}

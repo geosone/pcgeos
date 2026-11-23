@@ -1049,3 +1049,18 @@ Message ConvertKeyToMethod(const KeyboardShortcut *keys, const Message *msgs,
 
     return off == (word) -1 ? 0 : msgs[off / sizeof(KeyboardShortcut)];
 }
+
+/*
+ * OLBroadcastForDefaultFocus (OLBroadcastForDefaultFocus_callBack over
+ * the visible children): the object with HINT_DEFAULT_FOCUS below o;
+ * every fully enabled child is asked, the last to answer stays
+ */
+void OLBroadcastForDefaultFocus(optr o, ObjectAndGrabParams *q)
+{
+    optr c;
+    word i;
+
+    for (i = 0; (c = @call o::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0; i++)
+	if (((VisInstance *) ObjDerefVis(c))->VI_attrs & VA_FULLY_ENABLED)
+	    @call c::MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS(q);
+}
