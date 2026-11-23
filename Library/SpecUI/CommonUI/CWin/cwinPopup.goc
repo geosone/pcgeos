@@ -11,13 +11,13 @@
  *   - the button (OLButtonClass, OLMenuButtonClass): a popup that is
  *     user initiatable gets none, it comes up by
  *     MSG_GEN_INTERACTION_INITIATE only;
- *   - UserDoDialog (MSG_GEN_INTERACTION_INITIATE_BLOCKING_THREAD_ON_RESPONSE:
- *     the C UI has no UserDoDialog yet);
- *   - discarding the block of HINT_INTERACTION_DISCARD_WHEN_CLOSED,
- *     MSG_GEN_DESTROY_AND_FREE_BLOCK's clean up of the window list;
+ *   - the application cache (a UserDoDialog of an application on the
+ *     transparent detach list ends at once in the asm);
+ *   - discarding the block of HINT_INTERACTION_DISCARD_WHEN_CLOSED;
  *   - the pushpin and the menus' messages (OLMenuWinClass).
  */
 @include "cGeode.goh"
+#include <sem.h>
 
 @classdecl OLPopupWinClass, neverSaved;
 
@@ -326,6 +326,105 @@ void OLPopupDismiss(optr o)
 }
 
 /*
+ * OLPopupDestroyAndFreeBlock: a popup without a button goes the quick
+ * way: off the screen (OLWin), off the window list; one with a button
+ * is unbuilt the slow way (FALSE).  Port32: the popup itself is taken
+ * off the list (the asm every object of its block).
+ */
+@method OLPopupWinClass, MSG_GEN_DESTROY_AND_FREE_BLOCK
+{
+    if (pself->OLPWI_button)
+	return FALSE;
+    (void) @callsuper();
+    OLWinTakeOffWindowList(oself);
+    return TRUE;
+}
+
+/* AddRemoveGCNListCommon: on or off the application's list of dialogs
+ * a thread waits for */
+static void UserDoDialogsList(optr o, Boolean add)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (!app)
+	return;
+    if (add)
+	(void) @call app::MSG_META_GCN_LIST_ADD(o, GAGCNLT_USER_DO_DIALOGS,
+					 MANUFACTURER_ID_GEOWORKS);
+    else
+	(void) @call app::MSG_META_GCN_LIST_REMOVE(o, GAGCNLT_USER_DO_DIALOGS,
+					    MANUFACTURER_ID_GEOWORKS);
+}
+
+/*
+ * OLPopupInitiateBlockingThreadOnResponse (UserDoDialog): the dialog
+ * comes up and keeps the caller's structure for its response.  A
+ * dialog run by the UI thread is system modal, as is one of an
+ * application that is still attaching and runs it itself (nothing of
+ * it could be used meanwhile).  Not enabled, or the application
+ * detaching: answered at once with IC_NULL.
+ */
+@method OLPopupWinClass,
+	MSG_GEN_INTERACTION_INITIATE_BLOCKING_THREAD_ON_RESPONSE
+{
+    GeodeHandle ui = GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0);
+    optr app = GeodeGetAppObject(0), field;
+    ApplicationStates st = 0;
+    word none = IC_NULL;
+
+    if (ui && (ThreadHandle) MemGetInfo(OptrToHandle(oself),
+					MGIT_EXEC_THREAD) == ProcInfo(ui)) {
+	pself->OLPWI_flags &= ~OLPWF_APP_MODAL;
+	pself->OLPWI_flags |= OLPWF_SYS_MODAL;
+    }
+    pself->OLPWI_udds = dialogInfo;
+    if (app)
+	st = @call app::MSG_GEN_APPLICATION_GET_STATE();
+    if (!(pself->VI_attrs & VA_FULLY_ENABLED) || (st & AS_DETACHING)) {
+	@call oself::MSG_GEN_INTERACTION_RELEASE_BLOCKED_THREAD_WITH_RESPONSE(
+								    &none);
+	return;
+    }
+    if ((st & AS_ATTACHING) && dialogInfo->UDDS_boxRunByCurrentThread) {
+	pself = PWin(oself);
+	pself->OLPWI_flags &= ~OLPWF_APP_MODAL;
+	pself->OLPWI_flags |= OLPWF_SYS_MODAL;
+    }
+    UserDoDialogsList(oself, TRUE);
+    @call oself::MSG_GEN_INTERACTION_INITIATE();
+    field = @call oself::MSG_VIS_VUP_FIND_OBJECT_OF_CLASS(
+					(ClassStruct *) &OLFieldClass);
+    if (field)
+	@send field::MSG_META_ENSURE_ACTIVE_FT();
+}
+
+/*
+ * OLPopupReleaseBlockedThreadWithResponse: the UserDoDialog of this
+ * window ends with a response (the window stays): the caller's
+ * structure is complete; a caller that dispatches its queue gets a
+ * message to wake up for, one that blocks its semaphore
+ */
+@method OLPopupWinClass,
+	MSG_GEN_INTERACTION_RELEASE_BLOCKED_THREAD_WITH_RESPONSE
+{
+    UserDoDialogStruct *u;
+
+    UserDoDialogsList(oself, FALSE);
+    pself = PWin(oself);
+    u = pself->OLPWI_udds;
+    if (!u)
+	return;
+    pself->OLPWI_udds = NULL;
+    /* (the response before the dialog is complete) */
+    u->UDDS_response = *command;
+    u->UDDS_complete = (Boolean) -1;
+    if (u->UDDS_callingThread)
+	@send ConstructOptr(u->UDDS_callingThread, 0)::MSG_META_DUMMY();
+    else
+	ThreadVSem(u->UDDS_semaphore);
+}
+
+/*
  * OLPopupInteractionCommand: IC_INTERACTION_COMPLETE dismisses a popup
  * that is not pinned; IC_DISMISS takes it down (not a pinned menu).
  * The command stops here.
@@ -346,6 +445,12 @@ void OLPopupDismiss(optr o)
 	(w->OLWI_specState & OLWSS_PINNED))
 	return TRUE;
     OLPopupDismiss(oself);
+    if (PWin(oself)->OLPWI_udds) {
+	word dismiss = IC_DISMISS;
+
+	@call oself::MSG_GEN_INTERACTION_RELEASE_BLOCKED_THREAD_WITH_RESPONSE(
+								&dismiss);
+    }
     return TRUE;
 }
 

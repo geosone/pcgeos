@@ -441,6 +441,17 @@ extern ClassStruct *OLBuildBoolean(optr oself, word masterOffset);
 extern ClassStruct *OLBuildValue(optr oself, word masterOffset);
 extern ClassStruct *OLBuildGlyphDisplay(optr oself, word masterOffset);
 extern ClassStruct *OLBuildText(optr oself, word masterOffset);
+extern ClassStruct *OLBuildGadget(optr oself, word masterOffset);
+
+/* ActionDescriptor (object.def; C has none): the data of
+ * TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE, a word to pass on after it */
+typedef struct {
+    optr	AD_OD;
+    Message	AD_message;
+} ActionDescriptor;
+/* CUtils/copenUtils.goc: MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS to the
+ * visible children that are fully enabled */
+extern void OLBroadcastForDefaultFocus(optr o, ObjectAndGrabParams *q);
 /* CSpec/cspecPrimary.goc: the vis parent of a window asked of the
  * generic parent (OLBuildPrimary, OLBuildDisplay) */
 extern void DoSimpleWinBuild(optr oself, word parentType);

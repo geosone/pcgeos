@@ -48,8 +48,7 @@ export OLBuildGlyphDisplay
 export OLBuildText
 export OLBuildDisplayControl
 export OLBuildPrimary
-# OLBuildGadget
-skip 1
+export OLBuildGadget
 export OLBuildContent
 # OLBuildUIDocumentControl, OLBuildAppDocumentControl, OLBuildDocument,
 # OLBuildFileSelector
@@ -106,3 +105,5 @@ export OLScrollListClass
 export OLGlyphDisplayClass
 export OLScrollableItemClass
 export OLTextClass
+export OLGadgetClass
+export OLGadgetCompClass

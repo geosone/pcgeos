@@ -5244,6 +5244,39 @@ visual classes of `Library/User/Vis`:
   item group a text runs (`ATTR_GEN_TEXT_RUNS_ITEM_GROUP`). The font of
   editable text (`editableTextFontID`) is set by the font and size
   messages.
+- **The gadget** (`Gen/genGadget.goc` after `genGadget.asm`):
+  `GenGadgetClass` is the generic stand-in for an application's own
+  visible object (`SPIR_BUILD_GADGET`). Motif's `OLGadgetClass` and,
+  with `GGA_COMPOSITE`, `OLGadgetCompClass` (`CGadget/copenGadget.goc`,
+  `CSpec/cspecGadget.goc`, `Internal/SpecUI/olGadgetClass.goh`) answer
+  the display scheme (`VUQ_DISPLAY_SCHEME`); the composite is the
+  visible parent of its generic children (`SGQT_BUILD_INFO`, unless a
+  menu takes them), passes keys, the build flags and the applyable
+  messages on and looks for the default focus among its children.
+- **Dialogs a caller waits for** (`User/userDialog.goc` after
+  `userDialog.asm`): `UserDoDialog` brings up a modal dialog
+  (`GIA_INITIATED_VIA_USER_DO_DIALOG`) and returns its response.
+  A thread with an event queue does not block: it dispatches its queue
+  itself until the dialog is complete, letting through what belongs to
+  the dialog (its block, the application object, the flow and system
+  objects on the UI thread, objects the application calls always
+  interactable, and a few messages to the thread itself) and keeping
+  the rest in a queue of its own that goes back to the front
+  afterwards; `MSG_META_DETACH` ends the dialog. A thread without a
+  queue blocks on a semaphore. Motif's side is in `CWin/cwinPopup.goc`
+  (`MSG_GEN_INTERACTION_INITIATE_BLOCKING_THREAD_ON_RESPONSE`,
+  `..._RELEASE_BLOCKED_THREAD_WITH_RESPONSE`, the list
+  `GAGCNLT_USER_DO_DIALOGS`) and `cwinDialog.goc`: every interaction
+  command but help is the response (a dismiss that completes an
+  interaction is not), or goes to the action of
+  `TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE`. `UserCreateDialog`
+  copies a template's block (`MSG_GEN_APPLICATION_BUILD_DIALOG_FROM_
+  TEMPLATE`: the copy the application's child, usable),
+  `UserDestroyDialog` frees it. Port32: an event that waits is posted
+  as it is (events hold their parameters);
+  `MSG_GEN_INTERACTION_RELEASE_BLOCKED_THREAD_WITH_RESPONSE` takes a
+  pointer to the response. Not yet: `UserStandardDialog` (the specific
+  UI's standard dialogs), the transparent launch model, the sound.
 - **The glyph** (`Gen/genGlyphDisplay.goc` after `genGlyphDisplay.asm`):
   `GenGlyphClass` only shows its moniker; the specific UI builds it
   (`SPIR_BUILD_GLYPH_DISPLAY`). Motif's `OLGlyphDisplayClass`
@@ -5445,7 +5478,7 @@ are left out), the constants, the variables and the routines.
   far: `OLBuildApplication`, `OLBuildField`, `OLBuildScreen`,
   `OLBuildSystem`, `SpecGetDisplayScheme`, `SpecGetWindowOptions`,
   `SpecGetTextKbdBindings`, `SpecDrawTextCursor` (section 13z),
-  `OLBuildText`, and
+  `OLBuildText`, `OLBuildGadget`, and
   the classes `OLSystemClass`, `OLScreenClass`, `OLFieldClass`,
   `OLApplicationClass` (`CInclude/Internal/SpecUI/ol*Class.goh`).
 - **Ported.**
@@ -6059,7 +6092,7 @@ are left out), the constants, the variables and the routines.
   the number of items for the display control, the document
   control's options, `OLReleaseAllStayUpModeMenus` on a change of
   target. In `OLPopupWinClass` and
-  `OLDialogWinClass`: the file menu's place, UserDoDialog and the action response, the help
+  `OLDialogWinClass`: the file menu's place, the help
   trigger (its moniker is a picture), the reply bar removed on tiny
   screens, discarding the block, pinning a dialog (OPEN LOOK only), the focus of a
   dialog run by the UI thread. In `OLButtonClass`: the black and white
@@ -6240,6 +6273,13 @@ are left out), the constants, the variables and the routines.
   enabled and enabled again; the second grows with more text. With
   more text than fits (step 51) the one line scrolls: the cursor at
   the right edge, Home and End, text deleted at the end.
+  Two `GenGadget`s (step 52): one of the test's own class, sized and
+  drawn by it, and a composite with a trigger in it; the window's
+  default focus is the text with `HINT_DEFAULT_FOCUS`, found through
+  the controls (`MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS`), not the
+  trigger before it. A dialog from a template (steps 53 and 54):
+  `UserCreateDialog`, `UserDoDialog` answered by a timer that presses
+  "Yes" while a message to the process waits, `UserDestroyDialog`.
 
 ## 13z. The text library (`Library/Text`, P6)
 

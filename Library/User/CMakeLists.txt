@@ -38,6 +38,7 @@ geos_geode(ui GP ui32.gp
                ${ui}/Gen/genValue.goc
                ${ui}/Gen/genGlyphDisplay.goc
                ${ui}/Gen/genTextEdit.goc
+               ${ui}/Gen/genGadget.goc
                ${ui}/Proc/procClass.goc
                ${ui}/User/userFlowUtils.goc
                ${ui}/User/userFlowMisc.goc
@@ -45,6 +46,7 @@ geos_geode(ui GP ui32.gp
                ${ui}/User/userMain.goc
                ${ui}/User/userScreen.goc
                ${ui}/User/userUtils.goc
+               ${ui}/User/userDialog.goc
                ${ui}/UI/uiMain.goc
                ${ui}/User/userLibrary.goc
            INCLUDES ${ui})

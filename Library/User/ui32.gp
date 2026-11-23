@@ -172,6 +172,10 @@ export GenReturnTrackingArgs
 export UserCheckAcceleratorChar
 export UserCheckInsertableCtrlChar
 export GenTextClass
+export GenGadgetClass
+export UserDoDialog
+export UserCreateDialog
+export UserDestroyDialog
 
 resource ApplicationUI object
 resource SystemFieldUI object

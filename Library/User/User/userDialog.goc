@@ -1,0 +1,218 @@
+/*
+ * userDialog.goc -- dialogs that their caller waits for (after
+ * userDialog.asm): UserDoDialog brings up a modal GenInteraction
+ * (GIA_INITIATED_VIA_USER_DO_DIALOG) and returns the response;
+ * UserCreateDialog and UserDestroyDialog make a dialog from a template
+ * and take it away again.
+ *
+ * UserDoDialog does not block a thread that has an event queue: it
+ * dispatches the queue itself until the dialog is complete, so that a
+ * dialog run by the same thread works and MSG_META_DETACH gets through.
+ * What does not belong to the dialog waits in a queue of its own and
+ * goes back to the front of the thread's queue afterwards.  Let
+ * through are: everything for an object in the dialog's block; the
+ * flow and system objects (on the UI thread); the application object;
+ * objects the application says are always interactable
+ * (GAGCNLT_CONTROLLERS_WITHIN_USER_DO_DIALOGS); and of the messages to
+ * the thread itself MSG_PROCESS_CALL_ROUTINE,
+ * MSG_META_TEXT_EMPTY_STATUS_CHANGED, MSG_GEN_PROCESS_SEND_TO_APP_GCN_LIST
+ * and the events of MSG_META_DISPATCH_EVENT and
+ * MSG_META_OBJ_FLUSH_INPUT_QUEUE that go to such objects (never an
+ * object's or a block's final free).  MSG_META_DETACH and
+ * MSG_META_REMOVING_DISK end the dialog and wait.
+ *
+ * Port32: events hold their parameters, so one that waits is posted as
+ * it is.  Not yet: the transparent launch model
+ * (MSG_GEN_FIELD_ACTIVATE_DISMISS), the application brought to the top
+ * by a new IACP connection (no IACP), the standard dialogs
+ * (UserStandardDialog), the sound of an error.
+ */
+@include "uiInt.goh"
+@include <Objects/gInterC.goh>
+@include <Objects/gAppC.goh>
+@include <Objects/gProcC.goh>
+@include <iacp.goh>
+#include <string.h>
+#include <uDialog.h>
+#include <sem.h>
+#include <thread.h>
+
+/* whether a handle a message goes to is the current thread: its handle
+ * or its process's */
+static Boolean IsCurrentThread(Handle h)
+{
+    return h == ThreadGetInfo(0, TGIT_THREAD_HANDLE) ||
+	   h == GeodeGetProcessHandle();
+}
+
+/* CheckIfObjectCanReceiveMessagesDuringUserDoDialog */
+static Boolean CanReceive(const UserDoDialogStruct *u, optr dest,
+			  Message msg)
+{
+    optr app;
+
+    if (OptrToHandle(dest) == OptrToHandle(u->UDDS_dialog))
+	return TRUE;
+    if (uiFlowObj &&
+	MemOwner(OptrToHandle(uiFlowObj)) == GeodeGetProcessHandle() &&
+	(dest == uiFlowObj || dest == UserGetSystemObject()))
+	return TRUE;
+    app = GeodeGetAppObject(0);
+    if (dest == app && app)
+	/* (a new connection and its completion stay in order) */
+	return msg != MSG_GEN_APPLICATION_IACP_COMPLETE_CONNECTIONS &&
+	       msg != MSG_META_IACP_PROCESS_MESSAGE;
+    return app &&
+	   @call app::MSG_GEN_APPLICATION_CHECK_IF_ALWAYS_INTERACTABLE_OBJECT(
+								    dest);
+}
+
+/* the event a MSG_META_DISPATCH_EVENT or MSG_META_OBJ_FLUSH_INPUT_QUEUE
+ * carries: whether it may go on now */
+static Boolean CarriedEventGoes(const UserDoDialogStruct *u, EventHandle ev,
+				Boolean holdDeath)
+{
+    dword size;
+    const EventHandle *p = ObjGetMessageParams(ev, &size);
+    optr dest;
+    Message msg;
+    ThreadHandle exec;
+
+    if (size < sizeof(EventHandle) || !*p)
+	return FALSE;
+    msg = ObjGetMessageInfo(*p, &dest);
+    if (holdDeath && (msg == MSG_META_FINAL_OBJ_FREE ||
+		      msg == MSG_PROCESS_FINAL_BLOCK_FREE))
+	return FALSE;
+    if (IsCurrentThread(OptrToHandle(dest)))
+	return FALSE;
+    exec = (ThreadHandle) MemGetInfo(OptrToHandle(dest), MGIT_EXEC_THREAD);
+    if (!exec || exec != ThreadGetInfo(0, TGIT_THREAD_HANDLE))
+	return TRUE;
+    return CanReceive(u, dest, msg);
+}
+
+/* DispatchFromUserDoDialog: an event of the thread's queue is
+ * dispatched, or waits */
+static void Dispatch(UserDoDialogStruct *u, EventHandle ev)
+{
+    optr dest;
+    Message msg = ObjGetMessageInfo(ev, &dest);
+    Boolean go;
+
+    if (u->UDDS_complete && !u->UDDS_queue)
+	go = TRUE;
+    else if (!u->UDDS_complete && u->UDDS_boxRunByCurrentThread &&
+	     CanReceive(u, dest, msg))
+	go = TRUE;
+    else if (!IsCurrentThread(OptrToHandle(dest)))
+	go = FALSE;
+    else if (msg == MSG_PROCESS_CALL_ROUTINE ||
+	     msg == MSG_META_TEXT_EMPTY_STATUS_CHANGED)
+	go = TRUE;
+    else if (msg == MSG_META_REMOVING_DISK || msg == MSG_META_DETACH) {
+	/* the thread is going: the dialog ends (it cleans up), and the
+	 * box comes down */
+	word none = IC_NULL;
+	optr d = u->UDDS_dialog;
+
+	@send d::MSG_GEN_INTERACTION_RELEASE_BLOCKED_THREAD_WITH_RESPONSE(
+								    &none);
+	@send d::MSG_GEN_INTERACTION_ACTIVATE_COMMAND(IC_DISMISS);
+	go = FALSE;
+    } else if (msg == MSG_META_OBJ_FLUSH_INPUT_QUEUE)
+	go = CarriedEventGoes(u, ev, TRUE);
+    else if (msg == MSG_META_DISPATCH_EVENT)
+	go = CarriedEventGoes(u, ev, FALSE);
+    else if (msg == MSG_GEN_PROCESS_SEND_TO_APP_GCN_LIST)
+	go = ObjIsObjectInClass(ConstructOptr(GeodeGetProcessHandle(), 0),
+				&GenProcessClass);
+    else
+	go = FALSE;
+    if (go) {
+	(void) CMessageDispatchP(ev, MF_CALL, NULL, 0);
+	return;
+    }
+    if (!u->UDDS_queue)
+	u->UDDS_queue = GeodeAllocQueue();
+    QueuePostMessage(u->UDDS_queue, ev, 0);
+}
+
+/* LoopDispatchFromUserDoDialog */
+static void LoopDispatch(UserDoDialogStruct *u, QueueHandle q)
+{
+    do
+	Dispatch(u, QueueGetMessage(q));
+    while (!u->UDDS_complete);
+    if (u->UDDS_queue) {
+	GeodeFlushQueue(u->UDDS_queue, q, 0, MF_INSERT_AT_FRONT);
+	GeodeFreeQueue(u->UDDS_queue);
+    }
+}
+
+/*
+ * UserDoDialog: the dialog (linked into a generic tree, usable, in one
+ * block) on the screen until it is answered; the InteractionCommand of
+ * the answer, IC_NULL if the system ended it
+ */
+word _pascal UserDoDialog(optr dialogBox)
+{
+    UserDoDialogStruct u;
+
+    memset(&u, 0, sizeof(u));
+    u.UDDS_dialog = dialogBox;
+    u.UDDS_boxRunByCurrentThread =
+	ObjTestIfObjBlockRunByCurThread(OptrToHandle(dialogBox)) ? -1 : 0;
+    u.UDDS_callingThread = (ThreadHandle) ThreadGetInfo(0, TGIT_QUEUE_HANDLE);
+    if (!u.UDDS_callingThread)
+	u.UDDS_semaphore = ThreadAllocSem(0);
+    @call dialogBox::MSG_GEN_INTERACTION_INITIATE_BLOCKING_THREAD_ON_RESPONSE(
+									&u);
+    if (u.UDDS_semaphore) {
+	ThreadPSem(u.UDDS_semaphore);
+	ThreadFreeSem(u.UDDS_semaphore);
+    } else
+	LoopDispatch(&u, (QueueHandle) u.UDDS_callingThread);
+    return u.UDDS_response;
+}
+
+/* UserDestroyDialog: a dialog of UserCreateDialog (alone in its
+ * block) */
+void _pascal UserDestroyDialog(optr dialogBox)
+{
+    (void) @call dialogBox::MSG_GEN_DESTROY_AND_FREE_BLOCK();
+}
+
+/*
+ * BuildDialogCommon: the application object that builds a dialog: the
+ * caller's if it has one that is usable, else the UI's
+ */
+static optr BuildingApp(void)
+{
+    optr app = 0;
+
+    if (GeodeGetInfo(0, GGIT_ATTRIBUTES, NULL) & GA_PROCESS)
+	app = GeodeGetAppObject(0);
+    if (!app || !@call app::MSG_GEN_GET_USABLE())
+	app = uiFlowObj ?
+	      GeodeGetAppObject(MemOwner(OptrToHandle(uiFlowObj))) : 0;
+    return app;
+}
+
+/*
+ * UserCreateDialog: a dialog made from a template (a GenInteraction
+ * alone in its resource, not usable, not in a tree): the copy is the
+ * application's child and usable; 0 if there is no application
+ */
+optr _pascal UserCreateDialog(optr dialogBox)
+{
+    optr app = BuildingApp();
+    NewDialog nd;
+
+    if (!app)
+	return 0;
+    memset(&nd, 0, sizeof(nd));
+    @call app::MSG_GEN_APPLICATION_BUILD_DIALOG_FROM_TEMPLATE(&nd,
+							      dialogBox);
+    return nd.ND_dialog;
+}

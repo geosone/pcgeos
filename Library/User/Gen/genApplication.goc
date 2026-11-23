@@ -575,3 +575,21 @@ void GenAppQuitCommon(optr oself, word quitLevel)
     }
     @send, forceQueue ProcessOptr()::MSG_META_QUIT_ACK(QL_AFTER_UI, abort);
 }
+
+/*
+ * GenApplicationBuildDialogFromTemplate: a copy of the template's
+ * block (owned by the caller's geode, run by its thread), the dialog
+ * the application's last child and usable
+ */
+@method GenApplicationClass, MSG_GEN_APPLICATION_BUILD_DIALOG_FROM_TEMPLATE
+{
+    optr dialog = ConstructOptr(ObjDuplicateResource(OptrToHandle(template),
+						     0, 0),
+				OptrToChunk(template));
+
+    (void) pself;
+    @call oself::MSG_GEN_ADD_CHILD(dialog, CCO_LAST);
+    @call dialog::MSG_GEN_SET_USABLE(VUM_MANUAL);
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->ND_dialog = dialog;
+}

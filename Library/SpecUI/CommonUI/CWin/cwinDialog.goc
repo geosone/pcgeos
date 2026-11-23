@@ -12,7 +12,6 @@
  *   - the standard triggers the type adds (AddStandardTriggerIfNeeded:
  *     the specific UI builds no GenTrigger yet) and their monikers, the
  *     removal of a reply bar with only a close trigger;
- *   - TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE, UserDoDialog;
  *   - the focus of a dialog run by the UI thread
  *     (MSG_META_MUP_ALTER_FTVMC_EXCL);
  *   - a trigger activated by MSG_GEN_INTERACTION_ACTIVATE_COMMAND (the
@@ -830,10 +829,10 @@ static void HandleApplyable(optr o, Boolean on)
 	if (!@call oself::MSG_GEN_PRE_APPLY())
 	    @call oself::MSG_GEN_APPLY();
 	@call oself::MSG_GEN_POST_APPLY();
-	return TRUE;
+	break;
     case IC_RESET:
 	@call oself::MSG_GEN_RESET();
-	return TRUE;
+	break;
     case IC_INTERACTION_COMPLETE:
 	d = DWin(oself);
 	if ((d->OLDWI_optFlags & OLDOF_SINGLE_USAGE) ||
@@ -856,12 +855,41 @@ static void HandleApplyable(optr o, Boolean on)
 	OLPopupDismiss(oself);
 	(void) @call oself::MSG_VIS_P32_VUP_QUERY(&r,
 				SVQT_FORCE_RELEASE_DEFAULT_EXCLUSIVE, 0, 0);
-	DWin(oself)->OLDWI_optFlags &= ~OLDOF_DOING_COMPLETE;
-	return TRUE;
+	d = DWin(oself);
+	if (d->OLDWI_optFlags & OLDOF_DOING_COMPLETE) {
+	    d->OLDWI_optFlags &= ~OLDOF_DOING_COMPLETE;
+	    return TRUE;
+	}
+	break;
     }
     default:
-	return TRUE;
+	break;
     }
+    /* unblockUserDoDialog: the command is the response: to the action
+     * of TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE (with the word after
+     * it), or to the thread that waits in UserDoDialog */
+    {
+	ActionDescriptor *ad =
+	    ObjVarFindData(oself, TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE);
+
+	if (ad) {
+	    struct { word command; word data; } p;
+	    optr dest = ad->AD_OD;
+	    Message msg = ad->AD_message;
+
+	    p.command = command;
+	    p.data = *(word *) (ad + 1);
+	    (void) CObjMessageP(0, dest, msg, &p, sizeof(p), NULL, 0);
+	    ObjVarDeleteData(oself,
+			     TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE);
+	} else if (DWin(oself)->OLPWI_udds) {
+	    word response = command;
+
+	    @call oself::MSG_GEN_INTERACTION_RELEASE_BLOCKED_THREAD_WITH_RESPONSE(
+								&response);
+	}
+    }
+    return TRUE;
 }
 
 /* OLDialogWinActivateInteractionCommand: the command's trigger (Port32:

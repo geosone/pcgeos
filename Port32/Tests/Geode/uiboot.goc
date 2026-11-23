@@ -41,6 +41,10 @@
 @include <Objects/gGlyphC.goh>
 @include <Objects/gTextC.goh>
 @include <Internal/SpecUI/olTextClass.goh>
+@include <Objects/gGadgetC.goh>
+@include <Internal/SpecUI/olGadgetClass.goh>
+#include <uDialog.h>
+#include <timer.h>
 @include <Internal/SpecUI/olCtrlClass.goh>
 #include <string.h>
 #include <initfile.h>
@@ -93,6 +97,10 @@ typedef struct {
     word		UBS_gtext[16];
     char		UBS_name[12];
     sword		UBS_scroll[4];	/* left offset, cursor: typed, Home */
+    word		UBS_gadget[4];	/* draws, width, height, font */
+    /* response, the dialog open when answered, the message held: seen
+     * during the dialog, handled */
+    word		UBS_dlg[4];
 } UBState;
 
 UBState ubState;
@@ -123,8 +131,52 @@ UBState ubState;
     @message (GEN_DYNAMIC_LIST_QUERY_MSG) MSG_UB_QUERY_ITEM;
     @message (GEN_TEXT_APPLY_MSG) MSG_UB_NAME_APPLIED;
     @message (GEN_TEXT_STATUS_MSG) MSG_UB_NAME_STATUS;
+    @message void MSG_UB_HELD();
 @endc
 @classdecl UBProcessClass, neverSaved;
+
+/* the trigger that answers the dialog of step 53: whether the dialog
+ * is on the screen then, and whether a message to the process waited */
+@class UBYesClass, GenTriggerClass;
+@endc
+@classdecl UBYesClass;
+
+@method UBYesClass, MSG_GEN_ACTIVATE
+{
+    optr dlg = @call oself::MSG_GEN_FIND_PARENT();
+
+    (void) pself;
+    ubState.UBS_dlg[1] = @call dlg::MSG_VIS_QUERY_WINDOW() != 0;
+    ubState.UBS_dlg[2] = ubState.UBS_dlg[3];
+    @callsuper();
+}
+
+@method UBProcessClass, MSG_UB_HELD
+{
+    ubState.UBS_dlg[3]++;
+}
+
+/* a gadget of our own: 30 x 20, a filled rectangle */
+@class UBGadgetClass, GenGadgetClass;
+@endc
+@classdecl UBGadgetClass;
+
+@method UBGadgetClass, MSG_VIS_RECALC_SIZE
+{
+    (void) pself; (void) width; (void) height;
+    return MAKE_SIZE_DWORD(30, 20);
+}
+
+@method UBGadgetClass, MSG_VIS_DRAW
+{
+    Rectangle r;
+
+    (void) pself; (void) drawFlags;
+    VisGetBounds(oself, &r);
+    GrSetAreaColor(gstate, CF_INDEX, C_BLUE, 0, 0);
+    GrFillRect(gstate, r.R_left, r.R_top, r.R_right, r.R_bottom);
+    ubState.UBS_gadget[0]++;
+}
 
 @start UBAppObjects;
 @object GenApplicationClass UBApp = {
@@ -230,7 +282,22 @@ UBState ubState;
 /* in Doc 1: a text to edit, one line with a moniker, and a text to
  * show, several lines */
 @object GenInteractionClass UBTexts = {
-    GI_comp = @UBName, @UBNote;
+    GI_comp = @UBGadgets, @UBName, @UBNote;
+}
+/* gadgets: one of our own, and a composite with a trigger in it (the
+ * first object to navigate to: the default focus is not there) */
+@object GenInteractionClass UBGadgets = {
+    GI_comp = @UBGadget, @UBGadgetC;
+    HINT_ORIENT_CHILDREN_HORIZONTALLY;
+}
+@object UBGadgetClass UBGadget = {
+}
+@object GenGadgetClass UBGadgetC = {
+    GI_comp = @UBGTrig;
+    GGI_attrs = GGA_COMPOSITE;
+}
+@object GenTriggerClass UBGTrig = {
+    GI_visMoniker = "Go";
 }
 @object GenTextClass UBName = {
     GI_visMoniker = "Name";
@@ -241,6 +308,7 @@ UBState ubState;
     GTXI_applyMsg = MSG_UB_NAME_APPLIED;
     ATTR_GEN_TEXT_STATUS_MSG = MSG_UB_NAME_STATUS;
     HINT_FIXED_SIZE = { SST_PIXELS | 110, 0, 0 };
+    HINT_DEFAULT_FOCUS;
 }
 @object GenTextClass UBNote = {
     GI_attrs = @default | GA_READ_ONLY;
@@ -412,6 +480,35 @@ UBState ubState;
     HINT_ITEM_GROUP_SCROLLABLE;
 }
 @end UBAppObjects;
+
+/* the template of a dialog for UserCreateDialog and UserDoDialog:
+ * alone in its resource, not usable, in no tree */
+@start UBAskTemplate;
+@object GenInteractionClass UBAsk = {
+    GI_visMoniker = "Question";
+    GI_states = GS_ENABLED;
+    GI_comp = @UBAskText, @UBAskYes, @UBAskNo;
+    GII_type = GIT_MULTIPLE_RESPONSE;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE | GIA_MODAL |
+		GIA_INITIATED_VIA_USER_DO_DIALOG;
+}
+@object GenGlyphClass UBAskText = {
+    GI_visMoniker = "Go on?";
+}
+@object UBYesClass UBAskYes = {
+    GI_visMoniker = "Yes";
+    GI_attrs = @default | GA_SIGNAL_INTERACTION_COMPLETE;
+    ATTR_GEN_TRIGGER_INTERACTION_COMMAND = IC_YES;
+    HINT_SEEK_REPLY_BAR;
+}
+@object GenTriggerClass UBAskNo = {
+    GI_visMoniker = "No";
+    GI_attrs = @default | GA_SIGNAL_INTERACTION_COMPLETE;
+    ATTR_GEN_TRIGGER_INTERACTION_COMMAND = IC_NO;
+    HINT_SEEK_REPLY_BAR;
+}
+@end UBAskTemplate;
 
 /* the dynamic list's monikers: "Item n" */
 @method UBProcessClass, MSG_UB_QUERY_ITEM
@@ -2256,6 +2353,74 @@ static Rectangle ScreenBounds(WindowHandle w)
 		t.VTI_cursorPos.P_x == display);
 	break;
     }
+    case 52: {
+	/* GenGadgets: Motif's OLGadget, sized and drawn by our class,
+	 * and OLGadgetComp, the visible parent of its generic child;
+	 * both answer the display scheme.  The window's default focus
+	 * is the object with HINT_DEFAULT_FOCUS (found through the
+	 * controls), not the first to navigate to */
+	GenReturnParams q;
+	Rectangle r = Bounds(@UBGadget), cr = Bounds(@UBGadgetC),
+		  tr = Bounds(@UBGTrig);
+
+	UBCHECK(ObjIsObjectInClass(@UBGadget, &OLGadgetClass));
+	UBCHECK(ObjIsObjectInClass(@UBGadgetC, &OLGadgetCompClass));
+	ubState.UBS_gadget[1] = r.R_right - r.R_left;
+	ubState.UBS_gadget[2] = r.R_bottom - r.R_top;
+	UBCHECK(ubState.UBS_gadget[1] == 30 && ubState.UBS_gadget[2] == 20);
+	UBCHECK(ubState.UBS_gadget[0] >= 1);
+	UBCHECK(@call UBGTrig::MSG_VIS_FIND_PARENT() == @UBGadgetC);
+	UBCHECK(cr.R_right - cr.R_left >= tr.R_right - tr.R_left &&
+		tr.R_right > tr.R_left && tr.R_left >= cr.R_left &&
+		tr.R_top >= cr.R_top);
+	memset(&q, 0, sizeof(q));
+	UBCHECK(@call UBGadget::MSG_VIS_P32_VUP_QUERY(&q, VUQ_DISPLAY_SCHEME,
+						      0, 0));
+	ubState.UBS_gadget[3] = q.GRP_cx;
+	UBCHECK(q.GRP_cx != 0);
+	memset(&q, 0, sizeof(q));
+	UBCHECK(@call UBGadgetC::MSG_VIS_P32_VUP_QUERY(&q,
+						VUQ_DISPLAY_SCHEME, 0, 0) &&
+		q.GRP_cx == ubState.UBS_gadget[3]);
+	UBCHECK(@call UBDoc1::MSG_GEN_START_BROADCAST_FOR_DEFAULT_FOCUS() ==
+		@UBName);
+	break;
+    }
+    case 53: {
+	/* UserCreateDialog: a copy of the template, a usable child of
+	 * the application.  UserDoDialog: this thread runs the dialog
+	 * and dispatches its own queue meanwhile: a timer presses Yes
+	 * (the dialog is on the screen), a message to the process
+	 * waits; the response is the trigger's command, the dialog
+	 * down again.  UserDestroyDialog takes the copy away. */
+	word kids = @call UBApp::MSG_GEN_COUNT_CHILDREN(), id;
+	optr d = UserCreateDialog(@UBAsk), yes;
+
+	UBCHECK(d && OptrToHandle(d) != OptrToHandle(@UBAsk) &&
+		OptrToChunk(d) == OptrToChunk(@UBAsk));
+	if (!d)
+	    break;
+	UBCHECK(@call d::MSG_GEN_FIND_PARENT() == @UBApp &&
+		@call UBApp::MSG_GEN_COUNT_CHILDREN() == kids + 1);
+	UBCHECK(@call d::MSG_GEN_GET_USABLE());
+	yes = ConstructOptr(OptrToHandle(d), OptrToChunk(@UBAskYes));
+	@send, forceQueue process::MSG_UB_HELD();
+	(void) TimerStart(TIMER_EVENT_ONE_SHOT, yes, 20, MSG_GEN_ACTIVATE, 0,
+			  &id);
+	ubState.UBS_dlg[0] = UserDoDialog(d);
+	UBCHECK(ubState.UBS_dlg[0] == IC_YES);
+	UBCHECK(ubState.UBS_dlg[1] == 1);
+	UBCHECK(ubState.UBS_dlg[2] == 0 && ubState.UBS_dlg[3] == 0);
+	UBCHECK(!@call d::MSG_VIS_QUERY_WINDOW());
+	UBCHECK(!@call UBApp::MSG_GEN_APPLICATION_CHECK_IF_RUNNING_USER_DO_DIALOG());
+	UserDestroyDialog(d);
+	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == kids);
+	break;
+    }
+    case 54:
+	/* the message that waited came after the dialog */
+	UBCHECK(ubState.UBS_dlg[3] == 1);
+	break;
     }
 }
 
