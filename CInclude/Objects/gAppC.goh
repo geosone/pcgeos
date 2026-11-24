@@ -242,7 +242,7 @@ typedef struct {
     	    	    	optr ackOD = dx:bp);
 
 @message void MSG_GEN_APPLICATION_IACP_SHUTDOWN_ALL_CONNECTIONS();
-@message void MSG_GEN_APPLICATION_IACP_REGISTER();
+@message void MSG_GEN_APPLICATION_IACP_REGISTER(byte mode = cl);	/* IACPServerMode */
 @message void MSG_GEN_APPLICATION_IACP_UNREGISTER();
 @message void MSG_GEN_APPLICATION_IACP_COMPLETE_CONNECTIONS();
 @reserveMessages 4;

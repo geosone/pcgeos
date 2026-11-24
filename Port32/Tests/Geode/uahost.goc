@@ -15,6 +15,8 @@
 #include <sysstats.h>
 #include <string.h>
 @include "uiapp.goh"
+@include <alb.goh>
+@include <iacp.goh>
 
 typedef struct {
     GeodeHandle	UAH_process;
@@ -30,6 +32,10 @@ typedef struct {
     word	UAH_started, UAH_exited;	/* GCNSLT_APPLICATION */
     GeodeHandle	UAH_lastExited;
     word	UAH_failLines[8];
+    /* IACP (steps 7 to 9): the connection, its servers, the
+     * application's connections (all, application mode), completion
+     * messages, the connections once the client has left */
+    word	UAH_iacp[6];
 } UAHostState;
 
 UAHostState uaHostState;
@@ -47,6 +53,8 @@ UAHostState uaHostState;
     /* the load's acknowledgement (LoadApplication) */
     @message void MSG_UA_HOST_LOADED(GeodeHandle geode, word error,
 				     word ackID);
+    /* the completion message of a message over IACP */
+    @message void MSG_UA_HOST_IACP_DONE();
 @endc
 @classdecl UAHostClass, neverSaved;
 
@@ -238,6 +246,11 @@ static void CheckSystem(void)
 	    MSG_GEN_PROCESS_OPEN_APPLICATION);
 }
 
+@method UAHostClass, MSG_UA_HOST_IACP_DONE
+{
+    uaHostState.UAH_iacp[4]++;
+}
+
 @method UAHostClass, MSG_UA_HOST_STEP
 {
     switch (step) {
@@ -276,6 +289,65 @@ static void CheckSystem(void)
 	CheckUp(uaHostState.UAH_app);
 	@send ConstructOptr(UIProcess(), 0)::MSG_META_DETACH(0, Self());
 	break;
+    case 7: {
+	/* gone; a connection to its token with a launch block: IACP
+	 * launches it and waits until its application object has
+	 * registered as the server */
+	GeodeToken tok = { { 'U', 'I', 'A', 'P' }, 0 };
+	MemHandle alb =
+	    IACPCreateDefaultLaunchBlock(MSG_GEN_PROCESS_OPEN_APPLICATION);
+	AppLaunchBlock *a = MemLock(alb);
+	word n = 0;
+
+	CheckGone();
+	a->ALB_appRef.AIR_diskHandle = SP_APPLICATION;
+	memcpy(a->ALB_appRef.AIR_fileName, "uiapp", 6);
+	MemUnlock(alb);
+	uaHostState.UAH_iacp[0] =
+	    IACPConnect(&tok, IACPCF_FIRST_ONLY | IACPCF_CLIENT_OD_SPECIFIED |
+			IACPSM_USER_INTERACTIBLE, alb, Self(), &n);
+	uaHostState.UAH_iacp[1] = n;
+	UACHECK(uaHostState.UAH_iacp[0] != IACP_NO_CONNECTION && n == 1);
+	uaHostState.UAH_app = GeodeFind("uiapp   ", GEODE_NAME_SIZE, 0, 0);
+	UACHECK(uaHostState.UAH_app != 0);
+	UACHECK(IACPGetServerNumber(uaHostState.UAH_iacp[0],
+		    GeodeGetAppObject(uaHostState.UAH_app)) == 1);
+	break;
+    }
+    case 8: {
+	/* up, in application mode, with our connection; a message over
+	 * it, and one back when it is done; then we leave */
+	optr app = GeodeGetAppObject(uaHostState.UAH_app);
+	EventHandle ev, done;
+
+	CheckUp(uaHostState.UAH_app);
+	uaHostState.UAH_iacp[2] =
+	    @call app::MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_CONNECTIONS();
+	uaHostState.UAH_iacp[3] = @call app::
+	    MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_APP_MODE_CONNECTIONS();
+	UACHECK(uaHostState.UAH_iacp[2] == 1 && uaHostState.UAH_iacp[3] == 1);
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenApplicationClass,
+		     MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE, NULL, 0, &ev,
+		     sizeof(ev));
+	done = @record Self()::MSG_UA_HOST_IACP_DONE();
+	UACHECK(IACPSendMessage(uaHostState.UAH_iacp[0], ev, TO_SELF, done,
+				IACPS_CLIENT) == 1);
+	IACPShutdown(uaHostState.UAH_iacp[0], NullOptr);
+	break;
+    }
+    case 9: {
+	/* the application has left the connection too, and stays (it is
+	 * open for the user); quit (the test waits) */
+	optr app = GeodeGetAppObject(uaHostState.UAH_app);
+
+	uaHostState.UAH_iacp[5] =
+	    @call app::MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_CONNECTIONS();
+	UACHECK(!uaHostState.UAH_iacp[5]);
+	UACHECK(uaHostState.UAH_iacp[4] == 1);
+	CheckUp(uaHostState.UAH_app);
+	@send app::MSG_META_QUIT();
+	break;
+    }
     case 6:
 	/* the UI's process gone, the library stays; no system */
 	UACHECK(!(GeodeGetInfo(GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0),

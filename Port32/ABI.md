@@ -5167,9 +5167,17 @@ visual classes of `Library/User/Vis`:
     when the first had nobody to ack (a quit), else is acked at once,
     as is one while the application is not usable. Without a field in
     the AppLaunchBlock the application goes on the system's default
-    field (the asm asked the specific UI's system). There is no IACP
-    yet: the application has no connections, so it goes once it is not
-    usable;
+    field (the asm asked the specific UI's system). The application
+    object is the IACP server of the application's token and of
+    `ATTR_GEN_APPLICATION_ADDITIONAL_TOKENS` (`genAppCommonIACP.asm`):
+    `MSG_GEN_APPLICATION_IACP_REGISTER(mode)` has the `IACPServerMode`
+    as its parameter (CL in the asm, missing in the C prototype); its
+    connections with their mode in `GAI_iacpConnects`; a new
+    connection with a launch block for application mode opens it for
+    the user and its document (`MSG_GEN_DOCUMENT_GROUP_OPEN_DOC` down
+    the model hierarchy), kept in `TEMP_GEN_APPLICATION_SAVED_ALB`
+    while it detaches (Lazarus); it goes once it is not usable and has
+    no connections;
   - the kernel: a geode's parent process is the process that loaded
     it; when a process exits its parent gets
     `MSG_PROCESS_NOTIFY_PROCESS_EXIT` (process, exit code), as from the
@@ -5640,8 +5648,10 @@ visual classes of `Library/User/Vis`:
   - `library.ui.boot` steps 92 to 94: servers, a connection, messages
     both ways with a completion message, a document's server, a held
     connection, shutdown from the client and the server's answer.
-    Not yet: `GenApplicationClass` as a server (`genAppCommonIACP.asm`),
-    so launching a server is not tested.
+    `library.ui.app` steps 7 to 9: `IACPConnect` with a launch block
+    launches `uiapp`, whose application object is the server; a
+    message over the connection, the client leaves, the application
+    follows.
 - **`FEA_DISK`** by `FileGetPathExtAttributes` and
   `FileGetHandleExtAttributes`, alone or among `FEA_MULTIPLE`, is
   answered by the kernel (`Library/Kernel/File/fileEA.c`); the asm's
@@ -5681,7 +5691,7 @@ visual classes of `Library/User/Vis`:
   - in `GenProcessClass` and `GenApplicationClass`: state files (a
     RESTORE_FROM_STATE launch opens the application), the instance
     reference for the field's restart list, transparent detach, UI
-    threads, undo, IACP, Lazarus (launched again while detaching), the
+    threads, undo, the
     activation dialog, the save options query on quit, the floating
     keyboard, the removable disk list; the busy and input messages of
     `genAppMisc.asm`;

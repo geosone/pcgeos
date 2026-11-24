@@ -68,6 +68,7 @@ typedef struct {
     word	UAH_started, UAH_exited;
     GeodeHandle	UAH_lastExited;
     word	UAH_failLines[8];
+    word	UAH_iacp[6];
 } UAHostState;
 
 /* as tspui.goh */
@@ -232,25 +233,45 @@ int main(void)
 	  st->UAH_events[UAE_FINAL_DETACH] == 1);
     CHECK(st->UAH_events[UAE_STARTUP_SHUTDOWN] == 1);
 
+    /* 7 to 9: launched by IACP for a connection to its token; a
+     * message over the connection, the client leaves, quit */
+    step(7);
+    WAIT_FOR(ts->TSS_appOpenCompletes == 4 && ts->TSS_appNotBusy == 4);
+    CHECK(ts->TSS_appOpenCompletes == 4);
+    /* (it has no host to report its steps to: the launch block is
+     * IACP's) */
+    CHECK(st->UAH_events[UAE_OPEN_APP] == 1);
+    step(8);
+    WAIT_FOR(st->UAH_iacp[4]);
+    /* (the application hears that we left, and leaves too) */
+    { int k; for (k = 0; k < 30; k++) TimerSleep(1); }
+    step(9);
+    WAIT_FOR(!Find("uiapp   ") && st->UAH_exited == 3);
+    CHECK(!Find("uiapp   ") && st->UAH_exited == 3);
+    printf("IACP: connection %u, servers %u, the application's %u (%u in "
+	   "application mode), completed %u, left %u\n", st->UAH_iacp[0],
+	   st->UAH_iacp[1], st->UAH_iacp[2], st->UAH_iacp[3],
+	   st->UAH_iacp[4], st->UAH_iacp[5]);
+
     /* 4, 5: again, not on top; the UI detached */
     step(4);
-    WAIT_FOR(ts->TSS_appOpenCompletes == 4 && ts->TSS_appNotBusy == 4 &&
+    WAIT_FOR(ts->TSS_appOpenCompletes == 5 && ts->TSS_appNotBusy == 5 &&
 	     st->UAH_events[UAE_OPEN_APP] == 2);
-    CHECK(ts->TSS_appToTop == 3);
+    CHECK(ts->TSS_appToTop == 4);
     CHECK(st->UAH_events[UAE_OPEN_APP] == 2);
     step(5);
     WAIT_FOR(st->UAH_acks && !(GeodeGetInfo(ui, GGIT_ATTRIBUTES, NULL) &
 			       GA_PROCESS));
     CHECK(st->UAH_acks == 1);
-    CHECK(!Find("uiapp   ") && st->UAH_exited == 3);
+    CHECK(!Find("uiapp   ") && st->UAH_exited == 4);
     CHECK(!(GeodeGetInfo(ui, GGIT_ATTRIBUTES, NULL) & GA_PROCESS));
     Events();
     /* uiapp detached, not quit */
     CHECK(st->UAH_events[UAE_QUIT] == 5 && st->UAH_events[UAE_DETACH] == 2);
     CHECK(st->UAH_events[UAE_CLOSE_APP] == 2 &&
 	  st->UAH_events[UAE_FINAL_DETACH] == 2);
-    /* the UI's application and the three uiapps shut down */
-    CHECK(ts->TSS_appShutdowns == 4);
+    /* the UI's application and the four uiapps shut down */
+    CHECK(ts->TSS_appShutdowns == 5);
     CHECK(ts->TSS_fieldDetaches == 2);
 
     /* 6: the library stays */
