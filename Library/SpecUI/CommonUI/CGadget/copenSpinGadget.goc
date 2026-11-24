@@ -1,0 +1,1021 @@
+/*
+ * copenSpinGadget.goc -- OLSpinGadgetClass (after copenSpinGadget.asm):
+ * a control that shows one item as text, with a scrollbar of two
+ * arrows beside it to step through the items.  The subclass
+ * (OLValueClass) has the item.
+ *
+ * The gadget draws its text itself; a text object is made when it
+ * gains the focus (its text chunk is the item's) and goes again when
+ * the focus is lost.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the slider
+ * (OLSGA_SLIDER: the text floating over the thumb, the minimum and
+ * maximum monikers, the hash marks); the toolbox's ways (the size
+ * taken from the toolbar, the pre-passive button that gives the focus
+ * back); ink (MSG_META_QUERY_IF_PRESS_IS_INK); the floating keyboard.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olSpinGadgetClass.goh>
+@include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Objects/vTextC.goh>
+#include <timer.h>
+#include <font.h>
+
+@classdecl OLSpinGadgetClass, neverSaved;
+
+#define Spin(o)	((OLSpinGadgetInstance *) ObjDerefVis(o))
+#define Gen(o)	((GenInstance *) ObjDerefGen(o))
+#define InBlock(o, c)	ConstructOptr(OptrToHandle(o), c)
+
+/* cgadgetConstant.def (Motif) */
+#define SPIN_CONTENT_MARGIN		4
+#define SPIN_SCROLLBAR_SPACING		4
+#define NARROW_SPIN_SCROLLBAR_SPACING	(-1)
+#define NARROW_NO_EDIT_SCROLLBAR_SPACING 0
+#define SPIN_EXTRA_PEN_MARGIN		(10 - 2)
+#define SPIN_FIRST_DELAY		25
+#define OL_SPIN_DEFAULT_DESIRED_WIDTH	(SST_AVG_CHAR_WIDTHS | 8)
+#define OL_SPIN_DEFAULT_DESIRED_HEIGHT	(SST_LINES_OF_TEXT | 1)
+
+/* ---------------------------------------------------------------------
+ * Sizes
+ * ------------------------------------------------------------------- */
+
+/* CheckIfLargeHeight: an editable text on a pen system is taller
+ * (unless HINT_VALUE_DO_NOT_MAKE_LARGER_ON_PEN_SYSTEMS) */
+static Boolean LargeHeight(optr o)
+{
+    if (Spin(o)->OLSGI_attrs & (OLSGA_CANT_EDIT_TEXT | OLSGA_SLIDER))
+	return FALSE;
+    if (!SysGetPenMode())
+	return FALSE;
+    return !(ObjIsObjectInClass(o, &GenValueClass) &&
+	     ObjVarFindData(o, HINT_VALUE_DO_NOT_MAKE_LARGER_ON_PEN_SYSTEMS));
+}
+
+/* GetSpinTextSize: the room of the text area in the gadget: the
+ * desired size, the frame's lines and margins, the space to the
+ * scrollbar along the children's direction */
+static void TextAreaSize(optr o, word *w, word *h)
+{
+    OLSpinGadgetInstance *p = Spin(o);
+    word cx = p->OLSGI_desWidth, dx = p->OLSGI_desHeight;
+    Boolean frame = (p->OLSGI_states & OLSGS_DRAW_FRAME) != 0;
+    Boolean vert = (p->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+    Boolean arrows = !(p->OLSGI_attrs & OLSGA_NO_UP_DOWN_ARROWS);
+    word *along = vert ? &dx : &cx;
+
+    if (frame) {
+	dx += 1 + 1;
+	if (LargeHeight(o))
+	    dx += SPIN_EXTRA_PEN_MARGIN * 2;
+	cx += SPIN_CONTENT_MARGIN * 2;
+    }
+    if (arrows) {
+	*along += SPIN_SCROLLBAR_SPACING;
+	if (OpenCheckIfLimitedLength(o)) {
+	    *along -= SPIN_SCROLLBAR_SPACING - NARROW_SPIN_SCROLLBAR_SPACING;
+	    if (!frame)
+		*along -= NARROW_SPIN_SCROLLBAR_SPACING -
+			  NARROW_NO_EDIT_SCROLLBAR_SPACING;
+	}
+    }
+    *w = cx;
+    *h = dx;
+}
+
+/* GetSpinAreaSize: the size of what the text is drawn in: the desired
+ * size, as tall as the scrollbar (less its edges) */
+static void SpinAreaSize(optr o, word *w, word *h)
+{
+    OLSpinGadgetInstance *p = Spin(o);
+    word cx = p->OLSGI_desWidth, dx = p->OLSGI_desHeight, sh;
+    Boolean large = LargeHeight(o);
+    optr sb;
+
+    if (large)
+	dx += SPIN_EXTRA_PEN_MARGIN * 2;
+    p = Spin(o);
+    sb = p->OLSGI_scrollbar ? InBlock(o, p->OLSGI_scrollbar) : 0;
+    if ((p->OLSGI_attrs & (OLSGA_NO_UP_DOWN_ARROWS | OLSGA_SLIDER)) || !sb) {
+	if (p->OLSGI_states & OLSGS_DRAW_FRAME)
+	    dx += 1 + 1;
+    } else {
+	sh = p->OLSGI_desHeight + 1 + 1;
+	if (large)
+	    sh += SPIN_EXTRA_PEN_MARGIN * 2;
+	sh = DWORD_HEIGHT(@call sb::MSG_VIS_RECALC_SIZE(0, sh));
+	if (large)
+	    sh -= SPIN_EXTRA_PEN_MARGIN * 2;
+	sh -= 1 + 1;
+	if ((sword) sh >= (sword) dx)
+	    dx = sh;
+    }
+    *w = cx;
+    *h = dx;
+}
+
+/* OLSpinGadgetGetBounds: the control's margins in from the bounds
+ * (inside the frame's line and margin), the area's size */
+static void SpinBounds(optr o, Rectangle *r)
+{
+    Rectangle m;
+    OLSpinGadgetInstance *p;
+    word w, h;
+
+    @callsuper o::OLSpinGadgetClass::MSG_VIS_COMP_GET_MARGINS(&m);
+    p = Spin(o);
+    r->R_left = (sword) (m.R_left + p->VI_bounds.R_left);
+    r->R_top = (sword) (m.R_top + p->VI_bounds.R_top);
+    if (p->OLSGI_states & OLSGS_DRAW_FRAME) {
+	r->R_top++;
+	r->R_left += SPIN_CONTENT_MARGIN;
+    }
+    SpinAreaSize(o, &w, &h);
+    r->R_right = (sword) (r->R_left + w);
+    r->R_bottom = (sword) (r->R_top + h);
+}
+
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_GET_BOUNDS
+{
+    (void) pself;
+    SpinBounds(oself, bounds);
+}
+
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_GET_ATTRS
+{
+    return pself->OLSGI_attrs;
+}
+
+/* GetTextPosition: text of the height centered in the area */
+static void TextPosition(optr o, word height, sword *x, sword *y)
+{
+    Rectangle r;
+    sword room;
+
+    SpinBounds(o, &r);
+    room = (sword) (r.R_bottom - r.R_top - (sword) height);
+    if (room < 0)
+	room = 0;
+    *x = r.R_left;
+    *y = (sword) (r.R_top + room / 2);
+}
+
+/* ResizeSpinText: the text object as wide as desired, as tall as its
+ * text needs */
+static void ResizeText(optr o)
+{
+    OLSpinGadgetInstance *p = Spin(o);
+    word w = (p->OLSGI_attrs & OLSGA_SLIDER) ? p->OLSGI_textWidth
+					     : p->OLSGI_desWidth;
+    optr text = InBlock(o, p->OLSGI_text);
+
+    VisSetSize(text, (sword) w,
+	       (sword) @call text::MSG_VIS_TEXT_CALC_HEIGHT(w, FALSE));
+}
+
+/* PositionSpinText: the text object in its place, its geometry valid */
+static void PositionText(optr o)
+{
+    ChunkHandle tc = Spin(o)->OLSGI_text;
+    optr text;
+    VisInstance *v;
+    sword x, y;
+
+    if (!tc)
+	return;
+    text = InBlock(o, tc);
+    TextPosition(o, DWORD_HEIGHT(VisGetSize(text)), &x, &y);
+    VisSetPosition(text, x, y);
+    v = (VisInstance *) ObjDerefVis(text);
+    v->VI_optFlags &= ~(VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH);
+    v->VI_geoAttrs |= VGA_GEOMETRY_CALCULATED;
+    @call text::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+}
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+/* OLSpinGadgetInitialize: an input node (for the focus of its text),
+ * its center is the control's */
+@method OLSpinGadgetClass, MSG_META_INITIALIZE
+{
+    @callsuper();
+    pself = Spin(oself);
+    pself->VI_typeFlags |= VTF_IS_INPUT_NODE;
+    pself->VI_geoAttrs &= ~VGA_USE_VIS_CENTER;
+}
+
+/* OLSpinGadgetScanGeometryHints: children side by side unless a hint
+ * says otherwise; the control's hints */
+@method OLSpinGadgetClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+{
+    pself->VCI_geoAttrs = 0;
+    pself->VCI_geoDimensionAttrs = 0;
+    pself->VI_geoAttrs &= VGA_NOTIFY_GEOMETRY_VALID;
+    pself->OLCI_optFlags &= ~(OLCOF_DISPLAY_BORDER | OLCOF_DISPLAY_MKR_ABOVE |
+			      OLCOF_CUSTOM_SPACING);
+    OLCtrlDoHints(oself);
+}
+
+/* SetupSpinDesiredSize: the size hints applied to the desired size */
+static void SetupDesiredSize(optr o)
+{
+    OLSpinGadgetInstance *p = Spin(o);
+    sword w = (sword) p->OLSGI_desWidth, h = (sword) p->OLSGI_desHeight;
+
+    VisApplySizeHints(o, &w, &h);
+    p = Spin(o);
+    p->OLSGI_desWidth = (word) w;
+    if (!(p->OLSGI_attrs & OLSGA_SLIDER))
+	p->OLSGI_textWidth = (word) w;
+    p->OLSGI_desHeight = (word) h;
+}
+
+/*
+ * CreateSpinScrollbar: a scrollbar of two arrows, one above the other
+ * (stupid, vertical), that sends the spin messages to the gadget;
+ * read-only with it; it applies whether its value changed or not
+ */
+static void CreateScrollbar(optr o, SpecBuildFlags flags)
+{
+    OpenScrollbarArgs a;
+    optr sb;
+    OLScrollbarInstance *s;
+
+    (void) flags;
+    memset(&a, 0, sizeof(a));
+    a.OSA_actionMsg = MSG_SPEC_SPIN_MINIMUM;
+    a.OSA_vertical = TRUE;
+    sb = OpenAddScrollbar(o, HINT_VALUE_X_SCROLLER, FALSE, FALSE, &a);
+    Spin(o)->OLSGI_scrollbar = OptrToChunk(sb);
+    s = (OLScrollbarInstance *) ObjDerefVis(sb);
+    s->OLSBI_attrs |= OLSA_STUPID | OLSA_VERTICAL;
+    if (Gen(o)->GI_attrs & GA_READ_ONLY)
+	Gen(sb)->GI_attrs |= GA_READ_ONLY;
+    (void) ObjVarAddData(sb,
+		ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED, 0);
+}
+
+/*
+ * OLSpinGadgetSpecBuild: the control built; read-only: no editing, no
+ * arrows; the desired size (eight characters, one line; none without a
+ * digital display) unless the subclass set one; the height is the
+ * text's, children centered; the scrollbar; black and white: the
+ * controls above may not overlap their children
+ */
+@method OLSpinGadgetClass, MSG_SPEC_BUILD
+{
+    word w = 0, h = 0;
+
+    if (VisCheckIfSpecBuilt(oself))
+	return;
+    @callsuper();
+    @call oself::MSG_SPEC_SCAN_GEOMETRY_HINTS();
+    pself = Spin(oself);
+    if (Gen(oself)->GI_attrs & GA_READ_ONLY) {
+	pself->OLSGI_attrs |= OLSGA_CANT_EDIT_TEXT;
+	if (!(pself->OLSGI_attrs & OLSGA_SLIDER))
+	    pself->OLSGI_attrs |= OLSGA_NO_UP_DOWN_ARROWS;
+    }
+    if (!ObjVarFindData(oself, HINT_VALUE_NO_DIGITAL_DISPLAY)) {
+	GStateHandle gs = ViewCreateCalcGState();
+
+	w = VisConvertSpecVisSize(oself, OL_SPIN_DEFAULT_DESIRED_WIDTH, gs);
+	h = VisConvertSpecVisSize(oself, OL_SPIN_DEFAULT_DESIRED_HEIGHT, gs);
+	GrDestroyState(gs);
+    }
+    pself = Spin(oself);
+    if (!pself->OLSGI_textWidth)
+	pself->OLSGI_textWidth = w;
+    if (!pself->OLSGI_desWidth)
+	pself->OLSGI_desWidth = w;
+    if (!pself->OLSGI_desHeight) {
+	if (!(pself->OLSGI_attrs & OLSGA_SLIDER) && OpenCheckIfCGA())
+	    h--;
+	pself->OLSGI_desHeight = h;
+    }
+    if (ObjVarFindData(oself, HINT_DEFAULT_FOCUS))
+	pself->OLSGI_states |= OLSGS_MAKE_DEFAULT_FOCUS;
+    if (!(pself->OLCI_buildFlags & OLBF_TOOLBOX) &&
+	!(pself->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER) &&
+	!(pself->VCI_geoDimensionAttrs & (VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+					  VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT))) {
+	pself->VI_geoAttrs &= VGA_NOTIFY_GEOMETRY_VALID;
+	pself->VI_geoAttrs |= VGA_ONLY_RECALC_SIZE_WHEN_INVALID;
+    }
+    if (!(pself->OLSGI_attrs & OLSGA_SLIDER))
+	pself->VCI_geoDimensionAttrs |= VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT |
+		HJ_CENTER_CHILDREN_VERTICALLY;
+    pself->VCI_geoAttrs |= VCGA_HAS_MINIMUM_SIZE;
+    if (!(pself->OLSGI_attrs & OLSGA_NO_UP_DOWN_ARROWS)) {
+	if (!(Gen(oself)->GI_states & GS_ENABLED))
+	    flags &= ~SBF_VIS_PARENT_FULLY_ENABLED;
+	CreateScrollbar(oself, flags);
+	SetupDesiredSize(oself);
+    }
+    if (OpenCheckIfBW())
+	SpecSetFlagsOnAllCtrlParents(oself);
+}
+
+/* OLSpinGadgetVisUnbuild: the text object goes with the visible tree;
+ * the scrollbar is destroyed */
+@method OLSpinGadgetClass, MSG_SPEC_UNBUILD_BRANCH
+{
+    ChunkHandle sb = pself->OLSGI_scrollbar;
+    MemHandle mh = OptrToHandle(oself);
+
+    pself->OLSGI_text = 0;
+    pself->OLSGI_scrollbar = 0;
+    @callsuper();
+    if (sb)
+	OpenDestroyGenericBranch(ConstructOptr(mh, sb), FALSE);
+}
+
+/* ---------------------------------------------------------------------
+ * Geometry
+ * ------------------------------------------------------------------- */
+
+/* SpinGadgetPassMarginInfo: the control's spacing, our margins */
+static VisCompSpacingMarginsInfo PassMarginInfo(optr o)
+{
+    SpacingAsDWord s = @call o::MSG_VIS_COMP_GET_CHILD_SPACING();
+    Rectangle m;
+
+    @call o::MSG_VIS_COMP_GET_MARGINS(&m);
+    return OpenPassMarginInfo(o, &m, DWORD_CHILD_SPACING(s),
+			      DWORD_WRAP_SPACING(s));
+}
+
+/* OLSpinGadgetRerecalcSize: the text object sized; the height is the
+ * desired one with the frame's lines (and the pen's margins) */
+@method OLSpinGadgetClass, MSG_VIS_RECALC_SIZE
+{
+    if (pself->OLSGI_text)
+	ResizeText(oself);
+    pself = Spin(oself);
+    if (!(pself->OLSGI_attrs & OLSGA_SLIDER)) {
+	height = pself->OLSGI_desHeight + 1 + 1;
+	if (LargeHeight(oself))
+	    height += SPIN_EXTRA_PEN_MARGIN * 2;
+    }
+    return OpenRecalcCtrlSize(oself, width, height, PassMarginInfo(oself));
+}
+
+/* OLSpinGadgetGetCenter: the control's when centered on monikers */
+@method OLSpinGadgetClass, MSG_VIS_GET_CENTER
+{
+    if (pself->OLCI_optFlags & OLCOF_CENTER_ON_MONIKER)
+	@callsuper();
+    else
+	VisGetCenter(oself, retValue);
+}
+
+/* OLSpinGadgetGetMargins: the control's (top and bottom only for a
+ * moniker above), the text area before the scrollbar */
+@method OLSpinGadgetClass, MSG_VIS_COMP_GET_MARGINS
+{
+    word w, h;
+
+    @callsuper();
+    if (!(Spin(oself)->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE))
+	retValue->R_top = 0;
+    retValue->R_bottom = 0;
+    TextAreaSize(oself, &w, &h);
+    if (Spin(oself)->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY)
+	retValue->R_top += (sword) h;
+    else
+	retValue->R_left += (sword) w;
+}
+
+/* OLSpinGadgetGetMinimumSize: the moniker and the text area, beside
+ * or above each other */
+@method OLSpinGadgetClass, MSG_VIS_COMP_GET_MINIMUM_SIZE
+{
+    SizeAsDWord s = @callsuper();
+    word cx = DWORD_WIDTH(s), dx = DWORD_HEIGHT(s), ax, bx, t;
+    Boolean above, vert;
+
+    TextAreaSize(oself, &ax, &bx);
+    pself = Spin(oself);
+    above = (pself->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE) != 0;
+    vert = (pself->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+    if (vert) {
+	t = ax; ax = bx; bx = t;
+	t = cx; cx = dx; dx = t;
+	above = !above;
+    }
+    if (above) {
+	dx += bx;
+	cx -= ax;
+	if (cx < ax)
+	    cx = ax;
+    } else if (dx < bx)
+	dx = bx;
+    if (vert) {
+	t = cx; cx = dx; dx = t;
+    }
+    return MAKE_SIZE_DWORD(cx, dx);
+}
+
+/* OLSpinGadgetPosition: the gadget, its text, its children */
+@method OLSpinGadgetClass, MSG_VIS_POSITION_BRANCH
+{
+    (void) pself;
+    VisSetPosition(oself, (sword) xOrigin, (sword) yOrigin);
+    PositionText(oself);
+    VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
+		    PassMarginInfo(oself));
+}
+
+/* OLSpinGadgetGetExtraSize: what the gadget adds around its text: the
+ * scrollbar with its spacing, the frame */
+@method OLSpinGadgetClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    Rectangle r;
+    word cx, dx, bx = 0;
+    ChunkHandle sb;
+
+    (void) childCount;
+    SpinBounds(oself, &r);
+    cx = (word) r.R_right;
+    dx = (word) r.R_bottom;
+    pself = Spin(oself);
+    sb = pself->OLSGI_scrollbar;
+    if (!(pself->OLSGI_attrs & OLSGA_NO_UP_DOWN_ARROWS) && sb) {
+	SizeAsDWord s = @call InBlock(oself, sb)::MSG_VIS_RECALC_SIZE(cx, dx);
+
+	cx = DWORD_WIDTH(s) + SPIN_SCROLLBAR_SPACING;
+	dx = DWORD_HEIGHT(s);
+	if (OpenCheckIfNarrow())
+	    cx -= SPIN_SCROLLBAR_SPACING - NARROW_SPIN_SCROLLBAR_SPACING;
+    }
+    pself = Spin(oself);
+    if (!(pself->OLSGI_states & OLSGS_DRAW_FRAME)) {
+	cx += SPIN_CONTENT_MARGIN * 2;
+	bx = 1 + 1;
+	if (LargeHeight(oself))
+	    bx += SPIN_EXTRA_PEN_MARGIN * 2;
+    }
+    bx += Spin(oself)->OLSGI_desHeight;
+    if (bx > dx)
+	dx = bx;
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->ESP_extraWidth = cx;
+    retValue->ESP_extraHeight = dx - bx;
+}
+
+@method OLSpinGadgetClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT
+{
+    GStateHandle gs = ViewCreateCalcGState();
+    word w, h;
+
+    (void) pself;
+    (void) childCount;
+    w = VisConvertSpecVisSize(oself, desiredWidth, gs);
+    h = VisConvertSpecVisSize(oself, desiredHeight, gs);
+    GrDestroyState(gs);
+    return MAKE_SIZE_DWORD(w, h);
+}
+
+/* ---------------------------------------------------------------------
+ * Drawing
+ * ------------------------------------------------------------------- */
+
+/*
+ * ClearSpinDisplay (Motif): the area filled in the light color (white
+ * in black and white) unless a text object draws it; a disabled gadget
+ * is always cleared, out to its frame.  The frame: dark at the left
+ * and top, white at the right and bottom (black in black and white).
+ */
+static void ClearDisplay(optr o, GStateHandle gs)
+{
+    Boolean bw = OpenCheckIfBW();
+    word lt = bw ? C_BLACK : moCS_dsDarkColor;
+    word rb = bw ? C_BLACK : C_WHITE;
+    OLSpinGadgetInstance *p;
+    Rectangle r;
+    Boolean fill = TRUE;
+
+    GrSetAreaColor(gs, CF_INDEX, bw ? C_WHITE : moCS_dsLightColor, 0, 0);
+    GrSetLineColor(gs, CF_INDEX, lt, 0, 0);
+    SpinBounds(o, &r);
+    p = Spin(o);
+    if (!(p->VI_attrs & VA_FULLY_ENABLED)) {
+	r.R_left -= SPIN_CONTENT_MARGIN;
+	r.R_right += SPIN_CONTENT_MARGIN;
+	r.R_top--;
+	r.R_bottom++;
+    } else if (p->OLSGI_text)
+	fill = FALSE;
+    if (fill && r.R_top != r.R_bottom)
+	GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+    if (!(Spin(o)->OLSGI_states & OLSGS_DRAW_FRAME))
+	return;
+    SpinBounds(o, &r);
+    r.R_right--;
+    r.R_bottom--;
+    r.R_left -= SPIN_CONTENT_MARGIN;
+    r.R_right += SPIN_CONTENT_MARGIN;
+    r.R_top--;
+    r.R_bottom++;
+    GrDrawVLine(gs, r.R_left, r.R_top, r.R_bottom);
+    GrDrawHLine(gs, r.R_left, r.R_top, r.R_right);
+    GrSetLineColor(gs, CF_INDEX, rb, 0, 0);
+    GrDrawVLine(gs, r.R_right, r.R_top, r.R_bottom);
+    GrDrawHLine(gs, r.R_left, r.R_bottom, r.R_right);
+}
+
+/*
+ * OLSpinGadgetDrawContentsLow: the area cleared and framed; the item's
+ * text (unless a text object shows it, or there is no digital display)
+ * centered in it, clipped to the desired width; a disabled gadget in
+ * the 50% pattern
+ */
+static void DrawContents(optr o, GStateHandle gs)
+{
+    Boolean enabled = (Spin(o)->VI_attrs & VA_FULLY_ENABLED) != 0;
+    ChunkHandle item;
+
+    if (!enabled) {
+	GrSetTextMaskSys(gs, SDM_50);
+	GrSetLineMaskSys(gs, SDM_50);
+    }
+    ClearDisplay(o, gs);
+    if (!Spin(o)->OLSGI_text &&
+	!ObjVarFindData(o, HINT_VALUE_NO_DIGITAL_DISPLAY) &&
+	(item = @call o::MSG_SPEC_SPIN_GET_ITEM()) != 0) {
+	sword x, y;
+	word avail = Spin(o)->OLSGI_desWidth;
+	const char *s;
+	Boolean clip;
+
+	GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+	GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0);
+	TextPosition(o, (word) GrFontMetrics(gs, GFMI_HEIGHT_ROUNDED), &x, &y);
+	if (OpenCheckIfCGA() && LargeHeight(o))
+	    y++;
+	s = LMemDeref(InBlock(o, item));
+	clip = GrTextWidth(gs, s, 0) > avail;
+	if (clip) {
+	    GrSaveState(gs);
+	    GrSetClipRect(gs, PCT_REPLACE, x, (sword) -16384,
+			  (sword) (x + avail), (sword) 16383);
+	}
+	y = (sword) (y - (sword) GrFontMetrics(gs, GFMI_ABOVE_BOX_ROUNDED));
+	GrDrawText(gs, x, y, LMemDeref(InBlock(o, item)), 0);
+	if (clip)
+	    GrRestoreState(gs);
+    }
+    GrSetTextMaskSys(gs, SDM_100);
+    GrSetLineMaskSys(gs, SDM_100);
+}
+
+/* OLSpinGadgetDraw: the moniker and the scrollbar, then the contents */
+@method OLSpinGadgetClass, MSG_VIS_DRAW
+{
+    @callsuper();
+    DrawContents(oself, gstate);
+}
+
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_DRAW_CONTENTS
+{
+    GStateHandle gs = VupCreateGState(oself);
+
+    (void) pself;
+    if (!gs)
+	return;
+    DrawContents(oself, gs);
+    GrDestroyState(gs);
+}
+
+/* OLSpinGadgetMonikerPos: where the first text of the gadget is (the
+ * item's), for a parent lining up monikers */
+@method OLSpinGadgetClass, MSG_GET_FIRST_MKR_POS
+{
+    sword x, y;
+
+    (void) pself;
+    TextPosition(oself, GetSystemFontHeight(), &x, &y);
+    pos->P_x = x;
+    pos->P_y = y;
+    return TRUE;
+}
+
+/*
+ * OLSpinGadgetSetItem: a new item to show: the text object (if there
+ * is one) takes its chunk, all of it selected, and redraws; else the
+ * gadget draws it (unless its image is invalid anyway)
+ */
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_SET_ITEM
+{
+    optr text;
+
+    if (!pself->OLSGI_text) {
+	if (!(pself->VI_optFlags & VOF_IMAGE_INVALID) &&
+	    (pself->VI_attrs & VA_REALIZED))
+	    @call oself::MSG_SPEC_SPIN_DRAW_CONTENTS();
+	return;
+    }
+    text = InBlock(oself, pself->OLSGI_text);
+    ((VisTextInstance *) ObjDerefVis(text))->VTI_text = item;
+    @call text::MSG_VIS_TEXT_SELECT_RANGE_SMALL(0,
+		(word) (LMemGetChunkSize(InBlock(oself, item)) - 1));
+    @call text::MSG_VIS_TEXT_RECALC_AND_DRAW();
+}
+
+/* ---------------------------------------------------------------------
+ * The arrows
+ * ------------------------------------------------------------------- */
+
+/*
+ * SetUpRepeatScroll: the step taken (the subclass's); the scrollbar
+ * repeats its press after a first delay, then at the repeat rate
+ */
+static void StepAndRepeat(optr o, Message step)
+{
+    OLSpinGadgetInstance *p;
+    word ticks = SPIN_FIRST_DELAY, id = 0;
+    TimerHandle t;
+    ChunkHandle sb;
+
+    (void) CObjMessageP(MF_CALL, o, step, NULL, 0, NULL, 0);
+    p = Spin(o);
+    sb = p->OLSGI_scrollbar;
+    if (!sb)
+	return;
+    if (p->OLSGI_repeatCount)
+	ticks = @call o::MSG_SPEC_SPIN_GET_REPEAT_RATE(p->OLSGI_repeatCount);
+    t = TimerStart(TIMER_EVENT_ONE_SHOT, InBlock(o, sb), ticks,
+		   MSG_REPEAT_SCROLL, 0, &id);
+    p = Spin(o);
+    p->OLSGI_repeatCount++;
+    p->OLSGI_timerID = id;
+    p->OLSGI_timerHandle = t;
+}
+
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_UP_ARROW
+{
+    (void) value;
+    (void) stateFlags;
+    (void) pself;
+    StepAndRepeat(oself, MSG_SPEC_SPIN_INCREMENT);
+}
+
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_DOWN_ARROW
+{
+    (void) value;
+    (void) stateFlags;
+    (void) pself;
+    StepAndRepeat(oself, MSG_SPEC_SPIN_DECREMENT);
+}
+
+/* (a page: of a slider; along the gadget's direction) */
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_UP_PAGE
+{
+    (void) value;
+    (void) stateFlags;
+    StepAndRepeat(oself, (pself->OLSGI_attrs & OLSGA_ORIENT_VERTICALLY) ?
+			 MSG_SPEC_SPIN_INCREMENT : MSG_SPEC_SPIN_DECREMENT);
+}
+
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_DOWN_PAGE
+{
+    (void) value;
+    (void) stateFlags;
+    StepAndRepeat(oself, (pself->OLSGI_attrs & OLSGA_ORIENT_VERTICALLY) ?
+			 MSG_SPEC_SPIN_DECREMENT : MSG_SPEC_SPIN_INCREMENT);
+}
+
+/* OLSpinGadgetGetRepeatRate: the gadgets' repeat delay, shorter with
+ * every repeat if they accelerate */
+@method OLSpinGadgetClass, MSG_SPEC_SPIN_GET_REPEAT_RATE
+{
+    word rate = olGadgetRepeatDelay;
+
+    (void) pself;
+    if (olGadgetAccelerate)
+	rate = (rate > repeats) ? (word) (rate - repeats) : 0;
+    return rate;
+}
+
+/* ---------------------------------------------------------------------
+ * The focus and the text object
+ * ------------------------------------------------------------------- */
+
+/* CompareWithCurrentFocus: whether the object has the focus in its
+ * window (*app: and the window the application's) */
+static Boolean IsCurrentFocus(optr o, optr obj, Boolean *app)
+{
+    ObjectAndGrabParams q;
+    optr vp = VisFindParent(o);
+
+    memset(&q, 0, sizeof(q));
+    if (vp)
+	@call vp::MSG_VIS_FUP_QUERY_FOCUS_EXCL(&q);
+    if (app)
+	*app = (q.OAGP_grabFlags & HGF_APP_EXCL) != 0;
+    return q.OAGP_object == obj;
+}
+
+/*
+ * CreateSpinText: a one line text object on the item's chunk, all of
+ * it selected, not managed (the gadget places it), in the light color,
+ * its output the gadget; opened if the gadget is; then it is given the
+ * focus (through the queue)
+ */
+static void CreateText(optr o)
+{
+    ChunkHandle item = @call o::MSG_SPEC_SPIN_GET_ITEM();
+    Boolean large = LargeHeight(o);
+    optr text;
+    VisTextInstance *t;
+    VisTextWashColorModeRed mr;
+    VisTextWashColorBlueGreen bg;
+    ChunkHandle own;
+
+    if (!item)
+	return;
+    text = ObjInstantiate(OptrToHandle(o), (ClassStruct *) &VisTextClass);
+    ObjSetFlags(text, OCF_IGNORE_DIRTY, 0);
+    ObjInitializePart(text, word_offsetof(VisBase, Vis_offset));
+    t = (VisTextInstance *) ObjDerefVis(text);
+    own = t->VTI_text;
+    t->VTI_text = item;
+    t->VTI_filters |= VTF_NO_TABS;
+    /* (Port32: the object made a text chunk of its own) */
+    if (own && own != item)
+	LMemFreeHandles(OptrToHandle(o), own);
+    @call text::MSG_VIS_TEXT_SELECT_RANGE_SMALL(0,
+		(word) (LMemGetChunkSize(InBlock(o, item)) - 1));
+    t = (VisTextInstance *) ObjDerefVis(text);
+    t->VTI_state |= VTS_EDITABLE | VTS_ONE_LINE;
+    if (large)
+	t->VTI_tbMargin = SPIN_EXTRA_PEN_MARGIN;
+    t->VI_attrs &= ~VA_MANAGED;
+    if (Spin(o)->OLSGI_attrs & OLSGA_CANT_EDIT_TEXT)
+	t->VTI_state &= ~VTS_EDITABLE;
+    t->VTI_output = o;
+    mr.VTWCMR_redOrIndex = moCS_dsLightColor;
+    mr.VTWCMR_mapMode = CF_INDEX;
+    bg.VTWCBG_green = bg.VTWCBG_blue = 0;
+    @call text::MSG_VIS_TEXT_SET_WASH_COLOR(mr, bg);
+    Spin(o)->OLSGI_text = OptrToChunk(text);
+    @call o::MSG_VIS_ADD_CHILD(text, CCO_LAST);
+    ResizeText(o);
+    PositionText(o);
+    if (Spin(o)->VI_attrs & VA_REALIZED)
+	@call text::MSG_VIS_OPEN(0);
+    ((VisInstance *) ObjDerefVis(text))->VI_optFlags &=
+				~(VOF_IMAGE_INVALID | VOF_IMAGE_UPDATE_PATH);
+    @call text::MSG_VIS_TEXT_RECALC_AND_DRAW();
+    @send, forceQueue, insertAtFront o::MSG_SPIN_GIVE_TEXT_FOCUS();
+}
+
+/* OLSpinGadgetGainedFocusExcl: the text object gets the focus (made
+ * first if there is none) */
+@method OLSpinGadgetClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    pself->OLSGI_states |= OLSGS_HAS_FOCUS;
+    if (pself->OLSGI_text)
+	@send, forceQueue, insertAtFront oself::MSG_SPIN_GIVE_TEXT_FOCUS();
+    else
+	CreateText(oself);
+}
+
+/* OLSpinGadgetGiveTextFocus: still the focus: it goes to the text
+ * object, all its text selected */
+@method OLSpinGadgetClass, MSG_SPIN_GIVE_TEXT_FOCUS
+{
+    optr text;
+
+    if (!IsCurrentFocus(oself, oself, NULL))
+	return;
+    pself = Spin(oself);
+    if (!pself->OLSGI_text)
+	return;
+    text = InBlock(oself, pself->OLSGI_text);
+    @call text::MSG_META_MUP_ALTER_FTVMC_EXCL(text, MAEF_GRAB | MAEF_FOCUS |
+						    MAEF_NOT_HERE);
+    @call text::MSG_VIS_TEXT_SELECT_RANGE_SMALL(0, 0xffff);
+}
+
+/* OLSpinGadgetLostFocusExcl (also the text object's loss): the text
+ * object may go (through the queue); without one the gadget redraws */
+static void LostFocus(optr o)
+{
+    OLSpinGadgetInstance *p = Spin(o);
+
+    p->OLSGI_states &= ~OLSGS_HAS_FOCUS;
+    if (p->OLSGI_text)
+	@send, forceQueue, insertAtFront o::MSG_SPIN_DISCARD_TEXT();
+    else if (p->VI_attrs & VA_REALIZED)
+	@call o::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+@method OLSpinGadgetClass, MSG_META_LOST_FOCUS_EXCL
+{
+    (void) pself;
+    LostFocus(oself);
+}
+
+@method OLSpinGadgetClass, MSG_META_TEXT_LOST_FOCUS
+{
+    (void) pself;
+    (void) obj;
+    LostFocus(oself);
+}
+
+/*
+ * OLSpinGadgetDiscardText: the text object destroyed (the item's chunk
+ * stays) unless it still has the application's focus; if it has the
+ * window's only, the gadget takes that
+ */
+@method OLSpinGadgetClass, MSG_SPIN_DISCARD_TEXT
+{
+    ChunkHandle tc = pself->OLSGI_text;
+    optr text;
+    Boolean app;
+
+    if (!tc || !(pself->VI_attrs & VA_REALIZED))
+	return;
+    text = InBlock(oself, tc);
+    if (IsCurrentFocus(oself, text, &app)) {
+	if (app)
+	    return;
+	MetaGrabFocusExclLow(oself);
+    }
+    Spin(oself)->OLSGI_text = 0;
+    ((VisTextInstance *) ObjDerefVis(text))->VTI_text = 0;
+    @call text::MSG_VIS_DESTROY(VUM_MANUAL);
+}
+
+/*
+ * OLSpinGadgetStartSelect: not for a read-only gadget; a press on an
+ * arrow starts repeating anew; the gadget takes the focus (which makes
+ * its text object) and the press goes on to the text
+ */
+@method OLSpinGadgetClass, MSG_META_START_SELECT
+{
+    ChunkHandle tc;
+
+    if (Gen(oself)->GI_attrs & GA_READ_ONLY) {
+	retVal->flags = MRF_REPLAY;
+	return;
+    }
+    if (!(pself->OLSGI_attrs & OLSGA_NO_UP_DOWN_ARROWS)) {
+	pself->OLSGI_repeatCount = 0;
+	if (pself->OLSGI_timerHandle)
+	    (void) TimerStop(pself->OLSGI_timerHandle, pself->OLSGI_timerID);
+	Spin(oself)->OLSGI_timerHandle = 0;
+    }
+    @callsuper();
+    pself = Spin(oself);
+    if (pself->OLSGI_attrs & OLSGA_CANT_EDIT_TEXT) {
+	retVal->flags = MRF_REPLAY;
+	return;
+    }
+    if (!pself->OLSGI_text)
+	@call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself,
+				MAEF_GRAB | MAEF_FOCUS | MAEF_NOT_HERE);
+    if (retVal->flags & MRF_PROCESSED)
+	return;
+    tc = Spin(oself)->OLSGI_text;
+    if (!tc) {
+	retVal->flags = MRF_REPLAY;
+	return;
+    }
+    @call InBlock(oself, tc)::MSG_META_START_SELECT(retVal, xPosition,
+						    yPosition, inputState);
+}
+
+/* the arrow keys step (right and up on, left and down back); other
+ * keys go up */
+static const KeyboardShortcut spinKeys[] = {
+    (KS_CHAR_SET_CONTROL << 8) | VC_UP,
+    (KS_CHAR_SET_CONTROL << 8) | VC_DOWN,
+    (KS_CHAR_SET_CONTROL << 8) | VC_RIGHT,
+    (KS_CHAR_SET_CONTROL << 8) | VC_LEFT,
+};
+static const Message spinKeyMsgs[] = {
+    MSG_SPEC_SPIN_INCREMENT, MSG_SPEC_SPIN_DECREMENT,
+    MSG_SPEC_SPIN_INCREMENT, MSG_SPEC_SPIN_DECREMENT,
+};
+
+static Boolean SpinKbdChar(optr o, word character, word flags, word state)
+{
+    Message m = 0;
+    optr vp;
+
+    if (flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS))
+	m = ConvertKeyToMethod(spinKeys, spinKeyMsgs,
+			       sizeof(spinKeys) / sizeof(spinKeys[0]),
+			       character, flags, state);
+    if (m) {
+	(void) CObjMessageP(MF_CALL, o, m, NULL, 0, NULL, 0);
+	return TRUE;
+    }
+    vp = VisFindParent(o);
+    return vp ? @call vp::MSG_META_FUP_KBD_CHAR(character, flags, state)
+	      : FALSE;
+}
+
+@method OLSpinGadgetClass, MSG_META_KBD_CHAR
+{
+    (void) pself;
+    (void) SpinKbdChar(oself, character, flags, state);
+}
+
+@method OLSpinGadgetClass, MSG_META_FUP_KBD_CHAR
+{
+    (void) pself;
+    return SpinKbdChar(oself, character, flags, state);
+}
+
+/* its mnemonic gives an enabled gadget the focus */
+@method OLSpinGadgetClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    if ((pself->VI_attrs & VA_FULLY_ENABLED) &&
+	VisCheckMnemonic(oself, character, flags, state)) {
+	MetaGrabFocusExclLow(oself);
+	return TRUE;
+    }
+    return @callsuper();
+}
+
+/*
+ * OLSpinGadgetNavigate: the gadget takes the focus if it is enabled
+ * and can be changed (not read-only, not in a toolbox); with its text
+ * object it is a composite (the text takes it)
+ */
+@method OLSpinGadgetClass, MSG_SPEC_NAVIGATION_QUERY
+{
+    NavigateCommonFlags f = 0;
+
+    if (((pself->OLSGI_attrs & (OLSGA_CANT_EDIT_TEXT |
+				OLSGA_NO_UP_DOWN_ARROWS)) !=
+	 (OLSGA_CANT_EDIT_TEXT | OLSGA_NO_UP_DOWN_ARROWS)) &&
+	!(Gen(oself)->GI_attrs & GA_READ_ONLY) &&
+	!(pself->OLCI_buildFlags & OLBF_TOOLBOX)) {
+	if (pself->OLSGI_text)
+	    f = NCF_IS_COMPOSITE;
+	else if (pself->VI_attrs & VA_FULLY_ENABLED)
+	    f = NCF_IS_FOCUSABLE;
+    }
+    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, f,
+			     OptrToChunk(oself));
+}
+
+/* the default focus of the window if the hint says so and the text
+ * can be edited */
+@method OLSpinGadgetClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    if ((pself->OLSGI_attrs & OLSGA_CANT_EDIT_TEXT) ||
+	!(pself->OLSGI_states & OLSGS_MAKE_DEFAULT_FOCUS))
+	return;
+    retValue->OAGP_object = oself;
+    retValue->OAGP_grabFlags = 0;
+}
+
+/* OpenNavigateIfHaveFocus: with the window's focus: on to the next
+ * field */
+static void NavigateIfHaveFocus(optr o)
+{
+    optr vp = VisFindParent(o);
+    GenReturnParams r;
+
+    memset(&r, 0, sizeof(r));
+    if (vp && @call vp::MSG_VIS_P32_VUP_QUERY(&r,
+				SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL, 0, 0) &&
+	ConstructOptr(r.GRP_cx, r.GRP_dx) == o)
+	@call vp::MSG_SPEC_NAVIGATE_TO_NEXT_FIELD();
+}
+
+/* enabled or not: the scrollbar with the gadget; a text object that
+ * has the focus gives it away first */
+@method OLSpinGadgetClass, MSG_SPEC_NOTIFY_ENABLED,
+			   MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    struct { byte updateMode, flags; } a;
+
+    if (message == MSG_SPEC_NOTIFY_NOT_ENABLED && pself->OLSGI_text) {
+	optr text = InBlock(oself, pself->OLSGI_text);
+
+	NavigateIfHaveFocus(text);
+	MetaReleaseFocusExclLow(text);
+    }
+    if (!@callsuper())
+	return FALSE;
+    a.updateMode = updateMode;
+    a.flags = flags;
+    VisSendToChildren(oself, message, &a, sizeof(a));
+    return TRUE;
+}
+
+@method OLSpinGadgetClass, MSG_SPEC_SET_NOT_USABLE
+{
+    if (pself->OLSGI_text)
+	NavigateIfHaveFocus(InBlock(oself, pself->OLSGI_text));
+    @callsuper();
+}

@@ -1,0 +1,73 @@
+/*
+ * olSpinGadgetClass.goh -- OLSpinGadgetClass, the specific UI's spin
+ * gadget: a value shown as text between a moniker and two arrows
+ * (after Include/Internal/SpecUI/olSpinGadgetClass.def), for Port32.
+ */
+#ifndef __OLSPINGADGETCLASS_GOH
+#define __OLSPINGADGETCLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Objects/gValueC.goh>
+
+@deflib motif
+
+typedef ByteFlags OLSpinGadgetStates;
+#define OLSGS_HAS_FOCUS			0x80
+#define OLSGS_MAKE_DEFAULT_FOCUS	0x40
+#define OLSGS_DRAW_FRAME		0x01
+
+typedef ByteFlags OLSpinGadgetAttrs;
+#define OLSGA_TEXT			0x80	/* shows a text chunk */
+#define OLSGA_MONIKER			0x40
+#define OLSGA_NO_UP_DOWN_ARROWS		0x20
+#define OLSGA_SLIDER			0x10
+#define OLSGA_ORIENT_VERTICALLY		0x08
+#define OLSGA_SHOW_HASH_MARKS		0x04
+#define OLSGA_SHOW_MIN_MAX_MKRS		0x02
+#define OLSGA_CANT_EDIT_TEXT		0x01
+
+@class OLSpinGadgetClass, OLCtrlClass;
+
+/* the text object goes when it has lost the focus; gets the focus the
+ * gadget has gained */
+@message void MSG_SPIN_DISCARD_TEXT();
+@message void MSG_SPIN_GIVE_TEXT_FOCUS();
+@message void MSG_SPIN_UNBUILD();
+/* from the gadget's scrollbar: its apply message is the first of
+ * these, the part pressed (less one) added */
+@message (GEN_VALUE_APPLY_MSG) MSG_SPEC_SPIN_MINIMUM;
+@message (GEN_VALUE_APPLY_MSG) MSG_SPEC_SPIN_UP_PAGE;
+@message (GEN_VALUE_APPLY_MSG) MSG_SPEC_SPIN_UP_ARROW;
+@message (GEN_VALUE_APPLY_MSG) MSG_SPEC_SPIN_VALUE_CHANGED;
+@message (GEN_VALUE_APPLY_MSG) MSG_SPEC_SPIN_DOWN_ARROW;
+@message (GEN_VALUE_APPLY_MSG) MSG_SPEC_SPIN_DOWN_PAGE;
+@message (GEN_VALUE_APPLY_MSG) MSG_SPEC_SPIN_MAXIMUM;
+/* for the subclass that has the value */
+@message void MSG_SPEC_SPIN_INCREMENT();
+@message void MSG_SPEC_SPIN_DECREMENT();
+@message void MSG_SPEC_SPIN_DRAW_CONTENTS();
+/* the chunk of the text shown (0: none) */
+@message ChunkHandle MSG_SPEC_SPIN_GET_ITEM();
+/* the ticks to the next repeat after so many */
+@message word MSG_SPEC_SPIN_GET_REPEAT_RATE(word repeats);
+@message void MSG_SPEC_SPIN_SET_ITEM(ChunkHandle item);
+/* where the text is drawn */
+@message void MSG_SPEC_SPIN_GET_BOUNDS(Rectangle *bounds);
+@message byte MSG_SPEC_SPIN_GET_ATTRS();
+
+    @instance OLSpinGadgetAttrs	OLSGI_attrs = 0;
+    @instance word		OLSGI_desHeight = 0;
+    @instance word		OLSGI_desWidth = 0;
+    @instance word		OLSGI_textWidth = 0;	/* sliders */
+    /* the text object while the gadget has the focus */
+    @instance ChunkHandle	OLSGI_text = 0;
+    @instance word		OLSGI_repeatCount = 0;
+    @instance word		OLSGI_timerID = 0;
+    @instance TimerHandle	OLSGI_timerHandle = 0;
+    @instance OLSpinGadgetStates OLSGI_states = 0;
+    @instance ChunkHandle	OLSGI_scrollbar = 0;
+@endc;
+
+@endlib
+
+#endif

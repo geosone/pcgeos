@@ -112,3 +112,5 @@ export OLScrollableItemClass
 export OLTextClass
 export OLGadgetClass
 export OLGadgetCompClass
+export OLSpinGadgetClass
+export OLValueClass

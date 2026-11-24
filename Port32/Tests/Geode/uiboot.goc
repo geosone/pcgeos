@@ -46,6 +46,7 @@
 #include <uDialog.h>
 #include <timer.h>
 @include <Internal/SpecUI/olCtrlClass.goh>
+@include <Internal/SpecUI/olValueClass.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -106,6 +107,9 @@ typedef struct {
      * of the one not waited for (+ 0x100) */
     word		UBS_std[5];
     char		UBS_stdText[32];
+    /* the spin gadget: applies, the value applied, its state flags */
+    word		UBS_count[3];
+    char		UBS_countText[8];
 } UBState;
 
 UBState ubState;
@@ -138,6 +142,7 @@ UBState ubState;
     @message (GEN_TEXT_STATUS_MSG) MSG_UB_NAME_STATUS;
     @message void MSG_UB_HELD();
     @message (GEN_APP_DO_STANDARD_DIALOG_MSG) MSG_UB_STD_RESPONSE;
+    @message (GEN_VALUE_APPLY_MSG) MSG_UB_COUNT_APPLIED;
 @endc
 @classdecl UBProcessClass, neverSaved;
 
@@ -188,6 +193,13 @@ static word ubAnswer;
     ubState.UBS_dlg[1] = @call dlg::MSG_VIS_QUERY_WINDOW() != 0;
     ubState.UBS_dlg[2] = ubState.UBS_dlg[3];
     @callsuper();
+}
+
+@method UBProcessClass, MSG_UB_COUNT_APPLIED
+{
+    ubState.UBS_count[0]++;
+    ubState.UBS_count[1] = (word) (value >> 16);
+    ubState.UBS_count[2] = stateFlags.GVSFAW_flags;
 }
 
 @method UBProcessClass, MSG_UB_HELD
@@ -321,7 +333,7 @@ static word ubAnswer;
 /* in Doc 1: a text to edit, one line with a moniker, and a text to
  * show, several lines */
 @object GenInteractionClass UBTexts = {
-    GI_comp = @UBGadgets, @UBName, @UBNote;
+    GI_comp = @UBGadgets, @UBName, @UBNote, @UBCount;
 }
 /* gadgets: one of our own, and a composite with a trigger in it (the
  * first object to navigate to: the default focus is not there) */
@@ -353,6 +365,14 @@ static word ubAnswer;
     GI_attrs = @default | GA_READ_ONLY;
     GTXI_text = "A note of several words to show";
     HINT_FIXED_SIZE = { SST_PIXELS | 100, 0, 0 };
+}
+/* a spin gadget: 0 to 20, showing 5 */
+@object GenValueClass UBCount = {
+    GI_visMoniker = "Count";
+    GVLI_value = 0x50000;
+    GVLI_maximum = 0x140000;
+    GVLI_destination = process;
+    GVLI_applyMsg = MSG_UB_COUNT_APPLIED;
 }
 /* in Doc 2: a view of a 2000 x 300 document that scrolls both ways
  * (its window fixed at 200 x 40: the screens of the tests differ) */
@@ -908,6 +928,32 @@ static WindowHandle ScrollerWin(optr m, Boolean down, optr *sc)
     }
     MemUnlock(OptrToHandle(m));
     return w;
+}
+
+/* the text of UBCount's item */
+static const char *ItemText(ChunkHandle item)
+{
+    static char buf[8];
+    MemHandle mh = OptrToHandle(@UBCount);
+    const char *s;
+    word i;
+
+    ObjLockObjBlock(mh);
+    s = LMemDeref(ConstructOptr(mh, item));
+    for (i = 0; i < sizeof(buf) - 1 && s[i]; i++)
+	buf[i] = s[i];
+    buf[i] = 0;
+    MemUnlock(mh);
+    return buf;
+}
+
+static Boolean ItemIs(ChunkHandle item, const char *want)
+{
+    const char *s = ItemText(item);
+
+    while (*s && *s == *want)
+	s++, want++;
+    return *s == *want;
 }
 
 static Rectangle ScreenBounds(WindowHandle w)
@@ -2521,6 +2567,145 @@ static Rectangle ScreenBounds(WindowHandle w)
 	/* the response came, the dialog is gone */
 	UBCHECK(ubState.UBS_std[4] == 0x100 + IC_OK);
 	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == 3);
+	break;
+    case 59: {
+	/* a GenValue is a spin gadget: its value as text in a frame,
+	 * a scrollbar of two arrows right of it; a press on the upper
+	 * arrow steps the value up: modified, applied by the queue */
+	OLValueInstance v;
+	OLScrollbarInstance sb;
+	Rectangle r, a, b;
+	MouseReturnParams mr;
+	optr bar;
+
+	UBCHECK(InClass(@UBCount, (ClassStruct *) &OLValueClass));
+	VisData(@UBCount, &v, sizeof(v));
+	UBCHECK(v.OLSGI_attrs == OLSGA_TEXT);
+	UBCHECK(v.OLSGI_states & OLSGS_DRAW_FRAME);
+	UBCHECK(v.OLVLI_item && v.OLSGI_scrollbar && !v.OLSGI_text);
+	UBCHECK(v.OLVLI_maxLength == 2);
+	UBCHECK(ItemIs(v.OLVLI_item, "5"));
+	bar = ConstructOptr(OptrToHandle(@UBCount), v.OLSGI_scrollbar);
+	UBCHECK(@call bar::MSG_VIS_FIND_PARENT() == @UBCount);
+	VisData(bar, &sb, sizeof(sb));
+	UBCHECK((sb.OLSBI_attrs & (OLSA_STUPID | OLSA_VERTICAL)) ==
+		(OLSA_STUPID | OLSA_VERTICAL));
+	r = Bounds(@UBCount);
+	b = Bounds(bar);
+	@call UBCount::MSG_SPEC_SPIN_GET_BOUNDS(&a);
+	UBCHECK(a.R_left > r.R_left && a.R_right < b.R_left &&
+		b.R_right <= r.R_right);
+	UBCHECK(a.R_right - a.R_left == (sword) v.OLSGI_desWidth);
+	UBCHECK(a.R_top > r.R_top && a.R_bottom < r.R_bottom);
+	UBCHECK(b.R_top >= r.R_top && b.R_bottom <= r.R_bottom);
+	memset(&mr, 0, sizeof(mr));
+	@call bar::MSG_META_START_SELECT(&mr, b.R_left + 3, b.R_top + 2,
+		(UIFA_SELECT << 8) | BI_PRESS | BI_B0_DOWN);
+	UBCHECK(mr.flags & MRF_PROCESSED);
+	@call bar::MSG_META_END_SELECT(&mr, b.R_left + 3, b.R_top + 2, 0);
+	UBCHECK(@call UBCount::MSG_GEN_VALUE_GET_INTEGER_VALUE() == 6);
+	UBCHECK(@call UBCount::MSG_GEN_VALUE_IS_MODIFIED());
+	UBCHECK(ItemIs(v.OLVLI_item, "6"));
+	UBCHECK(!ubState.UBS_count[0]);
+	break;
+    }
+    case 60: {
+	/* applied; a press in the text gives the gadget the focus: a
+	 * text object on the item's chunk (through the queue) */
+	Rectangle a;
+	MouseReturnParams mr;
+
+	UBCHECK(ubState.UBS_count[0] == 1 && ubState.UBS_count[1] == 6);
+	UBCHECK(ubState.UBS_count[2] & GVSF_MODIFIED);
+	UBCHECK(!@call UBCount::MSG_GEN_VALUE_IS_MODIFIED());
+	@call UBCount::MSG_SPEC_SPIN_GET_BOUNDS(&a);
+	memset(&mr, 0, sizeof(mr));
+	@call UBCount::MSG_META_START_SELECT(&mr, a.R_left + 2, a.R_top + 2,
+		(UIFA_SELECT << 8) | BI_PRESS | BI_B0_DOWN);
+	@call UBCount::MSG_META_END_SELECT(&mr, a.R_left + 2, a.R_top + 2, 0);
+	break;
+    }
+    case 61: {
+	/* the text object has the focus (the gadget gave it on), its
+	 * cursor where the press was, before the 6: a typed digit goes
+	 * in (only as many as the longest value has, no letters), the
+	 * value is modified; asking for the value reads the text */
+	OLValueInstance v;
+	VisTextInstance t;
+	optr text;
+
+	VisData(@UBCount, &v, sizeof(v));
+	UBCHECK(v.OLSGI_text && !(v.OLSGI_states & OLSGS_HAS_FOCUS));
+	if (!v.OLSGI_text)
+	    break;
+	text = ConstructOptr(OptrToHandle(@UBCount), v.OLSGI_text);
+	VisData(text, &t, sizeof(t));
+	UBCHECK(t.VTI_text == v.OLVLI_item);
+	UBCHECK(t.VTI_maxLength == 2);
+	UBCHECK(t.VTI_state & VTS_ONE_LINE);
+	UBCHECK(@call text::MSG_VIS_FIND_PARENT() == @UBCount);
+	@call text::MSG_META_KBD_CHAR('1', CF_FIRST_PRESS, 0);
+	@call text::MSG_META_KBD_CHAR('x', CF_FIRST_PRESS, 0);
+	@call text::MSG_META_KBD_CHAR('2', CF_FIRST_PRESS, 0);
+	@call text::MSG_META_KBD_CHAR('3', CF_FIRST_PRESS, 0);
+	UBCHECK(ItemIs(v.OLVLI_item, "16"));
+	UBCHECK(@call UBCount::MSG_GEN_VALUE_IS_MODIFIED());
+	UBCHECK(@call UBCount::MSG_GEN_VALUE_GET_INTEGER_VALUE() == 16);
+	/* the up arrow key steps, shift with it goes to the maximum */
+	@call text::MSG_META_KBD_CHAR(UKEY(VC_UP), CF_FIRST_PRESS, 0);
+	UBCHECK(@call UBCount::MSG_GEN_VALUE_GET_INTEGER_VALUE() == 17);
+	UBCHECK(ItemIs(v.OLVLI_item, "17"));
+	@call text::MSG_META_KBD_CHAR(UKEY(VC_UP),
+			CF_FIRST_PRESS | (SS_LSHIFT << 8), 0);
+	UBCHECK(@call UBCount::MSG_GEN_VALUE_GET_INTEGER_VALUE() == 20);
+	break;
+    }
+    case 62: {
+	/* the applies of the typed value and the steps came; the focus
+	 * back to the name: the text object goes (through the queue) */
+	OLValueInstance v;
+
+	VisData(@UBCount, &v, sizeof(v));
+	UBCHECK(ubState.UBS_count[0] >= 2 && ubState.UBS_count[1] == 20);
+	UBCHECK(!@call UBCount::MSG_GEN_VALUE_IS_MODIFIED());
+	/* a value from the application: shown, not modified */
+	@call UBCount::MSG_GEN_VALUE_SET_INTEGER_VALUE(14, FALSE);
+	UBCHECK(ItemIs(v.OLVLI_item, "14"));
+	UBCHECK(!@call UBCount::MSG_GEN_VALUE_IS_MODIFIED());
+	@call UBName::MSG_META_GRAB_FOCUS_EXCL();
+	break;
+    }
+    case 63: {
+	OLValueInstance v;
+
+	VisData(@UBCount, &v, sizeof(v));
+	UBCHECK(!v.OLSGI_text && !(v.OLSGI_states & OLSGS_HAS_FOCUS));
+	UBCHECK(v.OLVLI_item && ItemIs(v.OLVLI_item, "14"));
+	/* the focus by the keyboard (as navigation gives it) */
+	@call UBCount::MSG_META_MUP_ALTER_FTVMC_EXCL(@UBCount,
+				MAEF_GRAB | MAEF_FOCUS | MAEF_NOT_HERE);
+	break;
+    }
+    case 64: {
+	/* a text object again, all its text selected: a typed digit
+	 * replaces it; the focus gone, the typed value is taken */
+	OLValueInstance v;
+	optr text;
+
+	VisData(@UBCount, &v, sizeof(v));
+	UBCHECK(v.OLSGI_text);
+	if (!v.OLSGI_text)
+	    break;
+	text = ConstructOptr(OptrToHandle(@UBCount), v.OLSGI_text);
+	@call text::MSG_META_KBD_CHAR('9', CF_FIRST_PRESS, 0);
+	UBCHECK(ItemIs(v.OLVLI_item, "9"));
+	@call UBName::MSG_META_GRAB_FOCUS_EXCL();
+	UBCHECK(@call UBCount::MSG_GEN_VALUE_IS_MODIFIED());
+	memcpy(ubState.UBS_countText, ItemText(v.OLVLI_item), 3);
+	break;
+    }
+    case 65:
+	UBCHECK(ubState.UBS_count[1] == 9);
 	break;
     }
 }

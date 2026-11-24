@@ -1,0 +1,562 @@
+/*
+ * copenValue.goc -- OLValueClass (after copenValue.asm): the specific
+ * part of a GenValue that is not a scrollbar.  A spin gadget whose
+ * item is the value as text; the arrows step the value, typed text is
+ * read when the value is asked for, applied, or the focus goes.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the slider
+ * (HINT_VALUE_ANALOG_DISPLAY, HINT_VALUE_SHOW_MIN_AND_MAX,
+ * HINT_VALUE_DISPLAY_INTERVALS, MSG_SPEC_SPIN_VALUE_CHANGED); a value
+ * that runs an item group (ATTR_GEN_VALUE_RUNS_ITEM_GROUP,
+ * MSG_SPEC_VALUE_SET_FROM_ITEM_GROUP).
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olValueClass.goh>
+@include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Objects/vTextC.goh>
+
+@classdecl OLValueClass, neverSaved;
+
+#define Val(o)	((OLValueInstance *) ObjDerefVis(o))
+#define GVL(o)	((GenValueInstance *) ObjDerefGen(o))
+#define InBlock(o, c)	ConstructOptr(OptrToHandle(o), c)
+
+static word StrLen(const char *s)
+{
+    word n = 0;
+
+    while (s[n])
+	n++;
+    return n;
+}
+
+/* ---------------------------------------------------------------------
+ * The value's text
+ * ------------------------------------------------------------------- */
+
+/*
+ * CreateValueText: the value as text (none if indeterminate) into the
+ * item's chunk; the text object's text is then not user modified.
+ * TRUE if the text changed.
+ */
+static Boolean CreateValueText(optr o)
+{
+    char buf[GEN_VALUE_MAX_TEXT_LEN + 1];
+    ChunkHandle item;
+    word size, i;
+    Boolean changed = FALSE;
+    char *d;
+
+    buf[0] = 0;
+    if (!(GVL(o)->GVLI_stateFlags & GVSF_INDETERMINATE))
+	@call o::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_VALUE);
+    size = StrLen(buf) + 1;
+    item = Val(o)->OLVLI_item;
+    if (item) {
+	if (LMemGetChunkSize(InBlock(o, item)) != size) {
+	    (void) LMemReAllocHandles(OptrToHandle(o), item, size);
+	    changed = TRUE;
+	}
+	d = LMemDeref(InBlock(o, item));
+	for (i = 0; i < size; i++) {
+	    if (d[i] != buf[i])
+		changed = TRUE;
+	    d[i] = buf[i];
+	}
+    }
+    if (Val(o)->OLSGI_text)
+	@call InBlock(o, Val(o)->OLSGI_text)::
+				MSG_VIS_TEXT_SET_NOT_USER_MODIFIED();
+    return changed;
+}
+
+/*
+ * CalculateMaxTextSize: the width of the longest text the value can
+ * have (with the size hints), its length
+ */
+static void MaxTextSize(optr o, word *width, word *len)
+{
+    char buf[GEN_VALUE_MAX_TEXT_LEN + 1];
+    GStateHandle gs = ViewCreateCalcGState();
+    sword w, h = 0;
+
+    buf[0] = 0;
+    @call o::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_LONG);
+    *len = StrLen(buf);
+    w = (sword) GrTextWidth(gs, buf, 0);
+    GrDestroyState(gs);
+    VisApplySizeHints(o, &w, &h);
+    *width = (word) w;
+}
+
+/* SendValueToScrollbar: the scrollbar shows the value's place in its
+ * range */
+static void SendValueToScrollbar(optr o)
+{
+    WWFixedAsDWord r = @call o::MSG_GEN_VALUE_GET_VALUE_RATIO(GVT_VALUE);
+    ChunkHandle sb = Val(o)->OLSGI_scrollbar;
+
+    if (sb)
+	@call InBlock(o, sb)::MSG_GEN_VALUE_SET_VALUE(r, FALSE);
+}
+
+/*
+ * SendMsgSetModifiedAndApplyIfNeeded, the part after the message: the
+ * modified flag as it was; if the value changed (or with ATTR_GEN_
+ * VALUE_SET_MODIFIED_ON_REDUNDANT_SELECTION) it is modified, the status
+ * message goes out and, unless delayed, it applies (through the queue)
+ */
+static void UserChanged(optr o, GenValueStateFlags wasModified,
+			Boolean changed)
+{
+    GenValueInstance *g = GVL(o);
+
+    g->GVLI_stateFlags = (GenValueStateFlags)
+		((g->GVLI_stateFlags & ~GVSF_MODIFIED) | wasModified);
+    if (!changed &&
+	!ObjVarFindData(o, ATTR_GEN_VALUE_SET_MODIFIED_ON_REDUNDANT_SELECTION))
+	return;
+    @call o::MSG_GEN_VALUE_SET_MODIFIED_STATE(TRUE);
+    @call o::MSG_GEN_VALUE_SEND_STATUS_MSG(TRUE);
+    if (!(Val(o)->OLCI_buildFlags & OLBF_DELAYED_MODE))
+	@send, forceQueue, insertAtFront o::MSG_GEN_APPLY();
+}
+
+/* a message without arguments that changes the value, as the user's */
+static void UserStep(optr o, Message msg)
+{
+    GenValueStateFlags was = GVL(o)->GVLI_stateFlags & GVSF_MODIFIED;
+    WWFixedAsDWord old = GVL(o)->GVLI_value;
+
+    (void) CObjMessageP(MF_CALL, o, msg, NULL, 0, NULL, 0);
+    UserChanged(o, was, GVL(o)->GVLI_value != old);
+}
+
+/* the new value shown: the scrollbar, the item */
+static void ShowValue(optr o)
+{
+    if (!CreateValueText(o))
+	return;
+    SendValueToScrollbar(o);
+    @call o::MSG_SPEC_SPIN_SET_ITEM(Val(o)->OLVLI_item);
+}
+
+/*
+ * SetValueIfUserDirtied: text the user typed becomes the value (as a
+ * change by the user), and is shown again as the value has it (in
+ * range); no text: the value shown again
+ */
+static void SetValueIfUserDirtied(optr o)
+{
+    char buf[GEN_VALUE_MAX_TEXT_LEN + 1];
+    ChunkHandle tc, item;
+    GenValueStateFlags was;
+    WWFixedAsDWord old;
+    const char *s;
+    word n;
+
+    if (!VisCheckIfSpecBuilt(o))
+	return;
+    tc = Val(o)->OLSGI_text;
+    if (!tc || !@call InBlock(o, tc)::MSG_VIS_TEXT_GET_USER_MODIFIED_STATE())
+	return;
+    item = Val(o)->OLVLI_item;
+    if (!item)
+	return;
+    s = LMemDeref(InBlock(o, item));
+    if (!*s) {
+	ShowValue(o);
+	return;
+    }
+    n = StrLen(s);
+    if (n > GEN_VALUE_MAX_TEXT_LEN)
+	n = GEN_VALUE_MAX_TEXT_LEN;
+    memcpy(buf, s, n);
+    buf[n] = 0;
+    was = GVL(o)->GVLI_stateFlags & GVSF_MODIFIED;
+    old = GVL(o)->GVLI_value;
+    @call o::MSG_GEN_VALUE_SET_VALUE_FROM_TEXT(buf, GVT_VALUE);
+    UserChanged(o, was, GVL(o)->GVLI_value != old);
+    (void) CreateValueText(o);
+    SendValueToScrollbar(o);
+}
+
+/* SetValueTextFilters: the text object takes what the value's format
+ * allows, no longer than its longest text */
+static void SetTextFilters(optr o)
+{
+    VisTextFilters f = @call o::MSG_GEN_VALUE_GET_TEXT_FILTER();
+    OLValueInstance *p = Val(o);
+    VisTextInstance *t;
+
+    if (!p->OLSGI_text)
+	return;
+    t = (VisTextInstance *) ObjDerefVis(InBlock(o, p->OLSGI_text));
+    t->VTI_maxLength = Val(o)->OLVLI_maxLength;
+    t->VTI_filters = f;
+}
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+static void NotDigitallyEditable(optr o)
+{
+    OLValueInstance *p = Val(o);
+
+    p->OLSGI_attrs |= OLSGA_CANT_EDIT_TEXT;
+    p->OLSGI_states &= ~OLSGS_DRAW_FRAME;
+}
+
+static void ValueHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		      word dataType, void *handlerData)
+{
+    optr o = ConstructOptr(mh, chnk);
+    OLValueInstance *p = Val(o);
+
+    (void) extra;
+    (void) handlerData;
+    switch (dataType) {
+    case HINT_VALUE_CUSTOM_RETURN_PRESS:
+	p->OLVLI_flags |= OLVF_CUSTOM_RETURN_PRESS;
+	break;
+    case HINT_VALUE_NAVIGATE_TO_NEXT_FIELD_ON_RETURN_PRESS:
+	p->OLVLI_flags |= OLVF_NAVIGATE_ON_RETURN_PRESS;
+	break;
+    case HINT_VALUE_NOT_INCREMENTABLE:
+	p->OLSGI_attrs |= OLSGA_NO_UP_DOWN_ARROWS;
+	break;
+    case HINT_VALUE_NOT_DIGITALLY_EDITABLE:
+	NotDigitallyEditable(o);
+	break;
+    case ATTR_GEN_PROPERTY:
+	p->OLCI_buildFlags |= OLBF_DELAYED_MODE;
+	break;
+    case ATTR_GEN_NOT_PROPERTY:
+	p->OLCI_buildFlags &= ~OLBF_DELAYED_MODE;
+	break;
+    case HINT_VALUE_ORIENT_HORIZONTALLY:
+	p->OLSGI_attrs &= ~OLSGA_ORIENT_VERTICALLY;
+	break;
+    }
+}
+
+static VarDataCHandler valueHints[] = {
+    { HINT_VALUE_CUSTOM_RETURN_PRESS, ValueHint },
+    { HINT_VALUE_NAVIGATE_TO_NEXT_FIELD_ON_RETURN_PRESS, ValueHint },
+    { HINT_VALUE_NOT_INCREMENTABLE, ValueHint },
+    { HINT_VALUE_NOT_DIGITALLY_EDITABLE, ValueHint },
+    { ATTR_GEN_PROPERTY, ValueHint },
+    { ATTR_GEN_NOT_PROPERTY, ValueHint },
+    { HINT_VALUE_ORIENT_HORIZONTALLY, ValueHint },
+};
+
+/*
+ * OLValueSpecBuild: the item's chunk, as wide as the longest text; the
+ * value's text in it; a framed text; the hints; then the gadget is
+ * built and shows the item; children side by side; a read-only value
+ * is not edited; the scrollbar's range (0 to 1) and value; a modified
+ * value makes its dialog applyable
+ */
+@method OLValueClass, MSG_SPEC_BUILD
+{
+    if (!pself->OLVLI_item) {
+	ChunkHandle c = LMemAlloc(OptrToHandle(oself),
+				  GEN_VALUE_MAX_TEXT_LEN);
+	word w, len;
+
+	ObjSetFlags(ConstructOptr(OptrToHandle(oself), c),
+		    OCF_IGNORE_DIRTY, 0);
+	*(char *) LMemDeref(InBlock(oself, c)) = 0;
+	Val(oself)->OLVLI_item = c;
+	MaxTextSize(oself, &w, &len);
+	pself = Val(oself);
+	pself->OLSGI_desWidth = w;
+	pself->OLSGI_textWidth = w;
+	pself->OLVLI_maxLength = len;
+    }
+    (void) CreateValueText(oself);
+    pself = Val(oself);
+    pself->OLSGI_attrs |= OLSGA_TEXT;
+    pself->OLSGI_states |= OLSGS_DRAW_FRAME;
+    OpenScanVarData(oself, sizeof(valueHints) / sizeof(valueHints[0]),
+		    valueHints, NULL);
+    if (ObjVarFindData(oself, HINT_VALUE_ORIENT_VERTICALLY))
+	Val(oself)->OLSGI_attrs |= OLSGA_ORIENT_VERTICALLY;
+    @callsuper();
+    @call oself::MSG_SPEC_SPIN_SET_ITEM(Val(oself)->OLVLI_item);
+    Val(oself)->VCI_geoAttrs &= ~VCGA_ORIENT_CHILDREN_VERTICALLY;
+    if (GVL(oself)->GI_attrs & GA_READ_ONLY)
+	NotDigitallyEditable(oself);
+    if (ObjVarFindData(oself, HINT_VALUE_FRAME)) {
+	Val(oself)->OLSGI_states |= OLSGS_DRAW_FRAME;
+	return;
+    }
+    pself = Val(oself);
+    if (pself->OLSGI_scrollbar)
+	@call InBlock(oself, pself->OLSGI_scrollbar)::
+		MSG_GEN_VALUE_SET_MAXIMUM((WWFixedAsDWord) 0x10000L);
+    SendValueToScrollbar(oself);
+    if (GVL(oself)->GVLI_stateFlags & GVSF_MODIFIED)
+	@send, forceQueue, insertAtFront oself::MSG_GEN_MAKE_APPLYABLE();
+}
+
+/* OLValueUnbuildBranch: typed text is taken first; the item goes */
+@method OLValueClass, MSG_SPEC_UNBUILD_BRANCH
+{
+    ChunkHandle item;
+
+    SetValueIfUserDirtied(oself);
+    pself = Val(oself);
+    item = pself->OLVLI_item;
+    pself->OLVLI_item = 0;
+    if (pself->OLSGI_text)
+	((VisTextInstance *) ObjDerefVis(InBlock(oself, pself->OLSGI_text)))
+							->VTI_text = 0;
+    if (item)
+	LMemFreeHandles(OptrToHandle(oself), item);
+    @callsuper();
+}
+
+@method OLValueClass, MSG_SPEC_VIS_OPEN_NOTIFY
+{
+    (void) pself;
+    VisOpenNotifyCommon(oself);
+}
+
+@method OLValueClass, MSG_SPEC_VIS_CLOSE_NOTIFY
+{
+    (void) pself;
+    VisCloseNotifyCommon(oself);
+}
+
+@method OLValueClass, MSG_SPEC_SPIN_GET_ITEM
+{
+    return pself->OLVLI_item;
+}
+
+/* ---------------------------------------------------------------------
+ * The generic value's messages
+ * ------------------------------------------------------------------- */
+
+/* typed text counts before the value is stepped or read */
+@method OLValueClass, MSG_GEN_VALUE_INCREMENT, MSG_GEN_VALUE_DECREMENT
+{
+    (void) pself;
+    SetValueIfUserDirtied(oself);
+}
+
+@method OLValueClass, MSG_GEN_VALUE_GET_VALUE
+{
+    (void) pself;
+    SetValueIfUserDirtied(oself);
+    return GVL(oself)->GVLI_value;
+}
+
+/* OLValueSetValue: the new value's text, shown if it changed */
+@method OLValueClass, MSG_GEN_VALUE_SET_VALUE
+{
+    (void) pself;
+    (void) value;
+    (void) indeterminate;
+    ShowValue(oself);
+}
+
+/*
+ * OLValueSetMinimum: a new range: the scrollbar; typed text taken; the
+ * longest text anew, the gadget wider if it needs to be
+ */
+@method OLValueClass, MSG_GEN_VALUE_SET_MINIMUM, MSG_GEN_VALUE_SET_MAXIMUM
+{
+    word w, len;
+
+    (void) value;
+    SendValueToScrollbar(oself);
+    SetValueIfUserDirtied(oself);
+    MaxTextSize(oself, &w, &len);
+    pself = Val(oself);
+    pself->OLVLI_maxLength = len;
+    if (pself->OLSGI_text)
+	((VisTextInstance *) ObjDerefVis(InBlock(oself, pself->OLSGI_text)))
+						->VTI_maxLength = len;
+    pself = Val(oself);
+    if (pself->OLSGI_attrs & OLSGA_SLIDER)
+	pself->OLSGI_textWidth = w;
+    if (w > pself->OLSGI_desWidth) {
+	pself->OLSGI_desWidth = w;
+	VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, VUM_DELAYED_VIA_UI_QUEUE);
+    }
+}
+
+/* OLValueApply: typed text is the value that is applied */
+@method OLValueClass, MSG_GEN_APPLY
+{
+    SetValueIfUserDirtied(oself);
+    pself = Val(oself);
+    if (pself->OLSGI_text)
+	@call InBlock(oself, pself->OLSGI_text)::
+				MSG_VIS_TEXT_SET_NOT_USER_MODIFIED();
+}
+
+/* OLValueGenMakeApplyable: a delayed value tells its dialog */
+@method OLValueClass, MSG_GEN_MAKE_APPLYABLE
+{
+    optr vp;
+
+    if ((pself->OLCI_buildFlags & OLBF_DELAYED_MODE) &&
+	(vp = VisFindParent(oself)) != 0)
+	@call vp::MSG_GEN_MAKE_APPLYABLE();
+}
+
+/* ---------------------------------------------------------------------
+ * The user
+ * ------------------------------------------------------------------- */
+
+@method OLValueClass, MSG_SPEC_SPIN_INCREMENT
+{
+    (void) pself;
+    UserStep(oself, MSG_GEN_VALUE_INCREMENT);
+}
+
+@method OLValueClass, MSG_SPEC_SPIN_DECREMENT
+{
+    (void) pself;
+    UserStep(oself, MSG_GEN_VALUE_DECREMENT);
+}
+
+/* OLValueTextUserModified: the first key typed: out of date, modified */
+@method OLValueClass, MSG_META_TEXT_USER_MODIFIED
+{
+    (void) pself;
+    (void) obj;
+    @call oself::MSG_GEN_VALUE_SET_OUT_OF_DATE();
+    @call oself::MSG_GEN_VALUE_SET_MODIFIED_STATE(TRUE);
+    @call oself::MSG_GEN_VALUE_SEND_STATUS_MSG(TRUE);
+}
+
+@method OLValueClass, MSG_META_START_SELECT
+{
+    @callsuper();
+    SetTextFilters(oself);
+}
+
+/* a value with a return press of its own is the window's default
+ * while it has the focus */
+static void DefaultExcl(optr o, VisUpwardQueryType q)
+{
+    optr vp;
+    GenReturnParams r;
+
+    if (!(Val(o)->OLVLI_flags & (OLVF_CUSTOM_RETURN_PRESS |
+				 OLVF_NAVIGATE_ON_RETURN_PRESS)))
+	return;
+    if (!(vp = VisFindParent(o)))
+	return;
+    memset(&r, 0, sizeof(r));
+    (void) @call vp::MSG_VIS_P32_VUP_QUERY(&r, q, OptrToChunk(o),
+					   OptrToHandle(o));
+}
+
+@method OLValueClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    @callsuper();
+    SetTextFilters(oself);
+    DefaultExcl(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
+}
+
+@method OLValueClass, MSG_META_TEXT_GAINED_FOCUS
+{
+    (void) pself;
+    (void) obj;
+    DefaultExcl(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
+}
+
+/* the focus gone: typed text is taken */
+@method OLValueClass, MSG_META_LOST_FOCUS_EXCL
+{
+    DefaultExcl(oself, SVQT_RELEASE_DEFAULT_EXCLUSIVE);
+    @callsuper();
+    SetValueIfUserDirtied(oself);
+}
+
+@method OLValueClass, MSG_META_TEXT_LOST_FOCUS
+{
+    DefaultExcl(oself, SVQT_RELEASE_DEFAULT_EXCLUSIVE);
+    @callsuper();
+    SetValueIfUserDirtied(oself);
+}
+
+/* return: typed text is taken */
+@method OLValueClass, MSG_META_TEXT_CR_FILTERED
+{
+    @callsuper();
+    SetValueIfUserDirtied(oself);
+}
+
+/*
+ * OLValueActivate (the window's default action while the value has the
+ * focus): on to the next field, or the custom message with the value
+ * and its state
+ */
+@method OLValueClass, MSG_GEN_ACTIVATE
+{
+    if (pself->OLVLI_flags & OLVF_NAVIGATE_ON_RETURN_PRESS)
+	@call oself::MSG_GEN_NAVIGATE_TO_NEXT_FIELD();
+    else if (pself->OLVLI_flags & OLVF_CUSTOM_RETURN_PRESS) {
+	Message *m = ObjVarFindData(oself, HINT_VALUE_CUSTOM_RETURN_PRESS);
+	struct { WWFixedAsDWord value; GenValueStateFlagsAsWord flags; } a;
+	EventHandle ev;
+
+	if (m && *m) {
+	    Message msg = *m;
+	    optr dest = GVL(oself)->GVLI_destination;
+
+	    a.value = GVL(oself)->GVLI_value;
+	    a.flags.GVSFAW_flags = GVL(oself)->GVLI_stateFlags;
+	    a.flags.GVSFAW_unused = 0;
+	    CObjMessageP(MF_RECORD, 0, msg, &a, sizeof(a), &ev, sizeof(ev));
+	    @call oself::MSG_GEN_OUTPUT_ACTION(ev, dest);
+	}
+    }
+    @callsuper();
+}
+
+/* shift and the up or down arrow: the maximum, the minimum */
+static const KeyboardShortcut valueKeys[] = {
+    KS_PHYSICAL | KS_SHIFT | (KS_CHAR_SET_CONTROL << 8) | VC_UP,
+    KS_PHYSICAL | KS_SHIFT | (KS_CHAR_SET_CONTROL << 8) | VC_DOWN,
+};
+static const Message valueKeyMsgs[] = {
+    MSG_GEN_VALUE_SET_VALUE_TO_MAXIMUM, MSG_GEN_VALUE_SET_VALUE_TO_MINIMUM,
+};
+
+static Message ValueKey(word character, word flags, word state)
+{
+    if (!(flags & (CF_FIRST_PRESS | CF_REPEAT_PRESS)))
+	return 0;
+    return ConvertKeyToMethod(valueKeys, valueKeyMsgs,
+			      sizeof(valueKeys) / sizeof(valueKeys[0]),
+			      character, flags, state);
+}
+
+@method OLValueClass, MSG_META_KBD_CHAR
+{
+    Message m = ValueKey(character, flags, state);
+
+    (void) pself;
+    if (m)
+	UserStep(oself, m);
+    else
+	@callsuper();
+}
+
+@method OLValueClass, MSG_META_FUP_KBD_CHAR
+{
+    Message m = ValueKey(character, flags, state);
+
+    (void) pself;
+    if (!m)
+	return @callsuper();
+    UserStep(oself, m);
+    return TRUE;
+}

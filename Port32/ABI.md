@@ -5638,9 +5638,39 @@ are left out), the constants, the variables and the routines.
     (`P_ARROW_WIDTH` ... `P_END_MINUS_ARROW`) plus an offset; the arrow
     bitmaps of 8, 10, 12 and 14 pixels are C data. As in the asm the xor
     color is `C_WHITE` (Motif's `C_LIGHT_GREY` is overwritten).
-    Not yet: `OLValueClass` (the spin gadget with its text) and
-    `OLSliderClass` (every value is a scrollbar until then), floating
-    scrollers, CGA's wider bar.
+    Not yet: `OLSliderClass`, floating scrollers, CGA's wider bar.
+  - **The spin gadget** (`CGadget/copenSpinGadget.goc`,
+    `copenValue.goc`, `CSpec/cspecValue.goc`;
+    `Internal/SpecUI/olSpinGadgetClass.goh`, `olValueClass.goh`): a
+    `GenValue` without a scroller hint is an `OLValue`, an
+    `OLSpinGadget` (an `OLCtrl`) whose item is the value as text in a
+    chunk. The gadget draws the item in a frame (dark at the left and
+    top, white at the right and bottom, filled in the light color) and
+    has a "stupid" vertical scrollbar of two arrows that sends
+    `MSG_SPEC_SPIN_MINIMUM` plus the part pressed; an arrow steps the
+    value (`MSG_SPEC_SPIN_INCREMENT`, `..._DECREMENT`) and a one-shot
+    timer repeats the press (first after 25 ticks, then at the gadgets'
+    repeat rate). When the gadget gains the focus it makes a one line
+    `VisText` on the item's chunk (not managed, placed by the gadget,
+    its output the gadget, the value's filter and longest length) and
+    hands the focus on to it through the queue, all text selected; when
+    the text loses the focus it is destroyed again, the chunk stays.
+    Typed text makes the value out of date and modified
+    (`MSG_META_TEXT_USER_MODIFIED`) and becomes the value when it is
+    asked for, stepped, applied, on Enter or when the focus goes
+    (`SetValueIfUserDirtied`); a change by the user sends the status
+    message and, unless delayed, `MSG_GEN_APPLY` through the queue.
+    The arrow keys step, Shift with up or down goes to the maximum or
+    minimum. Hints: `HINT_VALUE_NOT_INCREMENTABLE`,
+    `..._NOT_DIGITALLY_EDITABLE`, `..._CUSTOM_RETURN_PRESS`,
+    `..._NAVIGATE_TO_NEXT_FIELD_ON_RETURN_PRESS`, `..._FRAME`,
+    `ATTR_GEN_PROPERTY`. The C generic messages return no carry, so
+    "changed" is the value compared before and after;
+    `MSG_GEN_VALUE_GET_MAX_TEXT_LEN` is not asked, the longest text's
+    length is taken. `OLCtrlDoHints` (the control's geometry hints) is
+    exported for the subclass. Not yet: the slider
+    (`HINT_VALUE_ANALOG_DISPLAY`, minimum and maximum monikers, hash
+    marks), a value that runs an item group, the toolbox's ways, ink.
   - **The view** (`CView/cviewPane.goc`, `cviewPaneGeometry.goc`,
     `cviewPaneScroll.goc`, `cviewPaneWindow.goc`,
     `CSpec/cspecPane.goc`; `Internal/SpecUI/olPaneClass.goh`):
@@ -6297,6 +6327,16 @@ are left out), the constants, the variables and the routines.
   Standard dialogs (steps 55 to 58): a question with two triggers of
   its own and both arguments in its text, answered "no"; an error
   nobody waits for, its response sent to the process.
+  A spin gadget (steps 59 to 65): a `GenValue` of 0 to 20 is an
+  `OLValue` with its text area left of a scrollbar of two arrows; a
+  press on the first arrow steps the value, modified and applied by the
+  queue; a press in the text gives it a text object on the item's
+  chunk with the cursor there, a typed digit goes in (no letters, no
+  more than two characters) and is the value when asked for; the up
+  key steps, Shift with it goes to the maximum; a value set by the
+  application is shown and not modified; the focus elsewhere, the text
+  object is gone; the focus by the keyboard selects all the text, a
+  typed digit replaces it and is applied when the focus goes.
 
 ## 13z. The text library (`Library/Text`, P6)
 

@@ -386,11 +386,11 @@ static VarDataCHandler delayedHints[] = {
 };
 
 /*
- * DoCtrlHints: a generic OLCtrl only draws in its margins, a moniker
+ * DoCtrlHints (OLCtrlDoHints): a generic OLCtrl only draws in its margins, a moniker
  * goes left; the hints; centering asked by the parent; the toolbox and
  * delayed mode of the parent; a reply bar's moniker not centered
  */
-static void DoCtrlHints(optr oself)
+void OLCtrlDoHints(optr oself)
 {
     OLCtrlInstance *c = Ctrl(oself);
     OLCtrlOptFlags f = 0;
@@ -435,7 +435,7 @@ static void DoCtrlHints(optr oself)
     pself->VI_geoAttrs &= VGA_GEOMETRY_CALCULATED | VGA_NOTIFY_GEOMETRY_VALID;
     pself->OLCI_optFlags &= ~(OLCOF_DISPLAY_BORDER | OLCOF_DISPLAY_MKR_ABOVE |
 			      OLCOF_CUSTOM_SPACING);
-    DoCtrlHints(oself);
+    OLCtrlDoHints(oself);
 }
 
 @method OLCtrlClass, MSG_SPEC_CTRL_SET_MORE_FLAGS

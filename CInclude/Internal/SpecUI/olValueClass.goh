@@ -1,0 +1,33 @@
+/*
+ * olValueClass.goh -- OLValueClass, the specific part of a GenValue
+ * that is not a scrollbar: a spin gadget showing the value (after
+ * Include/Internal/SpecUI/olValueClass.def), for Port32.
+ */
+#ifndef __OLVALUECLASS_GOH
+#define __OLVALUECLASS_GOH
+
+@include <Internal/SpecUI/olSpinGadgetClass.goh>
+
+@deflib motif
+
+typedef ByteFlags OLValueFlags;
+#define OLVF_CUSTOM_RETURN_PRESS	0x80
+#define OLVF_NAVIGATE_ON_RETURN_PRESS	0x40
+
+@class OLValueClass, OLSpinGadgetClass;
+@uses GenValueClass;
+
+@message void MSG_SPEC_VALUE_SET_FROM_ITEM_GROUP(word item);
+
+    /* on the scrollbar of a slider (made by the value) */
+    @vardata void HINT_SPEC_SLIDER;
+
+    /* the chunk of the value's text */
+    @instance ChunkHandle	OLVLI_item = 0;
+    @instance word		OLVLI_maxLength = 0;
+    @instance OLValueFlags	OLVLI_flags = 0;
+@endc;
+
+@endlib
+
+#endif

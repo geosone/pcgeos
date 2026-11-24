@@ -593,6 +593,10 @@ extern ChunkHandle OpenWinCreateBarObject(optr o, ClassStruct *class);
 extern optr CreateTitleBarGroup(optr o, word titleGroupType);
 extern void OLMenuedWinSetMaximized(optr o, VisUpdateMode mode);
 
+/* CComp/copenCtrlClass.goc: the geometry hints of an OLCtrl (for a
+ * subclass with defaults of its own) */
+extern void OLCtrlDoHints(optr oself);
+
 /* CComp/copenCtrlGeometry.goc */
 extern SizeAsDWord OpenRecalcCtrlSize(optr o, word width, word height,
 				      VisCompSpacingMarginsInfo info);
