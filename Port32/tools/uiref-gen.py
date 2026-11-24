@@ -124,10 +124,15 @@ static void URClickMenu(word n)
     if (!bar || (b = @call bar::MSG_VIS_FIND_CHILD_AT_POSITION(n)) == 0)
 	return;
     @call b::MSG_VIS_GET_BOUNDS(&r);
-    @call b::MSG_META_START_SELECT(&mr, r.R_left + 3, r.R_top + 3,
+    /* both queued, so that the objects' thread handles them one after
+     * the other: with two calls it gets to a pointer event of the real
+     * mouse in between (the menu coming up makes one), the button
+     * gives up its mouse grab and the release does nothing */
+    @send, forceQueue b::MSG_META_START_SELECT(&mr, r.R_left + 3, r.R_top + 3,
 		((UIFA_SELECT | UIFA_IN) << 8) | BI_PRESS | BI_B0_DOWN);
-    @call b::MSG_META_END_SELECT(&mr, r.R_left + 3, r.R_top + 3,
+    @send, forceQueue b::MSG_META_END_SELECT(&mr, r.R_left + 3, r.R_top + 3,
 		UIFA_IN << 8);
+    @call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
 }
 
 @method URProcessClass, MSG_UR_SHOW

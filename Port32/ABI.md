@@ -6361,10 +6361,27 @@ are left out), the constants, the variables and the routines.
   wide as the menu's widest moniker and keyboard accelerator
   (`MSG_SPEC_GET_MENU_CENTER`, `OLMenuCalcCenters`) and show the
   accelerator ("F3"); the Exit trigger is built enabled
-  (`VisSendSpecBuild`).  Still different: the system menu button's
-  picture, a trigger inside a `GenGadget` composite (smaller in the
-  original), the first item of a menu opened by the mouse (not
-  cursored in the original).
+  (`VisSendSpecBuild`).  A second round: the two halves of a click on
+  a menu button are queued (`@send, forceQueue`), else a pointer event
+  of the real mouse comes between them and the button loses its grab
+  (the original then cursors the first item just as the port does); a
+  menu kept on the screen is moved off its button
+  (`OpenWinCheckMenuWinVisibilityConstraints`, `AvoidMenuOverlap`);
+  `windowOptions`, `expressOptions` and `helpOptions` are read from the
+  field's category (`GOP_category`, `[uiFeatures]` in the product's
+  ini: no window menu, only the close button), not from `[ui]`; system
+  icons and toolbox buttons have the single border (`SystemCBR`); a
+  scrollbar is built without an xor'ed elevator
+  (`OLSBI_xorElevOff = NO_XOR_ELEVATOR`; a twisted one showed a dotted
+  line below its arrows).  With that the windows of the variants are
+  the same pixel for pixel but for the mouse pointer and one thing kept
+  different on purpose: a trigger inside a `GenGadget` composite.  The
+  asm (`copenButtonBuild.asm`) reads `OLCI_buildFlags` of the generic
+  parent without checking its class; an `OLGadgetCompClass` object has
+  no such field, so the read lands in its Gen part (`GI_link`) and a
+  chunk handle decides whether the button counts as in a toolbox
+  (`OLBF_TOOLBOX`).  The port asks only an `OLCtrlClass` parent and
+  draws the normal button.
 
 ## 13z. The text library (`Library/Text`, P6)
 

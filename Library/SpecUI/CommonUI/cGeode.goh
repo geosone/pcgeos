@@ -280,9 +280,9 @@ extern const KeyboardShortcut *SpecGetTextKbdBindings(word *count,
 extern void SpecDrawTextCursor(optr o, GStateHandle gstate);
 extern UIWindowOptions SpecGetWindowOptions(void);
 extern UIExpressOptions SpecGetExpressOptions(void);
-extern void SpecInitWindowPreferences(void);
-extern void SpecInitExpressPreferences(void);
-extern void SpecInitHelpPreferences(void);
+extern void SpecInitWindowPreferences(const char *category);
+extern void SpecInitExpressPreferences(const char *category);
+extern void SpecInitHelpPreferences(const char *category);
 extern void SpecInitDefaultDisplayScheme(void);
 extern void SpecInitGadgetPreferences(void);
 
@@ -547,6 +547,9 @@ extern void GetCoreWinOpenParams(optr o, WinOpenParams *p);
 extern void OpenWinUpdateModalStatus(optr o);
 extern void EnsureWindowInParentWin(optr o, sword minW, sword minH);
 extern void OpenWinCheckVisibleConstraints(optr o);
+/* cwinClassOther.goc */
+extern Boolean AvoidMenuOverlap(optr button, optr menu, Boolean vertical,
+				Boolean toRight);
 extern word OpenWinGetTitleBarGroupSize(optr o, Boolean right);
 extern word OpenWinGetSysMenuButtonWidth(optr o);
 /* the objects of a window's system menu block (CWin/cwinClassCUAS.goc) */

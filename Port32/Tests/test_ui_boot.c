@@ -220,7 +220,9 @@ int main(int argc, char **argv)
 		 "editableTextFontsize = %s\r\n"
 		 "[motif options]\r\nbuttonInvertDelay = 6\r\n"
 		 "activetitlebarcolor = 8\r\ngadgetRepeatDelay = 18\r\n"
-		 "scrollArrowSize = 12\r\nselectColor = 135\r\n",
+		 "scrollArrowSize = 12\r\nselectColor = 135\r\n"
+		 "[uiFeatures]\r\nwindowOptions = 2048\r\n"
+		 "expressOptions = 4041\r\nhelpOptions = 0\r\n",
 		 ini, fs, fs);
 	Put("geos.ini", refIni, strlen(refIni));
     } else

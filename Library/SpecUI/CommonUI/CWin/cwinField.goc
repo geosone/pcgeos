@@ -80,15 +80,19 @@ static GenFieldInstance *GenField(optr oself)
 }
 
 /* OLFieldLoadOptions: the specific UI's options, read as the field
- * loads its own */
+ * loads its own (those of a field from its category) */
 @method OLFieldClass, MSG_GEN_LOAD_OPTIONS
 {
-    (void) params;
+    char cat[INI_CATEGORY_BUFFER_SIZE];
+
+    /* a copy: the object block may move */
+    memcpy(cat, params->GOP_category, sizeof(cat));
+    cat[sizeof(cat) - 1] = 0;
     SpecInitDefaultDisplayScheme();
     SpecInitGadgetPreferences();
-    SpecInitWindowPreferences();
-    SpecInitExpressPreferences();
-    SpecInitHelpPreferences();
+    SpecInitWindowPreferences(cat);
+    SpecInitExpressPreferences(cat);
+    SpecInitHelpPreferences(cat);
 }
 
 /*

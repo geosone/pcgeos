@@ -3,9 +3,10 @@
  * window closed (its grabs given up, its stagger slot freed, ready to
  * open again), lowered to the bottom, a menu's focus released.
  *
- * Port32: the system menu's window list entry, the state saved on
- * detach (OpenWinSaveState) and menus kept beside their buttons
- * (AvoidMenuOverlap) are not ported yet.
+ * A menu kept off its button (AvoidMenuOverlap).
+ *
+ * Port32: the system menu's window list entry and the state saved on
+ * detach (OpenWinSaveState) are not ported yet.
  */
 @include "cGeode.goh"
 
@@ -112,4 +113,77 @@ static void PrepForReOpen(optr o)
     if (f)
 	@call f::MSG_META_RELEASE_FOCUS_EXCL();
     @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+}
+
+/* ---------------------------------------------------------------------
+ * A menu and its button
+ * ------------------------------------------------------------------- */
+
+/*
+ * AvoidMenuOverlap: in one direction (across, or down if vertical): a
+ * menu that begins before its button's end moves to the other side of
+ * the button if it fits there, else (and a menu opening to the right,
+ * checked across, if it overlaps by more than a little) below the
+ * button (checked down: to its right).  TRUE if moved that way: it has
+ * to be brought on screen and checked again.
+ */
+Boolean AvoidMenuOverlap(optr button, optr menu, Boolean vertical,
+			 Boolean toRight)
+{
+    VisInstance *b = (VisInstance *) ObjDerefVis(button);
+    VisInstance *m;
+    WindowHandle win;
+    sword bx = b->VI_bounds.R_left, by = b->VI_bounds.R_top;
+    sword bw, bh, mx, my, mw, mh;
+    sword start, other, bLen, bOther, mStart, mLen, overlap;
+
+    win = VisQueryWindow(button);
+    if (!win)
+	return FALSE;
+    {
+	XYValueAsDWord s = WinTransform(win, bx, by);
+
+	bx = (sword) DWORD_X(s);
+	by = (sword) DWORD_Y(s);
+    }
+    b = (VisInstance *) ObjDerefVis(button);
+    m = (VisInstance *) ObjDerefVis(menu);
+    bw = (sword) (b->VI_bounds.R_right - b->VI_bounds.R_left);
+    bh = (sword) (b->VI_bounds.R_bottom - b->VI_bounds.R_top);
+    mx = m->VI_bounds.R_left;
+    my = m->VI_bounds.R_top;
+    mw = (sword) (m->VI_bounds.R_right - mx);
+    mh = (sword) (m->VI_bounds.R_bottom - my);
+    if (vertical) {
+	start = by; other = bx; bLen = bh; bOther = bw;
+	mStart = my; mLen = mh;
+    } else {
+	start = bx; other = by; bLen = bw; bOther = bh;
+	mStart = mx; mLen = mw;
+    }
+    /* one pixel of overlap is allowed (Motif) */
+    overlap = (sword) (mStart - start + 1 - bLen);
+    if (overlap >= 0)
+	return FALSE;
+    overlap--;
+    if (toRight && !vertical) {
+	/* Motif sub menus get some latitude */
+	if (overlap + 6 >= 0)
+	    return FALSE;
+    } else if (mLen <= start) {
+	/* fits before the button */
+	sword d = (sword) -(overlap + mLen + bLen);
+
+	if (vertical)
+	    VisSetPosition(menu, mx, (sword) (my + d));
+	else
+	    VisSetPosition(menu, (sword) (mx + d), my);
+	return FALSE;
+    }
+    other = (sword) (other + bOther);
+    if (vertical)
+	VisSetPosition(menu, other, mStart);
+    else
+	VisSetPosition(menu, mStart, other);
+    return TRUE;
 }

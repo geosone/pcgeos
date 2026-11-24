@@ -60,14 +60,14 @@ static UIWindowOptions GetDefaultWindowPreferences(void)
     return o;
 }
 
-/* SpecInitWindowPreferences: "[ui] windowOptions": the low byte the
- * options to set, the high byte those to take from it */
-void SpecInitWindowPreferences(void)
+/* SpecInitWindowPreferences: "windowOptions" of the field's category:
+ * the low byte the options to set, the high byte those to take from it */
+void SpecInitWindowPreferences(const char *category)
 {
     UIWindowOptions o = GetDefaultWindowPreferences();
     word v;
 
-    if (!InitFileReadInteger(uiCat, "windowOptions", &v)) {
+    if (!InitFileReadInteger(category, "windowOptions", &v)) {
 	byte set = (byte) v, mask = (byte) (v >> 8);
 	o |= set & mask;
 	o &= set | (byte) ~mask;
@@ -85,9 +85,9 @@ UIExpressOptions SpecGetExpressOptions(void)
     return olExpressOptions;
 }
 
-/* SpecInitExpressPreferences: "[ui] expressOptions", else the lists for
- * the user level */
-void SpecInitExpressPreferences(void)
+/* SpecInitExpressPreferences: "expressOptions" of the field's category,
+ * else the lists for the user level */
+void SpecInitExpressPreferences(const char *category)
 {
     word v;
     UIExpressOptions o = UIEO_DESK_ACCESSORY_LIST | UIEO_CONTROL_PANEL |
@@ -97,17 +97,17 @@ void SpecInitExpressPreferences(void)
 
     if (UserGetDefaultUILevel() > UIIL_BEGINNING)
 	o |= UIEO_MAIN_APPS_LIST | UIEO_OTHER_APPS_LIST;
-    if (!InitFileReadInteger(uiCat, "expressOptions", &v))
+    if (!InitFileReadInteger(category, "expressOptions", &v))
 	o = v;
     olExpressOptions = o;
 }
 
-/* SpecInitHelpPreferences: "[ui] helpOptions" */
-void SpecInitHelpPreferences(void)
+/* SpecInitHelpPreferences: "helpOptions" of the field's category */
+void SpecInitHelpPreferences(const char *category)
 {
     word v = 0;
 
-    (void) InitFileReadInteger(uiCat, "helpOptions", &v);
+    (void) InitFileReadInteger(category, "helpOptions", &v);
     olHelpOptions = v;
 }
 

@@ -78,6 +78,8 @@ static VarDataCHandler verticalHint[] = {
     sb = SBVis(oself);
     sb->VI_geoAttrs |= VGA_USE_VIS_SET_POSITION;
     sb->OLSBI_state |= OLSS_INVALID_OFFSETS;
+    /* no xor'ed elevator yet */
+    sb->OLSBI_xorElevOff = NO_XOR_ELEVATOR;
     OpenScanVarData(oself, sizeof(verticalHint) / sizeof(verticalHint[0]),
 		    verticalHint, &vertical);
     sb = SBVis(oself);

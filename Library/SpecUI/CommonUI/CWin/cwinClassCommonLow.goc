@@ -6,8 +6,8 @@
  * moniker in the title.
  *
  * Port32: popups (OLPopupWinClass) are not ported yet: no modal
- * priorities or nearest win group's priority, no menus kept beside
- * their buttons (AvoidMenuOverlap); no state saved or restored (the
+ * priorities or nearest win group's priority; no state saved or
+ * restored (the
  * TEMP_GEN_SAVE_WINDOW_INFO a restored window brings is read); the
  * title bar groups are not made yet.
  */
@@ -355,10 +355,61 @@ static void EnsureTitleBarInParentWin(optr o)
     VisSetPosition(o, x, y);
 }
 
+/* KeepMenuOnscreen: the menu back within its parent window */
+static void KeepMenuOnscreen(optr o)
+{
+    WinSizeInfoParams s;
+
+    if (!OpenGetParentWinSize(o, &s))
+	return;
+    s.WSIP_windowHeight -= GetTaskBarSizeAdjustment(o);
+    (void) MoveWindowToKeepOnscreen(o, (sword) s.WSIP_windowWidth,
+				    (sword) s.WSIP_windowHeight);
+}
+
+/*
+ * OpenWinCheckMenuWinVisibilityConstraints: a menu (or one opening to
+ * the right) that was moved on screen and now covers its button moves
+ * off it: checked in the direction of its children (to the right:
+ * across); moved to the other direction it is brought on screen and
+ * checked that way, then once more without a sub menu's limits, and at
+ * least stays on screen
+ */
+static void CheckMenuWinVisibilityConstraints(optr o)
+{
+    OLWinInstance *w = Win(o);
+    Boolean toRight = TRUE, vertical = FALSE;
+    optr b;
+
+    if (!ObjVarFindData(o, TEMP_POPUP_OPENING_TO_RIGHT)) {
+	w = Win(o);
+	if (w->OLWI_type != MOWT_SYSTEM_MENU && w->OLWI_type != MOWT_MENU)
+	    return;
+	toRight = FALSE;
+	vertical = (w->VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+    }
+    if (!ObjIsObjectInClass(o, &OLPopupWinClass) ||
+	!((OLPopupWinInstance *) ObjDerefVis(o))->OLPWI_button)
+	return;
+    b = ConstructOptr(OptrToHandle(o),
+		      ((OLPopupWinInstance *) ObjDerefVis(o))->OLPWI_button);
+    if (!AvoidMenuOverlap(b, o, vertical, toRight))
+	return;
+    KeepMenuOnscreen(o);
+    vertical = !vertical;
+    if (!AvoidMenuOverlap(b, o, vertical, toRight))
+	return;
+    KeepMenuOnscreen(o);
+    vertical = !vertical;
+    if (!AvoidMenuOverlap(b, o, vertical, FALSE))
+	return;
+    KeepMenuOnscreen(o);
+}
+
 /*
  * OpenWinCheckVisibleConstraints: partially visible (the title bar of a
  * titled window, else a margin), entirely visible, or visible with a
- * margin (a menu beside its button: Port32 not yet)
+ * margin; a menu off its button
  */
 void OpenWinCheckVisibleConstraints(optr o)
 {
@@ -383,6 +434,7 @@ void OpenWinCheckVisibleConstraints(optr o)
 	}
     }
     EnsureWindowInParentWin(o, cx, dx);
+    CheckMenuWinVisibilityConstraints(o);
 }
 
 /* ---------------------------------------------------------------------
