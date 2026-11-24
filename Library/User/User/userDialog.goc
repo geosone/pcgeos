@@ -24,8 +24,8 @@
  * Port32: events hold their parameters, so one that waits is posted as
  * it is.  Not yet: the transparent launch model
  * (MSG_GEN_FIELD_ACTIVATE_DISMISS), the application brought to the top
- * by a new IACP connection (no IACP), the standard dialogs
- * (UserStandardDialog), the sound of an error.
+ * by a new IACP connection (no IACP), the sound of an error or a
+ * warning (UserStandardSound).
  */
 @include "uiInt.goh"
 @include <Objects/gInterC.goh>
@@ -34,6 +34,7 @@
 @include <iacp.goh>
 #include <string.h>
 #include <uDialog.h>
+#include <Objects/helpCC.h>
 #include <sem.h>
 #include <thread.h>
 
@@ -215,4 +216,68 @@ optr _pascal UserCreateDialog(optr dialogBox)
     @call app::MSG_GEN_APPLICATION_BUILD_DIALOG_FROM_TEMPLATE(&nd,
 							      dialogBox);
     return nd.ND_dialog;
+}
+
+/*
+ * UserStandardDialog: one of the specific UI's standard dialogs (a
+ * question, a warning, a notification, an error) with a text, in which
+ * arg1 and arg2 stand for C_CTRL_A and C_CTRL_B; customTriggers is the
+ * StandardDialogResponseTriggerTable of a GIT_MULTIPLE_RESPONSE
+ * dialog.  The response; IC_NULL if no dialog could be made or the
+ * system ended it.  Port32: the help context is added here (the C
+ * message to build has none).
+ */
+word _pascal UserStandardDialog(char *helpContext, char *customTriggers,
+				char *arg2, char *arg1, char *string,
+				CustomDialogBoxFlags dialogFlags)
+{
+    optr app = BuildingApp(), dlg;
+    word response;
+
+    if (!app)
+	return IC_NULL;
+    dlg = @call app::MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG(
+			customTriggers, arg2, arg1, string, dialogFlags);
+    if (!dlg)
+	return IC_NULL;
+    if (helpContext) {
+	word n = 0;
+
+	while (helpContext[n++])
+	    ;
+	memcpy(ObjVarAddData(dlg, ATTR_GEN_HELP_CONTEXT, n), helpContext, n);
+	if (dialogFlags & CDBF_SYSTEM_MODAL)
+	    *(byte *) ObjVarAddData(dlg, ATTR_GEN_HELP_TYPE, 1) =
+						HT_SYSTEM_MODAL_HELP;
+    }
+    response = UserDoDialog(dlg);
+    UserDestroyDialog(dlg);
+    return response;
+}
+
+/* a string chunk locked (NULL: none) */
+static char *LockString(optr o)
+{
+    if (!o)
+	return NULL;
+    (void) MemLock(OptrToHandle(o));
+    return LMemDeref(o);
+}
+
+/* UserStandardDialogOptr: the strings are chunks */
+word _pascal UserStandardDialogOptr(char *helpContext, void *customTriggers,
+				    optr arg2, optr arg1, optr string,
+				    CustomDialogBoxFlags dialogFlags)
+{
+    word response = UserStandardDialog(helpContext, (char *) customTriggers,
+				       LockString(arg2), LockString(arg1),
+				       LockString(string), dialogFlags);
+
+    if (string)
+	MemUnlock(OptrToHandle(string));
+    if (arg1)
+	MemUnlock(OptrToHandle(arg1));
+    if (arg2)
+	MemUnlock(OptrToHandle(arg2));
+    return response;
 }

@@ -101,6 +101,11 @@ typedef struct {
     /* response, the dialog open when answered, the message held: seen
      * during the dialog, handled */
     word		UBS_dlg[4];
+    /* a standard dialog when answered: its response, on the screen,
+     * its children, the second trigger the default focus; the response
+     * of the one not waited for (+ 0x100) */
+    word		UBS_std[5];
+    char		UBS_stdText[32];
 } UBState;
 
 UBState ubState;
@@ -132,8 +137,42 @@ UBState ubState;
     @message (GEN_TEXT_APPLY_MSG) MSG_UB_NAME_APPLIED;
     @message (GEN_TEXT_STATUS_MSG) MSG_UB_NAME_STATUS;
     @message void MSG_UB_HELD();
+    @message (GEN_APP_DO_STANDARD_DIALOG_MSG) MSG_UB_STD_RESPONSE;
 @endc
 @classdecl UBProcessClass, neverSaved;
+
+/* the application answers its standard dialog (its last child) with
+ * ubAnswer, noting what the dialog is made of */
+@class UBAppClass, GenApplicationClass;
+    @message void MSG_UB_ANSWER();
+@endc
+@classdecl UBAppClass;
+
+static word ubAnswer;
+
+@method UBAppClass, MSG_UB_ANSWER
+{
+    word n = @call oself::MSG_GEN_COUNT_CHILDREN();
+    optr dlg = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(n - 1);
+    optr top = @call dlg::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+    optr text = @call top::MSG_GEN_FIND_CHILD_AT_POSITION(1);
+    optr second = @call dlg::MSG_GEN_FIND_CHILD_AT_POSITION(2);
+
+    (void) pself;
+    ubState.UBS_std[1] = @call dlg::MSG_VIS_QUERY_WINDOW() != 0;
+    ubState.UBS_std[2] = @call dlg::MSG_GEN_COUNT_CHILDREN();
+    ubState.UBS_std[3] = second &&
+			 ObjVarFindData(second, HINT_DEFAULT_FOCUS) != NULL;
+    if (text && @call text::MSG_VIS_TEXT_GET_TEXT_SIZE() <
+		sizeof(ubState.UBS_stdText))
+	(void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(ubState.UBS_stdText);
+    @call dlg::MSG_GEN_INTERACTION_ACTIVATE_COMMAND(ubAnswer);
+}
+
+@method UBProcessClass, MSG_UB_STD_RESPONSE
+{
+    ubState.UBS_std[4] = 0x100 + response;
+}
 
 /* the trigger that answers the dialog of step 53: whether the dialog
  * is on the screen then, and whether a message to the process waited */
@@ -179,7 +218,7 @@ UBState ubState;
 }
 
 @start UBAppObjects;
-@object GenApplicationClass UBApp = {
+@object UBAppClass UBApp = {
     GI_visMoniker = "Boot";
     GI_comp = @UBPrimary, @UBList, @UBBools;
     /* the displays on the windows list too, to come up with it */
@@ -479,6 +518,8 @@ UBState ubState;
     GDLI_queryMsg = MSG_UB_QUERY_ITEM;
     HINT_ITEM_GROUP_SCROLLABLE;
 }
+@visMoniker UBDeleteMoniker = 'D', "Delete";
+@visMoniker UBKeepMoniker = 'K', "Keep";
 @end UBAppObjects;
 
 /* the template of a dialog for UserCreateDialog and UserDoDialog:
@@ -2420,6 +2461,66 @@ static Rectangle ScreenBounds(WindowHandle w)
     case 54:
 	/* the message that waited came after the dialog */
 	UBCHECK(ubState.UBS_dlg[3] == 1);
+	break;
+    case 55: {
+	/* UserStandardDialog: a question with triggers of its own, the
+	 * arguments in its text; a destructive action whose first
+	 * trigger says yes has the default focus on the second.  A
+	 * timer has the application answer "no". */
+	StandardDialog2ResponseTriggerTable triggers;
+	word kids = @call UBApp::MSG_GEN_COUNT_CHILDREN(), id;
+
+	/* (filled here: an optr in constant data is not relocated) */
+	triggers.SD2RTT_numTriggers = 2;
+	triggers.SD2RTT_trigger1.SDRTE_moniker = @UBDeleteMoniker;
+	triggers.SD2RTT_trigger1.SDRTE_responseValue = IC_YES;
+	triggers.SD2RTT_trigger2.SDRTE_moniker = @UBKeepMoniker;
+	triggers.SD2RTT_trigger2.SDRTE_responseValue = IC_NO;
+	ubAnswer = IC_NO;
+	(void) TimerStart(TIMER_EVENT_ONE_SHOT, @UBApp, 20, MSG_UB_ANSWER, 0,
+			  &id);
+	ubState.UBS_std[0] = UserStandardDialog(NULL, (char *) &triggers,
+		"Disk", "Notes", "Delete \001 from \002?",
+		(CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		(GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET) |
+		CDBF_DESTRUCTIVE_ACTION);
+	UBCHECK(ubState.UBS_std[0] == IC_NO);
+	UBCHECK(ubState.UBS_std[1] == 1);
+	/* (the group of picture and text, two triggers) */
+	UBCHECK(ubState.UBS_std[2] == 3 && ubState.UBS_std[3] == 1);
+	UBCHECK(!memcmp(ubState.UBS_stdText, "Delete Notes from Disk?",
+			sizeof("Delete Notes from Disk?")));
+	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == kids);
+	break;
+    }
+    case 56: {
+	/* a standard dialog nobody waits for: an error, its response
+	 * sent to the process */
+	word kids = @call UBApp::MSG_GEN_COUNT_CHILDREN();
+
+	ubState.UBS_std[4] = 0;
+	ubState.UBS_stdText[0] = 0;
+	@call UBApp::MSG_GEN_APPLICATION_DO_STANDARD_DIALOG(
+		MSG_UB_STD_RESPONSE, ConstructOptr(GeodeGetProcessHandle(), 0),
+		NULL, NULL, NULL, "42", "Error \001 happened.",
+		(CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		(GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET));
+	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == kids + 1);
+	break;
+    }
+    case 57:
+	/* it is on the screen; answered */
+	UBCHECK(ubState.UBS_std[4] == 0);
+	ubAnswer = IC_OK;
+	@call UBApp::MSG_UB_ANSWER();
+	UBCHECK(ubState.UBS_std[1] == 1);
+	UBCHECK(!memcmp(ubState.UBS_stdText, "Error 42 happened.",
+			sizeof("Error 42 happened.")));
+	break;
+    case 58:
+	/* the response came, the dialog is gone */
+	UBCHECK(ubState.UBS_std[4] == 0x100 + IC_OK);
+	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == 3);
 	break;
     }
 }

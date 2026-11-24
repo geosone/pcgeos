@@ -29,6 +29,11 @@ resource DisplayWindowMenuResource read-only shared object
 resource AppSCMonikerResource read-only shared lmem
 resource AppSMMonikerResource read-only shared lmem
 resource AppSCGAMonikerResource read-only shared lmem
+resource AppSCMonikerDialogResource read-only shared lmem
+resource AppSMMonikerDialogResource read-only shared lmem
+resource AppSCGAMonikerDialogResource read-only shared lmem
+resource AppYMMonikerDialogResource read-only shared lmem
+resource StandardDialogUI read-only shared object
 resource DrawBitmapOptrSCResource read-only shared lmem
 resource DrawBitmapOptrSMResource read-only shared lmem
 resource DrawBitmapOptrSCGAResource read-only shared lmem

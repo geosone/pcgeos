@@ -176,6 +176,8 @@ export GenGadgetClass
 export UserDoDialog
 export UserCreateDialog
 export UserDestroyDialog
+export UserStandardDialog
+export UserStandardDialogOptr
 
 resource ApplicationUI object
 resource SystemFieldUI object

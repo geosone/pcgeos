@@ -12,8 +12,7 @@
  *     optr only);
  *   - GeodeSetUIData is not set (a word; nothing reads it);
  *   - not yet: the application's entries in the express menus
- *     (OLAppTaskItemClass, MSG_OL_APPLICATION_ADD_TO_FIELD_TASK_LIST),
- *     the standard dialogs (MSG_GEN_APPLICATION_DO_STANDARD_DIALOG).
+ *     (OLAppTaskItemClass, MSG_OL_APPLICATION_ADD_TO_FIELD_TASK_LIST).
  */
 @include "cGeode.goh"
 @include <Internal/flowC.goh>
@@ -22,6 +21,13 @@
 
 @classdecl OLApplicationClass, neverSaved;
 
+/* the standard dialogs (CSpec/cspecStdDialog.goc) */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG;
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_DO_STANDARD_DIALOG;
+@extern method OLApplicationClass,
+		MSG_GEN_APPLICATION_DO_STANDARD_TIMED_DIALOG;
+@extern method OLApplicationClass, MSG_OL_APP_DO_DIALOG_RESPONSE;
+@extern method OLApplicationClass, MSG_OL_APP_TIMED_DIALOG_TIMER_EXPIRED;
 /* the methods in copenAppCommon.goc and copenAppMisc.goc */
 @extern method OLApplicationClass, MSG_VIS_P32_VUP_QUERY;
 @extern method OLApplicationClass, MSG_SPEC_GUP_QUERY_VIS_PARENT;

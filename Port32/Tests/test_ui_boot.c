@@ -78,6 +78,8 @@ typedef struct {
     short		UBS_scroll[4];
     word		UBS_gadget[4];
     word		UBS_dlg[4];
+    word		UBS_std[5];
+    char		UBS_stdText[32];
 } UBState;
 
 static int fails;
@@ -138,7 +140,7 @@ static void Shot(int step)
     FILE *o;
     int x, y;
 
-    if (!f || step != (at ? atoi(at) : 54))
+    if (!f || step != (at ? atoi(at) : 58))
 	return;
     TimerSleep((word) (getenv("UIBOOT_SHOT_TICKS")
 		       ? atoi(getenv("UIBOOT_SHOT_TICKS")) : 60));
@@ -237,7 +239,7 @@ int main(int argc, char **argv)
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator */
-    for (i = 2; i <= 54; i++) {
+    for (i = 2; i <= 58; i++) {
 	step(i);
 	Shot(i);
     }
@@ -303,6 +305,9 @@ int main(int argc, char **argv)
 	   st->UBS_gadget[1], st->UBS_gadget[2], st->UBS_gadget[3]);
     printf("UserDoDialog: response %u, open %u, held %u then %u\n",
 	   st->UBS_dlg[0], st->UBS_dlg[1], st->UBS_dlg[2], st->UBS_dlg[3]);
+    printf("Standard dialog: response %u, open %u, children %u, focus %u; "
+	   "sent %#x, \"%s\"\n", st->UBS_std[0], st->UBS_std[1],
+	   st->UBS_std[2], st->UBS_std[3], st->UBS_std[4], st->UBS_stdText);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

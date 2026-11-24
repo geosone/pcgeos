@@ -12,8 +12,10 @@ GR_DRAW_BITMAP_OPTR at 0, 0 of a chunk of these files becomes the bitmap
 drawn inline (goc writes no optr in a gstring).
 Comments (/* */, //, and ; to the end of a line in a gstring) go.
 
-usage: uimkr2goc.py out.goh file.ui ... [NAME=value ...]
-The names default to the Motif build.  A .goh is meant to be included
+usage: uimkr2goc.py out.goh file.ui ... [NAME=value ...] [+Suffix]
+The names default to the Motif build; +Suffix is put into the names of
+the resources (AppSCMonikerResource: AppSCMonikerSuffixResource), for a
+second goc file with monikers.  A .goh is meant to be included
 by the goc file whose moniker lists use the monikers (goc needs a
 moniker's attributes for a list); a .goc includes cGeode.goh itself.
 """
@@ -87,8 +89,12 @@ def number(tok):
         return int(t[:-1], 2)
     if t.endswith('h'):
         return int(t[:-1], 16)
+    if t in BMC:
+        return BMC[t]
     return int(t, 0)
 
+
+BMC = {'bmc_uncompacted': 0, 'bmc_packbits': 1, 'bmc_lzw': 2}
 
 BMF = {'BMF_MONO': 0, 'BMF_4BIT': 1, 'BMF_8BIT': 2, 'BMF_24BIT': 3,
        'BMF_4CMYK': 4, 'BMF_3CMY': 5}
@@ -273,13 +279,22 @@ def wrap(first, items, last):
 def main(argv):
     names = dict(DEFAULTS)
     files = []
+    suffix = ''
     for a in argv[2:]:
-        if '=' in a:
+        if a.startswith('+'):
+            suffix = a[1:]
+        elif '=' in a:
             k, v = a.split('=', 1)
             names[k] = int(v)
         else:
             files.append(a)
-    open(argv[1], 'w').write(convert(files, names, argv[1].endswith('.goh')))
+    text = convert(files, names, argv[1].endswith('.goh'))
+    if suffix:
+        # (a resource is defined by one goc file only)
+        text = re.sub(r'^(@(?:start|end) \w+?)(Resource)?\b',
+                      lambda m: m.group(1) + suffix + (m.group(2) or ''),
+                      text, flags=re.M)
+    open(argv[1], 'w').write(text)
 
 
 if __name__ == '__main__':

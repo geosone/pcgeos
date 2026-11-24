@@ -11,9 +11,8 @@
  *     (MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER): no menus or windows yet;
  *   - the next window (MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW), the current
  *     menu bar, the task bar's windows, the windows told of a new field
- *     size (OLWinClass, OLBaseWinClass, OLDialogWinClass are not ported);
- *   - the standard dialogs (MSG_GEN_APPLICATION_DO_STANDARD_DIALOG and
- *     their responses).
+ *     size (OLWinClass, OLBaseWinClass, OLDialogWinClass are not ported).
+ * The standard dialogs are in CSpec/cspecStdDialog.goc.
  */
 @include "cGeode.goh"
 @include <Internal/flowC.goh>

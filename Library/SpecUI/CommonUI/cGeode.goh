@@ -449,6 +449,10 @@ typedef struct {
     optr	AD_OD;
     Message	AD_message;
 } ActionDescriptor;
+
+/* CSpec/cspecStdDialog.goc */
+extern void OLStdDialogHelp(optr dlg, const char *helpContext,
+			    word flags);
 /* CUtils/copenUtils.goc: MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS to the
  * visible children that are fully enabled */
 extern void OLBroadcastForDefaultFocus(optr o, ObjectAndGrabParams *q);
