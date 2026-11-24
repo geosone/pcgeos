@@ -334,6 +334,13 @@ are not in C yet.
   `GOC_SOPTR(chunk)`, the eight bytes of `GOCR_SOPTR(chunk)`; goc -cg
   writes the shadow of such a chunk as for any chunk with optrs
   (section 4), so the loader puts in the handle.
+- **Chunk handles and sizes.** A component that is a chunk handle
+  (`GTXI_text`) gets the bare name of its chunk (goc reads the
+  `OptrToChunk(@X)` uic writes as `X`). The mnemonics `VMO_CANCEL`,
+  `VMO_MNEMONIC_NOT_IN_MKR_TEXT` and `VMO_NO_MNEMONIC` are written as
+  their numbers; `SpecWidth <a, b>`, `SpecHeight <>` and
+  `SpecSizeSpec <>` in a hint as one word, and a size hint of two
+  values gets its third (the count, 0).
 - **Not yet** (uic stops with an error): chunks of a structure, data
   monikers, `hptr` values that are not null, localization instructions.
 
@@ -5549,10 +5556,37 @@ visual classes of `Library/User/Vis`:
   read with the field's options. The parameter of the Close entry is
   the connection alone. `library.ui.boot` steps 80 and 81; comparison
   variant 11 (the File menu) is equal to the original.
-  - Not yet: the dialogs (`cmainUIDocOperations.asm`), so
-    `OLDCRemoveSummons` does nothing, `..._DISPLAY_DIALOG` and the
-    `..._INITIATE_*` messages but Save's bring nothing up, and Save
-    does not say that a read-only document is saved under another name.
+  - **Its dialogs** (`CMain/cmainUIDocOperations.goc`, after
+    `cmainUIDocOperations.asm`; the `.ui`'s `DocumentDialogUI`,
+    `DocumentOpenUI`, `DocumentUseTemplateUI`, `DocumentSaveAsUI`,
+    `DocumentCopyToUI`, `DocumentMoveToUI`, `DocumentTypeUI`,
+    `DocumentPasswordUI` and `DocumentStringsUI`): the main dialog
+    (New, Open, Template ...), open, use template, save as, copy to,
+    move to, the document's type and password. A dialog is a copy of
+    its resource (`OLDCBringUpSummons`), set up for the user's level
+    and the control's attributes, with the control as its block's
+    output; the application's group for the task is put into it; the
+    next dialog or `OLDCRemoveSummons` destroys it. The file selector
+    shows the control's kind of document (`SetupFileSelector`), in its
+    simple or full form (`MSG_OLDC_*_SIMPLE`, `..._ADVANCED`); a file
+    taken goes to the document group (`..._OPEN_DOC`), a name entered
+    to the target document (`MSG_GEN_DOCUMENT_SAVE_AS`, `..._COPY_TO`,
+    `..._MOVE_TO`, `..._CHANGE_TYPE`, `..._CHANGE_PASSWORD`).
+    - The asm addressed every dialog by the chunk of `FileNewSummons`
+      (the first chunk of each resource); here the instance has the
+      chunk of the dialog that is up (`OLDCI_summonsChunk`).
+    - The messages of the file selectors are declared with the
+      selector's prototype, `MSG_OLDC_TYPE_USER_CHANGE` with the
+      selection.
+    - `library.ui.boot` steps 82 to 90 bring each up in turn.
+    - Not yet: the note that a read-only document is saved under
+      another name (its strings come with `OLDocumentClass`); the
+      variants that are not Motif's (`_DUI`, a custom document path,
+      the design assistant).
+- `ObjLockObjBlock` takes any block, as the asm (its error check looks
+  at object blocks alone): the text library locks the lmem block of a
+  string so (`MSG_VIS_TEXT_REPLACE_ALL_OPTR` with a chunk of a strings
+  resource).
 - `ATTR_GEN_DESTINATION_CLASS` has no relocation here: its class is a
   pointer the linker resolves (as an optr it was misread, and too short
   for one on the 32-bit hosts).

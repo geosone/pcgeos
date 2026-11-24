@@ -433,7 +433,44 @@ EspData(const char *in, int *count, int bytes)
 		if (n++ > 0) {
 		    StrAdd(&s, ", ", 2);
 		}
-		if (alen == 0) {
+		if (WordIs(word, wlen, "specwidth") ||
+		    WordIs(word, wlen, "specheight") ||
+		    WordIs(word, wlen, "specsizespec")) {
+		    /* a record that is a word in C: its fields or'ed */
+		    const char *a = args, *e = args + alen;
+		    int	       parts = 0;
+
+		    if (a < e && *a == '<') {
+			a++;
+		    }
+		    if (e > a && e[-1] == '>') {
+			e--;
+		    }
+		    StrAdd(&s, "(", 1);
+		    while (a < e) {
+			const char *c = a;
+
+			while (c < e && *c != ',') {
+			    c++;
+			}
+			while (a < c && isspace((unsigned char)*a)) {
+			    a++;
+			}
+			if (a < c) {
+			    if (parts++ > 0) {
+				StrAdd(&s, " | ", 3);
+			    }
+			    StrAdd(&s, "(", 1);
+			    EspExprTo(&s, a, c - a);
+			    StrAdd(&s, ")", 1);
+			}
+			a = c < e ? c + 1 : e;
+		    }
+		    if (parts == 0) {
+			StrAdd(&s, "0", 1);
+		    }
+		    StrAdd(&s, ")", 1);
+		} else if (alen == 0) {
 		    StrAdd(&s, "{0}", 3);
 		} else {
 		    EspExprTo(&s, args, alen);
@@ -863,7 +900,13 @@ OutputVarData(Symbol *object)
 			name = "ATTR_GEN_TRIGGER_ACTION_THREE_WORDS";
 		    }
 		}
-		if (n == 1 && strncmp(c, "(ClassStruct *)", 15) != 0) {
+		if (n == 2 && (strcmp(name, "HINT_FIXED_SIZE") == 0 ||
+			       strcmp(name, "HINT_INITIAL_SIZE") == 0 ||
+			       strcmp(name, "HINT_MINIMUM_SIZE") == 0 ||
+			       strcmp(name, "HINT_MAXIMUM_SIZE") == 0)) {
+		    /* CompSizeHintArgs without its count of children */
+		    Output("    %s = { %s, 0 };\n", name, c);
+		} else if (n == 1 && strncmp(c, "(ClassStruct *)", 15) != 0) {
 		    /* (a class is in a structure: DestinationClassArgs) */
 		    Output("    %s = %s;\n", name, c);
 		} else {
@@ -973,7 +1016,16 @@ OutputGocVisMonikerDef(Symbol *sym)
     } else if (sym->flags & SYM_STRING_NAV_MONIKER) {
 	char *c = EspExpr(sym->data.symVisMoniker.data.nonList.nav.navString);
 
-	Output("%s, ", c);
+	/* (goc knows these only as numbers) */
+	if (strcmp(c, "VMO_CANCEL") == 0) {
+	    Output("253, ");
+	} else if (strcmp(c, "VMO_MNEMONIC_NOT_IN_MKR_TEXT") == 0) {
+	    Output("254, ");
+	} else if (strcmp(c, "VMO_NO_MNEMONIC") == 0) {
+	    Output("255, ");
+	} else {
+	    Output("%s, ", c);
+	}
 	free(c);
     } else if (sym->data.symVisMoniker.data.nonList.nav.navChar != -1) {
 	int c = sym->data.symVisMoniker.data.nonList.nav.navChar;

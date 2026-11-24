@@ -1,0 +1,30 @@
+/***********************************************************************
+ * cmainUIDocumentControl.goh -- what the files of OLDocumentControlClass
+ * share (cmainUIDocumentControl.goc, cmainUIDocOperations.goc), for
+ * Port32.
+ ***********************************************************************/
+#ifndef __CMAINUIDOCUMENTCONTROL_GOH
+#define __CMAINUIDOCUMENTCONTROL_GOH
+
+@include <impex.goh>
+
+/* (Library/User) */
+extern void GenAddChildUpwardLinkOnly(optr obj, optr child);
+
+/* the objects of cmainManager.ui (uic -g) */
+@include "cmainManager.goh"
+
+#define GDC(o)	((GenDocumentControlInstance *) ObjDerefGen(o))
+#define OLDC(o)	((OLDocumentControlInstance *) ObjDerefVis(o))
+
+/* cmainUIDocumentControl.goc */
+extern void OLDCSendToAppDC(optr o, word flags, Message msg,
+			    const void *params, word size);
+extern void OLDCEnsureTemplateDir(optr o);
+
+/* cmainUIDocOperations.goc */
+extern void OLDCRemoveSummons(optr o);
+extern void OLDCSendToTargetDoc(optr o, Message msg, const void *params,
+				word size);
+
+#endif

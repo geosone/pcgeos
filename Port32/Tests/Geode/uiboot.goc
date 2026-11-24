@@ -134,6 +134,8 @@ typedef struct {
     /* the document control (step 80): children; usable, enabled without
      * a document; enabled with a clean one, with a dirty one */
     word		UBS_docCtl[5];
+    /* its dialogs (steps 82 to 90): the control's task */
+    word		UBS_docDlg[9];
 } UBState;
 
 UBState ubState;
@@ -3459,6 +3461,48 @@ static void UBClickMenu(word n)
 	UBCHECK(ubState.UBS_docCtl[2] == 0x63);
 	UBCHECK(ubState.UBS_docCtl[3] == 0x77);
 	UBCHECK(ubState.UBS_docCtl[4] == 0x7c);
+	break;
+    }
+    case 82:
+    case 83:
+    case 84:
+    case 85:
+    case 86:
+    case 87:
+    case 88:
+    case 89:
+    case 90: {
+	/* the dialogs of the document control (cmainUIDocOperations):
+	 * each is a copy of its resource, up as the control's task says,
+	 * and takes the place of the one before (but for the main dialog,
+	 * which leaves a dialog alone); save as, open, use
+	 * template, type, password, copy to, move to, the main dialog;
+	 * then none */
+	static const struct { Message msg; word task; } dlg[] = {
+	    { MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC, GDCT_SAVE_AS },
+	    { MSG_GEN_DOCUMENT_CONTROL_INITIATE_OPEN_DOC, GDCT_OPEN },
+	    { MSG_GEN_DOCUMENT_CONTROL_INITIATE_USE_TEMPLATE_DOC,
+	      GDCT_USE_TEMPLATE },
+	    { MSG_GEN_DOCUMENT_CONTROL_INITIATE_SET_TYPE_DOC, GDCT_TYPE },
+	    { MSG_GEN_DOCUMENT_CONTROL_INITIATE_SET_PASSWORD_DOC,
+	      GDCT_PASSWORD },
+	    { MSG_GEN_DOCUMENT_CONTROL_INITIATE_COPY_TO_DOC, GDCT_COPY_TO },
+	    { MSG_GEN_DOCUMENT_CONTROL_INITIATE_MOVE_TO_DOC, GDCT_MOVE_TO },
+	    { MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG, GDCT_DIALOG },
+	    { MSG_GEN_DOCUMENT_CONTROL_FILE_EXPORTED, GDCT_NONE }
+	};
+	word k = step - 82, task;
+
+	if (!k)
+	    (void) @call UBFile::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	/* (the main dialog does not come up over another) */
+	if (dlg[k].task == GDCT_DIALOG)
+	    @call UBDocCtl::MSG_GEN_DOCUMENT_CONTROL_FILE_EXPORTED();
+	CObjMessageP(MF_CALL, @UBDocCtl, dlg[k].msg, NULL, 0, NULL, 0);
+	task = (@call UBDocCtl::MSG_GEN_DOCUMENT_CONTROL_GET_ATTRS() &
+		GDCA_CURRENT_TASK) >> GDCA_CURRENT_TASK_OFFSET;
+	ubState.UBS_docDlg[k] = task;
+	UBCHECK(task == dlg[k].task);
 	break;
     }
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the

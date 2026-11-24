@@ -17,9 +17,8 @@
  * structure of the stack (DocumentCommonParams,
  * DocumentFileChangedParams) carry a copy when queued (section 5).
  * The parameter of the Close entry is the connection alone
- * (MSG_GEN_DOCUMENT_CLOSE's parameter structure).  Not yet: the
- * dialogs (cmainUIDocOperations.asm), so no dialog is taken down
- * (OLDCRemoveSummons) and none is put up when there is no document.
+ * (MSG_GEN_DOCUMENT_CLOSE's parameter structure).  The dialogs
+ * are in cmainUIDocOperations.goc.
  */
 @include "cGeode.goh"
 @include <Internal/specC.goh>
@@ -44,8 +43,6 @@
 
 /* (ALF_OPEN_FOR_IACP_ONLY of alb.def; ui.goh has its old name) */
 #define ALF_OPEN_FOR_IACP_ONLY		ALF_LAUNCHED_FOR_PRINTING_ONLY
-
-#define GDC(o)	((GenDocumentControlInstance *) ObjDerefGen(o))
 
 /* the features of the Other sub menu */
 #define OTHER_FEATURES \
@@ -104,27 +101,78 @@ word SpecGetDocControlOptions(void)
  * ------------------------------------------------------------------- */
 
 /* (the objects: cmainManager.ui through uic -g) */
-@include "cmainManager.goh"
+@include "cmainUIDocumentControl.goh"
+
+/* cmainUIDocOperations.goc: the dialogs */
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_NEW_DOC;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_OPEN_DOC;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_USE_TEMPLATE_DOC;
+@extern method OLDocumentControlClass, MSG_OLDC_OPEN_FILE_SELECTED,
+	MSG_OLDC_USE_TEMPLATE_FILE_SELECTED, MSG_OLDC_SAVE_AS_DIR_SELECTED,
+	MSG_OLDC_COPY_TO_DIR_SELECTED, MSG_OLDC_MOVE_TO_DIR_SELECTED;
+@extern method OLDocumentControlClass, MSG_OLDC_OPEN_SELECTED,
+	MSG_OLDC_USE_TEMPLATE_SELECTED;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_TEMPLATE_DOC;
+@extern method OLDocumentControlClass, MSG_OLDC_SAVE_AS_FILE_ENTERED,
+	MSG_OLDC_COPY_TO_FILE_ENTERED, MSG_OLDC_MOVE_TO_FILE_ENTERED;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_SAVE_AS_CANCELLED;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG;
+@extern method OLDocumentControlClass,
+	MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_IMPORT_CANCELLED;
+@extern method OLDocumentControlClass,
+	MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG;
+@extern method OLDocumentControlClass,
+	MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_DOC;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_IMPORT_DOC;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_EXPORT_DOC;
+@extern method OLDocumentControlClass, MSG_OLDC_OPEN_SIMPLE,
+	MSG_OLDC_OPEN_ADVANCED, MSG_OLDC_SAVE_AS_SIMPLE,
+	MSG_OLDC_SAVE_AS_ADVANCED, MSG_OLDC_COPY_TO_SIMPLE,
+	MSG_OLDC_COPY_TO_ADVANCED, MSG_OLDC_MOVE_TO_SIMPLE,
+	MSG_OLDC_MOVE_TO_ADVANCED;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_OPEN_IMPORT_SELECTED;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SET_TYPE_DOC;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SET_PASSWORD_DOC;
+@extern method OLDocumentControlClass, MSG_OLDC_TYPE_USER_CHANGE;
+@extern method OLDocumentControlClass, MSG_OLDC_TYPE_CHANGED;
+@extern method OLDocumentControlClass, MSG_OLDC_PASSWORD_CHANGED;
+@extern method OLDocumentControlClass, MSG_OLDC_PASSWORD_CANCELLED;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_FILE_EXPORTED;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_COPY_TO_DOC;
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_MOVE_TO_DOC;
 
 /* ---------------------------------------------------------------------
  * To the document group, to the target document
  * ------------------------------------------------------------------- */
 
 /* SendToAppDCRegs, ...Frame */
-static void SendToAppDC(optr o, word flags, Message msg, const void *params,
-			word size)
+void OLDCSendToAppDC(optr o, word flags, Message msg, const void *params,
+		     word size)
 {
     optr group = GDC(o)->GDCI_documentGroup;
 
     if (group)
 	CObjMessageP(flags, group, msg, params, size, NULL, 0);
-}
-
-/* OLDCRemoveSummons: the dialog that is up is taken down
- * (cmainUIDocOperations: not yet, there is none) */
-static void OLDCRemoveSummons(optr o)
-{
-    (void) o;
 }
 
 /* ---------------------------------------------------------------------
@@ -141,7 +189,7 @@ static void OLDCRemoveSummons(optr o)
 {
     (void) pself;
     MetaGrabModelExclLow(oself);
-    SendToAppDC(oself, 0, message, &appLaunchBlock, sizeof(appLaunchBlock));
+    OLDCSendToAppDC(oself, 0, message, &appLaunchBlock, sizeof(appLaunchBlock));
 }
 
 /*
@@ -182,7 +230,7 @@ static void OpenCommon(optr o, Message msg, const char *name,
 				    p.DCP_path, sizeof(p.DCP_path),
 				    &p.DCP_diskHandle, NULL);
     }
-    SendToAppDC(o, MF_FORCE_QUEUE, msg, &p, sizeof(p));
+    OLDCSendToAppDC(o, MF_FORCE_QUEUE, msg, &p, sizeof(p));
 }
 
 /*
@@ -213,7 +261,7 @@ static void OpenCommon(optr o, Message msg, const char *name,
 
 	    (void) @call oself::MSG_GEN_PATH_SET(alb->ALB_path,
 						 alb->ALB_diskHandle);
-	    SendToAppDC(oself, 0, message, &ap, sizeof(ap));
+	    OLDCSendToAppDC(oself, 0, message, &ap, sizeof(ap));
 	    alb = MemDeref(appLaunchBlock);
 	    if (alb->ALB_launchFlags & ALF_OPEN_FOR_IACP_ONLY)
 		f |= DOF_OPEN_FOR_IACP_ONLY;
@@ -227,7 +275,7 @@ static void OpenCommon(optr o, Message msg, const char *name,
 	}
 	MemUnlock(appLaunchBlock);
     }
-    SendToAppDC(oself, 0, message, &ap, sizeof(ap));
+    OLDCSendToAppDC(oself, 0, message, &ap, sizeof(ap));
     g = GDC(oself);
     attrs = g->GDCI_attrs;
     g->GDCI_attrs &= ~GDCA_CURRENT_TASK;
@@ -361,7 +409,7 @@ static void RemoveFromWindowsList(optr group)
     RemoveFromWindowsList(exp);
     p.id = callerID;
     p.ack = oself;
-    SendToAppDC(oself, 0, message, &p, sizeof(p));
+    OLDCSendToAppDC(oself, 0, message, &p, sizeof(p));
     ObjIncDetach(oself);		/* (the group's ack) */
     @callsuper();
     ObjEnableDetach(oself);
@@ -379,7 +427,7 @@ static void RemoveFromWindowsList(optr group)
     ObjIncDetach(oself);
     p.id = callerID;
     p.ack = oself;
-    SendToAppDC(oself, 0, message, &p, sizeof(p));
+    OLDCSendToAppDC(oself, 0, message, &p, sizeof(p));
     @callsuper();
     ObjEnableDetach(oself);
 }
@@ -391,7 +439,7 @@ static void RemoveFromWindowsList(optr group)
     optr self = oself;
 
     pself->OLDCI_quitOD = obj;
-    SendToAppDC(oself, 0, message, &self, sizeof(self));
+    OLDCSendToAppDC(oself, 0, message, &self, sizeof(self));
 }
 
 @method OLDocumentControlClass, MSG_META_QUIT_ACK
@@ -812,7 +860,7 @@ static void EnableLoop(MemHandle block, const ChunkHandle *table, word n,
 				MSG_META_LOST_SYS_MODEL_EXCL
 {
     (void) pself;
-    SendToAppDC(oself, 0, message, NULL, 0);
+    OLDCSendToAppDC(oself, 0, message, NULL, 0);
 }
 
 @method OLDocumentControlClass, MSG_META_GET_MODEL_EXCL
@@ -824,7 +872,7 @@ static void EnableLoop(MemHandle block, const ChunkHandle *table, word n,
 
 /* EnsureTemplateDir: the directory of the templates below SP_TEMPLATE
  * made, once */
-static void EnsureTemplateDir(optr o)
+void OLDCEnsureTemplateDir(optr o)
 {
     ChunkHandle dir;
 
@@ -846,7 +894,7 @@ static void EnsureTemplateDir(optr o)
     word n = 0;
 
     (void) pself;
-    EnsureTemplateDir(oself);
+    OLDCEnsureTemplateDir(oself);
     dir = GDC(oself)->GDCI_templateDir;
     buffer[0] = 0;
     if (!dir)
@@ -972,92 +1020,6 @@ static void EnsureTemplateDir(optr o)
 {
     (void) pself;
     GeodeGetInfo(MemOwner(OptrToHandle(oself)), GGIT_TOKEN_ID, token);
-}
-
-/* ---------------------------------------------------------------------
- * The main dialog and saving (cmainUIDocOperations.asm; the dialogs
- * themselves not yet)
- * ------------------------------------------------------------------- */
-
-@method OLDocumentControlClass,
-	MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG
-{
-    (void) pself;
-    OLDCRemoveSummons(oself);
-    @call oself::MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG();
-}
-
-@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_IMPORT_CANCELLED
-{
-    (void) pself;
-    @call oself::MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG();
-}
-
-/*
- * OLDocumentControlTestForDisplayMainDialog: without a document the
- * main dialog comes up (unless the specific UI has none, or the control
- * detaches): tested once the document group caught up, and the control
- * after it: the test goes to the group, which sends it back queued
- */
-@method OLDocumentControlClass, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG
-{
-    EventHandle ev;
-    struct { EventHandle ev; MessageFlags flags; } p;
-
-    (void) pself;
-    if ((docControlOptions & DCO_BYPASS_BIG_DIALOG) ||
-	ObjVarFindData(oself, DETACH_DATA))
-	return;
-    CObjMessageP(MF_RECORD, oself, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2,
-		 NULL, 0, &ev, sizeof(ev));
-    p.ev = ev;
-    p.flags = MF_FORCE_QUEUE;
-    CObjMessageP(MF_RECORD, oself, MSG_META_DISPATCH_EVENT, &p, sizeof(p),
-		 &ev, sizeof(ev));
-    p.ev = ev;
-    p.flags = 0;
-    if (GDC(oself)->GDCI_documentGroup)
-	SendToAppDC(oself, 0, MSG_META_DISPATCH_EVENT, &p, sizeof(p));
-    else
-	ObjFreeMessage(ev);
-}
-
-@method OLDocumentControlClass, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2
-{
-    optr app = GeodeGetAppObject(0);
-
-    if ((GDC(oself)->GDCI_attrs & GDCA_DOCUMENT_EXISTS) ||
-	OptrToHandle(pself->OLDCI_quitOD))
-	return;
-    if (app && (@call app::MSG_GEN_APPLICATION_GET_STATE() &
-		(AS_QUITTING | AS_DETACHING | AS_TRANSPARENT_DETACHING)))
-	return;
-    @call oself::MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG();
-}
-
-/* SendToTargetDocRegs: to the target document, through the model */
-static void SendToTargetDoc(optr o, Message msg, const void *params,
-			    word size)
-{
-    EventHandle ev;
-
-    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass, msg,
-		 params, size, &ev, sizeof(ev));
-    @call o::MSG_META_SEND_CLASSED_EVENT(ev, (TravelOption) TO_MODEL);
-}
-
-/*
- * OLDocumentControlInitiateSaveDoc: an untitled or read-only document
- * is saved under another name (Port32, not yet: the note that says so
- * for a read-only one); else the target document saves
- */
-@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_DOC
-{
-    (void) pself;
-    if (GDC(oself)->GDCI_docAttrs & (GDA_UNTITLED | GDA_READ_ONLY))
-	@call oself::MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC();
-    else
-	SendToTargetDoc(oself, MSG_GEN_DOCUMENT_SAVE, NULL, 0);
 }
 
 /* ---------------------------------------------------------------------

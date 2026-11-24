@@ -234,8 +234,7 @@ optr ObjBlockGetOutput(MemHandle mh)
 
 void *ObjLockObjBlock(MemHandle mh)
 {
-    void *p = MemLock(mh);
-
-    Header(mh);
-    return p;
+    /* (any block: the text library locks the lmem block of a string
+     * so, as the asm, which checks object blocks alone) */
+    return MemLock(mh);
 }

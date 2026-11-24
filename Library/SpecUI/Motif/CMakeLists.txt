@@ -11,6 +11,9 @@ geos_uic(cmainManager ${_common}/CMain/cmainManager.ui
          RESOURCES AppTCMonikerResource AppTMMonikerResource
                    AppTCGAMonikerResource OLDocumentControlUI
                    OLDocumentControlToolboxUI ControlStrings
+                   DocumentDialogUI DocumentOpenUI DocumentUseTemplateUI
+                   DocumentSaveAsUI DocumentCopyToUI DocumentMoveToUI
+                   DocumentTypeUI DocumentPasswordUI DocumentStringsUI
          INCLUDES ${_common}/CMain ${_common}
          DEFINITIONS MOTIF)
 geos_geode(motif GP motif32.gp

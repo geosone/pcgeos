@@ -2,4 +2,5 @@
 geos_sources(motif_goc
   cmainVariable.goc
   cmainCode.goc
-  cmainUIDocumentControl.goc)
+  cmainUIDocumentControl.goc
+  cmainUIDocOperations.goc)

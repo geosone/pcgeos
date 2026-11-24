@@ -17,9 +17,9 @@
 @uses GenDocumentControlClass;
 
 /* from the file selectors, texts and triggers of the dialogs */
-@message void MSG_OLDC_OPEN_FILE_SELECTED();
-@message void MSG_OLDC_USE_TEMPLATE_FILE_SELECTED();
-@message void MSG_OLDC_SAVE_AS_DIR_SELECTED();
+@message (GEN_FILE_SELECTOR_NOTIFICATION_MSG) MSG_OLDC_OPEN_FILE_SELECTED;
+@message (GEN_FILE_SELECTOR_NOTIFICATION_MSG) MSG_OLDC_USE_TEMPLATE_FILE_SELECTED;
+@message (GEN_FILE_SELECTOR_NOTIFICATION_MSG) MSG_OLDC_SAVE_AS_DIR_SELECTED;
 @message void MSG_OLDC_OPEN_SELECTED();
 @message void MSG_OLDC_OPEN_SIMPLE();
 @message void MSG_OLDC_OPEN_ADVANCED();
@@ -30,17 +30,18 @@
 @message void MSG_OLDC_COPY_TO_FILE_ENTERED();
 @message void MSG_OLDC_COPY_TO_SIMPLE();
 @message void MSG_OLDC_COPY_TO_ADVANCED();
-@message void MSG_OLDC_COPY_TO_DIR_SELECTED();
+@message (GEN_FILE_SELECTOR_NOTIFICATION_MSG) MSG_OLDC_COPY_TO_DIR_SELECTED;
 @message void MSG_OLDC_MOVE_TO_FILE_ENTERED();
 @message void MSG_OLDC_MOVE_TO_SIMPLE();
 @message void MSG_OLDC_MOVE_TO_ADVANCED();
-@message void MSG_OLDC_MOVE_TO_DIR_SELECTED();
+@message (GEN_FILE_SELECTOR_NOTIFICATION_MSG) MSG_OLDC_MOVE_TO_DIR_SELECTED;
 /* the main dialog put up if there is no document */
 @message void MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG();
 @message void MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2();
 @message void MSG_OLDC_TYPE_CHANGED();
 @message void MSG_OLDC_PASSWORD_CHANGED();
-@message void MSG_OLDC_TYPE_USER_CHANGE();
+/* (the type list's apply message: with its selection) */
+@message void MSG_OLDC_TYPE_USER_CHANGE(word type = cx);
 @message void MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG();
 @message void MSG_OLDC_PASSWORD_CANCELLED();
 
@@ -52,6 +53,8 @@
     @instance ChunkHandle OLDCI_currentFileType; /* shown as the type */
     @instance optr	OLDCI_quitOD;		/* gets MSG_META_QUIT_ACK */
     @instance GenFileSelectorEntryFlags OLDCI_fileFlags;
+    /* Port32: the chunk of the dialog in OLDCI_currentSummons */
+    @instance ChunkHandle OLDCI_summonsChunk;
 @endc
 
 /* the options of the specific UI ([ui] docControlOptions) */

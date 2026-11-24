@@ -3543,6 +3543,9 @@ SkipWhiteSpace(void)
  *		an error)
  *
  ***********************************************************************/
+static int uicChunkField;	/* the field is a ChunkHandle: its value,
+				 * written OptrToChunk(@X), is taken as X */
+
 static char *
 ScanUicField(char *text)
 {
@@ -3568,6 +3571,7 @@ ScanUicField(char *text)
 	    "class %d", text, n, count);
     return text;
   }
+  uicChunkField = found->type == CHUNK_INST_SYM;
   return found->name;
 }
 
@@ -3582,6 +3586,19 @@ ScanIdentifierThing(YYSTYPE *yylv,char flags)
 
   if (text[0] == '_' && strncmp(text, "__uic_", 6) == 0) {
     text = ScanUicField(text);
+  } else if (uicChunkField) {
+    uicChunkField = 0;
+    if (strcmp(text, "OptrToChunk") == 0) {
+      char c1 = PreProcInput(), c2 = PreProcInput();
+
+      if (c1 != '(' || c2 != '@') {
+	yyerror("OptrToChunk(@<chunk>) expected");
+      }
+      text = ScanIdentString(TRUE);
+      if (PreProcInput() != ')') {
+	yyerror("OptrToChunk(@<chunk>) expected");
+      }
+    }
   }
 
   if(*text == '\0'){                       /* nothing */

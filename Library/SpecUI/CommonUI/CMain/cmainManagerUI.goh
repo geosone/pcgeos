@@ -14,3 +14,11 @@
 @include <Objects/gTrigC.goh>
 @include <Objects/gInterC.goh>
 @include <gcnlist.goh>
+@include <Objects/gTextC.goh>
+@include <Objects/gGlyphC.goh>
+@include <Objects/gBoolGC.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gFSelC.goh>
+
+/* (ui.def; ui.goh has the size alone) */
+#define MAX_PASSWORD_SOURCE_LENGTH	32

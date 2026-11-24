@@ -198,6 +198,7 @@ export GenToolGroupClass
 export GenDocumentClass
 export GenDocumentControlClass
 export GenDocumentGroupClass
+export GenAddChildUpwardLinkOnly
 
 resource ApplicationUI object
 resource SystemFieldUI object

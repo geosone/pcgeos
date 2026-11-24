@@ -90,6 +90,7 @@ typedef struct {
     word		UBS_ctlAt[8][4];
     word		UBS_tgrp[3];
     word		UBS_docCtl[5];
+    word		UBS_docDlg[9];
 } UBState;
 
 static int fails;
@@ -285,7 +286,7 @@ int main(int argc, char **argv)
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator; ... ; the sliders */
-    for (i = 2; i <= 81; i++) {
+    for (i = 2; i <= 90; i++) {
 	step(i);
 	Shot(i);
     }
@@ -378,6 +379,10 @@ int main(int argc, char **argv)
 	   "a document %#x, a dirty one %#x\n", st->UBS_docCtl[0],
 	   st->UBS_docCtl[1], st->UBS_docCtl[2], st->UBS_docCtl[3],
 	   st->UBS_docCtl[4]);
+    printf("Document control's dialogs: tasks");
+    for (i = 0; i < 9; i++)
+	printf(" %u", st->UBS_docDlg[i]);
+    printf("\n");
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

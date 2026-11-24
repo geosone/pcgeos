@@ -1,0 +1,1422 @@
+/***********************************************************************
+ *
+ *	Copyright (c) Geoworks 1994 -- All Rights Reserved
+ *
+ * PROJECT:	  PC/GEOS
+ * MODULE:	  CommonUI/CMain (common code for several specific UIs)
+ * FILE:	  cmainUIDocOperations.goc
+ *
+ * DESCRIPTION:
+ *	The dialogs of OLDocumentControlClass, the C port of
+ *	cmainUIDocOperations.asm: the main dialog (new, open ...), open,
+ *	use template, save as, copy to, move to, the document's type
+ *	and password.
+ *
+ *	A dialog ("summons") is a copy of its resource of
+ *	cmainUIDocumentControl.ui, made when it comes up and destroyed
+ *	when it goes; its block's output is the control, which so gets
+ *	the messages of its triggers, file selector and texts.  The
+ *	application's group for the dialog (GDCI_openGroup ...) is put
+ *	into the copy while it is up.
+ *
+ * Port32 (Port32/ABI.md section 13y):
+ *	- the summons of each resource has a chunk of its own (the asm
+ *	  relied on it being the first of each): OLDCI_summonsChunk has
+ *	  it beside OLDCI_currentSummons;
+ *	- _DUI, CUSTOM_DOCUMENT_PATH, SINGLE_DRIVE_DOCUMENT_DIR, the
+ *	  design assistant and NO_USER_LEVELS are not Motif's and are
+ *	  left out;
+ *	- the note before a read-only document is saved under another
+ *	  name comes with OLDocumentClass, which has its strings.
+ *
+ ***********************************************************************/
+
+@include <stdapp.goh>
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olDocumentControlClass.goh>
+@include <Internal/SpecUI/olDocumentClass.goh>
+@include <Internal/SpecUI/olFileSelectorClass.goh>
+@include <Objects/gDocGrpC.goh>
+@include <Objects/gPrimC.goh>
+@include <Objects/gTrigC.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/gTextC.goh>
+@include <Objects/gBoolGC.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gFSelC.goh>
+@include <Objects/gAppC.goh>
+@include <alb.goh>
+
+#include <disk.h>
+#include <file.h>
+#include <localize.h>
+#include <string.h>
+#include <uDialog.h>
+
+@include "cmainUIDocumentControl.goh"
+
+/* the kernel's (localize.h has the C library's) */
+#undef LocalIsSpace
+extern Boolean LocalIsSpace(wchar ch);
+
+/* OLDCFileSelectorFlags */
+#define OLDCFSF_TEMPLATE	0x8000
+#define OLDCFSF_SAVE		0x4000
+
+/* (ALF_DESK_ACCESSORY of alb.def) */
+#ifndef ALF_DESK_ACCESSORY
+#define ALF_DESK_ACCESSORY	0x08
+#endif
+
+/* an object of the dialog that is up: of the copy in `block' */
+#define SUMMONS(block, obj)	ConstructOptr(block, OptrToChunk(obj))
+
+typedef void SetupRoutine(optr o, MemHandle block);
+
+/* ---------------------------------------------------------------------
+ * Utilities
+ * ------------------------------------------------------------------- */
+
+/* GetAppLevel: the application's level (UIInterfaceLevel) */
+static word GetAppLevel(void)
+{
+    optr app = GeodeGetAppObject(0);
+
+    return app ? (word) @call app::MSG_GEN_APPLICATION_GET_APP_FEATURES()
+	       : UIIL_ADVANCED;
+}
+
+static void SetUsable(optr obj, Boolean usable, VisUpdateMode mode)
+{
+    if (usable)
+	@call obj::MSG_GEN_SET_USABLE(mode);
+    else
+	@call obj::MSG_GEN_SET_NOT_USABLE(mode);
+}
+
+static void SetEnabled(optr obj, Boolean enabled)
+{
+    if (enabled)
+	@call obj::MSG_GEN_SET_ENABLED(VUM_NOW);
+    else
+	@call obj::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+}
+
+/* SendToTargetDocRegs, ...Frame: to the target document, through the
+ * model */
+void OLDCSendToTargetDoc(optr o, Message msg, const void *params, word size)
+{
+    EventHandle ev;
+
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass, msg,
+		 params, size, &ev, sizeof(ev));
+    @call o::MSG_META_SEND_CLASSED_EVENT(ev, (TravelOption) TO_MODEL);
+}
+
+/*
+ * The two triggers that switch the file selector between its simple
+ * and its full form: the one for the form it has not is shown, none if
+ * the form cannot change.
+ */
+static void SetupLevelTriggers(optr simple, optr advanced)
+{
+    if (docControlOptions & DCO_FS_CANNOT_CHANGE) {
+	SetUsable(simple, FALSE, VUM_NOW);
+	SetUsable(advanced, FALSE, VUM_NOW);
+    } else if (docControlFSLevel < UIIL_INTERMEDIATE) {
+	SetUsable(simple, FALSE, VUM_NOW);
+    } else {
+	SetUsable(advanced, FALSE, VUM_NOW);
+    }
+}
+
+/*
+ * OLDCCopyPathCommon: the path of one object to another.  Without one
+ * (its disk is gone, say): SP_DOCUMENT.  An OLFileSelector takes it by
+ * its own message, which does the right thing with removable disks.
+ */
+static void CopyPathCommon(optr src, optr dest)
+{
+    MemHandle mh = @call src::MSG_GEN_PATH_GET_BLOCK(NULL, 0);
+    DiskHandle disk = SP_DOCUMENT;
+    char empty[1], *path = empty;
+
+    empty[0] = 0;
+    if (mh) {
+	disk = @call src::MSG_GEN_PATH_GET_DISK_HANDLE();
+	path = MemLock(mh);
+    }
+    if (ObjIsObjectInClass(dest, (ClassStruct *) &OLFileSelectorClass))
+	(void) @call dest::MSG_OL_FILE_SELECTOR_PATH_SET(path, disk);
+    else
+	(void) @call dest::MSG_GEN_PATH_SET(path, disk);
+    if (mh)
+	MemFree(mh);
+}
+
+/* OLDCCopyPathToFS: the control's path to a file selector */
+#define OLDCCopyPathToFS(o, fs)		CopyPathCommon(o, fs)
+/* OLDCCopyPathFromFS: and back, once a file of it is taken */
+#define OLDCCopyPathFromFS(o, fs)	CopyPathCommon(fs, o)
+
+/* ---------------------------------------------------------------------
+ * A dialog comes up and goes
+ * ------------------------------------------------------------------- */
+
+/* the application's group that is in the dialog of a task */
+static optr TaskGroup(optr o, word attrs)
+{
+    switch ((attrs & GDCA_CURRENT_TASK) >> GDCA_CURRENT_TASK_OFFSET) {
+    case GDCT_OPEN:
+	return GDC(o)->GDCI_openGroup;
+    case GDCT_USE_TEMPLATE:
+	return GDC(o)->GDCI_useTemplateGroup;
+    case GDCT_SAVE_AS:
+	return GDC(o)->GDCI_saveAsGroup;
+    default:
+	return 0;
+    }
+}
+
+/*
+ * OLDCRemoveSummons: the dialog that is up is dismissed and destroyed;
+ * the application's groups in it are taken out first.
+ */
+void OLDCRemoveSummons(optr o)
+{
+    OLDocumentControlInstance *pself = OLDC(o);
+    MemHandle block = pself->OLDCI_currentSummons;
+    optr summons, group;
+    word attrs;
+
+    pself->OLDCI_currentFileType = 0;
+    pself->OLDCI_currentSummons = 0;
+    if (!block)
+	return;
+    summons = ConstructOptr(block, pself->OLDCI_summonsChunk);
+    (void) @call summons::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+
+    attrs = GDC(o)->GDCI_attrs;
+    GDC(o)->GDCI_attrs = attrs & ~GDCA_CURRENT_TASK;
+    if ((group = TaskGroup(o, attrs)) != 0)
+	@call group::MSG_GEN_REMOVE(VUM_NOW, 0);
+    if ((group = GDC(o)->GDCI_dialogGroup) != 0)
+	@call group::MSG_GEN_REMOVE(VUM_NOW, 0);
+    UserDestroyDialog(summons);
+}
+
+/*
+ * OLDCBringUpSummons: the dialog of a task comes up: a copy of the
+ * resource of `summons', set up by `setup'; `group', the application's
+ * UI for it, becomes child number `position' of it.
+ */
+static void BringUpSummons(optr o, GDCTask task, optr summons, optr group,
+			   word position, SetupRoutine *setup)
+{
+    MemHandle block;
+
+    /* (normally there is none) */
+    OLDCRemoveSummons(o);
+    GDC(o)->GDCI_attrs = (GDC(o)->GDCI_attrs & ~GDCA_CURRENT_TASK) |
+			 (task << GDCA_CURRENT_TASK_OFFSET);
+    block = ObjDuplicateResource(OptrToHandle(summons),
+				 MemOwner(OptrToHandle(o)), 0);
+    summons = ConstructOptr(block, OptrToChunk(summons));
+    OLDC(o)->OLDCI_currentSummons = block;
+    OLDC(o)->OLDCI_summonsChunk = OptrToChunk(summons);
+    setup(o, block);
+    /* the control hears from the dialog; the dialog is below the
+     * control, so that its help comes from the specific UI's file */
+    ObjBlockSetOutput(block, o);
+    GenAddChildUpwardLinkOnly(o, summons);
+    if (group) {
+	@call summons::MSG_GEN_ADD_CHILD(group, position);
+	@call group::MSG_GEN_SET_USABLE(VUM_MANUAL);
+    }
+    /*
+     * Not through the queue: the dialog may be destroyed before then
+     * (OLDCRemoveSummons), and would come up in a block on its way out.
+     */
+    @call summons::MSG_GEN_INTERACTION_INITIATE();
+    @call summons::MSG_GEN_BRING_TO_TOP();
+}
+
+/* ---------------------------------------------------------------------
+ * The file selector of a dialog
+ * ------------------------------------------------------------------- */
+
+/*
+ * SetupFileSelector: what it shows (the documents of the control's
+ * kind, directories), where (the templates' directory, which it cannot
+ * leave) and how much of it there is at the user's level.
+ */
+static void SetupFileSelector(optr o, optr fs, word flags)
+{
+    GenFileSelectorInstance *f;
+    word attrs = GDC(o)->GDCI_attrs, criteria, level;
+
+    /* a VM file has the control's token: only those */
+    if (attrs & GDCA_VM_FILE) {
+	GeodeToken t = GDC(o)->GDCI_documentToken;
+
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_TOKEN(
+	    (dword) (byte) t.GT_chars[0] |
+	    ((dword) (byte) t.GT_chars[1] << 8) |
+	    ((dword) (byte) t.GT_chars[2] << 16) |
+	    ((dword) (byte) t.GT_chars[3] << 24), t.GT_manufID);
+    }
+    if (flags & OLDCFSF_TEMPLATE) {
+	char path[PATH_BUFFER_SIZE];
+	ChunkHandle dir;
+	DiskHandle disk;
+	void *src, *dst;
+	word size;
+
+	OLDCEnsureTemplateDir(o);
+	FilePushDir();
+	dir = GDC(o)->GDCI_templateDir;
+	(void) FileSetCurrentPath(SP_TEMPLATE, dir ?
+		    (char *) LMemDerefHandles(OptrToHandle(o), dir) : "");
+	if (GetAppLevel() == UIIL_INTRODUCTORY) {
+	    MemLock(OptrToHandle(@IntroductoryTemplateDir));
+	    (void) FileSetCurrentPath(0, LMemDeref(@IntroductoryTemplateDir));
+	    MemUnlock(OptrToHandle(@IntroductoryTemplateDir));
+	}
+	disk = FileGetCurrentPath(path, sizeof(path));
+	(void) @call fs::MSG_GEN_PATH_SET(path, disk);
+	/* and that is its virtual root */
+	src = ObjVarFindData(fs, ATTR_GEN_PATH_DATA);
+	if (src) {
+	    size = VarDataSizePtr(src);
+	    dst = ObjVarAddData(fs, ATTR_GEN_FILE_SELECTOR_VIRTUAL_ROOT,
+				size);
+	    src = ObjVarFindData(fs, ATTR_GEN_PATH_DATA);
+	    memcpy(dst, src, size);
+	}
+	FilePopDir();
+    } else if (docControlOptions & DCO_NAVIGATE_ABOVE_DOC) {
+	(void) ObjVarDeleteData(fs, ATTR_GEN_FILE_SELECTOR_VIRTUAL_ROOT);
+    }
+
+    f = (GenFileSelectorInstance *) ObjDerefGen(fs);
+    criteria = (attrs & GDCA_VM_FILE) ?
+	FSFC_DIRS | FSFC_GEOS_NON_EXECUTABLES :
+	FSFC_DIRS | FSFC_NON_GEOS_FILES | FSFC_MASK_CASE_INSENSITIVE;
+    /* where to save: directories only */
+    if (flags & OLDCFSF_SAVE)
+	criteria &= ~(FSFC_NON_GEOS_FILES | FSFC_GEOS_EXECUTABLES |
+		      FSFC_GEOS_NON_EXECUTABLES);
+    f->GFSI_fileCriteria = criteria;
+    level = docControlFSLevel;
+    /* introductory: no directories, and so no list when saving */
+    if (level < UIIL_BEGINNING) {
+	f->GFSI_attrs &= ~(FSA_ALLOW_CHANGE_DIRS | FSA_HAS_CLOSE_DIR_BUTTON |
+			   FSA_HAS_OPEN_DIR_BUTTON);
+	f->GFSI_fileCriteria &= ~FSFC_DIRS;
+	if (flags & OLDCFSF_SAVE)
+	    f->GFSI_attrs &= ~FSA_HAS_FILE_LIST;
+    }
+    /* introductory, beginning, templates: no other drives */
+    if ((flags & OLDCFSF_TEMPLATE) || level < UIIL_INTERMEDIATE)
+	f->GFSI_attrs &= ~(FSA_HAS_CHANGE_DRIVE_LIST |
+			   FSA_HAS_DOCUMENT_BUTTON |
+			   FSA_HAS_CHANGE_DIRECTORY_LIST);
+    /* a subclass may have its say */
+    @call o::MSG_GEN_DOCUMENT_CONTROL_CONFIGURE_FILE_SELECTOR(fs, 0);
+}
+
+/*
+ * GetPathFromFileSelector: the path and the name of the dialog's
+ * choice into the parameters: the name from the text object if there is
+ * one (then the path is where the selector would save), else the
+ * selector's selection.  FALSE if there is no name.
+ */
+static Boolean GetPathFromFileSelector(optr fs, optr text,
+				       DocumentCommonParams *p,
+				       GenFileSelectorEntryFlags *flags,
+				       word *entry)
+{
+    p->DCP_path[0] = 0;
+    p->DCP_name[0] = 0;
+    if (text)
+	(void) @call fs::MSG_GEN_FILE_SELECTOR_GET_DESTINATION_PATH(
+	    p->DCP_path, sizeof(p->DCP_path));
+    else
+	(void) @call fs::MSG_GEN_PATH_GET(p->DCP_path, sizeof(p->DCP_path));
+    p->DCP_diskHandle = @call fs::MSG_GEN_PATH_GET_DISK_HANDLE();
+    if (text) {
+	(void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(p->DCP_name);
+	*flags = GFSET_FILE << GFSEF_TYPE_OFFSET;
+	*entry = 0;
+    } else {
+	dword d = @call fs::MSG_GEN_FILE_SELECTOR_GET_SELECTION(p->DCP_name);
+
+	*flags = (GenFileSelectorEntryFlags) d;
+	*entry = (word) (d >> 16);
+    }
+    return p->DCP_name[0] != 0;
+}
+
+/*
+ * SetDirText: the text of a dialog that says where it saves: "Saving
+ * to Folder: " and the last component of the selector's path (all of
+ * it if it has one alone).
+ */
+static void SetDirText(optr fs, optr text)
+{
+    char fsPath[PATH_BUFFER_SIZE], fullPath[PATH_BUFFER_SIZE];
+    char *end = fullPath, *start = fullPath;
+    DiskHandle disk;
+    word len, k;
+
+    @call text::MSG_META_SUSPEND();
+    @call text::MSG_VIS_TEXT_DELETE_ALL();
+    fsPath[0] = 0;
+    (void) @call fs::MSG_GEN_FILE_SELECTOR_GET_DESTINATION_PATH(fsPath,
+							    sizeof(fsPath));
+    disk = @call fs::MSG_GEN_PATH_GET_DISK_HANDLE();
+    fullPath[0] = 0;
+    (void) FileConstructFullPath(&end, sizeof(fullPath), disk, fsPath, TRUE);
+    len = (word) (end - fullPath);
+    if (len) {
+	/* (the asm's search leaves the first character out, and takes
+	 * one found at the second for none) */
+	for (k = len - 1; k >= 2; k--) {
+	    if (fullPath[k] == '\\') {
+		if (k + 1 != len)
+		    start = fullPath + k + 1;
+		break;
+	    }
+	}
+	@call text::MSG_VIS_TEXT_REPLACE_ALL_OPTR(@SavingToDirString, 0);
+	@call text::MSG_VIS_TEXT_APPEND_PTR(start, 0);
+    }
+    @call text::MSG_META_UNSUSPEND();
+}
+
+/* ---------------------------------------------------------------------
+ * New
+ * ------------------------------------------------------------------- */
+
+/* OLDocumentControlInitiateNewDoc: no dialog: the group makes an
+ * untitled document */
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_NEW_DOC
+{
+    DocumentCommonParams p;
+
+    (void) pself;
+    OLDCRemoveSummons(oself);
+    memset(&p, 0, sizeof(p));
+    p.DCP_docAttrs = GDA_UNTITLED;
+    OLDCSendToAppDC(oself, 0, MSG_GEN_DOCUMENT_GROUP_NEW_DOC, &p, sizeof(p));
+}
+
+/* ---------------------------------------------------------------------
+ * Open, use template
+ * ------------------------------------------------------------------- */
+
+/*
+ * MakeExitAppMoniker: the trigger's "Exit" becomes "Exit <application>"
+ * with the text moniker of the application.
+ */
+static void MakeExitAppMoniker(optr trigger)
+{
+    optr app = GeodeGetAppObject(0), name;
+    MemHandle block = OptrToHandle(trigger);
+    ChunkHandle exitMkr;
+    VisMonikerWithText *m;
+    char *text;
+    word size;
+
+    if (!app)
+	return;
+    name = @call app::MSG_GEN_FIND_MONIKER(TRUE,
+	    (VMS_TEXT << VMSF_STYLE_OFFSET) | VMSF_COPY_CHUNK, block);
+    if (!OptrToHandle(name))
+	return;
+    exitMkr = ((GenInstance *) ObjDerefGen(trigger))->GI_visMoniker;
+    m = LMemDeref(name);
+    if (exitMkr && !(m->VMWT_common.VM_type & VMT_GSTRING)) {
+	optr mk = ConstructOptr(block, exitMkr);
+
+	/* (the size of the name's chunk is more than its text needs) */
+	size = LMemGetChunkSizeHandles(block, exitMkr) +
+	       LMemGetChunkSizeHandles(block, OptrToChunk(name)) + 1;
+	if (LMemReAlloc(mk, size)) {
+	    m = LMemDeref(mk);
+	    m->VMWT_common.VM_width = 0;	/* measured again */
+	    const char *from = (const char *) LMemDeref(name) + VMWT_text;
+
+	    text = (char *) m + VMWT_text;
+	    while (*text)
+		text++;
+	    *text++ = ' ';
+	    while ((*text++ = *from++) != 0)
+		;
+	}
+    }
+    LMemFree(name);
+}
+
+/*
+ * SetupForOpen: read only and the user's notes only at the levels that
+ * have them; a viewer without a document leaves by the dialog's Cancel
+ * ("Exit <application>").
+ */
+static void SetupForOpen(optr o, MemHandle block)
+{
+    word level = GetAppLevel(), attrs = GDC(o)->GDCI_attrs;
+    optr fs = SUMMONS(block, @OpenFileSelector);
+    optr cancel = SUMMONS(block, @CancelOpenTrigger);
+
+    if (level != UIIL_ADVANCED ||
+	(docControlOptions & DCO_NO_OPEN_READ_ONLY_OPTIONS))
+	SetUsable(SUMMONS(block, @OpenInfoGroup), FALSE, VUM_NOW);
+    /* (native files have no notes) */
+    if (level < UIIL_INTERMEDIATE ||
+	(docControlOptions & DCO_NO_NOTES_IN_OPEN_BOX) ||
+	(attrs & GDCA_NATIVE))
+	SetUsable(SUMMONS(block, @OpenUserNotesTextDisplay), FALSE, VUM_NOW);
+    SetupLevelTriggers(SUMMONS(block, @OpenSimpleTrigger),
+		       SUMMONS(block, @OpenAdvancedTrigger));
+
+    if (((attrs & GDCA_MODE) >> GDCA_MODE_OFFSET) != GDCM_VIEWER) {
+	(void) @call cancel::MSG_META_DELETE_VAR_DATA(
+	    ATTR_GEN_DESTINATION_CLASS);
+    } else if (attrs & GDCA_DOCUMENT_EXISTS) {
+	@call cancel::MSG_GEN_USE_VIS_MONIKER(0, VUM_NOW);
+    } else {
+	@call cancel::MSG_GEN_USE_VIS_MONIKER(
+	    OptrToChunk(@CancelOpenExitMoniker), VUM_NOW);
+	MakeExitAppMoniker(cancel);
+	@call cancel::MSG_GEN_TRIGGER_SET_DESTINATION(
+	    ConstructOptr(0, TO_GEN_PARENT));
+	@call cancel::MSG_GEN_TRIGGER_SET_ACTION_MSG(MSG_META_QUIT);
+    }
+
+    /* the simple form is always in SP_DOCUMENT */
+    if (!(docControlOptions & DCO_FS_CANNOT_CHANGE) &&
+	docControlFSLevel < UIIL_INTERMEDIATE) {
+	char empty[1];
+
+	empty[0] = 0;
+	(void) @call fs::MSG_GEN_PATH_SET(empty, SP_DOCUMENT);
+    } else {
+	OLDCCopyPathToFS(o, fs);
+    }
+    SetupFileSelector(o, fs, 0);
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_OPEN_DOC
+{
+    (void) pself;
+    BringUpSummons(oself, GDCT_OPEN, @FileOpenSummons,
+		   GDC(oself)->GDCI_openGroup, 3, SetupForOpen);
+}
+
+static void SetupForUseTemplate(optr o, MemHandle block)
+{
+    word level = GetAppLevel();
+
+    if (level != UIIL_ADVANCED)
+	SetUsable(SUMMONS(block, @UseTemplateForEditingList), FALSE, VUM_NOW);
+    if (level < UIIL_INTERMEDIATE ||
+	(docControlOptions & DCO_NO_NOTES_IN_OPEN_BOX) ||
+	(GDC(o)->GDCI_attrs & GDCA_NATIVE))
+	SetUsable(SUMMONS(block, @UseTemplateUserNotesTextDisplay), FALSE,
+		  VUM_NOW);
+    SetupFileSelector(o, SUMMONS(block, @UseTemplateFileSelector),
+		      OLDCFSF_TEMPLATE);
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_USE_TEMPLATE_DOC
+{
+    (void) pself;
+    BringUpSummons(oself, GDCT_USE_TEMPLATE, @FileUseTemplateSummons,
+		   GDC(oself)->GDCI_useTemplateGroup, 3,
+		   SetupForUseTemplate);
+}
+
+/*
+ * OLDocumentControlFileSelected: from a file selector when its
+ * selection changes or is opened.  Save as, copy to, move to: the text
+ * that says where is set.  Open, use template: an opened file is
+ * taken; else the dialog shows what the selection is (the glyph), the
+ * user's notes of a file, and whether it can be opened for editing.
+ */
+@extern method OLDocumentControlClass, MSG_OLDC_OPEN_FILE_SELECTED,
+	MSG_OLDC_USE_TEMPLATE_FILE_SELECTED, MSG_OLDC_SAVE_AS_DIR_SELECTED,
+	MSG_OLDC_COPY_TO_DIR_SELECTED, MSG_OLDC_MOVE_TO_DIR_SELECTED
+{
+    MemHandle block = pself->OLDCI_currentSummons;
+    Boolean template = message == MSG_OLDC_USE_TEMPLATE_FILE_SELECTED;
+    Boolean enableForEditing = FALSE, selectForEditing = FALSE;
+    Boolean enableTextObj = FALSE;
+    word type = GFS_GET_ENTRY_TYPE(entryFlags);
+    FileUserNotes notes;
+    optr text, list, display;
+
+    (void) entryNum;
+    if (!block || (entryFlags & (GFSEF_ERROR | GFSEF_NO_ENTRIES)))
+	return;
+    switch (message) {
+    case MSG_OLDC_SAVE_AS_DIR_SELECTED:
+	SetDirText(SUMMONS(block, @SaveAsFileSelector),
+		   SUMMONS(block, @SaveAsDirText));
+	return;
+    case MSG_OLDC_COPY_TO_DIR_SELECTED:
+	SetDirText(SUMMONS(block, @CopyToFileSelector),
+		   SUMMONS(block, @CopyToDirText));
+	return;
+    case MSG_OLDC_MOVE_TO_DIR_SELECTED:
+	SetDirText(SUMMONS(block, @MoveToFileSelector),
+		   SUMMONS(block, @MoveToDirText));
+	return;
+    default:
+	break;
+    }
+    if (entryFlags & GFSEF_OPEN) {
+	if (type == GFSET_FILE) {
+	    if (template)
+		@call oself::MSG_OLDC_USE_TEMPLATE_SELECTED();
+	    else
+		@call oself::MSG_OLDC_OPEN_SELECTED();
+	}
+	return;
+    }
+
+    /* the trigger that takes it: for a file */
+    SetEnabled(template ? SUMMONS(block, @UseTemplateFileTrigger)
+			: SUMMONS(block, @OpenFileTrigger),
+	       type == GFSET_FILE);
+    notes[0] = 0;
+    text = @FileVolumeText;
+    if (type != GFSET_VOLUME) {
+	DocumentCommonParams p;
+	GenFileSelectorEntryFlags flags;
+	word entry;
+
+	memset(&p, 0, sizeof(p));
+	if (!GetPathFromFileSelector(
+		template ? SUMMONS(block, @UseTemplateFileSelector)
+			 : SUMMONS(block, @OpenFileSelector),
+		0, &p, &flags, &entry)) {
+	    text = @FileErrorText;
+	} else {
+	    /* the user's notes, where the dialog has them.  (The asm
+	     * tests the options with the mask of GDCA_NATIVE: 0x0400.) */
+	    FilePushDir();
+	    (void) FileSetCurrentPath(p.DCP_diskHandle, p.DCP_path);
+	    if (GetAppLevel() >= UIIL_INTERMEDIATE &&
+		!(docControlOptions & DCO_NO_NOTES_IN_OPEN_BOX) &&
+		!(docControlOptions & GDCA_NATIVE) &&
+		!FileGetPathExtAttributes(p.DCP_name, FEA_USER_NOTES, notes,
+					  sizeof(notes)))
+		enableTextObj = TRUE;
+	    FilePopDir();
+	    if (type == GFSET_SUBDIR) {
+		text = @FileSubDirText;
+	    } else {
+		Boolean viewer = ((GDC(oself)->GDCI_attrs & GDCA_MODE) >>
+				  GDCA_MODE_OFFSET) == GDCM_VIEWER;
+
+		OLDC(oself)->OLDCI_fileFlags = entryFlags;
+		if (entryFlags & GFSEF_TEMPLATE) {
+		    if (entryFlags & GFSEF_READ_ONLY) {
+			text = @FileReadOnlyTemplateText;
+		    } else {
+			text = @FileTemplateText;
+			enableForEditing = TRUE;
+		    }
+		} else if (entryFlags & GFSEF_READ_ONLY) {
+		    text = @FileReadOnlyText;
+		} else if (entryFlags & GFSEF_SHARED_SINGLE) {
+		    text = @FileSharedSingleText;
+		    enableForEditing = TRUE;
+		} else {
+		    selectForEditing = TRUE;
+		    if (entryFlags & GFSEF_SHARED_MULTIPLE) {
+			text = @FileSharedMultipleText;
+		    } else {
+			text = @FileNormalText;
+			enableForEditing = TRUE;
+		    }
+		}
+		/* a viewer never edits */
+		if (viewer)
+		    enableForEditing = selectForEditing = FALSE;
+	    }
+	}
+    }
+    /* what it is, unless the glyph says so already */
+    pself = OLDC(oself);
+    if (OptrToChunk(text) != pself->OLDCI_currentFileType) {
+	pself->OLDCI_currentFileType = OptrToChunk(text);
+	if (!template) {
+	    optr glyph = SUMMONS(block, @OpenFileTypeGlyph);
+
+	    (void) @call glyph::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(text,
+								 VUM_NOW);
+	}
+    }
+    if (template) {
+	list = SUMMONS(block, @UseTemplateForEditingList);
+	display = SUMMONS(block, @UseTemplateUserNotesTextDisplay);
+    } else {
+	list = SUMMONS(block, @OpenForEditingList);
+	display = SUMMONS(block, @OpenUserNotesTextDisplay);
+    }
+    @call list::MSG_GEN_BOOLEAN_GROUP_SET_GROUP_STATE(
+	selectForEditing ? GDA_READ_WRITE : 0, 0);
+    SetEnabled(list, enableForEditing);
+    SetEnabled(display, enableTextObj);
+    @call display::MSG_VIS_TEXT_REPLACE_ALL_PTR(notes, 0);
+}
+
+/*
+ * OLDocumentControlOpenSelected: the dialog's Open (or a file opened in
+ * the list): a directory or volume is opened in the selector; a file is
+ * opened by the group, for editing if the dialog says so, and the
+ * dialog goes.  The control's path becomes the selector's.
+ */
+@extern method OLDocumentControlClass, MSG_OLDC_OPEN_SELECTED,
+	MSG_OLDC_USE_TEMPLATE_SELECTED
+{
+    MemHandle block = pself->OLDCI_currentSummons;
+    Boolean open = message == MSG_OLDC_OPEN_SELECTED;
+    DocumentCommonParams p;
+    GenFileSelectorEntryFlags flags;
+    word entry;
+    optr fs, list;
+
+    /* (it happens, rarely, that there is none) */
+    if (!block)
+	return;
+    memset(&p, 0, sizeof(p));
+    fs = open ? SUMMONS(block, @OpenFileSelector)
+	      : SUMMONS(block, @UseTemplateFileSelector);
+    if (!GetPathFromFileSelector(fs, 0, &p, &flags, &entry))
+	return;
+    if (GFS_GET_ENTRY_TYPE(flags) != GFSET_FILE) {
+	(void) @call fs::MSG_GEN_FILE_SELECTOR_OPEN_ENTRY(entry);
+	return;
+    }
+    if (open) {
+	OLDCCopyPathFromFS(oself, fs);
+	list = SUMMONS(block, @OpenForEditingList);
+    } else {
+	p.DCP_flags = DOF_FORCE_TEMPLATE_BEHAVIOR;
+	list = SUMMONS(block, @UseTemplateForEditingList);
+    }
+    if (@call list::MSG_GEN_BOOLEAN_GROUP_GET_SELECTED_BOOLEANS()) {
+	p.DCP_docAttrs = GDA_READ_WRITE;
+	p.DCP_flags = 0;
+    } else {
+	p.DCP_docAttrs = GDA_READ_ONLY;
+    }
+    p.DCP_connection = 0;		/* the user's own doing */
+    OLDCSendToAppDC(oself, 0, MSG_GEN_DOCUMENT_GROUP_OPEN_DOC, &p,
+		    sizeof(p));
+    OLDCRemoveSummons(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Save as, copy to, move to
+ * ------------------------------------------------------------------- */
+
+/* SetTextObjectForFileType: the text takes what a file's name may be */
+static void SetTextObjectForFileType(optr text)
+{
+    @call text::MSG_META_ADD_VAR_DATA(ATTR_GEN_TEXT_LEGAL_FILENAMES, 0,
+				      NULL);
+    @call text::MSG_VIS_TEXT_SET_MAX_LENGTH(FILE_LONGNAME_LENGTH);
+}
+
+/*
+ * SetTextObjectWithFileName: the text of a dialog that asks for a
+ * name starts with the document's, selected, unless that is untitled.
+ * The "?xx" the file system makes of characters DOS has none for are
+ * left out.
+ */
+static void SetTextObjectWithFileName(optr o, optr text)
+{
+    FileLongName name;
+    const char *s;
+    char *d = name, c;
+
+    SetTextObjectForFileType(text);
+    if (GDC(o)->GDCI_docAttrs & GDA_UNTITLED)
+	return;
+    s = GDC(o)->GDCI_targetDocName;
+    do {
+	c = *s++;
+	if (c == '?') {
+	    if ((c = *s++) != 0 && (c = *s++) != 0)
+		continue;
+	}
+	*d++ = c;
+    } while (c);
+    @call text::MSG_VIS_TEXT_REPLACE_ALL_PTR(name, 0);
+    @call text::MSG_VIS_TEXT_SELECT_ALL();
+}
+
+static const char saveAsTemplateHelpName[] = "dbDCSaveAT";
+
+static void SetupForSaveAs(optr o, MemHandle block)
+{
+    optr fs = SUMMONS(block, @SaveAsFileSelector);
+    word flags = OLDCFSF_SAVE;
+
+    SetTextObjectWithFileName(o, SUMMONS(block, @SaveAsTextEdit));
+    SetupLevelTriggers(SUMMONS(block, @SaveAsSimpleTrigger),
+		       SUMMONS(block, @SaveAsAdvancedTrigger));
+    OLDCCopyPathToFS(o, fs);
+    if (ObjVarFindData(o, TEMP_OLDC_DOING_SAVE_AS_TEMPLATE)) {
+	optr summons = SUMMONS(block, @FileSaveAsSummons);
+
+	/* another glyph and another help text for a template */
+	SetUsable(SUMMONS(block, @SaveAsTemplateFileGlyph), TRUE, VUM_NOW);
+	SetUsable(SUMMONS(block, @SaveAsFileGlyph), FALSE, VUM_NOW);
+	@call summons::MSG_META_ADD_VAR_DATA(ATTR_GEN_HELP_CONTEXT,
+	    sizeof(saveAsTemplateHelpName), (void *) saveAsTemplateHelpName);
+	flags |= OLDCFSF_TEMPLATE;
+    }
+    SetupFileSelector(o, fs, flags);
+}
+
+static void BringUpSaveAs(optr o)
+{
+    BringUpSummons(o, GDCT_SAVE_AS, @FileSaveAsSummons,
+		   GDC(o)->GDCI_saveAsGroup, 3, SetupForSaveAs);
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC
+{
+    (void) pself;
+    (void) ObjVarDeleteData(oself, TEMP_OLDC_DOING_SAVE_AS_TEMPLATE);
+    BringUpSaveAs(oself);
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_TEMPLATE_DOC
+{
+    (void) pself;
+    (void) ObjVarAddData(oself, TEMP_OLDC_DOING_SAVE_AS_TEMPLATE, 0);
+    BringUpSaveAs(oself);
+}
+
+static void SetupForCopyTo(optr o, MemHandle block)
+{
+    optr fs = SUMMONS(block, @CopyToFileSelector);
+
+    SetTextObjectWithFileName(o, SUMMONS(block, @CopyToTextEdit));
+    SetupLevelTriggers(SUMMONS(block, @CopyToSimpleTrigger),
+		       SUMMONS(block, @CopyToAdvancedTrigger));
+    OLDCCopyPathToFS(o, fs);
+    SetupFileSelector(o, fs, OLDCFSF_SAVE);
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_COPY_TO_DOC
+{
+    (void) pself;
+    (void) ObjVarDeleteData(oself, TEMP_OLDC_DOING_SAVE_AS_TEMPLATE);
+    BringUpSummons(oself, GDCT_COPY_TO, @FileCopyToSummons, 0, 0,
+		   SetupForCopyTo);
+}
+
+static void SetupForMoveTo(optr o, MemHandle block)
+{
+    optr fs = SUMMONS(block, @MoveToFileSelector);
+
+    SetTextObjectWithFileName(o, SUMMONS(block, @MoveToTextEdit));
+    SetupLevelTriggers(SUMMONS(block, @MoveToSimpleTrigger),
+		       SUMMONS(block, @MoveToAdvancedTrigger));
+    OLDCCopyPathToFS(o, fs);
+    SetupFileSelector(o, fs, OLDCFSF_SAVE);
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_MOVE_TO_DOC
+{
+    (void) pself;
+    (void) ObjVarDeleteData(oself, TEMP_OLDC_DOING_SAVE_AS_TEMPLATE);
+    BringUpSummons(oself, GDCT_MOVE_TO, @FileMoveToSummons, 0, 0,
+		   SetupForMoveTo);
+}
+
+/* CheckForBlankTextObj: TRUE if the text has nothing but blanks */
+static Boolean CheckForBlankTextObj(optr text)
+{
+    char buf[FILE_LONGNAME_BUFFER_SIZE + 4];
+    const char *p;
+
+    buf[0] = 0;
+    (void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+    for (p = buf; *p; p++) {
+	if (!LocalIsSpace((unsigned char) *p))
+	    return FALSE;
+    }
+    return TRUE;
+}
+
+/*
+ * OLDocumentControlSaveAsFileEntered: the dialog's Save (Copy, Move):
+ * on the list of volumes that volume is opened; else the target
+ * document saves itself under the name of the text in the selector's
+ * directory, and the dialog goes.  Save as: the control's path becomes
+ * the selector's.
+ */
+@extern method OLDocumentControlClass, MSG_OLDC_SAVE_AS_FILE_ENTERED,
+	MSG_OLDC_COPY_TO_FILE_ENTERED, MSG_OLDC_MOVE_TO_FILE_ENTERED
+{
+    MemHandle block = pself->OLDCI_currentSummons;
+    DocumentCommonParams p;
+    GenFileSelectorEntryFlags flags;
+    FileLongName sel;
+    Message msg;
+    EventHandle ev;
+    optr fs, text;
+    word entry;
+    dword d;
+
+    if (!block)
+	return;
+    memset(&p, 0, sizeof(p));
+    switch (message) {
+    case MSG_OLDC_SAVE_AS_FILE_ENTERED:
+	fs = SUMMONS(block, @SaveAsFileSelector);
+	text = SUMMONS(block, @SaveAsTextEdit);
+	break;
+    case MSG_OLDC_COPY_TO_FILE_ENTERED:
+	fs = SUMMONS(block, @CopyToFileSelector);
+	text = SUMMONS(block, @CopyToTextEdit);
+	break;
+    default:
+	fs = SUMMONS(block, @MoveToFileSelector);
+	text = SUMMONS(block, @MoveToTextEdit);
+	break;
+    }
+    d = @call fs::MSG_GEN_FILE_SELECTOR_GET_SELECTION(sel);
+    if (GFS_GET_ENTRY_TYPE((word) d) == GFSET_VOLUME) {
+	(void) @call fs::MSG_GEN_FILE_SELECTOR_OPEN_ENTRY((word) (d >> 16));
+	return;
+    }
+    if (CheckForBlankTextObj(text)) {
+	(void) UserStandardDialogOptr(NULL, NULL, 0, 0, @BlankFileNameErrStr,
+		(CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		(GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET));
+	return;
+    }
+    if (!GetPathFromFileSelector(fs, text, &p, &flags, &entry))
+	return;
+    if (ObjVarFindData(oself, TEMP_OLDC_DOING_SAVE_AS_TEMPLATE)) {
+	msg = MSG_GEN_DOCUMENT_SAVE_AS_TEMPLATE;
+    } else if (message == MSG_OLDC_COPY_TO_FILE_ENTERED) {
+	msg = MSG_GEN_DOCUMENT_COPY_TO;
+    } else if (message == MSG_OLDC_MOVE_TO_FILE_ENTERED) {
+	msg = MSG_GEN_DOCUMENT_MOVE_TO;
+    } else {
+	OLDCCopyPathFromFS(oself, fs);
+	msg = MSG_GEN_DOCUMENT_SAVE_AS;
+    }
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass, msg, &p,
+		 sizeof(p), &ev, sizeof(ev));
+    OLDCRemoveSummons(oself);
+    @call oself::MSG_META_SEND_CLASSED_EVENT(ev, (TravelOption) TO_MODEL);
+}
+
+/* OLDocumentControlSaveAsCancelled: the group is told (it may be
+ * quitting) */
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_SAVE_AS_CANCELLED
+{
+    (void) pself;
+    OLDCRemoveSummons(oself);
+    OLDCSendToAppDC(oself, 0, MSG_GEN_DOCUMENT_GROUP_SAVE_AS_CANCELLED,
+		    NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The main dialog
+ * ------------------------------------------------------------------- */
+
+/* the application's own text for an entry of the main dialog */
+static void ReplaceTextIfNeeded(optr o, ChunkHandle text, optr obj)
+{
+    if (text)
+	@call obj::MSG_VIS_TEXT_REPLACE_ALL_OPTR(
+	    ConstructOptr(OptrToHandle(o), text), 0);
+}
+
+static void ReplaceMonikerIfNeeded(optr o, ChunkHandle mkr, optr obj)
+{
+    if (mkr)
+	(void) @call obj::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(
+	    ConstructOptr(OptrToHandle(o), mkr), VUM_NOW);
+}
+
+/*
+ * SetupMainDialog: the entries the application and the level have not
+ * go; the application's texts and monikers for the others; Cancel
+ * instead of "Exit <application>" if there is a document to go back
+ * to.
+ */
+static void SetupMainDialog(optr o, MemHandle block)
+{
+    GenDocumentControlInstance *g;
+    optr app = GeodeGetAppObject(0);
+    optr cancel = SUMMONS(block, @FDCancelTrigger);
+    FileLongName help;
+    word *above;
+
+    if (docControlOptions & DCO_NO_OPEN_DEFAULT)
+	SetUsable(SUMMONS(block, @FDOpenDefaultGroup), FALSE, VUM_NOW);
+    /*
+     * No way out of the dialog for a transparent application that
+     * neither asks before it saves, nor is a desk accessory, nor can be
+     * closed: unless there is a document to go back to.
+     */
+    if ((docControlOptions & DCO_TRANSPARENT_DOC) &&
+	!(docControlOptions & DCO_USER_CONFIRM_SAVE) &&
+	!(app && (@call app::MSG_GEN_APPLICATION_GET_LAUNCH_FLAGS() &
+		  ALF_DESK_ACCESSORY)) &&
+	!(UserGetLaunchOptions() & UILO_CLOSABLE_APPS) &&
+	!(GDC(o)->GDCI_attrs & GDCA_DOCUMENT_EXISTS))
+	SetUsable(cancel, FALSE, VUM_NOW);
+    /* the help of the dialog is the application's */
+    if (app && @call app::MSG_META_GET_HELP_FILE(help)) {
+	optr summons = SUMMONS(block, @FileDialogSummons);
+
+	@call summons::MSG_META_SET_HELP_FILE(help);
+    }
+
+    g = GDC(o);
+    ReplaceTextIfNeeded(o, g->GDCI_dialogNewText,
+			SUMMONS(block, @FDNewEmptyText));
+    ReplaceTextIfNeeded(o, GDC(o)->GDCI_dialogTemplateText,
+			SUMMONS(block, @FDNewTemplateText));
+    ReplaceTextIfNeeded(o, GDC(o)->GDCI_dialogOpenDefaultText,
+			SUMMONS(block, @FDOpenDefaultText));
+    ReplaceTextIfNeeded(o, GDC(o)->GDCI_dialogImportText,
+			SUMMONS(block, @FDImportText));
+    ReplaceTextIfNeeded(o, GDC(o)->GDCI_dialogOpenText,
+			SUMMONS(block, @FDOpenText));
+    ReplaceTextIfNeeded(o, GDC(o)->GDCI_dialogUserLevelText,
+			SUMMONS(block, @FDUserLevelText));
+    ReplaceMonikerIfNeeded(o, GDC(o)->GDCI_dialogNewMoniker,
+			   SUMMONS(block, @FDNewEmptyTrigger));
+    ReplaceMonikerIfNeeded(o, GDC(o)->GDCI_dialogTemplateMoniker,
+			   SUMMONS(block, @FDNewTemplateTrigger));
+    ReplaceMonikerIfNeeded(o, GDC(o)->GDCI_dialogOpenDefaultMoniker,
+			   SUMMONS(block, @FDOpenDefaultTrigger));
+    ReplaceMonikerIfNeeded(o, GDC(o)->GDCI_dialogImportMoniker,
+			   SUMMONS(block, @FDImportTrigger));
+    ReplaceMonikerIfNeeded(o, GDC(o)->GDCI_dialogOpenMoniker,
+			   SUMMONS(block, @FDOpenTrigger));
+
+    if ((docControlOptions & DCO_BYPASS_BIG_DIALOG) ||
+	(GDC(o)->GDCI_attrs & GDCA_DOCUMENT_EXISTS)) {
+	/* Cancel: back to the document */
+	@call cancel::MSG_GEN_USE_VIS_MONIKER(0, VUM_NOW);
+	@call cancel::MSG_GEN_TRIGGER_SET_ACTION_MSG(
+	    MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG);
+	@call cancel::MSG_GEN_TRIGGER_SET_DESTINATION(
+	    ConstructOptr(0, TO_OBJ_BLOCK_OUTPUT));
+	(void) ObjVarDeleteData(cancel, ATTR_GEN_DESTINATION_CLASS);
+    } else {
+	MakeExitAppMoniker(cancel);
+    }
+
+    if (GetAppLevel() == UIIL_INTRODUCTORY ||
+	!OptrToHandle(GDC(o)->GDCI_importGroup))
+	SetUsable(SUMMONS(block, @FDImportGroup), FALSE, VUM_NOW);
+    above = ObjVarFindData(o,
+		ATTR_GEN_DOCUMENT_CONTROL_NO_EMPTY_DOC_IF_NOT_ABOVE);
+    if (above && GetAppLevel() <= *above)
+	SetUsable(SUMMONS(block, @FDNewEmptyGroup), FALSE, VUM_NOW);
+    if (OptrToHandle(GDC(o)->GDCI_userLevelGroup)) {
+	optr trigger = SUMMONS(block, @FDUserLevelTrigger);
+
+	@call trigger::MSG_GEN_TRIGGER_SET_DESTINATION(
+	    GDC(o)->GDCI_userLevelGroup);
+    } else {
+	SetUsable(SUMMONS(block, @FDUserLevelGroup), FALSE, VUM_NOW);
+    }
+    if (!(GDC(o)->GDCI_features & GDCF_SUPPORTS_TEMPLATES))
+	SetUsable(SUMMONS(block, @FDNewTemplateGroup), FALSE, VUM_NOW);
+    if (!GDC(o)->GDCI_defaultFile)
+	SetUsable(SUMMONS(block, @FDOpenDefaultGroup), FALSE, VUM_NOW);
+}
+
+/*
+ * OLDocumentControlDisplayDialog: the main dialog, unless a dialog is
+ * up.  An application that neither makes nor opens documents quits; a
+ * viewer has the open dialog for it.
+ */
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG
+{
+    GenControlGetFeaturesReturn features;
+
+    if (pself->OLDCI_currentSummons)
+	return;
+    memset(&features, 0, sizeof(features));
+    @call oself::MSG_GEN_CONTROL_GET_NORMAL_FEATURES(&features);
+    if (!(features.GCSR_features & (GDCF_NEW | GDCF_OPEN_CLOSE))) {
+	optr app = GeodeGetAppObject(0);
+
+	if (app)
+	    CObjMessageP(MF_FORCE_QUEUE, app, MSG_META_QUIT, NULL, 0, NULL,
+			 0);
+	return;
+    }
+    if (((GDC(oself)->GDCI_attrs & GDCA_MODE) >> GDCA_MODE_OFFSET) ==
+	GDCM_VIEWER) {
+	@call oself::MSG_GEN_DOCUMENT_CONTROL_INITIATE_OPEN_DOC();
+	return;
+    }
+    BringUpSummons(oself, GDCT_DIALOG, @FileDialogSummons,
+		   GDC(oself)->GDCI_dialogGroup, 1, SetupMainDialog);
+}
+
+@extern method OLDocumentControlClass,
+	MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG
+{
+    (void) pself;
+    OLDCRemoveSummons(oself);
+    @call oself::MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG();
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_IMPORT_CANCELLED
+{
+    (void) pself;
+    OLDCRemoveSummons(oself);
+    @call oself::MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG();
+}
+
+/*
+ * OLDocumentControlTestForDisplayMainDialog: without a document the
+ * main dialog comes up (unless the specific UI has none, or the control
+ * detaches): tested once the document group caught up, and the control
+ * after it: the test goes to the group, which sends it back queued
+ */
+@extern method OLDocumentControlClass, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG
+{
+    EventHandle ev;
+    struct { EventHandle ev; MessageFlags flags; } p;
+
+    (void) pself;
+    if ((docControlOptions & DCO_BYPASS_BIG_DIALOG) ||
+	ObjVarFindData(oself, DETACH_DATA))
+	return;
+    CObjMessageP(MF_RECORD, oself, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2,
+		 NULL, 0, &ev, sizeof(ev));
+    p.ev = ev;
+    p.flags = MF_FORCE_QUEUE;
+    CObjMessageP(MF_RECORD, oself, MSG_META_DISPATCH_EVENT, &p, sizeof(p),
+		 &ev, sizeof(ev));
+    p.ev = ev;
+    p.flags = 0;
+    if (GDC(oself)->GDCI_documentGroup)
+	OLDCSendToAppDC(oself, 0, MSG_META_DISPATCH_EVENT, &p, sizeof(p));
+    else
+	ObjFreeMessage(ev);
+}
+
+@extern method OLDocumentControlClass, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2
+{
+    optr app = GeodeGetAppObject(0);
+
+    if ((GDC(oself)->GDCI_attrs & GDCA_DOCUMENT_EXISTS) ||
+	OptrToHandle(pself->OLDCI_quitOD))
+	return;
+    if (app && (@call app::MSG_GEN_APPLICATION_GET_STATE() &
+		(AS_QUITTING | AS_DETACHING | AS_TRANSPARENT_DETACHING)))
+	return;
+    @call oself::MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG();
+}
+
+/*
+ * OLDocumentControlInitiateSaveDoc: an untitled or read-only document
+ * is saved under another name (Port32, not yet: the note that says so
+ * for a read-only one); else the target document saves
+ */
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_DOC
+{
+    (void) pself;
+    if (GDC(oself)->GDCI_docAttrs & (GDA_UNTITLED | GDA_READ_ONLY))
+	@call oself::MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC();
+    else
+	OLDCSendToTargetDoc(oself, MSG_GEN_DOCUMENT_SAVE, NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * Import, export: the application's dialogs
+ * ------------------------------------------------------------------- */
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_IMPORT_DOC
+{
+    optr group = GDC(oself)->GDCI_importGroup;
+
+    (void) pself;
+    if (OptrToHandle(group))
+	@call group::MSG_GEN_INTERACTION_INITIATE();
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_EXPORT_DOC
+{
+    optr group = GDC(oself)->GDCI_exportGroup;
+
+    (void) pself;
+    if (OptrToHandle(group))
+	@call group::MSG_GEN_INTERACTION_INITIATE();
+}
+
+/* OLDocumentControlOpenImportSelected: the group imports the file as a
+ * new document */
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_OPEN_IMPORT_SELECTED
+{
+    (void) pself;
+    OLDCSendToAppDC(oself, 0, MSG_GEN_DOCUMENT_GROUP_IMPORT_NEW_DOC, params,
+		    sizeof(*params));
+    OLDCRemoveSummons(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * The file selector in its simple and its full form
+ * ------------------------------------------------------------------- */
+
+#define FS_SIMPLE_ATTRS \
+    (FSA_ALLOW_CHANGE_DIRS | FSA_HAS_CLOSE_DIR_BUTTON | \
+     FSA_HAS_OPEN_DIR_BUTTON | FSA_HAS_FILE_LIST)
+#define FS_ADVANCED_ATTRS \
+    (FSA_HAS_DOCUMENT_BUTTON | FSA_HAS_CHANGE_DIRECTORY_LIST | \
+     FSA_HAS_CHANGE_DRIVE_LIST)
+
+/*
+ * ChangeFSCommon: the attributes of the selector change while it is
+ * not usable; the trigger for the other form takes the place of the
+ * one pressed.
+ */
+static void ChangeFSCommon(optr fs, word set, word reset, optr show,
+			   optr hide)
+{
+    word attrs, criteria;
+
+    @call fs::MSG_GEN_SET_NOT_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+    attrs = @call fs::MSG_GEN_FILE_SELECTOR_GET_ATTRS();
+    @call fs::MSG_GEN_FILE_SELECTOR_SET_ATTRS((attrs & ~reset) | set);
+    criteria = @call fs::MSG_GEN_FILE_SELECTOR_GET_FILE_CRITERIA();
+    @call fs::MSG_GEN_FILE_SELECTOR_SET_FILE_CRITERIA(criteria | FSFC_DIRS);
+    @call fs::MSG_GEN_SET_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+    @call show::MSG_GEN_SET_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+    @call hide::MSG_GEN_SET_NOT_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+@extern method OLDocumentControlClass, MSG_OLDC_OPEN_SIMPLE,
+	MSG_OLDC_OPEN_ADVANCED, MSG_OLDC_SAVE_AS_SIMPLE,
+	MSG_OLDC_SAVE_AS_ADVANCED, MSG_OLDC_COPY_TO_SIMPLE,
+	MSG_OLDC_COPY_TO_ADVANCED, MSG_OLDC_MOVE_TO_SIMPLE,
+	MSG_OLDC_MOVE_TO_ADVANCED
+{
+    MemHandle block = pself->OLDCI_currentSummons;
+    optr fs, simple, advanced;
+    Boolean toSimple = message == MSG_OLDC_OPEN_SIMPLE ||
+		       message == MSG_OLDC_SAVE_AS_SIMPLE ||
+		       message == MSG_OLDC_COPY_TO_SIMPLE ||
+		       message == MSG_OLDC_MOVE_TO_SIMPLE;
+
+    if (!block)
+	return;
+    switch (message) {
+    case MSG_OLDC_OPEN_SIMPLE:
+    case MSG_OLDC_OPEN_ADVANCED:
+	fs = SUMMONS(block, @OpenFileSelector);
+	simple = SUMMONS(block, @OpenSimpleTrigger);
+	advanced = SUMMONS(block, @OpenAdvancedTrigger);
+	break;
+    case MSG_OLDC_SAVE_AS_SIMPLE:
+    case MSG_OLDC_SAVE_AS_ADVANCED:
+	fs = SUMMONS(block, @SaveAsFileSelector);
+	simple = SUMMONS(block, @SaveAsSimpleTrigger);
+	advanced = SUMMONS(block, @SaveAsAdvancedTrigger);
+	break;
+    case MSG_OLDC_COPY_TO_SIMPLE:
+    case MSG_OLDC_COPY_TO_ADVANCED:
+	fs = SUMMONS(block, @CopyToFileSelector);
+	simple = SUMMONS(block, @CopyToSimpleTrigger);
+	advanced = SUMMONS(block, @CopyToAdvancedTrigger);
+	break;
+    default:
+	fs = SUMMONS(block, @MoveToFileSelector);
+	simple = SUMMONS(block, @MoveToSimpleTrigger);
+	advanced = SUMMONS(block, @MoveToAdvancedTrigger);
+	break;
+    }
+    if (toSimple)
+	ChangeFSCommon(fs, FS_SIMPLE_ATTRS, FS_ADVANCED_ATTRS, advanced,
+		       simple);
+    else
+	ChangeFSCommon(fs, FS_SIMPLE_ATTRS | FS_ADVANCED_ATTRS, 0, simple,
+		       advanced);
+}
+
+/* ---------------------------------------------------------------------
+ * The document's type and password
+ * ------------------------------------------------------------------- */
+
+/*
+ * SetupForType: the document's type is selected; the types the
+ * control's mode and features have not go (public and multi user
+ * documents, templates).
+ */
+static void SetupForType(optr o, MemHandle block)
+{
+    word attrs = GDC(o)->GDCI_attrs, features = GDC(o)->GDCI_features;
+    word type = GDC(o)->GDCI_docType;
+    word mode = (attrs & GDCA_MODE) >> GDCA_MODE_OFFSET;
+    Boolean pub = FALSE, multi = FALSE, template = FALSE;
+    optr list = SUMMONS(block, @TypeList);
+
+    @call o::MSG_OLDC_TYPE_USER_CHANGE(type);
+    @call list::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(type, FALSE);
+    if (mode != GDCM_VIEWER) {
+	template = TRUE;
+	if (mode == GDCM_SHARED_SINGLE)
+	    pub = TRUE;
+	else
+	    multi = TRUE;
+    }
+    if (!(features & GDCF_SUPPORTS_USER_MAKING_SHARED_DOCUMENTS))
+	pub = multi = FALSE;
+    if (!(features & GDCF_SUPPORTS_TEMPLATES))
+	template = FALSE;
+    if (!pub)
+	SetUsable(SUMMONS(block, @PublicItem), FALSE, VUM_NOW);
+    if (!multi)
+	SetUsable(SUMMONS(block, @MultiUserItem), FALSE, VUM_NOW);
+    if (!template) {
+	SetUsable(SUMMONS(block, @TemplateItem), FALSE, VUM_NOW);
+	SetUsable(SUMMONS(block, @ReadOnlyTemplateItem), FALSE, VUM_NOW);
+    }
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SET_TYPE_DOC
+{
+    (void) pself;
+    BringUpSummons(oself, GDCT_TYPE, @TypeSummons, 0, 0, SetupForType);
+}
+
+/* OLDocumentControlTypeUserChange: the text below the list describes
+ * the type selected */
+@extern method OLDocumentControlClass, MSG_OLDC_TYPE_USER_CHANGE
+{
+    MemHandle block = pself->OLDCI_currentSummons;
+    ChunkHandle text;
+    optr description;
+
+    if (!block)
+	return;
+    switch (type) {
+    case GDT_NORMAL:
+	text = OptrToChunk(@TypeNormalText);
+	break;
+    case GDT_READ_ONLY:
+	text = OptrToChunk(@TypeReadOnlyText);
+	break;
+    case GDT_TEMPLATE:
+	text = OptrToChunk(@TextTemplateText);
+	break;
+    case GDT_READ_ONLY_TEMPLATE:
+	text = OptrToChunk(@TextReadOnlyTemplateText);
+	break;
+    case GDT_PUBLIC:
+	text = OptrToChunk(@TypePublicText);
+	break;
+    case GDT_MULTI_USER:
+	text = OptrToChunk(@TypeMultiUserText);
+	break;
+    default:
+	return;
+    }
+    description = SUMMONS(block, @TypeDescription);
+    @call description::MSG_VIS_TEXT_REPLACE_ALL_OPTR(
+	ConstructOptr(block, text), 0);
+}
+
+/* OLDocumentControlTypeChanged: the dialog's OK: the target document
+ * changes its type */
+@extern method OLDocumentControlClass, MSG_OLDC_TYPE_CHANGED
+{
+    MemHandle block = pself->OLDCI_currentSummons;
+    optr list;
+    word type;
+
+    if (!block)
+	return;
+    list = SUMMONS(block, @TypeList);
+    type = @call list::MSG_GEN_ITEM_GROUP_GET_SELECTION();
+    OLDCSendToTargetDoc(oself, MSG_GEN_DOCUMENT_CHANGE_TYPE, &type,
+			sizeof(type));
+    OLDCRemoveSummons(oself);
+}
+
+/* (nothing to set up) */
+static void SetupForPassword(optr o, MemHandle block)
+{
+    (void) o;
+    (void) block;
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_INITIATE_SET_PASSWORD_DOC
+{
+    (void) pself;
+    BringUpSummons(oself, GDCT_PASSWORD, @PasswordSummons, 0, 0,
+		   SetupForPassword);
+}
+
+/* OLDocumentControlPasswordChanged: the dialog's OK: the target
+ * document gets the password of the text */
+@extern method OLDocumentControlClass, MSG_OLDC_PASSWORD_CHANGED
+{
+    MemHandle block = pself->OLDCI_currentSummons;
+    char password[MAX_PASSWORD_SOURCE_SIZE + 2];
+    optr text;
+
+    if (!block)
+	return;
+    memset(password, 0, sizeof(password));
+    text = SUMMONS(block, @PasswordText);
+    (void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(password);
+    OLDCSendToTargetDoc(oself, MSG_GEN_DOCUMENT_CHANGE_PASSWORD, password,
+			sizeof(password));
+    OLDCRemoveSummons(oself);
+}
+
+/* OLDocumentControlPasswordCancelled, ...FileExported: the dialog
+ * goes */
+@extern method OLDocumentControlClass, MSG_OLDC_PASSWORD_CANCELLED
+{
+    (void) pself;
+    OLDCRemoveSummons(oself);
+}
+
+@extern method OLDocumentControlClass,
+	MSG_GEN_DOCUMENT_CONTROL_FILE_EXPORTED
+{
+    (void) pself;
+    OLDCRemoveSummons(oself);
+}
