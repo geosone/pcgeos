@@ -108,6 +108,7 @@ typedef struct { Addr r_offset; Xword r_info; Sxword r_addend; } Rela;
 
 enum {
     DT_NULL = 0, DT_NEEDED = 1, DT_PLTRELSZ = 2, DT_HASH = 4, DT_STRTAB = 5,
+    DT_SONAME = 14,
     DT_SYMTAB = 6, DT_RELA = 7, DT_RELASZ = 8, DT_RELAENT = 9, DT_SYMENT = 11,
     DT_REL = 17, DT_RELSZ = 18, DT_RELENT = 19, DT_PLTREL = 20,
     DT_JMPREL = 23, DT_INIT_ARRAY = 25, DT_FINI_ARRAY = 26,
@@ -327,6 +328,25 @@ static int protect(ghal_module *m, const Phdr *ph, unsigned phnum,
     return 1;
 }
 
+/*
+ * For gdb (Port32/tools/geos-gdb.py): the host's loader does not know
+ * the modules, so a debugger stops here to learn of them.  The name is
+ * the module's DT_SONAME ("" without one), the base its ELF address 0.
+ */
+__attribute__((noinline)) void ghal_module_debug_loaded(const char *name,
+                                                         const void *base)
+{
+    (void)name;
+    (void)base;
+    __asm__ volatile("");
+}
+
+__attribute__((noinline)) void ghal_module_debug_unloaded(const void *base)
+{
+    (void)base;
+    __asm__ volatile("");
+}
+
 ghal_status ghal_module_load(const void *image, size_t size,
                              ghal_module_import import, void *ctx,
                              ghal_module **out)
@@ -412,6 +432,11 @@ ghal_status ghal_module_load(const void *image, size_t size,
         return GHAL_ERR_HOST;
     }
 
+    {
+        const Dyn *so = dyn_find(dyn, DT_SONAME);
+
+        ghal_module_debug_loaded(so ? m->strtab + so->d_val : "", m->base);
+    }
     m->fini_array = dyn_val(dyn, DT_FINI_ARRAY);
     m->fini_count = dyn_val(dyn, DT_FINI_ARRAYSZ) / sizeof(Addr);
     init_arr = dyn_val(dyn, DT_INIT_ARRAY);
@@ -455,6 +480,7 @@ void ghal_module_unload(ghal_module *m)
         if (f && (uintptr_t)f != (uintptr_t)-1)
             f();
     }
+    ghal_module_debug_unloaded(m->base);
     ghal_mem_free(m->base);
     ghal_mem_free(m);
 }
