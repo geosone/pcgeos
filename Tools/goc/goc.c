@@ -70,6 +70,44 @@ DeflibNode    	*deflibPtr;
 char  		*outFile = "goc.out";
 char		*gccExportName = NULL;	/* -x: chunk constants for other files */
 FILE		*gccExport = NULL;
+char		*gccDepName = NULL;	/* -y: the @included files, for make */
+static char	**gccDeps;
+static int	gccDepCount;
+
+/* a file was read with @include */
+void
+GocDepAdd(char *path)
+{
+    if (gccDepName == NULL) {
+	return;
+    }
+    gccDeps = (char **) realloc(gccDeps, (gccDepCount + 1) * sizeof(char *));
+    gccDeps[gccDepCount] = (char *) malloc(strlen(path) + 1);
+    strcpy(gccDeps[gccDepCount++], path);
+}
+
+/* "output: file file ..." */
+static void
+GocDepWrite(void)
+{
+    FILE *f;
+    int i;
+
+    if (gccDepName == NULL) {
+	return;
+    }
+    f = fopen(gccDepName, "w");
+    if (f == NULL) {
+	perror(gccDepName);
+	exit(1);
+    }
+    fprintf(f, "%s:", outFile);
+    for (i = 0; i < gccDepCount; i++) {
+	fprintf(f, " \\\n  %s", gccDeps[i]);
+    }
+    putc('\n', f);
+    fclose(f);
+}
 
 char            *asciiStringType = "/* ASCII */char ";
 char            *lStringType = "/* L */wchar_t ";
@@ -281,6 +319,7 @@ Usage(char *fmt, ...)
 	    "\t-M\t\toutput makedepend information\n"
 	    "\t-o <filename>\tspecify output filename\n"
 	    "\t-x <filename>\t-cg: chunk constants for the other files\n"
+	    "\t-y <filename>\tthe @included files as a make rule\n"
 	    "\t-O\t\tUNIX-only, optimize for space with @optimize\n"
 	    "\t-p<path>\tdirectory to put/get @optimized files\n"
 	    "\t-w\t\tUNIX-only\n"
@@ -919,10 +958,13 @@ main(int argc, char **argv)
 	perror(gccExportName);
 	exit(1);
     }
+    GocDepWrite();
 
 #if defined(unix)
     (void) pclose(yyin);
-#else
+#elif !defined(__GNUC__)
+    /* (the scanner closed the last file at its end already: glibc
+     * aborts on the second close) */
     fclose(yyin);
 #endif
 
@@ -1460,6 +1502,18 @@ ParseArgs(int argc, char **argv)
 			/*NOTREACHED*/
 		    }
 		    outFile = argv[ac+1];
+		    ac++;
+		    break;
+		}
+
+		case 'y': {
+		    /* the files read with @include, as a make rule of
+		     * the output file (a depfile for the build system) */
+		    if (ac + 1 == argc) {
+			Usage("-y requires a filename argument");
+			/*NOTREACHED*/
+		    }
+		    gccDepName = argv[ac+1];
 		    ac++;
 		    break;
 		}

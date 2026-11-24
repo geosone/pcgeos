@@ -8,10 +8,12 @@
 # objects one file declares with @extern (GeosGocObjs.cmake).
 # <out-var> receives one C file per .goc file to add to a target: each
 # includes the resource numbers and then the goc output, so no compiler-
-# specific "force include" option is needed.  goc is the one built by the
-# pmake tools build (bin/goc); it runs on the build host, also when cross
-# compiling.
-find_program(GEOS_GOC goc PATHS ${PROJECT_SOURCE_DIR}/bin NO_DEFAULT_PATH)
+# specific "force include" option is needed.  goc is built from Tools/goc
+# for the build host (GeosHostTools.cmake), also when cross compiling.
+# It writes the files a .goc file reads with @include (goc -y), so a
+# change of a header runs goc again.
+include_guard(GLOBAL)
+include(${CMAKE_CURRENT_LIST_DIR}/GeosHostTools.cmake)
 find_package(Python3 COMPONENTS Interpreter)
 
 function(geos_goc out_var gp_file)
@@ -44,21 +46,17 @@ function(geos_goc out_var gp_file)
     set(out_c ${dir}/${base}.goc.c)
     set(xh ${dir}/${base}.goc.x.h)
     set(includes -I${goc_dir})
-    # the headers of the geode (beside the file and in INCLUDES): a change
-    # there runs goc again (the CInclude ones are not tracked)
-    file(GLOB local_headers ${goc_dir}/*.goh ${goc_dir}/*.h)
     foreach(inc IN LISTS ARG_INCLUDES)
       list(APPEND includes -I${inc})
-      file(GLOB inc_headers ${inc}/*.goh ${inc}/*.h)
-      list(APPEND local_headers ${inc_headers})
     endforeach()
     list(APPEND includes -I${PROJECT_SOURCE_DIR}/CInclude)
     add_custom_command(OUTPUT ${out_c} ${xh}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${dir}
       COMMAND ${GEOS_GOC} -cg -D__GEOS__ ${includes} -o ${out_c} -x ${xh}
-              ${goc_file}
+              -y ${out_c}.d ${goc_file}
       WORKING_DIRECTORY ${goc_dir}
-      DEPENDS ${goc_file} ${GEOS_GOC} ${local_headers}
+      DEPENDS ${goc_file} ${GEOS_GOC} geos_host_tools
+      DEPFILE ${out_c}.d
       COMMENT "goc -cg ${base}.goc"
       VERBATIM)
     list(APPEND xhs ${xh})

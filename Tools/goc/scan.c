@@ -2444,6 +2444,10 @@ ScanMaybeIncludeFile (char *path,
 	return;
     }
     MarkFileAsIncluded(path);
+    {
+	extern void GocDepAdd(char *path);
+	GocDepAdd(path);
+    }
 
     DBPRINTF((stderr,"INCLUDE %s\n", path));
 

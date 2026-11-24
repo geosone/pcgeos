@@ -449,7 +449,9 @@ FileUtil_GetTime(FileType file)
 #endif
 
 #if defined(unix) || defined(_LINUX)
-#if defined(_LINUX)
+#if defined(_LINUX) && defined(__GNUC__)
+    i = fstat(fileno(file), &stb);
+#elif defined(_LINUX)
     i = fstat(file->_handle, &stb);
 #else
     i = fstat(file->_file, &stb);
@@ -515,7 +517,9 @@ FileUtil_SprintError(char *result, char *fmt, ...)
 	}
 	va_end(argList);
     }
-#if defined(unix) || defined(_MSDOS) || defined(_LINUX)
+#if defined(_LINUX) && defined(__GNUC__)
+    sprintf(result, ": %s: error #%d\n", strerror(errno), errno);
+#elif defined(unix) || defined(_MSDOS) || defined(_LINUX)
     if (errno < sys_nerr) {
 	sprintf(result, ": %s: error #%d\n", sys_errlist[errno], errno);
     }
