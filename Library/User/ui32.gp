@@ -194,6 +194,10 @@ export GenFileSelectorClass
 export GenControlClass
 export GenControlSendToOutput
 export GenControlOutputAction
+export GenToolGroupClass
+export GenDocumentClass
+export GenDocumentControlClass
+export GenDocumentGroupClass
 
 resource ApplicationUI object
 resource SystemFieldUI object

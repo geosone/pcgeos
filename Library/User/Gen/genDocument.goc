@@ -1,0 +1,47 @@
+/*
+ * genDocument.goc -- GenDocumentClass (after genDocument.asm): a
+ * document of the document control: the content at the head of the
+ * document's objects, with the document's file, name and path
+ * (ATTR_GEN_PATH_DATA).  All it does is the specific UI's
+ * (SPIR_BUILD_DOCUMENT); see genAppDocumentControl.goc.
+ *
+ * Port32 (Port32/ABI.md section 13y): as the asm.
+ */
+@include "uiInt.goh"
+@include <Objects/gDocC.goh>
+
+@classdecl GenDocumentClass;
+
+@method GenDocumentClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_DOCUMENT, MasterOffset);
+}
+
+/* GenDocumentRelocOrUnReloc: no file in a state file; the path's disk
+ * is restored when the path is next used */
+@method GenDocumentClass, _reloc
+{
+    (void) vmRelocType;
+    if (message == MSG_META_UNRELOCATE) {
+	((GenDocumentInstance *) ObjDerefGen(oself))->GDI_fileHandle = 0;
+	GenPathUnrelocObjectPath(oself, ATTR_GEN_PATH_DATA,
+				 TEMP_GEN_PATH_SAVED_DISK_HANDLE);
+    }
+    return @callsuper();
+}
+
+/* GenDocumentInitializeVarData: a document's path starts as the
+ * document directory */
+@method GenDocumentClass, MSG_META_INITIALIZE_VAR_DATA
+{
+    GenFilePath *p;
+
+    (void) pself;
+    if (dataType != ATTR_GEN_PATH_DATA)
+	return @callsuper();
+    p = ObjVarAddData(oself, ATTR_GEN_PATH_DATA | VDF_SAVE_TO_STATE,
+		      sizeof(GenFilePath));
+    p->GFP_disk = SP_DOCUMENT;
+    p->GFP_path[0] = 0;
+    return (word) ((byte *) p - (byte *) MemDeref(OptrToHandle(oself)));
+}

@@ -50,6 +50,7 @@
 @include <Internal/SpecUI/olSliderClass.goh>
 @include <Objects/gFSelC.goh>
 @include <Objects/gCtrlC.goh>
+@include <Objects/gToolGC.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -125,6 +126,9 @@ typedef struct {
     /* per check: the features, the interactable flags, enabled, the
      * children of the group (of the tool holder) */
     word		UBS_ctlAt[8][4];
+    /* the tool group: its children, enabled, highlighted (each bit 0:
+     * built, 1: highlighted, 2: the highlight gone) */
+    word		UBS_tgrp[3];
 } UBState;
 
 UBState ubState;
@@ -661,6 +665,13 @@ static GenControlFeaturesInfo ubCtlToolFeatures[1];
     GI_visMoniker = "Tools";
     GII_visibility = GIV_DIALOG;
     GII_attrs = GIA_NOT_USER_INITIATABLE;
+}
+/* (in no tree until step 79: the steps before put the tools into the
+ * dialog itself, and a controller removes all the children of the
+ * object its tools are in) */
+@object GenToolGroupClass UBToolGrp = {
+    GI_states = @default & ~GS_USABLE;
+    GTGI_controller = @UBCtl;
 }
 @visMoniker UBDeleteMoniker = 'D', "Delete";
 @visMoniker UBKeepMoniker = 'K', "Keep";
@@ -3350,6 +3361,43 @@ static void UBClickMenu(word n)
 	UBCHECK(ubState.UBS_ctlAt[7][3] == 0);
 	@call UBCtl::MSG_GEN_SET_USABLE(VUM_NOW);
 	break;
+    case 79: {
+	/* a tool group (GenToolGroupClass): built, it has its
+	 * controller make the tools below it; highlighted it is
+	 * enabled, then again as the controller is */
+	word i;
+
+	@call UBToolBox::MSG_GEN_ADD_CHILD(@UBToolGrp, CCO_LAST);
+	@call UBToolGrp::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UBToolBox::MSG_GEN_INTERACTION_INITIATE();
+	@call UBToolBox::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	UBCHECK(@call UBToolBox::MSG_VIS_QUERY_WINDOW() != 0);
+	for (i = 0; i < 3; i++) {
+	    if (i == 1) {
+		@call UBCtl::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+		@call UBToolGrp::MSG_GEN_TOOL_GROUP_SET_HIGHLIGHT(
+			TGHT_ACTIVE_HIGHLIGHT);
+	    } else if (i == 2)
+		@call UBToolGrp::MSG_GEN_TOOL_GROUP_SET_HIGHLIGHT(
+			TGHT_NO_HIGHLIGHT);
+	    ubState.UBS_tgrp[0] |=
+		(@call UBToolGrp::MSG_GEN_COUNT_CHILDREN() == 1) << i;
+	    ubState.UBS_tgrp[1] |=
+		(@call UBToolGrp::MSG_GEN_GET_ENABLED() != 0) << i;
+	    ObjLockObjBlock(OptrToHandle(@UBToolGrp));
+	    ubState.UBS_tgrp[2] |= (ObjVarFindData(@UBToolGrp,
+			TEMP_TOOL_GROUP_HIGHLIGHT) != NULL) << i;
+	    MemUnlock(OptrToHandle(@UBToolGrp));
+	}
+	UBCHECK(ubState.UBS_tgrp[0] == 7);
+	UBCHECK(ubState.UBS_tgrp[1] == 3);
+	UBCHECK(ubState.UBS_tgrp[2] == 2);
+	@call UBCtl::MSG_GEN_SET_ENABLED(VUM_NOW);
+	UBCHECK(@call UBToolGrp::MSG_GEN_GET_ENABLED());
+	(void) @call UBToolBox::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	@call UBToolBox::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	break;
+    }
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */
     case 101:

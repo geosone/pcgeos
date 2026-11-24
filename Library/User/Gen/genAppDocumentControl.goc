@@ -1,0 +1,45 @@
+/*
+ * genAppDocumentControl.goc -- GenDocumentGroupClass (after
+ * genAppDocumentControl.asm): the part of the document control that
+ * runs in the application thread: the parent of the GenDocument
+ * objects, one per open document, which it makes from GDGI_
+ * documentClass (or copies of a template).  All it does is the
+ * specific UI's (SPIR_BUILD_APP_DOCUMENT_CONTROL).  While the
+ * application runs it is told of removable disks going away, which it
+ * passes on to its documents.
+ *
+ * Port32 (Port32/ABI.md section 13y): as the asm.
+ */
+@include "uiInt.goh"
+@include <Objects/gDocGrpC.goh>
+@include <gcnlist.goh>
+
+@classdecl GenDocumentGroupClass;
+
+@method GenDocumentGroupClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_APP_DOCUMENT_CONTROL,
+				    MasterOffset);
+}
+
+@method GenDocumentGroupClass, MSG_META_REMOVING_DISK
+{
+    (void) pself;
+    GenSendToChildren(oself, message, &disk, sizeof(disk));
+}
+
+/* GenDocumentGroupStartup, ...Detach: on the list of the removable
+ * disks while the application runs */
+@method GenDocumentGroupClass, MSG_META_APP_STARTUP
+{
+    (void) pself;
+    @callsuper();
+    GCNListAdd(oself, MANUFACTURER_ID_GEOWORKS, GCNSLT_REMOVABLE_DISK);
+}
+
+@method GenDocumentGroupClass, MSG_META_APP_SHUTDOWN
+{
+    (void) pself;
+    @callsuper();
+    GCNListRemove(oself, MANUFACTURER_ID_GEOWORKS, GCNSLT_REMOVABLE_DISK);
+}

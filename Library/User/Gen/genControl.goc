@@ -1368,7 +1368,7 @@ static void DestroyGeneratedUI(optr o, Boolean detaching)
 
 /* ControlSendStatusChange: for the tool control: the controller's
  * features have changed */
-static void SendStatusChange(optr o, GenControlStatusChange change)
+void GenControlSendStatusChange(optr o, word change)
 {
     MemHandle bh = MemAlloc(sizeof(NotifyGenControlStatusChange),
 			    HF_SWAPABLE | HF_SHARABLE,
@@ -1424,7 +1424,7 @@ static void UserFeatures(optr o, Boolean toolbox, WordFlags add,
 	return;
     SendDestroyUI(oself);
     @call oself::MSG_GEN_CONTROL_GENERATE_UI();
-    SendStatusChange(oself, GCSF_NORMAL_FEATURES_CHANGED);
+    GenControlSendStatusChange(oself, GCSF_NORMAL_FEATURES_CHANGED);
     @call oself::MSG_GEN_UPDATE_VISUAL(VUM_DELAYED_VIA_UI_QUEUE);
     if (((GenInteractionInstance *) ObjDerefGen(oself))->GII_visibility ==
 	GIV_DIALOG)
@@ -1440,7 +1440,7 @@ static void UserFeatures(optr o, Boolean toolbox, WordFlags add,
 	return;
     SendDestroyToolboxUI(oself);
     @call oself::MSG_GEN_CONTROL_GENERATE_TOOLBOX_UI(parent);
-    SendStatusChange(oself, GCSF_TOOLBOX_FEATURES_CHANGED);
+    GenControlSendStatusChange(oself, GCSF_TOOLBOX_FEATURES_CHANGED);
 }
 
 @method GenControlClass, MSG_GEN_CONTROL_ADD_FEATURE

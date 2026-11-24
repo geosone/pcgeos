@@ -156,6 +156,10 @@ void GenAddChildUpwardLinkOnly(optr obj, optr child);
 /* the application object of the current process (FALSE: none) */
 Boolean UserCallApplication(Message msg, const void *params,
 			    word paramSize, void *reply, word replySize);
+/* genControl.goc: a change of the controller's own state told on the
+ * application's GAGCNLT_GEN_CONTROL_NOTIFY_STATUS_CHANGE list (a
+ * GenControlStatusChange) */
+void GenControlSendStatusChange(optr controller, word change);
 
 /* the UI's FatalErrors (uiConstant.def), as far as the C UI raises them */
 #define UI_ERROR_NO_SPECIFIC_UI	18

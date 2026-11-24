@@ -1,0 +1,174 @@
+/*
+ * genToolGroup.goc -- GenToolGroupClass (after genToolGroup.asm): the
+ * place of a controller's tools.  When it is built it asks its
+ * controller (GTGI_controller) for the tools
+ * (MSG_GEN_CONTROL_GENERATE_TOOLBOX_UI), which become its children.
+ * While the user arranges the tools (GenToolControl) the group is
+ * outlined (MSG_GEN_TOOL_GROUP_SET_HIGHLIGHT) and a press on it tells
+ * that it is the one selected instead of going to a tool.
+ *
+ * Port32 (Port32/ABI.md section 13y): as the asm.
+ */
+@include "uiInt.goh"
+@include <Objects/gCtrlC.goh>
+@include <Objects/gToolGC.goh>
+@include <Objects/gAppC.goh>
+#include <graphics.h>
+#include <string.h>
+
+@classdecl GenToolGroupClass;
+
+#define ACTIVE_COLOR	C_LIGHT_VIOLET
+#define INACTIVE_COLOR	C_BROWN
+
+/* SetLineColorForCurrentDisplay: black and white: black (active) or a
+ * dithered grey */
+static void SetLineColor(GStateHandle gs, ToolGroupHighlightType type)
+{
+    DisplayScheme scheme;
+    optr app = GeodeGetAppObject(0);
+    word color;
+
+    memset(&scheme, 0, sizeof(scheme));
+    if (app)
+	@call app::MSG_GEN_APPLICATION_GET_DISPLAY_SCHEME(&scheme);
+    if ((scheme.DS_displayType & DT_DISP_CLASS) >
+	(DC_GRAY_1 << DT_DISP_CLASS_OFFSET))
+	color = type == TGHT_ACTIVE_HIGHLIGHT ? ACTIVE_COLOR : INACTIVE_COLOR;
+    else if (type == TGHT_ACTIVE_HIGHLIGHT)
+	color = C_BLACK;
+    else {
+	GrSetLineColorMap(gs, CMT_DITHER);
+	color = C_BW_GREY;
+    }
+    GrSetLineColor(gs, CF_INDEX, (byte) color, 0, 0);
+}
+
+/* GenToolGroupDrawHighlightLow: a frame two wide, unless there are no
+ * tools */
+static void DrawHighlight(optr o, GStateHandle gs,
+			  ToolGroupHighlightType type)
+{
+    Rectangle r;
+
+    if (!@call o::MSG_GEN_COUNT_CHILDREN())
+	return;
+    GrSaveState(gs);
+    SetLineColor(gs, type);
+    GrSetLineWidth(gs, MakeWWFixed(2));
+    VisGetBounds(o, &r);
+    GrDrawRect(gs, r.R_left + 1, r.R_top + 1, r.R_right - 1,
+	       r.R_bottom - 1);
+    GrRestoreState(gs);
+}
+
+/*
+ * GenToolGroupSetHighlight: highlighted the group is enabled, to be
+ * pressed on even if its controller is not; without the highlight it
+ * is enabled as the controller is again
+ */
+@method GenToolGroupClass, MSG_GEN_TOOL_GROUP_SET_HIGHLIGHT
+{
+    optr controller;
+    Boolean enabled = FALSE;
+
+    if ((byte) hlType != TGHT_NO_HIGHLIGHT) {
+	byte *h;
+	WindowHandle win;
+
+	@call oself::MSG_GEN_SET_ENABLED(VUM_NOW);
+	h = ObjVarFindData(oself, TEMP_TOOL_GROUP_HIGHLIGHT);
+	if (!h)
+	    h = ObjVarAddData(oself, TEMP_TOOL_GROUP_HIGHLIGHT,
+			      sizeof(ToolGroupHighlightType));
+	*h = (byte) hlType;
+	win = VisQueryWindow(oself);
+	if (win) {
+	    GStateHandle gs = GrCreateState(win);
+
+	    DrawHighlight(oself, gs, (ToolGroupHighlightType) hlType);
+	    GrDestroyState(gs);
+	}
+	return;
+    }
+    if (ObjVarDeleteData(oself, TEMP_TOOL_GROUP_HIGHLIGHT))
+	@call oself::MSG_VIS_INVALIDATE();
+    controller = ((GenToolGroupInstance *) ObjDerefGen(oself))->
+		 GTGI_controller;
+    (void) pself;
+    if (controller)
+	enabled = @call controller::MSG_GEN_GET_ENABLED();
+    if (enabled)
+	@call oself::MSG_GEN_SET_ENABLED(VUM_NOW);
+    else
+	@call oself::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+}
+
+/* GenToolGroupBuildBranch: the controller makes the tools, below the
+ * group, before the group is built */
+@method GenToolGroupClass, MSG_SPEC_BUILD_BRANCH
+{
+    if (!pself->GI_comp.CP_firstChild) {
+	optr controller = pself->GTGI_controller;
+
+	if (controller)
+	    @call controller::MSG_GEN_CONTROL_GENERATE_TOOLBOX_UI(oself);
+    }
+    @callsuper();
+}
+
+/* GenToolGroupSpecBuild: the highlight is drawn over the children */
+@method GenToolGroupClass, MSG_SPEC_BUILD
+{
+    (void) pself;
+    @callsuper();
+    if (((VisBase *) LMemDerefHandles(OptrToHandle(oself),
+				      OptrToChunk(oself)))->Vis_offset)
+	((VisCompInstance *) ObjDerefVis(oself))->VCI_geoAttrs &=
+	    ~VCGA_ONLY_DRAWS_IN_MARGINS;
+}
+
+@method GenToolGroupClass, MSG_VIS_DRAW
+{
+    byte *h;
+
+    (void) pself;
+    @callsuper();
+    h = ObjVarFindData(oself, TEMP_TOOL_GROUP_HIGHLIGHT);
+    if (h)
+	DrawHighlight(oself, gstate, (ToolGroupHighlightType) *h);
+}
+
+/*
+ * GenToolGroupMouseInput: highlighted, the mouse is the group's: a
+ * press says that this group is the one selected
+ * (GCSF_HIGHLIGHTED_TOOLGROUP_SELECTED of its controller)
+ */
+@method GenToolGroupClass, MSG_META_PTR, MSG_META_START_SELECT,
+			   MSG_META_START_MOVE_COPY, MSG_META_START_FEATURES,
+			   MSG_META_START_OTHER, MSG_META_DRAG_SELECT,
+			   MSG_META_DRAG_MOVE_COPY, MSG_META_DRAG_FEATURES,
+			   MSG_META_DRAG_OTHER, MSG_META_END_SELECT,
+			   MSG_META_END_MOVE_COPY, MSG_META_END_FEATURES,
+			   MSG_META_END_OTHER
+{
+    if (!ObjVarFindData(oself, TEMP_TOOL_GROUP_HIGHLIGHT)) {
+	@callsuper();
+	return;
+    }
+    if (message == MSG_META_START_SELECT && pself->GTGI_controller)
+	GenControlSendStatusChange(pself->GTGI_controller,
+				   GCSF_HIGHLIGHTED_TOOLGROUP_SELECTED);
+    retVal->flags = MRF_PROCESSED;
+}
+
+/* (no ink while the tools are arranged) */
+@method GenToolGroupClass, MSG_META_QUERY_IF_PRESS_IS_INK
+{
+    (void) pself;
+    if (!ObjVarFindData(oself, TEMP_TOOL_GROUP_HIGHLIGHT)) {
+	@callsuper();
+	return;
+    }
+    retVal->inkType = IRV_NO_INK;
+}

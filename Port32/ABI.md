@@ -5422,6 +5422,21 @@ visual classes of `Library/User/Vis`:
   - `library.ui.boot` steps 74 to 78: a controller with two features
     and a tool in a dialog (built, notified, a feature removed and
     added, the tools, the output, unbuilt).
+- **`GenToolGroupClass`** (`Gen/genToolGroup.goc`): the place of a
+  controller's tools: built, it has `GTGI_controller` generate them
+  below it; `MSG_GEN_TOOL_GROUP_SET_HIGHLIGHT` outlines it and makes a
+  press on it select the group (for the tool control, not yet ported).
+  As the asm. A controller removes all the children of the object its
+  tools are in, so a tool group holds nothing else. `library.ui.boot`
+  step 79.
+- **The generic document classes** (`Gen/genUIDocumentControl.goc`:
+  `GenDocumentControlClass`; `Gen/genAppDocumentControl.goc`:
+  `GenDocumentGroupClass`; `Gen/genDocument.goc`: `GenDocumentClass`):
+  the variant superclass (`SPIR_BUILD_UI_DOCUMENT_CONTROL`,
+  `..._APP_DOCUMENT_CONTROL`, `..._DOCUMENT`), a path that starts as
+  the document directory, the list of the removable disks. As the asm;
+  all the rest is the specific UI's, which is not yet ported: such an
+  object cannot be built yet.
 - **Not yet:**
   - in `GenClass`: `MSG_SPEC_RESOLVE_MONIKER_LIST` (`VisClass` keeps
     the list), the icon and text combination moniker
