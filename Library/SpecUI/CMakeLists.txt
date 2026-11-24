@@ -85,6 +85,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CGadget/copenGadget.goc
                ${c}/CGadget/copenSpinGadget.goc
                ${c}/CGadget/copenValue.goc
+               ${c}/CGadget/copenSlider.goc
                ${c}/CGadget/copenGlyphDisplay.goc
                ${c}/CGadget/copenTextBuild.goc
                ${c}/CGadget/copenTextCommon.goc

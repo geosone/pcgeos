@@ -5668,9 +5668,36 @@ are left out), the constants, the variables and the routines.
     "changed" is the value compared before and after;
     `MSG_GEN_VALUE_GET_MAX_TEXT_LEN` is not asked, the longest text's
     length is taken. `OLCtrlDoHints` (the control's geometry hints) is
-    exported for the subclass. Not yet: the slider
-    (`HINT_VALUE_ANALOG_DISPLAY`, minimum and maximum monikers, hash
-    marks), a value that runs an item group, the toolbox's ways, ink.
+    exported for the subclass. Not yet: a value that runs an item
+    group, the toolbox's ways, ink.
+  - **The slider** (`CGadget/copenSlider.goc`,
+    `Internal/SpecUI/olSliderClass.goh`; the slider's side of the spin
+    gadget and the value): `OLSliderClass` is an `OLScrollbar` without
+    arrows (`OLSA_SLIDER`, the value told during drags) that draws hash
+    marks beside itself, a long one where a major interval falls
+    (`MSG_SPEC_SLIDER_SET_NUM_INTERVALS`). A `GenValue` with
+    `HINT_VALUE_ANALOG_DISPLAY` is an `OLValue` with `OLSGA_SLIDER`: no
+    frame, 200 pixels wide (100 high with
+    `HINT_VALUE_ORIENT_VERTICALLY`), its scrollbar an `OLSlider`
+    (`HINT_SPEC_SLIDER`) below the text, or beside it when vertical.
+    The slider's range is 0 to 1 and its value the value's place in the
+    range; a drag comes back as `MSG_SPEC_SPIN_VALUE_CHANGED` and sets
+    the value from the ratio as a change by the user, a press beside
+    the thumb steps by the increment. The text floats: it is drawn
+    centered on the thumb, kept within the scrollbar, cleared along all
+    of it before it is drawn again, and never becomes a text object. A
+    read-only value is a gauge: no thumb, its text at the left.
+    `HINT_VALUE_SHOW_MIN_AND_MAX` (after the analog hint) draws the
+    minimum and maximum centered on the ends of the slider and adds the
+    margins for them; `HINT_VALUE_DISPLAY_INTERVALS` gives the hash
+    marks. With `HINT_VALUE_MERGE_ANALOG_AND_DIGITAL_DISPLAYS` as well
+    the `GenValue` is the `OLSlider` itself, its text in the bar
+    (`OLSA_TEXT_TOO`). Port32: a slider whose parent is no spin gadget
+    shows no hash marks (the asm reads what the unanswered
+    `MSG_SPEC_SPIN_GET_ATTRS` leaves in `cx`); a text gauge's empty
+    part is drawn not selected (the asm's flag is not initialized
+    there). Checked by `library.ui.boot` (step 66) and against the
+    original (`uiref-cmp.sh 1`: the same pixels).
   - **The view** (`CView/cviewPane.goc`, `cviewPaneGeometry.goc`,
     `cviewPaneScroll.goc`, `cviewPaneWindow.goc`,
     `CSpec/cspecPane.goc`; `Internal/SpecUI/olPaneClass.goh`):

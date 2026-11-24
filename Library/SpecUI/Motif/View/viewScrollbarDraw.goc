@@ -769,6 +769,10 @@ void DrawScrollbar(optr oself, GStateHandle gs, Boolean updating)
     d.SBD_gstate = gs;
     d.SBD_updating = updating;
     d.SBD_bw = OpenCheckIfBW();
+    /* (a text gauge fills its empty part before any part has set the
+     * flag: the asm's local is not initialized there and the original
+     * draws it not selected) */
+    d.SBD_notSelected = TRUE;
     if (!updating)
 	DrawOutline(oself, gs);
     sb = SBVis(oself);

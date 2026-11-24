@@ -1,0 +1,141 @@
+/*
+ * copenSlider.goc -- OLSliderClass (after copenSlider.asm): the
+ * scrollbar of a slider or gauge.  A thumb without arrows that tells
+ * its value while it is dragged; hash marks beside it at the intervals
+ * the value's HINT_VALUE_DISPLAY_INTERVALS gives.
+ *
+ * A slider is the child of the spin gadget of a GenValue with
+ * HINT_VALUE_ANALOG_DISPLAY (the gadget knows whether hash marks are
+ * shown), or the GenValue itself when it also has
+ * HINT_VALUE_MERGE_ANALOG_AND_DIGITAL_DISPLAYS (OLSA_TEXT_TOO: the
+ * hint is its own).
+ *
+ * Port32 (Port32/ABI.md section 13y): a slider whose parent is not a
+ * spin gadget shows no hash marks (the asm takes what the unanswered
+ * MSG_SPEC_SPIN_GET_ATTRS leaves in cx).
+ */
+@include "CView/cviewInt.goh"
+@include <Internal/SpecUI/olSliderClass.goh>
+@include <Internal/SpecUI/olSpinGadgetClass.goh>
+
+@classdecl OLSliderClass, neverSaved;
+
+#define Sl(o)	((OLSliderInstance *) ObjDerefVis(o))
+
+/* cgadgetConstant.def, cConstant.def (Motif) */
+#define HASH_MARK_SIZE		5
+#define SMALL_HASH_MARK_SIZE	3
+#define MO_THUMB_HEIGHT		12
+#define MO_CGA_THUMB_HEIGHT	8
+
+/* OLSliderSpecBuild: a slider, its value told during drags (unless a
+ * hint of the scrollbar's says delayed) */
+@method OLSliderClass, MSG_SPEC_BUILD
+{
+    pself->OLSBI_attrs |= OLSA_SLIDER | OLSA_UPDATE_DURING_DRAGS;
+    @callsuper();
+}
+
+@method OLSliderClass, MSG_SPEC_SLIDER_SET_NUM_INTERVALS
+{
+    if (!minor)
+	minor = major;
+    pself->OLSI_numMajorIntervals = major;
+    pself->OLSI_numMinorIntervals = minor;
+}
+
+/* OLSliderWantHashMarks: with the value's text in it: its own hint;
+ * else the spin gadget above knows */
+static Boolean WantHashMarks(optr o)
+{
+    optr p;
+
+    if (Sl(o)->OLSBI_attrs & OLSA_TEXT_TOO)
+	return ObjVarFindData(o, HINT_VALUE_DISPLAY_INTERVALS) != NULL;
+    p = VisFindParent(o);
+    if (!p || !ObjIsObjectInClass(p, &OLSpinGadgetClass))
+	return FALSE;
+    return (@call p::MSG_SPEC_SPIN_GET_ATTRS() & OLSGA_SHOW_HASH_MARKS) != 0;
+}
+
+/* OLSliderRecalcSize: the scrollbar's; with hash marks wider by their
+ * length, and long enough for three pixels an interval and a thumb */
+@method OLSliderClass, MSG_VIS_RECALC_SIZE
+{
+    SizeAsDWord s = @callsuper();
+    word across, along, min;
+    Boolean vertical;
+
+    if (!WantHashMarks(oself))
+	return s;
+    pself = Sl(oself);
+    vertical = (pself->OLSBI_attrs & OLSA_VERTICAL) != 0;
+    across = vertical ? DWORD_WIDTH(s) : DWORD_HEIGHT(s);
+    along = vertical ? DWORD_HEIGHT(s) : DWORD_WIDTH(s);
+    across += HASH_MARK_SIZE + 2;
+    min = (word) ((pself->OLSI_numMinorIntervals - 1) * 3 + 1 +
+		  MO_THUMB_HEIGHT);
+    if (vertical ? OpenCheckIfCGA() : OpenCheckIfNarrow())
+	min -= MO_THUMB_HEIGHT - MO_CGA_THUMB_HEIGHT;
+    if (along < min)
+	along = min;
+    if (vertical) {
+	if (OpenCheckIfNarrow())
+	    across -= 2;
+	return MAKE_SIZE_DWORD(across, along);
+    }
+    if (OpenCheckIfCGA())
+	across -= 2;
+    return MAKE_SIZE_DWORD(along, across);
+}
+
+/*
+ * DrawHashMarks: a black line for every minor interval, from the first
+ * to the last place of the thumb's middle; the long ones where a major
+ * interval falls
+ */
+static void DrawHashMarks(optr o, GStateHandle gs)
+{
+    OLSliderInstance *p = Sl(o);
+    word minor = p->OLSI_numMinorIntervals, major = p->OLSI_numMajorIntervals;
+    Boolean vertical = (p->OLSBI_attrs & OLSA_VERTICAL) != 0;
+    Boolean readOnly = (SBGen(o)->GI_attrs & GA_READ_ONLY) != 0;
+    word i, range, len, off;
+    sword a, b, c, d, t;
+
+    GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    if (!minor)
+	return;
+    for (i = 0; i <= minor; i++) {
+	p = Sl(o);
+	len = SMALL_HASH_MARK_SIZE;
+	if (major && ((dword) major * i) % minor == 0)
+	    len = HASH_MARK_SIZE;
+	range = (word) ((vertical ? p->VI_bounds.R_bottom - p->VI_bounds.R_top
+				  : p->VI_bounds.R_right - p->VI_bounds.R_left)
+			- p->OLSBI_elevLen - 2);
+	off = (word) (((dword) range * i) / minor);
+	b = (sword) (p->OLSBI_arrowSize + 3);
+	d = (sword) (b + len);
+	a = c = (sword) off;
+	if (!readOnly) {
+	    /* the middle of the thumb (three arrows long) */
+	    t = (sword) ((p->OLSBI_arrowSize * 3) >> 1);
+	    a += t;
+	    c += t;
+	}
+	if (vertical) {
+	    t = a; a = b; b = t;
+	    t = c; c = d; d = t;
+	}
+	GrDrawLine(gs, a + p->VI_bounds.R_left, b + p->VI_bounds.R_top,
+		   c + p->VI_bounds.R_left, d + p->VI_bounds.R_top);
+    }
+}
+
+@method OLSliderClass, MSG_VIS_DRAW
+{
+    @callsuper();
+    if (WantHashMarks(oself))
+	DrawHashMarks(oself, gstate);
+}

@@ -1,0 +1,26 @@
+/*
+ * olSliderClass.goh -- OLSliderClass, the specific UI's slider or
+ * gauge: a scrollbar without arrows, with hash marks beside it (after
+ * Include/Internal/SpecUI/olSliderClass.def), for Port32.
+ */
+#ifndef __OLSLIDERCLASS_GOH
+#define __OLSLIDERCLASS_GOH
+
+@include <Internal/SpecUI/olScrollbarClass.goh>
+
+@deflib motif
+
+@class OLSliderClass, OLScrollbarClass;
+@uses GenValueClass;
+
+/* the hash marks: so many intervals (no minor ones: the major ones) */
+@message void MSG_SPEC_SLIDER_SET_NUM_INTERVALS(word major = cx,
+						word minor = dx);
+
+    @instance word	OLSI_numMajorIntervals = 0;
+    @instance word	OLSI_numMinorIntervals = 0;
+@endc;
+
+@endlib
+
+#endif

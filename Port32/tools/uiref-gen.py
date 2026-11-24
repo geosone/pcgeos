@@ -12,7 +12,7 @@ screen is dumped).  OUTDIR's last component must be "uiref" (pmake names
 the geode after the directory).
 
 VARIANT picks what is on the screen:
-    1  Doc 1 maximized (texts, gadgets, the spin gadget)   [default]
+    1  Doc 1 maximized (texts, gadgets, the spin gadget, sliders) [default]
     2  Doc 2 maximized (items, lists, scrollbar, views, glyphs)
     3  both displays overlapping, as they come up
     4  a standard dialog (an error) over variant 1

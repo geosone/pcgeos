@@ -143,7 +143,7 @@ static void Shot(int step)
     int x, y;
 
     /* (step < 0: the reference mode, whatever the step) */
-    if (!f || (step >= 0 && step != (at ? atoi(at) : 65)))
+    if (!f || (step >= 0 && step != (at ? atoi(at) : 66)))
 	return;
     TimerSleep((word) (getenv("UIBOOT_SHOT_TICKS")
 		       ? atoi(getenv("UIBOOT_SHOT_TICKS")) : 60));
@@ -269,8 +269,8 @@ int main(int argc, char **argv)
      * taller than the screen scrolled by its scrollers and to its focus;
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
-     * a separator */
-    for (i = 2; i <= 65; i++) {
+     * a separator; ... ; the sliders */
+    for (i = 2; i <= 66; i++) {
 	step(i);
 	Shot(i);
     }

@@ -114,3 +114,4 @@ export OLGadgetClass
 export OLGadgetCompClass
 export OLSpinGadgetClass
 export OLValueClass
+export OLSliderClass

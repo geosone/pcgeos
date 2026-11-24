@@ -1,21 +1,61 @@
 /*
  * cspecValue.goc -- the build routine of the value (after
  * cspecValue.asm): a GenValue with HINT_VALUE_X_SCROLLER or
- * HINT_VALUE_Y_SCROLLER is an OLScrollbar, with HINT_SPEC_SLIDER (the
- * scrollbar of a slider) too; any other is an OLValue, the spin gadget.
- *
- * Port32 (Port32/ABI.md section 13y), not yet: OLSliderClass
- * (HINT_SPEC_SLIDER is built as a scrollbar).
+ * HINT_VALUE_Y_SCROLLER is an OLScrollbar; with HINT_SPEC_SLIDER (the
+ * scrollbar of a slider), or with both HINT_VALUE_ANALOG_DISPLAY and
+ * HINT_VALUE_MERGE_ANALOG_AND_DIGITAL_DISPLAYS, an OLSlider; any other
+ * is an OLValue, the spin gadget (which makes a slider of its own for
+ * HINT_VALUE_ANALOG_DISPLAY).  The last of these hints in the object
+ * decides.
  */
 @include "CView/cviewInt.goh"
 @include <Internal/SpecUI/olValueClass.goh>
+@include <Internal/SpecUI/olSliderClass.goh>
+
+typedef struct {
+    ClassStruct	*class;
+    word	both;		/* MaybeReturnSlider: needs both hints */
+} BuildValueScan;
+
+static void BuildValueHint(MemHandle mh, ChunkHandle chnk,
+			   VarDataEntry *extra, word dataType, void *data)
+{
+    BuildValueScan *b = data;
+
+    (void) mh;
+    (void) chnk;
+    (void) extra;
+    switch (dataType) {
+    case HINT_VALUE_X_SCROLLER:
+    case HINT_VALUE_Y_SCROLLER:
+	b->class = (ClassStruct *) &OLScrollbarClass;
+	break;
+    case HINT_SPEC_SLIDER:
+	b->class = (ClassStruct *) &OLSliderClass;
+	break;
+    default:
+	if (--b->both == 0)
+	    b->class = (ClassStruct *) &OLSliderClass;
+	break;
+    }
+}
+
+static VarDataCHandler buildValueHints[] = {
+    { HINT_VALUE_X_SCROLLER, BuildValueHint },
+    { HINT_VALUE_Y_SCROLLER, BuildValueHint },
+    { HINT_SPEC_SLIDER, BuildValueHint },
+    { HINT_VALUE_ANALOG_DISPLAY, BuildValueHint },
+    { HINT_VALUE_MERGE_ANALOG_AND_DIGITAL_DISPLAYS, BuildValueHint }
+};
 
 ClassStruct *OLBuildValue(optr oself, word masterOffset)
 {
+    BuildValueScan b;
+
     (void) masterOffset;
-    if (ObjVarFindData(oself, HINT_VALUE_X_SCROLLER) ||
-	ObjVarFindData(oself, HINT_VALUE_Y_SCROLLER) ||
-	ObjVarFindData(oself, HINT_SPEC_SLIDER))
-	return (ClassStruct *) &OLScrollbarClass;
-    return (ClassStruct *) &OLValueClass;
+    b.class = (ClassStruct *) &OLValueClass;
+    b.both = 2;
+    ObjVarScanData(oself, sizeof(buildValueHints) / sizeof(buildValueHints[0]),
+		   buildValueHints, &b);
+    return b.class;
 }

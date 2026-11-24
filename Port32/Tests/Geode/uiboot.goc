@@ -47,6 +47,7 @@
 #include <timer.h>
 @include <Internal/SpecUI/olCtrlClass.goh>
 @include <Internal/SpecUI/olValueClass.goh>
+@include <Internal/SpecUI/olSliderClass.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -334,12 +335,12 @@ static word ubAnswer;
 /* in Doc 1: a text to edit, one line with a moniker, and a text to
  * show, several lines */
 @object GenInteractionClass UBTexts = {
-    GI_comp = @UBGadgets, @UBName, @UBNote, @UBCount;
+    GI_comp = @UBGadgets, @UBName, @UBNote, @UBCount, @UBSliders;
 }
 /* gadgets: one of our own, and a composite with a trigger in it (the
  * first object to navigate to: the default focus is not there) */
 @object GenInteractionClass UBGadgets = {
-    GI_comp = @UBGadget, @UBGadgetC;
+    GI_comp = @UBGadget, @UBGadgetC, @UBVSlide;
     HINT_ORIENT_CHILDREN_HORIZONTALLY;
 }
 @object UBGadgetClass UBGadget = {
@@ -374,6 +375,43 @@ static word ubAnswer;
     GVLI_maximum = 0x140000;
     GVLI_destination = process;
     GVLI_applyMsg = MSG_UB_COUNT_APPLIED;
+}
+/* sliders: a horizontal one with its ends and hash marks (0 to 100,
+ * at 30), a gauge and a slider that shows its value in itself; the
+ * vertical one stands beside the gadgets (Doc 1 has to fit half the
+ * screen when tiled) */
+@object GenInteractionClass UBSliders = {
+    GI_comp = @UBSlide, @UBGauge, @UBMerged;
+}
+@object GenValueClass UBSlide = {
+    GI_visMoniker = "Level";
+    GVLI_value = 0x1e0000;
+    GVLI_maximum = 0x640000;
+    GVLI_increment = 0x50000;
+    HINT_VALUE_ANALOG_DISPLAY;
+    HINT_VALUE_SHOW_MIN_AND_MAX;
+    HINT_VALUE_DISPLAY_INTERVALS = { 4, 20 };
+}
+@object GenValueClass UBGauge = {
+    GI_visMoniker = "Done";
+    GI_attrs = @default | GA_READ_ONLY;
+    GVLI_value = 0x280000;
+    GVLI_maximum = 0x640000;
+    HINT_VALUE_ANALOG_DISPLAY;
+}
+@object GenValueClass UBMerged = {
+    GI_attrs = @default | GA_READ_ONLY;
+    GVLI_value = 0x460000;
+    GVLI_maximum = 0x640000;
+    HINT_VALUE_ANALOG_DISPLAY;
+    HINT_VALUE_MERGE_ANALOG_AND_DIGITAL_DISPLAYS;
+}
+@object GenValueClass UBVSlide = {
+    GVLI_value = 0x20000;
+    GVLI_maximum = 0xa0000;
+    HINT_VALUE_ANALOG_DISPLAY;
+    HINT_VALUE_ORIENT_VERTICALLY;
+    HINT_VALUE_DISPLAY_INTERVALS = { 2, 10 };
 }
 /* in Doc 2: a view of a 2000 x 300 document that scrolls both ways
  * (its window fixed at 200 x 40: the screens of the tests differ) */
@@ -701,6 +739,16 @@ static void VisData(optr o, void *buf, word size)
     ObjLockObjBlock(OptrToHandle(o));
     memcpy(buf, ObjDerefVis(o), size);
     MemUnlock(OptrToHandle(o));
+}
+
+static GenAttrs GenAttrsOf(optr o)
+{
+    GenAttrs a;
+
+    ObjLockObjBlock(OptrToHandle(o));
+    a = ((GenInstance *) ObjDerefGen(o))->GI_attrs;
+    MemUnlock(OptrToHandle(o));
+    return a;
 }
 
 /* the text of a generic object's moniker is t */
@@ -2742,6 +2790,84 @@ static void UBClickMenu(word n)
     case 65:
 	UBCHECK(ubState.UBS_count[1] == 9);
 	break;
+    case 66: {
+	/* the sliders: a GenValue with HINT_VALUE_ANALOG_DISPLAY is a
+	 * spin gadget with an OLSlider below its text (a vertical one
+	 * beside it), with the minimum and maximum and hash marks; one
+	 * that also merges its text is the OLSlider itself */
+	OLValueInstance v;
+	OLSliderInstance sl;
+	MouseReturnParams mr;
+	Rectangle b;
+	optr bar;
+	WWFixedAsDWord half = 0x8000;
+	GenValueStateFlagsAsWord sf;
+
+	memset(&sf, 0, sizeof(sf));
+	@call UBDoc1::MSG_GEN_BRING_TO_TOP();
+	@call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	UBCHECK(InClass(@UBSlide, (ClassStruct *) &OLValueClass));
+	VisData(@UBSlide, &v, sizeof(v));
+	UBCHECK((v.OLSGI_attrs & (OLSGA_SLIDER | OLSGA_SHOW_MIN_MAX_MKRS |
+				  OLSGA_SHOW_HASH_MARKS |
+				  OLSGA_ORIENT_VERTICALLY |
+				  OLSGA_CANT_EDIT_TEXT)) ==
+		(OLSGA_SLIDER | OLSGA_SHOW_MIN_MAX_MKRS |
+		 OLSGA_SHOW_HASH_MARKS));
+	UBCHECK(!(v.OLSGI_states & OLSGS_DRAW_FRAME));
+	UBCHECK(v.VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY);
+	UBCHECK(v.OLSGI_desWidth == 200 && v.OLSGI_scrollbar);
+	bar = ConstructOptr(OptrToHandle(@UBSlide), v.OLSGI_scrollbar);
+	UBCHECK(InClass(bar, (ClassStruct *) &OLSliderClass));
+	VisData(bar, &sl, sizeof(sl));
+	UBCHECK((sl.OLSBI_attrs & (OLSA_SLIDER | OLSA_VERTICAL | OLSA_STUPID |
+				   OLSA_UPDATE_DURING_DRAGS)) ==
+		(OLSA_SLIDER | OLSA_UPDATE_DURING_DRAGS));
+	UBCHECK(sl.OLSI_numMajorIntervals == 4 &&
+		sl.OLSI_numMinorIntervals == 20);
+	b = Bounds(bar);
+	/* (the hash marks: five pixels and two more below the bar) */
+	UBCHECK(b.R_bottom - b.R_top == (sword) sl.OLSBI_arrowSize + 2 + 7);
+	UBCHECK(b.R_right - b.R_left >= 200);
+	UBCHECK(ItemIs(v.OLVLI_item, "30"));
+	/* the thumb dragged to the middle */
+	@call UBSlide::MSG_SPEC_SPIN_VALUE_CHANGED(half, sf);
+	UBCHECK(@call UBSlide::MSG_GEN_VALUE_GET_INTEGER_VALUE() == 50);
+	UBCHECK(@call UBSlide::MSG_GEN_VALUE_IS_MODIFIED());
+	UBCHECK(ItemIs(v.OLVLI_item, "50"));
+	/* a press left of the thumb: down by the increment */
+	memset(&mr, 0, sizeof(mr));
+	@call bar::MSG_META_START_SELECT(&mr, b.R_left + 3, b.R_top + 3,
+		(UIFA_SELECT << 8) | BI_PRESS | BI_B0_DOWN);
+	UBCHECK(mr.flags & MRF_PROCESSED);
+	@call bar::MSG_META_END_SELECT(&mr, b.R_left + 3, b.R_top + 3, 0);
+	UBCHECK(@call UBSlide::MSG_GEN_VALUE_GET_INTEGER_VALUE() == 45);
+	/* the gauge: read-only, its bar too */
+	VisData(@UBGauge, &v, sizeof(v));
+	UBCHECK((v.OLSGI_attrs & (OLSGA_SLIDER | OLSGA_CANT_EDIT_TEXT |
+				  OLSGA_NO_UP_DOWN_ARROWS)) ==
+		(OLSGA_SLIDER | OLSGA_CANT_EDIT_TEXT));
+	bar = ConstructOptr(OptrToHandle(@UBGauge), v.OLSGI_scrollbar);
+	UBCHECK(InClass(bar, (ClassStruct *) &OLSliderClass));
+	UBCHECK(GenAttrsOf(bar) & GA_READ_ONLY);
+	/* the merged one */
+	UBCHECK(InClass(@UBMerged, (ClassStruct *) &OLSliderClass));
+	VisData(@UBMerged, &sl, sizeof(sl));
+	UBCHECK((sl.OLSBI_attrs & (OLSA_SLIDER | OLSA_TEXT_TOO)) ==
+		(OLSA_SLIDER | OLSA_TEXT_TOO));
+	/* the vertical one */
+	VisData(@UBVSlide, &v, sizeof(v));
+	UBCHECK(v.OLSGI_attrs & OLSGA_ORIENT_VERTICALLY);
+	UBCHECK(!(v.VCI_geoAttrs & VCGA_ORIENT_CHILDREN_VERTICALLY));
+	UBCHECK(v.OLSGI_desHeight == 100);
+	bar = ConstructOptr(OptrToHandle(@UBVSlide), v.OLSGI_scrollbar);
+	VisData(bar, &sl, sizeof(sl));
+	UBCHECK(sl.OLSBI_attrs & OLSA_VERTICAL);
+	b = Bounds(bar);
+	UBCHECK(b.R_bottom - b.R_top >= 100);
+	UBCHECK(b.R_right - b.R_left == (sword) sl.OLSBI_arrowSize + 2 + 7);
+	break;
+    }
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */
     case 101:

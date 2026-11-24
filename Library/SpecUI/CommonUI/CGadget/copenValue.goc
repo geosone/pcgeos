@@ -4,16 +4,23 @@
  * item is the value as text; the arrows step the value, typed text is
  * read when the value is asked for, applied, or the focus goes.
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the slider
- * (HINT_VALUE_ANALOG_DISPLAY, HINT_VALUE_SHOW_MIN_AND_MAX,
- * HINT_VALUE_DISPLAY_INTERVALS, MSG_SPEC_SPIN_VALUE_CHANGED); a value
- * that runs an item group (ATTR_GEN_VALUE_RUNS_ITEM_GROUP,
+ * With HINT_VALUE_ANALOG_DISPLAY the gadget is a slider (a gauge if
+ * read-only): the thumb's place is the value's place in its range,
+ * HINT_VALUE_SHOW_MIN_AND_MAX and HINT_VALUE_DISPLAY_INTERVALS add the
+ * texts at its ends and the hash marks.
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: a value that runs an
+ * item group (ATTR_GEN_VALUE_RUNS_ITEM_GROUP,
  * MSG_SPEC_VALUE_SET_FROM_ITEM_GROUP).
  */
 @include "cGeode.goh"
 @include <Internal/SpecUI/olValueClass.goh>
-@include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Internal/SpecUI/olSliderClass.goh>
 @include <Objects/vTextC.goh>
+
+/* cgadgetConstant.def */
+#define OL_SLIDER_DEFAULT_WIDTH		200
+#define OL_SLIDER_DEFAULT_HEIGHT	100
 
 @classdecl OLValueClass, neverSaved;
 
@@ -213,9 +220,9 @@ static void ValueHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
 {
     optr o = ConstructOptr(mh, chnk);
     OLValueInstance *p = Val(o);
+    Point *size = handlerData;
 
     (void) extra;
-    (void) handlerData;
     switch (dataType) {
     case HINT_VALUE_CUSTOM_RETURN_PRESS:
 	p->OLVLI_flags |= OLVF_CUSTOM_RETURN_PRESS;
@@ -225,6 +232,16 @@ static void ValueHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
 	break;
     case HINT_VALUE_NOT_INCREMENTABLE:
 	p->OLSGI_attrs |= OLSGA_NO_UP_DOWN_ARROWS;
+	break;
+    case HINT_VALUE_SHOW_MIN_AND_MAX:
+	/* (only for a slider: the analog hint comes first) */
+	if (p->OLSGI_attrs & OLSGA_SLIDER)
+	    p->OLSGI_attrs |= OLSGA_SHOW_MIN_MAX_MKRS;
+	break;
+    case HINT_VALUE_ANALOG_DISPLAY:
+	p->OLSGI_attrs |= OLSGA_SLIDER;
+	p->OLSGI_states &= ~OLSGS_DRAW_FRAME;
+	size->P_x = OL_SLIDER_DEFAULT_WIDTH;
 	break;
     case HINT_VALUE_NOT_DIGITALLY_EDITABLE:
 	NotDigitallyEditable(o);
@@ -245,6 +262,8 @@ static VarDataCHandler valueHints[] = {
     { HINT_VALUE_CUSTOM_RETURN_PRESS, ValueHint },
     { HINT_VALUE_NAVIGATE_TO_NEXT_FIELD_ON_RETURN_PRESS, ValueHint },
     { HINT_VALUE_NOT_INCREMENTABLE, ValueHint },
+    { HINT_VALUE_SHOW_MIN_AND_MAX, ValueHint },
+    { HINT_VALUE_ANALOG_DISPLAY, ValueHint },
     { HINT_VALUE_NOT_DIGITALLY_EDITABLE, ValueHint },
     { ATTR_GEN_PROPERTY, ValueHint },
     { ATTR_GEN_NOT_PROPERTY, ValueHint },
@@ -254,12 +273,16 @@ static VarDataCHandler valueHints[] = {
 /*
  * OLValueSpecBuild: the item's chunk, as wide as the longest text; the
  * value's text in it; a framed text; the hints; then the gadget is
- * built and shows the item; children side by side; a read-only value
- * is not edited; the scrollbar's range (0 to 1) and value; a modified
+ * built and shows the item; the hash marks; children side by side (a
+ * horizontal slider: below each other); a read-only value is not
+ * edited; the scrollbar's range (0 to 1) and value; a modified
  * value makes its dialog applyable
  */
 @method OLValueClass, MSG_SPEC_BUILD
 {
+    Point size;
+    GenValueIntervals *iv;
+
     if (!pself->OLVLI_item) {
 	ChunkHandle c = LMemAlloc(OptrToHandle(oself),
 				  GEN_VALUE_MAX_TEXT_LEN);
@@ -279,13 +302,39 @@ static VarDataCHandler valueHints[] = {
     pself = Val(oself);
     pself->OLSGI_attrs |= OLSGA_TEXT;
     pself->OLSGI_states |= OLSGS_DRAW_FRAME;
+    size.P_x = size.P_y = 0;
     OpenScanVarData(oself, sizeof(valueHints) / sizeof(valueHints[0]),
-		    valueHints, NULL);
-    if (ObjVarFindData(oself, HINT_VALUE_ORIENT_VERTICALLY))
-	Val(oself)->OLSGI_attrs |= OLSGA_ORIENT_VERTICALLY;
+		    valueHints, &size);
+    pself = Val(oself);
+    if (ObjVarFindData(oself, HINT_VALUE_ORIENT_VERTICALLY)) {
+	pself->OLSGI_attrs |= OLSGA_ORIENT_VERTICALLY;
+	if (pself->OLSGI_attrs & OLSGA_SLIDER) {
+	    size.P_y = OL_SLIDER_DEFAULT_HEIGHT;
+	    size.P_x = 0;
+	}
+    }
+    if (size.P_x)
+	pself->OLSGI_desWidth = (word) size.P_x;
+    if (size.P_y)
+	pself->OLSGI_desHeight = (word) size.P_y;
     @callsuper();
     @call oself::MSG_SPEC_SPIN_SET_ITEM(Val(oself)->OLVLI_item);
-    Val(oself)->VCI_geoAttrs &= ~VCGA_ORIENT_CHILDREN_VERTICALLY;
+    pself = Val(oself);
+    iv = ObjVarFindData(oself, HINT_VALUE_DISPLAY_INTERVALS);
+    if (iv && pself->OLSGI_scrollbar) {
+	word major = iv->GVI_numMajorIntervals;
+	word minor = iv->GVI_numMinorIntervals;
+
+	pself->OLSGI_attrs |= OLSGA_SHOW_HASH_MARKS;
+	@call InBlock(oself, pself->OLSGI_scrollbar)::
+		MSG_SPEC_SLIDER_SET_NUM_INTERVALS(major, minor);
+	pself = Val(oself);
+    }
+    /* a horizontal slider below its text, a vertical one beside it */
+    pself->VCI_geoAttrs &= ~VCGA_ORIENT_CHILDREN_VERTICALLY;
+    if ((pself->OLSGI_attrs & (OLSGA_SLIDER | OLSGA_ORIENT_VERTICALLY)) ==
+	OLSGA_SLIDER)
+	pself->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
     if (GVL(oself)->GI_attrs & GA_READ_ONLY)
 	NotDigitallyEditable(oself);
     if (ObjVarFindData(oself, HINT_VALUE_FRAME)) {
@@ -411,6 +460,22 @@ static VarDataCHandler valueHints[] = {
 /* ---------------------------------------------------------------------
  * The user
  * ------------------------------------------------------------------- */
+
+/* OLSpinGadgetValueChanged: the slider's thumb was moved: the value
+ * from its place in the range, as a change by the user */
+@method OLValueClass, MSG_SPEC_SPIN_VALUE_CHANGED
+{
+    GenValueStateFlags was = GVL(oself)->GVLI_stateFlags & GVSF_MODIFIED;
+    WWFixedAsDWord old = GVL(oself)->GVLI_value;
+    WWFixed r;
+
+    (void) pself;
+    (void) stateFlags;
+    r.WWF_int = IntegerOf(value);
+    r.WWF_frac = FractionOf(value);
+    @call oself::MSG_GEN_VALUE_SET_VALUE_FROM_RATIO(r, GVT_VALUE);
+    UserChanged(oself, was, GVL(oself)->GVLI_value != old);
+}
 
 @method OLValueClass, MSG_SPEC_SPIN_INCREMENT
 {

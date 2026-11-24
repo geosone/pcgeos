@@ -8,14 +8,19 @@
  * gains the focus (its text chunk is the item's) and goes again when
  * the focus is lost.
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the slider
- * (OLSGA_SLIDER: the text floating over the thumb, the minimum and
- * maximum monikers, the hash marks); the toolbox's ways (the size
- * taken from the toolbar, the pre-passive button that gives the focus
- * back); ink (MSG_META_QUERY_IF_PRESS_IS_INK); the floating keyboard.
+ * A slider (OLSGA_SLIDER, set by the subclass) has an OLSlider instead
+ * of the arrows, beside or below its text; the text of a slider that
+ * can be dragged floats along with the thumb and is never edited; the
+ * minimum and maximum can be shown at the ends (OLSGA_SHOW_MIN_MAX_MKRS).
+ *
+ * Port32 (Port32/ABI.md section 13y), not yet: the toolbox's ways (the
+ * size taken from the toolbar, the pre-passive button that gives the
+ * focus back); ink (MSG_META_QUERY_IF_PRESS_IS_INK); the floating
+ * keyboard.
  */
 @include "cGeode.goh"
-@include <Internal/SpecUI/olSpinGadgetClass.goh>
+/* (HINT_SPEC_SLIDER is the subclass's) */
+@include <Internal/SpecUI/olValueClass.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Objects/vTextC.goh>
 #include <timer.h>
@@ -36,6 +41,7 @@
 #define SPIN_FIRST_DELAY		25
 #define OL_SPIN_DEFAULT_DESIRED_WIDTH	(SST_AVG_CHAR_WIDTHS | 8)
 #define OL_SPIN_DEFAULT_DESIRED_HEIGHT	(SST_LINES_OF_TEXT | 1)
+#define MIN_MAX_MARGIN			1
 
 /* ---------------------------------------------------------------------
  * Sizes
@@ -147,17 +153,92 @@ static void SpinBounds(optr o, Rectangle *r)
     return pself->OLSGI_attrs;
 }
 
-/* GetTextPosition: text of the height centered in the area */
+/* CheckIfFloatingText: the text of a slider that can be dragged goes
+ * along with the thumb */
+static Boolean FloatingText(optr o)
+{
+    if (Gen(o)->GI_attrs & GA_READ_ONLY)
+	return FALSE;
+    return (Spin(o)->OLSGI_attrs & OLSGA_SLIDER) != 0;
+}
+
+/* GetSpinTextWidth: of the item's text */
+static word ItemTextWidth(optr o)
+{
+    ChunkHandle item = @call o::MSG_SPEC_SPIN_GET_ITEM();
+    GStateHandle gs;
+    word w;
+
+    if (!item)
+	return 0;
+    gs = ViewCreateCalcGState();
+    w = GrTextWidth(gs, LMemDeref(InBlock(o, item)), 0);
+    GrDestroyState(gs);
+    return w;
+}
+
+/*
+ * PositionFloatingText: along the slider the text is centered on the
+ * middle of the thumb (three arrows long), kept within the scrollbar
+ * (a horizontal one: by the text width the gadget keeps, not the
+ * item's)
+ */
+static void PositionFloatingText(optr o, sword *x, sword *y)
+{
+    OLSpinGadgetInstance *p = Spin(o);
+    Boolean vertical = (p->OLSGI_attrs & OLSGA_ORIENT_VERTICALLY) != 0;
+    word size = vertical ? GetSystemFontHeight() : ItemTextWidth(o);
+    sword pos = vertical ? *y : *x, lo, hi;
+    OLScrollbarInstance *sb;
+
+    p = Spin(o);
+    pos = (sword) (pos - (sword) ((size + 1) >> 1));
+    if (!p->OLSGI_scrollbar)
+	goto done;
+    sb = (OLScrollbarInstance *) ObjDerefVis(InBlock(o, p->OLSGI_scrollbar));
+    pos = (sword) (pos + sb->OLSBI_elevOffset + sb->OLSBI_arrowSize +
+		   (sb->OLSBI_arrowSize >> 1) + 1);
+    if (vertical) {
+	lo = sb->VI_bounds.R_top;
+	hi = sb->VI_bounds.R_bottom;
+    } else {
+	lo = sb->VI_bounds.R_left;
+	hi = sb->VI_bounds.R_right;
+	size = p->OLSGI_textWidth;
+    }
+    hi = (sword) (hi - (sword) size);
+    if (pos < lo)
+	pos = lo;
+    if (pos > hi)
+	pos = hi;
+done:
+    if (vertical)
+	*y = pos;
+    else
+	*x = pos;
+}
+
+/* GetTextPosition: text of the height centered in the area (a gauge's
+ * at its top); a slider's floating text at the thumb */
 static void TextPosition(optr o, word height, sword *x, sword *y)
 {
     Rectangle r;
     sword room;
+    Boolean floating = FloatingText(o);
 
     SpinBounds(o, &r);
+    *x = r.R_left;
+    *y = r.R_top;
+    if (floating) {
+	PositionFloatingText(o, x, y);
+	return;
+    }
+    if ((Spin(o)->OLSGI_attrs & OLSGA_SLIDER) &&
+	(Gen(o)->GI_attrs & GA_READ_ONLY))
+	return;
     room = (sword) (r.R_bottom - r.R_top - (sword) height);
     if (room < 0)
 	room = 0;
-    *x = r.R_left;
     *y = (sword) (r.R_top + room / 2);
 }
 
@@ -235,23 +316,33 @@ static void SetupDesiredSize(optr o)
 
 /*
  * CreateSpinScrollbar: a scrollbar of two arrows, one above the other
- * (stupid, vertical), that sends the spin messages to the gadget;
- * read-only with it; it applies whether its value changed or not
+ * (stupid, vertical), or a slider along the gadget's direction, that
+ * sends the spin messages to the gadget; read-only with it; it applies
+ * whether its value changed or not
  */
 static void CreateScrollbar(optr o, SpecBuildFlags flags)
 {
     OpenScrollbarArgs a;
     optr sb;
     OLScrollbarInstance *s;
+    OLSpinGadgetInstance *p;
+    word hint = HINT_VALUE_X_SCROLLER;
+    OLScrollbarAttrs attrs = OLSA_STUPID | OLSA_VERTICAL;
 
     (void) flags;
     memset(&a, 0, sizeof(a));
     a.OSA_actionMsg = MSG_SPEC_SPIN_MINIMUM;
-    a.OSA_vertical = TRUE;
-    sb = OpenAddScrollbar(o, HINT_VALUE_X_SCROLLER, FALSE, FALSE, &a);
+    p = Spin(o);
+    if (p->OLSGI_attrs & OLSGA_SLIDER) {
+	hint = HINT_SPEC_SLIDER;
+	attrs = (p->OLSGI_attrs & OLSGA_ORIENT_VERTICALLY) ? OLSA_VERTICAL
+							   : 0;
+    }
+    a.OSA_vertical = (attrs & OLSA_VERTICAL) != 0;
+    sb = OpenAddScrollbar(o, hint, FALSE, FALSE, &a);
     Spin(o)->OLSGI_scrollbar = OptrToChunk(sb);
     s = (OLScrollbarInstance *) ObjDerefVis(sb);
-    s->OLSBI_attrs |= OLSA_STUPID | OLSA_VERTICAL;
+    s->OLSBI_attrs |= attrs;
     if (Gen(o)->GI_attrs & GA_READ_ONLY)
 	Gen(sb)->GI_attrs |= GA_READ_ONLY;
     (void) ObjVarAddData(sb,
@@ -372,8 +463,47 @@ static VisCompSpacingMarginsInfo PassMarginInfo(optr o)
 	VisGetCenter(oself, retValue);
 }
 
+/* GetMinMaxMonikerSize: of the minimum's or the maximum's text */
+static void MinMaxSize(optr o, GenValueType t, word *w, word *h)
+{
+    char buf[GEN_VALUE_MAX_TEXT_LEN + 1];
+    GStateHandle gs = ViewCreateCalcGState();
+
+    buf[0] = 0;
+    @call o::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, t);
+    *w = GrTextWidth(gs, buf, 0);
+    *h = (word) GrFontMetrics(gs, GFMI_HEIGHT_ROUNDED);
+    GrDestroyState(gs);
+}
+
+/*
+ * AddInSpaceForMinMaxMonikers: the minimum and maximum stand centered
+ * on the ends of the slider, past its hash marks: half of each sticks
+ * out at its end, the larger of them is added across
+ */
+static void AddMinMaxMargins(optr o, Rectangle *m)
+{
+    word minW, minH, maxW, maxH;
+
+    if (!(Spin(o)->OLSGI_attrs & OLSGA_SHOW_MIN_MAX_MKRS))
+	return;
+    MinMaxSize(o, GVT_MINIMUM, &minW, &minH);
+    MinMaxSize(o, GVT_MAXIMUM, &maxW, &maxH);
+    if (Spin(o)->OLSGI_attrs & OLSGA_ORIENT_VERTICALLY) {
+	m->R_top += (sword) (minH >> 1);
+	m->R_bottom += (sword) (maxH >> 1);
+	m->R_right += (sword) ((maxW >= minW ? maxW : minW) + MIN_MAX_MARGIN);
+    } else {
+	m->R_left += (sword) (minW >> 1);
+	m->R_right += (sword) (maxW >> 1);
+	m->R_bottom += (sword) ((maxH >= minH ? maxH : minH) +
+				MIN_MAX_MARGIN);
+    }
+}
+
 /* OLSpinGadgetGetMargins: the control's (top and bottom only for a
- * moniker above), the text area before the scrollbar */
+ * moniker above), the text area before the scrollbar, the minimum and
+ * maximum of a slider */
 @method OLSpinGadgetClass, MSG_VIS_COMP_GET_MARGINS
 {
     word w, h;
@@ -387,6 +517,7 @@ static VisCompSpacingMarginsInfo PassMarginInfo(optr o)
 	retValue->R_top += (sword) h;
     else
 	retValue->R_left += (sword) w;
+    AddMinMaxMargins(oself, retValue);
 }
 
 /* OLSpinGadgetGetMinimumSize: the moniker and the text area, beside
@@ -486,7 +617,8 @@ static VisCompSpacingMarginsInfo PassMarginInfo(optr o)
 /*
  * ClearSpinDisplay (Motif): the area filled in the light color (white
  * in black and white) unless a text object draws it; a disabled gadget
- * is always cleared, out to its frame.  The frame: dark at the left
+ * is always cleared, out to its frame; a slider's along all of its
+ * scrollbar if the text floats.  The frame: dark at the left
  * and top, white at the right and bottom (black in black and white).
  */
 static void ClearDisplay(optr o, GStateHandle gs)
@@ -507,6 +639,23 @@ static void ClearDisplay(optr o, GStateHandle gs)
 	r.R_right += SPIN_CONTENT_MARGIN;
 	r.R_top--;
 	r.R_bottom++;
+    } else if (p->OLSGI_attrs & OLSGA_SLIDER) {
+	/* AdjustRectToEntireRange: floating text can have been anywhere
+	 * along the slider */
+	if (FloatingText(o) && p->OLSGI_scrollbar) {
+	    VisInstance *sb = (VisInstance *)
+			ObjDerefVis(InBlock(o, p->OLSGI_scrollbar));
+
+	    if (p->OLSGI_attrs & OLSGA_ORIENT_VERTICALLY) {
+		r.R_right--;
+		r.R_top = sb->VI_bounds.R_top;
+		r.R_bottom = sb->VI_bounds.R_bottom;
+	    } else {
+		r.R_bottom--;
+		r.R_left = sb->VI_bounds.R_left;
+		r.R_right = sb->VI_bounds.R_right;
+	    }
+	}
     } else if (p->OLSGI_text)
 	fill = FALSE;
     if (fill && r.R_top != r.R_bottom)
@@ -572,11 +721,50 @@ static void DrawContents(optr o, GStateHandle gs)
     GrSetLineMaskSys(gs, SDM_100);
 }
 
-/* OLSpinGadgetDraw: the moniker and the scrollbar, then the contents */
+/*
+ * OLSpinGadgetDrawMinMaxMonikers: a vertical slider's to the right of
+ * it, centered on its ends (the minimum at the bottom); a horizontal
+ * one's below it, centered on its ends
+ */
+static void DrawMinMax(optr o, GStateHandle gs)
+{
+    OLSpinGadgetInstance *p = Spin(o);
+    char buf[GEN_VALUE_MAX_TEXT_LEN + 1];
+    word minW, minH, maxW, maxH;
+    sword minX, minY, maxX, maxY;
+    Rectangle b;
+
+    if (!(p->OLSGI_attrs & OLSGA_SHOW_MIN_MAX_MKRS) || !p->OLSGI_scrollbar)
+	return;
+    MinMaxSize(o, GVT_MINIMUM, &minW, &minH);
+    MinMaxSize(o, GVT_MAXIMUM, &maxW, &maxH);
+    p = Spin(o);
+    b = ((VisInstance *) ObjDerefVis(InBlock(o, p->OLSGI_scrollbar)))
+								->VI_bounds;
+    if (p->OLSGI_attrs & OLSGA_ORIENT_VERTICALLY) {
+	minX = maxX = (sword) (b.R_right + MIN_MAX_MARGIN);
+	minY = (sword) (b.R_bottom - (sword) (minH >> 1));
+	maxY = (sword) (b.R_top - (sword) (maxH >> 1));
+    } else {
+	minX = (sword) (b.R_left - (sword) (minW >> 1));
+	maxX = (sword) (b.R_right - (sword) (maxW >> 1));
+	minY = maxY = (sword) (b.R_bottom + MIN_MAX_MARGIN);
+    }
+    buf[0] = 0;
+    @call o::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_MAXIMUM);
+    GrDrawText(gs, maxX, maxY, buf, 0);
+    buf[0] = 0;
+    @call o::MSG_GEN_VALUE_GET_VALUE_TEXT(buf, GVT_MINIMUM);
+    GrDrawText(gs, minX, minY, buf, 0);
+}
+
+/* OLSpinGadgetDraw: the moniker and the scrollbar, then the contents
+ * and a slider's minimum and maximum */
 @method OLSpinGadgetClass, MSG_VIS_DRAW
 {
     @callsuper();
     DrawContents(oself, gstate);
+    DrawMinMax(oself, gstate);
 }
 
 @method OLSpinGadgetClass, MSG_SPEC_SPIN_DRAW_CONTENTS
@@ -597,6 +785,8 @@ static void DrawContents(optr o, GStateHandle gs)
     sword x, y;
 
     (void) pself;
+    if (FloatingText(oself))
+	return FALSE;
     TextPosition(oself, GetSystemFontHeight(), &x, &y);
     pos->P_x = x;
     pos->P_y = y;
@@ -606,12 +796,26 @@ static void DrawContents(optr o, GStateHandle gs)
 /*
  * OLSpinGadgetSetItem: a new item to show: the text object (if there
  * is one) takes its chunk, all of it selected, and redraws; else the
- * gadget draws it (unless its image is invalid anyway)
+ * gadget draws it (unless its image is invalid anyway); a slider's old
+ * text is cleared first, where it was
  */
 @method OLSpinGadgetClass, MSG_SPEC_SPIN_SET_ITEM
 {
     optr text;
+    Boolean slider = (pself->OLSGI_attrs & OLSGA_SLIDER) != 0;
 
+    if (slider) {
+	/* the old text goes now, the text object follows the thumb */
+	GStateHandle gs = (pself->VI_attrs & VA_REALIZED) ?
+				VupCreateGState(oself) : 0;
+
+	if (gs) {
+	    ClearDisplay(oself, gs);
+	    GrDestroyState(gs);
+	}
+	PositionText(oself);
+	pself = Spin(oself);
+    }
     if (!pself->OLSGI_text) {
 	if (!(pself->VI_optFlags & VOF_IMAGE_INVALID) &&
 	    (pself->VI_attrs & VA_REALIZED))
@@ -620,8 +824,11 @@ static void DrawContents(optr o, GStateHandle gs)
     }
     text = InBlock(oself, pself->OLSGI_text);
     ((VisTextInstance *) ObjDerefVis(text))->VTI_text = item;
-    @call text::MSG_VIS_TEXT_SELECT_RANGE_SMALL(0,
-		(word) (LMemGetChunkSize(InBlock(oself, item)) - 1));
+    {
+	word end = (word) (LMemGetChunkSize(InBlock(oself, item)) - 1);
+
+	@call text::MSG_VIS_TEXT_SELECT_RANGE_SMALL(slider ? end : 0, end);
+    }
     @call text::MSG_VIS_TEXT_RECALC_AND_DRAW();
 }
 
@@ -655,20 +862,25 @@ static void StepAndRepeat(optr o, Message step)
     p->OLSGI_timerHandle = t;
 }
 
+#define HorizSlider(p) \
+    (((p)->OLSGI_attrs & (OLSGA_SLIDER | OLSGA_ORIENT_VERTICALLY)) == \
+     OLSGA_SLIDER)
+
 @method OLSpinGadgetClass, MSG_SPEC_SPIN_UP_ARROW
 {
     (void) value;
     (void) stateFlags;
-    (void) pself;
-    StepAndRepeat(oself, MSG_SPEC_SPIN_INCREMENT);
+    /* (a horizontal slider counts the other way) */
+    StepAndRepeat(oself, HorizSlider(pself) ? MSG_SPEC_SPIN_DECREMENT
+					    : MSG_SPEC_SPIN_INCREMENT);
 }
 
 @method OLSpinGadgetClass, MSG_SPEC_SPIN_DOWN_ARROW
 {
     (void) value;
     (void) stateFlags;
-    (void) pself;
-    StepAndRepeat(oself, MSG_SPEC_SPIN_DECREMENT);
+    StepAndRepeat(oself, HorizSlider(pself) ? MSG_SPEC_SPIN_INCREMENT
+					    : MSG_SPEC_SPIN_DECREMENT);
 }
 
 /* (a page: of a slider; along the gadget's direction) */
@@ -778,6 +990,10 @@ static void CreateText(optr o)
 @method OLSpinGadgetClass, MSG_META_GAINED_FOCUS_EXCL
 {
     pself->OLSGI_states |= OLSGS_HAS_FOCUS;
+    /* floating text is not edited */
+    if (FloatingText(oself))
+	return;
+    pself = Spin(oself);
     if (pself->OLSGI_text)
 	@send, forceQueue, insertAtFront oself::MSG_SPIN_GIVE_TEXT_FOCUS();
     else
