@@ -1,7 +1,6 @@
 # The Epson RX 9-pin printer driver (eprx9.geo) in C: eprx9Manager.asm's
 # PrintCom files (RX cursor by spaces, RX text, 240 x 216 dpi graphics) and
 # its control codes.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../DotMatrix.cmake)
 geos_dotmatrix_driver(eprx9 GP eprx932.gp REV eprx9.rev
   FONTS Text/Font/fontEpsonMXInfo.asm
   PRINTCOM
@@ -17,4 +16,3 @@ geos_dotmatrix_driver(eprx9 GP eprx932.gp REV eprx9.rev
     Text/textLoadEpsonSymbolSet.c
     printcomEpsonStyles.c
   SOURCES eprx9ControlCodes.c)
-set(eprx9_GEO ${eprx9_GEO} PARENT_SCOPE)

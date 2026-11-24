@@ -1,0 +1,31 @@
+# The user interface library, Gen/: GenClass, the generic tree and the generic classes.
+geos_sources(ui_goc
+  genUtils.goc
+  genClass.goc
+  genApplication.goc
+  genSystem.goc
+  genScreen.goc
+  genField.goc
+  genTrigger.goc
+  genInteraction.goc
+  genDisplay.goc
+  genDisplayControl.goc
+  genPrimary.goc
+  genItemGroup.goc
+  genItem.goc
+  genDynamicList.goc
+  genBooleanGroup.goc
+  genBoolean.goc
+  genView.goc
+  genContent.goc
+  genValue.goc
+  genGlyphDisplay.goc
+  genTextEdit.goc
+  genGadget.goc
+  genPathUtils.goc
+  genFileSelector.goc
+  genControl.goc
+  genToolGroup.goc
+  genDocument.goc
+  genUIDocumentControl.goc
+  genAppDocumentControl.goc)

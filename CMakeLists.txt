@@ -13,6 +13,19 @@
 #   (cmake/toolchain-dos32-watcom.cmake: the older Open Watcom 386 build,
 #    without goc -cg)
 #   cmake --build build && ctest --test-dir build
+#
+# Every directory has its own CMakeLists.txt, which names its files and
+# the directories below it; what they share is in cmake/:
+#
+#   GeosHostTools.cmake  the build tools (Tools/: goc), built for the
+#                        build host
+#   GeosGoc.cmake        goc -cg on .goc files
+#   GeosGeode.cmake      geos_geode(): a geode; geos_embed()
+#   GeosSources.cmake    geos_sources(): the files of a geode, listed in
+#                        its directories
+#
+# Linux builds have debug information; Port32/tools/geos-gdb.sh runs gdb
+# with the symbols of the geodes GEOS loads.
 cmake_minimum_required(VERSION 3.20)
 project(PCGEOS LANGUAGES C)
 
@@ -61,54 +74,42 @@ add_compile_definitions(GEOS_HOST_${_host})
 
 message(STATUS "GEOS_HOST=${GEOS_HOST} arch=${CMAKE_SYSTEM_PROCESSOR} EC=${GEOS_ERROR_CHECK}")
 
+# Debug information in every build of a Linux host (gdb; for the geodes
+# see Port32/tools/geos-gdb.sh).  It changes no code.
+set(_debug_default OFF)
+if(GEOS_HOST STREQUAL "linux" AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  set(_debug_default ON)
+endif()
+option(GEOS_DEBUG_INFO "Compile with debug information (-g)" ${_debug_default})
+if(GEOS_DEBUG_INFO)
+  add_compile_options(-g)
+endif()
+
+# Geodes (module loading, goc -cg) need gcc or clang; goc -cg alone (C99
+# compound literals) anything but Open Watcom.  goc is built for the
+# build host from Tools/ (cmake/GeosHostTools.cmake).
+find_package(Python3 COMPONENTS Interpreter)
+set(GEOS_HAVE_GOC OFF)
+set(GEOS_BUILD_GEODES OFF)
+if(Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
+  set(GEOS_HAVE_GOC ON)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    set(GEOS_BUILD_GEODES ON)
+  endif()
+endif()
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+include(GeosSources)
+if(GEOS_HAVE_GOC)
+  include(GeosGoc)
+  include(GeosGeode)
+endif()
+
 enable_testing()
 add_subdirectory(Ghal)
 add_subdirectory(Gapi)
-add_subdirectory(Driver/IFS/HostFS)
-add_subdirectory(Library/Math/Float)
-add_subdirectory(Library/Kernel)
+add_subdirectory(Driver)
+add_subdirectory(Library)
 add_subdirectory(Loader)
-add_subdirectory(Driver/Keyboard)
-add_subdirectory(Driver/Mouse)
-add_subdirectory(Driver/Power)
-add_subdirectory(Driver/Video)
-add_subdirectory(Driver/Font)
-add_subdirectory(Driver/Stream/Cups)
-add_subdirectory(Driver/Stream/Filestr)
-add_subdirectory(Library/Trans/Graphics/Vector/EPS)
-add_subdirectory(Driver/Printer/PScript)
-add_subdirectory(Driver/Printer/Ascii/Diablo)
-add_subdirectory(Driver/Printer/Ascii/Dumb)
-add_subdirectory(Driver/Printer/DotMatrix/Bchip9)
-add_subdirectory(Driver/Printer/DotMatrix/Canon48)
-add_subdirectory(Driver/Printer/DotMatrix/CanonBJC)
-add_subdirectory(Driver/Printer/DotMatrix/Citoh9)
-add_subdirectory(Driver/Printer/DotMatrix/Diconix9)
-add_subdirectory(Driver/Printer/DotMatrix/Eplx9)
-add_subdirectory(Driver/Printer/DotMatrix/Epmx9)
-add_subdirectory(Driver/Printer/DotMatrix/Eprx9)
-add_subdirectory(Driver/Printer/DotMatrix/Epshi24)
-add_subdirectory(Driver/Printer/DotMatrix/Epson24)
-add_subdirectory(Driver/Printer/DotMatrix/Epson48)
-add_subdirectory(Driver/Printer/DotMatrix/Epson9)
-add_subdirectory(Driver/Printer/DotMatrix/Grpr9)
-add_subdirectory(Driver/Printer/DotMatrix/Nec24)
-add_subdirectory(Driver/Printer/DotMatrix/Oki9)
-add_subdirectory(Driver/Printer/DotMatrix/Ppds24)
-add_subdirectory(Driver/Printer/DotMatrix/Prop9)
-add_subdirectory(Driver/Printer/DotMatrix/Propx24)
-add_subdirectory(Driver/Printer/DotMatrix/Star9)
-add_subdirectory(Driver/Printer/DotMatrix/Tosh24)
-add_subdirectory(Driver/Printer/HP/Deskjet)
-add_subdirectory(Driver/Printer/HP/Dj500c)
-add_subdirectory(Driver/Printer/HP/Lbp)
-add_subdirectory(Driver/Printer/HP/Mercury)
-add_subdirectory(Driver/Printer/HP/Pcl4)
-add_subdirectory(Driver/Printer/HP/QuietJet)
-add_subdirectory(Library/Spool)
-add_subdirectory(Library/User)
-add_subdirectory(Library/SpecUI)
-add_subdirectory(Library/Text)
 add_subdirectory(Port32/Tests)
 
 # Inventory of direct host contacts (plan P2).  Not part of 'all'.

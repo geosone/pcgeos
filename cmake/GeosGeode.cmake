@@ -5,8 +5,8 @@
 #              [INCLUDES dir...] [DEFINITIONS def...] [OPTIONS opt...])
 #
 # Builds <name>.geo in the current binary directory and the target
-# geode_<name>; the path of the file goes to the variable <name>_GEO in
-# the caller's scope.  With GP it is a GEOS geode: the .goc files go
+# geode_<name>; the path of the file goes to the variable <name>_GEO,
+# which every directory sees (an internal cache entry).  With GP it is a GEOS geode: the .goc files go
 # through goc -cg (GeosGoc.cmake) and Port32/tools/gpgeode.py writes the
 # GEOS data of the module (__geos_module, CInclude/geosmod.h) from
 # the .gp file and the .rev file (default: <geode>.rev next to the .gp
@@ -30,11 +30,18 @@
 # hosts and the like).  No stack protector and no sanitizers: their
 # runtime would be host imports.
 #
+# With GEOS_DEBUG_INFO (the default on Linux) the debug information of a
+# geode is in <name>.geo.debug beside it; Port32/tools/geos-gdb.sh loads
+# it into gdb when GEOS loads the geode.
+#
 #   geos_embed(<out-var> <file> <symbol>)
 #
 # Makes a C file that holds <file> as "const unsigned char <symbol>[]"
 # and "const unsigned long <symbol>_size", for tests that load a geode
 # without a file system.
+
+include_guard(GLOBAL)
+include(${CMAKE_CURRENT_LIST_DIR}/GeosGoc.cmake)
 
 set(_geos_geode_cflags -ffreestanding -fno-stack-protector -fno-sanitize=all)
 
@@ -48,7 +55,6 @@ function(geos_geode name)
   set(opts ${_geos_geode_cflags} ${ARG_OPTIONS})
 
   if(ARG_GP)
-    include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
     get_filename_component(gp ${ARG_GP} ABSOLUTE)
     get_filename_component(gp_dir ${gp} DIRECTORY)
     get_filename_component(geode ${gp} NAME_WE)
@@ -125,11 +131,21 @@ function(geos_geode name)
     target_compile_options(geode_${name} PRIVATE ${opts})
     target_include_directories(geode_${name} PRIVATE ${incs})
     target_compile_definitions(geode_${name} PRIVATE ${defs})
+    # the name in the file (DT_SONAME) tells a debugger which geode it is
     target_link_options(geode_${name} PRIVATE -nostdlib -fno-sanitize=all
-      -Wl,-z,now -Wl,--hash-style=both)
+      -Wl,-z,now -Wl,--hash-style=both -Wl,-soname,${name}.geo)
     target_link_libraries(geode_${name} PRIVATE gcc)
+    if(GEOS_DEBUG_INFO)
+      # the debug information goes to <name>.geo.debug: the geode itself
+      # stays as small as it is loaded (and embedded in the tests)
+      add_custom_command(TARGET geode_${name} POST_BUILD
+        COMMAND ${CMAKE_OBJCOPY} --only-keep-debug ${geo} ${geo}.debug
+        COMMAND ${CMAKE_STRIP} --strip-debug ${geo}
+        BYPRODUCTS ${geo}.debug
+        VERBATIM)
+    endif()
   endif()
-  set(${name}_GEO ${geo} PARENT_SCOPE)
+  set(${name}_GEO ${geo} CACHE INTERNAL "the geode ${name}")
 endfunction()
 
 function(geos_embed out_var file symbol)

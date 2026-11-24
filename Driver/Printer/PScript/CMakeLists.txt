@@ -1,14 +1,9 @@
 # The PostScript printer driver (pscript.geo) in C: the common printer
 # driver code of PrintCom/ (beside its asm) and this driver's own.  The
 # device tables come from the asm (Port32/tools/psdevinfo2c.py).
-# Geodes need gcc or clang (module loading).
-include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
-find_package(Python3 COMPONENTS Interpreter)
-if(NOT (GEOS_GOC AND Python3_Interpreter_FOUND AND
-        CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"))
+if(NOT GEOS_BUILD_GEODES)
   return()
 endif()
-include(${PROJECT_SOURCE_DIR}/cmake/GeosGeode.cmake)
 
 set(pc ${PROJECT_SOURCE_DIR}/Driver/Printer/PrintCom)
 set(ps ${CMAKE_CURRENT_SOURCE_DIR})
@@ -38,4 +33,3 @@ geos_geode(pscript
            ${pscript_devices}
            GP pscript32.gp REV pscript.rev PROTOCOL 5.0
            INCLUDES ${ps} ${pc} ${PROJECT_SOURCE_DIR}/CInclude/Internal)
-set(pscript_GEO ${pscript_GEO} PARENT_SCOPE)

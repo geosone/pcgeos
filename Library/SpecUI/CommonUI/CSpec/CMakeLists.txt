@@ -1,0 +1,20 @@
+# The specific UI, CommonUI/CSpec/: the build routines of the generic classes.
+geos_sources(motif_goc
+  cspecSystem.goc
+  cspecScreen.goc
+  cspecField.goc
+  cspecApplication.goc
+  cspecPrimary.goc
+  cspecDisplay.goc
+  cspecDisplayControl.goc
+  cspecInteraction.goc
+  cspecTrigger.goc
+  cspecItem.goc
+  cspecCUAS.goc
+  cspecStdDialog.goc
+  cspecValue.goc
+  cspecGlyphDisplay.goc
+  cspecText.goc
+  cspecGadget.goc
+  cspecPane.goc
+  cspecContent.goc)

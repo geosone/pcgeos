@@ -22,8 +22,8 @@ anything worth keeping in the git-ignored `Local/`.
 ```sh
 # 1. build the application (the directory name must be the geode name)
 mkdir -p Local/geosref/ffaref
-cp Port32/Tests/GeosRef/ffaref.goc Port32/Tests/GeosRef/ffaref.gp \
-   Port32/Tests/ffa_cases.h Local/geosref/ffaref/
+cp Port32/Tests/Math/GeosRef/ffaref.goc Port32/Tests/Math/GeosRef/ffaref.gp \
+   Port32/Tests/Math/ffa_cases.h Local/geosref/ffaref/
 cd Local/geosref/ffaref
 mkmf && pmake full          # with WATCOM, ROOT_DIR, LOCAL_ROOT, PATH set
 cd -
@@ -31,7 +31,7 @@ cd -
 # 2. run it in GEOS on real DOS and fetch the result
 DOSRUN_BASE_IMG=$PWD/Local/dosbase.img \
     Port32/tools/geosrun.sh Local/gbuild/localpc/ensemble FFAREF.TXT \
-    Local/geosref/ffaref/ffaref.geo > Port32/Tests/GeosRef/ffaref.txt
+    Local/geosref/ffaref/ffaref.geo > Port32/Tests/Math/GeosRef/ffaref.txt
 ```
 
 `geosrun.sh` copies the target to a second disk, adds the application to

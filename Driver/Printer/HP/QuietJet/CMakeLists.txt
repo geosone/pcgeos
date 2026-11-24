@@ -2,7 +2,6 @@
 # PrintCom files (the PCL job, page and cursor in 1/192", the dot matrix
 # text with the QuietJet's fonts, NLQ, bold and underline, raster lines
 # uncompressed at 96 and 192 dpi) and its control codes.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../DotMatrix/DotMatrix.cmake)
 geos_dotmatrix_driver(quietjet GP quietjet32.gp REV quietjet.rev
   INFOS qjetInfo.asm qjetplusInfo.asm
   FONTS Text/Font/fontQuietjetInfo.asm
@@ -27,4 +26,3 @@ geos_dotmatrix_driver(quietjet GP quietjet32.gp REV quietjet.rev
     Graphics/graphicsCommon.c Graphics/graphicsPrintSwathPCL.c
     Graphics/graphicsPCLScanline.c
   SOURCES quietjetControlCodes.c quietjetStyles.c)
-set(quietjet_GEO ${quietjet_GEO} PARENT_SCOPE)

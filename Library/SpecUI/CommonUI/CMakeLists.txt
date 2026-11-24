@@ -1,0 +1,10 @@
+# The code the specific UIs share, in C beside the asm.
+add_subdirectory(CMain)
+add_subdirectory(CUtils)
+add_subdirectory(CComp)
+add_subdirectory(CButton)
+add_subdirectory(CItem)
+add_subdirectory(CWin)
+add_subdirectory(CSpec)
+add_subdirectory(CGadget)
+add_subdirectory(CView)

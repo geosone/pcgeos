@@ -1,7 +1,6 @@
 # The dot matrix printer drivers in C: the common printer driver code of
 # PrintCom/ (beside its asm) and the driver's own files.  The device and
-# font tables come from the asm (Port32/tools/dmdevinfo2c.py).  Geodes
-# need gcc or clang (module loading).
+# font tables come from the asm (Port32/tools/dmdevinfo2c.py).
 #
 # geos_dotmatrix_driver(<name> GP <gp> REV <rev> [FONTS <font info asm>...]
 #                       [INFOS <info asm>...] [PREFIX <prefix>]
@@ -9,20 +8,16 @@
 # The driver's directory holds <prefix>DriverInfo.asm, its *Info.asm (or
 # INFOS) and <prefix>Constant.def (the prefix is the name but where the
 # asm files are named otherwise: toshiba24 for tosh24); the PCL drivers have no FONTS (their
-# fonts are the printer's).  The result is ${<name>_GEO} in the parent
-# scope.  The raster PCL drivers (Driver/Printer/HP) are built the same
+# fonts are the printer's).  The result is ${<name>_GEO}.  The raster PCL drivers (Driver/Printer/HP) are built the same
 # way.
-include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
-find_package(Python3 COMPONENTS Interpreter)
+# Included once by Driver/Printer/CMakeLists.txt, before the drivers.
 
 function(geos_dotmatrix_driver name)
   cmake_parse_arguments(D "" "GP;REV;PREFIX" "FONTS;INFOS;PRINTCOM;SOURCES"
                         ${ARGN})
-  if(NOT (GEOS_GOC AND Python3_Interpreter_FOUND AND
-          CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"))
+  if(NOT GEOS_BUILD_GEODES)
     return()
   endif()
-  include(${PROJECT_SOURCE_DIR}/cmake/GeosGeode.cmake)
   set(pc ${PROJECT_SOURCE_DIR}/Driver/Printer/PrintCom)
   set(pre ${name})			# the asm files' prefix
   if(D_PREFIX)
@@ -60,7 +55,6 @@ function(geos_dotmatrix_driver name)
   geos_geode(${name} ${D_PRINTCOM} ${D_SOURCES} ${devices}
              GP ${D_GP} REV ${D_REV} PROTOCOL 5.0
              INCLUDES ${dir} ${pc} ${PROJECT_SOURCE_DIR}/CInclude/Internal)
-  set(${name}_GEO ${${name}_GEO} PARENT_SCOPE)
 endfunction()
 
 # the PrintCom files of the dot matrix drivers, in the groups of the asm's

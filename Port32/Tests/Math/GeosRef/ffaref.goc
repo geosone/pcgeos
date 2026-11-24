@@ -1,7 +1,7 @@
 /*
  * ffaref.goc -- run the FloatFloatToAscii test cases (ffa_cases.h)
  * through the 16-bit original in the GEOS math library and record the
- * results, as reference for the C port (Port32/Tests/test_ffa.c).
+ * results, as reference for the C port (Port32/Tests/Math/test_ffa.c).
  *
  * Output: FFAREF.TXT in the GEOS top directory, one line per case:
  *     name <TAB> result <TAB> return value <TAB> float stack depth after

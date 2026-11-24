@@ -75,7 +75,7 @@ The order follows what the Preferences need first and what can be tested:
 - `CInclude/gapi.h`: the interface, prefix `gapi_`.
 - `Gapi/CMakeLists.txt`: the static library `gapi`, which links `ghal`. The kernel links both.
 - One backend per host: `Gapi/Dos32/gapi_dos32.c` and `Gapi/Linux/gapi_linux.c`. The Linux backend is not POSIX: it uses Linux services (D-Bus, systemd, CUPS). Later `Gapi/Win32` and `Gapi/GonWare`.
-- Tests: `Port32/Tests/test_gapi.c` (ctest `gapi.time`).
+- Tests: `Port32/Tests/Gapi/test_gapi.c` (ctest `gapi.time`).
 
 ## 5. Decisions (2026-11-12)
 
@@ -122,7 +122,7 @@ Still open: command-line tools (`timedatectl`, `lpstat`) as a stopgap before the
 - A job is Print-Job with the document in HTTP chunks, written as GEOS makes it. Closing it sends the last chunk and returns the job id. Cancelling closes the connection without the last chunk, and CUPS drops the job. The options are format (PostScript, PDF), copies and duplex.
 - Statuses: HTTP 401/403 and IPP 0x0401-0x0403 are refusals (`GHAL_ERR_ACCESS`); not-found is `GHAL_ERR_NOTFOUND`; no CUPS is `GHAL_ERR_UNSUPPORTED`.
 - dos32 has none: GEOS's printer drivers write to LPT, COM or a file themselves.
-- ctest `gapi.print` runs against a stand-in IPP server in a child process (`Port32/Tests/fakecups.c`), which checks the job's attributes and document. Against the real CUPS it only lists printers; it never prints.
+- ctest `gapi.print` runs against a stand-in IPP server in a child process (`Port32/Tests/Common/fakecups.c`), which checks the job's attributes and document. Against the real CUPS it only lists printers; it never prints.
 
 **The CUPS port driver** (`Driver/Stream/Cups`, `cups.geo`, `cupsDr.h`):
 - A stream driver that the spooler opens as a custom port (`PPT_CUSTOM`, `processCustom.asm`). It is new in Port32; there is no asm original.

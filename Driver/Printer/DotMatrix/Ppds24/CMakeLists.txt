@@ -1,7 +1,6 @@
 # The IBM PPDS 24-pin printer driver (ppds24.geo) in C: ppds24Manager.asm's
 # PrintCom files (the IBM job, the PPDS cursor, styles and graphics, 360 x 360
 # dpi in two interleaves) and its control codes.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../DotMatrix.cmake)
 geos_dotmatrix_driver(ppds24 GP ppds2432.gp REV ppds24.rev
   FONTS Text/Font/fontIBMPPDSInfo.asm
   PRINTCOM
@@ -20,4 +19,3 @@ geos_dotmatrix_driver(ppds24 GP ppds2432.gp REV ppds24.rev
     Graphics/Rotate/rotate2pass24.c
     printcomIBMPPDS24Styles.c
   SOURCES ppds24ControlCodes.c)
-set(ppds24_GEO ${ppds24_GEO} PARENT_SCOPE)

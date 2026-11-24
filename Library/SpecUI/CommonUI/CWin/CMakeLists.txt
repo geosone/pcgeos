@@ -1,0 +1,22 @@
+# The specific UI, CommonUI/CWin/: the windows: screen, field, base, display, menu, dialog.
+geos_sources(motif_goc
+  cwinMenu.goc
+  cwinPtr.goc
+  cwinClassMisc.goc
+  cwinScreen.goc
+  cwinField.goc
+  cwinClassCommonHigh.goc
+  cwinClassCommonMiddle.goc
+  cwinClassCommonLow.goc
+  cwinClassOther.goc
+  cwinClassCUAS.goc
+  cwinGeometry.goc
+  cwinExcl.goc
+  cwinMenuedWin.goc
+  cwinBase.goc
+  cwinPopup.goc
+  cwinDialog.goc
+  cwinWinIcon.goc
+  cwinDisplayControl.goc
+  cwinDisplay.goc
+  cwinGlyphDisplay.goc)

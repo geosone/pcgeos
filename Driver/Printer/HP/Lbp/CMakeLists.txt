@@ -3,7 +3,6 @@
 # cursor in 1/300" absolute, the scalable fonts with their size and pitch,
 # seven styles, the bands as raster images of their live bytes at 75, 150
 # and 300 dpi) and its control codes.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../DotMatrix/DotMatrix.cmake)
 geos_dotmatrix_driver(lbp GP lbp32.gp REV lbp.rev
   INFOS capsl2Info.asm capsl3Info.asm
   FONTS Text/Font/fontCapslInfo.asm
@@ -28,4 +27,3 @@ geos_dotmatrix_driver(lbp GP lbp32.gp REV lbp.rev
     Page/pageStartASFOnly.c Page/pageEndASFOnly.c
     ${DOTMATRIX_NO_COLOR}
   SOURCES lbpControlCodes.c lbpStyles.c)
-set(lbp_GEO ${lbp_GEO} PARENT_SCOPE)

@@ -5,13 +5,9 @@
 # C arrays of it at build time, Port32/tools/epsfonts2c.py the font tables
 # (exportFontTables.asm, exportMoreFonts.asm, Include/fontID.def).  Geodes
 # need gcc or clang.
-include(${PROJECT_SOURCE_DIR}/cmake/GeosGoc.cmake)
-find_package(Python3 COMPONENTS Interpreter)
-if(NOT (GEOS_GOC AND Python3_Interpreter_FOUND AND
-        CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"))
+if(NOT GEOS_BUILD_GEODES)
   return()
 endif()
-include(${PROJECT_SOURCE_DIR}/cmake/GeosGeode.cmake)
 
 set(_eps ${CMAKE_CURRENT_SOURCE_DIR})
 set(_eps_text ${_eps}/Export/exportPSCode.asm ${_eps}/Export/exportComments.asm
@@ -38,12 +34,11 @@ add_custom_command(OUTPUT ${_eps_fonts}
   COMMENT "epsfonts2c"
   VERBATIM)
 
-geos_geode(eps
-           ${_eps}/Export/exportMain.c ${_eps}/Export/exportHeader.c
-           ${_eps}/Export/exportGString.c ${_eps}/Export/exportPath.c
-           ${_eps}/Export/exportArc.c ${_eps}/Export/exportUtils.c
-           ${_eps}/Export/exportText.c ${_eps}/Export/exportBitmap.c
-           ${_eps}/Lib/libMain.c ${_eps_strings} ${_eps_fonts}
+add_subdirectory(Export)
+add_subdirectory(Lib)
+geos_get_sources(_eps_c eps)
+# (the generated strings and font tables belong to Export/; made here,
+# where the geode is)
+geos_geode(eps ${_eps_c} ${_eps_strings} ${_eps_fonts}
            GP eps32.gp REV eps.rev
            INCLUDES ${_eps}/Export ${CMAKE_CURRENT_BINARY_DIR})
-set(eps_GEO ${eps_GEO} PARENT_SCOPE)

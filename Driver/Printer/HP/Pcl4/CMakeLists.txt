@@ -3,7 +3,6 @@
 # and the devices' entry and exit codes, page, cursor, styles, the
 # graphics as one raster or as runs, the text in soft fonts GEOS draws
 # and downloads) and its control codes.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../DotMatrix/DotMatrix.cmake)
 geos_dotmatrix_driver(pcl4 GP pcl432.gp REV pcl4.rev
   INFOS laserjet2Info.asm laserjet2CompInfo.asm downloadInfo.asm
     ppdsInfo.asm internalInfo.asm downloadDuplexInfo.asm ibm4019Info.asm
@@ -36,4 +35,3 @@ geos_dotmatrix_driver(pcl4 GP pcl432.gp REV pcl4.rev
     Color/colorSetNextMono.c Color/colorSetFirstMono.c
     Color/colorGetFormat.c Color/colorSetNone.c
   SOURCES pcl4ControlCodes.c pcl4Tables.c)
-set(pcl4_GEO ${pcl4_GEO} PARENT_SCOPE)

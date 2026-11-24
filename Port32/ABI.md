@@ -57,7 +57,7 @@ headers switch on `GEOS_PORT32`, and that build stays byte-identical
 - `test_geosport` (ctest `cinclude.geosport`) checks the widths and the optr
   macros on every host, dos32 included.
 - `cinclude_port32` (GCC/Clang hosts) compiles every header listed in
-  `Port32/Tests/cinclude_port32.txt` in its own translation unit, after
+  `Port32/Tests/CInclude/cinclude_port32.txt` in its own translation unit, after
   `geos.h`, with `-Wall -Wextra -Werror`. At the start, 81 of the 114 `.h`
   files are listed. Most of the others are not self-contained: they need
   other headers included first. A few clash with the host C library: GEOS
@@ -132,7 +132,7 @@ to the resource handle. Without segments, `goc` does that work itself:
 Checks: `goc.resources` (`Port32/Tests/Goc`) links a `.goc` file with
 objects in two resources, monikers, a GCN list and a `process` destination.
 It checks the tables on amd64, i686, arm64 and dos32 (DJGPP). The target `goc_sdk`
-compiles 44 of the 55 SDK_C samples (`Port32/Tests/goc_sdk.txt`). In the
+compiles 44 of the 55 SDK_C samples (`Port32/Tests/Geode/goc_sdk.txt`). In the
 other samples, the application code needs porting: `NULL` used as a handle,
 `PtrToSegment`, inline asm, and static optr tables in code.
 
@@ -265,6 +265,13 @@ constant, and C has no constants across translation units. Therefore:
   `#define __goc_xrs_X GOCR_RES_<RESOURCE>`. Macros are expanded only
   where they are used, so the header type need not be known when the
   file is read.
+- goc is built from `Tools/goc` for the build host by the CMake build
+  itself (`Tools/CMakeLists.txt`, a project of its own that
+  `cmake/GeosHostTools.cmake` configures with the host's compiler, also
+  when the port is cross compiled); `bin/goc` of the pmake build is only
+  the 16-bit build's. `goc -y <file>` writes the files a `.goc` file
+  reads with `@include` as a make dependency file, so a changed header
+  runs goc again.
 - `cmake/GeosGoc.cmake` collects these per geode in `<geode>_objs.h`
   (`cmake/GeosGocObjs.cmake`, rewritten only when it changes). Every C
   file of the geode includes it after `<geode>_res.h`.
@@ -312,6 +319,27 @@ functions are GEOS's, see §4). ctest `geode.hello` loads the Hello sample
 (no kernel yet: every import gets a dummy address) and checks its
 `__geos_module` against `hello.gp`, down to the class pointer of the
 application object, which must be the import `GenApplicationClass`.
+
+### 7.0 Geodes in gdb
+
+The host's loader does not know the geodes, so gdb does not either. The
+ELF loader calls `ghal_module_debug_loaded(name, base)` after it has
+relocated a geode and `ghal_module_debug_unloaded(base)` before it frees
+one (empty functions; the name is the `DT_SONAME` that `geos_geode()`
+gives the file, `<name>.geo`). `Port32/tools/geos-gdb.py` stops there
+and gives gdb the geode's symbols at its address (`add-symbol-file
+<name>.geo.debug -o <base>`); `geodes` lists what is loaded.
+
+Linux builds are compiled with `-g` (`GEOS_DEBUG_INFO`, a build option;
+off on dos32). A geode's debug information is split off into
+`<name>.geo.debug` beside it, so the geode stays as small as it is
+loaded. goc's `#line` directives make gdb show the `.goc` files.
+
+    Port32/tools/geos-gdb.sh -batch -ex "break OLBuildUIDocumentControl" \
+        -ex run -ex bt build/Port32/Tests/test_ui_boot
+
+runs gdb on a screen of its own (`geos-xserver.sh`; `-vnc -view` to
+watch it), breakpoints in geodes are pending until the geode is loaded.
 
 ### 7.1 GeodeLoad in the C kernel (`Library/Kernel/Geodes`, P4)
 

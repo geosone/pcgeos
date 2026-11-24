@@ -1,7 +1,6 @@
 # The HP DeskJet printer driver (deskjet.geo) in C: deskjetManager.asm's
 # PrintCom files (the PCL job, page, cursor, text, styles, stream and
 # buffer, the TIFF compressed raster) and its control codes.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../DotMatrix/DotMatrix.cmake)
 geos_dotmatrix_driver(deskjet GP deskjet32.gp REV deskjet.rev
   INFOS deskjetdjInfo.asm
   PRINTCOM
@@ -24,4 +23,3 @@ geos_dotmatrix_driver(deskjet GP deskjet32.gp REV deskjet.rev
     Graphics/graphicsCommon.c Graphics/graphicsPrintSwathPCL.c
     Graphics/graphicsPCLTIFF.c
   SOURCES deskjetControlCodes.c)
-set(deskjet_GEO ${deskjet_GEO} PARENT_SCOPE)

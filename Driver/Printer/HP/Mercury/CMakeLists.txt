@@ -2,7 +2,6 @@
 # PrintCom files (the PCL job with the PaintJet XL300's PJL entry and exit,
 # page, cursor and stream, no text and no styles, the KCMY raster planes a
 # scan line at a time, TIFF compressed) and its control codes.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../DotMatrix/DotMatrix.cmake)
 geos_dotmatrix_driver(mercury GP mercury32.gp REV mercury.rev
   INFOS mercuryInfo.asm
   PRINTCOM
@@ -21,4 +20,3 @@ geos_dotmatrix_driver(mercury GP mercury32.gp REV mercury.rev
     Graphics/graphicsCommon.c Graphics/graphicsPrintSwathPCLKCMY.c
     Graphics/graphicsPCLTIFF.c
   SOURCES mercuryControlCodes.c)
-set(mercury_GEO ${mercury_GEO} PARENT_SCOPE)

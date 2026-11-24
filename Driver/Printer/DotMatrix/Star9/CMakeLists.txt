@@ -1,6 +1,5 @@
 # The Star 9-pin printer driver (star9.geo) in C: star9Manager.asm's PrintCom
 # files (cursor by tabs in 1/144", the Star SG graphics) and its control codes.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../DotMatrix.cmake)
 geos_dotmatrix_driver(star9 GP star932.gp REV star9.rev
   FONTS Text/Font/fontStarInfo.asm
   PRINTCOM
@@ -19,4 +18,3 @@ geos_dotmatrix_driver(star9 GP star932.gp REV star9.rev
     Text/textLoadEpsonSymbolSet.c
     printcomEpsonStyles.c
   SOURCES star9ControlCodes.c)
-set(star9_GEO ${star9_GEO} PARENT_SCOPE)
