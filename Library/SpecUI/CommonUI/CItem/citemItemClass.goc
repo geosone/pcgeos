@@ -9,7 +9,7 @@
  * Port32 (Port32/ABI.md section 13y), not yet: tabs, the title bar,
  * a dynamic list's items not interactable (MSG_OL_IGROUP_NOTIFY_ITEM_
  * CHANGED_INTERACTABLE_STATE), the centers (MSG_VIS_GET_CENTER,
- * MSG_SPEC_GET_MENU_CENTER: the button's).
+
  */
 @include "CItem/citemInt.goh"
 
@@ -237,6 +237,26 @@ static void CalcSizeWithoutHints(optr o, sword sugW, sword sugH,
 	*w = sugW;
     if ((f & OLBMA_CAN_CLIP_MONIKER_HEIGHT) && (word) *h > (word) sugH)
 	*h = sugH;
+}
+
+/*
+ * OLItemGetMenuCenter: as the button's, with the item's moniker
+ */
+@method OLItemClass, MSG_SPEC_GET_MENU_CENTER
+{
+    OpenMonikerArgs a;
+    OLItemInstance *i;
+
+    OLItemSetupMkrArgs(oself, &a);
+    OpenGetMonikerMenuCenter(oself, oself, &a, &center->SMC_monikerSpace,
+			     &center->SMC_accelSpace);
+    i = Item(oself);
+    if (!(i->VI_optFlags & VOF_GEOMETRY_INVALID))
+	center->SMC_flags |= SGMCF_NEED_TO_RESET_GEO;
+    if (center->SMC_flags & SGMCF_ALLOWING_WRAPPING) {
+	i->VI_geoAttrs &= ~VGA_ONLY_RECALC_SIZE_WHEN_INVALID;
+	i->OLBI_moreAttrs |= OLBMA_EXPAND_WIDTH_TO_FIT_PARENT;
+    }
 }
 
 /* OLItemRerecalcSize: the size hints around the size without them */

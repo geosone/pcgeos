@@ -397,6 +397,13 @@ typedef struct {
 extern SizeAsDWord OpenGetMonikerSize(optr obj, optr gen,
 				      OpenMonikerArgs *a);
 extern SizeAsDWord OpenGetMonikerExtraSize(OpenMonikerArgs *a);
+/* the widest moniker and accelerator: *left and *right raised to this
+ * object's */
+extern void OpenGetMonikerMenuCenter(optr obj, optr gen, OpenMonikerArgs *a,
+				     word *left, word *right);
+/* SpecGetMenuCenterFlags (SMC_flags) */
+#define SGMCF_NEED_TO_RESET_GEO		0x8000
+#define SGMCF_ALLOWING_WRAPPING		0x4000
 extern XYValueAsDWord OpenGetMonikerPos(optr obj, optr gen,
 					OpenMonikerArgs *a);
 extern void OpenDrawMoniker(optr obj, optr gen, OpenMonikerArgs *a);

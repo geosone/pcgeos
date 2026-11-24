@@ -178,6 +178,7 @@ export UserCreateDialog
 export UserDestroyDialog
 export UserStandardDialog
 export UserStandardDialogOptr
+export UserGetLoadedSpecificUI
 
 resource ApplicationUI object
 resource SystemFieldUI object

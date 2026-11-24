@@ -277,6 +277,36 @@ void SpecInitGadgetPreferences(void)
     olGadgetRepeatDelay = ReadInt(optionsCat, "gadgetRepeatDelay",
 				  DEFAULT_GADGET_REPEAT_DELAY);
     olGadgetAccelerate = ReadBool(optionsCat, "gadgetAccelerate", FALSE);
+    /* the colors the user chose (USER_CAN_CHOOSE_COLORS; none in
+     * black and white): the light and the dark color with all that is
+     * drawn in them, the active title bar (and its gradient's end),
+     * the selection */
+    if (!OpenCheckIfBW()) {
+	if (!InitFileReadInteger(optionsCat, "lightColor", &v)) {
+	    moCS.CSV_dsLightColor = (Color) v;
+	    moCS.CSV_windowBG = (Color) v;
+	    moCS.CSV_menuBar = (Color) v;
+	    moCS.CSV_activeBorder = (Color) v;
+	    moCS.CSV_inactiveBorder = (Color) v;
+	}
+	if (!InitFileReadInteger(optionsCat, "darkColor", &v)) {
+	    moCS.CSV_dsDarkColor = (Color) v;
+	    moCS.CSV_screenBG = (Color) v;
+	    moCS.CSV_appWorkspace = (Color) v;
+	    moCS.CSV_windowFrame = (Color) v;
+	    moCS.CSV_scrollBars = (Color) v;
+	    moCS.CSV_menuSelection = (Color) v;
+	    moCS.CSV_inactiveTitleBar = (Color) v;
+	}
+	if (!InitFileReadInteger(optionsCat, "active title bar color", &v)) {
+	    moCS.CSV_activeTitleBar = (Color) v;
+	    moCS.CSV_titleBar2 = (Color) v;
+	}
+	if (!InitFileReadInteger(optionsCat, "titleBarGradient", &v))
+	    moCS.CSV_titleBar2 = (Color) v;
+	if (!InitFileReadInteger(optionsCat, "selectColor", &v))
+	    moCS.CSV_selBkgdColor = (Color) v;
+    }
     if (!InitFileReadInteger(optionsCat, "scroll arrow size", &v)) {
 	if (v & 1)
 	    v++;

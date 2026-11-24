@@ -219,7 +219,9 @@ static void EnsureFileExit(optr o)
 			   VDF_SAVE_TO_STATE, sizeof(InteractionCommand));
 	*ic = IC_EXIT;
 	ObjSetFlags(t, 0, OCF_DIRTY);
-	@call t::MSG_SPEC_BUILD(0);
+	/* VisSendSpecBuild: fully enabled if the trigger is */
+	@call t::MSG_SPEC_BUILD(GenCheckIfFullyEnabled(t, TRUE) ?
+				SBF_VIS_PARENT_FULLY_ENABLED : 0);
 	e = ObjVarAddData(o, ATTR_OL_MENU_WIN_EXIT_TRIGGER, sizeof(optr));
 	*e = t;
 	MWin(o)->OLMWI_specState |= OMWSS_EXIT_CREATED;
@@ -720,6 +722,56 @@ static VisCompSpacingMarginsInfo MenuWinPassMarginInfo(optr o)
 @method OLMenuWinClass, MSG_VIS_COMP_GET_CHILD_SPACING
 {
     return MAKE_SPACING_DWORD(MENU_SPACING, MENU_SPACING);
+}
+
+/*
+ * OLMenuCalcCenters: the widest moniker and keyboard accelerator of
+ * the menu's items (twice if something wraps, so all see it; a pinned
+ * menu's items expand, so as if wrapping); TRUE if they changed
+ */
+static Boolean MenuCalcCenters(optr o, word *flags)
+{
+    SpecMenuCenter c;
+    OLMenuWinInstance *m = (OLMenuWinInstance *) ObjDerefVis(o);
+
+    c.SMC_flags = (m->OLWI_specState & OLWSS_PINNED) ?
+		  SGMCF_ALLOWING_WRAPPING : 0;
+    c.SMC_monikerSpace = c.SMC_accelSpace = 0;
+    @call o::MSG_SPEC_GET_MENU_CENTER(&c);
+    if (c.SMC_flags & SGMCF_ALLOWING_WRAPPING) {
+	c.SMC_monikerSpace = c.SMC_accelSpace = 0;
+	@call o::MSG_SPEC_GET_MENU_CENTER(&c);
+    }
+    *flags = c.SMC_flags;
+    m = (OLMenuWinInstance *) ObjDerefVis(o);
+    if ((word) m->OLMWI_monikerSpace == c.SMC_monikerSpace &&
+	(word) m->OLMWI_accelSpace == c.SMC_accelSpace)
+	return FALSE;
+    m->OLMWI_monikerSpace = (sword) c.SMC_monikerSpace;
+    m->OLMWI_accelSpace = (sword) c.SMC_accelSpace;
+    return TRUE;
+}
+
+/* OLMenuWinUpdateGeometry: the centers first; changed, items whose
+ * geometry was valid are sized again */
+@method OLMenuWinClass, MSG_VIS_UPDATE_GEOMETRY
+{
+    word flags;
+
+    if ((pself->VI_optFlags & (VOF_GEO_UPDATE_PATH | VOF_GEOMETRY_INVALID)) &&
+	MenuCalcCenters(oself, &flags) && (flags & SGMCF_NEED_TO_RESET_GEO))
+	@call oself::MSG_VIS_RESET_TO_INITIAL_SIZE(VUM_MANUAL);
+    @callsuper();
+}
+
+/* OLMenuWinResetSizeToStayOnscreen: the centers again (so one pass
+ * geometry is off where something wraps now) */
+@method OLMenuWinClass, MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN
+{
+    word flags;
+
+    @callsuper();
+    (void) MenuCalcCenters(oself, &flags);
 }
 
 @method OLMenuWinClass, MSG_VIS_RECALC_SIZE

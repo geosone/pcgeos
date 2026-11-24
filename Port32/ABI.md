@@ -6338,6 +6338,34 @@ are left out), the constants, the variables and the routines.
   object is gone; the focus by the keyboard selects all the text, a
   typed digit replaces it and is applied when the focus goes.
 
+  **Compared with the original** (`Port32/tools/uiref-cmp.sh`): the
+  objects of `uiboot.goc` are also built as a plain 16-bit application
+  (`uiref-gen.py`: the same resources, with the original goc and pmake)
+  and run in the original GEOS on DOS (`geosrun.sh`); the port shows the
+  same variant (`UIBOOT_REF`, `uiboot-shot.sh -ref`: the product's font
+  and `[motif options]`, steps 101 to 109) and both screens land side by
+  side in `Local/shots/cmp<v>.png`.  Variants: the two documents
+  maximized, the standard dialog, the popup list open, the File, Tools
+  and Long menus opened by a click on their buttons, the down arrow on
+  the closed popup list.  What it found and what was fixed: the File
+  menu goes first in the menu bar; `[motif options]` `lightColor`,
+  `darkColor`, `selectColor` and the title bar colors are read; a new
+  text object has the system's font and size
+  (`TextGetSystemCharAttrRun`, `UserGetLoadedSpecificUI`); the gadget
+  area has no margins beside a display group or menu bar
+  (`CheckForDispControls`); a system icon is a child of the window, not
+  of its gadget area; an `OLCtrl` in a menu is `OLCOF_IN_MENU` (no
+  moniker, border or minimum size, the menu's orientation), so a popup
+  list's items stand below each other without the list's moniker and
+  arrows on the closed list only move the focus item; menu items are as
+  wide as the menu's widest moniker and keyboard accelerator
+  (`MSG_SPEC_GET_MENU_CENTER`, `OLMenuCalcCenters`) and show the
+  accelerator ("F3"); the Exit trigger is built enabled
+  (`VisSendSpecBuild`).  Still different: the system menu button's
+  picture, a trigger inside a `GenGadget` composite (smaller in the
+  original), the first item of a menu opened by the mouse (not
+  cursored in the original).
+
 ## 13z. The text library (`Library/Text`, P6)
 
 `text.geo` in C, beside the asm (`text32.gp`; the files next to the asm

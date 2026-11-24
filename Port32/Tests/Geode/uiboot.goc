@@ -260,7 +260,8 @@ static word ubAnswer;
 @object GenTriggerClass UBLongFirst = {
     GI_visMoniker = "First";
 }
-@object GenInteractionClass UBLongBox = {
+/* (a glyph: a group in a menu has no minimum size) */
+@object GenGlyphClass UBLongBox = {
     HINT_FIXED_SIZE = { SST_PIXELS | 40, SST_PIXELS | 1000, 0 };
 }
 @object GenTriggerClass UBLongLast = {
@@ -965,6 +966,35 @@ static Rectangle ScreenBounds(WindowHandle w)
     return r;
 }
 
+/* a click on the n-th button of the primary's menu bar: the bar is the
+ * child of the primary that is no generic object and whose children
+ * are none either */
+static void UBClickMenu(word n)
+{
+    optr bar = 0, c, b;
+    word i;
+    Rectangle r;
+    MouseReturnParams mr;
+
+    for (i = 0; (c = @call UBPrimary::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++) {
+	if (@call c::MSG_META_IS_OBJECT_IN_CLASS(&GenClass))
+	    continue;
+	b = @call c::MSG_VIS_FIND_CHILD_AT_POSITION(0);
+	if (b && !@call b::MSG_META_IS_OBJECT_IN_CLASS(&GenClass)) {
+	    bar = c;
+	    break;
+	}
+    }
+    if (!bar || (b = @call bar::MSG_VIS_FIND_CHILD_AT_POSITION(n)) == 0)
+	return;
+    @call b::MSG_VIS_GET_BOUNDS(&r);
+    @call b::MSG_META_START_SELECT(&mr, r.R_left + 3, r.R_top + 3,
+		((UIFA_SELECT | UIFA_IN) << 8) | BI_PRESS | BI_B0_DOWN);
+    @call b::MSG_META_END_SELECT(&mr, r.R_left + 3, r.R_top + 3,
+		UIFA_IN << 8);
+}
+
 @method UBProcessClass, MSG_UB_STEP
 {
     OLItemInstance ii;
@@ -1616,8 +1646,13 @@ static Rectangle ScreenBounds(WindowHandle w)
 	ubState.UBS_sizeButton[0] = r.R_right - r.R_left;
 	ubState.UBS_sizeButton[1] = r.R_bottom - r.R_top;
 	UBCHECK(r.R_right - r.R_left >= Width(@UBSize2));
+	/* the list is in a menu: down on the closed list's button
+	 * leaves the selection (as the original does, uiref variant
+	 * 9); the second item activated takes it */
 	@call b::MSG_META_KBD_CHAR((VC_ISCTRL << 8) | VC_DOWN,
 				   CF_FIRST_PRESS, 0);
+	UBCHECK(@call UBSize::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 1);
+	@call UBSize2::MSG_GEN_ACTIVATE();
 	UBCHECK(@call UBSize::MSG_GEN_ITEM_GROUP_GET_SELECTION() == 2);
 	break;
     }
@@ -2706,6 +2741,57 @@ static Rectangle ScreenBounds(WindowHandle w)
     }
     case 65:
 	UBCHECK(ubState.UBS_count[1] == 9);
+	break;
+    /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
+     * variants of the reference application */
+    case 101:
+    case 104:
+	@call UBDoc1::MSG_GEN_BRING_TO_TOP();
+	@call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	if (step == 104)
+	    @call UBApp::MSG_GEN_APPLICATION_DO_STANDARD_DIALOG(
+		MSG_UB_STD_RESPONSE, ConstructOptr(GeodeGetProcessHandle(), 0),
+		NULL, NULL, NULL, "42", "Error \001 happened.",
+		(CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		(GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET));
+	break;
+    case 102:
+	@call UBDoc2::MSG_GEN_BRING_TO_TOP();
+	@call UBDoc2::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	break;
+    case 103:
+	break;
+    case 105:
+    case 109: {
+	/* the popup list opened: space on its button, the one child of
+	 * the list's row that is no generic object */
+	optr p, c;
+	word i;
+
+	@call UBDoc2::MSG_GEN_BRING_TO_TOP();
+	@call UBDoc2::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	@call UBDoc2::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	p = @call UBChecks::MSG_VIS_FIND_PARENT();
+	for (i = 0; p && (c = @call p::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0;
+	     i++)
+	    if (!@call c::MSG_META_IS_OBJECT_IN_CLASS(&GenClass)) {
+		if (step == 109)
+		    @call c::MSG_META_KBD_CHAR((VC_ISCTRL << 8) | VC_DOWN,
+					       CF_FIRST_PRESS, 0);
+		else
+		    @call c::MSG_META_KBD_CHAR(VC_BLANK, CF_FIRST_PRESS, 0);
+		break;
+	    }
+	break;
+    }
+    case 106:
+    case 107:
+    case 108:
+	/* the File, Tools, Long menu opened by a click on its button */
+	@call UBDoc1::MSG_GEN_BRING_TO_TOP();
+	@call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	@call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	UBClickMenu(step - 106);
 	break;
     }
 }

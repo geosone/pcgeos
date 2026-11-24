@@ -6,11 +6,11 @@
  * character and paragraph attributes, as long as it likes
  * (VTI_maxLength), on white.
  *
- * Port32 (Port32/ABI.md section 13z), not yet: the system's character
- * attributes (TextGetSystemCharAttrRun: the default attributes are
- * used), relocation, freeing the storage, the navigation query.
+ * Port32 (Port32/ABI.md section 13z), not yet: relocation, freeing the
+ * storage, the navigation query.
  */
 @include "textInt.goh"
+#include <Internal/specUI.h>
 
 @classdecl VisTextClass;
 
@@ -105,6 +105,53 @@
 @extern method VisTextClass, MSG_VIS_TEXT_CALC_HEIGHT;
 
 /* VisTextInitialize */
+/*
+ * T_GetSystemCharAttr: the default attributes with the specific UI's
+ * font and point size (SPIR_GET_DISPLAY_SCHEME), in black; without a
+ * specific UI the defaults
+ */
+static void GetSystemCharAttr(VisTextCharAttr *a)
+{
+    GeodeHandle ui = UserGetLoadedSpecificUI();
+    void (*get)(DisplayScheme *) = ui ? (void (*)(DisplayScheme *))
+		ProcGetLibraryEntry(ui, SPIR_GET_DISPLAY_SCHEME) : NULL;
+    DisplayScheme ds;
+
+    TA_MapDefaultCharAttr(VIS_TEXT_INITIAL_CHAR_ATTR, a);
+    if (!get)
+	return;
+    memset(&ds, 0, sizeof(ds));
+    get(&ds);
+    if (!ds.DS_fontID || ds.DS_pointSize <= 0)
+	return;
+    a->VTCA_pointSize.WBF_int = (word) ds.DS_pointSize;
+    a->VTCA_pointSize.WBF_frac = 0;
+    a->VTCA_fontID = ds.DS_fontID;
+    a->VTCA_color.CQ_redOrIndex = C_BLACK;
+}
+
+/*
+ * TextGetSystemCharAttrRun: the character attributes of a new text
+ * object: the system's, as a default record if one says them (the
+ * object keeps VTSF_DEFAULT_CHAR_ATTR), else in a chunk of the
+ * object's block
+ */
+static word SystemCharAttrRun(optr o)
+{
+    VisTextCharAttr a;
+    VisTextDefaultCharAttr def;
+    ChunkHandle c;
+
+    GetSystemCharAttr(&a);
+    if (TA_FindDefaultCharAttr(&a, &def))
+	return def;
+    c = LMemAlloc(OptrToHandle(o), sizeof(a));
+    ObjSetFlags(ConstructOptr(OptrToHandle(o), c), OCF_IGNORE_DIRTY, 0);
+    memcpy(LMemDeref(ConstructOptr(OptrToHandle(o), c)), &a, sizeof(a));
+    VT(o)->VTI_storageFlags &= ~VTSF_DEFAULT_CHAR_ATTR;
+    return c;
+}
+
 @method VisTextClass, MSG_META_INITIALIZE
 {
     @callsuper();
@@ -122,7 +169,7 @@
     memset(&pself->VTI_washColor, 0, sizeof(pself->VTI_washColor));
     pself->VTI_washColor.CQ_redOrIndex = C_WHITE;
     pself->VTI_washColor.CQ_info = CF_INDEX;
-    pself->VTI_charAttrRuns = VIS_TEXT_INITIAL_CHAR_ATTR;
+    pself->VTI_charAttrRuns = SystemCharAttrRun(oself);
 }
 
 @method VisTextClass, MSG_VIS_TEXT_SET_FILTER

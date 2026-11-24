@@ -83,6 +83,11 @@ GeodeHandle UserGetSpecificUI(void)
     return uiSpecUILibrary;
 }
 
+GeodeHandle UserGetLoadedSpecificUI(void)
+{
+    return uiSpecUILibrary;
+}
+
 void UserFreeSpecificUI(void)
 {
     GeodeHandle gh = uiSpecUILibrary;

@@ -142,7 +142,8 @@ static void Shot(int step)
     FILE *o;
     int x, y;
 
-    if (!f || step != (at ? atoi(at) : 65))
+    /* (step < 0: the reference mode, whatever the step) */
+    if (!f || (step >= 0 && step != (at ? atoi(at) : 65)))
 	return;
     TimerSleep((word) (getenv("UIBOOT_SHOT_TICKS")
 		       ? atoi(getenv("UIBOOT_SHOT_TICKS")) : 60));
@@ -205,7 +206,25 @@ int main(int argc, char **argv)
     Put("USERDATA", NULL, 0);
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
-    Put("geos.ini", ini, sizeof(ini) - 1);
+    /* UIBOOT_REF=variant: the reference mode (see below) with the
+     * product's font size, as Port32/tools/uiref-gen.py's application
+     * shows it in the original GEOS */
+    if (getenv("UIBOOT_REF")) {
+	static char refIni[sizeof(ini) + 400];
+	const char *fs = getenv("UIBOOT_FONTSIZE");
+
+	if (!fs)
+	    fs = "10";
+	snprintf(refIni, sizeof(refIni), "%s[ui]\r\nfontid = berkeley\r\n"
+		 "fontsize = %s\r\neditableTextFontID = berkeley\r\n"
+		 "editableTextFontsize = %s\r\n"
+		 "[motif options]\r\nbuttonInvertDelay = 6\r\n"
+		 "activetitlebarcolor = 8\r\ngadgetRepeatDelay = 18\r\n"
+		 "scrollArrowSize = 12\r\nselectColor = 135\r\n",
+		 ini, fs, fs);
+	Put("geos.ini", refIni, strlen(refIni));
+    } else
+	Put("geos.ini", ini, sizeof(ini) - 1);
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
     GeodeRegisterImage("uiboot", uiboot_geode, uiboot_geode_size);
     GeodeRegisterImage("text", text_geode, text_geode_size);
@@ -227,6 +246,14 @@ int main(int argc, char **argv)
     WAIT_FOR(st->UBS_opened);
     CHECK(st->UBS_attached == 1 && st->UBS_opened == 1);
 
+    /* the reference mode: no test, the objects as they come up in
+     * variant UIBOOT_REF (steps 101...), then the screen */
+    if (getenv("UIBOOT_REF")) {
+	step((word) (100 + atoi(getenv("UIBOOT_REF"))));
+	TimerSleep(60);
+	Shot(-1);
+	return 0;
+    }
     step(1);
     Shot(1);
     CHECK(st->UBS_primaryWin != 0);

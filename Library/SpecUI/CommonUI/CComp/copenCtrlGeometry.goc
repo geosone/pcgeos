@@ -6,9 +6,7 @@
  * position.
  *
  * Port32 (Port32/ABI.md section 13y), not yet: a reply bar's extra top
- * line (OLReplyBarClass's OLRBF_UNDER_DIALOG),
- * the menu center (MSG_SPEC_GET_MENU_CENTER: its C declaration has no
- * parameters yet).
+ * line (OLReplyBarClass's OLRBF_UNDER_DIALOG).
  */
 @include "cGeode.goh"
 
@@ -538,6 +536,28 @@ static SizeAsDWord RecalcCtrlSize(optr o, word width, word height)
 	pself->OLCI_monikerPos.P_x = x;
     if (!(pself->OLCI_optFlags & OLCOF_DISPLAY_MKR_ABOVE))
 	pself->OLCI_monikerPos.P_y = y;
+}
+
+/*
+ * OLCtrlGetMenuCenter: the children raise the menu's moniker and
+ * accelerator spaces; if this one or one below lets its children wrap,
+ * no one pass geometry, and it expands to the menu's width
+ */
+@extern method OLCtrlClass, MSG_SPEC_GET_MENU_CENTER
+{
+    optr c;
+    word i;
+
+    if (pself->VCI_geoAttrs & VCGA_ALLOW_CHILDREN_TO_WRAP)
+	center->SMC_flags |= SGMCF_ALLOWING_WRAPPING;
+    for (i = 0; (c = @call oself::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0; i++)
+	@call c::MSG_SPEC_GET_MENU_CENTER(center);
+    if (center->SMC_flags & SGMCF_ALLOWING_WRAPPING) {
+	OLCtrlInstance *o = Ctrl(oself);
+
+	o->VCI_geoAttrs &= ~VCGA_ONE_PASS_OPTIMIZATION;
+	o->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT;
+    }
 }
 
 /*

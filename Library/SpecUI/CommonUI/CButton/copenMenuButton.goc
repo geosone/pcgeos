@@ -528,7 +528,7 @@ static optr PopupList(optr o)
 /*
  * OLPopupListKbdChar: on a popup list's button Alt-down and space open
  * the list (Alt-down closes it again); the arrows, Home and End go to
- * the list (the selection changes with the list closed)
+ * the list (in a menu: they move its focus item)
  */
 static Boolean PopupListKbdChar(optr o, word c, word flags, word state)
 {

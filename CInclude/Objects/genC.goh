@@ -960,6 +960,9 @@ extern ClassStruct *GenQueryUICallSpecificUI(optr obj, word routine,
 					     word masterOffset);
 /* the specific UI library ([ui] specific), loaded on first use */
 extern GeodeHandle UserGetSpecificUI(void);
+/* Port32: the specific UI if it is loaded, else 0 (UserGetSpecificUI
+ * loads it, and dies without one) */
+extern GeodeHandle UserGetLoadedSpecificUI(void);
 extern void UserFreeSpecificUI(void);
 /* the message (goc -cg parameters) to the UI's system object, MF_CALL;
  * the reply zeroed first; FALSE if there is no system object yet */

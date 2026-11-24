@@ -25,6 +25,7 @@
 @extern method OLCtrlClass, MSG_VIS_COMP_GET_CHILD_SPACING;
 @extern method OLCtrlClass, MSG_VIS_COMP_GET_MARGINS;
 @extern method OLCtrlClass, MSG_VIS_COMP_GET_MINIMUM_SIZE;
+@extern method OLCtrlClass, MSG_SPEC_GET_MENU_CENTER;
 @extern method OLCtrlClass, MSG_VIS_COMP_GET_WRAP_COUNT;
 @extern method OLCtrlClass, MSG_SPEC_GET_EXTRA_SIZE;
 @extern method OLCtrlClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT;
@@ -394,7 +395,7 @@ void OLCtrlDoHints(optr oself)
 {
     OLCtrlInstance *c = Ctrl(oself);
     OLCtrlOptFlags f = 0;
-    optr parent;
+    optr parent, win;
 
     if (c->VI_typeFlags & VTF_IS_GEN) {
 	c->VCI_geoAttrs |= VCGA_ONLY_DRAWS_IN_MARGINS;
@@ -407,12 +408,38 @@ void OLCtrlDoHints(optr oself)
 	OpenScanVarData(oself, sizeof(ctrlGeoHints) / sizeof(ctrlGeoHints[0]),
 			ctrlGeoHints, NULL);
     }
-    /* in a menu window: OLCOF_IN_MENU and the menu's orientation
-     * (Port32: with OLWinClass) */
-    Ctrl(oself)->VI_geoAttrs |= VGA_USE_VIS_CENTER;
-    parent = GenFindParent(oself);
-    if (parent && @call parent::MSG_QUERY_CENTER_BY_MONIKERS(&f))
-	Ctrl(oself)->OLCI_optFlags |= f;
+    /* in a menu window: OLCOF_IN_MENU, no moniker, border, minimum
+     * size or wrapping, one pass, the menu's orientation, never
+     * expanding; else centering if the parent asks */
+    win = OpenFindOLWin(oself);
+    if (win && win != oself &&
+	(((OLWinInstance *) ObjDerefVis(win))->OLWI_fixedAttr &
+	 OWFA_IS_MENU)) {
+	Boolean vertical = (((VisCompInstance *) ObjDerefVis(win))->
+			    VCI_geoAttrs &
+			    VCGA_ORIENT_CHILDREN_VERTICALLY) != 0;
+
+	c = Ctrl(oself);
+	c->OLCI_optFlags = (OLCtrlOptFlags)
+	    ((c->OLCI_optFlags | OLCOF_IN_MENU) &
+	     ~(OLCOF_DISPLAY_MONIKER | OLCOF_DISPLAY_BORDER |
+	       OLCOF_DISPLAY_MKR_ABOVE));
+	c->VCI_geoAttrs = (byte)
+	    ((c->VCI_geoAttrs & ~(VCGA_HAS_MINIMUM_SIZE |
+				  VCGA_INCLUDE_ENDS_IN_CHILD_SPACING |
+				  VCGA_ALLOW_CHILDREN_TO_WRAP |
+				  VCGA_WRAP_AFTER_CHILD_COUNT |
+				  VCGA_ORIENT_CHILDREN_VERTICALLY)) |
+	     VCGA_ONE_PASS_OPTIMIZATION |
+	     (vertical ? VCGA_ORIENT_CHILDREN_VERTICALLY : 0));
+	c->VCI_geoDimensionAttrs &= ~(VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT |
+				      VCGDA_EXPAND_WIDTH_TO_FIT_PARENT);
+    } else {
+	Ctrl(oself)->VI_geoAttrs |= VGA_USE_VIS_CENTER;
+	parent = GenFindParent(oself);
+	if (parent && @call parent::MSG_QUERY_CENTER_BY_MONIKERS(&f))
+	    Ctrl(oself)->OLCI_optFlags |= f;
+    }
     f = (OLCtrlOptFlags) 0;
     {
 	OLBuildFlags b = OpenGetParentBuildFlagsIfCtrl(oself);

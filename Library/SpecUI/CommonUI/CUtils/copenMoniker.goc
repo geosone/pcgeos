@@ -8,11 +8,14 @@
  * The asm passes the visible object in ds:*si and the generic one with
  * the moniker in es:*bx; here obj and gen (the same block).
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the keyboard accelerator
- * text (OLMA_DISP_KBD_MONIKER: GetKbdAcceleratorString with the
- * strings of cspecFile.ui), so nothing is drawn or measured for it, and
- * menu items (OLMA_IS_MENU_ITEM: the moniker and accelerator spaces of
- * the OLMenuWin).
+ * The keyboard accelerator's text ("Ctrl X", "F3") goes right of the
+ * moniker in a menu (all at the menu's accelerator space) and in the
+ * menu bar, below it if asked, else before it ("F3 - "); a menu item is
+ * as wide as the menu's widest moniker and accelerator
+ * (MSG_SPEC_GET_MENU_CENTER, kept by the OLMenuWin).
+ *
+ * Port32 (Port32/ABI.md section 13y): the strings of cspecFile.ui are
+ * constants here (not localizable yet).
  */
 @include "cGeode.goh"
 
@@ -21,8 +24,11 @@
 #define BELOW_SHORTCUT_SPACING		4
 #define CGA_BELOW_SHORTCUT_SPACING	1
 #define WINDOW_DOT_TEXT_WIDTH		10	/* not PZ */
+#define MAX_KBD_MONIKER_LEN		30
+#define SHORTCUT_SPACING		16
 
 static word winMarkWidth;		/* "..." in the UI's font */
+static word addOnMnemonicWidth;		/* " (w)" in the UI's font */
 static const char winMark[] = "...";
 
 #define JUST_X(f)	((f) & DMF_X_JUST_MASK)
@@ -75,11 +81,158 @@ static void GetMkrSizeWithInsets(optr gen, const OpenMonikerArgs *a,
     if ((a->OMA_monikerAttrs & OLMA_DISP_DOWN_ARROW) &&
 	*h < GetSystemFontHeight())
 	*h = GetSystemFontHeight();
+    if (Moniker(gen)) {
+	VisMonikerWithText *m;
+	Boolean addOn;
+
+	ObjLockObjBlock(OptrToHandle(gen));
+	m = LMemDeref(ConstructOptr(OptrToHandle(gen), Moniker(gen)));
+	addOn = !(m->VMWT_common.VM_type & VMT_GSTRING) &&
+		(byte) m->VMWT_mnemonicOffset == 0xfe;
+	MemUnlock(OptrToHandle(gen));	/* VMO_MNEMONIC_NOT_IN_MKR_TEXT */
+	if (addOn) {
+	    if (!addOnMnemonicWidth) {
+		GStateHandle gs = ViewCreateCalcGState();
+
+		addOnMnemonicWidth = GrTextWidth(gs, " (w)", 4);
+		GrDestroyState(gs);
+	    }
+	    *w += addOnMnemonicWidth;
+	}
+    }
     AddInsetsAndWinMark(a, w, h);
 }
 
+/* ---------------------------------------------------------------------
+ * The keyboard accelerator
+ * ------------------------------------------------------------------- */
+
+static char *Put(char *d, const char *s)
+{
+    while (*s)
+	*d++ = *s++;
+    return d;
+}
+
+/* ExpandKbdAccelerator: "Alt ", "Shift " (also for a capital), "Ctrl ",
+ * then the key: F1 to F16, the named keys, else the character in upper
+ * case */
+static char *ExpandKbdAccelerator(char *d, KeyboardShortcut ks)
+{
+    byte c = (byte) ks;
+    Boolean ctrlSet = ((ks >> 8) & 0x0f) == 0x0f;
+
+    if (ks & KS_ALT)
+	d = Put(d, "Alt ");
+    if ((ks & KS_SHIFT) || (c >= 'A' && c <= 'Z'))
+	d = Put(d, "Shift ");
+    if (ks & KS_CTRL)
+	d = Put(d, "Ctrl ");
+    if (ctrlSet && c >= VC_F1 && c <= VC_F16) {
+	*d++ = 'F';
+	if (c >= VC_F10) {
+	    *d++ = '1';
+	    c -= 10;
+	}
+	*d++ = (char) (c - (VC_F1 - '1'));
+	return d;
+    }
+    switch (c) {
+    case VC_ESCAPE:	return Put(d, "Esc");
+    case VC_DEL:	return Put(d, "Del");
+    case VC_INS:	return Put(d, "Ins");
+    case VC_BACKSPACE:
+	return Put(d, (ks & (KS_ALT | KS_CTRL)) ? "Backspace" : "Ctrl U");
+    case VC_ENTER:	return Put(d, "Enter");
+    case VC_PREVIOUS:	return Put(d, "Page Up");
+    case VC_NEXT:	return Put(d, "Page Down");
+    case C_SPACE:	return Put(d, "Space");
+    }
+    if (c >= 'a' && c <= 'z')
+	c &= (byte) ~0x20;
+    *d++ = (char) c;
+    return d;
+}
+
+/*
+ * GetKbdAcceleratorString: the accelerator's text in buf (before the
+ * moniker with " -" after it); returns its width with the spacing to
+ * the moniker (more in a menu), 0 if there is no accelerator
+ */
+static word GetKbdAcceleratorString(optr gen, OLMonikerAttrs at,
+				    GStateHandle gs, char *buf)
+{
+    KeyboardShortcut ks =
+	((GenInstance *) ObjDerefGen(gen))->GI_kbdAccelerator;
+    char *d;
+    word w;
+
+    if (!(ks & 0x00ff))				/* KS_CHAR */
+	return 0;
+    d = ExpandKbdAccelerator(buf, ks);
+    if (!(at & (OLMA_IS_MENU_ITEM | OLMA_DRAW_SHORTCUT_BELOW |
+		OLMA_DRAW_SHORTCUT_TO_RIGHT)))
+	d = Put(d, " -");
+    *d = 0;
+    w = GrTextWidth(gs, buf, (word) (d - buf));
+    if (at & OLMA_IS_MENU_ITEM)
+	w += SHORTCUT_SPACING - CLOSE_SHORTCUT_SPACING;
+    return (word) (w + CLOSE_SHORTCUT_SPACING);
+}
+
+/* the accelerator's width with its spacing (0: none shown) */
+static word KbdAcceleratorWidth(optr gen, const OpenMonikerArgs *a)
+{
+    char buf[MAX_KBD_MONIKER_LEN];
+    GStateHandle gs = a->OMA_gState;
+    word w;
+
+    if (!(a->OMA_monikerAttrs & OLMA_DISP_KBD_MONIKER) ||
+	!(((GenInstance *) ObjDerefGen(gen))->GI_kbdAccelerator & 0x00ff))
+	return 0;
+    if (!gs)
+	gs = ViewCreateCalcGState();
+    w = GetKbdAcceleratorString(gen, a->OMA_monikerAttrs, gs, buf);
+    if (!a->OMA_gState)
+	GrDestroyState(gs);
+    return w;
+}
+
+/* the menu the item is in (0: none) */
+static optr MenuOf(optr obj)
+{
+    optr win = OpenFindOLWin(obj);
+
+    if (win && !ObjIsObjectInClass(win, (ClassStruct *) &OLMenuWinClass))
+	win = 0;
+    return win;
+}
+
+/*
+ * OpenDrawKbdAccelerator: the accelerator's text at x, y; a menu
+ * item's at the menu's accelerator space from the right
+ */
+static void OpenDrawKbdAccelerator(optr obj, optr gen, OpenMonikerArgs *a,
+				   sword x, sword y)
+{
+    char buf[MAX_KBD_MONIKER_LEN];
+    optr menu;
+
+    if (!GetKbdAcceleratorString(gen, a->OMA_monikerAttrs, a->OMA_gState,
+				 buf))
+	return;
+    if ((a->OMA_monikerAttrs & OLMA_IS_MENU_ITEM) &&
+	(menu = MenuOf(obj)) != 0) {
+	OLMenuWinInstance *m = (OLMenuWinInstance *) ObjDerefVis(menu);
+
+	x = (sword) (m->VI_bounds.R_right - m->VI_bounds.R_left -
+		     m->OLMWI_accelSpace);
+    }
+    GrDrawText(a->OMA_gState, x, y, buf, 0);
+}
+
 /* GetMonikerSizes: the moniker with its insets, and the width of what
- * goes beside it (a menu mark) */
+ * goes beside it (a menu mark, the keyboard accelerator) */
 static void GetMonikerSizes(optr gen, const OpenMonikerArgs *a, word *w,
 			    word *h, word *extra)
 {
@@ -89,6 +242,37 @@ static void GetMonikerSizes(optr gen, const OpenMonikerArgs *a, word *w,
 	*extra = OL_MARK_WIDTH + OL_MARK_SPACING;
     else if (a->OMA_monikerAttrs & OLMA_DISP_DOWN_ARROW)
 	*extra = OL_DOWN_MARK_WIDTH + OL_MARK_SPACING;
+    *extra += KbdAcceleratorWidth(gen, a);
+}
+
+/* OpenGetMonikerSizeLow: a menu item has the menu's moniker and
+ * accelerator spaces */
+static void GetMonikerSizeLow(optr obj, optr gen, const OpenMonikerArgs *a,
+			      word *w, word *h, word *extra)
+{
+    optr menu;
+
+    GetMonikerSizes(gen, a, w, h, extra);
+    if ((a->OMA_monikerAttrs & OLMA_IS_MENU_ITEM) &&
+	(menu = MenuOf(obj)) != 0) {
+	OLMenuWinInstance *m = (OLMenuWinInstance *) ObjDerefVis(menu);
+
+	*w = (word) m->OLMWI_monikerSpace;
+	*extra = (word) m->OLMWI_accelSpace;
+    }
+}
+
+void OpenGetMonikerMenuCenter(optr obj, optr gen, OpenMonikerArgs *a,
+			      word *left, word *right)
+{
+    word w, h, extra;
+
+    (void) obj;
+    GetMonikerSizes(gen, a, &w, &h, &extra);
+    if (w > *left)
+	*left = w;
+    if (extra > *right)
+	*right = extra;
 }
 
 /*
@@ -100,8 +284,7 @@ SizeAsDWord OpenGetMonikerSize(optr obj, optr gen, OpenMonikerArgs *a)
 {
     word w, h, extra;
 
-    (void) obj;
-    GetMonikerSizes(gen, a, &w, &h, &extra);
+    GetMonikerSizeLow(obj, gen, a, &w, &h, &extra);
     if ((a->OMA_monikerAttrs & OLMA_DRAW_SHORTCUT_BELOW) && extra) {
 	extra += a->OMA_leftInset + a->OMA_rightInset;
 	if (w < extra)
@@ -344,22 +527,46 @@ static void OpenDrawSelectionCursor(optr obj, OpenMonikerArgs *a, sword l,
 /*
  * OpenDrawMoniker: the moniker at its place (centered by hand), the
  * mnemonic underlined, the window mark after it, the selection cursor
- * around it
+ * around it; the keyboard accelerator before it, or right of it (menu
+ * items, the menu bar), or below it
  */
 void OpenDrawMoniker(optr obj, optr gen, OpenMonikerArgs *a)
 {
     ChunkHandle mk = Moniker(gen);
     DrawMonikerArgs d;
     DrawMonikerFlags f;
+    OLMonikerAttrs at;
     XYValueAsDWord p;
     SizeAsDWord s;
     sword x, y, right, bottom;
-    word w;
+    word w, mw, mh, extra, saved;
+    Boolean accel;
 
     if (!mk)
 	return;
     FixupCenteredMonikers(obj, gen, a);
     SetupMaxWidth(obj, a);
+    at = a->OMA_monikerAttrs;
+    accel = (at & OLMA_DISP_KBD_MONIKER) != 0;
+    if (!(at & (OLMA_IS_MENU_ITEM | OLMA_DRAW_SHORTCUT_BELOW |
+		OLMA_DRAW_SHORTCUT_TO_RIGHT))) {
+	/* the accelerator first, the moniker right of it */
+	if (accel) {
+	    p = OpenGetMonikerPos(obj, gen, a);
+	    OpenDrawKbdAccelerator(obj, gen, a, DWORD_X(p), DWORD_Y(p));
+	}
+	a->OMA_monikerAttrs &= ~(OLMA_DISP_DOWN_ARROW | OLMA_DISP_RT_ARROW);
+	GetMonikerSizes(gen, a, &mw, &mh, &extra);
+	a->OMA_monikerAttrs = at;
+	a->OMA_leftInset += extra;
+    }
+    saved = a->OMA_leftInset;
+    if (at & OLMA_DRAW_SHORTCUT_BELOW) {
+	/* centered over a wider accelerator */
+	GetMonikerSizes(gen, a, &mw, &mh, &extra);
+	if (mw < extra)
+	    a->OMA_leftInset += (word) (extra - mw) >> 1;
+    }
     f = (DrawMonikerFlags) (a->OMA_drawMonikerFlags |
 			    DMF_UNDERLINE_ACCELERATOR);
     ToDrawArgs(a, &d);
@@ -367,18 +574,42 @@ void OpenDrawMoniker(optr obj, optr gen, OpenMonikerArgs *a)
     x = DWORD_X(p);
     y = DWORD_Y(p);
     VisDrawMoniker(obj, mk, f, &d);
+    a->OMA_leftInset = saved;
     s = VisGetMonikerSize(obj, mk, d.DMA_textHeight, a->OMA_gState);
     w = DWORD_WIDTH(s);
     ObjLockObjBlock(OptrToHandle(gen));
     w += DrawMnemonicUnderline(gen, a->OMA_gState, x, y, w);
     MemUnlock(OptrToHandle(gen));
     right = x + (sword) w;
-    if (a->OMA_monikerAttrs & OLMA_DISP_WIN_MARK) {
+    if (at & OLMA_DISP_WIN_MARK) {
 	GrDrawText(a->OMA_gState, right, y, winMark, 3);
 	right += WINDOW_DOT_TEXT_WIDTH;
     }
-    if (a->OMA_monikerAttrs & OLMA_DISP_SELECTION_CURSOR) {
-	bottom = y + (sword) DWORD_HEIGHT(s) - 1;
+    bottom = y + (sword) DWORD_HEIGHT(s) - 1;
+    if (at & OLMA_DISP_SELECTION_CURSOR)
 	OpenDrawSelectionCursor(obj, a, x, y, right, bottom);
+    if (!accel)
+	return;
+    if (at & (OLMA_IS_MENU_ITEM | OLMA_DRAW_SHORTCUT_TO_RIGHT)) {
+	/* right of the moniker, centered in the object's height */
+	Rectangle b;
+
+	VisGetBounds(obj, &b);
+	y = (sword) (b.R_top + ((word) (b.R_bottom - b.R_top -
+					(sword) GetSystemFontHeight()) >> 1));
+	OpenDrawKbdAccelerator(obj, gen, a,
+			       (sword) (right + CLOSE_SHORTCUT_SPACING), y);
+    } else if (at & OLMA_DRAW_SHORTCUT_BELOW) {
+	GetMonikerSizes(gen, a, &mw, &mh, &extra);
+	if (extra < mw)
+	    x += (sword) ((word) (mw - extra) >> 1);
+	else {
+	    p = OpenGetMonikerPos(obj, gen, a);
+	    x = (sword) (DWORD_X(p) + CLOSE_SHORTCUT_SPACING / 2 +
+			 a->OMA_leftInset);
+	}
+	y = (sword) (bottom + (OpenCheckIfCGA() ? CGA_BELOW_SHORTCUT_SPACING
+						: BELOW_SHORTCUT_SPACING));
+	OpenDrawKbdAccelerator(obj, gen, a, x, y);
     }
 }

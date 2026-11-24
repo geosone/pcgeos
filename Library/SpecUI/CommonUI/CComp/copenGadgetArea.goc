@@ -11,6 +11,9 @@
  * OLPaneClass: RecalcGadgetAreaFlags finds none yet).
  */
 @include "cGeode.goh"
+@include <Internal/SpecUI/olDisplayGroupClass.goh>
+@include <Internal/SpecUI/olPaneClass.goh>
+@include <Objects/gViewC.goh>
 
 @classdecl OLGadgetAreaClass, neverSaved;
 
@@ -94,13 +97,46 @@
  * ------------------------------------------------------------------- */
 
 /*
- * RecalcGadgetAreaFlags: where the display controls are among the
- * children (Port32: there is none yet, their classes are not in C)
+ * RecalcGadgetAreaFlags (CheckForDispControls over the children):
+ * whether a display group or a menu bar (on CGA a view too, unless its
+ * contents are generic) is among the children, and whether it is the
+ * first or the last of those that show (an empty composite does not
+ * count)
  */
 static void RecalcGadgetAreaFlags(optr o)
 {
-    Area(o)->OLGAI_flags &= ~(OLGAF_HAS_DISP_CTRL | OLGAF_DISP_CTRL_FIRST |
-			      OLGAF_DISP_CTRL_LAST);
+    OLGadgetAreaFlags f = 0;
+    Boolean first = TRUE;
+    optr c;
+    word i;
+
+    for (i = 0; (c = @call o::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0; i++) {
+	VisCompInstance *v;
+	Boolean shows;
+
+	if (ObjIsObjectInClass(c, &OLDisplayGroupClass) ||
+	    ObjIsObjectInClass(c, &OLMenuBarClass) ||
+	    (OpenCheckIfCGA() && ObjIsObjectInClass(c, &OLPaneClass) &&
+	     !(((GenViewInstance *) ObjDerefGen(c))->GVI_attrs &
+	       GVA_GENERIC_CONTENTS))) {
+	    f |= OLGAF_HAS_DISP_CTRL | OLGAF_DISP_CTRL_LAST;
+	    if (first)
+		f |= OLGAF_DISP_CTRL_FIRST;
+	    continue;
+	}
+	v = (VisCompInstance *) ObjDerefVis(c);
+	shows = !(v->VI_typeFlags & VTF_IS_COMPOSITE) ||
+		v->VCI_comp.CP_firstChild;
+	if (!shows)
+	    continue;
+	first = FALSE;
+	if (f & OLGAF_HAS_DISP_CTRL)
+	    f &= ~OLGAF_DISP_CTRL_LAST;
+    }
+    Area(o)->OLGAI_flags = (OLGadgetAreaFlags)
+	((Area(o)->OLGAI_flags & ~(OLGAF_HAS_DISP_CTRL |
+				   OLGAF_DISP_CTRL_FIRST |
+				   OLGAF_DISP_CTRL_LAST)) | f);
 }
 
 /*

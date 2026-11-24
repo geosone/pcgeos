@@ -860,7 +860,19 @@ typedef word InsertDeleteSpaceTypes;
 @message void MSG_VIS_DESTROY_CACHED_GSTATES();
 @message void MSG_SPEC_VIS_OPEN_NOTIFY();
 @message void MSG_SPEC_VIS_CLOSE_NOTIFY();
+@ifdef GEOS_PORT32
+/* Port32 (Port32/ABI.md section 13y): the widest moniker and keyboard
+ * accelerator of a menu's items so far (asm: cx, dx) and the
+ * SpecGetMenuCenterFlags (bp), all in and out */
+typedef struct {
+    word	SMC_monikerSpace;
+    word	SMC_accelSpace;
+    word	SMC_flags;
+} SpecMenuCenter;
+@message void MSG_SPEC_GET_MENU_CENTER(SpecMenuCenter *center);
+@else
 @message dword MSG_SPEC_GET_MENU_CENTER() = cx.dx;
+@endif
 @message void MSG_SPEC_UPDATE_KBD_ACCELERATOR(VisUpdateMode updateMode = dl);
 @message void MSG_VIS_ADD_NON_DISCARDABLE_VM_CHILD(optr child = cx:dx, 
 						   CompChildFlags flags = bp);

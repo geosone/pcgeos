@@ -91,7 +91,20 @@ static void PopupBuildButton(optr oself, SpecBuildFlags flags)
     bi = (OLButtonInstance *) ObjDerefVis(b);
     if ((bf & OLBF_TARGET) == T(OLBT_IS_EXPRESS_MENU) ||
 	(bi->OLBI_specState & OLBSS_SYS_ICON)) {
+	/* a system icon is a child of the window itself (the generic
+	 * parent), not of its gadget area */
+	optr gp = GenFindParent(oself);
+
+	if (gp)
+	    vp = gp;
 	@call vp::MSG_VIS_ADD_CHILD(b, CCO_FIRST);
+	return;
+    }
+    /* the "File" menu comes first, wherever it is among the generic
+     * children */
+    if (PWin(oself)->OLPWI_flags & OLPWF_FILE_MENU) {
+	@call vp::MSG_VIS_ADD_CHILD(b, CCO_FIRST);
+	VisMarkFullyInvalid(b);
 	return;
     }
     VisAddChildRelativeToGen(oself, b, vp, flags);

@@ -20,6 +20,7 @@
 
 @extern method OLButtonClass, MSG_VIS_RECALC_SIZE;
 @extern method OLButtonClass, MSG_SPEC_GET_EXTRA_SIZE;
+@extern method OLButtonClass, MSG_SPEC_GET_MENU_CENTER;
 @extern method OLButtonClass, MSG_GET_FIRST_MKR_POS;
 @extern method OLButtonClass, MSG_VIS_VUP_CREATE_GSTATE;
 @extern method OLButtonClass, MSG_SPEC_SET_USABLE;

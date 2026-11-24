@@ -1285,7 +1285,7 @@ static word Slot(byte req, sword *x, sword *y)
 
     case 19: {
 	/* menus (OLMenuWin, OLMenuButton, OLMenuBar): the primary makes
-	 * its menu bar (first in it); each menu's button is in the bar
+	 * its menu bar; each menu's button is in the bar
 	 * (the Edit menu with its group type's moniker); pressed, the
 	 * menu comes up below the button, its item in it; released on
 	 * the button, the menu stays up; the other menu's button pressed
@@ -1307,7 +1307,9 @@ static word Slot(byte req, sword *x, sword *y)
 	UMCHECK(mw.OLMDWI_menuBar != 0);
 	bar = ConstructOptr(OptrToHandle(@UMMenuPrim), mw.OLMDWI_menuBar);
 	UMCHECK(InClass(bar, (ClassStruct *) &OLMenuBarClass));
-	UMCHECK(@call UMMenuPrim::MSG_VIS_FIND_CHILD(bar) == 0);
+	/* a child of the primary (the system icons, added later, go
+	 * before it as in the asm: unmanaged, their order is free) */
+	UMCHECK(@call UMMenuPrim::MSG_VIS_FIND_CHILD(bar) != (word) -1);
 	UMCHECK(@call UMMenuPrim::MSG_OL_WIN_QUERY_MENU_BAR() == bar);
 	UMCHECK(InClass(@UMEditMenu, (ClassStruct *) &OLMenuWinClass));
 	VisData(@UMEditMenu, &m, sizeof(m));

@@ -290,6 +290,29 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
     return MAKE_SIZE_DWORD(w, h);
 }
 
+/*
+ * OLButtonGetMenuCenter: the menu's moniker and accelerator spaces
+ * raised to this button's; geometry that was valid has to be reset;
+ * with wrapping in the menu the button is sized every time and expands
+ */
+@extern method OLButtonClass, MSG_SPEC_GET_MENU_CENTER
+{
+    OpenMonikerArgs a;
+    OLButtonInstance *b;
+
+    (void) SetupMonikerArgs(oself, &a);
+    OpenGetMonikerMenuCenter(oself, GenPart(oself), &a,
+			     &center->SMC_monikerSpace,
+			     &center->SMC_accelSpace);
+    b = Btn(oself);
+    if (!(b->VI_optFlags & VOF_GEOMETRY_INVALID))
+	center->SMC_flags |= SGMCF_NEED_TO_RESET_GEO;
+    if (center->SMC_flags & SGMCF_ALLOWING_WRAPPING) {
+	b->VI_geoAttrs &= ~VGA_ONLY_RECALC_SIZE_WHEN_INVALID;
+	b->OLBI_moreAttrs |= OLBMA_EXPAND_WIDTH_TO_FIT_PARENT;
+    }
+}
+
 /* OLButtonGetExtraSize: what is not the moniker */
 @extern method OLButtonClass, MSG_SPEC_GET_EXTRA_SIZE
 {
