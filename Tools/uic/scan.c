@@ -578,6 +578,25 @@ static SpecialSym vmSyms[] = {
     {"verySquished",	ASPECT_RATIO_COMP_SYM, (2 << VMT_GS_ASPECT_RATIO_FIELD)}
 };
 
+static SpecialSym kbdSyms[];
+
+/*
+ * The name of a key of a keyboard accelerator (for uic -g)
+ */
+char *
+Scan_KbdKeyName(int key)
+{
+    extern int Scan_KbdSymCount(void);
+    int i, n = Scan_KbdSymCount();
+
+    for (i = 0; i < n; i++) {
+	if (kbdSyms[i].type == KBD_SYM && kbdSyms[i].value == key) {
+	    return kbdSyms[i].name;
+	}
+    }
+    return NULL;
+}
+
 static SpecialSym kbdSyms[] = {
     {"alt",		KBD_MODIFIER_SYM,	M_ALT},
     {"control",		KBD_MODIFIER_SYM,	M_CTRL},
@@ -632,6 +651,12 @@ static SpecialSym kbdSyms[] = {
     {"MINUS",		KBD_SYM,	(KEY_DIGIT << 16) | '-'},
     {"ENTER",		KBD_SYM,	(KEY_MISC << 16) | '\r'}
 };
+
+int
+Scan_KbdSymCount(void)
+{
+    return sizeof(kbdSyms) / sizeof(kbdSyms[0]);
+}
 
 
 /***********************************************************************

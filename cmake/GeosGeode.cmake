@@ -47,7 +47,7 @@ set(_geos_geode_cflags -ffreestanding -fno-stack-protector -fno-sanitize=all)
 
 function(geos_geode name)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "" "GP;REV;PROTOCOL"
-                        "GOC;INCLUDES;DEFINITIONS;OPTIONS")
+                        "GOC;GOC_DEPENDS;INCLUDES;DEFINITIONS;OPTIONS")
   set(sources ${ARG_UNPARSED_ARGUMENTS})
   set(geo ${CMAKE_CURRENT_BINARY_DIR}/${name}.geo)
   set(incs ${ARG_INCLUDES})
@@ -63,7 +63,8 @@ function(geos_geode name)
       get_filename_component(g ${g} ABSOLUTE)
       list(APPEND gocs ${g})
     endforeach()
-    geos_goc(wrappers ${gp} ${gocs} INCLUDES ${ARG_INCLUDES})
+    geos_goc(wrappers ${gp} ${gocs} INCLUDES ${ARG_INCLUDES}
+             DEPENDS ${ARG_GOC_DEPENDS})
     set(dir ${CMAKE_CURRENT_BINARY_DIR}/goc/${geode})
     set(module_c ${dir}/${geode}_module.c)
     set(rev ${ARG_REV})

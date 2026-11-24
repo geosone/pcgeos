@@ -49,6 +49,8 @@ FILE		  *output;
 char		inFile[256] = "";
 
 char  		*outFile = "uic.out";
+int		outgoc = 0;	/* -g: write goc source */
+extern void	DoGocOutput(void);
 
 int		yyerrors = 0;
 
@@ -95,7 +97,7 @@ Usage(char *fmt, ...)
     vfprintf(stderr, fmt, args);
     va_end(args);
 
-    fprintf(stderr, "\nUsage: uic [-2cdopDIRW] <file>\n");
+    fprintf(stderr, "\nUsage: uic [-2cdgopDIRW] [-g [-G <resource>]... [-x <externs>] [-i <include>]...] <file>\n");
 
     exit(1);
 }
@@ -318,7 +320,11 @@ main(int argc, char **argv)
 	fprintf(stderr, "Semantic checks, starting output...\n");
     }
 
-    DoOutput();
+    if (outgoc) {
+	DoGocOutput();
+    } else {
+	DoOutput();
+    }
 
     if (yyerrors) {
 	fprintf(stderr, "\n\n%d errors found\n", yyerrors);
@@ -446,6 +452,25 @@ ParseArgs(int argc, char **argv)
 		}
 		case 'c' :{
 		    outcomments = 1;
+		    break;
+		}
+		case 'g' :{
+		    /* goc source for the C port (outgoc.c) */
+		    outgoc = 1;
+		    break;
+		}
+		case 'G' : case 'x' : case 'i' :{
+		    /* for -g: a resource to write (all without -G), the
+		     * file for the @extern declarations, a file the output
+		     * is to @include first */
+		    extern void GocOption(int option, char *arg);
+
+		    if (ac + 1 == argc) {
+			Usage("-%c requires an argument", argv[ac][1]);
+			/*NOTREACHED*/
+		    }
+		    GocOption(argv[ac][1], argv[ac+1]);
+		    ac++;
 		    break;
 		}
 		case 'l': {

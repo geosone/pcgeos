@@ -289,6 +289,61 @@ is now a geode of two files: `gocres2.goc` uses objects of `gocres.goc` in
 an object tree, instance data, chunk data, a static table, `OptrToChunk`
 in static data, code and `@send`.
 
+### 6.2 `.ui` files: `uic -g`
+
+uic's own output (`.rdef`, Esp) is of no use to the C port. `uic -g`
+(`Tools/uic/outgoc.c`) writes what a `.ui` file defines as goc source
+instead, resource by resource (`@start` ... `@end`), so goc -cg stays the
+only program that lays out resources. CMake: `geos_uic()`
+(`cmake/GeosUic.cmake`) makes `<name>.goc`, a file of the geode like its
+own `.goc` files, and `<name>.goh` with an `@extern` line for everything
+defined (`-x`); the files a `.ui` file includes are dependencies
+(`uicpp -M`). uic and its preprocessor uicpp are host tools of the CMake
+build (`Tools/uic`, `Tools/uicpp`). The geode gives a header that
+`@include`s the classes (`-i`, for Motif `CMain/cmainManagerUI.goh`), as
+the asm included the `.def` files before the `.rdef`. `-G <resource>`
+(repeated) writes only these resources, while the classes of the others
+are not in C yet.
+
+- **Instance data by position.** uic knows a class's components from
+  the `.uih` file, goc the instance variables from the `.goh` file, and
+  the names differ (`moniker` / `GI_visMoniker`). The order is the same.
+  uic writes a component as `__uic_<index>_<count>_<Class>Class = value;`
+  and goc's scanner (`ScanUicField`) takes it as the index-th instance
+  variable the class itself defines; `count` is the number uic knows, and
+  goc gives an error if its class has another number (a `.uih` and a
+  `.goh` that differ). An action is two variables (destination, message),
+  the variant pointer of a variant class is component 0.
+- **Values.** Bit fields and enumerated types are written as numbers
+  (their names are Esp's). Expressions in strings (`"mask X or Y"`) are
+  translated: `mask` dropped, `offset X` the chunk handle, `or`/`and`/
+  `not`/`shl`/`shr`, `0ffh`, `<a, b>` as `{a, b}`.
+- **Monikers.** A moniker written at the object is written at the object
+  for goc (`= 'O', "Open";`, `= list { @A, @B }`), one with a name of its
+  own as `@visMoniker`, before the objects of its resource.
+- **Hints and vardata** with data: the Esp directives of the data
+  (`word 1, 2`, `UN_OPTR X`, `lptr X`, `UN_DD XClass`) as a C
+  initializer. `ATTR_GEN_TRIGGER_ACTION_DATA` of two or three words
+  becomes `ATTR_GEN_TRIGGER_ACTION_TWO_WORDS` / `..._THREE_WORDS`.
+- **gstrings and chunks of data** are arrays of bytes for goc:
+  `word x` is `GOC_WORD(x)`, a `GS...` line the macro of `gstring.h`,
+  `Bitmap <...>` the macro `Bitmap(...)`, another structure
+  `GOC_<Type>(...)` (`GOC_CBitmap`, `GOC_RGBValue` in `gstring.h`).
+  An `optr` to a chunk in there (the icons of the document control's
+  dialogs draw a bitmap of another chunk, `GR_DRAW_BITMAP_OPTR`) is
+  `GOC_SOPTR(chunk)`, the eight bytes of `GOCR_SOPTR(chunk)`; goc -cg
+  writes the shadow of such a chunk as for any chunk with optrs
+  (section 4), so the loader puts in the handle.
+- **Not yet** (uic stops with an error): chunks of a structure, data
+  monikers, `hptr` values that are not null, localization instructions.
+
+Checked on `cmainManager.ui`: the objects of the document control that
+were written by hand before (`OLDocumentControlUI`, the tool box, the
+strings, the tool icons) come out the same value for value, except what
+the hand-written copy had left out (`SaveTrigger`'s `GI_attrs`, the
+dialogs' icons), and the screen of `library.ui.boot` is the same pixel
+for pixel.
+
 ## 7. Geodes as modules
 
 A geode is a module in the host's format (`GHAL-Concept.md` §4.4: DXE3 on
@@ -5480,9 +5535,9 @@ visual classes of `Library/User/Vis`:
   all the rest is the specific UI's: the control's is ported (below),
   the group's and the document's not yet.
 - **`OLDocumentControlClass`** (`CMain/cmainUIDocumentControl.goc`,
-  after `cmainUIDocumentControl.asm` and the `.ui`'s
-  `OLDocumentControlUI`, `OLDocumentControlToolboxUI`,
-  `ControlStrings`; the tool pictures in `cmainDocArt.goh`): Motif's
+  after `cmainUIDocumentControl.asm`; the objects are the `.ui`'s
+  `OLDocumentControlUI`, `OLDocumentControlToolboxUI`, `ControlStrings`
+  and tool pictures, through `uic -g`, section 6.2): Motif's
   part of a `GenDocumentControl`, a controller whose normal UI is the
   File menu's entries (New/Open, Close, Save, Save As, the Backup and
   Other sub menus) and whose tools are the buttons for them. They are

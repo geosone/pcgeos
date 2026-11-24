@@ -101,6 +101,7 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 include(GeosSources)
 if(GEOS_HAVE_GOC)
   include(GeosGoc)
+  include(GeosUic)
   include(GeosGeode)
 endif()
 

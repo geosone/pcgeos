@@ -3529,6 +3529,48 @@ SkipWhiteSpace(void)
  *      josh    7/92            initial version
  *
  ***********************************************************************/
+/***********************************************************************
+ *
+ * FUNCTION:	ScanUicField
+ *
+ * DESCRIPTION:	An instance variable named by its position, as uic -g
+ *		writes it (a .ui file knows the instance data of a class
+ *		only in its order): __uic_<index>_<count>_<class> is the
+ *		<index>th instance variable (from 0) that <class> itself
+ *		defines, and the class must define <count> of them.
+ *
+ * RETURN:	the name of the instance variable (the text itself after
+ *		an error)
+ *
+ ***********************************************************************/
+static char *
+ScanUicField(char *text)
+{
+  int	    index, count, n, used;
+  Symbol    *class, *inst, *found = NullSymbol;
+
+  if (sscanf(text, "__uic_%d_%d_%n", &index, &count, &used) != 2) {
+    return text;
+  }
+  class = Symbol_Find(String_EnterNoLen(text + used), TRUE);
+  if (class == NullSymbol || class->type != CLASS_SYM) {
+    yyerror("%s: %s is not a class", text, text + used);
+    return text;
+  }
+  for (n = 0, inst = class->data.symClass.instanceData; inst != NullSymbol;
+       n++, inst = inst->data.symRegInstance.next) {
+    if (n == index) {
+      found = inst;
+    }
+  }
+  if (n != count || found == NullSymbol) {
+    yyerror("%s: the class defines %d instance variables, the .ui file's "
+	    "class %d", text, n, count);
+    return text;
+  }
+  return found->name;
+}
+
 static int
 ScanIdentifierThing(YYSTYPE *yylv,char flags)
 {
@@ -3537,6 +3579,10 @@ ScanIdentifierThing(YYSTYPE *yylv,char flags)
   Symbol        *sym;
 
   char *text = ScanIdentString(TRUE);
+
+  if (text[0] == '_' && strncmp(text, "__uic_", 6) == 0) {
+    text = ScanUicField(text);
+  }
 
   if(*text == '\0'){                       /* nothing */
     DBPRINTF((stderr, "returning IDENT\n"));

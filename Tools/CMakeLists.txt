@@ -30,3 +30,5 @@ target_include_directories(geos_tool_config INTERFACE
 
 add_subdirectory(utils)
 add_subdirectory(goc)
+add_subdirectory(uic)
+add_subdirectory(uicpp)

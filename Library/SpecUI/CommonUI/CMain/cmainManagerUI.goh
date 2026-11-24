@@ -1,0 +1,16 @@
+/***********************************************************************
+ * cmainManagerUI.goh -- the classes of the objects of cmainManager.ui,
+ * for its goc source (uic -g, see cmake/GeosUic.cmake): what the asm
+ * had from cmainManager.asm before it included cmainManager.rdef.
+ ***********************************************************************/
+@include <stdapp.goh>
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olDocumentControlClass.goh>
+@include <Internal/SpecUI/olDocumentClass.goh>
+@include <Objects/gDocGrpC.goh>
+@include <Objects/gPrimC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gTrigC.goh>
+@include <Objects/gInterC.goh>
+@include <gcnlist.goh>

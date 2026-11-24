@@ -48,6 +48,12 @@ typedef unsigned char U_CHAR;
 #include <time.h>		/* for __DATE__ and __TIME__ */
 
 #include "fileargs.h"
+#if defined(_LINUX) && defined(__GNUC__)
+#include <errno.h>
+#ifndef max
+#define max(a,b) ((a) > (b) ? (a) : (b))
+#endif
+#endif
 
 /* External declarations.  */
 
@@ -352,7 +358,7 @@ enum node_type {
  T_UNUSED	/* Used for something not defined.  */
  };
 
-struct hashnode *install (U_CHAR*, int, enum node_type, int, int);
+struct hashnode *install (U_CHAR*, int, enum node_type, long, int);
 
 struct hashnode {
   struct hashnode *next;	/* double links for easy deletion */
@@ -4788,8 +4794,15 @@ error_from_errno (name)
 {
   int i;
   FILE_BUF *ip = NULL;
+#if defined(_LINUX) && defined(__GNUC__)
+  /* (the host's C library: errno is no variable, strerror has the text) */
+  int sys_nerr = 0x7fffffff;
+#define sys_errlist(e) strerror(e)
+#else
   extern int errno, sys_nerr;
   extern char *sys_errlist[];
+#define sys_errlist(e) sys_errlist[e]
+#endif
 
   for (i = indepth; i >= 0; i--)
     if (instack[i].fname != NULL) {
@@ -4801,7 +4814,7 @@ error_from_errno (name)
     fprintf (stderr, "%s:%d: ", ip->fname, ip->lineno);
 
   if (errno < sys_nerr)
-    fprintf (stderr, "%s: %s\n", name, sys_errlist[errno]);
+    fprintf (stderr, "%s: %s\n", name, sys_errlist(errno));
   else
     fprintf (stderr, "%s: undocumented I/O error\n", name);
 
@@ -4951,7 +4964,7 @@ install (name, len, type, value, hash)
      U_CHAR *name;
      int len;
      enum node_type type;
-     int value;
+     long value;	/* (an int or a pointer) */
      int hash;
         /* watch out here if sizeof (U_CHAR *) != sizeof (int) */
 {
@@ -4980,7 +4993,10 @@ install (name, len, type, value, hash)
     hp->next->prev = hp;
   hp->type = type;
   hp->length = len;
-  hp->value.ival = value;
+  if (sizeof (long) == sizeof (char *))
+    hp->value.cpval = (char *) value;
+  else
+    hp->value.ival = value;
   hp->name = ((U_CHAR *) hp) + sizeof (HASHNODE);
   p = hp->name;
   q = name;
@@ -5451,12 +5467,19 @@ void
 perror_with_name (name)
      char *name;
 {
+#if defined(_LINUX) && defined(__GNUC__)
+  /* (the host's C library: errno is no variable, strerror has the text) */
+  int sys_nerr = 0x7fffffff;
+#define sys_errlist(e) strerror(e)
+#else
   extern int errno, sys_nerr;
   extern char *sys_errlist[];
+#define sys_errlist(e) sys_errlist[e]
+#endif
 
   fprintf (stderr, "%s: ", progname);
   if (errno < sys_nerr)
-    fprintf (stderr, "%s: %s\n", name, sys_errlist[errno]);
+    fprintf (stderr, "%s: %s\n", name, sys_errlist(errno));
   else
     fprintf (stderr, "%s: undocumented I/O error\n", name);
   errors++;

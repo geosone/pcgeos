@@ -1,6 +1,7 @@
 # GeosGoc.cmake -- run goc -cg (the Port32 backend of goc) in CMake builds.
 #
-#   geos_goc(<out-var> <geode.gp> <file.goc>... [INCLUDES dir...])
+#   geos_goc(<out-var> <geode.gp> <file.goc>... [INCLUDES dir...]
+#            [DEPENDS file...])
 #
 # Translates the .goc files of one geode with goc -cg and numbers its
 # resources from <geode.gp> and the files (Port32/tools/gpres.py).  The
@@ -11,13 +12,14 @@
 # specific "force include" option is needed.  goc is built from Tools/goc
 # for the build host (GeosHostTools.cmake), also when cross compiling.
 # It writes the files a .goc file reads with @include (goc -y), so a
-# change of a header runs goc again.
+# change of a header runs goc again.  DEPENDS: files that must be made
+# before goc runs (headers a rule of the build writes).
 include_guard(GLOBAL)
 include(${CMAKE_CURRENT_LIST_DIR}/GeosHostTools.cmake)
 find_package(Python3 COMPONENTS Interpreter)
 
 function(geos_goc out_var gp_file)
-  cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "INCLUDES")
+  cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "INCLUDES;DEPENDS")
   get_filename_component(gp_file ${gp_file} ABSOLUTE)
   get_filename_component(geode ${gp_file} NAME_WE)
   set(dir ${CMAKE_CURRENT_BINARY_DIR}/goc/${geode})
@@ -55,7 +57,7 @@ function(geos_goc out_var gp_file)
       COMMAND ${GEOS_GOC} -cg -D__GEOS__ ${includes} -o ${out_c} -x ${xh}
               -y ${out_c}.d ${goc_file}
       WORKING_DIRECTORY ${goc_dir}
-      DEPENDS ${goc_file} ${GEOS_GOC} geos_host_tools
+      DEPENDS ${goc_file} ${GEOS_GOC} geos_host_tools ${ARG_DEPENDS}
       DEPFILE ${out_c}.d
       COMMENT "goc -cg ${base}.goc"
       VERBATIM)

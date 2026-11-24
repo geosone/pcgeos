@@ -225,6 +225,35 @@ pragma Alias(GrParseGString, "GRPARSEGSTRING");
 
 #define GOC_POINT(x,y) GOC_SW(x), GOC_SW(y)
 
+#ifdef GEOS_PORT32
+/*
+ * Port32: the eight bytes of the optr of a chunk of the same file, as
+ * goc -cg writes it in static data (GOCR_SOPTR, geosport.h): the loader
+ * puts in the handle of the chunk's resource.  What uic -g writes for an
+ * "optr" in a gstring or in a chunk of bytes.
+ */
+#define GOC_OPTR_BYTE(chunk, n)	((byte) (GOCR_SOPTR(chunk) >> (8 * (n))))
+#define GOC_SOPTR(chunk)						\
+	GOC_OPTR_BYTE(chunk, 0), GOC_OPTR_BYTE(chunk, 1),		\
+	GOC_OPTR_BYTE(chunk, 2), GOC_OPTR_BYTE(chunk, 3),		\
+	GOC_OPTR_BYTE(chunk, 4), GOC_OPTR_BYTE(chunk, 5),		\
+	GOC_OPTR_BYTE(chunk, 6), GOC_OPTR_BYTE(chunk, 7)
+#define GSDrawBitmapOptr(x_w,y_w,chunk)					\
+	GR_DRAW_BITMAP_OPTR,GOC_SW(x_w),GOC_SW(y_w),GOC_SOPTR(chunk)
+#define GSFillBitmapOptr(x_w,y_w,chunk)					\
+	GR_FILL_BITMAP_OPTR,GOC_SW(x_w),GOC_SW(y_w),GOC_SOPTR(chunk)
+#endif
+
+/*
+ * Structures as bytes, for a bitmap written as the bytes of a chunk
+ * (uic -g: "CBitmap <<...>, ...>", "RGBValue <r, g, b>").
+ */
+#define GOC_CBitmap(wid,hei,compact,type,start,num,dev,data,pal,xres,yres) \
+	Bitmap(wid,hei,compact,type), GOC_WORD(start), GOC_WORD(num),	\
+	GOC_WORD(dev), GOC_WORD(data), GOC_WORD(pal), GOC_WORD(xres),	\
+	GOC_WORD(yres)
+#define GOC_RGBValue(r,g,b)	(r), (g), (b)
+
 /*  NOTE:  the gstring opcode structures defined below have 
            *NOT* been tested yet */
 
