@@ -123,7 +123,7 @@ typedef ByteFlags GenDisplayControlAttributes;
     @instance GenDisplayControlAttributes	GDCII_attrs =
 				(GDCA_MAXIMIZED_NAME_ON_PRIMARY);
 
-    @default GI_states = @default | GS_ENABLED;
+    @default GI_states = (@default | GS_ENABLED);
     @default GCI_output = (TO_APP_TARGET);
 
 @endc

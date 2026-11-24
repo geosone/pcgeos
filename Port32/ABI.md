@@ -5449,8 +5449,35 @@ visual classes of `Library/User/Vis`:
   the variant superclass (`SPIR_BUILD_UI_DOCUMENT_CONTROL`,
   `..._APP_DOCUMENT_CONTROL`, `..._DOCUMENT`), a path that starts as
   the document directory, the list of the removable disks. As the asm;
-  all the rest is the specific UI's, which is not yet ported: such an
-  object cannot be built yet.
+  all the rest is the specific UI's: the control's is ported (below),
+  the group's and the document's not yet.
+- **`OLDocumentControlClass`** (`CMain/cmainUIDocumentControl.goc`,
+  after `cmainUIDocumentControl.asm` and the `.ui`'s
+  `OLDocumentControlUI`, `OLDocumentControlToolboxUI`,
+  `ControlStrings`; the tool pictures in `cmainDocArt.goh`): Motif's
+  part of a `GenDocumentControl`, a controller whose normal UI is the
+  File menu's entries (New/Open, Close, Save, Save As, the Backup and
+  Other sub menus) and whose tools are the buttons for them. They are
+  enabled by the target document's state (`GWNT_DOCUMENT_CHANGE`,
+  `GenerateEnabledFlags`). The control has the model exclusive and
+  passes what is for the model on to `GDCI_documentGroup` (attach,
+  detach, shutdown and quit with their acknowledgements too);
+  `[ui] docControlOptions`, `docControlFSLevel` and `backupDir` are
+  read with the field's options. The parameter of the Close entry is
+  the connection alone. `library.ui.boot` steps 80 and 81; comparison
+  variant 11 (the File menu) is equal to the original.
+  - Not yet: the dialogs (`cmainUIDocOperations.asm`), so
+    `OLDCRemoveSummons` does nothing, `..._DISPLAY_DIALOG` and the
+    `..._INITIATE_*` messages but Save's bring nothing up, and Save
+    does not say that a read-only document is saved under another name.
+- `ATTR_GEN_DESTINATION_CLASS` has no relocation here: its class is a
+  pointer the linker resolves (as an optr it was misread, and too short
+  for one on the 32-bit hosts).
+- A class default written `@default GI_states = @default | GS_ENABLED`
+  made an object's `@default & ~GS_USABLE` clear nothing (the
+  expansion is not put in parentheses): the four headers that had it
+  (`gDocCtrl.goh`, `gDCtrlC.goh`, `gToolCC.goh`, `game.goh`) now have
+  the parentheses.
 - **Not yet:**
   - in `GenClass`: `MSG_SPEC_RESOLVE_MONIKER_LIST` (`VisClass` keeps
     the list), the icon and text combination moniker

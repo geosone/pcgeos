@@ -15,6 +15,7 @@ set(c ${CMAKE_CURRENT_SOURCE_DIR}/CommonUI)
 geos_geode(motif GP Motif/motif32.gp
            GOC ${c}/CMain/cmainVariable.goc
                ${c}/CMain/cmainCode.goc
+               ${c}/CMain/cmainUIDocumentControl.goc
                ${c}/CUtils/copenUtils.goc
                ${c}/CUtils/cutilsPtrImages.goc
                ${c}/CUtils/copenSystem.goc

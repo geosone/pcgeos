@@ -1,0 +1,1349 @@
+/*
+ * cmainUIDocumentControl.goc -- OLDocumentControlClass (after
+ * cmainUIDocumentControl.asm and the OLDocumentControlUI, ...ToolboxUI
+ * and ControlStrings resources of cmainUIDocumentControl.ui): the
+ * specific part of a GenDocumentControl, the part of the document
+ * control that runs in the UI thread.  It is a controller: its normal
+ * UI is the File menu's entries for documents (New/Open, Close, Save,
+ * Save As, Backup, Other), its tools the buttons for them.  The state
+ * of the target document comes with GWNT_DOCUMENT_CHANGE
+ * (NotifyDocumentChange), by which the entries are enabled.  What the
+ * entries do is the GenDocumentGroup's (GDCI_documentGroup, in the
+ * application thread) and the target GenDocument's; the control itself
+ * has the model exclusive and passes what comes for the model on to
+ * the group.  The dialogs are in cmainUIDocOperations.goc.
+ *
+ * Port32 (Port32/ABI.md section 13y): the messages that take a
+ * structure of the stack (DocumentCommonParams,
+ * DocumentFileChangedParams) carry a copy when queued (section 5).
+ * The parameter of the Close entry is the connection alone
+ * (MSG_GEN_DOCUMENT_CLOSE's parameter structure).  Not yet: the
+ * dialogs (cmainUIDocOperations.asm), so no dialog is taken down
+ * (OLDCRemoveSummons) and none is put up when there is no document.
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olDocumentControlClass.goh>
+@include <Internal/SpecUI/olDocumentClass.goh>
+@include <Objects/gDocGrpC.goh>
+@include <Objects/gPrimC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gTrigC.goh>
+@include <Objects/gInterC.goh>
+@include <alb.goh>
+@include <gcnlist.goh>
+#include <initfile.h>
+#include <disk.h>
+#include <file.h>
+#include <string.h>
+
+@classdecl OLDocumentControlClass, neverSaved;
+
+#define OLDC_DEFAULT_FEATURES		GDC_SUGGESTED_ADVANCED_FEATURES
+#define OLDC_DEFAULT_TOOLBOX_FEATURES	0x003f	/* all of GDCToolboxFeatures */
+
+/* (ALF_OPEN_FOR_IACP_ONLY of alb.def; ui.goh has its old name) */
+#define ALF_OPEN_FOR_IACP_ONLY		ALF_LAUNCHED_FOR_PRINTING_ONLY
+
+#define GDC(o)	((GenDocumentControlInstance *) ObjDerefGen(o))
+
+/* the features of the Other sub menu */
+#define OTHER_FEATURES \
+    (GDCF_COPY | GDCF_EXPORT | GDCF_REVERT | GDCF_RENAME | \
+     GDCF_EDIT_USER_NOTES | GDCF_SET_TYPE | GDCF_SET_PASSWORD | \
+     GDCF_SAVE_AS_TEMPLATE | GDCF_SET_EMPTY_DOCUMENT | \
+     GDCF_SET_DEFAULT_DOCUMENT)
+
+/* ---------------------------------------------------------------------
+ * The options of the specific UI ([ui] docControlOptions,
+ * docControlFSLevel, backupDir of the field's category)
+ * ------------------------------------------------------------------- */
+
+word docControlOptions;			/* DocControlOptions */
+word docControlFSLevel = UIIL_ADVANCED;
+DiskHandle backupDirDisk = SP_BACKUP;
+char backupDirPath[PATH_BUFFER_SIZE];
+
+/* SpecInitDocumentControl: backupDir is a path followed by the data of
+ * a saved disk */
+void SpecInitDocumentControl(const char *category)
+{
+    word v, size = 0;
+    MemHandle bh = 0;
+
+    if (!InitFileReadInteger(category, "docControlOptions", &v))
+	docControlOptions = v;
+    if (!InitFileReadInteger(category, "docControlFSLevel", &v))
+	docControlFSLevel = v;
+    if (InitFileReadDataBlock(category, "backupDir", &bh, &size) || !bh)
+	return;
+    if (size) {
+	char *p = MemLock(bh);
+	word n = 0;
+	DiskHandle disk = 0;
+
+	while (n < size && p[n])
+	    n++;
+	if (n < size && n < PATH_BUFFER_SIZE &&
+	    (disk = DiskRestore(p + n + 1, NULL)) != 0) {
+	    backupDirDisk = disk;
+	    memcpy(backupDirPath, p, n + 1);
+	}
+	MemUnlock(bh);
+    }
+    MemFree(bh);
+}
+
+word SpecGetDocControlOptions(void)
+{
+    return docControlOptions;
+}
+
+/* ---------------------------------------------------------------------
+ * The controller's UI (cmainUIDocumentControl.ui)
+ * ------------------------------------------------------------------- */
+
+@include "CMain/cmainDocArt.goh"
+
+@start ControlStrings, data;
+@chunk char OLDCName[] = "Document Control";
+@chunk char SetDefaultDocumentName[] = "Set Default Document";
+@chunk char SetEmptyDocumentName[] = "Set Empty Document";
+@chunk char SaveAsTemplateName[] = "Save As Template";
+@chunk char SetPasswordName[] = "Set Document Password";
+@chunk char SetTypeName[] = "Set Document Type";
+@chunk char EditUserNotesName[] = "Edit Document's User Notes";
+@chunk char RenameName[] = "Rename";
+@chunk char RevertName[] = "Revert From Last Save";
+@chunk char ExportName[] = "Export";
+@chunk char CopyMoveName[] = "Copy/Move";
+@chunk char SaveAsName[] = "Save As";
+@chunk char SaveName[] = "Save";
+@chunk char QuickBackupName[] = "Quick Backup";
+@chunk char CloseName[] = "Close";
+@chunk char OpenName[] = "Open";
+@chunk char OpenCloseName[] = "Open/Close";
+@chunk char UseTemplateName[] = "Use Template";
+@chunk char NewName[] = "Create Empty";
+@chunk char BlankFileNameErrStr[] = "This name is invalid because it contains only spaces.  Please enter another name.";
+@visMoniker FileVolumeText = "Volume";
+@visMoniker FileSubDirText = "Folder";
+@visMoniker FileErrorText = "";
+@visMoniker FileTemplateText = "Template Document";
+@visMoniker FileReadOnlyTemplateText = "Read-only Template";
+@visMoniker FileReadOnlyText = "Read-only document";
+@visMoniker FileSharedMultipleText = "Multi-user document";
+@visMoniker FileSharedSingleText = "Public document";
+@visMoniker FileNormalText = "Normal document";
+@chunk char FileNewHelp[] = "Create a new file or template";
+@chunk char FileOpenHelp[] = "Retrieve a previously saved document";
+@chunk char FileCloseHelp[] = "Close the current document";
+@chunk char FileSaveHelp[] = "Store current document on disk";
+@chunk char FileSaveDisabledHelp[] = "Disabled because document is already saved";
+@chunk char FileSaveAsHelp[] = "Store current document on disk with different name";
+@end ControlStrings;
+
+@start OLDocumentControlUI, notDetachable;
+@object GenTriggerClass NewTrigger = {
+    GI_visMoniker = 'N', "New/Open";
+    GI_states = @default & ~GS_USABLE;
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+    ATTR_GEN_FOCUS_HELP = @FileNewHelp;
+}
+@object GenTriggerClass OpenTrigger = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = 'O', "Open";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_OPEN_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+    ATTR_GEN_FEATURE_LINK = OptrToChunk(@CloseTrigger);
+    ATTR_GEN_FOCUS_HELP = @FileOpenHelp;
+}
+@visMoniker SwitchDocumentMoniker = 'w', "Switch Document";
+@object GenTriggerClass CloseTrigger = {
+    GI_states = @default & ~(GS_USABLE | GS_ENABLED);
+    GI_visMoniker = 'C', "Close";
+    GTI_actionMsg = MSG_OL_DOCUMENT_CHECK_CUI_CLOSE;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+    /* (no connection: the user's) */
+    ATTR_GEN_TRIGGER_ACTION_DATA = 0;
+    ATTR_GEN_FOCUS_HELP = @FileCloseHelp;
+}
+@object GenTriggerClass SaveTrigger = {
+    GI_states = @default & ~(GS_USABLE | GS_ENABLED);
+    GI_visMoniker = 'S', "Save";
+    GI_kbdAccelerator = control 's';
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    ATTR_GEN_FOCUS_HELP = @FileSaveHelp;
+    ATTR_GEN_FOCUS_DISABLED_HELP = @FileSaveDisabledHelp;
+}
+@object GenTriggerClass SaveAsTrigger = {
+    GI_states = @default & ~(GS_USABLE | GS_ENABLED);
+    GI_visMoniker = 'A', "Save As";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+    ATTR_GEN_FOCUS_HELP = @FileSaveAsHelp;
+}
+@object GenInteractionClass BackupSubMenu = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = 'B', "Backup";
+    GI_comp = @QuickBackupTrigger, @RecoverFromQuickBackupTrigger;
+    GII_visibility = GIV_POPUP;
+}
+@object GenTriggerClass QuickBackupTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'M', "Make Backup";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_QUICK_BACKUP;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+}
+@object GenTriggerClass RecoverFromQuickBackupTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'R', "Restore From Backup";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_RECOVER_QUICK_BACKUP;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+}
+@object GenInteractionClass OptionsSubMenu = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = 't', "Other";
+    GI_comp = @OptionsSaveGroup, @SaveAsTemplateTrigger, @OptionsMiscGroup,
+	      @OptionsEmptyPopup;
+    GII_visibility = GIV_POPUP;
+}
+@object GenInteractionClass OptionsSaveGroup = {
+    GI_comp = @CopyMoveTriggers, @ExportTrigger, @RevertTrigger,
+	      @RenameTrigger;
+}
+@object GenInteractionClass CopyMoveTriggers = {
+    GI_comp = @CopyTrigger, @MoveTrigger;
+}
+@object GenTriggerClass CopyTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'C', "Copy To";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_COPY_TO_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenTriggerClass MoveTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'M', "Move To";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_MOVE_TO_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenTriggerClass ExportTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'E', "Export Document";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_EXPORT_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenTriggerClass RevertTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'D', "Discard Changes";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_REVERT;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+}
+@object GenTriggerClass RenameTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'R', "Rename";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_RENAME;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenTriggerClass SaveAsTemplateTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'S', "Save as Template";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_TEMPLATE_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenInteractionClass OptionsMiscGroup = {
+    GI_comp = @EditUserNotesTrigger, @SetPasswordTrigger, @SetTypeTrigger;
+}
+@object GenTriggerClass EditUserNotesTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'N', "Edit Document Notes";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_EDIT_USER_NOTES;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenTriggerClass SetPasswordTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'P', "Set Document Password";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_SET_PASSWORD_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenTriggerClass SetTypeTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'T', "Set Document Type";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_SET_TYPE_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenInteractionClass OptionsEmptyPopup = {
+    GI_visMoniker = 'y', "Empty Document";
+    GI_comp = @SetEmptyDocumentTrigger, @ClearEmptyDocumentTrigger,
+	      @SetDefaultDocumentTrigger, @ClearDefaultDocumentTrigger;
+    GII_visibility = GIV_POPUP;
+}
+@object GenTriggerClass SetEmptyDocumentTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'S', "Set Empty Document";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_SET_EMPTY;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_FEATURE_LINK = OptrToChunk(@ClearEmptyDocumentTrigger);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+}
+@object GenTriggerClass ClearEmptyDocumentTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'R', "Reset Empty Document";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CLEAR_EMPTY;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+}
+@object GenTriggerClass SetDefaultDocumentTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'S', "Set Startup Document";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_SET_DEFAULT;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_FEATURE_LINK = OptrToChunk(@ClearDefaultDocumentTrigger);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@object GenTriggerClass ClearDefaultDocumentTrigger = {
+    GI_states = @default & ~GS_ENABLED;
+    GI_visMoniker = 'R', "Reset Startup Document";
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CLEAR_DEFAULT;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+@end OLDocumentControlUI;
+
+@start OLDocumentControlToolboxUI, notDetachable;
+@object GenTriggerClass NewEmptyToolTrigger = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = list { @NewTCMoniker, @NewTMMoniker, @NewTCGAMoniker };
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_NEW_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    ATTR_GEN_FOCUS_HELP = @FileNewHelp;
+}
+@object GenTriggerClass UseTemplateToolTrigger = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = list { @UseTemplateTCMoniker, @UseTemplateTMMoniker,
+			   @UseTemplateTCGAMoniker };
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_USE_TEMPLATE_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    ATTR_GEN_FOCUS_HELP = @UseTemplateName;
+}
+@object GenTriggerClass OpenToolTrigger = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = list { @OpenTCMoniker, @OpenTMMoniker, @OpenTCGAMoniker };
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_OPEN_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    ATTR_GEN_FOCUS_HELP = @FileOpenHelp;
+}
+@object GenTriggerClass CloseToolTrigger = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = list { @CloseTCMoniker, @CloseTMMoniker,
+			   @CloseTCGAMoniker };
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CLOSE;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+    ATTR_GEN_TRIGGER_ACTION_DATA = 0;
+    ATTR_GEN_FOCUS_HELP = @FileCloseHelp;
+}
+@object GenTriggerClass SaveToolTrigger = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = list { @SaveTCMoniker, @SaveTMMoniker, @SaveTCGAMoniker };
+    GTI_actionMsg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_DOC;
+    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
+    ATTR_GEN_FOCUS_HELP = @FileSaveHelp;
+}
+@object GenTriggerClass QuickBackupToolTrigger = {
+    GI_states = @default & ~GS_USABLE;
+    GI_visMoniker = list { @QuickBackupTCMoniker, @QuickBackupTMMoniker,
+			   @QuickBackupTCGAMoniker };
+    GTI_actionMsg = MSG_GEN_DOCUMENT_QUICK_BACKUP;
+    GTI_destination = (TO_APP_MODEL);
+    ATTR_GEN_DESTINATION_CLASS = { (ClassStruct *) &GenDocumentClass };
+    ATTR_GEN_FOCUS_HELP = @QuickBackupName;
+}
+@end OLDocumentControlToolboxUI;
+
+/* ---------------------------------------------------------------------
+ * To the document group, to the target document
+ * ------------------------------------------------------------------- */
+
+/* SendToAppDCRegs, ...Frame */
+static void SendToAppDC(optr o, word flags, Message msg, const void *params,
+			word size)
+{
+    optr group = GDC(o)->GDCI_documentGroup;
+
+    if (group)
+	CObjMessageP(flags, group, msg, params, size, NULL, 0);
+}
+
+/* OLDCRemoveSummons: the dialog that is up is taken down
+ * (cmainUIDocOperations: not yet, there is none) */
+static void OLDCRemoveSummons(optr o)
+{
+    (void) o;
+}
+
+/* ---------------------------------------------------------------------
+ * Starting up
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDocumentControlAppStartup: the model exclusive, so that what is
+ * sent to the model comes here; on to the document group.  The document
+ * of the launch block is opened later (MSG_META_ATTACH), when the
+ * application knows its IACP connections.
+ */
+@method OLDocumentControlClass, MSG_META_APP_STARTUP
+{
+    (void) pself;
+    MetaGrabModelExclLow(oself);
+    SendToAppDC(oself, 0, message, &appLaunchBlock, sizeof(appLaunchBlock));
+}
+
+/*
+ * OpenCommon: msg with the DocumentCommonParams of a file to the
+ * document group, queued (as a one thread application's attach): name
+ * with a disk is a path below it, split into path and name; without
+ * (0) the name is in the control's path
+ */
+static void OpenCommon(optr o, Message msg, const char *name,
+		       DiskHandle disk, DocumentOpenFlags flags)
+{
+    DocumentCommonParams p;
+
+    memset(&p, 0, sizeof(p));
+    p.DCP_flags = flags;
+    if (disk) {
+	word n = 0, slash = 0;
+
+	p.DCP_diskHandle = disk;
+	for (n = 0; name[n] && n < sizeof(p.DCP_path) - 1; n++) {
+	    p.DCP_path[n] = name[n];
+	    if (name[n] == '\\')
+		slash = n + 1;
+	}
+	p.DCP_path[n] = 0;
+	for (n = 0; p.DCP_path[slash + n] && n < sizeof(p.DCP_name) - 1; n++)
+	    p.DCP_name[n] = p.DCP_path[slash + n];
+	p.DCP_name[n] = 0;
+	/* (the path ends before its last backslash; no backslash: none) */
+	p.DCP_path[slash ? slash - 1 : 0] = 0;
+    } else {
+	word n;
+
+	for (n = 0; name[n] && n < sizeof(p.DCP_name) - 1; n++)
+	    p.DCP_name[n] = name[n];
+	(void) GenPathGetObjectPath(o, ATTR_GEN_PATH_DATA,
+				    TEMP_GEN_PATH_SAVED_DISK_HANDLE,
+				    p.DCP_path, sizeof(p.DCP_path),
+				    &p.DCP_diskHandle, NULL);
+    }
+    SendToAppDC(o, MF_FORCE_QUEUE, msg, &p, sizeof(p));
+}
+
+/*
+ * OLDocumentControlAttach: no document yet.  The document of the
+ * launch block is opened (below SP_TEMPLATE: as a template); else,
+ * unless restoring from state, the default document, or the dialog
+ * that was up, or the main dialog.  In a one thread application after
+ * the attach is through, so that it is on screen first.
+ */
+@method OLDocumentControlClass, MSG_META_ATTACH_OBJECT
+{
+    GenDocumentControlInstance *g = GDC(oself);
+    GenDocumentControlAttrs attrs;
+    Message msg;
+    struct { word f; MemHandle alb; MemHandle extra; } ap;
+
+    (void) pself;
+    ap.f = flags;
+    ap.alb = appLaunchBlock;
+    ap.extra = extraState;
+    g->GDCI_attrs &= ~GDCA_DOCUMENT_EXISTS;
+    ObjMarkDirty(oself);
+    if (appLaunchBlock) {
+	AppLaunchBlock *alb = MemLock(appLaunchBlock);
+
+	if (alb->ALB_dataFile[0]) {
+	    DocumentOpenFlags f = 0;
+
+	    (void) @call oself::MSG_GEN_PATH_SET(alb->ALB_path,
+						 alb->ALB_diskHandle);
+	    SendToAppDC(oself, 0, message, &ap, sizeof(ap));
+	    alb = MemDeref(appLaunchBlock);
+	    if (alb->ALB_launchFlags & ALF_OPEN_FOR_IACP_ONLY)
+		f |= DOF_OPEN_FOR_IACP_ONLY;
+	    if (FileComparePaths(NULL, SP_TEMPLATE, alb->ALB_path,
+				 alb->ALB_diskHandle) <= PCT_SUBDIR)
+		f |= DOF_FORCE_TEMPLATE_BEHAVIOR;
+	    OpenCommon(oself, MSG_GEN_DOCUMENT_GROUP_OPEN_DOC,
+		       alb->ALB_dataFile, 0, f);
+	    MemUnlock(appLaunchBlock);
+	    return;
+	}
+	MemUnlock(appLaunchBlock);
+    }
+    SendToAppDC(oself, 0, message, &ap, sizeof(ap));
+    g = GDC(oself);
+    attrs = g->GDCI_attrs;
+    g->GDCI_attrs &= ~GDCA_CURRENT_TASK;
+    msg = MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG;
+    if ((flags & AAF_RESTORING_FROM_QUIT) ||
+	!(flags & AAF_RESTORING_FROM_STATE)) {
+	if (g->GDCI_defaultFile)
+	    msg = MSG_GEN_DOCUMENT_CONTROL_OPEN_DEFAULT_DOC;
+	else if (!(docControlOptions & DCO_BYPASS_BIG_DIALOG))
+	    msg = MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG;
+	else {
+	    switch ((attrs & GDCA_CURRENT_TASK) >> GDCA_CURRENT_TASK_OFFSET) {
+	    case GDCT_NONE:
+		return;
+	    case GDCT_NEW:
+		msg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_NEW_DOC;
+		break;
+	    case GDCT_OPEN:
+		msg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_OPEN_DOC;
+		break;
+	    case GDCT_USE_TEMPLATE:
+		msg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_USE_TEMPLATE_DOC;
+		break;
+	    case GDCT_SAVE_AS:
+		msg = MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC;
+		break;
+	    default:
+		msg = MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG;
+		break;
+	    }
+	}
+    }
+    CObjMessageP(ObjTestIfObjBlockRunByCurThread(
+		     OptrToHandle(g->GDCI_documentGroup)) ?
+		 MF_FORCE_QUEUE : MF_CALL, oself, msg, NULL, 0, NULL, 0);
+}
+
+/*
+ * OLDocumentFetchPathFromIniFile: the path under key in the
+ * application's category (a path, then the data of its saved disk).
+ * FALSE if there is none or its disk cannot be had.
+ */
+static Boolean FetchPathFromIniFile(const char *key, char *path,
+				    DiskHandle *disk)
+{
+    char cat[INI_CATEGORY_BUFFER_SIZE];
+    optr app = GeodeGetAppObject(0);
+    MemHandle bh = 0;
+    word size = 0, n = 0;
+    Boolean ok = FALSE;
+    char *p;
+
+    cat[0] = 0;
+    if (app)
+	@call app::MSG_META_GET_INI_CATEGORY(cat);
+    if (InitFileReadDataBlock(cat, key, &bh, &size) || !bh)
+	return FALSE;
+    p = MemLock(bh);
+    while (n < size && p[n])
+	n++;
+    if (n < size && n < PATH_BUFFER_SIZE) {
+	memcpy(path, p, n + 1);
+	ok = !UserDiskRestore(p + n + 1, disk);
+    }
+    MemUnlock(bh);
+    MemFree(bh);
+    return ok;
+}
+
+/*
+ * OLDocumentControlOpenDefaultDoc: the default document: the one of
+ * the .ini file (defaultDocument), else GDCI_defaultFile in the
+ * document directory; with neither the main dialog is tested for
+ */
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_OPEN_DEFAULT_DOC
+{
+    char path[PATH_BUFFER_SIZE];
+    DiskHandle disk = 0;
+
+    (void) pself;
+    if (!FetchPathFromIniFile("defaultDocument", path, &disk)) {
+	ChunkHandle def = GDC(oself)->GDCI_defaultFile;
+	const char *s;
+	word n;
+
+	if (!def) {
+	    @call oself::MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG();
+	    return;
+	}
+	s = LMemDerefHandles(OptrToHandle(oself), def);
+	for (n = 0; s[n] && n < sizeof(path) - 1; n++)
+	    path[n] = s[n];
+	path[n] = 0;
+	disk = SP_DOCUMENT;
+    }
+    OLDCRemoveSummons(oself);
+    OpenCommon(oself, MSG_GEN_DOCUMENT_GROUP_OPEN_DEFAULT_DOC, path, disk, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * Shutting down
+ * ------------------------------------------------------------------- */
+
+static void RemoveFromWindowsList(optr group)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (app && group)
+	(void) @call app::MSG_META_GCN_LIST_REMOVE(group, GAGCNLT_WINDOWS,
+						   MANUFACTURER_ID_GEOWORKS);
+}
+
+/*
+ * OLDocumentControlDetach: the dialogs down (the import and export
+ * dialogs off the windows list); the document group detaches and
+ * acknowledges to the control
+ */
+@method OLDocumentControlClass, MSG_META_DETACH
+{
+    GenDocumentControlInstance *g;
+    optr imp, exp;
+    struct { word id; optr ack; } p;
+
+    (void) pself;
+    ObjInitDetach(message, oself, callerID, caller);
+    OLDCRemoveSummons(oself);
+    g = GDC(oself);
+    imp = g->GDCI_importGroup;
+    exp = g->GDCI_exportGroup;
+    RemoveFromWindowsList(imp);
+    RemoveFromWindowsList(exp);
+    p.id = callerID;
+    p.ack = oself;
+    SendToAppDC(oself, 0, message, &p, sizeof(p));
+    ObjIncDetach(oself);		/* (the group's ack) */
+    @callsuper();
+    ObjEnableDetach(oself);
+}
+
+/* OLDocumentControlAppShutdown: the model exclusive given up; the
+ * document group shuts down and acknowledges to the control */
+@method OLDocumentControlClass, MSG_META_APP_SHUTDOWN
+{
+    struct { word id; optr ack; } p;
+
+    (void) pself;
+    ObjInitDetach(message, oself, callerID, ackOD);
+    MetaReleaseModelExclLow(oself);
+    ObjIncDetach(oself);
+    p.id = callerID;
+    p.ack = oself;
+    SendToAppDC(oself, 0, message, &p, sizeof(p));
+    @callsuper();
+    ObjEnableDetach(oself);
+}
+
+/* OLDocumentControlQuit: the document group asks about the documents
+ * and acknowledges to the control, which passes that on */
+@method OLDocumentControlClass, MSG_META_QUIT_OBJECT
+{
+    optr self = oself;
+
+    pself->OLDCI_quitOD = obj;
+    SendToAppDC(oself, 0, message, &self, sizeof(self));
+}
+
+@method OLDocumentControlClass, MSG_META_QUIT_ACK
+{
+    optr od = pself->OLDCI_quitOD;
+
+    pself->OLDCI_quitOD = 0;
+    if (od)
+	@send od::MSG_META_QUIT_ACK(quitLevel, abortFlag);
+}
+
+/* ---------------------------------------------------------------------
+ * The controller
+ * ------------------------------------------------------------------- */
+
+static GCNListType oldcGcnList[] = {
+    { MANUFACTURER_ID_GEOWORKS, GAGCNLT_APP_TARGET_NOTIFY_DOCUMENT_CHANGE }
+};
+static NotificationType oldcNotifyTypeList[] = {
+    { MANUFACTURER_ID_GEOWORKS, GWNT_DOCUMENT_CHANGE }
+};
+
+/* (the tables: in the order of the bits, the lowest first) */
+static const ChunkHandle *TriggerTable(void)
+{
+    static ChunkHandle t[15];
+
+    t[0] = OptrToChunk(@SetDefaultDocumentTrigger);
+    t[1] = OptrToChunk(@SetEmptyDocumentTrigger);
+    t[2] = OptrToChunk(@SaveAsTemplateTrigger);
+    t[3] = OptrToChunk(@SetPasswordTrigger);
+    t[4] = OptrToChunk(@SetTypeTrigger);
+    t[5] = OptrToChunk(@EditUserNotesTrigger);
+    t[6] = OptrToChunk(@RenameTrigger);
+    t[7] = OptrToChunk(@RevertTrigger);
+    t[8] = OptrToChunk(@ExportTrigger);
+    t[9] = OptrToChunk(@CopyMoveTriggers);
+    t[10] = OptrToChunk(@SaveAsTrigger);
+    t[11] = OptrToChunk(@SaveTrigger);
+    t[12] = OptrToChunk(@QuickBackupTrigger);
+    t[13] = OptrToChunk(@OpenTrigger);
+    t[14] = OptrToChunk(@NewTrigger);
+    return t;
+}
+
+static const ChunkHandle *ToolTriggerTable(void)
+{
+    static ChunkHandle t[6];
+
+    t[0] = OptrToChunk(@QuickBackupToolTrigger);
+    t[1] = OptrToChunk(@SaveToolTrigger);
+    t[2] = OptrToChunk(@CloseToolTrigger);
+    t[3] = OptrToChunk(@OpenToolTrigger);
+    t[4] = OptrToChunk(@UseTemplateToolTrigger);
+    t[5] = OptrToChunk(@NewEmptyToolTrigger);
+    return t;
+}
+
+/* OLDocumentControlGetInfo */
+@method OLDocumentControlClass, MSG_GEN_CONTROL_GET_INFO
+{
+    static GenControlChildInfo children[7];
+    static GenControlFeaturesInfo features[15];
+    static GenControlChildInfo tools[6];
+    static GenControlFeaturesInfo toolFeatures[6];
+    static const WordFlags childMasks[7] = {
+	GDCF_NEW, GDCF_OPEN_CLOSE, GDCF_OPEN_CLOSE, GDCF_SAVE, GDCF_SAVE_AS,
+	GDCF_QUICK_BACKUP, OTHER_FEATURES
+    };
+    static const WordFlags toolMasks[6] = {
+	GDCTF_NEW_EMPTY, GDCTF_OPEN, GDCTF_USE_TEMPLATE, GDCTF_CLOSE,
+	GDCTF_SAVE, GDCTF_QUICK_BACKUP
+    };
+    const ChunkHandle *tt = TriggerTable(), *tl = ToolTriggerTable();
+    word i;
+
+    (void) pself;
+    children[0].GCCI_object = OptrToChunk(@NewTrigger);
+    children[1].GCCI_object = OptrToChunk(@OpenTrigger);
+    children[2].GCCI_object = OptrToChunk(@CloseTrigger);
+    children[3].GCCI_object = OptrToChunk(@SaveTrigger);
+    children[4].GCCI_object = OptrToChunk(@SaveAsTrigger);
+    children[5].GCCI_object = OptrToChunk(@BackupSubMenu);
+    children[6].GCCI_object = OptrToChunk(@OptionsSubMenu);
+    for (i = 0; i < 7; i++) {
+	children[i].GCCI_featureMask = childMasks[i];
+	children[i].GCCI_flags = i < 6 ? GCCF_IS_DIRECTLY_A_FEATURE : 0;
+    }
+    for (i = 0; i < 15; i++)
+	features[i].GCFI_object = tt[i];
+    features[0].GCFI_name = @SetDefaultDocumentName;
+    features[1].GCFI_name = @SetEmptyDocumentName;
+    features[2].GCFI_name = @SaveAsTemplateName;
+    features[3].GCFI_name = @SetPasswordName;
+    features[4].GCFI_name = @SetTypeName;
+    features[5].GCFI_name = @EditUserNotesName;
+    features[6].GCFI_name = @RenameName;
+    features[7].GCFI_name = @RevertName;
+    features[8].GCFI_name = @ExportName;
+    features[9].GCFI_name = @CopyMoveName;
+    features[10].GCFI_name = @SaveAsName;
+    features[11].GCFI_name = @SaveName;
+    features[12].GCFI_name = @QuickBackupName;
+    features[13].GCFI_name = @OpenCloseName;
+    features[14].GCFI_name = @NewName;
+    tools[0].GCCI_object = OptrToChunk(@NewEmptyToolTrigger);
+    tools[1].GCCI_object = OptrToChunk(@OpenToolTrigger);
+    tools[2].GCCI_object = OptrToChunk(@UseTemplateToolTrigger);
+    tools[3].GCCI_object = OptrToChunk(@CloseToolTrigger);
+    tools[4].GCCI_object = OptrToChunk(@SaveToolTrigger);
+    tools[5].GCCI_object = OptrToChunk(@QuickBackupToolTrigger);
+    for (i = 0; i < 6; i++) {
+	tools[i].GCCI_featureMask = toolMasks[i];
+	tools[i].GCCI_flags = GCCF_IS_DIRECTLY_A_FEATURE;
+	toolFeatures[i].GCFI_object = tl[i];
+    }
+    toolFeatures[0].GCFI_name = @QuickBackupName;
+    toolFeatures[1].GCFI_name = @SaveName;
+    toolFeatures[2].GCFI_name = @CloseName;
+    toolFeatures[3].GCFI_name = @OpenName;
+    toolFeatures[4].GCFI_name = @UseTemplateName;
+    toolFeatures[5].GCFI_name = @NewName;
+
+    memset(info, 0, sizeof(*info));
+    info->GCBI_flags = GCBF_SPECIFIC_UI | GCBF_CUSTOM_ENABLE_DISABLE |
+		       GCBF_ALWAYS_UPDATE | GCBF_ALWAYS_INTERACTABLE |
+		       GCBF_IS_ON_ACTIVE_LIST;
+    info->GCBI_initFileKey = "documentControl";
+    info->GCBI_gcnList = oldcGcnList;
+    info->GCBI_gcnCount = 1;
+    info->GCBI_notificationList = oldcNotifyTypeList;
+    info->GCBI_notificationCount = 1;
+    info->GCBI_controllerName = @OLDCName;
+    info->GCBI_dupBlock = OptrToHandle(@NewTrigger);
+    info->GCBI_childList = children;
+    info->GCBI_childCount = 7;
+    info->GCBI_featuresList = features;
+    info->GCBI_featuresCount = 15;
+    info->GCBI_features = OLDC_DEFAULT_FEATURES;
+    info->GCBI_toolBlock = OptrToHandle(@NewEmptyToolTrigger);
+    info->GCBI_toolList = tools;
+    info->GCBI_toolCount = 6;
+    info->GCBI_toolFeaturesList = toolFeatures;
+    info->GCBI_toolFeaturesCount = 6;
+    info->GCBI_toolFeatures = OLDC_DEFAULT_TOOLBOX_FEATURES;
+}
+
+/*
+ * OLDocumentControlScanFeatureHints: after the controller's own scan:
+ * what the control's mode, attributes and features and the options of
+ * the specific UI prohibit, and the features required
+ */
+@method OLDocumentControlClass, MSG_GEN_CONTROL_SCAN_FEATURE_HINTS
+{
+    GenDocumentControlInstance *g = GDC(oself);
+    GenDocumentControlAttrs attrs = g->GDCI_attrs;
+    GenDocumentControlFeatures f = g->GDCI_features;
+    WordFlags no = 0, noTools = 0, required;
+
+    (void) pself;
+    if (!OptrToHandle(g->GDCI_exportGroup))
+	no |= GDCF_EXPORT;
+    if (((attrs & GDCA_MODE) >> GDCA_MODE_OFFSET) == GDCM_VIEWER) {
+	no |= GDCF_NEW | GDCF_QUICK_BACKUP | GDCF_SAVE | GDCF_SAVE_AS |
+	      GDCF_COPY | GDCF_REVERT | GDCF_RENAME | GDCF_EDIT_USER_NOTES |
+	      GDCF_SET_TYPE | GDCF_SET_PASSWORD | GDCF_SET_EMPTY_DOCUMENT;
+	noTools |= GDCTF_NEW_EMPTY | GDCTF_USE_TEMPLATE | GDCTF_SAVE |
+		   GDCTF_QUICK_BACKUP;
+    }
+    if (!(attrs & GDCA_SUPPORTS_SAVE_AS_REVERT))
+	no |= GDCF_SAVE_AS | GDCF_REVERT;
+    if (!(attrs & GDCA_VM_FILE))
+	no |= GDCF_EDIT_USER_NOTES | GDCF_SET_PASSWORD;
+    if (!(f & GDCF_SUPPORTS_USER_SETTABLE_EMPTY_DOCUMENT))
+	no |= GDCF_SET_EMPTY_DOCUMENT;
+    if (!(f & GDCF_SUPPORTS_TEMPLATES)) {
+	no |= GDCF_SAVE_AS_TEMPLATE;
+	noTools |= GDCTF_USE_TEMPLATE;
+    }
+    if (!(f & GDCF_SUPPORTS_USER_SETTABLE_DEFAULT_DOCUMENT))
+	no |= GDCF_SET_DEFAULT_DOCUMENT;
+    required = GDCF_NEW | GDCF_OPEN_CLOSE | GDCF_SAVE;
+    if (docControlOptions & DCO_TRANSPARENT_DOC) {
+	required = GDCF_NEW | GDCF_SAVE;
+	if (!(docControlOptions & DCO_USER_CONFIRM_SAVE)) {
+	    no |= GDCF_SAVE_AS | GDCF_REVERT;
+	    required = GDCF_NEW;
+	}
+	noTools |= GDCTF_OPEN | GDCTF_CLOSE | GDCTF_SAVE | GDCTF_USE_TEMPLATE;
+    }
+    if ((f & GDCF_SINGLE_DOCUMENT) &&
+	!(docControlOptions & DCO_SINGLE_DOCUMENT_OVERRIDE))
+	required &= ~(GDCF_NEW | GDCF_OPEN_CLOSE | GDCF_SAVE_AS);
+    if (type == GCUIT_NORMAL) {
+	info->GCSI_appProhibited |= no;
+	info->GCSI_appRequired |= required;
+    } else
+	info->GCSI_appProhibited |= noTools;
+}
+
+/*
+ * GenerateEnabledFlags: what can be done with the documents as they
+ * are: the features and the tools enabled; whether Close is
+ */
+static WordFlags GenerateEnabledFlags(optr o, Boolean *closeOn,
+				      WordFlags *toolsOn)
+{
+    GenDocumentControlInstance *g = GDC(o);
+    GenDocumentControlAttrs attrs = g->GDCI_attrs;
+    word doc = g->GDCI_docAttrs;
+    GenDocumentControlFeatures f = g->GDCI_features;
+    WordFlags on = 0, tools = 0;
+    Boolean canNewOpen;
+
+    *closeOn = FALSE;
+    if (docControlOptions & DCO_TRANSPARENT_DOC) {
+	on = GDCF_NEW | GDCF_QUICK_BACKUP;
+	tools = OLDC_DEFAULT_TOOLBOX_FEATURES;
+	canNewOpen = FALSE;
+    } else
+	/* one document only: a new one when there is none, or (if the
+	 * application wants that) when it is clean */
+	canNewOpen = (attrs & GDCA_MULTIPLE_OPEN_FILES) ||
+		     !(attrs & GDCA_DOCUMENT_EXISTS) ||
+		     ((f & GDCF_SINGLE_FILE_CLEAN_CAN_NEW_OPEN) &&
+		      !(doc & GDA_DIRTY));
+    if (canNewOpen) {
+	on |= GDCF_NEW | GDCF_OPEN_CLOSE;
+	tools |= GDCTF_NEW_EMPTY | GDCTF_OPEN | GDCTF_USE_TEMPLATE;
+    }
+    if (attrs & GDCA_DOCUMENT_EXISTS) {
+	on |= GDCF_SET_EMPTY_DOCUMENT | GDCF_SET_DEFAULT_DOCUMENT;
+	/* its attributes: on writable media, titled, not shared by
+	 * many.  The type of a document open read-only only if it is
+	 * read-only and clean. */
+	if ((doc & GDA_ON_WRITABLE_MEDIA) &&
+	    !(doc & (GDA_UNTITLED | GDA_SHARED_MULTIPLE))) {
+	    if (!(doc & GDA_READ_ONLY) ||
+		(!(doc & GDA_DIRTY) && g->GDCI_docType == GDT_READ_ONLY))
+		on |= GDCF_SET_TYPE;
+	    if (!(doc & GDA_READ_ONLY))
+		on |= GDCF_EDIT_USER_NOTES | GDCF_SET_PASSWORD | GDCF_RENAME;
+	}
+	on |= GDCF_QUICK_BACKUP | GDCF_SAVE_AS | GDCF_COPY | GDCF_EXPORT |
+	      GDCF_SAVE_AS_TEMPLATE;
+	*closeOn = TRUE;
+	tools |= GDCTF_CLOSE | GDCTF_QUICK_BACKUP;
+	if (!(doc & GDA_SHARED_MULTIPLE) && (doc & GDA_DIRTY)) {
+	    on |= GDCF_SAVE | GDCF_REVERT;
+	    tools |= GDCTF_SAVE;
+	    /* (after a save that failed there is nothing to revert to) */
+	    if (doc & GDA_SAVE_FAILED)
+		on &= ~GDCF_REVERT;
+	}
+	/* read-only: no saving, unless it can be edited to save as */
+	if ((doc & GDA_READ_ONLY) &&
+	    !(f & GDCF_READ_ONLY_SUPPORTS_SAVE_AS_REVERT)) {
+	    on &= ~(GDCF_SAVE | GDCF_SAVE_AS | GDCF_REVERT);
+	    tools &= ~GDCTF_SAVE;
+	}
+    }
+    *toolsOn = tools;
+    return on;
+}
+
+static void SetEnabled(MemHandle block, ChunkHandle ch, Boolean on)
+{
+    optr o = ConstructOptr(block, ch);
+
+    if (!block)
+	return;
+    if (on)
+	@send o::MSG_GEN_SET_ENABLED(VUM_NOW);
+    else
+	@send o::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+}
+
+/* (the objects of the features that exist, enabled or not) */
+static void EnableLoop(MemHandle block, const ChunkHandle *table, word n,
+		       WordFlags on, WordFlags exist)
+{
+    word i;
+
+    if (!block)
+	return;
+    for (i = 0; i < n; i++)
+	if (exist & (1u << i))
+	    SetEnabled(block, table[i], (on & (1u << i)) != 0);
+}
+
+/*
+ * OLDocumentControlUpdateUI: the target document's state
+ * (NotifyDocumentChange, none: no document) kept, and the entries and
+ * tools enabled by it; then the main dialog is tested for
+ */
+@method OLDocumentControlClass, MSG_GEN_CONTROL_UPDATE_UI
+{
+    GenDocumentControlInstance *g;
+    NotifyDocumentChange ndc;
+    WordFlags on, toolsOn;
+    Boolean closeOn;
+
+    (void) pself; (void) changeID; (void) manufID;
+    memset(&ndc, 0, sizeof(ndc));
+    if (data) {
+	ndc = *(NotifyDocumentChange *) MemLock(data);
+	MemUnlock(data);
+	g = GDC(oself);
+	g->GDCI_defaultExists = ndc.NDC_defaultExists;
+    }
+    g = GDC(oself);
+    g->GDCI_docAttrs = ndc.NDC_attrs;
+    g->GDCI_docType = ndc.NDC_type;
+    g->GDCI_docFileHandle = ndc.NDC_fileHandle;
+    g->GDCI_emptyExists = ndc.NDC_emptyExists;
+    if (features | toolboxFeatures) {
+	on = GenerateEnabledFlags(oself, &closeOn, &toolsOn);
+	if (features & GDCF_COPY) {
+	    SetEnabled(childBlock, OptrToChunk(@MoveTrigger), (on & GDCF_COPY) != 0);
+	    SetEnabled(childBlock, OptrToChunk(@CopyTrigger), (on & GDCF_COPY) != 0);
+	}
+	if (features & GDCF_QUICK_BACKUP)
+	    SetEnabled(childBlock, OptrToChunk(@RecoverFromQuickBackupTrigger),
+		       (GDC(oself)->GDCI_docAttrs & GDA_BACKUP_EXISTS) != 0);
+	if (features & GDCF_OPEN_CLOSE)
+	    SetEnabled(childBlock, OptrToChunk(@CloseTrigger), closeOn);
+	if (features & GDCF_SET_EMPTY_DOCUMENT)
+	    SetEnabled(childBlock, OptrToChunk(@ClearEmptyDocumentTrigger),
+		       GDC(oself)->GDCI_emptyExists != 0);
+	if (features & GDCF_SET_DEFAULT_DOCUMENT)
+	    SetEnabled(childBlock, OptrToChunk(@ClearDefaultDocumentTrigger),
+		       GDC(oself)->GDCI_defaultExists != 0);
+	EnableLoop(childBlock, TriggerTable(), 15, on, features);
+	EnableLoop(toolBlock, ToolTriggerTable(), 6, toolsOn,
+		   toolboxFeatures);
+    }
+    @call oself::MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG();
+}
+
+/* OLDocumentControlGenerateUI: no Open entry unless the specific UI
+ * has one (after the controller, which sets it usable) */
+@method OLDocumentControlClass, MSG_GEN_CONTROL_GENERATE_UI
+{
+    TempGenControlInstance *t;
+
+    (void) pself;
+    @callsuper();
+    t = ObjVarFindData(oself, TEMP_GEN_CONTROL_INSTANCE);
+    if (t && t->TGCI_childBlock && (t->TGCI_features & GDCF_OPEN_CLOSE) &&
+	!(docControlOptions & DCO_HAVE_FILE_OPEN)) {
+	optr open = ConstructOptr(t->TGCI_childBlock, OptrToChunk(@OpenTrigger));
+
+	@send open::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    }
+}
+
+/*
+ * OLDocumentControlTweakDuplicatedUI: by the options of the specific
+ * UI: "Switch Document" for New; no password entry; the Other sub menu
+ * a group; no Empty Document sub menu without its features
+ */
+@method OLDocumentControlClass, MSG_GEN_CONTROL_TWEAK_DUPLICATED_UI
+{
+    optr o;
+
+    (void) pself;
+    if ((docControlOptions & DCO_TRANSPARENT_DOC) && (features & GDCF_NEW)) {
+	o = ConstructOptr(childBlock, OptrToChunk(@NewTrigger));
+	@send o::MSG_GEN_USE_VIS_MONIKER(OptrToChunk(@SwitchDocumentMoniker),
+					 VUM_MANUAL);
+    }
+    if (docControlOptions & DCO_NO_DOC_PASSWORD) {
+	o = ConstructOptr(childBlock, OptrToChunk(@SetPasswordTrigger));
+	@send o::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    }
+    if (!(features & OTHER_FEATURES))
+	return;
+    if (docControlOptions & DCO_NO_OTHER_SUBMENU) {
+	o = ConstructOptr(childBlock, OptrToChunk(@OptionsSubMenu));
+	@send o::MSG_GEN_INTERACTION_SET_VISIBILITY(GIV_SUB_GROUP);
+    }
+    if (!(features & (GDCF_SET_EMPTY_DOCUMENT | GDCF_SET_DEFAULT_DOCUMENT))) {
+	o = ConstructOptr(childBlock, OptrToChunk(@OptionsEmptyPopup));
+	@send o::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    }
+}
+
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_GET_ATTRS
+{
+    (void) pself;
+    return GDC(oself)->GDCI_attrs;
+}
+
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_GET_FEATURES
+{
+    (void) pself;
+    return GDC(oself)->GDCI_features;
+}
+
+/* OLDocumentControlSendClassedEvent: what is for the model goes to the
+ * document group */
+@method OLDocumentControlClass, MSG_META_SEND_CLASSED_EVENT
+{
+    if ((word) whereTo != (word) TO_MODEL) {
+	@callsuper();
+	return;
+    }
+    (void) pself;
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo,
+					    GDC(oself)->GDCI_documentGroup,
+					    0);
+}
+
+@method OLDocumentControlClass, MSG_META_GAINED_MODEL_EXCL,
+				MSG_META_LOST_MODEL_EXCL,
+				MSG_META_GAINED_SYS_MODEL_EXCL,
+				MSG_META_LOST_SYS_MODEL_EXCL
+{
+    (void) pself;
+    SendToAppDC(oself, 0, message, NULL, 0);
+}
+
+@method OLDocumentControlClass, MSG_META_GET_MODEL_EXCL
+{
+    (void) pself;
+    *modelObject = GDC(oself)->GDCI_documentGroup;
+    return TRUE;
+}
+
+/* EnsureTemplateDir: the directory of the templates below SP_TEMPLATE
+ * made, once */
+static void EnsureTemplateDir(optr o)
+{
+    ChunkHandle dir;
+
+    if (ObjVarFindData(o, TEMP_OLDC_TEMPLATE_DIR_ENSURED))
+	return;
+    (void) ObjVarAddData(o, TEMP_OLDC_TEMPLATE_DIR_ENSURED, 0);
+    FilePushDir();
+    FileSetStandardPath(SP_TEMPLATE);
+    dir = GDC(o)->GDCI_templateDir;
+    if (dir)
+	(void) FileCreateDir(LMemDerefHandles(OptrToHandle(o), dir));
+    FilePopDir();
+}
+
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_GET_TEMPLATE_DIR
+{
+    ChunkHandle dir;
+    const char *s;
+    word n = 0;
+
+    (void) pself;
+    EnsureTemplateDir(oself);
+    dir = GDC(oself)->GDCI_templateDir;
+    buffer[0] = 0;
+    if (!dir)
+	return;
+    s = LMemDerefHandles(OptrToHandle(oself), dir);
+    do
+	buffer[n] = s[n];
+    while (s[n++]);
+}
+
+/*
+ * OLDocumentControlEnableDisable: there is a target document, or none
+ * (then no file name either); the objects of GDCI_enableDisableList
+ * are enabled with it.  With a document the main dialog goes.
+ */
+@method OLDocumentControlClass, MSG_GEN_CONTROL_ENABLE_DISABLE
+{
+    GenDocumentControlInstance *g = GDC(oself);
+    Boolean enable = msg == MSG_GEN_SET_ENABLED;
+    ChunkHandle list;
+    word i, n;
+
+    (void) pself;
+    if (enable) {
+	g->GDCI_attrs |= GDCA_DOCUMENT_EXISTS;
+	if (((g->GDCI_attrs & GDCA_CURRENT_TASK) >>
+	     GDCA_CURRENT_TASK_OFFSET) == GDCT_DIALOG) {
+	    OLDCRemoveSummons(oself);
+	    GDC(oself)->GDCI_attrs &= ~GDCA_CURRENT_TASK;
+	}
+    } else {
+	DocumentFileChangedParams fc;
+
+	g->GDCI_attrs &= ~GDCA_DOCUMENT_EXISTS;
+	memset(&fc, 0, sizeof(fc));
+	@call oself::MSG_GEN_DOCUMENT_CONTROL_FILE_CHANGED(&fc);
+    }
+    list = GDC(oself)->GDCI_enableDisableList;
+    if (!list)
+	return;
+    n = LMemGetChunkSizeHandles(OptrToHandle(oself), list) / sizeof(optr);
+    for (i = 0; i < n; i++) {
+	/* (the optrs of the list are not relocated) */
+	optr o = ((optr *) LMemDerefHandles(OptrToHandle(oself), list))[i];
+	MemHandle mh = OptrToHandle(o);
+
+	ObjDoRelocation(RELOC_RELOC_HANDLE, OptrToHandle(oself), &mh, &mh);
+	o = ConstructOptr(mh, OptrToChunk(o));
+	if (enable)
+	    @send o::MSG_GEN_SET_ENABLED(updateMode);
+	else
+	    @send o::MSG_GEN_SET_NOT_ENABLED(updateMode);
+    }
+}
+
+/* OLDocumentControlRebuildNormalUI: the dialog that is up is made of
+ * the UI, so it goes and is tested for again */
+@method OLDocumentControlClass, MSG_GEN_CONTROL_REBUILD_NORMAL_UI
+{
+    (void) pself;
+    OLDCRemoveSummons(oself);
+    @callsuper();
+    @call oself::MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG();
+}
+
+/*
+ * OLDocumentControlFileChanged: the target document has another file:
+ * its name and path are the control's (for the file selectors); the
+ * display of the document shows the name, or (without a display, and
+ * GDCF_NAME_ON_PRIMARY) the primary does as its long term moniker, the
+ * "no file" text without a document
+ */
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_FILE_CHANGED
+{
+    DocumentFileChangedParams fc = *dup;
+    char text[sizeof(FileLongName) > 64 ? sizeof(FileLongName) : 64];
+    GenDocumentControlInstance *g;
+    EventHandle ev;
+    word n;
+
+    (void) pself;
+    if (fc.DFCP_name[0]) {
+	(void) @call oself::MSG_GEN_PATH_SET(fc.DFCP_path,
+					     fc.DFCP_diskHandle);
+	memcpy(GDC(oself)->GDCI_targetDocName, fc.DFCP_name,
+	       sizeof(FileLongName));
+    }
+    if (OptrToHandle(fc.DFCP_display)) {
+	if (fc.DFCP_name[0])
+	    CObjMessageP(0, fc.DFCP_display,
+			 MSG_GEN_DISPLAY_UPDATE_FROM_DOCUMENT, &fc,
+			 sizeof(fc), NULL, 0);
+	return;
+    }
+    g = GDC(oself);
+    if (!(g->GDCI_features & GDCF_NAME_ON_PRIMARY))
+	return;
+    text[0] = 0;
+    if (fc.DFCP_name[0])
+	memcpy(text, fc.DFCP_name, sizeof(FileLongName));
+    else if (g->GDCI_noNameText) {
+	const char *s = LMemDerefHandles(OptrToHandle(oself),
+					 g->GDCI_noNameText);
+
+	for (n = 0; s[n] && n < sizeof(text) - 1; n++)
+	    text[n] = s[n];
+	text[n] = 0;
+    }
+    ev = @record GenPrimaryClass::MSG_GEN_PRIMARY_REPLACE_LONG_TERM_MONIKER(
+		VUM_NOW, 0, 0, 0, VMDT_TEXT, VMST_FPTR, (dword) (uintptr_t) text);
+    GenCallParent(oself, MSG_GEN_GUP_CALL_OBJECT_OF_CLASS, &ev, sizeof(ev),
+		  NULL, 0);
+}
+
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_GET_TOKEN
+{
+    (void) pself;
+    *token = GDC(oself)->GDCI_documentToken;
+}
+
+/* OLDocumentControlGetCreator: the token of the application */
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_GET_CREATOR
+{
+    (void) pself;
+    GeodeGetInfo(MemOwner(OptrToHandle(oself)), GGIT_TOKEN_ID, token);
+}
+
+/* ---------------------------------------------------------------------
+ * The main dialog and saving (cmainUIDocOperations.asm; the dialogs
+ * themselves not yet)
+ * ------------------------------------------------------------------- */
+
+@method OLDocumentControlClass,
+	MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG
+{
+    (void) pself;
+    OLDCRemoveSummons(oself);
+    @call oself::MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG();
+}
+
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_IMPORT_CANCELLED
+{
+    (void) pself;
+    @call oself::MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG();
+}
+
+/*
+ * OLDocumentControlTestForDisplayMainDialog: without a document the
+ * main dialog comes up (unless the specific UI has none, or the control
+ * detaches): tested once the document group caught up, and the control
+ * after it: the test goes to the group, which sends it back queued
+ */
+@method OLDocumentControlClass, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG
+{
+    EventHandle ev;
+    struct { EventHandle ev; MessageFlags flags; } p;
+
+    (void) pself;
+    if ((docControlOptions & DCO_BYPASS_BIG_DIALOG) ||
+	ObjVarFindData(oself, DETACH_DATA))
+	return;
+    CObjMessageP(MF_RECORD, oself, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2,
+		 NULL, 0, &ev, sizeof(ev));
+    p.ev = ev;
+    p.flags = MF_FORCE_QUEUE;
+    CObjMessageP(MF_RECORD, oself, MSG_META_DISPATCH_EVENT, &p, sizeof(p),
+		 &ev, sizeof(ev));
+    p.ev = ev;
+    p.flags = 0;
+    if (GDC(oself)->GDCI_documentGroup)
+	SendToAppDC(oself, 0, MSG_META_DISPATCH_EVENT, &p, sizeof(p));
+    else
+	ObjFreeMessage(ev);
+}
+
+@method OLDocumentControlClass, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2
+{
+    optr app = GeodeGetAppObject(0);
+
+    if ((GDC(oself)->GDCI_attrs & GDCA_DOCUMENT_EXISTS) ||
+	OptrToHandle(pself->OLDCI_quitOD))
+	return;
+    if (app && (@call app::MSG_GEN_APPLICATION_GET_STATE() &
+		(AS_QUITTING | AS_DETACHING | AS_TRANSPARENT_DETACHING)))
+	return;
+    @call oself::MSG_GEN_DOCUMENT_CONTROL_DISPLAY_DIALOG();
+}
+
+/* SendToTargetDocRegs: to the target document, through the model */
+static void SendToTargetDoc(optr o, Message msg, const void *params,
+			    word size)
+{
+    EventHandle ev;
+
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass, msg,
+		 params, size, &ev, sizeof(ev));
+    @call o::MSG_META_SEND_CLASSED_EVENT(ev, (TravelOption) TO_MODEL);
+}
+
+/*
+ * OLDocumentControlInitiateSaveDoc: an untitled or read-only document
+ * is saved under another name (Port32, not yet: the note that says so
+ * for a read-only one); else the target document saves
+ */
+@method OLDocumentControlClass, MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_DOC
+{
+    (void) pself;
+    if (GDC(oself)->GDCI_docAttrs & (GDA_UNTITLED | GDA_READ_ONLY))
+	@call oself::MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC();
+    else
+	SendToTargetDoc(oself, MSG_GEN_DOCUMENT_SAVE, NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * OLBuildUIDocumentControl (cspecUIDocumentControl.asm): always this
+ * class
+ * ------------------------------------------------------------------- */
+
+ClassStruct *OLBuildUIDocumentControl(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLDocumentControlClass;
+}

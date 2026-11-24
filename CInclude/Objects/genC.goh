@@ -576,7 +576,10 @@ typedef struct {
     @vardata SpecWinSizePair HINT_SIZE_WINDOW_AS_RATIO_OF_FIELD;
     @vardata SpecWinSizePair HINT_POSITION_ICON_AS_RATIO_OF_FIELD;
     @vardata DestinationClassArgs ATTR_GEN_DESTINATION_CLASS;
+@ifndef GEOS_PORT32
+/* (Port32: the class is a pointer the linker resolves: ABI.md 13y) */
     @reloc ATTR_GEN_DESTINATION_CLASS, 0, optr;
+@endif
     @vardata void HINT_INITIATED;   	/* INTERNAL */
     @vardata char[] ATTR_GEN_INIT_FILE_KEY;
     @vardata char[] ATTR_GEN_INIT_FILE_CATEGORY;

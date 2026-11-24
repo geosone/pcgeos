@@ -1,0 +1,82 @@
+/*
+ * olDocumentControlClass.goh -- OLDocumentControlClass, the specific
+ * UI's part of a GenDocumentControl: the File menu's entries for the
+ * documents, their tools and the dialogs they bring up (after
+ * Include/Internal/SpecUI/olDocumentControlClass.def), for Port32.
+ */
+#ifndef __OLDOCUMENTCONTROLCLASS_GOH
+#define __OLDOCUMENTCONTROLCLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Objects/gDocCtrl.goh>
+@include <Objects/gFSelC.goh>
+
+@deflib motif
+
+@class OLDocumentControlClass, OLCtrlClass;
+@uses GenDocumentControlClass;
+
+/* from the file selectors, texts and triggers of the dialogs */
+@message void MSG_OLDC_OPEN_FILE_SELECTED();
+@message void MSG_OLDC_USE_TEMPLATE_FILE_SELECTED();
+@message void MSG_OLDC_SAVE_AS_DIR_SELECTED();
+@message void MSG_OLDC_OPEN_SELECTED();
+@message void MSG_OLDC_OPEN_SIMPLE();
+@message void MSG_OLDC_OPEN_ADVANCED();
+@message void MSG_OLDC_USE_TEMPLATE_SELECTED();
+@message void MSG_OLDC_SAVE_AS_FILE_ENTERED();
+@message void MSG_OLDC_SAVE_AS_SIMPLE();
+@message void MSG_OLDC_SAVE_AS_ADVANCED();
+@message void MSG_OLDC_COPY_TO_FILE_ENTERED();
+@message void MSG_OLDC_COPY_TO_SIMPLE();
+@message void MSG_OLDC_COPY_TO_ADVANCED();
+@message void MSG_OLDC_COPY_TO_DIR_SELECTED();
+@message void MSG_OLDC_MOVE_TO_FILE_ENTERED();
+@message void MSG_OLDC_MOVE_TO_SIMPLE();
+@message void MSG_OLDC_MOVE_TO_ADVANCED();
+@message void MSG_OLDC_MOVE_TO_DIR_SELECTED();
+/* the main dialog put up if there is no document */
+@message void MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG();
+@message void MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG2();
+@message void MSG_OLDC_TYPE_CHANGED();
+@message void MSG_OLDC_PASSWORD_CHANGED();
+@message void MSG_OLDC_TYPE_USER_CHANGE();
+@message void MSG_OLDC_REMOVE_OLD_AND_TEST_FOR_DISPLAY_MAIN_DIALOG();
+@message void MSG_OLDC_PASSWORD_CANCELLED();
+
+    @vardata void TEMP_OLDC_DOING_SAVE_AS_TEMPLATE;
+    @vardata void TEMP_OLDC_TEMPLATE_DIR_ENSURED;
+    @vardata word TEMP_OLDC_NUMBER_OF_DOCUMENTS;
+
+    @instance MemHandle	OLDCI_currentSummons;	/* the dialog that is up */
+    @instance ChunkHandle OLDCI_currentFileType; /* shown as the type */
+    @instance optr	OLDCI_quitOD;		/* gets MSG_META_QUIT_ACK */
+    @instance GenFileSelectorEntryFlags OLDCI_fileFlags;
+@endc
+
+/* the options of the specific UI ([ui] docControlOptions) */
+typedef WordFlags DocControlOptions;
+#define DCO_BYPASS_BIG_DIALOG			0x8000
+#define DCO_TRANSPARENT_DOC			0x4000
+#define DCO_HAVE_FILE_OPEN			0x2000
+#define DCO_FS_CANNOT_CHANGE			0x1000
+#define DCO_NAVIGATE_ABOVE_DOC			0x0800
+#define DCO_ALWAYS_ALLOW_OVERLAPPING_DISPLAYS	0x0400
+#define DCO_NO_OTHER_SUBMENU			0x0200
+#define DCO_NO_OPEN_DEFAULT			0x0100
+#define DCO_NO_NOTES_IN_OPEN_BOX		0x0080
+#define DCO_NO_OPEN_READ_ONLY_OPTIONS		0x0040
+#define DCO_USER_CONFIRM_SAVE			0x0020
+#define DCO_NO_DOC_PASSWORD			0x0010
+#define DCO_SINGLE_DOCUMENT_OVERRIDE		0x0008
+
+extern word docControlOptions;
+extern word docControlFSLevel;
+extern DiskHandle backupDirDisk;
+extern char backupDirPath[];
+extern void SpecInitDocumentControl(const char *category);
+extern word SpecGetDocControlOptions(void);
+
+@endlib
+
+#endif

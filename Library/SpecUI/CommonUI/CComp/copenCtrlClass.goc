@@ -573,7 +573,9 @@ void OLCtrlDoHints(optr oself)
 		*retValue = r;
 		return TRUE;
 	    }
-	    if (reply != (OLBR_SUB_MENU << OLBF_REPLY_OFFSET))
+	    /* in a sub menu: this stays the vis parent, the reply kept;
+	     * anything else: the flags as they came */
+	    if (reply == (OLBR_SUB_MENU << OLBF_REPLY_OFFSET))
 		passed = r.GRP_bp;
 	}
     }

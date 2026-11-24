@@ -23,6 +23,7 @@ VARIANT picks what is on the screen:
     8  the Long menu open
    10  the file selector's dialog over variant 1 (the application makes
        the files it shows: DOCUMENT\\FSTEST)
+   11  the File menu open, with a document control in it (no document)
 """
 import os, re, sys
 
@@ -64,6 +65,7 @@ goc = r'''/*
 @include <Objects/gGadgetC.goh>
 @include <Objects/vTextC.goh>
 @include <Objects/gFSelC.goh>
+@include <Objects/gDocCtrl.goh>
 #include <file.h>
 #include <uDialog.h>
 
@@ -183,6 +185,14 @@ static void URClickMenu(word n)
     @call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
     @call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
     URClickMenu(%(variant)d - 6);
+#endif
+#if %(variant)d == 11
+    @call UBDoc1::MSG_GEN_BRING_TO_TOP();
+    @call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+    @call UBFile::MSG_GEN_ADD_CHILD(@UBDocCtl, CCO_FIRST);
+    @call UBDocCtl::MSG_GEN_SET_USABLE(VUM_NOW);
+    @call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+    URClickMenu(0);
 #endif
 #if %(variant)d == 10
     {

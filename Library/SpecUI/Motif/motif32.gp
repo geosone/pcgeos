@@ -36,6 +36,12 @@ resource AppYMMonikerDialogResource read-only shared lmem
 resource StandardDialogUI read-only shared object
 resource FileSelectorUI read-only shared object
 resource FileSelectorStrings lmem read-only shared
+resource OLDocumentControlUI read-only shared object
+resource OLDocumentControlToolboxUI read-only shared object
+resource ControlStrings lmem read-only shared
+resource AppTCMonikerResource read-only shared lmem
+resource AppTMMonikerResource read-only shared lmem
+resource AppTCGAMonikerResource read-only shared lmem
 resource DrawBitmapOptrSCResource read-only shared lmem
 resource DrawBitmapOptrSMResource read-only shared lmem
 resource DrawBitmapOptrSCGAResource read-only shared lmem
@@ -57,8 +63,9 @@ export OLBuildDisplayControl
 export OLBuildPrimary
 export OLBuildGadget
 export OLBuildContent
-# OLBuildUIDocumentControl, OLBuildAppDocumentControl, OLBuildDocument
-skip 3
+export OLBuildUIDocumentControl
+# OLBuildAppDocumentControl, OLBuildDocument
+skip 2
 export OLBuildFileSelector
 export OLBuildBooleanGroup
 export OLBuildItemGroup

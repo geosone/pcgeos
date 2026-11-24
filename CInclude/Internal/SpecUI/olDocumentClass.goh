@@ -1,0 +1,67 @@
+/*
+ * olDocumentClass.goh -- OLDocumentClass, the specific UI's part of a
+ * GenDocument: an open document with its file, its saving and its
+ * dialogs (after Include/Internal/SpecUI/olDocumentClass.def), for
+ * Port32.
+ */
+#ifndef __OLDOCUMENTCLASS_GOH
+#define __OLDOCUMENTCLASS_GOH
+
+@include <Internal/SpecUI/olContentClass.goh>
+@include <Objects/gDocC.goh>
+
+@deflib motif
+
+@class OLDocumentClass, OLContentClass;
+
+@message void MSG_OL_DOCUMENT_CONTINUE_REVERT();
+@message void MSG_OL_DOCUMENT_CONTINUE_REVERT_QUICK();
+@message void MSG_OL_DOCUMENT_UPDATE_UI();
+@message void MSG_OL_DOCUMENT_CONTINUE_CHANGE_TYPE();
+@message void MSG_OL_DOCUMENT_CONTINUE_RENAME();
+@message void MSG_OL_DOCUMENT_DELETE_AFTER_SAVE_ERROR();
+@message void MSG_OL_DOCUMENT_MOVE_AFTER_SAVE_ERROR();
+@message void MSG_OL_DOCUMENT_REVERT_AFTER_SAVE_ERROR();
+@message void MSG_OL_DOCUMENT_DELETE_SELECTED_FILE();
+@message void MSG_OL_DOCUMENT_SAVE_ERROR_RESOLVED();
+@message void MSG_OL_DOCUMENT_MOVE_AFTER_ERROR_FEEDBACK();
+@message void MSG_OL_DOCUMENT_DELETE_FILES_FS_NOTIFY();
+@message void MSG_OL_DOCUMENT_CONTINUE_CLOSE_AFTER_DISK_FULL();
+@message void MSG_OL_DOCUMENT_AUTO_SAVE_TIMER();
+@message void MSG_OL_DOCUMENT_CONTINUE_MOVE_TO();
+@message void MSG_OL_DOCUMENT_CONTINUE_REVERT_TO_AUTO_SAVE();
+@message void MSG_OL_DOCUMENT_CONTINUE_DUPLICATE();
+/* as MSG_GEN_DOCUMENT_CLOSE (in the CUI the last document quits the
+ * application) */
+@message void MSG_OL_DOCUMENT_CHECK_CUI_CLOSE(IACPConnection connection);
+
+    @vardata word TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE;
+    @vardata word TEMP_OL_DOCUMENT_FREE_SPACE_DRIVE;
+    @vardata void TEMP_OL_DOCUMENT_DISK_FULL_RESOLVED;
+    @vardata void TEMP_OL_DOCUMENT_DETACH_NO_SPACE_ERROR;
+    @vardata DocumentCommonParams TEMP_OL_DOCUMENT_SAVE_AS_DISK_FULL;
+    @vardata void TEMP_OL_DOCUMENT_IGNORE_NEXT_DELETE;
+    @vardata void TEMP_OL_DOCUMENT_NOT_SAVED;
+    @vardata void TEMP_OL_DOCUMENT_USER_RETRY_SAVE_AS;
+
+typedef ByteFlags OLDocumentAttrs;
+#define OLDA_USER_OPENED		0x80
+#define OLDA_REVERT_BEFORE_CLOSE	0x40
+#define OLDA_SAVE_BEFORE_CLOSE		0x20
+#define OLDA_UPDATE_BEFORE_CLOSE	0x10
+#define OLDA_WAITING_FOR_SAVE_QUERY	0x08
+
+    @instance word	OLDI_autoSaveTimer;
+    @instance word	OLDI_autoSaveTimerID;
+    @instance word	OLDI_changeTimer;
+    @instance word	OLDI_changeTimerID;
+    @instance ChunkHandle OLDI_iacpEngConnects;
+    @instance OLDocumentAttrs OLDI_attrs;
+    @instance word	OLDI_disk;	/* disk and id of the open file */
+    @instance FileID	OLDI_id;
+    @instance MemHandle	OLDI_saveErrorRes;
+@endc
+
+@endlib
+
+#endif

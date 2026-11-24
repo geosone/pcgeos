@@ -42,6 +42,8 @@
 @include <Objects/gTextC.goh>
 @include <Internal/SpecUI/olTextClass.goh>
 @include <Objects/gGadgetC.goh>
+@include <Objects/gDocCtrl.goh>
+@include <Objects/gDocC.goh>
 @include <Internal/SpecUI/olGadgetClass.goh>
 #include <uDialog.h>
 #include <timer.h>
@@ -129,6 +131,9 @@ typedef struct {
     /* the tool group: its children, enabled, highlighted (each bit 0:
      * built, 1: highlighted, 2: the highlight gone) */
     word		UBS_tgrp[3];
+    /* the document control (step 80): children; usable, enabled without
+     * a document; enabled with a clean one, with a dirty one */
+    word		UBS_docCtl[5];
 } UBState;
 
 UBState ubState;
@@ -672,6 +677,10 @@ static GenControlFeaturesInfo ubCtlToolFeatures[1];
 @object GenToolGroupClass UBToolGrp = {
     GI_states = @default & ~GS_USABLE;
     GTGI_controller = @UBCtl;
+}
+/* the document control of the File menu (in no tree until step 80) */
+@object GenDocumentControlClass UBDocCtl = {
+    GI_states = @default & ~GS_USABLE;
 }
 @visMoniker UBDeleteMoniker = 'D', "Delete";
 @visMoniker UBKeepMoniker = 'K', "Keep";
@@ -3398,6 +3407,60 @@ static void UBClickMenu(word n)
 	@call UBToolBox::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
 	break;
     }
+    case 80: {
+	/* the document control (OLDocumentControlClass) in the File
+	 * menu: its entries are its children (New/Open, Open (not
+	 * usable: Motif has none), Close, Save, Save As, Backup,
+	 * Other); without a document New/Open alone is enabled, with
+	 * a clean one (GWNT_DOCUMENT_CHANGE) also Close, Save As,
+	 * Backup and Other, with a dirty one Save too, but not New/Open
+	 * (one document at a time, and it has changes) */
+	@call UBFile::MSG_GEN_ADD_CHILD(@UBDocCtl, CCO_FIRST);
+	@call UBDocCtl::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UBFile::MSG_GEN_INTERACTION_INITIATE();
+	break;
+    }
+    case 81: {
+	word pass, i, n;
+
+	n = @call UBDocCtl::MSG_GEN_COUNT_CHILDREN();
+	ubState.UBS_docCtl[0] = n;
+	for (pass = 0; pass < 3; pass++) {
+	    if (pass) {
+		MemHandle bh = MemAlloc(sizeof(NotifyDocumentChange),
+					HF_SWAPABLE | HF_SHARABLE,
+					HAF_ZERO_INIT);
+		NotifyDocumentChange *ndc = MemLock(bh);
+		EventHandle ev;
+
+		ndc->NDC_attrs = GDA_ON_WRITABLE_MEDIA |
+				 (pass == 2 ? GDA_DIRTY : 0);
+		MemUnlock(bh);
+		MemInitRefCount(bh, 1);
+		@call UBDocCtl::MSG_GEN_CONTROL_ENABLE_DISABLE(
+			MSG_GEN_SET_ENABLED, VUM_NOW);
+		ev = @record null::MSG_META_NOTIFY_WITH_DATA_BLOCK(
+			MANUFACTURER_ID_GEOWORKS, GWNT_DOCUMENT_CHANGE, bh);
+		@call UBApp::MSG_META_GCN_LIST_SEND(GCNLSF_SET_STATUS, ev, bh,
+			GAGCNLT_APP_TARGET_NOTIFY_DOCUMENT_CHANGE,
+			MANUFACTURER_ID_GEOWORKS);
+	    }
+	    for (i = 0; i < n && i < 16; i++) {
+		optr c = @call UBDocCtl::MSG_GEN_FIND_CHILD_AT_POSITION(i);
+
+		if (!pass && @call c::MSG_GEN_GET_USABLE())
+		    ubState.UBS_docCtl[1] |= 1 << i;
+		if (@call c::MSG_GEN_GET_ENABLED())
+		    ubState.UBS_docCtl[2 + pass] |= 1 << i;
+	    }
+	}
+	UBCHECK(ubState.UBS_docCtl[0] == 7);
+	UBCHECK(ubState.UBS_docCtl[1] == 0x7d);
+	UBCHECK(ubState.UBS_docCtl[2] == 0x63);
+	UBCHECK(ubState.UBS_docCtl[3] == 0x77);
+	UBCHECK(ubState.UBS_docCtl[4] == 0x7c);
+	break;
+    }
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */
     case 101:
@@ -3453,6 +3516,15 @@ static void UBClickMenu(word n)
 	@call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
 	@call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
 	UBClickMenu(step - 106);
+	break;
+    case 111:
+	/* the File menu with a document control in it */
+	@call UBDoc1::MSG_GEN_BRING_TO_TOP();
+	@call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	@call UBFile::MSG_GEN_ADD_CHILD(@UBDocCtl, CCO_FIRST);
+	@call UBDocCtl::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	UBClickMenu(0);
 	break;
     }
 }

@@ -447,6 +447,8 @@ extern ClassStruct *OLBuildItem(optr oself, word masterOffset);
 extern ClassStruct *OLBuildBoolean(optr oself, word masterOffset);
 extern ClassStruct *OLBuildValue(optr oself, word masterOffset);
 extern ClassStruct *OLBuildFileSelector(optr oself, word masterOffset);
+extern ClassStruct *OLBuildUIDocumentControl(optr oself, word masterOffset);
+extern void SpecInitDocumentControl(const char *category);
 extern ClassStruct *OLBuildGlyphDisplay(optr oself, word masterOffset);
 extern ClassStruct *OLBuildText(optr oself, word masterOffset);
 extern ClassStruct *OLBuildGadget(optr oself, word masterOffset);

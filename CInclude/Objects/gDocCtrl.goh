@@ -272,7 +272,7 @@ typedef ByteEnum GenFileSelectorType;
     @instance @visMoniker    		GDCI_dialogUserLevelMoniker;
 
 
-    @default GI_states = @default | GS_ENABLED;
+    @default GI_states = (@default | GS_ENABLED);
     @default GI_attrs = @default | GA_KBD_SEARCH_PATH;
 
 @endc
