@@ -1,0 +1,620 @@
+/*
+ * cmainAppDocumentControl.goc -- OLDocumentGroupClass (after
+ * cmainAppDocumentControl.asm, and OLDocumentGroupNewDoc of
+ * cmainDocPhysical.asm): the specific part of a GenDocumentGroup, the
+ * part of the document control that runs in the application's thread.
+ * Its children are the documents, which it makes (a GenDocument of
+ * GDGI_documentClass, or a copy of the resource of GDGI_genDocument)
+ * for MSG_GEN_DOCUMENT_GROUP_NEW_DOC and ..._OPEN_DOC and frees when
+ * they are closed.  It is the model node of the documents: what goes
+ * to the model goes to the document that has the model exclusive.  It
+ * asks the documents one after the other when the application quits.
+ * What it is asked about the control (token, creator, attributes) it
+ * asks the GenDocumentControl (GDGI_documentControl, in the UI's
+ * thread), to which it has an upward link while the application runs.
+ *
+ * Port32 (Port32/ABI.md section 13y): while quitting OLDGI_quitObj is
+ * the group itself once no document is left (the asm had the link to
+ * the parent there).  FLOPPY_BASED_DOCUMENTS, VOLATILE_SYSTEM_STATE,
+ * UNTITLED_DOCS_ON_SP_TOP and CUSTOM_DOCUMENT_PATH are not Motif's and
+ * are left out.
+ */
+@include <stdapp.goh>
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olDocumentGroupClass.goh>
+@include <Internal/SpecUI/olDocumentControlClass.goh>
+@include <Objects/gDocC.goh>
+@include <iacp.goh>
+@include <impex.goh>
+@include <spool.goh>
+
+#include <file.h>
+#include <string.h>
+
+@classdecl OLDocumentGroupClass;
+
+#define GDG(o)	((GenDocumentGroupInstance *) ObjDerefGen(o))
+#define OLDG(o)	((OLDocumentGroupInstance *) ObjDerefVis(o))
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define OLDG_OFFSET(f)	word_offsetof(OLDocumentGroupInstance, f)
+
+/* OLBuildAppDocumentControl (cspecAppDocumentControl.asm): always this
+ * class */
+ClassStruct *OLBuildAppDocumentControl(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLDocumentGroupClass;
+}
+
+/* SendToUIDocControl */
+static void SendToUIDocControl(optr o, Message msg, const void *params,
+			       word size)
+{
+    optr ctrl = GDG(o)->GDGI_documentControl;
+
+    if (ctrl)
+	CObjMessageP(0, ctrl, msg, params, size, NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * Starting up and shutting down
+ * ------------------------------------------------------------------- */
+
+/* OLDocumentGroupAppStartup: an upward link to the document control,
+ * so that what goes up the generic tree gets there; documents that
+ * come back from state are told */
+@method OLDocumentGroupClass, MSG_META_APP_STARTUP
+{
+    (void) pself;
+    GenSetUpwardLink(OptrToHandle(oself), OptrToChunk(oself),
+		     GDG(oself)->GDGI_documentControl);
+    GenSendToChildren(oself, message, &appLaunchBlock,
+		      sizeof(appLaunchBlock));
+}
+
+/*
+ * OLDocumentGroupAttach: on to the documents.  In an application of
+ * one thread after the UI is through with its own MSG_META_ATTACH (a
+ * document's dialog must not hold that up).
+ */
+@method OLDocumentGroupClass, MSG_META_ATTACH_OBJECT
+{
+    struct { word f; MemHandle alb; MemHandle extra; } ap;
+    optr app = GeodeGetAppObject(0);
+
+    (void) pself;
+    ap.f = flags;
+    ap.alb = appLaunchBlock;
+    ap.extra = extraState;
+    if (app && ObjTestIfObjBlockRunByCurThread(OptrToHandle(app)))
+	CObjMessageP(MF_FORCE_QUEUE, oself, MSG_OLDG_ATTACH, &ap, sizeof(ap),
+		     NULL, 0);
+    else
+	GenSendToChildren(oself, MSG_META_ATTACH, &ap, sizeof(ap));
+}
+
+@method OLDocumentGroupClass, MSG_OLDG_ATTACH
+{
+    struct { word f; MemHandle alb; MemHandle extra; } ap;
+
+    (void) pself;
+    ap.f = flags;
+    ap.alb = appLaunchBlock;
+    ap.extra = extraState;
+    GenSendToChildren(oself, MSG_META_ATTACH, &ap, sizeof(ap));
+}
+
+/* OLDocumentGroupOpenDefaultDoc: the default document, made if there
+ * is none */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_OPEN_DEFAULT_DOC
+{
+    (void) pself;
+    params->DCP_flags = DOF_CREATE_FILE_IF_FILE_DOES_NOT_EXIST;
+    (void) @call oself::MSG_GEN_DOCUMENT_GROUP_OPEN_DOC(params);
+}
+
+/* OLDocumentGroupUpdateModelExcl: a model node */
+@method OLDocumentGroupClass, MSG_META_GAINED_MODEL_EXCL,
+	MSG_META_LOST_MODEL_EXCL, MSG_META_GAINED_SYS_MODEL_EXCL,
+	MSG_META_LOST_SYS_MODEL_EXCL
+{
+    (void) pself;
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_MODEL_EXCL, VIS_MASTER,
+			       OLDG_OFFSET(OLDGI_modelExcl), message);
+}
+
+/* OLDocumentGroupDetach: the documents detach (shut down) first: one
+ * acknowledgement from each */
+static void DetachCommon(optr o, Message msg, word callerID)
+{
+    struct { word id; optr ack; } p;
+    word n = @call o::MSG_GEN_COUNT_CHILDREN(), i;
+
+    if (!n)
+	return;
+    for (i = 0; i < n; i++)
+	ObjIncDetach(o);
+    p.id = callerID;
+    p.ack = o;
+    GenSendToChildren(o, msg, &p, sizeof(p));
+}
+
+@method OLDocumentGroupClass, MSG_META_DETACH
+{
+    (void) pself;
+    ObjInitDetach(message, oself, callerID, caller);
+    DetachCommon(oself, message, callerID);
+    @callsuper();
+    ObjEnableDetach(oself);
+}
+
+@method OLDocumentGroupClass, MSG_META_APP_SHUTDOWN
+{
+    (void) pself;
+    ObjInitDetach(message, oself, callerID, ackOD);
+    DetachCommon(oself, message, callerID);
+    @callsuper();
+    ObjEnableDetach(oself);
+}
+
+/* OLDocumentGroupShutdownComplete: the documents are shut down: the
+ * upward link goes */
+@method OLDocumentGroupClass, MSG_META_SHUTDOWN_COMPLETE
+{
+    (void) pself;
+    GenSetUpwardLink(OptrToHandle(oself), OptrToChunk(oself), 0);
+    @callsuper();
+}
+
+/*
+ * OLDocumentGroupQuit: the documents are closed one after the other,
+ * each with the model exclusive while it is asked.  Closed: on to the
+ * next, through the queue.  Delayed (a dialog is up, a "save as"): the
+ * document goes on with MSG_OLDG_USER_CLOSE_OK or ..._CANCELLED.
+ * Cancelled, or no document left: the control gets the acknowledgement
+ * (aborted or not).
+ */
+@method OLDocumentGroupClass, MSG_META_QUIT
+{
+    optr model = 0, doc, next;
+    word abort = 0, status, pos;
+
+    (void) pself;
+    (void) @call oself::MSG_META_GET_MODEL_EXCL(&model);
+    doc = OLDG(oself)->OLDGI_quitObj;
+    if (!doc)
+	doc = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+    if (doc && doc != oself) {
+	/* the next one now: this one may be gone after the call */
+	pos = @call oself::MSG_GEN_FIND_CHILD(doc);
+	next = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(pos + 1);
+	OLDG(oself)->OLDGI_quitObj = next ? next : oself;
+	@call doc::MSG_META_GRAB_MODEL_EXCL();
+	status = @call doc::MSG_GEN_DOCUMENT_CLOSE(0);
+	if (status == DQS_DELAYED)
+	    return;
+	/* the model exclusive back where it was */
+	if (model)
+	    @call model::MSG_META_GRAB_MODEL_EXCL();
+	if (status != DQS_SAVE_ERROR && status != DQS_CANCEL) {
+	    CObjMessageP(MF_FORCE_QUEUE, oself, MSG_META_QUIT, NULL, 0, NULL,
+			 0);
+	    return;
+	}
+	abort = (word) -1;
+    }
+    OLDG(oself)->OLDGI_quitObj = 0;
+    doc = GDG(oself)->GDGI_documentControl;
+    if (doc)
+	@send doc::MSG_META_QUIT_ACK(0, abort);
+}
+
+/* ---------------------------------------------------------------------
+ * The documents and the model
+ * ------------------------------------------------------------------- */
+
+/* SendToCXDXOrTargetDocument: to a document, or (0) to the one with
+ * the model exclusive */
+static void SendToDocOrTarget(optr o, optr doc, Message msg)
+{
+    EventHandle ev;
+
+    if (doc) {
+	CObjMessageP(0, doc, msg, NULL, 0, NULL, 0);
+	return;
+    }
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass, msg, NULL,
+		 0, &ev, sizeof(ev));
+    @call o::MSG_META_SEND_CLASSED_EVENT(ev, (TravelOption) TO_MODEL);
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_MARK_DIRTY
+{
+    (void) pself;
+    SendToDocOrTarget(oself, document, MSG_GEN_DOCUMENT_MARK_DIRTY);
+}
+
+/* OLDocumentGroupSendClassedEvent: to the model: to the document that
+ * has the model exclusive */
+@method OLDocumentGroupClass, MSG_META_SEND_CLASSED_EVENT
+{
+    if (whereTo != (TravelOption) TO_MODEL) {
+	@callsuper();
+	return;
+    }
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+			whereTo, pself->OLDGI_modelExcl.HG_OD, 0);
+}
+
+/* OLDocumentGroupGetDocByFile: the document that has the file open */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_DOC_BY_FILE
+{
+    optr found = 0, doc;
+    word i;
+
+    (void) pself;
+    for (i = 0; (doc = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++) {
+	if (@call doc::MSG_GEN_DOCUMENT_TEST_FOR_FILE(file, &found))
+	    break;
+    }
+    return found;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_MARK_DIRTY_BY_FILE
+{
+    optr doc = @call oself::MSG_GEN_DOCUMENT_GROUP_GET_DOC_BY_FILE(file);
+
+    (void) pself;
+    EC_ERROR_IF(!doc, -1);
+    if (doc)
+	@send doc::MSG_GEN_DOCUMENT_MARK_DIRTY();
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_AUTO_SAVE_BY_FILE
+{
+    optr doc = @call oself::MSG_GEN_DOCUMENT_GROUP_GET_DOC_BY_FILE(fh);
+
+    (void) pself;
+    if (doc)
+	@send doc::MSG_GEN_DOCUMENT_AUTO_SAVE();
+}
+
+@method OLDocumentGroupClass, MSG_OLDG_FILE_CHANGED
+{
+    (void) pself;
+    SendToUIDocControl(oself, MSG_GEN_DOCUMENT_CONTROL_FILE_CHANGED, p,
+		       sizeof(*p));
+}
+
+/* what the document control knows */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_UI_ATTRS
+{
+    optr ctrl = GDG(oself)->GDGI_documentControl;
+
+    (void) pself;
+    return ctrl ? @call ctrl::MSG_GEN_DOCUMENT_CONTROL_GET_ATTRS() : 0;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_TEMPLATE_DIR
+{
+    optr ctrl = GDG(oself)->GDGI_documentControl;
+
+    (void) pself;
+    if (ctrl)
+	@call ctrl::MSG_GEN_DOCUMENT_CONTROL_GET_TEMPLATE_DIR(buffer);
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_UI_FEATURES
+{
+    optr ctrl = GDG(oself)->GDGI_documentControl;
+
+    (void) pself;
+    return ctrl ? @call ctrl::MSG_GEN_DOCUMENT_CONTROL_GET_FEATURES() : 0;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_TOKEN
+{
+    optr ctrl = GDG(oself)->GDGI_documentControl;
+
+    (void) pself;
+    if (ctrl)
+	@call ctrl::MSG_GEN_DOCUMENT_CONTROL_GET_TOKEN(token);
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_CREATOR
+{
+    optr ctrl = GDG(oself)->GDGI_documentControl;
+
+    (void) pself;
+    if (ctrl)
+	@call ctrl::MSG_GEN_DOCUMENT_CONTROL_GET_CREATOR(token);
+}
+
+/* what the group has itself */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_OUTPUT
+{
+    (void) pself;
+    return GDG(oself)->GDGI_output;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_SET_OUTPUT
+{
+    (void) pself;
+    GDG(oself)->GDGI_output = output;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_ATTRS
+{
+    (void) pself;
+    return GDG(oself)->GDGI_attrs;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_PROTOCOL
+{
+    GenDocumentGroupInstance *g = GDG(oself);
+
+    (void) pself;
+    return ((dword) g->GDGI_protocolMinor << 16) | g->GDGI_protocolMajor;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_VIEW
+{
+    (void) pself;
+    return GDG(oself)->GDGI_genView;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY
+{
+    (void) pself;
+    return GDG(oself)->GDGI_genDisplay;
+}
+
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY_GROUP
+{
+    (void) pself;
+    return GDG(oself)->GDGI_genDisplayGroup;
+}
+
+@method OLDocumentGroupClass, MSG_META_GET_MODEL_EXCL
+{
+    *modelObject = pself->OLDGI_modelExcl.HG_OD;
+    return TRUE;
+}
+
+/* OLDocumentGroupAlterFTVMCExcl: the model exclusive of a document is
+ * the group's to give; the rest goes on up */
+@method OLDocumentGroupClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    (void) pself;
+    if (flags & MAEF_MODEL) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_MODEL_EXCL,
+				  VIS_MASTER, OLDG_OFFSET(OLDGI_modelExcl),
+				  objectWantingControl,
+				  flags & (MAEF_GRAB | MAEF_MODEL));
+	flags &= ~MAEF_MODEL;
+	if (!(flags & MAEF_MASK_OF_ALL_HIERARCHIES))
+	    return;
+    }
+    @callsuper oself::OLDocumentGroupClass::MSG_META_MUP_ALTER_FTVMC_EXCL(
+	objectWantingControl, flags);
+}
+
+/* ---------------------------------------------------------------------
+ * New and open
+ * ------------------------------------------------------------------- */
+
+/*
+ * CreateDocObject: a new document object, a child of the group, usable,
+ * which then makes or opens its file (msg: MSG_GEN_DOCUMENT_NEW or
+ * ..._OPEN).  If that fails the object goes again, and the control
+ * sees whether its main dialog is to come up.  The document, 0 if
+ * there is none.
+ */
+static optr CreateDocObject(optr o, Message msg, DocumentCommonParams *params)
+{
+    optr proto = GDG(o)->GDGI_genDocument, doc;
+    word fileOrError = 0;
+    Boolean err;
+
+    if (OptrToHandle(proto))
+	doc = ConstructOptr(ObjDuplicateResource(OptrToHandle(proto), 0, 0),
+			    OptrToChunk(proto));
+    else
+	doc = ObjInstantiate(OptrToHandle(o), GDG(o)->GDGI_documentClass);
+    /* opened for an IACP connection alone */
+    if (params->DCP_flags & DOF_OPEN_FOR_IACP_ONLY)
+	@call doc::MSG_META_ADD_VAR_DATA(ATTR_GEN_DOCUMENT_OPEN_FOR_IACP_ONLY,
+					 0, NULL);
+    @call o::MSG_GEN_ADD_CHILD(doc, CCO_FIRST | CCF_MARK_DIRTY);
+    @call doc::MSG_GEN_SET_USABLE(VUM_MANUAL);
+    if (msg == MSG_GEN_DOCUMENT_NEW)
+	err = @call doc::MSG_GEN_DOCUMENT_NEW(&fileOrError, params);
+    else
+	err = @call doc::MSG_GEN_DOCUMENT_OPEN(&fileOrError, params);
+    if (!err)
+	return doc;
+    @call o::MSG_OLDG_REMOVE_DOC(doc);
+    SendToUIDocControl(o, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG, NULL, 0);
+    return 0;
+}
+
+/* OLDocumentGroupNewDoc (cmainDocPhysical.asm) */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_NEW_DOC
+{
+    (void) pself;
+    return CreateDocObject(oself, MSG_GEN_DOCUMENT_NEW, params);
+}
+
+/*
+ * OLDocumentGroupOpenDoc: a document that is open already comes to the
+ * front instead (MSG_GEN_DOCUMENT_GROUP_SEARCH_FOR_DOC); not for a
+ * template, which is always copied into a new document.
+ */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_OPEN_DOC
+{
+    (void) pself;
+    params->DCP_flags |= DOF_RAISE_APP_AND_DOC;
+    if (!(params->DCP_flags & DOF_FORCE_TEMPLATE_BEHAVIOR)) {
+	Boolean open = @call oself::MSG_GEN_DOCUMENT_GROUP_SEARCH_FOR_DOC(
+			params);
+
+	if (open)
+	    return 0;
+    }
+    return CreateDocObject(oself, MSG_GEN_DOCUMENT_OPEN, params);
+}
+
+/*
+ * OLDocumentGroupSearchForDoc: TRUE if a document has the file open
+ * (it then does what the flags ask: comes to the front, takes the
+ * connection).  The documents compare the id of the file, which is
+ * put into the first four bytes of the name, with its disk, while they
+ * are asked (DOF_NAME_HOLDS_FILE_ID).
+ */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_SEARCH_FOR_DOC
+{
+    DocumentOpenFlags flags = params->DCP_flags;
+    DiskHandle disk = params->DCP_diskHandle;
+    Boolean found = FALSE;
+    byte name[sizeof(FileID)];
+    FileID id;
+    optr doc;
+    word i;
+
+    (void) pself;
+    if (!(flags & DOF_NAME_HOLDS_FILE_ID)) {
+	DiskHandle d = disk;
+
+	id = IACPGetDocumentID(params->DCP_path, params->DCP_name, &d);
+	memcpy(name, params->DCP_name, sizeof(name));
+	memcpy(params->DCP_name, &id, sizeof(id));
+	params->DCP_diskHandle = d;
+    }
+    params->DCP_flags |= DOF_NAME_HOLDS_FILE_ID;
+    for (i = 0; (doc = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0;
+	 i++) {
+	if (@call doc::MSG_GEN_DOCUMENT_SEARCH_FOR_DOC(params)) {
+	    found = TRUE;
+	    break;
+	}
+    }
+    if (!(flags & DOF_NAME_HOLDS_FILE_ID)) {
+	params->DCP_diskHandle = disk;
+	memcpy(params->DCP_name, name, sizeof(name));
+    }
+    params->DCP_flags = flags | (params->DCP_flags & ~DOF_NAME_HOLDS_FILE_ID);
+    return found;
+}
+
+/* OLDocumentGroupGetDefaultName: the name of an untitled document, in
+ * SP_DOCUMENT; the group's attributes */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_GET_DEFAULT_NAME
+{
+    DocumentCommonParams *p = (DocumentCommonParams *) buffer;
+    GenDocumentGroupInstance *g = GDG(oself);
+    ChunkHandle name = g->GDGI_untitledName;
+    word size;
+
+    (void) pself;
+    p->DCP_diskHandle = SP_DOCUMENT;
+    p->DCP_path[0] = 0;
+    p->DCP_name[0] = 0;
+    if (name) {
+	size = LMemGetChunkSizeHandles(OptrToHandle(oself), name);
+	EC_ERROR_IF(size > FILE_LONGNAME_LENGTH - 3 + 1, -1);
+	if (size > sizeof(p->DCP_name))
+	    size = sizeof(p->DCP_name);
+	memcpy(p->DCP_name, LMemDerefHandles(OptrToHandle(oself), name),
+	       size);
+    }
+    return g->GDGI_attrs;
+}
+
+/* ---------------------------------------------------------------------
+ * Import, printing
+ * ------------------------------------------------------------------- */
+
+/* OLDocumentGroupImportNewDoc: a new, really empty document, which
+ * imports the file; the import control is told how it went */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_IMPORT_NEW_DOC
+{
+    DocumentCommonParams p;
+    optr doc;
+
+    (void) pself;
+    memset(&p, 0, sizeof(p));
+    p.DCP_flags = DOF_FORCE_REAL_EMPTY_DOCUMENT;
+    p.DCP_docAttrs = GDA_UNTITLED;
+    doc = CreateDocObject(oself, MSG_GEN_DOCUMENT_NEW, &p);
+    if (doc)
+	(void) @call doc::MSG_GEN_DOCUMENT_IMPORT(params);
+    if (params->ITP_impexOD)
+	CObjMessageP(0, params->ITP_impexOD, params->ITP_returnMsg, params,
+		     sizeof(*params), NULL, 0);
+    return doc;
+}
+
+/* OLDocumentGroupGetDocName: the print control gets the name of the
+ * target document ("" if there is none) */
+@method OLDocumentGroupClass, MSG_PRINT_GET_DOC_NAME
+{
+    FileLongName name;
+    optr doc = pself->OLDGI_modelExcl.HG_OD;
+
+    name[0] = 0;
+    if (doc)
+	@call doc::MSG_GEN_DOCUMENT_GET_FILE_NAME(name);
+    @call printCtrlOD::MSG_PRINT_CONTROL_SET_DOC_NAME(name);
+}
+
+/* ---------------------------------------------------------------------
+ * A document goes; closing while quitting
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDocumentGroupRemoveDoc: the document gives up the model exclusive,
+ * leaves the tree and is freed: its block if it is a copy of the
+ * resource of GDGI_genDocument, else the object.
+ */
+@method OLDocumentGroupClass, MSG_OLDG_REMOVE_DOC
+{
+    (void) pself;
+    @call document::MSG_META_RELEASE_MODEL_EXCL();
+    @call document::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    @call oself::MSG_GEN_REMOVE_CHILD(document, 0);
+    if (OptrToHandle(GDG(oself)->GDGI_genDocument))
+	@send document::MSG_META_BLOCK_FREE();
+    else
+	@send document::MSG_META_OBJ_FREE();
+}
+
+/* OLDocumentGroupSaveAsCancelled: a quit is off; the target document
+ * is told */
+@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_SAVE_AS_CANCELLED
+{
+    (void) pself;
+    @call oself::MSG_OLDG_USER_CLOSE_CANCELLED();
+    SendToDocOrTarget(oself, 0, MSG_GEN_DOCUMENT_SAVE_AS_CANCELLED);
+}
+
+@method OLDocumentGroupClass, MSG_OLDG_USER_CLOSE_CANCELLED
+{
+    optr quit = pself->OLDGI_quitObj, ctrl;
+
+    pself->OLDGI_quitObj = 0;
+    if (!quit)
+	return;
+    ctrl = GDG(oself)->GDGI_documentControl;
+    if (ctrl)
+	@send ctrl::MSG_META_QUIT_ACK(0, (word) -1);
+}
+
+@method OLDocumentGroupClass, MSG_OLDG_USER_CLOSE_OK
+{
+    if (pself->OLDGI_quitObj)
+	@call oself::MSG_META_QUIT();
+}

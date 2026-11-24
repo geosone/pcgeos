@@ -199,6 +199,7 @@ export GenDocumentClass
 export GenDocumentControlClass
 export GenDocumentGroupClass
 export GenAddChildUpwardLinkOnly
+export IACPGetDocumentID
 
 resource ApplicationUI object
 resource SystemFieldUI object

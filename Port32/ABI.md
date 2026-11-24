@@ -5583,6 +5583,34 @@ visual classes of `Library/User/Vis`:
       another name (its strings come with `OLDocumentClass`); the
       variants that are not Motif's (`_DUI`, a custom document path,
       the design assistant).
+- **`OLDocumentGroupClass`** (`CMain/cmainAppDocumentControl.goc`,
+  after `cmainAppDocumentControl.asm`; `OLBuildAppDocumentControl`):
+  Motif's part of a `GenDocumentGroup`, in the application's thread.
+  It makes a document object for `..._NEW_DOC` and `..._OPEN_DOC`
+  (`CreateDocObject`: of `GDGI_documentClass`, or a copy of the
+  resource of `GDGI_genDocument`), unless a document has the file open
+  already (`..._SEARCH_FOR_DOC`, by the id of the file), and frees it
+  again (`MSG_OLDG_REMOVE_DOC`). It is the model node of the documents
+  (`OLDGI_modelExcl`; classed events `TO_MODEL` go to the document that
+  has it), passes attach, detach and shutdown on to them, and closes
+  them one after the other when the application quits
+  (`MSG_META_QUIT`; the control gets `MSG_META_QUIT_ACK`). What it is
+  asked about the control (token, creator, attributes, template
+  directory) it asks `GDGI_documentControl`.
+  - While quitting `OLDGI_quitObj` is the group itself once no document
+    is left (the asm kept the link to the parent there).
+  - `MSG_PRINT_GET_DOC_NAME` answers with
+    `MSG_PRINT_CONTROL_SET_DOC_NAME` (the asm's message came in `bp`,
+    which the C prototype has not).
+  - `library.ui.boot` step 91. Not yet: a document of its own
+    (`OLDocumentClass`), so nothing can be made or opened.
+- **`IACPGetDocumentID`** (`Library/User/IACP/iacpConnect.goc`): the
+  id of a document's file and its disk, of the target for a link. The
+  rest of IACP is not here yet.
+- **`FEA_DISK`** by `FileGetPathExtAttributes` and
+  `FileGetHandleExtAttributes`, alone or among `FEA_MULTIPLE`, is
+  answered by the kernel (`Library/Kernel/File/fileEA.c`); the asm's
+  file system drivers did that from the disk they were passed.
 - `ObjLockObjBlock` takes any block, as the asm (its error check looks
   at object blocks alone): the text library locks the lmem block of a
   string so (`MSG_VIS_TEXT_REPLACE_ALL_OPTR` with a chunk of a strings

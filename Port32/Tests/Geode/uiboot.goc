@@ -44,6 +44,8 @@
 @include <Objects/gGadgetC.goh>
 @include <Objects/gDocCtrl.goh>
 @include <Objects/gDocC.goh>
+@include <Objects/gDocGrpC.goh>
+@include <iacp.goh>
 @include <Internal/SpecUI/olGadgetClass.goh>
 #include <uDialog.h>
 #include <timer.h>
@@ -136,6 +138,10 @@ typedef struct {
     word		UBS_docCtl[5];
     /* its dialogs (steps 82 to 90): the control's task */
     word		UBS_docDlg[9];
+    /* the document group (step 91): attributes, protocol, the disk of
+     * the default name, searched, the id of a file (low word, twice),
+     * of none */
+    word		UBS_docGrp[7];
 } UBState;
 
 UBState ubState;
@@ -683,6 +689,11 @@ static GenControlFeaturesInfo ubCtlToolFeatures[1];
 /* the document control of the File menu (in no tree until step 80) */
 @object GenDocumentControlClass UBDocCtl = {
     GI_states = @default & ~GS_USABLE;
+}
+/* a document group (in no tree, as in an application; step 91) */
+@object GenDocumentGroupClass UBDocGrp = {
+    GDGI_untitledName = "Untitled";
+    GDGI_documentControl = UBDocCtl;
 }
 @visMoniker UBDeleteMoniker = 'D', "Delete";
 @visMoniker UBKeepMoniker = 'K', "Keep";
@@ -3503,6 +3514,58 @@ static void UBClickMenu(word n)
 		GDCA_CURRENT_TASK) >> GDCA_CURRENT_TASK_OFFSET;
 	ubState.UBS_docDlg[k] = task;
 	UBCHECK(task == dlg[k].task);
+	break;
+    }
+    case 91: {
+	/* the document group (OLDocumentGroupClass): what it has itself
+	 * and what it asks the control; the model node without a
+	 * document; no document has a file open; the id of a file
+	 * (IACPGetDocumentID) */
+	DocumentCommonParams p;
+	optr model = @UBApp;
+	DiskHandle d1 = SP_DOCUMENT, d2 = SP_DOCUMENT, d3 = SP_DOCUMENT;
+	dword id1, id2, id3;
+
+	ubState.UBS_docGrp[0] =
+	    @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_ATTRS();
+	UBCHECK(ubState.UBS_docGrp[0] & GDGA_VM_FILE);
+	ubState.UBS_docGrp[1] =
+	    (word) @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_PROTOCOL();
+	UBCHECK(@call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_PROTOCOL() == 1);
+	UBCHECK(@call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_UI_ATTRS() ==
+		@call UBDocCtl::MSG_GEN_DOCUMENT_CONTROL_GET_ATTRS());
+	UBCHECK(@call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_UI_FEATURES() ==
+		@call UBDocCtl::MSG_GEN_DOCUMENT_CONTROL_GET_FEATURES());
+	memset(&p, 0, sizeof(p));
+	UBCHECK(@call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_DEFAULT_NAME(
+		    (char *) &p) == ubState.UBS_docGrp[0]);
+	ubState.UBS_docGrp[2] = p.DCP_diskHandle;
+	UBCHECK(p.DCP_diskHandle == SP_DOCUMENT && !p.DCP_path[0]);
+	UBCHECK(StrIs(p.DCP_name, "Untitled"));
+	UBCHECK(@call UBDocGrp::MSG_META_GET_MODEL_EXCL(&model) && !model);
+	UBCHECK(!@call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_DOC_BY_FILE(1));
+	@call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_SET_OUTPUT(@UBApp);
+	UBCHECK(@call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_OUTPUT() == @UBApp);
+	/* (the name and the disk are as before after the search) */
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "FSTEST", 7);
+	ubState.UBS_docGrp[3] =
+	    @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_SEARCH_FOR_DOC(&p);
+	UBCHECK(!ubState.UBS_docGrp[3]);
+	UBCHECK(p.DCP_diskHandle == SP_DOCUMENT && !p.DCP_flags &&
+		StrIs(p.DCP_name, "FSTEST"));
+	id1 = IACPGetDocumentID("", "FSTEST", &d1);
+	id2 = IACPGetDocumentID("", "FSTEST", &d2);
+	id3 = IACPGetDocumentID("", "NOSUCH", &d3);
+	ubState.UBS_docGrp[4] = (word) id1;
+	ubState.UBS_docGrp[5] = (word) id2;
+	ubState.UBS_docGrp[6] = (word) id3;
+	UBCHECK(id1 != FILE_NO_ID && id1 == id2 && d1 == d2 &&
+		d1 != SP_DOCUMENT);
+	UBCHECK(id3 == FILE_NO_ID && d3 == SP_DOCUMENT);
+	/* nothing to ask when quitting: the control is told at once */
+	@call UBDocGrp::MSG_META_QUIT();
 	break;
     }
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the

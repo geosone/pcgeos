@@ -1,0 +1,70 @@
+/*
+ * iacpConnect.goc -- of iacpConnect.asm, for Port32: the id of a
+ * document's file (IACPGetDocumentID), by which the document control
+ * and IACP know a document that is open already.  Port32: the rest of
+ * IACP's connections is not here yet.
+ */
+@include "uiInt.goh"
+@include <iacp.goh>
+
+#include <file.h>
+
+/*
+ * IACPGetDocumentID: the id of the file `filename' in the directory
+ * `pathname' on *disk (a standard path, or a disk), and into *disk the
+ * disk it is on; of the target if it is a link.  FILE_NO_ID if the
+ * file cannot be had.
+ */
+dword IACPGetDocumentID(const char *pathname, const char *filename,
+			DiskHandle *disk)
+{
+    FileExtAttrDesc fead[3];
+    FileAttrs attrs = 0;
+    DiskHandle fileDisk = 0;
+    FileID id = FILE_NO_ID;
+    word err;
+
+    fead[0].FEAD_attr = FEA_DISK;
+    fead[0].FEAD_value = &fileDisk;
+    fead[0].FEAD_size = sizeof(fileDisk);
+    fead[0].FEAD_name = NULL;
+    fead[1].FEAD_attr = FEA_FILE_ID;
+    fead[1].FEAD_value = &id;
+    fead[1].FEAD_size = sizeof(id);
+    fead[1].FEAD_name = NULL;
+    fead[2].FEAD_attr = FEA_FILE_ATTR;
+    fead[2].FEAD_value = &attrs;
+    fead[2].FEAD_size = sizeof(attrs);
+    fead[2].FEAD_name = NULL;
+
+    FilePushDir();
+    if (!FileSetCurrentPath(*disk, pathname)) {
+	FilePopDir();
+	return FILE_NO_ID;
+    }
+    err = FileGetPathExtAttributes(filename, FEA_MULTIPLE, fead, 3);
+    if (!err && (attrs & FA_LINK)) {
+	/* a link: the attributes of what it points to */
+	MemHandle mh = MemAlloc(PATH_BUFFER_SIZE, HF_SWAPABLE, HAF_LOCK);
+	char *actual = MemDeref(mh), *end = actual;
+	char root[2];
+
+	root[0] = '\\';
+	root[1] = 0;
+	DiskHandle actualDisk = FileConstructActualPath(&end,
+				    PATH_BUFFER_SIZE, 0, filename, FALSE);
+
+	if (actualDisk) {
+	    (void) FileSetCurrentPath(actualDisk, root);
+	    err = FileGetPathExtAttributes(actual, FEA_MULTIPLE, fead, 3);
+	} else {
+	    err = ERROR_PATH_NOT_FOUND;
+	}
+	MemFree(mh);
+    }
+    FilePopDir();
+    if (err)
+	return FILE_NO_ID;
+    *disk = fileDisk;
+    return id;
+}

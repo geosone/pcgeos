@@ -15,25 +15,100 @@ static word Done(word e)
     return e;
 }
 
+/*
+ * FEA_DISK, the handle of the disk a file is on, is the kernel's own
+ * (the asm's drivers answered it from the disk they were passed): alone
+ * or among FEA_MULTIPLE it is filled in here.  TRUE if that was all;
+ * else *bufferP and *sizeP are what is left for the driver (a list
+ * without it: in `rest', or in a block returned in *mhP to free).
+ */
+#define EA_REST	16
+
+static Boolean DiskAttr(FSDDisk *d, FileExtendedAttribute attr,
+			void **bufferP, word *sizeP, FileExtAttrDesc *rest,
+			MemHandle *mhP, word *e)
+{
+    FileExtAttrDesc *a = *bufferP, *r = rest;
+    word i, n = 0, disks = 0;
+
+    *mhP = 0;
+    *e = 0;
+    if (attr == FEA_DISK) {
+	if (*sizeP < sizeof(DiskHandle))
+	    *e = ERROR_ATTR_SIZE_MISMATCH;
+	else
+	    *(DiskHandle *) *bufferP = d->FDK_handle;
+	return TRUE;
+    }
+    if (attr != FEA_MULTIPLE)
+	return FALSE;
+    for (i = 0; i < *sizeP; i++)
+	disks += a[i].FEAD_attr == FEA_DISK;
+    if (!disks)
+	return FALSE;
+    if (*sizeP - disks > EA_REST) {
+	*mhP = MemAlloc((*sizeP - disks) * sizeof(FileExtAttrDesc),
+			HF_SWAPABLE, HAF_LOCK);
+	if (!*mhP) {
+	    *e = ERROR_INSUFFICIENT_MEMORY;
+	    return TRUE;
+	}
+	r = MemDeref(*mhP);
+    }
+    for (i = 0; i < *sizeP; i++) {
+	if (a[i].FEAD_attr != FEA_DISK)
+	    r[n++] = a[i];
+	else if (a[i].FEAD_size < sizeof(DiskHandle))
+	    *e = ERROR_ATTR_SIZE_MISMATCH;
+	else
+	    *(DiskHandle *) a[i].FEAD_value = d->FDK_handle;
+    }
+    if (*e || !n) {
+	if (*mhP)
+	    MemFree(*mhP);
+	*mhP = 0;
+	return TRUE;
+    }
+    *bufferP = r;
+    *sizeP = n;
+    return FALSE;
+}
+
 static word ByPath(const TCHAR *path, FileExtendedAttribute attr,
 		   void *buffer, word bufSize, Boolean set)
 {
     char dp[FILE_DISK_PATH_SIZE];
     FSDDisk *d = FileLocate(0, path, dp, sizeof(dp));
+    FileExtAttrDesc rest[EA_REST];
+    MemHandle mh = 0;
+    word e;
 
     if (!d)
 	return ThreadGetError();
-    return Done(FSD_OF(d)->FSD_pathExtAttrs(d, dp, attr, buffer, bufSize,
-					    set));
+    if (!set && DiskAttr(d, attr, &buffer, &bufSize, rest, &mh, &e))
+	return Done(e);
+    e = FSD_OF(d)->FSD_pathExtAttrs(d, dp, attr, buffer, bufSize, set);
+    if (mh)
+	MemFree(mh);
+    return Done(e);
 }
 
 static word ByHandle(FileHandle fh, FileExtendedAttribute attr, void *buffer,
 		     word bufSize, Boolean set)
 {
     KFile *kf = FileOf(fh);
+    FSDDisk *d = kf->KF_file.FF_disk;
+    FileExtAttrDesc rest[EA_REST];
+    MemHandle mh = 0;
+    word e;
 
-    return Done(FSD_OF(kf->KF_file.FF_disk)->FSD_handleExtAttrs(
-		    &kf->KF_file, attr, buffer, bufSize, set));
+    if (!set && DiskAttr(d, attr, &buffer, &bufSize, rest, &mh, &e))
+	return Done(e);
+    e = FSD_OF(d)->FSD_handleExtAttrs(&kf->KF_file, attr, buffer, bufSize,
+				      set);
+    if (mh)
+	MemFree(mh);
+    return Done(e);
 }
 
 word FileGetPathExtAttributes(const TCHAR *path, FileExtendedAttribute attr,

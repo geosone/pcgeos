@@ -1,0 +1,42 @@
+/*
+ * olDocumentGroupClass.goh -- OLDocumentGroupClass, the specific UI's
+ * part of a GenDocumentGroup: the parent of the documents, in the
+ * application's thread (after
+ * Include/Internal/SpecUI/olDocumentGroupClass.def), for Port32.
+ */
+#ifndef __OLDOCUMENTGROUPCLASS_GOH
+#define __OLDOCUMENTGROUPCLASS_GOH
+
+@include <Objects/visC.goh>
+@include <Objects/gDocGrpC.goh>
+@include <Objects/gDocCtrl.goh>
+
+@deflib motif
+
+@class OLDocumentGroupClass, VisClass;
+@uses GenDocumentGroupClass;
+
+/* a document is gone: out of the tree and freed */
+@message void MSG_OLDG_REMOVE_DOC(optr document = cx:dx);
+/* from a document closed while the group quits: the user cancelled
+ * (the quit is off), or the document is closed (on to the next) */
+@message void MSG_OLDG_USER_CLOSE_CANCELLED();
+@message void MSG_OLDG_USER_CLOSE_OK();
+/* from a document whose file changed: on to the document control */
+@message void MSG_OLDG_FILE_CHANGED(DocumentFileChangedParams *p = ss:bp);
+/* MSG_META_ATTACH, after the UI is through with its own */
+@message void MSG_OLDG_ATTACH(word flags = cx, MemHandle appLaunchBlock = dx,
+			      MemHandle extraState = bp);
+
+    /* while quitting: the document to ask next (the group itself:
+     * none is left) */
+    @instance optr		OLDGI_quitObj;
+    @instance HierarchicalGrab	OLDGI_modelExcl;
+
+@endc
+
+extern ClassStruct *OLBuildAppDocumentControl(optr oself, word masterOffset);
+
+@endlib
+
+#endif
