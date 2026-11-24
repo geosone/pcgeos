@@ -528,6 +528,7 @@ extern MailboxError
 typedef enum {		
 
     MSN_APP_LOADED = 0x0,
+    MSN_APP_NOT_LOADED,
     MSN_NEW_FOCUS_APP,
     MSN_NEW_IACP_BINDING,
     MSN_REMOVE_IACP_BINDING,

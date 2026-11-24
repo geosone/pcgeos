@@ -311,6 +311,21 @@ static void MetaSendClassedEvent(void *pself, optr oself, Message m,
 	}
 	break;
     }
+    /* The completion message of an IACP transaction must be dispatched
+     * (IACPProcessMessage marks the MSG_META_DISPATCH_EVENT that
+     * carries it with a third parameter, 0xadeb: BP in the asm): it is
+     * sent to this object rather than destroyed. */
+    if (ObjGetMessageInfo(ev, &dest) == KMSG_META_DISPATCH_EVENT) {
+	dword size;
+	const struct { EventHandle event; word flags; word mark; } *d =
+	    ObjGetMessageParams(ev, &size);
+
+	if (size >= sizeof(*d) && d->mark == 0xadeb) {
+	    MessageSetDestination(ev, oself);
+	    CMessageDispatchP(ev, MF_CALL, reply, 0);
+	    return;
+	}
+    }
     ObjFreeMessage(ev);
 }
 

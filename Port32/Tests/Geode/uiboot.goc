@@ -142,6 +142,12 @@ typedef struct {
      * the default name, searched, the id of a file (low word, twice),
      * of none */
     word		UBS_docGrp[7];
+    /* IACP (steps 92 to 94): connection, servers, sent, the document's
+     * connection, the error without a server; new connections, pings
+     * of the server (value), of the client (value), completions; lost
+     * and shut down at the server, lost at the client; the error after
+     * all is unregistered */
+    word		UBS_iacp[14];
 } UBState;
 
 UBState ubState;
@@ -215,6 +221,13 @@ static word ubAnswer;
 
 /* the trigger that answers the dialog of step 53: whether the dialog
  * is on the screen then, and whether a message to the process waited */
+/* the two ends of an IACP connection (steps 92 to 94) */
+@class UBIacpClass, GenGlyphClass;
+    @message void MSG_UB_IACP_PING(word value);
+    @message void MSG_UB_IACP_DONE();
+@endc
+@classdecl UBIacpClass;
+
 @class UBYesClass, GenTriggerClass;
 @endc
 @classdecl UBYesClass;
@@ -695,6 +708,11 @@ static GenControlFeaturesInfo ubCtlToolFeatures[1];
     GDGI_untitledName = "Untitled";
     GDGI_documentControl = UBDocCtl;
 }
+/* a server and a client of IACP (in no tree; steps 92 to 94) */
+@object UBIacpClass UBIacpSrv = {
+}
+@object UBIacpClass UBIacpCli = {
+}
 @visMoniker UBDeleteMoniker = 'D', "Delete";
 @visMoniker UBKeepMoniker = 'K', "Keep";
 @end UBAppObjects;
@@ -748,6 +766,62 @@ static GenControlFeaturesInfo ubCtlToolFeatures[1];
     GI_states = @default & ~GS_USABLE;
 }
 @end UBCtlToolUI;
+
+static IACPConnection ubIacpConn, ubIacpDocConn, ubIacpHeldConn;
+
+@method UBIacpClass, MSG_META_IACP_NEW_CONNECTION
+{
+    (void) pself; (void) appLaunchBlock; (void) justLaunched;
+    if (oself == @UBIacpSrv &&
+	(connection == ubIacpConn || connection == ubIacpDocConn ||
+	 connection == ubIacpHeldConn))
+	ubState.UBS_iacp[5]++;
+}
+
+@method UBIacpClass, MSG_META_IACP_PROCESS_MESSAGE
+{
+    (void) pself;
+    IACPProcessMessage(oself, msgToSend, topt, completionMsg);
+}
+
+@method UBIacpClass, MSG_UB_IACP_PING
+{
+    (void) pself;
+    if (oself == @UBIacpSrv) {
+	ubState.UBS_iacp[6]++;
+	ubState.UBS_iacp[7] = value;
+    } else {
+	ubState.UBS_iacp[8] = value;
+    }
+}
+
+@method UBIacpClass, MSG_UB_IACP_DONE
+{
+    (void) pself;
+    /* behind the message it completes */
+    if (oself == @UBIacpCli && ubState.UBS_iacp[6])
+	ubState.UBS_iacp[9]++;
+}
+
+@method UBIacpClass, MSG_META_IACP_LOST_CONNECTION
+{
+    (void) pself;
+    if (oself == @UBIacpSrv) {
+	/* the client has gone (server number 0) */
+	if (!serverNum)
+	    ubState.UBS_iacp[10]++;
+	IACPLostConnection(oself, connection);
+    } else {
+	ubState.UBS_iacp[12] += serverNum;
+    }
+}
+
+@method UBIacpClass, MSG_META_IACP_SHUTDOWN_CONNECTION
+{
+    (void) pself;
+    ubState.UBS_iacp[11]++;
+    IACPShutdownConnection(oself, connection);
+}
 
 @method UBCtlClass, MSG_GEN_CONTROL_GET_INFO
 {
@@ -3566,6 +3640,113 @@ static void UBClickMenu(word n)
 	UBCHECK(id3 == FILE_NO_ID && d3 == SP_DOCUMENT);
 	/* nothing to ask when quitting: the control is told at once */
 	@call UBDocGrp::MSG_META_QUIT();
+	break;
+    }
+    case 92: {
+	/* IACP: a server registers for a token, a client connects and
+	 * sends it a message with a completion message, the server one
+	 * back; the server of an open document; nobody to connect to */
+	GeodeToken tok = { { 'U', 'B', 'I', 'T' }, 7 },
+		   none = { { 'N', 'O', 'N', 'E' }, 7 },
+		   low = { { 'U', 'B', 'I', 'L' }, 7 }, own;
+	DiskHandle disk = SP_DOCUMENT;
+	dword id = IACPGetDocumentID("", "FSTEST", &disk);
+	EventHandle ev, done;
+	word n = 0, v;
+
+	GeodeGetInfo(GeodeGetProcessHandle(), GGIT_TOKEN_ID, &own);
+	IACPRegisterServer(&tok, @UBIacpSrv, IACPSM_USER_INTERACTIBLE, 0);
+	IACPRegisterServer(&own, @UBIacpSrv, IACPSM_NOT_USER_INTERACTIBLE,
+			   0);
+	ubIacpConn = IACPConnect(&tok, IACPCF_CLIENT_OD_SPECIFIED |
+				 IACPSM_USER_INTERACTIBLE, 0, @UBIacpCli, &n);
+	ubState.UBS_iacp[0] = ubIacpConn;
+	ubState.UBS_iacp[1] = n;
+	UBCHECK(ubIacpConn != IACP_NO_CONNECTION && n == 1);
+	UBCHECK(IACPGetServerNumber(ubIacpConn, @UBIacpSrv) == 1);
+	UBCHECK(!IACPGetServerNumber(ubIacpConn, @UBIacpCli));
+	v = 42;
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &UBIacpClass,
+		     MSG_UB_IACP_PING, &v, sizeof(v), &ev, sizeof(ev));
+	done = @record UBIacpCli::MSG_UB_IACP_DONE();
+	ubState.UBS_iacp[2] = IACPSendMessage(ubIacpConn, ev, TO_SELF, done,
+					      IACPS_CLIENT);
+	UBCHECK(ubState.UBS_iacp[2] == 1);
+	v = 7;
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &UBIacpClass,
+		     MSG_UB_IACP_PING, &v, sizeof(v), &ev, sizeof(ev));
+	UBCHECK(IACPSendMessageToServer(ubIacpConn, ev, TO_SELF, 0, 1) == 1);
+	v = 9;
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &UBIacpClass,
+		     MSG_UB_IACP_PING, &v, sizeof(v), &ev, sizeof(ev));
+	UBCHECK(IACPSendMessage(ubIacpConn, ev, TO_SELF, 0, IACPS_SERVER)
+		== 1);
+	/* the file is open at the server */
+	UBCHECK(IACPConnectToDocumentServer("", "FSTEST", SP_DOCUMENT,
+		    IACPCF_CLIENT_OD_SPECIFIED, @UBIacpCli) ==
+		IACP_NO_CONNECTION);
+	IACPRegisterDocument(@UBIacpSrv, disk, id);
+	ubIacpDocConn = IACPConnectToDocumentServer("", "FSTEST", SP_DOCUMENT,
+			    IACPCF_CLIENT_OD_SPECIFIED, @UBIacpCli);
+	ubState.UBS_iacp[3] = ubIacpDocConn;
+	UBCHECK(ubIacpDocConn != IACP_NO_CONNECTION &&
+		ubIacpDocConn != ubIacpConn);
+	UBCHECK(IACPGetServerNumber(ubIacpDocConn, @UBIacpSrv) == 1);
+	n = 0;
+	UBCHECK(IACPConnect(&none, IACPCF_CLIENT_OD_SPECIFIED, 0, @UBIacpCli,
+			    &n) == IACP_NO_CONNECTION);
+	ubState.UBS_iacp[4] = n;
+	UBCHECK(n == IACPCE_NO_SERVER);
+	UBCHECK(!IACPLocateServer(&none));
+	/* a server in a lower mode than asked for: what the client
+	 * sends waits until the server has finished the connection */
+	IACPRegisterServer(&low, @UBIacpSrv, IACPSM_NOT_USER_INTERACTIBLE,
+			   0);
+	ubIacpHeldConn = IACPConnect(&low, IACPCF_CLIENT_OD_SPECIFIED |
+				     IACPSM_USER_INTERACTIBLE, 0, @UBIacpCli,
+				     &n);
+	UBCHECK(ubIacpHeldConn != IACP_NO_CONNECTION && n == 1);
+	v = 5;
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &UBIacpClass,
+		     MSG_UB_IACP_PING, &v, sizeof(v), &ev, sizeof(ev));
+	UBCHECK(IACPSendMessage(ubIacpHeldConn, ev, TO_SELF, 0, IACPS_CLIENT)
+		== 1);
+	break;
+    }
+    case 93:
+	/* all of it has arrived; the client leaves its connections */
+	UBCHECK(ubState.UBS_iacp[5] == 3);
+	UBCHECK(ubState.UBS_iacp[6] == 2 && ubState.UBS_iacp[7] == 7);
+	UBCHECK(ubState.UBS_iacp[8] == 9);
+	UBCHECK(ubState.UBS_iacp[9] == 1);
+	/* (the held message goes on before the client is lost) */
+	IACPFinishConnect(ubIacpHeldConn, @UBIacpSrv);
+	IACPShutdownAll(@UBIacpCli);
+	break;
+    case 94: {
+	/* the server was told, and has left them too: they are gone,
+	 * and with its last server the list */
+	GeodeToken tok = { { 'U', 'B', 'I', 'T' }, 7 },
+		   low = { { 'U', 'B', 'I', 'L' }, 7 }, own;
+	DiskHandle disk = SP_DOCUMENT;
+	dword id = IACPGetDocumentID("", "FSTEST", &disk);
+	word n = 0;
+
+	UBCHECK(ubState.UBS_iacp[10] == 3 && ubState.UBS_iacp[11] == 3);
+	UBCHECK(ubState.UBS_iacp[6] == 3 && ubState.UBS_iacp[7] == 5);
+	IACPUnregisterServer(&low, @UBIacpSrv);
+	UBCHECK(!ubState.UBS_iacp[12]);
+	GeodeGetInfo(GeodeGetProcessHandle(), GGIT_TOKEN_ID, &own);
+	IACPUnregisterDocument(@UBIacpSrv, disk, id);
+	UBCHECK(IACPConnectToDocumentServer("", "FSTEST", SP_DOCUMENT,
+		    IACPCF_CLIENT_OD_SPECIFIED, @UBIacpCli) ==
+		IACP_NO_CONNECTION);
+	IACPUnregisterServer(&own, @UBIacpSrv);
+	IACPUnregisterServer(&tok, @UBIacpSrv);
+	UBCHECK(IACPConnect(&tok, IACPCF_CLIENT_OD_SPECIFIED, 0, @UBIacpCli,
+			    &n) == IACP_NO_CONNECTION);
+	ubState.UBS_iacp[13] = n;
+	UBCHECK(n == IACPCE_NO_SERVER);
 	break;
     }
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the

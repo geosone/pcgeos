@@ -443,6 +443,9 @@ extern void
 extern void
     _pascal IACPLostConnection(optr oself, IACPConnection connection);
 
+extern void
+    _pascal IACPShutdownConnection(optr oself, IACPConnection connection);
+
 extern MemHandle
     _pascal IACPCreateDefaultLaunchBlock(word appMode);
 

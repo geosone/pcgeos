@@ -1,3 +1,4 @@
-# IACP: the id of a document's file so far (iacpConnect.asm).
+# IACP: servers, documents, connections and the messages over them.
 geos_sources(ui_goc
-  iacpConnect.goc)
+  iacpConnect.goc
+  iacpMain.goc)

@@ -1,13 +1,37 @@
 /*
- * iacpConnect.goc -- of iacpConnect.asm, for Port32: the id of a
- * document's file (IACPGetDocumentID), by which the document control
- * and IACP know a document that is open already.  Port32: the rest of
- * IACP's connections is not here yet.
+ * iacpConnect.goc -- IACP's connections (after iacpConnect.asm): a
+ * client connects to the servers of a token (IACPConnect) or to the
+ * server of an open document (IACPConnectToDocumentServer); with a
+ * launch block, a server that is not there is launched: its
+ * application is looked up in the [iacp] category of the ini file
+ * (IACPBindToken), then by its token below SP_APPLICATION and
+ * SP_SYS_APPLICATION.  And the id of a document's file
+ * (IACPGetDocumentID), by which the document control and IACP know a
+ * document that is open already.
+ *
+ * Port32 (Port32/ABI.md section 13z): as the asm, except
+ *  - the two questions to the user are strings of the code (the asm:
+ *    chunks of the Strings resource);
+ *  - where the asm went on with a freed launch block after a failed
+ *    launch the user had asked for, the server that runs is used and
+ *    the block kept;
+ *  - a document's server is of the geode that owns it (the asm took
+ *    the owner of the thread that runs it).
  */
 @include "uiInt.goh"
-@include <iacp.goh>
+@include "iacpInt.goh"
+@include <alb.goh>
+@include <mailbox.goh>
+@include <Objects/gProcC.goh>
 
+#include <chunkarr.h>
 #include <file.h>
+#include <fileEnum.h>
+#include <initfile.h>
+#include <lmem.h>
+#include <string.h>
+#include <system.h>
+#include <uDialog.h>
 
 /*
  * IACPGetDocumentID: the id of the file `filename' in the directory
@@ -67,4 +91,634 @@ dword IACPGetDocumentID(const char *pathname, const char *filename,
 	return FILE_NO_ID;
     *disk = fileDisk;
     return id;
+}
+
+/* ---------------------------------------------------------------------
+ * The application of a token
+ * ------------------------------------------------------------------- */
+
+static const char iacpCategory[] = "iacp";
+
+/* userStrings.asm: appAlreadyRunning, openDocInRunningApp */
+static const char appAlreadyRunning[] =
+    "\xd2\1\xd3 is already running. Would you like to bring the "
+    "already-running copy to the front?";
+static const char openDocInRunningApp[] =
+    "The application that created \xd2\1\xd3 is already running. Would "
+    "you like the already-running copy to open this document?";
+
+/* IACPGenerateTokenKey: the four characters, a comma, the
+ * manufacturer's id in decimal */
+static void TokenKey(const GeodeToken *t, char *key)
+{
+    memcpy(key, t->GT_chars, 4);
+    key[4] = ',';
+    UtilHex32ToAscii(key + 5, t->GT_manufID,
+		     UHTAF_NULL_TERMINATE | UHTAF_SBCS_STRING);
+}
+
+static void NotifyMailboxOfBinding(word notif, const GeodeToken *t)
+{
+    SysSendNotification(SST_MAILBOX, notif, 0,
+	(byte) t->GT_chars[0] | ((word) (byte) t->GT_chars[1] << 8),
+	(byte) t->GT_chars[2] | ((word) (byte) t->GT_chars[3] << 8),
+	t->GT_manufID);
+}
+
+/* IACPBindToken: the application to launch for a token, a path below
+ * SP_APPLICATION or SP_SYS_APPLICATION, into the ini file */
+void IACPBindToken(const GeodeToken *token, const char *appPath)
+{
+    char key[5 + UHTA_NULL_TERM_BUFFER_SIZE];
+
+    TokenKey(token, key);
+    InitFileWriteString(iacpCategory, key, appPath);
+    NotifyMailboxOfBinding(MSN_NEW_IACP_BINDING, token);
+}
+
+void IACPUnbindToken(const GeodeToken *token)
+{
+    char key[5 + UHTA_NULL_TERM_BUFFER_SIZE];
+
+    TokenKey(token, key);
+    InitFileDeleteEntry(iacpCategory, key);
+    NotifyMailboxOfBinding(MSN_REMOVE_IACP_BINDING, token);
+}
+
+static Boolean IsFile(const char *path)
+{
+    FileExtAttrDesc d;
+    FileAttrs attrs = 0;
+
+    d.FEAD_attr = FEA_FILE_ATTR;
+    d.FEAD_value = &attrs;
+    d.FEAD_size = sizeof(attrs);
+    d.FEAD_name = NULL;
+    return !FileGetPathExtAttributes(path, FEA_MULTIPLE, &d, 1) &&
+	   !(attrs & FA_SUBDIR);
+}
+
+/* IACPLocateServerAppInIniFile: the binding of the token, if the file
+ * is there */
+static Boolean LocateInIniFile(const GeodeToken *token,
+			       AppInstanceReference *air)
+{
+    char key[5 + UHTA_NULL_TERM_BUFFER_SIZE];
+    word size;
+
+    TokenKey(token, key);
+    if (InitFileReadStringBuffer(iacpCategory, key, air->AIR_fileName,
+				 sizeof(air->AIR_fileName), &size))
+	return FALSE;
+    FileSetStandardPath(SP_APPLICATION);
+    if (IsFile(air->AIR_fileName)) {
+	air->AIR_diskHandle = SP_APPLICATION;
+	return TRUE;
+    }
+    FileSetStandardPath(SP_SYS_APPLICATION);
+    if (IsFile(air->AIR_fileName)) {
+	air->AIR_diskHandle = SP_SYS_APPLICATION;
+	return TRUE;
+    }
+    return FALSE;
+}
+
+typedef struct {
+    FileAttrs		ERV_attr;
+    GeosFileHeaderFlags	ERV_flags;
+    FileLongName	ERV_name;
+} EnumRetVal;
+
+/*
+ * IACPLocateServerAppLow: an application with the token in the current
+ * directory, or below it (links are not followed: they might lead
+ * round).
+ */
+static Boolean LocateLow(const GeodeToken *token, AppInstanceReference *air)
+{
+    FileExtAttrDesc ret[4], match[3];
+    FileEnumParams p;
+    MemHandle buf = 0;
+    EnumRetVal *e;
+    word n, i, noFit;
+    Boolean found = FALSE;
+
+    memset(&p, 0, sizeof(p));
+    memset(ret, 0, sizeof(ret));
+    memset(match, 0, sizeof(match));
+    ret[0].FEAD_attr = FEA_FILE_ATTR;
+    ret[0].FEAD_value = (void *) offsetof(EnumRetVal, ERV_attr);
+    ret[0].FEAD_size = sizeof(e->ERV_attr);
+    ret[1].FEAD_attr = FEA_FLAGS;
+    ret[1].FEAD_value = (void *) offsetof(EnumRetVal, ERV_flags);
+    ret[1].FEAD_size = sizeof(e->ERV_flags);
+    ret[2].FEAD_attr = FEA_NAME;
+    ret[2].FEAD_value = (void *) offsetof(EnumRetVal, ERV_name);
+    ret[2].FEAD_size = sizeof(e->ERV_name);
+    ret[3].FEAD_attr = FEA_END_OF_LIST;
+    /* a process that is an application, with our token */
+    match[0].FEAD_attr = FEA_GEODE_ATTR;
+    match[0].FEAD_value = (void *) (uintptr_t) (GA_PROCESS | GA_APPLICATION);
+    match[0].FEAD_size = sizeof(GeodeAttrs);
+    match[1].FEAD_attr = FEA_TOKEN;
+    match[1].FEAD_value = (void *) token;
+    match[1].FEAD_size = sizeof(GeodeToken);
+    match[2].FEAD_attr = FEA_END_OF_LIST;
+    p.FEP_searchFlags = FESF_GEOS_EXECS | FESF_DIRS;
+    p.FEP_returnAttrs = ret;
+    p.FEP_returnSize = sizeof(EnumRetVal);
+    p.FEP_matchAttrs = match;
+    p.FEP_bufSize = FE_BUFSIZE_UNLIMITED;
+    n = FileEnum(&p, &buf, &noFit);
+    if (!n || !buf) {
+	if (buf)
+	    MemFree(buf);
+	return FALSE;
+    }
+    /* a file first: the application may be right here */
+    e = MemLock(buf);
+    for (i = 0; i < n && !found; i++) {
+	if (!(e[i].ERV_attr & FA_SUBDIR)) {
+	    char *path = air->AIR_fileName;
+
+	    air->AIR_diskHandle =
+		FileConstructFullPath(&path, sizeof(air->AIR_fileName), 0,
+				      e[i].ERV_name, FALSE);
+	    found = TRUE;
+	}
+    }
+    for (i = 0; i < n && !found; i++) {
+	if (e[i].ERV_attr & FA_LINK)
+	    continue;
+	FilePushDir();
+	FileSetCurrentPath(0, e[i].ERV_name);
+	found = LocateLow(token, air);
+	FilePopDir();
+	e = MemDeref(buf);
+    }
+    MemFree(buf);
+    return found;
+}
+
+/* IACPLocateServerApp: the application of a token into the reference
+ * of a launch block (here the block is left alone if there is none) */
+static Boolean LocateServerApp(const GeodeToken *token,
+			       AppInstanceReference *air)
+{
+    Boolean found;
+
+    FilePushDir();
+    found = LocateInIniFile(token, air);
+    if (!found) {
+	FileSetStandardPath(SP_APPLICATION);
+	found = LocateLow(token, air);
+    }
+    if (!found) {
+	FileSetStandardPath(SP_SYS_APPLICATION);
+	found = LocateLow(token, air);
+    }
+    FilePopDir();
+    return found;
+}
+
+/* IACPLocateServer: a block with the AppInstanceReference of the
+ * application of a token, 0 if there is none */
+MemHandle IACPLocateServer(const GeodeToken *token)
+{
+    MemHandle mh = MemAlloc(sizeof(AppInstanceReference), HF_SWAPABLE,
+			    HAF_ZERO_INIT | HAF_LOCK);
+
+    if (!mh)
+	return 0;
+    if (!LocateServerApp(token, MemDeref(mh))) {
+	MemFree(mh);
+	return 0;
+    }
+    MemUnlock(mh);
+    return mh;
+}
+
+/* ---------------------------------------------------------------------
+ * Connecting
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    IACPConnectFlags	flags;
+    optr		client;
+    MemHandle		alb;
+    GeodeToken		token;
+    Boolean		justLaunched;
+    word		listNum;	/* in iacpListArray */
+    word		nextServer;	/* in the list's servers */
+    Boolean		forceConnect;	/* to nextServer, whatever its mode */
+    Boolean		askUser;
+    Boolean		documentConnect;
+    QueueHandle		holdQueue;
+} ConnectState;
+
+#define LISTS	ConstructOptr(iacpListBlock, iacpListArray)
+#define DOCS	ConstructOptr(iacpListBlock, iacpDocArray)
+
+/* IACPFindServerOwnedByCX: a server of the token, of a geode (0: of
+ * any), into listNum/nextServer */
+static Boolean FindServerOwnedBy(ConnectState *st, GeodeHandle geode)
+{
+    int n = IACPFindList(&st->token);
+    optr arr;
+    word count, i, size;
+
+    if (n < 0)
+	return FALSE;
+    arr = ConstructOptr(iacpListBlock, IACPListPtr(n)->IACPL_servers);
+    count = ChunkArrayGetCount(arr);
+    for (i = 0; i < count; i++) {
+	IACPServer *s = ChunkArrayElementToPtr(arr, i, &size);
+
+	if (!geode || MemOwner(OptrToHandle(s->IACPS_object)) == geode) {
+	    st->listNum = n;
+	    st->nextServer = i;
+	    return TRUE;
+	}
+    }
+    return FALSE;
+}
+
+/*
+ * IACPInstantiateServer: the list block is locked exclusively and is
+ * again on success, with listNum and nextServer the server found; on
+ * an error (returned; 0: fine) it is unlocked.  force: launch one even
+ * if there is a server.  The launch block is kept (a copy goes to the
+ * application).
+ */
+static word InstantiateServer(ConnectState *st, Boolean force)
+{
+    GeodeHandle geode = 0;
+    GeodeLoadError err = GLE_OK;
+    AppLaunchBlock *alb;
+    Boolean have;
+    MemHandle copy;
+
+    IACPUnlockListBlock();
+    if (!st->alb)
+	return IACPCE_NO_SERVER;
+    alb = MemLock(st->alb);
+    have = alb->ALB_appRef.AIR_diskHandle ||
+	   LocateServerApp(&st->token, &alb->ALB_appRef);
+    MemUnlock(st->alb);
+    if (!have)
+	return IACPCE_CANNOT_FIND_SERVER;
+    ThreadPSem(iacpInstantiateSem);
+    if (!force) {
+	/* one may have registered by now: any will do */
+	IACPLockListBlockExcl();
+	if (FindServerOwnedBy(st, 0)) {
+	    ThreadVSem(iacpInstantiateSem);
+	    return 0;
+	}
+	IACPUnlockListBlock();
+    }
+    copy = IACPDuplicateALB(st->alb);
+    geode = UserLoadApplication(0, 0, copy, NULL, 0, &err);
+    if (!geode) {
+	ThreadVSem(iacpInstantiateSem);
+	return err ? (word) err : IACPCE_CANNOT_FIND_SERVER;
+    }
+    /* until a server of the application has registered */
+    IACPLockListBlockExcl();
+    while (!FindServerOwnedBy(st, geode)) {
+	iacpInstantiateWaiters++;
+	IACPUnlockListBlock();
+	ThreadPSem(iacpInstantiateWake);
+	IACPLockListBlockExcl();
+    }
+    st->justLaunched = TRUE;
+    ThreadVSem(iacpInstantiateSem);
+    return 0;
+}
+
+/*
+ * IACPCheckAndLocateDocument: the launch block names a document to
+ * open, and it is open already: the server that has it must be
+ * connected to, whatever its mode.
+ */
+static Boolean CheckAndLocateDocument(ConnectState *st)
+{
+    AppLaunchBlock *alb;
+    DiskHandle disk;
+    FileID id;
+    word size;
+    int n, k;
+
+    if (!st->alb)
+	return FALSE;
+    alb = MemLock(st->alb);
+    if ((alb->ALB_appMode && alb->ALB_appMode !=
+				 MSG_GEN_PROCESS_OPEN_APPLICATION) ||
+	!alb->ALB_dataFile[0]) {
+	MemUnlock(st->alb);
+	return FALSE;
+    }
+    disk = alb->ALB_diskHandle;
+    id = IACPGetDocumentID(alb->ALB_path, alb->ALB_dataFile, &disk);
+    MemUnlock(st->alb);
+    if (id == FILE_NO_ID)
+	return FALSE;
+    n = IACPLocateDocument(0, disk, id);
+    if (n < 0)
+	return FALSE;
+    k = IACPFindServer(IACPListPtr(st->listNum)->IACPL_servers,
+		       ((IACPDocument *) ChunkArrayElementToPtr(DOCS, n,
+						&size))->IACPD_server);
+    if (k < 0)
+	return FALSE;
+    st->nextServer = k;
+    st->forceConnect = TRUE;
+    return TRUE;
+}
+
+/*
+ * IACPAskUserForPermission: a server that may run several times, and a
+ * launch block: use the one that runs, or launch another?  The launch
+ * model decides, or the user.  TRUE: another was launched and is in
+ * listNum/nextServer.
+ */
+static Boolean AskUserForPermission(ConnectState *st, IACPServerFlags flags)
+{
+    AppLaunchBlock *alb;
+    UILaunchModel model = UserGetLaunchModel();
+    const char *string = openDocInRunningApp, *arg, *p;
+    word listNum = st->listNum, nextServer = st->nextServer, response;
+
+    if (!(flags & IACPSF_MULTIPLE_INSTANCES))
+	return FALSE;
+    alb = MemLock(st->alb);
+    if ((alb->ALB_launchFlags & ALF_OVERRIDE_MULTIPLE_INSTANCE) ||
+	model < UILM_MULTIPLE_INSTANCES) {
+	MemUnlock(st->alb);
+	return FALSE;
+    }
+    if (model == UILM_MULTIPLE_INSTANCES) {
+	arg = alb->ALB_dataFile;
+	if (!*arg) {
+	    /* the name of the application: the last part of its path */
+	    if (!alb->ALB_appRef.AIR_diskHandle &&
+		!LocateServerApp(&st->token, &alb->ALB_appRef)) {
+		/* nothing we could launch */
+		MemUnlock(st->alb);
+		return FALSE;
+	    }
+	    arg = alb->ALB_appRef.AIR_fileName;
+	    for (p = arg; *p; p++) {
+		if (*p == '\\')
+		    arg = p + 1;
+	    }
+	    string = appAlreadyRunning;
+	}
+	response = UserStandardDialog(NULL, NULL, NULL, (char *) arg,
+		(char *) string,
+		CDBF_SYSTEM_MODAL |
+		(CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		(GIT_AFFIRMATION << CDBF_INTERACTION_TYPE_OFFSET));
+	MemUnlock(st->alb);
+	if (response != IC_NO)
+	    return FALSE;
+    } else {
+	MemUnlock(st->alb);
+    }
+    if (InstantiateServer(st, TRUE)) {
+	/* no other to be had: the one that runs (the block was
+	 * unlocked) */
+	IACPLockListBlockExcl();
+	st->listNum = listNum;
+	st->nextServer = nextServer;
+	return FALSE;
+    }
+    st->askUser = FALSE;
+    st->forceConnect = TRUE;
+    return TRUE;
+}
+
+/*
+ * IACPConnectCommon: the list block is locked exclusively and is
+ * unlocked here.  docServer: the server of a document to connect to
+ * (0: those of the token).  The connection, or IACP_NO_CONNECTION with
+ * the error in *error.
+ */
+static IACPConnection ConnectCommon(ConnectState *st, optr docServer,
+				    word *numServers, word *error)
+{
+    IACPConnection connection;
+    IACPConnectionStruct *c;
+    IACPList *l;
+    IACPServer *s;
+    ChunkHandle serverList;
+    EventHandle msg, completion = 0;
+    GeodeHandle ui = GeodeGetCodeProcessHandle();
+    struct { MemHandle alb; word justLaunched; IACPConnection connection; }
+	np;
+    struct { MemHandle b1, b2; } dp;
+    optr arr;
+    word size, count, n, err;
+    int k;
+
+    st->justLaunched = FALSE;
+    st->askUser = st->forceConnect = FALSE;
+    st->holdQueue = 0;
+    st->nextServer = 0;
+    /* the launch block must outlast the client */
+    if (st->alb)
+	HandleModifyOwner(st->alb, ui);
+
+    k = IACPFindList(&st->token);
+    if (st->documentConnect) {
+	if (k >= 0) {
+	    st->listNum = k;
+	    k = IACPFindServer(IACPListPtr(k)->IACPL_servers, docServer);
+	}
+	if (k < 0) {
+	    IACPUnlockListBlock();
+	    *error = IACPCE_NO_SERVER;
+	    return IACP_NO_CONNECTION;
+	}
+	st->nextServer = k;
+	st->flags |= IACPCF_FIRST_ONLY;
+    } else if (k < 0 ||
+	       !ChunkArrayGetCount(ConstructOptr(iacpListBlock,
+				    IACPListPtr(k)->IACPL_servers))) {
+	/* nobody there: launch it, if we were told how */
+	err = InstantiateServer(st, FALSE);
+	if (err) {
+	    if (st->alb && err != IACPCE_NO_SERVER)
+		MemFree(st->alb);
+	    *error = err;
+	    return IACP_NO_CONNECTION;
+	}
+    } else {
+	st->listNum = k;
+	/* first of all the server that has the document of the launch
+	 * block open */
+	if (!CheckAndLocateDocument(st) && st->alb &&
+	    (st->flags & IACPCF_OBEY_LAUNCH_MODEL))
+	    st->askUser = TRUE;
+    }
+    if (!(st->flags & IACPCF_FIRST_ONLY))
+	st->nextServer = 0;		/* all of them */
+
+    /* the connection, into its list; the servers are appended as they
+     * are found */
+    connection = LMemAlloc(iacpListBlock, IACPCS_HEADER);
+    c = LMemDerefHandles(iacpListBlock, connection);
+    c->IACPCS_holdQueue = 0;
+    c->IACPCS_document = CA_NULL_ELEMENT;
+    l = IACPListPtr(st->listNum);
+    l->IACPL_numConnect++;
+    c->IACPCS_next = l->IACPL_connections;
+    l->IACPL_connections = connection;
+    serverList = l->IACPL_servers;
+    c->IACPCS_client = (st->flags & IACPCF_CLIENT_OD_SPECIFIED) ?
+			    st->client : GeodeGetAppObject(0);
+
+    /* the servers in the mode asked for, or a higher one */
+    for (;;) {
+	byte want = st->flags & IACPCF_SERVER_MODE, mode;
+	optr object;
+
+	arr = ConstructOptr(iacpListBlock, serverList);
+	s = ChunkArrayElementToPtr(arr, st->nextServer, &size);
+	mode = s->IACPS_mode;
+	if (st->documentConnect || want <= mode || st->forceConnect) {
+	    if (!st->documentConnect && st->askUser &&
+		AskUserForPermission(st, s->IACPS_flags))
+		continue;		/* another one was launched */
+	    arr = ConstructOptr(iacpListBlock, serverList);
+	    s = ChunkArrayElementToPtr(arr, st->nextServer, &size);
+	    object = s->IACPS_object;
+	    n = LMemGetChunkSizeHandles(iacpListBlock, connection);
+	    LMemInsertAtHandles(iacpListBlock, connection, n, sizeof(optr));
+	    c = LMemDerefHandles(iacpListBlock, connection);
+	    *(optr *) ((byte *) c + n) = object;
+	    /* a server in a lower mode must change it first: what the
+	     * client sends meanwhile waits (IACPFinishConnect) */
+	    if (!st->documentConnect && want > mode && !st->holdQueue) {
+		st->holdQueue = GeodeAllocQueue();
+		HandleModifyOwner(st->holdQueue, ui);
+	    }
+	    if (st->flags & IACPCF_FIRST_ONLY)
+		break;
+	}
+	if (++st->nextServer < ChunkArrayGetCount(arr))
+	    continue;
+	if (IACPNumServers(connection))
+	    break;
+	/* none in the mode: the first one, then, without bothering
+	 * the user */
+	st->nextServer = 0;
+	st->forceConnect = TRUE;
+	st->flags |= IACPCF_FIRST_ONLY;
+	st->askUser = FALSE;
+    }
+
+    /* the servers learn of the connection; they stay registered
+     * meanwhile */
+    count = IACPNumServers(connection);
+    MemDowngradeExclLock(iacpListBlock);
+    if (st->alb) {
+	/* each server gives its reference to the launch block back */
+	MemInitRefCount(st->alb, count);
+	dp.b1 = st->alb;
+	dp.b2 = 0;
+	CObjMessageP(MF_RECORD, ConstructOptr(ui, 0),
+		     MSG_META_DEC_BLOCK_REF_COUNT, &dp, sizeof(dp),
+		     &completion, sizeof(completion));
+	HandleModifyOwner(completion, ui);
+    }
+    np.alb = st->alb;
+    np.justLaunched = st->justLaunched;
+    np.connection = connection;
+    CObjMessageP(MF_RECORD, 0, MSG_META_IACP_NEW_CONNECTION, &np, sizeof(np),
+		 &msg, sizeof(msg));
+    MemLockShared(iacpListBlock);	/* (unlocked by the send) */
+    (void) IACPSendMessageLocked(connection, msg, (TravelOption) TO_SELF,
+				 completion, IACPS_CLIENT, 0);
+    if (st->holdQueue) {
+	(void) MemUpgradeSharedLock(iacpListBlock);
+	c = LMemDerefHandles(iacpListBlock, connection);
+	c->IACPCS_holdQueue = st->holdQueue;
+    }
+    IACPUnlockListBlock();
+    *numServers = count;
+    return connection;
+}
+
+/*
+ * IACPConnect: a connection to the servers of a token in the mode of
+ * the flags or a higher one (IACPCF_FIRST_ONLY: to the first).  With a
+ * launch block (which becomes IACP's), a server is launched if there
+ * is none, and the servers get the block with
+ * MSG_META_IACP_NEW_CONNECTION.  IACP_NO_CONNECTION: the error is in
+ * *numServersPtr.
+ */
+IACPConnection IACPConnect(GeodeToken *list, IACPConnectFlags flags,
+			   MemHandle appLaunchBlock, optr client,
+			   word *numServersPtr)
+{
+    ConnectState st;
+    IACPConnection connection;
+    word n = 0, error = 0;
+
+    memset(&st, 0, sizeof(st));
+    st.flags = flags;
+    st.client = client;
+    st.alb = appLaunchBlock;
+    st.token = *list;
+    IACPLockListBlockExcl();
+    connection = ConnectCommon(&st, 0, &n, &error);
+    if (numServersPtr)
+	*numServersPtr = connection ? n : error;
+    return connection;
+}
+
+/*
+ * IACPConnectToDocumentServer: a connection to the server that has the
+ * file open, IACP_NO_CONNECTION if nobody has.
+ */
+IACPConnection IACPConnectToDocumentServer(const char *pathname,
+					   const char *filename,
+					   DiskHandle disk,
+					   IACPConnectFlags flags,
+					   optr client)
+{
+    ConnectState st;
+    IACPConnection connection;
+    IACPConnectionStruct *c;
+    FileID id = IACPGetDocumentID(pathname, filename, &disk);
+    optr server;
+    word n, error, size;
+    int doc;
+
+    if (id == FILE_NO_ID)
+	return IACP_NO_CONNECTION;
+    IACPLockListBlockExcl();
+    doc = IACPLocateDocument(0, disk, id);
+    if (doc < 0) {
+	IACPUnlockListBlock();
+	return IACP_NO_CONNECTION;
+    }
+    server = ((IACPDocument *) ChunkArrayElementToPtr(DOCS, doc,
+						      &size))->IACPD_server;
+    memset(&st, 0, sizeof(st));
+    st.flags = IACPCF_FIRST_ONLY |
+	       (IACPSM_NOT_USER_INTERACTIBLE << IACPCF_SERVER_MODE_OFFSET) |
+	       (flags & IACPCF_CLIENT_OD_SPECIFIED);
+    st.client = client;
+    st.documentConnect = TRUE;
+    GeodeGetInfo(MemOwner(OptrToHandle(server)), GGIT_TOKEN_ID, &st.token);
+    connection = ConnectCommon(&st, server, &n, &error);
+    if (connection) {
+	IACPLockListBlockExcl();
+	c = LMemDerefHandles(iacpListBlock, connection);
+	c->IACPCS_document = doc;
+	IACPUnlockListBlock();
+    }
+    return connection;
 }

@@ -1,0 +1,75 @@
+/*
+ * iacpInt.goh -- what the files of IACP share (after iacpConstant.def
+ * and iacpVariable.def), for Port32.
+ */
+#ifndef __IACPINT_GOH
+#define __IACPINT_GOH
+
+@include <iacp.goh>
+#include <sem.h>
+
+/* A list: the servers registered for a token and the connections to
+ * them.  It goes when it has neither. */
+typedef struct {
+    GeodeToken	IACPL_token;
+    word	IACPL_numConnect;
+    ChunkHandle	IACPL_connections;	/* IACPConnectionStruct, linked */
+    ChunkHandle	IACPL_servers;		/* chunk array of IACPServer */
+} IACPList;
+
+typedef struct {
+    optr	IACPS_object;		/* the server itself */
+    byte	IACPS_mode;		/* IACPServerMode */
+    byte	IACPS_flags;		/* IACPServerFlags */
+} IACPServer;
+
+/* A connection, a chunk whose handle is the IACPConnection: the client
+ * and, to the end of the chunk, the servers (0: shut down). */
+typedef struct {
+    ChunkHandle	IACPCS_next;
+    /* the client's messages wait here until the server has the
+     * connection (IACPFinishConnect); 0: they need not wait */
+    QueueHandle	IACPCS_holdQueue;
+    /* IACPConnectToDocumentServer: the index of the file in the
+     * document registry */
+    word	IACPCS_document;
+    optr	IACPCS_client;
+    optr	IACPCS_servers[1];
+} IACPConnectionStruct;
+
+#define IACPCS_HEADER	offsetof(IACPConnectionStruct, IACPCS_servers)
+
+/* An open document: its file and the server object to reach it by */
+typedef struct {
+    word	IACPD_disk;
+    FileID	IACPD_id;
+    optr	IACPD_server;
+} IACPDocument;
+
+/* iacpMain.goc: the block of the lists, locked exclusively or shared */
+extern MemHandle iacpListBlock;
+extern ChunkHandle iacpListArray, iacpDocArray;
+extern Boolean IACPInit(void);
+extern void IACPExit(void);
+extern void IACPLockListBlockExcl(void);
+extern void IACPLockListBlockShared(void);
+extern void IACPUnlockListBlock(void);
+/* the number of the list of a token, -1 if there is none */
+extern int IACPFindList(const GeodeToken *token);
+extern IACPList *IACPListPtr(word n);
+/* the index of a document, of a server (0: of any), -1 if none */
+extern int IACPLocateDocument(optr server, word disk, FileID id);
+extern MemHandle IACPDuplicateALB(MemHandle alb);
+extern void IACPDeleteConnection(IACPConnection connection);
+extern word IACPNumServers(IACPConnection connection);
+/* the index of a server in a list's array, -1 */
+extern int IACPFindServer(ChunkHandle servers, optr server);
+/* IACPSendMessage/ToServer with the block locked shared already; it is
+ * unlocked */
+extern word IACPSendMessageLocked(IACPConnection connection, EventHandle msg,
+				  TravelOption topt, EventHandle completion,
+				  IACPSide side, word serverNum);
+extern SemaphoreHandle iacpInstantiateSem, iacpInstantiateWake;
+extern word iacpInstantiateWaiters;
+
+#endif

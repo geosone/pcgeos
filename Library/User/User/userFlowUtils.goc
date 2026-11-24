@@ -313,8 +313,9 @@ static EventHandle NestedEvent(EventHandle event)
  * FlowDestroyMessage: an event nobody will get is freed with what it
  * carries: the event in a message that passes one on, the data block's
  * reference of a notification.
- * (FlowDestroyMessageInMessage dispatched an IACP completion message
- * instead of freeing it; that comes with IACP.)
+ * The completion message of an IACP transaction is dispatched instead
+ * (FlowDestroyMessageInMessage): a MSG_META_DISPATCH_EVENT marked with
+ * a third parameter, 0xadeb (IACPProcessMessage).
  */
 void FlowDestroyMessage(EventHandle event)
 {
@@ -341,6 +342,19 @@ void FlowDestroyMessage(EventHandle event)
     }
     if (msg == MSG_META_SEND_CLASSED_EVENT || msg == MSG_META_DISPATCH_EVENT)
 	nested = TRUE;
+    if (msg == MSG_META_DISPATCH_EVENT) {
+	const struct { EventHandle event; word flags; word mark; } *d =
+	    params;
+
+	if (size >= sizeof(*d) && d->mark == 0xadeb) {
+	    EventHandle inner = d->event;
+	    word flags = d->flags;
+
+	    ObjFreeMessage(event);
+	    CMessageDispatchP(inner, flags, NULL, 0);
+	    return;
+	}
+    }
     if (nested) {
 	EventHandle inner = NestedEvent(event);
 

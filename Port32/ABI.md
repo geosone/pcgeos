@@ -4884,8 +4884,9 @@ visual classes of `Library/User/Vis`:
     for the registers of `ObjGetMessageData`;
   - `MetaGrabFocusExclLow` and its six relatives send
     `MSG_META_MUP_ALTER_FTVMC_EXCL` for an object;
-  - not yet: the IACP completion message that
-    `FlowDestroyMessageInMessage` dispatched instead of freeing.
+  - the IACP completion message is dispatched instead of freed
+    (`FlowDestroyMessageInMessage`): a `MSG_META_DISPATCH_EVENT` with
+    a third parameter `0xadeb` (the asm's `bp`).
   - `User/userFlowMisc.goc`: `FlowTranslatePassiveButton(message,
     inputState)` gives the passive message of the active button
     function; `FlowCheckKbdShortcut` asks the keyboard driver
@@ -5604,9 +5605,43 @@ visual classes of `Library/User/Vis`:
     which the C prototype has not).
   - `library.ui.boot` step 91. Not yet: a document of its own
     (`OLDocumentClass`), so nothing can be made or opened.
-- **`IACPGetDocumentID`** (`Library/User/IACP/iacpConnect.goc`): the
-  id of a document's file and its disk, of the target for a link. The
-  rest of IACP is not here yet.
+- **IACP** (`Library/User/IACP/iacpMain.goc`, `iacpConnect.goc`, beside
+  `iacpMain.asm`, `iacpUtils.asm`, `iacpConnect.asm`): the C API of
+  `iacp.goh` (plus `IACPShutdownConnection`), as the asm, except:
+  - the block of the lists (an array of lists: token, servers,
+    connections; an array of open documents) is made when the library
+    is loaded, not a resource; it is locked exclusively to change it
+    and shared to read it, as in the asm;
+  - an `IACPConnection` is the chunk of the connection in that block;
+  - `MSG_META_IACP_PROCESS_MESSAGE` carries `(msgToSend, topt,
+    completionMsg)`; an object that gets it calls
+    `IACPProcessMessage`. The completion message goes behind the
+    message as a `MSG_META_DISPATCH_EVENT` with a third parameter
+    `0xadeb` (the asm's `bp`), which the kernel's
+    `MSG_META_SEND_CLASSED_EVENT` and `FlowDestroyMessage` dispatch
+    where they would free an event nobody takes;
+  - a message held up until `IACPFinishConnect` waits on the
+    connection's queue as a `MSG_META_DUMMY` event whose parameters
+    are the message, the completion message, the travel option and
+    the completion message's owner (the asm: the registers, taken out
+    by `MessageProcess`);
+  - a client that launched a server waits on a semaphore which a
+    registering server releases once per waiting client (the asm: a
+    thread queue);
+  - `IACPConnect` returns the error in `*numServersPtr` when it
+    returns `IACP_NO_CONNECTION`, as the C stub did; where the asm
+    went on with a freed launch block after a launch the user asked
+    for had failed, the running server is used;
+  - the two questions about a running application are strings of the
+    code; the mailbox notifications are sent (`SST_MAILBOX`;
+    `MSN_APP_NOT_LOADED` added to `mailbox.goh`, which lacked it);
+  - `IACPGetDocumentID`: the id of a document's file and its disk, of
+    the target for a link;
+  - `library.ui.boot` steps 92 to 94: servers, a connection, messages
+    both ways with a completion message, a document's server, a held
+    connection, shutdown from the client and the server's answer.
+    Not yet: `GenApplicationClass` as a server (`genAppCommonIACP.asm`),
+    so launching a server is not tested.
 - **`FEA_DISK`** by `FileGetPathExtAttributes` and
   `FileGetHandleExtAttributes`, alone or among `FEA_MULTIPLE`, is
   answered by the kernel (`Library/Kernel/File/fileEA.c`); the asm's

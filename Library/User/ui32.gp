@@ -200,6 +200,26 @@ export GenDocumentControlClass
 export GenDocumentGroupClass
 export GenAddChildUpwardLinkOnly
 export IACPGetDocumentID
+export IACPRegisterServer
+export IACPUnregisterServer
+export IACPRegisterDocument
+export IACPUnregisterDocument
+export IACPConnect
+export IACPConnectToDocumentServer
+export IACPFinishConnect
+export IACPSendMessage
+export IACPSendMessageAndWait
+export IACPSendMessageToServer
+export IACPShutdown
+export IACPShutdownAll
+export IACPProcessMessage
+export IACPLostConnection
+export IACPShutdownConnection
+export IACPCreateDefaultLaunchBlock
+export IACPGetServerNumber
+export IACPLocateServer
+export IACPBindToken
+export IACPUnbindToken
 
 resource ApplicationUI object
 resource SystemFieldUI object

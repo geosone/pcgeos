@@ -1,0 +1,687 @@
+/*
+ * iacpMain.goc -- inter-application communication (after iacpMain.asm
+ * and iacpUtils.asm): servers register for the token of a list, open
+ * documents with the id of their file; messages go over a connection
+ * from the client to the servers or back; either side shuts a
+ * connection down.  Connecting is in iacpConnect.goc.
+ *
+ * All of it lives in one lmem block of the UI: an array of lists (a
+ * token, its servers, its connections) and an array of documents.  It
+ * is locked exclusively to change it, shared to read it.
+ *
+ * Port32 (Port32/ABI.md section 13z): as the asm, with these
+ * differences.
+ *  - The block is made when the library is loaded (the asm had it as a
+ *    resource).
+ *  - A client that has launched a server waits on a semaphore that a
+ *    registering server releases once for each one waiting (the asm
+ *    blocked on a thread queue, where a wake-up could come too early).
+ *  - A message held up until the server finishes the connection waits
+ *    on the connection's queue as an event of its own
+ *    (MSG_META_DUMMY with an IACPHeldMessage; the asm put the
+ *    registers there and had MessageProcess take them out).
+ */
+@include "uiInt.goh"
+@include "iacpInt.goh"
+@include <alb.goh>
+@include <mailbox.goh>
+
+#include <chunkarr.h>
+#include <file.h>
+#include <lmem.h>
+#include <sem.h>
+#include <string.h>
+#include <system.h>
+
+MemHandle iacpListBlock;
+ChunkHandle iacpListArray, iacpDocArray;
+/* one launches a server at a time (iacpInstantiateSem); it waits on
+ * iacpInstantiateWake, counted in iacpInstantiateWaiters under the
+ * exclusive lock of the block, until a server registers */
+SemaphoreHandle iacpInstantiateSem, iacpInstantiateWake;
+word iacpInstantiateWaiters;
+
+/* a held message: what IACPSendOneMessage wants later */
+typedef struct {
+    EventHandle		IHM_msg;
+    EventHandle		IHM_completion;
+    TravelOption	IHM_topt;
+    GeodeHandle		IHM_completionOwner;
+} IACPHeldMessage;
+
+/* ---------------------------------------------------------------------
+ * The list block (iacpUtils.asm)
+ * ------------------------------------------------------------------- */
+
+Boolean IACPInit(void)
+{
+    iacpListBlock = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+    if (!iacpListBlock)
+	return FALSE;
+    HandleModifyOwner(iacpListBlock, GeodeGetCodeProcessHandle());
+    MemLock(iacpListBlock);
+    iacpListArray = ChunkArrayCreate(iacpListBlock, sizeof(IACPList), 0, 0);
+    iacpDocArray = ChunkArrayCreate(iacpListBlock, sizeof(IACPDocument), 0,
+				    0);
+    MemUnlock(iacpListBlock);
+    iacpInstantiateSem = ThreadAllocSem(1);
+    iacpInstantiateWake = ThreadAllocSem(0);
+    HandleModifyOwner(iacpInstantiateSem, GeodeGetCodeProcessHandle());
+    HandleModifyOwner(iacpInstantiateWake, GeodeGetCodeProcessHandle());
+    return iacpListArray && iacpDocArray;
+}
+
+void IACPExit(void)
+{
+    if (iacpListBlock) {
+	MemFree(iacpListBlock);
+	ThreadFreeSem(iacpInstantiateSem);
+	ThreadFreeSem(iacpInstantiateWake);
+    }
+    iacpListBlock = 0;
+}
+
+void IACPLockListBlockExcl(void)
+{
+    (void) MemLockExcl(iacpListBlock);
+}
+
+void IACPLockListBlockShared(void)
+{
+    (void) MemLockShared(iacpListBlock);
+}
+
+void IACPUnlockListBlock(void)
+{
+    MemUnlockShared(iacpListBlock);
+}
+
+#define LISTS	ConstructOptr(iacpListBlock, iacpListArray)
+#define DOCS	ConstructOptr(iacpListBlock, iacpDocArray)
+#define CHUNK(ch)	LMemDerefHandles(iacpListBlock, ch)
+
+IACPList *IACPListPtr(word n)
+{
+    word size;
+
+    return ChunkArrayElementToPtr(LISTS, n, &size);
+}
+
+int IACPFindList(const GeodeToken *token)
+{
+    word n = ChunkArrayGetCount(LISTS), i;
+
+    for (i = 0; i < n; i++) {
+	IACPList *l = IACPListPtr(i);
+
+	if (!memcmp(l->IACPL_token.GT_chars, token->GT_chars,
+		    sizeof(token->GT_chars)) &&
+	    l->IACPL_token.GT_manufID == token->GT_manufID)
+	    return i;
+    }
+    return -1;
+}
+
+/* IACPFindServer: the index of a server in a list's array, -1 */
+int IACPFindServer(ChunkHandle servers, optr server)
+{
+    optr arr = ConstructOptr(iacpListBlock, servers);
+    word n = ChunkArrayGetCount(arr), i, size;
+
+    for (i = 0; i < n; i++) {
+	IACPServer *s = ChunkArrayElementToPtr(arr, i, &size);
+
+	if (s->IACPS_object == server)
+	    return i;
+    }
+    return -1;
+}
+
+int IACPLocateDocument(optr server, word disk, FileID id)
+{
+    word n = ChunkArrayGetCount(DOCS), i, size;
+
+    for (i = 0; i < n; i++) {
+	IACPDocument *d = ChunkArrayElementToPtr(DOCS, i, &size);
+
+	if (d->IACPD_disk == disk && d->IACPD_id == id &&
+	    (!server || d->IACPD_server == server))
+	    return i;
+    }
+    return -1;
+}
+
+/* IACPDuplicateALB: a copy of a launch block, with the same owner */
+MemHandle IACPDuplicateALB(MemHandle alb)
+{
+    word size = MemGetInfo(alb, MGIT_SIZE);
+    MemHandle copy = MemAlloc(size, HF_SWAPABLE | HF_SHARABLE, HAF_LOCK);
+
+    if (!copy)
+	return 0;
+    HandleModifyOwner(copy, MemOwner(alb));
+    memcpy(MemDeref(copy), MemLock(alb), size);
+    MemUnlock(alb);
+    MemUnlock(copy);
+    return copy;
+}
+
+word IACPNumServers(IACPConnection connection)
+{
+    return (LMemGetChunkSizeHandles(iacpListBlock, connection) -
+	    IACPCS_HEADER) / sizeof(optr);
+}
+
+/*
+ * IACPDeleteConnection: the connection out of its list and freed; a
+ * list with neither connections nor servers goes too.  The block is
+ * locked exclusively.
+ */
+void IACPDeleteConnection(IACPConnection connection)
+{
+    word n = ChunkArrayGetCount(LISTS), i;
+
+    for (i = 0; i < n; i++) {
+	IACPList *l = IACPListPtr(i);
+	ChunkHandle prev = 0, c = l->IACPL_connections;
+
+	while (c && c != connection) {
+	    prev = c;
+	    c = ((IACPConnectionStruct *) CHUNK(c))->IACPCS_next;
+	}
+	if (!c)
+	    continue;
+	c = ((IACPConnectionStruct *) CHUNK(connection))->IACPCS_next;
+	if (prev)
+	    ((IACPConnectionStruct *) CHUNK(prev))->IACPCS_next = c;
+	else
+	    l->IACPL_connections = c;
+	if (!--l->IACPL_numConnect &&
+	    !ChunkArrayGetCount(ConstructOptr(iacpListBlock,
+					      l->IACPL_servers))) {
+	    LMemFreeHandles(iacpListBlock, l->IACPL_servers);
+	    ChunkArrayDelete(LISTS, IACPListPtr(i));
+	}
+	break;
+    }
+    LMemFreeHandles(iacpListBlock, connection);
+}
+
+/* ---------------------------------------------------------------------
+ * Servers and documents register
+ * ------------------------------------------------------------------- */
+
+static void NotifyMailbox(word notif, const GeodeToken *t, word modeFlags)
+{
+    SysSendNotification(SST_MAILBOX, notif, modeFlags,
+	(byte) t->GT_chars[0] | ((word) (byte) t->GT_chars[1] << 8),
+	(byte) t->GT_chars[2] | ((word) (byte) t->GT_chars[3] << 8),
+	t->GT_manufID);
+}
+
+/*
+ * IACPRegisterServer: an object becomes a server of a list, or changes
+ * its mode there.  A client that waits for an application it has
+ * launched to register looks again.
+ */
+void IACPRegisterServer(GeodeToken *list, optr server, IACPServerMode mode,
+			IACPServerFlags flags)
+{
+    GeodeToken token = *list;
+    IACPList *l;
+    IACPServer *s;
+    ChunkHandle servers;
+    word size;
+    int n, k;
+
+    IACPLockListBlockExcl();
+    n = IACPFindList(&token);
+    if (n < 0) {
+	servers = ChunkArrayCreate(iacpListBlock, sizeof(IACPServer), 0, 0);
+	l = ChunkArrayAppend(LISTS, 0);
+	n = ChunkArrayPtrToElement(LISTS, l);
+	l->IACPL_token = token;
+	l->IACPL_numConnect = 0;
+	l->IACPL_connections = 0;
+	l->IACPL_servers = servers;
+    }
+    servers = IACPListPtr(n)->IACPL_servers;
+    k = IACPFindServer(servers, server);
+    if (k >= 0) {
+	s = ChunkArrayElementToPtr(ConstructOptr(iacpListBlock, servers), k,
+				   &size);
+    } else {
+	s = ChunkArrayAppend(ConstructOptr(iacpListBlock, servers), 0);
+	s->IACPS_object = server;
+    }
+    s->IACPS_mode = mode;
+    s->IACPS_flags = flags;
+    /* whoever waits for an application it launched looks again */
+    while (iacpInstantiateWaiters) {
+	iacpInstantiateWaiters--;
+	ThreadVSem(iacpInstantiateWake);
+    }
+    NotifyMailbox(MSN_APP_LOADED, &token, mode | ((word) flags << 8));
+    IACPUnlockListBlock();
+}
+
+void IACPUnregisterServer(GeodeToken *list, optr server)
+{
+    GeodeToken token = *list;
+    IACPList *l;
+    optr arr;
+    word size;
+    int n, k;
+
+    IACPLockListBlockExcl();
+    n = IACPFindList(&token);
+    if (n >= 0) {
+	l = IACPListPtr(n);
+	arr = ConstructOptr(iacpListBlock, l->IACPL_servers);
+	k = IACPFindServer(l->IACPL_servers, server);
+	if (k >= 0) {
+	    ChunkArrayDelete(arr, ChunkArrayElementToPtr(arr, k, &size));
+	    if (!ChunkArrayGetCount(arr)) {
+		/* no server left for the token */
+		NotifyMailbox(MSN_APP_NOT_LOADED, &token, 0);
+		l = IACPListPtr(n);
+		if (!l->IACPL_numConnect) {
+		    LMemFreeHandles(iacpListBlock, l->IACPL_servers);
+		    ChunkArrayDelete(LISTS, IACPListPtr(n));
+		}
+	    }
+	}
+    }
+    IACPUnlockListBlock();
+}
+
+/* IACPRegisterDocument: the file is open, and server is the object to
+ * talk to about it */
+void IACPRegisterDocument(optr server, word disk, dword fileID)
+{
+    IACPDocument *d;
+
+    IACPLockListBlockExcl();
+    if (IACPLocateDocument(server, disk, fileID) < 0) {
+	d = ChunkArrayAppend(DOCS, 0);
+	d->IACPD_disk = disk;
+	d->IACPD_id = fileID;
+	d->IACPD_server = server;
+    }
+    IACPUnlockListBlock();
+}
+
+void IACPUnregisterDocument(optr server, word disk, dword fileID)
+{
+    word size;
+    int n;
+
+    IACPLockListBlockExcl();
+    n = IACPLocateDocument(server, disk, fileID);
+    if (n >= 0)
+	ChunkArrayDelete(DOCS, ChunkArrayElementToPtr(DOCS, n, &size));
+    IACPUnlockListBlock();
+}
+
+/* ---------------------------------------------------------------------
+ * Messages over a connection
+ * ------------------------------------------------------------------- */
+
+/*
+ * IACPSendOneMessage: copies of the message and its completion message
+ * to one object, as MSG_META_IACP_PROCESS_MESSAGE through its queue.
+ * The copy of the message is the receiver's geode's (the sender may be
+ * gone before it gets there).  An object that has shut down: the
+ * completion message is dispatched here.  1 if it was sent, else 0.
+ */
+static word SendOneMessage(optr dest, EventHandle msg, TravelOption topt,
+			      EventHandle completion,
+			      GeodeHandle completionOwner)
+{
+    struct { EventHandle msg; TravelOption topt; EventHandle done; } p;
+
+    if (!OptrToHandle(dest)) {
+	if (completion)
+	    CMessageDispatchP(completion, MF_RECORD | MF_FORCE_QUEUE, NULL,
+			      0);
+	return 0;
+    }
+    p.msg = ObjDuplicateMessage(msg);
+    HandleModifyOwner(p.msg, MemOwner(OptrToHandle(dest)));
+    p.topt = topt;
+    p.done = 0;
+    if (completion) {
+	p.done = ObjDuplicateMessage(completion);
+	HandleModifyOwner(p.done, completionOwner);
+    }
+    CObjMessageP(MF_FORCE_QUEUE, dest, MSG_META_IACP_PROCESS_MESSAGE, &p,
+		 sizeof(p), NULL, 0);
+    return 1;
+}
+
+/* IACPHoldUp: onto the connection's queue until the server has it; the
+ * messages become the server's geode's */
+static word HoldUp(IACPConnectionStruct *c, EventHandle msg,
+		   TravelOption topt, EventHandle completion)
+{
+    GeodeHandle owner = MemOwner(OptrToHandle(c->IACPCS_servers[0]));
+    IACPHeldMessage h;
+    EventHandle ev;
+
+    h.IHM_msg = msg;
+    h.IHM_completion = completion;
+    h.IHM_topt = topt;
+    h.IHM_completionOwner = completion ? MemOwner(completion) : 0;
+    CObjMessageP(MF_RECORD, 0, MSG_META_DUMMY, &h, sizeof(h), &ev,
+		 sizeof(ev));
+    QueuePostMessage(c->IACPCS_holdQueue, ev, 0);
+    if (completion)
+	HandleModifyOwner(completion, owner);
+    HandleModifyOwner(msg, owner);
+    return 1;
+}
+
+/*
+ * IACPSendMessageInternal: to the client (from a server) or to all the
+ * servers (from the client); the recorded messages are freed.  The
+ * block is locked shared, and unlocked here.  The number sent.
+ */
+word IACPSendMessageLocked(IACPConnection connection, EventHandle msg,
+			   TravelOption topt, EventHandle completion,
+			   IACPSide side, word serverNum)
+{
+    IACPConnectionStruct *c = CHUNK(connection);
+    GeodeHandle owner = completion ? MemOwner(completion) : 0;
+    word n = 0, i, count;
+
+    if (side == IACPS_SERVER) {
+	n = SendOneMessage(c->IACPCS_client, msg, topt, completion, owner);
+    } else if (c->IACPCS_holdQueue) {
+	n = HoldUp(c, msg, topt, completion);
+	IACPUnlockListBlock();
+	return n;
+    } else if (serverNum) {
+	n = SendOneMessage(c->IACPCS_servers[serverNum - 1], msg, topt,
+			   completion, owner);
+    } else {
+	count = IACPNumServers(connection);
+	for (i = 0; i < count; i++) {
+	    c = CHUNK(connection);
+	    n += SendOneMessage(c->IACPCS_servers[i], msg, topt, completion,
+				owner);
+	}
+    }
+    ObjFreeMessage(msg);
+    if (completion)
+	ObjFreeMessage(completion);
+    IACPUnlockListBlock();
+    return n;
+}
+
+/*
+ * IACPSendMessage: a recorded message to the other side of a
+ * connection (from the client: to every server), sent as its
+ * TravelOption says (-1: to its own destination) by the object there;
+ * the completion message is dispatched once it has been.  Both are
+ * freed.  The number of objects it went to.
+ */
+word IACPSendMessage(IACPConnection connection, EventHandle msgToSend,
+		     TravelOption topt, EventHandle completionMsg,
+		     IACPSide side)
+{
+    IACPLockListBlockShared();
+    return IACPSendMessageLocked(connection, msgToSend, topt, completionMsg, side, 0);
+}
+
+/* IACPSendMessageToServer: to one server (1: the first) */
+word IACPSendMessageToServer(IACPConnection connection, EventHandle msgToSend,
+			     TravelOption topt, EventHandle completionMsg,
+			     word serverNum)
+{
+    IACPLockListBlockShared();
+    return IACPSendMessageLocked(connection, msgToSend, topt, completionMsg,
+			IACPS_CLIENT, serverNum);
+}
+
+/* IACPSendMessageAndWait: and wait until it has been handled: the
+ * completion message comes to a queue of our own */
+word IACPSendMessageAndWait(IACPConnection connection, EventHandle msgToSend,
+			    TravelOption topt, IACPSide side)
+{
+    QueueHandle q = GeodeAllocQueue();
+    EventHandle done;
+    word n;
+
+    CObjMessageP(MF_RECORD, (optr) ConstructOptr(q, 0), MSG_META_DUMMY, NULL,
+		 0, &done, sizeof(done));
+    n = IACPSendMessage(connection, msgToSend, topt, done, side);
+    ObjFreeMessage(QueueGetMessage(q));
+    GeodeFreeQueue(q);
+    return n;
+}
+
+/*
+ * IACPFinishConnect: the server has the connection: the messages held
+ * up for it are sent on, and later ones go straight.
+ */
+void IACPFinishConnect(IACPConnection connection, optr server)
+{
+    IACPConnectionStruct *c;
+    QueueHandle q;
+
+    (void) server;
+    IACPLockListBlockShared();
+    c = CHUNK(connection);
+    q = c->IACPCS_holdQueue;
+    c->IACPCS_holdQueue = 0;
+    if (q) {
+	while (GeodeInfoQueue(q)) {
+	    EventHandle ev = QueueGetMessage(q);
+	    dword size;
+	    IACPHeldMessage h = *(const IACPHeldMessage *)
+				    ObjGetMessageParams(ev, &size);
+
+	    ObjFreeMessage(ev);
+	    c = CHUNK(connection);
+	    (void) SendOneMessage(c->IACPCS_servers[0], h.IHM_msg,
+				  h.IHM_topt, h.IHM_completion,
+				  h.IHM_completionOwner);
+	    ObjFreeMessage(h.IHM_msg);
+	    if (h.IHM_completion)
+		ObjFreeMessage(h.IHM_completion);
+	}
+	GeodeFreeQueue(q);
+    }
+    IACPUnlockListBlock();
+}
+
+/*
+ * IACPProcessMessage: what an object does with
+ * MSG_META_IACP_PROCESS_MESSAGE: the message is dispatched (as a
+ * classed event if it has a TravelOption), then the completion message
+ * sent the same way, behind it.
+ */
+void IACPProcessMessage(optr oself, EventHandle msgToSend, TravelOption topt,
+			EventHandle completionMsg)
+{
+    /* mark: the message must be dispatched even where a classed event
+     * finds nobody (the kernel's MSG_META_SEND_CLASSED_EVENT,
+     * FlowDestroyMessage); BP of the asm */
+    struct { EventHandle ev; MessageFlags flags; word mark; } p;
+    optr dest = 0;
+    EventHandle ev;
+
+    if (completionMsg)
+	(void) ObjGetMessageInfo(msgToSend, &dest);
+    if (topt == (TravelOption) -1)
+	CMessageDispatchP(msgToSend, 0, NULL, 0);
+    else
+	@call oself::MSG_META_SEND_CLASSED_EVENT(msgToSend, topt);
+    if (!completionMsg)
+	return;
+    p.ev = completionMsg;
+    p.flags = MF_FORCE_QUEUE;
+    p.mark = 0xadeb;
+    if (topt == (TravelOption) -1) {
+	CObjMessageP(0, dest, MSG_META_DISPATCH_EVENT, &p, sizeof(p), NULL,
+		     0);
+    } else {
+	CObjMessageP(MF_RECORD, dest, MSG_META_DISPATCH_EVENT, &p, sizeof(p),
+		     &ev, sizeof(ev));
+	@call oself::MSG_META_SEND_CLASSED_EVENT(ev, topt);
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * A connection is shut down
+ * ------------------------------------------------------------------- */
+
+/*
+ * IACPShutdown: one side leaves the connection (server 0: the client).
+ * The other side is told (MSG_META_IACP_LOST_CONNECTION, with the
+ * number of the server that left, 0 for the client); once nobody is
+ * left the connection goes.
+ */
+void IACPShutdown(IACPConnection connection, optr server)
+{
+    IACPConnectionStruct *c;
+    struct { IACPConnection connection; word serverNum; } p;
+    word n, i, serverNum = 0;
+    Boolean left = FALSE;
+    EventHandle ev;
+
+    IACPLockListBlockExcl();
+    c = CHUNK(connection);
+    n = IACPNumServers(connection);
+    if (!OptrToHandle(server)) {
+	c->IACPCS_client = 0;
+    } else {
+	for (i = 0; i < n && c->IACPCS_servers[i] != server; i++)
+	    ;
+	if (i == n) {
+	    IACPUnlockListBlock();
+	    return;
+	}
+	c->IACPCS_servers[i] = 0;
+	serverNum = i + 1;
+    }
+    left = OptrToHandle(c->IACPCS_client) != 0;
+    for (i = 0; i < n; i++)
+	left = left || OptrToHandle(c->IACPCS_servers[i]);
+    if (!left) {
+	IACPDeleteConnection(connection);
+	IACPUnlockListBlock();
+	return;
+    }
+    MemDowngradeExclLock(iacpListBlock);
+    p.connection = connection;
+    p.serverNum = serverNum;
+    CObjMessageP(MF_RECORD, 0, MSG_META_IACP_LOST_CONNECTION, &p, sizeof(p),
+		 &ev, sizeof(ev));
+    (void) IACPSendMessageLocked(connection, ev, (TravelOption) TO_SELF, 0,
+			serverNum ? IACPS_SERVER : IACPS_CLIENT, 0);
+}
+
+/* IACPShutdownAll: every connection the object is in, as client or as
+ * server */
+void IACPShutdownAll(optr obj)
+{
+    ChunkHandle found;
+    optr arr;
+    word n, i, k, size;
+
+    IACPLockListBlockExcl();
+    /* first all of them, then the shutdowns: a shutdown may free a
+     * connection and its list */
+    found = ChunkArrayCreate(iacpListBlock, sizeof(ChunkHandle), 0, 0);
+    arr = ConstructOptr(iacpListBlock, found);
+    n = ChunkArrayGetCount(LISTS);
+    for (i = 0; i < n; i++) {
+	ChunkHandle ch = IACPListPtr(i)->IACPL_connections;
+
+	while (ch) {
+	    IACPConnectionStruct *c = CHUNK(ch);
+	    ChunkHandle next = c->IACPCS_next;
+	    word servers = IACPNumServers(ch);
+	    Boolean in = c->IACPCS_client == obj;
+
+	    for (k = 0; k < servers; k++)
+		in = in || c->IACPCS_servers[k] == obj;
+	    if (in)
+		*(ChunkHandle *) ChunkArrayAppend(arr, 0) = ch;
+	    ch = next;
+	}
+    }
+    n = ChunkArrayGetCount(arr);
+    for (i = n; i-- > 0; ) {
+	ChunkHandle ch = *(ChunkHandle *) ChunkArrayElementToPtr(arr, i,
+								 &size);
+	Boolean client =
+	    ((IACPConnectionStruct *) CHUNK(ch))->IACPCS_client == obj;
+
+	IACPUnlockListBlock();
+	IACPShutdown(ch, client ? 0 : obj);
+	IACPLockListBlockExcl();
+    }
+    LMemFreeHandles(iacpListBlock, found);
+    IACPUnlockListBlock();
+}
+
+/*
+ * IACPLostConnection: what a server does with
+ * MSG_META_IACP_LOST_CONNECTION: once its queues are through with what
+ * the client sent, it shuts its side down
+ * (MSG_META_IACP_SHUTDOWN_CONNECTION).
+ */
+void IACPLostConnection(optr oself, IACPConnection connection)
+{
+    EventHandle ev;
+
+    CObjMessageP(MF_RECORD, oself, MSG_META_IACP_SHUTDOWN_CONNECTION,
+		 &connection, sizeof(connection), &ev, sizeof(ev));
+    @call oself::MSG_META_OBJ_FLUSH_INPUT_QUEUE(ev, 0, OptrToHandle(oself));
+}
+
+/* IACPShutdownConnection: and for that message */
+void IACPShutdownConnection(optr oself, IACPConnection connection)
+{
+    IACPShutdown(connection, oself);
+}
+
+/* IACPCreateDefaultLaunchBlock: a launch block for IACPConnect: the
+ * mode, in SP_DOCUMENT, no data file */
+MemHandle IACPCreateDefaultLaunchBlock(word appMode)
+{
+    MemHandle mh = MemAlloc(sizeof(AppLaunchBlock),
+			    HF_SWAPABLE | HF_SHARABLE,
+			    HAF_ZERO_INIT | HAF_LOCK);
+    AppLaunchBlock *alb;
+
+    if (!mh)
+	return 0;
+    alb = MemDeref(mh);
+    alb->ALB_appMode = appMode;
+    alb->ALB_diskHandle = SP_DOCUMENT;
+    MemUnlock(mh);
+    return mh;
+}
+
+/* IACPGetServerNumber: the number of a server in a connection (1: the
+ * first), 0 if it is not in it */
+word IACPGetServerNumber(IACPConnection connection, optr server)
+{
+    IACPConnectionStruct *c;
+    word n, i, num = 0;
+
+    IACPLockListBlockShared();
+    c = CHUNK(connection);
+    n = IACPNumServers(connection);
+    for (i = 0; i < n; i++) {
+	if (c->IACPCS_servers[i] == server) {
+	    num = i + 1;
+	    break;
+	}
+    }
+    IACPUnlockListBlock();
+    return num;
+}
