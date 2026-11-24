@@ -82,6 +82,10 @@ typedef struct {
     char		UBS_stdText[32];
     word		UBS_count[3];
     char		UBS_countText[8];
+    word		UBS_fsel[3];
+    word		UBS_fselSel[6][2];
+    char		UBS_fselName[6][36];
+    char		UBS_fselPath[2][64];
 } UBState;
 
 static int fails;
@@ -143,7 +147,7 @@ static void Shot(int step)
     int x, y;
 
     /* (step < 0: the reference mode, whatever the step) */
-    if (!f || (step >= 0 && step != (at ? atoi(at) : 67)))
+    if (!f || (step >= 0 && step != (at ? atoi(at) : 73)))
 	return;
     TimerSleep((word) (getenv("UIBOOT_SHOT_TICKS")
 		       ? atoi(getenv("UIBOOT_SHOT_TICKS")) : 60));
@@ -206,6 +210,13 @@ int main(int argc, char **argv)
     Put("USERDATA", NULL, 0);
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
+    /* for the file selector */
+    Put("DOCUMENT", NULL, 0);
+    Put("DOCUMENT/FSTEST", NULL, 0);
+    Put("DOCUMENT/FSTEST/LETTERS", NULL, 0);
+    Put("DOCUMENT/FSTEST/LETTERS/NOTE.TXT", "note\r\n", 6);
+    Put("DOCUMENT/FSTEST/ALPHA.TXT", "alpha\r\n", 7);
+    Put("DOCUMENT/FSTEST/BETA.TXT", "beta\r\n", 6);
     /* UIBOOT_REF=variant: the reference mode (see below) with the
      * product's font size, as Port32/tools/uiref-gen.py's application
      * shows it in the original GEOS */
@@ -270,7 +281,7 @@ int main(int argc, char **argv)
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator; ... ; the sliders */
-    for (i = 2; i <= 67; i++) {
+    for (i = 2; i <= 73; i++) {
 	step(i);
 	Shot(i);
     }
@@ -342,6 +353,14 @@ int main(int argc, char **argv)
     printf("Spin gadget: applied %u times, last %u (flags %#x), shows \"%s\"\n",
 	   st->UBS_count[0], st->UBS_count[1], st->UBS_count[2],
 	   st->UBS_countText);
+    printf("File selector: %u notifications (entry %u, flags %#x)\n",
+	   st->UBS_fsel[0], st->UBS_fsel[1], st->UBS_fsel[2]);
+    for (i = 0; i < 6; i++)
+	printf("  selection %d: entry %u, flags %#x, \"%s\"\n", i,
+	       st->UBS_fselSel[i][0], st->UBS_fselSel[i][1],
+	       st->UBS_fselName[i]);
+    printf("  paths \"%s\", \"%s\"\n", st->UBS_fselPath[0],
+	   st->UBS_fselPath[1]);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

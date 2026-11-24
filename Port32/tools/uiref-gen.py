@@ -21,6 +21,8 @@ VARIANT picks what is on the screen:
     6  the File menu open (a click on its button in the menu bar)
     7  the Tools menu open
     8  the Long menu open
+   10  the file selector's dialog over variant 1 (the application makes
+       the files it shows: DOCUMENT\\FSTEST)
 """
 import os, re, sys
 
@@ -56,6 +58,8 @@ goc = r'''/*
 @include <Objects/gDListC.goh>
 @include <Objects/gGadgetC.goh>
 @include <Objects/vTextC.goh>
+@include <Objects/gFSelC.goh>
+#include <file.h>
 #include <uDialog.h>
 
 @class URProcessClass, GenProcessClass;
@@ -137,7 +141,7 @@ static void URClickMenu(word n)
 
 @method URProcessClass, MSG_UR_SHOW
 {
-#if %(variant)d == 1 || %(variant)d == 4
+#if %(variant)d == 1 || %(variant)d == 4 || %(variant)d == 10
     @call UBDoc1::MSG_GEN_BRING_TO_TOP();
     @call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
 #endif
@@ -174,6 +178,28 @@ static void URClickMenu(word n)
     @call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
     @call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
     URClickMenu(%(variant)d - 6);
+#endif
+#if %(variant)d == 10
+    {
+	static const char *files[] = { "ALPHA.TXT", "BETA.TXT" };
+	FileHandle fh;
+	word i;
+
+	FilePushDir();
+	FileSetCurrentPath(SP_DOCUMENT, ".");
+	(void) FileCreateDir("FSTEST");
+	FileSetCurrentPath(SP_DOCUMENT, "FSTEST");
+	(void) FileCreateDir("LETTERS");
+	for (i = 0; i < 2; i++) {
+	    fh = FileCreate(files[i], FILE_CREATE_TRUNCATE | FCF_NATIVE |
+			    FILE_ACCESS_W | FILE_DENY_RW, 0);
+	    if (fh)
+		FileClose(fh, FALSE);
+	}
+	FilePopDir();
+	(void) @call UBFSel::MSG_GEN_PATH_SET("FSTEST", SP_DOCUMENT);
+	@call UBFiles::MSG_GEN_INTERACTION_INITIATE();
+    }
 #endif
 #if %(variant)d == 4
     (void) UserStandardDialog(NULL, NULL, NULL, "42", "Error \001 happened.",

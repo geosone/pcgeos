@@ -850,23 +850,55 @@ void OLItemGroupMoveFocusToNextField(optr o)
 
 /*
  * OLItemGroupNotifyDoublePress: an exclusive group (that has to have a
- * selection) activates its dialog's default (with default rings, not in
- * a menu)
+ * selection) sends the message of ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_
+ * PRESS to its destination (as an apply: the selection, the count, the
+ * state flags); without one it activates its dialog's default (with
+ * default rings, not in a menu)
  */
 @extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_DOUBLE_PRESS
 {
+    Message *custom;
+
     (void) item;
     if (IsNonExclusive(oself) ||
 	IGG(oself)->GIGI_behaviorType == GIGBT_EXCLUSIVE_NONE)
 	return;
+    custom = ObjVarFindData(oself, ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS);
+    if (custom && *custom) {
+	/* (GenItemSendMsg) */
+	struct { word sel; word num; GenItemGroupStateFlags flags; } a;
+	Message msg = *custom;
+	MemHandle mh = OptrToHandle(oself);
+	ChunkHandle ch = OptrToChunk(oself);
+	GenItemGroupInstance *g = IGG(oself);
+	optr dest = g->GIGI_destination;
+	EventHandle ev;
+
+	a.num = g->GIGI_numSelections;
+	a.flags = g->GIGI_stateFlags;
+	a.sel = @call oself::MSG_GEN_ITEM_GROUP_GET_SELECTION();
+	GenProcessGenAttrsBeforeAction(mh, ch);
+	CObjMessageP(MF_RECORD, 0, msg, &a, sizeof(a), &ev, sizeof(ev));
+	@call oself::MSG_GEN_OUTPUT_ACTION(ev, dest);
+	GenProcessGenAttrsAfterAction(mh, ch);
+	return;
+    }
     if (!OpenCheckDefaultRings() ||
 	(IG(oself)->OLCI_optFlags & OLCOF_IN_MENU))
 	return;
     (void) @call oself::MSG_GEN_ACTIVATE_INTERACTION_DEFAULT();
 }
 
-/* OLItemGroupActivate: the group takes the focus */
+/* OLItemGroupActivate: a popup list passes it to its window (which
+ * opens); another group takes the focus */
 @extern method OLItemGroupClass, MSG_GEN_ACTIVATE
 {
+    if (pself->OLIGI_moreState & OLIGMS_POPUP_LIST) {
+	optr win = VisFindParent(oself);
+
+	if (win)
+	    @call win::MSG_GEN_ACTIVATE();
+	return;
+    }
     @call oself::MSG_META_GRAB_FOCUS_EXCL();
 }

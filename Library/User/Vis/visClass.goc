@@ -97,9 +97,15 @@ static WindowHandle OpenWindowHere(optr oself, WindowHandle win)
 	ObjIncInUseCount(OptrToHandle(oself));
 	@call oself::MSG_VIS_OPEN_WIN(win);
 	v = VisPart(oself);
-	if (v->VI_typeFlags & VTF_IS_COMPOSITE &&
-	    !(v->VI_typeFlags & VTF_CHILDREN_OUTSIDE_PORTAL_WIN))
-	    win = ((VisCompInstance *) v)->VCI_window;
+	if (v->VI_typeFlags & VTF_IS_COMPOSITE) {
+	    /* a portal with its children outside its window is as a
+	     * composite without one: the window passed is its window
+	     * and its children's */
+	    if (v->VI_typeFlags & VTF_CHILDREN_OUTSIDE_PORTAL_WIN)
+		((VisCompInstance *) v)->VCI_window = win;
+	    else
+		win = ((VisCompInstance *) v)->VCI_window;
+	}
     } else if (v->VI_typeFlags & VTF_IS_COMPOSITE)
 	((VisCompInstance *) v)->VCI_window = win;
     v->VI_attrs |= VA_REALIZED;

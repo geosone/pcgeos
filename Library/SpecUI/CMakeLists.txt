@@ -22,6 +22,7 @@ geos_geode(motif GP Motif/motif32.gp
                ${c}/CUtils/copenAppCommon.goc
                ${c}/CUtils/copenAppMisc.goc
                ${c}/CUtils/copenMoniker.goc
+               ${c}/CUtils/copenFileSelector.goc
                ${c}/CComp/copenCtrlClass.goc
                ${c}/CComp/copenCtrlGeometry.goc
                ${c}/CComp/copenCtrlCommon.goc

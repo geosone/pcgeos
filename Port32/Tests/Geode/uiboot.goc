@@ -112,6 +112,12 @@ typedef struct {
     /* the spin gadget: applies, the value applied, its state flags */
     word		UBS_count[3];
     char		UBS_countText[8];
+    /* the file selector: notifications, the entry and the flags of the
+     * last; the entries and flags of the selections asked for */
+    word		UBS_fsel[3];
+    word		UBS_fselSel[6][2];
+    char		UBS_fselName[6][FILE_LONGNAME_BUFFER_SIZE];
+    char		UBS_fselPath[2][64];
 } UBState;
 
 UBState ubState;
@@ -145,6 +151,7 @@ UBState ubState;
     @message void MSG_UB_HELD();
     @message (GEN_APP_DO_STANDARD_DIALOG_MSG) MSG_UB_STD_RESPONSE;
     @message (GEN_VALUE_APPLY_MSG) MSG_UB_COUNT_APPLIED;
+    @message (GEN_FILE_SELECTOR_NOTIFICATION_MSG) MSG_UB_FILE_SELECTED;
 @endc
 @classdecl UBProcessClass, neverSaved;
 
@@ -197,6 +204,13 @@ static word ubAnswer;
     @callsuper();
 }
 
+@method UBProcessClass, MSG_UB_FILE_SELECTED
+{
+    ubState.UBS_fsel[0]++;
+    ubState.UBS_fsel[1] = entryNum;
+    ubState.UBS_fsel[2] = entryFlags;
+}
+
 @method UBProcessClass, MSG_UB_COUNT_APPLIED
 {
     ubState.UBS_count[0]++;
@@ -234,7 +248,7 @@ static word ubAnswer;
 @start UBAppObjects;
 @object UBAppClass UBApp = {
     GI_visMoniker = "Boot";
-    GI_comp = @UBPrimary, @UBList, @UBBools;
+    GI_comp = @UBPrimary, @UBList, @UBBools, @UBFiles;
     /* the displays on the windows list too, to come up with it */
     gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS) = @UBPrimary, @UBDoc1,
 						      @UBDoc2;
@@ -578,6 +592,17 @@ static word ubAnswer;
     GDLI_queryMsg = MSG_UB_QUERY_ITEM;
     HINT_ITEM_GROUP_SCROLLABLE;
 }
+/* a dialog with a file selector */
+@object GenInteractionClass UBFiles = {
+    GI_visMoniker = "Files";
+    GI_comp = @UBFSel;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE;
+}
+@object GenFileSelectorClass UBFSel = {
+    GFSI_destination = process;
+    GFSI_notificationMsg = MSG_UB_FILE_SELECTED;
+}
 @visMoniker UBDeleteMoniker = 'D', "Delete";
 @visMoniker UBKeepMoniker = 'K', "Keep";
 @end UBAppObjects;
@@ -859,6 +884,25 @@ static Boolean StrIs(const char *p, const char *n)
     while (*n && *p == *n)
 	p++, n++;
     return *p == *n;
+}
+
+/* without regard to case (a DOS host has upper case names) */
+static Boolean StrIsCI(const char *p, const char *n)
+{
+    for (; *n; p++, n++)
+	if ((*p | 0x20) != (*n | 0x20))
+	    return FALSE;
+    return !*p;
+}
+
+/* the file selector's selection: its entry and flags to slot n */
+static void FSelSelection(word n)
+{
+    dword d = @call UBFSel::MSG_GEN_FILE_SELECTOR_GET_SELECTION(
+			ubState.UBS_fselName[n]);
+
+    ubState.UBS_fselSel[n][0] = GFS_GET_ENTRY_NUMBER(d);
+    ubState.UBS_fselSel[n][1] = GFS_GET_ENTRY_FLAGS(d);
 }
 
 /* the last notice's display name */
@@ -2658,7 +2702,7 @@ static void UBClickMenu(word n)
     case 58:
 	/* the response came, the dialog is gone */
 	UBCHECK(ubState.UBS_std[4] == 0x100 + IC_OK);
-	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == 3);
+	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == 4);
 	break;
     case 59: {
 	/* a GenValue is a spin gadget: its value as text in a frame,
@@ -2979,12 +3023,107 @@ static void UBClickMenu(word n)
 	UBCHECK(@call fs::MSG_GEN_FILE_SELECTOR_END_SUSPEND());
 	break;
     }
+    case 68: {
+	/* the file selector on screen (Motif's OLFileSelectorClass): in
+	 * DOCUMENT\FSTEST with a directory and two files.  The list
+	 * starts with the current directory, then the directories, then
+	 * the files by name; the first entry is selected and told to
+	 * the destination. */
+	UBCHECK(!@call UBFSel::MSG_GEN_PATH_SET("FSTEST", SP_DOCUMENT));
+	@call UBFiles::MSG_GEN_INTERACTION_INITIATE();
+	@call UBFiles::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	UBCHECK(@call UBFiles::MSG_VIS_QUERY_WINDOW() != 0);
+	UBCHECK(GenCheckIfSpecGrown(@UBFSel));
+	break;
+    }
+    case 69: {
+	UBCHECK(ubState.UBS_fsel[0] >= 1);
+	UBCHECK(ubState.UBS_fsel[1] == 0);
+	FSelSelection(0);
+	UBCHECK(ubState.UBS_fselSel[0][0] == 0);
+	UBCHECK(ubState.UBS_fselSel[0][1] & GFSEF_PARENT_DIR);
+	UBCHECK(GFS_GET_ENTRY_TYPE(ubState.UBS_fselSel[0][1]) ==
+		GFSET_SUBDIR);
+	/* a file selected by its name; one that is not there */
+	ubState.UBS_fsel[0] = 0;
+	UBCHECK(!@call UBFSel::MSG_GEN_FILE_SELECTOR_SET_SELECTION("BETA.TXT"));
+	FSelSelection(1);
+	UBCHECK(ubState.UBS_fselSel[1][0] == 3);
+	UBCHECK(GFS_GET_ENTRY_TYPE(ubState.UBS_fselSel[1][1]) == GFSET_FILE);
+	UBCHECK(StrIsCI(ubState.UBS_fselName[1], "BETA.TXT"));
+	UBCHECK(@call UBFSel::MSG_GEN_FILE_SELECTOR_SET_SELECTION("NONE.TXT"));
+	FSelSelection(2);
+	UBCHECK(ubState.UBS_fselSel[2][0] == 3);
+	UBCHECK(@call UBFSel::MSG_GEN_FILE_SELECTOR_OPEN_ENTRY(9));
+	break;
+    }
+    case 70: {
+	/* the directory opened (as a double press on it): the list is
+	 * its files, the path the directory */
+	UBCHECK(ubState.UBS_fsel[0] == 1 && ubState.UBS_fsel[1] == 3);
+	ubState.UBS_fsel[0] = 0;
+	UBCHECK(!@call UBFSel::MSG_GEN_FILE_SELECTOR_OPEN_ENTRY(1));
+	UBCHECK(!@call UBFSel::MSG_GEN_PATH_GET(ubState.UBS_fselPath[0],
+			sizeof(ubState.UBS_fselPath[0])));
+	UBCHECK(StrIsCI(ubState.UBS_fselPath[0], "FSTEST\\LETTERS"));
+	UBCHECK(!@call UBFSel::MSG_GEN_FILE_SELECTOR_SET_SELECTION("NOTE.TXT"));
+	FSelSelection(3);
+	UBCHECK(ubState.UBS_fselSel[3][0] == 1);
+	UBCHECK(@call UBFSel::MSG_GEN_FILE_SELECTOR_OPEN_ENTRY(2));
+	break;
+    }
+    case 71: {
+	/* up: the selection goes to the current directory first, then
+	 * the parent is shown with the directory left selected */
+	@call UBFSel::MSG_GEN_FILE_SELECTOR_UP_DIRECTORY();
+	FSelSelection(4);
+	UBCHECK(ubState.UBS_fselSel[4][0] == 0);
+	@call UBFSel::MSG_GEN_FILE_SELECTOR_UP_DIRECTORY();
+	UBCHECK(!@call UBFSel::MSG_GEN_PATH_GET(ubState.UBS_fselPath[1],
+			sizeof(ubState.UBS_fselPath[1])));
+	UBCHECK(StrIsCI(ubState.UBS_fselPath[1], "FSTEST"));
+	FSelSelection(5);
+	UBCHECK(ubState.UBS_fselSel[5][0] == 1);
+	UBCHECK(StrIsCI(ubState.UBS_fselName[5], "LETTERS"));
+	break;
+    }
+    case 72: {
+	/* a mask: only the files that match are listed (the
+	 * directories all); suspended, a change waits */
+	char name[FILE_LONGNAME_BUFFER_SIZE];
+
+	@call UBFSel::MSG_GEN_FILE_SELECTOR_SET_MASK("A*");
+	UBCHECK(@call UBFSel::MSG_GEN_FILE_SELECTOR_SET_SELECTION("BETA.TXT"));
+	UBCHECK(!@call UBFSel::MSG_GEN_FILE_SELECTOR_SET_SELECTION("ALPHA.TXT"));
+	UBCHECK(GFS_GET_ENTRY_NUMBER(@call UBFSel::
+		MSG_GEN_FILE_SELECTOR_GET_SELECTION(name)) == 2);
+	UBCHECK(!@call UBFSel::MSG_GEN_FILE_SELECTOR_SUSPEND());
+	UBCHECK(@call UBFSel::MSG_GEN_FILE_SELECTOR_SUSPEND());
+	@call UBFSel::MSG_GEN_FILE_SELECTOR_SET_MASK("*");
+	UBCHECK(!@call UBFSel::MSG_GEN_FILE_SELECTOR_END_SUSPEND());
+	UBCHECK(@call UBFSel::MSG_GEN_FILE_SELECTOR_END_SUSPEND());
+	UBCHECK(!@call UBFSel::MSG_GEN_FILE_SELECTOR_SET_SELECTION("BETA.TXT"));
+	UBCHECK(GFS_GET_ENTRY_NUMBER(@call UBFSel::
+		MSG_GEN_FILE_SELECTOR_GET_SELECTION(name)) == 3);
+	break;
+    }
+    case 73:
+	/* the dialog closed */
+	(void) @call UBFiles::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	@call UBFiles::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	UBCHECK(!@call UBFiles::MSG_VIS_QUERY_WINDOW());
+	break;
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */
     case 101:
     case 104:
+    case 110:
 	@call UBDoc1::MSG_GEN_BRING_TO_TOP();
 	@call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	if (step == 110) {
+	    (void) @call UBFSel::MSG_GEN_PATH_SET("FSTEST", SP_DOCUMENT);
+	    @call UBFiles::MSG_GEN_INTERACTION_INITIATE();
+	}
 	if (step == 104)
 	    @call UBApp::MSG_GEN_APPLICATION_DO_STANDARD_DIALOG(
 		MSG_UB_STD_RESPONSE, ConstructOptr(GeodeGetProcessHandle(), 0),

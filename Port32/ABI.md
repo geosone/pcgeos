@@ -5735,6 +5735,52 @@ are left out), the constants, the variables and the routines.
     part is drawn not selected (the asm's flag is not initialized
     there). Checked by `library.ui.boot` (step 66) and against the
     original (`uiref-cmp.sh 1`: the same pixels).
+  - **The file selector** (`CUtils/copenFileSelector.goc`, the icons
+    in `copenFileSelectorIcons.h`,
+    `Internal/SpecUI/olFileSelectorClass.goh`; after
+    `copenFileSelectorHigh.asm`, `...Middle.asm`, `...Low.asm`, the
+    `FileSelectorUI` template of `cspecFile.ui` and
+    `cspecFileSelector.asm`): `OLFileSelectorClass` is the specific
+    part of a `GenFileSelector`. Its gadgets are a copy of the
+    `FileSelectorUI` resource made when it is built, below it by an
+    upward link only, their output the selector: the popup list of the
+    path's elements, the button to the document directory, the popup
+    list of the drives and the list of the files
+    (`OLFSDynamicListClass`, a dynamic list on which the space bar is a
+    double press), which asks the selector for the monikers: a graphics
+    string of an icon and the name. The directory is read with
+    `FileEnum` when the selector comes on screen and whenever the path
+    or a criterion changes: directories first, by name
+    (`HINT_FILE_SELECTOR_DONT_SORT`, `..._REVERSE_SORT`); with
+    directories shown the first entry is the current directory, a
+    double press on it goes up. Every change of the selection is told
+    to the destination.
+    - `FileEnum`'s callback gets the parameters, which start a
+      structure with the selector and a copy of what is matched (no
+      pointers into the object block). The index of the sorted list
+      holds the entries' numbers, not their offsets.
+    - A filter routine (`MSG_GEN_FILE_SELECTOR_GET_FILTER_ROUTINE`,
+      `ATTR_GEN_FILE_SELECTOR_FILE_ENUM_FILTER`) is a C routine.
+    - An empty mask matches no file (as the original): a mask is
+      removed by deleting `ATTR_GEN_FILE_SELECTOR_NAME_MASK` or set to
+      `*`.
+    - For it the item group sends the message of
+      `ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS` on a double press, and
+      a popup list passes `MSG_GEN_ACTIVATE` to its window.
+    - Not: the `_DUI` and Wizard variants, the fake file system,
+      `FSEL_DISABLES_FILTERED_FILES` (not in Motif). Not yet: the
+      kernel sends no file change notifications
+      (`GCNSLT_FILE_SYSTEM`; the selector handles them),
+      `MSG_GEN_APPLICATION_GET_APP_FEATURES` for
+      `HINT_FILE_SELECTOR_SCALABLE_UI_DATA`.
+    - `library.ui.boot` steps 68 to 73: a selector in a dialog on
+      `DOCUMENT\FSTEST`: the list, a selection by name, a directory
+      opened, up again, a mask, suspension. Compared with the original
+      (`uiref-cmp.sh 10`).
+    - Found with it: `MSG_VIS_OPEN` did not give a portal whose
+      children are outside its window (a view) the window passed as
+      its own, so a scrollbar of a view could only draw on an
+      exposure.
   - **The view** (`CView/cviewPane.goc`, `cviewPaneGeometry.goc`,
     `cviewPaneScroll.goc`, `cviewPaneWindow.goc`,
     `CSpec/cspecPane.goc`; `Internal/SpecUI/olPaneClass.goh`):

@@ -1,0 +1,89 @@
+/*
+ * olFileSelectorClass.goh -- OLFileSelectorClass, the specific UI's
+ * file selector: a list of the files of a directory with a popup of
+ * the path, one of the drives and a button to the document directory
+ * (after Include/Internal/SpecUI/olFileSelectorClass.def), for Port32.
+ */
+#ifndef __OLFILESELECTORCLASS_GOH
+#define __OLFILESELECTORCLASS_GOH
+
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gDListC.goh>
+@include <Objects/gTrigC.goh>
+@include <Objects/gFSelC.goh>
+#include <file.h>
+
+@deflib motif
+
+typedef WordFlags OLFileSelectorState;
+#define OLFSS_FORCE_OPEN		0x8000	/* in ..._OPEN_ENTRY */
+#define OLFSS_RESCAN_ERROR		0x4000	/* the list could not be read */
+#define OLFSS_SUSPENDED			0x2000
+#define OLFSS_SHOW_PARENT_DIR		0x1000	/* the first entry is the
+						 * current directory */
+#define OLFSS_USING_WIZARD_VIRTUAL_ROOT	0x0800
+#define OLFSS_USING_DESKTOP_HOME	0x0400
+#define OLFSS_SELECT_HOME		0x0200
+#define OLFSS_RESCAN_NEEDED		0x0100	/* put off while suspended */
+#define OLFSS_SHOWING_DRIVE_LETTER	0x0080	/* the drive popup's moniker
+						 * is the current drive */
+#define OLFSS_VIS_OPEN_ERROR		0x0040
+#define OLFSS_RESCAN_AFTER_DRAW		0x0020
+#define OLFSS_SINGLE_ACTION		0x0010
+#define OLFSS_NO_FILES			0x0008
+
+/* what FileEnum returns for each file */
+typedef struct {
+    FileAttrs		OLFSE_fileAttrs;
+    GeosFileHeaderFlags	OLFSE_fileFlags;	/* (the root entry made for
+						 * a list: the DriveStatus
+						 * in its high byte) */
+    char		OLFSE_name[FILE_LONGNAME_BUFFER_SIZE];
+    FileID		OLFSE_id;
+    DiskHandle		OLFSE_disk;
+    word		OLFSE_fileType;		/* GeosFileType */
+    DosDotFileName	OLFSE_dosName;
+    GeodeToken		OLFSE_token;
+} OLFileSelectorEntry;
+
+#define OLFS_UP_DIRECTORY_ENTRY_NUM	0xffff
+
+@class OLFileSelectorClass, OLCtrlClass;
+@uses GenFileSelectorClass;
+
+/* from the list: its apply message, a double press and the moniker of
+ * an item */
+@message (GEN_ITEM_GROUP_APPLY_MSG) MSG_OL_FILE_SELECTOR_LIST_MESSAGE;
+@message (GEN_ITEM_GROUP_APPLY_MSG) MSG_OL_FILE_SELECTOR_DOUBLE_PRESS;
+@message (GEN_DYNAMIC_LIST_QUERY_MSG) MSG_OL_FILE_SELECTOR_ITEM_QUERY;
+/* from buttons: open the selected directory, close the current one, go
+ * to the document directory */
+@message (GEN_TRIGGER_ACTION) MSG_OL_FILE_SELECTOR_OPEN_DIR_BUTTON;
+@message (GEN_TRIGGER_ACTION) MSG_OL_FILE_SELECTOR_CLOSE_DIR_BUTTON;
+@message (GEN_TRIGGER_ACTION) MSG_OL_FILE_SELECTOR_DOCUMENT_BUTTON;
+/* from the popups: the drive (its number, the DriveStatus in the high
+ * byte) and the element of the path (0: the root) */
+@message (GEN_ITEM_GROUP_APPLY_MSG) MSG_OL_FILE_SELECTOR_CHANGE_DRIVE_POPUP;
+@message (GEN_ITEM_GROUP_APPLY_MSG) MSG_OL_FILE_SELECTOR_CHANGE_DIRECTORY_POPUP;
+/* MSG_GEN_PATH_SET with the selection cleared first: the new list has
+ * its first entry selected */
+@message Boolean MSG_OL_FILE_SELECTOR_PATH_SET(char *path = cx:dx,
+					      DiskHandle disk = bp) = carry;
+
+    @instance OLFileSelectorState OLFSI_state = 0;
+    @instance MemHandle	OLFSI_fileBuffer = 0;	/* OLFileSelectorEntry's */
+    @instance MemHandle	OLFSI_indexBuffer = 0;	/* their numbers, sorted */
+    @instance word	OLFSI_numFiles = 0;
+    @instance MemHandle	OLFSI_uiBlock = 0;	/* the copy of FileSelectorUI */
+    @instance word	OLFSI_dirCount = 0;
+    @instance word	OLFSI_fileCount = 0;
+@endc;
+
+/* the list of the files: the space bar opens the selected entry */
+@class OLFSDynamicListClass, GenDynamicListClass;
+@endc;
+
+@endlib
+
+#endif
