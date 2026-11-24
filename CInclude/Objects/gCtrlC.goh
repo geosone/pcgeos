@@ -155,11 +155,20 @@ typedef struct {
     WordFlags    GCSR_supported;
 } GenControlGetFeaturesReturn;
 
+@ifdef GEOS_PORT32
+/* Port32: the structure passed is filled (Port32/ABI.md section 13y) */
+@message void MSG_GEN_CONTROL_GET_NORMAL_FEATURES(
+			GenControlGetFeaturesReturn *ret);
+
+@message void MSG_GEN_CONTROL_GET_TOOLBOX_FEATURES(
+			GenControlGetFeaturesReturn *ret);
+@else
 @message void MSG_GEN_CONTROL_GET_NORMAL_FEATURES(
 			GenControlGetFeaturesReturn *return = axcxdxbp);
 
 @message void MSG_GEN_CONTROL_GET_TOOLBOX_FEATURES(
 			GenControlGetFeaturesReturn *return = axcxdxbp);
+@endif
 
 @message void MSG_GEN_CONTROL_ADD_APP_UI(optr appUI = cx:dx);
 @message void MSG_GEN_CONTROL_ADD_APP_TOOLBOX_UI(optr appUI = cx:dx);
@@ -304,6 +313,18 @@ typedef struct {
     @default GI_states = (@default & ~GS_ENABLED);
 
 @endc
+
+@ifdef GEOS_PORT32
+/* Port32: msg with its parameters (a structure, as for CObjMessageP) to
+ * the controller's output, for a class (0: none); an action with what
+ * the generic attributes ask for around it */
+extern void GenControlSendToOutput(optr controller, Message msg,
+				   const void *params, word size,
+				   ClassStruct *cls);
+extern void GenControlOutputAction(optr controller, Message msg,
+				   const void *params, word size,
+				   ClassStruct *cls);
+@endif
 
 #ifdef __HIGHC__
 #endif

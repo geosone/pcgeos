@@ -191,6 +191,9 @@ export GenPathUnrelocObjectPath
 export GenPathDiskRestoreError
 export UserDiskRestore
 export GenFileSelectorClass
+export GenControlClass
+export GenControlSendToOutput
+export GenControlOutputAction
 
 resource ApplicationUI object
 resource SystemFieldUI object

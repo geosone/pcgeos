@@ -49,6 +49,7 @@
 @include <Internal/SpecUI/olValueClass.goh>
 @include <Internal/SpecUI/olSliderClass.goh>
 @include <Objects/gFSelC.goh>
+@include <Objects/gCtrlC.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -118,6 +119,12 @@ typedef struct {
     word		UBS_fselSel[6][2];
     char		UBS_fselName[6][FILE_LONGNAME_BUFFER_SIZE];
     char		UBS_fselPath[2][64];
+    /* the controller: updates, the features and the data of the last,
+     * messages at its output and the value of the last */
+    word		UBS_ctl[6];
+    /* per check: the features, the interactable flags, enabled, the
+     * children of the group (of the tool holder) */
+    word		UBS_ctlAt[8][4];
 } UBState;
 
 UBState ubState;
@@ -152,6 +159,7 @@ UBState ubState;
     @message (GEN_APP_DO_STANDARD_DIALOG_MSG) MSG_UB_STD_RESPONSE;
     @message (GEN_VALUE_APPLY_MSG) MSG_UB_COUNT_APPLIED;
     @message (GEN_FILE_SELECTOR_NOTIFICATION_MSG) MSG_UB_FILE_SELECTED;
+    @message void MSG_UB_CTL_OUT(word value);
 @endc
 @classdecl UBProcessClass, neverSaved;
 
@@ -223,6 +231,45 @@ static word ubAnswer;
     ubState.UBS_dlg[3]++;
 }
 
+/*
+ * a controller of our own: two features in its normal UI (a group with
+ * the triggers A and B), one tool; it listens to the character
+ * attributes of the target
+ */
+#define UBCF_B	2
+#define UBCF_A	1
+
+@class UBCtlClass, GenControlClass;
+@endc
+@classdecl UBCtlClass;
+
+static GCNListType ubCtlLists[] = {
+    { MANUFACTURER_ID_GEOWORKS,
+      GAGCNLT_APP_TARGET_NOTIFY_TEXT_CHAR_ATTR_CHANGE }
+};
+static NotificationType ubCtlTypes[] = {
+    { MANUFACTURER_ID_GEOWORKS, GWNT_TEXT_CHAR_ATTR_CHANGE }
+};
+static GenControlChildInfo ubCtlChildren[1];
+static GenControlFeaturesInfo ubCtlFeatures[2];	/* bit 0 first */
+static GenControlChildInfo ubCtlTools[1];
+static GenControlFeaturesInfo ubCtlToolFeatures[1];
+
+@method UBCtlClass, MSG_GEN_CONTROL_UPDATE_UI
+{
+    (void) pself; (void) toolBlock; (void) childBlock; (void) manufID;
+    ubState.UBS_ctl[0]++;
+    ubState.UBS_ctl[1] = features;
+    ubState.UBS_ctl[2] = toolboxFeatures;
+    ubState.UBS_ctl[3] = data != 0 && changeID == GWNT_TEXT_CHAR_ATTR_CHANGE;
+}
+
+@method UBProcessClass, MSG_UB_CTL_OUT
+{
+    ubState.UBS_ctl[4]++;
+    ubState.UBS_ctl[5] = value;
+}
+
 /* a gadget of our own: 30 x 20, a filled rectangle */
 @class UBGadgetClass, GenGadgetClass;
 @endc
@@ -248,7 +295,7 @@ static word ubAnswer;
 @start UBAppObjects;
 @object UBAppClass UBApp = {
     GI_visMoniker = "Boot";
-    GI_comp = @UBPrimary, @UBList, @UBBools, @UBFiles;
+    GI_comp = @UBPrimary, @UBList, @UBBools, @UBFiles, @UBCtl, @UBToolBox;
     /* the displays on the windows list too, to come up with it */
     gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS) = @UBPrimary, @UBDoc1,
 						      @UBDoc2;
@@ -603,6 +650,18 @@ static word ubAnswer;
     GFSI_destination = process;
     GFSI_notificationMsg = MSG_UB_FILE_SELECTED;
 }
+/* a controller in a dialog, and a dialog for its tools */
+@object UBCtlClass UBCtl = {
+    GI_visMoniker = "Control";
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE;
+    GCI_output = process;
+}
+@object GenInteractionClass UBToolBox = {
+    GI_visMoniker = "Tools";
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = GIA_NOT_USER_INITIATABLE;
+}
 @visMoniker UBDeleteMoniker = 'D', "Delete";
 @visMoniker UBKeepMoniker = 'K', "Keep";
 @end UBAppObjects;
@@ -635,6 +694,99 @@ static word ubAnswer;
     HINT_SEEK_REPLY_BAR;
 }
 @end UBAskTemplate;
+
+/* the controller's normal UI and its tools: templates, copied by the
+ * controller */
+@start UBCtlUI;
+@object GenInteractionClass UBCtlGroup = {
+    GI_states = @default & ~GS_USABLE;
+    GI_comp = @UBCtlA, @UBCtlB;
+}
+@object GenTriggerClass UBCtlA = {
+    GI_visMoniker = "Feature A";
+}
+@object GenTriggerClass UBCtlB = {
+    GI_visMoniker = "Feature B";
+}
+@end UBCtlUI;
+@start UBCtlToolUI;
+@object GenTriggerClass UBCtlToolA = {
+    GI_visMoniker = "A";
+    GI_states = @default & ~GS_USABLE;
+}
+@end UBCtlToolUI;
+
+@method UBCtlClass, MSG_GEN_CONTROL_GET_INFO
+{
+    (void) pself;
+    ubCtlChildren[0].GCCI_object = OptrToChunk(@UBCtlGroup);
+    ubCtlChildren[0].GCCI_featureMask = UBCF_A | UBCF_B;
+    ubCtlFeatures[0].GCFI_object = OptrToChunk(@UBCtlA);
+    ubCtlFeatures[1].GCFI_object = OptrToChunk(@UBCtlB);
+    ubCtlTools[0].GCCI_object = OptrToChunk(@UBCtlToolA);
+    ubCtlTools[0].GCCI_featureMask = 1;
+    ubCtlTools[0].GCCI_flags = GCCF_IS_DIRECTLY_A_FEATURE;
+    ubCtlToolFeatures[0].GCFI_object = OptrToChunk(@UBCtlToolA);
+    memset(info, 0, sizeof(*info));
+    info->GCBI_gcnList = ubCtlLists;
+    info->GCBI_gcnCount = 1;
+    info->GCBI_notificationList = ubCtlTypes;
+    info->GCBI_notificationCount = 1;
+    info->GCBI_dupBlock = OptrToHandle(@UBCtlGroup);
+    info->GCBI_childList = ubCtlChildren;
+    info->GCBI_childCount = 1;
+    info->GCBI_featuresList = ubCtlFeatures;
+    info->GCBI_featuresCount = 2;
+    info->GCBI_features = UBCF_A | UBCF_B;
+    info->GCBI_toolBlock = OptrToHandle(@UBCtlToolA);
+    info->GCBI_toolList = ubCtlTools;
+    info->GCBI_toolCount = 1;
+    info->GCBI_toolFeaturesList = ubCtlToolFeatures;
+    info->GCBI_toolFeaturesCount = 1;
+    info->GCBI_toolFeatures = 1;
+}
+
+/* the controller's state for a check */
+static void UBCtlState(word n)
+{
+    TempGenControlInstance *t;
+    optr group = 0;
+    word *a = ubState.UBS_ctlAt[n];
+
+    ObjLockObjBlock(OptrToHandle(@UBCtl));
+    t = ObjVarFindData(@UBCtl, TEMP_GEN_CONTROL_INSTANCE);
+    a[0] = t ? t->TGCI_features | (t->TGCI_toolboxFeatures << 8) |
+	       (t->TGCI_childBlock ? 0x1000 : 0) |
+	       (t->TGCI_toolBlock ? 0x2000 : 0) |
+	       (t->TGCI_toolParent ? 0x4000 : 0) : 0xffff;
+    a[1] = t ? t->TGCI_interactableFlags : 0xffff;
+    MemUnlock(OptrToHandle(@UBCtl));
+    a[2] = @call UBCtl::MSG_GEN_GET_ENABLED() != 0;
+    a[2] |= (@call UBToolBox::MSG_GEN_GET_ENABLED() != 0) << 1;
+    a[3] = @call UBCtl::MSG_GEN_COUNT_CHILDREN();
+    if (a[3])
+	group = @call UBCtl::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+    if (group)
+	a[3] |= @call group::MSG_GEN_COUNT_CHILDREN() << 4;
+    a[3] |= @call UBToolBox::MSG_GEN_COUNT_CHILDREN() << 8;
+}
+
+/* the status of the controller's list: a block, or none */
+static void UBCtlNotify(Boolean withData)
+{
+    MemHandle bh = 0;
+    EventHandle ev;
+
+    if (withData) {
+	bh = MemAlloc(16, HF_SWAPABLE | HF_SHARABLE, HAF_ZERO_INIT);
+	MemInitRefCount(bh, 1);
+    }
+    ev = @record null::MSG_META_NOTIFY_WITH_DATA_BLOCK(
+		MANUFACTURER_ID_GEOWORKS, GWNT_TEXT_CHAR_ATTR_CHANGE, bh);
+    @call UBApp::MSG_META_GCN_LIST_SEND(GCNLSF_SET_STATUS, ev, bh,
+		GAGCNLT_APP_TARGET_NOTIFY_TEXT_CHAR_ATTR_CHANGE,
+		MANUFACTURER_ID_GEOWORKS);
+}
 
 /* the dynamic list's monikers: "Item n" */
 @method UBProcessClass, MSG_UB_QUERY_ITEM
@@ -2702,7 +2854,7 @@ static void UBClickMenu(word n)
     case 58:
 	/* the response came, the dialog is gone */
 	UBCHECK(ubState.UBS_std[4] == 0x100 + IC_OK);
-	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == 4);
+	UBCHECK(@call UBApp::MSG_GEN_COUNT_CHILDREN() == 6);
 	break;
     case 59: {
 	/* a GenValue is a spin gadget: its value as text in a frame,
@@ -3112,6 +3264,91 @@ static void UBClickMenu(word n)
 	(void) @call UBFiles::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
 	@call UBFiles::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
 	UBCHECK(!@call UBFiles::MSG_VIS_QUERY_WINDOW());
+	break;
+    case 74: {
+	/* a controller (GenControlClass) in a dialog: built, it copies
+	 * its normal UI and adds the children of its features; seen, it
+	 * is on its lists; disabled until a list has something to say */
+	GenControlGetFeaturesReturn r;
+
+	memset(&r, 0, sizeof(r));
+	@call UBCtl::MSG_GEN_CONTROL_GET_NORMAL_FEATURES(&r);
+	UBCHECK(r.GCSR_features == 3 && r.GCSR_supported == 3);
+	UBCHECK(!@call UBCtl::MSG_GEN_COUNT_CHILDREN());
+	@call UBCtl::MSG_GEN_INTERACTION_INITIATE();
+	@call UBCtl::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	UBCHECK(@call UBCtl::MSG_VIS_QUERY_WINDOW() != 0);
+	UBCtlState(0);
+	UBCHECK(ubState.UBS_ctlAt[0][0] == 0x1003);
+	UBCHECK(ubState.UBS_ctlAt[0][1] & GCIF_NORMAL_UI);
+	UBCHECK(!(ubState.UBS_ctlAt[0][2] & 1));
+	UBCHECK((ubState.UBS_ctlAt[0][3] & 0xff) == 0x21);
+	UBCHECK(!ubState.UBS_ctl[0]);
+	break;
+    }
+    case 75:
+	/* the list's status: a block enables the controller and has it
+	 * update its UI; none disables it */
+	UBCtlNotify(TRUE);
+	UBCtlState(1);
+	UBCHECK(ubState.UBS_ctlAt[1][2] & 1);
+	UBCHECK(ubState.UBS_ctl[0] == 1 && ubState.UBS_ctl[1] == 3);
+	UBCHECK(ubState.UBS_ctl[3]);
+	UBCtlNotify(FALSE);
+	UBCHECK(!@call UBCtl::MSG_GEN_GET_ENABLED());
+	UBCHECK(ubState.UBS_ctl[0] == 1);
+	UBCtlNotify(TRUE);
+	UBCHECK(@call UBCtl::MSG_GEN_GET_ENABLED());
+	UBCHECK(ubState.UBS_ctl[0] == 2);
+	break;
+    case 76:
+	/* a feature removed by the user: the UI is made again without
+	 * it; added again */
+	@call UBCtl::MSG_GEN_CONTROL_REMOVE_FEATURE(UBCF_B);
+	UBCtlState(2);
+	UBCHECK(ubState.UBS_ctlAt[2][0] == 0x1001);
+	UBCHECK((ubState.UBS_ctlAt[2][3] & 0xff) == 0x11);
+	@call UBCtl::MSG_GEN_CONTROL_ADD_FEATURE(UBCF_B);
+	UBCtlState(3);
+	UBCHECK(ubState.UBS_ctlAt[3][0] == 0x1003);
+	UBCHECK((ubState.UBS_ctlAt[3][3] & 0xff) == 0x21);
+	break;
+    case 77: {
+	/* the tools below another object, enabled as the controller;
+	 * the tool feature removed and added; a message to the output */
+	word v = 0x77;
+
+	UBCHECK(@call UBCtl::MSG_VIS_QUERY_WINDOW() != 0);
+	@call UBCtl::MSG_GEN_CONTROL_GENERATE_TOOLBOX_UI(@UBToolBox);
+	UBCtlState(4);
+	UBCHECK(ubState.UBS_ctlAt[4][0] == 0x7103);
+	UBCHECK(ubState.UBS_ctlAt[4][1] & GCIF_TOOLBOX_UI);
+	UBCHECK(ubState.UBS_ctlAt[4][2] == 3);
+	UBCHECK((ubState.UBS_ctlAt[4][3] >> 8) == 1);
+	@call UBCtl::MSG_GEN_CONTROL_REMOVE_TOOLBOX_FEATURE(1);
+	UBCtlState(5);
+	UBCHECK(ubState.UBS_ctlAt[5][0] == 0x5003);
+	UBCHECK((ubState.UBS_ctlAt[5][3] >> 8) == 0);
+	@call UBCtl::MSG_GEN_CONTROL_ADD_TOOLBOX_FEATURE(1);
+	UBCtlState(6);
+	UBCHECK(ubState.UBS_ctlAt[6][0] == 0x7103);
+	UBCHECK((ubState.UBS_ctlAt[6][3] >> 8) == 1);
+	GenControlOutputAction(@UBCtl, MSG_UB_CTL_OUT, &v, sizeof(v), NULL);
+	break;
+    }
+    case 78:
+	/* closed, the normal UI is no longer seen; not usable, all the
+	 * UI is destroyed */
+	UBCHECK(ubState.UBS_ctl[4] == 1 && ubState.UBS_ctl[5] == 0x77);
+	(void) @call UBCtl::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	@call UBCtl::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
+	UBCHECK(!@call UBCtl::MSG_VIS_QUERY_WINDOW());
+	@call UBCtl::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	UBCtlState(7);
+	UBCHECK(ubState.UBS_ctlAt[7][0] == 0);
+	UBCHECK(ubState.UBS_ctlAt[7][1] == 0);
+	UBCHECK(ubState.UBS_ctlAt[7][3] == 0);
+	@call UBCtl::MSG_GEN_SET_USABLE(VUM_NOW);
 	break;
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */

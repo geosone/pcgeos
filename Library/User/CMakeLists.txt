@@ -41,6 +41,7 @@ geos_geode(ui GP ui32.gp
                ${ui}/Gen/genGadget.goc
                ${ui}/Gen/genPathUtils.goc
                ${ui}/Gen/genFileSelector.goc
+               ${ui}/Gen/genControl.goc
                ${ui}/Proc/procClass.goc
                ${ui}/User/userFlowUtils.goc
                ${ui}/User/userFlowMisc.goc

@@ -19,5 +19,7 @@ library motif
 library text
 resource UBAppObjects object
 resource UBAskTemplate object
+resource UBCtlUI object
+resource UBCtlToolUI object
 export ubState
 export UBStep

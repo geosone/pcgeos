@@ -38,6 +38,9 @@ tree = src[a:b]
 tree = tree.replace("@object UBAppClass ", "@object GenApplicationClass ")
 tree = tree.replace("@object UBYesClass ", "@object GenTriggerClass ")
 tree = tree.replace("@object UBGadgetClass ", "@object URGadgetClass ")
+# the controller (never on screen here) as a plain dialog
+tree = tree.replace("@object UBCtlClass ", "@object GenInteractionClass ")
+tree = tree.replace("    GCI_output = process;\n", "")
 keep = ("MSG_UB_QUERY_ITEM",)
 lines = []
 for l in tree.split("\n"):

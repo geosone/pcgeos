@@ -1,0 +1,1544 @@
+/*
+ * genControl.goc -- GenControlClass (after genControl.asm): the base
+ * of the controllers, interactions that make their own children.  A
+ * subclass describes itself in MSG_GEN_CONTROL_GET_INFO
+ * (GenControlBuildInfo): the resource with its normal UI and the one
+ * with its tools, the children and features of each, the GCN lists it
+ * listens to and the notification types it understands.
+ *
+ * The normal UI is a copy of GCBI_dupBlock made when the controller is
+ * built (MSG_GEN_CONTROL_GENERATE_UI): the objects of features that
+ * are off are destroyed, the children listed are added below the
+ * controller.  The tools are a copy of GCBI_toolBlock added below
+ * another object, the tool parent (MSG_GEN_CONTROL_GENERATE_TOOLBOX_
+ * UI).  The features are the controller's defaults, changed by the
+ * user's choice (HINT_GEN_CONTROL_USER_MODIFIED_UI, kept in the .ini
+ * file) and the application's (ATTR_GEN_CONTROL_REQUIRE_UI, ...
+ * PROHIBIT_UI, HINT_GEN_CONTROL_SCALABLE_UI_DATA).
+ *
+ * A controller is on its GCN lists only while a part of it can be
+ * seen (MSG_GEN_CONTROL_NOTIFY_INTERACTABLE: the controller itself,
+ * the normal UI, the tools; TEMP_GEN_CONTROL_INSTANCE has the state).
+ * A notification of one of its types enables or disables it (a block:
+ * enabled) and has the subclass update its UI (MSG_GEN_CONTROL_UPDATE_
+ * UI).  While it has UI of its own it is on the application's active
+ * list, to destroy it on a detach.
+ *
+ * Port32 (Port32/ABI.md section 13y): the tables of the build info are
+ * pointers; MSG_GEN_CONTROL_GET_NORMAL_FEATURES and ..._TOOLBOX_
+ * FEATURES fill the structure passed.  GenControlSendToOutput and
+ * GenControlOutputAction take the parameters as a structure (as
+ * CObjMessageP).  Not yet: [ui] unbuildControllers is read as off.
+ */
+@include "uiInt.goh"
+@include <Objects/gCtrlC.goh>
+@include <Objects/gFieldC.goh>
+@include <Objects/gAppC.goh>
+#include <initfile.h>
+#include <string.h>
+
+@classdecl GenControlClass;
+
+/* [ui] unbuildControllers (userMain.asm) */
+static const Boolean unbuildControllers = FALSE;
+
+#define GCG(o)	((GenControlInstance *) ObjDerefGen(o))
+
+/* DerefVardata */
+static TempGenControlInstance *Temp(optr o)
+{
+    return ObjVarDerefData(o, TEMP_GEN_CONTROL_INSTANCE);
+}
+
+/* GetDupInfo */
+static void GetInfo(optr o, GenControlBuildInfo *info)
+{
+    memset(info, 0, sizeof(*info));
+    @call o::MSG_GEN_CONTROL_GET_INFO(info);
+}
+
+static GenControlBuildFlags Flags(optr o)
+{
+    GenControlBuildInfo info;
+
+    GetInfo(o, &info);
+    return info.GCBI_flags;
+}
+
+static void AddOrRemoveListEntry(Message msg, optr obj, word type)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (!app)
+	return;
+    if (msg == MSG_META_GCN_LIST_ADD)
+	(void) @call app::MSG_META_GCN_LIST_ADD(obj, type,
+						MANUFACTURER_ID_GEOWORKS);
+    else
+	(void) @call app::MSG_META_GCN_LIST_REMOVE(obj, type,
+						   MANUFACTURER_ID_GEOWORKS);
+}
+
+static void AddOrRemoveActiveListEntry(Message msg, optr obj)
+{
+    AddOrRemoveListEntry(msg, obj, MGCNLT_ACTIVE_LIST | GCNLTF_SAVE_TO_STATE);
+}
+
+/* AddToGCNLists: on or off the lists of the build info */
+static void AddToGCNLists(optr o, Message msg)
+{
+    GenControlBuildInfo info;
+    optr app = GeodeGetAppObject(0);
+    word i;
+
+    GetInfo(o, &info);
+    if (!app)
+	return;
+    for (i = 0; i < info.GCBI_gcnCount; i++) {
+	const GCNListType *l = &info.GCBI_gcnList[i];
+
+	if (msg == MSG_META_GCN_LIST_ADD)
+	    (void) @call app::MSG_META_GCN_LIST_ADD(o, l->GCNLT_type,
+						    l->GCNLT_manuf);
+	else
+	    (void) @call app::MSG_META_GCN_LIST_REMOVE(o, l->GCNLT_type,
+						       l->GCNLT_manuf);
+    }
+}
+
+/* EnsureOptionsLoaded: the options of the .ini file, once */
+static void EnsureOptionsLoaded(optr o)
+{
+    if (ObjVarFindData(o, TEMP_GEN_CONTROL_OPTIONS_LOADED))
+	return;
+    (void) ObjVarAddData(o, TEMP_GEN_CONTROL_OPTIONS_LOADED |
+			    VDF_SAVE_TO_STATE, 0);
+    @call o::MSG_META_LOAD_OPTIONS();
+}
+
+/* ---------------------------------------------------------------------
+ * The output
+ * ------------------------------------------------------------------- */
+
+/*
+ * GenControlSendToOutputRegs, ...Stack; GenControlOutputActionRegs,
+ * ...Stack: msg with its parameters to the controller's output, for a
+ * class (0: none).  An action does what the generic attributes ask
+ * for around it (GA_SIGNAL_INTERACTION_COMPLETE, the busy states).
+ */
+static void Output(optr o, Message msg, const void *params, word size,
+		   ClassStruct *cls, Boolean action)
+{
+    MemHandle mh = OptrToHandle(o);
+    ChunkHandle ch = OptrToChunk(o);
+    EventHandle ev;
+
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) cls, msg, params, size,
+		 &ev, sizeof(ev));
+    if (action)
+	GenProcessGenAttrsBeforeAction(mh, ch);
+    @call o::MSG_GEN_OUTPUT_ACTION(ev, GCG(o)->GCI_output);
+    if (action)
+	GenProcessGenAttrsAfterAction(mh, ch);
+}
+
+void GenControlSendToOutput(optr o, Message msg, const void *params,
+			    word size, ClassStruct *cls)
+{
+    Output(o, msg, params, size, cls, FALSE);
+}
+
+void GenControlOutputAction(optr o, Message msg, const void *params,
+			    word size, ClassStruct *cls)
+{
+    Output(o, msg, params, size, cls, TRUE);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_OUTPUT_ACTION
+{
+    @call oself::MSG_GEN_OUTPUT_ACTION(event, pself->GCI_output);
+}
+
+/* GenControlPreApply, ...PostApply: the output suspended around an
+ * apply (GCBF_SUSPEND_ON_APPLY) */
+@method GenControlClass, MSG_GEN_PRE_APPLY
+{
+    (void) pself;
+    if (Flags(oself) & GCBF_SUSPEND_ON_APPLY)
+	Output(oself, MSG_META_SUSPEND, NULL, 0, NULL, FALSE);
+    return @callsuper();
+}
+
+@method GenControlClass, MSG_GEN_POST_APPLY
+{
+    (void) pself;
+    if (Flags(oself) & GCBF_SUSPEND_ON_APPLY)
+	Output(oself, MSG_META_UNSUSPEND, NULL, 0, NULL, FALSE);
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * Notifications
+ * ------------------------------------------------------------------- */
+
+/* EnableDisableCommon: enabled with a block, else not (a controller
+ * with GCBF_CUSTOM_ENABLE_DISABLE is always told) */
+static void EnableDisableCommon(optr o, const GenControlBuildInfo *info,
+				word data)
+{
+    Boolean enabled = (((GenInstance *) ObjDerefGen(o))->GI_states &
+		       GS_ENABLED) != 0;
+    Message msg = data ? MSG_GEN_SET_ENABLED : MSG_GEN_SET_NOT_ENABLED;
+
+    if (!(info->GCBI_flags & GCBF_CUSTOM_ENABLE_DISABLE) &&
+	enabled == (data != 0))
+	return;
+    @call o::MSG_GEN_CONTROL_ENABLE_DISABLE(msg, VUM_NOW);
+}
+
+/* UpdateCommon: MSG_GEN_CONTROL_UPDATE_UI with the features of the
+ * parts that can be seen (GCBF_ALWAYS_UPDATE: even with none, and
+ * without a block) */
+static void UpdateCommon(optr o, const GenControlBuildInfo *info,
+			 word manuf, word type, word data)
+{
+    Boolean always = (info->GCBI_flags & GCBF_ALWAYS_UPDATE) != 0;
+    TempGenControlInstance *t;
+    WordFlags tools, features;
+    MemHandle childBlock, toolBlock;
+
+    if (!always && !data)
+	return;
+    t = Temp(o);
+    /* (what is up to date: a part seen again needs no update) */
+    t->TGCI_upToDate = t->TGCI_interactableFlags;
+    if (!always && !t->TGCI_childBlock && !t->TGCI_toolBlock)
+	return;
+    tools = (t->TGCI_interactableFlags & GCIF_TOOLBOX_UI) ?
+	    t->TGCI_toolboxFeatures : 0;
+    features = (t->TGCI_interactableFlags & GCIF_NORMAL_UI) ?
+	       t->TGCI_features : 0;
+    if (!always && !tools && !features)
+	return;
+    childBlock = t->TGCI_childBlock;
+    toolBlock = t->TGCI_toolBlock;
+    @call o::MSG_GEN_CONTROL_UPDATE_UI(toolBlock, childBlock, tools,
+				       features, data, type, manuf);
+}
+
+/*
+ * GenControlNotifyWithDataBlock: a notification of one of the
+ * controller's types enables or disables it and updates its UI.  A
+ * null one from another list than the one that last had something to
+ * say is ignored.
+ */
+static void Notify(optr o, word manuf, word type, word data)
+{
+    GenControlBuildInfo info;
+    TempGenControlInstance *t;
+    word i;
+
+    GetInfo(o, &info);
+    for (i = 0; i < info.GCBI_notificationCount; i++)
+	if (info.GCBI_notificationList[i].NT_manuf == manuf &&
+	    info.GCBI_notificationList[i].NT_type == type)
+	    break;
+    if (i == info.GCBI_notificationCount)
+	return;
+    t = Temp(o);
+    if (!(info.GCBI_flags & GCBF_ALWAYS_UPDATE) && !data &&
+	(t->TGCI_activeNotificationList.GCNLT_manuf != manuf ||
+	 t->TGCI_activeNotificationList.GCNLT_type != type))
+	return;
+    t->TGCI_activeNotificationList.GCNLT_manuf = manuf;
+    t->TGCI_activeNotificationList.GCNLT_type = type;
+    EnableDisableCommon(o, &info, data);
+    UpdateCommon(o, &info, manuf, type, data);
+}
+
+@method GenControlClass, MSG_META_NOTIFY_WITH_DATA_BLOCK
+{
+    (void) pself;
+    Notify(oself, manufID, notificationType, data);
+    @callsuper();
+}
+
+@method GenControlClass, MSG_META_NOTIFY
+{
+    (void) pself;
+    Notify(oself, manufID, notificationType, data);
+    @callsuper();
+}
+
+/* GenControlEnableDisable: the controller enabled or not if a part of
+ * it can be seen */
+@method GenControlClass, MSG_GEN_CONTROL_ENABLE_DISABLE
+{
+    GenControlBuildFlags f = Flags(oself);
+
+    (void) pself;
+    if (!(f & GCBF_CUSTOM_ENABLE_DISABLE) &&
+	(Temp(oself)->TGCI_interactableFlags &
+	 (GCIF_CONTROLLER | GCIF_NORMAL_UI | GCIF_TOOLBOX_UI))) {
+	if (msg == MSG_GEN_SET_ENABLED)
+	    @call oself::MSG_GEN_SET_ENABLED(updateMode);
+	else
+	    @call oself::MSG_GEN_SET_NOT_ENABLED(updateMode);
+    }
+    if (f & GCBF_SPECIFIC_UI)
+	@callsuper();
+}
+
+/* GenControlUpdateToolEnableStatus: the tools are somewhere else in
+ * the tree: their parent is enabled as the controller is, fully */
+static void UpdateToolEnableStatus(optr o)
+{
+    optr parent = Temp(o)->TGCI_toolParent;
+
+    if (!parent)
+	return;
+    if (GenCheckIfFullyEnabled(o, TRUE))
+	@send parent::MSG_GEN_SET_ENABLED(VUM_NOW);
+    else
+	@send parent::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+}
+
+@method GenControlClass, MSG_GEN_SET_ENABLED
+{
+    (void) pself;
+    @callsuper();
+    UpdateToolEnableStatus(oself);
+}
+
+@method GenControlClass, MSG_GEN_SET_NOT_ENABLED
+{
+    (void) pself;
+    @callsuper();
+    UpdateToolEnableStatus(oself);
+}
+
+@method GenControlClass, MSG_GEN_NOTIFY_ENABLED
+{
+    Boolean r = @callsuper();
+
+    (void) pself;
+    UpdateToolEnableStatus(oself);
+    return r;
+}
+
+@method GenControlClass, MSG_GEN_NOTIFY_NOT_ENABLED
+{
+    Boolean r = @callsuper();
+
+    (void) pself;
+    UpdateToolEnableStatus(oself);
+    return r;
+}
+
+/* ---------------------------------------------------------------------
+ * The GCN lists, interactability
+ * ------------------------------------------------------------------- */
+
+@method GenControlClass, MSG_GEN_CONTROL_ADD_TO_GCN_LISTS
+{
+    (void) pself;
+    AddToGCNLists(oself, MSG_META_GCN_LIST_ADD);
+    if (Flags(oself) & GCBF_SPECIFIC_UI)
+	@callsuper();
+}
+
+/* (off the lists the parts are no longer up to date) */
+@method GenControlClass, MSG_GEN_CONTROL_REMOVE_FROM_GCN_LISTS
+{
+    (void) pself;
+    Temp(oself)->TGCI_upToDate = 0;
+    AddToGCNLists(oself, MSG_META_GCN_LIST_REMOVE);
+    if (Flags(oself) & GCBF_SPECIFIC_UI)
+	@callsuper();
+}
+
+/* GenControlAttach (also MSG_SPEC_SET_USABLE): the options loaded; a
+ * controller that always is interactable or on its lists made so */
+static void Attached(optr o)
+{
+    GenControlBuildFlags f = Flags(o);
+
+    if (f & GCBF_ALWAYS_INTERACTABLE)
+	@call o::MSG_GEN_CONTROL_NOTIFY_INTERACTABLE(GCIF_CONTROLLER);
+    if (f & GCBF_ALWAYS_ON_GCN_LIST)
+	@call o::MSG_GEN_CONTROL_ADD_TO_GCN_LISTS();
+}
+
+@method GenControlClass, MSG_META_ATTACH
+{
+    (void) pself;
+    EnsureOptionsLoaded(oself);
+    @callsuper();
+    Attached(oself);
+}
+
+@method GenControlClass, MSG_SPEC_SET_USABLE
+{
+    (void) pself;
+    EnsureOptionsLoaded(oself);
+    @callsuper();
+    Attached(oself);
+}
+
+/*
+ * GenControlInteractable: parts of the controller can be seen.  The
+ * first puts it on the active list; it is put on its GCN lists (again:
+ * the lists then send their status again) with only the new parts that
+ * are not up to date as the interactable ones, so that only they are
+ * updated.
+ */
+@method GenControlClass, MSG_GEN_CONTROL_NOTIFY_INTERACTABLE
+{
+    TempGenControlInstance *t = Temp(oself);
+    GenControlInteractableFlags fresh = flags & ~t->TGCI_upToDate;
+
+    (void) pself;
+    if (!t->TGCI_interactableFlags &&
+	!(Flags(oself) & GCBF_IS_ON_ACTIVE_LIST))
+	AddOrRemoveActiveListEntry(MSG_META_GCN_LIST_ADD, oself);
+    if (fresh) {
+	GenControlInteractableFlags old;
+
+	t = Temp(oself);
+	old = t->TGCI_interactableFlags;
+	t->TGCI_interactableFlags = fresh;
+	@call oself::MSG_GEN_CONTROL_ADD_TO_GCN_LISTS();
+	Temp(oself)->TGCI_interactableFlags = old;
+    }
+    Temp(oself)->TGCI_interactableFlags |= flags;
+}
+
+/* GenControlNotInteractable: with no part left to be seen: off the GCN
+ * lists and (without normal UI to destroy on a detach) off the active
+ * list */
+@method GenControlClass, MSG_GEN_CONTROL_NOTIFY_NOT_INTERACTABLE
+{
+    TempGenControlInstance *t = Temp(oself);
+    GenControlBuildFlags f;
+
+    (void) pself;
+    t->TGCI_interactableFlags &= ~flags;
+    if (t->TGCI_interactableFlags)
+	return;
+    f = Flags(oself);
+    if (!(f & GCBF_ALWAYS_ON_GCN_LIST))
+	@call oself::MSG_GEN_CONTROL_REMOVE_FROM_GCN_LISTS();
+    if (f & (GCBF_IS_ON_ACTIVE_LIST | GCBF_MANUALLY_REMOVE_FROM_ACTIVE_LIST))
+	return;
+    if (Temp(oself)->TGCI_childBlock)
+	return;
+    AddOrRemoveActiveListEntry(MSG_META_GCN_LIST_REMOVE, oself);
+}
+
+/* GenControlNotifyObjBlockInteractible: the block of the normal UI is
+ * seen: the controller's own block counts as seen too */
+@method GenControlClass, MSG_META_NOTIFY_OBJ_BLOCK_INTERACTIBLE
+{
+    (void) pself;
+    if (objBlock != Temp(oself)->TGCI_childBlock)
+	return;
+    ObjIncInteractibleCount(OptrToHandle(oself));
+    @call oself::MSG_GEN_CONTROL_NOTIFY_INTERACTABLE(GCIF_NORMAL_UI);
+}
+
+@method GenControlClass, MSG_META_NOTIFY_OBJ_BLOCK_NOT_INTERACTIBLE
+{
+    (void) pself;
+    if (objBlock != Temp(oself)->TGCI_childBlock)
+	return;
+    @call oself::MSG_GEN_CONTROL_NOTIFY_NOT_INTERACTABLE(GCIF_NORMAL_UI);
+    /* (queued: this comes from the middle of a visual update) */
+    @send ,forceQueue oself::MSG_GEN_CONTROL_UNBUILD_NORMAL_UI_IF_POSSIBLE();
+    ObjDecInteractibleCount(OptrToHandle(oself));
+}
+
+/* GenControlReset: on the lists again, which send their status again */
+@method GenControlClass, MSG_GEN_RESET
+{
+    TempGenControlInstance *t;
+
+    (void) pself;
+    if (!(Flags(oself) & GCBF_ALWAYS_INTERACTABLE)) {
+	t = ObjVarFindData(oself, TEMP_GEN_CONTROL_INSTANCE);
+	if (!t || !(t->TGCI_interactableFlags &
+		    (GCIF_CONTROLLER | GCIF_TOOLBOX_UI | GCIF_NORMAL_UI)))
+	    return;
+    }
+    AddToGCNLists(oself, MSG_META_GCN_LIST_ADD);
+}
+
+/* GenControlAddToUI, ...RemoveFromUI: on or off the application's
+ * lists a controller has to be on: the active list, the list of the
+ * objects that load their options */
+static void AddOrRemoveSelf(optr o, Message msg)
+{
+    GenControlBuildFlags f = Flags(o);
+
+    if (f & GCBF_IS_ON_ACTIVE_LIST)
+	AddOrRemoveActiveListEntry(msg, o);
+    if (f & GCBF_NOT_REQUIRED_TO_BE_ON_SELF_LOAD_OPTIONS_LIST)
+	return;
+    AddOrRemoveListEntry(msg, o, ((f & GCBF_IS_ON_START_LOAD_OPTIONS_LIST) ?
+				  GAGCNLT_STARTUP_LOAD_OPTIONS :
+				  GAGCNLT_SELF_LOAD_OPTIONS) |
+				 GCNLTF_SAVE_TO_STATE);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_ADD_TO_UI
+{
+    (void) pself;
+    AddOrRemoveSelf(oself, MSG_META_GCN_LIST_ADD);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_REMOVE_FROM_UI
+{
+    (void) pself;
+    AddOrRemoveSelf(oself, MSG_META_GCN_LIST_REMOVE);
+}
+
+@method GenControlClass, MSG_META_FINAL_OBJ_FREE
+{
+    (void) pself;
+    @call oself::MSG_GEN_CONTROL_REMOVE_FROM_UI();
+    @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The features
+ * ------------------------------------------------------------------- */
+
+/* GenControlInitializeVarData: the temporary instance data; the user's
+ * features start as HINT_GEN_CONTROL_MODIFY_INITIAL_UI */
+@method GenControlClass, MSG_META_INITIALIZE_VAR_DATA
+{
+    void *d;
+
+    (void) pself;
+    if (dataType == TEMP_GEN_CONTROL_INSTANCE) {
+	d = ObjVarAddData(oself, TEMP_GEN_CONTROL_INSTANCE,
+			  sizeof(TempGenControlInstance));
+	memset(d, 0, sizeof(TempGenControlInstance));
+    } else if (dataType == HINT_GEN_CONTROL_USER_MODIFIED_UI) {
+	GenControlUserData init, *i;
+
+	memset(&init, 0, sizeof(init));
+	i = ObjVarFindData(oself, HINT_GEN_CONTROL_MODIFY_INITIAL_UI);
+	if (i)
+	    init = *i;
+	d = ObjVarAddData(oself, HINT_GEN_CONTROL_USER_MODIFIED_UI |
+				 VDF_SAVE_TO_STATE, sizeof(GenControlUserData));
+	*(GenControlUserData *) d = init;
+    } else
+	return @callsuper();
+    return (word) ((byte *) d - (byte *) MemDeref(OptrToHandle(oself)));
+}
+
+/* the scan of the feature hints */
+typedef struct {
+    optr		o;
+    GenControlUIType	type;
+    GenControlScanInfo	*info;
+} FeatureScan;
+
+static void UserModifiedUI(FeatureScan *s, const GenControlUserData *u)
+{
+    if (s->type == GCUIT_TOOLBOX) {
+	if (!(u->GCUD_flags & GCUF_USER_TOOLBOX_UI))
+	    return;
+	s->info->GCSI_userAdded = u->GCUD_userAddedToolboxUI;
+	s->info->GCSI_userRemoved = u->GCUD_userRemovedToolboxUI;
+    } else {
+	if (!(u->GCUD_flags & GCUF_USER_UI))
+	    return;
+	s->info->GCSI_userAdded = u->GCUD_userAddedUI;
+	s->info->GCSI_userRemoved = u->GCUD_userRemovedUI;
+    }
+}
+
+/* GEUIScalableUI: the features by the application's features and
+ * level (an odd command is for the tools) */
+static void ScalableUI(FeatureScan *s, const GenControlScalableUIEntry *e,
+		       word n)
+{
+    optr app = GeodeGetAppObject(0);
+    AppFeaturesInfo info = 0;
+    word features, level;
+
+    if (app)
+	info = @call app::MSG_GEN_APPLICATION_GET_APP_FEATURES();
+    features = GET_APP_FEATURES(info);
+    level = (word) GET_UI_INTERFACE_LEVEL(info);
+    s->info->GCSI_userAdded = 0;
+    s->info->GCSI_userRemoved = 0;
+    for (; n; n--, e++) {
+	Boolean on = (features & e->GCSUIE_appFeature) != 0;
+
+	if ((e->GCSUIE_command & 1) != (s->type == GCUIT_TOOLBOX ? 1 : 0))
+	    continue;
+	switch (e->GCSUIE_command & 0xfe) {
+	case GCSUIC_SET_NORMAL_FEATURES_IF_APP_FEATURE_ON:
+	    break;
+	case GCSUIC_SET_NORMAL_FEATURES_IF_APP_FEATURE_OFF:
+	    on = !on;
+	    break;
+	case GCSUIC_SET_NORMAL_FEATURES_IF_APP_LEVEL:
+	    on = level >= e->GCSUIE_appFeature;
+	    break;
+	case GCSUIC_ADD_NORMAL_FEATURES_IF_APP_FEATURE_ON:
+	    if (on) {
+		s->info->GCSI_userAdded |= e->GCSUIE_newFeatures;
+		s->info->GCSI_userRemoved &= ~e->GCSUIE_newFeatures;
+	    }
+	    continue;
+	default:
+	    continue;
+	}
+	if (on) {
+	    s->info->GCSI_userAdded = e->GCSUIE_newFeatures;
+	    s->info->GCSI_userRemoved = ~e->GCSUIE_newFeatures;
+	}
+    }
+}
+
+static void FeatureHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+			word dataType, void *data)
+{
+    FeatureScan *s = data;
+
+    (void) mh;
+    (void) chnk;
+    switch (dataType) {
+    case ATTR_GEN_CONTROL_REQUIRE_UI:
+    case ATTR_GEN_CONTROL_REQUIRE_TOOLBOX_UI:
+	s->info->GCSI_appRequired |= *(WordFlags *) extra;
+	break;
+    case ATTR_GEN_CONTROL_PROHIBIT_UI:
+    case ATTR_GEN_CONTROL_PROHIBIT_TOOLBOX_UI:
+	s->info->GCSI_appProhibited |= *(WordFlags *) extra;
+	break;
+    case HINT_GEN_CONTROL_TOOLBOX_ONLY:
+	s->info->GCSI_appProhibited = 0xffff;
+	break;
+    case HINT_GEN_CONTROL_MODIFY_INITIAL_UI:
+	/* (not beside the user's own) */
+	if (!ObjVarFindData(s->o, HINT_GEN_CONTROL_USER_MODIFIED_UI))
+	    UserModifiedUI(s, (const GenControlUserData *) extra);
+	break;
+    case HINT_GEN_CONTROL_USER_MODIFIED_UI:
+	UserModifiedUI(s, (const GenControlUserData *) extra);
+	break;
+    case HINT_GEN_CONTROL_SCALABLE_UI_DATA:
+	ScalableUI(s, (const GenControlScalableUIEntry *) extra,
+		   (word) (((extra - 1)->VDE_entrySize - sizeof(VarDataEntry)) /
+			   sizeof(GenControlScalableUIEntry)));
+	break;
+    }
+}
+
+/* (the normal UI: all but the last two; the tools: from the fourth) */
+static VarDataCHandler featureHints[] = {
+    { ATTR_GEN_CONTROL_REQUIRE_UI, FeatureHint },
+    { ATTR_GEN_CONTROL_PROHIBIT_UI, FeatureHint },
+    { HINT_GEN_CONTROL_TOOLBOX_ONLY, FeatureHint },
+    { HINT_GEN_CONTROL_MODIFY_INITIAL_UI, FeatureHint },
+    { HINT_GEN_CONTROL_USER_MODIFIED_UI, FeatureHint },
+    { HINT_GEN_CONTROL_SCALABLE_UI_DATA, FeatureHint },
+    { ATTR_GEN_CONTROL_REQUIRE_TOOLBOX_UI, FeatureHint },
+    { ATTR_GEN_CONTROL_PROHIBIT_TOOLBOX_UI, FeatureHint }
+};
+#define N_FEATURE_HINTS	(sizeof(featureHints) / sizeof(featureHints[0]))
+
+/*
+ * SetGlobalControllerFeatures: features under the controller's key in
+ * the category of the field the application is in are required and
+ * prohibited for all the applications of the field
+ */
+static void SetGlobalFeatures(optr o, GenControlUIType type,
+			      GenControlScanInfo *scan)
+{
+    char cat[INI_CATEGORY_BUFFER_SIZE];
+    char *catp = cat;
+    GenControlBuildInfo info;
+    GenControlUserData u;
+    EventHandle ev;
+    optr app = GeodeGetAppObject(0);
+    word size = 0;
+
+    cat[0] = 0;
+    if (!app)
+	return;
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenFieldClass,
+		 MSG_META_GET_INI_CATEGORY, &catp, sizeof(catp),
+		 &ev, sizeof(ev));
+    @call app::MSG_GEN_GUP_CALL_OBJECT_OF_CLASS(ev);
+    if (!cat[0])
+	return;
+    GetInfo(o, &info);
+    if (!info.GCBI_initFileKey)
+	return;
+    if (InitFileReadDataBuffer(cat, info.GCBI_initFileKey, &u, sizeof(u),
+			       &size))
+	return;
+    if (type == GCUIT_NORMAL) {
+	if (!(u.GCUD_flags & GCUF_USER_UI))
+	    return;
+	scan->GCSI_appRequired |= u.GCUD_userAddedUI;
+	scan->GCSI_appProhibited |= u.GCUD_userRemovedUI;
+    } else {
+	if (!(u.GCUD_flags & GCUF_USER_TOOLBOX_UI))
+	    return;
+	scan->GCSI_appRequired |= u.GCUD_userAddedToolboxUI;
+	scan->GCSI_appProhibited |= u.GCUD_userRemovedToolboxUI;
+    }
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_SCAN_FEATURE_HINTS
+{
+    FeatureScan s;
+
+    (void) pself;
+    EnsureOptionsLoaded(oself);
+    memset(info, 0, sizeof(*info));
+    s.o = oself;
+    s.type = type;
+    s.info = info;
+    if (type == GCUIT_TOOLBOX)
+	ObjVarScanData(oself, N_FEATURE_HINTS - 3, featureHints + 3, &s);
+    else
+	ObjVarScanData(oself, N_FEATURE_HINTS - 2, featureHints, &s);
+    if (Flags(oself) & GCBF_SPECIFIC_UI)
+	@callsuper();
+    SetGlobalFeatures(oself, type, info);
+}
+
+/*
+ * GenControlGetFeatures: the features in effect: the controller's
+ * defaults, with those the user added and without those removed, with
+ * those the application requires and without those it prohibits, of
+ * those the controller has
+ */
+static void GetFeatures(optr o, const GenControlBuildInfo *info,
+			GenControlUIType type, GenControlGetFeaturesReturn *r)
+{
+    GenControlScanInfo scan;
+    word n, f;
+
+    memset(&scan, 0, sizeof(scan));
+    @call o::MSG_GEN_CONTROL_SCAN_FEATURE_HINTS(type, &scan);
+    if (type == GCUIT_TOOLBOX) {
+	f = info->GCBI_toolFeatures;
+	n = info->GCBI_toolFeaturesCount;
+    } else {
+	f = info->GCBI_features;
+	n = info->GCBI_featuresCount;
+    }
+    r->GCSR_supported = n >= 16 ? 0xffff : (WordFlags) ((1u << n) - 1);
+    f = (f | scan.GCSI_userAdded) & ~scan.GCSI_userRemoved;
+    f = (f | scan.GCSI_appRequired) & ~scan.GCSI_appProhibited;
+    r->GCSR_features = f & r->GCSR_supported;
+    r->GCSR_required = scan.GCSI_appRequired;
+    r->GCSR_prohibited = scan.GCSI_appProhibited;
+}
+
+static WordFlags UIFeatures(optr o, const GenControlBuildInfo *info,
+			    GenControlUIType type)
+{
+    GenControlGetFeaturesReturn r;
+
+    GetFeatures(o, info, type, &r);
+    return r.GCSR_features;
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_GET_NORMAL_FEATURES
+{
+    GenControlBuildInfo info;
+
+    (void) pself;
+    GetInfo(oself, &info);
+    GetFeatures(oself, &info, GCUIT_NORMAL, ret);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_GET_TOOLBOX_FEATURES
+{
+    GenControlBuildInfo info;
+
+    (void) pself;
+    GetInfo(oself, &info);
+    GetFeatures(oself, &info, GCUIT_TOOLBOX, ret);
+}
+
+/* ---------------------------------------------------------------------
+ * The options
+ * ------------------------------------------------------------------- */
+
+/* GenControlLoadOptions: the user's features from the .ini file (the
+ * superclass is not called, as the asm) */
+@method GenControlClass, MSG_META_LOAD_OPTIONS
+{
+    char cat[INI_CATEGORY_BUFFER_SIZE];
+    GenControlBuildInfo info;
+    GenControlUserData u;
+    word size = 0;
+
+    (void) pself;
+    (void) ObjVarAddData(oself, TEMP_GEN_CONTROL_OPTIONS_LOADED |
+				VDF_SAVE_TO_STATE, 0);
+    GetInfo(oself, &info);
+    if (!info.GCBI_initFileKey)
+	return;
+    cat[0] = 0;
+    @call oself::MSG_META_GET_INI_CATEGORY(cat);
+    if (InitFileReadDataBuffer(cat, info.GCBI_initFileKey, &u, sizeof(u),
+			       &size))
+	return;
+    *(GenControlUserData *) ObjVarAddData(oself,
+	HINT_GEN_CONTROL_USER_MODIFIED_UI | VDF_SAVE_TO_STATE,
+	sizeof(GenControlUserData)) = u;
+}
+
+@method GenControlClass, MSG_META_SAVE_OPTIONS
+{
+    char cat[INI_CATEGORY_BUFFER_SIZE];
+    GenControlBuildInfo info;
+    GenControlUserData u, *p;
+
+    (void) pself;
+    EnsureOptionsLoaded(oself);
+    p = ObjVarFindData(oself, HINT_GEN_CONTROL_USER_MODIFIED_UI);
+    if (!p)
+	return;
+    u = *p;
+    GetInfo(oself, &info);
+    if (!info.GCBI_initFileKey)
+	return;
+    cat[0] = 0;
+    @call oself::MSG_META_GET_INI_CATEGORY(cat);
+    InitFileWriteData(cat, info.GCBI_initFileKey, &u, sizeof(u));
+}
+
+@method GenControlClass, MSG_META_RESET_OPTIONS
+{
+    (void) pself;
+    if (!ObjVarFindData(oself, HINT_GEN_CONTROL_USER_MODIFIED_UI))
+	return;
+    ObjVarDeleteData(oself, HINT_GEN_CONTROL_USER_MODIFIED_UI);
+    @call oself::MSG_GEN_CONTROL_REBUILD_NORMAL_UI();
+    @call oself::MSG_GEN_CONTROL_REBUILD_TOOLBOX_UI();
+}
+
+/* ---------------------------------------------------------------------
+ * Generating the UI
+ * ------------------------------------------------------------------- */
+
+/* DestroyHereLow: the object, its moniker and its children freed (a
+ * tree never built, all in the block) */
+static void DestroyHereLow(MemHandle mh, ChunkHandle ch)
+{
+    GenInstance *g = ObjDerefGen(ConstructOptr(mh, ch));
+    ChunkHandle moniker = g->GI_visMoniker;
+    ChunkHandle child = OptrToChunk(g->GI_comp.CP_firstChild);
+
+    if (moniker)
+	LMemFreeHandles(mh, moniker);
+    LMemFreeHandles(mh, ch);
+    while (child && !(child & LP_IS_PARENT)) {
+	ChunkHandle next;
+
+	g = ObjDerefGen(ConstructOptr(mh, child));
+	next = OptrToChunk(g->GI_link.LP_next);
+	DestroyHereLow(mh, child);
+	child = next;
+    }
+}
+
+/* DestroyDSSIHereAndNow: fast: out of its parent (in the same block)
+ * and freed; a controller with GCBF_USE_GEN_DESTROY the generic way */
+static void DestroyNow(const GenControlBuildInfo *info, optr obj)
+{
+    optr parent;
+
+    if (info->GCBI_flags & GCBF_USE_GEN_DESTROY) {
+	@send ,forceQueue obj::MSG_GEN_DESTROY(VUM_NOW, 0);
+	@send obj::MSG_GEN_REMOVE(VUM_NOW, 0);
+	return;
+    }
+    parent = GenFindParent(obj);
+    if (parent)
+	ObjCompRemoveChild(parent, obj, 0, word_offsetof(GenBase, Gen_offset),
+			   word_offsetof(GenInstance, GI_comp),
+			   word_offsetof(GenInstance, GI_link));
+    DestroyHereLow(OptrToHandle(obj), OptrToChunk(obj));
+}
+
+/* DestroyBXSI: the object and the ones its feature is linked to
+ * (ATTR_GEN_FEATURE_LINK) */
+static void DestroyObj(const GenControlBuildInfo *info, optr obj)
+{
+    MemHandle mh = OptrToHandle(obj);
+    ChunkHandle ch = OptrToChunk(obj);
+
+    if (!ch)
+	return;
+    ObjLockObjBlock(mh);
+    while (ch) {
+	ChunkHandle *link = ObjVarFindData(ConstructOptr(mh, ch),
+					   ATTR_GEN_FEATURE_LINK);
+	ChunkHandle next = link ? *link : 0;
+
+	DestroyNow(info, ConstructOptr(mh, ch));
+	ch = next;
+    }
+    MemUnlock(mh);
+}
+
+/* DupTheBlock: a copy of the resource owned by the controller's owner,
+ * its output the controller */
+static MemHandle DupTheBlock(optr o, MemHandle block)
+{
+    MemHandle dup;
+
+    if (!block)
+	return 0;
+    dup = ObjDuplicateResource(block, MemOwner(OptrToHandle(o)), 0);
+    ObjLockObjBlock(dup);
+    ObjBlockSetOutput(dup, o);
+    MemUnlock(dup);
+    return dup;
+}
+
+/*
+ * GenerateUICommon: the objects of the features that are off are
+ * destroyed; the children of the list are added below parent and set
+ * usable (those whose features are off destroyed, unless they are a
+ * feature themselves and gone already)
+ */
+static void GenerateUICommon(optr o, const GenControlBuildInfo *info,
+			     MemHandle block, WordFlags features,
+			     const GenControlFeaturesInfo *fl, word fcount,
+			     const GenControlChildInfo *cl, word ccount,
+			     optr parent)
+{
+    word i;
+
+    for (i = 0; i < fcount; i++)
+	if (!(features & (1u << i)))
+	    DestroyObj(info, ConstructOptr(block, fl[i].GCFI_object));
+    for (i = 0; i < ccount; i++) {
+	optr child = ConstructOptr(block, cl[i].GCCI_object);
+
+	if (!(cl[i].GCCI_flags & GCCF_ALWAYS_ADD) &&
+	    !(features & cl[i].GCCI_featureMask)) {
+	    if (!(cl[i].GCCI_flags & GCCF_IS_DIRECTLY_A_FEATURE))
+		DestroyObj(info, child);
+	    continue;
+	}
+	if (cl[i].GCCI_flags & GCCF_NOTIFY_WHEN_ADDING)
+	    @call o::MSG_GEN_CONTROL_NOTIFY_ADDING_FEATURE(child);
+	@call parent::MSG_GEN_ADD_CHILD(child, CCO_LAST);
+	@call child::MSG_GEN_SET_USABLE(VUM_MANUAL);
+    }
+}
+
+/* AddAppUI: the application's own objects (a list of optrs) added and
+ * set usable */
+static void AddAppUI(optr o, word attr, Boolean toolbox)
+{
+    word i;
+
+    for (i = 0; ; i++) {
+	optr *list = ObjVarFindData(o, attr), ui;
+
+	if (!list || (i + 1) * sizeof(optr) >
+		     ((VarDataEntry *) list - 1)->VDE_entrySize -
+		     sizeof(VarDataEntry))
+	    return;
+	ui = list[i];
+	if (toolbox)
+	    @call o::MSG_GEN_CONTROL_ADD_APP_TOOLBOX_UI(ui);
+	else
+	    @call o::MSG_GEN_CONTROL_ADD_APP_UI(ui);
+	@call ui::MSG_GEN_SET_USABLE(VUM_NOW);
+    }
+}
+
+/* RemoveAppUI */
+static void RemoveAppUI(optr o, word attr)
+{
+    word i;
+
+    for (i = 0; ; i++) {
+	optr *list = ObjVarFindData(o, attr), ui;
+
+	if (!list || (i + 1) * sizeof(optr) >
+		     ((VarDataEntry *) list - 1)->VDE_entrySize -
+		     sizeof(VarDataEntry))
+	    return;
+	ui = list[i];
+	@call ui::MSG_GEN_REMOVE(VUM_NOW, 0);
+    }
+}
+
+/*
+ * GenControlGenerateUI: the normal UI below the controller; the
+ * application's UI; in a dialog the controller's help context unless
+ * the application gave one
+ */
+@method GenControlClass, MSG_GEN_CONTROL_GENERATE_UI
+{
+    GenControlBuildInfo info;
+    WordFlags features = 0;
+    MemHandle block;
+    TempGenControlInstance *t;
+
+    (void) pself;
+    GetInfo(oself, &info);
+    features = UIFeatures(oself, &info, GCUIT_NORMAL);
+    block = DupTheBlock(oself, info.GCBI_dupBlock);
+    if (block) {
+	@call oself::MSG_GEN_CONTROL_TWEAK_DUPLICATED_UI(block, features);
+	GenerateUICommon(oself, &info, block, features,
+			 info.GCBI_featuresList, info.GCBI_featuresCount,
+			 info.GCBI_childList, info.GCBI_childCount, oself);
+    } else
+	features = 0;
+    t = Temp(oself);
+    t->TGCI_childBlock = block;
+    t->TGCI_features = features;
+    if (info.GCBI_flags & GCBF_SPECIFIC_UI)
+	@callsuper();
+    AddAppUI(oself, ATTR_GEN_CONTROL_APP_UI, FALSE);
+    if (((GenInteractionInstance *) ObjDerefGen(oself))->GII_visibility ==
+	GIV_DIALOG && info.GCBI_helpContext &&
+	!ObjVarFindData(oself, ATTR_GEN_HELP_CONTEXT)) {
+	word n = 1;
+
+	while (info.GCBI_helpContext[n - 1])
+	    n++;
+
+	memcpy(ObjVarAddData(oself, ATTR_GEN_HELP_CONTEXT, n),
+	       info.GCBI_helpContext, n);
+    }
+}
+
+/*
+ * GenControlGenerateToolboxUI: the tools below parent (enabled as the
+ * controller is), if the controller is fully usable and has tool
+ * features
+ */
+@method GenControlClass, MSG_GEN_CONTROL_GENERATE_TOOLBOX_UI
+{
+    GenControlBuildInfo info;
+    WordFlags features;
+    MemHandle block = 0;
+    TempGenControlInstance *t;
+
+    if (!GenCheckIfFullyUsable(oself, FALSE))
+	return;
+    (void) Temp(oself);
+    GetInfo(oself, &info);
+    features = UIFeatures(oself, &info, GCUIT_TOOLBOX);
+    if (features)
+	block = DupTheBlock(oself, info.GCBI_toolBlock);
+    if (block) {
+	@call oself::MSG_GEN_CONTROL_TWEAK_DUPLICATED_TOOLBOX_UI(block,
+								 features);
+	if (((GenInstance *) ObjDerefGen(oself))->GI_states & GS_ENABLED)
+	    @call parent::MSG_GEN_SET_ENABLED(VUM_MANUAL);
+	else
+	    @call parent::MSG_GEN_SET_NOT_ENABLED(VUM_MANUAL);
+	GenerateUICommon(oself, &info, block, features,
+			 info.GCBI_toolFeaturesList,
+			 info.GCBI_toolFeaturesCount,
+			 info.GCBI_toolList, info.GCBI_toolCount, parent);
+	@call parent::MSG_GEN_UPDATE_VISUAL(VUM_DELAYED_VIA_UI_QUEUE);
+    } else
+	features = 0;
+    t = Temp(oself);
+    t->TGCI_toolBlock = block;
+    t->TGCI_toolboxFeatures = features;
+    t->TGCI_toolParent = parent;
+    (void) pself;
+    if (info.GCBI_flags & GCBF_SPECIFIC_UI)
+	@callsuper();
+    if (!features)
+	return;
+    AddAppUI(oself, ATTR_GEN_CONTROL_APP_TOOLBOX_UI, TRUE);
+    @call oself::MSG_GEN_CONTROL_NOTIFY_INTERACTABLE(GCIF_TOOLBOX_UI);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_ADD_APP_UI
+{
+    (void) pself;
+    @call oself::MSG_GEN_ADD_CHILD(appUI, CCO_LAST);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_ADD_APP_TOOLBOX_UI
+{
+    optr parent = Temp(oself)->TGCI_toolParent;
+
+    (void) pself;
+    if (parent)
+	@call parent::MSG_GEN_ADD_CHILD(appUI, CCO_LAST);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_FREE_OBJ_BLOCK
+{
+    (void) pself;
+    ObjFreeObjBlock(blockToFree);
+}
+
+/*
+ * GenControlDestroyUI: the application's UI and the children that were
+ * added removed; the block freed by the queue (messages for it may be
+ * on their way).  Its output is cleared first, so if it is seen its
+ * "not interactible" is faked here.  With no part of the controller
+ * left to be seen it comes off the active list.
+ */
+@method GenControlClass, MSG_GEN_CONTROL_DESTROY_UI
+{
+    GenControlBuildInfo info;
+    TempGenControlInstance *t;
+    WordFlags features;
+    MemHandle block;
+    Boolean seen;
+    word i;
+
+    (void) pself;
+    RemoveAppUI(oself, ATTR_GEN_CONTROL_APP_UI);
+    t = Temp(oself);
+    features = t->TGCI_features;
+    block = t->TGCI_childBlock;
+    if (!block)
+	return;
+    GetInfo(oself, &info);
+    for (i = 0; i < info.GCBI_childCount; i++) {
+	const GenControlChildInfo *c = &info.GCBI_childList[i];
+
+	if ((c->GCCI_flags & GCCF_ALWAYS_ADD) ||
+	    (features & c->GCCI_featureMask)) {
+	    optr child = ConstructOptr(block, c->GCCI_object);
+
+	    @call child::MSG_GEN_REMOVE(VUM_NOW, 0);
+	}
+    }
+    ObjLockObjBlock(block);
+    ObjBlockSetOutput(block, 0);
+    seen = ((ObjLMemBlockHeader *) MemDeref(block))->
+		OLMBH_interactibleCount != 0;
+    MemUnlock(block);
+    if (seen)
+	@call oself::MSG_META_NOTIFY_OBJ_BLOCK_NOT_INTERACTIBLE(block);
+    @send ,forceQueue oself::MSG_GEN_CONTROL_FREE_OBJ_BLOCK(block);
+    t = Temp(oself);
+    t->TGCI_childBlock = 0;
+    t->TGCI_features = 0;
+    t->TGCI_upToDate &= ~GCIF_NORMAL_UI;
+    if (t->TGCI_interactableFlags ||
+	(info.GCBI_flags & (GCBF_IS_ON_ACTIVE_LIST |
+			    GCBF_MANUALLY_REMOVE_FROM_ACTIVE_LIST)))
+	return;
+    AddOrRemoveActiveListEntry(MSG_META_GCN_LIST_REMOVE, oself);
+}
+
+/*
+ * GenControlDestroyToolboxUI: the children of the tool parent set not
+ * usable (the specific part too: a child that is not fully usable
+ * would not unbuild) and removed; the block freed by the queue
+ */
+@method GenControlClass, MSG_GEN_CONTROL_DESTROY_TOOLBOX_UI
+{
+    TempGenControlInstance *t;
+    optr parent, child;
+    MemHandle block;
+
+    (void) pself;
+    RemoveAppUI(oself, ATTR_GEN_CONTROL_APP_TOOLBOX_UI);
+    @call oself::MSG_GEN_CONTROL_NOTIFY_NOT_INTERACTABLE(GCIF_TOOLBOX_UI);
+    parent = Temp(oself)->TGCI_toolParent;
+    while (parent &&
+	   (child = @call parent::MSG_GEN_FIND_CHILD_AT_POSITION(0)) != 0) {
+	@call child::MSG_GEN_SET_NOT_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+	ObjLockObjBlock(OptrToHandle(child));
+	if (GenCheckIfSpecGrown(child))
+	    @call child::MSG_SPEC_SET_NOT_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+	MemUnlock(OptrToHandle(child));
+	@call parent::MSG_GEN_REMOVE_CHILD(child, 0);
+    }
+    t = Temp(oself);
+    t->TGCI_upToDate &= ~GCIF_TOOLBOX_UI;
+    t->TGCI_toolParent = 0;
+    t->TGCI_toolboxFeatures = 0;
+    block = t->TGCI_toolBlock;
+    t->TGCI_toolBlock = 0;
+    @send ,forceQueue oself::MSG_GEN_CONTROL_FREE_OBJ_BLOCK(block);
+}
+
+static void SendDestroyUI(optr o)
+{
+    if (Temp(o)->TGCI_childBlock)
+	@call o::MSG_GEN_CONTROL_DESTROY_UI();
+}
+
+static void SendDestroyToolboxUI(optr o)
+{
+    if (Temp(o)->TGCI_toolBlock)
+	@call o::MSG_GEN_CONTROL_DESTROY_TOOLBOX_UI();
+}
+
+static void DestroyNormalUI(optr o)
+{
+    @call o::MSG_GEN_CONTROL_NOTIFY_NOT_INTERACTABLE(GCIF_NORMAL_UI);
+    SendDestroyUI(o);
+}
+
+/* an object of the block that is about to go may be on the windows
+ * list */
+static void RemoveAllFromWindowList(MemHandle block)
+{
+    AddOrRemoveListEntry(MSG_META_GCN_LIST_REMOVE, ConstructOptr(block, 0),
+			 GAGCNLT_WINDOWS);
+}
+
+/*
+ * DestroyGeneratedUI: the normal UI and the tools destroyed.  On a
+ * detach there is no need for all the work: the blocks are freed and
+ * the links to their objects cut.
+ */
+static void DestroyGeneratedUI(optr o, Boolean detaching)
+{
+    TempGenControlInstance *t;
+    MemHandle block;
+
+    if (!detaching) {
+	DestroyNormalUI(o);
+	@call o::MSG_GEN_CONTROL_NOTIFY_NOT_INTERACTABLE(GCIF_TOOLBOX_UI);
+	SendDestroyToolboxUI(o);
+	return;
+    }
+    t = Temp(o);
+    block = t->TGCI_childBlock;
+    t->TGCI_childBlock = 0;
+    if (block) {
+	Boolean seen;
+	MemHandle mh = OptrToHandle(o);
+	byte *base;
+
+	@send ,forceQueue o::MSG_GEN_CONTROL_FREE_OBJ_BLOCK(block);
+	RemoveAllFromWindowList(block);
+	/* (its "not interactible" will no longer be known as ours) */
+	ObjLockObjBlock(block);
+	seen = ((ObjLMemBlockHeader *) MemDeref(block))->
+		    OLMBH_interactibleCount != 0;
+	MemUnlock(block);
+	if (seen)
+	    ObjDecInteractibleCount(mh);
+	RemoveAppUI(o, ATTR_GEN_CONTROL_APP_UI);
+	((GenInstance *) ObjDerefGen(o))->GI_comp.CP_firstChild = 0;
+	base = LMemDerefHandles(mh, OptrToChunk(o));
+	if (((VisBase *) base)->Vis_offset)
+	    ((VisCompInstance *) ObjDerefVis(o))->VCI_comp.CP_firstChild = 0;
+    }
+    t = Temp(o);
+    block = t->TGCI_toolBlock;
+    t->TGCI_toolBlock = 0;
+    if (block) {
+	optr parent;
+
+	@send ,forceQueue o::MSG_GEN_CONTROL_FREE_OBJ_BLOCK(block);
+	RemoveAllFromWindowList(block);
+	RemoveAppUI(o, ATTR_GEN_CONTROL_APP_TOOLBOX_UI);
+	parent = Temp(o)->TGCI_toolParent;
+	if (parent) {
+	    ObjLockObjBlock(OptrToHandle(parent));
+	    ((GenInstance *) ObjDerefGen(parent))->GI_comp.CP_firstChild = 0;
+	    MemUnlock(OptrToHandle(parent));
+	}
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Building
+ * ------------------------------------------------------------------- */
+
+/*
+ * GenControlSpecBuildBranch: the normal UI is generated when the
+ * controller (the window of a dual build one) is built; one without
+ * features and without UI of the application is not user initiatable;
+ * unless it is such a dialog the controller itself is interactable
+ */
+@method GenControlClass, MSG_SPEC_BUILD_BRANCH
+{
+    SpecBuildFlags f = flags;
+    Boolean checkFeatures = TRUE, generate = TRUE;
+    GenInteractionInstance *g;
+
+    if (((VisInstance *) ObjDerefVis(oself))->VI_specAttrs &
+	SA_USES_DUAL_BUILD) {
+	if (!(f & SBF_WIN_GROUP))
+	    generate = FALSE;
+	else
+	    checkFeatures = FALSE;
+    }
+    (void) pself;
+    if (generate && !Temp(oself)->TGCI_childBlock)
+	@call oself::MSG_GEN_CONTROL_GENERATE_UI();
+    if (checkFeatures) {
+	GenControlGetFeaturesReturn r;
+
+	memset(&r, 0, sizeof(r));
+	@call oself::MSG_GEN_CONTROL_GET_NORMAL_FEATURES(&r);
+	if (!r.GCSR_features &&
+	    !ObjVarFindData(oself, ATTR_GEN_CONTROL_APP_UI))
+	    @call oself::MSG_GEN_INTERACTION_SET_ATTRS(
+				GIA_NOT_USER_INITIATABLE, 0);
+    }
+    g = (GenInteractionInstance *) ObjDerefGen(oself);
+    if (g->GII_visibility != GIV_DIALOG ||
+	!(g->GII_attrs & GIA_NOT_USER_INITIATABLE))
+	@call oself::MSG_GEN_CONTROL_NOTIFY_INTERACTABLE(GCIF_CONTROLLER);
+    /* (that may have enabled the controller) */
+    f &= ~SBF_VIS_PARENT_FULLY_ENABLED;
+    if (GenCheckIfFullyEnabled(oself, TRUE))
+	f |= SBF_VIS_PARENT_FULLY_ENABLED;
+    flags = f;
+    @callsuper();
+}
+
+@method GenControlClass, MSG_META_DETACH
+{
+    (void) pself;
+    DestroyGeneratedUI(oself, TRUE);
+    @call oself::MSG_GEN_CONTROL_NOTIFY_NOT_INTERACTABLE(
+		GCIF_CONTROLLER | GCIF_NORMAL_UI | GCIF_TOOLBOX_UI);
+    @callsuper();
+}
+
+/*
+ * GenControlSpecUnbuild: set not usable (or the visible parent of a
+ * single build controller unbuilds): all of the UI destroyed.  The
+ * window of a dual build controller: the normal UI only; its button:
+ * nothing but the controller no longer interactable.
+ */
+@method GenControlClass, MSG_SPEC_UNBUILD
+{
+    if ((flags & SBF_VIS_PARENT_UNBUILDING) &&
+	(((VisInstance *) ObjDerefVis(oself))->VI_specAttrs &
+	 SA_USES_DUAL_BUILD)) {
+	if (flags & SBF_WIN_GROUP) {
+	    DestroyNormalUI(oself);
+	    @callsuper();
+	    return;
+	}
+    } else
+	DestroyGeneratedUI(oself, FALSE);
+    (void) pself;
+    @call oself::MSG_GEN_CONTROL_NOTIFY_NOT_INTERACTABLE(GCIF_CONTROLLER);
+    @callsuper();
+}
+
+/*
+ * GenControlFindKbdAccelerator: the UI has to be there to look for an
+ * accelerator in it, and the controller interactable (so that it and
+ * its children are enabled as they should be)
+ */
+@method GenControlClass, MSG_GEN_FIND_KBD_ACCELERATOR
+{
+    Boolean r;
+
+    if (!(pself->GI_states & GS_USABLE))
+	return @callsuper();
+    if (!Temp(oself)->TGCI_childBlock)
+	@call oself::MSG_GEN_CONTROL_GENERATE_UI();
+    if (Temp(oself)->TGCI_interactableFlags & GCIF_CONTROLLER)
+	return @callsuper();
+    @call oself::MSG_GEN_CONTROL_NOTIFY_INTERACTABLE(GCIF_CONTROLLER);
+    r = @callsuper();
+    @call oself::MSG_GEN_CONTROL_NOTIFY_NOT_INTERACTABLE(GCIF_CONTROLLER);
+    return r;
+}
+
+/* ---------------------------------------------------------------------
+ * Changing the features
+ * ------------------------------------------------------------------- */
+
+/* ControlSendStatusChange: for the tool control: the controller's
+ * features have changed */
+static void SendStatusChange(optr o, GenControlStatusChange change)
+{
+    MemHandle bh = MemAlloc(sizeof(NotifyGenControlStatusChange),
+			    HF_SWAPABLE | HF_SHARABLE,
+			    HAF_LOCK | HAF_NO_ERR | HAF_ZERO_INIT);
+    NotifyGenControlStatusChange *n = MemDeref(bh);
+    optr app = GeodeGetAppObject(0);
+    EventHandle ev;
+
+    MemInitRefCount(bh, 1);
+    n->NGCS_controller = o;
+    n->NGCS_statusChange = change;
+    MemUnlock(bh);
+    ev = @record null::MSG_META_NOTIFY_WITH_DATA_BLOCK(
+		MANUFACTURER_ID_GEOWORKS,
+		GWNT_GEN_CONTROL_NOTIFY_STATUS_CHANGE, bh);
+    if (app)
+	@call app::MSG_META_GCN_LIST_SEND(0, ev, bh,
+		GAGCNLT_GEN_CONTROL_NOTIFY_STATUS_CHANGE,
+		MANUFACTURER_ID_GEOWORKS);
+}
+
+/* FeatureHintCommon: bits added to and removed from the user's
+ * features */
+static void UserFeatures(optr o, Boolean toolbox, WordFlags add,
+			 WordFlags remove)
+{
+    GenControlUserData *u;
+    word *added, *removed;
+
+    EnsureOptionsLoaded(o);
+    u = ObjVarDerefData(o, HINT_GEN_CONTROL_USER_MODIFIED_UI);
+    if (toolbox) {
+	u->GCUD_flags |= GCUF_USER_TOOLBOX_UI;
+	added = &u->GCUD_userAddedToolboxUI;
+	removed = &u->GCUD_userRemovedToolboxUI;
+    } else {
+	u->GCUD_flags |= GCUF_USER_UI;
+	added = &u->GCUD_userAddedUI;
+	removed = &u->GCUD_userRemovedUI;
+    }
+    *added = (*added | add) & ~remove;
+    *removed = (*removed | remove) & ~add;
+}
+
+/* GenControlRebuildNormalUI: if there is one: destroyed and generated
+ * again; a dialog back to its initial size */
+@method GenControlClass, MSG_GEN_CONTROL_REBUILD_NORMAL_UI
+{
+    (void) pself;
+    if (Flags(oself) & GCBF_SPECIFIC_UI)
+	@callsuper();
+    if (!Temp(oself)->TGCI_childBlock)
+	return;
+    SendDestroyUI(oself);
+    @call oself::MSG_GEN_CONTROL_GENERATE_UI();
+    SendStatusChange(oself, GCSF_NORMAL_FEATURES_CHANGED);
+    @call oself::MSG_GEN_UPDATE_VISUAL(VUM_DELAYED_VIA_UI_QUEUE);
+    if (((GenInteractionInstance *) ObjDerefGen(oself))->GII_visibility ==
+	GIV_DIALOG)
+	@call oself::MSG_GEN_RESET_TO_INITIAL_SIZE(VUM_NOW);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_REBUILD_TOOLBOX_UI
+{
+    optr parent = Temp(oself)->TGCI_toolParent;
+
+    (void) pself;
+    if (!parent)
+	return;
+    SendDestroyToolboxUI(oself);
+    @call oself::MSG_GEN_CONTROL_GENERATE_TOOLBOX_UI(parent);
+    SendStatusChange(oself, GCSF_TOOLBOX_FEATURES_CHANGED);
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_ADD_FEATURE
+{
+    (void) pself;
+    UserFeatures(oself, FALSE, featureToAdd, 0);
+    @call oself::MSG_GEN_CONTROL_REBUILD_NORMAL_UI();
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_REMOVE_FEATURE
+{
+    (void) pself;
+    UserFeatures(oself, FALSE, 0, featureToRemove);
+    @call oself::MSG_GEN_CONTROL_REBUILD_NORMAL_UI();
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_ADD_TOOLBOX_FEATURE
+{
+    (void) pself;
+    UserFeatures(oself, TRUE, featureToAdd, 0);
+    @call oself::MSG_GEN_CONTROL_REBUILD_TOOLBOX_UI();
+}
+
+@method GenControlClass, MSG_GEN_CONTROL_REMOVE_TOOLBOX_FEATURE
+{
+    (void) pself;
+    UserFeatures(oself, TRUE, 0, featureToRemove);
+    @call oself::MSG_GEN_CONTROL_REBUILD_TOOLBOX_UI();
+}
+
+/*
+ * GenControlUnbuildIfPossible: ([ui] unbuildControllers) the normal UI
+ * that is no longer seen is unbuilt: the window of a dual build
+ * controller; of another only with HINT_GEN_CONTROL_DESTROY_CHILDREN_
+ * WHEN_NOT_INTERACTABLE, the whole window it is in
+ */
+@method GenControlClass, MSG_GEN_CONTROL_UNBUILD_NORMAL_UI_IF_POSSIBLE
+{
+    Boolean hint;
+    TempGenControlInstance *t;
+    SpecBuildFlags sbf;
+    EventHandle ev;
+
+    (void) pself;
+    if (!unbuildControllers)
+	return;
+    hint = ObjVarFindData(oself,
+	HINT_GEN_CONTROL_DESTROY_CHILDREN_WHEN_NOT_INTERACTABLE) != NULL;
+    if (!hint && ObjVarFindData(oself, ATTR_GEN_CONTROL_APP_UI))
+	return;
+    t = Temp(oself);
+    if (t->TGCI_interactableFlags & GCIF_NORMAL_UI)
+	return;
+    if (((VisInstance *) ObjDerefVis(oself))->VI_specAttrs &
+	SA_USES_DUAL_BUILD) {
+	if (Flags(oself) & GCBF_DO_NOT_DESTROY_CHILDREN_WHEN_CLOSED)
+	    return;
+	@call oself::MSG_SPEC_UNBUILD_BRANCH(SBF_VIS_PARENT_UNBUILDING);
+	return;
+    }
+    if ((t->TGCI_interactableFlags & GCIF_TOOLBOX_UI) || !hint)
+	return;
+    sbf = SBF_VIS_PARENT_UNBUILDING;
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &VisClass,
+		 MSG_SPEC_UNBUILD_BRANCH, &sbf, sizeof(sbf), &ev, sizeof(ev));
+    @call oself::MSG_VIS_VUP_CALL_WIN_GROUP(ev);
+}
+
+/* GenControlCheckIfInteractableObject: the objects of the normal UI
+ * are the controller's */
+@method GenControlClass, MSG_META_CHECK_IF_INTERACTABLE_OBJECT
+{
+    (void) pself;
+    if (OptrToHandle(obj) == Temp(oself)->TGCI_childBlock)
+	return TRUE;
+    return @callsuper();
+}
+
+/*
+ * GenControlGetHelpFile: a controller's help file is named after the
+ * library it is of (the owner of its UI), unless
+ * ATTR_GEN_CONTROL_DO_NOT_USE_LIBRARY_NAME_FOR_HELP
+ */
+@method GenControlClass, MSG_META_GET_HELP_FILE
+{
+    GenControlBuildInfo info;
+    MemHandle block;
+    word n;
+
+    (void) pself;
+    if (ObjVarFindData(oself,
+		       ATTR_GEN_CONTROL_DO_NOT_USE_LIBRARY_NAME_FOR_HELP))
+	return @callsuper();
+    GetInfo(oself, &info);
+    block = info.GCBI_dupBlock ? info.GCBI_dupBlock : info.GCBI_toolBlock;
+    GeodeGetInfo(MemOwner(block), GGIT_PERM_NAME_ONLY, buf);
+    buf[GEODE_NAME_SIZE] = 0;
+    for (n = GEODE_NAME_SIZE; n && buf[n - 1] == ' '; )
+	buf[--n] = 0;
+    return TRUE;
+}

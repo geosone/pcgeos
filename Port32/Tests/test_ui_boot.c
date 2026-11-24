@@ -86,6 +86,8 @@ typedef struct {
     word		UBS_fselSel[6][2];
     char		UBS_fselName[6][36];
     char		UBS_fselPath[2][64];
+    word		UBS_ctl[6];
+    word		UBS_ctlAt[8][4];
 } UBState;
 
 static int fails;
@@ -147,7 +149,7 @@ static void Shot(int step)
     int x, y;
 
     /* (step < 0: the reference mode, whatever the step) */
-    if (!f || (step >= 0 && step != (at ? atoi(at) : 73)))
+    if (!f || (step >= 0 && step != (at ? atoi(at) : 78)))
 	return;
     TimerSleep((word) (getenv("UIBOOT_SHOT_TICKS")
 		       ? atoi(getenv("UIBOOT_SHOT_TICKS")) : 60));
@@ -281,7 +283,7 @@ int main(int argc, char **argv)
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator; ... ; the sliders */
-    for (i = 2; i <= 73; i++) {
+    for (i = 2; i <= 78; i++) {
 	step(i);
 	Shot(i);
     }
@@ -361,6 +363,13 @@ int main(int argc, char **argv)
 	       st->UBS_fselName[i]);
     printf("  paths \"%s\", \"%s\"\n", st->UBS_fselPath[0],
 	   st->UBS_fselPath[1]);
+    printf("Controller: %u updates (features %#x, tools %#x, data %u), "
+	   "%u at the output (%#x)\n", st->UBS_ctl[0], st->UBS_ctl[1],
+	   st->UBS_ctl[2], st->UBS_ctl[3], st->UBS_ctl[4], st->UBS_ctl[5]);
+    for (i = 0; i < 8; i++)
+	printf("  check %d: features %#x, interactable %#x, enabled %#x, "
+	       "children %#x\n", i, st->UBS_ctlAt[i][0], st->UBS_ctlAt[i][1],
+	       st->UBS_ctlAt[i][2], st->UBS_ctlAt[i][3]);
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);
 

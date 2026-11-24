@@ -5387,6 +5387,41 @@ visual classes of `Library/User/Vis`:
   - Not yet: `MSG_GEN_BRANCH_REPLACE_PARAMS`.
   - `library.ui.boot` step 67 checks both on an object that is not
     built.
+- **`GenControlClass`** (`Gen/genControl.goc`): the base of the
+  controllers. A subclass describes itself in
+  `MSG_GEN_CONTROL_GET_INFO`; the class copies the resource of the
+  normal UI when it is built and the one of the tools on
+  `MSG_GEN_CONTROL_GENERATE_TOOLBOX_UI`, destroys the objects of the
+  features that are off and adds the children listed. The features are
+  the defaults changed by the user (`HINT_GEN_CONTROL_USER_MODIFIED_UI`,
+  in the .ini file under `GCBI_initFileKey`) and the application
+  (required, prohibited, scalable UI). A controller is on its GCN
+  lists while a part of it is interactable; a notification of one of
+  its types enables it (a data block) or disables it and has it update
+  its UI (`MSG_GEN_CONTROL_UPDATE_UI`).
+  - The tables of `GenControlBuildInfo` are pointers with counts, as
+    in the C header of DOS16; the tool lists are fields of their own
+    (the asm indexes them by a fixed offset from the normal ones).
+  - `MSG_GEN_CONTROL_GET_NORMAL_FEATURES` and
+    `..._GET_TOOLBOX_FEATURES` fill the `GenControlGetFeaturesReturn`
+    passed (DOS16: four registers).
+  - `GenControlSendToOutput(controller, msg, params, size, class)` and
+    `GenControlOutputAction(...)` replace the four routines
+    `GenControlSendToOutputRegs`, `...Stack`,
+    `GenControlOutputActionRegs`, `...Stack`: the parameters are a
+    structure as for `CObjMessageP`; class 0 is no class.
+  - The category of the options is asked with
+    `MSG_META_GET_INI_CATEGORY` (`UserGetInitFileCategory` is its
+    short cut for applications with one category).
+  - `[ui] unbuildControllers` is not read:
+    `MSG_GEN_CONTROL_UNBUILD_NORMAL_UI_IF_POSSIBLE` does nothing, as
+    with the default of DOS16.
+  - Scalable UI (`HINT_GEN_CONTROL_SCALABLE_UI_DATA`) asks the
+    application for its features, which it does not answer yet
+    (`MSG_GEN_APPLICATION_GET_APP_FEATURES`).
+  - `library.ui.boot` steps 74 to 78: a controller with two features
+    and a tool in a dialog (built, notified, a feature removed and
+    added, the tools, the output, unbuilt).
 - **Not yet:**
   - in `GenClass`: `MSG_SPEC_RESOLVE_MONIKER_LIST` (`VisClass` keeps
     the list), the icon and text combination moniker
