@@ -1,6 +1,6 @@
 # The PostScript printer driver (pscript.geo) in C: the common printer
 # driver code of PrintCom/ (beside its asm) and this driver's own.  The
-# device tables come from the asm (Port32/tools/psdevinfo2c.py).
+# device tables come from the asm (psdevinfo2c, Tools/psdevinfo2c).
 if(NOT GEOS_BUILD_GEODES)
   return()
 endif()
@@ -14,10 +14,10 @@ list(REMOVE_ITEM pscript_infos ${ps}/pscriptDriverInfo.asm)
 list(SORT pscript_infos)
 set(pscript_devices ${CMAKE_CURRENT_BINARY_DIR}/pscriptDevices.c)
 add_custom_command(OUTPUT ${pscript_devices}
-  COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/psdevinfo2c.py
+  COMMAND ${GEOS_PSDEVINFO2C}
           -o ${pscript_devices} ${ps}/pscriptDriverInfo.asm ${pscript_infos}
   DEPENDS ${ps}/pscriptDriverInfo.asm ${pscript_infos}
-          ${PROJECT_SOURCE_DIR}/Port32/tools/psdevinfo2c.py
+          ${GEOS_PSDEVINFO2C} geos_host_tools
   COMMENT "psdevinfo2c pscript"
   VERBATIM)
 

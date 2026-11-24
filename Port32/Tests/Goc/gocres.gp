@@ -1,7 +1,7 @@
 ##############################################################################
 #
 # gocres.gp -- geode parameters of the goc -cg test (Port32/Tests/Goc).
-# Port32/tools/gpres.py makes the resource numbers from it.
+# Tools/gpres makes the resource numbers from it.
 #
 ##############################################################################
 name gocres.app

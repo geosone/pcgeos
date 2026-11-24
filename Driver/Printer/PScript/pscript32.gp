@@ -4,7 +4,7 @@
 #
 # The C port of pscript.gp: the common printer driver code beside its asm
 # in PrintCom/ and the driver's own code here (pscript.h).  The device
-# tables are generated from the asm (Port32/tools/psdevinfo2c.py), so
+# tables are generated from the asm (Tools/psdevinfo2c), so
 # there are no info resources.  The translation library (eps.geo) is
 # loaded per job, as "library eps noload" meant.  Not ported: the spool
 # library's UI (no import needed yet) and ps2pdf (the host prints through

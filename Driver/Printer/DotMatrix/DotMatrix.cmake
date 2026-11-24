@@ -1,6 +1,6 @@
 # The dot matrix printer drivers in C: the common printer driver code of
 # PrintCom/ (beside its asm) and the driver's own files.  The device and
-# font tables come from the asm (Port32/tools/dmdevinfo2c.py).
+# font tables come from the asm (dmdevinfo2c, Tools/dmdevinfo2c).
 #
 # geos_dotmatrix_driver(<name> GP <gp> REV <rev> [FONTS <font info asm>...]
 #                       [INFOS <info asm>...] [PREFIX <prefix>]
@@ -40,12 +40,11 @@ function(geos_dotmatrix_driver name)
   endforeach()
   set(devices ${CMAKE_CURRENT_BINARY_DIR}/${name}Devices.c)
   add_custom_command(OUTPUT ${devices}
-    COMMAND ${Python3_EXECUTABLE}
-            ${PROJECT_SOURCE_DIR}/Port32/tools/dmdevinfo2c.py
+    COMMAND ${GEOS_DMDEVINFO2C}
             -o ${devices} -D ${dir}/${pre}Constant.def
             ${fonts} ${dir}/${pre}DriverInfo.asm ${infos}
     DEPENDS ${dir}/${pre}DriverInfo.asm ${infos} ${dir}/${pre}Constant.def
-            ${fontdep} ${PROJECT_SOURCE_DIR}/Port32/tools/dmdevinfo2c.py
+            ${fontdep} ${GEOS_DMDEVINFO2C} geos_host_tools
     COMMENT "dmdevinfo2c ${name}"
     VERBATIM)
 

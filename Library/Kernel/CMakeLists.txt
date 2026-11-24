@@ -33,22 +33,26 @@ target_link_libraries(geos_kernel_objs PRIVATE ghal gapi hostfs)
 
 # The kernel's export table (what geodes may import by name): the
 # symbols of the objects above that Library/Kernel/geos.gp exports
-# (Port32/tools/kexports.py).  Without nm (Open Watcom) it is empty:
+# (kexports, Tools/kexports, from nm's list of them).  Without nm (Open
+# Watcom) it is empty:
 # that toolchain loads no geode modules.
 set(_kexports ${CMAKE_CURRENT_BINARY_DIR}/kernelExports.c)
-if(CMAKE_NM AND Python3_Interpreter_FOUND)
+if(CMAKE_NM)
   set(_kexports_args)
   if(GEOS_HOST STREQUAL "dos32")
     list(APPEND _kexports_args --underscore)
   endif()
   add_custom_command(OUTPUT ${_kexports}
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/kexports.py
-            --nm ${CMAKE_NM} --gp ${CMAKE_CURRENT_SOURCE_DIR}/geos.gp
-            ${_kexports_args} -o ${_kexports} $<TARGET_OBJECTS:geos_kernel_objs>
+    COMMAND ${CMAKE_COMMAND} -D NM=${CMAKE_NM} -D OUT=${_kexports}.syms
+            "-DOBJECTS=$<JOIN:$<TARGET_OBJECTS:geos_kernel_objs>,$<SEMICOLON>>"
+            -P ${PROJECT_SOURCE_DIR}/cmake/GeosNm.cmake
+    COMMAND ${GEOS_KEXPORTS} --syms ${_kexports}.syms
+            --gp ${CMAKE_CURRENT_SOURCE_DIR}/geos.gp
+            ${_kexports_args} -o ${_kexports}
     DEPENDS geos_kernel_objs $<TARGET_OBJECTS:geos_kernel_objs>
             ${CMAKE_CURRENT_SOURCE_DIR}/geos.gp
-            ${PROJECT_SOURCE_DIR}/Port32/tools/kexports.py
-    COMMAND_EXPAND_LISTS
+            ${PROJECT_SOURCE_DIR}/cmake/GeosNm.cmake
+            ${GEOS_KEXPORTS} geos_host_tools
     COMMENT "kernel exports"
     VERBATIM)
 else()

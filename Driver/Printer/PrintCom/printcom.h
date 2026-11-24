@@ -115,7 +115,7 @@ extern Boolean SendCodeOut(PState *ps, const byte *code);
 #define PS_BAND_BUFFER(ps)	((byte *) (ps)->PS_bufSeg + \
 				 PRINT_OUTPUT_BUFFER_SIZE)
 
-/* the driver's tables (Port32/tools/dmdevinfo2c.py): the font entries'
+/* the driver's tables (Tools/dmdevinfo2c): the font entries'
  * control codes by FE_command, the printerFontInfo resource (PI_draft and
  * PI_nlq are offsets into it), the tables of the ISO substitutions and
  * translations */

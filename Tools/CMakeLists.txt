@@ -1,5 +1,6 @@
 # The build tools of the C port that are programs of the build host:
-# goc so far.  A project of its own, built with the compiler of the
+# goc and uic (with uicpp), and the generators that make C of the asm
+# sources' tables.  A project of its own, built with the compiler of the
 # build host also when the port is cross compiled; the port's build
 # configures and builds it as an external project
 # (cmake/GeosHostTools.cmake).  The pmake build of the tools (Open
@@ -32,3 +33,17 @@ add_subdirectory(utils)
 add_subdirectory(goc)
 add_subdirectory(uic)
 add_subdirectory(uicpp)
+
+# The generators: plain C with nothing but the C library, so that they
+# can be built wherever GEOS is built (DOS too).  Each gives the same
+# output as the Python script it replaced.
+add_subdirectory(gpres)
+add_subdirectory(kexports)
+add_subdirectory(symtabgen)
+add_subdirectory(papergen)
+add_subdirectory(asmchars2c)
+add_subdirectory(epsfonts2c)
+add_subdirectory(kmapgen)
+add_subdirectory(localgen)
+add_subdirectory(psdevinfo2c)
+add_subdirectory(dmdevinfo2c)

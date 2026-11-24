@@ -4,7 +4,7 @@
  * A geode is a module in the host's format (ELF shared object, DXE3 on
  * dos32; loaded by ghal_module, Port32/GHAL-Concept.md section 4.4).  What
  * glue used to put into the geode header from the .gp file is the
- * exported object __geos_module, written by Port32/tools/gpgeode.py:
+ * exported object __geos_module, written by Tools/gpres/gpgeode.c:
  * name, token, attributes, protocol, libraries, the exported entries in
  * .gp order and the resource table.  The kernel's GeodeLoad reads it
  * after ghal_module_load.  Port32/ABI.md section 7.

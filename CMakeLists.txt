@@ -17,9 +17,10 @@
 # Every directory has its own CMakeLists.txt, which names its files and
 # the directories below it; what they share is in cmake/:
 #
-#   GeosHostTools.cmake  the build tools (Tools/: goc), built for the
-#                        build host
+#   GeosHostTools.cmake  the build tools (Tools/: goc, uic, the
+#                        generators), built for the build host
 #   GeosGoc.cmake        goc -cg on .goc files
+#   GeosUic.cmake        geos_uic(): uic -g on .ui files
 #   GeosGeode.cmake      geos_geode(): a geode; geos_embed()
 #   GeosSources.cmake    geos_sources(): the files of a geode, listed in
 #                        its directories
@@ -88,10 +89,12 @@ endif()
 # Geodes (module loading, goc -cg) need gcc or clang; goc -cg alone (C99
 # compound literals) anything but Open Watcom.  goc is built for the
 # build host from Tools/ (cmake/GeosHostTools.cmake).
+# The build needs no Python (the tools are C programs, Tools/); some
+# tests do, and the ghal-inventory targets.
 find_package(Python3 COMPONENTS Interpreter)
 set(GEOS_HAVE_GOC OFF)
 set(GEOS_BUILD_GEODES OFF)
-if(Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
   set(GEOS_HAVE_GOC ON)
   if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     set(GEOS_BUILD_GEODES ON)
@@ -99,6 +102,7 @@ if(Python3_Interpreter_FOUND AND NOT CMAKE_C_COMPILER_ID STREQUAL "OpenWatcom")
 endif()
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 include(GeosSources)
+include(GeosHostTools)
 if(GEOS_HAVE_GOC)
   include(GeosGoc)
   include(GeosUic)

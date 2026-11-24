@@ -1,6 +1,6 @@
 /*
  * localInt.h -- what the C files of the localization code share (SBCS):
- * the tables that Port32/tools/localgen.py makes of the asm at build
+ * the tables that Tools/localgen makes of the asm at build
  * time (localTables.c), and the code pages.
  */
 #ifndef __LOCALINT_H

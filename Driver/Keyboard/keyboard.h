@@ -6,7 +6,7 @@
  * design: the "interrupt" turns key events into PC scan codes (set 1, as
  * the 8042 gave them) and sends them to the output as MSG_IM_KBD_SCAN;
  * DR_KBD_XLATE_SCAN turns a scan code into a character with the keyboard
- * map (kmap*.def, made C by Port32/tools/kmapgen.py).  The key events come
+ * map (kmap*.def, made C by Tools/kmapgen).  The key events come
  * from ghal_input (HID usages) instead of port 60h.  SBCS.
  */
 #ifndef KEYBOARD_H

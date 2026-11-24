@@ -33,7 +33,7 @@ typedef struct {
 	(pi)->PI_hiRes + sizeof(GraphicsProperties)))
 
 /* PI_customEntry, PI_customExit: the custom job routines.  The asm
- * stored their offsets; these are numbers (psdevinfo2c.py). */
+ * stored their offsets; these are numbers (psdevinfo2c). */
 enum {
     PSC_NONE,
     PSC_PrintEnterLJ4PScript,

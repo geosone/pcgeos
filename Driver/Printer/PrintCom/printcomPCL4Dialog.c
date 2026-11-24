@@ -4,7 +4,7 @@
  * uiEval.asm, uiEvalPCL4Simplex.asm, uiEvalPCL4Duplex.asm).
  *
  * The print UI is not ported (Port32/PLAN.md): the device info has no
- * UI trees and no eval routine (dmdevinfo2c.py), so there is no tree to
+ * UI trees and no eval routine (dmdevinfo2c), so there is no tree to
  * return, evaluate or stuff; the paper paths, the printer's memory and
  * what is deleted from it (PrintDriverUIData) are what the job's
  * JP_printerData says.

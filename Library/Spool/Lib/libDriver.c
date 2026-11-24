@@ -5,7 +5,7 @@
  *
  * The symbol set tables (the upper 128 characters of the GEOS character
  * set in each PrinterSymbolSet) come from lib*Tab.asm at build time
- * (Port32/tools/symtabgen.py).  The Japanese build's mapping of the
+ * (Tools/symtabgen).  The Japanese build's mapping of the
  * Kanji fonts (PZ_PCGEOS) is not ported.
  */
 #include "spoolLocal.h"

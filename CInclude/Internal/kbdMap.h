@@ -8,7 +8,7 @@
  * DESCRIPTION:
  *	C form of Include/Internal/kbdMap.def: what a keyboard map looks
  *	like (SBCS).  The maps themselves (Driver/Keyboard/kmap*.def) are
- *	turned into C by Port32/tools/kmapgen.py.
+ *	turned into C by Tools/kmapgen.
  *
  ***********************************************************************/
 #ifndef __KBDMAP_H

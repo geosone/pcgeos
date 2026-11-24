@@ -7,7 +7,7 @@
 # Builds <name>.geo in the current binary directory and the target
 # geode_<name>; the path of the file goes to the variable <name>_GEO,
 # which every directory sees (an internal cache entry).  With GP it is a GEOS geode: the .goc files go
-# through goc -cg (GeosGoc.cmake) and Port32/tools/gpgeode.py writes the
+# through goc -cg (GeosGoc.cmake) and gpgeode (Tools/gpres) writes the
 # GEOS data of the module (__geos_module, CInclude/geosmod.h) from
 # the .gp file and the .rev file (default: <geode>.rev next to the .gp
 # file, if there is one).  PROTOCOL gives the protocol where the .rev
@@ -80,11 +80,9 @@ function(geos_geode name)
     endif()
     add_custom_command(OUTPUT ${module_c}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${dir}
-      COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/gpgeode.py
-              -o ${module_c} ${rev_args} --res ${geode}_res.h
+      COMMAND ${GEOS_GPGEODE} -o ${module_c} ${rev_args} --res ${geode}_res.h
               --objs ${geode}_objs.h ${gp} ${gocs}
-      DEPENDS ${gp} ${gocs} ${rev} ${PROJECT_SOURCE_DIR}/Port32/tools/gpgeode.py
-              ${PROJECT_SOURCE_DIR}/Port32/tools/gpres.py
+      DEPENDS ${gp} ${gocs} ${rev} ${GEOS_GPGEODE} geos_host_tools
       COMMENT "gpgeode ${geode}"
       VERBATIM)
     set_source_files_properties(${module_c} PROPERTIES

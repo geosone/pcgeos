@@ -4,7 +4,7 @@
 #            [DEPENDS file...])
 #
 # Translates the .goc files of one geode with goc -cg and numbers its
-# resources from <geode.gp> and the files (Port32/tools/gpres.py).  The
+# resources from <geode.gp> and the files (gpres, Tools/gpres).  The
 # chunk constants of all files are collected in <geode>_objs.h, for
 # objects one file declares with @extern (GeosGocObjs.cmake).
 # <out-var> receives one C file per .goc file to add to a target: each
@@ -16,7 +16,6 @@
 # before goc runs (headers a rule of the build writes).
 include_guard(GLOBAL)
 include(${CMAKE_CURRENT_LIST_DIR}/GeosHostTools.cmake)
-find_package(Python3 COMPONENTS Interpreter)
 
 function(geos_goc out_var gp_file)
   cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "INCLUDES;DEPENDS")
@@ -34,9 +33,8 @@ function(geos_goc out_var gp_file)
 
   add_custom_command(OUTPUT ${res_h}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${dir}
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/gpres.py
-            -o ${res_h} ${gp_file} ${gocs}
-    DEPENDS ${gp_file} ${gocs} ${PROJECT_SOURCE_DIR}/Port32/tools/gpres.py
+    COMMAND ${GEOS_GPRES} -o ${res_h} ${gp_file} ${gocs}
+    DEPENDS ${gp_file} ${gocs} ${GEOS_GPRES} geos_host_tools
     COMMENT "gpres ${geode}"
     VERBATIM)
 

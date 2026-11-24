@@ -3036,7 +3036,7 @@ void OutputMethodAntiWarningCode(Method *meth)
  * A chunk may consist of two C objects (header and elements of a chunk
  * array or GCN list, a moniker and its text); the loader puts them one
  * after the other, as the segment order did for glue.  GOCR_RES_<RESOURCE>
- * is the resource number from the .gp file (Port32/tools/gpres.py).
+ * is the resource number from the .gp file (Tools/gpres).
  *
  ***********************************************************************/
 static char *

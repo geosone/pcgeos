@@ -3,7 +3,7 @@
 #                      their tables (stringCharTables.asm, ...,
 #                      cmap*.asm) and strings (localStrings.asm) become
 #                      localTables.c and localStrings.h at build time
-#                      (Port32/tools/localgen.py)
+#                      (localgen, Tools/localgen)
 target_sources(geos_kernel_objs PRIVATE
   stringChar.c
   stringCase.c
@@ -28,7 +28,7 @@ set(_local_tables
 list(TRANSFORM _local_tables PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/localTables.c
                           ${CMAKE_CURRENT_BINARY_DIR}/localStrings.h
-  COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Port32/tools/localgen.py
+  COMMAND ${GEOS_LOCALGEN}
           -o ${CMAKE_CURRENT_BINARY_DIR}/localTables.c
           --header ${CMAKE_CURRENT_BINARY_DIR}/localStrings.h
           --chars ${PROJECT_SOURCE_DIR}/Include/char.def
@@ -36,7 +36,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/localTables.c
           ${_local_tables}
   DEPENDS ${_local_tables} ${PROJECT_SOURCE_DIR}/Include/char.def
           ${PROJECT_SOURCE_DIR}/Include/Internal/lexical.def
-          ${PROJECT_SOURCE_DIR}/Port32/tools/localgen.py
+          ${GEOS_LOCALGEN} geos_host_tools
   COMMENT "localization tables"
   VERBATIM)
 # the kernel is a target of the directory above: it waits for the tables

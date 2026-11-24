@@ -14,7 +14,7 @@ Boolean PrintSetSymbolSet(PState *ps)
     if (!pi->PI_fontSymbolSets)
 	return FALSE;
     /* a table of the control codes by PrinterSymbolSet: none of the
-     * ported drivers has one (dmdevinfo2c.py refuses it), so its entries
+     * ported drivers has one (dmdevinfo2c refuses it), so its entries
      * would be indices into printFontCommands */
     sets = (const word *) ((const byte *) pi + pi->PI_fontSymbolSets);
     s = PS_UI_DATA(ps)->PUID_symbolSet;

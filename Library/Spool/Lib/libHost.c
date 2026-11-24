@@ -31,7 +31,7 @@ static const char printerCat[] = "printer";
 static const char hostKey[] = "hostPrinter";
 static const char queueKey[] = "hostQueue";
 
-/* the device of the PostScript driver (psdevinfo2c.py's names) */
+/* the device of the PostScript driver (psdevinfo2c's names) */
 static const char monoDevice[] = "PostScript Compatible";
 static const char colorDevice[] = "HP Color LaserJet (PostScript)";
 

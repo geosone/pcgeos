@@ -1,6 +1,6 @@
 /*
  * libPaper.h -- the pre-defined page sizes of the spooler (libTables.asm,
- * made into C by Port32/tools/papergen.py) for libPaper.c.
+ * made into C by Tools/papergen) for libPaper.c.
  */
 #ifndef LIBPAPER_H
 #define LIBPAPER_H

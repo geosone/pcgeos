@@ -80,7 +80,7 @@ to the resource handle. Without segments, `goc` does that work itself:
   header, rounded up to 4 bytes; in an object block, entry 0 is the flags
   chunk. Code (also in other files) gets `const ChunkHandle X` and
   `const word X_resid`.
-- **Resource numbers come from the `.gp` file.** `Port32/tools/gpres.py`
+- **Resource numbers come from the `.gp` file.** `Tools/gpres`
   numbers the resources the way glue does: first the `resource` lines in
   order, then any other resource the `.goc` files start. Numbering starts at 2:
   0 is the core block and 1 the fixed data.
@@ -281,7 +281,7 @@ constant, and C has no constants across translation units. Therefore:
   output and static initializers in code.
 
 No load-time relocation by name is needed: resource numbers are fixed per
-geode by `gpres.py`, chunk handles by the order of the chunks. The SDK
+geode by `gpres`, chunk handles by the order of the chunks. The SDK
 output does not change (none of its samples uses `@extern` in data). Of
 the real multi-file geodes in `Appl` that goc can translate on Linux,
 BbxBrow and Webbox use it (12 references), and all resolve. `goc.resources`
@@ -350,7 +350,7 @@ A geode is a module in the host's format (`GHAL-Concept.md` §4.4: DXE3 on
 dos32, ELF shared object on linux and gonware), loaded by `ghal_module`.
 What glue put into the geode header from the `.gp` file is the exported
 object `__geos_module` (`CInclude/geosmod.h`), written by
-`Port32/tools/gpgeode.py`:
+`Tools/gpres/gpgeode.c`:
 
 - permanent name and extension (space padded), long name, token,
   attributes (`type`, computed as glue does: without `single` the geode
@@ -361,7 +361,7 @@ object `__geos_module` (`CInclude/geosmod.h`), written by
 - the exported entries in `.gp` order with their names (`export x as y`,
   `publish`, `skip n`, `skip until n` as empty slots), so entry numbers
   stay those of the `.gp` file;
-- the resource table indexed by resource number (`gpres.py`): the `RESF_*`
+- the resource table indexed by resource number (`gpres`): the `RESF_*`
   flags of the `resource` lines exactly as glue computes them, and for
   LMem resources made by goc a pointer to their `GocResource`;
 - `GM_resourceHandles`, the geode's `__goc_resource_handles[]`, which the
@@ -426,7 +426,7 @@ from their modules:
 - **Imports by name.** An import comes from one of three places:
   - the kernel's export table: every symbol of the kernel's objects
     that `Library/Kernel/geos.gp` exports, case ignored
-    (`Port32/tools/kexports.py`, generated at build time from `nm`);
+    (`Tools/kexports`, generated at build time from `nm`);
   - a few host names: `raise` for libgcc on ARM, and libgcc's frame
     registration for a DXE3;
   - a library's exports: an "export ... as" name, or a module symbol
@@ -575,7 +575,7 @@ typedef Boolean DriverStrategy(word function, DriverRegs *regs); /* carry */
   (§13f).
 
 **Driver table.** A driver defines its `DriverInfoStruct` as the
-variable `DriverTable`, as glue required. `gpgeode.py` puts its address
+variable `DriverTable`, as glue required. `gpgeode` puts its address
 into `GM_driverTable` (`GEOS_MODULE_VERSION` 2). `DRIVER_STRATEGY(f)`
 stores a strategy function in it, and `DriverCall(dis, fn, &regs)`
 calls it.
@@ -614,7 +614,7 @@ checks:
 
 **What a geode may import.** A geode has no host C library (§7). The
 kernel exports, besides its routines:
-- the GHAL host services that drivers need (`kexports.py`
+- the GHAL host services that drivers need (`kexports`
   `GHAL_EXPORTS`): `ghal_crit_*`, `ghal_log`, `ghal_time_monotonic_ns`,
   `ghal_irq_*`, `ghal_input_*` and `ghal_display_*`, and the GAPI
   print job routines and `gapi_last_error` for the CUPS port driver;
@@ -628,7 +628,7 @@ These entries have no asm counterpart. Their entry numbers are
 **Protocol.** A driver's protocol is the protocol of its driver class.
 glue took it from the `.ldf` file of that protocol (`kbd.ldf` gives
 `KEYBOARD_PROTO`, 4.1), not from the `.rev` file. `geos_geode(...
-PROTOCOL 4.1)` passes it to `gpgeode.py --protocol`.
+PROTOCOL 4.1)` passes it to `gpgeode --protocol`.
 
 ### 7.3 The keyboard driver (`Driver/Keyboard`, P4)
 
@@ -653,7 +653,7 @@ The C keyboard driver keeps the design of the asm driver
 `ConvertExtCodes`, `ProcessScanCode`, `HandleExtendedDef`,
 `HandleNormalDef`, `ProcessStateRelease` and `AccentTranslation`
 (SBCS).
-- It works on the tables of the keyboard map. `Port32/tools/kmapgen.py`
+- It works on the tables of the keyboard map. `Tools/kmapgen`
   makes C of a `kmap*.def` file (`KeyboardMap`,
   `CInclude/Internal/kbdMap.h`). It handles all 28 SBCS maps.
 - It returns `di` = `MSG_META_KBD_CHAR` (119) and `al` = 1 for a
@@ -1087,7 +1087,7 @@ resource.
 **The Epson 9-pin driver** (`Driver/Printer/DotMatrix/Epson9`,
 `epson9.geo`, protocol 5.0, from `epson932.gp`): `epson9ControlCodes.c`
 and the `PrintCom` files of `epson9Manager.asm`.
-`Port32/tools/dmdevinfo2c.py` makes the device and font tables of the
+`Tools/dmdevinfo2c` makes the device and font tables of the
 asm at build time (`epson9DriverInfo.asm`, the `*Info.asm`,
 `fontEpsonFXInfo.asm`): per info resource a structure of the
 `PrinterInfo`, its `GraphicsProperties`, the font geometries and pitch
@@ -1150,7 +1150,7 @@ mode, the drivers' graphics codes are the mode alone) with the swaths in
 1/180" or 1/360" (`graphicsPrintSwath72To180.c`, `72To360.c`).
 `jobEndDotMatrix.c` runs a device's custom exit as the asm does. A
 driver may have several font files (Canon48: `FONTS` of
-`geos_dotmatrix_driver`, `--fonts` of `dmdevinfo2c.py` repeated).
+`geos_dotmatrix_driver`, `--fonts` of `dmdevinfo2c` repeated).
 
 Three drivers speak no ESC/P: `oki9.geo` (Okidata: numbers in ASCII
 with leading zeros `streamHexToASCIILeading0.c`, whose C name
@@ -1208,7 +1208,7 @@ repository.
 cursor in 1/192" (`cursorConvert192.c`), the dot matrix text with its
 fonts and the styles NLQ, bold and underline (`quietjetStyles.c`),
 raster lines uncompressed at 96 and 192 dpi (`graphicsPCLScanline.c`; a
-white one as a raster line of a zero byte). `dmdevinfo2c.py` knows
+white one as a raster line of a zero byte). `dmdevinfo2c` knows
 `TP_21_3_PITCH`, and `TP_24_PITCH` has the value of
 `CInclude/Internal/printDr.h` (0xd6, not 0xc2).
 
@@ -1225,7 +1225,7 @@ cursor to the first byte with ink of any line (`CSI x \``), then `CSI
 count ; width ; dpi . r` and the lines from there to the last byte with
 ink of any line; after a band the cursor moves down absolutely
 (`graphicsPrintSwath300.c`). `ctlcodes2c.py` takes tables of codes of a
-stride (`pr_codes_SetGraphics`, indexed by the mode), `dmdevinfo2c.py`
+stride (`pr_codes_SetGraphics`, indexed by the mode), `dmdevinfo2c`
 constants with `shl` and `shr`.
 
 `dumb.geo` and `diablo.geo` (Driver/Printer/Ascii): text only, no
@@ -1237,7 +1237,7 @@ second ribbon color, the X by an absolute tab (`ESC HT n`). Two asm
 bugs are not ported: the counts of the Diablo pitch codes are one too
 big (the asm sent the next code's count byte with them; `ctlcodes2c.py`
 corrects them, `SHORT_CODES`), and `PrSetPaperPath` sent the bin byte
-of the ASF without a code before it (now only after one). `dmdevinfo2c.py`
+of the ASF without a code before it (now only after one). `dmdevinfo2c`
 takes a label right before a `FontEntry` as a second name of it.
 
 The control codes and the constants of these drivers come from the asm
@@ -1251,7 +1251,7 @@ send the bin number alone, as the asm).
 protocol 5.0, from `deskjet32.gp`), the first PCL driver:
 `deskjetControlCodes.c` and the `PrintCom` files of
 `deskjetManager.asm`, built by the same `geos_dotmatrix_driver`.
-- **Tables.** `dmdevinfo2c.py` reads the symbol set list of an info
+- **Tables.** `dmdevinfo2c` reads the symbol set list of an info
   resource (the control codes by `PrinterSymbolSet`, indices into
   `printFontCommands` as the font commands), drivers without a font
   file (the PCL NLQ list is an empty list in the info resource; the
@@ -1285,7 +1285,7 @@ the PCL 4 parts of the shared job files.
   exit routine instead of the reset at the end (PPDS to PCL and back,
   PJL with or without a message on the display, the total reset):
   `PI_customEntry`/`PI_customExit` are indices into
-  `printCustomRoutines`, which `dmdevinfo2c.py` emits for every driver
+  `printCustomRoutines`, which `dmdevinfo2c` emits for every driver
   (`PrintCustomRoutine`, `printcom.h`). Uncollated copies are the
   printer's (`ESC & l # X`, the job's `JP_numCopies` set to 1), duplex
   `ESC & l # S` before the input path, the soft fonts and macros deleted
@@ -1316,7 +1316,7 @@ the PCL 4 parts of the shared job files.
 
 **The PostScript driver** (`Driver/Printer/PScript`, `pscript.geo`,
 protocol 5.0, built from `pscript32.gp`):
-- **Device tables.** `Port32/tools/psdevinfo2c.py` makes them from the
+- **Device tables.** `Tools/psdevinfo2c` makes them from the
   asm at build time (`pscriptDriverInfo.asm` without `GPC_ONLY`, and
   the `*Info.asm`): 109 devices on 20 info resources. Each is a
   `PrinterInfo`, its `GraphicsProperties`, the `PSInfoStruct` and the
@@ -2379,7 +2379,7 @@ entries** of the owner, one of its libraries or the kernel
 class whose objects are saved is exported, as in 16-bit GEOS. The
 numbers do not change when a geode or the kernel grows: the export
 number of a geode is its `.gp` order, and each kernel export carries
-its entry number in `geos.gp` (`kexports.py` counts exports and `skip`
+its entry number in `geos.gp` (`kexports` counts exports and `skip`
 as glue does). Without a kernel export table (Open Watcom) the kernel
 knows the numbers of `MetaClass` and `ProcessClass`. Relocation methods see the same
 references through `ObjDoRelocation`/`ObjDoUnRelocation` (a per-thread
@@ -4244,7 +4244,7 @@ boot after the standard paths), with the C signatures of
 `CInclude/localize.h`. The tables and strings stay in the asm
 (`stringCharTables.asm`, `stringCaseTables.asm`,
 `stringSortTables.asm`, `cmap*.asm`, `localStrings.asm`):
-`Port32/tools/localgen.py` makes `localTables.c` and `localStrings.h` of
+`Tools/localgen` makes `localTables.c` and `localStrings.h` of
 them at build time, the symbols resolved from `Include/char.def` and
 `Include/Internal/lexical.def`.
 
@@ -4447,7 +4447,7 @@ PostScript printer driver uses (§7.6).
 
 - **The PostScript text stays in the asm.** `exportPSCode.asm`,
   `exportComments.asm` and `exportProlog.asm` keep the procedures,
-  comments and the prolog as `char` data. `Port32/tools/asmchars2c.py`
+  comments and the prolog as `char` data. `Tools/asmchars2c`
   makes C arrays of them at build time, with a header that gives their
   sizes (`epsStrings.c`, `epsStrings.h`), so there is one copy of the
   text.
@@ -4494,7 +4494,7 @@ by the prolog's `DSG` at the width GEOS measured.
   of the printer's font list (`PSEO_fonts`) by `CalcFontDiff`, the
   styles it lacks done by a matrix (bold, scripts, italic, weight,
   width), standard encoded fonts re-encoded to the GEOS character set.
-  `Port32/tools/epsfonts2c.py` makes the tables at build time from
+  `Tools/epsfonts2c` makes the tables at build time from
   `exportFontTables.asm`, `exportMoreFonts.asm` and the face table of
   `Include/fontID.def`.
 - The font, size and style are read before the metrics lock the font:
@@ -4552,7 +4552,7 @@ the asm's compact hex code, drawn by the header's `BuildGlyph`.
   point, rounded to 1/65536). The bounding box is `0 0 0 0` (unknown).
 - Bold and italic are left to the driver (they are in the `FontMatrix`),
   the other styles to the text, as for the printer's fonts.
-- `Port32/tools/asmchars2c.py` reads `exportType3Fonts.asm` too: lines
+- `Tools/asmchars2c` reads `exportType3Fonts.asm` too: lines
   continued with a backslash, labels named `end*` only end a block.
 
 Not ported yet: text in paths,
@@ -4692,7 +4692,7 @@ geode is built from `spool32.gp`.
 - **Page sizes** (`Lib/libPaper.c`, the C port of `libPaper.asm`): the
   pre-defined sizes of paper, envelopes, labels and postcards with their
   names and default layouts and the default orders come from
-  `libTables.asm` at build time (`Port32/tools/papergen.py`, the
+  `libTables.asm` at build time (`Tools/papergen`, the
   standard build's conditionals); user-defined sizes, the order and
   the default page size live in the ini file as before (`[paper] order`,
   `newSizes`, `count`, `paper128` …, `[spool] width` …). The asm built
@@ -4710,7 +4710,7 @@ geode is built from `spool32.gp`.
   font as pointers, and the driver's ISO substitution and translation
   tables (chunks in the asm) as a `SpoolTransTables`. The symbol set
   tables come from `lib*Tab.asm` at build time
-  (`Port32/tools/symtabgen.py`). The Kanji font mapping of the Japanese
+  (`Tools/symtabgen`). The Kanji font mapping of the Japanese
   build is not ported. Of `libPrintControl.asm` only
   `SpoolCreateSpoolFile` is ported: `SpoolGetPageSize`,
   `SpoolConvertToPaperSizes` and `SpoolGetPaperSizeString` are neither
@@ -6363,7 +6363,7 @@ are left out), the constants, the variables and the routines.
     (`CSpec/cspecCUASArt.goh`) are generated from the `mkr*.ui` and
     `bmPin.ui` files by `Port32/tools/uimkr2goc.py` and included where
     the moniker lists are (goc needs a listed moniker's attributes);
-    `gpgeode.py` and `gpres.py` find the resources such a local
+    `gpgeode` and `gpres` find the resources such a local
     `@include` starts.
   - Moniker lists are reduced to one moniker (an icon if there is one,
     else a gstring, else the text) when a generic object is built

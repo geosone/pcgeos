@@ -92,12 +92,12 @@ typedef struct TGSLocals {
                          ((dword) (e)[(off) + 3] << 24)))
 
 /* the PostScript text (generated from exportPSCode.asm, exportComments.asm
- * and exportProlog.asm by Port32/tools/asmchars2c.py) */
+ * and exportProlog.asm by Tools/asmchars2c) */
 #define PS(name)        name, (word) (sizeof(name) - 1)
 #include "epsStrings.h"
 
 /* an AdobeFontEntry (exportConstant.def), the tables of epsFonts.c
- * (Port32/tools/epsfonts2c.py) */
+ * (Tools/epsfonts2c) */
 typedef struct {
     word        AFE_id;                 /* FontID */
     byte        AFE_style;              /* TextStyle */

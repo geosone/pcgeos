@@ -2,7 +2,7 @@
  * test_kernel_geode.c -- the C kernel loads geodes (Geodes/geodesLoad.c,
  * Port32/ABI.md section 7).
  *
- * Two geodes built by goc -cg and gpgeode.py in the module format of the
+ * Two geodes built by goc -cg and gpgeode in the module format of the
  * host (Port32/Tests/Geode): the library kglib (a routine, a class, an
  * entry that counts its calls; protocol 2.3) and the process kgapp,
  * which uses kglib and has an object of kglib's class in its object

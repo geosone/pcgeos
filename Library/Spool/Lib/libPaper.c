@@ -3,7 +3,7 @@
  *
  * The pre-defined sizes of each PageType (paper, envelope, label,
  * postcard) are the tables of libTables.asm (libPaperTables.c, made by
- * Port32/tools/papergen.py).  A user-defined size lives in the ini file:
+ * Tools/papergen).  A user-defined size lives in the ini file:
  * a category paper128 ... (envel128, label128, postc128) with name,
  * width, height and layout, listed in [paper] newSizes and counted in
  * [paper] count; its number is the one of its category (128-255).  The

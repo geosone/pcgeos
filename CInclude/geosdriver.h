@@ -14,7 +14,7 @@
  * (Internal/fsDriver.h).
  *
  * A driver geode defines its DriverInfoStruct as the variable
- * "DriverTable", as glue required; gpgeode.py puts its address into
+ * "DriverTable", as glue required; gpgeode puts its address into
  * __geos_module (GM_driverTable).
  *
  *	static Boolean MyStrategy(word function, DriverRegs *r);

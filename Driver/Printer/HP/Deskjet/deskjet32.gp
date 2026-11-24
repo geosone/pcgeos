@@ -5,7 +5,7 @@
 # The C port of deskjet.gp: the common printer driver code beside its asm
 # in PrintCom/ and the driver's own code here (printcomDriver.h,
 # deskjetControlCodes.c).  The device tables are generated from the asm
-# (Port32/tools/dmdevinfo2c.py), so there are no info resources.  Not
+# (Tools/dmdevinfo2c), so there are no info resources.  Not
 # ported: the print UI (the options box) and the gamma correction of the
 # medium and high resolutions (Color/Correct).
 #

@@ -2,7 +2,7 @@
  * exportText.c -- text in PostScript (the C port of the text part of
  * exportText.asm and of exportFontMap.asm; the tables of
  * exportFontTables.asm, exportMoreFonts.asm and the face table of
- * fontID.def are made at build time by Port32/tools/epsfonts2c.py).
+ * fontID.def are made at build time by Tools/epsfonts2c).
  *
  * Each font and style the text uses becomes a page font: the PostScript
  * font that comes closest among those of the printer (PSEO_fonts).  A

@@ -10,7 +10,7 @@
  *     uses (a module is self-describing only after it is loaded), and
  *     loads or references those libraries;
  *   - loads the module for good; imports are resolved by name, from the
- *     kernel's export table (kernelExports.c, Port32/tools/kexports.py)
+ *     kernel's export table (kernelExports.c, Tools/kexports)
  *     and from the exports of the libraries;
  *   - allocates the core block, builds the LMem resources made by goc
  *     (LMemCreateResourceBlock), registers the resource handles,
@@ -858,7 +858,7 @@ GeodeHandle GeodeLoad(const char *name, GeodeAttrs attrMatch,
  * ------------------------------------------------------------------- */
 
 /* the kernel's classes where it has no export table (Open Watcom), with
- * their entry numbers in geos.gp (kexports.py) */
+ * their entry numbers in geos.gp (kexports) */
 extern ClassStruct MetaClass, ProcessClass;
 static const struct {
     const void	*addr;

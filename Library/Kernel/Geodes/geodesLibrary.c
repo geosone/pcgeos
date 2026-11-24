@@ -16,7 +16,7 @@
  * the client was built with must match the library's: the same major
  * number, and a minor number not above the library's
  * (TestProtocolNumbers of geodesLoad.asm).  0.0 takes any protocol:
- * gpgeode.py does not know yet what a geode needs of its libraries
+ * gpgeode does not know yet what a geode needs of its libraries
  * (glue took it from the library's .ldf file).
  */
 #include "kernelC.h"

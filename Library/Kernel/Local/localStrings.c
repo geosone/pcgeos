@@ -6,7 +6,7 @@
  * numericFormats.asm).
  *
  * The defaults are the asm's chunks, made C at build time
- * (localDefaultStrings[], Port32/tools/localgen.py); the copies here are
+ * (localDefaultStrings[], Tools/localgen); the copies here are
  * what the Set routines and the init file change.  A lock that nests,
  * as MemThreadGrab of the asm, guards them.
  */

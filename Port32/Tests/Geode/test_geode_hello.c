@@ -1,6 +1,6 @@
 /*
  * test_geode_hello.c -- load a real geode: Appl/SDK_C/Hello, built by
- * goc -cg and gpgeode.py as a module of the host (ELF, DXE3 on dos32),
+ * goc -cg and gpgeode as a module of the host (ELF, DXE3 on dos32),
  * and check its GEOS data (__geos_module, CInclude/geosmod.h)
  * against hello.gp.
  *

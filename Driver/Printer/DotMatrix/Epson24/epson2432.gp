@@ -5,7 +5,7 @@
 # The C port of epson24.gp: the common printer driver code beside its asm
 # in PrintCom/ and the driver's own code here (printcomDriver.h,
 # epson24ControlCodes.c).  The device and font tables are generated from
-# the asm (Port32/tools/dmdevinfo2c.py), so there are no info resources.
+# the asm (Tools/dmdevinfo2c), so there are no info resources.
 # Not ported: the print UI (the options and country boxes) and color
 # correction (CorrectInk).
 #

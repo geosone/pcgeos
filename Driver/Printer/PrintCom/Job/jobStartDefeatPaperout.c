@@ -16,7 +16,7 @@ Boolean PrintStartJob(PState *ps, DriverRegs *r)
     ps->PS_printerType = pi->PI_type;
     ps->PS_printerSmart = pi->PI_smarts;
     /* PI_customEntry: no custom routines in the tables of these drivers
-     * (dmdevinfo2c.py refuses them) */
+     * (dmdevinfo2c refuses them) */
     PrintResetPrinterAndWait(ps);
     PrSetPaperPath(ps, PS_UI_DATA(ps)->PUID_paperInput, 0);
     ps->PS_asciiSpacing = 12;

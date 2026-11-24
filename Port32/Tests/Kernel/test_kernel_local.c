@@ -3,7 +3,7 @@
  * (Library/Kernel/Local: character classes, case, string compare, DOS
  * code pages, quotes, number and currency formats and their settings in
  * geos.ini, numbers and distances as text, dates and times; the tables and strings made at build time by
- * Port32/tools/localgen.py).
+ * Tools/localgen).
  */
 #include "kernelC.h"
 #include "ghal.h"
