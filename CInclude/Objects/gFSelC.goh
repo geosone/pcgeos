@@ -283,6 +283,11 @@ typedef struct {
 /*
  * 	VarData
  */
+    /* GFSTempDataEntry: the selection as the specific UI last told it */
+    typedef struct {
+	word			  GFSTDE_selectionNumber;
+	GenFileSelectorEntryFlags GFSTDE_selectionFlags;
+    } GFSTempDataEntry;
     @vardata void TEMP_GEN_FILE_SELECTOR_DATA; /* Not to be used in .goc file */
 
     @vardata GeodeToken	ATTR_GEN_FILE_SELECTOR_TOKEN_MATCH;

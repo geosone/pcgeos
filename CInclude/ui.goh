@@ -308,7 +308,7 @@ extern void _far _pascal UserStopStandardSound(StandardSoundType soundType,
  * Front-end for DiskRestore. Returns 0 and *diskHandlePtr if successfully
  * restored, else returns DiskRestoreError.
  */
-extern word _pascal UserDiskRestore(void *savedData, word *diskHandlePtr);
+extern word _pascal UserDiskRestore(void *savedData, DiskHandle *diskHandlePtr);
 
 /*
  * Utility routine to encrypt a string

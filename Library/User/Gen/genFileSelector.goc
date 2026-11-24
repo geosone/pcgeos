@@ -1,0 +1,426 @@
+/*
+ * genFileSelector.goc -- GenFileSelectorClass (after
+ * genFileSelector.asm): the list of the files, directories and volumes
+ * of the object's path (ATTR_GEN_PATH_DATA, MSG_GEN_PATH_SET) from
+ * which the user picks one.  Which entries are shown is a matter of
+ * GFSI_fileCriteria and of the match attributes in the variable data
+ * (name mask, token, creator, file and geode attributes); GFSI_attrs
+ * says what the selector consists of.  The selection's name is
+ * GFSI_selection; its number and flags are told by the specific UI
+ * (TEMP_GEN_FILE_SELECTOR_DATA), which does the listing itself
+ * (SPIR_BUILD_FILE_SELECTOR) and sends GFSI_notificationMsg to
+ * GFSI_destination.
+ *
+ * Port32 (Port32/ABI.md section 13y): the messages' parameters are
+ * those of gFSelC.goh.  The four characters of a token are the bytes of
+ * the dword in memory order (SET_TOKEN_CHARS).  A getter of an
+ * attribute that is not there returns zeroes (the asm: whatever was on
+ * the stack) but for the file attributes, which default to no system
+ * and no hidden files.  Not yet: MSG_GEN_BRANCH_REPLACE_PARAMS
+ * (BRPT_OUTPUT_OPTR).
+ */
+@include "uiInt.goh"
+@include <Objects/gFSelC.goh>
+#include <string.h>
+
+@classdecl GenFileSelectorClass;
+
+#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
+
+static word StrLen(const char *s)
+{
+    word n = 0;
+
+    while (s[n])
+	n++;
+    return n;
+}
+
+/* GenFileSelectorRelocOrUnReloc: the path's disk is restored when the
+ * path is next used */
+@method GenFileSelectorClass, _reloc
+{
+    (void) vmRelocType;
+    if (message == MSG_META_UNRELOCATE)
+	GenPathUnrelocObjectPath(oself, ATTR_GEN_PATH_DATA,
+				 TEMP_GEN_PATH_SAVED_DISK_HANDLE);
+    return @callsuper();
+}
+
+@method GenFileSelectorClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    return GenQueryUICallSpecificUI(oself, SPIR_BUILD_FILE_SELECTOR,
+				    MasterOffset);
+}
+
+/* GenFileSelectorInitializeVarData: the selection's data starts as
+ * "none yet" */
+@method GenFileSelectorClass, MSG_META_INITIALIZE_VAR_DATA
+{
+    GFSTempDataEntry *t;
+
+    if (dataType != TEMP_GEN_FILE_SELECTOR_DATA)
+	return @callsuper();
+    t = ObjVarAddData(oself, TEMP_GEN_FILE_SELECTOR_DATA,
+		      sizeof(GFSTempDataEntry));
+    t->GFSTDE_selectionNumber = 0;
+    t->GFSTDE_selectionFlags = GFSEF_ERROR;
+    return (word) ((byte *) t - (byte *) MemDeref(OptrToHandle(oself)));
+}
+
+/* ---------------------------------------------------------------------
+ * Attributes: instance data and variable data.  A changed one goes to
+ * the specific part, if there is one (GenCallSpecIfGrown; written out
+ * in each method: goc wants @callsuper in a method).
+ * ------------------------------------------------------------------- */
+
+/* GFSCopyOutAttr: TRUE if the object has the attribute */
+static Boolean CopyOutAttr(optr o, VardataKey type, void *dest, word size)
+{
+    void *d = ObjVarFindData(o, type);
+    word n;
+
+    if (!d)
+	return FALSE;
+    n = ((VarDataEntry *) d - 1)->VDE_entrySize - sizeof(VarDataEntry);
+    memcpy(dest, d, n < size ? n : size);
+    return TRUE;
+}
+
+/* GFSCopyInAttr: all the attributes go to the state file */
+static void CopyInAttr(optr o, VardataKey type, const void *src, word size)
+{
+    memcpy(ObjVarAddData(o, type | VDF_SAVE_TO_STATE, size), src, size);
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_ATTRS
+{
+    return pself->GFSI_attrs;
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_ATTRS
+{
+    if (pself->GFSI_attrs != attributes) {
+	pself->GFSI_attrs = attributes;
+	ObjMarkDirty(oself);
+    }
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_FILE_CRITERIA
+{
+    return pself->GFSI_fileCriteria;
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_FILE_CRITERIA
+{
+    if (pself->GFSI_fileCriteria != fileCriteria) {
+	pself->GFSI_fileCriteria = fileCriteria;
+	ObjMarkDirty(oself);
+    }
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_ACTION
+{
+    retValue->GAP_message = pself->GFSI_notificationMsg;
+    retValue->GAP_unused = 0;
+    retValue->GAP_output = pself->GFSI_destination;
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_ACTION
+{
+    ObjMarkDirty(oself);
+    pself->GFSI_destination = actionOD;
+    pself->GFSI_notificationMsg = actionMessage;
+}
+
+/* the mask: untouched if the object has none */
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_MASK
+{
+    (void) CopyOutAttr(oself, ATTR_GEN_FILE_SELECTOR_NAME_MASK, mask,
+		       sizeof(GenFileSelectorMask));
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_MASK
+{
+    CopyInAttr(oself, ATTR_GEN_FILE_SELECTOR_NAME_MASK, mask,
+	       StrLen(mask) + 1);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+/* the low byte the FileAttrs to match, the high byte those that must
+ * not be set: no system and no hidden files unless told otherwise */
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_FILE_ATTRS
+{
+    GenFileSelectorFileAttrs a;
+
+    a.GFSFA_match = 0;
+    a.GFSFA_mismatch = FA_SYSTEM | FA_HIDDEN;
+    (void) CopyOutAttr(oself, ATTR_GEN_FILE_SELECTOR_FILE_ATTR, &a,
+		       sizeof(a));
+    return (word) a.GFSFA_match | ((word) a.GFSFA_mismatch << 8);
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_FILE_ATTRS
+{
+    GenFileSelectorFileAttrs a;
+
+    a.GFSFA_match = setAttrs;
+    a.GFSFA_mismatch = clearAttrs;
+    CopyInAttr(oself, ATTR_GEN_FILE_SELECTOR_FILE_ATTR, &a, sizeof(a));
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+/* the high word the GeodeAttrs to match (GET_MATCH_ATTRS) */
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_GEODE_ATTRS
+{
+    GenFileSelectorGeodeAttrs a;
+
+    a.GFSGA_match = 0;
+    a.GFSGA_mismatch = 0;
+    (void) CopyOutAttr(oself, ATTR_GEN_FILE_SELECTOR_GEODE_ATTR, &a,
+		       sizeof(a));
+    return ((dword) a.GFSGA_match << 16) | a.GFSGA_mismatch;
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_GEODE_ATTRS
+{
+    GenFileSelectorGeodeAttrs a;
+
+    a.GFSGA_match = matchGeodeAttrs;
+    a.GFSGA_mismatch = mismatchGeodeAttrs;
+    CopyInAttr(oself, ATTR_GEN_FILE_SELECTOR_GEODE_ATTR, &a, sizeof(a));
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+/* GFSCopyOutToken */
+static void CopyOutToken(optr o, VardataKey type, GetTokenCreatorParams *r)
+{
+    memset(r, 0, sizeof(*r));
+    (void) CopyOutAttr(o, type, &r->GTP_token, sizeof(GeodeToken));
+}
+
+/* GFSCopyInToken */
+static void CopyInToken(optr o, VardataKey type, dword chars,
+			ManufacturerID id)
+{
+    GeodeToken t;
+
+    t.GT_chars[0] = (char) chars;
+    t.GT_chars[1] = (char) (chars >> 8);
+    t.GT_chars[2] = (char) (chars >> 16);
+    t.GT_chars[3] = (char) (chars >> 24);
+    t.GT_manufID = id;
+    CopyInAttr(o, type, &t, sizeof(t));
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_TOKEN
+{
+    CopyOutToken(oself, ATTR_GEN_FILE_SELECTOR_TOKEN_MATCH, retValue);
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_TOKEN
+{
+    CopyInToken(oself, ATTR_GEN_FILE_SELECTOR_TOKEN_MATCH, tokenChars,
+		manufacturerID);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_CREATOR
+{
+    CopyOutToken(oself, ATTR_GEN_FILE_SELECTOR_CREATOR_MATCH, retValue);
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_CREATOR
+{
+    CopyInToken(oself, ATTR_GEN_FILE_SELECTOR_CREATOR_MATCH, tokenChars,
+		manufacturerID);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The selection
+ * ------------------------------------------------------------------- */
+
+static GenFileSelectorEntryFlags SelectionFlags(optr o, word *number)
+{
+    GFSTempDataEntry *t = ObjVarDerefData(o, TEMP_GEN_FILE_SELECTOR_DATA);
+
+    if (number)
+	*number = t->GFSTDE_selectionNumber;
+    return t->GFSTDE_selectionFlags;
+}
+
+/* GenFileSelectorGetSelection: the name (if a buffer of
+ * FILE_LONGNAME_BUFFER_SIZE is passed); the entry's number
+ * (GFS_GET_ENTRY_NUMBER) and flags */
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_SELECTION
+{
+    word number;
+    GenFileSelectorEntryFlags flags = SelectionFlags(oself, &number);
+
+    if (selection)
+	memcpy(selection, GFS(oself)->GFSI_selection,
+	       sizeof(GenFileSelectorSelection));
+    return ((dword) number << 16) | flags;
+}
+
+/* GenFileSelectorSetSelection: the specific part selects the entry of
+ * that name; TRUE if there is none (FALSE while not built or
+ * suspended) */
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_SELECTION
+{
+    word n = 0;
+
+    ObjMarkDirty(oself);
+    pself = GFS(oself);
+    while (n < sizeof(GenFileSelectorSelection) - 1 && selection[n]) {
+	pself->GFSI_selection[n] = selection[n];
+	n++;
+    }
+    memset(pself->GFSI_selection + n, 0,
+	   sizeof(GenFileSelectorSelection) - n);
+    if (GenCheckIfSpecGrown(oself))
+	return @callsuper();
+    return FALSE;
+}
+
+/* the place for a name after the path in the buffer: after a backslash
+ * that is added unless the path ends in one */
+static char *AfterPath(char *path)
+{
+    word n = StrLen(path);
+
+    if (!n || path[n - 1] != '\\')
+	path[n++] = '\\';
+    return path + n;
+}
+
+/*
+ * GenFileSelectorGetFullSelectionPath: the path and the selection (a
+ * volume: the selection alone; no selection: an empty string) in a
+ * buffer of PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE, if one is
+ * passed; the path's disk (GFS_GET_FULL_SELECTION_PATH_DISK_HANDLE) and
+ * the entry's flags.
+ */
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_FULL_SELECTION_PATH
+{
+    GenFileSelectorEntryFlags flags = SelectionFlags(oself, 0);
+    DiskHandle disk;
+    char *dest;
+
+    if (!selection) {
+	disk = GenPathFetchDiskHandleAndDerefPath(oself, ATTR_GEN_PATH_DATA,
+				TEMP_GEN_PATH_SAVED_DISK_HANDLE, 0);
+	return ((dword) disk << 16) | flags;
+    }
+    selection[0] = 0;
+    (void) GenPathGetObjectPath(oself, ATTR_GEN_PATH_DATA,
+				TEMP_GEN_PATH_SAVED_DISK_HANDLE, selection,
+				PATH_BUFFER_SIZE, &disk, 0);
+    pself = GFS(oself);
+    if (!pself->GFSI_selection[0]) {
+	selection[0] = 0;
+    } else {
+	dest = GFS_GET_ENTRY_TYPE(flags) == GFSET_VOLUME ?
+	       selection : AfterPath(selection);
+	memcpy(dest, pself->GFSI_selection,
+	       sizeof(GenFileSelectorSelection));
+    }
+    return ((dword) disk << 16) | flags;
+}
+
+/*
+ * GenFileSelectorSetFullSelectionPath: what is before the last
+ * backslash becomes the path (the backslash with it if it is the root's:
+ * "\name", "c:\name"), what is after it the selection; without a
+ * backslash it is all selection.
+ */
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_FULL_SELECTION_PATH
+{
+    char path[PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE];
+    const char *slash = 0, *s;
+    word n;
+
+    for (s = selection; *s; s++)
+	if (*s == '\\')
+	    slash = s;
+    if (slash) {
+	n = (word) (slash - selection);
+	if (!n || slash[-1] == ':')
+	    n++;
+	if (n > sizeof(path) - 1)
+	    n = sizeof(path) - 1;
+	memcpy(path, selection, n);
+	path[n] = 0;
+	(void) @call oself::MSG_GEN_PATH_SET(path, diskHandle);
+	selection = (char *) slash + 1;
+    }
+    return @call oself::MSG_GEN_FILE_SELECTOR_SET_SELECTION(selection);
+}
+
+/*
+ * GenFileSelectorGetDestinationPath: the path, with the selection if
+ * that is a directory (not the parent directory's entry).  TRUE if it
+ * does not fit.  Port32: the asm let the name run one byte over a
+ * buffer that was one byte short.
+ */
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_DESTINATION_PATH
+{
+    GenFileSelectorEntryFlags flags;
+    word n;
+
+    if (@call oself::MSG_GEN_PATH_GET(buffer, bufSize))
+	return TRUE;
+    flags = SelectionFlags(oself, 0);
+    if ((flags & (GFSEF_PARENT_DIR | GFSEF_NO_ENTRIES)) ||
+	GFS_GET_ENTRY_TYPE(flags) != GFSET_SUBDIR)
+	return FALSE;
+    n = StrLen(buffer);
+    if ((dword) n + 1 + sizeof(GenFileSelectorSelection) > bufSize)
+	return TRUE;
+    memcpy(AfterPath(buffer), GFS(oself)->GFSI_selection,
+	   sizeof(GenFileSelectorSelection));
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * What only the specific part does (GenFileSelectorSendToSpec,
+ * ...ReturnFlags: TRUE, an error, while there is none)
+ * ------------------------------------------------------------------- */
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_RESCAN,
+			      MSG_GEN_FILE_SELECTOR_UP_DIRECTORY
+{
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_OPEN_ENTRY
+{
+    if (GenCheckIfSpecGrown(oself))
+	return @callsuper();
+    return TRUE;
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_SUSPEND
+{
+    if (GenCheckIfSpecGrown(oself))
+	return @callsuper();
+    return TRUE;
+}
+
+@method GenFileSelectorClass, MSG_GEN_FILE_SELECTOR_END_SUSPEND
+{
+    if (GenCheckIfSpecGrown(oself))
+	return @callsuper();
+    return TRUE;
+}

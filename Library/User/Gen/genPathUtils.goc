@@ -1,0 +1,408 @@
+/*
+ * genPathUtils.goc -- the file system paths of a generic object (after
+ * genPathUtils.asm).  A path is a GenFilePath in the object's variable
+ * data (ATTR_GEN_PATH_DATA for MSG_GEN_PATH_SET and _GET; an object may
+ * keep more under types of its own): a disk handle or a StandardPath,
+ * and the path from there.  Beside it the disk is kept as DiskSave
+ * wrote it (TEMP_GEN_PATH_SAVED_DISK_HANDLE), for the state file: an
+ * unrelocated path has GEN_PATH_DISK_HANDLE_INVALID for a disk, and the
+ * disk is restored from the saved one when the path is next used.  The
+ * user is asked for a disk that is not in its drive
+ * (MSG_META_GEN_PATH_RESTORE_DISK_PROMPT, UserDiskRestore).
+ *
+ * Port32 (Port32/ABI.md section 13y): the routines take the optr and
+ * are declared in genC.goh.  DiskRestore's callback gets no context of
+ * its own, so the saved disk is restored from a copy on the stack that
+ * has the object before it.  GenClass's methods are in genClass.goc
+ * (goc wants them with @classdecl).
+ */
+@include "uiInt.goh"
+#include <disk.h>
+#include <file.h>
+#include <uDialog.h>
+#include <string.h>
+
+#define GEN_PATH_DISK_HANDLE_INVALID	((DiskHandle) -1)
+
+@start Strings, data;
+
+@chunk char diskRestorePrompt[] = "Please insert the disk \001 into drive \002 so that a file that was opened the last time you were using the software may be re-opened.";
+
+@chunk char diskRestoreError[] = "Unable to locate the expected disk: \001";
+@chunk char dreCouldntCreateNewDiskHandle[] = "There is not enough memory to keep track of the disk. Close some windows or applications to free up memory, then try again.\r\rError Code: UI-20";
+@chunk char dreDriveNoLongerExists[] = "The drive in which it was located no longer exists. If you are attached to a network, there may be an error in the network configuration or you may not be logged in properly.\r\rError Code: UI-19";
+@chunk char drePermissionDenied[] = "You do not have permission to use the appropriate network disk volume. See your computer system manager.\r\rError Code: UI-23";
+@chunk char dreRemovableDriveIsBusy[] = "The drive in which the disk is located is otherwise occupied. You may wish to try again later.\r\rError Code: UI-21";
+@chunk char dreNotAttachedToServer[] = "You are not connected to the appropriate server to which the disk belongs. See your computer system manager.\r\rError Code: UI-22";
+@chunk char dreAllDrivesUsed[] = "There is no free drive letter to which the network disk may be mapped. See your computer system manager.\r\rError Code: UI-24";
+
+@visMoniker diskInDriveMoniker = "Disk Is In The Drive";
+@visMoniker cancelDiskRestoreMoniker = "Stop Trying To Reopen The File";
+
+@end Strings;
+
+/* ---------------------------------------------------------------------
+ * Asking for a disk
+ * ------------------------------------------------------------------- */
+
+/* UserDiskRestoreCallback: the disk name without its trailing spaces;
+ * DRE_DISK_IN_DRIVE if the user says it is there */
+static DiskRestoreError AskForDisk(const char *driveName,
+				   const char *diskName)
+{
+    StandardDialog2ResponseTriggerTable t;
+    char name[VOLUME_NAME_LENGTH_ZT + 1];
+    word i, end = 0, r;
+
+    for (i = 0; i < sizeof(name) - 1 && diskName[i]; i++) {
+	name[i] = diskName[i];
+	if (diskName[i] != ' ')
+	    end = i + 1;
+    }
+    name[end] = 0;
+    t.SD2RTT_numTriggers = 2;
+    t.SD2RTT_trigger1.SDRTE_moniker = @diskInDriveMoniker;
+    t.SD2RTT_trigger1.SDRTE_responseValue = IC_YES;
+    t.SD2RTT_trigger2.SDRTE_moniker = @cancelDiskRestoreMoniker;
+    t.SD2RTT_trigger2.SDRTE_responseValue = IC_NO;
+    MemLock(OptrToHandle(@diskRestorePrompt));
+    r = UserStandardDialog(NULL, (char *) &t, (char *) driveName, name,
+			   LMemDeref(@diskRestorePrompt),
+			   (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+			   (GIT_MULTIPLE_RESPONSE <<
+			    CDBF_INTERACTION_TYPE_OFFSET));
+    MemUnlock(OptrToHandle(@diskRestorePrompt));
+    return r == IC_YES ? DRE_DISK_IN_DRIVE : DRE_USER_CANCELED_RESTORE;
+}
+
+static DiskRestoreError UserDiskRestoreCallback(const char *driveName,
+						const char *diskName,
+						void **bufferPtr,
+						DiskRestoreError error)
+{
+    (void) bufferPtr;
+    (void) error;
+    return AskForDisk(driveName, diskName);
+}
+
+/* UserDiskRestore: DiskRestore that asks the user for the disk; 0 and
+ * the disk in *diskHandlePtr, or the DiskRestoreError */
+word _pascal UserDiskRestore(void *savedData, DiskHandle *diskHandlePtr)
+{
+    DiskHandle d = DiskRestore(savedData, UserDiskRestoreCallback);
+
+    if (!d)
+	return ThreadGetError();
+    *diskHandlePtr = d;
+    return 0;
+}
+
+/* GenPathRestoreDiskPrompt: what GenClass does for
+ * MSG_META_GEN_PATH_RESTORE_DISK_PROMPT when the specific UI does not */
+DiskRestoreError GenPathAskForDisk(const GenPathDiskRestoreArgs *args)
+{
+    return AskForDisk(args->GPDRA_driveName, args->GPDRA_diskName);
+}
+
+/* ---------------------------------------------------------------------
+ * The path in the variable data
+ * ------------------------------------------------------------------- */
+
+/* GenPathInitPathData: the path made anew, SP_TOP; the offset of the
+ * data in the object's block (MSG_META_INITIALIZE_VAR_DATA) */
+word GenPathInitPathData(optr o, VardataKey pathType)
+{
+    GenFilePath *p = ObjVarAddData(o, pathType | VDF_SAVE_TO_STATE,
+				   sizeof(GenFilePath));
+
+    p->GFP_disk = SP_TOP;
+    p->GFP_path[0] = 0;
+    return (word) ((byte *) p - (byte *) MemDeref(OptrToHandle(o)));
+}
+
+/* the saved disk goes to DiskRestore in one of these, so that the
+ * callback finds the object */
+#define SAVED_DISK_MAX	128
+
+typedef struct {
+    optr		RC_obj;
+    VardataKey		RC_pathType;
+    VardataKey		RC_savedDiskType;
+    byte		RC_saved[SAVED_DISK_MAX];
+} RestoreContext;
+
+/* GenPathRestoreDiskCallback: the object asks
+ * (MSG_META_GEN_PATH_RESTORE_DISK_PROMPT); if nobody answers the error
+ * stays */
+static DiskRestoreError RestoreDiskCallback(const char *driveName,
+					    const char *diskName,
+					    void **bufferPtr,
+					    DiskRestoreError error)
+{
+    RestoreContext *c = (RestoreContext *)
+	((byte *) *bufferPtr - offsetof(RestoreContext, RC_saved));
+    GenPathDiskRestoreArgs args;
+    DiskRestoreError r = error;
+
+    args.GPDRA_pathType = c->RC_pathType;
+    args.GPDRA_savedDiskType = c->RC_savedDiskType;
+    args.GPDRA_driveName = (char *) driveName;
+    args.GPDRA_diskName = (char *) diskName;
+    args.GPDRA_errorCode = error;
+    if (!@call (c->RC_obj)::MSG_META_GEN_PATH_RESTORE_DISK_PROMPT(&r, &args))
+	r = error;
+    return r;
+}
+
+/* GenPathDiskRestoreError: the user is told why the disk could not be
+ * restored.  Port32: without the PDA's shorter texts. */
+void GenPathDiskRestoreError(DiskRestoreError e)
+{
+    optr why = 0;
+
+    switch (e) {
+    case DRE_DRIVE_NO_LONGER_EXISTS:
+	why = @dreDriveNoLongerExists;
+	break;
+    case DRE_COULDNT_CREATE_NEW_DISK_HANDLE:
+	why = @dreCouldntCreateNewDiskHandle;
+	break;
+    case DRE_REMOVABLE_DRIVE_IS_BUSY:
+	why = @dreRemovableDriveIsBusy;
+	break;
+    case DRE_NOT_ATTACHED_TO_SERVER:
+	why = @dreNotAttachedToServer;
+	break;
+    case DRE_PERMISSION_DENIED:
+	why = @drePermissionDenied;
+	break;
+    case DRE_ALL_DRIVES_USED:
+	why = @dreAllDrivesUsed;
+	break;
+    default:
+	return;
+    }
+    (void) UserStandardDialogOptr(NULL, NULL, 0, why, @diskRestoreError,
+				  (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+				  (GIT_NOTIFICATION <<
+				   CDBF_INTERACTION_TYPE_OFFSET));
+}
+
+/*
+ * GenPathFetchDiskHandleAndDerefPath: the path (made if it is not
+ * there), its disk restored if need be; the disk handle, 0 if it could
+ * not be restored.
+ */
+DiskHandle GenPathFetchDiskHandleAndDerefPath(optr o, VardataKey pathType,
+					      VardataKey savedDiskType,
+					      GenFilePath **path)
+{
+    GenFilePath *p = ObjVarDerefData(o, pathType);
+
+    if (p->GFP_disk == GEN_PATH_DISK_HANDLE_INVALID) {
+	byte *saved = ObjVarFindData(o, savedDiskType);
+	DiskHandle d = 0;
+
+	if (saved) {
+	    word size = ((VarDataEntry *) saved - 1)->VDE_entrySize -
+			sizeof(VarDataEntry);
+	    RestoreContext c;
+
+	    if (size <= SAVED_DISK_MAX) {
+		c.RC_obj = o;
+		c.RC_pathType = pathType;
+		c.RC_savedDiskType = savedDiskType;
+		memcpy(c.RC_saved, saved, size);
+		d = DiskRestore(c.RC_saved, RestoreDiskCallback);
+	    } else {
+		d = DiskRestore(saved, 0);
+	    }
+	    if (!d && ThreadGetError() != DRE_USER_CANCELED_RESTORE)
+		GenPathDiskRestoreError((DiskRestoreError) ThreadGetError());
+	}
+	p = ObjVarFindData(o, pathType);	/* may have moved */
+	p->GFP_disk = d;
+    }
+    if (path)
+	*path = p;
+    return p->GFP_disk;
+}
+
+/* CheckPathAbsolute: a drive and a backslash after it, or a leading
+ * backslash; a malformed path counts as relative */
+static Boolean PathAbsolute(const char *path)
+{
+    sword cx = 1;
+    const char *s = path;
+    char ch;
+
+    for (;;) {
+	ch = *s++;
+	if (!ch)
+	    return FALSE;	/* neither a drive nor a backslash */
+	if (ch == ':') {
+	    if (--cx)
+		return FALSE;	/* two colons */
+	} else if (ch == '\\') {
+	    if (!--cx)
+		return s - 1 == path;	/* no drive: absolute if first */
+	    return TRUE;
+	}
+    }
+}
+
+/*
+ * GenPathSetObjectPath: the path (relative to the object's present one
+ * if it is not absolute) made the object's, in full, its disk saved
+ * for the state file.  TRUE with the FileError in *error if the path
+ * cannot be set: the object then has the path the thread ended up
+ * with.
+ */
+Boolean GenPathSetObjectPath(optr o, const char *path, VardataKey pathType,
+			     VardataKey savedDiskType, DiskHandle disk,
+			     word *error)
+{
+    GenFilePath *p;
+    DiskHandle cur, d;
+    Boolean failed;
+    word e = 0, size, tries;
+
+    FilePushDir();
+    cur = GenPathFetchDiskHandleAndDerefPath(o, pathType, savedDiskType, &p);
+    /* the present path first, unless the new one cannot depend on it:
+     * it might ask for a disk the user has just taken out */
+    if (cur && !PathAbsolute(path) && !(disk & DISK_IS_STD_PATH_MASK) &&
+	(!disk || disk == cur)) {
+	if (!FileSetCurrentPath(cur, p->GFP_path)) {
+	    e = ThreadGetError();
+	    FilePopDir();
+	    if (error)
+		*error = e;
+	    return TRUE;
+	}
+    }
+    failed = !FileSetCurrentPath(disk, path);
+    if (failed)
+	e = ThreadGetError();
+
+    p = ObjVarFindData(o, pathType);
+    d = FileGetCurrentPath(p->GFP_path, sizeof(p->GFP_path));
+    p->GFP_disk = d;
+    if (!d) {
+	ObjVarDeleteData(o, savedDiskType);
+    } else {
+	for (tries = 0; tries < 2; tries++) {
+	    void *buf;
+
+	    size = 0;
+	    (void) DiskSave(d, 0, &size);
+	    if (size) {
+		buf = ObjVarAddData(o, savedDiskType | VDF_SAVE_TO_STATE,
+				    size);
+		if (DiskSave(d, buf, &size))
+		    break;
+	    }
+	    /* the disk cannot be saved: the path as if it were new */
+	    (void) @call o::MSG_META_INITIALIZE_VAR_DATA(pathType);
+	    p = ObjVarFindData(o, pathType);
+	    d = p->GFP_disk;
+	}
+    }
+    FilePopDir();
+    if (error)
+	*error = e;
+    return failed;
+}
+
+/*
+ * GenPathGetObjectPath: the path copied to the buffer, or (no buffer)
+ * to a new block whose handle goes to *sizeOrBlock; the disk in *disk.
+ * TRUE if the buffer is too small (*sizeOrBlock the size needed) or
+ * the path has no disk (*sizeOrBlock 0).
+ */
+Boolean GenPathGetObjectPath(optr o, VardataKey pathType,
+			     VardataKey savedDiskType, char *buffer,
+			     word bufSize, DiskHandle *disk,
+			     MemHandle *sizeOrBlock)
+{
+    GenFilePath *p;
+    DiskHandle d = GenPathFetchDiskHandleAndDerefPath(o, pathType,
+						      savedDiskType, &p);
+    word n = 0;
+    MemHandle ret = 0;
+    Boolean err = FALSE;
+
+    if (disk)
+	*disk = d;
+    if (!d) {
+	err = TRUE;
+    } else {
+	while (p->GFP_path[n++])
+	    ;
+	if (buffer) {
+	    if (bufSize < n) {
+		ret = n;
+		err = TRUE;
+	    } else {
+		memcpy(buffer, p->GFP_path, n);
+	    }
+	} else {
+	    MemHandle mh = MemAlloc(n, HF_SWAPABLE | HF_SHARABLE,
+				    HAF_LOCK | HAF_NO_ERR);
+
+	    p = ObjVarFindData(o, pathType);
+	    memcpy(MemDeref(mh), p->GFP_path, n);
+	    MemUnlock(mh);
+	    ret = mh;
+	}
+    }
+    if (sizeOrBlock)
+	*sizeOrBlock = ret;
+    return err;
+}
+
+/* GenPathConstructFullObjectPath: the full path (with the drive if
+ * asked) in the buffer; the disk, 0 if it does not fit or there is no
+ * disk.  *buffer is left at the null. */
+DiskHandle GenPathConstructFullObjectPath(optr o, VardataKey pathType,
+					  VardataKey savedDiskType,
+					  char **buffer, word bufSize,
+					  Boolean addDrive)
+{
+    GenFilePath *p;
+    DiskHandle d = GenPathFetchDiskHandleAndDerefPath(o, pathType,
+						      savedDiskType, &p);
+    PathName tail;
+
+    if (!d)
+	return 0;
+    memcpy(tail, p->GFP_path, sizeof(tail));
+    return FileConstructFullPath(buffer, bufSize, d, tail, addDrive);
+}
+
+/* GenPathSetCurrentPathFromObjectPath: the thread's path made the
+ * object's; 0 or the FileError */
+word GenPathSetCurrentPathFromObjectPath(optr o, VardataKey pathType,
+					 VardataKey savedDiskType)
+{
+    GenFilePath *p;
+    DiskHandle d = GenPathFetchDiskHandleAndDerefPath(o, pathType,
+						      savedDiskType, &p);
+    PathName tail;
+
+    if (!d)
+	return ERROR_DISK_UNAVAILABLE;
+    memcpy(tail, p->GFP_path, sizeof(tail));
+    return FileSetCurrentPath(d, tail) ? 0 : ThreadGetError();
+}
+
+/* GenPathUnrelocObjectPath: a path with a saved disk is marked to have
+ * its disk restored when next used */
+void GenPathUnrelocObjectPath(optr o, VardataKey pathType,
+			      VardataKey savedDiskType)
+{
+    GenFilePath *p = ObjVarFindData(o, pathType);
+
+    if (p && ObjVarFindData(o, savedDiskType))
+	p->GFP_disk = GEN_PATH_DISK_HANDLE_INVALID;
+}

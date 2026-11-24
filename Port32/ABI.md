@@ -5350,11 +5350,48 @@ visual classes of `Library/User/Vis`:
   `MSG_SPEC_GET_EXTRA_SIZE`, `MSG_SPEC_CONVERT_SIZE` and
   `MSG_SPEC_CONVERT_DESIRED_SIZE_HINT`. `VisIfFlagSetCallGenChildren`
   is exported for the specific UI.
+- **The paths of a generic object** (`Gen/genPathUtils.goc`, after
+  `genPathUtils.asm`): `MSG_GEN_PATH_SET`, `_GET`, `_GET_DISK_HANDLE`
+  and the `GenPath...` routines for paths under vardata types of the
+  object's own (`genC.goh`; they take the optr and the two vardata
+  types).
+  - A path is a `GenFilePath` (disk handle or `StandardPath`, and the
+    path from there). The disk is kept beside it as `DiskSave` wrote
+    it; an unrelocated path has its disk restored when it is next used.
+  - `MSG_GEN_PATH_GET` returns a `MemHandle` under Port32, because the
+    reply buffer is the sender's and a handle is wider than a Boolean:
+    non-zero for an error with a buffer, the new block without one
+    (`MSG_GEN_PATH_GET_BLOCK`).
+  - `DiskRestore`'s callback has no context, so the saved disk is
+    restored from a copy on the stack with the object before it. The
+    object is asked for the disk
+    (`MSG_META_GEN_PATH_RESTORE_DISK_PROMPT`); `GenClass` puts up a
+    standard dialog. `UserDiskRestore(savedData, &disk)` does the same
+    without an object (its second parameter is a `DiskHandle *`).
+  - The strings are the UI library's `Strings` resource.
+- **`GenFileSelectorClass`** (`Gen/genFileSelector.goc`): criteria,
+  attributes, the match attributes in the vardata (mask, token,
+  creator, file and geode attributes), the selection, the full
+  selection path and the destination path. The listing is the
+  specific UI's.
+  - A token's four characters are the bytes of the dword in memory
+    order (`SET_TOKEN_CHARS`).
+  - A getter of an attribute that is not there returns zeroes (the asm:
+    whatever was on the stack), but for the file attributes, which
+    default to no system and no hidden files.
+  - A disk handle fits the high word of the dword
+    `MSG_GEN_FILE_SELECTOR_GET_FULL_SELECTION_PATH` returns: disk
+    handles are small numbers (section 13f).
+  - `MSG_GEN_FILE_SELECTOR_GET_DESTINATION_PATH` does not write past a
+    buffer that is one byte short (the asm did).
+  - Not yet: `MSG_GEN_BRANCH_REPLACE_PARAMS`.
+  - `library.ui.boot` step 67 checks both on an object that is not
+    built.
 - **Not yet:**
   - in `GenClass`: `MSG_SPEC_RESOLVE_MONIKER_LIST` (`VisClass` keeps
     the list), the icon and text combination moniker
     (`HINT_USE_ICON_TEXT_COMBINATION_MONIKER`), `VMDT_TOKEN` monikers,
-    `MSG_GEN_BRANCH_REPLACE_PARAMS` (dword optrs), `ATTR_GEN_PATH_DATA`,
+    `MSG_GEN_BRANCH_REPLACE_PARAMS` (dword optrs),
     `MSG_META_BRING_UP_HELP`, the GenView's content in
     `GenSpecShrinkBranch`, `UserSendToApplicationViaProcess`;
     `MSG_GEN_MAKE_APPLYABLE`/`_NOT_APPLYABLE` up the visual tree (goc

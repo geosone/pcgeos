@@ -48,6 +48,7 @@
 @include <Internal/SpecUI/olCtrlClass.goh>
 @include <Internal/SpecUI/olValueClass.goh>
 @include <Internal/SpecUI/olSliderClass.goh>
+@include <Objects/gFSelC.goh>
 #include <string.h>
 #include <initfile.h>
 
@@ -852,7 +853,15 @@ static Boolean MenuShown(void)
 	   (VA_DRAWABLE | VA_DETECTABLE);
 }
 
-/* the last notice's display name (no strcmp in a geode) */
+/* (no strcmp in a geode) */
+static Boolean StrIs(const char *p, const char *n)
+{
+    while (*n && *p == *n)
+	p++, n++;
+    return *p == *n;
+}
+
+/* the last notice's display name */
 static Boolean NameIs(const char *n)
 {
     const char *p = ubState.UBS_lastName;
@@ -2866,6 +2875,108 @@ static void UBClickMenu(word n)
 	b = Bounds(bar);
 	UBCHECK(b.R_bottom - b.R_top >= 100);
 	UBCHECK(b.R_right - b.R_left == (sword) sl.OLSBI_arrowSize + 2 + 7);
+	break;
+    }
+    case 67: {
+	/* the paths of a generic object (MSG_GEN_PATH_SET, _GET) and the
+	 * generic part of a file selector that is not built (and in no
+	 * tree: there is no specific class for it yet): its criteria
+	 * and match attributes, the selection and the full selection
+	 * path; what only the specific part does fails */
+	char buf[PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE];
+	GetTokenCreatorParams tok;
+	GetActionParams act;
+	MemHandle mh;
+	dword d;
+	optr fs = ObjInstantiate(OptrToHandle(@UBTexts),
+				 (ClassStruct *) &GenFileSelectorClass);
+
+	UBCHECK(!GenCheckIfSpecGrown(fs));
+	UBCHECK(@call fs::MSG_GEN_PATH_GET_DISK_HANDLE() == SP_TOP);
+	UBCHECK(!@call fs::MSG_GEN_PATH_SET("", SP_TOP));
+	buf[0] = 'x';
+	UBCHECK(!@call fs::MSG_GEN_PATH_GET(buf, sizeof(buf)));
+	UBCHECK(!buf[0]);
+	UBCHECK(@call fs::MSG_GEN_PATH_GET(buf, 0));
+	UBCHECK(@call fs::MSG_GEN_PATH_GET_DISK_HANDLE() == SP_TOP);
+	UBCHECK(ObjVarFindData(fs, TEMP_GEN_PATH_SAVED_DISK_HANDLE));
+	mh = @call fs::MSG_GEN_PATH_GET_BLOCK(NULL, 0);
+	UBCHECK(mh);
+	UBCHECK(!*(char *) MemLock(mh));
+	MemFree(mh);
+	/* a path that does not exist */
+	UBCHECK(@call fs::MSG_GEN_PATH_SET("NOSUCH.DIR", 0));
+	UBCHECK(@call fs::MSG_GEN_PATH_GET_DISK_HANDLE() == SP_TOP);
+
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_FILE_CRITERIA(
+			FSFC_DIRS | FSFC_NON_GEOS_FILES);
+	UBCHECK(@call fs::MSG_GEN_FILE_SELECTOR_GET_FILE_CRITERIA() ==
+		(FSFC_DIRS | FSFC_NON_GEOS_FILES));
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_ATTRS(
+			FSA_ALLOW_CHANGE_DIRS | FSA_HAS_FILE_LIST);
+	UBCHECK(@call fs::MSG_GEN_FILE_SELECTOR_GET_ATTRS() ==
+		(FSA_ALLOW_CHANGE_DIRS | FSA_HAS_FILE_LIST));
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_MASK("*.TXT");
+	buf[0] = 0;
+	@call fs::MSG_GEN_FILE_SELECTOR_GET_MASK(buf);
+	UBCHECK(StrIs(buf, "*.TXT"));
+	UBCHECK(@call fs::MSG_GEN_FILE_SELECTOR_GET_FILE_ATTRS() ==
+		((FA_SYSTEM | FA_HIDDEN) << 8));
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_FILE_ATTRS(FA_RDONLY,
+							    FA_SYSTEM);
+	UBCHECK(@call fs::MSG_GEN_FILE_SELECTOR_GET_FILE_ATTRS() ==
+		(FA_RDONLY | (FA_SYSTEM << 8)));
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_GEODE_ATTRS(GA_APPLICATION,
+							     GA_LIBRARY);
+	d = @call fs::MSG_GEN_FILE_SELECTOR_GET_GEODE_ATTRS();
+	UBCHECK(GET_MATCH_ATTRS(d) == GA_APPLICATION &&
+		GET_MISMATCH_ATTRS(d) == GA_LIBRARY);
+	@call fs::MSG_GEN_FILE_SELECTOR_GET_TOKEN(&tok);
+	UBCHECK(!tok.GTP_token.GT_chars[0]);
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_TOKEN(
+			SET_TOKEN_CHARS('T', 'E', 'S', 'T'), 7);
+	@call fs::MSG_GEN_FILE_SELECTOR_GET_TOKEN(&tok);
+	UBCHECK(!memcmp(tok.GTP_token.GT_chars, "TEST", 4) &&
+		tok.GTP_token.GT_manufID == 7);
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_CREATOR(
+			SET_TOKEN_CHARS('M', 'A', 'K', 'E'), 0);
+	@call fs::MSG_GEN_FILE_SELECTOR_GET_CREATOR(&tok);
+	UBCHECK(!memcmp(tok.GTP_token.GT_chars, "MAKE", 4));
+	@call fs::MSG_GEN_FILE_SELECTOR_SET_ACTION(@UBApp,
+						       MSG_GEN_APPLY);
+	@call fs::MSG_GEN_FILE_SELECTOR_GET_ACTION(&act);
+	UBCHECK(act.GAP_output == @UBApp && act.GAP_message == MSG_GEN_APPLY);
+
+	/* no selection yet: the flags say "error" */
+	d = @call fs::MSG_GEN_FILE_SELECTOR_GET_SELECTION(buf);
+	UBCHECK(GFS_GET_ENTRY_FLAGS(d) == GFSEF_ERROR && !buf[0]);
+	UBCHECK(!@call fs::MSG_GEN_FILE_SELECTOR_SET_SELECTION("FOO"));
+	(void) @call fs::MSG_GEN_FILE_SELECTOR_GET_SELECTION(buf);
+	UBCHECK(StrIs(buf, "FOO"));
+	d = @call fs::MSG_GEN_FILE_SELECTOR_GET_FULL_SELECTION_PATH(buf);
+	UBCHECK(GFS_GET_FULL_SELECTION_PATH_DISK_HANDLE(d) == SP_TOP);
+	UBCHECK(StrIs(buf, "\\FOO"));
+	d = @call fs::MSG_GEN_FILE_SELECTOR_GET_FULL_SELECTION_PATH(NULL);
+	UBCHECK(GFS_GET_FULL_SELECTION_PATH_DISK_HANDLE(d) == SP_TOP);
+	/* a full path: the root's backslash is the path, the rest the
+	 * selection; a relative name is all selection */
+	UBCHECK(!@call fs::MSG_GEN_FILE_SELECTOR_SET_FULL_SELECTION_PATH(
+			"\\BAR.TXT", SP_TOP));
+	(void) @call fs::MSG_GEN_FILE_SELECTOR_GET_SELECTION(buf);
+	UBCHECK(StrIs(buf, "BAR.TXT"));
+	UBCHECK(@call fs::MSG_GEN_PATH_GET_DISK_HANDLE() == SP_TOP);
+	UBCHECK(!@call fs::MSG_GEN_FILE_SELECTOR_SET_FULL_SELECTION_PATH(
+			"BAZ", 0));
+	(void) @call fs::MSG_GEN_FILE_SELECTOR_GET_SELECTION(buf);
+	UBCHECK(StrIs(buf, "BAZ"));
+	/* the selection is no directory: the destination is the path */
+	buf[0] = 'x';
+	UBCHECK(!@call fs::MSG_GEN_FILE_SELECTOR_GET_DESTINATION_PATH(
+			buf, sizeof(buf)));
+	UBCHECK(!buf[0]);
+	UBCHECK(@call fs::MSG_GEN_FILE_SELECTOR_OPEN_ENTRY(0));
+	UBCHECK(@call fs::MSG_GEN_FILE_SELECTOR_SUSPEND());
+	UBCHECK(@call fs::MSG_GEN_FILE_SELECTOR_END_SUSPEND());
 	break;
     }
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the

@@ -180,5 +180,18 @@ export UserStandardDialog
 export UserStandardDialogOptr
 export UserGetLoadedSpecificUI
 
+# the paths of a generic object (genPathUtils.goc)
+export GenPathInitPathData
+export GenPathFetchDiskHandleAndDerefPath
+export GenPathSetObjectPath
+export GenPathGetObjectPath
+export GenPathConstructFullObjectPath
+export GenPathSetCurrentPathFromObjectPath
+export GenPathUnrelocObjectPath
+export GenPathDiskRestoreError
+export UserDiskRestore
+export GenFileSelectorClass
+
 resource ApplicationUI object
 resource SystemFieldUI object
+resource Strings lmem read-only shared

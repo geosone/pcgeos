@@ -20,7 +20,7 @@
  *     MSG_SPEC_RESCAN_GEO_AND_UPDATE the VisOptFlags
  *     (MSG_SPEC_P32_RESCAN_GEO_AND_UPDATE; Internal/specC.goh);
  *   - the moniker's source is a VisMonikerSource (an optr);
- *   - not yet: MSG_GEN_BRANCH_REPLACE_PARAMS (dword optrs), ATTR_GEN_PATH_DATA,
+ *   - not yet: MSG_GEN_BRANCH_REPLACE_PARAMS (dword optrs),
  *     MSG_META_BRING_UP_HELP, the view ranges.
  */
 @include "uiInt.goh"
@@ -163,13 +163,65 @@ static void CallMeta(optr oself, Message msg, const void *p, word ps,
     return r;
 }
 
-/* GenInitializeVarData (ATTR_GEN_PATH_DATA not yet) */
+/* GenInitializeVarData: the object's path starts as SP_TOP */
 @method GenClass, MSG_META_INITIALIZE_VAR_DATA
 {
     word r = 0;
 
+    if (dataType == ATTR_GEN_PATH_DATA)
+	return GenPathInitPathData(oself, ATTR_GEN_PATH_DATA);
     CallMeta(oself, message, &dataType, sizeof(dataType), &r, sizeof(r));
     return r;
+}
+
+/* ---------------------------------------------------------------------
+ * The object's path (genPathUtils.goc)
+ * ------------------------------------------------------------------- */
+
+/* GenPathSet: then the specific part's.  TRUE if the path cannot be
+ * set. */
+@method GenClass, MSG_GEN_PATH_SET
+{
+    if (GenPathSetObjectPath(oself, path, ATTR_GEN_PATH_DATA,
+			     TEMP_GEN_PATH_SAVED_DISK_HANDLE, disk, 0))
+	return TRUE;
+    if (GenCheckIfSpecGrown(oself))
+	return @callsuper();
+    return FALSE;
+}
+
+/* GenPathGet: non-zero if the path does not fit or has no disk.
+ * MSG_GEN_PATH_GET_BLOCK (no buffer): the handle of a new block with
+ * the path, 0 if it has no disk. */
+@method GenClass, MSG_GEN_PATH_GET
+{
+    MemHandle block = 0;
+    Boolean err = GenPathGetObjectPath(oself, ATTR_GEN_PATH_DATA,
+				       TEMP_GEN_PATH_SAVED_DISK_HANDLE,
+				       buffer, bufSize, 0, &block);
+
+    if (buffer)
+	return err ? 1 : 0;
+    return err ? 0 : block;
+}
+
+@method GenClass, MSG_GEN_PATH_GET_DISK_HANDLE
+{
+    return GenPathFetchDiskHandleAndDerefPath(oself, ATTR_GEN_PATH_DATA,
+				TEMP_GEN_PATH_SAVED_DISK_HANDLE, 0);
+}
+
+/* GenPathRestoreDiskPrompt: the specific UI may ask for the disk; else
+ * a standard dialog does */
+@method GenClass, MSG_META_GEN_PATH_RESTORE_DISK_PROMPT
+{
+    extern DiskRestoreError GenPathAskForDisk(
+				const GenPathDiskRestoreArgs *args);
+
+    if (GenCheckIfSpecGrown(oself) && @callsuper())
+	return TRUE;
+    *error = GenPathAskForDisk(args);
+    return TRUE;
 }
 
 /*

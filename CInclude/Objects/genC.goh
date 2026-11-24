@@ -409,7 +409,15 @@ typedef struct {
     @vardata void		TEMP_GEN_PATH_SAVED_DISK_HANDLE;
 
 @message Boolean MSG_GEN_PATH_SET(char *path = cx:dx, DiskHandle disk = bp) = carry;
+@ifdef GEOS_PORT32
+/* Port32: a MemHandle is wider than a Boolean and the reply buffer is
+ * the sender's, so the message returns a handle-sized value: with a
+ * buffer non-zero if the path does not fit or has no disk, without one
+ * the handle of the new block (MSG_GEN_PATH_GET_BLOCK) */
+@message MemHandle MSG_GEN_PATH_GET(char *buffer = dx:bp, word bufSize = cx) = dx;
+@else
 @message Boolean MSG_GEN_PATH_GET(char *buffer = dx:bp, word bufSize = cx) = carry;
+@endif
 	/* Pass buffer as NULL; returned handle of 0 => error */
 @alias (MSG_GEN_PATH_GET) MemHandle MSG_GEN_PATH_GET_BLOCK(char *buffer = dx:bp, word bufSize = cx) = dx;
 
@@ -958,6 +966,34 @@ extern Boolean GenCheckKbdAccelerator(optr obj, word character, word flags,
  * Internal/specUI.h), for MSG_META_RESOLVE_VARIANT_SUPERCLASS */
 extern ClassStruct *GenQueryUICallSpecificUI(optr obj, word routine,
 					     word masterOffset);
+/*
+ * The paths of a generic object (genPathUtils.goc): a GenFilePath under
+ * pathType, its disk as DiskSave wrote it under savedDiskType.
+ */
+extern word GenPathInitPathData(optr obj, VardataKey pathType);
+/* the disk (restored if need be; 0 if it could not be) and the path */
+extern DiskHandle GenPathFetchDiskHandleAndDerefPath(optr obj,
+			VardataKey pathType, VardataKey savedDiskType,
+			GenFilePath **path);
+/* TRUE with the FileError in *error if the path cannot be set */
+extern Boolean GenPathSetObjectPath(optr obj, const char *path,
+			VardataKey pathType, VardataKey savedDiskType,
+			DiskHandle disk, word *error);
+/* to the buffer, or (no buffer) to a new block, its handle in
+ * *sizeOrBlock; TRUE if it does not fit (*sizeOrBlock the size needed)
+ * or the path has no disk (*sizeOrBlock 0) */
+extern Boolean GenPathGetObjectPath(optr obj, VardataKey pathType,
+			VardataKey savedDiskType, char *buffer,
+			word bufSize, DiskHandle *disk, MemHandle *sizeOrBlock);
+extern DiskHandle GenPathConstructFullObjectPath(optr obj,
+			VardataKey pathType, VardataKey savedDiskType,
+			char **buffer, word bufSize, Boolean addDrive);
+/* 0 or the FileError */
+extern word GenPathSetCurrentPathFromObjectPath(optr obj,
+			VardataKey pathType, VardataKey savedDiskType);
+extern void GenPathUnrelocObjectPath(optr obj, VardataKey pathType,
+			VardataKey savedDiskType);
+extern void GenPathDiskRestoreError(DiskRestoreError error);
 /* the specific UI library ([ui] specific), loaded on first use */
 extern GeodeHandle UserGetSpecificUI(void);
 /* Port32: the specific UI if it is loaded, else 0 (UserGetSpecificUI
