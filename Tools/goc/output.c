@@ -1178,10 +1178,59 @@ GccParamStruct(char *buf, Symbol *msg)
     sprintf(cp, "}");
 }
 
-/* "&(S){args}, sizeof(S)" or "NULL, 0" */
-static void
-GccOutputParams(const char *st, const char *args, Boolean substOptr)
+/*
+ * MF_STACK: a message whose only parameter is a pointer to a structure
+ * at ss:bp ("T *p = ss:bp").  DOS16 copies the structure into the event;
+ * here the structure itself is the parameter structure (its size
+ * sizeof(T)), so that a queued or recorded message carries a copy and a
+ * direct call still lets the method write to the caller's structure.
+ * TRUE if msg is one; the type pointed to in pointee.
+ */
+static Boolean
+GccStackStruct(Symbol *msg, char *pointee)
 {
+    MessageParam *pp;
+    char *end;
+
+    if (msg == NullSymbol ||
+	!(msg->data.symMessage.mpd & MPD_STRUCT_AT_SS_BP)) {
+	return FALSE;
+    }
+    pp = msg->data.symMessage.firstParam;
+    if (pp == NullParam || pp->next != NullParam ||
+	pp->typeSuffix[0] != '\0') {
+	return FALSE;
+    }
+    GccTrim(pointee, pp->ctype);
+    end = pointee + strlen(pointee);
+    if (end == pointee || end[-1] != '*') {
+	return FALSE;
+    }
+    *--end = '\0';
+    while (end > pointee && isspace((unsigned char) end[-1])) {
+	*--end = '\0';
+    }
+    return strchr(pointee, '*') == NULL;
+}
+
+/* "&(S){args}, sizeof(S)" or "NULL, 0"; the structure of the stack
+ * itself for an MF_STACK message */
+static void
+GccOutputParams(Symbol *msg, const char *st, const char *args,
+		Boolean substOptr)
+{
+    char pointee[256];
+
+    if (GccStackStruct(msg, pointee)) {
+	Output("(");
+	if (substOptr) {
+	    GccOutputSubstOptr((char *) args, FALSE);
+	} else {
+	    Output("%s", args);
+	}
+	Output("), sizeof(%s)", pointee);
+	return;
+    }
     if (*st == '\0') {
 	Output("NULL, 0");
 	return;
@@ -1312,7 +1361,7 @@ OutputGccMessage(MsgInvocType mit, Symbol *passMsg, Symbol *retMsg,
     Output("CObjMessageP(0x%x, ", flags);
     GccOutputDest(od);
     Output(", (Message) %s, ", msgOut);
-    GccOutputParams(st, args, TRUE);
+    GccOutputParams(passMsg, st, args, TRUE);
     if (shift >= 0) {
 	GccOutputReplyEnd(brt);
 	Output(" >> %d))", shift);
@@ -1342,7 +1391,7 @@ OutputGccCallSuperInMethod(Method *meth)
     GccParamStruct(st, meth->message);
     GccOutputReplyStart(rt);
     Output("CObjCallSuperP(&%s, oself, message, ", meth->class->name);
-    GccOutputParams(st, args, FALSE);
+    GccOutputParams(meth->message, st, args, FALSE);
     GccOutputReplyEnd(rt);
 }
 
@@ -1358,7 +1407,7 @@ OutputGccCallSuper(Symbol *msg, ObjDest *od, char *args, char *className)
     Output("CObjCallSuperP(&%s, ", className);
     GccOutputDest(od);
     Output(", (Message) %d, ", msg->data.symMessage.messageNumber);
-    GccOutputParams(st, args, TRUE);
+    GccOutputParams(msg, st, args, TRUE);
     GccOutputReplyEnd(rt);
 }
 
@@ -1387,8 +1436,9 @@ OutputGccMethodThunks(Symbol *class)
 {
     Method *meth;
     MessageParam *pp;
-    char rt[256], st[2048];
+    char rt[256], st[2048], pointee[256];
     int n = 0, i;
+    Boolean stack;
 
     for (meth = class->data.symClass.firstMethod; meth != NullMethod;
 	 meth = meth->next)
@@ -1403,7 +1453,10 @@ OutputGccMethodThunks(Symbol *class)
 	Output("static void _goc_t_%s_%d(void *pself, optr oself, "
 	       "Message message, void *params, void *reply)\n{ ",
 	       class->name, n);
-	if (*st != '\0') {
+	stack = GccStackStruct(meth->message, pointee);
+	if (stack) {
+	    /* (the structure of the stack is the parameter structure) */
+	} else if (*st != '\0') {
 	    Output("%s *p = params; ", st);
 	} else {
 	    Output("(void) params; ");
@@ -1427,7 +1480,11 @@ OutputGccMethodThunks(Symbol *class)
 	for (pp = meth->message->data.symMessage.firstParam, i = 0;
 	     pp != NullParam; pp = pp->next, i++)
 	{
-	    Output(", p->_p%d", i);
+	    if (stack) {
+		Output(", (%s *) params", pointee);
+	    } else {
+		Output(", p->_p%d", i);
+	    }
 	}
 	Output("); }\n");
 	n++;

@@ -141,8 +141,11 @@ static EventHandle EventNew(optr dest, Message msg, const void *params,
     e->E_flags = flags;
     e->E_size = size;
     e->E_params = data ? data : e->E_inline.b;
-    if (size)
+    /* (a null pointer for a structure of the stack: zeroes) */
+    if (size && params)
 	memcpy(e->E_params, params, size);
+    else if (size)
+	memset(e->E_params, 0, size);
     HandleEntryOf(h)->HE_addr = e;
     return h;
 }

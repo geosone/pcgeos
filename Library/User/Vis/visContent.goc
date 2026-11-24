@@ -1223,10 +1223,8 @@ static Boolean CallTargetOrFirstChild(optr oself, Message msg,
 /* VisContentDefaultPassOnDownBehavior */
 @method VisContentClass, MSG_META_CONTENT_TRACK_SCROLLING
 {
-    struct { TrackScrollingParams *a; } p;
-
-    p.a = args;
-    CallTargetOrFirstChild(oself, message, &p, sizeof(p));
+    /* (a structure of the stack: ABI.md section 5) */
+    CallTargetOrFirstChild(oself, message, args, sizeof(*args));
 }
 
 @method VisContentClass, MSG_META_LARGE_PTR, MSG_META_LARGE_START_SELECT,

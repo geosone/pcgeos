@@ -11,9 +11,17 @@
  ***********************************************************************/
 @include <stdapp.goh>
 #include <stdio.h>
+#include <string.h>
 
 /* a master level (like Vis) ... */
 @class KTopClass, MetaClass, master;
+/* a structure of the stack (MF_STACK): bigger than an event keeps
+ * inline; the method adds the words up into KS_sum */
+typedef struct {
+    word	KS_words[40];
+    dword	KS_sum;
+} KStackParams;
+@message void MSG_KT_STACK(KStackParams *params = ss:bp);
     @instance word KTI_x;
     @instance word KTI_inits;
 @message word MSG_KT_GET_X();
@@ -46,6 +54,7 @@
 @message void MSG_KP_DUP(word value);
 @message ThreadHandle MSG_KP_WHO();
 @message void MSG_KP_TIMER(dword tick, word id);
+@message void MSG_KP_STACK(KStackParams *params = ss:bp);
 @endc
 @classdecl KMsgProcessClass;
 
@@ -68,6 +77,8 @@ word kmsgDup, kmsgDupCount;
 word kmsgTimerId;
 int kmsgTimers;
 word kmsgAckCode;
+dword kmsgStackSum;
+int kmsgStackCount;
 optr kmsgAckCaller;
 
 /* ---- master and variant levels ---- */
@@ -81,6 +92,12 @@ optr kmsgAckCaller;
 @method KTopClass, MSG_KT_GET_X
 {
     return pself->KTI_x;
+}
+
+@method KTopClass, MSG_KT_STACK
+{
+    (void) pself;
+    params->KS_sum = (dword) params->KS_words[0] + params->KS_words[39];
 }
 
 @method KTopImplClass, MSG_KT_GET_X
@@ -138,6 +155,17 @@ optr kmsgAckCaller;
     kmsgDupCount++;
 }
 
+@method KMsgProcessClass, MSG_KP_STACK
+{
+    word i;
+
+    params->KS_sum = 0;
+    for (i = 0; i < 40; i++)
+	params->KS_sum += params->KS_words[i];
+    kmsgStackSum = params->KS_sum;
+    kmsgStackCount++;
+}
+
 @method KMsgProcessClass, MSG_KP_WHO
 {
     return (ThreadHandle) ThreadGetInfo(0, TGIT_THREAD_HANDLE);
@@ -170,6 +198,7 @@ int KMsgLocal(optr button)
     int before = fails;
     ThreadHandle me = (ThreadHandle) ThreadGetInfo(0, TGIT_THREAD_HANDLE);
     word x;
+    KStackParams sp;
 
     CHECK(@call button::MSG_KV_GET_Y() == 5);
     CHECK(@call button::MSG_KB_SUM(1, 2, 3) == 11);
@@ -193,6 +222,12 @@ int KMsgLocal(optr button)
 
     /* an unhandled message: nothing happens, the reply stays 0 */
     CHECK(@call button::MSG_KP_PING(1) == 0);
+    /* a structure of the stack: a direct call works on the caller's */
+    memset(&sp, 0, sizeof(sp));
+    sp.KS_words[0] = 3;
+    sp.KS_words[39] = 4;
+    @call button::MSG_KT_STACK(&sp);
+    CHECK(sp.KS_sum == 7);
     return fails - before;
 }
 
@@ -230,6 +265,34 @@ int KMsgRemote(optr proc, optr remote)
 	CHECK(@dispatchcall (MSG_KP_PING) dup == 21);
     }
     CHECK(@dispatchcall (MSG_KP_PING) ev == 21);
+
+    /* a structure of the stack (T *p = ss:bp, MF_STACK): the event has
+     * a copy, so the sender's may go before the message arrives; a
+     * recorded event too.  A direct call works on the caller's. */
+    {
+	KStackParams sp;
+	word i;
+
+	for (i = 0; i < 40; i++)
+	    sp.KS_words[i] = i;			/* sum 780 */
+	sp.KS_sum = 1;
+	@send proc::MSG_KP_STACK(&sp);
+	ev = @record proc::MSG_KP_STACK(&sp);
+	memset(&sp, 0xff, sizeof(sp));
+	CHECK(kmsgStackCount == 0);
+	(void) @call proc::MSG_KP_PING(0);
+	CHECK(kmsgStackCount == 1 && kmsgStackSum == 780);
+	kmsgStackSum = 0;
+	@dispatch ev;
+	(void) @call proc::MSG_KP_PING(0);
+	CHECK(kmsgStackCount == 2 && kmsgStackSum == 780);
+	CHECK(sp.KS_sum == 0xffffffff);
+	/* (and a call to the other thread works on a copy) */
+	for (i = 0; i < 40; i++)
+	    sp.KS_words[i] = 2;
+	@call proc::MSG_KP_STACK(&sp);
+	CHECK(kmsgStackCount == 3 && kmsgStackSum == 80);
+    }
 
     /* an object block run by the other thread: remote calls */
     CHECK(@call remote::MSG_KV_WHO() == t2);

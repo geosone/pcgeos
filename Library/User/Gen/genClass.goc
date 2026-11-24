@@ -1322,7 +1322,6 @@ static void LoadOrSaveOptions(optr oself, Message meta, Message gen)
 
     if (key) {
 	GenOptionsParams p;
-	GenOptionsParams *pp = &p;	/* the parameter is a pointer (ss:bp) */
 	word n = (word) VarDataSizePtr(key);
 
 	memset(&p, 0, sizeof(p));
@@ -1330,7 +1329,8 @@ static void LoadOrSaveOptions(optr oself, Message meta, Message gen)
 	    n = sizeof(p.GOP_key) - 1;
 	memcpy(p.GOP_key, key, n);
 	@call oself::MSG_META_GET_INI_CATEGORY(p.GOP_category);
-	CObjMessageP(MF_CALL, oself, gen, &pp, sizeof(pp), NULL, 0);
+	/* (a structure of the stack: ABI.md section 5) */
+	CObjMessageP(MF_CALL, oself, gen, &p, sizeof(p), NULL, 0);
     }
     if (OptrToHandle(GenLock(oself)->GI_comp.CP_firstChild)) {
 	GenUnlock(oself);

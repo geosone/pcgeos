@@ -170,6 +170,20 @@ function type. Under `goc -cg`:
   reply)`. The thunk unpacks the structure and calls the method with its
   real prototype. `Class_methods` points to the thunks (`GocMethodThunk`).
   The method's prototype comes first, so `@extern method` works too.
+- **A structure of the stack** (`MF_STACK`): a message whose only
+  parameter is a pointer declared at `ss:bp` (`T *p = ss:bp`) has the
+  structure itself as its parameter structure: the sender passes
+  `(p), sizeof(T)`, the thunk hands the method `(T *) params`. A queued
+  or recorded message so carries a copy, as in DOS16, and the sender's
+  structure may go; a direct call works on the caller's structure, so
+  the method can write results into it; a call to another thread works
+  on the copy (nothing comes back). A null pointer queues zeroes. Code
+  that passes such a message by hand (`CObjMessageP`, `GenCallParent`,
+  ...) passes the structure and its size, not the pointer.
+  - Not so with a second parameter (the return registers of
+    `word *fileOrError = multipleax, DocumentCommonParams *params =
+    ss:bp`): those pass the pointers, and are calls.
+  - ctest `kernel.msg` sends, records and calls one of 84 bytes.
 - `MM_BASED` methods get an ordinary `pself` because there are no
   segments.
 
