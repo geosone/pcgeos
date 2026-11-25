@@ -560,6 +560,10 @@ int main(int argc, char **argv)
 	step(325);
 	printf("sub menu separators: %u\n", st->UBS_stub[14]);
 	CHECK(st->UBS_stub[14] == 7);
+	/* a trigger with a default moniker: the level icon */
+	step(326);
+	printf("default moniker: %u\n", st->UBS_stub[17]);
+	CHECK(st->UBS_stub[17] == 7);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }

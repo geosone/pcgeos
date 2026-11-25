@@ -1768,10 +1768,16 @@ static void EnabledStateChange(optr oself, VisUpdateMode mode)
 	@call b::MSG_VIS_MARK_INVALID(flags, updateMode);
 }
 
-/* Port32: moniker lists not yet (the list stays) */
+/* VisSpecResolveMonikerList: a list given to an object already built
+ * is replaced by its moniker fitting the display (an icon if there is
+ * one, else a gstring, else the text) */
 @method VisClass, MSG_SPEC_RESOLVE_MONIKER_LIST
 {
-    (void) monikerList;
+    (void) VisFindMoniker(ConstructOptr(OptrToHandle(oself), monikerList),
+			  VMSF_REPLACE_LIST | VMSF_GSTRING |
+			  (VMS_ICON << VMSF_STYLE_OFFSET), 0,
+			  UserLimitDisplayTypeToStandard(
+			      (DisplayType) (UserGetDisplayType() >> 8)));
 }
 
 @method VisClass, MSG_VIS_CREATE_VIS_MONIKER

@@ -13,9 +13,12 @@
  *     mkrWindowMenuButton.ui bmPin.ui cspecCUAS.ui
  *     ../CArt/mkrHelpTrigSM.ui ../CArt/mkrHelpTrigSCGA.ui
  *     ../CArt/mkrHelpPrimarySC.ui ../CArt/mkrHelpPrimarySM.ui
- *     ../CArt/mkrHelpPrimarySCGA.ui cspecHelp.ui:StandardMonikers
- * (cspecHelp.ui, #included in StandardMonikers: the help triggers'
- * monikers); goc needs the monikers of a list in the same file).
+ *     ../CArt/mkrHelpPrimarySCGA.ui ../CArt/mkrLevel[0-3]IC.ui
+ *     ../CArt/mkrLevel[0-3]IM.ui ../CArt/mkrLevel[0-3]ICGA.ui
+ *     cspecLevels.ui:StandardMonikers cspecHelp.ui:StandardMonikers
+ * (cspecLevels.ui and cspecHelp.ui, #included in StandardMonikers: the
+ * user levels' and the help triggers' monikers); goc needs the
+ * monikers of a list in the same file).
  *
  * The icons' ATTR_GEN_TRIGGER_ACTION_DATA (0, VUM_NOW) is left out: the
  * C messages they send take no arguments.

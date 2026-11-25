@@ -209,7 +209,9 @@ typedef struct {
      * up, 2 Yes activated by the click (steps 322 to 324); [14] a sub
      * menu after the Tools menu's group (the items below it not
      * usable): 1 no separator below the group first, 2 one with the
-     * sub menu usable, 4 none again with it not usable (step 325) */
+     * sub menu usable, 4 none again with it not usable (step 325);
+     * [17] a trigger with ATTR_GEN_DEFAULT_MONIKER: 1 a moniker, 2 a
+     * picture of the list chosen, 4 a level icon 64 wide (step 326) */
     word		UBS_stub[24];
 } UBState;
 
@@ -4778,6 +4780,44 @@ static void UBClickMenu(word n)
 	@call UBTools::MSG_GEN_REMOVE_CHILD(sub, 0);
 	@call sub::MSG_META_OBJ_FREE();
 	@call UBLast::MSG_GEN_SET_USABLE(VUM_NOW);
+	break;
+    }
+    case 326: {
+	/* a trigger with ATTR_GEN_DEFAULT_MONIKER gets the type's
+	 * standard moniker when built (OLButtonDefaultMoniker) */
+	optr tr;
+	GenDefaultMonikerType *d;
+	ChunkHandle mk;
+	VisMoniker *vm;
+
+	ubState.UBS_stub[17] = 0;
+	tr = ObjInstantiate(OptrToHandle(@UBTools),
+			    (ClassStruct *) &GenTriggerClass);
+	/* (the first message initializes the generic part) */
+	(void) @call tr::MSG_GEN_GET_USABLE();
+	ObjLockObjBlock(OptrToHandle(tr));
+	((GenInstance *) ObjDerefGen(tr))->GI_states &= ~GS_USABLE;
+	d = ObjVarAddData(tr, ATTR_GEN_DEFAULT_MONIKER, sizeof(*d));
+	*d = GDMT_LEVEL_1;
+	MemUnlock(OptrToHandle(tr));
+	@call UBTools::MSG_GEN_ADD_CHILD(tr, CCO_LAST);
+	@call tr::MSG_GEN_SET_USABLE(VUM_NOW);
+	ObjLockObjBlock(OptrToHandle(tr));
+	mk = ((GenInstance *) ObjDerefGen(tr))->GI_visMoniker;
+	if (mk) {
+	    ubState.UBS_stub[17] |= 1;
+	    vm = LMemDeref(ConstructOptr(OptrToHandle(tr), mk));
+	    if (!(vm->VM_type & VMT_MONIKER_LIST) &&
+		(vm->VM_type & VMT_GSTRING))
+		ubState.UBS_stub[17] |= 2;
+	    if (vm->VM_width == 64)
+		ubState.UBS_stub[17] |= 4;
+	}
+	MemUnlock(OptrToHandle(tr));
+	/* (as it was) */
+	@call tr::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	@call UBTools::MSG_GEN_REMOVE_CHILD(tr, 0);
+	@call tr::MSG_META_OBJ_FREE();
 	break;
     }
     case 210:

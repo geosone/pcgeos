@@ -11,12 +11,18 @@
  * (OLMenuButtonClass's OLMBSS_OPENS_POPUP_LIST), the pushpin trigger
  * (always enabled), scrollable items in a popup list
  * (OLScrollableItemClass), the task bar (HINT_EXPRESS_MENU always makes
- * a system icon), ATTR_GEN_DEFAULT_MONIKER (the StandardMonikers
- * resource).
+ * a system icon).
  */
 @include "cGeode.goh"
 
 @classdecl OLButtonClass;
+
+@extern visMoniker DefaultLevel0Moniker;
+@extern visMoniker DefaultLevel1Moniker;
+@extern visMoniker DefaultLevel2Moniker;
+@extern visMoniker DefaultLevel3Moniker;
+@extern visMoniker StandardHelpMoniker;
+@extern visMoniker StandardPrimaryHelpMoniker;
 
 @extern method OLButtonClass, MSG_VIS_RECALC_SIZE;
 @extern method OLButtonClass, MSG_SPEC_GET_EXTRA_SIZE;
@@ -400,7 +406,7 @@ static void ButtonHint2(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
 {
     optr b = ConstructOptr(mh, (ChunkHandle) (uintptr_t) handlerData);
 
-    (void) chnk; (void) extra;
+    (void) chnk;
     switch (dataType) {
     case HINT_TRIGGER_DESTRUCTIVE_ACTION:
 	Btn(b)->OLBI_fixedAttrs &= ~OLBFA_CAN_BE_TEMP_DEFAULT_TRIGGER;
@@ -418,9 +424,24 @@ static void ButtonHint2(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
 			  NULL, 0);
 	}
 	break;
-    case ATTR_GEN_DEFAULT_MONIKER:
-	/* (the StandardMonikers resource: not yet) */
+    case ATTR_GEN_DEFAULT_MONIKER: {
+	/* OLButtonDefaultMoniker: the standard moniker of the type (a
+	 * switch: an optr is known at run time only) */
+	optr m;
+
+	switch (*(GenDefaultMonikerType *) extra) {
+	case GDMT_LEVEL_0: m = @DefaultLevel0Moniker; break;
+	case GDMT_LEVEL_1: m = @DefaultLevel1Moniker; break;
+	case GDMT_LEVEL_2: m = @DefaultLevel2Moniker; break;
+	case GDMT_LEVEL_3: m = @DefaultLevel3Moniker; break;
+	case GDMT_HELP: m = @StandardHelpMoniker; break;
+	case GDMT_HELP_PRIMARY: m = @StandardPrimaryHelpMoniker; break;
+	default: m = 0; break;
+	}
+	if (m)
+	    (void) @call b::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(m, VUM_MANUAL);
 	break;
+    }
     }
 }
 

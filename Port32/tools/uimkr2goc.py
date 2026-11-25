@@ -9,7 +9,10 @@ them as goc: each @visMoniker with its attributes and its gstring as
 bytes, each chunk as an @chunk byte array, each moniker list as a list,
 in data resources named as in the .ui; text monikers are left out.  A
 GR_DRAW_BITMAP_OPTR at 0, 0 of a chunk of these files becomes the bitmap
-drawn inline (goc writes no optr in a gstring).
+drawn inline (goc writes no optr in a gstring).  uic's macros with
+parameters (#define NAME(a) and its lines ending in a backslash, | for
+a new line: cspecLevels.ui)
+are expanded.
 Comments (/* */, //, and ; to the end of a line in a gstring) go.
 
 usage: uimkr2goc.py out.goh file.ui[:Resource] ... [NAME=value ...] [+Suffix]
@@ -50,12 +53,53 @@ def cond(expr, names):
     return bool(eval(e))
 
 
+def expand(lines, macros):
+    """the macros with parameters expanded (| a new line)"""
+    if not macros:
+        return lines
+    pat = re.compile(r'\b(%s)\s*\(([^()]*)\)' % '|'.join(macros))
+    text = '\n'.join(lines)
+    while True:
+        new = pat.sub(lambda m: macros[m.group(1)](m.group(2)), text)
+        if new == text:
+            return text.split('\n')
+        text = new
+
+
+def macro(params, body):
+    """a macro's expansion function"""
+    def f(args):
+        vals = [a.strip() for a in args.split(',')]
+        t = body
+        for p, v in zip(params, vals):
+            t = re.sub(r'\b%s\b' % re.escape(p), v, t)
+        return t.replace('|', '\n')
+    return f
+
+
 def preprocess(path, names):
-    """the lines of the file whose conditions hold (#include ignored)"""
+    """the lines of the file whose conditions hold (#include ignored),
+    its macros with parameters expanded"""
     out, stack = [], []         # [this branch on, a branch taken] per level
+    macros, define = {}, None   # define: [name, params, body] being read
     text = re.sub(r'/\*.*?\*/', lambda m: '\n' * m.group(0).count('\n'),
                   open(path, encoding='latin-1').read(), flags=re.S)
     for line in text.split('\n'):
+        if define:
+            more = line.rstrip().endswith('\\')
+            define[2] += ' ' + line.rstrip().rstrip('\\')
+            if not more:
+                macros[define[0]] = macro(define[1], define[2])
+                define = None
+            continue
+        m = re.match(r'\s*#\s*define\s+(\w+)\(([^)]*)\)(.*)$', line)
+        if m and all(e[0] for e in stack):
+            define = [m.group(1), [p.strip() for p in m.group(2).split(',')],
+                      m.group(3).rstrip().rstrip('\\')]
+            if not line.rstrip().endswith('\\'):
+                macros[define[0]] = macro(define[1], define[2])
+                define = None
+            continue
         s = line.split(';')[0].strip()
         s = re.sub(r'^#\s+', '#', s)      # (# if, # endif)
         # the assembler's conditionals inside a gstring
@@ -84,7 +128,7 @@ def preprocess(path, names):
             continue
         if all(e[0] for e in stack):
             out.append(line)
-    return out
+    return expand(out, macros)
 
 
 def number(tok):

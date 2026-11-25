@@ -5946,8 +5946,7 @@ visual classes of `Library/User/Vis`:
   (`gDocCtrl.goh`, `gDCtrlC.goh`, `gToolCC.goh`, `game.goh`) now have
   the parentheses.
 - **Not yet:**
-  - in `GenClass`: `MSG_SPEC_RESOLVE_MONIKER_LIST` (`VisClass` keeps
-    the list), the icon and text combination moniker
+  - in `GenClass`: the icon and text combination moniker
     (`HINT_USE_ICON_TEXT_COMBINATION_MONIKER`), `VMDT_TOKEN` monikers,
     `MSG_GEN_BRANCH_REPLACE_PARAMS` (dword optrs),
     `MSG_META_BRING_UP_HELP`, the GenView's content in
@@ -6522,6 +6521,11 @@ are left out), the constants, the variables and the routines.
     `OLPWI_udds` is a pointer; the response's ActionDescriptor is
     `OLDWI_responseOD` and `OLDWI_responseMsg` (C has no type for it).
     `MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(command)` returns the optr.
+    A trigger with `ATTR_GEN_DEFAULT_MONIKER` gets the standard moniker
+    of the type (the user levels' icons of `cspecLevels.ui`, the help
+    monikers) when built; a list given to an object already built is
+    resolved to the moniker fitting the display
+    (`VisClass` `MSG_SPEC_RESOLVE_MONIKER_LIST`).
     `MSG_GEN_INTERACTION_ACTIVATE_COMMAND` sends the action of the
     command's standard trigger. As the modal window a popup lets the
     mouse into its own window, its child windows and menus not pinned
