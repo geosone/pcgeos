@@ -8,13 +8,16 @@
  * notifications of the display list and the display with the target;
  * Ctrl+F4 closes it, Ctrl+F6 goes to the next one.
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the document
- * (GenDocumentClass is not in C: MSG_GEN_DISPLAY_UPDATE_FROM_DOCUMENT,
- * the model grab for it, closing it), OLReleaseAllStayUpModeMenus.
+ * The display of a document has the document's name as its moniker,
+ * grabs the model for the document while it has the target, and closes
+ * the document instead of itself.
  */
 @include "cGeode.goh"
 @include <Internal/SpecUI/olDisplayGroupClass.goh>
 @include <Internal/SpecUI/olDisplayWinClass.goh>
+@include <Objects/gDocC.goh>
+@include <Objects/gDocCtrl.goh>
+#include <string.h>
 
 @classdecl OLDisplayWinClass, neverSaved;
 
@@ -388,9 +391,19 @@ static void SendNotification(optr oself, Boolean withData)
  * ------------------------------------------------------------------- */
 
 /* OLDisplayWinGenCloseInteraction: a dismissable display closes its
- * document (Port32: there is none yet) */
+ * document (which closes the display, unless the user cancels);
+ * without one a subclass has to handle it */
 @method OLDisplayWinClass, MSG_GEN_DISPLAY_CLOSE
 {
+    GenDisplayInstance *g = GenDisp(oself);
+    optr doc;
+
+    (void) pself;
+    if (!(g->GDI_attributes & GDA_USER_DISMISSABLE))
+	return;
+    doc = g->GDI_document;
+    if (doc)
+	(void) @call doc::MSG_GEN_DOCUMENT_CLOSE(0);
 }
 
 /* OLDisplayWinSpecSetUsable: the display list changed */
@@ -501,9 +514,25 @@ static void MinimizeCommon(optr oself)
 			       TL_GEN_DISPLAY, level, retValue);
 }
 
+/* OLDisplayGrabModelForDocument: the model for the document (not here);
+ * without a document yet, flagged to do it when it comes */
+static void GrabModelForDocument(optr oself)
+{
+    optr doc = GenDisp(oself)->GDI_document;
+
+    if (!doc) {
+	DWin(oself)->OLDW_flags |= OLDWF_NEED_TO_GRAB_MODEL_FOR_DOCUMENT;
+	return;
+    }
+    DWin(oself)->OLDW_flags &= ~OLDWF_NEED_TO_GRAB_MODEL_FOR_DOCUMENT;
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(doc, MAEF_GRAB | MAEF_MODEL |
+					       MAEF_NOT_HERE);
+}
+
 /*
- * OLDisplayWinUpdPriFocusState: gained, the traveling objects here (the
- * document's model grab: Port32 not yet), the display told; its menus'
+ * OLDisplayWinUpdPriFocusState: gained, the traveling objects here, the
+ * model grabbed for the document (later if none yet), the display
+ * told; its menus'
  * buttons shown, lost hidden, unless always or never adopted
  */
 @method OLDisplayWinClass, MSG_META_GAINED_TARGET_EXCL,
@@ -515,8 +544,7 @@ static void MinimizeCommon(optr oself)
     if (message == MSG_META_GAINED_TARGET_EXCL) {
 	pself->OLDW_flags |= OLDWF_TARGET;
 	TravelingObjectsCommon(oself, TRUE);
-	if (!GenDisp(oself)->GDI_document)
-	    DWin(oself)->OLDW_flags |= OLDWF_NEED_TO_GRAB_MODEL_FOR_DOCUMENT;
+	GrabModelForDocument(oself);
 	SendNotification(oself, TRUE);
     } else
 	SendNotification(oself, FALSE);
@@ -567,6 +595,32 @@ static void MinimizeCommon(optr oself)
 /* ---------------------------------------------------------------------
  * The document, the stacking in the group
  * ------------------------------------------------------------------- */
+
+/*
+ * OLDisplayUpdateFromDocument: the document kept, the model grabbed for
+ * it if that waited; the document's name as the moniker (unless it has
+ * it already)
+ */
+@method OLDisplayWinClass, MSG_GEN_DISPLAY_UPDATE_FROM_DOCUMENT
+{
+    const DocumentFileChangedParams *fc = params;
+    GenDisplayInstance *g = GenDisp(oself);
+    ChunkHandle m;
+
+    g->GDI_document = fc->DFCP_document;
+    if (pself->OLDW_flags & OLDWF_NEED_TO_GRAB_MODEL_FOR_DOCUMENT)
+	GrabModelForDocument(oself);
+    m = GenDisp(oself)->GI_visMoniker;
+    if (m) {
+	VisMoniker *vm = LMemDerefHandles(OptrToHandle(oself), m);
+
+	if (!(vm->VM_type & VMT_GSTRING) &&
+	    !LocalCmpStrings((char *) vm + VMWT_text, fc->DFCP_name, 0))
+	    return;
+    }
+    (void) @call oself::MSG_GEN_REPLACE_VIS_MONIKER_TEXT(
+			(char *) fc->DFCP_name, VUM_DELAYED_VIA_UI_QUEUE);
+}
 
 @method OLDisplayWinClass, MSG_GEN_DISPLAY_GET_DOCUMENT
 {

@@ -33,7 +33,13 @@
 @message void MSG_GEN_DISPLAY_SET_ATTRS(byte attrs = cl);
 @message byte MSG_GEN_DISPLAY_GET_ATTRS() = cl;
 
+@ifdef GEOS_PORT32
+/* Port32 (Port32/ABI.md section 13x): the parameter of the asm, a
+ * DocumentFileChangedParams (gDocCtrl.goh) */
+@message void MSG_GEN_DISPLAY_UPDATE_FROM_DOCUMENT(void *params = ss:bp);
+@else
 @message void MSG_GEN_DISPLAY_UPDATE_FROM_DOCUMENT();	/* NEEDS PROTOTYPE */
+@endif
 
 @message optr MSG_GEN_DISPLAY_GET_DOCUMENT() = cx:dx;
 

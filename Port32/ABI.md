@@ -6725,7 +6725,13 @@ are left out), the constants, the variables and the routines.
     tells the application's `GAGCNLT_APP_TARGET_NOTIFY_DISPLAY_CHANGE`
     list (`NotifyDisplayChange`: its number, name and overlapping) and
     the group's list change; losing it, it hides them. Ctrl+F4 closes a
-    display, Ctrl+F6 lowers it and brings up the next. `OLWinClass`
+    display, Ctrl+F6 lowers it and brings up the next. The display of a
+    document gets it and its name from the document control
+    (`MSG_GEN_DISPLAY_UPDATE_FROM_DOCUMENT`, its
+    `DocumentFileChangedParams` as the asm's parameter: `@ifdef
+    GEOS_PORT32` in `gDispC.goh`), grabs the model for it while it has
+    the target (up to the application) and closes the document instead
+    of itself. `OLWinClass`
     has `MSG_GEN_SET_WIN_POSITION`, `_SIZE` and `_CONSTRAIN` now
     (`cwinClassMisc.goc`: the previous bounds and flags while
     maximized). `NotifyDisplayChange` names the display by its number,

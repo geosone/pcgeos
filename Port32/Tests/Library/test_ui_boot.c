@@ -107,7 +107,7 @@ typedef struct {
     word		UBS_fcn[16];
     word		UBS_low[8];
     word		UBS_snd[6];
-    word		UBS_stub[16];
+    word		UBS_stub[24];
 } UBState;
 
 static int fails;
@@ -506,6 +506,12 @@ int main(int argc, char **argv)
 	step(313);
 	printf("task selected: %u\n", st->UBS_stub[5]);
 	CHECK(st->UBS_stub[5] == 3);
+	/* the display of a document */
+	step(314);
+	TimerSleep(5);
+	step(315);
+	printf("display with a document: %u\n", st->UBS_stub[16]);
+	CHECK(st->UBS_stub[16] == 15);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }
