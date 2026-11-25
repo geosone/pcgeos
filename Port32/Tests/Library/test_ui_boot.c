@@ -20,6 +20,7 @@
 #include <geosdriver.h>
 #include <initfile.h>
 #include <sysstats.h>
+#include <system.h>
 #include "ghal.h"
 #include <sound.h>
 #include <Internal/soundDrv.h>
@@ -147,6 +148,19 @@ static void Put(const char *rel, const void *data, unsigned long size)
     ghal_fs_close(f);
 }
 
+/* SysNotify: an application of execOnStartupBG that is not there
+ * (LoadApplicationWithErrorMessage): go on */
+static int notifies;
+static char notifyText[160];
+
+static word Notify(word flags, const char *string1, const char *string2)
+{
+    notifies++;
+    snprintf(notifyText, sizeof(notifyText), "%s %s",
+	     string1 ? string1 : "", string2 ? string2 : "");
+    return (flags & SNF_CONTINUE) ? SNF_CONTINUE : 0;
+}
+
 static GeodeHandle Find(const char *name)
 {
     return GeodeFind(name, GEODE_NAME_SIZE, 0, 0);
@@ -190,6 +204,42 @@ static void Sounds(GeodeHandle drv, int from)
     CHECK(trombone >= 1 && beeps >= 3 && note == 1);
 }
 
+/* the sound of step 301: one no input beep (its 800 Hz) of a content's
+ * unwanted press, none of the release */
+static void NoInputBeep(GeodeHandle drv, void (*step)(word))
+{
+    DriverRegs r;
+    TsndLog *log;
+    int i, from, noInput = 0, t;
+
+    memset(&r, 0, sizeof(r));
+    CHECK(drv && !DriverCall(GeodeInfoDriver(drv), TSND_GET_LOG, &r));
+    log = r.DR_farPtr;
+    if (!log)
+	return;
+    /* the voices free again (step 300's sounds over) */
+    for (t = 0, i = -1; t < 200 && i != (int) log->TL_count; t++) {
+	i = log->TL_count;
+	TimerSleep(10);
+    }
+    from = log->TL_count;
+    step(301);
+    for (t = 0; t < 120 && !noInput; t++) {
+	TimerSleep(1);
+	for (i = from; i < (int) log->TL_count; i++)
+	    if (log->TL_ev[i].TE_fn == DRE_SOUND_VOICE_ON &&
+		log->TL_ev[i].TE_ax == 800)
+		noInput++;
+    }
+    TimerSleep(10);
+    for (i = from, noInput = 0; i < (int) log->TL_count; i++)
+	if (log->TL_ev[i].TE_fn == DRE_SOUND_VOICE_ON &&
+	    log->TL_ev[i].TE_ax == 800)
+	    noInput++;
+    printf("no input beep: %d\n", noInput);
+    CHECK(noInput == 1);
+}
+
 /*
  * UIBOOT_SHOT=file: the screen (as GEOS drew it, read back from the
  * display) written as a PPM after step UIBOOT_SHOT_AT (default the
@@ -229,6 +279,7 @@ int main(int argc, char **argv)
     static const char ini[] =
 	"[ui]\r\ngeneric = ui\r\nspecific = motif\r\n"
 	"execOnStartup = uiboot\r\n"
+	"execOnStartupBG = ubnosuch\r\n"
 	"[screen 0]\r\ndriver = hostvid\r\n"
 	"device = Host Display: 640x480\r\n"
 	"[input]\r\nkeyboardOnly = false\r\n"
@@ -307,6 +358,7 @@ int main(int argc, char **argv)
     GeodeRegisterImage("hostvid", hostvid_geode, hostvid_geode_size);
 
     /* booted, with the fonts of SP_FONT: uiboot of execOnStartup up */
+    kernelSysNotifyHook = Notify;
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     ui = (GeodeHandle) SysGetInfo(SGIT_UI_PROCESS);
     CHECK(ui != 0 && ui == Find("ui      "));
@@ -316,6 +368,12 @@ int main(int argc, char **argv)
     CHECK(Find("motif   ") != 0);
     if (!app)
 	return 1;
+    /* the missing one of execOnStartupBG told, the startup gone on */
+    WAIT_FOR(notifies);
+    printf("notified %d: %s\n", notifies, notifyText);
+    CHECK(notifies == 1 &&
+	  strstr(notifyText, "Unable to load application") &&
+	  strstr(notifyText, "\"ubnosuch\""));
     st = ProcGetLibraryEntry(app, 0);
     step = (void (*)(word)) ProcGetLibraryEntry(app, 1);
     WAIT_FOR(st->UBS_opened);
@@ -368,6 +426,7 @@ int main(int argc, char **argv)
 	    from = ((TsndLog *) r.DR_farPtr)->TL_count;
 	step(300);
 	Sounds(drv, from);
+	NoInputBeep(drv, step);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }

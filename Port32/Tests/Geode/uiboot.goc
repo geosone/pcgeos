@@ -4300,6 +4300,14 @@ static void UBClickMenu(word n)
 	@call uiProc::MSG_USER_UPDATE_SOUND_PARAMS();
 	break;
     }
+    case 301:
+	/* a press nobody takes in a content beeps (the no input beep's
+	 * 800 Hz), a release not (once the sounds of step 300 are over:
+	 * they hold all the test driver's voices) */
+	@call UBContent::MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT(NULL,
+							       BI_PRESS);
+	@call UBContent::MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT(NULL, 0);
+	break;
     case 210:
 	/* (the documents left, while the test waits for step 209) */
 	ubState.UBS_low[6] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();

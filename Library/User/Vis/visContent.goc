@@ -856,11 +856,12 @@ done:
     MouseEvent(oself, message, xPosition, yPosition, inputState, retVal);
 }
 
-/* VisContentUnwantedMouseEvent (no sound for a press yet) */
+/* VisContentUnwantedMouseEvent: a press nobody takes beeps */
 @method VisContentClass, MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT
 {
     (void) mouseGrab;
-    (void) inputState;
+    if (inputState & BI_PRESS)
+	UserStandardSound(SST_NO_INPUT);
 }
 
 /*

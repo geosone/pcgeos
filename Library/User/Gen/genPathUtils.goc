@@ -36,6 +36,9 @@
 @chunk char dreNotAttachedToServer[] = "You are not connected to the appropriate server to which the disk belongs. See your computer system manager.\r\rError Code: UI-22";
 @chunk char dreAllDrivesUsed[] = "There is no free drive letter to which the network disk may be mapped. See your computer system manager.\r\rError Code: UI-24";
 
+/* userStrings.asm (UserClass: LoadApplicationWithErrorMessage) */
+@chunk char cannotLoadAppError[] = "Unable to load application. (UI-07)";
+
 @visMoniker diskInDriveMoniker = "Disk Is In The Drive";
 @visMoniker cancelDiskRestoreMoniker = "Stop Trying To Reopen The File";
 

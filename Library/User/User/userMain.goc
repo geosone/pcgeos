@@ -366,26 +366,66 @@ typedef struct {
     Boolean		SAD_shutdown;
 } StartupApplsData;
 
-/* LoadApplicationWithErrorMessage: Port32 shows no error yet */
+@extern chunk cannotLoadAppError;
+
+/*
+ * LoadApplicationWithErrorMessage: the application loaded; if it cannot
+ * be, the user is told (SysNotify): with mayContinue, to go on or shut
+ * down, else the system exits.  TRUE if the system shuts down.
+ */
+static Boolean LoadApplicationWithErrorMessage(const char *name,
+					       AppLaunchFlags flags,
+					       word extraData,
+					       Boolean mayContinue)
+{
+    MemHandle alb;
+    AppLaunchBlock *a;
+    GeodeLoadError e = GLE_OK;
+    char quoted[FILE_LONGNAME_BUFFER_SIZE + 4];
+    word answer;
+    size_t n;
+
+    alb = MemAlloc(sizeof(AppLaunchBlock), HF_SHARABLE | HF_SWAPABLE,
+		   HAF_ZERO_INIT);
+    if (alb) {
+	a = MemLock(alb);
+	a->ALB_extraData = extraData;
+	MemUnlock(alb);
+	if (UserLoadApplication(flags, MSG_GEN_PROCESS_OPEN_APPLICATION, alb,
+				(char *) name, 0, &e))
+	    return FALSE;
+    }
+    /* "Unable to load application." "<name>" */
+    for (n = 0; name[n] && n < sizeof(quoted) - 3; n++)
+	;
+    quoted[0] = '"';
+    memcpy(quoted + 1, name, n);
+    quoted[n + 1] = '"';
+    quoted[n + 2] = 0;
+    MemLock(OptrToHandle(@cannotLoadAppError));
+    answer = SysNotify(mayContinue ? SNF_ABORT | SNF_CONTINUE : SNF_EXIT,
+		       LMemDeref(@cannotLoadAppError), quoted);
+    MemUnlock(OptrToHandle(@cannotLoadAppError));
+    if (answer & SNF_ABORT) {
+	(void) SysShutdown(SST_CLEAN_FORCED);
+	return TRUE;
+    }
+    return FALSE;
+}
+
+/* StartupAppls_callback: each one may be missing; a shutdown chosen
+ * ends the list */
 static Boolean StartupApplsCB(const char *name, word sectionNum,
 			      void *data)
 {
     StartupApplsData *d = data;
-    MemHandle alb;
-    AppLaunchBlock *a;
-    GeodeLoadError e;
 
     (void) sectionNum;
-    alb = MemAlloc(sizeof(AppLaunchBlock), HF_SHARABLE | HF_SWAPABLE,
-		   HAF_ZERO_INIT);
-    if (!alb)
-	return FALSE;
-    a = MemLock(alb);
-    a->ALB_extraData = d->SAD_extraData;
-    MemUnlock(alb);
-    (void) UserLoadApplication(d->SAD_flags,
-			       MSG_GEN_PROCESS_OPEN_APPLICATION, alb,
-			       (char *) name, 0, &e);
+    if (LoadApplicationWithErrorMessage(name, d->SAD_flags, d->SAD_extraData,
+					TRUE)) {
+	d->SAD_shutdown = TRUE;
+	return TRUE;
+    }
     return FALSE;
 }
 
@@ -400,6 +440,8 @@ static Boolean StartupApplsCB(const char *name, word sectionNum,
     d.SAD_flags = ALF_NO_ACTIVATION_DIALOG;
     InitFileEnumStringSection("ui", "execOnStartup", IFRF_READ_ALL,
 			      StartupApplsCB, &d);
+    if (d.SAD_shutdown)
+	return TRUE;
     d.SAD_flags = ALF_NO_ACTIVATION_DIALOG | ALF_OPEN_IN_BACK |
 		  ALF_DO_NOT_OPEN_ON_TOP;
     InitFileEnumStringSection("ui", "execOnStartupBG", IFRF_READ_ALL,
