@@ -5611,8 +5611,54 @@ visual classes of `Library/User/Vis`:
   - `MSG_PRINT_GET_DOC_NAME` answers with
     `MSG_PRINT_CONTROL_SET_DOC_NAME` (the asm's message came in `bp`,
     which the C prototype has not).
-  - `library.ui.boot` step 91. Not yet: a document of its own
-    (`OLDocumentClass`), so nothing can be made or opened.
+  - `library.ui.boot` step 91.
+- **`OLDocumentClass`** (`CMain/cmainDocumentCommon.goc`,
+  `cmainDocDialog.goc`, `cmainDocPhysical.goc`, `cmainDocumentNew.goc`,
+  `cmainDocumentMisc.goc`, beside the asm of the same names;
+  `OLBuildDocument`; shared declarations in `cmainDocument.goh`):
+  Motif's part of a `GenDocument`: the document with its file. So far
+  new, open, save, update, auto save, close, attach from state, detach,
+  shutdown, the connections of IACP clients; not yet save as, revert,
+  import/export (rest of `cmainDocumentMisc.asm`), `cmainDocLowDisk`,
+  `cmainDocObscure`.
+  - `DocFileOrError` (`gDocC.goh`): what the `fileOrError` of the
+    document's messages points to: a `dword` in Port32 (a file handle
+    has 32 bits), a `word` in the 16-bit build.
+  - `OLDI_autoSaveTimer` and `OLDI_changeTimer` are `TimerHandle`s; the
+    new `OLDI_physOpen` says that `..._PHYSICAL_OPEN` (not
+    `..._PHYSICAL_CREATE`) opened the file.
+  - The undo context of a document is `(handle << 12) ^ chunk` of the
+    document object, a `dword`
+    (`MSG_GEN_PROCESS_UNDO_SET_CONTEXT`).
+  - `MSG_GEN_DOCUMENT_INITIATE_TEMPLATE_WIZARD(params)` is in
+    `gDocC.goh` now (the asm had it in `gDocC.def` alone).
+  - `MSG_GEN_DOCUMENT_PHYSICAL_REVERT` takes a `NULL` error pointer
+    (the document queues the message to itself).
+  - `MSG_GEN_DOCUMENT_ENABLE_AUTO_SAVE` clears `GDA_PREVENT_AUTO_SAVE`
+    and `..._DISABLE_AUTO_SAVE` sets it; the asm had the two the wrong
+    way round.
+  - `MSG_GEN_DOCUMENT_PHYSICAL_DELETE` pops the directory it pushed
+    (the asm left it pushed).
+  - Until `cmainDocLowDisk` is in C a full disk at close goes through
+    the standard dialog of a failed save, and at detach the document
+    acknowledges without asking the user to make room.
+  - The standard dialogs (`StandardDialogBoxType`, `cmainDocDialog.goc`)
+    are a `switch` generated once from the table of
+    `cmainDocDialog.asm`; `OLDocStandardDialogArg` passes the second
+    string (an error code, a drive name).
+  - `UserStoreDocFileName` (`Library/User/User/userDocumentSave.goc`)
+    keeps the last ten documents in `recntDoc.vm` of `SP_PRIVATE_DATA`
+    in the layout of the 16-bit build (a count byte, ten slots of
+    `FileLongName`, a `word` disk, `PathName`).
+    `UserEncryptPassword` (`userMain.goc`) as the asm: eight hex digits
+    of the hash, zeroes for no password.
+  - `uic -g`: a chunk that is one structure (`<Type> <values>`) is
+    written `@chunk Type Name = GOC_Type(values);`, the macro being in
+    the header of the type (`GOC_VisTextCharAttr`, `tCommon.h`); a
+    `word` that names a chunk is `OptrToChunk(@Name)`.
+  - `library.ui.boot` steps 95 to 98: an untitled document is made and
+    closed (object and file go); one with a name is made, marked dirty,
+    saved, closed, opened again (a second open finds it open), closed.
 - **IACP** (`Library/User/IACP/iacpMain.goc`, `iacpConnect.goc`, beside
   `iacpMain.asm`, `iacpUtils.asm`, `iacpConnect.asm`): the C API of
   `iacp.goh` (plus `IACPShutdownConnection`), as the asm, except:

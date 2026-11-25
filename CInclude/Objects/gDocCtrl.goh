@@ -197,6 +197,7 @@ typedef WordFlags GenDocumentControlAttrs;
 #define GDCA_DOCUMENT_EXISTS	    	0x0100
 #define GDCA_CURRENT_TASK	    	0x00f0
 #define GDCA_DO_NOT_SAVE_FILES	    	0x0008
+#define GDCA_FORCE_DEMAND_PAGING	0x0004
 
 #define GDCA_MODE_OFFSET   	    	13
 #define GDCA_CURRENT_TASK_OFFSET   	4

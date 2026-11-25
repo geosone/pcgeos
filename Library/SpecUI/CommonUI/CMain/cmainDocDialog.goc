@@ -1,0 +1,439 @@
+/*
+ * cmainDocDialog.goc -- the standard dialogs of a document (after
+ * cmainDocDialog.asm): each StandardDialogBoxType has its kind of
+ * dialog, its text (a chunk of DocumentStringsUI, in which \1 stands
+ * for the name of the file and \2 for what was being done) and its
+ * response triggers.
+ *
+ * Port32: the asm's table (StdDialogTable, with the trigger tables)
+ * is the switch of GetEntry, made from it by a script once: an optr
+ * is no constant here.
+ */
+@include "cmainDocument.goh"
+
+typedef struct {
+    word				n;
+    StandardDialogResponseTriggerEntry	e[3];
+} StdDialogTriggers;
+
+typedef struct {
+    CustomDialogBoxFlags	flags;
+    optr			arg2;	/* SDA_*: what was being done */
+    optr			string;
+    StdDialogTriggers		t;
+} StdDialogEntry;
+
+#define TRIGGER(i, moniker, response) \
+    (d->t.e[i].SDRTE_moniker = (moniker), \
+     d->t.e[i].SDRTE_responseValue = (response), d->t.n = (i) + 1)
+
+static void GetEntry(StandardDialogBoxType type, StdDialogEntry *d)
+{
+    memset(d, 0, sizeof(*d));
+    switch (type) {
+    case SDBT_FILE_NEW_CANNOT_CREATE_TEMP_NAME:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_createNew;
+	d->string = @SDS_fileCannotCreateTemp;
+	break;
+    case SDBT_FILE_NEW_INSUFFICIENT_DISK_SPACE:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_createNew;
+	d->string = @SDS_fileInsufficientDiskSpace;
+	break;
+    case SDBT_FILE_NEW_TOO_MANY_OPEN_FILES:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_createNew;
+	d->string = @SDS_fileTooManyOpenFiles;
+	break;
+    case SDBT_FILE_NEW_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_createNew;
+	d->string = @SDS_fileError;
+	break;
+    case SDBT_FILE_NEW_WRITE_PROTECTED:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_createNew;
+	d->string = @SDS_fileWriteProtected;
+	TRIGGER(0, @SDRT_ok, IC_YES);
+	TRIGGER(1, @SDRT_cancel, IC_NO);
+	break;
+    case SDBT_FILE_OPEN_SHARING_DENIED:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_opening;
+	d->string = @SDS_fileSharingDenied;
+	break;
+    case SDBT_FILE_OPEN_FILE_NOT_FOUND:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_opening;
+	d->string = @SDS_fileFileNotFound;
+	break;
+    case SDBT_FILE_OPEN_INVALID_VM_FILE:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_opening;
+	d->string = @SDS_fileInvalidVMFile;
+	break;
+    case SDBT_FILE_OPEN_INSUFFICIENT_DISK_SPACE:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_opening;
+	d->string = @SDS_fileInsufficientDiskSpace;
+	break;
+    case SDBT_FILE_OPEN_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_opening;
+	d->string = @SDS_fileError;
+	break;
+    case SDBT_FILE_OPEN_READ_ONLY_PUBLIC_IN_TRANSPARENT_MODE:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileOpenReadOnlyPublicInTransparentMode;
+	TRIGGER(0, @SDRT_ok, IC_YES);
+	TRIGGER(1, @SDRT_cancel, IC_NO);
+	break;
+    case SDBT_FILE_OPEN_VM_DIRTY:
+	d->flags = (CDT_NOTIFICATION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileOpenVMDirty;
+	break;
+    case SDBT_FILE_OPEN_APP_MORE_RECENT_THAN_DOC:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileOpenAppMoreRecent;
+	break;
+    case SDBT_FILE_OPEN_DOC_MORE_RECENT_THAN_APP:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileOpenDocMoreRecent;
+	break;
+    case SDBT_FILE_OPEN_FILE_TYPE_MISMATCH:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileOpenFileTypeMismatch;
+	break;
+    case SDBT_FILE_SAVE_INSUFFICIENT_DISK_SPACE:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_saving;
+	d->string = @SDS_fileInsufficientDiskSpace;
+	break;
+    case SDBT_FILE_SAVE_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileSaveError;
+	break;
+    case SDBT_FILE_SAVE_WRITE_PROTECTED:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_saving;
+	d->string = @SDS_fileWriteProtected;
+	TRIGGER(0, @SDRT_ok, IC_YES);
+	TRIGGER(1, @SDRT_cancel, IC_NO);
+	break;
+    case SDBT_FILE_SAVE_AS_FILE_EXISTS:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_AFFIRMATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_saving;
+	d->string = @SDS_fileSaveFileExists;
+	break;
+    case SDBT_FILE_SAVE_AS_SHARING_DENIED:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_saving;
+	d->string = @SDS_fileSharingDenied;
+	break;
+    case SDBT_FILE_SAVE_AS_FILE_FORMAT_MISMATCH:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileSaveAsFileFormatMismatch;
+	break;
+    case SDBT_FILE_CLOSE_SAVE_CHANGES_UNTITLED:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileCloseSaveChangesUntitled;
+	TRIGGER(0, @SDRT_fileCloseSaveChangesUntitled_Yes, IC_YES);
+	TRIGGER(1, @SDRT_fileCloseSaveChangesUntitled_No, IC_NO);
+	TRIGGER(2, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_FILE_CLOSE_SAVE_CHANGES_TITLED:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileCloseSaveChangesTitled;
+	TRIGGER(0, @SDRT_fileCloseSaveChangesTitled_Yes, IC_YES);
+	TRIGGER(1, @SDRT_fileCloseSaveChangesTitled_No, IC_NO);
+	TRIGGER(2, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_FILE_CLOSE_ATTACH_DIRTY:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileCloseAttachDirty;
+	TRIGGER(0, @SDRT_fileCloseAttachDirty_Yes, IC_YES);
+	TRIGGER(1, @SDRT_fileCloseAttachDirty_No, IC_NO);
+	TRIGGER(2, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_FILE_REVERT_CONFIRM:
+	d->flags = (CDT_WARNING << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_AFFIRMATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileRevertConfirm;
+	break;
+    case SDBT_FILE_REVERT_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_reverting;
+	d->string = @SDS_fileError;
+	break;
+    case SDBT_FILE_ATTACH_DISK_NOT_FOUND:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_attachDiskNotFound;
+	TRIGGER(0, @SDRT_ok, IC_OK);
+	TRIGGER(1, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_CANNOT_CHANGE_TYPE:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_cannotChangeType;
+	break;
+    case SDBT_CANNOT_CHANGE_PASSWORD:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_cannotChangePassword;
+	break;
+    case SDBT_PROMPT_MOVE_TEMPLATE:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_promptMoveTempalte;
+	TRIGGER(0, @SDRT_promptMoveTemplate_Yes, IC_OK);
+	TRIGGER(1, @SDRT_promptMoveTemplate_No, IC_DISMISS);
+	break;
+    case SDBT_BAD_PASSWORD:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_badPassword;
+	break;
+    case SDBT_RENAME_FILE_EXISTS:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_renameFileExists;
+	break;
+    case SDBT_RENAME_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_renameError;
+	break;
+    case SDBT_BACKUP_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_backupError;
+	break;
+    case SDBT_REVERT_QUICK_CONFIRM:
+	d->flags = (CDT_WARNING << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_AFFIRMATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_revertQuickConfirm;
+	break;
+    case SDBT_REVERT_QUICK_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_revertQuickError;
+	break;
+    case SDBT_QUERY_SET_EMPTY_NONE_EXISTS:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_querySetEmptyNoneExists;
+	TRIGGER(0, @SDRT_querySetEmpty_Yes, IC_YES);
+	TRIGGER(1, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_QUERY_SET_EMPTY_ONE_EXISTS:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_querySetEmptyOneExists;
+	TRIGGER(0, @SDRT_querySetEmpty_Yes, IC_YES);
+	TRIGGER(1, @SDRT_querySetEmptyOneExists_No, IC_NO);
+	TRIGGER(2, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_QUERY_CLEAR_EMPTY:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_queryClearEmpty;
+	TRIGGER(0, @SDRT_querySetEmptyOneExists_No, IC_NO);
+	TRIGGER(1, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_QUERY_SET_DEFAULT_NONE_EXISTS:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_querySetDefaultNoneExists;
+	TRIGGER(0, @SDRT_querySetDefault_Yes, IC_YES);
+	TRIGGER(1, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_QUERY_SET_DEFAULT_ONE_EXISTS:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_querySetDefaultOneExists;
+	TRIGGER(0, @SDRT_querySetDefault_Yes, IC_YES);
+	TRIGGER(1, @SDRT_querySetDefaultOneExists_No, IC_NO);
+	TRIGGER(2, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_QUERY_CLEAR_DEFAULT:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_queryClearDefault;
+	TRIGGER(0, @SDRT_querySetDefaultOneExists_No, IC_NO);
+	TRIGGER(1, @SDRT_cancel, IC_DISMISS);
+	break;
+    case SDBT_SET_EMPTY_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_setEmptyError;
+	break;
+    case SDBT_TRANSPARENT_NEW_FILE_EXISTS:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_transparentNewFileExists;
+	break;
+    case SDBT_CONFIRM_PASSWORD_CHANGE:
+	d->flags = (CDT_WARNING << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_AFFIRMATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_confirmPasswordChange;
+	break;
+    case SDBT_NOTIFY_SAVE_AS_TEMPLATE:
+	d->flags = (CDT_NOTIFICATION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_notifySaveAsTemplate;
+	break;
+    case SDBT_NOTIFY_SAVING_READ_ONLY:
+	d->flags = (CDT_NOTIFICATION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_notifySavingReadOnly;
+	break;
+    case SDBT_NOTIFY_SAVING_PUBLIC:
+	d->flags = (CDT_NOTIFICATION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_notifySavingPublic;
+	break;
+    case SDBT_DISK_RESTORE:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_diskRestore;
+	TRIGGER(0, @SDRT_diskRestore_Yes, IC_YES);
+	TRIGGER(1, @SDRT_diskRestore_No, IC_NO);
+	break;
+    case SDBT_FILE_ILLEGAL_NAME:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileSaveIllegalName;
+	break;
+    case SDBT_FILE_OVERWRITING_ITSELF:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileOverwritingItself;
+	break;
+    case SDBT_CANT_MOVE_READ_ONLY_DOCUMENT:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_cantMoveReadOnlyDocument;
+	break;
+    case SDBT_FILE_MOVE_WRITE_PROTECTED:
+	d->flags = (CDT_QUESTION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_MULTIPLE_RESPONSE << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_moving;
+	d->string = @SDS_fileWriteProtected;
+	TRIGGER(0, @SDRT_ok, IC_YES);
+	TRIGGER(1, @SDRT_cancel, IC_NO);
+	break;
+    case SDBT_UNABLE_TO_OVERWRITE_EXISTING_FILE:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_unableToOverwriteExistingFile;
+	break;
+    case SDBT_FILE_MOVE_INSUFFICIENT_DISK_SPACE:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->arg2 = @SDA_moving;
+	d->string = @SDS_fileInsufficientDiskSpace;
+	break;
+    case SDBT_FILE_MOVE_ERROR:
+	d->flags = (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileMoveError;
+	break;
+    case SDBT_FILE_COPY_FILE_IS_PUBLIC_OR_READ_ONLY:
+	d->flags = (CDT_NOTIFICATION << CDBF_DIALOG_TYPE_OFFSET) |
+		   (GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET);
+	d->string = @SDS_fileCopyPublicOrReadOnly;
+	break;
+    }
+}
+
+/*
+ * CallUserStandardDialog: the dialog of a type, with the first string
+ * argument (the name of the file, usually) and a second one for the
+ * dialogs that have no standing one.  The InteractionCommand.
+ */
+word OLDocUserStandardDialog(StandardDialogBoxType type, Boolean sysModal,
+			     const char *arg1, const char *arg2)
+{
+    StdDialogEntry d;
+    MemHandle strings;
+    word response;
+
+    GetEntry(type, &d);
+    if (sysModal)
+	d.flags |= CDBF_SYSTEM_MODAL;
+    /* a PDA has no disks to speak of */
+    if (olPDA) {
+	if (d.string == @SDS_fileFileNotFound)
+	    d.string = @SDS_fileFileNotFoundPDA;
+	else if (d.string == @SDS_fileSaveError)
+	    d.string = @SDS_fileSaveErrorPDA;
+    }
+    strings = OptrToHandle(d.string);
+    MemLock(strings);
+    if (d.arg2)
+	arg2 = LMemDeref(d.arg2);
+    response = UserStandardDialog(NULL, d.t.n ? (char *) &d.t : NULL,
+				  (char *) arg2, (char *) arg1,
+				  LMemDeref(d.string), d.flags);
+    MemUnlock(strings);
+    return response;
+}
+
+/* SetSysModalIfDiskFullError: over everything while the disk is full */
+static Boolean SysModal(optr o)
+{
+    return ObjVarFindData(o, TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE) != 0;
+}
+
+word OLDocStandardDialogArg(optr o, StandardDialogBoxType type,
+			    const DocumentCommonParams *params,
+			    const char *arg2)
+{
+    FileLongName name;
+
+    if (params)
+	memcpy(name, params->DCP_name, sizeof(name));
+    else
+	memcpy(name, GD(o)->GDI_fileName, sizeof(name));
+    return OLDocUserStandardDialog(type, SysModal(o), name, arg2);
+}
+
+/* CallStandardDialogDS_SI: about the document's file */
+word OLDocStandardDialog(optr o, StandardDialogBoxType type)
+{
+    return OLDocStandardDialogArg(o, type, NULL, NULL);
+}
+
+/* CallStandardDialogSS_BP: about the file of the parameters */
+word OLDocStandardDialogParams(optr o, StandardDialogBoxType type,
+			       const DocumentCommonParams *params)
+{
+    return OLDocStandardDialogArg(o, type, params, NULL);
+}

@@ -13,6 +13,7 @@
 @deflib motif
 
 @class OLDocumentClass, OLContentClass;
+@uses GenDocumentClass;
 
 @message void MSG_OL_DOCUMENT_CONTINUE_REVERT();
 @message void MSG_OL_DOCUMENT_CONTINUE_REVERT_QUICK();
@@ -51,15 +52,17 @@ typedef ByteFlags OLDocumentAttrs;
 #define OLDA_UPDATE_BEFORE_CLOSE	0x10
 #define OLDA_WAITING_FOR_SAVE_QUERY	0x08
 
-    @instance word	OLDI_autoSaveTimer;
+    @instance TimerHandle OLDI_autoSaveTimer;
     @instance word	OLDI_autoSaveTimerID;
-    @instance word	OLDI_changeTimer;
+    @instance TimerHandle OLDI_changeTimer;
     @instance word	OLDI_changeTimerID;
     @instance ChunkHandle OLDI_iacpEngConnects;
     @instance OLDocumentAttrs OLDI_attrs;
     @instance word	OLDI_disk;	/* disk and id of the open file */
     @instance FileID	OLDI_id;
     @instance MemHandle	OLDI_saveErrorRes;
+    /* Port32: OLDPO_* of the last MSG_GEN_DOCUMENT_PHYSICAL_OPEN */
+    @instance byte	OLDI_physOpen;
 @endc
 
 @endlib

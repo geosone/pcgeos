@@ -1,0 +1,522 @@
+/*
+ * cmainDocumentCommon.goc -- OLDocumentClass, the specific UI's part of
+ * a GenDocument (after cmainDocumentCommon.asm): what all its
+ * operations share (the operation in progress, busy, attributes, the
+ * notification of the document control), saving, updating, auto save
+ * and the check for changes by others, on their timers.
+ *
+ * Port32 (Port32/ABI.md section 13y): as the asm's Motif build (none
+ * of FLOPPY_BASED_DOCUMENTS, LIMITED_UNTITLED_DOC_DISK_SPACE,
+ * VOLATILE_SYSTEM_STATE, UNTITLED_DOCS_ON_SP_TOP).  The methods of the
+ * class are in cmainDocumentNew.goc (new, open, connections),
+ * cmainDocPhysical.goc (the file itself, the document's UI),
+ * cmainDocumentMisc.goc (attach, detach, close, save as, revert) and
+ * cmainDocObscure.goc (the rarer ones).
+ */
+@include "cmainDocument.goh"
+@include <Objects/gProcC.goh>
+
+@classdecl OLDocumentClass;
+
+/* cmainDocPhysical.goc */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_INITIALIZE_DOCUMENT_FILE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_READ_CACHED_DATA_FROM_FILE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_WRITE_CACHED_DATA_TO_FILE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DOCUMENT_HAS_CHANGED;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE_AS_COMPLETED;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ATTACH_FAILED;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE_EARLIER_COMPATIBLE_DOCUMENT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE_EARLIER_INCOMPATIBLE_DOCUMENT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_COMPUTE_ACCESS_FLAGS;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_OPEN;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CREATE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_UPDATE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS_FILE_HANDLE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_REVERT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_REVERT_TO_AUTO_SAVE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CHECK_FOR_MODIFICATIONS;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CLOSE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_DELETE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CREATE_UI_FOR_DOCUMENT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ATTACH_UI_TO_DOCUMENT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT;
+/* cmainDocumentNew.goc */
+@extern method OLDocumentClass, MSG_META_INITIALIZE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_IF_CLEAN_UNNAMED;
+@extern method OLDocumentClass, MSG_META_REMOVING_DISK;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_NEW;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GENERATE_NAME_FOR_NEW;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_OPEN;
+@extern method OLDocumentClass, MSG_META_GAINED_MODEL_EXCL;
+@extern method OLDocumentClass, MSG_META_LOST_MODEL_EXCL, MSG_META_LOST_SYS_MODEL_EXCL;
+/* cmainDocumentMisc.goc */
+@extern method OLDocumentClass, MSG_META_ATTACH_OBJECT;
+@extern method OLDocumentClass, MSG_META_GEN_PATH_RESTORE_DISK_PROMPT;
+@extern method OLDocumentClass, MSG_META_DETACH;
+@extern method OLDocumentClass, MSG_META_APP_SHUTDOWN;
+@extern method OLDocumentClass, MSG_META_IACP_LOST_CONNECTION;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SEARCH_FOR_DOC;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CHECK_CUI_CLOSE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_IF_OPEN_FOR_IACP_ONLY;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_CLOSE_AFTER_DISK_FULL;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_FILE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REOPEN_FILE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_OPERATION;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_DISPLAY;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ENABLE_AUTO_SAVE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DISABLE_AUTO_SAVE;
+@extern method OLDocumentClass, MSG_GEN_BRING_TO_TOP, MSG_GEN_LOWER_TO_BOTTOM;
+
+/* OLBuildDocument (cspecDocument.asm): always this class */
+ClassStruct *OLBuildDocument(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLDocumentClass;
+}
+
+static optr Parent(optr o)
+{
+    return GenFindParent(o);
+}
+
+/* ---------------------------------------------------------------------
+ * Utilities
+ * ------------------------------------------------------------------- */
+
+void OLDocSetOperation(optr o, word operation)
+{
+    GD(o)->GDI_operation = operation;
+}
+
+/* SendToSelfOnQueue */
+void OLDocSendToSelfOnQueue(optr o, Message msg)
+{
+    CObjMessageP(MF_FORCE_QUEUE, o, msg, NULL, 0, NULL, 0);
+}
+
+/* OLDocSetAttrs: bits of GDI_attrs set and cleared */
+void OLDocSetAttrs(optr o, word set, word clear)
+{
+    GenDocumentInstance *g = GD(o);
+
+    g->GDI_attrs = (GenDocumentAttrs) ((g->GDI_attrs & ~clear) | set);
+}
+
+word OLDocGetParentAttrs(optr o)
+{
+    optr parent = Parent(o);
+
+    return @call parent::MSG_GEN_DOCUMENT_GROUP_GET_ATTRS();
+}
+
+word OLDocGetUIParentAttrs(optr o)
+{
+    optr parent = Parent(o);
+
+    return @call parent::MSG_GEN_DOCUMENT_GROUP_GET_UI_ATTRS();
+}
+
+void OLDocMarkBusy(optr o)
+{
+    optr app = GeodeGetAppObject(0);
+
+    (void) o;
+    @call app::MSG_GEN_APPLICATION_MARK_BUSY();
+}
+
+/* not busy once the input that came meanwhile is through */
+void OLDocMarkNotBusy(optr o)
+{
+    optr app = GeodeGetAppObject(0);
+    EventHandle ev = @record app::MSG_GEN_APPLICATION_MARK_NOT_BUSY();
+
+    @call o::MSG_META_OBJ_FLUSH_INPUT_QUEUE(ev,
+		OFIQNS_INPUT_OBJ_OF_OWNING_GEODE, OptrToHandle(app));
+}
+
+/* SetCleanAndUpdate: saved */
+void OLDocSetCleanAndUpdate(optr o)
+{
+    OLDocSetAttrs(o, 0, GDA_DIRTY | GDA_ATTACH_TO_DIRTY_FILE |
+			GDA_SAVE_FAILED);
+    OLDocSendNotificationToDC(o, TRUE);
+}
+
+/* SetTemplateDir: the current directory becomes the group's template
+ * directory, below SP_TEMPLATE */
+void OLDocSetTemplateDir(optr o)
+{
+    optr parent = Parent(o);
+    PathName path;
+
+    path[0] = 0;
+    @call parent::MSG_GEN_DOCUMENT_GROUP_GET_TEMPLATE_DIR(path);
+    FileSetCurrentPath(SP_TEMPLATE, path);
+}
+
+/* DoesEmptyDocumentExist: the user's empty document, in the template
+ * directory */
+static Boolean EmptyDocumentExists(optr o)
+{
+    FileExtAttrDesc d;
+    FileAttrs attrs = 0;
+    Boolean exists;
+
+    FilePushDir();
+    OLDocSetTemplateDir(o);
+    MemLock(OptrToHandle(@defaultDocumentName));
+    d.FEAD_attr = FEA_FILE_ATTR;
+    d.FEAD_value = &attrs;
+    d.FEAD_size = sizeof(attrs);
+    d.FEAD_name = NULL;
+    exists = !FileGetPathExtAttributes(LMemDeref(@defaultDocumentName),
+				       FEA_MULTIPLE, &d, 1);
+    MemUnlock(OptrToHandle(@defaultDocumentName));
+    FilePopDir();
+    return exists;
+}
+
+/* DoesDefaultDocumentExist: the application's defaultDocument key */
+static Boolean DefaultDocumentExists(optr o)
+{
+    optr app = GeodeGetAppObject(0);
+    char category[INI_CATEGORY_BUFFER_SIZE];
+    MemHandle block = 0;
+    word size;
+
+    (void) o;
+    category[0] = 0;
+    @call app::MSG_META_GET_INI_CATEGORY(category);
+    if (InitFileReadStringBlock(category, "defaultDocument", &block, 0,
+				&size))
+	return FALSE;
+    if (block)
+	MemFree(block);
+    return TRUE;
+}
+
+/*
+ * SendNotificationToDC: the status of the application's
+ * GAGCNLT_APP_TARGET_NOTIFY_DOCUMENT_CHANGE list becomes this document
+ * (if it has the model), or nothing.
+ */
+void OLDocSendNotificationToDC(optr o, Boolean makeBlock)
+{
+    GenDocumentInstance *g = GD(o);
+    optr none = 0, app = GeodeGetAppObject(0);
+    GCNListSendFlags flags = GCNLSF_SET_STATUS;
+    NotifyDocumentChange *n;
+    MemHandle block = 0;
+    EventHandle ev;
+
+    if (makeBlock) {
+	word attrs = g->GDI_attrs, type = g->GDI_type;
+	FileHandle file = g->GDI_fileHandle;
+	Boolean empty, def;
+
+	if (!(attrs & GDA_MODEL))
+	    return;
+	empty = EmptyDocumentExists(o);
+	def = DefaultDocumentExists(o);
+	block = MemAlloc(sizeof(NotifyDocumentChange),
+			 HF_SWAPABLE | HF_SHARABLE,
+			 HAF_ZERO_INIT | HAF_LOCK | HAF_NO_ERR);
+	n = MemDeref(block);
+	n->NDC_attrs = attrs;
+	n->NDC_type = type;
+	n->NDC_fileHandle = file;
+	n->NDC_emptyExists = empty ? 0xff : 0;
+	n->NDC_defaultExists = def ? 0xff : 0;
+	MemUnlock(block);
+	MemInitRefCount(block, 1);
+    } else {
+	flags |= GCNLSF_IGNORE_IF_STATUS_TRANSITIONING;
+    }
+    ev = @record none::MSG_META_NOTIFY_WITH_DATA_BLOCK(
+			MANUFACTURER_ID_GEOWORKS, GWNT_DOCUMENT_CHANGE,
+			block);
+    @call app::MSG_META_GCN_LIST_SEND(flags, ev, block,
+			GAGCNLT_APP_TARGET_NOTIFY_DOCUMENT_CHANGE,
+			MANUFACTURER_ID_GEOWORKS);
+}
+
+/* SendUndoMessage: MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS or
+ * ..._SET_CONTEXT to the process, if the group does the undo
+ * interaction itself */
+void OLDocSendUndoMessage(optr o, Message msg, dword context)
+{
+    optr proc;
+
+    if (!(OLDocGetParentAttrs(o) & GDGA_AUTOMATIC_UNDO_INTERACTION))
+	return;
+    proc = ConstructOptr(GeodeGetProcessHandle(), 0);
+    if (msg == MSG_GEN_PROCESS_UNDO_SET_CONTEXT)
+	@send proc::MSG_GEN_PROCESS_UNDO_SET_CONTEXT(context);
+    else
+	@send proc::MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS();
+}
+
+/* IsFileDirty: a VM file knows; else GDA_DIRTY */
+Boolean OLDocIsFileDirty(optr o)
+{
+    if (OLDocIsVM(o))
+	return (VMGetDirtyState(GD(o)->GDI_fileHandle) >> 8) != 0;
+    return (GD(o)->GDI_attrs & GDA_DIRTY) != 0;
+}
+
+/*
+ * WriteCachedData: if the document is dirty, what the application
+ * caches goes to the file (MSG_GEN_DOCUMENT_WRITE_CACHED_DATA_TO_FILE)
+ * without the file's blocks telling of becoming dirty by it.  TRUE if
+ * it was dirty.
+ */
+Boolean OLDocWriteCachedData(optr o, Boolean isSave)
+{
+    VMFileHandle file = 0;
+    word vmAttrs = 0;
+
+    if (!OLDocIsFileDirty(o) && !(GD(o)->GDI_attrs & GDA_DIRTY))
+	return FALSE;
+    if (OLDocIsVM(o)) {
+	file = GD(o)->GDI_fileHandle;
+	vmAttrs = VMGetAttributes(file);
+	VMSetAttributes(file, 0, VMA_NOTIFY_DIRTY);
+    }
+    @call o::MSG_GEN_DOCUMENT_WRITE_CACHED_DATA_TO_FILE(isSave);
+    if (file && (vmAttrs & VMA_NOTIFY_DIRTY))
+	VMSetAttributes(file, VMA_NOTIFY_DIRTY, 0);
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * The timers
+ * ------------------------------------------------------------------- */
+
+/*
+ * GetTimerInterval: [ui] changePollTime, or autosaveTime if autosave
+ * is on (minutes in the ini file; a minute without the keys); 0: no
+ * timer.
+ */
+static word TimerInterval(word which)
+{
+    Boolean on = FALSE;
+    word v = 0;
+
+    if (which == OLDOC_CHANGE_TIMER) {
+	if (InitFileReadInteger("ui", "changePollTime", &v))
+	    return 3600;
+    } else {
+	if (InitFileReadBoolean("ui", "autosave", &on))
+	    return 3600;
+	if (!on)
+	    return 0;
+	if (InitFileReadInteger("ui", "autosaveTime", &v))
+	    return 3600;
+    }
+    if (v >= 65535 / 60)
+	v = 65535 / 60;
+    return v * 60;
+}
+
+/* StartATimer: a one-shot timer, unless it runs or auto save is
+ * stopped; ticks 0: the interval of the ini file */
+void OLDocStartATimer(optr o, word which, word ticks)
+{
+    OLDocumentInstance *d;
+    TimerHandle th;
+    word id = 0;
+
+    if (GD(o)->GDI_attrs & GDA_AUTO_SAVE_STOPPED)
+	return;
+    d = OLD(o);
+    if (which == OLDOC_AUTO_SAVE_TIMER ? d->OLDI_autoSaveTimer
+				       : d->OLDI_changeTimer)
+	return;
+    if (!ticks) {
+	ticks = TimerInterval(which);
+	if (!ticks)
+	    return;
+    }
+    th = TimerStart(TIMER_EVENT_ONE_SHOT, o, ticks,
+		    which == OLDOC_AUTO_SAVE_TIMER
+			? MSG_OL_DOCUMENT_AUTO_SAVE_TIMER
+			: MSG_GEN_DOCUMENT_CHECK_FOR_MODIFICATIONS, 0, &id);
+    d = OLD(o);
+    if (which == OLDOC_AUTO_SAVE_TIMER) {
+	d->OLDI_autoSaveTimer = th;
+	d->OLDI_autoSaveTimerID = id;
+    } else {
+	d->OLDI_changeTimer = th;
+	d->OLDI_changeTimerID = id;
+    }
+}
+
+@method OLDocumentClass, MSG_OL_DOCUMENT_AUTO_SAVE_TIMER
+{
+    pself->OLDI_autoSaveTimer = 0;
+    @call oself::MSG_GEN_DOCUMENT_AUTO_SAVE();
+}
+
+/*
+ * OLDocumentAutoSave: the document is updated (saved, for a
+ * transparent document control that does not ask), unless something
+ * else is going on; then the timer runs again.
+ */
+@method OLDocumentClass, MSG_GEN_DOCUMENT_AUTO_SAVE
+{
+    GenDocumentInstance *g = GD(oself);
+    optr app;
+    word ticks = 0, error;
+
+    (void) pself;
+    if (g->GDI_attrs & (GDA_CLOSING | GDA_AUTO_SAVE_STOPPED | GDA_READ_ONLY))
+	return;
+    if (g->GDI_operation == GDO_NORMAL) {
+	if (g->GDI_attrs & GDA_PREVENT_AUTO_SAVE) {
+	    ticks = 60;		/* again in a second */
+	} else {
+	    g->GDI_operation = GDO_AUTO_SAVE;
+	    app = GeodeGetAppObject(0);
+	    @call app::MSG_GEN_APPLICATION_MARK_BUSY();
+	    if ((docControlOptions & DCO_TRANSPARENT_DOC) &&
+		!(docControlOptions & DCO_USER_CONFIRM_SAVE))
+		(void) @call oself::MSG_GEN_DOCUMENT_SAVE();
+	    else
+		(void) @call oself::MSG_GEN_DOCUMENT_UPDATE(&error);
+	    @call app::MSG_GEN_APPLICATION_MARK_NOT_BUSY();
+	    GD(oself)->GDI_operation = GDO_NORMAL;
+	}
+    }
+    if (OLDocGetParentAttrs(oself) & GDGA_SUPPORTS_AUTO_SAVE)
+	OLDocStartATimer(oself, OLDOC_AUTO_SAVE_TIMER, ticks);
+}
+
+/* OLDocumentCheckForModifications: has someone else changed the file?
+ * (a shared document); and again later */
+@method OLDocumentClass, MSG_GEN_DOCUMENT_CHECK_FOR_MODIFICATIONS
+{
+    pself->OLDI_changeTimer = 0;
+    if (GD(oself)->GDI_attrs & GDA_CLOSING)
+	return;
+    if (@call oself::MSG_GEN_DOCUMENT_PHYSICAL_CHECK_FOR_MODIFICATIONS())
+	@call oself::MSG_GEN_DOCUMENT_DOCUMENT_HAS_CHANGED();
+    OLDocStartATimer(oself, OLDOC_CHANGE_TIMER, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * Save and update
+ * ------------------------------------------------------------------- */
+
+/* OLDocumentSave: TRUE if it could not be saved */
+@method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE
+{
+    Boolean failed = FALSE;
+    word error;
+
+    (void) pself;
+    OLDocMarkBusy(oself);
+    OLDocSetOperation(oself, GDO_SAVE);
+    (void) OLDocWriteCachedData(oself, TRUE);
+    for (;;) {
+	error = 0;
+	if (!@call oself::MSG_GEN_DOCUMENT_PHYSICAL_SAVE(&error)) {
+	    OLDocSetCleanAndUpdate(oself);
+	    break;
+	}
+	failed = TRUE;
+	/* (the user gave up putting the disk in: nothing to tell) */
+	if (error == ERROR_DISK_UNAVAILABLE)
+	    break;
+	if (!OLDocHandleSaveError(oself, OLDocConvertErrorCode(error),
+				  NULL)) {
+	    failed = FALSE;
+	    continue;		/* the user made room: once more */
+	}
+	OLDocSetAttrs(oself, GDA_SAVE_FAILED, 0);
+	break;
+    }
+    OLDocClearOperation(oself);
+    OLDocMarkNotBusy(oself);
+    return failed;
+}
+
+/* OLDocumentUpdate: the changes to the file, without committing them
+ * (a save keeps the backup of a VM file); TRUE and the error if it
+ * failed */
+@method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE
+{
+    word err = 0;
+
+    (void) pself;
+    if (!OLDocWriteCachedData(oself, FALSE))
+	return FALSE;
+    if (!@call oself::MSG_GEN_DOCUMENT_PHYSICAL_UPDATE(&err)) {
+	OLDocSetAttrs(oself, 0, GDA_SAVE_FAILED);
+	return FALSE;
+    }
+    if (err != ERROR_DISK_UNAVAILABLE) {
+	err = OLDocConvertErrorCode(err);
+	(void) OLDocHandleSaveError(oself, err, NULL);
+	OLDocSetAttrs(oself, GDA_SAVE_FAILED, 0);
+    }
+    if (error)
+	*error = err;
+    return TRUE;
+}
+
+/* OLDocumentMarkDirty: once, and the control's UI follows; a document
+ * shared by several is never dirty */
+@method OLDocumentClass, MSG_GEN_DOCUMENT_MARK_DIRTY
+{
+    GenDocumentInstance *g = GD(oself);
+
+    (void) pself;
+    if (g->GDI_attrs & (GDA_DIRTY | GDA_SHARED_MULTIPLE))
+	return;
+    g->GDI_attrs |= GDA_DIRTY;
+    OLDocSendNotificationToDC(oself, TRUE);
+}
+
+@method OLDocumentClass, MSG_OL_DOCUMENT_UPDATE_UI
+{
+    (void) pself;
+    OLDocSendNotificationToDC(oself, TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * What the document is
+ * ------------------------------------------------------------------- */
+
+@method OLDocumentClass, MSG_GEN_DOCUMENT_GET_FILE_NAME
+{
+    (void) pself;
+    memcpy(buffer, GD(oself)->GDI_fileName, sizeof(FileLongName));
+}
+
+@method OLDocumentClass, MSG_GEN_DOCUMENT_GET_FILE_HANDLE
+{
+    (void) pself;
+    return GD(oself)->GDI_fileHandle;
+}
+
+@method OLDocumentClass, MSG_GEN_DOCUMENT_GET_ATTRS
+{
+    (void) pself;
+    return GD(oself)->GDI_attrs;
+}
+
+/* OLDocumentTestForFile: is this the document of the file? */
+@method OLDocumentClass, MSG_GEN_DOCUMENT_TEST_FOR_FILE
+{
+    (void) pself;
+    if (GD(oself)->GDI_fileHandle != file)
+	return FALSE;
+    *docFound = oself;
+    return TRUE;
+}

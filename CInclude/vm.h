@@ -185,6 +185,7 @@ typedef ByteFlags VMAccessFlags;
 #define VMAF_DISALLOW_SHARED_MULTIPLE	    0x08
 #define VMAF_USE_BLOCK_LEVEL_SYNCHRONIZATION 0x04
 #define VMAF_FORCE_SHARED_MULTIPLE  	    0x02
+#define VMAF_NO_DEMAND_PAGING		    0x01
 
 extern VMFileHandle			/* Sets value for ThreadGetError() */	/*XXX*/
     _pascal VMOpen(char *name, VMAccessFlags flags, VMOpenType mode, word compression);

@@ -1,0 +1,184 @@
+/*
+ * cmainDocument.goh -- what the files of OLDocumentClass share
+ * (cmainDocument*.goc, cmainDocPhysical.goc, cmainDocDialog.goc), for
+ * Port32.
+ */
+#ifndef __CMAINDOCUMENT_GOH
+#define __CMAINDOCUMENT_GOH
+
+@include <stdapp.goh>
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olDocumentClass.goh>
+@include <Internal/SpecUI/olDocumentGroupClass.goh>
+@include <Internal/SpecUI/olDocumentControlClass.goh>
+@include <Objects/gDocC.goh>
+@include <Objects/gDocGrpC.goh>
+@include <Objects/gDocCtrl.goh>
+@include <iacp.goh>
+@include "cmainManager.goh"
+
+#include <chunkarr.h>
+#include <file.h>
+#include <initfile.h>
+#include <string.h>
+#include <timer.h>
+#include <uDialog.h>
+#include <vm.h>
+
+/* cConstant.def: the dialogs of the document (cmainDocDialog.goc has
+ * what each one says) */
+typedef enum {
+    SDBT_FILE_NEW_CANNOT_CREATE_TEMP_NAME,
+    SDBT_FILE_NEW_INSUFFICIENT_DISK_SPACE,
+    SDBT_FILE_NEW_TOO_MANY_OPEN_FILES,
+    SDBT_FILE_NEW_ERROR,
+    SDBT_FILE_NEW_WRITE_PROTECTED,
+    SDBT_FILE_OPEN_SHARING_DENIED,
+    SDBT_FILE_OPEN_FILE_NOT_FOUND,
+    SDBT_FILE_OPEN_INVALID_VM_FILE,
+    SDBT_FILE_OPEN_INSUFFICIENT_DISK_SPACE,
+    SDBT_FILE_OPEN_ERROR,
+    SDBT_FILE_OPEN_READ_ONLY_PUBLIC_IN_TRANSPARENT_MODE,
+    SDBT_FILE_OPEN_VM_DIRTY,
+    SDBT_FILE_OPEN_APP_MORE_RECENT_THAN_DOC,
+    SDBT_FILE_OPEN_DOC_MORE_RECENT_THAN_APP,
+    SDBT_FILE_OPEN_FILE_TYPE_MISMATCH,
+    SDBT_FILE_SAVE_INSUFFICIENT_DISK_SPACE,
+    SDBT_FILE_SAVE_ERROR,
+    SDBT_FILE_SAVE_WRITE_PROTECTED,
+    SDBT_FILE_SAVE_AS_FILE_EXISTS,
+    SDBT_FILE_SAVE_AS_SHARING_DENIED,
+    SDBT_FILE_SAVE_AS_FILE_FORMAT_MISMATCH,
+    SDBT_FILE_CLOSE_SAVE_CHANGES_UNTITLED,
+    SDBT_FILE_CLOSE_SAVE_CHANGES_TITLED,
+    SDBT_FILE_CLOSE_ATTACH_DIRTY,
+    SDBT_FILE_REVERT_CONFIRM,
+    SDBT_FILE_REVERT_ERROR,
+    SDBT_FILE_ATTACH_DISK_NOT_FOUND,
+    SDBT_CANNOT_CHANGE_TYPE,
+    SDBT_CANNOT_CHANGE_PASSWORD,
+    SDBT_PROMPT_MOVE_TEMPLATE,
+    SDBT_BAD_PASSWORD,
+    SDBT_RENAME_FILE_EXISTS,
+    SDBT_RENAME_ERROR,
+    SDBT_BACKUP_ERROR,
+    SDBT_REVERT_QUICK_CONFIRM,
+    SDBT_REVERT_QUICK_ERROR,
+    SDBT_QUERY_SET_EMPTY_NONE_EXISTS,
+    SDBT_QUERY_SET_EMPTY_ONE_EXISTS,
+    SDBT_QUERY_CLEAR_EMPTY,
+    SDBT_QUERY_SET_DEFAULT_NONE_EXISTS,
+    SDBT_QUERY_SET_DEFAULT_ONE_EXISTS,
+    SDBT_QUERY_CLEAR_DEFAULT,
+    SDBT_SET_EMPTY_ERROR,
+    SDBT_TRANSPARENT_NEW_FILE_EXISTS,
+    SDBT_CONFIRM_PASSWORD_CHANGE,
+    SDBT_NOTIFY_SAVE_AS_TEMPLATE,
+    SDBT_NOTIFY_SAVING_READ_ONLY,
+    SDBT_NOTIFY_SAVING_PUBLIC,
+    SDBT_DISK_RESTORE,
+    SDBT_FILE_ILLEGAL_NAME,
+    SDBT_FILE_OVERWRITING_ITSELF,
+    SDBT_CANT_MOVE_READ_ONLY_DOCUMENT,
+    SDBT_FILE_MOVE_WRITE_PROTECTED,
+    SDBT_UNABLE_TO_OVERWRITE_EXISTING_FILE,
+    SDBT_FILE_MOVE_INSUFFICIENT_DISK_SPACE,
+    SDBT_FILE_MOVE_ERROR,
+    SDBT_FILE_COPY_FILE_IS_PUBLIC_OR_READ_ONLY,
+} StandardDialogBoxType;
+
+#define GD(o)	((GenDocumentInstance *) ObjDerefGen(o))
+#define OLD(o)	((OLDocumentInstance *) ObjDerefVis(o))
+
+/* cmainUIDocumentControl.goc */
+extern word docControlOptions;
+
+/* ---- cmainDocDialog.goc ---- */
+/* a standard dialog about the document (its name the first argument),
+ * or about the file of the parameters; the InteractionCommand */
+extern word OLDocStandardDialog(optr o, StandardDialogBoxType type);
+extern word OLDocStandardDialogParams(optr o, StandardDialogBoxType type,
+				      const DocumentCommonParams *params);
+/* the same (params NULL: about the document's file) with a second
+ * string argument */
+extern word OLDocStandardDialogArg(optr o, StandardDialogBoxType type,
+				   const DocumentCommonParams *params,
+				   const char *arg2);
+extern word OLDocUserStandardDialog(StandardDialogBoxType type,
+				    Boolean sysModal, const char *arg1,
+				    const char *arg2);
+
+/* ---- cmainDocumentCommon.goc ---- */
+extern void OLDocSetOperation(optr o, word operation);
+#define OLDocClearOperation(o)	OLDocSetOperation(o, GDO_NORMAL)
+extern void OLDocSendToSelfOnQueue(optr o, Message msg);
+extern void OLDocSetCleanAndUpdate(optr o);
+extern void OLDocMarkBusy(optr o);
+extern void OLDocMarkNotBusy(optr o);
+extern void OLDocSetAttrs(optr o, word set, word clear);
+/* the group's attributes (GenDocumentGroupAttrs), the control's
+ * (GenDocumentControlAttrs) */
+extern word OLDocGetParentAttrs(optr o);
+extern word OLDocGetUIParentAttrs(optr o);
+#define OLDocIsVM(o)	((OLDocGetParentAttrs(o) & GDGA_VM_FILE) != 0)
+/* which: OLDOC_AUTO_SAVE_TIMER or OLDOC_CHANGE_TIMER; ticks 0: the
+ * interval of the ini file */
+#define OLDOC_AUTO_SAVE_TIMER	0
+#define OLDOC_CHANGE_TIMER	1
+extern void OLDocStartATimer(optr o, word which, word seconds);
+extern Boolean OLDocIsFileDirty(optr o);
+extern Boolean OLDocWriteCachedData(optr o, Boolean isSave);
+/* the control's UI follows the document (block 0: a block describing
+ * it is made, if the document has the model) */
+extern void OLDocSendNotificationToDC(optr o, Boolean makeBlock);
+extern void OLDocSetTemplateDir(optr o);
+extern void OLDocSendUndoMessage(optr o, Message msg, dword context);
+
+/* ---- cmainDocPhysical.goc ---- */
+extern word OLDocConvertErrorCode(word error);
+extern void OLDocSendNotificationToOutput(optr o, Message msg);
+extern void OLDocCallSetContent(optr o, optr content);
+
+/* OLDI_physOpen: what MSG_GEN_DOCUMENT_PHYSICAL_OPEN found (CX and DX
+ * of the asm), and what the UPDATE_EARLIER messages returned in AX */
+#define OLDPO_TEMPLATE		0x01	/* a template: to be copied */
+#define OLDPO_CREATED		0x02	/* the file is new */
+#define OLDPO_KEEP_PROTOCOL	0x04	/* the file keeps its protocol */
+
+/* ---- cmainDocumentNew.goc ---- */
+/* the directory of the parameters (of the document, without a disk in
+ * them) becomes the current one, made if need be; the directory is
+ * pushed in any case.  0 or the error. */
+extern word OLDocPushAndSetPath(optr o, DocumentCommonParams *params);
+extern void OLDocStoreNewDocumentName(optr o, FileHandle file,
+				      DocumentCommonParams *params);
+extern void OLDocRegisterOpenDoc(optr o);
+extern void OLDocUnregisterDoc(optr o);
+extern void OLDocStartAutoSave(optr o);
+extern void OLDocGrabModelIfAppropriate(optr o);
+extern void OLDocAddConnection(optr o, IACPConnection connection);
+extern void OLDocSendCompleteUpdateToDC(optr o, Boolean hasModel);
+/* TRUE if it failed */
+extern Boolean OLDocSaveOrUpdate(optr o);
+extern Boolean OLDocOpen(optr o, DocumentCommonParams *params,
+			 Boolean attach, DocFileOrError *fileOrError);
+
+/* ---- cmainDocumentMisc.goc ---- */
+extern void OLDocStopAutoSave(optr o);
+extern void OLDocRemoveObj(optr o);
+extern void OLDocDestroyDocument(optr o, Boolean deleteFile);
+extern void OLDocSendToDocumentControl(optr o, Message msg);
+/* what the user wants after a save failed */
+#define OLDSE_RETRY	0	/* (the disk is writable now) */
+#define OLDSE_GIVE_UP	1
+#define OLDSE_OVERWRITE	2	/* save as: over the existing file */
+extern word OLDocHandleSaveError(optr o, word error,
+				 const DocumentCommonParams *params);
+
+#define OLDocSendPhysicalCloseOnQueue(o) \
+    OLDocSendToSelfOnQueue(o, MSG_GEN_DOCUMENT_PHYSICAL_CLOSE)
+#define OLDocSendPhysicalDeleteOnQueue(o) \
+    OLDocSendToSelfOnQueue(o, MSG_GEN_DOCUMENT_PHYSICAL_DELETE)
+
+#endif

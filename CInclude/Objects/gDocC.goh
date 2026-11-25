@@ -77,6 +77,14 @@ typedef WordFlags DocumentOpenFlags;
 #define DOF_FORCE_REAL_EMPTY_DOCUMENT		0x0200
 #define DOF_OPEN_FOR_IACP_ONLY			0x0100
 
+/* what the messages that open a file return beside the carry: its
+ * handle, or the error.  Port32: a handle is 32 bits wide. */
+#ifdef GEOS_PORT32
+typedef dword DocFileOrError;
+#else
+typedef word DocFileOrError;
+#endif
+
 typedef struct {
     FileLongName	DCP_name;
     DiskHandle		DCP_diskHandle;
@@ -85,6 +93,12 @@ typedef struct {
     DocumentOpenFlags	DCP_flags;
     IACPConnection	DCP_connection;
 } DocumentCommonParams;
+
+#ifdef GEOS_PORT32
+/* the document was opened: into the list of the last ten documents
+ * (recntDoc.vm in SP_PRIVATE_DATA) */
+extern void UserStoreDocFileName(const DocumentCommonParams *params);
+#endif
 
 @message Boolean MSG_GEN_DOCUMENT_INITIALIZE_DOCUMENT_FILE() = carry;
 @message Boolean MSG_GEN_DOCUMENT_IMPORT(
@@ -107,7 +121,7 @@ typedef struct {
 
  	/* params below *must* be a local variable */
 @message Boolean MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS(
-			 word *fileOrError = multipleax,
+			 DocFileOrError *fileOrError = multipleax,
 			 DocumentCommonParams *params = ss:bp) = carry;
 
 @message Boolean MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS_FILE_HANDLE(
@@ -127,12 +141,12 @@ typedef struct {
 
  	/* params below *must* be a local variable */
 @message Boolean MSG_GEN_DOCUMENT_PHYSICAL_CREATE(
-			 word *fileOrError = multipleax,
+			 DocFileOrError *fileOrError = multipleax,
 		         DocumentCommonParams *params = ss:bp) = carry;
 
  	/* params below *must* be a local variable */
 @message Boolean MSG_GEN_DOCUMENT_PHYSICAL_OPEN(
-			 word *fileOrError = multipleax,
+			 DocFileOrError *fileOrError = multipleax,
 		         DocumentCommonParams *params = ss:bp) = carry;
 
 @message void MSG_GEN_DOCUMENT_PHYSICAL_CLOSE();
@@ -142,7 +156,7 @@ typedef struct {
 @message Boolean MSG_GEN_DOCUMENT_PHYSICAL_CHECK_FOR_MODIFICATIONS() = carry;
 
 @message Boolean MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE(
-			 word *fileOrError = multipleax) = carry;
+			 DocFileOrError *fileOrError = multipleax) = carry;
 
 @message void MSG_GEN_DOCUMENT_SAVE_AS_COMPLETED();
 @message void MSG_GEN_DOCUMENT_ATTACH_FAILED();
@@ -179,12 +193,12 @@ typedef struct {
 
  	/* params below *must* be a local variable */
 @message Boolean MSG_GEN_DOCUMENT_NEW(
-			 word *fileOrError = multipleax,
+			 DocFileOrError *fileOrError = multipleax,
 		         DocumentCommonParams *params = ss:bp) = carry;
 
  	/* params below *must* be a local variable */
 @message Boolean MSG_GEN_DOCUMENT_OPEN(
-			 word *fileOrError = multipleax,
+			 DocFileOrError *fileOrError = multipleax,
 		         DocumentCommonParams *params = ss:bp) = carry;
 
 @message word MSG_GEN_DOCUMENT_CLOSE(IACPConnection connection = bp) = cx;
@@ -197,12 +211,12 @@ typedef struct {
 
  	/* params below *must* be a local variable */
 @message Boolean MSG_GEN_DOCUMENT_SAVE_AS(
-			 word *fileOrError = multipleax,
+			 DocFileOrError *fileOrError = multipleax,
 		         DocumentCommonParams *params = ss:bp) = carry;
 
  	/* params below *must* be a local variable */
 @message Boolean MSG_GEN_DOCUMENT_SAVE_AS_TEMPLATE(
-			 word *fileOrError = multipleax,
+			 DocFileOrError *fileOrError = multipleax,
 		         DocumentCommonParams *params = ss:bp) = carry;
 
  	/* params below *must* be a local variable */
@@ -271,6 +285,10 @@ typedef struct {
 @message void MSG_GEN_DOCUMENT_DUPLICATE();
 @message void MSG_GEN_DOCUMENT_DELETE();
 @message void MSG_GEN_DOCUMENT_USE_TEMPLATE();
+/* a template was opened to make a document of (after
+ * Include/Objects/gDocC.def) */
+@message void MSG_GEN_DOCUMENT_INITIATE_TEMPLATE_WIZARD(
+				DocumentCommonParams *params = ss:bp);
 
 @protoreset
 

@@ -310,6 +310,7 @@ EspExpr(const char *in)
  *		    GS<Name> a, b   GS<Name>(a, b), the macro of gstring.h
  *		    Bitmap <a, b>   Bitmap(a, b), the same
  *		    <Type> <a, <b>> GOC_<Type>(a, b), a macro to be had
+ *				    (alone in a chunk: see OutputGocChunk)
  *		    A "|" ends a line (macros of .ui files use it).
  ***********************************************************************/
 static char *
@@ -559,13 +560,18 @@ EspData(const char *in, int *count, int bytes)
 			StrAdd(&s, width == 2 ? "GOC_WORD(" : "GOC_SDW(", -1);
 			EspExprTo(&s, op, olen);
 			StrAdd(&s, ")", 1);
-		    } else if (isChunk || (isOptr && ChunkSym(op, olen))) {
+		    } else if (isChunk || (isOptr && ChunkSym(op, olen)) ||
+			       (WordIs(word, wlen, "word") &&
+				ChunkSym(op, olen))) {
+			/* (a word that names a chunk is its handle) */
+			int ch = isChunk || !isOptr;
+
 			if (olen == 1 && *op == '0') {
 			    StrAdd(&s, "0", 1);
 			} else {
-			    StrAdd(&s, isChunk ? "OptrToChunk(@" : "@", -1);
+			    StrAdd(&s, ch ? "OptrToChunk(@" : "@", -1);
 			    StrAdd(&s, op, olen);
-			    if (isChunk) {
+			    if (ch) {
 				StrAdd(&s, ")", 1);
 			    }
 			}
@@ -1095,8 +1101,30 @@ OutputGocChunk(Symbol *sym)
     } else {
 	int	n;
 	char	*c = EspData(sym->data.symChunk.data.chunkText, &n, 1);
+	char	*t = c;
+	int	tlen = 0, lower = 0;
 
-	Output("@chunk byte %s[] = {\n    %s\n};\n", sym->name, c);
+	/*
+	 * One structure (<Type> <values>, which came out as the macro
+	 * GOC_<Type>) is a chunk of that type, as the code will read
+	 * it: the macro, beside the type in its header, makes its
+	 * initializer of the values.
+	 */
+	while (*t == ' ' || *t == '\t' || *t == '\n') {
+	    t++;
+	}
+	if (n == 1 && strncmp(t, "GOC_", 4) == 0) {
+	    while (isalnum((unsigned char)t[4 + tlen]) ||
+		   t[4 + tlen] == '_') {
+		lower |= islower((unsigned char)t[4 + tlen]);
+		tlen++;
+	    }
+	}
+	if (tlen > 0 && lower && t[4 + tlen] == '(') {
+	    Output("@chunk %.*s %s = %s;\n", tlen, t + 4, sym->name, t);
+	} else {
+	    Output("@chunk byte %s[] = {\n    %s\n};\n", sym->name, c);
+	}
 	free(c);
     }
 }

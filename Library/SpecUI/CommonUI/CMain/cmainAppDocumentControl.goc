@@ -417,7 +417,7 @@ static void SendToDocOrTarget(optr o, optr doc, Message msg)
 static optr CreateDocObject(optr o, Message msg, DocumentCommonParams *params)
 {
     optr proto = GDG(o)->GDGI_genDocument, doc;
-    word fileOrError = 0;
+    DocFileOrError fileOrError = 0;
     Boolean err;
 
     if (OptrToHandle(proto))

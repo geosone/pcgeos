@@ -1,0 +1,979 @@
+/*
+ * cmainDocumentNew.goc -- OLDocumentClass: a document is made or
+ * opened (after cmainDocumentNew.asm).  The document object exists and
+ * is a child of the document group; MSG_GEN_DOCUMENT_NEW or ..._OPEN
+ * gives it its file, registers it with IACP, starts its timers, has
+ * its UI made and takes the model exclusive.  Then the IACP
+ * connections that hold the document open, and what follows the model
+ * exclusive.
+ */
+@include "cmainDocument.goh"
+@include <Objects/gProcC.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/vTextC.goh>
+@include <disk.h>
+
+/* cmainUIDocumentControl.goc */
+extern DiskHandle backupDirDisk;
+extern char backupDirPath[];
+
+/* cmainConstant.def */
+#define DOCUMENT_MAX_GENERATED_NAMES	100
+
+#define ACCESS_ATTRS	(GDA_READ_ONLY | GDA_READ_WRITE | \
+			 GDA_SHARED_SINGLE | GDA_SHARED_MULTIPLE)
+
+static optr Parent(optr o)
+{
+    return GenFindParent(o);
+}
+
+static word UIMode(optr o)
+{
+    return OLDocGetUIParentAttrs(o) & GDCA_MODE;
+}
+
+/* ---------------------------------------------------------------------
+ * The object
+ * ------------------------------------------------------------------- */
+
+/* OLDocumentInitialize: the content is as the group says */
+@extern method OLDocumentClass, MSG_META_INITIALIZE
+{
+    OLDocumentInstance *d;
+    word group;
+
+    (void) pself;
+    @callsuper();
+    group = OLDocGetParentAttrs(oself);
+    d = OLD(oself);
+    d->OLDI_attrs = 0;
+    d->OLDI_iacpEngConnects = 0;
+    d->OLDI_disk = 0;
+    if (group & GDGA_CONTENT_DOES_NOT_MANAGE_CHILDREN) {
+	d->VI_attrs &= ~VA_MANAGED;
+	d->VI_optFlags &= ~(VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH);
+	d->VCI_geoAttrs |= VCGA_CUSTOM_MANAGE_CHILDREN;
+    }
+    if (group & GDGA_LARGE_CONTENT)
+	d->VCNI_attrs |= VCNA_LARGE_DOCUMENT_MODEL |
+			 VCNA_WINDOW_COORDINATE_MOUSE_EVENTS;
+    if (OLDocGetUIParentAttrs(oself) & GDCA_DO_NOT_SAVE_FILES)
+	GD(oself)->GDI_attrs |= GDA_READ_ONLY;
+}
+
+/* a document the user opened (not one open for an IACP client alone)
+ * takes the model */
+void OLDocGrabModelIfAppropriate(optr o)
+{
+    if (OLD(o)->OLDI_attrs & OLDA_USER_OPENED)
+	MetaGrabModelExclLow(o);
+}
+
+/* StartAutoSave: the timers of a document that can be written */
+void OLDocStartAutoSave(optr o)
+{
+    word group;
+
+    if (GD(o)->GDI_attrs & GDA_READ_ONLY)
+	return;
+    group = OLDocGetParentAttrs(o);
+    if (group & GDGA_SUPPORTS_AUTO_SAVE)
+	OLDocStartATimer(o, OLDOC_AUTO_SAVE_TIMER, 0);
+    if ((group & GDGA_AUTOMATIC_CHANGE_NOTIFICATION) &&
+	(GD(o)->GDI_attrs & GDA_SHARED_MULTIPLE))
+	OLDocStartATimer(o, OLDOC_CHANGE_TIMER, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * The directory and the name
+ * ------------------------------------------------------------------- */
+
+/* the directory is made below its disk */
+static Boolean CreateDir(DiskHandle disk, const char *path)
+{
+    if (!FileSetCurrentPath(disk, "."))
+	return FALSE;
+    return FileCreateDir(path) == 0;
+}
+
+word OLDocPushAndSetPath(optr o, DocumentCommonParams *params)
+{
+    GenFilePath *gfp;
+    PathName path;
+    DiskHandle disk;
+    word e;
+
+    FilePushDir();
+    if (params->DCP_diskHandle) {
+	if (FileSetCurrentPath(params->DCP_diskHandle, params->DCP_path))
+	    return 0;
+	e = ThreadGetError();
+	if (e != ERROR_PATH_NOT_FOUND)
+	    return e;
+	if (!CreateDir(params->DCP_diskHandle, params->DCP_path))
+	    return ERROR_PATH_NOT_FOUND;
+	if (FileSetCurrentPath(params->DCP_diskHandle, params->DCP_path))
+	    return 0;
+	return ThreadGetError();
+    }
+    e = GenPathSetCurrentPathFromObjectPath(o, ATTR_GEN_PATH_DATA,
+					    TEMP_GEN_PATH_SAVED_DISK_HANDLE);
+    if (e != ERROR_PATH_NOT_FOUND)
+	return e;
+    disk = GenPathFetchDiskHandleAndDerefPath(o, ATTR_GEN_PATH_DATA,
+				TEMP_GEN_PATH_SAVED_DISK_HANDLE, &gfp);
+    if (!disk)
+	return ERROR_PATH_NOT_FOUND;
+    memcpy(path, gfp->GFP_path, sizeof(path));
+    if (!CreateDir(disk, path))
+	return ERROR_PATH_NOT_FOUND;
+    return GenPathSetCurrentPathFromObjectPath(o, ATTR_GEN_PATH_DATA,
+					TEMP_GEN_PATH_SAVED_DISK_HANDLE);
+}
+
+/* OLDocumentGetID: the disk and the id of the open file, by which IACP
+ * and the group know the document */
+static void GetID(optr o, word *disk, FileID *id)
+{
+    OLDocumentInstance *d = OLD(o);
+    FileExtAttrDesc a[2];
+    DiskHandle dh = 0;
+    FileID fid = 0;
+
+    if (!d->OLDI_disk) {
+	a[0].FEAD_attr = FEA_DISK;
+	a[0].FEAD_value = &dh;
+	a[0].FEAD_size = sizeof(dh);
+	a[0].FEAD_name = NULL;
+	a[1].FEAD_attr = FEA_FILE_ID;
+	a[1].FEAD_value = &fid;
+	a[1].FEAD_size = sizeof(fid);
+	a[1].FEAD_name = NULL;
+	FileGetHandleExtAttributes(GD(o)->GDI_fileHandle, FEA_MULTIPLE, a,
+				   2);
+	d = OLD(o);
+	d->OLDI_disk = (word) dh;
+	d->OLDI_id = fid;
+    }
+    *disk = d->OLDI_disk;
+    *id = d->OLDI_id;
+}
+
+void OLDocRegisterOpenDoc(optr o)
+{
+    word disk;
+    FileID id;
+
+    GetID(o, &disk, &id);
+    IACPRegisterDocument(GeodeGetAppObject(0), disk, id);
+}
+
+void OLDocUnregisterDoc(optr o)
+{
+    word disk;
+    FileID id;
+
+    GetID(o, &disk, &id);
+    IACPUnregisterDocument(GeodeGetAppObject(0), disk, id);
+}
+
+/*
+ * StoreNewDocumentName: the document has its file: handle, directory,
+ * name, how it is open, on what kind of disk, whether a backup of it
+ * exists, the type of the file.  Then IACP knows it.
+ */
+void OLDocStoreNewDocumentName(optr o, FileHandle file,
+			       DocumentCommonParams *params)
+{
+    GenDocumentInstance *g;
+    FileLongName name;
+    FileAttrs fattrs = 0;
+    word flags = 0;
+
+    FilePushDir();
+    OLD(o)->OLDI_disk = 0;
+    GD(o)->GDI_fileHandle = file;
+    if (params->DCP_diskHandle)
+	(void) @call o::MSG_GEN_PATH_SET(params->DCP_path,
+					 params->DCP_diskHandle);
+    OLDocSetAttrs(o, params->DCP_docAttrs, ACCESS_ATTRS);
+    memcpy(GD(o)->GDI_fileName, params->DCP_name, sizeof(FileLongName));
+    if (DiskCheckWritable(FileGetDiskHandle(file))) {
+	g = GD(o);
+	g->GDI_attrs |= GDA_ON_WRITABLE_MEDIA;
+	if (!(g->GDI_attrs & (GDA_SHARED_SINGLE | GDA_SHARED_MULTIPLE |
+			      GDA_READ_ONLY)) &&
+	    FileSetCurrentPath(backupDirDisk, backupDirPath)) {
+	    memcpy(name, g->GDI_fileName, sizeof(name));
+	    ThreadSetError(0);
+	    (void) FileGetAttributes(name);
+	    if (!ThreadGetError())
+		GD(o)->GDI_attrs |= GDA_BACKUP_EXISTS;
+	}
+    }
+    FileGetHandleExtAttributes(file, FEA_FILE_ATTR, &fattrs, sizeof(fattrs));
+    if (FileGetHandleExtAttributes(file, FEA_FLAGS, &flags, sizeof(flags)))
+	flags = 0;
+    GD(o)->GDI_type = (fattrs & FA_RDONLY) ? GDT_READ_ONLY
+		    : (flags & GFHF_TEMPLATE) ? GDT_TEMPLATE
+		    : (flags & GFHF_SHARED_SINGLE) ? GDT_PUBLIC
+		    : (flags & GFHF_SHARED_MULTIPLE) ? GDT_MULTI_USER
+		    : GDT_NORMAL;
+    FilePopDir();
+    OLDocRegisterOpenDoc(o);
+}
+
+/* ---------------------------------------------------------------------
+ * The other documents
+ * ------------------------------------------------------------------- */
+
+/* DocumentCloseOthers: where one document is open at a time the others
+ * go now */
+static void CloseOthers(optr o)
+{
+    OLDocSetAttrs(o, GDA_OPENING, 0);
+    GenSendToChildren(Parent(o), MSG_GEN_DOCUMENT_CLOSE_IF_CLEAN_UNNAMED,
+		      NULL, 0);
+    OLDocSetAttrs(o, 0, GDA_OPENING);
+}
+
+/*
+ * OLDocumentSaveOrUpdate: the document is saved (a transparent
+ * document control that does not ask, a group without auto save) or
+ * updated before it is closed; the close goes on knowing which.  The
+ * document stays dirty as it was.
+ */
+Boolean OLDocSaveOrUpdate(optr o)
+{
+    word dirty = GD(o)->GDI_attrs & GDA_DIRTY, e;
+    Boolean failed, save;
+    byte did;
+
+    save = (docControlOptions & DCO_TRANSPARENT_DOC) &&
+	   !(docControlOptions & DCO_USER_CONFIRM_SAVE);
+    if (!save && !(OLDocGetParentAttrs(o) & GDGA_SUPPORTS_AUTO_SAVE))
+	save = TRUE;
+    if (save) {
+	failed = @call o::MSG_GEN_DOCUMENT_SAVE();
+	did = OLDA_SAVE_BEFORE_CLOSE;
+    } else {
+	failed = @call o::MSG_GEN_DOCUMENT_UPDATE(&e);
+	did = OLDA_UPDATE_BEFORE_CLOSE;
+    }
+    OLD(o)->OLDI_attrs |= did;
+    GD(o)->GDI_attrs |= dirty;
+    return failed;
+}
+
+static void SaveAndClose(optr o)
+{
+    if (!OLDocSaveOrUpdate(o))
+	OLDocSetAttrs(o, 0, GDA_DIRTY);
+    (void) @call o::MSG_GEN_DOCUMENT_CLOSE(0);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_IF_CLEAN_UNNAMED
+{
+    (void) pself;
+    if (GD(oself)->GDI_attrs & (GDA_CLOSING | GDA_OPENING))
+	return;
+    if (!(docControlOptions & DCO_TRANSPARENT_DOC) &&
+	(OLDocGetUIParentAttrs(oself) & GDCA_MULTIPLE_OPEN_FILES))
+	return;
+    /* (the user is asked while it closes) */
+    if (docControlOptions & DCO_USER_CONFIRM_SAVE)
+	(void) @call oself::MSG_GEN_DOCUMENT_CLOSE(0);
+    else
+	SaveAndClose(oself);
+}
+
+/* OLDocumentRemovingDisk: the disk of the file goes */
+@extern method OLDocumentClass, MSG_META_REMOVING_DISK
+{
+    (void) pself;
+    if (FileGetDiskHandle(GD(oself)->GDI_fileHandle) == disk)
+	SaveAndClose(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * IACP connections
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDocumentAddConnection: who has the document open: the user
+ * (connection 0; its display shows now, if it was open for clients
+ * alone) or an IACP client, which hears that the document is open and
+ * is kept in the array.
+ */
+void OLDocAddConnection(optr o, IACPConnection connection)
+{
+    OLDocumentInstance *d = OLD(o);
+    IACPDocOpenAckParams p;
+    EventHandle ev;
+    optr arr, app;
+    word i, n, size;
+
+    if (!connection) {
+	byte was = d->OLDI_attrs;
+	MemHandle display = GD(o)->GDI_display;
+
+	d->OLDI_attrs |= OLDA_USER_OPENED;
+	if ((was & OLDA_USER_OPENED) || !display)
+	    return;
+	arr = @call Parent(o)::MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY();
+	arr = ConstructOptr(display, OptrToChunk(arr));
+	@call arr::MSG_GEN_SET_USABLE(VUM_NOW);
+	MetaGrabModelExclLow(o);
+	return;
+    }
+    app = GeodeGetAppObject(0);
+    p.IDOAP_docObj = o;
+    p.IDOAP_connection = connection;
+    p.IDOAP_serverNum = IACPGetServerNumber(connection, app);
+    CObjMessageP(MF_RECORD, 0, MSG_META_IACP_DOC_OPEN_ACK, &p, sizeof(p),
+		 &ev, sizeof(ev));
+    IACPSendMessage(connection, ev, TO_SELF, 0, IACPS_SERVER);
+
+    d = OLD(o);
+    if (!d->OLDI_iacpEngConnects) {
+	ChunkHandle ch = OptrToChunk(ChunkArrayCreate(OptrToHandle(o),
+				sizeof(IACPConnection), 0, OCF_IGNORE_DIRTY));
+
+	OLD(o)->OLDI_iacpEngConnects = ch;
+    }
+    arr = ConstructOptr(OptrToHandle(o), OLD(o)->OLDI_iacpEngConnects);
+    n = ChunkArrayGetCount(arr);
+    for (i = 0; i < n; i++)
+	if (*(IACPConnection *) ChunkArrayElementToPtr(arr, i, &size) ==
+	    connection)
+	    return;
+    *(IACPConnection *) ChunkArrayAppend(arr, 0) = connection;
+}
+
+/* ---------------------------------------------------------------------
+ * The protocol of the file
+ * ------------------------------------------------------------------- */
+
+static Boolean HasHint(optr o, VardataKey key)
+{
+    return ObjVarFindData(o, key) != NULL;
+}
+
+/*
+ * FileOpenedCheckProtocol: a document older than the application is
+ * brought up to date (the application does that, the file gets the
+ * new protocol and is saved); a newer one cannot be opened.  0, or the
+ * dialog that tells why not.
+ */
+static word CheckProtocol(optr o)
+{
+    FileHandle file = GD(o)->GDI_fileHandle;
+    optr parent = Parent(o), progress = 0;
+    ProtocolNumber doc, app;
+    Boolean compatible, failed, vm = OLDocIsVM(o);
+    word vmAttrs = 0, e;
+    dword p;
+
+    doc.PN_major = doc.PN_minor = 0;
+    if (FileGetHandleExtAttributes(file, FEA_PROTOCOL, &doc, sizeof(doc)))
+	return 0;
+    if (!doc.PN_major && !doc.PN_minor)
+	return 0;
+    p = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_PROTOCOL();
+    app.PN_major = (word) p;
+    app.PN_minor = (word) (p >> 16);
+    if (!app.PN_major && !app.PN_minor)
+	return 0;
+    if (app.PN_major < doc.PN_major ||
+	(app.PN_major == doc.PN_major && app.PN_minor < doc.PN_minor))
+	return SDBT_FILE_OPEN_DOC_MORE_RECENT_THAN_APP;
+    if (app.PN_major == doc.PN_major && app.PN_minor == doc.PN_minor)
+	return 0;
+    compatible = app.PN_major == doc.PN_major;
+    if (compatible
+	    ? HasHint(o, HINT_GEN_DOCUMENT_CONTROL_PROGRESS_DIALOG_ON_UPDATE_MINOR)
+	    : !HasHint(o, HINT_GEN_DOCUMENT_CONTROL_NO_PROGRESS_DIALOG_ON_UPDATE_MAJOR)) {
+	progress = UserCreateDialog(@ProtoProgressDialog);
+	@send progress::MSG_GEN_INTERACTION_INITIATE();
+    }
+    /* what the conversion dirties is not the user's doing */
+    if (vm) {
+	vmAttrs = VMGetAttributes(file);
+	VMSetAttributes(file, 0, VMA_NOTIFY_DIRTY);
+    }
+    OLD(o)->OLDI_physOpen &= ~OLDPO_KEEP_PROTOCOL;
+    if (compatible)
+	failed = @call o::
+		MSG_GEN_DOCUMENT_UPDATE_EARLIER_COMPATIBLE_DOCUMENT();
+    else
+	failed = @call o::
+		MSG_GEN_DOCUMENT_UPDATE_EARLIER_INCOMPATIBLE_DOCUMENT();
+    if (vm && (vmAttrs & VMA_NOTIFY_DIRTY))
+	VMSetAttributes(file, VMA_NOTIFY_DIRTY, 0);
+    if (progress)
+	UserDestroyDialog(progress);
+    if (failed)
+	return SDBT_FILE_OPEN_APP_MORE_RECENT_THAN_DOC;
+    if (!(OLD(o)->OLDI_physOpen & OLDPO_KEEP_PROTOCOL) &&
+	FileSetHandleExtAttributes(file, FEA_PROTOCOL, &app, sizeof(app)))
+	return SDBT_FILE_SAVE_ERROR;
+    if (@call o::MSG_GEN_DOCUMENT_PHYSICAL_SAVE(&e))
+	return SDBT_FILE_SAVE_ERROR;
+    return 0;
+}
+
+/* ---------------------------------------------------------------------
+ * A new file
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDCNewVMFile: the attributes of a new VM file as the group and the
+ * control want them, and the extended attributes of the document:
+ * protocol, release, token and creator.
+ */
+static void SetupNewFile(optr o)
+{
+    FileHandle file = GD(o)->GDI_fileHandle;
+    optr parent = Parent(o);
+    word group = OLDocGetParentAttrs(o), ui, attrs;
+    struct {
+	ProtocolNumber	protocol;
+	ReleaseNumber	release;
+	GeodeToken	token;
+	GeodeToken	creator;
+    } ea;
+    FileExtAttrDesc a[4];
+    dword p;
+
+    if (group & GDGA_VM_FILE) {
+	ui = OLDocGetUIParentAttrs(o);
+	attrs = VMA_SYNC_UPDATE;
+	if (ui & GDCA_SUPPORTS_SAVE_AS_REVERT)
+	    attrs |= VMA_BACKUP;
+	if (!HasHint(parent,
+		     ATTR_GEN_DOCUMENT_GROUP_ALLOW_MULTIPLE_WRITE_ACCESS))
+	    attrs |= VMA_SINGLE_THREAD_ACCESS;
+	if (group & GDGA_AUTOMATIC_DIRTY_NOTIFICATION)
+	    attrs |= VMA_NOTIFY_DIRTY;
+	if (group & GDGA_VM_FILE_CONTAINS_OBJECTS)
+	    attrs |= VMA_OBJECT_ATTRS;
+	VMSetAttributes(file, (VMAttributes) attrs, 0);
+	if (attrs & VMA_NOTIFY_DIRTY)
+	    VMSetDirtyLimit(file, 0);
+    } else if (!(group & GDGA_NATIVE)) {
+	return;
+    }
+    memset(&ea, 0, sizeof(ea));
+    p = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_PROTOCOL();
+    ea.protocol.PN_major = (word) p;
+    ea.protocol.PN_minor = (word) (p >> 16);
+    GeodeGetInfo(MemGetInfo(OptrToHandle(o), MGIT_OWNER_OR_VM_FILE_HANDLE),
+		 GGIT_GEODE_RELEASE, &ea.release);
+    @call parent::MSG_GEN_DOCUMENT_GROUP_GET_TOKEN(&ea.token);
+    @call parent::MSG_GEN_DOCUMENT_GROUP_GET_CREATOR(&ea.creator);
+    memset(a, 0, sizeof(a));
+    a[0].FEAD_attr = FEA_PROTOCOL;
+    a[0].FEAD_value = &ea.protocol;
+    a[0].FEAD_size = sizeof(ea.protocol);
+    a[1].FEAD_attr = FEA_RELEASE;
+    a[1].FEAD_value = &ea.release;
+    a[1].FEAD_size = sizeof(ea.release);
+    a[2].FEAD_attr = FEA_TOKEN;
+    a[2].FEAD_value = &ea.token;
+    a[2].FEAD_size = sizeof(ea.token);
+    a[3].FEAD_attr = FEA_CREATOR;
+    a[3].FEAD_value = &ea.creator;
+    a[3].FEAD_size = sizeof(ea.creator);
+    FileSetHandleExtAttributes(file, FEA_MULTIPLE, a, 4);
+}
+
+static void CreateAndAttachUI(optr o, Boolean create)
+{
+    if (create)
+	@call o::MSG_GEN_DOCUMENT_CREATE_UI_FOR_DOCUMENT();
+    @call o::MSG_GEN_DOCUMENT_READ_CACHED_DATA_FROM_FILE();
+    @call o::MSG_GEN_DOCUMENT_ATTACH_UI_TO_DOCUMENT();
+}
+
+/*
+ * CreateNewFileCommon: the new file is set up, the application puts
+ * in what an empty document has, and it is saved once; then the UI of
+ * the document.  TRUE if that failed: the file is gone again.
+ */
+static Boolean CreateNewFileCommon(optr o)
+{
+    word e;
+
+    SetupNewFile(o);
+    if (!@call o::MSG_GEN_DOCUMENT_INITIALIZE_DOCUMENT_FILE()) {
+	e = 0;
+	if (!@call o::MSG_GEN_DOCUMENT_PHYSICAL_SAVE(&e)) {
+	    CloseOthers(o);
+	    OLDocStartAutoSave(o);
+	    CreateAndAttachUI(o, TRUE);
+	    return FALSE;
+	}
+	(void) OLDocStandardDialog(o,
+		e == ERROR_SHORT_READ_WRITE ||
+		e == VM_UPDATE_INSUFFICIENT_DISK_SPACE
+			? SDBT_FILE_NEW_INSUFFICIENT_DISK_SPACE
+			: SDBT_FILE_NEW_ERROR);
+    }
+    @call o::MSG_GEN_DOCUMENT_PHYSICAL_CLOSE();
+    @call o::MSG_GEN_DOCUMENT_PHYSICAL_DELETE();
+    return TRUE;
+}
+
+/*
+ * CopyFromTemplate: the document becomes a copy of the template it
+ * was opened from.  TRUE with the error (0: nothing to tell) if that
+ * failed.
+ */
+static Boolean CopyFromTemplate(optr o, word *error)
+{
+    DocFileOrError r;
+
+    for (;;) {
+	r = 0;
+	if (!@call o::MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE(&r)) {
+	    OLDocSetAttrs(o, 0, ACCESS_ATTRS | GDA_CLOSING);
+	    return FALSE;
+	}
+	*error = (word) r;
+	if (!r)
+	    return TRUE;
+	if (OLDocHandleSaveError(o, (word) r, NULL) != OLDSE_RETRY)
+	    break;
+    }
+    *error = OLDocConvertErrorCode((word) r);
+    return TRUE;
+}
+
+/*
+ * CheckForUserEmptyFile: where the user may set the empty document, a
+ * new document is a copy of that one (the default document of the
+ * template directory).  FALSE if the document is open so.
+ */
+static Boolean OpenUserEmptyFile(optr o)
+{
+    optr parent = Parent(o);
+    DocumentCommonParams p;
+    DocFileOrError file = 0;
+    Boolean failed;
+    word features = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_UI_FEATURES();
+    word dialog, e, n;
+    const char *name;
+
+    if (!(features & GDCF_SUPPORTS_USER_SETTABLE_EMPTY_DOCUMENT))
+	return TRUE;
+    memset(&p, 0, sizeof(p));
+    FilePushDir();
+    OLDocSetTemplateDir(o);
+    p.DCP_diskHandle = FileGetCurrentPath(p.DCP_path, sizeof(p.DCP_path));
+    FilePopDir();
+    MemLock(OptrToHandle(@defaultDocumentName));
+    name = LMemDeref(@defaultDocumentName);
+    for (n = 0; n < sizeof(p.DCP_name) - 1 && name[n]; n++)
+	p.DCP_name[n] = name[n];
+    MemUnlock(OptrToHandle(@defaultDocumentName));
+    p.DCP_docAttrs = GDA_READ_ONLY;
+    failed = OLDocPushAndSetPath(o, &p) != 0;
+    if (!failed)
+	failed = @call o::MSG_GEN_DOCUMENT_PHYSICAL_OPEN(&file, &p);
+    FilePopDir();
+    if (failed)
+	return TRUE;
+    CloseOthers(o);
+    OLDocStoreNewDocumentName(o, (FileHandle) file, &p);
+    dialog = CheckProtocol(o);
+    if (dialog) {
+	(void) OLDocStandardDialogParams(o, dialog, &p);
+	@call o::MSG_GEN_DOCUMENT_PHYSICAL_CLOSE();
+	return TRUE;
+    }
+    (void) CopyFromTemplate(o, &e);
+    CreateAndAttachUI(o, TRUE);
+    OLDocGrabModelIfAppropriate(o);
+    OLDocStartAutoSave(o);
+    return FALSE;
+}
+
+/* who asked for the document holds it open, and it takes the model */
+static void CopeWithIACP(optr o, const DocumentCommonParams *params)
+{
+    if (params->DCP_connection != (IACPConnection) -1)
+	OLDocAddConnection(o, params->DCP_connection);
+    OLDocGrabModelIfAppropriate(o);
+}
+
+/*
+ * OLDocumentNew: a new document.  An untitled one goes to SP_DOCUMENT
+ * (or where the group has its path) under the first free name of the
+ * group's default names; one with a name must not exist.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_NEW
+{
+    Boolean untitled = (params->DCP_docAttrs & GDA_UNTITLED) != 0;
+    Boolean failed = TRUE;
+    DocFileOrError file;
+    word count, e, dialog;
+
+    (void) pself;
+    OLDocMarkBusy(oself);
+    OLDocSetOperation(oself, GDO_NEW);
+    if (untitled && !params->DCP_diskHandle && !params->DCP_path[0])
+	params->DCP_diskHandle = SP_DOCUMENT;
+    e = OLDocPushAndSetPath(oself, params);
+    count = 0xffff;			/* (a name was given) */
+    if (!e && untitled) {
+	if (!(params->DCP_flags & DOF_FORCE_REAL_EMPTY_DOCUMENT) &&
+	    !OpenUserEmptyFile(oself)) {
+	    CopeWithIACP(oself, params);
+	    failed = FALSE;
+	    goto done;
+	}
+	count = 0;
+	goto generate;
+    }
+    for (;;) {
+	if (!e) {
+	    file = 0;
+	    if (!@call oself::MSG_GEN_DOCUMENT_PHYSICAL_CREATE(&file,
+							      params)) {
+		OLDocStoreNewDocumentName(oself, (FileHandle) file, params);
+		if (!CreateNewFileCommon(oself)) {
+		    CopeWithIACP(oself, params);
+		    failed = FALSE;
+		}
+		break;
+	    }
+	    e = (word) file;
+	}
+	e = OLDocConvertErrorCode(e);
+	if (e == ERROR_ACCESS_DENIED || e == ERROR_SHARING_VIOLATION ||
+	    e == ERROR_FILE_EXISTS || e == ERROR_FILE_FORMAT_MISMATCH) {
+	    /* the name is taken: the next one */
+	    if (docControlOptions & DCO_TRANSPARENT_DOC)
+		(void) OLDocStandardDialogParams(oself,
+				SDBT_TRANSPARENT_NEW_FILE_EXISTS, params);
+	    count++;
+	} else if (e == ERROR_WRITE_PROTECTED) {
+	    if (OLDocStandardDialogParams(oself,
+			SDBT_FILE_NEW_WRITE_PROTECTED, params) != IC_YES)
+		break;
+	} else {
+	    dialog = e == ERROR_TOO_MANY_OPEN_FILES
+			? SDBT_FILE_NEW_TOO_MANY_OPEN_FILES
+		   : e == ERROR_SHORT_READ_WRITE
+			? SDBT_FILE_NEW_INSUFFICIENT_DISK_SPACE
+		   : e == ERROR_INVALID_LONGNAME ? SDBT_FILE_ILLEGAL_NAME
+		   : SDBT_FILE_NEW_ERROR;
+	    (void) OLDocStandardDialogParams(oself, dialog, params);
+	    break;
+	}
+generate:
+	e = 0;
+	count = @call oself::MSG_GEN_DOCUMENT_GENERATE_NAME_FOR_NEW(
+			(char *) params, count);
+	if (count == GEN_DOCUMENT_GENERATE_NAME_CANCEL)
+	    break;
+	if (count == GEN_DOCUMENT_GENERATE_NAME_ERROR) {
+	    (void) OLDocStandardDialogParams(oself,
+			SDBT_FILE_NEW_CANNOT_CREATE_TEMP_NAME, params);
+	    break;
+	}
+    }
+done:
+    if (!failed)
+	*fileOrError = GD(oself)->GDI_fileHandle;
+    OLDocClearOperation(oself);
+    FilePopDir();
+    OLDocMarkNotBusy(oself);
+    return failed;
+}
+
+/*
+ * OLDocumentGenerateNameForNew: the name of try number retryCount into
+ * the parameters: the group's default name, with the number from the
+ * second try on ("Untitled 1"; no blank in a DOS name).  A
+ * transparent document control asks the user instead.  The count to go
+ * on with, or GEN_DOCUMENT_GENERATE_NAME_ERROR, ..._CANCEL.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GENERATE_NAME_FOR_NEW
+{
+    DocumentCommonParams *p = (DocumentCommonParams *) buffer;
+    optr parent = Parent(oself);
+    word attrs, n, count = retryCount;
+
+    (void) pself;
+    if (docControlOptions & DCO_TRANSPARENT_DOC) {
+	optr dialog, text;
+	word response;
+
+	p->DCP_docAttrs &= ~GDA_UNTITLED;
+	dialog = UserCreateDialog(@FileNewSummons);
+	text = ConstructOptr(OptrToHandle(dialog),
+			     OptrToChunk(@FileNewTextEdit));
+	@call text::MSG_META_ADD_VAR_DATA(ATTR_GEN_TEXT_LEGAL_FILENAMES, 0,
+					  NULL);
+	@call text::MSG_VIS_TEXT_SET_MAX_LENGTH(FILE_LONGNAME_LENGTH);
+	response = UserDoDialog(dialog);
+	(void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(p->DCP_name);
+	UserDestroyDialog(dialog);
+	return response == IC_APPLY ? retryCount
+				    : GEN_DOCUMENT_GENERATE_NAME_CANCEL;
+    }
+    if (count >= DOCUMENT_MAX_GENERATED_NAMES)
+	return GEN_DOCUMENT_GENERATE_NAME_ERROR;
+    attrs = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_DEFAULT_NAME(buffer);
+    if (!count)
+	return retryCount;
+    for (n = 0; n < sizeof(p->DCP_name) - 4 && p->DCP_name[n]; n++)
+	;
+    if (attrs & GDGA_VM_FILE)
+	p->DCP_name[n++] = ' ';
+    if (count >= 10)
+	p->DCP_name[n++] = (char) ('0' + count / 10);
+    p->DCP_name[n++] = (char) ('0' + count % 10);
+    p->DCP_name[n] = 0;
+    return retryCount;
+}
+
+/* ---------------------------------------------------------------------
+ * Opening
+ * ------------------------------------------------------------------- */
+
+/* the dialog for an error of opening; 0: nothing to tell */
+static word OpenErrorDialog(word e)
+{
+    switch (e) {
+    case 0:
+	return 0;
+    case ERROR_FILE_FORMAT_MISMATCH:
+	return SDBT_FILE_OPEN_FILE_TYPE_MISMATCH;
+    case VM_CANNOT_OPEN_SHARED_MULTIPLE:
+	return SDBT_FILE_OPEN_SHARING_DENIED;
+    case ERROR_FILE_NOT_FOUND:
+	return SDBT_FILE_OPEN_FILE_NOT_FOUND;
+    case VM_OPEN_INVALID_VM_FILE:
+	return SDBT_FILE_OPEN_INVALID_VM_FILE;
+    case ERROR_SHORT_READ_WRITE:
+	return SDBT_FILE_OPEN_INSUFFICIENT_DISK_SPACE;
+    }
+    return SDBT_FILE_OPEN_ERROR;
+}
+
+/*
+ * OLDocumentOpen: the file of the parameters is opened (read only, if
+ * it cannot be written), checked and made the document's.  attach:
+ * the document comes back from state, and has its UI still.
+ */
+Boolean OLDocOpen(optr o, DocumentCommonParams *params, Boolean attach,
+		  DocFileOrError *fileOrError)
+{
+    Boolean reopen = (params->DCP_flags & DOF_REOPEN) != 0;
+    Boolean haveDialog = FALSE, template;
+    DocFileOrError file = 0;
+    word e, dialog = 0;
+    byte found;
+    optr app;
+
+    OLDocMarkBusy(o);
+    if (!attach && !reopen)
+	OLDocSetOperation(o, GDO_OPEN);
+    e = OLDocPushAndSetPath(o, params);
+    while (!e) {
+	file = 0;
+	if (!@call o::MSG_GEN_DOCUMENT_PHYSICAL_OPEN(&file, params))
+	    break;
+	if (!file) {			/* the user gave up */
+	    FilePopDir();
+	    goto failed;
+	}
+	e = OLDocConvertErrorCode((word) file);
+	if (e != ERROR_ACCESS_DENIED && e != ERROR_SHARING_VIOLATION &&
+	    e != ERROR_WRITE_PROTECTED)
+	    break;
+	/* read only, then */
+	if (params->DCP_docAttrs & GDA_READ_ONLY) {
+	    dialog = SDBT_FILE_OPEN_SHARING_DENIED;
+	    haveDialog = TRUE;
+	    break;
+	}
+	params->DCP_docAttrs |= GDA_READ_ONLY;
+	params->DCP_docAttrs &= ~GDA_READ_WRITE;
+	params->DCP_flags &= ~DOF_CREATE_FILE_IF_FILE_DOES_NOT_EXIST;
+	e = 0;
+    }
+    if (e || haveDialog) {
+	FilePopDir();
+	if (!haveDialog)
+	    dialog = OpenErrorDialog(OLDocConvertErrorCode(e));
+	goto tell;
+    }
+
+    OLDocStoreNewDocumentName(o, (FileHandle) file, params);
+    UserStoreDocFileName(params);
+    FilePopDir();
+    found = OLD(o)->OLDI_physOpen;
+    if (found & OLDPO_CREATED) {
+	if (CreateNewFileCommon(o))
+	    goto failed;
+	goto opened;
+    }
+    template = (params->DCP_flags & DOF_FORCE_TEMPLATE_BEHAVIOR) ||
+	       ((found & OLDPO_TEMPLATE) &&
+		UIMode(o) != (GDCM_VIEWER << GDCA_MODE_OFFSET));
+    if (template && CopyFromTemplate(o, &e)) {
+	@call o::MSG_GEN_DOCUMENT_PHYSICAL_CLOSE();
+	dialog = OpenErrorDialog(e);
+	goto tell;
+    }
+    dialog = CheckProtocol(o);
+    if (dialog) {
+	@call o::MSG_GEN_DOCUMENT_PHYSICAL_CLOSE();
+	goto tell;
+    }
+    /* a read only document where documents are saved without asking */
+    if (UIMode(o) != (GDCM_VIEWER << GDCA_MODE_OFFSET) &&
+	(GD(o)->GDI_attrs & GDA_READ_ONLY) &&
+	(docControlOptions & DCO_TRANSPARENT_DOC) &&
+	OLDocStandardDialogParams(o,
+		SDBT_FILE_OPEN_READ_ONLY_PUBLIC_IN_TRANSPARENT_MODE,
+		params) != IC_YES) {
+	@call o::MSG_GEN_DOCUMENT_PHYSICAL_CLOSE();
+	goto failed;
+    }
+    /* a VM file with changes that were never saved: the system went
+     * down with the document open */
+    if (OLDocIsVM(o) &&
+	(OLDocGetUIParentAttrs(o) & GDCA_SUPPORTS_SAVE_AS_REVERT) &&
+	!(GD(o)->GDI_attrs & GDA_SHARED_MULTIPLE) &&
+	(VMGetDirtyState(GD(o)->GDI_fileHandle) & 0xff)) {
+	if (attach) {
+	    OLDocSetAttrs(o, GDA_ATTACH_TO_DIRTY_FILE | GDA_DIRTY, 0);
+	} else {
+	    if (!reopen && !(docControlOptions & DCO_TRANSPARENT_DOC))
+		(void) OLDocStandardDialogParams(o, SDBT_FILE_OPEN_VM_DIRTY,
+						 params);
+	    OLDocSetAttrs(o, GDA_DIRTY, 0);
+	}
+    }
+    OLDocStartAutoSave(o);
+    if (!reopen)
+	CloseOthers(o);
+    CreateAndAttachUI(o, !reopen && !attach);
+
+opened:
+    if (params->DCP_flags & DOF_RAISE_APP_AND_DOC) {
+	app = GeodeGetAppObject(0);
+	@call o::MSG_GEN_BRING_TO_TOP();
+	@call app::MSG_META_NOTIFY_TASK_SELECTED();
+	@call app::MSG_GEN_BRING_TO_TOP();
+    }
+    CopeWithIACP(o, params);
+    if (params->DCP_flags & DOF_FORCE_TEMPLATE_BEHAVIOR)
+	CObjMessageP(MF_CALL, o, MSG_GEN_DOCUMENT_INITIATE_TEMPLATE_WIZARD,
+		     params, sizeof(*params), NULL, 0);
+    *fileOrError = GD(o)->GDI_fileHandle;
+    OLDocClearOperation(o);
+    OLDocMarkNotBusy(o);
+    return FALSE;
+
+tell:
+    if (dialog) {
+	/* a document that was open already goes */
+	if (reopen)
+	    @call o::MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT();
+	(void) OLDocStandardDialogParams(o, dialog, params);
+	if (reopen)
+	    OLDocRemoveObj(o);
+	goto out;
+    }
+failed:
+    if (reopen) {
+	@call o::MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT();
+	OLDocRemoveObj(o);
+    }
+out:
+    OLDocClearOperation(o);
+    OLDocMarkNotBusy(o);
+    return TRUE;
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_OPEN
+{
+    (void) pself;
+    return OLDocOpen(oself, params, FALSE, fileOrError);
+}
+
+/* ---------------------------------------------------------------------
+ * The model exclusive
+ * ------------------------------------------------------------------- */
+
+/*
+ * SendCompleteUpdateToDC: the document control's UI follows the
+ * document, and the group tells the control which file is the current
+ * one (none, if the document lost the model).
+ */
+void OLDocSendCompleteUpdateToDC(optr o, Boolean hasModel)
+{
+    optr parent = Parent(o);
+    DocumentFileChangedParams p;
+    MemHandle display;
+    optr proto;
+
+    OLDocSendNotificationToDC(o, hasModel);
+    memset(&p, 0, sizeof(p));
+    if (hasModel) {
+	@call o::MSG_GEN_DOCUMENT_GET_FILE_NAME((TCHAR *) p.DFCP_name);
+	(void) @call o::MSG_GEN_PATH_GET(p.DFCP_path, sizeof(p.DFCP_path));
+	p.DFCP_diskHandle = @call o::MSG_GEN_PATH_GET_DISK_HANDLE();
+	proto = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY();
+	display = GD(o)->GDI_display;
+	if (OptrToHandle(proto))
+	    proto = ConstructOptr(display, OptrToChunk(proto));
+	p.DFCP_display = proto;
+	p.DFCP_document = o;
+    }
+    CObjMessageP(MF_CALL, parent, MSG_OLDG_FILE_CHANGED, &p, sizeof(p),
+		 NULL, 0);
+}
+
+/* the context of the undo chain of a document.  Port32: an optr does
+ * not fit a dword; this is as good as unique. */
+static dword UndoContext(optr o)
+{
+    return ((dword) OptrToHandle(o) << 12) ^ OptrToChunk(o);
+}
+
+@extern method OLDocumentClass, MSG_META_GAINED_MODEL_EXCL
+{
+    dword context;
+
+    (void) pself;
+    if (GD(oself)->GDI_attrs & GDA_CLOSING)
+	return;
+    GD(oself)->GDI_attrs |= GDA_MODEL;
+    OLDocSendCompleteUpdateToDC(oself, TRUE);
+    context = UndoContext(oself);
+    OLDocSendUndoMessage(oself, MSG_GEN_PROCESS_UNDO_SET_CONTEXT, context);
+}
+
+/* the model is another's: the control's UI lets go, and the document
+ * is saved while nobody works on it */
+@extern method OLDocumentClass, MSG_META_LOST_MODEL_EXCL,
+			 MSG_META_LOST_SYS_MODEL_EXCL
+{
+    dword context = NULL_UNDO_CONTEXT;
+
+    (void) pself;
+    if (message == MSG_META_LOST_MODEL_EXCL) {
+	GD(oself)->GDI_attrs &= ~GDA_MODEL;
+	OLDocSendCompleteUpdateToDC(oself, FALSE);
+	OLDocSendUndoMessage(oself, MSG_GEN_PROCESS_UNDO_SET_CONTEXT,
+			     context);
+    }
+    OLDocSendToSelfOnQueue(oself, MSG_GEN_DOCUMENT_AUTO_SAVE);
+}

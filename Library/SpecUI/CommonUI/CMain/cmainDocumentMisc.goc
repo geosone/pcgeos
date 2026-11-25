@@ -1,0 +1,718 @@
+/*
+ * cmainDocumentMisc.goc -- OLDocumentClass: a document comes back from
+ * state, goes to state, and is closed (after cmainDocumentMisc.asm).
+ * Closing asks about unsaved changes and saves, reverts or leaves the
+ * document open; when the last one who had it open (the user, IACP
+ * clients) lets go the document object goes.
+ */
+@include "cmainDocument.goh"
+@include <Objects/gProcC.goh>
+@include <Objects/gInterC.goh>
+@include <disk.h>
+@include <system.h>
+
+static optr Parent(optr o)
+{
+    return GenFindParent(o);
+}
+
+/* ---------------------------------------------------------------------
+ * Utilities
+ * ------------------------------------------------------------------- */
+
+/* SendToDocumentControl: up the generic tree from the group */
+void OLDocSendToDocumentControl(optr o, Message msg)
+{
+    optr parent = Parent(o);
+    EventHandle ev;
+
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentControlClass,
+		 msg, NULL, 0, &ev, sizeof(ev));
+    @call parent::MSG_META_SEND_CLASSED_EVENT(ev,
+					      (TravelOption) TO_GEN_PARENT);
+}
+
+void OLDocStopAutoSave(optr o)
+{
+    OLDocumentInstance *d;
+    TimerHandle th;
+
+    OLDocSetAttrs(o, GDA_AUTO_SAVE_STOPPED, 0);
+    d = OLD(o);
+    th = d->OLDI_autoSaveTimer;
+    d->OLDI_autoSaveTimer = 0;
+    if (th)
+	TimerStop(th, d->OLDI_autoSaveTimerID);
+    d = OLD(o);
+    th = d->OLDI_changeTimer;
+    d->OLDI_changeTimer = 0;
+    if (th)
+	TimerStop(th, d->OLDI_changeTimerID);
+}
+
+/* OLDocRemoveObj: the group removes the document object, later */
+void OLDocRemoveObj(optr o)
+{
+    optr parent = Parent(o);
+
+    OLDocStopAutoSave(o);
+    @send, forceQueue parent::MSG_OLDG_REMOVE_DOC(o);
+}
+
+/* OLDocDestroyDocument: UI, file and object go */
+void OLDocDestroyDocument(optr o, Boolean deleteFile)
+{
+    word e;
+
+    @call o::MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT();
+    @call o::MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT();
+    if (OLD(o)->OLDI_attrs & OLDA_REVERT_BEFORE_CLOSE) {
+	OLD(o)->OLDI_attrs &= ~OLDA_REVERT_BEFORE_CLOSE;
+	(void) @call o::MSG_GEN_DOCUMENT_PHYSICAL_REVERT(&e);
+    }
+    OLDocSendPhysicalCloseOnQueue(o);
+    if (deleteFile)
+	OLDocSendPhysicalDeleteOnQueue(o);
+    OLDocRemoveObj(o);
+}
+
+/*
+ * HandleSaveError: the user hears why the document could not be saved
+ * (if the user has it open at all), and may put things right: a
+ * write-protected disk, an existing file of that name.
+ */
+word OLDocHandleSaveError(optr o, word error,
+			  const DocumentCommonParams *params)
+{
+    char code[UHTA_NULL_TERM_BUFFER_SIZE];
+    word dialog;
+
+    if (error == ERROR_SHORT_READ_WRITE)
+	ObjVarAddData(o, TEMP_OL_DOCUMENT_DETACH_NO_SPACE_ERROR, 0);
+    if (!(OLD(o)->OLDI_attrs & OLDA_USER_OPENED))
+	return OLDSE_GIVE_UP;
+    if (error == ERROR_WRITE_PROTECTED)
+	return OLDocStandardDialogArg(o, SDBT_FILE_SAVE_WRITE_PROTECTED,
+				      params, NULL) == IC_YES
+		? OLDSE_RETRY : OLDSE_GIVE_UP;
+    if (error == ERROR_FILE_EXISTS) {
+	if (OLDocStandardDialogArg(o, SDBT_FILE_SAVE_AS_FILE_EXISTS, params,
+				   NULL) == IC_YES)
+	    return OLDSE_OVERWRITE;
+	/* another name, then */
+	OLDocSendToDocumentControl(o,
+			MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC);
+	ObjVarAddData(o, TEMP_OL_DOCUMENT_USER_RETRY_SAVE_AS, 0);
+	return OLDSE_GIVE_UP;
+    }
+    dialog = error == ERROR_FILE_FORMAT_MISMATCH
+		? SDBT_FILE_SAVE_AS_FILE_FORMAT_MISMATCH
+	   : error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION
+		? SDBT_FILE_SAVE_AS_SHARING_DENIED
+	   : error == ERROR_SHORT_READ_WRITE
+		? SDBT_FILE_SAVE_INSUFFICIENT_DISK_SPACE
+	   : error == ERROR_INVALID_LONGNAME ? SDBT_FILE_ILLEGAL_NAME
+	   : SDBT_FILE_SAVE_ERROR;
+    /* the error code, for the text of SDBT_FILE_SAVE_ERROR */
+    UtilHex32ToAscii(code, error, UHTAF_NULL_TERMINATE);
+    (void) OLDocStandardDialogArg(o, dialog, params, code);
+    return OLDSE_GIVE_UP;
+}
+
+/* ---------------------------------------------------------------------
+ * From state and to state
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDocumentAttach: a document that was open when the application went
+ * to state opens its file again.  If that fails (the disk is gone) the
+ * document goes.
+ */
+@extern method OLDocumentClass, MSG_META_ATTACH_OBJECT
+{
+    GenDocumentInstance *g = GD(oself);
+    DocumentCommonParams p;
+    DocFileOrError file;
+    GenFilePath *gfp;
+    Boolean gone = FALSE;
+
+    (void) pself;
+    (void) flags;
+    (void) appLaunchBlock;
+    (void) extraState;
+    if (g->GDI_fileHandle)
+	return;
+    /* a PDA does not ask for a card that was taken out */
+    if (olPDA) {
+	gfp = ObjVarFindData(oself, ATTR_GEN_PATH_DATA);
+	if (gfp && gfp->GFP_disk == (DiskHandle) -1) {
+	    void *saved = ObjVarFindData(oself,
+					 TEMP_GEN_PATH_SAVED_DISK_HANDLE);
+
+	    if (saved && !DiskRestore(saved, NULL) &&
+		ThreadGetError() == DRE_DRIVE_NO_LONGER_EXISTS)
+		gone = TRUE;
+	}
+    }
+    if (!gone &&
+	!GenPathFetchDiskHandleAndDerefPath(oself, ATTR_GEN_PATH_DATA,
+				TEMP_GEN_PATH_SAVED_DISK_HANDLE, &gfp))
+	gone = TRUE;
+    if (!gone) {
+	g = GD(oself);
+	g->GDI_attrs &= ~(GDA_CLOSING | GDA_AUTO_SAVE_STOPPED);
+	memset(&p, 0, sizeof(p));
+	p.DCP_docAttrs = g->GDI_attrs;
+	memcpy(p.DCP_name, g->GDI_fileName, sizeof(FileLongName));
+	gone = OLDocOpen(oself, &p, TRUE, &file);
+    }
+    if (gone) {
+	OLDocSetAttrs(oself, GDA_CLOSING, 0);
+	@call oself::MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT();
+	@call oself::MSG_GEN_DOCUMENT_ATTACH_FAILED();
+	OLDocRemoveObj(oself);
+    }
+}
+
+/* OLDocumentRestoreDiskPrompt: the disk of the document is wanted */
+@extern method OLDocumentClass, MSG_META_GEN_PATH_RESTORE_DISK_PROMPT
+{
+    FileLongName name;
+    char drive[DRIVE_NAME_MAX_LENGTH];
+    word i;
+
+    (void) pself;
+    memcpy(name, GD(oself)->GDI_fileName, sizeof(name));
+    for (i = 0; i < sizeof(drive) - 1 && args->GPDRA_driveName[i]; i++)
+	drive[i] = args->GPDRA_driveName[i];
+    drive[i] = 0;
+    *error = OLDocUserStandardDialog(SDBT_DISK_RESTORE, FALSE, name,
+				     drive) == IC_YES
+		? DRE_DISK_IN_DRIVE : DRE_USER_CANCELED_RESTORE;
+    return TRUE;
+}
+
+/*
+ * OLDocumentDetach: the changes go to the file (the document stays
+ * open: it is in the state file); a full disk must not hold up the
+ * detach for good.
+ */
+@extern method OLDocumentClass, MSG_META_DETACH
+{
+    word *msg;
+
+    (void) pself;
+    ObjInitDetach(message, oself, callerID, caller);
+    if (GD(oself)->GDI_fileHandle) {
+	ObjIncDetach(oself);
+	msg = ObjVarFindData(oself, TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE);
+	if (msg) {
+	    /* the dialog about the full disk is up: it acknowledges */
+	    *msg = MSG_META_ACK;
+	    GD(oself)->GDI_attrs &= ~GDA_CLOSING;
+	} else {
+	    ObjVarDeleteData(oself, TEMP_OL_DOCUMENT_DETACH_NO_SPACE_ERROR);
+	    (void) OLDocSaveOrUpdate(oself);
+	    /* (cmainDocLowDisk: with the disk full the user makes room
+	     * first) */
+	    @call oself::MSG_META_ACK(0, oself);
+	}
+    }
+    @callsuper();
+    ObjEnableDetach(oself);
+}
+
+/*
+ * OLDocumentAppShutdown: the application goes for good: the document
+ * is closed without asking.  What could not be saved is kept as an
+ * untitled document where that works.
+ */
+@extern method OLDocumentClass, MSG_META_APP_SHUTDOWN
+{
+    GenDocumentInstance *g = GD(oself);
+    DocFileOrError r;
+    EventHandle ev;
+    word attrs, e;
+
+    (void) pself;
+    ObjInitDetach(message, oself, callerID, ackOD);
+    g->GDI_operation = GDO_DETACH;
+    attrs = g->GDI_attrs;
+    g->GDI_attrs |= GDA_CLOSING;
+    if (!(attrs & GDA_CLOSING)) {
+	Boolean copy = FALSE, destroyed = FALSE;
+
+	OLDocStopAutoSave(oself);
+	if (attrs & GDA_SAVE_FAILED) {
+	    OLDocSetAttrs(oself, 0, GDA_SAVE_FAILED);
+	    if (@call oself::MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE(&r)) {
+		OLDocDestroyDocument(oself, TRUE);
+		destroyed = TRUE;
+	    }
+	} else if (attrs & GDA_DIRTY) {
+	    if (attrs & GDA_READ_ONLY) {
+		copy = TRUE;
+	    } else {
+		OLDocSendUndoMessage(oself,
+				MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS, 0);
+		copy = @call oself::MSG_GEN_DOCUMENT_UPDATE(&e);
+	    }
+	    if (copy &&
+		@call oself::MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE(&r))
+		(void) @call oself::MSG_GEN_DOCUMENT_PHYSICAL_REVERT(&e);
+	}
+	if (!destroyed) {
+	    @call oself::MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT();
+	    OLDocSendPhysicalCloseOnQueue(oself);
+	}
+    }
+    @callsuper();
+    /* acknowledged once what was queued above is through */
+    ObjIncDetach(oself);
+    ev = @record oself::MSG_META_SHUTDOWN_ACK(callerID, ackOD);
+    @call oself::MSG_META_OBJ_FLUSH_INPUT_QUEUE(ev, OFIQNS_SYSTEM_INPUT_OBJ,
+						OptrToHandle(oself));
+    ObjEnableDetach(oself);
+}
+
+/* ---------------------------------------------------------------------
+ * Who has the document open
+ * ------------------------------------------------------------------- */
+
+/*
+ * RemoveConnection: the user (connection 0) or an IACP client lets go
+ * of the document.  With nobody left the document goes: what was
+ * changed is updated (or kept as a copy, or reverted), the UI and the
+ * file are closed, an untitled file is deleted.
+ */
+static void RemoveConnection(optr o, IACPConnection connection)
+{
+    OLDocumentInstance *d = OLD(o);
+    DocFileOrError r;
+    word attrs, e;
+
+    if (connection) {
+	optr arr = ConstructOptr(OptrToHandle(o), d->OLDI_iacpEngConnects);
+	word i, n, size;
+	IACPConnection *c = NULL;
+
+	if (!d->OLDI_iacpEngConnects)
+	    return;
+	n = ChunkArrayGetCount(arr);
+	for (i = 0; i < n; i++) {
+	    c = ChunkArrayElementToPtr(arr, i, &size);
+	    if (*c == connection)
+		break;
+	}
+	if (i == n)
+	    return;
+	ChunkArrayDelete(arr, c);
+	if (ChunkArrayGetCount(arr))
+	    return;
+	LMemFree(arr);
+	d = OLD(o);
+	d->OLDI_iacpEngConnects = 0;
+	if (d->OLDI_attrs & OLDA_USER_OPENED)
+	    return;
+    } else {
+	d->OLDI_attrs &= ~OLDA_USER_OPENED;
+	if (d->OLDI_iacpEngConnects) {
+	    /* clients have it still: only the display goes */
+	    MemHandle display = GD(o)->GDI_display;
+
+	    if (display) {
+		optr proto =
+		    @call Parent(o)::MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY();
+
+		proto = ConstructOptr(display, OptrToChunk(proto));
+		@call proto::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	    }
+	    d = OLD(o);
+	    if (d->OLDI_attrs & OLDA_REVERT_BEFORE_CLOSE) {
+		d->OLDI_attrs &= ~OLDA_REVERT_BEFORE_CLOSE;
+		@call o::MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT();
+		OLDocSendToSelfOnQueue(o, MSG_GEN_DOCUMENT_PHYSICAL_REVERT);
+		OLDocSendToSelfOnQueue(o,
+				MSG_GEN_DOCUMENT_ATTACH_UI_TO_DOCUMENT);
+	    }
+	    return;
+	}
+    }
+
+    attrs = GD(o)->GDI_attrs;
+    if (attrs & GDA_DIRTY) {
+	Boolean revert = FALSE;
+
+	if (OLD(o)->OLDI_attrs & OLDA_REVERT_BEFORE_CLOSE) {
+	    OLDocSendUndoMessage(o, MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS, 0);
+	} else if (attrs & GDA_READ_ONLY) {
+	    revert = @call o::MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE(&r);
+	} else {
+	    OLDocSendUndoMessage(o, MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS, 0);
+	    revert = @call o::MSG_GEN_DOCUMENT_UPDATE(&e);
+	}
+	if (revert)
+	    (void) @call o::MSG_GEN_DOCUMENT_PHYSICAL_REVERT(&e);
+    }
+    @call o::MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT();
+    if (OLD(o)->OLDI_attrs & OLDA_REVERT_BEFORE_CLOSE)
+	OLDocSendToSelfOnQueue(o, MSG_GEN_DOCUMENT_PHYSICAL_REVERT);
+    @call o::MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT();
+    OLDocSendPhysicalCloseOnQueue(o);
+    if (GD(o)->GDI_attrs & GDA_UNTITLED)
+	OLDocSendPhysicalDeleteOnQueue(o);
+    OLDocRemoveObj(o);
+}
+
+@extern method OLDocumentClass, MSG_META_IACP_LOST_CONNECTION
+{
+    (void) pself;
+    (void) serverNum;
+    RemoveConnection(oself, connection);
+}
+
+/*
+ * OLDocumentSearchForDoc: is this the document of the file?  Then it
+ * does what the flags ask (comes to the front) and the connection has
+ * it open too.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SEARCH_FOR_DOC
+{
+    GenDocumentInstance *g = GD(oself);
+    GenFilePath *gfp;
+    FileID id;
+    word i;
+    optr app;
+
+    if (params->DCP_flags & DOF_NAME_HOLDS_FILE_ID) {
+	memcpy(&id, params->DCP_name, sizeof(id));
+	if (pself->OLDI_disk != (word) params->DCP_diskHandle ||
+	    pself->OLDI_id != id)
+	    return FALSE;
+    } else {
+	for (i = 0; i < sizeof(FileLongName); i++) {
+	    if (g->GDI_fileName[i] != params->DCP_name[i])
+		return FALSE;
+	    if (!params->DCP_name[i])
+		break;
+	}
+	gfp = ObjVarFindData(oself, ATTR_GEN_PATH_DATA);
+	if (!gfp || gfp->GFP_disk != params->DCP_diskHandle)
+	    return FALSE;
+	for (i = 0; i < sizeof(PathName); i++) {
+	    if (gfp->GFP_path[i] != params->DCP_path[i])
+		return FALSE;
+	    if (!params->DCP_path[i])
+		break;
+	}
+    }
+    /* the user wants it now: no longer for clients alone */
+    if (!params->DCP_connection &&
+	!(params->DCP_flags & DOF_OPEN_FOR_IACP_ONLY))
+	ObjVarDeleteData(oself, ATTR_GEN_DOCUMENT_OPEN_FOR_IACP_ONLY);
+    if (params->DCP_flags & DOF_RAISE_APP_AND_DOC) {
+	app = GeodeGetAppObject(0);
+	@call oself::MSG_GEN_BRING_TO_TOP();
+	@call app::MSG_META_NOTIFY_TASK_SELECTED();
+	@call app::MSG_GEN_BRING_TO_TOP();
+    }
+    OLDocAddConnection(oself, params->DCP_connection);
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * Closing
+ * ------------------------------------------------------------------- */
+
+/* OLDocumentSendCloseAck: the client hears how the close went; with
+ * the document closed the connection lets go of it */
+static void SendCloseAck(optr o, IACPConnection connection, word status)
+{
+    IACPDocCloseAckParams p;
+    EventHandle ev;
+
+    if (connection) {
+	p.IDCAP_docObj = o;
+	p.IDCAP_connection = connection;
+	p.IDCAP_serverNum = IACPGetServerNumber(connection,
+						GeodeGetAppObject(0));
+	p.IDCAP_status = status;
+	CObjMessageP(MF_RECORD, 0, MSG_META_IACP_DOC_CLOSE_ACK, &p,
+		     sizeof(p), &ev, sizeof(ev));
+	IACPSendMessage(connection, ev, TO_SELF, 0, IACPS_SERVER);
+    }
+    if (status == DQS_OK)
+	RemoveConnection(o, connection);
+}
+
+/* DisplayConfirmSave: "Save changes to <file>?"; FALSE for no */
+static Boolean ConfirmSave(optr o)
+{
+    FileLongName name;
+    optr dialog, glyph;
+    word response;
+
+    memcpy(name, GD(o)->GDI_fileName, sizeof(name));
+    dialog = UserCreateDialog(@ConfirmSaveDialog);
+    glyph = ConstructOptr(OptrToHandle(dialog),
+			  OptrToChunk(@ConfirmSaveFile));
+    (void) @call glyph::MSG_GEN_REPLACE_VIS_MONIKER_TEXT(name, VUM_NOW);
+    response = UserDoDialog(dialog);
+    UserDestroyDialog(dialog);
+    return response != IC_NO;
+}
+
+/*
+ * OLDocumentClose: the user (connection 0) or a client closes the
+ * document.  A client's close closes it only if that client is the
+ * last to have it open.  A dirty document is saved (asking first,
+ * unless the document control saves without asking; an untitled or
+ * read only one through the Save As dialog, which closes it later:
+ * DQS_DELAYED) or closed as it was last saved.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE
+{
+    enum { ASK, SAVE, SAVE_ERROR, REVERT, CLEAN, CLOSE, CANCEL } step;
+    GenDocumentInstance *g = GD(oself);
+    word attrs = g->GDI_attrs, status = DQS_OK, e = 0, dialog, r;
+    DocFileOrError file;
+    byte oa;
+
+    if (attrs & GDA_CLOSING)
+	return DQS_CANCEL;
+    OLDocSetOperation(oself, GDO_CLOSE);
+    OLDocSetAttrs(oself, GDA_CLOSING, 0);
+
+    step = ASK;
+    if (connection ||
+	ObjVarFindData(oself, ATTR_GEN_DOCUMENT_OPEN_FOR_IACP_ONLY)) {
+	OLDocumentInstance *d = OLD(oself);
+
+	/* others have it open still */
+	if ((d->OLDI_attrs & OLDA_USER_OPENED) ||
+	    !d->OLDI_iacpEngConnects ||
+	    ChunkArrayGetCount(ConstructOptr(OptrToHandle(oself),
+					d->OLDI_iacpEngConnects)) != 1)
+	    step = CLOSE;
+    }
+    (void) pself;
+    attrs = GD(oself)->GDI_attrs;
+    if (step == ASK) {
+	if (!(attrs & GDA_DIRTY)) {
+	    step = CLEAN;
+	} else if (docControlOptions & DCO_TRANSPARENT_DOC) {
+	    oa = OLD(oself)->OLDI_attrs;
+	    if (!(docControlOptions & DCO_USER_CONFIRM_SAVE) ||
+		(oa & OLDA_SAVE_BEFORE_CLOSE)) {
+		step = SAVE;
+	    } else if (oa & OLDA_REVERT_BEFORE_CLOSE) {
+		step = CLOSE;
+	    } else if (oa & OLDA_UPDATE_BEFORE_CLOSE) {
+		step = @call oself::MSG_GEN_DOCUMENT_UPDATE(&e) ? SAVE_ERROR
+								: CLEAN;
+	    } else {
+		step = ConfirmSave(oself) ? SAVE : REVERT;
+	    }
+	} else if (connection || (attrs & GDA_SAVE_FAILED)) {
+	    step = SAVE;
+	}
+    }
+    /* a document whose save failed asks again */
+    while (step == ASK || step == SAVE) {
+	if (step == SAVE) {
+	    g = GD(oself);
+	    if (!(g->GDI_attrs & (GDA_UNTITLED | GDA_READ_ONLY)) ||
+		(connection && (g->GDI_attrs & GDA_UNTITLED)))
+		break;			/* into its file */
+	    if (connection) {
+		/* a client's read only document: kept as a copy */
+		(void) @call oself::MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE(
+				&file);
+		step = CLEAN;
+		break;
+	    }
+	    if (!(attrs & GDA_SAVE_FAILED)) {
+		/* it needs a name: the Save As dialog goes on */
+		OLDocSendToDocumentControl(oself,
+			MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_DOC);
+		SendCloseAck(oself, connection, DQS_DELAYED);
+		OLDocClearOperation(oself);
+		return DQS_DELAYED;
+	    }
+	}
+	if (OLDocGetUIParentAttrs(oself) & GDCA_DO_NOT_SAVE_FILES) {
+	    step = REVERT;
+	    break;
+	}
+	dialog = (attrs & GDA_ATTACH_TO_DIRTY_FILE)
+			? SDBT_FILE_CLOSE_ATTACH_DIRTY
+	       : (attrs & GDA_UNTITLED)
+			? SDBT_FILE_CLOSE_SAVE_CHANGES_UNTITLED
+	       : SDBT_FILE_CLOSE_SAVE_CHANGES_TITLED;
+	r = OLDocStandardDialog(oself, dialog);
+	if (r == IC_NULL || r == IC_DISMISS) {
+	    status = DQS_CANCEL;
+	    step = CANCEL;
+	} else if (r == IC_NO) {
+	    step = REVERT;
+	} else {
+	    attrs &= ~GDA_SAVE_FAILED;
+	    step = SAVE;
+	}
+    }
+    if (step == SAVE || step == SAVE_ERROR) {
+	if (step == SAVE)
+	    (void) OLDocWriteCachedData(oself, TRUE);
+	for (;;) {
+	    if (step == SAVE) {
+		e = 0;
+		if (!@call oself::MSG_GEN_DOCUMENT_PHYSICAL_SAVE(&e)) {
+		    OLDocSetAttrs(oself, 0, GDA_DIRTY);
+		    step = CLEAN;
+		    break;
+		}
+	    }
+	    step = SAVE;
+	    /* (cmainDocLowDisk: a full disk has a dialog of its own, in
+	     * which the user makes room) */
+	    if (e == ERROR_DISK_UNAVAILABLE ||
+		OLDocHandleSaveError(oself, OLDocConvertErrorCode(e),
+				     NULL) != OLDSE_RETRY) {
+		status = DQS_SAVE_ERROR;
+		step = CANCEL;
+		break;
+	    }
+	}
+    }
+    if (step == REVERT)
+	OLD(oself)->OLDI_attrs |= OLDA_REVERT_BEFORE_CLOSE;
+    if (step == CLEAN)
+	OLDocSendToDocumentControl(oself,
+				   MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG);
+    if (step == CANCEL)
+	OLDocSetAttrs(oself, 0, GDA_CLOSING);
+    SendCloseAck(oself, connection, status);
+    OLDocClearOperation(oself);
+    return status;
+}
+
+/* the same; in the CUI closing the last document quits the
+ * application */
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CHECK_CUI_CLOSE
+{
+    optr parent = Parent(oself), app;
+
+    (void) pself;
+    if (UserGetDefaultUILevel() == UIIL_INTRODUCTORY &&
+	@call parent::MSG_GEN_COUNT_CHILDREN() == 1) {
+	app = GeodeGetAppObject(0);
+	@call app::MSG_META_QUIT();
+	return;
+    }
+    (void) @call oself::MSG_GEN_DOCUMENT_CLOSE(connection);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_IF_OPEN_FOR_IACP_ONLY
+{
+    (void) pself;
+    if (ObjVarFindData(oself, ATTR_GEN_DOCUMENT_OPEN_FOR_IACP_ONLY))
+	(void) @call oself::MSG_GEN_DOCUMENT_CLOSE(0);
+}
+
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_CLOSE_AFTER_DISK_FULL
+{
+    (void) pself;
+    OLDocSendToDocumentControl(oself,
+			       MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG);
+}
+
+/* ---------------------------------------------------------------------
+ * The file closed for a while (another program needs the files)
+ * ------------------------------------------------------------------- */
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_FILE
+{
+    optr app = GeodeGetAppObject(0);
+    EventHandle ev;
+    word e;
+
+    (void) pself;
+    (void) connection;
+    OLDocStopAutoSave(oself);
+    (void) @call oself::MSG_GEN_DOCUMENT_UPDATE(&e);
+    @call oself::MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT();
+    OLDocSendPhysicalCloseOnQueue(oself);
+    /* the application hears of it after the close */
+    ev = @record app::MSG_GEN_APPLICATION_CLOSE_FILE_ACK();
+    @send, forceQueue oself::MSG_META_DISPATCH_EVENT(ev, 0);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REOPEN_FILE
+{
+    GenDocumentInstance *g = GD(oself);
+    DocumentCommonParams p;
+    DocFileOrError file;
+    GenFilePath *gfp;
+
+    (void) pself;
+    memset(&p, 0, sizeof(p));
+    g->GDI_attrs &= ~GDA_AUTO_SAVE_STOPPED;
+    p.DCP_flags = DOF_REOPEN;
+    p.DCP_docAttrs = g->GDI_attrs & (GDA_READ_ONLY | GDA_READ_WRITE);
+    memcpy(p.DCP_name, g->GDI_fileName, sizeof(FileLongName));
+    gfp = ObjVarFindData(oself, ATTR_GEN_PATH_DATA);
+    if (gfp) {
+	p.DCP_diskHandle = gfp->GFP_disk;
+	memcpy(p.DCP_path, gfp->GFP_path, sizeof(PathName));
+    }
+    p.DCP_connection = (IACPConnection) -1;
+    (void) @call oself::MSG_GEN_DOCUMENT_OPEN(&file, &p);
+    OLDocSendNotificationToDC(oself, TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * What the document is, and its display
+ * ------------------------------------------------------------------- */
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_OPERATION
+{
+    (void) pself;
+    return GD(oself)->GDI_operation;
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_DISPLAY
+{
+    optr parent = Parent(oself);
+    optr proto = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY();
+
+    (void) pself;
+    return ConstructOptr(GD(oself)->GDI_display, OptrToChunk(proto));
+}
+
+/* auto save is held off while the application has the document in a
+ * state that must not get to the file.  (The asm set the bit on
+ * enable and cleared it on disable.) */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ENABLE_AUTO_SAVE
+{
+    (void) pself;
+    OLDocSetAttrs(oself, 0, GDA_PREVENT_AUTO_SAVE);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DISABLE_AUTO_SAVE
+{
+    (void) pself;
+    OLDocSetAttrs(oself, GDA_PREVENT_AUTO_SAVE, 0);
+}
+
+/* OLDocumentBringToTop: the display of the document */
+@extern method OLDocumentClass, MSG_GEN_BRING_TO_TOP, MSG_GEN_LOWER_TO_BOTTOM
+{
+    optr parent = Parent(oself);
+    optr proto = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY();
+
+    (void) pself;
+    if (!OptrToHandle(proto))
+	return;
+    proto = ConstructOptr(GD(oself)->GDI_display, OptrToChunk(proto));
+    CObjMessageP(0, proto, message, NULL, 0, NULL, 0);
+}

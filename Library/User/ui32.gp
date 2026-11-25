@@ -215,6 +215,8 @@ export IACPShutdownAll
 export IACPProcessMessage
 export IACPLostConnection
 export IACPShutdownConnection
+export UserStoreDocFileName
+export UserEncryptPassword
 export IACPCreateDefaultLaunchBlock
 export IACPGetServerNumber
 export IACPLocateServer

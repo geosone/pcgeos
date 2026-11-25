@@ -65,8 +65,7 @@ export OLBuildGadget
 export OLBuildContent
 export OLBuildUIDocumentControl
 export OLBuildAppDocumentControl
-# OLBuildDocument
-skip 1
+export OLBuildDocument
 export OLBuildFileSelector
 export OLBuildBooleanGroup
 export OLBuildItemGroup

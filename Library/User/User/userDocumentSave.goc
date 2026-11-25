@@ -1,0 +1,135 @@
+/*
+ * userDocumentSave.goc -- the list of the documents opened last (after
+ * userDocumentSave.asm): the document control tells of each document
+ * it opens, and the last ten are kept in recntDoc.vm in SP_PRIVATE_DATA
+ * for whoever shows them.
+ *
+ * The file is a byte, the slot the next document goes to, and ten
+ * slots, a ring whose oldest entry is that slot.  Port32: the slots
+ * keep the layout of the 16-bit file (the disk a word: a standard path,
+ * or a handle that means nothing after a restart, as before).
+ */
+@include <stdapp.goh>
+@include <Objects/gDocC.goh>
+#include <file.h>
+#include <string.h>
+
+#define RECENT_DOCS	10
+#define DE_NAME		0
+#define DE_DISK		sizeof(FileLongName)
+#define DE_PATH		(DE_DISK + 2)
+#define DE_SIZE		(DE_PATH + sizeof(PathName))
+#define RD_SIZE		(1 + RECENT_DOCS * DE_SIZE)
+
+static const char recntDocName[] = "recntDoc.vm";
+
+static word Len(const char *s, word max)
+{
+    word n = 0;
+
+    while (n < max && s[n])
+	n++;
+    return n;
+}
+
+static Boolean SameName(const char *a, const char *b)
+{
+    word i;
+
+    for (i = 0; i < sizeof(FileLongName); i++) {
+	if (a[i] != b[i])
+	    return FALSE;
+	if (!a[i])
+	    break;
+    }
+    return TRUE;
+}
+
+/*
+ * DeleteMatchedExistingEntry: an entry of the same name goes: the
+ * entries between the oldest one and it move up by one, so that the
+ * slot of the oldest is free for the document.
+ */
+static void DeleteMatched(byte *d, const DocumentCommonParams *params)
+{
+    word i, from;
+
+    for (i = 0; i < RECENT_DOCS; i++)
+	if (SameName((char *) d + 1 + i * DE_SIZE + DE_NAME,
+		     params->DCP_name))
+	    break;
+    if (i == RECENT_DOCS)
+	return;
+    while (i != d[0]) {
+	from = i ? i - 1 : RECENT_DOCS - 1;
+	memcpy(d + 1 + i * DE_SIZE, d + 1 + from * DE_SIZE, DE_SIZE);
+	i = from;
+    }
+}
+
+/* ReplaceEntryInMem: the document into the slot of the oldest entry;
+ * FALSE if the file makes no sense */
+static Boolean Replace(byte *d, const DocumentCommonParams *params)
+{
+    byte *e;
+    word n, disk = (word) params->DCP_diskHandle;
+
+    if (d[0] >= RECENT_DOCS)
+	return FALSE;
+    e = d + 1 + d[0] * DE_SIZE;
+    memset(e, 0, DE_SIZE);
+    n = Len(params->DCP_name, sizeof(FileLongName));
+    if (n >= sizeof(FileLongName))
+	return FALSE;
+    memcpy(e + DE_NAME, params->DCP_name, n + 1);
+    e[DE_DISK] = (byte) disk;
+    e[DE_DISK + 1] = (byte) (disk >> 8);
+    n = Len(params->DCP_path, sizeof(PathName));
+    if (n >= sizeof(PathName))
+	return FALSE;
+    memcpy(e + DE_PATH, params->DCP_path, n + 1);
+    d[0] = (byte) ((d[0] + 1) % RECENT_DOCS);
+    return TRUE;
+}
+
+void UserStoreDocFileName(const DocumentCommonParams *params)
+{
+    FileHandle fh;
+    MemHandle block;
+    byte *d;
+    word got = 0, n;
+
+    FilePushDir();
+    FileSetStandardPath(SP_PRIVATE_DATA);
+    fh = FileOpen(recntDocName, FILE_ACCESS_RW | FILE_DENY_NONE);
+    if (!fh)
+	fh = FileCreate(recntDocName,
+			FILE_CREATE_TRUNCATE | FILE_ACCESS_RW |
+			FILE_DENY_NONE, FILE_ATTR_NORMAL);
+    if (fh) {
+	block = MemAlloc(RD_SIZE, HF_SWAPABLE, HAF_ZERO_INIT | HAF_LOCK);
+	if (block) {
+	    d = MemDeref(block);
+	    while (got < RD_SIZE) {
+		n = FileRead(fh, d + got, RD_SIZE - got, FALSE);
+		if (!n || n == 0xffff)
+		    break;
+		got += n;
+	    }
+	    DeleteMatched(d, params);
+	    if (Replace(d, params)) {
+		FilePos(fh, 0, FILE_POS_START);
+		FileWrite(fh, d, RD_SIZE, FALSE);
+		MemFree(block);
+		FileClose(fh, TRUE);
+	    } else {
+		MemFree(block);
+		FileClose(fh, TRUE);
+		FileDelete(recntDocName);
+	    }
+	} else {
+	    FileClose(fh, TRUE);
+	}
+    }
+    FilePopDir();
+}

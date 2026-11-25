@@ -303,6 +303,27 @@ typedef struct {
     byte	    	    VTCA_reserved[7];
 } VisTextCharAttr;
 
+/*
+ * Port32: a VisTextCharAttr written in a .ui file as the structure of
+ * the asm (CHAR_ATTR_FONT_SIZE_STYLE_COLOR of generic.uih and its
+ * like); uic -g passes the values of
+ *   <<<<ref, refHigh>>, style>, font, <frac, size>, textStyles,
+ *    <color, info, green>, trackKerning, weight, width, <extStyles>,
+ *    grayScreen, <pattern>, <bgColor, bgInfo, bgGreen>, bgGrayScreen,
+ *    <bgPattern>, <reserved>>
+ * in that order; the ones left empty there are 0.
+ */
+#define GOC_VisTextCharAttr(ref, refHigh, style, font, frac, size, \
+			    textStyles, color, info, green, trackKerning, \
+			    weight, width, extStyles, grayScreen, pattern, \
+			    bgColor, bgInfo, bgGreen, bgGrayScreen, \
+			    bgPattern, reserved) \
+    { { { { (ref), (refHigh) } }, (style) }, (font), { (frac), (size) }, \
+      (textStyles), { (color), (info), (green), 0 }, (trackKerning), \
+      (weight), (width), (extStyles + 0), (grayScreen), { 0, 0 }, \
+      { (bgColor), (bgInfo), (bgGreen), 0 }, (bgGrayScreen), { 0, 0 }, \
+      { 0 } }
+
 typedef ByteEnum VisTextDefaultSize;
 #define     VTDS_8  0
 #define     VTDS_9  1

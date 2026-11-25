@@ -494,3 +494,33 @@ static Boolean StartupApplsCB(const char *name, word sectionNum,
     ev = @record null::MSG_NOTIFY_APP_EXITED(exitProcess);
     GCNListSend(MANUFACTURER_ID_GEOWORKS, GCNSLT_APPLICATION, ev, 0, 0);
 }
+
+/* ---------------------------------------------------------------------
+ * Passwords
+ * ------------------------------------------------------------------- */
+
+/*
+ * UserEncryptPassword: what is kept of a password (with a file, in the
+ * ini file): the eight hex digits of a hash of it (CalculateHash: times
+ * 33 plus the character, from 0x43e809f1), or zeroes for no password.
+ * TRUE if there is one.
+ */
+Boolean UserEncryptPassword(const char *string, char *dest)
+{
+    dword hash = 0x43e809f1;
+    word i;
+
+    if (!*string) {
+	memset(dest, 0, PASSWORD_ENCRYPTED_SIZE);
+	return FALSE;
+    }
+    while (*string)
+	hash = hash * 33 + (byte) *string++;
+    for (i = 0; i < PASSWORD_ENCRYPTED_SIZE; i++) {
+	byte nibble = (byte) (hash >> 28);
+
+	dest[i] = (char) (nibble < 10 ? '0' + nibble : 'a' + nibble - 10);
+	hash <<= 4;
+    }
+    return TRUE;
+}

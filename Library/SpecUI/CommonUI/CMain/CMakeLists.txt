@@ -4,4 +4,9 @@ geos_sources(motif_goc
   cmainCode.goc
   cmainUIDocumentControl.goc
   cmainUIDocOperations.goc
-  cmainAppDocumentControl.goc)
+  cmainAppDocumentControl.goc
+  cmainDocumentCommon.goc
+  cmainDocDialog.goc
+  cmainDocPhysical.goc
+  cmainDocumentNew.goc
+  cmainDocumentMisc.goc)

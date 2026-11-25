@@ -148,6 +148,12 @@ typedef struct {
      * and shut down at the server, lost at the client; the error after
      * all is unregistered */
     word		UBS_iacp[14];
+    /* a document (steps 95 to 98): an untitled one's attributes, is
+     * the group's by its file, has the model, closed (DocQuitStatus),
+     * documents and file left; a named one's attributes, dirty, after
+     * saving, closed, file left; opened again: attributes, a second
+     * open, closed, documents left */
+    word		UBS_doc[14];
 } UBState;
 
 UBState ubState;
@@ -159,6 +165,28 @@ UBState ubState;
 	ubState.UBS_fails++; \
 	if (!ubState.UBS_failLine) ubState.UBS_failLine = __LINE__; } \
     } while (0)
+
+/* a file of SP_DOCUMENT (steps 95 to 98) */
+static Boolean DocExists(const char *name)
+{
+    FileHandle fh;
+
+    FilePushDir();
+    FileSetStandardPath(SP_DOCUMENT);
+    fh = FileOpen(name, FILE_ACCESS_R | FILE_DENY_NONE);
+    if (fh)
+	FileClose(fh, FALSE);
+    FilePopDir();
+    return fh != 0;
+}
+
+static void DocDelete(const char *name)
+{
+    FilePushDir();
+    FileSetStandardPath(SP_DOCUMENT);
+    (void) FileDelete(name);
+    FilePopDir();
+}
 
 @class UBProcessClass, GenProcessClass;
     @message void MSG_UB_STEP(word step);
@@ -3749,6 +3777,111 @@ static void UBClickMenu(word n)
 	UBCHECK(n == IACPCE_NO_SERVER);
 	break;
     }
+    case 95: {
+	/* a document (OLDocumentClass): the group makes an untitled
+	 * one, a VM file in SP_DOCUMENT under the group's default name;
+	 * closed clean it goes, with its file */
+	DocumentCommonParams p;
+	FileLongName name;
+	optr doc, model = 0;
+	FileHandle file;
+
+	DocDelete("Untitled");
+	DocDelete("UBDOC");
+	memset(&p, 0, sizeof(p));
+	p.DCP_docAttrs = GDA_UNTITLED;
+	p.DCP_flags = DOF_FORCE_REAL_EMPTY_DOCUMENT;
+	doc = @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_NEW_DOC(&p);
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	UBCHECK(@call UBDocGrp::MSG_GEN_COUNT_CHILDREN() == 1);
+	ubState.UBS_doc[0] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(ubState.UBS_doc[0] & GDA_UNTITLED);
+	UBCHECK(!(ubState.UBS_doc[0] & (GDA_DIRTY | GDA_CLOSING)));
+	file = @call doc::MSG_GEN_DOCUMENT_GET_FILE_HANDLE();
+	UBCHECK(file != 0);
+	memset(name, 0, sizeof(name));
+	@call doc::MSG_GEN_DOCUMENT_GET_FILE_NAME(name);
+	UBCHECK(StrIs(name, "Untitled"));
+	ubState.UBS_doc[1] =
+	    @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_GET_DOC_BY_FILE(file) ==
+	    doc;
+	UBCHECK(ubState.UBS_doc[1]);
+	(void) @call UBDocGrp::MSG_META_GET_MODEL_EXCL(&model);
+	ubState.UBS_doc[2] = model == doc;
+	UBCHECK(model == doc);
+	ubState.UBS_doc[3] = @call doc::MSG_GEN_DOCUMENT_CLOSE(0);
+	UBCHECK(ubState.UBS_doc[3] == DQS_OK);
+	break;
+    }
+    case 96: {
+	/* the object and the file are gone.  One with a name: marked
+	 * dirty, saved, closed: the file stays */
+	DocumentCommonParams p;
+	optr doc;
+
+	ubState.UBS_doc[4] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();
+	UBCHECK(!ubState.UBS_doc[4]);
+	ubState.UBS_doc[5] = DocExists("Untitled");
+	UBCHECK(!ubState.UBS_doc[5]);
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBDOC", 6);
+	doc = @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_NEW_DOC(&p);
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	ubState.UBS_doc[6] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(!(ubState.UBS_doc[6] & (GDA_UNTITLED | GDA_DIRTY)));
+	@call doc::MSG_GEN_DOCUMENT_MARK_DIRTY();
+	ubState.UBS_doc[7] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(ubState.UBS_doc[7] & GDA_DIRTY);
+	UBCHECK(!@call doc::MSG_GEN_DOCUMENT_SAVE());
+	ubState.UBS_doc[8] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(!(ubState.UBS_doc[8] & GDA_DIRTY));
+	ubState.UBS_doc[9] = @call doc::MSG_GEN_DOCUMENT_CLOSE(0);
+	UBCHECK(ubState.UBS_doc[9] == DQS_OK);
+	break;
+    }
+    case 97: {
+	/* it is opened again; a second open finds it open */
+	DocumentCommonParams p;
+	FileLongName name;
+	optr doc;
+
+	UBCHECK(!@call UBDocGrp::MSG_GEN_COUNT_CHILDREN());
+	ubState.UBS_doc[10] = DocExists("UBDOC");
+	UBCHECK(ubState.UBS_doc[10]);
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBDOC", 6);
+	doc = @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_OPEN_DOC(&p);
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	ubState.UBS_doc[11] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(!(ubState.UBS_doc[11] & (GDA_UNTITLED | GDA_DIRTY)));
+	memset(name, 0, sizeof(name));
+	@call doc::MSG_GEN_DOCUMENT_GET_FILE_NAME(name);
+	UBCHECK(StrIs(name, "UBDOC"));
+	UBCHECK(@call doc::MSG_GEN_DOCUMENT_GET_FILE_HANDLE() != 0);
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBDOC", 6);
+	UBCHECK(!@call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_OPEN_DOC(&p));
+	UBCHECK(@call UBDocGrp::MSG_GEN_COUNT_CHILDREN() == 1);
+	ubState.UBS_doc[12] = @call doc::MSG_GEN_DOCUMENT_CLOSE(0);
+	UBCHECK(ubState.UBS_doc[12] == DQS_OK);
+	break;
+    }
+    case 98:
+	ubState.UBS_doc[13] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();
+	UBCHECK(!ubState.UBS_doc[13]);
+	UBCHECK(DocExists("UBDOC"));
+	DocDelete("UBDOC");
+	UBCHECK(!DocExists("UBDOC"));
+	break;
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */
     case 101:

@@ -7,4 +7,5 @@ geos_sources(ui_goc
   userScreen.goc
   userUtils.goc
   userDialog.goc
+  userDocumentSave.goc
   userLibrary.goc)

@@ -1,0 +1,803 @@
+/*
+ * cmainDocPhysical.goc -- OLDocumentClass: the file of the document
+ * (after cmainDocPhysical.asm).  The MSG_GEN_DOCUMENT_PHYSICAL_*
+ * messages open, create, save and close it as a VM file or a plain
+ * one; the others tell the output of the document group
+ * (MSG_META_DOC_OUTPUT_*), which makes the document's UI and its
+ * contents.  An application may subclass GenDocumentClass and take any
+ * of them instead.
+ *
+ * Port32: what MSG_GEN_DOCUMENT_PHYSICAL_OPEN returned in CX and DX (a
+ * template, a file just created) and the UPDATE_EARLIER messages in AX
+ * (leave the protocol alone) is in OLDI_physOpen.
+ */
+@include "cmainDocument.goh"
+@include <Objects/gViewC.goh>
+@include <Objects/vTextC.goh>
+@include <Objects/gProcC.goh>
+
+static optr Parent(optr o)
+{
+    return GenFindParent(o);
+}
+
+static optr Output(optr o)
+{
+    optr parent = Parent(o);
+
+    return @call parent::MSG_GEN_DOCUMENT_GROUP_GET_OUTPUT();
+}
+
+/* ---------------------------------------------------------------------
+ * The output of the group
+ * ------------------------------------------------------------------- */
+
+/* SendNotificationToOutput: the output hears of the document and its
+ * file */
+void OLDocSendNotificationToOutput(optr o, Message msg)
+{
+    optr out = Output(o);
+    FileHandle file = GD(o)->GDI_fileHandle;
+
+    if (!out)
+	return;
+    switch (msg) {
+    case MSG_META_DOC_OUTPUT_CREATE_UI_FOR_DOCUMENT:
+	@call out::MSG_META_DOC_OUTPUT_CREATE_UI_FOR_DOCUMENT(o, file);
+	break;
+    case MSG_META_DOC_OUTPUT_DESTROY_UI_FOR_DOCUMENT:
+	@call out::MSG_META_DOC_OUTPUT_DESTROY_UI_FOR_DOCUMENT(o, file);
+	break;
+    case MSG_META_DOC_OUTPUT_ATTACH_UI_TO_DOCUMENT:
+	@call out::MSG_META_DOC_OUTPUT_ATTACH_UI_TO_DOCUMENT(o, file);
+	break;
+    case MSG_META_DOC_OUTPUT_DETACH_UI_FROM_DOCUMENT:
+	@call out::MSG_META_DOC_OUTPUT_DETACH_UI_FROM_DOCUMENT(o, file);
+	break;
+    case MSG_META_DOC_OUTPUT_READ_CACHED_DATA_FROM_FILE:
+	@call out::MSG_META_DOC_OUTPUT_READ_CACHED_DATA_FROM_FILE(o, file);
+	break;
+    case MSG_META_DOC_OUTPUT_WRITE_CACHED_DATA_TO_FILE:
+	@call out::MSG_META_DOC_OUTPUT_WRITE_CACHED_DATA_TO_FILE(o, file);
+	break;
+    case MSG_META_DOC_OUTPUT_DOCUMENT_HAS_CHANGED:
+	@call out::MSG_META_DOC_OUTPUT_DOCUMENT_HAS_CHANGED(o, file);
+	break;
+    case MSG_META_DOC_OUTPUT_SAVE_AS_COMPLETED:
+	@call out::MSG_META_DOC_OUTPUT_SAVE_AS_COMPLETED(o, file);
+	break;
+    case MSG_META_DOC_OUTPUT_ATTACH_FAILED:
+	@call out::MSG_META_DOC_OUTPUT_ATTACH_FAILED(o, file);
+	break;
+    }
+}
+
+/* the same for what the output may do itself, or fail at: TRUE and the
+ * error if it failed */
+static Boolean OutputDoes(optr o, Message msg, word *error)
+{
+    optr out = Output(o);
+    FileHandle file = GD(o)->GDI_fileHandle;
+
+    *error = 0;
+    if (!out)
+	return FALSE;
+    switch (msg) {
+    case MSG_META_DOC_OUTPUT_PHYSICAL_SAVE:
+	return @call out::MSG_META_DOC_OUTPUT_PHYSICAL_SAVE(error, o, file);
+    case MSG_META_DOC_OUTPUT_PHYSICAL_UPDATE:
+	return @call out::MSG_META_DOC_OUTPUT_PHYSICAL_UPDATE(error, o,
+							      file);
+    case MSG_META_DOC_OUTPUT_PHYSICAL_REVERT:
+	return @call out::MSG_META_DOC_OUTPUT_PHYSICAL_REVERT(error, o,
+							      file);
+    case MSG_META_DOC_OUTPUT_PHYSICAL_REVERT_TO_AUTO_SAVE:
+	return @call out::MSG_META_DOC_OUTPUT_PHYSICAL_REVERT_TO_AUTO_SAVE(
+			error, o, file);
+    case MSG_META_DOC_OUTPUT_UPDATE_EARLIER_COMPATIBLE_DOCUMENT:
+	return @call out::
+		MSG_META_DOC_OUTPUT_UPDATE_EARLIER_COMPATIBLE_DOCUMENT(
+			error, o, file);
+    case MSG_META_DOC_OUTPUT_UPDATE_EARLIER_INCOMPATIBLE_DOCUMENT:
+	return @call out::
+		MSG_META_DOC_OUTPUT_UPDATE_EARLIER_INCOMPATIBLE_DOCUMENT(
+			error, o, file);
+    }
+    return FALSE;
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_INITIALIZE_DOCUMENT_FILE
+{
+    optr out = Output(oself);
+
+    (void) pself;
+    if (!out)
+	return FALSE;
+    return @call out::MSG_META_DOC_OUTPUT_INITIALIZE_DOCUMENT_FILE(oself,
+				GD(oself)->GDI_fileHandle);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_READ_CACHED_DATA_FROM_FILE
+{
+    (void) pself;
+    OLDocSendNotificationToOutput(oself,
+			MSG_META_DOC_OUTPUT_READ_CACHED_DATA_FROM_FILE);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_WRITE_CACHED_DATA_TO_FILE
+{
+    (void) pself;
+    (void) isSave;
+    OLDocSendNotificationToOutput(oself,
+			MSG_META_DOC_OUTPUT_WRITE_CACHED_DATA_TO_FILE);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DOCUMENT_HAS_CHANGED
+{
+    (void) pself;
+    OLDocSendNotificationToOutput(oself,
+			MSG_META_DOC_OUTPUT_DOCUMENT_HAS_CHANGED);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE_AS_COMPLETED
+{
+    (void) pself;
+    OLDocSendNotificationToOutput(oself,
+			MSG_META_DOC_OUTPUT_SAVE_AS_COMPLETED);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ATTACH_FAILED
+{
+    (void) pself;
+    OLDocSendNotificationToOutput(oself, MSG_META_DOC_OUTPUT_ATTACH_FAILED);
+}
+
+/* the output brings a document of an earlier protocol up to date; if
+ * it returns no word the protocol of the file stays as it is */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE_EARLIER_COMPATIBLE_DOCUMENT
+{
+    word changed;
+    Boolean err = OutputDoes(oself,
+		MSG_META_DOC_OUTPUT_UPDATE_EARLIER_COMPATIBLE_DOCUMENT,
+		&changed);
+
+    (void) pself;
+    if (!changed)
+	OLD(oself)->OLDI_physOpen |= OLDPO_KEEP_PROTOCOL;
+    return err;
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE_EARLIER_INCOMPATIBLE_DOCUMENT
+{
+    word changed;
+    Boolean err = OutputDoes(oself,
+		MSG_META_DOC_OUTPUT_UPDATE_EARLIER_INCOMPATIBLE_DOCUMENT,
+		&changed);
+
+    (void) pself;
+    if (!changed)
+	OLD(oself)->OLDI_physOpen |= OLDPO_KEEP_PROTOCOL;
+    return err;
+}
+
+/* ---------------------------------------------------------------------
+ * Opening
+ * ------------------------------------------------------------------- */
+
+/* ConvertErrorCode: the errors of VMOpen as those of a file */
+word OLDocConvertErrorCode(word error)
+{
+    switch (error) {
+    case VM_FILE_NOT_FOUND:
+	return ERROR_FILE_NOT_FOUND;
+    case VM_SHARING_DENIED:
+    case VM_CANNOT_CREATE:
+	return ERROR_ACCESS_DENIED;
+    case VM_WRITE_PROTECTED:
+	return ERROR_WRITE_PROTECTED;
+    case VM_FILE_EXISTS:
+	return ERROR_FILE_EXISTS;
+    case VM_UPDATE_INSUFFICIENT_DISK_SPACE:
+	return ERROR_SHORT_READ_WRITE;
+    case VM_FILE_FORMAT_MISMATCH:
+	return ERROR_FILE_FORMAT_MISMATCH;
+    }
+    return error;
+}
+
+/*
+ * OLDocumentComputeAccessFlags: how the file is opened (VMAccessFlags
+ * or FileAccessFlags), from the mode of the document control and from
+ * what the user asked for (read only, read/write).
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_COMPUTE_ACCESS_FLAGS
+{
+    word group = OLDocGetParentAttrs(oself);
+    word ui = OLDocGetUIParentAttrs(oself);
+    word mode = ui & GDCA_MODE;
+    byte f;
+
+    (void) pself;
+    if (ui & GDCA_VM_FILE) {
+	if (!mode)				/* a viewer */
+	    f = VMAF_FORCE_READ_ONLY | VMAF_DISALLOW_SHARED_MULTIPLE;
+	else if (mode == (GDCM_SHARED_SINGLE << GDCA_MODE_OFFSET))
+	    f = VMAF_DISALLOW_SHARED_MULTIPLE;
+	else
+	    f = 0;
+	if (params->DCP_docAttrs & GDA_READ_ONLY)
+	    f |= VMAF_FORCE_READ_ONLY;
+	if (params->DCP_docAttrs & GDA_READ_WRITE)
+	    f |= VMAF_FORCE_READ_WRITE;
+	if (!(ui & GDCA_FORCE_DEMAND_PAGING))
+	    f |= VMAF_NO_DEMAND_PAGING;
+	(void) group;
+	return f;
+    }
+    if (!mode)
+	f = FILE_DENY_NONE | FILE_ACCESS_R;
+    else if (mode == (GDCM_SHARED_SINGLE << GDCA_MODE_OFFSET))
+	f = FILE_DENY_W | FILE_ACCESS_RW;
+    else
+	f = FILE_DENY_NONE | FILE_ACCESS_RW;
+    if (params->DCP_docAttrs & GDA_READ_ONLY)
+	f = (byte) ((f & ~3) | FILE_ACCESS_R);
+    if (params->DCP_docAttrs & GDA_READ_WRITE)
+	f = (byte) ((f & ~3) | FILE_ACCESS_RW);
+    if (ui & GDCA_DOS_FILE_DENY_WRITE)
+	f = (byte) ((f & ~0x70) | FILE_DENY_W);
+    return f;
+}
+
+/* CheckFileType: the file must have the token of the group's documents;
+ * 0 or the error */
+static word CheckFileType(optr o, FileHandle file)
+{
+    optr parent = Parent(o);
+    GeodeToken want, have;
+    word e;
+
+    memset(&want, 0, sizeof(want));
+    memset(&have, 0, sizeof(have));
+    @call parent::MSG_GEN_DOCUMENT_GROUP_GET_TOKEN(&want);
+    e = FileGetHandleExtAttributes(file, FEA_TOKEN, &have, sizeof(have));
+    if (e)
+	return e;
+    return memcmp(&want, &have, sizeof(want)) ? ERROR_FILE_FORMAT_MISMATCH
+					      : 0;
+}
+
+/*
+ * CheckPassword: a file with a password is opened only by who knows
+ * it.  TRUE if the file is not to be opened, with the error, 0 if the
+ * user gave up.
+ */
+static Boolean CheckPassword(optr o, FileHandle file, word *error)
+{
+    char filePassword[FILE_PASSWORD_SIZE];
+    char userPassword[MAX_PASSWORD_SOURCE_SIZE + 1];
+    char encrypted[FILE_PASSWORD_SIZE];
+    FileLongName help;
+    optr dialog, text;
+    word e, response;
+
+    memset(filePassword, 0, sizeof(filePassword));
+    e = FileGetHandleExtAttributes(file, FEA_PASSWORD, filePassword,
+				   sizeof(filePassword));
+    if (e) {
+	if (e == ERROR_ATTR_NOT_FOUND || e == ERROR_ATTR_NOT_SUPPORTED)
+	    return FALSE;
+	*error = e;
+	return TRUE;
+    }
+    if (!filePassword[0])
+	return FALSE;
+    for (;;) {
+	dialog = UserCreateDialog(@GetPasswordDialog);
+	/* the help of the application, not ours */
+	if (@call o::MSG_META_GET_HELP_FILE(help))
+	    @call dialog::MSG_META_SET_HELP_FILE(help);
+	response = UserDoDialog(dialog);
+	text = ConstructOptr(OptrToHandle(dialog),
+			     OptrToChunk(@GetPasswordText));
+	memset(userPassword, 0, sizeof(userPassword));
+	(void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(userPassword);
+	UserDestroyDialog(dialog);
+	if (response != IC_OK) {
+	    *error = 0;
+	    return TRUE;
+	}
+	memset(encrypted, 0, sizeof(encrypted));
+	UserEncryptPassword(userPassword, encrypted);
+	if (!memcmp(encrypted, filePassword, FILE_PASSWORD_SIZE))
+	    return FALSE;
+	(void) OLDocUserStandardDialog(SDBT_BAD_PASSWORD, FALSE, NULL,
+				       NULL);
+    }
+}
+
+/*
+ * OLDocumentPhysicalOpen: the file of the parameters, in the current
+ * directory, is opened (created, with
+ * DOF_CREATE_FILE_IF_FILE_DOES_NOT_EXIST).  The attributes of the
+ * parameters tell how it was opened.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_OPEN
+{
+    word group = OLDocGetParentAttrs(oself);
+    byte access = @call oself::MSG_GEN_DOCUMENT_COMPUTE_ACCESS_FLAGS(params);
+    Boolean create =
+	(params->DCP_flags & DOF_CREATE_FILE_IF_FILE_DOES_NOT_EXIST) != 0;
+    Boolean reopen = (params->DCP_flags & DOF_REOPEN) != 0;
+    FileHandle file;
+    word status, e = 0;
+    byte found = 0;
+
+    (void) pself;
+    OLD(oself)->OLDI_physOpen = 0;
+    if (group & GDGA_VM_FILE) {
+	file = VMOpen(params->DCP_name, access,
+		      create ? VMO_CREATE : VMO_OPEN, 0);
+	status = ThreadGetError();
+	if (!file) {
+	    *fileOrError = status;
+	    return TRUE;
+	}
+	if (status != VM_CREATE_OK && !reopen) {
+	    e = CheckFileType(oself, file);
+	    if (e || CheckPassword(oself, file, &e)) {
+		VMClose(file, TRUE);
+		*fileOrError = e;
+		return TRUE;
+	    }
+	}
+	switch (status) {
+	case VM_CREATE_OK:
+	    found = OLDPO_CREATED;
+	    params->DCP_docAttrs |= GDA_READ_WRITE;
+	    break;
+	case VM_OPEN_OK_TEMPLATE:
+	    found = OLDPO_TEMPLATE;
+	    break;
+	case VM_OPEN_OK_READ_ONLY:
+	    params->DCP_docAttrs |= GDA_READ_ONLY;
+	    break;
+	case VM_OPEN_OK_READ_WRITE_SINGLE:
+	    params->DCP_docAttrs |= GDA_SHARED_SINGLE | GDA_READ_WRITE;
+	    break;
+	case VM_OPEN_OK_READ_WRITE_MULTIPLE:
+	    params->DCP_docAttrs |= GDA_SHARED_MULTIPLE | GDA_READ_WRITE;
+	    break;
+	default:
+	    params->DCP_docAttrs |= GDA_READ_WRITE;
+	    break;
+	}
+    } else if (!create) {
+	file = FileOpen(params->DCP_name, access);
+	if (!file) {
+	    *fileOrError = ThreadGetError();
+	    return TRUE;
+	}
+	if (!reopen && CheckPassword(oself, file, &e)) {
+	    FileClose(file, TRUE);
+	    *fileOrError = e;
+	    return TRUE;
+	}
+    } else {
+	file = FileCreate(params->DCP_name,
+			  FILE_CREATE_NO_TRUNCATE | access |
+			  ((group & GDGA_NATIVE) ? FCF_NATIVE : 0),
+			  FILE_ATTR_NORMAL);
+	if (!file) {
+	    *fileOrError = ThreadGetError();
+	    return TRUE;
+	}
+	/* an empty file is a new one */
+	if (!FileSize(file))
+	    found = OLDPO_CREATED;
+    }
+    OLD(oself)->OLDI_physOpen = found;
+    *fileOrError = file;
+    return FALSE;
+}
+
+/* OLDocumentPhysicalCreate: a new file, which must not exist */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CREATE
+{
+    word group = OLDocGetParentAttrs(oself);
+    byte access = @call oself::MSG_GEN_DOCUMENT_COMPUTE_ACCESS_FLAGS(params);
+    FileHandle file;
+
+    (void) pself;
+    if (group & GDGA_VM_FILE) {
+	file = VMOpen(params->DCP_name, access, VMO_CREATE_ONLY, 0);
+	if (file)
+	    params->DCP_docAttrs |= GDA_READ_WRITE;
+    } else {
+	file = FileCreate(params->DCP_name,
+			  FILE_CREATE_ONLY | access |
+			  ((group & GDGA_NATIVE) ? FCF_NATIVE : 0),
+			  FILE_ATTR_NORMAL);
+    }
+    if (!file) {
+	*fileOrError = ThreadGetError();
+	return TRUE;
+    }
+    *fileOrError = file;
+    return FALSE;
+}
+
+/* OLDocumentInitDocCommonParams: untitled documents go where the group
+ * has its path, if it has one */
+static void InitDocCommonParams(optr o, DocumentCommonParams *params)
+{
+    optr parent = Parent(o);
+
+    if (@call parent::MSG_GEN_PATH_GET(params->DCP_path,
+				       sizeof(params->DCP_path))) {
+	params->DCP_path[0] = 0;
+	return;
+    }
+    params->DCP_diskHandle = @call parent::MSG_GEN_PATH_GET_DISK_HANDLE();
+}
+
+/*
+ * OLDocumentPhysicalCopyTemplate: the document, a template or a read
+ * only file that was changed, becomes an untitled document of its own:
+ * it is saved under a new name.  TRUE with the error (0: the user gave
+ * up) if that fails.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE
+{
+    DocumentCommonParams p;
+    FileUserNotes notes;
+    DocFileOrError file = 0;
+    word count = 0, e, flags = 0;
+    Boolean failed = TRUE;
+
+    (void) pself;
+    memset(&p, 0, sizeof(p));
+    p.DCP_docAttrs = GDA_UNTITLED;
+    p.DCP_diskHandle = SP_DOCUMENT;
+    InitDocCommonParams(oself, &p);
+    e = OLDocPushAndSetPath(oself, &p);
+    while (!e) {
+	count = @call oself::MSG_GEN_DOCUMENT_GENERATE_NAME_FOR_NEW(
+			(char *) &p, count);
+	if (count == GEN_DOCUMENT_GENERATE_NAME_ERROR) {
+	    e = ERROR_FILE_NOT_FOUND;
+	    break;
+	}
+	if (count == GEN_DOCUMENT_GENERATE_NAME_CANCEL)
+	    break;
+	if (!@call oself::MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS(&file, &p)) {
+	    failed = FALSE;
+	    break;
+	}
+	e = OLDocConvertErrorCode((word) file);
+	count++;
+	if (e != ERROR_FILE_EXISTS && e != ERROR_ACCESS_DENIED &&
+	    e != ERROR_SHARING_VIOLATION)
+	    break;
+	e = 0;
+	if (docControlOptions & DCO_TRANSPARENT_DOC)
+	    (void) OLDocStandardDialogParams(oself,
+				SDBT_TRANSPARENT_NEW_FILE_EXISTS, &p);
+    }
+    if (!failed) {
+	OLDocStoreNewDocumentName(oself, (FileHandle) file, &p);
+	/* a template no more, and the notes of the template are not
+	 * those of the document */
+	FileSetHandleExtAttributes((FileHandle) file, FEA_FLAGS, &flags,
+				   sizeof(flags));
+	memset(notes, 0, sizeof(notes));
+	FileSetHandleExtAttributes((FileHandle) file, FEA_USER_NOTES, notes,
+				   100);
+    }
+    FilePopDir();
+    *fileOrError = failed ? e : file;
+    return failed;
+}
+
+/* ---------------------------------------------------------------------
+ * Saving
+ * ------------------------------------------------------------------- */
+
+/* OLDocumentPhysicalSave: the output saves the document, or the file
+ * is committed */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE
+{
+    FileHandle file;
+    word e;
+
+    (void) pself;
+    OLDocSendUndoMessage(oself, MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS, 0);
+    if (OutputDoes(oself, MSG_META_DOC_OUTPUT_PHYSICAL_SAVE, &e)) {
+	*error = e;
+	return TRUE;
+    }
+    file = GD(oself)->GDI_fileHandle;
+    if (OLDocIsVM(oself)) {
+	if (VMSave(file)) {
+	    e = ThreadGetError();
+	    if (e != VM_UPDATE_BLOCK_WAS_LOCKED &&
+		e != VM_UPDATE_NOTHING_DIRTY) {
+		*error = e;
+		return TRUE;
+	    }
+	}
+    } else {
+	e = FileCommit(file, FALSE);
+	if (e) {
+	    *error = e;
+	    return TRUE;
+	}
+    }
+    *error = 0;
+    return FALSE;
+}
+
+/* OLDocumentPhysicalUpdate: the changes to the file, the last save
+ * still there to go back to */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_UPDATE
+{
+    FileHandle file;
+    word e;
+
+    (void) pself;
+    if (OutputDoes(oself, MSG_META_DOC_OUTPUT_PHYSICAL_UPDATE, &e)) {
+	*error = e;
+	return TRUE;
+    }
+    *error = 0;
+    if (!OLDocIsVM(oself))
+	return FALSE;
+    file = GD(oself)->GDI_fileHandle;
+    e = VMUpdate(file);
+    if (e && e != VM_UPDATE_BLOCK_WAS_LOCKED &&
+	e != VM_UPDATE_NOTHING_DIRTY) {
+	*error = e;
+	return TRUE;
+    }
+    if (!e) {
+	e = FileCommit(file, FALSE);
+	if (e) {
+	    *error = e;
+	    return TRUE;
+	}
+    }
+    return FALSE;
+}
+
+/* OLDocumentPhysicalSaveAsFileHandle: a plain file is written by the
+ * output */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS_FILE_HANDLE
+{
+    optr out = Output(oself);
+
+    (void) pself;
+    *error = 0;
+    if (!out)
+	return FALSE;
+    return @call out::MSG_META_DOC_OUTPUT_PHYSICAL_SAVE_AS_FILE_HANDLE(
+			error, oself, file);
+}
+
+/*
+ * OLDocumentPhysicalSaveAs: the document goes to a new file in the
+ * current directory, which becomes its file; the old one is closed as
+ * it was last saved.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS
+{
+    word group = OLDocGetParentAttrs(oself);
+    Boolean overwrite =
+	(params->DCP_flags & DOF_SAVE_AS_OVERWRITE_EXISTING_FILE) != 0;
+    FileHandle old, file;
+    word e = 0;
+
+    (void) pself;
+    OLDocSendUndoMessage(oself, MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS, 0);
+    OLDocUnregisterDoc(oself);
+    old = GD(oself)->GDI_fileHandle;
+    if (group & GDGA_VM_FILE) {
+	byte access =
+	    @call oself::MSG_GEN_DOCUMENT_COMPUTE_ACCESS_FLAGS(params);
+
+	file = VMSaveAs(old, params->DCP_name, access,
+			overwrite ? VMO_CREATE_TRUNCATE : VMO_CREATE_ONLY, 0);
+	if (!file)
+	    e = ThreadGetError();
+	else
+	    params->DCP_docAttrs |= GDA_READ_WRITE;
+    } else {
+	file = FileCreate(params->DCP_name,
+			  (overwrite ? FILE_CREATE_TRUNCATE
+				     : FILE_CREATE_ONLY) |
+			  ((group & GDGA_NATIVE) ? FCF_NATIVE : 0) |
+			  FILE_ACCESS_RW | FILE_DENY_RW, FILE_ATTR_NORMAL);
+	if (!file) {
+	    e = ThreadGetError();
+	} else if (@call oself::MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS_FILE_HANDLE(
+				&e, file)) {
+	    FileClose(file, TRUE);
+	    FileDelete(params->DCP_name);
+	    file = 0;
+	} else {
+	    FileCommit(file, TRUE);
+	    FileClose(old, FALSE);
+	}
+    }
+    if (!file) {
+	/* still the old file */
+	OLDocRegisterOpenDoc(oself);
+	*fileOrError = e;
+	return TRUE;
+    }
+    *fileOrError = file;
+    return FALSE;
+}
+
+/* OLDocumentPhysicalRevert: back to the last save (queued, the message
+ * has nowhere to put an error) */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_REVERT
+{
+    FileHandle file;
+    word e;
+
+    (void) pself;
+    if (OutputDoes(oself, MSG_META_DOC_OUTPUT_PHYSICAL_REVERT, &e)) {
+	if (error)
+	    *error = e;
+	return TRUE;
+    }
+    if (error)
+	*error = 0;
+    if (OLDocIsVM(oself)) {
+	file = GD(oself)->GDI_fileHandle;
+	if (VMGetAttributes(file) & VMA_BACKUP)
+	    VMRevert(file);
+	else
+	    VMDiscardDirtyBlocks(file);
+    }
+    return FALSE;
+}
+
+/* OLDocumentPhysicalRevertToAutoSave: back to the last update */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_REVERT_TO_AUTO_SAVE
+{
+    word e;
+
+    (void) pself;
+    if (OutputDoes(oself, MSG_META_DOC_OUTPUT_PHYSICAL_REVERT_TO_AUTO_SAVE,
+		   &e))
+	return TRUE;
+    if (OLDocIsVM(oself))
+	VMDiscardDirtyBlocks(GD(oself)->GDI_fileHandle);
+    return FALSE;
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CHECK_FOR_MODIFICATIONS
+{
+    (void) pself;
+    return VMCheckForModifications(GD(oself)->GDI_fileHandle);
+}
+
+/* ---------------------------------------------------------------------
+ * Closing
+ * ------------------------------------------------------------------- */
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CLOSE
+{
+    FileHandle file;
+
+    (void) pself;
+    OLDocUnregisterDoc(oself);
+    file = GD(oself)->GDI_fileHandle;
+    GD(oself)->GDI_fileHandle = 0;
+    if (!file)
+	return;
+    if (OLDocIsVM(oself))
+	VMClose(file, TRUE);
+    else
+	FileClose(file, TRUE);
+}
+
+/* OLDocumentPhysicalDelete: the file, closed, goes */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_DELETE
+{
+    FileLongName name;
+
+    (void) pself;
+    FilePushDir();
+    if (!GenPathSetCurrentPathFromObjectPath(oself, ATTR_GEN_PATH_DATA,
+					     TEMP_GEN_PATH_SAVED_DISK_HANDLE)) {
+	memcpy(name, GD(oself)->GDI_fileName, sizeof(name));
+	FileDelete(name);
+    }
+    FilePopDir();
+}
+
+/* ---------------------------------------------------------------------
+ * The UI of the document
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDocumentCreateUIForDocument: if the group has a display to copy,
+ * the document gets its copy, a child of the display group, which
+ * sends its output to the document.  Then the output of the group
+ * makes what it needs.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CREATE_UI_FOR_DOCUMENT
+{
+    optr parent = Parent(oself);
+    optr proto = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY();
+
+    (void) pself;
+    if (OptrToHandle(proto)) {
+	optr app = GeodeGetAppObject(0);
+	optr group = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY_GROUP();
+	MemHandle block = ObjDuplicateResource(OptrToHandle(proto), 0,
+			(ThreadHandle) MemGetInfo(OptrToHandle(app),
+						  MGIT_EXEC_THREAD));
+	optr display = ConstructOptr(block, OptrToChunk(proto));
+
+	GD(oself)->GDI_display = block;
+	@call group::MSG_GEN_ADD_CHILD(display, CCO_LAST | CCF_MARK_DIRTY);
+	if (OLD(oself)->OLDI_attrs & OLDA_USER_OPENED)
+	    @call display::MSG_GEN_SET_USABLE(VUM_NOW);
+	@call display::MSG_META_SET_OBJ_BLOCK_OUTPUT(oself);
+    }
+    OLDocSendNotificationToOutput(oself,
+			MSG_META_DOC_OUTPUT_CREATE_UI_FOR_DOCUMENT);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT
+{
+    optr parent = Parent(oself);
+    optr proto = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_DISPLAY();
+
+    (void) pself;
+    if (OptrToHandle(proto)) {
+	MemHandle block = GD(oself)->GDI_display;
+	optr display = ConstructOptr(block, OptrToChunk(proto));
+
+	GD(oself)->GDI_display = 0;
+	if (block)
+	    @send display::MSG_GEN_DESTROY_AND_FREE_BLOCK();
+    }
+    OLDocSendNotificationToOutput(oself,
+			MSG_META_DOC_OUTPUT_DESTROY_UI_FOR_DOCUMENT);
+}
+
+/* CallSetContent: the view of the group (that of the document's own
+ * display, if it has one) shows the content, or nothing */
+void OLDocCallSetContent(optr o, optr content)
+{
+    optr parent = Parent(o);
+    optr view = @call parent::MSG_GEN_DOCUMENT_GROUP_GET_VIEW();
+    MemHandle display = GD(o)->GDI_display;
+
+    if (!OptrToHandle(view))
+	return;
+    if (display)
+	view = ConstructOptr(display, OptrToChunk(view));
+    @call view::MSG_GEN_VIEW_SET_CONTENT(content);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ATTACH_UI_TO_DOCUMENT
+{
+    (void) pself;
+    OLDocCallSetContent(oself, oself);
+    OLDocSendNotificationToOutput(oself,
+			MSG_META_DOC_OUTPUT_ATTACH_UI_TO_DOCUMENT);
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT
+{
+    (void) pself;
+    OLDocCallSetContent(oself, 0);
+    OLDocSendUndoMessage(oself, MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS, 0);
+    OLDocSendNotificationToOutput(oself,
+			MSG_META_DOC_OUTPUT_DETACH_UI_FROM_DOCUMENT);
+}
