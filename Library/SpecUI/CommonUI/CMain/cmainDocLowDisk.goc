@@ -1,0 +1,333 @@
+/*
+ * cmainDocLowDisk.goc -- OLDocumentClass: the dialog of a full disk
+ * (after cmainDocLowDisk.asm).  A save that failed for want of room
+ * (on close, on detach) brings up a copy of LowDiskUI (cmainLowDisk.ui),
+ * run by the UI's application thread: the user discards the changes,
+ * deletes the document, moves it elsewhere or deletes other files.  The
+ * document listens to the file change notification meanwhile; once a
+ * file is deleted it tries the save again and, if that works, takes
+ * the dialog down and goes on with what it was doing (the message kept
+ * in TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE).
+ *
+ * Not yet: the error beeps (UserStandardSound, which needs the sound
+ * library).
+ *
+ * Motif: NO_LOW_DISK_MOVE, NO_LOW_DISK_DELETE_CURRENT and
+ * HANDLE_DISK_FULL_ON_SAVE_AS are FALSE, so the dialog has all its
+ * parts and a save as is not handled here.
+ */
+@include "cmainDocument.goh"
+@include <Objects/gTextC.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/gFSelC.goh>
+@include <disk.h>
+@include <system.h>
+
+/* the object of the copy of LowDiskUI */
+static optr InBox(optr o, optr template)
+{
+    return ConstructOptr(OLD(o)->OLDI_saveErrorRes, OptrToChunk(template));
+}
+
+/*
+ * OLDocInsertDocName: the document's name in place of the "\1" of a
+ * chunk (from `start' on: past the VisMoniker of a moniker)
+ */
+static void InsertDocName(MemHandle block, ChunkHandle ch, word start,
+			  const char *name)
+{
+    optr c = ConstructOptr(block, ch);
+    word n = 0, size, at;
+    char *p;
+
+    while (name[n])
+	n++;
+    p = LMemDeref(c);
+    size = LMemGetChunkSizePtr(p);
+    for (at = start; at < size && p[at] != '\1'; at++)
+	;
+    if (at >= size)
+	return;
+    if (n > 1)
+	LMemInsertAt(c, at, n - 1);
+    else if (n == 0) {
+	LMemDeleteAt(c, at, 1);
+	return;
+    }
+    p = LMemDeref(c);
+    memcpy(p + at, name, n);
+}
+
+/*
+ * OLDocUpdateFreeSpaceDisplay: the free space of the disk the files to
+ * delete are shown from (a standard path: the system disk); the disk
+ * is kept in TEMP_OL_DOCUMENT_FREE_SPACE_DRIVE
+ */
+static void UpdateFreeSpaceDisplay(optr o)
+{
+    optr fs = InBox(o, @DeleteFilesFS);
+    DiskHandle disk = @call fs::MSG_GEN_PATH_GET_DISK_HANDLE();
+    char text[UHTA_NULL_TERM_BUFFER_SIZE];
+    DiskHandle *drive;
+    dword space;
+
+    if (disk & DISK_IS_STD_PATH_MASK)
+	disk = (DiskHandle) SysGetInfo(SGIT_SYSTEM_DISK);
+    drive = ObjVarAddData(o, TEMP_OL_DOCUMENT_FREE_SPACE_DRIVE,
+			  sizeof(word));
+    *(word *) drive = (word) disk;
+    space = DiskGetVolumeFreeSpace(disk);
+    if (ThreadGetError())
+	space = 0;
+    (void) UtilHex32ToAscii(text, space, UHTAF_NULL_TERMINATE);
+    @call (InBox(o, @DeleteFilesFreeSpace))::MSG_VIS_TEXT_REPLACE_ALL_PTR(
+								text, 0);
+}
+
+/*
+ * OLDocumentShowLowDiskError: up with the dialog; `msg' is what the
+ * document does once the disk has room (MSG_META_ACK on a detach)
+ */
+void OLDocumentShowLowDiskError(optr o, Message msg)
+{
+    GeodeHandle ui = GeodeFind("ui      ", GEODE_NAME_SIZE, 0, 0);
+    optr uiApp = GeodeGetAppObject(ui), app = GeodeGetAppObject(0);
+    optr box, name;
+    MemHandle block;
+    word *m;
+    FileLongName docName;
+
+    m = ObjVarAddData(o, TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE,
+		      sizeof(word));
+    *m = (word) msg;
+    /* owned by the UI (the block is run by its application's thread
+     * below), run by this thread meanwhile */
+    block = ObjDuplicateResource(OptrToHandle(@LowDiskBox), ui, 0);
+    OLD(o)->OLDI_saveErrorRes = block;
+    memcpy(docName, GD(o)->GDI_fileName, sizeof(FileLongName));
+    box = ConstructOptr(block, OptrToChunk(@LowDiskBox));
+
+    (void) ObjLockObjBlock(block);
+    ObjBlockSetOutput(block, o);
+    InsertDocName(block, OptrToChunk(@MessageTextText), 0, docName);
+    InsertDocName(block, OptrToChunk(@DeleteDocMoniker), VMWT_text,
+		  docName);
+    InsertDocName(block, OptrToChunk(@MoveDocMoniker), VMWT_text,
+		  docName);
+    /* the dialog has the application's name */
+    name = app ? @call app::MSG_GEN_FIND_MONIKER(TRUE,
+			(VMS_TEXT << VMSF_STYLE_OFFSET) | VMSF_COPY_CHUNK,
+			block) : 0;
+    if (OptrToHandle(name))
+	@call box::MSG_GEN_USE_VIS_MONIKER(OptrToChunk(name), VUM_MANUAL);
+    MemUnlock(block);
+
+    /* run by the UI's application thread, its first child */
+    MemModifyOtherInfo(block, MemGetInfo(OptrToHandle(uiApp),
+					 MGIT_EXEC_THREAD));
+    @call uiApp::MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY(box);
+    @send box::MSG_GEN_SET_USABLE(VUM_MANUAL);
+    @send box::MSG_GEN_INTERACTION_INITIATE();
+    /* UserStandardSound(SST_ERROR): no sound library yet */
+
+    /* to hear of files deleted */
+    (void) GCNListAdd(o, MANUFACTURER_ID_GEOWORKS, GCNSLT_FILE_SYSTEM);
+    OLDCCopyPathCommon(o, InBox(o, @DeleteFilesFS));
+    OLDCCopyPathCommon(o, InBox(o, @MoveFileFS));
+    UpdateFreeSpaceDisplay(o);
+}
+
+/*
+ * OLDocFinishSaveError: no more notifications; the dialog goes when the
+ * queue gets to it
+ */
+static void FinishSaveError(optr o)
+{
+    ObjVarAddData(o, TEMP_OL_DOCUMENT_DISK_FULL_RESOLVED, 0);
+    (void) GCNListRemove(o, MANUFACTURER_ID_GEOWORKS, GCNSLT_FILE_SYSTEM);
+    @send, forceQueue o::MSG_OL_DOCUMENT_SAVE_ERROR_RESOLVED();
+}
+
+/*
+ * OLDocLookForDelete: whether a file was deleted (*space: whether the
+ * free space may have changed: a delete, a create, new contents)
+ */
+static void LookAt(word type, Boolean *deleted, Boolean *space)
+{
+    switch (type) {
+    case FCNT_DELETE:
+	*deleted = TRUE;
+	*space = TRUE;
+	break;
+    case FCNT_CONTENTS:
+    case FCNT_CREATE:
+	*space = TRUE;
+	break;
+    default:
+	break;
+    }
+}
+
+static Boolean LookForDelete(word type, MemHandle data, Boolean *space)
+{
+    Boolean deleted = FALSE;
+
+    *space = FALSE;
+    if (type != FCNT_BATCH) {
+	LookAt(type, &deleted, space);
+	return deleted;
+    }
+    if (data) {
+	byte *b = MemLock(data);
+	FileChangeBatchNotificationData *bd = (void *) b;
+	word at = word_offsetof(FileChangeBatchNotificationData,
+				FCBND_notifications);
+
+	while (at < bd->FCBND_end) {
+	    FileChangeBatchNotificationItem *it = (void *) (b + at);
+	    word t = (word) it->FCBNI_type;
+
+	    LookAt(t, &deleted, space);
+	    at += word_offsetof(FileChangeBatchNotificationItem, FCBNI_name);
+	    if (t <= FCNT_RENAME)
+		at += sizeof(FileLongName);
+	}
+	MemUnlock(data);
+    }
+    return deleted;
+}
+
+@extern method OLDocumentClass, MSG_NOTIFY_FILE_CHANGE
+{
+    Boolean space;
+    word *m;
+
+    (void) pself;
+    OLDocMarkBusy(oself);
+    if (!ObjVarFindData(oself, TEMP_OL_DOCUMENT_DISK_FULL_RESOLVED)) {
+	if (LookForDelete((word) notifyType, data, &space) &&
+	    !OLDocSaveOrUpdate(oself)) {
+	    /* saved: on with what it was doing */
+	    m = ObjVarFindData(oself, TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE);
+	    if (m && *m != MSG_META_ACK) {
+		GD(oself)->GDI_attrs &= ~GDA_CLOSING;
+		(void) @call oself::MSG_GEN_DOCUMENT_CLOSE(0);
+	    }
+	    FinishSaveError(oself);
+	} else if (space)
+	    UpdateFreeSpaceDisplay(oself);
+    }
+    @callsuper();
+    OLDocMarkNotBusy(oself);
+}
+
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_SAVE_ERROR_RESOLVED
+{
+    MemHandle block = pself->OLDI_saveErrorRes;
+    Message msg = MSG_META_NULL;
+    word *m;
+
+    pself->OLDI_saveErrorRes = 0;
+    if (block)
+	(void) @call (ConstructOptr(block,
+		OptrToChunk(@LowDiskBox)))::MSG_GEN_DESTROY_AND_FREE_BLOCK();
+    m = ObjVarFindData(oself, TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE);
+    if (m) {
+	msg = *m;
+	ObjVarDeleteData(oself, TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE);
+    }
+    if (msg == MSG_META_ACK)
+	@call oself::MSG_META_ACK(0, oself);
+    else if (msg)
+	CObjMessageP(MF_CALL, oself, msg, NULL, 0, NULL, 0);
+}
+
+/* the file selected in DeleteFilesFS goes */
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_SELECTED_FILE
+{
+    optr fs = InBox(oself, @DeleteFilesFS);
+    char path[PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE];
+    dword r;
+    DiskHandle disk;
+
+    (void) pself;
+    r = @call fs::MSG_GEN_FILE_SELECTOR_GET_FULL_SELECTION_PATH(path);
+    if (GFS_GET_ENTRY_TYPE((GenFileSelectorEntryFlags) r) != GFSET_FILE)
+	return;
+    /* (the dword has 16 bits of the disk handle).  The path is
+     * relative to the disk: from its root, or in a standard path (the
+     * asm set "\\" for both: the top for a standard path) */
+    disk = @call fs::MSG_GEN_PATH_GET_DISK_HANDLE();
+    FilePushDir();
+    /* (an error: UserStandardSound(SST_ERROR); no sound library yet) */
+    if (FileSetCurrentPath(disk, (disk & DISK_IS_STD_PATH_MASK) ? "" : "\\"))
+	(void) FileDelete(path);
+    FilePopDir();
+}
+
+/* DeleteFilesFS went elsewhere: the free space of its disk */
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_FILES_FS_NOTIFY
+{
+    DiskHandle disk = @call (InBox(oself,
+				   @DeleteFilesFS))::MSG_GEN_PATH_GET_DISK_HANDLE();
+    word *drive;
+
+    (void) pself;
+    (void) entryNum;
+    (void) entryFlags;
+    if (disk & DISK_IS_STD_PATH_MASK)
+	disk = (DiskHandle) SysGetInfo(SGIT_SYSTEM_DISK);
+    drive = ObjVarFindData(oself, TEMP_OL_DOCUMENT_FREE_SPACE_DRIVE);
+    if (!drive || *drive != (word) disk)
+	UpdateFreeSpaceDisplay(oself);
+}
+
+/* "Delete <document>": the document and its file go */
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_AFTER_SAVE_ERROR
+{
+    (void) pself;
+    if (ObjVarFindData(oself, TEMP_OL_DOCUMENT_DISK_FULL_RESOLVED))
+	return;
+    FinishSaveError(oself);
+    OLDocDestroyDocument(oself, TRUE);
+}
+
+/* "Discard changes": back to what was saved */
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_REVERT_AFTER_SAVE_ERROR
+{
+    if (ObjVarFindData(oself, TEMP_OL_DOCUMENT_DISK_FULL_RESOLVED))
+	return;
+    pself->OLDI_attrs |= OLDA_REVERT_BEFORE_CLOSE;
+    FinishSaveError(oself);
+    OLDocDestroyDocument(oself, FALSE);
+}
+
+/* MoveFileFS changed: where it would go */
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_MOVE_AFTER_ERROR_FEEDBACK
+{
+    (void) pself;
+    (void) entryNum;
+    if (!(entryFlags & GFSEF_ERROR))
+	OLDCSetDirText(InBox(oself, @MoveFileFS),
+		       InBox(oself, @MoveFileDestText));
+}
+
+/* "Move": saved as the same name in the directory of MoveFileFS */
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_MOVE_AFTER_SAVE_ERROR
+{
+    optr fs = InBox(oself, @MoveFileFS);
+    DocumentCommonParams p;
+    DocFileOrError fe;
+
+    memset(&p, 0, sizeof(p));
+    (void) @call fs::MSG_GEN_FILE_SELECTOR_GET_DESTINATION_PATH(p.DCP_path,
+							     sizeof(p.DCP_path));
+    p.DCP_diskHandle = @call fs::MSG_GEN_PATH_GET_DISK_HANDLE();
+    memcpy(p.DCP_name, GD(oself)->GDI_fileName, sizeof(p.DCP_name));
+    GD(oself)->GDI_attrs &= ~GDA_CLOSING;
+    if (@call oself::MSG_GEN_DOCUMENT_SAVE_AS(&fe, &p))
+	return;		/* (UserStandardSound(SST_ERROR): no sound
+			 * library yet) */
+    FinishSaveError(oself);
+    OLDocDestroyDocument(oself, FALSE);
+}

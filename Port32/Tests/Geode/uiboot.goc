@@ -44,6 +44,8 @@
 @include <Objects/gGadgetC.goh>
 @include <Objects/gDocCtrl.goh>
 @include <Objects/gDocC.goh>
+@include <Internal/SpecUI/olDocumentClass.goh>
+@include <Objects/gDocC.goh>
 @include <Objects/gDocGrpC.goh>
 @include <iacp.goh>
 @include <Internal/SpecUI/olGadgetClass.goh>
@@ -165,6 +167,8 @@ typedef struct {
      * create's directory and name, the rename's file; the batch's
      * items and their types */
     word		UBS_fcn[16];
+    /* the dialog of a full disk (steps 207 to 209) */
+    word		UBS_low[8];
 } UBState;
 
 UBState ubState;
@@ -236,6 +240,13 @@ static void DocDelete(const char *name)
 @class UBWatchClass, MetaClass;
 @endc
 @classdecl UBWatchClass;
+
+/* a document whose save can fail as on a full disk (steps 207 to 209) */
+@class UBDocClass, GenDocumentClass;
+@endc
+@classdecl UBDocClass;
+
+static Boolean ubDiskFull;
 
 static word ubAnswer;
 
@@ -751,6 +762,7 @@ static GenControlFeaturesInfo ubCtlToolFeatures[1];
 @object GenDocumentGroupClass UBDocGrp = {
     GDGI_untitledName = "Untitled";
     GDGI_documentControl = UBDocCtl;
+    GDGI_documentClass = (ClassStruct *) &UBDocClass;
 }
 /* a server and a client of IACP (in no tree; steps 92 to 94) */
 @object UBIacpClass UBIacpSrv = {
@@ -884,6 +896,15 @@ static Boolean StrIs(const char *a, const char *b);
 	}
 	MemUnlock(data);
     }
+}
+
+@method UBDocClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE
+{
+    if (ubDiskFull) {
+	*error = VM_UPDATE_INSUFFICIENT_DISK_SPACE;
+	return TRUE;
+    }
+    return @callsuper();
 }
 
 @method UBIacpClass, MSG_UB_IACP_DONE
@@ -4147,6 +4168,85 @@ static void UBClickMenu(word n)
 	FileSetStandardPath(SP_DOCUMENT);
 	UBCHECK(!FileDeleteDir("UBNDIR"));
 	FilePopDir();
+	break;
+    case 207: {
+	/* a full disk on close: the close asks whether to save
+	 * (answered yes), the save fails, the dialog of a full disk comes
+	 * up and the close waits; the document listens for deletes */
+	DocumentCommonParams p;
+	optr doc;
+	FileHandle fh;
+	word id;
+	MemHandle res;
+
+	memset(ubState.UBS_low, 0, sizeof(ubState.UBS_low));
+	DocDelete("UBLOW");
+	DocDelete("UBJUNK");
+	FilePushDir();
+	FileSetStandardPath(SP_DOCUMENT);
+	fh = FileCreate("UBJUNK", FILE_CREATE_ONLY | FCF_NATIVE |
+			FILE_ACCESS_RW | FILE_DENY_RW, 0);
+	if (fh)
+	    (void) FileClose(fh, FALSE);
+	FilePopDir();
+	UBCHECK(fh != 0);
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBLOW", 6);
+	doc = @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_NEW_DOC(&p);
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	UBCHECK(InClass(doc, (ClassStruct *) &UBDocClass));
+	@call doc::MSG_GEN_DOCUMENT_MARK_DIRTY();
+	ubDiskFull = TRUE;
+	ubAnswer = IC_YES;
+	(void) TimerStart(TIMER_EVENT_ONE_SHOT, @UBApp, 20, MSG_UB_ANSWER, 0,
+			  &id);
+	ubState.UBS_low[0] = @call doc::MSG_GEN_DOCUMENT_CLOSE(0);
+	UBCHECK(ubState.UBS_low[0] == DQS_DELAYED);
+	res = ((OLDocumentInstance *) ObjDerefVis(doc))->OLDI_saveErrorRes;
+	ubState.UBS_low[1] = res != 0;
+	UBCHECK(res != 0);
+	ubState.UBS_low[2] = ObjVarFindData(doc,
+		TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE) != NULL;
+	UBCHECK(ubState.UBS_low[2]);
+	if (res)
+	    UBCHECK(ObjBlockGetOutput(res) == doc);
+	ubState.UBS_low[3] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(ubState.UBS_low[3] & GDA_SAVE_FAILED);
+	break;
+    }
+    case 208: {
+	/* room made: the notification of the delete has it saved, and
+	 * the close goes on (it asks again: the save kept the document
+	 * dirty, as on DOS16; answered yes) */
+	word id;
+
+	ubDiskFull = FALSE;
+	ubAnswer = IC_YES;
+	(void) TimerStart(TIMER_EVENT_ONE_SHOT, @UBApp, 20, MSG_UB_ANSWER, 0,
+			  &id);
+	FilePushDir();
+	FileSetStandardPath(SP_DOCUMENT);
+	UBCHECK(!FileDelete("UBJUNK"));
+	FilePopDir();
+	break;
+    }
+    case 209: {
+	/* saved and closed, the dialog gone (the test waits for the
+	 * group to be empty first: the application's thread gets there
+	 * after the answer's timer, and calls the process on the way) */
+	ubState.UBS_low[4] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();
+	UBCHECK(!ubState.UBS_low[4]);
+	ubState.UBS_low[5] = DocExists("UBLOW");
+	UBCHECK(ubState.UBS_low[5]);
+	DocDelete("UBLOW");
+	break;
+    }
+    case 210:
+	/* (the documents left, while the test waits for step 209) */
+	ubState.UBS_low[6] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();
 	break;
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */

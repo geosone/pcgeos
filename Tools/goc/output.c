@@ -307,6 +307,23 @@ GccExternChunk(const char *name)
     return FALSE;
 }
 
+/* the VisMonikerListEntryType of a moniker in a moniker list */
+static int
+VisMonikerListEntryTypeOf(Symbol *m)
+{
+    return VMLET_MONIKER_LIST |
+	   ((m->data.symVisMoniker.vmType.gsColor << VMLET_GS_COLOR_OFFSET) &
+	    VMLET_GS_COLOR) |
+	   ((m->data.symVisMoniker.vmType.style << VMLET_STYLE_OFFSET) &
+	    VMLET_STYLE) |
+	   ((m->data.symVisMoniker.vmType.aspectRatio <<
+	     VMLET_GS_ASPECT_RATIO_OFFSET) & VMLET_GS_ASPECT_RATIO) |
+	   ((m->flags & SYM_GSTRING_MONIKER)
+	    ? (VMLET_GSTRING | ((m->data.symVisMoniker.vmType.gsSize <<
+				 VMLET_GS_SIZE_OFFSET) & VMLET_GS_SIZE))
+	    : 0);
+}
+
 /* "X" for an object or chunk of another file: GOCR_XSOPTR, GOCR_XSCHUNK */
 static const char *
 GccXPrefix(const char *name)
@@ -2636,19 +2653,17 @@ OutputChunkLow(Symbol *chunk)
 		Output("VisMonikerListEntry %s _%s[] = {",lms, chunk->name);
 		for (sle = chunk->data.symVisMoniker.list;
 		     sle != NullSymbolListEntry; sle = sle->next) {
+			 if (compiler == COM_GCC &&
+			     GccExternChunk(sle->entry->name)) {
+			     /* a moniker of another file of the geode: its
+			      * type is in <geode>_objs.h, as its chunk */
+			     Output("{__goc_xvt_%s, GOCR_XSOPTR(%s)}, ",
+				    sle->entry->name, sle->entry->name);
+			     continue;
+			 }
 			 Output(compiler == COM_GCC ? "{%d, GOCR_SOPTR(%s)}, " :
-				"{%d, (optr)&%s}, ", VMLET_MONIKER_LIST |
-			   ((sle->entry->data.symVisMoniker.vmType.gsColor<<
-			    	VMLET_GS_COLOR_OFFSET) & VMLET_GS_COLOR) |
-			   ((sle->entry->data.symVisMoniker.vmType.style<<
-			    	VMLET_STYLE_OFFSET) & VMLET_STYLE) |
-			   ((sle->entry->data.symVisMoniker.vmType.aspectRatio<<
-    	    	    VMLET_GS_ASPECT_RATIO_OFFSET) & VMLET_GS_ASPECT_RATIO) |
-			   ((sle->entry->flags &SYM_GSTRING_MONIKER)
-			    ?(VMLET_GSTRING|
-			     ((sle->entry->data.symVisMoniker.vmType.gsSize <<
-			      VMLET_GS_SIZE_OFFSET) & VMLET_GS_SIZE))
-			    :0),
+				"{%d, (optr)&%s}, ", VisMonikerListEntryTypeOf(
+				sle->entry),
 			    sle->entry->name);
 		}
 		Output("};\n");
@@ -3099,6 +3114,12 @@ OutputChunkConstantGcc(Symbol *chunk)
 	    putc(toupper((unsigned char) *cp), gccExport);
 	}
 	putc('\n', gccExport);
+	/* a moniker: its type in a moniker list of another file */
+	if (chunk->type == VIS_MONIKER_CHUNK_SYM &&
+	    !(chunk->flags & SYM_LIST_MONIKER)) {
+	    fprintf(gccExport, "#define __goc_xvt_%s %d\n", chunk->name,
+		    VisMonikerListEntryTypeOf(chunk));
+	}
     }
 }
 

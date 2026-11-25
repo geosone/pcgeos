@@ -17,7 +17,7 @@ geos_uic(cmainManager ${_common}/CMain/cmainManager.ui
                    DocumentNewUI DocumentGetPasswordUI
                    DocumentProtoProgressUI DocumentConfirmSaveUI
                    DocumentUserNotesUI DocumentRenameUI
-                   DocumentQuickBackupUI
+                   DocumentQuickBackupUI LowDiskUI
          INCLUDES ${_common}/CMain ${_common}
          DEFINITIONS MOTIF)
 geos_geode(motif GP motif32.gp

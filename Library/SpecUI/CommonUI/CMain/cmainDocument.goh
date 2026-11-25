@@ -169,6 +169,13 @@ extern Boolean OLDocOpen(optr o, DocumentCommonParams *params,
 extern void OLDocStopAutoSave(optr o);
 extern void OLDocRemoveObj(optr o);
 extern void OLDocDestroyDocument(optr o, Boolean deleteFile);
+/* cmainDocLowDisk.goc: up with the dialog of a full disk; the message
+ * is sent to the document once there is room */
+extern void OLDocumentShowLowDiskError(optr o, Message msg);
+/* cmainUIDocOperations.goc: the path of one object to another (a file
+ * selector); "Saving to Folder: " and the selector's directory */
+extern void OLDCCopyPathCommon(optr src, optr dest);
+extern void OLDCSetDirText(optr fs, optr text);
 extern void OLDocSendToDocumentControl(optr o, Message msg);
 /* what the user wants after a save failed */
 #define OLDSE_RETRY	0	/* (the disk is writable now) */

@@ -341,6 +341,13 @@ are not in C yet.
   their numbers; `SpecWidth <a, b>`, `SpecHeight <>` and
   `SpecSizeSpec <>` in a hint as one word, and a size hint of two
   values gets its third (the count, 0).
+- **Moniker lists made by hand** (`cmainLowDisk.ui`: a chunk of
+  `VisMonikerListEntryType <...>` and `UN_OPTR Moniker` pairs) become a
+  goc list, `@visMoniker Name = list { @A, ... }`, with an
+  `@extern visMoniker` line for each moniker the file does not define;
+  goc writes the type of an entry from its moniker, for one of another
+  file of the geode the macro `__goc_xvt_<moniker>` that goc -cg -x
+  writes beside `__goc_xch_`/`__goc_xrs_` (`<geode>_objs.h`).
 - **Not yet** (uic stops with an error): chunks of a structure, data
   monikers, `hptr` values that are not null, localization instructions.
 
@@ -5655,8 +5662,8 @@ visual classes of `Library/User/Vis`:
   template), revert (to the last save, to the last auto save), import
   and export (`cmainDocumentSaveAs.goc`); user notes, rename, type,
   password, quick backup and its recovery, the empty and the default
-  document, copy to and move to (`cmainDocObscure.goc`); not yet
-  `cmainDocLowDisk`.
+  document, copy to and move to (`cmainDocObscure.goc`); the dialog
+  of a full disk (`cmainDocLowDisk.goc`, below).
   - `MSG_OL_DOCUMENT_CONTINUE_RENAME(newName)`,
     `..._CONTINUE_CHANGE_TYPE(type)` and `..._CONTINUE_MOVE_TO(params)`
     have their parameters in `olDocumentClass.goh` (the asm passed them
@@ -5690,9 +5697,31 @@ visual classes of `Library/User/Vis`:
     way round.
   - `MSG_GEN_DOCUMENT_PHYSICAL_DELETE` pops the directory it pushed
     (the asm left it pushed).
-  - Until `cmainDocLowDisk` is in C a full disk at close goes through
-    the standard dialog of a failed save, and at detach the document
-    acknowledges without asking the user to make room.
+  - The dialog of a full disk (`cmainDocLowDisk.goc`): a save that
+    fails for want of room at close (the user's, connection 0) or at
+    detach brings up a copy of `LowDiskUI` (`cmainLowDisk.ui`), owned
+    and then run by the UI's application thread (`UIApp`, found with
+    `GeodeFind("ui      ")`), the document's name in place of the
+    `\1` of the text and of two monikers, the application's name as
+    its moniker; the document is on `GCNSLT_FILE_SYSTEM` meanwhile and
+    saves again after each delete it hears of; once that works the
+    close goes on (`MSG_OL_DOCUMENT_CONTINUE_CLOSE_AFTER_DISK_FULL`) or
+    the detach is acknowledged, and the dialog goes. Discard changes,
+    delete the document, move it (a save as into the directory of the
+    selector) and delete other files as in the asm.
+    `MSG_OL_DOCUMENT_MOVE_AFTER_ERROR_FEEDBACK` and
+    `..._DELETE_FILES_FS_NOTIFY` are
+    `GEN_FILE_SELECTOR_NOTIFICATION_MSG`s (the asm read the flags from
+    `bp`). The file to delete is taken relative to the selector's disk
+    (a standard path: in it; the asm set `\` for both, the top for a
+    standard path). Not yet: the error beeps (`UserStandardSound`
+    needs the sound library, which the UI library imports and which
+    is not in C). `HANDLE_DISK_FULL_ON_SAVE_AS` is FALSE in Motif.
+    After the save that made it the close asks again whether to save
+    (the save kept the document dirty, as `OLDocumentSaveOrUpdate`
+    does).
+  - `OLDCCopyPathCommon` and `OLDCSetDirText`
+    (`cmainUIDocOperations.goc`) are shared with the document.
   - The standard dialogs (`StandardDialogBoxType`, `cmainDocDialog.goc`)
     are a `switch` generated once from the table of
     `cmainDocDialog.asm`; `OLDocStandardDialogArg` passes the second
@@ -5714,6 +5743,10 @@ visual classes of `Library/User/Vis`:
     one stays), changed and reverted, closed.
     Steps 200 to 204 (101 to 111 are the reference mode's): copy to,
     move to, the type read only and normal again, no password, closed.
+    Steps 207 to 209 (210 counts the documents while the test waits):
+    a document whose save fails as on a full disk (`UBDocClass`) is
+    closed: the dialog comes up, the close waits; a file deleted, the
+    document is saved and closed.
 - **IACP** (`Library/User/IACP/iacpMain.goc`, `iacpConnect.goc`, beside
   `iacpMain.asm`, `iacpUtils.asm`, `iacpConnect.asm`): the C API of
   `iacp.goh` (plus `IACPShutdownConnection`), as the asm, except:

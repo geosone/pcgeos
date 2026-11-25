@@ -212,10 +212,13 @@ word OLDocHandleSaveError(optr o, word error,
 	    GD(oself)->GDI_attrs &= ~GDA_CLOSING;
 	} else {
 	    ObjVarDeleteData(oself, TEMP_OL_DOCUMENT_DETACH_NO_SPACE_ERROR);
-	    (void) OLDocSaveOrUpdate(oself);
-	    /* (cmainDocLowDisk: with the disk full the user makes room
-	     * first) */
-	    @call oself::MSG_META_ACK(0, oself);
+	    if (OLDocSaveOrUpdate(oself) &&
+		ObjVarFindData(oself, TEMP_OL_DOCUMENT_DETACH_NO_SPACE_ERROR))
+		/* the disk is full: the user makes room first; the dialog
+		 * acknowledges */
+		OLDocumentShowLowDiskError(oself, MSG_META_ACK);
+	    else
+		@call oself::MSG_META_ACK(0, oself);
 	}
     }
     @callsuper();
@@ -573,8 +576,16 @@ static Boolean ConfirmSave(optr o)
 		}
 	    }
 	    step = SAVE;
-	    /* (cmainDocLowDisk: a full disk has a dialog of its own, in
-	     * which the user makes room) */
+	    if (e != ERROR_DISK_UNAVAILABLE && !connection &&
+		OLDocConvertErrorCode(e) == ERROR_SHORT_READ_WRITE) {
+		/* a full disk has a dialog of its own, in which the user
+		 * makes room; the close goes on after it.  (Save failed:
+		 * a move to elsewhere deletes the old file.) */
+		OLDocSetAttrs(oself, GDA_SAVE_FAILED, 0);
+		OLDocumentShowLowDiskError(oself,
+				MSG_OL_DOCUMENT_CONTINUE_CLOSE_AFTER_DISK_FULL);
+		return DQS_DELAYED;
+	    }
 	    if (e == ERROR_DISK_UNAVAILABLE ||
 		OLDocHandleSaveError(oself, OLDocConvertErrorCode(e),
 				     NULL) != OLDSE_RETRY) {

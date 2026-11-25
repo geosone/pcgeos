@@ -1087,6 +1087,170 @@ MarkInlineMonikers(Symbol *resource)
     }
 }
 
+/***********************************************************************
+ *				MonikerList
+ ***********************************************************************
+ * SYNOPSIS:	    A chunk of data that is a moniker list made by hand
+ *		    (cmainLowDisk.ui): "VisMonikerListEntryType <...>"
+ *		    and an optr (UN_OPTR, I_OPTR, optr) to the moniker,
+ *		    as often as there are monikers.  It is written as a
+ *		    goc moniker list ("@visMoniker Name = list {...}"),
+ *		    which has the type of each entry from its moniker
+ *		    (one of another file: from <geode>_objs.h,
+ *		    __goc_xvt_<moniker>).
+ * RETURN:	    the number of entries, 0 if the chunk is something
+ *		    else.  With out: "@Name" of each, a comma between;
+ *		    with names: the names, each with its 0.
+***********************************************************************/
+static const char *
+MonikerListSkip(const char *p)
+{
+    for (;;) {
+	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' ||
+	       *p == '|') {
+	    p++;
+	}
+	if (*p != ';') {
+	    return p;
+	}
+	while (*p != '\0' && *p != '\n') {
+	    p++;
+	}
+    }
+}
+
+static const char *
+MonikerListWord(const char *p, int *len)
+{
+    const char *w = p;
+
+    while (isalnum((unsigned char)*p) || *p == '_') {
+	p++;
+    }
+    *len = p - w;
+    return w;
+}
+
+static int
+MonikerList(const char *p, Str *out, Str *names)
+{
+    int	    	n = 0;
+
+    for (;;) {
+	const char  *w;
+	int 	    wl, depth;
+
+	p = MonikerListSkip(p);
+	if (*p == '\0') {
+	    return n;
+	}
+	w = MonikerListWord(p, &wl);
+	p = w + wl;
+	if (!WordIs(w, wl, "vismonikerlistentrytype")) {
+	    return 0;
+	}
+	p = MonikerListSkip(p);
+	if (*p != '<') {
+	    return 0;
+	}
+	for (p++, depth = 1; *p != '\0'; p++) {
+	    if (*p == '<') {
+		depth++;
+	    } else if (*p == '>' && --depth == 0) {
+		break;
+	    }
+	}
+	if (*p == '\0') {
+	    return 0;
+	}
+	p = MonikerListSkip(p + 1);
+	w = MonikerListWord(p, &wl);
+	p = w + wl;
+	if (!WordIs(w, wl, "optr") && !WordIs(w, wl, "i_optr") &&
+	    !WordIs(w, wl, "un_optr")) {
+	    return 0;
+	}
+	while (*p == ' ' || *p == '\t') {
+	    p++;
+	}
+	w = MonikerListWord(p, &wl);
+	p = w + wl;
+	if (wl == 0) {
+	    return 0;
+	}
+	if (out != NULL) {
+	    int i;
+
+	    StrAdd(out, n > 0 ? ",\n    @" : "    @", n > 0 ? 7 : 5);
+	    StrAdd(out, w, wl);
+	}
+	if (names != NULL) {
+	    StrAdd(names, w, wl);
+	    StrAdd(names, "", 1);
+	}
+	n++;
+    }
+}
+
+/*
+ * The monikers of hand-made moniker lists that are in another file
+ * (the .ui file has "extern Name;", but the name is not to be found
+ * when the file is written: those this file does not define): goc is
+ * to know them as such.
+ */
+static void
+OutputMonikerListExterns(void)
+{
+    Symbol  *resource, *sym;
+    Str	    seen = {NULL, 0, 0};
+
+    StrAdd(&seen, "", 0);
+    for (resource = firstResource; resource != NullSymbol;
+	 resource = resource->data.symResource.nextResource) {
+	if (!ResourceWanted(resource)) {
+	    continue;
+	}
+	for (sym = resource->data.symResource.firstObject;
+	     sym != NullSymbol; sym = sym->data.symObject.next) {
+	    Str	    	names = {NULL, 0, 0};
+	    int	    	n, i;
+	    const char  *name;
+
+	    if (sym->type != CHUNK_SYM ||
+		(sym->flags & (SYM_CHUNK_IS_EMPTY | SYM_CHUNK_IS_STRUCTURE |
+			       SYM_CHUNK_IS_TEXT))) {
+		continue;
+	    }
+	    StrAdd(&names, "", 0);
+	    n = MonikerList(sym->data.symChunk.data.chunkText, NULL, &names);
+	    for (i = 0, name = names.text; i < n; i++, name += strlen(name) + 1) {
+		Symbol	*m;
+		const char *q;
+		int 	found = 0;
+
+		/* (one this file defines is not) */
+		m = Symbol_Find((char *)name, TRUE);
+		if (m != NullSymbol && (m->flags & SYM_DEFINED) &&
+		    !(m->flags & SYM_EXTERNAL)) {
+		    continue;
+		}
+		for (q = seen.text; q < seen.text + seen.len; q += strlen(q) + 1) {
+		    if (*q != '\0' && strcmp(q, name) == 0) {
+			found = 1;
+			break;
+		    }
+		}
+		if (!found) {
+		    Output("@extern visMoniker %s;\n", name);
+		    StrAdd(&seen, name, strlen(name) + 1);
+		}
+	    }
+	    free(names.text);
+	}
+    }
+    free(seen.text);
+}
+
 static void
 OutputGocChunk(Symbol *sym)
 {
@@ -1098,6 +1262,14 @@ OutputGocChunk(Symbol *sym)
     } else if (sym->flags & SYM_CHUNK_IS_TEXT) {
 	Output("@chunk TCHAR %s[] = \"%s\";\n", sym->name,
 	       sym->data.symChunk.data.chunkText);
+    } else if (MonikerList(sym->data.symChunk.data.chunkText, NULL,
+			   NULL) > 0) {
+	Str l = {NULL, 0, 0};
+
+	StrAdd(&l, "", 0);
+	(void) MonikerList(sym->data.symChunk.data.chunkText, &l, NULL);
+	Output("@visMoniker %s = list {\n%s\n};\n", sym->name, l.text);
+	free(l.text);
     } else {
 	int	n;
 	char	*c = EspData(sym->data.symChunk.data.chunkText, &n, 1);
@@ -1154,6 +1326,7 @@ DoGocOutput(void)
 	}
 	fprintf(externs, "/* Made by uic -g; do not edit. */\n");
     }
+    OutputMonikerListExterns();
     for (resource = firstResource; resource != NullSymbol;
 	 resource = resource->data.symResource.nextResource) {
 	if (!ResourceWanted(resource)) {

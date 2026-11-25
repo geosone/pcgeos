@@ -136,7 +136,7 @@ static void SetupLevelTriggers(optr simple, optr advanced)
  * (its disk is gone, say): SP_DOCUMENT.  An OLFileSelector takes it by
  * its own message, which does the right thing with removable disks.
  */
-static void CopyPathCommon(optr src, optr dest)
+void OLDCCopyPathCommon(optr src, optr dest)
 {
     MemHandle mh = @call src::MSG_GEN_PATH_GET_BLOCK(NULL, 0);
     DiskHandle disk = SP_DOCUMENT;
@@ -156,9 +156,9 @@ static void CopyPathCommon(optr src, optr dest)
 }
 
 /* OLDCCopyPathToFS: the control's path to a file selector */
-#define OLDCCopyPathToFS(o, fs)		CopyPathCommon(o, fs)
+#define OLDCCopyPathToFS(o, fs)		OLDCCopyPathCommon(o, fs)
 /* OLDCCopyPathFromFS: and back, once a file of it is taken */
-#define OLDCCopyPathFromFS(o, fs)	CopyPathCommon(fs, o)
+#define OLDCCopyPathFromFS(o, fs)	OLDCCopyPathCommon(fs, o)
 
 /* ---------------------------------------------------------------------
  * A dialog comes up and goes
@@ -363,7 +363,7 @@ static Boolean GetPathFromFileSelector(optr fs, optr text,
  * to Folder: " and the last component of the selector's path (all of
  * it if it has one alone).
  */
-static void SetDirText(optr fs, optr text)
+void OLDCSetDirText(optr fs, optr text)
 {
     char fsPath[PATH_BUFFER_SIZE], fullPath[PATH_BUFFER_SIZE];
     char *end = fullPath, *start = fullPath;
@@ -565,15 +565,15 @@ static void SetupForUseTemplate(optr o, MemHandle block)
 	return;
     switch (message) {
     case MSG_OLDC_SAVE_AS_DIR_SELECTED:
-	SetDirText(SUMMONS(block, @SaveAsFileSelector),
+	OLDCSetDirText(SUMMONS(block, @SaveAsFileSelector),
 		   SUMMONS(block, @SaveAsDirText));
 	return;
     case MSG_OLDC_COPY_TO_DIR_SELECTED:
-	SetDirText(SUMMONS(block, @CopyToFileSelector),
+	OLDCSetDirText(SUMMONS(block, @CopyToFileSelector),
 		   SUMMONS(block, @CopyToDirText));
 	return;
     case MSG_OLDC_MOVE_TO_DIR_SELECTED:
-	SetDirText(SUMMONS(block, @MoveToFileSelector),
+	OLDCSetDirText(SUMMONS(block, @MoveToFileSelector),
 		   SUMMONS(block, @MoveToDirText));
 	return;
     default:

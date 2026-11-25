@@ -71,6 +71,15 @@
 @extern method OLDocumentClass, MSG_GEN_DOCUMENT_ENABLE_AUTO_SAVE;
 @extern method OLDocumentClass, MSG_GEN_DOCUMENT_DISABLE_AUTO_SAVE;
 @extern method OLDocumentClass, MSG_GEN_BRING_TO_TOP, MSG_GEN_LOWER_TO_BOTTOM;
+/* cmainDocLowDisk.goc */
+@extern method OLDocumentClass, MSG_NOTIFY_FILE_CHANGE;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_SAVE_ERROR_RESOLVED;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_SELECTED_FILE;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_FILES_FS_NOTIFY;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_AFTER_SAVE_ERROR;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_REVERT_AFTER_SAVE_ERROR;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_MOVE_AFTER_ERROR_FEEDBACK;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_MOVE_AFTER_SAVE_ERROR;
 
 /* cmainDocumentSaveAs.goc */
 @extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE_AS, MSG_GEN_DOCUMENT_SAVE_AS_TEMPLATE;
