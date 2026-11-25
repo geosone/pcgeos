@@ -3,7 +3,8 @@
 # goes through goc -cg like the geode's own .goc files.
 #
 #   geos_uic(<name> <file.ui> [PROLOG <file.goh>...] [RESOURCES <name>...]
-#            [INCLUDES <dir>...] [DEFINITIONS <def>...])
+#            [INCLUDES <dir>...] [DEFINITIONS <def>...]
+#            [DEPENDS <target or file>...])
 #
 # Makes, in ${CMAKE_CURRENT_BINARY_DIR}/uic:
 #   <name>.goc	the goc source, a file of the geode: add ${<name>_UI_GOC}
@@ -17,13 +18,14 @@
 # RESOURCES: only these resources of the file (while a geode has not all
 # its classes in C).  INCLUDES and DEFINITIONS are those of the .ui file
 # (Include/ is always there).  The .ui and .uih files it includes are
-# dependencies (uicpp -M).
+# dependencies (uicpp -M); DEPENDS: what must be made first (the
+# pictures of an Art directory, geos_art()).
 include_guard(GLOBAL)
 include(${CMAKE_CURRENT_LIST_DIR}/GeosHostTools.cmake)
 
 function(geos_uic name ui_file)
   cmake_parse_arguments(PARSE_ARGV 2 U "" ""
-                        "PROLOG;RESOURCES;INCLUDES;DEFINITIONS")
+                        "PROLOG;RESOURCES;INCLUDES;DEFINITIONS;DEPENDS")
   get_filename_component(ui_file ${ui_file} ABSOLUTE)
   get_filename_component(ui_dir ${ui_file} DIRECTORY)
   set(dir ${CMAKE_CURRENT_BINARY_DIR}/uic)
@@ -59,7 +61,7 @@ function(geos_uic name ui_file)
             -P ${PROJECT_SOURCE_DIR}/cmake/GeosUicDeps.cmake
     WORKING_DIRECTORY ${ui_dir}
     DEPENDS ${ui_file} ${prologs} ${GEOS_UIC} ${GEOS_UICPP} geos_host_tools
-            ${PROJECT_SOURCE_DIR}/cmake/GeosUicDeps.cmake
+            ${PROJECT_SOURCE_DIR}/cmake/GeosUicDeps.cmake ${U_DEPENDS}
     DEPFILE ${goc}.d
     COMMENT "uic -g ${name}"
     VERBATIM)

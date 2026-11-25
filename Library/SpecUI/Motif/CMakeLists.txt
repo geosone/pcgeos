@@ -4,7 +4,9 @@ add_subdirectory(Win)
 add_subdirectory(View)
 geos_get_sources(_motif_goc motif_goc)
 # The objects of the .ui files (uic -g).  Of cmainManager.ui only the
-# resources whose classes are in C so far.
+# resources whose classes are in C so far.  The binary directory first:
+# "../CommonUI/CArt/mkr*.ui" are then the pictures cvtpcx made of the
+# PCX files (CArt/CMakeLists.txt), not the ones checked in.
 set(_common ${PROJECT_SOURCE_DIR}/Library/SpecUI/CommonUI)
 geos_uic(cmainManager ${_common}/CMain/cmainManager.ui
          PROLOG ${_common}/CMain/cmainManagerUI.goh
@@ -18,8 +20,9 @@ geos_uic(cmainManager ${_common}/CMain/cmainManager.ui
                    DocumentProtoProgressUI DocumentConfirmSaveUI
                    DocumentUserNotesUI DocumentRenameUI
                    DocumentQuickBackupUI LowDiskUI
-         INCLUDES ${_common}/CMain ${_common}
-         DEFINITIONS MOTIF)
+         INCLUDES ${CMAKE_CURRENT_BINARY_DIR} ${_common}/CMain ${_common}
+         DEFINITIONS MOTIF
+         DEPENDS cart_art)
 geos_geode(motif GP motif32.gp
            GOC ${_motif_goc} ${cmainManager_UI_GOC}
            GOC_DEPENDS ${cmainManager_UI_GOH}
