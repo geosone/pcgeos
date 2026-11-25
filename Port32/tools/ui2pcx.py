@@ -10,7 +10,7 @@ at an offset (-x, -y), so that cvtpcx with the same options makes the
 same .ui.
 
     ui2pcx.py [-8] [-m pixel] [-x n] [-y n] [-W n -H n] [-p base.pcx]
-              file.ui out.pcx
+              [-n moniker] file.ui out.pcx
 
 -8: an 8-bit PCX with the bitmap's own palette, or the standard GEOS
 palette if it has none (cvtpcx then writes the bitmap without one),
@@ -19,6 +19,8 @@ else a 16-colour one (4 planes).
 bitmap reaching beyond it is cut (one cvtpcx read beyond its PCX).
 -p: the bitmap goes into this PCX (one of a grid of pictures), of the
 same kind; its masked-out pixels too.
+-n: the bitmap of this moniker (or chunk) of the file, not the first.
+A mono bitmap's 1 is black, its 0 white.
 """
 import os
 import re
@@ -54,18 +56,25 @@ def unpack(data):
     return out
 
 
-def read_bitmap(path):
+def read_bitmap(path, name=None):
     text = open(path, encoding="latin-1").read().replace("\r", "")
+    if name:
+        i = re.search(r"(visMoniker|chunk)\s+%s\b" % re.escape(name), text)
+        if not i:
+            sys.exit(f"{path}: no {name}")
+        text = text[i.start():]
     m = re.search(r"C?Bitmap\s*<+\s*(\d+)\s*,\s*(\d+)\s*,\s*(\w+)\s*,"
-                  r"\s*BMF_(4|8)BIT or mask BMT_MASK([^\n]*)", text)
+                  r"([^>\n]*)>?([^\n]*)", text)
     if not m:
-        sys.exit(f"{path}: no 4-bit or 8-bit bitmap with a mask")
-    w, h, comp, bpp = int(m.group(1)), int(m.group(2)), m.group(3), \
-        int(m.group(4))
+        sys.exit(f"{path}: no bitmap")
+    w, h, comp, kind = int(m.group(1)), int(m.group(2)), m.group(3), \
+        m.group(4) + m.group(5)
+    bpp = 8 if "BMF_8BIT" in kind else 4 if "BMF_4BIT" in kind else 1
+    hasmask = "BMT_MASK" in kind
     rest = text[m.end():]
     rest = rest[:rest.index("}")]
     pal = None
-    if "BMT_PALETTE" in m.group(5):
+    if "BMT_PALETTE" in kind:
         n = int(re.match(r"\s*word\s+(\d+)", rest).group(1))
         rgb = re.findall(r"RGBValue\s*<\s*(0x[0-9a-fA-F]+)\s*,\s*"
                          r"(0x[0-9a-fA-F]+)\s*,\s*(0x[0-9a-fA-F]+)\s*>",
@@ -77,7 +86,8 @@ def read_bitmap(path):
             end = rest.index("RGBValue", end) + 8
         rest = rest[rest.index(">", end) + 1:]
     data = [int(x, 16) for x in re.findall(r"0x([0-9a-fA-F]{1,2})", rest)]
-    mbytes, pbytes = (w + 7) // 8, (w * bpp + 7) // 8
+    mbytes = (w + 7) // 8 if hasmask else 0
+    pbytes = (w * bpp + 7) // 8
     if comp == "BMC_PACKBITS":
         data = unpack(data)
     line = mbytes + pbytes
@@ -90,10 +100,14 @@ def read_bitmap(path):
         if bpp == 4:
             val = [(px[x // 2] >> (4 if x % 2 == 0 else 0)) & 15
                    for x in range(w)]
+        elif bpp == 1:
+            # cvtpcx: a pixel neither white nor masked out is a 1
+            val = [0 if px[x // 8] & (0x80 >> (x % 8)) else 15
+                   for x in range(w)]
         else:
             val = px
-        rows.append([val[x] if mk[x // 8] & (0x80 >> (x % 8)) else None
-                     for x in range(w)])
+        rows.append([val[x] if not hasmask or mk[x // 8] & (0x80 >> (x % 8))
+                     else None for x in range(w)])
     return w, h, rows, pal
 
 
@@ -141,6 +155,7 @@ def read_pcx(path):
 def main():
     args, mask, xo, yo, base, eight, W, H = sys.argv[1:], 13, 0, 0, None, \
         False, 0, 0
+    name = None
     while args and args[0].startswith("-"):
         o = args[0][1]
         if o == "8":
@@ -161,9 +176,11 @@ def main():
             H = int(v)
         elif o == "p":
             base = v
+        elif o == "n":
+            name = v
     if len(args) != 2:
         sys.exit(__doc__)
-    w, h, rows, own = read_bitmap(args[0])
+    w, h, rows, own = read_bitmap(args[0], name)
     if base:
         hdr, tail, eight, W, H, bpl, pix = read_pcx(base)
     else:

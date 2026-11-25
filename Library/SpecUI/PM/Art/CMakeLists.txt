@@ -11,4 +11,4 @@ geos_cvtpcx(mkrStdDialogNotification.ui infoPM.pcc -f -m2 -l -dLM -dLC
 geos_cvtpcx(mkrStdDialogError.ui errorPM.pcc -f -m13 -l -dLM -dLC -dLCGA
             -nStdDialogError)
 
-add_custom_target(pm_art ALL DEPENDS ${GEOS_CVTPCX_OUTPUTS})
+geos_art(pm)

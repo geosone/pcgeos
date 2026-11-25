@@ -21,4 +21,4 @@ geos_cvtpcx(mkrStdDialogQuestion.ui questionPM.pcc -f -m13 -x0 -y0 -l -dLM
 geos_cvtpcx(mkrStdDialogWarning.ui warningPM.pcc -f -m13 -x0 -y0 -l -dLM
             -dLC -dLCGA -nStdDialogWarning)
 
-add_custom_target(isui_art ALL DEPENDS ${GEOS_CVTPCX_OUTPUTS})
+geos_art(isui)

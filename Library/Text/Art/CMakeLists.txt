@@ -85,4 +85,4 @@ geos_cvtpcx(mkrLargerTC.ui A146-8.pcx -m225 -x0 -y0 -2 -nLargerTC -w16 -h16
             -Stool -stiny)
 
 
-add_custom_target(text_art ALL DEPENDS ${GEOS_CVTPCX_OUTPUTS})
+geos_art(text)

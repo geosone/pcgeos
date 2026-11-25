@@ -64,4 +64,4 @@ geos_cvtpcx(mkrPrintToolTC.ui A128-8.pcx -m225 -x0 -y0 -2 -nPrintToolTC -w20
             -h16 -Stool -stiny)
 
 
-add_custom_target(spool_art ALL DEPENDS ${GEOS_CVTPCX_OUTPUTS})
+geos_art(spool)

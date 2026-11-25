@@ -5,24 +5,19 @@ if(NOT GEOS_BUILD_GEODES)
   return()
 endif()
 # the pictures cvtpcx makes at build time: the same as the .ui files
-# checked in (which the 16-bit build uses)
-foreach(_art cart:SpecUI/CommonUI/CArt isui:SpecUI/ISUI/Art
-             newui:SpecUI/NewUI/Art pm:SpecUI/PM/Art user:User/Art
-             text:Text/Art spool:Spool/Art)
-  string(REPLACE ":" ";" _art ${_art})
+# checked in (which the 16-bit build uses), each Art directory's
+# (geos_art, cmake/GeosCvtpcx.cmake)
+get_property(_arts GLOBAL PROPERTY GEOS_ART_DIRS)
+foreach(_art IN LISTS _arts)
+  string(REPLACE "|" ";" _art "${_art}")
   list(GET _art 0 _name)
-  list(GET _art 1 _dir)
-  set(_except)
-  if(_name STREQUAL "newui")
-    # written by hand, or of PCX files not there (CMakeLists.txt there)
-    set(_except mkrTitleClose.ui mkrPPPConnectedSC.ui
-                mkrPPPUnconnectedSC.ui)
-  endif()
+  list(GET _art 1 _src)
+  list(GET _art 2 _gen)
+  list(GET _art 3 _except)
+  string(REPLACE "," ";" _except "${_except}")
   add_test(NAME library.art.${_name}
-           COMMAND ${CMAKE_COMMAND}
-                   -D SRC=${PROJECT_SOURCE_DIR}/Library/${_dir}
-                   -D GEN=${PROJECT_BINARY_DIR}/Library/${_dir}
-                   -D GLOB=*.ui "-DEXCEPT=${_except}"
+           COMMAND ${CMAKE_COMMAND} -D SRC=${_src} -D GEN=${_gen}
+                   -D GLOB=*.ui "-DEXCEPT=${_except}" -D LOOSE=1
                    -P ${PROJECT_SOURCE_DIR}/Port32/tools/same-text.cmake)
 endforeach()
 

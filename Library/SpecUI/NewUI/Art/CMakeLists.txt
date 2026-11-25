@@ -25,4 +25,5 @@ geos_cvtpcx(mkrPrint.ui C007-8.pcx -m1 -x0 -y0 -2 -nPrintSC -w48 -h30)
 geos_cvtpcx(mkrBack.ui C008-8.pcx -m1 -x0 -y0 -2 -nBackSC -w48 -h30)
 geos_cvtpcx(mkrDone.ui C009-8.pcx -m1 -x0 -y0 -2 -nDoneSC -w48 -h30)
 
-add_custom_target(newui_art ALL DEPENDS ${GEOS_CVTPCX_OUTPUTS})
+geos_art(newui EXCEPT mkrTitleClose.ui mkrPPPConnectedSC.ui
+         mkrPPPUnconnectedSC.ui)

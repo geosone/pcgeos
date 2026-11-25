@@ -7,3 +7,14 @@ add_subdirectory(Sound)
 add_subdirectory(User)
 add_subdirectory(SpecUI)
 add_subdirectory(Text)
+
+# The pictures (cvtpcx, cmake/GeosCvtpcx.cmake) of the libraries not in
+# C yet; those in C add their own.
+foreach(_art AccPnt Bitmap Chart Color ConView GrObj IDialC ParentC Pen
+             Pref Pref/HPrefCN Pref/Prefbg Pref/Prefint Pref/Prefintl
+             Pref/Prefkbd Pref/Preflang Pref/Preflf Pref/Preflink Pref/Preflo
+             Pref/Preflvl Pref/Prefmous Pref/Prefos Pref/PrefPntC Pref/Prefsnd
+             Pref/Preftd Pref/Prefts Pref/Prefvid Pref/TweakUI Spell Spline
+             Spreadsheet Styles)
+  add_subdirectory(${_art}/Art)
+endforeach()

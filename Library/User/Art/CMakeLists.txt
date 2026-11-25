@@ -254,4 +254,4 @@ geos_cvtpcx(mkrLastPage.ui PCX/last.pcx -2 -z -dTM -dTCGA -m13 -x0 -y0
 geos_cvtpcx(mkrGPCPreferencesTC.ui PR000-8.pcx -2 -Stool -m1 -x50 -y1 -w15
             -h15 -nGPCPreferencesTC)
 
-add_custom_target(user_art ALL DEPENDS ${GEOS_CVTPCX_OUTPUTS})
+geos_art(user)

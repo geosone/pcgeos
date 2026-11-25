@@ -431,6 +431,8 @@ typedef int Boolean;
 #define CVT_NO_BEGIN_END_STRING	0x00002000  /* Don't output GSBegin/EndString*/
 #define CVT_ALWAYS_COMPACT	0x00004000  /* Compact even if it won't make
 					     * the bitmap smaller (-P) */
+#define CVT_KEEP_RESOURCES	0x00008000  /* Resource start/end even
+					     * without a grid (-e) */
 
 #define CVT_MODE_FLAGS	(CVT_UIC_MODE|CVT_ESP_MODE|CVT_GOC_MODE)
 
@@ -2768,6 +2770,8 @@ The following parameters are useful only for converting single icons:\n\
     -q			Quiet: no report of each file's input parameters.\n\
     -P			Compact a bitmap even if that does not make it\n\
 			smaller (as long as it fits).\n\
+    -e			Put out resource start/end directives also for a\n\
+			bitmap of its own (not of a grid), as cvtpcx once did.\n\
 \n\
 \n");
     fprintf(stderr,
@@ -2974,6 +2978,9 @@ main(int argc, char **argv)
 	    case 'P':
 		flags |= CVT_ALWAYS_COMPACT;
 		break;
+	    case 'e':
+		flags |= CVT_KEEP_RESOURCES;
+		break;
 	    default:
 		fprintf(stderr, "option %s unknown\n", argv[ac]);
 		usage();
@@ -3032,7 +3039,9 @@ main(int argc, char **argv)
 			    format.width);
 		    exit(1);
 		}
-		flags |= CVT_NO_RESOURCES;
+		if (!(flags & CVT_KEEP_RESOURCES)) {
+		    flags |= CVT_NO_RESOURCES;
+		}
 	    }
 
 

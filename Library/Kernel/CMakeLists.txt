@@ -6,6 +6,8 @@ add_library(geos_kernel_objs OBJECT
   # the HostFS file system driver (CInclude/Internal/fsDriver.h), part
   # of the kernel until drivers are geodes
   ${PROJECT_SOURCE_DIR}/Driver/IFS/HostFS/hostfsDriver.c)
+# the pictures (cvtpcx)
+add_subdirectory(Art)
 add_subdirectory(Sys)
 add_subdirectory(Heap)
 add_subdirectory(Thread)

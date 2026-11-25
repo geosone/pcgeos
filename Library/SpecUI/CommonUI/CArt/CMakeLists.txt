@@ -208,4 +208,4 @@ geos_cvtpcx(mkrSystrayGrip.ui SystrayGrip.pcx -2 -nSystrayGrip -x0 -y0 -m7
 
 geos_cvtpcx(mkrExit.ui Exit.pcx -2 -nExitComputerSC -x0 -y0 -m13 -w32 -h32)
 
-add_custom_target(commonui_cart ALL DEPENDS ${GEOS_CVTPCX_OUTPUTS})
+geos_art(cart)
