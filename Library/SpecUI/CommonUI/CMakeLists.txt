@@ -1,4 +1,6 @@
 # The code the specific UIs share, in C beside the asm.
+# the pictures (cvtpcx)
+add_subdirectory(CArt)
 add_subdirectory(CMain)
 add_subdirectory(CUtils)
 add_subdirectory(CComp)

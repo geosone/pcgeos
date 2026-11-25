@@ -7,6 +7,9 @@ endif()
 
 set(sp ${CMAKE_CURRENT_SOURCE_DIR})
 
+# the pictures (cvtpcx)
+add_subdirectory(Art)
+
 # the page sizes of libTables.asm (papergen, Tools/papergen)
 set(spool_paper ${CMAKE_CURRENT_BINARY_DIR}/libPaperTables.c)
 add_custom_command(OUTPUT ${spool_paper}

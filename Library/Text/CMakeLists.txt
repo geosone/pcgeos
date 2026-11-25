@@ -7,6 +7,8 @@ if(NOT GEOS_BUILD_GEODES)
   return()
 endif()
 
+# the pictures (cvtpcx)
+add_subdirectory(Art)
 add_subdirectory(Text)
 add_subdirectory(TextStorage)
 add_subdirectory(TextAttr)

@@ -6,5 +6,10 @@ if(NOT GEOS_BUILD_GEODES)
   return()
 endif()
 
+# the pictures of the other specific UIs (cvtpcx), which the .ui files
+# of CommonUI include
+add_subdirectory(ISUI/Art)
+add_subdirectory(NewUI/Art)
+add_subdirectory(PM/Art)
 add_subdirectory(CommonUI)
 add_subdirectory(Motif)
