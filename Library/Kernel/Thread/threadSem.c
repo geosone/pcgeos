@@ -40,6 +40,31 @@ void KSemV(KSem *s)
     ghal_crit_leave();
 }
 
+/* n more (the VSem of n units at once, as the stream driver's bulk
+ * copies do): the threads waiting for them are woken */
+void KSemAdd(KSem *s, sword n)
+{
+    sword old;
+
+    ghal_crit_enter();
+    old = s->S_value;
+    s->S_value = (sword) (old + n);
+    for (; old < 0 && n > 0; old++, n--)
+	ThreadWakeOne(s);
+    ghal_crit_leave();
+}
+
+/* every thread waiting woken (VAllSem of semInt.def) */
+void KSemVAll(KSem *s)
+{
+    ghal_crit_enter();
+    while (s->S_value < 0) {
+	s->S_value++;
+	ThreadWakeOne(s);
+    }
+    ghal_crit_leave();
+}
+
 static HandleEntry *SemOf(Handle h, byte lockFlag)
 {
     HandleEntry *he = HandleEntryOf(h);

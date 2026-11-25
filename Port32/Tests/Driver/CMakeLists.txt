@@ -14,6 +14,10 @@ geos_add_test(driver.mouse test_mouse)
 geos_test_program(test_power EMBED hostpwr)
 geos_add_test(driver.power test_power)
 
+# the stream driver (Driver/Stream/stream.c): buffers, notifiers, threads
+geos_test_program(test_stream EMBED stream)
+geos_add_test(driver.stream test_stream)
+
 # the C host video driver (Driver/Video) on ghal_display
 geos_test_program(test_video EMBED hostvid)
 geos_add_test(driver.video test_video DISPLAY)

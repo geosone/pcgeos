@@ -1445,6 +1445,45 @@ It also checks the eight on/off routines, the long term idle,
 unsupported calls, and that `GeodeFreeDriver` unhooks. The test covers
 the notifications too (§13u).
 
+### 7.8 The stream driver (`Driver/Stream/stream.c`, P4)
+
+`stream.geo` (beside `stream.asm`) makes the streams other drivers work
+on: a circular buffer of up to 32767 bytes in a block of its own,
+reader and writer side each with a counting semaphore (bytes to read,
+room to write), a lock, an error and a data notifier with a threshold.
+`CInclude/Internal/strDrInt.h` is `strDrInt.def` in C: `StreamData`
+with `SD_reader`/`SD_writer` (`StreamSideData`), the notifiers, the
+state; the sound library and the sound drivers use it directly.
+
+- The token of a stream is the handle of its block (the asm: the
+  segment, or a virtual segment for a movable block). `StreamDataOf`
+  gives the structure; `SSD_ptr` and `SD_max` stay offsets in the
+  block, the buffer starts at `SD_DATA_OFFSET`.
+- The semaphores in the structure are the kernel's (`KSem`,
+  `CInclude/Internal/semInt.h`): `KSemInit`, `KSemP` (timeout 0 is the
+  asm's `PTimedSem` with 0), `KSemV`, `KSemAdd` (n units at once, for
+  the bulk copies), `KSemVAll` (`VAllSem`), exported to drivers.
+  Interrupts off is `ghal_crit`. `SD_closing`, the asm's queue the
+  destroyer blocks on, is such a semaphore: a wake-up before the block
+  is kept, as `WakeUpLongQueue` kept it.
+- Notification routines are C functions of `streamC.h`'s types
+  (`StreamGeneralNotifyRoutine`, `StreamSpecialDataNotifyRoutine` for a
+  threshold of 1); the asm passed `dx` = token and `bx` = segment as
+  well. A message carries `StreamNotifyMessageParams` (count or error,
+  token, side). `DR_STREAM_SET_NOTIFY` takes the routine in
+  `DR_farPtr`, the destination of a message in `DR_cx` (handle) and
+  `DR_dx` (chunk).
+- The driver is a library too (`stream32.gp`: `type driver, library`):
+  `StreamNotify`, `StreamWriteDataNotify`, `StreamReadDataNotify`,
+  `StreamShutdown`, `StreamFree` and `StreamStrategy` are imported with
+  `library stream` (glue's `driver stream`; gpgeode reads `library`
+  lines only).
+- ctest `driver.stream`: creation, bulk and byte transfers across the
+  end of the buffer, non-blocking short transfers, data notifiers with
+  a threshold and the ack, the special reader, errors, flush, blocking
+  transfers between two threads, destroying with `STREAM_LINGER` and
+  with `STREAM_DISCARD` while a reader waits.
+
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 
 The C kernel starts with the handle table and the memory block API of

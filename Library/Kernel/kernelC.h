@@ -309,6 +309,9 @@ ThreadHandle KernelThisThread(void);
 void  KSemInit(KSem *s, sword value);
 SemaphoreError KSemP(KSem *s, dword timeout);
 void  KSemV(KSem *s);
+/* (for drivers too, exported: CInclude/Internal/semInt.h) */
+void  KSemAdd(KSem *s, sword n);
+void  KSemVAll(KSem *s);
 /* scheduler side (threadThread.c), inside ghal_crit: block the running
  * thread on s->S_queue (returns non-zero if it timed out); wake the best
  * thread of s->S_queue */

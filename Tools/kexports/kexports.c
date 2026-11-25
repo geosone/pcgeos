@@ -42,6 +42,9 @@ static const char *const port32Exports[] = {
 static const char *const port32LateExports[] = {
     "GrLoadGStringPtr", "ThreadPrivData", "ObjGetMessageParams",
     "ObjSetMessageParams", "QueuePeekLastMessage",
+    /* semaphores in a structure of a driver (Internal/semInt.h: the
+     * stream driver's StreamData) */
+    "KSemInit", "KSemP", "KSemV", "KSemAdd", "KSemVAll",
     NULL
 };
 /* GHAL host services the drivers on the GHAL use (Port32/GHAL-Concept.md
