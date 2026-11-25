@@ -1,0 +1,69 @@
+/*
+ * genAppMisc.goc -- UIApplicationClass, the UI's own application object
+ * (after genAppMisc.asm and genAppCommonIACP.asm): its geode's parent
+ * object is the system object (so that a system modal dialog of the UI
+ * gets the system's focus through it), a focus below it is given the
+ * application's focus, keys that come up to it are eaten (but F1, the
+ * help), and when nothing below it has the focus any more it lets go
+ * of its own and the system finds the focus again.
+ *
+ * Not yet: the hard icon bar's keyboard (MSG_META_NOTIFY,
+ * GWNT_HARD_ICON_BAR_FUNCTION and GWNT_STARTUP_INDEXED_APP: the
+ * floating keyboard is not ported), the mouse and ink messages ignored
+ * once the specific UI is gone on a shutdown (UIAppPreventCrashOnShutdown).
+ */
+@include "uiInt.goh"
+@include <Objects/gSysC.goh>
+#include <string.h>
+
+@classdecl UIApplicationClass;
+
+/* UIAppSpecBuild: the system object the geode's parent object */
+@method UIApplicationClass, MSG_SPEC_BUILD
+{
+    @callsuper();
+    WinGeodeSetParentObj(MemOwner(OptrToHandle(oself)),
+			 UserGetSystemObject());
+}
+
+/* UIAppAlterFTVMCExcl: a focus below the application (once the request
+ * of an object below it is done) gets the application's focus */
+@method UIApplicationClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    ObjectAndGrabParams q;
+
+    @callsuper();
+    if (flags & MAEF_NOT_HERE)
+	return;
+    memset(&q, 0, sizeof(q));
+    @call oself::MSG_VIS_FUP_QUERY_FOCUS_EXCL(&q);
+    if (q.OAGP_object)
+	@call oself::MSG_META_GRAB_FOCUS_EXCL();
+}
+
+/* UIAppFupKbdChar: every key eaten but F1 (help in the UI's dialogs) */
+@method UIApplicationClass, MSG_META_FUP_KBD_CHAR
+{
+    if (character == ((CS_CONTROL << 8) | VC_F1))
+	return @callsuper();
+    return TRUE;
+}
+
+/* UIAppNotifyNoFocusWithinNode: no focus below the application (not
+ * while it attaches or detaches, not once it is not usable): it lets
+ * go of its own, the system finds one */
+@method UIApplicationClass, MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE
+{
+    ObjectAndGrabParams q;
+
+    if ((pself->GAI_states & (AS_ATTACHING | AS_DETACHING |
+			      AS_QUIT_DETACHING | AS_TRANSPARENT_DETACHING)) ||
+	!(pself->GI_states & GS_USABLE))
+	return;
+    memset(&q, 0, sizeof(q));
+    @call oself::MSG_VIS_FUP_QUERY_FOCUS_EXCL(&q);
+    if (q.OAGP_object)
+	return;
+    @call oself::MSG_META_RELEASE_FOCUS_EXCL();
+    (void) UserCallSystem(MSG_META_ENSURE_ACTIVE_FT, NULL, 0, NULL, 0);
+}

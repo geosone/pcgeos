@@ -45,6 +45,7 @@ export GenValueClass
 export GenGlyphClass
 export GenProcessClass
 export UserClass
+export UIApplicationClass
 
 # the Vis routines in C (visC.goh, GEOS_PORT32)
 export VisCheckIfVisGrown

@@ -176,6 +176,7 @@ typedef struct {
 } UBState;
 
 UBState ubState;
+static MemHandle lowDiskRes;	/* the dialog of a full disk */
 
 #define UBCHECK(c) \
     do { ubState.UBS_checks++; if (!(c)) { \
@@ -4211,6 +4212,7 @@ static void UBClickMenu(word n)
 	UBCHECK(ubState.UBS_low[0] == DQS_DELAYED);
 	res = ((OLDocumentInstance *) ObjDerefVis(doc))->OLDI_saveErrorRes;
 	ubState.UBS_low[1] = res != 0;
+	lowDiskRes = res;
 	UBCHECK(res != 0);
 	ubState.UBS_low[2] = ObjVarFindData(doc,
 		TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE) != NULL;
@@ -4227,6 +4229,26 @@ static void UBClickMenu(word n)
 	 * dirty, as on DOS16; answered yes) */
 	word id;
 
+	{
+	    /* the dialog is system modal: the system's focus is the UI's
+	     * application, whose focus is the dialog, whose focus is its
+	     * first trigger (the default ring) */
+	    optr uiApp = GeodeGetAppObject((GeodeHandle)
+					   SysGetInfo(SGIT_UI_PROCESS));
+	    optr f = 0, af = 0, sf = 0, *sfp = &sf;
+
+	    TimerSleep(10);
+	    (void) @call uiApp::MSG_META_GET_FOCUS_EXCL(&af);
+	    (void) UserCallSystem(MSG_META_GET_FOCUS_EXCL, &sfp, sizeof(sfp),
+				  NULL, 0);
+	    UBCHECK(sf == uiApp);
+	    UBCHECK(af && OptrToHandle(af) == lowDiskRes);
+	    if (af)
+		(void) @call af::MSG_META_GET_FOCUS_EXCL(&f);
+	    UBCHECK(f != 0);
+	    ubState.UBS_low[7] = (sf == uiApp) | ((af != 0) << 1) |
+		((f != 0) << 2);
+	}
 	ubDiskFull = FALSE;
 	ubAnswer = IC_YES;
 	(void) TimerStart(TIMER_EVENT_ONE_SHOT, @UBApp, 20, MSG_UB_ANSWER, 0,

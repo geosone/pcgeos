@@ -5366,6 +5366,17 @@ visual classes of `Library/User/Vis`:
   - fixed with it: `GenCheckIfFullyUsable` and `GenCheckIfFullyEnabled`
     stop at the system object, as in the asm (the screens and fields
     are usable below it).
+- **The UI's application** (`Gen/genAppMisc.goc`, `UIApplicationClass`
+  after `genAppMisc.asm` and `genAppCommonIACP.asm`): `UIApp`'s geode
+  has the system object as its parent object, so a system modal dialog
+  of the UI (the dialog of a full disk) gets the system's focus through
+  the UI's application, and its first trigger the focus ring; a focus
+  below the application gets its focus; keys that come up to it are
+  eaten but F1; with no focus below it any more it lets go of its own
+  and the system finds one. Not yet: the hard icon bar's keyboard,
+  the mouse and ink messages ignored after the specific UI is freed
+  on a shutdown. ctest `library.ui.boot` (step 208) checks the focus
+  path system, UI application, dialog, trigger.
 - **The sounds** (`User/userSound.goc` after `userUtils.asm` and
   `userMain.asm`): the UI loads `sound.geo` from SYSTEM at its attach
   (`MSG_USER_UPDATE_SOUND_PARAMS`, sent again when `[ui] sound` or
@@ -6452,7 +6463,15 @@ are left out), the constants, the variables and the routines.
     has no C typedef yet (`OLGenSaveWindowInfo` locally). The UI
     exports `VisSpecBuildSetEnabledState`, `VisGetVisParent` and
     `VisConvertRatioToCoords` (`visC.goh`). A window class scans its
-    geometry hints in `MSG_META_INITIALIZE`, as `cwinDialog`.
+    geometry hints in `MSG_META_INITIALIZE`, as `cwinDialog`. Modal
+    popups as in the asm: `WIN_PRIO_MODAL` with a save under, a system
+    modal one in `LAYER_PRIO_MODAL` on the screen's window in a layer
+    of its block (`GetCoreWinOpenParams`); they ask for the focus with
+    `MAEF_MODAL` (else the application's non-modal cache takes the
+    request); `OpenWinUpdateModalStatus` tells the system
+    (`MSG_GEN_SYSTEM_NOTIFY_SYS_MODAL_WIN_CHANGE`) and the application
+    (`MSG_GEN_APPLICATION_NOTIFY_MODAL_WIN_CHANGE`) when one comes to
+    the top, goes behind or closes.
   - `OLMenuedWinClass` (`CWin/cwinMenuedWin.goc`,
     `Internal/SpecUI/olMenuedWinClass.goh`), `OLBaseWinClass`
     (`CWin/cwinBase.goc`, `olBaseWinClass.goh`), `OLGadgetAreaClass`

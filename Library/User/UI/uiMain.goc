@@ -4,8 +4,8 @@
  * default screen, and the system field of the first screen,
  * SystemField0 (userScreen.goc).
  *
- * Port32: UIApp is a GenApplicationClass (UIApplicationClass adds
- * nothing); not yet its children and active list (the help objects
+ * UIApp is a UIApplicationClass (Gen/genAppMisc.goc).  Not yet its
+ * children and active list (the help objects
  * SysHelpObject, SysModalHelpObject), the handwriting box, the dialogs
  * of uiMain.ui (state files, shutdown status, remote transfer).
  */
@@ -14,7 +14,7 @@
 
 @start ApplicationUI;
 
-@object GenApplicationClass UIApp = {
+@object UIApplicationClass UIApp = {
     GI_attrs = 0;			/* not targetable */
     GAI_states = AS_AVOID_TRANSPARENT_DETACH;	/* not focusable, modelable */
     GAI_optFlags = AOF_MULTIPLE_INIT_FILE_CATEGORIES;

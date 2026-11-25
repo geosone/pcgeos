@@ -79,6 +79,12 @@ void VisAlterInputFlow(optr obj, byte flags, byte grabType);
 @class VisEmptyClass, MetaClass, master;
 @endc
 
+/* UIApplicationClass (uiConstant.def): the UI's own application,
+ * Gen/genAppMisc.goc */
+@include <Objects/gAppC.goh>
+@class UIApplicationClass, GenApplicationClass;
+@endc
+
 /* AddOurBoundsToUpdateRegion */
 void VisAddOurBoundsToUpdateRegion(optr obj, VisAddRectFlags flags);
 Boolean VisShouldObjBeDrawn(optr obj, DrawFlags flags);

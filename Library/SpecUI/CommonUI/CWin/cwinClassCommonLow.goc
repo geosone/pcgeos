@@ -94,15 +94,30 @@ void GetCoreWinOpenParams(optr o, WinOpenParams *p)
     MemHandle *h;
 
     p->WOP_layerID = GeodeGetProcessHandle();
-    f = winPriorityTable[w->OLWI_type];
-    if (f == WIN_PRIO_POPUP) {
-	f |= WPF_SAVE_UNDER;
-	if (w->OLWI_specState & OLWSS_PINNED)
-	    f = WIN_PRIO_COMMAND;
+    if ((w->OLWI_moreFixedAttr & OWMFA_IS_POPUP) &&
+	(((OLPopupWinInstance *) w)->OLPWI_flags &
+	 (OLPWF_APP_MODAL | OLPWF_SYS_MODAL))) {
+	/* modal: saved under; system modal above the floating windows,
+	 * on the screen, in a layer of its block */
+	f = WIN_PRIO_MODAL | WPF_SAVE_UNDER;
+	if (((OLPopupWinInstance *) w)->OLPWI_flags & OLPWF_SYS_MODAL) {
+	    f |= LAYER_PRIO_MODAL << WPF_LAYER_PRIORITY_OFFSET;
+	    p->WOP_parent = GetScreenWin();
+	    p->WOP_layerID = OptrToHandle(o);
+	}
+    } else {
+	f = winPriorityTable[w->OLWI_type];
+	if (f == WIN_PRIO_POPUP) {
+	    f |= WPF_SAVE_UNDER;
+	    if (w->OLWI_specState & OLWSS_PINNED)
+		f = WIN_PRIO_COMMAND;
+	}
     }
-    /* the application's custom layer priority (a desk accessory) */
+    /* the application's custom layer priority (a desk accessory); not
+     * for a system modal window */
     app = GeodeGetAppObject(0);
-    if (app) {
+    if (app && (f & WPF_LAYER_PRIORITY) !=
+	(LAYER_PRIO_MODAL << WPF_LAYER_PRIORITY_OFFSET)) {
 	ObjLockObjBlock(OptrToHandle(app));
 	CustomLayerPriority(app, &f);
 	MemUnlock(OptrToHandle(app));
@@ -230,11 +245,25 @@ static void Detaching(optr o)
  * Bringing to the top
  * ------------------------------------------------------------------- */
 
-/* OpenWinUpdateModalStatus: a modal popup tells the application (and
- * the system); Port32: no popups yet */
+/* OpenWinUpdateModalStatus: a modal popup tells the application, a
+ * system modal one the system first (cwinClassOther.asm) */
 void OpenWinUpdateModalStatus(optr o)
 {
-    (void) o;
+    OLPopupWinInstance *p = (OLPopupWinInstance *) ObjDerefVis(o);
+    word flags;
+    optr app;
+
+    if (!(p->OLWI_moreFixedAttr & OWMFA_IS_POPUP))
+	return;
+    flags = p->OLPWI_flags;
+    if (!(flags & (OLPWF_SYS_MODAL | OLPWF_APP_MODAL)))
+	return;
+    if (flags & OLPWF_SYS_MODAL)
+	(void) UserCallSystem(MSG_GEN_SYSTEM_NOTIFY_SYS_MODAL_WIN_CHANGE,
+			      NULL, 0, NULL, 0);
+    app = GeodeGetAppObject(0);
+    if (app)
+	@call app::MSG_GEN_APPLICATION_NOTIFY_MODAL_WIN_CHANGE();
 }
 
 /*

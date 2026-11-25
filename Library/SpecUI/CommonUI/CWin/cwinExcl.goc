@@ -230,7 +230,10 @@ static void MarkFocusAreaInvalidIfNoOtherExcl(optr o, word otherOffset)
     f = MAEF_OD_IS_WINDOW | MAEF_GRAB | MAEF_FOCUS | MAEF_NOT_HERE;
     if (pself->OLWI_fixedAttr & OWFA_IS_MENU)
 	f |= MAEF_OD_IS_MENU_RELATED;
-    /* a modal popup: MAEF_MODAL (Port32: no popups yet) */
+    if ((pself->OLWI_moreFixedAttr & OWMFA_IS_POPUP) &&
+	(((OLPopupWinInstance *) pself)->OLPWI_flags &
+	 (OLPWF_APP_MODAL | OLPWF_SYS_MODAL)))
+	f |= MAEF_MODAL;
     @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, f);
 }
 

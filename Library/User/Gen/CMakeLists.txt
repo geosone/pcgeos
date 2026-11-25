@@ -3,6 +3,7 @@ geos_sources(ui_goc
   genUtils.goc
   genClass.goc
   genApplication.goc
+  genAppMisc.goc
   genSystem.goc
   genScreen.goc
   genField.goc
