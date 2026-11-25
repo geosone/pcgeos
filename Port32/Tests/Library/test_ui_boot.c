@@ -297,7 +297,7 @@ int main(int argc, char **argv)
 	step(i);
 	Shot(i);
     }
-    /* (101 to 111 are the reference mode's) */
+    /* (101 to 113 are the reference mode's) */
     for (i = 200; i <= 209; i++) {
 	if (i == 209)
 	    /* (the close of step 208 goes on on the application's

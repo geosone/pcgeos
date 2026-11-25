@@ -24,6 +24,9 @@ VARIANT picks what is on the screen:
    10  the file selector's dialog over variant 1 (the application makes
        the files it shows: DOCUMENT\\FSTEST)
    11  the File menu open, with a document control in it (no document)
+   12  the dialog of a full disk over variant 1 (a document of the
+       document group, dirty, whose save fails as on a full disk, closed)
+   13  "save changes?" over variant 1 (the same document closed)
 """
 import os, re, sys
 
@@ -43,6 +46,11 @@ tree = tree.replace("@object UBGadgetClass ", "@object URGadgetClass ")
 tree = tree.replace("@object UBCtlClass ", "@object GenInteractionClass ")
 tree = tree.replace("    GCI_output = process;\n", "")
 tree = tree.replace("@object GenToolGroupClass ", "@object GenInteractionClass ")
+tree = tree.replace("&UBDocClass", "&URDocClass")
+tree = tree.replace("@object GenDocumentGroupClass UBDocGrp", "@object URDocGrpClass UBDocGrp")
+# (objects in no tree: the IACP ends, the file change listener)
+tree = tree.replace("@object UBIacpClass ", "@object GenGlyphClass ")
+tree = tree.replace("@object UBWatchClass ", "@object GenGlyphClass ")
 tree = tree.replace("    GTGI_controller = @UBCtl;\n", "")
 keep = ("MSG_UB_QUERY_ITEM",)
 lines = []
@@ -66,7 +74,9 @@ goc = r'''/*
 @include <Objects/vTextC.goh>
 @include <Objects/gFSelC.goh>
 @include <Objects/gDocCtrl.goh>
+@include <Objects/gDocC.goh>
 #include <file.h>
+#include <vm.h>
 #include <uDialog.h>
 
 @class URProcessClass, GenProcessClass;
@@ -78,6 +88,61 @@ goc = r'''/*
 @class URGadgetClass, GenGadgetClass;
 @endc
 @classdecl URGadgetClass;
+
+/* a document whose save fails as on a full disk */
+@class URDocClass, GenDocumentClass;
+@endc
+@classdecl URDocClass;
+
+static Boolean urDiskFull;
+
+@method URDocClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE
+{
+    if (urDiskFull) {
+	*error = VM_UPDATE_INSUFFICIENT_DISK_SPACE;
+	return TRUE;
+    }
+    return @callsuper();
+}
+
+/* the document group: a dirty document made and closed (queued, the
+ * dialog is up after it) on the group's own thread */
+@class URDocGrpClass, GenDocumentGroupClass;
+    @message void MSG_UR_NEW_DOC();
+@endc
+@classdecl URDocGrpClass;
+
+@method URDocGrpClass, MSG_UR_NEW_DOC
+{
+#if %(variant)d >= 12
+    DocumentCommonParams p;
+    optr doc;
+    byte *b = (byte *) &p;
+    word i;
+
+    FilePushDir();
+    FileSetStandardPath(SP_DOCUMENT);
+    (void) FileDelete("URDOC");
+    FilePopDir();
+    /* (no memset, memcpy: no ansic library here) */
+    for (i = 0; i < sizeof(p); i++)
+	b[i] = 0;
+    for (i = 0; i < 6; i++)
+	p.DCP_name[i] = "URDOC"[i];
+    p.DCP_diskHandle = SP_DOCUMENT;
+    doc = @call oself::MSG_GEN_DOCUMENT_GROUP_NEW_DOC(&p);
+    if (doc) {
+	urDiskFull = TRUE;
+	@call doc::MSG_GEN_DOCUMENT_MARK_DIRTY();
+#if %(variant)d == 12
+	/* (failed before: the close saves without asking) */
+	((GenDocumentInstance *) ObjDerefGen(doc))->GDI_attrs |=
+	    GDA_SAVE_FAILED;
+#endif
+	@send, forceQueue doc::MSG_GEN_DOCUMENT_CLOSE(0);
+    }
+#endif
+}
 
 @method URGadgetClass, MSG_VIS_RECALC_SIZE
 {
@@ -104,6 +169,15 @@ goc = r'''/*
     *p++ = (char) ('0' + item %% 10);
     *p = 0;
     @call list::MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_TEXT(item, t);
+}
+
+/* the UI thread (runs the objects) with a bigger stack than the
+ * default 2000 bytes, as document applications have it: creating a
+ * document overflows the default */
+@method URProcessClass, MSG_PROCESS_CREATE_UI_THREAD
+{
+    stackSize = INTERFACE_THREAD_DEF_STACK_SIZE + 2000;
+    return @callsuper();
 }
 
 @method URProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
@@ -148,7 +222,7 @@ static void URClickMenu(word n)
 
 @method URProcessClass, MSG_UR_SHOW
 {
-#if %(variant)d == 1 || %(variant)d == 4 || %(variant)d == 10
+#if %(variant)d == 1 || %(variant)d == 4 || %(variant)d == 10 || %(variant)d >= 12
     @call UBDoc1::MSG_GEN_BRING_TO_TOP();
     @call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
 #endif
@@ -216,6 +290,14 @@ static void URClickMenu(word n)
 	@call UBFiles::MSG_GEN_INTERACTION_INITIATE();
     }
 #endif
+#if %(variant)d >= 12
+    /* (the document group's own thread makes the document: goc passes
+     * at most 126 bytes of a structure to another thread, and
+     * DocumentCommonParams has more) */
+    @call UBFile::MSG_GEN_ADD_CHILD(@UBDocCtl, CCO_FIRST);
+    @call UBDocCtl::MSG_GEN_SET_USABLE(VUM_NOW);
+    @send UBDocGrp::MSG_UR_NEW_DOC();
+#endif
 #if %(variant)d == 4
     (void) UserStandardDialog(NULL, NULL, NULL, "42", "Error \001 happened.",
 		(CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
@@ -239,6 +321,8 @@ library text
 resource UBAppObjects ui-object
 resource UBAskTemplate ui-object
 export URGadgetClass
+export URDocClass
+export URDocGrpClass
 '''
 os.makedirs(out, exist_ok=True)
 open(os.path.join(out, "uiref.goc"), "w").write(goc)

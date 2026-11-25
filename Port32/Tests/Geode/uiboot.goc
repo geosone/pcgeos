@@ -4022,7 +4022,7 @@ static void UBClickMenu(word n)
 	DocDelete("UBDOC");
 	DocDelete("UBDOC2");
 	break;
-    /* (101 to 111 are the reference mode's, below) */
+    /* (101 to 113 are the reference mode's, below) */
     case 200: {
 	/* a copy of the document elsewhere; then the document moves */
 	DocumentCommonParams p;
@@ -4304,6 +4304,31 @@ static void UBClickMenu(word n)
 	@call UBPrimary::MSG_GEN_UPDATE_VISUAL(VUM_NOW);
 	UBClickMenu(step - 106);
 	break;
+    case 112:
+    case 113: {
+	/* a dirty document of the group closed (queued): the dialog of a
+	 * full disk (its save fails; failed before, so the close does not
+	 * ask) or "save changes?" */
+	DocumentCommonParams p;
+	optr doc;
+
+	@call UBDoc1::MSG_GEN_BRING_TO_TOP();
+	@call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	DocDelete("URDOC");
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "URDOC", 6);
+	doc = @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_NEW_DOC(&p);
+	if (doc) {
+	    ubDiskFull = TRUE;
+	    @call doc::MSG_GEN_DOCUMENT_MARK_DIRTY();
+	    if (step == 112)
+		((GenDocumentInstance *) ObjDerefGen(doc))->GDI_attrs |=
+		    GDA_SAVE_FAILED;
+	    @send, forceQueue doc::MSG_GEN_DOCUMENT_CLOSE(0);
+	}
+	break;
+    }
     case 111:
 	/* the File menu with a document control in it */
 	@call UBDoc1::MSG_GEN_BRING_TO_TOP();
