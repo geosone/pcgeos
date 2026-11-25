@@ -93,13 +93,13 @@ static GenApplicationInstance *GenApp(optr oself)
 }
 
 /* OLApplicationUnwantedKbdEvent: no one takes the key: a beep on the
- * first press (not yet) */
+ * first press */
 @extern method OLApplicationClass, MSG_VIS_CONTENT_UNWANTED_KBD_EVENT
 {
     (void) character;
     (void) state;
-    (void) flags;	/* UserStandardSound(SST_NO_INPUT) on the first
-			 * press: not yet in the C UI (no sound driver) */
+    if (flags & CF_FIRST_PRESS)
+	UserStandardSound(SST_NO_INPUT);
 }
 
 /* ---------------------------------------------------------------------

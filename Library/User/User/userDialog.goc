@@ -24,8 +24,7 @@
  * Port32: events hold their parameters, so one that waits is posted as
  * it is.  Not yet: the transparent launch model
  * (MSG_GEN_FIELD_ACTIVATE_DISMISS), the application brought to the top
- * by a new IACP connection (no IACP), the sound of an error or a
- * warning (UserStandardSound).
+ * by a new IACP connection (no IACP).
  */
 @include "uiInt.goh"
 @include <Objects/gInterC.goh>
@@ -249,6 +248,15 @@ word _pascal UserStandardDialog(char *helpContext, char *customTriggers,
 	if (dialogFlags & CDBF_SYSTEM_MODAL)
 	    *(byte *) ObjVarAddData(dlg, ATTR_GEN_HELP_TYPE, 1) =
 						HT_SYSTEM_MODAL_HELP;
+    }
+    /* the sound of an error or a warning (BuildAndDoDialogCommon) */
+    switch ((dialogFlags & CDBF_DIALOG_TYPE) >> CDBF_DIALOG_TYPE_OFFSET) {
+    case CDT_ERROR:
+	UserStandardSound(SST_ERROR);
+	break;
+    case CDT_WARNING:
+	UserStandardSound(SST_WARNING);
+	break;
     }
     response = UserDoDialog(dlg);
     UserDestroyDialog(dlg);

@@ -15,8 +15,7 @@
  * chunk (the asm substitutes in the chunk, and again in what it
  * substituted); MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG has no help
  * context in C: who builds adds it (OLStdDialogHelp here,
- * UserStandardDialog in the UI).  Not yet: the sounds
- * (UserStandardSound).
+ * UserStandardDialog in the UI).
  */
 @include "cGeode.goh"
 @include "CSpec/cspecStdDialogArt.goh"
@@ -276,6 +275,15 @@ static void DoStandardDialog(optr oself, word timeout, Boolean timed,
     ad->AD_message = MSG_OL_APP_DO_DIALOG_RESPONSE;
     *(word *) (ad + 1) = d;
     @call dlg::MSG_GEN_INTERACTION_INITIATE();
+    /* the sound of an error or a warning */
+    switch ((dialogFlags & CDBF_DIALOG_TYPE) >> CDBF_DIALOG_TYPE_OFFSET) {
+    case CDT_ERROR:
+	UserStandardSound(SST_ERROR);
+	break;
+    case CDT_WARNING:
+	UserStandardSound(SST_WARNING);
+	break;
+    }
 }
 
 @extern method OLApplicationClass, MSG_GEN_APPLICATION_DO_STANDARD_DIALOG

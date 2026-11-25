@@ -6,6 +6,7 @@ geos_sources(ui_goc
   userMain.goc
   userScreen.goc
   userUtils.goc
+  userSound.goc
   userDialog.goc
   userDocumentSave.goc
   userLibrary.goc)

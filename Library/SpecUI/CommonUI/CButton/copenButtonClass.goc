@@ -483,7 +483,8 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
 	return FALSE;
     if (OpenButtonCheckIfFullyEnabled(oself))
 	@call oself::MSG_OL_BUTTON_KBD_ACTIVATE();
-    /* else UserStandardSound(SST_NO_INPUT) (Port32: no sound yet) */
+    else
+	UserStandardSound(SST_NO_INPUT);
     return TRUE;
 }
 
@@ -494,8 +495,9 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
     if (!GenCheckKbdAccelerator(oself, charValue, charFlagsAndShiftState,
 				toggleStateAndScanCode))
 	return FALSE;
-    /* disabled: UserStandardSound(SST_NO_INPUT) (Port32: no sound
-     * yet) */
+    if (((GenInstance *) ObjDerefGen(oself))->GI_states & GS_ENABLED)
+	return FALSE;			/* GenClass activates it */
+    UserStandardSound(SST_NO_INPUT);	/* disabled */
     return TRUE;
 }
 

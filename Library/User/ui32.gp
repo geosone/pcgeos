@@ -171,6 +171,7 @@ export GenSetupTrackingArgs
 export GenReturnTrackingArgs
 export UserCheckAcceleratorChar
 export UserCheckInsertableCtrlChar
+export UserStandardSound
 export GenTextClass
 export GenGadgetClass
 export UserDoDialog
@@ -222,6 +223,7 @@ export IACPGetServerNumber
 export IACPLocateServer
 export IACPBindToken
 export IACPUnbindToken
+export UserStopStandardSound
 
 resource ApplicationUI object
 resource SystemFieldUI object

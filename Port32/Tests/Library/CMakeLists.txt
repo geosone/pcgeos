@@ -36,7 +36,10 @@ geos_add_test(library.ui.motif test_ui_motif DISPLAY)
 # the UI booted with the Motif specific UI and an application of
 # "[ui] execOnStartup" with a document window
 geos_test_program(test_ui_boot
-                  EMBED ui uiboot motif hostvid vidmem berkeley text)
+                  EMBED ui uiboot motif hostvid vidmem berkeley text
+                        sound stream tsnddrv
+                  INCLUDES ${PROJECT_SOURCE_DIR}/CInclude/Internal
+                           ${GEOS_TESTS_SRC}/Geode)
 geos_add_test(library.ui.boot test_ui_boot DISPLAY)
 
 # the PostScript translation library (Library/Trans/Graphics/Vector/EPS),

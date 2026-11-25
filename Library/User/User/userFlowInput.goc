@@ -36,7 +36,7 @@
  *   - not yet: ink (pen mode, MSG_FLOW_INK_REPLY and the press-and-hold
  *     timer; ink notifications go to the current geode like the
  *     others), the quick transfer's move/copy keys (UpdateMoveCopy),
- *     UserStandardSound for input nobody takes, the hard icon events'
+ *     the hard icon events'
  *     duplicate check (MF_CUSTOM), and what needs GenSystemClass: the
  *     geode clicked in brought to the top (DefaultBehaviorOnMousePress
  *     only grabs the mouse), the default field of MSG_FLOW_SET_SCREEN,
@@ -237,8 +237,11 @@ static void SendMouse(optr oself, Message msg, sword x, sword y, word state)
     word mf = MF_FORCE_QUEUE;
 
     state |= UIFA_IN << 8;
-    if (!dest)
-	return;		/* UserStandardSound(SST_NO_INPUT) on a press */
+    if (!dest) {
+	if (state & BI_PRESS)
+	    UserStandardSound(SST_NO_INPUT);	/* nobody takes it */
+	return;
+    }
     p.VMP_ret = NULL;
     p.VMP_x = x;
     p.VMP_y = y;
@@ -795,8 +798,11 @@ static void UpdateConstrainState(optr oself, word character, word flags)
 	return;
     UpdateConstrainState(oself, character, flags);
     dest = FlowPart(oself)->FI_activeKbdGrab.KG_OD;
-    if (!dest)
-	return;		/* UserStandardSound(SST_NO_INPUT) on a first press */
+    if (!dest) {
+	if (flags & CF_FIRST_PRESS)
+	    UserStandardSound(SST_NO_INPUT);	/* nobody takes it */
+	return;
+    }
     CObjMessageP((flags & CF_REPEAT_PRESS)
 		 ? MF_FORCE_QUEUE | MF_CAN_DISCARD_IF_DESPERATE |
 		   MF_CHECK_DUPLICATE

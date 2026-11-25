@@ -9,9 +9,6 @@
  * the dialog down and goes on with what it was doing (the message kept
  * in TEMP_OL_DOCUMENT_NO_DISK_SPACE_MESSAGE).
  *
- * Not yet: the error beeps (UserStandardSound, which needs the sound
- * library).
- *
  * Motif: NO_LOW_DISK_MOVE, NO_LOW_DISK_DELETE_CURRENT and
  * HANDLE_DISK_FULL_ON_SAVE_AS are FALSE, so the dialog has all its
  * parts and a save as is not handled here.
@@ -128,7 +125,7 @@ void OLDocumentShowLowDiskError(optr o, Message msg)
     @call uiApp::MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY(box);
     @send box::MSG_GEN_SET_USABLE(VUM_MANUAL);
     @send box::MSG_GEN_INTERACTION_INITIATE();
-    /* UserStandardSound(SST_ERROR): no sound library yet */
+    UserStandardSound(SST_ERROR);
 
     /* to hear of files deleted */
     (void) GCNListAdd(o, MANUFACTURER_ID_GEOWORKS, GCNSLT_FILE_SYSTEM);
@@ -259,9 +256,10 @@ static Boolean LookForDelete(word type, MemHandle data, Boolean *space)
      * asm set "\\" for both: the top for a standard path) */
     disk = @call fs::MSG_GEN_PATH_GET_DISK_HANDLE();
     FilePushDir();
-    /* (an error: UserStandardSound(SST_ERROR); no sound library yet) */
-    if (FileSetCurrentPath(disk, (disk & DISK_IS_STD_PATH_MASK) ? "" : "\\"))
-	(void) FileDelete(path);
+    if (!FileSetCurrentPath(disk,
+			    (disk & DISK_IS_STD_PATH_MASK) ? "" : "\\") ||
+	FileDelete(path))
+	UserStandardSound(SST_ERROR);	/* for now just honk (the asm) */
     FilePopDir();
 }
 
@@ -325,9 +323,10 @@ static Boolean LookForDelete(word type, MemHandle data, Boolean *space)
     p.DCP_diskHandle = @call fs::MSG_GEN_PATH_GET_DISK_HANDLE();
     memcpy(p.DCP_name, GD(oself)->GDI_fileName, sizeof(p.DCP_name));
     GD(oself)->GDI_attrs &= ~GDA_CLOSING;
-    if (@call oself::MSG_GEN_DOCUMENT_SAVE_AS(&fe, &p))
-	return;		/* (UserStandardSound(SST_ERROR): no sound
-			 * library yet) */
+    if (@call oself::MSG_GEN_DOCUMENT_SAVE_AS(&fe, &p)) {
+	UserStandardSound(SST_ERROR);
+	return;
+    }
     FinishSaveError(oself);
     OLDocDestroyDocument(oself, FALSE);
 }

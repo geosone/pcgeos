@@ -269,6 +269,8 @@ void UserScreenNoVideoDriverError(void);
 void UserMakeScreens(MemHandle block);
 void UserMakeScreenFields(void);
 void UserScreenExit(void);
+/* the standard sounds freed, sound.geo let go (userSound.goc) */
+void UserSoundExit(void);
 
 /* genItemGroup.goc, shared with GenBooleanGroupClass (the identifier of
  * a GenItem and a GenBoolean in the same place) */

@@ -11,6 +11,8 @@
  *   - the master volume: off silences;
  *   - a sample stream: 8-bit PCM at 8000 Hz, a square wave of 200 Hz
  *     for half a second, resampled: its pitch and length.
+ * "test_hostsnd play" instead plays a short demonstration through the
+ * host's default output (PipeWire): for listening, never from ctest.
  */
 #define _GNU_SOURCE
 #include "kernelC.h"
@@ -164,6 +166,73 @@ static void PlayNote(InstrumentPatch inst, word freq, word vol, word ms,
 	  SOUND_ERROR_NO_ERRORS);
 }
 
+/* "play": a few seconds for the ear, through the host's default output */
+static void Note(InstrumentPatch inst, word freq, word ms)
+{
+    MemHandle mh;
+
+    PlayNote(inst, freq, DYNAMIC_F, ms, &mh);
+    Wait((word) (ms * 60 / 1000 + 2));
+    S_FreeMusicNote(mh);
+}
+
+static void Demo(void)
+{
+    static const word melody[] = { 523, 587, 659, 698, 784, 698, 659, 523 };
+    MemHandle c1, c2, c3;
+    unsigned i;
+
+    printf("melody (flute)\n");
+    for (i = 0; i < sizeof(melody) / sizeof(melody[0]); i++)
+	Note(IP_FLUTE, melody[i], 180);
+    printf("chord (piano)\n");
+    PlayNote(IP_ACOUSTIC_GRAND_PIANO, 262, DYNAMIC_F, 900, &c1);
+    PlayNote(IP_ACOUSTIC_GRAND_PIANO, 330, DYNAMIC_F, 900, &c2);
+    PlayNote(IP_ACOUSTIC_GRAND_PIANO, 392, DYNAMIC_F, 900, &c3);
+    Wait(80);
+    S_FreeMusicNote(c1);
+    S_FreeMusicNote(c2);
+    S_FreeMusicNote(c3);
+    printf("snare, cymbal\n");
+    Note(IP_ACOUSTIC_SNARE, 200, 150);
+    Note(IP_ACOUSTIC_SNARE, 200, 150);
+    Note(IP_CRASH_CYMBAL_1, 300, 600);
+    printf("the error beep (trombone), the warning (oboe)\n");
+    for (i = 0; i < 3; i++) {
+	Note(IP_TROMBONE, 500, 50);
+	Wait(2);
+    }
+    Wait(20);
+    Note(IP_OBOE, 198, 250);
+    Wait(20);
+    printf("a sample stream: a rising sweep at 8000 Hz\n");
+    {
+	static byte sw[8000];
+	SampleFormatDescription d;
+	MemHandle mh;
+	unsigned ph = 0;
+
+	for (i = 0; i < sizeof(sw); i++) {
+	    unsigned f = 200 + i / 10;		/* 200 .. 1000 Hz */
+	    ph += f * 65536u / 8000u;
+	    sw[i] = (byte) ((ph >> 15) & 1 ? 0x80 + 40 : 0x80 - 40);
+	}
+	if (S_AllocSampleStream(&mh) == 0 &&
+	    S_EnableSampleStream(mh, SP_STANDARD, 8000, 0,
+				 DACSF_8_BIT_PCM << SMID_FORMAT_OFFSET) == 0) {
+	    d.SFD_manufact = 0;
+	    d.SFD_format = DACSF_8_BIT_PCM << SMID_FORMAT_OFFSET;
+	    d.SFD_rate = 8000;
+	    d.SFD_playFlags = DACPF_CATENATE;
+	    (void) S_PlayToSampleStream(mh, (const word *) sw, sizeof(sw), &d);
+	    Wait(70);
+	    S_DisableSampleStream(mh);
+	    S_FreeSampleStream(mh);
+	}
+    }
+    Wait(60);
+}
+
 int main(int argc, char **argv)
 {
     const char *ini = "[sound]\r\nsynthDriver = hostsnd.geo\r\n";
@@ -181,9 +250,11 @@ int main(int argc, char **argv)
     double loud, soft;
     uint64_t p1;
 
-    (void) argc;
+    Boolean play = argc > 1 && !strcmp(argv[1], "play");
+
     setvbuf(stdout, NULL, _IONBF, 0);
-    setenv("GEOS_AUDIO", "null", 1);		/* never heard */
+    if (!play)
+	setenv("GEOS_AUDIO", "null", 1);	/* never heard */
     strncpy(top, argv[0], sizeof(top) - 8);
     top[sizeof(top) - 8] = 0;
     slash = strrchr(top, '/');
@@ -217,6 +288,11 @@ int main(int argc, char **argv)
     if (!au)
 	return 1;
     printf("backend %s\n", ghal_audio_backend(au));
+    if (play) {
+	Demo();
+	GeodeFreeLibrary(snd);
+	return 0;
+    }
     CHECK(!strcmp(ghal_audio_backend(au), "null"));
     ghal_audio_set_tap(au, Tap, NULL);
 

@@ -59,6 +59,8 @@
 @include <Objects/gToolGC.goh>
 #include <string.h>
 #include <initfile.h>
+#include <sysstats.h>
+@include <Internal/uProcC.goh>
 
 typedef struct {
     GeodeHandle		UBS_process;
@@ -169,6 +171,8 @@ typedef struct {
     word		UBS_fcn[16];
     /* the dialog of a full disk (steps 207 to 209) */
     word		UBS_low[8];
+    /* the standard sounds (step 300): the counts returned */
+    word		UBS_snd[6];
 } UBState;
 
 UBState ubState;
@@ -4242,6 +4246,36 @@ static void UBClickMenu(word n)
 	ubState.UBS_low[5] = DocExists("UBLOW");
 	UBCHECK(ubState.UBS_low[5]);
 	DocDelete("UBLOW");
+	break;
+    }
+    case 300: {
+	/* the standard sounds: a count for each one played, none for a
+	 * custom one; "[ui] sound = false" silences them but those with
+	 * SST_IGNORE_SOUND_OFF; "[ui] soundMask" each */
+	optr uiProc = ConstructOptr((GeodeHandle)
+				    SysGetInfo(SGIT_UI_PROCESS), 0);
+
+	ubState.UBS_snd[0] = UserStandardSound(SST_ERROR);
+	UBCHECK(ubState.UBS_snd[0] != 0);
+	/* not this one: it goes on */
+	UserStopStandardSound(SST_ERROR, ubState.UBS_snd[0] + 1);
+	UBCHECK(UserStandardSound(SST_CUSTOM_NOTE, 880, 2) == 0);
+	InitFileWriteBoolean("ui", "sound", FALSE);
+	@call uiProc::MSG_USER_UPDATE_SOUND_PARAMS();
+	ubState.UBS_snd[1] = UserStandardSound(SST_WARNING);
+	UBCHECK(ubState.UBS_snd[1] == 0);
+	ubState.UBS_snd[2] = UserStandardSound(SST_IGNORE_SOUND_OFF +
+					      SST_NOTIFY);
+	UBCHECK(ubState.UBS_snd[2] != 0);
+	InitFileWriteBoolean("ui", "sound", TRUE);
+	InitFileWriteInteger("ui", "soundMask",
+			     SOUND_MASK_ALL & ~SSF_ALARM);
+	@call uiProc::MSG_USER_UPDATE_SOUND_PARAMS();
+	UBCHECK(UserStandardSound(SST_ALARM) == 0);
+	ubState.UBS_snd[3] = UserStandardSound(SST_NO_HELP);
+	UBCHECK(ubState.UBS_snd[3] != 0);
+	InitFileDeleteEntry("ui", "soundMask");
+	@call uiProc::MSG_USER_UPDATE_SOUND_PARAMS();
 	break;
     }
     case 210:

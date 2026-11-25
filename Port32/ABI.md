@@ -5366,6 +5366,34 @@ visual classes of `Library/User/Vis`:
   - fixed with it: `GenCheckIfFullyUsable` and `GenCheckIfFullyEnabled`
     stop at the system object, as in the asm (the screens and fields
     are usable below it).
+- **The sounds** (`User/userSound.goc` after `userUtils.asm` and
+  `userMain.asm`): the UI loads `sound.geo` from SYSTEM at its attach
+  (`MSG_USER_UPDATE_SOUND_PARAMS`, sent again when `[ui] sound` or
+  `[ui] soundMask` change) and calls its routines by their entry
+  numbers (`sound32.gp`), as the UI does not import it.
+  `UserStandardSound` plays the seven standard sounds (error, warning,
+  notify, no input, key click, alarm, no help: the asm's songs, one
+  voice each, allocated on first use and owned by the UI) and the
+  custom ones (`SST_CUSTOM_SOUND`, `SST_CUSTOM_NOTE`,
+  `SST_CUSTOM_BUFFER`, the buffer copied into a block of the UI that
+  goes when played); it returns the count of a standard sound, which
+  `UserStopStandardSound` takes to stop just that one.
+  `MSG_USER_FREE_SOUND_HANDLE` frees a finished sound with
+  `EOSF_DESTROY` by its type (the sound library sends it). The callers
+  of the asm beep again: input nobody takes (`FlowClass`, the
+  application's unwanted keys, the view's unused key presses at most
+  every two seconds), a disabled button's mnemonic and accelerator,
+  the standard dialogs' errors and warnings, the dialog of a full
+  disk, the key click. Port32: `UserStandardSound` is a C routine with
+  the type's arguments after it (`ui.goh`: the asm's register routine
+  and its C stub in one); the library stays loaded while `[ui] sound`
+  is false, so that `SST_IGNORE_SOUND_OFF` is heard (the asm freed it
+  and called it anyway); the UI frees the standard sounds and the
+  library when it ends, as the kernel does not free what a geode used
+  while it ran; an enabled button's accelerator is left to `GenClass`
+  as in the asm (the C button said it handled it). ctest
+  `library.ui.boot` (step 300 of `uiboot`) plays them on the sound
+  library's test driver;
 - **Interactions, displays, primaries** (`Gen/genInteraction.goc`,
   `genDisplay.goc`, `genPrimary.goc` after `genInteraction.asm`,
   `genDisplay.asm`, `genPrimary.asm`): `GenInteractionClass` (type and
@@ -5538,7 +5566,7 @@ visual classes of `Library/User/Vis`:
   response is sent to an object). Port32: the C message to build has
   no help context, so who builds adds `ATTR_GEN_HELP_CONTEXT`; a
   trigger table holds optrs and so cannot be constant data. Not yet:
-  the transparent launch model, the sounds (`UserStandardSound`).
+  the transparent launch model.
 - **The glyph** (`Gen/genGlyphDisplay.goc` after `genGlyphDisplay.asm`):
   `GenGlyphClass` only shows its moniker; the specific UI builds it
   (`SPIR_BUILD_GLYPH_DISPLAY`). Motif's `OLGlyphDisplayClass`
@@ -5809,9 +5837,8 @@ visual classes of `Library/User/Vis`:
     `GEN_FILE_SELECTOR_NOTIFICATION_MSG`s (the asm read the flags from
     `bp`). The file to delete is taken relative to the selector's disk
     (a standard path: in it; the asm set `\` for both, the top for a
-    standard path). Not yet: the error beeps (`UserStandardSound`
-    needs the sound library, which the UI library imports and which
-    is not in C). `HANDLE_DISK_FULL_ON_SAVE_AS` is FALSE in Motif.
+    standard path). The error beeps are there (`UserStandardSound`).
+    `HANDLE_DISK_FULL_ON_SAVE_AS` is FALSE in Motif.
     After the save that made it the close asks again whether to save
     (the save kept the document dirty, as `OLDocumentSaveOrUpdate`
     does). The triggers with the name are as wide as their text: the
@@ -6769,8 +6796,7 @@ are left out), the constants, the variables and the routines.
   screens, discarding the block, pinning a dialog (OPEN LOOK only), the focus of a
   dialog run by the UI thread. In `OLButtonClass`: the black and white
   buttons (`copenButtonBW`), the menu marks and menu items, the
-  keyboard accelerator text, the sounds (`UserStandardSound` is not in
-  the C UI), the sound of a disabled button's mnemonic, the stay up menus released on activation,
+  keyboard accelerator text, the stay up menus released on activation,
   `MSG_GEN_TRIGGER_REPLACE_PARAMS`. In `cwinPtr.goc`: moving and resizing by the keyboard
   (the move/resize keys and their abort monitor, the system menu's
   Move and Size), ink. In `OLMenuWinClass`: a pinned menu restored from
@@ -7291,9 +7317,9 @@ interrupt), `soundVoiceAllocation.c` (voices and DACs by priority),
   stream drained (the asm left its semaphore taken, so the next format
   change waited for good); `SoundFreeSampleStream` that leaves the block
   to a waiting writer gives back the mutex (the asm kept it: deadlock).
-- **Not yet**: the GPC master volume of the ini file, the UI's side
-  (`UserStandardSound`, freeing finished sounds by type). The driver on
-  the host's audio is `hostsnd.geo` (section 7.9).
+- **Not yet**: the GPC master volume of the ini file. The UI's side
+  (`UserStandardSound`, freeing finished sounds by type) is in section
+  13x. The driver on the host's audio is `hostsnd.geo` (section 7.9).
 
 ctest `library.sound` with the test driver `tsnddrv` (4 voices, 1 DAC,
 logs every call with its tick): the driver of the ini file and its

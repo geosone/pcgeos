@@ -32,7 +32,7 @@
  *  - no state files: the UI opens its application without one and
  *    never asks to delete them (DeleteStateConfirmBox);
  *  - not yet: undo, overstrike, the activation dialog and keyboard
- *    accelerator modes, sound, the busy timer, the token database, the
+ *    accelerator modes, the busy timer, the token database, the
  *    screen blanker, pen mode and handwriting, the spooler and mailbox
  *    loaded at the start, the help objects, the graphical setup of
  *    "[system] continueSetup", the clipboard file, the task driver,
@@ -210,6 +210,9 @@ void UserSetDefaultInputMap(void)
  * ------------------------------------------------------------------- */
 
 @classdecl UserClass, neverSaved;
+/* the sounds (userSound.goc) */
+@extern method UserClass, MSG_USER_UPDATE_SOUND_PARAMS;
+@extern method UserClass, MSG_USER_FREE_SOUND_HANDLE;
 
 
 optr uiFlowObj;
@@ -267,6 +270,9 @@ static Boolean SystemUI(void)
 
     UserMakeScreens(block);
     UserSetDefaultInputMap();
+
+    /* the sound library (UserUpdateSoundParams) */
+    @call Self()::MSG_USER_UPDATE_SOUND_PARAMS();
 
     /* the UI as an application, below the default screen */
     UserCallSystem(MSG_GEN_SYSTEM_GET_DEFAULT_SCREEN, NULL, 0,
@@ -481,6 +487,7 @@ static Boolean StartupApplsCB(const char *name, word sectionNum,
 {
     (void) specificUI;
     UserFreeSpecificUI();
+    UserSoundExit();
 }
 
 /* UserNotifyProcessExit: the fields and GCNSLT_APPLICATION told */

@@ -21,6 +21,9 @@
 #include <initfile.h>
 #include <sysstats.h>
 #include "ghal.h"
+#include <sound.h>
+#include <Internal/soundDrv.h>
+#include "tsnddrv.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,11 +31,13 @@
 
 extern const unsigned char ui_geode[], uiboot_geode[], motif_geode[],
 			   hostvid_geode[], vidmem_geode[], berkeley_fnt[],
-			   text_geode[];
+			   text_geode[], sound_geode[], stream_geode[],
+			   tsnddrv_geode[];
 extern const unsigned long ui_geode_size, uiboot_geode_size,
 			   motif_geode_size, hostvid_geode_size,
 			   vidmem_geode_size, berkeley_fnt_size,
-			   text_geode_size;
+			   text_geode_size, sound_geode_size,
+			   stream_geode_size, tsnddrv_geode_size;
 
 /* as uiboot.goc */
 typedef struct {
@@ -98,6 +103,7 @@ typedef struct {
     word		UBS_docOb[8];
     word		UBS_fcn[16];
     word		UBS_low[8];
+    word		UBS_snd[6];
 } UBState;
 
 static int fails;
@@ -146,6 +152,44 @@ static GeodeHandle Find(const char *name)
     return GeodeFind(name, GEODE_NAME_SIZE, 0, 0);
 }
 
+/* the sounds of step 300 at the test driver: the error beep's trombone
+ * and its three voices on at 500 Hz, the note at 880 Hz */
+static void Sounds(GeodeHandle drv, int from)
+{
+    TsndLog *log;
+    DriverRegs r;
+    int i, trombone = 0, beeps = 0, note = 0, t;
+
+    memset(&r, 0, sizeof(r));
+    CHECK(drv && !DriverCall(GeodeInfoDriver(drv), TSND_GET_LOG, &r));
+    log = r.DR_farPtr;
+    if (!log)
+	return;
+    for (t = 0; t < 120 && beeps < 3; t++) {
+	TimerSleep(1);
+	trombone = beeps = note = 0;
+	for (i = from; i < log->TL_count; i++) {
+	    const TsndEvent *ev = &log->TL_ev[i];
+
+	    if (ev->TE_fn == DRE_SOUND_SET_ENVELOPE &&
+		ev->TE_si == IP_TROMBONE)
+		trombone++;
+	    if (ev->TE_fn == DRE_SOUND_VOICE_ON && ev->TE_ax == 500)
+		beeps++;
+	    if (ev->TE_fn == DRE_SOUND_VOICE_ON && ev->TE_ax == 880)
+		note++;
+	}
+    }
+    for (i = from; getenv("UIBOOT_SNDLOG") && i < log->TL_count; i++)
+	printf("  ev fn %#x ax %u bx %#x cx %u si %u tick %lu\n",
+	       log->TL_ev[i].TE_fn, log->TL_ev[i].TE_ax, log->TL_ev[i].TE_bx,
+	       log->TL_ev[i].TE_cx, log->TL_ev[i].TE_si,
+	       (unsigned long) log->TL_ev[i].TE_tick);
+    printf("sounds: %d driver events, trombone %d, 500 Hz %d, 880 Hz %d\n",
+	   log->TL_count - from, trombone, beeps, note);
+    CHECK(trombone >= 1 && beeps >= 3 && note == 1);
+}
+
 /*
  * UIBOOT_SHOT=file: the screen (as GEOS drew it, read back from the
  * display) written as a PPM after step UIBOOT_SHOT_AT (default the
@@ -187,7 +231,8 @@ int main(int argc, char **argv)
 	"execOnStartup = uiboot\r\n"
 	"[screen 0]\r\ndriver = hostvid\r\n"
 	"device = Host Display: 640x480\r\n"
-	"[input]\r\nkeyboardOnly = false\r\n";
+	"[input]\r\nkeyboardOnly = false\r\n"
+	"[sound]\r\nsynthDriver = tsnddrv.geo\r\n";
     GeodeLoadError e;
     char *slash;
     GeodeHandle ui, app;
@@ -219,6 +264,11 @@ int main(int argc, char **argv)
     Put("SYSTEM", NULL, 0);
     Put("SYSTEM/VIDEO", NULL, 0);
     Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
+    /* the sound library on the test driver, which logs what it is told */
+    Put("SYSTEM/SOUND", NULL, 0);
+    Put("SYSTEM/stream.geo", stream_geode, stream_geode_size);
+    Put("SYSTEM/sound.geo", sound_geode, sound_geode_size);
+    Put("SYSTEM/SOUND/tsnddrv.geo", tsnddrv_geode, tsnddrv_geode_size);
     Put("USERDATA", NULL, 0);
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
@@ -305,6 +355,21 @@ int main(int argc, char **argv)
 	    WAIT_FOR((step(210), st->UBS_low[6] == 0));
 	step(i);
 	Shot(i);
+    }
+    /* the standard sounds, through sound.geo the UI loaded */
+    {
+	GeodeHandle drv = Find("tsnddrv ");
+	DriverRegs r;
+	int from = 0;
+
+	CHECK(Find("sound   ") != 0 && drv != 0);
+	memset(&r, 0, sizeof(r));
+	if (drv && !DriverCall(GeodeInfoDriver(drv), TSND_GET_LOG, &r))
+	    from = ((TsndLog *) r.DR_farPtr)->TL_count;
+	step(300);
+	Sounds(drv, from);
+	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
+	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }
     printf("system menu button at %d,%d %dx%d, title bar %d..%d\n",
 	   st->UBS_sys[0], st->UBS_sys[1], st->UBS_sys[2], st->UBS_sys[3],
@@ -443,6 +508,7 @@ int main(int argc, char **argv)
     WAIT_FOR(!Find("uiboot  ") && !Find("ui      "));
     CHECK(!Find("uiboot  "));
     CHECK(!Find("ui      ") && !Find("motif   "));
+    CHECK(!Find("sound   "));
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

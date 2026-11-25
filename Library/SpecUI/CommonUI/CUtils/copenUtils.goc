@@ -389,12 +389,11 @@ Boolean OpenCheckIfKeyboardNavigation(void)
     return (olWindowOptions & UIWO_KBD_NAVIGATION) != 0;
 }
 
-/* OpenDoClickSound: the key click, if wanted (Port32: no
- * UserStandardSound yet, the sound library is not ported) */
+/* OpenDoClickSound: the key click, if wanted */
 void OpenDoClickSound(void)
 {
     if (specDoClickSound)
-	return;		/* UserStandardSound(SST_KEY_CLICK) */
+	UserStandardSound(SST_KEY_CLICK);
 }
 
 /* ---------------------------------------------------------------------

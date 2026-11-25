@@ -306,6 +306,36 @@ static Boolean HandleScrollKey(optr oself, word c, word flags, word state)
 }
 
 /*
+ * BeepIfUnusedPress: the first press of a key nobody used beeps (not
+ * shift and toggle keys, not while the application detaches, at most
+ * every two seconds)
+ */
+static void BeepIfUnusedPress(word character, word flags)
+{
+    static dword beepTime;
+    optr app;
+    dword now;
+
+    if (!(flags & CF_FIRST_PRESS) ||
+	(flags & (CF_STATE_KEY | CF_TEMP_ACCENT | CF_RELEASE)))
+	return;
+    if ((character >> 8) == CS_CONTROL) {
+	byte c = (byte) character;
+
+	if (!c || (c >= VC_LALT && c < VC_INVALID_KEY))
+	    return;
+    }
+    app = GeodeGetAppObject(0);
+    if (app && (@call app::MSG_GEN_APPLICATION_GET_STATE() & AS_DETACHING))
+	return;
+    now = TimerGetCount();
+    if (now - beepTime < 2 * 60)
+	return;
+    beepTime = now;
+    UserStandardSound(SST_NO_INPUT);
+}
+
+/*
  * OLPaneFupKbdChar: a key the content did not use: the scroll keys; Enter
  * and Tab (and the UI's keys) to the superclass (the window's
  * navigation), unless the mouse is pressed in the window
@@ -318,11 +348,16 @@ static Boolean HandleScrollKey(optr oself, word c, word flags, word state)
     if (character != ((CS_CONTROL << 8) | VC_ENTER) &&
 	character != ((CS_CONTROL << 8) | VC_TAB) &&
 	!(PGen(oself)->GVI_attrs & GVA_SEND_ALL_KBD_CHARS) &&
-	SpecCheckIfSpecialUIChar(character, flags, state))
-	return FALSE;	/* BeepIfUnusedPress: no sound yet */
+	SpecCheckIfSpecialUIChar(character, flags, state)) {
+	BeepIfUnusedPress(character, flags);	/* tried before */
+	return FALSE;
+    }
     if (PVis(oself)->OLPI_optFlags & OLPOF_PRESS_GRAB)
 	return FALSE;
-    return @callsuper();
+    if (@callsuper())
+	return TRUE;
+    BeepIfUnusedPress(character, flags);
+    return FALSE;
 }
 
 /* OLPaneActivateObjectWithMnemonic: a view of generic objects takes the
