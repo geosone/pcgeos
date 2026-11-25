@@ -284,6 +284,7 @@ typedef struct {
     void	*T_fileEnum;	/* the FileEnum running (FileEnumWildcard) */
     word	T_fileReloc;	/* relocating an object block for a file
 				 * (objectReloc.c) */
+    MemHandle	T_fsNotifyBatch;	/* FileBatchChangeNotifications */
     word	T_priv[THREAD_PRIV_WORDS];	/* ThreadPrivAlloc's words */
 } KThread;
 
@@ -585,6 +586,27 @@ typedef WordFlags GCNListSendFlags;
 #define GCNLSF_IGNORE_IF_STATUS_TRANSITIONING	0x4000
 #define GCNLSF_FORCE_QUEUE			0x2000
 
+/* file change notification (gcnlist.goh) */
+typedef enum {
+    FCNT_CREATE, FCNT_RENAME, FCNT_OPEN, FCNT_DELETE, FCNT_CONTENTS,
+    FCNT_ATTRIBUTES, FCNT_DISK_FORMAT, FCNT_CLOSE, FCNT_BATCH
+} FileChangeNotificationType;
+typedef struct {
+    DiskHandle		FCND_disk;
+    FileID		FCND_id;
+    FileLongName	FCND_name;
+} FileChangeNotificationData;
+typedef struct {
+    FileChangeNotificationType	FCBNI_type;
+    DiskHandle			FCBNI_disk;
+    FileID			FCBNI_id;
+    FileLongName		FCBNI_name;	/* create and rename only */
+} FileChangeBatchNotificationItem;
+typedef struct {
+    word			FCBND_end;
+    FileChangeBatchNotificationItem FCBND_notifications[1];
+} FileChangeBatchNotificationData;
+
 /* the system lists (a kernel block) */
 Boolean GCNListAdd(optr OD, ManufacturerID manufID, word listType);
 Boolean GCNListRemove(optr OD, ManufacturerID manufID, word listType);
@@ -799,6 +821,7 @@ typedef struct KPath {
 typedef struct KFile {
     FSDFile	KF_file;
     word	KF_refs;
+    Boolean	KF_written;	/* FCNT_CONTENTS when it is closed */
 } KFile;
 
 /* an open VM file; its SIG_VM handle (the VMFileHandle, owned by the
@@ -860,6 +883,16 @@ typedef word FileOpFunc(FSDDisk *disk, const char *diskPath, void *data);
 FSDDisk *FileResolvePlace(const char *path, word n, char *out, size_t size,
 			  Boolean *end);
 word FileOpOnPath(const char *path, FileOpFunc *op, void *data);
+
+/* File/fileNotify.c: file change notification after an operation */
+Boolean FSDGenerateNotify(FileChangeNotificationType type, DiskHandle disk,
+			  FileID id, const char *name);
+Boolean FSDCheckOpenCloseNotifyEnabled(void);
+FileID FileIDOf(FSDDisk *d, const char *dp);
+FileID FileIDOfOpen(FSDFile *f);
+const char *FileNameOf(const char *dp);
+void FileNotifyCreate(FSDDisk *d, const char *dp);
+void FileNotify(FileChangeNotificationType type, FSDDisk *d, FileID id);
 /* the first place of path (relative to the root of disk, 0: to the
  * current path) where it exists, else place 0 */
 FSDDisk *FileLocate(DiskHandle disk, const char *path, char *out,

@@ -2183,14 +2183,47 @@ where it is with `FileSetTopHostPath`.
   No change notification is sent yet.
 - **`FileGetCurrentPathIDs`**: a chunk in the caller's LMem block with
   a `FilePathID` (disk handle, `FEA_FILE_ID`) for each place of the
-  current path that exists.
+  current path that exists. `FPID_disk` is a `DiskHandle` (32 bits;
+  `word` in the 16-bit header).
+- **File change notification** (`File/fileNotify.c`, from
+  `FSDGenerateNotify` of `FSD/fsdFile.asm` and `fileUtils.asm`):
+  `MSG_NOTIFY_FILE_CHANGE` (type, a sharable data block with a
+  reference count of 1) to the GCN list `GCNSLT_FILE_SYSTEM`, forced
+  onto the queues. On DOS16 the file system drivers sent it (the DOS
+  driver only for files likely to be documents, `SEND_DOCUMENT_FCN_ONLY`);
+  here the kernel sends it after the driver's operation, for every
+  driver and every file:
+    - `FCNT_CREATE` (`FileCreate` that made the file, `FileCreateDir`,
+      `FileCreateLink`, the destination of `FileCopy`/`FileMove`): the
+      `FEA_FILE_ID` of the directory, the name;
+    - `FCNT_RENAME` (`FileRename`, `FileMove` within a directory): the
+      ID of the file, the new name; a rename or move into another
+      directory is `FCNT_DELETE` and `FCNT_CREATE`;
+    - `FCNT_DELETE` (`FileDelete`, `FileDeleteDir`, the source of a
+      move): the ID it had;
+    - `FCNT_ATTRIBUTES` (`FileSetAttributes`, setting extended
+      attributes by path or handle);
+    - `FCNT_CONTENTS`: when the last handle of a file that was written
+      or truncated is closed (DOS16: the dirty flag at close), and for a
+      `FILE_CREATE_TRUNCATE` of an existing file;
+    - `FCNT_OPEN`, `FCNT_CLOSE` while `FileEnableOpenCloseNotification`
+      is on (a count, as `openCloseNotificationCount`);
+    - not: `FCNT_DISK_FORMAT` (no formatting), the standard path ones.
+  `FCND_disk` and `FCBNI_disk` are `DiskHandle`s (32 bits; the
+  16-bit header keeps `word`). `FileBatchChangeNotifications` starts a
+  batch in the thread (`T_fsNotifyBatch` for `TPD_fsNotifyBatch`),
+  `FileFlushChangeNotifications` sends it as one `FCNT_BATCH` block;
+  where the asm chained blocks past `FSD_MAX_BATCH_SIZE` (8192) the
+  full block is sent at once and a new one begun. `GCNListSend` to the
+  system lists before any exists no longer makes their block.
+  `library.ui.boot` steps 205, 206 check what an object on the list
+  gets.
 
 Not yet:
 
 - deny modes, and reading and writing a region another open file has
   locked;
-- change notification; links in the destination of `FileCopy` and of
-  a rename with a path; `FilePushTopLevelPath`,
+- links in the destination of `FileCopy` and of a rename with a path; `FilePushTopLevelPath`,
   `FileCreateDirWithNativeShortName`;
 - `SPA_DOES_NOT_EXIST_LOCALLY` (every standard path has its place
   below the top).
@@ -6117,9 +6150,7 @@ are left out), the constants, the variables and the routines.
       `ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS` on a double press, and
       a popup list passes `MSG_GEN_ACTIVATE` to its window.
     - Not: the `_DUI` and Wizard variants, the fake file system,
-      `FSEL_DISABLES_FILTERED_FILES` (not in Motif). Not yet: the
-      kernel sends no file change notifications
-      (`GCNSLT_FILE_SYSTEM`; the selector handles them),
+      `FSEL_DISABLES_FILTERED_FILES` (not in Motif). Not yet:
       `MSG_GEN_APPLICATION_GET_APP_FEATURES` for
       `HINT_FILE_SELECTOR_SCALABLE_UI_DATA`.
     - `library.ui.boot` steps 68 to 73: a selector in a dialog on

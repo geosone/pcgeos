@@ -38,6 +38,9 @@ word FileWrite(FileHandle fh, const void *buf, word count,
     KFile *kf = FileOf(fh);
     word done = 0, e = DRV(kf)->FSD_write(&kf->KF_file, buf, count, &done);
 
+    if (done)
+	kf->KF_written = TRUE;
+
     Done(e ? e : done < count ? ERROR_SHORT_READ_WRITE : 0, noErrorFlag);
     return done;
 }
@@ -57,6 +60,7 @@ word FileTruncate(FileHandle fh, dword offset, Boolean noErrorFlag)
 {
     KFile *kf = FileOf(fh);
 
+    kf->KF_written = TRUE;
     return Done(DRV(kf)->FSD_truncate(&kf->KF_file, offset), noErrorFlag);
 }
 

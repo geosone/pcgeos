@@ -221,7 +221,11 @@ typedef enum {
 } FileChangeNotificationType;
 
 typedef struct {
+#ifdef GEOS_PORT32
+    DiskHandle	    FCND_disk;	/* (Port32: a handle has 32 bits) */
+#else
     word    	    FCND_disk; 	/* Handle for disk on which change occurred */
+#endif
     FileID  	    FCND_id;   	/* ID of affected file or containing dir,
 				 * as appropriate to notification type */
     FileLongName    FCND_name;	/* Name of file, if appropriate (FCNT_CREATE,
@@ -230,7 +234,11 @@ typedef struct {
 
 typedef struct {
     FileChangeNotificationType	FCBNI_type;
+#ifdef GEOS_PORT32
+    DiskHandle			FCBNI_disk;
+#else
     word    	    	    	FCBNI_disk;
+#endif
     FileID  	    	    	FCBNI_id;
     FileLongName    	    	FCBNI_name; /* Only present if required, else
 					     * next item is where this field

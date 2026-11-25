@@ -18,8 +18,8 @@
  *
  * Links on the way are followed (FileLocate); a link at the end is
  * deleted, renamed or given attributes itself, as on DOS16.  Not yet:
- * links in the destination of FileCopy or of a rename with a path, the
- * notification of file changes.
+ * links in the destination of FileCopy or of a rename with a path.
+ * What changes is notified (fileNotify.c).
  */
 #include "kernelC.h"
 
@@ -35,10 +35,32 @@ word FileDelete(const char *name)
 {
     char dp[FILE_DISK_PATH_SIZE];
     FSDDisk *d = FileLocate(0, name, dp, sizeof(dp));
+    FileID id;
+    word e;
 
     if (!d)
 	return ThreadGetError();
-    return Fail(FSD_OF(d)->FSD_deleteFile(d, dp));
+    id = FileIDOf(d, dp);
+    e = FSD_OF(d)->FSD_deleteFile(d, dp);
+    if (!e)
+	FileNotify(FCNT_DELETE, d, id);
+    return Fail(e);
+}
+
+/* a rename or move on one disk: a rename within the directory, else a
+ * delete and a create */
+static void NotifyMove(FSDDisk *d, const char *from, const char *to,
+		       FileID id)
+{
+    size_t n = (size_t) (FileNameOf(from) - from);
+
+    if (n == (size_t) (FileNameOf(to) - to) && !memcmp(from, to, n))
+	(void) FSDGenerateNotify(FCNT_RENAME, d->FDK_handle, id,
+				 FileNameOf(to));
+    else {
+	FileNotify(FCNT_DELETE, d, id);
+	FileNotifyCreate(d, to);
+    }
 }
 
 /* the new name is in the directory of the old one unless it has a
@@ -73,7 +95,14 @@ word FileRename(const char *oldName, const char *newName)
 	memcpy(to, from, n);
 	strcpy(to + n, newName);
     }
-    return Fail(FSD_OF(d)->FSD_rename(d, from, to));
+    {
+	FileID id = FileIDOf(d, from);
+	word e = FSD_OF(d)->FSD_rename(d, from, to);
+
+	if (!e)
+	    NotifyMove(d, from, to, id);
+	return Fail(e);
+    }
 }
 
 FileAttrs FileGetAttributes(const char *path)
@@ -98,13 +127,24 @@ word FileSetAttributes(const char *path, FileAttrs attr)
     d = FileLocate(0, path, dp, sizeof(dp));
     if (!d)
 	return ThreadGetError();
-    return Fail(FSD_OF(d)->FSD_setAttrs(d, dp, attr));
+    {
+	word e = FSD_OF(d)->FSD_setAttrs(d, dp, attr);
+
+	if (!e)
+	    FileNotify(FCNT_ATTRIBUTES, d, FileIDOf(d, dp));
+	return Fail(e);
+    }
 }
 
 static word CreateDirAt(FSDDisk *d, const char *dp, void *data)
 {
+    word e;
+
     (void) data;
-    return FSD_OF(d)->FSD_createDir(d, dp);
+    e = FSD_OF(d)->FSD_createDir(d, dp);
+    if (!e)
+	FileNotifyCreate(d, dp);
+    return e;
 }
 
 word FileCreateDir(const char *name)
@@ -129,7 +169,14 @@ word FileDeleteDir(const char *name)
 				     FALSE) &&
 	id == cid)
 	return Fail(ERROR_IS_CURRENT_DIRECTORY);
-    return Fail(FSD_OF(d)->FSD_deleteDir(d, dp));
+    {
+	FileID did = FileIDOf(d, dp);
+	word e = FSD_OF(d)->FSD_deleteDir(d, dp);
+
+	if (!e)
+	    FileNotify(FCNT_DELETE, d, did);
+	return Fail(e);
+    }
 }
 
 /* ---------------------------------------------------------------------
@@ -269,6 +316,8 @@ static word CopyMove(const TCHAR *source, const TCHAR *dest,
 				: FSD_OF(dd)->FSD_deleteFile(dd, dst);
 	if (!e)
 	    e = CopyOpen(&kf->KF_file, 0, dd, dst);
+	if (!e)
+	    FileNotifyCreate(dd, dst);
 	return Fail(e);
     }
     sd = local ? FileResolveOn(sourceDisk, source, src, sizeof(src))
@@ -278,26 +327,44 @@ static word CopyMove(const TCHAR *source, const TCHAR *dest,
     dd = FileResolveOn(destDisk, dest, dst, sizeof(dst));
     if (!dd)
 	return ThreadGetError();
-    if (!move)
-	return Fail(Copy(sd, src, dd, dst));
+    if (!move) {
+	e = Copy(sd, src, dd, dst);
+	if (!e)
+	    FileNotifyCreate(dd, dst);
+	return Fail(e);
+    }
     e = FSD_OF(sd)->FSD_getAttrs(sd, src, &a);
     if (e)
 	return Fail(e);
     if (!FSD_OF(dd)->FSD_getAttrs(dd, dst, &a) &&
 	!SameFile(sd, src, dd, dst))
 	return Fail(ERROR_FILE_EXISTS);
-    if (sd == dd)
-	return Fail(FSD_OF(sd)->FSD_rename(sd, src, dst));
+    if (sd == dd) {
+	FileID id = FileIDOf(sd, src);
+
+	e = FSD_OF(sd)->FSD_rename(sd, src, dst);
+	if (!e)
+	    NotifyMove(sd, src, dst, id);
+	return Fail(e);
+    }
     FSD_OF(sd)->FSD_getAttrs(sd, src, &a);
     if (a & FA_SUBDIR)
 	return Fail(ERROR_DIFFERENT_DEVICE);
-    e = Copy(sd, src, dd, dst);
-    if (!e) {
-	if (a & FA_RDONLY)
-	    FSD_OF(sd)->FSD_setAttrs(sd, src, 0);
-	e = FSD_OF(sd)->FSD_deleteFile(sd, src);
-	if (e)
-	    FSD_OF(dd)->FSD_deleteFile(dd, dst);
+    {
+	FileID id = FileIDOf(sd, src);
+
+	e = Copy(sd, src, dd, dst);
+	if (!e) {
+	    if (a & FA_RDONLY)
+		FSD_OF(sd)->FSD_setAttrs(sd, src, 0);
+	    e = FSD_OF(sd)->FSD_deleteFile(sd, src);
+	    if (e)
+		FSD_OF(dd)->FSD_deleteFile(dd, dst);
+	}
+	if (!e) {
+	    FileNotify(FCNT_DELETE, sd, id);
+	    FileNotifyCreate(dd, dst);
+	}
     }
     return Fail(e);
 }

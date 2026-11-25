@@ -49,17 +49,27 @@ typedef struct {
     FileAttrs	O_attrs;
     Boolean	O_create;
     KFile	*O_kf;
+    Boolean	O_new;		/* the create made the file */
+    char	O_dp[FILE_DISK_PATH_SIZE];
 } OpenOp;
 
 static word OpenAt(FSDDisk *d, const char *dp, void *data)
 {
     OpenOp *o = data;
+    FileAttrs a;
+    word e;
 
     o->O_kf->KF_file.FF_disk = d;
-    return o->O_create
-	   ? FSD_OF(d)->FSD_create(d, dp, o->O_flags, o->O_attrs,
-				   &o->O_kf->KF_file)
-	   : FSD_OF(d)->FSD_open(d, dp, o->O_flags, &o->O_kf->KF_file);
+    if (!o->O_create)
+	e = FSD_OF(d)->FSD_open(d, dp, o->O_flags, &o->O_kf->KF_file);
+    else {
+	o->O_new = FSD_OF(d)->FSD_getAttrs(d, dp, &a) != 0;
+	e = FSD_OF(d)->FSD_create(d, dp, o->O_flags, o->O_attrs,
+				  &o->O_kf->KF_file);
+    }
+    if (!e && strlen(dp) < sizeof(o->O_dp))
+	strcpy(o->O_dp, dp);
+    return e;
 }
 
 /* open or create (create: FileCreate's flags) the file at `name', at
@@ -82,6 +92,8 @@ static FileHandle Open(const char *name, word flags, FileAttrs attrs,
     o.O_attrs = attrs;
     o.O_create = create;
     o.O_kf = kf;
+    o.O_new = FALSE;
+    o.O_dp[0] = 0;
     e = FileOpOnPath(name, OpenAt, &o);
     if (e) {
 	ghal_mem_free(kf);
@@ -96,6 +108,12 @@ static FileHandle Open(const char *name, word flags, FileAttrs attrs,
 	return 0;
     }
     d->FDK_inUse++;
+    if (o.O_new)
+	FileNotifyCreate(d, o.O_dp);
+    else if (create && (flags & FCF_MODE) == FILE_CREATE_TRUNCATE)
+	FileNotify(FCNT_CONTENTS, d, FileIDOfOpen(&kf->KF_file));
+    if (FSDCheckOpenCloseNotifyEnabled())
+	FileNotify(FCNT_OPEN, d, FileIDOfOpen(&kf->KF_file));
     KernelSetError(0);
     return fh;
 }
@@ -140,10 +158,17 @@ static word Close(FileHandle fh)
 
     HandleFree(fh);
     if (--kf->KF_refs == 0) {
-	FileUnlockAll(kf);
 	FSDDisk *d = kf->KF_file.FF_disk;
+	Boolean notify = kf->KF_written || FSDCheckOpenCloseNotifyEnabled();
+	FileID id = notify ? FileIDOfOpen(&kf->KF_file) : 0;
+
+	FileUnlockAll(kf);
 	e = FSD_OF(d)->FSD_close(&kf->KF_file);
 	d->FDK_inUse--;
+	if (kf->KF_written)
+	    FileNotify(FCNT_CONTENTS, d, id);
+	if (FSDCheckOpenCloseNotifyEnabled())
+	    FileNotify(FCNT_CLOSE, d, id);
 	ghal_mem_free(kf);
     }
     return e;

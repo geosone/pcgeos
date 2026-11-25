@@ -510,10 +510,17 @@ Boolean GCNListRemove(optr OD, ManufacturerID manufID, word listType)
 word GCNListSend(ManufacturerID manufID, word listType, EventHandle event,
 		 MemHandle dataBlock, GCNListSendFlags flags)
 {
-    MemHandle mh = LockSystem();
-    optr list = SystemList(mh, manufID, listType,
-			   (flags & GCNLSF_SET_STATUS) != 0);
+    MemHandle mh;
+    optr list;
     Send s;
+
+    /* no list at all yet: nobody to send to (and no block made for it;
+     * a status is kept, though) */
+    if (!systemBlock && !(flags & GCNLSF_SET_STATUS))
+	return Drop(event, dataBlock);
+    mh = LockSystem();
+    list = SystemList(mh, manufID, listType,
+		      (flags & GCNLSF_SET_STATUS) != 0);
 
     if (!list) {
 	MemUnlockV(mh);

@@ -90,6 +90,8 @@ static word ByPath(const TCHAR *path, FileExtendedAttribute attr,
     e = FSD_OF(d)->FSD_pathExtAttrs(d, dp, attr, buffer, bufSize, set);
     if (mh)
 	MemFree(mh);
+    if (set && !e)
+	FileNotify(FCNT_ATTRIBUTES, d, FileIDOf(d, dp));
     return Done(e);
 }
 
@@ -108,6 +110,8 @@ static word ByHandle(FileHandle fh, FileExtendedAttribute attr, void *buffer,
 				      set);
     if (mh)
 	MemFree(mh);
+    if (set && !e)
+	FileNotify(FCNT_ATTRIBUTES, d, FileIDOfOpen(&kf->KF_file));
     return Done(e);
 }
 

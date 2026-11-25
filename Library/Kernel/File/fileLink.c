@@ -99,9 +99,12 @@ typedef struct {
 static word CreateLinkAt(FSDDisk *d, const char *dp, void *data)
 {
     CreateLinkData *c = data;
+    word e = FSD_OF(d)->FSD_createLink(d, dp, c->disk, c->diskSize,
+				       c->target);
 
-    return FSD_OF(d)->FSD_createLink(d, dp, c->disk, c->diskSize,
-				     c->target);
+    if (!e)
+	FileNotifyCreate(d, dp);
+    return e;
 }
 
 /* the link `path' (relative to the current path) to targetPath on

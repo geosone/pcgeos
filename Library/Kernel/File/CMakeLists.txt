@@ -9,6 +9,7 @@
 #                      of fileFile.asm, fileOpenClose.asm)
 #   fileEnum.c <- FileEnum of File/fileEnum.asm, fileC.asm
 #   fileLink.c <- links (File/fileLink.asm, fileUtils.asm)
+#   fileNotify.c <- file change notification (FSD/fsdFile.asm)
 target_sources(geos_kernel_objs PRIVATE
   filePath.c
   fileOpenClose.c
@@ -16,4 +17,5 @@ target_sources(geos_kernel_objs PRIVATE
   fileFile.c
   fileEA.c
   fileEnum.c
-  fileLink.c)
+  fileLink.c
+  fileNotify.c)

@@ -96,6 +96,7 @@ typedef struct {
     word		UBS_doc[14];
     word		UBS_docAs[7];
     word		UBS_docOb[8];
+    word		UBS_fcn[16];
 } UBState;
 
 static int fails;
@@ -296,7 +297,7 @@ int main(int argc, char **argv)
 	Shot(i);
     }
     /* (101 to 111 are the reference mode's) */
-    for (i = 200; i <= 204; i++) {
+    for (i = 200; i <= 206; i++) {
 	step(i);
 	Shot(i);
     }
@@ -413,6 +414,10 @@ int main(int argc, char **argv)
     printf("Copy, move, type:");
     for (i = 0; i < 8; i++)
 	printf(" %#x", st->UBS_docOb[i]);
+    printf("\n");
+    printf("File change:");
+    for (i = 0; i < 16; i++)
+	printf(" %u", st->UBS_fcn[i]);
     printf("\n");
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);

@@ -117,7 +117,11 @@ typedef ByteFlags FileAttrs;
 
 typedef dword	FileID;
 typedef struct {    /* Element of array returned by FileGetCurrentPathIDs */
+#ifdef GEOS_PORT32
+    DiskHandle FPID_disk;   /* disk handle (Port32: 32 bits) */
+#else
     word    FPID_disk;	    /* disk handle */
+#endif
     FileID  FPID_id;	    /* id for path on that disk */
 } FilePathID;
 

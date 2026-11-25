@@ -161,6 +161,10 @@ typedef struct {
      * the copy; after the move: name is the new one, files; type and
      * attributes read only, and normal again */
     word		UBS_docOb[8];
+    /* file change notification (steps 205, 206): count, the types; the
+     * create's directory and name, the rename's file; the batch's
+     * items and their types */
+    word		UBS_fcn[16];
 } UBState;
 
 UBState ubState;
@@ -227,6 +231,11 @@ static void DocDelete(const char *name)
     @message void MSG_UB_ANSWER();
 @endc
 @classdecl UBAppClass;
+
+/* what file change notification it gets (steps 205, 206) */
+@class UBWatchClass, MetaClass;
+@endc
+@classdecl UBWatchClass;
 
 static word ubAnswer;
 
@@ -748,6 +757,9 @@ static GenControlFeaturesInfo ubCtlToolFeatures[1];
 }
 @object UBIacpClass UBIacpCli = {
 }
+/* gets file change notification (steps 205, 206) */
+@object UBWatchClass UBWatch = {
+}
 @visMoniker UBDeleteMoniker = 'D', "Delete";
 @visMoniker UBKeepMoniker = 'K', "Keep";
 @end UBAppObjects;
@@ -827,6 +839,50 @@ static IACPConnection ubIacpConn, ubIacpDocConn, ubIacpHeldConn;
 	ubState.UBS_iacp[7] = value;
     } else {
 	ubState.UBS_iacp[8] = value;
+    }
+}
+
+static FileID ubFcnDirID, ubFcnFileID;
+static Boolean StrIs(const char *a, const char *b);
+
+@method UBWatchClass, MSG_NOTIFY_FILE_CHANGE
+{
+    word n = ubState.UBS_fcn[0];
+
+    (void) oself;
+    (void) pself;
+    if (n < 8)
+	ubState.UBS_fcn[1 + n] = (word) notifyType;
+    ubState.UBS_fcn[0] = n + 1;
+    if (data) {
+	byte *b = MemLock(data);
+	FileChangeNotificationData *d = (void *) b;
+
+	if (notifyType == FCNT_CREATE && n == 0) {
+	    ubState.UBS_fcn[9] = d->FCND_id == ubFcnDirID;
+	    ubState.UBS_fcn[10] = StrIs(d->FCND_name, "UBNOTE");
+	} else if (notifyType == FCNT_RENAME) {
+	    ubState.UBS_fcn[11] = d->FCND_id == ubFcnFileID &&
+				  StrIs(d->FCND_name, "UBNOTE2");
+	} else if (notifyType == FCNT_BATCH) {
+	    FileChangeBatchNotificationData *bd = (void *) b;
+	    word at = word_offsetof(FileChangeBatchNotificationData,
+				    FCBND_notifications), k = 0;
+
+	    while (at < bd->FCBND_end) {
+		FileChangeBatchNotificationItem *it = (void *) (b + at);
+
+		if (k < 2)
+		    ubState.UBS_fcn[13 + k] = (word) it->FCBNI_type;
+		k++;
+		at += word_offsetof(FileChangeBatchNotificationItem,
+				    FCBNI_name);
+		if (it->FCBNI_type <= FCNT_RENAME)
+		    at += sizeof(FileLongName);
+	    }
+	    ubState.UBS_fcn[12] = k;
+	}
+	MemUnlock(data);
     }
 }
 
@@ -4026,6 +4082,71 @@ static void UBClickMenu(word n)
 	UBCHECK(DocExists("UBDOC4"));
 	DocDelete("UBDOC3");
 	DocDelete("UBDOC4");
+	break;
+    case 205: {
+	/* file change notification: made, written, renamed, attributes
+	 * set; then a delete and a new directory in one batch */
+	FileHandle fh;
+	MemHandle mh = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+	ChunkHandle ids;
+
+	memset(ubState.UBS_fcn, 0, sizeof(ubState.UBS_fcn));
+	FilePushDir();
+	FileSetStandardPath(SP_DOCUMENT);
+	(void) FileDelete("UBNOTE");
+	(void) FileDelete("UBNOTE2");
+	(void) FileDeleteDir("UBNDIR");
+	ids = FileGetCurrentPathIDs(mh);
+	UBCHECK(ids != 0);
+	if (ids) {
+	    FilePathID *pid;
+
+	    MemLock(mh);
+	    pid = LMemDerefHandles(mh, ids);
+	    ubFcnDirID = pid->FPID_id;
+	    MemUnlock(mh);
+	}
+	MemFree(mh);
+	UBCHECK(GCNListAdd(@UBWatch, MANUFACTURER_ID_GEOWORKS,
+			   GCNSLT_FILE_SYSTEM));
+	fh = FileCreate("UBNOTE", FILE_CREATE_ONLY | FCF_NATIVE |
+			FILE_ACCESS_RW | FILE_DENY_RW, 0);
+	UBCHECK(fh != 0);
+	if (fh) {
+	    (void) FileWrite(fh, "note", 4, FALSE);
+	    (void) FileClose(fh, FALSE);
+	}
+	UBCHECK(!FileGetPathExtAttributes("UBNOTE", FEA_FILE_ID, &ubFcnFileID,
+					  sizeof(ubFcnFileID)));
+	UBCHECK(!FileRename("UBNOTE", "UBNOTE2"));
+	UBCHECK(!FileSetAttributes("UBNOTE2", FA_ARCHIVE));
+	FileBatchChangeNotifications();
+	UBCHECK(!FileDelete("UBNOTE2"));
+	UBCHECK(!FileCreateDir("UBNDIR"));
+	FileFlushChangeNotifications();
+	FilePopDir();
+	break;
+    }
+    case 206:
+	/* create, contents, rename, attributes, the batch: delete,
+	 * create */
+	UBCHECK(ubState.UBS_fcn[0] == 5);
+	UBCHECK(ubState.UBS_fcn[1] == FCNT_CREATE &&
+		ubState.UBS_fcn[2] == FCNT_CONTENTS &&
+		ubState.UBS_fcn[3] == FCNT_RENAME &&
+		ubState.UBS_fcn[4] == FCNT_ATTRIBUTES &&
+		ubState.UBS_fcn[5] == FCNT_BATCH);
+	UBCHECK(ubState.UBS_fcn[9] && ubState.UBS_fcn[10] &&
+		ubState.UBS_fcn[11]);
+	UBCHECK(ubState.UBS_fcn[12] == 2 &&
+		ubState.UBS_fcn[13] == FCNT_DELETE &&
+		ubState.UBS_fcn[14] == FCNT_CREATE);
+	UBCHECK(GCNListRemove(@UBWatch, MANUFACTURER_ID_GEOWORKS,
+			      GCNSLT_FILE_SYSTEM));
+	FilePushDir();
+	FileSetStandardPath(SP_DOCUMENT);
+	UBCHECK(!FileDeleteDir("UBNDIR"));
+	FilePopDir();
 	break;
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */
