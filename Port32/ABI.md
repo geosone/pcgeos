@@ -6488,7 +6488,12 @@ are left out), the constants, the variables and the routines.
     the title bar in a title bar group; minimized, maximized and
     restored as the GenDisplay's state says; Motif's primary attributes
     and display hints, maximized on startup, closing (the application
-    quits). `MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP` takes a
+    quits). The build adds a help trigger to the title bar
+    (`ATTR_GEN_HELP_CONTEXT`, `GDMT_HELP_PRIMARY`) and a File menu for
+    Exit to a primary without one (`HINT_PRIMARY_NO_FILE_MENU` keeps
+    it out), both linked upward only and destroyed on unbuild, as the
+    asm (a File menu brought up stays on the window list then: only an
+    unbuild takes it off). `MSG_OL_WIN_GET_OR_CREATE_TITLE_GROUP` takes a
     `TitleGroupType` (`TGT_LEFT_GROUP`, `TGT_RIGHT_GROUP`: the asm's
     offsets); `MSG_OL_MW_SET_ICON_POS(x, y, slot)`;
     `MSG_SPEC_CHECK_IF_NEEDS_MARGINS(word *margin)` returns Boolean (its

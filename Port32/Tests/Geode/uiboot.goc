@@ -211,7 +211,11 @@ typedef struct {
      * usable): 1 no separator below the group first, 2 one with the
      * sub menu usable, 4 none again with it not usable (step 325);
      * [17] a trigger with ATTR_GEN_DEFAULT_MONIKER: 1 a moniker, 2 a
-     * picture of the list chosen, 4 a level icon 64 wide (step 326) */
+     * picture of the list chosen, 4 a level icon 64 wide (step 326);
+     * [18] a second primary with a help context and no File menu: 1 a
+     * help trigger in its title bar, 2 with the primary help's picture,
+     * 4 a File menu made for it, 8 a file menu (Exit), 16 gone again
+     * (steps 327 and 328) */
     word		UBS_stub[24];
 } UBState;
 
@@ -313,6 +317,7 @@ static optr ubFakeDoc;
 
 /* a modal dialog clicked into (steps 322, 323) */
 static optr ubDefDlg;
+static optr ubPrimary2;
 
 /* a trigger that counts its activations (step 317) */
 @class UBCountTrigClass, GenTriggerClass;
@@ -4780,6 +4785,74 @@ static void UBClickMenu(word n)
 	@call UBTools::MSG_GEN_REMOVE_CHILD(sub, 0);
 	@call sub::MSG_META_OBJ_FREE();
 	@call UBLast::MSG_GEN_SET_USABLE(VUM_NOW);
+	break;
+    }
+    case 327: {
+	/* a primary with a help context and no File menu: the build adds
+	 * a help trigger (AddPrimaryHelp) and a File menu
+	 * (EnsureFileMenu) */
+	optr p;
+	char *ctx;
+
+	ubState.UBS_stub[18] = 0;
+	p = ObjInstantiate(OptrToHandle(@UBPrimary),
+			   (ClassStruct *) &GenPrimaryClass);
+	(void) @call p::MSG_GEN_REPLACE_VIS_MONIKER_TEXT("Second",
+							 VUM_MANUAL);
+	ObjLockObjBlock(OptrToHandle(p));
+	((GenInstance *) ObjDerefGen(p))->GI_states &= ~GS_USABLE;
+	ctx = ObjVarAddData(p, ATTR_GEN_HELP_CONTEXT, 4);
+	memcpy(ctx, "TOC", 4);
+	MemUnlock(OptrToHandle(p));
+	ubPrimary2 = p;
+	@call UBApp::MSG_GEN_ADD_CHILD(p, CCO_LAST);
+	@call p::MSG_GEN_SET_USABLE(VUM_NOW);
+	break;
+    }
+    case 328: {
+	optr p = ubPrimary2, t, m;
+	OLMenuWinInstance mw;
+	ChunkHandle *c;
+	GenInteractionGroupType *gt;
+	VisMoniker *vm;
+
+	c = ObjVarFindData(p, TEMP_OL_BASE_WIN_HELP_TRIGGER);
+	if (c) {
+	    t = ConstructOptr(OptrToHandle(p), *c);
+	    if (ObjVarFindData(t, HINT_SEEK_TITLE_BAR_RIGHT) &&
+		VisCheckIfSpecBuilt(t) &&
+		@call t::MSG_GEN_FIND_PARENT() == p)
+		ubState.UBS_stub[18] |= 1;
+	    ObjLockObjBlock(OptrToHandle(t));
+	    c = &((GenInstance *) ObjDerefGen(t))->GI_visMoniker;
+	    vm = *c ? LMemDeref(ConstructOptr(OptrToHandle(t), *c)) : NULL;
+	    if (vm && !(vm->VM_type & VMT_MONIKER_LIST) &&
+		(vm->VM_type & VMT_GSTRING))
+		ubState.UBS_stub[18] |= 2;
+	    MemUnlock(OptrToHandle(t));
+	}
+	c = ObjVarFindData(p, TEMP_OL_BASE_WIN_FILE_MENU);
+	if (c) {
+	    m = ConstructOptr(OptrToHandle(p), *c);
+	    gt = ObjVarFindData(m, ATTR_GEN_INTERACTION_GROUP_TYPE);
+	    if (gt && *gt == GIGT_FILE_MENU &&
+		InClass(m, (ClassStruct *) &OLMenuWinClass))
+		ubState.UBS_stub[18] |= 4;
+	    /* the menu Exit is made in when it comes up (not brought up
+	     * here: an initiated menu stays on the window list until it
+	     * is unbuilt, and one linked upward only is not unbuilt when
+	     * its primary goes, as in the asm) */
+	    VisData(m, &mw, sizeof(mw));
+	    if (mw.OLMWI_specState & OMWSS_FILE_MENU)
+		ubState.UBS_stub[18] |= 8;
+	}
+	@call p::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	@call UBApp::MSG_GEN_REMOVE_CHILD(p, 0);
+	if (!ObjVarFindData(p, TEMP_OL_BASE_WIN_HELP_TRIGGER) &&
+	    !ObjVarFindData(p, TEMP_OL_BASE_WIN_FILE_MENU))
+	    ubState.UBS_stub[18] |= 16;
+	@call p::MSG_GEN_DESTROY(VUM_NOW, 0);
+	ubPrimary2 = 0;
 	break;
     }
     case 326: {

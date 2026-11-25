@@ -9,10 +9,11 @@
  * primary, closing (the application quits, or goes to the back), the
  * target at TL_GEN_PRIMARY, Ctrl+F1 for the menu bar.
  *
+ * The build adds a help trigger in the title bar if the primary has a
+ * help context (AddPrimaryHelp) and a File menu if it has none
+ * (EnsureFileMenu: for Exit).
+ *
  * Port32 (Port32/ABI.md section 13y), not yet:
- *   - the help trigger and the file menu the build adds (AddPrimaryHelp,
- *     EnsureFileMenu: the specific UI builds no GenTrigger or
- *     GenInteraction popup yet);
  *   - the window list entry (OLWindowListItemClass,
  *     MSG_OL_FIELD_CREATE_WINDOW_LIST_ENTRY), the task bar;
  *   - the express tool area (the field has none yet: its size is 0).
@@ -164,12 +165,74 @@ static VarDataCHandler baseWinHints[] = {
  * Build and attach
  * ------------------------------------------------------------------- */
 
+/*
+ * AddPrimaryHelp: a help trigger in the title bar (its moniker the
+ * primary help's), bringing up the help, if help buttons are not hidden
+ * and the primary has a help context, no HINT_PRIMARY_NO_HELP_BUTTON
+ * and is no custom window
+ */
+static void AddPrimaryHelp(optr o)
+{
+    optr t;
+    GenDefaultMonikerType *d;
+    ChunkHandle *c;
+
+    if ((olHelpOptions & UIHO_HIDE_HELP_BUTTONS) ||
+	ObjVarFindData(o, ATTR_GEN_WINDOW_CUSTOM_WINDOW) ||
+	ObjVarFindData(o, HINT_PRIMARY_NO_HELP_BUTTON) ||
+	!ObjVarFindData(o, ATTR_GEN_HELP_CONTEXT))
+	return;
+    t = OpenCreateChildObject(OptrToHandle(o), o,
+			      (ClassStruct *) &GenTriggerClass,
+			      HINT_SEEK_TITLE_BAR_RIGHT, FALSE, TRUE, 0);
+    d = ObjVarAddData(t, ATTR_GEN_DEFAULT_MONIKER, sizeof(*d));
+    *d = GDMT_HELP_PRIMARY;
+    @call t::MSG_GEN_TRIGGER_SET_ACTION_MSG(MSG_META_BRING_UP_HELP);
+    @call t::MSG_GEN_TRIGGER_SET_DESTINATION(t);
+    c = ObjVarAddData(o, TEMP_OL_BASE_WIN_HELP_TRIGGER, sizeof(*c));
+    *c = OptrToChunk(t);
+    @call t::MSG_GEN_SET_USABLE(VUM_DELAYED_VIA_APP_QUEUE);
+}
+
+/*
+ * EnsureFileMenu: a File menu (for Exit) if the primary has none, is no
+ * custom window, has no HINT_PRIMARY_NO_FILE_MENU; not in the
+ * transparent launch model with applications not closable, unless a
+ * desk accessory
+ */
+static void EnsureFileMenu(optr o)
+{
+    optr m;
+    ChunkHandle *c;
+    GenInteractionGroupType *gt;
+
+    if ((BWin(o)->OLWI_moreFixedAttr & OWMFA_CUSTOM_WINDOW) ||
+	ObjVarFindData(o, HINT_PRIMARY_NO_FILE_MENU) ||
+	ObjVarFindData(o, ATTR_OL_BASE_WIN_HAVE_FILE_MENU))
+	return;
+    if (TransparentNotClosable() && !(LaunchFlags() & ALF_DESK_ACCESSORY))
+	return;
+    m = OpenCreateChildObject(OptrToHandle(o), o,
+			      (ClassStruct *) &GenInteractionClass, 0, TRUE,
+			      TRUE, CCO_FIRST);
+    c = ObjVarAddData(o, TEMP_OL_BASE_WIN_FILE_MENU, sizeof(*c));
+    *c = OptrToChunk(m);
+    ((GenInteractionInstance *) ObjDerefGen(m))->GII_visibility = GIV_POPUP;
+    gt = ObjVarAddData(m, ATTR_GEN_INTERACTION_GROUP_TYPE |
+		       VDF_SAVE_TO_STATE, sizeof(*gt));
+    *gt = GIGT_FILE_MENU;
+    ObjSetFlags(m, 0, OCF_DIRTY);	/* (not dirtied by the vardata) */
+    @call m::MSG_SPEC_BUILD_BRANCH(0);
+}
+
 /* OLBaseWinUpdateSpecBuild: the primary's children are built within the
- * tree (Port32: no help trigger or file menu added yet) */
+ * tree; then the help trigger and the File menu added */
 @method OLBaseWinClass, MSG_SPEC_BUILD_BRANCH
 {
     @callsuper oself::OLBaseWinClass::MSG_SPEC_BUILD_BRANCH(
 		flags | SBF_VIS_PARENT_WITHIN_SCOPE_OF_TREE_BUILD);
+    AddPrimaryHelp(oself);
+    EnsureFileMenu(oself);
 }
 
 /* OLBaseWinSpecBuild (Port32: no window list entry yet) */

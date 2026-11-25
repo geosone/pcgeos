@@ -137,6 +137,7 @@ UMState umState;
     GI_visMoniker = "Primary";
     GI_states = GS_ENABLED;
     GI_comp = @UMPrimGroup, @UMPrimTool;
+    HINT_PRIMARY_NO_FILE_MENU;	/* (the File menu: uiboot) */
 }
 /* a primary to minimize: its title, and for its icon the abbreviated
  * text and a picture, a black square of 16 by 16 */
@@ -159,6 +160,7 @@ UMState umState;
 @object GenPrimaryClass UMIconPrim = {
     GI_visMoniker = list { @UMIconText, @UMIconAbbrev, @UMIconPicture };
     GI_states = GS_ENABLED;
+    HINT_PRIMARY_NO_FILE_MENU;	/* (the File menu: uiboot) */
 }
 @object UMGroupClass UMPrimGroup = {
     GII_visibility = GIV_SUB_GROUP;
@@ -273,6 +275,7 @@ UMState umState;
     GI_visMoniker = "Menus";
     GI_states = GS_ENABLED;
     GI_comp = @UMEditMenu, @UMViewMenu;
+    HINT_PRIMARY_NO_FILE_MENU;	/* (the File menu: uiboot) */
 }
 @object GenInteractionClass UMEditMenu = {
     GI_comp = @UMCopy, @UMMoreMenu;

@@ -564,6 +564,12 @@ int main(int argc, char **argv)
 	step(326);
 	printf("default moniker: %u\n", st->UBS_stub[17]);
 	CHECK(st->UBS_stub[17] == 7);
+	/* a primary's help trigger and File menu made by the build */
+	step(327);
+	TimerSleep(30);
+	step(328);
+	printf("primary help and file menu: %u\n", st->UBS_stub[18]);
+	CHECK(st->UBS_stub[18] == 31);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }
