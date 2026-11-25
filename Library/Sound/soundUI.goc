@@ -1,0 +1,20 @@
+/*
+ * soundUI.goc -- the sound library's message to the UI (Port32; in the
+ * asm part of soundResident.asm, SoundFreeBlockRoutine).
+ *
+ * A song that is to be destroyed at its end ends in the timer routine,
+ * which cannot free memory; the UI's thread frees the block
+ * (MSG_USER_FREE_SOUND_HANDLE, which calls SoundFreeMusic & co).  The
+ * kernel sends MF_FORCE_QUEUE messages from interrupt code from a
+ * reserve, so the asm's detour through a one-tick timer is gone.
+ */
+@include <stdapp.goh>
+@include <Internal/uProcC.goh>
+#include "soundLocal.h"
+
+void SoundSendFreeToUI(MemHandle mh)
+{
+    if (userInterfaceHandle)
+	@send, forceQueue ConstructOptr(userInterfaceHandle, 0)::
+	    MSG_USER_FREE_SOUND_HANDLE(mh);
+}

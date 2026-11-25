@@ -39,6 +39,8 @@ geos_add_test(geode.hello test_geode_hello)
 geos_geode(kglib GP kglib.gp GOC kglib.goc)
 geos_geode(kgapp GP kgapp.gp GOC kgapp.goc)
 geos_geode(kgdrv kgdrv.c GP kgdrv.gp)
+# for the sound library's test: a sound driver that logs what it is told
+geos_geode(tsnddrv tsnddrv.c GP tsnddrv.gp PROTOCOL 3.0)
 
 # for the tests of the libraries (../Library)
 # the visual classes in a window

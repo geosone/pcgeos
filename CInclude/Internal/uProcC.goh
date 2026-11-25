@@ -41,7 +41,9 @@ DESCRIPTION:
 @message void MSG_USER_DELETE_STATE_FILES_DIALOG_RESPONSE(
 				InteractionCommand response);
 @message void MSG_USER_CONTINUE_STARTUP();
-@message void MSG_USER_FREE_SOUND_HANDLE();
+/* the block of a sound to free (SoundFreeMusic & co): the sound library
+ * ends a song in interrupt code */
+@message void MSG_USER_FREE_SOUND_HANDLE(MemHandle sound);
 @message void MSG_USER_PROMPT_FOR_PASSWORD();
 @message void MSG_USER_PASSWORD_ENTERED();
 @message void MSG_USER_IS_PASSWORD_DIALOG_ACTIVE();

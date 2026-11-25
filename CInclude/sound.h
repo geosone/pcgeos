@@ -905,5 +905,91 @@ pragma Alias(SoundMixerSetMasterVolume, "SOUNDMIXERSETMASTERVOLUME");
 #endif
 
 
+#ifdef GEOS_PORT32
+/*
+ * Port32 (Port32/ABI.md section 9.x, the sound library):
+ *
+ * Handles are 32 bits wide, the events of a song 16: a handle in a song
+ * takes two words, the low one first.  GE_SEND_NOTIFICATION is followed
+ * by the message, the destination's handle (two words) and chunk;
+ * GE_V_SEMAPHORE by the semaphore (two words).  The macros make them.
+ * ChangeEnvelope's instrument is a patch of a table (IT_STANDARD_TABLE),
+ * never a pointer.
+ */
+#define SoundHandleWords(h)	((word) (h)), ((word) ((dword) (h) >> 16))
+#define GeneralNotification(msg, handle, chunk) \
+    SSE_GENERAL, GE_SEND_NOTIFICATION, (word) (msg), \
+    SoundHandleWords(handle), (word) (chunk)
+#define GeneralVSemaphore(sem) \
+    SSE_GENERAL, GE_V_SEMAPHORE, SoundHandleWords(sem)
+
+#define SOUND_ERROR_CAN_NOT_ALLOCATE_CONTROL_WITH_NO_VOICES	20
+#define SOUND_ERROR_MIXER_READ_ONLY				22
+#define SOUND_ERROR_MIXER_UNKNOWN_DEVICE			24
+#define SOUND_ERROR_MIXER_VALUE_OUT_OF_RANGE			26
+
+/* MixerLevel: ML_OFF:1, ML_LEVEL:7 */
+typedef ByteFlags MixerLevel;
+#define ML_OFF		0x80
+#define ML_LEVEL	0x7f
+#define MIXER_LVL_MIN	0x00
+#define MIXER_LVL_MAX	0x7f
+#define MIXER_LVL_OFF	0x80
+#define MIXER_LVL_MUTE	MIXER_LVL_OFF
+
+typedef ByteEnum StdSourceType;
+#define SST_DAC		0x00
+#define SST_MIDI	0x01
+#define SST_CDROM	0x02
+#define SST_MODEM	0x03
+#define SST_MIC_IN	0x04
+#define SST_PC_SPKR	0x05
+
+/* StdSourceBehavior, StdEffectBehavior: MONO:1, SIG_BITS:3 */
+typedef ByteFlags StdSourceBehavior;
+typedef ByteFlags StdEffectBehavior;
+#define SSB_MONO		0x80
+#define SSB_SIG_BITS		0x70
+#define SSB_SIG_BITS_OFFSET	4
+#define SEB_MONO		0x80
+#define SEB_SIG_BITS		0x70
+#define SEB_SIG_BITS_OFFSET	4
+
+typedef ByteEnum StdEffectType;
+#define SET_BASS	0x00
+#define SET_TREBLE	0x01
+#define SET_EXPANDER	0x02
+
+/* The routines the asm had with registers only, in C.  The mixer's
+ * return 0 or a SOUND_ERROR_MIXER_*; a level is a MixerLevel. */
+extern word SoundMixerGetSourceCount(void);
+extern word SoundMixerGetEffectCount(void);
+extern word SoundMixerMapSource(StdSourceType type, word *source,
+				StdSourceBehavior *behavior);
+extern word SoundMixerMapEffect(StdEffectType type, word *effect,
+				StdEffectBehavior *behavior);
+extern word SoundMixerGetSourceVolume(word source, MixerLevel *left,
+				      MixerLevel *right);
+extern word SoundMixerSetSourceVolume(word source, MixerLevel left,
+				      MixerLevel right);
+extern word SoundMixerGetEffectLevel(word effect, MixerLevel *left,
+				     MixerLevel *right);
+extern word SoundMixerSetEffectLevel(word effect, MixerLevel left,
+				     MixerLevel right);
+
+/* the voice manager (with exclusive access, inside ghal_crit): a voice
+ * or DAC number, NO_VOICE (0xff) if none is free or of less priority;
+ * owner is the sound's block (its SC_voice[streamVoice] is told when
+ * the voice is taken away), 0 for none */
+extern void SoundVoiceManagerActivate(word voice, word priority);
+extern Boolean SoundVoiceManagerDeactivate(word voice);
+extern void SoundVoiceManagerAssign(word voice, MemHandle owner,
+				    word streamVoice);
+extern void SoundDACManagerActivate(word dac);
+extern Boolean SoundDACManagerDeactivate(word dac);
+extern void SoundDACManagerAssign(word dac, MemHandle owner,
+				  word streamVoice);
+#endif /* GEOS_PORT32 */
+
 #endif
 

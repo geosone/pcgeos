@@ -25,6 +25,8 @@
 
 #include <geos.h>
 #include <geosdriver.h>
+#include <ghal.h>
+#include <heap.h>
 #include <streamC.h>
 #include <Internal/semInt.h>
 #include <Internal/streamDr.h>
@@ -103,6 +105,49 @@ typedef struct {
     StreamToken	SNMP_stream;	/* dx */
     word	SNMP_side;	/* bp: STREAM_READ, STREAM_WRITE */
 } StreamNotifyMessageParams;
+
+/*
+ * StreamGetByteNB, StreamPutByteNB (the macros of strDrInt.def): a byte
+ * off the reading side or onto the writing side of a stream, without
+ * blocking and without telling the other side's notifier (the caller
+ * calls StreamWriteDataNotify or StreamReadDataNotify when it is done);
+ * TRUE if there is none (no room).  Interrupt code may call them.
+ */
+static inline Boolean StreamGetByteNB(StreamData *sd, byte *b)
+{
+    StreamSideData *r = &sd->SD_reader;
+
+    ghal_crit_enter();
+    if (r->SSD_sem.Sem_value <= 0) {
+	ghal_crit_leave();
+	return TRUE;
+    }
+    r->SSD_sem.Sem_value--;
+    *b = StreamBuffer(sd)[r->SSD_ptr];
+    if (++r->SSD_ptr == sd->SD_max)
+	r->SSD_ptr = SD_DATA_OFFSET;
+    KSemV((void *) &sd->SD_writer.SSD_sem);	/* (the kernel's KSem) */
+    ghal_crit_leave();
+    return FALSE;
+}
+
+static inline Boolean StreamPutByteNB(StreamData *sd, byte b)
+{
+    StreamSideData *w = &sd->SD_writer;
+
+    ghal_crit_enter();
+    if (w->SSD_sem.Sem_value <= 0) {
+	ghal_crit_leave();
+	return TRUE;
+    }
+    w->SSD_sem.Sem_value--;
+    StreamBuffer(sd)[w->SSD_ptr] = b;
+    if (++w->SSD_ptr == sd->SD_max)
+	w->SSD_ptr = SD_DATA_OFFSET;
+    KSemV((void *) &sd->SD_reader.SSD_sem);
+    ghal_crit_leave();
+    return FALSE;
+}
 
 /* the stream driver's routines for other drivers (stream32.gp exports
  * them; the driver is a library for that) */

@@ -79,3 +79,9 @@ geos_add_test(driver.pcl4 test_spool pcl4)
 foreach(_d ${_dotmatrix})
   geos_add_test(driver.${_d} test_spool dotmatrix ${_d})
 endforeach()
+
+# the sound library (Library/Sound) on the stream driver with a sound
+# driver that logs what it is told (../Geode/tsnddrv.c)
+geos_test_program(test_sound EMBED sound stream tsnddrv
+  INCLUDES ${PROJECT_SOURCE_DIR}/CInclude/Internal ${GEOS_TESTS_SRC}/Geode)
+geos_add_test(library.sound test_sound)

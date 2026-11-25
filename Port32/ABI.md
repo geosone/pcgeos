@@ -1684,6 +1684,13 @@ every chunk through its goc chunk handle.
   `TimerGetFileDateTime` and the file routines use the same clock.
 - Interrupt code does not free memory (DJGPP's `malloc` under a hardware
   interrupt); ended timers are freed from normal code (`TimerReap`).
+- **Timers started by interrupt code**: a timer routine may start a
+  timer (the sound library starts the next event of a song from the
+  routine of the last one, as the asm did). Interrupt code allocates no
+  memory either, so `TimerStart` takes a spare timer (`TimerReap` keeps
+  up to 8, with their handles) or one that ended and was not reaped yet;
+  only normal code allocates a new one. Out of all three, interrupt code
+  gets no timer (`TimerStart` returns 0).
 
 **Scheduling** now follows `timerInt.asm`: every tick the running thread's
 CPU usage and current priority go up; after a time slice (6 ticks) or
@@ -1703,6 +1710,9 @@ routine timers,
 waking a blocked thread, event timers through the hook, and two
 computing threads of the same priority sharing the CPU by time slices
 (with rising priority) while a better thread sleeps and comes back.
+A routine timer starting the next one from its routine, twenty times in
+a row, while the main thread waits on a semaphore (so nothing is reaped
+in between).
 
 ## 12. Events, queues and messages (`Geodes/geodesEvent.c`, `Object/objectClass.c`, P4)
 
@@ -7182,6 +7192,79 @@ the modules of the asm; what is there:
   keys passed to the content (text, cursor keys, selecting, deleting,
   Enter and Backspace); the mouse (press, drag, release, double
   press).
+
+## 13aa. The sound library (`Library/Sound`, P6)
+
+`sound.geo` in C beside the asm: `soundCommon.c` (entry, driver,
+exclusive access), `soundResident.c` (the player in the timer
+interrupt), `soundVoiceAllocation.c` (voices and DACs by priority),
+`soundDriver.c` (songs, notes, music streams, sample streams),
+`soundMixer.c`, `soundUI.goc`; the structures in
+`CInclude/Internal/soundCtl.h`, the sound driver's functions in
+`CInclude/Internal/soundDrv.h`.
+
+- **The driver**: at its attach the library loads `[sound] synthDriver`
+  from `SYSTEM\SOUND`, else `standard.geo` (protocol 3.0), and asks it
+  for its voices, DACs and abilities (`DRE_SOUND_QUERY_DEVICE_CAPABILITY`;
+  its `DR_farPtr` is the strategy of the streams to its DACs, else the
+  stream driver's). Without a driver every routine returns
+  `SOUND_ERROR_EXCLUSIVE_ACCESS_GRANTED`, as in the asm. The sound
+  driver's functions keep the asm's registers in `DriverRegs`.
+- **The library is no driver any more.** `sound.gp` made it a driver too
+  (`DR_SOUND_*`), for its own routines only; `sound32.gp` is
+  `library, single` with the entry numbers of `sound.gp`. The asm's
+  register routines and their C stubs (`SOUNDALLOCMUSIC`, ...) are the
+  same C routines under both names, the old names (`SoundAllocSimple`,
+  ...) too. The stream driver is imported as a library.
+- **Routines that took registers only** have C prototypes in `sound.h`
+  under `GEOS_PORT32`: the mixer (`SoundMixerGetSourceCount`, `MapSource`,
+  `Get/SetSourceVolume`, `Get/SetEffectLevel`, ...; a level pair is the
+  asm's al/ah), the voice and DAC managers (`SoundVoiceManager*`,
+  `SoundDACManager*`) for sound drivers.
+- **The table of sounds**: a timer routine and a stream notification get
+  a word of data, which holds no pointer. The library keeps its sounds in
+  a table (a fixed block of its own) and passes the place
+  (`SBS_slot`, new in `SoundBasicStatus`).
+- **Handles in songs**: `GE_SEND_NOTIFICATION` and `GE_V_SEMAPHORE` take
+  a 32-bit handle in two words (`GeneralNotification(msg, handle,
+  chunk)`, `GeneralVSemaphore(sem)`; the events are 12 and 8 bytes).
+  Code that patches the handle word of such an event (GeoLadder's
+  `sndwork.goc`) must write both.
+- **Instruments** are `table << 16 | patch` (`SVS_instrument`); the
+  driver gets the patch in si and the table in bx.
+- **Timing**: an event's delta (ms, ticks, or 64th notes times the
+  tempo) starts a one-shot timer from the timer routine (section 11);
+  waits longer than 65535 ms go in periods, as in the asm.
+- **The end of a song** unlocks the block as its `EndOfSongFlags` say and,
+  with `DESTROY_ON_EOS`, sends `MSG_USER_FREE_SOUND_HANDLE(sound)` to the
+  UI (queued from the interrupt; the parameter is the block's handle).
+- **Sample streams**: the stream to a DAC has the size the driver asks
+  for; the library writes without blocking and writes the rest when told
+  there is room (`SoundWriterNotification`, a routine notification at
+  threshold 0); a change of format waits until the DAC has read all.
+  No DMA page check.
+- **Fixes over the asm**: `SoundVoiceActivate` sorts the active list by
+  the priority (the asm compared the segment of dgroup); freeing a
+  playing song silences it first; `SoundDisableSampleStream` leaves the
+  stream drained (the asm left its semaphore taken, so the next format
+  change waited for good); `SoundFreeSampleStream` that leaves the block
+  to a waiting writer gives back the mutex (the asm kept it: deadlock).
+- **Not yet**: the GPC master volume of the ini file, the UI's side
+  (`UserStandardSound`, freeing finished sounds by type), a real driver
+  (the host sound driver on GHAL audio is next).
+
+ctest `library.sound` with the test driver `tsnddrv` (4 voices, 1 DAC,
+logs every call with its tick): the driver of the ini file and its
+abilities; a song of two voices with ms, tick and tempo deltas (the
+envelopes, the voices on and off at their times, the voices given back,
+the block unlocked); a semaphore V'd by a song; a note played,
+reallocated and played again; a song stopped (silenced, nothing more)
+and played again, freed while playing; priorities (an urgent note takes
+a voice of a background song, a lazy one gets none); exclusive access;
+a music stream written in two parts, the second up to the end of the
+song; a non-blocking write into a full stream; a sample stream with an
+unsupported format, and 300 bytes through the DAC's stream of 64 read by
+the test as the hardware would; the master volume.
 
 ## 14. Open
 
