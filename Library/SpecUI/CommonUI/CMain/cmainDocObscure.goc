@@ -1,0 +1,699 @@
+/*
+ * cmainDocObscure.goc -- OLDocumentClass: what is done to a document
+ * now and then (after cmainDocObscure.asm): its user notes, name,
+ * type and password, the quick backup, the empty and the default
+ * document, a copy and a move to somewhere else.
+ */
+@include "cmainDocument.goh"
+@include <Objects/gTextC.goh>
+@include <Objects/gInterC.goh>
+@include <disk.h>
+@include <system.h>
+
+/* (the kernel's, not the C library's isspace) */
+#undef LocalIsSpace
+extern Boolean LocalIsSpace(wchar ch);
+
+extern DiskHandle backupDirDisk;
+extern char backupDirPath[];
+
+/* the directory of the document */
+static void SetDocDir(optr o)
+{
+    GenFilePath *gfp = ObjVarFindData(o, ATTR_GEN_PATH_DATA);
+
+    if (gfp)
+	(void) FileSetCurrentPath(gfp->GFP_disk, gfp->GFP_path);
+}
+
+static void DocName(optr o, char *name)
+{
+    memcpy(name, GD(o)->GDI_fileName, sizeof(FileLongName));
+}
+
+/* the dialog has the help file of the document */
+static void CopyHelpFile(optr o, optr dialog)
+{
+    FileLongName help;
+
+    if (@call o::MSG_META_GET_HELP_FILE(help))
+	@call dialog::MSG_META_SET_HELP_FILE(help);
+}
+
+static word Length(const char *s)
+{
+    word n = 0;
+
+    while (s[n])
+	n++;
+    return n;
+}
+
+/*
+ * ConstructFullPath: the path of the document's file on the disk that
+ * is returned: from the root of a disk, within a standard path.
+ */
+static DiskHandle FullPath(optr o, char *out)
+{
+    GenFilePath *gfp;
+    DiskHandle disk;
+    const char *path = "";
+    word n = 0, len;
+
+    disk = GenPathFetchDiskHandleAndDerefPath(o, ATTR_GEN_PATH_DATA,
+				TEMP_GEN_PATH_SAVED_DISK_HANDLE, &gfp);
+    if (gfp) {
+	path = gfp->GFP_path;
+	if (!disk)
+	    disk = gfp->GFP_disk;
+    }
+    while (*path == '\\')
+	path++;
+    if (!(disk & DISK_IS_STD_PATH_MASK))
+	out[n++] = '\\';
+    len = Length(path);
+    if (len) {
+	memcpy(out + n, path, len);
+	n += len;
+	out[n++] = '\\';
+    }
+    DocName(o, out + n);
+    return disk;
+}
+
+/* ---------------------------------------------------------------------
+ * User notes
+ * ------------------------------------------------------------------- */
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_EDIT_USER_NOTES
+{
+    FileHandle file = GD(oself)->GDI_fileHandle;
+    optr dialog = UserCreateDialog(@EditUserNotesSummons), text;
+    FileUserNotes notes;
+
+    (void) pself;
+    text = ConstructOptr(OptrToHandle(dialog),
+			 OptrToChunk(@EditUserNotesTextEdit));
+    memset(notes, 0, sizeof(notes));
+    if (!FileGetHandleExtAttributes(file, FEA_USER_NOTES, notes,
+				    sizeof(notes))) {
+	@call text::MSG_VIS_TEXT_REPLACE_ALL_PTR(notes, 0);
+	@call text::MSG_VIS_TEXT_SELECT_RANGE_SMALL(
+			TEXT_ADDRESS_PAST_END_LOW, TEXT_ADDRESS_PAST_END_LOW);
+    }
+    CopyHelpFile(oself, dialog);
+    if (UserDoDialog(dialog) == IC_APPLY) {
+	memset(notes, 0, sizeof(notes));
+	(void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(notes);
+	FileSetHandleExtAttributes(file, FEA_USER_NOTES, notes,
+				   sizeof(notes));
+	FileCommit(file, FALSE);
+    }
+    UserDestroyDialog(dialog);
+}
+
+/* ---------------------------------------------------------------------
+ * Rename
+ * ------------------------------------------------------------------- */
+
+/*
+ * OLDocumentRename: the user gives the new name; the file is closed
+ * for the rename (MSG_OL_DOCUMENT_CONTINUE_RENAME, once it is).
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_RENAME
+{
+    FileLongName name, newName;
+    optr dialog, text;
+    Boolean blank;
+    word response, i;
+
+    (void) pself;
+    DocName(oself, name);
+    dialog = UserCreateDialog(@RenameDialog);
+    text = ConstructOptr(OptrToHandle(dialog), OptrToChunk(@RenameText));
+    @call text::MSG_META_ADD_VAR_DATA(ATTR_GEN_TEXT_LEGAL_FILENAMES, 0,
+				      NULL);
+    @call text::MSG_VIS_TEXT_SET_MAX_LENGTH(FILE_LONGNAME_LENGTH);
+    @call text::MSG_VIS_TEXT_REPLACE_ALL_PTR(name, 0);
+    @call text::MSG_VIS_TEXT_SELECT_ALL();
+    CopyHelpFile(oself, dialog);
+    response = UserDoDialog(dialog);
+    memset(newName, 0, sizeof(newName));
+    (void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(newName);
+    UserDestroyDialog(dialog);
+    blank = TRUE;
+    for (i = 0; newName[i]; i++) {
+	if (!LocalIsSpace((unsigned char) newName[i]))
+	    blank = FALSE;
+    }
+    if (blank) {
+	(void) UserStandardDialogOptr(0, 0, 0, 0, @BlankFileNameErrStr,
+		(CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		(GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET));
+	return;
+    }
+    if (response != IC_APPLY)
+	return;
+    OLDocMarkBusy(oself);
+    @call oself::MSG_GEN_DOCUMENT_CLOSE_FILE(0);
+    CObjMessageP(MF_FORCE_QUEUE, oself, MSG_OL_DOCUMENT_CONTINUE_RENAME,
+		 newName, sizeof(newName), NULL, 0);
+}
+
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_RENAME
+{
+    FileLongName name;
+    word e;
+
+    (void) pself;
+    FilePushDir();
+    SetDocDir(oself);
+    DocName(oself, name);
+    e = FileRename(name, newName);
+    if (!e)
+	memcpy(GD(oself)->GDI_fileName, newName, sizeof(FileLongName));
+    else
+	(void) OLDocUserStandardDialog(e == ERROR_FILE_EXISTS
+			? SDBT_RENAME_FILE_EXISTS : SDBT_RENAME_ERROR,
+			FALSE, newName, NULL);
+    @call oself::MSG_GEN_DOCUMENT_REOPEN_FILE();
+    OLDocSendCompleteUpdateToDC(oself, TRUE);
+    OLDocMarkNotBusy(oself);
+    FilePopDir();
+}
+
+/* ---------------------------------------------------------------------
+ * The type of the document
+ * ------------------------------------------------------------------- */
+
+/* what a change from one GenDocumentType to another takes */
+#define CAF_MODIFY_GEOS_FLAGS		0x200
+#define CAF_NEW_SHARED_SINGLE_FLAG	0x100
+#define CAF_NEW_SHARED_MULTIPLE_FLAG	0x080
+#define CAF_NEW_TEMPLATE_FLAG		0x040
+#define CAF_CONVERT_FROM_READ_ONLY	0x020
+#define CAF_CONVERT_TO_READ_ONLY	0x010
+#define CAF_MODIFY_BACKUP_BIT		0x008
+#define CAF_NEW_BACKUP_BIT		0x004
+#define CAF_PROMPT_TEMPLATE_MOVE	0x002
+#define CAF_REOPEN			0x001
+
+#define CAF(a, b, c, d, e, f, g, h, i, j) \
+    ((a) << 9 | (b) << 8 | (c) << 7 | (d) << 6 | (e) << 5 | (f) << 4 | \
+     (g) << 3 | (h) << 2 | (i) << 1 | (j))
+
+#define DOC_TYPES	(GDT_MULTI_USER + 1)
+
+/* [from][to]: normal, read only, template, read only template, public,
+ * multi-user */
+static const word accessChangeTable[DOC_TYPES][DOC_TYPES] = {
+    {	CAF(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+	CAF(0, 0, 0, 0, 0, 1, 0, 0, 0, 1),
+	CAF(1, 0, 0, 1, 0, 0, 0, 0, 1, 0),
+	CAF(1, 0, 0, 1, 0, 1, 0, 0, 1, 0),
+	CAF(1, 1, 0, 0, 0, 0, 0, 0, 0, 1),
+	CAF(1, 0, 1, 0, 0, 0, 1, 0, 0, 1) },
+    {	CAF(0, 0, 0, 0, 1, 0, 0, 0, 0, 1),
+	CAF(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+	CAF(1, 0, 0, 1, 1, 0, 0, 0, 1, 0),
+	CAF(1, 0, 0, 1, 1, 1, 0, 0, 1, 0),
+	CAF(1, 1, 0, 0, 1, 0, 0, 0, 0, 1),
+	CAF(1, 0, 1, 0, 1, 0, 1, 0, 0, 1) },
+    {	CAF(1, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+	CAF(1, 0, 0, 0, 0, 1, 0, 0, 0, 1),
+	CAF(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+	CAF(0, 0, 0, 0, 0, 1, 0, 0, 0, 0),
+	CAF(1, 1, 0, 0, 0, 0, 0, 0, 0, 1),
+	CAF(1, 0, 1, 0, 0, 0, 1, 0, 0, 1) },
+    {	CAF(1, 0, 0, 0, 1, 0, 0, 0, 0, 1),
+	CAF(1, 0, 0, 0, 1, 1, 0, 0, 0, 1),
+	CAF(0, 0, 0, 0, 1, 0, 0, 0, 0, 0),
+	CAF(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+	CAF(1, 1, 0, 0, 1, 0, 0, 0, 0, 1),
+	CAF(1, 0, 1, 0, 1, 0, 1, 0, 0, 1) },
+    {	CAF(1, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+	CAF(1, 0, 0, 0, 0, 1, 0, 0, 0, 1),
+	CAF(1, 0, 0, 1, 0, 0, 0, 0, 1, 0),
+	CAF(1, 0, 0, 1, 0, 1, 0, 0, 1, 0),
+	CAF(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+	CAF(1, 0, 1, 0, 0, 0, 1, 0, 0, 1) },
+    {	CAF(1, 0, 0, 0, 0, 0, 1, 1, 0, 1),
+	CAF(1, 0, 0, 0, 0, 1, 1, 1, 0, 1),
+	CAF(1, 0, 0, 1, 0, 0, 1, 1, 1, 0),
+	CAF(1, 0, 0, 1, 0, 1, 1, 1, 1, 0),
+	CAF(1, 1, 0, 0, 0, 0, 1, 1, 0, 1),
+	CAF(0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }
+};
+
+/* OLDocumentChangeType: saved and closed first */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CHANGE_TYPE
+{
+    (void) pself;
+    if (!(GD(oself)->GDI_attrs & GDA_READ_ONLY) &&
+	@call oself::MSG_GEN_DOCUMENT_SAVE())
+	return;
+    @call oself::MSG_GEN_DOCUMENT_CLOSE_FILE(0);
+    @send, forceQueue oself::MSG_OL_DOCUMENT_CONTINUE_CHANGE_TYPE(type);
+}
+
+static Boolean SetReadOnly(const char *name, Boolean on)
+{
+    FileAttrs a = FileGetAttributes(name);
+
+    if (ThreadGetError())
+	return TRUE;
+    a = on ? (a | FA_RDONLY) : (a & ~FA_RDONLY);
+    return FileSetAttributes(name, a) != 0;
+}
+
+/*
+ * OLDocumentContinueChangeType: the file gets what the new type is
+ * made of: the read only attribute, the flags of its header (shared,
+ * template), the backup of a VM file; a template may move to the
+ * template directory.  The document is open again after it, unless it
+ * is a template now.
+ */
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_CHANGE_TYPE
+{
+    GenDocumentInstance *g = GD(oself);
+    FileLongName name;
+    Boolean failed = FALSE;
+    word flags, old;
+
+    (void) pself;
+    FilePushDir();
+    SetDocDir(oself);
+    old = g->GDI_type;
+    g->GDI_type = (GenDocumentType) type;
+    DocName(oself, name);
+    flags = old < DOC_TYPES && type < DOC_TYPES
+		? accessChangeTable[old][type] : 0;
+    if (!flags) {
+	@call oself::MSG_GEN_DOCUMENT_REOPEN_FILE();
+	FilePopDir();
+	return;
+    }
+    if (flags & CAF_CONVERT_FROM_READ_ONLY)
+	failed = SetReadOnly(name, FALSE);
+    if (!failed && (flags & CAF_MODIFY_BACKUP_BIT) && OLDocIsVM(oself)) {
+	VMFileHandle vf = VMOpen(name, VMAF_FORCE_READ_WRITE, VMO_OPEN, 0);
+
+	if (!vf) {
+	    failed = TRUE;
+	} else {
+	    if (flags & CAF_NEW_BACKUP_BIT)
+		VMSetAttributes(vf, VMA_BACKUP, 0);
+	    else
+		VMSetAttributes(vf, 0, VMA_BACKUP);
+	    VMClose(vf, FILE_NO_ERRORS);
+	}
+    }
+    if (!failed && (flags & CAF_MODIFY_GEOS_FLAGS)) {
+	GeosFileHeaderFlags f = 0;
+
+	if (flags & CAF_NEW_SHARED_SINGLE_FLAG)
+	    f |= GFHF_SHARED_SINGLE;
+	if (flags & CAF_NEW_SHARED_MULTIPLE_FLAG)
+	    f |= GFHF_SHARED_MULTIPLE;
+	if (flags & CAF_NEW_TEMPLATE_FLAG)
+	    f |= GFHF_TEMPLATE;
+	failed = FileSetPathExtAttributes(name, FEA_FLAGS, &f,
+					  sizeof(f)) != 0;
+    }
+    if (!failed && (flags & CAF_PROMPT_TEMPLATE_MOVE) &&
+	OLDocStandardDialog(oself, SDBT_PROMPT_MOVE_TEMPLATE) == IC_OK) {
+	/* to the template directory of the group */
+	char dest[PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE + 1];
+	word n;
+
+	dest[0] = 0;
+	@call GenFindParent(oself)::MSG_GEN_DOCUMENT_GROUP_GET_TEMPLATE_DIR(
+		dest);
+	n = Length(dest);
+	dest[n++] = '\\';
+	memcpy(dest + n, name, Length(name) + 1);
+	failed = FileMove(name, dest, 0, SP_TEMPLATE) != 0;
+	if (!failed)
+	    OLDocSetTemplateDir(oself);
+    }
+    if (!failed && (flags & CAF_CONVERT_TO_READ_ONLY))
+	failed = SetReadOnly(name, TRUE);
+    if (failed)
+	(void) OLDocStandardDialog(oself, SDBT_CANNOT_CHANGE_TYPE);
+    if (failed || !(flags & CAF_REOPEN)) {
+	/* a template is not worked on: the document goes */
+	@call oself::MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT();
+	OLDocRemoveObj(oself);
+    } else {
+	if (flags & CAF_CONVERT_TO_READ_ONLY)
+	    OLDocSetAttrs(oself, GDA_READ_ONLY, GDA_READ_WRITE);
+	else
+	    OLDocSetAttrs(oself, GDA_READ_WRITE, GDA_READ_ONLY);
+	@call oself::MSG_GEN_DOCUMENT_REOPEN_FILE();
+    }
+    FilePopDir();
+}
+
+/* ---------------------------------------------------------------------
+ * Password
+ * ------------------------------------------------------------------- */
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CHANGE_PASSWORD
+{
+    FilePassword encrypted;
+
+    (void) pself;
+    if (UserEncryptPassword(password, encrypted) &&
+	OLDocStandardDialog(oself, SDBT_CONFIRM_PASSWORD_CHANGE) != IC_YES)
+	return;
+    if (FileSetHandleExtAttributes(GD(oself)->GDI_fileHandle, FEA_PASSWORD,
+				   encrypted, sizeof(encrypted)))
+	(void) OLDocStandardDialog(oself, SDBT_CANNOT_CHANGE_PASSWORD);
+}
+
+/* ---------------------------------------------------------------------
+ * Quick backup: a copy in the backup directory, and back from it
+ * ------------------------------------------------------------------- */
+
+/* CheckIfBackup: the document is itself in the backup directory */
+static Boolean IsBackup(optr o)
+{
+    PathName path;
+
+    if (@call o::MSG_GEN_PATH_GET(path, sizeof(path)))
+	return TRUE;
+    return FileComparePaths(path, @call o::MSG_GEN_PATH_GET_DISK_HANDLE(),
+			    backupDirPath, backupDirDisk) == PCT_EQUAL;
+}
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_QUICK_BACKUP
+{
+    FileLongName name;
+    optr dialog;
+    Boolean failed;
+    word e;
+
+    (void) pself;
+    FilePushDir();
+    if (FileSetCurrentPath(backupDirDisk, backupDirPath)) {
+	/* the user sees that it is being done */
+	dialog = UserCreateDialog(@QuickBackupDialog);
+	@send dialog::MSG_GEN_INTERACTION_INITIATE();
+	DocName(oself, name);
+	failed = IsBackup(oself);
+	if (!failed) {
+	    (void) @call oself::MSG_GEN_DOCUMENT_UPDATE(&e);
+	    failed = FileCopy(NULL, name,
+			      (DiskHandle) GD(oself)->GDI_fileHandle,
+			      0) != 0;
+	}
+	if (failed)
+	    (void) OLDocStandardDialog(oself, SDBT_BACKUP_ERROR);
+	else
+	    OLDocSetAttrs(oself, GDA_BACKUP_EXISTS, 0);
+	OLDocSendNotificationToDC(oself, TRUE);
+	UserDestroyDialog(dialog);
+    }
+    FilePopDir();
+}
+
+/* OLDocumentRecoverQuickBackup: after asking, with the file closed */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_RECOVER_QUICK_BACKUP
+{
+    (void) pself;
+    if ((GD(oself)->GDI_attrs & GDA_CLOSING) ||
+	OLDocStandardDialog(oself, SDBT_REVERT_QUICK_CONFIRM) != IC_YES) {
+	OLDocClearOperation(oself);
+	return;
+    }
+    OLDocSetOperation(oself, GDO_REVERT_QUICK);
+    @call oself::MSG_GEN_DOCUMENT_CLOSE_FILE(0);
+    OLDocSendToSelfOnQueue(oself, MSG_OL_DOCUMENT_CONTINUE_REVERT_QUICK);
+}
+
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_REVERT_QUICK
+{
+    char dest[PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE + 1];
+    FileLongName name;
+    DiskHandle disk;
+    Boolean failed = TRUE;
+
+    (void) pself;
+    FilePushDir();
+    DocName(oself, name);
+    if (FileSetCurrentPath(backupDirDisk, backupDirPath) &&
+	!IsBackup(oself)) {
+	disk = FullPath(oself, dest);
+	failed = FileCopy(name, dest, 0, disk) != 0;
+    }
+    if (failed)
+	(void) OLDocStandardDialog(oself, SDBT_REVERT_QUICK_ERROR);
+    FilePopDir();
+    OLDocSetAttrs(oself, 0, GDA_DIRTY | GDA_SAVE_FAILED);
+    @call oself::MSG_GEN_DOCUMENT_REOPEN_FILE();
+    @call oself::MSG_GEN_DOCUMENT_FILE_CHANGED_REINITIALIZE_CREATED_UI();
+}
+
+/* ---------------------------------------------------------------------
+ * The empty document (what a new one is a copy of) and the default
+ * document (what the application opens when it starts)
+ * ------------------------------------------------------------------- */
+
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SET_EMPTY,
+				MSG_GEN_DOCUMENT_CLEAR_EMPTY
+{
+    FileLongName name;
+    const char *s;
+    word dialog = 0, r, n, e;
+
+    (void) pself;
+    OLDocMarkBusy(oself);
+    FilePushDir();
+    OLDocSetTemplateDir(oself);
+    MemLock(OptrToHandle(@defaultDocumentName));
+    s = LMemDeref(@defaultDocumentName);
+    for (n = 0; n < sizeof(name) - 1 && s[n]; n++)
+	name[n] = s[n];
+    name[n] = 0;
+    MemUnlock(OptrToHandle(@defaultDocumentName));
+    (void) FileGetAttributes(name);
+    if (!ThreadGetError())
+	dialog = message == MSG_GEN_DOCUMENT_CLEAR_EMPTY
+			? SDBT_QUERY_CLEAR_EMPTY
+			: SDBT_QUERY_SET_EMPTY_ONE_EXISTS;
+    else if (message != MSG_GEN_DOCUMENT_CLEAR_EMPTY)
+	dialog = SDBT_QUERY_SET_EMPTY_NONE_EXISTS;
+    if (dialog) {
+	r = OLDocStandardDialog(oself, dialog);
+	if (r == IC_YES) {
+	    GeosFileHeaderFlags f = GFHF_TEMPLATE;
+
+	    (void) @call oself::MSG_GEN_DOCUMENT_UPDATE(&e);
+	    if (FileCopy(NULL, name, (DiskHandle) GD(oself)->GDI_fileHandle,
+			 0) ||
+		FileSetPathExtAttributes(name, FEA_FLAGS, &f, sizeof(f)))
+		(void) OLDocStandardDialog(oself, SDBT_SET_EMPTY_ERROR);
+	} else if (r == IC_NO) {
+	    (void) FileDelete(name);
+	}
+    }
+    FilePopDir();
+    OLDocSendNotificationToDC(oself, TRUE);
+    OLDocMarkNotBusy(oself);
+}
+
+/*
+ * OLDocumentSetDefault: "defaultDocument" in the application's
+ * category of the .ini file: the path of the document, then what
+ * DiskSave has of its disk.
+ */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SET_DEFAULT,
+				MSG_GEN_DOCUMENT_CLEAR_DEFAULT
+{
+    char category[INI_CATEGORY_BUFFER_SIZE];
+    char data[PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE + 1 + 256];
+    static const char key[] = "defaultDocument";
+    MemHandle block = 0;
+    word dialog = 0, r, n, size;
+
+    (void) pself;
+    category[0] = 0;
+    @call GeodeGetAppObject(0)::MSG_META_GET_INI_CATEGORY(category);
+    if (!InitFileReadStringBlock(category, key, &block, 0, &size)) {
+	if (block)
+	    MemFree(block);
+	dialog = message == MSG_GEN_DOCUMENT_CLEAR_DEFAULT
+			? SDBT_QUERY_CLEAR_DEFAULT
+			: SDBT_QUERY_SET_DEFAULT_ONE_EXISTS;
+    } else if (message != MSG_GEN_DOCUMENT_CLEAR_DEFAULT) {
+	dialog = SDBT_QUERY_SET_DEFAULT_NONE_EXISTS;
+    }
+    if (dialog) {
+	r = OLDocStandardDialog(oself, dialog);
+	if (r == IC_YES) {
+	    data[0] = 0;
+	    if (!@call oself::MSG_GEN_PATH_GET(data, PATH_BUFFER_SIZE)) {
+		n = Length(data);
+		if (!n || data[n - 1] != '\\')
+		    data[n++] = '\\';
+		DocName(oself, data + n);
+		n += Length(data + n) + 1;
+		size = sizeof(data) - n;
+		if (DiskSave(@call oself::MSG_GEN_PATH_GET_DISK_HANDLE(),
+			     data + n, &size)) {
+		    InitFileWriteData(category, key, data, n + size);
+		    InitFileCommit();
+		}
+	    }
+	} else if (r == IC_NO) {
+	    InitFileDeleteEntry(category, key);
+	}
+    }
+    OLDocSendNotificationToDC(oself, TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * Copy to and move to
+ * ------------------------------------------------------------------- */
+
+/* OLDocumentCopyTo: a copy of the document as it is now; the document
+ * stays what it was */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_COPY_TO
+{
+    Boolean failed = TRUE;
+    word e;
+
+    (void) pself;
+    OLDocMarkBusy(oself);
+    if (!OLDocPushAndSetPath(oself, params)) {
+	Boolean go = TRUE;
+
+	(void) FileGetAttributes(params->DCP_name);
+	if (!ThreadGetError())
+	    go = OLDocStandardDialogParams(oself,
+			SDBT_FILE_SAVE_AS_FILE_EXISTS, params) == IC_YES;
+	if (go) {
+	    if (GD(oself)->GDI_attrs & GDA_READ_ONLY)
+		(void) OLDocStandardDialog(oself,
+			SDBT_FILE_COPY_FILE_IS_PUBLIC_OR_READ_ONLY);
+	    else
+		(void) @call oself::MSG_GEN_DOCUMENT_UPDATE(&e);
+	    for (;;) {
+		e = FileCopy(NULL, params->DCP_name,
+			     (DiskHandle) GD(oself)->GDI_fileHandle, 0);
+		if (!e) {
+		    failed = FALSE;
+		    break;
+		}
+		if (OLDocHandleSaveError(oself, e, params) == OLDSE_GIVE_UP)
+		    break;
+	    }
+	}
+    }
+    FilePopDir();
+    OLDocMarkNotBusy(oself);
+    return failed;
+}
+
+static Boolean SameString(const char *a, const char *b)
+{
+    while (*a && *a == *b) {
+	a++;
+	b++;
+    }
+    return *a == *b;
+}
+
+/* OLDocumentMoveTo: the file is closed for the move
+ * (MSG_OL_DOCUMENT_CONTINUE_MOVE_TO, once it is) */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_MOVE_TO
+{
+    GenFilePath *gfp;
+    DiskHandle disk;
+
+    (void) pself;
+    if (GD(oself)->GDI_attrs & GDA_READ_ONLY) {
+	(void) OLDocStandardDialog(oself, SDBT_CANT_MOVE_READ_ONLY_DOCUMENT);
+	return FALSE;
+    }
+    /* to where it is: nothing to do */
+    if (SameString(GD(oself)->GDI_fileName, params->DCP_name)) {
+	disk = GenPathFetchDiskHandleAndDerefPath(oself, ATTR_GEN_PATH_DATA,
+				TEMP_GEN_PATH_SAVED_DISK_HANDLE, &gfp);
+	if (gfp && FileComparePaths(gfp->GFP_path, disk, params->DCP_path,
+				    params->DCP_diskHandle) == PCT_EQUAL)
+	    return FALSE;
+    }
+    OLDocMarkBusy(oself);
+    @call oself::MSG_GEN_DOCUMENT_CLOSE_FILE(0);
+    CObjMessageP(MF_FORCE_QUEUE, oself, MSG_OL_DOCUMENT_CONTINUE_MOVE_TO,
+		 params, sizeof(*params), NULL, 0);
+    return FALSE;
+}
+
+/* HandleMoveToError: TRUE to try again */
+static Boolean MoveToError(optr o, word e, const DocumentCommonParams *params)
+{
+    char code[UHTA_NULL_TERM_BUFFER_SIZE];
+    word dialog;
+
+    if (!(OLD(o)->OLDI_attrs & OLDA_USER_OPENED))
+	return FALSE;
+    if (e == ERROR_WRITE_PROTECTED)
+	return OLDocStandardDialog(o, SDBT_FILE_MOVE_WRITE_PROTECTED) ==
+	       IC_YES;
+    if (e == ERROR_FILE_EXISTS || e == ERROR_ACCESS_DENIED ||
+	e == ERROR_FILE_IN_USE) {
+	(void) OLDocStandardDialogParams(o,
+			SDBT_UNABLE_TO_OVERWRITE_EXISTING_FILE, params);
+	return FALSE;
+    }
+    dialog = e == ERROR_SHORT_READ_WRITE
+		? SDBT_FILE_MOVE_INSUFFICIENT_DISK_SPACE
+	   : e == ERROR_INVALID_LONGNAME ? SDBT_FILE_ILLEGAL_NAME
+	   : SDBT_FILE_MOVE_ERROR;
+    UtilHex32ToAscii(code, e, UHTAF_NULL_TERMINATE);
+    (void) OLDocStandardDialogArg(o, dialog, NULL, code);
+    return FALSE;
+}
+
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_MOVE_TO
+{
+    char source[PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE + 1];
+    DiskHandle disk;
+    Boolean moved = FALSE;
+    word e;
+
+    (void) pself;
+    if (!OLDocPushAndSetPath(oself, params)) {
+	Boolean go = TRUE;
+
+	(void) FileGetAttributes(params->DCP_name);
+	if (!ThreadGetError()) {
+	    go = OLDocStandardDialogParams(oself,
+			SDBT_FILE_SAVE_AS_FILE_EXISTS, params) == IC_YES;
+	    if (go && (e = FileDelete(params->DCP_name)) != 0)
+		go = MoveToError(oself, e, params);
+	}
+	while (go) {
+	    disk = FullPath(oself, source);
+	    e = FileMove(source, params->DCP_name, disk, 0);
+	    if (!e) {
+		moved = TRUE;
+		break;
+	    }
+	    go = MoveToError(oself, e, params);
+	}
+    }
+    FilePopDir();
+    if (moved) {
+	(void) @call oself::MSG_GEN_PATH_SET(params->DCP_path,
+					     params->DCP_diskHandle);
+	OLDocSetAttrs(oself, 0, GDA_UNTITLED);
+	memcpy(GD(oself)->GDI_fileName, params->DCP_name,
+	       sizeof(FileLongName));
+    }
+    @call oself::MSG_GEN_DOCUMENT_REOPEN_FILE();
+    OLDocSendCompleteUpdateToDC(oself, TRUE);
+    OLDocMarkNotBusy(oself);
+}

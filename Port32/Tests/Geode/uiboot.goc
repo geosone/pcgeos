@@ -157,6 +157,10 @@ typedef struct {
     /* save as and revert (steps 98 to 100): save as failed, attributes
      * after it, dirty, reverted, operation, closed, files left */
     word		UBS_docAs[7];
+    /* copy to, move to, type (step 100 on): copy failed, files after
+     * the copy; after the move: name is the new one, files; type and
+     * attributes read only, and normal again */
+    word		UBS_docOb[8];
 } UBState;
 
 UBState ubState;
@@ -3940,6 +3944,88 @@ static void UBClickMenu(word n)
 	UBCHECK(ubState.UBS_docAs[6] == 3);
 	DocDelete("UBDOC");
 	DocDelete("UBDOC2");
+	break;
+    /* (101 to 111 are the reference mode's, below) */
+    case 200: {
+	/* a copy of the document elsewhere; then the document moves */
+	DocumentCommonParams p;
+	optr doc;
+
+	DocDelete("UBDOC3");
+	DocDelete("UBDOC4");
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBDOC", 6);
+	doc = @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_NEW_DOC(&p);
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBDOC3", 7);
+	ubState.UBS_docOb[0] = @call doc::MSG_GEN_DOCUMENT_COPY_TO(&p);
+	UBCHECK(!ubState.UBS_docOb[0]);
+	ubState.UBS_docOb[1] = DocExists("UBDOC3");
+	UBCHECK(ubState.UBS_docOb[1]);
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBDOC4", 7);
+	(void) @call doc::MSG_GEN_DOCUMENT_MOVE_TO(&p);
+	break;
+    }
+    case 201: {
+	/* moved and open again; its type becomes read only */
+	optr doc = @call UBDocGrp::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+	FileLongName name;
+
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	memset(name, 0, sizeof(name));
+	@call doc::MSG_GEN_DOCUMENT_GET_FILE_NAME(name);
+	ubState.UBS_docOb[2] = StrIs(name, "UBDOC4");
+	UBCHECK(ubState.UBS_docOb[2]);
+	UBCHECK(@call doc::MSG_GEN_DOCUMENT_GET_FILE_HANDLE() != 0);
+	ubState.UBS_docOb[3] = DocExists("UBDOC") + 2 * DocExists("UBDOC3");
+	UBCHECK(ubState.UBS_docOb[3] == 2);
+	@call doc::MSG_GEN_DOCUMENT_CHANGE_TYPE(GDT_READ_ONLY);
+	break;
+    }
+    case 202: {
+	optr doc = @call UBDocGrp::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	ubState.UBS_docOb[4] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(ubState.UBS_docOb[4] & GDA_READ_ONLY);
+	UBCHECK(@call doc::MSG_GEN_DOCUMENT_GET_FILE_HANDLE() != 0);
+	@call doc::MSG_GEN_DOCUMENT_CHANGE_TYPE(GDT_NORMAL);
+	break;
+    }
+    case 203: {
+	/* normal again; no password; closed */
+	optr doc = @call UBDocGrp::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+	char none[2];
+
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	ubState.UBS_docOb[5] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(!(ubState.UBS_docOb[5] & GDA_READ_ONLY));
+	UBCHECK(@call doc::MSG_GEN_DOCUMENT_GET_FILE_HANDLE() != 0);
+	none[0] = 0;
+	@call doc::MSG_GEN_DOCUMENT_CHANGE_PASSWORD(none);
+	ubState.UBS_docOb[6] = @call doc::MSG_GEN_DOCUMENT_CLOSE(0);
+	UBCHECK(ubState.UBS_docOb[6] == DQS_OK);
+	break;
+    }
+    case 204:
+	ubState.UBS_docOb[7] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();
+	UBCHECK(!ubState.UBS_docOb[7]);
+	UBCHECK(DocExists("UBDOC4"));
+	DocDelete("UBDOC3");
+	DocDelete("UBDOC4");
 	break;
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */

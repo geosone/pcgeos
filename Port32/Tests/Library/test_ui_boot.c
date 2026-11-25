@@ -95,6 +95,7 @@ typedef struct {
     word		UBS_iacp[14];
     word		UBS_doc[14];
     word		UBS_docAs[7];
+    word		UBS_docOb[8];
 } UBState;
 
 static int fails;
@@ -294,6 +295,11 @@ int main(int argc, char **argv)
 	step(i);
 	Shot(i);
     }
+    /* (101 to 111 are the reference mode's) */
+    for (i = 200; i <= 204; i++) {
+	step(i);
+	Shot(i);
+    }
     printf("system menu button at %d,%d %dx%d, title bar %d..%d\n",
 	   st->UBS_sys[0], st->UBS_sys[1], st->UBS_sys[2], st->UBS_sys[3],
 	   st->UBS_sys[4], st->UBS_sys[5]);
@@ -403,6 +409,10 @@ int main(int argc, char **argv)
     printf("Save as:");
     for (i = 0; i < 7; i++)
 	printf(" %#x", st->UBS_docAs[i]);
+    printf("\n");
+    printf("Copy, move, type:");
+    for (i = 0; i < 8; i++)
+	printf(" %#x", st->UBS_docOb[i]);
     printf("\n");
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);

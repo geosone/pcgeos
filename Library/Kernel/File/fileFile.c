@@ -8,6 +8,8 @@
  * move a file within a disk (FSPOF_MOVE_FILE), and copies and deletes
  * it between disks.  A source or destination disk of 0 is the current
  * path's; with a disk, the path is relative to its root.
+ * FileCopy with no source (NULL) copies the open file whose handle is
+ * passed as the source disk, as the asm did for ds = 0.
  *
  * In a standard path spread over several directories (filePath.c) a
  * file is found at the first of them that has it; a new file or
@@ -249,6 +251,26 @@ static word CopyMove(const TCHAR *source, const TCHAR *dest,
     FileAttrs a;
     word e;
 
+    if (!source) {
+	/* an open file (the asm: ds = 0, si = the handle), from its
+	 * start */
+	KFile *kf = FileOf((FileHandle) sourceDisk);
+	dword pos;
+
+	if (move)
+	    return Fail(ERROR_UNSUPPORTED_FUNCTION);
+	dd = FileResolveOn(destDisk, dest, dst, sizeof(dst));
+	if (!dd)
+	    return ThreadGetError();
+	e = FSD_OF(kf->KF_file.FF_disk)->FSD_position(&kf->KF_file, 0,
+						      FILE_POS_START, &pos);
+	if (!e && !FSD_OF(dd)->FSD_getAttrs(dd, dst, &a))
+	    e = (a & FA_SUBDIR) ? ERROR_ACCESS_DENIED
+				: FSD_OF(dd)->FSD_deleteFile(dd, dst);
+	if (!e)
+	    e = CopyOpen(&kf->KF_file, 0, dd, dst);
+	return Fail(e);
+    }
     sd = local ? FileResolveOn(sourceDisk, source, src, sizeof(src))
 	       : FileLocate(sourceDisk, source, src, sizeof(src));
     if (!sd)

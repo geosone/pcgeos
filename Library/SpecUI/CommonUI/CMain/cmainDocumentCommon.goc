@@ -83,6 +83,22 @@
 @extern method OLDocumentClass, MSG_GEN_DOCUMENT_IMPORT;
 @extern method OLDocumentClass, MSG_GEN_DOCUMENT_EXPORT;
 
+/* cmainDocObscure.goc */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_EDIT_USER_NOTES;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_RENAME;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_RENAME;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CHANGE_TYPE;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_CHANGE_TYPE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CHANGE_PASSWORD;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_QUICK_BACKUP;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_RECOVER_QUICK_BACKUP;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_REVERT_QUICK;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SET_EMPTY, MSG_GEN_DOCUMENT_CLEAR_EMPTY;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SET_DEFAULT, MSG_GEN_DOCUMENT_CLEAR_DEFAULT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_COPY_TO;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_MOVE_TO;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_MOVE_TO;
+
 /* OLBuildDocument (cspecDocument.asm): always this class */
 ClassStruct *OLBuildDocument(optr oself, word masterOffset)
 {

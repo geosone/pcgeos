@@ -18,8 +18,8 @@
 @message void MSG_OL_DOCUMENT_CONTINUE_REVERT();
 @message void MSG_OL_DOCUMENT_CONTINUE_REVERT_QUICK();
 @message void MSG_OL_DOCUMENT_UPDATE_UI();
-@message void MSG_OL_DOCUMENT_CONTINUE_CHANGE_TYPE();
-@message void MSG_OL_DOCUMENT_CONTINUE_RENAME();
+@message void MSG_OL_DOCUMENT_CONTINUE_CHANGE_TYPE(word type = cx);
+@message void MSG_OL_DOCUMENT_CONTINUE_RENAME(char *newName = ss:bp);
 @message void MSG_OL_DOCUMENT_DELETE_AFTER_SAVE_ERROR();
 @message void MSG_OL_DOCUMENT_MOVE_AFTER_SAVE_ERROR();
 @message void MSG_OL_DOCUMENT_REVERT_AFTER_SAVE_ERROR();
@@ -29,7 +29,7 @@
 @message void MSG_OL_DOCUMENT_DELETE_FILES_FS_NOTIFY();
 @message void MSG_OL_DOCUMENT_CONTINUE_CLOSE_AFTER_DISK_FULL();
 @message void MSG_OL_DOCUMENT_AUTO_SAVE_TIMER();
-@message void MSG_OL_DOCUMENT_CONTINUE_MOVE_TO();
+@message void MSG_OL_DOCUMENT_CONTINUE_MOVE_TO(DocumentCommonParams *params = ss:bp);
 @message void MSG_OL_DOCUMENT_CONTINUE_REVERT_TO_AUTO_SAVE();
 @message void MSG_OL_DOCUMENT_CONTINUE_DUPLICATE();
 /* as MSG_GEN_DOCUMENT_CLOSE (in the CUI the last document quits the

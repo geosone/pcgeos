@@ -5620,8 +5620,20 @@ visual classes of `Library/User/Vis`:
   new, open, save, update, auto save, close, attach from state, detach,
   shutdown, the connections of IACP clients; save as (and as a
   template), revert (to the last save, to the last auto save), import
-  and export (`cmainDocumentSaveAs.goc`); not yet `cmainDocLowDisk`,
-  `cmainDocObscure`.
+  and export (`cmainDocumentSaveAs.goc`); user notes, rename, type,
+  password, quick backup and its recovery, the empty and the default
+  document, copy to and move to (`cmainDocObscure.goc`); not yet
+  `cmainDocLowDisk`.
+  - `MSG_OL_DOCUMENT_CONTINUE_RENAME(newName)`,
+    `..._CONTINUE_CHANGE_TYPE(type)` and `..._CONTINUE_MOVE_TO(params)`
+    have their parameters in `olDocumentClass.goh` (the asm passed them
+    in `cx` and on the stack without a C prototype).
+  - `FileCopy(NULL, dest, (DiskHandle) fileHandle, destDisk)` copies an
+    open file from its start, as the asm's `FileCopy` with `ds` = 0 and
+    the handle in `si` (quick backup, copy to, the empty document).
+  - The path of the document for a move or a recovery is relative
+    within a standard path and from the root on a disk (`FullPath`);
+    the asm always put a backslash in front.
   - `MSG_META_DOC_OUTPUT_IMPORT_FILE` and `..._EXPORT_FILE` carry the
     `ImpexTranslationParams` (the structure; the asm sent its address
     on the stack of the sender).
@@ -5667,6 +5679,8 @@ visual classes of `Library/User/Vis`:
     saved, closed, opened again (a second open finds it open), closed.
     Steps 98 to 100: save as (the document is the new file, the old
     one stays), changed and reverted, closed.
+    Steps 200 to 204 (101 to 111 are the reference mode's): copy to,
+    move to, the type read only and normal again, no password, closed.
 - **IACP** (`Library/User/IACP/iacpMain.goc`, `iacpConnect.goc`, beside
   `iacpMain.asm`, `iacpUtils.asm`, `iacpConnect.asm`): the C API of
   `iacp.goh` (plus `IACPShutdownConnection`), as the asm, except:
