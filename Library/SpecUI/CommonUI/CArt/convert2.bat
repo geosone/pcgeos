@@ -16,6 +16,7 @@ cvtpcx -x0 -y1 -2 -nHelpColor -w16 -h10 -omkrHelpGray.ui A031G-8.pcx
 cvtpcx -x0 -y0 -2 -m1 -nFSDocumentDir -w15 -h13 -omkrFSDocumentDir.ui A060-8.pcx
 cvtpcx -x0 -y0 -2 -m1 -nFSFloppyDrive -w15 -h13 -omkrFSFloppyDrive.ui A062-8.pcx
 cvtpcx -x0 -y0 -2 -m1 -nFSCDDrive -w15 -h13 -omkrFSCDDrive.ui A063-8.pcx
+cvtpcx -x0 -y0 -2 -m1 -nFSArchiveDir -w15 -h13 -omkrFSArchiveDir.ui A061-8.pcx
 cvtpcx -x0 -y0 -2 -m1 -g -nFSOpenFolder -w15 -h13 -omkrFSOpenFolder.ui A064-8.pcx
 cvtpcx -x0 -y0 -2 -m1 -g -nFSClosedFolder -w15 -h13 -omkrFSClosedFolder.ui A065-8.pcx
 cvtpcx -x0 -y0 -2 -m1 -g -nFSFile -w15 -h13 -omkrFSFile.ui A066-8.pcx
@@ -32,11 +33,14 @@ cvtpcx -m225 -x0 -y0 -2 -nSaveTC -w17 -h16 -Stool -stiny -omkrSaveTC.ui A126-8.p
 cvtpcx -x50 -y1 -2 -m1 -nHelpWindowMenuColor -w15 -h15 -omkrHelpWindowMenuColor.ui HP000-8.pcx
 
 cvtpcx -2 -g -m13 -x1 -y1 -w48 -h30 -nDialogImportIC import3.pcx
-cvtpcx -g -m13 -x1 -y1 -2 -nDialogImport4b -w64 -h40 -omkrDialogImport4b.ui import4.pcx
+cvtpcx -g -m13 -x1 -y1 -2 -nDialogImport4b -w64 -h40 -omkrDialogImport4b.ui import4b.pcx
 cvtpcx -2 -g -m13 -x1 -y1 -w48 -h30 -nDialogOpenDefaultIC default3.pcx
-cvtpcx -g -m13 -x1 -y1 -2 -nDialogOpenDefault4b -w64 -h40 -omkrDialogOpenDefault4b.ui default4.pcx
+cvtpcx -g -m13 -x1 -y1 -2 -nDialogOpenDefault4b -w64 -h40 -omkrDialogOpenDefault4b.ui deflt4b.pcx
 cvtpcx -2 -g -m13 -x1 -y1 -w48 -h30 -nDialogUserLevelIC levels3.pcx
-cvtpcx -g -m13 -x1 -y1 -2 -nDialogUserLevel4b -w64 -h40 -omkrDialogUserLevel4b.ui levels4.pcx
+cvtpcx -g -m6 -x1 -y1 -2 -nDialogUserLevel4b -w64 -h40 -omkrDialogUserLevel4b.ui levels4b.pcx
+cvtpcx -g -m13 -x1 -y1 -2 -nDialogEmpty4b -w64 -h40 -omkrDialogEmpty4b.ui empty4b.pcx
+cvtpcx -g -m13 -x1 -y1 -2 -nDialogOpen4b -w64 -h40 -omkrDialogOpen4b.ui open4b.pcx
+cvtpcx -g -m13 -x1 -y1 -2 -nDialogUseTemplate4b -w64 -h40 -omkrDialogUseTemplate4b.ui templ4b.pcx
 
 cvtpcx -j -x0 -y1 -2 -m1 -nProgramLevelTrayIcon -w15 -h15 -omkrProgramLevelTrayIcon.def ProgramLevelTrayIcon.pcx
 
