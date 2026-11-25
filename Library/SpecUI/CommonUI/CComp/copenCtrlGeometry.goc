@@ -9,6 +9,7 @@
  * line (OLReplyBarClass's OLRBF_UNDER_DIALOG).
  */
 @include "cGeode.goh"
+@include <Internal/SpecUI/olPaneClass.goh>
 
 #define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
 #define TARGET(f)	((f) & OLBF_TARGET)
@@ -281,10 +282,12 @@ static void CalcCtrlMargins(optr o, Rectangle *m)
     memset(m, 0, sizeof(*m));
     if (!(c->OLCI_optFlags & OLCOF_DISPLAY_MONIKER)) {
 	/* the left and right margins a gadget area could not give (a
-	 * pane on CGA takes none: Port32, OLPaneClass not yet) */
+	 * pane on CGA takes none) */
 	word extra;
 
-	if (CheckIfNeedsExtraMargins(o, &extra))
+	if (!(OpenCheckIfCGA() &&
+	      ObjIsObjectInClass(o, (ClassStruct *) &OLPaneClass)) &&
+	    CheckIfNeedsExtraMargins(o, &extra))
 	    m->R_left = m->R_right = (sword) extra;
 	c = Ctrl(o);
 	if (!c->VCI_comp.CP_firstChild && !(c->VI_typeFlags & VTF_IS_GEN))

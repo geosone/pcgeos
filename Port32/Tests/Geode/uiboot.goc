@@ -184,7 +184,13 @@ typedef struct {
      * going to the next window, after again (step 305); [11] the
      * Tools menu up after the click, [12] the primary maximized then,
      * [13] the primary restored by Alt+F5 (1) and the menu gone (2),
-     * [14] maximized again by Alt+F10 (steps 306 to 309) */
+     * [14] maximized again by Alt+F10 (steps 306 to 309); [15] the
+     * Yes trigger's actions sent by the dialog's activate command, [7]
+     * the dialog's response (step 310); [6] a slider of a GenValue
+     * made with HINT_VALUE_DELAYED_DRAG_NOTIFICATION: 1 built, 2 no
+     * update during drags (step 311); [5] the primary minimized (1),
+     * not minimized after the application is chosen as a task (2)
+     * (steps 312, 313) */
     word		UBS_stub[16];
 } UBState;
 
@@ -311,6 +317,14 @@ static word ubAnswer;
 @class UBYesClass, GenTriggerClass;
 @endc
 @classdecl UBYesClass;
+
+/* the dialog's MSG_GEN_INTERACTION_ACTIVATE_COMMAND sends the action of
+ * its standard trigger (step 310) */
+@method UBYesClass, MSG_GEN_TRIGGER_SEND_ACTION
+{
+    ubState.UBS_stub[15]++;
+    @callsuper();
+}
 
 @method UBYesClass, MSG_GEN_ACTIVATE
 {
@@ -4421,6 +4435,65 @@ static void UBClickMenu(word n)
 	break;
     case 309:
 	ubState.UBS_stub[14] = @call UBPrimary::MSG_GEN_DISPLAY_GET_MAXIMIZED();
+	break;
+    case 310: {
+	/* MSG_GEN_INTERACTION_ACTIVATE_COMMAND: the dialog's trigger for
+	 * the command sends its action (it ends the dialog with Yes) */
+	optr d = UserCreateDialog(@UBAsk);
+
+	if (!d)
+	    break;
+	ubState.UBS_stub[15] = 0;
+	@send, forceQueue d::MSG_GEN_INTERACTION_ACTIVATE_COMMAND(IC_YES);
+	ubState.UBS_stub[7] = UserDoDialog(d);
+	UserDestroyDialog(d);
+	break;
+    }
+    case 311: {
+	/* a slider takes its GenValue's HINT_VALUE_DELAYED_DRAG_
+	 * NOTIFICATION (OpenAddScrollbar): no update during drags */
+	optr par = @call UBSlide::MSG_GEN_FIND_PARENT(), v;
+	OLValueInstance vi;
+	OLSliderInstance sl;
+	GenValueInstance *g;
+
+	ubState.UBS_stub[6] = 0;
+	v = ObjInstantiate(OptrToHandle(@UBSlide),
+			   (ClassStruct *) &GenValueClass);
+	ObjLockObjBlock(OptrToHandle(v));
+	g = (GenValueInstance *) ObjDerefGen(v);
+	g->GVLI_maximum = 0x640000;
+	(void) ObjVarAddData(v, HINT_VALUE_ANALOG_DISPLAY, 0);
+	(void) ObjVarAddData(v, HINT_VALUE_DELAYED_DRAG_NOTIFICATION, 0);
+	MemUnlock(OptrToHandle(v));
+	@call par::MSG_GEN_ADD_CHILD(v, CCO_LAST);
+	@call v::MSG_GEN_SET_USABLE(VUM_NOW);
+	if (InClass(v, (ClassStruct *) &OLValueClass)) {
+	    VisData(v, &vi, sizeof(vi));
+	    if (vi.OLSGI_scrollbar) {
+		ubState.UBS_stub[6] = 1;
+		VisData(ConstructOptr(OptrToHandle(v), vi.OLSGI_scrollbar),
+			&sl, sizeof(sl));
+		if (!(sl.OLSBI_attrs & OLSA_UPDATE_DURING_DRAGS))
+		    ubState.UBS_stub[6] |= 2;
+	    }
+	}
+	@call v::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	@call par::MSG_GEN_REMOVE_CHILD(v, 0);
+	@call v::MSG_META_OBJ_FREE();
+	break;
+    }
+    case 312:
+	/* chosen as a task (the express menu): the primaries come back
+	 * from minimized (looked at in the next step) */
+	@call UBPrimary::MSG_GEN_DISPLAY_SET_MINIMIZED(VUM_NOW);
+	ubState.UBS_stub[5] =
+	    @call UBPrimary::MSG_GEN_DISPLAY_GET_MINIMIZED() ? 1 : 0;
+	@call UBApp::MSG_META_NOTIFY_TASK_SELECTED();
+	break;
+    case 313:
+	if (!@call UBPrimary::MSG_GEN_DISPLAY_GET_MINIMIZED())
+	    ubState.UBS_stub[5] |= 2;
 	break;
     case 210:
 	/* (the documents left, while the test waits for step 209) */

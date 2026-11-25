@@ -491,6 +491,21 @@ int main(int argc, char **argv)
 	       st->UBS_stub[12], st->UBS_stub[13], st->UBS_stub[14]);
 	CHECK(st->UBS_stub[11] && st->UBS_stub[12] && st->UBS_stub[13] == 3 &&
 	      st->UBS_stub[14]);
+	/* a dialog's command activates its trigger */
+	step(310);
+	printf("activate command: trigger actions %u, response %u\n",
+	       st->UBS_stub[15], st->UBS_stub[7]);
+	CHECK(st->UBS_stub[15] == 1 && st->UBS_stub[7] == 6 /* IC_YES */);
+	/* a slider with its GenValue's delayed drag notification */
+	step(311);
+	printf("delayed slider: %u\n", st->UBS_stub[6]);
+	CHECK(st->UBS_stub[6] == 3);
+	/* chosen as a task: the minimized primary comes back */
+	step(312);
+	TimerSleep(5);
+	step(313);
+	printf("task selected: %u\n", st->UBS_stub[5]);
+	CHECK(st->UBS_stub[5] == 3);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }

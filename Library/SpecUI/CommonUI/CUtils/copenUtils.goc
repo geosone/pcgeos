@@ -7,6 +7,7 @@
  * OpenGetPtrImage are in cutilsPtrImages.goc.
  */
 @include "cGeode.goh"
+@include <Internal/SpecUI/olValueClass.goh>
 @include <Objects/vTextC.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Objects/gViewC.goh>
@@ -940,8 +941,10 @@ optr OpenAddScrollbar(optr parent, word hint, Boolean dirty,
 
     if (immediateDrag)
 	(void) ObjVarAddData(sb, HINT_VALUE_IMMEDIATE_DRAG_NOTIFICATION, 0);
-    /* (a slider, HINT_SPEC_SLIDER, drags immediately unless delayed:
-     * with OLValueClass, not yet) */
+    /* a slider takes the parent's HINT_VALUE_DELAYED_DRAG_NOTIFICATION */
+    if (hint == HINT_SPEC_SLIDER &&
+	ObjVarFindData(parent, HINT_VALUE_DELAYED_DRAG_NOTIFICATION))
+	(void) ObjVarAddData(sb, HINT_VALUE_DELAYED_DRAG_NOTIFICATION, 0);
     if (!dirty) {
 	ObjSetFlags(sb, OCF_IGNORE_DIRTY, OCF_DIRTY);
 	GenRemoveDownwardLink(OptrToHandle(sb), OptrToChunk(sb), 0);

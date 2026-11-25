@@ -314,8 +314,13 @@ optr AppFindTopWinOfPriority(optr oself, byte prio)
     if (GenApp(oself)->GAI_states & (AS_DETACHING |
 				     AS_NOT_USER_INTERACTABLE))
 	return;
-    /* (the primaries not minimized: not yet, GenPrimaryClass is not
-     * ported) */
+    /* the primaries not minimized */
+    {
+	EventHandle ev = @record GenPrimaryClass::
+	    MSG_GEN_DISPLAY_SET_NOT_MINIMIZED(VUM_NOW);
+
+	@call oself::MSG_GEN_SEND_TO_CHILDREN(ev);
+    }
     OLAppRaiseLayerPrioIfDeskAccessory(oself);
     GenCallParent(oself, MSG_GEN_BRING_TO_TOP, NULL, 0, NULL, 0);
 }

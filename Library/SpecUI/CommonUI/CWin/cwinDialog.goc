@@ -8,14 +8,9 @@
  * complete); the standard triggers (IC_OK, IC_APPLY ...) the reply bar
  * holds are noted for MSG_GEN_INTERACTION_ACTIVATE_COMMAND.
  *
- * Port32 (Port32/ABI.md section 13y), not yet:
- *   - the standard triggers the type adds (AddStandardTriggerIfNeeded:
- *     the specific UI builds no GenTrigger yet) and their monikers, the
- *     removal of a reply bar with only a close trigger;
- *   - the focus of a dialog run by the UI thread
- *     (MSG_META_MUP_ALTER_FTVMC_EXCL);
- *   - a trigger activated by MSG_GEN_INTERACTION_ACTIVATE_COMMAND (the
- *     command goes up as MSG_GEN_GUP_INTERACTION_COMMAND).
+ * Port32 (Port32/ABI.md section 13y), not yet: the removal of a reply
+ * bar with only a close trigger (tiny screens); the focus of a dialog
+ * run by the UI thread (MSG_META_MUP_ALTER_FTVMC_EXCL).
  */
 @include "cGeode.goh"
 
@@ -898,10 +893,16 @@ static void HandleApplyable(optr o, Boolean on)
     return TRUE;
 }
 
-/* OLDialogWinActivateInteractionCommand: the command's trigger (Port32:
- * no GenTrigger in C yet, so the command itself) */
+/* OLDialogWinActivateInteractionCommand: the command's standard
+ * trigger sends its action; without one, the command goes up */
 @method OLDialogWinClass, MSG_GEN_INTERACTION_ACTIVATE_COMMAND
 {
+    optr t = FindStandardTrigger(oself, command);
+
+    if (t) {
+	@call t::MSG_GEN_TRIGGER_SEND_ACTION(FALSE);
+	return;
+    }
     (void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(command);
 }
 

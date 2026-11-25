@@ -245,7 +245,8 @@ static void BuildBar(optr bar, SpecBuildFlags flags)
  * Minimized
  * ------------------------------------------------------------------- */
 
-/* OLMenuedWinCallIconObject (Port32: there is no icon yet) */
+/* OLMenuedWinCallIconObject: the icon not realizable (if there is
+ * one) */
 static void IconSetNotRealizable(optr o)
 {
     optr icon = MWin(o)->OLMDWI_icon;

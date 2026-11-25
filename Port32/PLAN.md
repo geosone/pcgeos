@@ -146,12 +146,12 @@ Ordered by dependency, each with host-side tests under `linux`:
   ctest check. Done: the load error of the startup applications, the
   beep of an unwanted press, classed events TO_SYS_*, the click that
   raises a geode, the default field, the next window, the menus in
-  stay up mode released, the system menu's accelerators. Open
-  (dependency in C now): `copenAppMisc` (the primaries' icons),
-  `cwinDialog` (GenTrigger), `copenUtils` (OLValue),
-  `copenCtrlGeometry` (OLPane), `cwinMenuedWin` (the window icon),
-  `copenAppCommon` (GenPrimary), `cwinClassCommon*`, `cwinDisplay`,
-  `cwinPopup`, `taCharAttr` (ReflectChange on the screen). Waiting
+  stay up mode released, the system menu's accelerators, a dialog's
+  command through its standard trigger, a slider's delayed drag hint,
+  a pane's margins on CGA, the primaries restored when the application
+  is chosen as a task. Open (dependency in C now): `copenAppMisc` (the
+  primaries' icons), `cwinClassCommon*`, `cwinDisplay`, `cwinPopup`,
+  `taCharAttr` (ReflectChange on the screen). Waiting
   (dependency not in C): the task bar, the menu bar's popout, the
   express menu.
 - Hook up the FreeType driver (already C).
