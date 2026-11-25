@@ -1166,18 +1166,21 @@ static Boolean SendEventCallback(optr parent, optr child, void *data)
 	return;
     }
     if (to >= TO_APP_FOCUS && to <= TO_APP_MODEL) {
-	struct { EventHandle e; word w; } p;
+	/* (a full TravelOption: no undefined padding) */
+	struct { EventHandle e; TravelOption t; } p;
+
 	p.e = event;
-	p.w = (word) (to - (TO_APP_FOCUS - TO_FOCUS));
+	p.t = (TravelOption) (to - (TO_APP_FOCUS - TO_FOCUS));
 	if (!UserCallApplication(MSG_META_SEND_CLASSED_EVENT, &p, sizeof(p),
 				 NULL, 0))
 	    FlowDestroyMessage(event);
 	return;
     }
     if (to >= TO_SYS_FOCUS && to <= TO_SYS_MODEL) {
-	struct { EventHandle e; word w; } p;
+	struct { EventHandle e; TravelOption t; } p;
+
 	p.e = event;
-	p.w = (word) (to - (TO_SYS_FOCUS - TO_FOCUS));
+	p.t = (TravelOption) (to - (TO_SYS_FOCUS - TO_FOCUS));
 	if (!UserCallSystem(MSG_META_SEND_CLASSED_EVENT, &p, sizeof(p),
 			    NULL, 0))
 	    FlowDestroyMessage(event);

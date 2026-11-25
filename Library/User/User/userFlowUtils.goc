@@ -389,7 +389,9 @@ void FlowDestroyMessage(EventHandle event)
 Boolean FlowMessageClassedEvent(optr dest, Message msg, EventHandle event,
 				word other, MessageFlags flags)
 {
-    struct { EventHandle event; word other; } p;
+    /* (other as a dword: a TravelOption is read as an int, the
+     * padding after a word would be undefined) */
+    struct { EventHandle event; dword other; } p;
 
     if (!dest) {
 	FlowDestroyMessage(event);

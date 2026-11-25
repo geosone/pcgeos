@@ -280,7 +280,7 @@ static void MetaSendClassedEvent(void *pself, optr oself, Message m,
 	optr out = IsObject(oself) ? ObjBlockGetOutput(OptrToHandle(oself))
 				   : 0;
 	if (OptrToHandle(out)) {
-	    struct { EventHandle event; word whereTo; } q;
+	    struct { EventHandle event; dword whereTo; } q;
 	    q.event = ev;
 	    q.whereTo = TO_SELF;
 	    CObjMessageP(0, out, KMSG_META_SEND_CLASSED_EVENT, &q, sizeof(q),
