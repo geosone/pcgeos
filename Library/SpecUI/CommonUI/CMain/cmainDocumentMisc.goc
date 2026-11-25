@@ -331,7 +331,7 @@ static void RemoveConnection(optr o, IACPConnection connection)
 	    if (d->OLDI_attrs & OLDA_REVERT_BEFORE_CLOSE) {
 		d->OLDI_attrs &= ~OLDA_REVERT_BEFORE_CLOSE;
 		@call o::MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT();
-		OLDocSendToSelfOnQueue(o, MSG_GEN_DOCUMENT_PHYSICAL_REVERT);
+		@send, forceQueue o::MSG_GEN_DOCUMENT_PHYSICAL_REVERT(NULL);
 		OLDocSendToSelfOnQueue(o,
 				MSG_GEN_DOCUMENT_ATTACH_UI_TO_DOCUMENT);
 	    }
@@ -356,7 +356,7 @@ static void RemoveConnection(optr o, IACPConnection connection)
     }
     @call o::MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT();
     if (OLD(o)->OLDI_attrs & OLDA_REVERT_BEFORE_CLOSE)
-	OLDocSendToSelfOnQueue(o, MSG_GEN_DOCUMENT_PHYSICAL_REVERT);
+	@send, forceQueue o::MSG_GEN_DOCUMENT_PHYSICAL_REVERT(NULL);
     @call o::MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT();
     OLDocSendPhysicalCloseOnQueue(o);
     if (GD(o)->GDI_attrs & GDA_UNTITLED)

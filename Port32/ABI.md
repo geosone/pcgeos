@@ -5618,9 +5618,15 @@ visual classes of `Library/User/Vis`:
   `OLBuildDocument`; shared declarations in `cmainDocument.goh`):
   Motif's part of a `GenDocument`: the document with its file. So far
   new, open, save, update, auto save, close, attach from state, detach,
-  shutdown, the connections of IACP clients; not yet save as, revert,
-  import/export (rest of `cmainDocumentMisc.asm`), `cmainDocLowDisk`,
+  shutdown, the connections of IACP clients; save as (and as a
+  template), revert (to the last save, to the last auto save), import
+  and export (`cmainDocumentSaveAs.goc`); not yet `cmainDocLowDisk`,
   `cmainDocObscure`.
+  - `MSG_META_DOC_OUTPUT_IMPORT_FILE` and `..._EXPORT_FILE` carry the
+    `ImpexTranslationParams` (the structure; the asm sent its address
+    on the stack of the sender).
+  - `MSG_GEN_DOCUMENT_SAVE_AS` leaves the error in `*fileOrError` when
+    it fails.
   - `DocFileOrError` (`gDocC.goh`): what the `fileOrError` of the
     document's messages points to: a `dword` in Port32 (a file handle
     has 32 bits), a `word` in the 16-bit build.
@@ -5659,6 +5665,8 @@ visual classes of `Library/User/Vis`:
   - `library.ui.boot` steps 95 to 98: an untitled document is made and
     closed (object and file go); one with a name is made, marked dirty,
     saved, closed, opened again (a second open finds it open), closed.
+    Steps 98 to 100: save as (the document is the new file, the old
+    one stays), changed and reverted, closed.
 - **IACP** (`Library/User/IACP/iacpMain.goc`, `iacpConnect.goc`, beside
   `iacpMain.asm`, `iacpUtils.asm`, `iacpConnect.asm`): the C API of
   `iacp.goh` (plus `IACPShutdownConnection`), as the asm, except:

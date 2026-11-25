@@ -72,6 +72,17 @@
 @extern method OLDocumentClass, MSG_GEN_DOCUMENT_DISABLE_AUTO_SAVE;
 @extern method OLDocumentClass, MSG_GEN_BRING_TO_TOP, MSG_GEN_LOWER_TO_BOTTOM;
 
+/* cmainDocumentSaveAs.goc */
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE_AS, MSG_GEN_DOCUMENT_SAVE_AS_TEMPLATE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE_AS_CANCELLED;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REVERT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REVERT_NO_PROMPT;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_REVERT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REVERT_TO_AUTO_SAVE;
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_REVERT_TO_AUTO_SAVE;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_IMPORT;
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_EXPORT;
+
 /* OLBuildDocument (cspecDocument.asm): always this class */
 ClassStruct *OLBuildDocument(optr oself, word masterOffset)
 {

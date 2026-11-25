@@ -1004,7 +1004,8 @@ void OLDCEnsureTemplateDir(optr o)
 	text[n] = 0;
     }
     ev = @record GenPrimaryClass::MSG_GEN_PRIMARY_REPLACE_LONG_TERM_MONIKER(
-		VUM_NOW, 0, 0, 0, VMDT_TEXT, VMST_FPTR, (dword) (uintptr_t) text);
+		VUM_NOW, 0, 0, 0, VMDT_TEXT, VMST_FPTR,
+		(VisMonikerSource) (uintptr_t) text);
     GenCallParent(oself, MSG_GEN_GUP_CALL_OBJECT_OF_CLASS, &ev, sizeof(ev),
 		  NULL, 0);
 }

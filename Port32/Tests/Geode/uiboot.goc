@@ -154,6 +154,9 @@ typedef struct {
      * saving, closed, file left; opened again: attributes, a second
      * open, closed, documents left */
     word		UBS_doc[14];
+    /* save as and revert (steps 98 to 100): save as failed, attributes
+     * after it, dirty, reverted, operation, closed, files left */
+    word		UBS_docAs[7];
 } UBState;
 
 UBState ubState;
@@ -3881,6 +3884,62 @@ static void UBClickMenu(word n)
 	UBCHECK(DocExists("UBDOC"));
 	DocDelete("UBDOC");
 	UBCHECK(!DocExists("UBDOC"));
+    {
+	/* save as: the document is the new file from now on, the old
+	 * one stays; then changed and reverted */
+	DocumentCommonParams p;
+	DocFileOrError file = 0;
+	FileLongName name;
+	optr doc;
+
+	DocDelete("UBDOC2");
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBDOC", 6);
+	doc = @call UBDocGrp::MSG_GEN_DOCUMENT_GROUP_NEW_DOC(&p);
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	@call doc::MSG_GEN_DOCUMENT_MARK_DIRTY();
+	memset(&p, 0, sizeof(p));
+	p.DCP_diskHandle = SP_DOCUMENT;
+	memcpy(p.DCP_name, "UBDOC2", 7);
+	ubState.UBS_docAs[0] = @call doc::MSG_GEN_DOCUMENT_SAVE_AS(&file, &p);
+	UBCHECK(!ubState.UBS_docAs[0]);
+	UBCHECK(file && file == @call doc::MSG_GEN_DOCUMENT_GET_FILE_HANDLE());
+	memset(name, 0, sizeof(name));
+	@call doc::MSG_GEN_DOCUMENT_GET_FILE_NAME(name);
+	UBCHECK(StrIs(name, "UBDOC2"));
+	ubState.UBS_docAs[1] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(!(ubState.UBS_docAs[1] &
+		  (GDA_DIRTY | GDA_UNTITLED | GDA_CLOSING)));
+	UBCHECK(@call doc::MSG_GEN_DOCUMENT_GET_OPERATION() == GDO_NORMAL);
+	@call doc::MSG_GEN_DOCUMENT_MARK_DIRTY();
+	ubState.UBS_docAs[2] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(ubState.UBS_docAs[2] & GDA_DIRTY);
+	@call doc::MSG_GEN_DOCUMENT_REVERT_NO_PROMPT();
+	break;
+    }
+    case 99: {
+	optr doc = @call UBDocGrp::MSG_GEN_FIND_CHILD_AT_POSITION(0);
+
+	UBCHECK(doc != 0);
+	if (!doc)
+	    break;
+	ubState.UBS_docAs[3] = @call doc::MSG_GEN_DOCUMENT_GET_ATTRS();
+	UBCHECK(!(ubState.UBS_docAs[3] & GDA_DIRTY));
+	ubState.UBS_docAs[4] = @call doc::MSG_GEN_DOCUMENT_GET_OPERATION();
+	UBCHECK(ubState.UBS_docAs[4] == GDO_NORMAL);
+	ubState.UBS_docAs[5] = @call doc::MSG_GEN_DOCUMENT_CLOSE(0);
+	UBCHECK(ubState.UBS_docAs[5] == DQS_OK);
+	break;
+    }
+    case 100:
+	UBCHECK(!@call UBDocGrp::MSG_GEN_COUNT_CHILDREN());
+	ubState.UBS_docAs[6] = DocExists("UBDOC") + 2 * DocExists("UBDOC2");
+	UBCHECK(ubState.UBS_docAs[6] == 3);
+	DocDelete("UBDOC");
+	DocDelete("UBDOC2");
 	break;
     /* the reference mode (UIBOOT_REF, Port32/tools/uiref-gen.py): the
      * variants of the reference application */

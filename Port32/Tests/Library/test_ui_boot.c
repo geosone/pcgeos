@@ -94,6 +94,7 @@ typedef struct {
     word		UBS_docGrp[7];
     word		UBS_iacp[14];
     word		UBS_doc[14];
+    word		UBS_docAs[7];
 } UBState;
 
 static int fails;
@@ -289,7 +290,7 @@ int main(int argc, char **argv)
      * the generic item and boolean groups; Motif's radio group and
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator; ... ; the sliders */
-    for (i = 2; i <= 98; i++) {
+    for (i = 2; i <= 100; i++) {
 	step(i);
 	Shot(i);
     }
@@ -398,6 +399,10 @@ int main(int argc, char **argv)
     printf("Document:");
     for (i = 0; i < 14; i++)
 	printf(" %#x", st->UBS_doc[i]);
+    printf("\n");
+    printf("Save as:");
+    for (i = 0; i < 7; i++)
+	printf(" %#x", st->UBS_docAs[i]);
     printf("\n");
     printf("File menu pinned at %d,%d %dx%d\n", st->UBS_pinned[0],
 	   st->UBS_pinned[1], st->UBS_pinned[2], st->UBS_pinned[3]);

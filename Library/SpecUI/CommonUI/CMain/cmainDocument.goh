@@ -16,6 +16,7 @@
 @include <Objects/gDocGrpC.goh>
 @include <Objects/gDocCtrl.goh>
 @include <iacp.goh>
+@include <impex.goh>
 @include "cmainManager.goh"
 
 #include <chunkarr.h>
