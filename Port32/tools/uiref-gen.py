@@ -27,6 +27,9 @@ VARIANT picks what is on the screen:
    12  the dialog of a full disk over variant 1 (a document of the
        document group, dirty, whose save fails as on a full disk, closed)
    13  "save changes?" over variant 1 (the same document closed)
+   14  variant 1, the primary maximized, with the menu bar in its
+       header (uiref-cmp.sh runs GEOS with windowOptions = 10272:
+       UIWO_COMBINE_HEADER_AND_MENU_IN_MAXIMIZED_WINDOWS)
 """
 import os, re, sys
 
@@ -41,6 +44,7 @@ tree = src[a:b]
 # the test's own classes and messages
 tree = tree.replace("@object UBAppClass ", "@object GenApplicationClass ")
 tree = tree.replace("@object UBYesClass ", "@object GenTriggerClass ")
+tree = tree.replace("@object UBCountTrigClass ", "@object GenTriggerClass ")
 tree = tree.replace("@object UBGadgetClass ", "@object URGadgetClass ")
 # the controller (never on screen here) as a plain dialog
 tree = tree.replace("@object UBCtlClass ", "@object GenInteractionClass ")
@@ -114,7 +118,7 @@ static Boolean urDiskFull;
 
 @method URDocGrpClass, MSG_UR_NEW_DOC
 {
-#if %(variant)d >= 12
+#if %(variant)d == 12 || %(variant)d == 13
     DocumentCommonParams p;
     optr doc;
     byte *b = (byte *) &p;
@@ -226,6 +230,7 @@ static void URClickMenu(word n)
     @call UBDoc1::MSG_GEN_BRING_TO_TOP();
     @call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
 #endif
+
 #if %(variant)d == 2
     @call UBDoc2::MSG_GEN_BRING_TO_TOP();
     @call UBDoc2::MSG_GEN_DISPLAY_SET_MAXIMIZED();
@@ -290,7 +295,7 @@ static void URClickMenu(word n)
 	@call UBFiles::MSG_GEN_INTERACTION_INITIATE();
     }
 #endif
-#if %(variant)d >= 12
+#if %(variant)d == 12 || %(variant)d == 13
     /* (the document group's own thread makes the document: goc passes
      * at most 126 bytes of a structure to another thread, and
      * DocumentCommonParams has more) */

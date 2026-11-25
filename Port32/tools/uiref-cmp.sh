@@ -38,7 +38,10 @@ for v in "$@"; do
      pmake full >"$app/build.log" 2>&1) ||
 	{ echo "uiref-cmp: the reference application did not build ($app/build.log)" >&2; exit 1; }
     keep=$top/Local/geosref/run-uiref$v
-    GEOSRUN_VIDEO="VESA Compatible SuperVGA: 640x480 64K-color" \
+    # (variant 14: the menu bar in the header of a maximized window)
+    winopts=
+    [ "$v" = 14 ] && winopts=26720
+    GEOSRUN_WINDOW_OPTIONS=$winopts GEOSRUN_VIDEO="VESA Compatible SuperVGA: 640x480 64K-color" \
     GEOSRUN_TIMEOUT=${UIREF_WAIT:-40} GEOSRUN_KEEP=$keep \
 	"$top/Port32/tools/geosrun.sh" "$target" NONE.TXT "$app/uiref.geo" \
 	>/dev/null 2>&1 || true

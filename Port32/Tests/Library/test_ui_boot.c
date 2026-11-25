@@ -323,7 +323,10 @@ int main(int argc, char **argv)
     int i;
 
     setvbuf(stdout, NULL, _IONBF, 0);
-    (void) argc;
+    /* "menuhdr": the menu bar in the header of a maximized window
+     * (windowOptions: UIWO_COMBINE_HEADER_AND_MENU_IN_MAXIMIZED_WINDOWS
+     * set), steps 319, 320 only */
+    int menuHdr = argc > 1 && !strcmp(argv[1], "menuhdr");
     strncpy(top, argv[0], sizeof(top) - 8);
     top[sizeof(top) - 8] = 0;
     slash = strrchr(top, '/');
@@ -375,10 +378,18 @@ int main(int argc, char **argv)
 		 "[motif options]\r\nbuttonInvertDelay = 6\r\n"
 		 "activetitlebarcolor = 8\r\ngadgetRepeatDelay = 18\r\n"
 		 "scrollArrowSize = 12\r\nselectColor = 135\r\n"
-		 "[uiFeatures]\r\nwindowOptions = 2048\r\n"
+		 "[uiFeatures]\r\nwindowOptions = %s\r\n"
 		 "expressOptions = 4041\r\nhelpOptions = 0\r\n",
-		 ini, fs, fs);
+		 ini, fs, fs,
+		 /* (variant 14: the menus in the header when maximized) */
+		 atoi(getenv("UIBOOT_REF")) == 14 ? "26720" : "2048");
 	Put("geos.ini", refIni, strlen(refIni));
+    } else if (menuHdr) {
+	static const char hdr[] = "[uiFeatures]\r\nwindowOptions = 8224\r\n";
+	static char hdrIni[sizeof(ini) + sizeof(hdr)];
+
+	snprintf(hdrIni, sizeof(hdrIni), "%s%s", ini, hdr);
+	Put("geos.ini", hdrIni, strlen(hdrIni));
     } else
 	Put("geos.ini", ini, sizeof(ini) - 1);
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
@@ -416,6 +427,19 @@ int main(int argc, char **argv)
 	TimerSleep(60);
 	Shot(-1);
 	return 0;
+    }
+    if (menuHdr) {
+	step(319);
+	TimerSleep(10);
+	Shot(319);
+	step(320);
+	printf("menus in the header: %u (bar at %d,%d, header %d,%d, "
+	       "restored at %d)\n", st->UBS_stub[20], (sword) st->UBS_stub[21],
+	       (sword) st->UBS_stub[22], (sword) st->UBS_stub[23],
+	       (sword) st->UBS_stub[17], (sword) st->UBS_stub[19]);
+	CHECK(st->UBS_stub[20] == 15);
+	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
+	return fails != 0;
     }
     step(1);
     Shot(1);
@@ -512,6 +536,12 @@ int main(int argc, char **argv)
 	step(315);
 	printf("display with a document: %u\n", st->UBS_stub[16]);
 	CHECK(st->UBS_stub[16] == 15);
+	/* the default action activates a button with the focus */
+	step(316);
+	TimerSleep(5);
+	step(317);
+	printf("default action to the focus: %u\n", st->UBS_stub[18]);
+	CHECK(st->UBS_stub[18] == 15);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }

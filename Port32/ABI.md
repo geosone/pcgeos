@@ -6582,7 +6582,15 @@ are left out), the constants, the variables and the routines.
     superclass `OLPopoutClass` is not ported) is made by a menued
     window when a menu asks for the build info, first among its
     children, horizontal and wrapping, the menus' build info (top
-    menus). `OLBuildInteraction` builds a `GIV_POPUP` there as an
+    menus). With `UIWO_COMBINE_HEADER_AND_MENU_IN_MAXIMIZED_WINDOWS`
+    (`OpenCheckMenusInHeaderOnMax`) the bar of a maximized window is in
+    its header between the icons, instead of the title
+    (`OpenWinCheckMenusInHeader`; ctest `library.ui.boot.menuhdr`,
+    uiref variant 14: identical to the original). The original does
+    not redo the bar's geometry when a window is maximized while it is
+    up (`REDO_GEOMETRY_FOR_EXPRESS_MENU` is FALSE) and leaves the
+    header empty then; the port's geometry update puts the bar there.
+    `OLBuildInteraction` builds a `GIV_POPUP` there as an
     `OLMenuWinClass` (`CWin/cwinMenu.goc`): a menu or sub menu window,
     its items vertical without spacing (sub menu build info for them),
     the group type's standard moniker; brought up by its button at the
@@ -6832,15 +6840,13 @@ are left out), the constants, the variables and the routines.
   bar adjustments, the state saved on detach, menus kept beside their buttons and the
   dialog and menu checks in the spacing. In `OLMenuedWinClass` and
   `OLBaseWinClass`: the icon's private data and its window list entry
-  (the task bar), the trigger bar, the
-  menus in the header of a maximized window, the help trigger and file menu a primary adds,
+  (the task bar), the trigger bar, the help trigger and file menu a primary adds,
   the window list entry, the express tool area (the field has none),
   moniker lists, a double click on the title (the pointer code of
-  `cwinPtr.asm`). In the display classes: the document (closing a
-  display does not ask one yet), `MSG_GEN_DISPLAY_GROUP_SET_MONIKER`,
+  `cwinPtr.asm`). In the display classes:
+  `MSG_GEN_DISPLAY_GROUP_SET_MONIKER`,
   the number of items for the display control, the document
-  control's options, `OLReleaseAllStayUpModeMenus` on a change of
-  target. In `OLPopupWinClass` and
+  control's options. In `OLPopupWinClass` and
   `OLDialogWinClass`: the file menu's place, the help
   trigger (its moniker is a picture), the reply bar removed on tiny
   screens, discarding the block, pinning a dialog (OPEN LOOK only), the focus of a

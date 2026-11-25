@@ -41,6 +41,9 @@ geos_test_program(test_ui_boot
                   INCLUDES ${PROJECT_SOURCE_DIR}/CInclude/Internal
                            ${GEOS_TESTS_SRC}/Geode)
 geos_add_test(library.ui.boot test_ui_boot DISPLAY)
+# the same with the menu bar in the header of a maximized window
+# (windowOptions UIWO_COMBINE_HEADER_AND_MENU_IN_MAXIMIZED_WINDOWS)
+geos_add_test(library.ui.boot.menuhdr test_ui_boot DISPLAY menuhdr)
 
 # the PostScript translation library (Library/Trans/Graphics/Vector/EPS),
 # with Berkeley for the metrics of its text; the TrueType font driver

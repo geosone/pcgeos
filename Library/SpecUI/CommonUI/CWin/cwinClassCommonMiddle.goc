@@ -4,9 +4,6 @@
  * list, the default action and navigation, the header marked invalid
  * and updated, the title bar's geometry, the visual upward queries
  * (the default exclusive, menus, gadget exclusives), the window opened.
- *
- * Port32: the focus being a button
- * (OLButtonClass) is not activated as a default.
  */
 @include "cGeode.goh"
 @include <Objects/gPrimC.goh>
@@ -29,12 +26,21 @@ const Region *OpenWinGetRegionBW(void)
     return windowRegionBW;
 }
 
-/* OpenWinCheckMenusInHeader: the menus in the header of a maximized
- * window (OLMenuedWinClass; Port32: not yet) */
+/* OpenWinCheckMenusInHeader: the menus in the header: so configured, a
+ * maximized window (an OLMenuedWin) with a menu bar */
 Boolean OpenWinCheckMenusInHeader(optr o)
 {
-    (void) o;
-    return FALSE;
+    OLWinInstance *w;
+
+    if (!OpenCheckMenusInHeaderOnMax())
+	return FALSE;
+    w = Win(o);
+    if (!(w->OLWI_attrs & OWA_MAXIMIZABLE) ||
+	!(w->OLWI_specState & OLWSS_MAXIMIZED))
+	return FALSE;
+    EC_ERROR_IF(!ObjIsObjectInClass(o, (ClassStruct *) &OLMenuedWinClass),
+		-1);
+    return ((OLMenuedWinInstance *) w)->OLMDWI_menuBar != 0;
 }
 
 /* ---------------------------------------------------------------------
@@ -112,8 +118,8 @@ Boolean OpenWinEnsureRealizableOnTop(optr o)
  * The default action and navigation
  * ------------------------------------------------------------------- */
 
-/* OpenWinActivateInteractionDefault: the next field, or the default
- * (the focus if it is a button: Port32 not yet); TRUE if done */
+/* OpenWinActivateInteractionDefault: the next field, or the default,
+ * or the focus if it is a button (a popup's too); TRUE if done */
 @extern method OLWinClass, MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT
 {
     optr d;
@@ -123,8 +129,12 @@ Boolean OpenWinEnsureRealizableOnTop(optr o)
 	return TRUE;
     }
     d = pself->OLWI_defaultExcl.HG_OD;
-    if (!d)
-	return FALSE;
+    if (!d) {
+	d = pself->OLWI_focusExcl.FTVMC_OD;
+	if (!d || !@call d::MSG_META_IS_OBJECT_IN_CLASS(
+					(ClassStruct *) &OLButtonClass))
+	    return FALSE;
+    }
     @call d::MSG_GEN_ACTIVATE();
     return TRUE;
 }

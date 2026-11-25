@@ -28,6 +28,14 @@ Boolean OpenCheckIfCGA(void)
     return (moCS_flags & (CSF_VERY_SQUISHED | CSF_TINY)) != 0;
 }
 
+/* OpenCheckMenusInHeaderOnMax: the menu bar goes in the header of a
+ * maximized window (the .ini's window options) */
+Boolean OpenCheckMenusInHeaderOnMax(void)
+{
+    return (olWindowOptions &
+	    UIWO_COMBINE_HEADER_AND_MENU_IN_MAXIMIZED_WINDOWS) != 0;
+}
+
 /* OpenMinimizeIfCGA: 0 on a CGA, else the value */
 word OpenMinimizeIfCGA(word value)
 {

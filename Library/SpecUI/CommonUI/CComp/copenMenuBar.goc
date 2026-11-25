@@ -4,9 +4,11 @@
  * as wide as the window, first in it; the build info of the menus
  * (top menus), its spacing and margins, drawn as a raised frame.
  *
+ * So configured (OpenCheckMenusInHeaderOnMax) the bar of a maximized
+ * window is in its header, between the icons.
+ *
  * Port32 (Port32/ABI.md section 13y), not yet: the popout (its
- * superclass OLPopoutClass), the menus in the header of a maximized
- * window (OpenCheckMenusInHeaderOnMax).
+ * superclass OLPopoutClass).
  *
  * A mnemonic opens a menu of the bar with Alt, or without it while the
  * bar has the focus.
@@ -112,14 +114,40 @@ static VisCompSpacingMarginsInfo MenuBarPassMarginInfo(optr o)
 			      MENU_BAR_BETWEEN_LINES);
 }
 
+/* InHeader: the bar in the header of its maximized window; the room
+ * the icons take on either side */
+static Boolean InHeader(optr o, OLWinHeaderTitleBounds *b)
+{
+    optr w;
+
+    if (!OpenCheckMenusInHeaderOnMax())
+	return FALSE;
+    w = VisFindParent(o);
+    if (!w || !@call w::MSG_OL_WIN_IS_MAXIMIZED())
+	return FALSE;
+    b->OLWHTB_left = b->OLWHTB_right = 0;
+    @call w::MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS(b);
+    return TRUE;
+}
+
+/* OLMenuBarRecalcSize: in the header, the width between the icons */
 @method OLMenuBarClass, MSG_VIS_RECALC_SIZE
 {
+    OLWinHeaderTitleBounds b;
+
+    if (!(width & RSA_CHOOSE_OWN_SIZE) && InHeader(oself, &b))
+	width = (word) (width - b.OLWHTB_left - b.OLWHTB_right);
     return OpenRecalcCtrlSize(oself, width, height,
 			      MenuBarPassMarginInfo(oself));
 }
 
+/* OLMenuBarPositionBranch: in the header, right of the left icons */
 @method OLMenuBarClass, MSG_VIS_POSITION_BRANCH
 {
+    OLWinHeaderTitleBounds b;
+
+    if (InHeader(oself, &b))
+	xOrigin = b.OLWHTB_left;
     VisCompPosition(oself, (sword) xOrigin, (sword) yOrigin,
 		    MenuBarPassMarginInfo(oself));
 }

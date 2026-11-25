@@ -296,6 +296,7 @@ extern void DrawEtchedHLine(GStateHandle gs, sword left, sword y,
 			    sword right, Boolean fix);
 extern void OpenGetLineBounds(optr obj, Rectangle *r);
 extern Boolean OpenCheckIfCGA(void);
+extern Boolean OpenCheckMenusInHeaderOnMax(void);
 extern Boolean OpenCheckIfBW(void);
 extern word OpenMinimizeIfCGA(word value);
 extern void OpenGetScreenDimensions(word *width, word *height);

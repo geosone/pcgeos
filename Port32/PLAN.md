@@ -149,8 +149,10 @@ Ordered by dependency, each with host-side tests under `linux`:
   stay up mode released, the system menu's accelerators, a dialog's
   command through its standard trigger, a slider's delayed drag hint,
   a pane's margins on CGA, the primaries restored when the application
-  is chosen as a task, the display of a document. Open (dependency in
-  C now): `copenAppMisc` (the primaries' icons), `cwinClassCommon*`,
+  is chosen as a task, the display of a document, a focused button as
+  the default action, the menu bar in the header of a maximized window
+  (with uiref variant 14). Open (dependency in C now): `copenAppMisc`
+  (the primaries' icons), `cwinClassCommon*` (the express tool area),
   `cwinPopup`,
   `taCharAttr` (ReflectChange on the screen). Waiting
   (dependency not in C): the task bar, the menu bar's popout, the

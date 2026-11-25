@@ -193,7 +193,15 @@ typedef struct {
      * (steps 312, 313); [16] a display with a document: 1 the document
      * kept, 2 the model grabbed for it (in the application), 4 its
      * name the moniker, 8 its close closes the document (steps 314,
-     * 315) */
+     * 315); [18] a window's default action without a default: 1 no
+     * default, 2 the Go trigger has the focus, 4 the action done, 8
+     * the trigger activated ([19] its activations) (steps 316, 317);
+     * [20] the menu bar in the header of the maximized primary (with
+     * the window option): 1 maximized, 2 the bar right of the header's
+     * left icons, 4 the bar in the header, 8 back below it restored;
+     * [21], [22] the bar's position, [23] the left icons' width, [17]
+     * the primary's top, [19] the bar's top restored (test_ui_boot
+     * menuhdr: steps 319, 320) */
     word		UBS_stub[24];
 } UBState;
 
@@ -292,6 +300,26 @@ static void DocDelete(const char *name)
 }
 
 static optr ubFakeDoc;
+
+/* a trigger that counts its activations (step 317) */
+@class UBCountTrigClass, GenTriggerClass;
+@endc
+@classdecl UBCountTrigClass;
+
+@method UBCountTrigClass, MSG_GEN_ACTIVATE
+{
+    (void) pself;
+    ubState.UBS_stub[19]++;
+    @callsuper();
+}
+
+/* the window of a visual object */
+static optr UBWinOf(optr o)
+{
+    while (o && !ObjIsObjectInClass(o, (ClassStruct *) &OLWinClass))
+	o = @call o::MSG_VIS_FIND_PARENT();
+    return o;
+}
 
 static Boolean ubDiskFull;
 
@@ -557,7 +585,7 @@ static GenControlFeaturesInfo ubCtlToolFeatures[1];
     GI_comp = @UBGTrig;
     GGI_attrs = GGA_COMPOSITE;
 }
-@object GenTriggerClass UBGTrig = {
+@object UBCountTrigClass UBGTrig = {
     GI_visMoniker = "Go";
 }
 @object GenTextClass UBName = {
@@ -4567,6 +4595,74 @@ static void UBClickMenu(word n)
 	@call ubFakeDoc::MSG_META_OBJ_FREE();
 	break;
     }
+    case 316: {
+	/* the default action of a window without a default activates
+	 * the focus if it is a button (OpenWinActivateInteractionDefault):
+	 * the Go trigger given the focus */
+	optr w = UBWinOf(@UBGTrig);
+
+	ubState.UBS_stub[18] = ubState.UBS_stub[19] = 0;
+	@call UBGTrig::MSG_GEN_BRING_TO_TOP();
+	if (w)
+	    @call w::MSG_GEN_BRING_TO_TOP();
+	@call UBGTrig::MSG_META_GRAB_FOCUS_EXCL();
+	break;
+    }
+    case 317: {
+	optr w = UBWinOf(@UBGTrig);
+	OLWinInstance wi;
+
+	if (!w)
+	    break;
+	VisData(w, &wi, sizeof(wi));
+	if (!wi.OLWI_defaultExcl.HG_OD)
+	    ubState.UBS_stub[18] |= 1;
+	if (wi.OLWI_focusExcl.FTVMC_OD == @UBGTrig)
+	    ubState.UBS_stub[18] |= 2;
+	if (@call w::MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT())
+	    ubState.UBS_stub[18] |= 4;
+	if (ubState.UBS_stub[19] == 1)
+	    ubState.UBS_stub[18] |= 8;
+	break;
+    }
+    case 319:
+	@call UBPrimary::MSG_GEN_DISPLAY_SET_MAXIMIZED(VUM_NOW);
+	break;
+    case 320: {
+	/* maximized, the bar in the header between the icons (it takes
+	 * the place of the title); restored, below the header again */
+	OLMenuedWinInstance w;
+	OLWinHeaderTitleBounds hb;
+	Rectangle bar, pb;
+	optr mb;
+
+	ubState.UBS_stub[20] = 0;
+	VisData(@UBPrimary, &w, sizeof(w));
+	if (!w.OLMDWI_menuBar)
+	    break;
+	mb = ConstructOptr(OptrToHandle(@UBPrimary), w.OLMDWI_menuBar);
+	if (w.OLWI_specState & OLWSS_MAXIMIZED)
+	    ubState.UBS_stub[20] |= 1;
+	hb.OLWHTB_left = hb.OLWHTB_right = 0;
+	@call UBPrimary::MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS(&hb);
+	bar = Bounds(mb);
+	pb = Bounds(@UBPrimary);
+	ubState.UBS_stub[21] = (word) bar.R_left;
+	ubState.UBS_stub[22] = (word) bar.R_top;
+	ubState.UBS_stub[23] = hb.OLWHTB_left;
+	ubState.UBS_stub[17] = (word) pb.R_top;
+	if (bar.R_left == (sword) hb.OLWHTB_left)
+	    ubState.UBS_stub[20] |= 2;
+	if (bar.R_top - pb.R_top < 6)
+	    ubState.UBS_stub[20] |= 4;
+	@call UBPrimary::MSG_GEN_DISPLAY_SET_NOT_MAXIMIZED(VUM_NOW);
+	bar = Bounds(mb);
+	pb = Bounds(@UBPrimary);
+	ubState.UBS_stub[19] = (word) (bar.R_top - pb.R_top);
+	if (bar.R_top - pb.R_top >= 12)
+	    ubState.UBS_stub[20] |= 8;
+	break;
+    }
     case 210:
 	/* (the documents left, while the test waits for step 209) */
 	ubState.UBS_low[6] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();
@@ -4576,6 +4672,7 @@ static void UBClickMenu(word n)
     case 101:
     case 104:
     case 110:
+    case 114:
 	@call UBDoc1::MSG_GEN_BRING_TO_TOP();
 	@call UBDoc1::MSG_GEN_DISPLAY_SET_MAXIMIZED();
 	if (step == 110) {

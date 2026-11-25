@@ -23,7 +23,9 @@
 #
 # Environment: GEOSRUN_VIDEO (device of [screen 0], e.g. "VESA Compatible
 # SuperVGA: 640x480 64K-color"), GEOSRUN_TIMEOUT (s, default 180),
-# GEOSRUN_MEM (MB, qemu, default 64), DOSRUN_QEMU_ACCEL=kvm|tcg.
+# GEOSRUN_MEM (MB, qemu, default 64), DOSRUN_QEMU_ACCEL=kvm|tcg,
+# GEOSRUN_WINDOW_OPTIONS ([uiFeatures] windowOptions instead of the
+# target's).
 # GEOSRUN_KEEP=DIR keeps the GEOS tree after the run and, with qemu, a
 # screenshot (screen.png) and the exchange disk; GEOSRUN_SHOT=1 stays at
 # the DOS prompt after GEOS ends, so the screenshot shows its messages.
@@ -56,9 +58,10 @@ for a in "$@"; do
     apps="$apps$ln
 "
 done
-python3 - "$work/GEOS/$ini" "$apps" "${GEOSRUN_VIDEO:-}" <<'EOF'
+python3 - "$work/GEOS/$ini" "$apps" "${GEOSRUN_VIDEO:-}" "${GEOSRUN_WINDOW_OPTIONS:-}" <<'EOF'
 import re, sys
 path, apps, video = sys.argv[1], [a for a in sys.argv[2].split("\n") if a], sys.argv[3]
+winopts = sys.argv[4]
 text = open(path, encoding="latin-1").read().replace("\r\n", "\n")
 def setblock(text, key, lines):
     """replace 'key = { ... }' with the given lines (or drop it)."""
@@ -73,6 +76,9 @@ text = re.sub(r"^(\[mouse\]\n)(?:(?!\[).*\n)*",
 if video:                                            # [screen 0] device
     text = re.sub(r"^(\[screen 0\]\n(?:(?!\[).*\n)*?)device\s*=.*$",
                   lambda m: m.group(1) + "device = " + video, text, count=1, flags=re.M)
+if winopts:                                          # [uiFeatures] windowOptions
+    text = re.sub(r"^windowOptions\s*=.*$", "windowOptions = " + winopts,
+                  text, count=1, flags=re.M)
 open(path, "w", encoding="latin-1").write(text.replace("\n", "\r\n"))
 EOF
 
