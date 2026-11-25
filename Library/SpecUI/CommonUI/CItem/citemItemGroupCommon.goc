@@ -11,8 +11,7 @@
  *
  * Port32 (Port32/ABI.md section 13y), not yet: popup lists, a focus on
  * a text object (OpenTestIfFocusOnTextEditObject: taken as not),
- * ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS, the stay up mode menus
- * released by a selection in a menu.
+ * ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS.
  */
 @include "CItem/citemInt.goh"
 
@@ -519,6 +518,7 @@ static Boolean TestForSelectKeyEvent(optr o, word character)
     if (character != CTRL_KEY(VC_CTRL_M) && character != SPACE_KEY)
 	return FALSE;
     @call o::MSG_OL_IGROUP_TOGGLE_FOCUS_EXCL_ITEM(0);
+    OLReleaseAllStayUpModeMenus(o);
     return TRUE;
 }
 

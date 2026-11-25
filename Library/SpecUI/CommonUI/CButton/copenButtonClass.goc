@@ -10,8 +10,7 @@
  * (copenButtonData.asm), which the asm takes for color too.
  *
  * Port32 (Port32/ABI.md section 13y), not yet: menus (separators, the
- * menu center, menu marks, the stay-up menus released after a key
- * activation, the title bar height), the keyboard accelerator text (copenMoniker.goc).
+ * menu center, menu marks, the title bar height), the keyboard accelerator text (copenMoniker.goc).
  */
 @include "cGeode.goh"
 
@@ -432,10 +431,11 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
     OLButtonRestoreBorderedAndDepressedAndDrawNow(oself);
 }
 
-/* OLButtonKbdActivate (Port32: no stay-up menus to release) */
+/* OLButtonKbdActivate: activated, the menus in stay up mode released */
 @extern method OLButtonClass, MSG_OL_BUTTON_KBD_ACTIVATE
 {
     @call oself::MSG_GEN_ACTIVATE();
+    OLReleaseAllStayUpModeMenus(oself);
 }
 
 /*

@@ -5,13 +5,10 @@
  * between windows and applications, the gadget timer, the host's
  * display size.
  *
- * Port32 (Port32/ABI.md section 13y), not yet:
- *   - the menus in stay-up mode (OLCountStayUpModeMenus,
- *     OLReleaseAllStayUpModeMenus) and the icons of the primaries
- *     (MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER): no menus or windows yet;
- *   - the next window (MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW), the current
- *     menu bar, the task bar's windows, the windows told of a new field
- *     size (OLWinClass, OLBaseWinClass, OLDialogWinClass are not ported).
+ * Port32 (Port32/ABI.md section 13y), not yet: the icons of the
+ * primaries (MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER), the task bar's
+ * windows (the task bar is not ported), the windows told of a new
+ * field size.
  * The standard dialogs are in CSpec/cspecStdDialog.goc.
  */
 @include "cGeode.goh"
@@ -41,7 +38,9 @@ static GenApplicationInstance *GenApp(optr oself)
  * take ink */
 @extern method OLApplicationClass, MSG_META_QUERY_IF_PRESS_IS_INK
 {
-    if (pself->OLAI_flowFlags & AFF_FOCUS_APP) {
+    /* no ink while menus are in stay up mode (the press dismisses them) */
+    if (!OLCountStayUpModeMenus(oself) &&
+	(App(oself)->OLAI_flowFlags & AFF_FOCUS_APP)) {
 	@callsuper();
 	return;
     }
@@ -178,14 +177,19 @@ static const KeyboardShortcut appShortcuts[4] = {
 	if (character != (word) ((CS_CONTROL << 8) | VC_F1)) {
 	    optr m = pself->OLAI_modalWin;
 
+	    /* an accelerator (of the modal window, if one is up) done: the
+	     * menus in stay up mode released */
 	    if (m) {
 		(void) @call m::MSG_GEN_FIND_KBD_ACCELERATOR(character, flags,
 							      state);
+		OLReleaseAllStayUpModeMenus(oself);
 		return TRUE;
 	    }
 	    if (@call oself::MSG_GEN_FIND_KBD_ACCELERATOR(character, flags,
-							  state))
+							  state)) {
+		OLReleaseAllStayUpModeMenus(oself);
 		return TRUE;
+	    }
 	}
     }
     if (flags & (CF_STATE_KEY | CF_TEMP_ACCENT) ||
@@ -227,10 +231,84 @@ callField:
  * Navigation
  * ------------------------------------------------------------------- */
 
-/* the next window of the application: not yet (OLDialogWinClass,
- * OLBaseWinClass) */
+/* a window the application may go on to: a dialog, an icon or a base
+ * window that says it may be (OLANTNW_Callback) */
+static Boolean IsPotentialNextWindow(optr w)
+{
+    if (!@call w::MSG_META_IS_OBJECT_IN_CLASS(&OLDialogWinClass) &&
+	!@call w::MSG_META_IS_OBJECT_IN_CLASS(&OLWinIconClass) &&
+	!@call w::MSG_META_IS_OBJECT_IN_CLASS(&OLBaseWinClass))
+	return FALSE;
+    return @call w::MSG_OL_WIN_CHECK_IF_POTENTIAL_NEXT_WINDOW();
+}
+
+/*
+ * OLApplicationNavigateToNextWindow: unless a modal window is up, the
+ * window after the focus window on the application's GAGCNLT_WINDOWS
+ * list (raised last first), else the eligible one before it, comes to
+ * the top; the old focus window goes behind and to the end of the list
+ */
 @extern method OLApplicationClass, MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW
 {
+    OLApplicationInstance *a = App(oself);
+    optr focus = a->VCNI_focusExcl.FTVMC_OD, cur = 0, next = 0, other = 0;
+    TempMetaGCNData *g;
+    MemHandle mh = OptrToHandle(oself);
+    ChunkHandle list;
+    word i, n;
+    Boolean seen;
+    WindowHandle win;
+
+    if (a->OLAI_modalWin)
+	return;
+    if (focus) {
+	cur = @call focus::MSG_VIS_VUP_FIND_OBJECT_OF_CLASS(&OLDialogWinClass);
+	if (!cur)
+	    cur = @call focus::MSG_VIS_VUP_FIND_OBJECT_OF_CLASS(
+							&OLWinIconClass);
+	if (!cur)
+	    cur = @call focus::MSG_VIS_VUP_FIND_OBJECT_OF_CLASS(
+							&OLBaseWinClass);
+    }
+    g = ObjVarFindData(oself, TEMP_META_GCN);
+    if (!g)
+	return;
+    list = GCNListFindListInBlock(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS,
+				  mh, g->TMGCND_listOfLists, FALSE);
+    if (!list)
+	return;
+    /* the first eligible one after the focus window; until the focus
+     * window is seen, the last eligible one before it (wrapped to) */
+    seen = (cur == 0);
+    n = ChunkArrayGetCount(ConstructOptr(mh, list));
+    for (i = 0; i < n && !next; i++) {
+	optr item;
+	Boolean ok;
+
+	memcpy(&item, &((GCNListElement *) ChunkArrayElementToPtr(
+			    ConstructOptr(mh, list), i, NULL))->GCNLE_item,
+	       sizeof(item));
+	ok = IsPotentialNextWindow(item);
+	if (seen) {
+	    if (ok)
+		next = item;
+	} else if (item == cur)
+	    seen = TRUE;
+	else if (ok)
+	    other = item;
+    }
+    if (!next)
+	next = other;
+    if (!next)
+	return;
+    @call next::MSG_GEN_BRING_TO_TOP();
+    if (!cur)
+	return;
+    win = @call cur::MSG_VIS_QUERY_WINDOW();
+    if (!win)
+	return;
+    WinChangePriority(win, WPF_PLACE_BEHIND, 0);
+    @call oself::MSG_GEN_APPLICATION_LOWER_WINDOW_TO_BOTTOM(cur);
 }
 
 /*
@@ -382,9 +460,14 @@ static void NukeExpressMenu(optr oself)
     @callsuper();
 }
 
-/* the target's menu bar: not yet (OLBaseWinClass) */
+/* OLApplicationToggleCurrentMenuBar: the target's, if it is a base
+ * window (a GenPrimary) */
 @extern method OLApplicationClass, MSG_GEN_APPLICATION_TOGGLE_CURRENT_MENU_BAR
 {
+    optr t = App(oself)->VCNI_targetExcl.FTVMC_OD;
+
+    if (t && @call t::MSG_META_IS_OBJECT_IN_CLASS(&OLBaseWinClass))
+	@call t::MSG_OL_BASE_WIN_TOGGLE_MENU_BAR();
 }
 
 /* OLApplicationToggleExpressMenu: the field's (else the default

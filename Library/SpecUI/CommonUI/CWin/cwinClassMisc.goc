@@ -12,8 +12,9 @@
  * (MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC; the menu bar takes it with
  * Alt or while it has the focus).
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the system menu (its accelerators, the focus going to it when
- * there is no menu bar), the window position and size messages, the
+ * Port32 (Port32/ABI.md section 13y), not yet: the focus going to the
+ * system menu when there is no menu bar, the window position and size
+ * messages, the
  * legos look, rotating the display.
  */
 @include "cGeode.goh"
@@ -75,6 +76,16 @@ Boolean OpenWinCallParentOfWindow(optr o, Message msg, const void *params,
 @extern method OLWinClass, MSG_OL_WIN_CLEAR_TOGGLE_MENU_NAV_PENDING
 {
     pself->OLWI_menuState &= ~OLWMS_TOGGLE_MENU_NAV_PENDING;
+}
+
+/* OLWinCheckIfPotentiatNextWindow: a window the application may go on
+ * to (MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW): focusable, not "no
+ * disturb", realized */
+@extern method OLWinClass, MSG_OL_WIN_CHECK_IF_POTENTIAL_NEXT_WINDOW
+{
+    return (pself->OLWI_attrs & OWA_FOCUSABLE) &&
+	   !(pself->OLWI_moreFixedAttr & OWMFA_NO_DISTURB) &&
+	   (pself->VI_attrs & VA_REALIZED);
 }
 
 /* ---------------------------------------------------------------------
@@ -206,7 +217,8 @@ static Boolean HandleMenuNavigation(optr o, word c, word flags, word state)
  * OpenWinFupKbdChar: the menu toggling and navigation; Tab (with shift
  * backwards, with control too), the arrows: the next or previous field;
  * Enter: the default; a mnemonic (no menu in stay up mode, no control,
- * the window has the system focus); else up the focus hierarchy
+ * the window has the system focus); an accelerator of the system menu;
+ * else up the focus hierarchy
  */
 @extern method OLWinClass, MSG_META_FUP_KBD_CHAR
 {
@@ -244,6 +256,17 @@ static Boolean HandleMenuNavigation(optr o, word c, word flags, word state)
 	    @call oself::MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(character,
 								flags, state))
 	    return TRUE;
+	/* the accelerators of the window's system menu (unless it is a
+	 * close button); one done releases the menus in stay up mode */
+	if (!(Win(oself)->OLWI_menuState & OWA_SYS_MENU_IS_CLOSE_BUTTON)) {
+	    optr menu = OpenWinSysMenuObject(oself, SMO_MENU);
+
+	    if (menu && @call menu::MSG_GEN_FIND_KBD_ACCELERATOR(character,
+								flags, state)) {
+		OLReleaseAllStayUpModeMenus(oself);
+		return TRUE;
+	    }
+	}
     }
     p.c = character;
     p.f = flags;

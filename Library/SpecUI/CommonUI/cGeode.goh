@@ -413,6 +413,11 @@ extern Boolean OpenCheckIfKeyboardNavigation(void);
 extern Boolean OpenCheckIfMenusTakeFocus(void);
 extern void OpenDoClickSound(void);
 extern optr OpenFindOLWin(optr o);
+/* copenUtils.goc: the menus in stay up mode of the application's
+ * windows (and the express menus) dismissed, or counted */
+extern void OLProcessAppStayUpModeMenus(EnsureNoMenusInStayUpModeParams *p);
+extern void OLReleaseAllStayUpModeMenus(optr o);
+extern word OLCountStayUpModeMenus(optr o);
 
 /* CButton: OLButtonClass */
 extern void OLButtonUpdateState(optr oself);

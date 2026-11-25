@@ -692,6 +692,15 @@ static void PinnedOpened(optr o)
 	params->ENMISUMP_menuCount++;
     else
 	(void) @call oself::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+    /* its sub menus too (called: the count is on the caller's stack) */
+    {
+	optr c;
+	word i;
+
+	for (i = 0; (c = @call oself::MSG_GEN_FIND_CHILD_AT_POSITION(i)) != 0;
+	     i++)
+	    (void) @call c::MSG_META_ENSURE_NO_MENUS_IN_STAY_UP_MODE(params);
+    }
     return 0;
 }
 

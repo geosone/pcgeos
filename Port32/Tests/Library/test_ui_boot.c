@@ -107,7 +107,7 @@ typedef struct {
     word		UBS_fcn[16];
     word		UBS_low[8];
     word		UBS_snd[6];
-    word		UBS_stub[8];
+    word		UBS_stub[16];
 } UBState;
 
 static int fails;
@@ -473,6 +473,24 @@ int main(int argc, char **argv)
 	       "at %u,%u\n", st->UBS_stub[5], st->UBS_stub[6],
 	       st->UBS_stub[2], st->UBS_stub[3]);
 	CHECK(st->UBS_stub[4]);
+	/* the next window: the tool box, the primary, the tool box */
+	step(305);
+	printf("next window: %u %u %u\n", st->UBS_stub[8], st->UBS_stub[9],
+	       st->UBS_stub[10]);
+	CHECK(st->UBS_stub[8] == 2 && st->UBS_stub[9] == 1 &&
+	      st->UBS_stub[10] == 2);
+	/* the system menu's accelerators, a menu in stay up mode released */
+	step(306);
+	step(307);
+	TimerSleep(5);
+	step(308);
+	TimerSleep(5);
+	step(309);
+	printf("system menu keys: menu up %u maximized %u, Alt+F5 restored "
+	       "and menu gone %u, Alt+F10 maximized %u\n", st->UBS_stub[11],
+	       st->UBS_stub[12], st->UBS_stub[13], st->UBS_stub[14]);
+	CHECK(st->UBS_stub[11] && st->UBS_stub[12] && st->UBS_stub[13] == 3 &&
+	      st->UBS_stub[14]);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }

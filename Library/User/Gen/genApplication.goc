@@ -1023,3 +1023,72 @@ void GenAppQuitCommon(optr oself, word quitLevel)
     memset(retValue, 0, sizeof(*retValue));
     retValue->ND_dialog = dialog;
 }
+
+/* ---------------------------------------------------------------------
+ * The order of the windows (genAppCommonIACP.asm): the GAGCNLT_WINDOWS
+ * list keeps the window raised last first
+ * ------------------------------------------------------------------- */
+
+/* FindWindowListItem: the list's array and the window's element in it,
+ * NULL if not there */
+static GCNListElement *FindWindowListItem(optr oself, optr window,
+					  optr *array)
+{
+    TempMetaGCNData *g = ObjVarFindData(oself, TEMP_META_GCN);
+    MemHandle mh = OptrToHandle(oself);
+    ChunkHandle list;
+    word i, n;
+    GCNListElement *e;
+
+    if (!g)
+	return NULL;
+    list = GCNListFindListInBlock(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS,
+				  mh, g->TMGCND_listOfLists, FALSE);
+    if (!list)
+	return NULL;
+    *array = ConstructOptr(mh, list);
+    n = ChunkArrayGetCount(*array);
+    for (i = 0; i < n; i++) {
+	optr item;
+
+	e = ChunkArrayElementToPtr(*array, i, NULL);
+	memcpy(&item, &e->GCNLE_item, sizeof(item));
+	if (item == window)
+	    return e;
+    }
+    return NULL;
+}
+
+/* GenApplicationBringWindowToTop: the window first on the list */
+@method GenApplicationClass, MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP
+{
+    optr array;
+    GCNListElement *e = FindWindowListItem(oself, window, &array), *first;
+    optr item;
+
+    if (!e)
+	return;
+    first = ChunkArrayElementToPtr(array, 0, NULL);
+    if (first == e)
+	return;
+    memcpy(&item, &e->GCNLE_item, sizeof(item));
+    ChunkArrayDelete(array, e);
+    first = ChunkArrayElementToPtr(array, 0, NULL);
+    e = ChunkArrayInsertAt(array, first, 0);
+    memcpy(&e->GCNLE_item, &item, sizeof(item));
+}
+
+/* GenApplicationLowerWindowToBottom: the window last on the list */
+@method GenApplicationClass, MSG_GEN_APPLICATION_LOWER_WINDOW_TO_BOTTOM
+{
+    optr array;
+    GCNListElement *e = FindWindowListItem(oself, window, &array);
+    optr item;
+
+    if (!e)
+	return;
+    memcpy(&item, &e->GCNLE_item, sizeof(item));
+    ChunkArrayDelete(array, e);
+    e = ChunkArrayAppend(array, 0);
+    memcpy(&e->GCNLE_item, &item, sizeof(item));
+}

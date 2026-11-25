@@ -20,6 +20,10 @@
  * The icons' ATTR_GEN_TRIGGER_ACTION_DATA (0, VUM_NOW) is left out: the
  * C messages they send take no arguments.
  *
+ * GA_KBD_SEARCH_PATH is set on each object with an accelerator, as uic
+ * set it (goc does not): the menus' accelerators are searched through
+ * it (MSG_GEN_FIND_KBD_ACCELERATOR).
+ *
  * Port32: the application monikers are not here yet.
  */
 @include "cGeode.goh"
@@ -54,6 +58,7 @@
 
 @object GenInteractionClass StandardWindowMenu = {
     GI_kbdAccelerator = @specificUI shift ESCAPE;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GI_visMoniker = list { @MOWindowMenuColorMoniker, @MOWindowMenuBWMoniker, @MOWindowMenuCGAMoniker };
     GI_comp = @SMI_Restore, @SMI_Move, @SMI_Size, @SMI_Minimize, @SMI_Maximize, @SMI_Close;
     GII_visibility = GIV_POPUP;
@@ -63,12 +68,14 @@
 @object GenTriggerClass SMI_Restore = {
     GI_visMoniker = 'R', "Restore";
     GI_kbdAccelerator = @specificUI F5;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GTI_actionMsg = MSG_OL_RESTORE_WIN;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
 }
 @object GenTriggerClass SMI_Move = {
     GI_visMoniker = 'M', "Move";
     GI_kbdAccelerator = @specificUI F7;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GI_states = @default & ~GS_ENABLED;
     GTI_actionMsg = MSG_MO_SYSMENU_MOVE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
@@ -76,6 +83,7 @@
 @object GenTriggerClass SMI_Size = {
     GI_visMoniker = 'S', "Size";
     GI_kbdAccelerator = @specificUI F8;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GI_states = @default & ~GS_ENABLED;
     GTI_actionMsg = MSG_MO_SYSMENU_SIZE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
@@ -83,6 +91,7 @@
 @object GenTriggerClass SMI_Minimize = {
     GI_visMoniker = 'n', "Minimize";
     GI_kbdAccelerator = @specificUI F9;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GI_states = @default & ~GS_ENABLED;
     GTI_actionMsg = MSG_OL_WIN_MINIMIZE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
@@ -90,12 +99,14 @@
 @object GenTriggerClass SMI_Maximize = {
     GI_visMoniker = 'x', "Maximize";
     GI_kbdAccelerator = @specificUI F10;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GTI_actionMsg = MSG_OL_WIN_MAXIMIZE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
 }
 @object GenTriggerClass SMI_Close = {
     GI_visMoniker = 'C', "Close";
     GI_kbdAccelerator = @specificUI F4;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GTI_actionMsg = MSG_OL_WIN_CLOSE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
 }
@@ -125,6 +136,7 @@
 
 @object GenInteractionClass DisplayWindowMenu = {
     GI_kbdAccelerator = @specificUI alt MINUS;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GI_visMoniker = list { @MODisplayWindowMenuColorMoniker, @MODisplayWindowMenuBWMoniker, @MODisplayWindowMenuCGAMoniker };
     GI_comp = @DSMI_Restore, @DSMI_Move, @DSMI_Size, @DSMI_Minimize, @DSMI_Maximize, @DSMI_Close, @DSMI_Next;
     GII_visibility = GIV_POPUP;
@@ -134,12 +146,14 @@
 @object GenTriggerClass DSMI_Restore = {
     GI_visMoniker = 'R', "Restore";
     GI_kbdAccelerator = @specificUI F5;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GTI_actionMsg = MSG_OL_RESTORE_WIN;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
 }
 @object GenTriggerClass DSMI_Move = {
     GI_visMoniker = 'M', "Move";
     GI_kbdAccelerator = @specificUI F7;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GI_states = @default & ~GS_ENABLED;
     GTI_actionMsg = MSG_MO_SYSMENU_MOVE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
@@ -147,6 +161,7 @@
 @object GenTriggerClass DSMI_Size = {
     GI_visMoniker = 'S', "Size";
     GI_kbdAccelerator = @specificUI F8;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GI_states = @default & ~GS_ENABLED;
     GTI_actionMsg = MSG_MO_SYSMENU_SIZE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
@@ -154,6 +169,7 @@
 @object GenTriggerClass DSMI_Minimize = {
     GI_visMoniker = 'n', "Minimize";
     GI_kbdAccelerator = @specificUI F9;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GI_states = @default & ~GS_ENABLED;
     GTI_actionMsg = MSG_OL_WIN_MINIMIZE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
@@ -161,12 +177,14 @@
 @object GenTriggerClass DSMI_Maximize = {
     GI_visMoniker = 'x', "Maximize";
     GI_kbdAccelerator = @specificUI F10;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GTI_actionMsg = MSG_OL_WIN_MAXIMIZE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
 }
 @object GenTriggerClass DSMI_Close = {
     GI_visMoniker = 'C', "Close";
     GI_kbdAccelerator = @specificUI F4;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GTI_actionMsg = MSG_OL_WIN_CLOSE;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
 }
@@ -189,6 +207,7 @@
 @object GenTriggerClass DSMI_Next = {
     GI_visMoniker = 'N', "Next";
     GI_kbdAccelerator = @specificUI F6;
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
     GTI_actionMsg = MSG_MO_NEXT_WIN;
     GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
 }

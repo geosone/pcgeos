@@ -144,15 +144,16 @@ Ordered by dependency, each with host-side tests under `linux`:
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose
   dependency is ported since gets filled in after the asm, with its own
   ctest check. Done: the load error of the startup applications, the
-  beep of an unwanted press. Open (dependency in C now):
-  `copenAppMisc` (the next window, the current menu bar, the windows
-  for the task bar, the stay-up menus, the primaries' icons),
+  beep of an unwanted press, classed events TO_SYS_*, the click that
+  raises a geode, the default field, the next window, the menus in
+  stay up mode released, the system menu's accelerators. Open
+  (dependency in C now): `copenAppMisc` (the primaries' icons),
   `cwinDialog` (GenTrigger), `copenUtils` (OLValue),
   `copenCtrlGeometry` (OLPane), `cwinMenuedWin` (the window icon),
   `copenAppCommon` (GenPrimary), `cwinClassCommon*`, `cwinDisplay`,
-  `cwinPopup`, `visClass` (TO_SYS_* to the system object),
-  `userFlowInput` (the default field to the system object),
-  `taCharAttr` (ReflectChange on the screen).
+  `cwinPopup`, `taCharAttr` (ReflectChange on the screen). Waiting
+  (dependency not in C): the task bar, the menu bar's popout, the
+  express menu.
 - Hook up the FreeType driver (already C).
 
 **Result:** **first GEOS desktop in C, under `dos32` and `linux` (SDL3).** `Appl/SDK_C` samples run.

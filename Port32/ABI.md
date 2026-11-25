@@ -6664,6 +6664,25 @@ are left out), the constants, the variables and the routines.
     to its window): the asm kept the window's
     `OLWMS_HAS_MENU_IN_STAY_UP_MODE` until the next mouse press, so no
     mnemonic worked after a menu closed by the keyboard.
+    A key no mnemonic takes may be an accelerator of the window's
+    system menu (Alt+F5 Restore, Alt+F10 Maximize, …; Ctrl in a
+    display's); the hand-made `cspecCUAS.goc` sets
+    `GA_KBD_SEARCH_PATH` on the objects with accelerators, as uic did
+    (goc never sets it). An accelerator, a key activation of a button,
+    the space in a list, a display's Ctrl+F4/F6 release the menus in
+    stay up mode (`OLReleaseAllStayUpModeMenus`, `copenUtils.goc`:
+    `MSG_META_ENSURE_NO_MENUS_IN_STAY_UP_MODE` to the application's
+    `GAGCNLT_WINDOWS`, a menu passes it to its sub menus; counted by
+    `OLCountStayUpModeMenus`: no ink while one is up).
+  - The next window (`MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW`): unless a
+    modal window is up, the dialog, icon or base window after the focus
+    window on `GAGCNLT_WINDOWS` that may be one
+    (`MSG_OL_WIN_CHECK_IF_POTENTIAL_NEXT_WINDOW`: focusable, not "no
+    disturb", realized) comes up; the old one goes behind and to the
+    end of the list. `GenApplicationClass` keeps the list's order
+    (`MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP`, `_LOWER_WINDOW_TO_
+    BOTTOM`). `MSG_GEN_APPLICATION_TOGGLE_CURRENT_MENU_BAR` goes to the
+    target's base window (whose toggle waits for `OLPopoutClass`).
   - The window icon: `OLWinIconClass` (`CWin/cwinWinIcon.goc`, a
     GenPrimary with `HINT_WIN_ICON`: `OLBuildPrimary` builds it so) and
     `OLWinGlyphDisplayClass` (`CWin/cwinGlyphDisplay.goc`, its caption
@@ -6826,10 +6845,8 @@ are left out), the constants, the variables and the routines.
   (the move/resize keys and their abort monitor, the system menu's
   Move and Size), ink. In `OLMenuWinClass`: a pinned menu restored from
   state (`HINT_INITIATED`: no state yet), cascading sub menus, the express menu, the menu centers,
-  menus in stay up mode
-  released through the application (`MSG_META_ENSURE_NO_MENUS_IN_
-  STAY_UP_MODE` is answered by a menu, the generic tree does not pass
-  it on, nor does `OLMenuItemGroupClass` yet). In `OLMenuButtonClass`: popup lists and the selection box,
+  `OLMenuItemGroupClass` passing on
+  `MSG_META_ENSURE_NO_MENUS_IN_STAY_UP_MODE`. In `OLMenuButtonClass`: popup lists and the selection box,
   the keys of popup lists, the focus on a text object, the system menu icon, the default
   function. `OLPopoutClass` (a plain
   `OLCtrl`). In `OLGadgetAreaClass`:

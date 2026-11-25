@@ -550,6 +550,7 @@ static void MinimizeCommon(optr oself)
 	    @send, forceQueue oself::MSG_GEN_DISPLAY_CLOSE();
 	else
 	    @send, forceQueue oself::MSG_MO_NEXT_WIN();
+	OLReleaseAllStayUpModeMenus(oself);
 	return TRUE;
     }
     return @callsuper();

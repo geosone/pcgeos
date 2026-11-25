@@ -179,8 +179,13 @@ typedef struct {
      * [1] the application lowered lost the field's focus, [2], [3] a
      * point in the primary on the screen, [4] the application had it
      * after a click there, [5], [6] the field's focus before and after
-     * (steps 303, 304) */
-    word		UBS_stub[8];
+     * (steps 303, 304); [8] to [10] the application's focus (1 the
+     * primary, 2 the tool box, 0 other) with the tool box up, after
+     * going to the next window, after again (step 305); [11] the
+     * Tools menu up after the click, [12] the primary maximized then,
+     * [13] the primary restored by Alt+F5 (1) and the menu gone (2),
+     * [14] maximized again by Alt+F10 (steps 306 to 309) */
+    word		UBS_stub[16];
 } UBState;
 
 UBState ubState;
@@ -4363,6 +4368,60 @@ static void UBClickMenu(word n)
 	    ubState.UBS_stub[4] = af == @UBApp;
 	break;
     }
+    case 305: {
+	/* the next window (MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW): with the
+	 * tool box up the application goes from it to the primary and
+	 * back */
+	word k;
+
+	@call UBToolBox::MSG_GEN_INTERACTION_INITIATE();
+	for (k = 0; k < 3; k++) {
+	    optr af = 0;
+
+	    if (k)
+		@call UBApp::MSG_OL_APP_NAVIGATE_TO_NEXT_WINDOW();
+	    TimerSleep(5);
+	    (void) @call UBApp::MSG_META_GET_FOCUS_EXCL(&af);
+	    ubState.UBS_stub[8 + k] = af == @UBPrimary ? 1
+				     : af == @UBToolBox ? 2 : 0;
+	}
+	(void) @call UBToolBox::MSG_GEN_GUP_INTERACTION_COMMAND(IC_DISMISS);
+	break;
+    }
+    case 306:
+	/* a menu in stay up mode (opened by a click on its button) */
+	@call UBPrimary::MSG_GEN_DISPLAY_SET_MAXIMIZED();
+	{
+	    word k;
+	    for (k = 0; k < 4 && !ubState.UBS_stub[11]; k++) {
+		UBClickMenu(k);
+		TimerSleep(5);
+		if (@call UBTools::MSG_VIS_GET_ATTRS() & VA_REALIZED)
+		    ubState.UBS_stub[11] = 1 + k;
+	    }
+	}
+	ubState.UBS_stub[12] = @call UBPrimary::MSG_GEN_DISPLAY_GET_MAXIMIZED();
+	break;
+    case 307:
+	/* Alt+F5, the system menu's Restore (activated through the
+	 * queue: looked at in the next step) */
+	(void) @call UBPrimary::MSG_META_FUP_KBD_CHAR(
+			VC_F5 | (CS_CONTROL << 8),
+			CF_FIRST_PRESS | (SS_LALT << 8), 0);
+	break;
+    case 308:
+	/* the primary restored, the menu in stay up mode dismissed;
+	 * Alt+F10, Maximize */
+	ubState.UBS_stub[13] =
+	    (!@call UBPrimary::MSG_GEN_DISPLAY_GET_MAXIMIZED()) |
+	    ((!(@call UBTools::MSG_VIS_GET_ATTRS() & VA_REALIZED)) << 1);
+	(void) @call UBPrimary::MSG_META_FUP_KBD_CHAR(
+			VC_F10 | (CS_CONTROL << 8),
+			CF_FIRST_PRESS | (SS_LALT << 8), 0);
+	break;
+    case 309:
+	ubState.UBS_stub[14] = @call UBPrimary::MSG_GEN_DISPLAY_GET_MAXIMIZED();
+	break;
     case 210:
 	/* (the documents left, while the test waits for step 209) */
 	ubState.UBS_low[6] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();

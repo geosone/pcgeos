@@ -82,6 +82,7 @@
 @extern method OLWinClass, MSG_OL_WIN_QUERY_MENU_BAR;
 @extern method OLWinClass, MSG_OL_WIN_QUERY_MENU_BAR_HAS_FOCUS;
 @extern method OLWinClass, MSG_OL_WIN_CLEAR_TOGGLE_MENU_NAV_PENDING;
+@extern method OLWinClass, MSG_OL_WIN_CHECK_IF_POTENTIAL_NEXT_WINDOW;
 @extern method OLWinClass, MSG_OL_WIN_TOGGLE_MENU_NAVIGATION;
 @extern method OLWinClass, MSG_GEN_SET_WIN_POSITION;
 @extern method OLWinClass, MSG_GEN_SET_WIN_SIZE;

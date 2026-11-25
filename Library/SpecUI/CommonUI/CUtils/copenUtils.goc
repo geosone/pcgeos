@@ -402,6 +402,59 @@ void OpenDoClickSound(void)
 
 /* OpenFindOLWin (FindOLWin): the OLWin the object is in (itself if it
  * is one), up the vis tree as far as this thread runs it; 0 if none */
+/*
+ * OLProcessAppStayUpModeMenus: MSG_META_ENSURE_NO_MENUS_IN_STAY_UP_MODE
+ * to the windows of the application of this thread (GAGCNLT_WINDOWS):
+ * their menus in stay up mode dismissed, or with params counted
+ */
+void OLProcessAppStayUpModeMenus(EnsureNoMenusInStayUpModeParams *p)
+{
+    optr app = GeodeGetAppObject(0);
+    struct {
+	GCNListSendFlags f; EventHandle e; MemHandle b; word t;
+	ManufacturerID m;
+    } s;
+    EventHandle ev;
+
+    if (!app)
+	return;
+    ev = @record null::MSG_META_ENSURE_NO_MENUS_IN_STAY_UP_MODE(p);
+    s.f = 0;
+    s.e = ev;
+    s.b = 0;
+    s.t = GAGCNLT_WINDOWS;
+    s.m = MANUFACTURER_ID_GEOWORKS;
+    CObjMessageP(MF_CALL, app, MSG_META_GCN_LIST_SEND, &s, sizeof(s), NULL,
+		 0);
+}
+
+/* ReleaseExpressMenu: the field's express menu (on the UI's thread) */
+static void ReleaseExpressMenu(optr o)
+{
+    EventHandle ev = @record OLFieldClass::MSG_OL_FIELD_RELEASE_EXPRESS_MENU();
+
+    @call o::MSG_VIS_VUP_CALL_OBJECT_OF_CLASS(ev);
+}
+
+/* OLReleaseAllStayUpModeMenus: all of them dismissed */
+void OLReleaseAllStayUpModeMenus(optr o)
+{
+    OLProcessAppStayUpModeMenus(NULL);
+    ReleaseExpressMenu(o);
+}
+
+/* OLCountStayUpModeMenus: counted (not dismissed: the menus count
+ * then), the express menus released; the count */
+word OLCountStayUpModeMenus(optr o)
+{
+    EnsureNoMenusInStayUpModeParams p;
+
+    p.ENMISUMP_menuCount = 0;
+    OLProcessAppStayUpModeMenus(&p);
+    ReleaseExpressMenu(o);
+    return p.ENMISUMP_menuCount;
+}
+
 optr OpenFindOLWin(optr o)
 {
     while (o) {
