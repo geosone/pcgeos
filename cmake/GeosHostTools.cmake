@@ -33,7 +33,7 @@ set(GEOS_UICPP ${_tools_dir}/uicpp/uicpp CACHE INTERNAL
     "uicpp of the build host")
 set(_tool_files ${GEOS_GOC} ${GEOS_UIC} ${GEOS_UICPP})
 foreach(_tool gpres gpgeode kexports symtabgen papergen asmchars2c
-              epsfonts2c kmapgen localgen psdevinfo2c dmdevinfo2c)
+              epsfonts2c kmapgen localgen psdevinfo2c dmdevinfo2c sbigen)
   string(TOUPPER ${_tool} _var)
   set(_dir ${_tool})
   if(_tool STREQUAL "gpgeode")

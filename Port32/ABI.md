@@ -1484,6 +1484,48 @@ state; the sound library and the sound drivers use it directly.
   transfers between two threads, destroying with `STREAM_LINGER` and
   with `STREAM_DISCARD` while a reader waits.
 
+### 7.9 The host sound driver (`Driver/Sound/Host`, P6)
+
+`hostsnd.geo` is the sound library's driver (section 13aa) on the host's
+audio, `ghal_audio` (GHAL-Concept.md 4.8: PipeWire on Linux), as the
+Sound Blaster driver is on the card. `[sound] synthDriver =
+hostsnd.geo`.
+
+- **16 FM voices** played from the Sound Blaster driver's instruments:
+  `sbigen` (`Tools/sbigen`) makes the `InstrumentTable` of
+  `soundblasterVoice.asm` (175 SBI patches, the 128 melodic ones and the
+  percussion) C at build time. Each voice is two operators synthesized as
+  the OPL2 plays them: frequency multiple, the four waveforms, the
+  envelope at the chip's attack and decay/release rates (attack 0: the
+  operator never sounds; decay 0: it holds), sustain held or released
+  on (EG type), total level in 0.75 dB steps, tremolo and vibrato, the
+  modulator's feedback, FM or additive. The volume of a note sets the
+  carrier's total level as `SBDVoiceOn` did. Not modelled: key scaling.
+  Caller tables of their own (a far pointer in the asm) are not
+  supported: the patch is taken from the standard table.
+- **2 DACs** for sample streams: 8-bit PCM, mono or stereo (as mono),
+  2000 to 48000 Hz, interpolated to the mix's rate; no ADPCM. The
+  stream's size is a fifth of a second. The DAC reads its stream in the
+  audio interrupt and tells the writer when there is room, and once when
+  it ran empty (the library's "drained").
+- **The mix**: mono, 16 bits, 44100 Hz, made in the `GHAL_IRQ_AUDIO`
+  interrupt (inside `ghal_crit`, where the library's timer routine calls
+  the voice functions too), scaled by the master volume (the only mixer
+  setting). The stream plays only while there is sound: a note or an
+  attached DAC starts it, a second of silent output pauses it. About
+  50 ms of latency (the ring).
+- `HOSTSND_GET_AUDIO` (0x7e00, for tests): `DR_farPtr` the `ghal_audio`,
+  for its tap.
+- No libm in a geode: the sine and attenuation tables are computed at
+  the start by rotation and multiplication.
+
+ctest `driver.hostsnd` (Linux), on `ghal_audio` "null", heard through
+the tap: the stream paused while silent; a flute's A at 441.0 Hz by
+autocorrelation; a softer note softer; silence after the release and
+the stream paused after a second of it; a snare drum and a chord of
+three voices; master volume off; a 200 Hz square wave of half a second
+through a sample stream at 8000 Hz, its length and pitch.
+
 ## 8. Kernel heap (`Library/Kernel/Heap`, P4)
 
 The C kernel starts with the handle table and the memory block API of
@@ -7250,8 +7292,8 @@ interrupt), `soundVoiceAllocation.c` (voices and DACs by priority),
   change waited for good); `SoundFreeSampleStream` that leaves the block
   to a waiting writer gives back the mutex (the asm kept it: deadlock).
 - **Not yet**: the GPC master volume of the ini file, the UI's side
-  (`UserStandardSound`, freeing finished sounds by type), a real driver
-  (the host sound driver on GHAL audio is next).
+  (`UserStandardSound`, freeing finished sounds by type). The driver on
+  the host's audio is `hostsnd.geo` (section 7.9).
 
 ctest `library.sound` with the test driver `tsnddrv` (4 voices, 1 DAC,
 logs every call with its tick): the driver of the ini file and its

@@ -65,6 +65,10 @@ static const char *const ghalExports[] = {
     "gapi_print_job_close", "gapi_print_job_cancel", "gapi_last_error",
     /* the host power driver (Driver/Power/Host) */
     "gapi_power_status",
+    /* the host sound driver (Driver/Sound/Host) */
+    "ghal_audio_open", "ghal_audio_close", "ghal_audio_pause",
+    "ghal_audio_room", "ghal_audio_write", "ghal_audio_played",
+    "ghal_audio_underruns", "ghal_audio_set_tap", "ghal_audio_backend",
     NULL
 };
 /* gcc and clang require these of a freestanding environment */

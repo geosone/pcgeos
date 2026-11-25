@@ -37,3 +37,11 @@ geos_test_program(test_pscript EMBED eps pscript
                   INCLUDES ${PROJECT_SOURCE_DIR}/CInclude/Internal)
 geos_add_test(driver.pscript test_pscript)
 # (the other printer drivers print through the spooler: ../Library)
+
+# the host sound driver (Driver/Sound/Host) under the sound library,
+# heard through the tap of ghal_audio "null"
+if(GEOS_HOST STREQUAL "linux")
+  geos_test_program(test_hostsnd EMBED sound stream hostsnd LIBS geos_kernel m
+    INCLUDES ${PROJECT_SOURCE_DIR}/CInclude/Internal)
+  geos_add_test(driver.hostsnd test_hostsnd)
+endif()
