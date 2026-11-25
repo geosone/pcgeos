@@ -87,9 +87,12 @@ int GetStringWidth(char *string, int widthTable[], int ptsize)
 	    } else {
 		width += 16;
 	    }
-	} else if (c < 256) {
+	} else if (c >= 32 && c < 256) {
 	    width += widthTable[c-32];
 	} else {
+	    /* (Port32: a control character too, the "\1" a program
+	     * replaces: the table starts at the space, and the width of
+	     * the text is not known before) */
 	    /* We don't have the width here, so we stuff in a huge width here
 	       so that our call will drop the total width and force it to
 	       be calculated when needed. */

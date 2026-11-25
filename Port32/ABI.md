@@ -123,6 +123,10 @@ to the resource handle. Without segments, `goc` does that work itself:
   gstring). For goc -cg the header is `VisMonikerWithGString` as the C
   compiler lays it out: `VM_type`, a pad byte, `VM_width`, `VMWGS_height`
   (six bytes, `VMWGS_gString` = 6); the 16-bit output keeps its five.
+- **A text moniker's hinted width** (`VM_width`, `CalcHintedWidth`)
+  is 0 (measured when drawn) when the text has a control character
+  (the `\1` a program replaces): goc read its width table out of
+  bounds for one (for all outputs, the 16-bit one too).
 - **`ClassStruct` points to its tables** (`Class_messages`,
   `Class_methods`, `Class_htypes`, `Class_relocMethod`). The tables no
   longer have to follow the structure in a class segment, and the reloc
@@ -5719,7 +5723,11 @@ visual classes of `Library/User/Vis`:
     is not in C). `HANDLE_DISK_FULL_ON_SAVE_AS` is FALSE in Motif.
     After the save that made it the close asks again whether to save
     (the save kept the document dirty, as `OLDocumentSaveOrUpdate`
-    does).
+    does). The triggers with the name are as wide as their text: the
+    16-bit build kept the moniker's width hinted for the template
+    (`VM_width`, reset only for Nike), and that width was the 16-bit
+    uic's misreading of `\xd2` as an octal escape (a table read out of
+    bounds), so its triggers are wider and the reply bar wraps.
   - `OLDCCopyPathCommon` and `OLDCSetDirText`
     (`cmainUIDocOperations.goc`) are shared with the document.
   - The standard dialogs (`StandardDialogBoxType`, `cmainDocDialog.goc`)
@@ -5741,7 +5749,7 @@ visual classes of `Library/User/Vis`:
     saved, closed, opened again (a second open finds it open), closed.
     Steps 98 to 100: save as (the document is the new file, the old
     one stays), changed and reverted, closed.
-    Steps 200 to 204 (101 to 111 are the reference mode's): copy to,
+    Steps 200 to 204 (101 to 113 are the reference mode's): copy to,
     move to, the type read only and normal again, no password, closed.
     Steps 207 to 209 (210 counts the documents while the test waits):
     a document whose save fails as on a full disk (`UBDocClass`) is
@@ -6374,7 +6382,11 @@ are left out), the constants, the variables and the routines.
     Like the asm, an interaction no generic parent answers the build
     info for becomes a dialog window; a GIV_CONTROL_GROUP in a menu too.
     A reply bar's standard trigger is known by
-    `ATTR_GEN_TRIGGER_INTERACTION_COMMAND` alone.
+    `ATTR_GEN_TRIGGER_INTERACTION_COMMAND` alone. A dialog with
+    `ATTR_GEN_HELP_CONTEXT` gets the help trigger (`IC_HELP`, last in
+    the reply bar, `StandardHelpMoniker` of `cspecHelp.ui`) unless the
+    `.ini` hides help buttons; not yet: the help it brings up
+    (`MSG_META_BRING_UP_HELP`, the help library).
   - The UI's `GenTriggerClass` (`Library/User/Gen/genTrigger.goc`):
     `MSG_GEN_TRIGGER_SEND_ACTION` sends the action message (with
     `ATTR_GEN_TRIGGER_ACTION_DATA` or the trigger's optr) through
@@ -6600,7 +6612,9 @@ are left out), the constants, the variables and the routines.
     `ATTR_SYSTEM_MENU_CLOSE` are `OLButtonClass` vardata goc does not take
     on a `GenTrigger`: they are added to the copy. Its pictures
     (`CSpec/cspecCUASArt.goh`) are generated from the `mkr*.ui` and
-    `bmPin.ui` files by `Port32/tools/uimkr2goc.py` and included where
+    `bmPin.ui` files (and `cspecHelp.ui`, `#include`d inside
+    `StandardMonikers`: given as `cspecHelp.ui:StandardMonikers`, its
+    bitmaps from `CArt/mkrHelp*.ui`) by `Port32/tools/uimkr2goc.py` and included where
     the moniker lists are (goc needs a listed moniker's attributes);
     `gpgeode` and `gpres` find the resources such a local
     `@include` starts.

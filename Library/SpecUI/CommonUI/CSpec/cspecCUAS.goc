@@ -11,7 +11,11 @@
  *   uimkr2goc.py cspecCUASArt.goh mkrMinimize.ui mkrMaximize.ui
  *     mkrRestore.ui mkrWindowMenu.ui mkrDisplayWindowMenu.ui
  *     mkrWindowMenuButton.ui bmPin.ui cspecCUAS.ui
- * goc needs the monikers of a list in the same file).
+ *     ../CArt/mkrHelpTrigSM.ui ../CArt/mkrHelpTrigSCGA.ui
+ *     ../CArt/mkrHelpPrimarySC.ui ../CArt/mkrHelpPrimarySM.ui
+ *     ../CArt/mkrHelpPrimarySCGA.ui cspecHelp.ui:StandardMonikers
+ * (cspecHelp.ui, #included in StandardMonikers: the help triggers'
+ * monikers); goc needs the monikers of a list in the same file).
  *
  * The icons' ATTR_GEN_TRIGGER_ACTION_DATA (0, VUM_NOW) is left out: the
  * C messages they send take no arguments.

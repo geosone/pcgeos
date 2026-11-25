@@ -259,8 +259,9 @@ static void AddStandardTriggerIfNeeded(optr o, word ic)
  * HandleDialogResponses: the standard triggers of the dialog's type
  * (a notification OK, an affirmation Yes and No, progress Stop, a
  * command Close or Cancel, delayed properties Reset, Apply and Close),
- * then the reply bar built.  Port32: no help trigger yet (its moniker
- * is a picture), no tiny screens (RemoveReplyBarIfPossible).
+ * the help trigger if the dialog has help (unless the .ini hides help
+ * buttons), then the reply bar built.  Port32: no tiny screens
+ * (RemoveReplyBarIfPossible).
  */
 static void HandleDialogResponses(optr o)
 {
@@ -294,6 +295,9 @@ static void HandleDialogResponses(optr o)
 	AddStandardTriggerIfNeeded(o, IC_DISMISS);
 	break;
     }
+    if (!(olHelpOptions & UIHO_HIDE_HELP_BUTTONS) &&
+	ObjVarFindData(o, ATTR_GEN_HELP_CONTEXT))
+	AddStandardTriggerIfNeeded(o, IC_HELP);
     BuildBranchIfAny(DWin(o)->OLDWI_replyBar);
 }
 
@@ -561,6 +565,7 @@ static optr FindStandardTrigger(optr o, word ic)
 @extern visMoniker StandardStopMoniker;
 @extern visMoniker StandardNextMoniker;
 @extern visMoniker StandardPrevMoniker;
+@extern visMoniker StandardHelpMoniker;
 
 static optr StandardTriggerMoniker(word ic, byte popupFlags, byte optFlags)
 {
@@ -579,6 +584,7 @@ static optr StandardTriggerMoniker(word ic, byte popupFlags, byte optFlags)
     case IC_STOP:	return @StandardStopMoniker;
     case IC_NEXT:	return @StandardNextMoniker;
     case IC_PREVIOUS:	return @StandardPrevMoniker;
+    case IC_HELP:	return @StandardHelpMoniker;
     default:		return 0;
     }
 }
