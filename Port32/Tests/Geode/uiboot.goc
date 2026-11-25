@@ -201,7 +201,15 @@ typedef struct {
      * left icons, 4 the bar in the header, 8 back below it restored;
      * [21], [22] the bar's position, [23] the left icons' width, [17]
      * the primary's top, [19] the bar's top restored (test_ui_boot
-     * menuhdr: steps 319, 320) */
+     * menuhdr: steps 319, 320); [9] the primary's icon caption with
+     * HINT_DISPLAY_USE_APPLICATION_MONIKER_WHEN_MINIMIZED: 1 the
+     * application's moniker, 2 its new one after a change (step 321);
+     * a click into a modal dialog: [10], [11] the Yes button's middle
+     * on the screen, [12] its actions sent, [13] 1 the dialog modal and
+     * up, 2 Yes activated by the click (steps 322 to 324); [14] a sub
+     * menu after the Tools menu's group (the items below it not
+     * usable): 1 no separator below the group first, 2 one with the
+     * sub menu usable, 4 none again with it not usable (step 325) */
     word		UBS_stub[24];
 } UBState;
 
@@ -301,6 +309,9 @@ static void DocDelete(const char *name)
 
 static optr ubFakeDoc;
 
+/* a modal dialog clicked into (steps 322, 323) */
+static optr ubDefDlg;
+
 /* a trigger that counts its activations (step 317) */
 @class UBCountTrigClass, GenTriggerClass;
 @endc
@@ -373,6 +384,7 @@ static word ubAnswer;
 @method UBYesClass, MSG_GEN_TRIGGER_SEND_ACTION
 {
     ubState.UBS_stub[15]++;
+    ubState.UBS_stub[12]++;	/* (step 324) */
     @callsuper();
 }
 
@@ -4661,6 +4673,111 @@ static void UBClickMenu(word n)
 	ubState.UBS_stub[19] = (word) (bar.R_top - pb.R_top);
 	if (bar.R_top - pb.R_top >= 12)
 	    ubState.UBS_stub[20] |= 8;
+	break;
+    }
+    case 321: {
+	/* the application's moniker changed: its primaries update their
+	 * icons' monikers (OLApplicationSpecUpdateVisMoniker); the
+	 * primary shows the application's when minimized */
+	OLMenuedWinInstance w;
+	ChunkHandle old;
+
+	ubState.UBS_stub[9] = 0;
+	ObjLockObjBlock(OptrToHandle(@UBApp));
+	old = ((GenInstance *) ObjDerefGen(@UBApp))->GI_visMoniker;
+	(void) ObjVarAddData(@UBPrimary,
+			     HINT_DISPLAY_USE_APPLICATION_MONIKER_WHEN_MINIMIZED,
+			     0);
+	MemUnlock(OptrToHandle(@UBApp));
+	@call UBPrimary::MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER();
+	VisData(@UBPrimary, &w, sizeof(w));
+	if (w.OLMDWI_iconCaptionMoniker == ConstructOptr(OptrToHandle(@UBApp),
+							 old))
+	    ubState.UBS_stub[9] |= 1;
+	@call UBApp::MSG_GEN_USE_VIS_MONIKER(OptrToChunk(@UBKeepMoniker),
+					     VUM_NOW);
+	VisData(@UBPrimary, &w, sizeof(w));
+	if (w.OLMDWI_iconCaptionMoniker == @UBKeepMoniker)
+	    ubState.UBS_stub[9] |= 2;
+	/* (as it was) */
+	(void) ObjVarDeleteData(@UBPrimary,
+			HINT_DISPLAY_USE_APPLICATION_MONIKER_WHEN_MINIMIZED);
+	@call UBApp::MSG_GEN_USE_VIS_MONIKER(old, VUM_NOW);
+	break;
+    }
+    case 322: {
+	/* a modal dialog up (not by UserDoDialog): the mouse may go
+	 * into its window (OLPopupTestWinInteractibility); the test
+	 * clicks its Yes button */
+	ubState.UBS_stub[12] = ubState.UBS_stub[13] = 0;
+	ubDefDlg = UserCreateDialog(@UBAsk);
+	if (ubDefDlg)
+	    @call ubDefDlg::MSG_GEN_INTERACTION_INITIATE();
+	break;
+    }
+    case 323: {
+	/* (where it came up, after the queue) */
+	optr yes;
+	Rectangle w, b;
+	WindowHandle win;
+
+	if (!ubDefDlg)
+	    break;
+	yes = ConstructOptr(OptrToHandle(ubDefDlg), OptrToChunk(@UBAskYes));
+	win = @call ubDefDlg::MSG_VIS_QUERY_WINDOW();
+	if (win && @call UBApp::MSG_GEN_APPLICATION_GET_MODAL_WIN() ==
+	    ubDefDlg)
+	    ubState.UBS_stub[13] |= 1;
+	if (!win)
+	    break;
+	w = ScreenBounds(win);
+	b = Bounds(yes);
+	ubState.UBS_stub[10] = (word) (w.R_left + (b.R_left + b.R_right) / 2);
+	ubState.UBS_stub[11] = (word) (w.R_top + (b.R_top + b.R_bottom) / 2);
+	break;
+    }
+    case 324:
+	if (ubState.UBS_stub[12] == 1)
+	    ubState.UBS_stub[13] |= 2;
+	if (ubDefDlg) {
+	    if (@call ubDefDlg::MSG_VIS_QUERY_WINDOW())
+		(void) @call ubDefDlg::MSG_GEN_GUP_INTERACTION_COMMAND(
+								IC_DISMISS);
+	    UserDestroyDialog(ubDefDlg);
+	    ubDefDlg = 0;
+	}
+	break;
+    case 325: {
+	/* a popup whose button is in a menu (a sub menu) updates the
+	 * menu's separators when it changes usable
+	 * (OLPopupWinSpecChangeUsable) */
+	optr sub;
+	GenInstance *g;
+
+	ubState.UBS_stub[14] = 0;
+	@call UBLast::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	if (!(MIGState(@UBItems) & OLMIGSS_BOTTOM_SEP))
+	    ubState.UBS_stub[14] |= 1;
+	sub = ObjInstantiate(OptrToHandle(@UBTools),
+			     (ClassStruct *) &GenInteractionClass);
+	/* (the first message initializes the generic part) */
+	(void) @call sub::MSG_GEN_REPLACE_VIS_MONIKER_TEXT("Sub", VUM_MANUAL);
+	ObjLockObjBlock(OptrToHandle(sub));
+	g = (GenInstance *) ObjDerefGen(sub);
+	g->GI_states &= ~GS_USABLE;
+	((GenInteractionInstance *) g)->GII_visibility = GIV_POPUP;
+	MemUnlock(OptrToHandle(sub));
+	@call UBTools::MSG_GEN_ADD_CHILD(sub, 2);
+	@call sub::MSG_GEN_SET_USABLE(VUM_NOW);
+	if (MIGState(@UBItems) & OLMIGSS_BOTTOM_SEP)
+	    ubState.UBS_stub[14] |= 2;
+	@call sub::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+	if (!(MIGState(@UBItems) & OLMIGSS_BOTTOM_SEP))
+	    ubState.UBS_stub[14] |= 4;
+	/* (as it was) */
+	@call UBTools::MSG_GEN_REMOVE_CHILD(sub, 0);
+	@call sub::MSG_META_OBJ_FREE();
+	@call UBLast::MSG_GEN_SET_USABLE(VUM_NOW);
 	break;
     }
     case 210:

@@ -511,12 +511,14 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
 /*
  * OLButtonSpecMenuSepQuery: a usable, drawn item (not a title bar icon)
  * wants a separator before the next group and after itself on the way
- * back
+ * back.  Usable is the generic object's (OLButtonGetGenAndSpecState:
+ * the popup's for its button)
  */
 @extern method OLButtonClass, MSG_SPEC_MENU_SEP_QUERY
 {
     if ((pself->OLBI_specState & OLBSS_SYS_ICON) ||
-	!(((GenInstance *) ObjDerefGen(oself))->GI_states & GS_USABLE) ||
+	!(((GenInstance *) ObjDerefGen(GenPart(oself)))->GI_states &
+	  GS_USABLE) ||
 	!(Btn(oself)->VI_attrs & VA_DRAWABLE))
 	return OpenForwardMenuSepQuery(oself, flags);
     flags = OpenForwardMenuSepQuery(oself,

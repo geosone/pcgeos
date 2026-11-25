@@ -151,12 +151,13 @@ Ordered by dependency, each with host-side tests under `linux`:
   a pane's margins on CGA, the primaries restored when the application
   is chosen as a task, the display of a document, a focused button as
   the default action, the menu bar in the header of a maximized window
-  (with uiref variant 14). Open (dependency in C now): `copenAppMisc`
-  (the primaries' icons), `cwinClassCommon*` (the express tool area),
-  `cwinPopup`,
+  (with uiref variant 14), the primaries' icons after a new
+  application moniker, a click into a modal dialog (the mouse was not
+  let in), a sub menu's separators. Open (dependency in C now):
   `taCharAttr` (ReflectChange on the screen). Waiting
   (dependency not in C): the task bar, the menu bar's popout, the
-  express menu.
+  express menu (and its tool area in a header), discarding a popup's
+  block (the kernel does not load a discarded resource again).
 - Hook up the FreeType driver (already C).
 
 **Result:** **first GEOS desktop in C, under `dos32` and `linux` (SDL3).** `Appl/SDK_C` samples run.

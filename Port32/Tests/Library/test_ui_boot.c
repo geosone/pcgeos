@@ -542,6 +542,24 @@ int main(int argc, char **argv)
 	step(317);
 	printf("default action to the focus: %u\n", st->UBS_stub[18]);
 	CHECK(st->UBS_stub[18] == 15);
+	/* the application's new moniker reaches its primaries' icons */
+	step(321);
+	printf("icon caption: %u\n", st->UBS_stub[9]);
+	CHECK(st->UBS_stub[9] == 3);
+	/* a click into a modal dialog reaches its button */
+	step(322);
+	TimerSleep(60);
+	step(323);
+	Click(st->UBS_stub[10], st->UBS_stub[11]);
+	TimerSleep(20);
+	step(324);
+	printf("modal click at %u,%u: %u\n", st->UBS_stub[10],
+	       st->UBS_stub[11], st->UBS_stub[13]);
+	CHECK(st->UBS_stub[13] == 3);
+	/* a sub menu changing usable updates its menu's separators */
+	step(325);
+	printf("sub menu separators: %u\n", st->UBS_stub[14]);
+	CHECK(st->UBS_stub[14] == 7);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }

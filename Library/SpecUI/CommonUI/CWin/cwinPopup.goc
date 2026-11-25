@@ -7,14 +7,14 @@
  * MSG_GEN_INTERACTION_INITIATE, taken down by IC_DISMISS (and the
  * application's focus found again).
  *
+ * As the modal window it lets the mouse into its own windows and into
+ * menus not pinned (which come from it).
+ *
  * Port32 (Port32/ABI.md section 13y), not yet:
- *   - the button (OLButtonClass, OLMenuButtonClass): a popup that is
- *     user initiatable gets none, it comes up by
- *     MSG_GEN_INTERACTION_INITIATE only;
  *   - the application cache (a UserDoDialog of an application on the
  *     transparent detach list ends at once in the asm);
- *   - discarding the block of HINT_INTERACTION_DISCARD_WHEN_CLOSED;
- *   - the pushpin and the menus' messages (OLMenuWinClass).
+ *   - discarding the block of HINT_INTERACTION_DISCARD_WHEN_CLOSED (the
+ *     kernel does not load a discarded resource again yet).
  */
 @include "cGeode.goh"
 #include <sem.h>
@@ -193,8 +193,7 @@ void OpenSendSpecBuildBranch(optr o, SpecBuildFlags flags)
 
 /*
  * OLPopupWinSpecBuild: the window as OLWin builds it; the other part is
- * the button, unless the popup is not user initiatable (Port32: there
- * is no button yet)
+ * the button, unless the popup is not user initiatable
  */
 @method OLPopupWinClass, MSG_SPEC_BUILD
 {
@@ -315,6 +314,65 @@ void OpenSendSpecBuildBranch(optr o, SpecBuildFlags flags)
 	return;
     if (ObjVarFindData(oself, HINT_INTERACTION_DISCARD_WHEN_CLOSED))
 	@call oself::MSG_GEN_INTERACTION_DISABLE_DISCARDING();
+}
+
+/*
+ * OLPopupTestWinInteractibility: as the modal window, may the mouse go
+ * into the window of the input object?  Into this one and its child
+ * windows; into a menu (or popup list) not pinned, which can only have
+ * come from here (the menus are dismissed when a modal window comes up,
+ * and none from it can be pinned).
+ */
+@method OLPopupWinClass, MSG_META_TEST_WIN_INTERACTIBILITY
+{
+    Boolean r = FALSE;
+    WindowHandle parent = 0;
+
+    if (!inputOD)
+	return FALSE;
+    if (inputOD == oself)
+	return TRUE;
+    if (window)
+	WinGetInfo(window, WIT_PARENT_WIN, &parent);
+    if (parent && parent == pself->VCI_window)
+	return TRUE;
+    if (!ObjTestIfObjBlockRunByCurThread(OptrToHandle(inputOD)))
+	return FALSE;
+    ObjLockObjBlock(OptrToHandle(inputOD));
+    if (ObjIsObjectInClass(inputOD, (ClassStruct *) &OLMenuWinClass) &&
+	!(((OLWinInstance *) ObjDerefVis(inputOD))->OLWI_specState &
+	  OLWSS_PINNED))
+	r = TRUE;
+    MemUnlock(OptrToHandle(inputOD));
+    return r;
+}
+
+/* FindButtonMenu: the menu (window) the popup's button is in, if it is
+ * in one */
+static optr FindButtonMenu(optr o)
+{
+    optr b = PopupButton(o);
+
+    if (!b || !(((OLButtonInstance *) ObjDerefVis(b))->OLBI_specState &
+		OLBSS_IN_MENU))
+	return 0;
+    return OpenFindOLWin(b);
+}
+
+/* OLPopupWinSpecChangeUsable: a popup whose button is in a menu (a sub
+ * menu) has the menu's separators updated */
+@method OLPopupWinClass, MSG_SPEC_SET_USABLE, MSG_SPEC_SET_NOT_USABLE
+{
+    optr menu = 0;
+
+    (void) pself;
+    if (message == MSG_SPEC_SET_NOT_USABLE)
+	menu = FindButtonMenu(oself);
+    @callsuper();
+    if (message == MSG_SPEC_SET_USABLE)
+	menu = FindButtonMenu(oself);
+    if (menu)
+	@call menu::MSG_SPEC_UPDATE_MENU_SEPARATORS();
 }
 
 /* OLPopupClose: closable: dismissed */

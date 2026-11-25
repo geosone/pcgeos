@@ -5,8 +5,7 @@
  * between windows and applications, the gadget timer, the host's
  * display size.
  *
- * Port32 (Port32/ABI.md section 13y), not yet: the icons of the
- * primaries (MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER), the task bar's
+ * Port32 (Port32/ABI.md section 13y), not yet: the task bar's
  * windows (the task bar is not ported), the windows told of a new
  * field size.
  * The standard dialogs are in CSpec/cspecStdDialog.goc.
@@ -85,10 +84,15 @@ static GenApplicationInstance *GenApp(optr oself)
     (void) monikerList;
 }
 
-/* OLApplicationSpecUpdateVisMoniker: (the primaries' icons: not yet) */
+/* OLApplicationSpecUpdateVisMoniker: the primaries update their icons
+ * (they may show the application's moniker) */
 @extern method OLApplicationClass, MSG_SPEC_UPDATE_VIS_MONIKER
 {
+    EventHandle ev;
+
     @callsuper();
+    ev = @record GenPrimaryClass::MSG_OL_MENUED_WIN_UPDATE_ICON_MONIKER();
+    @call oself::MSG_GEN_SEND_TO_CHILDREN(ev);
 }
 
 /* OLApplicationUnwantedKbdEvent: no one takes the key: a beep on the

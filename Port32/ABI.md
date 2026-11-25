@@ -6522,6 +6522,14 @@ are left out), the constants, the variables and the routines.
     `OLPWI_udds` is a pointer; the response's ActionDescriptor is
     `OLDWI_responseOD` and `OLDWI_responseMsg` (C has no type for it).
     `MSG_OL_DIALOG_WIN_FIND_STANDARD_TRIGGER(command)` returns the optr.
+    `MSG_GEN_INTERACTION_ACTIVATE_COMMAND` sends the action of the
+    command's standard trigger. As the modal window a popup lets the
+    mouse into its own window, its child windows and menus not pinned
+    (`MSG_META_TEST_WIN_INTERACTIBILITY`; without it no click reached a
+    modal dialog). A popup whose button is in a menu (a sub menu)
+    updates the menu's separators when it changes usable; a button
+    asks its generic object (the popup's, for its button) whether it is
+    usable in `MSG_SPEC_MENU_SEP_QUERY`.
     Like the asm, an interaction no generic parent answers the build
     info for becomes a dialog window; a GIV_CONTROL_GROUP in a menu too.
     A reply bar's standard trigger is known by
@@ -6847,7 +6855,9 @@ are left out), the constants, the variables and the routines.
   `MSG_GEN_DISPLAY_GROUP_SET_MONIKER`,
   the number of items for the display control, the document
   control's options. In `OLPopupWinClass` and
-  `OLDialogWinClass`: the file menu's place, the help
+  `OLDialogWinClass`: the file menu's place, discarding the block of
+  `HINT_INTERACTION_DISCARD_WHEN_CLOSED` (no discarded resource is
+  loaded again yet), the help
   trigger (its moniker is a picture), the reply bar removed on tiny
   screens, discarding the block, pinning a dialog (OPEN LOOK only), the focus of a
   dialog run by the UI thread. In `OLButtonClass`: the black and white
