@@ -33,6 +33,7 @@ void KernelTimerInit(void)
     if (tickSource)
 	return;
     KernelTicks();			/* start the clock */
+    TimerReap();			/* the spares for interrupt code */
     ghal_irq_set_tick_rate(TIMER_INTERRUPT_RATE);
     if (ghal_irq_attach(GHAL_IRQ_TICK, TimerInterrupt, NULL, &tickSource)
 	!= GHAL_OK)

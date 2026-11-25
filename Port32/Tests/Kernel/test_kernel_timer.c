@@ -33,6 +33,21 @@ static void Continual(word data, dword tick)
     continual++;
 }
 
+/* a chain of timers, each started by the one before from interrupt code
+ * (the sound library does it) */
+static volatile int chained;
+
+static void Chain(word data, dword tick)
+{
+    (void) tick;
+    chained++;
+    if (data > 1)
+	CHECK(TimerStart(TIMER_ROUTINE_ONE_SHOT, TimerRoutineOptr(Chain), 1,
+			 (word) (data - 1), 0, NULL) != 0);
+    else
+	ThreadVSem(wake);
+}
+
 static void Waker(word data, dword tick)
 {
     (void) data;
@@ -203,8 +218,15 @@ int main(void)
     t1 = TimerGetCount();
     CHECK(fired == 1 && t1 - t0 >= 3 && t1 - t0 <= 8);
 
-    /* an interrupt wakes a blocked thread */
+    /* timers started from interrupt code, more than the spares, while
+     * normal code reaps nothing (a blocked thread) */
     wake = ThreadAllocSem(0);
+    TimerStart(TIMER_ROUTINE_ONE_SHOT, TimerRoutineOptr(Chain), 1, 20, 0,
+	       NULL);
+    CHECK(ThreadPTimedSem(wake, 200) == SE_NO_ERROR);
+    CHECK(chained == 20);
+
+    /* an interrupt wakes a blocked thread */
     t0 = TimerGetCount();
     TimerStart(TIMER_ROUTINE_ONE_SHOT, TimerRoutineOptr(Waker), 5, 0, 0,
 	       NULL);

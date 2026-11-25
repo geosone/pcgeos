@@ -20,7 +20,12 @@
  * interrupt checks it against the clock (KernelRealTimeNow), and so does
  * TimerSetDateAndTime.  A due one sends its message or calls its routine
  * once with the date and time it was set for (TimerCompressedDate << 16
- * | hours << 8 | minutes) where the others pass the tick count, and id 0.
+ * | hours << 8 | minutes) where the others pass the tick count, and id 0. *
+ * Interrupt code may start timers too (the sound library starts the next
+ * one from its timer routine): TimerStart takes them from a few spares
+ * (a KTimer with its handle) that TimerReap keeps ready from normal code,
+ * or from the ended timers not reaped yet, and there it neither
+ * allocates nor frees.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -39,6 +44,9 @@ typedef struct KTimer {
 static KTimer *timerList;		/* sorted by TI_due */
 static KTimer *realTimeList;		/* sorted by TI_due (date, time) */
 static KTimer *endedList;		/* to be freed by TimerReap */
+static KTimer *spareList;		/* ready for TimerStart, with handle */
+static word spareCount;
+#define TIMER_SPARES	8
 static word nextId = 1;
 
 void (*kernelTimerEventHook)(optr dest, Message msg, dword tick, word id);
@@ -60,20 +68,91 @@ static void Insert(KTimer *t)
     *p = t;
 }
 
+/* the ended timers become spares (TIMER_SPARES of them) or are freed;
+ * the spares are topped up.  Not in interrupt code (nothing happens). */
 void TimerReap(void)
 {
     KTimer *list;
 
+    if (ghal_irq_active())
+	return;
     ghal_crit_enter();
     list = endedList;
     endedList = NULL;
     ghal_crit_leave();
     while (list) {
 	KTimer *next = list->TI_next;
-	HandleFree(list->TI_handle);
-	ghal_mem_free(list);
+	ghal_crit_enter();
+	if (spareCount < TIMER_SPARES) {
+	    list->TI_next = spareList;
+	    spareList = list;
+	    spareCount++;
+	    list = NULL;
+	}
+	ghal_crit_leave();
+	if (list) {
+	    HandleFree(list->TI_handle);
+	    ghal_mem_free(list);
+	}
 	list = next;
     }
+    for (;;) {
+	KTimer *t;
+	Handle h;
+
+	ghal_crit_enter();
+	if (spareCount >= TIMER_SPARES) {
+	    ghal_crit_leave();
+	    break;
+	}
+	ghal_crit_leave();
+	t = ghal_mem_alloc(sizeof(KTimer), GHAL_MEM_ZERO);
+	h = t ? HandleAlloc(SIG_TIMER, 0) : 0;
+	if (!h) {
+	    if (t)
+		ghal_mem_free(t);
+	    break;
+	}
+	HandleEntryOf(h)->HE_addr = t;
+	t->TI_handle = h;
+	ghal_crit_enter();
+	t->TI_next = spareList;
+	spareList = t;
+	spareCount++;
+	ghal_crit_leave();
+    }
+}
+
+/* a KTimer with its handle, owned by owner: a spare or an ended one,
+ * else (not in interrupt code) a new one; NULL if there is none */
+static KTimer *NewTimer(GeodeHandle owner)
+{
+    KTimer *t;
+    Handle h;
+
+    ghal_crit_enter();
+    t = spareList;
+    if (t) {
+	spareList = t->TI_next;
+	spareCount--;
+    } else if ((t = endedList) != NULL)	/* ended, not reaped yet */
+	endedList = t->TI_next;
+    if (t)
+	HandleEntryOf(t->TI_handle)->HE_owner = owner;
+    ghal_crit_leave();
+    if (t || ghal_irq_active())
+	return t;
+    t = ghal_mem_alloc(sizeof(KTimer), GHAL_MEM_ZERO);
+    if (!t)
+	return NULL;
+    h = HandleAlloc(SIG_TIMER, owner);
+    if (!h) {
+	ghal_mem_free(t);
+	return NULL;
+    }
+    HandleEntryOf(h)->HE_addr = t;
+    t->TI_handle = h;
+    return t;
 }
 
 static int IsRoutine(TimerType type)
@@ -119,17 +198,11 @@ TimerHandle TimerStart(TimerType timerType, optr destObject, word ticks,
 	ticks = (word) (((dword) ticks * TIMER_INTERRUPT_RATE + 999) / 1000);
     if (ticks == 0 && !IsRealTime(timerType))
 	ticks = 1;			/* at the next tick */
-    t = ghal_mem_alloc(sizeof(KTimer), GHAL_MEM_ZERO);
+    t = NewTimer(MemOwner(KernelThisThread()) ?
+		 MemOwner(KernelThisThread()) : kernelCurrentGeode);
     if (!t)
 	return 0;
-    h = HandleAlloc(SIG_TIMER, MemOwner(KernelThisThread()) ?
-		    MemOwner(KernelThisThread()) : kernelCurrentGeode);
-    if (!h) {
-	ghal_mem_free(t);
-	return 0;
-    }
-    HandleEntryOf(h)->HE_addr = t;
-    t->TI_handle = h;
+    h = t->TI_handle;
     t->TI_type = timerType;
     t->TI_interval = interval;
     t->TI_dest = destObject;
