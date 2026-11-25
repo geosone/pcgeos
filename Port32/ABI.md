@@ -4971,8 +4971,8 @@ visual classes of `Library/User/Vis`:
   - exposure draws the children within the mask.
 - **Classed events.**
   - `TO_VIS_PARENT` goes up the visual tree;
-  - `TO_APP_*` goes to the application object, `TO_SYS_*` (no system
-    object yet) nowhere;
+  - `TO_APP_*` goes to the application object, `TO_SYS_*` to the
+    system object (`UserCallSystem`);
   - an event dispatched with `MF_CALL` has no reply in C, as in the
     kernel's `MetaSendClassedEvent`.
 - **The geometry manager** (`Vis/visCompGeometry.goc`):
@@ -5072,7 +5072,15 @@ visual classes of `Library/User/Vis`:
     `MSG_FLOW_REGISTER_NO_INK_WIN`,
     `MSG_META_ENSURE_MOUSE_NOT_ACTIVELY_TRESPASSING` (to the
     `GAGCNLT_WINDOWS` list of the geode with the mouse), notifications
-    to the geode with the keyboard, else the mouse.
+    to the geode with the keyboard, else the mouse, else the UI's
+    application object.
+  - The first press (`DefaultBehaviorOnMousePress`): the geode grabs
+    the mouse; unless a geode is system modal, the system brings it to
+    the top (`MSG_GEN_SYSTEM_BRING_GEODE_TO_TOP`, its layer found up the
+    windows of its owner; a layer above the standard one only if it is
+    the geode's), the UI's application lets go of the focus, a layer of
+    a block comes up and then the geode without its exclusives. The
+    system's default field follows the screen (`MSG_FLOW_SET_SCREEN`).
   - Port32:
     - the window system's pointer messages have the parameters it sends
       (`WinChangeParams`, `WinPtrEventParams`): goc aliases
@@ -5086,10 +5094,8 @@ visual classes of `Library/User/Vis`:
     - the window of a geode has to be opened with its owner: the C
       kernel's `MemAlloc` gives blocks to the kernel.
   - Not yet: ink (`MSG_FLOW_INK_REPLY`, the press and hold timer), the
-    quick transfer's cursor (`UpdateMoveCopy`), the sound for a press
-    that is not allowed, the duplicate check of hard icons, and what
-    needs `GenSystemClass`: raising the window clicked, the default
-    field, the application object as fallback.
+    quick transfer's cursor (`UpdateMoveCopy`), the duplicate check of
+    hard icons.
 - **`VisContentClass`** (`Vis/visContent.goc`, after
   `visContentClass.asm` and `visContentCommon.asm`): the top of a tree
   shown in a view's window, and its input node.

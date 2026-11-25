@@ -36,14 +36,11 @@
  *   - not yet: ink (pen mode, MSG_FLOW_INK_REPLY and the press-and-hold
  *     timer; ink notifications go to the current geode like the
  *     others), the quick transfer's move/copy keys (UpdateMoveCopy),
- *     the hard icon events'
- *     duplicate check (MF_CUSTOM), and what needs GenSystemClass: the
- *     geode clicked in brought to the top (DefaultBehaviorOnMousePress
- *     only grabs the mouse), the default field of MSG_FLOW_SET_SCREEN,
- *     notifications nobody takes sent to the UI's application object.
+ *     the hard icon events' duplicate check (MF_CUSTOM).
  */
 @include "uiInt.goh"
 @include <Internal/flowC.goh>
+@include <Objects/gSysC.goh>
 #include <string.h>
 #include <thread.h>
 #include <win.h>
@@ -334,9 +331,87 @@ static word UpdateFunctionsActive(optr oself, word state)
     return state;
 }
 
-/* CheckForFlowGrabMouse: the first button down grabs the mouse for the
- * geode it is over (DefaultBehaviorOnMousePress; raising the geode
- * clicked in needs GenSystemClass) */
+/*
+ * FindBoundary: up from the window to the first parent of another
+ * owner; the layer ID and the priority of the last window of the owner
+ * (its child on that boundary)
+ */
+static WindowHandle FindBoundary(WindowHandle win, Handle *layerID,
+				 word *prio)
+{
+    GeodeHandle owner = MemOwner((MemHandle) win);
+    WindowHandle child, parent = win;
+
+    do {
+	child = parent;
+	parent = 0;
+	WinGetInfo(child, WIT_PARENT_WIN, &parent);
+    } while (parent && MemOwner((MemHandle) parent) == owner);
+    *layerID = 0;
+    *prio = 0;
+    WinGetInfo(child, WIT_LAYER_ID, layerID);
+    WinGetInfo(child, WIT_PRIORITY, prio);
+    return parent;
+}
+
+/*
+ * DefaultBehaviorOnMousePress: the geode clicked in grabs the mouse; if
+ * no geode is modal, the system brings it to the top with the focus and
+ * target (a window in a layer above the standard one only if the layer
+ * is its geode's); a geode not the UI takes the focus from the UI's
+ * application; a layer of its own (a block's) comes up too, the geode
+ * then without a change of the exclusives
+ */
+static void DefaultBehaviorOnMousePress(optr oself)
+{
+    FlowInstance *f;
+    GeodeHandle geode;
+    WindowHandle win, parent = 0;
+    Handle layerID = 0;
+    word prio = 0;
+    optr uiApp;
+
+    @call oself::MSG_FLOW_GRAB_MOUSE();
+    f = FlowPart(oself);
+    if (f->FI_modalGeode.GG_OD)
+	return;
+    geode = f->FI_impliedMouseGrab.GG_geode;
+    win = f->FI_impliedWin.MG_gWin;
+    if (win)
+	parent = FindBoundary(win, &layerID, &prio);
+    if (layerID &&
+	(prio & WPF_LAYER_PRIORITY) <
+	    (LAYER_PRIO_STD << WPF_LAYER_PRIORITY_OFFSET) &&
+	layerID != (Handle) geode)
+	return;
+    {
+	struct { GeodeHandle g; Handle l; WindowHandle w; } p;
+	p.g = geode;
+	p.l = layerID;
+	p.w = parent;
+	UserCallSystem(MSG_GEN_SYSTEM_BRING_GEODE_TO_TOP, &p, sizeof(p),
+		       NULL, 0);
+    }
+    /* (no system object: the UI is not running, nor its application;
+     * a test of the flow object alone) */
+    if (geode != GeodeGetCodeProcessHandle() && UserGetSystemObject()) {
+	uiApp = GeodeGetAppObject(GeodeGetCodeProcessHandle());
+	if (uiApp)
+	    @call uiApp::MSG_META_RELEASE_FOCUS_EXCL();
+	UserCallSystem(MSG_META_ENSURE_ACTIVE_FT, NULL, 0, NULL, 0);
+    }
+    if (layerID != (Handle) geode) {
+	struct { GeodeHandle g; Handle l; WindowHandle w; } p;
+	p.g = 0;
+	p.l = (Handle) geode;
+	p.w = parent;
+	UserCallSystem(MSG_GEN_SYSTEM_BRING_GEODE_TO_TOP, &p, sizeof(p),
+		       NULL, 0);
+    }
+}
+
+/* CheckForFlowGrabMouse: the first button down (DefaultBehaviorOnMouse-
+ * Press) */
 static void CheckForGrabMouse(optr oself, word state)
 {
     FlowInstance *f = FlowPart(oself);
@@ -344,7 +419,7 @@ static void CheckForGrabMouse(optr oself, word state)
     if (!(state & BUTTONS_DOWN) || (f->FI_flowFlags & FF_MOUSE_DOWN))
 	return;
     f->FI_flowFlags |= FF_MOUSE_DOWN;
-    @call oself::MSG_FLOW_GRAB_MOUSE();
+    DefaultBehaviorOnMousePress(oself);
 }
 
 /* CheckForFlowReleaseMouse: the last button up releases it */
@@ -672,19 +747,23 @@ static void UpdateWinGeodeActive(optr oself)
     }
 }
 
-/* FlowSetScreen: the screen's video driver shows the pointer (the
- * default field goes to the system object: not yet) */
+/* FlowSetScreen: the screen's video driver shows the pointer; its
+ * field, once there is one, is the system's default field (as
+ * UserScreenSetCur also says) */
 @method FlowClass, MSG_FLOW_SET_SCREEN
 {
     DriverRegs r;
+    optr sys;
 
-    (void) field;
     pself->FI_curVideoStrategy = videoStrategy;
     ImSetPtrImage(PIL_FLOW, ConstructOptr(0, PIV_UPDATE));
     if (videoStrategy) {
 	memset(&r, 0, sizeof(r));
 	(void) ((DriverStrategy *) videoStrategy)(DR_VID_SHOWPTR, &r);
     }
+    sys = UserGetSystemObject();
+    if (field && sys)
+	@call sys::MSG_GEN_SYSTEM_SET_DEFAULT_FIELD(field);
 }
 
 /* ---------------------------------------------------------------------
@@ -815,15 +894,19 @@ static void UpdateConstrainState(optr oself, word character, word flags)
  * ------------------------------------------------------------------- */
 
 /* FlowNotify: to the current geode, the one with the keyboard, else the
- * one with the mouse (the UI's application object without either: not
- * yet) */
+ * one with the mouse, else the UI's application object (the default
+ * handling of the hard icon bar) */
 static optr CurrentGeode(optr oself)
 {
     FlowInstance *f = FlowPart(oself);
+    optr o;
 
     if (f->FI_activeKbdGrab.KG_OD)
 	return f->FI_activeKbdGrab.KG_OD;
-    return ActiveOrImplied(oself);
+    o = ActiveOrImplied(oself);
+    if (!o)
+	o = GeodeGetAppObject(GeodeGetCodeProcessHandle());
+    return o;
 }
 
 @method FlowClass, MSG_META_NOTIFY

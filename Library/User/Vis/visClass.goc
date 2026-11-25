@@ -12,9 +12,8 @@
  * Port32:
  *   - messages that answered with the carry return their value (0: not
  *     answered), as the C prototypes of visC.goh have them;
- *   - the clipboard and the system object are not in the library yet:
- *     classed events for the system (TO_SYS_*) and the quick transfer
- *     of MSG_META_END_MOVE_COPY go nowhere (Port32/ABI.md section 13x);
+ *   - the clipboard is not in the library yet: the quick transfer of
+ *     MSG_META_END_MOVE_COPY goes nowhere (Port32/ABI.md section 13x);
  *   - the handlers of the specific part of a generic object (the
  *     MSG_SPEC_* messages, after visSpec.asm) are at the end; their
  *     routines are in visSpec.goc;
@@ -990,7 +989,7 @@ static void DispatchSendOnOrDestroy(optr oself, EventHandle event,
 }
 
 /* VisSendClassedEvent: TO_VIS_PARENT up the visual tree, TO_APP_* to
- * the application object, TO_SYS_* (no system object yet) nowhere */
+ * the application object, TO_SYS_* to the system object */
 @method VisClass, MSG_META_SEND_CLASSED_EVENT
 {
     word to = (word) whereTo;
@@ -1011,7 +1010,12 @@ static void DispatchSendOnOrDestroy(optr oself, EventHandle event,
 	return;
     }
     if (to >= (word) TO_SYS_FOCUS && to <= (word) TO_SYS_MODEL) {
-	FlowDestroyMessage(event);
+	struct { EventHandle e; word w; } p;
+	p.e = event;
+	p.w = (word) (to - (TO_SYS_FOCUS - TO_FOCUS));
+	if (!UserCallSystem(MSG_META_SEND_CLASSED_EVENT, &p, sizeof(p),
+			    NULL, 0))
+	    FlowDestroyMessage(event);
 	return;
     }
     @callsuper();

@@ -17,6 +17,7 @@
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olApplicationClass.goh>
 @include <Objects/gInterC.goh>
+@include <Objects/gSysC.goh>
 @include <Internal/SpecUI/olWinClass.goh>
 @include <Internal/SpecUI/olBaseWinClass.goh>
 @include <Internal/SpecUI/olDisplayGroupClass.goh>
@@ -173,6 +174,13 @@ typedef struct {
     word		UBS_low[8];
     /* the standard sounds (step 300): the counts returned */
     word		UBS_snd[6];
+    /* the interim stubs filled in (steps 302 on): [0] classed events
+     * that came to the application TO_SYS_* from a visual object;
+     * [1] the application lowered lost the field's focus, [2], [3] a
+     * point in the primary on the screen, [4] the application had it
+     * after a click there, [5], [6] the field's focus before and after
+     * (steps 303, 304) */
+    word		UBS_stub[8];
 } UBState;
 
 UBState ubState;
@@ -238,6 +246,7 @@ static void DocDelete(const char *name)
  * ubAnswer, noting what the dialog is made of */
 @class UBAppClass, GenApplicationClass;
     @message void MSG_UB_ANSWER();
+    @message void MSG_UB_SYS_PING();
 @endc
 @classdecl UBAppClass;
 
@@ -254,6 +263,12 @@ static void DocDelete(const char *name)
 static Boolean ubDiskFull;
 
 static word ubAnswer;
+
+/* a classed event TO_SYS_FOCUS from a visual object (step 302) */
+@method UBAppClass, MSG_UB_SYS_PING
+{
+    ubState.UBS_stub[0]++;
+}
 
 @method UBAppClass, MSG_UB_ANSWER
 {
@@ -4308,6 +4323,46 @@ static void UBClickMenu(word n)
 							       BI_PRESS);
 	@call UBContent::MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT(NULL, 0);
 	break;
+    case 302: {
+	/* a visual object's classed event TO_SYS_FOCUS goes to the
+	 * system object and down its focus to this application
+	 * (VisSendClassedEvent) */
+	EventHandle ev = @record UBAppClass::MSG_UB_SYS_PING();
+	@call UBContent::MSG_META_SEND_CLASSED_EVENT(ev,
+						    (TravelOption) TO_SYS_FOCUS);
+	break;
+    }
+    case 303:
+    case 304: {
+	/* a click in a geode's window brings it to the top with the
+	 * focus (DefaultBehaviorOnMousePress): the application lowered
+	 * to the bottom first has lost it, the test clicks into the
+	 * primary */
+	optr sf = 0, *sfp = &sf, af = 0;
+	Rectangle r;
+
+	(void) UserCallSystem(MSG_META_GET_FOCUS_EXCL, &sfp, sizeof(sfp),
+			      NULL, 0);
+	if (step == 303 && sf) {
+	    /* the application lets go of the field's focus and target */
+	    @call sf::MSG_META_MUP_ALTER_FTVMC_EXCL(@UBApp,
+						   MAEF_FOCUS | MAEF_TARGET);
+	    r = ScreenBounds(@call UBPrimary::MSG_VIS_QUERY_WINDOW());
+	    ubState.UBS_stub[2] = (r.R_left + r.R_right) / 2;
+	    ubState.UBS_stub[3] = (r.R_top + r.R_bottom) / 2;
+	}
+	/* the system's focus is the field, the field's the application */
+	(void) UserCallSystem(MSG_META_GET_FOCUS_EXCL, &sfp, sizeof(sfp),
+			      NULL, 0);
+	if (sf)
+	    (void) @call sf::MSG_META_GET_TARGET_EXCL(&af);
+	ubState.UBS_stub[5 + (step - 303)] = OptrToHandle(af);
+	if (step == 303)
+	    ubState.UBS_stub[1] = af != @UBApp;
+	else
+	    ubState.UBS_stub[4] = af == @UBApp;
+	break;
+    }
     case 210:
 	/* (the documents left, while the test waits for step 209) */
 	ubState.UBS_low[6] = @call UBDocGrp::MSG_GEN_COUNT_CHILDREN();

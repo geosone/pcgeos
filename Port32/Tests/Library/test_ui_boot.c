@@ -17,6 +17,8 @@
  */
 #include "kernelC.h"
 #include <Internal/videoDr.h>
+#include <Internal/im.h>
+#include <input.h>
 #include <geosdriver.h>
 #include <initfile.h>
 #include <sysstats.h>
@@ -105,6 +107,7 @@ typedef struct {
     word		UBS_fcn[16];
     word		UBS_low[8];
     word		UBS_snd[6];
+    word		UBS_stub[8];
 } UBState;
 
 static int fails;
@@ -159,6 +162,33 @@ static word Notify(word flags, const char *string1, const char *string2)
     snprintf(notifyText, sizeof(notifyText), "%s %s",
 	     string1 ? string1 : "", string2 ? string2 : "");
     return (flags & SNF_CONTINUE) ? SNF_CONTINUE : 0;
+}
+
+/* a click of the first button at x, y on the screen, through the input
+ * manager (as a mouse driver would send it) */
+static void ToIM(Message m, word cx, word dx, word bp)
+{
+    IMParams p;
+
+    p.IMP_cx = cx;
+    p.IMP_dx = dx;
+    p.IMP_bp = bp;
+    p.IMP_si = 0;
+    CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(ImInfoInputProcess(), 0), m,
+		 &p, sizeof(p), NULL, 0);
+}
+
+static void Click(word x, word y)
+{
+    static word now = 1000;
+
+    ToIM(MSG_IM_PTR_CHANGE, x, y, PI_absX | PI_absY);
+    TimerSleep(2);
+    now += 1000;
+    ToIM(MSG_IM_BUTTON_CHANGE, now, 0, BUTTON_0 | BI_PRESS);
+    TimerSleep(2);
+    now += 10;
+    ToIM(MSG_IM_BUTTON_CHANGE, now, 0, BUTTON_0);
 }
 
 static GeodeHandle Find(const char *name)
@@ -427,6 +457,22 @@ int main(int argc, char **argv)
 	step(300);
 	Sounds(drv, from);
 	NoInputBeep(drv, step);
+	/* a visual object's classed event TO_SYS_FOCUS reaches the
+	 * application at the system's focus */
+	step(302);
+	WAIT_FOR(st->UBS_stub[0]);
+	printf("classed event to the system: %u\n", st->UBS_stub[0]);
+	CHECK(st->UBS_stub[0] == 1);
+	/* the application lowered to the bottom loses the focus; a click
+	 * into its primary brings it back to the top with the focus */
+	step(303);
+	CHECK(st->UBS_stub[1]);
+	Click(st->UBS_stub[2], st->UBS_stub[3]);
+	WAIT_FOR((step(304), st->UBS_stub[4]));
+	printf("click: the field's focus %#x lowered, %#x after the click "
+	       "at %u,%u\n", st->UBS_stub[5], st->UBS_stub[6],
+	       st->UBS_stub[2], st->UBS_stub[3]);
+	CHECK(st->UBS_stub[4]);
 	printf("standard sounds: counts %u %u %u %u\n", st->UBS_snd[0],
 	       st->UBS_snd[1], st->UBS_snd[2], st->UBS_snd[3]);
     }
