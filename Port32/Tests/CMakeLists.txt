@@ -69,7 +69,7 @@ endfunction()
 
 # geos_add_test(<test> <program> [DISPLAY] [<argument>...])
 # The ctest <test>: <program>, run in this directory.  DISPLAY: on a
-# screen of its own.
+# screen of its own.  GEOS_AUDIO=null: ghal_audio plays nowhere.
 function(geos_add_test test program)
   cmake_parse_arguments(PARSE_ARGV 2 T "DISPLAY" "" "")
   if(T_DISPLAY AND GEOS_TEST_XSERVER)
@@ -81,6 +81,8 @@ function(geos_add_test test program)
     add_test(NAME ${test} COMMAND ${program} ${T_UNPARSED_ARGUMENTS}
              WORKING_DIRECTORY ${GEOS_TESTS_DIR})
   endif()
+  # never sound from the speakers: ghal_audio plays nowhere
+  set_tests_properties(${test} PROPERTIES ENVIRONMENT GEOS_AUDIO=null)
 endfunction()
 
 if(GEOS_BUILD_GEODES)

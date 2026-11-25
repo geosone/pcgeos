@@ -11,6 +11,15 @@ if(GHAL_HAVE_X11 AND GEOS_LINUX_DISPLAY STREQUAL "x11")
   target_compile_definitions(test_ghal_display PRIVATE GHAL_TEST_X11)
 endif()
 geos_add_test(ghal.display test_ghal_display DISPLAY)
+geos_test_program(test_ghal_audio LIBS ghal)
+geos_add_test(ghal.audio test_ghal_audio)
+if(TARGET ghal_pipewire)
+  # PipeWire, silent: a stream linked to no sink, driven by the server's
+  # dummy driver (without a server, ghal_audio falls back to null)
+  geos_add_test(ghal.audio.pipewire test_ghal_audio)
+  set_tests_properties(ghal.audio.pipewire PROPERTIES ENVIRONMENT
+    GEOS_AUDIO=pipewire)
+endif()
 
 # ghal_module: a geode in the host's module format (ELF, or DXE3 on
 # dos32), embedded in the test program (testgeode of ../Geode).  Not with

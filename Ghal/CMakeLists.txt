@@ -39,9 +39,50 @@ int main(void) { return XShmQueryExtension(XOpenDisplay(0)); }"
     target_sources(ghal PRIVATE Display/ghal_display_null.c)
   endif()
   message(STATUS "ghal_display: ${_display}")
+  # ghal_audio: PipeWire where its library is there for the target,
+  # else null only (GEOS_LINUX_AUDIO=null to leave it out)
+  set(GEOS_LINUX_AUDIO "pipewire" CACHE STRING "ghal_audio: pipewire or null")
+  target_sources(ghal PRIVATE Audio/ghal_audio.c)
+  target_include_directories(ghal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Audio)
+  set(_audio null)
+  if(GEOS_LINUX_AUDIO STREQUAL "pipewire")
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+      pkg_check_modules(PIPEWIRE QUIET IMPORTED_TARGET libpipewire-0.3)
+    endif()
+    if(PIPEWIRE_FOUND)
+      # the host's library may not fit the target (cross and -m32
+      # builds): only if a program links with it
+      include(CheckCSourceCompiles)
+      set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
+      set(CMAKE_REQUIRED_INCLUDES ${PIPEWIRE_INCLUDE_DIRS})
+      set(CMAKE_REQUIRED_LIBRARIES ${PIPEWIRE_LINK_LIBRARIES})
+      check_c_source_compiles("#include <pipewire/pipewire.h>
+int main(void) { pw_init(0, 0); return 0; }" GHAL_HAVE_PIPEWIRE)
+      unset(CMAKE_REQUIRED_DEFINITIONS)
+      unset(CMAKE_REQUIRED_INCLUDES)
+      unset(CMAKE_REQUIRED_LIBRARIES)
+    endif()
+    if(GHAL_HAVE_PIPEWIRE)
+      set(_audio pipewire)
+      # on its own: the spa headers include the C library's <math.h>,
+      # which CInclude's hides; ghal.h is found as "ghal.h" (-iquote)
+      add_library(ghal_pipewire OBJECT Audio/ghal_audio_pipewire.c)
+      target_compile_options(ghal_pipewire PRIVATE
+        "SHELL:-iquote ${PROJECT_SOURCE_DIR}/CInclude"
+        "SHELL:-iquote ${CMAKE_CURRENT_SOURCE_DIR}/Audio")
+      target_link_libraries(ghal_pipewire PRIVATE PkgConfig::PIPEWIRE)
+      target_sources(ghal PRIVATE $<TARGET_OBJECTS:ghal_pipewire>)
+      target_compile_definitions(ghal PRIVATE GHAL_HAVE_PIPEWIRE)
+      target_compile_definitions(ghal_pipewire PRIVATE GHAL_HAVE_PIPEWIRE)
+      target_link_libraries(ghal PUBLIC PkgConfig::PIPEWIRE)
+    endif()
+  endif()
+  message(STATUS "ghal_audio: ${_audio}")
 elseif(GEOS_HOST STREQUAL "dos32")
   target_sources(ghal PRIVATE Dos32/ghal_dos32.c Dos32/ghal_fs_dos.c
-                              Display/ghal_display_null.c)
+                              Display/ghal_display_null.c
+                              Audio/ghal_audio_none.c)
   # geodes are DXE3 modules (dxe3gen); the Watcom build has no loader
   if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_sources(ghal PRIVATE Dos32/ghal_module_dxe.c)

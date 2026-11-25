@@ -186,7 +186,8 @@ typedef struct ghal_irq_source ghal_irq_source;
 
 enum {
     GHAL_IRQ_TICK = 0,      /* scheduler tick (dos32: IRQ0 / PIT) */
-    GHAL_IRQ_INPUT = 1      /* ghal_input has events (every host) */
+    GHAL_IRQ_INPUT = 1,     /* ghal_input has events (every host) */
+    GHAL_IRQ_AUDIO = 2      /* ghal_audio has room (hosts with it) */
 };
 
 ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
@@ -491,6 +492,52 @@ int         ghal_input_read(unsigned sources, ghal_input_event *ev);
 ghal_status ghal_input_post(const ghal_input_event *ev, unsigned n);
 /* Events dropped because the queue was full, since the start. */
 uint32_t    ghal_input_dropped(void);
+
+/* ---------------------------------------------------------------------
+ * ghal_audio -- PCM output (GHAL-Concept.md section 4, host services),
+ * for the host sound driver, which mixes its voices and sample streams
+ * into it.
+ *
+ * One stream: signed 16-bit samples, 1 or 2 channels interleaved, at
+ * the rate asked for.  GHAL keeps a ring of frames; the backend takes
+ * them at the device's pace (silence when the ring is empty: an
+ * underrun).  Whenever the ring is half empty or more, the handlers of
+ * GHAL_IRQ_AUDIO run, as a sound card's DMA interrupt did, and refill
+ * it with ghal_audio_write.  The backend's own thread never waits for
+ * ghal_crit: a thread of GHAL raises the interrupt.  While paused, the
+ * device takes nothing and the interrupt does not come.
+ *
+ * Backends ("pipewire" where its library was there at build time, else
+ * "null"); the environment variable GEOS_AUDIO chooses: "null" or
+ * "pipewire".  "null" takes the frames in real time and plays them
+ * nowhere (the tests use it, ctest sets GEOS_AUDIO=null).  Not on dos32
+ * (there the Sound Blaster driver drives the card): GHAL_ERR_UNSUPPORTED.
+ * ------------------------------------------------------------------- */
+
+typedef struct ghal_audio ghal_audio;
+
+/* What the device took, as it took it (silence for underruns); called
+ * on a host thread, not as an interrupt.  For tests and recording. */
+typedef void (*ghal_audio_tap)(void *ctx, const int16_t *frames,
+                               size_t n);
+
+/* frames: the size of the ring (0: a tenth of a second).  Starts
+ * paused. */
+ghal_status ghal_audio_open(unsigned rate, unsigned channels,
+                            size_t frames, ghal_audio **out);
+void        ghal_audio_close(ghal_audio *a);
+void        ghal_audio_pause(ghal_audio *a, int paused);
+/* Frames that fit into the ring now. */
+size_t      ghal_audio_room(ghal_audio *a);
+/* Up to n frames into the ring, without waiting; returns how many. */
+size_t      ghal_audio_write(ghal_audio *a, const int16_t *frames, size_t n);
+/* Frames the device took from the ring, and frames of silence it got
+ * for want of them, since the open. */
+uint64_t    ghal_audio_played(ghal_audio *a);
+uint64_t    ghal_audio_underruns(ghal_audio *a);
+void        ghal_audio_set_tap(ghal_audio *a, ghal_audio_tap fn, void *ctx);
+/* "pipewire", "null" */
+const char *ghal_audio_backend(ghal_audio *a);
 
 #ifdef __cplusplus
 }

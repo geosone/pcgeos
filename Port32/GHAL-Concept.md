@@ -118,7 +118,7 @@ Under DOS, on the other hand, the real hardware drivers stay (VGA/VESA, PS/2, IF
 | `ghal_display` | modes, surface (pointer, pitch, format), flush rectangles, resize | VESA VBE 2/3 LFB (or the VGA driver directly) | SDL3 / X11-SHM / fbdev | DIB section + `BitBlt` or SDL3 |
 | `ghal_input` | events in the **openinput format** `{page, usage, value, source}` (HID usages) | PS/2 or the DOS drivers | SDL/X11/evdev → HID | Win32 messages → HID |
 | `ghal_fs` | files, directories, attributes (long name, token, protocol); implemented for POSIX and dos32 (`ghal.h`) | C library DOS calls, 8.3 names, no named attributes (the DOS FSD keeps the GEOS header) | POSIX + xattrs `user.geos.*` | Win32 `*W` API + NTFS streams (`:geos`) |
-| `ghal_audio` | PCM output | (SoundBlaster driver) | SDL3 audio / OSS / ALSA | SDL3 / WASAPI |
+| `ghal_audio` | PCM output, a ring refilled on `GHAL_IRQ_AUDIO` (section 4.8) | (SoundBlaster driver) | PipeWire (null without it) | WASAPI |
 | `ghal_net` | TCP/UDP, name resolution | (GEOS's own TCP/IP stack over a packet driver) | BSD sockets | Winsock |
 
 ### 4.1 Threads and scheduler
@@ -250,6 +250,35 @@ ctest `ghal.input` checks the queue and the interrupt on every host.
 checks what comes out. With `GHAL_DISPLAY_HOLD`, the test prints what
 is typed and clicked in its window or VNC session.
 
+
+### 4.8 Audio (implemented 2026-11-25)
+
+`ghal_audio` (`ghal.h`, `Ghal/Audio/`) gives one PCM stream: signed
+16-bit, one or two channels, at the rate asked for. GHAL keeps a ring of
+frames; the backend takes them at the device's pace (silence when it is
+empty: an underrun). While the ring is half empty or more, the handlers
+of the new interrupt source `GHAL_IRQ_AUDIO` run, as the DMA interrupt of
+a sound card did, and refill it. The host sound driver mixes its voices
+and sample streams there.
+
+- **`pipewire`** (Linux, where `libpipewire-0.3` is there at build time):
+  a playback stream to the default sink, about 20 ms a period. Its
+  process callback runs on PipeWire's realtime thread and only copies out
+  of the ring (a mutex of its own, never `ghal_crit`); a thread of GHAL
+  raises the interrupt. Without a server it falls back to `null`.
+  Routing, links and devices of its own (a PipeWire driver of GEOS) are
+  for later.
+- **`null`**: takes the frames in real time and plays them nowhere. ctest
+  sets `GEOS_AUDIO=null` for every test.
+- dos32 has no `ghal_audio` (the Sound Blaster driver drives the card):
+  `GHAL_ERR_UNSUPPORTED`.
+- `GEOS_AUDIO=null|pipewire` chooses; a tap sees what the device got.
+
+**Testing without sound.** ctest `ghal.audio` uses `null`;
+`ghal.audio.pipewire` uses PipeWire with a stream linked to no sink
+(`PIPEWIRE_PROPS='{ node.autoconnect = false node.always-process = true }'`),
+which the server's dummy driver drives: the backend runs for real and
+nothing is heard. The test sets that itself, however it is run.
 ## 5. Driver sets per host
 
 | Driver class | `dos32` (from today's DOS parts, 32-bit) | `linux` | `win32/64` | `gonware` (later) |

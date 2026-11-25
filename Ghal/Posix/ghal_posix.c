@@ -2,7 +2,8 @@
  * ghal_posix.c -- GHAL backend for POSIX hosts (linux; later other Unix).
  *
  * Implements the whole of ghal.h but ghal_fs, ghal_module, ghal_display
- * and ghal_input.  ghal_irq offers GHAL_IRQ_TICK and GHAL_IRQ_INPUT.
+ * and ghal_input.  ghal_irq offers GHAL_IRQ_TICK, GHAL_IRQ_INPUT and
+ * GHAL_IRQ_AUDIO.
  */
 #define _GNU_SOURCE 1   /* MAP_ANONYMOUS, _SC_AVPHYS_PAGES */
 
@@ -525,6 +526,17 @@ struct ghal_irq_source {
 
 static struct ghal_irq_source *tick_list;
 static struct ghal_irq_source *input_list;  /* GHAL_IRQ_INPUT */
+static struct ghal_irq_source *audio_list;  /* GHAL_IRQ_AUDIO */
+
+/* the list of a source raised by ghal_irq_raise, else NULL */
+static struct ghal_irq_source **raised_list(int source)
+{
+    switch (source) {
+    case GHAL_IRQ_INPUT: return &input_list;
+    case GHAL_IRQ_AUDIO: return &audio_list;
+    default:             return NULL;
+    }
+}
 static unsigned  tick_hz = 60;          /* GEOS default */
 static pthread_t tick_thread;
 static int       tick_running;          /* thread exists */
@@ -572,18 +584,20 @@ ghal_status ghal_irq_attach(int source, ghal_irq_handler fn, void *ctx,
         *out = NULL;
     if (!fn || !out)
         return GHAL_ERR_INVAL;
-    if (source != GHAL_IRQ_TICK && source != GHAL_IRQ_INPUT)
+    if (source != GHAL_IRQ_TICK && !raised_list(source))
         return GHAL_ERR_UNSUPPORTED;
     s = malloc(sizeof *s);
     if (!s)
         return GHAL_ERR_NOMEM;
     s->fn = fn;
     s->ctx = ctx;
-    if (source == GHAL_IRQ_INPUT) {
-        /* raised by whoever posts input (ghal_irq_raise) */
+    if (raised_list(source)) {
+        /* raised by whoever posts input, or by ghal_audio
+         * (ghal_irq_raise) */
+        struct ghal_irq_source **l = raised_list(source);
         ghal_crit_enter();
-        s->next = input_list;
-        input_list = s;
+        s->next = *l;
+        *l = s;
         ghal_crit_leave();
         *out = s;
         return GHAL_OK;
@@ -627,6 +641,14 @@ ghal_status ghal_irq_detach(ghal_irq_source *src)
             return GHAL_OK;
         }
     }
+    for (pp = &audio_list; *pp; pp = &(*pp)->next) {
+        if (*pp == src) {
+            *pp = src->next;
+            ghal_crit_leave();
+            free(src);
+            return GHAL_OK;
+        }
+    }
     ghal_crit_leave();
     pthread_mutex_lock(&tick_ctl);
     ghal_crit_enter();
@@ -654,14 +676,14 @@ ghal_status ghal_irq_detach(ghal_irq_source *src)
 
 void ghal_irq_raise(int source)
 {
-    struct ghal_irq_source *s;
+    struct ghal_irq_source *s, **l = raised_list(source);
     int was;
-    if (source != GHAL_IRQ_INPUT)
+    if (!l)
         return;
     ghal_crit_enter();
     was = irq_active;
     irq_active = 1;
-    for (s = input_list; s; s = s->next)
+    for (s = *l; s; s = s->next)
         s->fn(s->ctx);
     irq_active = was;
     pthread_cond_broadcast(&idle_cv);
