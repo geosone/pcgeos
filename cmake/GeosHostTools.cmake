@@ -11,8 +11,10 @@
 #   GEOS_UICPP      uicpp, the same
 #   GEOS_GPRES, GEOS_GPGEODE, GEOS_KEXPORTS, GEOS_SYMTABGEN,
 #   GEOS_PAPERGEN, GEOS_ASMCHARS2C, GEOS_EPSFONTS2C, GEOS_KMAPGEN,
-#   GEOS_LOCALGEN, GEOS_PSDEVINFO2C, GEOS_DMDEVINFO2C
+#   GEOS_LOCALGEN, GEOS_PSDEVINFO2C, GEOS_DMDEVINFO2C, GEOS_SBIGEN
 #                   the generators (Tools/<name>), the same
+#   GEOS_CVTPCX     cvtpcx (Tools/misc/cvtpcx), the same: PCX pictures
+#                   to monikers (GeosCvtpcx.cmake)
 #
 # GEOS_HOST_CC picks the host compiler (default: cc, gcc or clang of the
 # PATH).
@@ -33,11 +35,14 @@ set(GEOS_UICPP ${_tools_dir}/uicpp/uicpp CACHE INTERNAL
     "uicpp of the build host")
 set(_tool_files ${GEOS_GOC} ${GEOS_UIC} ${GEOS_UICPP})
 foreach(_tool gpres gpgeode kexports symtabgen papergen asmchars2c
-              epsfonts2c kmapgen localgen psdevinfo2c dmdevinfo2c sbigen)
+              epsfonts2c kmapgen localgen psdevinfo2c dmdevinfo2c sbigen
+              cvtpcx)
   string(TOUPPER ${_tool} _var)
   set(_dir ${_tool})
   if(_tool STREQUAL "gpgeode")
     set(_dir gpres)
+  elseif(_tool STREQUAL "cvtpcx")
+    set(_dir misc/cvtpcx)
   endif()
   set(GEOS_${_var} ${_tools_dir}/${_dir}/${_tool} CACHE INTERNAL
       "${_tool} of the build host")

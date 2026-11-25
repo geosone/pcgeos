@@ -429,6 +429,8 @@ typedef int Boolean;
 #define CVT_ESP_MODE	    	0x00000800  /* Output for Esp */
 #define CVT_UIC_MODE	    	0x00001000  /* Output for UIC */
 #define CVT_NO_BEGIN_END_STRING	0x00002000  /* Don't output GSBegin/EndString*/
+#define CVT_ALWAYS_COMPACT	0x00004000  /* Compact even if it won't make
+					     * the bitmap smaller (-P) */
 
 #define CVT_MODE_FLAGS	(CVT_UIC_MODE|CVT_ESP_MODE|CVT_GOC_MODE)
 
@@ -2565,10 +2567,12 @@ ConvertFormat(FILE  	 *stream,  /* Input stream, positioned at start of
     /*
      * If we're allowed to compact and the compacted bitmap is actually
      * valid (i.e. it didn't overflow the size allocated for the uncompacted
-     * version), use it. Else use the uncompacted form.
+     * version), use it. Else use the uncompacted form.  With -P also
+     * when it is no smaller (as some pictures checked in were made).
      */
     if ((flags & CVT_NO_COMPACT) || !icon->cvalid ||
-	(icon->compacted.next - icon->compacted.data >=
+	(!(flags & CVT_ALWAYS_COMPACT) &&
+	 icon->compacted.next - icon->compacted.data >=
 	 icon->uncompacted.next - icon->uncompacted.data))
     {
 	bm = &icon->uncompacted;
@@ -2761,6 +2765,9 @@ The following parameters are useful only for converting single icons:\n\
 			or the mask (set by \"-m\") is set to 1.\n\
 \n\
     -N	    	    	map the colors to the indices for the Nokia device\n\
+    -q			Quiet: no report of each file's input parameters.\n\
+    -P			Compact a bitmap even if that does not make it\n\
+			smaller (as long as it fits).\n\
 \n\
 \n");
     fprintf(stderr,
@@ -2807,6 +2814,8 @@ void
 main(int argc, char **argv)
 {
     int	    	ac;
+    int		status = 0;	/* 1 once a file could not be converted */
+    int		quiet = 0;	/* -q: no report of the input parameters */
     int	    	xoffset = 0;
     int	    	yoffset = 0;
     char    	*ofile = NULL;
@@ -2959,6 +2968,12 @@ main(int argc, char **argv)
 	    case 'N':
 		mapColorsForResponder = TRUE;
 		break;
+	    case 'q':
+		quiet = 1;
+		break;
+	    case 'P':
+		flags |= CVT_ALWAYS_COMPACT;
+		break;
 	    default:
 		fprintf(stderr, "option %s unknown\n", argv[ac]);
 		usage();
@@ -2969,8 +2984,24 @@ main(int argc, char **argv)
 	     */
 	    FILE    *stream = fopen(argv[ac], "rb");
 
+	    if (stream == NULL && strchr(argv[ac], '\\') != NULL) {
+		/*
+		 * A DOS path (PCX\Dialer.pcx) on a host whose separator is
+		 * the slash: opened so, its name written as given.
+		 */
+		char	*p = strdup(argv[ac]), *q;
+
+		for (q = p; *q != '\0'; q++) {
+		    if (*q == '\\') {
+			*q = '/';
+		    }
+		}
+		stream = fopen(p, "rb");
+		free(p);
+	    }
 	    if (stream == NULL) {
 		perror(argv[ac]);
+		status = 1;
 		continue;
 	    }
 
@@ -3012,6 +3043,7 @@ main(int argc, char **argv)
 		fprintf(stderr, "no header on %s\n", argv[ac]);
 	    file_err:
 		(void)fclose(stream);
+		status = 1;
 		continue;
 	    } else if (header.PCXH_id != 10) {
 		fprintf(stderr, "header id wrong for %s\n", argv[ac]);
@@ -3059,25 +3091,27 @@ main(int argc, char **argv)
 		perror(outname);
 		goto file_err;
 	    }
-	    fprintf(stderr, "Input parameters for %s:\n", argv[ac]);
-	    fprintf(stderr,
-		    "\t%d bits per pixel, %d planes, %d bytes per plane\n",
-		    header.PCXH_bitsPerPixel, header.PCXH_planes,
-		    swaps(header.PCXH_bytesPerPlane));
-	    fprintf(stderr,
-		    "\t(%d, %d) to (%d, %d): width = %d, height = %d\n",
-		    swaps(header.PCXH_upLeftX),
-		    swaps(header.PCXH_upLeftY),
-		    swaps(header.PCXH_lowRightX),
-		    swaps(header.PCXH_lowRightY),
-		    abs(swaps(header.PCXH_lowRightX) -
-			swaps(header.PCXH_upLeftX)),
-		    abs(swaps(header.PCXH_lowRightY) -
-			swaps(header.PCXH_upLeftY))
-		    );
-	    fprintf(stderr, "\txRes = %d, yRes = %d\n",
-		    swaps(header.PCXH_dispXRes),
-		    swaps(header.PCXH_dispYRes));
+	    if (!quiet) {
+		fprintf(stderr, "Input parameters for %s:\n", argv[ac]);
+		fprintf(stderr,
+			"\t%d bits per pixel, %d planes, %d bytes per plane\n",
+			header.PCXH_bitsPerPixel, header.PCXH_planes,
+			swaps(header.PCXH_bytesPerPlane));
+		fprintf(stderr,
+			"\t(%d, %d) to (%d, %d): width = %d, height = %d\n",
+			swaps(header.PCXH_upLeftX),
+			swaps(header.PCXH_upLeftY),
+			swaps(header.PCXH_lowRightX),
+			swaps(header.PCXH_lowRightY),
+			abs(swaps(header.PCXH_lowRightX) -
+			    swaps(header.PCXH_upLeftX)),
+			abs(swaps(header.PCXH_lowRightY) -
+			    swaps(header.PCXH_upLeftY))
+			);
+		fprintf(stderr, "\txRes = %d, yRes = %d\n",
+			swaps(header.PCXH_dispXRes),
+			swaps(header.PCXH_dispYRes));
+	    }
 
 	    bitsPerPCXPixel = header.PCXH_planes * header.PCXH_bitsPerPixel;
 
@@ -3128,5 +3162,5 @@ main(int argc, char **argv)
 	}
     }
 
-    exit(0);
+    exit(status);
 }
