@@ -151,7 +151,9 @@ int main(int argc, char **argv)
     printf("modified %u, not modified %u, empty %u, not empty %u\n",
 	   st->TOS_modified, st->TOS_notModified, st->TOS_empty,
 	   st->TOS_notEmpty);
-    CHECK(st->TOS_modified == 3 && st->TOS_empty == 1);
+    /* (an attribute change marks the text user modified, as the asm's
+     * ReflectChange: once in step 9, once in step 11) */
+    CHECK(st->TOS_modified == 5 && st->TOS_empty == 1);
 
     printf("geode checks: %u, failed %u (first at textobj.goc line %u)\n",
 	   st->TOS_checks, st->TOS_fails, st->TOS_failLine);

@@ -762,6 +762,34 @@ static Boolean ChunkIs(optr c, const char *text)
 	TOCHECK(t->VTI_lines && t->VTI_height.WBF_int == 12 &&
 		ChunkArrayGetCountHandles(OptrToHandle(@TOText),
 					  t->VTI_lines) == 1);
+	/* a new character attribute: the lines made again at once
+	 * (ReflectChange), the object user modified */
+	TOCHECK(!(t->VTI_state & VTS_USER_MODIFIED));
+	{
+	    WWFixed size;
+
+	    size.WWF_int = 24;
+	    size.WWF_frac = 0;
+	    @call TOText::MSG_VIS_TEXT_SET_POINT_SIZE(size,
+						      TEXT_ADDRESS_PAST_END,
+						      0);
+	}
+	t = ObjDerefVis(@TOText);
+	TOCHECK(t->VTI_height.WBF_int >= 24 &&
+		(t->VTI_state & VTS_USER_MODIFIED));
+	/* (Berkeley 10 again) */
+	{
+	    WWFixed size;
+
+	    size.WWF_int = 10;
+	    size.WWF_frac = 0;
+	    @call TOText::MSG_VIS_TEXT_SET_POINT_SIZE(size,
+						      TEXT_ADDRESS_PAST_END,
+						      0);
+	}
+	t = ObjDerefVis(@TOText);
+	TOCHECK(t->VTI_height.WBF_int == 12);
+	@call TOText::MSG_VIS_TEXT_SET_NOT_USER_MODIFIED();
 	break;
     }
     case 12: {

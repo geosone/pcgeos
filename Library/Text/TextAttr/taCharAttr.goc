@@ -7,8 +7,8 @@
  * (VTSF_DEFAULT_CHAR_ATTR) or the chunk of a VisTextCharAttr.  An
  * attribute that a default record can say is kept as one
  * (SetSingleCharAttr).  The range of a change is the whole object.
- * Not yet: runs (VTSF_MULTIPLE_CHAR_ATTRS), tokens, styles, undo; the
- * change on the screen (ReflectChange).
+ * Not yet: runs (VTSF_MULTIPLE_CHAR_ATTRS), tokens, styles, undo, the
+ * notifications of a change (TA_SendNotification).
  */
 @include "textInt.goh"
 #include <font.h>
@@ -149,15 +149,40 @@ void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a)
     memcpy(LMemDerefHandles(mh, t->VTI_charAttrRuns), a, sizeof(*a));
 }
 
-/* ReflectChangeUpdateGeneric: the change on the screen -- not yet */
+/*
+ * ReflectChangeUpdateGeneric (textSuspend.asm): a generic object's
+ * instance data updated; the lines of the range made again and drawn,
+ * the selection shown again; the object user modified, told
+ * MSG_VIS_TEXT_ATTRIBUTE_CHANGE.  The range is the whole object.
+ */
 static void ReflectChange(optr o)
 {
-    (void) o;
+    dword size = TS_GetTextSize(o);
+    WBFixed before = VT(o)->VTI_height;
+    Boolean lines;
+
+    if (VT(o)->VI_typeFlags & VTF_IS_GEN)
+	@call o::MSG_VIS_TEXT_UPDATE_GENERIC();
+    lines = VT(o)->VTI_lines != 0;
+    if (lines) {
+	TextRecalc(o, 0, size, size);
+	TextScreenUpdate(o);
+	TextScrollOneLine(o, VT(o)->VTI_selectStart);
+    }
+    EditHilite(o);
+    TextGStateDestroy(o);
+    if (lines)
+	TextHeightNotify(o, before);
+    TextMarkUserModified(o);
+    @call o::MSG_VIS_TEXT_ATTRIBUTE_CHANGE();
 }
 
-/* SetCharAttrCommon */
+/* SetCharAttrCommon: the selection off the screen while the attribute
+ * changes (UnHiliteAndFixupCharAttrRange) */
 static void SetCharAttr(optr o, const VisTextCharAttr *a)
 {
+    TextGStateCreate(o);
+    EditUnHilite(o);
     TA_SetSingleCharAttr(o, a);
     ReflectChange(o);
 }

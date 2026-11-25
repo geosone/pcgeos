@@ -7162,6 +7162,10 @@ the modules of the asm; what is there:
   compared with the passed attribute (`VisTextCharAttrDiffs`). The range
   of these messages is not looked at. A default record with a font
   number beyond the table is Berkeley (the asm read past its table).
+  After a change the lines are made again and drawn, the object is
+  user modified and gets `MSG_VIS_TEXT_ATTRIBUTE_CHANGE`, a generic
+  one `MSG_VIS_TEXT_UPDATE_GENERIC` (ReflectChangeUpdateGeneric); the
+  notifications of the change are not sent yet.
 - **Port32 changes in the C API.** The block of
   `MSG_VIS_TEXT_REPLACE_ALL_BLOCK`, `MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK`,
   `MSG_VIS_TEXT_APPEND_BLOCK` and `MSG_VIS_TEXT_GET_ALL_BLOCK` is a
