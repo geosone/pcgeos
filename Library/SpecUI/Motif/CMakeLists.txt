@@ -23,9 +23,9 @@ geos_uic(cmainManager ${_common}/CMain/cmainManager.ui
          INCLUDES ${CMAKE_CURRENT_BINARY_DIR} ${_common}/CMain ${_common}
          DEFINITIONS MOTIF
          DEPENDS cart_art)
-# Of cspecCUAS.ui the monikers and pictures (also those of the standard
-# dialogs, cspecFile.ui) and the window menus; StandardDialogUI is
-# CSpec/cspecStdDialog.goc.  The binary directory first, as above; the
+# Of cspecCUAS.ui the monikers and pictures, the window menus and the
+# template of the standard dialogs (cspecFile.ui's StandardDialogUI,
+# which CSpec/cspecStdDialog.goc copies).  The binary directory first, as above; the
 # source directory for "../CommonUI/CSpec/mkr*.ui".  The Esp constants
 # the conditions in its gstrings use, as CommonUI/cConstant.def has them
 # for Motif (uic -g decides them).  HINT_SYS_ICON and
@@ -39,7 +39,7 @@ geos_uic(cspecCUAS ${_common}/CSpec/cspecCUAS.ui
                    DrawBitmapOptrSCGAResource AppFileSCMonikerResource
                    AppFileSMMonikerResource AppFileSCGAMonikerResource
                    StandardMonikers StandardWindowMenuResource
-                   DisplayWindowMenuResource
+                   DisplayWindowMenuResource StandardDialogUI
          INCLUDES ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
                   ${_common}
          DEFINITIONS MOTIF THREE_DIMENSIONAL_BORDERS=0

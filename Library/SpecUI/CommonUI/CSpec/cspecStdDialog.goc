@@ -24,49 +24,9 @@
 #include <timer.h>
 #include <Objects/helpCC.h>
 
-/* (this block holds nothing but the standard dialog: it is duplicated
- * for each one put up) */
-@start StandardDialogUI, notDetachable;
-
-@object GenInteractionClass StandardDialogSummons = {
-    GI_states = @default & ~GS_USABLE;
-    GI_comp = @StdDialogTopGroup;
-    /* (the type is set when built) */
-    GII_visibility = GIV_DIALOG;
-    GII_attrs = @default | GIA_NOT_USER_INITIATABLE |
-		GIA_INITIATED_VIA_USER_DO_DIALOG | GIA_MODAL;
-}
-@object GenInteractionClass StdDialogTopGroup = {
-    GI_comp = @StdDialogCuteGlyph, @StdDialogTextDisplay;
-    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;
-    HINT_EXPAND_WIDTH_TO_FIT_PARENT;
-    HINT_ORIENT_CHILDREN_HORIZONTALLY;
-}
-@object GenGlyphClass StdDialogCuteGlyph = {
-}
-@visMoniker StdDialogQuestionMoniker = list {
-    @StdDialogQuestionSCMoniker, @StdDialogQuestionSMMoniker,
-    @StdDialogQuestionSCGAMoniker, @StdDialogQuestionYMMoniker };
-@visMoniker StdDialogWarningMoniker = list {
-    @StdDialogWarningSCMoniker, @StdDialogWarningSMMoniker,
-    @StdDialogWarningSCGAMoniker, @StdDialogWarningYMMoniker };
-@visMoniker StdDialogNotificationMoniker = list {
-    @StdDialogNotificationSCMoniker, @StdDialogNotificationSMMoniker,
-    @StdDialogNotificationSCGAMoniker, @StdDialogNotificationYMMoniker };
-@visMoniker StdDialogErrorMoniker = list {
-    @StdDialogErrorSCMoniker, @StdDialogErrorSMMoniker,
-    @StdDialogErrorSCGAMoniker, @StdDialogErrorYMMoniker };
-
-@chunk char StdDialogText[] = "";
-@object GenTextClass StdDialogTextDisplay = {
-    GI_attrs = @default | GA_READ_ONLY;
-    GTXI_text = @StdDialogText;
-    GTXI_attrs = GTA_USE_TAB_FOR_NAVIGATION;
-    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;
-    HINT_MAXIMUM_SIZE = { SST_AVG_CHAR_WIDTHS | 50, 0, 0 };
-}
-
-@end StandardDialogUI;
+/* The template, StandardDialogUI (a block that holds nothing but the
+ * standard dialog: duplicated for each one put up), is uic -g's of
+ * cspecFile.ui, by way of cspecCUAS.ui (cspecCUAS.goh). */
 
 /* the table of response triggers a GIT_MULTIPLE_RESPONSE dialog is
  * passed (StandardDialogResponseTriggerTable) */

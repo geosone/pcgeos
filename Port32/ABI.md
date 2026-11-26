@@ -5573,7 +5573,8 @@ visual classes of `Library/User/Vis`:
   specific UI's standard dialogs
   (`MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG`), wait for it and destroy
   it. Motif's side is `CSpec/cspecStdDialog.goc` (after `cspecFile.ui`
-  and `copenAppMisc.asm`): the template `StandardDialogUI` copied per
+  and `copenAppMisc.asm`): the template `StandardDialogUI` (uic -g of `cspecFile.ui`, by way of
+  `cspecCUAS.ui`) copied per
   dialog, the picture of its type (the monikers of `cspecCUAS.ui`'s
   picture resources, by uic -g: `cspecCUAS.goh`), the interaction type, the response triggers
   of a `GIT_MULTIPLE_RESPONSE` dialog, the text with its two arguments;
