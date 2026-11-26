@@ -23,6 +23,7 @@
 /* TextStorage/tsExternal.goc: the text of an object */
 extern void TS_SmallCreateTextStorage(optr o);
 extern dword TS_GetTextSize(optr o);
+extern dword TS_GetWordCount(optr o);
 /* the text from an offset on (till the next change of the object's
  * block), *after the characters from there */
 extern const char *TS_LockTextPtr(optr o, dword offset, word *after);
@@ -131,6 +132,9 @@ extern Boolean FilterReplacement(optr o, VisTextReplaceParameters *p);
 extern Boolean TF_CheckIfCharFiltered(optr o, word c);
 /* Text/textScrollOneLine.goc */
 extern void TextScrollOneLine(optr o, dword offset);
+/* TextAttr/taNotify.goc: the notifications of flags for the
+ * controllers (0: the null status, the target lost) */
+extern void TA_SendNotification(optr o, VisTextNotificationFlags flags);
 /* Text/textOutput.goc: an offset shown on the screen (flags:
  * VTSSF_DRAGGING) */
 extern void TextCallShowSelection(optr o, dword offset,
@@ -185,6 +189,7 @@ extern dword TL_LineFromOffset(optr o, dword offset, Boolean first,
 			       dword *start);
 extern WBFixed TL_LineGetTop(optr o, dword line);
 extern WBFixed TL_LineGetHeight(optr o, dword line);
+extern dword TL_LineGetParaCount(optr o);
 extern void TL_LineFromPositionGetBLOAndHeight(optr o, sword y,
 					       WBFixed *blo, WBFixed *hgt);
 
@@ -253,6 +258,21 @@ extern void SmallRegionTransformGState(optr o, Boolean print);
 extern void SmallRegionGetRegionTopLeft(optr o, PointDWord *p);
 extern void TR_RegionGetTopLeft(optr o, word region, PointDWord *p);
 extern void TR_RegionTransformGState(optr o, word region, Boolean print);
+extern void SmallRegionLeftRight(optr o, sword *left, sword *right);
+extern void SmallRegionFromOffsetGetStartLineAndOffset(optr o, dword *line,
+							dword *offset);
+extern word SmallRegionFromLine(optr o, dword line);
+/* TextRegion/trSmallGet.goc */
+extern dword SmallRegionGetTopLine(optr o, word region);
+/* TextRegion/trExternal.goc: the region of a line or offset, its edges */
+extern void TR_RegionLeftRight(optr o, word region, sword y, word pointSize,
+			       sword *left, sword *right);
+extern sword TR_RegionWidth(optr o, word region, sword y, word pointSize);
+extern dword TR_RegionGetTopLine(optr o, word region);
+extern word TR_RegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
+						dword *line, dword *start);
+extern word TR_RegionFromLine(optr o, dword line);
+extern Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end);
 
 /* TextLine/tlCommonPosition.goc: positions on a line (from its left
  * edge, LI_adjustment), the line at a height */

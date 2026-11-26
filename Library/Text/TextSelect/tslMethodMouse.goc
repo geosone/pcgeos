@@ -100,6 +100,7 @@ static dword OffsetAtPosition(optr o, sword x, sword y)
     pself->VTI_intSelFlags &= ~(VTISF_DOING_SELECTION |
 				VTISF_DOING_DRAG_SELECTION);
     VisReleaseMouse(oself);
+    TA_SendNotification(oself, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS);
 }
 
 /* ComputeEventPositionAndOffset: the offset on a line nearest the

@@ -16,6 +16,7 @@
 #include <font.h>
 #include <fontID.h>
 #include <chunkarr.h>
+#include <geoworks.h>
 
 typedef struct {
     GeodeHandle	TOS_process;
@@ -29,6 +30,10 @@ typedef struct {
     word	TOS_geo[6];
     word	TOS_filter[2];		/* characters asked, tabs refused */
     word	TOS_shown;		/* (step 15) asked to show */
+    word	TOS_generated;		/* (step 16) MSG_VIS_TEXT_GENERATE_NOTIFY */
+    VisTextNotificationFlags TOS_types;
+    VisTextNotifySendFlags TOS_send;
+    MemHandle	TOS_countBlock;
 } TOState;
 
 TOState toState;
@@ -91,6 +96,16 @@ static Boolean Typed(const char *s)
     p.VTRP_textReference.TR_type = TRT_POINTER;
     p.VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer = buf;
     return @call TOText::MSG_VIS_TEXT_REPLACE_TEXT(&p);
+}
+
+/* (step 16) the notifications asked, the count block kept */
+@method TOTextClass, MSG_VIS_TEXT_GENERATE_NOTIFY
+{
+    toState.TOS_generated++;
+    toState.TOS_types = params->VTGNP_notificationTypes;
+    toState.TOS_send = params->VTGNP_sendFlags;
+    @callsuper();
+    toState.TOS_countBlock = params->VTGNP_notificationBlocks[5];
 }
 
 /* (step 15) the view is not asked: none here */
@@ -1072,6 +1087,51 @@ static word ParaOf(optr o, dword start, dword end, VisTextMaxParaAttr *a,
 					     MRVM_50_PERCENT, 10, 0, 0, 0);
 	@call n::MSG_VIS_TEXT_SHOW_POSITION(0);
 	TOCHECK(!toState.TOS_shown);
+	break;
+    }
+    case 16: {
+	/* the notifications: of a type, the standard ones; not the
+	 * target: for nobody.  With ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_
+	 * TARGETED made (the application's list, none here, keeps its
+	 * reference): the count of the text */
+	VisTextNotifyCountChange *c;
+	word state = @call TOText::MSG_VIS_TEXT_GET_STATE();
+
+	/* (neither editable nor targetable: only the select state) */
+	@call TOText::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(VTS_EDITABLE,
+							      0);
+	toState.TOS_generated = 0;
+	@call TOText::MSG_META_UI_FORCE_CONTROLLER_UPDATE(
+			MANUFACTURER_ID_GEOWORKS, GWNT_TEXT_COUNT_CHANGE);
+	TOCHECK(toState.TOS_generated == 1 &&
+		toState.TOS_types == VTNF_COUNT &&
+		!(toState.TOS_send & VTNSF_UPDATE_APP_TARGET_GCN_LISTS) &&
+		!toState.TOS_countBlock);
+	@call TOText::MSG_META_UI_FORCE_CONTROLLER_UPDATE(0xffff, 0);
+	TOCHECK(toState.TOS_generated == 2 &&
+		toState.TOS_types == (VIS_TEXT_STANDARD_NOTIFICATION_FLAGS &
+				      ~(VTNF_TYPE | VTNF_NAME)));
+	(void) ObjVarAddData(@TOText,
+			     ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_TARGETED, 0);
+	@call TOText::MSG_META_UI_FORCE_CONTROLLER_UPDATE(
+			MANUFACTURER_ID_GEOWORKS, GWNT_TEXT_COUNT_CHANGE);
+	TOCHECK(toState.TOS_generated == 3 &&
+		(toState.TOS_send & VTNSF_UPDATE_APP_TARGET_GCN_LISTS) &&
+		toState.TOS_countBlock);
+	if (toState.TOS_countBlock) {
+	    c = MemLock(toState.TOS_countBlock);
+	    TOCHECK(c->VTNCC_charCount == 15 && c->VTNCC_wordCount == 3);
+	    MemUnlock(toState.TOS_countBlock);
+	    MemDecRefCount(toState.TOS_countBlock);
+	}
+	(void) ObjVarDeleteData(@TOText,
+				ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_TARGETED);
+	/* (a manufacturer's own types: nothing) */
+	@call TOText::MSG_META_UI_FORCE_CONTROLLER_UPDATE(1, 0);
+	TOCHECK(toState.TOS_generated == 3);
+	if (!(state & VTS_EDITABLE))
+	    @call TOText::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(0,
+							VTS_EDITABLE);
 	break;
     }
     }

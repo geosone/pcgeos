@@ -147,9 +147,14 @@ Ordered by dependency, each with host-side tests under `linux`:
   2026-11-26: character attribute runs (`TextAttr/taRunLow.goc` and beside): runs and
   elements in the object's block, changes of a range, the insertion
   token, the runs moved by a replacement; paragraph attribute runs and
-  the messages that change paragraph attributes; ctest `library.text`.
-  Open: large objects, shared elements and style sheets, drawing
-  borders, undo, the notifications.
+  the messages that change paragraph attributes; the selection shown
+  (`textOutput.goc`: a one line object scrolls, the others ask their
+  view, `MSG_VIS_TEXT_SHOW_SELECTION`); the notifications for the
+  controllers (`taNotify.goc`: select state, attributes, selection,
+  counts, search, spell, cursor position, the null status of a lost
+  target); ctest `library.text`.
+  Open: large objects, shared elements and style sheets (and their
+  notifications), drawing borders, undo, the clipboard (`pasteable`).
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose
   dependency is ported since gets filled in after the asm, with its own
   ctest check. Done: the load error of the startup applications, the

@@ -3,7 +3,8 @@
  * TL_LineCalculate, TL_LineTextPosition, TL_LineStorageCreate,
  * TL_LineStorageDestroy, TL_LineGetCount, TL_LineInsert, TL_LineDelete,
  * TL_LineToOffsetStart, TL_LineFromOffset, TL_LineGetTop,
- * TL_LineFromPositionGetBLOAndHeight, TL_LineGetHeight.
+ * TL_LineFromPositionGetBLOAndHeight, TL_LineGetHeight,
+ * TL_LineGetParaCount.
  */
 @include "textInt.goh"
 
@@ -100,4 +101,16 @@ void TL_LineFromPositionGetBLOAndHeight(optr o, sword y, WBFixed *blo,
 WBFixed TL_LineGetHeight(optr o, dword line)
 {
     return SmallGetLinePointer(o, line, NULL)->LI_hgt;
+}
+
+/* TL_LineGetParaCount (CommonLineGetParaCountCallback): the paragraphs:
+ * the lines that start one */
+dword TL_LineGetParaCount(optr o)
+{
+    dword n = TL_LineGetCount(o), i, count = 0;
+
+    for (i = 0; i < n; i++)
+	if (SmallGetLinePointer(o, i, NULL)->LI_flags & LF_STARTS_PARAGRAPH)
+	    count++;
+    return count;
 }

@@ -14,7 +14,7 @@
  * end of a line that was wrapped would stand at the start of the next
  * (the cursor is placed by its offset), so End and the moves up and
  * down stop one character before.  Not yet: overstrike mode, smart
- * quotes, pages, the notifications.
+ * quotes, pages.
  * As in the asm VTKF_SELECT_LINE, _PARAGRAPH and _OBJECT do nothing.
  */
 @include "textInt.goh"
@@ -52,16 +52,23 @@ dword TSL_LineCursorEnd(optr o, dword line)
  * as a press there would make it (a cursor, or the selection adjusted
  * to the offset), then the offset shown
  */
+static void SendNotif(optr o)
+{
+    TA_SendNotification(o, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS);
+}
+
 static void FakeSelectionNoAdjust(optr o, dword offset, Boolean setGoal)
 {
     SelectCursor(o, offset, setGoal);
     TextCallShowSelection(o, offset, 0);
+    SendNotif(o);
 }
 
 static void FakeSelectionAdjust(optr o, dword offset)
 {
     StartSelectAdjust(o, offset);
     TextCallShowSelection(o, offset, 0);
+    SendNotif(o);
 }
 
 /* ForwardOrBackwardLine: the cursor a line down or up; a range

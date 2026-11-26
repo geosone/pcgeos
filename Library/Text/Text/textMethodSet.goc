@@ -78,8 +78,9 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     Boolean hadText, hasText;
     VisTextReplaceFlags flags;
     VisTextInstance *t;
-    dword size, start, inserted, deleted;
+    dword size, start, inserted, deleted, cursor;
     WBFixed before;
+    Boolean force;
 
     TA_GetTextRange(o, &p->VTRP_range, 0);
     TS_GetReplaceSize(o, p);
@@ -101,19 +102,32 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     /* the selection off the screen while the text changes */
     TextGStateCreate(o);
     EditUnHilite(o);
+    /* a range selected: the attributes shown change */
+    force = !TSL_SelectIsCursor(o);
     AdjustSelectionForReplacement(o, p);
     start = p->VTRP_range.VTR_start;
     deleted = p->VTRP_range.VTR_end - start;
     inserted = p->VTRP_insCount;
     /* (the runs while the replaced text is still there) */
-    (void) TA_UpdateRunsForReplacement(o, p);
+    if (TA_UpdateRunsForReplacement(o, p))
+	force = TRUE;
     TS_ReplaceRange(o, p);
     /* the lines again, those that changed drawn */
     before = VT(o)->VTI_height;
     TextRecalc(o, start, inserted, deleted);
     TextScreenUpdate(o);
     TextScrollOneLine(o, VT(o)->VTI_selectStart);
+    /* the controllers: all if the attributes there may have changed
+     * (text inserted and the cursor now at a paragraph start too), else
+     * the cursor position of an editable object */
+    cursor = VT(o)->VTI_selectStart;
+    if (force || (inserted && cursor != TS_GetTextSize(o) &&
+		  TSL_IsParagraphStart(o, cursor)))
+	TA_SendNotification(o, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS);
+    else if (VT(o)->VTI_state & VTS_EDITABLE)
+	TA_SendNotification(o, VTNF_CURSOR_POSITION);
     EditHilite(o);
+    TextCallShowSelection(o, VT(o)->VTI_selectStart, 0);
     TextGStateDestroy(o);
     if (VT(o)->VTI_lines)
 	SmallRegionAdjustHeight(o, before);

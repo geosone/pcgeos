@@ -1,0 +1,532 @@
+/*
+ * taNotify.goc -- after taNotify.asm: the notifications of the text
+ * object for the controllers (the application's GCN lists):
+ * MSG_VIS_TEXT_GENERATE_CURSOR_POSITION_NOTIFICATION,
+ * TA_SendNotification, HandleCursorPositionNotification,
+ * MSG_VIS_TEXT_GENERATE_NOTIFY (VisTextGenerateNotify,
+ * SendNotificationLow), MSG_META_UI_FORCE_CONTROLLER_UPDATE,
+ * UpdateAppGCNList, CallGenNotify and the Gen*Notify routines that fill
+ * a notification block each.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: the
+ * style and style sheet notifications (the Styles library is not in C;
+ * their GCN lists get only the null status), the type notification
+ * (objects with types are not in C; their bit is cleared without
+ * VTSF_TYPES, as in the asm), the clipboard for NSSC_pasteable (not in
+ * C: FALSE).
+ */
+@include "textInt.goh"
+@include <Objects/gEditCC.goh>
+@include <Objects/Text/tCtrlC.goh>
+@include <Objects/styles.goh>
+@include <spell.goh>
+#include <geoworks.h>
+#include <timer.h>
+#include <string.h>
+
+/* the asm's SendNotificationLow locals the Gen*Notify routines share */
+typedef struct {
+    VisTextNotifySendFlags	NV_sendFlags;
+    word			NV_attrFlags;	/* VTGAF_MERGE_WITH_PASSED */
+    word			NV_charAttrToken;
+    word			NV_paraAttrToken;
+} NotifyVars;
+
+typedef void NotifRoutine(optr o, NotifyVars *v, void *block);
+
+typedef struct {
+    NotifRoutine	*NS_routine;	/* NULL: not yet (see above) */
+    word		NS_size;
+    word		NS_gcnType;	/* GeoWorksNotificationType */
+    word		NS_appType;	/* GeoWorksGenAppGCNListType */
+} NotifStruct;
+
+/* GenNameNotify: the asm's idata nameCount */
+static word nameCount;
+
+static NotifRoutine GenSelectStateNotify, GenCharAttrNotify,
+		    GenParaAttrNotify, GenSelectionNotify, GenCountNotify,
+		    GenSearchReplaceEnableNotify, GenSpellEnableNotify,
+		    GenNameNotify, GenCursorPositionNotify,
+		    GenHyperlinkabilityNotify;
+
+/* BooleanByte and BooleanWord TRUE (geos.def) */
+#define BB_TRUE		0xff
+#define BW_TRUE		0xffff
+
+/* in the order of VisTextNotificationFlags, the highest bit first */
+static const NotifStruct notificationTable[] = {
+    { GenSelectStateNotify, sizeof(NotifySelectStateChange),
+      GWNT_SELECT_STATE_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_SELECT_STATE_CHANGE },
+    { GenCharAttrNotify, sizeof(VisTextNotifyCharAttrChange),
+      GWNT_TEXT_CHAR_ATTR_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_TEXT_CHAR_ATTR_CHANGE },
+    { GenParaAttrNotify, sizeof(VisTextNotifyParaAttrChange),
+      GWNT_TEXT_PARA_ATTR_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_TEXT_PARA_ATTR_CHANGE },
+    { NULL /* GenTypeNotify */, sizeof(VisTextNotifyTypeChange),
+      GWNT_TEXT_TYPE_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_TEXT_TYPE_CHANGE },
+    { GenSelectionNotify, sizeof(VisTextNotifySelectionChange),
+      GWNT_TEXT_SELECTION_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_TEXT_SELECTION_CHANGE },
+    { GenCountNotify, sizeof(VisTextNotifyCountChange),
+      GWNT_TEXT_COUNT_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_TEXT_COUNT_CHANGE },
+    { NULL /* GenStyleSheetNotify */, sizeof(NotifyStyleSheetChange),
+      GWNT_STYLE_SHEET_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_STYLE_SHEET_TEXT_CHANGE },
+    { NULL /* GenStyleNotify */, sizeof(NotifyStyleChange),
+      GWNT_STYLE_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_STYLE_TEXT_CHANGE },
+    { GenSearchReplaceEnableNotify,
+      sizeof(NotifySearchReplaceEnableChange),
+      GWNT_SEARCH_REPLACE_ENABLE_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_SEARCH_REPLACE_CHANGE },
+    { GenSpellEnableNotify, sizeof(NotifySpellEnableChange),
+      GWNT_SPELL_ENABLE_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_SEARCH_SPELL_CHANGE },
+    { GenNameNotify, sizeof(VisTextNotifyNameChange),
+      GWNT_TEXT_NAME_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_TEXT_NAME_CHANGE },
+    { GenCursorPositionNotify, sizeof(VisTextCursorPositionChange),
+      GWNT_CURSOR_POSITION_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_CURSOR_POSITION_CHANGE },
+    { GenHyperlinkabilityNotify,
+      sizeof(VisTextNotifyHyperlinkabilityChange),
+      GWNT_TEXT_HYPERLINKABILITY_CHANGE,
+      GAGCNLT_APP_TARGET_NOTIFY_TEXT_HYPERLINKABILITY_CHANGE },
+};
+#define NOTIFICATION_COUNT \
+	(sizeof(notificationTable) / sizeof(notificationTable[0]))
+
+/* VisTextGenerateCursorPositionNotification: the delayed cursor
+ * position notification (the timer of HandleCursorPositionNotification
+ * went off) */
+@extern method VisTextClass,
+	MSG_VIS_TEXT_GENERATE_CURSOR_POSITION_NOTIFICATION
+{
+    (void) ObjVarDeleteData(oself, TEMP_VIS_TEXT_NOTIFY_CURSOR_POSITION_TIME);
+    (void) ObjVarDeleteData(oself, TEMP_VIS_TEXT_NOTIFY_CURSOR_POSITION_INFO);
+    TA_SendNotification(oself, VTNF_CURSOR_POSITION);
+}
+
+/*
+ * TA_SendNotification: the notifications of flags sent (none: the null
+ * status, the object has lost the target).  Without types no type or
+ * name notifications; an object neither editable nor targetable sends
+ * only the select state.  A suspended object keeps them for the end of
+ * the suspension.  The application's GCN lists are updated only by the
+ * target (or with ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_TARGETED).
+ */
+void TA_SendNotification(optr o, VisTextNotificationFlags flags)
+{
+    VisTextInstance *t = VT(o);
+    VisTextGenerateNotifyParams p;
+    VisTextNotifySendFlags send;
+
+    if (!(t->VTI_storageFlags & VTSF_TYPES))
+	flags &= ~(VTNF_NAME | VTNF_TYPE);
+    if (!(t->VTI_state & (VTS_EDITABLE | VTS_TARGETABLE)))
+	flags &= VTNF_SELECT_STATE;
+    memset(&p, 0, sizeof(p));
+    p.VTGNP_notificationTypes = flags;
+    if (!flags)
+	send = VTNSF_NULL_STATUS | VTNSF_UPDATE_APP_TARGET_GCN_LISTS;
+    else {
+	send = 0;
+	if (t->VTI_intFlags & VTIF_SUSPENDED) {
+	    VisTextSuspendData *d = ObjVarFindData(o,
+						   ATTR_VIS_TEXT_SUSPEND_DATA);
+	    if (d)
+		d->VTSD_notifications |= flags;
+	    return;
+	}
+	if (ObjVarFindData(o, ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_TARGETED) ||
+	    (t->VTI_intSelFlags & VTISF_IS_TARGET))
+	    send |= VTNSF_UPDATE_APP_TARGET_GCN_LISTS;
+    }
+    p.VTGNP_sendFlags = send | VTNSF_SEND_AFTER_GENERATION;
+    @call o::MSG_VIS_TEXT_GENERATE_NOTIFY(&p);
+}
+
+/*
+ * HandleCursorPositionNotification: TRUE to send.  The cursor position
+ * with ATTR_VIS_TEXT_NOTIFY_CURSOR_POSITION only, at most once in its
+ * threshold (ticks; 0: always): sooner, a timer sends it later
+ * (MSG_VIS_TEXT_GENERATE_CURSOR_POSITION_NOTIFICATION).  Only the cursor
+ * position and that not now: nothing to send.
+ */
+static Boolean HandleCursorPositionNotification(optr o,
+					VisTextGenerateNotifyParams *p)
+{
+    word *thr;
+    dword now, *last;
+
+    if (!(p->VTGNP_notificationTypes & VTNF_CURSOR_POSITION))
+	return TRUE;
+    thr = ObjVarFindData(o, ATTR_VIS_TEXT_NOTIFY_CURSOR_POSITION);
+    if (thr) {
+	word threshold = *thr;
+
+	now = TimerGetCount();
+	if (threshold) {
+	    last = ObjVarFindData(o, TEMP_VIS_TEXT_NOTIFY_CURSOR_POSITION_TIME);
+	    /* (a wrap-around sends) */
+	    if (last && now - *last < threshold) {
+		/* sendDelayed */
+		if (!ObjVarFindData(o,
+				    TEMP_VIS_TEXT_NOTIFY_CURSOR_POSITION_INFO)) {
+		    word id;
+		    TimerHandle th = TimerStart(TIMER_EVENT_ONE_SHOT, o,
+			threshold,
+			MSG_VIS_TEXT_GENERATE_CURSOR_POSITION_NOTIFICATION,
+			0, &id);
+		    TVTNCPIData *d = ObjVarAddData(o,
+				TEMP_VIS_TEXT_NOTIFY_CURSOR_POSITION_INFO,
+				sizeof(TVTNCPIData));
+
+		    d->TVTNCPID_handle = th;
+		    d->TVTNCPID_id = id;
+		}
+		goto noCurPos;
+	    }
+	}
+	/* updateCurPosTimeAndSend */
+	*(dword *) ObjVarAddData(o, TEMP_VIS_TEXT_NOTIFY_CURSOR_POSITION_TIME,
+				 sizeof(dword)) = now;
+	return TRUE;
+    }
+noCurPos:
+    if (p->VTGNP_notificationTypes == VTNF_CURSOR_POSITION)
+	return FALSE;
+    p->VTGNP_notificationTypes &= ~VTNF_CURSOR_POSITION;
+    return TRUE;
+}
+
+/*
+ * UpdateAppGCNList: the status of a notification (block, or 0) for the
+ * application's GCN list (through the process with
+ * ATTR_VIS_TEXT_UPDATE_VIA_PROCESS); the paragraph attribute also for
+ * the content's (VCGCNLT_TARGET_NOTIFY_TEXT_PARA_ATTR_CHANGE) unless
+ * ATTR_VIS_TEXT_DO_NOT_NOTIFY_CONTENT.
+ */
+static EventHandle LoadParams(const NotifStruct *n, MemHandle block,
+			      GCNListSendFlags *f)
+{
+    optr none = 0;
+
+    MemIncRefCount(block);
+    *f = GCNLSF_SET_STATUS;
+    if (!block)
+	*f |= GCNLSF_IGNORE_IF_STATUS_TRANSITIONING;
+    return @record none::MSG_META_NOTIFY_WITH_DATA_BLOCK(
+		MANUFACTURER_ID_GEOWORKS, n->NS_gcnType, block);
+}
+
+static void UpdateAppGCNList(optr o, const NotifStruct *n, MemHandle block)
+{
+    GCNListSendFlags f;
+    EventHandle ev = LoadParams(n, block, &f);
+
+    if (ObjVarFindData(o, ATTR_VIS_TEXT_UPDATE_VIA_PROCESS)) {
+	/* (goc: "process" is this geode's process) */
+	@call process::MSG_GEN_PROCESS_SEND_TO_APP_GCN_LIST(f, ev, block,
+				n->NS_appType, MANUFACTURER_ID_GEOWORKS);
+    } else {
+	optr app = GeodeGetAppObject(0);
+
+	@call app::MSG_META_GCN_LIST_SEND(f, ev, block, n->NS_appType,
+					  MANUFACTURER_ID_GEOWORKS);
+    }
+    if (n->NS_gcnType == GWNT_TEXT_PARA_ATTR_CHANGE &&
+	!ObjVarFindData(o, ATTR_VIS_TEXT_DO_NOT_NOTIFY_CONTENT) &&
+	((VisInstance *) VT(o))->VI_link.LP_next) {
+	EventHandle send;
+
+	ev = LoadParams(n, block, &f);
+	send = @record VisContentClass::MSG_META_GCN_LIST_SEND(f, ev, block,
+				VCGCNLT_TARGET_NOTIFY_TEXT_PARA_ATTR_CHANGE,
+				MANUFACTURER_ID_GEOWORKS);
+	@call o::MSG_VIS_VUP_CALL_OBJECT_OF_CLASS(send);
+    }
+}
+
+/* CallGenNotify: the notification block made (or merged into the
+ * passed one) */
+static MemHandle CallGenNotify(optr o, NotifyVars *v, const NotifStruct *n,
+			       MemHandle block)
+{
+    if (v->NV_sendFlags & VTNSF_NULL_STATUS)
+	return block;
+    if (!block) {
+	block = MemAlloc(n->NS_size, HF_DYNAMIC | HF_SHARABLE,
+			 HAF_ZERO_INIT | HAF_NO_ERR);
+	MemInitRefCount(block, 1);
+    }
+    v->NV_attrFlags = (v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED) ?
+		      VTGAF_MERGE_WITH_PASSED : 0;
+    n->NS_routine(o, v, MemLock(block));
+    MemUnlock(block);
+    return block;
+}
+
+/* SendNotificationLow: MSG_VIS_TEXT_GENERATE_NOTIFY's work: for each
+ * notification asked (all, for the null status) the block made and
+ * sent */
+static void SendNotificationLow(optr o, VisTextGenerateNotifyParams *p)
+{
+    VisTextNotificationFlags flags = p->VTGNP_notificationTypes;
+    NotifyVars v;
+    word i;
+
+    memset(&v, 0, sizeof(v));
+    v.NV_sendFlags = p->VTGNP_sendFlags;
+    p->VTGNP_sendFlags |= VTNSF_STRUCTURE_INITIALIZED;
+    for (i = 0; i < NOTIFICATION_COUNT; i++) {
+	const NotifStruct *n = &notificationTable[i];
+	MemHandle block;
+
+	if (!(v.NV_sendFlags & VTNSF_NULL_STATUS) &&
+	    !(flags & (0x8000 >> i)))
+	    continue;
+	if (!n->NS_appType)
+	    continue;
+	/* (not yet: only the null status) */
+	if (!n->NS_routine && !(v.NV_sendFlags & VTNSF_NULL_STATUS))
+	    continue;
+	block = (v.NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED) ?
+		p->VTGNP_notificationBlocks[i] : NullHandle;
+	if (!(v.NV_sendFlags & VTNSF_SEND_ONLY))
+	    block = CallGenNotify(o, &v, n, block);
+	p->VTGNP_notificationBlocks[i] = block;
+	if (!(v.NV_sendFlags &
+	      (VTNSF_SEND_AFTER_GENERATION | VTNSF_SEND_ONLY)))
+	    continue;
+	if (!(n->NS_gcnType == GWNT_SEARCH_REPLACE_ENABLE_CHANGE &&
+	      ObjVarFindData(o,
+			ATTR_VIS_TEXT_DO_NOT_INTERACT_WITH_SEARCH_CONTROL)) &&
+	    (v.NV_sendFlags & VTNSF_UPDATE_APP_TARGET_GCN_LISTS))
+	    UpdateAppGCNList(o, n, block);
+	MemDecRefCount(block);
+    }
+}
+
+/* VisTextGenerateNotify: only for the application's GCN lists; not
+ * while the object is being freed */
+@extern method VisTextClass, MSG_VIS_TEXT_GENERATE_NOTIFY
+{
+    if (!(params->VTGNP_sendFlags & VTNSF_UPDATE_APP_TARGET_GCN_LISTS))
+	return;
+    if (!(pself->VTI_storageFlags & VTSF_TYPES))
+	params->VTGNP_notificationTypes &= ~(VTNF_NAME | VTNF_TYPE);
+    if (ObjVarFindData(oself, TEMP_VIS_TEXT_FREEING_OBJECT))
+	return;
+    if (!HandleCursorPositionNotification(oself, params))
+	return;
+    SendNotificationLow(oself, params);
+}
+
+/* VisTextForceControllerUpdate: the notification of a GeoWorks type;
+ * manufacturer 0xffff: all of them (type 0xffff) or the standard ones */
+@extern method VisTextClass, MSG_META_UI_FORCE_CONTROLLER_UPDATE
+{
+    VisTextNotificationFlags flags;
+    word i;
+
+    if (manufID == 0xffff)
+	flags = changeID == 0xffff ? (VisTextNotificationFlags) 0xfff8
+				   : VIS_TEXT_STANDARD_NOTIFICATION_FLAGS;
+    else if (manufID != MANUFACTURER_ID_GEOWORKS)
+	return;
+    else {
+	for (i = 0; i < NOTIFICATION_COUNT; i++)
+	    if (notificationTable[i].NS_gcnType == changeID)
+		break;
+	if (i == NOTIFICATION_COUNT)
+	    return;
+	flags = 0x8000 >> i;
+    }
+    TA_SendNotification(oself, flags);
+}
+
+/* GenCharAttrNotify: the selection's character attribute; a token only
+ * when all of the notified objects share it */
+static void GenCharAttrNotify(optr o, NotifyVars *v, void *block)
+{
+    VisTextNotifyCharAttrChange *n = block;
+    word token = @call o::MSG_VIS_TEXT_GET_CHAR_ATTR(v->NV_attrFlags,
+				&n->VTNCAC_charAttrDiffs, &n->VTNCAC_charAttr,
+				VIS_TEXT_RANGE_SELECTION,
+				VIS_TEXT_RANGE_SELECTION);
+
+    if (!(v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED) ||
+	token != n->VTNCAC_charAttrToken) {
+	if (v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED)
+	    token = CA_NULL_ELEMENT;
+	n->VTNCAC_charAttrToken = token;
+	v->NV_charAttrToken = token;
+    }
+    /* (the checksum and the style for GenStyleNotify: not yet) */
+}
+
+/* GenParaAttrNotify: the selection's paragraph attribute, the selected
+ * tab, where the region is (for the ruler) and how wide */
+static void GenParaAttrNotify(optr o, NotifyVars *v, void *block)
+{
+    VisTextNotifyParaAttrChange *n = block;
+    VisTextInstance *t;
+    word token = @call o::MSG_VIS_TEXT_GET_PARA_ATTR(v->NV_attrFlags,
+				&n->VTNPAC_paraAttrDiffs, &n->VTNPAC_paraAttr,
+				VIS_TEXT_RANGE_SELECTION,
+				VIS_TEXT_RANGE_SELECTION);
+    word *tab;
+
+    if (!(v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED) ||
+	token != n->VTNPAC_paraAttrToken) {
+	if (v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED)
+	    token = CA_NULL_ELEMENT;
+	n->VTNPAC_paraAttrToken = token;
+	v->NV_paraAttrToken = token;
+    }
+    tab = ObjVarFindData(o, ATTR_VIS_TEXT_SELECTED_TAB);
+    n->VTNPAC_selectedTab = tab ? *tab : (word) -1;
+    t = VT(o);
+    n->VTNPAC_regionOffset = (sdword) t->VTI_leftOffset;
+    if ((t->VTI_intSelFlags & VTISF_IS_TARGET) &&
+	!(t->VI_typeFlags & VTF_IS_GEN)) {
+	PointDWord pt;
+	TransMatrix tm;
+
+	TR_RegionGetTopLeft(o, t->VTI_cursorRegion, &pt);
+	/* small: the window's translation too */
+	TextGStateCreate(o);
+	TR_RegionTransformGState(o, 0, FALSE);
+	GrGetTransform(VT(o)->VTI_gstate, &tm);
+	pt.PD_x += tm.TM_e31.DWF_int;
+	TextGStateDestroy(o);
+	n->VTNPAC_regionOffset = pt.PD_x;
+    }
+    n->VTNPAC_regionWidth = TR_RegionWidth(o, 0, 0,
+					   VIS_TEXT_DEFAULT_POINT_SIZE);
+    /* (the checksum for GenStyleNotify: not yet) */
+}
+
+/* GenNameNotify: names changed: a new count */
+static void GenNameNotify(optr o, NotifyVars *v, void *block)
+{
+    (void) o;
+    (void) v;
+    ((VisTextNotifyNameChange *) block)->VTNNC_count = ++nameCount;
+}
+
+/* GenCursorPositionNotify: the cursor's line in its region and its
+ * place in the line */
+static void GenCursorPositionNotify(optr o, NotifyVars *v, void *block)
+{
+    VisTextCursorPositionChange *n = block;
+    dword start, end, line;
+
+    if (v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED)
+	return;
+    TSL_SelectGetSelection(o, &start, &end);
+    line = TL_LineFromOffset(o, start, FALSE, NULL);
+    n->VTCPC_rowNumber = start - TL_LineToOffsetStart(o, line);
+    n->VTCPC_lineNumber = line -
+			  TR_RegionGetTopLine(o, TR_RegionFromLine(o, line));
+}
+
+/* GenSelectStateNotify: what the edit menu can do with the selection */
+static void GenSelectStateNotify(optr o, NotifyVars *v, void *block)
+{
+    NotifySelectStateChange *n = block;
+    Boolean editable = (VT(o)->VTI_state & VTS_EDITABLE) != 0;
+    dword start, end;
+
+    (void) v;
+    n->NSSC_selectionType = SDT_TEXT;
+    n->NSSC_selectAllAvailable = BB_TRUE;
+    TSL_SelectGetSelection(o, &start, &end);
+    if (start != end) {
+	if (ObjVarFindData(o, ATTR_VIS_TEXT_ALLOW_CROSS_SECTION_COPY) ||
+	    !TR_CheckCrossSectionChange(o, start, end))
+	    n->NSSC_clipboardableSelection = BB_TRUE;
+	if (editable)
+	    n->NSSC_deleteableSelection = BB_TRUE;
+    }
+    /* (editable: pasteable if the clipboard has text, or graphics for
+     * an object with graphics: the clipboard is not in C yet) */
+}
+
+/* GenSelectionNotify: the selection, its line and region */
+static void GenSelectionNotify(optr o, NotifyVars *v, void *block)
+{
+    VisTextNotifySelectionChange *n = block;
+    dword line;
+
+    if (v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED)
+	return;
+    TSL_SelectGetSelection(o, &n->VTNSC_selectStart, &n->VTNSC_selectEnd);
+    line = TL_LineFromOffset(o, n->VTNSC_selectStart, FALSE, NULL);
+    n->VTNSC_lineNumber = line;
+    n->VTNSC_lineStart = TL_LineToOffsetStart(o, line);
+    n->VTNSC_region = TR_RegionFromLine(o, line);
+    TR_RegionFromOffsetGetStartLineAndOffset(o, n->VTNSC_lineStart,
+					     &n->VTNSC_regionStartLine,
+					     &n->VTNSC_regionStartOffset);
+}
+
+/* GenHyperlinkabilityNotify: a range can be a hyperlink */
+static void GenHyperlinkabilityNotify(optr o, NotifyVars *v, void *block)
+{
+    dword start, end;
+
+    if (v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED)
+	return;
+    TSL_SelectGetSelection(o, &start, &end);
+    if (start != end)
+	((VisTextNotifyHyperlinkabilityChange *) block)->VTNHC_hyperlinkable =
+	    BW_TRUE;
+}
+
+/* GenCountNotify: characters, lines, words and paragraphs (added up
+ * over the notified objects) */
+static void GenCountNotify(optr o, NotifyVars *v, void *block)
+{
+    VisTextNotifyCountChange *n = block;
+
+    (void) v;
+    n->VTNCC_charCount += TS_GetTextSize(o);
+    n->VTNCC_lineCount += TL_LineGetCount(o);
+    n->VTNCC_wordCount += TS_GetWordCount(o);
+    n->VTNCC_paraCount += TL_LineGetParaCount(o);
+}
+
+/* GenSearchReplaceEnableNotify: the target can be searched, replaced in
+ * if editable */
+static void GenSearchReplaceEnableNotify(optr o, NotifyVars *v,
+					 void *block)
+{
+    VisTextInstance *t = VT(o);
+    SearchReplaceEnableFlags f = 0;
+
+    (void) v;
+    if (t->VTI_intSelFlags & VTISF_IS_TARGET) {
+	f |= SREF_SEARCH;
+	if (t->VTI_state & VTS_EDITABLE)
+	    f |= SREF_REPLACE;
+    }
+    ((NotifySearchReplaceEnableChange *) block)->flags = f;
+}
+
+/* GenSpellEnableNotify: the target can be spell checked if editable */
+static void GenSpellEnableNotify(optr o, NotifyVars *v, void *block)
+{
+    VisTextInstance *t = VT(o);
+
+    (void) v;
+    ((NotifySpellEnableChange *) block)->NSEC_spellEnabled =
+	((t->VTI_intSelFlags & VTISF_IS_TARGET) &&
+	 (t->VTI_state & VTS_EDITABLE)) ? (Boolean) -1 : 0;
+}

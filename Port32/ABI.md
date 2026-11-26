@@ -7364,14 +7364,27 @@ the modules of the asm; what is there:
   (`MSG_VIS_TEXT_HEIGHT_NOTIFY`, with the margins).
   `MSG_VIS_TEXT_SET_WASH_COLOR` and `..._GET_WASH_COLOR` set and read
   the background.
+- **The selection shown** (`Text/textOutput.goc`):
+  `TextCallShowSelection` puts the cursor's or the offset's place in
+  view unless it is in the window already: a one line object scrolls
+  itself, the others send `MSG_VIS_TEXT_SHOW_SELECTION`, which asks the
+  view (`MSG_GEN_VIEW_MAKE_RECT_VISIBLE`). The key functions, the
+  selection of a range, a replacement and gaining the target show it.
+- **The notifications** (`TextAttr/taNotify.goc`): `TA_SendNotification`
+  builds a block per kind (`MSG_VIS_TEXT_GENERATE_NOTIFY`) and sets it
+  as the status of the application's GCN list, as the asm's table
+  orders them; only the target (or with
+  `ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_TARGETED`); losing the target sends
+  the null status. `MSG_META_UI_FORCE_CONTROLLER_UPDATE` too.
+  `MemIncRefCount`/`MemDecRefCount` take a zero handle as the asm does.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
   paragraph attribute, borders and paragraph backgrounds, tab leaders,
-  extended styles, hyphenation, graphics, scrolling (the selection
-  into a view: `MSG_VIS_TEXT_SHOW_SELECTION`), overstrike mode, smart
+  extended styles, hyphenation, graphics, overstrike mode, smart
   quotes, the large mouse messages, selection by words and lines while
   dragging, quick transfer, the clipboard, the pointer image over
   text;
-  filters, undo, suspension, the notifications for the controllers,
+  filters, undo, suspension, the style and style sheet notifications
+  (the Styles library) and `NSSC_pasteable` (the clipboard),
   large objects (`VisLargeTextClass`, huge arrays), references to VM
   blocks, DB items and huge arrays, search and spelling, the
   controllers, the ruler.

@@ -20,6 +20,7 @@
  *  13. the character attribute runs.
  *  14. the paragraph attribute runs.
  *  15. a position shown (not on a screen: nothing to scroll).
+ *  16. the notifications for the controllers.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -45,6 +46,10 @@ typedef struct {
     word	TOS_line[16];
     word	TOS_geo[6];
     word	TOS_filter[2];
+    word	TOS_shown;
+    word	TOS_generated;
+    word	TOS_types, TOS_send;
+    word	TOS_countBlock;
 } TOState;
 
 static int fails;
@@ -94,7 +99,7 @@ int main(int argc, char **argv)
 	"Hello, world!", "bye, world!?", "!!?bye!!", "abcdefgh", "bh",
 	"in aa blockin", "aXYde", "aXYde", "aXYde", "Hi Hi Hi",
 	"Hi Hi Hi Hi Hi", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
-	"a12b-cE -.F14y#", "a12b-cE -.F14y#"
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#"
     };
     GeodeHandle app;
     GeodeLoadError e;
@@ -138,7 +143,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 15; i++) {
+    for (i = 1; i <= 16; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);
@@ -159,6 +164,7 @@ int main(int argc, char **argv)
      * ReflectChange: once in step 9, once in step 11) */
     CHECK(st->TOS_modified == 5 && st->TOS_empty == 1);
 
+    printf("notify: generated %u, types %x, send %x\n", st->TOS_generated, st->TOS_types, st->TOS_send);
     printf("geode checks: %u, failed %u (first at textobj.goc line %u)\n",
 	   st->TOS_checks, st->TOS_fails, st->TOS_failLine);
     for (i = 0; i < st->TOS_fails && i < 8; i++)

@@ -128,6 +128,10 @@
 @extern method VisTextClass, MSG_VIS_TEXT_ADD_CHAR_ATTR;
 @extern method VisTextClass, MSG_VIS_TEXT_REMOVE_CHAR_ATTR;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_CHAR_ATTR;
+/* TextAttr/taNotify.goc */
+@extern method VisTextClass, MSG_VIS_TEXT_GENERATE_CURSOR_POSITION_NOTIFICATION;
+@extern method VisTextClass, MSG_VIS_TEXT_GENERATE_NOTIFY;
+@extern method VisTextClass, MSG_META_UI_FORCE_CONTROLLER_UPDATE;
 /* TextAttr/taParaAttr.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_DEFAULT;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR;

@@ -1,7 +1,9 @@
 /*
  * trExternal.goc -- after trExternal.asm: TR_RegionTransformGState,
- * TR_RegionGetTopLeft.  Port32: small objects (one region); the large
- * ones are not in C yet.
+ * TR_RegionGetTopLeft, TR_RegionLeftRight, TR_RegionWidth,
+ * TR_RegionGetTopLine, TR_RegionFromOffsetGetStartLineAndOffset,
+ * TR_RegionFromLine, TR_CheckCrossSectionChange.  Port32: small objects
+ * (one region); the large ones are not in C yet.
  */
 @include "textInt.goh"
 
@@ -22,4 +24,56 @@ void TR_RegionGetTopLeft(optr o, word region, PointDWord *p)
 {
     (void) region;
     SmallRegionGetRegionTopLeft(o, p);
+}
+
+/* TR_RegionLeftRight: the region's left and right edge at a height (for
+ * a line of a point size) */
+void TR_RegionLeftRight(optr o, word region, sword y, word pointSize,
+			sword *left, sword *right)
+{
+    (void) region;
+    (void) y;
+    (void) pointSize;
+    SmallRegionLeftRight(o, left, right);
+}
+
+/* TR_RegionWidth: the region's width there */
+sword TR_RegionWidth(optr o, word region, sword y, word pointSize)
+{
+    sword left, right;
+
+    TR_RegionLeftRight(o, region, y, pointSize, &left, &right);
+    return (sword) (right - left);
+}
+
+/* TR_RegionGetTopLine: the region's first line */
+dword TR_RegionGetTopLine(optr o, word region)
+{
+    return SmallRegionGetTopLine(o, region);
+}
+
+/* TR_RegionFromOffsetGetStartLineAndOffset: the first line and offset of
+ * the region of an offset */
+word TR_RegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
+					      dword *line, dword *start)
+{
+    (void) offset;
+    SmallRegionFromOffsetGetStartLineAndOffset(o, line, start);
+    return 0;
+}
+
+/* TR_RegionFromLine: the region of a line */
+word TR_RegionFromLine(optr o, dword line)
+{
+    return SmallRegionFromLine(o, line);
+}
+
+/* TR_CheckCrossSectionChange: TRUE if a range crosses a section (a
+ * small object has one) */
+Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end)
+{
+    (void) o;
+    (void) start;
+    (void) end;
+    return FALSE;
 }

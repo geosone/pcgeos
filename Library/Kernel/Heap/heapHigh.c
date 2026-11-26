@@ -247,10 +247,14 @@ void MemInitRefCount(MemHandle mh, word count)
     MemEntryOf(mh)->HE_otherInfo = count;
 }
 
+/* (zero: nothing, as the asm) */
 void MemIncRefCount(MemHandle mh)
 {
-    HandleEntry *he = MemEntryOf(mh);
+    HandleEntry *he;
 
+    if (!mh)
+	return;
+    he = MemEntryOf(mh);
     if (he->HE_otherInfo == 0xffff)
 	KernelFatal(MEM_REFERENCE_COUNT_OVERFLOW);
     he->HE_otherInfo++;
@@ -258,8 +262,11 @@ void MemIncRefCount(MemHandle mh)
 
 void MemDecRefCount(MemHandle mh)
 {
-    HandleEntry *he = MemEntryOf(mh);
+    HandleEntry *he;
 
+    if (!mh)
+	return;
+    he = MemEntryOf(mh);
     if (he->HE_otherInfo == 0)
 	KernelFatal(MEM_REFERENCE_COUNT_UNDERFLOW);
     if (--he->HE_otherInfo == 0)

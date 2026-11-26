@@ -7,10 +7,9 @@
  * its selection: the system's target (TEMP_VIS_TEXT_SYS_TARGET) also
  * without the focus.
  *
- * Port32 (Port32/ABI.md section 13z), not yet: the notifications (the
- * focus text object for the application's GCN list, the controllers',
- * the selection's context), showing the selection on gaining the
- * target, undo, the FEP.
+ * Port32 (Port32/ABI.md section 13z), not yet: the notifications of the
+ * focus text object for the application's GCN list and of the
+ * selection's context, undo, the FEP.
  */
 @include "textInt.goh"
 #include <Internal/specUI.h>
@@ -74,14 +73,29 @@ static void SetTarget(optr o, Boolean target, Message msg)
     SendToTextOutput(o, msg);
 }
 
+/* VisTextGainedTargetExcl: the controllers told (when on the screen),
+ * the selection shown (a small object unless
+ * ATTR_VIS_TEXT_DONT_SHOW_POSITION_ON_GAINED_TARGET_EXCL) */
 @extern method VisTextClass, MSG_META_GAINED_TARGET_EXCL
 {
     SetTarget(oself, TRUE, MSG_META_TEXT_GAINED_TARGET);
+    if (VT(oself)->VI_attrs & VA_REALIZED)
+	TA_SendNotification(oself, VIS_TEXT_GAINED_TARGET_NOTIFICATION_FLAGS);
+    if (ObjVarFindData(oself,
+		       ATTR_VIS_TEXT_DONT_SHOW_POSITION_ON_GAINED_TARGET_EXCL))
+	return;
+    if (!ObjVarFindData(oself,
+			ATTR_VIS_TEXT_SHOW_POSITION_ON_GAINED_TARGET_EXCL) &&
+	(VT(oself)->VTI_storageFlags & VTSF_LARGE))
+	return;
+    @call oself::MSG_VIS_TEXT_SHOW_POSITION(VIS_TEXT_RANGE_SELECTION);
 }
 
+/* VisTextLostTargetExcl: the application's lists without a target */
 @extern method VisTextClass, MSG_META_LOST_TARGET_EXCL
 {
     SetTarget(oself, FALSE, MSG_META_TEXT_LOST_TARGET);
+    TA_SendNotification(oself, 0);
 }
 
 static void SetSysTarget(optr o, Boolean target)

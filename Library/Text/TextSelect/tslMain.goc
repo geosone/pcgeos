@@ -93,7 +93,14 @@ void SelectRange(optr o, dword start, dword end)
     TSL_SelectSetSelection(o, r.VTR_start, r.VTR_end);
     TextScrollOneLine(o, r.VTR_end);
     EditHilite(o);
-    TextGStateDestroy(o);
     VT(o)->VTI_selectMinStart = r.VTR_start;
     VT(o)->VTI_selectMinEnd = r.VTR_start;
+    /* (VisTextSelectRangeNew, on the screen) the goal where the cursor
+     * is, the start shown, the controllers told */
+    if (TextCheckCanDraw(o)) {
+	VT(o)->VTI_goalPosition = VT(o)->VTI_cursorPos.P_x;
+	TextCallShowSelection(o, r.VTR_start, 0);
+	TA_SendNotification(o, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS);
+    }
+    TextGStateDestroy(o);
 }

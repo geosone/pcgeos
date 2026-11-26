@@ -1,5 +1,7 @@
 /*
- * trSmallInfo.goc -- after trSmallInfo.asm: SmallRegionGetRegionTopLeft.
+ * trSmallInfo.goc -- after trSmallInfo.asm: SmallRegionGetRegionTopLeft,
+ * SmallRegionLeftRight, SmallRegionFromOffsetGetStartLineAndOffset,
+ * SmallRegionFromLine.  A small object has one region.
  */
 @include "textInt.goh"
 
@@ -11,4 +13,35 @@ void SmallRegionGetRegionTopLeft(optr o, PointDWord *p)
 
     p->PD_x = (sdword) t->VI_bounds.R_left + t->VTI_lrMargin;
     p->PD_y = (sdword) t->VI_bounds.R_top + t->VTI_tbMargin;
+}
+
+/* SmallRegionLeftRight: the region's left and right edge (in it): the
+ * object's width within its margins (0 for an object without width) */
+void SmallRegionLeftRight(optr o, sword *left, sword *right)
+{
+    VisTextInstance *t = VT(o);
+    sword w = (sword) (t->VI_bounds.R_right - t->VI_bounds.R_left);
+
+    if (w)
+	w = (sword) (w - 2 * t->VTI_lrMargin);
+    *left = 0;
+    *right = w;
+}
+
+/* SmallRegionFromOffsetGetStartLineAndOffset: the region's first line
+ * and offset */
+void SmallRegionFromOffsetGetStartLineAndOffset(optr o, dword *line,
+						dword *offset)
+{
+    (void) o;
+    *line = 0;
+    *offset = 0;
+}
+
+/* SmallRegionFromLine: the region of a line */
+word SmallRegionFromLine(optr o, dword line)
+{
+    (void) o;
+    (void) line;
+    return 0;
 }

@@ -5,7 +5,8 @@
  *
  * Port32 (Port32/ABI.md section 13z), not yet: open and close, the
  * cached GStates, the geometry, the wash color, the minimum dimensions,
- * the cursor and notifications of MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE.
+ * the focus notification of MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE
+ * (SendTextFocusNotification).
  */
 @include "textInt.goh"
 #include <Internal/specUI.h>
@@ -79,9 +80,24 @@
     pself->VTI_features = (pself->VTI_features | bitsToSet) & ~bitsToClear;
 }
 
+/* VisTextModifyEditableSelectable: no longer editable, the cursor goes
+ * off the screen; editable with the focus, it flashes; the controllers
+ * told */
 @extern method VisTextClass, MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE
 {
+    const byte on = VTISF_IS_FOCUS | VTISF_CURSOR_ENABLED | VTISF_CURSOR_ON;
+
+    if ((clearBits & VTS_EDITABLE) && (pself->VTI_state & VTS_EDITABLE) &&
+	(pself->VTI_intSelFlags & on) == on && TextCheckCanDraw(oself) &&
+	!GrGetExclusive(NullHandle)) {
+	CursorToggle(oself);
+	VT(oself)->VTI_intSelFlags &= ~VTISF_CURSOR_ON;
+    }
+    pself = VT(oself);
     pself->VTI_state = (pself->VTI_state & ~clearBits) | setBits;
+    if ((setBits & VTS_EDITABLE) && (pself->VTI_intSelFlags & VTISF_IS_FOCUS))
+	TSL_StartCursorCommon(oself);
+    TA_SendNotification(oself, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS);
 }
 
 /* VisTextSetWashColor: the background; drawn again */

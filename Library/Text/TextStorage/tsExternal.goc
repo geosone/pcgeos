@@ -86,3 +86,20 @@ dword TS_GetTextRange(optr o, const VisTextRange *range, TextReference *ref)
     TS_UnlockReference(unlock);
     return n;
 }
+
+/* TS_GetWordCount: the words (runs of word part characters,
+ * CC_WORD_PART: TSL_IsWordPart) */
+dword TS_GetWordCount(optr o)
+{
+    dword size = TS_GetTextSize(o), off, count = 0;
+    Boolean in = FALSE;
+
+    for (off = 0; off < size; off++) {
+	Boolean w = TSL_IsWordPart(o, off);
+
+	if (w && !in)
+	    count++;
+	in = w;
+    }
+    return count;
+}

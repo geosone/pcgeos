@@ -1,0 +1,12 @@
+/*
+ * trSmallGet.goc -- after trSmallGet.asm: SmallRegionGetTopLine.
+ */
+@include "textInt.goh"
+
+/* SmallRegionGetTopLine: the region's first line */
+dword SmallRegionGetTopLine(optr o, word region)
+{
+    (void) o;
+    (void) region;
+    return 0;
+}
