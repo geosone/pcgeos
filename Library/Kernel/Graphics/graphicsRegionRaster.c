@@ -3,7 +3,6 @@
  * rasterization routines for regions/paths.
  */
 #include "graphicsInt.h"
-#include <stdlib.h>
 
 #define BEZIER_POINT_TOLERANCE	2	/* grWinInt.def, pixels */
 #define BEZIER_MAX_DEPTH	10

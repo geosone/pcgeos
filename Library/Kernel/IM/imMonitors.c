@@ -33,10 +33,6 @@
 #include <input.h>
 #include <system.h>
 #include <timer.h>
-#include "imConstant.h"
-#include <Internal/videoDr.h>
-#include <Internal/powerDr.h>
-#include <geosdriver.h>
 
 ImVars im;
 

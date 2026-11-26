@@ -3,8 +3,6 @@
  * dealing with outline fonts.
  */
 #include "vidcom.h"
-#include <Internal/fontDr.h>
-#include <char.h>
 
 /* VidBuildChar: the font driver builds ch into the font */
 const FontBuf *VidBuildChar(GState *gs, const FontBuf *fb, byte ch)

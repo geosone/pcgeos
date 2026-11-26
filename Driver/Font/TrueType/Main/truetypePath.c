@@ -11,7 +11,6 @@
 #include <heap.h>
 #include <geode.h>
 #include <Internal/window.h>
-#include "truetypeConstant.h"
 
 /* the region path wrappers of truetypePath.asm: not reached, see above */
 void _pascal GrRegionPathMovePen(Handle regionPath, sword x, sword y)

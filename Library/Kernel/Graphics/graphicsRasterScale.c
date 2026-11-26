@@ -4,10 +4,7 @@
  */
 #include "graphicsInt.h"
 #include "graphicsConstant.h"
-#include "graphicsMacro.h"
-#include "Win/winInt.h"
 #include <stdlib.h>
-#include <hugearr.h>
 
 Boolean GrBMSourceSlice(BMSource *s, const Bitmap *bm)
 {

@@ -30,7 +30,6 @@
 #include <localize.h>
 #include <gstring.h>
 #include <uDialog.h>
-@include "cutilsConstant.goh"
 /*
  * OLFSRescanLow: the current directory is shown first when directories
  * are; the directory is read; the list gets its number of items and

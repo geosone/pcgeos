@@ -15,8 +15,6 @@
  * selecting.
  */
 @include "textInt.goh"
-#include <Internal/specUI.h>
-#include <timer.h>
 
 /* ComputeEventPositionAndOffset: the offset at a position in the
  * object's parent's coordinates */

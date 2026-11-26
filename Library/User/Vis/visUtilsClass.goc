@@ -13,8 +13,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <Internal/grWinInt.h>
-@include <Objects/gFieldC.goh>
-#include <localize.h>
 
 /* VisMonikerScore: the fields by priority (highest first) */
 #define SCORE_TEXT_OR_GSTRING	0x1000

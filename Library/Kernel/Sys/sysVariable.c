@@ -3,7 +3,6 @@
  * the port has, under their asm names.
  */
 #include "kernelC.h"
-#include <sysstats.h>
 #include <geode.h>
 #include <object.h>
 #include <geosdriver.h>

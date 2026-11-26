@@ -6,8 +6,6 @@
 #include <vm.h>
 #include "ghal.h"
 #include <string.h>
-#include <system.h>
-#include "gapi.h"
 
 /* TRUE if that was the last reference and the geode is gone */
 Boolean GeodeRemoveReference(GeodeHandle gh)

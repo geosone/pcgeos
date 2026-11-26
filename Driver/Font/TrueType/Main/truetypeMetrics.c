@@ -2,16 +2,8 @@
  * truetypeMetrics.c -- after truetypeMetrics.asm: Routines for
  * generating character metrics.
  */
-#include "../Adapter/ttadapter.h"
-#include "truetypeConstant.h"
-#include "../Adapter/ttinit.h"
 #include "../Adapter/ttwidths.h"
-#include "../Adapter/ttchars.h"
 #include "../Adapter/ttmetrics.h"
-#include "../Adapter/ttpath.h"
-#include <heap.h>
-#include <geode.h>
-#include <Internal/window.h>
 
 Boolean TrueTypeCharMetrics(DriverRegs *r)
 {

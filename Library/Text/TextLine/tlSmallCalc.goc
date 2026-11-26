@@ -3,7 +3,6 @@
  * a small text object.
  */
 @include "textInt.goh"
-#include <chunkarr.h>
 
 /* the line with fields fields (SmallLineAddField,
  * SmallLineTruncateFields); the new fields are cleared */

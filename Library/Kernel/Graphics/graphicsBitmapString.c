@@ -3,11 +3,7 @@
  * write a bitmap out to a gstring
  */
 #include "graphicsInt.h"
-#include "graphicsConstant.h"
-#include "graphicsMacro.h"
-#include "Win/winInt.h"
 #include <stdlib.h>
-#include <hugearr.h>
 
 /* SliceToString: the bytes of a bitmap (its first slice) as a graphics
  * string keeps it, the header, a complex bitmap's palette and the data

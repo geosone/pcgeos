@@ -31,7 +31,6 @@
  * kinds of drives; the top line is blank */
 #define GFS_ICON_HEIGHT		12
 #include "CUtils/copenFileSelectorIcons.h"
-@include "cutilsConstant.goh"
 
 #define GFS_ICON_SPACING	2
 

@@ -2,10 +2,7 @@
  * vmemLow.c -- after vmemLow.asm: Low-level VM file manipulation
  */
 #include "vmemInt.h"
-#include <stdlib.h>
-#include "ghal.h"
 #include <string.h>
-#include <stdio.h>
 
 /* VMDiscardMemBlk: the memory of an entry goes; a block whose handle is
  * preserved (VMBF_PRESERVE_HANDLE) keeps it, discarded, and is read

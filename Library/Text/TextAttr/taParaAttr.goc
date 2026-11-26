@@ -12,8 +12,6 @@
  */
 @include "textInt.goh"
 #include <font.h>
-#include <fontID.h>
-#include <chunkarr.h>
 
 static const word defaultDefaultTabs[4] = {
     0, (PIXELS_PER_INCH / 2) * 8, PIXELS_PER_INCH * 8, 227

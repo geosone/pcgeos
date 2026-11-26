@@ -3,11 +3,8 @@
  * draw/scale bitmaps
  */
 #include "graphicsInt.h"
-#include "graphicsConstant.h"
 #include "graphicsMacro.h"
-#include "Win/winInt.h"
 #include <stdlib.h>
-#include <hugearr.h>
 
 /* the huge bitmap's slice from scan line first on; FALSE past the end */
 Boolean GrBMHugeSlice(BMFrame *f, word first)

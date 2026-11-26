@@ -28,10 +28,6 @@
  */
 #include "soundLocal.h"
 #include <string.h>
-#include <geode.h>
-#include <file.h>
-#include <initfile.h>
-#include <library.h>
 
 SoundControl *SoundLockControl(MemHandle mh)
 {

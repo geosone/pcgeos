@@ -12,12 +12,6 @@
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Objects/gViewC.goh>
 @include <Objects/gContC.goh>
-@include "../CGadget/cgadgetMacro.goh"
-@include <Internal/SpecUI/olTextClass.goh>
-@include <Internal/SpecUI/olCtrlClass.goh>
-@include <Internal/specC.goh>
-#include <font.h>
-#include <string.h>
 
 /* OpenGetLineBounds: the bounds of the object for drawing lines: the
  * right and bottom one pixel in */

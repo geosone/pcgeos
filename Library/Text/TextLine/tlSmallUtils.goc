@@ -3,7 +3,6 @@
  * utilities.
  */
 @include "textInt.goh"
-#include <chunkarr.h>
 
 /* SmallGetLinePointer: the line, *size its size with the fields */
 LineInfo *SmallGetLinePointer(optr o, dword line, word *size)

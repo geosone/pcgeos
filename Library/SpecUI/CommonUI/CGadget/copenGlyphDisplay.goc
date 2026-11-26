@@ -16,13 +16,6 @@
  */
 @include "cGeode.goh"
 @include <Internal/SpecUI/olGlyphDisplayClass.goh>
-@include "../CButton/cbuttonMacro.goh"
-@include "../CButton/cbuttonConstant.goh"
-@include <Internal/SpecUI/olValueClass.goh>
-@include <Objects/vTextC.goh>
-@include <Internal/SpecUI/olScrollbarClass.goh>
-@include <Objects/gViewC.goh>
-@include <Objects/gContC.goh>
 
 @classdecl OLGlyphDisplayClass, neverSaved;
 

@@ -19,9 +19,6 @@
 @include <Internal/specC.goh>
 @include <Objects/gPrimC.goh>
 @include <Objects/gPenICC.goh>
-@include <Objects/gTrigC.goh>
-@include <Objects/gDispC.goh>
-@include <Objects/gInterC.goh>
 
 @classdecl OLWinClass, neverSaved;
 /* cwinClassCommonLow.goc */

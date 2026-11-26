@@ -12,9 +12,6 @@
 #include "kernelC.h"
 #include "sysVariable.h"
 #include <sysstats.h>
-#include "../Thread/threadVariable.h"
-#include "ghal.h"
-#include <string.h>
 
 #define SGIT_COUNTER_AT_LAST_INPUT	24	/* sysstats.def, not in .h */
 #define SGIT_SCREEN_SAVER_DELAY		26

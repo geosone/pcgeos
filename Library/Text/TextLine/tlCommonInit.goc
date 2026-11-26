@@ -3,7 +3,6 @@
  * lines and fields.
  */
 @include "textInt.goh"
-#include <chunkarr.h>
 
 #define INIT_LINE_FLAGS \
 	(LF_STARTS_PARAGRAPH | LF_ENDS_PARAGRAPH | LF_ENDS_IN_NULL)

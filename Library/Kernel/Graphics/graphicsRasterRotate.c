@@ -5,10 +5,7 @@
  */
 #include "graphicsInt.h"
 #include "graphicsConstant.h"
-#include "graphicsMacro.h"
-#include "Win/winInt.h"
 #include <stdlib.h>
-#include <hugearr.h>
 
 /* CalcBitmapDimensions: the size at 72 dpi, WWFixed */
 static WWFixedAsDWord Dimension(word size, word res, Boolean complexBM)

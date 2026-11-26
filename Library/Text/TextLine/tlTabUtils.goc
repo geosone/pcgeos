@@ -3,8 +3,6 @@
  * tabs.
  */
 @include "textInt.goh"
-#include <font.h>
-#include <char.h>
 
 #define PA(l)	((l)->LICL_theParaAttr.VTMPA_paraAttr)
 

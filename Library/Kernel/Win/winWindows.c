@@ -32,7 +32,6 @@
 #include "../Graphics/graphicsInt.h"
 #include "kernelC.h"
 #include "ghal.h"
-#include <stdlib.h>
 
 /* ---------------------------------------------------------------------
  * Inserting and removing

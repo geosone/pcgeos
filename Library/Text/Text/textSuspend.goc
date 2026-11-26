@@ -2,9 +2,6 @@
  * textSuspend.goc -- after textSuspend.asm: This file contains...
  */
 @include "textInt.goh"
-#include <font.h>
-#include <fontID.h>
-#include <chunkarr.h>
 
 /*
  * ReflectChangeUpdateGeneric (textSuspend.asm): a generic object's

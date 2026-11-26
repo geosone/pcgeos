@@ -98,15 +98,6 @@ word SpecGetDocControlOptions(void)
 
 /* (the objects: cmainManager.ui through uic -g) */
 @include "cmainUIDocumentControl.goh"
-@include <stdapp.goh>
-@include <Internal/SpecUI/olFileSelectorClass.goh>
-@include <Objects/gTextC.goh>
-@include <Objects/gBoolGC.goh>
-@include <Objects/gItemGC.goh>
-@include <Objects/gFSelC.goh>
-@include <Objects/gAppC.goh>
-#include <localize.h>
-#include <uDialog.h>
 
 /* cmainUIDocOperations.goc: the dialogs */
 @extern method OLDocumentControlClass,

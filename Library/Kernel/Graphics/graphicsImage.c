@@ -6,7 +6,6 @@
 #include "Win/winInt.h"
 #include <stdlib.h>
 #include <hugearr.h>
-#include "graphicsConstant.h"
 #include "graphicsMacro.h"
 
 #define IF_HUGE_C	0x40
