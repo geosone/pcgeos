@@ -1,0 +1,26 @@
+/*
+ * gocerrloop.goc -- goc's parser stays at the same token after these
+ * errors (a label in a gstring, as uic -g writes for mkrMinimize.ui):
+ * goc must stop after GOC_MAX_ERRORS (Tools/goc/goc.h), not print the
+ * same error for ever (ctest goc.errors.stop).
+ */
+@start R, data;
+@visMoniker MinimizeColorMoniker = {
+    style = icon;
+    size = standard;
+    color = color4;
+    aspectRatio = normal;
+    cachedSize = 26, 4;
+    gstring {
+	GSSetAreaColorIndex(C_WHITE),
+	GSFillBitmapAtCP({(EndMiniButtonLBM-StartMiniButtonLBM)}),
+	GOC_StartMiniButtonLBM(label	byte),
+	Bitmap(  20, 4, 0,  BMF_MONO   ), 0b00000000, 0b00001110, 0b00000000, 0b00000000, 0b00001000, 0b00000000, 0b00000000, 0b00001000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+	GOC_EndMiniButtonLBM(label	byte),
+	GSSetAreaColorIndex(C_BLACK),
+	GSFillBitmapAtCP({(EndMiniButtonDBM-StartMiniButtonDBM)}),
+	GOC_StartMiniButtonDBM(label	byte),
+	Bitmap(  20, 4, 0,  BMF_MONO   ), 0b00000000, 0b00000001, 0b00000000, 0b00000000, 0b00000001, 0b00000000, 0b00000000, 0b00000001, 0b00000000, 0b00000000, 0b00001111, 0b00000000,
+	GOC_EndMiniButtonDBM(label	byte),
+}
+@end R;

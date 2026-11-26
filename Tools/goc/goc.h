@@ -77,6 +77,8 @@ extern FILE 	*yyin;    	/* Stream for current input file */
 
 extern int	yylineno;
 extern int	yyerrors;
+#define GOC_MAX_ERRORS	100	/* then goc stops (GocTooManyErrors) */
+extern void	GocTooManyErrors(void);
 
 extern char	inFile[];
 extern char 	*outFile;

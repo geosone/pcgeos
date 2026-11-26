@@ -22,3 +22,12 @@ geos_add_test(goc.resources test_gocres)
 
 # classes and objects of goc -cg for the kernel's message and object
 # tests (../Kernel, which builds them: kmsg.goc, kobj.goc)
+
+# goc stops after too many errors, with an exit status, its output
+# removed (Tools/goc: GocTooManyErrors)
+add_test(NAME goc.errors.stop
+         COMMAND ${CMAKE_COMMAND} -D GOC=${GEOS_GOC}
+                 -D IN=${CMAKE_CURRENT_SOURCE_DIR}/gocerrloop.goc
+                 -D OUT=${CMAKE_CURRENT_BINARY_DIR}/gocerrloop.c
+                 -P ${PROJECT_SOURCE_DIR}/Port32/tools/goc-errors.cmake)
+set_tests_properties(goc.errors.stop PROPERTIES TIMEOUT 60)

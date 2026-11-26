@@ -859,6 +859,40 @@ CompilerEndSegment(char *prefix, char *name)
 
 
 /***********************************************************************
+ *				GocErrorStatus
+ ***********************************************************************
+ * SYNOPSIS:	  The exit status for errors: their number, but not 0 for
+ *		  256 of them (an exit status is a byte).
+ * CALLED BY:	  main, GocTooManyErrors
+ ***********************************************************************/
+static int
+GocErrorStatus(void)
+{
+    return (yyerrors > 255 ? 255 : yyerrors);
+}
+
+/***********************************************************************
+ *				GocTooManyErrors
+ ***********************************************************************
+ * SYNOPSIS:	  Stop after GOC_MAX_ERRORS errors, as main stops after
+ *		  errors: the parser's error recovery can stay at the same
+ *		  token for ever, printing the same error each time.
+ * CALLED BY:	  yyerror
+ ***********************************************************************/
+void
+GocTooManyErrors(void)
+{
+    fprintf(stderr, "\n\ntoo many errors (%d), stopped\n", yyerrors);
+    if (!makeDepend) {
+	unlink(outFile);
+	if (gccExportName != NULL) {
+	    unlink(gccExportName);
+	}
+    }
+    exit(GocErrorStatus());
+}
+
+/***********************************************************************
  *				main
  ***********************************************************************
  * SYNOPSIS:	  Guess what?
@@ -909,7 +943,7 @@ main(int argc, char **argv)
 	if (gccExportName != NULL) {
 	    unlink(gccExportName);
 	}
-        exit(yyerrors);
+        exit(GocErrorStatus());
     }
 
     if (gocdebug) {
@@ -930,7 +964,7 @@ main(int argc, char **argv)
 	if (gccExportName != NULL) {
 	    unlink(gccExportName);
 	}
-        exit(yyerrors);
+        exit(GocErrorStatus());
     }
 
     if (gocdebug) {

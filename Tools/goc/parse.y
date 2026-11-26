@@ -4659,6 +4659,11 @@ yyerror(const char *fmt, ...)
 
     yyerrors++;
     va_end(args);
+    if (yyerrors >= GOC_MAX_ERRORS) {
+	/* the parser's error recovery can stay at the same token for
+	 * ever: stop rather than print the same error without end */
+	GocTooManyErrors();
+    }
 }
 
 /***********************************************************************
