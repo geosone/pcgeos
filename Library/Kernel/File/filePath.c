@@ -467,35 +467,6 @@ void FSDLinkEncountered(const void *savedDisk, word diskSize,
     strcpy(l->KL_path + pathLen, rest);
 }
 
-/* the target of the link a driver met (FileGetLinkData): its disk (a
- * standard path, a disk, or SP_TOP for a path with a drive name) and
- * the path; 0 with the error set */
-DiskHandle FileLinkTarget(char *path, size_t size)
-{
-    KLink *l = ThreadOf(KernelThisThread())->T_link;
-    DiskHandle disk = SP_TOP;
-    word e;
-
-    if (!l || l->KL_tooLong || strlen(l->KL_path) >= size) {
-	KernelSetError(l ? ERROR_PATH_TOO_LONG : ERROR_INSUFFICIENT_MEMORY);
-	return 0;
-    }
-    strcpy(path, l->KL_path);
-    if (l->KL_diskSize) {
-	disk = DiskRestore(l->KL_disk, NULL);
-	if (!disk) {
-	    /* the DiskRestoreError as a FileError */
-	    e = ThreadGetError();
-	    KernelSetError(e == DRE_NOT_ATTACHED_TO_SERVER
-			   ? ERROR_NETWORK_NOT_LOGGED_IN
-			   : e == DRE_PERMISSION_DENIED ? ERROR_ACCESS_DENIED
-			   : ERROR_DISK_UNAVAILABLE);
-	    return 0;
-	}
-    }
-    return disk;
-}
-
 static word FollowOp(FileOpFunc *op, void *data, word depth)
 {
     char path[FILE_DISK_PATH_SIZE];
@@ -505,7 +476,7 @@ static word FollowOp(FileOpFunc *op, void *data, word depth)
 	return ERROR_LINK_ENCOUNTERED;
     if (depth + 1 == MAX_LINK_COUNT)
 	return ERROR_TOO_MANY_LINKS;
-    disk = FileLinkTarget(path, sizeof(path));
+    disk = FileGetLinkDataCommon(path, sizeof(path));
     if (!disk)
 	return ThreadGetError();
     return FileOpOnPlacesN(disk, "", path, op, data, depth + 1);
@@ -577,7 +548,7 @@ static FSDDisk *LocateFollow(FSDDisk *d, char *out, size_t size,
 	KernelSetError(ERROR_TOO_MANY_LINKS);
 	return NULL;
     }
-    target = FileLinkTarget(path, sizeof(path));
+    target = FileGetLinkDataCommon(path, sizeof(path));
     return target ? LocateN(target, path, out, size, final, depth + 1)
 		  : NULL;
 }
@@ -707,7 +678,7 @@ DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
 	    if (++depth == MAX_LINK_COUNT)
 		e = ERROR_TOO_MANY_LINKS;
 	    else {
-		disk = FileLinkTarget(target, sizeof(target));
+		disk = FileGetLinkDataCommon(target, sizeof(target));
 		if (!disk)
 		    return 0;
 		path = target;

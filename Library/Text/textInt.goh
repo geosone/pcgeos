@@ -111,9 +111,9 @@ extern void TSL_SelectSetSelectionWithoutNukingUndo(optr o, dword start,
 						    dword end);
 /* on the screen too (with the object's gstate): a cursor, the
  * selection grown from where it started */
-extern void TSL_SelectCursor(optr o, dword offset, Boolean setGoal);
+extern void SelectCursor(optr o, dword offset, Boolean setGoal);
 extern dword TSL_SelectGetAdjustPosition(optr o, Boolean forward);
-extern void TSL_SelectAdjust(optr o, dword offset);
+extern void StartSelectAdjust(optr o, dword offset);
 
 /* TextSelect/tslKbdShortcuts.goc: a key function (VisTextKeyFunction);
  * FALSE if not done */
@@ -371,5 +371,8 @@ word FieldDrawStyleCallback(GDF_vars *v, TextAttr *attr, word offset,
 
 /* tlCommonInit.goc (for tlSmallStorage.goc) */
 void CommonInitLineAndField(LineInfo *li);
+
+/* tslMain.goc (for tslMethodMouse.goc) */
+void SetShown(optr o, dword start, dword end, dword show);
 
 #endif

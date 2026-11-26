@@ -55,7 +55,7 @@ static void MoveLine(optr o, Boolean forward)
 
     TSL_SelectGetSelection(o, &start, &end);
     if (start != end) {
-	TSL_SelectCursor(o, forward ? end : start, FALSE);
+	SelectCursor(o, forward ? end : start, FALSE);
 	return;
     }
     line = TSL_GetCursorLine(o);
@@ -68,7 +68,7 @@ static void MoveLine(optr o, Boolean forward)
 	    return;
 	line--;
     }
-    TSL_SelectCursor(o, ComputeEventPositionAndOffset(o, line), FALSE);
+    SelectCursor(o, ComputeEventPositionAndOffset(o, line), FALSE);
 }
 
 /* VTFSelectAdjustForwardLine, VTFSelectAdjustBackwardLine */
@@ -97,7 +97,7 @@ static void AdjustLine(optr o, Boolean forward)
 	if (off != adjust)
 	    break;
     }
-    TSL_SelectAdjust(o, off);
+    StartSelectAdjust(o, off);
 }
 
 /* DeleteRange: by the user */
@@ -165,42 +165,42 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 	AdjustLine(o, FALSE);
 	break;
     case VTKF_FORWARD_CHAR:
-	TSL_SelectCursor(o, range ? end : end + 1, TRUE);
+	SelectCursor(o, range ? end : end + 1, TRUE);
 	break;
     case VTKF_BACKWARD_CHAR:
-	TSL_SelectCursor(o, range || !start ? start : start - 1, TRUE);
+	SelectCursor(o, range || !start ? start : start - 1, TRUE);
 	break;
     case VTKF_FORWARD_WORD:
-	TSL_SelectCursor(o, range ? end : FindNextWordEdge(o, end), TRUE);
+	SelectCursor(o, range ? end : FindNextWordEdge(o, end), TRUE);
 	break;
     case VTKF_BACKWARD_WORD:
-	TSL_SelectCursor(o, range ? start : FindPreviousWordEdge(o, start),
+	SelectCursor(o, range ? start : FindPreviousWordEdge(o, start),
 			 TRUE);
 	break;
     case VTKF_FORWARD_PARAGRAPH:
-	TSL_SelectCursor(o, range ? end : FindNextParagraphEdge(o, end),
+	SelectCursor(o, range ? end : FindNextParagraphEdge(o, end),
 			 TRUE);
 	break;
     case VTKF_BACKWARD_PARAGRAPH:
-	TSL_SelectCursor(o, range ? start
+	SelectCursor(o, range ? start
 				  : FindPreviousParagraphEdge(o, start),
 			 TRUE);
 	break;
     case VTKF_START_OF_LINE:
 	if (!range)
 	    start = TL_LineToOffsetStart(o, TSL_GetCursorLine(o));
-	TSL_SelectCursor(o, start, TRUE);
+	SelectCursor(o, start, TRUE);
 	break;
     case VTKF_END_OF_LINE:
 	if (!range)
 	    end = TSL_LineCursorEnd(o, TSL_GetCursorLine(o));
-	TSL_SelectCursor(o, end, TRUE);
+	SelectCursor(o, end, TRUE);
 	break;
     case VTKF_START_OF_TEXT:
-	TSL_SelectCursor(o, range ? start : 0, TRUE);
+	SelectCursor(o, range ? start : 0, TRUE);
 	break;
     case VTKF_END_OF_TEXT:
-	TSL_SelectCursor(o, range ? end : size, TRUE);
+	SelectCursor(o, range ? end : size, TRUE);
 	break;
     case VTKF_SELECT_WORD:
 	SelectWord(o, start);
@@ -210,45 +210,45 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
     case VTKF_SELECT_OBJECT:
 	break;
     case VTKF_SELECT_ADJUST_FORWARD_CHAR:
-	TSL_SelectAdjust(o, TSL_SelectGetAdjustPosition(o, TRUE) + 1);
+	StartSelectAdjust(o, TSL_SelectGetAdjustPosition(o, TRUE) + 1);
 	break;
     case VTKF_SELECT_ADJUST_BACKWARD_CHAR:
 	off = TSL_SelectGetAdjustPosition(o, FALSE);
-	TSL_SelectAdjust(o, off ? off - 1 : 0);
+	StartSelectAdjust(o, off ? off - 1 : 0);
 	break;
     case VTKF_SELECT_ADJUST_FORWARD_WORD:
-	TSL_SelectAdjust(o, FindNextWordEdge(o,
+	StartSelectAdjust(o, FindNextWordEdge(o,
 			TSL_SelectGetAdjustPosition(o, TRUE)));
 	break;
     case VTKF_SELECT_ADJUST_BACKWARD_WORD:
-	TSL_SelectAdjust(o, FindPreviousWordEdge(o,
+	StartSelectAdjust(o, FindPreviousWordEdge(o,
 			TSL_SelectGetAdjustPosition(o, FALSE)));
 	break;
     case VTKF_SELECT_ADJUST_FORWARD_PARAGRAPH:
-	TSL_SelectAdjust(o, FindNextParagraphEdge(o,
+	StartSelectAdjust(o, FindNextParagraphEdge(o,
 			TSL_SelectGetAdjustPosition(o, TRUE)));
 	break;
     case VTKF_SELECT_ADJUST_BACKWARD_PARAGRAPH:
-	TSL_SelectAdjust(o, FindPreviousParagraphEdge(o,
+	StartSelectAdjust(o, FindPreviousParagraphEdge(o,
 			TSL_SelectGetAdjustPosition(o, FALSE)));
 	break;
     case VTKF_SELECT_ADJUST_TO_START:
-	TSL_SelectAdjust(o, 0);
+	StartSelectAdjust(o, 0);
 	break;
     case VTKF_SELECT_ADJUST_TO_END:
-	TSL_SelectAdjust(o, size);
+	StartSelectAdjust(o, size);
 	break;
     case VTKF_SELECT_ADJUST_START_OF_LINE:
 	/* FindPreviousLineEdge: of the line the offset ends or is on */
 	off = TSL_SelectGetAdjustPosition(o, FALSE);
 	(void) TL_LineFromOffset(o, off, TRUE, &off);
-	TSL_SelectAdjust(o, off);
+	StartSelectAdjust(o, off);
 	break;
     case VTKF_SELECT_ADJUST_END_OF_LINE:
 	/* FindNextLineEdge: of the line the offset starts or is on */
 	off = TSL_SelectGetAdjustPosition(o, TRUE);
 	line = TL_LineFromOffset(o, off, FALSE, &off);
-	TSL_SelectAdjust(o, off + TL_LineGetCharCount(
+	StartSelectAdjust(o, off + TL_LineGetCharCount(
 					SmallGetLinePointer(o, line, NULL)));
 	break;
     case VTKF_DELETE_BACKWARD_CHAR:
@@ -306,7 +306,7 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 	DeleteRange(o, 0, size);
 	break;
     case VTKF_DESELECT:
-	TSL_SelectCursor(o, start, TRUE);
+	SelectCursor(o, start, TRUE);
 	break;
     case VTKF_TOGGLE_OVERSTRIKE_MODE:
     case VTKF_TOGGLE_SMART_QUOTES:

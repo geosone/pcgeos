@@ -174,7 +174,7 @@ DiskHandle FileReadLink(const char *path, char *targetPath)
 	return 0;
     }
     l = ThreadOf(KernelThisThread())->T_link;
-    disk = FileLinkTarget(targetPath, PATH_BUFFER_SIZE);
+    disk = FileGetLinkDataCommon(targetPath, PATH_BUFFER_SIZE);
     if (!disk)
 	return 0;
     KernelSetError(0);

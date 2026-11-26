@@ -62,9 +62,9 @@ static dword OffsetAtPosition(optr o, sword x, sword y)
 	@call oself::MSG_META_GRAB_TARGET_EXCL();
     off = OffsetAtPosition(oself, xPosition, yPosition);
     if ((inputState >> 8) & (UIFA_ADJUST | UIFA_EXTEND))
-	TSL_SelectAdjust(oself, off);
+	StartSelectAdjust(oself, off);
     else {
-	TSL_SelectCursor(oself, off, TRUE);
+	SelectCursor(oself, off, TRUE);
 	if (inputState & BI_DOUBLE_PRESS)
 	    (void) TSL_HandleKbdShortcut(oself, VTKF_SELECT_WORD);
     }
@@ -83,7 +83,7 @@ static dword OffsetAtPosition(optr o, sword x, sword y)
     TextGStateCreate(oself);
     if (TextCheckCanDraw(oself)) {
 	VT(oself)->VTI_intSelFlags |= VTISF_DOING_DRAG_SELECTION;
-	TSL_SelectAdjust(oself, OffsetAtPosition(oself, xPosition,
+	StartSelectAdjust(oself, OffsetAtPosition(oself, xPosition,
 						 yPosition));
     }
     TextGStateDestroy(oself);
@@ -114,4 +114,46 @@ dword ComputeEventPositionAndOffset(optr o, dword line)
     off = TL_LineTextPosition(o, line, x, TEXT_ADDRESS_PAST_END, &pos,
 			      NULL);
     return off > end ? end : off;
+}
+
+/*
+ * TSL_SelectCursor (SelectCursor): a cursor at an offset; a selection
+ * adjusted later grows from here.  setGoal: the cursor's place is
+ * where moves up and down aim for.
+ */
+void SelectCursor(optr o, dword offset, Boolean setGoal)
+{
+    VisTextInstance *t;
+    dword size = TS_GetTextSize(o);
+
+    if (offset > size)
+	offset = size;
+    SetShown(o, offset, offset, offset);
+    t = VT(o);
+    t->VTI_selectMinStart = t->VTI_selectMinEnd = offset;
+    t->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
+    if (setGoal)
+	t->VTI_goalPosition = t->VTI_cursorPos.P_x;
+}
+
+/*
+ * TSL_SelectAdjust (StartSelectAdjust, character selection): the
+ * selection from where it started to an offset
+ */
+void StartSelectAdjust(optr o, dword offset)
+{
+    VisTextInstance *t = VT(o);
+    dword size = TS_GetTextSize(o), start, end;
+
+    if (offset > size)
+	offset = size;
+    t = VT(o);
+    start = t->VTI_selectMinStart;
+    end = t->VTI_selectMinEnd;
+    if (offset < start)
+	start = offset;
+    if (offset > end)
+	end = offset;
+    SetShown(o, start, end, offset);
+    VT(o)->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;
 }
