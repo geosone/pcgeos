@@ -1,0 +1,24 @@
+/*
+ * textBGBorder.goc -- after textBGBorder.asm: T_GetNewParaAttr,
+ * T_EnsureCorrectParaAttr.
+ */
+@include "textInt.goh"
+
+/* T_GetNewParaAttr: the paragraph attribute for a position, the
+ * margin the lines end at */
+void T_GetNewParaAttr(LICL_vars *l, dword pos)
+{
+    TA_GetParaAttrForPosition(l->LICL_object, pos, &l->LICL_theParaAttr,
+			      &l->LICL_paraAttrStart, &l->LICL_paraAttrEnd);
+    l->LICL_realRightMargin =
+	l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_rightMargin;
+}
+
+/* T_EnsureCorrectParaAttr: the paragraph attribute of the position,
+ * fetched if it is not the one at hand (no regions yet: none is
+ * complex) */
+void T_EnsureCorrectParaAttr(LICL_vars *l, dword pos)
+{
+    if (pos < l->LICL_paraAttrStart || pos >= l->LICL_paraAttrEnd)
+	T_GetNewParaAttr(l, pos);
+}

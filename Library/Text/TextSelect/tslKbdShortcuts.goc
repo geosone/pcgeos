@@ -1,7 +1,7 @@
 /*
  * tslKbdShortcuts.goc -- what the keys of a text object do (after
- * tslKbdShortcuts.asm, of tslUtils.asm the edges of words, lines and
- * paragraphs): the VisTextKeyFunctions, which the specific UI binds
+ * tslKbdShortcuts.asm; the edges of words and paragraphs are in
+ * tslUtils.goc): the VisTextKeyFunctions, which the specific UI binds
  * keys to (SPIR_GET_TEXT_KBD_BINDINGS).
  *
  * Moving puts a cursor somewhere (at the end of a range towards which
@@ -18,73 +18,18 @@
  * As in the asm VTKF_SELECT_LINE, _PARAGRAPH and _OBJECT do nothing.
  */
 @include "textInt.goh"
+#include <Internal/specUI.h>
+#include <timer.h>
 
 @extern method VisTextClass, MSG_VIS_TEXT_DO_KEY_FUNCTION;
 
-#define C_CR_CHAR	0x0d
-
 /* CC_WORD_PART: letters, digits and the apostrophe */
-static Boolean IsWordPart(optr o, dword offset)
+Boolean TSL_IsWordPart(optr o, dword offset)
 {
     byte c = (byte) TS_GetCharAtOffset(o, offset);
 
     return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
 	   (c >= 'a' && c <= 'z') || c >= 0x80 || c == '\'';
-}
-
-/* FindNextWordEdge: the end of the word or of the room between words
- * an offset is in */
-static dword FindNextWordEdge(optr o, dword off)
-{
-    dword size = TS_GetTextSize(o);
-    Boolean word;
-
-    if (off >= size)
-	return size;
-    word = IsWordPart(o, off);
-    while (off < size && IsWordPart(o, off) == word)
-	off++;
-    return off;
-}
-
-/* FindPreviousWordEdge: the start of the word or room before an
- * offset */
-static dword FindPreviousWordEdge(optr o, dword off)
-{
-    Boolean word;
-
-    if (!off)
-	return 0;
-    off--;
-    word = IsWordPart(o, off);
-    while (off && IsWordPart(o, off - 1) == word)
-	off--;
-    return off;
-}
-
-/* FindPreviousParagraphEdge: the start of the paragraph before an
- * offset */
-static dword FindPreviousParagraphEdge(optr o, dword off)
-{
-    if (!off)
-	return 0;
-    off--;
-    while (off && (byte) TS_GetCharAtOffset(o, off - 1) != C_CR_CHAR)
-	off--;
-    return off;
-}
-
-/* FindNextParagraphEdge: the start of the next paragraph, or the end
- * of the text */
-static dword FindNextParagraphEdge(optr o, dword off)
-{
-    dword size = TS_GetTextSize(o);
-
-    while (off < size) {
-	if ((byte) TS_GetCharAtOffset(o, off++) == C_CR_CHAR)
-	    break;
-    }
-    return off;
 }
 
 /* where a line's text ends for the cursor: before its carriage
@@ -194,8 +139,8 @@ static void SelectWord(optr o, dword off)
     Boolean word;
 
     if (off < size) {
-	word = IsWordPart(o, off);
-	while (start && IsWordPart(o, start - 1) == word)
+	word = TSL_IsWordPart(o, off);
+	while (start && TSL_IsWordPart(o, start - 1) == word)
 	    start--;
 	end = FindNextWordEdge(o, off);
     }
@@ -395,4 +340,10 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
     TextGStateCreate(oself);
     (void) TSL_HandleKbdShortcut(oself, func);
     TextGStateDestroy(oself);
+}
+
+/* TSL_GetCursorLine: the line the cursor is on */
+dword TSL_GetCursorLine(optr o)
+{
+    return TL_LineFromPosition(o, VT(o)->VTI_cursorPos.P_y, NULL);
 }

@@ -24,13 +24,13 @@ void TA_GetTextRange(optr o, VisTextRange *range, VisTextRangeContext context)
     if ((range->VTR_end >> 16) == TEXT_ADDRESS_PAST_END_HIGH)
 	range->VTR_end = TS_GetTextSize(o);
     if (context & VTRC_PARAGRAPH_CHANGE) {
-	range->VTR_start = TA_FindParagraphStart(o, range->VTR_start);
+	range->VTR_start = TSL_FindParagraphStart(o, range->VTR_start);
 	p = range->VTR_end;
 	/* (a range ending at a paragraph's start ends in the one
 	 * before) */
 	if (p && p != range->VTR_start)
 	    p--;
-	if (TA_FindParagraphEnd(o, &p)) {
+	if (TSL_FindParagraphEnd(o, &p)) {
 	    p++;			/* past the carriage return */
 	    if (context & VTRC_PARA_ATTR_BORDER_CHANGE)
 		p++;			/* the next line made again too */
@@ -42,8 +42,8 @@ void TA_GetTextRange(optr o, VisTextRange *range, VisTextRangeContext context)
 	/* the carriage return at the end of a paragraph's text, but not
 	 * the one of an empty paragraph */
 	p = range->VTR_end;
-	if (TA_IsParagraphEnd(o, p, &eot) && !eot &&
-	    (!p || !TA_IsParagraphEnd(o, p - 1, &eot)))
+	if (TSL_IsParagraphEnd(o, p, &eot) && !eot &&
+	    (!p || !TSL_IsParagraphEnd(o, p - 1, &eot)))
 	    range->VTR_end++;
     }
 }

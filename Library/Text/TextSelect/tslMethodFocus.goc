@@ -13,6 +13,8 @@
  * target, undo, the FEP.
  */
 @include "textInt.goh"
+#include <Internal/specUI.h>
+#include <timer.h>
 
 @extern method VisTextClass, MSG_META_GAINED_SYS_FOCUS_EXCL;
 @extern method VisTextClass, MSG_META_LOST_SYS_FOCUS_EXCL;
@@ -114,4 +116,16 @@ static void SetSysTarget(optr o, Boolean target)
 @extern method VisTextClass, MSG_META_LOST_SYS_TARGET_EXCL
 {
     SetSysTarget(oself, FALSE);
+}
+
+/* TSL_StartCursorCommon: the cursor starts flashing */
+void TSL_StartCursorCommon(optr o)
+{
+    VisTextInstance *t = VT(o);
+
+    if (!(((VisInstance *) t)->VI_attrs & VA_REALIZED) ||
+	t->VTI_timerHandle || !(t->VTI_state & VTS_EDITABLE) ||
+	!(FlowGetUIButtonFlags() & UIBF_BLINKING_CURSOR))
+	return;
+    @call o::MSG_VIS_TEXT_FLASH_CURSOR_ON();
 }

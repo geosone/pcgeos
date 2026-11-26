@@ -1,0 +1,70 @@
+/*
+ * tslMethodCursor.goc -- after tslMethodCursor.asm: TextTimerStart,
+ * MSG_VIS_TEXT_FLASH_CURSOR_ON, MSG_VIS_TEXT_FLASH_CURSOR_OFF.
+ */
+@include "textInt.goh"
+#include <Internal/specUI.h>
+#include <timer.h>
+
+#define VIS_TEXT_CURSOR_FLASH	40	/* ticks on, and off */
+
+/* TextTimerStart: the next half of a flash */
+void TextTimerStart(optr o, Message msg)
+{
+    word id = 0;
+    TimerHandle th = TimerStart(TIMER_EVENT_ONE_SHOT, o,
+				VIS_TEXT_CURSOR_FLASH, msg, 0, &id);
+    VisTextInstance *t = VT(o);
+
+    t->VTI_timerHandle = th;
+    t->VTI_timerID = id;
+}
+
+/* VisTextFlashCursorOn */
+@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_ON
+{
+    Boolean noFocus = CursorNoFocus(oself);
+
+    pself = VT(oself);
+    pself->VTI_timerHandle = NullHandle;
+    if (!noFocus && !(pself->VTI_intSelFlags & VTISF_IS_FOCUS))
+	return;
+    if (!(pself->VTI_state & VTS_EDITABLE))
+	return;
+    /* (not while someone has the screen to himself) */
+    if (!GrGetExclusive(NullHandle))
+	CursorForceOn(oself);
+    if (noFocus)
+	return;
+    TextTimerStart(oself, MSG_VIS_TEXT_FLASH_CURSOR_OFF);
+}
+
+/* VisTextFlashCursorOff */
+@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_OFF
+{
+    Boolean noFocus = CursorNoFocus(oself);
+    byte f;
+
+    pself = VT(oself);
+    f = pself->VTI_intSelFlags;
+    pself->VTI_timerHandle = NullHandle;
+    if (!noFocus && !(f & VTISF_IS_FOCUS))
+	return;
+    if (!(pself->VTI_state & VTS_EDITABLE))
+	return;
+    if (TextCheckCanDraw(oself)) {
+	Boolean off = TRUE;
+
+	if (f & VTISF_CURSOR_ENABLED) {
+	    if (!(f & VTISF_CURSOR_ON) || GrGetExclusive(NullHandle))
+		off = FALSE;
+	    else
+		CursorToggle(oself);
+	}
+	if (off)
+	    VT(oself)->VTI_intSelFlags &= ~VTISF_CURSOR_ON;
+    }
+    if (noFocus)
+	return;
+    TextTimerStart(oself, MSG_VIS_TEXT_FLASH_CURSOR_ON);
+}

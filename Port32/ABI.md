@@ -7178,8 +7178,9 @@ the modules of the asm; what is there:
   user modified and gets `MSG_VIS_TEXT_ATTRIBUTE_CHANGE`, a generic
   one `MSG_VIS_TEXT_UPDATE_GENERIC` (ReflectChangeUpdateGeneric); the
   notifications of the change are not sent yet.
-- **Character attribute runs** (`TextAttr/taRun.goc`, after
-  `taRunLow.asm`, `taRunManip.asm`, `taElement.asm`, `taStorage.asm`):
+- **Character attribute runs** (`TextAttr/taRunLow.goc`,
+  `taRunManip.goc`, `taElement.goc`, `taStorage.goc`, `taRunQuery.goc`,
+  each beside its asm file):
   `MSG_VIS_TEXT_CREATE_STORAGE` with `VTSF_MULTIPLE_CHAR_ATTRS` makes
   `VTI_charAttrRuns` a run array (a chunk array of
   `TextRunArrayElement`: position, token; the last one at

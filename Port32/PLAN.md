@@ -144,7 +144,7 @@ Ordered by dependency, each with host-side tests under `linux`:
 - `Library/Text` (~149 k) → C.
   **Started 2026-11-18** (ABI.md §13z): small objects: storage, the
   replacement, selection, lines, drawing, single attributes, filters.
-  2026-11-26: character attribute runs (`TextAttr/taRun.goc`): runs and
+  2026-11-26: character attribute runs (`TextAttr/taRunLow.goc` and beside): runs and
   elements in the object's block, changes of a range, the insertion
   token, the runs moved by a replacement; paragraph attribute runs and
   the messages that change paragraph attributes; ctest `library.text`.

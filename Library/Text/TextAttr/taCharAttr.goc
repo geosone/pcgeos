@@ -1,6 +1,6 @@
 /*
  * taCharAttr.goc -- the character attributes of a text object (after
- * taCharAttr.asm, the handlers of taAttr.asm that change one field).
+ * taCharAttr.asm; the messages that change one field are in taAttr.goc).
  *
  * Port32 (Port32/ABI.md section 13z): an object with a single
  * character attribute has a VisTextDefaultCharAttr in VTI_charAttrRuns
@@ -8,7 +8,7 @@
  * attribute that a default record can say is kept as one
  * (SetSingleCharAttr), the range of a change is the whole object.  With
  * VTSF_MULTIPLE_CHAR_ATTRS the range is changed in the runs
- * (taRun.goc).  Not yet: styles, undo, the notifications of a change
+ * (taRunManip.goc).  Not yet: styles, undo, the notifications of a change
  * (TA_SendNotification).
  */
 @include "textInt.goh"
@@ -187,7 +187,7 @@ void TA_ReflectChange(optr o)
  * FixupCharAttrRange makes it); the selection off the screen while the
  * attribute changes.  FALSE if the object has a single attribute.
  */
-static Boolean FixupRange(optr o, VisTextRange *r, dword start, dword end)
+Boolean FixupRange(optr o, VisTextRange *r, dword start, dword end)
 {
     Boolean multiple =
 	(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS) != 0;
@@ -199,27 +199,6 @@ static Boolean FixupRange(optr o, VisTextRange *r, dword start, dword end)
     TextGStateCreate(o);
     EditUnHilite(o);
     return multiple;
-}
-
-/*
- * CharAttrChangeCommon: one field of the attribute changed by the
- * callback, in the range (with runs) or the object's single attribute
- */
-static void ChangeCharAttr(optr o, dword start, dword end,
-			   TA_ModifyCallback *cb, void *data)
-{
-    VisTextCharAttr a;
-    VisTextRange r;
-
-    if (FixupRange(o, &r, start, end))
-	(void) TA_ModifyRun(o, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, cb,
-			    data, CA_NULL_ELEMENT);
-    else {
-	TA_GetSingleCharAttr(o, &a);
-	cb(o, &a, data);
-	TA_SetSingleCharAttr(o, &a);
-    }
-    TA_ReflectChange(o);
 }
 
 /* SetCharAttrCommon, SetCharAttrOrParaAttrMultiple: the whole attribute
@@ -360,7 +339,7 @@ static void DiffCharAttr(const VisTextCharAttr *a, const VisTextCharAttr *b,
 	}
 	if (token == (word) -1)
 	    i = TA_RunForPosition(oself, TRK_CHAR_ATTR, r.VTR_start,
-				  !TA_IsParagraphStart(oself, r.VTR_start) &&
+				  !TSL_IsParagraphStart(oself, r.VTR_start) &&
 				  TS_GetTextSize(oself) != r.VTR_start);
     } else {
 	/* a range: the run to the right of its start */
@@ -392,128 +371,4 @@ static void DiffCharAttr(const VisTextCharAttr *a, const VisTextCharAttr *b,
     }
     *attrs = a;
     return CA_NULL_ELEMENT;
-}
-
-/*
- * The handlers of taAttr.asm that change one field, with their
- * callbacks
- */
-static void SetFontIDCB(optr o, void *e, void *data)
-{
-    (void) o;
-    ((VisTextCharAttr *) e)->VTCA_fontID = *(FontID *) data;
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID
-{
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontIDCB, &fid);
-}
-
-static void SetFontWeightCB(optr o, void *e, void *data)
-{
-    (void) o;
-    ((VisTextCharAttr *) e)->VTCA_fontWeight = *(byte *) data;
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT
-{
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontWeightCB,
-		   &fontWeight);
-}
-
-static void SetFontWidthCB(optr o, void *e, void *data)
-{
-    (void) o;
-    ((VisTextCharAttr *) e)->VTCA_fontWidth = *(byte *) data;
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WIDTH
-{
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontWidthCB,
-		   &fontWidth);
-}
-
-/* SetWBFixedCallback: the WWFixed rounded to a WBFixed */
-static void SetPointSizeCB(optr o, void *e, void *data)
-{
-    VisTextCharAttr *a = e;
-    WWFixed *s = data;
-
-    (void) o;
-    a->VTCA_pointSize.WBF_int = s->WWF_int;
-    a->VTCA_pointSize.WBF_frac = s->WWF_frac >> 8;
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SET_POINT_SIZE
-{
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetPointSizeCB,
-		   &pointSize);
-}
-
-/* SetTextStyleCallback: the same bits to set and to clear toggle them;
- * superscript and subscript exclude each other, the new one wins */
-typedef struct {
-    word set, clear, extSet, extClear;
-} StyleChange;
-
-static void SetTextStyleCB(optr o, void *e, void *data)
-{
-    VisTextCharAttr *a = e;
-    StyleChange *c = data;
-    byte s = a->VTCA_textStyles;
-
-    (void) o;
-    if ((byte) c->clear == (byte) c->set)
-	s ^= (byte) c->clear;
-    else
-	s = (s & ~(byte) c->clear) | (byte) c->set;
-    if ((s & (TS_SUPERSCRIPT | TS_SUBSCRIPT)) ==
-	(TS_SUPERSCRIPT | TS_SUBSCRIPT)) {
-	if (a->VTCA_textStyles & TS_SUPERSCRIPT)
-	    s &= ~TS_SUPERSCRIPT;
-	else
-	    s &= ~TS_SUBSCRIPT;
-    }
-    a->VTCA_textStyles = s;
-    a->VTCA_extendedStyles =
-	(a->VTCA_extendedStyles & ~c->extClear) | c->extSet;
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE
-{
-    StyleChange c;
-
-    c.set = styleBitsToSet;
-    c.clear = styleBitsToClear;
-    c.extSet = extBitsToSet;
-    c.extClear = extBitsToClear;
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetTextStyleCB, &c);
-}
-
-/* SetColorCallback: an index has no green and blue */
-static void SetColorCB(optr o, void *e, void *data)
-{
-    VisTextCharAttr *a = e;
-
-    (void) o;
-    a->VTCA_color = *(ColorQuad *) data;
-    if (a->VTCA_color.CQ_info == CF_INDEX)
-	a->VTCA_color.CQ_green = a->VTCA_color.CQ_blue = 0;
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR
-{
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetColorCB, &color);
-}
-
-static void SetGrayScreenCB(optr o, void *e, void *data)
-{
-    (void) o;
-    ((VisTextCharAttr *) e)->VTCA_grayScreen = *(SystemDrawMask *) data;
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN
-{
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetGrayScreenCB,
-		   &grayScreen);
 }

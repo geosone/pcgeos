@@ -1,5 +1,5 @@
 /*
- * tslMain.goc -- the selection (after tslMain.asm, tslMethodSelect.asm):
+ * tslMain.goc -- the selection (after tslMain.asm; the messages are in tslMethodSelect.goc):
  * VTI_selectStart to VTI_selectEnd, a cursor where they are the same.
  *
  * On the screen it is shown by tslInvert.goc and tslCursor.goc.
@@ -108,7 +108,7 @@ void TSL_SelectAdjust(optr o, dword offset)
 }
 
 /* the range made real, kept within the text and in order */
-static void SelectRange(optr o, dword start, dword end)
+void SelectRange(optr o, dword start, dword end)
 {
     VisTextRange r;
     dword size = TS_GetTextSize(o);
@@ -138,35 +138,4 @@ static void SelectRange(optr o, dword start, dword end)
     TextGStateDestroy(o);
     VT(o)->VTI_selectMinStart = r.VTR_start;
     VT(o)->VTI_selectMinEnd = r.VTR_start;
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_RANGE
-{
-    TSL_SelectGetSelection(oself, &vtr->VTR_start, &vtr->VTR_end);
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE
-{
-    SelectRange(oself, start, end);
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE_SMALL
-{
-    SelectRange(oself, start == 0xffff ? TEXT_ADDRESS_PAST_END : start,
-		end == 0xffff ? TEXT_ADDRESS_PAST_END : end);
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_ALL
-{
-    SelectRange(oself, 0, TEXT_ADDRESS_PAST_END);
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_START
-{
-    SelectRange(oself, 0, 0);
-}
-
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_END
-{
-    SelectRange(oself, TEXT_ADDRESS_PAST_END, TEXT_ADDRESS_PAST_END);
 }

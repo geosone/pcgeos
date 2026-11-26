@@ -571,7 +571,7 @@ static void SaveNewLineValues(LICL_vars *l, TOC_vars *v)
  * the line's flags, height and end in the LICL_vars, CF_LINE_CHANGED
  * if anything of it changed (then it is marked to draw).
  */
-void TL_LineCalculate(LICL_vars *l, LineFlags flags)
+void CommonLineCalculate(LICL_vars *l, LineFlags flags)
 {
     optr o = l->LICL_object;
     TOC_vars v;

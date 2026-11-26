@@ -1,0 +1,117 @@
+/*
+ * tslUtils.goc -- after tslUtils.asm: TSL_ConvertOffsetToCoordinate,
+ * FindNextWordEdge, FindPreviousWordEdge, FindPreviousParagraphEdge,
+ * FindNextParagraphEdge, TSL_IsParagraphStart, TSL_IsParagraphEnd,
+ * TSL_FindParagraphStart, TSL_FindParagraphEnd.
+ */
+@include "textInt.goh"
+#include <Internal/specUI.h>
+#include <timer.h>
+#include <chunkarr.h>
+#include <char.h>
+
+/*
+ * TSL_ConvertOffsetToCoordinate: where an offset is, in the text's
+ * coordinates: its left edge and the top of its line.  An offset
+ * between two lines is at the start of the second.
+ */
+void TSL_ConvertOffsetToCoordinate(optr o, dword offset, sword *x, sword *y)
+{
+    dword line = TL_LineFromOffset(o, offset, FALSE, NULL);
+    WBFixed top = TL_LineGetTop(o, line);
+    sword pos;
+
+    (void) TL_LineTextPosition(o, line, 0x7fff, offset, &pos, NULL);
+    *x = (sword) (pos + TL_LinePtr(o, line, NULL)->LI_adjustment);
+    *y = (sword) top.WBF_int;
+}
+
+#define C_CR_CHAR	0x0d
+
+/* FindNextWordEdge: the end of the word or of the room between words
+ * an offset is in */
+dword FindNextWordEdge(optr o, dword off)
+{
+    dword size = TS_GetTextSize(o);
+    Boolean word;
+
+    if (off >= size)
+	return size;
+    word = TSL_IsWordPart(o, off);
+    while (off < size && TSL_IsWordPart(o, off) == word)
+	off++;
+    return off;
+}
+
+/* FindPreviousWordEdge: the start of the word or room before an
+ * offset */
+dword FindPreviousWordEdge(optr o, dword off)
+{
+    Boolean word;
+
+    if (!off)
+	return 0;
+    off--;
+    word = TSL_IsWordPart(o, off);
+    while (off && TSL_IsWordPart(o, off - 1) == word)
+	off--;
+    return off;
+}
+
+/* FindPreviousParagraphEdge: the start of the paragraph before an
+ * offset */
+dword FindPreviousParagraphEdge(optr o, dword off)
+{
+    if (!off)
+	return 0;
+    off--;
+    while (off && (byte) TS_GetCharAtOffset(o, off - 1) != C_CR_CHAR)
+	off--;
+    return off;
+}
+
+/* FindNextParagraphEdge: the start of the next paragraph, or the end
+ * of the text */
+dword FindNextParagraphEdge(optr o, dword off)
+{
+    dword size = TS_GetTextSize(o);
+
+    while (off < size) {
+	if ((byte) TS_GetCharAtOffset(o, off++) == C_CR_CHAR)
+	    break;
+    }
+    return off;
+}
+
+Boolean TSL_IsParagraphStart(optr o, dword pos)
+{
+    return pos == 0 || TS_GetCharAtOffset(o, pos - 1) == C_CR;
+}
+
+/* TRUE at a carriage return or the end of the text (*atEnd then) */
+Boolean TSL_IsParagraphEnd(optr o, dword pos, Boolean *atEnd)
+{
+    *atEnd = pos >= TS_GetTextSize(o);
+    return *atEnd || TS_GetCharAtOffset(o, pos) == C_CR;
+}
+
+/* TSL_FindParagraphStart: the start of the paragraph pos is in (pos
+ * itself at a paragraph's start) */
+dword TSL_FindParagraphStart(optr o, dword pos)
+{
+    while (pos && TS_GetCharAtOffset(o, pos - 1) != C_CR)
+	pos--;
+    return pos;
+}
+
+/* TSL_FindParagraphEnd: the carriage return at or after pos, FALSE at
+ * the end of the text */
+Boolean TSL_FindParagraphEnd(optr o, dword *pos)
+{
+    dword size = TS_GetTextSize(o);
+
+    for (; *pos < size; (*pos)++)
+	if (TS_GetCharAtOffset(o, *pos) == C_CR)
+	    return TRUE;
+    return FALSE;
+}

@@ -1,0 +1,178 @@
+/*
+ * taRunQuery.goc -- after taRunQuery.asm: TA_GetParaAttrForPosition,
+ * TA_FillTextAttrForDraw, TA_GetCharAttrForPosition,
+ * MSG_VIS_TEXT_GET_RUN_BOUNDS.
+ */
+@include "textInt.goh"
+#include <font.h>
+#include <chunkarr.h>
+#include <char.h>
+
+/* RoundParaAttrPos: points * 8 to pixels */
+static word RoundPos(word v)
+{
+    return (word) (v + 4) >> 3;
+}
+
+/*
+ * ParaAttrVirtualToPhysical: the margins and tabs in pixels from the
+ * left edge of the text (inside the object's left and right margin);
+ * the right margin, an inset in the attribute, a position.  The text
+ * is never narrower than VIS_TEXT_MIN_TEXT_FIELD_WIDTH; a one line
+ * object is as wide as a line may be.
+ */
+static void ParaAttrVirtualToPhysical(optr o, VisTextMaxParaAttr *m)
+{
+    VisTextParaAttr *a = &m->VTMPA_paraAttr;
+    VisTextInstance *t = VT(o);
+    VisInstance *v = (VisInstance *) t;
+    sword width, right, limit, min;
+    word i;
+
+    width = v->VI_bounds.R_right - v->VI_bounds.R_left -
+	    2 * t->VTI_lrMargin;
+    right = (t->VTI_state & VTS_ONE_LINE) ?
+	    VIS_TEXT_ONE_LINE_RIGHT_MARGIN : width;
+    a->VTPA_rightMargin = RoundPos(a->VTPA_rightMargin);
+    a->VTPA_paraMargin = RoundPos(a->VTPA_paraMargin);
+    a->VTPA_leftMargin = RoundPos(a->VTPA_leftMargin);
+    /* the left margins leave room for the narrowest text */
+    /* (the inset counts from the object's edge) */
+    i = (word) (width - right);
+    a->VTPA_rightMargin = i >= a->VTPA_rightMargin ? 0 :
+			  (word) (a->VTPA_rightMargin - i);
+    limit = right - VIS_TEXT_MIN_TEXT_FIELD_WIDTH;
+    if (limit < 0)
+	limit = 0;
+    if (a->VTPA_leftMargin > (word) limit)
+	a->VTPA_leftMargin = (word) limit;
+    if (a->VTPA_paraMargin > (word) limit)
+	a->VTPA_paraMargin = (word) limit;
+    min = (sword) (a->VTPA_leftMargin > a->VTPA_paraMargin ?
+		   a->VTPA_leftMargin : a->VTPA_paraMargin) +
+	  VIS_TEXT_MIN_TEXT_FIELD_WIDTH;
+    if (min > right)
+	min = right;
+    right -= (sword) a->VTPA_rightMargin;
+    if (right < min)
+	right = min;
+    a->VTPA_rightMargin = (word) right;
+    for (i = 0; i < a->VTPA_numberOfTabs && i < VIS_TEXT_MAX_TABS; i++)
+	m->VTMPA_tabs[i].T_position = RoundPos(m->VTMPA_tabs[i].T_position);
+}
+
+/*
+ * TA_GetParaAttrForPosition: the paragraph attribute at a position, in
+ * pixels; the range of the text it holds for
+ */
+void TA_GetParaAttrForPosition(optr o, dword pos, VisTextMaxParaAttr *a,
+			       dword *start, dword *end)
+{
+    word i;
+
+    if (!(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS)) {
+	TA_GetSingleParaAttr(o, a);
+	*start = 0;
+	*end = TEXT_ADDRESS_PAST_END;
+    } else {
+	/* (runs start at paragraphs: the one to the right) */
+	i = TA_RunForPosition(o, TRK_PARA_ATTR, pos, FALSE);
+	TA_GetElement(o, TRK_PARA_ATTR, TA_RunToken(o, TRK_PARA_ATTR, i), a);
+	*start = TA_RunPosition(o, TRK_PARA_ATTR, i);
+	*end = TA_RunPosition(o, TRK_PARA_ATTR, i + 1);
+    }
+    ParaAttrVirtualToPhysical(o, a);
+}
+
+/*
+ * TA_FillTextAttrForDraw: the drawing attributes at a position: the
+ * character attribute's, gray for an object that is not enabled or
+ * wants the 50% mask.  *count the characters they hold for; returns
+ * the extended styles.
+ */
+VisTextExtendedStyles TA_FillTextAttrForDraw(optr o, dword pos,
+					     TextAttr *ta, dword *count)
+{
+    VisTextCharAttr ca;
+    VisTextInstance *t;
+    Boolean gray;
+
+    TA_GetCharAttrForPosition(o, pos, FALSE, &ca, count);
+    t = VT(o);
+    gray = !(((VisInstance *) t)->VI_attrs & VA_FULLY_ENABLED) ||
+	   (t->VTI_features & VTF_USE_50_PCT_TEXT_MASK);
+    ta->TA_font = ca.VTCA_fontID;
+    ta->TA_size = ca.VTCA_pointSize;
+    ta->TA_trackKern = ca.VTCA_trackKerning;
+    ta->TA_color = ca.VTCA_color;
+    ta->TA_pattern = ca.VTCA_pattern;
+    ta->TA_mask = gray ? SDM_50 : ca.VTCA_grayScreen;
+    ta->TA_styleSet = ca.VTCA_textStyles;
+    ta->TA_styleClear = 0xff;
+    ta->TA_modeSet = TM_DRAW_BASE;
+    ta->TA_modeClear = 0;
+    ta->TA_fontWeight = ca.VTCA_fontWeight;
+    ta->TA_fontWidth = ca.VTCA_fontWidth;
+    return ca.VTCA_extendedStyles;
+}
+
+/* ---------------------------------------------------------------------
+ * Queries (taRunQuery.asm)
+ * ------------------------------------------------------------------- */
+
+/*
+ * TA_GetCharAttrForPosition (GetCharAttrMultiple): the character
+ * attribute at a position, *count the characters from it that have it.
+ * For the insertion (the cursor) the insertion token, else at a
+ * paragraph's start or the end of the text the attribute to the right,
+ * else the one to the left; for manipulation always to the right.
+ */
+void TA_GetCharAttrForPosition(optr o, dword pos, Boolean insertion,
+			       VisTextCharAttr *a, dword *count)
+{
+    word i, token = CA_NULL_ELEMENT;
+    Boolean left = FALSE;
+
+    if (!(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS)) {
+	TA_GetSingleCharAttr(o, a);
+	if (count)
+	    *count = TEXT_ADDRESS_PAST_END - pos;
+	return;
+    }
+    if (insertion) {
+	token = GetInsertionElement(o);
+	if (token == CA_NULL_ELEMENT)
+	    left = !TSL_IsParagraphStart(o, pos) && TS_GetTextSize(o) != pos;
+    }
+    i = TA_RunForPosition(o, TRK_CHAR_ATTR, pos, left);
+    TA_GetElement(o, TRK_CHAR_ATTR,
+		  token != CA_NULL_ELEMENT ? token
+					   : TA_RunToken(o, TRK_CHAR_ATTR, i),
+		  a);
+    if (count)
+	*count = TA_RunPosition(o, TRK_CHAR_ATTR, i + 1) - pos;
+}
+
+/* TA_GetRunBounds: the run at the position (to the right) */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_RUN_BOUNDS
+{
+    TextRunKind kind;
+    word i;
+
+    if (runOffset == offsetof(VisTextInstance, VTI_charAttrRuns))
+	kind = TRK_CHAR_ATTR;
+    else if (runOffset == offsetof(VisTextInstance, VTI_paraAttrRuns))
+	kind = TRK_PARA_ATTR;
+    else
+	return;
+    if (!(pself->VTI_storageFlags & (kind == TRK_CHAR_ATTR ?
+					 VTSF_MULTIPLE_CHAR_ATTRS :
+					 VTSF_MULTIPLE_PARA_ATTRS))) {
+	retVal->VTR_start = 0;
+	retVal->VTR_end = TEXT_ADDRESS_PAST_END;
+	return;
+    }
+    i = TA_RunForPosition(oself, kind, position, FALSE);
+    retVal->VTR_start = TA_RunPosition(oself, kind, i);
+    retVal->VTR_end = TA_RunPosition(oself, kind, i + 1);
+}

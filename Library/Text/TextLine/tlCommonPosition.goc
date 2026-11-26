@@ -52,12 +52,12 @@ static word FieldTextPosition(optr o, dword start, dword max, sword pixel,
 }
 
 /*
- * TL_LineTextPosition (CommonLineTextPosition): the offset nearest a
+ * CommonLineTextPosition: the offset nearest a
  * pixel position on a line (from the line's left edge), not beyond
  * stop; *x where that offset is.  *over (may be NULL): the position is
  * over the line's text.  The object has its gstate.
  */
-dword TL_LineTextPosition(optr o, dword line, sword pixel, dword stop,
+dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
 			  sword *x, Boolean *over)
 {
     word size, fields, f;
@@ -133,27 +133,4 @@ dword TL_LineTextPosition(optr o, dword line, sword pixel, dword stop,
 			     x);
     *x = (sword) (*x + left);
     return cur;
-}
-
-/*
- * TL_LineFromPosition (SmallLineFromPositionGetInfo): the line at a
- * height in the text; the last one below them all (*below set)
- */
-dword TL_LineFromPosition(optr o, sword y, Boolean *below)
-{
-    dword n = TL_LineGetCount(o), i;
-    sdword pos = (sdword) y << 8;
-
-    if (below)
-	*below = FALSE;
-    for (i = 0; i < n; i++) {
-	const LineInfo *li = TL_LinePtr(o, i, NULL);
-
-	pos -= ((sdword) li->LI_hgt.WBF_int << 8) + li->LI_hgt.WBF_frac;
-	if (pos < 0)
-	    return i;
-    }
-    if (below)
-	*below = TRUE;
-    return n ? n - 1 : 0;
 }

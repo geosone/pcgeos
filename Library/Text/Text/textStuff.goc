@@ -1,0 +1,26 @@
+/*
+ * textStuff.goc -- after textStuff.asm: TextCheckCanDraw,
+ * TextCheckCanDrawEditable.
+ */
+@include "textInt.goh"
+#include <Internal/specUI.h>
+#include <timer.h>
+
+/* TextCheckCanDraw: on the screen, with lines and a gstate there */
+Boolean TextCheckCanDraw(optr o)
+{
+    VisTextInstance *t = VT(o);
+    VisInstance *v = (VisInstance *) t;
+
+    if ((v->VI_optFlags & VOF_GEOMETRY_INVALID) ||
+	(t->VTI_intFlags & VTIF_SUSPENDED) || !t->VTI_lines ||
+	!(v->VI_attrs & VA_DRAWABLE) || !(v->VI_attrs & VA_REALIZED) ||
+	!t->VTI_gstate)
+	return FALSE;
+    return GrGetWinHandle(t->VTI_gstate) != NullHandle;
+}
+
+Boolean TextCheckCanDrawEditable(optr o)
+{
+    return TextCheckCanDraw(o) && (VT(o)->VTI_state & VTS_EDITABLE);
+}

@@ -1,0 +1,21 @@
+/*
+ * textUtils.goc -- after textUtils.asm: SendToTextOutput.
+ */
+@include "textInt.goh"
+#include <Internal/specUI.h>
+
+/* SendToTextOutput (textUtils.asm): the message with the object to
+ * VTI_output; a generic text object's goes as its action */
+void SendToTextOutput(optr o, Message msg)
+{
+    optr out = VT(o)->VTI_output;
+    EventHandle ev;
+
+    if (!out)
+	return;
+    if (VT(o)->VI_typeFlags & VTF_IS_GEN) {
+	CObjMessageP(MF_RECORD, 0, msg, &o, sizeof(o), &ev, sizeof(ev));
+	@call o::MSG_GEN_OUTPUT_ACTION(ev, out);
+    } else
+	CObjMessageP(0, out, msg, &o, sizeof(o), NULL, 0);
+}

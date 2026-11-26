@@ -68,7 +68,7 @@ extern void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a);
  * shown, the object told */
 extern void TA_ReflectChange(optr o);
 
-/* TextAttr/taRun.goc: the attribute runs (VTSF_MULTIPLE_CHAR_ATTRS,
+/* TextAttr/taRunLow.goc and beside: the attribute runs (VTSF_MULTIPLE_CHAR_ATTRS,
  * VTSF_MULTIPLE_PARA_ATTRS) */
 typedef enum { TRK_CHAR_ATTR, TRK_PARA_ATTR } TextRunKind;
 /* the element (a VisTextCharAttr or VisTextMaxParaAttr) changed */
@@ -81,13 +81,13 @@ extern void TA_GetElement(optr o, TextRunKind kind, word token, void *buf);
 extern word TA_AddElement(optr o, TextRunKind kind, void *element);
 extern void TA_ElementAddRef(optr o, TextRunKind kind, word token);
 extern void TA_RemoveElement(optr o, TextRunKind kind, word token);
-extern Boolean TA_IsParagraphStart(optr o, dword pos);
+extern Boolean TSL_IsParagraphStart(optr o, dword pos);
 /* TRUE at a carriage return or the end of the text (*atEnd then) */
-extern Boolean TA_IsParagraphEnd(optr o, dword pos, Boolean *atEnd);
+extern Boolean TSL_IsParagraphEnd(optr o, dword pos, Boolean *atEnd);
 /* *pos to the carriage return at or after it; FALSE (at the end of the
  * text) if there is none */
-extern Boolean TA_FindParagraphEnd(optr o, dword *pos);
-extern dword TA_FindParagraphStart(optr o, dword pos);
+extern Boolean TSL_FindParagraphEnd(optr o, dword *pos);
+extern dword TSL_FindParagraphStart(optr o, dword pos);
 /* the attribute of the range changed by cb (or, with none, set to the
  * element token) */
 extern dword TA_ModifyRun(optr o, TextRunKind kind, dword start,
@@ -265,5 +265,66 @@ extern void TSL_StopCursorTimer(optr o);
 extern void TSL_DrawHilite(optr o, dword start, dword end);
 extern void EditHilite(optr o);
 extern void EditUnHilite(optr o);
+
+/* the small and common line routines behind tlExternal.goc */
+void CommonLineCalculate(LICL_vars *l, LineFlags flags);
+dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop, sword *x, Boolean *over);
+void SmallStorageCreate(optr o);
+void SmallStorageDestroy(optr o);
+dword SmallLineGetCount(optr o);
+void SmallLineInsert(optr o, dword line, word count);
+void SmallLineDelete(optr o, dword line, word count);
+dword SmallLineToOffsetStart(optr o, dword line);
+dword SmallLineFromOffsetGetStart(optr o, dword offset, Boolean first, dword *start);
+WBFixed SmallLineGetTop(optr o, dword line);
+
+/* taParaAttr.goc and taAttr.goc */
+void SelectTab(optr o, word pos);
+
+/* taRunLow.goc and taElement.goc */
+word GetInsertionElement(optr o);
+word ClearInsertionElement(optr o, Boolean unref);
+void SetInsertionElement(optr o, word token);
+
+/* taRunLow.goc and taRunManip.goc */
+optr TA_RunArray(optr o, TextRunKind kind);
+void TA_SetRunPos(optr o, TextRunKind kind, word i, dword pos);
+Boolean TA_RunAtEnd(dword pos);
+dword CoalesceRun(optr o, TextRunKind kind);
+
+/* tslCursor.goc and tslMethodCursor.goc */
+void TextTimerStart(optr o, Message msg);
+
+/* tslInvert.goc and tslMisc.goc */
+void InvertRange(optr o, dword start, dword end);
+
+/* tslKbdShortcuts.goc and tslUtils.goc */
+Boolean TSL_IsWordPart(optr o, dword offset);
+dword FindNextWordEdge(optr o, dword off);
+dword FindPreviousWordEdge(optr o, dword off);
+dword FindPreviousParagraphEdge(optr o, dword off);
+dword FindNextParagraphEdge(optr o, dword off);
+
+/* taRunLow.goc and taRunManip.goc */
+TextRunArrayElement *TA_Run(optr o, TextRunKind kind, word i);
+void TA_RunInsert(optr o, TextRunKind kind, word i, dword pos,
+	word token);
+
+/* taCharAttr.goc and taAttr.goc */
+Boolean FixupRange(optr o, VisTextRange *r, dword start, dword end);
+
+/* taParaAttr.goc and taAttr.goc */
+void ChangeParaAttr(optr o, dword start, dword end,
+	TA_ModifyCallback *cb, void *data);
+
+/* tlSmallStorage.goc and tlSmallLineInfo.goc */
+optr Lines(optr o);
+
+/* tslCursor.goc and tslMethodCursor.goc */
+Boolean CursorNoFocus(optr o);
+void CursorToggle(optr o);
+
+/* tslMain.goc and textCompatibility.goc */
+void SelectRange(optr o, dword start, dword end);
 
 #endif

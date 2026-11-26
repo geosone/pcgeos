@@ -1,6 +1,6 @@
 /*
  * tsExternal.goc -- the text storage (after tsExternal.asm and the
- * small object's tsSmallAccess.asm, tsSmallCreDest.asm,
+ * small object's tsSmallAccess.asm,
  * tsSmallModify.asm, tsSmallGetText.asm): the text of a small object is
  * a chunk of its block, null terminated (VTI_text).
  *
@@ -16,20 +16,6 @@ static optr TextOptr(optr o)
     if (!VT(o)->VTI_text)
 	TS_SmallCreateTextStorage(o);
     return ConstructOptr(OptrToHandle(o), VT(o)->VTI_text);
-}
-
-/* TS_SmallCreateTextStorage: an empty text, dirty unless the object
- * ignores that */
-void TS_SmallCreateTextStorage(optr o)
-{
-    MemHandle mh = OptrToHandle(o);
-    ObjChunkFlags f = ObjGetFlags(o);
-    ChunkHandle c = LMemAlloc(mh, TEXT_INIT_STREAM);
-
-    *(char *) LMemDeref(ConstructOptr(mh, c)) = 0;
-    ObjSetFlags(ConstructOptr(mh, c),
-		(f & OCF_IGNORE_DIRTY) | OCF_DIRTY, 0);
-    VT(o)->VTI_text = c;
 }
 
 dword TS_GetTextSize(optr o)

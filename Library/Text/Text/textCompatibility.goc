@@ -1,0 +1,11 @@
+/*
+ * textCompatibility.goc -- after textCompatibility.asm:
+ * MSG_VIS_TEXT_SELECT_RANGE_SMALL.
+ */
+@include "textInt.goh"
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE_SMALL
+{
+    SelectRange(oself, start == 0xffff ? TEXT_ADDRESS_PAST_END : start,
+		end == 0xffff ? TEXT_ADDRESS_PAST_END : end);
+}

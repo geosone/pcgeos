@@ -1,0 +1,78 @@
+/*
+ * tslMisc.goc -- after tslMisc.asm: InvertRange.
+ */
+@include "textInt.goh"
+
+static sdword W(const WBFixed *w)
+{
+    return ((sdword) w->WBF_int << 8) + w->WBF_frac;
+}
+
+/*
+ * InvertRange (CommonLineInvertRange, LineInvertArea): the characters
+ * from start to end inverted, line by line: from the line's left edge
+ * or the start to the end of its last field or the end
+ */
+void InvertRange(optr o, dword start, dword end)
+{
+    VisTextInstance *t = VT(o);
+    VisInstance *v = (VisInstance *) t;
+    GStateHandle g = t->VTI_gstate;
+    dword first, last, line, ls, s;
+    sdword top;
+    WBFixed wtop;
+    sword width = (sword) (v->VI_bounds.R_right - v->VI_bounds.R_left -
+			   2 * t->VTI_lrMargin);
+
+    if (start > end) {
+	s = start;
+	start = end;
+	end = s;
+    }
+    last = TL_LineFromOffset(o, end, TRUE, NULL);
+    first = TL_LineFromOffset(o, start, FALSE, &ls);
+    if (first > last)
+	return;
+    wtop = TL_LineGetTop(o, first);
+    top = W(&wtop);
+    GrSaveState(g);
+    TextGStateToText(o, FALSE);
+    GrSetAreaMaskSys(g, SDM_100);
+    GrSetMixMode(g, MM_INVERT);
+    for (line = first; line <= last; line++) {
+	const LineInfo *li = TL_LinePtr(o, line, NULL);
+	sdword hgt = W(&li->LI_hgt);
+	dword count = TL_LineGetCharCount(li);
+	word fields = TL_LineGetFieldCount(o, line);
+	sword adj = li->LI_adjustment, left, right, x;
+
+	if (hgt) {
+	    if (ls >= start)
+		left = adj;
+	    else {
+		(void) TL_LineTextPosition(o, line, 0x7fff, start, &x, NULL);
+		left = (sword) (x + adj);
+	    }
+	    li = TL_LinePtr(o, line, NULL);
+	    if (ls + count <= end) {
+		const FieldInfo *fi = &li->LI_firstField + (fields - 1);
+
+		right = (sword) (fi->FI_position + fi->FI_width + adj);
+	    } else {
+		(void) TL_LineTextPosition(o, line, 0x7fff, end, &x, NULL);
+		right = (sword) (x + adj);
+	    }
+	    left = (sword) (left + VT(o)->VTI_leftOffset);
+	    right = (sword) (right + VT(o)->VTI_leftOffset);
+	    if (right > width)
+		right = width;
+	    if (left < right)
+		GrFillRect(g, left, (sword) ((top + 0xff) >> 8), right,
+			   (sword) ((top + hgt + 0xff) >> 8));
+	}
+	top += hgt;
+	ls += count;
+    }
+    GrSetMixMode(g, MM_COPY);
+    GrRestoreState(g);
+}

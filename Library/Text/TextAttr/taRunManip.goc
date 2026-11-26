@@ -1,0 +1,362 @@
+/*
+ * taRunManip.goc -- after taRunManip.asm:
+ * TA_UpdateRunsForSelectionChange, CoalesceRun,
+ * TA_UpdateRunsForReplacement, TA_ModifyRun.
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+#include <char.h>
+
+/* RunArrayDelete */
+static void RunDelete(optr o, TextRunKind kind, word i)
+{
+    optr a = TA_RunArray(o, kind);
+
+    ChunkArrayDelete(a, ChunkArrayElementToPtr(a, i, NULL));
+    ObjMarkDirty(o);
+}
+
+/* TA_UpdateRunsForSelectionChange: a new selection drops the insertion
+ * token */
+void TA_UpdateRunsForSelectionChange(optr o)
+{
+    if (VT(o)->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS)
+	(void) ClearInsertionElement(o, TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * Coalescing and changing (taRunManip.asm)
+ * ------------------------------------------------------------------- */
+
+/* CoalesceRun: runs with the token of the one before, and the first of
+ * two at the same position, removed; the position of the last real run */
+dword CoalesceRun(optr o, TextRunKind kind)
+{
+    word i = 0, lastToken;
+    dword lastPos, pos;
+
+    lastToken = TA_RunToken(o, kind, 0);
+    lastPos = TA_RunPosition(o, kind, 0);
+    for (i = 1; ; ) {
+	pos = TA_RunPosition(o, kind, i);
+	if (TA_RunAtEnd(pos))
+	    break;
+	if (TA_RunToken(o, kind, i) == lastToken) {
+	    TA_RemoveElement(o, kind, lastToken);
+	    RunDelete(o, kind, i);
+	    continue;
+	}
+	if (pos == lastPos) {
+	    TA_RemoveElement(o, kind, TA_RunToken(o, kind, i - 1));
+	    RunDelete(o, kind, i - 1);
+	    if (i > 1) {
+		i--;
+		lastToken = TA_RunToken(o, kind, i - 1);
+		lastPos = TA_RunPosition(o, kind, i - 1);
+	    } else {
+		lastToken = TA_RunToken(o, kind, 0);
+		lastPos = TA_RunPosition(o, kind, 0);
+		i = 1;
+	    }
+	    continue;
+	}
+	lastToken = TA_RunToken(o, kind, i);
+	lastPos = pos;
+	i++;
+    }
+    return lastPos;
+}
+/*
+ * UpdateRun: the runs of a kind moved for the replacement of the range
+ * by insCount characters (the text not yet replaced).  TRUE if the
+ * attributes the UI shows may have changed.
+ */
+static Boolean UpdateRun(optr o, TextRunKind kind,
+			 const VisTextReplaceParameters *rp, Boolean middle)
+{
+    Boolean para = kind == TRK_PARA_ATTR, updateUI = FALSE,
+	    coalesce = FALSE, atEnd;
+    dword rStart = rp->VTRP_range.VTR_start, rEnd = rp->VTRP_range.VTR_end;
+    dword ins = rp->VTRP_insCount, del = rEnd - rStart;
+    dword runPos, nextPos, p;
+    word i, insToken = CA_NULL_ELEMENT;
+
+    /* a replacement takes the attribute of the replaced text */
+    if (ins && del && !para) {
+	updateUI = TRUE;
+	insToken = TA_RunToken(o, kind,
+			       TA_RunForPosition(o, kind, rStart, FALSE));
+	SetInsertionElement(o, insToken);
+    }
+    i = TA_RunForPosition(o, kind, rStart, TRUE);
+    if (rStart && i)
+	i--;
+    for (;;) {
+	runPos = TA_RunPosition(o, kind, i);
+	/* case 0: the last run */
+	if (TA_RunAtEnd(runPos))
+	    break;
+	nextPos = TA_RunPosition(o, kind, i + 1);
+	/* case -1: the only run stays */
+	if (runPos == 0 && TA_RunAtEnd(nextPos))
+	    break;
+	/* case 1: the run ends before the range */
+	if (nextPos <= rStart) {
+	    i++;
+	    continue;
+	}
+	/* case 2: the run is after the range */
+	if (runPos >= rEnd) {
+	    if (runPos == rEnd) {
+		/* the run starts where the range ends */
+		if (para) {
+		    if (!del) {
+			i++;
+			continue;
+		    }
+		    goto extendToNextParagraph;
+		}
+		if (del) {
+		    /* the carriage return after a deletion joins the
+		     * run before */
+		    if (TSL_IsParagraphEnd(o, runPos, &atEnd)) {
+			if (atEnd)
+			    goto doDelete;
+			TA_SetRunPos(o, kind, i, runPos + 1);
+			runPos++;
+			nextPos = TA_RunPosition(o, kind, i + 1);
+		    }
+		}
+		if (TSL_IsParagraphStart(o, rEnd))
+		    updateUI = TRUE;
+		if (TSL_IsParagraphStart(o, rStart)) {
+		    /* at a paragraph's start the insertion does not move
+		     * the run, the deletion does */
+		    if (del) {
+			coalesce = TRUE;
+			TA_SetRunPos(o, kind, i, runPos - del);
+		    }
+		    i++;
+		    continue;
+		}
+	    }
+	    if (runPos == 0) {
+		i++;
+		continue;
+	    }
+	    if (del)
+		coalesce = TRUE;
+	    TA_SetRunPos(o, kind, i, runPos - del + ins);
+	    i++;
+	    continue;
+	}
+	/* the run starts before the range: not ours */
+	if (runPos < rStart) {
+	    i++;
+	    continue;
+	}
+	/* the run starts at the range and goes on past it: kept (unless
+	 * only its carriage return is left after it) */
+	if (runPos == rStart && middle && nextPos > rEnd) {
+	    if (nextPos - 1 != rEnd)
+		goto case4;
+	    if (para) {
+		i++;
+		continue;
+	    }
+	    if (!TSL_IsParagraphEnd(o, rEnd, &atEnd) ||
+		TSL_IsParagraphStart(o, rStart)) {
+		i++;
+		continue;
+	    }
+	    goto doDelete;
+	}
+	/* case 3: the run is in the range */
+	updateUI = TRUE;
+	if (!middle) {
+	    /* deleting at the end: the last paragraph attribute, and a
+	     * character attribute at a paragraph's start, stay if they
+	     * are not all deleted */
+	    if (para || TSL_IsParagraphStart(o, rStart)) {
+		if (TA_RunAtEnd(nextPos) && runPos <= rStart) {
+		    i++;
+		    continue;
+		}
+	    }
+	    goto doDelete;
+	}
+	if (nextPos <= rEnd)
+	    goto doDelete;
+case4:
+	/* case 4: the run goes on past the range's end */
+	if (rStart == 0) {
+	    i++;
+	    continue;
+	}
+	if (para)
+	    goto extendToNextParagraph;
+	TA_SetRunPos(o, kind, i, rStart + ins);
+	i++;
+	continue;
+
+extendToNextParagraph:
+	/* the paragraph run starts with the next paragraph after the
+	 * range */
+	updateUI = TRUE;
+	if (TSL_IsParagraphStart(o, rStart))
+	    p = rEnd;
+	else {
+	    p = rEnd;
+	    if (TSL_FindParagraphEnd(o, &p))
+		p++;
+	    else
+		p = TEXT_ADDRESS_PAST_END;
+	}
+	if (TA_RunAtEnd(p))
+	    goto doDelete;
+	TA_SetRunPos(o, kind, i, p);
+	if (p == nextPos)
+	    goto doDelete;
+	p -= del;
+	if (p != rStart)
+	    p += ins;
+	TA_SetRunPos(o, kind, i, p);
+	i++;
+	continue;
+
+doDelete:
+	TA_RemoveElement(o, kind, TA_RunToken(o, kind, i));
+	RunDelete(o, kind, i);
+	if (runPos == 0)
+	    TA_SetRunPos(o, kind, i, 0);
+	coalesce = updateUI = TRUE;
+    }
+    if (coalesce)
+	(void) CoalesceRun(o, kind);
+    if (para)
+	return updateUI && del;
+    /* the insertion token for the inserted text */
+    insToken = ClearInsertionElement(o, FALSE);
+    if (insToken != CA_NULL_ELEMENT) {
+	if (ins) {
+	    dword s = rStart, e;
+	    Boolean eot;
+
+	    /* (a change at a paragraph's end takes its CR too) */
+	    if (TSL_IsParagraphEnd(o, s, &eot) && !eot)
+		s++;
+	    e = middle ? s + ins : TEXT_ADDRESS_PAST_END;
+	    (void) TA_ModifyRun(o, kind, rStart, e, NULL, NULL, insToken);
+	} else
+	    updateUI = TRUE;
+	TA_RemoveElement(o, kind, insToken);
+    }
+    return updateUI && del;
+}
+
+/* TA_UpdateRunsForReplacement: TRUE if the attributes shown may have
+ * changed */
+Boolean TA_UpdateRunsForReplacement(optr o,
+				    const VisTextReplaceParameters *p)
+{
+    VisTextStorageFlags f = VT(o)->VTI_storageFlags;
+    Boolean middle = TS_GetTextSize(o) != p->VTRP_range.VTR_end,
+	    changed = FALSE;
+
+    if (f & VTSF_MULTIPLE_CHAR_ATTRS)
+	changed |= UpdateRun(o, TRK_CHAR_ATTR, p, middle);
+    if (f & VTSF_MULTIPLE_PARA_ATTRS)
+	changed |= UpdateRun(o, TRK_PARA_ATTR, p, middle);
+    return changed;
+}
+
+static void SetToken(optr o, TextRunKind kind, word i, word token)
+{
+    TA_Run(o, kind, i)->TRAE_token = token;
+    ObjMarkDirty(o);
+}
+/* MR_ModifyElementLow: the element changed by the callback (or
+ * replaced by `token'), the old reference given up; the new token */
+static word ModifyElement(optr o, TextRunKind kind, word old,
+			  TA_ModifyCallback *cb, void *data, word token)
+{
+    VisTextMaxParaAttr buf;
+    word t;
+
+    TA_GetElement(o, kind, old, &buf);
+    TA_RemoveElement(o, kind, old);
+    if (cb) {
+	cb(o, &buf, data);
+	return TA_AddElement(o, kind, &buf);
+    }
+    /* (CA_NULL_ELEMENT, the base style: no style sheets yet) */
+    if (token == CA_NULL_ELEMENT)
+	return TA_AddElement(o, kind, &buf);
+    t = token;
+    TA_ElementAddRef(o, kind, t);
+    return t;
+}
+
+/*
+ * ModifyRunWithoutUndo: the attribute of a range changed by the
+ * callback (or set to the element `token'); at a cursor (an empty range
+ * inside the text) the character attribute becomes the insertion token
+ * instead.  The position of the last real run, or 0xffffffff for an
+ * insertion token.
+ */
+dword TA_ModifyRun(optr o, TextRunKind kind, dword start, dword end,
+		   TA_ModifyCallback *cb, void *data, word token)
+{
+    dword size = TS_GetTextSize(o), p;
+    word i, endToken, ins;
+
+    if (start == end && kind == TRK_CHAR_ATTR && size != start) {
+	if (!cb && token != CA_NULL_ELEMENT) {
+	    SetInsertionElement(o, token);
+	    return 0xffffffff;
+	}
+	ins = GetInsertionElement(o);
+	if (ins == CA_NULL_ELEMENT) {
+	    /* at a paragraph's start the attribute to the right, else the
+	     * one to the left */
+	    i = TA_RunForPosition(o, kind, start,
+				  !TSL_IsParagraphStart(o, start));
+	    ins = TA_RunToken(o, kind, i);
+	}
+	TA_ElementAddRef(o, kind, ins);
+	ins = ModifyElement(o, kind, ins, cb, data, token);
+	SetInsertionElement(o, ins);
+	TA_RemoveElement(o, kind, ins);
+	return 0xffffffff;
+    }
+    /* the attribute at the end, kept for the text after the range */
+    endToken = TA_RunToken(o, kind, TA_RunForPosition(o, kind, end, FALSE));
+    TA_ElementAddRef(o, kind, endToken);
+    i = TA_RunForPosition(o, kind, start, FALSE);
+    if (TA_RunPosition(o, kind, i) != start) {
+	/* a run where the change starts */
+	TA_RunInsert(o, kind, i, TA_RunPosition(o, kind, i),
+		  TA_RunToken(o, kind, i));
+	i++;
+	TA_SetRunPos(o, kind, i, start);
+	/* (the inserted run holds a reference too) */
+	TA_ElementAddRef(o, kind, TA_RunToken(o, kind, i));
+    }
+    for (;;) {
+	SetToken(o, kind, i,
+		 ModifyElement(o, kind, TA_RunToken(o, kind, i), cb, data,
+			       token));
+	i++;
+	p = TA_RunPosition(o, kind, i);
+	if (p >= end)
+	    break;
+    }
+    if (p != end && !(TA_RunAtEnd(p) && end == size)) {
+	/* a run where it ends, so that the text after keeps its
+	 * attribute */
+	TA_RunInsert(o, kind, i, end, endToken);
+	TA_ElementAddRef(o, kind, endToken);
+    }
+    TA_RemoveElement(o, kind, endToken);
+    return CoalesceRun(o, kind);
+}

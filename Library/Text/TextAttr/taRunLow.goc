@@ -1,0 +1,121 @@
+/*
+ * taRunLow.goc -- the attribute runs of a small text object (after
+ * taRunLow.asm; changing runs is in taRunManip.goc, their elements in
+ * taElement.goc, creating them in taStorage.goc, looking up attributes
+ * in taRunQuery.goc).
+ *
+ * A run array is a chunk array of TextRunArrayElement in the object's
+ * block (VTI_charAttrRuns, VTI_paraAttrRuns with VTSF_MULTIPLE_...):
+ * a run starts at TRAE_position and has the attribute TRAE_token, an
+ * element of the element array the run array's header names
+ * (TRAH_elementArray, a chunk of the same block); the last run is at
+ * TEXT_ADDRESS_PAST_END with CA_NULL_ELEMENT.  The text at a position
+ * has the attribute of the last run that starts at or before it (the
+ * run "to the right"; to the left: at a run's start, the run before).
+ * Elements are counted: one reference per run that uses them (and per
+ * insertion token, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN: the
+ * attribute for text typed at a cursor).
+ *
+ * Port32 (Port32/ABI.md section 13z): runs are positions and tokens,
+ * looked up by index (no pointers kept across a change of the block).
+ * Not yet: large objects (runs in huge arrays), elements in a VM block
+ * (TRAH_elementVMBlock: shared with other objects, style sheets),
+ * graphics and type runs, undo, the cached last run position
+ * (TEMP_VIS_TEXT_CACHED_RUN_INFO: only an optimization).
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+#include <char.h>
+
+
+/* ---------------------------------------------------------------------
+ * The run array (taRunLow.asm)
+ * ------------------------------------------------------------------- */
+
+static ChunkHandle RunChunk(optr o, TextRunKind kind)
+{
+    VisTextInstance *t = VT(o);
+
+    return kind == TRK_CHAR_ATTR ? t->VTI_charAttrRuns : t->VTI_paraAttrRuns;
+}
+
+/* RunArrayLock */
+optr TA_RunArray(optr o, TextRunKind kind)
+{
+    return ConstructOptr(OptrToHandle(o), RunChunk(o, kind));
+}
+
+TextRunArrayElement *TA_Run(optr o, TextRunKind kind, word i)
+{
+    return ChunkArrayElementToPtr(TA_RunArray(o, kind), i, NULL);
+}
+
+static dword PosOf(const TextRunArrayElement *r)
+{
+    return (word) r->TRAE_position.WAAH_low |
+	   ((dword) (byte) r->TRAE_position.WAAH_high << 16);
+}
+
+dword TA_RunPosition(optr o, TextRunKind kind, word i)
+{
+    return PosOf(TA_Run(o, kind, i));
+}
+
+word TA_RunToken(optr o, TextRunKind kind, word i)
+{
+    return TA_Run(o, kind, i)->TRAE_token;
+}
+
+void TA_SetRunPos(optr o, TextRunKind kind, word i, dword pos)
+{
+    TextRunArrayElement *r = TA_Run(o, kind, i);
+
+    r->TRAE_position.WAAH_low = (sword) (word) pos;
+    r->TRAE_position.WAAH_high = (sbyte) (byte) (pos >> 16);
+    ObjMarkDirty(o);
+}
+
+Boolean TA_RunAtEnd(dword pos)
+{
+    return (pos >> 16) == TEXT_ADDRESS_PAST_END_HIGH;
+}
+
+/* RunArrayInsert: a run before run i */
+void TA_RunInsert(optr o, TextRunKind kind, word i, dword pos,
+		      word token)
+{
+    optr a = TA_RunArray(o, kind);
+    TextRunArrayElement *r;
+
+    r = ChunkArrayInsertAt(a, ChunkArrayElementToPtr(a, i, NULL), 0);
+    r->TRAE_token = token;
+    TA_SetRunPos(o, kind, i, pos);
+}
+
+/*
+ * GetRunForPosition (right: a run starting at pos is the one) and
+ * GetRunForPositionLeft (the run before it); TEXT_ADDRESS_PAST_END is
+ * in the middle of the last real run
+ */
+word TA_RunForPosition(optr o, TextRunKind kind, dword pos, Boolean left)
+{
+    word n = (word) ChunkArrayGetCount(TA_RunArray(o, kind)), i;
+
+    for (i = 0; i < n; i++) {
+	dword p = TA_RunPosition(o, kind, i);
+	if (pos < p || (pos == p && TA_RunAtEnd(pos)))
+	    break;		/* in the middle of the run before */
+	if (pos == p)
+	    return left && i ? i - 1 : i;
+    }
+    return i ? i - 1 : 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Paragraphs (TSL_IsParagraphStart, TSL_IsParagraphEnd)
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * The runs after a replacement (UpdateRun)
+ * ------------------------------------------------------------------- */
+

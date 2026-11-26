@@ -1,0 +1,32 @@
+/*
+ * tslMethodSelect.goc -- after tslMethodSelect.asm:
+ * MSG_VIS_TEXT_GET_SELECTION_RANGE, MSG_VIS_TEXT_SELECT_RANGE,
+ * MSG_VIS_TEXT_SELECT_ALL, MSG_VIS_TEXT_SELECT_START,
+ * MSG_VIS_TEXT_SELECT_END.
+ */
+@include "textInt.goh"
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_RANGE
+{
+    TSL_SelectGetSelection(oself, &vtr->VTR_start, &vtr->VTR_end);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE
+{
+    SelectRange(oself, start, end);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_ALL
+{
+    SelectRange(oself, 0, TEXT_ADDRESS_PAST_END);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_START
+{
+    SelectRange(oself, 0, 0);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SELECT_END
+{
+    SelectRange(oself, TEXT_ADDRESS_PAST_END, TEXT_ADDRESS_PAST_END);
+}

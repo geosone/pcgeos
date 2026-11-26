@@ -1,0 +1,91 @@
+/*
+ * taStorage.goc -- after taStorage.asm: MSG_VIS_TEXT_CREATE_STORAGE.
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+#include <char.h>
+
+/* ---------------------------------------------------------------------
+ * Storage (taStorage.asm)
+ * ------------------------------------------------------------------- */
+
+/* TA_CreateRunAndElementArrays: the run array (with its last run) and
+ * the element array, chunks of the object's block */
+static ChunkHandle CreateArrays(optr o, TextArrayType type, word elSize)
+{
+    MemHandle mh = OptrToHandle(o);
+    ChunkHandle runs, els;
+    TextElementArrayHeader *eh;
+    TextRunArrayHeader *rh;
+    TextRunArrayElement *r;
+
+    els = ElementArrayCreate(mh, elSize, sizeof(TextElementArrayHeader),
+			     OCF_DIRTY);
+    eh = LMemDerefHandles(mh, els);
+    eh->TEAH_arrayType = type;
+    runs = ChunkArrayCreate(mh, sizeof(TextRunArrayElement),
+			    sizeof(TextRunArrayHeader), OCF_DIRTY);
+    rh = LMemDerefHandles(mh, runs);
+    rh->TRAH_elementVMBlock = 0;
+    rh->TRAH_elementArray = els;
+    r = ChunkArrayAppend(ConstructOptr(mh, runs), 0);
+    r->TRAE_position.WAAH_low = (sword) TEXT_ADDRESS_PAST_END_LOW;
+    r->TRAE_position.WAAH_high = (sbyte) TEXT_ADDRESS_PAST_END_HIGH;
+    r->TRAE_token = CA_NULL_ELEMENT;
+    return runs;
+}
+
+/* the object's single attribute of a kind made the one run of new
+ * arrays (addElementAndInsertRun); the chunk of the attribute freed */
+static void CreateRuns(optr o, TextRunKind kind)
+{
+    VisTextMaxParaAttr a;	/* (large enough for both) */
+    VisTextInstance *t = VT(o);
+    Boolean para = kind == TRK_PARA_ATTR, single;
+    VisTextStorageFlags def = para ? VTSF_DEFAULT_PARA_ATTR
+				   : VTSF_DEFAULT_CHAR_ATTR;
+    ChunkHandle old, runs;
+    word token;
+
+    if (para)
+	TA_GetSingleParaAttr(o, &a);
+    else
+	TA_GetSingleCharAttr(o, (VisTextCharAttr *) &a);
+    single = !(t->VTI_storageFlags & def);
+    old = para ? t->VTI_paraAttrRuns : t->VTI_charAttrRuns;
+    /* (paragraph attributes have their tabs: of variable size) */
+    runs = CreateArrays(o, para ? TAT_PARA_ATTRS : TAT_CHAR_ATTRS,
+			para ? 0 : sizeof(VisTextCharAttr));
+    t = VT(o);
+    if (para)
+	t->VTI_paraAttrRuns = runs;
+    else
+	t->VTI_charAttrRuns = runs;
+    t->VTI_storageFlags = (t->VTI_storageFlags |
+			   (para ? VTSF_MULTIPLE_PARA_ATTRS
+				 : VTSF_MULTIPLE_CHAR_ATTRS)) & ~def;
+    if (single)
+	LMemFreeHandles(OptrToHandle(o), old);
+    token = TA_AddElement(o, kind, &a);
+    TA_RunInsert(o, kind, 0, 0, token);
+}
+
+/*
+ * VisTextCreateStorage: multiple character and paragraph attributes
+ * (the object's attribute the one run's).  Port32: the chunk of the
+ * single attribute is freed (the asm left it).  Not yet: types,
+ * graphics, styles, regions.
+ */
+@extern method VisTextClass, MSG_VIS_TEXT_CREATE_STORAGE
+{
+    (void) regionFlag;
+    if ((flags & VTSF_MULTIPLE_CHAR_ATTRS) &&
+	!(pself->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS))
+	CreateRuns(oself, TRK_CHAR_ATTR);
+    if ((flags & VTSF_MULTIPLE_PARA_ATTRS) &&
+	!(VT(oself)->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS))
+	CreateRuns(oself, TRK_PARA_ATTR);
+    ObjMarkDirty(oself);
+    if (VT(oself)->VI_typeFlags & VTF_IS_GEN)
+	@call oself::MSG_VIS_TEXT_UPDATE_GENERIC();
+}

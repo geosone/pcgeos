@@ -1,6 +1,6 @@
 /*
- * tslCursor.goc -- the text cursor (after tslCursor.asm,
- * tslMethodCursor.asm, of tslMisc.asm the position of an offset).
+ * tslCursor.goc -- the text cursor (after tslCursor.asm;
+ * the cursor messages are in tslMethodCursor.goc).
  *
  * The cursor stands at VTI_cursorPos (in the text's coordinates plus
  * VTI_leftOffset; P_y one below the top of its line) while the
@@ -21,54 +21,11 @@
 @extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_ON;
 @extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_OFF;
 
-#define VIS_TEXT_CURSOR_FLASH	40	/* ticks on, and off */
-
 typedef void SpecDrawTextCursorRoutine(optr o, GStateHandle gstate);
 
-/* TextCheckCanDraw: on the screen, with lines and a gstate there */
-Boolean TextCheckCanDraw(optr o)
-{
-    VisTextInstance *t = VT(o);
-    VisInstance *v = (VisInstance *) t;
-
-    if ((v->VI_optFlags & VOF_GEOMETRY_INVALID) ||
-	(t->VTI_intFlags & VTIF_SUSPENDED) || !t->VTI_lines ||
-	!(v->VI_attrs & VA_DRAWABLE) || !(v->VI_attrs & VA_REALIZED) ||
-	!t->VTI_gstate)
-	return FALSE;
-    return GrGetWinHandle(t->VTI_gstate) != NullHandle;
-}
-
-Boolean TextCheckCanDrawEditable(optr o)
-{
-    return TextCheckCanDraw(o) && (VT(o)->VTI_state & VTS_EDITABLE);
-}
-
-static Boolean CursorNoFocus(optr o)
+Boolean CursorNoFocus(optr o)
 {
     return ObjVarFindData(o, ATTR_VIS_TEXT_CURSOR_NO_FOCUS) != NULL;
-}
-
-/*
- * TSL_ConvertOffsetToCoordinate: where an offset is, in the text's
- * coordinates: its left edge and the top of its line.  An offset
- * between two lines is at the start of the second.
- */
-void TSL_ConvertOffsetToCoordinate(optr o, dword offset, sword *x, sword *y)
-{
-    dword line = TL_LineFromOffset(o, offset, FALSE, NULL);
-    WBFixed top = TL_LineGetTop(o, line);
-    sword pos;
-
-    (void) TL_LineTextPosition(o, line, 0x7fff, offset, &pos, NULL);
-    *x = (sword) (pos + TL_LinePtr(o, line, NULL)->LI_adjustment);
-    *y = (sword) top.WBF_int;
-}
-
-/* TSL_GetCursorLine: the line the cursor is on */
-dword TSL_GetCursorLine(optr o)
-{
-    return TL_LineFromPosition(o, VT(o)->VTI_cursorPos.P_y, NULL);
 }
 
 /*
@@ -76,7 +33,7 @@ dword TSL_GetCursorLine(optr o)
  * the baseline of the cursor's line, with the font and style of the
  * text there, for the specific UI
  */
-static void CursorToggle(optr o)
+void CursorToggle(optr o)
 {
     VisTextInstance *t;
     VisInstance *v;
@@ -208,18 +165,6 @@ void TSL_CursorPosition(optr o, sword x, sword y)
     CursorEnable(o);
 }
 
-/* TSL_StartCursorCommon: the cursor starts flashing */
-void TSL_StartCursorCommon(optr o)
-{
-    VisTextInstance *t = VT(o);
-
-    if (!(((VisInstance *) t)->VI_attrs & VA_REALIZED) ||
-	t->VTI_timerHandle || !(t->VTI_state & VTS_EDITABLE) ||
-	!(FlowGetUIButtonFlags() & UIBF_BLINKING_CURSOR))
-	return;
-    @call o::MSG_VIS_TEXT_FLASH_CURSOR_ON();
-}
-
 /* TSL_StopCursorTimer: no more flashing */
 void TSL_StopCursorTimer(optr o)
 {
@@ -230,65 +175,4 @@ void TSL_StopCursorTimer(optr o)
 	return;
     t->VTI_timerHandle = NullHandle;
     (void) TimerStop(th, t->VTI_timerID);
-}
-
-/* TextTimerStart: the next half of a flash */
-static void TextTimerStart(optr o, Message msg)
-{
-    word id = 0;
-    TimerHandle th = TimerStart(TIMER_EVENT_ONE_SHOT, o,
-				VIS_TEXT_CURSOR_FLASH, msg, 0, &id);
-    VisTextInstance *t = VT(o);
-
-    t->VTI_timerHandle = th;
-    t->VTI_timerID = id;
-}
-
-/* VisTextFlashCursorOn */
-@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_ON
-{
-    Boolean noFocus = CursorNoFocus(oself);
-
-    pself = VT(oself);
-    pself->VTI_timerHandle = NullHandle;
-    if (!noFocus && !(pself->VTI_intSelFlags & VTISF_IS_FOCUS))
-	return;
-    if (!(pself->VTI_state & VTS_EDITABLE))
-	return;
-    /* (not while someone has the screen to himself) */
-    if (!GrGetExclusive(NullHandle))
-	CursorForceOn(oself);
-    if (noFocus)
-	return;
-    TextTimerStart(oself, MSG_VIS_TEXT_FLASH_CURSOR_OFF);
-}
-
-/* VisTextFlashCursorOff */
-@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_OFF
-{
-    Boolean noFocus = CursorNoFocus(oself);
-    byte f;
-
-    pself = VT(oself);
-    f = pself->VTI_intSelFlags;
-    pself->VTI_timerHandle = NullHandle;
-    if (!noFocus && !(f & VTISF_IS_FOCUS))
-	return;
-    if (!(pself->VTI_state & VTS_EDITABLE))
-	return;
-    if (TextCheckCanDraw(oself)) {
-	Boolean off = TRUE;
-
-	if (f & VTISF_CURSOR_ENABLED) {
-	    if (!(f & VTISF_CURSOR_ON) || GrGetExclusive(NullHandle))
-		off = FALSE;
-	    else
-		CursorToggle(oself);
-	}
-	if (off)
-	    VT(oself)->VTI_intSelFlags &= ~VTISF_CURSOR_ON;
-    }
-    if (noFocus)
-	return;
-    TextTimerStart(oself, MSG_VIS_TEXT_FLASH_CURSOR_ON);
 }

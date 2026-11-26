@@ -1,0 +1,80 @@
+/*
+ * tlExternal.goc -- after tlExternal.asm: TL_LineFromPosition,
+ * TL_LineCalculate, TL_LineTextPosition, TL_LineStorageCreate,
+ * TL_LineStorageDestroy, TL_LineGetCount, TL_LineInsert, TL_LineDelete,
+ * TL_LineToOffsetStart, TL_LineFromOffset, TL_LineGetTop.
+ */
+@include "textInt.goh"
+
+/*
+ * TL_LineFromPosition (SmallLineFromPositionGetInfo): the line at a
+ * height in the text; the last one below them all (*below set)
+ */
+dword TL_LineFromPosition(optr o, sword y, Boolean *below)
+{
+    dword n = TL_LineGetCount(o), i;
+    sdword pos = (sdword) y << 8;
+
+    if (below)
+	*below = FALSE;
+    for (i = 0; i < n; i++) {
+	const LineInfo *li = TL_LinePtr(o, i, NULL);
+
+	pos -= ((sdword) li->LI_hgt.WBF_int << 8) + li->LI_hgt.WBF_frac;
+	if (pos < 0)
+	    return i;
+    }
+    if (below)
+	*below = TRUE;
+    return n ? n - 1 : 0;
+}
+
+void TL_LineCalculate(LICL_vars *l, LineFlags flags)
+{
+    CommonLineCalculate(l, flags);
+}
+
+dword TL_LineTextPosition(optr o, dword line, sword pixel, dword stop, sword *x, Boolean *over)
+{
+    return CommonLineTextPosition(o, line, pixel, stop, x, over);
+}
+
+void TL_LineStorageCreate(optr o)
+{
+    SmallStorageCreate(o);
+}
+
+void TL_LineStorageDestroy(optr o)
+{
+    SmallStorageDestroy(o);
+}
+
+dword TL_LineGetCount(optr o)
+{
+    return SmallLineGetCount(o);
+}
+
+void TL_LineInsert(optr o, dword line, word count)
+{
+    SmallLineInsert(o, line, count);
+}
+
+void TL_LineDelete(optr o, dword line, word count)
+{
+    SmallLineDelete(o, line, count);
+}
+
+dword TL_LineToOffsetStart(optr o, dword line)
+{
+    return SmallLineToOffsetStart(o, line);
+}
+
+dword TL_LineFromOffset(optr o, dword offset, Boolean first, dword *start)
+{
+    return SmallLineFromOffsetGetStart(o, offset, first, start);
+}
+
+WBFixed TL_LineGetTop(optr o, dword line)
+{
+    return SmallLineGetTop(o, line);
+}

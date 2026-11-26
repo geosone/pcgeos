@@ -1,0 +1,19 @@
+/*
+ * tsSmallCreDest.goc -- after tsSmallCreDest.asm:
+ * TS_SmallCreateTextStorage.
+ */
+@include "textInt.goh"
+
+/* TS_SmallCreateTextStorage: an empty text, dirty unless the object
+ * ignores that */
+void TS_SmallCreateTextStorage(optr o)
+{
+    MemHandle mh = OptrToHandle(o);
+    ObjChunkFlags f = ObjGetFlags(o);
+    ChunkHandle c = LMemAlloc(mh, TEXT_INIT_STREAM);
+
+    *(char *) LMemDeref(ConstructOptr(mh, c)) = 0;
+    ObjSetFlags(ConstructOptr(mh, c),
+		(f & OCF_IGNORE_DIRTY) | OCF_DIRTY, 0);
+    VT(o)->VTI_text = c;
+}

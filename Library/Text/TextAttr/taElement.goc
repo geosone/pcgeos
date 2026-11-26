@@ -1,0 +1,93 @@
+/*
+ * taElement.goc -- after taElement.asm: GetInsertionElement,
+ * ClearInsertionElement, SetInsertionElement, TA_GetElement,
+ * TA_AddElement, TA_ElementAddRef, TA_RemoveElement.
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+#include <char.h>
+
+/* GetInsertionElement */
+word GetInsertionElement(optr o)
+{
+    word *w = ObjVarFindData(o, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN);
+
+    return w ? *w : CA_NULL_ELEMENT;
+}
+
+/* ClearInsertionElement: the token (CA_NULL_ELEMENT if none), its
+ * reference removed if `unref' */
+word ClearInsertionElement(optr o, Boolean unref)
+{
+    word token = GetInsertionElement(o);
+
+    if (token == CA_NULL_ELEMENT)
+	return token;
+    (void) ObjVarDeleteData(o, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN);
+    if (unref)
+	TA_RemoveElement(o, TRK_CHAR_ATTR, token);
+    return token;
+}
+
+/* SetInsertionElement: with a reference */
+void SetInsertionElement(optr o, word token)
+{
+    word *w;
+
+    (void) ClearInsertionElement(o, TRUE);
+    w = ObjVarAddData(o, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN,
+		      sizeof(word));
+    *w = token;
+    TA_ElementAddRef(o, TRK_CHAR_ATTR, token);
+}
+
+/* ElementArrayLock: the elements are in the object's block */
+static optr Elements(optr o, TextRunKind kind)
+{
+    TextRunArrayHeader *h = LMemDeref(TA_RunArray(o, kind));
+
+    if (h->TRAH_elementVMBlock)
+	EC_ERROR(-1);	/* (elements in a VM block: not yet) */
+    return ConstructOptr(OptrToHandle(o), h->TRAH_elementArray);
+}
+
+/* ---------------------------------------------------------------------
+ * Elements (taElement.asm)
+ * ------------------------------------------------------------------- */
+
+static word ElementSize(TextRunKind kind)
+{
+    return kind == TRK_CHAR_ATTR ? sizeof(VisTextCharAttr)
+				 : sizeof(VisTextMaxParaAttr);
+}
+
+/* GetElement */
+void TA_GetElement(optr o, TextRunKind kind, word token, void *buf)
+{
+    word size;
+    void *e = ChunkArrayElementToPtr(Elements(o, kind), token, &size);
+
+    memset(buf, 0, ElementSize(kind));
+    memcpy(buf, e, size);
+}
+
+/* AddElement: the element's token, with a reference more */
+word TA_AddElement(optr o, TextRunKind kind, void *element)
+{
+    if (kind == TRK_PARA_ATTR)
+	return ElementArrayAddElementSized(Elements(o, kind), element,
+					   TA_ParaAttrSize(element), 0, NULL);
+    return ElementArrayAddElement(Elements(o, kind), element, 0, NULL);
+}
+
+/* ElementAddRef */
+void TA_ElementAddRef(optr o, TextRunKind kind, word token)
+{
+    ElementArrayAddReference(Elements(o, kind), token);
+}
+
+/* RemoveElement */
+void TA_RemoveElement(optr o, TextRunKind kind, word token)
+{
+    ElementArrayRemoveReference(Elements(o, kind), token, 0, NULL);
+}
