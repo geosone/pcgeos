@@ -43,6 +43,7 @@ target_sources(geos_kernel_objs PRIVATE
   graphicsTextObscure.c
   graphicsFontDriver.c
   graphicsSpline.c
+  graphicsRegionRaster.c
   graphicsPath.c
   graphicsPattern.c
   graphicsC.c

@@ -504,4 +504,7 @@ void ScaleOneScan(const Bitmap *bm, const byte *s, byte *d,
 void ScaleSlice(BMFrame *f);
 Boolean BMComplexReject(BMFrame *f, sword x, sword y);
 
+/* graphicsRegionRaster.c: a curve halved into the polyline (graphicsSpline.c) */
+Boolean RasterBezier(SplinePoly *poly, const sdword *p, int depth);
+
 #endif
