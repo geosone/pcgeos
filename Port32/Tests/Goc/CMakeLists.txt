@@ -5,6 +5,17 @@
 if(NOT GEOS_HAVE_GOC)
   return()
 endif()
+
+# every @extern method of the port's goc files is declared beside its
+# @classdecl, else goc leaves it out of the method table silently
+if(Python3_Interpreter_FOUND)
+  add_test(NAME goc.method.declared
+           COMMAND ${Python3_EXECUTABLE}
+                   ${PROJECT_SOURCE_DIR}/Port32/tools/checkdecl.py
+                   Library/User Library/SpecUI Library/Text
+                   Library/Spool Library/Sound
+           WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+endif()
 geos_goc(_gocres_c gocres.gp gocres.goc gocres2.goc)
 # test_gocres.c stands in for the message kernel (fake handles show
 # where goc sends to): its entry points get their own names, so the
