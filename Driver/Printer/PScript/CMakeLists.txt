@@ -27,6 +27,7 @@ geos_geode(pscript
            ${pc}/printcomNoText.c ${pc}/printcomNoStyles.c
            ${pc}/Color/colorGetFormat.c ${pc}/Color/colorSetNone.c
            ${pc}/printcomPScriptJob.c ${pc}/printcomPScriptDialog.c
+           ${pc}/Job/jobPaperInfo.c ${pc}/Job/jobPaperPathNoASFControl.c
            ${ps}/pscriptAdmin.c ${ps}/pscriptControlCodes.c
            ${ps}/pscriptCursor.c ${ps}/pscriptGraphics.c ${ps}/pscriptPage.c
            ${ps}/pscriptPDL.c ${ps}/pscriptTables.c ${ps}/pscriptUtils.c
