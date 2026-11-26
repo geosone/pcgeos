@@ -456,6 +456,13 @@ int main(int argc, char **argv)
      * check boxes; a popup list; a scrollbar; a view; a scrolling list; a dynamic list; a glyph and
      * a separator; ... ; the sliders */
     for (i = 2; i <= 100; i++) {
+	/* (IACP: the messages of step 92 and the shutdown of step 93
+	 * arrive on other threads) */
+	if (i == 93)
+	    WAIT_FOR(st->UBS_iacp[5] == 3 && st->UBS_iacp[8] == 9 &&
+		     st->UBS_iacp[9] == 1);
+	if (i == 94)
+	    WAIT_FOR(st->UBS_iacp[10] == 3 && st->UBS_iacp[11] == 3);
 	step(i);
 	Shot(i);
     }
