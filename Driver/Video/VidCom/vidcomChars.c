@@ -1,6 +1,6 @@
 /*
  * vidcomChars.c -- DR_VID_PUTSTRING (after vidcomChars.asm: VidPutString,
- * PutStringLow, KernChar; the position of vidcomFont.asm).
+ * PutStringLow, KernChar).  VidBuildChar is in vidcomFont.c.
  *
  * Each character's picture (CharData: rows of bits, MSB first) is drawn
  * at the pen plus its offsets in the text attributes, a run of set bits
@@ -22,21 +22,6 @@
 #include "vidcom.h"
 #include <Internal/fontDr.h>
 #include <char.h>
-
-/* VidBuildChar: the font driver builds ch into the font */
-static const FontBuf *BuildChar(GState *gs, const FontBuf *fb, byte ch)
-{
-    DriverRegs r;
-
-    memset(&r, 0, sizeof(r));
-    r.DR_dx = ch;
-    r.DR_esDi = (void *) fb;
-    r.DR_bpPtr = gs;
-    if (GrCallFontDriverID(fb->FB_maker, DR_FONT_GEN_CHAR, &r) ||
-	!r.DR_esDi)
-	return fb;
-    return r.DR_esDi;
-}
 
 static CharTableEntry *Entry(const FontBuf *fb, byte ch)
 {
@@ -131,7 +116,7 @@ void VidPutString(DriverRegs *r)
 	if (ch >= fb->FB_firstChar && ch <= fb->FB_lastChar &&
 	    FB_CHAR_TABLE(fb)[ch - fb->FB_firstChar].CTE_dataOffset ==
 	    CHAR_NOT_BUILT) {
-	    fb = BuildChar(gs, fb, ch);
+	    fb = VidBuildChar(gs, fb, ch);
 	    a->VPS_font = (FontBuf *) fb;
 	}
 	cte = Entry(fb, ch);

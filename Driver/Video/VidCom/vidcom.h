@@ -19,6 +19,7 @@
 #include <Internal/videoDr.h>
 #include <Internal/window.h>
 #include <Internal/gstate.h>
+#include <Internal/fontDr.h>
 
 #define VID_NO_DEVICE	0xffff		/* VDI_device before DRE_SET_DEVICE */
 
@@ -184,5 +185,8 @@ Boolean VidSetDevice(DriverRegs *r);
 
 /* vidcomExclBounds.c */
 void ExclRectBounds(sword l, sword t, sword r, sword b, const Window *w);
+
+/* vidcomChars.c and vidcomFont.c */
+const FontBuf *VidBuildChar(GState *gs, const FontBuf *fb, byte ch);
 
 #endif /* VIDCOM_H */

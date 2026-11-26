@@ -167,7 +167,8 @@ sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
 
 /* graphicsRaster.c: CalcLineSize */
 word GrBitmapLineSize(word width, byte type);
-/* UncompactPackBits: n bytes from *src (moved on) to dst */
+/* graphicsRasterDraw.c: UncompactPackBits, n bytes from *src (moved on)
+ * to dst */
 void GrUnpackBits(const byte **src, byte *dst, dword n);
 /* BltCommon: in window wh (locked, the tree too), screen coordinates */
 void GrBltCommon(WindowHandle wh, sword sx, sword sy, sword dx, sword dy,
@@ -308,7 +309,7 @@ Handle GrGStringOf(GStateHandle gstate);	/* 0: not a graphics string */
 #define GR_WWF_D(w)	(((dword) (word) (w).WWF_int << 16) | (word) (w).WWF_frac)
 #define GR_WBF_D(w)	(((dword) (word) (w).WBF_int << 16) | \
 			 ((dword) (byte) (w).WBF_frac << 8))
-word GrBitmapStringSize(const Bitmap *bm);
+word GrBitmapStringSize(const Bitmap *bm);	/* graphicsBitmapString.c */
 sword *GrSplineDevPoints(const GrDraw *d, const Point *points, word n,
 			 word *count);
 sword *GrRoundRectDevPoints(const GrDraw *d, sword l, sword t, sword r,
@@ -387,6 +388,18 @@ typedef struct {
     word		imgPalN;
 } BMFrame;
 
+/* the source scan lines one after another, through the slices and
+ * unpacked (GetSliceComplex) */
+typedef struct {
+    BMFrame		*f;
+    const Bitmap	*bm;		/* the slice */
+    const byte		*data;		/* its first scan line */
+    word		first, n;	/* its scan lines */
+    word		line;		/* BF_origBMscanSize */
+    byte		*buf;		/* unpacked */
+    dword		size;
+} BMSource;
+
 typedef struct {
     sword	*SP_pts;	/* device x, y pairs */
     word	SP_count;
@@ -424,7 +437,8 @@ void GrFreePath(GStateHandle gstate, GetPathType ptype);
 void GrPathSetClip(GStateHandle gstate, GetPathType ptype,
 	PathCombineType params, RegionFillRule rule);
 
-/* graphicsRaster.c and graphicsBitmapHuge.c */
+/* for graphicsBitmapHuge.c: graphicsBitmapString.c (BitmapToPath),
+ * graphicsRaster.c, graphicsRasterDraw.c */
 Boolean GrPathRect(GStateHandle gstate, Boolean atCP, sword x, sword y,
 	XYValueAsDWord size);
 void GrBitmapDraw(BMFrame *f, sword x, sword y);
@@ -459,5 +473,35 @@ void GrSetPatternLow(GStateHandle gstate, Boolean text, GraphicPattern pat,
 
 /* graphicsTextMetrics.c and graphicsC.c */
 sdword GrTextWidthStr(GStateHandle gstate, const char *str, word size);
+
+/* the bitmap code, in the files of its asm files */
+/* graphicsBitmapString.c */
+Boolean BitmapToString(GStateHandle gstate, byte op, Boolean atCP,
+	sword x, sword y, const Bitmap *bm,
+	Bitmap *(*callback)(Bitmap *bm));
+/* graphicsImage.c */
+void ImageHugeSection(BMFrame *f, sword sy);
+/* graphicsRaster.c */
+const CBitmap *GrBMComplex(const Bitmap *bm);
+/* graphicsRasterDraw.c */
+const byte *GrBMSliceData(const BMFrame *f, const Bitmap *bm, word *n);
+void GrBMPutBits(BMFrame *f, sword y);
+const Bitmap *GrBMNextSlice(BMFrame *f, const Bitmap *bm);
+void GrBMUnpack(byte compact, const byte **src, byte *dst, dword n);
+void GrBMCallConverted(BMFrame *f, word function, DriverRegs *r,
+	word lines);
+Boolean GrBMHugeSlice(BMFrame *f, word first);
+void InitFormatConversion(BMFrame *f, const Bitmap *bm);
+void GrBMDrawUnpacked(BMFrame *f);
+/* graphicsRasterRotate.c */
+void RotateBitmap(BMFrame *f, sword x, sword y);
+/* graphicsRasterScale.c */
+Boolean GrBMSourceSlice(BMSource *s, const Bitmap *bm);
+const byte *GrBMSourceScan(BMSource *s, word k);
+word *GrBMXSteps(const Bitmap *bm, word fw, dword xstep);
+void ScaleOneScan(const Bitmap *bm, const byte *s, byte *d,
+	const word *xs, word fw, Boolean mirror);
+void ScaleSlice(BMFrame *f);
+Boolean BMComplexReject(BMFrame *f, sword x, sword y);
 
 #endif

@@ -2,5 +2,5 @@
 # each driver.
 geos_sources(vidcom
   vidcomEntry.c vidcomInfo.c vidcomExclBounds.c vidcomOutput.c vidcomLine.c vidcomRaster.c
-  vidcomPolygon.c vidcomRegion.c vidcomPutLine.c vidcomChars.c
+  vidcomPolygon.c vidcomRegion.c vidcomPutLine.c vidcomChars.c vidcomFont.c
   vidcomXOR.c vidcomUnder.c vidcomPalette.c vidcomVariable.c)

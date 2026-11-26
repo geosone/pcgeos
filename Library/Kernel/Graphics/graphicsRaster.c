@@ -1,11 +1,15 @@
 /*
- * graphicsRaster.c -- drawing bitmaps and GrBitBlt (huge bitmaps in
- * graphicsBitmapHuge.c, images in graphicsImage.c; after
+ * graphicsRaster.c -- drawing bitmaps and GrBitBlt (after
  * graphicsRaster.asm: GrBitBlt, BltCommon, CalcDestRegion,
  * CalcInvalRegion, GrDrawBitmap, GrDrawBitmapAtCP, GrFillBitmap,
- * GrFillBitmapAtCP, BitmapSetDrawPoint, BMCheckAllocation, InitBitmapPalette, BMCallBack,
- * BMTrivialReject, CalcLineSize; graphicsRasterDraw.asm: DrawSlice,
- * InitBitmapOperations, BMGetSlice, GetSliceComplex, UncompactPackBits).
+ * GrFillBitmapAtCP, BitmapSetDrawPoint, BMCheckAllocation,
+ * InitBitmapPalette, BMCallBack, BMTrivialReject, CalcLineSize).  The
+ * rest of the bitmap code is in the files of its asm files: slices,
+ * unpacking and format conversion in graphicsRasterDraw.c, scaling in
+ * graphicsRasterScale.c, rotation in graphicsRasterRotate.c, bitmaps in
+ * graphics strings and paths in graphicsBitmapString.c, huge bitmaps in
+ * graphicsBitmapHuge.c, images in graphicsImage.c.  How it works, for
+ * all of them:
  *
  * A bitmap goes to the video driver as DR_VID_PUTBITS at its device
  * position, as it is when it can: uncompacted, no scaling or rotation,
@@ -59,47 +63,6 @@
 #include <stdlib.h>
 #include <hugearr.h>
 
-#define LINE_ATTR	((word) offsetof(GState, GS_lineAttr))
-
-/* the huge bitmap's slice from scan line first on; FALSE past the end */
-static Boolean HugeSlice(BMFrame *f, word first)
-{
-    void *p;
-    word size;
-    dword r;
-
-    if (f->hdata)
-	HugeArrayUnlock((void *) f->hdata);
-    f->hdata = NULL;
-    f->hfirst = first;
-    f->hn = 0;
-    if (first >= f->bm->B_height)
-	return FALSE;
-    r = HugeArrayLock(f->hfile, f->hblock, first, &p, &size);
-    if (!HAL_COUNT(r))
-	return FALSE;
-    f->hdata = p;
-    f->hn = (word) HAL_COUNT(r);
-    if ((dword) first + f->hn > f->bm->B_height)
-	f->hn = (word) (f->bm->B_height - first);
-    return TRUE;
-}
-
-/* a slice's scan lines (n) and their data */
-static const byte *SliceData(const BMFrame *f, const Bitmap *bm, word *n)
-{
-    if (f->hfile) {
-	*n = f->hn;
-	return f->hdata;
-    }
-    if (bm->B_type & BMT_COMPLEX) {
-	*n = ((const CBitmap *) bm)->CB_numScans;
-	return (const byte *) bm + ((const CBitmap *) bm)->CB_data;
-    }
-    *n = bm->B_height;
-    return (const byte *) (bm + 1);
-}
-
 /* CalcLineSize: the bytes of a scan line of width pixels */
 word GrBitmapLineSize(word width, byte type)
 {
@@ -127,7 +90,7 @@ word GrBitmapLineSize(word width, byte type)
     return n;
 }
 
-static const CBitmap *Complex(const Bitmap *bm)
+const CBitmap *GrBMComplex(const Bitmap *bm)
 {
     return (const CBitmap *) bm;
 }
@@ -161,7 +124,7 @@ static Boolean SetDrawPoint(BMFrame *f, sword x, sword y)
 /* InitBitmapPalette: from the bitmap's palette (a count, then RGB) */
 static void InitPalette(BMFrame *f, const Bitmap *bm)
 {
-    const byte *p = (const byte *) bm + Complex(bm)->CB_palette;
+    const byte *p = (const byte *) bm + GrBMComplex(bm)->CB_palette;
     word n = (word) (p[0] | (p[1] << 8)), i, last;
     const byte *cur;
     Handle win;
@@ -194,847 +157,12 @@ static void InitPalette(BMFrame *f, const Bitmap *bm)
     f->args.PBA_pal = f->pal;
 }
 
-/* ---------------------------------------------------------------------
- * Format conversion for devices of fewer colors (graphicsRasterDraw.asm:
- * InitFormatConversion, ChangeBitmapFormat and their routines VGAtoMono,
- * SVGAtoMono, SVGAtoVGA, RGBtoVGA, RGBtoSVGA, RGBtoMono)
- *
- * Each scan line goes to the device's format on its way to the driver,
- * the mask as it is.  To monochrome: a color's luminance picks one of
- * 17 grey draw masks (MapRGBTo16GreyDither; MM_SET, MM_CLEAR and
- * MM_INVERT take black), whose bit at the pixel's x and the scan line's
- * number (from the first converted line, BF_formatScan) makes the pixel
- * white.  To 4 or 8 bits: the nearest of the first 16 or 256 entries of
- * the window's palette.  The colors of an index are the bitmap's palette
- * or the default one.
- * ------------------------------------------------------------------- */
-
-/* CalcLuminance, bit for bit */
-static byte Luminance(byte r, byte g, byte b)
-{
-    byte l = (byte) ((r >> 2) + (r >> 4) + (g >> 1) + (g >> 4) + (b >> 3));
-    byte c = (byte) (((r >> 3) & 1) + ((g >> 3) & 1) + ((b >> 2) & 1));
-
-    return (byte) (l + (c >> 1) + (c & 1));
-}
-
-/* MapRGBTo16GreyDither: a SystemDrawMask */
-static byte GreyDither(const BMFrame *f, byte r, byte g, byte b)
-{
-    MixMode m = f->d->GD_gs->GS_mixMode;
-    byte l;
-
-    if (m == MM_SET || m == MM_CLEAR || m == MM_INVERT)
-	return SDM_0;
-    l = Luminance(r, g, b);
-    return (byte) (SDM_0 - 4 * ((l >> 4) + ((l >> 3) & 1)));
-}
-
-/* InitFormatConversion: the table for indexed sources */
-static void InitConvert(BMFrame *f, const Bitmap *bm)
-{
-    byte src = (byte) (bm->B_type & BMT_FORMAT);
-    const byte *pal = grDefaultPalette;
-    word i, n = src == BMF_4BIT ? 16 : 256;
-
-    f->conv = TRUE;
-    f->srcType = (byte) (bm->B_type & ~(BMT_COMPLEX | BMT_HUGE));
-    f->cur = GrLockPalette(f->d->GD_gs, &f->curLast, &f->curWin);
-    if (src == BMF_24BIT)
-	return;					/* InitRGBtoAll */
-    if ((bm->B_type & BMT_PALETTE) && Complex(bm)->CB_palette) {
-	const byte *p = (const byte *) bm + Complex(bm)->CB_palette;
-	word k = (word) (p[0] | (p[1] << 8));
-	if (k)
-	    pal = p + 2;
-	if (k && k < n)
-	    n = k;
-    }
-    for (i = 0; i < n; i++) {
-	const byte *e = pal + 3 * i;
-	f->convTab[i] = f->devType == BMF_MONO ?
-			GreyDither(f, e[0], e[1], e[2]) :
-			GrMapRGBtoIndex(f->cur, 15, e[0], e[1], e[2]);
-    }
-}
-
-/* a pixel of a source line as RGB (24 bits) or its table entry */
-static byte ConvPixel(const BMFrame *f, const byte *s, word x, byte *rgb)
-{
-    switch (f->srcType & BMT_FORMAT) {
-    case BMF_4BIT:
-	return f->convTab[(x & 1) ? s[x >> 1] & 0x0f : s[x >> 1] >> 4];
-    case BMF_8BIT:
-	return f->convTab[s[x]];
-    default:
-	memcpy(rgb, s + 3 * x, 3);
-	return 0;
-    }
-}
-
-/* ChangeBitmapFormat: n lines of width w from src (stride sstride) to
- * the device's format; the size of a converted line */
-static word ConvertLines(BMFrame *f, const byte *src, word sstride, word w,
-			 word n)
-{
-    byte dtype = (byte) ((f->srcType & BMT_MASK) | f->devType);
-    word dline = GrBitmapLineSize(w, dtype);
-    word mask = (f->srcType & BMT_MASK) ? (word) ((w + 7) >> 3) : 0;
-    Boolean rgbSrc = (Boolean) ((f->srcType & BMT_FORMAT) == BMF_24BIT);
-    dword need = (dword) dline * n;
-    word j, x;
-
-    if (need > f->csize) {
-	byte *nb = realloc(f->cbuf, need);
-	if (!nb)
-	    return 0;
-	f->cbuf = nb;
-	f->csize = need;
-    }
-    for (j = 0; j < n; j++, f->fscan++) {
-	const byte *s = src + (dword) j * sstride;
-	byte *d = f->cbuf + (dword) j * dline;
-	memcpy(d, s, mask);
-	s += mask;
-	d += mask;
-	memset(d, 0, dline - mask);
-	for (x = 0; x < w; x++) {
-	    byte rgb[3], v = ConvPixel(f, s, x, rgb);
-	    switch (f->devType) {
-	    case BMF_MONO:
-		if (rgbSrc)
-		    v = GreyDither(f, rgb[0], rgb[1], rgb[2]);
-		if (!(grSysDrawMasks[v][f->fscan & 7] & (0x80 >> (x & 7))))
-		    d[x >> 3] |= (byte) (0x80 >> (x & 7));
-		break;
-	    case BMF_4BIT:
-		if (rgbSrc)
-		    v = GrMapRGBtoIndex(f->cur, 15, rgb[0], rgb[1], rgb[2]);
-		d[x >> 1] |= (byte) ((x & 1) ? v & 0x0f : v << 4);
-		break;
-	    default:				/* RGBtoSVGA */
-		d[x] = GrMapRGBtoIndex(f->cur, f->curLast < 255 ?
-				       f->curLast : 255, rgb[0], rgb[1],
-				       rgb[2]);
-		break;
-	    }
-	}
-    }
-    return dline;
-}
-
-/* the driver gets the lines in the device's format */
-static void CallConverted(BMFrame *f, word function, DriverRegs *r,
-			  word lines)
-{
-    const byte *data = f->args.PBA_data;
-    word size = f->args.PBA_size;
-    byte type = f->args.PBA_bm.B_type;
-
-    if (f->conv) {
-	word dl = ConvertLines(f, data, size, f->args.PBA_bm.B_width, lines);
-	if (!dl)
-	    return;
-	f->args.PBA_data = f->cbuf;
-	f->args.PBA_size = dl;
-	f->args.PBA_bm.B_type = (byte) ((f->srcType & BMT_MASK) |
-					f->devType);
-    }
-    GrCallDriver(f->d, function, r, AREA);
-    f->args.PBA_data = data;
-    f->args.PBA_size = size;
-    f->args.PBA_bm.B_type = type;
-}
-
-static void ImageSection(BMFrame *f, sword y);
-
-static void PutBits(BMFrame *f, sword y)
-{
-    DriverRegs r;
-
-    if (f->bump > 1) {
-	ImageSection(f, y);
-	return;
-    }
-
-    memset(&r, 0, sizeof(r));
-    r.DR_ax = (word) f->x;
-    r.DR_bx = (word) y;
-    r.DR_bpPtr = &f->args;
-    CallConverted(f, DR_VID_PUTBITS, &r, f->args.PBA_bm.B_height);
-}
-
-/* the callback's next slice; NULL when there is none */
-static const Bitmap *NextSlice(BMFrame *f, const Bitmap *bm)
-{
-    const CBitmap *c = Complex(bm);
-
-    if (f->hfile)
-	return HugeSlice(f, (word) (f->hfirst + f->hn)) ? bm : NULL;
-    if ((word) (c->CB_startScan + c->CB_numScans) >= bm->B_height ||
-	!f->cb)
-	return NULL;
-    return f->cb((Bitmap *) bm);
-}
-
-/* n bytes from *src to dst, PackBits or LZG (a stream after another,
- * as LZGUncompressSource in the asm loop) */
-static void Unpack(byte compact, const byte **src, byte *dst, dword n)
-{
-    if (compact != BMC_LZG) {
-	GrUnpackBits(src, dst, n);
-	return;
-    }
-    while (n) {
-	dword used, got = LZGUncompressBounded(dst, n, *src, &used);
-	*src += used;
-	if (!got)
-	    break;
-	if (got > n)
-	    got = n;
-	dst += got;
-	n -= got;
-    }
-}
-
-/* SliceToString: the bytes of a bitmap (its first slice) as a graphics
- * string keeps it, the header, a complex bitmap's palette and the data
- * (packed: as far as its scan lines go); 0 if too large */
-word GrBitmapStringSize(const Bitmap *bm)
-{
-    word lines, line = GrBitmapLineSize(bm->B_width, bm->B_type);
-    const byte *data;
-    dword size;
-
-    if (bm->B_type & BMT_COMPLEX) {
-	lines = Complex(bm)->CB_numScans;
-	data = (const byte *) bm + Complex(bm)->CB_data;
-    } else {
-	lines = bm->B_height;
-	data = (const byte *) (bm + 1);
-    }
-    if (bm->B_compact == BMC_PACKBITS || bm->B_compact == BMC_LZG) {
-	byte *scratch = malloc((size_t) line * lines + 1);
-	const byte *src = data;
-	if (!scratch)
-	    return 0;
-	Unpack(bm->B_compact, &src, scratch, (dword) line * lines);
-	free(scratch);
-	size = (dword) (src - (const byte *) bm);
-    } else
-	size = (dword) (data - (const byte *) bm) + (dword) line * lines;
-    return (word) (size <= 0xfff0 ? size : 0);
-}
-
-/* SliceToString of a slice after the first: GSE_BITMAP_SLICE, the size,
- * the CBitmap (CB_data right after it), the data; no palette */
-static void RecordSlice(Handle gstring, const Bitmap *bm)
-{
-    const CBitmap *c = Complex(bm);
-    word all = GrBitmapStringSize(bm), data, n;
-    byte *e;
-    CBitmap h;
-
-    if (!all || all < c->CB_data)
-	return;
-    data = (word) (all - c->CB_data);
-    n = (word) (sizeof(CBitmap) + data);
-    e = malloc((size_t) n + 3);
-    if (!e)
-	return;
-    h = *c;
-    h.CB_data = sizeof(CBitmap);
-    e[0] = GSE_BITMAP_SLICE;
-    e[1] = (byte) n;
-    e[2] = (byte) (n >> 8);
-    memcpy(e + 3, &h, sizeof(h));
-    memcpy(e + 3 + sizeof(h), (const byte *) bm + c->CB_data, data);
-    (void) GrGSStore(gstring, e, (word) (n + 3));
-    free(e);
-}
-
-/* BitmapToString: the element of a bitmap at x, y or (atCP) at the pen,
- * then the callback's slices; TRUE if the GState writes a graphics
- * string (the callback is used up then) */
-static Boolean RecordBitmap(GStateHandle gstate, byte op, Boolean atCP,
-			    sword x, sword y, const Bitmap *bm,
-			    Bitmap *(*callback)(Bitmap *bm))
-{
-    Handle gstring = GrGStringOf(gstate);
-    word n, scans;
-
-    if (!gstring)
-	return FALSE;
-    if (!(n = GrBitmapStringSize(bm)))
-	return TRUE;
-    if (atCP)
-	(void) GrGSRecord(gstate, op, "wr", n, bm, n);
-    else
-	(void) GrGSRecord(gstate, op, "wwwr", x, y, n, bm, n);
-    if (!(bm->B_type & BMT_COMPLEX) || !callback)
-	return TRUE;
-    for (scans = Complex(bm)->CB_numScans; scans < bm->B_height;
-	 scans = (word) (scans + Complex(bm)->CB_numScans)) {
-	bm = callback((Bitmap *) bm);
-	if (!bm || !Complex(bm)->CB_numScans)
-	    break;
-	RecordSlice(gstring, bm);
-    }
-    return TRUE;
-}
-
-/* BitmapToPath: while a path is defined, a bitmap is the rectangle it
- * covers (GR_DRAW_RECT; GR_DRAW_RECT_TO from the pen), of its size in
- * points (GrGetBitmapSize; the asm's ScaleBitmapSide multiplied by the
- * resolution over 72 where drawing divides); TRUE if so */
-Boolean GrPathRect(GStateHandle gstate, Boolean atCP, sword x, sword y,
-			XYValueAsDWord size)
-{
-    GState *gs = MemLock(gstate);
-    Boolean path = (Boolean) (gs->GS_gstring &&
-			      (gs->GS_pathFlags & PF_DEFINING_PATH));
-
-    MemUnlock(gstate);
-    if (!path)
-	return FALSE;
-    if (atCP) {
-	XYValueAsDWord pen = GrGetCurPos(gstate);
-	GrDrawRectTo(gstate, (sword) (DWORD_X(pen) + (sword) (word) size),
-		     (sword) (DWORD_Y(pen) + (sword) (word) (size >> 16)));
-    } else
-	GrDrawRect(gstate, x, y, (sword) (x + (sword) (word) size),
-		   (sword) (y + (sword) (word) (size >> 16)));
-    return TRUE;
-}
-
-/* UncompactPackBits: n bytes from *src to dst */
-void GrUnpackBits(const byte **src, byte *dst, dword n)
-{
-    const byte *s = *src;
-
-    while (n) {
-	sbyte c = (sbyte) *s++;
-	word k;
-	if (c < 0) {			/* a byte -c + 1 times */
-	    k = (word) (-c + 1);
-	    if (k > n)
-		k = (word) n;
-	    memset(dst, *s++, k);
-	} else {			/* c + 1 bytes as they are */
-	    k = (word) (c + 1);
-	    if (k > n)
-		k = (word) n;
-	    memcpy(dst, s, k);
-	    s += c + 1;
-	}
-	dst += k;
-	n -= k;
-    }
-    *src = s;
-}
-
-/* DrawSlice, for unpacking: each slice of the original unpacked and
- * drawn below the one before */
-static void DrawUnpacked(BMFrame *f)
-{
-    const Bitmap *bm = f->bm;
-    word line = GrBitmapLineSize(bm->B_width, bm->B_type);
-    sword y = f->y;
-    byte *buf = NULL;
-    dword size = 0;
-
-    f->args.PBA_bm.B_compact = BMC_UNCOMPACTED;
-    while (bm) {
-	const byte *src;
-	word n;
-	dword need;
-
-	src = SliceData(f, bm, &n);
-	need = (dword) n * line;
-	if (need > size) {
-	    byte *nb = realloc(buf, need);
-	    if (!nb)
-		break;
-	    buf = nb;
-	    size = need;
-	}
-	if (n) {
-	    Unpack(bm->B_compact, &src, buf, need);
-	    f->args.PBA_data = buf;
-	    f->args.PBA_bm.B_height = n;
-	    PutBits(f, y);
-	    y = (sword) (y + n);
-	}
-	if (!(bm->B_type & BMT_COMPLEX) && !f->hfile)
-	    break;
-	if (y > f->d->GD_w->W_maskRect.R_bottom)
-	    break;
-	bm = NextSlice(f, bm);
-    }
-    free(buf);
-}
-
-/* the source scan lines one after another, through the slices and
- * unpacked (GetSliceComplex) */
-typedef struct {
-    BMFrame		*f;
-    const Bitmap	*bm;		/* the slice */
-    const byte		*data;		/* its first scan line */
-    word		first, n;	/* its scan lines */
-    word		line;		/* BF_origBMscanSize */
-    byte		*buf;		/* unpacked */
-    dword		size;
-} BMSource;
-
-static Boolean SourceSlice(BMSource *s, const Bitmap *bm)
-{
-    const byte *src;
-    dword need;
-
-    s->bm = bm;
-    src = SliceData(s->f, bm, &s->n);
-    if (bm->B_compact == BMC_UNCOMPACTED) {
-	s->data = src;
-	return TRUE;
-    }
-    need = (dword) s->n * s->line;
-    if (need > s->size) {
-	byte *nb = realloc(s->buf, need);
-	if (!nb)
-	    return FALSE;
-	s->buf = nb;
-	s->size = need;
-    }
-    Unpack(bm->B_compact, &src, s->buf, need);
-    s->data = s->buf;
-    return TRUE;
-}
-
-/* scan line k (not before the one asked last); NULL past the end */
-static const byte *SourceScan(BMSource *s, word k)
-{
-    while ((dword) k >= (dword) s->first + s->n) {
-	const Bitmap *next;
-	if (!(s->bm->B_type & BMT_COMPLEX) && !s->f->hfile)
-	    return NULL;
-	next = NextSlice(s->f, s->bm);
-	if (!next)
-	    return NULL;
-	s->first = (word) (s->first + s->n);
-	if (!SourceSlice(s, next))
-	    return NULL;
-    }
-    return s->data + (dword) (k - s->first) * s->line;
-}
-
-/* ScaleMonoScan and the others: pixel i of the scaled line is pixel
- * xs[i] of the source */
-static void ScaleBits(const byte *src, byte *dst, const word *xs, word w,
-		      byte format)
-{
-    word i;
-
-    switch (format) {
-    case BMF_MONO:
-	memset(dst, 0, (word) ((w + 7) >> 3));
-	for (i = 0; i < w; i++)
-	    if (src[xs[i] >> 3] & (0x80 >> (xs[i] & 7)))
-		dst[i >> 3] |= (byte) (0x80 >> (i & 7));
-	break;
-    case BMF_4BIT:
-	memset(dst, 0, (word) ((w + 1) >> 1));
-	for (i = 0; i < w; i++) {
-	    byte v = (byte) ((xs[i] & 1) ? src[xs[i] >> 1] & 0x0f :
-			     src[xs[i] >> 1] >> 4);
-	    dst[i >> 1] |= (byte) ((i & 1) ? v : v << 4);
-	}
-	break;
-    case BMF_8BIT:
-	for (i = 0; i < w; i++)
-	    dst[i] = src[xs[i]];
-	break;
-    case BMF_24BIT:
-	for (i = 0; i < w; i++)
-	    memcpy(dst + 3 * i, src + 3 * xs[i], 3);
-	break;
-    }
-}
-
-/* MirrorBitmapBits: one scan line right to left */
-static void MirrorBits(byte *p, word w, byte format)
-{
-    word i, j;
-
-    for (i = 0, j = (word) (w - 1); i < j; i++, j--) {
-	switch (format) {
-	case BMF_MONO: {
-	    byte bi = (byte) ((p[i >> 3] >> (7 - (i & 7))) & 1);
-	    byte bj = (byte) ((p[j >> 3] >> (7 - (j & 7))) & 1);
-	    p[i >> 3] = (byte) ((p[i >> 3] & ~(0x80 >> (i & 7))) |
-				(bj << (7 - (i & 7))));
-	    p[j >> 3] = (byte) ((p[j >> 3] & ~(0x80 >> (j & 7))) |
-				(bi << (7 - (j & 7))));
-	    break;
-	}
-	case BMF_4BIT: {
-	    byte vi = (byte) ((i & 1) ? p[i >> 1] & 0x0f : p[i >> 1] >> 4);
-	    byte vj = (byte) ((j & 1) ? p[j >> 1] & 0x0f : p[j >> 1] >> 4);
-	    p[i >> 1] = (byte) ((i & 1) ? (p[i >> 1] & 0xf0) | vj :
-				(p[i >> 1] & 0x0f) | (vj << 4));
-	    p[j >> 1] = (byte) ((j & 1) ? (p[j >> 1] & 0xf0) | vi :
-				(p[j >> 1] & 0x0f) | (vi << 4));
-	    break;
-	}
-	case BMF_8BIT: {
-	    byte t = p[i];
-	    p[i] = p[j];
-	    p[j] = t;
-	    break;
-	}
-	case BMF_24BIT: {
-	    byte t[3];
-	    memcpy(t, p + 3 * i, 3);
-	    memcpy(p + 3 * i, p + 3 * j, 3);
-	    memcpy(p + 3 * j, t, 3);
-	    break;
-	}
-	}
-    }
-}
-
-/* BuildMonoMasks and the others: the source pixel of each of the fw
- * pixels of a scaled line */
-static word *XSteps(const Bitmap *bm, word fw, dword xstep)
-{
-    word *xs = malloc(fw * sizeof(word)), i;
-    dword acc = 0;
-
-    if (!xs)
-	return NULL;
-    xs[0] = 0;
-    for (i = 0; i + 1 < fw; i++) {
-	acc += xstep;
-	xs[i + 1] = (acc >> 16) < bm->B_width ? (word) (acc >> 16) : xs[i];
-    }
-    return xs;
-}
-
-/* ScaleOneScan (and MirrorBitmapBits): a source scan line to fw pixels,
- * the mask first if there is one */
-static void ScaleLine(const Bitmap *bm, const byte *s, byte *d,
-		      const word *xs, word fw, Boolean mirror)
-{
-    byte format = (byte) (bm->B_type & BMT_FORMAT);
-    word srcMask = 0, dstMask = 0;
-
-    if (bm->B_type & BMT_MASK) {
-	srcMask = (word) ((bm->B_width + 7) >> 3);
-	dstMask = (word) ((fw + 7) >> 3);
-	ScaleBits(s, d, xs, fw, BMF_MONO);
-	if (mirror)
-	    MirrorBits(d, fw, BMF_MONO);
-    }
-    ScaleBits(s + srcMask, d + dstMask, xs, fw, format);
-    if (mirror)
-	MirrorBits(d + dstMask, fw, format);
-}
-
-/* InitBitmapScale: the factor of one direction (the matrix and the
- * bitmap's resolution), the scaled size and the step in the source */
-static void ScaleFactor(WWFixedAsDWord m, word res, Boolean complexBM,
-			word size, sword *err, Boolean *neg, word *final,
-			dword *step)
-{
-    WWFixedAsDWord f = m;
-
-    *neg = (Boolean) ((sdword) f < 0);
-    if (*neg) {
-	f = (WWFixedAsDWord) -(sdword) f;
-	*err = (sword) -*err;
-    }
-    if (complexBM)
-	f = GrMulWWFixed(GrUDivWWFixed((WWFixedAsDWord) DEF_BITMAP_RES << 16,
-				       (WWFixedAsDWord) res << 16), f);
-    *final = (word) ((GrMulWWFixed((WWFixedAsDWord) size << 16, f) +
-		      (word) *err) >> 16);
-    *step = f ? GrUDivWWFixed((WWFixedAsDWord) 1 << 16, f) : 0;
-}
-
-#define SCALE_LINES	32
-
-/* DrawSlice with BMOT_SCALE: nearest neighbours, the source pixels
- * taken in steps of the inverse factor */
-static void DrawScaled(BMFrame *f)
-{
-    const Bitmap *bm = f->bm;
-    const TMatrix *tm = &f->d->GD_w->W_curTMatrix;
-    const Rectangle *mask = &f->d->GD_w->W_maskRect;
-    Boolean complexBM = (Boolean) ((bm->B_type & BMT_COMPLEX) != 0);
-    byte format = (byte) (bm->B_type & BMT_FORMAT);
-    Boolean negX, negY;
-    word fw, fh, line, j, done;
-    dword xstep, ystep, acc;
-    word *xs;
-    byte *out;
-    BMSource src;
-
-    ScaleFactor(*(const WWFixedAsDWord *) &tm->TM_11,
-		complexBM ? Complex(bm)->CB_xres : DEF_BITMAP_RES, complexBM,
-		bm->B_width, &f->errX, &negX, &fw, &xstep);
-    ScaleFactor(*(const WWFixedAsDWord *) &tm->TM_22,
-		complexBM ? Complex(bm)->CB_yres : DEF_BITMAP_RES, complexBM,
-		bm->B_height, &f->errY, &negY, &fh, &ystep);
-    if (!fw || !fh || format > BMF_24BIT)
-	return;
-    line = GrBitmapLineSize(fw, bm->B_type);
-    xs = XSteps(bm, fw, xstep);
-    out = malloc((dword) line * SCALE_LINES);
-    memset(&src, 0, sizeof(src));
-    src.f = f;
-    src.line = GrBitmapLineSize(bm->B_width, bm->B_type);
-    if (!xs || !out || !SourceSlice(&src, bm)) {
-	free(xs);
-	free(out);
-	free(src.buf);
-	return;
-    }
-    if (negX)					/* InitBitmapMasksJumps */
-	f->x = (sword) (f->x - fw);
-    f->args.PBA_bm.B_width = fw;
-    f->args.PBA_bm.B_compact = BMC_UNCOMPACTED;
-    f->args.PBA_size = line;
-    f->args.PBA_data = out;
-
-    for (j = 0, acc = 0, done = 0; j < fh && !done; ) {
-	word n = 0;
-	sword y0 = (sword) (negY ? f->y - j : f->y + j);
-
-	if (negY ? y0 < mask->R_top : y0 > mask->R_bottom)
-	    break;
-	while (n < SCALE_LINES && j < fh) {	/* ScaleOneScan, BumpCurScan */
-	    const byte *s;
-	    byte *d;
-	    if ((acc >> 16) >= bm->B_height ||
-		!(s = SourceScan(&src, (word) (acc >> 16)))) {
-		done = 1;
-		break;
-	    }
-	    d = out + (dword) (negY ? SCALE_LINES - 1 - n : n) * line;
-	    ScaleLine(bm, s, d, xs, fw, negX);
-	    acc += ystep;
-	    n++;
-	    j++;
-	}
-	if (!n)
-	    break;
-	f->args.PBA_bm.B_height = n;
-	if (negY) {				/* upwards from y0 */
-	    f->args.PBA_data = out + (dword) (SCALE_LINES - n) * line;
-	    PutBits(f, (sword) (y0 - n + 1));
-	} else {
-	    f->args.PBA_data = out;
-	    PutBits(f, y0);
-	}
-    }
-    free(xs);
-    free(out);
-    free(src.buf);
-}
-
-/* BMComplexReject: the four corners of the bitmap (its size at 72 dpi)
- * through the matrix, TRUE when outside the mask */
-static Boolean ComplexReject(BMFrame *f, sword x, sword y)
-{
-    const Bitmap *bm = f->bm;
-    const Rectangle *m = &f->d->GD_w->W_maskRect;
-    word w = bm->B_width, h = bm->B_height;
-    sword cx[2], cy[2], l = 0x7fff, t = 0x7fff, r = -0x8000, b = -0x8000;
-    int i;
-
-    if (bm->B_type & BMT_COMPLEX) {
-	const CBitmap *c = Complex(bm);
-	if (c->CB_xres != DEF_BITMAP_RES)
-	    w = (word) ((GrMulWWFixed(GrUDivWWFixed(
-		(WWFixedAsDWord) DEF_BITMAP_RES << 16,
-		(WWFixedAsDWord) c->CB_xres << 16), (WWFixedAsDWord) w << 16) +
-			 0x8000) >> 16);
-	if (c->CB_yres != DEF_BITMAP_RES)
-	    h = (word) ((GrMulWWFixed(GrUDivWWFixed(
-		(WWFixedAsDWord) DEF_BITMAP_RES << 16,
-		(WWFixedAsDWord) c->CB_yres << 16), (WWFixedAsDWord) h << 16) +
-			 0x8000) >> 16);
-    }
-    cx[0] = x;
-    cx[1] = (sword) (x + w);
-    cy[0] = y;
-    cy[1] = (sword) (y + h);
-    for (i = 0; i < 4; i++) {
-	sword dx, dy;
-	if (!GrTransDev(f->d, cx[i & 1], cy[i >> 1], &dx, &dy))
-	    return TRUE;
-	if (dx < l) l = dx;
-	if (dx > r) r = dx;
-	if (dy < t) t = dy;
-	if (dy > b) b = dy;
-    }
-    return (Boolean) (l > m->R_right || r < m->R_left || t > m->R_bottom ||
-		      b < m->R_top);
-}
-
-/* CalcBitmapDimensions: the size at 72 dpi, WWFixed */
-static WWFixedAsDWord Dimension(word size, word res, Boolean complexBM)
-{
-    if (!complexBM || res == DEF_BITMAP_RES)
-	return (WWFixedAsDWord) size << 16;
-    return GrMulWWFixed(GrUDivWWFixed((WWFixedAsDWord) DEF_BITMAP_RES << 16,
-				      (WWFixedAsDWord) res << 16),
-			(WWFixedAsDWord) size << 16);
-}
-
-static Boolean RotCorner(BMFrame *f, int64_t x, int64_t y, sword *dx,
-			 sword *dy)
-{
-    GrMatTransDWF(&f->d->GD_w->W_curTMatrix, &x, &y);
-    return (Boolean) (GrRoundToWord(x, dx) && GrRoundToWord(y, dy));
-}
-
-static void PutLine(BMFrame *f, sword ax, sword bx, sword cx, sword dx)
-{
-    DriverRegs r;
-
-    memset(&r, 0, sizeof(r));
-    r.DR_ax = (word) ax;
-    r.DR_bx = (word) bx;
-    r.DR_cx = (word) cx;
-    r.DR_dx = (word) dx;
-    r.DR_bpPtr = &f->args;
-    CallConverted(f, DR_VID_PUTLINE, &r, 1);
-}
-
-static sword Abs(sword v)
-{
-    return (sword) (v < 0 ? -v : v);
-}
-
-/* RotateBitmap, CalcRotatedScaleFactor, BumpCoords: the bitmap scaled
- * to the length of its rotated top edge and the number of steps down
- * its left edge, each scan line put along a line parallel to the top
- * edge (DR_VID_PUTLINE), the lines stepping down the left edge.  Where
- * the left edge steps sideways too, the scan line is put once more
- * before the sideways step, so that no holes are left (this happens
- * after the last line too, as in the asm). */
-static void DrawRotated(BMFrame *f, sword x, sword y)
-{
-    const Bitmap *bm = f->bm;
-    Boolean complexBM = (Boolean) ((bm->B_type & BMT_COMPLEX) != 0);
-    WWFixedAsDWord w = Dimension(bm->B_width,
-				 complexBM ? Complex(bm)->CB_xres : 0,
-				 complexBM);
-    WWFixedAsDWord h = Dimension(bm->B_height,
-				 complexBM ? Complex(bm)->CB_yres : 0,
-				 complexBM);
-    int64_t ox = (int64_t) x << 16, oy = (int64_t) y << 16;
-    sword ulx, uly, urx, ury, llx, lly, xbump = 0, ybump = 0;
-    sword ax, bx, cx, dx;
-    sword adx, ady;
-    Boolean flip;
-    word fw, fh, j, line;
-    sdword slope, cur;
-    dword ystep, acc;
-    word *xs;
-    byte *out;
-    BMSource src;
-
-    if (!RotCorner(f, ox + (sdword) w, oy, &urx, &ury) ||
-	!RotCorner(f, ox, oy + (sdword) h, &llx, &lly) ||
-	!RotCorner(f, ox, oy, &ulx, &uly))
-	return;
-    adx = Abs((sword) (ulx - urx));
-    ady = Abs((sword) (uly - ury));
-    flip = (Boolean) (adx >= ady ? ulx > urx : uly >= ury);
-    fw = (word) ((adx > ady ? adx : ady) + 1);
-    adx = Abs((sword) (ulx - llx));
-    ady = Abs((sword) (uly - lly));
-    if (adx < ady) {				/* down the left edge in y */
-	fh = (word) ady;
-	ybump = (sword) (uly < lly ? 1 : -1);
-	cur = (sdword) ulx << 16;
-	slope = (sdword) GrSDivWWFixed((WWFixedAsDWord) ((sdword) (llx - ulx)
-							 << 16),
-				       (WWFixedAsDWord) ((sdword) fh << 16));
-    } else {					/* in x */
-	fh = (word) adx;
-	xbump = (sword) (ulx < llx ? 1 : -1);
-	cur = (sdword) uly << 16;
-	slope = fh ? (sdword) GrSDivWWFixed(
-	    (WWFixedAsDWord) ((sdword) (lly - uly) << 16),
-	    (WWFixedAsDWord) ((sdword) fh << 16)) : 0;
-    }
-    if (!fh || (bm->B_type & BMT_FORMAT) > BMF_24BIT)
-	return;
-    ystep = GrUDivWWFixed((WWFixedAsDWord) bm->B_height << 16,
-			  (WWFixedAsDWord) fh << 16);
-    line = GrBitmapLineSize(fw, bm->B_type);
-    xs = XSteps(bm, fw, GrUDivWWFixed((WWFixedAsDWord) bm->B_width << 16,
-				      (WWFixedAsDWord) fw << 16));
-    out = malloc(line);
-    memset(&src, 0, sizeof(src));
-    src.f = f;
-    src.line = GrBitmapLineSize(bm->B_width, bm->B_type);
-    if (!xs || !out || !SourceSlice(&src, bm)) {
-	free(xs);
-	free(out);
-	free(src.buf);
-	return;
-    }
-    f->args.PBA_bm.B_width = fw;
-    f->args.PBA_bm.B_height = 1;
-    f->args.PBA_bm.B_compact = BMC_UNCOMPACTED;
-    f->args.PBA_size = line;
-    f->args.PBA_data = out;
-    ax = ulx;
-    bx = uly;
-    cx = urx;
-    dx = ury;
-    for (j = 0, acc = 0; j < fh; j++, acc += ystep) {
-	const byte *s;
-	sword r, step;
-
-	if ((acc >> 16) >= bm->B_height ||
-	    !(s = SourceScan(&src, (word) (acc >> 16))))
-	    break;
-	ScaleLine(bm, s, out, xs, fw, flip);
-	PutLine(f, ax, bx, cx, dx);
-	ax = (sword) (ax + xbump);		/* BumpCoords */
-	cx = (sword) (cx + xbump);
-	bx = (sword) (bx + ybump);
-	dx = (sword) (dx + ybump);
-	cur += slope;
-	r = (sword) ((cur + ((cur & 0xffff) == 0x8000 && cur < 0 ? 0 :
-			     0x8000)) >> 16);
-	step = (sword) (r - (ybump ? ax : bx));
-	if (step) {
-	    PutLine(f, ax, bx, cx, dx);
-	    if (ybump) {
-		ax = (sword) (ax + step);
-		cx = (sword) (cx + step);
-	    } else {
-		bx = (sword) (bx + step);
-		dx = (sword) (dx + step);
-	    }
-	}
-    }
-    free(xs);
-    free(out);
-    free(src.buf);
-}
-
 void GrBitmapDraw(BMFrame *f, sword x, sword y)
 {
     GrDraw *d = f->d;
     const Bitmap *bm = f->bm;
     DriverRegs r;
-    const CBitmap *c = Complex(bm);
+    const CBitmap *c = GrBMComplex(bm);
     Boolean complexBM = (Boolean) ((bm->B_type & BMT_COMPLEX) != 0 ||
 				   f->hfile);
     Boolean fill = f->fill;
@@ -1052,7 +180,7 @@ void GrBitmapDraw(BMFrame *f, sword x, sword y)
 	    f->x > d->GD_w->W_winRect.R_right ||
 	    f->y > d->GD_w->W_winRect.R_bottom)
 	    return;
-    } else if ((scaled ? ComplexReject(f, x, y) : Reject(f, x, y)) ||
+    } else if ((scaled ? BMComplexReject(f, x, y) : Reject(f, x, y)) ||
 	       !SetDrawPoint(f, x, y))
 	return;
     memset(&r, 0, sizeof(r));
@@ -1073,7 +201,7 @@ void GrBitmapDraw(BMFrame *f, sword x, sword y)
 	}
     } else if (!fill && (bm->B_type & BMT_FORMAT) < BMF_4CMYK &&
 	(bm->B_type & BMT_FORMAT) > f->devType) {
-	InitConvert(f, bm);			/* checkFormatChange */
+	InitFormatConversion(f, bm);			/* checkFormatChange */
 	f->args.PBA_bm.B_type &= (byte) ~BMT_PALETTE;
     } else if (bm->B_type & BMT_PALETTE) {
 	if (fill)
@@ -1085,24 +213,24 @@ void GrBitmapDraw(BMFrame *f, sword x, sword y)
 
     if (bm->B_compact > BMC_LZG)
 	return;
-    if (f->hfile && !HugeSlice(f, 0))
+    if (f->hfile && !GrBMHugeSlice(f, 0))
 	return;
     if (rotated) {
-	DrawRotated(f, x, y);
+	RotateBitmap(f, x, y);
 	return;
     }
     if (scaled) {
-	DrawScaled(f);
+	ScaleSlice(f);
 	return;
     }
     if (bm->B_compact != BMC_UNCOMPACTED) {
-	DrawUnpacked(f);
+	GrBMDrawUnpacked(f);
 	return;
     }
     if (!complexBM) {
 	f->args.PBA_data = (const byte *) (bm + 1);
 	f->args.PBA_bm.B_height = bm->B_height;
-	PutBits(f, f->y);
+	GrBMPutBits(f, f->y);
 	return;
     }
     for (;;) {					/* handleComplex */
@@ -1111,13 +239,13 @@ void GrBitmapDraw(BMFrame *f, sword x, sword y)
 	if (f->hfile)
 	    sy = (sword) (f->y + f->hfirst);
 	else if (bm != f->bm)
-	    sy = (sword) (f->y + Complex(bm)->CB_startScan);
-	f->args.PBA_data = SliceData(f, bm, &n);
+	    sy = (sword) (f->y + GrBMComplex(bm)->CB_startScan);
+	f->args.PBA_data = GrBMSliceData(f, bm, &n);
 	if (n) {
 	    f->args.PBA_bm.B_height = n;
-	    PutBits(f, sy);
+	    GrBMPutBits(f, sy);
 	}
-	bm = NextSlice(f, bm);			/* BMCallBack */
+	bm = GrBMNextSlice(f, bm);			/* BMCallBack */
 	if (!bm)
 	    break;
     }
@@ -1140,111 +268,6 @@ void GrBitmapDraw(BMFrame *f, sword x, sword y)
 #ifndef IF_IGNORE_MASK
 #define IF_IGNORE_MASK	0x10
 #endif
-
-/* the color of pixel x of a scan line (after the mask) into the area
- * attributes; a key to compare runs with */
-static dword ImageColor(const BMFrame *f, const byte *pix, word x,
-			Boolean set)
-{
-    GState *gs = f->d->GD_gs;
-    byte fmt = (byte) (f->args.PBA_bm.B_type & BMT_FORMAT), i;
-    const byte *e;
-
-    switch (fmt) {
-    case BMF_MONO:
-	i = (byte) ((pix[x >> 3] & (0x80 >> (x & 7))) ? C_BLACK : C_WHITE);
-	break;
-    case BMF_4BIT:
-	i = (byte) ((x & 1) ? pix[x >> 1] & 0x0f : pix[x >> 1] >> 4);
-	break;
-    case BMF_8BIT:
-	i = pix[x];
-	break;
-    default:
-	e = pix + 3 * x;
-	if (set)
-	    GrSetColorIn(gs, &gs->GS_areaAttr, CF_RGB, e[0], e[1], e[2]);
-	return 0x1000000UL | ((dword) e[0] << 16) | ((dword) e[1] << 8) |
-	       e[2];
-    }
-    if (f->imgPal && fmt != BMF_MONO) {
-	e = f->imgPal + 3 * (i < f->imgPalN ? i : 0);
-	if (set)
-	    GrSetColorIn(gs, &gs->GS_areaAttr, CF_RGB, e[0], e[1], e[2]);
-    } else if (set)
-	GrSetColorIn(gs, &gs->GS_areaAttr, CF_INDEX, i, 0, 0);
-    return i;
-}
-
-/* DrawImageScan: one scan line at x0, y */
-static void ImageScan(BMFrame *f, const byte *line, sword x0, sword y)
-{
-    const GrDraw *d = f->d;
-    word w = f->args.PBA_bm.B_width, n = f->bump, count = 0;
-    Boolean masked = (Boolean) ((f->args.PBA_bm.B_type & BMT_MASK) != 0);
-    const byte *pix = line + (masked ? (w + 7) >> 3 : 0);
-    Boolean border = (Boolean) ((f->image & IF_BORDER) != 0);
-    sword x = x0;
-
-    if (f->image & IF_IGNORE_MASK)
-	masked = FALSE;
-    while (count < w) {
-	word run = 1;
-	if (masked && !(line[count >> 3] & (0x80 >> (count & 7)))) {
-	    while (count + run < w &&
-		   !(line[(count + run) >> 3] & (0x80 >> ((count + run) & 7))))
-		run++;				/* CheckMaskedPixels: skip */
-	} else {
-	    dword key = ImageColor(f, pix, count, TRUE);
-	    while (count + run < w &&
-		   (!masked || (line[(count + run) >> 3] &
-				(0x80 >> ((count + run) & 7)))) &&
-		   ImageColor(f, pix, (word) (count + run), FALSE) == key)
-		run++;
-	    GrFillRectLow(d, x, y, (sword) (x + run * n - border),
-			  (sword) (y + n - border), AREA);
-	}
-	count = (word) (count + run);
-	x = (sword) (x + run * n);
-	if (x > d->GD_w->W_maskRect.R_right)
-	    break;
-    }
-    if (border) {				/* handleBorder */
-	word k;
-	GrFillRectLow(d, x0, (sword) (y + n - 1), (sword) (x0 + count * n),
-		      (sword) (y + n - 1), LINE_ATTR);
-	for (k = 0; k < count; k++) {
-	    sword bx = (sword) (x0 + n - 1 + k * n);
-	    GrFillRectLow(d, bx, y, bx, (sword) (y + n - 1), LINE_ATTR);
-	}
-    }
-}
-
-/* ImageHugeSection: the scan lines of the slice at device line sy (the
- * bitmap's line sy - f->y) */
-static void ImageSection(BMFrame *f, sword sy)
-{
-    const Window *w = f->d->GD_w;
-    const byte *line = f->args.PBA_data;
-    sword y = (sword) (f->y + (sy - f->y) * (sword) f->bump);
-    word k;
-
-    for (k = 0; k < f->args.PBA_bm.B_height; k++) {
-	if (y > w->W_maskRect.R_bottom)
-	    break;
-	if (y + (sword) f->bump > w->W_maskRect.R_top)
-	    ImageScan(f, line, f->x, y);
-	y = (sword) (y + f->bump);
-	line += f->args.PBA_size;
-    }
-}
-
-void GrBitmapDoneConvert(BMFrame *f)
-{
-    if (f->conv)
-	GrUnlockPalette(f->curWin);
-    free(f->cbuf);
-}
 
 static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
 		       Bitmap *(*cb)(Bitmap *), Boolean fill)
@@ -1269,7 +292,7 @@ void GrDrawBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 
     if (GrPathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
 	return;
-    if (RecordBitmap(gstate, GR_DRAW_BITMAP, FALSE, x, y, bm, callback))
+    if (BitmapToString(gstate, GR_DRAW_BITMAP, FALSE, x, y, bm, callback))
 	callback = NULL;
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
@@ -1284,7 +307,7 @@ void GrFillBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 
     if (GrPathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
 	return;
-    if (RecordBitmap(gstate, GR_FILL_BITMAP, FALSE, x, y, bm, callback))
+    if (BitmapToString(gstate, GR_FILL_BITMAP, FALSE, x, y, bm, callback))
 	callback = NULL;
     GrEnterGraphics(gstate, &d);
     GrSetDocPenPos(d.GD_gs, x, y);
@@ -1310,7 +333,7 @@ void GrDrawBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 {
     if (GrPathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
 	return;
-    if (RecordBitmap(gstate, GR_DRAW_BITMAP_CP, TRUE, 0, 0, bm, callback))
+    if (BitmapToString(gstate, GR_DRAW_BITMAP_CP, TRUE, 0, 0, bm, callback))
 	callback = NULL;
     AtCP(gstate, bm, callback, FALSE);
 }
@@ -1320,7 +343,7 @@ void GrFillBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 {
     if (GrPathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
 	return;
-    if (RecordBitmap(gstate, GR_FILL_BITMAP_CP, TRUE, 0, 0, bm, callback))
+    if (BitmapToString(gstate, GR_FILL_BITMAP_CP, TRUE, 0, 0, bm, callback))
 	callback = NULL;
     AtCP(gstate, bm, callback, TRUE);
 }

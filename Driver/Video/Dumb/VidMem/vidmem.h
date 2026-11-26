@@ -44,4 +44,7 @@ extern const byte (*const vidmemDitherCyan[VM_DITHER_LEVELS])[5];
 extern const byte (*const vidmemDitherMagenta[VM_DITHER_LEVELS])[5];
 extern const byte *const vidmemDitherYellow[VM_DITHER_LEVELS];
 
+/* Mono/monoUtils.c: black at x, y on a monochrome bitmap */
+Boolean MonoClusteredBlack(dword c, sword x, sword y);
+
 #endif /* VIDMEM_H */

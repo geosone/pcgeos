@@ -21,6 +21,10 @@ target_sources(geos_kernel_objs PRIVATE
   graphicsRoundedRect.c
   graphicsWin.c
   graphicsRaster.c
+  graphicsRasterDraw.c
+  graphicsBitmapString.c
+  graphicsRasterRotate.c
+  graphicsRasterScale.c
   graphicsImage.c
   graphicsBitmapHuge.c
   graphicsBitmapCreate.c

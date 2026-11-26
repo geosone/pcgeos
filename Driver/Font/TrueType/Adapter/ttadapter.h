@@ -577,4 +577,16 @@ Boolean TrueType_Lock_Face(TRUETYPE_VARS, TrueTypeOutlineEntry* entry);
 void TrueType_Unlock_Face(TRUETYPE_VARS);
 
 
+/* Main/: the driver's functions, each in the file of its asm file
+ * (called by TrueTypeStrategy, mainManager.c) */
+Boolean TrueTypeInit(void);			/* truetypeInit.c */
+Boolean TrueTypeExit(void);
+Boolean TrueTypeInitFonts(DriverRegs *r);
+Boolean TrueTypeGenWidths(DriverRegs *r);	/* truetypeWidths.c */
+Boolean TrueTypeGenChar(DriverRegs *r);		/* truetypeChars.c */
+Boolean TrueTypeCharMetrics(DriverRegs *r);	/* truetypeMetrics.c */
+Boolean TrueTypeGenPath(DriverRegs *r);		/* truetypePath.c */
+/* mainManager.c: the GState's point size */
+WWFixedAsDWord TrueTypePointSize(const GState *gs);
+
 #endif /* _TTADAPTER_H_ */
