@@ -641,7 +641,7 @@ typedef WordFlags VisTextGetAttrFlags;
 
 /***************************************************************************/
 
-@message void MSG_VIS_TEXT_ADD_CHAR_ATTR(@stack VisTextCharAttr *attrs) = ax;
+@message word MSG_VIS_TEXT_ADD_CHAR_ATTR(@stack VisTextCharAttr *attrs) = ax;
 /*
  * 	Add a given charAttr to the charAttr array and initialize its
  * 	reference count to one.

@@ -36,7 +36,7 @@ static word FontMetric(optr o, GFM_info info)
 
     TextGStateCreate(o);
     g = VT(o)->VTI_gstate;
-    TA_GetSingleCharAttr(o, &ca);
+    TA_GetCharAttrForPosition(o, 0, FALSE, &ca, NULL);
     GrSetFont(g, ca.VTCA_fontID,
 	      ((dword) ca.VTCA_pointSize.WBF_int << 16) |
 	      ((dword) ca.VTCA_pointSize.WBF_frac << 8));
@@ -83,7 +83,7 @@ static word FontMetric(optr o, GFM_info info)
 
     TextGStateCreate(oself);
     g = VT(oself)->VTI_gstate;
-    TA_GetSingleCharAttr(oself, &ca);
+    TA_GetCharAttrForPosition(oself, 0, FALSE, &ca, NULL);
     GrSetFont(g, ca.VTCA_fontID,
 	      ((dword) ca.VTCA_pointSize.WBF_int << 16) |
 	      ((dword) ca.VTCA_pointSize.WBF_frac << 8));

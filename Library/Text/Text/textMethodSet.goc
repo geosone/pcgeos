@@ -105,6 +105,8 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     start = p->VTRP_range.VTR_start;
     deleted = p->VTRP_range.VTR_end - start;
     inserted = p->VTRP_insCount;
+    /* (the runs while the replaced text is still there) */
+    (void) TA_UpdateRunsForReplacement(o, p);
     TS_ReplaceRange(o, p);
     /* the lines again, those that changed drawn */
     before = VT(o)->VTI_height;

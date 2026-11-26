@@ -64,6 +64,35 @@ extern Boolean TA_FindDefaultCharAttr(const VisTextCharAttr *a,
 extern void TA_GetSingleCharAttr(optr o, VisTextCharAttr *a);
 extern void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a);
 
+/* TextAttr/taRun.goc: the attribute runs (VTSF_MULTIPLE_CHAR_ATTRS,
+ * VTSF_MULTIPLE_PARA_ATTRS) */
+typedef enum { TRK_CHAR_ATTR, TRK_PARA_ATTR } TextRunKind;
+/* the element (a VisTextCharAttr or VisTextMaxParaAttr) changed */
+typedef void TA_ModifyCallback(optr o, void *element, void *data);
+extern word TA_RunForPosition(optr o, TextRunKind kind, dword pos,
+			      Boolean left);
+extern dword TA_RunPosition(optr o, TextRunKind kind, word run);
+extern word TA_RunToken(optr o, TextRunKind kind, word run);
+extern void TA_GetElement(optr o, TextRunKind kind, word token, void *buf);
+extern word TA_AddElement(optr o, TextRunKind kind, void *element);
+extern void TA_ElementAddRef(optr o, TextRunKind kind, word token);
+extern void TA_RemoveElement(optr o, TextRunKind kind, word token);
+extern Boolean TA_IsParagraphStart(optr o, dword pos);
+/* the attribute of the range changed by cb (or, with none, set to the
+ * element token) */
+extern dword TA_ModifyRun(optr o, TextRunKind kind, dword start,
+			  dword end, TA_ModifyCallback *cb, void *data,
+			  word token);
+/* before the text is replaced: the runs moved; TRUE if the attributes
+ * shown may have changed */
+extern Boolean TA_UpdateRunsForReplacement(optr o,
+					   const VisTextReplaceParameters *p);
+extern void TA_UpdateRunsForSelectionChange(optr o);
+/* the character attribute at a position (insertion: for the cursor),
+ * *count the characters from there that have it */
+extern void TA_GetCharAttrForPosition(optr o, dword pos, Boolean insertion,
+				      VisTextCharAttr *a, dword *count);
+
 /* TextSelect/tslMain.goc: the selection */
 extern void TSL_SelectGetSelection(optr o, dword *start, dword *end);
 extern Boolean TSL_SelectIsCursor(optr o);

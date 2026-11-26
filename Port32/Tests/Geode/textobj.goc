@@ -179,6 +179,52 @@ static Boolean ChunkIs(optr c, const char *text)
     return ok;
 }
 
+/* the character attribute run at pos is from s to e */
+static Boolean RunIs(optr o, dword pos, dword s, dword e)
+{
+    VisTextRange r;
+
+    @call o::MSG_VIS_TEXT_GET_RUN_BOUNDS(&r,
+		offsetof(VisTextInstance, VTI_charAttrRuns), pos);
+    return r.VTR_start == s && r.VTR_end == e;
+}
+
+/* the font of the range, and the token of its attribute */
+static FontID FontOf(optr o, dword start, dword end, word *token,
+		     VisTextCharAttrDiffs *d)
+{
+    VisTextCharAttr a;
+
+    *token = @call o::MSG_VIS_TEXT_GET_CHAR_ATTR(0, d, &a, end, start);
+    return a.VTCA_fontID;
+}
+
+/* the range replaced by the text (by the program: not filtered) */
+static void ReplaceRange(optr o, dword start, dword end, const char *s)
+{
+    VisTextReplaceParameters p;
+
+    memset(&p, 0, sizeof(p));
+    p.VTRP_range.VTR_start = start;
+    p.VTRP_range.VTR_end = end;
+    p.VTRP_insCount = Len(s);
+    p.VTRP_textReference.TR_type = TRT_POINTER;
+    p.VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer = (char *) s;
+    (void) @call o::MSG_VIS_TEXT_REPLACE_TEXT(&p);
+}
+
+/* the elements of the character attributes in use */
+static word UsedElements(optr o)
+{
+    MemHandle mh = OptrToHandle(o);
+    TextRunArrayHeader *h;
+
+    h = LMemDerefHandles(mh, ((VisTextInstance *) ObjDerefVis(o))->
+				 VTI_charAttrRuns);
+    return ElementArrayGetUsedCount(ConstructOptr(mh, h->TRAH_elementArray),
+				    0, NULL);
+}
+
 @method TOProcessClass, MSG_TO_STEP
 {
     VisTextReplaceParameters p;
@@ -844,6 +890,71 @@ static Boolean ChunkIs(optr c, const char *text)
 	TOCHECK(Typed("z#z") && toState.TOS_filter[0] == 3);
 	ObjVarDeleteData(@TOText, ATTR_VIS_TEXT_EXTENDED_FILTER);
 	TOCHECK(!Typed("#") && toState.TOS_filter[0] == 3);
+	break;
+    }
+    case 13: {
+	/* character attribute runs: a range of another font, text
+	 * inserted in it and deleted across it, the font of the whole
+	 * text again (one run), the attribute typed at a cursor */
+	VisTextCharAttrDiffs d;
+	VisTextCharAttr a;
+	FontID base;
+	word t, u;
+	optr n;
+
+	n = ObjInstantiate(OptrToHandle(@TOText),
+			   (ClassStruct *) &VisTextClass);
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("abcdef", 0);
+	@call n::MSG_VIS_TEXT_CREATE_STORAGE(VTSF_MULTIPLE_CHAR_ATTRS, 0);
+	TOCHECK(((VisTextInstance *) ObjDerefVis(n))->VTI_storageFlags &
+		VTSF_MULTIPLE_CHAR_ATTRS);
+	TOCHECK(RunIs(n, 3, 0, TEXT_ADDRESS_PAST_END));
+	TOCHECK(UsedElements(n) == 1);
+	base = FontOf(n, 0, 6, &t, &d);
+	TOCHECK(t == 0 && !d.VTCAD_diffs);
+	@call n::MSG_VIS_TEXT_SET_FONT_ID(FID_ROMA, 4, 2);
+	TOCHECK(RunIs(n, 0, 0, 2) && RunIs(n, 2, 2, 4) && RunIs(n, 3, 2, 4));
+	TOCHECK(RunIs(n, 4, 4, TEXT_ADDRESS_PAST_END));
+	TOCHECK(UsedElements(n) == 2);
+	TOCHECK(FontOf(n, 2, 4, &t, &d) == FID_ROMA && t == 1);
+	TOCHECK(FontOf(n, 0, 2, &t, &d) == base && t == 0);
+	(void) FontOf(n, 0, 6, &t, &d);
+	TOCHECK(t == CA_NULL_ELEMENT && d.VTCAD_diffs == VTCAF_MULTIPLE_FONT_IDS);
+	/* in the run: it grows */
+	ReplaceRange(n, 3, 3, "XY");
+	TOCHECK(Is(n, "abcXYdef"));
+	TOCHECK(RunIs(n, 2, 2, 6) && RunIs(n, 6, 6, TEXT_ADDRESS_PAST_END));
+	/* across its start: what is left of it starts with the range */
+	ReplaceRange(n, 1, 5, "");
+	TOCHECK(Is(n, "adef"));
+	TOCHECK(RunIs(n, 0, 0, 1) && RunIs(n, 1, 1, 2) &&
+		RunIs(n, 2, 2, TEXT_ADDRESS_PAST_END));
+	TOCHECK(FontOf(n, 1, 2, &t, &d) == FID_ROMA);
+	/* one font: one run, one element */
+	@call n::MSG_VIS_TEXT_SET_FONT_ID(base, TEXT_ADDRESS_PAST_END, 0);
+	TOCHECK(RunIs(n, 1, 0, TEXT_ADDRESS_PAST_END));
+	TOCHECK(UsedElements(n) == 1);
+	/* bold at a cursor: for the text typed there only */
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(2, 2);
+	@call n::MSG_VIS_TEXT_SET_TEXT_STYLE(0, 0, 0, TS_BOLD, 2, 2);
+	TOCHECK(RunIs(n, 1, 0, TEXT_ADDRESS_PAST_END));
+	TOCHECK(ObjVarFindData(n, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN));
+	(void) @call n::MSG_VIS_TEXT_GET_CHAR_ATTR(0, &d, &a, 2, 2);
+	TOCHECK(a.VTCA_textStyles == TS_BOLD);
+	ReplaceRange(n, 2, 2, "Z");
+	TOCHECK(Is(n, "adZef"));
+	TOCHECK(!ObjVarFindData(n, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN));
+	TOCHECK(RunIs(n, 2, 2, 3) && RunIs(n, 3, 3, TEXT_ADDRESS_PAST_END));
+	(void) @call n::MSG_VIS_TEXT_GET_CHAR_ATTR(0, &d, &a, 3, 2);
+	TOCHECK(a.VTCA_textStyles == TS_BOLD);
+	(void) @call n::MSG_VIS_TEXT_GET_CHAR_ATTR(0, &d, &a, 4, 3);
+	TOCHECK(a.VTCA_textStyles == 0);
+	/* a new cursor gives up an attribute not typed with */
+	@call n::MSG_VIS_TEXT_SET_TEXT_STYLE(0, 0, 0, TS_ITALIC, 1, 1);
+	u = UsedElements(n);
+	TOCHECK(u == 3);
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(4, 4);
+	TOCHECK(UsedElements(n) == 2);
 	break;
     }
     }

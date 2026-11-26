@@ -7169,13 +7169,46 @@ the modules of the asm; what is there:
   `..._GRAY_SCREEN`, `MSG_VIS_TEXT_SET_TEXT_STYLE`: the same bits to set
   and to clear toggle them, superscript and subscript exclude each
   other); `MSG_VIS_TEXT_GET_CHAR_ATTR`, with `VTGAF_MERGE_WITH_PASSED`
-  compared with the passed attribute (`VisTextCharAttrDiffs`). The range
-  of these messages is not looked at. A default record with a font
+  compared with the passed attribute (`VisTextCharAttrDiffs`). For an
+  object with a single attribute the range of these messages is not
+  looked at; with runs it is (below). A default record with a font
   number beyond the table is Berkeley (the asm read past its table).
   After a change the lines are made again and drawn, the object is
   user modified and gets `MSG_VIS_TEXT_ATTRIBUTE_CHANGE`, a generic
   one `MSG_VIS_TEXT_UPDATE_GENERIC` (ReflectChangeUpdateGeneric); the
   notifications of the change are not sent yet.
+- **Character attribute runs** (`TextAttr/taRun.goc`, after
+  `taRunLow.asm`, `taRunManip.asm`, `taElement.asm`, `taStorage.asm`):
+  `MSG_VIS_TEXT_CREATE_STORAGE` with `VTSF_MULTIPLE_CHAR_ATTRS` makes
+  `VTI_charAttrRuns` a run array (a chunk array of
+  `TextRunArrayElement`: position, token; the last one at
+  `TEXT_ADDRESS_PAST_END`) and an element array of `VisTextCharAttr`
+  (`TRAH_elementArray`), chunks of the object's block; the object's
+  attribute becomes the one run's (its chunk is freed). Objects of a
+  resource with `@RUN_ARRAY_HEADER` and their elements work as they
+  are. Text has the attribute of the last run that starts at or
+  before it; an element counts the runs (and the insertion token) that
+  use it. A change of a range splits the runs at its ends, changes or
+  replaces each run's element and joins equal neighbours
+  (ModifyRunWithoutUndo, CoalesceRun); at a cursor inside the text it
+  sets the **insertion token** (`ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN`)
+  that the text typed there gets; a new selection drops it. Before
+  every replacement the runs move (UpdateRun: deleted runs go, later
+  ones shift, a carriage return after a deletion and a paragraph's
+  start keep theirs; a replacement takes the attribute of the replaced
+  text). `MSG_VIS_TEXT_GET_CHAR_ATTR` gives the attribute at a cursor
+  (the insertion token, else to the right at a paragraph's start and at
+  the end of the text, else to the left) or of the run at a range's
+  start, with the differences of all runs in the range and
+  `CA_NULL_ELEMENT` for more than one. `MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN`,
+  `MSG_VIS_TEXT_ADD_CHAR_ATTR` (it returns the token: the C header said
+  `void`), `MSG_VIS_TEXT_REMOVE_CHAR_ATTR`, `MSG_VIS_TEXT_GET_RUN_BOUNDS`.
+  Lines are calculated and drawn run by run, the cursor with the
+  attribute typing would get. Not yet: paragraph attribute runs, large
+  objects (runs in huge arrays), elements in a VM block shared with
+  other objects (`TRAH_elementVMBlock`), style sheets (`CA_NULL_ELEMENT`
+  as the base style), type and graphic runs, undo, the notifications.
+  ctest `library.text` (step 13).
 - **Port32 changes in the C API.** The block of
   `MSG_VIS_TEXT_REPLACE_ALL_BLOCK`, `MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK`,
   `MSG_VIS_TEXT_APPEND_BLOCK` and `MSG_VIS_TEXT_GET_ALL_BLOCK` is a

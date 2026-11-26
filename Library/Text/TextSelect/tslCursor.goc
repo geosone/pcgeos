@@ -106,7 +106,7 @@ static void CursorToggle(optr o)
     GrSaveState(g);
     TextGStateToText(o, FALSE);
     GrMoveTo(g, x, y);
-    TA_GetSingleCharAttr(o, &ca);
+    TA_GetCharAttrForPosition(o, VT(o)->VTI_selectStart, TRUE, &ca, NULL);
     GrSetFont(g, ca.VTCA_fontID,
 	      ((dword) ca.VTCA_pointSize.WBF_int << 16) |
 	      ((dword) ca.VTCA_pointSize.WBF_frac << 8));

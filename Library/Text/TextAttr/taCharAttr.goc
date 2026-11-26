@@ -2,13 +2,14 @@
  * taCharAttr.goc -- the character attributes of a text object (after
  * taCharAttr.asm, the handlers of taAttr.asm that change one field).
  *
- * Port32 (Port32/ABI.md section 13z): objects with a single character
- * attribute only so far: VTI_charAttrRuns is a VisTextDefaultCharAttr
- * (VTSF_DEFAULT_CHAR_ATTR) or the chunk of a VisTextCharAttr.  An
+ * Port32 (Port32/ABI.md section 13z): an object with a single
+ * character attribute has a VisTextDefaultCharAttr in VTI_charAttrRuns
+ * (VTSF_DEFAULT_CHAR_ATTR) or the chunk of a VisTextCharAttr; an
  * attribute that a default record can say is kept as one
- * (SetSingleCharAttr).  The range of a change is the whole object.
- * Not yet: runs (VTSF_MULTIPLE_CHAR_ATTRS), tokens, styles, undo, the
- * notifications of a change (TA_SendNotification).
+ * (SetSingleCharAttr), the range of a change is the whole object.  With
+ * VTSF_MULTIPLE_CHAR_ATTRS the range is changed in the runs
+ * (taRun.goc).  Not yet: styles, undo, the notifications of a change
+ * (TA_SendNotification).
  */
 @include "textInt.goh"
 #include <font.h>
@@ -18,6 +19,9 @@
 @extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_DEFAULT;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_CHAR_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN;
+@extern method VisTextClass, MSG_VIS_TEXT_ADD_CHAR_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_CHAR_ATTR;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WIDTH;
@@ -177,13 +181,64 @@ static void ReflectChange(optr o)
     @call o::MSG_VIS_TEXT_ATTRIBUTE_CHANGE();
 }
 
-/* SetCharAttrCommon: the selection off the screen while the attribute
- * changes (UnHiliteAndFixupCharAttrRange) */
-static void SetCharAttr(optr o, const VisTextCharAttr *a)
+/*
+ * UnHiliteAndFixupCharAttrRange: the range of a change made real (the
+ * whole object with a single attribute: VIS_TEXT_RANGE_SELECTION, as
+ * FixupCharAttrRange makes it); the selection off the screen while the
+ * attribute changes.  FALSE if the object has a single attribute.
+ */
+static Boolean FixupRange(optr o, VisTextRange *r, dword start, dword end)
 {
+    Boolean multiple =
+	(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS) != 0;
+
+    r->VTR_start = start;
+    r->VTR_end = end;
+    if (multiple)
+	TA_GetTextRange(o, r, 0);
     TextGStateCreate(o);
     EditUnHilite(o);
-    TA_SetSingleCharAttr(o, a);
+    return multiple;
+}
+
+/*
+ * CharAttrChangeCommon: one field of the attribute changed by the
+ * callback, in the range (with runs) or the object's single attribute
+ */
+static void ChangeCharAttr(optr o, dword start, dword end,
+			   TA_ModifyCallback *cb, void *data)
+{
+    VisTextCharAttr a;
+    VisTextRange r;
+
+    if (FixupRange(o, &r, start, end))
+	(void) TA_ModifyRun(o, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, cb,
+			    data, CA_NULL_ELEMENT);
+    else {
+	TA_GetSingleCharAttr(o, &a);
+	cb(o, &a, data);
+	TA_SetSingleCharAttr(o, &a);
+    }
+    ReflectChange(o);
+}
+
+/* SetCharAttrCommon, SetCharAttrOrParaAttrMultiple: the whole attribute
+ * (the element added, the range set to it, the extra reference given
+ * up) */
+static void SetCharAttr(optr o, dword start, dword end,
+			const VisTextCharAttr *a)
+{
+    VisTextCharAttr c = *a;
+    VisTextRange r;
+    word token;
+
+    if (FixupRange(o, &r, start, end)) {
+	token = TA_AddElement(o, TRK_CHAR_ATTR, &c);
+	(void) TA_ModifyRun(o, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, NULL,
+			    NULL, token);
+	TA_RemoveElement(o, TRK_CHAR_ATTR, token);
+    } else
+	TA_SetSingleCharAttr(o, &c);
     ReflectChange(o);
 }
 
@@ -191,181 +246,274 @@ static void SetCharAttr(optr o, const VisTextCharAttr *a)
 {
     VisTextCharAttr a;
 
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
     TA_MapDefaultCharAttr(defCharAttrs, &a);
-    SetCharAttr(oself, &a);
+    SetCharAttr(oself, rangeStart, rangeEnd, &a);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR
 {
-    VisTextCharAttr a = *attrs;
-
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    SetCharAttr(oself, &a);
+    SetCharAttr(oself, rangeStart, rangeEnd, attrs);
 }
 
-/* VisTextGetCharAttr: the attribute of the range, here the object's;
- * with VTGAF_MERGE_WITH_PASSED the passed attribute is compared with it
- * (DiffCharAttr) */
+/* VisTextSetCharAttrByToken: an element of the array (CA_NULL_ELEMENT,
+ * the base style: no style sheets yet) */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN
+{
+    VisTextRange r;
+
+    if (!FixupRange(oself, &r, rangeStart, rangeEnd) ||
+	token == CA_NULL_ELEMENT) {
+	ReflectChange(oself);
+	return;
+    }
+    (void) TA_ModifyRun(oself, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, NULL,
+			NULL, token);
+    ReflectChange(oself);
+}
+
+/* VisTextAddCharAttr: the element with a reference */
+@extern method VisTextClass, MSG_VIS_TEXT_ADD_CHAR_ATTR
+{
+    VisTextCharAttr a = *attrs;
+
+    return TA_AddElement(oself, TRK_CHAR_ATTR, &a);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_CHAR_ATTR
+{
+    TA_RemoveElement(oself, TRK_CHAR_ATTR, attrToken);
+}
+
+/* DiffCharAttr: the fields in which two attributes differ marked */
+static void DiffCharAttr(const VisTextCharAttr *a, const VisTextCharAttr *b,
+			 VisTextCharAttrDiffs *diffs)
+{
+    word d = diffs->VTCAD_diffs;
+
+    if (a->VTCA_fontID != b->VTCA_fontID)
+	d |= VTCAF_MULTIPLE_FONT_IDS;
+    if (a->VTCA_pointSize.WBF_int != b->VTCA_pointSize.WBF_int ||
+	a->VTCA_pointSize.WBF_frac != b->VTCA_pointSize.WBF_frac)
+	d |= VTCAF_MULTIPLE_POINT_SIZES;
+    if (memcmp(&a->VTCA_color, &b->VTCA_color, sizeof(ColorQuad)))
+	d |= VTCAF_MULTIPLE_COLORS;
+    if (a->VTCA_grayScreen != b->VTCA_grayScreen)
+	d |= VTCAF_MULTIPLE_GRAY_SCREENS;
+    if (memcmp(&a->VTCA_pattern, &b->VTCA_pattern, sizeof(GraphicPattern)))
+	d |= VTCAF_MULTIPLE_PATTERNS;
+    if (a->VTCA_trackKerning != b->VTCA_trackKerning)
+	d |= VTCAF_MULTIPLE_TRACK_KERNINGS;
+    if (a->VTCA_fontWeight != b->VTCA_fontWeight)
+	d |= VTCAF_MULTIPLE_FONT_WEIGHTS;
+    if (a->VTCA_fontWidth != b->VTCA_fontWidth)
+	d |= VTCAF_MULTIPLE_FONT_WIDTHS;
+    if (memcmp(&a->VTCA_bgColor, &b->VTCA_bgColor, sizeof(ColorQuad)))
+	d |= VTCAF_MULTIPLE_BG_COLORS;
+    if (a->VTCA_bgGrayScreen != b->VTCA_bgGrayScreen)
+	d |= VTCAF_MULTIPLE_BG_GRAY_SCREENS;
+    if (memcmp(&a->VTCA_bgPattern, &b->VTCA_bgPattern,
+	       sizeof(GraphicPattern)))
+	d |= VTCAF_MULTIPLE_BG_PATTERNS;
+    if (a->VTCA_meta.SSEH_style != b->VTCA_meta.SSEH_style)
+	d |= VTCAF_MULTIPLE_STYLES;
+    diffs->VTCAD_diffs = d;
+    diffs->VTCAD_textStyles |= a->VTCA_textStyles ^ b->VTCA_textStyles;
+    diffs->VTCAD_extendedStyles |=
+	a->VTCA_extendedStyles ^ b->VTCA_extendedStyles;
+}
+
+/*
+ * VisTextGetCharAttr: the attribute of the range (of its start; at a
+ * cursor the one typing would get); with several runs in the range the
+ * differences of theirs marked and CA_NULL_ELEMENT returned, else the
+ * run's token.  With VTGAF_MERGE_WITH_PASSED the passed attribute is
+ * compared too.
+ */
 @extern method VisTextClass, MSG_VIS_TEXT_GET_CHAR_ATTR
 {
-    VisTextCharAttr a;
+    VisTextCharAttr a, e;
+    VisTextRange r;
+    word i, token;
+    dword next;
 
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    TA_GetSingleCharAttr(oself, &a);
-    if (!(flags & VTGAF_MERGE_WITH_PASSED)) {
+    if (diffs && !(flags & VTGAF_MERGE_WITH_PASSED))
+	memset(diffs, 0, sizeof(*diffs));
+    if (!(pself->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS)) {
+	TA_GetSingleCharAttr(oself, &a);
+	if ((flags & VTGAF_MERGE_WITH_PASSED) && diffs)
+	    DiffCharAttr(&a, attrs, diffs);
+	*attrs = a;
+	return CA_NULL_ELEMENT;
+    }
+    r.VTR_start = rangeStart;
+    r.VTR_end = rangeEnd;
+    TA_GetTextRange(oself, &r, 0);
+    if (r.VTR_start == r.VTR_end) {
+	/* a cursor: the insertion element, else the attribute typing
+	 * would get */
+	token = (word) -1;
+	{
+	    word *w = ObjVarFindData(oself,
+				     ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN);
+	    if (w)
+		token = *w;
+	}
+	if (token == (word) -1)
+	    i = TA_RunForPosition(oself, TRK_CHAR_ATTR, r.VTR_start,
+				  !TA_IsParagraphStart(oself, r.VTR_start) &&
+				  TS_GetTextSize(oself) != r.VTR_start);
+    } else {
+	/* a range: the run to the right of its start */
+	token = (word) -1;
+	i = TA_RunForPosition(oself, TRK_CHAR_ATTR, r.VTR_start, FALSE);
+    }
+    if (token != (word) -1)
+	next = TEXT_ADDRESS_PAST_END;
+    else {
+	token = TA_RunToken(oself, TRK_CHAR_ATTR, i);
+	next = TA_RunPosition(oself, TRK_CHAR_ATTR, i + 1);
+    }
+    TA_GetElement(oself, TRK_CHAR_ATTR, token, &a);
+    if (r.VTR_start == r.VTR_end || next >= r.VTR_end) {
+	if ((flags & VTGAF_MERGE_WITH_PASSED) && diffs)
+	    DiffCharAttr(&a, attrs, diffs);
+	*attrs = a;
+	return token;
+    }
+    /* EnumRunsInRange with GetCharAttrCallback */
+    i = TA_RunForPosition(oself, TRK_CHAR_ATTR, r.VTR_start, FALSE);
+    while (TA_RunPosition(oself, TRK_CHAR_ATTR, i) < r.VTR_end &&
+	   TA_RunToken(oself, TRK_CHAR_ATTR, i) != CA_NULL_ELEMENT) {
+	TA_GetElement(oself, TRK_CHAR_ATTR,
+		      TA_RunToken(oself, TRK_CHAR_ATTR, i), &e);
 	if (diffs)
-	    memset(diffs, 0, sizeof(*diffs));
-    } else if (diffs) {
-	const VisTextCharAttr *b = attrs;
-	word d = diffs->VTCAD_diffs;
-
-	if (a.VTCA_fontID != b->VTCA_fontID)
-	    d |= VTCAF_MULTIPLE_FONT_IDS;
-	if (a.VTCA_pointSize.WBF_int != b->VTCA_pointSize.WBF_int ||
-	    a.VTCA_pointSize.WBF_frac != b->VTCA_pointSize.WBF_frac)
-	    d |= VTCAF_MULTIPLE_POINT_SIZES;
-	if (memcmp(&a.VTCA_color, &b->VTCA_color, sizeof(ColorQuad)))
-	    d |= VTCAF_MULTIPLE_COLORS;
-	if (a.VTCA_grayScreen != b->VTCA_grayScreen)
-	    d |= VTCAF_MULTIPLE_GRAY_SCREENS;
-	if (memcmp(&a.VTCA_pattern, &b->VTCA_pattern, sizeof(GraphicPattern)))
-	    d |= VTCAF_MULTIPLE_PATTERNS;
-	if (a.VTCA_trackKerning != b->VTCA_trackKerning)
-	    d |= VTCAF_MULTIPLE_TRACK_KERNINGS;
-	if (a.VTCA_fontWeight != b->VTCA_fontWeight)
-	    d |= VTCAF_MULTIPLE_FONT_WEIGHTS;
-	if (a.VTCA_fontWidth != b->VTCA_fontWidth)
-	    d |= VTCAF_MULTIPLE_FONT_WIDTHS;
-	if (memcmp(&a.VTCA_bgColor, &b->VTCA_bgColor, sizeof(ColorQuad)))
-	    d |= VTCAF_MULTIPLE_BG_COLORS;
-	if (a.VTCA_bgGrayScreen != b->VTCA_bgGrayScreen)
-	    d |= VTCAF_MULTIPLE_BG_GRAY_SCREENS;
-	if (memcmp(&a.VTCA_bgPattern, &b->VTCA_bgPattern,
-		   sizeof(GraphicPattern)))
-	    d |= VTCAF_MULTIPLE_BG_PATTERNS;
-	if (a.VTCA_meta.SSEH_style != b->VTCA_meta.SSEH_style)
-	    d |= VTCAF_MULTIPLE_STYLES;
-	diffs->VTCAD_diffs = d;
-	diffs->VTCAD_textStyles |= a.VTCA_textStyles ^ b->VTCA_textStyles;
-	diffs->VTCAD_extendedStyles |=
-	    a.VTCA_extendedStyles ^ b->VTCA_extendedStyles;
+	    DiffCharAttr(&e, &a, diffs);
+	i++;
     }
     *attrs = a;
     return CA_NULL_ELEMENT;
 }
 
 /*
- * CharAttrChangeCommon with its callbacks: one field of the attribute
+ * The handlers of taAttr.asm that change one field, with their
+ * callbacks
  */
+static void SetFontIDCB(optr o, void *e, void *data)
+{
+    (void) o;
+    ((VisTextCharAttr *) e)->VTCA_fontID = *(FontID *) data;
+}
+
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID
 {
-    VisTextCharAttr a;
+    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontIDCB, &fid);
+}
 
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    TA_GetSingleCharAttr(oself, &a);
-    a.VTCA_fontID = fid;
-    SetCharAttr(oself, &a);
+static void SetFontWeightCB(optr o, void *e, void *data)
+{
+    (void) o;
+    ((VisTextCharAttr *) e)->VTCA_fontWeight = *(byte *) data;
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT
 {
-    VisTextCharAttr a;
+    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontWeightCB,
+		   &fontWeight);
+}
 
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    TA_GetSingleCharAttr(oself, &a);
-    a.VTCA_fontWeight = fontWeight;
-    SetCharAttr(oself, &a);
+static void SetFontWidthCB(optr o, void *e, void *data)
+{
+    (void) o;
+    ((VisTextCharAttr *) e)->VTCA_fontWidth = *(byte *) data;
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WIDTH
 {
-    VisTextCharAttr a;
-
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    TA_GetSingleCharAttr(oself, &a);
-    a.VTCA_fontWidth = fontWidth;
-    SetCharAttr(oself, &a);
+    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontWidthCB,
+		   &fontWidth);
 }
 
 /* SetWBFixedCallback: the WWFixed rounded to a WBFixed */
+static void SetPointSizeCB(optr o, void *e, void *data)
+{
+    VisTextCharAttr *a = e;
+    WWFixed *s = data;
+
+    (void) o;
+    a->VTCA_pointSize.WBF_int = s->WWF_int;
+    a->VTCA_pointSize.WBF_frac = s->WWF_frac >> 8;
+}
+
 @extern method VisTextClass, MSG_VIS_TEXT_SET_POINT_SIZE
 {
-    VisTextCharAttr a;
-
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    TA_GetSingleCharAttr(oself, &a);
-    a.VTCA_pointSize.WBF_int = pointSize.WWF_int;
-    a.VTCA_pointSize.WBF_frac = pointSize.WWF_frac >> 8;
-    SetCharAttr(oself, &a);
+    ChangeCharAttr(oself, rangeStart, rangeEnd, SetPointSizeCB,
+		   &pointSize);
 }
 
 /* SetTextStyleCallback: the same bits to set and to clear toggle them;
  * superscript and subscript exclude each other, the new one wins */
-@extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE
-{
-    VisTextCharAttr a;
-    byte s;
+typedef struct {
+    word set, clear, extSet, extClear;
+} StyleChange;
 
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    TA_GetSingleCharAttr(oself, &a);
-    s = a.VTCA_textStyles;
-    if ((byte) styleBitsToClear == (byte) styleBitsToSet)
-	s ^= (byte) styleBitsToClear;
+static void SetTextStyleCB(optr o, void *e, void *data)
+{
+    VisTextCharAttr *a = e;
+    StyleChange *c = data;
+    byte s = a->VTCA_textStyles;
+
+    (void) o;
+    if ((byte) c->clear == (byte) c->set)
+	s ^= (byte) c->clear;
     else
-	s = (s & ~(byte) styleBitsToClear) | (byte) styleBitsToSet;
+	s = (s & ~(byte) c->clear) | (byte) c->set;
     if ((s & (TS_SUPERSCRIPT | TS_SUBSCRIPT)) ==
 	(TS_SUPERSCRIPT | TS_SUBSCRIPT)) {
-	if (a.VTCA_textStyles & TS_SUPERSCRIPT)
+	if (a->VTCA_textStyles & TS_SUPERSCRIPT)
 	    s &= ~TS_SUPERSCRIPT;
 	else
 	    s &= ~TS_SUBSCRIPT;
     }
-    a.VTCA_textStyles = s;
-    a.VTCA_extendedStyles =
-	(a.VTCA_extendedStyles & ~extBitsToClear) | extBitsToSet;
-    SetCharAttr(oself, &a);
+    a->VTCA_textStyles = s;
+    a->VTCA_extendedStyles =
+	(a->VTCA_extendedStyles & ~c->extClear) | c->extSet;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE
+{
+    StyleChange c;
+
+    c.set = styleBitsToSet;
+    c.clear = styleBitsToClear;
+    c.extSet = extBitsToSet;
+    c.extClear = extBitsToClear;
+    ChangeCharAttr(oself, rangeStart, rangeEnd, SetTextStyleCB, &c);
 }
 
 /* SetColorCallback: an index has no green and blue */
+static void SetColorCB(optr o, void *e, void *data)
+{
+    VisTextCharAttr *a = e;
+
+    (void) o;
+    a->VTCA_color = *(ColorQuad *) data;
+    if (a->VTCA_color.CQ_info == CF_INDEX)
+	a->VTCA_color.CQ_green = a->VTCA_color.CQ_blue = 0;
+}
+
 @extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR
 {
-    VisTextCharAttr a;
+    ChangeCharAttr(oself, rangeStart, rangeEnd, SetColorCB, &color);
+}
 
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    TA_GetSingleCharAttr(oself, &a);
-    a.VTCA_color = color;
-    if (color.CQ_info == CF_INDEX)
-	a.VTCA_color.CQ_green = a.VTCA_color.CQ_blue = 0;
-    SetCharAttr(oself, &a);
+static void SetGrayScreenCB(optr o, void *e, void *data)
+{
+    (void) o;
+    ((VisTextCharAttr *) e)->VTCA_grayScreen = *(SystemDrawMask *) data;
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN
 {
-    VisTextCharAttr a;
-
-    /* (a single attribute: the whole object) */
-    (void) rangeStart;
-    (void) rangeEnd;
-    TA_GetSingleCharAttr(oself, &a);
-    a.VTCA_grayScreen = grayScreen;
-    SetCharAttr(oself, &a);
+    ChangeCharAttr(oself, rangeStart, rangeEnd, SetGrayScreenCB,
+		   &grayScreen);
 }

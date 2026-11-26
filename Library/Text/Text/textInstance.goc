@@ -67,6 +67,12 @@
 @extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN;
+@extern method VisTextClass, MSG_VIS_TEXT_ADD_CHAR_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_CHAR_ATTR;
+/* TextAttr/taRun.goc */
+@extern method VisTextClass, MSG_VIS_TEXT_CREATE_STORAGE;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_RUN_BOUNDS;
 /* Text/textGState.goc */
 @extern method VisTextClass, MSG_VIS_CREATE_CACHED_GSTATES;
 @extern method VisTextClass, MSG_VIS_DESTROY_CACHED_GSTATES;

@@ -90,7 +90,7 @@ int main(int argc, char **argv)
     static const char *const text[] = {
 	"Hello, world!", "bye, world!?", "!!?bye!!", "abcdefgh", "bh",
 	"in aa blockin", "aXYde", "aXYde", "aXYde", "Hi Hi Hi",
-	"Hi Hi Hi Hi Hi", "a12b-cE -.F14y#"
+	"Hi Hi Hi Hi Hi", "a12b-cE -.F14y#", "a12b-cE -.F14y#"
     };
     GeodeHandle app;
     GeodeLoadError e;
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 12; i++) {
+    for (i = 1; i <= 13; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);

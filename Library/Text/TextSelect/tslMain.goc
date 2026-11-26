@@ -45,6 +45,7 @@ static void SetShown(optr o, dword start, dword end, dword show)
     TSL_SelectSetSelection(o, start, end);
     TextScrollOneLine(o, show);
     EditHilite(o);
+    TA_UpdateRunsForSelectionChange(o);
 }
 
 /*
@@ -128,6 +129,9 @@ static void SelectRange(optr o, dword start, dword end)
     /* UpdateSelectedArea: the old one off the screen, the new one on */
     TextGStateCreate(o);
     EditUnHilite(o);
+    if (VT(o)->VTI_selectStart != r.VTR_start ||
+	VT(o)->VTI_selectEnd != r.VTR_end)
+	TA_UpdateRunsForSelectionChange(o);
     TSL_SelectSetSelection(o, r.VTR_start, r.VTR_end);
     TextScrollOneLine(o, r.VTR_end);
     EditHilite(o);

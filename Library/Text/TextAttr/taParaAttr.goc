@@ -143,7 +143,7 @@ VisTextExtendedStyles TA_FillTextAttrForDraw(optr o, dword pos,
     VisTextInstance *t;
     Boolean gray;
 
-    TA_GetSingleCharAttr(o, &ca);
+    TA_GetCharAttrForPosition(o, pos, FALSE, &ca, count);
     t = VT(o);
     gray = !(((VisInstance *) t)->VI_attrs & VA_FULLY_ENABLED) ||
 	   (t->VTI_features & VTF_USE_50_PCT_TEXT_MASK);
@@ -159,6 +159,5 @@ VisTextExtendedStyles TA_FillTextAttrForDraw(optr o, dword pos,
     ta->TA_modeClear = 0;
     ta->TA_fontWeight = ca.VTCA_fontWeight;
     ta->TA_fontWidth = ca.VTCA_fontWidth;
-    *count = TEXT_ADDRESS_PAST_END - pos;
     return ca.VTCA_extendedStyles;
 }

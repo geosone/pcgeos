@@ -202,6 +202,7 @@ static void SelectWord(optr o, dword off)
     EditUnHilite(o);
     TSL_SelectSetSelection(o, start, end);
     EditHilite(o);
+    TA_UpdateRunsForSelectionChange(o);
     t = VT(o);
     t->VTI_selectMinStart = start;
     t->VTI_selectMinEnd = end;

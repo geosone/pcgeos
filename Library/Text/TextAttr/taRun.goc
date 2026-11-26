@@ -1,0 +1,710 @@
+/*
+ * taRun.goc -- the attribute runs of a small text object (after
+ * taRunLow.asm, taRunManip.asm, taElement.asm, taStorage.asm and the
+ * run parts of taRunQuery.asm).
+ *
+ * A run array is a chunk array of TextRunArrayElement in the object's
+ * block (VTI_charAttrRuns, VTI_paraAttrRuns with VTSF_MULTIPLE_...):
+ * a run starts at TRAE_position and has the attribute TRAE_token, an
+ * element of the element array the run array's header names
+ * (TRAH_elementArray, a chunk of the same block); the last run is at
+ * TEXT_ADDRESS_PAST_END with CA_NULL_ELEMENT.  The text at a position
+ * has the attribute of the last run that starts at or before it (the
+ * run "to the right"; to the left: at a run's start, the run before).
+ * Elements are counted: one reference per run that uses them (and per
+ * insertion token, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN: the
+ * attribute for text typed at a cursor).
+ *
+ * Port32 (Port32/ABI.md section 13z): runs are positions and tokens,
+ * looked up by index (no pointers kept across a change of the block).
+ * Not yet: large objects (runs in huge arrays), elements in a VM block
+ * (TRAH_elementVMBlock: shared with other objects, style sheets),
+ * graphics and type runs, undo, the cached last run position
+ * (TEMP_VIS_TEXT_CACHED_RUN_INFO: only an optimization).
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+#include <char.h>
+
+@extern method VisTextClass, MSG_VIS_TEXT_CREATE_STORAGE;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_RUN_BOUNDS;
+
+/* ---------------------------------------------------------------------
+ * The run array (taRunLow.asm)
+ * ------------------------------------------------------------------- */
+
+static ChunkHandle RunChunk(optr o, TextRunKind kind)
+{
+    VisTextInstance *t = VT(o);
+
+    return kind == TRK_CHAR_ATTR ? t->VTI_charAttrRuns : t->VTI_paraAttrRuns;
+}
+
+/* RunArrayLock */
+static optr RunArray(optr o, TextRunKind kind)
+{
+    return ConstructOptr(OptrToHandle(o), RunChunk(o, kind));
+}
+
+/* ElementArrayLock: the elements are in the object's block */
+static optr Elements(optr o, TextRunKind kind)
+{
+    TextRunArrayHeader *h = LMemDeref(RunArray(o, kind));
+
+    if (h->TRAH_elementVMBlock)
+	EC_ERROR(-1);	/* (elements in a VM block: not yet) */
+    return ConstructOptr(OptrToHandle(o), h->TRAH_elementArray);
+}
+
+static TextRunArrayElement *Run(optr o, TextRunKind kind, word i)
+{
+    return ChunkArrayElementToPtr(RunArray(o, kind), i, NULL);
+}
+
+static dword PosOf(const TextRunArrayElement *r)
+{
+    return (word) r->TRAE_position.WAAH_low |
+	   ((dword) (byte) r->TRAE_position.WAAH_high << 16);
+}
+
+dword TA_RunPosition(optr o, TextRunKind kind, word i)
+{
+    return PosOf(Run(o, kind, i));
+}
+
+word TA_RunToken(optr o, TextRunKind kind, word i)
+{
+    return Run(o, kind, i)->TRAE_token;
+}
+
+static void SetPos(optr o, TextRunKind kind, word i, dword pos)
+{
+    TextRunArrayElement *r = Run(o, kind, i);
+
+    r->TRAE_position.WAAH_low = (sword) (word) pos;
+    r->TRAE_position.WAAH_high = (sbyte) (byte) (pos >> 16);
+    ObjMarkDirty(o);
+}
+
+static void SetToken(optr o, TextRunKind kind, word i, word token)
+{
+    Run(o, kind, i)->TRAE_token = token;
+    ObjMarkDirty(o);
+}
+
+static Boolean AtEnd(dword pos)
+{
+    return (pos >> 16) == TEXT_ADDRESS_PAST_END_HIGH;
+}
+
+/* RunArrayInsert: a run before run i */
+static void RunInsert(optr o, TextRunKind kind, word i, dword pos,
+		      word token)
+{
+    optr a = RunArray(o, kind);
+    TextRunArrayElement *r;
+
+    r = ChunkArrayInsertAt(a, ChunkArrayElementToPtr(a, i, NULL), 0);
+    r->TRAE_token = token;
+    SetPos(o, kind, i, pos);
+}
+
+/* RunArrayDelete */
+static void RunDelete(optr o, TextRunKind kind, word i)
+{
+    optr a = RunArray(o, kind);
+
+    ChunkArrayDelete(a, ChunkArrayElementToPtr(a, i, NULL));
+    ObjMarkDirty(o);
+}
+
+/*
+ * GetRunForPosition (right: a run starting at pos is the one) and
+ * GetRunForPositionLeft (the run before it); TEXT_ADDRESS_PAST_END is
+ * in the middle of the last real run
+ */
+word TA_RunForPosition(optr o, TextRunKind kind, dword pos, Boolean left)
+{
+    word n = (word) ChunkArrayGetCount(RunArray(o, kind)), i;
+
+    for (i = 0; i < n; i++) {
+	dword p = TA_RunPosition(o, kind, i);
+	if (pos < p || (pos == p && AtEnd(pos)))
+	    break;		/* in the middle of the run before */
+	if (pos == p)
+	    return left && i ? i - 1 : i;
+    }
+    return i ? i - 1 : 0;
+}
+
+/* ---------------------------------------------------------------------
+ * Elements (taElement.asm)
+ * ------------------------------------------------------------------- */
+
+static word ElementSize(TextRunKind kind)
+{
+    return kind == TRK_CHAR_ATTR ? sizeof(VisTextCharAttr)
+				 : sizeof(VisTextMaxParaAttr);
+}
+
+/* GetElement */
+void TA_GetElement(optr o, TextRunKind kind, word token, void *buf)
+{
+    word size;
+    void *e = ChunkArrayElementToPtr(Elements(o, kind), token, &size);
+
+    memset(buf, 0, ElementSize(kind));
+    memcpy(buf, e, size);
+}
+
+/* AddElement: the element's token, with a reference more */
+word TA_AddElement(optr o, TextRunKind kind, void *element)
+{
+    return ElementArrayAddElement(Elements(o, kind), element, 0, NULL);
+}
+
+/* ElementAddRef */
+void TA_ElementAddRef(optr o, TextRunKind kind, word token)
+{
+    ElementArrayAddReference(Elements(o, kind), token);
+}
+
+/* RemoveElement */
+void TA_RemoveElement(optr o, TextRunKind kind, word token)
+{
+    ElementArrayRemoveReference(Elements(o, kind), token, 0, NULL);
+}
+
+/* GetInsertionElement */
+static word GetInsertionElement(optr o)
+{
+    word *w = ObjVarFindData(o, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN);
+
+    return w ? *w : CA_NULL_ELEMENT;
+}
+
+/* ClearInsertionElement: the token (CA_NULL_ELEMENT if none), its
+ * reference removed if `unref' */
+static word ClearInsertionElement(optr o, Boolean unref)
+{
+    word token = GetInsertionElement(o);
+
+    if (token == CA_NULL_ELEMENT)
+	return token;
+    (void) ObjVarDeleteData(o, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN);
+    if (unref)
+	TA_RemoveElement(o, TRK_CHAR_ATTR, token);
+    return token;
+}
+
+/* SetInsertionElement: with a reference */
+static void SetInsertionElement(optr o, word token)
+{
+    word *w;
+
+    (void) ClearInsertionElement(o, TRUE);
+    w = ObjVarAddData(o, ATTR_VIS_TEXT_CHAR_ATTR_INSERTION_TOKEN,
+		      sizeof(word));
+    *w = token;
+    TA_ElementAddRef(o, TRK_CHAR_ATTR, token);
+}
+
+/* TA_UpdateRunsForSelectionChange: a new selection drops the insertion
+ * token */
+void TA_UpdateRunsForSelectionChange(optr o)
+{
+    if (VT(o)->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS)
+	(void) ClearInsertionElement(o, TRUE);
+}
+
+/* ---------------------------------------------------------------------
+ * Paragraphs (TSL_IsParagraphStart, TSL_IsParagraphEnd)
+ * ------------------------------------------------------------------- */
+
+Boolean TA_IsParagraphStart(optr o, dword pos)
+{
+    return pos == 0 || TS_GetCharAtOffset(o, pos - 1) == C_CR;
+}
+
+/* TRUE at a carriage return or the end of the text (*atEnd then) */
+static Boolean IsParagraphEnd(optr o, dword pos, Boolean *atEnd)
+{
+    *atEnd = pos >= TS_GetTextSize(o);
+    return *atEnd || TS_GetCharAtOffset(o, pos) == C_CR;
+}
+
+/* TSL_FindParagraphEnd: the carriage return at or after pos, FALSE at
+ * the end of the text */
+static Boolean FindParagraphEnd(optr o, dword *pos)
+{
+    dword size = TS_GetTextSize(o);
+
+    for (; *pos < size; (*pos)++)
+	if (TS_GetCharAtOffset(o, *pos) == C_CR)
+	    return TRUE;
+    return FALSE;
+}
+
+/* ---------------------------------------------------------------------
+ * Coalescing and changing (taRunManip.asm)
+ * ------------------------------------------------------------------- */
+
+/* CoalesceRun: runs with the token of the one before, and the first of
+ * two at the same position, removed; the position of the last real run */
+static dword CoalesceRun(optr o, TextRunKind kind)
+{
+    word i = 0, lastToken;
+    dword lastPos, pos;
+
+    lastToken = TA_RunToken(o, kind, 0);
+    lastPos = TA_RunPosition(o, kind, 0);
+    for (i = 1; ; ) {
+	pos = TA_RunPosition(o, kind, i);
+	if (AtEnd(pos))
+	    break;
+	if (TA_RunToken(o, kind, i) == lastToken) {
+	    TA_RemoveElement(o, kind, lastToken);
+	    RunDelete(o, kind, i);
+	    continue;
+	}
+	if (pos == lastPos) {
+	    TA_RemoveElement(o, kind, TA_RunToken(o, kind, i - 1));
+	    RunDelete(o, kind, i - 1);
+	    if (i > 1) {
+		i--;
+		lastToken = TA_RunToken(o, kind, i - 1);
+		lastPos = TA_RunPosition(o, kind, i - 1);
+	    } else {
+		lastToken = TA_RunToken(o, kind, 0);
+		lastPos = TA_RunPosition(o, kind, 0);
+		i = 1;
+	    }
+	    continue;
+	}
+	lastToken = TA_RunToken(o, kind, i);
+	lastPos = pos;
+	i++;
+    }
+    return lastPos;
+}
+
+/* MR_ModifyElementLow: the element changed by the callback (or
+ * replaced by `token'), the old reference given up; the new token */
+static word ModifyElement(optr o, TextRunKind kind, word old,
+			  TA_ModifyCallback *cb, void *data, word token)
+{
+    VisTextMaxParaAttr buf;
+    word t;
+
+    TA_GetElement(o, kind, old, &buf);
+    TA_RemoveElement(o, kind, old);
+    if (cb) {
+	cb(o, &buf, data);
+	return TA_AddElement(o, kind, &buf);
+    }
+    /* (CA_NULL_ELEMENT, the base style: no style sheets yet) */
+    if (token == CA_NULL_ELEMENT)
+	return TA_AddElement(o, kind, &buf);
+    t = token;
+    TA_ElementAddRef(o, kind, t);
+    return t;
+}
+
+/*
+ * ModifyRunWithoutUndo: the attribute of a range changed by the
+ * callback (or set to the element `token'); at a cursor (an empty range
+ * inside the text) the character attribute becomes the insertion token
+ * instead.  The position of the last real run, or 0xffffffff for an
+ * insertion token.
+ */
+dword TA_ModifyRun(optr o, TextRunKind kind, dword start, dword end,
+		   TA_ModifyCallback *cb, void *data, word token)
+{
+    dword size = TS_GetTextSize(o), p;
+    word i, endToken, ins;
+
+    if (start == end && kind == TRK_CHAR_ATTR && size != start) {
+	if (!cb && token != CA_NULL_ELEMENT) {
+	    SetInsertionElement(o, token);
+	    return 0xffffffff;
+	}
+	ins = GetInsertionElement(o);
+	if (ins == CA_NULL_ELEMENT) {
+	    /* at a paragraph's start the attribute to the right, else the
+	     * one to the left */
+	    i = TA_RunForPosition(o, kind, start,
+				  !TA_IsParagraphStart(o, start));
+	    ins = TA_RunToken(o, kind, i);
+	}
+	TA_ElementAddRef(o, kind, ins);
+	ins = ModifyElement(o, kind, ins, cb, data, token);
+	SetInsertionElement(o, ins);
+	TA_RemoveElement(o, kind, ins);
+	return 0xffffffff;
+    }
+    /* the attribute at the end, kept for the text after the range */
+    endToken = TA_RunToken(o, kind, TA_RunForPosition(o, kind, end, FALSE));
+    TA_ElementAddRef(o, kind, endToken);
+    i = TA_RunForPosition(o, kind, start, FALSE);
+    if (TA_RunPosition(o, kind, i) != start) {
+	/* a run where the change starts */
+	RunInsert(o, kind, i, TA_RunPosition(o, kind, i),
+		  TA_RunToken(o, kind, i));
+	i++;
+	SetPos(o, kind, i, start);
+	/* (the inserted run holds a reference too) */
+	TA_ElementAddRef(o, kind, TA_RunToken(o, kind, i));
+    }
+    for (;;) {
+	SetToken(o, kind, i,
+		 ModifyElement(o, kind, TA_RunToken(o, kind, i), cb, data,
+			       token));
+	i++;
+	p = TA_RunPosition(o, kind, i);
+	if (p >= end)
+	    break;
+    }
+    if (p != end && !(AtEnd(p) && end == size)) {
+	/* a run where it ends, so that the text after keeps its
+	 * attribute */
+	RunInsert(o, kind, i, end, endToken);
+	TA_ElementAddRef(o, kind, endToken);
+    }
+    TA_RemoveElement(o, kind, endToken);
+    return CoalesceRun(o, kind);
+}
+
+/* ---------------------------------------------------------------------
+ * The runs after a replacement (UpdateRun)
+ * ------------------------------------------------------------------- */
+
+/*
+ * UpdateRun: the runs of a kind moved for the replacement of the range
+ * by insCount characters (the text not yet replaced).  TRUE if the
+ * attributes the UI shows may have changed.
+ */
+static Boolean UpdateRun(optr o, TextRunKind kind,
+			 const VisTextReplaceParameters *rp, Boolean middle)
+{
+    Boolean para = kind == TRK_PARA_ATTR, updateUI = FALSE,
+	    coalesce = FALSE, atEnd;
+    dword rStart = rp->VTRP_range.VTR_start, rEnd = rp->VTRP_range.VTR_end;
+    dword ins = rp->VTRP_insCount, del = rEnd - rStart;
+    dword runPos, nextPos, p;
+    word i, insToken = CA_NULL_ELEMENT;
+
+    /* a replacement takes the attribute of the replaced text */
+    if (ins && del && !para) {
+	updateUI = TRUE;
+	insToken = TA_RunToken(o, kind,
+			       TA_RunForPosition(o, kind, rStart, FALSE));
+	SetInsertionElement(o, insToken);
+    }
+    i = TA_RunForPosition(o, kind, rStart, TRUE);
+    if (rStart && i)
+	i--;
+    for (;;) {
+	runPos = TA_RunPosition(o, kind, i);
+	/* case 0: the last run */
+	if (AtEnd(runPos))
+	    break;
+	nextPos = TA_RunPosition(o, kind, i + 1);
+	/* case -1: the only run stays */
+	if (runPos == 0 && AtEnd(nextPos))
+	    break;
+	/* case 1: the run ends before the range */
+	if (nextPos <= rStart) {
+	    i++;
+	    continue;
+	}
+	/* case 2: the run is after the range */
+	if (runPos >= rEnd) {
+	    if (runPos == rEnd) {
+		/* the run starts where the range ends */
+		if (para) {
+		    if (!del) {
+			i++;
+			continue;
+		    }
+		    goto extendToNextParagraph;
+		}
+		if (del) {
+		    /* the carriage return after a deletion joins the
+		     * run before */
+		    if (IsParagraphEnd(o, runPos, &atEnd)) {
+			if (atEnd)
+			    goto doDelete;
+			SetPos(o, kind, i, runPos + 1);
+			runPos++;
+			nextPos = TA_RunPosition(o, kind, i + 1);
+		    }
+		}
+		if (TA_IsParagraphStart(o, rEnd))
+		    updateUI = TRUE;
+		if (TA_IsParagraphStart(o, rStart)) {
+		    /* at a paragraph's start the insertion does not move
+		     * the run, the deletion does */
+		    if (del) {
+			coalesce = TRUE;
+			SetPos(o, kind, i, runPos - del);
+		    }
+		    i++;
+		    continue;
+		}
+	    }
+	    if (runPos == 0) {
+		i++;
+		continue;
+	    }
+	    if (del)
+		coalesce = TRUE;
+	    SetPos(o, kind, i, runPos - del + ins);
+	    i++;
+	    continue;
+	}
+	/* the run starts before the range: not ours */
+	if (runPos < rStart) {
+	    i++;
+	    continue;
+	}
+	/* the run starts at the range and goes on past it: kept (unless
+	 * only its carriage return is left after it) */
+	if (runPos == rStart && middle && nextPos > rEnd) {
+	    if (nextPos - 1 != rEnd)
+		goto case4;
+	    if (para) {
+		i++;
+		continue;
+	    }
+	    if (!IsParagraphEnd(o, rEnd, &atEnd) ||
+		TA_IsParagraphStart(o, rStart)) {
+		i++;
+		continue;
+	    }
+	    goto doDelete;
+	}
+	/* case 3: the run is in the range */
+	updateUI = TRUE;
+	if (!middle) {
+	    /* deleting at the end: the last paragraph attribute, and a
+	     * character attribute at a paragraph's start, stay if they
+	     * are not all deleted */
+	    if (para || TA_IsParagraphStart(o, rStart)) {
+		if (AtEnd(nextPos) && runPos <= rStart) {
+		    i++;
+		    continue;
+		}
+	    }
+	    goto doDelete;
+	}
+	if (nextPos <= rEnd)
+	    goto doDelete;
+case4:
+	/* case 4: the run goes on past the range's end */
+	if (rStart == 0) {
+	    i++;
+	    continue;
+	}
+	if (para)
+	    goto extendToNextParagraph;
+	SetPos(o, kind, i, rStart + ins);
+	i++;
+	continue;
+
+extendToNextParagraph:
+	/* the paragraph run starts with the next paragraph after the
+	 * range */
+	updateUI = TRUE;
+	if (TA_IsParagraphStart(o, rStart))
+	    p = rEnd;
+	else {
+	    p = rEnd;
+	    if (FindParagraphEnd(o, &p))
+		p++;
+	    else
+		p = TEXT_ADDRESS_PAST_END;
+	}
+	if (AtEnd(p))
+	    goto doDelete;
+	SetPos(o, kind, i, p);
+	if (p == nextPos)
+	    goto doDelete;
+	p -= del;
+	if (p != rStart)
+	    p += ins;
+	SetPos(o, kind, i, p);
+	i++;
+	continue;
+
+doDelete:
+	TA_RemoveElement(o, kind, TA_RunToken(o, kind, i));
+	RunDelete(o, kind, i);
+	if (runPos == 0)
+	    SetPos(o, kind, i, 0);
+	coalesce = updateUI = TRUE;
+    }
+    if (coalesce)
+	(void) CoalesceRun(o, kind);
+    if (para)
+	return updateUI && del;
+    /* the insertion token for the inserted text */
+    insToken = ClearInsertionElement(o, FALSE);
+    if (insToken != CA_NULL_ELEMENT) {
+	if (ins) {
+	    dword s = rStart, e;
+	    Boolean eot;
+
+	    /* (a change at a paragraph's end takes its CR too) */
+	    if (IsParagraphEnd(o, s, &eot) && !eot)
+		s++;
+	    e = middle ? s + ins : TEXT_ADDRESS_PAST_END;
+	    (void) TA_ModifyRun(o, kind, rStart, e, NULL, NULL, insToken);
+	} else
+	    updateUI = TRUE;
+	TA_RemoveElement(o, kind, insToken);
+    }
+    return updateUI && del;
+}
+
+/* TA_UpdateRunsForReplacement: TRUE if the attributes shown may have
+ * changed */
+Boolean TA_UpdateRunsForReplacement(optr o,
+				    const VisTextReplaceParameters *p)
+{
+    VisTextStorageFlags f = VT(o)->VTI_storageFlags;
+    Boolean middle = TS_GetTextSize(o) != p->VTRP_range.VTR_end,
+	    changed = FALSE;
+
+    if (f & VTSF_MULTIPLE_CHAR_ATTRS)
+	changed |= UpdateRun(o, TRK_CHAR_ATTR, p, middle);
+    if (f & VTSF_MULTIPLE_PARA_ATTRS)
+	changed |= UpdateRun(o, TRK_PARA_ATTR, p, middle);
+    return changed;
+}
+
+/* ---------------------------------------------------------------------
+ * Storage (taStorage.asm)
+ * ------------------------------------------------------------------- */
+
+/* TA_CreateRunAndElementArrays: the run array (with its last run) and
+ * the element array, chunks of the object's block */
+static ChunkHandle CreateArrays(optr o, TextArrayType type, word elSize)
+{
+    MemHandle mh = OptrToHandle(o);
+    ChunkHandle runs, els;
+    TextElementArrayHeader *eh;
+    TextRunArrayHeader *rh;
+    TextRunArrayElement *r;
+
+    els = ElementArrayCreate(mh, elSize, sizeof(TextElementArrayHeader),
+			     OCF_DIRTY);
+    eh = LMemDerefHandles(mh, els);
+    eh->TEAH_arrayType = type;
+    runs = ChunkArrayCreate(mh, sizeof(TextRunArrayElement),
+			    sizeof(TextRunArrayHeader), OCF_DIRTY);
+    rh = LMemDerefHandles(mh, runs);
+    rh->TRAH_elementVMBlock = 0;
+    rh->TRAH_elementArray = els;
+    r = ChunkArrayAppend(ConstructOptr(mh, runs), 0);
+    r->TRAE_position.WAAH_low = (sword) TEXT_ADDRESS_PAST_END_LOW;
+    r->TRAE_position.WAAH_high = (sbyte) TEXT_ADDRESS_PAST_END_HIGH;
+    r->TRAE_token = CA_NULL_ELEMENT;
+    return runs;
+}
+
+/*
+ * VisTextCreateStorage: multiple character attributes (the object's
+ * attribute the one run's).  Port32: the chunk of the single attribute
+ * is freed (the asm left it).  Not yet: paragraph attributes, types,
+ * graphics, styles, regions.
+ */
+@extern method VisTextClass, MSG_VIS_TEXT_CREATE_STORAGE
+{
+    VisTextCharAttr a;
+    VisTextInstance *t;
+    ChunkHandle old;
+    Boolean single;
+    word token;
+
+    (void) regionFlag;
+    if (!(flags & VTSF_MULTIPLE_CHAR_ATTRS) ||
+	(pself->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS))
+	return;
+    TA_GetSingleCharAttr(oself, &a);
+    t = VT(oself);
+    single = !(t->VTI_storageFlags & VTSF_DEFAULT_CHAR_ATTR);
+    old = t->VTI_charAttrRuns;
+    t->VTI_charAttrRuns = CreateArrays(oself, TAT_CHAR_ATTRS,
+				       sizeof(VisTextCharAttr));
+    t = VT(oself);
+    t->VTI_storageFlags = (t->VTI_storageFlags | VTSF_MULTIPLE_CHAR_ATTRS) &
+			  ~VTSF_DEFAULT_CHAR_ATTR;
+    if (single)
+	LMemFreeHandles(OptrToHandle(oself), old);
+    token = TA_AddElement(oself, TRK_CHAR_ATTR, &a);
+    RunInsert(oself, TRK_CHAR_ATTR, 0, 0, token);
+    ObjMarkDirty(oself);
+    if (VT(oself)->VI_typeFlags & VTF_IS_GEN)
+	@call oself::MSG_VIS_TEXT_UPDATE_GENERIC();
+}
+
+/* ---------------------------------------------------------------------
+ * Queries (taRunQuery.asm)
+ * ------------------------------------------------------------------- */
+
+/*
+ * TA_GetCharAttrForPosition (GetCharAttrMultiple): the character
+ * attribute at a position, *count the characters from it that have it.
+ * For the insertion (the cursor) the insertion token, else at a
+ * paragraph's start or the end of the text the attribute to the right,
+ * else the one to the left; for manipulation always to the right.
+ */
+void TA_GetCharAttrForPosition(optr o, dword pos, Boolean insertion,
+			       VisTextCharAttr *a, dword *count)
+{
+    word i, token = CA_NULL_ELEMENT;
+    Boolean left = FALSE;
+
+    if (!(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS)) {
+	TA_GetSingleCharAttr(o, a);
+	if (count)
+	    *count = TEXT_ADDRESS_PAST_END - pos;
+	return;
+    }
+    if (insertion) {
+	token = GetInsertionElement(o);
+	if (token == CA_NULL_ELEMENT)
+	    left = !TA_IsParagraphStart(o, pos) && TS_GetTextSize(o) != pos;
+    }
+    i = TA_RunForPosition(o, TRK_CHAR_ATTR, pos, left);
+    TA_GetElement(o, TRK_CHAR_ATTR,
+		  token != CA_NULL_ELEMENT ? token
+					   : TA_RunToken(o, TRK_CHAR_ATTR, i),
+		  a);
+    if (count)
+	*count = TA_RunPosition(o, TRK_CHAR_ATTR, i + 1) - pos;
+}
+
+/* TA_GetRunBounds: the run at the position (to the right) */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_RUN_BOUNDS
+{
+    TextRunKind kind;
+    word i;
+
+    if (runOffset == offsetof(VisTextInstance, VTI_charAttrRuns))
+	kind = TRK_CHAR_ATTR;
+    else if (runOffset == offsetof(VisTextInstance, VTI_paraAttrRuns))
+	kind = TRK_PARA_ATTR;
+    else
+	return;
+    if (!(pself->VTI_storageFlags & (kind == TRK_CHAR_ATTR ?
+					 VTSF_MULTIPLE_CHAR_ATTRS :
+					 VTSF_MULTIPLE_PARA_ATTRS))) {
+	retVal->VTR_start = 0;
+	retVal->VTR_end = TEXT_ADDRESS_PAST_END;
+	return;
+    }
+    i = TA_RunForPosition(oself, kind, position, FALSE);
+    retVal->VTR_start = TA_RunPosition(oself, kind, i);
+    retVal->VTR_end = TA_RunPosition(oself, kind, i + 1);
+}
