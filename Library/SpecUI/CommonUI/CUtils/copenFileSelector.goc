@@ -28,6 +28,7 @@
  * system, FSEL_DISABLES_FILTERED_FILES (FALSE in Motif).
  */
 @include "cGeode.goh"
+@include "cspecCUAS.goh"
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olFileSelectorClass.goh>
 @include <Internal/SpecUI/olApplicationClass.goh>
@@ -59,68 +60,8 @@
  * The gadgets (CSpec/cspecFile.ui)
  * ------------------------------------------------------------------- */
 
-@start FileSelectorUI, notDetachable;
-
-@object GenInteractionClass OLFileSelectorGroup = {
-    GI_comp = @OLFileSelectorControlGroup, @OLFileSelectorCenteringGroup;
-    HINT_CENTER_CHILDREN_HORIZONTALLY;
-    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;
-    HINT_EXPAND_WIDTH_TO_FIT_PARENT;
-}
-@object GenInteractionClass OLFileSelectorCenteringGroup = {
-    GI_comp = @OLFileSelectorFileList;
-    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;
-    HINT_ORIENT_CHILDREN_VERTICALLY;
-    HINT_CUSTOM_CHILD_SPACING = SST_PIXELS | 1;
-}
-@object GenInteractionClass OLFileSelectorControlGroup = {
-    GI_comp = @OLFileSelectorChangeDirectoryPopup,
-	      @OLFileSelectorDocumentButton, @OLFileSelectorChangeDrivePopup;
-    HINT_ORIENT_CHILDREN_HORIZONTALLY;
-}
-@object GenTriggerClass OLFileSelectorDocumentButton = {
-    GI_visMoniker = 'u', "Go to Document";
-    GTI_actionMsg = MSG_OL_FILE_SELECTOR_DOCUMENT_BUTTON;
-    GTI_destination = (TO_OBJ_BLOCK_OUTPUT);
-    HINT_DONT_SHOW_SHORTCUT;
-}
-@object GenItemGroupClass OLFileSelectorChangeDirectoryPopup = {
-    GI_visMoniker = 'P', "Path";
-    GIGI_destination = (TO_OBJ_BLOCK_OUTPUT);
-    GIGI_applyMsg = MSG_OL_FILE_SELECTOR_CHANGE_DIRECTORY_POPUP;
-    HINT_ITEM_GROUP_MINIMIZE_SIZE;
-    ATTR_GEN_ITEM_GROUP_SET_MODIFIED_ON_REDUNDANT_SELECTION;
-    HINT_DONT_SHOW_SHORTCUT;
-}
-@object GenItemGroupClass OLFileSelectorChangeDrivePopup = {
-    GI_visMoniker = 'v', "Drives";
-    GIGI_destination = (TO_OBJ_BLOCK_OUTPUT);
-    GIGI_applyMsg = MSG_OL_FILE_SELECTOR_CHANGE_DRIVE_POPUP;
-    HINT_ITEM_GROUP_MINIMIZE_SIZE;
-    ATTR_GEN_ITEM_GROUP_SET_MODIFIED_ON_REDUNDANT_SELECTION;
-    HINT_DONT_SHOW_SHORTCUT;
-}
-@object OLFSDynamicListClass OLFileSelectorFileList = {
-    GIGI_applyMsg = MSG_OL_FILE_SELECTOR_LIST_MESSAGE;
-    GDLI_queryMsg = MSG_OL_FILE_SELECTOR_ITEM_QUERY;
-    GIGI_destination = (TO_OBJ_BLOCK_OUTPUT);
-    HINT_ITEM_GROUP_SCROLLABLE;
-    ATTR_GEN_SEND_APPLY_MSG_ON_APPLY_EVEN_IF_NOT_MODIFIED;
-    ATTR_GEN_ITEM_GROUP_CUSTOM_DOUBLE_PRESS =
-	MSG_OL_FILE_SELECTOR_DOUBLE_PRESS;
-    HINT_DEFAULT_FOCUS;
-    ATTR_GEN_ITEM_GROUP_SET_MODIFIED_ON_REDUNDANT_SELECTION;
-}
-
-@end FileSelectorUI;
-
-/* (StringsUI in the asm) */
-@start FileSelectorStrings, data;
-@chunk char DiskNotFoundString[] =
-    "The disk could not be found.  Please insert it in the"
-    " drive and try again.";
-@visMoniker ChangeDriveMoniker = 'v', "Drives";
-@end FileSelectorStrings;
+/* The gadgets, FileSelectorUI, and the strings (StringsUI) are uic -g's
+ * of cspecFile.ui, by way of cspecCUAS.ui (cspecCUAS.goh). */
 
 /* the icons of the list: files and directories (the wide ones
  * indented, below the open folder of the current directory) and the

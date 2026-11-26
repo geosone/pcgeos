@@ -35,7 +35,7 @@ resource AppSCGAMonikerDialogResource read-only shared lmem
 resource AppYMMonikerDialogResource read-only shared lmem
 resource StandardDialogUI read-only shared object
 resource FileSelectorUI read-only shared object
-resource FileSelectorStrings lmem read-only shared
+resource StringsUI lmem read-only shared
 resource OLDocumentControlUI read-only shared object
 resource OLDocumentControlToolboxUI read-only shared object
 resource ControlStrings lmem read-only shared

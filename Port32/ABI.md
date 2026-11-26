@@ -6299,7 +6299,8 @@ are left out), the constants, the variables and the routines.
     `FileSelectorUI` template of `cspecFile.ui` and
     `cspecFileSelector.asm`): `OLFileSelectorClass` is the specific
     part of a `GenFileSelector`. Its gadgets are a copy of the
-    `FileSelectorUI` resource made when it is built, below it by an
+    `FileSelectorUI` resource (uic -g of `cspecFile.ui`, by way of
+    `cspecCUAS.ui`, with `StringsUI`) made when it is built, below it by an
     upward link only, their output the selector: the popup list of the
     path's elements, the button to the document directory, the popup
     list of the drives and the list of the files

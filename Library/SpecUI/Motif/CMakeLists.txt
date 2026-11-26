@@ -24,15 +24,17 @@ geos_uic(cmainManager ${_common}/CMain/cmainManager.ui
          DEFINITIONS MOTIF
          DEPENDS cart_art)
 # Of cspecCUAS.ui the monikers and pictures, the window menus and the
-# template of the standard dialogs (cspecFile.ui's StandardDialogUI,
-# which CSpec/cspecStdDialog.goc copies).  The binary directory first, as above; the
+# template of the standard dialogs and the gadgets of a file selector
+# (cspecFile.ui's StandardDialogUI and FileSelectorUI, which
+# CSpec/cspecStdDialog.goc and CUtils/copenFileSelector.goc copy), and
+# its strings (StringsUI).  The binary directory first, as above; the
 # source directory for "../CommonUI/CSpec/mkr*.ui".  The Esp constants
 # the conditions in its gstrings use, as CommonUI/cConstant.def has them
 # for Motif (uic -g decides them).  HINT_SYS_ICON and
 # ATTR_SYSTEM_MENU_CLOSE (OLButtonClass's, on GenTriggers) are not
 # written: CWin/cwinClassCUAS.goc adds them to each window's copy.
 geos_uic(cspecCUAS ${_common}/CSpec/cspecCUAS.ui
-         PROLOG ${_common}/cGeode.goh
+         PROLOG ${_common}/CSpec/cspecCUASUI.goh
          RESOURCES AppSCMonikerResource AppSMMonikerResource
                    AppSCGAMonikerResource AppYMMonikerResource
                    DrawBitmapOptrSCResource DrawBitmapOptrSMResource
@@ -40,6 +42,7 @@ geos_uic(cspecCUAS ${_common}/CSpec/cspecCUAS.ui
                    AppFileSMMonikerResource AppFileSCGAMonikerResource
                    StandardMonikers StandardWindowMenuResource
                    DisplayWindowMenuResource StandardDialogUI
+                   FileSelectorUI StringsUI
          INCLUDES ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
                   ${_common}
          DEFINITIONS MOTIF THREE_DIMENSIONAL_BORDERS=0
@@ -48,5 +51,6 @@ geos_uic(cspecCUAS ${_common}/CSpec/cspecCUAS.ui
 geos_geode(motif GP motif32.gp
            GOC ${_motif_goc} ${cmainManager_UI_GOC} ${cspecCUAS_UI_GOC}
            GOC_DEPENDS ${cmainManager_UI_GOH} ${cspecCUAS_UI_GOH}
-           INCLUDES ${_common} ${_common}/CMain ${cmainManager_UI_DIR}
+           INCLUDES ${_common} ${_common}/CMain ${_common}/CSpec
+                    ${cmainManager_UI_DIR}
            PROTOCOL 727.0)

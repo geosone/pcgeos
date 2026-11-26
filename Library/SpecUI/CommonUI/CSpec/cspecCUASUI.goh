@@ -1,0 +1,14 @@
+/***********************************************************************
+ * cspecCUASUI.goh -- the classes of the objects of cspecCUAS.ui (and
+ * the cspecFile.ui it includes), for its goc source (uic -g, see
+ * cmake/GeosUic.cmake).
+ ***********************************************************************/
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olFileSelectorClass.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/gTrigC.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gDListC.goh>
+@include <Objects/gTextC.goh>
+@include <Objects/gGlyphC.goh>
