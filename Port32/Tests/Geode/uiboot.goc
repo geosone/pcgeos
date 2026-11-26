@@ -4524,14 +4524,14 @@ static void UBClickMenu(word n)
 	optr par = @call UBSlide::MSG_GEN_FIND_PARENT(), v;
 	OLValueInstance vi;
 	OLSliderInstance sl;
-	GenValueInstance *g;
 
 	ubState.UBS_stub[6] = 0;
 	v = ObjInstantiate(OptrToHandle(@UBSlide),
 			   (ClassStruct *) &GenValueClass);
+	/* (by a message: the first one initializes the generic part; until
+	 * then ObjDerefGen gives the chunk's start, too small for it) */
+	@call v::MSG_GEN_VALUE_SET_MAXIMUM(0x640000);
 	ObjLockObjBlock(OptrToHandle(v));
-	g = (GenValueInstance *) ObjDerefGen(v);
-	g->GVLI_maximum = 0x640000;
 	(void) ObjVarAddData(v, HINT_VALUE_ANALOG_DISPLAY, 0);
 	(void) ObjVarAddData(v, HINT_VALUE_DELAYED_DRAG_NOTIFICATION, 0);
 	MemUnlock(OptrToHandle(v));
