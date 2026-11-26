@@ -1,0 +1,115 @@
+/*
+ * visGeometry.goc -- after visGeometry.asm: This file contains geometry
+ * management routines for VisClass.
+ */
+@include "uiInt.goh"
+#include <string.h>
+#include <stdint.h>
+@include <Objects/gFieldC.goh>
+#include <localize.h>
+#include <Internal/grWinInt.h>
+
+/* VisUpdateGeometry: the children's geometry first (if only the path
+ * is set), then this object sized and placed where it is; the parent's
+ * geometry is invalid if the bounds changed */
+@extern method VisClass, MSG_VIS_UPDATE_GEOMETRY
+{
+    VisInstance *v = VisPart(oself);
+    SizeAsDWord s;
+    Rectangle b;
+
+    if (!(v->VI_optFlags & VOF_GEOMETRY_INVALID)) {
+	if (!(v->VI_typeFlags & VTF_IS_COMPOSITE))
+	    goto done;
+	VisIfFlagSetCallVisChildren(oself, MSG_VIS_UPDATE_GEOMETRY, NULL, 0,
+				    VOF_GEOMETRY_INVALID |
+				    VOF_GEO_UPDATE_PATH);
+	if (!(VisPart(oself)->VI_optFlags & VOF_GEOMETRY_INVALID))
+	    goto done;
+    }
+    s = VisGetSize(oself);
+    if (!DWORD_WIDTH(s) && !DWORD_HEIGHT(s))
+	s = MAKE_SIZE_DWORD(RSA_CHOOSE_OWN_SIZE, RSA_CHOOSE_OWN_SIZE);
+    s = @call oself::MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED(DWORD_WIDTH(s),
+							     DWORD_HEIGHT(s));
+    VisSetSize(oself, DWORD_WIDTH(s), DWORD_HEIGHT(s));
+    VisGetBounds(oself, &b);
+    if (@call oself::MSG_VIS_POSITION_AND_INVAL_IF_NEEDED(b.R_left,
+							    b.R_top) &&
+	!(VisPart(oself)->VI_typeFlags & VTF_IS_WIN_GROUP))
+	VisMarkInvalidOnParent(oself, VOF_GEOMETRY_INVALID, VUM_MANUAL);
+done:
+    VisPart(oself)->VI_optFlags &= ~(VOF_GEOMETRY_INVALID |
+				     VOF_GEO_UPDATE_PATH);
+}
+
+@extern method VisClass, MSG_VIS_BOUNDS_CHANGED
+{
+    Rectangle old;
+
+    old.R_left = left;
+    old.R_top = top;
+    old.R_right = right;
+    old.R_bottom = bottom;
+    VisBoundsChanged(oself, &old);
+}
+
+/* VisResetToInitialSize: managed objects of the branch recalculate their
+ * geometry from scratch */
+@extern method VisClass, MSG_VIS_RESET_TO_INITIAL_SIZE,
+		  MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN
+{
+    struct { VisUpdateMode m; } p;
+
+    if (!(pself->VI_attrs & VA_MANAGED))
+	return;
+    VisSaveOldBounds(oself);
+    VisPart(oself)->VI_geoAttrs &= ~VGA_GEOMETRY_CALCULATED;
+    p.m = VUM_MANUAL;
+    VisIfFlagSetCallVisChildren(oself, message, &p, sizeof(p), 0);
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID |
+		   VOF_WINDOW_INVALID, updateMode);
+}
+
+@extern method VisClass, MSG_VIS_SET_GEO_ATTRS
+{
+    pself->VI_geoAttrs = (pself->VI_geoAttrs | attrsToSet) & ~attrsToClear;
+    if ((attrsToSet | attrsToClear) & (VGA_DONT_CENTER | VGA_NO_SIZE_HINTS))
+	VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, updateMode);
+}
+
+@extern method VisClass, MSG_VIS_GET_GEO_ATTRS
+{
+    return pself->VI_geoAttrs;
+}
+
+/* VisInvalOldBounds */
+void VisInvalOldBounds(optr oself, VisAddRectFlags flags, sword left,
+		       sword top, sword right, sword bottom)
+{
+    if (left != right && top != bottom)
+	@call oself::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0, flags, bottom,
+						       right, top, left);
+}
+
+/* VisBoundsChanged (static, from CheckForBoundsChange): the old bounds
+ * invalidated (not for a win group: the window covers them), the new
+ * window and image invalid */
+void VisBoundsChanged(optr oself, const Rectangle *old)
+{
+    VisInstance *v = VisPart(oself);
+
+    if (v->VI_attrs & VA_REALIZED) {
+	if (old->R_left == old->R_right || old->R_top == old->R_bottom ||
+	    old->R_right & RSA_CHOOSE_OWN_SIZE ||
+	    old->R_bottom & RSA_CHOOSE_OWN_SIZE)
+	    return;
+	if (v->VI_typeFlags & VTF_IS_CONTENT ||
+	    !(v->VI_typeFlags & VTF_IS_WIN_GROUP))
+	    @call oself::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0,
+		VARF_NOT_IF_ALREADY_INVALID | VARF_ONLY_REDRAW_MARGINS,
+		old->R_bottom, old->R_right, old->R_top, old->R_left);
+    }
+    VisMarkInvalid(oself, VOF_WINDOW_INVALID | VOF_IMAGE_INVALID,
+		   VUM_MANUAL);
+}

@@ -5,7 +5,8 @@
  * and the fields (its generic children), and the detach of the system
  * (the fields, then the UI process).  Also the system object itself
  * (UserAttach of userMain.asm creates it; UserCallSystem of genUtils.asm
- * calls it) and the UI's global state (userVariable.def).
+ * calls it) and the UI's global state (userVariable.def, its variables in
+ * User/userVariable.goc).
  *
  * Port32 (Port32/ABI.md section 13x): until the UI is a process
  * (UserClass), UserCreateSystemObject makes the system object in the
@@ -24,11 +25,7 @@
 #define GEN_LINK	word_offsetof(GenInstance, GI_link)
 #define SYS_SCREENS	word_offsetof(GenSystemInstance, GSYI_screenComp)
 
-/* userVariable.def */
-UIFlags uiFlags;
-byte uiDisplayType;
 
-static optr uiSystemObj;
 
 /* ---------------------------------------------------------------------
  * The system object
@@ -48,29 +45,9 @@ void UserDestroySystemObject(void)
     uiSystemObj = NullOptr;
 }
 
-Boolean UserCallSystem(Message msg, const void *params, word paramSize,
-		       void *reply, word replySize)
-{
-    if (replySize)
-	memset(reply, 0, replySize);
-    if (!uiSystemObj)
-	return FALSE;
-    CObjMessageP(MF_CALL, uiSystemObj, msg, (void *) params, paramSize,
-		 reply, replySize);
-    return TRUE;
-}
-
 optr UserGetSystemObject(void)
 {
     return uiSystemObj;
-}
-
-/* UserGetDisplayType: the DisplayType in the high byte, TRUE in the low
- * byte once a screen set it */
-word UserGetDisplayType(void)
-{
-    return (word) (((word) uiDisplayType << 8) |
-		   ((uiFlags & UIF_HAVE_DISPLAY_TYPE) ? 0xff : 0));
 }
 
 /* ---------------------------------------------------------------------

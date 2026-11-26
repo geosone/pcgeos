@@ -1,0 +1,471 @@
+/*
+ * visContentClass.goc -- VisContentClass, after visContentClass.asm,
+ * which has its class record; what visContentCommon.asm has is in
+ * visContentCommon.goc.  The content is the top of a visual tree that
+ * is shown in the window of a view (VCNI_view, VCNI_window), and its
+ * input node.
+ *
+ * Here:
+ *   - the view: its window opened and closed, its size (the content's
+ *     geometry follows it), origin and scale factor, the document
+ *     bounds set in it;
+ *   - mouse events: to the pre-passive grabs, the active grab or else
+ *     the implied one (the object the window under the mouse belongs
+ *     to), the post-passive grabs, in the coordinates of the grab
+ *     (small ones, or large ones in the document); a replay when the
+ *     grab changed;
+ *   - the grabs themselves (MSG_VIS_VUP_ALTER_INPUT_FLOW), keyboard
+ *     events to the keyboard grab or the focus;
+ *   - input held up in a queue (MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW)
+ *     until it may flow again;
+ *   - the content as a node of the focus and target hierarchies.
+ *
+ * Port32 (Port32/ABI.md section 13x):
+ *   - a grab's coordinates are worked out on a copy of the VisMouseGrab
+ *     (chunks move); MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT gets that
+ *     copy;
+ *   - an event held up is recorded again with its parameter structure;
+ *     the MouseReturnParams of a mouse event do not come back to a
+ *     sender that has gone on meanwhile (the pointer is cleared);
+ *   - the pointer events combined in the hold-up queue (MF_CUSTOM in
+ *     the asm) use QueuePeekLastMessage and ObjSetMessageParams;
+ *   - not yet: ink (MSG_META_NOTIFY_WITH_DATA_BLOCK of GWNT_INK needs
+ *     VisCallChildrenInBounds), the quick transfer's end
+ *     (ClipboardHandleEndMoveCopy), UserStandardSound for an unwanted
+ *     press, the EC messages (MSG_VIS_VUP_EC_ENSURE_*);
+ *   - goc has no discardOnSave: the class is declared without
+ *     CLASSF_DISCARD_ON_SAVE (nothing is saved to state yet).
+ */
+@include "uiInt.goh"
+@include <Objects/vCntC.goh>
+#include <string.h>
+#include <chunkarr.h>
+#include <thread.h>
+@classdecl VisContentClass;
+@extern method VisContentClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE, MSG_VIS_FORCE_GRAB_MOUSE, MSG_VIS_GRAB_LARGE_MOUSE, MSG_VIS_GRAB_MOUSE, MSG_VIS_RELEASE_MOUSE;
+@extern method VisContentClass, MSG_VIS_INVALIDATE;
+@extern method VisContentClass, MSG_META_CONTENT_VIEW_LOST_GADGET_EXCL;
+@extern method VisContentClass, MSG_META_CONTENT_VIEW_ORIGIN_CHANGED;
+@extern method VisContentClass, MSG_VIS_VUP_SET_MOUSE_INTERACTION_BOUNDS;
+@extern method VisContentClass, MSG_VIS_DRAW;
+@extern method VisContentClass, MSG_META_FORCE_GRAB_KBD, MSG_META_GRAB_KBD, MSG_META_RELEASE_KBD;
+@extern method VisContentClass, MSG_VIS_CONTENT_DISABLE_HOLD_UP;
+@extern method VisContentClass, MSG_VIS_CONTENT_ENABLE_HOLD_UP;
+@extern method VisContentClass, MSG_VIS_CONTENT_HOLD_UP_INPUT_FLOW;
+@extern method VisContentClass, MSG_VIS_CONTENT_RESUME_INPUT_FLOW;
+@extern method VisContentClass, MSG_META_OBJ_FLUSH_INPUT_QUEUE;
+@extern method VisContentClass, MSG_META_PTR, MSG_META_START_SELECT, MSG_META_END_SELECT, MSG_META_DRAG_SELECT, MSG_META_START_MOVE_COPY, MSG_META_END_MOVE_COPY, MSG_META_DRAG_MOVE_COPY, MSG_META_START_FEATURES, MSG_META_END_FEATURES, MSG_META_DRAG_FEATURES, MSG_META_START_OTHER, MSG_META_END_OTHER, MSG_META_DRAG_OTHER;
+@extern method VisContentClass, MSG_META_SCROLL_VERTICAL;
+@extern method VisContentClass, MSG_VIS_CONTENT_UNWANTED_MOUSE_EVENT;
+@extern method VisContentClass, MSG_META_QUERY_IF_PRESS_IS_INK;
+@extern method VisContentClass, MSG_META_IMPLIED_WIN_CHANGE;
+@extern method VisContentClass, MSG_VIS_CONTENT_TEST_IF_ACTIVE_OR_IMPLIED_WIN;
+@extern method VisContentClass, MSG_VIS_VUP_ALTER_INPUT_FLOW;
+@extern method VisContentClass, MSG_META_KBD_CHAR;
+@extern method VisContentClass, MSG_META_LOST_FOCUS_EXCL, MSG_META_LOST_SYS_FOCUS_EXCL, MSG_META_GAINED_FOCUS_EXCL, MSG_META_GAINED_SYS_FOCUS_EXCL;
+@extern method VisContentClass, MSG_META_GAINED_TARGET_EXCL, MSG_META_GAINED_SYS_TARGET_EXCL, MSG_META_LOST_SYS_TARGET_EXCL, MSG_META_LOST_TARGET_EXCL;
+@extern method VisContentClass, MSG_META_MUP_ALTER_FTVMC_EXCL;
+@extern method VisContentClass, MSG_META_GET_FOCUS_EXCL;
+@extern method VisContentClass, MSG_VIS_VUP_QUERY_FOCUS_EXCL, MSG_VIS_FUP_QUERY_FOCUS_EXCL;
+@extern method VisContentClass, MSG_META_GET_TARGET_EXCL;
+@extern method VisContentClass, MSG_META_SEND_CLASSED_EVENT;
+@extern method VisContentClass, MSG_META_CONTENT_TRACK_SCROLLING;
+@extern method VisContentClass, MSG_META_LARGE_PTR, MSG_META_LARGE_START_SELECT, MSG_META_LARGE_START_MOVE_COPY, MSG_META_LARGE_START_FEATURES, MSG_META_LARGE_START_OTHER, MSG_META_LARGE_DRAG_SELECT, MSG_META_LARGE_DRAG_MOVE_COPY, MSG_META_LARGE_DRAG_FEATURES, MSG_META_LARGE_DRAG_OTHER, MSG_META_LARGE_END_SELECT, MSG_META_LARGE_END_MOVE_COPY, MSG_META_LARGE_END_FEATURES, MSG_META_LARGE_END_OTHER;
+@extern method VisContentClass, MSG_META_LARGE_QUERY_IF_PRESS_IS_INK;
+@extern method VisContentClass, MSG_META_CONTENT_ENTER, MSG_META_CONTENT_LEAVE;
+
+/* the large messages follow the small ones in the same order */
+typedef char VisContentLargeOrder[
+    (MSG_META_LARGE_DRAG_OTHER - MSG_META_LARGE_START_SELECT ==
+     MSG_META_DRAG_OTHER - MSG_META_START_SELECT) ? 1 : -1];
+
+#define ContentPart(o)	((VisContentInstance *) ObjDerefVis(o))
+
+/* ---------------------------------------------------------------------
+ * Creation and the end
+ * ------------------------------------------------------------------- */
+
+/* ViewUpdateContentTargetInfo: the view told the target here and its
+ * class (called: the structure is the caller's) */
+void VisContentUpdateViewTargetInfo(optr oself)
+{
+    VisContentInstance *c = ContentPart(oself);
+    ViewTargetInfo info;
+    optr view = c->VCNI_view;
+
+    memset(&info, 0, sizeof(info));
+    info.VTI_content.TR_object = oself;
+    info.VTI_content.TR_class = @call oself::MSG_META_GET_CLASS();
+    info.VTI_target.TR_object = c->VCNI_targetExcl.FTVMC_OD;
+    if (info.VTI_target.TR_object)
+	info.VTI_target.TR_class =
+	    @call info.VTI_target.TR_object::MSG_META_GET_CLASS();
+    if (view)
+	@call view::MSG_GEN_VIEW_UPDATE_CONTENT_TARGET_INFO(&info);
+}
+
+/* VisContentReloc: nothing has the focus or target when saved; the GCN
+ * lists unrelocated */
+@method VisContentClass, _reloc
+{
+    VisContentInstance *c = ContentPart(oself);
+    TempMetaGCNData *d;
+
+    (void) vmRelocType;
+    if (message != MSG_META_RELOCATE) {
+	c->VCNI_focusExcl.FTVMC_OD = 0;
+	c->VCNI_targetExcl.FTVMC_OD = 0;
+	c->VCNI_view = 0;
+	d = ObjVarFindData(oself, TEMP_META_GCN);
+	if (d && d->TMGCND_flags & TMGCNF_RELOCATED) {
+	    d->TMGCND_flags &= ~TMGCNF_RELOCATED;
+	    if (GCNListUnRelocateBlock(OptrToHandle(oself),
+				       d->TMGCND_listOfLists,
+				       OptrToHandle(oself)))
+		ObjVarDeleteData(oself, TEMP_META_GCN);
+	}
+    }
+    return @callsuper();
+}
+
+/* ---------------------------------------------------------------------
+ * The view and its window
+ * ------------------------------------------------------------------- */
+
+/* VisContentSendToLargeDocumentLayers */
+void VisContentSendToLayers(optr oself, Message msg, const void *params,
+			 word size)
+{
+    if (ContentPart(oself)->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL)
+	VisSendToChildren(oself, msg, params, size);
+}
+
+/* ---------------------------------------------------------------------
+ * Input held up
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * Mouse events to the grabs
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * The grabs
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * The keyboard
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * Focus and target
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * Passed on down
+ * ------------------------------------------------------------------- */
+
+#define ContentPart(o)	((VisContentInstance *) ObjDerefVis(o))
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define CONTENT_OFFSET(f) word_offsetof(VisContentInstance, f)
+
+/* VisContentInitialize */
+@method VisContentClass, MSG_META_INITIALIZE
+{
+    VisContentInstance *c;
+
+    @callsuper();
+    c = ContentPart(oself);
+    c->VI_typeFlags |= VTF_IS_WINDOW | VTF_IS_WIN_GROUP | VTF_IS_CONTENT |
+		       VTF_IS_INPUT_NODE;
+    /* to fill the view */
+    c->VCI_geoDimensionAttrs |= VCGDA_EXPAND_WIDTH_TO_FIT_PARENT |
+				VCGDA_EXPAND_HEIGHT_TO_FIT_PARENT;
+    c->VCI_geoAttrs |= VCGA_ORIENT_CHILDREN_VERTICALLY;
+    c->VCNI_impliedMouseGrab.VMG_flags = VIFGF_MOUSE | VIFGF_PTR;
+}
+
+/* VisContentSetView */
+@method VisContentClass, MSG_META_CONTENT_SET_VIEW
+{
+    pself->VCNI_view = view;
+    VisContentUpdateViewTargetInfo(oself);
+}
+
+/* VisContentFinalObjFree: the passive lists and the hold-up queue go,
+ * and the GCN lists */
+@method VisContentClass, MSG_META_FINAL_OBJ_FREE
+{
+    ChunkHandle pre = pself->VCNI_prePassiveMouseGrabList;
+    ChunkHandle post = pself->VCNI_postPassiveMouseGrabList;
+    QueueHandle q = pself->VCNI_holdUpInputQueue;
+
+    if (pre)
+	LMemFree(ConstructOptr(OptrToHandle(oself), pre));
+    if (post)
+	LMemFree(ConstructOptr(OptrToHandle(oself), post));
+    if (q)
+	GeodeFreeQueue(q);
+    CObjCallSuperP(&VisContentClass, oself, MSG_META_GCN_LIST_DESTROY, NULL,
+		   0, NULL, 0);
+    @callsuper();
+}
+
+/* VisContentBlockFree */
+@method VisContentClass, MSG_META_BLOCK_FREE
+{
+    CObjCallSuperP(&VisContentClass, oself, MSG_META_GCN_LIST_DESTROY, NULL,
+		   0, NULL, 0);
+    @callsuper();
+}
+/* VisContentGetVUM: updates happen now once the view's window is there
+ * and the content is linked to the view */
+VisUpdateMode VisContentGetVUM(optr obj)
+{
+    VisContentInstance *c;
+    VisUpdateMode mode;
+
+    ObjLockObjBlock(OptrToHandle(obj));
+    c = ContentPart(obj);
+    mode = c->VCNI_window && OptrToHandle(c->VI_link.LP_next) ? VUM_NOW
+							     : VUM_MANUAL;
+    MemUnlock(OptrToHandle(obj));
+    return mode;
+}
+
+/* VisContentViewOpening: linked up to the view (not as its child) and
+ * made visible */
+@method VisContentClass, MSG_META_CONTENT_VIEW_OPENING
+{
+    VisUpdateMode mode;
+
+    pself->VCNI_view = view;
+    pself->VI_link.LP_next = view | LP_IS_PARENT;
+    mode = VisContentGetVUM(oself);
+    if (pself->VI_typeFlags & VTF_IS_GEN)
+	@call oself::MSG_SPEC_SET_ATTRS(SA_REALIZABLE, 0, mode);
+    else
+	@call oself::MSG_VIS_SET_ATTRS(VA_VISIBLE, 0, mode);
+}
+
+/* VisContentViewClosing */
+@method VisContentClass, MSG_META_CONTENT_VIEW_CLOSING
+{
+    VisUpdateMode mode = VisContentGetVUM(oself);
+
+    if (pself->VI_typeFlags & VTF_IS_GEN)
+	@call oself::MSG_SPEC_SET_ATTRS(0, SA_REALIZABLE, mode);
+    else
+	@call oself::MSG_VIS_SET_ATTRS(0, VA_VISIBLE, mode);
+    ContentPart(oself)->VI_link.LP_next = 0;
+}
+
+/* VisContentOpenWin: the view's window is ours; the content is the
+ * implied grab in it */
+@method VisContentClass, MSG_VIS_OPEN_WIN
+{
+    VisContentInstance *c;
+
+    (void) parentWindow;
+    pself->VCI_window = pself->VCNI_window;
+    VisContentInvalidate(oself);
+    @call oself::MSG_META_IMPLIED_WIN_CHANGE(oself,
+					     ContentPart(oself)->VCNI_window);
+    c = ContentPart(oself);
+    if (c->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL)
+	c->VCNI_impliedMouseGrab.VMG_flags |= VIFGF_LARGE;
+}
+
+/* VisContentCloseWin: the window stays open (it is the view's) */
+@method VisContentClass, MSG_VIS_CLOSE_WIN
+{
+    VisContentInvalidate(oself);
+    ContentPart(oself)->VCI_window = 0;
+    @call oself::MSG_META_IMPLIED_WIN_CHANGE(0, 0);
+}
+
+/* VisContentVisClose: whatever is active in the view lets go */
+@method VisContentClass, MSG_VIS_CLOSE
+{
+    @callsuper();
+    @call oself::MSG_VIS_TAKE_GADGET_EXCL(0);
+}
+
+/* VisContentViewWinOpened */
+@method VisContentClass, MSG_META_CONTENT_VIEW_WIN_OPENED
+{
+    pself->VCNI_window = viewWindow;
+    @call oself::MSG_META_CONTENT_VIEW_SIZE_CHANGED(viewWidth, viewHeight,
+						    viewWindow);
+}
+
+/* VisContentViewWinClosed */
+@method VisContentClass, MSG_META_CONTENT_VIEW_WIN_CLOSED
+{
+    (void) viewWindow;
+    pself->VCNI_window = 0;
+}
+
+/* SetViewDocBounds: the content's bounds are the view's document,
+ * unless the document is large or set by hand */
+static void SetViewDocBounds(optr oself)
+{
+    VisContentInstance *c = ContentPart(oself);
+    optr view = c->VCNI_view;
+    Rectangle b = c->VI_bounds;
+
+    if (c->VCNI_attrs & (VCNA_LARGE_DOCUMENT_MODEL |
+			 VCNA_VIEW_DOC_BOUNDS_SET_MANUALLY) ||
+	!OptrToChunk(view))
+	return;
+    @call view::MSG_GEN_VIEW_SET_DOC_BOUNDS(b.R_bottom, b.R_right, b.R_top,
+					    b.R_left);
+}
+
+/* VisContentSubviewSizeChanged: the geometry again if the size is
+ * another one; the children hear of it in any case */
+@method VisContentClass, MSG_META_CONTENT_VIEW_SIZE_CHANGED
+{
+    struct { word w, h; WindowHandle win; } p;
+
+    if (pself->VCNI_viewHeight != viewHeight ||
+	pself->VCNI_viewWidth != viewWidth)
+	VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, VUM_MANUAL);
+    pself = ContentPart(oself);
+    pself->VCNI_viewHeight = viewHeight;
+    pself->VCNI_viewWidth = viewWidth;
+    p.w = viewWidth;
+    p.h = viewHeight;
+    p.win = viewWindow;
+    VisSendToChildren(oself, message, &p, sizeof(p));
+    (void) @call oself::MSG_VIS_VUP_UPDATE_WIN_GROUP(VisContentGetVUM(oself));
+    SetViewDocBounds(oself);
+}
+
+/* VisContentPositionBranch: a position from the view while the geometry
+ * is not done is ignored */
+@method VisContentClass, MSG_VIS_POSITION_BRANCH
+{
+    if (pself->VI_optFlags & (VOF_GEOMETRY_INVALID | VOF_UPDATE_PENDING))
+	return;
+    @callsuper();
+}
+
+/* VisContentGetWinSize */
+@method VisContentClass, MSG_VIS_CONTENT_GET_WIN_SIZE
+{
+    return MAKE_SIZE_DWORD(pself->VCNI_viewWidth, pself->VCNI_viewHeight);
+}
+
+/* VisContentUpdateGeometry: as wide or high as the view where it
+ * follows it, else what the content wants; it stays where it is */
+@method VisContentClass, MSG_VIS_UPDATE_GEOMETRY
+{
+    word w = RSA_CHOOSE_OWN_SIZE, h = RSA_CHOOSE_OWN_SIZE;
+    SizeAsDWord s;
+    VisContentInstance *c;
+
+    if (pself->VCNI_attrs & VCNA_SAME_HEIGHT_AS_VIEW)
+	h = pself->VCNI_viewHeight;
+    if (pself->VCNI_attrs & VCNA_SAME_WIDTH_AS_VIEW)
+	w = pself->VCNI_viewWidth;
+    s = VisRecalcSizeAndInvalIfNeeded(oself, w, h);
+    VisSetSize(oself, DWORD_WIDTH(s), DWORD_HEIGHT(s));
+    SetViewDocBounds(oself);
+    c = ContentPart(oself);
+    VisSendPositionAndInvalIfNeeded(oself, c->VI_bounds.R_left,
+				    c->VI_bounds.R_top);
+}
+
+/* VisContentScaleFactorChanged */
+@method VisContentClass, MSG_META_CONTENT_VIEW_SCALE_FACTOR_CHANGED
+{
+    struct { WindowHandle win; WWFixedAsDWord y, x; } p;
+
+    pself->VCNI_scaleFactor.PF_x.WWF_int = (word) (xScaleFactor >> 16);
+    pself->VCNI_scaleFactor.PF_x.WWF_frac = (word) xScaleFactor;
+    pself->VCNI_scaleFactor.PF_y.WWF_int = (word) (yScaleFactor >> 16);
+    pself->VCNI_scaleFactor.PF_y.WWF_frac = (word) yScaleFactor;
+    p.win = viewWindow;
+    p.y = yScaleFactor;
+    p.x = xScaleFactor;
+    VisContentSendToLayers(oself, message, &p, sizeof(p));
+}
+
+/* VisContentSetDocBounds (large documents): to the view and the layers */
+@method VisContentClass, MSG_VIS_CONTENT_SET_DOC_BOUNDS
+{
+    optr view = pself->VCNI_view;
+    struct { long b, r, t, l; } p;
+
+    if (OptrToChunk(view))
+	@call view::MSG_GEN_VIEW_SET_DOC_BOUNDS(bottom, right, top, left);
+    p.b = bottom;
+    p.r = right;
+    p.t = top;
+    p.l = left;
+    VisSendToChildren(oself, MSG_VIS_LAYER_SET_DOC_BOUNDS, &p, sizeof(p));
+}
+
+/* VisContentAddRectToUpdateRegion: a content that only draws in its
+ * margins adds what the window shows right of and below the rectangle */
+@method VisContentClass, MSG_VIS_ADD_RECT_TO_UPDATE_REGION
+{
+    VisAddRectFlags f = addRectFlags & ~VARF_ONLY_REDRAW_MARGINS;
+    sword r = right, b = bottom;
+    WindowHandle win;
+
+    if ((addRectFlags & VARF_ONLY_REDRAW_MARGINS) &&
+	(pself->VCI_geoAttrs & VCGA_ONLY_DRAWS_IN_MARGINS) &&
+	(win = VisQueryWindow(oself)) != 0) {
+	GStateHandle gs = GrCreateState(win);
+	Rectangle w;
+
+	GrGetWinBounds(gs, &w);
+	GrDestroyState(gs);
+	if (r < w.R_right)
+	    VisInvalOldBounds(oself, f, r, w.R_top, w.R_right, w.R_bottom);
+	if (b < w.R_bottom)
+	    VisInvalOldBounds(oself, f, w.R_left, b, w.R_right, w.R_bottom);
+    }
+    @callsuper();
+}
+
+/* VisContentVupAllowGlobalTransfer */
+@method VisContentClass, MSG_VIS_VUP_ALLOW_GLOBAL_TRANSFER
+{
+    optr view = pself->VCNI_view;
+
+    if (OptrToChunk(view))
+	@send view::MSG_GEN_VIEW_ALLOW_GLOBAL_TRANSFER();
+}
+
+@method VisContentClass, MSG_VIS_CONTENT_GET_ATTRS
+{
+    return pself->VCNI_attrs;
+}
+
+@method VisContentClass, MSG_VIS_CONTENT_SET_ATTRS
+{
+    pself->VCNI_attrs = (pself->VCNI_attrs | attrsToSet) & ~attrsToClear;
+}
+
+/* VisContentUnwantedKbdEvent: up the focus hierarchy */
+@method VisContentClass, MSG_VIS_CONTENT_UNWANTED_KBD_EVENT
+{
+    (void) @call oself::MSG_META_FUP_KBD_CHAR(character, flags, state);
+}
+
+/* VisContentGetTargetAtTargetLevel */
+@method VisContentClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER,
+			       CONTENT_OFFSET(VCNI_targetExcl), TL_CONTENT,
+			       level, retValue);
+}
+
+/* VisContentDoNothing, VisContentWindowAboutToBeClosed (the window is
+ * the view's) */
+@method VisContentClass, MSG_VIS_MOVE_RESIZE_WIN,
+			 MSG_VIS_WIN_ABOUT_TO_BE_CLOSED
+{
+}

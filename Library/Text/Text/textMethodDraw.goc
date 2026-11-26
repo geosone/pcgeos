@@ -283,3 +283,18 @@ void TextScreenUpdate(optr o)
     pself->VTI_gstate = old;
     GrRestoreState(gstate);
 }
+
+@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW
+{
+    WBFixed before = pself->VTI_height;
+
+    if (!pself->VTI_lines)
+	return;				/* no geometry yet */
+    TextGStateCreate(oself);
+    EditUnHilite(oself);
+    TextCompleteRecalc(oself);
+    TextScreenUpdate(oself);
+    EditHilite(oself);
+    TextGStateDestroy(oself);
+    TextHeightNotify(oself, before);
+}

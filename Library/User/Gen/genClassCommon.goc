@@ -1,0 +1,718 @@
+/*
+ * genClassCommon.goc -- after genClassCommon.asm: This file contains
+ * routines to implement the Gen class
+ */
+@include "uiInt.goh"
+#include <initfile.h>
+#include <string.h>
+#include <localize.h>
+
+/* ---------------------------------------------------------------------
+ * States, attributes, monikers, accelerators, hints
+ * (genClassCommon.asm)
+ * ------------------------------------------------------------------- */
+
+@extern method GenClass, MSG_GEN_ACTIVATE_INTERACTION_DEFAULT
+{
+    return @call oself::MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT();
+}
+
+@extern method GenClass, MSG_GEN_START_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    return @call oself::MSG_SPEC_START_BROADCAST_FOR_DEFAULT_FOCUS();
+}
+
+static void SetState(optr oself, GenStates set, GenStates clear)
+{
+    GenInstance *g = GenLock(oself);
+
+    g->GI_states = (GenStates) ((g->GI_states | set) & ~clear);
+    GenUnlock(oself);
+    ObjMarkDirty(oself);
+}
+
+/*
+ * GenGenSetUsable: once the whole branch up is usable, the specific UI
+ * builds it (from scratch: what was grown before goes).
+ */
+@extern method GenClass, MSG_GEN_SET_USABLE
+{
+    if (pself->GI_states & GS_USABLE)
+	return;
+    SetState(oself, GS_USABLE, 0);
+    if (!GenCheckIfFullyUsable(oself, TRUE))
+	return;
+    GenSpecShrinkBranch(oself);
+    @call oself::MSG_SPEC_SET_USABLE(updateMode);
+}
+
+@extern method GenClass, MSG_GEN_SET_NOT_USABLE
+{
+    Boolean was;
+
+    if (!(pself->GI_states & GS_USABLE))
+	return;
+    was = GenCheckIfFullyUsable(oself, TRUE);
+    SetState(oself, 0, GS_USABLE);
+    if (was && GenCheckIfSpecGrown(oself))
+	@call oself::MSG_SPEC_SET_NOT_USABLE(updateMode);
+}
+
+@extern method GenClass, MSG_GEN_UPDATE_VISUAL
+{
+    if (GenCheckIfSpecGrown(oself))
+	@call oself::MSG_SPEC_UPDATE_VISUAL(updateMode);
+}
+
+/* EnableCommon: the object of a usable, built branch notified (and
+ * through it its children) */
+static void EnableCommon(optr oself, GenStates set, GenStates clear,
+			 Message notify, VisUpdateMode mode)
+{
+    struct { VisUpdateMode m; byte f; } p;
+    Boolean r;
+
+    SetState(oself, set, clear);
+    if (!GenCheckIfFullyUsable(oself, FALSE) || !GenCheckIfSpecGrown(oself))
+	return;
+    p.m = mode;
+    p.f = NEF_STATE_CHANGING;
+    CObjMessageP(MF_CALL, oself, notify, &p, sizeof(p), &r, sizeof(r));
+}
+
+@extern method GenClass, MSG_GEN_SET_ENABLED
+{
+    if (!(pself->GI_states & GS_ENABLED))
+	EnableCommon(oself, GS_ENABLED, 0, MSG_GEN_NOTIFY_ENABLED,
+		     updateMode);
+}
+
+@extern method GenClass, MSG_GEN_SET_NOT_ENABLED
+{
+    if (pself->GI_states & GS_ENABLED)
+	EnableCommon(oself, 0, GS_ENABLED, MSG_GEN_NOTIFY_NOT_ENABLED,
+		     updateMode);
+}
+
+/* NotifyEnabledCommon: the specific part told; if that changed
+ * something, the children too (their own state is not changing) */
+static Boolean NotifyEnabledCommon(optr oself, Message spec,
+				   Message gen, VisUpdateMode mode, byte flags)
+{
+    struct { VisUpdateMode m; byte f; } p;
+    Boolean r = FALSE;
+    GenStates st = GenLock(oself)->GI_states;
+
+    GenUnlock(oself);
+    if (!(st & GS_USABLE) || !GenCheckIfSpecGrown(oself))
+	return FALSE;
+    p.m = mode;
+    p.f = flags;
+    CObjMessageP(MF_CALL, oself, spec, &p, sizeof(p), &r, sizeof(r));
+    if (!r)
+	return FALSE;
+    p.f = (byte) (flags & ~NEF_STATE_CHANGING);
+    GenSendToChildren(oself, gen, &p, sizeof(p));
+    return TRUE;
+}
+
+@extern method GenClass, MSG_GEN_NOTIFY_ENABLED
+{
+    return NotifyEnabledCommon(oself, MSG_SPEC_NOTIFY_ENABLED, message,
+			       updateMode, flags);
+}
+
+@extern method GenClass, MSG_GEN_NOTIFY_NOT_ENABLED
+{
+    return NotifyEnabledCommon(oself, MSG_SPEC_NOTIFY_NOT_ENABLED, message,
+			       updateMode, flags);
+}
+
+@extern method GenClass, MSG_GEN_GET_VIS_MONIKER
+{
+    return pself->GI_visMoniker;
+}
+
+/* the moniker's size (0, 0 if there is none, or it is a list) */
+static SizeAsDWord MonikerSize(optr oself)
+{
+    ChunkHandle m = GenLock(oself)->GI_visMoniker;
+    SizeAsDWord s = 0;
+
+    GenUnlock(oself);
+    if (m)
+	s = VisGetMonikerSize(oself, m, 0, 0);
+    return s;
+}
+
+/*
+ * UpdateMoniker: the specific part shows the new moniker (a list is
+ * resolved first if the object is usable); old width and height for
+ * the geometry.
+ */
+static void UpdateMoniker(optr oself, VisUpdateMode mode, word oldWidth,
+			  word oldHeight)
+{
+    ChunkHandle m;
+
+    if (!GenCheckIfSpecGrown(oself))
+	return;
+    m = GenLock(oself)->GI_visMoniker;
+    if (m && ((VisMoniker *) LMemDeref(ConstructOptr(OptrToHandle(oself),
+						      m)))->VM_type &
+	     VMT_MONIKER_LIST) {
+	GenUnlock(oself);
+	if (!GenCheckIfFullyUsable(oself, FALSE))
+	    return;
+	@call oself::MSG_SPEC_RESOLVE_MONIKER_LIST(m);
+    } else {
+	GenUnlock(oself);
+    }
+    @callsuper oself::GenClass::MSG_SPEC_UPDATE_VIS_MONIKER(mode, oldWidth,
+							   oldHeight);
+}
+
+@extern method GenClass, MSG_GEN_USE_VIS_MONIKER
+{
+    SizeAsDWord old = 0;
+
+    ObjMarkDirty(oself);
+    if (GenCheckIfSpecGrown(oself))
+	old = MonikerSize(oself);
+    GenLock(oself)->GI_visMoniker = moniker;
+    GenUnlock(oself);
+    UpdateMoniker(oself, updateMode, DWORD_WIDTH(old), DWORD_HEIGHT(old));
+}
+
+@extern method GenClass, MSG_GEN_CREATE_VIS_MONIKER
+{
+    Boolean failed;
+
+    return VisCreateMonikerChunk(oself, 0, flags, height, width, length,
+				 dataType, sourceType, source, &failed);
+}
+
+/* ReplaceVisMonikerGetSize: the cached size of the current moniker
+ * (computed if the object is grown and it is a gstring) */
+static void ReplaceGetSize(optr oself, word *w, word *h)
+{
+    ChunkHandle m = GenLock(oself)->GI_visMoniker;
+    VisMoniker *vm;
+
+    *w = *h = 0;
+    if (!m) {
+	GenUnlock(oself);
+	return;
+    }
+    vm = LMemDeref(ConstructOptr(OptrToHandle(oself), m));
+    if (vm->VM_type & VMT_MONIKER_LIST) {
+	GenUnlock(oself);
+	return;
+    }
+    *w = vm->VM_width;
+    if (!(vm->VM_type & VMT_GSTRING)) {
+	GenUnlock(oself);
+	return;
+    }
+    *h = ((VisMonikerWithGString *) vm)->VMWGS_height;
+    GenUnlock(oself);
+    if (GenCheckIfSpecGrown(oself)) {
+	SizeAsDWord s = VisGetMonikerSize(oself, m, 0, 0);
+	*w = DWORD_WIDTH(s);
+	*h = DWORD_HEIGHT(s);
+    }
+}
+
+/*
+ * GenReplaceVisMoniker: a new moniker made over the current one (or a
+ * new chunk if there is none); VMDT_NULL: no moniker.
+ */
+@extern method GenClass, MSG_GEN_REPLACE_VIS_MONIKER
+{
+    ChunkHandle old, m;
+    word w, h;
+    Boolean failed;
+
+    ObjMarkDirty(oself);
+    if (dataType != VMDT_NULL) {
+	ReplaceGetSize(oself, &w, &h);
+	old = GenLock(oself)->GI_visMoniker;
+	GenUnlock(oself);
+	m = VisCreateMonikerChunk(oself, old, CVMF_DIRTY, height, width,
+				  length, dataType, sourceType, source,
+				  &failed);
+	if (!failed) {
+	    if (old) {
+		UpdateMoniker(oself, updateMode, w, h);
+		return m;
+	    }
+	    if (ObjGetFlags(oself) & OCF_IGNORE_DIRTY)
+		ObjSetFlags(ConstructOptr(OptrToHandle(oself), m),
+			    OCF_IGNORE_DIRTY, 0);
+	    @call oself::MSG_GEN_USE_VIS_MONIKER(m, updateMode);
+	    return m;
+	}
+    }
+    old = GenLock(oself)->GI_visMoniker;
+    GenUnlock(oself);
+    if (old) {
+	@call oself::MSG_GEN_USE_VIS_MONIKER(0, updateMode);
+	ObjFreeChunk(ConstructOptr(OptrToHandle(oself), old));
+    }
+    return 0;
+}
+
+@extern method GenClass, MSG_GEN_REPLACE_VIS_MONIKER_OPTR
+{
+    return @call oself::MSG_GEN_REPLACE_VIS_MONIKER(updateMode, 0, 0, 0,
+						    VMDT_VIS_MONIKER,
+						    VMST_OPTR, source);
+}
+
+@extern method GenClass, MSG_GEN_REPLACE_VIS_MONIKER_TEXT
+{
+    return @call oself::MSG_GEN_REPLACE_VIS_MONIKER(updateMode, 0, 0, 0,
+				VMDT_TEXT, VMST_FPTR,
+				(VisMonikerSource) (uintptr_t) source);
+}
+
+static void MonikerArgs(DrawMonikerArgs *a, word textHeight,
+			GStateHandle gs, word yMax, word xMax, word yInset,
+			word xInset)
+{
+    a->DMA_xInset = xInset;
+    a->DMA_yInset = yInset;
+    a->DMA_xMaximum = xMax;
+    a->DMA_yMaximum = yMax;
+    a->DMA_gState = gs;
+    a->DMA_textHeight = textHeight;
+}
+
+@extern method GenClass, MSG_GEN_DRAW_MONIKER
+{
+    DrawMonikerArgs a;
+
+    MonikerArgs(&a, textHeight, gState, yMaximum, xMaximum, yInset, xInset);
+    VisDrawMoniker(oself, pself->GI_visMoniker, monikerFlags, &a);
+}
+
+@extern method GenClass, MSG_GEN_GET_MONIKER_POS
+{
+    DrawMonikerArgs a;
+
+    MonikerArgs(&a, textHeight, gState, yMaximum, xMaximum, yInset, xInset);
+    return VisGetMonikerPos(oself, pself->GI_visMoniker, monikerFlags, &a);
+}
+
+@extern method GenClass, MSG_GEN_GET_MONIKER_SIZE
+{
+    return VisGetMonikerSize(oself, pself->GI_visMoniker, textHeight,
+			     gState);
+}
+
+/*
+ * GenFindMoniker: the moniker of the object (or the application's,
+ * MSG_GEN_APPLICATION_FIND_MONIKER), of a list the one fitting the
+ * search flags and the display type best (VisFindMoniker); copied as
+ * the flags ask.  0 if none.  Port32, not yet: the icon and text
+ * combination (HINT_USE_ICON_TEXT_COMBINATION_MONIKER).
+ */
+@extern method GenClass, MSG_GEN_FIND_MONIKER
+{
+    optr src;
+    MemHandle sh = OptrToHandle(oself);
+    ChunkHandle m;
+    VisMoniker *vm;
+
+    if (useAppMonikerList) {
+	src = GeodeGetAppObject(0);
+	if (!src)
+	    return 0;
+	return @call src::MSG_GEN_APPLICATION_FIND_MONIKER(destBlock,
+		searchFlags,
+		UserLimitDisplayTypeToStandard(
+		    (DisplayType) (UserGetDisplayType() >> 8)));
+    }
+    m = GenLock(oself)->GI_visMoniker;
+    if (!(searchFlags & VMSF_COPY_CHUNK)) {
+	/* no list: the moniker itself */
+	if (!m) {
+	    GenUnlock(oself);
+	    return 0;
+	}
+	vm = LMemDeref(ConstructOptr(sh, m));
+	if (!(vm->VM_type & VMT_MONIKER_LIST)) {
+	    GenUnlock(oself);
+	    return ConstructOptr(sh, m);
+	}
+    }
+    GenUnlock(oself);
+    return VisFindMoniker(ConstructOptr(sh, m), searchFlags, destBlock,
+			  UserLimitDisplayTypeToStandard(
+			      (DisplayType) (UserGetDisplayType() >> 8)));
+}
+
+/* GenFindKbdAccelerator: the specific part, then the accelerator, then
+ * the children on the search path */
+typedef struct {
+    word c, f, s;
+    Boolean found;
+} FindAccelData;
+
+static Boolean FindAccelCallback(optr parent, optr child, void *data)
+{
+    FindAccelData *d = data;
+    GenAttrs a = GenLock(child)->GI_attrs;
+
+    (void) parent;
+    GenUnlock(child);
+    if (!(a & GA_KBD_SEARCH_PATH))
+	return FALSE;
+    d->found = @call child::MSG_GEN_FIND_KBD_ACCELERATOR(d->c, d->f, d->s);
+    return d->found;
+}
+
+@extern method GenClass, MSG_GEN_FIND_KBD_ACCELERATOR
+{
+    FindAccelData d;
+
+    if (!(pself->GI_states & GS_USABLE))
+	return FALSE;
+    if (@callsuper())
+	return TRUE;
+    if (!(GenLock(oself)->GI_states & GS_ENABLED)) {
+	GenUnlock(oself);
+	return FALSE;
+    }
+    GenUnlock(oself);
+    if (GenCheckKbdAccelerator(oself, charValue, charFlagsAndShiftState,
+			       toggleStateAndScanCode)) {
+	@send ,forceQueue,insertAtFront oself::MSG_GEN_ACTIVATE();
+	return TRUE;
+    }
+    d.c = charValue;
+    d.f = charFlagsAndShiftState;
+    d.s = toggleStateAndScanCode;
+    d.found = FALSE;
+    GenCallChildren(oself, FindAccelCallback, &d);
+    return d.found;
+}
+
+@extern method GenClass, MSG_GEN_GET_KBD_ACCELERATOR
+{
+    return pself->GI_kbdAccelerator;
+}
+
+@extern method GenClass, MSG_GEN_SET_KBD_ACCELERATOR
+{
+    optr o = oself;
+
+    pself->GI_kbdAccelerator = accelerator;
+    if (!accelerator)
+	return;
+    @call oself::MSG_GEN_SET_KBD_MKR_PATH();
+    if (!GenCheckIfSpecGrown(oself))
+	return;
+    if (VisLock(oself)->VI_specAttrs & SA_USES_DUAL_BUILD) {
+	VisUnlock(oself);
+	o = VisGetSpecificVisObject(oself, 0);
+    } else {
+	VisUnlock(oself);
+    }
+    if (o)
+	@call o::MSG_SPEC_UPDATE_KBD_ACCELERATOR(updateMode);
+}
+
+/* ChangeSizeHint: the hint (saved to state) set, or removed if no size
+ * is given */
+static void ChangeSizeHint(optr oself, word hint, word width, word height,
+			   word count)
+{
+    if (!width && !height) {
+	ObjVarDeleteData(oself, hint);
+	return;
+    }
+    if (count) {
+	CompSizeHintArgs *c = ObjVarAddData(oself, hint | VDF_SAVE_TO_STATE,
+					    sizeof(CompSizeHintArgs));
+	c->CSHA_width = width;
+	c->CSHA_height = height;
+	c->CSHA_count = count;
+    } else {
+	GadgetSizeHintArgs *g = ObjVarAddData(oself,
+					      hint | VDF_SAVE_TO_STATE,
+					      sizeof(GadgetSizeHintArgs));
+	g->GSHA_width = width;
+	g->GSHA_height = height;
+    }
+}
+
+static void SetSizeAndRescan(optr oself, word hint, word width,
+			     word height, word count, VisUpdateMode mode)
+{
+    ChangeSizeHint(oself, hint, width, height, count);
+    if (VisCheckIfSpecBuilt(oself))
+	@call oself::MSG_SPEC_P32_RESCAN_GEO_AND_UPDATE(VOF_GEOMETRY_INVALID,
+							mode);
+}
+
+@extern method GenClass, MSG_GEN_SET_INITIAL_SIZE
+{
+    ChangeSizeHint(oself, HINT_INITIAL_SIZE, width, height, count);
+    (void) updateMode;
+}
+
+@extern method GenClass, MSG_GEN_SET_MINIMUM_SIZE
+{
+    SetSizeAndRescan(oself, HINT_MINIMUM_SIZE, width, height, count,
+		     updateMode);
+}
+
+@extern method GenClass, MSG_GEN_SET_MAXIMUM_SIZE
+{
+    SetSizeAndRescan(oself, HINT_MAXIMUM_SIZE, width, height, count,
+		     updateMode);
+}
+
+@extern method GenClass, MSG_GEN_SET_FIXED_SIZE
+{
+    SetSizeAndRescan(oself, HINT_FIXED_SIZE, width, height, count,
+		     updateMode);
+}
+
+/* GetArgs: the hint's size and count (0 if there is no hint) */
+static void GetSizeHint(optr oself, word hint, GetSizeArgs *r)
+{
+    CompSizeHintArgs *c = ObjVarFindData(oself, hint);
+
+    memset(r, 0, sizeof(*r));
+    if (!c)
+	return;
+    r->GSA_width = c->CSHA_width;
+    r->GSA_height = c->CSHA_height;
+    if (VarDataSizePtr(c) != sizeof(GadgetSizeHintArgs))
+	r->GSA_count = c->CSHA_count;
+}
+
+@extern method GenClass, MSG_GEN_GET_INITIAL_SIZE
+{
+    GetSizeHint(oself, HINT_INITIAL_SIZE, initSize);
+}
+
+@extern method GenClass, MSG_GEN_GET_MINIMUM_SIZE
+{
+    GetSizeHint(oself, HINT_MINIMUM_SIZE, minSize);
+}
+
+@extern method GenClass, MSG_GEN_GET_MAXIMUM_SIZE
+{
+    GetSizeHint(oself, HINT_MAXIMUM_SIZE, maxSize);
+}
+
+@extern method GenClass, MSG_GEN_GET_FIXED_SIZE
+{
+    GetSizeHint(oself, HINT_FIXED_SIZE, fixedSize);
+}
+
+/*
+ * HandleWinGeometryChange: the window hints of one kind (first to last)
+ * replaced by the one for the type, then the specific part told.
+ */
+static void WinHint(optr oself, word first, word last, const word *table,
+		    word count, byte type, word x, word y)
+{
+    word hint;
+
+    ObjVarDeleteDataRange(oself, first, last, FALSE);
+    hint = type < count ? table[type] : 0;
+    if (!hint)
+	return;
+    if (hint & VDF_EXTRA_DATA) {
+	SpecWinSizePair *sp = ObjVarAddData(oself, hint | VDF_SAVE_TO_STATE,
+					    sizeof(SpecWinSizePair));
+	sp->SWSP_x = x;
+	sp->SWSP_y = y;
+    } else {
+	ObjVarAddData(oself, hint | VDF_SAVE_TO_STATE, 0);
+    }
+}
+
+static const word positionHints[] = {
+    HINT_POSITION_WINDOW_AT_RATIO_OF_PARENT | VDF_EXTRA_DATA,
+    HINT_STAGGER_WINDOW,
+    HINT_CENTER_WINDOW,
+    HINT_TILE_WINDOW,
+    HINT_POSITION_WINDOW_AT_MOUSE,
+    0,
+    0
+};
+
+static const word sizeHints[] = {
+    HINT_SIZE_WINDOW_AS_RATIO_OF_PARENT | VDF_EXTRA_DATA,
+    HINT_SIZE_WINDOW_AS_RATIO_OF_FIELD | VDF_EXTRA_DATA,
+    HINT_SIZE_WINDOW_AS_DESIRED,
+    HINT_EXTEND_WINDOW_TO_BOTTOM_RIGHT,
+    HINT_EXTEND_WINDOW_NEAR_BOTTOM_RIGHT
+};
+
+static const word constrainHints[] = {
+    HINT_DONT_KEEP_PARTIALLY_ONSCREEN,
+    HINT_KEEP_PARTIALLY_ONSCREEN,
+    HINT_KEEP_ENTIRELY_ONSCREEN,
+    HINT_KEEP_ENTIRELY_ONSCREEN_WITH_MARGIN
+};
+
+@extern method GenClass, MSG_GEN_SET_WIN_POSITION
+{
+    WinHint(oself, HINT_POSITION_WINDOW_AT_RATIO_OF_PARENT,
+	    HINT_POSITION_WINDOW_AT_MOUSE, positionHints,
+	    sizeof(positionHints) / sizeof(positionHints[0]),
+	    (byte) (modeAndType >> 8), xPosSpec, yPosSpec);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@extern method GenClass, MSG_GEN_SET_WIN_SIZE
+{
+    WinHint(oself, HINT_EXTEND_WINDOW_TO_BOTTOM_RIGHT,
+	    HINT_SIZE_WINDOW_AS_RATIO_OF_FIELD, sizeHints,
+	    sizeof(sizeHints) / sizeof(sizeHints[0]),
+	    (byte) (modeAndType >> 8), xSizeSpec, ySizeSpec);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@extern method GenClass, MSG_GEN_SET_WIN_CONSTRAIN
+{
+    WinHint(oself, HINT_KEEP_PARTIALLY_ONSCREEN,
+	    HINT_DONT_KEEP_PARTIALLY_ONSCREEN, constrainHints,
+	    sizeof(constrainHints) / sizeof(constrainHints[0]),
+	    constrainType, 0, 0);
+    if (GenCheckIfSpecGrown(oself))
+	@callsuper();
+}
+
+@extern method GenClass, MSG_GEN_RESET_TO_INITIAL_SIZE
+{
+    if (VisCheckIfSpecBuilt(oself))
+	@callsuper oself::GenClass::MSG_VIS_RESET_TO_INITIAL_SIZE(updateMode);
+}
+
+@extern method GenClass, MSG_GEN_SET_ATTRS
+{
+    pself->GI_attrs = (GenAttrs) ((pself->GI_attrs & ~attrsToClear) |
+				  attrsToSet);
+}
+
+@extern method GenClass, MSG_GEN_GET_ATTRIBUTES
+{
+    return pself->GI_attrs;
+}
+
+/*
+ * GenOutputAction: the event to the destination; with none (0, the
+ * asm's cx = 0) it goes as a classed event: to ATTR_GEN_DESTINATION_CLASS
+ * if there is one, from ATTR_GEN_OUTPUT_TRAVEL_START or this object, in
+ * the travel option the event's destination holds.  A null event (dest
+ * 0 and no travel option) is destroyed.
+ */
+@extern method GenClass, MSG_GEN_OUTPUT_ACTION
+{
+    optr cls, *start;
+    DestinationClassArgs *dca;
+
+    if (OptrToHandle(dest)) {
+	MessageSetDestination(event, dest);
+	CMessageDispatchP(event, 0, NULL, 0);
+	return;
+    }
+    if (!OptrToChunk(dest)) {
+	ObjFreeMessage(event);
+	return;
+    }
+    dca = ObjVarFindData(oself, ATTR_GEN_DESTINATION_CLASS);
+    if (dca) {
+	cls = (optr) (uintptr_t) dca->DCA_class;
+	MessageSetDestination(event, cls);
+    }
+    start = ObjVarFindData(oself, ATTR_GEN_OUTPUT_TRAVEL_START);
+    if (start) {
+	optr s = *start;
+	@send s::MSG_META_SEND_CLASSED_EVENT(event, OptrToChunk(dest));
+    } else
+	@call oself::MSG_META_SEND_CLASSED_EVENT(event, OptrToChunk(dest));
+}
+
+/* HintRequiresOneWordData */
+static Boolean HintOneWord(word hint)
+{
+    hint &= VDF_TYPE;
+    return hint == HINT_CUSTOM_CHILD_SPACING || hint == ATTR_GEN_POSITION_X ||
+	   hint == ATTR_GEN_POSITION_Y || hint == HINT_WRAP_AFTER_CHILD_COUNT;
+}
+
+@extern method GenClass, MSG_GEN_ADD_GEOMETRY_HINT
+{
+    if (HintOneWord(hint))
+	*(word *) ObjVarAddData(oself, hint, sizeof(word)) = hintArgument;
+    else
+	ObjVarAddData(oself, hint, 0);
+    @call oself::MSG_SPEC_P32_RESCAN_GEO_AND_UPDATE(
+	VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID, updateMode);
+}
+
+@extern method GenClass, MSG_GEN_REMOVE_GEOMETRY_HINT
+{
+    ObjVarDeleteData(oself, hint);
+    @call oself::MSG_SPEC_P32_RESCAN_GEO_AND_UPDATE(
+	VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID, updateMode);
+}
+
+/*
+ * GenFindTextMoniker: this object (unless GFTMF_SKIP_THIS_NODE) if its
+ * text moniker starts with the text (or is it, GFTMF_EXACT_MATCH), else
+ * the first child's answer.
+ */
+typedef struct {
+    char *text;
+    GenFindObjectWithMonikerFlags flags;
+    optr found;
+} FindTextData;
+
+static Boolean FindTextCallback(optr parent, optr child, void *data)
+{
+    FindTextData *d = data;
+
+    (void) parent;
+    d->found = @call child::MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER(d->text,
+			  d->flags & GFTMF_EXACT_MATCH);
+    return d->found != 0;
+}
+
+@extern method GenClass, MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER
+{
+    FindTextData d;
+
+    if (!(flags & GFTMF_SKIP_THIS_NODE) && pself->GI_visMoniker) {
+	VisMoniker *m = LMemDeref(ConstructOptr(OptrToHandle(oself),
+						pself->GI_visMoniker));
+	const char *t = (const char *) m + VMWT_text;
+
+	if (!(m->VM_type & (VMT_GSTRING | VMT_MONIKER_LIST)) && *t) {
+	    word n = LocalStringLength(text);
+	    if (!LocalCmpStrings(t, text, n) &&
+		(!(flags & GFTMF_EXACT_MATCH) || !t[n]))
+		return oself;
+	}
+    }
+    d.text = text;
+    d.flags = flags;
+    d.found = 0;
+    GenCallChildren(oself, FindTextCallback, &d);
+    return d.found;
+}
+
+@extern method GenClass, MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER_C
+{
+    return @call oself::MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER(text, flags);
+}

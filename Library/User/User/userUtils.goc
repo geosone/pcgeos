@@ -26,24 +26,19 @@
 #include <geosdriver.h>
 #include <initfile.h>
 #include <string.h>
+#include <system.h>
+#include <win.h>
+#include <Internal/im.h>
+#include <library.h>
+@include <Objects/gProcC.goh>
+#include <sound.h>
+#include <Internal/soundCtl.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <Internal/grWinInt.h>
 
 /* userStrings.asm */
 static const char deskAccessoryPathname[] = "Desk Accessories";
-
-/*
- * UserAllocObjBlock: an object block run by the thread (0: the current
- * one)
- */
-MemHandle UserAllocObjBlock(ThreadHandle thread)
-{
-    MemHandle mh = MemAllocLMem(LMEM_TYPE_OBJ_BLOCK,
-				sizeof(ObjLMemBlockHeader));
-
-    MemModifyFlags(mh, HF_SHARABLE, 0);
-    if (thread)
-	MemModifyOtherInfo(mh, thread);
-    return mh;
-}
 
 /*
  * PrepAppLaunchBlock: the AppLaunchBlock for a launch (a new one for
@@ -363,4 +358,368 @@ Boolean UserCheckInsertableCtrlChar(word character, word flags, word state)
 	return TRUE;
     return (state & TS_NUMLOCK) && !(flags & CF_EXTENDED) &&
 	   ch >= '.' && ch <= '9';
+}
+
+UIInterfaceLevel UserGetDefaultUILevel(void)
+{
+    return uiInterfaceLevel;
+}
+
+UIInterfaceLevel UserGetDefaultLaunchLevel(void)
+{
+    return uiDefaultLaunchLevel;
+}
+
+UILaunchModel UserGetLaunchModel(void)
+{
+    return uiLaunchModel;
+}
+
+UILaunchOptions UserGetLaunchOptions(void)
+{
+    return uiLaunchOptions;
+}
+
+UIInterfaceOptions UserGetInterfaceOptions(void)
+{
+    return uiInterfaceOptions;
+}
+
+/* UserGetDisplayType: the DisplayType in the high byte, TRUE in the low
+ * byte once a screen set it */
+word UserGetDisplayType(void)
+{
+    return (word) (((word) uiDisplayType << 8) |
+		   ((uiFlags & UIF_HAVE_DISPLAY_TYPE) ? 0xff : 0));
+}
+
+/* UserSendToApplicationViaProcess: the message recorded for the
+ * application object, dispatched by the process from its queue */
+void UserSendToApplicationViaProcess(Message msg, const void *params,
+				     word paramSize)
+{
+    EventHandle ev = 0;
+    optr proc = ConstructOptr(GeodeGetProcessHandle(), 0);
+
+    CObjMessageP(MF_RECORD, GeodeGetAppObject(0), msg, params, paramSize,
+		 &ev, sizeof(ev));
+    @send, forceQueue proc::MSG_META_DISPATCH_EVENT(ev, MF_FORCE_QUEUE);
+}
+
+/* UserGetKbdAcceleratorMode: [ui] kbdAcceleratorMode, on by default
+ * (the asm read it once when the UI attached) */
+Boolean UserGetKbdAcceleratorMode(void)
+{
+    Boolean on;
+
+    if (InitFileReadBoolean("ui", "kbdAcceleratorMode", &on))
+	return TRUE;
+    return on;
+}
+/* UserCallApplication: the message to the application object of the
+ * current process (FALSE if there is none) */
+Boolean UserCallApplication(Message msg, const void *params,
+			    word paramSize, void *reply, word replySize)
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (replySize)
+	memset(reply, 0, replySize);
+    if (!app)
+	return FALSE;
+    CObjMessageP(MF_CALL, app, msg, (void *) params, paramSize, reply,
+		 replySize);
+    return TRUE;
+}
+
+/*
+ * The sounds of the UI.  The UI does not import the sound library: it
+ * loads sound.geo from SYSTEM when it attaches
+ * (MSG_USER_UPDATE_SOUND_PARAMS, userMain.goc) and calls its routines by
+ * entry number (Library/Sound/sound32.gp).  "[ui] sound" (default true)
+ * turns the sounds on and off, "[ui] soundMask" each standard sound
+ * (StandardSoundFlags, a bit per StandardSoundType).
+ *
+ * Port32:
+ *  - the library stays loaded while "[ui] sound" is false (the asm freed
+ *    it), so that a sound with SST_IGNORE_SOUND_OFF is heard then too;
+ *    the asm went on to call the library it had not loaded;
+ *  - UserStandardSound is a C routine (ui.goh), the asm's register
+ *    routine and its C stub (_UserStandardSound) in one;
+ *  - UserStopStandardSound ignores the type SST_IGNORE_SOUND_OFF + 7 too
+ *    (the asm let it index past its table);
+ *  - the standard sounds are songs of the UI's data, not resources;
+ *  - the UI frees them and the library when it ends (UserSoundExit, a
+ *    Port32 routine): the kernel does not free what a geode used while
+ *    it ran.
+ */
+GeodeHandle uiSoundLib;
+Boolean uiSoundOn;
+MemHandle uiStandardSoundHandles[NUM_STANDARD_SOUNDS];
+
+#define SND(n, f)	((__typeof__(&f)) ProcGetLibraryEntry(uiSoundLib, (n)))
+#define S_StopMusic		SND(5, SoundStopMusic)
+
+#define STANDARD_TEMPO		8
+#define STANDARD_PRIORITY	SP_SYSTEM_LEVEL
+#define VOICE_HIGH		DYNAMIC_FFFF
+#define VOICE_LOW		DYNAMIC_FFF
+#define ChangePriority(p)	General(GE_SET_PRIORITY), (p)
+static word standardSoundCounts[NUM_STANDARD_SOUNDS];
+#define S_AllocMusic		SND(3, SoundAllocMusic)
+#define S_PlayMusic		SND(4, SoundPlayMusic)
+#define S_InitMusic		SND(8, SoundInitMusic)
+#define S_AllocMusicNote	SND(9, SoundAllocMusicNote)
+#define S_PlayMusicNote		SND(10, SoundPlayMusicNote)
+#define S_ChangeOwnerSimple	SND(18, SoundChangeOwnerSimple)
+static const word stdErrorBeep[] = {
+    ChangePriority(SP_SYSTEM_LEVEL + SP_IMMEDIATE),
+    ChangeEnvelope(0, IP_TROMBONE, IT_STANDARD_TABLE),
+    DeltaTick(1),
+    VoiceOn(0, 500, VOICE_HIGH), DeltaTick(3),	/* 3 tick beep */
+    VoiceOff(0), DeltaTick(2),			/* 2 tick pause */
+    VoiceOn(0, 500, VOICE_HIGH), DeltaTick(3),
+    VoiceOff(0), DeltaTick(2),
+    VoiceOn(0, 500, VOICE_HIGH), DeltaTick(3),
+    VoiceOff(0),
+    General(GE_END_OF_SONG)
+};
+
+static const word stdWarningBeep[] = {
+    ChangePriority(SP_SYSTEM_LEVEL + SP_IMMEDIATE),
+    ChangeEnvelope(0, IP_OBOE, IT_STANDARD_TABLE),
+    DeltaTick(1),
+    VoiceOn(0, 198, VOICE_HIGH), DeltaTick(15),
+    VoiceOff(0),
+    General(GE_END_OF_SONG)
+};
+
+static const word stdNotifyBeep[] = {
+    ChangePriority(SP_SYSTEM_LEVEL),
+    ChangeEnvelope(0, IP_TINKLE_BELL, IT_STANDARD_TABLE),
+    DeltaTick(1),
+    VoiceOn(0, 400, VOICE_HIGH), DeltaTick(5),	/* 5 tick beep */
+    VoiceOff(0), DeltaTick(3),			/* 3 tick pause */
+    VoiceOn(0, 400, VOICE_HIGH), DeltaTick(5),
+    VoiceOff(0),
+    General(GE_END_OF_SONG)
+};
+
+static const word stdNoInputBeep[] = {
+    ChangePriority(SP_SYSTEM_LEVEL),
+    ChangeEnvelope(0, IP_OVERDRIVEN_GUITAR, IT_STANDARD_TABLE),
+    DeltaTick(1),
+    VoiceOn(0, 800, VOICE_LOW), DeltaTick(1),	/* 1 tick beep */
+    VoiceOff(0),				/* no pause */
+    VoiceOn(0, 500, VOICE_HIGH), DeltaTick(1),
+    VoiceOff(0),
+    General(GE_END_OF_SONG)
+};
+
+static const word stdKeyClick[] = {
+    ChangePriority(SP_SYSTEM_LEVEL + SP_THEME),
+    ChangeEnvelope(0, IP_HI_MID_TOM, IT_STANDARD_TABLE),
+    DeltaTick(1),
+    VoiceOn(0, 400, VOICE_HIGH), DeltaTick(1),
+    VoiceOff(0), DeltaTick(1),
+    VoiceOn(0, 100, VOICE_HIGH), DeltaTick(1),
+    VoiceOff(0),
+    General(GE_END_OF_SONG)
+};
+#define ALARM_NOTE(f, t) \
+    VoiceOn(0, f, VOICE_LOW), DeltaTick(t), VoiceOff(0), DeltaTick(2)
+
+static const word stdAlarm[] = {
+    ChangePriority(SP_SYSTEM_LEVEL + SP_IMMEDIATE),
+    ChangeEnvelope(0, IP_FLUTE, IT_STANDARD_TABLE),
+    DeltaTick(1),
+    ALARM_NOTE(MIDDLE_A, 8), ALARM_NOTE(MIDDLE_G, 8), ALARM_NOTE(MIDDLE_F, 8),
+    ALARM_NOTE(MIDDLE_A, 8), ALARM_NOTE(MIDDLE_G, 8), ALARM_NOTE(MIDDLE_F, 8),
+    ALARM_NOTE(MIDDLE_A, 8), ALARM_NOTE(MIDDLE_G, 10),
+    VoiceOn(0, MIDDLE_F, VOICE_LOW), DeltaTick(12),
+    VoiceOff(0),
+    General(GE_END_OF_SONG)
+};
+
+static const word stdNoHelpBeep[] = {
+    ChangePriority(SP_SYSTEM_LEVEL),
+    ChangeEnvelope(0, IP_OVERDRIVEN_GUITAR, IT_STANDARD_TABLE),
+    DeltaTick(1),
+    VoiceOn(0, 600, VOICE_LOW), DeltaTick(1),
+    VoiceOff(0),
+    VoiceOn(0, 400, VOICE_HIGH), DeltaTick(1),
+    VoiceOff(0),
+    General(GE_END_OF_SONG)
+};
+
+static const word *const standardSongs[NUM_STANDARD_SOUNDS] = {
+    stdErrorBeep, stdWarningBeep, stdNotifyBeep, stdNoInputBeep,
+    stdKeyClick, stdAlarm, stdNoHelpBeep
+};
+
+/* SetUpStandardSounds: a sound of one voice for each, the UI's */
+static Boolean SetUpStandardSounds(void)
+{
+    word i;
+
+    for (i = 0; i < NUM_STANDARD_SOUNDS; i++) {
+	if (uiStandardSoundHandles[i])
+	    continue;
+	if (S_AllocMusic(standardSongs[i], 1, &uiStandardSoundHandles[i]) !=
+	    SOUND_ERROR_NO_ERRORS) {
+	    uiStandardSoundHandles[i] = 0;
+	    return FALSE;
+	}
+	S_ChangeOwnerSimple(uiStandardSoundHandles[i],
+			    (MemHandle) GeodeGetCodeProcessHandle());
+    }
+    return TRUE;
+}
+
+/* a song of the caller's, copied into a block of the UI that goes away
+ * when it is played */
+static void PlayCustomBuffer(const word *buffer, word size)
+{
+    MemHandle mh;
+    byte *p;
+
+    mh = MemAllocSetOwner(GeodeGetCodeProcessHandle(),
+			  (word) (SOUND_CONTROL_SIZE(1) + size),
+			  HF_SWAPABLE | HF_SHARABLE, HAF_LOCK);
+    if (!mh)
+	return;
+    p = MemDeref(mh);
+    memcpy(p + SOUND_CONTROL_SIZE(1), buffer, size);
+    S_InitMusic(mh, 1);
+    (void) S_PlayMusic(mh, STANDARD_PRIORITY, STANDARD_TEMPO,
+		       UNLOCK_ON_EOS | DESTROY_ON_EOS);
+}
+
+/* PlayStandardSound */
+static void PlayStandardSound(word type, va_list ap)
+{
+    switch (type) {
+    case SST_CUSTOM_SOUND: {
+	MemHandle mh = va_arg(ap, MemHandle);
+	word tempo = (word) va_arg(ap, int);
+
+	(void) S_PlayMusic(mh, SP_SYSTEM_LEVEL, tempo, UNLOCK_ON_EOS);
+	break;
+    }
+    case SST_CUSTOM_NOTE: {
+	word freq = (word) va_arg(ap, int);
+	word ticks = (word) va_arg(ap, int);
+	MemHandle mh;
+
+	if (S_AllocMusicNote(IP_REED_ORGAN, IT_STANDARD_TABLE, freq,
+			     DYNAMIC_MF, SSDTT_TICKS, ticks, &mh) ==
+	    SOUND_ERROR_NO_ERRORS)
+	    (void) S_PlayMusicNote(mh, STANDARD_PRIORITY, STANDARD_TEMPO,
+				   UNLOCK_ON_EOS | DESTROY_ON_EOS);
+	break;
+    }
+    case SST_CUSTOM_BUFFER: {
+	const word *buffer = va_arg(ap, const word *);
+	word size = (word) va_arg(ap, int);
+
+	PlayCustomBuffer(buffer, size);
+	break;
+    }
+    default:
+	if (type >= NUM_STANDARD_SOUNDS || !SetUpStandardSounds())
+	    break;
+	(void) S_PlayMusic(uiStandardSoundHandles[type],
+			   STANDARD_PRIORITY + SP_IMMEDIATE, STANDARD_TEMPO,
+			   UNLOCK_ON_EOS);
+	break;
+    }
+}
+
+word _cdecl UserStandardSound(StandardSoundType stype, ...)
+{
+    word type = (word) stype, count;
+    va_list ap;
+
+    if (!uiSoundLib)
+	return 0;
+    if ((type & 0xff00) == SST_IGNORE_SOUND_OFF)
+	type &= 0x00ff;			/* heard whatever the settings */
+    else {
+	if (!uiSoundOn)
+	    return 0;
+	/* the custom sounds are not masked */
+	if (type < NUM_STANDARD_SOUNDS && !(soundMask & (1 << type)))
+	    return 0;
+    }
+    va_start(ap, stype);
+    PlayStandardSound(type, ap);
+    va_end(ap);
+    if (type >= NUM_STANDARD_SOUNDS)
+	return 0;
+    count = standardSoundCounts[type];
+    do
+	count++;
+    while (!count);
+    standardSoundCounts[type] = count;
+    return count;
+}
+
+void _pascal UserStopStandardSound(StandardSoundType stype, word countID)
+{
+    word type = (word) stype & 0x00ff;
+
+    if (!countID || !uiSoundLib || ((word) stype & 0x7f00) ||
+	type >= NUM_STANDARD_SOUNDS)
+	return;
+    if (standardSoundCounts[type] == countID && uiStandardSoundHandles[type])
+	(void) S_StopMusic(uiStandardSoundHandles[type]);
+}
+
+/* UserLimitDisplayTypeToStandard: no larger than standard, not
+ * squished (the monikers for bigger displays are scaled) */
+DisplayType UserLimitDisplayTypeToStandard(DisplayType t)
+{
+    if (((t & DT_DISP_SIZE) >> DT_DISP_SIZE_OFFSET) > DS_STANDARD)
+	t = (DisplayType) ((t & ~DT_DISP_SIZE) |
+			   (DS_STANDARD << DT_DISP_SIZE_OFFSET));
+    if (((t & DT_DISP_ASPECT_RATIO) >> DT_DISP_ASPECT_RATIO_OFFSET) ==
+	DAR_SQUISHED)
+	t = (DisplayType) ((t & ~DT_DISP_ASPECT_RATIO) |
+			   (DAR_NORMAL << DT_DISP_ASPECT_RATIO_OFFSET));
+    return t;
+}
+
+
+void UserSetDefaultMonikerFont(FontID id, word pointSize)
+{
+    uiDefaultMonikerFont = id;
+    uiDefaultMonikerPointSize = pointSize;
+}
+
+/* UserGetDefaultMonikerFont: the UI's moniker font (the asm asked for an
+ * object; every object has the same) */
+void UserGetDefaultMonikerFont(FontID *id, word *pointSize)
+{
+    *id = uiDefaultMonikerFont;
+    *pointSize = uiDefaultMonikerPointSize;
+}
+
+#define NUM_STANDARD_SOUNDS	7
+
+#define S_FreeMusic		SND(7, SoundFreeMusic)
+/* UserSoundExit: the UI ends */
+void UserSoundExit(void)
+{
+    word i;
+
+    if (!uiSoundLib)
+	return;
+    for (i = 0; i < NUM_STANDARD_SOUNDS; i++)
+	if (uiStandardSoundHandles[i]) {
+	    (void) S_StopMusic(uiStandardSoundHandles[i]);
+	    S_FreeMusic(uiStandardSoundHandles[i]);
+	    uiStandardSoundHandles[i] = 0;
+	}
+    GeodeFreeLibrary(uiSoundLib);
+    uiSoundLib = 0;
 }

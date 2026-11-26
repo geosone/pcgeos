@@ -106,7 +106,7 @@ void VisCompUpdateWinGroup(optr obj);
 void VisSaveOldBounds(optr obj);
 
 /* ---------------------------------------------------------------------
- * Vis/visContent.goc
+ * Vis/visContentClass.goc, visContentCommon.goc
  * ------------------------------------------------------------------- */
 /* VUM_NOW if the content may be updated (its view's window is there and
  * it is linked to the view), else VUM_MANUAL */
@@ -132,7 +132,6 @@ typedef struct {
 } InputMapHeader;
 
 extern InputMapHeader uiInputMap;
-extern UIButtonFlags uiButtonFlags;
 extern Boolean uiFloatingKbdEnabled;
 /* SetDefaultInputMap: the map for the mouse's buttons, the [input]
  * flags */
@@ -151,7 +150,7 @@ void GenUnlock(optr obj);
 
 typedef Boolean GenChildCallback(optr parent, optr child, void *data);
 Boolean GenCallChildren(optr obj, GenChildCallback *cb, void *data);
-/* Gen/genClass.goc: the view area the hints of an object ask for
+/* Gen/genClassBuild.goc: the view area the hints of an object ask for
  * (HINT_SEEK_*_OF_VIEW, HINT_SEEK_*_SCROLLER_AREA); the unambiguous one
  * is no choice for a scroller area */
 RequestedViewArea GetViewAreaRequest(optr obj);
@@ -189,8 +188,6 @@ typedef ByteFlags UIFlags;
 #define UIF_HAVE_DISPLAY_TYPE	0x20
 #define UIF_INIT		0x10
 
-extern UIFlags uiFlags;
-extern byte uiDisplayType;
 /* the display type for monikers: standard size at most, not squished */
 extern DisplayType UserLimitDisplayTypeToStandard(DisplayType t);
 /* the system object (0 until UserCreateSystemObject) */
@@ -209,7 +206,7 @@ typedef struct {
 #define GPDF_DETACHING		0x0001
 #define GEN_PROCESS_PRIV_WORDS	((sizeof(GenProcessDetachData) + 1) / 2)
 
-/* GenAppQuitCommon (genApplication.goc): the quit from that level */
+/* GenAppQuitCommon (genAppAttDet.goc): the quit from that level */
 void GenAppQuitCommon(optr app, word quitLevel);
 
 /* the offset of the words (GeodePrivAlloc, in UILibraryEntry) */
@@ -263,7 +260,6 @@ void VisCompUpdateWindow(optr obj, UpdateWindowFlags flags,
 #endif
 
 /* the flow object of the UI's process (0 while there is none) */
-extern optr uiFlowObj;
 
 GeodeLoadError PrepAppLaunchBlock(MemHandle *albp, AppLaunchFlags alf,
 				  Message attachMethod, const char *filename,
@@ -275,7 +271,7 @@ void UserScreenNoVideoDriverError(void);
 void UserMakeScreens(MemHandle block);
 void UserMakeScreenFields(void);
 void UserScreenExit(void);
-/* the standard sounds freed, sound.geo let go (userSound.goc) */
+/* the standard sounds freed, sound.geo let go (userUtils.goc) */
 void UserSoundExit(void);
 
 /* genItemGroup.goc, shared with GenBooleanGroupClass (the identifier of
@@ -291,5 +287,53 @@ Boolean GenOptGetInteger(const GenOptionsParams *params, Boolean boolean,
 			 word *value);
 void GenOptWriteInteger(const GenOptionsParams *params, Boolean boolean,
 			word value);
+
+/* genAppCommonIACP.goc, genAppMisc.goc, for genAppAttDet.goc */
+optr GenAppProcessOptr(void);
+void GenAppSendToGCNList(optr oself, word listType, Message msg,
+	const void *params, word size);
+optr GenAppIACPConnects(optr oself);
+void GenAppNotifyModelIfDoc(optr oself, const AppLaunchBlock *alb,
+	Boolean openDefault);
+Boolean GenAppSwitchToAppMode(optr oself, MemHandle albHandle);
+
+/* User/userVariable.goc: the UI's variables (userVariable.def) */
+extern word soundMask;
+extern UIFlags uiFlags;
+extern word uiAckID;
+extern optr uiAckOD;
+extern UIButtonFlags uiButtonFlags;
+extern UIInterfaceLevel uiInterfaceLevel;
+extern UIInterfaceLevel uiDefaultLaunchLevel;
+extern UIInterfaceOptions uiInterfaceOptions;
+extern UILaunchModel uiLaunchModel;
+extern UILaunchOptions uiLaunchOptions;
+extern optr uiSystemObj;
+extern optr uiFlowObj;
+extern GeodeHandle uiSpecUILibrary;
+extern byte uiDisplayType;
+extern FontID uiDefaultMonikerFont;
+extern word uiDefaultMonikerPointSize;
+
+/* IACP/iacpUtils.goc, for GenApplicationClass */
+MemHandle IACPDuplicateALB(MemHandle alb);
+
+/* userUtils.goc: the sounds of the UI */
+#define NUM_STANDARD_SOUNDS	7
+extern GeodeHandle uiSoundLib;
+extern Boolean uiSoundOn;
+extern MemHandle uiStandardSoundHandles[NUM_STANDARD_SOUNDS];
+
+/* visGeometry.goc, for visUtilsClass.goc */
+void VisBoundsChanged(optr oself, const Rectangle *old);
+
+/* visContentClass.goc, visContentCommon.goc */
+void VisContentUpdateViewTargetInfo(optr oself);
+void VisContentInvalidate(optr oself);
+void VisContentSendToLayers(optr oself, Message msg, const void *params,
+	word size);
+
+/* visSpecUtils.goc */
+void VisContinueGenBranchCheck(optr obj, GenBranchInfo *info);
 
 #endif

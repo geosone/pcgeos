@@ -11,6 +11,8 @@
  */
 @include "uiInt.goh"
 #include <string.h>
+#include <stdint.h>
+#include <Internal/grWinInt.h>
 
 /* VisMonikerScore: the fields by priority (highest first) */
 #define SCORE_TEXT_OR_GSTRING	0x1000
@@ -131,16 +133,155 @@ optr VisFindMoniker(optr moniker, VisMonikerSearchFlags searchFlags,
     return r;
 }
 
-/* UserLimitDisplayTypeToStandard: no larger than standard, not
- * squished (the monikers for bigger displays are scaled) */
-DisplayType UserLimitDisplayTypeToStandard(DisplayType t)
+/* VisCompRemoveNonDiscardable */
+@extern method VisClass, MSG_VIS_REMOVE_NON_DISCARDABLE
 {
-    if (((t & DT_DISP_SIZE) >> DT_DISP_SIZE_OFFSET) > DS_STANDARD)
-	t = (DisplayType) ((t & ~DT_DISP_SIZE) |
-			   (DS_STANDARD << DT_DISP_SIZE_OFFSET));
-    if (((t & DT_DISP_ASPECT_RATIO) >> DT_DISP_ASPECT_RATIO_OFFSET) ==
-	DAR_SQUISHED)
-	t = (DisplayType) ((t & ~DT_DISP_ASPECT_RATIO) |
-			   (DAR_NORMAL << DT_DISP_ASPECT_RATIO_OFFSET));
-    return t;
+    @call oself::MSG_VIS_REMOVE(updateMode);
+    ObjDecInUseCount(OptrToHandle(oself));
+}
+
+/* VisRecalcSizeAndInvalIfNeeded: MSG_VIS_RECALC_SIZE unless the size
+ * passed is the one there (or the object only recalculates when
+ * invalid) */
+@extern method VisClass, MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED
+{
+    VisInstance *v = VisPart(oself);
+    SizeAsDWord s = VisGetSize(oself);
+    Boolean call;
+
+    if (v->VI_optFlags & (VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH) ||
+	v->VI_geoAttrs & VGA_ALWAYS_RECALC_SIZE)
+	call = TRUE;
+    else if (v->VI_geoAttrs & VGA_ONLY_RECALC_SIZE_WHEN_INVALID)
+	call = FALSE;
+    else
+	call = (!(width & RSA_CHOOSE_OWN_SIZE) && width != DWORD_WIDTH(s)) ||
+	       (!(height & RSA_CHOOSE_OWN_SIZE) &&
+		height != DWORD_HEIGHT(s));
+    if (call) {
+	if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
+	    VisSaveOldBounds(oself);
+	else
+	    VisMarkInvalid(oself, VOF_WINDOW_INVALID | VOF_IMAGE_INVALID,
+			   VUM_MANUAL);
+	s = @call oself::MSG_VIS_RECALC_SIZE(width, height);
+    }
+    VisPart(oself)->VI_optFlags &= ~(VOF_GEOMETRY_INVALID |
+				     VOF_GEO_UPDATE_PATH);
+    return s;
+}
+
+/* CheckForBoundsChange: TRUE if the bounds changed since SaveOldBounds
+ * (or none were saved) */
+static Boolean CheckForBoundsChange(optr oself)
+{
+    Rectangle *saved, old, now;
+
+    VisPart(oself)->VI_attrs &= ~VA_OLD_BOUNDS_SAVED;
+    saved = ObjVarFindData(oself, TEMP_VIS_OLD_BOUNDS);
+    if (!saved)
+	return TRUE;
+    old = *saved;
+    ObjVarDeleteData(oself, TEMP_VIS_OLD_BOUNDS);
+    VisGetBounds(oself, &now);
+    if (!memcmp(&old, &now, sizeof(old)))
+	return FALSE;
+    VisBoundsChanged(oself, &old);
+    return TRUE;
+}
+
+/* VisSendPositionAndInvalIfNeeded: placed (MSG_VIS_POSITION_BRANCH, or
+ * VisSetPosition or VisCompPosition directly); TRUE if the bounds
+ * changed */
+@extern method VisClass, MSG_VIS_POSITION_AND_INVAL_IF_NEEDED
+{
+    VisInstance *v = VisPart(oself);
+    Boolean changed;
+
+    if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
+	VisSaveOldBounds(oself);
+    v = VisPart(oself);
+    if (v->VI_geoAttrs & VGA_USE_VIS_SET_POSITION) {
+	if (v->VI_typeFlags & VTF_IS_COMPOSITE)
+	    VisCompPosition(oself, xPosition, yPosition, 0);
+	else
+	    VisSetPosition(oself, xPosition, yPosition);
+    } else
+	@call oself::MSG_VIS_POSITION_BRANCH(xPosition, yPosition);
+    VisPart(oself)->VI_geoAttrs |= VGA_GEOMETRY_CALCULATED;
+    changed = CheckForBoundsChange(oself);
+    if (VisPart(oself)->VI_geoAttrs & VGA_NOTIFY_GEOMETRY_VALID)
+	@call oself::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+    return changed;
+}
+
+/* VisInvalAllGeometry: the geometry of the managed branch invalid */
+@extern method VisClass, MSG_VIS_INVAL_ALL_GEOMETRY
+{
+    struct { VisUpdateMode m; } p;
+
+    if (!(pself->VI_attrs & VA_MANAGED))
+	return;
+    if (pself->VI_typeFlags & VTF_IS_COMPOSITE) {
+	p.m = VUM_MANUAL;
+	VisSendToChildren(oself, MSG_VIS_INVAL_ALL_GEOMETRY, &p, sizeof(p));
+    }
+    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, updateMode);
+}
+
+@extern method VisClass, MSG_VIS_ADD_BUTTON_PRE_PASSIVE
+{
+    VisAlterInputFlow(oself, VIFGF_MOUSE | VIFGF_GRAB, VIFGT_PRE_PASSIVE);
+}
+
+@extern method VisClass, MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE
+{
+    VisAlterInputFlow(oself, VIFGF_MOUSE, VIFGT_PRE_PASSIVE);
+}
+
+@extern method VisClass, MSG_VIS_ADD_BUTTON_POST_PASSIVE
+{
+    VisAlterInputFlow(oself, VIFGF_MOUSE | VIFGF_GRAB, VIGFT_POST_PASSIVE);
+}
+
+@extern method VisClass, MSG_VIS_REMOVE_BUTTON_POST_PASSIVE
+{
+    VisAlterInputFlow(oself, VIFGF_MOUSE, VIGFT_POST_PASSIVE);
+}
+
+/* VisSendCenter: the center, directly if the object says so
+ * (VGA_USE_VIS_CENTER) */
+void VisSendCenter(optr obj, GetCenterParams *c)
+{
+    VisInstance *v = VisLock(obj);
+    Boolean direct = (v->VI_geoAttrs & VGA_USE_VIS_CENTER) != 0;
+    Boolean comp = (v->VI_typeFlags & VTF_IS_COMPOSITE) != 0;
+
+    VisUnlock(obj);
+    if (!direct)
+	@call obj::MSG_VIS_GET_CENTER(c);
+    else if (comp)
+	VisCompGetCenter(obj, c);
+    else
+	VisGetCenter(obj, c);
+}
+
+void VisGetParentCenter(optr obj, GetCenterParams *c)
+{
+    optr p = VisFindParent(obj);
+
+    memset(c, 0, sizeof(*c));
+    if (p)
+	VisSendCenter(p, c);
+}
+
+/* the methods of VisClass (visClass.goc) as routines */
+SizeAsDWord VisRecalcSizeAndInvalIfNeeded(optr obj, word width, word height)
+{
+    return @call obj::MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED(width, height);
+}
+
+Boolean VisSendPositionAndInvalIfNeeded(optr obj, sword x, sword y)
+{
+    return @call obj::MSG_VIS_POSITION_AND_INVAL_IF_NEEDED(x, y);
 }

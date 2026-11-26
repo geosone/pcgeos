@@ -22,8 +22,20 @@
  */
 @include "uiInt.goh"
 #include <string.h>
+@include <Objects/gFieldC.goh>
+#include <localize.h>
+#include <stdint.h>
 
 @classdecl VisCompClass, neverSaved;
+@extern method VisCompClass, MSG_VIS_RECALC_SIZE;
+@extern method VisCompClass, MSG_VIS_POSITION_BRANCH;
+@extern method VisCompClass, MSG_VIS_GET_CENTER;
+@extern method VisCompClass, MSG_VIS_COMP_GET_CHILD_SPACING;
+@extern method VisCompClass, MSG_VIS_COMP_GET_MARGINS;
+@extern method VisCompClass, MSG_VIS_COMP_GET_MINIMUM_SIZE;
+@extern method VisCompClass, MSG_VIS_COMP_SET_GEO_ATTRS;
+@extern method VisCompClass, MSG_VIS_COMP_GET_GEO_ATTRS;
+@extern method VisCompClass, MSG_VIS_ADD_RECT_TO_UPDATE_REGION;
 
 /* VisCompInitialize */
 @method VisCompClass, MSG_META_INITIALIZE
@@ -399,89 +411,6 @@ static Boolean InkCallback(optr parent, optr child, void *data)
 }
 
 /* ---------------------------------------------------------------------
- * Geometry (visCompGeometry.asm; the manager is in visCompGeometry.goc)
- * ------------------------------------------------------------------- */
-
-@method VisCompClass, MSG_VIS_RECALC_SIZE
-{
-    return VisCompRecalcSize(oself, width, height, 0);
-}
-
-@method VisCompClass, MSG_VIS_POSITION_BRANCH
-{
-    VisCompPosition(oself, xOrigin, yOrigin, 0);
-}
-
-@method VisCompClass, MSG_VIS_GET_CENTER
-{
-    VisCompGetCenter(oself, retValue);
-}
-
-@method VisCompClass, MSG_VIS_COMP_GET_CHILD_SPACING
-{
-    return MAKE_SPACING_DWORD(VIS_COMP_DEFAULT_SPACING,
-			      VIS_COMP_DEFAULT_SPACING);
-}
-
-@method VisCompClass, MSG_VIS_COMP_GET_MARGINS
-{
-    memset(retValue, 0, sizeof(*retValue));
-}
-
-@method VisCompClass, MSG_VIS_COMP_GET_MINIMUM_SIZE
-{
-    return 0;
-}
-
-@method VisCompClass, MSG_VIS_COMP_SET_GEO_ATTRS
-{
-    pself->VCI_geoAttrs = (pself->VCI_geoAttrs | attrsToSet.GADA_geoAttrs) &
-			  ~attrsToClear.GADA_geoAttrs;
-    pself->VCI_geoDimensionAttrs =
-	(pself->VCI_geoDimensionAttrs | attrsToSet.GADA_geoDimensionAttrs) &
-	~attrsToClear.GADA_geoDimensionAttrs;
-}
-
-@method VisCompClass, MSG_VIS_COMP_GET_GEO_ATTRS
-{
-    GeoAndDimensionAttrs a;
-
-    a.GADA_geoAttrs = pself->VCI_geoAttrs;
-    a.GADA_geoDimensionAttrs = pself->VCI_geoDimensionAttrs;
-    return a;
-}
-
-/* VisInvalOldBounds */
-void VisInvalOldBounds(optr oself, VisAddRectFlags flags, sword left,
-		       sword top, sword right, sword bottom)
-{
-    if (left != right && top != bottom)
-	@call oself::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0, flags, bottom,
-						       right, top, left);
-}
-
-/* VisCompAddRectToUpdateRegion: a composite that only draws in its
- * margins adds those four parts of the rectangle (its children add
- * theirs) */
-@method VisCompClass, MSG_VIS_ADD_RECT_TO_UPDATE_REGION
-{
-    Rectangle m;
-    VisAddRectFlags f = addRectFlags & ~VARF_ONLY_REDRAW_MARGINS;
-    sword l = left, t = top, r = right, b = bottom;
-
-    if (!(addRectFlags & VARF_ONLY_REDRAW_MARGINS) ||
-	!(pself->VCI_geoAttrs & VCGA_ONLY_DRAWS_IN_MARGINS)) {
-	@callsuper();
-	return;
-    }
-    @call oself::MSG_VIS_COMP_GET_MARGINS(&m);
-    VisInvalOldBounds(oself, f, l, t, l + m.R_left, b);
-    VisInvalOldBounds(oself, f, l, t, r, t + m.R_top);
-    VisInvalOldBounds(oself, f, r - m.R_right, t, r, b);
-    VisInvalOldBounds(oself, f, l, b - m.R_bottom, r, b);
-}
-
-/* ---------------------------------------------------------------------
  * A generic win group's window (MSG_META_UPDATE_WINDOW)
  * ------------------------------------------------------------------- */
 
@@ -624,5 +553,22 @@ void VisCompUpdateWindow(optr obj, UpdateWindowFlags flags,
 	return TRUE;
     @call oself::MSG_META_UPDATE_WINDOW(updateFlags & ~UWF_FROM_WINDOWS_LIST,
 					updateMode);
+    return TRUE;
+}
+
+Boolean QuickGenAppGetState(ApplicationStates *states)
+{
+    optr app = GeodeGetAppObject(0);
+
+    *states = 0;
+    if (!app)
+	return FALSE;
+    if (ObjTestIfObjBlockRunByCurThread(OptrToHandle(app))) {
+	ObjLockObjBlock(OptrToHandle(app));
+	*states = ((GenApplicationInstance *) ObjDerefGen(app))->GAI_states;
+	MemUnlock(OptrToHandle(app));
+    } else {
+	*states = @call app::MSG_GEN_APPLICATION_GET_STATE();
+    }
     return TRUE;
 }

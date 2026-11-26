@@ -1,6 +1,6 @@
 /*
- * userFlowInput.goc -- FlowClass, the UI's flow object (after userFlow.asm
- * and userFlowInput.asm).
+ * userFlowInput.goc -- FlowClass, the UI's flow object (after
+ * userFlowInput.asm; what userFlow.asm has is in userFlow.goc).
  *
  * The flow object gets what the input manager sends its output
  * (MSG_META_MOUSE_BUTTON, _PTR, _DRAG, _WHEEL_VERTICAL, MSG_META_KBD_CHAR)
@@ -50,6 +50,7 @@
 #include <Internal/videoDr.h>
 
 @classdecl FlowClass, neverSaved;
+@extern method FlowClass, MSG_META_INITIALIZE;
 
 #define FlowPart(o)	((FlowInstance *) LMemDeref(o))
 #define FLOW_OFFSET(f)	word_offsetof(FlowInstance, f)
@@ -74,14 +75,6 @@ static void UpdateImpliedMouseGrab(optr oself);
 /* ---------------------------------------------------------------------
  * Creation and the end
  * ------------------------------------------------------------------- */
-
-/* FlowInitialize: no superclass (the end of the master class) */
-@method FlowClass, MSG_META_INITIALIZE
-{
-    pself->FI_activeMouseButton = 0xff;
-    pself->FI_curVideoStrategy = NULL;
-    pself->FI_holdUpInputQueue = GeodeAllocQueue();
-}
 
 @method FlowClass, MSG_META_FINAL_OBJ_FREE
 {

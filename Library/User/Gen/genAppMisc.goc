@@ -1,22 +1,247 @@
 /*
- * genAppMisc.goc -- UIApplicationClass, the UI's own application object
- * (after genAppMisc.asm and genAppCommonIACP.asm): its geode's parent
- * object is the system object (so that a system modal dialog of the UI
- * gets the system's focus through it), a focus below it is given the
- * application's focus, keys that come up to it are eaten (but F1, the
- * help), and when nothing below it has the focus any more it lets go
- * of its own and the system finds the focus again.
+ * genAppMisc.goc -- GenApplicationClass and UIApplicationClass, after
+ * genAppMisc.asm, which has their class records; the methods of
+ * GenApplicationClass are in genAppAttDet.goc, genAppCommonIACP.goc and
+ * here, each beside its asm file.
  *
- * Not yet: the hard icon bar's keyboard (MSG_META_NOTIFY,
- * GWNT_HARD_ICON_BAR_FUNCTION and GWNT_STARTUP_INDEXED_APP: the
- * floating keyboard is not ported), the mouse and ink messages ignored
- * once the specific UI is gone on a shutdown (UIAppPreventCrashOnShutdown).
+ * GenApplicationClass: the top of the usable and
+ * enabled checks (GenCheckIfFullyUsable), the class of the specific UI
+ * it is built into, its state, and its part in the life of the process
+ * (procClass.goc): the startup on its field, the attach (usable, the
+ * active list and the windows), the detach, the close and shutdown
+ * (off the field), and the quit levels.
+ *
+ * Port32 (Port32/ABI.md section 13x):
+ *  - the application asks no field for its specific UI
+ *    (MSG_SPEC_GUP_QUERY's GenReturnParams hold no 32-bit handle); it
+ *    takes GAI_specificUI, else the UI's own (UserGetSpecificUI);
+ *  - without a field in its AppLaunchBlock it goes on the system's
+ *    default field (the asm asked the specific UI's system,
+ *    MSG_SPEC_GUP_QUERY_VIS_PARENT);
+ *  - MSG_GEN_APPLICATION_IACP_REGISTER has its parameter, the
+ *    IACPServerMode (CL in the asm, missing in the C prototype);
+ *  - not yet: state files and the restart list of the field, transparent
+ *    detach, the floating keyboard, the removable disk list, the
+ *    activation dialog, the save options query on quit.
+ *
+ * UIApplicationClass, the UI's own application object: its geode's
+ * parent object is the system object (so that a system modal dialog of
+ * the UI gets the system's focus through it), a focus below it is given
+ * the application's focus, keys that come up to it are eaten (but F1,
+ * the help), and when nothing below it has the focus any more it lets
+ * go of its own and the system finds the focus again.  Not yet: the
+ * hard icon bar's keyboard (MSG_META_NOTIFY, GWNT_HARD_ICON_BAR_FUNCTION
+ * and GWNT_STARTUP_INDEXED_APP: the floating keyboard is not ported),
+ * the mouse and ink messages ignored once the specific UI is gone on a
+ * shutdown (UIAppPreventCrashOnShutdown).
  */
 @include "uiInt.goh"
 @include <Objects/gSysC.goh>
+@include <Objects/gFieldC.goh>
+@include <Objects/gDocC.goh>
+@include <Objects/gDocGrpC.goh>
+@include <Objects/gDocCtrl.goh>
+@include <alb.goh>
+@include <iacp.goh>
+#include <chunkarr.h>
+#include <file.h>
+#include <initfile.h>
 #include <string.h>
+@classdecl GenApplicationClass;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_STATE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_ATTACH_FLAGS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_REGISTER;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_UNREGISTER;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_COMPLETE_CONNECTIONS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_SHUTDOWN_ALL_CONNECTIONS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_CONNECTIONS;
+@extern method GenApplicationClass, MSG_META_IACP_NEW_CONNECTION;
+@extern method GenApplicationClass, MSG_META_IACP_LOST_CONNECTION;
+@extern method GenApplicationClass, MSG_META_IACP_SHUTDOWN_CONNECTION;
+@extern method GenApplicationClass, MSG_META_IACP_PROCESS_MESSAGE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_CLOSE_FILE_ACK;
+@extern method GenApplicationClass, MSG_META_IACP_ALLOW_FILE_ACCESS, MSG_META_IACP_NOTIFY_FILE_ACCESS_FINISHED;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_NO_MORE_CONNECTIONS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_LOWER_WINDOW_TO_BOTTOM;
+@extern method GenApplicationClass, MSG_GEN_SET_ATTRS;
+@extern method GenApplicationClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_FIND_MONIKER;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_SET_STATE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_SET_ATTACHED_TO_STATE_FILE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_SET_NOT_ATTACHED_TO_STATE_FILE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_SET_NOT_QUITTING;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_SET_APP_MODE_MESSAGE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_APP_MODE_CONNECTIONS;
+@extern method GenApplicationClass, MSG_META_APP_STARTUP;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_OPEN_COMPLETE;
+@extern method GenApplicationClass, MSG_META_DETACH;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_CLOSE_COMPLETE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_APP_MODE_COMPLETE;
+@extern method GenApplicationClass, MSG_META_APP_SHUTDOWN;
+@extern method GenApplicationClass, MSG_META_SHUTDOWN_COMPLETE;
+@extern method GenApplicationClass, MSG_META_QUIT;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_INITIATE_UI_QUIT;
+@extern method GenApplicationClass, MSG_META_FINISH_QUIT;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_QUIT_AFTER_UI;
+
+#define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
+
+optr GenAppProcessOptr(void)
+{
+    return ConstructOptr(GeodeGetProcessHandle(), 0);
+}
+
+/* SendToGenAppGCNList: the message (goc -cg parameters) to each object
+ * on one of the application's GCN lists */
+void GenAppSendToGCNList(optr oself, word listType, Message msg,
+			  const void *params, word size)
+{
+    struct {
+	GCNListSendFlags f; EventHandle e; MemHandle b; word t;
+	ManufacturerID m;
+    } p;
+    EventHandle ev;
+
+    CObjMessageP(MF_RECORD, 0, msg, (void *) params, size, &ev, sizeof(ev));
+    p.f = 0;
+    p.e = ev;
+    p.b = 0;
+    p.t = listType;
+    p.m = MANUFACTURER_ID_GEOWORKS;
+    CObjMessageP(MF_CALL, oself, MSG_META_GCN_LIST_SEND, &p, sizeof(p),
+		 NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * State
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * IACP: the application object is the server of the application's
+ * token (genAppCommonIACP.asm)
+ * ------------------------------------------------------------------- */
+
+/* IACP/iacpMain.goc */
+
+optr GenAppIACPConnects(optr oself)
+{
+    ChunkHandle ch = AppPart(oself)->GAI_iacpConnects;
+
+    return ch ? ConstructOptr(OptrToHandle(oself), ch) : NullOptr;
+}
+
+/* ---------------------------------------------------------------------
+ * Attach
+ * ------------------------------------------------------------------- */
+
+/*
+ * GenAppAttach: from MSG_GEN_PROCESS_OPEN_APPLICATION.  The application
+ * is usable from here; the specific UI attaches it, the options load
+ * (not when restoring from state), the active list attaches, the windows
+ * update, and it comes to the top.  The system is busy meanwhile; the
+ * application is (completely) busy until the queue is through.
+ */
+@method GenApplicationClass, MSG_META_ATTACH_OBJECT
+{
+    optr model = NullOptr;
+    UpdateWindowFlags uwf;
+    EventHandle ev;
+    optr *save;
+
+    pself->GAI_attachFlags = flags;
+    UserCallSystem(MSG_GEN_SYSTEM_MARK_BUSY, NULL, 0, NULL, 0);
+
+    /* whatever was built before does not count; the model exclusive the
+     * document control took at startup stays */
+    if (!@call oself::MSG_META_GET_MODEL_EXCL(&model))
+	model = NullOptr;
+    if (OptrToHandle(model))
+	@call model::MSG_META_RELEASE_MODEL_EXCL();
+    GenSpecShrinkBranch(oself);
+    if (OptrToHandle(model))
+	@call model::MSG_META_GRAB_MODEL_EXCL();
+
+    pself = AppPart(oself);
+    pself->GI_states |= GS_USABLE;
+    pself->GAI_states |= AS_ATTACHING;
+    pself->GAI_states &= ~(AS_QUITTING | AS_TRANSPARENT_DETACHING);
+    pself->GAI_attachFlags = flags;
+    if (UserGetLaunchModel() == UILM_TRANSPARENT) {
+	pself->GAI_states |= AS_TRANSPARENT;
+	if (!(UserGetLaunchOptions() & UILO_CLOSABLE_APPS) &&
+	    (save = ObjVarFindData(oself,
+				   ATTR_GEN_APPLICATION_SAVE_OPTIONS_TRIGGER))
+	    != NULL) {
+	    optr t = *save;
+	    GenInstance *g = GenLock(t);
+	    g->GI_states &= ~GS_USABLE;
+	    GenUnlock(t);
+	}
+    }
+    /* the Save Options trigger not enabled until options change */
+    if (!(flags & AAF_RESTORING_FROM_STATE) &&
+	(save = ObjVarFindData(oself,
+			       ATTR_GEN_APPLICATION_SAVE_OPTIONS_TRIGGER))
+	!= NULL) {
+	optr t = *save;
+	GenInstance *g = GenLock(t);
+	g->GI_states &= ~GS_ENABLED;
+	ObjMarkDirty(t);
+	GenUnlock(t);
+    }
+
+    @callsuper();
+
+    if (!(flags & AAF_RESTORING_FROM_STATE))
+	@call oself::MSG_META_LOAD_OPTIONS();
+    {
+	struct { word f; MemHandle alb, extra; } p;
+
+	p.f = flags;
+	p.alb = appLaunchBlock;
+	p.extra = extraState;
+	GenAppSendToGCNList(oself, MGCNLT_ACTIVE_LIST, MSG_META_ATTACH_OBJECT, &p,
+		      sizeof(p));
+    }
+    @call oself::MSG_GEN_APPLICATION_MARK_APP_COMPLETELY_BUSY();
+
+    uwf = UWF_ATTACHING | UWF_FROM_WINDOWS_LIST;
+    if (flags & AAF_RESTORING_FROM_STATE)
+	uwf |= UWF_RESTORING_FROM_STATE;
+    {
+	struct { UpdateWindowFlags f; VisUpdateMode m; } p;
+
+	p.f = uwf;
+	p.m = VUM_NOW;
+	GenAppSendToGCNList(oself, GAGCNLT_WINDOWS, MSG_META_UPDATE_WINDOW, &p,
+		      sizeof(p));
+    }
+    if (!(AppPart(oself)->GAI_launchFlags & ALF_DO_NOT_OPEN_ON_TOP))
+	@call oself::MSG_GEN_BRING_TO_TOP();
+    @call oself::MSG_GEN_APPLICATION_IACP_REGISTER(
+	IACPSM_USER_INTERACTIBLE);
+    @send, forceQueue oself::MSG_GEN_APPLICATION_OPEN_COMPLETE();
+    UserCallSystem(MSG_GEN_SYSTEM_MARK_NOT_BUSY, NULL, 0, NULL, 0);
+
+    ev = @record oself::MSG_GEN_APPLICATION_MARK_APP_NOT_COMPLETELY_BUSY();
+    @call oself::MSG_META_OBJ_FLUSH_INPUT_QUEUE(ev,
+		OFIQNS_INPUT_OBJ_OF_OWNING_GEODE, OptrToHandle(oself));
+}
+
+/* ---------------------------------------------------------------------
+ * Detach
+ * ------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------
+ * Quit
+ * ------------------------------------------------------------------- */
 
 @classdecl UIApplicationClass;
+@extern method UIApplicationClass, MSG_META_FUP_KBD_CHAR;
+@extern method UIApplicationClass, MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE;
+@extern method UIApplicationClass, MSG_META_MUP_ALTER_FTVMC_EXCL;
 
 /* UIAppSpecBuild: the system object the geode's parent object */
 @method UIApplicationClass, MSG_SPEC_BUILD
@@ -26,44 +251,32 @@
 			 UserGetSystemObject());
 }
 
-/* UIAppAlterFTVMCExcl: a focus below the application (once the request
- * of an object below it is done) gets the application's focus */
-@method UIApplicationClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+/* GenAppBuild */
+/* an application made at run time is targetable (as the @default of a
+ * declared one) */
+@method GenApplicationClass, MSG_META_INITIALIZE
 {
-    ObjectAndGrabParams q;
-
+    pself->GI_attrs |= GA_TARGETABLE;
     @callsuper();
-    if (flags & MAEF_NOT_HERE)
-	return;
-    memset(&q, 0, sizeof(q));
-    @call oself::MSG_VIS_FUP_QUERY_FOCUS_EXCL(&q);
-    if (q.OAGP_object)
-	@call oself::MSG_META_GRAB_FOCUS_EXCL();
 }
-
-/* UIAppFupKbdChar: every key eaten but F1 (help in the UI's dialogs) */
-@method UIApplicationClass, MSG_META_FUP_KBD_CHAR
+@method GenApplicationClass, MSG_GEN_APPLICATION_GET_LAUNCH_FLAGS
 {
-    if (character == ((CS_CONTROL << 8) | VC_F1))
-	return @callsuper();
-    return TRUE;
+    return pself->GAI_launchFlags;
 }
-
-/* UIAppNotifyNoFocusWithinNode: no focus below the application (not
- * while it attaches or detaches, not once it is not usable): it lets
- * go of its own, the system finds one */
-@method UIApplicationClass, MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE
+/*
+ * GenApplicationBuildDialogFromTemplate: a copy of the template's
+ * block (owned by the caller's geode, run by its thread), the dialog
+ * the application's last child and usable
+ */
+@method GenApplicationClass, MSG_GEN_APPLICATION_BUILD_DIALOG_FROM_TEMPLATE
 {
-    ObjectAndGrabParams q;
+    optr dialog = ConstructOptr(ObjDuplicateResource(OptrToHandle(template),
+						     0, 0),
+				OptrToChunk(template));
 
-    if ((pself->GAI_states & (AS_ATTACHING | AS_DETACHING |
-			      AS_QUIT_DETACHING | AS_TRANSPARENT_DETACHING)) ||
-	!(pself->GI_states & GS_USABLE))
-	return;
-    memset(&q, 0, sizeof(q));
-    @call oself::MSG_VIS_FUP_QUERY_FOCUS_EXCL(&q);
-    if (q.OAGP_object)
-	return;
-    @call oself::MSG_META_RELEASE_FOCUS_EXCL();
-    (void) UserCallSystem(MSG_META_ENSURE_ACTIVE_FT, NULL, 0, NULL, 0);
+    (void) pself;
+    @call oself::MSG_GEN_ADD_CHILD(dialog, CCO_LAST);
+    @call dialog::MSG_GEN_SET_USABLE(VUM_MANUAL);
+    memset(retValue, 0, sizeof(*retValue));
+    retValue->ND_dialog = dialog;
 }

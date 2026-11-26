@@ -1,0 +1,399 @@
+/*
+ * genClassBuild.goc -- after genClassBuild.asm: This file contains
+ * routines to implement the Gen class
+ */
+@include "uiInt.goh"
+#include <initfile.h>
+#include <string.h>
+#include <localize.h>
+@include <Objects/gSysC.goh>
+#include <library.h>
+@include <Objects/gFieldC.goh>
+#include <Internal/im.h>
+
+#define GEN_MASTER	word_offsetof(GenBase, Gen_offset)
+#define GEN_COMP	word_offsetof(GenInstance, GI_comp)
+#define GEN_LINK	word_offsetof(GenInstance, GI_link)
+
+/*
+ * GenCallMeta: a message the specific part has a say in only once it is
+ * grown; before, MetaClass (VisClass's superclass) handles it, and the
+ * specific UI is not resolved for it.
+ */
+static void CallMeta(optr oself, Message msg, const void *p, word ps,
+		     void *r, word rs)
+{
+    CObjCallSuperP(GenCheckIfSpecGrown(oself) ? &GenClass : &VisClass,
+		   oself, msg, p, ps, r, rs);
+}
+
+/* ---------------------------------------------------------------------
+ * Building (genClassBuild.asm)
+ * ------------------------------------------------------------------- */
+
+/* GenInitialize: a new object is enabled, but not usable */
+@extern method GenClass, MSG_META_INITIALIZE
+{
+    pself->GI_states |= GS_ENABLED;
+}
+
+@extern method GenClass, MSG_META_FINAL_OBJ_FREE
+{
+    if (pself->GI_visMoniker)
+	ObjFreeChunk(ConstructOptr(OptrToHandle(oself),
+				   pself->GI_visMoniker));
+    CallMeta(oself, message, NULL, 0, NULL, 0);
+}
+
+@extern method GenClass, MSG_META_BLOCK_FREE
+{
+    CallMeta(oself, message, NULL, 0, NULL, 0);
+}
+
+@extern method GenClass, MSG_META_OBJ_FREE
+{
+    CallMeta(oself, message, NULL, 0, NULL, 0);
+}
+
+@extern method GenClass, MSG_META_OBJ_FLUSH_INPUT_QUEUE
+{
+    struct { EventHandle e; ObjFlushInputQueueNextStop n; MemHandle b; } p;
+
+    p.e = event;
+    p.n = nextStop;
+    p.b = objBlock;
+    CallMeta(oself, message, &p, sizeof(p), NULL, 0);
+}
+
+@extern method GenClass, MSG_META_DETACH
+{
+    struct { word id; optr caller; } p;
+
+    p.id = callerID;
+    p.caller = caller;
+    CallMeta(oself, message, &p, sizeof(p), NULL, 0);
+}
+
+@extern method GenClass, MSG_META_DETACH_COMPLETE
+{
+    struct { word id; optr ack; } p;
+
+    p.id = callerID;
+    p.ack = ackOD;
+    CallMeta(oself, message, &p, sizeof(p), NULL, 0);
+}
+
+@extern method GenClass, MSG_META_WIN_DEC_REF_COUNT
+{
+    CallMeta(oself, message, &win, sizeof(win), NULL, 0);
+}
+
+@extern method GenClass, MSG_META_GCN_LIST_SEND
+{
+    struct {
+	GCNListSendFlags f; EventHandle e; MemHandle b; word t;
+	ManufacturerID m;
+    } p;
+
+    p.f = flags;
+    p.e = event;
+    p.b = block;
+    p.t = listType;
+    p.m = listManuf;
+    CallMeta(oself, message, &p, sizeof(p), NULL, 0);
+}
+
+@extern method GenClass, MSG_META_ADD_VAR_DATA
+{
+    struct { word t; word s; void *d; } p;
+
+    p.t = dataType;
+    p.s = dataSize;
+    p.d = data;
+    CallMeta(oself, message, &p, sizeof(p), NULL, 0);
+}
+
+@extern method GenClass, MSG_META_SET_OBJ_BLOCK_OUTPUT
+{
+    CallMeta(oself, message, &output, sizeof(output), NULL, 0);
+}
+
+@extern method GenClass, MSG_META_SET_FLAGS
+{
+    struct { ChunkHandle c; ObjChunkFlags s, r; } p;
+
+    p.c = objChunk;
+    p.s = bitsToSet;
+    p.r = bitsToClear;
+    CallMeta(oself, message, &p, sizeof(p), NULL, 0);
+}
+
+@extern method GenClass, MSG_META_GET_FLAGS
+{
+    word r = 0;
+
+    CallMeta(oself, message, &ch, sizeof(ch), &r, sizeof(r));
+    return r;
+}
+
+/* GenInitializeVarData: the object's path starts as SP_TOP */
+@extern method GenClass, MSG_META_INITIALIZE_VAR_DATA
+{
+    word r = 0;
+
+    if (dataType == ATTR_GEN_PATH_DATA)
+	return GenPathInitPathData(oself, ATTR_GEN_PATH_DATA);
+    CallMeta(oself, message, &dataType, sizeof(dataType), &r, sizeof(r));
+    return r;
+}
+
+/*
+ * GenAddGenChild: a child added to an object that has no specific part
+ * loses its own (it is built with the parent); a child on the keyboard
+ * accelerator path (or with an accelerator) puts the parents on it.
+ */
+@extern method GenClass, MSG_GEN_ADD_CHILD
+{
+    GenInstance *g;
+    Boolean path;
+
+    if (!GenCheckIfSpecGrown(oself)) {
+	ObjLockObjBlock(OptrToHandle(child));
+	GenSpecShrinkBranch(child);
+	MemUnlock(OptrToHandle(child));
+    }
+    ObjCompAddChild(oself, child, flags, GEN_MASTER, GEN_COMP, GEN_LINK);
+    g = GenLock(child);
+    path = g->GI_attrs & GA_KBD_SEARCH_PATH ||
+	   g->GI_kbdAccelerator & 0x00ff;		/* KS_CHAR */
+    if (path)
+	g->GI_attrs &= ~GA_KBD_SEARCH_PATH;
+    GenUnlock(child);
+    if (path)
+	@call child::MSG_GEN_SET_KBD_MKR_PATH();
+}
+
+@extern method GenClass, MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY
+{
+    GenAddChildUpwardLinkOnly(oself, child);
+}
+
+@extern method GenClass, MSG_GEN_GROW_PARENTS
+{
+    GenSpecGrowParents(oself);
+}
+
+/* GenSetKbdMkrPath: up to the application */
+@extern method GenClass, MSG_GEN_SET_KBD_MKR_PATH
+{
+    optr p;
+
+    if (pself->GI_attrs & GA_KBD_SEARCH_PATH)
+	return;
+    pself->GI_attrs |= GA_KBD_SEARCH_PATH;
+    if (ObjIsObjectInClass(oself, &GenApplicationClass))
+	return;
+    p = GenFindParent(oself);
+    if (p)
+	@call p::MSG_GEN_SET_KBD_MKR_PATH();
+}
+
+@extern method GenClass, MSG_GEN_REMOVE
+{
+    @call oself::MSG_GEN_SET_NOT_USABLE(updateMode);
+    {
+	struct { optr c; CompChildFlags f; } p;
+	p.c = oself;
+	p.f = flags;
+	GenCallParent(oself, MSG_GEN_REMOVE_CHILD, &p, sizeof(p), NULL, 0);
+    }
+}
+
+@extern method GenClass, MSG_GEN_REMOVE_CHILD
+{
+    GenRemoveGenChildLow(oself, child, flags);
+}
+
+@extern method GenClass, MSG_GEN_MOVE_CHILD
+{
+    ObjCompMoveChild(oself, child, flags, GEN_MASTER, GEN_COMP, GEN_LINK);
+}
+
+/* the child's number, -1 if it is not one */
+@extern method GenClass, MSG_GEN_FIND_CHILD
+{
+    return ObjCompFindChildByOptr(oself, child, GEN_MASTER, GEN_COMP,
+				  GEN_LINK);
+}
+
+@extern method GenClass, MSG_GEN_FIND_CHILD_AT_POSITION
+{
+    return ObjCompFindChildByNumber(oself, position, GEN_MASTER, GEN_COMP,
+				    GEN_LINK);
+}
+
+@extern method GenClass, MSG_GEN_FIND_PARENT
+{
+    return GenFindParent(oself);
+}
+
+/*
+ * GenCopyTree: a copy of the object (and its moniker) in destBlock,
+ * added as the last child of parentChunk there (not usable while it is
+ * added), then the children copied below it.
+ */
+@extern method GenClass, MSG_GEN_COPY_TREE
+{
+    MemHandle src = OptrToHandle(oself);
+    word oflags = ObjGetFlags(oself);
+    ChunkHandle ch, mk;
+    optr copy;
+    GenInstance *g;
+    word srcMoniker = pself->GI_visMoniker;
+
+    ch = GenCopyChunk(destBlock, src, OptrToChunk(oself),
+		      flags & CCF_MARK_DIRTY);
+    copy = ConstructOptr(destBlock, ch);
+    ObjLockObjBlock(destBlock);
+    ObjSetFlags(copy, oflags & (OCF_IS_OBJECT | OCF_VARDATA_RELOC), 0);
+    mk = GenCopyChunk(destBlock, src, srcMoniker, flags & CCF_MARK_DIRTY);
+    g = GenPart(copy);
+    g->GI_visMoniker = mk;
+    g->GI_link.LP_next = 0;
+    g->GI_comp.CP_firstChild = 0;
+    MemUnlock(destBlock);
+    if (parentChunk) {
+	optr parent = ConstructOptr(destBlock, parentChunk);
+	GenStates st;
+
+	g = GenLock(copy);
+	st = g->GI_states;
+	g->GI_states &= ~GS_USABLE;
+	GenUnlock(copy);
+	@call parent::MSG_GEN_ADD_CHILD(copy, flags);
+	g = GenLock(copy);
+	g->GI_states = st;
+	GenUnlock(copy);
+    }
+    {
+	struct { MemHandle b; ChunkHandle c; CompChildFlags f; } p;
+	p.b = destBlock;
+	p.c = ch;
+	p.f = (flags & CCF_MARK_DIRTY) | CCO_LAST;
+	GenSendToChildren(oself, MSG_GEN_COPY_TREE, &p, sizeof(p));
+    }
+    return copy;
+}
+
+/* ---------------------------------------------------------------------
+ * The place of an object under a view (genClassBuild.asm)
+ * ------------------------------------------------------------------- */
+
+static void _pascal ReturnAreaHint(MemHandle mh, ChunkHandle ch,
+				   VarDataEntry *e, word dataType,
+				   void *data)
+{
+    (void) mh;
+    (void) ch;
+    (void) e;
+    /* HINT_SEEK_X_SCROLLER_AREA, _Y_ ... LEFT_OF_VIEW ... BOTTOM_OF_VIEW
+     * are four apart, the scroller areas below the left one */
+    *(RequestedViewArea *) data = (RequestedViewArea) (RVA_LEFT_AREA +
+	((sword) (dataType & ~VDF_SAVE_TO_STATE) -
+	 (sword) HINT_SEEK_LEFT_OF_VIEW) / 4);
+}
+
+static const VarDataCHandler areaHints[] = {
+    { HINT_SEEK_LEFT_OF_VIEW, ReturnAreaHint },
+    { HINT_SEEK_TOP_OF_VIEW, ReturnAreaHint },
+    { HINT_SEEK_RIGHT_OF_VIEW, ReturnAreaHint },
+    { HINT_SEEK_BOTTOM_OF_VIEW, ReturnAreaHint },
+    { HINT_SEEK_X_SCROLLER_AREA, ReturnAreaHint },
+    { HINT_SEEK_Y_SCROLLER_AREA, ReturnAreaHint }
+};
+
+/* GetViewAreaRequest: the area the hints ask for (RVA_NO_AREA_CHOICE if
+ * none) */
+RequestedViewArea GetViewAreaRequest(optr obj)
+{
+    RequestedViewArea a = RVA_NO_AREA_CHOICE;
+
+    ObjVarScanData(obj, sizeof(areaHints) / sizeof(areaHints[0]),
+		   (VarDataCHandler *) areaHints, &a);
+    return a;
+}
+
+/* GetUnambiguousViewAreaRequest: the same, but no choice for just
+ * wanting to be with a scroller (used to place the scrollers) */
+RequestedViewArea GetUnambiguousViewAreaRequest(optr obj)
+{
+    RequestedViewArea a = GetViewAreaRequest(obj);
+
+    return (a == RVA_X_SCROLLER_AREA || a == RVA_Y_SCROLLER_AREA) ?
+	   RVA_NO_AREA_CHOICE : a;
+}
+
+static Boolean FindViewRangesCallback(optr parent, optr child, void *data)
+{
+    (void) parent;
+    @call child::MSG_GEN_FIND_VIEW_RANGES(data);
+    return FALSE;
+}
+
+/*
+ * GenFindViewRanges: the scrollbars at or below a usable object (the
+ * children asked in turn); a scrollbar found below takes this object's
+ * area hint if it had none
+ */
+@extern method GenClass, MSG_GEN_FIND_VIEW_RANGES
+{
+    ChunkHandle h = params->GFVRP_hRange, v = params->GFVRP_vRange;
+    RequestedViewArea a;
+
+    if (!(pself->GI_states & GS_USABLE))
+	return;
+    GenCallChildren(oself, FindViewRangesCallback, params);
+    a = GetUnambiguousViewAreaRequest(oself);
+    if (!h && params->GFVRP_hRange &&
+	params->GFVRP_hViewArea == RVA_NO_AREA_CHOICE)
+	params->GFVRP_hViewArea = a;
+    if (!v && params->GFVRP_vRange &&
+	params->GFVRP_vViewArea == RVA_NO_AREA_CHOICE)
+	params->GFVRP_vViewArea = a;
+}
+
+static Boolean QueryViewAreaCallback(optr parent, optr child, void *data)
+{
+    (void) parent;
+    *(RequestedViewArea *) data =
+	@call child::MSG_GEN_QUERY_VIEW_AREA(*(RequestedViewArea *) data);
+    return FALSE;
+}
+
+/* GenQueryViewArea: where the object wants to be under a view: its own
+ * hint, else the first choice of its children */
+@extern method GenClass, MSG_GEN_QUERY_VIEW_AREA
+{
+    if (viewArea != RVA_NO_AREA_CHOICE)
+	return viewArea;
+    viewArea = GetViewAreaRequest(oself);
+    if (viewArea == RVA_NO_AREA_CHOICE)
+	GenCallChildren(oself, QueryViewAreaCallback, &viewArea);
+    return viewArea;
+}
+
+void GenRemoveGenChildLow(optr obj, optr child, CompChildFlags flags)
+{
+    ObjCompRemoveChild(obj, child, flags,
+		       word_offsetof(GenBase, Gen_offset),
+		       word_offsetof(GenInstance, GI_comp),
+		       word_offsetof(GenInstance, GI_link));
+}
+
+/* GenBuild: only a subclass knows what to be built into */
+@extern method GenClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
+{
+    (void) MasterOffset;
+    FatalError(UI_ERROR_NO_SPECIFIC_UI);
+    return NULL;
+}

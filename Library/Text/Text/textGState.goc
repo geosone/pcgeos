@@ -61,19 +61,3 @@ void TextGStateDestroy(optr o)
 {
     TextGStateDestroy(oself);
 }
-
-/* VisTextRecreateCachedGStates: the window changed: the gstate made
- * anew for those who hold it */
-@extern method VisTextClass, MSG_VIS_RECREATE_CACHED_GSTATES
-{
-    VisTextInstance *t = VT(oself);
-    byte count = t->VTI_gsRefCount;
-
-    if (!t->VTI_gstate)
-	return;
-    GrDestroyState(t->VTI_gstate);
-    t->VTI_gstate = NullHandle;
-    t->VTI_gsRefCount &= ~GSRCAF_REF_COUNT;
-    TextGStateCreate(oself);
-    VT(oself)->VTI_gsRefCount = count;
-}

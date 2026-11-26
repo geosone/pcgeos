@@ -215,3 +215,13 @@ void UserScreenExit(void)
 	    @call screenFields[i]::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
     }
 }
+
+/* userStrings.asm */
+static const char noVideoMessage[] =
+    "No working compatible video hardware found on this system.";
+
+/* UserScreenNoVideoDriverError (userScreen.asm): no video, no GEOS */
+void UserScreenNoVideoDriverError(void)
+{
+    SysShutdown(SST_DIRTY, noVideoMessage);
+}

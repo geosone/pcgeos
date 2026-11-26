@@ -1,0 +1,496 @@
+/*
+ * genClassMisc.goc -- GenClass, after genClassMisc.asm, which has its
+ * class record; the methods are in genClassBuild.goc, genClassCommon.goc
+ * and here, each beside its asm file.  The generic object: the generic tree, the
+ * usable and enabled states, the moniker, the keyboard accelerator,
+ * hints, upward queries and classed events.
+ *
+ * GenClass is a variant master class above VisClass: what a generic
+ * object looks like comes from the specific UI, whose class the object
+ * resolves when its specific part is first needed (a Gen subclass
+ * answers MSG_META_RESOLVE_VARIANT_SUPERCLASS by
+ * GenQueryUICallSpecificUI).  Many messages are passed to the specific
+ * part only once it is grown, so that a generic tree that is not usable
+ * stays without one.
+ *
+ * Port32 (Port32/ABI.md section 13x):
+ *   - MSG_GEN_GUP_ENSURE_UPDATE_WINDOW returns its carry as
+ *     MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW, MSG_SPEC_GUP_QUERY has
+ *     MSG_GEN_GUP_QUERY's parameters (MSG_SPEC_P32_GUP_QUERY), and
+ *     MSG_SPEC_RESCAN_GEO_AND_UPDATE the VisOptFlags
+ *     (MSG_SPEC_P32_RESCAN_GEO_AND_UPDATE; Internal/specC.goh);
+ *   - the moniker's source is a VisMonikerSource (an optr);
+ *   - not yet: MSG_GEN_BRANCH_REPLACE_PARAMS (dword optrs),
+ *     MSG_META_BRING_UP_HELP, the view ranges.
+ */
+@include "uiInt.goh"
+#include <initfile.h>
+#include <string.h>
+#include <localize.h>
+@classdecl GenClass;
+@extern method GenClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS;
+@extern method GenClass, MSG_GEN_PATH_GET_DISK_HANDLE;
+@extern method GenClass, MSG_META_GEN_PATH_RESTORE_DISK_PROMPT;
+@extern method GenClass, MSG_GEN_PATH_SET;
+@extern method GenClass, MSG_GEN_PATH_GET;
+@extern method GenClass, MSG_GEN_ACTIVATE_INTERACTION_DEFAULT;
+@extern method GenClass, MSG_GEN_START_BROADCAST_FOR_DEFAULT_FOCUS;
+@extern method GenClass, MSG_GEN_SET_USABLE;
+@extern method GenClass, MSG_GEN_SET_NOT_USABLE;
+@extern method GenClass, MSG_GEN_UPDATE_VISUAL;
+@extern method GenClass, MSG_GEN_SET_ENABLED;
+@extern method GenClass, MSG_GEN_SET_NOT_ENABLED;
+@extern method GenClass, MSG_GEN_NOTIFY_ENABLED;
+@extern method GenClass, MSG_GEN_NOTIFY_NOT_ENABLED;
+@extern method GenClass, MSG_GEN_GET_VIS_MONIKER;
+@extern method GenClass, MSG_GEN_USE_VIS_MONIKER;
+@extern method GenClass, MSG_GEN_CREATE_VIS_MONIKER;
+@extern method GenClass, MSG_GEN_REPLACE_VIS_MONIKER;
+@extern method GenClass, MSG_GEN_REPLACE_VIS_MONIKER_OPTR;
+@extern method GenClass, MSG_GEN_REPLACE_VIS_MONIKER_TEXT;
+@extern method GenClass, MSG_GEN_DRAW_MONIKER;
+@extern method GenClass, MSG_GEN_GET_MONIKER_POS;
+@extern method GenClass, MSG_GEN_GET_MONIKER_SIZE;
+@extern method GenClass, MSG_GEN_FIND_MONIKER;
+@extern method GenClass, MSG_GEN_FIND_KBD_ACCELERATOR;
+@extern method GenClass, MSG_GEN_GET_KBD_ACCELERATOR;
+@extern method GenClass, MSG_GEN_SET_KBD_ACCELERATOR;
+@extern method GenClass, MSG_GEN_SET_INITIAL_SIZE;
+@extern method GenClass, MSG_GEN_SET_MINIMUM_SIZE;
+@extern method GenClass, MSG_GEN_SET_MAXIMUM_SIZE;
+@extern method GenClass, MSG_GEN_SET_FIXED_SIZE;
+@extern method GenClass, MSG_GEN_GET_INITIAL_SIZE;
+@extern method GenClass, MSG_GEN_GET_MINIMUM_SIZE;
+@extern method GenClass, MSG_GEN_GET_MAXIMUM_SIZE;
+@extern method GenClass, MSG_GEN_GET_FIXED_SIZE;
+@extern method GenClass, MSG_GEN_SET_WIN_POSITION;
+@extern method GenClass, MSG_GEN_SET_WIN_SIZE;
+@extern method GenClass, MSG_GEN_SET_WIN_CONSTRAIN;
+@extern method GenClass, MSG_GEN_RESET_TO_INITIAL_SIZE;
+@extern method GenClass, MSG_GEN_SET_ATTRS;
+@extern method GenClass, MSG_GEN_GET_ATTRIBUTES;
+@extern method GenClass, MSG_GEN_OUTPUT_ACTION;
+@extern method GenClass, MSG_GEN_ADD_GEOMETRY_HINT;
+@extern method GenClass, MSG_GEN_REMOVE_GEOMETRY_HINT;
+@extern method GenClass, MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER;
+@extern method GenClass, MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER_C;
+@extern method GenClass, MSG_META_INITIALIZE;
+@extern method GenClass, MSG_META_FINAL_OBJ_FREE;
+@extern method GenClass, MSG_META_BLOCK_FREE;
+@extern method GenClass, MSG_META_OBJ_FREE;
+@extern method GenClass, MSG_META_OBJ_FLUSH_INPUT_QUEUE;
+@extern method GenClass, MSG_META_DETACH;
+@extern method GenClass, MSG_META_DETACH_COMPLETE;
+@extern method GenClass, MSG_META_WIN_DEC_REF_COUNT;
+@extern method GenClass, MSG_META_GCN_LIST_SEND;
+@extern method GenClass, MSG_META_ADD_VAR_DATA;
+@extern method GenClass, MSG_META_SET_OBJ_BLOCK_OUTPUT;
+@extern method GenClass, MSG_META_SET_FLAGS;
+@extern method GenClass, MSG_META_GET_FLAGS;
+@extern method GenClass, MSG_META_INITIALIZE_VAR_DATA;
+@extern method GenClass, MSG_GEN_FIND_VIEW_RANGES;
+@extern method GenClass, MSG_GEN_QUERY_VIEW_AREA;
+@extern method GenClass, MSG_GEN_ADD_CHILD;
+@extern method GenClass, MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY;
+@extern method GenClass, MSG_GEN_GROW_PARENTS;
+@extern method GenClass, MSG_GEN_SET_KBD_MKR_PATH;
+@extern method GenClass, MSG_GEN_REMOVE;
+@extern method GenClass, MSG_GEN_REMOVE_CHILD;
+@extern method GenClass, MSG_GEN_MOVE_CHILD;
+@extern method GenClass, MSG_GEN_FIND_CHILD;
+@extern method GenClass, MSG_GEN_FIND_CHILD_AT_POSITION;
+@extern method GenClass, MSG_GEN_FIND_PARENT;
+@extern method GenClass, MSG_GEN_COPY_TREE;
+
+/* ---------------------------------------------------------------------
+ * The object's path (genPathUtils.goc)
+ * ------------------------------------------------------------------- */
+
+@method GenClass, MSG_GEN_P32_GUP_ENSURE_UPDATE_WINDOW
+{
+    struct { UpdateWindowFlags f; VisUpdateMode m; } p;
+    Boolean r = FALSE;
+
+    if (@callsuper())
+	return TRUE;
+    p.f = updateFlags;
+    p.m = updateMode;
+    GenCallParent(oself, message, &p, sizeof(p), &r, sizeof(r));
+    return r;
+}
+
+@method GenClass, MSG_GEN_CHANGE_ACCELERATOR
+{
+    pself->GI_kbdAccelerator = (KeyboardShortcut)
+	((pself->GI_kbdAccelerator & ~bitsToClear) | bitsToSet);
+}
+
+/* ---------------------------------------------------------------------
+ * Queries and classed events (genClassMisc.asm)
+ * ------------------------------------------------------------------- */
+
+@method GenClass, MSG_GEN_GUP_QUERY
+{
+    return @call oself::MSG_SPEC_P32_GUP_QUERY(retValue, queryType);
+}
+
+/* GenContinueGupQuery: the specific part first, then the parent */
+@method GenClass, MSG_GEN_GUP_INTERACTION_COMMAND
+{
+    Boolean r = FALSE;
+
+    if (@callsuper())
+	return TRUE;
+    GenCallParent(oself, message, &command, sizeof(command), &r, sizeof(r));
+    return r;
+}
+
+@method GenClass, MSG_GEN_GUP_FINISH_QUIT
+{
+    @callsuper oself::GenClass::MSG_META_FINISH_QUIT(abortFlag);
+    if (notifyParent) {
+	struct { Boolean a, n; } p;
+	p.a = abortFlag;
+	p.n = notifyParent;
+	GenCallParent(oself, message, &p, sizeof(p), NULL, 0);
+    }
+}
+
+/* GenGenSendToChildren: a copy of the event to each child of its class
+ * (all if it has none); the event is freed */
+typedef struct {
+    EventHandle event;
+    ClassStruct *cls;
+} SendEventData;
+
+static Boolean SendEventCallback(optr parent, optr child, void *data)
+{
+    SendEventData *d = data;
+
+    (void) parent;
+    if (!d->cls || ObjIsObjectInClass(child, d->cls)) {
+	EventHandle e = ObjDuplicateMessage(d->event);
+	MessageSetDestination(e, child);
+	CMessageDispatchP(e, MF_CALL, NULL, 0);
+    }
+    return FALSE;
+}
+
+@method GenClass, MSG_GEN_SEND_TO_CHILDREN
+{
+    SendEventData d;
+    optr cls;
+
+    ObjGetMessageInfo(event, &cls);
+    d.event = event;
+    d.cls = (ClassStruct *) (uintptr_t) cls;
+    GenCallChildren(oself, SendEventCallback, &d);
+    ObjFreeMessage(event);
+}
+
+/* GenSendClassedEvent: the generic travel options */
+@method GenClass, MSG_META_SEND_CLASSED_EVENT
+{
+    word to = (word) whereTo;	/* TravelOption and GenTravelOption */
+
+    if (to == TO_GEN_PARENT) {
+	FlowMessageClassedEvent(GenFindParent(oself),
+				MSG_GEN_GUP_SEND_TO_OBJECT_OF_CLASS, event,
+				0, 0);
+	return;
+    }
+    if (to >= TO_APP_FOCUS && to <= TO_APP_MODEL) {
+	/* (a full TravelOption: no undefined padding) */
+	struct { EventHandle e; TravelOption t; } p;
+
+	p.e = event;
+	p.t = (TravelOption) (to - (TO_APP_FOCUS - TO_FOCUS));
+	if (!UserCallApplication(MSG_META_SEND_CLASSED_EVENT, &p, sizeof(p),
+				 NULL, 0))
+	    FlowDestroyMessage(event);
+	return;
+    }
+    if (to >= TO_SYS_FOCUS && to <= TO_SYS_MODEL) {
+	struct { EventHandle e; TravelOption t; } p;
+
+	p.e = event;
+	p.t = (TravelOption) (to - (TO_SYS_FOCUS - TO_FOCUS));
+	if (!UserCallSystem(MSG_META_SEND_CLASSED_EVENT, &p, sizeof(p),
+			    NULL, 0))
+	    FlowDestroyMessage(event);
+	return;
+    }
+    @callsuper();
+}
+
+@method GenClass, MSG_GEN_GUP_CALL_OBJECT_OF_CLASS
+{
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event, 0,
+					    GenFindParent(oself), MF_CALL);
+}
+
+@method GenClass, MSG_GEN_GUP_SEND_TO_OBJECT_OF_CLASS
+{
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event, 0,
+					    GenFindParent(oself), 0);
+}
+
+@method GenClass, MSG_GEN_GUP_TEST_FOR_OBJECT_OF_CLASS
+{
+    Boolean r = FALSE;
+
+    if (ObjIsObjectInClass(oself, class))
+	return TRUE;
+    GenCallParent(oself, message, &class, sizeof(class), &r, sizeof(r));
+    return r;
+}
+
+@method GenClass, MSG_GEN_GUP_FIND_OBJECT_OF_CLASS
+{
+    optr r = 0;
+
+    if (ObjIsObjectInClass(oself, class))
+	return oself;
+    GenCallParent(oself, message, &class, sizeof(class), &r, sizeof(r));
+    return r;
+}
+
+@method GenClass, MSG_GEN_COUNT_CHILDREN
+{
+    return GenCountChildren(oself);
+}
+
+@method GenClass, MSG_GEN_CALL_PARENT
+{
+    FlowMessageClassedEvent(GenFindParent(oself),
+			    MSG_META_SEND_CLASSED_EVENT, event, TO_SELF,
+			    MF_CALL);
+}
+
+@method GenClass, MSG_GEN_SEND_TO_PARENT
+{
+    FlowMessageClassedEvent(GenFindParent(oself),
+			    MSG_META_SEND_CLASSED_EVENT, event, TO_SELF, 0);
+}
+
+@method GenClass, MSG_GEN_CALL_APPLICATION
+{
+    FlowMessageClassedEvent(GeodeGetAppObject(0),
+			    MSG_META_SEND_CLASSED_EVENT, event, TO_SELF,
+			    MF_CALL);
+}
+
+@method GenClass, MSG_GEN_SEND_TO_PROCESS
+{
+    MessageSetDestination(event, ConstructOptr(GeodeGetProcessHandle(), 0));
+    CMessageDispatchP(event, 0, NULL, 0);
+}
+
+@method GenClass, MSG_GEN_CALL_SYSTEM
+{
+    FlowMessageClassedEvent(UserGetSystemObject(),
+			    MSG_META_SEND_CLASSED_EVENT, event, TO_SELF,
+			    MF_CALL);
+}
+
+@method GenClass, MSG_GEN_NAVIGATE_TO_NEXT_FIELD
+{
+    @call oself::MSG_SPEC_NAVIGATE_TO_NEXT_FIELD();
+}
+
+@method GenClass, MSG_GEN_NAVIGATE_TO_PREVIOUS_FIELD
+{
+    @call oself::MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD();
+}
+
+@method GenClass, MSG_GEN_NAVIGATION_QUERY
+{
+    return @call oself::MSG_SPEC_NAVIGATION_QUERY(retValue, queryOrigin,
+						  navFlags);
+}
+
+/* GenDetachAbort: the detach's ack goes out now (queued) */
+@method GenClass, MSG_META_DETACH_ABORT
+{
+    DetachDataEntry *d = ObjVarFindData(oself, DETACH_DATA);
+    word id;
+    optr ack;
+
+    if (!d)
+	return;
+    id = d->DDE_callerID;
+    ack = d->DDE_ackOD;
+    @send ,forceQueue ack::MSG_META_ACK(id, oself);
+    ObjVarDeleteData(oself, DETACH_DATA);
+}
+
+@method GenClass, MSG_GEN_GET_ENABLED
+{
+    return (pself->GI_states & GS_ENABLED) != 0;
+}
+
+@method GenClass, MSG_GEN_GET_USABLE
+{
+    return (pself->GI_states & GS_USABLE) != 0;
+}
+
+@method GenClass, MSG_GEN_CHECK_IF_FULLY_ENABLED
+{
+    return GenCheckIfFullyEnabled(oself, FALSE);
+}
+
+@method GenClass, MSG_GEN_CHECK_IF_FULLY_USABLE
+{
+    return GenCheckIfFullyUsable(oself, FALSE);
+}
+
+@method GenClass, MSG_META_GRAB_TARGET_EXCL
+{
+    if (pself->GI_attrs & GA_TARGETABLE)
+	@callsuper();
+}
+
+/* LoadOrSaveOptions: with ATTR_GEN_INIT_FILE_KEY the object loads
+ * (saves) its options under its category; on to the children with
+ * ATTR_GEN_INIT_FILE_PROPAGATE_TO_CHILDREN */
+static void LoadOrSaveOptions(optr oself, Message meta, Message gen)
+{
+    char *key = ObjVarFindData(oself, ATTR_GEN_INIT_FILE_KEY);
+
+    if (key) {
+	GenOptionsParams p;
+	word n = (word) VarDataSizePtr(key);
+
+	memset(&p, 0, sizeof(p));
+	if (n >= sizeof(p.GOP_key))
+	    n = sizeof(p.GOP_key) - 1;
+	memcpy(p.GOP_key, key, n);
+	@call oself::MSG_META_GET_INI_CATEGORY(p.GOP_category);
+	/* (a structure of the stack: ABI.md section 5) */
+	CObjMessageP(MF_CALL, oself, gen, &p, sizeof(p), NULL, 0);
+    }
+    if (OptrToHandle(GenLock(oself)->GI_comp.CP_firstChild)) {
+	GenUnlock(oself);
+	if (ObjVarFindData(oself, ATTR_GEN_INIT_FILE_PROPAGATE_TO_CHILDREN))
+	    GenSendToChildren(oself, meta, NULL, 0);
+    } else {
+	GenUnlock(oself);
+    }
+}
+
+@method GenClass, MSG_META_LOAD_OPTIONS
+{
+    LoadOrSaveOptions(oself, message, MSG_GEN_LOAD_OPTIONS);
+}
+
+@method GenClass, MSG_META_SAVE_OPTIONS
+{
+    LoadOrSaveOptions(oself, message, MSG_GEN_SAVE_OPTIONS);
+}
+
+/* GGetAttrCommon: the string attribute (without trailing spaces), else
+ * the parent's answer */
+static Boolean GetAttrString(optr oself, Message msg, word attr, char *buf)
+{
+    char *s = ObjVarFindData(oself, attr);
+    Boolean r = FALSE;
+
+    *buf = 0;
+    if (s) {
+	word n = (word) VarDataSizePtr(s);
+	memcpy(buf, s, n);
+	buf[n] = 0;
+	while (n && (buf[n - 1] == ' ' || !buf[n - 1]))
+	    buf[--n] = 0;
+	return TRUE;
+    }
+    GenCallParent(oself, msg, &buf, sizeof(buf), &r, sizeof(r));
+    return r;
+}
+
+@method GenClass, MSG_META_GET_INI_CATEGORY
+{
+    GetAttrString(oself, message, ATTR_GEN_INIT_FILE_CATEGORY, buf);
+}
+
+@method GenClass, MSG_META_GET_HELP_FILE
+{
+    if (ObjVarFindData(oself, ATTR_GEN_HELP_FILE_FROM_INIT_FILE)) {
+	char cat[INI_CATEGORY_BUFFER_SIZE];
+	word size;
+
+	cat[0] = 0;
+	@call oself::MSG_META_GET_INI_CATEGORY(cat);
+	if (cat[0] && !InitFileReadStringBuffer(cat, "helpfile", buf,
+						INI_CATEGORY_BUFFER_SIZE &
+						IFRF_SIZE, &size))
+	    return TRUE;
+    }
+    return GetAttrString(oself, message, ATTR_GEN_HELP_FILE, buf);
+}
+
+@method GenClass, MSG_META_SET_HELP_FILE
+{
+    word n = (word) (LocalStringLength(buf) + 1);
+
+    memcpy(ObjVarAddData(oself, ATTR_GEN_HELP_FILE, n), buf, n);
+}
+
+@method GenClass, MSG_META_GET_HELP_TYPE
+{
+    HelpType *t;
+    Boolean r = FALSE;
+
+    if (@callsuper())
+	return TRUE;
+    t = ObjVarFindData(oself, ATTR_GEN_HELP_TYPE);
+    if (t) {
+	retValue->HTR_helpType = *t;
+	return TRUE;
+    }
+    GenCallParent(oself, message, &retValue, sizeof(retValue), &r,
+		  sizeof(r));
+    return r;
+}
+
+/* GenGenDestroy: not usable, the children destroyed, out of the parent,
+ * freed (after the queue) */
+@method GenClass, MSG_GEN_DESTROY
+{
+    struct { VisUpdateMode m; CompChildFlags f; } p;
+
+    @call oself::MSG_GEN_SET_NOT_USABLE(updateMode);
+    p.m = updateMode;
+    p.f = flags;
+    GenSendToChildren(oself, MSG_GEN_DESTROY, &p, sizeof(p));
+    {
+	struct { optr c; CompChildFlags f; } q;
+	q.c = oself;
+	q.f = flags;
+	GenCallParent(oself, MSG_GEN_REMOVE_CHILD, &q, sizeof(q), NULL, 0);
+    }
+    @call oself::MSG_META_OBJ_FREE();
+}
+
+/*
+ * GenDestroyAndFreeBlock: the object (the top of its block) out of the
+ * tree and the block freed after the queue.  An object on the
+ * application's active list is removed the usual way; else the specific
+ * part may do it faster (TRUE: then only the downward link goes).
+ */
+@method GenClass, MSG_GEN_DESTROY_AND_FREE_BLOCK
+{
+    optr app = GeodeGetAppObject(0);
+    Boolean onList = FALSE;
+
+    if (app)
+	onList = @call app::MSG_META_GCN_LIST_FIND_ITEM(
+			ConstructOptr(OptrToHandle(oself), 0),
+			MGCNLT_ACTIVE_LIST, MANUFACTURER_ID_GEOWORKS);
+    if (!onList && @callsuper())
+	GenRemoveDownwardLink(OptrToHandle(oself), OptrToChunk(oself), 0);
+    else
+	@call oself::MSG_GEN_REMOVE(VUM_NOW, 0);
+    @send ,forceQueue oself::MSG_META_BLOCK_FREE();
+    return TRUE;
+}

@@ -1,0 +1,796 @@
+/*
+ * visSpecUtils.goc -- after visSpecUtils.asm: the routines of the
+ * specific part of a generic object: where its visual object goes in the
+ * visual tree, building the branch when it becomes usable, the generic
+ * branch's state, the position hints, making moniker chunks, the size
+ * specifications and size hints.
+ *
+ * The routines take the generic object's optr; its block must be run by
+ * the calling thread (Port32/ABI.md section 13x).
+ *
+ * Navigation (VisNavigateCommon): the answer of an object to the
+ * navigation query that travels the visual tree to the next object to
+ * get the focus.
+ *
+ * Port32, not yet: VMDT_TOKEN monikers (the token database), mnemonics,
+ * HINT_NAVIGATION_NEXT_ID (the query goes to the visual sibling).
+ */
+@include "uiInt.goh"
+#include <string.h>
+#include <stdint.h>
+@include <Objects/gFieldC.goh>
+#include <localize.h>
+
+/* VisConvertSize */
+@extern method VisClass, MSG_SPEC_CONVERT_SIZE
+{
+    return VisConvertSpecVisSize(oself, specSize, gstate);
+}
+/* VisSetNotRealized (visSpecUtils.asm): a realized win group is made not
+ * visible and updated now (it closes), another object closed */
+void VisSetNotRealized(optr obj)
+{
+    VisInstance *v;
+
+    if (!VisCheckIfVisGrown(obj))
+	return;
+    v = VisLock(obj);
+    if (!(v->VI_attrs & VA_REALIZED)) {
+	VisUnlock(obj);
+	return;
+    }
+    if (v->VI_typeFlags & VTF_IS_WIN_GROUP) {
+	v->VI_attrs &= ~VA_VISIBLE;
+	VisUnlock(obj);
+	VisVupUpdateWinGroup(obj, VUM_NOW);
+	return;
+    }
+    VisUnlock(obj);
+    @call obj::MSG_VIS_CLOSE();
+}
+
+/* VisCheckMnemonic as a message */
+@extern method VisClass, MSG_SPEC_CHECK_MNEMONIC
+{
+    return VisCheckMnemonic(oself, character, flags, state);
+}
+
+/* VisSpecBuildSetEnabledState: fully enabled if the visual parent is and
+ * the object is enabled */
+void VisSpecBuildSetEnabledState(optr obj, SpecBuildFlags flags)
+{
+    VisInstance *v = VisLock(obj);
+
+    v->VI_attrs &= ~VA_FULLY_ENABLED;
+    if (flags & SBF_VIS_PARENT_FULLY_ENABLED &&
+	(!(v->VI_typeFlags & VTF_IS_GEN) || GenPart(obj)->GI_states &
+					    GS_ENABLED))
+	VisPart(obj)->VI_attrs |= VA_FULLY_ENABLED;
+    VisUnlock(obj);
+}
+
+/*
+ * VisGetSpecificVisObject: the visual object of the generic object for
+ * the win group part (SBF_WIN_GROUP) or the other part: the object
+ * itself if it is that part (unless MSG_SPEC_GET_SPECIFIC_VIS_OBJECT
+ * answers), else none.
+ */
+optr VisGetSpecificVisObject(optr obj, SpecBuildFlags flags)
+{
+    VisInstance *v;
+    Boolean wg;
+    optr r;
+
+    if (!VisCheckIfVisGrown(obj))
+	return 0;
+    v = VisLock(obj);
+    if (!(v->VI_specAttrs & SA_SIMPLE_GEN_OBJ)) {
+	VisUnlock(obj);
+	r = @call obj::MSG_SPEC_GET_SPECIFIC_VIS_OBJECT(flags);
+	if (r)
+	    return r;
+	v = VisLock(obj);
+    }
+    wg = (v->VI_typeFlags & VTF_IS_WIN_GROUP) != 0;
+    VisUnlock(obj);
+    return wg == ((flags & SBF_WIN_GROUP) != 0) ? obj : 0;
+}
+
+/* FindVisParentMatch: a generic sibling whose visual object is a child
+ * of the visual parent; its position there */
+typedef struct {
+    optr	visParent;
+    SpecBuildFlags flags;
+    sword	pos;		/* -1: none yet */
+} MatchData;
+
+static Boolean MatchCallback(optr parent, optr child, void *data)
+{
+    MatchData *d = data;
+    optr vo;
+
+    (void) parent;
+    if (d->flags & SBF_SKIP_CHILD) {
+	d->flags &= ~SBF_SKIP_CHILD;
+	return FALSE;
+    }
+    vo = VisGetSpecificVisObject(child, d->flags);
+    if (!vo || !VisCheckIfSpecBuilt(vo) || VisFindParent(vo) != d->visParent)
+	return FALSE;
+    d->pos = (sword) @call d->visParent::MSG_VIS_FIND_CHILD(vo);
+    return !(d->flags & SBF_FIND_LAST);
+}
+
+/*
+ * VisAddChildRelativeToGen: the visual object of genObj added to its
+ * visual parent in the order of the generic tree: before the first
+ * generic sibling to the right that is there already, else after the
+ * last one there, else last.  Within a tree build that goes in order,
+ * last.
+ */
+void VisAddChildRelativeToGen(optr genObj, optr visObj, optr visParent,
+			      SpecBuildFlags flags)
+{
+    word pos = CCO_LAST;
+
+    if (!(flags & SBF_TREE_BUILD &&
+	  flags & SBF_VIS_PARENT_WITHIN_SCOPE_OF_TREE_BUILD)) {
+	optr gp = GenFindParent(genObj);
+	MatchData d;
+
+	d.visParent = visParent;
+	d.pos = -1;
+	if (gp && !(flags & SBF_TREE_BUILD)) {
+	    d.flags = flags | SBF_SKIP_CHILD;
+	    ObjCompProcessChildren(gp, genObj,
+				   OCCT_SAVE_PARAMS_DONT_TEST_ABORT, &d,
+				   word_offsetof(GenBase, Gen_offset),
+				   word_offsetof(GenInstance, GI_comp),
+				   word_offsetof(GenInstance, GI_link),
+				   MatchCallback);
+	    if (d.pos >= 0)
+		pos = (word) d.pos;
+	}
+	if (gp && d.pos < 0) {
+	    d.flags = (flags & ~SBF_SKIP_CHILD) | SBF_FIND_LAST;
+	    ObjCompProcessChildren(gp, 0, OCCT_SAVE_PARAMS_DONT_TEST_ABORT,
+				   &d, word_offsetof(GenBase, Gen_offset),
+				   word_offsetof(GenInstance, GI_comp),
+				   word_offsetof(GenInstance, GI_link),
+				   MatchCallback);
+	    if (d.pos >= 0)
+		pos = (word) (d.pos + 1);
+	}
+    }
+    @call visParent::MSG_VIS_ADD_CHILD(visObj, pos);
+}
+typedef struct {
+    optr	obj;
+    sword	x, y;
+    Boolean	found;
+} PosData;
+
+/* MakePositionAbsolute: relative to the visual parent unless that is a
+ * window */
+static void Absolute(optr obj, sword *x, sword *y)
+{
+    VisTypeFlags t = 0;
+    XYValueAsDWord p = 0;
+
+    VisCallParent(obj, MSG_VIS_GET_TYPE_FLAGS, NULL, 0, &t, sizeof(t));
+    if (t & VTF_IS_WINDOW)
+	return;
+    VisCallParent(obj, MSG_VIS_GET_POSITION, NULL, 0, &p, sizeof(p));
+    *x = (sword) (*x + DWORD_X(p));
+    *y = (sword) (*y + DWORD_Y(p));
+}
+
+static void PosHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		    word dataType, void *handlerData)
+{
+    PosData *d = handlerData;
+    void *data = extra;
+    sword x, y;
+    optr other;
+    Rectangle r;
+    SizeAsDWord s;
+
+    (void) mh;
+    (void) chnk;
+    switch (dataType) {
+    case ATTR_GEN_POSITION:
+	x = ((Point *) data)->P_x;
+	y = ((Point *) data)->P_y;
+	Absolute(d->obj, &x, &y);
+	d->x = x;
+	d->y = y;
+	break;
+    case ATTR_GEN_POSITION_X:
+	x = *(sword *) data;
+	y = 0;
+	Absolute(d->obj, &x, &y);
+	d->x = x;
+	break;
+    case ATTR_GEN_POSITION_Y:
+	x = 0;
+	y = *(sword *) data;
+	Absolute(d->obj, &x, &y);
+	d->y = y;
+	break;
+    case HINT_ALIGN_LEFT_EDGE_WITH_OBJECT:
+    case HINT_ALIGN_TOP_EDGE_WITH_OBJECT: {
+	XYValueAsDWord p;
+	other = *(optr *) data;
+	p = @call other::MSG_VIS_GET_POSITION();
+	if (dataType == HINT_ALIGN_LEFT_EDGE_WITH_OBJECT)
+	    d->x = DWORD_X(p);
+	else
+	    d->y = DWORD_Y(p);
+	break;
+    }
+    case HINT_ALIGN_RIGHT_EDGE_WITH_OBJECT:
+    case HINT_ALIGN_BOTTOM_EDGE_WITH_OBJECT:
+	other = *(optr *) data;
+	@call other::MSG_VIS_GET_BOUNDS(&r);
+	s = VisGetSize(d->obj);
+	if (dataType == HINT_ALIGN_RIGHT_EDGE_WITH_OBJECT)
+	    d->x = (sword) (r.R_right - DWORD_WIDTH(s));
+	else
+	    d->y = (sword) (r.R_bottom - DWORD_HEIGHT(s));
+	break;
+    default:
+	return;
+    }
+    d->found = TRUE;
+}
+
+static VarDataCHandler posHints[] = {
+    { ATTR_GEN_POSITION, PosHint },
+    { ATTR_GEN_POSITION_X, PosHint },
+    { ATTR_GEN_POSITION_Y, PosHint },
+    { HINT_ALIGN_LEFT_EDGE_WITH_OBJECT, PosHint },
+    { HINT_ALIGN_TOP_EDGE_WITH_OBJECT, PosHint },
+    { HINT_ALIGN_RIGHT_EDGE_WITH_OBJECT, PosHint },
+    { HINT_ALIGN_BOTTOM_EDGE_WITH_OBJECT, PosHint },
+};
+
+/* the position the hints ask for (starting from the object's own);
+ * FALSE if it has none */
+Boolean VisSpecCheckForPosHints(optr obj, sword *x, sword *y)
+{
+    PosData d;
+    VisInstance *v = VisLock(obj);
+
+    d.obj = obj;
+    d.x = v->VI_bounds.R_left;
+    d.y = v->VI_bounds.R_top;
+    d.found = FALSE;
+    ObjVarScanData(obj, sizeof(posHints) / sizeof(posHints[0]), posHints,
+		   &d);
+    VisUnlock(obj);
+    *x = d.x;
+    *y = d.y;
+    return d.found;
+}
+typedef struct {
+    Message	msg;
+    const void	*params;
+    word	paramSize;
+    byte	flags;
+} GenFlagData;
+
+/* CCWFS_callBack: usable children (grown first), with one of the
+ * VisOptFlags if any are given; win groups only with a dual build */
+static Boolean GenFlagCallback(optr parent, optr child, void *data)
+{
+    GenFlagData *d = data;
+    VisInstance *v;
+    Boolean send;
+
+    (void) parent;
+    ObjLockObjBlock(OptrToHandle(child));
+    if (!((VisBase *) ObjDeref(child, 0))->Vis_offset)
+	ObjInitializePart(child, word_offsetof(VisBase, Vis_offset));
+    v = VisPart(child);
+    send = GenPart(child)->GI_states & GS_USABLE &&
+	   (!d->flags || v->VI_optFlags & d->flags) &&
+	   (!(v->VI_typeFlags & VTF_IS_WIN_GROUP) ||
+	    v->VI_specAttrs & SA_USES_DUAL_BUILD);
+    MemUnlock(OptrToHandle(child));
+    if (send)
+	CObjMessageP(MF_CALL, child, d->msg, (void *) d->params,
+		     d->paramSize, NULL, 0);
+    return FALSE;
+}
+
+void VisIfFlagSetCallGenChildren(optr obj, Message msg, const void *params,
+				 word paramSize, byte flags)
+{
+    GenFlagData d;
+
+    d.msg = msg;
+    d.params = params;
+    d.paramSize = paramSize;
+    d.flags = flags;
+    GenCallChildren(obj, GenFlagCallback, &d);
+}
+
+/*
+ * VisGetGenBranchInfo: the branch from here up is usable (GBI_USABLE),
+ * or minimized (GBI_BRANCH_MINIMIZED, unless an object below the
+ * minimized one is VA_BRANCH_NOT_MINIMIZABLE).  Port32: the walk stops
+ * at a parent run by another thread (the asm called it there).
+ */
+GenBranchInfo VisGetGenBranchInfo(optr obj)
+{
+    GenBranchInfo info = GBI_USABLE;
+
+    VisContinueGenBranchCheck(obj, &info);
+    return info;
+}
+
+/* ---------------------------------------------------------------------
+ * Size specifications (visSpecUtils.asm)
+ * ------------------------------------------------------------------- */
+
+/* GetSizeOfField: the size of the application's field (else of its
+ * screen) */
+static SizeAsDWord GetSizeOfField(void)
+{
+    GenReturnParams r;
+    SizeAsDWord s = 0;
+    optr app = GeodeGetAppObject(0);
+    word q;
+
+    if (!app)
+	return 0;
+    for (q = GUQT_FIELD; q <= GUQT_SCREEN; q++) {
+	optr o;
+
+	memset(&r, 0, sizeof(r));
+	(void) @call app::MSG_SPEC_P32_GUP_QUERY(&r, q);
+	o = ConstructOptr(r.GRP_cx, r.GRP_dx);
+	if (o)
+	    s = @call o::MSG_VIS_GET_SIZE();
+	if (DWORD_HEIGHT(s))
+	    break;
+    }
+    return s;
+}
+
+/* CalcPercentOfScreen: size * data / 1024, rounded */
+static word PercentOf(word size, word data)
+{
+    return (word) (((dword) size * data + 0x200) >> 10);
+}
+
+static word FontValue(GStateHandle gs, GFM_info info)
+{
+    return (word) GrFontMetrics(gs, info);
+}
+
+word VisConvertSpecVisSize(optr obj, SpecSizeSpec size, GStateHandle gs)
+{
+    word data = size & SSS_DATA;
+
+    (void) obj;
+    if (!size)
+	return 0;
+    switch (size & 0xfc00) {
+    case SST_PIXELS:
+	return size;
+    case SST_PCT_OF_FIELD_WIDTH:
+	return PercentOf(DWORD_WIDTH(GetSizeOfField()), data);
+    case SST_PCT_OF_FIELD_HEIGHT:
+	return PercentOf(DWORD_HEIGHT(GetSizeOfField()), data);
+    /* the asm multiplies bytes (mul dl) */
+    case SST_AVG_CHAR_WIDTHS:
+	return (word) ((byte) data *
+		       (byte) FontValue(gs, GFMI_AVERAGE_WIDTH_ROUNDED));
+    case SST_WIDE_CHAR_WIDTHS:
+	return (word) ((byte) data *
+		       (byte) FontValue(gs, GFMI_MAX_WIDTH_ROUNDED));
+    case SST_LINES_OF_TEXT:
+	return (word) ((byte) data *
+		       (byte) FontValue(gs, GFMI_HEIGHT_ROUNDED));
+    default:
+	return 0;			/* SpecSizeError */
+    }
+}
+
+/* ConvertSize: a size hint (a SpecWidth, a GadgetSizeHintArgs or a
+ * CompSizeHintArgs) in pixels by MSG_SPEC_CONVERT_DESIRED_SIZE_HINT */
+static void ConvertSize(optr obj, void *data, sword *w, sword *h,
+			sword *count)
+{
+    CompSizeHintArgs *c = data;
+    word size = VarDataSizePtr(data);
+    word cw = c->CSHA_width, ch = 0, n = 0;
+    SizeAsDWord s;
+
+    VisPart(obj)->VI_geoAttrs &= ~VGA_NO_SIZE_HINTS;
+    if (size != sizeof(SpecWidth)) {
+	ch = c->CSHA_height;
+	if (size != sizeof(GadgetSizeHintArgs))
+	    n = c->CSHA_count;
+    }
+    s = @call obj::MSG_SPEC_CONVERT_DESIRED_SIZE_HINT(cw, ch, n);
+    *w = (sword) DWORD_WIDTH(s);
+    *h = (sword) DWORD_HEIGHT(s);
+    *count = (sword) n;
+}
+
+static void SizeHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		     word dataType, void *handlerData)
+{
+    SpecSizeArgs *a = handlerData;
+    optr obj = ConstructOptr(mh, chnk);
+    sword *p;
+
+    switch (dataType) {
+    case HINT_INITIAL_SIZE:	p = &a->SSA_initWidth; break;
+    case HINT_MINIMUM_SIZE:	p = &a->SSA_minWidth; break;
+    case HINT_MAXIMUM_SIZE:	p = &a->SSA_maxWidth; break;
+    case HINT_FIXED_SIZE:	p = &a->SSA_fixedWidth; break;
+    default:			return;
+    }
+    ConvertSize(obj, extra, &p[0], &p[1], &p[2]);
+}
+
+static VarDataCHandler sizeHints[] = {
+    { HINT_INITIAL_SIZE, SizeHint },
+    { HINT_MINIMUM_SIZE, SizeHint },
+    { HINT_MAXIMUM_SIZE, SizeHint },
+    { HINT_FIXED_SIZE, SizeHint },
+};
+
+/* CorrectMinMaxFixedSizesIfNeeded: a fixed size within min and max is
+ * both */
+static void CorrectMinMaxFixed(sword *min, sword *fixed, sword *max)
+{
+    if (!*fixed)
+	return;
+    if (*max && (word) *fixed > (word) *max)
+	*fixed = *max;
+    else
+	*max = *fixed;
+    if (*min && (word) *fixed < (word) *min) {
+	*fixed = *max = *min;
+	return;
+    }
+    *min = *fixed;
+}
+
+/*
+ * VisSetupSizeArgs: the size hints of a generic object in pixels (all 0
+ * without; VGA_NO_SIZE_HINTS remembers that there are none)
+ */
+void VisSetupSizeArgs(optr obj, SpecSizeArgs *a)
+{
+    VisInstance *v;
+
+    memset(a, 0, sizeof(*a));
+    v = VisPart(obj);
+    if (!(v->VI_typeFlags & VTF_IS_GEN) ||
+	(v->VI_geoAttrs & VGA_NO_SIZE_HINTS))
+	return;
+    v->VI_geoAttrs |= VGA_NO_SIZE_HINTS;
+    ObjVarScanData(obj, sizeof(sizeHints) / sizeof(sizeHints[0]), sizeHints,
+		   a);
+    CorrectMinMaxFixed(&a->SSA_minWidth, &a->SSA_fixedWidth,
+		       &a->SSA_maxWidth);
+    CorrectMinMaxFixed(&a->SSA_minHeight, &a->SSA_fixedHeight,
+		       &a->SSA_maxHeight);
+    if (a->SSA_fixedNumChildren)
+	a->SSA_minNumChildren = a->SSA_maxNumChildren =
+	    a->SSA_fixedNumChildren;
+}
+
+/* the initial size, the first time the geometry is calculated (for a
+ * size not passed: negative) */
+void VisApplyInitialSizeArgs(optr obj, const SpecSizeArgs *a, sword *width,
+			     sword *height)
+{
+    if (VisPart(obj)->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
+	return;
+    if (*width < 0 && a->SSA_initWidth)
+	*width = a->SSA_initWidth;
+    if (a->SSA_initHeight && *height < 0)
+	*height = a->SSA_initHeight;
+}
+
+/* the width within the maximum and minimum (a fixed size even for a
+ * width not passed) */
+void VisApplySizeArgsToWidth(const SpecSizeArgs *a, sword *width)
+{
+    if (!a->SSA_fixedWidth && *width < 0)
+	return;
+    if (a->SSA_maxWidth && (word) *width >= (word) a->SSA_maxWidth)
+	*width = a->SSA_maxWidth;
+    if (a->SSA_minWidth && (word) *width <= (word) a->SSA_minWidth)
+	*width = a->SSA_minWidth;
+}
+
+void VisApplySizeArgsToHeight(const SpecSizeArgs *a, sword *height)
+{
+    if (!a->SSA_fixedHeight && *height < 0)
+	return;
+    if (a->SSA_maxHeight && (word) *height >= (word) a->SSA_maxHeight)
+	*height = a->SSA_maxHeight;
+    if (a->SSA_minHeight && (word) *height <= (word) a->SSA_minHeight)
+	*height = a->SSA_minHeight;
+}
+
+void VisApplySizeHints(optr obj, sword *width, sword *height)
+{
+    SpecSizeArgs a;
+
+    VisSetupSizeArgs(obj, &a);
+    VisApplyInitialSizeArgs(obj, &a, width, height);
+    VisApplySizeArgsToWidth(&a, width);
+    VisApplySizeArgsToHeight(&a, height);
+}
+
+/* ---------------------------------------------------------------------
+ * Window position and size pairs (visSpecUtils.asm)
+ * ------------------------------------------------------------------- */
+
+/* GetSizeOfFieldOrWinGroup: the size of the win group above the object
+ * (MSG_VIS_VUP_CALL_WIN_GROUP from its parent) or of the field above
+ * it; 0 without a parent */
+static SizeAsDWord GetSizeOfFieldOrWinGroup(optr obj, Boolean field)
+{
+    optr p = VisFindParent(obj);
+
+    while (p) {
+	Boolean is;
+
+	ObjLockObjBlock(OptrToHandle(p));
+	is = field ? ObjIsObjectInClass(p, &GenFieldClass)
+		   : (VisPart(p)->VI_typeFlags & VTF_IS_WIN_GROUP) != 0;
+	MemUnlock(OptrToHandle(p));
+	if (is)
+	    return @call p::MSG_VIS_GET_SIZE();
+	p = VisFindParent(p);
+    }
+    return 0;
+}
+
+/* VisConvertRatioToCoord: size * ratio / 1024, rounded (one more for
+ * an odd ratio, as the asm), negative with SWSS_SIGN */
+static SpecWinSizeSpec RatioToCoord(SpecWinSizeSpec v, word size)
+{
+    word r = v & (SWSS_MANTISSA | SWSS_FRACTION), c;
+
+    if (r & PCT_50)
+	r++;
+    c = (word) (((dword) r * size) >> 8);
+    c = (word) ((c >> 2) + ((c >> 1) & 1));
+    return (v & SWSS_SIGN) ? (SpecWinSizeSpec) -(sword) c : c;
+}
+
+/*
+ * VisConvertRatioToCoords: a pair of ratios (x decides) in coordinates
+ * of the win group's or the field's size (FALSE if that is empty); a
+ * pair of coordinates gets its sign extended
+ */
+Boolean VisConvertRatioToCoords(optr obj, SpecWinSizeSpec *x,
+				SpecWinSizeSpec *y, Boolean ofField)
+{
+    SizeAsDWord s;
+
+    if (!(*x & SWSS_RATIO)) {
+	if (*x & SWSS_SIGN)
+	    *x |= 0x8000;
+	if (*y & SWSS_SIGN)
+	    *y |= 0x8000;
+	return TRUE;
+    }
+    s = GetSizeOfFieldOrWinGroup(obj, ofField);
+    if (!DWORD_WIDTH(s) && !DWORD_HEIGHT(s))
+	return FALSE;
+    *x = RatioToCoord(*x, DWORD_WIDTH(s));
+    *y = RatioToCoord(*y, DWORD_HEIGHT(s));
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------------
+ * Navigation (visSpecUtils.asm)
+ * ------------------------------------------------------------------- */
+
+/* VisTestNode: focusable, and menu related as the query is */
+static Boolean TestNode(NavigateCommonFlags ncf, NavigationFlags nf)
+{
+    return (ncf & NCF_IS_FOCUSABLE) &&
+	   !(((byte) nf ^ ncf) & NCF_IS_MENU_RELATED);
+}
+
+static optr FirstChild(optr obj)
+{
+    optr c = ((VisCompInstance *) VisLock(obj))->VCI_comp.CP_firstChild;
+
+    VisUnlock(obj);
+    return c;
+}
+
+/*
+ * VisNavigateCommon: the query's step at obj.  Back at the origin (on
+ * the second pass, or after the root) the circuit is complete (the
+ * origin found if focusable).  A leaf that may have the focus is found
+ * (unless skipped, or the query travels the circuit); a composite sends
+ * the query to its first child unless it is focusable itself (and not
+ * skipped); else the next node: the root's first child (the root is
+ * reached), the visual sibling, or the parent (to be skipped).  The
+ * backtrack flag tells the object was focusable (for backtracking: the
+ * previous field is the last focusable one before the origin).
+ */
+Boolean VisNavigateCommon(optr obj, NavigationQueryParams *ret, optr origin,
+			  NavigationFlags nf, NavigateCommonFlags ncf,
+			  ChunkHandle genPart)
+{
+    byte back = 0;
+    optr next = origin;
+    Boolean found = FALSE;
+    const NavigationFlags clr = NF_INITIATE_QUERY | NF_SKIP_NODE;
+
+    (void) genPart;
+    if ((nf & NF_BACKTRACK_AFTER_TRAVELING) &&
+	((nf & NF_INITIATE_QUERY) || !(nf & NF_SKIP_NODE)) &&
+	TestNode(ncf, nf))
+	back = 0xff;
+    if (((nf & NF_REACHED_ROOT) || !(nf & clr)) && origin == obj) {
+	if (!(ncf & NCF_IS_FOCUSABLE))
+	    next = 0;
+	nf |= NF_COMPLETED_CIRCUIT;
+	found = TRUE;
+	goto done;
+    }
+    if (!(ncf & NCF_IS_COMPOSITE)) {
+	if (!TestNode(ncf, nf) || (nf & NF_SKIP_NODE))
+	    goto forward;
+	goto takeFocusIfNeeded;
+    }
+    if (TestNode(ncf, nf)) {
+	if (!(nf & NF_SKIP_NODE))
+	    goto takeFocusIfNeeded;
+	if (!(nf & NF_INITIATE_QUERY))
+	    goto forward;
+    } else if (nf & NF_SKIP_NODE)
+	goto forward;
+sendToFirstChild:
+    next = FirstChild(obj);
+    if (next) {
+	nf &= ~clr;
+	goto done;
+    }
+    if (!(ncf & NCF_IS_FOCUSABLE) || (nf & clr))
+	goto forward;
+    if (!(nf & NF_TRAVEL_CIRCUIT))
+	goto returnOD;
+    goto forward;
+takeFocusIfNeeded:
+    if (!(nf & NF_TRAVEL_CIRCUIT))
+	goto returnOD;
+    if (ncf & NCF_IS_COMPOSITE)
+	goto sendToFirstChild;
+forward:
+    nf &= ~clr;
+    if (ncf & NCF_IS_ROOT_NODE) {
+	nf |= NF_REACHED_ROOT;
+	next = FirstChild(obj);
+	goto done;
+    }
+    next = VisLock(obj)->VI_link.LP_next;
+    VisUnlock(obj);
+    if (next & LP_IS_PARENT) {
+	next &= ~(optr) LP_IS_PARENT;
+	nf |= NF_SKIP_NODE;
+    }
+    goto done;
+returnOD:
+    next = obj;
+    found = TRUE;
+done:
+    ret->NQP_nextObject = next;
+    ret->NQP_navFlags = nf;
+    ret->NQP_backtrackFlag = back;
+    ret->NQP_unused = 0;
+    return found;
+}
+
+/*
+ * VisCheckMnemonic (MSG_SPEC_CHECK_MNEMONIC): a generic object whose
+ * text moniker has a mnemonic: the character stored at its offset (or
+ * after the text), compared without case; VMO_CANCEL is the specific
+ * UI's cancel (MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC).  The
+ * caller checks that it is enabled.
+ */
+Boolean VisCheckMnemonic(optr obj, word c, word flags, word state)
+{
+    ChunkHandle m;
+    VisMonikerWithText *t;
+    const char *text;
+    byte off, mc;
+
+    if (!(VisLock(obj)->VI_typeFlags & VTF_IS_GEN)) {
+	VisUnlock(obj);
+	return FALSE;
+    }
+    VisUnlock(obj);
+    m = ((GenInstance *) ObjDerefGen(obj))->GI_visMoniker;
+    if (!m)
+	return FALSE;
+    t = LMemDeref(ConstructOptr(OptrToHandle(obj), m));
+    if (t->VMWT_common.VM_type & VMT_GSTRING)
+	return FALSE;
+    off = (byte) t->VMWT_mnemonicOffset;
+    if (off == (byte) @VMO_NO_MNEMONIC)
+	return FALSE;
+    if (off == (byte) @VMO_CANCEL) {
+	/* GenCallApplication: the application of the block's owner */
+	optr app = GeodeGetAppObject(MemOwner(OptrToHandle(obj)));
+	CharFlagsAndShiftState f;
+	ToggleStateAndScanCode t;
+
+	if (!app)
+	    return FALSE;
+	f.CFASS_charFlags = (CharFlags) flags;
+	f.CFASS_shiftState = (ShiftState) (flags >> 8);
+	t.TSASC_toggleState = (ToggleState) state;
+	t.TSASC_scanCode = (byte) (state >> 8);
+	return @call app::MSG_GEN_APPLICATION_TEST_FOR_CANCEL_MNEMONIC(c, f,
+								       t);
+    }
+    text = (const char *) t + VMWT_text;
+    if (off == (byte) @VMO_MNEMONIC_NOT_IN_MKR_TEXT) {
+	while (*text)
+	    text++;
+	mc = (byte) text[1];
+    } else
+	mc = (byte) text[off];
+    c &= 0xff;
+    if (c >= 'A' && c <= 'Z')
+	c += 'a' - 'A';
+    if (mc >= 'A' && mc <= 'Z')
+	mc += 'a' - 'A';
+    return c == mc;
+}
+
+/* VisContinueRoutine: a minimized parent ends the walk */
+static void BranchContinue(optr obj, GenBranchInfo *info)
+{
+    SpecAttrs sa = 0;
+
+    if (VisCheckIfVisGrown(obj)) {
+	sa = VisLock(obj)->VI_specAttrs;
+	VisUnlock(obj);
+    }
+    if (sa & SA_BRANCH_MINIMIZED) {
+	*info |= GBI_BRANCH_MINIMIZED;
+	return;
+    }
+    VisContinueGenBranchCheck(obj, info);
+}
+
+/* VisContinueGenBranchCheck */
+void VisContinueGenBranchCheck(optr obj, GenBranchInfo *info)
+{
+    VisAttrs a = 0;
+    GenStates st = GenLock(obj)->GI_states;
+    optr p;
+
+    GenUnlock(obj);
+    if (!(st & GS_USABLE)) {
+	*info &= ~GBI_USABLE;
+    } else {
+	if (VisCheckIfVisGrown(obj)) {
+	    a = VisLock(obj)->VI_attrs;
+	    VisUnlock(obj);
+	}
+	p = GenFindParent(obj);
+	if (p && ObjTestIfObjBlockRunByCurThread(OptrToHandle(p)))
+	    BranchContinue(p, info);
+    }
+    if (a & VA_BRANCH_NOT_MINIMIZABLE)
+	*info &= ~GBI_BRANCH_MINIMIZED;
+}

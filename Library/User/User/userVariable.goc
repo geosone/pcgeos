@@ -1,0 +1,26 @@
+/*
+ * userVariable.goc -- after userVariable.def: the variables of the UI's
+ * dgroup that the port has, in the order of the .def file.  They are
+ * declared in uiInt.goh.
+ */
+@include "uiInt.goh"
+
+word soundMask = SOUND_MASK_ALL;
+UIFlags uiFlags;
+word uiAckID;
+optr uiAckOD;
+UIButtonFlags uiButtonFlags;
+/* userVariable.def: the options of the fields (GenFieldLoadOptions) */
+UIInterfaceLevel uiInterfaceLevel = UIIL_ADVANCED;
+UIInterfaceLevel uiDefaultLaunchLevel = UIIL_ADVANCED;
+UIInterfaceOptions uiInterfaceOptions = UIIO_OPTIONS_MENU;
+UILaunchModel uiLaunchModel = UILM_MULTIPLE_INSTANCES;
+UILaunchOptions uiLaunchOptions = UILO_DESK_ACCESSORIES;
+optr uiSystemObj;
+optr uiFlowObj;
+GeodeHandle uiSpecUILibrary;
+byte uiDisplayType;
+/* the UI's moniker font, set by the specific UI from its display
+ * scheme (userUtils.goc); Berkeley 10 until then */
+FontID uiDefaultMonikerFont = FID_BERKELEY;
+word uiDefaultMonikerPointSize = 10;

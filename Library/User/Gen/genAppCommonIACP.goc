@@ -1,0 +1,559 @@
+/*
+ * genAppCommonIACP.goc -- after genAppCommonIACP.asm: This file contains
+ * routines to implement the GenApplication class.
+ */
+@include "uiInt.goh"
+@include <Objects/gSysC.goh>
+#include <string.h>
+@include <Objects/gFieldC.goh>
+@include <Objects/gDocC.goh>
+@include <Objects/gDocGrpC.goh>
+@include <Objects/gDocCtrl.goh>
+@include <alb.goh>
+@include <iacp.goh>
+#include <chunkarr.h>
+#include <file.h>
+#include <initfile.h>
+
+/* UIAppAlterFTVMCExcl: a focus below the application (once the request
+ * of an object below it is done) gets the application's focus */
+@extern method UIApplicationClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    ObjectAndGrabParams q;
+
+    @callsuper();
+    if (flags & MAEF_NOT_HERE)
+	return;
+    memset(&q, 0, sizeof(q));
+    @call oself::MSG_VIS_FUP_QUERY_FOCUS_EXCL(&q);
+    if (q.OAGP_object)
+	@call oself::MSG_META_GRAB_FOCUS_EXCL();
+}
+
+/* UIAppFupKbdChar: every key eaten but F1 (help in the UI's dialogs) */
+@extern method UIApplicationClass, MSG_META_FUP_KBD_CHAR
+{
+    if (character == ((CS_CONTROL << 8) | VC_F1))
+	return @callsuper();
+    return TRUE;
+}
+
+/* UIAppNotifyNoFocusWithinNode: no focus below the application (not
+ * while it attaches or detaches, not once it is not usable): it lets
+ * go of its own, the system finds one */
+@extern method UIApplicationClass, MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE
+{
+    ObjectAndGrabParams q;
+
+    if ((pself->GAI_states & (AS_ATTACHING | AS_DETACHING |
+			      AS_QUIT_DETACHING | AS_TRANSPARENT_DETACHING)) ||
+	!(pself->GI_states & GS_USABLE))
+	return;
+    memset(&q, 0, sizeof(q));
+    @call oself::MSG_VIS_FUP_QUERY_FOCUS_EXCL(&q);
+    if (q.OAGP_object)
+	return;
+    @call oself::MSG_META_RELEASE_FOCUS_EXCL();
+    (void) UserCallSystem(MSG_META_ENSURE_ACTIVE_FT, NULL, 0, NULL, 0);
+}
+
+#define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
+
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_STATE
+{
+    return pself->GAI_states;
+}
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE
+{
+    return pself->GAI_appMode;
+}
+
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_ATTACH_FLAGS
+{
+    return pself->GAI_attachFlags;
+}
+
+/* GAI_iacpConnects: the connections the application serves, and the
+ * mode each asked for */
+typedef struct {
+    IACPConnection	GAIACPC_connection;
+    word		GAIACPC_appMode;  /* MSG_GEN_PROCESS_OPEN_APPLICATION
+					   * or ..._OPEN_ENGINE */
+} GenAppIACPConnection;
+
+/*
+ * GenAppRegisterUnregisterCommon: for the token of the application and
+ * for those of ATTR_GEN_APPLICATION_ADDITIONAL_TOKENS
+ */
+static void RegisterUnregister(optr oself, IACPServerMode mode,
+			       Boolean unregister)
+{
+    IACPServerFlags flags = 0;
+    GeodeToken token, *more;
+    word n, i;
+
+    if (!unregister) {
+	if (!(AppPart(oself)->GAI_states & AS_SINGLE_INSTANCE))
+	    flags |= IACPSF_MULTIPLE_INSTANCES;
+	if (ObjVarFindData(oself,
+		HINT_APPLICATION_NO_INBOX_QUERY_WHEN_FOREGROUND_APP))
+	    flags |= IACPSF_MAILBOX_DONT_NOTIFY_USER;
+    }
+    GeodeGetInfo(MemOwner(OptrToHandle(oself)), GGIT_TOKEN_ID, &token);
+    more = ObjVarFindData(oself, ATTR_GEN_APPLICATION_ADDITIONAL_TOKENS);
+    n = more ? VarDataSizePtr(more) / sizeof(GeodeToken) : 0;
+    for (i = 0; ; i++) {
+	if (unregister)
+	    IACPUnregisterServer(&token, oself);
+	else
+	    IACPRegisterServer(&token, oself, mode, flags);
+	if (i == n)
+	    break;
+	more = ObjVarFindData(oself, ATTR_GEN_APPLICATION_ADDITIONAL_TOKENS);
+	token = more[i];
+    }
+}
+
+/* GenAppRegisterAsIACPServer */
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_REGISTER
+{
+    (void) pself;
+    RegisterUnregister(oself, (IACPServerMode) mode, FALSE);
+}
+
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_UNREGISTER
+{
+    (void) pself;
+    RegisterUnregister(oself, 0, TRUE);
+}
+
+/* GenAppCompleteConnections: in application mode now: what the clients
+ * sent meanwhile goes on */
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_COMPLETE_CONNECTIONS
+{
+    optr arr = GenAppIACPConnects(oself);
+    word n = arr ? ChunkArrayGetCount(arr) : 0, i, size;
+
+    (void) pself;
+    for (i = 0; i < n; i++) {
+	GenAppIACPConnection *c = ChunkArrayElementToPtr(arr, i, &size);
+
+	IACPFinishConnect(c->GAIACPC_connection, oself);
+    }
+}
+
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_SHUTDOWN_ALL_CONNECTIONS
+{
+    (void) pself;
+    IACPShutdownAll(oself);
+}
+
+@extern method GenApplicationClass,
+	MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_CONNECTIONS
+{
+    optr arr = GenAppIACPConnects(oself);
+
+    (void) pself;
+    return arr ? ChunkArrayGetCount(arr) : 0;
+}
+
+/* GenAppRecordConnection: so the application does not go while the
+ * connection is there */
+static void RecordConnection(optr oself, IACPConnection connection,
+			     word appMode)
+{
+    GenAppIACPConnection *c;
+
+    if (!AppPart(oself)->GAI_iacpConnects) {
+	ChunkHandle ch = ChunkArrayCreate(OptrToHandle(oself),
+					  sizeof(GenAppIACPConnection), 0,
+					  OCF_IGNORE_DIRTY);
+
+	AppPart(oself)->GAI_iacpConnects = ch;
+    }
+    c = ChunkArrayAppend(GenAppIACPConnects(oself), 0);
+    c->GAIACPC_connection = connection;
+    c->GAIACPC_appMode = appMode;
+}
+
+/*
+ * GAINCRecordALBIfAppropriate: asked to open for the user while
+ * detaching: a copy of the launch block is kept until the detach is
+ * through (MSG_GEN_APPLICATION_APP_MODE_COMPLETE,
+ * MSG_GEN_APPLICATION_QUIT_AFTER_UI), and the field shows that the
+ * application is being activated.
+ */
+static void RecordALBIfAppropriate(optr oself, MemHandle albHandle)
+{
+    MemHandle copy, *saved;
+    optr parent;
+
+    if (ObjVarFindData(oself, TEMP_GEN_APPLICATION_SAVED_ALB))
+	return;			/* the user is impatient */
+    copy = IACPDuplicateALB(albHandle);
+    saved = ObjVarAddData(oself, TEMP_GEN_APPLICATION_SAVED_ALB,
+			  sizeof(MemHandle));
+    *saved = copy;
+    parent = GenFindParent(oself);
+    if (OptrToHandle(parent)) {
+	@call parent::MSG_GEN_FIELD_ACTIVATE_INITIATE(copy);
+	@call parent::MSG_GEN_FIELD_ACTIVATE_UPDATE(
+	    MemOwner(OptrToHandle(oself)), copy);
+    }
+}
+
+/*
+ * GenApplicationIACPNewConnection: a client has connected.  With a
+ * launch block for application mode the application opens for the
+ * user (unless it was launched for this, which the attach sees to) and
+ * opens the document of the block; else the connection is for engine
+ * mode.  The launch block is IACP's.
+ */
+@extern method GenApplicationClass, MSG_META_IACP_NEW_CONNECTION
+{
+    AppLaunchBlock *alb = appLaunchBlock ? MemLock(appLaunchBlock) : NULL;
+
+    if (alb && (!alb->ALB_appMode ||
+		alb->ALB_appMode == MSG_GEN_PROCESS_OPEN_APPLICATION)) {
+	RecordConnection(oself, connection,
+			 MSG_GEN_PROCESS_OPEN_APPLICATION);
+	pself = AppPart(oself);
+	if (justLaunched) {
+	    /* what the block says was done at the launch */
+	} else if (pself->GAI_states & (AS_DETACHING | AS_QUIT_DETACHING)) {
+	    RecordALBIfAppropriate(oself, appLaunchBlock);
+	} else if (!GenAppSwitchToAppMode(oself, appLaunchBlock)) {
+	    /* in application mode: the document, and what the client
+	     * sent meanwhile (while attaching: at
+	     * MSG_GEN_APPLICATION_OPEN_COMPLETE) */
+	    GenAppNotifyModelIfDoc(oself, MemDeref(appLaunchBlock), FALSE);
+	    if (!(AppPart(oself)->GAI_states & AS_ATTACHING))
+		IACPFinishConnect(connection, oself);
+	}
+    } else {
+	RecordConnection(oself, connection, MSG_GEN_PROCESS_OPEN_ENGINE);
+	IACPFinishConnect(connection, oself);
+    }
+    if (alb)
+	MemUnlock(appLaunchBlock);
+    /* Port32: not yet: GenAppUpdateTransparentDetachLists */
+}
+
+/*
+ * GenApplicationIACPLostConnection: the client has gone: the documents
+ * are told (through the document group, down the model hierarchy), and
+ * the application leaves the connection once its queues are through.
+ */
+@extern method GenApplicationClass, MSG_META_IACP_LOST_CONNECTION
+{
+    struct { IACPConnection connection; word serverNum; } p;
+    EventHandle lost, kids;
+
+    (void) pself;
+    if (serverNum)
+	return;			/* another server went */
+    p.connection = connection;
+    p.serverNum = serverNum;
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &MetaClass,
+		 MSG_META_IACP_LOST_CONNECTION, &p, sizeof(p), &lost,
+		 sizeof(lost));
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentGroupClass,
+		 MSG_GEN_SEND_TO_CHILDREN, &lost, sizeof(lost), &kids,
+		 sizeof(kids));
+    @call oself::MSG_META_SEND_CLASSED_EVENT(kids,
+					     (TravelOption) TO_MODEL);
+    IACPLostConnection(oself, connection);
+}
+
+/*
+ * GenApplicationIACPShutdownConnection: out of the connection, and the
+ * connection out of the application's; that may have been what kept it
+ * (MSG_GEN_APPLICATION_APP_MODE_COMPLETE, with the ack that waits).
+ */
+@extern method GenApplicationClass, MSG_META_IACP_SHUTDOWN_CONNECTION
+{
+    optr arr, *ack;
+    word n, i, size;
+
+    (void) pself;
+    IACPShutdownConnection(oself, connection);
+    /* (no array: NO_MORE_CONNECTIONS has been through, the application
+     * is going already) */
+    arr = GenAppIACPConnects(oself);
+    if (!arr)
+	return;
+    n = ChunkArrayGetCount(arr);
+    for (i = 0; i < n; i++) {
+	GenAppIACPConnection *c = ChunkArrayElementToPtr(arr, i, &size);
+
+	if (c->GAIACPC_connection == connection) {
+	    ChunkArrayDelete(arr, c);
+	    break;
+	}
+    }
+    ack = ObjVarFindData(oself, TEMP_GEN_APPLICATION_APP_MODE_COMPLETE_ACK_OD);
+    @call oself::MSG_GEN_APPLICATION_APP_MODE_COMPLETE(ack ? *ack : NullOptr);
+}
+
+/*
+ * GenAppMetaIACPProcessMessage: a message over a connection.  The
+ * completion message of MSG_META_IACP_ALLOW_FILE_ACCESS waits until
+ * the document has closed its file
+ * (MSG_GEN_APPLICATION_CLOSE_FILE_ACK).
+ */
+@extern method GenApplicationClass, MSG_META_IACP_PROCESS_MESSAGE
+{
+    optr dest;
+
+    (void) pself;
+    if (completionMsg && ObjGetMessageInfo(msgToSend, &dest) ==
+			     MSG_META_IACP_ALLOW_FILE_ACCESS) {
+	EventHandle *ev = ObjVarAddData(oself,
+				TEMP_GEN_APPLICATION_CLOSE_FILE_ACK_EVENT,
+				sizeof(EventHandle));
+
+	*ev = completionMsg;
+	completionMsg = 0;
+    }
+    IACPProcessMessage(oself, msgToSend, topt, completionMsg);
+}
+
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_CLOSE_FILE_ACK
+{
+    EventHandle *ev = ObjVarFindData(oself,
+				     TEMP_GEN_APPLICATION_CLOSE_FILE_ACK_EVENT);
+    EventHandle done;
+
+    (void) pself;
+    if (!ev)
+	return;
+    done = *ev;
+    ObjVarDeleteData(oself, TEMP_GEN_APPLICATION_CLOSE_FILE_ACK_EVENT);
+    CMessageDispatchP(done, MF_FORCE_QUEUE, NULL, 0);
+}
+
+/*
+ * GenAppIACPCloseReopenFile: someone needs the file of the document:
+ * it closes it, and opens it again afterwards; an application with
+ * HINT_APPLICATION_QUIT_ON_IACP_ALLOW_FILE_ACCESS detaches instead.
+ */
+@extern method GenApplicationClass, MSG_META_IACP_ALLOW_FILE_ACCESS,
+			     MSG_META_IACP_NOTIFY_FILE_ACCESS_FINISHED
+{
+    EventHandle ev;
+
+    (void) pself;
+    if (ObjVarFindData(oself,
+		       HINT_APPLICATION_QUIT_ON_IACP_ALLOW_FILE_ACCESS)) {
+	if (message == MSG_META_IACP_ALLOW_FILE_ACCESS)
+	    @call oself::MSG_META_TRANSPARENT_DETACH();
+	return;
+    }
+    if (message == MSG_META_IACP_ALLOW_FILE_ACCESS)
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass,
+		     MSG_GEN_DOCUMENT_CLOSE_FILE, &connection,
+		     sizeof(connection), &ev, sizeof(ev));
+    else
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass,
+		     MSG_GEN_DOCUMENT_REOPEN_FILE, NULL, 0, &ev, sizeof(ev));
+    @call oself::MSG_META_SEND_CLASSED_EVENT(ev,
+					     (TravelOption) TO_MODEL);
+}
+/* GenApplicationIACPNoMoreConnections: still nothing to stay for: the
+ * process really detaches, after the input queue */
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_NO_MORE_CONNECTIONS
+{
+    EventHandle ev;
+
+    (void) ackOD;
+    /* usable again, or on the way there, or a connection came in
+     * while it quits: a server again, for a while */
+    if (pself->GI_states & GS_USABLE) {
+	@call oself::MSG_GEN_APPLICATION_IACP_REGISTER(
+	    IACPSM_USER_INTERACTIBLE);
+	return;
+    }
+    if ((pself->GAI_states & AS_ATTACHING) ||
+	(@call oself::MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_CONNECTIONS() &&
+	 (AppPart(oself)->GAI_states & AS_QUITTING))) {
+	@call oself::MSG_GEN_APPLICATION_IACP_REGISTER(
+	    IACPSM_NOT_USER_INTERACTIBLE);
+	return;
+    }
+    pself = AppPart(oself);
+    if (pself->GAI_iacpConnects) {
+	ChunkHandle c = pself->GAI_iacpConnects;
+
+	pself->GAI_iacpConnects = 0;
+	LMemFree(ConstructOptr(OptrToHandle(oself), c));
+    }
+    ev = @record oself::MSG_GEN_APPLICATION_IACP_SHUTDOWN_ALL_CONNECTIONS();
+    @call oself::MSG_META_OBJ_FLUSH_INPUT_QUEUE(ev, OFIQNS_SYSTEM_INPUT_OBJ,
+						OptrToHandle(oself));
+    pself = AppPart(oself);
+    if (pself->GAI_states & AS_REAL_DETACHING)
+	FatalError(UI_ERROR_SECOND_REAL_DETACH);
+    pself->GAI_states |= AS_REAL_DETACHING;
+    ev = @record GenAppProcessOptr()::MSG_GEN_PROCESS_REAL_DETACH();
+    @call oself::MSG_META_OBJ_FLUSH_INPUT_QUEUE(ev, OFIQNS_SYSTEM_INPUT_OBJ,
+						OptrToHandle(oself));
+}
+
+/* ---------------------------------------------------------------------
+ * The order of the windows (genAppCommonIACP.asm): the GAGCNLT_WINDOWS
+ * list keeps the window raised last first
+ * ------------------------------------------------------------------- */
+
+/* FindWindowListItem: the list's array and the window's element in it,
+ * NULL if not there */
+static GCNListElement *FindWindowListItem(optr oself, optr window,
+					  optr *array)
+{
+    TempMetaGCNData *g = ObjVarFindData(oself, TEMP_META_GCN);
+    MemHandle mh = OptrToHandle(oself);
+    ChunkHandle list;
+    word i, n;
+    GCNListElement *e;
+
+    if (!g)
+	return NULL;
+    list = GCNListFindListInBlock(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS,
+				  mh, g->TMGCND_listOfLists, FALSE);
+    if (!list)
+	return NULL;
+    *array = ConstructOptr(mh, list);
+    n = ChunkArrayGetCount(*array);
+    for (i = 0; i < n; i++) {
+	optr item;
+
+	e = ChunkArrayElementToPtr(*array, i, NULL);
+	memcpy(&item, &e->GCNLE_item, sizeof(item));
+	if (item == window)
+	    return e;
+    }
+    return NULL;
+}
+
+/* GenApplicationBringWindowToTop: the window first on the list */
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP
+{
+    optr array;
+    GCNListElement *e = FindWindowListItem(oself, window, &array), *first;
+    optr item;
+
+    if (!e)
+	return;
+    first = ChunkArrayElementToPtr(array, 0, NULL);
+    if (first == e)
+	return;
+    memcpy(&item, &e->GCNLE_item, sizeof(item));
+    ChunkArrayDelete(array, e);
+    first = ChunkArrayElementToPtr(array, 0, NULL);
+    e = ChunkArrayInsertAt(array, first, 0);
+    memcpy(&e->GCNLE_item, &item, sizeof(item));
+}
+
+/* GenApplicationLowerWindowToBottom: the window last on the list */
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_LOWER_WINDOW_TO_BOTTOM
+{
+    optr array;
+    GCNListElement *e = FindWindowListItem(oself, window, &array);
+    optr item;
+
+    if (!e)
+	return;
+    memcpy(&item, &e->GCNLE_item, sizeof(item));
+    ChunkArrayDelete(array, e);
+    e = ChunkArrayAppend(array, 0);
+    memcpy(&e->GCNLE_item, &item, sizeof(item));
+}
+
+#define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
+
+/* GenAppInitDocumentCommonParams: the document of a launch block; one
+ * below SP_TEMPLATE is opened as a template */
+static void InitDocumentCommonParams(DocumentCommonParams *p,
+				     const AppLaunchBlock *alb)
+{
+    memset(p, 0, sizeof(*p));
+    memcpy(p->DCP_name, alb->ALB_dataFile, sizeof(p->DCP_name));
+    p->DCP_diskHandle = alb->ALB_diskHandle;
+    memcpy(p->DCP_path, alb->ALB_path, sizeof(p->DCP_path));
+    if (alb->ALB_launchFlags & ALF_OPEN_FOR_IACP_ONLY)
+	p->DCP_flags |= DOF_OPEN_FOR_IACP_ONLY;
+    if (FileComparePaths("", SP_TEMPLATE, alb->ALB_path,
+			 alb->ALB_diskHandle) <= PCT_SUBDIR)
+	p->DCP_flags |= DOF_FORCE_TEMPLATE_BEHAVIOR;
+}
+
+/*
+ * GenAppNotifyModelIfDoc: the document group opens the document of the
+ * launch block; without one, the document control its default document
+ * if asked for.
+ */
+void GenAppNotifyModelIfDoc(optr oself, const AppLaunchBlock *alb,
+			     Boolean openDefault)
+{
+    DocumentCommonParams p;
+    EventHandle ev;
+
+    if (alb->ALB_dataFile[0]) {
+	InitDocumentCommonParams(&p, alb);
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentGroupClass,
+		     MSG_GEN_DOCUMENT_GROUP_OPEN_DOC, &p, sizeof(p), &ev,
+		     sizeof(ev));
+    } else if (openDefault) {
+	CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentControlClass,
+		     MSG_GEN_DOCUMENT_CONTROL_OPEN_DEFAULT_DOC, NULL, 0, &ev,
+		     sizeof(ev));
+    } else {
+	return;
+    }
+    @call oself::MSG_META_SEND_CLASSED_EVENT(ev,
+					     (TravelOption) TO_MODEL);
+}
+
+/*
+ * GenAppSwitchToAppMode: the application is to be open for the user.
+ * Usable already: it comes to the top (FALSE).  Else the process takes
+ * it from engine to application mode with a copy of the launch block
+ * (TRUE: on the way; the document of the block is seen to then).
+ */
+Boolean GenAppSwitchToAppMode(optr oself, MemHandle albHandle)
+{
+    GenApplicationInstance *pself = AppPart(oself);
+    AppLaunchBlock *alb = MemLock(albHandle);
+    AppLaunchFlags launchFlags = alb->ALB_launchFlags;
+    Boolean dataFile = alb->ALB_dataFile[0] != 0;
+    MemHandle copy;
+
+    MemUnlock(albHandle);
+    if (!(launchFlags & ALF_OPEN_FOR_IACP_ONLY)) {
+	/* open for the user's general use from now on; a quit that has
+	 * not detached yet can be given up */
+	pself->GAI_launchFlags &= ~ALF_OPEN_FOR_IACP_ONLY;
+	if (pself->GAI_states & AS_QUITTING)
+	    (void) ObjVarAddData(oself, TEMP_GEN_APPLICATION_ABORT_QUIT, 0);
+    }
+    pself = AppPart(oself);
+    if (pself->GI_states & GS_USABLE) {
+	if (!(launchFlags & (ALF_DO_NOT_OPEN_ON_TOP | ALF_OPEN_IN_BACK))) {
+	    @call oself::MSG_META_NOTIFY_TASK_SELECTED();
+	    @call oself::MSG_GEN_BRING_TO_TOP();
+	}
+	return FALSE;
+    }
+    if (pself->GAI_states & AS_ATTACHING)
+	return TRUE;
+    /* (early, so a connection shut down before MSG_META_ATTACH comes
+     * does not make the application exit) */
+    pself->GAI_states |= AS_ATTACHING;
+    copy = IACPDuplicateALB(albHandle);
+    MemInitRefCount(copy, 1);
+    @send, forceQueue GenAppProcessOptr()::
+	MSG_GEN_PROCESS_TRANSITION_FROM_ENGINE_TO_APPLICATION_MODE(
+	    dataFile ? AAF_DATA_FILE_PASSED : 0, copy);
+    /* the copy goes when the application is open */
+    @send, forceQueue GenAppProcessOptr()::MSG_META_DEC_BLOCK_REF_COUNT(copy, 0);
+    return TRUE;
+}

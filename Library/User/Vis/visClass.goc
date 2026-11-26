@@ -1,7 +1,7 @@
 /*
- * visClass.goc -- VisClass (after visClass.asm, with the methods of
- * visUtilsResident.asm, visUtilsClass.asm and visGeometry.asm: goc
- * wants all methods of a class in the file of its @classdecl).
+ * visClass.goc -- VisClass, after visClass.asm, which has its class
+ * record; its other methods are in visGeometry.goc, visSpec.goc,
+ * visUtilsClass.goc and visUtilsResident.goc, each beside its asm file.
  *
  * VisClass is the base of the visual tree: bounds, the opening and
  * closing of the visible branch (MSG_VIS_OPEN/CLOSE), the update
@@ -14,9 +14,6 @@
  *     answered), as the C prototypes of visC.goh have them;
  *   - the clipboard is not in the library yet: the quick transfer of
  *     MSG_META_END_MOVE_COPY goes nowhere (Port32/ABI.md section 13x);
- *   - the handlers of the specific part of a generic object (the
- *     MSG_SPEC_* messages, after visSpec.asm) are at the end; their
- *     routines are in visSpec.goc;
  *   - MSG_VIS_VUP_QUERY goes up with its query
  *     (MSG_VIS_P32_VUP_QUERY, Internal/specC.goh);
  *   - MSG_VIS_CALL_ROUTINE (registers and a far routine) is not handled
@@ -25,8 +22,65 @@
 @include "uiInt.goh"
 #include <string.h>
 #include <stdint.h>
+@include <Objects/gFieldC.goh>
+#include <localize.h>
+#include <Internal/grWinInt.h>
 
 @classdecl VisEmptyClass, neverSaved;
+@extern method VisClass, MSG_VIS_RECALC_SIZE;
+@extern method VisClass, MSG_VIS_GET_SIZE;
+@extern method VisClass, MSG_SPEC_GET_EXTRA_SIZE;
+@extern method VisClass, MSG_VIS_SET_SIZE;
+@extern method VisClass, MSG_VIS_SET_POSITION, MSG_VIS_POSITION_BRANCH;
+@extern method VisClass, MSG_VIS_GET_CENTER;
+@extern method VisClass, MSG_VIS_GRAB_MOUSE;
+@extern method VisClass, MSG_VIS_FORCE_GRAB_MOUSE;
+@extern method VisClass, MSG_VIS_GRAB_LARGE_MOUSE;
+@extern method VisClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE;
+@extern method VisClass, MSG_META_GRAB_KBD;
+@extern method VisClass, MSG_META_FORCE_GRAB_KBD;
+@extern method VisClass, MSG_META_RELEASE_KBD;
+@extern method VisClass, MSG_VIS_RELEASE_MOUSE;
+@extern method VisClass, MSG_VIS_MARK_INVALID;
+@extern method VisClass, MSG_VIS_REMOVE_NON_DISCARDABLE;
+@extern method VisClass, MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED;
+@extern method VisClass, MSG_VIS_POSITION_AND_INVAL_IF_NEEDED;
+@extern method VisClass, MSG_VIS_INVAL_ALL_GEOMETRY;
+@extern method VisClass, MSG_VIS_ADD_BUTTON_PRE_PASSIVE;
+@extern method VisClass, MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE;
+@extern method VisClass, MSG_VIS_ADD_BUTTON_POST_PASSIVE;
+@extern method VisClass, MSG_VIS_REMOVE_BUTTON_POST_PASSIVE;
+@extern method VisClass, MSG_SPEC_CHECK_MNEMONIC;
+@extern method VisClass, MSG_SPEC_CONVERT_SIZE;
+@extern method VisClass, MSG_SPEC_BUILD_BRANCH;
+@extern method VisClass, MSG_SPEC_UNBUILD;
+@extern method VisClass, MSG_SPEC_UNBUILD_BRANCH;
+@extern method VisClass, MSG_SPEC_SET_USABLE;
+@extern method VisClass, MSG_SPEC_SET_NOT_USABLE;
+@extern method VisClass, MSG_SPEC_UPDATE_VISUAL;
+@extern method VisClass, MSG_SPEC_SET_ATTRS;
+@extern method VisClass, MSG_SPEC_GET_ATTRS;
+@extern method VisClass, MSG_SPEC_NOTIFY_ENABLED;
+@extern method VisClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
+@extern method VisClass, MSG_SPEC_UPDATE_VIS_MONIKER;
+@extern method VisClass, MSG_SPEC_UPDATE_KBD_ACCELERATOR;
+@extern method VisClass, MSG_SPEC_GUP_QUERY_VIS_PARENT;
+@extern method VisClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
+@extern method VisClass, MSG_SPEC_RESOLVE_MONIKER_LIST;
+@extern method VisClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT;
+@extern method VisClass, MSG_SPEC_NAVIGATE;
+@extern method VisClass, MSG_SPEC_NAVIGATION_QUERY;
+@extern method VisClass, MSG_SPEC_NAVIGATE_COMMON;
+@extern method VisClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
+@extern method VisClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD, MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD, MSG_SPEC_UPDATE_MENU_SEPARATORS;
+@extern method VisClass, MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT;
+@extern method VisClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO;
+@extern method VisClass, MSG_SPEC_BUILD;
+@extern method VisClass, MSG_VIS_UPDATE_GEOMETRY;
+@extern method VisClass, MSG_VIS_BOUNDS_CHANGED;
+@extern method VisClass, MSG_VIS_RESET_TO_INITIAL_SIZE, MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN;
+@extern method VisClass, MSG_VIS_SET_GEO_ATTRS;
+@extern method VisClass, MSG_VIS_GET_GEO_ATTRS;
 @classdecl VisClass, neverSaved;
 
 /* ---------------------------------------------------------------------
@@ -72,13 +126,6 @@
 @method VisClass, MSG_VIS_REMOVE
 {
     VisRemove(oself, updateMode);
-}
-
-/* VisCompRemoveNonDiscardable */
-@method VisClass, MSG_VIS_REMOVE_NON_DISCARDABLE
-{
-    @call oself::MSG_VIS_REMOVE(updateMode);
-    ObjDecInUseCount(OptrToHandle(oself));
 }
 
 /* ---------------------------------------------------------------------
@@ -323,12 +370,6 @@ call:
 	InvalUpdateRegionIfNeeded(oself);
 }
 
-/* VisMarkInvalid (static) */
-@method VisClass, MSG_VIS_MARK_INVALID
-{
-    VisMarkInvalid(oself, flagsToSet, updateMode);
-}
-
 /* VisVupUpdateWinGroup (static) */
 @method VisClass, MSG_VIS_VUP_UPDATE_WIN_GROUP
 {
@@ -524,72 +565,6 @@ static void AddToInvalRegion(optr oself, const Rectangle *r)
  * Geometry (visGeometry.asm, visUtilsClass.asm)
  * ------------------------------------------------------------------- */
 
-/* VisGetSize (static): MSG_VIS_RECALC_SIZE keeps the size */
-@method VisClass, MSG_VIS_RECALC_SIZE
-{
-    (void) width;
-    (void) height;
-    return VisGetSize(oself);
-}
-
-@method VisClass, MSG_VIS_GET_SIZE
-{
-    return VisGetSize(oself);
-}
-
-/* VisGetSize: the space besides the moniker is the whole object; no
- * children left over */
-@method VisClass, MSG_SPEC_GET_EXTRA_SIZE
-{
-    SizeAsDWord s = VisGetSize(oself);
-
-    (void) childCount;
-    retValue->ESP_extraWidth = DWORD_WIDTH(s);
-    retValue->ESP_extraHeight = DWORD_HEIGHT(s);
-    retValue->ESP_leftoverChildren = 0;
-    retValue->ESP_unused = 0;
-}
-
-/* VisConvertSize */
-@method VisClass, MSG_SPEC_CONVERT_SIZE
-{
-    return VisConvertSpecVisSize(oself, specSize, gstate);
-}
-
-/*
- * VisSpecConvertDesiredSizeHint: a desired size in pixels, with the
- * object's extra size (by the font of its GState); 0 stays 0
- */
-@method VisClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT
-{
-    ExtraSizeParams e;
-    GStateHandle gs;
-    word w = 0, h = 0;
-
-    memset(&e, 0, sizeof(e));
-    @call oself::MSG_SPEC_GET_EXTRA_SIZE(&e, childCount);
-    gs = @call oself::MSG_VIS_VUP_CREATE_GSTATE();
-    if (desiredWidth)
-	w = (word) (VisConvertSpecVisSize(oself, desiredWidth, gs) +
-		    e.ESP_extraWidth);
-    if (desiredHeight)
-	h = (word) (VisConvertSpecVisSize(oself, desiredHeight, gs) +
-		    e.ESP_extraHeight);
-    if (gs)
-	GrDestroyState(gs);
-    return MAKE_SIZE_DWORD(w, h);
-}
-
-@method VisClass, MSG_VIS_SET_SIZE
-{
-    VisSetSize(oself, width, height);
-}
-
-@method VisClass, MSG_VIS_SET_POSITION, MSG_VIS_POSITION_BRANCH
-{
-    VisSetPosition(oself, xOrigin, yOrigin);
-}
-
 @method VisClass, MSG_VIS_GET_POSITION
 {
     return MAKE_XY_DWORD(pself->VI_bounds.R_left, pself->VI_bounds.R_top);
@@ -598,45 +573,6 @@ static void AddToInvalRegion(optr oself, const Rectangle *r)
 @method VisClass, MSG_VIS_GET_BOUNDS
 {
     *retValue = pself->VI_bounds;
-}
-
-@method VisClass, MSG_VIS_GET_CENTER
-{
-    VisGetCenter(oself, retValue);
-}
-
-/* VisUpdateGeometry: the children's geometry first (if only the path
- * is set), then this object sized and placed where it is; the parent's
- * geometry is invalid if the bounds changed */
-@method VisClass, MSG_VIS_UPDATE_GEOMETRY
-{
-    VisInstance *v = VisPart(oself);
-    SizeAsDWord s;
-    Rectangle b;
-
-    if (!(v->VI_optFlags & VOF_GEOMETRY_INVALID)) {
-	if (!(v->VI_typeFlags & VTF_IS_COMPOSITE))
-	    goto done;
-	VisIfFlagSetCallVisChildren(oself, MSG_VIS_UPDATE_GEOMETRY, NULL, 0,
-				    VOF_GEOMETRY_INVALID |
-				    VOF_GEO_UPDATE_PATH);
-	if (!(VisPart(oself)->VI_optFlags & VOF_GEOMETRY_INVALID))
-	    goto done;
-    }
-    s = VisGetSize(oself);
-    if (!DWORD_WIDTH(s) && !DWORD_HEIGHT(s))
-	s = MAKE_SIZE_DWORD(RSA_CHOOSE_OWN_SIZE, RSA_CHOOSE_OWN_SIZE);
-    s = @call oself::MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED(DWORD_WIDTH(s),
-							     DWORD_HEIGHT(s));
-    VisSetSize(oself, DWORD_WIDTH(s), DWORD_HEIGHT(s));
-    VisGetBounds(oself, &b);
-    if (@call oself::MSG_VIS_POSITION_AND_INVAL_IF_NEEDED(b.R_left,
-							    b.R_top) &&
-	!(VisPart(oself)->VI_typeFlags & VTF_IS_WIN_GROUP))
-	VisMarkInvalidOnParent(oself, VOF_GEOMETRY_INVALID, VUM_MANUAL);
-done:
-    VisPart(oself)->VI_optFlags &= ~(VOF_GEOMETRY_INVALID |
-				     VOF_GEO_UPDATE_PATH);
 }
 
 /* SaveOldBounds: the bounds before the geometry changes them */
@@ -653,183 +589,9 @@ void VisSaveOldBounds(optr obj)
     VisUnlock(obj);
 }
 
-/* VisRecalcSizeAndInvalIfNeeded: MSG_VIS_RECALC_SIZE unless the size
- * passed is the one there (or the object only recalculates when
- * invalid) */
-@method VisClass, MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED
-{
-    VisInstance *v = VisPart(oself);
-    SizeAsDWord s = VisGetSize(oself);
-    Boolean call;
-
-    if (v->VI_optFlags & (VOF_GEOMETRY_INVALID | VOF_GEO_UPDATE_PATH) ||
-	v->VI_geoAttrs & VGA_ALWAYS_RECALC_SIZE)
-	call = TRUE;
-    else if (v->VI_geoAttrs & VGA_ONLY_RECALC_SIZE_WHEN_INVALID)
-	call = FALSE;
-    else
-	call = (!(width & RSA_CHOOSE_OWN_SIZE) && width != DWORD_WIDTH(s)) ||
-	       (!(height & RSA_CHOOSE_OWN_SIZE) &&
-		height != DWORD_HEIGHT(s));
-    if (call) {
-	if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
-	    VisSaveOldBounds(oself);
-	else
-	    VisMarkInvalid(oself, VOF_WINDOW_INVALID | VOF_IMAGE_INVALID,
-			   VUM_MANUAL);
-	s = @call oself::MSG_VIS_RECALC_SIZE(width, height);
-    }
-    VisPart(oself)->VI_optFlags &= ~(VOF_GEOMETRY_INVALID |
-				     VOF_GEO_UPDATE_PATH);
-    return s;
-}
-
-/* VisBoundsChanged (static, from CheckForBoundsChange): the old bounds
- * invalidated (not for a win group: the window covers them), the new
- * window and image invalid */
-static void BoundsChanged(optr oself, const Rectangle *old)
-{
-    VisInstance *v = VisPart(oself);
-
-    if (v->VI_attrs & VA_REALIZED) {
-	if (old->R_left == old->R_right || old->R_top == old->R_bottom ||
-	    old->R_right & RSA_CHOOSE_OWN_SIZE ||
-	    old->R_bottom & RSA_CHOOSE_OWN_SIZE)
-	    return;
-	if (v->VI_typeFlags & VTF_IS_CONTENT ||
-	    !(v->VI_typeFlags & VTF_IS_WIN_GROUP))
-	    @call oself::MSG_VIS_ADD_RECT_TO_UPDATE_REGION(0,
-		VARF_NOT_IF_ALREADY_INVALID | VARF_ONLY_REDRAW_MARGINS,
-		old->R_bottom, old->R_right, old->R_top, old->R_left);
-    }
-    VisMarkInvalid(oself, VOF_WINDOW_INVALID | VOF_IMAGE_INVALID,
-		   VUM_MANUAL);
-}
-
-@method VisClass, MSG_VIS_BOUNDS_CHANGED
-{
-    Rectangle old;
-
-    old.R_left = left;
-    old.R_top = top;
-    old.R_right = right;
-    old.R_bottom = bottom;
-    BoundsChanged(oself, &old);
-}
-
-/* CheckForBoundsChange: TRUE if the bounds changed since SaveOldBounds
- * (or none were saved) */
-static Boolean CheckForBoundsChange(optr oself)
-{
-    Rectangle *saved, old, now;
-
-    VisPart(oself)->VI_attrs &= ~VA_OLD_BOUNDS_SAVED;
-    saved = ObjVarFindData(oself, TEMP_VIS_OLD_BOUNDS);
-    if (!saved)
-	return TRUE;
-    old = *saved;
-    ObjVarDeleteData(oself, TEMP_VIS_OLD_BOUNDS);
-    VisGetBounds(oself, &now);
-    if (!memcmp(&old, &now, sizeof(old)))
-	return FALSE;
-    BoundsChanged(oself, &old);
-    return TRUE;
-}
-
-/* VisSendPositionAndInvalIfNeeded: placed (MSG_VIS_POSITION_BRANCH, or
- * VisSetPosition or VisCompPosition directly); TRUE if the bounds
- * changed */
-@method VisClass, MSG_VIS_POSITION_AND_INVAL_IF_NEEDED
-{
-    VisInstance *v = VisPart(oself);
-    Boolean changed;
-
-    if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
-	VisSaveOldBounds(oself);
-    v = VisPart(oself);
-    if (v->VI_geoAttrs & VGA_USE_VIS_SET_POSITION) {
-	if (v->VI_typeFlags & VTF_IS_COMPOSITE)
-	    VisCompPosition(oself, xPosition, yPosition, 0);
-	else
-	    VisSetPosition(oself, xPosition, yPosition);
-    } else
-	@call oself::MSG_VIS_POSITION_BRANCH(xPosition, yPosition);
-    VisPart(oself)->VI_geoAttrs |= VGA_GEOMETRY_CALCULATED;
-    changed = CheckForBoundsChange(oself);
-    if (VisPart(oself)->VI_geoAttrs & VGA_NOTIFY_GEOMETRY_VALID)
-	@call oself::MSG_VIS_NOTIFY_GEOMETRY_VALID();
-    return changed;
-}
-
-/* VisResetToInitialSize: managed objects of the branch recalculate their
- * geometry from scratch */
-@method VisClass, MSG_VIS_RESET_TO_INITIAL_SIZE,
-		  MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN
-{
-    struct { VisUpdateMode m; } p;
-
-    if (!(pself->VI_attrs & VA_MANAGED))
-	return;
-    VisSaveOldBounds(oself);
-    VisPart(oself)->VI_geoAttrs &= ~VGA_GEOMETRY_CALCULATED;
-    p.m = VUM_MANUAL;
-    VisIfFlagSetCallVisChildren(oself, message, &p, sizeof(p), 0);
-    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID |
-		   VOF_WINDOW_INVALID, updateMode);
-}
-
-@method VisClass, MSG_VIS_SET_GEO_ATTRS
-{
-    pself->VI_geoAttrs = (pself->VI_geoAttrs | attrsToSet) & ~attrsToClear;
-    if ((attrsToSet | attrsToClear) & (VGA_DONT_CENTER | VGA_NO_SIZE_HINTS))
-	VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, updateMode);
-}
-
-@method VisClass, MSG_VIS_GET_GEO_ATTRS
-{
-    return pself->VI_geoAttrs;
-}
-
-/* VisInvalAllGeometry: the geometry of the managed branch invalid */
-@method VisClass, MSG_VIS_INVAL_ALL_GEOMETRY
-{
-    struct { VisUpdateMode m; } p;
-
-    if (!(pself->VI_attrs & VA_MANAGED))
-	return;
-    if (pself->VI_typeFlags & VTF_IS_COMPOSITE) {
-	p.m = VUM_MANUAL;
-	VisSendToChildren(oself, MSG_VIS_INVAL_ALL_GEOMETRY, &p, sizeof(p));
-    }
-    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID, updateMode);
-}
-
 /* ---------------------------------------------------------------------
  * Removing from the tree (VisRemove of visUtilsClass.asm)
  * ------------------------------------------------------------------- */
-
-/* VisSetNotRealized (visSpecUtils.asm): a realized win group is made not
- * visible and updated now (it closes), another object closed */
-void VisSetNotRealized(optr obj)
-{
-    VisInstance *v;
-
-    if (!VisCheckIfVisGrown(obj))
-	return;
-    v = VisLock(obj);
-    if (!(v->VI_attrs & VA_REALIZED)) {
-	VisUnlock(obj);
-	return;
-    }
-    if (v->VI_typeFlags & VTF_IS_WIN_GROUP) {
-	v->VI_attrs &= ~VA_VISIBLE;
-	VisUnlock(obj);
-	VisVupUpdateWinGroup(obj, VUM_NOW);
-	return;
-    }
-    VisUnlock(obj);
-    @call obj::MSG_VIS_CLOSE();
-}
 
 /* VisVupInvalGeoToHere: the geometry invalid up the managed path to the
  * win group, updated there */
@@ -1165,66 +927,6 @@ out:
  * Input
  * ------------------------------------------------------------------- */
 
-@method VisClass, MSG_VIS_GRAB_MOUSE
-{
-    VisGrabMouse(oself);
-}
-
-@method VisClass, MSG_VIS_FORCE_GRAB_MOUSE
-{
-    VisForceGrabMouse(oself);
-}
-
-@method VisClass, MSG_VIS_GRAB_LARGE_MOUSE
-{
-    VisGrabLargeMouse(oself);
-}
-
-@method VisClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE
-{
-    VisForceGrabLargeMouse(oself);
-}
-
-@method VisClass, MSG_VIS_RELEASE_MOUSE
-{
-    VisReleaseMouse(oself);
-}
-
-@method VisClass, MSG_META_GRAB_KBD
-{
-    VisGrabKbd(oself);
-}
-
-@method VisClass, MSG_META_FORCE_GRAB_KBD
-{
-    VisForceGrabKbd(oself);
-}
-
-@method VisClass, MSG_META_RELEASE_KBD
-{
-    VisReleaseKbd(oself);
-}
-
-@method VisClass, MSG_VIS_ADD_BUTTON_PRE_PASSIVE
-{
-    VisAlterInputFlow(oself, VIFGF_MOUSE | VIFGF_GRAB, VIFGT_PRE_PASSIVE);
-}
-
-@method VisClass, MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE
-{
-    VisAlterInputFlow(oself, VIFGF_MOUSE, VIFGT_PRE_PASSIVE);
-}
-
-@method VisClass, MSG_VIS_ADD_BUTTON_POST_PASSIVE
-{
-    VisAlterInputFlow(oself, VIFGF_MOUSE | VIFGF_GRAB, VIGFT_POST_PASSIVE);
-}
-
-@method VisClass, MSG_VIS_REMOVE_BUTTON_POST_PASSIVE
-{
-    VisAlterInputFlow(oself, VIFGF_MOUSE, VIGFT_POST_PASSIVE);
-}
-
 /* VisVupAlterInputFlow: on to the input node */
 @method VisClass, MSG_VIS_VUP_ALTER_INPUT_FLOW
 {
@@ -1351,129 +1053,8 @@ out:
     retVal->inkType = IRV_NO_INK;
 }
 
-/* ---------------------------------------------------------------------
- * The specific part of a generic object (visSpec.asm)
- * ------------------------------------------------------------------- */
-
-/*
- * VisSpecNavigate: the navigation query from here: each object queried
- * names the next, until one answers (backtracking: the last focusable
- * object before it); the answer told it is
- */
-@method VisClass, MSG_SPEC_NAVIGATE
-{
-    NavigationQueryParams q;
-    NavigationFlags nf = navigateFlags;
-    optr cur = oself, last = 0, found;
-
-    for (;;) {
-	memset(&q, 0, sizeof(q));
-	if (@call cur::MSG_SPEC_NAVIGATION_QUERY(&q, oself, nf)) {
-	    nf = q.NQP_navFlags;
-	    found = (nf & NF_BACKTRACK_AFTER_TRAVELING) ? last
-							: q.NQP_nextObject;
-	    if (found)
-		@call found::MSG_SPEC_NOTIFY_NAVIGATION_COMPLETE(nf);
-	    return found;
-	}
-	nf = q.NQP_navFlags;
-	if (!q.NQP_nextObject)
-	    return 0;
-	if (q.NQP_backtrackFlag)
-	    last = cur;
-	cur = q.NQP_nextObject;
-    }
-}
-
-/* VisSpecNavigationQuery: a leaf, not focusable */
-@method VisClass, MSG_SPEC_NAVIGATION_QUERY
-{
-    return VisNavigateCommon(oself, retValue, queryOrigin, navFlags, 0, 0);
-}
-
-/* VisNavigateCommon as a message: the answer in the parameters (the
- * object found or next in NCP_object) */
-@method VisClass, MSG_SPEC_NAVIGATE_COMMON
-{
-    NavigationQueryParams q;
-    Boolean r;
-
-    r = VisNavigateCommon(oself, &q, navCommonParams->NCP_object,
-			  navCommonParams->NCP_navFlags,
-			  navCommonParams->NCP_navCommonFlags,
-			  navCommonParams->NCP_genPart);
-    navCommonParams->NCP_object = q.NQP_nextObject;
-    navCommonParams->NCP_navFlags = q.NQP_navFlags;
-    navCommonParams->NCP_backtrackFlag = q.NQP_backtrackFlag;
-    return r;
-}
-
-/* VisCheckMnemonic as a message */
-@method VisClass, MSG_SPEC_CHECK_MNEMONIC
-{
-    return VisCheckMnemonic(oself, character, flags, state);
-}
-
-/*
- * VisSpecActivateObjectWithMnemonic: an enabled generic object, not a
- * win group, whose mnemonic it is is activated (MSG_GEN_ACTIVATE); else
- * the visual children are asked until one takes it
- */
-@method VisClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
-{
-    VisInstance *v = pself;
-    optr c, next;
-
-    if ((v->VI_typeFlags & VTF_IS_GEN) &&
-	!(v->VI_typeFlags & VTF_IS_WIN_GROUP) &&
-	GenCheckIfFullyEnabled(oself, FALSE) &&
-	VisCheckMnemonic(oself, character, flags, state)) {
-	@call oself::MSG_GEN_ACTIVATE();
-	return TRUE;
-    }
-    if (!(VisLock(oself)->VI_typeFlags & VTF_IS_COMPOSITE)) {
-	VisUnlock(oself);
-	return FALSE;
-    }
-    c = ((VisCompInstance *) VisLock(oself))->VCI_comp.CP_firstChild;
-    VisUnlock(oself);
-    VisUnlock(oself);
-    while (c) {
-	next = VisLock(c)->VI_link.LP_next;
-	VisUnlock(c);
-	if (@call c::MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC(character, flags,
-							    state))
-	    return TRUE;
-	if (next & LP_IS_PARENT)
-	    break;
-	c = next;
-    }
-    return FALSE;
-}
-
-/* the defaults: up the visual tree (or the generic one) */
-@method VisClass, MSG_SPEC_NAVIGATE_TO_NEXT_FIELD,
-		  MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD,
-		  MSG_SPEC_UPDATE_MENU_SEPARATORS
-{
-    VisCallParent(oself, message, NULL, 0, NULL, 0);
-}
-
-@method VisClass, MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT
-{
-    Boolean r = FALSE;
-
-    VisCallParent(oself, message, NULL, 0, &r, sizeof(r));
-    return r;
-}
-
 /* (MSG_GEN_MAKE_APPLYABLE and _NOT_APPLYABLE up the visual tree: not
  * yet, goc gives VisClass no Gen messages) */
-
-@method VisClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO
-{
-    VisCallParent(oself, message, &retValue, sizeof(retValue), NULL, 0);
-}
 
 @method VisClass, MSG_SPEC_P32_GUP_QUERY
 {
@@ -1484,270 +1065,6 @@ out:
     p.t = queryType;
     GenCallParent(oself, message, &p, sizeof(p), &r, sizeof(r));
     return r;
-}
-
-/*
- * VisSpecBuild: a generic object that is not built yet is added to its
- * visual parent (in the generic order) and, with position hints, asks
- * to hear when its geometry is valid.
- */
-@method VisClass, MSG_SPEC_BUILD
-{
-    optr vp;
-    sword x, y;
-
-    if (!(pself->VI_typeFlags & VTF_IS_GEN) || VisCheckIfSpecBuilt(oself))
-	return;
-    VisSpecBuildSetEnabledState(oself, flags);
-    vp = VisGetVisParent(oself, &flags);
-    if (!vp)
-	return;
-    VisAddChildRelativeToGen(oself, oself, vp, flags);
-    /* a moniker list replaced by the moniker fitting the display (an
-     * icon if there is one, else a gstring, else the text) */
-    (void) @call oself::MSG_GEN_FIND_MONIKER(FALSE, VMSF_REPLACE_LIST |
-				VMSF_GSTRING | (VMS_ICON << VMSF_STYLE_OFFSET),
-				0);
-    if (VisSpecCheckForPosHints(oself, &x, &y))
-	VisPart(oself)->VI_geoAttrs |= VGA_NOTIFY_GEOMETRY_VALID;
-}
-
-/* VisSpecBuildBranch: this object (unless the win group part is built
- * already), then the generic children */
-@method VisClass, MSG_SPEC_BUILD_BRANCH
-{
-    if (!(pself->VI_typeFlags & VTF_IS_GEN))
-	return;
-    flags &= ~SBF_VIS_PARENT_FULLY_ENABLED;
-    if (GenCheckIfFullyEnabled(oself, TRUE))
-	flags |= SBF_VIS_PARENT_FULLY_ENABLED;
-    if (!(flags & SBF_WIN_GROUP) || !VisCheckIfSpecBuilt(oself)) {
-	SpecBuildFlags f = flags;
-	if (!(GenPart(oself)->GI_states & GS_ENABLED))
-	    f &= ~SBF_VIS_PARENT_FULLY_ENABLED;
-	@call oself::MSG_SPEC_BUILD(f);
-    }
-    if (!(flags & SBF_WIN_GROUP) &&
-	VisPart(oself)->VI_specAttrs & SA_USES_DUAL_BUILD)
-	return;
-    flags = (flags & ~SBF_WIN_GROUP) | SBF_TREE_BUILD;
-    VisIfFlagSetCallGenChildren(oself, MSG_SPEC_BUILD_BRANCH, &flags,
-				sizeof(flags), 0);
-}
-
-/* VisSpecUnbuild: the generic object's visual object out of the tree */
-@method VisClass, MSG_SPEC_UNBUILD
-{
-    VisUpdateMode mode = (VisUpdateMode) (flags & SBF_UPDATE_MODE);
-    optr vo;
-
-    if (!(pself->VI_typeFlags & VTF_IS_GEN)) {
-	VisRemove(oself, mode);
-	return;
-    }
-    vo = VisGetSpecificVisObject(oself, flags);
-    if (vo)
-	VisRemove(vo, mode);
-}
-
-/*
- * VisSpecUnbuildBranch: the generic object closed (a win group through
- * MSG_META_UPDATE_WINDOW), its children unbuilt, then itself (both
- * parts of a dual build).  A plain visual object is destroyed.
- */
-@method VisClass, MSG_SPEC_UNBUILD_BRANCH
-{
-    VisInstance *v = pself;
-
-    if (!(v->VI_typeFlags & VTF_IS_GEN)) {
-	if (v->VI_typeFlags & VTF_IS_COMPOSITE) {
-	    SpecBuildFlags f = flags | SBF_VIS_PARENT_UNBUILDING;
-	    VisSendToChildren(oself, MSG_SPEC_UNBUILD_BRANCH, &f, sizeof(f));
-	}
-	@call oself::MSG_VIS_DESTROY((VisUpdateMode) (flags &
-						      SBF_UPDATE_MODE));
-	return;
-    }
-    if (v->VI_typeFlags & VTF_IS_WIN_GROUP)
-	VisCompUpdateWindow(oself, VisAppUpdateWindowFlags(FALSE) &
-			    UWF_DETACHING,
-			    (VisUpdateMode) (flags & SBF_UPDATE_MODE));
-    else
-	VisSetNotRealized(oself);
-    VisUnbuildChildren(oself, flags);
-    v = VisPart(oself);
-    if (v->VI_typeFlags & VTF_IS_WIN_GROUP) {
-	if (v->VI_specAttrs & SA_USES_DUAL_BUILD &&
-	    !(flags & SBF_VIS_PARENT_UNBUILDING))
-	    @call oself::MSG_SPEC_UNBUILD(flags & ~SBF_WIN_GROUP);
-	@call oself::MSG_SPEC_UNBUILD(flags | SBF_WIN_GROUP);
-    } else {
-	@call oself::MSG_SPEC_UNBUILD(flags & ~SBF_WIN_GROUP);
-    }
-}
-
-/*
- * VisSpecSetUsable: a win group is updated as a window (built and
- * opened if its branch allows; a tree that was built but not realized
- * is linked in again); another object is built into its parent.
- */
-@method VisClass, MSG_SPEC_SET_USABLE
-{
-    VisInstance *v = pself;
-
-    if (!(v->VI_typeFlags & VTF_IS_WIN_GROUP)) {
-	VisSetNonWinGroupUsable(oself, updateMode);
-	return;
-    }
-    if (v->VI_specAttrs & SA_TREE_BUILT_BUT_NOT_REALIZED) {
-	v->VI_specAttrs &= ~SA_TREE_BUILT_BUT_NOT_REALIZED;
-	v->VI_link.LP_next = 0;
-    }
-    if (v->VI_specAttrs & SA_USES_DUAL_BUILD)
-	VisSetNonWinGroupUsable(oself, updateMode);
-    VisCompUpdateWindow(oself, VisAppUpdateWindowFlags(TRUE), updateMode);
-}
-
-@method VisClass, MSG_SPEC_SET_NOT_USABLE
-{
-    @call oself::MSG_SPEC_UNBUILD_BRANCH((SpecBuildFlags) updateMode);
-}
-
-@method VisClass, MSG_SPEC_UPDATE_VISUAL
-{
-    VisVupUpdateWinGroup(oself, updateMode);
-}
-
-/* VisSpecSetAttrs: a change of the branch's minimization updates the
- * application's windows */
-@method VisClass, MSG_SPEC_SET_ATTRS
-{
-    SpecAttrs old = pself->VI_specAttrs;
-    UpdateWindowFlags uwf = VisAppUpdateWindowFlags(TRUE);
-
-    pself->VI_specAttrs = (SpecAttrs) ((old | attrsToSet) & ~attrsToClear);
-    if ((old ^ pself->VI_specAttrs) & SA_BRANCH_MINIMIZED) {
-	optr app = GeodeGetAppObject(0);
-	if (app) {
-	    EventHandle ev = @record null::MSG_META_UPDATE_WINDOW(uwf,
-								  updateMode);
-	    @call app::MSG_META_GCN_LIST_SEND(0, ev, 0, GAGCNLT_WINDOWS,
-					      MANUFACTURER_ID_GEOWORKS);
-	}
-    }
-    VisCompUpdateWindow(oself, uwf, updateMode);
-}
-
-@method VisClass, MSG_SPEC_GET_ATTRS
-{
-    return pself->VI_specAttrs;
-}
-
-/* HandleEnabledStateChange: drawn again (now, or invalid) if it is
- * drawn */
-static void EnabledStateChange(optr oself, VisUpdateMode mode)
-{
-    GStateHandle gs;
-
-    if (!VisShouldObjBeDrawn(oself, DF_DONT_DRAW_CHILDREN) || mode & 0x80)
-	return;
-    if (mode != VUM_NOW) {
-	@call oself::MSG_VIS_MARK_INVALID(VOF_IMAGE_INVALID, mode);
-	return;
-    }
-    gs = @call oself::MSG_VIS_VUP_CREATE_GSTATE();
-    if (!gs)
-	return;
-    @call oself::MSG_VIS_DRAW(DF_DONT_DRAW_CHILDREN, gs);
-    GrDestroyState(gs);
-}
-
-/* VisSpecNotifyEnabled: fully enabled if the generic branch is; a
- * realized object then may take the focus.  TRUE if the state changed. */
-@method VisClass, MSG_SPEC_NOTIFY_ENABLED
-{
-    ObjectAndGrabParams q;
-
-    (void) flags;
-    if (pself->VI_typeFlags & VTF_IS_GEN &&
-	!GenCheckIfFullyEnabled(oself, TRUE))
-	return FALSE;
-    if (VisPart(oself)->VI_attrs & VA_FULLY_ENABLED)
-	return FALSE;
-    VisPart(oself)->VI_attrs |= VA_FULLY_ENABLED;
-    EnabledStateChange(oself, updateMode);
-    if (!(VisPart(oself)->VI_attrs & VA_REALIZED))
-	return TRUE;
-    memset(&q, 0, sizeof(q));
-    {
-	struct { ObjectAndGrabParams *r; } p;
-	p.r = &q;
-	VisCallParent(oself, MSG_VIS_FUP_QUERY_FOCUS_EXCL, &p, sizeof(p),
-		      NULL, 0);
-    }
-    if (q.OAGP_object)
-	return TRUE;
-    @call oself::MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS(&q);
-    if (q.OAGP_object)
-	MetaGrabFocusExclLow(oself);
-    return TRUE;
-}
-
-@method VisClass, MSG_SPEC_NOTIFY_NOT_ENABLED
-{
-    if (!(flags & NEF_STATE_CHANGING) && pself->VI_typeFlags & VTF_IS_GEN &&
-	!(GenPart(oself)->GI_states & GS_ENABLED))
-	return FALSE;
-    if (!(VisPart(oself)->VI_attrs & VA_FULLY_ENABLED))
-	return FALSE;
-    VisPart(oself)->VI_attrs &= ~VA_FULLY_ENABLED;
-    EnabledStateChange(oself, updateMode);
-    return TRUE;
-}
-
-/* VisSpecUpdateVisMoniker: the image invalid if the size stays, else
- * the geometry too and the win group updated */
-@method VisClass, MSG_SPEC_UPDATE_VIS_MONIKER
-{
-    if (!VisCheckIfSpecBuilt(oself))
-	return;
-    if (pself->VI_typeFlags & VTF_IS_GEN) {
-	ChunkHandle m = GenPart(oself)->GI_visMoniker;
-	SizeAsDWord s = m ? VisGetMonikerSize(oself, m, 0, 0) : 0;
-	if (DWORD_WIDTH(s) == oldMonikerWidth &&
-	    DWORD_HEIGHT(s) == oldMonikerHeight) {
-	    VisMarkInvalid(oself, VOF_IMAGE_INVALID, updateMode);
-	    return;
-	}
-    }
-    VisMarkFullyInvalid(oself);
-    VisVupUpdateWinGroup(oself, updateMode);
-}
-
-@method VisClass, MSG_SPEC_UPDATE_KBD_ACCELERATOR
-{
-    VisMarkInvalid(oself, VOF_GEOMETRY_INVALID | VOF_IMAGE_INVALID,
-		   updateMode);
-}
-
-@method VisClass, MSG_SPEC_GUP_QUERY_VIS_PARENT
-{
-    optr r = 0;
-
-    GenCallParent(oself, message, &parentType, sizeof(parentType), &r,
-		  sizeof(r));
-    return r;
-}
-
-/* VisNotifyGeometryValid: a generic object placed where its position
- * hints say */
-@method VisClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
-{
-    sword x, y;
-
-    if (pself->VI_typeFlags & VTF_IS_GEN &&
-	VisSpecCheckForPosHints(oself, &x, &y))
-	@call oself::MSG_VIS_POSITION_BRANCH(x, y);
 }
 
 /*
@@ -1768,22 +1085,137 @@ static void EnabledStateChange(optr oself, VisUpdateMode mode)
 	@call b::MSG_VIS_MARK_INVALID(flags, updateMode);
 }
 
-/* VisSpecResolveMonikerList: a list given to an object already built
- * is replaced by its moniker fitting the display (an icon if there is
- * one, else a gstring, else the text) */
-@method VisClass, MSG_SPEC_RESOLVE_MONIKER_LIST
-{
-    (void) VisFindMoniker(ConstructOptr(OptrToHandle(oself), monikerList),
-			  VMSF_REPLACE_LIST | VMSF_GSTRING |
-			  (VMS_ICON << VMSF_STYLE_OFFSET), 0,
-			  UserLimitDisplayTypeToStandard(
-			      (DisplayType) (UserGetDisplayType() >> 8)));
-}
-
 @method VisClass, MSG_VIS_CREATE_VIS_MONIKER
 {
     Boolean failed;
 
     return VisCreateMonikerChunk(oself, 0, flags, height, width, length,
 				 dataType, sourceType, source, &failed);
+}
+
+/* ---------------------------------------------------------------------
+ * Moniker chunks (VisCreateMonikerChunk of visClass.asm)
+ * ------------------------------------------------------------------- */
+
+/* LockSource: the source's bytes (UnlockSource: unlocked) */
+static const byte *LockSource(VisMonikerSourceType st, VisMonikerSource src,
+			      word *chunkSize)
+{
+    *chunkSize = 0;
+    switch (st) {
+    case VMST_FPTR:
+	return (const byte *) (uintptr_t) src;
+    case VMST_OPTR: {
+	const byte *p;
+	MemLock(OptrToHandle(src));
+	p = LMemDeref(src);
+	*chunkSize = p ? LMemGetChunkSize(src) : 0;
+	return p;
+    }
+    default:
+	return (const byte *) MemLock(OptrToHandle(src)) + OptrToChunk(src);
+    }
+}
+
+static void UnlockSource(VisMonikerSourceType st, VisMonikerSource src)
+{
+    if (st != VMST_FPTR)
+	MemUnlock(OptrToHandle(src));
+}
+
+/*
+ * VisCreateMonikerChunk: a moniker made in the object's block from the
+ * source: a VisMoniker as it is, text or a gstring with the moniker
+ * header put in front; over `chunk' if it is not 0.  The chunk is marked
+ * dirty with CVMF_DIRTY.  Port32: the source is copied directly (the
+ * block is run by the calling thread), not by
+ * MSG_PROCESS_COPY_CHUNK_OVER; VMDT_TOKEN fails (*failed TRUE).
+ */
+ChunkHandle VisCreateMonikerChunk(optr obj, ChunkHandle chunk,
+				  CreateVisMonikerFlags flags, word height,
+				  word width, word length,
+				  VisMonikerDataType dataType,
+				  VisMonikerSourceType sourceType,
+				  VisMonikerSource source, Boolean *failed)
+{
+    MemHandle mh = OptrToHandle(obj);
+    word hdr = 0, size, csize;
+    const byte *s;
+    byte *d;
+    Boolean addNull = FALSE;
+
+    *failed = FALSE;
+    if (dataType == VMDT_NULL || dataType == VMDT_TOKEN) {
+	*failed = TRUE;
+	return chunk;
+    }
+    if (dataType == VMDT_TEXT)
+	hdr = VMWT_text;
+    else if (dataType == VMDT_GSTRING)
+	hdr = VMWGS_gString;
+    s = LockSource(sourceType, source, &csize);
+    size = sourceType == VMST_OPTR ? csize : length;
+    if (dataType == VMDT_TEXT) {
+	if (!size)
+	    size = (word) (LocalStringLength((const char *) s) + 1);
+	addNull = !size || s[size - 1] != 0;
+    }
+    UnlockSource(sourceType, source);
+    ObjLockObjBlock(mh);
+    if (chunk) {
+	LMemReAlloc(ConstructOptr(mh, chunk), (word) (hdr + size + addNull));
+    } else {
+	chunk = LMemAlloc(mh, (word) (hdr + size + addNull));
+    }
+    s = LockSource(sourceType, source, &csize);
+    d = LMemDeref(ConstructOptr(mh, chunk));
+    memset(d, 0, hdr);
+    memcpy(d + hdr, s, size);
+    UnlockSource(sourceType, source);
+    if (addNull)
+	d[hdr + size] = 0;
+    if (dataType == VMDT_TEXT) {
+	VisMonikerWithText *t = (VisMonikerWithText *) d;
+	t->VMWT_common.VM_type = 0;
+	t->VMWT_common.VM_width = 0;
+	t->VMWT_mnemonicOffset = (char) 0xff;	/* VMO_NO_MNEMONIC */
+    } else if (dataType == VMDT_GSTRING) {
+	VisMonikerWithGString *g = (VisMonikerWithGString *) d;
+	g->VMWGS_common.VM_type = VMT_GSTRING;
+	g->VMWGS_common.VM_width = width;
+	g->VMWGS_height = height;
+    }
+    if (flags & CVMF_DIRTY)
+	ObjSetFlags(ConstructOptr(mh, chunk), OCF_DIRTY, 0);
+    MemUnlock(mh);
+    return chunk;
+}
+
+word VisCountChildren(optr obj)
+{
+    word n = 0;
+
+    ObjCompProcessChildren(obj, 0, OCCT_COUNT_CHILDREN, &n,
+			   word_offsetof(VisBase, Vis_offset),
+			   word_offsetof(VisCompInstance, VCI_comp),
+			   word_offsetof(VisInstance, VI_link), NULL);
+    return n;
+}
+
+/* VisVupUpdateWinGroup (static): up to the win group, which updates
+ * (VisCompVupUpdateWinGroup); TRUE if one was reached */
+Boolean VisVupUpdateWinGroup(optr obj, VisUpdateMode mode)
+{
+    optr o = obj;
+
+    if (mode == VUM_MANUAL)
+	return FALSE;
+    while (o) {
+	VisTypeFlags t = VisLock(o)->VI_typeFlags;
+	VisUnlock(o);
+	if (t & VTF_IS_WIN_GROUP)
+	    return VisCompVupUpdateWinGroup(o, mode);
+	o = VisFindParent(o);
+    }
+    return FALSE;
 }

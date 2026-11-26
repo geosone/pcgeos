@@ -1,0 +1,122 @@
+/*
+ * iacpUtils.goc -- after iacpUtils.asm: Utility functions used by
+ * iacpMain.asm
+ */
+@include "uiInt.goh"
+@include "iacpInt.goh"
+@include <alb.goh>
+@include <mailbox.goh>
+#include <chunkarr.h>
+#include <file.h>
+#include <lmem.h>
+#include <sem.h>
+#include <string.h>
+#include <system.h>
+
+#define LISTS	ConstructOptr(iacpListBlock, iacpListArray)
+#define DOCS	ConstructOptr(iacpListBlock, iacpDocArray)
+#define CHUNK(ch)	LMemDerefHandles(iacpListBlock, ch)
+
+void IACPLockListBlockExcl(void)
+{
+    (void) MemLockExcl(iacpListBlock);
+}
+
+void IACPLockListBlockShared(void)
+{
+    (void) MemLockShared(iacpListBlock);
+}
+
+int IACPFindList(const GeodeToken *token)
+{
+    word n = ChunkArrayGetCount(LISTS), i;
+
+    for (i = 0; i < n; i++) {
+	IACPList *l = IACPListPtr(i);
+
+	if (!memcmp(l->IACPL_token.GT_chars, token->GT_chars,
+		    sizeof(token->GT_chars)) &&
+	    l->IACPL_token.GT_manufID == token->GT_manufID)
+	    return i;
+    }
+    return -1;
+}
+
+/* IACPFindServer: the index of a server in a list's array, -1 */
+int IACPFindServer(ChunkHandle servers, optr server)
+{
+    optr arr = ConstructOptr(iacpListBlock, servers);
+    word n = ChunkArrayGetCount(arr), i, size;
+
+    for (i = 0; i < n; i++) {
+	IACPServer *s = ChunkArrayElementToPtr(arr, i, &size);
+
+	if (s->IACPS_object == server)
+	    return i;
+    }
+    return -1;
+}
+
+int IACPLocateDocument(optr server, word disk, FileID id)
+{
+    word n = ChunkArrayGetCount(DOCS), i, size;
+
+    for (i = 0; i < n; i++) {
+	IACPDocument *d = ChunkArrayElementToPtr(DOCS, i, &size);
+
+	if (d->IACPD_disk == disk && d->IACPD_id == id &&
+	    (!server || d->IACPD_server == server))
+	    return i;
+    }
+    return -1;
+}
+
+/* IACPDuplicateALB: a copy of a launch block, with the same owner */
+MemHandle IACPDuplicateALB(MemHandle alb)
+{
+    word size = MemGetInfo(alb, MGIT_SIZE);
+    MemHandle copy = MemAlloc(size, HF_SWAPABLE | HF_SHARABLE, HAF_LOCK);
+
+    if (!copy)
+	return 0;
+    HandleModifyOwner(copy, MemOwner(alb));
+    memcpy(MemDeref(copy), MemLock(alb), size);
+    MemUnlock(alb);
+    MemUnlock(copy);
+    return copy;
+}
+
+/*
+ * IACPDeleteConnection: the connection out of its list and freed; a
+ * list with neither connections nor servers goes too.  The block is
+ * locked exclusively.
+ */
+void IACPDeleteConnection(IACPConnection connection)
+{
+    word n = ChunkArrayGetCount(LISTS), i;
+
+    for (i = 0; i < n; i++) {
+	IACPList *l = IACPListPtr(i);
+	ChunkHandle prev = 0, c = l->IACPL_connections;
+
+	while (c && c != connection) {
+	    prev = c;
+	    c = ((IACPConnectionStruct *) CHUNK(c))->IACPCS_next;
+	}
+	if (!c)
+	    continue;
+	c = ((IACPConnectionStruct *) CHUNK(connection))->IACPCS_next;
+	if (prev)
+	    ((IACPConnectionStruct *) CHUNK(prev))->IACPCS_next = c;
+	else
+	    l->IACPL_connections = c;
+	if (!--l->IACPL_numConnect &&
+	    !ChunkArrayGetCount(ConstructOptr(iacpListBlock,
+					      l->IACPL_servers))) {
+	    LMemFreeHandles(iacpListBlock, l->IACPL_servers);
+	    ChunkArrayDelete(LISTS, IACPListPtr(i));
+	}
+	break;
+    }
+    LMemFreeHandles(iacpListBlock, connection);
+}

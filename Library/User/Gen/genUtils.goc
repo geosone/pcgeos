@@ -21,6 +21,8 @@
 #include <initfile.h>
 #include <library.h>
 #include <string.h>
+@include <Objects/gFieldC.goh>
+#include <Internal/im.h>
 
 /* the character of a KeyboardShortcut (KS_CHAR of the asm record) */
 #define KS_CHAR_ONLY	0x00ff
@@ -36,35 +38,10 @@ void GenUnlock(optr obj)
     MemUnlock(OptrToHandle(obj));
 }
 
-/* UserSendToApplicationViaProcess: the message recorded for the
- * application object, dispatched by the process from its queue */
-void UserSendToApplicationViaProcess(Message msg, const void *params,
-				     word paramSize)
-{
-    EventHandle ev = 0;
-    optr proc = ConstructOptr(GeodeGetProcessHandle(), 0);
-
-    CObjMessageP(MF_RECORD, GeodeGetAppObject(0), msg, params, paramSize,
-		 &ev, sizeof(ev));
-    @send, forceQueue proc::MSG_META_DISPATCH_EVENT(ev, MF_FORCE_QUEUE);
-}
-
-/* UserGetKbdAcceleratorMode: [ui] kbdAcceleratorMode, on by default
- * (the asm read it once when the UI attached) */
-Boolean UserGetKbdAcceleratorMode(void)
-{
-    Boolean on;
-
-    if (InitFileReadBoolean("ui", "kbdAcceleratorMode", &on))
-	return TRUE;
-    return on;
-}
-
 /* ---------------------------------------------------------------------
  * The specific UI
  * ------------------------------------------------------------------- */
 
-static GeodeHandle uiSpecUILibrary;
 
 GeodeHandle UserGetSpecificUI(void)
 {
@@ -86,15 +63,6 @@ GeodeHandle UserGetSpecificUI(void)
 GeodeHandle UserGetLoadedSpecificUI(void)
 {
     return uiSpecUILibrary;
-}
-
-void UserFreeSpecificUI(void)
-{
-    GeodeHandle gh = uiSpecUILibrary;
-
-    uiSpecUILibrary = 0;
-    if (gh)
-	GeodeFreeLibrary(gh);
 }
 
 /*
@@ -254,14 +222,6 @@ void GenAddChildUpwardLinkOnly(optr obj, optr child)
     GenSetUpwardLink(OptrToHandle(child), OptrToChunk(child), obj);
 }
 
-void GenRemoveGenChildLow(optr obj, optr child, CompChildFlags flags)
-{
-    ObjCompRemoveChild(obj, child, flags,
-		       word_offsetof(GenBase, Gen_offset),
-		       word_offsetof(GenInstance, GI_comp),
-		       word_offsetof(GenInstance, GI_link));
-}
-
 /* GenRemoveDownwardLink: out of the parent's children, but still
  * pointing to the parent */
 void GenRemoveDownwardLink(MemHandle mh, ChunkHandle chnk,
@@ -417,22 +377,6 @@ Boolean GenCheckIfFullyEnabled(optr obj, Boolean noOpt)
  * The application and the system
  * ------------------------------------------------------------------- */
 
-/* UserCallApplication: the message to the application object of the
- * current process (FALSE if there is none) */
-Boolean UserCallApplication(Message msg, const void *params,
-			    word paramSize, void *reply, word replySize)
-{
-    optr app = GeodeGetAppObject(0);
-
-    if (replySize)
-	memset(reply, 0, replySize);
-    if (!app)
-	return FALSE;
-    CObjMessageP(MF_CALL, app, msg, (void *) params, paramSize, reply,
-		 replySize);
-    return TRUE;
-}
-
 static void SendToApplication(Message msg)
 {
     optr app = GeodeGetAppObject(0);
@@ -518,4 +462,16 @@ Boolean GenCheckKbdAccelerator(optr obj, word character, word flags,
     MemUnlock(OptrToHandle(obj));
     return n && FlowCheckKbdShortcut(extra, n, character, flags, state) !=
 		(word) -1;
+}
+
+Boolean UserCallSystem(Message msg, const void *params, word paramSize,
+		       void *reply, word replySize)
+{
+    if (replySize)
+	memset(reply, 0, replySize);
+    if (!uiSystemObj)
+	return FALSE;
+    CObjMessageP(MF_CALL, uiSystemObj, msg, (void *) params, paramSize,
+		 reply, replySize);
+    return TRUE;
 }

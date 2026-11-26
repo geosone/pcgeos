@@ -113,21 +113,6 @@ void TextCompleteRecalc(optr o)
     TextRecalc(o, 0, TEXT_ADDRESS_PAST_END, TEXT_ADDRESS_PAST_END);
 }
 
-@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW
-{
-    WBFixed before = pself->VTI_height;
-
-    if (!pself->VTI_lines)
-	return;				/* no geometry yet */
-    TextGStateCreate(oself);
-    EditUnHilite(oself);
-    TextCompleteRecalc(oself);
-    TextScreenUpdate(oself);
-    EditHilite(oself);
-    TextGStateDestroy(oself);
-    TextHeightNotify(oself, before);
-}
-
 /* VisTextGetLineInfo: a line with its fields into a buffer (as much
  * as fits); TRUE if there is no such line */
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO

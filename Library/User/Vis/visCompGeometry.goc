@@ -1038,3 +1038,77 @@ void VisCompGetCenter(optr obj, GetCenterParams *c)
 done:
     MemUnlock(OptrToHandle(obj));
 }
+
+/* ---------------------------------------------------------------------
+ * Geometry (visCompGeometry.asm; the manager is in visCompGeometry.goc)
+ * ------------------------------------------------------------------- */
+
+@extern method VisCompClass, MSG_VIS_RECALC_SIZE
+{
+    return VisCompRecalcSize(oself, width, height, 0);
+}
+
+@extern method VisCompClass, MSG_VIS_POSITION_BRANCH
+{
+    VisCompPosition(oself, xOrigin, yOrigin, 0);
+}
+
+@extern method VisCompClass, MSG_VIS_GET_CENTER
+{
+    VisCompGetCenter(oself, retValue);
+}
+
+@extern method VisCompClass, MSG_VIS_COMP_GET_CHILD_SPACING
+{
+    return MAKE_SPACING_DWORD(VIS_COMP_DEFAULT_SPACING,
+			      VIS_COMP_DEFAULT_SPACING);
+}
+
+@extern method VisCompClass, MSG_VIS_COMP_GET_MARGINS
+{
+    memset(retValue, 0, sizeof(*retValue));
+}
+
+@extern method VisCompClass, MSG_VIS_COMP_GET_MINIMUM_SIZE
+{
+    return 0;
+}
+
+@extern method VisCompClass, MSG_VIS_COMP_SET_GEO_ATTRS
+{
+    pself->VCI_geoAttrs = (pself->VCI_geoAttrs | attrsToSet.GADA_geoAttrs) &
+			  ~attrsToClear.GADA_geoAttrs;
+    pself->VCI_geoDimensionAttrs =
+	(pself->VCI_geoDimensionAttrs | attrsToSet.GADA_geoDimensionAttrs) &
+	~attrsToClear.GADA_geoDimensionAttrs;
+}
+
+@extern method VisCompClass, MSG_VIS_COMP_GET_GEO_ATTRS
+{
+    GeoAndDimensionAttrs a;
+
+    a.GADA_geoAttrs = pself->VCI_geoAttrs;
+    a.GADA_geoDimensionAttrs = pself->VCI_geoDimensionAttrs;
+    return a;
+}
+
+/* VisCompAddRectToUpdateRegion: a composite that only draws in its
+ * margins adds those four parts of the rectangle (its children add
+ * theirs) */
+@extern method VisCompClass, MSG_VIS_ADD_RECT_TO_UPDATE_REGION
+{
+    Rectangle m;
+    VisAddRectFlags f = addRectFlags & ~VARF_ONLY_REDRAW_MARGINS;
+    sword l = left, t = top, r = right, b = bottom;
+
+    if (!(addRectFlags & VARF_ONLY_REDRAW_MARGINS) ||
+	!(pself->VCI_geoAttrs & VCGA_ONLY_DRAWS_IN_MARGINS)) {
+	@callsuper();
+	return;
+    }
+    @call oself::MSG_VIS_COMP_GET_MARGINS(&m);
+    VisInvalOldBounds(oself, f, l, t, l + m.R_left, b);
+    VisInvalOldBounds(oself, f, l, t, r, t + m.R_top);
+    VisInvalOldBounds(oself, f, r - m.R_right, t, r, b);
+    VisInvalOldBounds(oself, f, l, b - m.R_bottom, r, b);
+}

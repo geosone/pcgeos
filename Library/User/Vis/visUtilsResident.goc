@@ -13,6 +13,7 @@
 @include "uiInt.goh"
 #include <Internal/grWinInt.h>
 #include <string.h>
+#include <stdint.h>
 
 /* ---------------------------------------------------------------------
  * The object
@@ -112,43 +113,6 @@ void VisGetCenter(optr obj, GetCenterParams *c)
     c->GCP_rightOfCenter = w - (w >> 1);
     c->GCP_aboveCenter = h >> 1;
     c->GCP_belowCenter = h - (h >> 1);
-}
-
-/* VisSendCenter: the center, directly if the object says so
- * (VGA_USE_VIS_CENTER) */
-void VisSendCenter(optr obj, GetCenterParams *c)
-{
-    VisInstance *v = VisLock(obj);
-    Boolean direct = (v->VI_geoAttrs & VGA_USE_VIS_CENTER) != 0;
-    Boolean comp = (v->VI_typeFlags & VTF_IS_COMPOSITE) != 0;
-
-    VisUnlock(obj);
-    if (!direct)
-	@call obj::MSG_VIS_GET_CENTER(c);
-    else if (comp)
-	VisCompGetCenter(obj, c);
-    else
-	VisGetCenter(obj, c);
-}
-
-void VisGetParentCenter(optr obj, GetCenterParams *c)
-{
-    optr p = VisFindParent(obj);
-
-    memset(c, 0, sizeof(*c));
-    if (p)
-	VisSendCenter(p, c);
-}
-
-/* the methods of VisClass (visClass.goc) as routines */
-SizeAsDWord VisRecalcSizeAndInvalIfNeeded(optr obj, word width, word height)
-{
-    return @call obj::MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED(width, height);
-}
-
-Boolean VisSendPositionAndInvalIfNeeded(optr obj, sword x, sword y)
-{
-    return @call obj::MSG_VIS_POSITION_AND_INVAL_IF_NEEDED(x, y);
 }
 
 /* inside the bounds (a window: its own coordinates, from 0, 0) */
@@ -257,17 +221,6 @@ Boolean VisCallChildren(optr obj, VisChildCallback *cb, void *data)
 				  data, word_offsetof(VisBase, Vis_offset),
 				  word_offsetof(VisCompInstance, VCI_comp),
 				  word_offsetof(VisInstance, VI_link), cb);
-}
-
-word VisCountChildren(optr obj)
-{
-    word n = 0;
-
-    ObjCompProcessChildren(obj, 0, OCCT_COUNT_CHILDREN, &n,
-			   word_offsetof(VisBase, Vis_offset),
-			   word_offsetof(VisCompInstance, VCI_comp),
-			   word_offsetof(VisInstance, VI_link), NULL);
-    return n;
 }
 
 optr VisFirstChild(optr obj)
@@ -417,24 +370,6 @@ void VisMarkFullyInvalid(optr obj)
     VisMarkInvalid(obj, f, VUM_MANUAL);
 }
 
-/* VisVupUpdateWinGroup (static): up to the win group, which updates
- * (VisCompVupUpdateWinGroup); TRUE if one was reached */
-Boolean VisVupUpdateWinGroup(optr obj, VisUpdateMode mode)
-{
-    optr o = obj;
-
-    if (mode == VUM_MANUAL)
-	return FALSE;
-    while (o) {
-	VisTypeFlags t = VisLock(o)->VI_typeFlags;
-	VisUnlock(o);
-	if (t & VTF_IS_WIN_GROUP)
-	    return VisCompVupUpdateWinGroup(o, mode);
-	o = VisFindParent(o);
-    }
-    return FALSE;
-}
-
 /* ---------------------------------------------------------------------
  * The children under a point (mouse), in bounds (ink)
  * ------------------------------------------------------------------- */
@@ -573,26 +508,6 @@ void VisTakeGadgetExclAndGrab(optr obj)
 /* ---------------------------------------------------------------------
  * Monikers
  * ------------------------------------------------------------------- */
-
-/* the UI's moniker font (userUtils.asm: uiDefaultMonikerFont and
- * uiDefaultMonikerPointSize), set by the specific UI from its display
- * scheme; Berkeley 10 until then */
-static FontID uiDefaultMonikerFont = FID_BERKELEY;
-static word uiDefaultMonikerPointSize = 10;
-
-void UserSetDefaultMonikerFont(FontID id, word pointSize)
-{
-    uiDefaultMonikerFont = id;
-    uiDefaultMonikerPointSize = pointSize;
-}
-
-/* UserGetDefaultMonikerFont: the UI's moniker font (the asm asked for an
- * object; every object has the same) */
-void UserGetDefaultMonikerFont(FontID *id, word *pointSize)
-{
-    *id = uiDefaultMonikerFont;
-    *pointSize = uiDefaultMonikerPointSize;
-}
 
 static void DefaultMonikerFont(FontID *id, word *size)
 {
@@ -791,4 +706,89 @@ void VisDrawMoniker(optr obj, ChunkHandle moniker, DrawMonikerFlags flags,
     MemUnlock(OptrToHandle(obj));
     if (clip)
 	GrRestoreState(gs);
+}
+
+/* VisMarkInvalid (static) */
+@extern method VisClass, MSG_VIS_MARK_INVALID
+{
+    VisMarkInvalid(oself, flagsToSet, updateMode);
+}
+/* VisGetSize (static): MSG_VIS_RECALC_SIZE keeps the size */
+@extern method VisClass, MSG_VIS_RECALC_SIZE
+{
+    (void) width;
+    (void) height;
+    return VisGetSize(oself);
+}
+
+@extern method VisClass, MSG_VIS_GET_SIZE
+{
+    return VisGetSize(oself);
+}
+
+/* VisGetSize: the space besides the moniker is the whole object; no
+ * children left over */
+@extern method VisClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    SizeAsDWord s = VisGetSize(oself);
+
+    (void) childCount;
+    retValue->ESP_extraWidth = DWORD_WIDTH(s);
+    retValue->ESP_extraHeight = DWORD_HEIGHT(s);
+    retValue->ESP_leftoverChildren = 0;
+    retValue->ESP_unused = 0;
+}
+
+@extern method VisClass, MSG_VIS_SET_SIZE
+{
+    VisSetSize(oself, width, height);
+}
+
+@extern method VisClass, MSG_VIS_SET_POSITION, MSG_VIS_POSITION_BRANCH
+{
+    VisSetPosition(oself, xOrigin, yOrigin);
+}
+
+@extern method VisClass, MSG_VIS_GET_CENTER
+{
+    VisGetCenter(oself, retValue);
+}
+@extern method VisClass, MSG_VIS_GRAB_MOUSE
+{
+    VisGrabMouse(oself);
+}
+
+@extern method VisClass, MSG_VIS_FORCE_GRAB_MOUSE
+{
+    VisForceGrabMouse(oself);
+}
+
+@extern method VisClass, MSG_VIS_GRAB_LARGE_MOUSE
+{
+    VisGrabLargeMouse(oself);
+}
+
+@extern method VisClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE
+{
+    VisForceGrabLargeMouse(oself);
+}
+
+@extern method VisClass, MSG_VIS_RELEASE_MOUSE
+{
+    VisReleaseMouse(oself);
+}
+
+@extern method VisClass, MSG_META_GRAB_KBD
+{
+    VisGrabKbd(oself);
+}
+
+@extern method VisClass, MSG_META_FORCE_GRAB_KBD
+{
+    VisForceGrabKbd(oself);
+}
+
+@extern method VisClass, MSG_META_RELEASE_KBD
+{
+    VisReleaseKbd(oself);
 }

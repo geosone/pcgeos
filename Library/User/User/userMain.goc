@@ -53,9 +53,15 @@
 #include <Internal/mouseDr.h>
 #include <Internal/videoDr.h>
 #include <string.h>
+#include <library.h>
+@include <Objects/gProcC.goh>
+#include <sound.h>
+#include <file.h>
+#include <Internal/soundCtl.h>
+#include <stdarg.h>
+#include <win.h>
 
 InputMapHeader uiInputMap;
-UIButtonFlags uiButtonFlags;
 Boolean uiFloatingKbdEnabled;
 
 #define BME(b, ss, msg, pref)	{ (b), (ss), (msg), (pref) }
@@ -204,18 +210,13 @@ void UserSetDefaultInputMap(void)
     uiButtonFlags = uiInputMap.IMH_flags;
 }
 
-
 /* ---------------------------------------------------------------------
  * UserClass, the UI's process
  * ------------------------------------------------------------------- */
 
 @classdecl UserClass, neverSaved;
-/* the sounds (userSound.goc) */
-@extern method UserClass, MSG_USER_UPDATE_SOUND_PARAMS;
-@extern method UserClass, MSG_USER_FREE_SOUND_HANDLE;
+/* the sounds (userUtils.goc) */
 
-
-optr uiFlowObj;
 
 /* UserCallFlow's object (Port32) */
 optr UserGetFlowObject(void)
@@ -223,8 +224,6 @@ optr UserGetFlowObject(void)
     return uiFlowObj;
 }
 
-static word uiAckID;
-static optr uiAckOD;
 
 static optr Self(void)
 {
@@ -572,4 +571,86 @@ Boolean UserEncryptPassword(const char *string, char *dest)
 	hash <<= 4;
     }
     return TRUE;
+}
+
+void UserFreeSpecificUI(void)
+{
+    GeodeHandle gh = uiSpecUILibrary;
+
+    uiSpecUILibrary = 0;
+    if (gh)
+	GeodeFreeLibrary(gh);
+}
+
+#define SND(n, f)	((__typeof__(&f)) ProcGetLibraryEntry(uiSoundLib, (n)))
+#define S_FreeMusic		SND(7, SoundFreeMusic)
+
+#define S_FreeMusicStream	SND(16, SoundFreeMusicStream)
+#define S_FreeSampleStream	SND(21, SoundFreeSampleStream)
+/* UserUpdateSoundParams: "[ui] soundMask" and "[ui] sound" read again,
+ * the library loaded */
+@method UserClass, MSG_USER_UPDATE_SOUND_PARAMS
+{
+    Boolean on = TRUE;
+    word mask = SOUND_MASK_ALL;
+
+    if (InitFileReadInteger("ui", "soundMask", &mask))
+	mask = SOUND_MASK_ALL;
+    soundMask = mask;
+    if (InitFileReadBoolean("ui", "sound", &on))
+	on = TRUE;			/* no setting: sound */
+    uiSoundOn = on;
+    if (!uiSoundLib) {
+	GeodeLoadError err;
+
+	FilePushDir();
+	FileSetStandardPath(SP_SYSTEM);
+	uiSoundLib = GeodeUseLibrary("sound.geo", 0, 0, &err);
+	FilePopDir();
+    }
+}
+
+/* UserFreeSoundHandle: a sound that ended (the sound library cannot
+ * free it in its timer routine), freed as its type wants */
+@method UserClass, MSG_USER_FREE_SOUND_HANDLE
+{
+    SoundControl *sc;
+    word type;
+
+    if (!sound || !uiSoundLib)
+	return;
+    sc = MemLock(sound);
+    if (!sc)
+	return;
+    type = sc->SC_status.SBS_type;
+    MemUnlock(sound);
+    switch (type) {
+    case ST_SIMPLE_FM:
+	S_FreeMusic(sound);
+	break;
+    case ST_STREAM_FM:
+	S_FreeMusicStream(sound);
+	break;
+    case ST_STREAM_DAC:
+	S_FreeSampleStream(sound);
+	break;
+    default:			/* ST_SIMPLE_DAC: never made */
+	MemFree(sound);
+	break;
+    }
+}
+
+/*
+ * UserAllocObjBlock: an object block run by the thread (0: the current
+ * one)
+ */
+MemHandle UserAllocObjBlock(ThreadHandle thread)
+{
+    MemHandle mh = MemAllocLMem(LMEM_TYPE_OBJ_BLOCK,
+				sizeof(ObjLMemBlockHeader));
+
+    MemModifyFlags(mh, HF_SHARABLE, 0);
+    if (thread)
+	MemModifyOtherInfo(mh, thread);
+    return mh;
 }

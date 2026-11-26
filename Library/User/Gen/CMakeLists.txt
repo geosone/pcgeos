@@ -1,9 +1,12 @@
 # The user interface library, Gen/: GenClass, the generic tree and the generic classes.
 geos_sources(ui_goc
   genUtils.goc
-  genClass.goc
-  genApplication.goc
+  genClassMisc.goc
+  genClassCommon.goc
+  genClassBuild.goc
+  genAppAttDet.goc
   genAppMisc.goc
+  genAppCommonIACP.goc
   genSystem.goc
   genScreen.goc
   genField.goc

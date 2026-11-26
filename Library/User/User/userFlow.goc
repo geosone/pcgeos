@@ -1,0 +1,22 @@
+/*
+ * userFlow.goc -- after userFlow.asm: This set of files (userFlow*.asm)
+ * contains routines to handle input processing for the User Interface.
+ */
+@include "uiInt.goh"
+@include <Internal/flowC.goh>
+@include <Objects/gSysC.goh>
+#include <string.h>
+#include <thread.h>
+#include <win.h>
+#include <geoworks.h>
+#include <geosdriver.h>
+#include <Internal/im.h>
+#include <Internal/videoDr.h>
+
+/* FlowInitialize: no superclass (the end of the master class) */
+@extern method FlowClass, MSG_META_INITIALIZE
+{
+    pself->FI_activeMouseButton = 0xff;
+    pself->FI_curVideoStrategy = NULL;
+    pself->FI_holdUpInputQueue = GeodeAllocQueue();
+}

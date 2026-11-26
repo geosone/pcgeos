@@ -30,37 +30,6 @@
 
 @classdecl GenFieldClass;
 
-/* userVariable.def: the options of the fields (GenFieldLoadOptions) */
-static UIInterfaceLevel uiInterfaceLevel = UIIL_ADVANCED;
-static UIInterfaceLevel uiDefaultLaunchLevel = UIIL_ADVANCED;
-static UILaunchModel uiLaunchModel = UILM_MULTIPLE_INSTANCES;
-static UILaunchOptions uiLaunchOptions = UILO_DESK_ACCESSORIES;
-static UIInterfaceOptions uiInterfaceOptions = UIIO_OPTIONS_MENU;
-
-UIInterfaceLevel UserGetDefaultUILevel(void)
-{
-    return uiInterfaceLevel;
-}
-
-UIInterfaceLevel UserGetDefaultLaunchLevel(void)
-{
-    return uiDefaultLaunchLevel;
-}
-
-UILaunchModel UserGetLaunchModel(void)
-{
-    return uiLaunchModel;
-}
-
-UILaunchOptions UserGetLaunchOptions(void)
-{
-    return uiLaunchOptions;
-}
-
-UIInterfaceOptions UserGetInterfaceOptions(void)
-{
-    return uiInterfaceOptions;
-}
 
 #define FieldPart(o)	((GenFieldInstance *) ObjDerefGen(o))
 

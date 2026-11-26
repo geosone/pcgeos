@@ -5097,8 +5097,8 @@ visual classes of `Library/User/Vis`:
   - Not yet: ink (`MSG_FLOW_INK_REPLY`, the press and hold timer), the
     quick transfer's cursor (`UpdateMoveCopy`), the duplicate check of
     hard icons.
-- **`VisContentClass`** (`Vis/visContent.goc`, after
-  `visContentClass.asm` and `visContentCommon.asm`): the top of a tree
+- **`VisContentClass`** (`Vis/visContentClass.goc` and
+  `visContentCommon.goc`, after their asm files): the top of a tree
   shown in a view's window, and its input node.
   - The view: `MSG_META_CONTENT_SET_VIEW`, `_VIEW_WIN_OPENED`,
     `_VIEW_OPENING` (linked up to the view, made visible),
@@ -5150,8 +5150,8 @@ visual classes of `Library/User/Vis`:
       (`ClipboardHandleEndMoveCopy`), the sound for an unwanted press,
       the EC messages `MSG_VIS_VUP_EC_ENSURE_*`; `CLASSF_DISCARD_ON_SAVE`
       (goc has no keyword for it; nothing is saved to state yet).
-- **GenClass** (`Gen/genClass.goc` after `genClassBuild.asm`,
-  `genClassCommon.asm`, `genClassMisc.asm`; the routines in
+- **GenClass** (`Gen/genClassBuild.goc`, `genClassCommon.goc`,
+  `genClassMisc.goc`, after their asm files; the routines in
   `Gen/genUtils.goc`, the specific part's in `Vis/visSpec.goc`, the
   `MSG_SPEC_*` handlers at the end of `Vis/visClass.goc`):
   - the generic tree (add, remove, move, find, copy, destroy), the
@@ -5172,7 +5172,7 @@ visual classes of `Library/User/Vis`:
     `ClassStruct *routine(optr obj, word masterOffset)`. The library is
     `[ui] specific` (default `motif`), loaded on first use by
     `UserGetSpecificUI`, freed by `UserFreeSpecificUI`.
-    `GenApplicationClass` (`Gen/genApplication.goc`, only the resolve
+    `GenApplicationClass` (`Gen/genAppMisc.goc`, only the resolve
     and its state so far) takes `GAI_specificUI` or that library;
   - becoming usable builds the branch from scratch
     (`GenSpecShrinkBranch`, then `MSG_SPEC_SET_USABLE`): a win group is
@@ -5264,8 +5264,8 @@ visual classes of `Library/User/Vis`:
     get a pointer to the `GenOptionsParams`, as their prototype says
     (`GenClass` passed the structure).
 - **The process and the application's life** (`Proc/procClass.goc`
-  after `procClass.asm`; `Gen/genApplication.goc` after
-  `genAppAttDet.asm`, `genAppCommonIACP.asm`):
+  after `procClass.asm`; `Gen/genAppAttDet.goc`,
+  `genAppCommonIACP.goc`, `genAppMisc.goc` after their asm files):
   - `GenProcessClass`: `MSG_META_ATTACH` with the AppLaunchBlock (the
     system busy meanwhile, `SP_TOP` the path), `MSG_META_APP_STARTUP` to
     the application object, then the mode message
@@ -5384,8 +5384,8 @@ visual classes of `Library/User/Vis`:
   the mouse and ink messages ignored after the specific UI is freed
   on a shutdown. ctest `library.ui.boot` (step 208) checks the focus
   path system, UI application, dialog, trigger.
-- **The sounds** (`User/userSound.goc` after `userUtils.asm` and
-  `userMain.asm`): the UI loads `sound.geo` from SYSTEM at its attach
+- **The sounds** (`User/userUtils.goc` and `User/userMain.goc`, after
+  their asm files): the UI loads `sound.geo` from SYSTEM at its attach
   (`MSG_USER_UPDATE_SOUND_PARAMS`, sent again when `[ui] sound` or
   `[ui] soundMask` change) and calls its routines by their entry
   numbers (`sound32.gp`), as the UI does not import it.

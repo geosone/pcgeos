@@ -3,10 +3,11 @@ geos_sources(ui_goc
   userFlowUtils.goc
   userFlowMisc.goc
   userFlowInput.goc
+  userFlow.goc
   userMain.goc
   userScreen.goc
   userUtils.goc
-  userSound.goc
+  userVariable.goc
   userDialog.goc
   userDocumentSave.goc
   userLibrary.goc)

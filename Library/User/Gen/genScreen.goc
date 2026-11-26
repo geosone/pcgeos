@@ -19,10 +19,6 @@
 
 @classdecl GenScreenClass;
 
-/* userStrings.asm */
-static const char noVideoMessage[] =
-    "No working compatible video hardware found on this system.";
-
 /* FakeScreen: the page size of the ini file */
 static void FakeScreen(VideoDriverInfo *vdi)
 {
@@ -36,12 +32,6 @@ static void FakeScreen(VideoDriverInfo *vdi)
 	vdi->VDI_pageW = v;
     if (!InitFileReadInteger("ui", "yScreenSize", &v))
 	vdi->VDI_pageH = v;
-}
-
-/* UserScreenNoVideoDriverError (userScreen.asm): no video, no GEOS */
-void UserScreenNoVideoDriverError(void)
-{
-    SysShutdown(SST_DIRTY, noVideoMessage);
 }
 
 @method GenScreenClass, MSG_GEN_SCREEN_SET_VIDEO_DRIVER
