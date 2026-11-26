@@ -16,6 +16,7 @@
  * look (NOTEBOOK_INTERACTION is FALSE in Motif).
  */
 @include "cGeode.goh"
+@include "ccompMacro.goh"
 @include <Internal/specC.goh>
 
 @classdecl OLCtrlClass, neverSaved;
@@ -43,10 +44,6 @@
 @extern method OLCtrlClass, MSG_SPEC_CTRL_SET_MONIKER_OFFSET;
 @extern method OLCtrlClass, MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE;
 @extern method OLCtrlClass, MSG_GET_FIRST_MKR_POS;
-
-#define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
-#define TARGET(f)	((f) & OLBF_TARGET)
-#define T(t)		((t) << OLBF_TARGET_OFFSET)
 
 /* VupCreateGState */
 @method OLCtrlClass, MSG_VIS_VUP_CREATE_GSTATE

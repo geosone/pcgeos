@@ -30,15 +30,10 @@
  * Then ObjCloseVMFile closes the file.
  */
 #include "kernelC.h"
+#include "objectConstant.h"
 #include "../VMem/vmemInt.h"
 
 #include <string.h>
-
-/* VM user IDs of the state file (objectConstant.def) */
-#define VM_SAVED_ATTACHED	0xffff	/* block is in memory */
-#define VM_SAVED_UI		0xfffe	/* run by the UI thread */
-#define VM_SAVED_APP		0xfffd	/* run by a thread of the process */
-#define VM_EXTRA_DATA		0xfffc	/* ObjSaveExtraStateBlock */
 
 /* ---------------------------------------------------------------------
  * The process and its state file

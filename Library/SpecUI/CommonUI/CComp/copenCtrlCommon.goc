@@ -11,11 +11,8 @@
  * leaves or colored disabled gadgets (cConstant.def).
  */
 @include "cGeode.goh"
+@include "ccompMacro.goh"
 @include <Internal/specC.goh>
-
-#define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
-#define TARGET(f)	((f) & OLBF_TARGET)
-#define T(t)		((t) << OLBF_TARGET_OFFSET)
 
 /* ---------------------------------------------------------------------
  * Generic messages

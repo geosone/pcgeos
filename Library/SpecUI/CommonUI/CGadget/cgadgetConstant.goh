@@ -1,0 +1,22 @@
+/*
+ * cgadgetConstant.goh -- after cgadgetConstant.def: the constants of the module
+ * that the port has.
+ */
+#ifndef H_CGADGETCONSTANT
+#define H_CGADGETCONSTANT
+
+#define CGA_FRAME_TEXT_MARGIN	1
+#define FRAME_TEXT_MARGIN	2	/* text in a frame */
+/* cgadgetConstant.def, cConstant.def (Motif) */
+#define HASH_MARK_SIZE		5
+#define MIN_MAX_MARGIN			1
+#define OL_SLIDER_DEFAULT_HEIGHT	100
+/* cgadgetConstant.def */
+#define OL_SLIDER_DEFAULT_WIDTH		200
+#define OL_SPIN_DEFAULT_DESIRED_HEIGHT	(SST_LINES_OF_TEXT | 1)
+#define OL_SPIN_DEFAULT_DESIRED_WIDTH	(SST_AVG_CHAR_WIDTHS | 8)
+#define SMALL_HASH_MARK_SIZE	3
+#define SPIN_EXTRA_PEN_MARGIN		(10 - 2)
+#define SPIN_FIRST_DELAY		25
+
+#endif /* H_CGADGETCONSTANT */

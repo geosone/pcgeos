@@ -1,0 +1,10 @@
+/*
+ * iacpVariable.goc -- after iacpVariable.def: the block of the IACP
+ * lists (IACPListBlock) and its two chunk arrays, made at the first use
+ * (iacpMain.goc).
+ */
+@include "uiInt.goh"
+@include "iacpInt.goh"
+
+MemHandle iacpListBlock;
+ChunkHandle iacpListArray, iacpDocArray;

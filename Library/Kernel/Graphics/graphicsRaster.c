@@ -53,13 +53,13 @@
  * the slice is the scan lines of one data block, locked in turn.
  */
 #include "graphicsInt.h"
+#include "graphicsConstant.h"
+#include "graphicsMacro.h"
 #include "Win/winInt.h"
 #include <stdlib.h>
 #include <hugearr.h>
 
-#define AREA	((word) offsetof(GState, GS_areaAttr))
 #define LINE_ATTR	((word) offsetof(GState, GS_lineAttr))
-#define DEF_BITMAP_RES	72
 
 /* the huge bitmap's slice from scan line first on; FALSE past the end */
 static Boolean HugeSlice(BMFrame *f, word first)

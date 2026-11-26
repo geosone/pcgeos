@@ -1,0 +1,10 @@
+/*
+ * tslConstant.goh -- after tslConstant.def: the constants of the module
+ * that the port has.
+ */
+#ifndef H_TSLCONSTANT
+#define H_TSLCONSTANT
+
+#define VIS_TEXT_CURSOR_FLASH	40	/* ticks on, and off */
+
+#endif /* H_TSLCONSTANT */

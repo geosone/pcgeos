@@ -16,9 +16,8 @@
  * GrRoundRectDevPoints).
  */
 #include "graphicsInt.h"
+#include "graphicsMacro.h"
 #include <stdlib.h>
-
-#define AREA	((word) offsetof(GState, GS_areaAttr))
 
 typedef struct {
     sword	*pts;

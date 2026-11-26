@@ -3,13 +3,12 @@
  * GrAllocGString, GrDestroyGString.
  */
 #include "graphicsInt.h"
+#include "graphicsMacro.h"
 #include <gstring.h>
 #include <file.h>
 #include <hugearr.h>
 #include <stdarg.h>
 #include <stdlib.h>
-
-#define CGSC_WRITING	1
 
 static const byte metafileHeader[] = {
     GR_COMMENT, 17, 0,

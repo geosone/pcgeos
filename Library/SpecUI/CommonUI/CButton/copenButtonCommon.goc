@@ -16,8 +16,7 @@
  * (DrawBWButton: drawn in color).
  */
 @include "cGeode.goh"
-
-#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
+@include "cbuttonMacro.goh"
 
 /* ---------------------------------------------------------------------
  * The state

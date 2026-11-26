@@ -21,6 +21,7 @@
  * The class record of OLTextClass is here, as in the asm.
  */
 @include "cGeode.goh"
+@include "cgadgetMacro.goh"
 @include <Internal/SpecUI/olTextClass.goh>
 @include <Internal/SpecUI/olCtrlClass.goh>
 @include <Internal/specC.goh>
@@ -41,8 +42,6 @@
 @extern method OLTextClass, MSG_SPEC_GET_SPECIFIC_VIS_OBJECT;
 @extern method OLTextClass, MSG_VIS_VUP_CREATE_GSTATE;
 
-
-#define Txt(o)	((OLTextInstance *) ObjDerefVis(o))
 #define Gen(o)	((GenTextInstance *) ObjDerefGen(o))
 
 /*

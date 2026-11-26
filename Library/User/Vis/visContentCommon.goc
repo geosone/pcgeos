@@ -3,15 +3,11 @@
  * routines to implement the VisContentClass.
  */
 @include "uiInt.goh"
+@include "visMacro.goh"
 @include <Objects/vCntC.goh>
 #include <string.h>
 #include <chunkarr.h>
 #include <thread.h>
-
-#define ContentPart(o)	((VisContentInstance *) ObjDerefVis(o))
-
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define CONTENT_OFFSET(f) word_offsetof(VisContentInstance, f)
 
 @extern method VisContentClass, MSG_VIS_INVALIDATE
 {
@@ -814,8 +810,6 @@ static Boolean CallTargetOrFirstChild(optr oself, Message msg,
     p.v = view;
     CallTargetOrFirstChild(oself, message, &p, sizeof(p));
 }
-
-#define ContentPart(o)	((VisContentInstance *) ObjDerefVis(o))
 
 /* VisContentInvalidate: the whole window (it is the view's: nothing
  * invalidates it for us) */

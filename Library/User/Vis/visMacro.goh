@@ -1,0 +1,12 @@
+/*
+ * visMacro.goh -- after visMacro.def: the macros of the module, and
+ * the helpers its files share.
+ */
+#ifndef H_VISMACRO
+#define H_VISMACRO
+
+#define CONTENT_OFFSET(f) word_offsetof(VisContentInstance, f)
+#define ContentPart(o)	((VisContentInstance *) ObjDerefVis(o))
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+
+#endif /* H_VISMACRO */

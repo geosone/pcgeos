@@ -36,12 +36,12 @@
  * Not yet: a current directory per drive.
  */
 #include "kernelC.h"
+#include "fileConstant.h"
 
 #include <initfile.h>
 #include <string.h>
 
 #define TOP_DRIVE	2		/* C: */
-#define MAX_LINK_COUNT	16		/* fileConstant.def */
 
 static DiskHandle topDisk;
 

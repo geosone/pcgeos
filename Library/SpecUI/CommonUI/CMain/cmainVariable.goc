@@ -3,10 +3,9 @@
  * cmainVariable.def), for Motif: the options read at the field's
  * initialization (cmainCode.goc), the color scheme and the display
  * scheme.
- *
- * Port32: the document control's variables are not here yet.
  */
 @include "cGeode.goh"
+@include "cmainDocument.goh"
 
 word olGadgetRepeatDelay;
 byte olGadgetAccelerate;
@@ -69,3 +68,9 @@ Boolean kbdRequired;
 FontID editableTextFontID;
 sword editableTextFontsize;
 word fieldWidth = 0, fieldHeight = 0;
+
+/* the document control ([ui] of the field's category) */
+word docControlOptions;			/* DocControlOptions */
+word docControlFSLevel = UIIL_ADVANCED;
+DiskHandle backupDirDisk = SP_BACKUP;
+char backupDirPath[PATH_BUFFER_SIZE];

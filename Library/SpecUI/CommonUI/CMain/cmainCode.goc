@@ -13,12 +13,9 @@
  * keyboard of the library's attach (InitFloatingKbd).
  */
 @include "cGeode.goh"
+@include "cmainConstant.goh"
 
 #define NARROW_WIDTH			300
-#define DEFAULT_GADGET_REPEAT_DELAY	10
-#define DEFAULT_BUTTON_INVERT_DELAY	6
-#define MIN_ARROW_SIZE			8
-#define MAX_ARROW_SIZE			14
 
 extern const ColorSchemeVars moCSMonochrome;	/* cmainVariable.goc */
 

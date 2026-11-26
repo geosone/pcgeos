@@ -57,11 +57,10 @@
  * the GState to store them; the C stores them as they are.
  */
 #include "graphicsInt.h"
+#include "graphicsMacro.h"
 #include <gstring.h>
 #include <Internal/grWinInt.h>
 #include <stdlib.h>
-
-#define AREA	((word) offsetof(GState, GS_areaAttr))
 
 /* OBP_flags of a group of a clip path: its fill rule (the asm's
  * BPF_FILL_RULE_VALID, BPF_FILL_RULE) */

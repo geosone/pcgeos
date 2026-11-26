@@ -3,6 +3,7 @@
  * routines to implement the GenApplication class.
  */
 @include "uiInt.goh"
+@include "genMacro.goh"
 @include <Objects/gSysC.goh>
 #include <string.h>
 @include <Objects/gFieldC.goh>
@@ -56,8 +57,6 @@
     @call oself::MSG_META_RELEASE_FOCUS_EXCL();
     (void) UserCallSystem(MSG_META_ENSURE_ACTIVE_FT, NULL, 0, NULL, 0);
 }
-
-#define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
 
 @extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_STATE
 {
@@ -467,8 +466,6 @@ static GCNListElement *FindWindowListItem(optr oself, optr window,
     e = ChunkArrayAppend(array, 0);
     memcpy(&e->GCNLE_item, &item, sizeof(item));
 }
-
-#define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
 
 /* GenAppInitDocumentCommonParams: the document of a launch block; one
  * below SP_TEMPLATE is opened as a template */

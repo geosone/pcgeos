@@ -5,10 +5,8 @@
  * DBInfoUngrouped.
  */
 #include "dbaseInt.h"
+#include "dbaseMacro.h"
 #include <string.h>
-
-#define GROUP_OF(id)	((VMBlockHandle) ((id) >> 16))
-#define ITEM_OF(id)	((word) (id))
 
 void *DBLockGetRefUngrouped(VMFileHandle file, DBGroupAndItem id,
 			    optr *refPtr)

@@ -13,13 +13,11 @@
  * run by the UI thread (MSG_META_MUP_ALTER_FTVMC_EXCL).
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 
 @classdecl OLDialogWinClass, neverSaved;
 
 #define DWin(o)		((OLDialogWinInstance *) ObjDerefVis(o))
-#define Inter(o)	((GenInteractionInstance *) ObjDerefGen(o))
-#define T(t)		((t) << OLBF_TARGET_OFFSET)
-#define R(r)		((r) << OLBF_REPLY_OFFSET)
 #define MODAL		(OLPWF_APP_MODAL | OLPWF_SYS_MODAL)
 
 /* ---------------------------------------------------------------------

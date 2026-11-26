@@ -35,6 +35,7 @@
  * at once), heapspace and the UI thread.
  */
 #include "kernelC.h"
+#include "geodesMacro.h"
 #include "geosmod.h"
 #include <vm.h>
 #include "ghal.h"
@@ -50,7 +51,6 @@ extern const KernelExport kernelExports[];
 extern const unsigned kernelExportCount;
 
 #define CORE(gh)	((GeodeCore *) MemDeref(gh))
-#define INFO(c)		((const GeosModuleInfo *) (c)->GC_info)
 #define NAME_LEN	(GEODE_NAME_SIZE + GEODE_NAME_EXT_SIZE)
 
 /* ---------------------------------------------------------------------

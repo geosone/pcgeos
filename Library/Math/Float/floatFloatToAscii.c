@@ -16,6 +16,7 @@
  *   - known quirks of the original are preserved and marked "QUIRK".
  */
 #include <assert.h>
+#include "floatConstant.h"
 #include <string.h>
 #include "fpstack.h"
 #include "floatFloatToAscii.h"
@@ -25,8 +26,6 @@
 #else
 #define EC(x) ((void)0)
 #endif
-
-#define NUM_DEC_DIGITS_IN_32_BITS 10
 
 /* DwordToAsciiFlags (subset used here) */
 #define DTAF_INCLUDE_LEADING_ZEROS        0x01

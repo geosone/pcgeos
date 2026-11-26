@@ -12,6 +12,7 @@
  * passed to the generic children (Port32/ABI.md section 13y).
  */
 @include "cGeode.goh"
+@include "ccompConstant.goh"
 @include <Internal/specC.goh>
 
 @classdecl OLMenuItemGroupClass, neverSaved;
@@ -19,8 +20,6 @@
 #define MIG(o)	((OLMenuItemGroupInstance *) ObjDerefVis(o))
 #define Gen(o)	((GenInstance *) ObjDerefGen(o))
 
-/* Motif's (ccompConstant.def) */
-#define OL_MENU_ITEM_SEP_HEIGHT		1
 #define OL_MENU_ITEM_ETCHED_SEP_HEIGHT	2
 
 /* OLMenuItemGroupInitialize: separators unless the same category as

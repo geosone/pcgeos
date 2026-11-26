@@ -1,0 +1,8 @@
+/*
+ * cutilsVariable.goc -- after cutilsVariable.def: the variables of
+ * CUtils that the port has (declared in cGeode.goh).  The pointer
+ * images are in cutilsPtrImages.goc, made from the asm's tables.
+ */
+@include "cGeode.goh"
+
+word screenWidth, screenHeight;	/* the screen (CWin/cwinScreen.goc) */

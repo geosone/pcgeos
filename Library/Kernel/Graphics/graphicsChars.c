@@ -26,12 +26,12 @@
  * (FBF_IS_INVALID), DBCS.
  */
 #include "graphicsInt.h"
+#include "graphicsConstant.h"
 #include <Internal/fontDr.h>
 #include <file.h>
 #include <stdlib.h>
 
 #define FID_MAKER_MASK	0xf0		/* of the high byte */
-#define FID_INIT_SIZE	16
 
 /* ---------------------------------------------------------------------
  * The info block

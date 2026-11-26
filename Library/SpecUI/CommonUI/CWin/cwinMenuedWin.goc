@@ -14,13 +14,12 @@
  *   - a double click on the title (cwinPtr.asm's MSG_META_START_SELECT).
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Objects/gDCtrlC.goh>
 
 @classdecl OLMenuedWinClass, neverSaved;
 
 #define MWin(o)		((OLMenuedWinInstance *) ObjDerefVis(o))
-#define Gen(o)		((GenInstance *) ObjDerefGen(o))
-#define T(t)		((t) << OLBF_TARGET_OFFSET)
 
 /* ---------------------------------------------------------------------
  * Bars

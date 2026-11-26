@@ -37,6 +37,7 @@
  *     CLASSF_DISCARD_ON_SAVE (nothing is saved to state yet).
  */
 @include "uiInt.goh"
+@include "visMacro.goh"
 @include <Objects/vCntC.goh>
 #include <string.h>
 #include <chunkarr.h>
@@ -79,8 +80,6 @@
 typedef char VisContentLargeOrder[
     (MSG_META_LARGE_DRAG_OTHER - MSG_META_LARGE_START_SELECT ==
      MSG_META_DRAG_OTHER - MSG_META_START_SELECT) ? 1 : -1];
-
-#define ContentPart(o)	((VisContentInstance *) ObjDerefVis(o))
 
 /* ---------------------------------------------------------------------
  * Creation and the end
@@ -164,10 +163,6 @@ void VisContentSendToLayers(optr oself, Message msg, const void *params,
 /* ---------------------------------------------------------------------
  * Passed on down
  * ------------------------------------------------------------------- */
-
-#define ContentPart(o)	((VisContentInstance *) ObjDerefVis(o))
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define CONTENT_OFFSET(f) word_offsetof(VisContentInstance, f)
 
 /* VisContentInitialize */
 @method VisContentClass, MSG_META_INITIALIZE

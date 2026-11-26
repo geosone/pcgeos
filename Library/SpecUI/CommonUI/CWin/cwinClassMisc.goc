@@ -18,12 +18,11 @@
  * legos look, rotating the display.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Objects/gTrigC.goh>
 @include <Objects/gPrimC.goh>
 @include <Objects/gDispC.goh>
 @include <Objects/gInterC.goh>
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 #define CTRL_KEYS	(SS_LCTRL | SS_RCTRL)
 #define ANY_MODIFIER	(SS_LCTRL | SS_RCTRL | SS_LALT | SS_RALT | \

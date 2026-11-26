@@ -27,11 +27,11 @@
  * (EB_color).
  */
 #include "graphicsInt.h"
+#include "graphicsConstant.h"
 #include "Win/winInt.h"
 #include <hugearr.h>
 #include <Internal/videoDr.h>
 
-#define DEF_BITMAP_RES	72
 #define VIDMEM_VERSION_MAJOR	1
 #define VIDMEM_VERSION_MINOR	0
 

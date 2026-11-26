@@ -36,6 +36,7 @@
  * shutdown (UIAppPreventCrashOnShutdown).
  */
 @include "uiInt.goh"
+@include "genMacro.goh"
 @include <Objects/gSysC.goh>
 @include <Objects/gFieldC.goh>
 @include <Objects/gDocC.goh>
@@ -87,8 +88,6 @@
 @extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_NO_MORE_CONNECTIONS;
 @extern method GenApplicationClass, MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP;
 @extern method GenApplicationClass, MSG_GEN_APPLICATION_LOWER_WINDOW_TO_BOTTOM;
-
-#define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
 
 optr GenAppProcessOptr(void)
 {

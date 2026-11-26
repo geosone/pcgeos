@@ -18,11 +18,9 @@
  * is not ported.
  */
 #include "dbaseInt.h"
+#include "dbaseMacro.h"
 
 #include <string.h>
-
-#define GROUP_OF(id)	((VMBlockHandle) ((id) >> 16))
-#define ITEM_OF(id)	((word) (id))
 
 /* DBLockGroupValid: the item block locked, the item's chunk in it */
 optr DBLockItem(VMFileHandle file, DBGroupAndItem id)

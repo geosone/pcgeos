@@ -16,13 +16,13 @@
  * animated busy pointer (ANIMATED_BUSY_CURSOR is off for Motif).
  */
 @include "cGeode.goh"
+@include "cutilsMacro.goh"
 @include <Internal/flowC.goh>
 @include <Internal/specC.goh>
 #include <sysstats.h>
 
 @classdecl OLSystemClass, neverSaved;
 
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
 #define SYS_OFFSET(f)	word_offsetof(OLSystemInstance, f)
 
 /* the grabs of a node: focus, target, full screen, model, in this order

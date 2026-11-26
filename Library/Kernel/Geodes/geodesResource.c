@@ -8,6 +8,7 @@
  * that build resources without a geode module register theirs.
  */
 #include "kernelC.h"
+#include "geodesMacro.h"
 #include "geosmod.h"
 #include <vm.h>
 #include <string.h>
@@ -81,8 +82,6 @@ sdword GeodeHandleToResource(GeodeHandle gh, Handle h)
 	    return r ? r : GOCR_PROCESS_RES;
     return -1;
 }
-
-#define INFO(c)	((const GeosModuleInfo *) (c)->GC_info)
 
 /* exported entry `entryNumber' of a library (.gp order) */
 void *ProcGetLibraryEntry(GeodeHandle library, word entryNumber)

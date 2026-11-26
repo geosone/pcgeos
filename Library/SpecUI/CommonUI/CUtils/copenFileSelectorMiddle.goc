@@ -9,6 +9,7 @@
  * OLFSCreateAndInitGenItem, OLFSShowCurrentDir.
  */
 @include "cGeode.goh"
+@include "cutilsMacro.goh"
 @include "cspecCUAS.goh"
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olFileSelectorClass.goh>
@@ -30,11 +31,6 @@
  * kinds of drives; the top line is blank */
 #define GFS_ICON_HEIGHT		12
 #include "CUtils/copenFileSelectorIcons.h"
-
-#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
-#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
-#define SDAVNF_PASS_DISK_HANDLE		4
-#define SDAVNF_TRAILING_SLASH		1
 
 #define GFS_ICON_SPACING	2
 
@@ -250,8 +246,6 @@ static const Bitmap *EntryIcon(const OLFileSelectorEntry *e, Boolean parent,
 		VMDT_GSTRING, VMST_OPTR, ConstructOptr(bh, chunk));
     MemFree(bh);
 }
-
-#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
 
 /* OLFSDestroyListChildren: the children of the list from a position on */
 void OLFSDestroyListChildren(optr list, word from)

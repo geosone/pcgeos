@@ -1,0 +1,18 @@
+/*
+ * cutilsConstant.goh -- after cutilsConstant.def: the constants of the module
+ * that the port has.
+ */
+#ifndef H_CUTILSCONSTANT
+#define H_CUTILSCONSTANT
+
+#define BELOW_SHORTCUT_SPACING		4
+#define CGA_BELOW_SHORTCUT_SPACING	1
+#define CLOSE_SHORTCUT_SPACING		5
+#define MAX_KBD_MONIKER_LEN		30
+#define MIN_UNDERLINE_WIDTH		3
+#define OLFS_CGA_DEFAULT_FILES_SHOWN		3
+#define OLFS_DEFAULT_FILES_SHOWN		7
+#define OLFS_LARGE_DISPLAY_DEFAULT_FILES_SHOWN	14
+#define SHORTCUT_SPACING		16
+
+#endif /* H_CUTILSCONSTANT */

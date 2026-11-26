@@ -1,0 +1,11 @@
+/*
+ * cgadgetMacro.goh -- after cgadgetMacro.def: the macros of the module, and
+ * the helpers its files share.
+ */
+#ifndef H_CGADGETMACRO
+#define H_CGADGETMACRO
+
+#define InBlock(o, c)	ConstructOptr(OptrToHandle(o), c)
+#define Txt(o)	((OLTextInstance *) ObjDerefVis(o))
+
+#endif /* H_CGADGETMACRO */

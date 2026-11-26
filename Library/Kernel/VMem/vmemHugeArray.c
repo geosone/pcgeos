@@ -33,6 +33,7 @@
  * routines that take one find the block with MemPtrToHandle.
  */
 #include "vmemInt.h"
+#include "vmemConstant.h"
 #include <lmem.h>
 #include <chunkarr.h>
 #include <hugearr.h>
@@ -51,9 +52,6 @@ typedef struct {
     word		HADE_size;
     VMBlockHandle	HADE_handle;
 } HugeArrayDirEntry;
-
-#define HA_DESIRED_BLOCK_SIZE	4000
-#define HA_UPPER_LIMIT		((3 * HA_DESIRED_BLOCK_SIZE) / 2)
 
 #define DOS16_LMBH_SIZE		16
 #define LMBH_DELTA		((word) (sizeof(LMemBlockHeader) - \

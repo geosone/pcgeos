@@ -3,12 +3,11 @@
  * font-mapping algorithm that returns the difference between two fontIDs
  */
 #include "exportInt.h"
+#include "exportMacro.h"
 #include <font.h>
 #include <fontID.h>
 #include <char.h>
 #include <Internal/fontDr.h>
-
-#define FID_MAKER_MASK	0xf000
 
 /* CalcFontDiff: how far apart two faces are (FontMap: 0 the same, 0xff
  * not to be used for each other) */

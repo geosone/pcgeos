@@ -20,12 +20,11 @@
  * goc does not take on a GenTrigger: they are added to the copy.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Objects/gTrigC.goh>
 @include <Objects/gPrimC.goh>
 @include <Objects/gDispC.goh>
 @include <Objects/gInterC.goh>
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 @extern object StandardWindowMenu;
 @extern object SMI_Restore;
@@ -549,8 +548,6 @@ void OpenWinSysMenuNotifyEnabled(optr o, Message msg, byte mode,
 	    (void) @call x::MSG_SPEC_NOTIFY_NOT_ENABLED(mode, flags);
     }
 }
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 /* OpenWinGetTitleBarGroupSize: the width of a title bar group that is
  * built (one less on black and white, to overlap) */

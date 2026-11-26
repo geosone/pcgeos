@@ -40,6 +40,8 @@
  * not installed.
  */
 #include "exportInt.h"
+#include "exportMacro.h"
+#include "exportConstant.h"
 #include <font.h>
 #include <fontID.h>
 #include <char.h>
@@ -68,8 +70,6 @@ typedef struct {
 #define BOLD_FACTOR		((WWFixedAsDWord) 0x00012000)
 #define ITALIC_FACTOR		((WWFixedAsDWord) 0xffffc996)
 #define STRIKETHRU_FACTOR	((WWFixedAsDWord) 0xffff3333)
-
-#define FID_MAKER_MASK	0xf000
 
 /* a DOS16 TextAttr in a GR_DRAW_TEXT_FIELD run (aligned to a word) */
 #define TA_SIZE		24
@@ -232,16 +232,6 @@ void FreePageFonts(TGSLocals *tgs)
  * Type 3 fonts (exportType3Fonts.asm, DownloadFont, EmitCharacter)
  * ------------------------------------------------------------------- */
 
-#define HO_MOVETO	0
-#define HO_LINETO	2
-#define HO_CURVETO	6
-#define HO_FILL		8
-#define HO_SETCACHE	9
-#define HO_DIGITS_RANGE	110
-#define HO_DIGITS_ZERO	0x7c
-#define HO_110S_LOW	(-10)
-#define HO_110S_HIGH	10
-#define HO_110S_ZERO	0xf5
 #define T3_SIZE		1000		/* the size the paths are made at */
 #define T3_LINE		70		/* hex digits on a line */
 /* a string literal and its length */

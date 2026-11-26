@@ -6,11 +6,8 @@
  * (the default exclusive, menus, gadget exclusives), the window opened.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Objects/gPrimC.goh>
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
 
 /* windowRegionBW (cwinClassMisc.asm): the window with its shadow */
 static const Region windowRegionBW[] = {

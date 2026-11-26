@@ -14,6 +14,7 @@
  * asm went on with the UI process).
  */
 @include "uiInt.goh"
+@include "genMacro.goh"
 @include <Objects/gSysC.goh>
 @include <Objects/gFieldC.goh>
 #include <Internal/im.h>
@@ -21,11 +22,7 @@
 
 @classdecl GenSystemClass;
 
-#define GEN_MASTER	word_offsetof(GenBase, Gen_offset)
-#define GEN_LINK	word_offsetof(GenInstance, GI_link)
 #define SYS_SCREENS	word_offsetof(GenSystemInstance, GSYI_screenComp)
-
-
 
 /* ---------------------------------------------------------------------
  * The system object

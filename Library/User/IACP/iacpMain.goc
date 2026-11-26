@@ -33,8 +33,6 @@
 #include <string.h>
 #include <system.h>
 
-MemHandle iacpListBlock;
-ChunkHandle iacpListArray, iacpDocArray;
 /* one launches a server at a time (iacpInstantiateSem); it waits on
  * iacpInstantiateWake, counted in iacpInstantiateWaiters under the
  * exclusive lock of the block, until a server registers */
@@ -85,10 +83,6 @@ void IACPUnlockListBlock(void)
 {
     MemUnlockShared(iacpListBlock);
 }
-
-#define LISTS	ConstructOptr(iacpListBlock, iacpListArray)
-#define DOCS	ConstructOptr(iacpListBlock, iacpDocArray)
-#define CHUNK(ch)	LMemDerefHandles(iacpListBlock, ch)
 
 IACPList *IACPListPtr(word n)
 {

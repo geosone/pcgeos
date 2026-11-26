@@ -8,6 +8,7 @@
  * exclusive.
  */
 @include "cmainDocument.goh"
+@include "cmainConstant.goh"
 @include <Objects/gProcC.goh>
 @include <Objects/gInterC.goh>
 @include <Objects/vTextC.goh>
@@ -15,11 +16,6 @@
 @include <system.h>
 
 /* cmainUIDocumentControl.goc */
-extern DiskHandle backupDirDisk;
-extern char backupDirPath[];
-
-/* cmainConstant.def */
-#define DOCUMENT_MAX_GENERATED_NAMES	100
 
 #define ACCESS_ATTRS	(GDA_READ_ONLY | GDA_READ_WRITE | \
 			 GDA_SHARED_SINGLE | GDA_SHARED_MULTIPLE)

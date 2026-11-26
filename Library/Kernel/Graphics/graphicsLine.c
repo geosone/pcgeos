@@ -15,8 +15,7 @@
  * (graphicsPolyline.c), a styled one in dashes (graphicsLineStyles.c).
  */
 #include "graphicsInt.h"
-
-#define LINE	((word) offsetof(GState, GS_lineAttr))
+#include "graphicsMacro.h"
 
 /* AdjustLineEnds */
 void GrAdjustLineEnds(const GState *gs, sword *x1, sword *y1, sword *x2,

@@ -18,19 +18,14 @@
  * constants here (not localizable yet).
  */
 @include "cGeode.goh"
+@include "cutilsConstant.goh"
 @include <Internal/SpecUI/olValueClass.goh>
 @include <Objects/vTextC.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Objects/gViewC.goh>
 @include <Objects/gContC.goh>
 
-#define MIN_UNDERLINE_WIDTH		3
-#define CLOSE_SHORTCUT_SPACING		5
-#define BELOW_SHORTCUT_SPACING		4
-#define CGA_BELOW_SHORTCUT_SPACING	1
 #define WINDOW_DOT_TEXT_WIDTH		10	/* not PZ */
-#define MAX_KBD_MONIKER_LEN		30
-#define SHORTCUT_SPACING		16
 
 static word winMarkWidth;		/* "..." in the UI's font */
 static word addOnMnemonicWidth;		/* " (w)" in the UI's font */

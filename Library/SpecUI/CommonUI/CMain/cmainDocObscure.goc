@@ -14,8 +14,6 @@
 #undef LocalIsSpace
 extern Boolean LocalIsSpace(wchar ch);
 
-extern DiskHandle backupDirDisk;
-extern char backupDirPath[];
 
 /* the directory of the document */
 static void SetDocDir(optr o)

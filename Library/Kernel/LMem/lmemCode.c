@@ -7,7 +7,7 @@
  *   header         LMemBlockHeader (or a larger one: ObjLMemBlockHeader)
  *   handle table   at LMBH_offset, LMBH_nHandles words; a chunk handle is
  *                  the offset of its entry.  Entry 0: free handle,
- *                  LMEM_EMPTY: chunk without data, else the offset of the
+ *                  LMEM_NOMEM_HANDLE: chunk without data, else the offset of the
  *                  chunk's data.
  *   heap           chunks, each a size word (data size + 2) right before
  *                  its data.
@@ -28,33 +28,24 @@
  * relocation (the object system does that).
  */
 #include "kernelC.h"
+#include "lmemMacros.h"
 #include "ghal.h"
 
 #include <object.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define LMEM_EMPTY	0xffffu		/* LMEM_NOMEM_HANDLE */
-#define LMEM_ALIGN	8u
-#define ALIGN(n)	(((n) + LMEM_ALIGN - 1) & ~(dword) (LMEM_ALIGN - 1))
-#define LMEM_MAX_BLOCK	0xfff0u
-#define LMEM_HANDLE_INCR 24		/* handles added at a time */
-#define LMEM_PADDING	256		/* extra free space when growing */
-
-#define HDR(b)		((LMemBlockHeader *) (b))
-#define W(b, off)	(*(word *) ((byte *) (b) + (off)))
-
 /* offset of the first chunk's size word */
 static dword HeapStart(const byte *b)
 {
-    dword tableEnd = HDR(b)->LMBH_offset + 2u * HDR(b)->LMBH_nHandles;
-    return ALIGN(tableEnd + 2) - 2;
+    dword tableEnd = LMEM_HDR(b)->LMBH_offset + 2u * LMEM_HDR(b)->LMBH_nHandles;
+    return RoundUp(tableEnd + 2) - 2;
 }
 
 /* bytes a chunk occupies, from its data offset */
 static dword SlotOf(const byte *b, word data)
 {
-    return ALIGN((dword) W(b, data - 2));
+    return RoundUp((dword) LMEM_WORD(b, data - 2));
 }
 
 byte *LMemBlockOf(MemHandle mh)
@@ -70,7 +61,7 @@ byte *LMemBlockOf(MemHandle mh)
 /* the handle table entry of a chunk handle in use */
 word *LMemEntryOf(byte *b, ChunkHandle ch)
 {
-    LMemBlockHeader *h = HDR(b);
+    LMemBlockHeader *h = LMEM_HDR(b);
 
     if (ch < h->LMBH_offset)
 	KernelFatal(LMEM_HANDLE_BEFORE_HANDLE_TABLE);
@@ -78,9 +69,9 @@ word *LMemEntryOf(byte *b, ChunkHandle ch)
 	KernelFatal(LMEM_HANDLE_BEYOND_HANDLE_TABLE);
     if ((ch - h->LMBH_offset) & 1)
 	KernelFatal(LMEM_CHUNK_HANDLE_AT_ODD_ADDRESS);
-    if (W(b, ch) == 0)
+    if (LMEM_WORD(b, ch) == 0)
 	KernelFatal(ILLEGAL_HANDLE);	/* freed chunk */
-    return &W(b, ch);
+    return &LMEM_WORD(b, ch);
 }
 
 /* ---------------------------------------------------------------------
@@ -90,28 +81,28 @@ word *LMemEntryOf(byte *b, ChunkHandle ch)
 /* give [data - 2, data - 2 + slot) back, merging with its neighbours */
 static void FreeSlot(byte *b, word data, dword slot)
 {
-    LMemBlockHeader *h = HDR(b);
+    LMemBlockHeader *h = LMEM_HDR(b);
     word *link = &h->LMBH_freeList, prev = 0;
 
-    W(b, data - 2) = (word) slot;
+    LMEM_WORD(b, data - 2) = (word) slot;
     while (*link && *link < data) {
 	prev = *link;
-	link = &W(b, *link);
+	link = &LMEM_WORD(b, *link);
     }
-    W(b, data) = *link;			/* insert, sorted */
+    LMEM_WORD(b, data) = *link;			/* insert, sorted */
     *link = data;
     h->LMBH_totalFree += (word) slot;
     /* merge with the next one */
-    if (W(b, data) && data + slot == W(b, data)) {
-	word next = W(b, data);
-	slot += W(b, next - 2);
-	W(b, data) = W(b, next);
-	W(b, data - 2) = (word) slot;
+    if (LMEM_WORD(b, data) && data + slot == LMEM_WORD(b, data)) {
+	word next = LMEM_WORD(b, data);
+	slot += LMEM_WORD(b, next - 2);
+	LMEM_WORD(b, data) = LMEM_WORD(b, next);
+	LMEM_WORD(b, data - 2) = (word) slot;
     }
     /* merge into the previous one */
-    if (prev && prev + (dword) W(b, prev - 2) == data) {
-	W(b, prev - 2) = (word) (W(b, prev - 2) + slot);
-	W(b, prev) = W(b, data);
+    if (prev && prev + (dword) LMEM_WORD(b, prev - 2) == data) {
+	LMEM_WORD(b, prev - 2) = (word) (LMEM_WORD(b, prev - 2) + slot);
+	LMEM_WORD(b, prev) = LMEM_WORD(b, data);
     }
 }
 
@@ -119,10 +110,10 @@ static void FreeSlot(byte *b, word data, dword slot)
 static word TakeFree(byte *b, word *link, dword need)
 {
     word data = *link;
-    dword slot = W(b, data - 2);
+    dword slot = LMEM_WORD(b, data - 2);
 
-    *link = W(b, data);
-    HDR(b)->LMBH_totalFree -= (word) slot;
+    *link = LMEM_WORD(b, data);
+    LMEM_HDR(b)->LMBH_totalFree -= (word) slot;
     if (slot > need)
 	FreeSlot(b, (word) (data + need), slot - need);
     return data;
@@ -138,10 +129,10 @@ static int CompareDwords(const void *x, const void *y)
 
 static void Compact(byte *b)
 {
-    LMemBlockHeader *h = HDR(b);
+    LMemBlockHeader *h = LMEM_HDR(b);
     word n = h->LMBH_nHandles, i, count = 0;
     dword pos = HeapStart(b), end = h->LMBH_blockSize;
-    word *table = &W(b, h->LMBH_offset);
+    word *table = &LMEM_WORD(b, h->LMBH_offset);
     dword *order;
 
     if (h->LMBH_freeList == 0)
@@ -150,7 +141,7 @@ static void Compact(byte *b)
     if (!order)
 	return;				/* compaction is only an optimization */
     for (i = 0; i < n; i++)
-	if (table[i] != 0 && table[i] != LMEM_EMPTY)
+	if (table[i] != 0 && table[i] != LMEM_NOMEM_HANDLE)
 	    order[count++] = ((dword) table[i] << 16) | i;
     qsort(order, count, sizeof(dword), CompareDwords);
     for (i = 0; i < count; i++) {
@@ -177,27 +168,27 @@ static void Compact(byte *b)
 static byte *ResizeBlock(MemHandle mh, sdword delta)
 {
     byte *b = LMemBlockOf(mh);
-    dword size = HDR(b)->LMBH_blockSize + delta;
+    dword size = LMEM_HDR(b)->LMBH_blockSize + delta;
 
-    if (delta > 0 && ((HDR(b)->LMBH_flags & LMF_NO_ENLARGE) ||
+    if (delta > 0 && ((LMEM_HDR(b)->LMBH_flags & LMF_NO_ENLARGE) ||
 		      size > LMEM_MAX_BLOCK))
 	return NULL;
     if (MemReAlloc(mh, (word) size, 0) == 0)
 	return NULL;
     b = MemDeref(mh);
-    HDR(b)->LMBH_blockSize = (word) size;
+    LMEM_HDR(b)->LMBH_blockSize = (word) size;
     return b;
 }
 
 /* a free chunk of at least `need' bytes (slot size), first fit */
 static word *FindFree(byte *b, dword need)
 {
-    word *link = &HDR(b)->LMBH_freeList;
+    word *link = &LMEM_HDR(b)->LMBH_freeList;
 
     while (*link) {
-	if (W(b, *link - 2) >= need)
+	if (LMEM_WORD(b, *link - 2) >= need)
 	    return link;
-	link = &W(b, *link);
+	link = &LMEM_WORD(b, *link);
     }
     return NULL;
 }
@@ -207,11 +198,11 @@ static word *FindFree(byte *b, dword need)
 static word AllocSpace(MemHandle mh, word size)
 {
     byte *b = LMemBlockOf(mh);
-    dword need = ALIGN((dword) size + 2);
+    dword need = RoundUp((dword) size + 2);
     word *link, data;
 
     link = FindFree(b, need);
-    if (!link && HDR(b)->LMBH_totalFree >= need) {
+    if (!link && LMEM_HDR(b)->LMBH_totalFree >= need) {
 	Compact(b);
 	link = FindFree(b, need);
     }
@@ -219,14 +210,14 @@ static word AllocSpace(MemHandle mh, word size)
 	/* grow: what the last free chunk (at the end) lacks, and some */
 	dword have = 0, grow;
 	word f;
-	for (f = HDR(b)->LMBH_freeList; f; f = W(b, f))
-	    if (f - 2u + W(b, f - 2) == HDR(b)->LMBH_blockSize)
-		have = W(b, f - 2);
-	grow = need - have + LMEM_PADDING;
-	if (HDR(b)->LMBH_blockSize + grow > LMEM_MAX_BLOCK)
+	for (f = LMEM_HDR(b)->LMBH_freeList; f; f = LMEM_WORD(b, f))
+	    if (f - 2u + LMEM_WORD(b, f - 2) == LMEM_HDR(b)->LMBH_blockSize)
+		have = LMEM_WORD(b, f - 2);
+	grow = need - have + LMEM_MIN_ALLOCATION_PADDING;
+	if (LMEM_HDR(b)->LMBH_blockSize + grow > LMEM_MAX_BLOCK)
 	    grow = need - have;
 	{
-	    dword oldEnd = HDR(b)->LMBH_blockSize;
+	    dword oldEnd = LMEM_HDR(b)->LMBH_blockSize;
 	    b = ResizeBlock(mh, (sdword) grow);
 	    if (!b)
 		return 0;
@@ -237,7 +228,7 @@ static word AllocSpace(MemHandle mh, word size)
 	    KernelFatal(CORRUPTED_LMEM_BLOCK);
     }
     data = TakeFree(b, link, need);
-    W(b, data - 2) = (word) (size + 2);
+    LMEM_WORD(b, data - 2) = (word) (size + 2);
     return data;
 }
 
@@ -245,7 +236,7 @@ static word AllocSpace(MemHandle mh, word size)
 static int MoreHandles(MemHandle mh, word count)
 {
     byte *b = LMemBlockOf(mh);
-    LMemBlockHeader *h = HDR(b);
+    LMemBlockHeader *h = LMEM_HDR(b);
     dword oldStart = HeapStart(b), newStart, delta, oldEnd = h->LMBH_blockSize;
     word i, oldN = h->LMBH_nHandles, *table;
 
@@ -257,21 +248,21 @@ static int MoreHandles(MemHandle mh, word count)
 	b = ResizeBlock(mh, (sdword) delta);
 	if (!b)
 	    return 0;
-	h = HDR(b);
+	h = LMEM_HDR(b);
 	memmove(b + newStart, b + oldStart, oldEnd - oldStart);
-	table = &W(b, h->LMBH_offset);
+	table = &LMEM_WORD(b, h->LMBH_offset);
 	for (i = 0; i < oldN; i++)
-	    if (table[i] != 0 && table[i] != LMEM_EMPTY)
+	    if (table[i] != 0 && table[i] != LMEM_NOMEM_HANDLE)
 		table[i] = (word) (table[i] + delta);
 	if (h->LMBH_freeList) {
 	    word *link = &h->LMBH_freeList;
 	    while (*link) {
 		*link = (word) (*link + delta);
-		link = &W(b, *link);
+		link = &LMEM_WORD(b, *link);
 	    }
 	}
     }
-    table = &W(b, h->LMBH_offset);
+    table = &LMEM_WORD(b, h->LMBH_offset);
     for (i = oldN; i < oldN + count; i++)
 	table[i] = 0;
     h->LMBH_nHandles = (word) (oldN + count);
@@ -283,15 +274,15 @@ static int MoreHandles(MemHandle mh, word count)
 	    LMemReAlloc(ConstructOptr(mh, fc), h->LMBH_nHandles))
 	    return 0;
 	b = LMemBlockOf(mh);
-	if (old < HDR(b)->LMBH_nHandles)
-	    memset(b + W(b, fc) + old, 0, HDR(b)->LMBH_nHandles - old);
+	if (old < LMEM_HDR(b)->LMBH_nHandles)
+	    memset(b + LMEM_WORD(b, fc) + old, 0, LMEM_HDR(b)->LMBH_nHandles - old);
     }
     return 1;
 }
 
 static void Failed(MemHandle mh)
 {
-    if (!(HDR(LMemBlockOf(mh))->LMBH_flags & LMF_RETURN_ERRORS))
+    if (!(LMEM_HDR(LMemBlockOf(mh))->LMBH_flags & LMF_RETURN_ERRORS))
 	KernelFatal(LMEM_CANNOT_ALLOCATE);
 }
 
@@ -308,13 +299,13 @@ void LMemInitHeap(MemHandle mh, LMemType type, LocalMemoryFlags flags,
 
     if (offset < sizeof(LMemBlockHeader))
 	offset = (sizeof(LMemBlockHeader) + 3u) & ~3u;
-    start = ALIGN(offset + 2u * numHandles + 2) - 2;
-    size = start + ALIGN(freeSpace ? freeSpace : LMEM_ALIGN);
+    start = RoundUp(offset + 2u * numHandles + 2) - 2;
+    size = start + RoundUp(freeSpace ? freeSpace : LMEM_ALIGN);
     if (size > LMEM_MAX_BLOCK || !MemReAlloc(mh, (word) size, 0))
 	KernelFatal(LMEM_CANNOT_ALLOCATE);
     MemModifyFlags(mh, HF_LMEM, 0);
     b = MemDeref(mh);
-    h = HDR(b);
+    h = LMEM_HDR(b);
     h->LMBH_handle = mh;
     h->LMBH_offset = (word) offset;
     h->LMBH_flags = flags;
@@ -324,7 +315,7 @@ void LMemInitHeap(MemHandle mh, LMemType type, LocalMemoryFlags flags,
     h->LMBH_freeList = 0;
     h->LMBH_totalFree = 0;
     for (i = 0; i < numHandles; i++)
-	W(b, offset + 2 * i) = 0;
+	LMEM_WORD(b, offset + 2 * i) = 0;
     memset(b + offset + 2u * numHandles, 0, start - offset - 2u * numHandles);
     FreeSlot(b, (word) (start + 2), size - start);
     if ((flags & LMF_HAS_FLAGS) && numHandles) {
@@ -333,7 +324,7 @@ void LMemInitHeap(MemHandle mh, LMemType type, LocalMemoryFlags flags,
 	if (!data)
 	    KernelFatal(LMEM_CANNOT_ALLOCATE);
 	b = MemDeref(mh);
-	W(b, offset) = data;
+	LMEM_WORD(b, offset) = data;
 	memset(b + data, 0, numHandles);
     }
 }
@@ -343,11 +334,11 @@ static ChunkHandle AllocHandle(MemHandle mh, word i, word chunkSize);
 ChunkHandle LMemAlloc(MemHandle mh, word chunkSize)
 {
     byte *b = LMemBlockOf(mh);
-    LMemBlockHeader *h = HDR(b);
+    LMemBlockHeader *h = LMEM_HDR(b);
     word i;
 
     for (i = 0; i < h->LMBH_nHandles; i++)
-	if (W(b, h->LMBH_offset + 2 * i) == 0)
+	if (LMEM_WORD(b, h->LMBH_offset + 2 * i) == 0)
 	    break;
     if (i == h->LMBH_nHandles) {
 	if (!MoreHandles(mh, LMEM_HANDLE_INCR)) {
@@ -362,7 +353,7 @@ ChunkHandle LMemAlloc(MemHandle mh, word chunkSize)
 ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize)
 {
     byte *b = LMemBlockOf(mh);
-    LMemBlockHeader *h = HDR(b);
+    LMemBlockHeader *h = LMEM_HDR(b);
     word i;
 
     if (ch < h->LMBH_offset || (ch - h->LMBH_offset) & 1)
@@ -374,7 +365,7 @@ ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize)
 	return 0;
     }
     b = LMemBlockOf(mh);
-    if (W(b, ch) != 0)
+    if (LMEM_WORD(b, ch) != 0)
 	KernelFatal(CANNOT_ALLOCATE_CORRECT_CHUNK_HANDLE);
     return AllocHandle(mh, i, chunkSize);
 }
@@ -382,24 +373,24 @@ ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize)
 static ChunkHandle AllocHandle(MemHandle mh, word i, word chunkSize)
 {
     byte *b = LMemBlockOf(mh);
-    LMemBlockHeader *h = HDR(b);
+    LMemBlockHeader *h = LMEM_HDR(b);
     word data;
     ChunkHandle ch;
 
     ch = (ChunkHandle) (h->LMBH_offset + 2 * i);
-    W(b, ch) = LMEM_EMPTY;		/* taken, even while we compact */
+    LMEM_WORD(b, ch) = LMEM_NOMEM_HANDLE;		/* taken, even while we compact */
     if (chunkSize) {
 	data = AllocSpace(mh, chunkSize);
 	b = LMemBlockOf(mh);
 	if (!data) {
-	    W(b, ch) = 0;
+	    LMEM_WORD(b, ch) = 0;
 	    Failed(mh);
 	    return 0;
 	}
-	W(b, ch) = data;
+	LMEM_WORD(b, ch) = data;
     }
-    if (HDR(b)->LMBH_flags & LMF_HAS_FLAGS)
-	b[W(b, HDR(b)->LMBH_offset) + i] = 0;	/* no ObjChunkFlags */
+    if (LMEM_HDR(b)->LMBH_flags & LMF_HAS_FLAGS)
+	b[LMEM_WORD(b, LMEM_HDR(b)->LMBH_offset) + i] = 0;	/* no ObjChunkFlags */
     return ch;
 }
 
@@ -408,7 +399,7 @@ void *LMemDeref(optr o)
     byte *b = LMemBlockOf(OptrToHandle(o));
     word v = *LMemEntryOf(b, OptrToChunk(o));
 
-    return v == LMEM_EMPTY ? NULL : b + v;
+    return v == LMEM_NOMEM_HANDLE ? NULL : b + v;
 }
 
 void LMemFree(optr o)
@@ -417,11 +408,11 @@ void LMemFree(optr o)
     ChunkHandle ch = OptrToChunk(o);
     word *e = LMemEntryOf(b, ch), v = *e;
 
-    if (v != LMEM_EMPTY)
+    if (v != LMEM_NOMEM_HANDLE)
 	FreeSlot(b, v, SlotOf(b, v));
     *e = 0;
-    if (HDR(b)->LMBH_flags & LMF_HAS_FLAGS)
-	b[W(b, HDR(b)->LMBH_offset) + (ch - HDR(b)->LMBH_offset) / 2] = 0;
+    if (LMEM_HDR(b)->LMBH_flags & LMF_HAS_FLAGS)
+	b[LMEM_WORD(b, LMEM_HDR(b)->LMBH_offset) + (ch - LMEM_HDR(b)->LMBH_offset) / 2] = 0;
 }
 
 /* TRUE if it failed (LMF_RETURN_ERRORS), as the asm C stub */
@@ -431,32 +422,32 @@ Boolean LMemReAlloc(optr o, word chunkSize)
     ChunkHandle ch = OptrToChunk(o);
     byte *b = LMemBlockOf(mh);
     word v = *LMemEntryOf(b, ch), data;
-    dword slot, need = ALIGN((dword) chunkSize + 2);
+    dword slot, need = RoundUp((dword) chunkSize + 2);
 
     if (chunkSize == 0) {
-	if (v != LMEM_EMPTY)
+	if (v != LMEM_NOMEM_HANDLE)
 	    FreeSlot(b, v, SlotOf(b, v));
-	W(b, ch) = LMEM_EMPTY;
+	LMEM_WORD(b, ch) = LMEM_NOMEM_HANDLE;
 	return FALSE;
     }
-    if (v != LMEM_EMPTY) {
+    if (v != LMEM_NOMEM_HANDLE) {
 	slot = SlotOf(b, v);
 	if (need <= slot) {			/* shrink or same slot */
-	    W(b, v - 2) = (word) (chunkSize + 2);
+	    LMEM_WORD(b, v - 2) = (word) (chunkSize + 2);
 	    if (slot > need)
 		FreeSlot(b, (word) (v + need), slot - need);
 	    return FALSE;
 	}
 	/* grow into a free neighbour */
 	{
-	    word *link = &HDR(b)->LMBH_freeList;
+	    word *link = &LMEM_HDR(b)->LMBH_freeList;
 	    while (*link && *link < v + slot)
-		link = &W(b, *link);
-	    if (*link == v + slot && slot + W(b, *link - 2) >= need) {
-		dword both = slot + W(b, *link - 2);
-		HDR(b)->LMBH_totalFree -= W(b, *link - 2);
-		*link = W(b, *link);
-		W(b, v - 2) = (word) (chunkSize + 2);
+		link = &LMEM_WORD(b, *link);
+	    if (*link == v + slot && slot + LMEM_WORD(b, *link - 2) >= need) {
+		dword both = slot + LMEM_WORD(b, *link - 2);
+		LMEM_HDR(b)->LMBH_totalFree -= LMEM_WORD(b, *link - 2);
+		*link = LMEM_WORD(b, *link);
+		LMEM_WORD(b, v - 2) = (word) (chunkSize + 2);
 		if (both > need)
 		    FreeSlot(b, (word) (v + need), both - need);
 		return FALSE;
@@ -471,12 +462,12 @@ Boolean LMemReAlloc(optr o, word chunkSize)
 	return TRUE;
     }
     b = LMemBlockOf(mh);
-    v = W(b, ch);
-    if (v != LMEM_EMPTY) {
-	memcpy(b + data, b + v, W(b, v - 2) - 2u);
+    v = LMEM_WORD(b, ch);
+    if (v != LMEM_NOMEM_HANDLE) {
+	memcpy(b + data, b + v, LMEM_WORD(b, v - 2) - 2u);
 	FreeSlot(b, v, SlotOf(b, v));
     }
-    W(b, ch) = data;
+    LMEM_WORD(b, ch) = data;
     return FALSE;
 }
 
@@ -518,11 +509,11 @@ void LMemContract(MemHandle mh)
     word f = 0;
 
     Compact(b);
-    f = HDR(b)->LMBH_freeList;		/* one chunk at the end, or none */
-    if (f && W(b, f - 2) > LMEM_ALIGN) {
-	dword cut = W(b, f - 2) - LMEM_ALIGN;	/* keep a minimal one */
-	W(b, f - 2) = LMEM_ALIGN;
-	HDR(b)->LMBH_totalFree = LMEM_ALIGN;
+    f = LMEM_HDR(b)->LMBH_freeList;		/* one chunk at the end, or none */
+    if (f && LMEM_WORD(b, f - 2) > LMEM_ALIGN) {
+	dword cut = LMEM_WORD(b, f - 2) - LMEM_ALIGN;	/* keep a minimal one */
+	LMEM_WORD(b, f - 2) = LMEM_ALIGN;
+	LMEM_HDR(b)->LMBH_totalFree = LMEM_ALIGN;
 	ResizeBlock(mh, -(sdword) cut);
     }
 }
@@ -534,18 +525,18 @@ void LMemContract(MemHandle mh)
 void LMemValidate(MemHandle mh)
 {
     byte *b = LMemBlockOf(mh);
-    LMemBlockHeader *h = HDR(b);
+    LMemBlockHeader *h = LMEM_HDR(b);
     dword start = HeapStart(b), end = h->LMBH_blockSize, total = 0, used = 0;
     word i, f, prev = 0;
 
     if (h->LMBH_handle != mh || end != MemGetInfo(mh, MGIT_SIZE) ||
 	start > end || (end - start) % LMEM_ALIGN)
 	KernelFatal(CORRUPTED_LMEM_BLOCK);
-    for (f = h->LMBH_freeList; f; f = W(b, f)) {
-	dword slot = W(b, f - 2);
+    for (f = h->LMBH_freeList; f; f = LMEM_WORD(b, f)) {
+	dword slot = LMEM_WORD(b, f - 2);
 	if (f <= prev || f - 2u < start || f - 2u + slot > end ||
 	    slot % LMEM_ALIGN || slot == 0 ||
-	    (prev && prev - 2u + W(b, prev - 2) >= f - 2u))  /* unmerged */
+	    (prev && prev - 2u + LMEM_WORD(b, prev - 2) >= f - 2u))  /* unmerged */
 	    KernelFatal(CORRUPTED_LMEM_BLOCK);
 	total += slot;
 	prev = f;
@@ -553,8 +544,8 @@ void LMemValidate(MemHandle mh)
     if (total != h->LMBH_totalFree)
 	KernelFatal(CORRUPTED_LMEM_BLOCK);
     for (i = 0; i < h->LMBH_nHandles; i++) {
-	word v = W(b, h->LMBH_offset + 2 * i);
-	if (v == 0 || v == LMEM_EMPTY)
+	word v = LMEM_WORD(b, h->LMBH_offset + 2 * i);
+	if (v == 0 || v == LMEM_NOMEM_HANDLE)
 	    continue;
 	if (v % LMEM_ALIGN || v - 2u < start || v - 2u + SlotOf(b, v) > end)
 	    KernelFatal(CORRUPTED_LMEM_BLOCK);
@@ -583,7 +574,7 @@ MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
     for (i = 0; i < r->GR_chunks; i++) {
 	dword n = r->GR_chunk[i].GC_size + r->GR_chunk[i].GC_size2;
 	if (n)
-	    size += ALIGN(n + 2);
+	    size += RoundUp(n + 2);
     }
     size += LMEM_ALIGN;				/* a free chunk */
     if (size > LMEM_MAX_BLOCK)
@@ -594,25 +585,25 @@ MemHandle LMemCreateResourceBlock(const GocResource *r, GeodeHandle owner,
 	return 0;
     b = MemDeref(mh);
     memcpy(b, src, r->GR_headerSize);
-    HDR(b)->LMBH_handle = mh;
-    HDR(b)->LMBH_blockSize = (word) size;
-    HDR(b)->LMBH_freeList = 0;
-    HDR(b)->LMBH_totalFree = 0;
+    LMEM_HDR(b)->LMBH_handle = mh;
+    LMEM_HDR(b)->LMBH_blockSize = (word) size;
+    LMEM_HDR(b)->LMBH_freeList = 0;
+    LMEM_HDR(b)->LMBH_totalFree = 0;
     pos = start;
     for (i = 0; i < r->GR_chunks; i++) {
 	const GocChunk *c = &r->GR_chunk[i];
 	dword n = c->GC_size + c->GC_size2;
-	word *e = &W(b, src->LMBH_offset + 2 * i);
+	word *e = &LMEM_WORD(b, src->LMBH_offset + 2 * i);
 	if (n == 0) {
-	    *e = LMEM_EMPTY;
+	    *e = LMEM_NOMEM_HANDLE;
 	    continue;
 	}
-	W(b, pos) = (word) (n + 2);
+	LMEM_WORD(b, pos) = (word) (n + 2);
 	memcpy(b + pos + 2, c->GC_data, c->GC_size);
 	if (c->GC_size2)
 	    memcpy(b + pos + 2 + c->GC_size, c->GC_data2, c->GC_size2);
 	*e = (word) (pos + 2);
-	pos += ALIGN(n + 2);
+	pos += RoundUp(n + 2);
     }
     FreeSlot(b, (word) (pos + 2), size - pos);
     return mh;
@@ -656,14 +647,14 @@ static word Get16(const byte *p)
 word LMemDOS16Size(MemHandle mh, word gapLen)
 {
     const byte *b = MemDeref(mh);
-    const LMemBlockHeader *h = HDR(b);
+    const LMemBlockHeader *h = LMEM_HDR(b);
     dword size = h->LMBH_offset - LMBH_DELTA - gapLen +
 		 2u * h->LMBH_nHandles, i;
 
     for (i = 0; i < h->LMBH_nHandles; i++) {
-	word e = W(b, h->LMBH_offset + 2 * i);
-	if (e && e != LMEM_EMPTY)
-	    size += ALIGN4(W(b, e - 2));
+	word e = LMEM_WORD(b, h->LMBH_offset + 2 * i);
+	if (e && e != LMEM_NOMEM_HANDLE)
+	    size += ALIGN4(LMEM_WORD(b, e - 2));
     }
     return size > LMEM_MAX_BLOCK ? 0 : (word) size;
 }
@@ -689,19 +680,19 @@ static void CopyHeader(byte *mem, byte *file, word off, word gapAt,
 word LMemToDOS16(MemHandle mh, byte *out, word gapAt, word gapLen)
 {
     byte *b = MemDeref(mh);
-    const LMemBlockHeader *h = HDR(b);
+    const LMemBlockHeader *h = LMEM_HDR(b);
     word off = (word) (h->LMBH_offset - LMBH_DELTA - gapLen),
 	 n = h->LMBH_nHandles;
     dword pos = off + 2u * n, i;
 
     CopyHeader(b, out, off, gapAt, gapLen, TRUE);
     for (i = 0; i < n; i++) {
-	word e = W(b, h->LMBH_offset + 2 * i), sz;
-	if (!e || e == LMEM_EMPTY) {
+	word e = LMEM_WORD(b, h->LMBH_offset + 2 * i), sz;
+	if (!e || e == LMEM_NOMEM_HANDLE) {
 	    Put16(out + off + 2 * i, e);
 	    continue;
 	}
-	sz = W(b, e - 2);
+	sz = LMEM_WORD(b, e - 2);
 	Put16(out + pos, sz);
 	memcpy(out + pos + 2, b + e, sz - 2u);
 	memset(out + pos + sz, 0, ALIGN4(sz) - sz);
@@ -740,18 +731,18 @@ MemHandle LMemFromDOS16(const byte *img, word size, Handle owner,
     if (gapLen && off < gapAt - LMBH_DELTA)
 	return 0;
     memOff = off + LMBH_DELTA + gapLen;
-    start = ALIGN(memOff + 2u * n + 2) - 2;
+    start = RoundUp(memOff + 2u * n + 2) - 2;
     total = start + LMEM_ALIGN;		/* a free chunk at the end */
     for (i = 0; i < n; i++) {
 	word e = Get16(img + off + 2 * i), sz;
-	if (!e || e == LMEM_EMPTY)
+	if (!e || e == LMEM_NOMEM_HANDLE)
 	    continue;
 	if (e < tableEnd + 2 || e > size)
 	    return 0;
 	sz = Get16(img + e - 2);
 	if (sz < 2 || (dword) e - 2 + sz > size)
 	    return 0;
-	total += ALIGN(sz);
+	total += RoundUp(sz);
     }
     if (total > LMEM_MAX_BLOCK)
 	return 0;
@@ -760,7 +751,7 @@ MemHandle LMemFromDOS16(const byte *img, word size, Handle owner,
     if (!mh)
 	return 0;
     b = MemDeref(mh);
-    h = HDR(b);
+    h = LMEM_HDR(b);
     CopyHeader(b, (byte *) img, off, gapAt, gapLen, FALSE);
     h->LMBH_handle = mh;
     h->LMBH_offset = (word) memOff;
@@ -773,15 +764,15 @@ MemHandle LMemFromDOS16(const byte *img, word size, Handle owner,
     start = HeapStart(b);
     for (i = 0; i < n; i++) {
 	word e = Get16(img + off + 2 * i), sz;
-	if (!e || e == LMEM_EMPTY) {
-	    W(b, memOff + 2 * i) = e;
+	if (!e || e == LMEM_NOMEM_HANDLE) {
+	    LMEM_WORD(b, memOff + 2 * i) = e;
 	    continue;
 	}
 	sz = Get16(img + e - 2);
-	W(b, start) = sz;
+	LMEM_WORD(b, start) = sz;
 	memcpy(b + start + 2, img + e, sz - 2u);
-	W(b, memOff + 2 * i) = (word) (start + 2);
-	start += ALIGN(sz);
+	LMEM_WORD(b, memOff + 2 * i) = (word) (start + 2);
+	start += RoundUp(sz);
     }
     FreeSlot(b, (word) (start + 2), total - start);
     return mh;

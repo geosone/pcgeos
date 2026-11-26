@@ -52,6 +52,9 @@
  *      global dgoup objects
  ***********************************************************************/
 
+/* Main/truetypeVariable.c */
+extern MemHandle bitmapHandle;
+extern MemHandle variableHandle;
 extern TEngine_Instance engineInstance;
 
 

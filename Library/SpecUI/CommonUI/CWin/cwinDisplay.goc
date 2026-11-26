@@ -13,6 +13,7 @@
  * the document instead of itself.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Internal/SpecUI/olDisplayGroupClass.goh>
 @include <Internal/SpecUI/olDisplayWinClass.goh>
 @include <Objects/gDocC.goh>
@@ -21,10 +22,7 @@
 
 @classdecl OLDisplayWinClass, neverSaved;
 
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
 #define DWin(o)		((OLDisplayWinInstance *) ObjDerefVis(o))
-#define Gen(o)		((GenInstance *) ObjDerefGen(o))
 #define GenDisp(o)	((GenDisplayInstance *) ObjDerefGen(o))
 
 /* ---------------------------------------------------------------------

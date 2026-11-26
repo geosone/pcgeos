@@ -3,10 +3,9 @@
  * MSG_VIS_TEXT_FLASH_CURSOR_ON, MSG_VIS_TEXT_FLASH_CURSOR_OFF.
  */
 @include "textInt.goh"
+@include "tslConstant.goh"
 #include <Internal/specUI.h>
 #include <timer.h>
-
-#define VIS_TEXT_CURSOR_FLASH	40	/* ticks on, and off */
 
 /* TextTimerStart: the next half of a flash */
 void TextTimerStart(optr o, Message msg)

@@ -1,0 +1,12 @@
+/*
+ * genMacro.goh -- after genMacro.def: the macros of the module, and
+ * the helpers its files share.
+ */
+#ifndef H_GENMACRO
+#define H_GENMACRO
+
+#define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
+#define GEN_LINK	word_offsetof(GenInstance, GI_link)
+#define GEN_MASTER	word_offsetof(GenBase, Gen_offset)
+
+#endif /* H_GENMACRO */

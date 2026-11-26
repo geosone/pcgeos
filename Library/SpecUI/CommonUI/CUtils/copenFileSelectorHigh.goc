@@ -15,6 +15,8 @@
  * The class record of OLFileSelectorClass and OLFSDynamicListClass is here, as in the asm.
  */
 @include "cGeode.goh"
+@include "cutilsConstant.goh"
+@include "cutilsMacro.goh"
 @include "cspecCUAS.goh"
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olFileSelectorClass.goh>
@@ -57,13 +59,6 @@
 @extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_FILTER_ROUTINE;
 @extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_ITEM_QUERY;
 
-#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
-#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
-#define SDAVNF_VOLUME_ONLY_FOR_FIXED	2
-
-#define OLFS_DEFAULT_FILES_SHOWN		7
-#define OLFS_LARGE_DISPLAY_DEFAULT_FILES_SHOWN	14
-#define OLFS_CGA_DEFAULT_FILES_SHOWN		3
 #define TINY_SCREEN_WIDTH_THRESHOLD		512
 
 /*
@@ -736,8 +731,6 @@ static void NotifyFileChange(optr o, word type,
     }
     @callsuper();
 }
-
-#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
 
 /* OLFSFreeBuffers */
 void OLFSFreeBuffers(optr o)

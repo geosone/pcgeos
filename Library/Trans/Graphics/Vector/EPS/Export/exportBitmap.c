@@ -32,11 +32,8 @@
  * - EPSExportBitmap (TranslateBitmap, huge bitmaps) is not ported yet.
  */
 #include "exportInt.h"
+#include "exportConstant.h"
 
-#define EPS_BIN_TAG                 'B'
-#define EPS_HEX_TAG                 'H'
-#define EPS_WIDE_LINE_LENGTH        100
-#define EPS_WIDE_LINE_BUFFS_PER_LINE 4
 #define EPS_HEX_LINE                240     /* hex digits on a line */
 
 /* the bitmap element's header in the DOS16 layout */

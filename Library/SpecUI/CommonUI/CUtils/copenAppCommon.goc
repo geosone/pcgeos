@@ -18,14 +18,12 @@
  *     in Motif).
  */
 @include "cGeode.goh"
+@include "cutilsMacro.goh"
 @include <Internal/flowC.goh>
 @include <Internal/specC.goh>
 @include <Objects/gInterC.goh>
 #include <system.h>
 #include <localize.h>
-
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define APP_OFFSET(f)	word_offsetof(OLApplicationInstance, f)
 
 static OLApplicationInstance *App(optr oself)
 {

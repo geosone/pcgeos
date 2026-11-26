@@ -33,10 +33,9 @@
  * left text in paths, hatch patterns in a text field.
  */
 #include "graphicsInt.h"
+#include "graphicsMacro.h"
 #include <Internal/fontDr.h>
 #include <stdlib.h>
-
-#define TEXT	((word) offsetof(GState, GS_textAttr))
 
 static sdword W256(const WBFixed *w)
 {

@@ -15,9 +15,7 @@
  * through a path (graphicsPattern.c).
  */
 #include "graphicsInt.h"
-
-#define AREA	((word) offsetof(GState, GS_areaAttr))
-#define LINE	((word) offsetof(GState, GS_lineAttr))
+#include "graphicsMacro.h"
 
 /* FillRectLow: device coordinates, the right and bottom ones not
  * filled unless equal to the left and top */

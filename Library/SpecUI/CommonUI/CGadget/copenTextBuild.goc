@@ -17,18 +17,15 @@
  * the font and size messages (the asm maps a default record itself).
  */
 @include "cGeode.goh"
+@include "cgadgetMacro.goh"
+@include "cgadgetConstant.goh"
 @include <Internal/SpecUI/olTextClass.goh>
 @include <Internal/SpecUI/olCtrlClass.goh>
 @include <Internal/SpecUI/olWinClass.goh>
 @include <Objects/gInterC.goh>
 #include <string.h>
 
-
-#define Txt(o)	((OLTextInstance *) ObjDerefVis(o))
 #define Gen(o)	((GenTextInstance *) ObjDerefGen(o))
-
-#define FRAME_TEXT_MARGIN	2	/* text in a frame */
-#define CGA_FRAME_TEXT_MARGIN	1
 
 /* a word of variable data copied to another type (copyVarData) */
 static void CopyVarData(optr o, word from, word to)

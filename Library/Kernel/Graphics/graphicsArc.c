@@ -12,8 +12,7 @@
  * a recorded "to" arc still goes to point 3.
  */
 #include "graphicsInt.h"
-
-#define AREA	((word) offsetof(GState, GS_areaAttr))
+#include "graphicsMacro.h"
 
 static sdword WWF(const WWFixed *w)
 {

@@ -2,6 +2,7 @@
 geos_sources(motif_goc
   copenUtils.goc
   cutilsPtrImages.goc
+  cutilsVariable.goc
   copenSystem.goc
   copenAppAttDet.goc
   copenAppCommon.goc

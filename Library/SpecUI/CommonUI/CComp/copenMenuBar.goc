@@ -14,14 +14,10 @@
  * bar has the focus.
  */
 @include "cGeode.goh"
+@include "ccompConstant.goh"
 
 @classdecl OLMenuBarClass, neverSaved;
 
-/* ccompConstant.def (Motif) */
-#define MENU_BAR_LEFT_MARGIN	1
-#define MENU_BAR_TOP_MARGIN	1
-#define MENU_BAR_BOTTOM_MARGIN	1
-#define MENU_BAR_RIGHT_MARGIN	1
 #define MENU_BAR_BETWEEN_LINES	0
 #define MENU_BAR_BETWEEN_KIDS	0
 

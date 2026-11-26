@@ -14,6 +14,7 @@
  * OLFSSelectCurrentDriveInChangeDrivePopup, OLFSNotifyUserOfDiskError.
  */
 @include "cGeode.goh"
+@include "cutilsMacro.goh"
 @include "cspecCUAS.goh"
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olFileSelectorClass.goh>
@@ -29,9 +30,6 @@
 #include <localize.h>
 #include <gstring.h>
 #include <uDialog.h>
-
-#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
-#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
 
 /* OLFSEnumParams: FileEnum's parameters first (the callback is passed
  * them), then what the callback needs */
@@ -571,11 +569,6 @@ static Boolean ListSpace(optr o, word character, word flags)
     return @callsuper();
 }
 
-#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
-#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
-#define SDAVNF_PASS_DISK_HANDLE		4
-#define SDAVNF_TRAILING_SLASH		1
-
 static word StrLen(const char *s)
 {
     word n = 0;
@@ -596,7 +589,6 @@ void *OLFSFindTempData(optr o)
 {
     return ObjVarDerefData(o, TEMP_GEN_FILE_SELECTOR_DATA);
 }
-#define SDAVNF_VOLUME_ONLY_FOR_FIXED	2
 
 /* OLFSStuffDriveAndVolumeName: "name:[volume]\", as much as fits */
 void OLFSStuffDriveAndVolumeName(char *buf, word size, word drive,
@@ -788,9 +780,6 @@ void OLFSNotifyUserOfDiskError(void)
 		(CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
 		(GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET));
 }
-
-#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
-#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
 
 /* OLFSSendAD: the selection noted, then told to the destination when
  * the queue has been emptied (the selector may not be done yet) */

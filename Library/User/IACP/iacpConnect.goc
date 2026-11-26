@@ -316,9 +316,6 @@ typedef struct {
     QueueHandle		holdQueue;
 } ConnectState;
 
-#define LISTS	ConstructOptr(iacpListBlock, iacpListArray)
-#define DOCS	ConstructOptr(iacpListBlock, iacpDocArray)
-
 /* IACPFindServerOwnedByCX: a server of the token, of a geode (0: of
  * any), into listNum/nextServer */
 static Boolean FindServerOwnedBy(ConnectState *st, GeodeHandle geode)

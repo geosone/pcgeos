@@ -11,6 +11,7 @@
  * Not yet: record locks.
  */
 #include "kernelC.h"
+#include "fileMacro.h"
 #include <string.h>
 #include "ghal.h"
 
@@ -289,8 +290,6 @@ error:
     KernelSetError(e);
     return 0;
 }
-
-#define EA_REST	16
 
 static word ByHandle(FileHandle fh, FileExtendedAttribute attr, void *buffer,
 		     word bufSize, Boolean set)

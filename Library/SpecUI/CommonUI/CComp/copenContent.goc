@@ -11,6 +11,7 @@
  * (OLScrollableItemClass, MSG_GEN_ITEM_GROUP_MAKE_ITEM_VISIBLE).
  */
 @include "cGeode.goh"
+@include "ccompMacro.goh"
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olContentClass.goh>
 

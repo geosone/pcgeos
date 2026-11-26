@@ -11,9 +11,8 @@
  * added to each width that stays positive.
  */
 #include "graphicsInt.h"
+#include "graphicsConstant.h"
 #include <char.h>
-
-#define TM_KERNING	(TM_TRACK_KERN | TM_PAIR_KERN)
 
 /* the WBFixed of a FontBuf as 1/256 */
 static sdword W256(const WBFixed *w)

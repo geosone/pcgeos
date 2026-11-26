@@ -24,6 +24,7 @@
  * here, UserStandardDialog in the UI).
  */
 @include "cGeode.goh"
+@include "cutilsMacro.goh"
 @include <Internal/flowC.goh>
 @include <Internal/specC.goh>
 #include <input.h>
@@ -37,9 +38,6 @@
 static word OLStdDialogStrLen(const char *s);
 static void CreateHelpHintIfNeeded(optr dlg, const char *helpContext,
 				   CustomDialogBoxFlags flags);
-
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define APP_OFFSET(f)	word_offsetof(OLApplicationInstance, f)
 
 static OLApplicationInstance *App(optr oself)
 {

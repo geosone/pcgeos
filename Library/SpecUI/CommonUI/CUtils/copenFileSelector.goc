@@ -29,6 +29,7 @@
  * system, FSEL_DISABLES_FILTERED_FILES (FALSE in Motif).
  */
 @include "cGeode.goh"
+@include "cutilsMacro.goh"
 @include "cspecCUAS.goh"
 @include <Internal/specC.goh>
 @include <Internal/SpecUI/olFileSelectorClass.goh>
@@ -46,9 +47,6 @@
 #include <uDialog.h>
 
 /* copenFileSelectorMiddle.goc */
-
-#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
-#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
 
 /* cutilsConstant.def, cConstant.def */
 

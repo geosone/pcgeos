@@ -25,6 +25,7 @@
  * another gadget taking it completes the menu).
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 
 @classdecl OLMenuWinClass, neverSaved;
 @classdecl MenuWinScrollerClass, neverSaved;
@@ -33,7 +34,6 @@ static void UpdateScrollers(optr o, Boolean delayClose);
 static void ScrollersOnTop(optr o);
 
 #define MWin(o)		((OLMenuWinInstance *) ObjDerefVis(o))
-#define R(r)		((r) << OLBF_REPLY_OFFSET)
 
 /* the menu's position and size: kept visible, placed as required,
  * sized as desired */
@@ -1000,7 +1000,6 @@ static void CloseSubMenuToParentMenu(optr o)
 						IC_INTERACTION_COMPLETE);
     return TRUE;
 }
-
 
 /* ---------------------------------------------------------------------
  * MenuWinScrollerClass: the arrows of a menu taller than the screen

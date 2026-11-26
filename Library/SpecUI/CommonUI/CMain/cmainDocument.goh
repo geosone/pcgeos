@@ -92,8 +92,12 @@ typedef enum {
 #define GD(o)	((GenDocumentInstance *) ObjDerefGen(o))
 #define OLD(o)	((OLDocumentInstance *) ObjDerefVis(o))
 
-/* cmainUIDocumentControl.goc */
+/* cmainVariable.goc: the document control's options (read in
+ * cmainUIDocumentControl.goc) */
 extern word docControlOptions;
+extern word docControlFSLevel;
+extern DiskHandle backupDirDisk;
+extern char backupDirPath[];
 
 /* ---- cmainDocDialog.goc ---- */
 /* a standard dialog about the document (its name the first argument),

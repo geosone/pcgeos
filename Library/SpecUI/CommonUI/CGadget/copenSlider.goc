@@ -15,6 +15,7 @@
  * MSG_SPEC_SPIN_GET_ATTRS leaves in cx).
  */
 @include "CView/cviewInt.goh"
+@include "cgadgetConstant.goh"
 @include <Internal/SpecUI/olSliderClass.goh>
 @include <Internal/SpecUI/olSpinGadgetClass.goh>
 
@@ -22,9 +23,6 @@
 
 #define Sl(o)	((OLSliderInstance *) ObjDerefVis(o))
 
-/* cgadgetConstant.def, cConstant.def (Motif) */
-#define HASH_MARK_SIZE		5
-#define SMALL_HASH_MARK_SIZE	3
 #define MO_THUMB_HEIGHT		12
 #define MO_CGA_THUMB_HEIGHT	8
 

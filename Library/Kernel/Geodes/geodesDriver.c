@@ -23,12 +23,11 @@
  * keyboard drivers (defaultVideoStrategy and so on).
  */
 #include "kernelC.h"
+#include "geodesConstant.h"
 #include "geosmod.h"
 #include <geosdriver.h>
 
 #include <string.h>
-
-#define MAX_SYSTEM_DRIVERS	16
 
 static GeodeHandle systemDrivers[MAX_SYSTEM_DRIVERS];
 static word systemDriverCount;

@@ -15,7 +15,6 @@
 
 @classdecl OLScreenClass, neverSaved;
 
-word screenWidth, screenHeight;
 
 /* the driver's information */
 static VideoDriverInfo *ScreenDriverInfo(optr oself)

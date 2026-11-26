@@ -17,13 +17,12 @@
  *     kernel does not load a discarded resource again yet).
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 #include <sem.h>
 
 @classdecl OLPopupWinClass, neverSaved;
 
 #define PWin(o)		((OLPopupWinInstance *) ObjDerefVis(o))
-#define Inter(o)	((GenInteractionInstance *) ObjDerefGen(o))
-#define T(t)		((t) << OLBF_TARGET_OFFSET)
 
 /* the button's optr (0 if none) */
 static optr PopupButton(optr o)

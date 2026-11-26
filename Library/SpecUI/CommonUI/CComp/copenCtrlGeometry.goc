@@ -9,11 +9,8 @@
  * line (OLReplyBarClass's OLRBF_UNDER_DIALOG).
  */
 @include "cGeode.goh"
+@include "ccompMacro.goh"
 @include <Internal/SpecUI/olPaneClass.goh>
-
-#define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
-#define TARGET(f)	((f) & OLBF_TARGET)
-#define T(t)		((t) << OLBF_TARGET_OFFSET)
 
 static Boolean Vertical(optr o)
 {

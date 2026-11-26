@@ -1,0 +1,16 @@
+/*
+ * cutilsMacro.goh -- after cutilsMacro.def: the macros of the module, and
+ * the helpers its files share.
+ */
+#ifndef H_CUTILSMACRO
+#define H_CUTILSMACRO
+
+#define APP_OFFSET(f)	word_offsetof(OLApplicationInstance, f)
+#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
+#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
+#define SDAVNF_PASS_DISK_HANDLE		4
+#define SDAVNF_TRAILING_SLASH		1
+#define SDAVNF_VOLUME_ONLY_FOR_FIXED	2
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+
+#endif /* H_CUTILSMACRO */

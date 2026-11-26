@@ -15,13 +15,13 @@
  * bar).
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 
 @classdecl OLWinIconClass, neverSaved;
 
 #define Icon(o)		((OLWinIconInstance *) ObjDerefVis(o))
 
 #define OL_WIN_ICON_MAX_WIDTH		1023
-#define WIN_ICON_GLYPH_Y_SPACING	3
 
 /* the glyph of an icon (0 if none yet) */
 static optr GlyphOf(optr o)

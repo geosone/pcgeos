@@ -1,0 +1,15 @@
+/*
+ * cmainConstant.goh -- after cmainConstant.def: the constants of the module
+ * that the port has.
+ */
+#ifndef H_CMAINCONSTANT
+#define H_CMAINCONSTANT
+
+#define DEFAULT_BUTTON_INVERT_DELAY	6
+#define DEFAULT_GADGET_REPEAT_DELAY	10
+/* cmainConstant.def */
+#define DOCUMENT_MAX_GENERATED_NAMES	100
+#define MAX_ARROW_SIZE			14
+#define MIN_ARROW_SIZE			8
+
+#endif /* H_CMAINCONSTANT */

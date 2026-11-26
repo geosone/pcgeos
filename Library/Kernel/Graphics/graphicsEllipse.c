@@ -7,8 +7,7 @@
  * (graphicsString*.c, graphicsPath.c).
  */
 #include "graphicsInt.h"
-
-#define AREA	((word) offsetof(GState, GS_areaAttr))
+#include "graphicsMacro.h"
 
 void GrDrawEllipse(GStateHandle gstate, sword left, sword top, sword right,
 		   sword bottom)

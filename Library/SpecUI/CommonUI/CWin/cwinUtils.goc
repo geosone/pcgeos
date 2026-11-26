@@ -4,14 +4,13 @@
  * EnsureTitleBarInParentWin, OpenWinCheckIfMinMaxRestoreControls.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Objects/gTrigC.goh>
 @include <Internal/specC.goh>
 @include <Objects/gPrimC.goh>
 @include <Objects/gPenICC.goh>
 @include <Objects/gDispC.goh>
 @include <Objects/gInterC.goh>
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 /*
  * OpenWinDuplicateBlock: a copy of the template's block owned by the
@@ -57,8 +56,6 @@ optr GetVisParentForDialog(optr o)
 			 sizeof(type), &vp, sizeof(vp));
     return vp;
 }
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 /*
  * EnsureWindowInParentWin: the window moved into its parent window so

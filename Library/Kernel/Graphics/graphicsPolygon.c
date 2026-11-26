@@ -34,9 +34,9 @@
  * fill rule (graphicsPattern.c).
  */
 #include "graphicsInt.h"
+#include "graphicsConstant.h"
+#include "graphicsMacro.h"
 #include <stdlib.h>
-
-#define AREA	((word) offsetof(GState, GS_areaAttr))
 
 /* ER_edgeInfo */
 #define ER_SHORTEN_BOTTOM	0x01
@@ -45,10 +45,6 @@
 #define ER_CCW			0x08
 #define ER_USE_Y_ROUTINE	0x10
 #define ER_DELTA_X_NEG		0x20
-
-/* ER_scanLineInfo */
-#define SPAN_ONLY	1
-#define SPAN_TOGGLE	2
 
 typedef struct {
     sword	xLeft;		/* the top x, then the span's left */

@@ -24,6 +24,7 @@
  * off), the count starts again and the screens stay as they are.
  */
 #include "kernelC.h"
+#include "imConstant.h"
 #include "imInt.h"
 
 #include <input.h>
@@ -34,7 +35,6 @@
 #include <geosdriver.h>
 
 #define IM_DEFAULT_SCREEN_SAVER_COUNT		15	/* minutes */
-#define INTERVAL_BETWEEN_SCREEN_SAVER_COUNTDOWN_EVENTS (15 * 60) /* ticks */
 #define GCNSLT_SCREEN_SAVER_NOTIFICATIONS	72	/* gcnlist.goh */
 /* GWNT_SCREEN_SAVER_STATUS_NOTIFICATION of geoworks.h, which clashes
  * with kernelC.h */

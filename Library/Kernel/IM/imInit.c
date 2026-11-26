@@ -23,12 +23,11 @@
  * Not yet: pen mode (its stack).
  */
 #include "kernelC.h"
+#include "imConstant.h"
 #include "imInt.h"
 
 #include <initfile.h>
 #include <driver.h>
-
-#define IM_STACK_SIZE	32768
 
 static const char inputCategory[] = "input";
 

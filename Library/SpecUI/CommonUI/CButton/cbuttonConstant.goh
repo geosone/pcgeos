@@ -1,0 +1,25 @@
+/*
+ * cbuttonConstant.goh -- after cbuttonConstant.def: the constants of the module
+ * that the port has.
+ */
+#ifndef H_CBUTTONCONSTANT
+#define H_CBUTTONCONSTANT
+
+#define BUTTON_TOOLBOX_X_INSET		2
+#define BUTTON_TOOLBOX_Y_INSET		2
+#define MO_BUTTON_INSET_Y		3	/* DOUBLE_BORDERED_GADGETS */
+#define MO_BUTTON_INSET_Y_CGA		2
+#define MO_BUTTON_MIN_HEIGHT		5
+#define MO_BUTTON_MIN_WIDTH		5
+#define MO_CGA_REPLY_BUTTON_INSET_Y	(MO_BUTTON_INSET_Y / 2 + 1)
+#define MO_MENU_BUTTON_INSET_Y_CGA	0
+#define MO_MENU_BUTTON_MIN_HEIGHT	5
+#define MO_MENU_ITEM_INSET_X		7
+#define MO_MENU_ITEM_INSET_X_NARROW	4
+#define MO_MENU_ITEM_INSET_Y		2
+#define MO_MENU_ITEM_INSET_Y_CGA	1
+#define MO_MENU_ITEM_MIN_HEIGHT		5
+#define MO_REPLY_BUTTON_INSET_X		MO_BUTTON_INSET_X
+#define MO_REPLY_BUTTON_INSET_Y		MO_BUTTON_INSET_Y
+
+#endif /* H_CBUTTONCONSTANT */

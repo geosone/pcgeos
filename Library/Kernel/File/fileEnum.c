@@ -30,12 +30,12 @@
  * Not yet: FEA_CUSTOM, FESF_LOCK_CB_DATA (nothing to lock).
  */
 #include "kernelC.h"
+#include "fileConstant.h"
 #include <fileEnum.h>
 
 #include <stddef.h>
 #include <string.h>
 
-#define FE_INCR_SIZE	40	/* entries the buffer grows by */
 #define FE_MAX_ATTRS	32
 
 /* the standard return types (fileEnumStandardReturnArrays) */

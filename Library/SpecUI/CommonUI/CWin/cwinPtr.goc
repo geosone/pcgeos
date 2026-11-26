@@ -17,12 +17,11 @@
  * the pushpin of Open Look.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Internal/flowC.goh>
 @include <Internal/im.h>
 @include <Internal/SpecUI/olDisplayGroupClass.goh>
 @include <Internal/SpecUI/olDisplayWinClass.goh>
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 /* the start of a move or resize: the press (window coordinates), from
  * the first drag on the screen's; the xor flags of the resize */

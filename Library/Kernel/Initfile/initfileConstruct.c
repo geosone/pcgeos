@@ -10,11 +10,10 @@
  * line, in a blob when the entry would be longer than 40 columns.
  */
 #include "initfileInt.h"
+#include "initfileConstant.h"
 #include "ghal.h"
 
 #include <string.h>
-
-#define DATA_ENTRY_LINE_SIZE	40	/* columns */
 
 typedef struct {
     char	*B_text;

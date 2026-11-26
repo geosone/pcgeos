@@ -3,11 +3,8 @@
  * FSDGenerateNotify.
  */
 #include "kernelC.h"
+#include "fsdConstant.h"
 #include <string.h>
-
-#define FSD_ALLOC_GRANULARITY	1024
-
-#define FSD_MAX_BATCH_SIZE	8192	/* fsdConstant.def */
 
 Boolean FSDCheckOpenCloseNotifyEnabled(void)
 {

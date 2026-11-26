@@ -19,13 +19,12 @@
  *   - the express tool area (the field has none yet: its size is 0).
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 
 @classdecl OLBaseWinClass, neverSaved;
 
 #define BWin(o)		((OLBaseWinInstance *) ObjDerefVis(o))
 #define Prim(o)		((GenPrimaryInstance *) ObjDerefGen(o))
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
 
 /* the application's launch flags (none without an application) */
 static AppLaunchFlags LaunchFlags(void)

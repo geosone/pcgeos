@@ -14,7 +14,7 @@
  * a system icon).
  */
 @include "cGeode.goh"
-
+@include "cbuttonMacro.goh"
 
 @extern visMoniker DefaultLevel0Moniker;
 @extern visMoniker DefaultLevel1Moniker;
@@ -23,8 +23,6 @@
 @extern visMoniker StandardHelpMoniker;
 @extern visMoniker StandardPrimaryHelpMoniker;
 
-
-#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
 #define T(t)		((t) << OLBF_TARGET_OFFSET)
 #define R(r)		((r) << OLBF_REPLY_OFFSET)
 

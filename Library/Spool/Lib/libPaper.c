@@ -20,9 +20,9 @@
  * margins) when the ini has none.
  */
 #include "spoolLocal.h"
+#include "libConstant.h"
 #include "libPaper.h"
 
-#define USER_DEFINED_MASK	0x80
 #define PAPER_SIZE_NUMERIC_FIRST 5
 #define PAPER_SIZE_CATEGORY_BUFFER 10
 #define ORDER_ENTRY_SIZE	4	/* "ddd," */

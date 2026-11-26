@@ -22,6 +22,7 @@
  * What changes is notified (fileNotify.c).
  */
 #include "kernelC.h"
+#include "fileMacro.h"
 
 #include <string.h>
 
@@ -392,8 +393,6 @@ word FileMoveLocal(const TCHAR *source, const TCHAR *dest,
 {
     return CopyMove(source, dest, sourceDisk, destDisk, TRUE, TRUE);
 }
-
-#define EA_REST	16
 
 static word ByPath(const TCHAR *path, FileExtendedAttribute attr,
 		   void *buffer, word bufSize, Boolean set)

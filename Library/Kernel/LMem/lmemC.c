@@ -3,13 +3,12 @@
  * ElementArrayCreateAt, NameArrayCreateAt.
  */
 #include "kernelC.h"
+#include "lmemMacros.h"
 #include <chunkarr.h>
 #include <stdlib.h>
 #include <string.h>
 #include "ghal.h"
 #include <object.h>
-
-typedef ChunkArrayHeader CAH;
 
 ChunkHandle ChunkArrayCreateAt(optr arr, word elementSize, word headerSize,
 			       ObjChunkFlags ocf)
@@ -43,15 +42,12 @@ ChunkHandle ChunkArrayCreateAt(optr arr, word elementSize, word headerSize,
     return ch;
 }
 
-#define LMEM_EMPTY	0xffffu		/* LMEM_NOMEM_HANDLE */
-#define W(b, off)	(*(word *) ((byte *) (b) + (off)))
-
 word LMemGetChunkSize(optr o)
 {
     byte *b = LMemBlockOf(OptrToHandle(o));
     word v = *LMemEntryOf(b, OptrToChunk(o));
 
-    return v == LMEM_EMPTY ? 0 : (word) (W(b, v - 2) - 2);
+    return v == LMEM_NOMEM_HANDLE ? 0 : (word) (LMEM_WORD(b, v - 2) - 2);
 }
 
 ChunkHandle ElementArrayCreateAt(optr arr, word elementSize, word headerSize,

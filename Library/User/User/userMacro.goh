@@ -1,0 +1,11 @@
+/*
+ * userMacro.goh -- after userMacro.def: the macros of the module, and
+ * the helpers its files share.
+ */
+#ifndef H_USERMACRO
+#define H_USERMACRO
+
+#define SND(n, f)	((__typeof__(&f)) ProcGetLibraryEntry(uiSoundLib, (n)))
+#define S_FreeMusic		SND(7, SoundFreeMusic)
+
+#endif /* H_USERMACRO */

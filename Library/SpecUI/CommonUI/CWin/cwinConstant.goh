@@ -1,0 +1,35 @@
+/*
+ * cwinConstant.goh -- after cwinConstant.def: the constants of the module
+ * that the port has, and the helpers its files share.
+ */
+#ifndef H_CWINCONSTANT
+#define H_CWINCONSTANT
+
+#define CGA_WIN_ICON_PLOT_HEIGHT	35
+#define CGA_WIN_ICON_PLOT_MARGIN_Y	(-4)
+#define FIRST_BASE_X_POS	10
+#define FIRST_BASE_Y_POS	8
+#define STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
+				 CUAS_WIN_ICON_WIDTH - 1)
+#define STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
+				 CUAS_WIN_ICON_HEIGHT - 1)
+#define TINY_FIRST_BASE_X_POS	6
+#define TINY_FIRST_BASE_Y_POS	4
+#define TINY_STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_TINY_SIZE + \
+				 CUAS_WIN_ICON_WIDTH - (1 + 7))
+#define TINY_STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_TINY_SIZE + \
+				 CUAS_WIN_ICON_HEIGHT - (1 + 3 + 8 - 4))
+#define WIN_ICON_GLYPH_Y_SPACING	3
+#define WIN_ICON_PLOT_MARGIN_X		10
+
+/* Port32: helpers the files of CWin share (cwin has no Macro.def) */
+#define FIELD_OFFSET(f)	word_offsetof(OLFieldInstance, f)
+#define Gen(o)		((GenInstance *) ObjDerefGen(o))
+#define Inter(o)	((GenInteractionInstance *) ObjDerefGen(o))
+#define R(r)		((r) << OLBF_REPLY_OFFSET)
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+#endif /* H_CWINCONSTANT */

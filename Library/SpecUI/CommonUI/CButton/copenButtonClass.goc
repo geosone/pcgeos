@@ -15,6 +15,8 @@
  * The class record of OLButtonClass is here, as in the asm.
  */
 @include "cGeode.goh"
+@include "cbuttonMacro.goh"
+@include "cbuttonConstant.goh"
 @include <Internal/SpecUI/olValueClass.goh>
 @include <Objects/vTextC.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
@@ -52,27 +54,10 @@
 @extern method OLButtonClass, MSG_OL_BUTTON_GET_GEN_PART;
 @extern method OLButtonClass, MSG_SPEC_NAVIGATION_QUERY;
 
-#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
-
-#define MO_BUTTON_INSET_Y		3	/* DOUBLE_BORDERED_GADGETS */
-#define MO_BUTTON_INSET_Y_CGA		2
-#define MO_BUTTON_MIN_WIDTH		5
-#define MO_BUTTON_MIN_HEIGHT		5
-#define MO_REPLY_BUTTON_INSET_X		MO_BUTTON_INSET_X
-#define MO_REPLY_BUTTON_INSET_Y		MO_BUTTON_INSET_Y
-#define MO_CGA_REPLY_BUTTON_INSET_Y	(MO_BUTTON_INSET_Y / 2 + 1)
 #define MO_BUTTON_INSET_X_NARROW	4
-#define MO_MENU_ITEM_INSET_X		7
-#define MO_MENU_ITEM_INSET_X_NARROW	4
-#define MO_MENU_ITEM_INSET_Y		2
-#define MO_MENU_ITEM_INSET_Y_CGA	1
-#define MO_MENU_ITEM_MIN_HEIGHT		5
 #define MO_MENU_BUTTON_INSET_X		7
 #define MO_MENU_BUTTON_INSET_X_NARROW	4
 #define MO_MENU_BUTTON_INSET_Y		2
-#define MO_MENU_BUTTON_INSET_Y_CGA	0
-#define MO_MENU_BUTTON_MIN_HEIGHT	5
-#define BUTTON_TOOLBOX_X_INSET		2
 
 /* the moniker part of BWButtonRegionSetStruct (the regions are drawn
  * by copenButtonColor.goc) */
@@ -565,8 +550,6 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
     return (MenuSepFlags) (flags | MSF_SEP);
 }
 
-#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
-
 Boolean OpenButtonCheckIfFullyEnabled(optr oself)
 {
     return OpenButtonCheckIfAlwaysEnabled(oself) ||
@@ -608,8 +591,6 @@ void VisCloseNotifyCommon(optr obj)
 {
     VisOpenCloseNotifyCommon(obj, FALSE);
 }
-
-#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
 
 /* OpenButtonCheckIfAlwaysEnabled: a menu's button, the pushpin */
 Boolean OpenButtonCheckIfAlwaysEnabled(optr oself)

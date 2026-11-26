@@ -2,11 +2,10 @@
  * geodesAccess.c -- information about geodes (after geodesAccess.asm).
  */
 #include "kernelC.h"
+#include "geodesMacro.h"
 #include "geosmod.h"
 
 #include <string.h>
-
-#define INFO(c)	((const GeosModuleInfo *) (c)->GC_info)
 
 /* the geode of the running thread */
 GeodeHandle GeodeGetProcessHandle(void)

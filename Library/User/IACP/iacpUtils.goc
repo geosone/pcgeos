@@ -13,10 +13,6 @@
 #include <string.h>
 #include <system.h>
 
-#define LISTS	ConstructOptr(iacpListBlock, iacpListArray)
-#define DOCS	ConstructOptr(iacpListBlock, iacpDocArray)
-#define CHUNK(ch)	LMemDerefHandles(iacpListBlock, ch)
-
 void IACPLockListBlockExcl(void)
 {
     (void) MemLockExcl(iacpListBlock);

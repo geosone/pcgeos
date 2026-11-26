@@ -12,11 +12,10 @@
  * title bar groups are not made yet.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Objects/gPrimC.goh>
 @include <Objects/gDispC.goh>
 @include <Objects/gInterC.goh>
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 /* ---------------------------------------------------------------------
  * Opening

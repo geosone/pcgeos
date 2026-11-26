@@ -1,0 +1,12 @@
+/*
+ * ccompMacro.goh -- after ccompMacro.def: the macros of the module, and
+ * the helpers its files share.
+ */
+#ifndef H_CCOMPMACRO
+#define H_CCOMPMACRO
+
+#define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
+#define T(t)		((t) << OLBF_TARGET_OFFSET)
+#define TARGET(f)	((f) & OLBF_TARGET)
+
+#endif /* H_CCOMPMACRO */

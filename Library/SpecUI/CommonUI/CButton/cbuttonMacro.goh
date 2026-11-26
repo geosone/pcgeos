@@ -1,0 +1,10 @@
+/*
+ * cbuttonMacro.goh -- after cbuttonMacro.def: the macros of the module, and
+ * the helpers its files share.
+ */
+#ifndef H_CBUTTONMACRO
+#define H_CBUTTONMACRO
+
+#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
+
+#endif /* H_CBUTTONMACRO */

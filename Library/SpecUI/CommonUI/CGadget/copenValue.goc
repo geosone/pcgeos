@@ -14,19 +14,16 @@
  * MSG_SPEC_VALUE_SET_FROM_ITEM_GROUP).
  */
 @include "cGeode.goh"
+@include "cgadgetMacro.goh"
+@include "cgadgetConstant.goh"
 @include <Internal/SpecUI/olValueClass.goh>
 @include <Internal/SpecUI/olSliderClass.goh>
 @include <Objects/vTextC.goh>
-
-/* cgadgetConstant.def */
-#define OL_SLIDER_DEFAULT_WIDTH		200
-#define OL_SLIDER_DEFAULT_HEIGHT	100
 
 @classdecl OLValueClass, neverSaved;
 
 #define Val(o)	((OLValueInstance *) ObjDerefVis(o))
 #define GVL(o)	((GenValueInstance *) ObjDerefGen(o))
-#define InBlock(o, c)	ConstructOptr(OptrToHandle(o), c)
 
 static word StrLen(const char *s)
 {

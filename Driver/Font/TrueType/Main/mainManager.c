@@ -3,7 +3,7 @@
  * mainManager.asm: TrueTypeStrategy, DriverTable; truetypeInit.asm:
  * TrueTypeInit, TrueTypeExit, TrueTypeInitFonts; truetypeWidths.asm,
  * truetypeChars.asm, truetypeMetrics.asm: the wrappers of the
- * adapter's C functions; truetypeVariable.def: the driver's variables).
+ * adapter's C functions).
  * The path routines are in truetypePath.c, TrueType_GrMulWWFixed in
  * ansic_runtime.c.
  * The FreeType engine and the GEOS adapter were C already.
@@ -37,6 +37,7 @@
  * Not yet: the escape functions (TrueTypeFontEscape: they fail).
  */
 #include "../Adapter/ttadapter.h"
+#include "truetypeConstant.h"
 #include "../Adapter/ttinit.h"
 #include "../Adapter/ttwidths.h"
 #include "../Adapter/ttchars.h"
@@ -50,8 +51,6 @@
 TT_Error _pascal Init_FreeType(void);
 void _pascal Exit_FreeType(MemHandle varBlock);
 
-#define TRUETYPE_BLOCK_SIZE	1024	/* truetypeConstant.def */
-
 static Boolean TrueTypeStrategy(word function, DriverRegs *r);
 
 FontDriverInfoStruct DriverTable = {
@@ -59,9 +58,6 @@ FontDriverInfoStruct DriverTable = {
     FM_TRUETYPE
 };
 
-TEngine_Instance engineInstance;
-static MemHandle bitmapHandle;		/* the picture of a character */
-static MemHandle variableHandle;	/* TrueTypeVars */
 
 /* the adapter's matrix is a TMatrix */
 typedef char MatrixIsTMatrix[sizeof(TT_FontMatrix) == sizeof(TMatrix) &&

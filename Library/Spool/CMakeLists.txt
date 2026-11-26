@@ -39,6 +39,7 @@ add_custom_command(OUTPUT ${spool_sym}
   VERBATIM)
 add_subdirectory(Process)
 add_subdirectory(Lib)
+geos_sources(spool spoolVariable.c)
 geos_get_sources(_spool spool)
 geos_get_sources(_spool_goc spool_goc)
 # (the generated tables belong to Lib/; made here, where the geode is)

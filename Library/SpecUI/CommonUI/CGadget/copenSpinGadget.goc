@@ -19,6 +19,8 @@
  * keyboard.
  */
 @include "cGeode.goh"
+@include "cgadgetMacro.goh"
+@include "cgadgetConstant.goh"
 /* (HINT_SPEC_SLIDER is the subclass's) */
 @include <Internal/SpecUI/olValueClass.goh>
 @include <Internal/SpecUI/olScrollbarClass.goh>
@@ -30,18 +32,12 @@
 
 #define Spin(o)	((OLSpinGadgetInstance *) ObjDerefVis(o))
 #define Gen(o)	((GenInstance *) ObjDerefGen(o))
-#define InBlock(o, c)	ConstructOptr(OptrToHandle(o), c)
 
 /* cgadgetConstant.def (Motif) */
 #define SPIN_CONTENT_MARGIN		4
 #define SPIN_SCROLLBAR_SPACING		4
 #define NARROW_SPIN_SCROLLBAR_SPACING	(-1)
 #define NARROW_NO_EDIT_SCROLLBAR_SPACING 0
-#define SPIN_EXTRA_PEN_MARGIN		(10 - 2)
-#define SPIN_FIRST_DELAY		25
-#define OL_SPIN_DEFAULT_DESIRED_WIDTH	(SST_AVG_CHAR_WIDTHS | 8)
-#define OL_SPIN_DEFAULT_DESIRED_HEIGHT	(SST_LINES_OF_TEXT | 1)
-#define MIN_MAX_MARGIN			1
 
 /* ---------------------------------------------------------------------
  * Sizes

@@ -9,27 +9,10 @@
  * MSG_OL_FIELD_GET_TOOL_AREA_SIZE, MSG_OL_FIELD_MOVE_TOOL_AREA.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Internal/flowC.goh>
 @include <Internal/specC.goh>
 
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define FIELD_OFFSET(f)	word_offsetof(OLFieldInstance, f)
-
-#define STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
-				 CUAS_WIN_ICON_WIDTH - 1)
-#define STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
-				 CUAS_WIN_ICON_HEIGHT - 1)
-#define TINY_STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_TINY_SIZE + \
-				 CUAS_WIN_ICON_WIDTH - (1 + 7))
-#define TINY_STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_TINY_SIZE + \
-				 CUAS_WIN_ICON_HEIGHT - (1 + 3 + 8 - 4))
-#define FIRST_BASE_X_POS	10
-#define FIRST_BASE_Y_POS	8
-#define TINY_FIRST_BASE_X_POS	6
-#define TINY_FIRST_BASE_Y_POS	4
-#define CGA_WIN_ICON_PLOT_HEIGHT	35
-#define WIN_ICON_PLOT_MARGIN_X		10
-#define CGA_WIN_ICON_PLOT_MARGIN_Y	(-4)
 #define INITIAL_SLOT			1
 #define OL_WINDOW_STAGGER_SLOT_MASK	0x07
 

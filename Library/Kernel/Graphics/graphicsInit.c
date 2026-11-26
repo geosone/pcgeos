@@ -18,6 +18,7 @@
  * cache file of the asm (the FontInfo of the last start) is not needed.
  */
 #include "graphicsInt.h"
+#include "graphicsConstant.h"
 #include <Internal/fontDr.h>
 #include <fileEnum.h>
 #include <initfile.h>
@@ -30,10 +31,6 @@ Handle grDefaultFontHandle;
 TMatrix grIdentityMatrix;
 
 #define FONT_FILE_INFO_SIZE	8	/* "BSWF", minor, major, headerSize */
-#define MAX_MAJOR_VER		1
-#define FID_DEFAULT_FILE_HANDLES 8
-#define FID_MIN_FILE_HANDLES	2
-#define FID_MAX_FILE_HANDLES	32
 #define DOS16_FI_FILE_HANDLE	2	/* the table offsets count it */
 
 /* the attributes of a new GState (GState <>, FontCommonAttrs <>) */

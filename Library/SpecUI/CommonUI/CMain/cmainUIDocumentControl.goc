@@ -53,13 +53,9 @@
 
 /* ---------------------------------------------------------------------
  * The options of the specific UI ([ui] docControlOptions,
- * docControlFSLevel, backupDir of the field's category)
+ * docControlFSLevel, backupDir of the field's category; the variables
+ * are in cmainVariable.goc)
  * ------------------------------------------------------------------- */
-
-word docControlOptions;			/* DocControlOptions */
-word docControlFSLevel = UIIL_ADVANCED;
-DiskHandle backupDirDisk = SP_BACKUP;
-char backupDirPath[PATH_BUFFER_SIZE];
 
 /* SpecInitDocumentControl: backupDir is a path followed by the data of
  * a saved disk */

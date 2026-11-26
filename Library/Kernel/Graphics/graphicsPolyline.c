@@ -19,9 +19,8 @@
  * (graphicsLineStyles.c).
  */
 #include "graphicsInt.h"
+#include "graphicsMacro.h"
 #include <stdlib.h>
-
-#define LINE	((word) offsetof(GState, GS_lineAttr))
 
 /* CreateSeparatorFormat; NULL when a point does not fit */
 sword *GrSeparatorFormat(const GrDraw *d, const Point *points, word n,

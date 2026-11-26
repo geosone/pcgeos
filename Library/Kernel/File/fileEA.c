@@ -6,6 +6,7 @@
  * (HostFS: the GeosFileHeader, Driver/IFS/HostFS/hostfsDriver.c).
  */
 #include "kernelC.h"
+#include "fileMacro.h"
 
 #include <string.h>
 
@@ -14,15 +15,6 @@ word FileEADone(word e)
     KernelSetError(e);
     return e;
 }
-
-/*
- * FEA_DISK, the handle of the disk a file is on, is the kernel's own
- * (the asm's drivers answered it from the disk they were passed): alone
- * or among FEA_MULTIPLE it is filled in here.  TRUE if that was all;
- * else *bufferP and *sizeP are what is left for the driver (a list
- * without it: in `rest', or in a block returned in *mhP to free).
- */
-#define EA_REST	16
 
 Boolean FileDiskAttr(FSDDisk *d, FileExtendedAttribute attr,
 			void **bufferP, word *sizeP, FileExtAttrDesc *rest,

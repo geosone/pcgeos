@@ -18,6 +18,7 @@
  *    (DefaultLauncherCheck), multi-language paths.
  */
 @include "uiInt.goh"
+@include "userMacro.goh"
 @include <Objects/gSysC.goh>
 @include <Objects/gFieldC.goh>
 @include <Internal/uProcC.goh>
@@ -457,7 +458,6 @@ GeodeHandle uiSoundLib;
 Boolean uiSoundOn;
 MemHandle uiStandardSoundHandles[NUM_STANDARD_SOUNDS];
 
-#define SND(n, f)	((__typeof__(&f)) ProcGetLibraryEntry(uiSoundLib, (n)))
 #define S_StopMusic		SND(5, SoundStopMusic)
 
 #define STANDARD_TEMPO		8
@@ -689,7 +689,6 @@ DisplayType UserLimitDisplayTypeToStandard(DisplayType t)
     return t;
 }
 
-
 void UserSetDefaultMonikerFont(FontID id, word pointSize)
 {
     uiDefaultMonikerFont = id;
@@ -706,7 +705,6 @@ void UserGetDefaultMonikerFont(FontID *id, word *pointSize)
 
 #define NUM_STANDARD_SOUNDS	7
 
-#define S_FreeMusic		SND(7, SoundFreeMusic)
 /* UserSoundExit: the UI ends */
 void UserSoundExit(void)
 {

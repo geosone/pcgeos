@@ -33,11 +33,9 @@
  * user patterns, which the asm did not have, fill solid.
  */
 #include "graphicsInt.h"
+#include "graphicsMacro.h"
 #include <gstring.h>
 #include <stdlib.h>
-
-#define AREA	((word) offsetof(GState, GS_areaAttr))
-#define TEXT	((word) offsetof(GState, GS_textAttr))
 
 /* graphicsPatternHatch.asm: a HatchPattern of one or two lines */
 typedef struct {

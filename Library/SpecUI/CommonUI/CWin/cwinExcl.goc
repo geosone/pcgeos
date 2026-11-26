@@ -7,12 +7,9 @@
  * grabs and a menu's grabs through its button go to the vis parent.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Objects/gPenICC.goh>
 @include <Objects/gTrigC.goh>
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define WIN_OFFSET(f)	word_offsetof(OLWinInstance, f)
 
 /* ---------------------------------------------------------------------
  * The floating keyboard
@@ -427,8 +424,6 @@ static void UnsetFocusExcl(optr o, optr obj)
     FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
 					    whereTo, dest, 0);
 }
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 /*
  * OpenWinCallParentOfWindow: up from the window: a menu (not pinned)

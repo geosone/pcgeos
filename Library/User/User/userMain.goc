@@ -40,6 +40,7 @@
  *    driver without "[mouse] driver" (the asm's kbmouse.geo).
  */
 @include "uiInt.goh"
+@include "userMacro.goh"
 @include <Objects/gSysC.goh>
 @include <Objects/gFieldC.goh>
 @include <Internal/uProcC.goh>
@@ -217,13 +218,11 @@ void UserSetDefaultInputMap(void)
 @classdecl UserClass, neverSaved;
 /* the sounds (userUtils.goc) */
 
-
 /* UserCallFlow's object (Port32) */
 optr UserGetFlowObject(void)
 {
     return uiFlowObj;
 }
-
 
 static optr Self(void)
 {
@@ -581,9 +580,6 @@ void UserFreeSpecificUI(void)
     if (gh)
 	GeodeFreeLibrary(gh);
 }
-
-#define SND(n, f)	((__typeof__(&f)) ProcGetLibraryEntry(uiSoundLib, (n)))
-#define S_FreeMusic		SND(7, SoundFreeMusic)
 
 #define S_FreeMusicStream	SND(16, SoundFreeMusicStream)
 #define S_FreeSampleStream	SND(21, SoundFreeSampleStream)

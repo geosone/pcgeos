@@ -12,15 +12,14 @@
  * applies).
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Internal/SpecUI/olDisplayGroupClass.goh>
 @include <Internal/SpecUI/olDisplayWinClass.goh>
 
 @classdecl OLDisplayGroupClass, neverSaved;
 
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
 #define DG_OFFSET(f)	word_offsetof(OLDisplayGroupInstance, f)
 #define DGroup(o)	((OLDisplayGroupInstance *) ObjDerefVis(o))
-#define Gen(o)		((GenInstance *) ObjDerefGen(o))
 
 #define DISPLAY_CONTROL_MIN_WIDTH	20
 #define DISPLAY_CONTROL_MIN_HEIGHT	10

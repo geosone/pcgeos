@@ -35,18 +35,6 @@
 
 @classdecl SpoolProcClass, neverSaved;
 
-/* spoolVariable.def */
-MemHandle	queueHandle;
-SemaphoreHandle	queueSemaphore;
-word		spoolStateFlags;
-word		nextJobID;
-word		customQueueID;
-ThreadLockHandle errorThreadLock;
-word		errorBoxCount;
-word		spoolAckID;
-optr		spoolAckOD;
-Boolean		spoolDetachHeld;
-
 @method SpoolProcClass, MSG_META_ATTACH_PROCESS
 {
     (void) value1;

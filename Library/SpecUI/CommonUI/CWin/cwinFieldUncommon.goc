@@ -11,11 +11,9 @@
  * MSG_OL_FIELD_SEND_TO_GEN_APPLICATIONS.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Internal/flowC.goh>
 @include <Internal/specC.goh>
-
-#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
-#define FIELD_OFFSET(f)	word_offsetof(OLFieldInstance, f)
 
 @extern method OLFieldClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
 {

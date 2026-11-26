@@ -49,6 +49,10 @@ typedef struct {
 /* iacpMain.goc: the block of the lists, locked exclusively or shared */
 extern MemHandle iacpListBlock;
 extern ChunkHandle iacpListArray, iacpDocArray;
+/* the lists and documents in iacpListBlock */
+#define CHUNK(ch)	LMemDerefHandles(iacpListBlock, ch)
+#define DOCS	ConstructOptr(iacpListBlock, iacpDocArray)
+#define LISTS	ConstructOptr(iacpListBlock, iacpListArray)
 extern Boolean IACPInit(void);
 extern void IACPExit(void);
 extern void IACPLockListBlockExcl(void);

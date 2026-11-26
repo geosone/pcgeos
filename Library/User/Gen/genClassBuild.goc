@@ -3,6 +3,7 @@
  * routines to implement the Gen class
  */
 @include "uiInt.goh"
+@include "genMacro.goh"
 #include <initfile.h>
 #include <string.h>
 #include <localize.h>
@@ -11,9 +12,7 @@
 @include <Objects/gFieldC.goh>
 #include <Internal/im.h>
 
-#define GEN_MASTER	word_offsetof(GenBase, Gen_offset)
 #define GEN_COMP	word_offsetof(GenInstance, GI_comp)
-#define GEN_LINK	word_offsetof(GenInstance, GI_link)
 
 /*
  * GenCallMeta: a message the specific part has a say in only once it is

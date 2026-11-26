@@ -3,6 +3,7 @@
  * routines to implement the GenApplication class.
  */
 @include "uiInt.goh"
+@include "genMacro.goh"
 @include <Objects/gSysC.goh>
 @include <Objects/gFieldC.goh>
 @include <Objects/gDocC.goh>
@@ -14,8 +15,6 @@
 #include <file.h>
 #include <initfile.h>
 #include <string.h>
-
-#define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
 
 /* GAI_iacpConnects: the connections the application serves, and the
  * mode each asked for */

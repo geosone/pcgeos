@@ -9,11 +9,10 @@
  * detach (OpenWinSaveState) are not ported yet.
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Objects/gPrimC.goh>
 @include <Objects/gDispC.goh>
 @include <Objects/gInterC.goh>
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
 /* OpenWinCheckMenuState: a menu is not saved unless it is pinned and
  * from a resource */

@@ -15,6 +15,7 @@
  * task bar (taskBarPrefs: the adjustments are 0, as with no task bar).
  */
 @include "cGeode.goh"
+@include "cwinConstant.goh"
 @include <Internal/specC.goh>
 @include <Objects/gPrimC.goh>
 @include <Objects/gPenICC.goh>
@@ -101,9 +102,6 @@
 @extern method OLWinClass, MSG_META_KBD_CHAR;
 /* Motif/Win/winDraw.goc */
 @extern method OLWinClass, MSG_VIS_DRAW;
-
-#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
-#define Gen(o)		((GenInstance *) ObjDerefGen(o))
 
 /* ---------------------------------------------------------------------
  * Initialization (OpenWinInitialize)

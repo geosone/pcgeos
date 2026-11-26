@@ -17,14 +17,9 @@
  * trigger (OLBSS_DEFAULT_TRIGGER: InsetBoundsIfReplyPopup).
  */
 @include "cGeode.goh"
+@include "cbuttonMacro.goh"
+@include "cbuttonConstant.goh"
 
-#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
-
-#define MO_BUTTON_INSET_Y		3
-#define MO_REPLY_BUTTON_INSET_X		MO_BUTTON_INSET_X
-#define MO_REPLY_BUTTON_INSET_Y		MO_BUTTON_INSET_Y
-#define BUTTON_TOOLBOX_X_INSET		2
-#define BUTTON_TOOLBOX_Y_INSET		2
 #define RX	MO_REPLY_BUTTON_INSET_X
 #define RY	MO_REPLY_BUTTON_INSET_Y
 #define W	PARAM_2

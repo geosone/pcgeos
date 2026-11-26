@@ -32,6 +32,7 @@
  * (below).
  */
 #include "graphicsInt.h"
+#include "graphicsMacro.h"
 #include <gstring.h>
 #include <file.h>
 #include <hugearr.h>
@@ -1729,8 +1730,6 @@ Boolean GrGetGStringBounds(Handle gstring, GStateHandle gstate,
     bounds->R_bottom = (sword) rd.RD_bottom;
     return FALSE;
 }
-
-#define CGSC_WRITING	1
 
 GStateHandle GrCreateGString(Handle han, GStringType hanType, word *vmBlock)
 {

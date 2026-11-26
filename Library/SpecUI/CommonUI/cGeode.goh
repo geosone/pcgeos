@@ -266,7 +266,7 @@ extern Boolean kbdRequired;
 extern FontID editableTextFontID;
 extern sword editableTextFontsize;
 extern word fieldWidth, fieldHeight;
-extern word screenWidth, screenHeight;	/* CWin/cwinScreen.goc */
+extern word screenWidth, screenHeight;	/* CUtils/cutilsVariable.goc */
 
 /* ---------------------------------------------------------------------
  * Routines

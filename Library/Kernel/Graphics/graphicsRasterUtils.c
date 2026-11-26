@@ -3,11 +3,10 @@
  * GrSetBitmapRes, GrGetBitmapRes, GrGetBitmapSize, GrGetHugeBitmapSize.
  */
 #include "graphicsInt.h"
+#include "graphicsConstant.h"
 #include "Win/winInt.h"
 #include <hugearr.h>
 #include <Internal/videoDr.h>
-
-#define DEF_BITMAP_RES	72
 
 void GrSetBitmapRes(GStateHandle gstate, word xRes, word yRes)
 {

@@ -27,9 +27,9 @@
  * untransformed; it is transformed here).
  */
 #include "graphicsInt.h"
+#include "graphicsMacro.h"
 #include <stdlib.h>
 
-#define LINE	((word) offsetof(GState, GS_lineAttr))
 #define INFINITE_SLOPE	0x7fffffffL
 
 static sdword WWF(const WWFixed *w)

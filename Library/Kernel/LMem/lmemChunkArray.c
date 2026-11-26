@@ -17,12 +17,11 @@
  * with the right element.
  */
 #include "kernelC.h"
+#include "lmemMacros.h"
 
 #include <chunkarr.h>
 #include <stdlib.h>
 #include <string.h>
-
-typedef ChunkArrayHeader CAH;
 
 /* the handle of `arr', or of the block holding `ptr' when it is 0 (the
  * ...Handle macros of chunkarr.h pass handle 0 with a pointer) */

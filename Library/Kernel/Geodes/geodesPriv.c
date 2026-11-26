@@ -18,12 +18,11 @@
  * block owned by the geode.
  */
 #include "kernelC.h"
+#include "geodesConstant.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-#define FIRST_GEODE_PRIV_OFFSET		2
-#define PRIV_DATA_SLOT_INCREMENT	8
 #define PRIV_KERNEL			((GeodeHandle) ~0u)	/* geode 0 */
 
 static KSem privSem = { 1, 0 };
