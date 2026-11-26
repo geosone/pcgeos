@@ -1,6 +1,7 @@
 /*
  * graphicsMath.c -- fixed point math of the graphics system (after
- * graphicsMath.asm and graphicsMathObscure.asm).
+ * graphicsMath.asm; GrMulDWFixed and GrSDivDWFbyWWF are in
+ * graphicsMathObscure.c).
  *
  * WWFixed is 16.16, DWFixed 32.16 (48 bits), each in two's complement.
  * The results are the asm's bit for bit: products truncated toward
@@ -11,7 +12,7 @@
 #include "graphicsInt.h"
 #include <stdint.h>
 
-static uint32_t Abs32(sdword v)
+uint32_t GrAbs32(sdword v)
 {
     return v < 0 ? (uint32_t) 0 - (uint32_t) v : (uint32_t) v;
 }
@@ -19,7 +20,7 @@ static uint32_t Abs32(sdword v)
 /* GrRegMul32ToDDF, the middle 32 bits */
 WWFixedAsDWord GrMulWWFixed(WWFixedAsDWord i, WWFixedAsDWord j)
 {
-    uint64_t p = (uint64_t) Abs32((sdword) i) * Abs32((sdword) j);
+    uint64_t p = (uint64_t) GrAbs32((sdword) i) * GrAbs32((sdword) j);
     uint32_t r = (uint32_t) (p >> 16);
 
     return ((sdword) (i ^ j) < 0) ? (WWFixedAsDWord) (0 - r) :
@@ -51,7 +52,7 @@ Boolean GrUDiv32(WWFixedAsDWord dividend, WWFixedAsDWord divisor,
 Boolean GrSDiv32(WWFixedAsDWord dividend, WWFixedAsDWord divisor,
 		 WWFixedAsDWord *q)
 {
-    Boolean ok = GrUDiv32(Abs32((sdword) dividend), Abs32((sdword) divisor),
+    Boolean ok = GrUDiv32(GrAbs32((sdword) dividend), GrAbs32((sdword) divisor),
 			  q);
 
     if ((sdword) (dividend ^ divisor) < 0)
@@ -258,75 +259,4 @@ WWFixedAsDWord GrQuickArcSine(WWFixedAsDWord deltaYDivDistance,
     else if ((sword) origDeltaX < 0)
 	r = GR_WWF(180 - (r >> 16), r);
     return r;
-}
-
-/*
- * DWFixed: magnitudes of 48 bits as three 16-bit limbs, low first.
- */
-static Boolean Mag48(const DWFixed *v, uint32_t l[3])
-{
-    uint64_t m = ((uint64_t) (uint32_t) v->DWF_int << 16) | v->DWF_frac;
-    Boolean neg = v->DWF_int < 0;
-
-    if (neg)
-	m = ((uint64_t) 1 << 48) - m;
-    m &= ((uint64_t) 1 << 48) - 1;
-    l[0] = (uint32_t) (m & 0xffff);
-    l[1] = (uint32_t) ((m >> 16) & 0xffff);
-    l[2] = (uint32_t) (m >> 32);
-    return neg;
-}
-
-static void SetDWF(DWFixed *d, uint64_t m, Boolean neg)
-{
-    if (neg)
-	m = (uint64_t) 0 - m;
-    d->DWF_frac = (word) m;
-    d->DWF_int = (sdword) (uint32_t) (m >> 16);
-}
-
-/* GrMulDWFixedPtr: the product, the fraction truncated */
-void GrMulDWFixed(const DWFixed *i, const DWFixed *j, DWFixed *result)
-{
-    uint32_t a[3], b[3];
-    uint64_t limb[6], c = 0, r;
-    Boolean neg = (Boolean) (Mag48(i, a) != Mag48(j, b));
-    int x, y;
-
-    for (x = 0; x < 6; x++)
-	limb[x] = 0;
-    for (x = 0; x < 3; x++)
-	for (y = 0; y < 3; y++)
-	    limb[x + y] += (uint64_t) a[x] * b[y];
-    for (x = 0; x < 6; x++) {		/* carry through */
-	limb[x] += c;
-	c = limb[x] >> 16;
-	limb[x] &= 0xffff;
-    }
-    r = limb[1] | (limb[2] << 16) | (limb[3] << 32);
-    SetDWF(result, r, neg);
-}
-
-/* the quotient rounded to 1/65536 */
-void GrSDivDWFbyWWF(const DWFixed *dividend, const WWFixed *divisor,
-		    DWFixed *quotient)
-{
-    uint32_t a[3];
-    Boolean neg = Mag48(dividend, a);
-    uint64_t num = ((uint64_t) a[2] << 32) | ((uint64_t) a[1] << 16) | a[0];
-    uint32_t den = Abs32((sdword) GR_WWF(divisor->WWF_int,
-					 divisor->WWF_frac));
-    uint64_t q, rem;
-
-    if (divisor->WWF_int < 0)
-	neg = (Boolean) !neg;
-    if (!den) {
-	SetDWF(quotient, ((uint64_t) 1 << 47) - 1, neg);
-	return;
-    }
-    q = (num << 16) / den;
-    rem = (num << 16) % den;
-    if (((rem << 16) / den) & 0x8000)
-	q++;
-    SetDWF(quotient, q, neg);
 }

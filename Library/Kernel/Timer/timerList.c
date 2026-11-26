@@ -1,6 +1,6 @@
 /*
  * timerList.c -- timers of the C kernel (CInclude/timer.h; after
- * timerList.asm and timerMisc.asm).
+ * timerList.asm).
  *
  * A timer is a SIG_TIMER handle with a KTimer, kept in a list sorted by
  * the tick it is due.  The timer interrupt (timerInt.c) runs the due
@@ -314,10 +314,4 @@ void TimerSleep(word ticks)
     }
     KSemInit(&s, 0);
     KSemP(&s, ticks);
-}
-
-dword TimerGetCount(void)
-{
-    KernelPreemptPoint();
-    return KernelTicks();
 }

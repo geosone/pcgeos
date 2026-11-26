@@ -145,12 +145,6 @@ FileHandle FileDuplicateHandle(FileHandle fh)
     return nh;
 }
 
-DiskHandle FileGetDiskHandle(FileHandle fh)
-{
-    KernelSetError(0);
-    return FileOf(fh)->KF_file.FF_disk->FDK_handle;
-}
-
 static word Close(FileHandle fh)
 {
     KFile *kf = FileOf(fh);

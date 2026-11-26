@@ -1,6 +1,5 @@
 /*
- * geodesAccess.c -- information about geodes (after geodesAccess.asm and
- * GeodeFind of geodesHandle.asm).
+ * geodesAccess.c -- information about geodes (after geodesAccess.asm).
  */
 #include "kernelC.h"
 #include "geosmod.h"
@@ -72,17 +71,6 @@ word GeodeGetInfo(GeodeHandle gh, GeodeGetInfoType info, void *buf)
     return r;
 }
 
-GeodeHandle GeodeFind(const char *name, word numChars, GeodeAttrs attrMatch,
-		      GeodeAttrs attrNoMatch)
-{
-    GeodeHandle gh;
-
-    GeodeLock();
-    gh = GeodeFindLow(name, numChars, attrMatch, attrNoMatch);
-    GeodeUnlock();
-    return gh;
-}
-
 /* the application object ("appobj"), relocated; 0 if there is none */
 optr GeodeGetAppObject(GeodeHandle gh)
 {
@@ -97,22 +85,6 @@ optr GeodeGetAppObject(GeodeHandle gh)
     return o;
 }
 
-/* exported entry `entryNumber' of a library (.gp order) */
-void *ProcGetLibraryEntry(GeodeHandle library, word entryNumber)
-{
-    GeodeCore *c;
-    const void *a = NULL;
-
-    GeodeLock();
-    c = GeodeCoreOf(library);
-    if (!c)
-	KernelFatal(GEODE_NOT_LOADED);
-    if (entryNumber < INFO(c)->GM_exportCount)
-	a = INFO(c)->GM_exports[entryNumber].GME_address;
-    GeodeUnlock();
-    return (void *) a;
-}
-
 /* the word the UI keeps for a process (PH_uiData); 0: the running one */
 word GeodeGetUIData(GeodeHandle gh)
 {
@@ -124,14 +96,7 @@ void GeodeSetUIData(GeodeHandle gh, word data)
     CoreOrCurrent(&gh)->GC_uiData = data;
 }
 
-/* the first thread of a process (HM_otherInfo of its core block) */
-ThreadHandle ProcInfo(GeodeHandle gh)
+DriverInfoStruct *GeodeInfoDriver(GeodeHandle gh)
 {
-    return (ThreadHandle) MemEntryOf(gh)->HE_otherInfo;
-}
-
-/* no multi-language mode (MULTI_LANGUAGE was off in the asm kernel) */
-Boolean IsMultiLanguageModeOn(void)
-{
-    return FALSE;
+    return GeodeDriverTable(gh);
 }

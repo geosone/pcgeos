@@ -1,6 +1,6 @@
 /*
- * objectClass.c -- calling methods (after objectClass.asm and the master
- * part routines of objectUtils.asm).
+ * objectClass.c -- calling methods (after objectClass.asm; the master
+ * part routines of objectUtils.asm are in objectUtils.c).
  *
  * An object is a chunk that starts with its class (MetaBase) and one
  * word per master level: the offset of that master part, 0 while it is
@@ -34,18 +34,9 @@ static word *MasterWord(optr o, word masterOffset)
     return (word *) (Obj(o) + masterOffset);
 }
 
-static ClassStruct *ClassOfObj(optr o)
+ClassStruct *ObjClassOfObj(optr o)
 {
     return *(ClassStruct **) Obj(o);
-}
-
-static int CallClass(ClassStruct *cls, optr oself, int isObj, Message msg,
-		     const void *params, void *reply);
-
-void ObjInitializeMaster(optr o, ClassStruct *cls)
-{
-    ObjResizeMaster(o, cls->Class_masterOffset, cls->Class_instanceSize);
-    CallClass(cls, o, 1, KMSG_META_INITIALIZE, NULL, NULL);
 }
 
 /* the superclass of a variant master class `cls' for this object */
@@ -60,7 +51,7 @@ ClassStruct *ObjResolveVariant(optr o, ClassStruct *cls)
     if (*slot)
 	return *slot;
     super = NULL;
-    CallClass(ClassOfObj(o), o, 1, KMSG_META_RESOLVE_VARIANT_SUPERCLASS, &p,
+    ObjCallClassLow(ObjClassOfObj(o), o, 1, KMSG_META_RESOLVE_VARIANT_SUPERCLASS, &p,
 	      &super);
     if (!super)
 	KernelFatal(VARIANT_SUPERCLASS_NOT_RESOLVED);
@@ -70,7 +61,7 @@ ClassStruct *ObjResolveVariant(optr o, ClassStruct *cls)
 }
 
 /* ObjCallMethodTable: TRUE if a method handled it */
-static int CallClass(ClassStruct *cls, optr oself, int isObj, Message msg,
+int ObjCallClassLow(ClassStruct *cls, optr oself, int isObj, Message msg,
 		     const void *params, void *reply)
 {
     byte scratch[256];
@@ -123,11 +114,11 @@ void KernelDeliver(optr dest, Message msg, const void *params, void *reply)
     HandleEntry *he = HandleEntryOf(h);
 
     if (OptrToChunk(dest) == 0 || he->HE_type != HT_MEM) {
-	CallClass(ThreadClass(), dest, 0, msg, params, reply);
+	ObjCallClassLow(ThreadClass(), dest, 0, msg, params, reply);
 	return;
     }
     MemLock(h);
-    CallClass(ClassOfObj(dest), dest, 1, msg, params, reply);
+    ObjCallClassLow(ObjClassOfObj(dest), dest, 1, msg, params, reply);
     MemUnlock(h);
 }
 
@@ -150,7 +141,7 @@ void *CObjCallSuperP(ClassStruct *superOf, optr dest, Message message,
 	cls = isObj ? ObjResolveVariant(dest, superOf) : NULL;
     if (!(superOf->Class_flags & CLASSF_MASTER_CLASS) ||
 	message != KMSG_META_INITIALIZE)
-	CallClass(cls, dest, isObj, message, params, reply);
+	ObjCallClassLow(cls, dest, isObj, message, params, reply);
     if (isObj)
 	MemUnlock(h);
     return reply;
@@ -174,15 +165,6 @@ void *ObjDeref2(optr obj)
     return ObjDeref(obj, sizeof(ClassStruct *) + sizeof(word));
 }
 
-/* TRUE if `cls' is `of' or below it (variants: the static chain only) */
-Boolean ObjIsClassADescendant(ClassStruct *cls, ClassStruct *of)
-{
-    for (; cls && cls != OBJ_VARIANT_SUPER; cls = cls->Class_superClass)
-	if (cls == of)
-	    return TRUE;
-    return FALSE;
-}
-
 /* the next class up for object `o' (0: none or an unresolved variant) */
 ClassStruct *ObjSuperOf(optr o, ClassStruct *cls)
 {
@@ -194,20 +176,6 @@ ClassStruct *ObjSuperOf(optr o, ClassStruct *cls)
     if (!OptrToChunk(o) || !*MasterWord(o, mo))
 	return NULL;
     return *(ClassStruct **) (Obj(o) + *MasterWord(o, mo));
-}
-
-/* ClassInClassCommon: is the object's class `of' or below it? */
-Boolean ObjIsObjectInClass(optr obj, ClassStruct *of)
-{
-    ClassStruct *cls;
-
-    for (cls = ClassOfObj(obj); cls; cls = ObjSuperOf(obj, cls)) {
-	if (of->Class_masterOffset > cls->Class_masterOffset)
-	    return FALSE;
-	if (cls == of)
-	    return TRUE;
-    }
-    return FALSE;
 }
 
 /*
@@ -244,7 +212,7 @@ optr ObjInstantiate(MemHandle block, ClassStruct *cls)
     *(ClassStruct **) p = cls;
     ObjSetFlags(ConstructOptr(block, ch), OCF_IS_OBJECT | OCF_DIRTY, 0);
     if (!cls->Class_masterOffset)
-	CallClass(cls, ConstructOptr(block, ch), 1, KMSG_META_INITIALIZE,
+	ObjCallClassLow(cls, ConstructOptr(block, ch), 1, KMSG_META_INITIALIZE,
 		  NULL, NULL);
     MemUnlock(block);
     return ConstructOptr(block, ch);
@@ -290,4 +258,11 @@ optr ObjInstantiateForThread(ThreadHandle thread, ClassStruct *cls)
     MemUnlock(mh);
     t->T_dynamicObjBlock = mh;
     return ObjInstantiate(mh, cls);
+}
+
+void *ObjLockObjBlock(MemHandle mh)
+{
+    /* (any block: the text library locks the lmem block of a string
+     * so, as the asm, which checks object blocks alone) */
+    return MemLock(mh);
 }

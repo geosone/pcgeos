@@ -232,9 +232,31 @@ optr ObjBlockGetOutput(MemHandle mh)
     return o;
 }
 
-void *ObjLockObjBlock(MemHandle mh)
+void ObjInitializeMaster(optr o, ClassStruct *cls)
 {
-    /* (any block: the text library locks the lmem block of a string
-     * so, as the asm, which checks object blocks alone) */
-    return MemLock(mh);
+    ObjResizeMaster(o, cls->Class_masterOffset, cls->Class_instanceSize);
+    ObjCallClassLow(cls, o, 1, KMSG_META_INITIALIZE, NULL, NULL);
+}
+
+/* TRUE if `cls' is `of' or below it (variants: the static chain only) */
+Boolean ObjIsClassADescendant(ClassStruct *cls, ClassStruct *of)
+{
+    for (; cls && cls != OBJ_VARIANT_SUPER; cls = cls->Class_superClass)
+	if (cls == of)
+	    return TRUE;
+    return FALSE;
+}
+
+/* ClassInClassCommon: is the object's class `of' or below it? */
+Boolean ObjIsObjectInClass(optr obj, ClassStruct *of)
+{
+    ClassStruct *cls;
+
+    for (cls = ObjClassOfObj(obj); cls; cls = ObjSuperOf(obj, cls)) {
+	if (of->Class_masterOffset > cls->Class_masterOffset)
+	    return FALSE;
+	if (cls == of)
+	    return TRUE;
+    }
+    return FALSE;
 }

@@ -3,7 +3,7 @@
  * graphicsUtils.asm: GrTransform, GrTransformWWFixed, GrTransformDWord,
  * GrTransformDWFixed, GrUntransform and the rest, SetDocWWFPenPos,
  * SetRelDocPenPos, GetDocPenPos; GrSetVMFile, GrGetExclusive,
- * GrGrabExclusive, GrReleaseExclusive).
+ * GrGrabExclusive, GrReleaseExclusive; GrShiftMask).
  *
  * The pen position (GS_penPos) is kept in page coordinates: the
  * document position through GS_TMatrix.
@@ -153,37 +153,11 @@ void GrUntransformDWord(GStateHandle gstate, sdword xCoord, sdword yCoord,
 /* the pen position */
 void GrSetDocPenPos(GState *gs, sword x, sword y);
 
-static void SetPen(GState *gs, int64_t x, int64_t y)	/* SetDocWWFPenPos */
+void GrSetPen(GState *gs, int64_t x, int64_t y)	/* SetDocWWFPenPos */
 {
     GrMatTransDWF(&gs->GS_TMatrix, &x, &y);
     GrSetDWF(&gs->GS_penPos.PDF_x, x);
     GrSetDWF(&gs->GS_penPos.PDF_y, y);
-}
-
-void GrMoveTo(GStateHandle gstate, sword x, sword y)
-{
-    GState *gs = MemLock(gstate);
-
-    (void) GrGSRecord(gstate, GR_MOVE_TO, "ww", x, y);
-    SetPen(gs, (int64_t) x * 65536, (int64_t) y * 65536);
-    MemUnlock(gstate);
-}
-
-void GrMoveToWWFixed(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y)
-{
-    GState *gs = MemLock(gstate);
-
-    (void) GrGSRecord(gstate, GR_MOVE_TO_WWFIXED, "dd", x, y);
-    SetPen(gs, (sdword) x, (sdword) y);
-    MemUnlock(gstate);
-}
-
-/* SetRelDocPenPos: the offset through the 2x2 part only
- * (TransformRelVector) */
-void GrRelMoveTo(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y)
-{
-    (void) GrGSRecord(gstate, GR_REL_MOVE_TO, "dd", x, y);
-    GrRelMovePen(gstate, x, y);
 }
 
 /* GrRelMoveTo, not stored in a graphics string */
@@ -234,12 +208,12 @@ void GrGetCurPosWWFixed(GStateHandle gstate, PointWWFixed *cp)
 
 void GrSetDocPenPos(GState *gs, sword x, sword y)
 {
-    SetPen(gs, (int64_t) x * 65536, (int64_t) y * 65536);
+    GrSetPen(gs, (int64_t) x * 65536, (int64_t) y * 65536);
 }
 
 void GrSetDocWWFPenPos(GState *gs, sdword x, sdword y)
 {
-    SetPen(gs, x, y);
+    GrSetPen(gs, x, y);
 }
 
 /* ---------------------------------------------------------------------
@@ -406,4 +380,22 @@ void GrReleaseExclusive(GeodeHandle videoDriver, GStateHandle gstate,
     bounds->R_top = (sword) r.DR_di;
     bounds->R_right = (sword) r.DR_cx;
     bounds->R_bottom = (sword) r.DR_dx;
+}
+
+/*
+ * GrShiftMask: rotate a mask from the GState's shift to a new one, so
+ * that it lines up with the screen: pixel x, y of the result is pixel
+ * x - dx, y - dy of the mask.
+ */
+void GrShiftMask(GState *gs, DrawMask m, byte xShift, byte yShift)
+{
+    DrawMask old;
+    int dx = (xShift - gs->GS_xShift) & 7, dy = (yShift - gs->GS_yShift) & 7;
+    int y;
+
+    memcpy(old, m, sizeof(DrawMask));
+    for (y = 0; y < 8; y++) {
+	byte b = old[(y - dy) & 7];
+	m[y] = (byte) (dx ? (b >> dx) | (b << (8 - dx)) : b);
+    }
 }

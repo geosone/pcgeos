@@ -64,11 +64,6 @@ void *DBLockGetRefUngrouped(VMFileHandle file, DBGroupAndItem id,
     return LMemDeref(o);
 }
 
-void DBUnlock(void *ptr)
-{
-    VMUnlock(MemPtrToHandle(ptr));
-}
-
 void DBDirty(const void *ptr)
 {
     VMDirty(MemPtrToHandle((void *) ptr));
@@ -329,4 +324,38 @@ Boolean DBInfoUngrouped(VMFileHandle file, DBGroupAndItem id, word *sizePtr)
 done:
     DBLeave();
     return ok;
+}
+
+/* DBCheckDBFile, DBCheckData */
+static Boolean CheckData(VMFileHandle file, word uid, word minSize)
+{
+    VMBlockHandle b = 0;
+    VMInfoStruct info;
+
+    while ((b = VMFind(file, b, uid)) != 0)
+	if (!VMInfo(file, b, &info) || info.size < minSize)
+	    return FALSE;
+    return TRUE;
+}
+
+Boolean DBCheckDBFile(VMFileHandle file)
+{
+    VMBlockHandle map = VMGetDBMap(file);
+    VMInfoStruct info;
+    MemHandle mh;
+    DBMapBlock *m;
+    Boolean ok;
+
+    if (!map)
+	return TRUE;
+    if (!VMInfo(file, map, &info) || info.size != DB_DOS16_MAP_BLOCK_SIZE)
+	return FALSE;
+    m = VMLock(file, map, &mh);
+    if (!m)
+	return FALSE;
+    ok = m->DBMB_vmemHandle == map;
+    VMUnlock(mh);
+    return ok &&
+	CheckData(file, DB_GROUP_ID, sizeof(DBGroupHeader)) &&
+	CheckData(file, DB_ITEM_BLOCK_ID, DB_DOS16_ITEM_BLOCK_HEADER);
 }

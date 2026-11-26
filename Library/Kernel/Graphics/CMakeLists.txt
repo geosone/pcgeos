@@ -3,8 +3,10 @@ target_sources(geos_kernel_objs PRIVATE
   graphicsRegion.c
   graphicsTables.c
   graphicsMath.c
+  graphicsMathObscure.c
   graphicsTransformUtils.c
   graphicsTransform.c
+  graphicsPathLow.c
   graphicsUtils.c
   graphicsOutput.c
   graphicsLine.c
@@ -19,7 +21,10 @@ target_sources(geos_kernel_objs PRIVATE
   graphicsRoundedRect.c
   graphicsWin.c
   graphicsRaster.c
+  graphicsImage.c
+  graphicsBitmapHuge.c
   graphicsBitmapCreate.c
+  graphicsRasterUtils.c
   graphicsLineStyles.c
   graphicsColor.c
   graphicsState.c
@@ -36,6 +41,6 @@ target_sources(geos_kernel_objs PRIVATE
   graphicsPath.c
   graphicsPattern.c
   graphicsString.c
-  graphicsStringBounds.c
   graphicsStringMisc.c
-  graphicsStringStore.c)
+  graphicsStringStore.c
+  graphicsStringUtils.c)

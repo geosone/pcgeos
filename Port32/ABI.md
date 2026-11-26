@@ -2241,7 +2241,7 @@ where it is with `FileSetTopHostPath`.
   it was locked; closing the file frees its regions.
 - **`FileOpenAndRead`** (`fileIO.c`): the file in a new block, with CR
   LF, `^Z` and a null added as the flags ask.
-- **All extended attributes** (`fileEA.c`): the list of the DOS driver
+- **All extended attributes** (`fileIO.c`): the list of the DOS driver
   (`dosvceaAllAttrs`, 13 attributes; a file that is no GEOS file has
   only the first two). The kernel fetches them one by one through the
   driver. `FileCopyExtAttributes` and `FileCopyPathExtAttributes` set
@@ -2606,7 +2606,7 @@ on the way to a FAT disk.
   keeps the header. `FileOpen` takes any file that starts with the
   signature as a GEOS file. `FileCreate` of an existing file of the
   other kind is `ERROR_FILE_FORMAT_MISMATCH`.
-- **Extended attributes** (`File/fileEA.c` over the driver, kept by HostFS): `FileGet/SetPathExtAttributes`,
+- **Extended attributes** (`File/fileFile.c`, `fileIO.c` over the driver, kept by HostFS): `FileGet/SetPathExtAttributes`,
   `FileGet/SetHandleExtAttributes`, one attribute or `FEA_MULTIPLE`
   (the first error is returned, the others are still done).
   - The header fields are read and set as they are in the file (little
@@ -4151,7 +4151,7 @@ element for each slice after it: the size, the `CBitmap` with
 **Not yet:** the truncation of a full stream.
 (`GST_PATH` and the other path and clip elements: §13q.)
 
-**Bounds** (`graphicsStringBounds.c`). `GrGetGStringBoundsDWord` and
+**Bounds** (`graphicsString.c`). `GrGetGStringBoundsDWord` and
 `GrGetGStringBounds` play the string from its position until the
 `GSControl` flags stop. They play into a GState without a window that
 starts with the transformation, pen, line width and font of the GState

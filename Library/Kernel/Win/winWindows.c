@@ -588,3 +588,34 @@ void WinForEach(WindowHandle win, WinForEachCallback *callback, void *data)
 	;
     WinTreeV();
 }
+
+/* WinClearSaveUndersLow: give up the areas f; any is a window of the
+ * tree */
+void WinClearSaveUnders(WindowHandle any, WinUnderFlags f)
+{
+    WinUnderFlags bit;
+    Window *w;
+
+    if (!f)
+	return;
+    for (bit = 1; bit; bit = (WinUnderFlags) (bit << 1)) {
+	DriverRegs r;
+	WindowHandle sh;
+	if (!(f & bit))
+	    continue;
+	memset(&r, 0, sizeof(r));
+	r.DR_ax = bit;
+	w = MemLock(any);
+	(void) WinCallVidDriver(w, DR_VID_INFO_UNDER, &r);
+	MemUnlock(any);
+	sh = (WindowHandle) r.DR_di;
+	if (!sh)
+	    continue;
+	w = MemLock(sh);
+	memset(&r, 0, sizeof(r));
+	(void) WinCallVidDriver(w, DR_VID_NUKE_UNDER, &r);
+	w->W_saveUnder = 0;
+	MemUnlock(sh);
+    }
+    WinClearUnderBits(WinRootOf(any), f);
+}

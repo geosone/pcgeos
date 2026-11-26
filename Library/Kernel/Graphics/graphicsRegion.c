@@ -372,3 +372,53 @@ void GrDrawRegionAtCP(GStateHandle gstate, const Region *reg, word axParam,
 	DoRegion(&d, reg, params);
     GrExitGraphics(&d);
 }
+
+/* SetClipRectCommon, AddRectangleToPath: the rectangle as a path of its
+ * own (the clip rectangle with the transformation, the window one in
+ * page coordinates), combined into the clip path; the current path
+ * stays */
+static void SetClipRect(GStateHandle gstate, GetPathType ptype,
+			PathCombineType flags, sword l, sword t, sword r,
+			sword b)
+{
+    GState *gs = MemLock(gstate);
+    ChunkHandle cur = gs->GS_currentPath;
+
+    if (gs->GS_pathFlags & (PF_DEFINING_PATH | PF_FILL | PF_STROKE)) {
+	MemUnlock(gstate);
+	return;
+    }
+    if (flags == PCT_NULL) {
+	MemUnlock(gstate);
+	GrPathSetClip(gstate, ptype, PCT_NULL, ODD_EVEN);
+	return;
+    }
+    gs->GS_currentPath = 0;
+    MemUnlock(gstate);
+    GrBeginPath(gstate, PCT_REPLACE);
+    if (ptype == GPT_WIN_CLIP)
+	GrSetNullTransform(gstate);
+    GrFillRect(gstate, l, t, r, b);
+    GrEndPath(gstate);
+    GrPathSetClip(gstate, ptype, flags, ODD_EVEN);
+    GrFreePath(gstate, GPT_CURRENT);
+    gs = MemLock(gstate);
+    gs->GS_currentPath = cur;
+    MemUnlock(gstate);
+}
+
+void GrSetClipRect(GStateHandle gstate, PathCombineType flags, sword left,
+		   sword top, sword right, sword bottom)
+{
+    if (!GrGSRecord(gstate, GR_SET_CLIP_RECT, "wwwww", flags, left, top,
+		    right, bottom))
+	SetClipRect(gstate, GPT_CLIP, flags, left, top, right, bottom);
+}
+
+void GrSetWinClipRect(GStateHandle gstate, PathCombineType flags,
+		      sword left, sword top, sword right, sword bottom)
+{
+    if (!GrGSRecord(gstate, GR_SET_WIN_CLIP_RECT, "wwwww", flags, left, top,
+		    right, bottom))
+	SetClipRect(gstate, GPT_WIN_CLIP, flags, left, top, right, bottom);
+}

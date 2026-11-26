@@ -49,4 +49,10 @@ char	*IniBuildString(const char *key, const char *str, word *size);
 char	*IniBuildData(const char *key, const byte *buf, word bufSize,
 		      word *size);
 
+/* initfileHigh.c and initfileLow.c */
+extern KSem iniSem;
+extern ThreadHandle iniOwner;
+extern word iniNesting;
+void VInitFile(void);
+
 #endif

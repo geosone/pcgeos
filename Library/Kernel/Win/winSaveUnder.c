@@ -1,7 +1,7 @@
 /*
  * winSaveUnder.c -- save under areas in the window system (after
  * winWindows.asm: WinGetOverlyingSaveUnders,
- * WinClearSaveUndersOverlappingParent, WinClearSaveUnders,
+ * WinClearSaveUndersOverlappingParent,
  * WinPerformObscure, WinPerformVis, CorrectForSaveUnder; winUtils.asm:
  * WinClearSaveUndersLow; winCreDest.asm: WinRequestUnder and the save
  * under parts of WinOpen and WinClose; winIndividual.asm:
@@ -41,7 +41,7 @@
 WinUnderFlags winUnderClosing;		/* the area being closed */
 optr winUnderRestored;			/* and its restored region */
 
-static WindowHandle Root(WindowHandle wh)
+WindowHandle WinRootOf(WindowHandle wh)
 {
     for (;;) {
 	Window *w = MemLock(wh);
@@ -54,7 +54,7 @@ static WindowHandle Root(WindowHandle wh)
 }
 
 /* the bits f out of the branch */
-static void ClearBits(WindowHandle wh, WinUnderFlags f)
+void WinClearUnderBits(WindowHandle wh, WinUnderFlags f)
 {
     Window *w = MemLock(wh);
     WindowHandle ch, next;
@@ -65,7 +65,7 @@ static void ClearBits(WindowHandle wh, WinUnderFlags f)
 	Window *c = MemLock(ch);
 	next = c->W_nextSibling;
 	MemUnlock(ch);
-	ClearBits(ch, f);
+	WinClearUnderBits(ch, f);
     }
     MemUnlock(wh);
 }
@@ -110,37 +110,6 @@ WinUnderFlags WinCheckUnder(Window *w, const Rectangle *b)
     if (WinCallVidDriver(w, DR_VID_CHECK_UNDER, &r))
 	return 0;
     return (WinUnderFlags) r.DR_ax;
-}
-
-/* WinClearSaveUndersLow: give up the areas f; any is a window of the
- * tree */
-void WinClearSaveUnders(WindowHandle any, WinUnderFlags f)
-{
-    WinUnderFlags bit;
-    Window *w;
-
-    if (!f)
-	return;
-    for (bit = 1; bit; bit = (WinUnderFlags) (bit << 1)) {
-	DriverRegs r;
-	WindowHandle sh;
-	if (!(f & bit))
-	    continue;
-	memset(&r, 0, sizeof(r));
-	r.DR_ax = bit;
-	w = MemLock(any);
-	(void) WinCallVidDriver(w, DR_VID_INFO_UNDER, &r);
-	MemUnlock(any);
-	sh = (WindowHandle) r.DR_di;
-	if (!sh)
-	    continue;
-	w = MemLock(sh);
-	memset(&r, 0, sizeof(r));
-	(void) WinCallVidDriver(w, DR_VID_NUKE_UNDER, &r);
-	w->W_saveUnder = 0;
-	MemUnlock(sh);
-    }
-    ClearBits(Root(any), f);
 }
 
 /* WinGetOverlyingSaveUnders: the areas over the window's bounds, not
@@ -207,7 +176,7 @@ void WinUnderOpened(WindowHandle wh)
 	b.R_bottom = (sword) r.DR_dx;
 	MemUnlock(wh);
 	if (r.DR_di)
-	    MarkBits(Root(wh), wh, f, &b);
+	    MarkBits(WinRootOf(wh), wh, f, &b);
 	return;
     }
     MemUnlock(wh);
@@ -264,5 +233,5 @@ void WinUnderClosed(WindowHandle wh, WindowHandle parent, WinUnderFlags f)
     winUnderRestored = 0;
     WinRegNull(wh, ((Window *) MemDeref(wh))->W_temp1Reg);
     MemUnlock(wh);
-    ClearBits(Root(parent), f);
+    WinClearUnderBits(WinRootOf(parent), f);
 }

@@ -67,15 +67,6 @@ FontsAvailEntry *GrFontAvailEntry(FontID id)
     return NULL;
 }
 
-FontInfo *FontDrFindFontInfo(void *infoBlock, FontID id)
-{
-    FontsAvailEntry *fa;
-
-    (void) infoBlock;
-    fa = GrFontAvailEntry(id);
-    return fa ? GrFontChunk(fa->FAE_infoHandle, NULL) : NULL;
-}
-
 /* IsFontAvailable: the font, or one of another maker with the same
  * number; *id becomes the one found */
 FontInfo *GrFontAvailable(FontID *id)
@@ -579,8 +570,6 @@ static Boolean ReallocFont(GState *gs, const TMatrix *m, Handle h)
  * Locking
  * ------------------------------------------------------------------- */
 
-static void RecalcKern(GState *gs);
-
 /* UpdateFontOpts */
 static void UpdateFontOpts(GState *gs, const FontBuf *fb)
 {
@@ -598,7 +587,7 @@ static void UpdateFontOpts(GState *gs, const FontBuf *fb)
 	gs->GS_kernOp = GO_SPECIAL_CASE;
     }
     if (gs->GS_trackKernDegree)
-	RecalcKern(gs);
+	GrRecalcKern(gs);
     gs->GS_fontFlags = (byte) ((gs->GS_fontFlags & FONT_GS_FLAGS) |
 			       fb->FB_flags);
 }
@@ -670,7 +659,7 @@ void FontDrUnlockFont(GStateHandle gstate)
  * ------------------------------------------------------------------- */
 
 /* LibRecalcKernValues: the track kerning for the size */
-static void RecalcKern(GState *gs)
+void GrRecalcKern(GState *gs)
 {
     sword degree = gs->GS_trackKernDegree;
     sword size = (sword) (gs->GS_fontAttr.FCA_pointsize.WBF_int +
@@ -699,28 +688,7 @@ static void RecalcKern(GState *gs)
 
 void GrRecalcKernValues(GState *gs)
 {
-    RecalcKern(gs);
-}
-
-void GrSetTrackKern(GStateHandle gstate, word tk)
-{
-    GState *gs = MemLock(gstate);
-
-    (void) GrGSRecord(gstate, GR_SET_TRACK_KERN, "w", tk);
-    if ((sword) tk != gs->GS_trackKernDegree) {
-	gs->GS_trackKernDegree = (sword) tk;
-	RecalcKern(gs);
-    }
-    MemUnlock(gstate);
-}
-
-word GrGetTrackKern(GStateHandle gstate)
-{
-    GState *gs = MemLock(gstate);
-    word tk = (word) gs->GS_trackKernDegree;
-
-    MemUnlock(gstate);
-    return tk;
+    GrRecalcKern(gs);
 }
 
 /* GrSetFont: 0 keeps the font or the size */
@@ -742,7 +710,7 @@ void GrSetFont(GStateHandle gstate, FontID id, WWFixedAsDWord pointSize)
 	    gs->GS_fontAttr.FCA_pointsize.WBF_frac = sf;
 	}
 	if (gs->GS_trackKernDegree)
-	    RecalcKern(gs);
+	    GrRecalcKern(gs);
     }
     MemUnlock(gstate);
 }
@@ -752,4 +720,24 @@ FontID GrGetDefFontID(dword *sizeSHL16)
     if (sizeSHL16)
 	*sizeSHL16 = (dword) grDefaultFontSize << 16;
     return grDefaultFontID;
+}
+
+Boolean GrCallFontDriverID(FontMaker maker, word function, DriverRegs *r)
+{
+    word size, i;
+    DriversAvailEntry *d;
+    FontDriverStrategy *strat = NULL;
+    Boolean carry = TRUE;
+
+    if (!grFontBlock)
+	return TRUE;
+    FontDrLockInfoBlock();
+    d = GrFontChunk(FONT_DRIVERS_HANDLE, &size);
+    for (i = 0; i < size / sizeof(DriversAvailEntry); i++)
+	if (d[i].DAE_makerID == maker)
+	    strat = d[i].DAE_strategy;
+    if (strat)
+	carry = strat(function, r);
+    FontDrUnlockInfoBlock();
+    return carry;
 }

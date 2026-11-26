@@ -7,6 +7,7 @@
 #                     Sys/sysNotification.asm
 target_sources(geos_kernel_objs PRIVATE
   sysError.c
+  sysScreen.c
   sysMisc.c
   sysNotification.c
   sysStats.c)

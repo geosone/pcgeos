@@ -181,19 +181,6 @@ word GrGetFontName(FontID id, char *name)
     return len;
 }
 
-FontID GrGetFont(GStateHandle gstate, WWFixedAsDWord *pointSize)
-{
-    GState *gs = MemLock(gstate);
-    FontID id = gs->GS_fontAttr.FCA_fontID;
-
-    if (pointSize)
-	*pointSize = ((dword) (word) gs->GS_fontAttr.FCA_pointsize.WBF_int
-		      << 16) |
-		     ((dword) gs->GS_fontAttr.FCA_pointsize.WBF_frac << 8);
-    MemUnlock(gstate);
-    return id;
-}
-
 /* SetFontAttrCommonByte/Word: a change drops the font */
 static void SetAttr(GStateHandle gstate, size_t offset, const byte *v,
 		    word n)

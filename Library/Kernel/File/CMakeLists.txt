@@ -12,6 +12,7 @@
 #   fileNotify.c <- file change notification (FSD/fsdFile.asm)
 target_sources(geos_kernel_objs PRIVATE
   filePath.c
+  fileUtils.c
   fileOpenClose.c
   fileIO.c
   fileFile.c

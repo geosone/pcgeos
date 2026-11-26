@@ -50,9 +50,9 @@ static Boolean grabbed;
 
 /* exclusive access, nesting for the thread that has it (callbacks may
  * call the init file routines) */
-static KSem iniSem = { 1, 0 };
-static ThreadHandle iniOwner;
-static word iniNesting;
+KSem iniSem = { 1, 0 };
+ThreadHandle iniOwner;
+word iniNesting;
 
 static void Load(void);
 
@@ -69,14 +69,6 @@ static void PInitFile(void)
     iniNesting = 1;
     if (!iniLoaded)
 	Load();
-}
-
-static void VInitFile(void)
-{
-    if (--iniNesting == 0) {
-	iniOwner = 0;
-	KSemV(&iniSem);
-    }
 }
 
 /* ---------------------------------------------------------------------

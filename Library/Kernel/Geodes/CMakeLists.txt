@@ -12,7 +12,10 @@ target_sources(geos_kernel_objs PRIVATE
   geodesEvent.c
   geodesResource.c
   geodesLoad.c
+  geodesUtils.c
   geodesLibrary.c
   geodesDriver.c
   geodesAccess.c
+  geodesPatch.c
+  geodesHandle.c
   geodesPriv.c)

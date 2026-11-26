@@ -1,6 +1,6 @@
 /*
- * vmemHigh.c -- the VM file routines (after vmemHigh.asm,
- * vmemKernelHigh.asm and vmemC.asm).
+ * vmemHigh.c -- the VM file routines (after vmemHigh.asm and the C stubs
+ * of vmemC.asm).
  *
  * A VMFileHandle is a SIG_VM handle owned by the process that opened the
  * file; it points to the KVMFile and owns the memory of the blocks, so
@@ -530,31 +530,6 @@ void VMSetDBMap(VMFileHandle file, VMBlockHandle block)
     VHSet16(VMFileOf(file), VMH_DB_MAP_BLOCK, block);
 }
 
-void VMMarkUngroupAvail(VMFileHandle file, VMBlockHandle block)
-{
-    KVMFile *f = VMFileOf(file);
-
-    VMCheckBlock(f, block);
-    VHSet8(f, block + VMBH_FLAGS,
-	   (byte) (f->VF_hdr[block + VMBH_FLAGS] | VMBF_UNGROUPED_AVAIL));
-}
-
-VMBlockHandle VMFindAvailUngroup(VMFileHandle file)
-{
-    KVMFile *f = VMFileOf(file);
-    word h;
-
-    for (h = VM_HEADER_BLOCK + VMBH_SIZE; h < VHGet16(f, VMH_LAST_HANDLE);
-	 h += VMBH_SIZE)
-	if (VMIsUsed(f, h) &&
-	    (f->VF_hdr[h + VMBH_FLAGS] & VMBF_UNGROUPED_AVAIL)) {
-	    VHSet8(f, h + VMBH_FLAGS, (byte) (f->VF_hdr[h + VMBH_FLAGS] &
-					      ~VMBF_UNGROUPED_AVAIL));
-	    return h;
-	}
-    return 0;
-}
-
 word VMGetAttributes(VMFileHandle file)
 {
     return VMFileOf(file)->VF_hdr[VMH_ATTRIBUTES];
@@ -633,11 +608,6 @@ MemHandle VMDetach(VMFileHandle file, VMBlockHandle block, GeodeHandle owner)
     return mh;
 }
 
-VMBlockHandle VMAllocLMem(VMFileHandle file, LMemType ltype, word headerSize)
-{
-    return VMAttach(file, 0, MemAllocLMem(ltype, headerSize));
-}
-
 void VMSetReloc(VMFileHandle file,
 		void (*reloc)(VMFileHandle file, VMBlockHandle block,
 			      MemHandle mh, void *data, VMRelocType type))
@@ -659,32 +629,6 @@ void VMPreserveBlocksHandle(VMFileHandle file, VMBlockHandle block)
     VMCheckBlock(f, block);
     VHSet8(f, block + VMBH_FLAGS,
 	   (byte) (f->VF_hdr[block + VMBH_FLAGS] | VMBF_PRESERVE_HANDLE));
-}
-
-VMBlockHandle VMCopyVMBlock(VMFileHandle sourceFile,
-			    VMBlockHandle sourceBlock, VMFileHandle destFile)
-{
-    MemHandle smh, dmh;
-    const void *src = VMLock(sourceFile, sourceBlock, &smh);
-    word size;
-    VMBlockHandle nb;
-    KVMFile *sf = VMFileOf(sourceFile);
-
-    if (!src)
-	return 0;
-    size = (word) MemGetInfo(smh, MGIT_SIZE);
-    nb = VMAlloc(destFile, size,
-		 VHGet16(sf, sourceBlock + VMBH_UID));
-    memcpy(VMLock(destFile, nb, &dmh), src, size);
-    if (MemGetInfo(smh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) {
-	/* CopyVMBlock: an LMem block stays one */
-	MemModifyFlags(dmh, HF_LMEM, 0);
-	((LMemBlockHeader *) MemDeref(dmh))->LMBH_handle = dmh;
-    }
-    VMDirty(dmh);
-    VMUnlock(dmh);
-    VMUnlock(smh);
-    return nb;
 }
 
 /* ---------------------------------------------------------------------
@@ -1057,16 +1001,6 @@ Boolean VMCheckForModifications(VMFileHandle file)
     KVMFile *f = VMFileOf(file);
 
     return (Boolean) (ReadWord(f, VMFH_UPDATE_COUNTER) != f->VF_updateCount);
-}
-
-void VMGetHeaderInfo(VMFileHandle file, VMHeaderInfoStruct *vmInfo)
-{
-    KVMFile *f = VMFileOf(file);
-
-    vmInfo->usedBlocks = VHGet16(f, VMH_NUM_USED);
-    vmInfo->headerSize = VHGet16(f, VMH_LAST_HANDLE);
-    vmInfo->freeBlocks = (word) (VHGet16(f, VMH_NUM_UNASSIGNED) +
-				 VHGet16(f, VMH_NUM_ASSIGNED));
 }
 
 void VMSetDirtyLimit(VMFileHandle file, word dirtyLimit)

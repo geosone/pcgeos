@@ -99,4 +99,7 @@ Boolean ImMaybeUnblankScreens(void);
 void ImScreenSaverMethod(void *pself, optr oself, Message m, void *params,
 			 void *reply);
 
+/* imMisc.c and imPtr.c */
+void ImRefreshPtrNow(void);
+
 #endif /* IMINT_H */

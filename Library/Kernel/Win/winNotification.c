@@ -91,7 +91,6 @@ static struct {
     WindowHandle	locatedVisWin;
     WindowHandle	finalWin;	/* whose images are shown */
     GeodeHandle		finalGeode;
-    GeodeHandle		activeGeode;	/* WinSysSetActiveGeode */
 } wp;
 
 static PtrQueue eventQueue, sendQueue;
@@ -537,7 +536,7 @@ static void CommonTraverse(WindowHandle tree, sword x, sword y)
 static void FinalWinAndGeode(WindowHandle *win, GeodeHandle *geode)
 {
     WindowHandle wh = wp.impliedWin;
-    GeodeHandle g = wp.activeGeode;
+    GeodeHandle g = winActiveGeode;
     GeodeWinVars v;
 
     if (g) {
@@ -612,19 +611,6 @@ optr WinPtrOutputOD(void)
 GeodeHandle WinPtrFinalGeode(void)
 {
     return wp.finalGeode;
-}
-
-/* WinSysSetActiveGeode: the geode the mouse is down in, if any */
-void WinSysSetActiveGeode(GeodeHandle gh)
-{
-    WinTreeP();
-    WinPtrImageP();
-    if (gh != wp.activeGeode) {
-	wp.activeGeode = gh;
-	WinUpdatePtrImages();
-    }
-    WinPtrImageV();
-    WinTreeV();
 }
 
 void WinSetPtrImage(WindowHandle win, PtrImageLevel ptrLevel, optr ptrCh)

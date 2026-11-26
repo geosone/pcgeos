@@ -90,3 +90,8 @@ Boolean DBItemBlockDelRef(DBGroup_ *g, MemHandle mh)
     DBItemBlockFree(g, info);
     return TRUE;
 }
+
+void DBUnlock(void *ptr)
+{
+    VMUnlock(MemPtrToHandle(ptr));
+}

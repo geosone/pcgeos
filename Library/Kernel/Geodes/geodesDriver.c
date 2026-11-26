@@ -34,7 +34,7 @@ static GeodeHandle systemDrivers[MAX_SYSTEM_DRIVERS];
 static word systemDriverCount;
 static GeodeHandle defaultDrivers[GDDT_TASK / 2 + 1];
 
-static DriverInfoStruct *TableOf(GeodeHandle gh)
+DriverInfoStruct *GeodeDriverTable(GeodeHandle gh)
 {
     GeodeCore *c = GeodeCoreOf(gh);
 
@@ -44,7 +44,7 @@ static DriverInfoStruct *TableOf(GeodeHandle gh)
 
 GeodeLoadError GeodeInitDriver(GeodeHandle gh, dword appInfo)
 {
-    DriverInfoStruct *dis = TableOf(gh);
+    DriverInfoStruct *dis = GeodeDriverTable(gh);
     GeodeCore *c = GeodeCoreOf(gh);
     DriverRegs r;
 
@@ -66,7 +66,7 @@ GeodeLoadError GeodeInitDriver(GeodeHandle gh, dword appInfo)
 void GeodeExitDriver(GeodeHandle gh)
 {
     GeodeCore *c = GeodeCoreOf(gh);
-    DriverInfoStruct *dis = TableOf(gh);
+    DriverInfoStruct *dis = GeodeDriverTable(gh);
     DriverRegs r;
     word i;
 
@@ -122,11 +122,6 @@ void GeodeFreeDriver(GeodeHandle gh)
     if (!--c->GC_refCount)
 	GeodeFreeLow(gh);
     GeodeUnlock();
-}
-
-DriverInfoStruct *GeodeInfoDriver(GeodeHandle gh)
-{
-    return TableOf(gh);
 }
 
 GeodeHandle GeodeGetDefaultDriver(GeodeDefaultDriverType type)

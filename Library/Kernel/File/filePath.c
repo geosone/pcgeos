@@ -308,7 +308,7 @@ static FSDDisk *Place(StandardPath sp, word n, Comps *c, Boolean *end)
     return NULL;
 }
 
-static KPath *CurPath(void)
+KPath *FileCurPath(void)
 {
     KThread *t = ThreadOf(KernelThisThread());
 
@@ -427,7 +427,7 @@ FSDDisk *FileResolveOn(DiskHandle disk, const char *path, char *out,
 
 FSDDisk *FileResolve(const char *path, char *out, size_t size)
 {
-    KPath *cur = CurPath();
+    KPath *cur = FileCurPath();
     Boolean end;
 
     return ResolvePlace(cur->KP_disk, cur->KP_tail, path, 0, out, size,
@@ -437,7 +437,7 @@ FSDDisk *FileResolve(const char *path, char *out, size_t size)
 FSDDisk *FileResolvePlace(const char *path, word n, char *out, size_t size,
 			  Boolean *end)
 {
-    KPath *cur = CurPath();
+    KPath *cur = FileCurPath();
 
     return ResolvePlace(cur->KP_disk, cur->KP_tail, path, n, out, size,
 			end);
@@ -497,13 +497,6 @@ DiskHandle FileLinkTarget(char *path, size_t size)
     return disk;
 }
 
-/* FileOpOnPath: op at each place of the path (from base, tail) until
- * one returns other than "not found"; that, else ERROR_FILE_NOT_FOUND
- * if a place had the directory, else ERROR_PATH_NOT_FOUND.  A link met
- * is followed unless depth is MAX_LINK_COUNT. */
-static word OpOnPlacesN(DiskHandle base, const char *tail, const char *path,
-			FileOpFunc *op, void *data, word depth);
-
 static word FollowOp(FileOpFunc *op, void *data, word depth)
 {
     char path[FILE_DISK_PATH_SIZE];
@@ -516,16 +509,10 @@ static word FollowOp(FileOpFunc *op, void *data, word depth)
     disk = FileLinkTarget(path, sizeof(path));
     if (!disk)
 	return ThreadGetError();
-    return OpOnPlacesN(disk, "", path, op, data, depth + 1);
+    return FileOpOnPlacesN(disk, "", path, op, data, depth + 1);
 }
 
-static word OpOnPlaces(DiskHandle base, const char *tail, const char *path,
-		       FileOpFunc *op, void *data)
-{
-    return OpOnPlacesN(base, tail, path, op, data, 0);
-}
-
-static word OpOnPlacesN(DiskHandle base, const char *tail, const char *path,
+word FileOpOnPlacesN(DiskHandle base, const char *tail, const char *path,
 			FileOpFunc *op, void *data, word depth)
 {
     char dp[FILE_DISK_PATH_SIZE];
@@ -551,13 +538,6 @@ static word OpOnPlacesN(DiskHandle base, const char *tail, const char *path,
 	    return e;
     }
     return notFound;
-}
-
-word FileOpOnPath(const char *path, FileOpFunc *op, void *data)
-{
-    KPath *cur = CurPath();
-
-    return OpOnPlaces(cur->KP_disk, cur->KP_tail, path, op, data);
 }
 
 /* the first place of path (relative to the root of disk; 0: to the
@@ -606,7 +586,7 @@ static FSDDisk *LocateFollow(FSDDisk *d, char *out, size_t size,
 static FSDDisk *LocateN(DiskHandle disk, const char *path, char *out,
 			size_t size, Boolean final, word depth)
 {
-    KPath *cur = CurPath();
+    KPath *cur = FileCurPath();
     DiskHandle base = disk ? disk : cur->KP_disk;
     const char *tail = disk ? "" : cur->KP_tail;
     char dp[FILE_DISK_PATH_SIZE];
@@ -693,7 +673,7 @@ static word CurPathSetAt(FSDDisk *d, const char *dp, void *full)
  * or on the way to it, makes its target the current path. */
 DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
 {
-    KPath *cur = CurPath();
+    KPath *cur = FileCurPath();
     Comps c, full;
     DiskHandle base;
     const char *tail;
@@ -723,7 +703,7 @@ DiskHandle FileSetCurrentPath(DiskHandle disk, const char *path)
 	 * must be at one of its places */
 	if (!c.len)
 	    break;
-	e = OpOnPlacesN(base, "", c.buf, CurPathSetAt, NULL, MAX_LINK_COUNT);
+	e = FileOpOnPlacesN(base, "", c.buf, CurPathSetAt, NULL, MAX_LINK_COUNT);
 	if (e == ERROR_LINK_ENCOUNTERED) {
 	    if (++depth == MAX_LINK_COUNT)
 		e = ERROR_TOO_MANY_LINKS;
@@ -759,7 +739,7 @@ void FileSetStandardPath(StandardPath sp)
 
 DiskHandle FileGetCurrentPath(char *buffer, word bufferSize)
 {
-    KPath *cur = CurPath();
+    KPath *cur = FileCurPath();
 
     if (buffer && bufferSize) {
 	strncpy(buffer, cur->KP_tail, bufferSize - 1);
@@ -773,7 +753,7 @@ void FilePushDir(void)
     KThread *t = ThreadOf(KernelThisThread());
     KPath *p;
 
-    CurPath();
+    FileCurPath();
     p = NewPath(t->T_path);
     p->KP_next = t->T_path;
     t->T_path = p;
@@ -943,7 +923,7 @@ DiskHandle FileConstructFullPath(char **buffer, word bufSize,
     } else {
 	if (!disk) {
 	    /* the current path first */
-	    cur = CurPath();
+	    cur = FileCurPath();
 	    real = FPLeading(&f, cur->KP_disk, addDriveLetter);
 	    if (!real)
 		return 0;

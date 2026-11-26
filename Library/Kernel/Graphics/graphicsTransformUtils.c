@@ -190,17 +190,6 @@ Boolean GrRoundToWord(int64_t v, sword *r)
     return i >= -32768 && i <= 32767;
 }
 
-/* the 128-bit product of two magnitudes */
-static void MulU64(uint64_t a, uint64_t b, uint64_t *hi, uint64_t *lo)
-{
-    uint64_t al = a & 0xffffffffUL, ah = a >> 32, bl = b & 0xffffffffUL,
-	     bh = b >> 32, m1 = ah * bl, m2 = al * bh, l = al * bl, c;
-
-    c = (l >> 32) + (m1 & 0xffffffffUL) + (m2 & 0xffffffffUL);
-    *lo = (l & 0xffffffffUL) | (c << 32);
-    *hi = ah * bh + (m1 >> 32) + (m2 >> 32) + (c >> 32);
-}
-
 /*
  * CalcInverse: for a scaled matrix 1/11 and 1/22 (GrReciprocal32), for
  * a rotated one 1 / (11 22 - 12 21) as DDFixed (32.32), its low word
@@ -249,19 +238,6 @@ void GrMatCalcInverse(TMatrix *m)
     m->TM_flags |= TF_INV_VALID;
 }
 
-/* MulDDF: n (1/65536) * inv (1/2^32), in 1/2^32, the magnitude
- * truncated */
-static int64_t MulDDF(int64_t n, int64_t inv)
-{
-    uint64_t a = n < 0 ? (uint64_t) 0 - (uint64_t) n : (uint64_t) n;
-    uint64_t b = inv < 0 ? (uint64_t) 0 - (uint64_t) inv : (uint64_t) inv;
-    uint64_t hi, lo, r;
-
-    MulU64(a, b, &hi, &lo);
-    r = (lo >> 16) | (hi << 48);
-    return ((n < 0) != (inv < 0)) ? -(int64_t) r : (int64_t) r;
-}
-
 /* UnTransCoordFixed: p = p' * m^-1, in 1/65536 */
 void GrMatUntransDWF(TMatrix *m, int64_t *x, int64_t *y)
 {
@@ -279,7 +255,73 @@ void GrMatUntransDWF(TMatrix *m, int64_t *x, int64_t *y)
     } else {
 	int64_t nx = GrMulWD(W(&m->TM_22), dx) - GrMulWD(W(&m->TM_21), dy);
 	int64_t ny = GrMulWD(W(&m->TM_11), dy) - GrMulWD(W(&m->TM_12), dx);
-	*x = (MulDDF(nx, DDF(&m->TM_xInv)) + 0x8000) >> 16;
-	*y = (MulDDF(ny, DDF(&m->TM_yInv)) + 0x8000) >> 16;
+	*x = (GrMulDDF(nx, DDF(&m->TM_xInv)) + 0x8000) >> 16;
+	*y = (GrMulDDF(ny, DDF(&m->TM_yInv)) + 0x8000) >> 16;
     }
+}
+
+/* the element of GrSetTransform and GrApplyTransform */
+static void RecordMatrix(GStateHandle gstate, byte op, const TransMatrix *tm)
+{
+    (void) GrGSRecord(gstate, op, "ddddDD", GR_WWF_D(tm->TM_e11),
+		      GR_WWF_D(tm->TM_e12), GR_WWF_D(tm->TM_e21),
+		      GR_WWF_D(tm->TM_e22), &tm->TM_e31, &tm->TM_e32);
+}
+
+void GrApplyScale(GStateHandle gstate, WWFixedAsDWord xScale,
+		  WWFixedAsDWord yScale)
+{
+    GState *gs;
+
+    (void) GrGSRecord(gstate, GR_APPLY_SCALE, "dd", xScale, yScale);
+    if (xScale == 0x10000UL && yScale == 0x10000UL)
+	return;
+    gs = MemLock(gstate);
+    GrInvalidateFont(gs);
+    GrMatScale(&gs->GS_TMatrix, xScale, yScale);
+    GrExitTrans(gstate, gs);
+}
+
+void GrApplyRotation(GStateHandle gstate, WWFixedAsDWord angle)
+{
+    GState *gs = MemLock(gstate);
+
+    (void) GrGSRecord(gstate, GR_APPLY_ROTATION, "d", angle);
+    GrInvalidateFont(gs);
+    GrMatRotate(&gs->GS_TMatrix, angle);
+    GrExitTrans(gstate, gs);
+}
+
+void GrSetTransform(GStateHandle gstate, const TransMatrix *tm)
+{
+    GState *gs = MemLock(gstate);
+
+    RecordMatrix(gstate, GR_SET_TRANSFORM, tm);
+    GrInvalidateFont(gs);
+    GrMatFromTransMatrix(&gs->GS_TMatrix, tm);
+    GrExitTrans(gstate, gs);
+}
+
+/* GS_TMatrix = tm * GS_TMatrix (TMatrixPreMul) */
+void GrApplyTransform(GStateHandle gstate, const TransMatrix *tm)
+{
+    GState *gs = MemLock(gstate);
+    TMatrix m;
+
+    RecordMatrix(gstate, GR_APPLY_TRANSFORM, tm);
+    GrInvalidateFont(gs);
+    GrMatFromTransMatrix(&m, tm);
+    GrMatMul(&gs->GS_TMatrix, &m, &gs->GS_TMatrix);
+    GrMatSetFlags(&gs->GS_TMatrix);
+    GrExitTrans(gstate, gs);
+}
+
+void GrSetNullTransform(GStateHandle gstate)
+{
+    GState *gs = MemLock(gstate);
+
+    (void) GrGSRecord(gstate, GR_SET_NULL_TRANSFORM, "");
+    GrInvalidateFont(gs);
+    GrMatIdentity(&gs->GS_TMatrix);
+    GrExitTrans(gstate, gs);
 }

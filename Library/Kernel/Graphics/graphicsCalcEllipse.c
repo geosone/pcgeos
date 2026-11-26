@@ -22,14 +22,6 @@
 #include "graphicsInt.h"
 #include <stdlib.h>
 
-typedef struct {
-    Point	p1, p2, p3, p4;		/* the box's corners, doubled */
-    Point	J;			/* center */
-    Point	P, Q;			/* conjugate radii */
-    sdword	centerX, centerY;	/* EF_center, WWFixed, not doubled */
-    GrConic	conic;
-} Frame;
-
 static Boolean Double(sword *v)
 {
     if (*v > 0x3fff || *v < -0x4000)
@@ -55,63 +47,9 @@ static void Avg(sword ax, sword bx, sword *cx, sword *dx)
     *dx = (sword) (bx + ((sword) (*dx - bx) >> 1));
 }
 
-static Boolean Rotated(const GrDraw *d)
+Boolean GrRotated(const GrDraw *d)
 {
     return (Boolean) ((d->GD_w->W_curTMatrix.TM_flags & TM_ROTATED) != 0);
-}
-
-/* EllipseTrivialReject: C_bounds (doubled), and the bounds (not
- * doubled) with the top and bottom clipped to the mask; TRUE: outside */
-static Boolean TrivialReject(const GrDraw *d, Frame *f, Rectangle *r)
-{
-    sword ax = f->p1.P_x, bx = f->p1.P_y, cx, dx;
-    const Point *p[3];
-    int i;
-
-    if (!Rotated(d)) {
-	cx = f->p3.P_x;
-	dx = f->p3.P_y;
-	if (ax > cx) {
-	    sword s = ax; ax = cx; cx = s;
-	}
-	if (bx > dx) {
-	    sword s = bx; bx = dx; dx = s;
-	}
-    } else {
-	cx = ax;
-	dx = bx;
-	p[0] = &f->p2; p[1] = &f->p3; p[2] = &f->p4;
-	for (i = 0; i < 3; i++) {
-	    if (ax >= p[i]->P_x)		/* CheckXMinMax */
-		ax = p[i]->P_x;
-	    else if (cx < p[i]->P_x)
-		cx = p[i]->P_x;
-	    if (bx >= p[i]->P_y)		/* CheckYMinMax */
-		bx = p[i]->P_y;
-	    else if (dx < p[i]->P_y)
-		dx = p[i]->P_y;
-	}
-    }
-    f->conic.C_bounds.R_left = ax;
-    f->conic.C_bounds.R_top = bx;
-    f->conic.C_bounds.R_right = cx;
-    f->conic.C_bounds.R_bottom = dx;
-    ax >>= 1; bx >>= 1; cx >>= 1; dx >>= 1;
-    if (d->GD_w) {
-	const Rectangle *m = &d->GD_w->W_maskRect;
-	if (ax > m->R_right || cx < m->R_left || bx > m->R_bottom ||
-	    dx < m->R_top)
-	    return TRUE;
-	if (bx < m->R_top)
-	    bx = m->R_top;
-	if (dx > m->R_bottom)
-	    dx = m->R_bottom;
-    }
-    r->R_left = ax;
-    r->R_top = bx;
-    r->R_right = cx;
-    r->R_bottom = dx;
-    return FALSE;
 }
 
 /* ConjugateEllipse: the coefficients from P and Q; FALSE when they are
@@ -300,7 +238,7 @@ sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
     f.J.P_y = f.conic.C_center.P_y = dx;
     f.centerX = (sdword) cx << 15;
     f.centerY = (sdword) dx << 15;
-    if (!(flags & GR_CEF_DONT_TRANSFORM) && Rotated(d)) {
+    if (!(flags & GR_CEF_DONT_TRANSFORM) && GrRotated(d)) {
 	/* the radii to the midpoints of the transformed box's sides */
 	ax = r; bx = t; cx = l; dx = b;
 	if (!TransDouble(d, flags, &ax, &bx, &cx, &dx))
@@ -328,7 +266,7 @@ sword *GrCalcEllipse(const GrDraw *d, sword l, sword t, sword r, sword b,
 	Setup3PointArc(d, &f, type, ap);
     else
 	SetupArc(d, &f, type, ap);
-    if (TrivialReject(d, &f, &rb))
+    if (GrOutputTrivialReject(d, &f, &rb))
 	return NULL;
     {
 	sdword lw = (sdword) (((dword) (word) d->GD_gs->GS_lineWidth.WWF_int

@@ -22,28 +22,6 @@
 #define BEZIER_POINT_TOLERANCE	2	/* grWinInt.def, pixels */
 #define BEZIER_MAX_DEPTH	10
 
-typedef struct {
-    sword	*SP_pts;	/* device x, y pairs */
-    word	SP_count;
-    word	SP_size;
-} SplinePoly;
-
-static Boolean AddPoint(SplinePoly *p, sdword x, sdword y)
-{
-    if (p->SP_count + 2 > p->SP_size) {	/* and room for SEPARATOR */
-	word n = (word) (p->SP_size ? p->SP_size * 2 : 64);
-	sword *np = realloc(p->SP_pts, (size_t) n * 2 * sizeof(sword));
-	if (!np)
-	    return FALSE;
-	p->SP_pts = np;
-	p->SP_size = n;
-    }
-    p->SP_pts[2 * p->SP_count] = (sword) ((x + 128) >> 8);
-    p->SP_pts[2 * p->SP_count + 1] = (sword) ((y + 128) >> 8);
-    p->SP_count++;
-    return TRUE;
-}
-
 static sdword Abs(sdword v)
 {
     return v < 0 ? -v : v;
@@ -79,7 +57,7 @@ static Boolean Bezier(SplinePoly *poly, const sdword *p, int depth)
 	flat = (Boolean) (NearLine(&p[0], &p[6], &p[2]) &&
 			  NearLine(&p[0], &p[6], &p[4]));
     if (flat || depth >= BEZIER_MAX_DEPTH)
-	return AddPoint(poly, p[6], p[7]);
+	return GrSplineAddPoint(poly, p[6], p[7]);
     for (i = 0; i < 2; i++) {			/* DivideCurve */
 	sdword p01 = (p[i] + p[2 + i]) / 2, p12 = (p[2 + i] + p[4 + i]) / 2;
 	sdword p23 = (p[4 + i] + p[6 + i]) / 2;
@@ -112,7 +90,7 @@ sword *GrSplineDevPoints(const GrDraw *d, const Point *points, word n,
     dev = GrSeparatorFormat(d, points, n, FALSE, &i);
     if (!dev)
 	return NULL;
-    if (AddPoint(&poly, (sdword) dev[0] << 8, (sdword) dev[1] << 8)) {
+    if (GrSplineAddPoint(&poly, (sdword) dev[0] << 8, (sdword) dev[1] << 8)) {
 	for (i = 0; i + 3 < n; i += 3) {
 	    sdword p[8];
 	    int k;

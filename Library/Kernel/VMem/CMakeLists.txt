@@ -7,5 +7,6 @@ target_sources(geos_kernel_objs PRIVATE
   vmemBlkManip.c
   vmemHeader.c
   vmemHigh.c
+  vmemKernelHigh.c
   vmemChain.c
   vmemHugeArray.c)

@@ -445,3 +445,11 @@ Boolean IniSection(const char *s, word len, word index, word *start,
 	}
     }
 }
+
+void VInitFile(void)
+{
+    if (--iniNesting == 0) {
+	iniOwner = 0;
+	KSemV(&iniSem);
+    }
+}

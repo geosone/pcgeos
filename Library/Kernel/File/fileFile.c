@@ -392,3 +392,38 @@ word FileMoveLocal(const TCHAR *source, const TCHAR *dest,
 {
     return CopyMove(source, dest, sourceDisk, destDisk, TRUE, TRUE);
 }
+
+#define EA_REST	16
+
+static word ByPath(const TCHAR *path, FileExtendedAttribute attr,
+		   void *buffer, word bufSize, Boolean set)
+{
+    char dp[FILE_DISK_PATH_SIZE];
+    FSDDisk *d = FileLocate(0, path, dp, sizeof(dp));
+    FileExtAttrDesc rest[EA_REST];
+    MemHandle mh = 0;
+    word e;
+
+    if (!d)
+	return ThreadGetError();
+    if (!set && FileDiskAttr(d, attr, &buffer, &bufSize, rest, &mh, &e))
+	return FileEADone(e);
+    e = FSD_OF(d)->FSD_pathExtAttrs(d, dp, attr, buffer, bufSize, set);
+    if (mh)
+	MemFree(mh);
+    if (set && !e)
+	FileNotify(FCNT_ATTRIBUTES, d, FileIDOf(d, dp));
+    return FileEADone(e);
+}
+
+word FileGetPathExtAttributes(const TCHAR *path, FileExtendedAttribute attr,
+			      void *buffer, word bufSize)
+{
+    return ByPath(path, attr, buffer, bufSize, FALSE);
+}
+
+word FileSetPathExtAttributes(const TCHAR *path, FileExtendedAttribute attr,
+			      const void *buffer, word bufSize)
+{
+    return ByPath(path, attr, (void *) buffer, bufSize, TRUE);
+}

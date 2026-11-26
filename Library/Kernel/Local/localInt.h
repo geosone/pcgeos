@@ -114,4 +114,7 @@ Boolean LocalIsLegalFormatChar(wchar ch, DateTimeFormat format);
  * too) */
 Boolean LocalInCharGroup(wchar ch, word id);
 
+/* dateTimeFields.c and dateTimeFormat.c */
+void LocalFromTDAT(LocalDateTime *dt, const TimerDateAndTime *t);
+
 #endif

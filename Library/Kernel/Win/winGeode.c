@@ -156,3 +156,20 @@ void WinGeodeSetActiveWin(GeodeHandle gh, WindowHandle win)
     WinPtrImageV();
     WinTreeV();
 }
+
+/* the geode the mouse is down in, if any (wActiveGeode); under the tree
+ * lock and ptrImageSem */
+GeodeHandle winActiveGeode;
+
+/* WinSysSetActiveGeode: the geode the mouse is down in, if any */
+void WinSysSetActiveGeode(GeodeHandle gh)
+{
+    WinTreeP();
+    WinPtrImageP();
+    if (gh != winActiveGeode) {
+	winActiveGeode = gh;
+	WinUpdatePtrImages();
+    }
+    WinPtrImageV();
+    WinTreeV();
+}

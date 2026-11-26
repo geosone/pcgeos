@@ -229,3 +229,73 @@ void GrDrawPointAtCP(GStateHandle gstate)
 	GrFillRectLow(&d, dx, dy, dx, dy, AREA);
     GrExitGraphics(&d);
 }
+
+/* EllipseTrivialReject: C_bounds (doubled), and the bounds (not
+ * doubled) with the top and bottom clipped to the mask; TRUE: outside */
+Boolean GrOutputTrivialReject(const GrDraw *d, Frame *f, Rectangle *r)
+{
+    sword ax = f->p1.P_x, bx = f->p1.P_y, cx, dx;
+    const Point *p[3];
+    int i;
+
+    if (!GrRotated(d)) {
+	cx = f->p3.P_x;
+	dx = f->p3.P_y;
+	if (ax > cx) {
+	    sword s = ax; ax = cx; cx = s;
+	}
+	if (bx > dx) {
+	    sword s = bx; bx = dx; dx = s;
+	}
+    } else {
+	cx = ax;
+	dx = bx;
+	p[0] = &f->p2; p[1] = &f->p3; p[2] = &f->p4;
+	for (i = 0; i < 3; i++) {
+	    if (ax >= p[i]->P_x)		/* CheckXMinMax */
+		ax = p[i]->P_x;
+	    else if (cx < p[i]->P_x)
+		cx = p[i]->P_x;
+	    if (bx >= p[i]->P_y)		/* CheckYMinMax */
+		bx = p[i]->P_y;
+	    else if (dx < p[i]->P_y)
+		dx = p[i]->P_y;
+	}
+    }
+    f->conic.C_bounds.R_left = ax;
+    f->conic.C_bounds.R_top = bx;
+    f->conic.C_bounds.R_right = cx;
+    f->conic.C_bounds.R_bottom = dx;
+    ax >>= 1; bx >>= 1; cx >>= 1; dx >>= 1;
+    if (d->GD_w) {
+	const Rectangle *m = &d->GD_w->W_maskRect;
+	if (ax > m->R_right || cx < m->R_left || bx > m->R_bottom ||
+	    dx < m->R_top)
+	    return TRUE;
+	if (bx < m->R_top)
+	    bx = m->R_top;
+	if (dx > m->R_bottom)
+	    dx = m->R_bottom;
+    }
+    r->R_left = ax;
+    r->R_top = bx;
+    r->R_right = cx;
+    r->R_bottom = dx;
+    return FALSE;
+}
+
+void GrDrawHLineTo(GStateHandle gstate, sword x)
+{
+    XYValueAsDWord p = GrGetCurPos(gstate);
+
+    (void) GrGSRecord(gstate, GR_DRAW_HLINE_TO, "w", x);
+    GrLineToLow(gstate, x, DWORD_Y(p));
+}
+
+void GrDrawVLineTo(GStateHandle gstate, sword y)
+{
+    XYValueAsDWord p = GrGetCurPos(gstate);
+
+    (void) GrGSRecord(gstate, GR_DRAW_VLINE_TO, "w", y);
+    GrLineToLow(gstate, DWORD_X(p), y);
+}

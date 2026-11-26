@@ -346,4 +346,104 @@ void GrFieldEncode(const GDF_saved *f, byte *e);
 void GrFieldDecode(const byte *e, GDF_saved *f);
 int64_t GrWBF64(const WBFixed *w);
 
+typedef struct {
+    Point	p1, p2, p3, p4;		/* the box's corners, doubled */
+    Point	J;			/* center */
+    Point	P, Q;			/* conjugate radii */
+    sdword	centerX, centerY;	/* EF_center, WWFixed, not doubled */
+    GrConic	conic;
+} Frame;
+
+typedef struct {
+    GrDraw		*d;
+    const Bitmap	*bm;		/* BF_origBM */
+    Bitmap *(*cb)(Bitmap *bm);	/* BF_cbFunc */
+    Boolean		fill;		/* BMOT_FILL_MASK */
+    byte		devType;	/* BF_deviceType */
+    sword		x, y;		/* BF_drawPoint */
+    sword		errX, errY;	/* BF_drawPointErrorX/Y */
+    PutBitsArgs		args;		/* BF_args */
+    byte		pal[256 * 3];
+    VMFileHandle	hfile;		/* a huge bitmap: its array */
+    VMBlockHandle	hblock;
+    const byte		*hdata;		/* the locked slice */
+    word		hfirst, hn;	/* its scan lines */
+    /* format conversion (BMOT_FORMAT) */
+    Boolean		conv;
+    byte		srcType;	/* BF_origBMtype, simple */
+    byte		convTab[256];	/* BF_formatPtr: index to SDM or
+					 * index */
+    const byte		*cur;		/* the window's palette (RGB to
+					 * index) */
+    Handle		curWin;
+    word		curLast;
+    word		fscan;		/* BF_formatScan */
+    byte		*cbuf;
+    dword		csize;
+    /* GrDrawImage */
+    ImageFlags		image;		/* BF_imageFlags; 0: a bitmap */
+    word		bump;		/* BF_ybump: a pixel's size */
+    const byte		*imgPal;	/* the bitmap's palette (RGB) */
+    word		imgPalN;
+} BMFrame;
+
+typedef struct {
+    sword	*SP_pts;	/* device x, y pairs */
+    word	SP_count;
+    word	SP_size;
+} SplinePoly;
+
+/* graphicsInit.c */
+void GrInitFontDriver(GeodeHandle gh);
+
+/* graphicsBitmapCreate.c and graphicsRasterUtils.c */
+WWFixedAsDWord GrRatio(word a, word b);
+void *GrLockBitmap(GStateHandle gstate, VMFileHandle *file,
+	VMBlockHandle *block);
+
+/* graphicsCalcEllipse.c and graphicsOutput.c */
+Boolean GrRotated(const GrDraw *d);
+Boolean GrOutputTrivialReject(const GrDraw *d, Frame *f, Rectangle *r);
+
+/* graphicsChars.c and graphicsTextObscure.c */
+void GrRecalcKern(GState *gs);
+
+/* graphicsLine.c and graphicsOutput.c */
+void GrLineToLow(GStateHandle gstate, sword x, sword y);
+
+/* graphicsLineStyles.c and graphicsLine.c */
+const byte *GrDashPairs(const GState *gs);
+void GrScaleDashLengths(const GrDraw *d, const DashInfo *di,
+	WWFixed *patt);
+
+/* graphicsMath.c and graphicsMathObscure.c */
+uint32_t GrAbs32(sdword v);
+
+/* graphicsPath.c and graphicsRegion.c */
+void GrFreePath(GStateHandle gstate, GetPathType ptype);
+void GrPathSetClip(GStateHandle gstate, GetPathType ptype,
+	PathCombineType params, RegionFillRule rule);
+
+/* graphicsRaster.c and graphicsBitmapHuge.c */
+Boolean GrPathRect(GStateHandle gstate, Boolean atCP, sword x, sword y,
+	XYValueAsDWord size);
+void GrBitmapDraw(BMFrame *f, sword x, sword y);
+void GrBitmapDoneConvert(BMFrame *f);
+
+/* graphicsSpline.c and graphicsCalcConic.c */
+Boolean GrSplineAddPoint(SplinePoly *p, sdword x, sdword y);
+
+/* graphicsStringStore.c and graphicsString.c */
+GStateHandle GrAllocGString(Handle han, GStringType type, word *block,
+	word flags);
+
+/* graphicsTransform.c and graphicsTransformUtils.c */
+void GrExitTrans(GStateHandle gstate, GState *gs);
+
+/* graphicsTransformUtils.c and graphicsMathObscure.c */
+int64_t GrMulDDF(int64_t n, int64_t inv);
+
+/* graphicsUtils.c and graphicsState.c */
+void GrSetPen(GState *gs, int64_t x, int64_t y);
+
 #endif

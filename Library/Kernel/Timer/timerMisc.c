@@ -193,3 +193,9 @@ TimerFileDateTime TimerGetFileDateTime(void)
     r.TFDT_fileTime = (word) (fdat >> 16);
     return r;
 }
+
+dword TimerGetCount(void)
+{
+    KernelPreemptPoint();
+    return KernelTicks();
+}

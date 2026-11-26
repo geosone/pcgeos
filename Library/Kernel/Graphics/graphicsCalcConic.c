@@ -552,3 +552,19 @@ sword *GrCalcConic(GrConic *c, word *count)
     *count = f.points;
     return f.buf;
 }
+
+Boolean GrSplineAddPoint(SplinePoly *p, sdword x, sdword y)
+{
+    if (p->SP_count + 2 > p->SP_size) {	/* and room for SEPARATOR */
+	word n = (word) (p->SP_size ? p->SP_size * 2 : 64);
+	sword *np = realloc(p->SP_pts, (size_t) n * 2 * sizeof(sword));
+	if (!np)
+	    return FALSE;
+	p->SP_pts = np;
+	p->SP_size = n;
+    }
+    p->SP_pts[2 * p->SP_count] = (sword) ((x + 128) >> 8);
+    p->SP_pts[2 * p->SP_count + 1] = (sword) ((y + 128) >> 8);
+    p->SP_count++;
+    return TRUE;
+}

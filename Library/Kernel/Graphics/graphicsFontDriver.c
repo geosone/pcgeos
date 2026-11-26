@@ -1,9 +1,8 @@
 /*
  * graphicsFontDriver.c -- the kernel's side of the font drivers (after
  * graphicsFontDriver.asm: FontDrGetMaxBufSize, FontDrCharDataSize,
- * FontDrFindOutlineData, GrCallFontDriver; GrCallFontDriverID of
- * graphicsChars.asm; GrInitFontDriver of graphicsInit.asm; LoadFontDriver
- * of bootInitfile.asm).
+ * FontDrFindOutlineData, GrCallFontDriver; LoadFontDriver of
+ * bootInitfile.asm).
  *
  * A font driver is a geode of type DRIVER_TYPE_FONT whose
  * FontDriverInfoStruct names its maker.  The kernel loads the drivers of
@@ -80,26 +79,6 @@ OutlineEntry *FontDrFindOutlineData(FontInfo *fi, TextStyle style,
 	   part == ODF_PART1 ? &best->ODE_first : &best->ODE_second;
 }
 
-Boolean GrCallFontDriverID(FontMaker maker, word function, DriverRegs *r)
-{
-    word size, i;
-    DriversAvailEntry *d;
-    FontDriverStrategy *strat = NULL;
-    Boolean carry = TRUE;
-
-    if (!grFontBlock)
-	return TRUE;
-    FontDrLockInfoBlock();
-    d = GrFontChunk(FONT_DRIVERS_HANDLE, &size);
-    for (i = 0; i < size / sizeof(DriversAvailEntry); i++)
-	if (d[i].DAE_makerID == maker)
-	    strat = d[i].DAE_strategy;
-    if (strat)
-	carry = strat(function, r);
-    FontDrUnlockInfoBlock();
-    return carry;
-}
-
 /* GrCallFontDriver: the driver of the GState's font */
 Boolean GrCallFontDriver(GStateHandle gstate, word function, DriverRegs *r)
 {
@@ -111,35 +90,6 @@ Boolean GrCallFontDriver(GStateHandle gstate, word function, DriverRegs *r)
     maker = fb->FB_maker;
     FontDrUnlockFont(gstate);
     return GrCallFontDriverID(maker, function, r);
-}
-
-/* GrInitFontDriver: a loaded font driver into the info block, and its
- * fonts */
-void GrInitFontDriver(GeodeHandle gh)
-{
-    const FontDriverInfoStruct *fdis =
-	(const FontDriverInfoStruct *) GeodeInfoDriver(gh);
-    DriversAvailEntry *d;
-    DriverRegs r;
-    word size;
-
-    if (!grFontBlock || !fdis ||
-	fdis->FDIS_common.DIS_driverType != DRIVER_TYPE_FONT)
-	return;
-    FontDrLockInfoBlock();
-    size = LMemGetChunkSizeHandles(grFontBlock, FONT_DRIVERS_HANDLE);
-    LMemReAllocHandles(grFontBlock, FONT_DRIVERS_HANDLE,
-		       (word) (size + sizeof(DriversAvailEntry)));
-    d = (DriversAvailEntry *) ((byte *) GrFontChunk(FONT_DRIVERS_HANDLE,
-						    NULL) + size);
-    d->DAE_makerID = fdis->FDIS_maker;
-    d->DAE_driverHandle = gh;
-    d->DAE_strategy = (FontDriverStrategy *) DriverStrategyOf(
-	&fdis->FDIS_common);
-    memset(&r, 0, sizeof(r));
-    r.DR_bx = grFontBlock;
-    (void) d->DAE_strategy(DR_FONT_INIT_FONTS, &r);
-    FontDrUnlockInfoBlock();
 }
 
 /* LoadFontDriver: the drivers of [system] font, each name in turn */
@@ -169,4 +119,13 @@ void GrLoadFontDrivers(void)
 	    GrInitFontDriver(gh);
     }
     FilePopDir();
+}
+
+FontInfo *FontDrFindFontInfo(void *infoBlock, FontID id)
+{
+    FontsAvailEntry *fa;
+
+    (void) infoBlock;
+    fa = GrFontAvailEntry(id);
+    return fa ? GrFontChunk(fa->FAE_infoHandle, NULL) : NULL;
 }

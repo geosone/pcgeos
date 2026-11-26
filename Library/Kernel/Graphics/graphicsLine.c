@@ -133,7 +133,7 @@ void GrDrawVLine(GStateHandle gstate, sword x, sword y1, sword y2)
 
 /* from the pen (in the device) to x, y; a fat line from the pen in
  * document coordinates */
-static void LineTo(GStateHandle gstate, sword x, sword y)
+void GrLineToLow(GStateHandle gstate, sword x, sword y)
 {
     GrDraw d;
     sword px, py, dx, dy;
@@ -160,23 +160,7 @@ static void LineTo(GStateHandle gstate, sword x, sword y)
 void GrDrawLineTo(GStateHandle gstate, sword x, sword y)
 {
     (void) GrGSRecord(gstate, GR_DRAW_LINE_TO, "ww", x, y);
-    LineTo(gstate, x, y);
-}
-
-void GrDrawHLineTo(GStateHandle gstate, sword x)
-{
-    XYValueAsDWord p = GrGetCurPos(gstate);
-
-    (void) GrGSRecord(gstate, GR_DRAW_HLINE_TO, "w", x);
-    LineTo(gstate, x, DWORD_Y(p));
-}
-
-void GrDrawVLineTo(GStateHandle gstate, sword y)
-{
-    XYValueAsDWord p = GrGetCurPos(gstate);
-
-    (void) GrGSRecord(gstate, GR_DRAW_VLINE_TO, "w", y);
-    LineTo(gstate, DWORD_X(p), y);
+    GrLineToLow(gstate, x, y);
 }
 
 /* the pen moves by x, y (through the GState's 2x2 part) */
@@ -195,4 +179,76 @@ void GrDrawRelLineTo(GStateHandle gstate, WWFixedAsDWord x, WWFixedAsDWord y)
     if (ok && GrGetDevPenPos(&d, &nx, &ny))
 	GrDrawLineLow(&d, px, py, nx, ny, LINE);
     GrExitGraphics(&d);
+}
+
+/* SqrRootDWordLine: the square root of n, WWFixed */
+static sdword SqrtLine(dword n)
+{
+    word r, b, rem;
+    dword sq;
+
+    if ((n >> 16) >= 0x1fff) {		/* the asm gave up; 64 bits here */
+	dword x = 0, bit = 1UL << 30;
+	while (bit > n)
+	    bit >>= 2;
+	while (bit) {
+	    if (n >= x + bit) {
+		n -= x + bit;
+		x = (x >> 1) + bit;
+	    } else
+		x >>= 1;
+	    bit >>= 2;
+	}
+	return (sdword) (x << 16);
+    }
+    r = (word) (n / ((n >> 24) ? 8192 : 300) + 2);
+    for (;;) {
+	b = r;
+	r = (word) ((n / b + b) >> 1);
+	if (r == b || (word) (b - r) == 1 || (word) (b - r) == 0xffff)
+	    break;
+    }
+    for (;;) {
+	sq = (dword) r * r;
+	if (sq > n && ((sq - n) >> 16) > 0) {	/* aWeirdCase */
+	    r--;
+	    continue;
+	}
+	break;
+    }
+    rem = (word) (n - sq);
+    return (sdword) (((dword) r << 16) |
+		     (word) GrUDivWWFixed((dword) rem << 16, (dword) r << 17));
+}
+
+/* ScaleDashLengths, CalcDistance */
+void GrScaleDashLengths(const GrDraw *d, const DashInfo *di,
+			     WWFixed *patt)
+{
+    const GState *gs = d->GD_gs;
+    word ax = (word) (di->DI_pt1.P_x - di->DI_pt2.P_x);
+    word bx = (word) (di->DI_pt1.P_y - di->DI_pt2.P_y);
+    sdword ratio, mul;
+    word i, s;
+
+    if ((sword) ax < 0)
+	ax = (word) -ax;
+    if ((sword) bx < 0)
+	bx = (word) -bx;
+    if (ax < bx) {
+	s = ax; ax = bx; bx = s;
+    }
+    ratio = (sdword) GrSDivWWFixed((dword) ax << 16,
+				   (WWFixedAsDWord) SqrtLine((dword) ax * ax +
+							     (dword) bx * bx));
+    s = GrScaleScalar(d, 256L << 16);	/* the width's scale, 8.8 */
+    mul = (sdword) GrMulWWFixed((WWFixedAsDWord) ratio, (dword) s << 8);
+    for (i = 0; i < 2 * gs->GS_numOfDashPairs; i++) {
+	sdword v = (sdword) GrMulWWFixed((WWFixedAsDWord) mul,
+					 (dword) GrDashPairs(gs)[i] << 16);
+	if (!v)
+	    v = 1L << 16;
+	patt[i].WWF_int = (sword) (v >> 16);
+	patt[i].WWF_frac = (word) v;
+    }
 }

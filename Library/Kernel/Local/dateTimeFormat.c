@@ -202,3 +202,38 @@ void LocalNormalizeDateTime(TimerDateAndTime *destTDAT,
 							 d.TDAT_day);
     *destTDAT = d;
 }
+
+/* LocalFormatDateTime: in one of the standard formats */
+word LocalFormatDateTime(char *str, DateTimeFormat format,
+			 const TimerDateAndTime *dateTime)
+{
+    LocalDateTime dt;
+    word n;
+
+    LocalFromTDAT(&dt, dateTime);
+    LocalLockStrings();
+    n = LocalDateTimeFieldFormat(str, LocalString((word) (LS_DateLong + format)),
+				 &dt);
+    LocalUnlockStrings();
+    return n;
+}
+
+/* LocalFormatFileDateTime: of a FileDateAndTime (the date in the low
+ * word, the time in the high one) */
+word LocalFormatFileDateTime(char *str, DateTimeFormat format,
+			     const FileDateAndTime *dateTime)
+{
+    TimerDateAndTime t;
+    word date = (word) *dateTime, time = (word) (*dateTime >> 16);
+
+    t.TDAT_year = (word) (((date & FD_YEAR) >> FD_YEAR_OFFSET) + 1980);
+    t.TDAT_month = (word) ((date & FD_MONTH) >> FD_MONTH_OFFSET);
+    t.TDAT_day = (word) (date & FD_DAY);
+    t.TDAT_hours = (word) ((time & FT_HOUR) >> FT_HOUR_OFFSET);
+    t.TDAT_minutes = (word) ((time & FT_MINUTE) >> FT_MINUTE_OFFSET);
+    t.TDAT_seconds = (word) ((time & FT_2SECOND) << 1);
+    t.TDAT_dayOfWeek = (DayOfTheWeek) LocalCalcDayOfWeek(t.TDAT_year,
+							 t.TDAT_month,
+							 t.TDAT_day);
+    return LocalFormatDateTime(str, format, &t);
+}

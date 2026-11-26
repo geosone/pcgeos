@@ -44,14 +44,14 @@
  * The process and its state file
  * ------------------------------------------------------------------- */
 
-static GeodeHandle Process(void)
+GeodeHandle ObjCurProcess(void)
 {
     return GeodeGetProcessHandle();
 }
 
 static GeodeCore *CoreOfProcess(void)
 {
-    GeodeCore *c = GeodeCoreOf(Process());
+    GeodeCore *c = GeodeCoreOf(ObjCurProcess());
 
     if (!c)
 	KernelFatal(GEODE_NOT_LOADED);
@@ -169,7 +169,7 @@ static MemHandle TakeBlock(VMFileHandle file, VMBlockHandle vb)
 
     if (!VMInfo(file, vb, &info) || !info.size)
 	return 0;			/* written before a crash */
-    return VMDetach(file, vb, Process());
+    return VMDetach(file, vb, ObjCurProcess());
 }
 
 /* AllocAllSavedBlocks: the saved blocks of one thread */
@@ -255,7 +255,7 @@ static Boolean Detachable(MemHandle mh)
 
 static void RestoreResources(VMFileHandle file)
 {
-    GeodeHandle gh = Process();
+    GeodeHandle gh = ObjCurProcess();
     MemHandle mh, sb;
     VMBlockHandle vb;
     word res;
@@ -277,7 +277,7 @@ static void RestoreResources(VMFileHandle file)
 Boolean ObjAssocVMFile(VMFileHandle file, MemHandle *extra)
 {
     GeodeCore *c = CoreOfProcess();
-    ThreadHandle app = FirstThread(Process());
+    ThreadHandle app = FirstThread(ObjCurProcess());
     VMBlockHandle vb;
     Handle sb;
 
@@ -457,7 +457,7 @@ void ObjDisassocVMFile(void)
 {
     GeodeCore *c = CoreOfProcess();
     VMFileHandle file = c->GC_vmHandle;
-    GeodeHandle gh = Process();
+    GeodeHandle gh = ObjCurProcess();
     MemHandle mh;
     Handle sb;
     word res;
@@ -514,36 +514,3 @@ void ObjSaveExtraStateBlock(MemHandle mh)
  * Saved blocks and their VM blocks
  * ------------------------------------------------------------------- */
 
-VMBlockHandle ObjMapSavedToState(MemHandle mh)
-{
-    GeodeCore *c;
-    Handle sb;
-    VMBlockHandle vb = 0;
-
-    GeodeLock();
-    c = GeodeCoreOf(MemOwner(mh));
-    for (sb = c ? c->GC_savedBlocks : 0; sb; sb = HandleEntryOf(sb)->HE_next)
-	if (HandleEntryOf(sb)->HE_otherInfo == mh) {
-	    vb = (VMBlockHandle) HandleEntryOf(sb)->HE_size;
-	    break;
-	}
-    GeodeUnlock();
-    return vb;
-}
-
-MemHandle ObjMapStateToSaved(VMBlockHandle vmbh, GeodeHandle gh)
-{
-    GeodeCore *c;
-    Handle sb;
-    MemHandle mh = 0;
-
-    GeodeLock();
-    c = GeodeCoreOf(gh ? gh : Process());
-    for (sb = c ? c->GC_savedBlocks : 0; sb; sb = HandleEntryOf(sb)->HE_next)
-	if ((VMBlockHandle) HandleEntryOf(sb)->HE_size == vmbh) {
-	    mh = (MemHandle) HandleEntryOf(sb)->HE_otherInfo;
-	    break;
-	}
-    GeodeUnlock();
-    return mh;
-}

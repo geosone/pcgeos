@@ -1,6 +1,7 @@
 /*
  * bootInit.c -- starting the kernel (after InitGeos and
- * ProcessCommandLine of bootInit.asm, LoadUI of bootInitfile.asm).
+ * ProcessCommandLine of bootInit.asm, LoadUI of bootInitfile.asm; the
+ * drivers of bootInitfile.asm are in bootInitfile.c).
  *
  * The program that runs the kernel (Loader/main.c, as the loader of DOS16
  * GEOS) calls KernelBoot with the host directory of the GEOS top and the
@@ -95,39 +96,6 @@ static void ActiveFile(void)
 	FileClose(fh, TRUE);
 }
 
-/* LoadDriver of bootInitfile.asm: a driver from a standard path */
-static GeodeHandle LoadDriver(const char *name, StandardPath sp,
-			      word major, word minor)
-{
-    GeodeLoadError e;
-    GeodeHandle gh;
-
-    FilePushDir();
-    FileSetStandardPath(sp);
-    gh = GeodeUseDriver(name, major, minor, &e);
-    FilePopDir();
-    return gh;
-}
-
-static void LoadKeyboardDriver(void)
-{
-    char name[FILE_LONGNAME_BUFFER_SIZE];
-    word n;
-    GeodeHandle gh;
-
-    if (InitFileReadStringBuffer("keyboard", "driver", name, sizeof(name),
-				 &n))
-	return;
-    gh = LoadDriver(name, SP_KEYBOARD_DRIVERS, KEYBOARD_PROTO_MAJOR,
-		    KEYBOARD_PROTO_MINOR);
-    if (!gh)
-	gh = LoadDriver("kbd.geo", SP_KEYBOARD_DRIVERS, KEYBOARD_PROTO_MAJOR,
-			KEYBOARD_PROTO_MINOR);
-    if (!gh)
-	KernelFatal(CANNOT_LOAD_KEYBOARD_DRIVER);
-    GeodeSetDefaultDriver(GDDT_KEYBOARD, gh);
-}
-
 /* LoadMemVid: the memory video driver, which draws into bitmaps
  * (GrCreateBitmap), unless "[system] noVidMem = true".  DOS16 found it
  * fatal when it was missing (KR-25); here a GEOS without it (the tests)
@@ -139,7 +107,7 @@ static void LoadMemVid(void)
 
     if (!InitFileReadBoolean("system", "noVidMem", &no) && no)
 	return;
-    gh = LoadDriver("vidmem.geo", SP_VIDEO_DRIVERS, VIDEO_PROTO_MAJOR,
+    gh = BootLoadDriver("vidmem.geo", SP_VIDEO_DRIVERS, VIDEO_PROTO_MAJOR,
 		    VIDEO_PROTO_MINOR);
     if (gh)
 	GeodeSetDefaultDriver(GDDT_MEMORY_VIDEO, gh);
@@ -154,7 +122,7 @@ static void LoadPowerDriver(void)
 
     if (!InitFileReadStringBuffer("system", "power", name, sizeof(name),
 				  &n)) {
-	gh = LoadDriver(name, SP_POWER_DRIVERS, POWER_PROTO_MAJOR,
+	gh = BootLoadDriver(name, SP_POWER_DRIVERS, POWER_PROTO_MAJOR,
 			POWER_PROTO_MINOR);
 	if (gh)
 	    GeodeSetDefaultDriver(GDDT_POWER_MANAGEMENT, gh);
@@ -249,7 +217,7 @@ GeodeHandle KernelBoot(const char *topHostPath, const char *cmdTail,
     GrInitDefaultFont();
     LoadMemVid();
     KernelImInit();
-    LoadKeyboardDriver();
+    BootLoadKeyboardDriver();
     KernelImStart();
     BootLoadUI();
     gh = ProcessCommandLine(cmdTail, &e);

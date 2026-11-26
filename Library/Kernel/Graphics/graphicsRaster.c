@@ -1,5 +1,6 @@
 /*
- * graphicsRaster.c -- drawing bitmaps and GrBitBlt (after
+ * graphicsRaster.c -- drawing bitmaps and GrBitBlt (huge bitmaps in
+ * graphicsBitmapHuge.c, images in graphicsImage.c; after
  * graphicsRaster.asm: GrBitBlt, BltCommon, CalcDestRegion,
  * CalcInvalRegion, GrDrawBitmap, GrDrawBitmapAtCP, GrFillBitmap,
  * GrFillBitmapAtCP, BitmapSetDrawPoint, BMCheckAllocation, InitBitmapPalette, BMCallBack,
@@ -59,39 +60,6 @@
 #define AREA	((word) offsetof(GState, GS_areaAttr))
 #define LINE_ATTR	((word) offsetof(GState, GS_lineAttr))
 #define DEF_BITMAP_RES	72
-
-typedef struct {
-    GrDraw		*d;
-    const Bitmap	*bm;		/* BF_origBM */
-    Bitmap *(*cb)(Bitmap *bm);	/* BF_cbFunc */
-    Boolean		fill;		/* BMOT_FILL_MASK */
-    byte		devType;	/* BF_deviceType */
-    sword		x, y;		/* BF_drawPoint */
-    sword		errX, errY;	/* BF_drawPointErrorX/Y */
-    PutBitsArgs		args;		/* BF_args */
-    byte		pal[256 * 3];
-    VMFileHandle	hfile;		/* a huge bitmap: its array */
-    VMBlockHandle	hblock;
-    const byte		*hdata;		/* the locked slice */
-    word		hfirst, hn;	/* its scan lines */
-    /* format conversion (BMOT_FORMAT) */
-    Boolean		conv;
-    byte		srcType;	/* BF_origBMtype, simple */
-    byte		convTab[256];	/* BF_formatPtr: index to SDM or
-					 * index */
-    const byte		*cur;		/* the window's palette (RGB to
-					 * index) */
-    Handle		curWin;
-    word		curLast;
-    word		fscan;		/* BF_formatScan */
-    byte		*cbuf;
-    dword		csize;
-    /* GrDrawImage */
-    ImageFlags		image;		/* BF_imageFlags; 0: a bitmap */
-    word		bump;		/* BF_ybump: a pixel's size */
-    const byte		*imgPal;	/* the bitmap's palette (RGB) */
-    word		imgPalN;
-} BMFrame;
 
 /* the huge bitmap's slice from scan line first on; FALSE past the end */
 static Boolean HugeSlice(BMFrame *f, word first)
@@ -379,7 +347,6 @@ static void CallConverted(BMFrame *f, word function, DriverRegs *r,
 }
 
 static void ImageSection(BMFrame *f, sword y);
-static void DoneConvert(BMFrame *f);
 
 static void PutBits(BMFrame *f, sword y)
 {
@@ -520,7 +487,7 @@ static Boolean RecordBitmap(GStateHandle gstate, byte op, Boolean atCP,
  * covers (GR_DRAW_RECT; GR_DRAW_RECT_TO from the pen), of its size in
  * points (GrGetBitmapSize; the asm's ScaleBitmapSide multiplied by the
  * resolution over 72 where drawing divides); TRUE if so */
-static Boolean PathRect(GStateHandle gstate, Boolean atCP, sword x, sword y,
+Boolean GrPathRect(GStateHandle gstate, Boolean atCP, sword x, sword y,
 			XYValueAsDWord size)
 {
     GState *gs = MemLock(gstate);
@@ -1062,7 +1029,7 @@ static void DrawRotated(BMFrame *f, sword x, sword y)
     free(src.buf);
 }
 
-static void Draw(BMFrame *f, sword x, sword y)
+void GrBitmapDraw(BMFrame *f, sword x, sword y)
 {
     GrDraw *d = f->d;
     const Bitmap *bm = f->bm;
@@ -1173,9 +1140,6 @@ static void Draw(BMFrame *f, sword x, sword y)
 #ifndef IF_IGNORE_MASK
 #define IF_IGNORE_MASK	0x10
 #endif
-#define IF_HUGE_C	0x40
-
-static const byte imageSizes[] = { 1, 2, 4, 8, 16, 1, 1, 1 };
 
 /* the color of pixel x of a scan line (after the mask) into the area
  * attributes; a key to compare runs with */
@@ -1275,59 +1239,7 @@ static void ImageSection(BMFrame *f, sword sy)
     }
 }
 
-static void DrawImage(GrDraw *d, sword x, sword y, ImageFlags flags,
-		      const Bitmap *bm, VMFileHandle file, VMBlockHandle block)
-{
-    GState *gs = d->GD_gs;
-    CommonAttr area = gs->GS_areaAttr;
-    BMFrame f;
-    void *dir = NULL;
-
-    if (GrTrivialReject(d))
-	return;
-    memset(&f, 0, sizeof(f));
-    f.d = d;
-    f.image = (ImageFlags) (flags | 0x80);	/* IF_DRAW_IMAGE */
-    f.bump = imageSizes[flags & IF_BITSIZE];
-    gs->GS_areaAttr.CA_mapMode |= CMM_MAP_TYPE;
-    if (file) {
-	HugeArrayLockDir(file, block, &dir);
-	bm = (const Bitmap *) ((byte *) dir + sizeof(HugeArrayDirectory));
-	f.hfile = file;
-	f.hblock = block;
-    }
-    f.bm = bm;
-    Draw(&f, x, y);
-    DoneConvert(&f);
-    if (f.hdata)
-	HugeArrayUnlock((void *) f.hdata);
-    if (dir)
-	HugeArrayUnlockDir(dir);
-    gs->GS_areaAttr = area;
-}
-
-void GrDrawImage(GStateHandle gstate, sword x, sword y, ImageFlags flags,
-		 const Bitmap *bm)
-{
-    GrDraw d;
-
-    GrEnterGraphics(gstate, &d);
-    DrawImage(&d, x, y, (ImageFlags) (flags & ~IF_HUGE_C), bm, 0, 0);
-    GrExitGraphics(&d);
-}
-
-void GrDrawHugeImage(GStateHandle gstate, sword x, sword y, ImageFlags flags,
-		     VMFileHandle vmFile, VMBlockHandle vmBlk)
-{
-    GrDraw d;
-
-    GrEnterGraphics(gstate, &d);
-    DrawImage(&d, x, y, (ImageFlags) (flags | IF_HUGE_C), NULL, vmFile,
-	      vmBlk);
-    GrExitGraphics(&d);
-}
-
-static void DoneConvert(BMFrame *f)
+void GrBitmapDoneConvert(BMFrame *f)
 {
     if (f->conv)
 	GrUnlockPalette(f->curWin);
@@ -1346,86 +1258,8 @@ static void DrawBitmap(GrDraw *d, sword x, sword y, const Bitmap *bm,
     f.bm = bm;
     f.cb = cb;
     f.fill = fill;
-    Draw(&f, x, y);
-    DoneConvert(&f);
-}
-
-/* graphicsBitmapHuge.asm: the bitmap in the huge array's directory
- * block (EditableBitmap: EB_bm after the HugeArrayDirectory), one scan
- * line per element */
-static void DrawHuge(GrDraw *d, sword x, sword y, VMFileHandle file,
-		     VMBlockHandle block, Boolean fill)
-{
-    BMFrame f;
-    void *dir;
-
-    if (GrTrivialReject(d))
-	return;
-    memset(&f, 0, sizeof(f));
-    HugeArrayLockDir(file, block, &dir);
-    f.d = d;
-    f.bm = (const Bitmap *) ((byte *) dir + sizeof(HugeArrayDirectory));
-    f.fill = fill;
-    f.hfile = file;
-    f.hblock = block;
-    Draw(&f, x, y);
-    DoneConvert(&f);
-    if (f.hdata)
-	HugeArrayUnlock((void *) f.hdata);
-    HugeArrayUnlockDir(dir);
-}
-
-void GrDrawHugeBitmap(GStateHandle gstate, sword x, sword y,
-		      VMFileHandle vmFile, VMBlockHandle vmBlk)
-{
-    GrDraw d;
-
-    if (PathRect(gstate, FALSE, x, y, GrGetHugeBitmapSize(vmFile, vmBlk)))
-	return;
-    GrEnterGraphics(gstate, &d);
-    GrSetDocPenPos(d.GD_gs, x, y);
-    DrawHuge(&d, x, y, vmFile, vmBlk, FALSE);
-    GrExitGraphics(&d);
-}
-
-void GrFillHugeBitmap(GStateHandle gstate, sword x, sword y,
-		      VMFileHandle vmFile, VMBlockHandle vmBlk)
-{
-    GrDraw d;
-
-    if (PathRect(gstate, FALSE, x, y, GrGetHugeBitmapSize(vmFile, vmBlk)))
-	return;
-    GrEnterGraphics(gstate, &d);
-    GrSetDocPenPos(d.GD_gs, x, y);
-    DrawHuge(&d, x, y, vmFile, vmBlk, TRUE);
-    GrExitGraphics(&d);
-}
-
-static void HugeAtCP(GStateHandle gstate, VMFileHandle vmFile,
-		     VMBlockHandle vmBlk, Boolean fill)
-{
-    XYValueAsDWord pen;
-    GrDraw d;
-
-    if (PathRect(gstate, TRUE, 0, 0, GrGetHugeBitmapSize(vmFile, vmBlk)))
-	return;
-    pen = GrGetCurPos(gstate);
-    GrEnterGraphics(gstate, &d);
-    DrawHuge(&d, (sword) (word) pen, (sword) (word) (pen >> 16), vmFile,
-	     vmBlk, fill);
-    GrExitGraphics(&d);
-}
-
-void GrDrawHugeBitmapAtCP(GStateHandle gstate, VMFileHandle vmFile,
-			  VMBlockHandle vmBlk)
-{
-    HugeAtCP(gstate, vmFile, vmBlk, FALSE);
-}
-
-void GrFillHugeBitmapAtCP(GStateHandle gstate, VMFileHandle vmFile,
-			  VMBlockHandle vmBlk)
-{
-    HugeAtCP(gstate, vmFile, vmBlk, TRUE);
+    GrBitmapDraw(&f, x, y);
+    GrBitmapDoneConvert(&f);
 }
 
 void GrDrawBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
@@ -1433,7 +1267,7 @@ void GrDrawBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 {
     GrDraw d;
 
-    if (PathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
+    if (GrPathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
 	return;
     if (RecordBitmap(gstate, GR_DRAW_BITMAP, FALSE, x, y, bm, callback))
 	callback = NULL;
@@ -1448,7 +1282,7 @@ void GrFillBitmap(GStateHandle gstate, sword x, sword y, const Bitmap *bm,
 {
     GrDraw d;
 
-    if (PathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
+    if (GrPathRect(gstate, FALSE, x, y, GrGetBitmapSize(bm)))
 	return;
     if (RecordBitmap(gstate, GR_FILL_BITMAP, FALSE, x, y, bm, callback))
 	callback = NULL;
@@ -1474,7 +1308,7 @@ static void AtCP(GStateHandle gstate, const Bitmap *bm,
 void GrDrawBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 		      Bitmap *(*callback)(Bitmap *bm))
 {
-    if (PathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
+    if (GrPathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
 	return;
     if (RecordBitmap(gstate, GR_DRAW_BITMAP_CP, TRUE, 0, 0, bm, callback))
 	callback = NULL;
@@ -1484,7 +1318,7 @@ void GrDrawBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 void GrFillBitmapAtCP(GStateHandle gstate, const Bitmap *bm,
 		      Bitmap *(*callback)(Bitmap *bm))
 {
-    if (PathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
+    if (GrPathRect(gstate, TRUE, 0, 0, GrGetBitmapSize(bm)))
 	return;
     if (RecordBitmap(gstate, GR_FILL_BITMAP_CP, TRUE, 0, 0, bm, callback))
 	callback = NULL;

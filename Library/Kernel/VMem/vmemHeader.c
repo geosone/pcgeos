@@ -125,3 +125,13 @@ word VMWriteHeader(KVMFile *f)
     f->VF_hdrDirty = FALSE;
     return 0;
 }
+
+void VMGetHeaderInfo(VMFileHandle file, VMHeaderInfoStruct *vmInfo)
+{
+    KVMFile *f = VMFileOf(file);
+
+    vmInfo->usedBlocks = VHGet16(f, VMH_NUM_USED);
+    vmInfo->headerSize = VHGet16(f, VMH_LAST_HANDLE);
+    vmInfo->freeBlocks = (word) (VHGet16(f, VMH_NUM_UNASSIGNED) +
+				 VHGet16(f, VMH_NUM_ASSIGNED));
+}

@@ -93,7 +93,7 @@ static sword S(const byte *p)
  * ------------------------------------------------------------------- */
 
 /* GrDestroyPath */
-static void FreePath(GStateHandle gstate, GetPathType ptype)
+void GrFreePath(GStateHandle gstate, GetPathType ptype)
 {
     GState *gs = MemLock(gstate);
     ChunkHandle ch = *PathField(gs, ptype);
@@ -117,7 +117,7 @@ void GrBeginPath(GStateHandle gstate, PathCombineType params)
     }
     if (params == PCT_NULL) {
 	MemUnlock(gstate);
-	FreePath(gstate, GPT_CURRENT);
+	GrFreePath(gstate, GPT_CURRENT);
 	return;
     }
     path = GrAllocPathString();
@@ -1124,7 +1124,7 @@ Boolean GrGetPathBounds(GStateHandle gstate, GetPathType ptype,
 
 /* SetClipPathCommon: the current path (its groups with the fill rule)
  * combined into a clip path; the window's mask recalculated */
-static void SetClip(GStateHandle gstate, GetPathType ptype,
+void GrPathSetClip(GStateHandle gstate, GetPathType ptype,
 		    PathCombineType params, RegionFillRule rule)
 {
     GState *gs;
@@ -1132,7 +1132,7 @@ static void SetClip(GStateHandle gstate, GetPathType ptype,
     word size, off;
 
     if (params == PCT_NULL)
-	FreePath(gstate, ptype);
+	GrFreePath(gstate, ptype);
     else if ((path = CopyPath(gstate, GPT_CURRENT, &size)) != NULL) {
 	path[1] = (byte) params;
 	path[2] = (byte) (params >> 8);
@@ -1151,7 +1151,7 @@ static void SetClip(GStateHandle gstate, GetPathType ptype,
 	Combine(gstate, ptype, path, size);
 	free(path);
     } else if (params == PCT_REPLACE)
-	FreePath(gstate, ptype);
+	GrFreePath(gstate, ptype);
     gs = MemLock(gstate);
     GrWinStateFlags(gstate, gs, (WinGrFlags) ~WGF_MASK_VALID,
 		    (WinGrRegFlags) ~(ptype == GPT_CLIP ? WGRF_PATH_VALID :
@@ -1163,64 +1163,14 @@ void GrSetClipPath(GStateHandle gstate, PathCombineType params,
 		   RegionFillRule rule)
 {
     if (!GrGSRecord(gstate, GR_SET_CLIP_PATH, "bw", rule, params))
-	SetClip(gstate, GPT_CLIP, params, rule);
+	GrPathSetClip(gstate, GPT_CLIP, params, rule);
 }
 
 void GrSetWinClipPath(GStateHandle gstate, PathCombineType params,
 		      RegionFillRule rule)
 {
     if (!GrGSRecord(gstate, GR_SET_WIN_CLIP_PATH, "bw", rule, params))
-	SetClip(gstate, GPT_WIN_CLIP, params, rule);
-}
-
-/* SetClipRectCommon, AddRectangleToPath: the rectangle as a path of its
- * own (the clip rectangle with the transformation, the window one in
- * page coordinates), combined into the clip path; the current path
- * stays */
-static void SetClipRect(GStateHandle gstate, GetPathType ptype,
-			PathCombineType flags, sword l, sword t, sword r,
-			sword b)
-{
-    GState *gs = MemLock(gstate);
-    ChunkHandle cur = gs->GS_currentPath;
-
-    if (gs->GS_pathFlags & (PF_DEFINING_PATH | PF_FILL | PF_STROKE)) {
-	MemUnlock(gstate);
-	return;
-    }
-    if (flags == PCT_NULL) {
-	MemUnlock(gstate);
-	SetClip(gstate, ptype, PCT_NULL, ODD_EVEN);
-	return;
-    }
-    gs->GS_currentPath = 0;
-    MemUnlock(gstate);
-    GrBeginPath(gstate, PCT_REPLACE);
-    if (ptype == GPT_WIN_CLIP)
-	GrSetNullTransform(gstate);
-    GrFillRect(gstate, l, t, r, b);
-    GrEndPath(gstate);
-    SetClip(gstate, ptype, flags, ODD_EVEN);
-    FreePath(gstate, GPT_CURRENT);
-    gs = MemLock(gstate);
-    gs->GS_currentPath = cur;
-    MemUnlock(gstate);
-}
-
-void GrSetClipRect(GStateHandle gstate, PathCombineType flags, sword left,
-		   sword top, sword right, sword bottom)
-{
-    if (!GrGSRecord(gstate, GR_SET_CLIP_RECT, "wwwww", flags, left, top,
-		    right, bottom))
-	SetClipRect(gstate, GPT_CLIP, flags, left, top, right, bottom);
-}
-
-void GrSetWinClipRect(GStateHandle gstate, PathCombineType flags,
-		      sword left, sword top, sword right, sword bottom)
-{
-    if (!GrGSRecord(gstate, GR_SET_WIN_CLIP_RECT, "wwwww", flags, left, top,
-		    right, bottom))
-	SetClipRect(gstate, GPT_WIN_CLIP, flags, left, top, right, bottom);
+	GrPathSetClip(gstate, GPT_WIN_CLIP, params, rule);
 }
 
 /* the region rows of chunk ch (C heap) */

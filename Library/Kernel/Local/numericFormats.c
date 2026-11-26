@@ -162,3 +162,11 @@ void LocalNumericInitFormats(void)
 	    LocalSetString(id, buf);
     }
 }
+
+void LocalWriteStringAsData(const char *key, word id)
+{
+    char buf[LOCAL_STRING_SIZE];
+
+    LocalGetString(id, buf, sizeof(buf));
+    InitFileWriteData(localizationCategory, key, buf, (word) strlen(buf));
+}

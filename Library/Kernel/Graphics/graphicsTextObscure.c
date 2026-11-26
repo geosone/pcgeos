@@ -178,3 +178,24 @@ Boolean GrGetTextBounds(GStateHandle gstate, const char *str, word xpos,
     bounds->R_bottom = Rounded(b.bottom);
     return FALSE;
 }
+
+void GrSetTrackKern(GStateHandle gstate, word tk)
+{
+    GState *gs = MemLock(gstate);
+
+    (void) GrGSRecord(gstate, GR_SET_TRACK_KERN, "w", tk);
+    if ((sword) tk != gs->GS_trackKernDegree) {
+	gs->GS_trackKernDegree = (sword) tk;
+	GrRecalcKern(gs);
+    }
+    MemUnlock(gstate);
+}
+
+word GrGetTrackKern(GStateHandle gstate)
+{
+    GState *gs = MemLock(gstate);
+    word tk = (word) gs->GS_trackKernDegree;
+
+    MemUnlock(gstate);
+    return tk;
+}

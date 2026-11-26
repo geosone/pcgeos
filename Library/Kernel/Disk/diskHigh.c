@@ -157,13 +157,6 @@ word DiskSetVolumeName(DiskHandle dh, const char *name)
 			      : ERROR_INVALID_VOLUME);
 }
 
-Boolean DiskCheckWritable(DiskHandle disk)
-{
-    FSDDisk *d = FSDDiskOf(disk);
-
-    return d && (d->FDK_flags & FDK_WRITABLE);
-}
-
 Boolean DiskCheckInUse(DiskHandle disk)
 {
     FSDDisk *d = FSDDiskOf(disk);

@@ -230,3 +230,37 @@ void ObjFreeDuplicate(MemHandle mh)
 	RemoveFromSavedList(mh);
     MemFree(mh);
 }
+
+VMBlockHandle ObjMapSavedToState(MemHandle mh)
+{
+    GeodeCore *c;
+    Handle sb;
+    VMBlockHandle vb = 0;
+
+    GeodeLock();
+    c = GeodeCoreOf(MemOwner(mh));
+    for (sb = c ? c->GC_savedBlocks : 0; sb; sb = HandleEntryOf(sb)->HE_next)
+	if (HandleEntryOf(sb)->HE_otherInfo == mh) {
+	    vb = (VMBlockHandle) HandleEntryOf(sb)->HE_size;
+	    break;
+	}
+    GeodeUnlock();
+    return vb;
+}
+
+MemHandle ObjMapStateToSaved(VMBlockHandle vmbh, GeodeHandle gh)
+{
+    GeodeCore *c;
+    Handle sb;
+    MemHandle mh = 0;
+
+    GeodeLock();
+    c = GeodeCoreOf(gh ? gh : ObjCurProcess());
+    for (sb = c ? c->GC_savedBlocks : 0; sb; sb = HandleEntryOf(sb)->HE_next)
+	if ((VMBlockHandle) HandleEntryOf(sb)->HE_size == vmbh) {
+	    mh = (MemHandle) HandleEntryOf(sb)->HE_otherInfo;
+	    break;
+	}
+    GeodeUnlock();
+    return mh;
+}

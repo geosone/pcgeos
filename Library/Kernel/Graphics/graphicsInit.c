@@ -315,3 +315,32 @@ void GrInitDefaultFont(void)
     AddDefaultInUse(style);
     FontDrUnlockInfoBlock();
 }
+
+/* GrInitFontDriver: a loaded font driver into the info block, and its
+ * fonts */
+void GrInitFontDriver(GeodeHandle gh)
+{
+    const FontDriverInfoStruct *fdis =
+	(const FontDriverInfoStruct *) GeodeInfoDriver(gh);
+    DriversAvailEntry *d;
+    DriverRegs r;
+    word size;
+
+    if (!grFontBlock || !fdis ||
+	fdis->FDIS_common.DIS_driverType != DRIVER_TYPE_FONT)
+	return;
+    FontDrLockInfoBlock();
+    size = LMemGetChunkSizeHandles(grFontBlock, FONT_DRIVERS_HANDLE);
+    LMemReAllocHandles(grFontBlock, FONT_DRIVERS_HANDLE,
+		       (word) (size + sizeof(DriversAvailEntry)));
+    d = (DriversAvailEntry *) ((byte *) GrFontChunk(FONT_DRIVERS_HANDLE,
+						    NULL) + size);
+    d->DAE_makerID = fdis->FDIS_maker;
+    d->DAE_driverHandle = gh;
+    d->DAE_strategy = (FontDriverStrategy *) DriverStrategyOf(
+	&fdis->FDIS_common);
+    memset(&r, 0, sizeof(r));
+    r.DR_bx = grFontBlock;
+    (void) d->DAE_strategy(DR_FONT_INIT_FONTS, &r);
+    FontDrUnlockInfoBlock();
+}

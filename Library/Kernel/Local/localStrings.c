@@ -106,11 +106,3 @@ Boolean LocalReadStringAsData(const char *key, word id, word size)
     LocalSetString(id, buf);
     return TRUE;
 }
-
-void LocalWriteStringAsData(const char *key, word id)
-{
-    char buf[LOCAL_STRING_SIZE];
-
-    LocalGetString(id, buf, sizeof(buf));
-    InitFileWriteData(localizationCategory, key, buf, (word) strlen(buf));
-}

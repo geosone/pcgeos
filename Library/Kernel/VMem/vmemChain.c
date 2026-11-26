@@ -295,3 +295,34 @@ Boolean VMInfoVMChain(VMFileHandle sourceFile, VMChain sourceChain,
 	*dbItemCount = items;
     return ok;
 }
+
+VMBlockHandle VMAllocLMem(VMFileHandle file, LMemType ltype, word headerSize)
+{
+    return VMAttach(file, 0, MemAllocLMem(ltype, headerSize));
+}
+
+VMBlockHandle VMCopyVMBlock(VMFileHandle sourceFile,
+			    VMBlockHandle sourceBlock, VMFileHandle destFile)
+{
+    MemHandle smh, dmh;
+    const void *src = VMLock(sourceFile, sourceBlock, &smh);
+    word size;
+    VMBlockHandle nb;
+    KVMFile *sf = VMFileOf(sourceFile);
+
+    if (!src)
+	return 0;
+    size = (word) MemGetInfo(smh, MGIT_SIZE);
+    nb = VMAlloc(destFile, size,
+		 VHGet16(sf, sourceBlock + VMBH_UID));
+    memcpy(VMLock(destFile, nb, &dmh), src, size);
+    if (MemGetInfo(smh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) {
+	/* CopyVMBlock: an LMem block stays one */
+	MemModifyFlags(dmh, HF_LMEM, 0);
+	((LMemBlockHeader *) MemDeref(dmh))->LMBH_handle = dmh;
+    }
+    VMDirty(dmh);
+    VMUnlock(dmh);
+    VMUnlock(smh);
+    return nb;
+}

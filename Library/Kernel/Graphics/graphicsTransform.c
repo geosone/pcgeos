@@ -1,9 +1,8 @@
 /*
  * graphicsTransform.c -- the transformation of a GState (after
- * graphicsTransform.asm, graphicsTransformUtils.asm: GrApplyScale,
- * GrApplyRotation, GrSetTransform, GrApplyTransform, GrSetNullTransform;
- * graphicsTransformSimple.asm: GSetNullTransform; graphicsGetState.asm:
- * GrGetTransform).
+ * graphicsTransform.asm; graphicsTransformSimple.asm: GSetNullTransform;
+ * the routines of graphicsTransformUtils.asm are in
+ * graphicsTransformUtils.c).
  *
  * GS_TMatrix goes from document to page coordinates, the window's
  * W_TMatrix from page to window coordinates; their product with the
@@ -15,19 +14,11 @@
 #include "graphicsInt.h"
 
 /* GrExitTrans, ExitTransform */
-static void ExitTrans(GStateHandle gstate, GState *gs)
+void GrExitTrans(GStateHandle gstate, GState *gs)
 {
     GrWinStateFlags(gstate, gs, (WinGrFlags) ~WGF_XFORM_VALID,
 		    (WinGrRegFlags) ~WGRF_PATH_VALID);
     MemUnlock(gstate);
-}
-
-/* the element of GrSetTransform and GrApplyTransform */
-static void RecordMatrix(GStateHandle gstate, byte op, const TransMatrix *tm)
-{
-    (void) GrGSRecord(gstate, op, "ddddDD", GR_WWF_D(tm->TM_e11),
-		      GR_WWF_D(tm->TM_e12), GR_WWF_D(tm->TM_e21),
-		      GR_WWF_D(tm->TM_e22), &tm->TM_e31, &tm->TM_e32);
 }
 
 void GrApplyTranslation(GStateHandle gstate, WWFixedAsDWord xTrans,
@@ -37,7 +28,7 @@ void GrApplyTranslation(GStateHandle gstate, WWFixedAsDWord xTrans,
 
     (void) GrGSRecord(gstate, GR_APPLY_TRANSLATION, "dd", xTrans, yTrans);
     GrMatTranslate(&gs->GS_TMatrix, (sdword) xTrans, (sdword) yTrans);
-    ExitTrans(gstate, gs);
+    GrExitTrans(gstate, gs);
 }
 
 void GrApplyTranslationDWord(GStateHandle gstate, sdword xTrans,
@@ -49,73 +40,7 @@ void GrApplyTranslationDWord(GStateHandle gstate, sdword xTrans,
 		      (dword) xTrans, (dword) yTrans);
     GrMatTranslate(&gs->GS_TMatrix, (int64_t) xTrans * 65536,
 		   (int64_t) yTrans * 65536);
-    ExitTrans(gstate, gs);
-}
-
-void GrApplyScale(GStateHandle gstate, WWFixedAsDWord xScale,
-		  WWFixedAsDWord yScale)
-{
-    GState *gs;
-
-    (void) GrGSRecord(gstate, GR_APPLY_SCALE, "dd", xScale, yScale);
-    if (xScale == 0x10000UL && yScale == 0x10000UL)
-	return;
-    gs = MemLock(gstate);
-    GrInvalidateFont(gs);
-    GrMatScale(&gs->GS_TMatrix, xScale, yScale);
-    ExitTrans(gstate, gs);
-}
-
-void GrApplyRotation(GStateHandle gstate, WWFixedAsDWord angle)
-{
-    GState *gs = MemLock(gstate);
-
-    (void) GrGSRecord(gstate, GR_APPLY_ROTATION, "d", angle);
-    GrInvalidateFont(gs);
-    GrMatRotate(&gs->GS_TMatrix, angle);
-    ExitTrans(gstate, gs);
-}
-
-void GrSetTransform(GStateHandle gstate, const TransMatrix *tm)
-{
-    GState *gs = MemLock(gstate);
-
-    RecordMatrix(gstate, GR_SET_TRANSFORM, tm);
-    GrInvalidateFont(gs);
-    GrMatFromTransMatrix(&gs->GS_TMatrix, tm);
-    ExitTrans(gstate, gs);
-}
-
-/* GS_TMatrix = tm * GS_TMatrix (TMatrixPreMul) */
-void GrApplyTransform(GStateHandle gstate, const TransMatrix *tm)
-{
-    GState *gs = MemLock(gstate);
-    TMatrix m;
-
-    RecordMatrix(gstate, GR_APPLY_TRANSFORM, tm);
-    GrInvalidateFont(gs);
-    GrMatFromTransMatrix(&m, tm);
-    GrMatMul(&gs->GS_TMatrix, &m, &gs->GS_TMatrix);
-    GrMatSetFlags(&gs->GS_TMatrix);
-    ExitTrans(gstate, gs);
-}
-
-void GrSetNullTransform(GStateHandle gstate)
-{
-    GState *gs = MemLock(gstate);
-
-    (void) GrGSRecord(gstate, GR_SET_NULL_TRANSFORM, "");
-    GrInvalidateFont(gs);
-    GrMatIdentity(&gs->GS_TMatrix);
-    ExitTrans(gstate, gs);
-}
-
-void GrGetTransform(GStateHandle gstate, TransMatrix *tm)
-{
-    GState *gs = MemLock(gstate);
-
-    GrMatToTransMatrix(&gs->GS_TMatrix, tm);
-    MemUnlock(gstate);
+    GrExitTrans(gstate, gs);
 }
 
 static TMatrix *Chunk(GStateHandle gstate, ChunkHandle ch)
@@ -147,7 +72,7 @@ void GrSetDefaultTransform(GStateHandle gstate)
 	gs->GS_TMatrix = *Chunk(gstate, gs->GS_defTMatrix);
     else
 	GrMatIdentity(&gs->GS_TMatrix);
-    ExitTrans(gstate, gs);
+    GrExitTrans(gstate, gs);
 }
 
 /*
@@ -199,7 +124,7 @@ void GrRestoreTransform(GStateHandle gstate)
 	*Chunk(gstate, s->STM_default) = s->STM_defMatrix;
     LMemFree(ConstructOptr(gstate, ch));
     gs = MemDeref(gstate);
-    ExitTrans(gstate, gs);
+    GrExitTrans(gstate, gs);
 }
 
 /*

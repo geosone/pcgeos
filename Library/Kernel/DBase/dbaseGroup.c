@@ -1,6 +1,6 @@
 /*
- * dbaseGroup.c -- group blocks and the DB map block (after dbaseGroup.asm
- * and dbaseMapBlk.asm), and the lock of the database manager.
+ * dbaseGroup.c -- group blocks (after dbaseGroup.asm) and the lock of
+ * the database manager; the DB map block is in dbaseMapBlk.c.
  *
  * Items allocated DB_UNGROUPED go to the current "new ungroup" group;
  * when it is full (DB_GROUP_BLOCK_DESIRED_SIZE) another one is taken:
@@ -58,44 +58,6 @@ void DBGroupDirty(DBGroup_ *g)
     VMDirty(g->mh);
 }
 
-/* DBInitDBMap */
-static VMBlockHandle InitDBMap(VMFileHandle file)
-{
-    VMBlockHandle map = VMAlloc(file, sizeof(DBMapBlock), DB_MAP_ID);
-    MemHandle mh;
-    DBMapBlock *m;
-    DBGroup_ g;
-    VMBlockHandle ungroup;
-
-    VMSetDBMap(file, map);
-    ungroup = DBGroupAlloc(file);
-    DBGroupLock(file, ungroup, &g);
-    DBGH(&g)->DBGH_flags |= GF_IS_UNGROUP;
-    DBGroupDirty(&g);
-    DBGroupUnlock(&g);
-    m = VMLock(file, map, &mh);
-    memset(m, 0, sizeof(*m));
-    m->DBMB_ungrouped = ungroup;
-    m->DBMB_vmemHandle = map;
-    VMDirty(mh);
-    VMUnlock(mh);
-    return map;
-}
-
-/* DBLockDBMap: made the first time */
-DBMapBlock *DBLockDBMap(VMFileHandle file, MemHandle *mh)
-{
-    VMBlockHandle map = VMGetDBMap(file);
-    DBMapBlock *m;
-
-    if (!map)
-	map = InitDBMap(file);
-    m = VMLock(file, map, mh);
-    if (!m)
-	KernelFatal(DB_LOCK_FAILED);
-    return m;
-}
-
 /* DBGroupNewUngrouped */
 static VMBlockHandle NewUngrouped(VMFileHandle file)
 {
@@ -126,38 +88,4 @@ VMBlockHandle DBGroupGetUngrouped(VMFileHandle file)
 
     VMUnlock(mh);
     return group ? group : NewUngrouped(file);
-}
-
-/* DBCheckDBFile, DBCheckData */
-static Boolean CheckData(VMFileHandle file, word uid, word minSize)
-{
-    VMBlockHandle b = 0;
-    VMInfoStruct info;
-
-    while ((b = VMFind(file, b, uid)) != 0)
-	if (!VMInfo(file, b, &info) || info.size < minSize)
-	    return FALSE;
-    return TRUE;
-}
-
-Boolean DBCheckDBFile(VMFileHandle file)
-{
-    VMBlockHandle map = VMGetDBMap(file);
-    VMInfoStruct info;
-    MemHandle mh;
-    DBMapBlock *m;
-    Boolean ok;
-
-    if (!map)
-	return TRUE;
-    if (!VMInfo(file, map, &info) || info.size != DB_DOS16_MAP_BLOCK_SIZE)
-	return FALSE;
-    m = VMLock(file, map, &mh);
-    if (!m)
-	return FALSE;
-    ok = m->DBMB_vmemHandle == map;
-    VMUnlock(mh);
-    return ok &&
-	CheckData(file, DB_GROUP_ID, sizeof(DBGroupHeader)) &&
-	CheckData(file, DB_ITEM_BLOCK_ID, DB_DOS16_ITEM_BLOCK_HEADER);
 }

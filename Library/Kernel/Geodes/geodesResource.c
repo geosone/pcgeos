@@ -8,6 +8,7 @@
  * that build resources without a geode module register theirs.
  */
 #include "kernelC.h"
+#include "geosmod.h"
 
 #define MAX_GEODES	32
 
@@ -77,4 +78,28 @@ sdword GeodeHandleToResource(GeodeHandle gh, Handle h)
 	if (geodes[i].handles[r] == h)
 	    return r ? r : GOCR_PROCESS_RES;
     return -1;
+}
+
+#define INFO(c)	((const GeosModuleInfo *) (c)->GC_info)
+
+/* exported entry `entryNumber' of a library (.gp order) */
+void *ProcGetLibraryEntry(GeodeHandle library, word entryNumber)
+{
+    GeodeCore *c;
+    const void *a = NULL;
+
+    GeodeLock();
+    c = GeodeCoreOf(library);
+    if (!c)
+	KernelFatal(GEODE_NOT_LOADED);
+    if (entryNumber < INFO(c)->GM_exportCount)
+	a = INFO(c)->GM_exports[entryNumber].GME_address;
+    GeodeUnlock();
+    return (void *) a;
+}
+
+/* the first thread of a process (HM_otherInfo of its core block) */
+ThreadHandle ProcInfo(GeodeHandle gh)
+{
+    return (ThreadHandle) MemEntryOf(gh)->HE_otherInfo;
 }

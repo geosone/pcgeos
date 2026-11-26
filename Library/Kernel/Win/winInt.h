@@ -73,6 +73,7 @@ void WinPtrImageP(void);
 void WinPtrImageV(void);
 void WinUpdatePtrImages(void);		/* with WinPtrImageP */
 WindowHandle WinPtrFinalWin(void);
+extern GeodeHandle winActiveGeode;	/* winGeode.c */
 GeodeHandle WinPtrFinalGeode(void);
 void WinChangePtrNotification(void);
 void WinPtrClosing(WindowHandle wh, WindowHandle parent);
@@ -137,5 +138,9 @@ void WinSendUpdateComplete(WindowHandle wh);
 void WinWashOutReg(WindowHandle wh, ChunkHandle reg);
 void WinSetupMaskFlags(Window *w);
 void WinValWinStruct(GStateHandle gh, GState *gs, WindowHandle wh);
+
+/* winSaveUnder.c and winWindows.c */
+WindowHandle WinRootOf(WindowHandle wh);
+void WinClearUnderBits(WindowHandle wh, WinUnderFlags f);
 
 #endif

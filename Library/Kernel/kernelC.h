@@ -19,6 +19,7 @@
 #include <geode.h>
 #include <library.h>
 #include <resource.h>
+#include <driver.h>
 #include <timer.h>
 #include <object.h>
 #include <file.h>
@@ -1044,5 +1045,32 @@ const char *KernelExitMessage(void);	/* "" if none */
 /* in the top while GEOS runs (sysSemaphoreFile); SysGetConfig's flags */
 #define KERNEL_ACTIVE_FILE	"GEOS_ACT.IVE"
 extern ByteFlags kernelSysConfig;	/* SysConfigFlags (system.h) */
+
+/* bootInit.c and bootInitfile.c */
+GeodeHandle BootLoadDriver(const char *name, StandardPath sp,
+	word major, word minor);
+void BootLoadKeyboardDriver(void);
+
+/* fileEA.c and fileFile.c */
+word FileEADone(word e);
+Boolean FileDiskAttr(FSDDisk *d, FileExtendedAttribute attr,
+	void **bufferP, word *sizeP, FileExtAttrDesc *rest,
+	MemHandle *mhP, word *e);
+
+/* filePath.c and fileUtils.c */
+KPath *FileCurPath(void);
+word FileOpOnPlacesN(DiskHandle base, const char *tail, const char *path,
+	FileOpFunc *op, void *data, word depth);
+
+/* geodesDriver.c and geodesAccess.c */
+DriverInfoStruct *GeodeDriverTable(GeodeHandle gh);
+
+/* objectClass.c and objectUtils.c */
+ClassStruct *ObjClassOfObj(optr o);
+int ObjCallClassLow(ClassStruct *cls, optr oself, int isObj, Message msg,
+	const void *params, void *reply);
+
+/* objectFile.c and objectDup.c */
+GeodeHandle ObjCurProcess(void);
 
 #endif /* KERNELC_H */

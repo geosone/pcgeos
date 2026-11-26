@@ -5,8 +5,8 @@
  * GrGetBitmapMode, GrClearBitmap, LockHugeBitmap, GrGetPoint,
  * GrGetBitmap, GetBitmap, GetBitSizeBlock, GrCompactBitmap,
  * CompactPackBits, GrUncompactBitmap,
- * AllocBitmapInitDeviceInfo; graphicsRasterUtils.asm: GrSetBitmapRes,
- * GrGetBitmapRes, GrGetHugeBitmapSize, GrGetBitmapSize).
+ * AllocBitmapInitDeviceInfo; the routines of graphicsRasterUtils.asm
+ * are in graphicsRasterUtils.c).
  *
  * A bitmap is a huge array, a scan line an element, whose directory
  * block is an EditableBitmap (CInclude/Internal/videoDr.h): the
@@ -176,7 +176,7 @@ VMBlockHandle GrCreateBitmap(BMFormat initFormat, word initWidth,
 
 /* the scale of a bitmap's resolution against 72 dpi, or new against
  * old */
-static WWFixedAsDWord Ratio(word a, word b)
+WWFixedAsDWord GrRatio(word a, word b)
 {
     return GrSDivWWFixed((WWFixedAsDWord) a << 16, (WWFixedAsDWord) b << 16);
 }
@@ -198,14 +198,14 @@ GStateHandle GrEditBitmap(VMFileHandle vmFile, VMBlockHandle vmBlock,
     HugeArrayUnlockDir(dir);
     gs = OpenBitmapWindow(vmFile, vmBlock, w, h, exposureOD);
     if (xres != DEF_BITMAP_RES || yres != DEF_BITMAP_RES)
-	WinApplyScale(GrGetWinHandle(gs), Ratio(xres, DEF_BITMAP_RES),
-		      Ratio(yres, DEF_BITMAP_RES), WIF_DONT_INVALIDATE);
+	WinApplyScale(GrGetWinHandle(gs), GrRatio(xres, DEF_BITMAP_RES),
+		      GrRatio(yres, DEF_BITMAP_RES), WIF_DONT_INVALIDATE);
     return gs;
 }
 
 /* LockHugeBitmap: the directory block of the GState's bitmap; NULL if
  * it has none */
-static void *LockBitmap(GStateHandle gstate, VMFileHandle *file,
+void *GrLockBitmap(GStateHandle gstate, VMFileHandle *file,
 			VMBlockHandle *block)
 {
     GState *gs = MemLock(gstate);
@@ -252,7 +252,7 @@ void GrDestroyBitmap(GStateHandle gstate, BMDestroy flags)
 
 void GrSetBitmapMode(GStateHandle gstate, word flags, MemHandle colorCorr)
 {
-    EditableBitmap *eb = LockBitmap(gstate, NULL, NULL);
+    EditableBitmap *eb = GrLockBitmap(gstate, NULL, NULL);
 
     if (!eb)
 	return;
@@ -267,7 +267,7 @@ void GrSetBitmapMode(GStateHandle gstate, word flags, MemHandle colorCorr)
 
 word GrGetBitmapMode(GStateHandle gstate)
 {
-    EditableBitmap *eb = LockBitmap(gstate, NULL, NULL);
+    EditableBitmap *eb = GrLockBitmap(gstate, NULL, NULL);
     word flags;
 
     if (!eb)
@@ -283,7 +283,7 @@ void GrClearBitmap(GStateHandle gstate)
 {
     VMFileHandle file;
     VMBlockHandle block;
-    EditableBitmap *eb = LockBitmap(gstate, &file, &block);
+    EditableBitmap *eb = GrLockBitmap(gstate, &file, &block);
     word height, width, lineSize, off, n;
     byte type, value;
     void *p;
@@ -346,72 +346,6 @@ RGBColorAsDWord GrGetPoint(GStateHandle gstate, sword x, sword y)
     }
     GrExitGraphics(&d);
     return c;
-}
-
-void GrSetBitmapRes(GStateHandle gstate, word xRes, word yRes)
-{
-    XYValueAsDWord old = GrGetBitmapRes(gstate);
-    EditableBitmap *eb;
-
-    if (!old)
-	return;
-    WinApplyScale(GrGetWinHandle(gstate), Ratio(xRes, (word) old),
-		  Ratio(yRes, (word) (old >> 16)), WIF_DONT_INVALIDATE);
-    eb = LockBitmap(gstate, NULL, NULL);
-    if (!eb)
-	return;
-    eb->EB_bm.CB_xres = xRes;
-    eb->EB_bm.CB_yres = yRes;
-    HugeArrayDirty(eb);
-    HugeArrayUnlockDir(eb);
-}
-
-/* x resolution low, y high; 0 if the GState has no bitmap */
-XYValueAsDWord GrGetBitmapRes(GStateHandle gstate)
-{
-    EditableBitmap *eb = LockBitmap(gstate, NULL, NULL);
-    XYValueAsDWord res;
-
-    if (!eb)
-	return 0;
-    res = ((dword) eb->EB_bm.CB_yres << 16) | eb->EB_bm.CB_xres;
-    HugeArrayUnlockDir(eb);
-    return res;
-}
-
-/* the size in points: the pixels at 72 dpi, others scaled */
-static word Points(word pixels, word res)
-{
-    WWFixedAsDWord v = GrMulWWFixed(GrUDivWWFixed(
-				    (WWFixedAsDWord) DEF_BITMAP_RES << 16,
-				    (WWFixedAsDWord) res << 16),
-				    (WWFixedAsDWord) pixels << 16);
-
-    return (word) ((v + 0x8000) >> 16);
-}
-
-XYValueAsDWord GrGetBitmapSize(const Bitmap *bm)
-{
-    const CBitmap *c = (const CBitmap *) bm;
-    word w = bm->B_width, h = bm->B_height;
-
-    if ((bm->B_type & BMT_COMPLEX) &&
-	(c->CB_xres != DEF_BITMAP_RES || c->CB_yres != DEF_BITMAP_RES)) {
-	w = Points(w, c->CB_xres);
-	h = Points(h, c->CB_yres);
-    }
-    return ((dword) h << 16) | w;
-}
-
-XYValueAsDWord GrGetHugeBitmapSize(VMFileHandle vmFile, VMBlockHandle vmBlk)
-{
-    void *dir;
-    XYValueAsDWord s;
-
-    HugeArrayLockDir(vmFile, vmBlk, &dir);
-    s = GrGetBitmapSize(&EB_BM(dir)->CB_simple);
-    HugeArrayUnlockDir(dir);
-    return s;
 }
 
 /* ---------------------------------------------------------------------
