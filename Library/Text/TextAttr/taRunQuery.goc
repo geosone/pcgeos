@@ -176,3 +176,23 @@ void TA_GetCharAttrForPosition(optr o, dword pos, Boolean insertion,
     retVal->VTR_start = TA_RunPosition(oself, kind, i);
     retVal->VTR_end = TA_RunPosition(oself, kind, i + 1);
 }
+
+/* TA_CharAttrRunSetupGStateForCalc: the object's gstate with the font
+ * of its character attribute; a metric of that font */
+word TA_CharAttrRunSetupGStateForCalc(optr o, GFM_info info)
+{
+    VisTextCharAttr ca;
+    GStateHandle g;
+    word v;
+
+    TextGStateCreate(o);
+    g = VT(o)->VTI_gstate;
+    TA_GetCharAttrForPosition(o, 0, FALSE, &ca, NULL);
+    GrSetFont(g, ca.VTCA_fontID,
+	      ((dword) ca.VTCA_pointSize.WBF_int << 16) |
+	      ((dword) ca.VTCA_pointSize.WBF_frac << 8));
+    GrSetTextStyle(g, ca.VTCA_textStyles, (TextStyle) ~ca.VTCA_textStyles);
+    v = (word) GrFontMetrics(g, info);
+    TextGStateDestroy(o);
+    return v;
+}

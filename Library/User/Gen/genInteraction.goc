@@ -28,16 +28,6 @@
 				    MasterOffset);
 }
 
-/* GenSetByte: a byte of the instance stored, the object dirty if it
- * changed */
-static void SetByte(optr oself, byte *field, byte value)
-{
-    if (*field == value)
-	return;
-    *field = value;
-    ObjMarkDirty(oself);
-}
-
 @method GenInteractionClass, MSG_GEN_INTERACTION_GET_TYPE
 {
     return pself->GII_type;
@@ -45,7 +35,7 @@ static void SetByte(optr oself, byte *field, byte value)
 
 @method GenInteractionClass, MSG_GEN_INTERACTION_SET_TYPE
 {
-    SetByte(oself, &pself->GII_type, type);
+    GenSetByte(oself, &pself->GII_type, type);
 }
 
 @method GenInteractionClass, MSG_GEN_INTERACTION_GET_VISIBILITY
@@ -55,7 +45,7 @@ static void SetByte(optr oself, byte *field, byte value)
 
 @method GenInteractionClass, MSG_GEN_INTERACTION_SET_VISIBILITY
 {
-    SetByte(oself, &pself->GII_visibility, visibility);
+    GenSetByte(oself, &pself->GII_visibility, visibility);
 }
 
 @method GenInteractionClass, MSG_GEN_INTERACTION_GET_ATTRS
@@ -65,7 +55,7 @@ static void SetByte(optr oself, byte *field, byte value)
 
 @method GenInteractionClass, MSG_GEN_INTERACTION_SET_ATTRS
 {
-    SetByte(oself, &pself->GII_attrs,
+    GenSetByte(oself, &pself->GII_attrs,
 	    (byte) ((pself->GII_attrs & ~clearAttrs) | setAttrs));
 }
 

@@ -601,3 +601,25 @@ static void UserDoDialogsList(optr o, Boolean add)
     if (b)
 	CObjMessageP(MF_CALL, b, message, NULL, 0, NULL, 0);
 }
+
+/* SendToObjectAndItsChildren: the pin group and its children shown or
+ * hidden (drawable, detectable, managed) */
+void SendToObjectAndItsChildren(optr o, Boolean on)
+{
+    ChunkHandle ch = ((OLMenuWinInstance *) ObjDerefVis(o))->OLPWI_pinTrigger;
+    optr g;
+    word i, n;
+    VisAttrs a = VA_DRAWABLE | VA_DETECTABLE | VA_MANAGED;
+
+    if (!ch)
+	return;
+    g = ConstructOptr(OptrToHandle(o), ch);
+    @call g::MSG_VIS_SET_ATTRS(on ? a : 0, on ? 0 : a, VUM_MANUAL);
+    n = @call g::MSG_VIS_COUNT_CHILDREN();
+    for (i = 0; i < n; i++) {
+	optr c = @call g::MSG_VIS_FIND_CHILD_AT_POSITION(i);
+
+	if (c)
+	    @call c::MSG_VIS_SET_ATTRS(on ? a : 0, on ? 0 : a, VUM_MANUAL);
+    }
+}

@@ -15,7 +15,8 @@
  * selecting.
  */
 @include "textInt.goh"
-
+#include <Internal/specUI.h>
+#include <timer.h>
 
 /* ComputeEventPositionAndOffset: the offset at a position in the
  * object's parent's coordinates */
@@ -30,7 +31,7 @@ static dword OffsetAtPosition(optr o, sword x, sword y)
 		 t->VTI_leftOffset);
     y = (sword) (y - v->VI_bounds.R_top - t->VTI_tbMargin);
     line = TL_LineFromPosition(o, (sword) (y < 0 ? 0 : y), NULL);
-    x = (sword) (x - TL_LinePtr(o, line, NULL)->LI_adjustment);
+    x = (sword) (x - SmallGetLinePointer(o, line, NULL)->LI_adjustment);
     off = TL_LineTextPosition(o, line, x, TEXT_ADDRESS_PAST_END, &pos,
 			      NULL);
     end = TSL_LineCursorEnd(o, line);
@@ -101,4 +102,18 @@ static dword OffsetAtPosition(optr o, sword x, sword y)
     pself->VTI_intSelFlags &= ~(VTISF_DOING_SELECTION |
 				VTISF_DOING_DRAG_SELECTION);
     VisReleaseMouse(oself);
+}
+
+/* ComputeEventPositionAndOffset: the offset on a line nearest the
+ * goal position */
+dword ComputeEventPositionAndOffset(optr o, dword line)
+{
+    VisTextInstance *t = VT(o);
+    sword x = (sword) (t->VTI_goalPosition - t->VTI_leftOffset -
+		       SmallGetLinePointer(o, line, NULL)->LI_adjustment), pos;
+    dword off, end = TSL_LineCursorEnd(o, line);
+
+    off = TL_LineTextPosition(o, line, x, TEXT_ADDRESS_PAST_END, &pos,
+			      NULL);
+    return off > end ? end : off;
 }

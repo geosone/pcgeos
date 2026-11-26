@@ -334,20 +334,6 @@ static optr Composite(optr o)
 	MetaGrabTargetExclLow(oself);
 }
 
-/* OpenNavigateIfHaveFocus: with the window's focus: on to the next
- * field */
-static void NavigateIfHaveFocus(optr o)
-{
-    optr vp = VisFindParent(o);
-    GenReturnParams r;
-
-    memset(&r, 0, sizeof(r));
-    if (vp && @call vp::MSG_VIS_P32_VUP_QUERY(&r,
-				SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL, 0, 0) &&
-	ConstructOptr(r.GRP_cx, r.GRP_dx) == o)
-	@call vp::MSG_SPEC_NAVIGATE_TO_NEXT_FIELD();
-}
-
 /* OLTextNotifyEnabled: editable and selectable again (unless
  * read-only); the composite enabled too */
 @method OLTextClass, MSG_SPEC_NOTIFY_ENABLED
@@ -377,7 +363,7 @@ static void NavigateIfHaveFocus(optr o)
 {
     optr comp;
 
-    NavigateIfHaveFocus(oself);
+    OpenNavigateIfHaveFocus(oself);
     MetaReleaseFocusExclLow(oself);
     MetaReleaseTargetExclLow(oself);
     VisReleaseMouse(oself);

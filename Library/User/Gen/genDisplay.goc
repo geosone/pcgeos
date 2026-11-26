@@ -11,13 +11,6 @@
 
 @classdecl GenDisplayClass;
 
-/* GenCallSpecIfGrown: the specific part, if there is one */
-static void CallSpecIfGrown(optr oself, Message msg, const void *p, word ps)
-{
-    if (GenCheckIfSpecGrown(oself))
-	CObjCallSuperP(&GenClass, oself, msg, p, ps, NULL, 0);
-}
-
 /* the parent (a GenDisplayGroup) full sized */
 static Boolean ParentFullSized(optr oself)
 {
@@ -84,7 +77,7 @@ static Boolean ParentFullSized(optr oself)
 		       MSG_GEN_DISPLAY_INTERNAL_SET_OVERLAPPING
 {
     if (GenCheckIfFullyUsable(oself, FALSE))
-	CallSpecIfGrown(oself, message, &updateMode, sizeof(updateMode));
+	GenCallSpecIfGrown(oself, message, &updateMode, sizeof(updateMode));
 }
 
 @method GenDisplayClass, MSG_GEN_DISPLAY_SET_MINIMIZED
@@ -95,7 +88,7 @@ static Boolean ParentFullSized(optr oself)
     (void) ObjVarAddData(oself, ATTR_GEN_DISPLAY_MINIMIZED_STATE |
 			 VDF_SAVE_TO_STATE, 0);
     if (GenCheckIfFullyUsable(oself, FALSE))
-	CallSpecIfGrown(oself, message, NULL, 0);
+	GenCallSpecIfGrown(oself, message, NULL, 0);
 }
 
 @method GenDisplayClass, MSG_GEN_DISPLAY_SET_NOT_MINIMIZED
@@ -104,7 +97,7 @@ static Boolean ParentFullSized(optr oself)
 	!ObjVarDeleteData(oself, ATTR_GEN_DISPLAY_MINIMIZED_STATE))
 	return;
     if (GenCheckIfFullyUsable(oself, FALSE))
-	CallSpecIfGrown(oself, message, NULL, 0);
+	GenCallSpecIfGrown(oself, message, NULL, 0);
 }
 
 @method GenDisplayClass, MSG_GEN_DISPLAY_GET_MINIMIZED

@@ -180,7 +180,7 @@ static void GenAppSendToGCNListUppingDetachCount(optr oself, word listType,
     if (@call parent::MSG_META_IS_OBJECT_IN_CLASS(
 	    (ClassStruct *) &GenFieldClass))
 	@call parent::MSG_GEN_FIELD_ADD_GEN_APPLICATION(oself, CCO_LAST);
-    GenAppSendToGCNList(oself, MGCNLT_APP_STARTUP, MSG_META_APP_STARTUP,
+    SendToGenAppGCNList(oself, MGCNLT_APP_STARTUP, MSG_META_APP_STARTUP,
 		  &appLaunchBlock, sizeof(appLaunchBlock));
     @call oself::MSG_GEN_APPLICATION_IACP_REGISTER(
 	IACPSM_NOT_USER_INTERACTIBLE);
@@ -216,7 +216,7 @@ static void GenAppSendToGCNListUppingDetachCount(optr oself, word listType,
 
 	p.f = UWF_DETACHING;
 	p.m = VUM_NOW;
-	GenAppSendToGCNList(oself, GAGCNLT_WINDOWS, MSG_META_UPDATE_WINDOW, &p,
+	SendToGenAppGCNList(oself, GAGCNLT_WINDOWS, MSG_META_UPDATE_WINDOW, &p,
 		      sizeof(p));
     }
     GenAppSendToGCNListUppingDetachCount(oself, MGCNLT_ACTIVE_LIST,
@@ -349,7 +349,7 @@ void GenAppQuitCommon(optr oself, word quitLevel)
 	@send GenAppProcessOptr()::MSG_META_QUIT_ACK(QL_UI, 0);
 	return;
     }
-    GenAppSendToGCNList(oself, GAGCNLT_WINDOWS, MSG_META_QUIT, NULL, 0);
+    SendToGenAppGCNList(oself, GAGCNLT_WINDOWS, MSG_META_QUIT, NULL, 0);
     CObjCallSuperP((ClassStruct *) &GenApplicationClass, oself,
 		   MSG_META_QUIT_ACK, NULL, 0, NULL, 0);
 }

@@ -261,14 +261,6 @@ static Boolean HandleMenuNavigation(optr o, word c, word flags, word state)
  * The application's word on the window's position, size and constraint
  * ------------------------------------------------------------------- */
 
-/* the flags, state and bounds set: the previous ones while maximized */
-typedef struct {
-    WinPosSizeFlags	*flags;
-    WinPosSizeState	*state;
-    Rectangle		*bounds;
-    Boolean		maximized;
-} WinPosSizeRefs;
-
 static WinPosSizeRefs PosSizeRefs(optr o)
 {
     OLWinInstance *w = Win(o);
@@ -285,27 +277,6 @@ static WinPosSizeRefs PosSizeRefs(optr o)
 	r.bounds = &w->VI_bounds;
     }
     return r;
-}
-
-#define SIZE_PAIRS	(WPSS_VIS_POS_IS_SPEC_PAIR | \
-			 WPSS_VIS_SIZE_IS_SPEC_PAIR_PARENT)
-
-/* EnsureRightBottomBoundsAreIndependent: pixel bounds to a size */
-static void BoundsIndependent(WinPosSizeRefs *r)
-{
-    if (!(*r->state & SIZE_PAIRS)) {
-	r->bounds->R_right -= r->bounds->R_left;
-	r->bounds->R_bottom -= r->bounds->R_top;
-    }
-}
-
-/* EnsureBoundsAreDependent: back to pixel bounds */
-static void BoundsDependent(WinPosSizeRefs *r)
-{
-    if (!(*r->state & SIZE_PAIRS)) {
-	r->bounds->R_right += r->bounds->R_left;
-	r->bounds->R_bottom += r->bounds->R_top;
-    }
 }
 
 /* the window updated unless maximized (then for when it is restored) */
@@ -328,17 +299,17 @@ static void PosSizeUpdate(optr o, WinPosSizeRefs *r, byte mode, byte inval)
     if (type == WPT_AT_SPECIFIC_POSITION) {
 	Boolean same;
 
-	BoundsIndependent(&r);
+	EnsureRightBottomBoundsAreIndependent(&r);
 	*r.state &= ~WPSS_VIS_POS_IS_SPEC_PAIR;
 	same = r.bounds->R_left == (sword) xPosSpec &&
 	       r.bounds->R_top == (sword) yPosSpec;
 	r.bounds->R_left = (sword) xPosSpec;
 	r.bounds->R_top = (sword) yPosSpec;
-	BoundsDependent(&r);
+	EnsureBoundsAreDependent(&r);
 	if (same)
 	    return;
     } else if (type == WPT_AT_RATIO) {
-	BoundsIndependent(&r);
+	EnsureRightBottomBoundsAreIndependent(&r);
 	*r.state |= WPSS_VIS_POS_IS_SPEC_PAIR;
 	r.bounds->R_left = (sword) xPosSpec;
 	r.bounds->R_top = (sword) yPosSpec;

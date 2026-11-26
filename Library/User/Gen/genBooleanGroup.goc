@@ -29,16 +29,6 @@
 				    MasterOffset);
 }
 
-/* GenSetWord: stored, the object dirty; TRUE if changed */
-static Boolean SetWord(optr o, word *field, word value)
-{
-    if (*field == value)
-	return FALSE;
-    *field = value;
-    ObjMarkDirty(o);
-    return TRUE;
-}
-
 /* UpdateBooleanObject: the specific UI told of the changed booleans */
 static void UpdateBooleans(optr o, word changed)
 {
@@ -54,19 +44,19 @@ static void UpdateBooleans(optr o, word changed)
     word changed = (pself->GBGI_selectedBooleans ^ selectedBooleans) |
 		   (pself->GBGI_indeterminateBooleans ^ indeterminateBooleans);
 
-    SetWord(oself, &pself->GBGI_selectedBooleans, selectedBooleans);
-    SetWord(oself, &pself->GBGI_indeterminateBooleans,
+    GenSetWord(oself, &pself->GBGI_selectedBooleans, selectedBooleans);
+    GenSetWord(oself, &pself->GBGI_indeterminateBooleans,
 	    indeterminateBooleans);
     if (changed)
 	UpdateBooleans(oself, changed);
     pself = GBG(oself);
-    SetWord(oself, &pself->GBGI_modifiedBooleans, 0);
+    GenSetWord(oself, &pself->GBGI_modifiedBooleans, 0);
 }
 
 /* modified ones: the dialog's apply trigger enabled */
 @method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_SET_GROUP_MODIFIED_STATE
 {
-    if (SetWord(oself, &pself->GBGI_modifiedBooleans,
+    if (GenSetWord(oself, &pself->GBGI_modifiedBooleans,
 		(pself->GBGI_modifiedBooleans | setBooleans) &
 		~clearBooleans) && setBooleans)
 	@call oself::MSG_GEN_MAKE_APPLYABLE();
@@ -148,7 +138,7 @@ static void SendMsg(optr o, Message msg, word third, Boolean apply)
 static Boolean SetBoolean(optr o, word *field, word identifier,
 			  Boolean state)
 {
-    return SetWord(o, field, state ? (*field | identifier) :
+    return GenSetWord(o, field, state ? (*field | identifier) :
 		   (*field & ~identifier));
 }
 
@@ -158,7 +148,7 @@ static void SetState(optr o, word *field, word identifier, Boolean state)
     if (SetBoolean(o, field, identifier, state))
 	UpdateBooleans(o, identifier);
     field = &GBG(o)->GBGI_modifiedBooleans;
-    SetWord(o, field, *field & ~identifier);
+    GenSetWord(o, field, *field & ~identifier);
 }
 
 @method GenBooleanGroupClass, MSG_GEN_BOOLEAN_GROUP_SET_BOOLEAN_STATE

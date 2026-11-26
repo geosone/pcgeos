@@ -13,6 +13,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <Internal/grWinInt.h>
+@include <Objects/gFieldC.goh>
+#include <localize.h>
 
 /* VisMonikerScore: the fields by priority (highest first) */
 #define SCORE_TEXT_OR_GSTRING	0x1000
@@ -160,7 +162,7 @@ optr VisFindMoniker(optr moniker, VisMonikerSearchFlags searchFlags,
 		height != DWORD_HEIGHT(s));
     if (call) {
 	if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
-	    VisSaveOldBounds(oself);
+	    SaveOldBounds(oself);
 	else
 	    VisMarkInvalid(oself, VOF_WINDOW_INVALID | VOF_IMAGE_INVALID,
 			   VUM_MANUAL);
@@ -199,7 +201,7 @@ static Boolean CheckForBoundsChange(optr oself)
     Boolean changed;
 
     if (v->VI_geoAttrs & VGA_GEOMETRY_CALCULATED)
-	VisSaveOldBounds(oself);
+	SaveOldBounds(oself);
     v = VisPart(oself);
     if (v->VI_geoAttrs & VGA_USE_VIS_SET_POSITION) {
 	if (v->VI_typeFlags & VTF_IS_COMPOSITE)
@@ -284,4 +286,38 @@ SizeAsDWord VisRecalcSizeAndInvalIfNeeded(optr obj, word width, word height)
 Boolean VisSendPositionAndInvalIfNeeded(optr obj, sword x, sword y)
 {
     return @call obj::MSG_VIS_POSITION_AND_INVAL_IF_NEEDED(x, y);
+}
+
+/* SaveOldBounds: the bounds before the geometry changes them */
+void SaveOldBounds(optr obj)
+{
+    VisInstance *v = VisLock(obj);
+    Rectangle *r;
+
+    if (!(v->VI_attrs & VA_OLD_BOUNDS_SAVED)) {
+	v->VI_attrs |= VA_OLD_BOUNDS_SAVED;
+	r = ObjVarAddData(obj, TEMP_VIS_OLD_BOUNDS, sizeof(Rectangle));
+	*r = VisPart(obj)->VI_bounds;
+    }
+    VisUnlock(obj);
+}
+
+/* ---------------------------------------------------------------------
+ * Removing from the tree (VisRemove of visUtilsClass.asm)
+ * ------------------------------------------------------------------- */
+
+/* VisVupInvalGeoToHere: the geometry invalid up the managed path to the
+ * win group, updated there */
+void VisVupInvalGeoToHere(optr obj, VisUpdateMode mode)
+{
+    while (obj) {
+	VisInstance *v = VisLock(obj);
+	Boolean up = v->VI_attrs & VA_MANAGED &&
+		     !(v->VI_typeFlags & VTF_IS_WIN_GROUP);
+	VisUnlock(obj);
+	VisMarkInvalid(obj, VOF_GEOMETRY_INVALID, up ? VUM_MANUAL : mode);
+	if (!up)
+	    return;
+	obj = VisFindParent(obj);
+    }
 }

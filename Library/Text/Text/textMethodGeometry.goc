@@ -17,37 +17,16 @@
 @include "textInt.goh"
 #include <font.h>
 
-
 #define VIS_TEXT_MIN_TEXT_FIELD_WIDTH	47
-
-/* TA_CharAttrRunSetupGStateForCalc: the object's gstate with the font
- * of its character attribute; a metric of that font */
-static word FontMetric(optr o, GFM_info info)
-{
-    VisTextCharAttr ca;
-    GStateHandle g;
-    word v;
-
-    TextGStateCreate(o);
-    g = VT(o)->VTI_gstate;
-    TA_GetCharAttrForPosition(o, 0, FALSE, &ca, NULL);
-    GrSetFont(g, ca.VTCA_fontID,
-	      ((dword) ca.VTCA_pointSize.WBF_int << 16) |
-	      ((dword) ca.VTCA_pointSize.WBF_frac << 8));
-    GrSetTextStyle(g, ca.VTCA_textStyles, (TextStyle) ~ca.VTCA_textStyles);
-    v = (word) GrFontMetrics(g, info);
-    TextGStateDestroy(o);
-    return v;
-}
 
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_HEIGHT
 {
-    return FontMetric(oself, GFMI_MAX_ADJUSTED_HEIGHT_ROUNDED);
+    return TA_CharAttrRunSetupGStateForCalc(oself, GFMI_MAX_ADJUSTED_HEIGHT_ROUNDED);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_GET_MIN_WIDTH
 {
-    word w = FontMetric(oself, GFMI_MAX_WIDTH_ROUNDED);
+    word w = TA_CharAttrRunSetupGStateForCalc(oself, GFMI_MAX_WIDTH_ROUNDED);
 
     if (w < VIS_TEXT_MIN_TEXT_FIELD_WIDTH)
 	w = VIS_TEXT_MIN_TEXT_FIELD_WIDTH;
@@ -56,19 +35,14 @@ static word FontMetric(optr o, GFM_info info)
 
 @extern method VisTextClass, MSG_VIS_TEXT_GET_SIMPLE_MIN_WIDTH
 {
-    word w = FontMetric(oself, GFMI_MAX_WIDTH_ROUNDED);
+    word w = TA_CharAttrRunSetupGStateForCalc(oself, GFMI_MAX_WIDTH_ROUNDED);
 
     return (word) (w + 2 * VT(oself)->VTI_lrMargin);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_GET_AVERAGE_CHAR_WIDTH
 {
-    return FontMetric(oself, GFMI_AVERAGE_WIDTH_ROUNDED);
-}
-
-static sdword W(const WBFixed *w)
-{
-    return ((sdword) w->WBF_int << 8) + w->WBF_frac;
+    return TA_CharAttrRunSetupGStateForCalc(oself, GFMI_AVERAGE_WIDTH_ROUNDED);
 }
 
 /* VisTextCalcHeight */
@@ -101,7 +75,7 @@ static sdword W(const WBFixed *w)
 	    v->VI_bounds.R_right = right;
 	}
 	if (cacheResult) {
-	    if (W(&old) != W(&height))
+	    if (TEXT_WBF(&old) != TEXT_WBF(&height))
 		TL_LineStorageDestroy(oself);
 	    pself = VT(oself);
 	    pself->VTI_lastWidth = width;
@@ -109,5 +83,5 @@ static sdword W(const WBFixed *w)
 	}
     }
     pself = VT(oself);
-    return (word) (((W(&height) + 0xff) >> 8) + 2 * pself->VTI_tbMargin);
+    return (word) (((TEXT_WBF(&height) + 0xff) >> 8) + 2 * pself->VTI_tbMargin);
 }

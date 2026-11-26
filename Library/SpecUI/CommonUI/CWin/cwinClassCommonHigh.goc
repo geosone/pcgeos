@@ -19,6 +19,9 @@
 @include <Internal/specC.goh>
 @include <Objects/gPrimC.goh>
 @include <Objects/gPenICC.goh>
+@include <Objects/gTrigC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gInterC.goh>
 
 @classdecl OLWinClass, neverSaved;
 /* cwinClassCommonLow.goc */
@@ -753,4 +756,22 @@ void ConvertSpecWinSizePairsToPixels(optr o)
     else
 	Win(oself)->OLWI_titleBarLeftGroup = g;
     return g;
+}
+
+/* EnsureRightBottomBoundsAreIndependent: pixel bounds to a size */
+void EnsureRightBottomBoundsAreIndependent(WinPosSizeRefs *r)
+{
+    if (!(*r->state & SIZE_PAIRS)) {
+	r->bounds->R_right -= r->bounds->R_left;
+	r->bounds->R_bottom -= r->bounds->R_top;
+    }
+}
+
+/* EnsureBoundsAreDependent: back to pixel bounds */
+void EnsureBoundsAreDependent(WinPosSizeRefs *r)
+{
+    if (!(*r->state & SIZE_PAIRS)) {
+	r->bounds->R_right += r->bounds->R_left;
+	r->bounds->R_bottom += r->bounds->R_top;
+    }
 }

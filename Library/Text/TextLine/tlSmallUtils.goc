@@ -1,0 +1,17 @@
+/*
+ * tlSmallUtils.goc -- after tlSmallUtils.asm: Misc small-object
+ * utilities.
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+
+/* SmallGetLinePointer: the line, *size its size with the fields */
+LineInfo *SmallGetLinePointer(optr o, dword line, word *size)
+{
+    word s;
+    LineInfo *li = ChunkArrayElementToPtr(Lines(o), (word) line, &s);
+
+    if (size)
+	*size = s;
+    return li;
+}

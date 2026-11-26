@@ -11,7 +11,7 @@ dword SmallLineToOffsetStart(optr o, dword line)
     dword off = 0, i;
 
     for (i = 0; i < line; i++)
-	off += TL_LineGetCharCount(TL_LinePtr(o, i, NULL));
+	off += TL_LineGetCharCount(SmallGetLinePointer(o, i, NULL));
     return off;
 }
 
@@ -25,7 +25,7 @@ dword SmallLineFromOffsetGetStart(optr o, dword offset, Boolean first, dword *st
     dword n = TL_LineGetCount(o), i, off = 0, count;
 
     for (i = 0; i < n; i++) {
-	count = TL_LineGetCharCount(TL_LinePtr(o, i, NULL));
+	count = TL_LineGetCharCount(SmallGetLinePointer(o, i, NULL));
 	if (offset < off + count || i == n - 1 ||
 	    (offset == off + count && first))
 	    break;

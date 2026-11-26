@@ -12,22 +12,9 @@
 @include "textInt.goh"
 #include <chunkarr.h>
 
-#define INIT_LINE_FLAGS \
-	(LF_STARTS_PARAGRAPH | LF_ENDS_PARAGRAPH | LF_ENDS_IN_NULL)
-#define INIT_FIELD_TAB_REFERENCE \
-	((TRT_OTHER << 7) | RULER_TAB_TO_LINE_LEFT)
-
 optr Lines(optr o)
 {
     return ConstructOptr(OptrToHandle(o), VT(o)->VTI_lines);
-}
-
-/* CommonInitLineAndField */
-static void InitLine(LineInfo *li)
-{
-    memset(li, 0, TL_LINE_SIZE(1));
-    li->LI_flags = INIT_LINE_FLAGS;
-    li->LI_firstField.FI_tab = INIT_FIELD_TAB_REFERENCE;
 }
 
 /* SmallStorageCreate: one line, empty */
@@ -38,7 +25,7 @@ void SmallStorageCreate(optr o)
     c = ChunkArrayCreate(OptrToHandle(o), 0, 0,
 			 ObjGetFlags(o) & OCF_IGNORE_DIRTY);
     VT(o)->VTI_lines = c;
-    InitLine(ChunkArrayAppend(Lines(o), TL_LINE_SIZE(1)));
+    CommonInitLineAndField(ChunkArrayAppend(Lines(o), TL_LINE_SIZE(1)));
 }
 
 /* SmallStorageDestroy */
@@ -52,17 +39,6 @@ void SmallStorageDestroy(optr o)
     }
 }
 
-/* SmallGetLinePointer: the line, *size its size with the fields */
-LineInfo *TL_LinePtr(optr o, dword line, word *size)
-{
-    word s;
-    LineInfo *li = ChunkArrayElementToPtr(Lines(o), (word) line, &s);
-
-    if (size)
-	*size = s;
-    return li;
-}
-
 /* SmallLineInsert: count new lines before a line (or at the end) */
 void SmallLineInsert(optr o, dword line, word count)
 {
@@ -71,9 +47,9 @@ void SmallLineInsert(optr o, dword line, word count)
 
     while (count--) {
 	if (line >= n)
-	    InitLine(ChunkArrayAppend(arr, TL_LINE_SIZE(1)));
+	    CommonInitLineAndField(ChunkArrayAppend(arr, TL_LINE_SIZE(1)));
 	else
-	    InitLine(ChunkArrayInsertAt(arr,
+	    CommonInitLineAndField(ChunkArrayInsertAt(arr,
 			ChunkArrayElementToPtr(arr, (word) line, NULL),
 			TL_LINE_SIZE(1)));
 	n++;
@@ -86,28 +62,11 @@ void SmallLineDelete(optr o, dword line, word count)
     ChunkArrayDeleteRange(Lines(o), (word) line, count);
 }
 
-/* the line with fields fields (SmallLineAddField,
- * SmallLineTruncateFields); the new fields are cleared */
-void TL_LineSetFieldCount(optr o, dword line, word fields)
-{
-    optr arr = Lines(o);
-    word old;
-    LineInfo *li = ChunkArrayElementToPtr(arr, (word) line, &old);
-
-    if (old == TL_LINE_SIZE(fields))
-	return;
-    ChunkArrayElementResize(arr, (word) line, TL_LINE_SIZE(fields));
-    if (TL_LINE_SIZE(fields) > old) {
-	li = ChunkArrayElementToPtr(arr, (word) line, NULL);
-	memset((byte *) li + old, 0, TL_LINE_SIZE(fields) - old);
-    }
-}
-
 word TL_LineGetFieldCount(optr o, dword line)
 {
     word size;
 
-    (void) TL_LinePtr(o, line, &size);
+    (void) SmallGetLinePointer(o, line, &size);
     return (word) ((size - offsetof(LineInfo, LI_firstField)) /
 		   sizeof(FieldInfo));
 }

@@ -12,6 +12,8 @@
  */
 @include "textInt.goh"
 #include <font.h>
+#include <fontID.h>
+#include <chunkarr.h>
 
 static const word defaultDefaultTabs[4] = {
     0, (PIXELS_PER_INCH / 2) * 8, PIXELS_PER_INCH * 8, 227
@@ -152,23 +154,6 @@ void TA_SetSingleParaAttr(optr o, const VisTextMaxParaAttr *a)
     memcpy(LMemDerefHandles(mh, VT(o)->VTI_paraAttrRuns), a, size);
 }
 
-/* UnHiliteAndFixupParaAttrRange: the range of a change, whole
- * paragraphs; FALSE if the object has a single attribute */
-static Boolean FixupParaRange(optr o, VisTextRange *r, dword start,
-			      dword end)
-{
-    Boolean multiple =
-	(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS) != 0;
-
-    r->VTR_start = start;
-    r->VTR_end = end;
-    if (multiple)
-	TA_GetTextRange(o, r, VTRC_PARAGRAPH_CHANGE);
-    TextGStateCreate(o);
-    EditUnHilite(o);
-    return multiple;
-}
-
 /* DoParaAttrChangeCommon: the attribute of the paragraphs changed by
  * the callback */
 void ChangeParaAttr(optr o, dword start, dword end,
@@ -177,7 +162,7 @@ void ChangeParaAttr(optr o, dword start, dword end,
     VisTextMaxParaAttr a;
     VisTextRange r;
 
-    if (FixupParaRange(o, &r, start, end))
+    if (UnHiliteAndFixupParaAttrRange(o, &r, start, end))
 	(void) TA_ModifyRun(o, TRK_PARA_ATTR, r.VTR_start, r.VTR_end, cb,
 			    data, CA_NULL_ELEMENT);
     else {
@@ -185,7 +170,7 @@ void ChangeParaAttr(optr o, dword start, dword end,
 	cb(o, &a, data);
 	TA_SetSingleParaAttr(o, &a);
     }
-    TA_ReflectChange(o);
+    ReflectChangeUpdateGeneric(o);
 }
 
 /* SetParaAttrCommon: the whole attribute */
@@ -198,14 +183,14 @@ static void SetParaAttr(optr o, dword start, dword end,
 
     memset(&c, 0, sizeof(c));
     memcpy(&c, a, TA_ParaAttrSize(a));
-    if (FixupParaRange(o, &r, start, end)) {
+    if (UnHiliteAndFixupParaAttrRange(o, &r, start, end)) {
 	token = TA_AddElement(o, TRK_PARA_ATTR, &c);
 	(void) TA_ModifyRun(o, TRK_PARA_ATTR, r.VTR_start, r.VTR_end, NULL,
 			    NULL, token);
 	TA_RemoveElement(o, TRK_PARA_ATTR, token);
     } else
 	TA_SetSingleParaAttr(o, &c);
-    TA_ReflectChange(o);
+    ReflectChangeUpdateGeneric(o);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_DEFAULT
@@ -230,11 +215,11 @@ static void SetParaAttr(optr o, dword start, dword end,
 {
     VisTextRange r;
 
-    if (FixupParaRange(oself, &r, rangeStart, rangeEnd) &&
+    if (UnHiliteAndFixupParaAttrRange(oself, &r, rangeStart, rangeEnd) &&
 	paraAttrToken != CA_NULL_ELEMENT)
 	(void) TA_ModifyRun(oself, TRK_PARA_ATTR, r.VTR_start, r.VTR_end,
 			    NULL, NULL, paraAttrToken);
-    TA_ReflectChange(oself);
+    ReflectChangeUpdateGeneric(oself);
 }
 
 /* VisTextParaAttrAdd: the element with a reference (its tabs are not
@@ -373,4 +358,12 @@ static void DiffParaAttr(const VisTextMaxParaAttr *ma,
 	DiffParaAttr(&a, attrs, diffs);
     memcpy(attrs, &a, TA_ParaAttrSize(&a));
     return token;
+}
+
+/* ParaAttrChangeCommon, ParaAttrBorderChangeCommon: the range to make
+ * again differs, here all lines are */
+void ParaAttrChangeCommon(optr o, dword start, dword end,
+		       TA_ModifyCallback *cb, word v)
+{
+    ChangeParaAttr(o, start, end, cb, &v);
 }

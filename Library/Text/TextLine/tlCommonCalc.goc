@@ -24,11 +24,6 @@
 #define PA(l)	((l)->LICL_theParaAttr.VTMPA_paraAttr)
 #define EXT(v)	((v)->TOCV_ext)
 
-static sdword W(const WBFixed *w)
-{
-    return ((sdword) w->WBF_int << 8) + w->WBF_frac;
-}
-
 static void SetW(WBFixed *w, sdword v)
 {
     w->WBF_int = (word) (v >> 8);
@@ -42,7 +37,7 @@ static word Rnd(sdword v)
 
 static LineInfo *Line(LICL_vars *l)
 {
-    return TL_LinePtr(l->LICL_object, l->LICL_line, NULL);
+    return SmallGetLinePointer(l->LICL_object, l->LICL_line, NULL);
 }
 
 static FieldInfo *Field(LICL_vars *l, word field)
@@ -188,36 +183,6 @@ static Boolean FindNextTabStop(LICL_vars *l, TOC_vars *v, word field,
     return TRUE;
 }
 
-/* TabGetPositionAndAttributes: the position and the attributes of the
- * tab a reference names */
-word TL_TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
-				    word endPrevField, TabReference ref,
-				    byte *attr)
-{
-    byte num = ref & TR_REF_NUMBER;
-
-    *attr = TT_LEFT;
-    if (!(ref & 0x80)) {
-	const Tab *tab;
-
-	if (num == RULER_TAB_TO_LEFT_MARGIN)
-	    return PA(l).VTPA_leftMargin;
-	if (num == RULER_TAB_TO_PARA_MARGIN)
-	    return PA(l).VTPA_paraMargin;
-	if (num == RULER_TAB_TO_LINE_LEFT)
-	    return paraStart ? PA(l).VTPA_paraMargin : PA(l).VTPA_leftMargin;
-	tab = &l->LICL_theParaAttr.VTMPA_tabs[PA(l).VTPA_numberOfTabs - num];
-	*attr = tab->T_attr;
-	return tab->T_position;
-    }
-    if (num == OTHER_INTRINSIC_TAB)
-	return (word) (endPrevField + TAB_INTRINSIC_WIDTH);
-    if (num == OTHER_ZERO_WIDTH_TAB)
-	return endPrevField;
-    return (word) (((dword) num * ((dword) PA(l).VTPA_defaultTabs << 2) +
-		    16) >> 5);
-}
-
 /* ---------------------------------------------------------------------
  * the kernel's callbacks
  * ------------------------------------------------------------------- */
@@ -252,7 +217,7 @@ static void CalcHeightCallback(TOC_vars *v, WBFixed height)
 {
     LICL_vars *l = EXT(v).TOCE_passBack;
 
-    if (W(&height) > W(&l->LICL_lineHeight))
+    if (TEXT_WBF(&height) > TEXT_WBF(&l->LICL_lineHeight))
 	l->LICL_lineHeight = height;
 }
 
@@ -317,7 +282,7 @@ static void CalcFieldPosition(LICL_vars *l, TOC_vars *v, word field)
     byte attr;
     FieldInfo *f;
 
-    tab = TL_TabGetPositionAndAttributes(l,
+    tab = TabGetPositionAndAttributes(l,
 		(EXT(v).TOCE_lineFlags & LF_STARTS_PARAGRAPH) != 0, prev,
 		l->LICL_tabReference, &attr);
     l->LICL_lastFieldTabType = attr & TA_TYPE;
@@ -358,7 +323,7 @@ static void CalcFieldPosition(LICL_vars *l, TOC_vars *v, word field)
     l->LICL_lineJustEnd = (word) (just + pos);
     l->LICL_lastFieldJustWidth = just;
     w = (EXT(v).TOCE_lineFlags & (LF_ENDS_IN_CR | LF_ENDS_IN_AUTO_HYPHEN)) ?
-	just : Rnd(W(&EXT(v).TOCE_fieldWidth));
+	just : Rnd(TEXT_WBF(&EXT(v).TOCE_fieldWidth));
     l->LICL_lineEnd = (word) (pos + w);
 }
 
@@ -366,7 +331,7 @@ static void CalcFieldPosition(LICL_vars *l, TOC_vars *v, word field)
 static void SaveNewFieldValues(LICL_vars *l, TOC_vars *v, word field)
 {
     FieldInfo *f = Field(l, field);
-    word width = Rnd(W(&EXT(v).TOCE_fieldWidth));
+    word width = Rnd(TEXT_WBF(&EXT(v).TOCE_fieldWidth));
 
     if (f->FI_tab != l->LICL_tabReference ||
 	f->FI_width != width || f->FI_nChars != (word) EXT(v).TOCE_nChars)
@@ -393,10 +358,10 @@ static void AdjustForLeading(LICL_vars *l, TOC_vars *v)
     if (l->LICL_calcFlags & CF_SAVE_RESULTS) {
 	word blo = leading;
 
-	prev = TL_LinePtr(l->LICL_object, l->LICL_line - 1, NULL);
+	prev = SmallGetLinePointer(l->LICL_object, l->LICL_line - 1, NULL);
 	if (prev->LI_flags & LF_ENDS_PARAGRAPH)
 	    blo = Rnd(((sdword) blo << 8) + PA(l).VTPA_spaceOnBottom);
-	prevDesc = (word) (Rnd(W(&prev->LI_hgt)) - Rnd(W(&prev->LI_blo)));
+	prevDesc = (word) (Rnd(TEXT_WBF(&prev->LI_hgt)) - Rnd(TEXT_WBF(&prev->LI_blo)));
 	EXT(v).TOCE_lineBLO.WBF_int = (word) (blo - prevDesc);
 	EXT(v).TOCE_lineBLO.WBF_frac = 0;
     }
@@ -416,7 +381,7 @@ static void AdjustLineHeight(LICL_vars *l, TOC_vars *v)
 	AdjustForLeading(l, v);
     if (PA(l).VTPA_lineSpacing != 0x0100)
 	SetW(&EXT(v).TOCE_lineHeight,
-	     (sdword) (((dword) W(&EXT(v).TOCE_lineHeight) *
+	     (sdword) (((dword) TEXT_WBF(&EXT(v).TOCE_lineHeight) *
 			PA(l).VTPA_lineSpacing) >> 8));
     if (EXT(v).TOCE_lineFlags & LF_STARTS_PARAGRAPH) {
 	/* AdjustParagraphStart: no space above the first line of the
@@ -431,22 +396,22 @@ static void AdjustLineHeight(LICL_vars *l, TOC_vars *v)
 	if (add || l->LICL_line != l->LICL_regionTopLine) {
 	    sdword s = ((sdword) add << 8) + PA(l).VTPA_spaceOnTop;
 
-	    SetW(&EXT(v).TOCE_lineHeight, W(&EXT(v).TOCE_lineHeight) + s);
-	    SetW(&EXT(v).TOCE_lineBLO, W(&EXT(v).TOCE_lineBLO) + s);
+	    SetW(&EXT(v).TOCE_lineHeight, TEXT_WBF(&EXT(v).TOCE_lineHeight) + s);
+	    SetW(&EXT(v).TOCE_lineBLO, TEXT_WBF(&EXT(v).TOCE_lineBLO) + s);
 	}
     }
     if (EXT(v).TOCE_lineFlags & LF_ENDS_PARAGRAPH)
-	SetW(&EXT(v).TOCE_lineHeight, W(&EXT(v).TOCE_lineHeight) +
+	SetW(&EXT(v).TOCE_lineHeight, TEXT_WBF(&EXT(v).TOCE_lineHeight) +
 	     PA(l).VTPA_spaceOnBottom);
     /* AdjustSingleLineObject: the font's tallest, whatever is in it */
     t = VT(o);
     if (t->VTI_state & VTS_ONE_LINE) {
 	WBFixed *min = ObjVarFindData(o,
 				ATTR_VIS_TEXT_MINIMUM_SINGLE_LINE_HEIGHT);
-	sdword minH = min ? W(min) : 0, h;
+	sdword minH = min ? TEXT_WBF(min) : 0, h;
 	GStateHandle g = VT(o)->VTI_gstate;
 
-	SetW(&EXT(v).TOCE_lineBLO, W(&EXT(v).TOCE_lineBLO) +
+	SetW(&EXT(v).TOCE_lineBLO, TEXT_WBF(&EXT(v).TOCE_lineBLO) +
 	     (sdword) (GrFontMetrics(g, GFMI_ABOVE_BOX) >> 8));
 	h = (sdword) (GrFontMetrics(g, GFMI_MAX_ADJUSTED_HEIGHT) >> 8);
 	SetW(&EXT(v).TOCE_lineHeight, h < minH ? minH : h);
@@ -513,7 +478,7 @@ static void HandleJustification(LICL_vars *l, TOC_vars *v, word fields)
 	break;
     }
     li = Line(l);
-    if (W(&li->LI_spacePad) != pad) {
+    if (TEXT_WBF(&li->LI_spacePad) != pad) {
 	SetW(&li->LI_spacePad, pad);
 	l->LICL_calcFlags |= CF_LINE_CHANGED;
     }
@@ -541,14 +506,14 @@ static void SaveNewLineValues(LICL_vars *l, TOC_vars *v)
 {
     LineInfo *li = Line(l);
     word flags = EXT(v).TOCE_lineFlags;
-    sdword d = W(&EXT(v).TOCE_lineHeight) - W(&li->LI_hgt);
+    sdword d = TEXT_WBF(&EXT(v).TOCE_lineHeight) - TEXT_WBF(&li->LI_hgt);
 
     if (d) {
 	l->LICL_insertedSpace += d;
 	li->LI_hgt = EXT(v).TOCE_lineHeight;
 	l->LICL_calcFlags |= CF_LINE_CHANGED;
     }
-    if (W(&li->LI_blo) != W(&EXT(v).TOCE_lineBLO)) {
+    if (TEXT_WBF(&li->LI_blo) != TEXT_WBF(&EXT(v).TOCE_lineBLO)) {
 	li->LI_blo = EXT(v).TOCE_lineBLO;
 	l->LICL_calcFlags |= CF_LINE_CHANGED;
     }
@@ -609,14 +574,14 @@ void CommonLineCalculate(LICL_vars *l, LineFlags flags)
 	/* AddFieldToLine */
 	field++;
 	if (field >= TL_LineGetFieldCount(o, l->LICL_line)) {
-	    TL_LineSetFieldCount(o, l->LICL_line, (word) (field + 1));
+	    SmallLineAddField(o, l->LICL_line, (word) (field + 1));
 	    l->LICL_calcFlags |= CF_LINE_CHANGED;
 	}
 	v.TOCV_ext.TOCE_otherFlags &= ~TOCOF_IS_FIRST_FIELD;
     }
     /* TruncateLineAtPosition */
     if (TL_LineGetFieldCount(o, l->LICL_line) != (word) (field + 1)) {
-	TL_LineSetFieldCount(o, l->LICL_line, (word) (field + 1));
+	SmallLineAddField(o, l->LICL_line, (word) (field + 1));
 	l->LICL_calcFlags |= CF_LINE_CHANGED;
     }
     (void) old;

@@ -333,7 +333,7 @@ static void DoScrollAction(optr oself, sword pos, word bi)
 
 /* HandlePress: the action; the timer for a repeat (not a drag, but at
  * its press); drawn unless an xor thumb is up */
-static void HandlePress(optr oself, sword pos, word bi)
+void HandlePress(optr oself, sword pos, word bi)
 {
     DownFlags f;
 
@@ -344,22 +344,6 @@ static void HandlePress(optr oself, sword pos, word bi)
     if ((bi & BI_PRESS) ||
 	SBVis(oself)->OLSBI_xorElevOff == NO_XOR_ELEVATOR)
 	@call oself::MSG_VIS_REDRAW_ENTIRE_OBJECT();
-}
-
-/* RepeatScrollIfNeeded: both the timer and the content's redraw in,
- * a part other than the thumb held: pressed again */
-void OLScrollbarRepeatPress(optr oself)
-{
-    OLScrollbarInstance *sb = SBVis(oself);
-    DownFlags f;
-
-    if (sb->OLSBI_optFlags & (OLSOF_REPEAT_SCROLL_PENDING |
-			      OLSOF_TIMER_EXPIRED_PENDING))
-	return;
-    f = sb->OLSBI_state & OLSS_DOWN_FLAGS;
-    if (!f || f == OLSS_DRAG_AREA)
-	return;
-    HandlePress(oself, 0, (word) ((UIFA_SELECT << 8) | BI_PRESS));
 }
 
 /* ---------------------------------------------------------------------

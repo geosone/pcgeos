@@ -102,19 +102,6 @@ static void UpdateSpecific(optr o, word n, const word *items)
 								     items);
 }
 
-/* GenSetBitInByte: the bits of mask set or cleared, the object dirty
- * if they changed; TRUE if changed */
-static Boolean SetBits(optr o, byte *field, byte mask, Boolean set)
-{
-    byte v = set ? (*field | mask) : (*field & ~mask);
-
-    if (v == *field)
-	return FALSE;
-    *field = v;
-    ObjMarkDirty(o);
-    return TRUE;
-}
-
 /*
  * SetSelection: the selection (an identifier, or the chunk for several)
  * and its count stored, indeterminate as passed, not modified; TRUE if
@@ -125,10 +112,10 @@ static Boolean SetSelection(optr o, word num, word sel,
 {
     GenItemGroupInstance *p = GIG(o);
 
-    if (SetBits(o, &p->GIGI_stateFlags, GIGSF_INDETERMINATE,
+    if (GenSetBitInByte(o, &p->GIGI_stateFlags, GIGSF_INDETERMINATE,
 		indeterminate))
 	changed = TRUE;
-    if (SetBits(o, &p->GIGI_stateFlags, GIGSF_MODIFIED, FALSE))
+    if (GenSetBitInByte(o, &p->GIGI_stateFlags, GIGSF_MODIFIED, FALSE))
 	changed = TRUE;
     if (p->GIGI_selection != sel || p->GIGI_numSelections != num) {
 	p->GIGI_selection = sel;
@@ -281,7 +268,7 @@ static void UpdateAllChildren(optr o)
 
 @method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_INDETERMINATE_STATE
 {
-    if (SetBits(oself, &pself->GIGI_stateFlags, GIGSF_INDETERMINATE,
+    if (GenSetBitInByte(oself, &pself->GIGI_stateFlags, GIGSF_INDETERMINATE,
 		indeterminateState))
 	UpdateAllChildren(oself);
 }
@@ -294,7 +281,7 @@ static void UpdateAllChildren(optr o)
 /* modified: the dialog's apply trigger enabled */
 @method GenItemGroupClass, MSG_GEN_ITEM_GROUP_SET_MODIFIED_STATE
 {
-    if (SetBits(oself, &pself->GIGI_stateFlags, GIGSF_MODIFIED,
+    if (GenSetBitInByte(oself, &pself->GIGI_stateFlags, GIGSF_MODIFIED,
 		modifiedState) && modifiedState)
 	@call oself::MSG_GEN_MAKE_APPLYABLE();
 }

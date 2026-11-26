@@ -31,7 +31,7 @@
     p.win = viewWindow;
     p.y = yOrigin;
     p.x = xOrigin;
-    VisContentSendToLayers(oself, message, &p, sizeof(p));
+    VisContentSendToLargeDocumentLayers(oself, message, &p, sizeof(p));
 }
 
 /* VisContentSetInteractionBounds */
@@ -680,7 +680,7 @@ done:
 			       VIS_MASTER, CONTENT_OFFSET(VCNI_targetExcl),
 			       message);
     if (message == MSG_META_LOST_TARGET_EXCL)
-	VisContentUpdateViewTargetInfo(oself);
+	ViewUpdateContentTargetInfo(oself);
 }
 
 /* VisContentAlterFTVMCExcl: focus and target are kept here, the other
@@ -699,7 +699,7 @@ done:
 				  VIS_MASTER, CONTENT_OFFSET(VCNI_targetExcl),
 				  objectWantingControl,
 				  (flags & MAEF_GRAB) | MAEF_TARGET);
-	VisContentUpdateViewTargetInfo(oself);
+	ViewUpdateContentTargetInfo(oself);
 	flags &= ~MAEF_TARGET;
     }
     if (flags & MAEF_MASK_OF_ALL_HIERARCHIES) {
@@ -835,4 +835,31 @@ void VisContentInvalidate(optr oself)
 			 MSG_VIS_GRAB_MOUSE,
 			 MSG_VIS_RELEASE_MOUSE
 {
+}
+
+/* ViewUpdateContentTargetInfo: the view told the target here and its
+ * class (called: the structure is the caller's) */
+void ViewUpdateContentTargetInfo(optr oself)
+{
+    VisContentInstance *c = ContentPart(oself);
+    ViewTargetInfo info;
+    optr view = c->VCNI_view;
+
+    memset(&info, 0, sizeof(info));
+    info.VTI_content.TR_object = oself;
+    info.VTI_content.TR_class = @call oself::MSG_META_GET_CLASS();
+    info.VTI_target.TR_object = c->VCNI_targetExcl.FTVMC_OD;
+    if (info.VTI_target.TR_object)
+	info.VTI_target.TR_class =
+	    @call info.VTI_target.TR_object::MSG_META_GET_CLASS();
+    if (view)
+	@call view::MSG_GEN_VIEW_UPDATE_CONTENT_TARGET_INFO(&info);
+}
+
+/* VisContentSendToLargeDocumentLayers */
+void VisContentSendToLargeDocumentLayers(optr oself, Message msg, const void *params,
+			 word size)
+{
+    if (ContentPart(oself)->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL)
+	VisSendToChildren(oself, msg, params, size);
 }

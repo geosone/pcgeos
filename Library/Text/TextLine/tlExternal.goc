@@ -18,7 +18,7 @@ dword TL_LineFromPosition(optr o, sword y, Boolean *below)
     if (below)
 	*below = FALSE;
     for (i = 0; i < n; i++) {
-	const LineInfo *li = TL_LinePtr(o, i, NULL);
+	const LineInfo *li = SmallGetLinePointer(o, i, NULL);
 
 	pos -= ((sdword) li->LI_hgt.WBF_int << 8) + li->LI_hgt.WBF_frac;
 	if (pos < 0)

@@ -1,0 +1,35 @@
+/*
+ * textSuspend.goc -- after textSuspend.asm: This file contains...
+ */
+@include "textInt.goh"
+#include <font.h>
+#include <fontID.h>
+#include <chunkarr.h>
+
+/*
+ * ReflectChangeUpdateGeneric (textSuspend.asm): a generic object's
+ * instance data updated; the lines of the range made again and drawn,
+ * the selection shown again; the object user modified, told
+ * MSG_VIS_TEXT_ATTRIBUTE_CHANGE.  The range is the whole object.
+ */
+void ReflectChangeUpdateGeneric(optr o)
+{
+    dword size = TS_GetTextSize(o);
+    WBFixed before = VT(o)->VTI_height;
+    Boolean lines;
+
+    if (VT(o)->VI_typeFlags & VTF_IS_GEN)
+	@call o::MSG_VIS_TEXT_UPDATE_GENERIC();
+    lines = VT(o)->VTI_lines != 0;
+    if (lines) {
+	TextRecalc(o, 0, size, size);
+	TextScreenUpdate(o);
+	TextScrollOneLine(o, VT(o)->VTI_selectStart);
+    }
+    EditHilite(o);
+    TextGStateDestroy(o);
+    if (lines)
+	SmallRegionAdjustHeight(o, before);
+    TextMarkUserModified(o);
+    @call o::MSG_VIS_TEXT_ATTRIBUTE_CHANGE();
+}

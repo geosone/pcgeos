@@ -61,64 +61,6 @@
 
 #define TINY_SCREEN_WIDTH_THRESHOLD		512
 
-/*
- * OLFSBuildChangeDrivePopup: an item for each drive (not the removable
- * ones with FSA_SHOW_FIXED_DISKS_ONLY, not the read-only ones with
- * FSA_SHOW_WRITABLE_DISKS_ONLY), its identifier the drive's number
- * with the DriveStatus above it, its moniker the drive's name and, for
- * a fixed disk, the volume's.
- */
-static void BuildChangeDrivePopup(optr o)
-{
-    optr popup = OLFSUIObj(o, @OLFileSelectorChangeDrivePopup);
-    FileSelectorAttrs attrs = GFS(o)->GFSI_attrs;
-    word drive;
-
-    if ((attrs & FSA_HAS_CHANGE_DRIVE_LIST) && popup) {
-	OLFSDestroyListChildren(popup, 0);
-	for (drive = 0; drive < DRIVE_MAX_DRIVES; drive++) {
-	    char name[FILE_LONGNAME_BUFFER_SIZE];
-	    word status;
-	    optr item;
-
-	    if ((attrs & FSA_SHOW_WRITABLE_DISKS_ONLY)) {
-		word ext = DriveGetExtStatus(drive);
-
-		if (!ext || (ext & DES_READ_ONLY))
-		    continue;
-	    }
-	    status = DriveGetStatus(drive);
-	    if (!status)
-		continue;
-	    if ((attrs & FSA_SHOW_FIXED_DISKS_ONLY) &&
-		(status & DS_MEDIA_REMOVABLE))
-		continue;
-	    item = OLFSCreateAndInitGenItem(popup,
-			(word) (drive | ((status & 0xff) << 8)));
-	    OLFSStuffDriveAndVolumeName(name, sizeof(name), drive,
-				    SDAVNF_VOLUME_ONLY_FOR_FIXED, status, 0);
-	    OLFSReplaceMonikerText(item, name);
-	}
-    }
-    OLFSSelectCurrentDriveInChangeDrivePopup(o);
-}
-
-/* OLFSMarkDirtyAndRescanIfRealized: a criterion has changed: scanned
- * again if on screen (when the suspension ends if suspended).  Whether
- * it was scanned. */
-static Boolean MarkDirtyAndRescanIfRealized(optr o)
-{
-    ObjMarkDirty(o);
-    if (!OLFSIsRealized(o))
-	return FALSE;
-    if (FS(o)->OLFSI_state & OLFSS_SUSPENDED) {
-	FS(o)->OLFSI_state |= OLFSS_RESCAN_NEEDED;
-	return FALSE;
-    }
-    @call o::MSG_GEN_FILE_SELECTOR_RESCAN();
-    return TRUE;
-}
-
 /* OLFileSelectorGetIDs: the identifiers of the current directory (one
  * for each place of a standard path) in the vardata, for the file
  * change notifications; not saved to state */
@@ -154,7 +96,7 @@ static FilePathID *DirIDs(optr o, word *count)
  * back to the virtual root, or to the document directory */
 static void CloseForNotify(optr o)
 {
-    GenFilePath *vr = OLFSVirtualRoot(o);
+    GenFilePath *vr = OLFSHaveVirtualRoot(o);
 
     if (vr) {
 	char root[PATH_BUFFER_SIZE];
@@ -208,7 +150,7 @@ static DiskHandle CheckRemovable(DiskHandle disk)
     (void) disk;
     GetIDs(oself);
     if (FS(oself)->VI_attrs & VA_REALIZED)
-	(void) MarkDirtyAndRescanIfRealized(oself);
+	(void) OLFSMarkDirtyAndRescanIfRealized(oself);
     return FALSE;
 }
 @method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_FILE_ATTRS
@@ -216,21 +158,21 @@ static DiskHandle CheckRemovable(DiskHandle disk)
     (void) pself;
     (void) setAttrs;
     (void) clearAttrs;
-    (void) MarkDirtyAndRescanIfRealized(oself);
+    (void) OLFSMarkDirtyAndRescanIfRealized(oself);
 }
 
 @method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_FILE_CRITERIA
 {
     (void) pself;
     (void) fileCriteria;
-    (void) MarkDirtyAndRescanIfRealized(oself);
+    (void) OLFSMarkDirtyAndRescanIfRealized(oself);
 }
 
 @method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_MASK
 {
     (void) pself;
     (void) mask;
-    (void) MarkDirtyAndRescanIfRealized(oself);
+    (void) OLFSMarkDirtyAndRescanIfRealized(oself);
 }
 
 @method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_GEODE_ATTRS
@@ -238,7 +180,7 @@ static DiskHandle CheckRemovable(DiskHandle disk)
     (void) pself;
     (void) matchGeodeAttrs;
     (void) mismatchGeodeAttrs;
-    (void) MarkDirtyAndRescanIfRealized(oself);
+    (void) OLFSMarkDirtyAndRescanIfRealized(oself);
 }
 
 @method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_TOKEN
@@ -246,7 +188,7 @@ static DiskHandle CheckRemovable(DiskHandle disk)
     (void) pself;
     (void) tokenChars;
     (void) manufacturerID;
-    (void) MarkDirtyAndRescanIfRealized(oself);
+    (void) OLFSMarkDirtyAndRescanIfRealized(oself);
 }
 
 @method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_CREATOR
@@ -254,33 +196,7 @@ static DiskHandle CheckRemovable(DiskHandle disk)
     (void) pself;
     (void) tokenChars;
     (void) manufacturerID;
-    (void) MarkDirtyAndRescanIfRealized(oself);
-}
-
-/* OLFSSetUsableOnFlags */
-static void SetUsable(optr obj, Boolean usable)
-{
-    if (!obj)
-	return;
-    if (usable)
-	@call obj::MSG_GEN_SET_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
-    else
-	@call obj::MSG_GEN_SET_NOT_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
-}
-
-/* OLFSTurnOffGadgetry: the gadgets the attributes ask for */
-static void TurnOffGadgetry(optr o)
-{
-    FileSelectorAttrs a = GFS(o)->GFSI_attrs;
-
-    SetUsable(OLFSUIObj(o, @OLFileSelectorDocumentButton),
-	      (a & FSA_HAS_DOCUMENT_BUTTON) != 0);
-    SetUsable(OLFSUIObj(o, @OLFileSelectorChangeDirectoryPopup),
-	      (a & FSA_HAS_CHANGE_DIRECTORY_LIST) != 0);
-    SetUsable(OLFSUIObj(o, @OLFileSelectorChangeDrivePopup),
-	      (a & FSA_HAS_CHANGE_DRIVE_LIST) != 0);
-    SetUsable(OLFSUIObj(o, @OLFileSelectorFileList),
-	      (a & FSA_HAS_FILE_LIST) != 0);
+    (void) OLFSMarkDirtyAndRescanIfRealized(oself);
 }
 
 @method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_ATTRS
@@ -288,9 +204,9 @@ static void TurnOffGadgetry(optr o)
     (void) attributes;
     if (!pself->OLFSI_uiBlock)
 	return;
-    TurnOffGadgetry(oself);
-    BuildChangeDrivePopup(oself);
-    (void) MarkDirtyAndRescanIfRealized(oself);
+    OLFSTurnOffGadgetry(oself);
+    OLFSBuildChangeDrivePopup(oself);
+    (void) OLFSMarkDirtyAndRescanIfRealized(oself);
 }
 
 /* OLFileSelectorAddVarData, ...DeleteVarData: the match attributes are
@@ -299,7 +215,7 @@ static void VarDataChanged(optr o, word type)
 {
     if (type >= ATTR_GEN_FILE_SELECTOR_TOKEN_MATCH &&
 	type <= ATTR_GEN_FILE_SELECTOR_NAME_MASK)
-	(void) MarkDirtyAndRescanIfRealized(o);
+	(void) OLFSMarkDirtyAndRescanIfRealized(o);
 }
 
 @method OLFileSelectorClass, MSG_META_ADD_VAR_DATA
@@ -487,7 +403,7 @@ static void ProcessHints(optr o)
     (void) GCNListAdd(oself, MANUFACTURER_ID_GEOWORKS, GCNSLT_FILE_SYSTEM);
     ObjBlockSetOutput(bh, oself);
     HandleScalableUIData(oself);
-    TurnOffGadgetry(oself);
+    OLFSTurnOffGadgetry(oself);
     group = ConstructOptr(bh, OptrToChunk(@OLFileSelectorGroup));
     GenSetUpwardLink(OptrToHandle(group), OptrToChunk(group), oself);
     ProcessHints(oself);
@@ -576,9 +492,9 @@ static void DestroyBlock(optr o)
 	ObjVarDeleteData(oself, ATTR_GEN_PATH_DATA);
 	ObjVarDeleteData(oself, TEMP_GEN_PATH_SAVED_DISK_HANDLE);
     }
-    if (OLFSVirtualRoot(oself) && !OLFSUnderVirtualRoot(oself, NULL))
+    if (OLFSHaveVirtualRoot(oself) && !OLFSIsCurDirVirtualRootOrUnderVirtualRoot(oself, NULL))
 	CloseForNotify(oself);
-    BuildChangeDrivePopup(oself);
+    OLFSBuildChangeDrivePopup(oself);
     FS(oself)->OLFSI_state &= ~OLFSS_VIS_OPEN_ERROR;
     @call oself::MSG_GEN_FILE_SELECTOR_RESCAN();
     if (FS(oself)->OLFSI_state & OLFSS_VIS_OPEN_ERROR)
@@ -596,7 +512,7 @@ static void DestroyBlock(optr o)
 {
     (void) pself;
     @callsuper();
-    BuildChangeDrivePopup(oself);
+    OLFSBuildChangeDrivePopup(oself);
 }
 
 static Boolean DiskIsOurs(optr o, DiskHandle disk)
@@ -665,18 +581,18 @@ static void NotifyFileChange(optr o, word type,
     switch (type) {
     case FCNT_CREATE:
 	if (IDIsOurs(o, d))
-	    (void) MarkDirtyAndRescanIfRealized(o);
+	    (void) OLFSMarkDirtyAndRescanIfRealized(o);
 	break;
     case FCNT_RENAME:
     case FCNT_DELETE:
 	if (IDIsOurs(o, d))
 	    CloseForNotify(o);
 	else if (IDIsKids(o, d))
-	    (void) MarkDirtyAndRescanIfRealized(o);
+	    (void) OLFSMarkDirtyAndRescanIfRealized(o);
 	break;
     case FCNT_ATTRIBUTES:
 	if (IDIsKids(o, d))
-	    (void) MarkDirtyAndRescanIfRealized(o);
+	    (void) OLFSMarkDirtyAndRescanIfRealized(o);
 	break;
     case FCNT_DISK_FORMAT:
 	if (DiskIsOurs(o, d->FCND_disk))
@@ -690,7 +606,7 @@ static void NotifyFileChange(optr o, word type,
 
 	if ((ours & DISK_IS_STD_PATH_MASK) &&
 	    FileComparePaths("", d->FCND_disk, "", ours) <= PCT_SUBDIR)
-	    (void) MarkDirtyAndRescanIfRealized(o);
+	    (void) OLFSMarkDirtyAndRescanIfRealized(o);
 	break;
     }
     default:

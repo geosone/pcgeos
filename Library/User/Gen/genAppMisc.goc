@@ -94,27 +94,6 @@ optr GenAppProcessOptr(void)
     return ConstructOptr(GeodeGetProcessHandle(), 0);
 }
 
-/* SendToGenAppGCNList: the message (goc -cg parameters) to each object
- * on one of the application's GCN lists */
-void GenAppSendToGCNList(optr oself, word listType, Message msg,
-			  const void *params, word size)
-{
-    struct {
-	GCNListSendFlags f; EventHandle e; MemHandle b; word t;
-	ManufacturerID m;
-    } p;
-    EventHandle ev;
-
-    CObjMessageP(MF_RECORD, 0, msg, (void *) params, size, &ev, sizeof(ev));
-    p.f = 0;
-    p.e = ev;
-    p.b = 0;
-    p.t = listType;
-    p.m = MANUFACTURER_ID_GEOWORKS;
-    CObjMessageP(MF_CALL, oself, MSG_META_GCN_LIST_SEND, &p, sizeof(p),
-		 NULL, 0);
-}
-
 /* ---------------------------------------------------------------------
  * State
  * ------------------------------------------------------------------- */
@@ -203,7 +182,7 @@ optr GenAppIACPConnects(optr oself)
 	p.f = flags;
 	p.alb = appLaunchBlock;
 	p.extra = extraState;
-	GenAppSendToGCNList(oself, MGCNLT_ACTIVE_LIST, MSG_META_ATTACH_OBJECT, &p,
+	SendToGenAppGCNList(oself, MGCNLT_ACTIVE_LIST, MSG_META_ATTACH_OBJECT, &p,
 		      sizeof(p));
     }
     @call oself::MSG_GEN_APPLICATION_MARK_APP_COMPLETELY_BUSY();
@@ -216,7 +195,7 @@ optr GenAppIACPConnects(optr oself)
 
 	p.f = uwf;
 	p.m = VUM_NOW;
-	GenAppSendToGCNList(oself, GAGCNLT_WINDOWS, MSG_META_UPDATE_WINDOW, &p,
+	SendToGenAppGCNList(oself, GAGCNLT_WINDOWS, MSG_META_UPDATE_WINDOW, &p,
 		      sizeof(p));
     }
     if (!(AppPart(oself)->GAI_launchFlags & ALF_DO_NOT_OPEN_ON_TOP))

@@ -103,17 +103,6 @@ static void SetEnabled(optr obj, Boolean enabled)
 	@call obj::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
 }
 
-/* SendToTargetDocRegs, ...Frame: to the target document, through the
- * model */
-void OLDCSendToTargetDoc(optr o, Message msg, const void *params, word size)
-{
-    EventHandle ev;
-
-    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass, msg,
-		 params, size, &ev, sizeof(ev));
-    @call o::MSG_META_SEND_CLASSED_EVENT(ev, (TravelOption) TO_MODEL);
-}
-
 /*
  * The two triggers that switch the file selector between its simple
  * and its full form: the one for the form it has not is shown, none if
@@ -1155,7 +1144,7 @@ static void SetupMainDialog(optr o, MemHandle block)
     if (GDC(oself)->GDCI_docAttrs & (GDA_UNTITLED | GDA_READ_ONLY))
 	@call oself::MSG_GEN_DOCUMENT_CONTROL_INITIATE_SAVE_AS_DOC();
     else
-	OLDCSendToTargetDoc(oself, MSG_GEN_DOCUMENT_SAVE, NULL, 0);
+	SendToTargetDocRegs(oself, MSG_GEN_DOCUMENT_SAVE, NULL, 0);
 }
 
 /* ---------------------------------------------------------------------
@@ -1368,7 +1357,7 @@ static void SetupForType(optr o, MemHandle block)
 	return;
     list = SUMMONS(block, @TypeList);
     type = @call list::MSG_GEN_ITEM_GROUP_GET_SELECTION();
-    OLDCSendToTargetDoc(oself, MSG_GEN_DOCUMENT_CHANGE_TYPE, &type,
+    SendToTargetDocRegs(oself, MSG_GEN_DOCUMENT_CHANGE_TYPE, &type,
 			sizeof(type));
     OLDCRemoveSummons(oself);
 }
@@ -1401,7 +1390,7 @@ static void SetupForPassword(optr o, MemHandle block)
     memset(password, 0, sizeof(password));
     text = SUMMONS(block, @PasswordText);
     (void) @call text::MSG_VIS_TEXT_GET_ALL_PTR(password);
-    OLDCSendToTargetDoc(oself, MSG_GEN_DOCUMENT_CHANGE_PASSWORD, password,
+    SendToTargetDocRegs(oself, MSG_GEN_DOCUMENT_CHANGE_PASSWORD, password,
 			sizeof(password));
     OLDCRemoveSummons(oself);
 }

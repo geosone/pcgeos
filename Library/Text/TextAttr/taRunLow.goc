@@ -27,7 +27,6 @@
 #include <chunkarr.h>
 #include <char.h>
 
-
 /* ---------------------------------------------------------------------
  * The run array (taRunLow.asm)
  * ------------------------------------------------------------------- */
@@ -119,3 +118,11 @@ word TA_RunForPosition(optr o, TextRunKind kind, dword pos, Boolean left)
  * The runs after a replacement (UpdateRun)
  * ------------------------------------------------------------------- */
 
+/* RunArrayDelete */
+void RunArrayDelete(optr o, TextRunKind kind, word i)
+{
+    optr a = TA_RunArray(o, kind);
+
+    ChunkArrayDelete(a, ChunkArrayElementToPtr(a, i, NULL));
+    ObjMarkDirty(o);
+}

@@ -58,25 +58,11 @@
  * The state
  * ------------------------------------------------------------------- */
 
-/* GenSetBitInByte */
-static Boolean SetFlag(optr o, GenTextStateFlags mask, Boolean set)
-{
-    GenTextInstance *g = GTX(o);
-    GenTextStateFlags f = set ? (g->GTXI_stateFlags | mask)
-			      : (g->GTXI_stateFlags & ~mask);
-
-    if (f == g->GTXI_stateFlags)
-	return FALSE;
-    g->GTXI_stateFlags = f;
-    ObjMarkDirty(o);
-    return TRUE;
-}
-
 /* a change is the specific part's too (the text drawn in a 50%
  * pattern) */
 @method GenTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE
 {
-    if (SetFlag(oself, GTSF_INDETERMINATE, indeterminateState) &&
+    if (GenSetBitInByte(oself, &GTX(oself)->GTXI_stateFlags, GTSF_INDETERMINATE, indeterminateState) &&
 	GenCheckIfSpecGrown(oself))
 	@callsuper();
 }
@@ -89,7 +75,7 @@ static Boolean SetFlag(optr o, GenTextStateFlags mask, Boolean set)
 /* a change is the specific part's too; modified now: applyable */
 @method GenTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE
 {
-    if (!SetFlag(oself, GTSF_MODIFIED, modifiedState))
+    if (!GenSetBitInByte(oself, &GTX(oself)->GTXI_stateFlags, GTSF_MODIFIED, modifiedState))
 	return;
     if (GenCheckIfSpecGrown(oself))
 	@callsuper();

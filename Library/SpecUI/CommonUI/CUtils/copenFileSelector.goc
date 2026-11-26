@@ -100,17 +100,6 @@ DiskHandle OLFSCurPath(optr o, GenFilePath **path)
 			TEMP_GEN_PATH_SAVED_DISK_HANDLE, path);
 }
 
-/* OLFSGetCurrentDrive */
-word OLFSCurDrive(optr o, DiskHandle *disk)
-{
-    GenFilePath *p;
-    DiskHandle d = OLFSCurPath(o, &p);
-
-    if (disk)
-	*disk = d;
-    return DiskGetDrive(d);
-}
-
 /* the full path of the object's directory from the root of its disk
  * (no drive name); the disk */
 DiskHandle OLFSFullPath(optr o, char *buf, word size)
@@ -157,42 +146,11 @@ OLFileSelectorEntry *OLFSLockEntry(optr o, word n)
  * The virtual root
  * ------------------------------------------------------------------- */
 
-/* OLFSHaveVirtualRoot */
-GenFilePath *OLFSVirtualRoot(optr o)
-{
-    if (!(GFS(o)->GFSI_attrs & FSA_USE_VIRTUAL_ROOT))
-	return NULL;
-    return ObjVarFindData(o, ATTR_GEN_FILE_SELECTOR_VIRTUAL_ROOT);
-}
-
-/* OLFSIsCurDirVirtualRootOrUnderVirtualRoot: PCT_EQUAL or PCT_SUBDIR
- * in *how */
-Boolean OLFSUnderVirtualRoot(optr o, PathCompareType *how)
-{
-    GenFilePath *p, *vr;
-    DiskHandle d;
-    char cur[PATH_BUFFER_SIZE], root[PATH_BUFFER_SIZE];
-    DiskHandle vd;
-    PathCompareType t;
-
-    if (!OLFSVirtualRoot(o))
-	return FALSE;
-    d = OLFSCurPath(o, &p);		/* (the block may move) */
-    OLFSStrCopy(cur, p->GFP_path, sizeof(cur));
-    vr = OLFSVirtualRoot(o);
-    vd = vr->GFP_disk;
-    OLFSStrCopy(root, vr->GFP_path, sizeof(root));
-    t = FileComparePaths(root, vd, cur, d);
-    if (how)
-	*how = t;
-    return t == PCT_EQUAL || t == PCT_SUBDIR;
-}
-
 Boolean OLFSIsVirtualRoot(optr o)
 {
     PathCompareType t;
 
-    return OLFSUnderVirtualRoot(o, &t) && t == PCT_EQUAL;
+    return OLFSIsCurDirVirtualRootOrUnderVirtualRoot(o, &t) && t == PCT_EQUAL;
 }
 
 /* ---------------------------------------------------------------------
@@ -234,58 +192,6 @@ const char *OLFSLastElement(const char *path)
 	if (*path == '\\')
 	    last = path + 1;
     return last;
-}
-
-/* up a directory (not above a virtual root): the directory left is the
- * suggested selection of its parent's list */
-static void UpDirectory(optr o)
-{
-    char path[PATH_BUFFER_SIZE];
-
-    if (OLFSIsVirtualRoot(o))
-	return;
-    (void) OLFSFullPath(o, path, sizeof(path));
-    if (!(path[0] == '\\' && !path[1]))
-	OLFSStrCopy(GFS(o)->GFSI_selection, OLFSLastElement(path),
-		sizeof(GenFileSelectorSelection));
-    (void) @call o::MSG_GEN_PATH_SET("..", 0);
-}
-
-/*
- * HandleFileSelectorUserAction: a press on an entry tells the
- * destination; a double press (GFSEF_OPEN) also opens a directory, on
- * the first entry (the current directory) it goes up
- */
-void OLFSHandleUserAction(optr o, word entry, Boolean doublePress)
-{
-    FileSelectorAttrs attrs = GFS(o)->GFSI_attrs;
-    OLFileSelectorEntry e;
-    Boolean has;
-
-    if ((FS(o)->OLFSI_state & OLFSS_SHOW_PARENT_DIR) && !entry) {
-	if (!doublePress) {
-	    OLFSBuildEntryFlagsAndSendAD(o, 0);
-	    OLFSShowCurrentDir(o);
-	} else if (attrs & FSA_ALLOW_CHANGE_DIRS)
-	    UpDirectory(o);
-	return;
-    }
-    if (entry == OLFS_UP_DIRECTORY_ENTRY_NUM) {
-	UpDirectory(o);
-	return;
-    }
-    OLFSBuildEntryFlagsAndSendADLow(o, entry, doublePress ? GFSEF_OPEN : 0,
-				&e, &has);
-    if (!has)
-	return;
-    if (!doublePress) {
-	OLFSShowCurrentDir(o);
-	return;
-    }
-    if (!(attrs & FSA_ALLOW_CHANGE_DIRS) || !(e.OLFSE_fileAttrs & FA_SUBDIR))
-	return;
-    if (@call o::MSG_OL_FILE_SELECTOR_PATH_SET(e.OLFSE_name, 0))
-	OLFSNotifyUserOfDiskError();
 }
 
 /* ---------------------------------------------------------------------

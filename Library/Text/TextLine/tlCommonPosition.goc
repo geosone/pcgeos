@@ -61,7 +61,7 @@ dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
 			  sword *x, Boolean *over)
 {
     word size, fields, f;
-    LineInfo *li = TL_LinePtr(o, line, &size);
+    LineInfo *li = SmallGetLinePointer(o, line, &size);
     dword cur = TL_LineToOffsetStart(o, line);
     LineFlags flags;
     WWFixedAsDWord pad;
@@ -72,7 +72,7 @@ dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
 
     if (!over)
 	over = &dummy;
-    li = TL_LinePtr(o, line, &size);
+    li = SmallGetLinePointer(o, line, &size);
     flags = li->LI_flags;
     pad = ((dword) li->LI_spacePad.WBF_int << 16) |
 	  ((dword) li->LI_spacePad.WBF_frac << 8);

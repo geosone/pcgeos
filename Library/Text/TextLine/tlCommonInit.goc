@@ -1,0 +1,19 @@
+/*
+ * tlCommonInit.goc -- after tlCommonInit.asm: Code for initializing
+ * lines and fields.
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+
+#define INIT_LINE_FLAGS \
+	(LF_STARTS_PARAGRAPH | LF_ENDS_PARAGRAPH | LF_ENDS_IN_NULL)
+#define INIT_FIELD_TAB_REFERENCE \
+	((TRT_OTHER << 7) | RULER_TAB_TO_LINE_LEFT)
+
+/* CommonInitLineAndField */
+void CommonInitLineAndField(LineInfo *li)
+{
+    memset(li, 0, TL_LINE_SIZE(1));
+    li->LI_flags = INIT_LINE_FLAGS;
+    li->LI_firstField.FI_tab = INIT_FIELD_TAB_REFERENCE;
+}

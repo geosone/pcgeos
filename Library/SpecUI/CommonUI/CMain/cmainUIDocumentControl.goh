@@ -24,7 +24,7 @@ extern void OLDCEnsureTemplateDir(optr o);
 
 /* cmainUIDocOperations.goc */
 extern void OLDCRemoveSummons(optr o);
-extern void OLDCSendToTargetDoc(optr o, Message msg, const void *params,
+extern void SendToTargetDocRegs(optr o, Message msg, const void *params,
 				word size);
 
 #endif

@@ -1,0 +1,39 @@
+/*
+ * tlTabUtils.goc -- after tlTabUtils.asm: Utility routines for accessing
+ * tabs.
+ */
+@include "textInt.goh"
+#include <font.h>
+#include <char.h>
+
+#define PA(l)	((l)->LICL_theParaAttr.VTMPA_paraAttr)
+
+/* TabGetPositionAndAttributes: the position and the attributes of the
+ * tab a reference names */
+word TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
+				    word endPrevField, TabReference ref,
+				    byte *attr)
+{
+    byte num = ref & TR_REF_NUMBER;
+
+    *attr = TT_LEFT;
+    if (!(ref & 0x80)) {
+	const Tab *tab;
+
+	if (num == RULER_TAB_TO_LEFT_MARGIN)
+	    return PA(l).VTPA_leftMargin;
+	if (num == RULER_TAB_TO_PARA_MARGIN)
+	    return PA(l).VTPA_paraMargin;
+	if (num == RULER_TAB_TO_LINE_LEFT)
+	    return paraStart ? PA(l).VTPA_paraMargin : PA(l).VTPA_leftMargin;
+	tab = &l->LICL_theParaAttr.VTMPA_tabs[PA(l).VTPA_numberOfTabs - num];
+	*attr = tab->T_attr;
+	return tab->T_position;
+    }
+    if (num == OTHER_INTRINSIC_TAB)
+	return (word) (endPrevField + TAB_INTRINSIC_WIDTH);
+    if (num == OTHER_ZERO_WIDTH_TAB)
+	return endPrevField;
+    return (word) (((dword) num * ((dword) PA(l).VTPA_defaultTabs << 2) +
+		    16) >> 5);
+}

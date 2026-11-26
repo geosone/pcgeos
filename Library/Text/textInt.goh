@@ -66,7 +66,7 @@ extern void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a);
 /* ReflectChangeUpdateGeneric: after an attribute changed, the lines
  * made again and drawn (with the object's gstate), the selection
  * shown, the object told */
-extern void TA_ReflectChange(optr o);
+extern void ReflectChangeUpdateGeneric(optr o);
 
 /* TextAttr/taRunLow.goc and beside: the attribute runs (VTSF_MULTIPLE_CHAR_ATTRS,
  * VTSF_MULTIPLE_PARA_ATTRS) */
@@ -167,10 +167,10 @@ extern void TextGStateDestroy(optr o);
 extern void TL_LineStorageCreate(optr o);
 extern void TL_LineStorageDestroy(optr o);
 extern dword TL_LineGetCount(optr o);
-extern LineInfo *TL_LinePtr(optr o, dword line, word *size);
+extern LineInfo *SmallGetLinePointer(optr o, dword line, word *size);
 extern void TL_LineInsert(optr o, dword line, word count);
 extern void TL_LineDelete(optr o, dword line, word count);
-extern void TL_LineSetFieldCount(optr o, dword line, word fields);
+extern void SmallLineAddField(optr o, dword line, word fields);
 extern word TL_LineGetFieldCount(optr o, dword line);
 extern dword TL_LineGetCharCount(const LineInfo *li);
 extern void TL_LineSetCharCount(LineInfo *li, dword count);
@@ -219,7 +219,7 @@ typedef struct {
 
 /* TextLine/tlCommonCalc.goc */
 extern void TL_LineCalculate(LICL_vars *l, LineFlags flags);
-extern word TL_TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
+extern word TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
 					   word endPrevField,
 					   TabReference ref, byte *attr);
 
@@ -227,7 +227,7 @@ extern word TL_TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
 extern void T_GetNewParaAttr(LICL_vars *l, dword pos);
 extern void T_EnsureCorrectParaAttr(LICL_vars *l, dword pos);
 extern void TextCompleteRecalc(optr o);
-void TextHeightNotify(optr o, WBFixed before);
+void SmallRegionAdjustHeight(optr o, WBFixed before);
 extern void TextRecalc(optr o, dword start, dword inserted, dword deleted);
 
 /* Text/textMethodDraw.goc */
@@ -238,7 +238,7 @@ extern void TextDraw(optr o, byte flags, Boolean onlyMarked);
 extern void TextScreenUpdate(optr o);
 /* the object's gstate moved to the text (inside the margins) and
  * clipped to it; between GrSaveState and GrRestoreState */
-extern void TextGStateToText(optr o, Boolean print);
+extern void SmallRegionTransformGState(optr o, Boolean print);
 
 /* TextLine/tlCommonPosition.goc: positions on a line (from its left
  * edge, LI_adjustment), the line at a height */
@@ -278,53 +278,98 @@ dword SmallLineToOffsetStart(optr o, dword line);
 dword SmallLineFromOffsetGetStart(optr o, dword offset, Boolean first, dword *start);
 WBFixed SmallLineGetTop(optr o, dword line);
 
-/* taParaAttr.goc and taAttr.goc */
+/* taAttr.goc (for taParaAttr.goc) */
 void SelectTab(optr o, word pos);
 
-/* taRunLow.goc and taElement.goc */
+/* taElement.goc (for taRunLow.goc) */
 word GetInsertionElement(optr o);
 word ClearInsertionElement(optr o, Boolean unref);
 void SetInsertionElement(optr o, word token);
 
-/* taRunLow.goc and taRunManip.goc */
+/* taRunManip.goc (for taRunLow.goc) */
 optr TA_RunArray(optr o, TextRunKind kind);
 void TA_SetRunPos(optr o, TextRunKind kind, word i, dword pos);
 Boolean TA_RunAtEnd(dword pos);
 dword CoalesceRun(optr o, TextRunKind kind);
 
-/* tslCursor.goc and tslMethodCursor.goc */
+/* tslMethodCursor.goc (for tslCursor.goc) */
 void TextTimerStart(optr o, Message msg);
 
-/* tslInvert.goc and tslMisc.goc */
+/* tslMisc.goc (for tslInvert.goc) */
 void InvertRange(optr o, dword start, dword end);
 
-/* tslKbdShortcuts.goc and tslUtils.goc */
+/* tslUtils.goc (for tslKbdShortcuts.goc) */
 Boolean TSL_IsWordPart(optr o, dword offset);
 dword FindNextWordEdge(optr o, dword off);
 dword FindPreviousWordEdge(optr o, dword off);
 dword FindPreviousParagraphEdge(optr o, dword off);
 dword FindNextParagraphEdge(optr o, dword off);
 
-/* taRunLow.goc and taRunManip.goc */
+/* taRunLow.goc (for taRunManip.goc) */
 TextRunArrayElement *TA_Run(optr o, TextRunKind kind, word i);
 void TA_RunInsert(optr o, TextRunKind kind, word i, dword pos,
 	word token);
 
-/* taCharAttr.goc and taAttr.goc */
+/* taCharAttr.goc (for taAttr.goc) */
 Boolean FixupRange(optr o, VisTextRange *r, dword start, dword end);
 
-/* taParaAttr.goc and taAttr.goc */
+/* taParaAttr.goc (for taAttr.goc) */
 void ChangeParaAttr(optr o, dword start, dword end,
 	TA_ModifyCallback *cb, void *data);
 
-/* tlSmallStorage.goc and tlSmallLineInfo.goc */
+/* tlSmallStorage.goc (for tlSmallLineInfo.goc) */
 optr Lines(optr o);
 
-/* tslCursor.goc and tslMethodCursor.goc */
+/* tslCursor.goc (for tslMethodCursor.goc) */
 Boolean CursorNoFocus(optr o);
 void CursorToggle(optr o);
 
-/* tslMain.goc and textCompatibility.goc */
+/* tslMain.goc (for textCompatibility.goc) */
 void SelectRange(optr o, dword start, dword end);
+
+/* a WBFixed as a 24.8 number */
+#define TEXT_WBF(w)	(((sdword) (w)->WBF_int << 8) + (w)->WBF_frac)
+
+/* textUtils.goc (for textInstance.goc) */
+void SendToTextOutputLowIfNotSelf(optr o, Message msg, const void *args,
+	word size);
+
+/* taRunQuery.goc (for textMethodGeometry.goc) */
+word TA_CharAttrRunSetupGStateForCalc(optr o, GFM_info info);
+
+/* taCharAttr.goc (for taAttr.goc) */
+void CharAttrChangeCommon(optr o, dword start, dword end,
+	TA_ModifyCallback *cb, void *data);
+
+/* taParaAttr.goc (for taAttr.goc) */
+void ParaAttrChangeCommon(optr o, dword start, dword end,
+	TA_ModifyCallback *cb, word v);
+
+/* taCharAttr.goc (for taParaAttr.goc) */
+Boolean UnHiliteAndFixupParaAttrRange(optr o, VisTextRange *r, dword start,
+	dword end);
+
+/* taRunLow.goc (for taRunManip.goc) */
+void RunArrayDelete(optr o, TextRunKind kind, word i);
+
+/* tslMethodMouse.goc (for tslKbdShortcuts.goc) */
+dword ComputeEventPositionAndOffset(optr o, dword line);
+
+/* textMethodDraw.goc (for trSmallGState.goc) */
+void TextSize(optr o, sword *width, sword *height);
+
+/* trSmallClear.goc (for textMethodDraw.goc) */
+void ClearRectCommon(optr o, sword left, sword top, sword right,
+	sword bottom);
+
+/* trSmallClear.goc */
+void SmallRegionClearToBottom(optr o);
+
+/* tlCommonDraw.goc (for textMethodDraw.goc) */
+word FieldDrawStyleCallback(GDF_vars *v, TextAttr *attr, word offset,
+	Boolean first, const char **text);
+
+/* tlCommonInit.goc (for tlSmallStorage.goc) */
+void CommonInitLineAndField(LineInfo *li);
 
 #endif

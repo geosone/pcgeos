@@ -1,0 +1,18 @@
+/*
+ * tlCommonDraw.goc -- after tlCommonDraw.asm: Draw related stuff.
+ */
+@include "textInt.goh"
+
+/* FieldDrawStyleCallback: the attributes and the text of a run */
+word FieldDrawStyleCallback(GDF_vars *v, TextAttr *attr, word offset,
+			      Boolean first, const char **text)
+{
+    optr o = *(optr *) v->GDFV_other;
+    dword pos = v->GDFV_textOffset + offset, count;
+    word after;
+
+    (void) first;
+    *text = TS_LockTextPtr(o, pos, &after);
+    (void) TA_FillTextAttrForDraw(o, pos, attr, &count);
+    return count < after ? (word) count : after;
+}

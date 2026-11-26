@@ -50,8 +50,8 @@ extern Semaphore exclusiveSemaphore, librarySemaphore;
 extern Boolean SoundSynth(word function, DriverRegs *r);
 /* SoundCallLibraryDriverRoutine: FALSE if another thread has exclusive
  * access (SOUND_ERROR_EXCLUSIVE_ACCESS_GRANTED) */
-extern Boolean SoundEnterLibrary(void);
-extern void SoundExitLibrary(void);
+extern Boolean SoundLibDriverEnterLibraryRoutine(void);
+extern void SoundLibDriverExitLibraryRoutine(void);
 
 /* the table of sounds (a timer routine's or notification's data is the
  * place + 1) */
@@ -116,5 +116,21 @@ enum {
     SNB_DELTA_TIME_TWO, SNB_GENERAL, SNB_END_OF_SONG,
     SNB_WORDS
 };
+
+/* soundDriver.c: the library driver's routines soundCommon.c calls */
+SoundControl *SoundCheckExclusiveSimpleFM(MemHandle mh);
+void SoundStartSimpleFM(SoundControl *sc);
+SoundControl *SoundStartPlayToStreamFM(MemHandle mh, word *oldPrio);
+void SoundActivateStreamReader(SoundControl *sc);
+Boolean SoundLibDriverWriteEvent(SoundControl *sc, const byte **p, sword *left,
+	Boolean sized);
+StreamToken SoundLibDriverCreateStream(DriverStrategy *strat, word size);
+word SoundLibDriverGetDACAndStreamForSound(SoundControl *sc, word manufact, word format);
+word SoundLibDriverWriteToDAC(SoundControl *sc, const byte *sample, word size,
+	const SampleFormatDescription *fmt);
+void SoundLibDriverFreeDAC(MemHandle mh);
+/* soundCommon.c: event sizes and streams, for soundDriver.c too */
+word EventSize(const byte *p);
+void DestroyStream(DriverStrategy *strat, StreamToken token);
 
 #endif /* SOUNDLOCAL_H */

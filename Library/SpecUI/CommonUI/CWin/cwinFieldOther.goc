@@ -126,7 +126,7 @@ word GetBackgroundColorPict(void)
     a.count = 0;
     a.max = MAX_FIELD_APPS;
     a.ui = SysGetInfo(SGIT_UI_PROCESS);
-    FieldCollectApps(pself->VCI_window, &a);
+    FieldCreateAppArrayFromWindowsCallback(pself->VCI_window, &a);
     for (i = 0; i < a.count; i++)
 	@call oself::MSG_GEN_FIELD_MOVE_GEN_APPLICATION(apps[i], i);
 }

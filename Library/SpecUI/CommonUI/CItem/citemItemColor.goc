@@ -109,41 +109,6 @@ static word Correct50PercentMask(OLItemState st)
 							    : SDM_HORIZONTAL;
 }
 
-/* OLItemSetMasksIfDisabled */
-static void SetMasksIfDisabled(optr o, GStateHandle gs, word mask)
-{
-    if (Item(o)->VI_attrs & VA_FULLY_ENABLED)
-	return;
-    GrSetLineMaskSys(gs, mask);
-    GrSetTextMaskSys(gs, (SysDrawMask) mask);
-    GrSetAreaMaskSys(gs, mask);
-}
-
-/*
- * OLItemWash50Percent: an item just disabled washed in the area color
- * (the mask set): the check box (a tool, a check box, a selected
- * diamond) and the moniker
- */
-static void Wash50Percent(optr o, GStateHandle gs, word mask)
-{
-    OLItemInstance *i = Item(o);
-    OLItemState st = i->OLII_state;
-    Rectangle r;
-    sword x;
-
-    if ((i->VI_attrs & VA_FULLY_ENABLED) ||
-	!(i->OLBI_optFlags & OLBOF_ENABLED))
-	return;
-    GrSetAreaMaskSys(gs, mask);
-    VisGetBounds(o, &r);
-    x = r.R_left + CHECK_BOX_WIDTH;
-    if ((st & (OLIS_IS_CHECKBOX | OLIS_DRAW_AS_TOOLBOX)) ||
-	((st & OLIS_SELECTED) && !(st & OLIS_INDETERMINATE)))
-	GrFillRect(gs, r.R_left, r.R_top, x, r.R_bottom);
-    GrSetAreaMaskSys(gs, SDM_50 | SDM_INVERSE);
-    GrFillRect(gs, x, r.R_top, r.R_right, r.R_bottom);
-}
-
 /*
  * ItemDrawColorMotifItemBorderIfInMenu: in a menu, on a full redraw or
  * a changed border: etched while bordered, else the light color.  TRUE
@@ -338,7 +303,7 @@ void ItemDrawColorItem(optr o, GStateHandle gs, DrawFlags df)
     if (changed & OLBSS_CURSORED) {
 	if (st & OLIS_DRAW_AS_TOOLBOX)
 	    goto fullRedraw;
-	SetMasksIfDisabled(o, gs, Correct50PercentMask(st));
+	OLItemSetMasksIfDisabled(o, gs, Correct50PercentMask(st));
 	if (st & OLIS_IS_CHECKBOX)
 	    moniker = NonExclusiveItem(o, gs, changed, FALSE);
 	else {
@@ -358,7 +323,7 @@ void ItemDrawColorItem(optr o, GStateHandle gs, DrawFlags df)
 	if ((cc & 0xff) != (cc >> 8))
 	    goto fullRedraw;
 	AreaColor(gs, moCS_dsLightColor);
-	Wash50Percent(o, gs, Correct50PercentMask(st) | SDM_INVERSE);
+	OLItemWash50Percent(o, gs, Correct50PercentMask(st) | SDM_INVERSE);
 	return;
     }
     goto drawCommon;
@@ -369,7 +334,7 @@ fullRedraw:
     GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
     full = TRUE;
 drawCommon:
-    SetMasksIfDisabled(o, gs, Correct50PercentMask(st));
+    OLItemSetMasksIfDisabled(o, gs, Correct50PercentMask(st));
     if (st & OLIS_MONIKER_INVALID)
 	return;
     moniker = full;
@@ -384,7 +349,7 @@ drawCommon:
 drawMoniker:
     if (!moniker)
 	return;
-    SetMasksIfDisabled(o, gs, SDM_50);
+    OLItemSetMasksIfDisabled(o, gs, SDM_50);
     i = Item(o);
     AreaColor(gs, (i->VI_attrs & VA_FULLY_ENABLED) ? C_BLACK
 						   : moCS_dsDarkColor);
@@ -409,4 +374,23 @@ drawMoniker:
 	y = TOOLBOX_INSET_Y;
     }
     OLButtonDrawMoniker(o, gs, f, at, x, y);
+}
+
+/* FillRectWithBGColors: the bounds in the background colors (the
+ * second at 50% if enabled) */
+void FillRectWithBGColors(optr o, GStateHandle gs, Boolean selected)
+{
+    word cc = OpenGetBackgroundColor(o, selected);
+    Color c1 = (Color) (cc & 0xff), c2 = (Color) (cc >> 8);
+    Rectangle r;
+
+    VisGetBounds(o, &r);
+    GrSetAreaColor(gs, CF_INDEX, c1, 0, 0);
+    GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+    if (c1 != c2 && (Item(o)->VI_attrs & VA_FULLY_ENABLED)) {
+	GrSetAreaColor(gs, CF_INDEX, c2, 0, 0);
+	GrSetAreaMaskSys(gs, SDM_50);
+	GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
+	GrSetAreaMaskSys(gs, SDM_100);
+    }
 }

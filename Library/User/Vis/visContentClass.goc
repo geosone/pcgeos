@@ -85,25 +85,6 @@ typedef char VisContentLargeOrder[
  * Creation and the end
  * ------------------------------------------------------------------- */
 
-/* ViewUpdateContentTargetInfo: the view told the target here and its
- * class (called: the structure is the caller's) */
-void VisContentUpdateViewTargetInfo(optr oself)
-{
-    VisContentInstance *c = ContentPart(oself);
-    ViewTargetInfo info;
-    optr view = c->VCNI_view;
-
-    memset(&info, 0, sizeof(info));
-    info.VTI_content.TR_object = oself;
-    info.VTI_content.TR_class = @call oself::MSG_META_GET_CLASS();
-    info.VTI_target.TR_object = c->VCNI_targetExcl.FTVMC_OD;
-    if (info.VTI_target.TR_object)
-	info.VTI_target.TR_class =
-	    @call info.VTI_target.TR_object::MSG_META_GET_CLASS();
-    if (view)
-	@call view::MSG_GEN_VIEW_UPDATE_CONTENT_TARGET_INFO(&info);
-}
-
 /* VisContentReloc: nothing has the focus or target when saved; the GCN
  * lists unrelocated */
 @method VisContentClass, _reloc
@@ -131,14 +112,6 @@ void VisContentUpdateViewTargetInfo(optr oself)
 /* ---------------------------------------------------------------------
  * The view and its window
  * ------------------------------------------------------------------- */
-
-/* VisContentSendToLargeDocumentLayers */
-void VisContentSendToLayers(optr oself, Message msg, const void *params,
-			 word size)
-{
-    if (ContentPart(oself)->VCNI_attrs & VCNA_LARGE_DOCUMENT_MODEL)
-	VisSendToChildren(oself, msg, params, size);
-}
 
 /* ---------------------------------------------------------------------
  * Input held up
@@ -184,7 +157,7 @@ void VisContentSendToLayers(optr oself, Message msg, const void *params,
 @method VisContentClass, MSG_META_CONTENT_SET_VIEW
 {
     pself->VCNI_view = view;
-    VisContentUpdateViewTargetInfo(oself);
+    ViewUpdateContentTargetInfo(oself);
 }
 
 /* VisContentFinalObjFree: the passive lists and the hold-up queue go,
@@ -384,7 +357,7 @@ static void SetViewDocBounds(optr oself)
     p.win = viewWindow;
     p.y = yScaleFactor;
     p.x = xScaleFactor;
-    VisContentSendToLayers(oself, message, &p, sizeof(p));
+    VisContentSendToLargeDocumentLayers(oself, message, &p, sizeof(p));
 }
 
 /* VisContentSetDocBounds (large documents): to the view and the layers */

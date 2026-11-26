@@ -475,3 +475,46 @@ Boolean UserCallSystem(Message msg, const void *params, word paramSize,
 		 reply, replySize);
     return TRUE;
 }
+
+/* GenSetWord: a word of the instance stored, the object dirty if it
+ * changed; TRUE if changed */
+Boolean GenSetWord(optr o, word *field, word value)
+{
+    if (*field == value)
+	return FALSE;
+    *field = value;
+    ObjMarkDirty(o);
+    return TRUE;
+}
+
+/* GenSetByte: a byte of the instance stored, the object dirty if it
+ * changed; TRUE if changed */
+Boolean GenSetByte(optr o, byte *field, byte value)
+{
+    if (*field == value)
+	return FALSE;
+    *field = value;
+    ObjMarkDirty(o);
+    return TRUE;
+}
+
+/* GenSetBitInByte: the bits of mask set or cleared, the object dirty if
+ * they changed; TRUE if changed */
+Boolean GenSetBitInByte(optr o, byte *field, byte mask, Boolean set)
+{
+    byte v = set ? (*field | mask) : (*field & ~mask);
+
+    if (v == *field)
+	return FALSE;
+    *field = v;
+    ObjMarkDirty(o);
+    return TRUE;
+}
+
+/* GenCallSpecIfGrown: the message to the specific part (GenClass's
+ * superclass), if there is one */
+void GenCallSpecIfGrown(optr o, Message msg, const void *p, word ps)
+{
+    if (GenCheckIfSpecGrown(o))
+	CObjCallSuperP(&GenClass, o, msg, p, ps, NULL, 0);
+}

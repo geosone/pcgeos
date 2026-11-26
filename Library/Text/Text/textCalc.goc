@@ -20,7 +20,6 @@
  */
 @include "textInt.goh"
 
-
 /*
  * TextRecalc: the lines again after a change: at start, inserted
  * characters came for deleted ones
@@ -52,7 +51,7 @@ void TextRecalc(optr o, dword start, dword inserted, dword deleted)
 	    TL_LineInsert(o, line, 1);
 	    l.LICL_calcFlags |= CF_FORCE_CHANGED;
 	} else
-	    oldCount = TL_LineGetCharCount(TL_LinePtr(o, line, NULL));
+	    oldCount = TL_LineGetCharCount(SmallGetLinePointer(o, line, NULL));
 	/* a line below a change of height, or other text in it */
 	if (l.LICL_insertedSpace ||
 	    (oldStart >= start + deleted &&
@@ -83,23 +82,6 @@ void TextRecalc(optr o, dword start, dword inserted, dword deleted)
     TextGStateDestroy(o);
 }
 
-/*
- * TextHeightNotify (SmallRegionAdjustHeight): after a recalculation on
- * the screen: a height other than before (in whole pixels) is told to
- * the object (MSG_VIS_TEXT_HEIGHT_NOTIFY, with the margins: a subclass
- * resizes) and kept as the height at this width
- */
-void TextHeightNotify(optr o, WBFixed before)
-{
-    VisTextInstance *t = VT(o);
-    word h = (word) (t->VTI_height.WBF_int + (t->VTI_height.WBF_frac != 0));
-
-    if (h == (word) (before.WBF_int + (before.WBF_frac != 0)))
-	return;
-    t->VTI_lastWidth = (word) (t->VI_bounds.R_right - t->VI_bounds.R_left);
-    @call o::MSG_VIS_TEXT_HEIGHT_NOTIFY((word) (h + 2 * t->VTI_tbMargin));
-}
-
 /* TextCompleteRecalc: all of it, every line to draw */
 void TextCompleteRecalc(optr o)
 {
@@ -117,7 +99,7 @@ void TextCompleteRecalc(optr o)
     retValue->VTGLIRV_byteCount = 0;
     if (!pself->VTI_lines || vtglip->VTGLIP_line >= TL_LineGetCount(oself))
 	return TRUE;
-    li = TL_LinePtr(oself, vtglip->VTGLIP_line, &size);
+    li = SmallGetLinePointer(oself, vtglip->VTGLIP_line, &size);
     if (size > vtglip->VTGLIP_bsize)
 	size = vtglip->VTGLIP_bsize;
     retValue->VTGLIRV_byteCount = size;
@@ -139,7 +121,7 @@ void TextCompleteRecalc(optr o)
 	return TRUE;
     params->VTGLOAFP_offset = TL_LineToOffsetStart(oself,
 						   params->VTGLOAFP_line);
-    params->VTGLOAFP_flags = TL_LinePtr(oself, params->VTGLOAFP_line,
+    params->VTGLOAFP_flags = SmallGetLinePointer(oself, params->VTGLOAFP_line,
 					NULL)->LI_flags;
     return FALSE;
 }

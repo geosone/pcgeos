@@ -1,0 +1,23 @@
+/*
+ * tlSmallCalc.goc -- after tlSmallCalc.asm: Calculation related code for
+ * a small text object.
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+
+/* the line with fields fields (SmallLineAddField,
+ * SmallLineTruncateFields); the new fields are cleared */
+void SmallLineAddField(optr o, dword line, word fields)
+{
+    optr arr = Lines(o);
+    word old;
+    LineInfo *li = ChunkArrayElementToPtr(arr, (word) line, &old);
+
+    if (old == TL_LINE_SIZE(fields))
+	return;
+    ChunkArrayElementResize(arr, (word) line, TL_LINE_SIZE(fields));
+    if (TL_LINE_SIZE(fields) > old) {
+	li = ChunkArrayElementToPtr(arr, (word) line, NULL);
+	memset((byte *) li + old, 0, TL_LINE_SIZE(fields) - old);
+    }
+}

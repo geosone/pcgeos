@@ -103,7 +103,7 @@ void VisCompUpdateWinGroup(optr obj);
 /* ---------------------------------------------------------------------
  * Vis/visUtilsClass.goc (static parts of the geometry)
  * ------------------------------------------------------------------- */
-void VisSaveOldBounds(optr obj);
+void SaveOldBounds(optr obj);
 
 /* ---------------------------------------------------------------------
  * Vis/visContentClass.goc, visContentCommon.goc
@@ -290,7 +290,7 @@ void GenOptWriteInteger(const GenOptionsParams *params, Boolean boolean,
 
 /* genAppCommonIACP.goc, genAppMisc.goc, for genAppAttDet.goc */
 optr GenAppProcessOptr(void);
-void GenAppSendToGCNList(optr oself, word listType, Message msg,
+void SendToGenAppGCNList(optr oself, word listType, Message msg,
 	const void *params, word size);
 optr GenAppIACPConnects(optr oself);
 void GenAppNotifyModelIfDoc(optr oself, const AppLaunchBlock *alb,
@@ -328,12 +328,22 @@ extern MemHandle uiStandardSoundHandles[NUM_STANDARD_SOUNDS];
 void VisBoundsChanged(optr oself, const Rectangle *old);
 
 /* visContentClass.goc, visContentCommon.goc */
-void VisContentUpdateViewTargetInfo(optr oself);
+void ViewUpdateContentTargetInfo(optr oself);
 void VisContentInvalidate(optr oself);
-void VisContentSendToLayers(optr oself, Message msg, const void *params,
+void VisContentSendToLargeDocumentLayers(optr oself, Message msg, const void *params,
 	word size);
 
 /* visSpecUtils.goc */
 void VisContinueGenBranchCheck(optr obj, GenBranchInfo *info);
+
+/* visClass.goc and visUtilsClass.goc */
+void VisVupInvalGeoToHere(optr obj, VisUpdateMode mode);
+
+/* Gen/genUtils.goc: instance data stored, the object dirty if changed;
+ * messages to the specific part */
+Boolean GenSetWord(optr o, word *field, word value);
+Boolean GenSetByte(optr o, byte *field, byte value);
+Boolean GenSetBitInByte(optr o, byte *field, byte mask, Boolean set);
+void GenCallSpecIfGrown(optr o, Message msg, const void *p, word ps);
 
 #endif

@@ -160,16 +160,6 @@ static const ColorButtonRegions replyDefaultCBR = {
     replyDefBorderLT, replyDefBorderRB, replyInterior
 };
 
-/* OLButtonMovePenCalcSize: the pen at the top left, the size */
-static void MovePenCalcSize(optr oself, GStateHandle gs, word *w, word *h)
-{
-    OLButtonInstance *b = Btn(oself);
-
-    GrMoveTo(gs, b->VI_bounds.R_left, b->VI_bounds.R_top);
-    *w = (word) (b->VI_bounds.R_right - b->VI_bounds.R_left);
-    *h = (word) (b->VI_bounds.R_bottom - b->VI_bounds.R_top);
-}
-
 static void DrawRegion(GStateHandle gs, const Region *r, Color c, word w,
 		       word h)
 {
@@ -374,12 +364,12 @@ void DrawColorButton(optr oself, GStateHandle gs, DrawFlags df,
 	(((byte) b->OLBI_specState ^ old) & OLBOF_DRAWN_BORDERED) &&
 	(!(b->OLBI_specState & (OLBSS_IN_MENU | OLBSS_IN_MENU_BAR)) ||
 	 !OpenCheckIfKeyboardOnly())) {
-	MovePenCalcSize(oself, gs, &w, &h);
+	OLButtonMovePenCalcSize(oself, gs, &w, &h);
 	DrawBorder(oself, gs, cbr, df, w, h);
 	return;
     }
     DrawBackground(oself, gs, df, old);
-    MovePenCalcSize(oself, gs, &w, &h);
+    OLButtonMovePenCalcSize(oself, gs, &w, &h);
     DrawBorder(oself, gs, cbr, df, w, h);
     DrawInterior(oself, gs, cbr, w, h);
     SetDrawColors(oself, gs);

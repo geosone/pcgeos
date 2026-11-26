@@ -275,28 +275,6 @@ static void EnsurePinTrigger(optr o)
     @call o::MSG_VIS_MOVE_CHILD(g, CCO_FIRST);
 }
 
-/* SendToObjectAndItsChildren: the pin group and its children shown or
- * hidden (drawable, detectable, managed) */
-static void PinShown(optr o, Boolean on)
-{
-    ChunkHandle ch = MWin(o)->OLPWI_pinTrigger;
-    optr g;
-    word i, n;
-    VisAttrs a = VA_DRAWABLE | VA_DETECTABLE | VA_MANAGED;
-
-    if (!ch)
-	return;
-    g = ConstructOptr(OptrToHandle(o), ch);
-    @call g::MSG_VIS_SET_ATTRS(on ? a : 0, on ? 0 : a, VUM_MANUAL);
-    n = @call g::MSG_VIS_COUNT_CHILDREN();
-    for (i = 0; i < n; i++) {
-	optr c = @call g::MSG_VIS_FIND_CHILD_AT_POSITION(i);
-
-	if (c)
-	    @call c::MSG_VIS_SET_ATTRS(on ? a : 0, on ? 0 : a, VUM_MANUAL);
-    }
-}
-
 /*
  * OLPopupTogglePushpin (a menu): pinned: up as a command window, the
  * focus, a title and the system menu (OpenWinUpdatePinnedMenu), its
@@ -324,7 +302,7 @@ static void TogglePushpin(optr o, Boolean close)
 	b = MenuButton(o);
 	if (b)
 	    @call b::MSG_OL_MENU_BUTTON_NOTIFY_MENU_DISMISSED();
-	PinShown(o, FALSE);
+	SendToObjectAndItsChildren(o, FALSE);
 	@call o::MSG_SPEC_UPDATE_MENU_SEPARATORS();
 	OpenWinHeaderMarkInvalid(o, OLWHS_SYS_ICON_IMAGES_INVALID);
 	@call o::MSG_VIS_RESET_TO_INITIAL_SIZE(VUM_NOW);
@@ -350,7 +328,7 @@ static void TogglePushpin(optr o, Boolean close)
 	VisMarkInvalid(ConstructOptr(OptrToHandle(o),
 		       MWin(o)->OLPWI_pinTrigger), VOF_WINDOW_INVALID,
 		       VUM_MANUAL);
-	PinShown(o, TRUE);
+	SendToObjectAndItsChildren(o, TRUE);
 	@call o::MSG_SPEC_UPDATE_MENU_SEPARATORS();
     }
     VisMarkInvalid(o, VOF_WINDOW_INVALID | VOF_GEOMETRY_INVALID, VUM_MANUAL);

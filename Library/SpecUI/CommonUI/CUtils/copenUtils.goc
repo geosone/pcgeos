@@ -12,6 +12,12 @@
 @include <Internal/SpecUI/olScrollbarClass.goh>
 @include <Objects/gViewC.goh>
 @include <Objects/gContC.goh>
+@include "../CGadget/cgadgetMacro.goh"
+@include <Internal/SpecUI/olTextClass.goh>
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Internal/specC.goh>
+#include <font.h>
+#include <string.h>
 
 /* OpenGetLineBounds: the bounds of the object for drawing lines: the
  * right and bottom one pixel in */
@@ -953,4 +959,18 @@ void OLBroadcastForDefaultFocus(optr o, ObjectAndGrabParams *q)
 void SpecGetDisplayScheme(DisplayScheme *ds)
 {
     *ds = specDisplayScheme;
+}
+
+/* OpenNavigateIfHaveFocus: with the window's focus: on to the next
+ * field */
+void OpenNavigateIfHaveFocus(optr o)
+{
+    optr vp = VisFindParent(o);
+    GenReturnParams r;
+
+    memset(&r, 0, sizeof(r));
+    if (vp && @call vp::MSG_VIS_P32_VUP_QUERY(&r,
+				SVQT_QUERY_WIN_GROUP_FOR_FOCUS_EXCL, 0, 0) &&
+	ConstructOptr(r.GRP_cx, r.GRP_dx) == o)
+	@call vp::MSG_SPEC_NAVIGATE_TO_NEXT_FIELD();
 }

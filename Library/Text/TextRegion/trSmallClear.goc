@@ -1,0 +1,49 @@
+/*
+ * trSmallClear.goc -- after trSmallClear.asm: Code for clearing in
+ * regions.
+ */
+@include "textInt.goh"
+
+/* ClearRectCommon: the background */
+void ClearRectCommon(optr o, sword left, sword top, sword right,
+		      sword bottom)
+{
+    VisTextInstance *t = VT(o);
+    GStateHandle g = t->VTI_gstate;
+
+    if (top == bottom)
+	return;
+    GrSetAreaColor(g, t->VTI_washColor.CQ_info,
+		   t->VTI_washColor.CQ_redOrIndex,
+		   t->VTI_washColor.CQ_green, t->VTI_washColor.CQ_blue);
+    GrSetAreaMaskSys(g, SDM_100);
+    GrFillRect(g, left, top, right, bottom);
+}
+
+/* SmallRegionClearToBottom: the background below the last line */
+void SmallRegionClearToBottom(optr o)
+{
+    VisTextInstance *t = VT(o);
+    sword width, height;
+
+    TextSize(o, &width, &height);
+    ClearRectCommon(o, 0, (sword) (((TEXT_WBF(&t->VTI_height) + 0xff) >> 8) + 1),
+	      width, height);
+}
+
+/*
+ * TextHeightNotify (SmallRegionAdjustHeight): after a recalculation on
+ * the screen: a height other than before (in whole pixels) is told to
+ * the object (MSG_VIS_TEXT_HEIGHT_NOTIFY, with the margins: a subclass
+ * resizes) and kept as the height at this width
+ */
+void SmallRegionAdjustHeight(optr o, WBFixed before)
+{
+    VisTextInstance *t = VT(o);
+    word h = (word) (t->VTI_height.WBF_int + (t->VTI_height.WBF_frac != 0));
+
+    if (h == (word) (before.WBF_int + (before.WBF_frac != 0)))
+	return;
+    t->VTI_lastWidth = (word) (t->VI_bounds.R_right - t->VI_bounds.R_left);
+    @call o::MSG_VIS_TEXT_HEIGHT_NOTIFY((word) (h + 2 * t->VTI_tbMargin));
+}

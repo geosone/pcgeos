@@ -16,6 +16,13 @@
  */
 @include "cGeode.goh"
 @include <Internal/SpecUI/olGlyphDisplayClass.goh>
+@include "../CButton/cbuttonMacro.goh"
+@include "../CButton/cbuttonConstant.goh"
+@include <Internal/SpecUI/olValueClass.goh>
+@include <Objects/vTextC.goh>
+@include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Objects/gViewC.goh>
+@include <Objects/gContC.goh>
 
 @classdecl OLGlyphDisplayClass, neverSaved;
 
@@ -229,4 +236,24 @@ static void DrawSeparator(optr oself, GStateHandle gs)
 	GrSetLineMaskSys(gstate, SDM_100);
 	GrSetTextMaskSys(gstate, SDM_100);
     }
+}
+
+/* OpenChooseNewGadgetSize: the suggested size where the gadget hints
+ * allow it (a toolbox button only expands its height if the room is
+ * not twice its own, unless asked for) */
+void OpenChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
+				Boolean sysIcon, sword sugW, sword sugH,
+				sword *w, sword *h)
+{
+    if ((f & OLBMA_EXPAND_WIDTH_TO_FIT_PARENT) && sugW > *w)
+	*w = sugW;
+    if ((f & OLBMA_EXPAND_HEIGHT_TO_FIT_PARENT) && sugH > *h) {
+	if (sysIcon || !(f & OLBMA_IN_TOOLBOX) || sugH - *h <= *h ||
+	    ObjVarFindData(oself, HINT_EXPAND_HEIGHT_TO_FIT_PARENT))
+	    *h = sugH;
+    }
+    if ((f & OLBMA_CAN_CLIP_MONIKER_WIDTH) && (word) *w > (word) sugW)
+	*w = sugW;
+    if ((f & OLBMA_CAN_CLIP_MONIKER_HEIGHT) && (word) *h > (word) sugH)
+	*h = sugH;
 }

@@ -396,7 +396,7 @@ static void RedrawIfValid(optr oself)
 @method OLScrollbarClass, MSG_REPEAT_SCROLL
 {
     pself->OLSBI_optFlags &= ~OLSOF_REPEAT_SCROLL_PENDING;
-    OLScrollbarRepeatPress(oself);
+    RepeatScrollIfNeeded(oself);
 }
 
 @method OLScrollbarClass, MSG_TIMER_EXPIRED
@@ -404,7 +404,7 @@ static void RedrawIfValid(optr oself)
     (void) tick;
     (void) timerID;
     pself->OLSBI_optFlags &= ~OLSOF_TIMER_EXPIRED_PENDING;
-    OLScrollbarRepeatPress(oself);
+    RepeatScrollIfNeeded(oself);
 }
 
 void SwapIfHorizontal(optr oself, sword *x, sword *y)
@@ -416,4 +416,20 @@ void SwapIfHorizontal(optr oself, sword *x, sword *y)
 	*x = *y;
 	*y = t;
     }
+}
+
+/* RepeatScrollIfNeeded: both the timer and the content's redraw in,
+ * a part other than the thumb held: pressed again */
+void RepeatScrollIfNeeded(optr oself)
+{
+    OLScrollbarInstance *sb = SBVis(oself);
+    DownFlags f;
+
+    if (sb->OLSBI_optFlags & (OLSOF_REPEAT_SCROLL_PENDING |
+			      OLSOF_TIMER_EXPIRED_PENDING))
+	return;
+    f = sb->OLSBI_state & OLSS_DOWN_FLAGS;
+    if (!f || f == OLSS_DRAG_AREA)
+	return;
+    HandlePress(oself, 0, (word) ((UIFA_SELECT << 8) | BI_PRESS));
 }

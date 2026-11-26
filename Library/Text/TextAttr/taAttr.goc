@@ -33,27 +33,6 @@ void SelectTab(optr o, word pos)
 }
 
 /*
- * CharAttrChangeCommon: one field of the attribute changed by the
- * callback, in the range (with runs) or the object's single attribute
- */
-static void ChangeCharAttr(optr o, dword start, dword end,
-			   TA_ModifyCallback *cb, void *data)
-{
-    VisTextCharAttr a;
-    VisTextRange r;
-
-    if (FixupRange(o, &r, start, end))
-	(void) TA_ModifyRun(o, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, cb,
-			    data, CA_NULL_ELEMENT);
-    else {
-	TA_GetSingleCharAttr(o, &a);
-	cb(o, &a, data);
-	TA_SetSingleCharAttr(o, &a);
-    }
-    TA_ReflectChange(o);
-}
-
-/*
  * The handlers of taAttr.asm that change one field, with their
  * callbacks
  */
@@ -65,7 +44,7 @@ static void SetFontIDCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID
 {
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontIDCB, &fid);
+    CharAttrChangeCommon(oself, rangeStart, rangeEnd, SetFontIDCB, &fid);
 }
 
 static void SetFontWeightCB(optr o, void *e, void *data)
@@ -76,7 +55,7 @@ static void SetFontWeightCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT
 {
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontWeightCB,
+    CharAttrChangeCommon(oself, rangeStart, rangeEnd, SetFontWeightCB,
 		   &fontWeight);
 }
 
@@ -88,7 +67,7 @@ static void SetFontWidthCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WIDTH
 {
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetFontWidthCB,
+    CharAttrChangeCommon(oself, rangeStart, rangeEnd, SetFontWidthCB,
 		   &fontWidth);
 }
 
@@ -105,7 +84,7 @@ static void SetPointSizeCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_POINT_SIZE
 {
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetPointSizeCB,
+    CharAttrChangeCommon(oself, rangeStart, rangeEnd, SetPointSizeCB,
 		   &pointSize);
 }
 
@@ -146,7 +125,7 @@ static void SetTextStyleCB(optr o, void *e, void *data)
     c.clear = styleBitsToClear;
     c.extSet = extBitsToSet;
     c.extClear = extBitsToClear;
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetTextStyleCB, &c);
+    CharAttrChangeCommon(oself, rangeStart, rangeEnd, SetTextStyleCB, &c);
 }
 
 /* SetColorCallback: an index has no green and blue */
@@ -162,7 +141,7 @@ static void SetColorCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR
 {
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetColorCB, &color);
+    CharAttrChangeCommon(oself, rangeStart, rangeEnd, SetColorCB, &color);
 }
 
 static void SetGrayScreenCB(optr o, void *e, void *data)
@@ -173,7 +152,7 @@ static void SetGrayScreenCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN
 {
-    ChangeCharAttr(oself, rangeStart, rangeEnd, SetGrayScreenCB,
+    CharAttrChangeCommon(oself, rangeStart, rangeEnd, SetGrayScreenCB,
 		   &grayScreen);
 }
 
@@ -232,14 +211,6 @@ COLOR_FIELD_CB(SetParaBGColorCB, VTPA_bgColor)
 PATTERN_FIELD_CB(SetBorderPatternCB, VTPA_borderPattern)
 PATTERN_FIELD_CB(SetParaBGPatternCB, VTPA_bgPattern)
 
-/* ParaAttrChangeCommon, ParaAttrBorderChangeCommon: the range to make
- * again differs, here all lines are */
-static void ChangeWord(optr o, dword start, dword end,
-		       TA_ModifyCallback *cb, word v)
-{
-    ChangeParaAttr(o, start, end, cb, &v);
-}
-
 static void ChangeByte(optr o, dword start, dword end,
 		       TA_ModifyCallback *cb, byte v)
 {
@@ -290,45 +261,45 @@ static void ChangeBits(optr o, dword start, dword end,
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_LINE_SPACING
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetLineSpacingCB,
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetLineSpacingCB,
 	       (word) (lineSpacing.BBF_int << 8 | lineSpacing.BBF_frac));
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_DEFAULT_TABS
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetDefaultTabsCB, defaultTabs);
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetDefaultTabsCB, defaultTabs);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_MARGIN
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetLeftMarginCB, position);
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetLeftMarginCB, position);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_RIGHT_MARGIN
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetRightMarginCB, position);
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetRightMarginCB, position);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_MARGIN
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetParaMarginCB, position);
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetParaMarginCB, position);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_TOP
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetSpaceOnTopCB,
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetSpaceOnTopCB,
 	       (word) (spacing.BBF_int << 8 | spacing.BBF_frac));
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_BOTTOM
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetSpaceOnBottomCB,
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetSpaceOnBottomCB,
 	       (word) (spacing.BBF_int << 8 | spacing.BBF_frac));
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_LEADING
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetLeadingCB, leading);
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetLeadingCB, leading);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_COLOR
@@ -417,7 +388,7 @@ static void ClearTabCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_CLEAR_TAB
 {
-    ChangeWord(oself, rangeStart, rangeEnd, ClearTabCB, position);
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, ClearTabCB, position);
 }
 
 /* MoveTabCallback: the tab at the source (if any) to the destination */
@@ -496,7 +467,7 @@ static void SetLeftAndParaMarginCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_AND_PARA_MARGIN
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetLeftAndParaMarginCB,
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetLeftAndParaMarginCB,
 	       position);
 }
 
@@ -528,6 +499,6 @@ static void SetLeftAndParaMarginCB(optr o, void *e, void *data)
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_PARAGRAPH_NUMBER
 {
-    ChangeWord(oself, rangeStart, rangeEnd, SetParagraphNumberCB,
+    ParaAttrChangeCommon(oself, rangeStart, rangeEnd, SetParagraphNumberCB,
 	       startingParaNumber);
 }

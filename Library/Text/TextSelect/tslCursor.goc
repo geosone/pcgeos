@@ -47,7 +47,7 @@ void CursorToggle(optr o)
 	ProcGetLibraryEntry(UserGetSpecificUI(), SPIR_DRAW_TEXT_CURSOR);
     if (!r)
 	return;
-    blo = TL_LinePtr(o, TSL_GetCursorLine(o), NULL)->LI_blo.WBF_int;
+    blo = SmallGetLinePointer(o, TSL_GetCursorLine(o), NULL)->LI_blo.WBF_int;
     t = VT(o);
     v = (VisInstance *) t;
     g = t->VTI_gstate;
@@ -59,7 +59,7 @@ void CursorToggle(optr o)
     if ((word) x > (word) right)
 	x = right;
     GrSaveState(g);
-    TextGStateToText(o, FALSE);
+    SmallRegionTransformGState(o, FALSE);
     GrMoveTo(g, x, y);
     TA_GetCharAttrForPosition(o, VT(o)->VTI_selectStart, TRUE, &ca, NULL);
     GrSetFont(g, ca.VTCA_fontID,

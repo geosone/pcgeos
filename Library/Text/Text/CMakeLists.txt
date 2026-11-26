@@ -15,4 +15,5 @@ geos_sources(text_goc
   textFilter.goc
   textScrollOneLine.goc
   textStuff.goc
-  textCompatibility.goc)
+  textCompatibility.goc
+  textSuspend.goc)

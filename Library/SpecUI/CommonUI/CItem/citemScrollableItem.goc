@@ -143,25 +143,6 @@ static word AddExtraSpaceIfInMenu(optr o, word w)
  * Drawing
  * ------------------------------------------------------------------- */
 
-/* FillRectWithBGColors: the bounds in the background colors (the
- * second at 50% if enabled) */
-static void FillBG(optr o, GStateHandle gs, Boolean selected)
-{
-    word cc = OpenGetBackgroundColor(o, selected);
-    Color c1 = (Color) (cc & 0xff), c2 = (Color) (cc >> 8);
-    Rectangle r;
-
-    VisGetBounds(o, &r);
-    GrSetAreaColor(gs, CF_INDEX, c1, 0, 0);
-    GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
-    if (c1 != c2 && (Item(o)->VI_attrs & VA_FULLY_ENABLED)) {
-	GrSetAreaColor(gs, CF_INDEX, c2, 0, 0);
-	GrSetAreaMaskSys(gs, SDM_50);
-	GrFillRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom);
-	GrSetAreaMaskSys(gs, SDM_100);
-    }
-}
-
 /* the selected color of HINT_GADGET_TEXT_COLOR (the item's or its
  * parent's, as OpenGetTextColor) */
 static Boolean SelectedTextColor(optr o, Color *c)
@@ -194,7 +175,7 @@ static void DrawBackground(optr o, GStateHandle gs, Boolean full)
 
     if (!(i->OLII_state & OLIS_MONIKER_INVALID) &&
 	(i->OLBI_specState & OLBSS_SELECTED)) {
-	FillBG(o, gs, TRUE);
+	FillRectWithBGColors(o, gs, TRUE);
 	c = C_WHITE;
 	(void) SelectedTextColor(o, &c);
 	GrSetTextColor(gs, CF_INDEX, c, 0, 0);
@@ -204,7 +185,7 @@ static void DrawBackground(optr o, GStateHandle gs, Boolean full)
     if ((i->OLII_state & OLIS_MONIKER_INVALID) || full ||
 	!(i->OLBI_optFlags & OLBOF_DRAW_STATE_KNOWN) ||
 	(i->OLBI_optFlags & OLBOF_DRAWN_SELECTED))
-	FillBG(o, gs, FALSE);
+	FillRectWithBGColors(o, gs, FALSE);
 }
 
 /*

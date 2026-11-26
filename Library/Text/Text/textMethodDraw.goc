@@ -27,14 +27,8 @@
  */
 @include "textInt.goh"
 
-
-static sdword W(const WBFixed *w)
-{
-    return ((sdword) w->WBF_int << 8) + w->WBF_frac;
-}
-
 /* the text's width and height: the object's inside its margins */
-static void TextSize(optr o, sword *width, sword *height)
+void TextSize(optr o, sword *width, sword *height)
 {
     VisTextInstance *t = VT(o);
     VisInstance *v = (VisInstance *) t;
@@ -43,53 +37,6 @@ static void TextSize(optr o, sword *width, sword *height)
 	     2 * t->VTI_lrMargin;
     *height = v->VI_bounds.R_bottom - v->VI_bounds.R_top -
 	      2 * t->VTI_tbMargin;
-}
-
-/* SmallRegionTransformGState, SmallSetClip: the gstate at the text's
- * top left, clipped to the text unless printing */
-void TextGStateToText(optr o, Boolean print)
-{
-    VisTextInstance *t = VT(o);
-    VisInstance *v = (VisInstance *) t;
-    GStateHandle g = t->VTI_gstate;
-    sword w, h;
-
-    GrApplyTranslationDWord(g, v->VI_bounds.R_left + t->VTI_lrMargin,
-			    v->VI_bounds.R_top + t->VTI_tbMargin);
-    if (!print) {
-	TextSize(o, &w, &h);
-	GrSetClipRect(g, PCT_REPLACE, 0, 0, w, h);
-    }
-}
-
-/* ClearRectCommon: the background */
-static void ClearRect(optr o, sword left, sword top, sword right,
-		      sword bottom)
-{
-    VisTextInstance *t = VT(o);
-    GStateHandle g = t->VTI_gstate;
-
-    if (top == bottom)
-	return;
-    GrSetAreaColor(g, t->VTI_washColor.CQ_info,
-		   t->VTI_washColor.CQ_redOrIndex,
-		   t->VTI_washColor.CQ_green, t->VTI_washColor.CQ_blue);
-    GrSetAreaMaskSys(g, SDM_100);
-    GrFillRect(g, left, top, right, bottom);
-}
-
-/* FieldDrawStyleCallback: the attributes and the text of a run */
-static word DrawStyleCallback(GDF_vars *v, TextAttr *attr, word offset,
-			      Boolean first, const char **text)
-{
-    optr o = *(optr *) v->GDFV_other;
-    dword pos = v->GDFV_textOffset + offset, count;
-    word after;
-
-    (void) first;
-    *text = TS_LockTextPtr(o, pos, &after);
-    (void) TA_FillTextAttrForDraw(o, pos, attr, &count);
-    return count < after ? (word) count : after;
 }
 
 /*
@@ -102,19 +49,19 @@ static void LineDraw(optr o, dword line, sdword top, dword start,
 {
     VisTextInstance *t = VT(o);
     GStateHandle g = t->VTI_gstate;
-    LineInfo *li = TL_LinePtr(o, line, NULL);
+    LineInfo *li = SmallGetLinePointer(o, line, NULL);
     word fields = TL_LineGetFieldCount(o, line), f;
     sword width, height, y = (sword) (top >> 8), bottom;
     GDF_vars v;
 
-    if (!W(&li->LI_hgt))
+    if (!TEXT_WBF(&li->LI_hgt))
 	return;
     TextSize(o, &width, &height);
-    bottom = (sword) (y + ((W(&li->LI_hgt) + 0xff) >> 8));
+    bottom = (sword) (y + ((TEXT_WBF(&li->LI_hgt) + 0xff) >> 8));
     /* LineWashBackground */
     if (!(flags & TCBF_PRINT) &&
 	!((flags & TCBF_MSG_DRAW) && (t->VTI_features & VTF_TRANSPARENT)))
-	ClearRect(o, 0, (sword) (haveDrawn ? y + 1 : y), width,
+	ClearRectCommon(o, 0, (sword) (haveDrawn ? y + 1 : y), width,
 		  (sword) (bottom + 1));
     if (!(flags & TCBF_PRINT))
 	li->LI_flags &= ~LF_NEEDS_DRAW;
@@ -125,7 +72,7 @@ static void LineDraw(optr o, dword line, sdword top, dword start,
 	dword off = start;
 	WWFixedAsDWord pad = 0;
 
-	li = TL_LinePtr(o, line, NULL);
+	li = SmallGetLinePointer(o, line, NULL);
 	fi = &li->LI_firstField + f;
 	n = fi->FI_nChars;
 	start += n;
@@ -160,22 +107,11 @@ static void LineDraw(optr o, dword line, sdword top, dword start,
 	/* SetAutoHyphenFlag */
 	if (f == fields - 1 && (li->LI_flags & LF_ENDS_IN_AUTO_HYPHEN))
 	    v.GDFV_saved.GDFS_flags |= HF_AUTO_HYPHEN;
-	v.GDFV_styleCallback = DrawStyleCallback;
+	v.GDFV_styleCallback = FieldDrawStyleCallback;
 	v.GDFV_textOffset = off;
 	GrDrawTextField(g, &v);
     }
     GrSetTextSpacePad(g, 0);
-}
-
-/* SmallRegionClearToBottom: the background below the last line */
-static void ClearToBottom(optr o)
-{
-    VisTextInstance *t = VT(o);
-    sword width, height;
-
-    TextSize(o, &width, &height);
-    ClearRect(o, 0, (sword) (((W(&t->VTI_height) + 0xff) >> 8) + 1),
-	      width, height);
 }
 
 /*
@@ -196,13 +132,13 @@ void TextDraw(optr o, byte flags, Boolean onlyMarked)
     if (!t->VTI_lines || !g)
 	return;				/* TextCheckCanDraw */
     GrSaveState(g);
-    TextGStateToText(o, (flags & TCBF_PRINT) != 0);
+    SmallRegionTransformGState(o, (flags & TCBF_PRINT) != 0);
     if (!all && !onlyMarked)
 	GrGetMaskBounds(g, &mask);
     n = TL_LineGetCount(o);
     for (line = 0; line < n; line++) {
-	const LineInfo *li = TL_LinePtr(o, line, NULL);
-	sdword hgt = W(&li->LI_hgt);
+	const LineInfo *li = SmallGetLinePointer(o, line, NULL);
+	sdword hgt = TEXT_WBF(&li->LI_hgt);
 	dword count = TL_LineGetCharCount(li);
 	Boolean draw;
 
@@ -224,7 +160,7 @@ void TextDraw(optr o, byte flags, Boolean onlyMarked)
     if (!(flags & TCBF_PRINT) &&
 	!((flags & TCBF_MSG_DRAW) &&
 	  (VT(o)->VTI_features & VTF_TRANSPARENT)))
-	ClearToBottom(o);
+	SmallRegionClearToBottom(o);
     GrRestoreState(g);
 }
 
@@ -295,5 +231,5 @@ void TextScreenUpdate(optr o)
     TextScreenUpdate(oself);
     EditHilite(oself);
     TextGStateDestroy(oself);
-    TextHeightNotify(oself, before);
+    SmallRegionAdjustHeight(oself, before);
 }

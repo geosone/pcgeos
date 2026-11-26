@@ -61,19 +61,6 @@ static WWFixedAsDWord KeepInRange(optr o, WWFixedAsDWord v)
     return v;
 }
 
-static Boolean SetFlag(optr o, GenValueStateFlags mask, Boolean set)
-{
-    GenValueInstance *g = GVL(o);
-    GenValueStateFlags f = set ? (g->GVLI_stateFlags | mask)
-			       : (g->GVLI_stateFlags & ~mask);
-
-    if (f == g->GVLI_stateFlags)
-	return FALSE;
-    g->GVLI_stateFlags = f;
-    ObjMarkDirty(o);
-    return TRUE;
-}
-
 /* GenValueSetValue: in range; up to date, indeterminate as passed, not
  * modified; then the specific part's */
 @method GenValueClass, MSG_GEN_VALUE_SET_VALUE
@@ -84,9 +71,9 @@ static Boolean SetFlag(optr o, GenValueStateFlags mask, Boolean set)
 	pself->GVLI_value = value;
 	ObjMarkDirty(oself);
     }
-    (void) SetFlag(oself, GVSF_OUT_OF_DATE, FALSE);
-    (void) SetFlag(oself, GVSF_INDETERMINATE, indeterminate);
-    (void) SetFlag(oself, GVSF_MODIFIED, FALSE);
+    (void) GenSetBitInByte(oself, &GVL(oself)->GVLI_stateFlags, GVSF_OUT_OF_DATE, FALSE);
+    (void) GenSetBitInByte(oself, &GVL(oself)->GVLI_stateFlags, GVSF_INDETERMINATE, indeterminate);
+    (void) GenSetBitInByte(oself, &GVL(oself)->GVLI_stateFlags, GVSF_MODIFIED, FALSE);
     if (GenCheckIfSpecGrown(oself))
 	@callsuper oself::GenClass::MSG_GEN_VALUE_SET_VALUE(value,
 							     indeterminate);
@@ -187,7 +174,7 @@ static void RedoValue(optr o)
 
 @method GenValueClass, MSG_GEN_VALUE_SET_INDETERMINATE_STATE
 {
-    if (SetFlag(oself, GVSF_INDETERMINATE, indeterminateState) &&
+    if (GenSetBitInByte(oself, &GVL(oself)->GVLI_stateFlags, GVSF_INDETERMINATE, indeterminateState) &&
 	GenCheckIfSpecGrown(oself)) {
 	GenValueInstance *g = GVL(oself);
 
@@ -205,7 +192,7 @@ static void RedoValue(optr o)
  * applyable */
 @method GenValueClass, MSG_GEN_VALUE_SET_MODIFIED_STATE
 {
-    if (SetFlag(oself, GVSF_MODIFIED, modifiedState) && modifiedState)
+    if (GenSetBitInByte(oself, &GVL(oself)->GVLI_stateFlags, GVSF_MODIFIED, modifiedState) && modifiedState)
 	@call oself::MSG_GEN_MAKE_APPLYABLE();
 }
 
@@ -216,7 +203,7 @@ static void RedoValue(optr o)
 
 @method GenValueClass, MSG_GEN_VALUE_SET_OUT_OF_DATE
 {
-    (void) SetFlag(oself, GVSF_OUT_OF_DATE, TRUE);
+    (void) GenSetBitInByte(oself, &GVL(oself)->GVLI_stateFlags, GVSF_OUT_OF_DATE, TRUE);
 }
 
 /*

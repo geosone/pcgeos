@@ -21,7 +21,6 @@
 #include <Internal/specUI.h>
 #include <timer.h>
 
-
 /* CC_WORD_PART: letters, digits and the apostrophe */
 Boolean TSL_IsWordPart(optr o, dword offset)
 {
@@ -36,7 +35,7 @@ Boolean TSL_IsWordPart(optr o, dword offset)
 dword TSL_LineCursorEnd(optr o, dword line)
 {
     dword start = TL_LineToOffsetStart(o, line);
-    const LineInfo *li = TL_LinePtr(o, line, NULL);
+    const LineInfo *li = SmallGetLinePointer(o, line, NULL);
     dword count = TL_LineGetCharCount(li);
 
     if (!count)
@@ -46,20 +45,6 @@ dword TSL_LineCursorEnd(optr o, dword line)
 	line + 1 < TL_LineGetCount(o))
 	return start + count - 1;
     return start + count;
-}
-
-/* ComputeEventPositionAndOffset: the offset on a line nearest the
- * goal position */
-static dword LineOffsetAtGoal(optr o, dword line)
-{
-    VisTextInstance *t = VT(o);
-    sword x = (sword) (t->VTI_goalPosition - t->VTI_leftOffset -
-		       TL_LinePtr(o, line, NULL)->LI_adjustment), pos;
-    dword off, end = TSL_LineCursorEnd(o, line);
-
-    off = TL_LineTextPosition(o, line, x, TEXT_ADDRESS_PAST_END, &pos,
-			      NULL);
-    return off > end ? end : off;
 }
 
 /* ForwardOrBackwardLine: the cursor a line down or up; a range
@@ -83,7 +68,7 @@ static void MoveLine(optr o, Boolean forward)
 	    return;
 	line--;
     }
-    TSL_SelectCursor(o, LineOffsetAtGoal(o, line), FALSE);
+    TSL_SelectCursor(o, ComputeEventPositionAndOffset(o, line), FALSE);
 }
 
 /* VTFSelectAdjustForwardLine, VTFSelectAdjustBackwardLine */
@@ -108,7 +93,7 @@ static void AdjustLine(optr o, Boolean forward)
 	    }
 	    line--;
 	}
-	off = LineOffsetAtGoal(o, line);
+	off = ComputeEventPositionAndOffset(o, line);
 	if (off != adjust)
 	    break;
     }
@@ -264,7 +249,7 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 	off = TSL_SelectGetAdjustPosition(o, TRUE);
 	line = TL_LineFromOffset(o, off, FALSE, &off);
 	TSL_SelectAdjust(o, off + TL_LineGetCharCount(
-					TL_LinePtr(o, line, NULL)));
+					SmallGetLinePointer(o, line, NULL)));
 	break;
     case VTKF_DELETE_BACKWARD_CHAR:
 	if (range || start)
@@ -293,7 +278,7 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 
 	    line = TSL_GetCursorLine(o);
 	    off = TL_LineToOffsetStart(o, line);
-	    li = TL_LinePtr(o, line, NULL);
+	    li = SmallGetLinePointer(o, line, NULL);
 	    end = off + TL_LineGetCharCount(li);
 	    if ((li->LI_flags & LF_ENDS_IN_CR) && start < end - 1)
 		end--;

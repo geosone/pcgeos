@@ -12,12 +12,6 @@
 
 #define PrimPart(o)	((GenPrimaryInstance *) ObjDerefGen(o))
 
-static void CallSpecIfGrown(optr oself, Message msg)
-{
-    if (GenCheckIfSpecGrown(oself))
-	CObjCallSuperP(&GenClass, oself, msg, NULL, 0, NULL, 0);
-}
-
 @method GenPrimaryClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
 {
     return GenQueryUICallSpecificUI(oself, SPIR_BUILD_PRIMARY,
@@ -57,7 +51,7 @@ static void CallSpecIfGrown(optr oself, Message msg)
     (void) ObjVarAddData(oself, ATTR_GEN_DISPLAY_MAXIMIZED_STATE |
 			 VDF_SAVE_TO_STATE, 0);
     if (GenCheckIfFullyUsable(oself, FALSE))
-	CallSpecIfGrown(oself, message);
+	GenCallSpecIfGrown(oself, message, NULL, 0);
 }
 
 @method GenPrimaryClass, MSG_GEN_DISPLAY_SET_NOT_MAXIMIZED
@@ -66,7 +60,7 @@ static void CallSpecIfGrown(optr oself, Message msg)
 	!ObjVarDeleteData(oself, ATTR_GEN_DISPLAY_MAXIMIZED_STATE))
 	return;
     if (GenCheckIfFullyUsable(oself, FALSE))
-	CallSpecIfGrown(oself, message);
+	GenCallSpecIfGrown(oself, message, NULL, 0);
 }
 
 @method GenPrimaryClass, MSG_GEN_DISPLAY_GET_MAXIMIZED

@@ -579,40 +579,6 @@ static void AddToInvalRegion(optr oself, const Rectangle *r)
     *retValue = pself->VI_bounds;
 }
 
-/* SaveOldBounds: the bounds before the geometry changes them */
-void VisSaveOldBounds(optr obj)
-{
-    VisInstance *v = VisLock(obj);
-    Rectangle *r;
-
-    if (!(v->VI_attrs & VA_OLD_BOUNDS_SAVED)) {
-	v->VI_attrs |= VA_OLD_BOUNDS_SAVED;
-	r = ObjVarAddData(obj, TEMP_VIS_OLD_BOUNDS, sizeof(Rectangle));
-	*r = VisPart(obj)->VI_bounds;
-    }
-    VisUnlock(obj);
-}
-
-/* ---------------------------------------------------------------------
- * Removing from the tree (VisRemove of visUtilsClass.asm)
- * ------------------------------------------------------------------- */
-
-/* VisVupInvalGeoToHere: the geometry invalid up the managed path to the
- * win group, updated there */
-static void InvalGeoToHere(optr obj, VisUpdateMode mode)
-{
-    while (obj) {
-	VisInstance *v = VisLock(obj);
-	Boolean up = v->VI_attrs & VA_MANAGED &&
-		     !(v->VI_typeFlags & VTF_IS_WIN_GROUP);
-	VisUnlock(obj);
-	VisMarkInvalid(obj, VOF_GEOMETRY_INVALID, up ? VUM_MANUAL : mode);
-	if (!up)
-	    return;
-	obj = VisFindParent(obj);
-    }
-}
-
 /* VisRemove: closed and out of the visual tree; the parent's geometry
  * is invalid and updated with the mode */
 void VisRemove(optr obj, VisUpdateMode mode)
@@ -660,7 +626,7 @@ void VisRemove(optr obj, VisUpdateMode mode)
 	Boolean custom = p->VCI_geoAttrs & VCGA_CUSTOM_MANAGE_CHILDREN;
 	VisUnlock(parent);
 	if (!custom)
-	    InvalGeoToHere(parent, realized ? mode : VUM_MANUAL);
+	    VisVupInvalGeoToHere(parent, realized ? mode : VUM_MANUAL);
     }
 }
 

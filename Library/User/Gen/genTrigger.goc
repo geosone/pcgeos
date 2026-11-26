@@ -17,12 +17,6 @@
 
 @classdecl GenTriggerClass;
 
-static void CallSpecIfGrown(optr oself, Message msg, const void *p, word ps)
-{
-    if (GenCheckIfSpecGrown(oself))
-	CObjCallSuperP(&GenClass, oself, msg, p, ps, NULL, 0);
-}
-
 @method GenTriggerClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS
 {
     return GenQueryUICallSpecificUI(oself, SPIR_BUILD_TRIGGER, MasterOffset);
@@ -91,7 +85,7 @@ static void CallSpecIfGrown(optr oself, Message msg, const void *p, word ps)
 	pself->GTI_actionMsg = actionMsg;
 	ObjMarkDirty(oself);
     }
-    CallSpecIfGrown(oself, MSG_GEN_TRIGGER_SET_ACTION_MSG, &actionMsg,
+    GenCallSpecIfGrown(oself, MSG_GEN_TRIGGER_SET_ACTION_MSG, &actionMsg,
 		    sizeof(actionMsg));
 }
 

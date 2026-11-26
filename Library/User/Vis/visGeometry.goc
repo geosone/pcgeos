@@ -63,7 +63,7 @@ done:
 
     if (!(pself->VI_attrs & VA_MANAGED))
 	return;
-    VisSaveOldBounds(oself);
+    SaveOldBounds(oself);
     VisPart(oself)->VI_geoAttrs &= ~VGA_GEOMETRY_CALCULATED;
     p.m = VUM_MANUAL;
     VisIfFlagSetCallVisChildren(oself, message, &p, sizeof(p), 0);

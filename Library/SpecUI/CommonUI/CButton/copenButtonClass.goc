@@ -246,26 +246,6 @@ static void ApplySizeHints(optr oself, sword *w, sword *h)
     VisApplySizeHints(GenPart(oself), w, h);
 }
 
-/* OpenChooseNewGadgetSize: the suggested size where the gadget hints
- * allow it (a toolbox button only expands its height if the room is
- * not twice its own, unless asked for) */
-static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
-				Boolean sysIcon, sword sugW, sword sugH,
-				sword *w, sword *h)
-{
-    if ((f & OLBMA_EXPAND_WIDTH_TO_FIT_PARENT) && sugW > *w)
-	*w = sugW;
-    if ((f & OLBMA_EXPAND_HEIGHT_TO_FIT_PARENT) && sugH > *h) {
-	if (sysIcon || !(f & OLBMA_IN_TOOLBOX) || sugH - *h <= *h ||
-	    ObjVarFindData(oself, HINT_EXPAND_HEIGHT_TO_FIT_PARENT))
-	    *h = sugH;
-    }
-    if ((f & OLBMA_CAN_CLIP_MONIKER_WIDTH) && (word) *w > (word) sugW)
-	*w = sugW;
-    if ((f & OLBMA_CAN_CLIP_MONIKER_HEIGHT) && (word) *h > (word) sugH)
-	*h = sugH;
-}
-
 /*
  * OLButtonRerecalcSize: the moniker with its insets (a reply bar's
  * inset around it), the gadget hints and size hints applied, at least
@@ -295,7 +275,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
 	    h -= 2 * (MO_REPLY_BUTTON_INSET_Y - MO_CGA_REPLY_BUTTON_INSET_Y);
     }
     b = Btn(oself);
-    ChooseNewGadgetSize(oself, b->OLBI_moreAttrs,
+    OpenChooseNewGadgetSize(oself, b->OLBI_moreAttrs,
 			(b->OLBI_specState & OLBSS_SYS_ICON) != 0, sw, sh,
 			&w, &h);
     ApplySizeHints(oself, &w, &h);
@@ -605,4 +585,14 @@ Boolean OpenButtonCheckIfAlwaysEnabled(optr oself)
 	MSG_OL_POPUP_TOGGLE_PUSHPIN)
 	return TRUE;
     return FALSE;
+}
+
+/* OLButtonMovePenCalcSize: the pen at the top left, the size */
+void OLButtonMovePenCalcSize(optr oself, GStateHandle gs, word *w, word *h)
+{
+    OLButtonInstance *b = Btn(oself);
+
+    GrMoveTo(gs, b->VI_bounds.R_left, b->VI_bounds.R_top);
+    *w = (word) (b->VI_bounds.R_right - b->VI_bounds.R_left);
+    *h = (word) (b->VI_bounds.R_bottom - b->VI_bounds.R_top);
 }

@@ -25,7 +25,6 @@
 @include <Internal/flowC.goh>
 @include <Internal/specC.goh>
 
-
 /* the background ([ui], backgrnd.def) */
 const char fieldBackgroundCategory[] = "ui";
 static const char backgroundDisabledOnField[] = "backgroundDisabledOnField";
@@ -128,37 +127,4 @@ word FieldWindowColor(optr oself)
     retValue->GRP_cx = (word) x;
     retValue->GRP_dx = (word) y;
     return TRUE;
-}
-
-/* FieldCreateAppArrayFromWindowsCallback: the application objects of
- * the focusable geodes (not the UI) with standard windows on the field,
- * front to back, each once */
-void FieldCollectApps(WindowHandle parent, AppArray *a)
-{
-    optr child = 0;
-    WindowHandle w;
-
-    WinGetInfo(parent, WIT_FIRST_CHILD_WIN, &child);
-    for (w = (WindowHandle) child; w; ) {
-	optr prio = 0, next = 0;
-	GeodeHandle owner;
-
-	WinGetInfo(w, WIT_PRIORITY, &prio);
-	owner = MemOwner(w);
-	if ((((word) prio & WPD_LAYER) == (LAYER_PRIO_STD << 4)) &&
-	    owner != a->ui &&
-	    (WinGeodeGetFlags(owner) & GWF_FOCUSABLE)) {
-	    optr app = GeodeGetAppObject(owner);
-	    word i;
-
-	    if (app) {
-		for (i = 0; i < a->count && a->apps[i] != app; i++)
-		    ;
-		if (i == a->count && a->count < a->max)
-		    a->apps[a->count++] = app;
-	    }
-	}
-	WinGetInfo(w, WIT_NEXT_SIBLING_WIN, &next);
-	w = (WindowHandle) next;
-    }
 }

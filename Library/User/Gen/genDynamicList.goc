@@ -54,12 +54,6 @@
     return pself->GDLI_numItems;
 }
 
-/* GenCallSpecIfGrown */
-static Boolean Grown(optr o)
-{
-    return ((VisBase *) ObjDeref(o, 0))->Vis_offset != 0;
-}
-
 /* ---------------------------------------------------------------------
  * The items' monikers
  * ------------------------------------------------------------------- */
@@ -126,7 +120,7 @@ static void ValidateItem(optr list, optr item, word id, Boolean moveIds)
     if (!EnsureUsable(list, item, id))
 	return;
     NukeMoniker(item);
-    if (Grown(item))
+    if (GenCheckIfSpecGrown(item))
 	@call item::MSG_GEN_ITEM_SET_INTERACTABLE_STATE(FALSE);
     @call item::MSG_GEN_SET_ENABLED(VUM_DELAYED_VIA_UI_QUEUE);
     id = ((GenItemInstance *) ObjDerefGen(item))->GII_identifier;
@@ -159,7 +153,7 @@ static void ValidateItem(optr list, optr item, word id, Boolean moveIds)
 			dataType, sourceType, source);
 	@call i::MSG_GEN_ITEM_SET_INTERACTABLE_STATE(TRUE);
     }
-    if (Grown(oself))
+    if (GenCheckIfSpecGrown(oself))
 	@callsuper();
 }
 
@@ -364,7 +358,7 @@ static void InitItemChanges(optr o, word *top, word *numVis)
 {
     optr first;
 
-    if (Grown(o))
+    if (GenCheckIfSpecGrown(o))
 	@call o::MSG_GEN_DYNAMIC_LIST_NUM_ITEMS_CHANGED(
 					GDL(o)->GDLI_numItems);
     *top = 0;

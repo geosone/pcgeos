@@ -210,3 +210,30 @@ void OpenWinUpdateModalStatus(optr o)
     if (app)
 	@call app::MSG_GEN_APPLICATION_NOTIFY_MODAL_WIN_CHANGE();
 }
+
+/*
+ * OpenWinDetaching: an attached window that will be saved (dirty, or
+ * in a resource and not ignoring dirty; not an icon) is restarted next
+ * time (Port32: its state is not saved yet); others leave the window
+ * list; then not attached
+ */
+void OpenWinDetaching(optr o)
+{
+    OLWinInstance *w = Win(o);
+    word f;
+
+    if (!(w->VI_specAttrs & SA_ATTACHED))
+	return;
+    if (w->OLWI_type != MOWT_WINDOW_ICON) {
+	f = ObjGetFlags(o);
+	if (!(f & (OCF_DIRTY | OCF_IN_RESOURCE)) ||
+	    !((f ^ OCF_IGNORE_DIRTY) & (OCF_IGNORE_DIRTY | OCF_IN_RESOURCE))) {
+	    OLWinTakeOffWindowList(o);
+	    @call o::MSG_SPEC_SET_ATTRS(0, SA_ATTACHED, VUM_NOW);
+	    return;
+	}
+    }
+    Win(o)->OLWI_winPosSizeState |= WPSS_HAS_RESTARTED;
+    /* OpenWinSaveState (the maximized state swapped around it) */
+    @call o::MSG_SPEC_SET_ATTRS(0, SA_ATTACHED, VUM_NOW);
+}

@@ -13,7 +13,6 @@
 @include "textInt.goh"
 #include <Internal/specUI.h>
 
-
 /* VisTextInitialize */
 /*
  * T_GetSystemCharAttr: the default attributes with the specific UI's
@@ -122,31 +121,11 @@ static word SystemCharAttrRun(optr o)
     return pself->VTI_tbMargin;
 }
 
-/*
- * SendToTextOutputLowIfNotSelf: what the object tells itself goes on
- * to its output unless that is the object (a subclass that took the
- * message is the output then); a generic text object's as its action
- */
-static void ToOutputIfNotSelf(optr o, Message msg, const void *args,
-			      word size)
-{
-    optr out = VT(o)->VTI_output;
-    EventHandle ev;
-
-    if (!out || out == o)
-	return;
-    if (VT(o)->VI_typeFlags & VTF_IS_GEN) {
-	CObjMessageP(MF_RECORD, 0, msg, args, size, &ev, sizeof(ev));
-	@call o::MSG_GEN_OUTPUT_ACTION(ev, out);
-    } else
-	CObjMessageP(0, out, msg, args, size, NULL, 0);
-}
-
 @extern method VisTextClass, MSG_META_TEXT_USER_MODIFIED
 {
     (void) pself;
     (void) obj;
-    ToOutputIfNotSelf(oself, message, &oself, sizeof(oself));
+    SendToTextOutputLowIfNotSelf(oself, message, &oself, sizeof(oself));
 }
 
 @extern method VisTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED
@@ -157,7 +136,7 @@ static void ToOutputIfNotSelf(optr o, Message msg, const void *args,
     (void) object;
     a.object = oself;
     a.hasText = hasTextFlag;
-    ToOutputIfNotSelf(oself, message, &a, sizeof(a));
+    SendToTextOutputLowIfNotSelf(oself, message, &a, sizeof(a));
 }
 
 @extern method VisTextClass, MSG_META_TEXT_CR_FILTERED, MSG_META_TEXT_TAB_FILTERED
@@ -167,5 +146,5 @@ static void ToOutputIfNotSelf(optr o, Message msg, const void *args,
     (void) pself;
     a.character = character;
     a.params = params;
-    ToOutputIfNotSelf(oself, message, &a, sizeof(a));
+    SendToTextOutputLowIfNotSelf(oself, message, &a, sizeof(a));
 }

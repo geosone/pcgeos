@@ -7,15 +7,6 @@
 #include <chunkarr.h>
 #include <char.h>
 
-/* RunArrayDelete */
-static void RunDelete(optr o, TextRunKind kind, word i)
-{
-    optr a = TA_RunArray(o, kind);
-
-    ChunkArrayDelete(a, ChunkArrayElementToPtr(a, i, NULL));
-    ObjMarkDirty(o);
-}
-
 /* TA_UpdateRunsForSelectionChange: a new selection drops the insertion
  * token */
 void TA_UpdateRunsForSelectionChange(optr o)
@@ -43,12 +34,12 @@ dword CoalesceRun(optr o, TextRunKind kind)
 	    break;
 	if (TA_RunToken(o, kind, i) == lastToken) {
 	    TA_RemoveElement(o, kind, lastToken);
-	    RunDelete(o, kind, i);
+	    RunArrayDelete(o, kind, i);
 	    continue;
 	}
 	if (pos == lastPos) {
 	    TA_RemoveElement(o, kind, TA_RunToken(o, kind, i - 1));
-	    RunDelete(o, kind, i - 1);
+	    RunArrayDelete(o, kind, i - 1);
 	    if (i > 1) {
 		i--;
 		lastToken = TA_RunToken(o, kind, i - 1);
@@ -226,7 +217,7 @@ extendToNextParagraph:
 
 doDelete:
 	TA_RemoveElement(o, kind, TA_RunToken(o, kind, i));
-	RunDelete(o, kind, i);
+	RunArrayDelete(o, kind, i);
 	if (runPos == 0)
 	    TA_SetRunPos(o, kind, i, 0);
 	coalesce = updateUI = TRUE;

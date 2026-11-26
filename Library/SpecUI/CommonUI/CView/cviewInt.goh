@@ -52,7 +52,7 @@ extern sword GetDefaultThumbHeight(optr oself);
 
 /* CView/cviewScrollbarSelect.goc */
 /* the press (or the drag) repeated while the button is held down */
-extern void OLScrollbarRepeatPress(optr oself);
+extern void RepeatScrollIfNeeded(optr oself);
 /* Motif/View/viewScrollbarDraw.goc: the bar drawn (updating: only the
  * thumb and page areas) */
 extern void DrawScrollbar(optr oself, GStateHandle gs, Boolean updating);
@@ -103,5 +103,8 @@ extern void OLPaneWindowSetContent(optr oself);
 /* the window scrolled to the origin (absolute) */
 extern void OLPaneWindowScroll(optr oself, const PointDWord *origin);
 extern void SendPaneSizeMethod(optr oself, Message msg);
+
+/* cviewScrollbarSelect.goc (for cviewScrollbar.goc) */
+void HandlePress(optr oself, sword pos, word bi);
 
 #endif

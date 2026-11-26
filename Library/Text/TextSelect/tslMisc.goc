@@ -3,11 +3,6 @@
  */
 @include "textInt.goh"
 
-static sdword W(const WBFixed *w)
-{
-    return ((sdword) w->WBF_int << 8) + w->WBF_frac;
-}
-
 /*
  * InvertRange (CommonLineInvertRange, LineInvertArea): the characters
  * from start to end inverted, line by line: from the line's left edge
@@ -34,14 +29,14 @@ void InvertRange(optr o, dword start, dword end)
     if (first > last)
 	return;
     wtop = TL_LineGetTop(o, first);
-    top = W(&wtop);
+    top = TEXT_WBF(&wtop);
     GrSaveState(g);
-    TextGStateToText(o, FALSE);
+    SmallRegionTransformGState(o, FALSE);
     GrSetAreaMaskSys(g, SDM_100);
     GrSetMixMode(g, MM_INVERT);
     for (line = first; line <= last; line++) {
-	const LineInfo *li = TL_LinePtr(o, line, NULL);
-	sdword hgt = W(&li->LI_hgt);
+	const LineInfo *li = SmallGetLinePointer(o, line, NULL);
+	sdword hgt = TEXT_WBF(&li->LI_hgt);
 	dword count = TL_LineGetCharCount(li);
 	word fields = TL_LineGetFieldCount(o, line);
 	sword adj = li->LI_adjustment, left, right, x;
@@ -53,7 +48,7 @@ void InvertRange(optr o, dword start, dword end)
 		(void) TL_LineTextPosition(o, line, 0x7fff, start, &x, NULL);
 		left = (sword) (x + adj);
 	    }
-	    li = TL_LinePtr(o, line, NULL);
+	    li = SmallGetLinePointer(o, line, NULL);
 	    if (ls + count <= end) {
 		const FieldInfo *fi = &li->LI_firstField + (fields - 1);
 

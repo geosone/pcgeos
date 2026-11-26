@@ -16,7 +16,6 @@
 #include <fontID.h>
 #include <chunkarr.h>
 
-
 static const FontID defaultFonts[] = {
     FID_BERKELEY, FID_CHICAGO, FID_BISON, FID_WINDOWS, FID_LED,
     FID_ROMA, FID_UNIVERSITY,
@@ -141,34 +140,6 @@ void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a)
 }
 
 /*
- * ReflectChangeUpdateGeneric (textSuspend.asm): a generic object's
- * instance data updated; the lines of the range made again and drawn,
- * the selection shown again; the object user modified, told
- * MSG_VIS_TEXT_ATTRIBUTE_CHANGE.  The range is the whole object.
- */
-void TA_ReflectChange(optr o)
-{
-    dword size = TS_GetTextSize(o);
-    WBFixed before = VT(o)->VTI_height;
-    Boolean lines;
-
-    if (VT(o)->VI_typeFlags & VTF_IS_GEN)
-	@call o::MSG_VIS_TEXT_UPDATE_GENERIC();
-    lines = VT(o)->VTI_lines != 0;
-    if (lines) {
-	TextRecalc(o, 0, size, size);
-	TextScreenUpdate(o);
-	TextScrollOneLine(o, VT(o)->VTI_selectStart);
-    }
-    EditHilite(o);
-    TextGStateDestroy(o);
-    if (lines)
-	TextHeightNotify(o, before);
-    TextMarkUserModified(o);
-    @call o::MSG_VIS_TEXT_ATTRIBUTE_CHANGE();
-}
-
-/*
  * UnHiliteAndFixupCharAttrRange: the range of a change made real (the
  * whole object with a single attribute: VIS_TEXT_RANGE_SELECTION, as
  * FixupCharAttrRange makes it); the selection off the screen while the
@@ -205,7 +176,7 @@ static void SetCharAttr(optr o, dword start, dword end,
 	TA_RemoveElement(o, TRK_CHAR_ATTR, token);
     } else
 	TA_SetSingleCharAttr(o, &c);
-    TA_ReflectChange(o);
+    ReflectChangeUpdateGeneric(o);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_DEFAULT
@@ -229,12 +200,12 @@ static void SetCharAttr(optr o, dword start, dword end,
 
     if (!FixupRange(oself, &r, rangeStart, rangeEnd) ||
 	token == CA_NULL_ELEMENT) {
-	TA_ReflectChange(oself);
+	ReflectChangeUpdateGeneric(oself);
 	return;
     }
     (void) TA_ModifyRun(oself, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, NULL,
 			NULL, token);
-    TA_ReflectChange(oself);
+    ReflectChangeUpdateGeneric(oself);
 }
 
 /* VisTextAddCharAttr: the element with a reference */
@@ -358,4 +329,42 @@ static void DiffCharAttr(const VisTextCharAttr *a, const VisTextCharAttr *b,
     }
     *attrs = a;
     return CA_NULL_ELEMENT;
+}
+
+/*
+ * CharAttrChangeCommon: one field of the attribute changed by the
+ * callback, in the range (with runs) or the object's single attribute
+ */
+void CharAttrChangeCommon(optr o, dword start, dword end,
+			   TA_ModifyCallback *cb, void *data)
+{
+    VisTextCharAttr a;
+    VisTextRange r;
+
+    if (FixupRange(o, &r, start, end))
+	(void) TA_ModifyRun(o, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, cb,
+			    data, CA_NULL_ELEMENT);
+    else {
+	TA_GetSingleCharAttr(o, &a);
+	cb(o, &a, data);
+	TA_SetSingleCharAttr(o, &a);
+    }
+    ReflectChangeUpdateGeneric(o);
+}
+
+/* UnHiliteAndFixupParaAttrRange: the range of a change, whole
+ * paragraphs; FALSE if the object has a single attribute */
+Boolean UnHiliteAndFixupParaAttrRange(optr o, VisTextRange *r, dword start,
+			      dword end)
+{
+    Boolean multiple =
+	(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS) != 0;
+
+    r->VTR_start = start;
+    r->VTR_end = end;
+    if (multiple)
+	TA_GetTextRange(o, r, VTRC_PARAGRAPH_CHANGE);
+    TextGStateCreate(o);
+    EditUnHilite(o);
+    return multiple;
 }

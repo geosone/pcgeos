@@ -98,6 +98,15 @@ word SpecGetDocControlOptions(void)
 
 /* (the objects: cmainManager.ui through uic -g) */
 @include "cmainUIDocumentControl.goh"
+@include <stdapp.goh>
+@include <Internal/SpecUI/olFileSelectorClass.goh>
+@include <Objects/gTextC.goh>
+@include <Objects/gBoolGC.goh>
+@include <Objects/gItemGC.goh>
+@include <Objects/gFSelC.goh>
+@include <Objects/gAppC.goh>
+#include <localize.h>
+#include <uDialog.h>
 
 /* cmainUIDocOperations.goc: the dialogs */
 @extern method OLDocumentControlClass,
@@ -1017,4 +1026,15 @@ void OLDCEnsureTemplateDir(optr o)
 {
     (void) pself;
     GeodeGetInfo(MemOwner(OptrToHandle(oself)), GGIT_TOKEN_ID, token);
+}
+
+/* SendToTargetDocRegs, ...Frame: to the target document, through the
+ * model */
+void SendToTargetDocRegs(optr o, Message msg, const void *params, word size)
+{
+    EventHandle ev;
+
+    CObjMessageP(MF_RECORD, (optr) (uintptr_t) &GenDocumentClass, msg,
+		 params, size, &ev, sizeof(ev));
+    @call o::MSG_META_SEND_CLASSED_EVENT(ev, (TravelOption) TO_MODEL);
 }

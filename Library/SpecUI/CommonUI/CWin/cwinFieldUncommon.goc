@@ -139,7 +139,7 @@
     a.count = 0;
     a.max = 1;
     a.ui = SysGetInfo(SGIT_UI_PROCESS);
-    FieldCollectApps(pself->VCI_window, &a);
+    FieldCreateAppArrayFromWindowsCallback(pself->VCI_window, &a);
     return a.count ? apps[0] : 0;
 }
 
@@ -158,5 +158,38 @@
 	optr app = ((optr *) LMemDeref(l))[i];
 
 	(void) CObjMessageP(0, app, msg, NULL, 0, NULL, 0);
+    }
+}
+
+/* FieldCreateAppArrayFromWindowsCallback: the application objects of
+ * the focusable geodes (not the UI) with standard windows on the field,
+ * front to back, each once */
+void FieldCreateAppArrayFromWindowsCallback(WindowHandle parent, AppArray *a)
+{
+    optr child = 0;
+    WindowHandle w;
+
+    WinGetInfo(parent, WIT_FIRST_CHILD_WIN, &child);
+    for (w = (WindowHandle) child; w; ) {
+	optr prio = 0, next = 0;
+	GeodeHandle owner;
+
+	WinGetInfo(w, WIT_PRIORITY, &prio);
+	owner = MemOwner(w);
+	if ((((word) prio & WPD_LAYER) == (LAYER_PRIO_STD << 4)) &&
+	    owner != a->ui &&
+	    (WinGeodeGetFlags(owner) & GWF_FOCUSABLE)) {
+	    optr app = GeodeGetAppObject(owner);
+	    word i;
+
+	    if (app) {
+		for (i = 0; i < a->count && a->apps[i] != app; i++)
+		    ;
+		if (i == a->count && a->count < a->max)
+		    a->apps[a->count++] = app;
+	    }
+	}
+	WinGetInfo(w, WIT_NEXT_SIBLING_WIN, &next);
+	w = (WindowHandle) next;
     }
 }

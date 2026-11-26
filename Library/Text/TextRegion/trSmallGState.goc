@@ -1,0 +1,21 @@
+/*
+ * trSmallGState.goc -- after trSmallGState.asm: GState related stuff.
+ */
+@include "textInt.goh"
+
+/* SmallRegionTransformGState, SmallSetClip: the gstate at the text's
+ * top left, clipped to the text unless printing */
+void SmallRegionTransformGState(optr o, Boolean print)
+{
+    VisTextInstance *t = VT(o);
+    VisInstance *v = (VisInstance *) t;
+    GStateHandle g = t->VTI_gstate;
+    sword w, h;
+
+    GrApplyTranslationDWord(g, v->VI_bounds.R_left + t->VTI_lrMargin,
+			    v->VI_bounds.R_top + t->VTI_tbMargin);
+    if (!print) {
+	TextSize(o, &w, &h);
+	GrSetClipRect(g, PCT_REPLACE, 0, 0, w, h);
+    }
+}
