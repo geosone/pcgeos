@@ -45,7 +45,8 @@
 #define WINDOW_FREE_SPACE	206
 #define WIN_NUM_REGIONS		11	/* W_winReg ... W_pathReg */
 
-/* winSaveUnder.c: save under areas */
+/* save under areas: winCreDest.c (the variables, opening and closing),
+ * winWindows.c, winIndividual.c */
 extern WinUnderFlags winUnderClosing;
 extern optr winUnderRestored;
 WinUnderFlags WinCheckUnder(Window *w, const Rectangle *b);
@@ -139,7 +140,7 @@ void WinWashOutReg(WindowHandle wh, ChunkHandle reg);
 void WinSetupMaskFlags(Window *w);
 void WinValWinStruct(GStateHandle gh, GState *gs, WindowHandle wh);
 
-/* winSaveUnder.c and winWindows.c */
+/* winWindows.c, for winCreDest.c */
 WindowHandle WinRootOf(WindowHandle wh);
 void WinClearUnderBits(WindowHandle wh, WinUnderFlags f);
 
@@ -155,5 +156,9 @@ extern word wGeodeWinVarsOffset;
 
 /* winWindows.c */
 Boolean WinTestIfWinInBranch(WindowHandle wh, WindowHandle top);
+
+/* winWindows.c (WinPerformObscure), for winCreDest.c */
+void WinMarkUnderBits(WindowHandle wh, WindowHandle skip, WinUnderFlags f,
+	const Rectangle *r);
 
 #endif

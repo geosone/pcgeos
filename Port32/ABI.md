@@ -651,7 +651,7 @@ PROTOCOL 4.1)` passes it to `gpgeode --protocol`.
 ### 7.3 The keyboard driver (`Driver/Keyboard`, P4)
 
 The C keyboard driver keeps the design of the asm driver
-(`keyboard.h`, `keyboardProcess.c`, `keyboardInput.c`,
+(`keyboard.h`, `keyboardProcess.c`,
 `keyboardInit.c`, beside the asm files).
 
 **The interrupt.**
@@ -1237,7 +1237,7 @@ A4 and B5 by their code, others by their size in dots, for which the
 printer asks the user) and the full paint mode in 1/300"; the cursor is
 absolute (`CSI y ; x f`); the fonts are scalable, with their size in
 dots and their pitch (`textSetFontCapsl.c`; the pitch is the
-`TextPitch` value of the spooler); seven styles (`lbpStyles.c`). A band
+`TextPitch` value of the spooler); seven styles (`printcomCapslStyles.c`). A band
 goes as a raster image of its live bytes (`graphicsCapslCommon.c`): the
 cursor to the first byte with ink of any line (`CSI x \``), then `CSI
 count ; width ; dpi . r` and the lines from there to the last byte with
@@ -3424,7 +3424,7 @@ The window system in C lies beside the asm: `winCreDest.c`,
   transparent. ctest `kernel.draw` checks both. Bitmaps (not filled
   ones) are not yet drawn through the checker.
 
-**Save under areas** (`winSaveUnder.c`, driver side §7.5). A window
+**Save under areas** (`winCreDest.c`, `winWindows.c`, `winIndividual.c`, driver side §7.5). A window
 opened with `WPF_SAVE_UNDER` has the screen under it saved and gets
 the area's bit in `W_saveUnder`. On close, the pixels go back within
 what of the window was visible.

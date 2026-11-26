@@ -260,7 +260,7 @@ static void AddToInval(WindowHandle wh)
 }
 
 /* an invalidation: what it touches of a save under area is no longer
- * what was saved (winSaveUnder.c) */
+ * what was saved (winCreDest.c) */
 void WinAddToInvalReg(WindowHandle wh)
 {
     WinUnderInval(wh);
@@ -271,7 +271,7 @@ void WinAddToInvalReg(WindowHandle wh)
  * WinCalcVisReg: W_visReg = W_univReg - W_childReg; what is new of it
  * to the invalid region.  While a save under area closes, its restored
  * part is not new to a window whose mask bit is still set
- * (winSaveUnder.c).
+ * (winCreDest.c).
  */
 void WinCalcVisReg(WindowHandle wh)
 {
@@ -459,4 +459,18 @@ void GrEndUpdate(GStateHandle gstate)
 	WinSendExpEvent(wh);
     }
     Leave(wh);
+}
+
+/* WinMaskOutSaveUnder for an invalidation: what W_temp1Reg (screen)
+ * touches is no longer what was saved */
+void WinUnderInval(WindowHandle wh)
+{
+    Window *w = MemDeref(wh);
+    Rectangle b;
+
+    if (!w->W_savedUnderMask || WinRegIsNull(wh, w->W_temp1Reg))
+	return;
+    GrGetPtrRegBounds(WinReg(wh, w->W_temp1Reg), &b);
+    w = MemDeref(wh);
+    w->W_savedUnderMask &= (WinUnderFlags) ~WinCheckUnder(w, &b);
 }

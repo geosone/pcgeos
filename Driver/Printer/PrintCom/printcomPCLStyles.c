@@ -1,23 +1,20 @@
 /*
- * printcomPCLStyles.c -- the styles of the PCL drivers (the C port of
- * printcomPCLStyles.asm with stylesSRBold.asm, stylesSRItalic.asm and
- * stylesSRUnderline.asm): bold, italic and underline by their codes, the
- * others nothing.
+ * printcomPCLStyles.c -- the styles of the PCL drivers (after
+ * printcomPCLStyles.asm, with the Styles/stylesSR*.c parts it includes,
+ * as the asm includes Styles/stylesSR*.asm): bold, italic and underline
+ * by their codes, the others nothing.
  */
 #include "printcom.h"
 #include "printcomDriver.h"
+#include "Styles/stylesSRBold.c"
+#include "Styles/stylesSRItalic.c"
+#include "Styles/stylesSRUnderline.c"
 
 static Boolean None(PState *ps)
 {
     (void) ps;
     return FALSE;
 }
-
-#define CODE(name) \
-    static Boolean name(PState *ps) { return SendCodeOut(ps, pr_codes_##name); }
-CODE(SetBold) CODE(ResetBold)
-CODE(SetItalic) CODE(ResetItalic)
-CODE(SetUnderline) CODE(ResetUnderline)
 
 /* by bit: PTS_FUTURE (0) ... PTS_CONDENSED (15) */
 PrintStyleRoutine *const printSetStyle[16] = {

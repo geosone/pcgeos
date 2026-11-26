@@ -19,6 +19,7 @@ geos_dotmatrix_driver(lbp GP lbp32.gp REV lbp.rev
     Text/textSetFontCapsl.c Text/textGetLineSpacing.c
     Text/textSetLineSpacing.c Text/textSetSymbolSet.c
     Text/textLoadNoISOSymbolSet.c
+    printcomCapslStyles.c
     Styles/stylesGet.c Styles/stylesSet.c Styles/stylesTest.c
     Graphics/graphicsCommon.c Graphics/graphicsCapslCommon.c
     Graphics/graphicsAdjustForResolution.c Graphics/graphicsPrintSwath300.c
@@ -26,4 +27,4 @@ geos_dotmatrix_driver(lbp GP lbp32.gp REV lbp.rev
     Cursor/cursorSetCursorCapsl.c
     Page/pageStartASFOnly.c Page/pageEndASFOnly.c
     ${DOTMATRIX_NO_COLOR}
-  SOURCES lbpControlCodes.c lbpStyles.c)
+  SOURCES lbpControlCodes.c)

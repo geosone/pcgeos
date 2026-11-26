@@ -26,7 +26,8 @@
  * visible region goes to WinCalcVisReg, which washes out and exposes
  * what became visible.
  *
- * Save under areas: winSaveUnder.c.
+ * Save under areas: winCreDest.c (how they work), here and
+ * winIndividual.c.
  */
 #include "winInt.h"
 #include "../Graphics/graphicsInt.h"
@@ -657,4 +658,103 @@ WinUnderFlags WinGetOverlyingSaveUnders(WindowHandle wh)
 	MemUnlock(s);
     }
     return f;
+}
+
+WindowHandle WinRootOf(WindowHandle wh)
+{
+    for (;;) {
+	Window *w = MemLock(wh);
+	WindowHandle up = w->W_parent;
+	MemUnlock(wh);
+	if (!up)
+	    return wh;
+	wh = up;
+    }
+}
+
+/* the bits f out of the branch */
+void WinClearUnderBits(WindowHandle wh, WinUnderFlags f)
+{
+    Window *w = MemLock(wh);
+    WindowHandle ch, next;
+
+    w->W_savedUnderMask &= (WinUnderFlags) ~f;
+    w->W_savedUnderFlags &= (WinUnderFlags) ~f;
+    for (ch = w->W_firstChild; ch; ch = next) {
+	Window *c = MemLock(ch);
+	next = c->W_nextSibling;
+	MemUnlock(ch);
+	WinClearUnderBits(ch, f);
+    }
+    MemUnlock(wh);
+}
+
+/* DR_VID_CHECK_UNDER: the areas a rectangle (screen) overlaps */
+WinUnderFlags WinCheckUnder(Window *w, const Rectangle *b)
+{
+    DriverRegs r;
+
+    memset(&r, 0, sizeof(r));
+    r.DR_ax = (word) b->R_left;
+    r.DR_bx = (word) b->R_top;
+    r.DR_cx = (word) b->R_right;
+    r.DR_dx = (word) b->R_bottom;
+    if (WinCallVidDriver(w, DR_VID_CHECK_UNDER, &r))
+	return 0;
+    return (WinUnderFlags) r.DR_ax;
+}
+
+/* before a change of the window (WinChangePrep and
+ * WinClearSaveUndersOverlappingParent): its own area, then those over
+ * its parent's bounds (its own at the root) */
+void WinUnderChange(WindowHandle wh)
+{
+    Window *w = MemLock(wh);
+    WindowHandle parent = w->W_parent;
+    Rectangle b;
+
+    if (w->W_saveUnder) {
+	WinUnderFlags own = w->W_saveUnder;
+	MemUnlock(wh);
+	WinClearSaveUnders(wh, own);
+	w = MemLock(wh);
+    }
+    b = w->W_winRect;
+    if (parent) {
+	Window *p = MemLock(parent);
+	b = p->W_winRect;
+	MemUnlock(parent);
+    }
+    {
+	WinUnderFlags f = WinCheckUnder(w, &b);
+	MemUnlock(wh);
+	WinClearSaveUnders(wh, f);
+    }
+}
+
+/* WinPerformObscure with WIN_OPEN_SAVE_UNDER: the windows of the branch
+ * the rectangle overlaps, not the branch skip */
+void WinMarkUnderBits(WindowHandle wh, WindowHandle skip, WinUnderFlags f,
+		     const Rectangle *r)
+{
+    Window *w;
+    WindowHandle ch, next;
+
+    if (wh == skip)
+	return;
+    w = MemLock(wh);
+    if (w->W_winRect.R_left <= r->R_right &&
+	w->W_winRect.R_right >= r->R_left &&
+	w->W_winRect.R_top <= r->R_bottom &&
+	w->W_winRect.R_bottom >= r->R_top) {
+	w->W_savedUnderMask |= f;
+	w->W_savedUnderFlags |= f;
+    }
+    for (ch = w->W_firstChild; ch; ch = next) {
+	Window *c = MemLock(ch);
+	next = c->W_nextSibling;
+	MemUnlock(ch);
+	WinMarkUnderBits(ch, skip, f, r);
+    }
+    MemUnlock(wh);
 }

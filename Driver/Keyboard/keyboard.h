@@ -105,7 +105,8 @@ void KbdScanEvent(word scan);
 /* keyboardInit.c */
 Boolean KbdInit(void);
 void KbdExit(void);
-/* the HID key events of ghal_input as scan codes (keyboardInput.c) */
+/* the HID key events of ghal_input as scan codes (KbdInterrupt,
+ * keyboardProcess.c) */
 void KbdInputHandler(void *ctx);
 
 /* keyboardVariable.c (keyboardVariable.def) */
