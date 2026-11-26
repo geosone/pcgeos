@@ -14,6 +14,7 @@ geos_sources(text_goc
   textMethodGeometry.goc
   textFilter.goc
   textScrollOneLine.goc
+  textOutput.goc
   textStuff.goc
   textCompatibility.goc
   textSuspend.goc)

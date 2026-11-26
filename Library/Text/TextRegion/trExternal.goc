@@ -1,0 +1,25 @@
+/*
+ * trExternal.goc -- after trExternal.asm: TR_RegionTransformGState,
+ * TR_RegionGetTopLeft.  Port32: small objects (one region); the large
+ * ones are not in C yet.
+ */
+@include "textInt.goh"
+
+/* TR_RegionTransformGState: the gstate at the region's top left, unless
+ * it is there already (VTI_gstateRegion) */
+void TR_RegionTransformGState(optr o, word region, Boolean print)
+{
+    VisTextInstance *t = VT(o);
+
+    if (region == t->VTI_gstateRegion)
+	return;
+    t->VTI_gstateRegion = region;
+    SmallRegionTransformGState(o, print);
+}
+
+/* TR_RegionGetTopLeft: the region's top left */
+void TR_RegionGetTopLeft(optr o, word region, PointDWord *p)
+{
+    (void) region;
+    SmallRegionGetRegionTopLeft(o, p);
+}

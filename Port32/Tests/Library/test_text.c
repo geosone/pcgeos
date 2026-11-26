@@ -17,6 +17,9 @@
  *      carriage return, a tab.
  *  11. the sizes for the geometry.
  *  12. the filters.
+ *  13. the character attribute runs.
+ *  14. the paragraph attribute runs.
+ *  15. a position shown (not on a screen: nothing to scroll).
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -91,7 +94,7 @@ int main(int argc, char **argv)
 	"Hello, world!", "bye, world!?", "!!?bye!!", "abcdefgh", "bh",
 	"in aa blockin", "aXYde", "aXYde", "aXYde", "Hi Hi Hi",
 	"Hi Hi Hi Hi Hi", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
-	"a12b-cE -.F14y#"
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#"
     };
     GeodeHandle app;
     GeodeLoadError e;
@@ -135,7 +138,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 14; i++) {
+    for (i = 1; i <= 15; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);

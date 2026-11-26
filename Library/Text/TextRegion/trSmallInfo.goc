@@ -1,0 +1,14 @@
+/*
+ * trSmallInfo.goc -- after trSmallInfo.asm: SmallRegionGetRegionTopLeft.
+ */
+@include "textInt.goh"
+
+/* SmallRegionGetRegionTopLeft: the top left of the region (of the text:
+ * the object's bounds within its margins) */
+void SmallRegionGetRegionTopLeft(optr o, PointDWord *p)
+{
+    VisTextInstance *t = VT(o);
+
+    p->PD_x = (sdword) t->VI_bounds.R_left + t->VTI_lrMargin;
+    p->PD_y = (sdword) t->VI_bounds.R_top + t->VTI_tbMargin;
+}

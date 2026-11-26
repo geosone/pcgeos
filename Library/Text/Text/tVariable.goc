@@ -81,6 +81,9 @@
 @extern method VisTextClass, MSG_VIS_TEXT_DELETE_SELECTION;
 /* textScrollOneLine.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_SCROLL_ONE_LINE;
+/* textOutput.goc */
+@extern method VisTextClass, MSG_VIS_TEXT_SHOW_POSITION;
+@extern method VisTextClass, MSG_VIS_TEXT_SHOW_SELECTION;
 /* TextAttr/taAttr.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID;
 @extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT;

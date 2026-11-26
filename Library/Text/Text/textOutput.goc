@@ -1,0 +1,128 @@
+/*
+ * textOutput.goc -- after textOutput.asm: MSG_VIS_TEXT_SHOW_POSITION,
+ * TextCallShowSelection, MSG_VIS_TEXT_SHOW_SELECTION.  Routines for
+ * telling the rest of the world about changes in the text object.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects (the height
+ * notification of a large object is not in C yet).
+ */
+@include "textInt.goh"
+#include <sysstats.h>
+
+/* heapInt.def: fewer free handles than this, and the selection is not
+ * forced onto the screen */
+#define LOW_ON_FREE_HANDLES_THRESHOLD	400
+
+/* VisTextShowPosition: an offset (or one of the special values of
+ * VTR_start) shown */
+@extern method VisTextClass, MSG_VIS_TEXT_SHOW_POSITION
+{
+    VisTextRange r;
+
+    r.VTR_start = r.VTR_end = position;
+    TA_GetTextRange(oself, &r, 0);
+    TextGStateCreate(oself);
+    TextCallShowSelection(oself, r.VTR_start, 0);
+    TextGStateDestroy(oself);
+}
+
+/*
+ * TextCallShowSelection: an offset of the text shown (flags:
+ * VTSSF_DRAGGING when the pointer drags).  A suspended object keeps it
+ * for the end of the suspension; one that cannot draw, or is targetable
+ * without the target, does nothing.  The place is the cursor's, or the
+ * offset's on its line; already within the window it stays.  A one
+ * line object scrolls itself (MSG_VIS_TEXT_SCROLL_ONE_LINE), the others
+ * ask their view (MSG_VIS_TEXT_SHOW_SELECTION).
+ */
+void TextCallShowSelection(optr o, dword offset,
+			   VisTextShowSelectionFlags flags)
+{
+    VisTextInstance *t = VT(o);
+    sword x, y, height;
+    word region;
+    WBFixed blo, hgt;
+    PointDWord tl;
+    sdword left, top;
+    MakeRectVisibleFlags yFlags = 0;
+    MakeRectVisibleMargin yMargin = MRVM_50_PERCENT;
+    Boolean atTop;
+
+    if (t->VTI_intFlags & VTIF_SUSPENDED) {
+	VisTextSuspendData *d = ObjVarFindData(o,
+					       ATTR_VIS_TEXT_SUSPEND_DATA);
+	if (d)
+	    d->VTSD_showSelectionPos = offset;
+	return;
+    }
+    if (!TextCheckCanDraw(o))
+	return;
+    t = VT(o);
+    if ((t->VTI_state & VTS_TARGETABLE) &&
+	!(t->VTI_intSelFlags & VTISF_IS_TARGET))
+	return;
+    if (TSL_SelectIsCursor(o) && t->VTI_cursorPos.P_y != (sword) EOREGREC) {
+	/* the cursor's place */
+	region = t->VTI_cursorRegion;
+	TR_RegionTransformGState(o, region, FALSE);
+	t = VT(o);
+	x = t->VTI_cursorPos.P_x;
+	y = t->VTI_cursorPos.P_y;
+	TSL_GetCursorLineBLOAndHeight(o, &blo, &hgt);
+	height = (sword) ((TEXT_WBF(&hgt) + 0xff) >> 8);
+    } else {
+	/* the offset's place on its line */
+	hgt = TL_LineGetHeight(o, TL_LineFromOffset(o, offset, FALSE, NULL));
+	height = (sword) hgt.WBF_int;
+	TSL_ConvertOffsetToCoordinate(o, offset, &x, &y);
+	region = 0;
+	TR_RegionTransformGState(o, region, FALSE);
+	x = (sword) (x + VT(o)->VTI_leftOffset);	/* a one line object */
+    }
+    /* (the asm: space on top of the first line could make y negative) */
+    if (y < 0)
+	y = 0;
+    t = VT(o);
+    atTop = ObjVarFindData(o, TEMP_VIS_TEXT_SHOW_SELECTION_AT_TOP_LEFT) !=
+	    NULL;
+    if (!(t->VTI_state & VTS_ONE_LINE) && !atTop) {
+	/* already within the window? */
+	Rectangle w;
+
+	GrGetWinBounds(t->VTI_gstate, &w);
+	if (x >= w.R_left && x <= w.R_right && y >= w.R_top &&
+	    y + height <= w.R_bottom)
+	    return;
+    }
+    /* to the document's coordinates */
+    TR_RegionGetTopLeft(o, region, &tl);
+    left = tl.PD_x + x;
+    top = tl.PD_y + y;
+    if (atTop) {
+	yMargin = MRVM_0_PERCENT;
+	yFlags = MRVF_ALWAYS_SCROLL | MRVF_USE_MARGIN_FROM_TOP_LEFT;
+    }
+    if (VT(o)->VTI_state & VTS_ONE_LINE) {
+	@call o::MSG_VIS_TEXT_SCROLL_ONE_LINE((word) left);
+	return;
+    }
+    /* (the asm's hack: not when low on handles) */
+    if (SysGetInfo(SGIT_NUMBER_OF_FREE_HANDLES) <
+	LOW_ON_FREE_HANDLES_THRESHOLD)
+	return;
+    @call o::MSG_VIS_TEXT_SHOW_SELECTION(flags, yFlags, yMargin, 0,
+					 MRVM_50_PERCENT, top + height, left,
+					 top, left);
+}
+
+/* VisTextShowSelection: the view asked to make the rectangle visible
+ * (MSG_GEN_VIEW_MAKE_RECT_VISIBLE through MSG_VIS_VUP_CALL_OBJECT_OF_CLASS) */
+@extern method VisTextClass, MSG_VIS_TEXT_SHOW_SELECTION
+{
+    EventHandle ev = @record GenViewClass::MSG_GEN_VIEW_MAKE_RECT_VISIBLE(
+	yFlags, yMargin, xFlags, xMargin, bottom, right, top, left);
+
+    (void) flags;
+    (void) VisCallParent(oself, MSG_VIS_VUP_CALL_OBJECT_OF_CLASS, &ev,
+			 sizeof(ev), NULL, 0);
+}

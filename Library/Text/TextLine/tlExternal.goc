@@ -2,7 +2,8 @@
  * tlExternal.goc -- after tlExternal.asm: TL_LineFromPosition,
  * TL_LineCalculate, TL_LineTextPosition, TL_LineStorageCreate,
  * TL_LineStorageDestroy, TL_LineGetCount, TL_LineInsert, TL_LineDelete,
- * TL_LineToOffsetStart, TL_LineFromOffset, TL_LineGetTop.
+ * TL_LineToOffsetStart, TL_LineFromOffset, TL_LineGetTop,
+ * TL_LineFromPositionGetBLOAndHeight, TL_LineGetHeight.
  */
 @include "textInt.goh"
 
@@ -77,4 +78,26 @@ dword TL_LineFromOffset(optr o, dword offset, Boolean first, dword *start)
 WBFixed TL_LineGetTop(optr o, dword line)
 {
     return SmallLineGetTop(o, line);
+}
+
+/*
+ * TL_LineFromPositionGetBLOAndHeight: the baseline and the height of
+ * the line at a height in the text (the region's: small objects have
+ * one)
+ */
+void TL_LineFromPositionGetBLOAndHeight(optr o, sword y, WBFixed *blo,
+					WBFixed *hgt)
+{
+    const LineInfo *li = SmallGetLinePointer(o,
+					      TL_LineFromPosition(o, y, NULL),
+					      NULL);
+
+    *blo = li->LI_blo;
+    *hgt = li->LI_hgt;
+}
+
+/* TL_LineGetHeight: the height of a line */
+WBFixed TL_LineGetHeight(optr o, dword line)
+{
+    return SmallGetLinePointer(o, line, NULL)->LI_hgt;
 }

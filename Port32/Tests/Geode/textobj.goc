@@ -28,6 +28,7 @@ typedef struct {
     word	TOS_line[16];		/* of step 10, to print */
     word	TOS_geo[6];
     word	TOS_filter[2];		/* characters asked, tabs refused */
+    word	TOS_shown;		/* (step 15) asked to show */
 } TOState;
 
 TOState toState;
@@ -90,6 +91,15 @@ static Boolean Typed(const char *s)
     p.VTRP_textReference.TR_type = TRT_POINTER;
     p.VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer = buf;
     return @call TOText::MSG_VIS_TEXT_REPLACE_TEXT(&p);
+}
+
+/* (step 15) the view is not asked: none here */
+@method TOTextClass, MSG_VIS_TEXT_SHOW_SELECTION
+{
+    (void) flags; (void) yFlags; (void) yMargin;
+    (void) xFlags; (void) xMargin; (void) bottom; (void) right;
+    (void) top; (void) left;
+    toState.TOS_shown++;
 }
 
 @method TOTextClass, MSG_META_TEXT_USER_MODIFIED
@@ -1041,6 +1051,27 @@ static word ParaOf(optr o, dword start, dword end, VisTextMaxParaAttr *a,
 		a.VTMPA_tabs[1].T_position == 54 * 8);
 	@call n::MSG_VIS_TEXT_CLEAR_ALL_TABS(5, 5);
 	TOCHECK(ParaRunIs(n, 4, 0, TEXT_ADDRESS_PAST_END));
+	break;
+    }
+    case 15: {
+	/* a position shown: an object not on the screen does nothing
+	 * (keeps its selection, asks nobody); a plain object without a
+	 * view to ask */
+	VisTextRange r;
+	optr n;
+
+	@call TOText::MSG_VIS_TEXT_SELECT_RANGE(2, 2);
+	@call TOText::MSG_VIS_TEXT_SHOW_POSITION(5);
+	@call TOText::MSG_VIS_TEXT_GET_SELECTION_RANGE(&r);
+	TOCHECK(r.VTR_start == 2 && r.VTR_end == 2);
+	TOCHECK(!toState.TOS_shown);
+	n = ObjInstantiate(OptrToHandle(@TOText),
+			   (ClassStruct *) &VisTextClass);
+	TOCHECK(n != 0);
+	@call n::MSG_VIS_TEXT_SHOW_SELECTION(0, 0, MRVM_50_PERCENT, 0,
+					     MRVM_50_PERCENT, 10, 0, 0, 0);
+	@call n::MSG_VIS_TEXT_SHOW_POSITION(0);
+	TOCHECK(!toState.TOS_shown);
 	break;
     }
     }

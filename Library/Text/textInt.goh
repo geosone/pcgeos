@@ -120,6 +120,8 @@ extern void StartSelectAdjust(optr o, dword offset);
 extern Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f);
 /* where a line ends for the cursor */
 extern dword TSL_LineCursorEnd(optr o, dword line);
+/* the baseline and height of the cursor's line */
+extern void TSL_GetCursorLineBLOAndHeight(optr o, WBFixed *blo, WBFixed *hgt);
 
 /* Text/textMethodSet.goc: the replacement all changes of the text go
  * through (VisTextReplaceNew); TRUE if it was not made */
@@ -129,6 +131,10 @@ extern Boolean FilterReplacement(optr o, VisTextReplaceParameters *p);
 extern Boolean TF_CheckIfCharFiltered(optr o, word c);
 /* Text/textScrollOneLine.goc */
 extern void TextScrollOneLine(optr o, dword offset);
+/* Text/textOutput.goc: an offset shown on the screen (flags:
+ * VTSSF_DRAGGING) */
+extern void TextCallShowSelection(optr o, dword offset,
+				  VisTextShowSelectionFlags flags);
 extern void TextMarkUserModified(optr o);
 extern void TextMarkNotUserModified(optr o);
 
@@ -178,6 +184,9 @@ extern dword TL_LineToOffsetStart(optr o, dword line);
 extern dword TL_LineFromOffset(optr o, dword offset, Boolean first,
 			       dword *start);
 extern WBFixed TL_LineGetTop(optr o, dword line);
+extern WBFixed TL_LineGetHeight(optr o, dword line);
+extern void TL_LineFromPositionGetBLOAndHeight(optr o, sword y,
+					       WBFixed *blo, WBFixed *hgt);
 
 /* the state of a calculation (texttext.def) */
 typedef ByteFlags CalcFlags;
@@ -239,6 +248,11 @@ extern void TextScreenUpdate(optr o);
 /* the object's gstate moved to the text (inside the margins) and
  * clipped to it; between GrSaveState and GrRestoreState */
 extern void SmallRegionTransformGState(optr o, Boolean print);
+/* TextRegion/trSmallInfo.goc, trExternal.goc: the region's top left;
+ * the gstate there */
+extern void SmallRegionGetRegionTopLeft(optr o, PointDWord *p);
+extern void TR_RegionGetTopLeft(optr o, word region, PointDWord *p);
+extern void TR_RegionTransformGState(optr o, word region, Boolean print);
 
 /* TextLine/tlCommonPosition.goc: positions on a line (from its left
  * edge, LI_adjustment), the line at a height */
