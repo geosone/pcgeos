@@ -3,6 +3,7 @@
  * (the C port of printcomNoText.asm and Text/textPrintRaw.asm).
  */
 #include "printcom.h"
+#include "Text/textPrintRaw.c"
 
 /* PrintStyleRun, PrintText, PrintSetFont, PrintGetLineSpacing and
  * PrintSetLineSpacing: nothing to do */
@@ -18,12 +19,6 @@ Boolean PrintText(PState *ps, DriverRegs *r)		{ return NoText(ps, r); }
 Boolean PrintSetFont(PState *ps, DriverRegs *r)		{ return NoText(ps, r); }
 Boolean PrintGetLineSpacing(PState *ps, DriverRegs *r)	{ return NoText(ps, r); }
 Boolean PrintSetLineSpacing(PState *ps, DriverRegs *r)	{ return NoText(ps, r); }
-
-/* PrintRaw: dx:si (DR_dsSi) = buffer, cx = count */
-Boolean PrintRaw(PState *ps, DriverRegs *r)
-{
-    return PrintStreamWrite(ps, r->DR_dsSi, (word) r->DR_cx);
-}
 
 /* PrintSetSymbolSet, PrintLoadSymbolSet: no symbol set without text */
 Boolean PrintSetSymbolSet(PState *ps)

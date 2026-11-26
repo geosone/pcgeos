@@ -9,6 +9,8 @@
  */
 #include "fontPCL4.h"
 #include <string.h>
+#include "printcomDriver.h"
+#include <vm.h>
 
 /* the TestFontEntry of PS_curFont */
 static void CurrentFont(PState *ps, TestFontEntry *t)
@@ -62,4 +64,14 @@ SoftFontEntry *AddFontEntry(PState *ps, HPFontInfo *fi, word tag)
     sfe->SFE_size = HP_FONT_SIZE;
     sfe->SFE_fontTag = tag;
     return sfe;
+}
+
+HPFontInfo *LockFontInfo(PState *ps)
+{
+    return ps->PS_expansionInfo ? MemLock(ps->PS_expansionInfo) : NULL;
+}
+
+void UnlockFontInfo(PState *ps)
+{
+    MemUnlock(ps->PS_expansionInfo);
 }

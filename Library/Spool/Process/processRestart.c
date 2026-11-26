@@ -1,7 +1,7 @@
 /*
  * processRestart.c -- the spooler's start and the state file of a detach
- * (the C port of processRestart.asm, and of SaveQueueState of
- * processApp.asm).
+ * (the C port of processRestart.asm; SaveQueueState, which writes
+ * the state file, is in processApp.goc as in the asm).
  *
  * A detach while jobs are queued writes the state file spoolsta.dat in
  * the spool directory; the jobs' spool files stay.  The next start reads
@@ -20,23 +20,6 @@
  */
 #include "spoolLocal.h"
 #include <string.h>
-
-#define SPOOL_STATE_FILE	"spoolsta.dat"
-#define SPOOL_STATE_MAGIC	0x53505347UL	/* "GSPS" */
-#define SPOOL_STATE_VERSION	1
-
-typedef struct {
-    dword	SSH_magic;
-    word	SSH_version;
-    word	SSH_nextJobID;		/* the asm's LMBH_handle */
-    word	SSH_numJobs;
-    word	SSH_jobParamsSize;	/* sizeof(JobParameters) */
-} SpoolStateHeader;
-
-typedef struct {
-    word	SSJ_jobID;
-    word	SSJ_size;		/* JP_size: the bytes that follow */
-} SpoolStateJob;
 
 static void SpoolNukeFiles(const char *pattern)
 {
@@ -167,45 +150,5 @@ void SpoolBirth(void)
     if (!restarted)
 	SpoolNukeFiles("spool???.dat");
     SpoolNukeFiles("spool???.ps");
-    FilePopDir();
-}
-
-/* SaveQueueState: the queued jobs into the state file, for the next
- * start ("kind of like a last will"); the queue is locked */
-void SaveQueueState(void)
-{
-    SpoolStateHeader h;
-    SpoolStateJob sj;
-    FileHandle fh;
-    ChunkHandle q, job;
-    JobInfoStruct *j;
-
-    FilePushDir();
-    FileSetStandardPath(SP_SPOOL);
-    FileDelete(SPOOL_STATE_FILE);
-    fh = FileCreate(SPOOL_STATE_FILE, FCF_NATIVE | FILE_CREATE_TRUNCATE |
-		    FILE_ACCESS_W | FILE_DENY_W, 0);
-    if (!fh) {
-	FilePopDir();
-	return;
-    }
-    h.SSH_magic = SPOOL_STATE_MAGIC;
-    h.SSH_version = SPOOL_STATE_VERSION;
-    h.SSH_nextJobID = nextJobID;
-    h.SSH_numJobs = 0;
-    h.SSH_jobParamsSize = sizeof(JobParameters);
-    FileWrite(fh, &h, sizeof(h), FALSE);
-    for (q = PQ()->PQ_firstQueue; q; q = QUEUE(q)->QI_next)
-	for (job = QUEUE(q)->QI_curJob; job; job = JOB(job)->JIS_next) {
-	    j = JOB(job);
-	    sj.SSJ_jobID = j->JIS_jobID;
-	    sj.SSJ_size = j->JIS_info.JP_size;
-	    FileWrite(fh, &sj, sizeof(sj), FALSE);
-	    FileWrite(fh, &JOB(job)->JIS_info, sj.SSJ_size, FALSE);
-	    h.SSH_numJobs++;
-	}
-    FilePos(fh, 0, FILE_POS_START);
-    FileWrite(fh, &h, sizeof(h), FALSE);
-    FileClose(fh, FALSE);
     FilePopDir();
 }

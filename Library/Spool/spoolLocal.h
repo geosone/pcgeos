@@ -303,8 +303,8 @@ extern void ExitNothingPort(SpoolJobInfo *j);
 /* processError.c: InteractionCommand of the answer */
 extern word SpoolErrorBox(word error, ChunkHandle queue);
 
-/* processRestart.c: the start; the state file of a detach (SaveQueueState
- * was in processApp.asm) */
+/* processRestart.c: the start; processApp.goc: the state file of a
+ * detach */
 extern void SpoolBirth(void);
 extern void SaveQueueState(void);
 
@@ -324,5 +324,23 @@ extern void SpoolSyncHostPrinters(void);
 /* Lib/libPaper.c: the pre-defined paper size of width x height, 0 if
  * none */
 extern word SpoolFindPaperSize(word width, word height);
+
+/* the state file of the queue (processApp.goc, processRestart.c) */
+#define SPOOL_STATE_FILE	"spoolsta.dat"
+#define SPOOL_STATE_MAGIC	0x53505347UL	/* "GSPS" */
+#define SPOOL_STATE_VERSION	1
+
+typedef struct {
+    dword	SSH_magic;
+    word	SSH_version;
+    word	SSH_nextJobID;		/* the asm's LMBH_handle */
+    word	SSH_numJobs;
+    word	SSH_jobParamsSize;	/* sizeof(JobParameters) */
+} SpoolStateHeader;
+
+typedef struct {
+    word	SSJ_jobID;
+    word	SSJ_size;		/* JP_size: the bytes that follow */
+} SpoolStateJob;
 
 #endif /* SPOOLLOCAL_H */

@@ -84,4 +84,8 @@ extern Boolean SendFontHeader(PState *ps, HPFontInfo *fi,
 extern Boolean DownloadCharData(PState *ps, HPFontInfo *fi,
 				const SoftFontEntry *sfe, byte c);
 
+/* fontInternalPCL4.c */
+extern HPFontInfo *LockFontInfo(PState *ps);
+extern void UnlockFontInfo(PState *ps);
+
 #endif /* FONTPCL4_H */

@@ -95,4 +95,26 @@ extern void _pascal SoundWriterNotification(word data, word value,
 
 #define SOUND_PRIORITY_REUSE	0xffff	/* a voice off: first to go */
 
+/* soundDriver.c and soundC.c */
+void SoundChangeOwnerBlock(MemHandle mh, GeodeHandle owner);
+
+/* soundDriver.c and soundCommon.c */
+SoundControl *SoundLockControl(MemHandle mh);
+void SoundSetDrained(Semaphore *s);
+Boolean SoundStreamCall(DriverStrategy *strat, word fn, DriverRegs *r);
+void SoundInitVoices(SoundControl *sc, word voices);
+SemaphoreHandle SoundNewMutex(MemHandle mh);
+
+/* a StandardNoteBuffer (soundConstant.def): change, voice on, delta,
+ * voice off, end of song */
+enum {
+    SNB_CHANGE_EVENT, SNB_CHANGE_VOICE, SNB_PATCH, SNB_TABLE,
+    SNB_DELTA_TYPE_ONE, SNB_DELTA_TIME_ONE,
+    SNB_VOICE_ON, SNB_VOICE_ON_VOICE, SNB_FREQUENCY, SNB_ATTACK,
+    SNB_DELTA_TYPE, SNB_DELTA_TIME,
+    SNB_VOICE_OFF, SNB_VOICE_OFF_VOICE, SNB_DELTA_TYPE_TWO,
+    SNB_DELTA_TIME_TWO, SNB_GENERAL, SNB_END_OF_SONG,
+    SNB_WORDS
+};
+
 #endif /* SOUNDLOCAL_H */

@@ -10,7 +10,9 @@ endif()
 set(_kbd_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/keyboardProcess.c
   ${CMAKE_CURRENT_SOURCE_DIR}/keyboardInput.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/keyboardInit.c)
+  ${CMAKE_CURRENT_SOURCE_DIR}/keyboardInit.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/keyboardUtils.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/keyboardVariable.c)
 
 # geos_keyboard(<geode> <kmap .def> <.gp>)
 function(geos_keyboard name kmap gp)

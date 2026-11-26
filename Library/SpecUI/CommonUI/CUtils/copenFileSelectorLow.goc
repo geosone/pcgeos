@@ -788,3 +788,94 @@ void OLFSNotifyUserOfDiskError(void)
 		(CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
 		(GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET));
 }
+
+#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
+#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
+
+/* OLFSSendAD: the selection noted, then told to the destination when
+ * the queue has been emptied (the selector may not be done yet) */
+static void SendAD(optr o, word entry, GenFileSelectorEntryFlags flags)
+{
+    struct { word entryNum; GenFileSelectorEntryFlags entryFlags; } a;
+    GenFileSelectorInstance *g;
+    optr dest;
+    Message msg;
+    EventHandle ev;
+
+    OLFSCopySelection(o, entry, flags);
+    g = GFS(o);
+    dest = g->GFSI_destination;
+    msg = g->GFSI_notificationMsg;
+    if (!msg || !dest)
+	return;
+    a.entryNum = entry;
+    a.entryFlags = flags;
+    if (OptrToHandle(dest)) {
+	CObjMessageP(MF_FORCE_QUEUE, dest, msg, &a, sizeof(a), NULL, 0);
+	return;
+    }
+    CObjMessageP(MF_RECORD, 0, msg, &a, sizeof(a), &ev, sizeof(ev));
+    @send, forceQueue o::MSG_GEN_OUTPUT_ACTION(ev, dest);
+}
+
+/*
+ * OLFSBuildEntryFlagsAndSendADLow: the GenFileSelectorEntryFlags of
+ * the entry (on top of those passed) and the notification.  The entry
+ * of the file buffer is copied to *out if there is one (*has).
+ */
+void OLFSBuildEntryFlagsAndSendADLow(optr o, word entry,
+					GenFileSelectorEntryFlags flags,
+					OLFileSelectorEntry *out, Boolean *has)
+{
+    OLFileSelectorInstance *f = FS(o);
+    Boolean parent = (f->OLFSI_state & OLFSS_SHOW_PARENT_DIR) != 0;
+    word n = entry;
+
+    if (has)
+	*has = FALSE;
+    if (parent && !entry) {
+	flags |= GFSET_SUBDIR << GFSEF_TYPE_OFFSET;
+    } else {
+	if (parent)
+	    n--;
+	if (f->OLFSI_numFiles && n < f->OLFSI_numFiles) {
+	    OLFileSelectorEntry *e = OLFSLockEntry(o, n);
+
+	    if (e->OLFSE_fileAttrs & FA_VOLUME) {
+		flags |= GFSET_VOLUME << GFSEF_TYPE_OFFSET;
+	    } else {
+		if (e->OLFSE_fileAttrs & FA_SUBDIR)
+		    flags |= GFSET_SUBDIR << GFSEF_TYPE_OFFSET;
+		else {
+		    /* a file: the document flags of its header */
+		    if (e->OLFSE_fileFlags & GFHF_TEMPLATE)
+			flags |= GFSEF_TEMPLATE;
+		    if (e->OLFSE_fileFlags & GFHF_SHARED_MULTIPLE)
+			flags |= GFSEF_SHARED_MULTIPLE;
+		    if (e->OLFSE_fileFlags & GFHF_SHARED_SINGLE)
+			flags |= GFSEF_SHARED_SINGLE;
+		}
+		if (e->OLFSE_fileAttrs & FA_RDONLY)
+		    flags |= GFSEF_READ_ONLY;
+	    }
+	    if (out)
+		*out = *e;
+	    if (has)
+		*has = TRUE;
+	    MemUnlock(FS(o)->OLFSI_fileBuffer);
+	    f = FS(o);
+	}
+    }
+    if (!f->OLFSI_numFiles)
+	flags |= GFSEF_NO_ENTRIES;
+    if (parent && !entry)
+	flags |= GFSEF_PARENT_DIR;
+    /* an error of the last scan is told once (..._OPEN_ENTRY returns
+     * it instead) */
+    if (!(f->OLFSI_state & OLFSS_FORCE_OPEN) &&
+	(f->OLFSI_state & OLFSS_RESCAN_ERROR)) {
+	flags |= GFSEF_ERROR;
+	f->OLFSI_state &= ~OLFSS_RESCAN_ERROR;
+    }
+    SendAD(o, entry, flags);
+}

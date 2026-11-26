@@ -26,6 +26,7 @@
 @include <Objects/processC.goh>
 #include <library.h>
 #include "spoolLocal.h"
+#include <string.h>
 @include <gcnlist.goh>
 
 @class SpoolProcClass, ProcessClass;
@@ -45,20 +46,6 @@ word		errorBoxCount;
 word		spoolAckID;
 optr		spoolAckOD;
 Boolean		spoolDetachHeld;
-
-/* the library entry: the semaphores of the queue and the error box
- * (static Semaphores in the asm's idata) */
-Boolean SpoolLibraryEntry(LibraryCallType ty, GeodeHandle client)
-{
-    (void) client;
-    if (ty == LCT_ATTACH) {
-	queueSemaphore = ThreadAllocSem(1);
-	errorThreadLock = ThreadAllocThreadLock();
-	HandleModifyOwner(queueSemaphore, GeodeGetCodeProcessHandle());
-	HandleModifyOwner(errorThreadLock, GeodeGetCodeProcessHandle());
-    }
-    return FALSE;
-}
 
 @method SpoolProcClass, MSG_META_ATTACH_PROCESS
 {
@@ -224,4 +211,44 @@ void SpoolSendPrintersChanged(void)
     ev = @record null::MSG_PRINTER_INSTALLED_REMOVED();
     GCNListSend(MANUFACTURER_ID_GEOWORKS, GCNSLT_INSTALLED_PRINTERS, ev, 0,
 		GCNLSF_FORCE_QUEUE);
+}
+
+/* SaveQueueState: the queued jobs into the state file, for the next
+ * start ("kind of like a last will"); the queue is locked */
+void SaveQueueState(void)
+{
+    SpoolStateHeader h;
+    SpoolStateJob sj;
+    FileHandle fh;
+    ChunkHandle q, job;
+    JobInfoStruct *j;
+
+    FilePushDir();
+    FileSetStandardPath(SP_SPOOL);
+    FileDelete(SPOOL_STATE_FILE);
+    fh = FileCreate(SPOOL_STATE_FILE, FCF_NATIVE | FILE_CREATE_TRUNCATE |
+		    FILE_ACCESS_W | FILE_DENY_W, 0);
+    if (!fh) {
+	FilePopDir();
+	return;
+    }
+    h.SSH_magic = SPOOL_STATE_MAGIC;
+    h.SSH_version = SPOOL_STATE_VERSION;
+    h.SSH_nextJobID = nextJobID;
+    h.SSH_numJobs = 0;
+    h.SSH_jobParamsSize = sizeof(JobParameters);
+    FileWrite(fh, &h, sizeof(h), FALSE);
+    for (q = PQ()->PQ_firstQueue; q; q = QUEUE(q)->QI_next)
+	for (job = QUEUE(q)->QI_curJob; job; job = JOB(job)->JIS_next) {
+	    j = JOB(job);
+	    sj.SSJ_jobID = j->JIS_jobID;
+	    sj.SSJ_size = j->JIS_info.JP_size;
+	    FileWrite(fh, &sj, sizeof(sj), FALSE);
+	    FileWrite(fh, &JOB(job)->JIS_info, sj.SSJ_size, FALSE);
+	    h.SSH_numJobs++;
+	}
+    FilePos(fh, 0, FILE_POS_START);
+    FileWrite(fh, &h, sizeof(h), FALSE);
+    FileClose(fh, FALSE);
+    FilePopDir();
 }

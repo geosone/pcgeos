@@ -2,9 +2,10 @@
  * mainManager.c -- the TrueType font driver's own part (after
  * mainManager.asm: TrueTypeStrategy, DriverTable; truetypeInit.asm:
  * TrueTypeInit, TrueTypeExit, TrueTypeInitFonts; truetypeWidths.asm,
- * truetypeChars.asm, truetypeMetrics.asm, truetypePath.asm: the
- * wrappers of the adapter's C functions; ansic_runtime.asm:
- * TrueType_GrMulWWFixed; truetypeVariable.def: the driver's variables).
+ * truetypeChars.asm, truetypeMetrics.asm: the wrappers of the
+ * adapter's C functions; truetypeVariable.def: the driver's variables).
+ * The path routines are in truetypePath.c, TrueType_GrMulWWFixed in
+ * ansic_runtime.c.
  * The FreeType engine and the GEOS adapter were C already.
  *
  * The functions, registers as the kernel passes them
@@ -66,30 +67,6 @@ static MemHandle variableHandle;	/* TrueTypeVars */
 typedef char MatrixIsTMatrix[sizeof(TT_FontMatrix) == sizeof(TMatrix) &&
 			     offsetof(TT_FontMatrix, FM_flags) ==
 			     offsetof(TMatrix, TM_flags) ? 1 : -1];
-
-WWFixedAsDWord _pascal TrueType_GrMulWWFixed(WWFixedAsDWord i,
-					     WWFixedAsDWord j)
-{
-    /* the middle 32 bits of the product (TrueType_GrRegMul32ToDDF) */
-    return (WWFixedAsDWord) (sdword) (((int64_t) (sdword) i *
-				       (sdword) j) >> 16);
-}
-
-/* the region path wrappers of truetypePath.asm: not reached, see above */
-void _pascal GrRegionPathMovePen(Handle regionPath, sword x, sword y)
-{
-    (void) regionPath; (void) x; (void) y;
-}
-
-void _pascal GrRegionPathDrawLineTo(Handle regionPath, sword x, sword y)
-{
-    (void) regionPath; (void) x; (void) y;
-}
-
-void _pascal GrRegionPathDrawCurveTo(Handle regionPath, const Point *points)
-{
-    (void) regionPath; (void) points;
-}
 
 static WWFixedAsDWord PointSize(const GState *gs)
 {

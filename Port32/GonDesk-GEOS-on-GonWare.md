@@ -262,7 +262,7 @@ The old formats (packed 16-bit structures) are **not** taken over. New formats:
 A finding from the pilot:
 
 - On x86-64 and i686, `long double` is the x87 extended format and thus bit-identical to GEOS-80.
-- On **ARM64, `long double` is a 128-bit quad** (in software). The `memcpy` trick from `fpstack.c` does not work there.
+- On **ARM64, `long double` is a 128-bit quad** (in software). The `memcpy` trick from `floatStack.c` does not work there.
 
 Since bit identity with old GEOS is no longer required, there are two clean options:
 
@@ -373,7 +373,7 @@ Aligned with GonWare's PLAN.md:
 
 - The method is confirmed: keep the structure 1:1 and replace helper routines with a shim. For the first pass this remains sensible, because it allows checking against the original.
 - **With the compatibility break, three things change:**
-  - `fpstack.c` computes with `double` instead of the x87 `memcpy` trick (6.4), so it also runs on ARM64.
+  - `floatStack.c` computes with `double` instead of the x87 `memcpy` trick (6.4), so it also runs on ARM64.
   - The deliberately preserved **QUIRKs** (truncation after rounding, flag overwrite on the fallback to scientific notation, negative exponent with `DONT_USE_SCIENTIFIC`) may now be fixed.
   - The ABI question of buffer offsets (`FFA_decimalPoint == 0` ambiguous) is solved freely, e.g. with pointers or `-1` for "not present".
 - The pilot is C11 with `_Thread_local` and therefore also builds with Clang for GonWare/mlibc once Ring 3 TLS exists.

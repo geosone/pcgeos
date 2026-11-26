@@ -16,16 +16,6 @@
 #include <vm.h>
 #include <string.h>
 
-static HPFontInfo *LockFontInfo(PState *ps)
-{
-    return ps->PS_expansionInfo ? MemLock(ps->PS_expansionInfo) : NULL;
-}
-
-static void UnlockFontInfo(PState *ps)
-{
-    MemUnlock(ps->PS_expansionInfo);
-}
-
 Boolean FontInit(PState *ps)
 {
     const PrinterInfo *pi = ps->PS_deviceInfo;

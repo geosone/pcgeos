@@ -83,4 +83,23 @@ int    FloatFloatToDword(dword *result);
 extern char fpDecimalSeparator;
 extern char fpThousandsSeparator;
 
+/* floatStack.c: the stack */
+#define FP_STACK_MAX 64
+
+/* one float stack per thread, as in GEOS; dos32 has a single thread */
+#if defined(__WATCOMC__)
+#define FP_THREAD_LOCAL
+#else
+#define FP_THREAD_LOCAL _Thread_local
+#endif
+
+/* floatStack.c, for floatFixed.c */
+FpValue FromFloatNum(const FloatNum *n);
+void ToFloatNum(FpValue x, FloatNum *n);
+
+/* floatStack.c, for floatHigh.c */
+extern FP_THREAD_LOCAL FpValue fpStack[FP_STACK_MAX];
+extern FP_THREAD_LOCAL int fpSP;
+int fp_signbit(FpValue x);
+
 #endif

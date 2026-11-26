@@ -173,4 +173,16 @@ void VidDevMovePtr(sword x, sword y);
 void VidDevCondHidePtr(sword left, sword top, sword right, sword bottom);
 void VidDevCondShowPtr(void);
 
+/* vidcomVariable.c (vidcomVariable.def) */
+extern Rectangle exclBound;
+extern SemaphoreHandle videoSem;
+
+/* vidcomInfo.c */
+Boolean VidInit(void);
+void VidExit(void);
+Boolean VidSetDevice(DriverRegs *r);
+
+/* vidcomExclBounds.c */
+void ExclRectBounds(sword l, sword t, sword r, sword b, const Window *w);
+
 #endif /* VIDCOM_H */

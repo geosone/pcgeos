@@ -23,12 +23,8 @@
 #include <ghal.h>
 #include <string.h>
 
-static const char category[] = "keyboard";
-static ghal_irq_source *irq;
-static Monitor kbdMonitor;
-
 /* CheckKeyboardOption: TRUE (and the option set) if the key is TRUE */
-static Boolean CheckKeyboardOption(const char *key, byte option)
+Boolean CheckKeyboardOption(const char *key, byte option)
 {
     Boolean b = FALSE;
 
@@ -38,7 +34,7 @@ static Boolean CheckKeyboardOption(const char *key, byte option)
     return TRUE;
 }
 
-static void KbdSetOptions(void)
+void KbdSetOptions(void)
 {
     KeyDef *ralt = &kbd.KV_keyDefs[SCANCODE_RIGHT_ALT - 1];
     KeyDef *lctrl = &kbd.KV_keyDefs[SCANCODE_LEFT_CTRL - 1];
@@ -57,40 +53,4 @@ static void KbdSetOptions(void)
 	*lctrl = *caps;
 	*caps = t;
     }
-}
-
-Boolean KbdInit(void)
-{
-    word w;
-    word n = kbdKeyboardMap.KBM_maxScan;
-
-    if (irq)
-	return TRUE;			/* KBD_NESTED_INIT */
-    memset(&kbd, 0, sizeof(kbd));
-    kbd.KV_outputHandle = 0xffff;	/* no process yet */
-    if (n > KBD_NUM_KEYDEFS)
-	n = KBD_NUM_KEYDEFS;
-    memcpy(kbd.KV_keyDefs, kbdKeyboardMap.KBM_keyDefTab, n * sizeof(KeyDef));
-    CheckKeyboardOption("keyboardDoesLEDs", KO_DOES_LEDS);
-    if (!InitFileReadInteger(category, "keyboardTypematic", &w))
-	kbd.KV_typematicState = (byte) (w & 0x7f);
-    KbdSetOptions();
-    kbd.KV_outputHandle = ImAddMonitor(&kbdMonitor, ML_DRIVER,
-				       KbdMonRoutine);
-    if (ghal_irq_attach(GHAL_IRQ_INPUT, KbdInputHandler, NULL, &irq) !=
-	GHAL_OK) {
-	irq = NULL;
-	ImRemoveMonitor(&kbdMonitor, MF_REMOVE_IMMEDIATE);
-	return TRUE;
-    }
-    return FALSE;
-}
-
-void KbdExit(void)
-{
-    kbd.KV_shiftState = 0;		/* no modifiers down */
-    if (irq)
-	ghal_irq_detach(irq);
-    irq = NULL;
-    ImRemoveMonitor(&kbdMonitor, MF_REMOVE_IMMEDIATE);
 }

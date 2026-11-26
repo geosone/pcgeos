@@ -177,4 +177,7 @@ Boolean EmitDocSetup(PSExportBlock *opts, MemHandle stream);
 Boolean EmitPageSetup(PSExportBlock *opts, MemHandle stream);
 Boolean EmitEndPageSetup(MemHandle stream);
 
+/* exportText.c and exportFontMap.c */
+byte CalcFontDiff(FontID want, FontID test);
+
 #endif /* EXPORT_INT_H */

@@ -10,31 +10,6 @@
  * JP_printerData says.
  */
 #include "printcom.h"
-
-Boolean PrintGetMainUI(PState *ps, DriverRegs *r)
-{
-    r->DR_cx = OptrToHandle(ps->PS_deviceInfo->PI_mainUI);
-    r->DR_dx = OptrToChunk(ps->PS_deviceInfo->PI_mainUI);
-    return FALSE;
-}
-
-Boolean PrintGetOptionsUI(PState *ps, DriverRegs *r)
-{
-    r->DR_cx = OptrToHandle(ps->PS_deviceInfo->PI_optionsUI);
-    r->DR_dx = OptrToChunk(ps->PS_deviceInfo->PI_optionsUI);
-    return FALSE;
-}
-
-Boolean PrintEvalUI(PState *ps, DriverRegs *r)
-{
-    (void) ps;
-    (void) r;
-    return FALSE;
-}
-
-Boolean PrintStuffUI(PState *ps, DriverRegs *r)
-{
-    (void) ps;
-    (void) r;
-    return FALSE;
-}
+#include "UI/uiGetMain.c"
+#include "UI/uiGetOptions.c"
+#include "UI/uiEval.c"

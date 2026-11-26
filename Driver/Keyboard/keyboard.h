@@ -108,4 +108,16 @@ void KbdExit(void);
 /* the HID key events of ghal_input as scan codes (keyboardInput.c) */
 void KbdInputHandler(void *ctx);
 
+/* keyboardVariable.c (keyboardVariable.def) */
+extern Monitor kbdMonitor;
+extern const byte bitTable[8];
+
+/* keyboardUtils.c */
+Boolean KbdCheckShortcut(DriverRegs *r);
+
+/* keyboardProcess.c and keyboardInit.c */
+extern const char category[];
+Boolean CheckKeyboardOption(const char *key, byte option);
+void KbdSetOptions(void);
+
 #endif /* KEYBOARD_H */

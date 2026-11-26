@@ -1,9 +1,10 @@
 /*
  * vidcomEntry.c -- the strategy routine of the C video drivers (after
  * vidcomEntry.asm: DriverStrategy, VidStartExclusive, VidEndExclusive;
- * vidcomInfo.asm: VidInit, VidExit, VidTestDevice, VidSetDevice,
- * VidInfo, VidGetExclusive; vidcomExclBounds.asm: ExclRectBounds;
- * vidcomEscape.asm: VidEscape).
+ * VidTestDevice, VidInfo, VidGetExclusive of vidcomInfo.asm and
+ * VidEscape of vidcomEscape.asm, which are small here; VidInit, VidExit
+ * and VidSetDevice are in vidcomInfo.c, ExclRectBounds in
+ * vidcomExclBounds.c).
  *
  * As in DOS16:
  *   - the functions up to DR_VID_END_EXCLUSIVE run without the driver's
@@ -26,12 +27,10 @@
 #include <thread.h>
 #include <sem.h>
 
-static SemaphoreHandle videoSem;
 sword vidPtrX, vidPtrY;
 const VidDrawState vidInvertState = { 0, MM_INVERT, NULL, { 0 } };
 static Handle exclusiveGState;
 static Boolean exclusiveCausedAbort;
-static Rectangle exclBound;
 
 #define EXCL_MAX	((sword) 0x4000)	/* MAX_COORD */
 #define EXCL_MIN	((sword) 0xc000)	/* MIN_COORD */
@@ -39,34 +38,6 @@ static Rectangle exclBound;
 static sword Coord(dword v)
 {
     return (sword) (word) v;
-}
-
-/* ExclRectBounds: the bounds of an operation not done */
-static void ExclRectBounds(sword l, sword t, sword r, sword b,
-			   const Window *w)
-{
-    if (l > r) { sword x = l; l = r; r = x; }
-    if (t > b) { sword y = t; t = b; b = y; }
-    if (w) {
-	if (l < w->W_maskRect.R_left)
-	    l = w->W_maskRect.R_left;
-	if (t < w->W_maskRect.R_top)
-	    t = w->W_maskRect.R_top;
-	if (r > w->W_maskRect.R_right)
-	    r = w->W_maskRect.R_right;
-	if (b > w->W_maskRect.R_bottom)
-	    b = w->W_maskRect.R_bottom;
-    }
-    if (l > r || t > b)
-	return;
-    if (l < exclBound.R_left)
-	exclBound.R_left = l;
-    if (t < exclBound.R_top)
-	exclBound.R_top = t;
-    if (r > exclBound.R_right)
-	exclBound.R_right = r;
-    if (b > exclBound.R_bottom)
-	exclBound.R_bottom = b;
 }
 
 static void Sort(sword l, sword t, sword r, sword b, Rectangle *out)
@@ -203,36 +174,6 @@ static Boolean Excluded(word function, DriverRegs *r)
     }
     ghal_crit_leave();
     return out;
-}
-
-static Boolean VidInit(void)
-{
-    if (!videoSem)
-	videoSem = ThreadAllocSem(1);
-    return VidDevInit();
-}
-
-static void VidExit(void)
-{
-    VidResetXOR();
-    VidUnderReset();
-    VidDevExit();
-    DriverTable.VDI_device = VID_NO_DEVICE;
-    if (videoSem)
-	ThreadFreeSem(videoSem);
-    videoSem = 0;
-}
-
-static Boolean VidSetDevice(DriverRegs *r)
-{
-    if (VidDevSet(r->DR_dsSi)) {
-	r->DR_ax = (word) DP_INVALID_DEVICE;
-	return TRUE;
-    }
-    DriverTable.VDI_device = 0;
-    VidDevSetPtr(NULL);			/* start hidden, with the default */
-    r->DR_ax = DP_PRESENT;
-    return FALSE;
 }
 
 /* the functions with the semaphore */

@@ -279,16 +279,6 @@ static SoundControl *OwnerOf(MemHandle mh)
     return mh ? (SoundControl *) MemDeref(mh) : NULL;
 }
 
-word SoundVoiceManagerGetFree(SoundPriority priority)
-{
-    return SoundVoiceGetFree((word) priority);
-}
-
-void SoundVoiceManagerFree(word voice)
-{
-    SoundVoiceFree(voice);
-}
-
 void SoundVoiceManagerActivate(word voice, word priority)
 {
     SoundVoiceActivate(voice, priority);
@@ -302,16 +292,6 @@ Boolean SoundVoiceManagerDeactivate(word voice)
 void SoundVoiceManagerAssign(word voice, MemHandle owner, word streamVoice)
 {
     SoundVoiceAssign(voice, OwnerOf(owner), streamVoice);
-}
-
-word SoundDACManagerGetFree(SoundPriority priority)
-{
-    return SoundDACGetFree((word) priority);
-}
-
-void SoundDACManagerFree(word dac)
-{
-    SoundDACFree(dac);
 }
 
 void SoundDACManagerActivate(word dac)
