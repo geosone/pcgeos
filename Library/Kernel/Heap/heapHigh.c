@@ -458,7 +458,7 @@ word ThreadGetError(void)
     return ThreadOf(KernelThisThread())->T_error;
 }
 
-void ThreadSetError(word errno)
+void ThreadSetError(word err)
 {
-    KernelSetError(errno);
+    KernelSetError(err);
 }
