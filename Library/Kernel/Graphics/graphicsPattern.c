@@ -39,7 +39,6 @@
 #define AREA	((word) offsetof(GState, GS_areaAttr))
 #define TEXT	((word) offsetof(GState, GS_textAttr))
 
-
 /* graphicsPatternHatch.asm: a HatchPattern of one or two lines */
 typedef struct {
     word	SH_numLines;
@@ -70,7 +69,7 @@ static sdword WWF(const WWFixed *w)
 }
 
 /* the size of a HatchPattern */
-static word HatchSize(const HatchPattern *hp)
+word GrHatchSize(const HatchPattern *hp)
 {
     const byte *p = (const byte *) hp + sizeof(HatchPattern);
     word i;
@@ -93,7 +92,7 @@ static Boolean Drawable(byte type)
  * ------------------------------------------------------------------- */
 
 /* SetPatternCommon, SetPatternComplex */
-static void SetPattern(GStateHandle gstate, Boolean text, GraphicPattern pat,
+void GrSetPatternLow(GStateHandle gstate, Boolean text, GraphicPattern pat,
 		       const void *data, word size)
 {
     GState *gs;
@@ -129,7 +128,7 @@ static void SetPattern(GStateHandle gstate, Boolean text, GraphicPattern pat,
 	LMemFree(ConstructOptr(gstate, old));
     if (pat.HP_type == PT_SYSTEM_HATCH && pat.HP_data < NUM_SYS_HATCHES) {
 	data = &sysHatches[pat.HP_data];
-	size = HatchSize(data);
+	size = GrHatchSize(data);
     } else if (!custom)
 	size = 0;
     if (size && data && size <= MAX_CUSTOM_PATTERN_SIZE) {
@@ -145,30 +144,12 @@ static void SetPattern(GStateHandle gstate, Boolean text, GraphicPattern pat,
 
 void GrSetAreaPattern(GStateHandle gstate, GraphicPattern pattern)
 {
-    SetPattern(gstate, FALSE, pattern, NULL, 0);
-}
-
-void GrSetCustomAreaPattern(GStateHandle gstate, GraphicPattern pattern,
-			    const void *patternData, word patternSize)
-{
-    SetPattern(gstate, FALSE, pattern, patternData, patternSize);
+    GrSetPatternLow(gstate, FALSE, pattern, NULL, 0);
 }
 
 void GrSetTextPattern(GStateHandle gstate, GraphicPattern pattern)
 {
-    SetPattern(gstate, TRUE, pattern, NULL, 0);
-}
-
-/* the C binding has no size: that of the HatchPattern or Bitmap */
-void GrSetCustomTextPattern(GStateHandle gstate, GraphicPattern pattern,
-			    const void *patternData)
-{
-    word size = 0;
-
-    if (patternData)
-	size = pattern.HP_type == PT_CUSTOM_HATCH ?
-	    HatchSize(patternData) : GrBitmapStringSize(patternData);
-    SetPattern(gstate, TRUE, pattern, patternData, size);
+    GrSetPatternLow(gstate, TRUE, pattern, NULL, 0);
 }
 
 /* GetPatternCommon: a custom pattern copied into a new block */

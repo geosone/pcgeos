@@ -46,22 +46,6 @@ static word Lookup(optr arr, const TCHAR *name, word len)
     return CA_NULL_ELEMENT;
 }
 
-ChunkHandle NameArrayCreateAt(optr arr, word dataSize, word headerSize,
-			      ObjChunkFlags ocf)
-{
-    ChunkHandle ch;
-
-    if (headerSize == 0)
-	headerSize = sizeof(NameArrayHeader);
-    if (headerSize < sizeof(NameArrayHeader))
-	KernelFatal(CHUNK_ARRAY_HEADER_SIZE_TOO_SMALL);
-    ch = ElementArrayCreateAt(arr, 0, headerSize, ocf);
-    if (ch)
-	((NameArrayHeader *) LMemDeref(ConstructOptr(OptrToHandle(arr), ch)))
-	    ->NAH_dataSize = dataSize;
-    return ch;
-}
-
 static Boolean NeverEqual(void *a, void *b, dword v)
 {
     (void) a; (void) b; (void) v;

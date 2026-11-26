@@ -57,7 +57,7 @@ static dword SlotOf(const byte *b, word data)
     return ALIGN((dword) W(b, data - 2));
 }
 
-static byte *BlockOf(MemHandle mh)
+byte *LMemBlockOf(MemHandle mh)
 {
     HandleEntry *he = MemEntryOf(mh);
     byte *b = he->HE_addr;
@@ -68,7 +68,7 @@ static byte *BlockOf(MemHandle mh)
 }
 
 /* the handle table entry of a chunk handle in use */
-static word *EntryOf(byte *b, ChunkHandle ch)
+word *LMemEntryOf(byte *b, ChunkHandle ch)
 {
     LMemBlockHeader *h = HDR(b);
 
@@ -176,7 +176,7 @@ static void Compact(byte *b)
  * negative); the new space is not entered anywhere.  0 if it cannot. */
 static byte *ResizeBlock(MemHandle mh, sdword delta)
 {
-    byte *b = BlockOf(mh);
+    byte *b = LMemBlockOf(mh);
     dword size = HDR(b)->LMBH_blockSize + delta;
 
     if (delta > 0 && ((HDR(b)->LMBH_flags & LMF_NO_ENLARGE) ||
@@ -206,7 +206,7 @@ static word *FindFree(byte *b, dword need)
  * if there is none.  May compact the heap and move the block. */
 static word AllocSpace(MemHandle mh, word size)
 {
-    byte *b = BlockOf(mh);
+    byte *b = LMemBlockOf(mh);
     dword need = ALIGN((dword) size + 2);
     word *link, data;
 
@@ -244,7 +244,7 @@ static word AllocSpace(MemHandle mh, word size)
 /* add `count' handles (zero: free); moves the heap up */
 static int MoreHandles(MemHandle mh, word count)
 {
-    byte *b = BlockOf(mh);
+    byte *b = LMemBlockOf(mh);
     LMemBlockHeader *h = HDR(b);
     dword oldStart = HeapStart(b), newStart, delta, oldEnd = h->LMBH_blockSize;
     word i, oldN = h->LMBH_nHandles, *table;
@@ -282,7 +282,7 @@ static int MoreHandles(MemHandle mh, word count)
 	if (old < h->LMBH_nHandles &&
 	    LMemReAlloc(ConstructOptr(mh, fc), h->LMBH_nHandles))
 	    return 0;
-	b = BlockOf(mh);
+	b = LMemBlockOf(mh);
 	if (old < HDR(b)->LMBH_nHandles)
 	    memset(b + W(b, fc) + old, 0, HDR(b)->LMBH_nHandles - old);
     }
@@ -291,7 +291,7 @@ static int MoreHandles(MemHandle mh, word count)
 
 static void Failed(MemHandle mh)
 {
-    if (!(HDR(BlockOf(mh))->LMBH_flags & LMF_RETURN_ERRORS))
+    if (!(HDR(LMemBlockOf(mh))->LMBH_flags & LMF_RETURN_ERRORS))
 	KernelFatal(LMEM_CANNOT_ALLOCATE);
 }
 
@@ -338,28 +338,11 @@ void LMemInitHeap(MemHandle mh, LMemType type, LocalMemoryFlags flags,
     }
 }
 
-MemHandle MemAllocLMem(LMemType type, word headerSize)
-{
-    /* zeroed: the rest of a larger header (ObjLMemBlockHeader: in-use
-     * count, output) starts at 0 */
-    MemHandle mh = MemAlloc(128, HF_SWAPABLE, HAF_NO_ERR | HAF_ZERO_INIT);
-    LocalMemoryFlags flags = 0;
-    word def = sizeof(LMemBlockHeader);
-
-    if (type == LMEM_TYPE_OBJ_BLOCK) {
-	MemModifyOtherInfo(mh, KernelThisThread());	/* exec thread */
-	flags = LMF_HAS_FLAGS | LMF_RELOCATED;
-	def = sizeof(ObjLMemBlockHeader);
-    }
-    LMemInitHeap(mh, type, flags, headerSize ? headerSize : def, 2, 64);
-    return mh;
-}
-
 static ChunkHandle AllocHandle(MemHandle mh, word i, word chunkSize);
 
 ChunkHandle LMemAlloc(MemHandle mh, word chunkSize)
 {
-    byte *b = BlockOf(mh);
+    byte *b = LMemBlockOf(mh);
     LMemBlockHeader *h = HDR(b);
     word i;
 
@@ -378,7 +361,7 @@ ChunkHandle LMemAlloc(MemHandle mh, word chunkSize)
 /* LMemAllocHere: a chunk with the free handle `ch' (state, objectFile.c) */
 ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize)
 {
-    byte *b = BlockOf(mh);
+    byte *b = LMemBlockOf(mh);
     LMemBlockHeader *h = HDR(b);
     word i;
 
@@ -390,7 +373,7 @@ ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize)
 	Failed(mh);
 	return 0;
     }
-    b = BlockOf(mh);
+    b = LMemBlockOf(mh);
     if (W(b, ch) != 0)
 	KernelFatal(CANNOT_ALLOCATE_CORRECT_CHUNK_HANDLE);
     return AllocHandle(mh, i, chunkSize);
@@ -398,7 +381,7 @@ ChunkHandle LMemAllocAt(MemHandle mh, ChunkHandle ch, word chunkSize)
 
 static ChunkHandle AllocHandle(MemHandle mh, word i, word chunkSize)
 {
-    byte *b = BlockOf(mh);
+    byte *b = LMemBlockOf(mh);
     LMemBlockHeader *h = HDR(b);
     word data;
     ChunkHandle ch;
@@ -407,7 +390,7 @@ static ChunkHandle AllocHandle(MemHandle mh, word i, word chunkSize)
     W(b, ch) = LMEM_EMPTY;		/* taken, even while we compact */
     if (chunkSize) {
 	data = AllocSpace(mh, chunkSize);
-	b = BlockOf(mh);
+	b = LMemBlockOf(mh);
 	if (!data) {
 	    W(b, ch) = 0;
 	    Failed(mh);
@@ -422,17 +405,17 @@ static ChunkHandle AllocHandle(MemHandle mh, word i, word chunkSize)
 
 void *LMemDeref(optr o)
 {
-    byte *b = BlockOf(OptrToHandle(o));
-    word v = *EntryOf(b, OptrToChunk(o));
+    byte *b = LMemBlockOf(OptrToHandle(o));
+    word v = *LMemEntryOf(b, OptrToChunk(o));
 
     return v == LMEM_EMPTY ? NULL : b + v;
 }
 
 void LMemFree(optr o)
 {
-    byte *b = BlockOf(OptrToHandle(o));
+    byte *b = LMemBlockOf(OptrToHandle(o));
     ChunkHandle ch = OptrToChunk(o);
-    word *e = EntryOf(b, ch), v = *e;
+    word *e = LMemEntryOf(b, ch), v = *e;
 
     if (v != LMEM_EMPTY)
 	FreeSlot(b, v, SlotOf(b, v));
@@ -441,21 +424,13 @@ void LMemFree(optr o)
 	b[W(b, HDR(b)->LMBH_offset) + (ch - HDR(b)->LMBH_offset) / 2] = 0;
 }
 
-word LMemGetChunkSize(optr o)
-{
-    byte *b = BlockOf(OptrToHandle(o));
-    word v = *EntryOf(b, OptrToChunk(o));
-
-    return v == LMEM_EMPTY ? 0 : (word) (W(b, v - 2) - 2);
-}
-
 /* TRUE if it failed (LMF_RETURN_ERRORS), as the asm C stub */
 Boolean LMemReAlloc(optr o, word chunkSize)
 {
     MemHandle mh = OptrToHandle(o);
     ChunkHandle ch = OptrToChunk(o);
-    byte *b = BlockOf(mh);
-    word v = *EntryOf(b, ch), data;
+    byte *b = LMemBlockOf(mh);
+    word v = *LMemEntryOf(b, ch), data;
     dword slot, need = ALIGN((dword) chunkSize + 2);
 
     if (chunkSize == 0) {
@@ -495,7 +470,7 @@ Boolean LMemReAlloc(optr o, word chunkSize)
 	Failed(mh);
 	return TRUE;
     }
-    b = BlockOf(mh);
+    b = LMemBlockOf(mh);
     v = W(b, ch);
     if (v != LMEM_EMPTY) {
 	memcpy(b + data, b + v, W(b, v - 2) - 2u);
@@ -539,7 +514,7 @@ void LMemDeleteAt(optr o, word deleteOffset, word deleteCount)
 
 void LMemContract(MemHandle mh)
 {
-    byte *b = BlockOf(mh);
+    byte *b = LMemBlockOf(mh);
     word f = 0;
 
     Compact(b);
@@ -558,7 +533,7 @@ void LMemContract(MemHandle mh)
 
 void LMemValidate(MemHandle mh)
 {
-    byte *b = BlockOf(mh);
+    byte *b = LMemBlockOf(mh);
     LMemBlockHeader *h = HDR(b);
     dword start = HeapStart(b), end = h->LMBH_blockSize, total = 0, used = 0;
     word i, f, prev = 0;

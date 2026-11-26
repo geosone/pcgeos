@@ -6,5 +6,6 @@
 target_sources(geos_kernel_objs PRIVATE
   heapHandle.c
   heapHigh.c
+  heapC.c
   heapErrorCheck.c
   heapCompress.c)

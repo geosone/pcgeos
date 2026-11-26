@@ -15,6 +15,8 @@
  * and the sums are exact, the results are the same.
  */
 #include "graphicsInt.h"
+#include "../Win/winInt.h"
+#include "../Graphics/graphicsInt.h"
 
 /* the elements as plain numbers: WWFixed raw 32 bits, DWFixed 48 */
 static sdword W(const WWFixed *w)
@@ -324,4 +326,31 @@ void GrSetNullTransform(GStateHandle gstate)
     GrInvalidateFont(gs);
     GrMatIdentity(&gs->GS_TMatrix);
     GrExitTrans(gstate, gs);
+}
+
+void WinSetTransform(WindowHandle win, const TransMatrix *tm,
+		     WinInvalFlag flag)
+{
+    WindowHandle wh;
+    Window *w = WinEnterTrans(win, &wh);
+
+    if (!w)
+	return;
+    GrMatFromTransMatrix(&w->W_TMatrix, tm);
+    WinFinishTrans(wh, flag);
+}
+
+void WinApplyTransform(WindowHandle win, const TransMatrix *tm,
+		       WinInvalFlag flag)
+{
+    WindowHandle wh;
+    Window *w = WinEnterTrans(win, &wh);
+    TMatrix m;
+
+    if (!w)
+	return;
+    GrMatFromTransMatrix(&m, tm);
+    GrMatMul(&w->W_TMatrix, &m, &w->W_TMatrix);
+    GrMatSetFlags(&w->W_TMatrix);
+    WinFinishTrans(wh, flag);
 }

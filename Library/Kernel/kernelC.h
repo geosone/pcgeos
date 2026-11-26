@@ -1073,4 +1073,41 @@ int ObjCallClassLow(ClassStruct *cls, optr oself, int isObj, Message msg,
 /* objectFile.c and objectDup.c */
 GeodeHandle ObjCurProcess(void);
 
+/* fileNotify.c and fsdFile.c */
+extern word fsdOpenCloseCount;
+void FSDSendNotify(FileChangeNotificationType type, MemHandle block);
+MemHandle FSDNewBatch(void);
+
+/* heapErrorCheck.c and fileEC.c */
+void ECCheckHandleType(Handle h, byte type, Boolean nullOk);
+
+/*
+ * A place in the child list: the object whose field holds it (the
+ * composite, or the previous child) and the offset of that field.
+ */
+typedef struct {
+    optr	owner;
+    word	offset;
+} ObjCompPlace;
+
+/* objectComposite.c and objectC.c */
+int ObjIsParentLink(optr link);
+optr ObjPlaceGet(const ObjCompPlace *pl, word masterOffset);
+ObjCompPlace ObjFindLocation(optr comp, word n, word masterOffset,
+	word compOffset, word linkOffset);
+Boolean ObjCompFindChildLow(optr comp, optr child, word masterOffset,
+	word compOffset, word linkOffset, ObjCompPlace *pl,
+	word *pos);
+
+/* objectDup.c and geodesResource.c */
+const GocResource *GeodeResourceOf(MemHandle mh, word *resf);
+void GeodeDupFlags(word resf, HeapFlags *hf, HeapAllocFlags *haf);
+
+/* the LMem files (lmemCode.c, lmemChunkArray.c, lmemElementArray.c) and
+ * lmemC.c */
+byte *LMemBlockOf(MemHandle mh);
+word *LMemEntryOf(byte *b, ChunkHandle ch);
+ChunkArrayHeader *LMemCArrayHdr(optr arr);
+ElementArrayHeader *LMemEArrayHdr(optr arr);
+
 #endif /* KERNELC_H */

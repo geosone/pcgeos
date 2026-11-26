@@ -22,6 +22,7 @@ target_sources(geos_kernel_objs PRIVATE
   objectProcess.c
   objectReloc.c
   objectComposite.c
+  objectC.c
   objectLinkable.c
   objectShutdown.c
   objectDup.c

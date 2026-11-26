@@ -33,7 +33,7 @@ static optr Arr(optr arr, const void *ptr)
     return arr;
 }
 
-static CAH *Hdr(optr arr)
+CAH *LMemCArrayHdr(optr arr)
 {
     return LMemDeref(arr);
 }
@@ -60,46 +60,14 @@ static word SizeOf(optr arr, CAH *h, word i)
     return (word) (OffsetOf(arr, h, (word) (i + 1)) - OffsetOf(arr, h, i));
 }
 
-ChunkHandle ChunkArrayCreateAt(optr arr, word elementSize, word headerSize,
-			       ObjChunkFlags ocf)
-{
-    MemHandle mh = OptrToHandle(arr);
-    ChunkHandle ch = OptrToChunk(arr);
-    CAH *h;
-
-    if (headerSize == 0)
-	headerSize = sizeof(CAH);
-    if (headerSize < sizeof(CAH))
-	KernelFatal(CHUNK_ARRAY_HEADER_SIZE_TOO_SMALL);
-    if (ch == 0) {
-	ch = LMemAlloc(mh, headerSize);
-	if (!ch)
-	    return 0;
-    } else if (LMemReAlloc(arr, headerSize))
-	return 0;
-    arr = ConstructOptr(mh, ch);
-    h = Hdr(arr);
-    memset(h, 0, headerSize);
-    h->CAH_elementSize = elementSize;
-    h->CAH_offset = headerSize;
-    if (ocf) {
-	LMemBlockHeader *b = MemDeref(mh);
-	if (b->LMBH_flags & LMF_HAS_FLAGS) {
-	    byte *flags = LMemDeref(ConstructOptr(mh, b->LMBH_offset));
-	    flags[(ch - b->LMBH_offset) / 2] = ocf;
-	}
-    }
-    return ch;
-}
-
 word ChunkArrayGetCount(optr arr)
 {
-    return Hdr(arr)->CAH_count;
+    return LMemCArrayHdr(arr)->CAH_count;
 }
 
 void *ChunkArrayElementToPtr(optr arr, word elementNumber, word *elementSize)
 {
-    CAH *h = Hdr(arr);
+    CAH *h = LMemCArrayHdr(arr);
     word n = elementNumber;
 
     if (n == CA_NULL_ELEMENT)
@@ -123,7 +91,7 @@ word ChunkArrayPtrToElement(optr arr, void *element)
     word off, i;
 
     arr = Arr(arr, element);
-    h = Hdr(arr);
+    h = LMemCArrayHdr(arr);
     off = (word) ((byte *) element - (byte *) h);
     if (h->CAH_elementSize)
 	return (word) ((off - h->CAH_offset) / h->CAH_elementSize);
@@ -144,7 +112,7 @@ void ChunkArrayGetElement(optr arr, word elementNumber, void *buffer)
 /* insert a zeroed element of `size' bytes before element `i' */
 static void *InsertIndex(optr arr, word i, word size)
 {
-    CAH *h = Hdr(arr);
+    CAH *h = LMemCArrayHdr(arr);
     word k, at;
 
     if (i > h->CAH_count)
@@ -157,7 +125,7 @@ static void *InsertIndex(optr arr, word i, word size)
 	/* a table entry (all elements move by 2), then the data */
 	if (LMemInsertAt(arr, (word) (h->CAH_offset + 2 * i), 2))
 	    return NULL;
-	h = Hdr(arr);
+	h = LMemCArrayHdr(arr);
 	h->CAH_count++;
 	for (k = 0; k < h->CAH_count; k++)
 	    if (k != i)
@@ -167,7 +135,7 @@ static void *InsertIndex(optr arr, word i, word size)
 	h->CAH_count--;
 	if (LMemInsertAt(arr, at, size)) {
 	    /* take the table entry out again */
-	    h = Hdr(arr);
+	    h = LMemCArrayHdr(arr);
 	    h->CAH_count++;
 	    for (k = 0; k < h->CAH_count; k++)
 		if (k != i)
@@ -176,11 +144,11 @@ static void *InsertIndex(optr arr, word i, word size)
 	    LMemDeleteAt(arr, (word) (h->CAH_offset + 2 * i), 2);
 	    return NULL;
 	}
-	h = Hdr(arr);
+	h = LMemCArrayHdr(arr);
 	for (k = (word) (i + 1); k <= h->CAH_count; k++)
 	    Table(h)[k] = (word) (Table(h)[k] + size);
     }
-    h = Hdr(arr);
+    h = LMemCArrayHdr(arr);
     h->CAH_count++;
     if (h->CAH_curOffset && i < h->CAH_curOffset)
 	h->CAH_curOffset++;			/* the running enum's element */
@@ -189,7 +157,7 @@ static void *InsertIndex(optr arr, word i, word size)
 
 void *ChunkArrayAppend(optr arr, word elementSize)
 {
-    return InsertIndex(arr, Hdr(arr)->CAH_count, elementSize);
+    return InsertIndex(arr, LMemCArrayHdr(arr)->CAH_count, elementSize);
 }
 
 void *ChunkArrayInsertAt(optr arr, void *insertPointer, word elementSize)
@@ -201,19 +169,19 @@ void *ChunkArrayInsertAt(optr arr, void *insertPointer, word elementSize)
 
 static void DeleteIndex(optr arr, word i)
 {
-    CAH *h = Hdr(arr);
+    CAH *h = LMemCArrayHdr(arr);
     word size, k;
 
     if (i >= h->CAH_count)
 	KernelFatal(CHUNK_ARRAY_BAD_ELEMENT);
     size = SizeOf(arr, h, i);
     LMemDeleteAt(arr, OffsetOf(arr, h, i), size);
-    h = Hdr(arr);
+    h = LMemCArrayHdr(arr);
     if (!h->CAH_elementSize) {
 	for (k = (word) (i + 1); k < h->CAH_count; k++)
 	    Table(h)[k] = (word) (Table(h)[k] - size);
 	LMemDeleteAt(arr, (word) (h->CAH_offset + 2 * i), 2);
-	h = Hdr(arr);
+	h = LMemCArrayHdr(arr);
 	for (k = 0; k + 1u < h->CAH_count; k++)
 	    Table(h)[k] = (word) (Table(h)[k] - 2);
     }
@@ -242,7 +210,7 @@ void ChunkArrayDeleteRange(optr arr, word firstElement, word count)
 
 void ChunkArrayElementResize(optr arr, word element, word newSize)
 {
-    CAH *h = Hdr(arr);
+    CAH *h = LMemCArrayHdr(arr);
     word old, k, off;
 
     if (h->CAH_elementSize)
@@ -256,14 +224,14 @@ void ChunkArrayElementResize(optr arr, word element, word newSize)
 	    return;
     } else if (newSize < old)
 	LMemDeleteAt(arr, (word) (off + newSize), (word) (old - newSize));
-    h = Hdr(arr);
+    h = LMemCArrayHdr(arr);
     for (k = (word) (element + 1); k < h->CAH_count; k++)
 	Table(h)[k] = (word) (Table(h)[k] + newSize - old);
 }
 
 void ChunkArrayZero(optr arr)
 {
-    CAH *h = Hdr(arr);
+    CAH *h = LMemCArrayHdr(arr);
     word hs = h->CAH_offset;
 
     h->CAH_count = 0;
@@ -274,25 +242,25 @@ Boolean ChunkArrayEnumRange(optr arr, word startElement, word count,
 			    void *enumData,
 			    Boolean (*callback)(void *element, void *enumData))
 {
-    CAH *h = Hdr(arr);
+    CAH *h = LMemCArrayHdr(arr);
     word saved = h->CAH_curOffset, i;
     Boolean stop = FALSE;
 
     h->CAH_curOffset = (word) (startElement + 1);
     while (count) {
-	h = Hdr(arr);
+	h = LMemCArrayHdr(arr);
 	i = (word) (h->CAH_curOffset - 1);
 	if (i >= h->CAH_count)
 	    break;
 	stop = callback((byte *) h + OffsetOf(arr, h, i), enumData);
 	if (stop)
 	    break;
-	h = Hdr(arr);
+	h = LMemCArrayHdr(arr);
 	h->CAH_curOffset++;
 	if (count != 0xffff)
 	    count--;
     }
-    Hdr(arr)->CAH_curOffset = saved;
+    LMemCArrayHdr(arr)->CAH_curOffset = saved;
     return stop ? TRUE : FALSE;
 }
 
@@ -409,7 +377,7 @@ void ChunkArraySort(optr arr, word valueForCallback,
 		    sword (*callback)(void *el1, void *el2,
 				      word valueForCallback))
 {
-    CAH *h = Hdr(arr);
+    CAH *h = LMemCArrayHdr(arr);
     SortCtx c;
 
     if (!h->CAH_elementSize)

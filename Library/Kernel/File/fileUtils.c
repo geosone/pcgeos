@@ -17,3 +17,23 @@ word FileOpOnPath(const char *path, FileOpFunc *op, void *data)
 
     return OpOnPlaces(cur->KP_disk, cur->KP_tail, path, op, data);
 }
+
+void FileBatchChangeNotifications(void)
+{
+    KThread *t = ThreadOf(KernelThisThread());
+
+    if (t && !t->T_fsNotifyBatch)
+	t->T_fsNotifyBatch = FSDNewBatch();
+}
+
+void FileFlushChangeNotifications(void)
+{
+    KThread *t = ThreadOf(KernelThisThread());
+    MemHandle mh;
+
+    if (!t || !t->T_fsNotifyBatch)
+	return;
+    mh = t->T_fsNotifyBatch;
+    t->T_fsNotifyBatch = 0;
+    FSDSendNotify(FCNT_BATCH, mh);
+}

@@ -18,4 +18,5 @@ target_sources(geos_kernel_objs PRIVATE
   geodesAccess.c
   geodesPatch.c
   geodesHandle.c
-  geodesPriv.c)
+  geodesPriv.c
+  geodesErrorCheck.c)

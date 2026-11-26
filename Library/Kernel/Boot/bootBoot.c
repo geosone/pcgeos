@@ -1,6 +1,7 @@
 /*
  * bootBoot.c -- ending GEOS (after EndGeos of bootBoot.asm, with
- * RemoveGeodes of geodesUtils.asm and ExitFile of fileList.asm).
+ * RemoveGeodes of geodesUtils.asm and ExitFile of fileList.asm), and
+ * CFatalError and CWarningNotice of bootBoot.asm.
  *
  * EndGeos, as DOS16 did before it went back to DOS:
  *   1. clears the file change list (GCNSLT_FILE_SYSTEM), whose objects
@@ -127,4 +128,15 @@ Boolean KernelEnded(void)
 const char *KernelExitMessage(void)
 {
     return endMessage;
+}
+
+void CFatalError(word code)
+{
+    ghal_log(GHAL_LOG_ERROR, "CFatalError %u", (unsigned) code);
+    KernelFatal(C_FATAL_ERROR);
+}
+
+void CWarningNotice(word code)
+{
+    ghal_log(GHAL_LOG_WARN, "CWarningNotice %u", (unsigned) code);
 }

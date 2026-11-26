@@ -1,7 +1,7 @@
 /*
  * imScreenSaver.c -- the screen saver of the input manager (after
- * imScreenSaver.asm, MaybeUnblankScreens of imMonitors.asm and
- * SysEnableAPO/SysDisableAPO of sysMisc.asm).
+ * imScreenSaver.asm, MaybeUnblankScreens of imMonitors.asm;
+ * SysEnableAPO/SysDisableAPO are in sysMisc.c).
  *
  * Once enabled (MSG_IM_ENABLE_SCREEN_SAVER), a continual timer sends the
  * input manager MSG_IM_SCREEN_SAVER_COUNTDOWN every 15 seconds; each one
@@ -45,26 +45,6 @@ void ImInitScreenSaver(void)
 {
     im.ssMaxCount = IM_DEFAULT_SCREEN_SAVER_COUNT * 4;
     im.screenSaverDelay = IM_DEFAULT_SCREEN_SAVER_COUNT * 4;
-}
-
-void SysDisableAPO(void)
-{
-    ghal_crit_enter();
-    im.disableAPOCount++;
-    ghal_crit_leave();
-    if (!im.disableAPOCount)
-	KernelFatal(DISABLE_APO_COUNT_OVERFLOW);
-}
-
-void SysEnableAPO(void)
-{
-    ghal_crit_enter();
-    if (!im.disableAPOCount) {
-	ghal_crit_leave();
-	KernelFatal(DISABLE_APO_COUNT_OVERFLOW);
-    }
-    im.disableAPOCount--;
-    ghal_crit_leave();
 }
 
 static void CallVideo(word function)

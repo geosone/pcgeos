@@ -30,6 +30,8 @@
  */
 #include "winInt.h"
 #include "../Graphics/graphicsInt.h"
+#include "kernelC.h"
+#include "ghal.h"
 
 /* ---------------------------------------------------------------------
  * Inserting and removing
@@ -619,3 +621,6 @@ void WinClearSaveUnders(WindowHandle any, WinUnderFlags f)
     }
     WinClearUnderBits(WinRootOf(any), f);
 }
+
+void ECCheckGStateHandle(GStateHandle h)    { ECCheckHandleType(h, HT_MEM, FALSE); }
+void ECCheckWindowHandle(WindowHandle h)    { ECCheckHandleType(h, HT_MEM, FALSE); }

@@ -212,3 +212,18 @@ FileHandle FileCreateTempFile(const char *dir, FileCreateFlags flags,
 	count++;
     }
 }
+
+void FileEnableOpenCloseNotification(void)
+{
+    ghal_crit_enter();
+    fsdOpenCloseCount++;
+    ghal_crit_leave();
+}
+
+void FileDisableOpenCloseNotification(void)
+{
+    ghal_crit_enter();
+    if (fsdOpenCloseCount)
+	fsdOpenCloseCount--;
+    ghal_crit_leave();
+}

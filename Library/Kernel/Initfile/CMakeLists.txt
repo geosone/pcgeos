@@ -6,4 +6,5 @@
 target_sources(geos_kernel_objs PRIVATE
   initfileLow.c
   initfileConstruct.c
-  initfileHigh.c)
+  initfileHigh.c
+  initfileC.c)

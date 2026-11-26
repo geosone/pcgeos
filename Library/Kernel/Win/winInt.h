@@ -143,4 +143,8 @@ void WinValWinStruct(GStateHandle gh, GState *gs, WindowHandle wh);
 WindowHandle WinRootOf(WindowHandle wh);
 void WinClearUnderBits(WindowHandle wh, WinUnderFlags f);
 
+/* winTrans.c and graphicsTransformSimple.c */
+Window *WinEnterTrans(Handle h, WindowHandle *wh);
+void WinFinishTrans(WindowHandle wh, WinInvalFlag flag);
+
 #endif

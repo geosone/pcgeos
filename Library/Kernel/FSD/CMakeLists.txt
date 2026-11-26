@@ -5,4 +5,5 @@
 #                      name layout from [system] primaryFSD)
 target_sources(geos_kernel_objs PRIVATE
   fsdDrive.c
-  fsdInit.c)
+  fsdInit.c
+  fsdFile.c)

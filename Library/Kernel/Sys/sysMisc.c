@@ -43,6 +43,12 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../IM/imInt.h"
+#include <input.h>
+#include <timer.h>
+#include <Internal/videoDr.h>
+#include <Internal/powerDr.h>
+#include <geosdriver.h>
 
 #define SST_POWER_OFF_TYPE	(SST_CLEAN_REBOOT + 1)	/* system.def */
 #define KMSG_META_CONFIRM_SHUTDOWN	702		/* gcnlist.goh */
@@ -365,4 +371,24 @@ Boolean UtilAsciiToHex32(const char *string, sdword *value)
     }
     *value = (sdword) v;
     return FALSE;
+}
+
+void SysDisableAPO(void)
+{
+    ghal_crit_enter();
+    im.disableAPOCount++;
+    ghal_crit_leave();
+    if (!im.disableAPOCount)
+	KernelFatal(DISABLE_APO_COUNT_OVERFLOW);
+}
+
+void SysEnableAPO(void)
+{
+    ghal_crit_enter();
+    if (!im.disableAPOCount) {
+	ghal_crit_leave();
+	KernelFatal(DISABLE_APO_COUNT_OVERFLOW);
+    }
+    im.disableAPOCount--;
+    ghal_crit_leave();
 }

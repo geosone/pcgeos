@@ -123,4 +123,7 @@ byte *DBItemBlockLock(DBGroup_ *g, word info, MemHandle *mh);
 void DBItemBlockAddRef(DBGroup_ *g, MemHandle mh);
 Boolean DBItemBlockDelRef(DBGroup_ *g, MemHandle mh);	/* TRUE: freed */
 
+/* dbaseCode.c and dbaseC.c */
+optr DBLockItem(VMFileHandle file, DBGroupAndItem id);
+
 #endif

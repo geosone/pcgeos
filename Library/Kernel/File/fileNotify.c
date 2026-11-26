@@ -1,7 +1,10 @@
 /*
- * fileNotify.c -- file change notification (FSDGenerateNotify,
- * FSDAddNotifyToBatch of FSD/fsdFile.asm; FileBatchChangeNotifications,
- * FileFlushChangeNotifications, File{En,Dis}ableOpenCloseNotification).
+ * fileNotify.c -- Port32: file change notification for every driver
+ * (the routines of the asm are beside it: FSDGenerateNotify and
+ * FSDAddNotifyToBatch in FSD/fsdFile.c, FileBatchChangeNotifications and
+ * FileFlushChangeNotifications in fileUtils.c, File{En,Dis}able-
+ * OpenCloseNotification in fileOpenClose.c); here what they share and
+ * what the file routines call.
  *
  * What changes on a disk goes to the objects of the GCN list
  * GCNSLT_FILE_SYSTEM as MSG_NOTIFY_FILE_CHANGE (FileChangeNotificationType,
@@ -33,33 +36,12 @@
 
 #define GCNSLT_FILE_SYSTEM_LIST	0	/* gcnlist.goh */
 #define KMSG_NOTIFY_FILE_CHANGE	693	/* gcnlist.goh */
-#define FSD_MAX_BATCH_SIZE	8192	/* fsdConstant.def */
 #define FSD_ALLOC_GRANULARITY	1024
 
-static word openCloseCount;
-
-void FileEnableOpenCloseNotification(void)
-{
-    ghal_crit_enter();
-    openCloseCount++;
-    ghal_crit_leave();
-}
-
-void FileDisableOpenCloseNotification(void)
-{
-    ghal_crit_enter();
-    if (openCloseCount)
-	openCloseCount--;
-    ghal_crit_leave();
-}
-
-Boolean FSDCheckOpenCloseNotifyEnabled(void)
-{
-    return openCloseCount != 0;
-}
+word fsdOpenCloseCount;
 
 /* the message to the list; the block goes with it (or is freed) */
-static void Send(FileChangeNotificationType type, MemHandle block)
+void FSDSendNotify(FileChangeNotificationType type, MemHandle block)
 {
     struct {
 	FileChangeNotificationType type;
@@ -76,7 +58,7 @@ static void Send(FileChangeNotificationType type, MemHandle block)
 		       block, GCNLSF_FORCE_QUEUE);
 }
 
-static MemHandle NewBatch(void)
+MemHandle FSDNewBatch(void)
 {
     MemHandle mh = MemAlloc(FSD_ALLOC_GRANULARITY, HF_DYNAMIC | HF_SHARABLE,
 			    HAF_ZERO_INIT);
@@ -89,106 +71,6 @@ static MemHandle NewBatch(void)
 				   FCBND_notifications);
     MemUnlock(mh);
     return mh;
-}
-
-static Boolean HasName(FileChangeNotificationType type)
-{
-    return type == FCNT_CREATE || type == FCNT_RENAME;
-}
-
-static void CopyName(char *to, const char *name)
-{
-    size_t n = name ? strlen(name) : 0;
-
-    if (n >= sizeof(FileLongName))
-	n = sizeof(FileLongName) - 1;
-    memset(to, 0, sizeof(FileLongName));
-    if (n)
-	memcpy(to, name, n);
-}
-
-static Boolean AddToBatch(KThread *t, FileChangeNotificationType type,
-			  DiskHandle disk, FileID id, const char *name)
-{
-    FileChangeBatchNotificationData *b;
-    FileChangeBatchNotificationItem *it;
-    word size = (word) (HasName(type)
-		? sizeof(FileChangeBatchNotificationItem)
-		: offsetof(FileChangeBatchNotificationItem, FCBNI_name));
-    word end, need;
-
-    b = MemLock(t->T_fsNotifyBatch);
-    end = b->FCBND_end;
-    if (end > FSD_MAX_BATCH_SIZE) {
-	MemUnlock(t->T_fsNotifyBatch);
-	Send(FCNT_BATCH, t->T_fsNotifyBatch);
-	t->T_fsNotifyBatch = NewBatch();
-	if (!t->T_fsNotifyBatch)
-	    return TRUE;
-	b = MemLock(t->T_fsNotifyBatch);
-	end = b->FCBND_end;
-    }
-    need = (word) ((end + size + FSD_ALLOC_GRANULARITY - 1) &
-		   ~(FSD_ALLOC_GRANULARITY - 1));
-    if (need > MemGetInfo(t->T_fsNotifyBatch, MGIT_SIZE)) {
-	MemUnlock(t->T_fsNotifyBatch);
-	if (!MemReAlloc(t->T_fsNotifyBatch, need, HAF_ZERO_INIT))
-	    return TRUE;
-	b = MemLock(t->T_fsNotifyBatch);
-    }
-    it = (FileChangeBatchNotificationItem *) ((byte *) b + end);
-    it->FCBNI_type = type;
-    it->FCBNI_disk = disk;
-    it->FCBNI_id = id;
-    if (HasName(type))
-	CopyName(it->FCBNI_name, name);
-    b->FCBND_end = (word) (end + size);
-    MemUnlock(t->T_fsNotifyBatch);
-    return FALSE;
-}
-
-/* TRUE if the notification was dropped for want of memory */
-Boolean FSDGenerateNotify(FileChangeNotificationType type, DiskHandle disk,
-			  FileID id, const char *name)
-{
-    KThread *t = ThreadOf(KernelThisThread());
-    FileChangeNotificationData *n;
-    MemHandle mh;
-
-    if (t && t->T_fsNotifyBatch)
-	return AddToBatch(t, type, disk, id, name);
-    mh = MemAlloc(sizeof(FileChangeNotificationData),
-		  HF_DYNAMIC | HF_SHARABLE, HAF_ZERO_INIT);
-    if (!mh)
-	return TRUE;
-    n = MemLock(mh);
-    n->FCND_disk = disk;
-    n->FCND_id = id;
-    if (HasName(type))
-	CopyName(n->FCND_name, name);
-    MemUnlock(mh);
-    Send(type, mh);
-    return FALSE;
-}
-
-void FileBatchChangeNotifications(void)
-{
-    KThread *t = ThreadOf(KernelThisThread());
-
-    if (t && !t->T_fsNotifyBatch)
-	t->T_fsNotifyBatch = NewBatch();
-}
-
-void FileFlushChangeNotifications(void)
-{
-    KThread *t = ThreadOf(KernelThisThread());
-    MemHandle mh;
-
-    if (!t || !t->T_fsNotifyBatch)
-	return;
-    mh = t->T_fsNotifyBatch;
-    t->T_fsNotifyBatch = 0;
-    Send(FCNT_BATCH, mh);
 }
 
 /* ---------------------------------------------------------------------

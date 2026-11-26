@@ -19,4 +19,5 @@ target_sources(geos_kernel_objs PRIVATE
   fileEA.c
   fileEnum.c
   fileLink.c
-  fileNotify.c)
+  fileNotify.c
+  fileEC.c)

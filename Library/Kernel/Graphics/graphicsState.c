@@ -323,53 +323,6 @@ void GrSetMaskIn(GState *gs, CommonAttr *ca, SysDrawMask sdm,
     }
 }
 
-static void SetMask(GStateHandle gstate, word attr, SysDrawMask sdm,
-		    const DrawMask *custom)
-{
-    GState *gs = MemLock(gstate);
-
-    GrSetMaskIn(gs, (CommonAttr *) ((byte *) gs + attr), sdm, custom);
-    if (attr == offsetof(GState, GS_textAttr))
-	GrUpdateOpts(gs);
-    MemUnlock(gstate);
-}
-
-void GrSetLineMaskSys(GStateHandle gstate, word sysDM)
-{
-    (void) GrGSRecord(gstate, GR_SET_LINE_MASK, "b", sysDM);
-    SetMask(gstate, offsetof(GState, GS_lineAttr), (SysDrawMask) sysDM, NULL);
-}
-
-void GrSetLineMaskCustom(GStateHandle gstate, const DrawMask *dm)
-{
-    (void) GrGSRecord(gstate, GR_SET_CUSTOM_LINE_MASK, "r", dm, 8);
-    SetMask(gstate, offsetof(GState, GS_lineAttr), SDM_CUSTOM, dm);
-}
-
-void GrSetAreaMaskSys(GStateHandle gstate, word sysDM)
-{
-    (void) GrGSRecord(gstate, GR_SET_AREA_MASK, "b", sysDM);
-    SetMask(gstate, offsetof(GState, GS_areaAttr), (SysDrawMask) sysDM, NULL);
-}
-
-void GrSetAreaMaskCustom(GStateHandle gstate, const DrawMask *dm)
-{
-    (void) GrGSRecord(gstate, GR_SET_CUSTOM_AREA_MASK, "r", dm, 8);
-    SetMask(gstate, offsetof(GState, GS_areaAttr), SDM_CUSTOM, dm);
-}
-
-void GrSetTextMaskSys(GStateHandle gstate, SysDrawMask sysDM)
-{
-    (void) GrGSRecord(gstate, GR_SET_TEXT_MASK, "b", sysDM);
-    SetMask(gstate, offsetof(GState, GS_textAttr), sysDM, NULL);
-}
-
-void GrSetTextMaskCustom(GStateHandle gstate, const DrawMask *dm)
-{
-    (void) GrGSRecord(gstate, GR_SET_CUSTOM_TEXT_MASK, "r", dm, 8);
-    SetMask(gstate, offsetof(GState, GS_textAttr), SDM_CUSTOM, dm);
-}
-
 /* lines */
 void GrSetLineWidth(GStateHandle gstate, WWFixedAsDWord width)
 {

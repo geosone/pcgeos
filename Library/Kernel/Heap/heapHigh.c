@@ -1,6 +1,7 @@
 /*
  * heapHigh.c -- the memory block API of the C kernel (CInclude/heap.h;
- * after heapHigh.asm and heapC.asm).
+ * after heapHigh.asm and the C stubs of heapC.asm; what only heapC.asm
+ * has is in heapC.c).
  *
  * Every block is one GHAL memory block (ghal_mem_alloc), as in the PM
  * kernel's GPMI_CALL_ALLOCATE_BLOCK: a block never moves while it exists,
@@ -25,6 +26,9 @@
 #include "ghal.h"
 
 #include <string.h>
+#include <object.h>
+#include <stdlib.h>
+#include <sysstats.h>
 
 GeodeHandle kernelCurrentGeode;
 
@@ -237,34 +241,6 @@ GeodeHandle MemOwner(MemHandle mh)
     return he && he->HE_type == SIG_VM ? he->HE_owner : owner;
 }
 
-typedef struct {
-    const byte *ptr;
-    MemHandle found;
-} PtrSearch;
-
-static int FindPtr(Handle h, HandleEntry *he, void *ctx)
-{
-    PtrSearch *s = ctx;
-    const byte *start = he->HE_addr;
-
-    if (he->HE_type == HT_MEM && start && s->ptr >= start &&
-	s->ptr < start + (he->HE_size ? he->HE_size : 1)) {
-	s->found = h;
-	return 1;
-    }
-    return 0;
-}
-
-MemHandle MemPtrToHandle(void *ptr)
-{
-    PtrSearch s;
-
-    s.ptr = ptr;
-    s.found = 0;
-    HandleEnum(FindPtr, &s);
-    return s.found;
-}
-
 void MemInitRefCount(MemHandle mh, word count)
 {
     EC_CHECK(count != 0, MEM_REFERENCE_COUNT_ILLEGAL_INITIAL_VALUE);
@@ -457,4 +433,32 @@ void *MemLockFixedOrMovable(void *ptr)
 void MemUnlockFixedOrMovable(void *ptr)
 {
     (void) ptr;
+}
+
+MemHandle MemAllocLMem(LMemType type, word headerSize)
+{
+    /* zeroed: the rest of a larger header (ObjLMemBlockHeader: in-use
+     * count, output) starts at 0 */
+    MemHandle mh = MemAlloc(128, HF_SWAPABLE, HAF_NO_ERR | HAF_ZERO_INIT);
+    LocalMemoryFlags flags = 0;
+    word def = sizeof(LMemBlockHeader);
+
+    if (type == LMEM_TYPE_OBJ_BLOCK) {
+	MemModifyOtherInfo(mh, KernelThisThread());	/* exec thread */
+	flags = LMF_HAS_FLAGS | LMF_RELOCATED;
+	def = sizeof(ObjLMemBlockHeader);
+    }
+    LMemInitHeap(mh, type, flags, headerSize ? headerSize : def, 2, 64);
+    return mh;
+}
+
+/* the error of the last file (and other) routine of the running thread */
+word ThreadGetError(void)
+{
+    return ThreadOf(KernelThisThread())->T_error;
+}
+
+void ThreadSetError(word errno)
+{
+    KernelSetError(errno);
 }

@@ -9,6 +9,8 @@
  */
 #include "kernelC.h"
 #include "geosmod.h"
+#include <vm.h>
+#include <string.h>
 
 #define MAX_GEODES	32
 
@@ -102,4 +104,17 @@ void *ProcGetLibraryEntry(GeodeHandle library, word entryNumber)
 ThreadHandle ProcInfo(GeodeHandle gh)
 {
     return (ThreadHandle) MemEntryOf(gh)->HE_otherInfo;
+}
+
+/* a new block with the contents of resource `mh' as the geode holds
+ * them, owned by the resource's owner, not relocated */
+MemHandle GeodeDuplicateResource(MemHandle mh)
+{
+    word resf;
+    const GocResource *r = GeodeResourceOf(mh, &resf);
+    HeapFlags hf;
+    HeapAllocFlags haf;
+
+    GeodeDupFlags(resf, &hf, &haf);
+    return LMemCreateResourceBlock(r, MemOwner(mh), hf, haf);
 }

@@ -1,6 +1,6 @@
 /*
  * objectDup.c -- duplicating resources and the saved-block list (after
- * objectDup.asm and GeodeDuplicateResource of geodesResource.asm).
+ * objectDup.asm; GeodeDuplicateResource is in geodesResource.c).
  *
  * A resource is duplicated from the module's data (the GocResource that
  * goc -cg made), as the asm kernel read it from the geode file: the
@@ -98,7 +98,7 @@ void ObjSaveBlock(MemHandle mh)
  * ------------------------------------------------------------------- */
 
 /* the module data of a resource handle, and its number and flags */
-static const GocResource *ResourceOf(MemHandle mh, word *resf)
+const GocResource *GeodeResourceOf(MemHandle mh, word *resf)
 {
     GeodeHandle owner = MemOwner(mh);
     sdword res = GeodeHandleToResource(owner, mh);
@@ -112,7 +112,7 @@ static const GocResource *ResourceOf(MemHandle mh, word *resf)
     return r;
 }
 
-static void DupFlags(word resf, HeapFlags *hf, HeapAllocFlags *haf)
+void GeodeDupFlags(word resf, HeapFlags *hf, HeapAllocFlags *haf)
 {
     /* a copy cannot be discarded: it is not in the geode */
     *hf = HF_SWAPABLE;
@@ -123,19 +123,6 @@ static void DupFlags(word resf, HeapFlags *hf, HeapAllocFlags *haf)
 	*haf |= HAF_UI;
     if (resf & RESF_OBJECT)
 	*haf |= HAF_OBJECT_RESOURCE;
-}
-
-/* a new block with the contents of resource `mh' as the geode holds
- * them, owned by the resource's owner, not relocated */
-MemHandle GeodeDuplicateResource(MemHandle mh)
-{
-    word resf;
-    const GocResource *r = ResourceOf(mh, &resf);
-    HeapFlags hf;
-    HeapAllocFlags haf;
-
-    DupFlags(resf, &hf, &haf);
-    return LMemCreateResourceBlock(r, MemOwner(mh), hf, haf);
 }
 
 /* the thread to run the copy (DetermineBurdenThreadForDuplicatedResource):
@@ -178,7 +165,7 @@ MemHandle ObjDuplicateResource(MemHandle blockToDup, GeodeHandle owner,
 {
     GeodeHandle srcOwner = MemOwner(blockToDup);
     word resf;
-    const GocResource *r = ResourceOf(blockToDup, &resf);
+    const GocResource *r = GeodeResourceOf(blockToDup, &resf);
     HeapFlags hf;
     HeapAllocFlags haf;
     MemHandle mh;
@@ -195,7 +182,7 @@ MemHandle ObjDuplicateResource(MemHandle blockToDup, GeodeHandle owner,
 
     /* relocated for the template's owner, or the new one if it runs the
      * same geode */
-    DupFlags(resf, &hf, &haf);
+    GeodeDupFlags(resf, &hf, &haf);
     mh = LMemCreateResourceBlock(r, SameGeode(srcOwner, owner) ? owner
 							       : srcOwner,
 				 hf, haf);

@@ -32,6 +32,7 @@ target_sources(geos_kernel_objs PRIVATE
   graphicsInit.c
   graphicsChars.c
   graphicsFont.c
+  graphicsFontC.c
   graphicsTextMetrics.c
   graphicsText.c
   graphicsTextObject.c
@@ -40,7 +41,9 @@ target_sources(geos_kernel_objs PRIVATE
   graphicsSpline.c
   graphicsPath.c
   graphicsPattern.c
+  graphicsC.c
   graphicsString.c
   graphicsStringMisc.c
   graphicsStringStore.c
-  graphicsStringUtils.c)
+  graphicsStringUtils.c
+  graphicsTransformSimple.c)

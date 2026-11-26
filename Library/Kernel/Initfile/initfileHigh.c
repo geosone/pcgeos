@@ -1,6 +1,6 @@
 /*
  * initfileHigh.c -- the init file API (after initfileHigh.asm, the C
- * stubs of initfileC.asm and, for finding the files, Loader/ini.asm).
+ * stubs of initfileC.asm (what only it has is in initfileC.c) and, for finding the files, Loader/ini.asm).
  *
  * The init files are read on first use: geos.ini in the top directory,
  * then the files that "[paths] ini" of an init file names, up to
@@ -30,14 +30,7 @@
 
 #include <string.h>
 
-#define MAX_INI_FILES	4
-
-typedef struct {
-    char	*IT_text;	/* IT_len bytes, then INI_EOF */
-    word	IT_len;
-} IniText;
-
-static IniText ini[MAX_INI_FILES];
+IniText iniFiles[MAX_INI_FILES];
 static word iniCount;
 static Boolean iniLoaded;
 static char iniName[16];		/* of the first, in SP_TOP */
@@ -56,7 +49,7 @@ word iniNesting;
 
 static void Load(void);
 
-static void PInitFile(void)
+void PInitFile(void)
 {
     ThreadHandle me = KernelThisThread();
 
@@ -155,7 +148,7 @@ static Boolean ReadIniFile(const char *name, FileAccessFlags access,
 /* the value of [paths] ini of file i: the further files */
 static void Chain(word i)
 {
-    const char *t = ini[i].IT_text;
+    const char *t = iniFiles[i].IT_text;
     word pos, ks, n, start = 0, end;
     char *value;
 
@@ -173,7 +166,7 @@ static void Chain(word i)
 	value[end] = 0;
 	if (end > start &&
 	    ReadIniFile(value + start, FILE_ACCESS_R | FILE_DENY_W,
-			&ini[iniCount]))
+			&iniFiles[iniCount]))
 	    Chain(iniCount++);
 	start = (word) (end + 1);
     }
@@ -191,12 +184,12 @@ static void Load(void)
     FileSetStandardPath(SP_TOP);
     strcpy(iniName, names[0]);
     for (i = 0; i < 2; i++) {
-	if (ReadIniFile(names[i], FILE_ACCESS_R | FILE_DENY_W, &ini[0])) {
+	if (ReadIniFile(names[i], FILE_ACCESS_R | FILE_DENY_W, &iniFiles[0])) {
 	    strcpy(iniName, names[i]);
 	    break;
 	}
     }
-    if (!ini[0].IT_text && !SetText(&ini[0], "", 0))
+    if (!iniFiles[0].IT_text && !SetText(&iniFiles[0], "", 0))
 	KernelFatal(INIT_FILE_ERROR);
     Chain(0);
     FilePopDir();
@@ -209,7 +202,7 @@ void InitFileReset(void)
 
     KSemP(&iniSem, KSEM_FOREVER);
     for (i = 0; i < MAX_INI_FILES; i++)
-	FreeText(&ini[i]);
+	FreeText(&iniFiles[i]);
     iniCount = 0;
     iniLoaded = FALSE;
     KSemV(&iniSem);
@@ -221,14 +214,14 @@ void InitFileReset(void)
 
 /* the first file from *file on (only the first with IFRF_FIRST_ONLY)
  * with cat and key: *file and the position of the value */
-static Boolean Locate(const char *cat, const char *key,
+Boolean InitFileLocate(const char *cat, const char *key,
 		      InitFileReadFlags flags, word *file, word *body)
 {
     word last = (flags & IFRF_FIRST_ONLY) ? 1 : iniCount, f, pos, ks;
 
     for (f = *file; f < last; f++) {
-	if (IniFindCategory(ini[f].IT_text, cat, &pos) &&
-	    IniFindKey(ini[f].IT_text, &pos, key, &ks)) {
+	if (IniFindCategory(iniFiles[f].IT_text, cat, &pos) &&
+	    IniFindKey(iniFiles[f].IT_text, &pos, key, &ks)) {
 	    *file = f;
 	    *body = pos;
 	    return TRUE;
@@ -241,7 +234,7 @@ static Boolean Locate(const char *cat, const char *key,
  * InitFileRead/InitFileReadAll: the string of cat/key as a null
  * terminated ghal_mem block, *len its length; NULL if there is none.
  */
-static char *ReadString(const char *cat, const char *key,
+char *InitFileReadStringLow(const char *cat, const char *key,
 			InitFileReadFlags flags, word *len)
 {
     byte conv = (byte) ((flags & IFRF_CHAR_CONVERT) >>
@@ -252,8 +245,8 @@ static char *ReadString(const char *cat, const char *key,
     if (flags & IFRF_READ_ALL)
 	flags &= ~IFRF_FIRST_ONLY;
     PInitFile();
-    while (Locate(cat, key, flags, &f, &body)) {
-	const char *t = ini[f].IT_text;
+    while (InitFileLocate(cat, key, flags, &f, &body)) {
+	const char *t = iniFiles[f].IT_text;
 	size = IniValueSize(t, body);
 	ns = s ? ghal_mem_resize(s, (dword) n + 2 + size + 1)
 	       : ghal_mem_alloc((dword) size + 1, 0);
@@ -274,116 +267,9 @@ static char *ReadString(const char *cat, const char *key,
     return s;
 }
 
-static MemHandle NewBlock(const void *data, word size)
-{
-    MemHandle mh = MemAlloc(size ? size : 1, HF_SWAPABLE, HAF_STANDARD);
-
-    if (mh) {
-	memcpy(MemLock(mh), data, size);
-	MemUnlock(mh);
-    }
-    return mh;
-}
-
 /* ---------------------------------------------------------------------
  * Reading
  */
-
-Boolean InitFileReadStringBuffer(const char *category, const char *key,
-				 char *buffer, InitFileReadFlags flags,
-				 word *dataSize)
-{
-    word len, size = flags & IFRF_SIZE;
-    char *s = ReadString(category, key, flags, &len);
-
-    *dataSize = 0;
-    if (!s)
-	return TRUE;
-    if (size) {
-	if (len >= size)
-	    len = (word) (size - 1);
-	memcpy(buffer, s, len);
-	buffer[len] = 0;
-	*dataSize = len;
-    }
-    ghal_mem_free(s);
-    return FALSE;
-}
-
-Boolean InitFileReadStringBlock(const char *category, const char *key,
-				MemHandle *block, InitFileReadFlags flags,
-				word *dataSize)
-{
-    word len;
-    char *s = ReadString(category, key, flags & ~IFRF_SIZE, &len);
-
-    *block = 0;
-    *dataSize = 0;
-    if (!s)
-	return TRUE;
-    *block = NewBlock(s, (word) (len + 1));
-    ghal_mem_free(s);
-    if (!*block)
-	return TRUE;
-    *dataSize = len;
-    return FALSE;
-}
-
-/* the section of the string of cat/key: s (to free) and where in it */
-static char *ReadSection(const char *cat, const char *key, word section,
-			 InitFileReadFlags flags, word *start, word *len)
-{
-    word n;
-    char *s = ReadString(cat, key, flags & ~IFRF_SIZE, &n);
-
-    if (s && !IniSection(s, n, section, start, len)) {
-	ghal_mem_free(s);
-	s = NULL;
-    }
-    return s;
-}
-
-Boolean InitFileReadStringSectionBuffer(const char *category,
-					const char *key, word section,
-					char *buffer, InitFileReadFlags flags,
-					word *dataSize)
-{
-    word start, len;
-    char *s = ReadSection(category, key, section, flags, &start, &len);
-
-    *dataSize = 0;
-    if (!s)
-	return TRUE;
-    if ((flags & IFRF_SIZE) <= len) {
-	ghal_mem_free(s);
-	return TRUE;
-    }
-    memcpy(buffer, s + start, len);
-    buffer[len] = 0;
-    *dataSize = len;
-    ghal_mem_free(s);
-    return FALSE;
-}
-
-Boolean InitFileReadStringSectionBlock(const char *category, const char *key,
-				       word section, MemHandle *block,
-				       InitFileReadFlags flags, word *dataSize)
-{
-    word start, len;
-    char *s = ReadSection(category, key, section, flags, &start, &len);
-
-    *block = 0;
-    *dataSize = 0;
-    if (!s)
-	return TRUE;
-    s[start + len] = 0;
-    *block = NewBlock(s + start, (word) (len + 1));
-    ghal_mem_free(s);
-    if (!*block)
-	return TRUE;
-    *dataSize = len;
-    return FALSE;
-}
 
 /* TRUE only if the callback stopped the enumeration */
 Boolean InitFileEnumStringSection(const char *category, const char *key,
@@ -394,7 +280,7 @@ Boolean InitFileEnumStringSection(const char *category, const char *key,
 				  void *enumData)
 {
     word n, start, len, i;
-    char *s = ReadString(category, key, flags & ~IFRF_SIZE, &n);
+    char *s = InitFileReadStringLow(category, key, flags & ~IFRF_SIZE, &n);
     Boolean stop = FALSE;
 
     if (!s)
@@ -409,54 +295,14 @@ Boolean InitFileEnumStringSection(const char *category, const char *key,
     return stop;
 }
 
-static Boolean ReadData(const char *cat, const char *key, byte *buffer,
-			word bufSize, MemHandle *block, word *dataSize)
-{
-    word f = 0, body, n;
-    Boolean found;
-    byte *data;
-
-    *dataSize = 0;
-    PInitFile();
-    found = Locate(cat, key, 0, &f, &body);
-    if (found && block) {
-	const char *t = ini[f].IT_text;
-	n = IniGetData(t, body, NULL, 0, TRUE);
-	*block = MemAlloc(n ? n : 1, HF_SWAPABLE, HAF_STANDARD);
-	if (!*block)
-	    found = FALSE;
-	else {
-	    data = MemLock(*block);
-	    *dataSize = IniGetData(t, body, data, n, FALSE);
-	    MemUnlock(*block);
-	}
-    } else if (found)
-	*dataSize = IniGetData(ini[f].IT_text, body, buffer, bufSize, FALSE);
-    VInitFile();
-    return !found;
-}
-
-Boolean InitFileReadDataBuffer(const char *category, const char *key,
-			       void *buffer, word bufSize, word *dataSize)
-{
-    return ReadData(category, key, buffer, bufSize, NULL, dataSize);
-}
-
-Boolean InitFileReadDataBlock(const char *category, const char *key,
-			      MemHandle *block, word *dataSize)
-{
-    *block = 0;
-    return ReadData(category, key, NULL, 0, block, dataSize);
-}
-
 Boolean InitFileReadInteger(const char *category, const char *key, word *i)
 {
     word f = 0, body;
     Boolean ok;
 
     PInitFile();
-    ok = Locate(category, key, 0, &f, &body) &&
-	 IniGetDecimal(ini[f].IT_text, body, i);
+    ok = InitFileLocate(category, key, 0, &f, &body) &&
+	 IniGetDecimal(iniFiles[f].IT_text, body, i);
     VInitFile();
     return !ok;
 }
@@ -472,9 +318,9 @@ Boolean InitFileReadAllInteger(const char *category, const char *key,
     Boolean any = FALSE, stop = FALSE;
 
     PInitFile();
-    while (!stop && Locate(category, key, 0, &f, &body)) {
+    while (!stop && InitFileLocate(category, key, 0, &f, &body)) {
 	any = TRUE;
-	if (IniGetDecimal(ini[f].IT_text, body, &v))
+	if (IniGetDecimal(iniFiles[f].IT_text, body, &v))
 	    stop = callback(v, enumData) != FALSE;
 	f++;
     }
@@ -489,8 +335,8 @@ Boolean InitFileReadBoolean(const char *category, const char *key,
     Boolean ok;
 
     PInitFile();
-    ok = Locate(category, key, 0, &f, &body) &&
-	 IniGetBoolean(ini[f].IT_text, body, bool);
+    ok = InitFileLocate(category, key, 0, &f, &body) &&
+	 IniGetBoolean(iniFiles[f].IT_text, body, bool);
     VInitFile();
     return !ok;
 }
@@ -502,7 +348,7 @@ Boolean InitFileReadBoolean(const char *category, const char *key,
 /* InitFileWrite: the entry for key (from IniBuild*) into cat */
 static void Write(const char *cat, const char *key, char *entry, word size)
 {
-    IniText *it = &ini[0];
+    IniText *it = &iniFiles[0];
     word pos, ks;
     Boolean ok;
 
@@ -600,7 +446,7 @@ void InitFileWriteStringSection(const char *category, const char *key,
     char *s, *ns;
 
     PInitFile();
-    s = ReadString(category, key, IFRF_FIRST_ONLY, &len);
+    s = InitFileReadStringLow(category, key, IFRF_FIRST_ONLY, &len);
     if (s && len) {
 	ns = ghal_mem_resize(s, (dword) len + 2 + slen + 1);
 	if (ns) {
@@ -623,7 +469,7 @@ void InitFileDeleteEntry(const char *category, const char *key)
     word pos, ks;
 
     PInitFile();
-    it = &ini[0];
+    it = &iniFiles[0];
     if (IniFindCategory(it->IT_text, category, &pos) &&
 	IniFindKey(it->IT_text, &pos, key, &ks))
 	Splice(it, ks, (word) (IniEntryEnd(it->IT_text, pos) - ks), "", 0);
@@ -639,7 +485,7 @@ void InitFileDeleteStringSection(const char *category, const char *key,
     char *s;
 
     PInitFile();
-    s = ReadString(category, key, IFRF_FIRST_ONLY, &len);
+    s = InitFileReadStringLow(category, key, IFRF_FIRST_ONLY, &len);
     if (s && IniSection(s, len, stringNum, &start, &slen)) {
 	end = (word) (start + slen);
 	while (end < len && (byte) s[end] < ' ')
@@ -667,7 +513,7 @@ void InitFileDeleteCategory(const char *category)
     Boolean blob = FALSE;
 
     PInitFile();
-    it = &ini[0];
+    it = &iniFiles[0];
     if (IniFindCategory(it->IT_text, category, &pos)) {
 	end = pos;
 	if (IniFindChar(it->IT_text, &end, '[', &blob))
@@ -706,7 +552,7 @@ void InitFileCommit(void)
     PInitFile();
     if (grabbed && grabFile) {
 	FilePos(grabFile, 0, FILE_POS_START);
-	WriteAll(grabFile, &ini[0]);
+	WriteAll(grabFile, &iniFiles[0]);
     } else {
 	FilePushDir();
 	FileSetStandardPath(SP_TOP);
@@ -716,7 +562,7 @@ void InitFileCommit(void)
 				     FILE_ACCESS_RW | FILE_DENY_W,
 			    FILE_ATTR_NORMAL);
 	if (fh) {
-	    WriteAll(fh, &ini[0]);
+	    WriteAll(fh, &iniFiles[0]);
 	    FileClose(fh, FALSE);
 	}
 	FilePopDir();
@@ -739,8 +585,8 @@ Boolean InitFileSave(void)
 				FILE_ACCESS_RW | FILE_DENY_RW,
 		    FILE_ATTR_NORMAL);
     if (fh) {
-	ok = FileWrite(fh, ini[0].IT_text, ini[0].IT_len, FALSE) ==
-	     ini[0].IT_len;
+	ok = FileWrite(fh, iniFiles[0].IT_text, iniFiles[0].IT_len, FALSE) ==
+	     iniFiles[0].IT_len;
 	FileClose(fh, FALSE);
     }
     FilePopDir();
@@ -758,8 +604,8 @@ Boolean InitFileRevert(void)
     FileSetStandardPath(SP_PRIVATE_DATA);
     ok = ReadIniFile(backupName, FILE_ACCESS_R | FILE_DENY_RW, &it);
     if (ok) {
-	FreeText(&ini[0]);
-	ini[0] = it;
+	FreeText(&iniFiles[0]);
+	iniFiles[0] = it;
     }
     FilePopDir();
     VInitFile();
@@ -790,8 +636,8 @@ word InitFileGrab(MemHandle mem, FileHandle fh, word size)
 	VInitFile();
 	return 1;
     }
-    grabSaved = ini[0];
-    ini[0] = it;
+    grabSaved = iniFiles[0];
+    iniFiles[0] = it;
     grabMem = mem;
     grabFile = fh;
     grabbed = TRUE;
@@ -806,13 +652,13 @@ void InitFileRelease(void)
 
     if (!grabbed || iniOwner != KernelThisThread())
 	return;
-    if (MemReAlloc(grabMem, (word) (ini[0].IT_len + 1), HAF_STANDARD)) {
+    if (MemReAlloc(grabMem, (word) (iniFiles[0].IT_len + 1), HAF_STANDARD)) {
 	p = MemLock(grabMem);
-	memcpy(p, ini[0].IT_text, (size_t) ini[0].IT_len + 1);
+	memcpy(p, iniFiles[0].IT_text, (size_t) iniFiles[0].IT_len + 1);
 	MemUnlock(grabMem);
     }
-    FreeText(&ini[0]);
-    ini[0] = grabSaved;
+    FreeText(&iniFiles[0]);
+    iniFiles[0] = grabSaved;
     grabbed = FALSE;
     grabMem = 0;
     grabFile = 0;

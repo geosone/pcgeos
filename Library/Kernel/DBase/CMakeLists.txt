@@ -7,4 +7,5 @@ target_sources(geos_kernel_objs PRIVATE
   dbaseMapBlk.c
   dbaseStructure.c
   dbaseItemBlock.c
-  dbaseCode.c)
+  dbaseCode.c
+  dbaseC.c)

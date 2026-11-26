@@ -446,4 +446,18 @@ int64_t GrMulDDF(int64_t n, int64_t inv);
 /* graphicsUtils.c and graphicsState.c */
 void GrSetPen(GState *gs, int64_t x, int64_t y);
 
+/* graphicsFont.c and graphicsFontC.c */
+Boolean GrCheckFontType(const FontInfo *fi, FontEnumFlags flags,
+	word family);
+void GrEnumAddFont(FontEnumStruct *e, const FontInfo *fi,
+	FontEnumFlags flags);
+
+/* graphicsPattern.c and graphicsC.c */
+word GrHatchSize(const HatchPattern *hp);
+void GrSetPatternLow(GStateHandle gstate, Boolean text, GraphicPattern pat,
+	const void *data, word size);
+
+/* graphicsTextMetrics.c and graphicsC.c */
+sdword GrTextWidthStr(GStateHandle gstate, const char *str, word size);
+
 #endif

@@ -55,4 +55,20 @@ extern ThreadHandle iniOwner;
 extern word iniNesting;
 void VInitFile(void);
 
+/* the init files read (initfileHigh.c) */
+#define MAX_INI_FILES	4
+
+typedef struct {
+    char	*IT_text;	/* IT_len bytes, then INI_EOF */
+    word	IT_len;
+} IniText;
+
+/* initfileHigh.c and initfileC.c */
+extern IniText iniFiles[MAX_INI_FILES];
+void PInitFile(void);
+Boolean InitFileLocate(const char *cat, const char *key,
+	InitFileReadFlags flags, word *file, word *body);
+char *InitFileReadStringLow(const char *cat, const char *key,
+	InitFileReadFlags flags, word *len);
+
 #endif

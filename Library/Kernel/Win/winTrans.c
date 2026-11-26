@@ -16,7 +16,7 @@
 #include "winInt.h"
 #include "../Graphics/graphicsInt.h"
 
-static Window *Enter(Handle h, WindowHandle *wh)
+Window *WinEnterTrans(Handle h, WindowHandle *wh)
 {
     Window *w;
 
@@ -28,7 +28,7 @@ static Window *Enter(Handle h, WindowHandle *wh)
 }
 
 /* FinishWinTransform, InvalWholeWin */
-static void Finish(WindowHandle wh, WinInvalFlag flag)
+void WinFinishTrans(WindowHandle wh, WinInvalFlag flag)
 {
     Window *w = MemDeref(wh);
 
@@ -49,19 +49,19 @@ void WinApplyRotation(WindowHandle win, WWFixedAsDWord angle,
 		      WinInvalFlag flag)
 {
     WindowHandle wh;
-    Window *w = Enter(win, &wh);
+    Window *w = WinEnterTrans(win, &wh);
 
     if (!w)
 	return;
     GrMatRotate(&w->W_TMatrix, angle);
-    Finish(wh, flag);
+    WinFinishTrans(wh, flag);
 }
 
 void WinApplyScale(WindowHandle win, WWFixedAsDWord xScale,
 		   WWFixedAsDWord yScale, WinInvalFlag flag)
 {
     WindowHandle wh;
-    Window *w = Enter(win, &wh);
+    Window *w = WinEnterTrans(win, &wh);
 
     if (!w)
 	return;
@@ -71,89 +71,39 @@ void WinApplyScale(WindowHandle win, WWFixedAsDWord xScale,
 	return;
     }
     GrMatScale(&w->W_TMatrix, xScale, yScale);
-    Finish(wh, flag);
+    WinFinishTrans(wh, flag);
 }
 
 void WinApplyTranslation(WindowHandle win, WWFixedAsDWord xTrans,
 			 WWFixedAsDWord yTrans, WinInvalFlag flag)
 {
     WindowHandle wh;
-    Window *w = Enter(win, &wh);
+    Window *w = WinEnterTrans(win, &wh);
 
     if (!w)
 	return;
     GrMatTranslate(&w->W_TMatrix, (sdword) xTrans, (sdword) yTrans);
-    Finish(wh, flag);
+    WinFinishTrans(wh, flag);
 }
 
 void WinApplyTranslationDWord(WindowHandle win, sdword xTrans,
 			      sdword yTrans, WinInvalFlag flag)
 {
     WindowHandle wh;
-    Window *w = Enter(win, &wh);
+    Window *w = WinEnterTrans(win, &wh);
 
     if (!w)
 	return;
     GrMatTranslate(&w->W_TMatrix, (int64_t) xTrans * 65536,
 		   (int64_t) yTrans * 65536);
-    Finish(wh, flag);
-}
-
-void WinSetTransform(WindowHandle win, const TransMatrix *tm,
-		     WinInvalFlag flag)
-{
-    WindowHandle wh;
-    Window *w = Enter(win, &wh);
-
-    if (!w)
-	return;
-    GrMatFromTransMatrix(&w->W_TMatrix, tm);
-    Finish(wh, flag);
-}
-
-void WinApplyTransform(WindowHandle win, const TransMatrix *tm,
-		       WinInvalFlag flag)
-{
-    WindowHandle wh;
-    Window *w = Enter(win, &wh);
-    TMatrix m;
-
-    if (!w)
-	return;
-    GrMatFromTransMatrix(&m, tm);
-    GrMatMul(&w->W_TMatrix, &m, &w->W_TMatrix);
-    GrMatSetFlags(&w->W_TMatrix);
-    Finish(wh, flag);
-}
-
-void WinSetNullTransform(WindowHandle win, WinInvalFlag flag)
-{
-    WindowHandle wh;
-    Window *w = Enter(win, &wh);
-
-    if (!w)
-	return;
-    GrMatIdentity(&w->W_TMatrix);
-    Finish(wh, flag);
-}
-
-void WinGetTransform(WindowHandle win, TransMatrix *tm)
-{
-    WindowHandle wh;
-    Window *w = Enter(win, &wh);
-
-    if (!w)
-	return;
-    GrMatToTransMatrix(&w->W_TMatrix, tm);
-    MemUnlock(wh);
-    WinTreeV();
+    WinFinishTrans(wh, flag);
 }
 
 /* WinTransCoord: rounded to words; 0x8000, 0x8000 on overflow */
 XYValueAsDWord WinTransform(WindowHandle win, sword x, sword y)
 {
     WindowHandle wh;
-    Window *w = Enter(win, &wh);
+    Window *w = WinEnterTrans(win, &wh);
     int64_t px = (int64_t) x * 65536, py = (int64_t) y * 65536;
     sword rx, ry;
 
@@ -174,7 +124,7 @@ XYValueAsDWord WinTransform(WindowHandle win, sword x, sword y)
 XYValueAsDWord WinUntransform(WindowHandle win, sword x, sword y)
 {
     WindowHandle wh;
-    Window *w = Enter(win, &wh);
+    Window *w = WinEnterTrans(win, &wh);
     int64_t px, py;
     sword rx, ry;
 
@@ -194,7 +144,7 @@ void WinTransformDWord(WindowHandle win, sdword xCoord, sdword yCoord,
 		       PointDWord *screenCoordinates)
 {
     WindowHandle wh;
-    Window *w = Enter(win, &wh);
+    Window *w = WinEnterTrans(win, &wh);
     int64_t px = (int64_t) xCoord * 65536, py = (int64_t) yCoord * 65536;
 
     if (!w)
@@ -212,7 +162,7 @@ void WinUntransformDWord(WindowHandle win, sdword xCoord, sdword yCoord,
 			 PointDWord *documentCoordinates)
 {
     WindowHandle wh;
-    Window *w = Enter(win, &wh);
+    Window *w = WinEnterTrans(win, &wh);
     int64_t px, py;
 
     if (!w)

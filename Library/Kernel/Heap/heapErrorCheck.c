@@ -1,7 +1,8 @@
 /*
- * heapErrorCheck.c -- the error checks geodes call (after
- * heapErrorCheck.asm, geodesErrorCheck.asm and the ECCHECK* stubs of
- * heapC.asm), and CFatalError and CWarningNotice of bootBoot.asm.
+ * heapErrorCheck.c -- the memory handle checks geodes call (after
+ * heapErrorCheck.asm); the checks of other handles are beside the asm
+ * they come from (geodesErrorCheck.c, fileEC.c, lmemErrorCheck.c,
+ * threadErrorCheck.c, winWindows.c), all through ECCheckHandleType.
  *
  * Port32: a handle is checked for its type in the handle table: a
  * memory handle for the memory, GState, window, LMem, resource and
@@ -14,7 +15,7 @@
 #include "kernelC.h"
 #include "ghal.h"
 
-static void CheckType(Handle h, byte type, Boolean nullOk)
+void ECCheckHandleType(Handle h, byte type, Boolean nullOk)
 {
     HandleEntry *he;
 
@@ -25,31 +26,7 @@ static void CheckType(Handle h, byte type, Boolean nullOk)
 	KernelFatal(EC_BAD_HANDLE);
 }
 
-void ECCheckMemHandle(MemHandle mh)	    { CheckType(mh, HT_MEM, FALSE); }
-void ECCheckMemHandleNS(MemHandle mh)	    { CheckType(mh, HT_MEM, FALSE); }
-void ECCheckResourceHandle(MemHandle mh)    { CheckType(mh, HT_MEM, FALSE); }
-void ECCheckLMemHandle(MemHandle mh)	    { CheckType(mh, HT_MEM, FALSE); }
-void ECCheckLMemHandleNS(MemHandle mh)	    { CheckType(mh, HT_MEM, FALSE); }
-void ECCheckGStateHandle(GStateHandle h)    { CheckType(h, HT_MEM, FALSE); }
-void ECCheckWindowHandle(WindowHandle h)    { CheckType(h, HT_MEM, FALSE); }
-void ECCheckGeodeHandle(GeodeHandle gh)	    { CheckType(gh, HT_MEM, FALSE); }
-void ECCheckProcessHandle(GeodeHandle gh)   { CheckType(gh, HT_MEM, FALSE); }
-void ECCheckDriverHandle(GeodeHandle gh)    { CheckType(gh, HT_MEM, FALSE); }
-void ECCheckLibraryHandle(GeodeHandle gh)   { CheckType(gh, HT_MEM, FALSE); }
-void ECCheckFileHandle(FileHandle fh)	    { CheckType(fh, SIG_FILE, FALSE); }
-void ECCheckThreadHandle(ThreadHandle th)   { CheckType(th, SIG_THREAD, FALSE); }
-void ECCheckQueueHandle(QueueHandle qh)	    { CheckType(qh, SIG_QUEUE, FALSE); }
+void ECCheckMemHandle(MemHandle mh)	    { ECCheckHandleType(mh, HT_MEM, FALSE); }
+void ECCheckMemHandleNS(MemHandle mh)	    { ECCheckHandleType(mh, HT_MEM, FALSE); }
 
 void ECCheckBounds(void *address)	    { (void) address; }
-void ECCheckStack(void)			    { }
-
-void CFatalError(word code)
-{
-    ghal_log(GHAL_LOG_ERROR, "CFatalError %u", (unsigned) code);
-    KernelFatal(C_FATAL_ERROR);
-}
-
-void CWarningNotice(word code)
-{
-    ghal_log(GHAL_LOG_WARN, "CWarningNotice %u", (unsigned) code);
-}

@@ -6,4 +6,5 @@
 target_sources(geos_kernel_objs PRIVATE
   threadThread.c
   threadSem.c
-  threadPrivate.c)
+  threadPrivate.c
+  threadErrorCheck.c)

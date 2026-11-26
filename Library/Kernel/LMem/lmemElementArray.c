@@ -42,7 +42,7 @@ static void SetRefCount(RefElementHeader *e, dword n)
     e->REH_refCount.WAAH_high = (sbyte) (byte) (n >> 16);
 }
 
-static ElementArrayHeader *EHdr(optr arr)
+ElementArrayHeader *LMemEArrayHdr(optr arr)
 {
     return LMemDeref(arr);
 }
@@ -68,22 +68,6 @@ static word Find(optr arr, void *element, word size, dword cbData,
     return CA_NULL_ELEMENT;
 }
 
-ChunkHandle ElementArrayCreateAt(optr arr, word elementSize, word headerSize,
-				 ObjChunkFlags ocf)
-{
-    ChunkHandle ch;
-
-    if (headerSize == 0)
-	headerSize = sizeof(ElementArrayHeader);
-    if (headerSize < sizeof(ElementArrayHeader))
-	KernelFatal(CHUNK_ARRAY_HEADER_SIZE_TOO_SMALL);
-    ch = ChunkArrayCreateAt(arr, elementSize, headerSize, ocf);
-    if (ch)
-	EHdr(ConstructOptr(OptrToHandle(arr), ch))->EAH_freePtr =
-	    EA_FREE_LIST_TERMINATOR;
-    return ch;
-}
-
 void ElementArrayAddReference(optr arr, word token)
 {
     RefElementHeader *e = Elt(arr, token, NULL);
@@ -96,7 +80,7 @@ void ElementArrayAddReference(optr arr, word token)
 word ElementArrayAddElementSized(optr arr, void *element, word size,
 				 dword callbackData, EqualCB *callback)
 {
-    ElementArrayHeader *h = EHdr(arr);
+    ElementArrayHeader *h = LMemEArrayHdr(arr);
     word fixed = h->EAH_meta.CAH_elementSize, token;
     RefElementHeader *e;
 
@@ -109,10 +93,10 @@ word ElementArrayAddElementSized(optr arr, void *element, word size,
 	SetRefCount(e, RefCount(e) + 1);
 	return token;
     }
-    token = EHdr(arr)->EAH_freePtr;
+    token = LMemEArrayHdr(arr)->EAH_freePtr;
     if (token != EA_FREE_LIST_TERMINATOR) {
 	e = Elt(arr, token, NULL);
-	EHdr(arr)->EAH_freePtr = (word) e->REH_refCount.WAAH_low;
+	LMemEArrayHdr(arr)->EAH_freePtr = (word) e->REH_refCount.WAAH_low;
 	if (!fixed)
 	    ChunkArrayElementResize(arr, token, size);
 	e = Elt(arr, token, NULL);
@@ -135,7 +119,7 @@ word ElementArrayAddElement(optr arr, void *element, dword callbackData,
 						void *elementFromArray,
 						dword valueForCallback))
 {
-    if (!EHdr(arr)->EAH_meta.CAH_elementSize)
+    if (!LMemEArrayHdr(arr)->EAH_meta.CAH_elementSize)
 	KernelFatal(CHUNK_ARRAY_BAD_ELEMENT);
     return ElementArrayAddElementSized(arr, element, 0, callbackData,
 				       callback);
@@ -149,12 +133,12 @@ static void FreeElement(optr arr, word token, dword cbData,
 
     if (callback)
 	callback(Elt(arr, token, NULL), cbData);
-    if (!EHdr(arr)->EAH_meta.CAH_elementSize)
+    if (!LMemEArrayHdr(arr)->EAH_meta.CAH_elementSize)
 	ChunkArrayElementResize(arr, token, sizeof(RefElementHeader));
     e = Elt(arr, token, NULL);
-    e->REH_refCount.WAAH_low = (sword) EHdr(arr)->EAH_freePtr;
+    e->REH_refCount.WAAH_low = (sword) LMemEArrayHdr(arr)->EAH_freePtr;
     e->REH_refCount.WAAH_high = EA_FREE_ELEMENT;
-    EHdr(arr)->EAH_freePtr = token;
+    LMemEArrayHdr(arr)->EAH_freePtr = token;
 }
 
 void ElementArrayRemoveReference(optr arr, word token, dword callbackData,

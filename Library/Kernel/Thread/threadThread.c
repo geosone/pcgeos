@@ -503,20 +503,9 @@ void ThreadAttachToQueue(QueueHandle qh, ClassStruct *class)
  * Information and priorities
  * ------------------------------------------------------------------- */
 
-/* the error of the last file (and other) routine of the running thread */
-word ThreadGetError(void)
-{
-    return ThreadOf(KernelThisThread())->T_error;
-}
-
 void KernelSetError(word error)
 {
     ThreadOf(KernelThisThread())->T_error = error;
-}
-
-void ThreadSetError(word errno)
-{
-    KernelSetError(errno);
 }
 
 dword ThreadGetInfo(ThreadHandle th, ThreadGetInfoType info)

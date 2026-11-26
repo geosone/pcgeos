@@ -1,6 +1,6 @@
 /*
- * objectComposite.c -- composite objects (after objectComposite.asm and
- * COBJSENDTOCHILDREN of objectC.asm).
+ * objectComposite.c -- composite objects (after objectComposite.asm;
+ * the routines of objectC.asm are in objectC.c).
  *
  * A composite holds its first child in a CompPart; each child holds the
  * next sibling in its LinkPart, and the last child holds the composite
@@ -55,7 +55,7 @@ static void SetField(optr o, word masterOffset, word offset, optr v)
     MemUnlock(OptrToHandle(o));
 }
 
-static int IsParentLink(optr link)
+int ObjIsParentLink(optr link)
 {
     return (OptrToChunk(link) & LP_IS_PARENT) != 0;
 }
@@ -65,21 +65,12 @@ static optr ParentLink(optr parent)
     return parent | LP_IS_PARENT;
 }
 
-/*
- * A place in the child list: the object whose field holds it (the
- * composite, or the previous child) and the offset of that field.
- */
-typedef struct {
-    optr	owner;
-    word	offset;
-} Place;
-
-static optr PlaceGet(const Place *pl, word masterOffset)
+optr ObjPlaceGet(const ObjCompPlace *pl, word masterOffset)
 {
     return GetField(pl->owner, masterOffset, pl->offset);
 }
 
-static void PlaceSet(const Place *pl, word masterOffset, optr v)
+static void PlaceSet(const ObjCompPlace *pl, word masterOffset, optr v)
 {
     SetField(pl->owner, masterOffset, pl->offset, v);
 }
@@ -88,17 +79,17 @@ static void PlaceSet(const Place *pl, word masterOffset, optr v)
  * FindObjLocation: the place of child number `n' (CCO_LAST: after the
  * last child).
  */
-static Place FindLocation(optr comp, word n, word masterOffset,
+ObjCompPlace ObjFindLocation(optr comp, word n, word masterOffset,
 			  word compOffset, word linkOffset)
 {
-    Place pl;
+    ObjCompPlace pl;
     optr v;
 
     pl.owner = comp;
     pl.offset = compOffset;
     while (n) {
-	v = PlaceGet(&pl, masterOffset);
-	if (!OptrToHandle(v) || IsParentLink(v))
+	v = ObjPlaceGet(&pl, masterOffset);
+	if (!OptrToHandle(v) || ObjIsParentLink(v))
 	    break;
 	pl.owner = v;
 	pl.offset = linkOffset;
@@ -111,8 +102,8 @@ static Place FindLocation(optr comp, word n, word masterOffset,
  * FindChildLow: the place that holds `child' and its position.  FALSE if
  * it is not a child; *pos is then the number of children.
  */
-static Boolean FindChild(optr comp, optr child, word masterOffset,
-			 word compOffset, word linkOffset, Place *pl,
+Boolean ObjCompFindChildLow(optr comp, optr child, word masterOffset,
+			 word compOffset, word linkOffset, ObjCompPlace *pl,
 			 word *pos)
 {
     optr v;
@@ -121,8 +112,8 @@ static Boolean FindChild(optr comp, optr child, word masterOffset,
     pl->offset = compOffset;
     *pos = 0;
     for (;;) {
-	v = PlaceGet(pl, masterOffset);
-	if (!OptrToHandle(v) || IsParentLink(v))
+	v = ObjPlaceGet(pl, masterOffset);
+	if (!OptrToHandle(v) || ObjIsParentLink(v))
 	    return FALSE;
 	if (v == child)
 	    return TRUE;
@@ -135,7 +126,7 @@ static Boolean FindChild(optr comp, optr child, word masterOffset,
 void ObjCompAddChild(optr obj, optr objToAdd, word flags, word masterOffset,
 		     word compOffset, word linkOffset)
 {
-    Place pl;
+    ObjCompPlace pl;
     optr at, link;
     byte *p;
 
@@ -152,9 +143,9 @@ void ObjCompAddChild(optr obj, optr objToAdd, word flags, word masterOffset,
     if (OptrToHandle(GetField(objToAdd, masterOffset, linkOffset)))
 	KernelFatal(ADD_CHILD_OF_OBJ_ALREADY_IN_COMPOSITE);
 
-    pl = FindLocation(obj, (word) (flags & CCF_REFERENCE), masterOffset,
+    pl = ObjFindLocation(obj, (word) (flags & CCF_REFERENCE), masterOffset,
 		      compOffset, linkOffset);
-    at = PlaceGet(&pl, masterOffset);
+    at = ObjPlaceGet(&pl, masterOffset);
     link = OptrToHandle(at) ? at : ParentLink(obj);
     PlaceSet(&pl, masterOffset, objToAdd);
     SetField(objToAdd, masterOffset, linkOffset, link);
@@ -167,12 +158,12 @@ void ObjCompAddChild(optr obj, optr objToAdd, word flags, word masterOffset,
 void ObjCompRemoveChild(optr obj, optr objToRemove, word flags,
 			word masterOffset, word compOffset, word linkOffset)
 {
-    Place pl;
+    ObjCompPlace pl;
     word pos;
     optr next;
     Boolean found;
 
-    found = FindChild(obj, objToRemove, masterOffset, compOffset,
+    found = ObjCompFindChildLow(obj, objToRemove, masterOffset, compOffset,
 		      linkOffset, &pl, &pos);
     next = GetField(objToRemove, masterOffset, linkOffset);
     SetField(objToRemove, masterOffset, linkOffset, 0);
@@ -182,7 +173,7 @@ void ObjCompRemoveChild(optr obj, optr objToRemove, word flags,
 	ObjMarkDirty(pl.owner);
 	ObjMarkDirty(objToRemove);
     }
-    if (pos == 0 && IsParentLink(next))
+    if (pos == 0 && ObjIsParentLink(next))
 	next = 0;			/* it was the only child */
     PlaceSet(&pl, masterOffset, next);
 }
@@ -194,26 +185,6 @@ void ObjCompMoveChild(optr obj, optr objToMove, word flags,
 		       linkOffset);
     ObjCompAddChild(obj, objToMove, flags, masterOffset, compOffset,
 		    linkOffset);
-}
-
-word ObjCompFindChildByOptr(optr obj, optr childToFind, word masterOffset,
-			    word compOffset, word linkOffset)
-{
-    Place pl;
-    word pos;
-
-    return FindChild(obj, childToFind, masterOffset, compOffset, linkOffset,
-		     &pl, &pos) ? pos : (word) -1;
-}
-
-optr ObjCompFindChildByNumber(optr obj, word childToFind, word masterOffset,
-			      word compOffset, word linkOffset)
-{
-    Place pl = FindLocation(obj, childToFind, masterOffset, compOffset,
-			    linkOffset);
-    optr v = PlaceGet(&pl, masterOffset);
-
-    return OptrToHandle(v) && !IsParentLink(v) ? v : 0;
 }
 
 /*
@@ -240,7 +211,7 @@ Boolean ObjCompProcessChildren(optr obj, optr firstChild,
 	countdown = OptrToChunk(firstChild);
 	child = GetField(obj, masterOffset, compOffset);
     }
-    while (OptrToHandle(child) && !IsParentLink(child)) {
+    while (OptrToHandle(child) && !ObjIsParentLink(child)) {
 	next = GetField(child, masterOffset, linkOffset);
 	if (countdown)
 	    countdown--;
@@ -251,24 +222,4 @@ Boolean ObjCompProcessChildren(optr obj, optr firstChild,
 	child = next;
     }
     return FALSE;
-}
-
-/* the event to each child, then it is freed */
-static Boolean SendCallback(optr parent, optr child, void *cbData)
-{
-    EventHandle ev = *(EventHandle *) cbData;
-
-    (void) parent;
-    MessageSetDestination(ev, child);
-    CMessageDispatchP(ev, MF_DISPATCH_DONT_FREE, NULL, 0);
-    return FALSE;
-}
-
-void CObjSendToChildren(optr o, EventHandle message, word masterOffset,
-			word compOffset, word linkOffset)
-{
-    ObjCompProcessChildren(o, 0, OCCT_SAVE_PARAMS_DONT_TEST_ABORT, &message,
-			   masterOffset, compOffset, linkOffset,
-			   SendCallback);
-    ObjFreeMessage(message);
 }

@@ -15,7 +15,7 @@
 #include <stdlib.h>
 
 /* CheckFontType */
-static Boolean FontType(const FontInfo *fi, FontEnumFlags flags,
+Boolean GrCheckFontType(const FontInfo *fi, FontEnumFlags flags,
 			word family)
 {
     FontAttrs a = fi->FI_family;
@@ -35,7 +35,7 @@ static Boolean FontType(const FontInfo *fi, FontEnumFlags flags,
 }
 
 /* AddFont */
-static void AddFont(FontEnumStruct *e, const FontInfo *fi,
+void GrEnumAddFont(FontEnumStruct *e, const FontInfo *fi,
 		    FontEnumFlags flags)
 {
     word i;
@@ -71,66 +71,16 @@ word GrEnumFonts(FontEnumStruct *buffer, word size, FontEnumFlags flags,
 	FontInfo *fi = GrFontChunk(fa[i].FAE_infoHandle, NULL);
 	if (buffer && found == size)
 	    break;
-	if (!FontType(fi, flags, family))
+	if (!GrCheckFontType(fi, flags, family))
 	    continue;
 	if (buffer)
-	    AddFont(&buffer[found], fi, flags);
+	    GrEnumAddFont(&buffer[found], fi, flags);
 	found++;
     }
     FontDrUnlockInfoBlock();
     if (buffer && (flags & FEF_ALPHABETIZE) && found > 1)
 	qsort(buffer, found, sizeof(FontEnumStruct), CompareFonts);
     return found;
-}
-
-/* GrCheckFontAvailReal: the font by ID or (FEF_STRING) name, of the
- * type; FID_INVALID if not there */
-static FontID CheckFontAvail(FontEnumFlags flags, word family, FontID id,
-			     const char *name)
-{
-    word n, i;
-    FontsAvailEntry *fa;
-    FontID r = FID_INVALID;
-
-    if (!grFontBlock)
-	return FID_INVALID;
-    FontDrLockInfoBlock();
-    fa = GrFontChunk(FONTS_AVAIL_HANDLE, &n);
-    n = (word) (n / sizeof(FontsAvailEntry));
-    for (i = 0; i < n && r == FID_INVALID; i++) {
-	FontInfo *fi = GrFontChunk(fa[i].FAE_infoHandle, NULL);
-	FontEnumStruct e;
-	const char *a, *b;
-	if (!FontType(fi, flags, family))
-	    continue;
-	if (!(flags & FEF_STRING)) {
-	    if (fi->FI_fontID == id)
-		r = id;
-	    continue;
-	}
-	AddFont(&e, fi, 0);
-	for (a = e.FES_name, b = name; *a && *b; a++, b++)
-	    if ((flags & FEF_DOWNCASE) ?
-		tolower((byte) *a) != tolower((byte) *b) : *a != *b)
-		break;
-	if (!*a && !*b)
-	    r = fi->FI_fontID;
-    }
-    FontDrUnlockInfoBlock();
-    return r;
-}
-
-FontID GrCheckFontAvailID(FontEnumFlags flags, word family, FontID id)
-{
-    return CheckFontAvail((FontEnumFlags) (flags & ~FEF_STRING), family, id,
-			  NULL);
-}
-
-FontID GrCheckFontAvailName(FontEnumFlags flags, word family,
-			    const char *name)
-{
-    return CheckFontAvail((FontEnumFlags) (flags | FEF_STRING), family, 0,
-			  name);
 }
 
 /* the nearest bitmap size of the font (or its outlines, any size) and

@@ -138,7 +138,7 @@ sdword GrTextWidthLow(const GState *gs, const FontBuf *fb, const char *str,
     return w;
 }
 
-static sdword TextWidth(GStateHandle gstate, const char *str, word size)
+sdword GrTextWidthStr(GStateHandle gstate, const char *str, word size)
 {
     FontBuf *fb = FontDrLockFont(gstate);
     GState *gs;
@@ -155,10 +155,5 @@ static sdword TextWidth(GStateHandle gstate, const char *str, word size)
 
 word GrTextWidth(GStateHandle gstate, const char *str, word size)
 {
-    return (word) ((TextWidth(gstate, str, size) + 0x80) >> 8);
-}
-
-dword GrTextWidthWWFixed(GStateHandle gstate, const char *str, word size)
-{
-    return (dword) (TextWidth(gstate, str, size) << 8);
+    return (word) ((GrTextWidthStr(gstate, str, size) + 0x80) >> 8);
 }

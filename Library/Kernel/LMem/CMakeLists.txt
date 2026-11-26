@@ -7,6 +7,8 @@
 target_sources(geos_kernel_objs PRIVATE
   lmemCode.c
   lmemChunkArray.c
+  lmemC.c
   lmemElementArray.c
   lmemNameArray.c
-  lmemGCNList.c)
+  lmemGCNList.c
+  lmemErrorCheck.c)
