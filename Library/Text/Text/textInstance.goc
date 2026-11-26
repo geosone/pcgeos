@@ -1,5 +1,6 @@
 /*
- * textInstance.goc -- VisTextClass (after textInstance.asm): the class,
+ * textInstance.goc -- VisTextClass (after textInstance.asm; its class
+ * record is in tVariable.goc, after tVariable.def):
  * a new object, the plain instance data.
  *
  * A new text object is editable and selectable, empty, with the default
@@ -12,148 +13,6 @@
 @include "textInt.goh"
 #include <Internal/specUI.h>
 
-@classdecl VisTextClass;
-/* Text/textCalc.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_FROM_OFFSET;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS;
-/* Text/textCompatibility.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE_SMALL;
-/* Text/textGState.goc */
-@extern method VisTextClass, MSG_VIS_CREATE_CACHED_GSTATES;
-@extern method VisTextClass, MSG_VIS_DESTROY_CACHED_GSTATES;
-@extern method VisTextClass, MSG_VIS_RECREATE_CACHED_GSTATES;
-/* Text/textMethodDraw.goc */
-@extern method VisTextClass, MSG_VIS_DRAW;
-/* Text/textMethodGeometry.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_HEIGHT;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_MIN_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_SIMPLE_MIN_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_AVERAGE_CHAR_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_CALC_HEIGHT;
-/* Text/textMethodGet.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_GET_TEXT_RANGE;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_PTR;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_OPTR;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_BLOCK;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_PTR;
-/* Text/textMethodInput.goc */
-@extern method VisTextClass, MSG_META_KBD_CHAR;
-/* Text/textMethodInstance.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_SET_MAX_LENGTH;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_MAX_LENGTH;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_START;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_TEXT_SIZE;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_NOT_USER_MODIFIED;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_USER_MODIFIED;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_STATE;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_USER_MODIFIED_STATE;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_FEATURES;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FEATURES;
-@extern method VisTextClass, MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_WASH_COLOR;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_WASH_COLOR;
-@extern method VisTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
-@extern method VisTextClass, MSG_VIS_OPEN;
-@extern method VisTextClass, MSG_VIS_CLOSE;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_ONE_LINE_WIDTH;
-/* Text/textMethodSet.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_TEXT;
-@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_PTR;
-@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_OPTR;
-@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_BLOCK;
-@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_PTR;
-@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_OPTR;
-@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK;
-@extern method VisTextClass, MSG_VIS_TEXT_APPEND_PTR;
-@extern method VisTextClass, MSG_VIS_TEXT_APPEND_OPTR;
-@extern method VisTextClass, MSG_VIS_TEXT_APPEND_BLOCK;
-@extern method VisTextClass, MSG_META_DELETE_RANGE_OF_CHARS;
-@extern method VisTextClass, MSG_VIS_TEXT_DELETE_ALL;
-@extern method VisTextClass, MSG_META_DELETE;
-@extern method VisTextClass, MSG_VIS_TEXT_DELETE_SELECTION;
-/* Text/textScrollOneLine.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_SCROLL_ONE_LINE;
-/* TextAttr/taAttr.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_POINT_SIZE;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_BITS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_SPACING;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_SHADOW;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_COLOR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_PATTERN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_LINE_SPACING;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_DEFAULT_TABS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_MARGIN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_RIGHT_MARGIN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_MARGIN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_TOP;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_BOTTOM;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_LEADING;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_COLOR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_PATTERN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_TAB;
-@extern method VisTextClass, MSG_VIS_TEXT_CLEAR_TAB;
-@extern method VisTextClass, MSG_VIS_TEXT_MOVE_TAB;
-@extern method VisTextClass, MSG_VIS_TEXT_CLEAR_ALL_TABS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PREPEND_CHARS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_GRAY_SCREEN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTRIBUTES;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_AND_PARA_MARGIN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_GRAY_SCREEN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_HYPHENATION_PARAMS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_DROP_CAP_PARAMS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_KEEP_PARAMS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARAGRAPH_NUMBER;
-/* TextAttr/taCharAttr.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_DEFAULT;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN;
-@extern method VisTextClass, MSG_VIS_TEXT_ADD_CHAR_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_CHAR_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_CHAR_ATTR;
-/* TextAttr/taParaAttr.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_DEFAULT;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_TOKEN;
-@extern method VisTextClass, MSG_VIS_TEXT_ADD_PARA_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_PARA_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_PARA_ATTR;
-/* TextAttr/taRange.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_GET_RANGE;
-/* TextAttr/taRunQuery.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_GET_RUN_BOUNDS;
-/* TextAttr/taStorage.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_CREATE_STORAGE;
-/* TextSelect/tslKbdShortcuts.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_DO_KEY_FUNCTION;
-/* TextSelect/tslMethodCursor.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_ON;
-@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_OFF;
-/* TextSelect/tslMethodFocus.goc */
-@extern method VisTextClass, MSG_META_GAINED_SYS_FOCUS_EXCL;
-@extern method VisTextClass, MSG_META_LOST_SYS_FOCUS_EXCL;
-@extern method VisTextClass, MSG_META_GAINED_TARGET_EXCL;
-@extern method VisTextClass, MSG_META_LOST_TARGET_EXCL;
-@extern method VisTextClass, MSG_META_GAINED_SYS_TARGET_EXCL;
-@extern method VisTextClass, MSG_META_LOST_SYS_TARGET_EXCL;
-/* TextSelect/tslMethodMouse.goc */
-@extern method VisTextClass, MSG_META_START_SELECT;
-@extern method VisTextClass, MSG_META_PTR;
-@extern method VisTextClass, MSG_META_END_SELECT;
-/* TextSelect/tslMethodSelect.goc */
-@extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_RANGE;
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_RANGE;
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_ALL;
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_START;
-@extern method VisTextClass, MSG_VIS_TEXT_SELECT_END;
 
 /* VisTextInitialize */
 /*
@@ -203,7 +62,7 @@ static word SystemCharAttrRun(optr o)
     return c;
 }
 
-@method VisTextClass, MSG_META_INITIALIZE
+@extern method VisTextClass, MSG_META_INITIALIZE
 {
     @callsuper();
     pself = VT(oself);
@@ -223,42 +82,42 @@ static word SystemCharAttrRun(optr o)
     pself->VTI_charAttrRuns = SystemCharAttrRun(oself);
 }
 
-@method VisTextClass, MSG_VIS_TEXT_SET_FILTER
+@extern method VisTextClass, MSG_VIS_TEXT_SET_FILTER
 {
     pself->VTI_filters = filter;
 }
 
-@method VisTextClass, MSG_VIS_TEXT_GET_FILTER
+@extern method VisTextClass, MSG_VIS_TEXT_GET_FILTER
 {
     return pself->VTI_filters;
 }
 
-@method VisTextClass, MSG_VIS_TEXT_SET_OUTPUT
+@extern method VisTextClass, MSG_VIS_TEXT_SET_OUTPUT
 {
     pself->VTI_output = newOutput;
 }
 
-@method VisTextClass, MSG_VIS_TEXT_GET_OUTPUT
+@extern method VisTextClass, MSG_VIS_TEXT_GET_OUTPUT
 {
     return pself->VTI_output;
 }
 
-@method VisTextClass, MSG_VIS_TEXT_SET_LR_MARGIN
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LR_MARGIN
 {
     pself->VTI_lrMargin = lrMargin;
 }
 
-@method VisTextClass, MSG_VIS_TEXT_GET_LR_MARGIN
+@extern method VisTextClass, MSG_VIS_TEXT_GET_LR_MARGIN
 {
     return pself->VTI_lrMargin;
 }
 
-@method VisTextClass, MSG_VIS_TEXT_SET_TB_MARGIN
+@extern method VisTextClass, MSG_VIS_TEXT_SET_TB_MARGIN
 {
     pself->VTI_tbMargin = tbMargin;
 }
 
-@method VisTextClass, MSG_VIS_TEXT_GET_TB_MARGIN
+@extern method VisTextClass, MSG_VIS_TEXT_GET_TB_MARGIN
 {
     return pself->VTI_tbMargin;
 }
@@ -283,14 +142,14 @@ static void ToOutputIfNotSelf(optr o, Message msg, const void *args,
 	CObjMessageP(0, out, msg, args, size, NULL, 0);
 }
 
-@method VisTextClass, MSG_META_TEXT_USER_MODIFIED
+@extern method VisTextClass, MSG_META_TEXT_USER_MODIFIED
 {
     (void) pself;
     (void) obj;
     ToOutputIfNotSelf(oself, message, &oself, sizeof(oself));
 }
 
-@method VisTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED
+@extern method VisTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED
 {
     struct { optr object; word hasText; } a;
 
@@ -301,7 +160,7 @@ static void ToOutputIfNotSelf(optr o, Message msg, const void *args,
     ToOutputIfNotSelf(oself, message, &a, sizeof(a));
 }
 
-@method VisTextClass, MSG_META_TEXT_CR_FILTERED, MSG_META_TEXT_TAB_FILTERED
+@extern method VisTextClass, MSG_META_TEXT_CR_FILTERED, MSG_META_TEXT_TAB_FILTERED
 {
     struct { word character; MetaTextFilteredParameters params; } a;
 

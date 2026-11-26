@@ -10,10 +10,13 @@ geos_sources(motif_goc
   cspecInteraction.goc
   cspecTrigger.goc
   cspecItem.goc
-  cspecStdDialog.goc
   cspecValue.goc
   cspecGlyphDisplay.goc
   cspecText.goc
   cspecGadget.goc
   cspecPane.goc
-  cspecContent.goc)
+  cspecContent.goc
+  cspecAppDocumentControl.goc
+  cspecDocument.goc
+  cspecUIDocumentControl.goc
+  cspecFileSelector.goc)

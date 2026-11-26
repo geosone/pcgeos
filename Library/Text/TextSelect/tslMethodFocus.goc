@@ -16,12 +16,6 @@
 #include <Internal/specUI.h>
 #include <timer.h>
 
-@extern method VisTextClass, MSG_META_GAINED_SYS_FOCUS_EXCL;
-@extern method VisTextClass, MSG_META_LOST_SYS_FOCUS_EXCL;
-@extern method VisTextClass, MSG_META_GAINED_TARGET_EXCL;
-@extern method VisTextClass, MSG_META_LOST_TARGET_EXCL;
-@extern method VisTextClass, MSG_META_GAINED_SYS_TARGET_EXCL;
-@extern method VisTextClass, MSG_META_LOST_SYS_TARGET_EXCL;
 
 /* the focus flag changed: a range of the system's target looks the
  * same with and without the focus */

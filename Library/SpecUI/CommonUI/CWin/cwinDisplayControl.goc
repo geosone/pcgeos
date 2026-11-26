@@ -17,7 +17,6 @@
 
 @classdecl OLDisplayGroupClass, neverSaved;
 
-
 #define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
 #define DG_OFFSET(f)	word_offsetof(OLDisplayGroupInstance, f)
 #define DGroup(o)	((OLDisplayGroupInstance *) ObjDerefVis(o))
@@ -239,18 +238,6 @@
 	return;
     pself->OLDGI_states &= ~OLDGS_PTR_IN_RAW_UNIV;
     @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
-}
-
-/* the group may be worked (the application asked) */
-static Boolean CheckIfInteractable(optr o)
-{
-    WindowHandle w = DGroup(o)->VCI_window;
-    optr app;
-
-    if (!w)
-	return FALSE;
-    app = GeodeGetAppObject(0);
-    return !app || @call app::MSG_META_TEST_WIN_INTERACTIBILITY(o, w);
 }
 
 /* OLDisplayGroupPrePassiveButton: the passive message of the button's

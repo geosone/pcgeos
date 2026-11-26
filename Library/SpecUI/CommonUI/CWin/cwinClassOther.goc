@@ -9,6 +9,9 @@
  * detach (OpenWinSaveState) are not ported yet.
  */
 @include "cGeode.goh"
+@include <Objects/gPrimC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gInterC.goh>
 
 #define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
@@ -186,4 +189,25 @@ Boolean AvoidMenuOverlap(optr button, optr menu, Boolean vertical,
     else
 	VisSetPosition(menu, mStart, other);
     return TRUE;
+}
+
+/* OpenWinUpdateModalStatus: a modal popup tells the application, a
+ * system modal one the system first (cwinClassOther.asm) */
+void OpenWinUpdateModalStatus(optr o)
+{
+    OLPopupWinInstance *p = (OLPopupWinInstance *) ObjDerefVis(o);
+    word flags;
+    optr app;
+
+    if (!(p->OLWI_moreFixedAttr & OWMFA_IS_POPUP))
+	return;
+    flags = p->OLPWI_flags;
+    if (!(flags & (OLPWF_SYS_MODAL | OLPWF_APP_MODAL)))
+	return;
+    if (flags & OLPWF_SYS_MODAL)
+	(void) UserCallSystem(MSG_GEN_SYSTEM_NOTIFY_SYS_MODAL_WIN_CHANGE,
+			      NULL, 0, NULL, 0);
+    app = GeodeGetAppObject(0);
+    if (app)
+	@call app::MSG_GEN_APPLICATION_NOTIFY_MODAL_WIN_CHANGE();
 }

@@ -50,6 +50,7 @@
 #include <Internal/videoDr.h>
 
 @classdecl FlowClass, neverSaved;
+/* userFlow.goc */
 @extern method FlowClass, MSG_META_INITIALIZE;
 
 #define FlowPart(o)	((FlowInstance *) LMemDeref(o))

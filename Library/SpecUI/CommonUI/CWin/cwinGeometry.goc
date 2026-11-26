@@ -13,6 +13,9 @@
  * spacing hints.
  */
 @include "cGeode.goh"
+@include <Objects/gPrimC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gInterC.goh>
 
 #define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
@@ -344,17 +347,6 @@ static void RefitToParent(optr o, sword pw, sword ph)
     return TRUE;
 }
 
-@extern method OLWinClass, MSG_OL_WIN_IS_MAXIMIZED
-{
-    return (pself->OLWI_specState & OLWSS_MAXIMIZED) != 0;
-}
-
-@extern method OLWinClass, MSG_OL_WIN_IS_DEFAULT_ACTION_NAVIGATE_TO_NEXT_FIELD
-{
-    return (pself->OLWI_moreFixedAttr &
-	    OWMFA_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD) != 0;
-}
-
 /* ---------------------------------------------------------------------
  * The resize border, squished screens
  * ------------------------------------------------------------------- */
@@ -376,4 +368,31 @@ Boolean OpenWinHasResizeBorder(optr o)
     if (OpenCheckIfCGA() || OpenCheckIfNarrow())
 	return (a & OWA_RESIZABLE) != 0;
     return (a & OWA_TITLED) != 0;
+}
+
+/* GetDividerStrLen */
+word GetDividerStrLen(GStateHandle gs)
+{
+    return (word) GrTextWidth(gs, openWinLongTermStr, 0);
+}
+
+/*
+ * OpenWinGetMonikerSize: the moniker's size; a primary's with its long
+ * term moniker after " - " (on a tiny screen that one alone)
+ */
+SizeAsDWord OpenWinGetMonikerSize(optr o, GStateHandle gs)
+{
+    ChunkHandle m = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
+    ChunkHandle lt = OpenWinLongTermMoniker(o);
+    SizeAsDWord s = VisGetMonikerSize(o, m, GetSystemFontHeight(), gs), l;
+    word w;
+
+    if (!lt)
+	return s;
+    l = VisGetMonikerSize(o, lt, GetSystemFontHeight(), gs);
+    if (OpenWinTinyScreen())
+	return l;
+    w = (word) (DWORD_WIDTH(s) + GetDividerStrLen(gs) + DWORD_WIDTH(l));
+    return MAKE_SIZE_DWORD(w, DWORD_HEIGHT(l) > DWORD_HEIGHT(s)
+			      ? DWORD_HEIGHT(l) : DWORD_HEIGHT(s));
 }

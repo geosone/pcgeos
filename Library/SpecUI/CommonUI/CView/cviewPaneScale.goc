@@ -1,0 +1,28 @@
+/*
+ * cviewPaneScale.goc -- after cviewPaneScale.asm: FullyInvalidateView,
+ * SendNewScaleToOD.
+ */
+@include "CView/cviewInt.goh"
+@include <Internal/flowC.goh>
+
+/* FullyInvalidateView: the parent's geometry (now, from the queue) and
+ * ours invalid, ahead of other messages */
+void FullyInvalidateView(optr oself)
+{
+    EventHandle ev = @record null::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID,
+							 VUM_NOW);
+
+    @send ,forceQueue,insertAtFront oself::MSG_VIS_SEND_TO_PARENT(ev);
+    @send ,forceQueue,insertAtFront oself::MSG_VIS_MARK_INVALID(
+				VOF_GEOMETRY_INVALID, VUM_MANUAL);
+}
+
+/* SendNewScaleToOD: the content told the scale (queued) */
+void SendNewScaleToOD(optr oself, WWFixedAsDWord x, WWFixedAsDWord y)
+{
+    optr c = PGen(oself)->GVI_content;
+
+    if (c)
+	@send ,forceQueue c::MSG_META_CONTENT_VIEW_SCALE_FACTOR_CHANGED(
+		PVis(oself)->OLPI_window, y, x);
+}

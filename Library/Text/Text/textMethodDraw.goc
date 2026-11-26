@@ -27,7 +27,6 @@
  */
 @include "textInt.goh"
 
-@extern method VisTextClass, MSG_VIS_DRAW;
 
 static sdword W(const WBFixed *w)
 {

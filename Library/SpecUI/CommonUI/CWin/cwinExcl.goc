@@ -8,6 +8,7 @@
  */
 @include "cGeode.goh"
 @include <Objects/gPenICC.goh>
+@include <Objects/gTrigC.goh>
 
 #define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 #define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
@@ -425,4 +426,28 @@ static void UnsetFocusExcl(optr o, optr obj)
     }
     FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
 					    whereTo, dest, 0);
+}
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/*
+ * OpenWinCallParentOfWindow: up from the window: a menu (not pinned)
+ * with a button through its button (an adopted button's query goes to
+ * the primary), else to the vis parent
+ */
+Boolean OpenWinCallParentOfWindow(optr o, Message msg, const void *params,
+				  word paramSize, void *reply, word replySize)
+{
+    OLPopupWinInstance *w = (OLPopupWinInstance *) Win(o);
+
+    if ((w->OLWI_fixedAttr & OWFA_IS_MENU) &&
+	!(w->OLWI_specState & OLWSS_PINNED) && w->OLPWI_button) {
+	optr b = ConstructOptr(OptrToHandle(o), w->OLPWI_button);
+
+	if (reply)
+	    memset(reply, 0, replySize);
+	CObjMessageP(MF_CALL, b, msg, params, paramSize, reply, replySize);
+	return TRUE;
+    }
+    return VisCallParent(o, msg, params, paramSize, reply, replySize);
 }

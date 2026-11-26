@@ -1,0 +1,31 @@
+/*
+ * cspecUIDocumentControl.goc -- after cspecUIDocumentControl.asm:
+ * OLBuildUIDocumentControl.
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olDocumentControlClass.goh>
+@include <Internal/SpecUI/olDocumentClass.goh>
+@include <Objects/gDocGrpC.goh>
+@include <Objects/gPrimC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gTrigC.goh>
+@include <Objects/gInterC.goh>
+@include <alb.goh>
+@include <gcnlist.goh>
+#include <initfile.h>
+#include <disk.h>
+#include <file.h>
+#include <string.h>
+
+/* ---------------------------------------------------------------------
+ * OLBuildUIDocumentControl (cspecUIDocumentControl.asm): always this
+ * class
+ * ------------------------------------------------------------------- */
+
+ClassStruct *OLBuildUIDocumentControl(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLDocumentControlClass;
+}

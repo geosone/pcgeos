@@ -10,6 +10,6 @@ geos_sources(motif_goc
   cmainDocPhysical.goc
   cmainDocumentNew.goc
   cmainDocumentMisc.goc
-  cmainDocumentSaveAs.goc
   cmainDocObscure.goc
-  cmainDocLowDisk.goc)
+  cmainDocLowDisk.goc
+  cmainUtils.goc)

@@ -1,0 +1,24 @@
+/*
+ * cspecAppDocumentControl.goc -- after cspecAppDocumentControl.asm:
+ * OLBuildAppDocumentControl.
+ */
+@include <stdapp.goh>
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olDocumentGroupClass.goh>
+@include <Internal/SpecUI/olDocumentControlClass.goh>
+@include <Objects/gDocC.goh>
+@include <iacp.goh>
+@include <impex.goh>
+@include <spool.goh>
+#include <file.h>
+#include <string.h>
+
+/* OLBuildAppDocumentControl (cspecAppDocumentControl.asm): always this
+ * class */
+ClassStruct *OLBuildAppDocumentControl(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLDocumentGroupClass;
+}

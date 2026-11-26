@@ -1,0 +1,416 @@
+/*
+ * copenFileSelectorMiddle.goc -- after copenFileSelectorMiddle.asm:
+ * MSG_OL_FILE_SELECTOR_OPEN_DIR_BUTTON,
+ * MSG_OL_FILE_SELECTOR_CHANGE_DRIVE_POPUP,
+ * MSG_OL_FILE_SELECTOR_CHANGE_DIRECTORY_POPUP,
+ * MSG_GEN_FILE_SELECTOR_SET_SELECTION,
+ * MSG_GEN_FILE_SELECTOR_GET_FILTER_ROUTINE,
+ * MSG_OL_FILE_SELECTOR_ITEM_QUERY, OLFSDestroyListChildren,
+ * OLFSCreateAndInitGenItem, OLFSShowCurrentDir.
+ */
+@include "cGeode.goh"
+@include "cspecCUAS.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olFileSelectorClass.goh>
+@include <Internal/SpecUI/olApplicationClass.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/gItemC.goh>
+#include <fileEnum.h>
+#include <disk.h>
+#include <drive.h>
+@include <gcnlist.goh>
+#include <sysstats.h>
+#include <chunkarr.h>
+#include <localize.h>
+#include <gstring.h>
+#include <uDialog.h>
+
+/* the icons of the list: files and directories (the wide ones
+ * indented, below the open folder of the current directory) and the
+ * kinds of drives; the top line is blank */
+#define GFS_ICON_HEIGHT		12
+#include "CUtils/copenFileSelectorIcons.h"
+
+#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
+#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
+#define SDAVNF_PASS_DISK_HANDLE		4
+#define SDAVNF_TRAILING_SLASH		1
+
+#define GFS_ICON_SPACING	2
+
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_OPEN_DIR_BUTTON
+{
+    word sel = OLFSListSelection(oself);
+
+    (void) pself;
+    (void) trigger;
+    if (sel != GIGS_NONE)
+	OLFSHandleUserAction(oself, sel, TRUE);
+}
+
+/* OLFileSelectorChangeDrivePopupHandler: to the root of the disk in
+ * the drive; the popup's moniker becomes the drive */
+static void ChangeDrive(optr o, word drive)
+{
+    DiskHandle disk = DiskRegisterDiskSilently(drive & 0xff);
+
+    if (disk && !@call o::MSG_OL_FILE_SELECTOR_PATH_SET("\\", disk)) {
+	OLFSUpdateChangeDrivePopupMoniker(o, TRUE);
+	return;
+    }
+    OLFSNotifyUserOfDiskError();
+    OLFSSelectCurrentDriveInChangeDrivePopup(o);
+}
+
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_CHANGE_DRIVE_POPUP
+{
+    (void) pself;
+    (void) numSelections;
+    (void) stateFlags;
+    ChangeDrive(oself, selection);
+}
+
+/*
+ * OLFileSelectorChangeDirectoryPopupHandler: element 0 is the root of
+ * the drive; an element of the path is gone to; the current
+ * directory's own moves the selection to the first entry; the one
+ * after it is the selected directory, opened
+ */
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_CHANGE_DIRECTORY_POPUP
+{
+    char path[PATH_BUFFER_SIZE];
+    DiskHandle disk;
+    word n = selection;
+    char *p;
+
+    (void) pself;
+    (void) numSelections;
+    (void) stateFlags;
+    if (!n) {
+	ChangeDrive(oself, OLFSCurDrive(oself, NULL));
+	return;
+    }
+    disk = OLFSFullPath(oself, path, sizeof(path));
+    if (!path[0])
+	return;
+    for (p = path + 1; *p; p++) {
+	if (*p != '\\' || --n)
+	    continue;
+	/* the path up to the element */
+	*p = 0;
+	disk = DiskRegisterDiskSilently(DiskGetDrive(disk));
+	if (!disk || @call oself::MSG_OL_FILE_SELECTOR_PATH_SET(path, disk))
+	    OLFSNotifyUserOfDiskError();
+	return;
+    }
+    if (path[1] && n == 1) {
+	OLFSSetItemSelection(OLFSUIObj(oself, @OLFileSelectorFileList), 0);
+	OLFSShowCurrentDir(oself);
+	OLFSBuildEntryFlagsAndSendAD(oself, 0);
+	return;
+    }
+    OLFSHandleUserAction(oself, OLFSListSelection(oself), TRUE);
+}
+
+/* OLFileSelectorSetSelection: TRUE if the file is not in the list (or
+ * there is no list yet) */
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_SELECTION
+{
+    word entry;
+
+    (void) selection;
+    if (!OLFSIsRealized(oself))
+	return TRUE;
+    if (pself->OLFSI_state & OLFSS_SUSPENDED) {
+	pself->OLFSI_state |= OLFSS_RESCAN_NEEDED;
+	return FALSE;
+    }
+    if (OLFSResolveSelection(oself, &entry)) {
+	/* back to the selection there was */
+	GFSTempDataEntry *t = OLFSFindTempData(oself);
+
+	OLFSCopySelection(oself, t->GFSTDE_selectionNumber,
+		      t->GFSTDE_selectionFlags);
+	return TRUE;
+    }
+    OLFSSetItemSelection(OLFSUIObj(oself, @OLFileSelectorFileList), entry);
+    OLFSBuildEntryFlagsAndSendAD(oself, entry);
+    OLFSShowCurrentDir(oself);
+    return FALSE;
+}
+/* OLFileSelectorGetFilterRoutine: the routine of the vardata, if any
+ * (an application's subclass returns its own) */
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_FILTER_ROUTINE
+{
+    void *d = ObjVarFindData(oself, ATTR_GEN_FILE_SELECTOR_FILE_ENUM_FILTER);
+
+    (void) pself;
+    filter->filterRoutine = NULL;
+    filter->filterAttrs = NULL;
+    /* (Port32: the vardata holds a pointer, so it has its size) */
+    if (d && ((VarDataEntry *) d - 1)->VDE_entrySize - sizeof(VarDataEntry) >=
+	     sizeof(filter->filterRoutine))
+	memcpy(&filter->filterRoutine, d, sizeof(filter->filterRoutine));
+}
+/* the icon of an entry: a volume's by the kind of its drive (the
+ * DriveStatus in the high byte of the file flags) */
+static const Bitmap *EntryIcon(const OLFileSelectorEntry *e, Boolean parent,
+			       Boolean first)
+{
+    if (e->OLFSE_fileAttrs & FA_SUBDIR) {
+	if (!parent)
+	    return &narrowFolderIconBitmap.b;
+	return first ? &openFolderIconBitmap.b : &folderIconBitmap.b;
+    }
+    if (!(e->OLFSE_fileAttrs & FA_VOLUME))
+	return parent ? &fileIconBitmap.b : &narrowFileIconBitmap.b;
+    switch ((e->OLFSE_fileFlags >> 8) & DS_TYPE) {
+    case DRIVE_5_25:
+	return &disk525IconBitmap.b;
+    case DRIVE_3_5:
+	return &disk35IconBitmap.b;
+    case DRIVE_PCMCIA:
+	return &diskPCMCIAIconBitmap.b;
+    case DRIVE_FIXED:
+    case DRIVE_CD_ROM:
+	return &diskHDIconBitmap.b;
+    default:
+	return &diskRamIconBitmap.b;
+    }
+}
+
+/*
+ * OLFileSelectorRequestMoniker: the list asks for an item's moniker: a
+ * graphics string of the entry's icon and name.  With the current
+ * directory shown the first item is its name (the drive and volume at
+ * the root) with an open folder (the drive's icon), the others are
+ * indented.  Files shown disabled (FSA_SHOW_FILES_DISABLED) are.
+ */
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_ITEM_QUERY
+{
+    optr dl = OLFSUIObj(oself, @OLFileSelectorFileList);
+    Boolean parent = (pself->OLFSI_state & OLFSS_SHOW_PARENT_DIR) != 0;
+    OLFileSelectorEntry e;
+    const Bitmap *bm;
+    MemHandle bh;
+    GStateHandle gs;
+    word chunk = 0, n = item;
+    ReplaceItemMonikerFlags flags = 0;
+
+    (void) list;
+    if (!dl)
+	return;
+    memset(&e, 0, sizeof(e));
+    if (parent && !item) {
+	char path[PATH_BUFFER_SIZE];
+	DiskHandle disk = OLFSFullPath(oself, path, sizeof(path));
+	const char *last = OLFSLastElement(path);
+
+	if (*last) {
+	    OLFSStrCopy(e.OLFSE_name, last, sizeof(e.OLFSE_name));
+	    e.OLFSE_fileAttrs = FA_SUBDIR;
+	} else {
+	    word drive = DiskGetDrive(disk);
+	    word status = DriveGetStatus(drive);
+
+	    if (!status)
+		return;
+	    e.OLFSE_fileAttrs = FA_VOLUME;
+	    e.OLFSE_fileFlags = (GeosFileHeaderFlags) (status << 8);
+	    OLFSStuffDriveAndVolumeName(e.OLFSE_name, sizeof(e.OLFSE_name),
+		drive, SDAVNF_PASS_DISK_HANDLE | SDAVNF_TRAILING_SLASH, 0,
+		disk);
+	}
+    } else {
+	OLFileSelectorEntry *p;
+
+	if (parent)
+	    n--;
+	pself = FS(oself);
+	if (n >= pself->OLFSI_numFiles || !pself->OLFSI_fileBuffer)
+	    return;
+	p = OLFSLockEntry(oself, n);
+	e = *p;
+	MemUnlock(FS(oself)->OLFSI_fileBuffer);
+    }
+
+    bh = MemAllocLMem(LMEM_TYPE_GENERAL, 0);
+    gs = GrCreateGString(bh, GST_CHUNK, &chunk);
+    bm = EntryIcon(&e, parent, !item);
+    GrFillBitmapAtCP(gs, bm, NULL);
+    GrRelMoveTo(gs, MakeWWFixed(bm->B_width + GFS_ICON_SPACING), 0);
+    GrDrawTextAtCP(gs, e.OLFSE_name, 0);
+    (void) GrEndGString(gs);
+    GrDestroyGString(gs, 0, GSKT_LEAVE_DATA);
+
+    if ((GFS(oself)->GFSI_attrs & FSA_SHOW_FILES_DISABLED) &&
+	!(e.OLFSE_fileAttrs & (FA_SUBDIR | FA_VOLUME)))
+	flags = RIMF_NOT_ENABLED;
+    @call dl::MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER(item, flags, 0, 0, 0,
+		VMDT_GSTRING, VMST_OPTR, ConstructOptr(bh, chunk));
+    MemFree(bh);
+}
+
+#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
+
+/* OLFSDestroyListChildren: the children of the list from a position on */
+void OLFSDestroyListChildren(optr list, word from)
+{
+    optr c;
+
+    while ((c = @call list::MSG_GEN_FIND_CHILD_AT_POSITION(from)) != 0)
+	@call c::MSG_GEN_DESTROY(VUM_DELAYED_VIA_UI_QUEUE, 0);
+}
+
+/* OLFSCreateAndInitGenItem: a new last item of the list */
+optr OLFSCreateAndInitGenItem(optr list, word id)
+{
+    optr item = ObjInstantiate(OptrToHandle(list),
+			       (ClassStruct *) &GenItemClass);
+
+    ObjSetFlags(item, OCF_IGNORE_DIRTY, OCF_DIRTY);
+    @call item::MSG_GEN_ITEM_SET_IDENTIFIER(id);
+    @call list::MSG_GEN_ADD_CHILD(item, CCO_LAST);
+    @call item::MSG_GEN_SET_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+    return item;
+}
+
+/* OLFSCreateCurDirItem: the item of the path popup at a position: the
+ * one that is there if it has the identifier, else a new one (what
+ * followed is destroyed) */
+static optr CreateCurDirItem(optr list, word id, word position)
+{
+    optr c = @call list::MSG_GEN_FIND_CHILD_AT_POSITION(position);
+
+    if (c) {
+	if (@call c::MSG_GEN_ITEM_GET_IDENTIFIER() == id)
+	    return c;
+	OLFSDestroyListChildren(list, position);
+    }
+    return OLFSCreateAndInitGenItem(list, id);
+}
+
+/* OLFSDisableDocButtonIfDocDir */
+static void DisableDocButtonIfDocDir(optr o, const char *path, DiskHandle disk)
+{
+    optr b = OLFSUIObj(o, @OLFileSelectorDocumentButton);
+
+    if (!b)
+	return;
+    if (FileComparePaths("", SP_DOCUMENT, path, disk) == PCT_EQUAL)
+	@call b::MSG_GEN_SET_NOT_ENABLED(VUM_DELAYED_VIA_UI_QUEUE);
+    else
+	@call b::MSG_GEN_SET_ENABLED(VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+/* OLFSDisableCloseAndChangeDirectoryButtonsIfFirstEntryAndIsRoot: no
+ * path popup with the first entry selected at the (virtual) root */
+static void DisablePathPopupIfFirstEntryAndIsRoot(optr o, Boolean atRoot)
+{
+    optr popup = OLFSUIObj(o, @OLFileSelectorChangeDirectoryPopup);
+    Boolean enable = TRUE;
+
+    if (!(FS(o)->OLFSI_state & OLFSS_SHOW_PARENT_DIR) || !OLFSListSelection(o))
+	enable = !OLFSIsVirtualRoot(o) && !atRoot;
+    if (!popup)
+	return;
+    if (enable)
+	@call popup::MSG_GEN_SET_ENABLED(VUM_DELAYED_VIA_UI_QUEUE);
+    else
+	@call popup::MSG_GEN_SET_NOT_ENABLED(VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+/*
+ * OLFSShowCurrentDir: the path popup shows the current directory: an
+ * item for the root ("drive:[volume]\", identifier 0), one for each
+ * element of the path (identifiers from 1) and one more for a selected
+ * directory; the deepest is selected.  Under a virtual root the items
+ * start at the root's last element (the identifiers still count from
+ * the disk's root: the handler finds the directory by them).  Items
+ * that are there are used again; the document button is disabled in
+ * the document directory.
+ */
+void OLFSShowCurrentDir(optr o)
+{
+    optr popup = OLFSUIObj(o, @OLFileSelectorChangeDirectoryPopup);
+    char path[PATH_BUFFER_SIZE];
+    word id = 0, count = 0, sel;
+    Boolean underVR, vrSeen = FALSE, atRoot = TRUE;
+    DiskHandle disk;
+    optr item = 0;
+    char *p;
+
+    if (!popup)
+	return;
+    underVR = OLFSUnderVirtualRoot(o, NULL);
+    if (!underVR) {
+	word drive = OLFSCurDrive(o, &disk);
+
+	OLFSStuffDriveAndVolumeName(path, sizeof(path), drive,
+		SDAVNF_PASS_DISK_HANDLE | SDAVNF_TRAILING_SLASH, 0, disk);
+	item = CreateCurDirItem(popup, id, count++);
+	OLFSReplaceMonikerText(item, path);
+	OLFSSetItemSelection(popup, @call item::MSG_GEN_ITEM_GET_IDENTIFIER());
+    }
+    id++;
+    disk = OLFSFullPath(o, path, sizeof(path));
+    p = path;
+    if (*p == '\\')
+	p++;
+    if (*p) {
+	item = 0;
+	while (*p) {
+	    char *end = p, save;
+	    Boolean show = TRUE;
+
+	    while (*end && *end != '\\')
+		end++;
+	    save = *end;
+	    *end = 0;
+	    if (underVR && !vrSeen) {
+		/* shown from the virtual root on */
+		GenFilePath *vr = OLFSVirtualRoot(o);
+		char root[PATH_BUFFER_SIZE];
+		DiskHandle vd = vr->GFP_disk;
+
+		OLFSStrCopy(root, vr->GFP_path, sizeof(root));
+		if (FileComparePaths(root, vd, path, disk) == PCT_EQUAL)
+		    vrSeen = TRUE;
+		else
+		    show = FALSE;
+	    }
+	    if (show) {
+		item = CreateCurDirItem(popup, id, count++);
+		OLFSReplaceMonikerText(item, p);
+	    }
+	    *end = save;
+	    id++;
+	    p = save ? end + 1 : end;
+	}
+	if (item) {
+	    OLFSSetItemSelection(popup, @call item::MSG_GEN_ITEM_GET_IDENTIFIER());
+	    atRoot = FALSE;
+	}
+    }
+    /* one more for a selected directory */
+    sel = OLFSListSelection(o);
+    if (sel && sel != GIGS_NONE &&
+	(word) (sel - 1) < FS(o)->OLFSI_numFiles) {
+	OLFileSelectorEntry *e = OLFSLockEntry(o, (word) (sel - 1));
+	char name[FILE_LONGNAME_BUFFER_SIZE];
+	Boolean dir = (e->OLFSE_fileAttrs & FA_SUBDIR) != 0;
+
+	OLFSStrCopy(name, e->OLFSE_name, sizeof(name));
+	MemUnlock(FS(o)->OLFSI_fileBuffer);
+	if (dir) {
+	    item = CreateCurDirItem(popup, id, count++);
+	    id++;
+	    OLFSReplaceMonikerText(item, name);
+	    OLFSSetItemSelection(popup,
+			     @call item::MSG_GEN_ITEM_GET_IDENTIFIER());
+	}
+    }
+    OLFSDestroyListChildren(popup, count);
+    DisableDocButtonIfDocDir(o, path, disk);
+    DisablePathPopupIfFirstEntryAndIsRoot(o, atRoot);
+}

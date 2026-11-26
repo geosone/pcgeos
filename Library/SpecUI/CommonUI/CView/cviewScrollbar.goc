@@ -17,7 +17,7 @@
 @include "CView/cviewInt.goh"
 
 @classdecl OLScrollbarClass, neverSaved;
-
+/* cviewScrollbarSelect.goc */
 @extern method OLScrollbarClass, MSG_META_START_SELECT;
 @extern method OLScrollbarClass, MSG_META_END_SELECT;
 @extern method OLScrollbarClass, MSG_META_PTR;
@@ -405,4 +405,15 @@ static void RedrawIfValid(optr oself)
     (void) timerID;
     pself->OLSBI_optFlags &= ~OLSOF_TIMER_EXPIRED_PENDING;
     OLScrollbarRepeatPress(oself);
+}
+
+void SwapIfHorizontal(optr oself, sword *x, sword *y)
+{
+    sword t;
+
+    if (!(SBVis(oself)->OLSBI_attrs & OLSA_VERTICAL)) {
+	t = *x;
+	*x = *y;
+	*y = t;
+    }
 }

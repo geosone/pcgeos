@@ -30,17 +30,6 @@ static void SetResult(MouseReturnParams *r, MouseReturnFlags f)
     }
 }
 
-static void SwapIfHorizontal(optr oself, sword *x, sword *y)
-{
-    sword t;
-
-    if (!(SBVis(oself)->OLSBI_attrs & OLSA_VERTICAL)) {
-	t = *x;
-	*x = *y;
-	*y = t;
-    }
-}
-
 /* ---------------------------------------------------------------------
  * The timer
  * ------------------------------------------------------------------- */

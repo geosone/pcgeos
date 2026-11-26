@@ -1,0 +1,164 @@
+/*
+ * cwinFieldUncommon.goc -- after cwinFieldUncommon.asm:
+ * MSG_META_GET_TARGET_AT_TARGET_LEVEL, MSG_META_GAINED_FOCUS_EXCL,
+ * MSG_META_LOST_FOCUS_EXCL, MSG_META_GAINED_TARGET_EXCL,
+ * MSG_META_LOST_TARGET_EXCL,
+ * MSG_META_GAINED_FULL_SCREEN_EXCL/MSG_META_LOST_FULL_SCREEN_EXCL,
+ * MSG_META_FORCE_GRAB_KBD/MSG_META_GRAB_KBD/MSG_META_RELEASE_KBD, MSG_VI
+ * S_FORCE_GRAB_LARGE_MOUSE/MSG_VIS_FORCE_GRAB_MOUSE/MSG_VIS_GRAB_LARGE_M
+ * OUSE/MSG_VIS_GRAB_MOUSE/MSG_VIS_RELEASE_MOUSE, MSG_GEN_BRING_TO_TOP,
+ * MSG_GEN_LOWER_TO_BOTTOM, MSG_GEN_FIELD_GET_TOP_GEN_APPLICATION,
+ * MSG_OL_FIELD_SEND_TO_GEN_APPLICATIONS.
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/specC.goh>
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define FIELD_OFFSET(f)	word_offsetof(OLFieldInstance, f)
+
+@extern method OLFieldClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL
+{
+    FlowGetTargetAtTargetLevel(oself, VIS_MASTER,
+			       FIELD_OFFSET(OLFI_targetExcl), TL_GEN_FIELD,
+			       level, retValue);
+}
+
+/* OLFieldGainedFocusExcl: the applications restored; the focus below
+ * gets it, and the keyboard */
+@extern method OLFieldClass, MSG_META_GAINED_FOCUS_EXCL
+{
+    @call oself::MSG_GEN_FIELD_RESTORE_APPS();
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       FIELD_OFFSET(OLFI_focusExcl), message);
+    SysUpdateKbdGrab(OLFieldInstanceOf(oself)->OLFI_focusExcl.HG_OD);
+}
+
+@extern method OLFieldClass, MSG_META_LOST_FOCUS_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FOCUS_EXCL, VIS_MASTER,
+			       FIELD_OFFSET(OLFI_focusExcl), message);
+    SysUpdateKbdGrab(0);
+}
+
+/* OLFieldGainedTargetExcl: the system's default field; the
+ * applications restored */
+@extern method OLFieldClass, MSG_META_GAINED_TARGET_EXCL
+{
+    optr sys = UserGetSystemObject();
+
+    if (sys)
+	@call sys::MSG_GEN_SYSTEM_SET_DEFAULT_FIELD(oself);
+    @call oself::MSG_GEN_FIELD_RESTORE_APPS();
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+			       VIS_MASTER, FIELD_OFFSET(OLFI_targetExcl),
+			       message);
+}
+
+@extern method OLFieldClass, MSG_META_LOST_TARGET_EXCL
+{
+    optr sys = UserGetSystemObject();
+
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+			       VIS_MASTER, FIELD_OFFSET(OLFI_targetExcl),
+			       message);
+    if (sys)
+	@call sys::MSG_GEN_SYSTEM_SET_DEFAULT_FIELD(0);
+}
+
+@extern method OLFieldClass, MSG_META_GAINED_FULL_SCREEN_EXCL,
+		      MSG_META_LOST_FULL_SCREEN_EXCL
+{
+    FlowUpdateHierarchicalGrab(oself, MSG_META_GAINED_FULL_SCREEN_EXCL,
+			       VIS_MASTER, FIELD_OFFSET(OLFI_fullScreenExcl),
+			       message);
+}
+
+/* OLFieldConsumeMessage: the field takes no mouse or keyboard grab */
+@extern method OLFieldClass, MSG_META_FORCE_GRAB_KBD, MSG_META_GRAB_KBD,
+		      MSG_META_RELEASE_KBD
+{
+}
+
+@extern method OLFieldClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE,
+		      MSG_VIS_FORCE_GRAB_MOUSE, MSG_VIS_GRAB_LARGE_MOUSE,
+		      MSG_VIS_GRAB_MOUSE, MSG_VIS_RELEASE_MOUSE
+{
+}
+
+/*
+ * OLFieldBringToTop: the field's window first, attached; the full
+ * screen, target and focus exclusives in the system; the model to the
+ * focus below
+ */
+@extern method OLFieldClass, MSG_GEN_BRING_TO_TOP
+{
+    WindowHandle win = VisQueryWindow(oself);
+    optr focus;
+
+    if (win)
+	WinChangePriority(win, 0, 0);
+    @call oself::MSG_META_ATTACH();
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, MAEF_GRAB |
+					       MAEF_FULL_SCREEN |
+					       MAEF_NOT_HERE);
+    @call oself::MSG_META_GRAB_TARGET_EXCL();
+    @call oself::MSG_META_GRAB_FOCUS_EXCL();
+    focus = OLFieldInstanceOf(oself)->OLFI_focusExcl.HG_OD;
+    if (focus)
+	@send focus::MSG_META_GRAB_MODEL_EXCL();
+}
+
+/* OLFieldLowerToBottom: the exclusives given up, the window behind the
+ * others; the system finds the new focus and target */
+@extern method OLFieldClass, MSG_GEN_LOWER_TO_BOTTOM
+{
+    WindowHandle win;
+    optr sys;
+
+    @call oself::MSG_META_RELEASE_FOCUS_EXCL();
+    @call oself::MSG_META_RELEASE_TARGET_EXCL();
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, MAEF_FULL_SCREEN |
+					       MAEF_NOT_HERE);
+    win = VisQueryWindow(oself);
+    if (!win)
+	return;
+    WinChangePriority(win, WPF_PLACE_BEHIND, 0);
+    sys = UserGetSystemObject();
+    if (sys)
+	@call sys::MSG_META_ENSURE_ACTIVE_FT();
+}
+
+/* OLFieldGetTopGenApplication: the front application on the field */
+@extern method OLFieldClass, MSG_GEN_FIELD_GET_TOP_GEN_APPLICATION
+{
+    optr apps[1];
+    AppArray a;
+
+    if (!pself->VCI_window)
+	return 0;
+    a.apps = apps;
+    a.count = 0;
+    a.max = 1;
+    a.ui = SysGetInfo(SGIT_UI_PROCESS);
+    FieldCollectApps(pself->VCI_window, &a);
+    return a.count ? apps[0] : 0;
+}
+
+/* OLFieldSendToGenApplications: the message to each application */
+@extern method OLFieldClass, MSG_OL_FIELD_SEND_TO_GEN_APPLICATIONS
+{
+    ChunkHandle list = GenFieldInstanceOf(oself)->GFI_genApplications;
+    optr l;
+    word n, i;
+
+    if (!list)
+	return;
+    l = ConstructOptr(OptrToHandle(oself), list);
+    n = LMemGetChunkSize(l) / sizeof(optr);
+    for (i = 0; i < n; i++) {
+	optr app = ((optr *) LMemDeref(l))[i];
+
+	(void) CObjMessageP(0, app, msg, NULL, 0, NULL, 0);
+    }
+}

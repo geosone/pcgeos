@@ -17,6 +17,8 @@
  *
  * Port32 (Port32/ABI.md section 13z), not yet: the view (scrolling),
  * the item group a text runs, the pointer image over text.
+ *
+ * The class record of OLTextClass is here, as in the asm.
  */
 @include "cGeode.goh"
 @include <Internal/SpecUI/olTextClass.goh>
@@ -24,36 +26,21 @@
 @include <Internal/specC.goh>
 #include <font.h>
 #include <string.h>
+@include <Internal/SpecUI/olValueClass.goh>
+@include <Objects/vTextC.goh>
+@include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Objects/gViewC.goh>
+@include <Objects/gContC.goh>
 
-@extern method OLTextClass, MSG_VIS_DRAW;
-@extern method OLTextClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
-@extern method OLTextClass, MSG_META_GRAB_FOCUS_EXCL;
-@extern method OLTextClass, MSG_META_GRAB_TARGET_EXCL;
-@extern method OLTextClass, MSG_SPEC_NOTIFY_ENABLED;
-@extern method OLTextClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
-@extern method OLTextClass, MSG_SPEC_NAVIGATION_QUERY;
-@extern method OLTextClass, MSG_META_TEXT_USER_MODIFIED;
-@extern method OLTextClass, MSG_META_TEXT_NOT_USER_MODIFIED;
-@extern method OLTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE;
-@extern method OLTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE;
-@extern method OLTextClass, MSG_GEN_APPLY;
-@extern method OLTextClass, MSG_SPEC_UPDATE_VIS_MONIKER;
-@extern method OLTextClass, MSG_SPEC_VIS_OPEN_NOTIFY;
-@extern method OLTextClass, MSG_SPEC_VIS_CLOSE_NOTIFY;
-@extern method OLTextClass, MSG_VIS_RECALC_SIZE;
-@extern method OLTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
-@extern method OLTextClass, MSG_SPEC_GET_EXTRA_SIZE;
-@extern method OLTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY;
-@extern method OLTextClass, MSG_GET_FIRST_MKR_POS;
-@extern method OLTextClass, MSG_VIS_TEXT_UPDATE_GENERIC;
-@extern method OLTextClass, MSG_META_KBD_CHAR;
-@extern method OLTextClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
-@extern method OLTextClass, MSG_GEN_FIND_KBD_ACCELERATOR;
-@extern method OLTextClass, MSG_META_GAINED_FOCUS_EXCL;
-@extern method OLTextClass, MSG_META_LOST_FOCUS_EXCL;
-@extern method OLTextClass, MSG_GEN_ACTIVATE;
-@extern method OLTextClass, MSG_GEN_MAKE_APPLYABLE;
-@extern method OLTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED;
+@classdecl OLTextClass, neverSaved;
+/* copenTextBuild.goc */
+@extern method OLTextClass, MSG_META_INITIALIZE;
+@extern method OLTextClass, MSG_SPEC_SCAN_GEOMETRY_HINTS;
+@extern method OLTextClass, MSG_SPEC_BUILD;
+@extern method OLTextClass, MSG_SPEC_UNBUILD;
+@extern method OLTextClass, MSG_SPEC_GET_SPECIFIC_VIS_OBJECT;
+@extern method OLTextClass, MSG_VIS_VUP_CREATE_GSTATE;
+
 
 #define Txt(o)	((OLTextInstance *) ObjDerefVis(o))
 #define Gen(o)	((GenTextInstance *) ObjDerefGen(o))
@@ -95,7 +82,7 @@ void SpecDrawTextCursor(optr o, GStateHandle gstate)
  * one is set, the frame black, white on black; else the inset frame's
  * colors) and framed; then the text
  */
-@extern method OLTextClass, MSG_VIS_DRAW
+@method OLTextClass, MSG_VIS_DRAW
 {
     if (pself->OLTDI_specState & TDSS_IN_FRAME) {
 	word colors = (C_BLACK << 8) | C_BLACK;
@@ -154,7 +141,7 @@ static word LineHeight(optr o)
 }
 
 /* OLTextRerecalcSize */
-@extern method OLTextClass, MSG_VIS_RECALC_SIZE
+@method OLTextClass, MSG_VIS_RECALC_SIZE
 {
     SpecSizeArgs a;
     sword w = (sword) width, h = (sword) height;
@@ -234,7 +221,7 @@ static word LineHeight(optr o)
  * that cannot (one under a GenView): from now on they take the height
  * of their text, and the geometry is done again.
  */
-@extern method OLTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
+@method OLTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
 {
     ChunkHandle lines;
     word w, h;
@@ -262,7 +249,7 @@ static word LineHeight(optr o)
 }
 
 /* OLTextGetExtraSize: the margins */
-@extern method OLTextClass, MSG_SPEC_GET_EXTRA_SIZE
+@method OLTextClass, MSG_SPEC_GET_EXTRA_SIZE
 {
     (void) childCount;
     memset(retValue, 0, sizeof(*retValue));
@@ -275,7 +262,7 @@ static word LineHeight(optr o)
  * the object: the geometry again (by the queue), unless it is being
  * made
  */
-@extern method OLTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY
+@method OLTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY
 {
     GenTextAttrs attrs = Gen(oself)->GTXI_attrs;
 
@@ -294,19 +281,19 @@ static word LineHeight(optr o)
 
 /* OLTextMkrPos: where the text starts (a moniker beside it lines up
  * with its first line) */
-@extern method OLTextClass, MSG_GET_FIRST_MKR_POS
+@method OLTextClass, MSG_GET_FIRST_MKR_POS
 {
     pos->P_x = (sword) (pself->VI_bounds.R_left + pself->VTI_lrMargin);
     pos->P_y = (sword) (pself->VI_bounds.R_top + pself->VTI_tbMargin);
     return TRUE;
 }
 
-@extern method OLTextClass, MSG_SPEC_VIS_OPEN_NOTIFY
+@method OLTextClass, MSG_SPEC_VIS_OPEN_NOTIFY
 {
     VisOpenNotifyCommon(oself);
 }
 
-@extern method OLTextClass, MSG_SPEC_VIS_CLOSE_NOTIFY
+@method OLTextClass, MSG_SPEC_VIS_CLOSE_NOTIFY
 {
     VisCloseNotifyCommon(oself);
 }
@@ -326,7 +313,7 @@ static optr Composite(optr o)
 }
 
 /* OLTextBroadcastForDefaultFocus */
-@extern method OLTextClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+@method OLTextClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
 {
     if ((pself->OLTDI_moreState & (TDSS_SELECTABLE | TDSS_MAKE_DEFAULT_FOCUS))
 	!= (TDSS_SELECTABLE | TDSS_MAKE_DEFAULT_FOCUS))
@@ -336,13 +323,13 @@ static optr Composite(optr o)
 }
 
 /* only a selectable text takes the focus, the target */
-@extern method OLTextClass, MSG_META_GRAB_FOCUS_EXCL
+@method OLTextClass, MSG_META_GRAB_FOCUS_EXCL
 {
     if (pself->OLTDI_moreState & TDSS_SELECTABLE)
 	MetaGrabFocusExclLow(oself);
 }
 
-@extern method OLTextClass, MSG_META_GRAB_TARGET_EXCL
+@method OLTextClass, MSG_META_GRAB_TARGET_EXCL
 {
     if (pself->OLTDI_moreState & TDSS_SELECTABLE)
 	MetaGrabTargetExclLow(oself);
@@ -364,7 +351,7 @@ static void NavigateIfHaveFocus(optr o)
 
 /* OLTextNotifyEnabled: editable and selectable again (unless
  * read-only); the composite enabled too */
-@extern method OLTextClass, MSG_SPEC_NOTIFY_ENABLED
+@method OLTextClass, MSG_SPEC_NOTIFY_ENABLED
 {
     GenInstance *g;
     optr comp;
@@ -387,7 +374,7 @@ static void NavigateIfHaveFocus(optr o)
 
 /* OLTextNotifyNotEnabled: the focus goes on, the grabs are given up,
  * the text is neither editable nor selectable; the composite too */
-@extern method OLTextClass, MSG_SPEC_NOTIFY_NOT_ENABLED
+@method OLTextClass, MSG_SPEC_NOTIFY_NOT_ENABLED
 {
     optr comp;
 
@@ -407,7 +394,7 @@ static void NavigateIfHaveFocus(optr o)
 }
 
 /* OLTextNavigate: an enabled editable text takes the focus */
-@extern method OLTextClass, MSG_SPEC_NAVIGATION_QUERY
+@method OLTextClass, MSG_SPEC_NAVIGATION_QUERY
 {
     NavigateCommonFlags f = 0;
 
@@ -440,20 +427,20 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
 }
 
 /* OLTextGainedFocusExcl: the target too */
-@extern method OLTextClass, MSG_META_GAINED_FOCUS_EXCL
+@method OLTextClass, MSG_META_GAINED_FOCUS_EXCL
 {
     @call oself::MSG_META_GRAB_TARGET_EXCL();
     ChangeDefaultExcl(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
 }
 
-@extern method OLTextClass, MSG_META_LOST_FOCUS_EXCL
+@method OLTextClass, MSG_META_LOST_FOCUS_EXCL
 {
     ChangeDefaultExcl(oself, SVQT_RELEASE_DEFAULT_EXCLUSIVE);
 }
 
 /* OLTextActivateObjectWithMnemonic: the mnemonic of its moniker gives
  * it the focus */
-@extern method OLTextClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+@method OLTextClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
 {
     if ((pself->VI_attrs & VA_FULLY_ENABLED) &&
 	VisCheckMnemonic(oself, character, flags, state)) {
@@ -464,7 +451,7 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
 }
 
 /* OLTextFindKbdAccelerator: its accelerator gives it the focus */
-@extern method OLTextClass, MSG_GEN_FIND_KBD_ACCELERATOR
+@method OLTextClass, MSG_GEN_FIND_KBD_ACCELERATOR
 {
     if (!(((GenInstance *) ObjDerefGen(oself))->GI_states & GS_ENABLED) ||
 	!GenCheckKbdAccelerator(oself, charValue, charFlagsAndShiftState,
@@ -483,7 +470,7 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
  * activates it and goes on to the parent (the default action); Tab
  * goes there with GTA_USE_TAB_FOR_NAVIGATION; all else is the text's.
  */
-@extern method OLTextClass, MSG_META_KBD_CHAR
+@method OLTextClass, MSG_META_KBD_CHAR
 {
     optr vp;
 
@@ -511,7 +498,7 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
 
 /* OLTextTextUserModified: no longer indeterminate; modified; the
  * default exclusive */
-@extern method OLTextClass, MSG_META_TEXT_USER_MODIFIED
+@method OLTextClass, MSG_META_TEXT_USER_MODIFIED
 {
     @callsuper();
     @call oself::MSG_GEN_TEXT_SET_INDETERMINATE_STATE(FALSE);
@@ -519,14 +506,14 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
     ChangeDefaultExcl(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
 }
 
-@extern method OLTextClass, MSG_META_TEXT_NOT_USER_MODIFIED
+@method OLTextClass, MSG_META_TEXT_NOT_USER_MODIFIED
 {
     @callsuper();
     @call oself::MSG_GEN_TEXT_SET_MODIFIED_STATE(FALSE);
 }
 
 /* the generic state changed: the text's */
-@extern method OLTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE
+@method OLTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE
 {
     if (modifiedState)
 	@call oself::MSG_VIS_TEXT_SET_USER_MODIFIED();
@@ -535,7 +522,7 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
 }
 
 /* indeterminate: the text in a 50% pattern */
-@extern method OLTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE
+@method OLTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE
 {
     if (indeterminateState)
 	pself->VTI_features |= VTF_USE_50_PCT_TEXT_MASK;
@@ -545,14 +532,14 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
     @call oself::MSG_VIS_TEXT_SET_NOT_USER_MODIFIED();
 }
 
-@extern method OLTextClass, MSG_GEN_APPLY
+@method OLTextClass, MSG_GEN_APPLY
 {
     @call oself::MSG_VIS_TEXT_SET_NOT_USER_MODIFIED();
 }
 
 /* OLTextActivate: the status message; the apply message (by the
  * queue) unless delayed */
-@extern method OLTextClass, MSG_GEN_ACTIVATE
+@method OLTextClass, MSG_GEN_ACTIVATE
 {
     @call oself::MSG_GEN_TEXT_SEND_STATUS_MSG(TRUE);
     if (!(Txt(oself)->OLTDI_moreState & TDSS_DELAYED))
@@ -560,7 +547,7 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
 }
 
 /* OLTextGenMakeApplyable: a delayed text tells its dialog */
-@extern method OLTextClass, MSG_GEN_MAKE_APPLYABLE
+@method OLTextClass, MSG_GEN_MAKE_APPLYABLE
 {
     optr vp;
 
@@ -571,7 +558,7 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
 
 /* OLTextEmptyStatusChanged: an object enabled while there is text
  * (ATTR_GEN_TEXT_SET_OBJECT_ENABLED_WHEN_TEXT_EXISTS) */
-@extern method OLTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED
+@method OLTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED
 {
     optr *p = ObjVarFindData(oself,
 			ATTR_GEN_TEXT_SET_OBJECT_ENABLED_WHEN_TEXT_EXISTS);
@@ -590,7 +577,7 @@ static void ChangeDefaultExcl(optr o, VisUpwardQueryType q)
 }
 
 /* OLTextUpdateVisMoniker: the moniker is the composite's */
-@extern method OLTextClass, MSG_SPEC_UPDATE_VIS_MONIKER
+@method OLTextClass, MSG_SPEC_UPDATE_VIS_MONIKER
 {
     optr comp = Composite(oself);
     ChunkHandle m = ((GenInstance *) ObjDerefGen(oself))->GI_visMoniker;
@@ -629,7 +616,7 @@ static const word visToGen[][2] = {
  * saved): the maximum length, the text chunk, the character and
  * paragraph attributes as the hint for their kind, the variable data
  */
-@extern method OLTextClass, MSG_VIS_TEXT_UPDATE_GENERIC
+@method OLTextClass, MSG_VIS_TEXT_UPDATE_GENERIC
 {
     GenTextInstance *g = Gen(oself);
     word want, runs, i;
@@ -671,4 +658,16 @@ static const word visToGen[][2] = {
 	v = *p;
 	*(word *) ObjVarAddData(oself, visToGen[i][1], sizeof(word)) = v;
     }
+}
+
+/*
+ * SpecGetTextKbdBindings (SPIR_GET_TEXT_KBD_BINDINGS): the text
+ * object's keys: the shortcuts, their count and the function of each
+ */
+const KeyboardShortcut *SpecGetTextKbdBindings(word *count,
+					       const word **functions)
+{
+    *count = TEXT_KBD_BINDING_COUNT;
+    *functions = textKbdFunctions;
+    return textKbdBindings;
 }

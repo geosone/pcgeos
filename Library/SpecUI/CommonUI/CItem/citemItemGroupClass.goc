@@ -15,17 +15,8 @@
 @include "CItem/citemInt.goh"
 
 @classdecl OLItemGroupClass, neverSaved;
-
-@extern method OLItemGroupClass, MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT;
-@extern method OLItemGroupClass, MSG_OL_IGROUP_GET_ITEM_STATE;
-@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_REDRAW_ITEMS;
-@extern method OLItemGroupClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
-@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE;
-@extern method OLItemGroupClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
-@extern method OLItemGroupClass, MSG_OL_IGROUP_RESET_POPUP_LIST_MONIKER;
-@extern method OLItemGroupClass, MSG_GEN_MAKE_APPLYABLE, MSG_GEN_MAKE_NOT_APPLYABLE;
-@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_GET_FOCUS_ITEM;
-@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_SET_FOCUS_ITEM;
+/* citemItemGroupCommon.goc */
+@extern method OLItemGroupClass, MSG_VIS_CLOSE;
 @extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_AND_APPLY_IF_NEEDED;
 @extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_SELECTION;
 @extern method OLItemGroupClass, MSG_OL_IGROUP_SET_MODIFIED_ITEM_STATE;
@@ -55,6 +46,17 @@
 @extern method OLItemGroupClass, MSG_SPEC_SET_NOT_USABLE;
 @extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_DOUBLE_PRESS;
 @extern method OLItemGroupClass, MSG_GEN_ACTIVATE;
+/* citemItemGroupVeryCommon.goc */
+@extern method OLItemGroupClass, MSG_SPEC_P32_UPDATE_SPECIFIC_OBJECT;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_GET_ITEM_STATE;
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_REDRAW_ITEMS;
+@extern method OLItemGroupClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_NOTIFY_ITEM_SET_USABLE;
+@extern method OLItemGroupClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
+@extern method OLItemGroupClass, MSG_OL_IGROUP_RESET_POPUP_LIST_MONIKER;
+@extern method OLItemGroupClass, MSG_GEN_MAKE_APPLYABLE, MSG_GEN_MAKE_NOT_APPLYABLE;
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_GET_FOCUS_ITEM;
+@extern method OLItemGroupClass, MSG_GEN_ITEM_GROUP_SET_FOCUS_ITEM;
 
 /* ---------------------------------------------------------------------
  * Building
@@ -269,15 +271,6 @@ void RemoveDynamicListItems(optr o)
     if (IsExtendedSelection(oself))
 	IG(oself)->OLIGI_displayedItem = 0;
     SetPopupListMonikerIfNeeded(oself);
-}
-
-/* OLItemGroupVisClose: a popup list that shows its selection shows
- * one changed while it was up */
-@method OLItemGroupClass, MSG_VIS_CLOSE
-{
-    @callsuper();
-    if (IG(oself)->OLIGI_moreState & OLIGMS_DISPLAYS_CURRENT_SELECTION)
-	SetPopupListMonikerIfNeeded(oself);
 }
 
 /* ---------------------------------------------------------------------
@@ -599,23 +592,6 @@ optr GetFocusItemOptr(optr o)
     if (!(p->OLIGI_state & OLIGS_HAS_FOCUS_ITEM))
 	return 0;
     return GetOptrOrSelf(o, p->OLIGI_focusItem);
-}
-
-/* GetOptr: the generic child with the identifier (FindChildIdentifier) */
-optr GetItemOptr(optr o, word id)
-{
-    if (IG(o)->OLIGI_state & OLIGS_CHECKBOXES)
-	return @call o::MSG_GEN_BOOLEAN_GROUP_GET_BOOLEAN_OPTR(id);
-    return @call o::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(id);
-}
-
-/* GetOptrOrSelf: the item, or the group (a dynamic list's item not
- * there) */
-optr GetOptrOrSelf(optr o, word id)
-{
-    optr item = GetItemOptr(o, id);
-
-    return item ? item : o;
 }
 
 void SetFocusItem(optr o, word id, Boolean has)

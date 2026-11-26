@@ -1,7 +1,7 @@
 /*
  * cmainAppDocumentControl.goc -- OLDocumentGroupClass (after
- * cmainAppDocumentControl.asm, and OLDocumentGroupNewDoc of
- * cmainDocPhysical.asm): the specific part of a GenDocumentGroup, the
+ * cmainAppDocumentControl.asm; OLDocumentGroupNewDoc is in
+ * cmainDocPhysical.goc): the specific part of a GenDocumentGroup, the
  * part of the document control that runs in the application's thread.
  * Its children are the documents, which it makes (a GenDocument of
  * GDGI_documentClass, or a copy of the resource of GDGI_genDocument)
@@ -33,21 +33,14 @@
 #include <string.h>
 
 @classdecl OLDocumentGroupClass;
+/* cmainDocPhysical.goc */
+@extern method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_NEW_DOC;
 
 #define GDG(o)	((GenDocumentGroupInstance *) ObjDerefGen(o))
 #define OLDG(o)	((OLDocumentGroupInstance *) ObjDerefVis(o))
 
 #define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
 #define OLDG_OFFSET(f)	word_offsetof(OLDocumentGroupInstance, f)
-
-/* OLBuildAppDocumentControl (cspecAppDocumentControl.asm): always this
- * class */
-ClassStruct *OLBuildAppDocumentControl(optr oself, word masterOffset)
-{
-    (void) oself;
-    (void) masterOffset;
-    return (ClassStruct *) &OLDocumentGroupClass;
-}
 
 /* SendToUIDocControl */
 static void SendToUIDocControl(optr o, Message msg, const void *params,
@@ -414,7 +407,7 @@ static void SendToDocOrTarget(optr o, optr doc, Message msg)
  * sees whether its main dialog is to come up.  The document, 0 if
  * there is none.
  */
-static optr CreateDocObject(optr o, Message msg, DocumentCommonParams *params)
+optr CreateDocObject(optr o, Message msg, DocumentCommonParams *params)
 {
     optr proto = GDG(o)->GDGI_genDocument, doc;
     DocFileOrError fileOrError = 0;
@@ -440,13 +433,6 @@ static optr CreateDocObject(optr o, Message msg, DocumentCommonParams *params)
     @call o::MSG_OLDG_REMOVE_DOC(doc);
     SendToUIDocControl(o, MSG_OLDC_TEST_FOR_DISPLAY_MAIN_DIALOG, NULL, 0);
     return 0;
-}
-
-/* OLDocumentGroupNewDoc (cmainDocPhysical.asm) */
-@method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_NEW_DOC
-{
-    (void) pself;
-    return CreateDocObject(oself, MSG_GEN_DOCUMENT_NEW, params);
 }
 
 /*

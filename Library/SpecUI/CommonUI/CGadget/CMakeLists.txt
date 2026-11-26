@@ -1,6 +1,7 @@
 # The specific UI, CommonUI/CGadget/: glyphs, gadgets, the spin gadget, values.
 geos_sources(motif_goc
   copenGadget.goc
+  copenGadgetComp.goc
   copenSpinGadget.goc
   copenValue.goc
   copenSlider.goc

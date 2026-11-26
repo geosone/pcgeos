@@ -15,7 +15,6 @@
  */
 @include "textInt.goh"
 
-@extern method VisTextClass, MSG_VIS_TEXT_SCROLL_ONE_LINE;
 
 /* VisTextSetNewOffset */
 static void SetNewOffset(optr o, sword off)

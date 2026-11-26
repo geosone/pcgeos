@@ -19,7 +19,14 @@
 @include <Internal/specC.goh>
 
 @classdecl OLCtrlClass, neverSaved;
-
+/* copenCtrlCommon.goc */
+@extern method OLCtrlClass, MSG_GEN_APPLY, MSG_GEN_RESET, MSG_GEN_POST_APPLY;
+@extern method OLCtrlClass, MSG_GEN_GUP_INTERACTION_COMMAND;
+@extern method OLCtrlClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
+@extern method OLCtrlClass, MSG_GEN_PRE_APPLY;
+@extern method OLCtrlClass, MSG_VIS_DRAW;
+@extern method OLCtrlClass, MSG_VIS_P32_VUP_QUERY;
+/* copenCtrlGeometry.goc */
 @extern method OLCtrlClass, MSG_VIS_RECALC_SIZE;
 @extern method OLCtrlClass, MSG_VIS_POSITION_BRANCH;
 @extern method OLCtrlClass, MSG_VIS_COMP_GET_CHILD_SPACING;
@@ -36,12 +43,6 @@
 @extern method OLCtrlClass, MSG_SPEC_CTRL_SET_MONIKER_OFFSET;
 @extern method OLCtrlClass, MSG_SPEC_GET_TYPICAL_CHILD_EXTRA_SIZE;
 @extern method OLCtrlClass, MSG_GET_FIRST_MKR_POS;
-@extern method OLCtrlClass, MSG_GEN_GUP_INTERACTION_COMMAND;
-@extern method OLCtrlClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
-@extern method OLCtrlClass, MSG_GEN_APPLY;
-@extern method OLCtrlClass, MSG_GEN_PRE_APPLY;
-@extern method OLCtrlClass, MSG_VIS_DRAW;
-@extern method OLCtrlClass, MSG_VIS_P32_VUP_QUERY;
 
 #define Ctrl(o)		((OLCtrlInstance *) ObjDerefVis(o))
 #define TARGET(f)	((f) & OLBF_TARGET)

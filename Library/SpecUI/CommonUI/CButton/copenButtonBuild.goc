@@ -15,7 +15,6 @@
  */
 @include "cGeode.goh"
 
-@classdecl OLButtonClass;
 
 @extern visMoniker DefaultLevel0Moniker;
 @extern visMoniker DefaultLevel1Moniker;
@@ -24,44 +23,6 @@
 @extern visMoniker StandardHelpMoniker;
 @extern visMoniker StandardPrimaryHelpMoniker;
 
-@extern method OLButtonClass, MSG_VIS_RECALC_SIZE;
-@extern method OLButtonClass, MSG_SPEC_GET_EXTRA_SIZE;
-@extern method OLButtonClass, MSG_SPEC_GET_MENU_CENTER;
-@extern method OLButtonClass, MSG_GET_FIRST_MKR_POS;
-@extern method OLButtonClass, MSG_VIS_VUP_CREATE_GSTATE;
-@extern method OLButtonClass, MSG_SPEC_SET_USABLE;
-@extern method OLButtonClass, MSG_SPEC_SET_NOT_USABLE;
-@extern method OLButtonClass, MSG_SPEC_UPDATE_VIS_MONIKER;
-@extern method OLButtonClass, MSG_SPEC_UPDATE_KBD_ACCELERATOR;
-@extern method OLButtonClass, MSG_SPEC_VIS_OPEN_NOTIFY;
-@extern method OLButtonClass, MSG_SPEC_VIS_CLOSE_NOTIFY;
-@extern method OLButtonClass, MSG_GEN_ACTIVATE;
-@extern method OLButtonClass, MSG_OL_BUTTON_KBD_ACTIVATE;
-@extern method OLButtonClass, MSG_META_KBD_CHAR;
-@extern method OLButtonClass, MSG_META_FUP_KBD_CHAR;
-@extern method OLButtonClass, MSG_SPEC_NAVIGATION_QUERY;
-@extern method OLButtonClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
-@extern method OLButtonClass, MSG_GEN_FIND_KBD_ACCELERATOR;
-@extern method OLButtonClass, MSG_GEN_TRIGGER_MAKE_DEFAULT_ACTION;
-@extern method OLButtonClass, MSG_OL_BUTTON_REDRAW;
-@extern method OLButtonClass, MSG_META_START_SELECT;
-@extern method OLButtonClass, MSG_META_PTR;
-@extern method OLButtonClass, MSG_META_END_SELECT;
-@extern method OLButtonClass, MSG_META_GAINED_SYS_FOCUS_EXCL;
-@extern method OLButtonClass, MSG_META_LOST_SYS_FOCUS_EXCL;
-@extern method OLButtonClass, MSG_VIS_LOST_GADGET_EXCL;
-@extern method OLButtonClass, MSG_META_GAINED_DEFAULT_EXCL;
-@extern method OLButtonClass, MSG_META_LOST_DEFAULT_EXCL;
-@extern method OLButtonClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
-@extern method OLButtonClass, MSG_OL_MAKE_APPLYABLE;
-@extern method OLButtonClass, MSG_OL_MAKE_NOT_APPLYABLE;
-@extern method OLButtonClass, MSG_SPEC_NOTIFY_ENABLED;
-@extern method OLButtonClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
-@extern method OLButtonClass, MSG_OL_BUTTON_QUERY_IS_TRIGGER;
-@extern method OLButtonClass, MSG_VIS_DRAW;
-@extern method OLButtonClass, MSG_OL_BUTTON_SET_DRAW_STATE_UNKNOWN;
-@extern method OLButtonClass, MSG_OL_BUTTON_GET_GEN_PART;
-@extern method OLButtonClass, MSG_SPEC_MENU_SEP_QUERY;
 
 #define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
 #define T(t)		((t) << OLBF_TARGET_OFFSET)
@@ -187,7 +148,7 @@ static VarDataCHandler gadgetHints[] = {
  * geometry flags; the gadget hints (any: the size recalculated even
  * when valid)
  */
-@method OLButtonClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+@extern method OLButtonClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
 {
     optr g = GenPart(oself);
     OLButtonMoreAttrs f = 0;
@@ -219,7 +180,7 @@ static VarDataCHandler gadgetHints[] = {
  * with a vis parent of its own, bordered; the hints; seeking the title
  * bar makes it a system icon there
  */
-@method OLButtonClass, MSG_META_INITIALIZE
+@extern method OLButtonClass, MSG_META_INITIALIZE
 {
     @callsuper();
     pself = Btn(oself);
@@ -236,12 +197,12 @@ static VarDataCHandler gadgetHints[] = {
     }
 }
 
-@method OLButtonClass, MSG_OL_BUTTON_SET_WIN_FLAG
+@extern method OLButtonClass, MSG_OL_BUTTON_SET_WIN_FLAG
 {
     pself->OLBI_specState |= OLBSS_WINDOW_MARK;
 }
 
-@method OLButtonClass, MSG_OL_BUTTON_CLEAR_WIN_FLAG
+@extern method OLButtonClass, MSG_OL_BUTTON_CLEAR_WIN_FLAG
 {
     pself->OLBI_specState &= ~OLBSS_WINDOW_MARK;
 }
@@ -292,7 +253,7 @@ void OLButtonUseQueryResults(optr oself, OLBuildFlags f)
  * trigger's hints) and the answer sets the button's look.  0 for the
  * generic parent.
  */
-@method OLButtonClass, MSG_SPEC_GET_VIS_PARENT
+@extern method OLButtonClass, MSG_SPEC_GET_VIS_PARENT
 {
     OLBuildFlags f = OLBF_TRIGGER;
     GenReturnParams r;
@@ -501,7 +462,7 @@ void OLButtonCallWin(optr oself, VisUpwardQueryType q)
  * the fixed attributes, its interaction command told to the window, the
  * hints, a master default made the window's
  */
-@method OLButtonClass, MSG_SPEC_BUILD
+@extern method OLButtonClass, MSG_SPEC_BUILD
 {
     optr win;
 
@@ -547,7 +508,7 @@ void OLButtonCallWin(optr oself, VisUpwardQueryType q)
  * popup's button unbuilt with its vis parent is forgotten by the popup;
  * no longer the master default or default
  */
-@method OLButtonClass, MSG_SPEC_UNBUILD_BRANCH
+@extern method OLButtonClass, MSG_SPEC_UNBUILD_BRANCH
 {
     ChunkHandle g;
 
@@ -569,7 +530,7 @@ void OLButtonCallWin(optr oself, VisUpwardQueryType q)
  * text moniker gets the window mark; the popup's build flags set its
  * look; in a reply bar with default rings it is one there
  */
-@method OLButtonClass, MSG_OL_BUTTON_SETUP
+@extern method OLButtonClass, MSG_OL_BUTTON_SETUP
 {
     optr g = ConstructOptr(OptrToHandle(oself), genChunk);
     ChunkHandle m;

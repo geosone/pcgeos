@@ -27,6 +27,7 @@
 #include <stdint.h>
 
 @classdecl VisCompClass, neverSaved;
+/* visCompGeometry.goc */
 @extern method VisCompClass, MSG_VIS_RECALC_SIZE;
 @extern method VisCompClass, MSG_VIS_POSITION_BRANCH;
 @extern method VisCompClass, MSG_VIS_GET_CENTER;

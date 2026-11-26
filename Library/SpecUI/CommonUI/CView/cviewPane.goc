@@ -17,8 +17,15 @@
  */
 @include "CView/cviewInt.goh"
 @include <Internal/flowC.goh>
+@include <Internal/im.h>
 
 @classdecl OLPaneClass, neverSaved;
+/* cviewPaneGeometry.goc */
+@extern method OLPaneClass, MSG_GET_FIRST_MKR_POS;
+@extern method OLPaneClass, MSG_SPEC_GET_EXTRA_SIZE;
+@extern method OLPaneClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT;
+/* cviewPaneScroll.goc */
+@extern method OLPaneClass, MSG_GEN_VIEW_SET_DRAG_BOUNDS;
 
 /* (in cviewPaneGeometry.goc, cviewPaneScroll.goc, cviewPaneWindow.goc) */
 @extern method OLPaneClass, MSG_VIS_RECALC_SIZE;
@@ -65,29 +72,7 @@
 @extern method OLPaneClass, MSG_VIS_LOST_GADGET_EXCL;
 @extern method OLPaneClass, MSG_META_RAW_UNIV_ENTER;
 @extern method OLPaneClass, MSG_META_RAW_UNIV_LEAVE;
-@extern method OLPaneClass, MSG_GEN_VIEW_ALLOW_GLOBAL_TRANSFER;
 @extern method OLPaneClass, MSG_META_WIN_UPDATE_COMPLETE;
-@extern method OLPaneClass, MSG_META_PRE_PASSIVE_BUTTON;
-
-/* the view's messages that do nothing here (only scaling would) */
-@method OLPaneClass, MSG_GET_FIRST_MKR_POS
-{
-    (void) pos;
-    return FALSE;
-}
-
-@method OLPaneClass, MSG_SPEC_GET_EXTRA_SIZE
-{
-    (void) childCount;
-    retValue->ESP_extraWidth = 0;
-    retValue->ESP_extraHeight = 0;
-}
-
-@method OLPaneClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT
-{
-    return @callsuper oself::OLCtrlClass::MSG_SPEC_CONVERT_DESIRED_SIZE_HINT(
-		desiredWidth, desiredHeight, childCount);
-}
 
 /* ---------------------------------------------------------------------
  * The content
@@ -1148,15 +1133,47 @@ void OLPaneFinishSetDocSize(optr oself)
     @call oself::MSG_GEN_VIEW_REDRAW_CONTENT();
 }
 
-/* OLPaneSetDragBounds: where drag scrolling stops (none if all zero) */
-@method OLPaneClass, MSG_GEN_VIEW_SET_DRAG_BOUNDS
+/* OLPaneAdjustOrigin: the origin anew (a tail oriented dimension at its
+ * end kept at the end) */
+void OLPaneAdjustOrigin(optr oself, OLPaneScrollFlags flags)
 {
-    pself->OLPI_dragBounds.RD_left = left;
-    pself->OLPI_dragBounds.RD_top = top;
-    pself->OLPI_dragBounds.RD_right = right;
-    pself->OLPI_dragBounds.RD_bottom = bottom;
-    if (left || top || right || bottom)
-	pself->OLPI_optFlags |= OLPOF_LIMIT_DRAG_SCROLLING;
-    else
-	pself->OLPI_optFlags &= ~OLPOF_LIMIT_DRAG_SCROLLING;
+    GenViewInstance *g = PGen(oself);
+    OLPaneFlags f = PVis(oself)->OLPI_flags;
+    PointDWord p;
+
+    GetOrigin(oself, &p);
+    if ((g->GVI_vertAttrs & GVDA_TAIL_ORIENTED) &&
+	(f & OLPF_AT_BOTTOM_EDGE))
+	p.PD_y = g->GVI_docBounds.RD_bottom;
+    if ((g->GVI_horizAttrs & GVDA_TAIL_ORIENTED) &&
+	(f & OLPF_AT_RIGHT_EDGE))
+	p.PD_x = g->GVI_docBounds.RD_right;
+    OLPaneMakeRelative(oself, &p);
+    OLPaneScroll(oself, &p, flags);
+}
+
+/* OLPaneAllowGlobalTransfer: the mouse let go for a quick transfer */
+@method OLPaneClass, MSG_GEN_VIEW_ALLOW_GLOBAL_TRANSFER
+{
+    optr f;
+
+    if (pself->OLPI_optFlags & OLPOF_WANDERING_GRAB)
+	return;
+    pself->OLPI_optFlags |= OLPOF_WANDERING_GRAB;
+    if (pself->OLPI_optFlags & (OLPOF_PTR_IN_RAW_UNIV | OLPOF_CONSTRAIN))
+	return;
+    OLPaneReleaseGadgetExcl(oself);
+    if ((f = UserGetFlowObject()) != 0)
+	@call f::MSG_FLOW_ALLOW_GLOBAL_TRANSFER();
+}
+
+/* OLPanePrePassiveButton: a menu's focus released on a press */
+@method OLPaneClass, MSG_META_PRE_PASSIVE_BUTTON
+{
+    optr p = VisFindParent(oself);
+
+    if (p)
+	@call p::MSG_VIS_VUP_RELEASE_MENU_FOCUS();
+    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
+    @callsuper();
 }

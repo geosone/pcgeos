@@ -16,9 +16,6 @@
  */
 @include "textInt.goh"
 
-@extern method VisTextClass, MSG_META_START_SELECT;
-@extern method VisTextClass, MSG_META_PTR;
-@extern method VisTextClass, MSG_META_END_SELECT;
 
 /* ComputeEventPositionAndOffset: the offset at a position in the
  * object's parent's coordinates */

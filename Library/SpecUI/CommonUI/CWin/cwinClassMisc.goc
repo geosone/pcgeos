@@ -18,6 +18,10 @@
  * legos look, rotating the display.
  */
 @include "cGeode.goh"
+@include <Objects/gTrigC.goh>
+@include <Objects/gPrimC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gInterC.goh>
 
 #define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
@@ -26,28 +30,6 @@
 			 SS_LSHIFT | SS_RSHIFT)
 #define KEY(k)		((KS_CHAR_SET_CONTROL << 8) | (k))
 #define CTRL_CHAR(k)	((CS_CONTROL << 8) | (k))
-
-/*
- * OpenWinCallParentOfWindow: up from the window: a menu (not pinned)
- * with a button through its button (an adopted button's query goes to
- * the primary), else to the vis parent
- */
-Boolean OpenWinCallParentOfWindow(optr o, Message msg, const void *params,
-				  word paramSize, void *reply, word replySize)
-{
-    OLPopupWinInstance *w = (OLPopupWinInstance *) Win(o);
-
-    if ((w->OLWI_fixedAttr & OWFA_IS_MENU) &&
-	!(w->OLWI_specState & OLWSS_PINNED) && w->OLPWI_button) {
-	optr b = ConstructOptr(OptrToHandle(o), w->OLPWI_button);
-
-	if (reply)
-	    memset(reply, 0, replySize);
-	CObjMessageP(MF_CALL, b, msg, params, paramSize, reply, replySize);
-	return TRUE;
-    }
-    return VisCallParent(o, msg, params, paramSize, reply, replySize);
-}
 
 /* OpenWinNavigate: the window is the root of its navigation tree */
 @extern method OLWinClass, MSG_SPEC_NAVIGATION_QUERY
@@ -401,4 +383,25 @@ static void PosSizeUpdate(optr o, WinPosSizeRefs *r, byte mode, byte inval)
 	return;
     UpdateWinPosSize(oself);
     VisMarkInvalid(oself, VOF_WINDOW_INVALID, updateMode);
+}
+
+/* OLWinNotifyEnabled: changed: the system menu, its button and its
+ * icons told too */
+@extern method OLWinClass, MSG_SPEC_NOTIFY_ENABLED, MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    if (!@callsuper())
+	return FALSE;
+    OpenWinSysMenuNotifyEnabled(oself, message, updateMode, flags);
+    return TRUE;
+}
+
+@extern method OLWinClass, MSG_OL_WIN_IS_MAXIMIZED
+{
+    return (pself->OLWI_specState & OLWSS_MAXIMIZED) != 0;
+}
+
+@extern method OLWinClass, MSG_OL_WIN_IS_DEFAULT_ACTION_NAVIGATE_TO_NEXT_FIELD
+{
+    return (pself->OLWI_moreFixedAttr &
+	    OWMFA_DEFAULT_ACTION_IS_NAVIGATE_TO_NEXT_FIELD) != 0;
 }

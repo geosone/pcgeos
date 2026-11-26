@@ -16,19 +16,6 @@
 #include <fontID.h>
 #include <chunkarr.h>
 
-@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_DEFAULT;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_CHAR_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN;
-@extern method VisTextClass, MSG_VIS_TEXT_ADD_CHAR_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_CHAR_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_ID;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WEIGHT;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_FONT_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_POINT_SIZE;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_TEXT_STYLE;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_COLOR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_GRAY_SCREEN;
 
 static const FontID defaultFonts[] = {
     FID_BERKELEY, FID_CHICAGO, FID_BISON, FID_WINDOWS, FID_LED,

@@ -902,3 +902,12 @@ void OLItemGroupMoveFocusToNextField(optr o)
     }
     @call oself::MSG_META_GRAB_FOCUS_EXCL();
 }
+
+/* OLItemGroupVisClose: a popup list that shows its selection shows
+ * one changed while it was up */
+@extern method OLItemGroupClass, MSG_VIS_CLOSE
+{
+    @callsuper();
+    if (IG(oself)->OLIGI_moreState & OLIGMS_DISPLAYS_CURRENT_SELECTION)
+	SetPopupListMonikerIfNeeded(oself);
+}

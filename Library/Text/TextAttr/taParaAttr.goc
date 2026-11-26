@@ -11,41 +11,6 @@
  * undo, the notifications of a change.
  */
 @include "textInt.goh"
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_DEFAULT;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_TOKEN;
-@extern method VisTextClass, MSG_VIS_TEXT_ADD_PARA_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_PARA_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_PARA_ATTR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_BITS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_SPACING;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_SHADOW;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_COLOR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_GRAY_SCREEN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_PATTERN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTRIBUTES;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_LINE_SPACING;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_DEFAULT_TABS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_MARGIN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_RIGHT_MARGIN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_MARGIN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_AND_PARA_MARGIN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_TOP;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_BOTTOM;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_LEADING;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_COLOR;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_GRAY_SCREEN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_PATTERN;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_TAB;
-@extern method VisTextClass, MSG_VIS_TEXT_CLEAR_TAB;
-@extern method VisTextClass, MSG_VIS_TEXT_MOVE_TAB;
-@extern method VisTextClass, MSG_VIS_TEXT_CLEAR_ALL_TABS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PREPEND_CHARS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_HYPHENATION_PARAMS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_DROP_CAP_PARAMS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_KEEP_PARAMS;
-@extern method VisTextClass, MSG_VIS_TEXT_SET_PARAGRAPH_NUMBER;
 #include <font.h>
 
 static const word defaultDefaultTabs[4] = {

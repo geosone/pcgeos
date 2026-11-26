@@ -21,7 +21,7 @@
 
 @classdecl OLApplicationClass, neverSaved;
 
-/* the standard dialogs (CSpec/cspecStdDialog.goc) */
+/* copenAppMisc.goc: the standard dialogs */
 @extern method OLApplicationClass, MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG;
 @extern method OLApplicationClass, MSG_GEN_APPLICATION_DO_STANDARD_DIALOG;
 @extern method OLApplicationClass,

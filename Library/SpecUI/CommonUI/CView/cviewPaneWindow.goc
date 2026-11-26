@@ -230,7 +230,7 @@ static Boolean ViewEnabled(optr oself)
     return (PVis(oself)->VI_attrs & VA_FULLY_ENABLED) != 0;
 }
 
-static void ReleaseGadgetExcl(optr oself)
+void OLPaneReleaseGadgetExcl(optr oself)
 {
     optr p = VisFindParent(oself);
 
@@ -361,7 +361,7 @@ static void PaneButton(optr oself, Message msg, MouseReturnParams *ret,
     }
     if (!(GET_BUTTON_INFO(state) & (BI_B0_DOWN | BI_B1_DOWN | BI_B2_DOWN |
 				    BI_B3_DOWN)))
-	ReleaseGadgetExcl(oself);
+	OLPaneReleaseGadgetExcl(oself);
     ret->flags = MRF_PROCESSED;
 }
 
@@ -482,27 +482,12 @@ static void PaneButton(optr oself, Message msg, MouseReturnParams *ret,
 
     pself->OLPI_optFlags &= ~OLPOF_PTR_IN_RAW_UNIV;
     if (!(PVis(oself)->OLPI_optFlags & OLPOF_PRESS_GRAB)) {
-	ReleaseGadgetExcl(oself);
+	OLPaneReleaseGadgetExcl(oself);
 	if (ViewEnabled(oself) && (f = UserGetFlowObject()) != 0)
 	    @call f::MSG_FLOW_ALLOW_GLOBAL_TRANSFER();
     }
     if (!(PVis(oself)->OLPI_optFlags & OLPOF_PRESS_GRAB))
 	ContentLeave(oself);
-}
-
-/* OLPaneAllowGlobalTransfer: the mouse let go for a quick transfer */
-@extern method OLPaneClass, MSG_GEN_VIEW_ALLOW_GLOBAL_TRANSFER
-{
-    optr f;
-
-    if (pself->OLPI_optFlags & OLPOF_WANDERING_GRAB)
-	return;
-    pself->OLPI_optFlags |= OLPOF_WANDERING_GRAB;
-    if (pself->OLPI_optFlags & (OLPOF_PTR_IN_RAW_UNIV | OLPOF_CONSTRAIN))
-	return;
-    ReleaseGadgetExcl(oself);
-    if ((f = UserGetFlowObject()) != 0)
-	@call f::MSG_FLOW_ALLOW_GLOBAL_TRANSFER();
 }
 
 /* OLPaneUpdateComplete: the window drawn: the scrollbars repeat */
@@ -519,13 +504,25 @@ static void PaneButton(optr oself, Message msg, MouseReturnParams *ret,
 	@send ,forceQueue sb::MSG_REPEAT_SCROLL();
 }
 
-/* OLPanePrePassiveButton: a menu's focus released on a press */
-@extern method OLPaneClass, MSG_META_PRE_PASSIVE_BUTTON
+void GetPaneWinBounds(optr oself, Rectangle *r)
 {
-    optr p = VisFindParent(oself);
+    sword x, y;
+    word f = GetFrameWidth(oself);
 
-    if (p)
-	@call p::MSG_VIS_VUP_RELEASE_MENU_FOCUS();
-    @call oself::MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE();
-    @callsuper();
+    GetWinLeftTop(oself, &x, &y);
+    r->R_left = x + f;
+    r->R_top = y + f;
+    r->R_right = r->R_left + PVis(oself)->OLPI_winWidth - 1;
+    r->R_bottom = r->R_top + PVis(oself)->OLPI_winHeight - 1;
+}
+
+void GetFrameBounds(optr oself, Rectangle *r)
+{
+    word f = GetFrameWidth(oself);
+
+    GetPaneWinBounds(oself, r);
+    r->R_left -= f;
+    r->R_top -= f;
+    r->R_right += f;
+    r->R_bottom += f;
 }

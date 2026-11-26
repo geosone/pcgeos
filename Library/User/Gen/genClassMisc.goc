@@ -28,11 +28,36 @@
 #include <string.h>
 #include <localize.h>
 @classdecl GenClass;
+/* genClassBuild.goc */
 @extern method GenClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS;
-@extern method GenClass, MSG_GEN_PATH_GET_DISK_HANDLE;
-@extern method GenClass, MSG_META_GEN_PATH_RESTORE_DISK_PROMPT;
-@extern method GenClass, MSG_GEN_PATH_SET;
-@extern method GenClass, MSG_GEN_PATH_GET;
+@extern method GenClass, MSG_META_INITIALIZE;
+@extern method GenClass, MSG_META_FINAL_OBJ_FREE;
+@extern method GenClass, MSG_META_BLOCK_FREE;
+@extern method GenClass, MSG_META_OBJ_FREE;
+@extern method GenClass, MSG_META_OBJ_FLUSH_INPUT_QUEUE;
+@extern method GenClass, MSG_META_DETACH;
+@extern method GenClass, MSG_META_DETACH_COMPLETE;
+@extern method GenClass, MSG_META_WIN_DEC_REF_COUNT;
+@extern method GenClass, MSG_META_GCN_LIST_SEND;
+@extern method GenClass, MSG_META_ADD_VAR_DATA;
+@extern method GenClass, MSG_META_SET_OBJ_BLOCK_OUTPUT;
+@extern method GenClass, MSG_META_SET_FLAGS;
+@extern method GenClass, MSG_META_GET_FLAGS;
+@extern method GenClass, MSG_META_INITIALIZE_VAR_DATA;
+@extern method GenClass, MSG_GEN_FIND_VIEW_RANGES;
+@extern method GenClass, MSG_GEN_QUERY_VIEW_AREA;
+@extern method GenClass, MSG_GEN_ADD_CHILD;
+@extern method GenClass, MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY;
+@extern method GenClass, MSG_GEN_GROW_PARENTS;
+@extern method GenClass, MSG_GEN_SET_KBD_MKR_PATH;
+@extern method GenClass, MSG_GEN_REMOVE;
+@extern method GenClass, MSG_GEN_REMOVE_CHILD;
+@extern method GenClass, MSG_GEN_MOVE_CHILD;
+@extern method GenClass, MSG_GEN_FIND_CHILD;
+@extern method GenClass, MSG_GEN_FIND_CHILD_AT_POSITION;
+@extern method GenClass, MSG_GEN_FIND_PARENT;
+@extern method GenClass, MSG_GEN_COPY_TREE;
+/* genClassCommon.goc */
 @extern method GenClass, MSG_GEN_ACTIVATE_INTERACTION_DEFAULT;
 @extern method GenClass, MSG_GEN_START_BROADCAST_FOR_DEFAULT_FOCUS;
 @extern method GenClass, MSG_GEN_SET_USABLE;
@@ -74,33 +99,11 @@
 @extern method GenClass, MSG_GEN_REMOVE_GEOMETRY_HINT;
 @extern method GenClass, MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER;
 @extern method GenClass, MSG_GEN_FIND_OBJECT_WITH_TEXT_MONIKER_C;
-@extern method GenClass, MSG_META_INITIALIZE;
-@extern method GenClass, MSG_META_FINAL_OBJ_FREE;
-@extern method GenClass, MSG_META_BLOCK_FREE;
-@extern method GenClass, MSG_META_OBJ_FREE;
-@extern method GenClass, MSG_META_OBJ_FLUSH_INPUT_QUEUE;
-@extern method GenClass, MSG_META_DETACH;
-@extern method GenClass, MSG_META_DETACH_COMPLETE;
-@extern method GenClass, MSG_META_WIN_DEC_REF_COUNT;
-@extern method GenClass, MSG_META_GCN_LIST_SEND;
-@extern method GenClass, MSG_META_ADD_VAR_DATA;
-@extern method GenClass, MSG_META_SET_OBJ_BLOCK_OUTPUT;
-@extern method GenClass, MSG_META_SET_FLAGS;
-@extern method GenClass, MSG_META_GET_FLAGS;
-@extern method GenClass, MSG_META_INITIALIZE_VAR_DATA;
-@extern method GenClass, MSG_GEN_FIND_VIEW_RANGES;
-@extern method GenClass, MSG_GEN_QUERY_VIEW_AREA;
-@extern method GenClass, MSG_GEN_ADD_CHILD;
-@extern method GenClass, MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY;
-@extern method GenClass, MSG_GEN_GROW_PARENTS;
-@extern method GenClass, MSG_GEN_SET_KBD_MKR_PATH;
-@extern method GenClass, MSG_GEN_REMOVE;
-@extern method GenClass, MSG_GEN_REMOVE_CHILD;
-@extern method GenClass, MSG_GEN_MOVE_CHILD;
-@extern method GenClass, MSG_GEN_FIND_CHILD;
-@extern method GenClass, MSG_GEN_FIND_CHILD_AT_POSITION;
-@extern method GenClass, MSG_GEN_FIND_PARENT;
-@extern method GenClass, MSG_GEN_COPY_TREE;
+/* genPathUtils.goc */
+@extern method GenClass, MSG_GEN_PATH_GET_DISK_HANDLE;
+@extern method GenClass, MSG_META_GEN_PATH_RESTORE_DISK_PROMPT;
+@extern method GenClass, MSG_GEN_PATH_SET;
+@extern method GenClass, MSG_GEN_PATH_GET;
 
 /* ---------------------------------------------------------------------
  * The object's path (genPathUtils.goc)

@@ -26,7 +26,6 @@ geos_uic(cmainManager ${_common}/CMain/cmainManager.ui
 # Of cspecCUAS.ui the monikers and pictures, the window menus and the
 # template of the standard dialogs and the gadgets of a file selector
 # (cspecFile.ui's StandardDialogUI and FileSelectorUI, which
-# CSpec/cspecStdDialog.goc and CUtils/copenFileSelector.goc copy), and
 # its strings (StringsUI).  The binary directory first, as above; the
 # source directory for "../CommonUI/CSpec/mkr*.ui".  The Esp constants
 # the conditions in its gstrings use, as CommonUI/cConstant.def has them

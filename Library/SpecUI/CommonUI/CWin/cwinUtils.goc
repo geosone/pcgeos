@@ -1,0 +1,135 @@
+/*
+ * cwinUtils.goc -- after cwinUtils.asm: OpenWinDuplicateBlock,
+ * GetVisParentForDialog, EnsureWindowInParentWin,
+ * EnsureTitleBarInParentWin, OpenWinCheckIfMinMaxRestoreControls.
+ */
+@include "cGeode.goh"
+@include <Objects/gTrigC.goh>
+@include <Internal/specC.goh>
+@include <Objects/gPrimC.goh>
+@include <Objects/gPenICC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gInterC.goh>
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/*
+ * OpenWinDuplicateBlock: a copy of the template's block owned by the
+ * window's owner, its output the window, the copy's object linked up
+ * to the window; the block kept in OLWI_sysMenu
+ */
+optr OpenWinDuplicateBlock(optr o, optr tmpl)
+{
+    static const SysMenuObject icons[] = {
+	SMO_MINIMIZE_ICON, SMO_MAXIMIZE_ICON, SMO_RESTORE_ICON, SMO_BUTTON
+    };
+    Boolean display = Win(o)->OLWI_type == MOWT_DISPLAY_WINDOW;
+    MemHandle b = ObjDuplicateResource(OptrToHandle(tmpl),
+				       MemOwner(OptrToHandle(o)), 0);
+    optr n = ConstructOptr(b, OptrToChunk(tmpl));
+    int i;
+
+    ObjLockObjBlock(b);
+    ObjBlockSetOutput(b, o);
+    for (i = 0; i < 4; i++)
+	(void) ObjVarAddData(ConstructOptr(b, OptrToChunk(OpenWinSysMenuTemplate(display,
+							icons[i]))),
+			     HINT_SYS_ICON, 0);
+    (void) ObjVarAddData(ConstructOptr(b, OptrToChunk(OpenWinSysMenuTemplate(display,
+							SMO_CLOSE))),
+			 ATTR_SYSTEM_MENU_CLOSE, 0);
+    MemUnlock(b);
+    Win(o)->OLWI_sysMenu = b;
+    @call o::MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY(n);
+    return n;
+}
+
+/* GetVisParentForDialog: the vis parent for a popup or a system modal
+ * dialog */
+optr GetVisParentForDialog(optr o)
+{
+    optr vp = 0;
+    word type = (((GenInteractionInstance *) ObjDerefGen(o))->GII_attrs &
+		 GIA_SYS_MODAL) ? SQT_VIS_PARENT_FOR_SYS_MODAL
+				: SQT_VIS_PARENT_FOR_POPUP;
+
+    (void) GenCallParent(o, MSG_SPEC_GUP_QUERY_VIS_PARENT, &type,
+			 sizeof(type), &vp, sizeof(vp));
+    return vp;
+}
+
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/*
+ * EnsureWindowInParentWin: the window moved into its parent window so
+ * that at least the width and height given stay visible
+ */
+void EnsureWindowInParentWin(optr o, sword minW, sword minH)
+{
+    WinSizeInfoParams s;
+    OLWinInstance *w;
+    sword x, y, lim;
+
+    if (!OpenGetParentWinSize(o, &s))
+	return;
+    s.WSIP_windowHeight -= GetTaskBarSizeAdjustment(o);
+    w = Win(o);
+    x = w->VI_bounds.R_left;
+    if (x >= 0 && x > (lim = (sword) (s.WSIP_windowWidth - minW + 1)))
+	x = lim;
+    else if (x <= (lim = (sword) (minW - w->VI_bounds.R_right +
+				  w->VI_bounds.R_left)))
+	x = lim;
+    y = w->VI_bounds.R_top;
+    if (y >= 0 && (lim = (sword) (s.WSIP_windowHeight - minH + 1)) < 0)
+	y = 0;
+    else if (y >= 0 && y > lim)
+	y = lim;
+    else if (y <= (lim = (sword) (minH - w->VI_bounds.R_bottom +
+				  w->VI_bounds.R_top)))
+	y = lim;
+    VisSetPosition(o, x, y);
+}
+#define MIN_WIN_TITLE_BAR_ONSCREEN_DIST	10
+
+/* EnsureTitleBarInParentWin: enough of the title bar stays in the
+ * parent window */
+void EnsureTitleBarInParentWin(optr o)
+{
+    WinSizeInfoParams s;
+    OLWinInstance *w = Win(o);
+    sword x, y, lim;
+
+    if (!(w->OLWI_attrs & OWA_TITLED) || !OpenGetParentWinSize(o, &s))
+	return;
+    s.WSIP_windowHeight -= GetTaskBarSizeAdjustment(o);
+    w = Win(o);
+    x = w->VI_bounds.R_left;
+    if (x >= 0 &&
+	x > (lim = (sword) (s.WSIP_windowWidth - w->OLWI_titleBarBounds.R_left -
+			    (MIN_WIN_TITLE_BAR_ONSCREEN_DIST - 1))))
+	x = lim;
+    else if (x <= (lim = (sword) (MIN_WIN_TITLE_BAR_ONSCREEN_DIST -
+				  w->OLWI_titleBarBounds.R_right)))
+	x = lim;
+    y = w->VI_bounds.R_top;
+    if (y >= 0 &&
+	y > (lim = (sword) (s.WSIP_windowHeight - w->OLWI_titleBarBounds.R_top -
+			    (MIN_WIN_TITLE_BAR_ONSCREEN_DIST - 1))))
+	y = lim;
+    else if (y <= (lim = (sword) (MIN_WIN_TITLE_BAR_ONSCREEN_DIST -
+				  w->OLWI_titleBarBounds.R_bottom)))
+	y = lim;
+    VisSetPosition(o, x, y);
+}
+/* OpenWinCheckIfMinMaxRestoreControls: displays, primaries if the
+ * options say so */
+Boolean OpenWinCheckIfMinMaxRestoreControls(optr o)
+{
+    OLWinType t = Win(o)->OLWI_type;
+
+    if (t == MOWT_DISPLAY_WINDOW)
+	return TRUE;
+    return t == MOWT_PRIMARY_WINDOW &&
+	   (olWindowOptions & UIWO_PRIMARY_MIN_MAX_RESTORE_CONTROLS);
+}

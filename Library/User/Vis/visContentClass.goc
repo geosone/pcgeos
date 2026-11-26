@@ -42,6 +42,7 @@
 #include <chunkarr.h>
 #include <thread.h>
 @classdecl VisContentClass;
+/* visContentCommon.goc */
 @extern method VisContentClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE, MSG_VIS_FORCE_GRAB_MOUSE, MSG_VIS_GRAB_LARGE_MOUSE, MSG_VIS_GRAB_MOUSE, MSG_VIS_RELEASE_MOUSE;
 @extern method VisContentClass, MSG_VIS_INVALIDATE;
 @extern method VisContentClass, MSG_META_CONTENT_VIEW_LOST_GADGET_EXCL;

@@ -1,0 +1,755 @@
+/*
+ * copenFileSelectorHigh.goc -- after copenFileSelectorHigh.asm:
+ * MSG_OL_FILE_SELECTOR_PATH_SET, MSG_GEN_PATH_SET,
+ * MSG_GEN_FILE_SELECTOR_SET_FILE_ATTRS,
+ * MSG_GEN_FILE_SELECTOR_SET_FILE_CRITERIA,
+ * MSG_GEN_FILE_SELECTOR_SET_MASK, MSG_GEN_FILE_SELECTOR_SET_GEODE_ATTRS,
+ * MSG_GEN_FILE_SELECTOR_SET_TOKEN, MSG_GEN_FILE_SELECTOR_SET_CREATOR,
+ * MSG_GEN_FILE_SELECTOR_SET_ATTRS, MSG_META_ADD_VAR_DATA,
+ * MSG_META_DELETE_VAR_DATA, MSG_META_INITIALIZE, MSG_SPEC_BUILD,
+ * MSG_SPEC_UNBUILD, MSG_SPEC_UNBUILD_BRANCH, MSG_META_DETACH,
+ * MSG_SPEC_NOTIFY_ENABLED/MSG_SPEC_NOTIFY_NOT_ENABLED, MSG_VIS_OPEN,
+ * MSG_VIS_CLOSE, MSG_NOTIFY_DRIVE_CHANGE, MSG_META_REMOVING_DISK,
+ * MSG_NOTIFY_FILE_CHANGE, OLFSFreeBuffers.
+ *
+ * The class record of OLFileSelectorClass and OLFSDynamicListClass is here, as in the asm.
+ */
+@include "cGeode.goh"
+@include "cspecCUAS.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olFileSelectorClass.goh>
+@include <Internal/SpecUI/olApplicationClass.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/gItemC.goh>
+#include <fileEnum.h>
+#include <disk.h>
+#include <drive.h>
+@include <gcnlist.goh>
+#include <sysstats.h>
+#include <chunkarr.h>
+#include <localize.h>
+#include <gstring.h>
+#include <uDialog.h>
+
+@classdecl OLFSDynamicListClass;
+/* copenFileSelectorLow.goc */
+@extern method OLFSDynamicListClass, MSG_META_KBD_CHAR;
+@extern method OLFSDynamicListClass, MSG_META_FUP_KBD_CHAR;
+
+@classdecl OLFileSelectorClass, neverSaved;
+/* copenFileSelectorLow.goc */
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_LIST_MESSAGE;
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_DOUBLE_PRESS;
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_UP_DIRECTORY;
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_CLOSE_DIR_BUTTON;
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_DOCUMENT_BUTTON;
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_RESCAN;
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_OPEN_ENTRY;
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SUSPEND;
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_END_SUSPEND;
+@extern method OLFileSelectorClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
+@extern method OLFileSelectorClass, MSG_META_CHECK_IF_INTERACTABLE_OBJECT;
+/* copenFileSelectorMiddle.goc */
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_OPEN_DIR_BUTTON;
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_CHANGE_DRIVE_POPUP;
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_CHANGE_DIRECTORY_POPUP;
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_SELECTION;
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_GET_FILTER_ROUTINE;
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_ITEM_QUERY;
+
+#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
+#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
+#define SDAVNF_VOLUME_ONLY_FOR_FIXED	2
+
+#define OLFS_DEFAULT_FILES_SHOWN		7
+#define OLFS_LARGE_DISPLAY_DEFAULT_FILES_SHOWN	14
+#define OLFS_CGA_DEFAULT_FILES_SHOWN		3
+#define TINY_SCREEN_WIDTH_THRESHOLD		512
+
+/*
+ * OLFSBuildChangeDrivePopup: an item for each drive (not the removable
+ * ones with FSA_SHOW_FIXED_DISKS_ONLY, not the read-only ones with
+ * FSA_SHOW_WRITABLE_DISKS_ONLY), its identifier the drive's number
+ * with the DriveStatus above it, its moniker the drive's name and, for
+ * a fixed disk, the volume's.
+ */
+static void BuildChangeDrivePopup(optr o)
+{
+    optr popup = OLFSUIObj(o, @OLFileSelectorChangeDrivePopup);
+    FileSelectorAttrs attrs = GFS(o)->GFSI_attrs;
+    word drive;
+
+    if ((attrs & FSA_HAS_CHANGE_DRIVE_LIST) && popup) {
+	OLFSDestroyListChildren(popup, 0);
+	for (drive = 0; drive < DRIVE_MAX_DRIVES; drive++) {
+	    char name[FILE_LONGNAME_BUFFER_SIZE];
+	    word status;
+	    optr item;
+
+	    if ((attrs & FSA_SHOW_WRITABLE_DISKS_ONLY)) {
+		word ext = DriveGetExtStatus(drive);
+
+		if (!ext || (ext & DES_READ_ONLY))
+		    continue;
+	    }
+	    status = DriveGetStatus(drive);
+	    if (!status)
+		continue;
+	    if ((attrs & FSA_SHOW_FIXED_DISKS_ONLY) &&
+		(status & DS_MEDIA_REMOVABLE))
+		continue;
+	    item = OLFSCreateAndInitGenItem(popup,
+			(word) (drive | ((status & 0xff) << 8)));
+	    OLFSStuffDriveAndVolumeName(name, sizeof(name), drive,
+				    SDAVNF_VOLUME_ONLY_FOR_FIXED, status, 0);
+	    OLFSReplaceMonikerText(item, name);
+	}
+    }
+    OLFSSelectCurrentDriveInChangeDrivePopup(o);
+}
+
+/* OLFSMarkDirtyAndRescanIfRealized: a criterion has changed: scanned
+ * again if on screen (when the suspension ends if suspended).  Whether
+ * it was scanned. */
+static Boolean MarkDirtyAndRescanIfRealized(optr o)
+{
+    ObjMarkDirty(o);
+    if (!OLFSIsRealized(o))
+	return FALSE;
+    if (FS(o)->OLFSI_state & OLFSS_SUSPENDED) {
+	FS(o)->OLFSI_state |= OLFSS_RESCAN_NEEDED;
+	return FALSE;
+    }
+    @call o::MSG_GEN_FILE_SELECTOR_RESCAN();
+    return TRUE;
+}
+
+/* OLFileSelectorGetIDs: the identifiers of the current directory (one
+ * for each place of a standard path) in the vardata, for the file
+ * change notifications; not saved to state */
+static void GetIDs(optr o)
+{
+    ChunkHandle ch;
+
+    FilePushDir();
+    if (!GenPathSetCurrentPathFromObjectPath(o, ATTR_GEN_PATH_DATA,
+					TEMP_GEN_PATH_SAVED_DISK_HANDLE) &&
+	(ch = FileGetCurrentPathIDs(OptrToHandle(o))) != 0) {
+	optr ids = ConstructOptr(OptrToHandle(o), ch);
+	word size = LMemGetChunkSize(ids);
+	void *d = ObjVarAddData(o, TEMP_GEN_FILE_SELECTOR_DIR_IDS, size);
+
+	memcpy(d, LMemDeref(ids), size);
+	LMemFree(ids);
+    }
+    FilePopDir();
+}
+
+/* the FilePathIDs of the current directory */
+static FilePathID *DirIDs(optr o, word *count)
+{
+    FilePathID *ids = ObjVarFindData(o, TEMP_GEN_FILE_SELECTOR_DIR_IDS);
+
+    *count = ids ? (word) ((((VarDataEntry *) ids - 1)->VDE_entrySize -
+			    sizeof(VarDataEntry)) / sizeof(FilePathID)) : 0;
+    return ids;
+}
+
+/* OLFileSelectorCloseForNotify: the directory or its disk has gone:
+ * back to the virtual root, or to the document directory */
+static void CloseForNotify(optr o)
+{
+    GenFilePath *vr = OLFSVirtualRoot(o);
+
+    if (vr) {
+	char root[PATH_BUFFER_SIZE];
+	DiskHandle d = vr->GFP_disk;
+
+	OLFSStrCopy(root, vr->GFP_path, sizeof(root));
+	if (!@call o::MSG_GEN_PATH_SET(root, d))
+	    return;
+    }
+    @call o::MSG_OL_FILE_SELECTOR_DOCUMENT_BUTTON(0);
+}
+
+/* OLFileSelectorCheckRemovable: the disk now in a removable drive (the
+ * user may have changed it) */
+static DiskHandle CheckRemovable(DiskHandle disk)
+{
+    word drive, status;
+    DiskHandle now;
+
+    if (!disk || (disk & DISK_IS_STD_PATH_MASK))
+	return disk;
+    drive = DiskGetDrive(disk);
+    status = DriveGetStatus(drive);
+    if (!status || !(status & DS_MEDIA_REMOVABLE))
+	return disk;
+    now = DiskRegisterDiskSilently(drive);
+    return now ? now : disk;
+}
+
+@method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_PATH_SET
+{
+    char first;
+    Boolean err;
+
+    (void) pself;
+    OLFSCallApp(MSG_GEN_APPLICATION_MARK_APP_COMPLETELY_BUSY);
+    /* no selection: the first entry of the new list */
+    first = GFS(oself)->GFSI_selection[0];
+    GFS(oself)->GFSI_selection[0] = 0;
+    err = @call oself::MSG_GEN_PATH_SET(path, CheckRemovable(disk));
+    if (err)
+	GFS(oself)->GFSI_selection[0] = first;
+    OLFSCallApp(MSG_GEN_APPLICATION_MARK_APP_NOT_COMPLETELY_BUSY);
+    return err;
+}
+
+/* OLFileSelectorSetPath: (after GenClass has the path) */
+@method OLFileSelectorClass, MSG_GEN_PATH_SET
+{
+    (void) path;
+    (void) disk;
+    GetIDs(oself);
+    if (FS(oself)->VI_attrs & VA_REALIZED)
+	(void) MarkDirtyAndRescanIfRealized(oself);
+    return FALSE;
+}
+@method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_FILE_ATTRS
+{
+    (void) pself;
+    (void) setAttrs;
+    (void) clearAttrs;
+    (void) MarkDirtyAndRescanIfRealized(oself);
+}
+
+@method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_FILE_CRITERIA
+{
+    (void) pself;
+    (void) fileCriteria;
+    (void) MarkDirtyAndRescanIfRealized(oself);
+}
+
+@method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_MASK
+{
+    (void) pself;
+    (void) mask;
+    (void) MarkDirtyAndRescanIfRealized(oself);
+}
+
+@method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_GEODE_ATTRS
+{
+    (void) pself;
+    (void) matchGeodeAttrs;
+    (void) mismatchGeodeAttrs;
+    (void) MarkDirtyAndRescanIfRealized(oself);
+}
+
+@method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_TOKEN
+{
+    (void) pself;
+    (void) tokenChars;
+    (void) manufacturerID;
+    (void) MarkDirtyAndRescanIfRealized(oself);
+}
+
+@method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_CREATOR
+{
+    (void) pself;
+    (void) tokenChars;
+    (void) manufacturerID;
+    (void) MarkDirtyAndRescanIfRealized(oself);
+}
+
+/* OLFSSetUsableOnFlags */
+static void SetUsable(optr obj, Boolean usable)
+{
+    if (!obj)
+	return;
+    if (usable)
+	@call obj::MSG_GEN_SET_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+    else
+	@call obj::MSG_GEN_SET_NOT_USABLE(VUM_DELAYED_VIA_UI_QUEUE);
+}
+
+/* OLFSTurnOffGadgetry: the gadgets the attributes ask for */
+static void TurnOffGadgetry(optr o)
+{
+    FileSelectorAttrs a = GFS(o)->GFSI_attrs;
+
+    SetUsable(OLFSUIObj(o, @OLFileSelectorDocumentButton),
+	      (a & FSA_HAS_DOCUMENT_BUTTON) != 0);
+    SetUsable(OLFSUIObj(o, @OLFileSelectorChangeDirectoryPopup),
+	      (a & FSA_HAS_CHANGE_DIRECTORY_LIST) != 0);
+    SetUsable(OLFSUIObj(o, @OLFileSelectorChangeDrivePopup),
+	      (a & FSA_HAS_CHANGE_DRIVE_LIST) != 0);
+    SetUsable(OLFSUIObj(o, @OLFileSelectorFileList),
+	      (a & FSA_HAS_FILE_LIST) != 0);
+}
+
+@method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SET_ATTRS
+{
+    (void) attributes;
+    if (!pself->OLFSI_uiBlock)
+	return;
+    TurnOffGadgetry(oself);
+    BuildChangeDrivePopup(oself);
+    (void) MarkDirtyAndRescanIfRealized(oself);
+}
+
+/* OLFileSelectorAddVarData, ...DeleteVarData: the match attributes are
+ * vardata */
+static void VarDataChanged(optr o, word type)
+{
+    if (type >= ATTR_GEN_FILE_SELECTOR_TOKEN_MATCH &&
+	type <= ATTR_GEN_FILE_SELECTOR_NAME_MASK)
+	(void) MarkDirtyAndRescanIfRealized(o);
+}
+
+@method OLFileSelectorClass, MSG_META_ADD_VAR_DATA
+{
+    word type = dataType & ~(VDF_SAVE_TO_STATE | VDF_EXTRA_DATA);
+
+    (void) pself;
+    @callsuper();
+    VarDataChanged(oself, type);
+}
+
+@method OLFileSelectorClass, MSG_META_DELETE_VAR_DATA
+{
+    Boolean r = @callsuper();
+
+    (void) pself;
+    VarDataChanged(oself, dataType & ~(VDF_SAVE_TO_STATE | VDF_EXTRA_DATA));
+    return r;
+}
+@method OLFileSelectorClass, MSG_META_INITIALIZE
+{
+    ObjMarkDirty(oself);
+    @callsuper();
+    pself = FS(oself);
+    pself->OLFSI_fileBuffer = 0;
+    pself->OLFSI_indexBuffer = 0;
+    pself->OLFSI_numFiles = 0;
+    pself->OLFSI_state = 0;
+}
+
+/*
+ * HandleScalableUIData: HINT_FILE_SELECTOR_SCALABLE_UI_DATA sets or
+ * adds attributes by the application's features and level
+ */
+static void HandleScalableUIData(optr o)
+{
+    GenFileSelectorScalableUIEntry *e =
+	ObjVarFindData(o, HINT_FILE_SELECTOR_SCALABLE_UI_DATA);
+    optr app = GeodeGetAppObject(0);
+    AppFeaturesInfo info = 0;
+    word n, i, features, level;
+
+    if (!e || !app)
+	return;
+    n = (word) ((((VarDataEntry *) e - 1)->VDE_entrySize -
+		 sizeof(VarDataEntry)) / sizeof(*e));
+    info = @call app::MSG_GEN_APPLICATION_GET_APP_FEATURES();
+    features = GET_APP_FEATURES(info);
+    level = (word) GET_UI_INTERFACE_LEVEL(info);
+    e = ObjVarFindData(o, HINT_FILE_SELECTOR_SCALABLE_UI_DATA);
+    for (i = 0; i < n; i++, e++) {
+	Boolean on = (features & e->GFSSUIE_appFeature) != 0;
+	Boolean set;
+
+	switch (e->GFSSUIE_command) {
+	case GFSSUIC_SET_FEATURES_IF_APP_FEATURE_ON:
+	    set = TRUE;
+	    break;
+	case GFSSUIC_SET_FEATURES_IF_APP_FEATURE_OFF:
+	    set = TRUE;
+	    on = !on;
+	    break;
+	case GFSSUIC_ADD_FEATURES_IF_APP_FEATURE_ON:
+	    set = FALSE;
+	    break;
+	case GFSSUIC_SET_FEATURES_IF_APP_LEVEL:
+	    set = TRUE;
+	    on = level >= e->GFSSUIE_appFeature;
+	    break;
+	case GFSSUIC_ADD_FEATURES_IF_APP_LEVEL:
+	    set = FALSE;
+	    on = level >= e->GFSSUIE_appFeature;
+	    break;
+	default:
+	    continue;
+	}
+	if (!on)
+	    continue;
+	if (set)
+	    GFS(o)->GFSI_attrs = e->GFSSUIE_fsFeatures;
+	else
+	    GFS(o)->GFSI_attrs |= e->GFSSUIE_fsFeatures;
+    }
+}
+
+/* OLFSProcessHints: the size of the list and the hints that go to it */
+typedef struct {
+    optr	o;
+    optr	list;
+    byte	count;		/* files shown (0: the height not fixed) */
+    byte	width;		/* in average characters (0: not fixed) */
+} HintScan;
+
+static void FSHint(MemHandle mh, ChunkHandle chnk, VarDataEntry *extra,
+		   word dataType, void *data)
+{
+    HintScan *h = data;
+
+    (void) mh;
+    (void) chnk;
+    switch (dataType) {
+    case HINT_FILE_SELECTOR_NUMBER_OF_FILES_TO_SHOW:
+	h->count = *(byte *) extra;
+	return;
+    case HINT_FILE_SELECTOR_FILE_LIST_WIDTH:
+	h->width = *(byte *) extra;
+	return;
+    case HINT_FILE_SELECTOR_SINGLE_ACTION:
+	FS(h->o)->OLFSI_state |= OLFSS_SINGLE_ACTION;
+	return;
+    case HINT_EXPAND_WIDTH_TO_FIT_PARENT:
+	h->width = 0;
+	break;
+    case HINT_EXPAND_HEIGHT_TO_FIT_PARENT:
+	h->count = 0;
+	break;
+    }
+    /* (the default focus, the feature hints, the expand hints) */
+    ObjVarCopyDataRange(h->o, h->list, dataType, dataType);
+}
+
+static VarDataCHandler fsHints[] = {
+    { HINT_FILE_SELECTOR_NUMBER_OF_FILES_TO_SHOW, FSHint },
+    { HINT_FILE_SELECTOR_FILE_LIST_WIDTH, FSHint },
+    { HINT_DEFAULT_FOCUS, FSHint },
+    { HINT_AN_ADVANCED_FEATURE, FSHint },
+    { HINT_GENERAL_CONSUMER_MODE, FSHint },
+    { HINT_EXPAND_WIDTH_TO_FIT_PARENT, FSHint },
+    { HINT_EXPAND_HEIGHT_TO_FIT_PARENT, FSHint },
+    { HINT_FILE_SELECTOR_SINGLE_ACTION, FSHint }
+};
+
+static void ProcessHints(optr o)
+{
+    HintScan h;
+    CompSizeHintArgs *a;
+    word w, ht;
+
+    h.o = o;
+    h.list = OLFSUIObj(o, @OLFileSelectorFileList);
+    h.count = OLFS_DEFAULT_FILES_SHOWN;
+    h.width = FILE_LONGNAME_LENGTH + 7;
+    if (OpenCheckIfCGA())
+	h.count = OLFS_CGA_DEFAULT_FILES_SHOWN;
+    /* OpenCheckIfDisplayLarge */
+    switch (moCS_displayType & DT_DISP_SIZE) {
+    case DS_LARGE << DT_DISP_SIZE_OFFSET:
+    case DS_HUGE << DT_DISP_SIZE_OFFSET:
+	h.count = OLFS_LARGE_DISPLAY_DEFAULT_FILES_SHOWN;
+	break;
+    }
+    OpenGetScreenDimensions(&w, &ht);
+    if (w <= TINY_SCREEN_WIDTH_THRESHOLD)
+	h.width = FILE_LONGNAME_LENGTH + 2;
+    ObjVarScanData(o, sizeof(fsHints) / sizeof(fsHints[0]), fsHints, &h);
+    /* the list: wide enough for a name, so many lines high */
+    a = ObjVarAddData(h.list, HINT_FIXED_SIZE, sizeof(CompSizeHintArgs));
+    a->CSHA_width = SST_AVG_CHAR_WIDTHS | h.width;
+    a->CSHA_height = SST_LINES_OF_TEXT | h.count;
+    a->CSHA_count = h.count;
+}
+
+/*
+ * OLFileSelectorSpecBuild: the gadgets are a copy of FileSelectorUI,
+ * owned by the selector's owner, their output the selector.  The copy
+ * goes when the selector is unbuilt or detached: for the detach it is
+ * on the application's active list.  The group is built below the
+ * selector (an upward link only).
+ */
+@method OLFileSelectorClass, MSG_SPEC_BUILD
+{
+    optr app = GeodeGetAppObject(0), group;
+    MemHandle bh;
+    SpecBuildFlags f = flags;
+
+    @callsuper();
+    bh = ObjDuplicateResource(OptrToHandle(@OLFileSelectorGroup),
+			      MemOwner(OptrToHandle(oself)), 0);
+    FS(oself)->OLFSI_uiBlock = bh;
+    if (app)
+	(void) @call app::MSG_META_GCN_LIST_ADD(oself,
+			MGCNLT_ACTIVE_LIST | GCNLTF_SAVE_TO_STATE,
+			MANUFACTURER_ID_GEOWORKS);
+    GetIDs(oself);
+    (void) GCNListAdd(oself, MANUFACTURER_ID_GEOWORKS, GCNSLT_FILE_SYSTEM);
+    ObjBlockSetOutput(bh, oself);
+    HandleScalableUIData(oself);
+    TurnOffGadgetry(oself);
+    group = ConstructOptr(bh, OptrToChunk(@OLFileSelectorGroup));
+    GenSetUpwardLink(OptrToHandle(group), OptrToChunk(group), oself);
+    ProcessHints(oself);
+
+    f &= ~SBF_UPDATE_MODE;
+    if (!(GFS(oself)->GI_states & GS_ENABLED))
+	f &= ~SBF_VIS_PARENT_FULLY_ENABLED;
+    @call group::MSG_SPEC_BUILD_BRANCH(f);
+}
+
+/* DestroyBlockAndRemoveFromActiveList */
+static void DestroyBlock(optr o)
+{
+    MemHandle bh = FS(o)->OLFSI_uiBlock;
+    optr app = GeodeGetAppObject(0);
+
+    FS(o)->OLFSI_uiBlock = 0;
+    if (bh) {
+	optr group = ConstructOptr(bh, OptrToChunk(@OLFileSelectorGroup));
+
+	/* (only an upward link: nothing to mark dirty) */
+	@call group::MSG_GEN_DESTROY(VUM_DELAYED_VIA_UI_QUEUE, 0);
+	@call group::MSG_META_BLOCK_FREE();
+    }
+    (void) GCNListRemove(o, MANUFACTURER_ID_GEOWORKS, GCNSLT_FILE_SYSTEM);
+    if (app)
+	(void) @call app::MSG_META_GCN_LIST_REMOVE(o, MGCNLT_ACTIVE_LIST,
+						   MANUFACTURER_ID_GEOWORKS);
+}
+
+@method OLFileSelectorClass, MSG_SPEC_UNBUILD
+{
+    (void) pself;
+    @callsuper();
+    DestroyBlock(oself);
+}
+
+@method OLFileSelectorClass, MSG_SPEC_UNBUILD_BRANCH
+{
+    optr group = OLFSUIObj(oself, @OLFileSelectorGroup);
+
+    (void) pself;
+    if (group)
+	@call group::MSG_SPEC_UNBUILD_BRANCH(flags);
+    @callsuper();
+}
+
+@method OLFileSelectorClass, MSG_META_DETACH
+{
+    (void) pself;
+    DestroyBlock(oself);
+    @callsuper();
+}
+
+/* OLFSNotifyCommon: the gadgets are visual children, but generic ones
+ * by an upward link only: they are told here */
+@method OLFileSelectorClass, MSG_SPEC_NOTIFY_ENABLED,
+			     MSG_SPEC_NOTIFY_NOT_ENABLED
+{
+    struct { byte updateMode, flags; } a;
+
+    (void) pself;
+    if (!@callsuper())
+	return FALSE;
+    a.updateMode = updateMode;
+    a.flags = flags & ~NEF_STATE_CHANGING;
+    VisSendToChildren(oself, message == MSG_SPEC_NOTIFY_ENABLED ?
+			     MSG_GEN_NOTIFY_ENABLED :
+			     MSG_GEN_NOTIFY_NOT_ENABLED, &a, sizeof(a));
+    return TRUE;
+}
+
+/*
+ * OLFileSelectorVisOpen: on screen: a path that cannot be used is
+ * dropped (the default takes its place), a directory not under the
+ * virtual root becomes the root, the drives are listed and the
+ * directory is read; if that fails, the top directory is.
+ */
+@method OLFileSelectorClass, MSG_VIS_OPEN
+{
+    GenFilePath *p;
+
+    (void) pself;
+    @callsuper();
+    if (!OLFSCurPath(oself, &p)) {
+	ObjVarDeleteData(oself, ATTR_GEN_PATH_DATA);
+	ObjVarDeleteData(oself, TEMP_GEN_PATH_SAVED_DISK_HANDLE);
+    }
+    if (OLFSVirtualRoot(oself) && !OLFSUnderVirtualRoot(oself, NULL))
+	CloseForNotify(oself);
+    BuildChangeDrivePopup(oself);
+    FS(oself)->OLFSI_state &= ~OLFSS_VIS_OPEN_ERROR;
+    @call oself::MSG_GEN_FILE_SELECTOR_RESCAN();
+    if (FS(oself)->OLFSI_state & OLFSS_VIS_OPEN_ERROR)
+	(void) @call oself::MSG_OL_FILE_SELECTOR_PATH_SET("", SP_TOP);
+}
+
+@method OLFileSelectorClass, MSG_VIS_CLOSE
+{
+    (void) pself;
+    ObjMarkDirty(oself);
+    @callsuper();
+    OLFSFreeBuffers(oself);
+}
+@method OLFileSelectorClass, MSG_NOTIFY_DRIVE_CHANGE
+{
+    (void) pself;
+    @callsuper();
+    BuildChangeDrivePopup(oself);
+}
+
+static Boolean DiskIsOurs(optr o, DiskHandle disk)
+{
+    word n, i;
+    FilePathID *ids = DirIDs(o, &n);
+
+    for (i = 0; i < n; i++)
+	if (ids[i].FPID_disk == disk)
+	    return TRUE;
+    return FALSE;
+}
+
+/* OLFileSelectorRemovingDisk: the disk of the directory goes: to the
+ * document directory */
+@method OLFileSelectorClass, MSG_META_REMOVING_DISK
+{
+    (void) pself;
+    if (DiskIsOurs(oself, disk))
+	@call oself::MSG_OL_FILE_SELECTOR_DOCUMENT_BUTTON(0);
+}
+
+/* OLFileSelectorCheckIDIsOurs: the file is the current directory */
+static Boolean IDIsOurs(optr o, const FileChangeNotificationData *d)
+{
+    word n, i;
+    FilePathID *ids = DirIDs(o, &n);
+
+    for (i = 0; i < n; i++)
+	if (ids[i].FPID_disk == d->FCND_disk && ids[i].FPID_id == d->FCND_id)
+	    return TRUE;
+    return FALSE;
+}
+
+/* OLFileSelectorCheckIDIsKids: the file is in the list */
+static Boolean IDIsKids(optr o, const FileChangeNotificationData *d)
+{
+    OLFileSelectorInstance *f = FS(o);
+    MemHandle fb = f->OLFSI_fileBuffer;
+    word n = f->OLFSI_numFiles, i;
+    OLFileSelectorEntry *e;
+    Boolean found = FALSE;
+
+    if (!fb)
+	return FALSE;
+    e = MemLock(fb);
+    for (i = 0; i < n && !found; i++)
+	found = e[i].OLFSE_disk == d->FCND_disk &&
+		e[i].OLFSE_id == d->FCND_id;
+    MemUnlock(fb);
+    return found;
+}
+#define FCNT_ADD_SP_DIRECTORY		9
+#define FCNT_DELETE_SP_DIRECTORY	10
+
+/*
+ * OLFileSelectorNotifyFileChangeLow: a file created in the directory,
+ * one of the list renamed, deleted or with new attributes: scanned
+ * again; the directory itself renamed or deleted, its disk formatted:
+ * left (CloseForNotify); a directory added to or taken from a standard
+ * path the directory is in: scanned again
+ */
+static void NotifyFileChange(optr o, word type,
+			     const FileChangeNotificationData *d)
+{
+    switch (type) {
+    case FCNT_CREATE:
+	if (IDIsOurs(o, d))
+	    (void) MarkDirtyAndRescanIfRealized(o);
+	break;
+    case FCNT_RENAME:
+    case FCNT_DELETE:
+	if (IDIsOurs(o, d))
+	    CloseForNotify(o);
+	else if (IDIsKids(o, d))
+	    (void) MarkDirtyAndRescanIfRealized(o);
+	break;
+    case FCNT_ATTRIBUTES:
+	if (IDIsKids(o, d))
+	    (void) MarkDirtyAndRescanIfRealized(o);
+	break;
+    case FCNT_DISK_FORMAT:
+	if (DiskIsOurs(o, d->FCND_disk))
+	    CloseForNotify(o);
+	break;
+    case FCNT_ADD_SP_DIRECTORY:
+    case FCNT_DELETE_SP_DIRECTORY: {
+	/* (the standard path is the notification's disk) */
+	GenFilePath *p;
+	DiskHandle ours = OLFSCurPath(o, &p);
+
+	if ((ours & DISK_IS_STD_PATH_MASK) &&
+	    FileComparePaths("", d->FCND_disk, "", ours) <= PCT_SUBDIR)
+	    (void) MarkDirtyAndRescanIfRealized(o);
+	break;
+    }
+    default:
+	break;
+    }
+}
+
+@method OLFileSelectorClass, MSG_NOTIFY_FILE_CHANGE
+{
+    (void) pself;
+    if (data) {
+	byte *base = MemLock(data);
+
+	if (notifyType == FCNT_BATCH) {
+	    /* the items one by one, the selector suspended; an item
+	     * has a name only if its type has (create, rename) */
+	    FileChangeBatchNotificationData *b = (void *) base;
+	    Boolean was = @call oself::MSG_GEN_FILE_SELECTOR_SUSPEND();
+	    word at = word_offsetof(FileChangeBatchNotificationData,
+				    FCBND_notifications);
+
+	    while (at < b->FCBND_end) {
+		FileChangeBatchNotificationItem *it = (void *) (base + at);
+		word type = (word) it->FCBNI_type;
+
+		NotifyFileChange(oself, type,
+		    (const FileChangeNotificationData *) &it->FCBNI_disk);
+		at += word_offsetof(FileChangeBatchNotificationItem,
+				    FCBNI_name);
+		if (type <= FCNT_RENAME)
+		    at += sizeof(FileLongName);
+	    }
+	    if (!was)
+		(void) @call oself::MSG_GEN_FILE_SELECTOR_END_SUSPEND();
+	} else
+	    NotifyFileChange(oself, (word) notifyType, (void *) base);
+	MemUnlock(data);
+    }
+    @callsuper();
+}
+
+#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
+
+/* OLFSFreeBuffers */
+void OLFSFreeBuffers(optr o)
+{
+    OLFileSelectorInstance *f = FS(o);
+    MemHandle fb = f->OLFSI_fileBuffer, ib = f->OLFSI_indexBuffer;
+
+    f->OLFSI_numFiles = 0;
+    f->OLFSI_fileBuffer = 0;
+    f->OLFSI_indexBuffer = 0;
+    if (fb)
+	MemFree(fb);
+    if (ib)
+	MemFree(ib);
+}

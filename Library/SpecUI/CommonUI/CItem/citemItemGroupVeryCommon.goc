@@ -413,3 +413,20 @@ Boolean OLItemGroupGetFirstItemOptr(optr o, optr *item)
     }
     @call oself::MSG_OL_IGROUP_SET_MODIFIED_SELECTION(identifier, 1 << 8);
 }
+
+/* GetOptr: the generic child with the identifier (FindChildIdentifier) */
+optr GetItemOptr(optr o, word id)
+{
+    if (IG(o)->OLIGI_state & OLIGS_CHECKBOXES)
+	return @call o::MSG_GEN_BOOLEAN_GROUP_GET_BOOLEAN_OPTR(id);
+    return @call o::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(id);
+}
+
+/* GetOptrOrSelf: the item, or the group (a dynamic list's item not
+ * there) */
+optr GetOptrOrSelf(optr o, word id)
+{
+    optr item = GetItemOptr(o, id);
+
+    return item ? item : o;
+}

@@ -48,23 +48,7 @@
 #include <initfile.h>
 #include <string.h>
 @classdecl GenApplicationClass;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_STATE;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_ATTACH_FLAGS;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_REGISTER;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_UNREGISTER;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_COMPLETE_CONNECTIONS;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_SHUTDOWN_ALL_CONNECTIONS;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_CONNECTIONS;
-@extern method GenApplicationClass, MSG_META_IACP_NEW_CONNECTION;
-@extern method GenApplicationClass, MSG_META_IACP_LOST_CONNECTION;
-@extern method GenApplicationClass, MSG_META_IACP_SHUTDOWN_CONNECTION;
-@extern method GenApplicationClass, MSG_META_IACP_PROCESS_MESSAGE;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_CLOSE_FILE_ACK;
-@extern method GenApplicationClass, MSG_META_IACP_ALLOW_FILE_ACCESS, MSG_META_IACP_NOTIFY_FILE_ACCESS_FINISHED;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_NO_MORE_CONNECTIONS;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP;
-@extern method GenApplicationClass, MSG_GEN_APPLICATION_LOWER_WINDOW_TO_BOTTOM;
+/* genAppAttDet.goc */
 @extern method GenApplicationClass, MSG_GEN_SET_ATTRS;
 @extern method GenApplicationClass, MSG_META_RESOLVE_VARIANT_SUPERCLASS;
 @extern method GenApplicationClass, MSG_GEN_APPLICATION_FIND_MONIKER;
@@ -85,6 +69,24 @@
 @extern method GenApplicationClass, MSG_GEN_APPLICATION_INITIATE_UI_QUIT;
 @extern method GenApplicationClass, MSG_META_FINISH_QUIT;
 @extern method GenApplicationClass, MSG_GEN_APPLICATION_QUIT_AFTER_UI;
+/* genAppCommonIACP.goc */
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_STATE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_APP_MODE_MESSAGE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_GET_ATTACH_FLAGS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_REGISTER;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_UNREGISTER;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_COMPLETE_CONNECTIONS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_SHUTDOWN_ALL_CONNECTIONS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_GET_NUMBER_OF_CONNECTIONS;
+@extern method GenApplicationClass, MSG_META_IACP_NEW_CONNECTION;
+@extern method GenApplicationClass, MSG_META_IACP_LOST_CONNECTION;
+@extern method GenApplicationClass, MSG_META_IACP_SHUTDOWN_CONNECTION;
+@extern method GenApplicationClass, MSG_META_IACP_PROCESS_MESSAGE;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_CLOSE_FILE_ACK;
+@extern method GenApplicationClass, MSG_META_IACP_ALLOW_FILE_ACCESS, MSG_META_IACP_NOTIFY_FILE_ACCESS_FINISHED;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_IACP_NO_MORE_CONNECTIONS;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_BRING_WINDOW_TO_TOP;
+@extern method GenApplicationClass, MSG_GEN_APPLICATION_LOWER_WINDOW_TO_BOTTOM;
 
 #define AppPart(o)	((GenApplicationInstance *) ObjDerefGen(o))
 
@@ -239,6 +241,7 @@ optr GenAppIACPConnects(optr oself)
  * ------------------------------------------------------------------- */
 
 @classdecl UIApplicationClass;
+/* genAppCommonIACP.goc */
 @extern method UIApplicationClass, MSG_META_FUP_KBD_CHAR;
 @extern method UIApplicationClass, MSG_META_NOTIFY_NO_FOCUS_WITHIN_NODE;
 @extern method UIApplicationClass, MSG_META_MUP_ALTER_FTVMC_EXCL;

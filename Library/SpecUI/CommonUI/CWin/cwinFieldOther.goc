@@ -1,0 +1,189 @@
+/*
+ * cwinFieldOther.goc -- after cwinFieldOther.asm:
+ * GetBackgroundColorNoPict, GetBackgroundColorPict,
+ * MSG_GEN_FIELD_RESET_BG, MSG_META_KBD_CHAR,
+ * MSG_GEN_FIELD_ORDER_GEN_APPLICATION_LIST,
+ * MSG_GEN_FIELD_APP_NO_LONGER_EXITING,
+ * MSG_GEN_FIELD_ABOUT_TO_DETACH_COMPLETE, MSG_VIS_CLOSE,
+ * MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP.
+ *
+ * The class record of OLFieldClass is here, as in the asm.
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/specC.goh>
+
+@classdecl OLFieldClass, neverSaved;
+/* cwinField.goc */
+@extern method OLFieldClass, MSG_SPEC_P32_GUP_QUERY;
+@extern method OLFieldClass, MSG_VIS_P32_VUP_QUERY;
+/* cwinFieldCommon.goc */
+@extern method OLFieldClass, MSG_SPEC_GUP_QUERY_VIS_PARENT;
+@extern method OLFieldClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO;
+@extern method OLFieldClass, MSG_VIS_VUP_ALTER_INPUT_FLOW;
+@extern method OLFieldClass, MSG_META_ENSURE_ACTIVE_FT;
+@extern method OLFieldClass, MSG_META_MUP_ALTER_FTVMC_EXCL;
+@extern method OLFieldClass, MSG_META_GET_FOCUS_EXCL;
+@extern method OLFieldClass, MSG_META_GET_TARGET_EXCL;
+@extern method OLFieldClass, MSG_META_SEND_CLASSED_EVENT;
+@extern method OLFieldClass, MSG_OL_FIELD_GET_TOOL_AREA_SIZE;
+@extern method OLFieldClass, MSG_OL_FIELD_MOVE_TOOL_AREA;
+/* cwinFieldInit.goc */
+@extern method OLFieldClass, MSG_VIS_OPEN_WIN;
+@extern method OLFieldClass, MSG_META_INITIALIZE;
+@extern method OLFieldClass, MSG_GEN_LOAD_OPTIONS;
+@extern method OLFieldClass, MSG_SPEC_BUILD;
+/* cwinFieldUncommon.goc */
+@extern method OLFieldClass, MSG_META_GET_TARGET_AT_TARGET_LEVEL;
+@extern method OLFieldClass, MSG_META_GAINED_FOCUS_EXCL;
+@extern method OLFieldClass, MSG_META_LOST_FOCUS_EXCL;
+@extern method OLFieldClass, MSG_META_GAINED_TARGET_EXCL;
+@extern method OLFieldClass, MSG_META_LOST_TARGET_EXCL;
+@extern method OLFieldClass, MSG_META_GAINED_FULL_SCREEN_EXCL, MSG_META_LOST_FULL_SCREEN_EXCL;
+@extern method OLFieldClass, MSG_META_FORCE_GRAB_KBD, MSG_META_GRAB_KBD, MSG_META_RELEASE_KBD;
+@extern method OLFieldClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE, MSG_VIS_FORCE_GRAB_MOUSE, MSG_VIS_GRAB_LARGE_MOUSE, MSG_VIS_GRAB_MOUSE, MSG_VIS_RELEASE_MOUSE;
+@extern method OLFieldClass, MSG_GEN_BRING_TO_TOP;
+@extern method OLFieldClass, MSG_GEN_LOWER_TO_BOTTOM;
+@extern method OLFieldClass, MSG_GEN_FIELD_GET_TOP_GEN_APPLICATION;
+@extern method OLFieldClass, MSG_OL_FIELD_SEND_TO_GEN_APPLICATIONS;
+
+static const char backgroundColorKey[] = "backgroundcolor";
+
+/* GetBackgroundColorFromFile: [ui] backgroundcolor, if a color */
+static Boolean GetBackgroundColorFromFile(Color *c)
+{
+    word v;
+
+    if (InitFileReadInteger(fieldBackgroundCategory, backgroundColorKey, &v) ||
+	v > 0xff)
+	return FALSE;
+    *c = (Color) v;
+    return TRUE;
+}
+
+/* GetBackgroundColorNoPict: the field's color without a picture: grey
+ * on black and white, else the .ini's or the scheme's (dithered);
+ * the color flags in the high byte */
+word GetBackgroundColorNoPict(void)
+{
+    Color c = C_BW_GREY;
+
+    if (!(moCS_flags & CSF_BW) && !GetBackgroundColorFromFile(&c))
+	c = moCS_screenBG;
+    return ((WCF_PLAIN | CMT_DITHER) << 8) | c;
+}
+
+/* GetBackgroundColorPict: behind a picture: white on black and white */
+word GetBackgroundColorPict(void)
+{
+    Color c = C_WHITE;
+
+    if (!(moCS_flags & CSF_BW) && !GetBackgroundColorFromFile(&c))
+	c = moCS_screenBG;
+    return ((CMT_CLOSEST | CMM_ON_BLACK) << 8) | c;
+}
+
+/* OLFieldResetBG: the background again (no picture yet), drawn again */
+@method OLFieldClass, MSG_GEN_FIELD_RESET_BG
+{
+    word color;
+    Rectangle b;
+
+    if (!pself->VCI_window)
+	return;
+    color = FieldWindowColor(oself);
+    WinSetInfo(pself->VCI_window, WIT_COLOR,
+	       ((optr) (color >> 8) << 8) | (color & 0xff));
+    VisGetBounds(oself, &b);
+    WinInvalTree(OLFieldInstanceOf(oself)->VCI_window, NULL, b.R_left, b.R_top,
+		 b.R_right, b.R_bottom);
+}
+
+/* OLFieldKbdChar: to the field's focus */
+@method OLFieldClass, MSG_META_KBD_CHAR
+{
+    optr focus = pself->OLFI_focusExcl.HG_OD;
+
+    if (!focus) {
+	@callsuper();
+	return;
+    }
+    @send focus::MSG_META_KBD_CHAR(character, flags, state);
+}
+#define MAX_FIELD_APPS	64
+
+/* OLFieldOrderGenApplicationList: GFI_genApplications in the order of
+ * the applications' windows */
+@method OLFieldClass, MSG_GEN_FIELD_ORDER_GEN_APPLICATION_LIST
+{
+    optr apps[MAX_FIELD_APPS];
+    AppArray a;
+    word i;
+
+    if (!pself->VCI_window)
+	return;
+    a.apps = apps;
+    a.count = 0;
+    a.max = MAX_FIELD_APPS;
+    a.ui = SysGetInfo(SGIT_UI_PROCESS);
+    FieldCollectApps(pself->VCI_window, &a);
+    for (i = 0; i < a.count; i++)
+	@call oself::MSG_GEN_FIELD_MOVE_GEN_APPLICATION(apps[i], i);
+}
+
+/* OLFieldAppNoLongerExiting: a quit on close is off, the applications
+ * told */
+@method OLFieldClass, MSG_GEN_FIELD_APP_NO_LONGER_EXITING
+{
+    GenFieldInstance *gen = GenFieldInstanceOf(oself);
+    ChunkHandle list;
+    optr l;
+    word n, i;
+
+    if (!(gen->GFI_flags & GFF_QUIT_ON_CLOSE))
+	return;
+    gen->GFI_flags &= ~GFF_QUIT_ON_CLOSE;
+    list = gen->GFI_genApplications;
+    if (!list)
+	return;
+    l = ConstructOptr(OptrToHandle(oself), list);
+    n = LMemGetChunkSize(l) / sizeof(optr);
+    for (i = 0; i < n; i++) {
+	optr app = ((optr *) LMemDeref(l))[i];
+
+	@send, forceQueue app::MSG_GEN_APPLICATION_FIELD_QUIT_ABORTED();
+    }
+}
+
+/* OLFieldAboutToDetachComplete: the express menu and the tool area go
+ * (none yet) */
+@method OLFieldClass, MSG_GEN_FIELD_ABOUT_TO_DETACH_COMPLETE
+{
+    pself->OLFI_expressMenu = 0;
+    pself->OLFI_toolArea = 0;
+}
+
+/* OLFieldVisClose: the exclusives given up, closed; the system finds a
+ * new focus and target */
+@method OLFieldClass, MSG_VIS_CLOSE
+{
+    optr sys;
+
+    @call oself::MSG_META_RELEASE_FOCUS_EXCL();
+    @call oself::MSG_META_RELEASE_TARGET_EXCL();
+    @call oself::MSG_META_MUP_ALTER_FTVMC_EXCL(oself, MAEF_FULL_SCREEN |
+					       MAEF_NOT_HERE);
+    @callsuper();
+    sys = UserGetSystemObject();
+    if (sys)
+	@call sys::MSG_META_ENSURE_ACTIVE_FT();
+}
+
+/* the next application: the window list's next entry (not yet: the
+ * window list is not ported); the application's event freed */
+@method OLFieldClass, MSG_OL_FIELD_NAVIGATE_TO_NEXT_APP
+{
+    (void) currentApp;
+    if (event)
+	ObjFreeMessage(event);
+}

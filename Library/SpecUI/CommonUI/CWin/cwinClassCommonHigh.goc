@@ -20,7 +20,12 @@
 @include <Objects/gPenICC.goh>
 
 @classdecl OLWinClass, neverSaved;
-
+/* cwinClassCommonLow.goc */
+@extern method OLWinClass, MSG_META_UPDATE_WINDOW;
+@extern method OLWinClass, MSG_GEN_BRING_TO_TOP;
+@extern method OLWinClass, MSG_VIS_MOVE_RESIZE_WIN;
+@extern method OLWinClass, MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS;
+@extern method OLWinClass, MSG_OL_WIN_GET_TITLE_BAR_HEIGHT;
 /* cwinClassCommonMiddle.goc */
 @extern method OLWinClass, MSG_SPEC_UNBUILD;
 @extern method OLWinClass, MSG_GEN_DESTROY_AND_FREE_BLOCK;
@@ -32,51 +37,10 @@
 @extern method OLWinClass, MSG_VIS_P32_VUP_QUERY;
 @extern method OLWinClass, MSG_VIS_OPEN_WIN;
 @extern method OLWinClass, MSG_OL_WIN_UPDATE_FOR_TITLE_GROUP;
-/* cwinClassCommonLow.goc */
-@extern method OLWinClass, MSG_META_UPDATE_WINDOW;
-@extern method OLWinClass, MSG_GEN_BRING_TO_TOP;
-@extern method OLWinClass, MSG_VIS_MOVE_RESIZE_WIN;
-@extern method OLWinClass, MSG_OL_WIN_GET_HEADER_TITLE_BOUNDS;
-@extern method OLWinClass, MSG_OL_WIN_GET_TITLE_BAR_HEIGHT;
-/* cwinClassCUAS.goc */
+/* cwinClassMisc.goc */
 @extern method OLWinClass, MSG_SPEC_NOTIFY_ENABLED, MSG_SPEC_NOTIFY_NOT_ENABLED;
-/* cwinClassOther.goc */
-@extern method OLWinClass, MSG_VIS_CLOSE;
-@extern method OLWinClass, MSG_GEN_LOWER_TO_BOTTOM;
-@extern method OLWinClass, MSG_VIS_VUP_RELEASE_MENU_FOCUS;
-/* cwinGeometry.goc */
-@extern method OLWinClass, MSG_VIS_RECALC_SIZE;
-@extern method OLWinClass, MSG_VIS_POSITION_BRANCH;
-@extern method OLWinClass, MSG_VIS_COMP_GET_CHILD_SPACING;
-@extern method OLWinClass, MSG_VIS_COMP_GET_MARGINS;
-@extern method OLWinClass, MSG_VIS_COMP_GET_MINIMUM_SIZE;
-@extern method OLWinClass, MSG_VIS_UPDATE_GEOMETRY;
-@extern method OLWinClass, MSG_OL_GET_CHILDS_TREE_POS;
-@extern method OLWinClass, MSG_VIS_RESET_TO_INITIAL_SIZE;
-@extern method OLWinClass, MSG_OL_WIN_RECALC_DISPLAY_SIZE;
 @extern method OLWinClass, MSG_OL_WIN_IS_MAXIMIZED;
 @extern method OLWinClass, MSG_OL_WIN_IS_DEFAULT_ACTION_NAVIGATE_TO_NEXT_FIELD;
-/* cwinExcl.goc */
-@extern method OLWinClass, MSG_META_GAINED_FOCUS_EXCL;
-@extern method OLWinClass, MSG_META_GAINED_SYS_FOCUS_EXCL,
-		    MSG_META_LOST_SYS_FOCUS_EXCL;
-@extern method OLWinClass, MSG_META_LOST_FOCUS_EXCL;
-@extern method OLWinClass, MSG_META_GAINED_SYS_TARGET_EXCL,
-		    MSG_META_LOST_SYS_TARGET_EXCL;
-@extern method OLWinClass, MSG_META_GAINED_TARGET_EXCL,
-		    MSG_META_LOST_TARGET_EXCL;
-@extern method OLWinClass, MSG_META_GRAB_FOCUS_EXCL;
-@extern method OLWinClass, MSG_META_GRAB_TARGET_EXCL;
-@extern method OLWinClass, MSG_META_MUP_ALTER_FTVMC_EXCL;
-@extern method OLWinClass, MSG_OL_WIN_RESTORE_PREVIOUS_FOCUS_EXCL;
-@extern method OLWinClass, MSG_META_GET_FOCUS_EXCL;
-@extern method OLWinClass, MSG_VIS_FUP_QUERY_FOCUS_EXCL,
-		    MSG_VIS_VUP_QUERY_FOCUS_EXCL;
-@extern method OLWinClass, MSG_META_GET_TARGET_EXCL;
-@extern method OLWinClass, MSG_META_SEND_CLASSED_EVENT;
-/* Motif/Win/winDraw.goc */
-@extern method OLWinClass, MSG_VIS_DRAW;
-/* cwinClassMisc.goc */
 @extern method OLWinClass, MSG_SPEC_NAVIGATION_QUERY;
 @extern method OLWinClass, MSG_SPEC_NAVIGATE_TO_PREVIOUS_FIELD;
 @extern method OLWinClass, MSG_OL_WIN_QUERY_MENU_BAR;
@@ -88,6 +52,34 @@
 @extern method OLWinClass, MSG_GEN_SET_WIN_SIZE;
 @extern method OLWinClass, MSG_GEN_SET_WIN_CONSTRAIN;
 @extern method OLWinClass, MSG_META_FUP_KBD_CHAR;
+/* cwinClassOther.goc */
+@extern method OLWinClass, MSG_VIS_CLOSE;
+@extern method OLWinClass, MSG_GEN_LOWER_TO_BOTTOM;
+@extern method OLWinClass, MSG_VIS_VUP_RELEASE_MENU_FOCUS;
+/* cwinExcl.goc */
+@extern method OLWinClass, MSG_META_GAINED_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GAINED_SYS_FOCUS_EXCL, MSG_META_LOST_SYS_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_LOST_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GAINED_SYS_TARGET_EXCL, MSG_META_LOST_SYS_TARGET_EXCL;
+@extern method OLWinClass, MSG_META_GAINED_TARGET_EXCL, MSG_META_LOST_TARGET_EXCL;
+@extern method OLWinClass, MSG_META_GRAB_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GRAB_TARGET_EXCL;
+@extern method OLWinClass, MSG_META_MUP_ALTER_FTVMC_EXCL;
+@extern method OLWinClass, MSG_OL_WIN_RESTORE_PREVIOUS_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GET_FOCUS_EXCL;
+@extern method OLWinClass, MSG_VIS_FUP_QUERY_FOCUS_EXCL, MSG_VIS_VUP_QUERY_FOCUS_EXCL;
+@extern method OLWinClass, MSG_META_GET_TARGET_EXCL;
+@extern method OLWinClass, MSG_META_SEND_CLASSED_EVENT;
+/* cwinGeometry.goc */
+@extern method OLWinClass, MSG_VIS_RECALC_SIZE;
+@extern method OLWinClass, MSG_VIS_POSITION_BRANCH;
+@extern method OLWinClass, MSG_VIS_COMP_GET_CHILD_SPACING;
+@extern method OLWinClass, MSG_VIS_COMP_GET_MARGINS;
+@extern method OLWinClass, MSG_VIS_COMP_GET_MINIMUM_SIZE;
+@extern method OLWinClass, MSG_VIS_UPDATE_GEOMETRY;
+@extern method OLWinClass, MSG_OL_GET_CHILDS_TREE_POS;
+@extern method OLWinClass, MSG_VIS_RESET_TO_INITIAL_SIZE;
+@extern method OLWinClass, MSG_OL_WIN_RECALC_DISPLAY_SIZE;
 /* cwinPtr.goc */
 @extern method OLWinClass, MSG_OL_WIN_STARTUP_GRAB;
 @extern method OLWinClass, MSG_OL_WIN_END_GRAB;
@@ -101,13 +93,14 @@
 @extern method OLWinClass, MSG_META_START_SELECT, MSG_META_START_MOVE_COPY;
 @extern method OLWinClass, MSG_META_START_FEATURES;
 @extern method OLWinClass, MSG_META_DRAG_SELECT, MSG_META_DRAG_MOVE_COPY;
-@extern method OLWinClass, MSG_META_END_SELECT, MSG_META_END_MOVE_COPY,
-		    MSG_META_END_FEATURES;
+@extern method OLWinClass, MSG_META_END_SELECT, MSG_META_END_MOVE_COPY, MSG_META_END_FEATURES;
 @extern method OLWinClass, MSG_META_PRE_PASSIVE_START_SELECT;
 @extern method OLWinClass, MSG_META_PRE_PASSIVE_START_MOVE_COPY;
 @extern method OLWinClass, MSG_META_RAW_UNIV_ENTER;
 @extern method OLWinClass, MSG_META_RAW_UNIV_LEAVE;
 @extern method OLWinClass, MSG_META_KBD_CHAR;
+/* Motif/Win/winDraw.goc */
+@extern method OLWinClass, MSG_VIS_DRAW;
 
 #define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 #define Gen(o)		((GenInstance *) ObjDerefGen(o))
@@ -704,20 +697,6 @@ void OpenWinSwapState(optr o)
     if (pself->VI_specAttrs & SA_USES_DUAL_BUILD)
 	return GetVisParentForDialog(oself);
     return pself->OLCI_visParent;
-}
-
-/* GetVisParentForDialog: the vis parent for a popup or a system modal
- * dialog */
-optr GetVisParentForDialog(optr o)
-{
-    optr vp = 0;
-    word type = (((GenInteractionInstance *) ObjDerefGen(o))->GII_attrs &
-		 GIA_SYS_MODAL) ? SQT_VIS_PARENT_FOR_SYS_MODAL
-				: SQT_VIS_PARENT_FOR_POPUP;
-
-    (void) GenCallParent(o, MSG_SPEC_GUP_QUERY_VIS_PARENT, &type,
-			 sizeof(type), &vp, sizeof(vp));
-    return vp;
 }
 
 /*

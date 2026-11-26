@@ -7,4 +7,7 @@ geos_sources(motif_goc
   copenAppCommon.goc
   copenAppMisc.goc
   copenMoniker.goc
-  copenFileSelector.goc)
+  copenFileSelector.goc
+  copenFileSelectorMiddle.goc
+  copenFileSelectorLow.goc
+  copenFileSelectorHigh.goc)

@@ -274,96 +274,8 @@ OLCtrlMoreFlags OpenGetParentMoreFlagsIfCtrl(optr obj)
 }
 
 /* ---------------------------------------------------------------------
- * Visibility notification (copenButtonClass.asm)
- * ------------------------------------------------------------------- */
-
-/* VisOpenCloseNotifyCommon: ATTR_GEN_VISIBILITY_MESSAGE (else
- * MSG_GEN_APPLICATION_VISIBILITY_NOTIFICATION) with the object (or
- * ATTR_GEN_VISIBILITY_DATA) to ATTR_GEN_VISIBILITY_DESTINATION (else
- * the application) */
-static void VisOpenCloseNotifyCommon(optr obj, Boolean opening)
-{
-    optr data = obj, dest;
-    Message msg = MSG_GEN_APPLICATION_VISIBILITY_NOTIFICATION;
-    void *p;
-
-    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_DATA)) != NULL)
-	data = *(optr *) p;
-    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_MESSAGE)) != NULL)
-	msg = *(Message *) p;
-    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_DESTINATION)) != NULL)
-	dest = *(optr *) p;
-    else
-	dest = GeodeGetAppObject(0);
-    if (dest)
-	@send dest::{GEN_VISIBILITY_OUTPUT}(msg)(data, opening);
-}
-
-void VisOpenNotifyCommon(optr obj)
-{
-    VisOpenCloseNotifyCommon(obj, TRUE);
-}
-
-void VisCloseNotifyCommon(optr obj)
-{
-    VisOpenCloseNotifyCommon(obj, FALSE);
-}
-
-/* ---------------------------------------------------------------------
- * Moniker sizes (copenMoniker.asm)
- * ------------------------------------------------------------------- */
-
-static word systemFontHeight;
-static word addOnMnemonicWidth;
-
-/* GetSystemFontHeight: the height of the UI's font (cached;
- * CalcAndCacheSystemFontHeight) */
-word GetSystemFontHeight(void)
-{
-    if (!systemFontHeight) {
-	GStateHandle gs = ViewCreateCalcGState();
-
-	systemFontHeight = (word) GrFontMetrics(gs, GFMI_HEIGHT_ROUNDED);
-	GrDestroyState(gs);
-    }
-    return systemFontHeight;
-}
-
-/* SpecGetGenMonikerSize: the generic moniker's size; a mnemonic not in
- * the text is shown after it (as " (w)") */
-SizeAsDWord SpecGetGenMonikerSize(optr obj, GStateHandle gs)
-{
-    ChunkHandle m = ((GenInstance *) ObjDerefGen(obj))->GI_visMoniker;
-    SizeAsDWord s;
-    VisMonikerWithText *t;
-
-    s = VisGetMonikerSize(obj, m, GetSystemFontHeight(), gs);
-    if (!m)
-	return s;
-    t = LMemDeref(ConstructOptr(OptrToHandle(obj), m));
-    if ((t->VMWT_common.VM_type & VMT_GSTRING) ||
-	(byte) t->VMWT_mnemonicOffset != 0xfe)	/* VMO_MNEMONIC_NOT_IN_MKR_TEXT */
-	return s;
-    if (!addOnMnemonicWidth) {
-	GStateHandle cg = ViewCreateCalcGState();
-
-	addOnMnemonicWidth = GrTextWidth(cg, " (w)", 4);
-	GrDestroyState(cg);
-    }
-    return MAKE_SIZE_DWORD(DWORD_WIDTH(s) + addOnMnemonicWidth,
-			   DWORD_HEIGHT(s));
-}
-
-/* ---------------------------------------------------------------------
  * The keyboard
  * ------------------------------------------------------------------- */
-
-/* CheckIfKeyboardRequired (cmainUtils.asm): no keyboard, or the
- * floating keyboard wanted ([input] floatingKbd) */
-Boolean CheckIfKeyboardRequired(void)
-{
-    return (FlowGetUIButtonFlags() & UIBF_NO_KEYBOARD) || kbdRequired;
-}
 
 /* OpenCheckIfKeyboardOnly: no mouse */
 Boolean OpenCheckIfKeyboardOnly(void)
@@ -998,82 +910,6 @@ word OpenSetInsetRectColors(GStateHandle gs)
     return (C_WHITE << 8) | moCS_dsDarkColor;
 }
 
-#define UKEY(k)		((KS_CHAR_SET_CONTROL << 8) | (k))
-
-/* the text object's keys (cviewVariable.def, CUA style): not special */
-static const KeyboardShortcut textKbdBindings[] = {
-    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_LEFT),
-    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_RIGHT),
-    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_UP),
-    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_DOWN),
-    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_HOME),
-    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_END),
-    KS_PHYSICAL | KS_CTRL | UKEY(VC_LEFT),
-    KS_PHYSICAL | KS_CTRL | UKEY(VC_RIGHT),
-    KS_PHYSICAL | KS_CTRL | UKEY(VC_UP),
-    KS_PHYSICAL | KS_CTRL | UKEY(VC_DOWN),
-    KS_PHYSICAL | KS_CTRL | UKEY(VC_HOME),
-    KS_PHYSICAL | KS_CTRL | UKEY(VC_END),
-    KS_PHYSICAL | KS_SHIFT | UKEY(VC_LEFT),
-    KS_PHYSICAL | KS_SHIFT | UKEY(VC_RIGHT),
-    KS_PHYSICAL | KS_SHIFT | UKEY(VC_UP),
-    KS_PHYSICAL | KS_SHIFT | UKEY(VC_DOWN),
-    KS_PHYSICAL | KS_SHIFT | UKEY(VC_HOME),
-    KS_PHYSICAL | KS_SHIFT | UKEY(VC_END),
-    UKEY(VC_UP), UKEY(VC_DOWN), UKEY(VC_LEFT), UKEY(VC_RIGHT),
-    UKEY(VC_HOME), UKEY(VC_END), UKEY(VC_BACKSPACE), UKEY(VC_DEL),
-    KS_SHIFT | UKEY(VC_BACKSPACE), KS_SHIFT | UKEY(VC_DEL),
-    KS_CTRL | UKEY(VC_BACKSPACE), KS_CTRL | UKEY(VC_DEL),
-    KS_CTRL | KS_SHIFT | UKEY(VC_BACKSPACE),
-    KS_PHYSICAL | KS_CTRL | KS_SHIFT | UKEY(VC_DEL),
-    KS_PHYSICAL | KS_CTRL | (KS_CHAR_SET_PRINTABLE << 8) | ' ',
-    KS_PHYSICAL | KS_ALT | UKEY(VC_INS),
-    KS_PHYSICAL | UKEY(VC_INS),
-    KS_CTRL | KS_SHIFT | (KS_CHAR_SET_PRINTABLE << 8) | '"',
-    KS_CTRL | KS_SHIFT | (KS_CHAR_SET_PRINTABLE << 8) | '\'',
-    KS_CTRL | (KS_CHAR_SET_PRINTABLE << 8) | '"',
-    KS_CTRL | (KS_CHAR_SET_PRINTABLE << 8) | '\'',
-    KS_PHYSICAL | UKEY(VC_JOYSTICK_180),
-    KS_PHYSICAL | UKEY(VC_JOYSTICK_0)
-};
-
-/* what the keys do, in the order of the table (VisTextKeyFunction) */
-static const word textKbdFunctions[] = {
-    VTKF_SELECT_ADJUST_BACKWARD_WORD, VTKF_SELECT_ADJUST_FORWARD_WORD,
-    VTKF_SELECT_ADJUST_BACKWARD_PARAGRAPH,
-    VTKF_SELECT_ADJUST_FORWARD_PARAGRAPH,
-    VTKF_SELECT_ADJUST_TO_START, VTKF_SELECT_ADJUST_TO_END,
-    VTKF_BACKWARD_WORD, VTKF_FORWARD_WORD,
-    VTKF_BACKWARD_PARAGRAPH, VTKF_FORWARD_PARAGRAPH,
-    VTKF_START_OF_TEXT, VTKF_END_OF_TEXT,
-    VTKF_SELECT_ADJUST_BACKWARD_CHAR, VTKF_SELECT_ADJUST_FORWARD_CHAR,
-    VTKF_SELECT_ADJUST_BACKWARD_LINE, VTKF_SELECT_ADJUST_FORWARD_LINE,
-    VTKF_SELECT_ADJUST_START_OF_LINE, VTKF_SELECT_ADJUST_END_OF_LINE,
-    VTKF_BACKWARD_LINE, VTKF_FORWARD_LINE,
-    VTKF_BACKWARD_CHAR, VTKF_FORWARD_CHAR,
-    VTKF_START_OF_LINE, VTKF_END_OF_LINE,
-    VTKF_DELETE_BACKWARD_CHAR, VTKF_DELETE_CHAR,
-    VTKF_DELETE_BACKWARD_CHAR, VTKF_DELETE_CHAR,
-    VTKF_DELETE_BACKWARD_WORD, VTKF_DELETE_WORD,
-    VTKF_DELETE_BACKWARD_LINE, VTKF_DELETE_LINE,
-    VTKF_SELECT_WORD, VTKF_DESELECT, VTKF_TOGGLE_OVERSTRIKE_MODE,
-    VTKF_TOGGLE_SMART_QUOTES, VTKF_TOGGLE_SMART_QUOTES,
-    VTKF_TOGGLE_SMART_QUOTES, VTKF_TOGGLE_SMART_QUOTES,
-    VTKF_BACKWARD_CHAR, VTKF_FORWARD_CHAR
-};
-
-/*
- * SpecGetTextKbdBindings (SPIR_GET_TEXT_KBD_BINDINGS): the text
- * object's keys: the shortcuts, their count and the function of each
- */
-const KeyboardShortcut *SpecGetTextKbdBindings(word *count,
-					       const word **functions)
-{
-    *count = sizeof(textKbdBindings) / sizeof(textKbdBindings[0]);
-    *functions = textKbdFunctions;
-    return textKbdBindings;
-}
-
 /*
  * SpecCheckIfSpecialUIChar: a key for the UI rather than the object with
  * the focus: Alt, F10, releases of control keys, shortcuts that are not
@@ -1095,22 +931,7 @@ Boolean SpecCheckIfSpecialUIChar(word c, word flags, word state)
 	UserCheckInsertableCtrlChar(c, flags, state))
 	return FALSE;
     return FlowCheckKbdShortcut((KeyboardShortcut *) textKbdBindings,
-				sizeof(textKbdBindings) /
-				sizeof(textKbdBindings[0]), c, flags,
-				state) == (word) -1;
-}
-
-/*
- * ConvertKeyToMethod: the message for the key in a table of shortcuts
- * and the messages beside it; 0 if not there
- */
-Message ConvertKeyToMethod(const KeyboardShortcut *keys, const Message *msgs,
-			   word count, word c, word flags, word state)
-{
-    word off = FlowCheckKbdShortcut((KeyboardShortcut *) keys, count, c,
-				    flags, state);
-
-    return off == (word) -1 ? 0 : msgs[off / sizeof(KeyboardShortcut)];
+				TEXT_KBD_BINDING_COUNT, c, flags, state) == (word) -1;
 }
 
 /*
@@ -1126,4 +947,10 @@ void OLBroadcastForDefaultFocus(optr o, ObjectAndGrabParams *q)
     for (i = 0; (c = @call o::MSG_VIS_FIND_CHILD_AT_POSITION(i)) != 0; i++)
 	if (((VisInstance *) ObjDerefVis(c))->VI_attrs & VA_FULLY_ENABLED)
 	    @call c::MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS(q);
+}
+
+/* SpecGetDisplayScheme: the display scheme (one display, one font) */
+void SpecGetDisplayScheme(DisplayScheme *ds)
+{
+    *ds = specDisplayScheme;
 }

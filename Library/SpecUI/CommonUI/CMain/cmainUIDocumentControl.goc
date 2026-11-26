@@ -1022,15 +1022,3 @@ void OLDCEnsureTemplateDir(optr o)
     (void) pself;
     GeodeGetInfo(MemOwner(OptrToHandle(oself)), GGIT_TOKEN_ID, token);
 }
-
-/* ---------------------------------------------------------------------
- * OLBuildUIDocumentControl (cspecUIDocumentControl.asm): always this
- * class
- * ------------------------------------------------------------------- */
-
-ClassStruct *OLBuildUIDocumentControl(optr oself, word masterOffset)
-{
-    (void) oself;
-    (void) masterOffset;
-    return (ClassStruct *) &OLDocumentControlClass;
-}

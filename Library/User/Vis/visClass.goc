@@ -26,32 +26,14 @@
 #include <localize.h>
 #include <Internal/grWinInt.h>
 
-@classdecl VisEmptyClass, neverSaved;
-@extern method VisClass, MSG_VIS_RECALC_SIZE;
-@extern method VisClass, MSG_VIS_GET_SIZE;
-@extern method VisClass, MSG_SPEC_GET_EXTRA_SIZE;
-@extern method VisClass, MSG_VIS_SET_SIZE;
-@extern method VisClass, MSG_VIS_SET_POSITION, MSG_VIS_POSITION_BRANCH;
-@extern method VisClass, MSG_VIS_GET_CENTER;
-@extern method VisClass, MSG_VIS_GRAB_MOUSE;
-@extern method VisClass, MSG_VIS_FORCE_GRAB_MOUSE;
-@extern method VisClass, MSG_VIS_GRAB_LARGE_MOUSE;
-@extern method VisClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE;
-@extern method VisClass, MSG_META_GRAB_KBD;
-@extern method VisClass, MSG_META_FORCE_GRAB_KBD;
-@extern method VisClass, MSG_META_RELEASE_KBD;
-@extern method VisClass, MSG_VIS_RELEASE_MOUSE;
-@extern method VisClass, MSG_VIS_MARK_INVALID;
-@extern method VisClass, MSG_VIS_REMOVE_NON_DISCARDABLE;
-@extern method VisClass, MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED;
-@extern method VisClass, MSG_VIS_POSITION_AND_INVAL_IF_NEEDED;
-@extern method VisClass, MSG_VIS_INVAL_ALL_GEOMETRY;
-@extern method VisClass, MSG_VIS_ADD_BUTTON_PRE_PASSIVE;
-@extern method VisClass, MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE;
-@extern method VisClass, MSG_VIS_ADD_BUTTON_POST_PASSIVE;
-@extern method VisClass, MSG_VIS_REMOVE_BUTTON_POST_PASSIVE;
-@extern method VisClass, MSG_SPEC_CHECK_MNEMONIC;
-@extern method VisClass, MSG_SPEC_CONVERT_SIZE;
+@classdecl VisClass, neverSaved;
+/* visGeometry.goc */
+@extern method VisClass, MSG_VIS_UPDATE_GEOMETRY;
+@extern method VisClass, MSG_VIS_BOUNDS_CHANGED;
+@extern method VisClass, MSG_VIS_RESET_TO_INITIAL_SIZE, MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN;
+@extern method VisClass, MSG_VIS_SET_GEO_ATTRS;
+@extern method VisClass, MSG_VIS_GET_GEO_ATTRS;
+/* visSpec.goc */
 @extern method VisClass, MSG_SPEC_BUILD_BRANCH;
 @extern method VisClass, MSG_SPEC_UNBUILD;
 @extern method VisClass, MSG_SPEC_UNBUILD_BRANCH;
@@ -76,12 +58,34 @@
 @extern method VisClass, MSG_SPEC_ACTIVATE_INTERACTION_DEFAULT;
 @extern method VisClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO;
 @extern method VisClass, MSG_SPEC_BUILD;
-@extern method VisClass, MSG_VIS_UPDATE_GEOMETRY;
-@extern method VisClass, MSG_VIS_BOUNDS_CHANGED;
-@extern method VisClass, MSG_VIS_RESET_TO_INITIAL_SIZE, MSG_SPEC_RESET_SIZE_TO_STAY_ONSCREEN;
-@extern method VisClass, MSG_VIS_SET_GEO_ATTRS;
-@extern method VisClass, MSG_VIS_GET_GEO_ATTRS;
-@classdecl VisClass, neverSaved;
+/* visSpecUtils.goc */
+@extern method VisClass, MSG_SPEC_CHECK_MNEMONIC;
+@extern method VisClass, MSG_SPEC_CONVERT_SIZE;
+/* visUtilsClass.goc */
+@extern method VisClass, MSG_VIS_REMOVE_NON_DISCARDABLE;
+@extern method VisClass, MSG_VIS_RECALC_SIZE_AND_INVAL_IF_NEEDED;
+@extern method VisClass, MSG_VIS_POSITION_AND_INVAL_IF_NEEDED;
+@extern method VisClass, MSG_VIS_INVAL_ALL_GEOMETRY;
+@extern method VisClass, MSG_VIS_ADD_BUTTON_PRE_PASSIVE;
+@extern method VisClass, MSG_VIS_REMOVE_BUTTON_PRE_PASSIVE;
+@extern method VisClass, MSG_VIS_ADD_BUTTON_POST_PASSIVE;
+@extern method VisClass, MSG_VIS_REMOVE_BUTTON_POST_PASSIVE;
+/* visUtilsResident.goc */
+@extern method VisClass, MSG_VIS_RECALC_SIZE;
+@extern method VisClass, MSG_VIS_GET_SIZE;
+@extern method VisClass, MSG_SPEC_GET_EXTRA_SIZE;
+@extern method VisClass, MSG_VIS_SET_SIZE;
+@extern method VisClass, MSG_VIS_SET_POSITION, MSG_VIS_POSITION_BRANCH;
+@extern method VisClass, MSG_VIS_GET_CENTER;
+@extern method VisClass, MSG_VIS_GRAB_MOUSE;
+@extern method VisClass, MSG_VIS_FORCE_GRAB_MOUSE;
+@extern method VisClass, MSG_VIS_GRAB_LARGE_MOUSE;
+@extern method VisClass, MSG_VIS_FORCE_GRAB_LARGE_MOUSE;
+@extern method VisClass, MSG_META_GRAB_KBD;
+@extern method VisClass, MSG_META_FORCE_GRAB_KBD;
+@extern method VisClass, MSG_META_RELEASE_KBD;
+@extern method VisClass, MSG_VIS_RELEASE_MOUSE;
+@extern method VisClass, MSG_VIS_MARK_INVALID;
 
 /* ---------------------------------------------------------------------
  * Construction

@@ -17,12 +17,6 @@
 @include "textInt.goh"
 #include <font.h>
 
-@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_HEIGHT;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_MIN_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_SIMPLE_MIN_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_AVERAGE_CHAR_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_ONE_LINE_WIDTH;
-@extern method VisTextClass, MSG_VIS_TEXT_CALC_HEIGHT;
 
 #define VIS_TEXT_MIN_TEXT_FIELD_WIDTH	47
 

@@ -138,27 +138,6 @@ void OLButtonUpdateState(optr oself)
     b->OLBI_optFlags |= f;
 }
 
-/* OpenButtonCheckIfAlwaysEnabled: a menu's button, the pushpin */
-static Boolean CheckIfAlwaysEnabled(optr oself)
-{
-    optr g = ConstructOptr(OptrToHandle(oself), Btn(oself)->OLBI_genChunk);
-
-    if (OLQueryIsMenu(g))
-	return TRUE;
-    if ((Btn(oself)->VI_typeFlags & VTF_IS_GEN) &&
-	ObjIsObjectInClass(oself, &GenTriggerClass) &&
-	((GenTriggerInstance *) ObjDerefGen(oself))->GTI_actionMsg ==
-	MSG_OL_POPUP_TOGGLE_PUSHPIN)
-	return TRUE;
-    return FALSE;
-}
-
-Boolean OpenButtonCheckIfFullyEnabled(optr oself)
-{
-    return CheckIfAlwaysEnabled(oself) ||
-	   (Btn(oself)->VI_attrs & VA_FULLY_ENABLED);
-}
-
 /* ---------------------------------------------------------------------
  * The grabs and exclusives
  * ------------------------------------------------------------------- */
@@ -490,7 +469,7 @@ static void FinishChangeEnabled(optr oself)
 {
     Boolean r;
 
-    if (CheckIfAlwaysEnabled(oself))
+    if (OpenButtonCheckIfAlwaysEnabled(oself))
 	return FALSE;
     r = @callsuper();
     FinishChangeEnabled(oself);
@@ -501,7 +480,7 @@ static void FinishChangeEnabled(optr oself)
 {
     Boolean r;
 
-    if (CheckIfAlwaysEnabled(oself))
+    if (OpenButtonCheckIfAlwaysEnabled(oself))
 	return FALSE;
     r = @callsuper();
     FinishChangeEnabled(oself);

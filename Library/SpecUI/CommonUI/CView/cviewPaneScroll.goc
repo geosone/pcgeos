@@ -1,6 +1,6 @@
 /*
- * cviewPaneScroll.goc -- scrolling OLPaneClass (after cviewPaneScroll.asm
- * and the origin and scale messages to the content of cviewPaneScale.asm).
+ * cviewPaneScroll.goc -- scrolling OLPaneClass (after
+ * cviewPaneScroll.asm; scaling is in cviewPaneScale.goc).
  * Every scroll comes to OLPaneScroll as a change of the origin: kept in
  * the document (the window's page from its end at most); a content that
  * tracks scrolling (GVA_TRACK_SCROLLING) may change it first (it answers
@@ -17,6 +17,7 @@
  * linked views (GenViewSendToLinksIfNeededDirection).
  */
 @include "CView/cviewInt.goh"
+@include <Internal/flowC.goh>
 
 /* GetXOrigin, GetYOrigin: the origin rounded */
 void GetOrigin(optr oself, PointDWord *p)
@@ -40,7 +41,7 @@ static void MakeAbsolute(optr oself, PointDWord *p)
 }
 
 /* MakeRelativeToOrigin */
-static void MakeRelative(optr oself, PointDWord *p)
+void OLPaneMakeRelative(optr oself, PointDWord *p)
 {
     PointDWord o;
 
@@ -94,16 +95,6 @@ void SendNewOriginToOD(optr oself, const PointDWord *origin)
     if (g->GVI_origin.PDF_y.DWF_frac & 0x8000)
 	y++;
     @send ,forceQueue c::MSG_META_CONTENT_VIEW_ORIGIN_CHANGED(
-		PVis(oself)->OLPI_window, y, x);
-}
-
-/* SendNewScaleToOD: the content told the scale (queued) */
-void SendNewScaleToOD(optr oself, WWFixedAsDWord x, WWFixedAsDWord y)
-{
-    optr c = PGen(oself)->GVI_content;
-
-    if (c)
-	@send ,forceQueue c::MSG_META_CONTENT_VIEW_SCALE_FACTOR_CHANGED(
 		PVis(oself)->OLPI_window, y, x);
 }
 
@@ -175,7 +166,7 @@ void OLPaneScroll(optr oself, PointDWord *change, OLPaneScrollFlags flags)
     ObjMarkDirty(oself);
     MakeAbsolute(oself, &abs);
     (void) KeepOriginInBounds(oself, &abs);
-    MakeRelative(oself, &abs);
+    OLPaneMakeRelative(oself, &abs);
     *change = abs;
     g = PGen(oself);
     if (!(flags & OLPSF_DONT_NORMALIZE) && (flags & OLPSF_SCROLL_ACTION) &&
@@ -222,26 +213,7 @@ void OLPaneScrollAbsolute(optr oself, sdword x, sdword y,
     GetOrigin(oself, &o);
     p.PD_x = x == DONT_SCROLL ? o.PD_x : x;
     p.PD_y = y == DONT_SCROLL ? o.PD_y : y;
-    MakeRelative(oself, &p);
-    OLPaneScroll(oself, &p, flags);
-}
-
-/* OLPaneAdjustOrigin: the origin anew (a tail oriented dimension at its
- * end kept at the end) */
-void OLPaneAdjustOrigin(optr oself, OLPaneScrollFlags flags)
-{
-    GenViewInstance *g = PGen(oself);
-    OLPaneFlags f = PVis(oself)->OLPI_flags;
-    PointDWord p;
-
-    GetOrigin(oself, &p);
-    if ((g->GVI_vertAttrs & GVDA_TAIL_ORIENTED) &&
-	(f & OLPF_AT_BOTTOM_EDGE))
-	p.PD_y = g->GVI_docBounds.RD_bottom;
-    if ((g->GVI_horizAttrs & GVDA_TAIL_ORIENTED) &&
-	(f & OLPF_AT_RIGHT_EDGE))
-	p.PD_x = g->GVI_docBounds.RD_right;
-    MakeRelative(oself, &p);
+    OLPaneMakeRelative(oself, &p);
     OLPaneScroll(oself, &p, flags);
 }
 
@@ -373,7 +345,7 @@ static void ScrollBy(optr oself, sdword x, sdword y, OLPaneScrollFlags f)
     GetOrigin(oself, &o);
     p.PD_x = xOrigin == (sdword) GVSOL_NO_CHANGE ? o.PD_x : xOrigin;
     p.PD_y = yOrigin == (sdword) GVSOL_NO_CHANGE ? o.PD_y : yOrigin;
-    MakeRelative(oself, &p);
+    OLPaneMakeRelative(oself, &p);
     OLPaneScroll(oself, &p, SA_SCROLL | OLPSF_DONT_SEND_TO_LINKS |
 		 OLPSF_DONT_NORMALIZE);
 }
@@ -532,4 +504,17 @@ static sdword ScrollIntoOneDimension(sdword o, word page, const RectSide *r)
     if (args->TSP_action == SA_INITIAL_POS)
 	@send ,forceQueue oself::MSG_SPEC_VIEW_UNSUSPEND_OPENED_WIN(
 		PVis(oself)->OLPI_windowID);
+}
+
+/* OLPaneSetDragBounds: where drag scrolling stops (none if all zero) */
+@extern method OLPaneClass, MSG_GEN_VIEW_SET_DRAG_BOUNDS
+{
+    pself->OLPI_dragBounds.RD_left = left;
+    pself->OLPI_dragBounds.RD_top = top;
+    pself->OLPI_dragBounds.RD_right = right;
+    pself->OLPI_dragBounds.RD_bottom = bottom;
+    if (left || top || right || bottom)
+	pself->OLPI_optFlags |= OLPOF_LIMIT_DRAG_SCROLLING;
+    else
+	pself->OLPI_optFlags &= ~OLPOF_LIMIT_DRAG_SCROLLING;
 }

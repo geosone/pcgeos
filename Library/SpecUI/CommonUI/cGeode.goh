@@ -466,9 +466,6 @@ typedef struct {
     Message	AD_message;
 } ActionDescriptor;
 
-/* CSpec/cspecStdDialog.goc */
-extern void OLStdDialogHelp(optr dlg, const char *helpContext,
-			    word flags);
 /* CUtils/copenUtils.goc: MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS to the
  * visible children that are fully enabled */
 extern void OLBroadcastForDefaultFocus(optr o, ObjectAndGrabParams *q);
@@ -687,3 +684,109 @@ extern Boolean OLQueryIsMenu(optr o);
 extern void OpenSendSpecBuildBranch(optr o, SpecBuildFlags flags);
 extern void OLPopupDismiss(optr o);
 extern optr OpenWinMaybeInTitleBar(optr o, optr child);
+
+/* copenButtonCommon.goc and copenButtonClass.goc */
+Boolean OpenButtonCheckIfAlwaysEnabled(optr oself);
+
+/* cmainAppDocumentControl.goc and cmainDocPhysical.goc */
+optr CreateDocObject(optr o, Message msg, DocumentCommonParams *params);
+
+/* cmainDocumentMisc.goc and cmainDocumentNew.goc */
+void RemoveConnection(optr o, IACPConnection connection);
+
+/* copenFileSelector.goc and copenFileSelectorHigh.goc */
+void OLFSStrCopy(char *d, const char *s, word size);
+optr OLFSUIObj(optr o, optr template);
+void OLFSCallApp(Message msg);
+Boolean OLFSIsRealized(optr o);
+DiskHandle OLFSCurPath(optr o, GenFilePath **path);
+GenFilePath *OLFSVirtualRoot(optr o);
+Boolean OLFSUnderVirtualRoot(optr o, PathCompareType *how);
+void OLFSStuffDriveAndVolumeName(char *buf, word size, word drive,
+	word flags, word status, DiskHandle disk);
+void OLFSFreeBuffers(optr o);
+void OLFSDestroyListChildren(optr list, word from);
+optr OLFSCreateAndInitGenItem(optr list, word id);
+void OLFSReplaceMonikerText(optr obj, const char *text);
+void OLFSSelectCurrentDriveInChangeDrivePopup(optr o);
+
+@include <Internal/SpecUI/olFileSelectorClass.goh>
+
+/* copenFileSelector.goc and copenFileSelectorLow.goc */
+word OLFSListSelection(optr o);
+void OLFSSetItemSelection(optr group, word id);
+Boolean OLFSResolveSelection(optr o, word *entry);
+void OLFSBuildEntryFlagsAndSendAD(optr o, word entry);
+void OLFSUpdateChangeDrivePopupMoniker(optr o, Boolean useCurrent);
+void OLFSShowCurrentDir(optr o);
+void OLFSNotifyUserOfDiskError(void);
+void OLFSHandleUserAction(optr o, word entry, Boolean doublePress);
+
+/* copenFileSelector.goc and copenFileSelectorMiddle.goc */
+void *OLFSFindTempData(optr o);
+word OLFSCurDrive(optr o, DiskHandle *disk);
+DiskHandle OLFSFullPath(optr o, char *buf, word size);
+OLFileSelectorEntry *OLFSLockEntry(optr o, word n);
+void OLFSCopySelection(optr o, word entry, GenFileSelectorEntryFlags flags);
+const char *OLFSLastElement(const char *path);
+
+/* CView/cviewVariable.goc: the text object's keys, for copenTextCommon.goc */
+#define TEXT_KBD_BINDING_COUNT	41
+extern const KeyboardShortcut textKbdBindings[TEXT_KBD_BINDING_COUNT];
+extern const word textKbdFunctions[TEXT_KBD_BINDING_COUNT];
+
+/* cviewPaneScroll.goc and cviewPane.goc */
+void OLPaneMakeRelative(optr oself, PointDWord *p);
+
+/* cviewPaneWindow.goc and cviewPane.goc */
+void OLPaneReleaseGadgetExcl(optr oself);
+
+/* cviewScrollbarSelect.goc and cviewScrollbar.goc */
+void SwapIfHorizontal(optr oself, sword *x, sword *y);
+
+/* cwinClassCUAS.goc and cwinUtils.goc */
+optr OpenWinSysMenuTemplate(Boolean display, SysMenuObject which);
+optr OpenWinDuplicateBlock(optr o, optr tmpl);
+
+/* cwinClassCommonLow.goc and cwinGeometry.goc */
+extern const char openWinLongTermStr[];
+ChunkHandle OpenWinLongTermMoniker(optr o);
+Boolean OpenWinTinyScreen(void);
+
+/* cwinClassCommonLow.goc and cwinUtils.goc */
+void EnsureTitleBarInParentWin(optr o);
+
+/* cwinDisplayControl.goc and cwinPtr.goc */
+Boolean CheckIfInteractable(optr o);
+
+/* ---------------------------------------------------------------------
+ * The applications (cwinFieldOther.asm, cwinFieldUncommon.asm)
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+    optr	*apps;
+    word	count, max;
+    GeodeHandle	ui;
+} AppArray;
+
+/* cwinField.goc and cwinFieldCommon.goc */
+OLFieldInstance *OLFieldInstanceOf(optr oself);
+word FieldFindIconSlot(optr oself, sword x, sword y);
+
+/* cwinField.goc and cwinFieldInit.goc */
+GenFieldInstance *GenFieldInstanceOf(optr oself);
+word FieldWindowColor(optr oself);
+
+/* cwinField.goc and cwinFieldOther.goc */
+extern const char fieldBackgroundCategory[];
+word GetBackgroundColorNoPict(void);
+word GetBackgroundColorPict(void);
+void FieldCollectApps(WindowHandle parent, AppArray *a);
+
+/* copenFileSelector.goc and copenFileSelectorLow.goc */
+void OLFSBuildEntryFlagsAndSendADLow(optr o, word entry,
+	GenFileSelectorEntryFlags flags,
+	OLFileSelectorEntry *out, Boolean *has);
+
+/* copenFileSelector.goc and copenFileSelectorMiddle.goc */
+Boolean OLFSIsVirtualRoot(optr o);

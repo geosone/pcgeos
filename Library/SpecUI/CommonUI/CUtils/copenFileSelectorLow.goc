@@ -1,0 +1,790 @@
+/*
+ * copenFileSelectorLow.goc -- after copenFileSelectorLow.asm:
+ * MSG_OL_FILE_SELECTOR_LIST_MESSAGE, MSG_OL_FILE_SELECTOR_DOUBLE_PRESS,
+ * MSG_GEN_FILE_SELECTOR_UP_DIRECTORY,
+ * MSG_OL_FILE_SELECTOR_CLOSE_DIR_BUTTON,
+ * MSG_OL_FILE_SELECTOR_DOCUMENT_BUTTON, MSG_GEN_FILE_SELECTOR_RESCAN,
+ * MSG_GEN_FILE_SELECTOR_OPEN_ENTRY, MSG_GEN_FILE_SELECTOR_SUSPEND,
+ * MSG_GEN_FILE_SELECTOR_END_SUSPEND,
+ * MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC,
+ * MSG_META_CHECK_IF_INTERACTABLE_OBJECT, MSG_META_KBD_CHAR,
+ * MSG_META_FUP_KBD_CHAR, OLFSFindTempData, OLFSStuffDriveAndVolumeName,
+ * OLFSResolveSelection, OLFSCopySelection, OLFSBuildEntryFlagsAndSendAD,
+ * OLFSUpdateChangeDrivePopupMoniker,
+ * OLFSSelectCurrentDriveInChangeDrivePopup, OLFSNotifyUserOfDiskError.
+ */
+@include "cGeode.goh"
+@include "cspecCUAS.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olFileSelectorClass.goh>
+@include <Internal/SpecUI/olApplicationClass.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/gItemC.goh>
+#include <fileEnum.h>
+#include <disk.h>
+#include <drive.h>
+@include <gcnlist.goh>
+#include <sysstats.h>
+#include <chunkarr.h>
+#include <localize.h>
+#include <gstring.h>
+#include <uDialog.h>
+
+#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
+#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
+
+/* OLFSEnumParams: FileEnum's parameters first (the callback is passed
+ * them), then what the callback needs */
+typedef struct {
+    FileEnumParams		EC_common;
+    optr			EC_fs;
+    GenFileSelectorFilterRoutine *EC_filter;
+    FileSelectorFileCriteria	EC_criteria;
+    FileExtAttrDesc		EC_matchAttrs[5];
+    GeodeToken			EC_token;
+    GeodeToken			EC_creator;
+    FileAttrs			EC_fileAttrsMismatch;
+    GenFileSelectorFileHeaderFlags EC_headerFlags;
+    char			EC_mask[sizeof(GenFileSelectorMask)];
+} EnumContext;
+
+static const FileExtAttrDesc olfsReturnAttrs[] = {
+    { FEA_FILE_ATTR, (void *) word_offsetof(OLFileSelectorEntry, OLFSE_fileAttrs),
+      sizeof(FileAttrs), NULL },
+    { FEA_FLAGS, (void *) word_offsetof(OLFileSelectorEntry, OLFSE_fileFlags),
+      sizeof(GeosFileHeaderFlags), NULL },
+    { FEA_NAME, (void *) word_offsetof(OLFileSelectorEntry, OLFSE_name),
+      FILE_LONGNAME_BUFFER_SIZE, NULL },
+    { FEA_FILE_ID, (void *) word_offsetof(OLFileSelectorEntry, OLFSE_id),
+      sizeof(FileID), NULL },
+    { FEA_DISK, (void *) word_offsetof(OLFileSelectorEntry, OLFSE_disk),
+      sizeof(DiskHandle), NULL },
+    { FEA_DOS_NAME, (void *) word_offsetof(OLFileSelectorEntry, OLFSE_dosName),
+      sizeof(DosDotFileName), NULL },
+    { FEA_FILE_TYPE, (void *) word_offsetof(OLFileSelectorEntry, OLFSE_fileType),
+      sizeof(word), NULL },
+    { FEA_TOKEN, (void *) word_offsetof(OLFileSelectorEntry, OLFSE_token),
+      sizeof(GeodeToken), NULL },
+    { FEA_END_OF_LIST, NULL, 0, NULL }
+};
+
+/*
+ * OLFSFileEnumCallback: non-zero accepts the file.  A hidden GEOS file
+ * goes when hidden files do; a file's header flags are matched; the
+ * name mask is for files (for directories with FSFC_USE_MASK_FOR_DIRS);
+ * then the application's filter, which rejects with TRUE.
+ */
+static word _pascal EnumCallback(FileEnumParams *params,
+				 FileEnumCallbackData *fecd, word frame)
+{
+    EnumContext *c = (EnumContext *) params;
+    const byte *hf = FileEnumLocateAttr(fecd, FEA_FLAGS, NULL);
+    const byte *fa = FileEnumLocateAttr(fecd, FEA_FILE_ATTR, NULL);
+    Boolean dir = fa && (*fa & FA_SUBDIR);
+
+    if (hf) {
+	GeosFileHeaderFlags flags = (GeosFileHeaderFlags) (hf[0] | hf[1] << 8);
+
+	if ((c->EC_fileAttrsMismatch & FA_HIDDEN) && (flags & GFHF_HIDDEN))
+	    return FALSE;
+	if (!dir) {
+	    if (c->EC_headerFlags.GFSFHF_match &&
+		!(flags & c->EC_headerFlags.GFSFHF_match))
+		return FALSE;
+	    if (flags & c->EC_headerFlags.GFSFHF_mismatch)
+		return FALSE;
+	}
+    }
+    if (c->EC_common.FEP_cbData1 &&
+	(!dir || (c->EC_criteria & FSFC_USE_MASK_FOR_DIRS))) {
+	c->EC_common.FEP_cbData2 =
+	    (c->EC_criteria & FSFC_MASK_CASE_INSENSITIVE) ? 0xff : 0;
+	if (!FileEnumWildcard(fecd, frame))
+	    return FALSE;
+    }
+    if ((c->EC_criteria & FSFC_FILE_FILTER) && c->EC_filter &&
+	c->EC_filter(c->EC_fs, fecd, frame))
+	return FALSE;
+    return TRUE;
+}
+
+/* a bit attribute to match: the bits to be set in the low word of the
+ * value, those to be clear above them */
+static void *MatchBits(word set, word clear)
+{
+    return (void *) (uintptr_t) ((dword) set | ((dword) clear << 16));
+}
+
+/* two entries compared: directories before files, then by name
+ * (OLFSCompareFiles; ...Reverse: the names the other way round, among
+ * files and among directories) */
+static sword CompareEntries(const OLFileSelectorEntry *a,
+			    const OLFileSelectorEntry *b)
+{
+    byte da = a->OLFSE_fileAttrs & FA_SUBDIR, db = b->OLFSE_fileAttrs & FA_SUBDIR;
+
+    if (da != db)
+	return da ? -1 : 1;
+    return LocalCmpStrings(a->OLFSE_name, b->OLFSE_name,
+			   FILE_LONGNAME_BUFFER_SIZE);
+}
+
+static word _pascal CompareFiles(void *el1, void *el2, word reverse)
+{
+    const OLFileSelectorEntry *a = *(const OLFileSelectorEntry **) el1;
+    const OLFileSelectorEntry *b = *(const OLFileSelectorEntry **) el2;
+
+    if (reverse && !((a->OLFSE_fileAttrs ^ b->OLFSE_fileAttrs) & FA_SUBDIR))
+	return (word) CompareEntries(b, a);
+    return (word) CompareEntries(a, b);
+}
+
+/*
+ * OLFSSortList: the index of the entries of the file buffer, sorted
+ * unless HINT_FILE_SELECTOR_DONT_SORT.  (Port32: the index holds the
+ * entries' numbers, not their offsets.  Pointers to the entries are
+ * sorted, the compare routine gets no more than its two elements; then
+ * they become the numbers.)
+ */
+static void SortList(optr o)
+{
+    Boolean sort = !ObjVarFindData(o, HINT_FILE_SELECTOR_DONT_SORT);
+    Boolean reverse = ObjVarFindData(o, HINT_FILE_SELECTOR_REVERSE_SORT) != NULL;
+    word n = FS(o)->OLFSI_numFiles, i;
+    MemHandle ib, pb, fb = FS(o)->OLFSI_fileBuffer;
+    word *index;
+
+    if (!n)
+	return;
+    ib = MemAlloc((word) (n * sizeof(word)), HF_SWAPABLE | HF_SHARABLE,
+		  HAF_LOCK | HAF_NO_ERR);
+    FS(o)->OLFSI_indexBuffer = ib;
+    index = MemDeref(ib);
+    for (i = 0; i < n; i++)
+	index[i] = i;
+    if (sort) {
+	OLFileSelectorEntry *base = MemLock(fb);
+	const OLFileSelectorEntry **ptrs;
+	QuickSortParameters q;
+
+	pb = MemAlloc((word) (n * sizeof(*ptrs)), HF_SWAPABLE,
+		      HAF_LOCK | HAF_NO_ERR);
+	ptrs = MemDeref(pb);
+	for (i = 0; i < n; i++)
+	    ptrs[i] = base + i;
+	memset(&q, 0, sizeof(q));	/* (the default limits) */
+	q.QSP_compareCallback = CompareFiles;
+	ArrayQuickSort(ptrs, n, sizeof(*ptrs), reverse, &q);
+	for (i = 0; i < n; i++)
+	    index[i] = (word) (ptrs[i] - base);
+	MemFree(pb);
+	MemUnlock(fb);
+    }
+    MemUnlock(ib);
+}
+
+/*
+ * OLFSBuildFileList: the files of the object's directory that match
+ * its criteria into the file buffer, counted and sorted.  The disk in
+ * the drive is looked at first: no disk is an error, another disk than
+ * the path's is shown from its root.  TRUE on an error.
+ */
+static Boolean BuildFileList(optr o)
+{
+    GenFilePath *p;
+    DiskHandle disk, real, was;
+    GenFileSelectorInstance *g;
+    EnumContext *c;
+    MemHandle cb, fb = 0;
+    FileExtAttrDesc *m;
+    void *d;
+    word n, i, dirs, criteria, unused;
+    GenFileSelectorGetFilterRoutineResults filter;
+    OLFileSelectorEntry *e;
+    Boolean filesDisabled;
+    word err;
+
+    disk = OLFSCurPath(o, &p);
+    if (!disk)
+	return TRUE;
+    real = DiskRegisterDiskSilently(DiskGetDrive(disk));
+    if (!real)
+	return TRUE;
+    was = (disk & DISK_IS_STD_PATH_MASK) ?
+	  (DiskHandle) SysGetInfo(SGIT_SYSTEM_DISK) : disk;
+    if (was != real &&
+	GenPathSetObjectPath(o, "\\", ATTR_GEN_PATH_DATA,
+			     TEMP_GEN_PATH_SAVED_DISK_HANDLE, real, &err))
+	return TRUE;
+
+    FilePushDir();
+    (void) GenPathSetCurrentPathFromObjectPath(o, ATTR_GEN_PATH_DATA,
+					TEMP_GEN_PATH_SAVED_DISK_HANDLE);
+    /* (not on the stack: borrowed stacks are small) */
+    cb = MemAlloc(sizeof(EnumContext), HF_SWAPABLE,
+		  HAF_LOCK | HAF_NO_ERR | HAF_ZERO_INIT);
+    c = MemDeref(cb);
+    g = GFS(o);
+    criteria = g->GFSI_fileCriteria;
+    filesDisabled = (g->GFSI_attrs & FSA_SHOW_FILES_DISABLED) != 0;
+    c->EC_fs = o;
+    c->EC_criteria = criteria;
+    /* the four kinds of files of the criteria are the search flags'.
+     * Files shown disabled are all shown: the names that are taken */
+    c->EC_common.FEP_searchFlags = (FileEnumSearchFlags)
+	(((criteria >> 8) & (FESF_DIRS | FESF_NON_GEOS | FESF_GEOS_EXECS |
+			     FESF_GEOS_NON_EXECS)) | FESF_CALLBACK);
+    if (filesDisabled)
+	c->EC_common.FEP_searchFlags |= FESF_NON_GEOS | FESF_GEOS_EXECS |
+					FESF_GEOS_NON_EXECS;
+    c->EC_common.FEP_returnAttrs = (FileExtAttrDesc *) olfsReturnAttrs;
+    c->EC_common.FEP_returnSize = sizeof(OLFileSelectorEntry);
+    c->EC_common.FEP_matchAttrs = c->EC_matchAttrs;
+    c->EC_common.FEP_bufSize = FE_BUFSIZE_UNLIMITED;
+    c->EC_common.FEP_callback = EnumCallback;
+
+    d = ObjVarFindData(o, ATTR_GEN_FILE_SELECTOR_NAME_MASK);
+    if (d) {
+	OLFSStrCopy(c->EC_mask, d, sizeof(c->EC_mask));
+	c->EC_common.FEP_cbData1 = (uintptr_t) c->EC_mask;
+    }
+    m = c->EC_matchAttrs;
+    d = NULL;
+    if (!filesDisabled) {
+	/* (the tokens without the manufacturer with FSFC_TOKEN_NO_ID) */
+	word tsize = (criteria & FSFC_TOKEN_NO_ID) ? TOKEN_CHARS_LENGTH :
+						     sizeof(GeodeToken);
+	GenFileSelectorGeodeAttrs *ga;
+
+	d = ObjVarFindData(o, ATTR_GEN_FILE_SELECTOR_TOKEN_MATCH);
+	if (d) {
+	    memcpy(&c->EC_token, d, sizeof(GeodeToken));
+	    m->FEAD_attr = FEA_TOKEN;
+	    m->FEAD_value = &c->EC_token;
+	    m->FEAD_size = tsize;
+	    m++;
+	}
+	d = ObjVarFindData(o, ATTR_GEN_FILE_SELECTOR_CREATOR_MATCH);
+	if (d) {
+	    memcpy(&c->EC_creator, d, sizeof(GeodeToken));
+	    m->FEAD_attr = FEA_CREATOR;
+	    m->FEAD_value = &c->EC_creator;
+	    m->FEAD_size = tsize;
+	    m++;
+	}
+	ga = ObjVarFindData(o, ATTR_GEN_FILE_SELECTOR_GEODE_ATTR);
+	if (ga) {
+	    m->FEAD_attr = FEA_GEODE_ATTR;
+	    m->FEAD_value = MatchBits(ga->GFSGA_match, ga->GFSGA_mismatch);
+	    m->FEAD_size = sizeof(GeodeAttrs);
+	    m++;
+	}
+	d = ObjVarFindData(o, ATTR_GEN_FILE_SELECTOR_FILE_ATTR);
+    }
+    {
+	/* the file attributes: without any, no hidden and no system
+	 * files (and no directories unless they are asked for) */
+	FileAttrs match = 0, mismatch = FA_HIDDEN | FA_SYSTEM;
+
+	if (d) {
+	    match = ((GenFileSelectorFileAttrs *) d)->GFSFA_match;
+	    mismatch = ((GenFileSelectorFileAttrs *) d)->GFSFA_mismatch;
+	} else if (!(c->EC_common.FEP_searchFlags & FESF_DIRS))
+	    mismatch |= FA_SUBDIR;
+	m->FEAD_attr = FEA_FILE_ATTR;
+	m->FEAD_value = MatchBits(match, mismatch);
+	m->FEAD_size = sizeof(FileAttrs);
+	m++;
+	c->EC_fileAttrsMismatch = mismatch;
+    }
+    m->FEAD_attr = FEA_END_OF_LIST;
+    d = ObjVarFindData(o, ATTR_GEN_FILE_SELECTOR_FILE_HEADER_FLAGS);
+    if (d)
+	c->EC_headerFlags = *(GenFileSelectorFileHeaderFlags *) d;
+    if (criteria & FSFC_FILE_FILTER) {
+	filter.filterRoutine = NULL;
+	filter.filterAttrs = NULL;
+	@call o::MSG_GEN_FILE_SELECTOR_GET_FILTER_ROUTINE(&filter);
+	c = MemDeref(cb);
+	if (filter.filterRoutine) {
+	    c->EC_filter = filter.filterRoutine;
+	    c->EC_common.FEP_callbackAttrs =
+		(FileExtAttrDesc *) filter.filterAttrs;
+	}
+    }
+
+    n = FileEnum(&c->EC_common, &fb, &unused);
+    MemFree(cb);
+    FilePopDir();
+    if (n == (word) -1)
+	return TRUE;
+    if (!n && fb) {
+	MemFree(fb);
+	fb = 0;
+    }
+    dirs = 0;
+    if (n) {
+	e = MemLock(fb);
+	for (i = 0; i < n; i++)
+	    if (e[i].OLFSE_fileAttrs & FA_SUBDIR)
+		dirs++;
+	MemUnlock(fb);
+    }
+    FS(o)->OLFSI_numFiles = n;
+    FS(o)->OLFSI_fileBuffer = fb;
+    FS(o)->OLFSI_dirCount = dirs;
+    FS(o)->OLFSI_fileCount = n - dirs;
+    SortList(o);
+    return FALSE;
+}
+
+/* OLFSReadList */
+static void ReadList(optr o)
+{
+    if (BuildFileList(o))
+	FS(o)->OLFSI_state |= OLFSS_RESCAN_ERROR | OLFSS_VIS_OPEN_ERROR;
+}
+/*
+ * OLFSRescanLow: the current directory is shown first when directories
+ * are; the directory is read; the list gets its number of items and
+ * the selection (the entry named by GFSI_selection); the popups follow
+ * and the destination is told.  If the focus is among the selector's
+ * gadgets the list takes it.
+ */
+static void RescanLow(optr o)
+{
+    optr list;
+    word entry, n;
+    ObjectAndGrabParams q;
+
+    if (GFS(o)->GFSI_fileCriteria & FSFC_DIRS)
+	FS(o)->OLFSI_state |= OLFSS_SHOW_PARENT_DIR;
+    else
+	FS(o)->OLFSI_state &= ~OLFSS_SHOW_PARENT_DIR;
+    OLFSFreeBuffers(o);
+    ReadList(o);
+    (void) OLFSResolveSelection(o, &entry);
+    n = FS(o)->OLFSI_numFiles;
+    if (FS(o)->OLFSI_state & OLFSS_SHOW_PARENT_DIR)
+	n++;
+    list = OLFSUIObj(o, @OLFileSelectorFileList);
+    if (list) {
+	@call list::MSG_GEN_DYNAMIC_LIST_INITIALIZE(n);
+	OLFSSetItemSelection(list, entry);
+    }
+    OLFSShowCurrentDir(o);
+    OLFSSelectCurrentDriveInChangeDrivePopup(o);
+    OLFSBuildEntryFlagsAndSendAD(o, entry);
+
+    memset(&q, 0, sizeof(q));
+    @call o::MSG_VIS_VUP_QUERY_FOCUS_EXCL(&q);
+    if (list && OptrToHandle(q.OAGP_object) == OptrToHandle(list))
+	@send, forceQueue list::MSG_META_GRAB_FOCUS_EXCL();
+}
+
+/* OLFileSelectorListMethod: the list's selection.  With [motif
+ * options] fsSingleClickToOpen a single action selector (HINT_FILE_
+ * SELECTOR_SINGLE_ACTION) also gets a double press. */
+static void ListAction(optr o, word entry)
+{
+    if (olFileSelectorSingleClickToOpen &&
+	(FS(o)->OLFSI_state & OLFSS_SINGLE_ACTION)) {
+	struct { word sel; word num; GenItemGroupStateFlags flags; } a;
+
+	a.sel = entry;
+	a.num = 1;
+	a.flags = 0;
+	CObjMessageP(MF_FORCE_QUEUE, o, MSG_OL_FILE_SELECTOR_DOUBLE_PRESS,
+		     &a, sizeof(a), NULL, 0);
+    }
+    OLFSHandleUserAction(o, entry, FALSE);
+}
+
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_LIST_MESSAGE
+{
+    (void) pself;
+    (void) numSelections;
+    (void) stateFlags;
+    ListAction(oself, selection);
+}
+
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_DOUBLE_PRESS
+{
+    (void) pself;
+    (void) numSelections;
+    (void) stateFlags;
+    OLFSHandleUserAction(oself, selection, TRUE);
+}
+
+/* OLFileSelectorUpDirectory: with the current directory in the list
+ * and another entry selected, the selection moves to it; else up */
+static void GoUp(optr o)
+{
+    if ((FS(o)->OLFSI_state & OLFSS_SHOW_PARENT_DIR) && OLFSListSelection(o)) {
+	OLFSSetItemSelection(OLFSUIObj(o, @OLFileSelectorFileList), 0);
+	OLFSBuildEntryFlagsAndSendAD(o, 0);
+	OLFSShowCurrentDir(o);
+	return;
+    }
+    ListAction(o, OLFS_UP_DIRECTORY_ENTRY_NUM);
+}
+
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_UP_DIRECTORY
+{
+    (void) pself;
+    GoUp(oself);
+}
+
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_CLOSE_DIR_BUTTON
+{
+    (void) pself;
+    (void) trigger;
+    GoUp(oself);
+}
+
+@extern method OLFileSelectorClass, MSG_OL_FILE_SELECTOR_DOCUMENT_BUTTON
+{
+    (void) pself;
+    (void) trigger;
+    if (!@call oself::MSG_OL_FILE_SELECTOR_PATH_SET("", SP_DOCUMENT))
+	OLFSUpdateChangeDrivePopupMoniker(oself, FALSE);
+    else
+	OLFSNotifyUserOfDiskError();
+    OLFSSelectCurrentDriveInChangeDrivePopup(oself);
+}
+
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_RESCAN
+{
+    (void) pself;
+    OLFSCallApp(MSG_GEN_APPLICATION_MARK_APP_COMPLETELY_BUSY);
+    RescanLow(oself);
+    OLFSCallApp(MSG_GEN_APPLICATION_MARK_APP_NOT_COMPLETELY_BUSY);
+}
+
+/* OLFileSelectorOpenEntry: as a double press, the error returned */
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_OPEN_ENTRY
+{
+    Boolean parent = (pself->OLFSI_state & OLFSS_SHOW_PARENT_DIR) != 0;
+    word n = pself->OLFSI_numFiles;
+
+    if (parent && !entryNumber)
+	return FALSE;
+    if (!n || entryNumber > n || (!parent && entryNumber == n))
+	return TRUE;
+    pself->OLFSI_state |= OLFSS_FORCE_OPEN;
+    OLFSHandleUserAction(oself, entryNumber, TRUE);
+    pself = FS(oself);
+    pself->OLFSI_state &= ~OLFSS_FORCE_OPEN;
+    if (!(pself->OLFSI_state & OLFSS_RESCAN_ERROR))
+	return FALSE;
+    pself->OLFSI_state &= ~OLFSS_RESCAN_ERROR;
+    return TRUE;
+}
+
+/* TRUE: was suspended already */
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_SUSPEND
+{
+    if (pself->OLFSI_state & OLFSS_SUSPENDED)
+	return TRUE;
+    pself->OLFSI_state |= OLFSS_SUSPENDED;
+    return FALSE;
+}
+
+/* TRUE: was not suspended */
+@extern method OLFileSelectorClass, MSG_GEN_FILE_SELECTOR_END_SUSPEND
+{
+    OLFileSelectorState s = pself->OLFSI_state;
+
+    if (!(s & OLFSS_SUSPENDED))
+	return TRUE;
+    pself->OLFSI_state &= ~(OLFSS_SUSPENDED | OLFSS_RESCAN_NEEDED);
+    if (s & OLFSS_RESCAN_NEEDED)
+	@call oself::MSG_GEN_FILE_SELECTOR_RESCAN();
+    return FALSE;
+}
+/*
+ * OLFileSelectorActivateObjectWithMnemonic: the selector's own
+ * mnemonic gives the list the focus; 'v' opens the drive popup (whose
+ * moniker, the drive's name, has lost its mnemonic)
+ */
+@extern method OLFileSelectorClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+{
+    optr obj;
+
+    if (pself->VI_attrs & VA_FULLY_ENABLED) {
+	if (VisCheckMnemonic(oself, character, flags, state)) {
+	    obj = OLFSUIObj(oself, @OLFileSelectorFileList);
+	    if (obj)
+		@call obj::MSG_META_GRAB_FOCUS_EXCL();
+	    return TRUE;
+	}
+	if ((GFS(oself)->GFSI_attrs & FSA_HAS_CHANGE_DRIVE_LIST) &&
+	    ((character & 0xff) == 'v' || (character & 0xff) == 'V') &&
+	    (character >> 8) == CS_BSW) {
+	    obj = OLFSUIObj(oself, @OLFileSelectorChangeDrivePopup);
+	    if (obj)
+		@call obj::MSG_GEN_ACTIVATE();
+	    return TRUE;
+	}
+    }
+    return @callsuper();
+}
+
+/* OLFSCheckIfInteractableObject: the gadgets are the selector's */
+@extern method OLFileSelectorClass, MSG_META_CHECK_IF_INTERACTABLE_OBJECT
+{
+    if (OptrToHandle(obj) == pself->OLFSI_uiBlock)
+	return TRUE;
+    return @callsuper();
+}
+
+/* OLFSDynamicListKbdChar: the space bar is a double press on the
+ * selected entry */
+static Boolean ListSpace(optr o, word character, word flags)
+{
+    word sel;
+    optr fs;
+
+    if ((flags & (CF_RELEASE | CF_STATE_KEY | CF_TEMP_ACCENT)) ||
+	character != ((CS_BSW << 8) | VC_BLANK))
+	return FALSE;
+    sel = @call o::MSG_GEN_ITEM_GROUP_GET_SELECTION();
+    fs = ObjBlockGetOutput(OptrToHandle(o));
+    if (sel == GIGS_NONE || !fs)
+	return FALSE;
+    @call fs::MSG_OL_FILE_SELECTOR_DOUBLE_PRESS(sel, 1, 0);
+    return TRUE;
+}
+
+@extern method OLFSDynamicListClass, MSG_META_KBD_CHAR
+{
+    (void) pself;
+    if (!ListSpace(oself, character, flags))
+	@callsuper();
+}
+
+@extern method OLFSDynamicListClass, MSG_META_FUP_KBD_CHAR
+{
+    (void) pself;
+    if (ListSpace(oself, character, flags))
+	return TRUE;
+    return @callsuper();
+}
+
+#define FS(o)	((OLFileSelectorInstance *) ObjDerefVis(o))
+#define GFS(o)	((GenFileSelectorInstance *) ObjDerefGen(o))
+#define SDAVNF_PASS_DISK_HANDLE		4
+#define SDAVNF_TRAILING_SLASH		1
+
+static word StrLen(const char *s)
+{
+    word n = 0;
+
+    while (s[n])
+	n++;
+    return n;
+}
+
+static Boolean StrEq(const char *a, const char *b)
+{
+    while (*a && *a == *b)
+	a++, b++;
+    return *a == *b;
+}
+
+void *OLFSFindTempData(optr o)
+{
+    return ObjVarDerefData(o, TEMP_GEN_FILE_SELECTOR_DATA);
+}
+#define SDAVNF_VOLUME_ONLY_FOR_FIXED	2
+
+/* OLFSStuffDriveAndVolumeName: "name:[volume]\", as much as fits */
+void OLFSStuffDriveAndVolumeName(char *buf, word size, word drive,
+				    word flags, word status, DiskHandle disk)
+{
+    char *p;
+
+    buf[0] = 0;
+    p = DriveGetName(drive, buf, size);
+    if (!p)
+	return;
+    size = (word) (size - (p - buf));
+    if (size < 2)
+	return;
+    *p++ = ':';
+    *p = 0;
+    size -= 2;
+    if (flags & SDAVNF_VOLUME_ONLY_FOR_FIXED) {
+	/* only where the medium stays and is known to */
+	if ((status & DS_MEDIA_REMOVABLE) ||
+	    (status & DS_TYPE) != DRIVE_FIXED)
+	    goto slash;
+    }
+    if (!(flags & SDAVNF_PASS_DISK_HANDLE)) {
+	disk = DiskRegisterDiskSilently(drive);
+	if (!disk)
+	    goto slash;
+    }
+    if (size < VOLUME_NAME_LENGTH + 3)
+	return;
+    *p++ = '[';
+    DiskGetVolumeName(disk, p);
+    p += StrLen(p);
+    *p++ = ']';
+    *p = 0;
+    size -= 3;
+slash:
+    if (!(flags & SDAVNF_TRAILING_SLASH) || size < 2)
+	return;
+    *p++ = '\\';
+    *p = 0;
+}
+/*
+ * OLFSResolveSelection: the entry of the list with the name in
+ * GFSI_selection (*entry).  With no name, no files or no such file:
+ * the first entry (no entry if there are no files and the current
+ * directory is not shown).  TRUE if there was a name and it is not
+ * there.
+ */
+Boolean OLFSResolveSelection(optr o, word *entry)
+{
+    OLFileSelectorInstance *f = FS(o);
+    word n = f->OLFSI_numFiles, i, first;
+    char sel[sizeof(GenFileSelectorSelection)];
+    Boolean parent = (f->OLFSI_state & OLFSS_SHOW_PARENT_DIR) != 0;
+
+    first = parent ? 0 : GIGS_NONE;
+    if (!n) {
+	*entry = first;
+	return TRUE;
+    }
+    *entry = 0;
+    OLFSStrCopy(sel, GFS(o)->GFSI_selection, sizeof(sel));
+    if (!sel[0] || !f->OLFSI_indexBuffer)
+	return FALSE;
+    for (i = 0; i < n; i++) {
+	OLFileSelectorEntry *e = OLFSLockEntry(o, i);
+	Boolean same = StrEq(e->OLFSE_name, sel);
+
+	MemUnlock(FS(o)->OLFSI_fileBuffer);
+	if (same) {
+	    *entry = parent ? i + 1 : i;
+	    return FALSE;
+	}
+    }
+    return TRUE;
+}
+
+/*
+ * OLFSCopySelection: the entry and its flags (not the error) to the
+ * temporary data, its name to GFSI_selection: "." for the current
+ * directory, nothing if there are no files
+ */
+void OLFSCopySelection(optr o, word entry, GenFileSelectorEntryFlags flags)
+{
+    GFSTempDataEntry *t = OLFSFindTempData(o);
+    char name[FILE_LONGNAME_BUFFER_SIZE];
+
+    t->GFSTDE_selectionFlags = flags & ~GFSEF_ERROR;
+    t->GFSTDE_selectionNumber = entry;
+    name[0] = 0;
+    if (FS(o)->OLFSI_state & OLFSS_SHOW_PARENT_DIR) {
+	if (!entry) {
+	    name[0] = '.';
+	    name[1] = 0;
+	    goto store;
+	}
+	entry--;
+    }
+    if (FS(o)->OLFSI_numFiles && entry < FS(o)->OLFSI_numFiles) {
+	OLFileSelectorEntry *e = OLFSLockEntry(o, entry);
+
+	OLFSStrCopy(name, e->OLFSE_name, sizeof(name));
+	MemUnlock(FS(o)->OLFSI_fileBuffer);
+    }
+store:
+    OLFSStrCopy(GFS(o)->GFSI_selection, name, sizeof(GenFileSelectorSelection));
+}
+
+void OLFSBuildEntryFlagsAndSendAD(optr o, word entry)
+{
+    OLFSBuildEntryFlagsAndSendADLow(o, entry, 0, NULL, NULL);
+}
+
+/*
+ * OLFSUpdateChangeDrivePopupMoniker: the drive popup's moniker is the
+ * current drive and its volume (useCurrent), or "Drives" again.  With
+ * [motif options] fsStaticDrivePopupMoniker it stays "Drives".
+ */
+void OLFSUpdateChangeDrivePopupMoniker(optr o, Boolean useCurrent)
+{
+    optr popup = OLFSUIObj(o, @OLFileSelectorChangeDrivePopup);
+    char name[FILE_LONGNAME_BUFFER_SIZE];
+
+    if (!(GFS(o)->GFSI_attrs & FSA_HAS_CHANGE_DRIVE_LIST))
+	return;
+    if (useCurrent && !olFileSelectorStaticDrivePopupMoniker) {
+	DiskHandle disk;
+	word drive = OLFSCurDrive(o, &disk);
+	Boolean same = FALSE;
+
+	OLFSStuffDriveAndVolumeName(name, sizeof(name), drive,
+				SDAVNF_PASS_DISK_HANDLE, 0, disk);
+	if (popup) {
+	    /* (not set again if that is the moniker already) */
+	    ChunkHandle m = @call popup::MSG_GEN_GET_VIS_MONIKER();
+
+	    if (m) {
+		VisMoniker *vm = LMemDerefHandles(OptrToHandle(popup), m);
+
+		same = !(vm->VM_type & VMT_GSTRING) &&
+		       StrEq((const char *) vm + VMWT_text, name);
+	    }
+	    if (!same)
+		OLFSReplaceMonikerText(popup, name);
+	}
+	FS(o)->OLFSI_state |= OLFSS_SHOWING_DRIVE_LETTER;
+	return;
+    }
+    if (!(FS(o)->OLFSI_state & OLFSS_SHOWING_DRIVE_LETTER))
+	return;
+    if (popup)
+	(void) @call popup::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(
+			@ChangeDriveMoniker, VUM_DELAYED_VIA_UI_QUEUE);
+    FS(o)->OLFSI_state &= ~OLFSS_SHOWING_DRIVE_LETTER;
+}
+
+/* OLFSSelectCurrentDriveInChangeDrivePopup: the current drive's item
+ * selected (a drive that has gone: left as it is) */
+void OLFSSelectCurrentDriveInChangeDrivePopup(optr o)
+{
+    optr popup = OLFSUIObj(o, @OLFileSelectorChangeDrivePopup);
+    word drive, status, id;
+
+    if (!(GFS(o)->GFSI_attrs & FSA_HAS_CHANGE_DRIVE_LIST) || !popup)
+	return;
+    drive = OLFSCurDrive(o, NULL);
+    status = DriveGetStatus(drive);
+    if (!status)
+	return;
+    id = (word) ((drive & 0xff) | (status << 8));
+    OLFSSetItemSelection(popup, id);
+    if (!@call popup::MSG_GEN_ITEM_GROUP_GET_ITEM_OPTR(id))
+	return;
+    OLFSUpdateChangeDrivePopupMoniker(o,
+	(FS(o)->OLFSI_state & OLFSS_SHOWING_DRIVE_LETTER) != 0);
+}
+/* OLFSNotifyUserOfDiskError */
+void OLFSNotifyUserOfDiskError(void)
+{
+    optr app = GeodeGetAppObject(0);
+    char *s;
+
+    if (!app)
+	return;
+    s = LMemDeref(@DiskNotFoundString);
+    @call app::MSG_GEN_APPLICATION_DO_STANDARD_DIALOG(0, 0, NULL, NULL,
+		NULL, NULL, s,
+		(CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+		(GIT_NOTIFICATION << CDBF_INTERACTION_TYPE_OFFSET));
+}

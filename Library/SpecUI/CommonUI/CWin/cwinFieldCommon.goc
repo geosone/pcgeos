@@ -1,0 +1,302 @@
+/*
+ * cwinFieldCommon.goc -- after cwinFieldCommon.asm:
+ * MSG_SPEC_GUP_QUERY_VIS_PARENT, MSG_SPEC_VUP_GET_WIN_SIZE_INFO,
+ * FieldRequestStaggerSlot, FieldFreeStaggerSlot,
+ * FieldCalcStaggerPosition, FieldFindIconSlot,
+ * MSG_VIS_VUP_ALTER_INPUT_FLOW, MSG_META_ENSURE_ACTIVE_FT,
+ * MSG_META_MUP_ALTER_FTVMC_EXCL, MSG_META_GET_FOCUS_EXCL,
+ * MSG_META_GET_TARGET_EXCL, MSG_META_SEND_CLASSED_EVENT,
+ * MSG_OL_FIELD_GET_TOOL_AREA_SIZE, MSG_OL_FIELD_MOVE_TOOL_AREA.
+ */
+@include "cGeode.goh"
+@include <Internal/flowC.goh>
+@include <Internal/specC.goh>
+
+#define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
+#define FIELD_OFFSET(f)	word_offsetof(OLFieldInstance, f)
+
+#define STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
+				 CUAS_WIN_ICON_WIDTH - 1)
+#define STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_SIZE + \
+				 CUAS_WIN_ICON_HEIGHT - 1)
+#define TINY_STAGGER_X_OFFSET	(CUAS_WIN_RESIZE_BORDER_TINY_SIZE + \
+				 CUAS_WIN_ICON_WIDTH - (1 + 7))
+#define TINY_STAGGER_Y_OFFSET	(CUAS_WIN_RESIZE_BORDER_TINY_SIZE + \
+				 CUAS_WIN_ICON_HEIGHT - (1 + 3 + 8 - 4))
+#define FIRST_BASE_X_POS	10
+#define FIRST_BASE_Y_POS	8
+#define TINY_FIRST_BASE_X_POS	6
+#define TINY_FIRST_BASE_Y_POS	4
+#define CGA_WIN_ICON_PLOT_HEIGHT	35
+#define WIN_ICON_PLOT_MARGIN_X		10
+#define CGA_WIN_ICON_PLOT_MARGIN_Y	(-4)
+#define INITIAL_SLOT			1
+#define OL_WINDOW_STAGGER_SLOT_MASK	0x07
+
+/* ---------------------------------------------------------------------
+ * Queries (cwinFieldCommon.asm)
+ * ------------------------------------------------------------------- */
+
+/* OLFieldGupQueryVisParent: the field itself, but the system's for a
+ * system modal window */
+@extern method OLFieldClass, MSG_SPEC_GUP_QUERY_VIS_PARENT
+{
+    optr p = 0;
+
+    if (parentType != SQT_VIS_PARENT_FOR_SYS_MODAL)
+	return oself;
+    GenCallParent(oself, MSG_SPEC_GUP_QUERY_VIS_PARENT, &parentType,
+		  sizeof(parentType), &p, sizeof(p));
+    return p;
+}
+
+/* OLFieldGetWinSizeInfo: the field's size, the margins for windows
+ * extended near its corner */
+@extern method OLFieldClass, MSG_SPEC_VUP_GET_WIN_SIZE_INFO
+{
+    SizeAsDWord s = VisGetSize(oself);
+
+    retValue->WSIP_windowWidth = DWORD_WIDTH(s);
+    retValue->WSIP_windowHeight = DWORD_HEIGHT(s);
+    retValue->WSIP_rightArea = EXTEND_NEAR_PARENT_MARGIN_X;
+    retValue->WSIP_bottomArea = OpenCheckIfCGA()
+				? CGA_EXTEND_NEAR_PARENT_MARGIN_Y
+				: NON_CGA_EXTEND_NEAR_PARENT_MARGIN_Y;
+}
+
+/*
+ * FieldRequestStaggerSlot: the requested slot of the map, else (if it
+ * may be reassigned) the next free one, row by row, around twice; the
+ * slot taken
+ */
+byte FieldRequestStaggerSlot(word *map, byte req)
+{
+    byte row, col;
+    int tries = 2;
+
+    if (!(req & SSPR_SLOT))
+	req |= INITIAL_SLOT | SSPR_REASSIGN_IF_CONFLICT;
+    row = (req >> 4) & 7;
+    col = req & SSPR_COLUMN;
+    if (((map[row] >> col) & 1) && (req & SSPR_REASSIGN_IF_CONFLICT))
+	for (;;) {
+	    if (col < 15)
+		col++;
+	    else if ((row & 3) != 3) {
+		row++;
+		col = 0;
+	    } else {
+		row &= ~3;
+		col = 1;
+		if (!--tries)
+		    break;
+	    }
+	    if (!((map[row] >> col) & 1))
+		break;
+	}
+    map[row] |= 1 << col;
+    return (byte) ((row << 4) | col);
+}
+
+void FieldFreeStaggerSlot(word *map, byte slot)
+{
+    map[(slot >> 4) & 7] &= ~(1 << (slot & SSPR_COLUMN));
+}
+
+/* FieldCalcStaggerPosition: the position of a window's slot, or of an
+ * icon's slot along the field's bottom */
+void FieldCalcStaggerPosition(optr oself, byte slot, sword *x,
+			      sword *y)
+{
+    if (!(slot & SSPR_ICON)) {
+	word n = (slot - 1) & OL_WINDOW_STAGGER_SLOT_MASK;
+
+	*y = n * (OpenCheckIfCGA() ? TINY_STAGGER_Y_OFFSET
+				   : STAGGER_Y_OFFSET) +
+	     (OpenCheckIfCGA() ? TINY_FIRST_BASE_Y_POS : FIRST_BASE_Y_POS);
+	*x = n * (OpenCheckIfNarrow() ? TINY_STAGGER_X_OFFSET
+				      : STAGGER_X_OFFSET) +
+	     (OpenCheckIfNarrow() ? TINY_FIRST_BASE_X_POS : FIRST_BASE_X_POS);
+    } else {
+	SizeAsDWord s = VisGetSize(oself);
+	word perRow = (DWORD_WIDTH(s) - WIN_ICON_PLOT_MARGIN_X) /
+		      WIN_ICON_PLOT_WIDTH;
+	word n = (slot & SSPR_SLOT) - 1, row, col;
+	sword h, top;
+
+	if (!perRow)
+	    perRow = 1;
+	row = n / perRow + 1;
+	col = n % perRow;
+	h = OpenCheckIfCGA() ? CGA_WIN_ICON_PLOT_HEIGHT
+			     : NON_CGA_WIN_ICON_PLOT_HEIGHT;
+	top = (sword) DWORD_HEIGHT(s) -
+	      (row * h + (OpenCheckIfCGA() ? CGA_WIN_ICON_PLOT_MARGIN_Y
+					   : NON_CGA_WIN_ICON_PLOT_MARGIN_Y));
+	*y = top < 0 ? 0 : top;
+	*x = col * WIN_ICON_PLOT_WIDTH + WIN_ICON_PLOT_MARGIN_X;
+    }
+}
+
+/* FieldFindIconSlot: the icon slot nearest the position */
+word FieldFindIconSlot(optr oself, sword x, sword y)
+{
+    SizeAsDWord s = VisGetSize(oself);
+    sword col, row, h, base;
+    word perRow, slot;
+
+    x -= WIN_ICON_PLOT_MARGIN_X - WIN_ICON_PLOT_WIDTH / 2;
+    if (x < 0)
+	x = 0;
+    col = x / WIN_ICON_PLOT_WIDTH;
+    perRow = (DWORD_WIDTH(s) - WIN_ICON_PLOT_MARGIN_X) / WIN_ICON_PLOT_WIDTH;
+    if (!perRow)
+	perRow = 1;
+    if (col >= perRow)
+	col = perRow - 1;
+    h = OpenCheckIfCGA() ? CGA_WIN_ICON_PLOT_HEIGHT
+			 : NON_CGA_WIN_ICON_PLOT_HEIGHT;
+    base = (OpenCheckIfCGA() ? CGA_WIN_ICON_PLOT_MARGIN_Y
+			     : NON_CGA_WIN_ICON_PLOT_MARGIN_Y) + h / 2;
+    row = (sword) DWORD_HEIGHT(s) - y - base;
+    if (row < 0)
+	row = 0;
+    slot = (row / h) * perRow + col + 1;
+    return slot > 63 ? 63 : slot;
+}
+
+/* OLFieldVupGrabWithinView: the input flow is the application's (the
+ * UI's) to alter */
+@extern method OLFieldClass, MSG_VIS_VUP_ALTER_INPUT_FLOW
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (app)
+	@call app::MSG_VIS_VUP_ALTER_INPUT_FLOW(translation, window, object,
+						grabType, grabFlags);
+}
+
+/* ---------------------------------------------------------------------
+ * The hierarchies (cwinFieldCommon.asm, cwinFieldUncommon.asm)
+ * ------------------------------------------------------------------- */
+
+/* OLFieldEnsureActiveFT: the best windows of the field get its focus
+ * and target */
+@extern method OLFieldClass, MSG_META_ENSURE_ACTIVE_FT
+{
+    EnsureActiveFTCommon(oself, pself->VCI_window,
+			 FIELD_OFFSET(OLFI_focusExcl),
+			 FIELD_OFFSET(OLFI_nonModalFocus), TRUE);
+}
+
+/* FieldTestForModalGeodeWithin: a system modal geode is up and the
+ * system's focus is this field */
+static Boolean FieldTestForModalGeodeWithin(optr oself)
+{
+    GeodeHandle geode = 0;
+    optr focus = 0;
+
+    optr sys = UserGetSystemObject();
+
+    if (!sys)
+	return FALSE;
+    (void) @call sys::MSG_GEN_SYSTEM_GET_MODAL_GEODE(&geode);
+    if (!geode)
+	return FALSE;
+    (void) @call sys::MSG_META_GET_FOCUS_EXCL(&focus);
+    return focus == oself;
+}
+
+/*
+ * OLFieldAlterFTVMCExcl: the hierarchies at the field (the focus with
+ * the non-modal cache, a new focus gets the keyboard); with no target
+ * left, the tool area back to the field's layer
+ */
+@extern method OLFieldClass, MSG_META_MUP_ALTER_FTVMC_EXCL
+{
+    optr hadTarget = pself->OLFI_targetExcl.HG_OD;
+
+    if (flags & MAEF_NOT_HERE) {
+	@callsuper();
+	return;
+    }
+    if (flags & MAEF_FOCUS) {
+	optr old = pself->OLFI_focusExcl.HG_OD;
+	Boolean modal = FieldTestForModalGeodeWithin(oself);
+
+	AlterFExclWithNonModalCacheCommon(oself,
+					  FIELD_OFFSET(OLFI_focusExcl),
+					  FIELD_OFFSET(OLFI_nonModalFocus),
+					  objectWantingControl, flags, modal);
+	pself = OLFieldInstanceOf(oself);
+	if (pself->OLFI_focusExcl.HG_OD != old &&
+	    (pself->OLFI_focusExcl.HG_flags & HGF_APP_EXCL))
+	    SysUpdateKbdGrab(pself->OLFI_focusExcl.HG_OD);
+	flags &= ~MAEF_FOCUS;
+    }
+    if (flags & MAEF_TARGET) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_TARGET_EXCL,
+				  VIS_MASTER, FIELD_OFFSET(OLFI_targetExcl),
+				  objectWantingControl,
+				  (flags & MAEF_GRAB) | MAEF_TARGET);
+	flags &= ~MAEF_TARGET;
+    }
+    if (flags & MAEF_FULL_SCREEN) {
+	FlowAlterHierarchicalGrab(oself, MSG_META_GAINED_FULL_SCREEN_EXCL,
+				  VIS_MASTER,
+				  FIELD_OFFSET(OLFI_fullScreenExcl),
+				  objectWantingControl,
+				  (flags & MAEF_GRAB) | MAEF_FULL_SCREEN);
+	flags &= ~MAEF_FULL_SCREEN;
+    }
+    if (flags & MAEF_MASK_OF_ALL_HIERARCHIES)
+	@callsuper oself::OLFieldClass::MSG_META_MUP_ALTER_FTVMC_EXCL(
+				objectWantingControl, flags);
+    if (hadTarget && !OLFieldInstanceOf(oself)->OLFI_targetExcl.HG_OD &&
+	OLFieldInstanceOf(oself)->OLFI_toolArea) {
+	OLFieldMoveToolAreaParams p;
+
+	memset(&p, 0, sizeof(p));
+	@call oself::MSG_OL_FIELD_MOVE_TOOL_AREA(&p);
+    }
+}
+
+@extern method OLFieldClass, MSG_META_GET_FOCUS_EXCL
+{
+    *focusObject = pself->OLFI_focusExcl.HG_OD;
+    return TRUE;
+}
+
+@extern method OLFieldClass, MSG_META_GET_TARGET_EXCL
+{
+    *targetObject = pself->OLFI_targetExcl.HG_OD;
+    return TRUE;
+}
+
+/* OLFieldSendClassedEvent: to the field's focus or target */
+@extern method OLFieldClass, MSG_META_SEND_CLASSED_EVENT
+{
+    optr dest;
+
+    if (whereTo == (TravelOption) TO_FOCUS)
+	dest = pself->OLFI_focusExcl.HG_OD;
+    else if (whereTo == (TravelOption) TO_TARGET)
+	dest = pself->OLFI_targetExcl.HG_OD;
+    else {
+	@callsuper();
+	return;
+    }
+    FlowDispatchSendOnOrDestroyClassedEvent(NULL, oself, message, event,
+					    whereTo, dest, 0);
+}
+
+/* the tool area (none yet): no size */
+@extern method OLFieldClass, MSG_OL_FIELD_GET_TOOL_AREA_SIZE
+{
+    return 0;
+}
+
+@extern method OLFieldClass, MSG_OL_FIELD_MOVE_TOOL_AREA
+{
+    (void) params;
+}

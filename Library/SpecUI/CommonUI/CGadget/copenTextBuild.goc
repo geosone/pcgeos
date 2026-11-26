@@ -23,37 +23,6 @@
 @include <Objects/gInterC.goh>
 #include <string.h>
 
-@classdecl OLTextClass, neverSaved;
-
-@extern method OLTextClass, MSG_VIS_DRAW;
-@extern method OLTextClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
-@extern method OLTextClass, MSG_META_GRAB_FOCUS_EXCL;
-@extern method OLTextClass, MSG_META_GRAB_TARGET_EXCL;
-@extern method OLTextClass, MSG_SPEC_NOTIFY_ENABLED;
-@extern method OLTextClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
-@extern method OLTextClass, MSG_SPEC_NAVIGATION_QUERY;
-@extern method OLTextClass, MSG_META_TEXT_USER_MODIFIED;
-@extern method OLTextClass, MSG_META_TEXT_NOT_USER_MODIFIED;
-@extern method OLTextClass, MSG_GEN_TEXT_SET_MODIFIED_STATE;
-@extern method OLTextClass, MSG_GEN_TEXT_SET_INDETERMINATE_STATE;
-@extern method OLTextClass, MSG_GEN_APPLY;
-@extern method OLTextClass, MSG_SPEC_UPDATE_VIS_MONIKER;
-@extern method OLTextClass, MSG_SPEC_VIS_OPEN_NOTIFY;
-@extern method OLTextClass, MSG_SPEC_VIS_CLOSE_NOTIFY;
-@extern method OLTextClass, MSG_VIS_RECALC_SIZE;
-@extern method OLTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
-@extern method OLTextClass, MSG_SPEC_GET_EXTRA_SIZE;
-@extern method OLTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY;
-@extern method OLTextClass, MSG_GET_FIRST_MKR_POS;
-@extern method OLTextClass, MSG_VIS_TEXT_UPDATE_GENERIC;
-@extern method OLTextClass, MSG_META_KBD_CHAR;
-@extern method OLTextClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC;
-@extern method OLTextClass, MSG_GEN_FIND_KBD_ACCELERATOR;
-@extern method OLTextClass, MSG_META_GAINED_FOCUS_EXCL;
-@extern method OLTextClass, MSG_META_LOST_FOCUS_EXCL;
-@extern method OLTextClass, MSG_GEN_ACTIVATE;
-@extern method OLTextClass, MSG_GEN_MAKE_APPLYABLE;
-@extern method OLTextClass, MSG_META_TEXT_EMPTY_STATUS_CHANGED;
 
 #define Txt(o)	((OLTextInstance *) ObjDerefVis(o))
 #define Gen(o)	((GenTextInstance *) ObjDerefGen(o))
@@ -149,7 +118,7 @@ static void SetTextMargins(optr o)
 }
 
 /* OLTextInitialize */
-@method OLTextClass, MSG_META_INITIALIZE
+@extern method OLTextClass, MSG_META_INITIALIZE
 {
     GenTextInstance *g;
     GenTextAttrs attrs;
@@ -395,7 +364,7 @@ static void SelectRange(optr o, dword start, dword end)
  * the expand hints; a fixed size that expands nowhere is only
  * calculated when invalid
  */
-@method OLTextClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
+@extern method OLTextClass, MSG_SPEC_SCAN_GEOMETRY_HINTS
 {
     pself->OLTDI_moreState &= ~(TDSS_EXPAND_WIDTH_TO_FIT_PARENT |
 				TDSS_EXPAND_HEIGHT_TO_FIT_PARENT);
@@ -446,7 +415,7 @@ static void CreateComposite(optr o, SpecBuildFlags flags)
  * ATTR_GEN_TEXT_SELECTABLE) and enabled, then the focus and target
  * hints; a modified text makes its dialog applyable
  */
-@method OLTextClass, MSG_SPEC_BUILD
+@extern method OLTextClass, MSG_SPEC_BUILD
 {
     BuildHints h;
     GenTextInstance *g;
@@ -525,7 +494,7 @@ done:
  * attribute chunk made here (the editable font) too; out of the
  * composite, which is destroyed
  */
-@method OLTextClass, MSG_SPEC_UNBUILD
+@extern method OLTextClass, MSG_SPEC_UNBUILD
 {
     ChunkHandle c;
     optr comp = 0;
@@ -556,7 +525,7 @@ done:
 }
 
 /* OLTextGetSpecVisObj: the composite if it is in one */
-@method OLTextClass, MSG_SPEC_GET_SPECIFIC_VIS_OBJECT
+@extern method OLTextClass, MSG_SPEC_GET_SPECIFIC_VIS_OBJECT
 {
     if (flags & SBF_WIN_GROUP)
 	return 0;
@@ -567,7 +536,7 @@ done:
 
 /* OLTextVupCreateGState: an editable text's gstate has the font for
  * editable text */
-@method OLTextClass, MSG_VIS_VUP_CREATE_GSTATE
+@extern method OLTextClass, MSG_VIS_VUP_CREATE_GSTATE
 {
     GStateHandle g = @callsuper();
 

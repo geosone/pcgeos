@@ -21,6 +21,9 @@
  */
 @include "cGeode.goh"
 @include <Objects/gTrigC.goh>
+@include <Objects/gPrimC.goh>
+@include <Objects/gDispC.goh>
+@include <Objects/gInterC.goh>
 
 #define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
@@ -59,7 +62,7 @@
 #define OLWSI_SIZE	0x01
 
 /* the template's object, the standard one's or the display one's */
-static optr Template(Boolean display, SysMenuObject which)
+optr OpenWinSysMenuTemplate(Boolean display, SysMenuObject which)
 {
     switch (which) {
     case SMO_MENU:
@@ -96,7 +99,7 @@ optr OpenWinSysMenuObject(optr o, SysMenuObject which)
     if (!w->OLWI_sysMenu)
 	return 0;
     return ConstructOptr(w->OLWI_sysMenu,
-			 OptrToChunk(Template(w->OLWI_type ==
+			 OptrToChunk(OpenWinSysMenuTemplate(w->OLWI_type ==
 					      MOWT_DISPLAY_WINDOW, which)));
 }
 
@@ -111,37 +114,6 @@ optr OpenWinSysMenuTop(optr o)
     if (w->OLWI_menuState & OWA_SYS_MENU_IS_CLOSE_BUTTON)
 	return ConstructOptr(w->OLWI_sysMenu, w->OLWI_sysMenuButton);
     return OpenWinSysMenuObject(o, SMO_MENU);
-}
-
-/*
- * OpenWinDuplicateBlock: a copy of the template's block owned by the
- * window's owner, its output the window, the copy's object linked up
- * to the window; the block kept in OLWI_sysMenu
- */
-static optr OpenWinDuplicateBlock(optr o, optr tmpl)
-{
-    static const SysMenuObject icons[] = {
-	SMO_MINIMIZE_ICON, SMO_MAXIMIZE_ICON, SMO_RESTORE_ICON, SMO_BUTTON
-    };
-    Boolean display = Win(o)->OLWI_type == MOWT_DISPLAY_WINDOW;
-    MemHandle b = ObjDuplicateResource(OptrToHandle(tmpl),
-				       MemOwner(OptrToHandle(o)), 0);
-    optr n = ConstructOptr(b, OptrToChunk(tmpl));
-    int i;
-
-    ObjLockObjBlock(b);
-    ObjBlockSetOutput(b, o);
-    for (i = 0; i < 4; i++)
-	(void) ObjVarAddData(ConstructOptr(b, OptrToChunk(Template(display,
-							icons[i]))),
-			     HINT_SYS_ICON, 0);
-    (void) ObjVarAddData(ConstructOptr(b, OptrToChunk(Template(display,
-							SMO_CLOSE))),
-			 ATTR_SYSTEM_MENU_CLOSE, 0);
-    MemUnlock(b);
-    Win(o)->OLWI_sysMenu = b;
-    @call o::MSG_GEN_ADD_CHILD_UPWARD_LINK_ONLY(n);
-    return n;
 }
 
 /*
@@ -181,13 +153,13 @@ void OpenWinEnsureSysMenu(optr o, SpecBuildFlags flags)
     if (w->OLWI_attrs & OWA_HAS_SYS_MENU) {
 	if (!w->OLWI_sysMenu) {
 	    if (!(olWindowOptions & UIWO_WINDOW_MENU)) {
-		button = Template(display, SMO_BUTTON);
+		button = OpenWinSysMenuTemplate(display, SMO_BUTTON);
 		w->OLWI_sysMenuButton = OptrToChunk(button);
 		(void) OpenWinDuplicateBlock(o, button);
 		Win(o)->OLWI_menuState |= OWA_SYS_MENU_IS_CLOSE_BUTTON;
 	    } else
 		CustomizeSysMenu(o, OpenWinDuplicateBlock(o,
-					Template(display, SMO_MENU)));
+					OpenWinSysMenuTemplate(display, SMO_MENU)));
 	}
 	flags = (flags & ~SBF_WIN_GROUP) | SBF_TREE_BUILD;
 	if (GenCheckIfFullyEnabled(o, TRUE))
@@ -578,12 +550,25 @@ void OpenWinSysMenuNotifyEnabled(optr o, Message msg, byte mode,
     }
 }
 
-/* OLWinNotifyEnabled: changed: the system menu, its button and its
- * icons told too */
-@extern method OLWinClass, MSG_SPEC_NOTIFY_ENABLED, MSG_SPEC_NOTIFY_NOT_ENABLED
+#define Win(o)		((OLWinInstance *) ObjDerefVis(o))
+
+/* OpenWinGetTitleBarGroupSize: the width of a title bar group that is
+ * built (one less on black and white, to overlap) */
+word OpenWinGetTitleBarGroupSize(optr o, Boolean right)
 {
-    if (!@callsuper())
-	return FALSE;
-    OpenWinSysMenuNotifyEnabled(oself, message, updateMode, flags);
-    return TRUE;
+    OLWinInstance *w = Win(o);
+    optr g = right ? w->OLWI_titleBarRightGroup : w->OLWI_titleBarLeftGroup;
+    word cx = 0;
+
+    if (!g)
+	return 0;
+    ObjLockObjBlock(OptrToHandle(g));
+    if (VisCheckIfSpecBuilt(g)) {
+	cx = DWORD_WIDTH(@call g::MSG_VIS_RECALC_SIZE(RSA_CHOOSE_OWN_SIZE,
+						      RSA_CHOOSE_OWN_SIZE));
+	if (OpenCheckIfBW() && cx)
+	    cx--;
+    }
+    MemUnlock(OptrToHandle(g));
+    return cx;
 }

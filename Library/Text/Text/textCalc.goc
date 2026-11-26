@@ -20,13 +20,6 @@
  */
 @include "textInt.goh"
 
-@extern method VisTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
-@extern method VisTextClass, MSG_VIS_OPEN;
-@extern method VisTextClass, MSG_VIS_CLOSE;
-@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_FROM_OFFSET;
-@extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS;
 
 /*
  * TextRecalc: the lines again after a change: at start, inserted

@@ -1,0 +1,58 @@
+/*
+ * copenGadgetComp.goc -- after copenGadgetComp.asm:
+ * MSG_VIS_VUP_CREATE_GSTATE, MSG_META_FUP_KBD_CHAR,
+ * MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS, MSG_VUP_GET_BUILD_FLAGS,
+ * MSG_VIS_VUP_RELEASE_MENU_FOCUS/MSG_OL_VUP_MAKE_APPLYABLE,
+ * MSG_OL_MAKE_APPLYABLE/MSG_OL_MAKE_NOT_APPLYABLE.
+ *
+ * The class record of OLGadgetCompClass is here, as in the asm.
+ */
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olCtrlClass.goh>
+@include <Internal/SpecUI/olWinClass.goh>
+@include <Internal/SpecUI/olGadgetClass.goh>
+
+@classdecl OLGadgetCompClass, neverSaved;
+/* copenGadget.goc */
+@extern method OLGadgetCompClass, MSG_VIS_P32_VUP_QUERY;
+@extern method OLGadgetCompClass, MSG_SPEC_P32_GUP_QUERY;
+
+@method OLGadgetCompClass, MSG_VIS_VUP_CREATE_GSTATE
+{
+    return VupCreateGState(oself);
+}
+
+/* OLGadgetCompFupKbdChar: a key no child wanted: to the parent */
+@method OLGadgetCompClass, MSG_META_FUP_KBD_CHAR
+{
+    optr parent = VisFindParent(oself);
+
+    return parent ? @call parent::MSG_META_FUP_KBD_CHAR(character, flags,
+							state) : FALSE;
+}
+
+/* OLGadgetCompBroadcastForDefaultFocus: on into the gadget */
+@method OLGadgetCompClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS
+{
+    OLBroadcastForDefaultFocus(oself, retValue);
+}
+
+@method OLGadgetCompClass, MSG_VUP_GET_BUILD_FLAGS
+{
+    optr parent = VisFindParent(oself);
+
+    return parent ? @call parent::MSG_VUP_GET_BUILD_FLAGS(flags) : FALSE;
+}
+
+@method OLGadgetCompClass, MSG_VIS_VUP_RELEASE_MENU_FOCUS,
+			   MSG_OL_VUP_MAKE_APPLYABLE
+{
+    (void) VisCallParent(oself, message, NULL, 0, NULL, 0);
+}
+
+@method OLGadgetCompClass, MSG_OL_MAKE_APPLYABLE,
+			   MSG_OL_MAKE_NOT_APPLYABLE
+{
+    VisSendToChildren(oself, message, NULL, 0);
+}

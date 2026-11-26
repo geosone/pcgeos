@@ -1,0 +1,8 @@
+/*
+ * visEmpty.goc -- after visEmpty.asm: VisEmptyClass, a shell class with
+ * no instance data and no methods, a placeholder for master offsets
+ * (declared in uiInt.goh).
+ */
+@include "uiInt.goh"
+
+@classdecl VisEmptyClass, neverSaved;

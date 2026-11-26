@@ -17,7 +17,6 @@
 @include "textInt.goh"
 #include <Internal/specUI.h>
 
-@extern method VisTextClass, MSG_META_KBD_CHAR;
 
 typedef const KeyboardShortcut *SpecGetTextKbdBindingsRoutine(
 				word *count, const word **functions);

@@ -245,27 +245,6 @@ static void Detaching(optr o)
  * Bringing to the top
  * ------------------------------------------------------------------- */
 
-/* OpenWinUpdateModalStatus: a modal popup tells the application, a
- * system modal one the system first (cwinClassOther.asm) */
-void OpenWinUpdateModalStatus(optr o)
-{
-    OLPopupWinInstance *p = (OLPopupWinInstance *) ObjDerefVis(o);
-    word flags;
-    optr app;
-
-    if (!(p->OLWI_moreFixedAttr & OWMFA_IS_POPUP))
-	return;
-    flags = p->OLPWI_flags;
-    if (!(flags & (OLPWF_SYS_MODAL | OLPWF_APP_MODAL)))
-	return;
-    if (flags & OLPWF_SYS_MODAL)
-	(void) UserCallSystem(MSG_GEN_SYSTEM_NOTIFY_SYS_MODAL_WIN_CHANGE,
-			      NULL, 0, NULL, 0);
-    app = GeodeGetAppObject(0);
-    if (app)
-	@call app::MSG_GEN_APPLICATION_NOTIFY_MODAL_WIN_CHANGE();
-}
-
 /*
  * OpenWinBringToTop: the window to the top of its layer; the target and
  * focus taken (not a toolbox, not a window that does not disturb unless
@@ -318,70 +297,6 @@ void OpenWinUpdateModalStatus(optr o)
 	reg = OpenWinGetRegionBW();
     WinResize(win, reg, b.R_left, b.R_top, (word) (b.R_right - 1),
 	      (word) (b.R_bottom - 1), WPF_ABS);
-}
-
-/*
- * EnsureWindowInParentWin: the window moved into its parent window so
- * that at least the width and height given stay visible
- */
-void EnsureWindowInParentWin(optr o, sword minW, sword minH)
-{
-    WinSizeInfoParams s;
-    OLWinInstance *w;
-    sword x, y, lim;
-
-    if (!OpenGetParentWinSize(o, &s))
-	return;
-    s.WSIP_windowHeight -= GetTaskBarSizeAdjustment(o);
-    w = Win(o);
-    x = w->VI_bounds.R_left;
-    if (x >= 0 && x > (lim = (sword) (s.WSIP_windowWidth - minW + 1)))
-	x = lim;
-    else if (x <= (lim = (sword) (minW - w->VI_bounds.R_right +
-				  w->VI_bounds.R_left)))
-	x = lim;
-    y = w->VI_bounds.R_top;
-    if (y >= 0 && (lim = (sword) (s.WSIP_windowHeight - minH + 1)) < 0)
-	y = 0;
-    else if (y >= 0 && y > lim)
-	y = lim;
-    else if (y <= (lim = (sword) (minH - w->VI_bounds.R_bottom +
-				  w->VI_bounds.R_top)))
-	y = lim;
-    VisSetPosition(o, x, y);
-}
-
-#define MIN_WIN_TITLE_BAR_ONSCREEN_DIST	10
-
-/* EnsureTitleBarInParentWin: enough of the title bar stays in the
- * parent window */
-static void EnsureTitleBarInParentWin(optr o)
-{
-    WinSizeInfoParams s;
-    OLWinInstance *w = Win(o);
-    sword x, y, lim;
-
-    if (!(w->OLWI_attrs & OWA_TITLED) || !OpenGetParentWinSize(o, &s))
-	return;
-    s.WSIP_windowHeight -= GetTaskBarSizeAdjustment(o);
-    w = Win(o);
-    x = w->VI_bounds.R_left;
-    if (x >= 0 &&
-	x > (lim = (sword) (s.WSIP_windowWidth - w->OLWI_titleBarBounds.R_left -
-			    (MIN_WIN_TITLE_BAR_ONSCREEN_DIST - 1))))
-	x = lim;
-    else if (x <= (lim = (sword) (MIN_WIN_TITLE_BAR_ONSCREEN_DIST -
-				  w->OLWI_titleBarBounds.R_right)))
-	x = lim;
-    y = w->VI_bounds.R_top;
-    if (y >= 0 &&
-	y > (lim = (sword) (s.WSIP_windowHeight - w->OLWI_titleBarBounds.R_top -
-			    (MIN_WIN_TITLE_BAR_ONSCREEN_DIST - 1))))
-	y = lim;
-    else if (y <= (lim = (sword) (MIN_WIN_TITLE_BAR_ONSCREEN_DIST -
-				  w->OLWI_titleBarBounds.R_bottom)))
-	y = lim;
-    VisSetPosition(o, x, y);
 }
 
 /* KeepMenuOnscreen: the menu back within its parent window */
@@ -470,39 +385,6 @@ void OpenWinCheckVisibleConstraints(optr o)
  * The title bar
  * ------------------------------------------------------------------- */
 
-/* OpenWinGetTitleBarGroupSize: the width of a title bar group that is
- * built (one less on black and white, to overlap) */
-word OpenWinGetTitleBarGroupSize(optr o, Boolean right)
-{
-    OLWinInstance *w = Win(o);
-    optr g = right ? w->OLWI_titleBarRightGroup : w->OLWI_titleBarLeftGroup;
-    word cx = 0;
-
-    if (!g)
-	return 0;
-    ObjLockObjBlock(OptrToHandle(g));
-    if (VisCheckIfSpecBuilt(g)) {
-	cx = DWORD_WIDTH(@call g::MSG_VIS_RECALC_SIZE(RSA_CHOOSE_OWN_SIZE,
-						      RSA_CHOOSE_OWN_SIZE));
-	if (OpenCheckIfBW() && cx)
-	    cx--;
-    }
-    MemUnlock(OptrToHandle(g));
-    return cx;
-}
-
-/* OpenWinCheckIfMinMaxRestoreControls: displays, primaries if the
- * options say so */
-Boolean OpenWinCheckIfMinMaxRestoreControls(optr o)
-{
-    OLWinType t = Win(o)->OLWI_type;
-
-    if (t == MOWT_DISPLAY_WINDOW)
-	return TRUE;
-    return t == MOWT_PRIMARY_WINDOW &&
-	   (olWindowOptions & UIWO_PRIMARY_MIN_MAX_RESTORE_CONTROLS);
-}
-
 /*
  * OLWinGetHeaderTitleBounds: the room the title leaves on the left (the
  * system menu button, the left group) and on the right (the minimize
@@ -555,48 +437,21 @@ Boolean OpenWinCheckIfMinMaxRestoreControls(optr o)
  * The moniker in the title
  * ------------------------------------------------------------------- */
 
-static const char longTermStr[] = " - ";
+const char openWinLongTermStr[] = " - ";
 
-/* GetDividerStrLen */
-word GetDividerStrLen(GStateHandle gs)
-{
-    return (word) GrTextWidth(gs, longTermStr, 0);
-}
-
-static ChunkHandle LongTermMoniker(optr o)
+ChunkHandle OpenWinLongTermMoniker(optr o)
 {
     if (Win(o)->OLWI_type != MOWT_PRIMARY_WINDOW)
 	return 0;
     return ((GenPrimaryInstance *) ObjDerefGen(o))->GPI_longTermMoniker;
 }
 
-static Boolean TinyScreen(void)
+Boolean OpenWinTinyScreen(void)
 {
     word w, h;
 
     OpenGetScreenDimensions(&w, &h);
     return w <= TINY_SCREEN_WIDTH_THRESHOLD;
-}
-
-/*
- * OpenWinGetMonikerSize: the moniker's size; a primary's with its long
- * term moniker after " - " (on a tiny screen that one alone)
- */
-SizeAsDWord OpenWinGetMonikerSize(optr o, GStateHandle gs)
-{
-    ChunkHandle m = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
-    ChunkHandle lt = LongTermMoniker(o);
-    SizeAsDWord s = VisGetMonikerSize(o, m, GetSystemFontHeight(), gs), l;
-    word w;
-
-    if (!lt)
-	return s;
-    l = VisGetMonikerSize(o, lt, GetSystemFontHeight(), gs);
-    if (TinyScreen())
-	return l;
-    w = (word) (DWORD_WIDTH(s) + GetDividerStrLen(gs) + DWORD_WIDTH(l));
-    return MAKE_SIZE_DWORD(w, DWORD_HEIGHT(l) > DWORD_HEIGHT(s)
-			      ? DWORD_HEIGHT(l) : DWORD_HEIGHT(s));
 }
 
 /*
@@ -606,10 +461,10 @@ SizeAsDWord OpenWinGetMonikerSize(optr o, GStateHandle gs)
 void OpenWinDrawMoniker(optr o, DrawMonikerFlags flags, DrawMonikerArgs *a)
 {
     ChunkHandle m = ((GenInstance *) ObjDerefGen(o))->GI_visMoniker;
-    ChunkHandle lt = LongTermMoniker(o);
+    ChunkHandle lt = OpenWinLongTermMoniker(o);
     word x = a->DMA_xInset, y = a->DMA_yInset, mw, dw = 0;
 
-    if (lt && TinyScreen()) {
+    if (lt && OpenWinTinyScreen()) {
 	VisDrawMoniker(o, lt, flags, a);
 	return;
     }
@@ -621,7 +476,7 @@ void OpenWinDrawMoniker(optr o, DrawMonikerFlags flags, DrawMonikerArgs *a)
 	dw = GetDividerStrLen(a->DMA_gState);
 	if (a->DMA_xMaximum >= mw + dw)
 	    GrDrawText(a->DMA_gState, (sword) (x + mw), (sword) y,
-		       longTermStr, 0);
+		       openWinLongTermStr, 0);
     }
     a->DMA_xInset = (word) (x + mw + dw);
     if ((sword) (a->DMA_xMaximum -= (word) (mw + dw)) < 0)

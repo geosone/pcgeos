@@ -8,12 +8,35 @@
  * Port32 (Port32/ABI.md section 13y), not yet: the task bar's
  * windows (the task bar is not ported), the windows told of a new
  * field size.
- * The standard dialogs are in CSpec/cspecStdDialog.goc.
+ *
+ * The standard dialogs: the template every standard dialog is a copy of
+ * (StandardDialogUI, a block that holds nothing but the standard dialog,
+ * duplicated for each one put up) is uic -g's of cspecFile.ui, by way of
+ * cspecCUAS.ui (cspecCUAS.goh); its pictures are the monikers uic -g
+ * writes of cspecCUAS.ui's picture resources.  The application builds
+ * one (MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG, for
+ * UserStandardDialog) and runs one without a thread waiting
+ * (MSG_GEN_APPLICATION_DO_STANDARD_DIALOG, ..._TIMED_DIALOG: the response
+ * is sent to an object).  Port32: the strings are put together before
+ * they go into the text's chunk (the asm substitutes in the chunk, and
+ * again in what it substituted); MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG
+ * has no help context in C: who builds adds it (CreateHelpHintIfNeeded
+ * here, UserStandardDialog in the UI).
  */
 @include "cGeode.goh"
 @include <Internal/flowC.goh>
 @include <Internal/specC.goh>
 #include <input.h>
+@include "cspecCUAS.goh"
+@include <Objects/gTextC.goh>
+@include <Objects/gGlyphC.goh>
+#include <uDialog.h>
+#include <timer.h>
+#include <Objects/helpCC.h>
+
+static word OLStdDialogStrLen(const char *s);
+static void CreateHelpHintIfNeeded(optr dlg, const char *helpContext,
+				   CustomDialogBoxFlags flags);
 
 #define VIS_MASTER	word_offsetof(VisBase, Vis_offset)
 #define APP_OFFSET(f)	word_offsetof(OLApplicationInstance, f)
@@ -497,4 +520,281 @@ static void NukeExpressMenu(optr oself)
 /* the windows' positions for the task bar: not yet (OLWinClass) */
 @extern method OLApplicationClass, MSG_OL_APP_UPDATE_WINDOWS_FOR_TASK_BAR
 {
+}
+
+/* the table of response triggers a GIT_MULTIPLE_RESPONSE dialog is
+ * passed (StandardDialogResponseTriggerTable) */
+typedef struct {
+    word				SDRTT_numTriggers;
+    StandardDialogResponseTriggerEntry	SDRTT_triggers[1];
+} StdDialogTriggers;
+
+/* SubstituteStringArg, for both: the string with arg1 for each
+ * C_CTRL_A and arg2 for each C_CTRL_B, written to dest if there is
+ * one; its size with the null */
+static word Substitute(char *dest, const char *s, const char *arg1,
+		       const char *arg2)
+{
+    word n = 0;
+
+    for (; *s; s++) {
+	const char *a = (*s == C_CTRL_A) ? arg1 :
+			(*s == C_CTRL_B) ? arg2 : NULL;
+
+	if (!a) {
+	    if (dest)
+		dest[n] = *s;
+	    n++;
+	    continue;
+	}
+	if (dest)
+	    memcpy(dest + n, a, OLStdDialogStrLen(a));
+	n += OLStdDialogStrLen(a);
+    }
+    if (dest)
+	dest[n] = 0;
+    return n + 1;
+}
+
+/*
+ * CreateMultipleResponseTriggers: a trigger in the reply bar per entry,
+ * with its moniker and command, completing the interaction.  A
+ * destructive action whose first trigger is "Yes" has its default focus
+ * on the second one.
+ */
+static void CreateResponseTriggers(optr dlg, const StdDialogTriggers *t,
+				   CustomDialogBoxFlags flags)
+{
+    word i;
+
+    if (!t)
+	return;
+    for (i = 0; i < t->SDRTT_numTriggers; i++) {
+	const StandardDialogResponseTriggerEntry *e = &t->SDRTT_triggers[i];
+	optr trig = OpenCreateChildObject(OptrToHandle(dlg), dlg,
+					  &GenTriggerClass,
+					  HINT_SEEK_REPLY_BAR, TRUE, FALSE,
+					  CCO_LAST);
+	word *cmd;
+
+	if (e->SDRTE_moniker)
+	    (void) @call trig::MSG_GEN_REPLACE_VIS_MONIKER_OPTR(
+					e->SDRTE_moniker, VUM_MANUAL);
+	cmd = ObjVarAddData(trig, ATTR_GEN_TRIGGER_INTERACTION_COMMAND,
+			    sizeof(word));
+	*cmd = e->SDRTE_responseValue;
+	if ((flags & CDBF_DESTRUCTIVE_ACTION) && i == 1 &&
+	    t->SDRTT_triggers[0].SDRTE_responseValue == IC_YES)
+	    (void) ObjVarAddData(trig, HINT_DEFAULT_FOCUS, 0);
+	((GenInstance *) ObjDerefGen(trig))->GI_attrs |=
+					GA_SIGNAL_INTERACTION_COMPLETE;
+    }
+}
+
+/*
+ * OLApplicationBuildStandardDialog: a copy of the standard dialog
+ * (owned by the caller's geode, run by its thread) with the picture of
+ * its type, its interaction type, the response triggers and the text;
+ * the application's last child, usable.  0 if the application is
+ * detaching.
+ */
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG
+{
+    MemHandle bh;
+    optr dlg, glyph, text;
+    ChunkHandle mkr;
+    GenInteractionInstance *gi;
+    GenInteractionType type;
+
+    (void) pself;
+    if (((GenApplicationInstance *) ObjDerefGen(oself))->GAI_states &
+	AS_DETACHING)
+	return 0;
+    bh = ObjDuplicateResource(OptrToHandle(@StandardDialogSummons), 0, 0);
+    dlg = ConstructOptr(bh, OptrToChunk(@StandardDialogSummons));
+    glyph = ConstructOptr(bh, OptrToChunk(@StdDialogCuteGlyph));
+    text = ConstructOptr(bh, OptrToChunk(@StdDialogText));
+    switch ((dialogFlags & CDBF_DIALOG_TYPE) >> CDBF_DIALOG_TYPE_OFFSET) {
+    case CDT_QUESTION:
+	mkr = OptrToChunk(@StdDialogQuestionMoniker);
+	break;
+    case CDT_WARNING:
+	mkr = OptrToChunk(@StdDialogWarningMoniker);
+	break;
+    case CDT_NOTIFICATION:
+	mkr = OptrToChunk(@StdDialogNotificationMoniker);
+	break;
+    default:
+	mkr = OptrToChunk(@StdDialogErrorMoniker);
+	break;
+    }
+    ((GenInstance *) ObjDerefGen(glyph))->GI_visMoniker = mkr;
+    gi = (GenInteractionInstance *) ObjDerefGen(dlg);
+    if (dialogFlags & CDBF_SYSTEM_MODAL) {
+	gi->GII_attrs |= GIA_SYS_MODAL;
+	gi->GII_attrs &= ~GIA_MODAL;
+    }
+    type = (GenInteractionType) ((dialogFlags & CDBF_INTERACTION_TYPE) >>
+				 CDBF_INTERACTION_TYPE_OFFSET);
+    gi->GII_type = type;
+    if (type == GIT_MULTIPLE_RESPONSE)
+	CreateResponseTriggers(dlg, (const StdDialogTriggers *) customTriggers,
+			       dialogFlags);
+    if (string) {
+	(void) LMemReAlloc(text, Substitute(NULL, string, arg1, arg2));
+	(void) Substitute(LMemDeref(text), string, arg1, arg2);
+    }
+    @call oself::MSG_GEN_ADD_CHILD(dlg, CCO_LAST);
+    @call dlg::MSG_GEN_SET_USABLE(VUM_MANUAL);
+    return dlg;
+}
+
+static OLAStdDialog *StdDialog(optr app, ChunkHandle d)
+{
+    return (OLAStdDialog *) LMemDerefHandles(OptrToHandle(app), d);
+}
+
+/*
+ * OLApplicationDoStandardDialog: a standard dialog whose response goes
+ * to an object: the dialog is described by a chunk in the application's
+ * chain, its interaction command comes back here
+ * (TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE) with that chunk.  Not
+ * built (detaching): IC_NULL is the response, through the queue.
+ */
+static void DoStandardDialog(optr oself, word timeout, Boolean timed,
+			     Message dialogMethod, optr dialogOD,
+			     const char *helpContext,
+			     const char *customTriggers, const char *arg2,
+			     const char *arg1, const char *string,
+			     CustomDialogBoxFlags dialogFlags)
+{
+    ChunkHandle d = LMemAlloc(OptrToHandle(oself), sizeof(OLAStdDialog));
+    optr dlg = @call oself::MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG(
+				(char *) customTriggers, (char *) arg2,
+				(char *) arg1, (char *) string, dialogFlags);
+    OLAStdDialog *s;
+    OLApplicationInstance *a;
+    ActionDescriptor *ad;
+    word id = 0;
+    TimerHandle timer = 0;
+
+    if (!dlg) {
+	LMemFreeHandles(OptrToHandle(oself), d);
+	@send, forceQueue dialogOD::{GEN_APP_DO_STANDARD_DIALOG_MSG}
+						(dialogMethod)(IC_NULL);
+	return;
+    }
+    CreateHelpHintIfNeeded(dlg, helpContext, dialogFlags);
+    if (timed)
+	timer = TimerStart(TIMER_EVENT_ONE_SHOT, oself, timeout,
+			   MSG_OL_APP_TIMED_DIALOG_TIMER_EXPIRED, 0, &id);
+    a = (OLApplicationInstance *) ObjDerefVis(oself);
+    s = StdDialog(oself, d);
+    s->OLASD_responseOD = dialogOD;
+    s->OLASD_responseMsg = dialogMethod;
+    s->OLASD_summons = dlg;
+    s->OLASD_timerHandle = timer;
+    s->OLASD_timerId = id;
+    s->OLASD_next = a->OLAI_stdDialogs;
+    a->OLAI_stdDialogs = d;
+    ad = ObjVarAddData(dlg, TEMP_GEN_INTERACTION_WITH_ACTION_RESPONSE,
+		       sizeof(ActionDescriptor) + sizeof(word));
+    ad->AD_OD = oself;
+    ad->AD_message = MSG_OL_APP_DO_DIALOG_RESPONSE;
+    *(word *) (ad + 1) = d;
+    @call dlg::MSG_GEN_INTERACTION_INITIATE();
+    /* the sound of an error or a warning */
+    switch ((dialogFlags & CDBF_DIALOG_TYPE) >> CDBF_DIALOG_TYPE_OFFSET) {
+    case CDT_ERROR:
+	UserStandardSound(SST_ERROR);
+	break;
+    case CDT_WARNING:
+	UserStandardSound(SST_WARNING);
+	break;
+    }
+}
+
+@extern method OLApplicationClass, MSG_GEN_APPLICATION_DO_STANDARD_DIALOG
+{
+    (void) pself;
+    DoStandardDialog(oself, 0, FALSE, dialogMethod, dialogOD, helpContext,
+		     customTriggers, arg2, arg1, string, dialogFlags);
+}
+
+@extern method OLApplicationClass,
+	MSG_GEN_APPLICATION_DO_STANDARD_TIMED_DIALOG
+{
+    (void) pself;
+    DoStandardDialog(oself, timeout, TRUE, dialogMethod, dialogOD,
+		     helpContext, customTriggers, arg2, arg1, string,
+		     dialogFlags);
+}
+
+/*
+ * OLApplicationDoDialogResponse: a standard dialog is answered: off the
+ * chain (its timer stopped), the dialog off the window list, taken out
+ * and its block freed; the response goes to who asked (sent: that may
+ * be another thread)
+ */
+@extern method OLApplicationClass, MSG_OL_APP_DO_DIALOG_RESPONSE
+{
+    ChunkHandle *link = &pself->OLAI_stdDialogs;
+    OLAStdDialog s;
+
+    while (*link && *link != stdDialog)
+	link = &StdDialog(oself, *link)->OLASD_next;
+    if (!*link)
+	return;
+    s = *StdDialog(oself, stdDialog);
+    *link = s.OLASD_next;
+    LMemFreeHandles(OptrToHandle(oself), stdDialog);
+    if (s.OLASD_timerId)
+	(void) TimerStop(s.OLASD_timerHandle, s.OLASD_timerId);
+    (void) @call oself::MSG_META_GCN_LIST_REMOVE(s.OLASD_summons,
+						 GAGCNLT_WINDOWS,
+						 MANUFACTURER_ID_GEOWORKS);
+    @call s.OLASD_summons::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+    @call oself::MSG_GEN_REMOVE_CHILD(s.OLASD_summons, 0);
+    @send s.OLASD_summons::MSG_META_BLOCK_FREE();
+    @send s.OLASD_responseOD::{GEN_APP_DO_STANDARD_DIALOG_MSG}
+				(s.OLASD_responseMsg)(response);
+}
+
+/* OLApplicationTimedDialogTimerExpired: a timed dialog not answered
+ * yet is answered with IC_NULL */
+@extern method OLApplicationClass, MSG_OL_APP_TIMED_DIALOG_TIMER_EXPIRED
+{
+    ChunkHandle d;
+
+    (void) tick;
+    for (d = pself->OLAI_stdDialogs; d; d = StdDialog(oself, d)->OLASD_next)
+	if (StdDialog(oself, d)->OLASD_timerId == timerID) {
+	    @call oself::MSG_OL_APP_DO_DIALOG_RESPONSE(IC_NULL, d);
+	    return;
+	}
+}
+
+static word OLStdDialogStrLen(const char *s)
+{
+    word n = 0;
+
+    while (s[n])
+	n++;
+    return n;
+}
+
+/* CreateHelpHintIfNeeded: the help context of a standard dialog (a
+ * system modal one has help of its own type) */
+static void CreateHelpHintIfNeeded(optr dlg, const char *helpContext,
+		     CustomDialogBoxFlags flags)
+{
+    word n;
+
+    if (!helpContext || !dlg)
+	return;
+    n = OLStdDialogStrLen(helpContext) + 1;
+    memcpy(ObjVarAddData(dlg, ATTR_GEN_HELP_CONTEXT, n), helpContext, n);
+    if (flags & CDBF_SYSTEM_MODAL)
+	*(byte *) ObjVarAddData(dlg, ATTR_GEN_HELP_TYPE, 1) =
+						HT_SYSTEM_MODAL_HELP;
 }

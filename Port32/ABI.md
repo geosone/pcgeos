@@ -5573,8 +5573,8 @@ visual classes of `Library/User/Vis`:
   `UserStandardDialogOptr` have the application build one of the
   specific UI's standard dialogs
   (`MSG_GEN_APPLICATION_BUILD_STANDARD_DIALOG`), wait for it and destroy
-  it. Motif's side is `CSpec/cspecStdDialog.goc` (after `cspecFile.ui`
-  and `copenAppMisc.asm`): the template `StandardDialogUI` (uic -g of `cspecFile.ui`, by way of
+  it. Motif's side is `CUtils/copenAppMisc.goc` (after
+  `copenAppMisc.asm`, with `cspecFile.ui`): the template `StandardDialogUI` (uic -g of `cspecFile.ui`, by way of
   `cspecCUAS.ui`) copied per
   dialog, the picture of its type (the monikers of `cspecCUAS.ui`'s
   picture resources, by uic -g: `cspecCUAS.goh`), the interaction type, the response triggers
@@ -5801,7 +5801,7 @@ visual classes of `Library/User/Vis`:
   new, open, save, update, auto save, close, attach from state, detach,
   shutdown, the connections of IACP clients; save as (and as a
   template), revert (to the last save, to the last auto save), import
-  and export (`cmainDocumentSaveAs.goc`); user notes, rename, type,
+  and export (`cmainDocumentMisc.goc`); user notes, rename, type,
   password, quick backup and its recovery, the empty and the default
   document, copy to and move to (`cmainDocObscure.goc`); the dialog
   of a full disk (`cmainDocLowDisk.goc`, below).

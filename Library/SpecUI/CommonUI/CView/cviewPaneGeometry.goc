@@ -15,6 +15,7 @@
  * (GVA_SCALE_TO_FIT).
  */
 @include "CView/cviewInt.goh"
+@include <Internal/flowC.goh>
 
 /* ---------------------------------------------------------------------
  * The window's place
@@ -82,29 +83,6 @@ void GetWinLeftTop(optr oself, sword *x, sword *y)
     VisGetBoundsInsideMargins(oself, &r);
     *y = r.R_top + AreaAndMargin(oself, PA_TOP, TRUE);
     *x = r.R_left + AreaAndMargin(oself, PA_LEFT, FALSE);
-}
-
-void GetPaneWinBounds(optr oself, Rectangle *r)
-{
-    sword x, y;
-    word f = GetFrameWidth(oself);
-
-    GetWinLeftTop(oself, &x, &y);
-    r->R_left = x + f;
-    r->R_top = y + f;
-    r->R_right = r->R_left + PVis(oself)->OLPI_winWidth - 1;
-    r->R_bottom = r->R_top + PVis(oself)->OLPI_winHeight - 1;
-}
-
-void GetFrameBounds(optr oself, Rectangle *r)
-{
-    word f = GetFrameWidth(oself);
-
-    GetPaneWinBounds(oself, r);
-    r->R_left -= f;
-    r->R_top -= f;
-    r->R_right += f;
-    r->R_bottom += f;
 }
 
 /* ---------------------------------------------------------------------
@@ -605,18 +583,6 @@ Boolean OLPaneSetNewPageSize(optr oself)
 			   SA_SCROLL_FOR_SIZE_CHANGE);
 }
 
-/* FullyInvalidateView: the parent's geometry (now, from the queue) and
- * ours invalid, ahead of other messages */
-void FullyInvalidateView(optr oself)
-{
-    EventHandle ev = @record null::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID,
-							 VUM_NOW);
-
-    @send ,forceQueue,insertAtFront oself::MSG_VIS_SEND_TO_PARENT(ev);
-    @send ,forceQueue,insertAtFront oself::MSG_VIS_MARK_INVALID(
-				VOF_GEOMETRY_INVALID, VUM_MANUAL);
-}
-
 /* InvalViewWindow: the document shown drawn anew */
 @extern method OLPaneClass, MSG_GEN_VIEW_REDRAW_CONTENT
 {
@@ -633,4 +599,24 @@ void FullyInvalidateView(optr oself)
     gs = GrCreateState(PVis(oself)->OLPI_window);
     GrInvalRectDWord(gs, &r);
     GrDestroyState(gs);
+}
+
+/* the view's messages that do nothing here (only scaling would) */
+@extern method OLPaneClass, MSG_GET_FIRST_MKR_POS
+{
+    (void) pos;
+    return FALSE;
+}
+
+@extern method OLPaneClass, MSG_SPEC_GET_EXTRA_SIZE
+{
+    (void) childCount;
+    retValue->ESP_extraWidth = 0;
+    retValue->ESP_extraHeight = 0;
+}
+
+@extern method OLPaneClass, MSG_SPEC_CONVERT_DESIRED_SIZE_HINT
+{
+    return @callsuper oself::OLCtrlClass::MSG_SPEC_CONVERT_DESIRED_SIZE_HINT(
+		desiredWidth, desiredHeight, childCount);
 }

@@ -9,9 +9,6 @@
  */
 @include "textInt.goh"
 
-@extern method VisTextClass, MSG_VIS_CREATE_CACHED_GSTATES;
-@extern method VisTextClass, MSG_VIS_DESTROY_CACHED_GSTATES;
-@extern method VisTextClass, MSG_VIS_RECREATE_CACHED_GSTATES;
 
 /* TextInitModeAndBorder */
 static void TextInitGState(GStateHandle g)

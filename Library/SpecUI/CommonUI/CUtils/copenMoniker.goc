@@ -18,6 +18,11 @@
  * constants here (not localizable yet).
  */
 @include "cGeode.goh"
+@include <Internal/SpecUI/olValueClass.goh>
+@include <Objects/vTextC.goh>
+@include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Objects/gViewC.goh>
+@include <Objects/gContC.goh>
 
 #define MIN_UNDERLINE_WIDTH		3
 #define CLOSE_SHORTCUT_SPACING		5
@@ -612,4 +617,48 @@ void OpenDrawMoniker(optr obj, optr gen, OpenMonikerArgs *a)
 						: BELOW_SHORTCUT_SPACING));
 	OpenDrawKbdAccelerator(obj, gen, a, x, y);
     }
+}
+
+/* ---------------------------------------------------------------------
+ * Moniker sizes (copenMoniker.asm)
+ * ------------------------------------------------------------------- */
+
+static word systemFontHeight;
+
+/* GetSystemFontHeight: the height of the UI's font (cached;
+ * CalcAndCacheSystemFontHeight) */
+word GetSystemFontHeight(void)
+{
+    if (!systemFontHeight) {
+	GStateHandle gs = ViewCreateCalcGState();
+
+	systemFontHeight = (word) GrFontMetrics(gs, GFMI_HEIGHT_ROUNDED);
+	GrDestroyState(gs);
+    }
+    return systemFontHeight;
+}
+
+/* SpecGetGenMonikerSize: the generic moniker's size; a mnemonic not in
+ * the text is shown after it (as " (w)") */
+SizeAsDWord SpecGetGenMonikerSize(optr obj, GStateHandle gs)
+{
+    ChunkHandle m = ((GenInstance *) ObjDerefGen(obj))->GI_visMoniker;
+    SizeAsDWord s;
+    VisMonikerWithText *t;
+
+    s = VisGetMonikerSize(obj, m, GetSystemFontHeight(), gs);
+    if (!m)
+	return s;
+    t = LMemDeref(ConstructOptr(OptrToHandle(obj), m));
+    if ((t->VMWT_common.VM_type & VMT_GSTRING) ||
+	(byte) t->VMWT_mnemonicOffset != 0xfe)	/* VMO_MNEMONIC_NOT_IN_MKR_TEXT */
+	return s;
+    if (!addOnMnemonicWidth) {
+	GStateHandle cg = ViewCreateCalcGState();
+
+	addOnMnemonicWidth = GrTextWidth(cg, " (w)", 4);
+	GrDestroyState(cg);
+    }
+    return MAKE_SIZE_DWORD(DWORD_WIDTH(s) + addOnMnemonicWidth,
+			   DWORD_HEIGHT(s));
 }

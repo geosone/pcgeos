@@ -1,0 +1,13 @@
+/*
+ * cspecDocument.goc -- after cspecDocument.asm: OLBuildDocument.
+ */
+@include "../CMain/cmainDocument.goh"
+@include <Objects/gProcC.goh>
+
+/* OLBuildDocument (cspecDocument.asm): always this class */
+ClassStruct *OLBuildDocument(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLDocumentClass;
+}

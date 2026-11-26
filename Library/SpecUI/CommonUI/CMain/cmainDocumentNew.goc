@@ -12,6 +12,7 @@
 @include <Objects/gInterC.goh>
 @include <Objects/vTextC.goh>
 @include <disk.h>
+@include <system.h>
 
 /* cmainUIDocumentControl.goc */
 extern DiskHandle backupDirDisk;
@@ -961,19 +962,9 @@ static dword UndoContext(optr o)
     OLDocSendUndoMessage(oself, MSG_GEN_PROCESS_UNDO_SET_CONTEXT, context);
 }
 
-/* the model is another's: the control's UI lets go, and the document
- * is saved while nobody works on it */
-@extern method OLDocumentClass, MSG_META_LOST_MODEL_EXCL,
-			 MSG_META_LOST_SYS_MODEL_EXCL
+@extern method OLDocumentClass, MSG_META_IACP_LOST_CONNECTION
 {
-    dword context = NULL_UNDO_CONTEXT;
-
     (void) pself;
-    if (message == MSG_META_LOST_MODEL_EXCL) {
-	GD(oself)->GDI_attrs &= ~GDA_MODEL;
-	OLDocSendCompleteUpdateToDC(oself, FALSE);
-	OLDocSendUndoMessage(oself, MSG_GEN_PROCESS_UNDO_SET_CONTEXT,
-			     context);
-    }
-    OLDocSendToSelfOnQueue(oself, MSG_GEN_DOCUMENT_AUTO_SAVE);
+    (void) serverNum;
+    RemoveConnection(oself, connection);
 }

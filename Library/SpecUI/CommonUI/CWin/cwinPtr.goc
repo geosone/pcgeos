@@ -19,6 +19,8 @@
 @include "cGeode.goh"
 @include <Internal/flowC.goh>
 @include <Internal/im.h>
+@include <Internal/SpecUI/olDisplayGroupClass.goh>
+@include <Internal/SpecUI/olDisplayWinClass.goh>
 
 #define Win(o)		((OLWinInstance *) ObjDerefVis(o))
 
@@ -68,11 +70,12 @@ static XorFlags olXorFlags;
     return pself->OLWI_sysMenu && OptrToHandle(obj) == pself->OLWI_sysMenu;
 }
 
-/* the window may be worked (the application asked); not without a
- * window */
-static Boolean CheckIfInteractable(optr o)
+/* CheckIfInteractable: the window may be worked (the application
+ * asked); not without a window.  Also for OLDisplayGroupClass
+ * (cwinDisplayControl.goc). */
+Boolean CheckIfInteractable(optr o)
 {
-    WindowHandle w = Win(o)->VCI_window;
+    WindowHandle w = ((VisCompInstance *) ObjDerefVis(o))->VCI_window;
     optr app;
 
     if (!w)

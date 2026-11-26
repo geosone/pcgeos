@@ -1,0 +1,30 @@
+/*
+ * cmainUtils.goc -- after cmainUtils.asm: CheckIfKeyboardRequired,
+ * ConvertKeyToMethod.
+ */
+@include "cGeode.goh"
+@include <Internal/SpecUI/olValueClass.goh>
+@include <Objects/vTextC.goh>
+@include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Objects/gViewC.goh>
+@include <Objects/gContC.goh>
+
+/* CheckIfKeyboardRequired (cmainUtils.asm): no keyboard, or the
+ * floating keyboard wanted ([input] floatingKbd) */
+Boolean CheckIfKeyboardRequired(void)
+{
+    return (FlowGetUIButtonFlags() & UIBF_NO_KEYBOARD) || kbdRequired;
+}
+
+/*
+ * ConvertKeyToMethod: the message for the key in a table of shortcuts
+ * and the messages beside it; 0 if not there
+ */
+Message ConvertKeyToMethod(const KeyboardShortcut *keys, const Message *msgs,
+			   word count, word c, word flags, word state)
+{
+    word off = FlowCheckKbdShortcut((KeyboardShortcut *) keys, count, c,
+				    flags, state);
+
+    return off == (word) -1 ? 0 : msgs[off / sizeof(KeyboardShortcut)];
+}

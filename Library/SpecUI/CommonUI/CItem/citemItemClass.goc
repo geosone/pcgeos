@@ -14,7 +14,7 @@
 @include "CItem/citemInt.goh"
 
 @classdecl OLItemClass, neverSaved;
-
+/* citemItemCommon.goc */
 @extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_PRESSED;
 @extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_NOT_PRESSED;
 @extern method OLItemClass, MSG_OL_ITEM_ENSURE_IS_RELEASED;
@@ -37,29 +37,6 @@
 /* ---------------------------------------------------------------------
  * What the item asks of its group
  * ------------------------------------------------------------------- */
-
-/* OLItemGetParentState: TRUE with HINT_ITEM_GROUP_TOOLBOX_STYLE */
-Boolean OLItemGetParentState(optr o, OLItemParentState *s)
-{
-    optr p = GenFindParent(o);
-    Boolean toolbox;
-    MemHandle mh;
-
-    memset(s, 0, sizeof(*s));
-    if (!p)
-	return FALSE;
-    mh = OptrToHandle(p);
-    if (mh != OptrToHandle(o))
-	ObjLockObjBlock(mh);
-    toolbox = ObjVarFindData(p, HINT_ITEM_GROUP_TOOLBOX_STYLE) != NULL;
-    s->PS_behavior = ObjIsObjectInClass(p, &GenBooleanGroupClass)
-		     ? GIGBT_NON_EXCLUSIVE : IGG(p)->GIGI_behaviorType;
-    s->PS_attrs = ((GenInstance *) ObjDerefGen(p))->GI_attrs;
-    s->PS_state = IG(p)->OLIGI_state;
-    if (mh != OptrToHandle(o))
-	MemUnlock(mh);
-    return toolbox;
-}
 
 Boolean CheckIfBoolean(optr o)
 {

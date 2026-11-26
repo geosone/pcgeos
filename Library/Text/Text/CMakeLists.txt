@@ -1,6 +1,7 @@
 # The text library, Text/: VisTextClass: instance, drawing, input, geometry.
 geos_sources(text_goc
   textInstance.goc
+  tVariable.goc
   textUtils.goc
   textMethodSet.goc
   textMethodGet.goc

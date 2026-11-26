@@ -18,8 +18,6 @@
 #include <Internal/specUI.h>
 #include <timer.h>
 
-@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_ON;
-@extern method VisTextClass, MSG_VIS_TEXT_FLASH_CURSOR_OFF;
 
 typedef void SpecDrawTextCursorRoutine(optr o, GStateHandle gstate);
 

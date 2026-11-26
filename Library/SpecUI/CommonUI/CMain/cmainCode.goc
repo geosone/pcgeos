@@ -241,12 +241,6 @@ void SpecInitDefaultDisplayScheme(void)
 	editableTextFontsize = esize;
 }
 
-/* SpecGetDisplayScheme: the display scheme (one display, one font) */
-void SpecGetDisplayScheme(DisplayScheme *ds)
-{
-    *ds = specDisplayScheme;
-}
-
 /* ---------------------------------------------------------------------
  * The gadget options
  * ------------------------------------------------------------------- */

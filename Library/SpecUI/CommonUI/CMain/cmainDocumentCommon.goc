@@ -16,105 +16,6 @@
 @include "cmainDocument.goh"
 @include <Objects/gProcC.goh>
 
-@classdecl OLDocumentClass;
-
-/* cmainDocPhysical.goc */
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_INITIALIZE_DOCUMENT_FILE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_READ_CACHED_DATA_FROM_FILE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_WRITE_CACHED_DATA_TO_FILE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DOCUMENT_HAS_CHANGED;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE_AS_COMPLETED;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ATTACH_FAILED;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE_EARLIER_COMPATIBLE_DOCUMENT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE_EARLIER_INCOMPATIBLE_DOCUMENT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_COMPUTE_ACCESS_FLAGS;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_OPEN;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CREATE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_COPY_TEMPLATE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_UPDATE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS_FILE_HANDLE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_SAVE_AS;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_REVERT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_REVERT_TO_AUTO_SAVE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CHECK_FOR_MODIFICATIONS;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_CLOSE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_PHYSICAL_DELETE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CREATE_UI_FOR_DOCUMENT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DESTROY_UI_FOR_DOCUMENT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ATTACH_UI_TO_DOCUMENT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DETACH_UI_FROM_DOCUMENT;
-/* cmainDocumentNew.goc */
-@extern method OLDocumentClass, MSG_META_INITIALIZE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_IF_CLEAN_UNNAMED;
-@extern method OLDocumentClass, MSG_META_REMOVING_DISK;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_NEW;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GENERATE_NAME_FOR_NEW;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_OPEN;
-@extern method OLDocumentClass, MSG_META_GAINED_MODEL_EXCL;
-@extern method OLDocumentClass, MSG_META_LOST_MODEL_EXCL, MSG_META_LOST_SYS_MODEL_EXCL;
-/* cmainDocumentMisc.goc */
-@extern method OLDocumentClass, MSG_META_ATTACH_OBJECT;
-@extern method OLDocumentClass, MSG_META_GEN_PATH_RESTORE_DISK_PROMPT;
-@extern method OLDocumentClass, MSG_META_DETACH;
-@extern method OLDocumentClass, MSG_META_APP_SHUTDOWN;
-@extern method OLDocumentClass, MSG_META_IACP_LOST_CONNECTION;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SEARCH_FOR_DOC;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_CHECK_CUI_CLOSE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_IF_OPEN_FOR_IACP_ONLY;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_CLOSE_AFTER_DISK_FULL;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CLOSE_FILE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REOPEN_FILE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_OPERATION;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_DISPLAY;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_ENABLE_AUTO_SAVE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_DISABLE_AUTO_SAVE;
-@extern method OLDocumentClass, MSG_GEN_BRING_TO_TOP, MSG_GEN_LOWER_TO_BOTTOM;
-/* cmainDocLowDisk.goc */
-@extern method OLDocumentClass, MSG_NOTIFY_FILE_CHANGE;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_SAVE_ERROR_RESOLVED;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_SELECTED_FILE;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_FILES_FS_NOTIFY;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_DELETE_AFTER_SAVE_ERROR;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_REVERT_AFTER_SAVE_ERROR;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_MOVE_AFTER_ERROR_FEEDBACK;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_MOVE_AFTER_SAVE_ERROR;
-
-/* cmainDocumentSaveAs.goc */
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE_AS, MSG_GEN_DOCUMENT_SAVE_AS_TEMPLATE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE_AS_CANCELLED;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REVERT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REVERT_NO_PROMPT;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_REVERT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_REVERT_TO_AUTO_SAVE;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_REVERT_TO_AUTO_SAVE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_IMPORT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_EXPORT;
-
-/* cmainDocObscure.goc */
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_EDIT_USER_NOTES;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_RENAME;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_RENAME;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CHANGE_TYPE;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_CHANGE_TYPE;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CHANGE_PASSWORD;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_QUICK_BACKUP;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_RECOVER_QUICK_BACKUP;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_REVERT_QUICK;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SET_EMPTY, MSG_GEN_DOCUMENT_CLEAR_EMPTY;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SET_DEFAULT, MSG_GEN_DOCUMENT_CLEAR_DEFAULT;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_COPY_TO;
-@extern method OLDocumentClass, MSG_GEN_DOCUMENT_MOVE_TO;
-@extern method OLDocumentClass, MSG_OL_DOCUMENT_CONTINUE_MOVE_TO;
-
-/* OLBuildDocument (cspecDocument.asm): always this class */
-ClassStruct *OLBuildDocument(optr oself, word masterOffset)
-{
-    (void) oself;
-    (void) masterOffset;
-    return (ClassStruct *) &OLDocumentClass;
-}
 
 static optr Parent(optr o)
 {
@@ -393,7 +294,7 @@ void OLDocStartATimer(optr o, word which, word ticks)
     }
 }
 
-@method OLDocumentClass, MSG_OL_DOCUMENT_AUTO_SAVE_TIMER
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_AUTO_SAVE_TIMER
 {
     pself->OLDI_autoSaveTimer = 0;
     @call oself::MSG_GEN_DOCUMENT_AUTO_SAVE();
@@ -404,7 +305,7 @@ void OLDocStartATimer(optr o, word which, word ticks)
  * transparent document control that does not ask), unless something
  * else is going on; then the timer runs again.
  */
-@method OLDocumentClass, MSG_GEN_DOCUMENT_AUTO_SAVE
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_AUTO_SAVE
 {
     GenDocumentInstance *g = GD(oself);
     optr app;
@@ -435,7 +336,7 @@ void OLDocStartATimer(optr o, word which, word ticks)
 
 /* OLDocumentCheckForModifications: has someone else changed the file?
  * (a shared document); and again later */
-@method OLDocumentClass, MSG_GEN_DOCUMENT_CHECK_FOR_MODIFICATIONS
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_CHECK_FOR_MODIFICATIONS
 {
     pself->OLDI_changeTimer = 0;
     if (GD(oself)->GDI_attrs & GDA_CLOSING)
@@ -450,7 +351,7 @@ void OLDocStartATimer(optr o, word which, word ticks)
  * ------------------------------------------------------------------- */
 
 /* OLDocumentSave: TRUE if it could not be saved */
-@method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_SAVE
 {
     Boolean failed = FALSE;
     word error;
@@ -485,7 +386,7 @@ void OLDocStartATimer(optr o, word which, word ticks)
 /* OLDocumentUpdate: the changes to the file, without committing them
  * (a save keeps the backup of a VM file); TRUE and the error if it
  * failed */
-@method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_UPDATE
 {
     word err = 0;
 
@@ -508,7 +409,7 @@ void OLDocStartATimer(optr o, word which, word ticks)
 
 /* OLDocumentMarkDirty: once, and the control's UI follows; a document
  * shared by several is never dirty */
-@method OLDocumentClass, MSG_GEN_DOCUMENT_MARK_DIRTY
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_MARK_DIRTY
 {
     GenDocumentInstance *g = GD(oself);
 
@@ -519,7 +420,7 @@ void OLDocStartATimer(optr o, word which, word ticks)
     OLDocSendNotificationToDC(oself, TRUE);
 }
 
-@method OLDocumentClass, MSG_OL_DOCUMENT_UPDATE_UI
+@extern method OLDocumentClass, MSG_OL_DOCUMENT_UPDATE_UI
 {
     (void) pself;
     OLDocSendNotificationToDC(oself, TRUE);
@@ -529,26 +430,26 @@ void OLDocStartATimer(optr o, word which, word ticks)
  * What the document is
  * ------------------------------------------------------------------- */
 
-@method OLDocumentClass, MSG_GEN_DOCUMENT_GET_FILE_NAME
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_FILE_NAME
 {
     (void) pself;
     memcpy(buffer, GD(oself)->GDI_fileName, sizeof(FileLongName));
 }
 
-@method OLDocumentClass, MSG_GEN_DOCUMENT_GET_FILE_HANDLE
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_FILE_HANDLE
 {
     (void) pself;
     return GD(oself)->GDI_fileHandle;
 }
 
-@method OLDocumentClass, MSG_GEN_DOCUMENT_GET_ATTRS
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_GET_ATTRS
 {
     (void) pself;
     return GD(oself)->GDI_attrs;
 }
 
 /* OLDocumentTestForFile: is this the document of the file? */
-@method OLDocumentClass, MSG_GEN_DOCUMENT_TEST_FOR_FILE
+@extern method OLDocumentClass, MSG_GEN_DOCUMENT_TEST_FOR_FILE
 {
     (void) pself;
     if (GD(oself)->GDI_fileHandle != file)

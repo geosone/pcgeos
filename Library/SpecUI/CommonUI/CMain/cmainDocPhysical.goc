@@ -15,6 +15,17 @@
 @include <Objects/gViewC.goh>
 @include <Objects/vTextC.goh>
 @include <Objects/gProcC.goh>
+@include <stdapp.goh>
+@include "cGeode.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olDocumentGroupClass.goh>
+@include <Internal/SpecUI/olDocumentControlClass.goh>
+@include <Objects/gDocC.goh>
+@include <iacp.goh>
+@include <impex.goh>
+@include <spool.goh>
+#include <file.h>
+#include <string.h>
 
 static optr Parent(optr o)
 {
@@ -800,4 +811,11 @@ void OLDocCallSetContent(optr o, optr content)
     OLDocSendUndoMessage(oself, MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS, 0);
     OLDocSendNotificationToOutput(oself,
 			MSG_META_DOC_OUTPUT_DETACH_UI_FROM_DOCUMENT);
+}
+
+/* OLDocumentGroupNewDoc (cmainDocPhysical.asm) */
+@extern method OLDocumentGroupClass, MSG_GEN_DOCUMENT_GROUP_NEW_DOC
+{
+    (void) pself;
+    return CreateDocObject(oself, MSG_GEN_DOCUMENT_NEW, params);
 }

@@ -11,8 +11,46 @@
  *
  * Port32 (Port32/ABI.md section 13y), not yet: menus (separators, the
  * menu center, menu marks, the title bar height), the keyboard accelerator text (copenMoniker.goc).
+ *
+ * The class record of OLButtonClass is here, as in the asm.
  */
 @include "cGeode.goh"
+@include <Internal/SpecUI/olValueClass.goh>
+@include <Objects/vTextC.goh>
+@include <Internal/SpecUI/olScrollbarClass.goh>
+@include <Objects/gViewC.goh>
+@include <Objects/gContC.goh>
+
+@classdecl OLButtonClass;
+/* copenButtonBuild.goc */
+@extern method OLButtonClass, MSG_SPEC_SCAN_GEOMETRY_HINTS;
+@extern method OLButtonClass, MSG_META_INITIALIZE;
+@extern method OLButtonClass, MSG_OL_BUTTON_SET_WIN_FLAG;
+@extern method OLButtonClass, MSG_OL_BUTTON_CLEAR_WIN_FLAG;
+@extern method OLButtonClass, MSG_SPEC_GET_VIS_PARENT;
+@extern method OLButtonClass, MSG_SPEC_BUILD;
+@extern method OLButtonClass, MSG_SPEC_UNBUILD_BRANCH;
+@extern method OLButtonClass, MSG_OL_BUTTON_SETUP;
+/* copenButtonCommon.goc */
+@extern method OLButtonClass, MSG_OL_BUTTON_REDRAW;
+@extern method OLButtonClass, MSG_META_START_SELECT;
+@extern method OLButtonClass, MSG_META_PTR;
+@extern method OLButtonClass, MSG_META_END_SELECT;
+@extern method OLButtonClass, MSG_META_GAINED_SYS_FOCUS_EXCL;
+@extern method OLButtonClass, MSG_META_LOST_SYS_FOCUS_EXCL;
+@extern method OLButtonClass, MSG_VIS_LOST_GADGET_EXCL;
+@extern method OLButtonClass, MSG_META_GAINED_DEFAULT_EXCL;
+@extern method OLButtonClass, MSG_META_LOST_DEFAULT_EXCL;
+@extern method OLButtonClass, MSG_SPEC_BROADCAST_FOR_DEFAULT_FOCUS;
+@extern method OLButtonClass, MSG_OL_MAKE_APPLYABLE;
+@extern method OLButtonClass, MSG_OL_MAKE_NOT_APPLYABLE;
+@extern method OLButtonClass, MSG_SPEC_NOTIFY_ENABLED;
+@extern method OLButtonClass, MSG_SPEC_NOTIFY_NOT_ENABLED;
+@extern method OLButtonClass, MSG_OL_BUTTON_QUERY_IS_TRIGGER;
+@extern method OLButtonClass, MSG_VIS_DRAW;
+@extern method OLButtonClass, MSG_OL_BUTTON_SET_DRAW_STATE_UNKNOWN;
+@extern method OLButtonClass, MSG_OL_BUTTON_GET_GEN_PART;
+@extern method OLButtonClass, MSG_SPEC_NAVIGATION_QUERY;
 
 #define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
 
@@ -249,7 +287,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
  * the minimum width and the region set's height; in the title bar the
  * title bar's height
  */
-@extern method OLButtonClass, MSG_VIS_RECALC_SIZE
+@method OLButtonClass, MSG_VIS_RECALC_SIZE
 {
     OpenMonikerArgs a;
     SizeAsDWord s;
@@ -294,7 +332,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
  * raised to this button's; geometry that was valid has to be reset;
  * with wrapping in the menu the button is sized every time and expands
  */
-@extern method OLButtonClass, MSG_SPEC_GET_MENU_CENTER
+@method OLButtonClass, MSG_SPEC_GET_MENU_CENTER
 {
     OpenMonikerArgs a;
     OLButtonInstance *b;
@@ -313,7 +351,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
 }
 
 /* OLButtonGetExtraSize: what is not the moniker */
-@extern method OLButtonClass, MSG_SPEC_GET_EXTRA_SIZE
+@method OLButtonClass, MSG_SPEC_GET_EXTRA_SIZE
 {
     OpenMonikerArgs a;
     SizeAsDWord s;
@@ -335,7 +373,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
 }
 
 /* OLButtonMkrPos: where the moniker starts (FALSE: none) */
-@extern method OLButtonClass, MSG_GET_FIRST_MKR_POS
+@method OLButtonClass, MSG_GET_FIRST_MKR_POS
 {
     OpenMonikerArgs a;
     XYValueAsDWord p;
@@ -351,14 +389,14 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
  * Usable, the moniker, opening
  * ------------------------------------------------------------------- */
 
-@extern method OLButtonClass, MSG_VIS_VUP_CREATE_GSTATE
+@method OLButtonClass, MSG_VIS_VUP_CREATE_GSTATE
 {
     return VupCreateGState(oself);
 }
 
 /* OLButtonSpecChangeUsable: a menu item has the menu's separators
  * updated */
-@extern method OLButtonClass, MSG_SPEC_SET_USABLE
+@method OLButtonClass, MSG_SPEC_SET_USABLE
 {
     @callsuper();
     if (Btn(oself)->OLBI_specState & OLBSS_IN_MENU)
@@ -366,7 +404,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
 		      NULL, 0);
 }
 
-@extern method OLButtonClass, MSG_SPEC_SET_NOT_USABLE
+@method OLButtonClass, MSG_SPEC_SET_NOT_USABLE
 {
     optr p = VisFindParent(oself);
 
@@ -377,7 +415,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
 
 /* OLButtonUpdateVisMoniker: a menu item's window, a title bar button's
  * title group, updated */
-@extern method OLButtonClass, MSG_SPEC_UPDATE_VIS_MONIKER
+@method OLButtonClass, MSG_SPEC_UPDATE_VIS_MONIKER
 {
     optr win = OpenFindOLWin(oself);
 
@@ -390,7 +428,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
     @callsuper();
 }
 
-@extern method OLButtonClass, MSG_SPEC_UPDATE_KBD_ACCELERATOR
+@method OLButtonClass, MSG_SPEC_UPDATE_KBD_ACCELERATOR
 {
     optr win = OpenFindOLWin(oself);
 
@@ -403,12 +441,12 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
     @callsuper();
 }
 
-@extern method OLButtonClass, MSG_SPEC_VIS_OPEN_NOTIFY
+@method OLButtonClass, MSG_SPEC_VIS_OPEN_NOTIFY
 {
     VisOpenNotifyCommon(oself);
 }
 
-@extern method OLButtonClass, MSG_SPEC_VIS_CLOSE_NOTIFY
+@method OLButtonClass, MSG_SPEC_VIS_CLOSE_NOTIFY
 {
     VisCloseNotifyCommon(oself);
 }
@@ -419,7 +457,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
 
 /* OLButtonGenActivate: enabled: drawn depressed, activated, shown so
  * for olButtonActivateDelay, restored */
-@extern method OLButtonClass, MSG_GEN_ACTIVATE
+@method OLButtonClass, MSG_GEN_ACTIVATE
 {
     if (!OpenButtonCheckIfFullyEnabled(oself))
 	return;
@@ -432,7 +470,7 @@ static void ChooseNewGadgetSize(optr oself, OLButtonMoreAttrs f,
 }
 
 /* OLButtonKbdActivate: activated, the menus in stay up mode released */
-@extern method OLButtonClass, MSG_OL_BUTTON_KBD_ACTIVATE
+@method OLButtonClass, MSG_OL_BUTTON_KBD_ACTIVATE
 {
     @call oself::MSG_GEN_ACTIVATE();
     OLReleaseAllStayUpModeMenus(oself);
@@ -465,19 +503,19 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
 	     : FALSE;
 }
 
-@extern method OLButtonClass, MSG_META_KBD_CHAR
+@method OLButtonClass, MSG_META_KBD_CHAR
 {
     (void) ButtonKbdChar(oself, character, flags, state);
 }
 
-@extern method OLButtonClass, MSG_META_FUP_KBD_CHAR
+@method OLButtonClass, MSG_META_FUP_KBD_CHAR
 {
     return ButtonKbdChar(oself, character, flags, state);
 }
 
 /* OLButtonActivateObjectWithMnemonic: the mnemonic activates (a
  * disabled one beeps) */
-@extern method OLButtonClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
+@method OLButtonClass, MSG_SPEC_ACTIVATE_OBJECT_WITH_MNEMONIC
 {
     if (!VisCheckMnemonic(GenPart(oself), character, flags, state))
 	return FALSE;
@@ -490,7 +528,7 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
 
 /* OLButtonFindKbdAccelerator: the accelerator is the button's (a
  * disabled one beeps) */
-@extern method OLButtonClass, MSG_GEN_FIND_KBD_ACCELERATOR
+@method OLButtonClass, MSG_GEN_FIND_KBD_ACCELERATOR
 {
     if (!GenCheckKbdAccelerator(oself, charValue, charFlagsAndShiftState,
 				toggleStateAndScanCode))
@@ -502,7 +540,7 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
 }
 
 /* OLButtonMakeDefaultAction: the window's default */
-@extern method OLButtonClass, MSG_GEN_TRIGGER_MAKE_DEFAULT_ACTION
+@method OLButtonClass, MSG_GEN_TRIGGER_MAKE_DEFAULT_ACTION
 {
     OLButtonCallWin(oself, SVQT_TAKE_DEFAULT_EXCLUSIVE);
     OLButtonDrawLaterIfNewState(oself);
@@ -514,7 +552,7 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
  * back.  Usable is the generic object's (OLButtonGetGenAndSpecState:
  * the popup's for its button)
  */
-@extern method OLButtonClass, MSG_SPEC_MENU_SEP_QUERY
+@method OLButtonClass, MSG_SPEC_MENU_SEP_QUERY
 {
     if ((pself->OLBI_specState & OLBSS_SYS_ICON) ||
 	!(((GenInstance *) ObjDerefGen(GenPart(oself)))->GI_states &
@@ -525,4 +563,65 @@ static Boolean ButtonKbdChar(optr oself, word character, word flags,
 				    (MenuSepFlags) (flags | MSF_SEP |
 						    MSF_USABLE));
     return (MenuSepFlags) (flags | MSF_SEP);
+}
+
+#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
+
+Boolean OpenButtonCheckIfFullyEnabled(optr oself)
+{
+    return OpenButtonCheckIfAlwaysEnabled(oself) ||
+	   (Btn(oself)->VI_attrs & VA_FULLY_ENABLED);
+}
+
+/* ---------------------------------------------------------------------
+ * Visibility notification (copenButtonClass.asm)
+ * ------------------------------------------------------------------- */
+
+/* VisOpenCloseNotifyCommon: ATTR_GEN_VISIBILITY_MESSAGE (else
+ * MSG_GEN_APPLICATION_VISIBILITY_NOTIFICATION) with the object (or
+ * ATTR_GEN_VISIBILITY_DATA) to ATTR_GEN_VISIBILITY_DESTINATION (else
+ * the application) */
+static void VisOpenCloseNotifyCommon(optr obj, Boolean opening)
+{
+    optr data = obj, dest;
+    Message msg = MSG_GEN_APPLICATION_VISIBILITY_NOTIFICATION;
+    void *p;
+
+    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_DATA)) != NULL)
+	data = *(optr *) p;
+    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_MESSAGE)) != NULL)
+	msg = *(Message *) p;
+    if ((p = ObjVarFindData(obj, ATTR_GEN_VISIBILITY_DESTINATION)) != NULL)
+	dest = *(optr *) p;
+    else
+	dest = GeodeGetAppObject(0);
+    if (dest)
+	@send dest::{GEN_VISIBILITY_OUTPUT}(msg)(data, opening);
+}
+
+void VisOpenNotifyCommon(optr obj)
+{
+    VisOpenCloseNotifyCommon(obj, TRUE);
+}
+
+void VisCloseNotifyCommon(optr obj)
+{
+    VisOpenCloseNotifyCommon(obj, FALSE);
+}
+
+#define Btn(o)		((OLButtonInstance *) ObjDerefVis(o))
+
+/* OpenButtonCheckIfAlwaysEnabled: a menu's button, the pushpin */
+Boolean OpenButtonCheckIfAlwaysEnabled(optr oself)
+{
+    optr g = ConstructOptr(OptrToHandle(oself), Btn(oself)->OLBI_genChunk);
+
+    if (OLQueryIsMenu(g))
+	return TRUE;
+    if ((Btn(oself)->VI_typeFlags & VTF_IS_GEN) &&
+	ObjIsObjectInClass(oself, &GenTriggerClass) &&
+	((GenTriggerInstance *) ObjDerefGen(oself))->GTI_actionMsg ==
+	MSG_OL_POPUP_TOGGLE_PUSHPIN)
+	return TRUE;
+    return FALSE;
 }

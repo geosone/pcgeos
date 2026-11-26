@@ -1,6 +1,7 @@
 # The user interface library, Vis/: the visible classes.
 geos_sources(ui_goc
   visClass.goc
+  visEmpty.goc
   visSpecUtils.goc
   visGeometry.goc
   visComp.goc

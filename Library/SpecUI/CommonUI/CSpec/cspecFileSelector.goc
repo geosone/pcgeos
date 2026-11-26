@@ -1,0 +1,31 @@
+/*
+ * cspecFileSelector.goc -- after cspecFileSelector.asm:
+ * OLBuildFileSelector.
+ */
+@include "cGeode.goh"
+@include "cspecCUAS.goh"
+@include <Internal/specC.goh>
+@include <Internal/SpecUI/olFileSelectorClass.goh>
+@include <Internal/SpecUI/olApplicationClass.goh>
+@include <Objects/gInterC.goh>
+@include <Objects/gItemC.goh>
+#include <fileEnum.h>
+#include <disk.h>
+#include <drive.h>
+@include <gcnlist.goh>
+#include <sysstats.h>
+#include <chunkarr.h>
+#include <localize.h>
+#include <gstring.h>
+#include <uDialog.h>
+
+/* ---------------------------------------------------------------------
+ * OLBuildFileSelector (cspecFileSelector.asm): always this class
+ * ------------------------------------------------------------------- */
+
+ClassStruct *OLBuildFileSelector(optr oself, word masterOffset)
+{
+    (void) oself;
+    (void) masterOffset;
+    return (ClassStruct *) &OLFileSelectorClass;
+}

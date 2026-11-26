@@ -5,11 +5,16 @@ geos_sources(motif_goc
   cwinClassMisc.goc
   cwinScreen.goc
   cwinField.goc
+  cwinFieldUncommon.goc
+  cwinFieldOther.goc
+  cwinFieldInit.goc
+  cwinFieldCommon.goc
   cwinClassCommonHigh.goc
   cwinClassCommonMiddle.goc
   cwinClassCommonLow.goc
   cwinClassOther.goc
   cwinClassCUAS.goc
+  cwinUtils.goc
   cwinGeometry.goc
   cwinExcl.goc
   cwinMenuedWin.goc
