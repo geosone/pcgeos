@@ -94,16 +94,15 @@ static struct {
 } wp;
 
 static PtrQueue eventQueue, sendQueue;
-static KSem ptrImageSem = { 1, 0 };
 
 void WinPtrImageP(void)
 {
-    KSemP(&ptrImageSem, KSEM_FOREVER);
+    KSemP(&winPtrImageSem, KSEM_FOREVER);
 }
 
 void WinPtrImageV(void)
 {
-    KSemV(&ptrImageSem);
+    KSemV(&winPtrImageSem);
 }
 
 /* ---------------------------------------------------------------------
@@ -536,7 +535,7 @@ static void CommonTraverse(WindowHandle tree, sword x, sword y)
 static void FinalWinAndGeode(WindowHandle *win, GeodeHandle *geode)
 {
     WindowHandle wh = wp.impliedWin;
-    GeodeHandle g = winActiveGeode;
+    GeodeHandle g = wPtrActiveGeode;
     GeodeWinVars v;
 
     if (g) {

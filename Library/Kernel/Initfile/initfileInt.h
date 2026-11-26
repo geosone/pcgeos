@@ -49,8 +49,9 @@ char	*IniBuildString(const char *key, const char *str, word *size);
 char	*IniBuildData(const char *key, const byte *buf, word bufSize,
 		      word *size);
 
-/* initfileHigh.c and initfileLow.c */
-extern KSem iniSem;
+/* the init file lock: initFileSem in initfileVariable.c, its owner
+ * and nesting in initfileHigh.c; for initfileLow.c too */
+extern KSem initFileSem;
 extern ThreadHandle iniOwner;
 extern word iniNesting;
 void VInitFile(void);
@@ -70,5 +71,8 @@ Boolean InitFileLocate(const char *cat, const char *key,
 	InitFileReadFlags flags, word *file, word *body);
 char *InitFileReadStringLow(const char *cat, const char *key,
 	InitFileReadFlags flags, word *len);
+
+extern dword initfileLastModified;
+extern const char initfileBackupName[];
 
 #endif

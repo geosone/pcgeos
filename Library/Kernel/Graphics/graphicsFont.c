@@ -62,7 +62,7 @@ word GrEnumFonts(FontEnumStruct *buffer, word size, FontEnumFlags flags,
     word n, i, found = 0;
     FontsAvailEntry *fa;
 
-    if (!grFontBlock)
+    if (!fontBlkHandle)
 	return 0;
     FontDrLockInfoBlock();
     fa = GrFontChunk(FONTS_AVAIL_HANDLE, &n);
@@ -93,7 +93,7 @@ Boolean GrFindNearestPointsize(FontID id, dword sizeSHL16, word styles,
     sdword found = (sdword) (sizeSHL16 >> 8);
     TextStyle fs = 0;
 
-    if (!grFontBlock)
+    if (!fontBlkHandle)
 	return FID_INVALID;
     FontDrLockInfoBlock();
     fi = GrFontAvailable(&id);
@@ -118,7 +118,7 @@ word GrGetFontName(FontID id, char *name)
     FontInfo *fi;
     word len = 0;
 
-    if (!grFontBlock)
+    if (!fontBlkHandle)
 	return 0;
     FontDrLockInfoBlock();
     fi = FontDrFindFontInfo(NULL, id);

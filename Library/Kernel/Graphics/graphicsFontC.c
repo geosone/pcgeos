@@ -15,7 +15,7 @@ static FontID CheckFontAvail(FontEnumFlags flags, word family, FontID id,
     FontsAvailEntry *fa;
     FontID r = FID_INVALID;
 
-    if (!grFontBlock)
+    if (!fontBlkHandle)
 	return FID_INVALID;
     FontDrLockInfoBlock();
     fa = GrFontChunk(FONTS_AVAIL_HANDLE, &n);

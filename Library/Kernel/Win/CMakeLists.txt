@@ -8,4 +8,5 @@ target_sources(geos_kernel_objs PRIVATE
   winGeode.c
   winIndividual.c
   winState.c
-  winTrans.c)
+  winTrans.c
+  winVariable.c)

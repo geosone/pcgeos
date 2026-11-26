@@ -36,13 +36,6 @@
 
 ImVars im;
 
-static KSem semMonChain = { 1, 0 };
-static Monitor headMonitor;		/* M_monRoutine NULL: the start */
-
-static const byte buttonConvTab[IM_MAX_BUTTONS] = {
-    BI_B0_DOWN, BI_B1_DOWN, BI_B2_DOWN, BI_B3_DOWN
-};
-
 void ImLockChain(void)
 {
     KSemP(&semMonChain, KSEM_FOREVER);

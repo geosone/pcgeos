@@ -11,18 +11,18 @@
  * thread waits, right away (the idle loop sees the ready thread).
  */
 #include "kernelC.h"
+#include "timerVariable.h"
 #include "ghal.h"
 
 static ghal_irq_source *tickSource;
-static dword ticksToDecay = TIMER_INTERRUPT_RATE;
 
 static void TimerInterrupt(void *ctx)
 {
     (void) ctx;
     TimerCheckList(KernelTicks());
     ThreadTick();
-    if (--ticksToDecay == 0) {
-	ticksToDecay = TIMER_INTERRUPT_RATE;
+    if (--decayCount == 0) {
+	decayCount = TIMER_INTERRUPT_RATE;
 	ThreadDecay();
 	TimerCheckRealTime(KernelRealTimeNow(KernelTicks()));
     }

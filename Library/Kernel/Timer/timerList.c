@@ -28,26 +28,13 @@
  * allocates nor frees.
  */
 #include "kernelC.h"
+#include "timerVariable.h"
 #include "ghal.h"
 
-typedef struct KTimer {
-    struct KTimer *TI_next;
-    TimerHandle	TI_handle;
-    TimerType	TI_type;
-    dword	TI_due;			/* tick */
-    word	TI_interval;		/* continual: ticks */
-    word	TI_id;
-    optr	TI_dest;		/* object, or the routine */
-    Message	TI_msg;			/* message, or the routine's data */
-} KTimer;
-
-static KTimer *timerList;		/* sorted by TI_due */
-static KTimer *realTimeList;		/* sorted by TI_due (date, time) */
 static KTimer *endedList;		/* to be freed by TimerReap */
 static KTimer *spareList;		/* ready for TimerStart, with handle */
 static word spareCount;
 #define TIMER_SPARES	8
-static word nextId = 1;
 
 void (*kernelTimerEventHook)(optr dest, Message msg, dword tick, word id);
 dword kernelTimerEventsDropped;
@@ -60,7 +47,7 @@ static int Due(dword due, dword now)
 /* inside ghal_crit */
 static void Insert(KTimer *t)
 {
-    KTimer **p = &timerList;
+    KTimer **p = &timeListPtr;
 
     while (*p && Due((*p)->TI_due, t->TI_due))	/* FIFO for equal ticks */
 	p = &(*p)->TI_next;
@@ -208,11 +195,11 @@ TimerHandle TimerStart(TimerType timerType, optr destObject, word ticks,
     t->TI_dest = destObject;
     t->TI_msg = msg;
     ghal_crit_enter();
-    t->TI_id = nextId++;
-    if (nextId == 0)
-	nextId = 1;
+    t->TI_id = timerID++;
+    if (timerID == 0)
+	timerID = 1;
     if (IsRealTime(timerType)) {
-	KTimer **p = &realTimeList;
+	KTimer **p = &realTimeListPtr;
 	t->TI_due = ((dword) ticks << 16) | interval;
 	while (*p && (*p)->TI_due <= t->TI_due)
 	    p = &(*p)->TI_next;
@@ -235,11 +222,11 @@ Boolean TimerStop(TimerHandle th, word id)
     Boolean notFound = TRUE;
 
     ghal_crit_enter();
-    for (p = &timerList; *p; p = &(*p)->TI_next)
+    for (p = &timeListPtr; *p; p = &(*p)->TI_next)
 	if ((*p)->TI_handle == th && (*p)->TI_id == id)
 	    break;
     if (!*p)
-	for (p = &realTimeList; *p; p = &(*p)->TI_next)
+	for (p = &realTimeListPtr; *p; p = &(*p)->TI_next)
 	    if ((*p)->TI_handle == th && (*p)->TI_id == id)
 		break;
     if (*p) {
@@ -257,9 +244,9 @@ Boolean TimerStop(TimerHandle th, word id)
 /* from the timer interrupt, inside ghal_crit */
 void TimerCheckList(dword now)
 {
-    while (timerList && Due(timerList->TI_due, now)) {
-	KTimer *t = timerList;
-	timerList = t->TI_next;
+    while (timeListPtr && Due(timeListPtr->TI_due, now)) {
+	KTimer *t = timeListPtr;
+	timeListPtr = t->TI_next;
 	if (IsRoutine(t->TI_type)) {
 	    TimerRoutine *fn = (TimerRoutine *) (uintptr_t) t->TI_dest;
 	    fn((word) t->TI_msg, now);
@@ -286,9 +273,9 @@ void TimerCheckRealTime(dword now)
 {
     if (!now)
 	return;
-    while (realTimeList && realTimeList->TI_due <= now) {
-	KTimer *t = realTimeList;
-	realTimeList = t->TI_next;
+    while (realTimeListPtr && realTimeListPtr->TI_due <= now) {
+	KTimer *t = realTimeListPtr;
+	realTimeListPtr = t->TI_next;
 	if (t->TI_type == TIMER_ROUTINE_REAL_TIME) {
 	    TimerRoutine *fn = (TimerRoutine *) (uintptr_t) t->TI_dest;
 	    fn((word) t->TI_msg, t->TI_due);

@@ -73,7 +73,7 @@ void WinPtrImageP(void);
 void WinPtrImageV(void);
 void WinUpdatePtrImages(void);		/* with WinPtrImageP */
 WindowHandle WinPtrFinalWin(void);
-extern GeodeHandle winActiveGeode;	/* winGeode.c */
+extern GeodeHandle wPtrActiveGeode;	/* winVariable.c */
 GeodeHandle WinPtrFinalGeode(void);
 void WinChangePtrNotification(void);
 void WinPtrClosing(WindowHandle wh, WindowHandle parent);
@@ -146,5 +146,11 @@ void WinClearUnderBits(WindowHandle wh, WinUnderFlags f);
 /* winTrans.c and graphicsTransformSimple.c */
 Window *WinEnterTrans(Handle h, WindowHandle *wh);
 void WinFinishTrans(WindowHandle wh, WinInvalFlag flag);
+
+extern KSem winTreeSem;
+
+extern KSem winPtrImageSem;
+
+extern word wGeodeWinVarsOffset;
 
 #endif

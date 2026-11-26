@@ -8,7 +8,7 @@
 
 Boolean FSDCheckOpenCloseNotifyEnabled(void)
 {
-    return fsdOpenCloseCount != 0;
+    return openCloseNotificationCount != 0;
 }
 
 static Boolean HasName(FileChangeNotificationType type)

@@ -16,17 +16,14 @@
  * ThreadDestroy (needs messages), event queues, thread exceptions.
  */
 #include "kernelC.h"
+#include "threadVariable.h"
 #include "ghal.h"
 #include <sysstats.h>
 
 #include <string.h>
 
-ThreadHandle kernelCurrentThread;
-
 volatile int kernelReschedulePending;
 
-static Handle runQueue;			/* ready threads, via T_nextQ */
-static byte   sliceLeft = TIME_SLICE;	/* ticks of the running thread */
 static Handle deadList;			/* ended, to be released */
 static dword  timedWaiters;		/* blocked threads with a deadline */
 static uint64_t tickBase;
@@ -146,7 +143,7 @@ static void Reap(void)
  * again (never for an ended thread). */
 static void Dispatch(void)
 {
-    Handle prev = kernelCurrentThread, next;
+    Handle prev = currentThread, next;
     KThread *pt = ThreadOf(prev), *nt;
 
     for (;;) {
@@ -159,8 +156,8 @@ static void Dispatch(void)
     next = QueuePop(&runQueue);
     nt = ThreadOf(next);
     nt->T_state = TS_RUNNING;
-    kernelCurrentThread = next;
-    sliceLeft = TIME_SLICE;
+    currentThread = next;
+    threadTimer = TIME_SLICE;
     if (next == prev)
 	return;
     curStats.SS_contextSwitches++;
@@ -174,7 +171,7 @@ static void Dispatch(void)
  * interrupt code: there the switch waits for the next dispatch) */
 static void MaybePreempt(void)
 {
-    Handle cur = kernelCurrentThread;
+    Handle cur = currentThread;
 
     if (cur && runQueue &&
 	ThreadOf(runQueue)->T_curPriority < ThreadOf(cur)->T_curPriority) {
@@ -229,7 +226,7 @@ void KernelPreemptPoint(void)
 /* the running thread used a tick (timerInt.asm, step 9) */
 void ThreadTick(void)
 {
-    Handle cur = kernelCurrentThread;
+    Handle cur = currentThread;
     KThread *t;
 
     curStats.SS_interrupts++;
@@ -241,8 +238,8 @@ void ThreadTick(void)
 	t->T_cpuUsage++;
     if (t->T_curPriority < PRIORITY_IDLE - 1)
 	t->T_curPriority++;
-    if (--sliceLeft == 0) {
-	sliceLeft = TIME_SLICE;
+    if (--threadTimer == 0) {
+	threadTimer = TIME_SLICE;
 	if (runQueue)
 	    kernelReschedulePending = 1;
     } else if (runQueue &&
@@ -290,10 +287,10 @@ void KernelYield(void)
 {
     ghal_crit_enter();
     CheckTimeouts();
-    if (kernelCurrentThread && runQueue &&
+    if (currentThread && runQueue &&
 	ThreadOf(runQueue)->T_curPriority <=
-	ThreadOf(kernelCurrentThread)->T_curPriority) {
-	MakeReady(kernelCurrentThread);
+	ThreadOf(currentThread)->T_curPriority) {
+	MakeReady(currentThread);
 	Dispatch();
     }
     ghal_crit_leave();
@@ -320,7 +317,7 @@ static KThread *NewThread(ThreadHandle *out, GeodeHandle owner,
     t->T_basePriority = t->T_curPriority = priority;
     HandleEntryOf(th)->HE_addr = t;
     /* the current path of the creator (none for the first thread) */
-    FileThreadInit(t, kernelCurrentThread ? ThreadOf(kernelCurrentThread)
+    FileThreadInit(t, currentThread ? ThreadOf(currentThread)
 					  : NULL);
     return t;
 }
@@ -330,21 +327,21 @@ ThreadHandle KernelThreadInit(ThreadPriority priority)
     ThreadHandle th;
     KThread *t;
 
-    if (kernelCurrentThread)
-	return kernelCurrentThread;
+    if (currentThread)
+	return currentThread;
     t = NewThread(&th, kernelCurrentGeode, priority);
     if (!t)
 	KernelFatal(THREAD_CREATE_FAILED);
     t->T_ctx = ghal_ctx_self();
     t->T_state = TS_RUNNING;
-    kernelCurrentThread = th;
+    currentThread = th;
     KernelEventInit();
     return th;
 }
 
 ThreadHandle KernelThisThread(void)
 {
-    return kernelCurrentThread ? kernelCurrentThread
+    return currentThread ? currentThread
 			       : KernelThreadInit(PRIORITY_STANDARD);
 }
 
@@ -553,7 +550,7 @@ void ThreadModify(ThreadHandle th, word newBasePriority,
 	QueueRemove(&t->T_waitSem->S_queue, th);
 	QueueInsert(&t->T_waitSem->S_queue, th);
     }
-    if (th == kernelCurrentThread)
+    if (th == currentThread)
 	KernelYield();
     else
 	MaybePreempt();

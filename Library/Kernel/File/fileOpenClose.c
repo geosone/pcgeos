@@ -216,14 +216,14 @@ FileHandle FileCreateTempFile(const char *dir, FileCreateFlags flags,
 void FileEnableOpenCloseNotification(void)
 {
     ghal_crit_enter();
-    fsdOpenCloseCount++;
+    openCloseNotificationCount++;
     ghal_crit_leave();
 }
 
 void FileDisableOpenCloseNotification(void)
 {
     ghal_crit_enter();
-    if (fsdOpenCloseCount)
-	fsdOpenCloseCount--;
+    if (openCloseNotificationCount)
+	openCloseNotificationCount--;
     ghal_crit_leave();
 }

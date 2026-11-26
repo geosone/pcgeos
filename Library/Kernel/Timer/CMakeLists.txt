@@ -6,4 +6,5 @@
 target_sources(geos_kernel_objs PRIVATE
   timerList.c
   timerInt.c
-  timerMisc.c)
+  timerMisc.c
+  timerVariable.c)

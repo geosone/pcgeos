@@ -215,11 +215,11 @@ void GrUpdateOpts(GState *gs);
 void GrWinStateFlags(GStateHandle gstate, const GState *gs, WinGrFlags keep,
 		     WinGrRegFlags keepReg);
 
-/* graphicsInit.c: the fonts at the start */
-extern MemHandle grFontBlock;		/* the font info block, or 0 */
-extern FontID grDefaultFontID;
-extern word grDefaultFontSize;
-extern Handle grDefaultFontHandle;	/* the default font's FontBuf */
+/* graphicsVariable.c: the fonts (set at the start, graphicsInit.c) */
+extern MemHandle fontBlkHandle;		/* the font info block, or 0 */
+extern FontID defaultFontID;
+extern word defaultFontSize;
+extern Handle defaultFontHandle;	/* the default font's FontBuf */
 extern TMatrix grIdentityMatrix;
 void GrDefaultFontAttrs(FontCommonAttrs *fa);
 

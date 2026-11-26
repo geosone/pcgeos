@@ -8,4 +8,5 @@ target_sources(geos_kernel_objs PRIVATE
   imMonitors.c
   imMisc.c
   imPtr.c
-  imScreenSaver.c)
+  imScreenSaver.c
+  imVariable.c)

@@ -6,4 +6,5 @@
 target_sources(geos_kernel_objs PRIVATE
   bootInit.c
   bootInitfile.c
-  bootBoot.c)
+  bootBoot.c
+  bootVariable.c)

@@ -6,4 +6,5 @@
 target_sources(geos_kernel_objs PRIVATE
   fsdDrive.c
   fsdInit.c
-  fsdFile.c)
+  fsdFile.c
+  fsdVariable.c)

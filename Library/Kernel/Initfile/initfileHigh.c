@@ -34,7 +34,6 @@ IniText iniFiles[MAX_INI_FILES];
 static word iniCount;
 static Boolean iniLoaded;
 static char iniName[16];		/* of the first, in SP_TOP */
-static dword iniModified;
 
 static IniText grabSaved;
 static MemHandle grabMem;
@@ -43,7 +42,6 @@ static Boolean grabbed;
 
 /* exclusive access, nesting for the thread that has it (callbacks may
  * call the init file routines) */
-KSem iniSem = { 1, 0 };
 ThreadHandle iniOwner;
 word iniNesting;
 
@@ -57,7 +55,7 @@ void PInitFile(void)
 	iniNesting++;
 	return;
     }
-    KSemP(&iniSem, KSEM_FOREVER);
+    KSemP(&initFileSem, KSEM_FOREVER);
     iniOwner = me;
     iniNesting = 1;
     if (!iniLoaded)
@@ -200,12 +198,12 @@ void InitFileReset(void)
 {
     word i;
 
-    KSemP(&iniSem, KSEM_FOREVER);
+    KSemP(&initFileSem, KSEM_FOREVER);
     for (i = 0; i < MAX_INI_FILES; i++)
 	FreeText(&iniFiles[i]);
     iniCount = 0;
     iniLoaded = FALSE;
-    KSemV(&iniSem);
+    KSemV(&initFileSem);
 }
 
 /* ---------------------------------------------------------------------
@@ -395,7 +393,7 @@ static void Write(const char *cat, const char *key, char *entry, word size)
 	    ok = Splice(it, pos, 0, entry, size);
     }
     if (ok)
-	iniModified = TimerGetCount();
+	initfileLastModified = TimerGetCount();
     VInitFile();
     ghal_mem_free(entry);
 }
@@ -529,7 +527,7 @@ void InitFileDeleteCategory(const char *category)
 
 dword InitFileGetTimeLastModified(void)
 {
-    return iniModified;
+    return initfileLastModified;
 }
 
 /* ---------------------------------------------------------------------
@@ -571,8 +569,6 @@ void InitFileCommit(void)
     VInitFile();
 }
 
-static const char backupName[] = "ini.bak";
-
 Boolean InitFileSave(void)
 {
     FileHandle fh;
@@ -581,7 +577,7 @@ Boolean InitFileSave(void)
     PInitFile();
     FilePushDir();
     FileSetStandardPath(SP_PRIVATE_DATA);
-    fh = FileCreate(backupName, FCF_NATIVE | FILE_CREATE_TRUNCATE |
+    fh = FileCreate(initfileBackupName, FCF_NATIVE | FILE_CREATE_TRUNCATE |
 				FILE_ACCESS_RW | FILE_DENY_RW,
 		    FILE_ATTR_NORMAL);
     if (fh) {
@@ -602,7 +598,7 @@ Boolean InitFileRevert(void)
     PInitFile();
     FilePushDir();
     FileSetStandardPath(SP_PRIVATE_DATA);
-    ok = ReadIniFile(backupName, FILE_ACCESS_R | FILE_DENY_RW, &it);
+    ok = ReadIniFile(initfileBackupName, FILE_ACCESS_R | FILE_DENY_RW, &it);
     if (ok) {
 	FreeText(&iniFiles[0]);
 	iniFiles[0] = it;

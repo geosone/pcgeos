@@ -18,6 +18,7 @@
  * block owned by the geode.
  */
 #include "kernelC.h"
+#include "geodesVariable.h"
 #include "geodesConstant.h"
 
 #include <stdlib.h>
@@ -25,7 +26,6 @@
 
 #define PRIV_KERNEL			((GeodeHandle) ~0u)	/* geode 0 */
 
-static KSem privSem = { 1, 0 };
 static GeodeHandle *privMap;		/* owner per slot, 0: free */
 static word privMapWords;
 

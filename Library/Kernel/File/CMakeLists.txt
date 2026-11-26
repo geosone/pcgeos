@@ -20,4 +20,5 @@ target_sources(geos_kernel_objs PRIVATE
   fileEnum.c
   fileLink.c
   fileNotify.c
-  fileEC.c)
+  fileEC.c
+  fileVariable.c)

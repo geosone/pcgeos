@@ -5,7 +5,7 @@
  * EnsureFontFileOpen, the font locks and UpdateFontOpts; LibFindBestFace
  * and the nearest size of graphicsFont.asm).
  *
- * The font info block (grFontBlock, an LMem block, locked with
+ * The font info block (fontBlkHandle, an LMem block, locked with
  * MemThreadGrab) holds four chunks at fixed handles (fontDr.h): the
  * fonts available (FontsAvailEntry, each with a FontInfo chunk), the
  * fonts in use (FontsInUseEntry), the font drivers (DriversAvailEntry)
@@ -39,20 +39,20 @@
 
 void *FontDrLockInfoBlock(void)
 {
-    return grFontBlock ? MemThreadGrab(grFontBlock) : NULL;
+    return fontBlkHandle ? MemThreadGrab(fontBlkHandle) : NULL;
 }
 
 void FontDrUnlockInfoBlock(void)
 {
-    if (grFontBlock)
-	MemThreadRelease(grFontBlock);
+    if (fontBlkHandle)
+	MemThreadRelease(fontBlkHandle);
 }
 
 void *GrFontChunk(ChunkHandle ch, word *size)
 {
     if (size)
-	*size = LMemGetChunkSizeHandles(grFontBlock, ch);
-    return LMemDerefHandles(grFontBlock, ch);
+	*size = LMemGetChunkSizeHandles(fontBlkHandle, ch);
+    return LMemDerefHandles(fontBlkHandle, ch);
 }
 
 /* IsFontAvail: the entry of exactly this font */
@@ -189,8 +189,8 @@ static Boolean FindBestFace(GState *gs)
     } else if (fi && fi->FI_outlineEnd)
 	outline = TRUE;
     else {
-	id = grDefaultFontID;
-	size = (sdword) grDefaultFontSize << 8;
+	id = defaultFontID;
+	size = (sdword) defaultFontSize << 8;
 	style = 0;
 	fa->FCA_weight = FW_NORMAL;
 	fa->FCA_width = FWI_MEDIUM;
@@ -289,7 +289,7 @@ word GrAddInUseEntry(const FontCommonAttrs *attrs, TextStyle style,
 	if (!e[i].FIUE_dataHandle)
 	    break;
     if (i == size / sizeof(FontsInUseEntry)) {
-	LMemReAllocHandles(grFontBlock, FONTS_IN_USE_HANDLE,
+	LMemReAllocHandles(fontBlkHandle, FONTS_IN_USE_HANDLE,
 			   (word) (size + sizeof(FontsInUseEntry)));
 	e = GrFontChunk(FONTS_IN_USE_HANDLE, NULL);
     }
@@ -337,7 +337,7 @@ static void FindFont(GState *gs, const TMatrix *m)
 	    e->FIUE_dataHandle = h;
 	    break;
 	}
-	if (!grDefaultFontHandle && !fi) {	/* no fonts at all */
+	if (!defaultFontHandle && !fi) {	/* no fonts at all */
 	    gs->GS_fontHandle = 0;
 	    FontDrUnlockInfoBlock();
 	    return;
@@ -350,7 +350,7 @@ static void FindFont(GState *gs, const TMatrix *m)
     gs->GS_fontIndex = (word) ((byte *) e -
 			       (byte *) GrFontChunk(FONTS_IN_USE_HANDLE,
 						    NULL));
-    if (gs->GS_fontHandle == grDefaultFontHandle)
+    if (gs->GS_fontHandle == defaultFontHandle)
 	gs->GS_fontFlags |= FBF_DEFAULT_FONT;
     FontDrUnlockInfoBlock();
 }
@@ -360,7 +360,7 @@ void GrInvalidateFont(GState *gs)
 {
     if (!gs->GS_fontHandle)
 	return;
-    if (grFontBlock && !(gs->GS_fontFlags & FBF_DEFAULT_FONT)) {
+    if (fontBlkHandle && !(gs->GS_fontFlags & FBF_DEFAULT_FONT)) {
 	FontsInUseEntry *e;
 	FontDrLockInfoBlock();
 	e = InUseAt(gs->GS_fontIndex);
@@ -599,7 +599,7 @@ FontBuf *GrLockFont(GState *gs, const TMatrix *m)
     Handle h;
     FontBuf *fb;
 
-    if (!grFontBlock)
+    if (!fontBlkHandle)
 	return NULL;
     if (!gs->GS_fontHandle) {
 	FindFont(gs, m);
@@ -718,8 +718,8 @@ void GrSetFont(GStateHandle gstate, FontID id, WWFixedAsDWord pointSize)
 FontID GrGetDefFontID(dword *sizeSHL16)
 {
     if (sizeSHL16)
-	*sizeSHL16 = (dword) grDefaultFontSize << 16;
-    return grDefaultFontID;
+	*sizeSHL16 = (dword) defaultFontSize << 16;
+    return defaultFontID;
 }
 
 Boolean GrCallFontDriverID(FontMaker maker, word function, DriverRegs *r)
@@ -729,7 +729,7 @@ Boolean GrCallFontDriverID(FontMaker maker, word function, DriverRegs *r)
     FontDriverStrategy *strat = NULL;
     Boolean carry = TRUE;
 
-    if (!grFontBlock)
+    if (!fontBlkHandle)
 	return TRUE;
     FontDrLockInfoBlock();
     d = GrFontChunk(FONT_DRIVERS_HANDLE, &size);

@@ -10,4 +10,5 @@ target_sources(geos_kernel_objs PRIVATE
   sysScreen.c
   sysMisc.c
   sysNotification.c
-  sysStats.c)
+  sysStats.c
+  sysVariable.c)

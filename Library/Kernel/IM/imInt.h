@@ -102,4 +102,10 @@ void ImScreenSaverMethod(void *pself, optr oself, Message m, void *params,
 /* imMisc.c and imPtr.c */
 void ImRefreshPtrNow(void);
 
+extern KSem semMonChain;
+extern Monitor headMonitor;
+extern const byte buttonConvTab[IM_MAX_BUTTONS];
+
+extern KSem semPtrImage;
+
 #endif /* IMINT_H */

@@ -36,14 +36,13 @@
  * Not yet: a current directory per drive.
  */
 #include "kernelC.h"
+#include "fileVariable.h"
 #include "fileConstant.h"
 
 #include <initfile.h>
 #include <string.h>
 
 #define TOP_DRIVE	2		/* C: */
-
-static DiskHandle topDisk;
 
 /* names and parents of the standard paths (fileVariable.def,
  * stdPathUpwardTree), by StandardPath / 2 */
@@ -110,16 +109,16 @@ void FileSetTopHostPath(const char *hostPath)
     if (!FSDInitDrive(TOP_DRIVE, "C", DS_PRESENT | DRIVE_FIXED,
 		      MEDIA_FIXED_DISK, &hostFSDriver, priv))
 	KernelFatal(FILE_PATH_ALLOC_FAILED);
-    topDisk = 0;		/* registered when it is used */
+    topLevelDiskHandle = 0;		/* registered when it is used */
 }
 
 DiskHandle FileTopDisk(void)
 {
     if (!FSDDriveOf(TOP_DRIVE))
 	FileSetTopHostPath(".");
-    if (!topDisk)
-	topDisk = DiskRegisterDiskSilently(TOP_DRIVE);
-    return topDisk;
+    if (!topLevelDiskHandle)
+	topLevelDiskHandle = DiskRegisterDiskSilently(TOP_DRIVE);
+    return topLevelDiskHandle;
 }
 
 /* ---------------------------------------------------------------------

@@ -35,6 +35,7 @@
  * UtilHex32ToAscii and UtilAsciiToHex32.
  */
 #include "kernelC.h"
+#include "sysVariable.h"
 #include "ghal.h"
 #include <system.h>
 #include <ec.h>
@@ -56,13 +57,6 @@
 #define GCNSCT_SUSPEND_TYPE	0
 #define GCNSCT_SHUTDOWN_TYPE	1
 
-static KSem broadcastSem = { 1, 0 };	/* shutdownBroadcastSem */
-static KSem confirmSem = { 1, 0 };	/* shutdownConfirmSem */
-static dword confirmCount;		/* shutdownConfirmCount */
-static Boolean shutdownOK = TRUE;
-static optr ackOD;
-static Message ackMsg;
-
 typedef struct {
     word	confirmed;
     int		type;		/* GCNShutdownControlType */
@@ -78,8 +72,8 @@ static void SendAck(Boolean ok)
     word confirmed = ok;
     DetachParams dp;
 
-    if (OptrToHandle(ackOD)) {
-	CObjMessageP(0, ackOD, ackMsg, &confirmed, sizeof(confirmed), NULL, 0);
+    if (OptrToHandle(shutdownAckOD)) {
+	CObjMessageP(0, shutdownAckOD, shutdownAckMsg, &confirmed, sizeof(confirmed), NULL, 0);
 	return;
     }
     /* nobody to tell: the UI detaches if all agreed */
@@ -97,14 +91,14 @@ static Boolean ConfirmEnd(Boolean allow)
 
     if (!allow)
 	shutdownOK = FALSE;
-    KSemV(&confirmSem);
-    KSemP(&broadcastSem, KSEM_FOREVER);
-    if (confirmCount && !--confirmCount) {
+    KSemV(&shutdownConfirmSem);
+    KSemP(&shutdownBroadcastSem, KSEM_FOREVER);
+    if (shutdownConfirmCount && !--shutdownConfirmCount) {
 	ok = shutdownOK;
 	shutdownOK = TRUE;
 	SendAck(ok);
     }
-    KSemV(&broadcastSem);
+    KSemV(&shutdownBroadcastSem);
     return FALSE;
 }
 
@@ -114,17 +108,17 @@ static Boolean CleanOrSuspend(int gcnType, optr od, Message msg)
     EventHandle ev;
     word n;
 
-    KSemP(&broadcastSem, KSEM_FOREVER);
-    if (confirmCount) {
-	KSemV(&broadcastSem);
+    KSemP(&shutdownBroadcastSem, KSEM_FOREVER);
+    if (shutdownConfirmCount) {
+	KSemV(&shutdownBroadcastSem);
 	return TRUE;
     }
-    ackOD = od;
-    ackMsg = msg;
+    shutdownAckOD = od;
+    shutdownAckMsg = msg;
     /* 1, plus 10000 against answers that come in before the count of the
      * list is known */
-    confirmCount = 10001;
-    KSemV(&broadcastSem);
+    shutdownConfirmCount = 10001;
+    KSemV(&shutdownBroadcastSem);
 
     p.confirmed = 0;
     p.type = gcnType;
@@ -132,11 +126,11 @@ static Boolean CleanOrSuspend(int gcnType, optr od, Message msg)
 		 &ev, sizeof(ev));
     n = GCNListSend(MANUFACTURER_ID_GEOWORKS, GCNSLT_SHUTDOWN_CONTROL_LIST,
 		    ev, 0, 0);
-    KSemP(&broadcastSem, KSEM_FOREVER);
-    confirmCount = confirmCount + n - 10000;
-    KSemV(&broadcastSem);
+    KSemP(&shutdownBroadcastSem, KSEM_FOREVER);
+    shutdownConfirmCount = shutdownConfirmCount + n - 10000;
+    KSemV(&shutdownBroadcastSem);
     /* our own answer: we allow it */
-    KSemP(&confirmSem, KSEM_FOREVER);
+    KSemP(&shutdownConfirmSem, KSEM_FOREVER);
     return ConfirmEnd(TRUE);
 }
 
@@ -206,7 +200,7 @@ Boolean SysShutdown(SysShutdownType type, ...)
     case SST_SUSPEND:
 	return CleanOrSuspend(GCNSCT_SUSPEND_TYPE, od, msg);
     case SST_CONFIRM_START:
-	KSemP(&confirmSem, KSEM_FOREVER);
+	KSemP(&shutdownConfirmSem, KSEM_FOREVER);
 	if (shutdownOK)
 	    return FALSE;
 	ConfirmEnd(FALSE);
@@ -219,19 +213,15 @@ Boolean SysShutdown(SysShutdownType type, ...)
     }
 }
 
-ByteFlags kernelSysConfig = SCF_RTC | SCF_COPROC;
-
 dword SysGetConfig(void)
 {
-    return (dword) kernelSysConfig | ((dword) SPT_80486 << 16) |
+    return (dword) sysConfig | ((dword) SPT_80486 << 16) |
 	   ((dword) SMT_UNKNOWN << 24);
 }
 
 /* ---------------------------------------------------------------------
  * Exit flags, error-check level, DOS environment, pen (sysMisc.asm)
  * ------------------------------------------------------------------- */
-
-ExitFlags kernelSysExitFlags;		/* exitFlags; EndGeos reads EF_RESET */
 
 /* the bits of system.h (it has no EF_POWER_OFF) */
 #define EXIT_FLAGS_MASK	(EF_PANIC | EF_RUN_DOS | EF_OLD_EXIT | EF_RESET | \
@@ -242,14 +232,11 @@ word SysSetExitFlags(ExitFlags bitsToSet, ExitFlags bitsToClear)
     EC_CHECK(!(bitsToSet & ~EXIT_FLAGS_MASK) &&
 	     !(bitsToClear & ~EXIT_FLAGS_MASK), BAD_EXIT_FLAGS);
     ghal_crit_enter();
-    kernelSysExitFlags = (ExitFlags) ((kernelSysExitFlags | bitsToSet) &
+    exitFlags = (ExitFlags) ((exitFlags | bitsToSet) &
 				      ~bitsToClear);
     ghal_crit_leave();
-    return kernelSysExitFlags;
+    return exitFlags;
 }
-
-static ErrorCheckingFlags sysECLevel;
-static MemHandle sysECBlock;
 
 ErrorCheckingFlags SysGetECLevel(MemHandle *checksumBlock)
 {

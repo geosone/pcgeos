@@ -28,8 +28,6 @@
 #include <lmem.h>
 #include <Internal/videoDr.h>
 
-static KSem semPtrImage = { 1, 0 };
-
 #define CallPtrDriver ImCallPtrDriver
 
 Boolean ImCallPtrDriver(word function, DriverRegs *r)

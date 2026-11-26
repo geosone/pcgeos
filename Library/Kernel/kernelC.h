@@ -293,8 +293,8 @@ typedef struct {
  * (ThreadPrivAlloc, TPD_heap); a geode's go when it exits */
 void ThreadPrivExit(GeodeHandle gh);
 
-/* the running thread (0 before KernelThreadInit) */
-extern ThreadHandle kernelCurrentThread;
+/* the running thread (0 before KernelThreadInit; Thread/threadVariable.c) */
+extern ThreadHandle currentThread;
 
 /* Make the caller (the program's own context) the first GEOS thread. */
 ThreadHandle KernelThreadInit(ThreadPriority priority);
@@ -1038,13 +1038,13 @@ extern ThreadHandle kernelBootThread;
 #define KEF_RESET	0x0002	/* the machine should reboot */
 #define KEF_POWER_OFF	0x0004	/* it may be switched off */
 extern word kernelExitFlags;
-extern byte kernelSysExitFlags;		/* ExitFlags of SysSetExitFlags */
+extern byte exitFlags;		/* Boot/bootVariable.c: SysSetExitFlags */
 void EndGeos(word flags, const char *reason);
 Boolean KernelEnded(void);
 const char *KernelExitMessage(void);	/* "" if none */
 /* in the top while GEOS runs (sysSemaphoreFile); SysGetConfig's flags */
 #define KERNEL_ACTIVE_FILE	"GEOS_ACT.IVE"
-extern ByteFlags kernelSysConfig;	/* SysConfigFlags (system.h) */
+extern ByteFlags sysConfig;	/* Sys/sysVariable.c: SysConfigFlags */
 
 /* bootInit.c and bootInitfile.c */
 GeodeHandle BootLoadDriver(const char *name, StandardPath sp,
@@ -1073,8 +1073,8 @@ int ObjCallClassLow(ClassStruct *cls, optr oself, int isObj, Message msg,
 /* objectFile.c and objectDup.c */
 GeodeHandle ObjCurProcess(void);
 
-/* fileNotify.c and fsdFile.c */
-extern word fsdOpenCloseCount;
+/* FSD/fsdVariable.c: for fileNotify.c and fsdFile.c */
+extern word openCloseNotificationCount;
 void FSDSendNotify(FileChangeNotificationType type, MemHandle block);
 MemHandle FSDNewBatch(void);
 

@@ -24,10 +24,6 @@
 #include <initfile.h>
 #include <stdlib.h>
 
-MemHandle grFontBlock;
-FontID grDefaultFontID = DEFAULT_FONT_ID;
-word grDefaultFontSize = DEFAULT_FONT_SIZE;
-Handle grDefaultFontHandle;
 TMatrix grIdentityMatrix;
 
 #define FONT_FILE_INFO_SIZE	8	/* "BSWF", minor, major, headerSize */
@@ -37,8 +33,8 @@ TMatrix grIdentityMatrix;
 void GrDefaultFontAttrs(FontCommonAttrs *fa)
 {
     memset(fa, 0, sizeof(*fa));
-    fa->FCA_fontID = grDefaultFontID;
-    fa->FCA_pointsize.WBF_int = (sword) grDefaultFontSize;
+    fa->FCA_fontID = defaultFontID;
+    fa->FCA_pointsize.WBF_int = (sword) defaultFontSize;
     fa->FCA_weight = FW_NORMAL;
     fa->FCA_width = FWI_MEDIUM;
     fa->FCA_superPos = SPP_DEFAULT;
@@ -108,8 +104,8 @@ static void ProcessFont(const char *name)
     total = (word) (sizeof(FontInfo) + nps * sizeof(PointSizeEntry) +
 		    nol * sizeof(OutlineDataEntry));
 
-    ch = LMemAlloc(grFontBlock, total);
-    fi = LMemDerefHandles(grFontBlock, ch);
+    ch = LMemAlloc(fontBlkHandle, total);
+    fi = LMemDerefHandles(fontBlkHandle, ch);
     memset(fi, 0, total);
     fi->FI_fontID = id = Le16(hdr);
     fi->FI_maker = Le16(hdr + 2);
@@ -156,14 +152,14 @@ static void ProcessFont(const char *name)
 
     /* a font already there (another file of it) keeps the first */
     if (GrFontAvailEntry(id)) {
-	LMemFreeHandles(grFontBlock, ch);
+	LMemFreeHandles(fontBlkHandle, ch);
 	return;
     }
     {
-	word n = LMemGetChunkSizeHandles(grFontBlock, FONTS_AVAIL_HANDLE);
-	LMemReAllocHandles(grFontBlock, FONTS_AVAIL_HANDLE,
+	word n = LMemGetChunkSizeHandles(fontBlkHandle, FONTS_AVAIL_HANDLE);
+	LMemReAllocHandles(fontBlkHandle, FONTS_AVAIL_HANDLE,
 			   (word) (n + sizeof(FontsAvailEntry)));
-	fa = (FontsAvailEntry *) ((byte *) LMemDerefHandles(grFontBlock,
+	fa = (FontsAvailEntry *) ((byte *) LMemDerefHandles(fontBlkHandle,
 						FONTS_AVAIL_HANDLE) + n);
     }
     memset(fa, 0, sizeof(*fa));
@@ -178,11 +174,11 @@ static void CreateFontBlock(void)
     ChunkHandle ch[4];
     int i;
 
-    grFontBlock = MemAllocLMem(LMEM_TYPE_FONT_BLK, 0);
-    MemModifyFlags(grFontBlock, HF_SHARABLE, 0);
-    MemLock(grFontBlock);
+    fontBlkHandle = MemAllocLMem(LMEM_TYPE_FONT_BLK, 0);
+    MemModifyFlags(fontBlkHandle, HF_SHARABLE, 0);
+    MemLock(fontBlkHandle);
     for (i = 0; i < 4; i++)
-	ch[i] = LMemAlloc(grFontBlock, 0);
+	ch[i] = LMemAlloc(fontBlkHandle, 0);
     EC_CHECK(ch[0] == FONTS_AVAIL_HANDLE && ch[1] == FONTS_IN_USE_HANDLE &&
 	     ch[2] == FONT_DRIVERS_HANDLE && ch[3] == FONT_MOD_DATA_HANDLE,
 	     GRAPHICS_GR_INIT_FONTS_ERROR);
@@ -227,11 +223,11 @@ void GrInitFonts(void)
 	files = FID_MIN_FILE_HANDLES;
     if (files > FID_MAX_FILE_HANDLES)
 	files = FID_MAX_FILE_HANDLES;
-    LMemReAllocHandles(grFontBlock, FONT_FILE_CACHE_HANDLE,
+    LMemReAllocHandles(fontBlkHandle, FONT_FILE_CACHE_HANDLE,
 		       (word) (files * sizeof(FontID)));
-    memset(LMemDerefHandles(grFontBlock, FONT_FILE_CACHE_HANDLE), 0,
+    memset(LMemDerefHandles(fontBlkHandle, FONT_FILE_CACHE_HANDLE), 0,
 	   files * sizeof(FontID));
-    MemUnlock(grFontBlock);
+    MemUnlock(fontBlkHandle);
 }
 
 /* InitAddInUseEntry: the default font in use, by the kernel */
@@ -245,7 +241,7 @@ static void AddDefaultInUse(TextStyle style)
     index = GrAddInUseEntry(&fa, style, NULL);
     e = (FontsInUseEntry *) ((byte *) GrFontChunk(FONTS_IN_USE_HANDLE,
 						  NULL) + index);
-    e->FIUE_dataHandle = grDefaultFontHandle;
+    e->FIUE_dataHandle = defaultFontHandle;
     e->FIUE_refCount = 1;
 }
 
@@ -269,7 +265,7 @@ void GrInitDefaultFont(void)
 	id = GrCheckFontAvailName(FEF_BITMAPS | FEF_STRING | FEF_DOWNCASE,
 				  0, name);
     if (id == FID_INVALID)
-	id = GrCheckFontAvailID(FEF_BITMAPS, 0, grDefaultFontID);
+	id = GrCheckFontAvailID(FEF_BITMAPS, 0, defaultFontID);
     if (id == FID_INVALID) {
 	FontEnumStruct fes;
 	if (!GrEnumFonts(&fes, 1, FEF_BITMAPS, 0))
@@ -277,7 +273,7 @@ void GrInitDefaultFont(void)
 	id = fes.FES_ID;
     }
     if (InitFileReadInteger("system", "fontsize", &size))
-	size = grDefaultFontSize;
+	size = defaultFontSize;
 
     FontDrLockInfoBlock();
     fi = FontDrFindFontInfo(NULL, id);
@@ -285,8 +281,8 @@ void GrInitDefaultFont(void)
 	FontDrUnlockInfoBlock();
 	return;
     }
-    grDefaultFontID = id;
-    grDefaultFontSize = (word) (found >> 8);
+    defaultFontID = id;
+    defaultFontSize = (word) (found >> 8);
     fh = GrEnsureFontFileOpen(id);
     fi = FontDrFindFontInfo(NULL, id);
     /* InitFindFace: the entry of that size and style */
@@ -308,7 +304,7 @@ void GrInitDefaultFont(void)
 	FontDrUnlockInfoBlock();
 	return;
     }
-    grDefaultFontHandle = h;
+    defaultFontHandle = h;
     AddDefaultInUse(style);
     FontDrUnlockInfoBlock();
 }
@@ -323,12 +319,12 @@ void GrInitFontDriver(GeodeHandle gh)
     DriverRegs r;
     word size;
 
-    if (!grFontBlock || !fdis ||
+    if (!fontBlkHandle || !fdis ||
 	fdis->FDIS_common.DIS_driverType != DRIVER_TYPE_FONT)
 	return;
     FontDrLockInfoBlock();
-    size = LMemGetChunkSizeHandles(grFontBlock, FONT_DRIVERS_HANDLE);
-    LMemReAllocHandles(grFontBlock, FONT_DRIVERS_HANDLE,
+    size = LMemGetChunkSizeHandles(fontBlkHandle, FONT_DRIVERS_HANDLE);
+    LMemReAllocHandles(fontBlkHandle, FONT_DRIVERS_HANDLE,
 		       (word) (size + sizeof(DriversAvailEntry)));
     d = (DriversAvailEntry *) ((byte *) GrFontChunk(FONT_DRIVERS_HANDLE,
 						    NULL) + size);
@@ -337,7 +333,7 @@ void GrInitFontDriver(GeodeHandle gh)
     d->DAE_strategy = (FontDriverStrategy *) DriverStrategyOf(
 	&fdis->FDIS_common);
     memset(&r, 0, sizeof(r));
-    r.DR_bx = grFontBlock;
+    r.DR_bx = fontBlkHandle;
     (void) d->DAE_strategy(DR_FONT_INIT_FONTS, &r);
     FontDrUnlockInfoBlock();
 }

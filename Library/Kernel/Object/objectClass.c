@@ -103,7 +103,7 @@ int ObjCallClassLow(ClassStruct *cls, optr oself, int isObj, Message msg,
 /* the class a thread, queue or process message goes to */
 static ClassStruct *ThreadClass(void)
 {
-    return kernelCurrentThread ? ThreadOf(kernelCurrentThread)->T_class
+    return currentThread ? ThreadOf(currentThread)->T_class
 			       : NULL;
 }
 

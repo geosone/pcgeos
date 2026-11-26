@@ -38,8 +38,6 @@
 #define KMSG_NOTIFY_FILE_CHANGE	693	/* gcnlist.goh */
 #define FSD_ALLOC_GRANULARITY	1024
 
-word fsdOpenCloseCount;
-
 /* the message to the list; the block goes with it (or is freed) */
 void FSDSendNotify(FileChangeNotificationType type, MemHandle block)
 {

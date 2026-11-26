@@ -86,7 +86,7 @@ void EndGeos(word flags, const char *reason)
     ghal_crit_leave();
 
     kernelExitFlags |= flags;
-    if (kernelSysExitFlags & EF_RESET)	/* SysSetExitFlags */
+    if (exitFlags & EF_RESET)	/* SysSetExitFlags */
 	kernelExitFlags |= KEF_RESET;
     if (reason) {
 	strncpy(endMessage, reason, sizeof(endMessage) - 1);

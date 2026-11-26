@@ -15,7 +15,6 @@
  * The tree lock: a recursive lock of its own
  * ------------------------------------------------------------------- */
 
-static KSem treeSem;
 static Boolean treeSemInit;
 static ThreadHandle treeOwner;
 static word treeNesting;
@@ -25,14 +24,14 @@ void WinTreeP(void)
     ThreadHandle cur = KernelThisThread();
 
     if (!treeSemInit) {
-	KSemInit(&treeSem, 1);
+	KSemInit(&winTreeSem, 1);
 	treeSemInit = TRUE;
     }
     if (treeNesting && treeOwner == cur) {
 	treeNesting++;
 	return;
     }
-    KSemP(&treeSem, KSEM_FOREVER);
+    KSemP(&winTreeSem, KSEM_FOREVER);
     treeOwner = cur;
     treeNesting = 1;
 }
@@ -43,7 +42,7 @@ void WinTreeV(void)
 	KernelFatal(UNLOCK_MODULE_BY_WRONG_THREAD);
     if (--treeNesting == 0) {
 	treeOwner = 0;
-	KSemV(&treeSem);
+	KSemV(&winTreeSem);
     }
 }
 

@@ -569,7 +569,7 @@ void *CObjMessageP(word flags, optr dest, Message message,
 	KernelFatal(CANNOT_HAVE_BOTH_MF_FORCE_QUEUE_AND_MF_CALL);
     Route(dest, &th, &qh);
 
-    if (!(flags & MF_FORCE_QUEUE) && th && th == kernelCurrentThread &&
+    if (!(flags & MF_FORCE_QUEUE) && th && th == currentThread &&
 	!ghal_irq_active()) {
 	ReplyScratch scratch;
 	KernelDeliver(dest, message, params, reply ? reply : &scratch);

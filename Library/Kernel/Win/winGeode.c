@@ -13,7 +13,6 @@
  */
 #include "winInt.h"
 
-static word gwvOffset;
 static KSem gwvSem = { 1, 0 };
 
 #define GWV_WORDS	((word) ((sizeof(GeodeWinVars) + 1) / sizeof(word)))
@@ -25,13 +24,13 @@ typedef union {
 
 static word Offset(void)
 {
-    if (!gwvOffset) {
+    if (!wGeodeWinVarsOffset) {
 	KSemP(&gwvSem, KSEM_FOREVER);
-	if (!gwvOffset)
-	    gwvOffset = GeodePrivAlloc(0, GWV_WORDS);
+	if (!wGeodeWinVarsOffset)
+	    wGeodeWinVarsOffset = GeodePrivAlloc(0, GWV_WORDS);
 	KSemV(&gwvSem);
     }
-    return gwvOffset;
+    return wGeodeWinVarsOffset;
 }
 
 /* ReadGeodeWinVars */
@@ -159,15 +158,14 @@ void WinGeodeSetActiveWin(GeodeHandle gh, WindowHandle win)
 
 /* the geode the mouse is down in, if any (wActiveGeode); under the tree
  * lock and ptrImageSem */
-GeodeHandle winActiveGeode;
 
 /* WinSysSetActiveGeode: the geode the mouse is down in, if any */
 void WinSysSetActiveGeode(GeodeHandle gh)
 {
     WinTreeP();
     WinPtrImageP();
-    if (gh != winActiveGeode) {
-	winActiveGeode = gh;
+    if (gh != wPtrActiveGeode) {
+	wPtrActiveGeode = gh;
 	WinUpdatePtrImages();
     }
     WinPtrImageV();

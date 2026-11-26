@@ -35,6 +35,7 @@
  * at once), heapspace and the UI thread.
  */
 #include "kernelC.h"
+#include "geodesVariable.h"
 #include "geodesMacro.h"
 #include "geosmod.h"
 #include <vm.h>
@@ -57,8 +58,6 @@ extern const unsigned kernelExportCount;
  * The geode list and its lock (geodeSem)
  * ------------------------------------------------------------------- */
 
-static GeodeHandle geodeList;
-static KSem geodeSem = { 1, 0 };
 static ThreadHandle geodeLockOwner;
 static word geodeLockNesting;
 
@@ -89,7 +88,7 @@ GeodeCore *GeodeCoreOf(GeodeHandle gh)
 
     if (!gh)
 	return NULL;
-    for (g = geodeList; g; g = CORE(g)->GC_next)
+    for (g = geodeListPtr; g; g = CORE(g)->GC_next)
 	if (g == gh)
 	    return CORE(g);
     return NULL;
@@ -103,7 +102,7 @@ GeodeHandle GeodeFindLow(const char *name, word n, GeodeAttrs attrMatch,
 
     if (n > NAME_LEN)
 	n = NAME_LEN;
-    for (g = geodeList; g; g = c->GC_next) {
+    for (g = geodeListPtr; g; g = c->GC_next) {
 	c = CORE(g);
 	if (memcmp(c->GC_name, name, n) == 0 &&
 	    (c->GC_attrs & attrMatch) == attrMatch &&
@@ -440,7 +439,7 @@ const GocResource *GeodeResourceImage(GeodeHandle gh, word res, word *resf)
 
 static void Unlink(GeodeHandle gh)
 {
-    GeodeHandle *p = &geodeList;
+    GeodeHandle *p = &geodeListPtr;
 
     while (*p && *p != gh)
 	p = &CORE(*p)->GC_next;
@@ -516,7 +515,7 @@ void GeodeCount(word *total, word *processes, word *libraries,
 
     *total = *processes = *libraries = *drivers = 0;
     GeodeLock();
-    for (g = geodeList; g; g = CORE(g)->GC_next) {
+    for (g = geodeListPtr; g; g = CORE(g)->GC_next) {
 	GeodeAttrs a = CORE(g)->GC_attrs;
 	(*total)++;
 	if (a & GA_PROCESS)
@@ -767,8 +766,8 @@ GeodeHandle GeodeLoadLow(const char *fileName, GeodeAttrs attrMatch,
     c->GC_libraryCount = nlibs;
     memcpy(c->GC_libraries, libs, nlibs * sizeof(GeodeHandle));
     nlibs = 0;				/* the core block has them now */
-    c->GC_next = geodeList;
-    geodeList = gh;
+    c->GC_next = geodeListPtr;
+    geodeListPtr = gh;
 
     if (!CreateResources(gh, info)) {
 	*err = GLE_MEMORY_ALLOCATION_ERROR;

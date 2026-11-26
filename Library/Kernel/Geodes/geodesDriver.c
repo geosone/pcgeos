@@ -23,15 +23,14 @@
  * keyboard drivers (defaultVideoStrategy and so on).
  */
 #include "kernelC.h"
+#include "geodesVariable.h"
 #include "geodesConstant.h"
 #include "geosmod.h"
 #include <geosdriver.h>
 
 #include <string.h>
 
-static GeodeHandle systemDrivers[MAX_SYSTEM_DRIVERS];
 static word systemDriverCount;
-static GeodeHandle defaultDrivers[GDDT_TASK / 2 + 1];
 
 DriverInfoStruct *GeodeDriverTable(GeodeHandle gh)
 {
@@ -58,7 +57,7 @@ GeodeLoadError GeodeInitDriver(GeodeHandle gh, dword appInfo)
     c = GeodeCoreOf(gh);
     c->GC_attrs |= GA_DRIVER_INITIALIZED;
     if ((c->GC_attrs & GA_SYSTEM) && systemDriverCount < MAX_SYSTEM_DRIVERS)
-	systemDrivers[systemDriverCount++] = gh;
+	systemDriverList[systemDriverCount++] = gh;
     return GLE_OK;
 }
 
@@ -73,8 +72,8 @@ void GeodeExitDriver(GeodeHandle gh)
 	return;
     c->GC_attrs &= ~GA_DRIVER_INITIALIZED;
     for (i = 0; i < systemDriverCount; i++)
-	if (systemDrivers[i] == gh) {
-	    memmove(&systemDrivers[i], &systemDrivers[i + 1],
+	if (systemDriverList[i] == gh) {
+	    memmove(&systemDriverList[i], &systemDriverList[i + 1],
 		    (systemDriverCount - i - 1) * sizeof(GeodeHandle));
 	    systemDriverCount--;
 	    break;
@@ -90,7 +89,7 @@ void GeodeExitSystemDrivers(void)
 {
     GeodeLock();
     while (systemDriverCount)
-	GeodeExitDriver(systemDrivers[systemDriverCount - 1]);
+	GeodeExitDriver(systemDriverList[systemDriverCount - 1]);
     GeodeUnlock();
 }
 

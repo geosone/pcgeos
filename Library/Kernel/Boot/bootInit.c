@@ -87,7 +87,7 @@ static void ActiveFile(void)
 
     FileGetAttributes(KERNEL_ACTIVE_FILE);
     if (ThreadGetError() == 0) {
-	kernelSysConfig |= SCF_CRASHED;
+	sysConfig |= SCF_CRASHED;
 	return;
     }
     fh = FileCreate(KERNEL_ACTIVE_FILE, FILE_CREATE_ONLY | FCF_NATIVE |

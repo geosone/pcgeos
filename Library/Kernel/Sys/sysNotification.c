@@ -21,29 +21,18 @@
  * Not for interrupt code, as in DOS16.
  */
 #include "kernelC.h"
+#include "sysVariable.h"
+#include "sysConstant.h"
 
 #include <system.h>
 #include <object.h>
 #include <geode.h>
 #include <string.h>
 
-#define SST_COUNT	(SST_SOCKET / 9 + 1)
-
-typedef SysNotificationRoutine SysNotifyRoutine;
-
-typedef enum { SNE_QUEUE, SNE_HOOKED, SNE_IGNORED } SNEState;
-
-typedef struct {
-    SNEState		state;
-    SysNotifyRoutine	*routine;
-    QueueHandle		queue;		/* SNE_QUEUE: 0 until the first */
-} SubsystemNotificationEntry;
-
-static SubsystemNotificationEntry table[SST_COUNT];
 static SemaphoreHandle tableSem;
 
 /* SysPNotification: the entry, locked */
-static SubsystemNotificationEntry *Lock(SysSubsystemType subsys)
+static SubsystemNotificationElement *Lock(SysSubsystemType subsys)
 {
     EC_CHECK((word) subsys % 9 == 0 && (word) subsys <= SST_SOCKET,
 	     NOT_VALID_MEMBER_OF_ENUMERATED_TYPE);
@@ -59,7 +48,7 @@ static SubsystemNotificationEntry *Lock(SysSubsystemType subsys)
 	    ThreadFreeSem(s);
     }
     ThreadPSem(tableSem);
-    return &table[(word) subsys / 9];
+    return &sysNotificationTable[(word) subsys / 9];
 }
 
 static void Unlock(void)
@@ -105,7 +94,7 @@ static Boolean Next(QueueHandle q, SysNotificationType *notif, dword *w)
 void SysSendNotification(SysSubsystemType subsys, SysNotificationType notif,
 			 dword word1, dword word2, dword word3, dword word4)
 {
-    SubsystemNotificationEntry *e = Lock(subsys);
+    SubsystemNotificationElement *e = Lock(subsys);
     dword w[4];
 
     w[0] = word1;
@@ -139,7 +128,7 @@ void SysSendNotification(SysSubsystemType subsys, SysNotificationType notif,
 Boolean SysHookNotification(SysSubsystemType subsys,
 			    SysNotificationRoutine *routine)
 {
-    SubsystemNotificationEntry *e = Lock(subsys);
+    SubsystemNotificationElement *e = Lock(subsys);
     SysNotificationType notif;
     dword w[4];
 
@@ -168,7 +157,7 @@ Boolean SysHookNotification(SysSubsystemType subsys,
 void SysUnhookNotification(SysSubsystemType subsys,
 			   SysNotificationRoutine *routine)
 {
-    SubsystemNotificationEntry *e = Lock(subsys);
+    SubsystemNotificationElement *e = Lock(subsys);
 
     if (e->state == SNE_HOOKED && e->routine == routine) {
 	e->state = SNE_QUEUE;
@@ -180,7 +169,7 @@ void SysUnhookNotification(SysSubsystemType subsys,
 /* TRUE if ignored now (FALSE: hooked); what waits is dropped */
 Boolean SysIgnoreNotification(SysSubsystemType subsys)
 {
-    SubsystemNotificationEntry *e = Lock(subsys);
+    SubsystemNotificationElement *e = Lock(subsys);
     SysNotificationType notif;
     dword w[4];
 

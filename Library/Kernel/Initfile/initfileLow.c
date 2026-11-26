@@ -450,6 +450,6 @@ void VInitFile(void)
 {
     if (--iniNesting == 0) {
 	iniOwner = 0;
-	KSemV(&iniSem);
+	KSemV(&initFileSem);
     }
 }

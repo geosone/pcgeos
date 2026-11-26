@@ -46,4 +46,5 @@ target_sources(geos_kernel_objs PRIVATE
   graphicsStringMisc.c
   graphicsStringStore.c
   graphicsStringUtils.c
-  graphicsTransformSimple.c)
+  graphicsTransformSimple.c
+  graphicsVariable.c)
