@@ -24,7 +24,7 @@ static void TimerInterrupt(void *ctx)
     if (--decayCount == 0) {
 	decayCount = TIMER_INTERRUPT_RATE;
 	ThreadDecay();
-	TimerCheckRealTime(KernelRealTimeNow(KernelTicks()));
+	CheckRealTimeTimers(KernelRealTimeNow(KernelTicks()));
     }
 }
 
@@ -47,4 +47,24 @@ void KernelTimerExit(void)
 	tickSource = NULL;
     }
     TimerReap();
+}
+
+/* CheckRealTimeTimers (timerInt.asm): inside ghal_crit */
+void CheckRealTimeTimers(dword now)
+{
+    if (!now)
+	return;
+    while (realTimeListPtr && realTimeListPtr->TI_due <= now) {
+	KTimer *t = realTimeListPtr;
+	realTimeListPtr = t->TI_next;
+	if (t->TI_type == TIMER_ROUTINE_REAL_TIME) {
+	    TimerRoutine *fn = (TimerRoutine *) (uintptr_t) t->TI_dest;
+	    fn((word) t->TI_msg, t->TI_due);
+	} else if (kernelTimerEventHook)
+	    kernelTimerEventHook(t->TI_dest, t->TI_msg, t->TI_due, 0);
+	else
+	    kernelTimerEventsDropped++;
+	t->TI_next = endedList;
+	endedList = t;
+    }
 }

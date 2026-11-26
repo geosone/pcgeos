@@ -16,6 +16,7 @@
  * ThreadDestroy (needs messages), event queues, thread exceptions.
  */
 #include "kernelC.h"
+#include "Sys/sysVariable.h"
 #include "threadVariable.h"
 #include "ghal.h"
 #include <sysstats.h>
@@ -27,7 +28,6 @@ volatile int kernelReschedulePending;
 static Handle deadList;			/* ended, to be released */
 static dword  timedWaiters;		/* blocked threads with a deadline */
 static uint64_t tickBase;
-static SysStats curStats, lastStats;	/* SysStatistics: this, last second */
 
 #define NS_PER_TICK	(1000000000u / 60u)
 
@@ -554,14 +554,5 @@ void ThreadModify(ThreadHandle th, word newBasePriority,
 	KernelYield();
     else
 	MaybePreempt();
-    ghal_crit_leave();
-}
-
-/* SysStatistics: the counts of the last second (idle: times the
- * scheduler found nothing to run; interrupts: timer ticks) */
-void KernelGetStatistics(void *stats)
-{
-    ghal_crit_enter();
-    *(SysStats *) stats = lastStats;
     ghal_crit_leave();
 }

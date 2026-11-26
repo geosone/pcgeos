@@ -87,24 +87,12 @@ static void BlankScreens(void)
 }
 
 /* UnBlankScreens */
-static void UnBlankScreens(void)
+void UnBlankScreens(void)
 {
     if (OptrToHandle(im.ssOD))
 	ToSaver(im.ssEndMsg);
     else
 	CallVideo(DR_VID_SCREEN_ON);
-}
-
-/* MaybeUnblankScreens: input from the user; FALSE if the screens were
- * blank (and are back now) */
-Boolean ImMaybeUnblankScreens(void)
-{
-    im.ssCurCount = im.ssMaxCount;
-    if (!(im.ssState & SSS_ACTIVE))
-	return TRUE;
-    UnBlankScreens();
-    im.ssState &= (byte) ~SSS_ACTIVE;
-    return FALSE;
 }
 
 /* IMSaverCountdownReachedZero */

@@ -31,7 +31,7 @@
 #include "timerVariable.h"
 #include "ghal.h"
 
-static KTimer *endedList;		/* to be freed by TimerReap */
+KTimer *endedList;		/* to be freed by TimerReap */
 static KTimer *spareList;		/* ready for TimerStart, with handle */
 static word spareCount;
 #define TIMER_SPARES	8
@@ -265,26 +265,6 @@ void TimerCheckList(dword now)
 	    t->TI_next = endedList;
 	    endedList = t;
 	}
-    }
-}
-
-/* CheckRealTimeTimers (timerInt.asm): inside ghal_crit */
-void TimerCheckRealTime(dword now)
-{
-    if (!now)
-	return;
-    while (realTimeListPtr && realTimeListPtr->TI_due <= now) {
-	KTimer *t = realTimeListPtr;
-	realTimeListPtr = t->TI_next;
-	if (t->TI_type == TIMER_ROUTINE_REAL_TIME) {
-	    TimerRoutine *fn = (TimerRoutine *) (uintptr_t) t->TI_dest;
-	    fn((word) t->TI_msg, t->TI_due);
-	} else if (kernelTimerEventHook)
-	    kernelTimerEventHook(t->TI_dest, t->TI_msg, t->TI_due, 0);
-	else
-	    kernelTimerEventsDropped++;
-	t->TI_next = endedList;
-	endedList = t;
     }
 }
 

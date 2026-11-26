@@ -33,6 +33,10 @@
 #include <input.h>
 #include <system.h>
 #include <timer.h>
+#include "imConstant.h"
+#include <Internal/videoDr.h>
+#include <Internal/powerDr.h>
+#include <geosdriver.h>
 
 ImVars im;
 
@@ -318,7 +322,7 @@ static byte ProcessPtr(ImEvent *ev)
 }
 
 /* CombineInputMonitor */
-static byte CombineInputMonitor(Monitor *mon, ImEvent *ev)
+byte CombineInputMonitor(Monitor *mon, ImEvent *ev)
 {
     (void) mon;
     /* a real user (the screen saver, MaybeUnblankScreens): anything but
@@ -330,9 +334,9 @@ static byte CombineInputMonitor(Monitor *mon, ImEvent *ev)
 	if (ev->IE_bp & PI_absY)
 	    dy = (sword) (dy - im.pointerY);
 	if (dx || dy)
-	    (void) ImMaybeUnblankScreens();
+	    (void) MaybeUnblankScreens();
     } else if (ev->IE_message)
-	(void) ImMaybeUnblankScreens();
+	(void) MaybeUnblankScreens();
     switch (ev->IE_message) {
     case MSG_IM_PTR_CHANGE:
 	return ProcessPtr(ev);
@@ -431,7 +435,7 @@ static void Send(const ImEvent *ev, word flags)
 }
 
 /* OutputMonitor */
-static byte OutputMonitor(Monitor *mon, ImEvent *ev)
+byte OutputMonitor(Monitor *mon, ImEvent *ev)
 {
     sword x, y;
     word flags = MF_FORCE_QUEUE;
@@ -503,11 +507,14 @@ static byte OutputMonitor(Monitor *mon, ImEvent *ev)
     return 0;
 }
 
-static Monitor combineMonitor, outputMonitor;
-
-/* InitIMMonitors */
-void ImInitMonitors(void)
+/* MaybeUnblankScreens: input from the user; FALSE if the screens were
+ * blank (and are back now) */
+Boolean MaybeUnblankScreens(void)
 {
-    ImAddMonitor(&combineMonitor, ML_COMBINE, CombineInputMonitor);
-    ImAddMonitor(&outputMonitor, ML_OUTPUT, OutputMonitor);
+    im.ssCurCount = im.ssMaxCount;
+    if (!(im.ssState & SSS_ACTIVE))
+	return TRUE;
+    UnBlankScreens();
+    im.ssState &= (byte) ~SSS_ACTIVE;
+    return FALSE;
 }

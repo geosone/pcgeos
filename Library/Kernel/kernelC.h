@@ -348,7 +348,7 @@ void KernelTimerExit(void);
 /* runs the timers that are due; from the timer interrupt */
 void TimerCheckList(dword now);
 /* real-time timers due at `now' (KernelRealTimeNow), inside ghal_crit */
-void TimerCheckRealTime(dword now);
+void CheckRealTimeTimers(dword now);
 /* Timer/timerMisc.c: the GEOS date and time (the host's clock and the
  * offset TimerSetDateAndTime set); from the interrupt, the minute as a
  * real-time timer has it (TimerCompressedDate << 16 | hours << 8 |
@@ -373,6 +373,27 @@ extern dword kernelTimerEventsDropped;
  * Events, queues and messages (Geodes/geodesEvent.c, Object/
  * objectClass.c).  Port32/ABI.md section 12.
  * ------------------------------------------------------------------- */
+/* an event (SIG_EVENT handles point to it; the asm's HandleEvent) */
+#define EVENT_INLINE	32		/* parameter bytes kept in the event */
+typedef struct KEvent {
+    struct KEvent *E_free;		/* reserve list */
+    optr	E_dest;
+    Message	E_msg;
+    word	E_flags;		/* MessageFlags it was sent with */
+    dword	E_size;			/* of the parameters */
+    void	*E_params;		/* E_inline or allocated */
+    void	*E_reply;		/* call: the caller's reply buffer */
+    dword	E_replySize;
+    KSem	*E_done;		/* call: V when dispatched */
+    union {
+	byte	b[EVENT_INLINE];
+	dword	align[EVENT_INLINE / 4];
+	void	*p;
+    } E_inline;
+} KEvent;
+/* geodesEvent.c: the event of a handle (lmemGCNList.c compares them) */
+KEvent *EventOf(EventHandle ev);
+
 /* MetaClass and ProcessClass messages the kernel handles or sends
  * (MetaMessages in metaC.goh, ProcessMessages in processC.goh; the
  * ctest kernel.obj compares them with goc's numbers) */
@@ -647,7 +668,7 @@ void GCNListRelocateList(optr list, MemHandle relocBlock);
 void GCNListUnRelocateList(optr list, MemHandle relocBlock);
 /* is `newEv' (with data block `newData') the same status as `oldEv'
  * (with `oldData')?  Then it need not be sent again (geodesEvent.c) */
-Boolean EventSameStatus(EventHandle newEv, MemHandle newData,
+Boolean CompareStatusEvents(EventHandle newEv, MemHandle newData,
 			EventHandle oldEv, MemHandle oldData);
 
 /* ---------------------------------------------------------------------
@@ -1109,5 +1130,8 @@ byte *LMemBlockOf(MemHandle mh);
 word *LMemEntryOf(byte *b, ChunkHandle ch);
 ChunkArrayHeader *LMemCArrayHdr(optr arr);
 ElementArrayHeader *LMemEArrayHdr(optr arr);
+
+/* Geodes/geodesUtils.c: the drivers' DR_EXIT at the end (bootBoot.c) */
+void RemoveGeodes(void);
 
 #endif /* KERNELC_H */

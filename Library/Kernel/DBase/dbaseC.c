@@ -45,46 +45,10 @@ DBGroupAndItem DBRawAlloc(VMFileHandle file, DBGroup group, word size)
     return DBCombineGroupAndItem(group, item);
 }
 
-/* DBReAllocInternal: a larger item that would make its block too large
- * goes to another one, unless it is alone in it */
-static void ReAlloc(VMFileHandle file, DBGroupAndItem id, word size)
-{
-    DBGroup_ g;
-    word item = ITEM_OF(id), info, newInfo, oldSize;
-    MemHandle mh, nmh;
-    ChunkHandle ch, nch;
-
-    DBGroupLock(file, GROUP_OF(id), &g);
-    info = DBII(&g, item)->DBII_block;
-    ch = DB_CHUNK_TO_MEM(DBII(&g, item)->DBII_chunk);
-    (void) DBItemBlockLock(&g, info, &mh);
-    oldSize = LMemGetChunkSize(ConstructOptr(mh, ch));
-    if (size > oldSize && DBIBI(&g, info)->DBIBI_refCount != 1 &&
-	(dword) size - oldSize +
-	((LMemBlockHeader *) MemDeref(mh))->LMBH_blockSize >
-	DB_ITEM_BLOCK_DESIRED_SIZE) {
-	newInfo = DBItemBlockFind(&g, size);
-	DBII(&g, item)->DBII_block = newInfo;
-	(void) DBItemBlockLock(&g, newInfo, &nmh);
-	nch = LMemAlloc(nmh, size);
-	memcpy(LMemDeref(ConstructOptr(nmh, nch)),
-	       LMemDeref(ConstructOptr(mh, ch)), oldSize);
-	LMemFree(ConstructOptr(mh, ch));
-	DBItemBlockAddRef(&g, nmh);
-	VMUnlock(nmh);
-	DBII(&g, item)->DBII_chunk = DB_CHUNK_TO_FILE(nch);
-	(void) DBItemBlockDelRef(&g, mh);	/* others are left in it */
-    } else
-	LMemReAlloc(ConstructOptr(mh, ch), size);
-    VMDirty(mh);
-    VMUnlock(mh);
-    DBGroupUnlock(&g);
-}
-
 void DBReAllocUngrouped(VMFileHandle file, DBGroupAndItem id, word size)
 {
     DBEnter();
-    ReAlloc(file, id, size);
+    DBReAllocInternal(file, id, size);
     DBLeave();
 }
 
@@ -118,7 +82,7 @@ void DBInsertAtUngrouped(VMFileHandle file, DBGroupAndItem id,
     o = DBLockItem(file, id);
     oldSize = LMemGetChunkSize(o);
     VMUnlock(OptrToHandle(o));
-    ReAlloc(file, id, (word) (oldSize + insertCount));
+    DBReAllocInternal(file, id, (word) (oldSize + insertCount));
     o = DBLockItem(file, id);
     p = LMemDeref(o);
     memmove(p + insertOffset + insertCount, p + insertOffset,

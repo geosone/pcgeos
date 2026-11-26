@@ -157,7 +157,7 @@ static void Chain(word i)
     value = ghal_mem_alloc((dword) n + 1, 0);
     if (!value)
 	return;
-    n = IniGetString(t, pos, value, (word) (n + 1), IFCC_INTACT);
+    n = ReconstructString(t, pos, value, (word) (n + 1), IFCC_INTACT);
     while (start < n && iniCount < MAX_INI_FILES) {
 	for (end = start; end < n && value[end] != ' '; end++)
 	    ;
@@ -255,7 +255,7 @@ char *InitFileReadStringLow(const char *cat, const char *key,
 	    s[n++] = '\r';
 	    s[n++] = '\n';
 	}
-	n = (word) (n + IniGetString(t, body, s + n, (word) (size + 1), conv));
+	n = (word) (n + ReconstructString(t, body, s + n, (word) (size + 1), conv));
 	if (!(flags & IFRF_READ_ALL))
 	    break;
 	f++;
@@ -680,4 +680,24 @@ void InitFileMakeCanonicKeyCategory(char *keyCat, const TCHAR *src)
 	    *keyCat++ = (char) c;
     }
     *keyCat = 0;
+}
+
+#define AT(t, p)	((byte) (t)[p])
+
+/* InitFileReadBoolean: "true" or "false" (case and spaces do not count),
+ * ended by a blank, the line end, a comment or the end of the file */
+Boolean IniGetBoolean(const char *t, word body, Boolean *value)
+{
+    word p = body;
+    byte c;
+
+    if (IniCmpString(t, &p, "false"))
+	*value = FALSE;
+    else if (IniCmpString(t, &p, "true"))
+	*value = TRUE;
+    else
+	return FALSE;
+    c = AT(t, p);
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' ||
+	   c == INI_COMMENT || c == INI_EOF;
 }

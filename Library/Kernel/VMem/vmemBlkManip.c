@@ -414,25 +414,6 @@ word VMWriteBlock(KVMFile *f, VMBlockHandle h)
     return e;
 }
 
-/* VMDiscardMemBlk: the memory of an entry goes; a block whose handle is
- * preserved (VMBF_PRESERVE_HANDLE) keeps it, discarded, and is read
- * into it again when locked */
-void VMDiscardMem(KVMFile *f, VMBlockHandle h)
-{
-    word i = (word) VM_INDEX(h);
-    MemHandle mh = f->VF_mem[i];
-
-    f->VF_dirty[i] = FALSE;
-    if (!mh)
-	return;
-    if (f->VF_hdr[h + VMBH_FLAGS] & VMBF_PRESERVE_HANDLE)
-	(void) MemReAlloc(mh, 0, 0);
-    else {
-	MemFree(mh);
-	f->VF_mem[i] = 0;
-    }
-}
-
 /* VMFreeBlkHandle: an entry in use (a block, a BACKUP or a ZOMBIE)
  * freed with its space and memory; VMH_numUsed is the caller's */
 void VMFreeEntry(KVMFile *f, VMBlockHandle h)

@@ -135,7 +135,7 @@ WindowHandle WinOpen(Handle parentWinOrVidDr, optr inputRecipient,
 	{				/* the areas over it go */
 	    WinUnderFlags over;
 	    MemUnlock(parent);
-	    over = WinOverlyingUnders(wh);
+	    over = WinGetOverlyingSaveUnders(wh);
 	    WinClearSaveUnders(wh, over);
 	    MemLock(parent);
 	    w = MemDeref(wh);

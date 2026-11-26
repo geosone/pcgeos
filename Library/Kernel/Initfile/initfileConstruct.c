@@ -131,3 +131,149 @@ char *IniBuildData(const char *key, const byte *buf, word bufSize,
     }
     return End(&b, size);
 }
+
+#define AT(t, p)	((byte) (t)[p])
+
+/* the end of a value that is no blob: before a comment, the end of the
+ * line, and the spaces and tabs before them */
+static word PlainEnd(const char *t, word p)
+{
+    word end = p;
+    byte c;
+
+    for (;;) {
+	c = AT(t, p);
+	if (c == INI_EOF || c == INI_COMMENT || c == '\r' || c == '\n')
+	    return end;
+	p++;
+	if (c != ' ' && c != '\t')
+	    end = p;
+    }
+}
+
+static char Convert(byte c, byte conv)
+{
+    if (conv == IFCC_UPCASE && c >= 'a' && c <= 'z')
+	return (char) (c - 'a' + 'A');
+    if (conv == IFCC_DOWNCASE && c >= 'A' && c <= 'Z')
+	return (char) (c - 'A' + 'a');
+    return (char) c;
+}
+
+/*
+ * ReconstructString: the value at body without braces and escapes, in
+ * `out' (at most outSize-1 characters and a null), converted by `conv'
+ * (InitFileCharConvert).  Returns the characters stored.  The value
+ * is never longer than IniValueSize.
+ */
+word ReconstructString(const char *t, word body, char *out, word outSize,
+		  byte conv)
+{
+    word p = body, n = 0, end;
+    byte c;
+    Boolean blob = AT(t, p) == '{';
+
+#define PUT(ch) \
+    do { if (n + 1 < outSize) out[n++] = Convert((byte) (ch), conv); \
+    } while (0)
+
+    if (blob) {
+	p++;
+	if (AT(t, p) == '\r')
+	    p++;
+	if (AT(t, p) == '\n')
+	    p++;
+	for (;;) {
+	    c = AT(t, p++);
+	    if (c == INI_EOF || c == '}')
+		break;
+	    if (c == '\\') {
+		c = AT(t, p);
+		if (c == '{' || c == '[' || c == '}' || c == '\\') {
+		    p++;
+		    PUT(c);
+		} else if (c == 'n') {
+		    p++;
+		    PUT('\n');
+		} else if (c == 'r') {
+		    p++;
+		    PUT('\r');
+		} else
+		    PUT('\\');
+		continue;
+	    }
+	    PUT(c);
+	}
+	/* the line end before the "}" is the blob's, not the value's */
+	if (n && out[n - 1] == '\n')
+	    n--;
+	if (n && out[n - 1] == '\r')
+	    n--;
+    } else {
+	end = PlainEnd(t, p);
+	while (p < end) {
+	    c = AT(t, p++);
+	    if (c == '\\' && p < end && (AT(t, p) == '{' || AT(t, p) == '['))
+		c = AT(t, p++);
+	    PUT(c);
+	}
+    }
+    if (outSize)
+	out[n] = 0;
+    return n;
+#undef PUT
+}
+
+#define AT(t, p)	((byte) (t)[p])
+
+static int Nibble(int c)
+{
+    if (c >= '0' && c <= '9')
+	return c - '0';
+    if (c >= 'A' && c <= 'F')
+	return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f')
+	return c - 'a' + 10;
+    return -1;
+}
+
+/*
+ * ReconstructData: the bytes of the value at body, two hex digits each,
+ * in a blob over several lines.  At most outSize; with count set, the
+ * number of bytes of the whole value (out not used).
+ */
+word ReconstructData(const char *t, word body, byte *out, word outSize,
+		Boolean count)
+{
+    word p = body, n = 0;
+    Boolean blob = FALSE;
+    int c, hi, lo;
+
+    IniSkipWhiteSpace(t, &p);
+    if (AT(t, p) == '{') {
+	p++;
+	blob = TRUE;
+    }
+    for (;;) {
+	if (!count && n >= outSize)
+	    break;
+	c = IniGetChar(t, &p);
+	if (c < 0 || c == '}')
+	    break;
+	if (c == '\r' || c == '\n') {
+	    if (blob)
+		continue;
+	    break;
+	}
+	hi = Nibble(c);
+	if (hi < 0)
+	    break;
+	lo = Nibble(IniGetChar(t, &p));
+	if (lo < 0)
+	    break;
+	if (!count)
+	    out[n] = (byte) (hi << 4 | lo);
+	n++;
+    }
+    return n;
+}

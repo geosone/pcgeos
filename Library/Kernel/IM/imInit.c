@@ -137,7 +137,7 @@ void KernelImInit(void)
     im.dragTime = IM_DEFAULT_DRAG_TIME;
     im.dragDistance = IM_DEFAULT_DRAG_DISTANCE;
     ImInitScreenSaver();
-    ImInitMonitors();
+    InitIMMonitors();
     q = GeodeAllocQueue();
     HandleEntryOf(q)->HE_owner = kernelCurrentGeode;
     CObjMessageP(MF_FORCE_QUEUE, ConstructOptr(q, 0), KMSG_META_ATTACH,
@@ -151,4 +151,11 @@ void KernelImInit(void)
 void KernelImStart(void)
 {
     KernelThreadRun(im.imThread);
+}
+
+/* InitIMMonitors: the combine and output monitors */
+void InitIMMonitors(void)
+{
+    ImAddMonitor(&combineMonitor, ML_COMBINE, CombineInputMonitor);
+    ImAddMonitor(&outputMonitor, ML_OUTPUT, OutputMonitor);
 }

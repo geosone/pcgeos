@@ -32,6 +32,7 @@
 #include "../Graphics/graphicsInt.h"
 #include "kernelC.h"
 #include "ghal.h"
+#include <stdlib.h>
 
 /* ---------------------------------------------------------------------
  * Inserting and removing
@@ -624,3 +625,37 @@ void WinClearSaveUnders(WindowHandle any, WinUnderFlags f)
 
 void ECCheckGStateHandle(GStateHandle h)    { ECCheckHandleType(h, HT_MEM, FALSE); }
 void ECCheckWindowHandle(WindowHandle h)    { ECCheckHandleType(h, HT_MEM, FALSE); }
+
+/* WinTestIfWinInBranch: is wh in the branch of top? */
+Boolean WinTestIfWinInBranch(WindowHandle wh, WindowHandle top)
+{
+    while (wh) {
+	Window *w;
+	WindowHandle up;
+	if (wh == top)
+	    return TRUE;
+	w = MemLock(wh);
+	up = w->W_parent;
+	MemUnlock(wh);
+	wh = up;
+    }
+    return FALSE;
+}
+
+/* WinGetOverlyingSaveUnders: the areas over the window's bounds, not
+ * those of the siblings below it */
+WinUnderFlags WinGetOverlyingSaveUnders(WindowHandle wh)
+{
+    Window *w = MemLock(wh);
+    WinUnderFlags f = WinCheckUnder(w, &w->W_winRect);
+    WindowHandle s = w->W_nextSibling, next;
+
+    MemUnlock(wh);
+    for (; s && f; s = next) {
+	Window *sw = MemLock(s);
+	f &= (WinUnderFlags) ~sw->W_saveUnder;
+	next = sw->W_nextSibling;
+	MemUnlock(s);
+    }
+    return f;
+}

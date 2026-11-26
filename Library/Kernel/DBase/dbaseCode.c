@@ -143,3 +143,39 @@ Boolean DBCheckDBFile(VMFileHandle file)
 	CheckData(file, DB_GROUP_ID, sizeof(DBGroupHeader)) &&
 	CheckData(file, DB_ITEM_BLOCK_ID, DB_DOS16_ITEM_BLOCK_HEADER);
 }
+
+/* DBReAllocInternal: a larger item that would make its block too large
+ * goes to another one, unless it is alone in it */
+void DBReAllocInternal(VMFileHandle file, DBGroupAndItem id, word size)
+{
+    DBGroup_ g;
+    word item = ITEM_OF(id), info, newInfo, oldSize;
+    MemHandle mh, nmh;
+    ChunkHandle ch, nch;
+
+    DBGroupLock(file, GROUP_OF(id), &g);
+    info = DBII(&g, item)->DBII_block;
+    ch = DB_CHUNK_TO_MEM(DBII(&g, item)->DBII_chunk);
+    (void) DBItemBlockLock(&g, info, &mh);
+    oldSize = LMemGetChunkSize(ConstructOptr(mh, ch));
+    if (size > oldSize && DBIBI(&g, info)->DBIBI_refCount != 1 &&
+	(dword) size - oldSize +
+	((LMemBlockHeader *) MemDeref(mh))->LMBH_blockSize >
+	DB_ITEM_BLOCK_DESIRED_SIZE) {
+	newInfo = DBItemBlockFind(&g, size);
+	DBII(&g, item)->DBII_block = newInfo;
+	(void) DBItemBlockLock(&g, newInfo, &nmh);
+	nch = LMemAlloc(nmh, size);
+	memcpy(LMemDeref(ConstructOptr(nmh, nch)),
+	       LMemDeref(ConstructOptr(mh, ch)), oldSize);
+	LMemFree(ConstructOptr(mh, ch));
+	DBItemBlockAddRef(&g, nmh);
+	VMUnlock(nmh);
+	DBII(&g, item)->DBII_chunk = DB_CHUNK_TO_FILE(nch);
+	(void) DBItemBlockDelRef(&g, mh);	/* others are left in it */
+    } else
+	LMemReAlloc(ConstructOptr(mh, ch), size);
+    VMDirty(mh);
+    VMUnlock(mh);
+    DBGroupUnlock(&g);
+}

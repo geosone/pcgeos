@@ -54,22 +54,6 @@ static int CollectFile(Handle h, HandleEntry *he, void *ctx)
     return 0;
 }
 
-/* RemoveGeodes: DR_EXIT to the drivers that are not system drivers */
-static void ExitDrivers(void)
-{
-    GeodeHandle drivers[64], gh;
-    word n = 0;
-
-    GeodeLock();
-    for (gh = GeodeFindLow("", 0, 0, 0); gh; gh = GeodeCoreOf(gh)->GC_next)
-	if ((GeodeCoreOf(gh)->GC_attrs & (GA_DRIVER | GA_SYSTEM)) == GA_DRIVER
-	    && n < 64)
-	    drivers[n++] = gh;
-    while (n)
-	GeodeExitDriver(drivers[--n]);
-    GeodeUnlock();
-}
-
 void EndGeos(word flags, const char *reason)
 {
     FileHandle files[64];
@@ -93,7 +77,7 @@ void EndGeos(word flags, const char *reason)
 	endMessage[sizeof(endMessage) - 1] = 0;
     }
     GCNListClearList(MANUFACTURER_ID_GEOWORKS, GCNSLT_FILE_SYSTEM_LIST);
-    ExitDrivers();
+    RemoveGeodes();
     memset(files, 0, sizeof(files));
     HandleEnum(CollectFile, files);
     for (i = 0; files[i]; i++)

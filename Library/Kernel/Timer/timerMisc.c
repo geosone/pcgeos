@@ -176,7 +176,7 @@ void TimerSetDateAndTime(word flags, const TimerDateAndTime *dateAndTime)
     offset += secs - old;
     anchorSecs = secs;
     anchorTick = KernelTicks();
-    TimerCheckRealTime(KernelRealTimeNow(anchorTick));
+    CheckRealTimeTimers(KernelRealTimeNow(anchorTick));
     ghal_crit_leave();
     TimerReap();
     CObjMessageP(MF_RECORD, 0, KMSG_NOTIFY_DATE_TIME_CHANGE, NULL, 0, &ev,

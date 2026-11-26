@@ -84,7 +84,10 @@ extern ImVars im;
 void ImLockChain(void);
 void ImUnlockChain(void);
 void ImProcessUserInput(ImEvent *ev);
-void ImInitMonitors(void);
+void InitIMMonitors(void);			/* imInit.c */
+/* imMonitors.c: the monitors InitIMMonitors adds */
+byte CombineInputMonitor(Monitor *mon, ImEvent *ev);
+byte OutputMonitor(Monitor *mon, ImEvent *ev);
 byte ImPtrPerturbMonitor(Monitor *mon, ImEvent *ev);
 /* imPtr.c: move the pointer in the driver; the save under areas
  * under it */
@@ -95,7 +98,7 @@ void ImXorMethod(void *pself, optr oself, Message m, void *params,
 void ImUpdateScreenXor(word bp, sword *x, sword *y);
 void ImXorButton(word bp);
 void ImInitScreenSaver(void);
-Boolean ImMaybeUnblankScreens(void);
+Boolean MaybeUnblankScreens(void);
 void ImScreenSaverMethod(void *pself, optr oself, Message m, void *params,
 			 void *reply);
 
@@ -107,5 +110,11 @@ extern Monitor headMonitor;
 extern const byte buttonConvTab[IM_MAX_BUTTONS];
 
 extern KSem semPtrImage;
+
+extern Monitor combineMonitor;
+extern Monitor outputMonitor;
+
+/* imScreenSaver.c, for MaybeUnblankScreens (imMonitors.c) */
+void UnBlankScreens(void);
 
 #endif /* IMINT_H */

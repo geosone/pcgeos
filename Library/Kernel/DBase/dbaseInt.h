@@ -126,4 +126,7 @@ Boolean DBItemBlockDelRef(DBGroup_ *g, MemHandle mh);	/* TRUE: freed */
 /* dbaseCode.c and dbaseC.c */
 optr DBLockItem(VMFileHandle file, DBGroupAndItem id);
 
+/* dbaseCode.c */
+void DBReAllocInternal(VMFileHandle file, DBGroupAndItem id, word size);
+
 #endif

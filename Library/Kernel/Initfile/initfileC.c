@@ -126,17 +126,17 @@ static Boolean ReadData(const char *cat, const char *key, byte *buffer,
     found = InitFileLocate(cat, key, 0, &f, &body);
     if (found && block) {
 	const char *t = iniFiles[f].IT_text;
-	n = IniGetData(t, body, NULL, 0, TRUE);
+	n = ReconstructData(t, body, NULL, 0, TRUE);
 	*block = MemAlloc(n ? n : 1, HF_SWAPABLE, HAF_STANDARD);
 	if (!*block)
 	    found = FALSE;
 	else {
 	    data = MemLock(*block);
-	    *dataSize = IniGetData(t, body, data, n, FALSE);
+	    *dataSize = ReconstructData(t, body, data, n, FALSE);
 	    MemUnlock(*block);
 	}
     } else if (found)
-	*dataSize = IniGetData(iniFiles[f].IT_text, body, buffer, bufSize, FALSE);
+	*dataSize = ReconstructData(iniFiles[f].IT_text, body, buffer, bufSize, FALSE);
     VInitFile();
     return !found;
 }

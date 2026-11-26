@@ -112,24 +112,6 @@ WinUnderFlags WinCheckUnder(Window *w, const Rectangle *b)
     return (WinUnderFlags) r.DR_ax;
 }
 
-/* WinGetOverlyingSaveUnders: the areas over the window's bounds, not
- * those of the siblings below it */
-WinUnderFlags WinOverlyingUnders(WindowHandle wh)
-{
-    Window *w = MemLock(wh);
-    WinUnderFlags f = WinCheckUnder(w, &w->W_winRect);
-    WindowHandle s = w->W_nextSibling, next;
-
-    MemUnlock(wh);
-    for (; s && f; s = next) {
-	Window *sw = MemLock(s);
-	f &= (WinUnderFlags) ~sw->W_saveUnder;
-	next = sw->W_nextSibling;
-	MemUnlock(s);
-    }
-    return f;
-}
-
 /* before a change of the window (WinChangePrep and
  * WinClearSaveUndersOverlappingParent): its own area, then those over
  * its parent's bounds (its own at the root) */
@@ -212,7 +194,7 @@ WinUnderFlags WinUnderClosing(WindowHandle wh, WindowHandle parent)
     if (!f)
 	return 0;
     WinClearSaveUnders(parent,
-		       (WinUnderFlags) (WinOverlyingUnders(wh) & ~f));
+		       (WinUnderFlags) (WinGetOverlyingSaveUnders(wh) & ~f));
     w = MemLock(wh);
     WinRegCopy(WIN_REG(wh, w->W_visReg), WIN_REG(wh, w->W_temp1Reg));
     w = MemDeref(wh);

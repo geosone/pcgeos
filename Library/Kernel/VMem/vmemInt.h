@@ -133,12 +133,19 @@ word VMWriteBlock(KVMFile *f, VMBlockHandle h);		/* error */
 word VMWriteData(KVMFile *f, VMBlockHandle h, const void *data, word size);
 void VMFreeBlockLow(KVMFile *f, VMBlockHandle h);
 void VMFreeEntry(KVMFile *f, VMBlockHandle h);	/* numUsed: caller's */
-void VMDiscardMem(KVMFile *f, VMBlockHandle h);
+void VMDiscardMemBlk(KVMFile *f, VMBlockHandle h);
 VMBlockHandle VMBackupBlock(KVMFile *f, VMBlockHandle h);
 
 /* vmemHeader.c */
 word VMCreateHeader(KVMFile *f);			/* error */
 word VMReadHeader(KVMFile *f);				/* error */
 word VMWriteHeader(KVMFile *f);				/* error */
+
+/* vmemLow.c (vmemLow.asm) */
+word VMUpdateNoBackup(KVMFile *f);
+word VMSaveRevertCommon(KVMFile *f, Boolean save);
+/* vmemHigh.c, for vmemLow.c */
+word VMHighUpdate(KVMFile *f);
+void VMHighSetSig(KVMFile *f, VMBlockHandle h, byte sig);
 
 #endif

@@ -25,25 +25,7 @@
 
 #include <string.h>
 
-#define EVENT_INLINE	32		/* parameter bytes kept in the event */
 #define EVENT_RESERVE	32		/* events kept for interrupt code */
-
-typedef struct KEvent {
-    struct KEvent *E_free;		/* reserve list */
-    optr	E_dest;
-    Message	E_msg;
-    word	E_flags;		/* MessageFlags it was sent with */
-    dword	E_size;			/* of the parameters */
-    void	*E_params;		/* E_inline or allocated */
-    void	*E_reply;		/* call: the caller's reply buffer */
-    dword	E_replySize;
-    KSem	*E_done;		/* call: V when dispatched */
-    union {
-	byte	b[EVENT_INLINE];
-	dword	align[EVENT_INLINE / 4];
-	void	*p;
-    } E_inline;
-} KEvent;
 
 typedef struct {
     Handle	Q_head, Q_tail;		/* events, via HE_next */
@@ -74,7 +56,7 @@ static void Refill(void)
     }
 }
 
-static KEvent *EventOf(EventHandle ev)
+KEvent *EventOf(EventHandle ev)
 {
     HandleEntry *he = HandleEntryOf(ev);
 
@@ -201,56 +183,6 @@ EventHandle ObjDuplicateMessage(EventHandle msg)
     if (!dup)
 	KernelFatal(OUT_OF_HANDLES);
     return dup;
-}
-
-/*
- * CompareStatusEvents of lmemGCNList.asm: is `newEv' the status
- * `oldEv' already gave?  Same message and parameters (not the
- * destination: a status event has been sent on to objects since).  With
- * different data blocks, the blocks must hold the same bytes and the
- * parameters may differ only where they hold the blocks' handles.
- */
-Boolean EventSameStatus(EventHandle newEv, MemHandle newData,
-			EventHandle oldEv, MemHandle oldData)
-{
-    KEvent *a, *b;
-    byte *copy;
-    dword i, size;
-    Boolean same;
-
-    if (!newEv || !oldEv)
-	return FALSE;
-    a = EventOf(newEv);
-    b = EventOf(oldEv);
-    if (a->E_msg != b->E_msg || a->E_size != b->E_size)
-	return FALSE;
-    if (newData == oldData)
-	return memcmp(a->E_params, b->E_params, a->E_size) == 0;
-    if (!newData || !oldData)
-	return FALSE;
-    size = MemGetInfo(newData, MGIT_SIZE);
-    if (size != MemGetInfo(oldData, MGIT_SIZE))
-	return FALSE;
-    same = memcmp(MemLock(newData), MemLock(oldData), size) == 0;
-    MemUnlock(oldData);
-    MemUnlock(newData);
-    if (!same)
-	return FALSE;
-    copy = ghal_mem_alloc(b->E_size ? b->E_size : 1, 0);
-    if (!copy)
-	return FALSE;
-    memcpy(copy, b->E_params, b->E_size);
-    for (i = 0; i + sizeof(Handle) <= b->E_size; i += sizeof(Handle)) {
-	Handle h;
-	memcpy(&h, copy + i, sizeof(h));
-	if (h == oldData) {
-	    h = newData;
-	    memcpy(copy + i, &h, sizeof(h));
-	}
-    }
-    same = memcmp(copy, a->E_params, a->E_size) == 0;
-    ghal_mem_free(copy);
-    return same;
 }
 
 /* parameter structure of an event (Port32: no MessageDataStruct

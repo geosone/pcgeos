@@ -336,22 +336,6 @@ void WinChangePtrNotification(void)
  * The walk (under the tree lock)
  * ------------------------------------------------------------------- */
 
-/* WinTestIfWinInBranch: is wh in the branch of top? */
-static Boolean InBranch(WindowHandle wh, WindowHandle top)
-{
-    while (wh) {
-	Window *w;
-	WindowHandle up;
-	if (wh == top)
-	    return TRUE;
-	w = MemLock(wh);
-	up = w->W_parent;
-	MemUnlock(wh);
-	wh = up;
-    }
-    return FALSE;
-}
-
 /* LowCheckInVis: in says whether the pointer is in the visible region
  * (b its band and run there) */
 static void LowCheckInVis(WindowHandle wh, Boolean in, const Rectangle *b)
@@ -403,7 +387,7 @@ static Boolean CheckInUniv(WindowHandle wh)
     Boolean in;
 
     if (wp.locatedVisWin)
-	in = InBranch(wp.locatedVisWin, wh);
+	in = WinTestIfWinInBranch(wp.locatedVisWin, wh);
     else
 	in = GrTestPointInReg(WinReg(wh, w->W_univReg), (word) wp.lastX,
 			      (word) wp.lastY, &b);
@@ -712,7 +696,7 @@ static void LeaveBranch(WindowHandle wh)
 void WinPtrClosing(WindowHandle wh, WindowHandle parent)
 {
     LeaveBranch(wh);
-    if (wp.impliedWin && InBranch(wp.impliedWin, wh)) {
+    if (wp.impliedWin && WinTestIfWinInBranch(wp.impliedWin, wh)) {
 	wp.impliedWin = parent;
 	wp.impliedWinProc = 0;
 	wp.impliedWinOD = 0;

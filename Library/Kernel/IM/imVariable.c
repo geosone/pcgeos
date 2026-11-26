@@ -18,3 +18,6 @@ const byte buttonConvTab[IM_MAX_BUTTONS] = {
 };
 
 KSem semPtrImage = { 1, 0 };
+
+Monitor combineMonitor;
+Monitor outputMonitor;

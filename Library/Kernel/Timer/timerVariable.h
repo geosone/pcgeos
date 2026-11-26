@@ -14,4 +14,8 @@ extern dword decayCount;
 
 extern KTimer *realTimeListPtr;
 
+/* Port32: the ended timers, to be freed by TimerReap (timerList.c;
+ * CheckRealTimeTimers of timerInt.c adds to them) */
+extern KTimer *endedList;
+
 #endif /* H_TIMERVARIABLE */

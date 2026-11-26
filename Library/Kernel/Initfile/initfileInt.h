@@ -34,9 +34,9 @@ Boolean	IniFindCategory(const char *t, const char *cat, word *pos);
 Boolean	IniFindKey(const char *t, word *pos, const char *key, word *keyStart);
 word	IniEntryEnd(const char *t, word body);
 word	IniValueSize(const char *t, word body);
-word	IniGetString(const char *t, word body, char *out, word outSize,
+word	ReconstructString(const char *t, word body, char *out, word outSize,
 		     byte conv);
-word	IniGetData(const char *t, word body, byte *out, word outSize,
+word	ReconstructData(const char *t, word body, byte *out, word outSize,
 		   Boolean count);
 Boolean	IniGetDecimal(const char *t, word body, word *value);
 Boolean	IniGetBoolean(const char *t, word body, Boolean *value);

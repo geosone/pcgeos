@@ -181,7 +181,7 @@ static void Collect(optr list, Send *s)
 	MemHandle oldData;
 
 	h->GCNLH_statusCount++;
-	if (EventSameStatus(s->event, s->data, h->GCNLH_statusEvent,
+	if (CompareStatusEvents(s->event, s->data, h->GCNLH_statusEvent,
 			    h->GCNLH_statusData)) {
 	    /* the same status again: nobody needs it */
 	    ObjFreeMessage(s->event);
@@ -543,4 +543,54 @@ void GCNListClearList(ManufacturerID manufID, word listType)
     if (list)
 	ChunkArrayDeleteRange(list, 0, 0xffff);
     MemUnlockV(mh);
+}
+
+/*
+ * CompareStatusEvents of lmemGCNList.asm: is `newEv' the status
+ * `oldEv' already gave?  Same message and parameters (not the
+ * destination: a status event has been sent on to objects since).  With
+ * different data blocks, the blocks must hold the same bytes and the
+ * parameters may differ only where they hold the blocks' handles.
+ */
+Boolean CompareStatusEvents(EventHandle newEv, MemHandle newData,
+			EventHandle oldEv, MemHandle oldData)
+{
+    KEvent *a, *b;
+    byte *copy;
+    dword i, size;
+    Boolean same;
+
+    if (!newEv || !oldEv)
+	return FALSE;
+    a = EventOf(newEv);
+    b = EventOf(oldEv);
+    if (a->E_msg != b->E_msg || a->E_size != b->E_size)
+	return FALSE;
+    if (newData == oldData)
+	return memcmp(a->E_params, b->E_params, a->E_size) == 0;
+    if (!newData || !oldData)
+	return FALSE;
+    size = MemGetInfo(newData, MGIT_SIZE);
+    if (size != MemGetInfo(oldData, MGIT_SIZE))
+	return FALSE;
+    same = memcmp(MemLock(newData), MemLock(oldData), size) == 0;
+    MemUnlock(oldData);
+    MemUnlock(newData);
+    if (!same)
+	return FALSE;
+    copy = ghal_mem_alloc(b->E_size ? b->E_size : 1, 0);
+    if (!copy)
+	return FALSE;
+    memcpy(copy, b->E_params, b->E_size);
+    for (i = 0; i + sizeof(Handle) <= b->E_size; i += sizeof(Handle)) {
+	Handle h;
+	memcpy(&h, copy + i, sizeof(h));
+	if (h == oldData) {
+	    h = newData;
+	    memcpy(copy + i, &h, sizeof(h));
+	}
+    }
+    same = memcmp(copy, a->E_params, a->E_size) == 0;
+    ghal_mem_free(copy);
+    return same;
 }

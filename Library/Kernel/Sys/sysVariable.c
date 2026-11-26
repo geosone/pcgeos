@@ -3,6 +3,7 @@
  * the port has, under their asm names.
  */
 #include "kernelC.h"
+#include <sysstats.h>
 #include <geode.h>
 #include <object.h>
 #include <geosdriver.h>
@@ -29,3 +30,6 @@ ErrorCheckingFlags sysECLevel;
 MemHandle sysECBlock;
 
 SubsystemNotificationElement sysNotificationTable[SST_COUNT];
+
+SysStats curStats;	/* SysStatistics: this second */
+SysStats lastStats;	/* and the last */

@@ -247,7 +247,7 @@ VMFileHandle VMOpen(char *name, VMAccessFlags flags, VMOpenType mode,
     return f->VF_handle;
 }
 
-static word Update(KVMFile *f)
+word VMHighUpdate(KVMFile *f)
 {
     Boolean any = FALSE;
     word h, e;
@@ -279,7 +279,7 @@ static word Update(KVMFile *f)
 
 word VMUpdate(VMFileHandle file)
 {
-    word e = Update(VMFileOf(file));
+    word e = VMHighUpdate(VMFileOf(file));
 
     KernelSetError(e == VM_UPDATE_NOTHING_DIRTY ? 0 : e);
     return e;
@@ -293,7 +293,7 @@ word VMClose(VMFileHandle file, Boolean noErrorFlag)
     if (--f->VF_refs)
 	return 0;
     if (!f->VF_readOnly) {
-	e = Update(f);
+	e = VMHighUpdate(f);
 	if (e == VM_UPDATE_NOTHING_DIRTY)
 	    e = 0;
     }
@@ -635,80 +635,11 @@ void VMPreserveBlocksHandle(VMFileHandle file, VMBlockHandle block)
  * Backup mode: save, revert, save as (VMSaveRevertCommon, VMSaveAs)
  * ------------------------------------------------------------------- */
 
-/* VMUpdateNoBackup: the dirty blocks written in place, as USED */
-static word UpdateNoBackup(KVMFile *f)
-{
-    word e;
-
-    if (f->VF_readOnly)
-	return 0;
-    f->VF_noBackup = TRUE;
-    e = Update(f);
-    f->VF_noBackup = FALSE;
-    return e == VM_UPDATE_NOTHING_DIRTY ? 0 : e;
-}
-
-static void SetSig(KVMFile *f, VMBlockHandle h, byte sig)
+void VMHighSetSig(KVMFile *f, VMBlockHandle h, byte sig)
 {
     VHSet8(f, h + VMBH_SIG, sig);
     VHSet8(f, h + VMBH_FLAGS,
 	   (byte) (f->VF_hdr[h + VMBH_FLAGS] & ~VMBF_HAS_BACKUP));
-}
-
-/* VMSaveRevertCommon: the entries from the last to the first */
-static word SaveRevert(KVMFile *f, Boolean save)
-{
-    word h;
-
-    for (h = VHGet16(f, VMH_LAST_HANDLE) - VMBH_SIZE; h > VM_HEADER_BLOCK;
-	 h -= VMBH_SIZE) {
-	byte sig = f->VF_hdr[h + VMBH_SIG];
-	byte flags = f->VF_hdr[h + VMBH_FLAGS];
-	if (!(sig & VM_IN_USE_BIT))
-	    continue;
-	if (sig == VMBT_BACKUP) {
-	    VMBlockHandle d = VHGet16(f, h + VMBH_UID);
-	    if (save) {
-		/* the new version stays; a zombie goes */
-		if (f->VF_hdr[d + VMBH_SIG] == VMBT_ZOMBIE)
-		    VMFreeEntry(f, d);
-		else
-		    SetSig(f, d, VMBT_USED);
-	    } else {
-		/* the backup's place goes back to the block (VMExchangeWords
-		 * of the size and the position), its memory is out of
-		 * date */
-		byte t[6];
-		memcpy(t, f->VF_hdr + d + VMBH_FILE_SIZE, 6);
-		memcpy(f->VF_hdr + d + VMBH_FILE_SIZE,
-		       f->VF_hdr + h + VMBH_FILE_SIZE, 6);
-		memcpy(f->VF_hdr + h + VMBH_FILE_SIZE, t, 6);
-		VMDiscardMem(f, d);
-		if (f->VF_hdr[d + VMBH_SIG] == VMBT_ZOMBIE)
-		    VHSet16(f, VMH_NUM_USED,
-			    (word) (VHGet16(f, VMH_NUM_USED) + 1));
-		SetSig(f, d, VMBT_USED);
-	    }
-	    VMFreeEntry(f, h);
-	} else if (sig == VMBT_DUP) {
-	    if (flags & VMBF_HAS_BACKUP)
-		continue;		/* through its backup */
-	    if (save)
-		VHSet8(f, h + VMBH_SIG, VMBT_USED);
-	    else {
-		/* new since the save: gone */
-		if (h == VHGet16(f, VMH_DB_MAP_BLOCK))
-		    VHSet16(f, VMH_DB_MAP_BLOCK, 0);
-		VMFreeBlockLow(f, h);
-	    }
-	} else if (sig == VMBT_USED) {
-	    if (!save && f->VF_dirty[VM_INDEX(h)])
-		VMDiscardMem(f, h);
-	} else if (sig == VMBT_ZOMBIE && !(flags & VMBF_HAS_BACKUP))
-	    VMFreeEntry(f, h);
-    }
-    f->VF_hdrDirty = TRUE;
-    return UpdateNoBackup(f);
 }
 
 /* VMSave: the version of the file since the last save becomes the one
@@ -716,7 +647,7 @@ static word SaveRevert(KVMFile *f, Boolean save)
 Boolean VMSave(VMFileHandle file)
 {
     KVMFile *f = VMFileOf(file);
-    word e = f->VF_readOnly ? ERROR_ACCESS_DENIED : SaveRevert(f, TRUE);
+    word e = f->VF_readOnly ? ERROR_ACCESS_DENIED : VMSaveRevertCommon(f, TRUE);
 
     KernelSetError(e);
     return (Boolean) (e != 0);
@@ -728,7 +659,7 @@ void VMRevert(VMFileHandle file)
 {
     KVMFile *f = VMFileOf(file);
 
-    KernelSetError(SaveRevert(f, FALSE));
+    KernelSetError(VMSaveRevertCommon(f, FALSE));
 }
 
 /* the header of a new file for VMSaveAs: the source's block table with
@@ -863,7 +794,7 @@ VMFileHandle VMSaveAs(VMFileHandle file, const char *name,
     d->VF_reloc = s->VF_reloc;
     d->VF_execThread = s->VF_execThread;
     if (!e)
-	e = UpdateNoBackup(d);
+	e = VMUpdateNoBackup(d);
     if (e) {
 	/* undo: the memory back to the file, the new one deleted */
 	for (h = VM_HEADER_BLOCK + VMBH_SIZE; h < last; h += VMBH_SIZE) {
@@ -883,7 +814,7 @@ VMFileHandle VMSaveAs(VMFileHandle file, const char *name,
 	KernelSetError(e);
 	return 0;
     }
-    (void) SaveRevert(s, FALSE);
+    (void) VMSaveRevertCommon(s, FALSE);
     s->VF_refs = 1;
     VMClose(file, FALSE);
     KernelSetError(status);
@@ -910,7 +841,7 @@ word VMDiscardDirtyBlocks(VMFileHandle file)
 	    if (f->VF_mem[VM_INDEX(h)]) {
 		VHSet8(f, h + VMBH_FLAGS, (byte) (f->VF_hdr[h + VMBH_FLAGS] &
 						  ~VMBF_PRESERVE_HANDLE));
-		VMDiscardMem(f, h);
+		VMDiscardMemBlk(f, h);
 	    }
 	e = VMReadHeader(f);
     } else {
@@ -926,7 +857,7 @@ word VMDiscardDirtyBlocks(VMFileHandle file)
 		VMBlockHandle u = VHGet16(f, h + VMBH_UID);
 		if (f->VF_hdr[u + VMBH_SIG] == VMBT_ZOMBIE &&
 		    !VHGet16(f, u + VMBH_FILE_SIZE)) {
-		    SetSig(f, u, VMBT_USED);
+		    VMHighSetSig(f, u, VMBT_USED);
 		    VHSet16(f, VMH_NUM_USED,
 			    (word) (VHGet16(f, VMH_NUM_USED) + 1));
 		    memcpy(f->VF_hdr + u + VMBH_FILE_SIZE,
@@ -935,7 +866,7 @@ word VMDiscardDirtyBlocks(VMFileHandle file)
 		    VMFreeEntry(f, h);
 		}
 	    } else if (f->VF_mem[VM_INDEX(h)] && f->VF_dirty[VM_INDEX(h)])
-		VMDiscardMem(f, h);
+		VMDiscardMemBlk(f, h);
 	}
     }
     KernelSetError(e);
@@ -989,7 +920,7 @@ void VMReleaseExclusive(VMFileHandle file)
     if (--f->VF_exclCount)
 	return;
     if (!f->VF_readOnly)
-	(void) Update(f);
+	(void) VMHighUpdate(f);
     f->VF_exclOwner = 0;
     ThreadVSem(f->VF_exclSem);
 }

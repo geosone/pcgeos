@@ -50,7 +50,7 @@ extern WinUnderFlags winUnderClosing;
 extern optr winUnderRestored;
 WinUnderFlags WinCheckUnder(Window *w, const Rectangle *b);
 void WinClearSaveUnders(WindowHandle any, WinUnderFlags f);
-WinUnderFlags WinOverlyingUnders(WindowHandle wh);
+WinUnderFlags WinGetOverlyingSaveUnders(WindowHandle wh);
 void WinUnderChange(WindowHandle wh);
 void WinUnderOpened(WindowHandle wh);
 void WinUnderInval(WindowHandle wh);
@@ -152,5 +152,8 @@ extern KSem winTreeSem;
 extern KSem winPtrImageSem;
 
 extern word wGeodeWinVarsOffset;
+
+/* winWindows.c */
+Boolean WinTestIfWinInBranch(WindowHandle wh, WindowHandle top);
 
 #endif
