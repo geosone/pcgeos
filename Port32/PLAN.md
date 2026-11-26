@@ -145,9 +145,10 @@ Ordered by dependency, each with host-side tests under `linux`:
   replacement, selection, lines, drawing, single attributes, filters.
   2026-11-26: character attribute runs (`TextAttr/taRun.goc`): runs and
   elements in the object's block, changes of a range, the insertion
-  token, the runs moved by a replacement; ctest `library.text`. Open:
-  paragraph attribute runs, large objects, shared elements and style
-  sheets, undo, the notifications.
+  token, the runs moved by a replacement; paragraph attribute runs and
+  the messages that change paragraph attributes; ctest `library.text`.
+  Open: large objects, shared elements and style sheets, drawing
+  borders, undo, the notifications.
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose
   dependency is ported since gets filled in after the asm, with its own
   ctest check. Done: the load error of the startup applications, the

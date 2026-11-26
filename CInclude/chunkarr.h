@@ -225,6 +225,17 @@ extern word     /*XXX*/
 #define ElementArrayAddElementHandles(mh, ch, el, cbd, cb) \
 		ElementArrayAddElement(ConstructOptr(mh, ch), el, cbd, cb)
 
+#ifdef GEOS_PORT32
+/* Port32: with the size of a variable-sized element (the C stub of the
+ * asm passed none: ElementArrayAddElement serves fixed-size arrays) */
+extern word
+    ElementArrayAddElementSized(optr arr, void *element, word size,
+				dword callbackData,
+				Boolean (*callback)(void *elementToAdd,
+						    void *elementFromArray,
+						    dword valueForCallback));
+#endif
+
 /***/
 
 extern void     /*XXX*/

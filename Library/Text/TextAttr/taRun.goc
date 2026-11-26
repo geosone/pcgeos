@@ -160,6 +160,9 @@ void TA_GetElement(optr o, TextRunKind kind, word token, void *buf)
 /* AddElement: the element's token, with a reference more */
 word TA_AddElement(optr o, TextRunKind kind, void *element)
 {
+    if (kind == TRK_PARA_ATTR)
+	return ElementArrayAddElementSized(Elements(o, kind), element,
+					   TA_ParaAttrSize(element), 0, NULL);
     return ElementArrayAddElement(Elements(o, kind), element, 0, NULL);
 }
 
@@ -227,15 +230,24 @@ Boolean TA_IsParagraphStart(optr o, dword pos)
 }
 
 /* TRUE at a carriage return or the end of the text (*atEnd then) */
-static Boolean IsParagraphEnd(optr o, dword pos, Boolean *atEnd)
+Boolean TA_IsParagraphEnd(optr o, dword pos, Boolean *atEnd)
 {
     *atEnd = pos >= TS_GetTextSize(o);
     return *atEnd || TS_GetCharAtOffset(o, pos) == C_CR;
 }
 
+/* TSL_FindParagraphStart: the start of the paragraph pos is in (pos
+ * itself at a paragraph's start) */
+dword TA_FindParagraphStart(optr o, dword pos)
+{
+    while (pos && TS_GetCharAtOffset(o, pos - 1) != C_CR)
+	pos--;
+    return pos;
+}
+
 /* TSL_FindParagraphEnd: the carriage return at or after pos, FALSE at
  * the end of the text */
-static Boolean FindParagraphEnd(optr o, dword *pos)
+Boolean TA_FindParagraphEnd(optr o, dword *pos)
 {
     dword size = TS_GetTextSize(o);
 
@@ -431,7 +443,7 @@ static Boolean UpdateRun(optr o, TextRunKind kind,
 		if (del) {
 		    /* the carriage return after a deletion joins the
 		     * run before */
-		    if (IsParagraphEnd(o, runPos, &atEnd)) {
+		    if (TA_IsParagraphEnd(o, runPos, &atEnd)) {
 			if (atEnd)
 			    goto doDelete;
 			SetPos(o, kind, i, runPos + 1);
@@ -476,7 +488,7 @@ static Boolean UpdateRun(optr o, TextRunKind kind,
 		i++;
 		continue;
 	    }
-	    if (!IsParagraphEnd(o, rEnd, &atEnd) ||
+	    if (!TA_IsParagraphEnd(o, rEnd, &atEnd) ||
 		TA_IsParagraphStart(o, rStart)) {
 		i++;
 		continue;
@@ -519,7 +531,7 @@ extendToNextParagraph:
 	    p = rEnd;
 	else {
 	    p = rEnd;
-	    if (FindParagraphEnd(o, &p))
+	    if (TA_FindParagraphEnd(o, &p))
 		p++;
 	    else
 		p = TEXT_ADDRESS_PAST_END;
@@ -555,7 +567,7 @@ doDelete:
 	    Boolean eot;
 
 	    /* (a change at a paragraph's end takes its CR too) */
-	    if (IsParagraphEnd(o, s, &eot) && !eot)
+	    if (TA_IsParagraphEnd(o, s, &eot) && !eot)
 		s++;
 	    e = middle ? s + ins : TEXT_ADDRESS_PAST_END;
 	    (void) TA_ModifyRun(o, kind, rStart, e, NULL, NULL, insToken);
@@ -612,37 +624,56 @@ static ChunkHandle CreateArrays(optr o, TextArrayType type, word elSize)
     return runs;
 }
 
+/* the object's single attribute of a kind made the one run of new
+ * arrays (addElementAndInsertRun); the chunk of the attribute freed */
+static void CreateRuns(optr o, TextRunKind kind)
+{
+    VisTextMaxParaAttr a;	/* (large enough for both) */
+    VisTextInstance *t = VT(o);
+    Boolean para = kind == TRK_PARA_ATTR, single;
+    VisTextStorageFlags def = para ? VTSF_DEFAULT_PARA_ATTR
+				   : VTSF_DEFAULT_CHAR_ATTR;
+    ChunkHandle old, runs;
+    word token;
+
+    if (para)
+	TA_GetSingleParaAttr(o, &a);
+    else
+	TA_GetSingleCharAttr(o, (VisTextCharAttr *) &a);
+    single = !(t->VTI_storageFlags & def);
+    old = para ? t->VTI_paraAttrRuns : t->VTI_charAttrRuns;
+    /* (paragraph attributes have their tabs: of variable size) */
+    runs = CreateArrays(o, para ? TAT_PARA_ATTRS : TAT_CHAR_ATTRS,
+			para ? 0 : sizeof(VisTextCharAttr));
+    t = VT(o);
+    if (para)
+	t->VTI_paraAttrRuns = runs;
+    else
+	t->VTI_charAttrRuns = runs;
+    t->VTI_storageFlags = (t->VTI_storageFlags |
+			   (para ? VTSF_MULTIPLE_PARA_ATTRS
+				 : VTSF_MULTIPLE_CHAR_ATTRS)) & ~def;
+    if (single)
+	LMemFreeHandles(OptrToHandle(o), old);
+    token = TA_AddElement(o, kind, &a);
+    RunInsert(o, kind, 0, 0, token);
+}
+
 /*
- * VisTextCreateStorage: multiple character attributes (the object's
- * attribute the one run's).  Port32: the chunk of the single attribute
- * is freed (the asm left it).  Not yet: paragraph attributes, types,
+ * VisTextCreateStorage: multiple character and paragraph attributes
+ * (the object's attribute the one run's).  Port32: the chunk of the
+ * single attribute is freed (the asm left it).  Not yet: types,
  * graphics, styles, regions.
  */
 @extern method VisTextClass, MSG_VIS_TEXT_CREATE_STORAGE
 {
-    VisTextCharAttr a;
-    VisTextInstance *t;
-    ChunkHandle old;
-    Boolean single;
-    word token;
-
     (void) regionFlag;
-    if (!(flags & VTSF_MULTIPLE_CHAR_ATTRS) ||
-	(pself->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS))
-	return;
-    TA_GetSingleCharAttr(oself, &a);
-    t = VT(oself);
-    single = !(t->VTI_storageFlags & VTSF_DEFAULT_CHAR_ATTR);
-    old = t->VTI_charAttrRuns;
-    t->VTI_charAttrRuns = CreateArrays(oself, TAT_CHAR_ATTRS,
-				       sizeof(VisTextCharAttr));
-    t = VT(oself);
-    t->VTI_storageFlags = (t->VTI_storageFlags | VTSF_MULTIPLE_CHAR_ATTRS) &
-			  ~VTSF_DEFAULT_CHAR_ATTR;
-    if (single)
-	LMemFreeHandles(OptrToHandle(oself), old);
-    token = TA_AddElement(oself, TRK_CHAR_ATTR, &a);
-    RunInsert(oself, TRK_CHAR_ATTR, 0, 0, token);
+    if ((flags & VTSF_MULTIPLE_CHAR_ATTRS) &&
+	!(pself->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS))
+	CreateRuns(oself, TRK_CHAR_ATTR);
+    if ((flags & VTSF_MULTIPLE_PARA_ATTRS) &&
+	!(VT(oself)->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS))
+	CreateRuns(oself, TRK_PARA_ATTR);
     ObjMarkDirty(oself);
     if (VT(oself)->VI_typeFlags & VTF_IS_GEN)
 	@call oself::MSG_VIS_TEXT_UPDATE_GENERIC();

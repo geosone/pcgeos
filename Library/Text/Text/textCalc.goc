@@ -38,6 +38,15 @@ void T_GetNewParaAttr(LICL_vars *l, dword pos)
 	l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_rightMargin;
 }
 
+/* T_EnsureCorrectParaAttr: the paragraph attribute of the position,
+ * fetched if it is not the one at hand (no regions yet: none is
+ * complex) */
+void T_EnsureCorrectParaAttr(LICL_vars *l, dword pos)
+{
+    if (pos < l->LICL_paraAttrStart || pos >= l->LICL_paraAttrEnd)
+	T_GetNewParaAttr(l, pos);
+}
+
 /*
  * TextRecalc: the lines again after a change: at start, inserted
  * characters came for deleted ones
@@ -79,6 +88,7 @@ void TextRecalc(optr o, dword start, dword inserted, dword deleted)
 	l.LICL_line = line;
 	l.LICL_lineHeight.WBF_int = 0;
 	l.LICL_lineHeight.WBF_frac = 0;
+	T_EnsureCorrectParaAttr(&l, l.LICL_range.VTR_start);
 	TL_LineCalculate(&l, (prev & LF_ENDS_PARAGRAPH) ?
 			     LF_STARTS_PARAGRAPH : 0);
 	l.LICL_calcFlags &= ~CF_FORCE_CHANGED;

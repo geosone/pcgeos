@@ -3,13 +3,50 @@
  * taParaAttr.asm, and of taRunQuery.asm what the line calculation asks:
  * the paragraph attribute and the drawing attributes at a position).
  *
- * Port32 (Port32/ABI.md section 13z): objects with a single paragraph
- * attribute only so far: VTI_paraAttrRuns is a VisTextDefaultParaAttr
+ * Port32 (Port32/ABI.md section 13z): with a single paragraph
+ * attribute VTI_paraAttrRuns is a VisTextDefaultParaAttr
  * (VTSF_DEFAULT_PARA_ATTR) or the chunk of a VisTextParaAttr with its
- * tabs.  Not yet: runs (VTSF_MULTIPLE_PARA_ATTRS), changing the
- * attribute by message, borders.
+ * tabs; with VTSF_MULTIPLE_PARA_ATTRS runs (taRun.goc) that start at
+ * paragraphs.  With the messages that change it (those of taAttr.asm
+ * too).  Not yet: drawing borders, styles,
+ * undo, the notifications of a change.
  */
 @include "textInt.goh"
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_DEFAULT;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_TOKEN;
+@extern method VisTextClass, MSG_VIS_TEXT_ADD_PARA_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_PARA_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_PARA_ATTR;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_BITS;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_WIDTH;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_SPACING;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_SHADOW;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_COLOR;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_GRAY_SCREEN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_PATTERN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTRIBUTES;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LINE_SPACING;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_DEFAULT_TABS;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_MARGIN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_RIGHT_MARGIN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_MARGIN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_AND_PARA_MARGIN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_TOP;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_BOTTOM;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LEADING;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_COLOR;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_GRAY_SCREEN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_PATTERN;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_TAB;
+@extern method VisTextClass, MSG_VIS_TEXT_CLEAR_TAB;
+@extern method VisTextClass, MSG_VIS_TEXT_MOVE_TAB;
+@extern method VisTextClass, MSG_VIS_TEXT_CLEAR_ALL_TABS;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PREPEND_CHARS;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_HYPHENATION_PARAMS;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_DROP_CAP_PARAMS;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_KEEP_PARAMS;
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARAGRAPH_NUMBER;
 #include <font.h>
 
 static const word defaultDefaultTabs[4] = {
@@ -123,10 +160,19 @@ static void ParaAttrVirtualToPhysical(optr o, VisTextMaxParaAttr *m)
 void TA_GetParaAttrForPosition(optr o, dword pos, VisTextMaxParaAttr *a,
 			       dword *start, dword *end)
 {
-    (void) pos;
-    TA_GetSingleParaAttr(o, a);
-    *start = 0;
-    *end = TEXT_ADDRESS_PAST_END;
+    word i;
+
+    if (!(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS)) {
+	TA_GetSingleParaAttr(o, a);
+	*start = 0;
+	*end = TEXT_ADDRESS_PAST_END;
+    } else {
+	/* (runs start at paragraphs: the one to the right) */
+	i = TA_RunForPosition(o, TRK_PARA_ATTR, pos, FALSE);
+	TA_GetElement(o, TRK_PARA_ATTR, TA_RunToken(o, TRK_PARA_ATTR, i), a);
+	*start = TA_RunPosition(o, TRK_PARA_ATTR, i);
+	*end = TA_RunPosition(o, TRK_PARA_ATTR, i + 1);
+    }
     ParaAttrVirtualToPhysical(o, a);
 }
 
@@ -160,4 +206,678 @@ VisTextExtendedStyles TA_FillTextAttrForDraw(optr o, dword pos,
     ta->TA_fontWeight = ca.VTCA_fontWeight;
     ta->TA_fontWidth = ca.VTCA_fontWidth;
     return ca.VTCA_extendedStyles;
+}
+
+/* ---------------------------------------------------------------------
+ * Changing the attribute (taParaAttr.asm, taAttr.asm)
+ * ------------------------------------------------------------------- */
+
+/*
+ * TextFindDefaultParaAttr: TRUE and the record if a default record says
+ * the attribute.  (As the asm: a right margin of
+ * VIS_TEXT_MAX_PARA_WIDTH * 8 counts as the record's 0.)
+ */
+static Boolean FindDefaultParaAttr(const VisTextParaAttr *a,
+				   VisTextDefaultParaAttr *def)
+{
+    const word half = (PIXELS_PER_INCH / 2) * 8;
+    word d;
+
+    if (a->VTPA_spaceOnTop || a->VTPA_spaceOnBottom ||
+	a->VTPA_numberOfTabs || a->VTPA_borderFlags || a->VTPA_leading ||
+	a->VTPA_prependChars[0] || a->VTPA_prependChars[1] ||
+	a->VTPA_prependChars[2] || a->VTPA_prependChars[3] ||
+	a->VTPA_keepInfo ||
+	a->VTPA_startingParaNumber != VIS_TEXT_DEFAULT_STARTING_NUMBER ||
+	a->VTPA_borderWidth != 1 * 8 || a->VTPA_borderSpacing != 2 * 8 ||
+	a->VTPA_borderShadow != 1 * 8 ||
+	a->VTPA_hyphenationInfo != (VIS_TEXT_DEFAULT_HYPHENATION) ||
+	a->VTPA_dropCapInfo != (VIS_TEXT_DEFAULT_DROP_CAP) ||
+	a->VTPA_nextStyle != CA_NULL_ELEMENT ||
+	a->VTPA_bgGrayScreen != SDM_0 ||
+	a->VTPA_borderGrayScreen != SDM_100 ||
+	a->VTPA_lineSpacing != 1 << 8 ||
+	/* (the asm compares the colors' first words) */
+	a->VTPA_bgColor.CQ_redOrIndex != C_WHITE ||
+	a->VTPA_bgColor.CQ_info != CF_INDEX ||
+	a->VTPA_borderColor.CQ_redOrIndex != C_BLACK ||
+	a->VTPA_borderColor.CQ_info != CF_INDEX)
+	return FALSE;
+    switch (a->VTPA_defaultTabs) {
+    case 0:		d = VTDDT_NONE; break;
+    case (PIXELS_PER_INCH / 2) * 8: d = VTDDT_HALF_INCH; break;
+    case PIXELS_PER_INCH * 8: d = VTDDT_INCH; break;
+    case 227:		d = VTDDT_CENTIMETER; break;
+    default:		return FALSE;
+    }
+    d <<= VTDPA_DEFAULT_TABS_OFFSET;
+    if (a->VTPA_leftMargin % half || a->VTPA_paraMargin % half)
+	return FALSE;
+    d |= (a->VTPA_leftMargin / half) << VTDPA_LEFT_MARGIN_OFFSET;
+    d |= (a->VTPA_paraMargin / half) << VTDPA_PARA_MARGIN_OFFSET;
+    if (a->VTPA_rightMargin != VIS_TEXT_MAX_PARA_WIDTH * 8) {
+	if (a->VTPA_rightMargin % half)
+	    return FALSE;
+	d |= (a->VTPA_rightMargin / half) << VTDPA_RIGHT_MARGIN_OFFSET;
+    }
+    if (a->VTPA_attributes & ~VTPAA_JUSTIFICATION)
+	return FALSE;
+    *def = d | a->VTPA_attributes;
+    return TRUE;
+}
+
+/* SetSingleParaAttr: a default record if one says it, else a chunk of
+ * the attribute's size (with its tabs) */
+void TA_SetSingleParaAttr(optr o, const VisTextMaxParaAttr *a)
+{
+    MemHandle mh = OptrToHandle(o);
+    VisTextInstance *t = VT(o);
+    VisTextDefaultParaAttr def;
+    word size = TA_ParaAttrSize(a);
+    ChunkHandle c;
+
+    ObjMarkDirty(o);
+    if (FindDefaultParaAttr(&a->VTMPA_paraAttr, &def)) {
+	c = t->VTI_paraAttrRuns;
+	t->VTI_paraAttrRuns = def;
+	if (!(t->VTI_storageFlags & VTSF_DEFAULT_PARA_ATTR)) {
+	    t->VTI_storageFlags |= VTSF_DEFAULT_PARA_ATTR;
+	    LMemFreeHandles(mh, c);
+	}
+	return;
+    }
+    if (t->VTI_storageFlags & VTSF_DEFAULT_PARA_ATTR) {
+	c = LMemAlloc(mh, size);
+	t = VT(o);
+	t->VTI_storageFlags &= ~VTSF_DEFAULT_PARA_ATTR;
+	t->VTI_paraAttrRuns = c;
+    } else
+	LMemReAllocHandles(mh, t->VTI_paraAttrRuns, size);
+    memcpy(LMemDerefHandles(mh, VT(o)->VTI_paraAttrRuns), a, size);
+}
+
+/* UnHiliteAndFixupParaAttrRange: the range of a change, whole
+ * paragraphs; FALSE if the object has a single attribute */
+static Boolean FixupParaRange(optr o, VisTextRange *r, dword start,
+			      dword end)
+{
+    Boolean multiple =
+	(VT(o)->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS) != 0;
+
+    r->VTR_start = start;
+    r->VTR_end = end;
+    if (multiple)
+	TA_GetTextRange(o, r, VTRC_PARAGRAPH_CHANGE);
+    TextGStateCreate(o);
+    EditUnHilite(o);
+    return multiple;
+}
+
+/* DoParaAttrChangeCommon: the attribute of the paragraphs changed by
+ * the callback */
+static void ChangeParaAttr(optr o, dword start, dword end,
+			   TA_ModifyCallback *cb, void *data)
+{
+    VisTextMaxParaAttr a;
+    VisTextRange r;
+
+    if (FixupParaRange(o, &r, start, end))
+	(void) TA_ModifyRun(o, TRK_PARA_ATTR, r.VTR_start, r.VTR_end, cb,
+			    data, CA_NULL_ELEMENT);
+    else {
+	TA_GetSingleParaAttr(o, &a);
+	cb(o, &a, data);
+	TA_SetSingleParaAttr(o, &a);
+    }
+    TA_ReflectChange(o);
+}
+
+/* SetParaAttrCommon: the whole attribute */
+static void SetParaAttr(optr o, dword start, dword end,
+			const VisTextMaxParaAttr *a)
+{
+    VisTextMaxParaAttr c;
+    VisTextRange r;
+    word token;
+
+    memset(&c, 0, sizeof(c));
+    memcpy(&c, a, TA_ParaAttrSize(a));
+    if (FixupParaRange(o, &r, start, end)) {
+	token = TA_AddElement(o, TRK_PARA_ATTR, &c);
+	(void) TA_ModifyRun(o, TRK_PARA_ATTR, r.VTR_start, r.VTR_end, NULL,
+			    NULL, token);
+	TA_RemoveElement(o, TRK_PARA_ATTR, token);
+    } else
+	TA_SetSingleParaAttr(o, &c);
+    TA_ReflectChange(o);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_DEFAULT
+{
+    VisTextMaxParaAttr a;
+
+    memset(&a, 0, sizeof(a));
+    TA_MapDefaultParaAttr(defParaAttrs, &a.VTMPA_paraAttr);
+    SetParaAttr(oself, rangeStart, rangeEnd, &a);
+}
+
+/* (the attribute with its tabs: a VisTextMaxParaAttr's start) */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR
+{
+    SetParaAttr(oself, rangeStart, rangeEnd,
+		(const VisTextMaxParaAttr *) newParaAttrs);
+}
+
+/* VisTextSetParaAttrByToken (CA_NULL_ELEMENT, the base style: no style
+ * sheets yet) */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTR_BY_TOKEN
+{
+    VisTextRange r;
+
+    if (FixupParaRange(oself, &r, rangeStart, rangeEnd) &&
+	paraAttrToken != CA_NULL_ELEMENT)
+	(void) TA_ModifyRun(oself, TRK_PARA_ATTR, r.VTR_start, r.VTR_end,
+			    NULL, NULL, paraAttrToken);
+    TA_ReflectChange(oself);
+}
+
+/* VisTextParaAttrAdd: the element with a reference (its tabs are not
+ * passed: none) */
+@extern method VisTextClass, MSG_VIS_TEXT_ADD_PARA_ATTR
+{
+    VisTextMaxParaAttr a;
+
+    memset(&a, 0, sizeof(a));
+    a.VTMPA_paraAttr = attrs;
+    a.VTMPA_paraAttr.VTPA_numberOfTabs = 0;
+    return TA_AddElement(oself, TRK_PARA_ATTR, &a);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REMOVE_PARA_ATTR
+{
+    TA_RemoveElement(oself, TRK_PARA_ATTR, token);
+}
+
+/* DiffParaAttr: the fields in which two attributes differ marked */
+static void DiffParaAttr(const VisTextMaxParaAttr *ma,
+			 const VisTextMaxParaAttr *mb,
+			 VisTextParaAttrDiffs *d)
+{
+    const VisTextParaAttr *a = &ma->VTMPA_paraAttr, *b = &mb->VTMPA_paraAttr;
+    word f = 0, bf, x;
+
+    if (a->VTPA_meta.SSEH_style != b->VTPA_meta.SSEH_style)
+	f |= VTPAF_MULTIPLE_STYLES;
+    if (a->VTPA_leftMargin != b->VTPA_leftMargin)
+	f |= VTPAF_MULTIPLE_LEFT_MARGINS;
+    if (a->VTPA_rightMargin != b->VTPA_rightMargin)
+	f |= VTPAF_MULTIPLE_RIGHT_MARGINS;
+    if (a->VTPA_paraMargin != b->VTPA_paraMargin)
+	f |= VTPAF_MULTIPLE_PARA_MARGINS;
+    if (a->VTPA_lineSpacing != b->VTPA_lineSpacing)
+	f |= VTPAF_MULTIPLE_LINE_SPACINGS;
+    if (a->VTPA_leading != b->VTPA_leading)
+	f |= VTPAF_MULTIPLE_LEADINGS;
+    if (a->VTPA_defaultTabs != b->VTPA_defaultTabs)
+	f |= VTPAF_MULTIPLE_DEFAULT_TABS;
+    if (a->VTPA_spaceOnTop != b->VTPA_spaceOnTop)
+	f |= VTPAF_MULTIPLE_TOP_SPACING;
+    if (a->VTPA_spaceOnBottom != b->VTPA_spaceOnBottom)
+	f |= VTPAF_MULTIPLE_BOTTOM_SPACING;
+    if (memcmp(&a->VTPA_bgColor, &b->VTPA_bgColor, sizeof(ColorQuad)))
+	f |= VTPAF_MULTIPLE_BG_COLORS;
+    if (a->VTPA_bgGrayScreen != b->VTPA_bgGrayScreen)
+	f |= VTPAF_MULTIPLE_BG_GRAY_SCREENS;
+    if (memcmp(&a->VTPA_bgPattern, &b->VTPA_bgPattern,
+	       sizeof(GraphicPattern)))
+	f |= VTPAF_MULTIPLE_BG_PATTERNS;
+    if (a->VTPA_numberOfTabs != b->VTPA_numberOfTabs ||
+	memcmp(ma->VTMPA_tabs, mb->VTMPA_tabs,
+	       a->VTPA_numberOfTabs * sizeof(Tab)))
+	f |= VTPAF_MULTIPLE_TAB_LISTS;
+    if (memcmp(a->VTPA_prependChars, b->VTPA_prependChars, 4))
+	f |= VTPAF_MULTIPLE_PREPEND_CHARS;
+    if (a->VTPA_startingParaNumber != b->VTPA_startingParaNumber)
+	f |= VTPAF_MULTIPLE_STARTING_PARA_NUMBERS;
+    if (a->VTPA_nextStyle != b->VTPA_nextStyle)
+	f |= VTPAF_MULTIPLE_NEXT_STYLES;
+    d->VTPAD_diffs |= f;
+    x = a->VTPA_borderFlags ^ b->VTPA_borderFlags;
+    bf = x & (VTPBF_LEFT | VTPBF_TOP | VTPBF_RIGHT | VTPBF_BOTTOM);
+    if (x & VTPBF_ANCHOR)
+	bf |= VTPABF_MULTIPLE_BORDER_ANCHORS;
+    if (x & VTPBF_DOUBLE)
+	bf |= VTPABF_MULTIPLE_BORDER_DOUBLES;
+    if (x & VTPBF_DRAW_INNER_LINES)
+	bf |= VTPABF_MULTIPLE_BORDER_DRAW_INNERS;
+    if (a->VTPA_borderWidth != b->VTPA_borderWidth)
+	bf |= VTPABF_MULTIPLE_BORDER_WIDTHS;
+    if (a->VTPA_borderSpacing != b->VTPA_borderSpacing)
+	bf |= VTPABF_MULTIPLE_BORDER_SPACINGS;
+    if (a->VTPA_borderShadow != b->VTPA_borderShadow)
+	bf |= VTPABF_MULTIPLE_BORDER_SHADOWS;
+    if (memcmp(&a->VTPA_borderColor, &b->VTPA_borderColor,
+	       sizeof(ColorQuad)))
+	bf |= VTPABF_MULTIPLE_BORDER_COLORS;
+    if (a->VTPA_borderGrayScreen != b->VTPA_borderGrayScreen)
+	bf |= VTPABF_MULTIPLE_BORDER_GRAY_SCREENS;
+    if (memcmp(&a->VTPA_borderPattern, &b->VTPA_borderPattern,
+	       sizeof(GraphicPattern)))
+	bf |= VTPABF_MULTIPLE_BORDER_PATTERNS;
+    d->VTPAD_borderDiffs |= bf;
+    d->VTPAD_hyphenationInfo |=
+	a->VTPA_hyphenationInfo ^ b->VTPA_hyphenationInfo;
+    d->VTPAD_dropCapInfo |= a->VTPA_dropCapInfo ^ b->VTPA_dropCapInfo;
+    d->VTPAD_attributes |= a->VTPA_attributes ^ b->VTPA_attributes;
+    if (a->VTPA_language != b->VTPA_language)
+	d->VTPAD_diffs2 |= VTPAF2_MULTIPLE_LANGUAGES;
+    d->VTPAD_keepInfo |= a->VTPA_keepInfo ^ b->VTPA_keepInfo;
+}
+
+/*
+ * VisTextGetParaAttr: the attribute of the range's start (whole
+ * paragraphs not asked for), with the differences of all runs in the
+ * range and CA_NULL_ELEMENT for more than one; with
+ * VTGAF_MERGE_WITH_PASSED compared with the passed one too.  The
+ * attribute is written with its tabs.
+ */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_PARA_ATTR
+{
+    VisTextMaxParaAttr a, e;
+    VisTextRange r;
+    word i, token;
+
+    if (diffs && !(flags & VTGAF_MERGE_WITH_PASSED))
+	memset(diffs, 0, sizeof(*diffs));
+    if (!(pself->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS)) {
+	TA_GetSingleParaAttr(oself, &a);
+	token = CA_NULL_ELEMENT;
+    } else {
+	r.VTR_start = rangeStart;
+	r.VTR_end = rangeEnd;
+	TA_GetTextRange(oself, &r, 0);
+	i = TA_RunForPosition(oself, TRK_PARA_ATTR, r.VTR_start, FALSE);
+	token = TA_RunToken(oself, TRK_PARA_ATTR, i);
+	TA_GetElement(oself, TRK_PARA_ATTR, token, &a);
+	if (TA_RunPosition(oself, TRK_PARA_ATTR, i + 1) < r.VTR_end) {
+	    /* EnumRunsInRange with GetParaAttrCallback */
+	    while (TA_RunPosition(oself, TRK_PARA_ATTR, i) < r.VTR_end &&
+		   TA_RunToken(oself, TRK_PARA_ATTR, i) != CA_NULL_ELEMENT) {
+		TA_GetElement(oself, TRK_PARA_ATTR,
+			      TA_RunToken(oself, TRK_PARA_ATTR, i), &e);
+		if (diffs)
+		    DiffParaAttr(&e, &a, diffs);
+		i++;
+	    }
+	    memcpy(attrs, &a, TA_ParaAttrSize(&a));
+	    return CA_NULL_ELEMENT;
+	}
+    }
+    if ((flags & VTGAF_MERGE_WITH_PASSED) && diffs)
+	DiffParaAttr(&a, attrs, diffs);
+    memcpy(attrs, &a, TA_ParaAttrSize(&a));
+    return token;
+}
+
+/*
+ * The handlers of taAttr.asm that change one field of the paragraph
+ * attribute, with their callbacks (SetWordCallback, SetByteCallback,
+ * SetWordBitsCallback, SetColorCallback and their own)
+ */
+typedef struct {
+    word set, clear;
+} BitsChange;
+
+#define PA(e)	(((VisTextMaxParaAttr *) (e))->VTMPA_paraAttr)
+
+/* a callback that sets one field from the word data points to */
+#define WORD_FIELD_CB(name, field) \
+    static void name(optr o, void *e, void *data) \
+    { (void) o; PA(e).field = *(word *) data; }
+#define BYTE_FIELD_CB(name, field) \
+    static void name(optr o, void *e, void *data) \
+    { (void) o; PA(e).field = *(byte *) data; }
+#define BITS_FIELD_CB(name, field) \
+    static void name(optr o, void *e, void *data) \
+    { BitsChange *c = data; (void) o; \
+      PA(e).field = (PA(e).field & ~c->clear) | c->set; }
+#define COLOR_FIELD_CB(name, field) \
+    static void name(optr o, void *e, void *data) \
+    { (void) o; PA(e).field = *(ColorQuad *) data; \
+      if (PA(e).field.CQ_info == CF_INDEX) \
+	  PA(e).field.CQ_green = PA(e).field.CQ_blue = 0; }
+#define PATTERN_FIELD_CB(name, field) \
+    static void name(optr o, void *e, void *data) \
+    { (void) o; PA(e).field = *(GraphicPattern *) data; }
+
+WORD_FIELD_CB(SetLineSpacingCB, VTPA_lineSpacing)
+WORD_FIELD_CB(SetDefaultTabsCB, VTPA_defaultTabs)
+WORD_FIELD_CB(SetLeftMarginCB, VTPA_leftMargin)
+WORD_FIELD_CB(SetRightMarginCB, VTPA_rightMargin)
+WORD_FIELD_CB(SetParaMarginCB, VTPA_paraMargin)
+WORD_FIELD_CB(SetSpaceOnTopCB, VTPA_spaceOnTop)
+WORD_FIELD_CB(SetSpaceOnBottomCB, VTPA_spaceOnBottom)
+WORD_FIELD_CB(SetLeadingCB, VTPA_leading)
+WORD_FIELD_CB(SetParagraphNumberCB, VTPA_startingParaNumber)
+BYTE_FIELD_CB(SetBorderWidthCB, VTPA_borderWidth)
+BYTE_FIELD_CB(SetBorderSpacingCB, VTPA_borderSpacing)
+BYTE_FIELD_CB(SetBorderShadowCB, VTPA_borderShadow)
+BYTE_FIELD_CB(SetBorderGrayScreenCB, VTPA_borderGrayScreen)
+BYTE_FIELD_CB(SetParaBGGrayScreenCB, VTPA_bgGrayScreen)
+BITS_FIELD_CB(SetBorderBitsCB, VTPA_borderFlags)
+BITS_FIELD_CB(SetParaAttributesCB, VTPA_attributes)
+BITS_FIELD_CB(SetHyphenationCB, VTPA_hyphenationInfo)
+BITS_FIELD_CB(SetDropCapCB, VTPA_dropCapInfo)
+BITS_FIELD_CB(SetKeepCB, VTPA_keepInfo)
+COLOR_FIELD_CB(SetBorderColorCB, VTPA_borderColor)
+COLOR_FIELD_CB(SetParaBGColorCB, VTPA_bgColor)
+PATTERN_FIELD_CB(SetBorderPatternCB, VTPA_borderPattern)
+PATTERN_FIELD_CB(SetParaBGPatternCB, VTPA_bgPattern)
+
+/* ParaAttrChangeCommon, ParaAttrBorderChangeCommon: the range to make
+ * again differs, here all lines are */
+static void ChangeWord(optr o, dword start, dword end,
+		       TA_ModifyCallback *cb, word v)
+{
+    ChangeParaAttr(o, start, end, cb, &v);
+}
+
+static void ChangeByte(optr o, dword start, dword end,
+		       TA_ModifyCallback *cb, byte v)
+{
+    ChangeParaAttr(o, start, end, cb, &v);
+}
+
+static void ChangeBits(optr o, dword start, dword end,
+		       TA_ModifyCallback *cb, word set, word clear)
+{
+    BitsChange c;
+
+    c.set = set;
+    c.clear = clear;
+    ChangeParaAttr(o, start, end, cb, &c);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_BITS
+{
+    ChangeBits(oself, rangeStart, rangeEnd, SetBorderBitsCB, bitsToSet,
+	       bitsToClear);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_WIDTH
+{
+    ChangeByte(oself, rangeStart, rangeEnd, SetBorderWidthCB, width);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_SPACING
+{
+    ChangeByte(oself, rangeStart, rangeEnd, SetBorderSpacingCB, width);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_SHADOW
+{
+    ChangeByte(oself, rangeStart, rangeEnd, SetBorderShadowCB, width);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_COLOR
+{
+    ChangeParaAttr(oself, rangeStart, rangeEnd, SetBorderColorCB, &color);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_GRAY_SCREEN
+{
+    ChangeByte(oself, rangeStart, rangeEnd, SetBorderGrayScreenCB,
+	       grayScreen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_BORDER_PATTERN
+{
+    ChangeParaAttr(oself, rangeStart, rangeEnd, SetBorderPatternCB,
+		   &hatch);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_ATTRIBUTES
+{
+    ChangeBits(oself, rangeStart, rangeEnd, SetParaAttributesCB, bitsToSet,
+	       bitsToClear);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LINE_SPACING
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetLineSpacingCB,
+	       (word) (lineSpacing.BBF_int << 8 | lineSpacing.BBF_frac));
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_DEFAULT_TABS
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetDefaultTabsCB, defaultTabs);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_MARGIN
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetLeftMarginCB, position);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_RIGHT_MARGIN
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetRightMarginCB, position);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_MARGIN
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetParaMarginCB, position);
+}
+
+/* SetLeftAndParaMarginCallback */
+static void SetLeftAndParaMarginCB(optr o, void *e, void *data)
+{
+    (void) o;
+    PA(e).VTPA_leftMargin = PA(e).VTPA_paraMargin = *(word *) data;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LEFT_AND_PARA_MARGIN
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetLeftAndParaMarginCB,
+	       position);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_TOP
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetSpaceOnTopCB,
+	       (word) (spacing.BBF_int << 8 | spacing.BBF_frac));
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_SPACE_ON_BOTTOM
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetSpaceOnBottomCB,
+	       (word) (spacing.BBF_int << 8 | spacing.BBF_frac));
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_LEADING
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetLeadingCB, leading);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_COLOR
+{
+    ChangeParaAttr(oself, rangeStart, rangeEnd, SetParaBGColorCB, &color);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_GRAY_SCREEN
+{
+    ChangeByte(oself, rangeStart, rangeEnd, SetParaBGGrayScreenCB,
+	       grayScreen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARA_BG_PATTERN
+{
+    ChangeParaAttr(oself, rangeStart, rangeEnd, SetParaBGPatternCB,
+		   &hatch);
+}
+
+/* FindTabAtPosition: the index of the tab at a position, or -1 */
+static int FindTab(const VisTextMaxParaAttr *a, word pos)
+{
+    int i;
+
+    for (i = 0; i < a->VTMPA_paraAttr.VTPA_numberOfTabs; i++)
+	if (a->VTMPA_tabs[i].T_position == pos)
+	    return i;
+    return -1;
+}
+
+/* InsertTabAtPosition: room for a tab at a position (in order); its
+ * index.  A tab already there is the one. */
+static int InsertTab(VisTextMaxParaAttr *a, word pos)
+{
+    int n = a->VTMPA_paraAttr.VTPA_numberOfTabs, i;
+
+    for (i = 0; i < n; i++) {
+	if (a->VTMPA_tabs[i].T_position == pos)
+	    return i;
+	if (a->VTMPA_tabs[i].T_position > pos)
+	    break;
+    }
+    memmove(&a->VTMPA_tabs[i + 1], &a->VTMPA_tabs[i],
+	    (n - i) * sizeof(Tab));
+    a->VTMPA_paraAttr.VTPA_numberOfTabs++;
+    return i;
+}
+
+/* ClearTabAtPosition: TRUE and the tab if there was one */
+static Boolean ClearTab(VisTextMaxParaAttr *a, word pos, Tab *was)
+{
+    int i = FindTab(a, pos), n = a->VTMPA_paraAttr.VTPA_numberOfTabs;
+
+    if (i < 0)
+	return FALSE;
+    *was = a->VTMPA_tabs[i];
+    memmove(&a->VTMPA_tabs[i], &a->VTMPA_tabs[i + 1],
+	    (n - i - 1) * sizeof(Tab));
+    a->VTMPA_paraAttr.VTPA_numberOfTabs--;
+    return TRUE;
+}
+
+/* SelectTab: the tab the ruler shows selected */
+static void SelectTab(optr o, word pos)
+{
+    word *w = ObjVarAddData(o, ATTR_VIS_TEXT_SELECTED_TAB, sizeof(word));
+
+    *w = pos;
+}
+
+/* SetTabCallback: replaced, or added if there is room */
+static void SetTabCB(optr o, void *e, void *data)
+{
+    VisTextMaxParaAttr *a = e;
+    Tab *t = data;
+    int i = FindTab(a, t->T_position);
+
+    (void) o;
+    if (i < 0) {
+	if (a->VTMPA_paraAttr.VTPA_numberOfTabs == VIS_TEXT_MAX_TABS)
+	    return;
+	i = InsertTab(a, t->T_position);
+    }
+    a->VTMPA_tabs[i] = *t;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_TAB
+{
+    SelectTab(oself, tab.T_position);
+    ChangeParaAttr(oself, rangeStart, rangeEnd, SetTabCB, &tab);
+}
+
+static void ClearTabCB(optr o, void *e, void *data)
+{
+    Tab was;
+
+    (void) o;
+    (void) ClearTab(e, *(word *) data, &was);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_CLEAR_TAB
+{
+    ChangeWord(oself, rangeStart, rangeEnd, ClearTabCB, position);
+}
+
+/* MoveTabCallback: the tab at the source (if any) to the destination */
+typedef struct {
+    word from, to;
+} TabMove;
+
+static void MoveTabCB(optr o, void *e, void *data)
+{
+    VisTextMaxParaAttr *a = e;
+    TabMove *m = data;
+    Tab t;
+    int i;
+
+    (void) o;
+    if (!ClearTab(a, m->from, &t) ||
+	a->VTMPA_paraAttr.VTPA_numberOfTabs == VIS_TEXT_MAX_TABS)
+	return;
+    i = InsertTab(a, m->to);
+    a->VTMPA_tabs[i] = t;
+    a->VTMPA_tabs[i].T_position = m->to;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_MOVE_TAB
+{
+    TabMove m;
+
+    m.from = sourcePosition;
+    m.to = destPosition;
+    SelectTab(oself, destPosition);
+    ChangeParaAttr(oself, rangeStart, rangeEnd, MoveTabCB, &m);
+}
+
+static void ClearAllTabsCB(optr o, void *e, void *data)
+{
+    (void) o;
+    (void) data;
+    PA(e).VTPA_numberOfTabs = 0;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_CLEAR_ALL_TABS
+{
+    ChangeParaAttr(oself, rangeStart, rangeEnd, ClearAllTabsCB, NULL);
+}
+
+static void SetPrependCharsCB(optr o, void *e, void *data)
+{
+    (void) o;
+    memcpy(PA(e).VTPA_prependChars, data, 4);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PREPEND_CHARS
+{
+    ChangeParaAttr(oself, rangeStart, rangeEnd, SetPrependCharsCB,
+		   prependChars);
+}
+
+/* (the bits by their names: the asm's frame has them the other way
+ * round from the C prototype of these three) */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_HYPHENATION_PARAMS
+{
+    ChangeBits(oself, rangeStart, rangeEnd, SetHyphenationCB, bitsToSet,
+	       bitsToClear);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_DROP_CAP_PARAMS
+{
+    ChangeBits(oself, rangeStart, rangeEnd, SetDropCapCB, bitsToSet,
+	       bitsToClear);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_KEEP_PARAMS
+{
+    ChangeBits(oself, rangeStart, rangeEnd, SetKeepCB, bitsToSet,
+	       bitsToClear);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_SET_PARAGRAPH_NUMBER
+{
+    ChangeWord(oself, rangeStart, rangeEnd, SetParagraphNumberCB,
+	       startingParaNumber);
 }

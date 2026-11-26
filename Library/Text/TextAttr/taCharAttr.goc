@@ -159,7 +159,7 @@ void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a)
  * the selection shown again; the object user modified, told
  * MSG_VIS_TEXT_ATTRIBUTE_CHANGE.  The range is the whole object.
  */
-static void ReflectChange(optr o)
+void TA_ReflectChange(optr o)
 {
     dword size = TS_GetTextSize(o);
     WBFixed before = VT(o)->VTI_height;
@@ -195,7 +195,7 @@ static Boolean FixupRange(optr o, VisTextRange *r, dword start, dword end)
     r->VTR_start = start;
     r->VTR_end = end;
     if (multiple)
-	TA_GetTextRange(o, r, 0);
+	TA_GetTextRange(o, r, VTRC_CHAR_ATTR_CHANGE);
     TextGStateCreate(o);
     EditUnHilite(o);
     return multiple;
@@ -219,7 +219,7 @@ static void ChangeCharAttr(optr o, dword start, dword end,
 	cb(o, &a, data);
 	TA_SetSingleCharAttr(o, &a);
     }
-    ReflectChange(o);
+    TA_ReflectChange(o);
 }
 
 /* SetCharAttrCommon, SetCharAttrOrParaAttrMultiple: the whole attribute
@@ -239,7 +239,7 @@ static void SetCharAttr(optr o, dword start, dword end,
 	TA_RemoveElement(o, TRK_CHAR_ATTR, token);
     } else
 	TA_SetSingleCharAttr(o, &c);
-    ReflectChange(o);
+    TA_ReflectChange(o);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_SET_CHAR_ATTR_BY_DEFAULT
@@ -263,12 +263,12 @@ static void SetCharAttr(optr o, dword start, dword end,
 
     if (!FixupRange(oself, &r, rangeStart, rangeEnd) ||
 	token == CA_NULL_ELEMENT) {
-	ReflectChange(oself);
+	TA_ReflectChange(oself);
 	return;
     }
     (void) TA_ModifyRun(oself, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, NULL,
 			NULL, token);
-    ReflectChange(oself);
+    TA_ReflectChange(oself);
 }
 
 /* VisTextAddCharAttr: the element with a reference */

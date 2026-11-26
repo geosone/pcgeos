@@ -225,6 +225,23 @@ static word UsedElements(optr o)
 				    0, NULL);
 }
 
+/* the paragraph attribute run at pos is from s to e */
+static Boolean ParaRunIs(optr o, dword pos, dword s, dword e)
+{
+    VisTextRange r;
+
+    @call o::MSG_VIS_TEXT_GET_RUN_BOUNDS(&r,
+		offsetof(VisTextInstance, VTI_paraAttrRuns), pos);
+    return r.VTR_start == s && r.VTR_end == e;
+}
+
+/* the paragraph attribute of the range, its token */
+static word ParaOf(optr o, dword start, dword end, VisTextMaxParaAttr *a,
+		   VisTextParaAttrDiffs *d)
+{
+    return @call o::MSG_VIS_TEXT_GET_PARA_ATTR(0, d, a, end, start);
+}
+
 @method TOProcessClass, MSG_TO_STEP
 {
     VisTextReplaceParameters p;
@@ -955,6 +972,75 @@ static word UsedElements(optr o)
 	TOCHECK(u == 3);
 	@call n::MSG_VIS_TEXT_SELECT_RANGE(4, 4);
 	TOCHECK(UsedElements(n) == 2);
+	break;
+    }
+    case 14: {
+	/* paragraph attribute runs: a margin for one paragraph (the
+	 * range grows to whole paragraphs), the paragraphs joined, a
+	 * tab; a single attribute kept as a default record while one
+	 * says it */
+	VisTextParaAttrDiffs d;
+	VisTextMaxParaAttr a;
+	VisTextInstance *vi;
+	Tab tab;
+	optr n;
+
+	n = ObjInstantiate(OptrToHandle(@TOText),
+			   (ClassStruct *) &VisTextClass);
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("ab\rcd\ref", 0);
+	@call n::MSG_VIS_TEXT_SET_LEFT_MARGIN(72 * 8, 0, 0);
+	vi = (VisTextInstance *) ObjDerefVis(n);
+	TOCHECK(vi->VTI_storageFlags & VTSF_DEFAULT_PARA_ATTR);
+	@call n::MSG_VIS_TEXT_SET_LEADING(3 * 8, 0, 0);
+	vi = (VisTextInstance *) ObjDerefVis(n);
+	TOCHECK(!(vi->VTI_storageFlags & VTSF_DEFAULT_PARA_ATTR));
+	(void) ParaOf(n, 0, 0, &a, &d);
+	TOCHECK(a.VTMPA_paraAttr.VTPA_leftMargin == 72 * 8 &&
+		a.VTMPA_paraAttr.VTPA_leading == 3 * 8);
+	@call n::MSG_VIS_TEXT_SET_LEADING(0, 0, 0);
+	@call n::MSG_VIS_TEXT_SET_LEFT_MARGIN(0, 0, 0);
+	vi = (VisTextInstance *) ObjDerefVis(n);
+	TOCHECK(vi->VTI_storageFlags & VTSF_DEFAULT_PARA_ATTR);
+
+	@call n::MSG_VIS_TEXT_CREATE_STORAGE(VTSF_MULTIPLE_PARA_ATTRS, 0);
+	vi = (VisTextInstance *) ObjDerefVis(n);
+	TOCHECK((vi->VTI_storageFlags & (VTSF_MULTIPLE_PARA_ATTRS |
+					 VTSF_DEFAULT_PARA_ATTR)) ==
+		VTSF_MULTIPLE_PARA_ATTRS);
+	TOCHECK(ParaRunIs(n, 4, 0, TEXT_ADDRESS_PAST_END));
+	/* the second paragraph ("cd\r", 3 to 6) */
+	@call n::MSG_VIS_TEXT_SET_LEFT_MARGIN(72 * 8, 4, 4);
+	TOCHECK(ParaRunIs(n, 1, 0, 3) && ParaRunIs(n, 3, 3, 6) &&
+		ParaRunIs(n, 6, 6, TEXT_ADDRESS_PAST_END));
+	TOCHECK(ParaOf(n, 5, 5, &a, &d) != CA_NULL_ELEMENT &&
+		a.VTMPA_paraAttr.VTPA_leftMargin == 72 * 8);
+	TOCHECK(ParaOf(n, 0, 8, &a, &d) == CA_NULL_ELEMENT &&
+		a.VTMPA_paraAttr.VTPA_leftMargin == 0 &&
+		d.VTPAD_diffs == VTPAF_MULTIPLE_LEFT_MARGINS);
+	/* joined: the paragraph keeps the first one's attribute */
+	ReplaceRange(n, 2, 4, "");
+	TOCHECK(Is(n, "abd\ref"));
+	TOCHECK(ParaRunIs(n, 4, 0, TEXT_ADDRESS_PAST_END));
+	(void) ParaOf(n, 1, 1, &a, &d);
+	TOCHECK(a.VTMPA_paraAttr.VTPA_leftMargin == 0);
+	/* a tab for the last paragraph */
+	memset(&tab, 0, sizeof(tab));
+	tab.T_position = 36 * 8;
+	@call n::MSG_VIS_TEXT_SET_TAB(tab, 5, 5);
+	TOCHECK(ParaRunIs(n, 0, 0, 4) &&
+		ParaRunIs(n, 4, 4, TEXT_ADDRESS_PAST_END));
+	(void) ParaOf(n, 4, 4, &a, &d);
+	TOCHECK(a.VTMPA_paraAttr.VTPA_numberOfTabs == 1 &&
+		a.VTMPA_tabs[0].T_position == 36 * 8);
+	tab.T_position = 18 * 8;
+	@call n::MSG_VIS_TEXT_SET_TAB(tab, 5, 5);
+	@call n::MSG_VIS_TEXT_MOVE_TAB(54 * 8, 36 * 8, 5, 5);
+	(void) ParaOf(n, 4, 4, &a, &d);
+	TOCHECK(a.VTMPA_paraAttr.VTPA_numberOfTabs == 2 &&
+		a.VTMPA_tabs[0].T_position == 18 * 8 &&
+		a.VTMPA_tabs[1].T_position == 54 * 8);
+	@call n::MSG_VIS_TEXT_CLEAR_ALL_TABS(5, 5);
+	TOCHECK(ParaRunIs(n, 4, 0, TEXT_ADDRESS_PAST_END));
 	break;
     }
     }

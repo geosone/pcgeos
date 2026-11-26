@@ -1,17 +1,21 @@
 /*
  * taRange.goc -- virtual ranges (after taRange.asm): a range that
- * starts at VIS_TEXT_RANGE_SELECTION is the selection, an offset of
- * TEXT_ADDRESS_PAST_END the end of the text.
- *
- * Port32, not yet: the paragraph and attribute contexts
- * (VIS_TEXT_RANGE_PARAGRAPH_SELECTION, VTRC_PARAGRAPH_CHANGE,
- * VTRC_CHAR_ATTR_CHANGE), which need the paragraphs.
+ * starts at VIS_TEXT_RANGE_SELECTION is the selection
+ * (VIS_TEXT_RANGE_PARAGRAPH_SELECTION: its paragraphs), an offset of
+ * TEXT_ADDRESS_PAST_END the end of the text.  The context widens the
+ * range for a change: to whole paragraphs (VTRC_PARAGRAPH_CHANGE, and
+ * the next line for a border, VTRC_PARA_ATTR_BORDER_CHANGE), or by the
+ * carriage return at a paragraph's end (VTRC_CHAR_ATTR_CHANGE).
  */
 @include "textInt.goh"
 
 void TA_GetTextRange(optr o, VisTextRange *range, VisTextRangeContext context)
 {
-    (void) context;
+    dword p;
+    Boolean eot;
+
+    if ((range->VTR_start >> 16) == VIS_TEXT_RANGE_PARAGRAPH_SELECTION_HIGH)
+	context |= VTRC_PARAGRAPH_CHANGE;
     if ((range->VTR_start >> 16) == VIS_TEXT_RANGE_SELECTION_HIGH ||
 	(range->VTR_start >> 16) == VIS_TEXT_RANGE_PARAGRAPH_SELECTION_HIGH)
 	TSL_SelectGetSelection(o, &range->VTR_start, &range->VTR_end);
@@ -19,6 +23,29 @@ void TA_GetTextRange(optr o, VisTextRange *range, VisTextRangeContext context)
 	range->VTR_start = TS_GetTextSize(o);
     if ((range->VTR_end >> 16) == TEXT_ADDRESS_PAST_END_HIGH)
 	range->VTR_end = TS_GetTextSize(o);
+    if (context & VTRC_PARAGRAPH_CHANGE) {
+	range->VTR_start = TA_FindParagraphStart(o, range->VTR_start);
+	p = range->VTR_end;
+	/* (a range ending at a paragraph's start ends in the one
+	 * before) */
+	if (p && p != range->VTR_start)
+	    p--;
+	if (TA_FindParagraphEnd(o, &p)) {
+	    p++;			/* past the carriage return */
+	    if (context & VTRC_PARA_ATTR_BORDER_CHANGE)
+		p++;			/* the next line made again too */
+	}
+	range->VTR_end = p;
+    }
+    if ((context & VTRC_CHAR_ATTR_CHANGE) &&
+	range->VTR_end != range->VTR_start) {
+	/* the carriage return at the end of a paragraph's text, but not
+	 * the one of an empty paragraph */
+	p = range->VTR_end;
+	if (TA_IsParagraphEnd(o, p, &eot) && !eot &&
+	    (!p || !TA_IsParagraphEnd(o, p - 1, &eot)))
+	    range->VTR_end++;
+    }
 }
 
 /* VisTextGetRange */

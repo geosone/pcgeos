@@ -1658,8 +1658,9 @@ Name arrays are variable-sized element arrays of reference count, data
   alignment), 3 in 16-bit GEOS: name and element arrays in DOS16 files
   need the converter (section 14).
 - `ElementArrayAddElement` has no size for variable-sized elements (the
-  asm C stub passed none either): it serves fixed-size arrays; the kernel
-  uses `ElementArrayAddElementSized` (for name arrays).
+  asm C stub passed none either): it serves fixed-size arrays;
+  `ElementArrayAddElementSized` (Port32, exported) takes the size (name
+  arrays, the text library's paragraph attributes).
 - `ChunkArrayEnum` callbacks may delete or insert elements;
   `CAH_curOffset` holds the running enumeration's position.
 - An element of size 0 has the offset of the next one: a pointer cannot
@@ -7204,11 +7205,19 @@ the modules of the asm; what is there:
   `MSG_VIS_TEXT_ADD_CHAR_ATTR` (it returns the token: the C header said
   `void`), `MSG_VIS_TEXT_REMOVE_CHAR_ATTR`, `MSG_VIS_TEXT_GET_RUN_BOUNDS`.
   Lines are calculated and drawn run by run, the cursor with the
-  attribute typing would get. Not yet: paragraph attribute runs, large
+  attribute typing would get. **Paragraph attribute runs**
+  (`VTSF_MULTIPLE_PARA_ATTRS`) start at paragraphs: a change widens its
+  range to whole paragraphs (`TA_GetTextRange` with
+  `VTRC_PARAGRAPH_CHANGE`; `VTRC_CHAR_ATTR_CHANGE` takes the carriage
+  return at a paragraph's end), joined paragraphs keep the first one's
+  attribute, each line is calculated with its paragraph's
+  (`T_EnsureCorrectParaAttr`). Their elements have their tabs, so they
+  are of variable size: the kernel exports `ElementArrayAddElementSized`
+  (`chunkarr.h`, Port32 only; `Tools/kexports`). Not yet: large
   objects (runs in huge arrays), elements in a VM block shared with
   other objects (`TRAH_elementVMBlock`), style sheets (`CA_NULL_ELEMENT`
   as the base style), type and graphic runs, undo, the notifications.
-  ctest `library.text` (step 13).
+  ctest `library.text` (steps 13 and 14).
 - **Port32 changes in the C API.** The block of
   `MSG_VIS_TEXT_REPLACE_ALL_BLOCK`, `MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK`,
   `MSG_VIS_TEXT_APPEND_BLOCK` and `MSG_VIS_TEXT_GET_ALL_BLOCK` is a
@@ -7223,7 +7232,20 @@ the modules of the asm; what is there:
   pixels from the left edge of the text (inside `VTI_lrMargin`), the
   right margin a position; the text is never narrower than
   `VIS_TEXT_MIN_TEXT_FIELD_WIDTH`, a one line object as wide as a
-  paragraph may be. There are no messages to change it yet.
+  paragraph may be. The messages of `taParaAttr.asm` and `taAttr.asm`
+  change it: the whole attribute (`MSG_VIS_TEXT_SET_PARA_ATTR`,
+  `..._BY_DEFAULT`, `..._BY_TOKEN`), margins, line spacing, leading,
+  space on top and bottom, default tabs, tabs (`MSG_VIS_TEXT_SET_TAB`,
+  `..._CLEAR_TAB`, `..._MOVE_TAB`, `..._CLEAR_ALL_TABS`), attributes
+  (justification), background, border, hyphenation, drop cap, keep,
+  prepend characters, paragraph number; `MSG_VIS_TEXT_GET_PARA_ATTR`
+  with the differences (`VisTextParaAttrDiffs`). A single attribute is
+  kept as a default record while one says it (as the asm, a right
+  margin of `VIS_TEXT_MAX_PARA_WIDTH * 8` counts as the record's 0).
+  The bits of `MSG_VIS_TEXT_SET_HYPHENATION_PARAMS`,
+  `..._DROP_CAP_PARAMS` and `..._KEEP_PARAMS` are taken by their names
+  in the C prototype (the asm's frame has set and clear the other way
+  round). Borders are not drawn yet.
 - **Measuring in the kernel** (`Library/Kernel/Graphics/
   graphicsTextObject.c`, `graphics.h`): `GrTextObjCalc(gstate,
   TOC_vars *)` fits a field (the text up to a tab or the end of the

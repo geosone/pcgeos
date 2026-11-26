@@ -45,6 +45,9 @@ static const char *const port32LateExports[] = {
     /* semaphores in a structure of a driver (Internal/semInt.h: the
      * stream driver's StreamData) */
     "KSemInit", "KSemP", "KSemV", "KSemAdd", "KSemVAll",
+    /* variable-sized elements (the text library's paragraph
+     * attributes: CInclude/chunkarr.h) */
+    "ElementArrayAddElementSized",
     NULL
 };
 /* GHAL host services the drivers on the GHAL use (Port32/GHAL-Concept.md

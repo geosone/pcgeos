@@ -63,6 +63,10 @@ extern Boolean TA_FindDefaultCharAttr(const VisTextCharAttr *a,
 				      VisTextDefaultCharAttr *def);
 extern void TA_GetSingleCharAttr(optr o, VisTextCharAttr *a);
 extern void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a);
+/* ReflectChangeUpdateGeneric: after an attribute changed, the lines
+ * made again and drawn (with the object's gstate), the selection
+ * shown, the object told */
+extern void TA_ReflectChange(optr o);
 
 /* TextAttr/taRun.goc: the attribute runs (VTSF_MULTIPLE_CHAR_ATTRS,
  * VTSF_MULTIPLE_PARA_ATTRS) */
@@ -78,6 +82,12 @@ extern word TA_AddElement(optr o, TextRunKind kind, void *element);
 extern void TA_ElementAddRef(optr o, TextRunKind kind, word token);
 extern void TA_RemoveElement(optr o, TextRunKind kind, word token);
 extern Boolean TA_IsParagraphStart(optr o, dword pos);
+/* TRUE at a carriage return or the end of the text (*atEnd then) */
+extern Boolean TA_IsParagraphEnd(optr o, dword pos, Boolean *atEnd);
+/* *pos to the carriage return at or after it; FALSE (at the end of the
+ * text) if there is none */
+extern Boolean TA_FindParagraphEnd(optr o, dword *pos);
+extern dword TA_FindParagraphStart(optr o, dword pos);
 /* the attribute of the range changed by cb (or, with none, set to the
  * element token) */
 extern dword TA_ModifyRun(optr o, TextRunKind kind, dword start,
@@ -130,6 +140,11 @@ extern void SendToTextOutput(optr o, Message msg);
 extern void TA_MapDefaultParaAttr(VisTextDefaultParaAttr def,
 				  VisTextParaAttr *a);
 extern void TA_GetSingleParaAttr(optr o, VisTextMaxParaAttr *a);
+extern void TA_SetSingleParaAttr(optr o, const VisTextMaxParaAttr *a);
+/* CalcParaAttrSize: the attribute with its tabs */
+#define TA_ParaAttrSize(a) \
+    ((word) (offsetof(VisTextMaxParaAttr, VTMPA_tabs) + \
+	     ((const VisTextParaAttr *) (a))->VTPA_numberOfTabs * sizeof(Tab)))
 extern void TA_GetParaAttrForPosition(optr o, dword pos,
 				      VisTextMaxParaAttr *a, dword *start,
 				      dword *end);
@@ -210,6 +225,7 @@ extern word TL_TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
 
 /* Text/textCalc.goc: the lines calculated again */
 extern void T_GetNewParaAttr(LICL_vars *l, dword pos);
+extern void T_EnsureCorrectParaAttr(LICL_vars *l, dword pos);
 extern void TextCompleteRecalc(optr o);
 void TextHeightNotify(optr o, WBFixed before);
 extern void TextRecalc(optr o, dword start, dword inserted, dword deleted);
