@@ -97,7 +97,7 @@ Usage(char *fmt, ...)
     vfprintf(stderr, fmt, args);
     va_end(args);
 
-    fprintf(stderr, "\nUsage: uic [-2cdgopDIRW] [-g [-G <resource>]... [-x <externs>] [-i <include>]...] <file>\n");
+    fprintf(stderr, "\nUsage: uic [-2cdgopDIRW] [-g [-G <resource>]... [-x <externs>] [-i <include>]... [-N <vardata>]...] <file>\n");
 
     exit(1);
 }
@@ -459,10 +459,11 @@ ParseArgs(int argc, char **argv)
 		    outgoc = 1;
 		    break;
 		}
-		case 'G' : case 'x' : case 'i' :{
+		case 'G' : case 'x' : case 'i' : case 'N' :{
 		    /* for -g: a resource to write (all without -G), the
 		     * file for the @extern declarations, a file the output
-		     * is to @include first */
+		     * is to @include first, a vardata not to write (-N:
+		     * the code adds it) */
 		    extern void GocOption(int option, char *arg);
 
 		    if (ac + 1 == argc) {

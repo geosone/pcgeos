@@ -1,0 +1,22 @@
+/*
+ * uicgstrbad.ui -- a difference of labels across a macro of gstring.h,
+ * whose size uic -g does not know: uic must fail (ctest uic.goc.gstring).
+ */
+start TestResource, data;
+visMoniker TestMoniker = {
+	size = standard;
+	color = color4;
+	aspectRatio = normal;
+	cachedSize = 20, 4;
+	gstring {
+		GSBeginString
+		GSFillBitmapAtCP <(EndTestBM-StartTestBM)>
+		StartTestBM	label	byte
+		GSSetAreaColorIndex	C_BLACK
+			Bitmap < 20, 1, 0, <BMF_MONO> >
+			db	00000000b, 00001110b, 00000000b
+		EndTestBM	label	byte
+		GSEndString
+	}
+}
+end TestResource;

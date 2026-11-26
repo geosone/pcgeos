@@ -54,6 +54,23 @@ static int  numOnlyResources = 0;
 static char *includes[MAX_GOC_OPTIONS];
 static int  numIncludes = 0;
 static char *externFile = NULL;
+/* -N: vardata not written (goc takes no vardata of another class, such
+ * as a specific UI's on a generic object: the code adds it) */
+static char *omitVarData[MAX_GOC_OPTIONS];
+static int  numOmitVarData = 0;
+
+static int
+VarDataOmitted(const char *name)
+{
+    int	i;
+
+    for (i = 0; i < numOmitVarData; i++) {
+	if (strcmp(name, omitVarData[i]) == 0) {
+	    return 1;
+	}
+    }
+    return 0;
+}
 
 void
 GocOption(int option, char *arg)
@@ -64,6 +81,8 @@ GocOption(int option, char *arg)
 	includes[numIncludes++] = arg;
     } else if (option == 'x') {
 	externFile = arg;
+    } else if (option == 'N' && numOmitVarData < MAX_GOC_OPTIONS) {
+	omitVarData[numOmitVarData++] = arg;
     }
 }
 
@@ -155,9 +174,10 @@ ChunkSym(const char *name, int len)
  *		    offset X	    OptrToChunk(@X) for a chunk of this
  *				    file, else X_OFFSET (a record field)
  *		    size X	    sizeof(X)
+ *		    BM_MASK ...	    BMT_MASK ... (graphics.def's old names)
  *		    or and xor not shl shr mod	the C operators
  *		    eq ne lt le gt ge		the C operators
- *		    12h 0ffh 101b 10d		C numbers
+ *		    12h 0ffh 101b 10d		C numbers (101b in hex)
  *		    < a, b >	    { a, b } (a structure's values)
  *		    the rest as it is
  ***********************************************************************/
@@ -203,6 +223,16 @@ EspExprTo(Str *out, const char *in, int len)
 	    if (ops[i].esp != NULL) {
 		continue;
 	    }
+	    if (pending == 0 && n >= 6 && strncmp(start, "BM_", 3) == 0 &&
+		(WordIs(start + 3, n - 3, "palette") ||
+		 WordIs(start + 3, n - 3, "huge") ||
+		 WordIs(start + 3, n - 3, "mask") ||
+		 WordIs(start + 3, n - 3, "complex"))) {
+		/* BMTypeOld's names (graphics.def): BMType's in C */
+		StrAdd(out, "BMT_", 4);
+		StrAdd(out, start + 3, n - 3);
+		continue;
+	    }
 	    if (pending == 1) {
 		if (ChunkSym(start, n) != NullSymbol) {
 		    StrAdd(out, "OptrToChunk(@", -1);
@@ -237,8 +267,12 @@ EspExprTo(Str *out, const char *in, int len)
 		StrAdd(out, "0x", 2);
 		StrAdd(out, start, n - 1);
 	    } else if (last == 'b' && strspn(start, "01") == (size_t)(n - 1)) {
-		StrAdd(out, "0b", 2);
-		StrAdd(out, start, n - 1);
+		/* in hex: goc does not read 0b */
+		unsigned long v = strtoul(start, NULL, 2);
+		char	      hex[24];
+
+		sprintf(hex, "0x%02lx", v);
+		StrAdd(out, hex, -1);
 	    } else if (last == 'd' && n > 1) {
 		StrAdd(out, start, n - 1);
 	    } else {
@@ -311,8 +345,219 @@ EspExpr(const char *in)
  *		    Bitmap <a, b>   Bitmap(a, b), the same
  *		    <Type> <a, <b>> GOC_<Type>(a, b), a macro to be had
  *				    (alone in a chunk: see OutputGocChunk)
+ *		    if elif else endif	Esp's conditions, decided here
+ *				    (EspCondition): the lines of the
+ *				    branch had, the others not
+ *		    X label byte    nothing: X is the number of bytes
+ *				    before it (EspLabels), for the size of
+ *				    a bitmap of the gstring, (EndX-StartX)
  *		    A "|" ends a line (macros of .ui files use it).
+ *		    espDataError: why the data cannot be written (else
+ *		    NULL), for the caller to report.
  ***********************************************************************/
+/*
+ * The labels of a gstring: the bytes before them.  The size of a macro
+ * of gstring.h is not known here: after one the bytes are counted anew
+ * (part), and a difference of labels across one cannot be had.
+ */
+#define ESP_MAX_LABELS	64
+static struct {
+    char    *name;
+    int	    part, off;
+} espLabels[ESP_MAX_LABELS];
+static int  	espNumLabels;
+static const char *espDataError;
+
+static int
+EspLabel(const char *name, int len)
+{
+    int	i;
+
+    for (i = 0; i < espNumLabels; i++) {
+	if ((int)strlen(espLabels[i].name) == len &&
+	    strncmp(espLabels[i].name, name, len) == 0) {
+	    return i;
+	}
+    }
+    return -1;
+}
+
+/*
+ * The labels in the text (made by EspData) replaced by their numbers of
+ * bytes; the labels of an operand must be of the same part.
+ */
+static char *
+EspLabels(char *text)
+{
+    Str	    	s = {NULL, 0, 0};
+    const char	*p = text;
+    int	    	depth = 0, part = -1;
+
+    StrAdd(&s, "", 0);
+    while (*p != '\0') {
+	if (isalpha((unsigned char)*p) || *p == '_') {
+	    const char	*start = p;
+	    int	    	i;
+
+	    while (isalnum((unsigned char)*p) || *p == '_') {
+		p++;
+	    }
+	    i = EspLabel(start, p - start);
+	    if (i < 0) {
+		StrAdd(&s, start, p - start);
+	    } else {
+		char	num[16];
+
+		if (part >= 0 && part != espLabels[i].part) {
+		    espDataError = "uic -g: a difference of labels across a "
+			"macro of gstring.h (its size is not known)";
+		}
+		part = espLabels[i].part;
+		sprintf(num, "%d", espLabels[i].off);
+		StrAdd(&s, num, -1);
+	    }
+	    continue;
+	}
+	if (*p == '(') {
+	    depth++;
+	} else if (*p == ')') {
+	    depth--;
+	} else if (*p == ',' && depth == 0) {
+	    part = -1;
+	}
+	StrAdd(&s, p, 1);
+	p++;
+    }
+    free(text);
+    return s.text;
+}
+
+/*
+ * The value of the expression of an Esp condition (if, elif), in C
+ * (EspExprTo): numbers, TRUE and FALSE, ( ), the unary - ~ ! and the
+ * binary operators of C.  A name with no value (not given with -D, which
+ * uicpp puts in) sets espDataError.
+ */
+static const char *espEvalP;
+
+static long EspEvalBinary(int prec);
+
+static void
+EspEvalSpace(void)
+{
+    while (isspace((unsigned char)*espEvalP)) {
+	espEvalP++;
+    }
+}
+
+static long
+EspEvalUnary(void)
+{
+    EspEvalSpace();
+    if (*espEvalP == '(') {
+	long	v;
+
+	espEvalP++;
+	v = EspEvalBinary(0);
+	EspEvalSpace();
+	if (*espEvalP == ')') {
+	    espEvalP++;
+	}
+	return v;
+    } else if (*espEvalP == '-' || *espEvalP == '~' || *espEvalP == '!' ||
+	       *espEvalP == '+') {
+	char	op = *espEvalP++;
+	long	v = EspEvalUnary();
+
+	return op == '-' ? -v : op == '~' ? ~v : op == '!' ? !v : v;
+    } else if (isdigit((unsigned char)*espEvalP)) {
+	return strtol(espEvalP, (char **)&espEvalP, 0);
+    } else if (isalpha((unsigned char)*espEvalP) || *espEvalP == '_') {
+	const char	*start = espEvalP;
+
+	while (isalnum((unsigned char)*espEvalP) || *espEvalP == '_') {
+	    espEvalP++;
+	}
+	if (WordIs(start, espEvalP - start, "true")) {
+	    return -1;
+	} else if (WordIs(start, espEvalP - start, "false")) {
+	    return 0;
+	}
+	espDataError = "uic -g: a name with no value in a condition of the "
+	    "data (an Esp constant: give it with -D)";
+	return 0;
+    }
+    espDataError = "uic -g: a condition of the data not understood";
+    return 0;
+}
+
+static long
+EspEvalBinary(int prec)
+{
+    static const struct { const char *op; int prec; } ops[] = {
+	{"||", 1}, {"&&", 2}, {"|", 3}, {"^", 4}, {"&", 5},
+	{"==", 6}, {"!=", 6}, {"<=", 7}, {">=", 7}, {"<<", 8}, {">>", 8},
+	{"<", 7}, {">", 7}, {"+", 9}, {"-", 9}, {"*", 10}, {"/", 10},
+	{"%", 10}, {NULL, 0}
+    };
+    long    v = EspEvalUnary();
+
+    for (;;) {
+	int	i;
+	long	w;
+
+	EspEvalSpace();
+	for (i = 0; ops[i].op != NULL; i++) {
+	    size_t  n = strlen(ops[i].op);
+
+	    if (strncmp(espEvalP, ops[i].op, n) == 0 &&
+		!(n == 1 && (espEvalP[1] == '|' || espEvalP[1] == '&') &&
+		  espEvalP[1] == *espEvalP)) {
+		break;
+	    }
+	}
+	if (ops[i].op == NULL || ops[i].prec <= prec) {
+	    return v;
+	}
+	espEvalP += strlen(ops[i].op);
+	w = EspEvalBinary(ops[i].prec);
+	switch (ops[i].op[0] * 256 + ops[i].op[1]) {
+	    case '|' * 256 + '|': v = v || w; break;
+	    case '&' * 256 + '&': v = v && w; break;
+	    case '|' * 256: v |= w; break;
+	    case '^' * 256: v ^= w; break;
+	    case '&' * 256: v &= w; break;
+	    case '=' * 256 + '=': v = v == w; break;
+	    case '!' * 256 + '=': v = v != w; break;
+	    case '<' * 256 + '=': v = v <= w; break;
+	    case '>' * 256 + '=': v = v >= w; break;
+	    case '<' * 256 + '<': v <<= w; break;
+	    case '>' * 256 + '>': v >>= w; break;
+	    case '<' * 256: v = v < w; break;
+	    case '>' * 256: v = v > w; break;
+	    case '+' * 256: v += w; break;
+	    case '-' * 256: v -= w; break;
+	    case '*' * 256: v *= w; break;
+	    case '/' * 256: v = w ? v / w : 0; break;
+	    case '%' * 256: v = w ? v % w : 0; break;
+	}
+    }
+}
+
+static int
+EspCondition(const char *args, int alen)
+{
+    Str	    c = {NULL, 0, 0};
+    long    v;
+
+    StrAdd(&c, "", 0);
+    EspExprTo(&c, args, alen);
+    espEvalP = c.text;
+    v = EspEvalBinary(0);
+    free(c.text);
+    return v != 0;
+}
+
 static char *
 EspData(const char *in, int *count, int bytes)
 {
@@ -321,7 +566,17 @@ EspData(const char *in, int *count, int bytes)
     int	    	n = 0;
     const char	*lastWord = NULL;
     int	    	lastWlen = 0;
+    int	    	off = 0, part = 0;	/* the bytes (bytes != 0) */
+    int	    	i;
+    /* Esp's if/elif/else/endif: for each level, whether its lines are
+     * had (1), not yet (0), or no more (2: a branch was had) */
+    int	    	cond[32], ncond = 0, skip = 0;
 
+    for (i = 0; i < espNumLabels; i++) {
+	free(espLabels[i].name);
+    }
+    espNumLabels = 0;
+    espDataError = NULL;
     StrAdd(&s, "", 0);
     while (*p != '\0') {
 	const char  *word, *args, *eol, *q;
@@ -372,6 +627,55 @@ EspData(const char *in, int *count, int bytes)
 	while (alen > 0 && isspace((unsigned char)args[alen - 1])) {
 	    alen--;
 	}
+	if (wlen > 0 && (WordIs(word, wlen, "if") || WordIs(word, wlen, "elif") ||
+			 WordIs(word, wlen, "else") ||
+			 WordIs(word, wlen, "endif"))) {
+	    /* a condition of Esp (cpp's #if is uicpp's) */
+	    if (WordIs(word, wlen, "if")) {
+		if (ncond == 32) {
+		    espDataError = "uic -g: conditions too deep in the data";
+		} else {
+		    cond[ncond++] = skip ? 2 : EspCondition(args, alen);
+		}
+	    } else if (ncond == 0) {
+		espDataError = "uic -g: an elif, else or endif without if";
+	    } else if (WordIs(word, wlen, "endif")) {
+		ncond--;
+	    } else if (cond[ncond - 1] == 1) {
+		cond[ncond - 1] = 2;
+	    } else if (cond[ncond - 1] == 0) {
+		cond[ncond - 1] = WordIs(word, wlen, "else") ? 1 :
+		    EspCondition(args, alen);
+	    }
+	    for (skip = 0, i = 0; i < ncond; i++) {
+		if (cond[i] != 1) {
+		    skip = 1;
+		}
+	    }
+	    lastWord = NULL;
+	    wlen = 0;
+	} else if (skip) {
+	    lastWord = NULL;
+	    wlen = 0;
+	}
+	if (bytes && wlen > 0 && alen >= 5 && WordIs(args, 5, "label") &&
+	    (alen == 5 || isspace((unsigned char)args[5]))) {
+	    /* X label byte: the bytes before it */
+	    if (EspLabel(word, wlen) >= 0) {
+		espDataError = "uic -g: a label twice in a gstring";
+	    } else if (espNumLabels == ESP_MAX_LABELS) {
+		espDataError = "uic -g: too many labels in a gstring";
+	    } else {
+		espLabels[espNumLabels].name = malloc(wlen + 1);
+		memcpy(espLabels[espNumLabels].name, word, wlen);
+		espLabels[espNumLabels].name[wlen] = '\0';
+		espLabels[espNumLabels].part = part;
+		espLabels[espNumLabels].off = off;
+		espNumLabels++;
+	    }
+	    lastWord = NULL;
+	    wlen = 0;
+	}
 	if (wlen > 0) {
 	    int	isChar = WordIs(word, wlen, "char") ||
 			 WordIs(word, wlen, "wchar");
@@ -407,6 +711,12 @@ EspData(const char *in, int *count, int bytes)
 		Str a = {NULL, 0, 0};
 		int i;
 
+		if (wlen == 6 && strncmp(word, "Bitmap", 6) == 0) {
+		    off += 6;	/* (Bitmap: 2 words, 2 bytes) */
+		} else {
+		    part++, off = 0;
+		}
+
 		if (n++ > 0) {
 		    StrAdd(&s, ",\n\t", 3);
 		}
@@ -418,6 +728,12 @@ EspData(const char *in, int *count, int bytes)
 		StrAdd(&s, "(", 1);
 		StrAdd(&a, "", 0);
 		EspExprTo(&a, args, alen);
+		if (a.len >= 2 && a.text[0] == '{' && a.text[a.len - 1] == '}' &&
+		    strchr(a.text, ',') == NULL) {
+		    /* <(x)>: a value of its own */
+		    a.text[0] = ' ';
+		    a.text[a.len - 1] = ' ';
+		}
 		if (strncmp(word, "GS", 2) != 0) {
 		    /* (a structure's values are the macro's arguments) */
 		    for (i = 0; i < a.len; i++) {
@@ -521,6 +837,23 @@ EspData(const char *in, int *count, int bytes)
 		    if (n++ > 0) {
 			StrAdd(&s, ", ", 2);
 		    }
+		    if (bytes) {
+			if (isChunk) {
+			    off += 2;
+			} else if (isOptr) {
+			    off += 8;
+			} else if (isChar && olen >= 2 && *op == '"') {
+			    off += olen - 2;	/* (near enough: a label
+						 * after a string with \ is
+						 * not had) */
+			} else if (isChar) {
+			    off += WordIs(word, wlen, "wchar") ? 2 : 1;
+			} else if (isPlain) {
+			    off += width;
+			} else {
+			    part++, off = 0;
+			}
+		    }
 		    if (bytes && (isChunk || isOptr)) {
 			if (olen == 1 && *op == '0') {
 			    StrAdd(&s, isChunk ? "0, 0" :
@@ -594,8 +927,11 @@ EspData(const char *in, int *count, int bytes)
 	    }
 	}
     }
+    if (ncond != 0) {
+	espDataError = "uic -g: an if without endif in the data";
+    }
     *count = n;
-    return s.text;
+    return espNumLabels > 0 ? EspLabels(s.text) : s.text;
 }
 
 /*
@@ -890,7 +1226,9 @@ OutputVarData(Symbol *object)
     if (hSym != NullSymbol) {
 	for (hint = hSym->data.symHintList.firstHint;
 	     hint != NullObjectField; hint = hint->next) {
-	    if (hint->data.fieldHintEntry.data != NULL) {
+	    if (VarDataOmitted(hint->data.fieldHintEntry.name->name)) {
+		continue;
+	    } else if (hint->data.fieldHintEntry.data != NULL) {
 		int	n;
 		char	*c = EspData(hint->data.fieldHintEntry.data, &n, 0);
 		char	*name = hint->data.fieldHintEntry.name->name;
@@ -1000,6 +1338,9 @@ OutputGocVisMonikerDef(Symbol *sym)
 	    return;
 	}
 	c = EspData(data, &count, 1);
+	if (espDataError != NULL) {
+	    uicerror(sym, "%s", espDataError);
+	}
 	Output("{\n");
 	Output("    style = %s;\n", styles[(flags & V20_VMT_STYLE) >>
 					   V20_VMT_STYLE_FIELD]);
@@ -1275,6 +1616,10 @@ OutputGocChunk(Symbol *sym)
 	char	*c = EspData(sym->data.symChunk.data.chunkText, &n, 1);
 	char	*t = c;
 	int	tlen = 0, lower = 0;
+
+	if (espDataError != NULL) {
+	    uicerror(sym, "%s", espDataError);
+	}
 
 	/*
 	 * One structure (<Type> <values>, which came out as the macro

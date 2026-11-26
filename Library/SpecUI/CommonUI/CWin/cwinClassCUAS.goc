@@ -3,8 +3,8 @@
  * menu of a CUA style window and its icons.
  *
  * A window with OWA_HAS_SYS_MENU gets a copy of StandardWindowMenuResource
- * (a display: DisplayWindowMenuResource, cspecCUAS.goc), owned by the
- * window's owner, its output the window: the menu (or, without
+ * (a display: DisplayWindowMenuResource; both uic -g of cspecCUAS.ui),
+ * owned by the window's owner, its output the window: the menu (or, without
  * UIWO_WINDOW_MENU, only the button that closes the window) is linked up
  * to the window and built; its button in the title bar is the system
  * menu button.  The minimize, maximize and restore icons of the same

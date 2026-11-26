@@ -3,6 +3,7 @@
 #   Math/      the math library          Ghal/     the GHAL
 #   Gapi/      GAPI                      CInclude/ the headers under GEOS_PORT32
 #   Goc/       goc -cg                   Geode/    the geodes the tests load
+#   Uic/       uic -g
 #   Kernel/    the C kernel              Driver/   the drivers
 #   Library/   the libraries: the UI, text, printing
 #   Common/    what several tests share (the stand-in for CUPS)
@@ -101,6 +102,7 @@ add_subdirectory(Ghal)
 add_subdirectory(Gapi)
 add_subdirectory(CInclude)
 add_subdirectory(Goc)
+add_subdirectory(Uic)
 add_subdirectory(Kernel)
 add_subdirectory(Driver)
 add_subdirectory(Library)

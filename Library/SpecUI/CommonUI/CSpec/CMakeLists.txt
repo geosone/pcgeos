@@ -10,7 +10,6 @@ geos_sources(motif_goc
   cspecInteraction.goc
   cspecTrigger.goc
   cspecItem.goc
-  cspecCUAS.goc
   cspecStdDialog.goc
   cspecValue.goc
   cspecGlyphDisplay.goc

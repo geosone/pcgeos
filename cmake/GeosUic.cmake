@@ -4,7 +4,7 @@
 #
 #   geos_uic(<name> <file.ui> [PROLOG <file.goh>...] [RESOURCES <name>...]
 #            [INCLUDES <dir>...] [DEFINITIONS <def>...]
-#            [DEPENDS <target or file>...])
+#            [DEPENDS <target or file>...] [OMIT_VARDATA <name>...])
 #
 # Makes, in ${CMAKE_CURRENT_BINARY_DIR}/uic:
 #   <name>.goc	the goc source, a file of the geode: add ${<name>_UI_GOC}
@@ -19,13 +19,15 @@
 # its classes in C).  INCLUDES and DEFINITIONS are those of the .ui file
 # (Include/ is always there).  The .ui and .uih files it includes are
 # dependencies (uicpp -M); DEPENDS: what must be made first (the
-# pictures of an Art directory, geos_art()).
+# pictures of an Art directory, geos_art()).  OMIT_VARDATA: vardata uic
+# does not write (uic -N): goc takes no vardata of another class on an
+# object, as a specific UI's on a generic one; the code adds it.
 include_guard(GLOBAL)
 include(${CMAKE_CURRENT_LIST_DIR}/GeosHostTools.cmake)
 
 function(geos_uic name ui_file)
   cmake_parse_arguments(PARSE_ARGV 2 U "" ""
-                        "PROLOG;RESOURCES;INCLUDES;DEFINITIONS;DEPENDS")
+                        "PROLOG;RESOURCES;INCLUDES;DEFINITIONS;DEPENDS;OMIT_VARDATA")
   get_filename_component(ui_file ${ui_file} ABSOLUTE)
   get_filename_component(ui_dir ${ui_file} DIRECTORY)
   set(dir ${CMAKE_CURRENT_BINARY_DIR}/uic)
@@ -43,6 +45,9 @@ function(geos_uic name ui_file)
   set(args)
   foreach(res IN LISTS U_RESOURCES)
     list(APPEND args -G ${res})
+  endforeach()
+  foreach(v IN LISTS U_OMIT_VARDATA)
+    list(APPEND args -N ${v})
   endforeach()
   set(prologs)
   foreach(p IN LISTS U_PROLOG)

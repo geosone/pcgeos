@@ -1,0 +1,44 @@
+/*
+ * uicgstr.ui -- what uic -g makes of a gstring in Esp (ctest
+ * uic.goc.gstring, uic-goc.cmake): labels for the size of a bitmap
+ * (GSFillBitmapAtCP <(End-Start)>, as CommonUI/CSpec/mkrMinimize.ui),
+ * Esp's if/else (TEST_BIG given with -D, as THREE_DIMENSIONAL_BORDERS
+ * for mkrWindowMenuButton.ui), binary numbers, BM_MASK
+ * (CSpec/bmPin.ui), and a vardata left out with -N.
+ */
+#include "generic.uih"
+
+start TestResource, data;
+visMoniker TestMoniker = {
+	size = standard;
+	color = color4;
+	aspectRatio = normal;
+	cachedSize = 20, 4;
+	gstring {
+		GSBeginString
+		GSFillBitmapAtCP <(EndTestBM-StartTestBM)>
+		StartTestBM	label	byte
+if TEST_BIG
+			Bitmap < 20, 4, 0, <mask BM_MASK or BMF_MONO> >
+			db	11111111b, 11111111b, 11110000b
+			db	11111111b, 11111111b, 11110000b
+			db	11111111b, 11111111b, 11110000b
+			db	11111111b, 11111111b, 11110000b
+else
+			Bitmap < 20, 2, 0, <BMF_MONO> >
+			db	00000000b, 00001110b, 00000000b
+			db	00000000b, 00001000b, 00000000b
+endif
+		EndTestBM	label	byte
+		GSSetAreaColorIndex	C_BLACK
+		GSEndString
+	}
+}
+end TestResource;
+
+start TestUI;
+TestTrigger = GenTrigger {
+	moniker = "Test";
+	hints = { HINT_EXPAND_WIDTH_TO_FIT_PARENT, HINT_DEFAULT_DEFAULT_ACTION }
+}
+end TestUI;
