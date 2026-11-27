@@ -263,8 +263,7 @@ Boolean TA_UpdateRunsForReplacement(optr o,
 
 static void SetToken(optr o, TextRunKind kind, word i, word token)
 {
-    TA_Run(o, kind, i)->TRAE_token = token;
-    ObjMarkDirty(o);
+    TA_SetRunToken(o, kind, i, token);
 }
 /* MR_ModifyElementLow: the element changed by the callback (or
  * replaced by `token'), the old reference given up; the new token */

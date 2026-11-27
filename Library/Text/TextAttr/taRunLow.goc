@@ -18,60 +18,200 @@
  *
  * Port32 (Port32/ABI.md section 13z): runs are positions and tokens,
  * looked up by index (no pointers kept across a change of the block).
- * Not yet: large objects (runs in huge arrays), elements in a VM block
- * (TRAH_elementVMBlock: shared with other objects, style sheets),
- * graphics and type runs, undo, the cached last run position
+ * Not yet: graphics and type runs, undo, the cached last run position
  * (TEMP_VIS_TEXT_CACHED_RUN_INFO: only an optimization).
  */
 @include "textInt.goh"
 #include <chunkarr.h>
+#include <hugearr.h>
 #include <char.h>
 
 /* ---------------------------------------------------------------------
- * The run array (taRunLow.asm)
+ * The run array (taRunLow.asm: RunArrayLock, RunArrayInsert, ...)
+ *
+ * The runs of a small object are a chunk array in its block, those of a
+ * large object (and of a transfer format) a huge array in its VM file
+ * (TextLargeRunArrayHeader); TextRuns names either.
  * ------------------------------------------------------------------- */
 
-static ChunkHandle RunChunk(optr o, TextRunKind kind)
+/* RunArrayLock: the runs of a kind of the object */
+void TA_RunsOf(optr o, TextRunKind kind, TextRuns *r)
 {
     VisTextInstance *t = VT(o);
+    word h = kind == TRK_CHAR_ATTR ? t->VTI_charAttrRuns
+				   : t->VTI_paraAttrRuns;
 
-    return kind == TRK_CHAR_ATTR ? t->VTI_charAttrRuns : t->VTI_paraAttrRuns;
+    r->TR_file = T_GetVMFile(o);
+    if (t->VTI_storageFlags & VTSF_LARGE) {
+	r->TR_chunk = NullOptr;
+	r->TR_block = h;
+    } else {
+	r->TR_chunk = ConstructOptr(OptrToHandle(o), h);
+	r->TR_block = 0;
+    }
 }
 
-/* RunArrayLock */
-optr TA_RunArray(optr o, TextRunKind kind)
+/* the runs of a transfer format (or any huge array of runs) */
+void TA_RunsInFile(VMFileHandle f, VMBlockHandle b, TextRuns *r)
 {
-    return ConstructOptr(OptrToHandle(o), RunChunk(o, kind));
+    r->TR_chunk = NullOptr;
+    r->TR_file = f;
+    r->TR_block = b;
 }
 
-TextRunArrayElement *TA_Run(optr o, TextRunKind kind, word i)
+/* a run locked: of a huge array until RunsUnlock */
+static TextRunArrayElement *RunsLock(const TextRuns *r, word i)
 {
-    return ChunkArrayElementToPtr(TA_RunArray(o, kind), i, NULL);
+    void *p;
+    word size;
+
+    if (r->TR_block) {
+	(void) HugeArrayLock(r->TR_file, r->TR_block, i, &p, &size);
+	return p;
+    }
+    return ChunkArrayElementToPtr(r->TR_chunk, i, NULL);
 }
 
-static dword PosOf(const TextRunArrayElement *r)
+static void RunsUnlock(const TextRuns *r, TextRunArrayElement *e,
+		       Boolean dirty)
 {
-    return (word) r->TRAE_position.WAAH_low |
-	   ((dword) (byte) r->TRAE_position.WAAH_high << 16);
+    if (r->TR_block) {
+	if (dirty)
+	    HugeArrayDirty(e);
+	HugeArrayUnlock(e);
+    } else if (dirty)
+	ObjMarkDirty(r->TR_chunk);
 }
 
+word TA_RunsCount(const TextRuns *r)
+{
+    if (r->TR_block)
+	return (word) HugeArrayGetCount(r->TR_file, r->TR_block);
+    return (word) ChunkArrayGetCount(r->TR_chunk);
+}
+
+static dword PosOf(const TextRunArrayElement *e)
+{
+    return (word) e->TRAE_position.WAAH_low |
+	   ((dword) (byte) e->TRAE_position.WAAH_high << 16);
+}
+
+dword TA_RunsPosition(const TextRuns *r, word i)
+{
+    TextRunArrayElement *e = RunsLock(r, i);
+    dword pos = PosOf(e);
+
+    RunsUnlock(r, e, FALSE);
+    return pos;
+}
+
+word TA_RunsToken(const TextRuns *r, word i)
+{
+    TextRunArrayElement *e = RunsLock(r, i);
+    word token = e->TRAE_token;
+
+    RunsUnlock(r, e, FALSE);
+    return token;
+}
+
+static void SetPos(TextRunArrayElement *e, dword pos)
+{
+    e->TRAE_position.WAAH_low = (sword) (word) pos;
+    e->TRAE_position.WAAH_high = (sbyte) (byte) (pos >> 16);
+}
+
+void TA_RunsSetPosition(const TextRuns *r, word i, dword pos)
+{
+    TextRunArrayElement *e = RunsLock(r, i);
+
+    SetPos(e, pos);
+    RunsUnlock(r, e, TRUE);
+}
+
+void TA_RunsSetToken(const TextRuns *r, word i, word token)
+{
+    TextRunArrayElement *e = RunsLock(r, i);
+
+    e->TRAE_token = token;
+    RunsUnlock(r, e, TRUE);
+}
+
+/* RunArrayInsert: a run before run i */
+void TA_RunsInsert(const TextRuns *r, word i, dword pos, word token)
+{
+    TextRunArrayElement n;
+
+    SetPos(&n, pos);
+    n.TRAE_token = token;
+    if (r->TR_block) {
+	HugeArrayInsert(r->TR_file, r->TR_block, 1, i, &n);
+	return;
+    }
+    *(TextRunArrayElement *) ChunkArrayInsertAt(r->TR_chunk,
+		ChunkArrayElementToPtr(r->TR_chunk, i, NULL), 0) = n;
+    ObjMarkDirty(r->TR_chunk);
+}
+
+/* RunArrayDelete */
+void TA_RunsDelete(const TextRuns *r, word i)
+{
+    if (r->TR_block) {
+	HugeArrayDelete(r->TR_file, r->TR_block, 1, i);
+	return;
+    }
+    ChunkArrayDelete(r->TR_chunk, ChunkArrayElementToPtr(r->TR_chunk, i,
+							 NULL));
+    ObjMarkDirty(r->TR_chunk);
+}
+
+/* GetRunForPosition (right: a run starting at pos is the one) and
+ * GetRunForPositionLeft (the run before it); TEXT_ADDRESS_PAST_END is
+ * in the middle of the last real run */
+word TA_RunsForPosition(const TextRuns *r, dword pos, Boolean left)
+{
+    word n = TA_RunsCount(r), i;
+
+    for (i = 0; i < n; i++) {
+	dword p = TA_RunsPosition(r, i);
+	if (pos < p || (pos == p && TA_RunAtEnd(pos)))
+	    break;		/* in the middle of the run before */
+	if (pos == p)
+	    return left && i ? i - 1 : i;
+    }
+    return i ? i - 1 : 0;
+}
+
+/* (the object's runs of a kind) */
 dword TA_RunPosition(optr o, TextRunKind kind, word i)
 {
-    return PosOf(TA_Run(o, kind, i));
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    return TA_RunsPosition(&r, i);
 }
 
 word TA_RunToken(optr o, TextRunKind kind, word i)
 {
-    return TA_Run(o, kind, i)->TRAE_token;
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    return TA_RunsToken(&r, i);
 }
 
 void TA_SetRunPos(optr o, TextRunKind kind, word i, dword pos)
 {
-    TextRunArrayElement *r = TA_Run(o, kind, i);
+    TextRuns r;
 
-    r->TRAE_position.WAAH_low = (sword) (word) pos;
-    r->TRAE_position.WAAH_high = (sbyte) (byte) (pos >> 16);
-    ObjMarkDirty(o);
+    TA_RunsOf(o, kind, &r);
+    TA_RunsSetPosition(&r, i, pos);
+}
+
+void TA_SetRunToken(optr o, TextRunKind kind, word i, word token)
+{
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    TA_RunsSetToken(&r, i, token);
 }
 
 Boolean TA_RunAtEnd(dword pos)
@@ -79,35 +219,28 @@ Boolean TA_RunAtEnd(dword pos)
     return (pos >> 16) == TEXT_ADDRESS_PAST_END_HIGH;
 }
 
-/* RunArrayInsert: a run before run i */
-void TA_RunInsert(optr o, TextRunKind kind, word i, dword pos,
-		      word token)
+void TA_RunInsert(optr o, TextRunKind kind, word i, dword pos, word token)
 {
-    optr a = TA_RunArray(o, kind);
-    TextRunArrayElement *r;
+    TextRuns r;
 
-    r = ChunkArrayInsertAt(a, ChunkArrayElementToPtr(a, i, NULL), 0);
-    r->TRAE_token = token;
-    TA_SetRunPos(o, kind, i, pos);
+    TA_RunsOf(o, kind, &r);
+    TA_RunsInsert(&r, i, pos, token);
 }
 
-/*
- * GetRunForPosition (right: a run starting at pos is the one) and
- * GetRunForPositionLeft (the run before it); TEXT_ADDRESS_PAST_END is
- * in the middle of the last real run
- */
 word TA_RunForPosition(optr o, TextRunKind kind, dword pos, Boolean left)
 {
-    word n = (word) ChunkArrayGetCount(TA_RunArray(o, kind)), i;
+    TextRuns r;
 
-    for (i = 0; i < n; i++) {
-	dword p = TA_RunPosition(o, kind, i);
-	if (pos < p || (pos == p && TA_RunAtEnd(pos)))
-	    break;		/* in the middle of the run before */
-	if (pos == p)
-	    return left && i ? i - 1 : i;
-    }
-    return i ? i - 1 : 0;
+    TA_RunsOf(o, kind, &r);
+    return TA_RunsForPosition(&r, pos, left);
+}
+
+void RunArrayDelete(optr o, TextRunKind kind, word i)
+{
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    TA_RunsDelete(&r, i);
 }
 
 /* ---------------------------------------------------------------------
@@ -118,11 +251,4 @@ word TA_RunForPosition(optr o, TextRunKind kind, dword pos, Boolean left)
  * The runs after a replacement (UpdateRun)
  * ------------------------------------------------------------------- */
 
-/* RunArrayDelete */
-void RunArrayDelete(optr o, TextRunKind kind, word i)
-{
-    optr a = TA_RunArray(o, kind);
 
-    ChunkArrayDelete(a, ChunkArrayElementToPtr(a, i, NULL));
-    ObjMarkDirty(o);
-}

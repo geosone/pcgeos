@@ -105,6 +105,40 @@ extern void ReflectChangeUpdateGeneric(optr o);
 /* TextAttr/taRunLow.goc and beside: the attribute runs (VTSF_MULTIPLE_CHAR_ATTRS,
  * VTSF_MULTIPLE_PARA_ATTRS) */
 typedef enum { TRK_CHAR_ATTR, TRK_PARA_ATTR } TextRunKind;
+/* runs: a chunk array of the object (TR_chunk) or a huge array
+ * (TR_block) in TR_file, the file of their elements in a VM block */
+typedef struct {
+    optr		TR_chunk;
+    VMFileHandle	TR_file;
+    VMBlockHandle	TR_block;
+} TextRuns;
+extern void TA_RunsOf(optr o, TextRunKind kind, TextRuns *r);
+extern void TA_RunsInFile(VMFileHandle f, VMBlockHandle b, TextRuns *r);
+extern word TA_RunsCount(const TextRuns *r);
+extern dword TA_RunsPosition(const TextRuns *r, word i);
+extern word TA_RunsToken(const TextRuns *r, word i);
+extern void TA_RunsSetPosition(const TextRuns *r, word i, dword pos);
+extern void TA_RunsSetToken(const TextRuns *r, word i, word token);
+extern void TA_RunsInsert(const TextRuns *r, word i, dword pos, word token);
+extern void TA_RunsDelete(const TextRuns *r, word i);
+extern word TA_RunsForPosition(const TextRuns *r, dword pos, Boolean left);
+extern void TA_RunsGetElement(const TextRuns *r, TextRunKind kind,
+			      word token, void *buf);
+extern word TA_RunsAddElement(const TextRuns *r, TextRunKind kind,
+			      void *element);
+extern void TA_RunsElementAddRef(const TextRuns *r, word token);
+extern void TA_RunsRemoveElement(const TextRuns *r, word token);
+extern void TA_SetRunToken(optr o, TextRunKind kind, word i, word token);
+/* TextAttr/taStorage.goc: runs and their elements in a VM file */
+extern VMBlockHandle TA_CreateRunsInFile(VMFileHandle f, TextRunKind kind);
+extern VMBlockHandle TA_RunsElementBlock(VMFileHandle f, VMBlockHandle runs);
+/* TextAttr/taRunTrans.goc: runs to and from a transfer */
+extern void TA_CopyRunToTransfer(optr o, TextRunKind kind,
+				 const VisTextRange *range, VMFileHandle f,
+				 VMBlockHandle xfer);
+extern void TA_CopyRunFromTransfer(optr o, TextRunKind kind,
+				   const VisTextRange *range, VMFileHandle f,
+				   VMBlockHandle xfer);
 /* the element (a VisTextCharAttr or VisTextMaxParaAttr) changed */
 typedef void TA_ModifyCallback(optr o, void *element, void *data);
 extern word TA_RunForPosition(optr o, TextRunKind kind, dword pos,
@@ -432,7 +466,6 @@ word ClearInsertionElement(optr o, Boolean unref);
 void SetInsertionElement(optr o, word token);
 
 /* taRunManip.goc (for taRunLow.goc) */
-optr TA_RunArray(optr o, TextRunKind kind);
 void TA_SetRunPos(optr o, TextRunKind kind, word i, dword pos);
 Boolean TA_RunAtEnd(dword pos);
 dword CoalesceRun(optr o, TextRunKind kind);
@@ -451,7 +484,6 @@ dword FindPreviousParagraphEdge(optr o, dword off);
 dword FindNextParagraphEdge(optr o, dword off);
 
 /* taRunLow.goc (for taRunManip.goc) */
-TextRunArrayElement *TA_Run(optr o, TextRunKind kind, word i);
 void TA_RunInsert(optr o, TextRunKind kind, word i, dword pos,
 	word token);
 

@@ -5,6 +5,7 @@
  */
 @include "textInt.goh"
 #include <chunkarr.h>
+#include <hugearr.h>
 #include <char.h>
 
 /* GetInsertionElement */
@@ -41,14 +42,42 @@ void SetInsertionElement(optr o, word token)
     TA_ElementAddRef(o, TRK_CHAR_ATTR, token);
 }
 
-/* ElementArrayLock: the elements are in the object's block */
-static optr Elements(optr o, TextRunKind kind)
+/*
+ * ElementArrayLock: the element array of runs: a chunk of the object's
+ * block, or VM_ELEMENT_ARRAY_CHUNK of an LMem VM block of the runs'
+ * file (TRAH_elementVMBlock of small runs, TLRAH_elementVMBlock of a
+ * huge array); *vm the block to give back (ElementArrayUnlock)
+ */
+static optr ElementArrayLock(const TextRuns *r, MemHandle *vm)
 {
-    TextRunArrayHeader *h = LMemDeref(TA_RunArray(o, kind));
+    VMBlockHandle b;
 
-    if (h->TRAH_elementVMBlock)
-	EC_ERROR(-1);	/* (elements in a VM block: not yet) */
-    return ConstructOptr(OptrToHandle(o), h->TRAH_elementArray);
+    *vm = 0;
+    if (r->TR_block) {
+	TextLargeRunArrayHeader *h;
+
+	HugeArrayLockDir(r->TR_file, r->TR_block, (void **) &h);
+	b = h->TLRAH_elementVMBlock;
+	HugeArrayUnlockDir(h);
+    } else {
+	TextRunArrayHeader *h = LMemDeref(r->TR_chunk);
+
+	b = h->TRAH_elementVMBlock;
+	if (!b)
+	    return ConstructOptr(OptrToHandle(r->TR_chunk),
+				 h->TRAH_elementArray);
+    }
+    (void) VMLock(r->TR_file, b, vm);
+    return ConstructOptr(*vm, VM_ELEMENT_ARRAY_CHUNK);
+}
+
+static void ElementArrayUnlock(MemHandle vm, Boolean dirty)
+{
+    if (!vm)
+	return;
+    if (dirty)
+	VMDirty(vm);
+    VMUnlock(vm);
 }
 
 /* ---------------------------------------------------------------------
@@ -62,32 +91,81 @@ static word ElementSize(TextRunKind kind)
 }
 
 /* GetElement */
-void TA_GetElement(optr o, TextRunKind kind, word token, void *buf)
+void TA_RunsGetElement(const TextRuns *r, TextRunKind kind, word token,
+		       void *buf)
 {
+    MemHandle vm;
     word size;
-    void *e = ChunkArrayElementToPtr(Elements(o, kind), token, &size);
+    void *e = ChunkArrayElementToPtr(ElementArrayLock(r, &vm), token, &size);
 
     memset(buf, 0, ElementSize(kind));
     memcpy(buf, e, size);
+    ElementArrayUnlock(vm, FALSE);
 }
 
 /* AddElement: the element's token, with a reference more */
-word TA_AddElement(optr o, TextRunKind kind, void *element)
+word TA_RunsAddElement(const TextRuns *r, TextRunKind kind, void *element)
 {
+    MemHandle vm;
+    optr a = ElementArrayLock(r, &vm);
+    word t;
+
     if (kind == TRK_PARA_ATTR)
-	return ElementArrayAddElementSized(Elements(o, kind), element,
-					   TA_ParaAttrSize(element), 0, NULL);
-    return ElementArrayAddElement(Elements(o, kind), element, 0, NULL);
+	t = ElementArrayAddElementSized(a, element, TA_ParaAttrSize(element),
+					0, NULL);
+    else
+	t = ElementArrayAddElement(a, element, 0, NULL);
+    ElementArrayUnlock(vm, TRUE);
+    return t;
 }
 
 /* ElementAddRef */
-void TA_ElementAddRef(optr o, TextRunKind kind, word token)
+void TA_RunsElementAddRef(const TextRuns *r, word token)
 {
-    ElementArrayAddReference(Elements(o, kind), token);
+    MemHandle vm;
+
+    ElementArrayAddReference(ElementArrayLock(r, &vm), token);
+    ElementArrayUnlock(vm, TRUE);
 }
 
 /* RemoveElement */
+void TA_RunsRemoveElement(const TextRuns *r, word token)
+{
+    MemHandle vm;
+
+    ElementArrayRemoveReference(ElementArrayLock(r, &vm), token, 0, NULL);
+    ElementArrayUnlock(vm, TRUE);
+}
+
+/* (the object's elements of a kind) */
+void TA_GetElement(optr o, TextRunKind kind, word token, void *buf)
+{
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    TA_RunsGetElement(&r, kind, token, buf);
+}
+
+word TA_AddElement(optr o, TextRunKind kind, void *element)
+{
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    return TA_RunsAddElement(&r, kind, element);
+}
+
+void TA_ElementAddRef(optr o, TextRunKind kind, word token)
+{
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    TA_RunsElementAddRef(&r, token);
+}
+
 void TA_RemoveElement(optr o, TextRunKind kind, word token)
 {
-    ElementArrayRemoveReference(Elements(o, kind), token, 0, NULL);
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    TA_RunsRemoveElement(&r, token);
 }

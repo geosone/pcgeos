@@ -14,7 +14,7 @@
  * Port32 (Port32/ABI.md section 13z), not yet: undo (the cut and the
  * paste as one undo chain), graphics (pasting a CIF_GRAPHICS_STRING
  * into an object with graphics, GenerateGStringFormatIfAppropriate),
- * the runs of the clipboard object.
+ * the types, graphics and styles of the clipboard object.
  */
 @include "textInt.goh"
 @include <Objects/clipbrd.goh>
@@ -178,7 +178,7 @@ optr _pascal TextAllocClipboardObject(VMFileHandle file,
 	file = ClipboardGetClipboardFile();
     @call o::MSG_VIS_TEXT_SET_VM_FILE(file);
     @call o::MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES();
-    @call o::MSG_VIS_TEXT_CREATE_STORAGE(regionFlag, storageFlags);
+    @call o::MSG_VIS_TEXT_CREATE_STORAGE(storageFlags, regionFlag);
     return o;
 }
 
@@ -206,7 +206,17 @@ VMBlockHandle _pascal TextFinishWithClipboardObject(optr obj,
     t = VMLock(f, header, &th);
     vt = VT(obj);
     t->TTBH_text = VMCHAIN_MAKE_FROM_VM_BLOCK(vt->VTI_text);
-    /* (Port32: the runs not yet) */
+    if (vt->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS) {
+	t->TTBH_charAttrRuns = VMCHAIN_MAKE_FROM_VM_BLOCK(vt->VTI_charAttrRuns);
+	t->TTBH_charAttrElements = VMCHAIN_MAKE_FROM_VM_BLOCK(
+		TA_RunsElementBlock(f, vt->VTI_charAttrRuns));
+    }
+    if (vt->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS) {
+	t->TTBH_paraAttrRuns = VMCHAIN_MAKE_FROM_VM_BLOCK(vt->VTI_paraAttrRuns);
+	t->TTBH_paraAttrElements = VMCHAIN_MAKE_FROM_VM_BLOCK(
+		TA_RunsElementBlock(f, vt->VTI_paraAttrRuns));
+    }
+    /* (Port32, not yet: types, graphics, styles) */
     VMDirty(th);
     VMUnlock(th);
     ret = header;

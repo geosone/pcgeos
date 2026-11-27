@@ -7,8 +7,11 @@
  * refused with an error box (PASTE_ERROR_BOXES) unless the object has
  * ATTR_VIS_TEXT_DONT_BEEP_ON_INSERTION_ERROR.
  *
- * Port32 (Port32/ABI.md section 13z), not yet: the runs of the format
- * copied (TA_CopyRunFromTransfer, the element blocks fixed), graphics
+ * The runs of the format are given to the new text where the object has
+ * multiple attributes of their kind (TA_CopyRunFromTransfer), else the
+ * text takes the attributes at its place.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: graphics
  * relocated (TT_RelocateGraphics), the quick move's special case
  * (QuickMoveSpecial), suspension; the error box is a beep (there is no
  * MSG_GEN_APPLICATION_DO_STANDARD_DIALOG in C yet).
@@ -23,6 +26,22 @@ static void PasteError(optr o)
 	UserStandardSound(SST_ERROR);
 }
 
+/* fixElementVMBlock: the runs' header names the element block of the
+ * format (a copied format has blocks of its own) */
+static void FixElementVMBlock(VMFileHandle f, VMChain runs, VMChain els)
+{
+    TextLargeRunArrayHeader *h;
+
+    if (!runs)
+	return;
+    HugeArrayLockDir(f, VMCHAIN_GET_VM_BLOCK(runs), (void **) &h);
+    if (h->TLRAH_elementVMBlock != VMCHAIN_GET_VM_BLOCK(els)) {
+	h->TLRAH_elementVMBlock = VMCHAIN_GET_VM_BLOCK(els);
+	HugeArrayDirty(h);
+    }
+    HugeArrayUnlockDir(h);
+}
+
 /* VisTextReplaceWithTransferFormat (the asm's carry, set if refused,
  * is not in the C message) */
 @extern method VisTextClass, MSG_VIS_TEXT_REPLACE_WITH_TEXT_TRANSFER_FORMAT
@@ -32,12 +51,18 @@ static void PasteError(optr o)
     TextTransferBlockHeader *t;
     MemHandle mh;
     dword count;
+    VMBlockHandle charRuns, paraRuns;
+    VisTextStorageFlags flags;
 
     (void) pasteFrame;
     r.VTR_start = start;
     r.VTR_end = end;
     TA_GetTextRange(oself, &r, 0);
     t = VMLock(file, block, &mh);
+    FixElementVMBlock(file, t->TTBH_charAttrRuns, t->TTBH_charAttrElements);
+    FixElementVMBlock(file, t->TTBH_paraAttrRuns, t->TTBH_paraAttrElements);
+    charRuns = VMCHAIN_GET_VM_BLOCK(t->TTBH_charAttrRuns);
+    paraRuns = VMCHAIN_GET_VM_BLOCK(t->TTBH_paraAttrRuns);
     memset(&p, 0, sizeof(p));
     p.VTRP_range = r;
     p.VTRP_flags = VTRF_FILTER | VTRF_USER_MODIFICATION;
@@ -62,6 +87,22 @@ static void PasteError(optr o)
     if (@call oself::MSG_VIS_TEXT_REPLACE_TEXT(&p)) {
 	PasteError(oself);
 	return;
+    }
+    r.VTR_end = r.VTR_start + p.VTRP_insCount;
+    flags = VT(oself)->VTI_storageFlags;
+    if (!(flags & VTSF_MULTIPLE_CHAR_ATTRS))
+	charRuns = 0;
+    if (!(flags & VTSF_MULTIPLE_PARA_ATTRS))
+	paraRuns = 0;
+    if (charRuns || paraRuns) {
+	TextGStateCreate(oself);
+	EditUnHilite(oself);
+	if (charRuns)
+	    TA_CopyRunFromTransfer(oself, TRK_CHAR_ATTR, &r, file, charRuns);
+	if (paraRuns)
+	    TA_CopyRunFromTransfer(oself, TRK_PARA_ATTR, &r, file, paraRuns);
+	/* (the asm's TextUnsuspend: the lines made again) */
+	ReflectChangeUpdateGeneric(oself);
     }
     TA_SendNotification(oself, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS |
 			VTNF_NAME);

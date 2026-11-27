@@ -4,6 +4,7 @@
 @include "textInt.goh"
 #include <chunkarr.h>
 #include <char.h>
+#include <hugearr.h>
 
 /* ---------------------------------------------------------------------
  * Storage (taStorage.asm)
@@ -35,8 +36,71 @@ static ChunkHandle CreateArrays(optr o, TextArrayType type, word elSize)
     return runs;
 }
 
+/* TA_CreateElementArray in an LMem VM block of f: the array is its
+ * VM_ELEMENT_ARRAY_CHUNK */
+static VMBlockHandle CreateVMElementArray(VMFileHandle f, TextArrayType type,
+					  word elSize)
+{
+    VMBlockHandle b = VMAllocLMem(f, LMEM_TYPE_GENERAL, 0);
+    MemHandle mh;
+    ChunkHandle c;
+    TextElementArrayHeader *eh;
+
+    (void) VMLock(f, b, &mh);
+    c = ElementArrayCreate(mh, elSize, sizeof(TextElementArrayHeader),
+			   OCF_DIRTY);
+    EC_ERROR_IF(c != VM_ELEMENT_ARRAY_CHUNK, -1);
+    eh = LMemDerefHandles(mh, c);
+    eh->TEAH_arrayType = type;
+    eh->TEAH_unused = 0;
+    VMDirty(mh);
+    VMUnlock(mh);
+    return b;
+}
+
+/*
+ * TA_CreateRunAndElementArrays in VM (a large object's, a transfer
+ * format's): a huge array of runs with its last run, its elements in a
+ * VM block (TLRAH_elementVMBlock)
+ */
+VMBlockHandle TA_CreateRunsInFile(VMFileHandle f, TextRunKind kind)
+{
+    Boolean para = kind == TRK_PARA_ATTR;
+    VMBlockHandle els = CreateVMElementArray(f,
+				para ? TAT_PARA_ATTRS : TAT_CHAR_ATTRS,
+				para ? 0 : sizeof(VisTextCharAttr));
+    VMBlockHandle runs = HugeArrayCreate(f, sizeof(TextRunArrayElement),
+					 sizeof(TextLargeRunArrayHeader));
+    TextLargeRunArrayHeader *h;
+    TextRunArrayElement last;
+
+    /* SetElementBlock */
+    HugeArrayLockDir(f, runs, (void **) &h);
+    h->TLRAH_elementVMBlock = els;
+    HugeArrayDirty(h);
+    HugeArrayUnlockDir(h);
+    last.TRAE_position.WAAH_low = (sword) TEXT_ADDRESS_PAST_END_LOW;
+    last.TRAE_position.WAAH_high = (sbyte) TEXT_ADDRESS_PAST_END_HIGH;
+    last.TRAE_token = CA_NULL_ELEMENT;
+    HugeArrayAppend(f, runs, 1, &last);
+    return runs;
+}
+
+/* the element block of runs in a huge array */
+VMBlockHandle TA_RunsElementBlock(VMFileHandle f, VMBlockHandle runs)
+{
+    TextLargeRunArrayHeader *h;
+    VMBlockHandle b;
+
+    HugeArrayLockDir(f, runs, (void **) &h);
+    b = h->TLRAH_elementVMBlock;
+    HugeArrayUnlockDir(h);
+    return b;
+}
+
 /* the object's single attribute of a kind made the one run of new
- * arrays (addElementAndInsertRun); the chunk of the attribute freed */
+ * arrays (addElementAndInsertRun); the chunk of the attribute freed
+ * (a large object's runs in its VM file) */
 static void CreateRuns(optr o, TextRunKind kind)
 {
     VisTextMaxParaAttr a;	/* (large enough for both) */
@@ -54,8 +118,11 @@ static void CreateRuns(optr o, TextRunKind kind)
     single = !(t->VTI_storageFlags & def);
     old = para ? t->VTI_paraAttrRuns : t->VTI_charAttrRuns;
     /* (paragraph attributes have their tabs: of variable size) */
-    runs = CreateArrays(o, para ? TAT_PARA_ATTRS : TAT_CHAR_ATTRS,
-			para ? 0 : sizeof(VisTextCharAttr));
+    if (t->VTI_storageFlags & VTSF_LARGE)
+	runs = TA_CreateRunsInFile(T_GetVMFile(o), kind);
+    else
+	runs = CreateArrays(o, para ? TAT_PARA_ATTRS : TAT_CHAR_ATTRS,
+			    para ? 0 : sizeof(VisTextCharAttr));
     t = VT(o);
     if (para)
 	t->VTI_paraAttrRuns = runs;

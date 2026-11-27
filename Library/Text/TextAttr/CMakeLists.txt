@@ -7,6 +7,7 @@ geos_sources(text_goc
   taAttr.goc
   taRunLow.goc
   taStorage.goc
+  taRunTrans.goc
   taRunManip.goc
   taElement.goc
   taNotify.goc)

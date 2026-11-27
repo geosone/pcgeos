@@ -48,18 +48,33 @@ static word Uid(VMFileHandle file, VMBlockHandle b)
     return VHGet16(VMFileOf(file), (word) (b + VMBH_UID));
 }
 
-/* the link of block b, locked at p */
-static word Link(VMFileHandle file, VMBlockHandle b, const byte *p)
+/*
+ * Port32: an LMem block (HF_LMEM) starts with its 32-bit handle, not a
+ * link: it ends its chain.  (The asm's text object cleared the handle
+ * and HF_LMEM of the element blocks of a transfer for the clipboard,
+ * MakeTransferFormatNotLMem, and set them again to use them.)
+ */
+static Boolean IsLMem(MemHandle mh)
+{
+    return (MemGetInfo(mh, MGIT_FLAGS_AND_LOCK_COUNT) & HF_LMEM) != 0;
+}
+
+/* the link of block b, locked at p (mh) */
+static word Link(VMFileHandle file, VMBlockHandle b, const byte *p,
+		 MemHandle mh)
 {
     Boolean ha;
     word l = VMHugeArrayLink(Uid(file, b), p, &ha);
 
-    return ha ? l : Get16(p);
+    if (ha)
+	return l;
+    return IsLMem(mh) ? 0 : Get16(p);
 }
 
-static void SetLink(VMFileHandle file, VMBlockHandle b, byte *p, word l)
+static void SetLink(VMFileHandle file, VMBlockHandle b, byte *p, word l,
+		    MemHandle mh)
 {
-    if (!VMHugeArraySetLink(Uid(file, b), p, l))
+    if (!VMHugeArraySetLink(Uid(file, b), p, l) && !IsLMem(mh))
 	Put16(p, l);
 }
 
@@ -91,7 +106,7 @@ static Boolean IsTree(VMFileHandle file, VMBlockHandle b, VMBlockHandle *next)
 {
     MemHandle mh;
     const byte *p = VMLock(file, b, &mh);
-    word n = Link(file, b, p);
+    word n = Link(file, b, p, mh);
 
     VMUnlock(mh);
     *next = n == VM_CHAIN_TREE ? 0 : n;
@@ -150,7 +165,7 @@ VMChain VMCopyVMChain(VMFileHandle sourceFile, VMChain sourceChain,
 	}
 	if (prev) {
 	    p = VMLock(destFile, prev, &mh);
-	    SetLink(destFile, prev, p, nb);
+	    SetLink(destFile, prev, p, nb, mh);
 	    VMDirty(mh);
 	    VMUnlock(mh);
 	}
@@ -159,7 +174,7 @@ VMChain VMCopyVMChain(VMFileHandle sourceFile, VMChain sourceChain,
     }
     if (prev) {				/* the copy's last link */
 	p = VMLock(destFile, prev, &mh);
-	SetLink(destFile, prev, p, 0);
+	SetLink(destFile, prev, p, 0, mh);
 	VMDirty(mh);
 	VMUnlock(mh);
     }

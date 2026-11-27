@@ -1,0 +1,122 @@
+/*
+ * taRunTrans.goc -- after taRunTrans.asm: runs copied between a text
+ * object and a transfer format (TA_CopyRunToTransfer,
+ * TA_CopyRunFromTransfer, CopyTransferElement, LoadCopyRunParams).
+ *
+ * The runs of a transfer are a huge array in its file whose positions
+ * start at 0, their elements in a VM block of the file (taStorage.goc).
+ * Each run's element is copied to the other side's element array.
+ *
+ * Port32 (Port32/ABI.md section 13z): without style sheets (the Styles
+ * library is not in C): a copied element's style is CA_NULL_ELEMENT,
+ * as the asm's when the destination has no style array, and the runs
+ * the asm adds at the paragraph edges of a paste for the styles
+ * (posToStartStyleCopy, posToEndStyleCopy) are left out (with no styles
+ * they repeat the run before and are coalesced).  Not yet: type runs
+ * and their names (TypeRunCopyNames), graphic runs, undo.
+ */
+@include "textInt.goh"
+#include <stylesh.h>
+
+/* CopyTransferElement: the element of a run, a reference to it in the
+ * other runs' elements */
+static word CopyTransferElement(const TextRuns *from, const TextRuns *to,
+				TextRunKind kind, word token)
+{
+    VisTextMaxParaAttr buf;	/* (large enough for both) */
+
+    TA_RunsGetElement(from, kind, token, &buf);
+    ((StyleSheetElementHeader *) &buf)->SSEH_style = CA_NULL_ELEMENT;
+    return TA_RunsAddElement(to, kind, &buf);
+}
+
+/*
+ * TA_CopyRunToTransfer: the runs of a kind of the object over the
+ * range, appended to the transfer's runs (xfer: their huge array in f)
+ * with positions from the range's start
+ */
+void TA_CopyRunToTransfer(optr o, TextRunKind kind, const VisTextRange *range,
+			  VMFileHandle f, VMBlockHandle xfer)
+{
+    TextRuns obj, x;
+    word i, xi = 0;
+    dword sourceStart, pos;
+
+    TA_RunsOf(o, kind, &obj);
+    TA_RunsInFile(f, xfer, &x);
+    i = TA_RunsForPosition(&obj, range->VTR_start, FALSE);
+    sourceStart = TA_RunsPosition(&obj, i);
+    for (;;) {
+	word token;
+
+	pos = TA_RunsPosition(&obj, i);
+	if (TA_RunAtEnd(pos))
+	    break;
+	token = CopyTransferElement(&obj, &x, kind, TA_RunsToken(&obj, i));
+	TA_RunsInsert(&x, xi++, pos - sourceStart, token);
+	i++;
+	sourceStart = range->VTR_start;
+	if (TA_RunsPosition(&obj, i) >= range->VTR_end)
+	    break;
+    }
+}
+
+/*
+ * TA_CopyRunFromTransfer: the transfer's runs (xfer in f) given to the
+ * range of the object the transfer's text was just inserted at.  A
+ * paragraph attribute starts at the first paragraph that starts in the
+ * range: the paragraph the text went into keeps its own.
+ */
+void TA_CopyRunFromTransfer(optr o, TextRunKind kind,
+			    const VisTextRange *range, VMFileHandle f,
+			    VMBlockHandle xfer)
+{
+    TextRuns obj, x;
+    dword textsize = TS_GetTextSize(o), start = range->VTR_start,
+	  adjustment = 0, xpos;
+    word i, xi = 0, token;
+    Boolean inserted = FALSE;
+
+    TA_RunsOf(o, kind, &obj);
+    TA_RunsInFile(f, xfer, &x);
+    i = TA_RunsForPosition(&obj, start, FALSE);
+    /* the attribute after the range goes on after it */
+    token = TA_RunsToken(&obj, i);
+    i++;
+    if (range->VTR_end != TA_RunsPosition(&obj, i) &&
+	range->VTR_end != textsize) {
+	TA_RunsElementAddRef(&obj, token);
+	TA_RunsInsert(&obj, i, range->VTR_end, token);
+	inserted = TRUE;
+    }
+    if (kind == TRK_PARA_ATTR && !TSL_IsParagraphStart(o, start)) {
+	dword end = start;
+
+	if (!TSL_FindParagraphEnd(o, &end))
+	    goto afterLoop;
+	end++;
+	adjustment = end - start;
+	start = end;
+	if (start > range->VTR_end)
+	    goto afterLoop;
+    }
+    do {
+	dword next;
+
+	xpos = TA_RunsPosition(&x, xi);
+	if (TA_RunAtEnd(xpos))
+	    break;
+	token = CopyTransferElement(&x, &obj, kind, TA_RunsToken(&x, xi));
+	TA_RunsInsert(&obj, i++, start, token);
+	next = TA_RunsPosition(&x, ++xi);
+	start = next - xpos + start - adjustment;
+	adjustment = 0;
+    } while (start < range->VTR_end);
+afterLoop:
+    if (kind == TRK_PARA_ATTR && inserted)
+	/* (the run after the range starts a paragraph) */
+	TA_RunsSetPosition(&obj, i,
+			   TSL_FindParagraphStart(o,
+						  TA_RunsPosition(&obj, i)));
+    (void) CoalesceRun(o, kind);
+}

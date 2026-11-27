@@ -7214,10 +7214,15 @@ the modules of the asm; what is there:
   attribute, each line is calculated with its paragraph's
   (`T_EnsureCorrectParaAttr`). Their elements have their tabs, so they
   are of variable size: the kernel exports `ElementArrayAddElementSized`
-  (`chunkarr.h`, Port32 only; `Tools/kexports`). Not yet: large
-  objects (runs in huge arrays), elements in a VM block shared with
-  other objects (`TRAH_elementVMBlock`), style sheets (`CA_NULL_ELEMENT`
-  as the base style), type and graphic runs, undo, the notifications.
+  (`chunkarr.h`, Port32 only; `Tools/kexports`). The runs of a large
+  object are a huge array of `TextRunArrayElement` in its VM file whose
+  directory is a `TextLargeRunArrayHeader`; their elements are in an
+  LMem VM block of the file (`TLRAH_elementVMBlock`, the array at
+  `VM_ELEMENT_ARRAY_CHUNK`), as are a small object's whose
+  `TRAH_elementVMBlock` is set. `TextRuns` in `taRunLow.goc` names
+  either kind of run array; the `TA_Runs*` routines work on it. Not
+  yet: style sheets (`CA_NULL_ELEMENT` as the base style), type and
+  graphic runs, undo.
   ctest `library.text` (steps 13 and 14).
 - **Port32 changes in the C API.** The block of
   `MSG_VIS_TEXT_REPLACE_ALL_BLOCK`, `MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK`,
@@ -7435,9 +7440,21 @@ the modules of the asm; what is there:
   the normal item has text, or a gstring for an object with graphics.
   `TextAllocClipboardObject` and `TextFinishWithClipboardObject` give
   an application a large object whose text array becomes the format.
-  The format carries no runs yet, so pasted text takes the attributes
-  at its place. Graphics, undo chains, quick transfer and the
-  name/type/style arrays come later.
+  An object with multiple character or paragraph attributes puts its
+  runs into the format: `TTBH_charAttrRuns` and `TTBH_paraAttrRuns`
+  are huge arrays starting at 0, with their elements in
+  `TTBH_*Elements` (`TextAttr/taRunTrans.goc`). A paste gives them to
+  the new text if the object has multiple attributes of that kind;
+  otherwise the text takes the attributes at its place. A paragraph
+  attribute starts at the first paragraph that begins in the paste, so
+  the paragraph pasted into keeps its own. A copied element's style is
+  `CA_NULL_ELEMENT`. The asm also adds runs at the paste's paragraph
+  edges for style sheets; those are left out, because without styles
+  they repeat their neighbour. The element blocks stay LMem blocks: the
+  kernel's `VMCopyVMChain` and `VMFreeVMChain` treat an `HF_LMEM` block
+  as the end of its chain (`VMem/vmemChain.c`), so the asm's
+  `MakeTransferFormatNotLMem` is not needed. Graphics, undo chains,
+  quick transfer and the name/type/style arrays come later.
 - **References.** Text is copied from and to all kinds of references:
   pointer, chunk, block, VM block, DB item and huge array
   (`tsReference.goc`). A destination is first resized to the text plus

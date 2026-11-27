@@ -48,6 +48,7 @@ typedef struct {
     word	TOS_large[3];		/* of step 22 */
     MemHandle	TOS_selectBlock;	/* (step 23) the select state */
     word	TOS_paste[2];		/* of step 23 */
+    word	TOS_runs[2];		/* of step 24 */
 } TOState;
 
 TOState toState;
@@ -1591,6 +1592,109 @@ static Boolean TOItemName(TransferBlockID id, const char *name)
 	if (!(state & VTS_EDITABLE))
 	    @call TOText::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(0,
 							VTS_EDITABLE);
+	ClipboardCloseClipboardFile();
+	break;
+    }
+    case 24: {
+	/* the attribute runs go with a copy: a font and a margin copied
+	 * from one object, pasted into another (a paragraph begun in the
+	 * paste gets its margin, the one pasted into keeps its own); an
+	 * application's clipboard object (a large object: runs in huge
+	 * arrays) with a font */
+	ClipboardQueryArgs q;
+	ClipboardRequestArgs ra;
+	TextTransferBlockHeader *t;
+	VisTextCharAttrDiffs d;
+	VisTextParaAttrDiffs pd;
+	VisTextMaxParaAttr a;
+	MemHandle mh;
+	FontID base;
+	word tk;
+	optr n, m, co;
+
+	TOCHECK(ClipboardOpenClipboardFile() == 0);
+	n = ObjInstantiate(OptrToHandle(@TOText),
+			   (ClassStruct *) &VisTextClass);
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("ab\rcd\ref", 0);
+	@call n::MSG_VIS_TEXT_CREATE_STORAGE(VTSF_MULTIPLE_CHAR_ATTRS |
+					     VTSF_MULTIPLE_PARA_ATTRS, 0);
+	base = FontOf(n, 0, 1, &tk, &d);
+	@call n::MSG_VIS_TEXT_SET_FONT_ID(FID_ROMA, 5, 4);
+	@call n::MSG_VIS_TEXT_SET_LEFT_MARGIN(72 * 8, 4, 4);
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(8, 3);
+	@call n::MSG_META_CLIPBOARD_COPY();
+	ClipboardQueryItem(TIF_NORMAL, &q);
+	ClipboardRequestItemFormat(FormatIDFromManufacturerAndType(
+			MANUFACTURER_ID_GEOWORKS, CIF_TEXT), q.CQA_header, &ra);
+	t = VMLock(ra.CRA_file, VMCHAIN_GET_VM_BLOCK(ra.CRA_data), &mh);
+	TOCHECK(t->TTBH_charAttrRuns && t->TTBH_paraAttrRuns &&
+		t->TTBH_charAttrElements && t->TTBH_paraAttrElements);
+	if (t->TTBH_charAttrRuns && t->TTBH_paraAttrRuns) {
+	    toState.TOS_runs[0] = (word) HugeArrayGetCount(ra.CRA_file,
+				VMCHAIN_GET_VM_BLOCK(t->TTBH_charAttrRuns));
+	    toState.TOS_runs[1] = (word) HugeArrayGetCount(ra.CRA_file,
+				VMCHAIN_GET_VM_BLOCK(t->TTBH_paraAttrRuns));
+	}
+	/* ("cd" "\ref": base, the font, base; two paragraphs) */
+	TOCHECK(toState.TOS_runs[0] == 4 && toState.TOS_runs[1] == 3);
+	VMUnlock(mh);
+	ClipboardDoneWithItem(q.CQA_header);
+
+	m = ObjInstantiate(OptrToHandle(@TOText),
+			   (ClassStruct *) &VisTextClass);
+	@call m::MSG_VIS_TEXT_REPLACE_ALL_PTR("xy\rz", 0);
+	@call m::MSG_VIS_TEXT_CREATE_STORAGE(VTSF_MULTIPLE_CHAR_ATTRS |
+					     VTSF_MULTIPLE_PARA_ATTRS, 0);
+	@call m::MSG_VIS_TEXT_SELECT_RANGE(0, 0);
+	@call m::MSG_META_CLIPBOARD_PASTE();
+	TOCHECK(Is(m, "cd\refxy\rz"));
+	TOCHECK(FontOf(m, 1, 2, &tk, &d) == FID_ROMA);
+	TOCHECK(FontOf(m, 0, 1, &tk, &d) == base);
+	/* (a font set up to a paragraph's end takes its carriage return:
+	 * "d\r") */
+	TOCHECK(FontOf(m, 3, 9, &tk, &d) == base && tk != CA_NULL_ELEMENT);
+	TOCHECK(RunIs(m, 1, 1, 3) && RunIs(m, 3, 3, TEXT_ADDRESS_PAST_END));
+	(void) ParaOf(m, 1, 1, &a, &pd);
+	TOCHECK(a.VTMPA_paraAttr.VTPA_leftMargin == 72 * 8);
+	(void) ParaOf(m, 6, 6, &a, &pd);
+	TOCHECK(a.VTMPA_paraAttr.VTPA_leftMargin == 0);
+	TOCHECK(ParaRunIs(m, 1, 0, 3) &&
+		ParaRunIs(m, 4, 3, TEXT_ADDRESS_PAST_END));
+
+	/* (the application's large object) */
+	co = TextAllocClipboardObject(0, VTSF_MULTIPLE_CHAR_ATTRS, 0);
+	@call co::MSG_VIS_TEXT_REPLACE_ALL_PTR("QR", 0);
+	@call co::MSG_VIS_TEXT_SET_FONT_ID(FID_ROMA, 2, 1);
+	TOCHECK(TextFinishWithClipboardObject(co, TCO_COPY, m, "Runs") == 0);
+	/* (its runs and elements in the item, the runs naming them) */
+	ClipboardQueryItem(TIF_NORMAL, &q);
+	ClipboardRequestItemFormat(FormatIDFromManufacturerAndType(
+			MANUFACTURER_ID_GEOWORKS, CIF_TEXT), q.CQA_header, &ra);
+	t = VMLock(ra.CRA_file, VMCHAIN_GET_VM_BLOCK(ra.CRA_data), &mh);
+	TOCHECK(t->TTBH_charAttrRuns && t->TTBH_charAttrElements &&
+		!t->TTBH_paraAttrRuns);
+	if (t->TTBH_charAttrRuns) {
+	    TextLargeRunArrayHeader *lh;
+
+	    TOCHECK(HugeArrayGetCount(ra.CRA_file,
+			VMCHAIN_GET_VM_BLOCK(t->TTBH_charAttrRuns)) == 3);
+	    HugeArrayLockDir(ra.CRA_file,
+			     VMCHAIN_GET_VM_BLOCK(t->TTBH_charAttrRuns),
+			     (void **) &lh);
+	    TOCHECK(lh->TLRAH_elementVMBlock ==
+		    VMCHAIN_GET_VM_BLOCK(t->TTBH_charAttrElements));
+	    HugeArrayUnlockDir(lh);
+	}
+	VMUnlock(mh);
+	ClipboardDoneWithItem(q.CQA_header);
+	@call m::MSG_VIS_TEXT_SELECT_RANGE(9, 9);
+	@call m::MSG_META_CLIPBOARD_PASTE();
+	TOCHECK(Is(m, "cd\refxy\rzQR"));
+	TOCHECK(FontOf(m, 10, 11, &tk, &d) == FID_ROMA);
+	TOCHECK(FontOf(m, 9, 10, &tk, &d) == base);
+	TOCHECK(RunIs(m, 9, 3, 10) && RunIs(m, 10, 10, TEXT_ADDRESS_PAST_END));
+	@call n::MSG_META_OBJ_FREE();
+	@call m::MSG_META_OBJ_FREE();
 	ClipboardCloseClipboardFile();
 	break;
     }

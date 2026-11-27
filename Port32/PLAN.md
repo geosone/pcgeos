@@ -159,10 +159,10 @@ Ordered by dependency, each with host-side tests under `linux`:
   ABI.md §13ab), `library.text` step 21; the text of large objects
   (`VisLargeTextClass`, huge arrays) and all kinds of text references,
   step 22; cut, copy and paste of text (`TextTrans/`, `pasteable`),
-  step 23.
-  Open: the lines, regions and runs of large objects, the runs of a
-  transfer, shared elements and style sheets (and their
-  notifications), undo, quick transfer.
+  step 23; the attribute runs of large objects and of a transfer
+  (huge arrays, elements in VM blocks, `taRunTrans.goc`), step 24.
+  Open: the lines and regions of large objects, style sheets (and
+  their notifications), undo, quick transfer.
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose
   dependency is ported since gets filled in after the asm, with its own
   ctest check. Done: the load error of the startup applications, the

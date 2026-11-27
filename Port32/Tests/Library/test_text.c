@@ -28,6 +28,7 @@
  *  21. the clipboard: items registered, held, freed, kept.
  *  22. a large text object: its text in a huge array.
  *  23. copy, paste and cut of text; an application's clipboard object.
+ *  24. the attribute runs of a copy, pasted; a large object's runs.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -66,6 +67,7 @@ typedef struct {
     word	TOS_large[3];
     MemHandle	TOS_selectBlock;
     word	TOS_paste[2];
+    word	TOS_runs[2];
 } TOState;
 
 static int fails;
@@ -118,7 +120,7 @@ int main(int argc, char **argv)
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
-	"a12b-cE -.F14y#"
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#"
     };
     GeodeHandle app, mdrv;
     GeodeLoadError e;
@@ -173,7 +175,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 23; i++) {
+    for (i = 1; i <= 24; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);
@@ -202,6 +204,7 @@ int main(int argc, char **argv)
 	   st->TOS_large[1], st->TOS_large[2]);
     printf("paste: copied %u, pasted %u\n", st->TOS_paste[0],
 	   st->TOS_paste[1]);
+    printf("runs: char %u, para %u\n", st->TOS_runs[0], st->TOS_runs[1]);
     printf("tab: leader %x, line %x\n", st->TOS_tab[0], st->TOS_tab[1]);
     printf("notify: generated %u, types %x, send %x\n", st->TOS_generated, st->TOS_types, st->TOS_send);
     printf("geode checks: %u, failed %u (first at textobj.goc line %u)\n",

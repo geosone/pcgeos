@@ -7,12 +7,16 @@
  * TextTransferBlockHeader whose VMChains name the text (a huge array of
  * characters ending in a null), the runs and their elements.
  *
- * Port32 (Port32/ABI.md section 13z), not yet: the runs and elements
- * of the format (TA_CreateRunAndElementArrays, TA_CopyRunToTransfer;
- * a transfer holds the text only, pasted text takes the attributes at
- * its place), styles, names, types and graphics, the section breaks
- * filtered out (FilterSectionBreakFromHugeArray: there are no sections
- * yet), MakeTransferFormatNotLMem (there are no element blocks).
+ * The character and paragraph attribute runs of an object with
+ * multiple ones go with it (taRunTrans.goc), each a huge array with its
+ * elements in a VM block of the file.
+ *
+ * Port32 (Port32/ABI.md section 13z): the element blocks stay LMem
+ * blocks: the kernel's VM chains take an LMem block for the end of its
+ * chain (the asm cleared their handle and HF_LMEM for the clipboard,
+ * MakeTransferFormatNotLMem).  Not yet: styles, names, types and
+ * graphics, the section breaks filtered out
+ * (FilterSectionBreakFromHugeArray: there are no sections yet).
  */
 @include "textInt.goh"
 #include <hugearr.h>
@@ -67,7 +71,8 @@ void TT_DoWarningDialog(optr string)
 {
     VisTextRange r;
     TextReference ref;
-    VMBlockHandle header, text;
+    VMBlockHandle header, text, runs;
+    VisTextStorageFlags flags;
     TextTransferBlockHeader *t;
     MemHandle mh;
     dword limit;
@@ -96,6 +101,25 @@ void TT_DoWarningDialog(optr string)
     header = TT_CreateTransferFormatHeader(file);
     t = VMLock(file, header, &mh);
     t->TTBH_text = VMCHAIN_MAKE_FROM_VM_BLOCK(text);
+    flags = VT(oself)->VTI_storageFlags;
+    if (flags & VTSF_MULTIPLE_PARA_ATTRS) {
+	runs = TA_CreateRunsInFile(file, TRK_PARA_ATTR);
+	t->TTBH_paraAttrRuns = VMCHAIN_MAKE_FROM_VM_BLOCK(runs);
+	t->TTBH_paraAttrElements =
+	    VMCHAIN_MAKE_FROM_VM_BLOCK(TA_RunsElementBlock(file, runs));
+    }
+    if (flags & VTSF_MULTIPLE_CHAR_ATTRS) {
+	runs = TA_CreateRunsInFile(file, TRK_CHAR_ATTR);
+	t->TTBH_charAttrRuns = VMCHAIN_MAKE_FROM_VM_BLOCK(runs);
+	t->TTBH_charAttrElements =
+	    VMCHAIN_MAKE_FROM_VM_BLOCK(TA_RunsElementBlock(file, runs));
+    }
+    if (flags & VTSF_MULTIPLE_CHAR_ATTRS)
+	TA_CopyRunToTransfer(oself, TRK_CHAR_ATTR, &r, file,
+			     VMCHAIN_GET_VM_BLOCK(t->TTBH_charAttrRuns));
+    if (flags & VTSF_MULTIPLE_PARA_ATTRS)
+	TA_CopyRunToTransfer(oself, TRK_PARA_ATTR, &r, file,
+			     VMCHAIN_GET_VM_BLOCK(t->TTBH_paraAttrRuns));
     VMDirty(mh);
     VMUnlock(mh);
     return header;
