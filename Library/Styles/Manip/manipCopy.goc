@@ -1,0 +1,258 @@
+/*
+ * manipCopy.goc -- after manipCopy.asm: copying a style and an element
+ * between the object's arrays and a transfer's, with the optimization
+ * block that remembers what was copied.
+ *
+ * Port32 (Port32/ABI.md section 13ac): the optimization block is an
+ * LMem block whose header holds the chunks of its lists (the asm's
+ * chunks at fixed handles, OPT_STYLE_ARRAY_CHUNK...).
+ */
+@include "stylesInt.goh"
+
+typedef struct {
+    word	OE_sourceToken;
+    word	OE_destToken;
+    word	OE_sourceRef;
+} OptEntry;
+
+typedef struct {
+    LMemBlockHeader	OBH_meta;
+    ChunkHandle		OBH_lists[1 + MAX_STYLE_SHEET_ATTRS];
+} OptBlockHeader;
+
+/* Load_dssi_sourceStyle ... Load_dssi_destAttr */
+optr SourceStyle(StyleLocals *l)
+{
+    return l->SL_fromTransfer ? l->SL_xferStyleArray : l->SL_styleArray;
+}
+
+optr DestStyle(StyleLocals *l)
+{
+    return l->SL_fromTransfer ? l->SL_styleArray : l->SL_xferStyleArray;
+}
+
+optr SourceAttr(StyleLocals *l)
+{
+    return l->SL_fromTransfer ? l->SL_xferAttrArray : l->SL_attrArray;
+}
+
+optr DestAttr(StyleLocals *l)
+{
+    return l->SL_fromTransfer ? l->SL_attrArray : l->SL_xferAttrArray;
+}
+
+/* LookupOpt: the destination token of a source token (copied relative
+ * to sourceRef) copied before */
+Boolean LookupOpt(StyleLocals *l, word which, word source, word sourceRef,
+		  word *dest)
+{
+    OptBlockHeader *h;
+    OptEntry *e;
+    word n;
+    Boolean found = FALSE;
+
+    if (!l->SL_optBlock)
+	return FALSE;
+    h = MemLock(l->SL_optBlock);
+    e = LMemDeref(ConstructOptr(l->SL_optBlock, h->OBH_lists[which]));
+    for (n = (word) (LMemGetChunkSize(ConstructOptr(l->SL_optBlock,
+						    h->OBH_lists[which])) /
+		     sizeof(OptEntry)); n; n--, e++)
+	if (e->OE_sourceToken == source && e->OE_sourceRef == sourceRef) {
+	    *dest = e->OE_destToken;
+	    found = TRUE;
+	    break;
+	}
+    MemUnlock(l->SL_optBlock);
+    return found;
+}
+
+/* AddOpt: what a source token became, at the front of its list */
+void AddOpt(StyleLocals *l, word which, word source, word sourceRef,
+	    word dest)
+{
+    OptBlockHeader *h;
+    OptEntry *e;
+    optr list;
+    word i;
+
+    if (!l->SL_optBlock) {
+	l->SL_optBlock = MemAllocLMem(LMEM_TYPE_GENERAL,
+				      sizeof(OptBlockHeader));
+	(void) MemLock(l->SL_optBlock);
+	for (i = 0; i < 1 + MAX_STYLE_SHEET_ATTRS; i++) {
+	    ChunkHandle ch = LMemAlloc(l->SL_optBlock, 0);
+
+	    h = MemDeref(l->SL_optBlock);
+	    h->OBH_lists[i] = ch;
+	}
+    } else
+	(void) MemLock(l->SL_optBlock);
+    h = MemDeref(l->SL_optBlock);
+    list = ConstructOptr(l->SL_optBlock, h->OBH_lists[which]);
+    (void) LMemInsertAt(list, 0, sizeof(OptEntry));
+    e = LMemDeref(list);
+    e->OE_destToken = dest;
+    e->OE_sourceRef = sourceRef;
+    e->OE_sourceToken = source;
+    MemUnlock(l->SL_optBlock);
+}
+
+/* LowLevelCopyElement: the source element added to the destination
+ * array, based on the style base */
+static word LowLevelCopyElement(StyleLocals *l, word element, word base)
+{
+    byte buf[STYLE_SHEET_MAX_ELEMENT_SIZE];
+    word size;
+    void *e;
+
+    EC_ERROR_IF(element == CA_NULL_ELEMENT,
+		STYLE_SHEET_CANNOT_COPY_NULL_ELEMENT);
+    e = ElementToPtrCheckNull(SourceAttr(l), element, &size);
+    EC_ERROR_IF(size > sizeof(buf), STYLE_SHEET_ELEMENT_IS_TOO_LARGE);
+    memcpy(buf, e, size);
+    ((StyleSheetElementHeader *) buf)->SSEH_style = base;
+    return ElementArrayAddElementSized(DestAttr(l), buf, size, 0, NULL);
+}
+
+/*
+ * CopyStyle: the style (in the source space) and its base styles in
+ * the destination space, found by name or made; from the transfer with
+ * changeDestStyles a style there takes the source's definition.  Its
+ * token in the destination.
+ */
+word CopyStyle(StyleLocals *l, word style)
+{
+    word saveStyle = l->SL_styleToChange, saveDest = l->SL_destStyle,
+	 saveNew = l->SL_createdNew, saveOldBase = l->SL_oldBaseStyle;
+    word result, size, nameOff, len, i, base, differ, a;
+    StyleElementHeader *s, *d;
+    TCHAR name[NAME_ARRAY_MAX_NAME_LENGTH + 1];
+
+    /* (the null element is the same everywhere) */
+    if (style == CA_NULL_ELEMENT)
+	return CA_NULL_ELEMENT;
+    l->SL_createdNew = 0;
+    if (LookupOpt(l, OPT_STYLE, style, 0, &result))
+	goto done;
+    /* found in the destination space? */
+    l->SL_styleToChange = style;
+    s = StylePtr(SourceStyle(l), style, &size);
+    l->SL_oldBaseStyle = s->SEH_baseStyle;
+    l->SL_styleFlags = s->SEH_flags;
+    memcpy(l->SL_privateData, s->SEH_privateData, 4);
+    memcpy(l->SL_reserved, s->SEH_reserved, sizeof(l->SL_reserved));
+    nameOff = StyleNameOffset(SourceStyle(l));
+    len = (word) ((size - nameOff) / sizeof(TCHAR));
+    memcpy(name, (byte *) s + nameOff, len * sizeof(TCHAR));
+    result = NameArrayFind(DestStyle(l), name, len, NULL);
+    if (result != CA_NULL_ELEMENT) {
+	/* there: done unless the source's view goes to the object
+	 * (copying to the transfer the spaces agree) */
+	if (!l->SL_fromTransfer || !l->SL_changeDestStyles)
+	    goto addOpt;
+    } else {
+	/* not there: made */
+	l->SL_createdNew++;
+	if (l->SL_fromTransfer)
+	    StyleSheetIncNotifyCounter();
+	result = NameArrayAdd(DestStyle(l), name, len, 0, NULL);
+	d = StylePtr(DestStyle(l), result, NULL);
+	memcpy(d->SEH_privateData, l->SL_privateData, 4);
+	memcpy(d->SEH_reserved, l->SL_reserved, sizeof(d->SEH_reserved));
+	d->SEH_flags = l->SL_styleFlags;
+    }
+    l->SL_destStyle = result;
+    /* the base style */
+    base = CopyStyle(l, l->SL_oldBaseStyle);
+    ObjMarkDirty(DestStyle(l));
+    StylePtr(DestStyle(l), l->SL_destStyle, NULL)->SEH_baseStyle = base;
+    l->SL_destCopyFromStyle = base;
+    /* the attributes, relative to the base style of the style copied */
+    for (i = 0; i < l->SL_attrTotal; i++) {
+	word save;
+
+	(void) LockLoopAttrArray(l, i, CA_NULL_ELEMENT, NULL);
+	a = StylePtr(SourceStyle(l), l->SL_styleToChange,
+		     NULL)->SEH_attrTokens[i];
+	save = l->SL_styleToChange;
+	l->SL_styleToChange = l->SL_oldBaseStyle;
+	l->SL_changeAttrs[i] = CopyElement(l, a, FALSE);
+	l->SL_styleToChange = save;
+	UnlockLoopAttrArray(l);
+    }
+    /* a new style (or one in the transfer) takes the elements; one of
+     * the object from the transfer changes if they differ */
+    d = StylePtr(DestStyle(l), l->SL_destStyle, NULL);
+    differ = 0;
+    for (i = 0; i < l->SL_attrTotal; i++) {
+	if (l->SL_createdNew || !l->SL_fromTransfer)
+	    d->SEH_attrTokens[i] = l->SL_changeAttrs[i];
+	else if (l->SL_changeAttrs[i] != d->SEH_attrTokens[i])
+	    differ++;
+    }
+    if (l->SL_fromTransfer && !l->SL_createdNew) {
+	if (differ) {
+	    word save = l->SL_styleToChange;
+
+	    l->SL_styleToChange = l->SL_destStyle;
+	    ChangeStyle(l);
+	    l->SL_styleToChange = save;
+	}
+	/* (a reference less to the old elements, or the copies) */
+	for (i = 0; i < l->SL_attrTotal; i++) {
+	    (void) LockLoopAttrArray(l, i, CA_NULL_ELEMENT, NULL);
+	    ElementArrayRemoveReference(DestAttr(l), l->SL_changeAttrs[i], 0,
+					NULL);
+	    UnlockLoopAttrArray(l);
+	}
+    }
+    result = l->SL_destStyle;
+addOpt:
+    AddOpt(l, OPT_STYLE, l->SL_styleToChange, 0, result);
+done:
+    l->SL_styleToChange = saveStyle;
+    l->SL_destStyle = saveDest;
+    l->SL_createdNew = saveNew;
+    l->SL_oldBaseStyle = saveOldBase;
+    return result;
+}
+
+/*
+ * CopyElement: the element of the attribute array locked (in the
+ * source space) in the destination, based on l->SL_destStyle.  From the
+ * transfer without changeDestStyles the element is merged into the
+ * object's view of its style: target = new + (target - old), old the
+ * element of the base style it had (l->SL_styleToChange: its style, or
+ * with relative its element), new the destination style's.
+ */
+word CopyElement(StyleLocals *l, word element, Boolean relative)
+{
+    word target, old = CA_NULL_ELEMENT, newTok;
+    StyleElementHeader *s;
+
+    if (!l->SL_fromTransfer || l->SL_changeDestStyles ||
+	l->SL_destCopyFromStyle == CA_NULL_ELEMENT)
+	return LowLevelCopyElement(l, element, l->SL_destStyle);
+    /* (a fake base style for the copy) */
+    target = LowLevelCopyElement(l, element, (word) -2);
+    if (relative)
+	old = LowLevelCopyElement(l, l->SL_styleToChange,
+				  l->SL_destCopyFromStyle);
+    else {
+	s = ElementToPtrCheckNull(SourceStyle(l), l->SL_styleToChange, NULL);
+	if (s)
+	    old = LowLevelCopyElement(l, s->SEH_attrTokens[l->SL_attrCounter],
+				      l->SL_destCopyFromStyle);
+    }
+    newTok = StylePtr(DestStyle(l), l->SL_destCopyFromStyle,
+		      NULL)->SEH_attrTokens[l->SL_attrCounter];
+    MergeToken(l, old, target, newTok);
+    /* (OLD was added for the merge only) */
+    if (old != CA_NULL_ELEMENT)
+	ElementArrayRemoveReference(DestAttr(l), old, 0, NULL);
+    ((StyleSheetElementHeader *) ChunkArrayElementToPtr(DestAttr(l), target,
+							NULL))->SSEH_style =
+	l->SL_destStyle;
+    return ElementArrayElementChanged(DestAttr(l), target, 0, NULL);
+}

@@ -1,0 +1,239 @@
+/*
+ * manipChange.goc -- after manipChange.asm: changing a style (its
+ * attribute elements, the elements and styles based on it), merging an
+ * element (target <= new + (target - old)), substituting tokens.
+ */
+@include "stylesInt.goh"
+
+static Boolean ChangeElementCallback(void *element, void *enumData);
+static Boolean ChangeStyleCallback(void *element, void *enumData);
+
+/*
+ * ChangeStyle: the style l->SL_styleToChange gets the attribute tokens
+ * of l->SL_changeAttrs (which get the old ones); the elements based on
+ * the style follow (merged from the old to the new), then the styles
+ * based on it
+ */
+void ChangeStyle(StyleLocals *l)
+{
+    StyleElementHeader *s;
+    word i, old;
+
+    MarkStylesDirty(l, FALSE);
+    s = StylePtr(l->SL_styleArray, l->SL_styleToChange, NULL);
+    memcpy(l->SL_privateData, s->SEH_privateData, 4);
+    for (i = 0; i < l->SL_attrTotal; i++) {
+	(void) LockLoopAttrArray(l, i, CA_NULL_ELEMENT, NULL);
+	l->SL_newElement = l->SL_changeAttrs[i];
+	s = StylePtr(l->SL_styleArray, l->SL_styleToChange, NULL);
+	old = s->SEH_attrTokens[i];
+	s->SEH_attrTokens[i] = l->SL_newElement;
+	l->SL_oldElement = old;
+	l->SL_changeAttrs[i] = old;
+	if (old != l->SL_newElement) {
+	    /* the elements based on this style */
+	    (void) ChunkArrayEnum(l->SL_attrArray, l, ChangeElementCallback);
+	    if (l->SL_newElement != CA_NULL_ELEMENT)
+		SubstituteToken(l, old, l->SL_newElement, TRUE);
+	}
+	UnlockLoopAttrArray(l);
+    }
+    /* the styles based on this style */
+    (void) ChunkArrayEnum(l->SL_styleArray, l, ChangeStyleCallback);
+}
+
+/*
+ * ChangeStyleCallback: a style based on the style changed gets, for
+ * each attribute, a copy of its element merged from the old base
+ * element to the new one, and is changed in turn
+ */
+static Boolean ChangeStyleCallback(void *element, void *enumData)
+{
+    StyleLocals *l = enumData;
+    StyleElementHeader *s = element;
+    word saveStyle, saveAttrs[MAX_STYLE_SHEET_ATTRS], i, size, target,
+	 added, oldTok, newTok;
+    byte savePrivate[4];
+    void *e;
+    byte copy[STYLE_SHEET_MAX_ELEMENT_SIZE];
+
+    if (StyleIsFree(s) || s->SEH_baseStyle != l->SL_styleToChange)
+	return FALSE;
+    /* (what the recursion changes) */
+    saveStyle = l->SL_styleToChange;
+    memcpy(saveAttrs, l->SL_changeAttrs, sizeof(saveAttrs));
+    memcpy(savePrivate, l->SL_privateData, 4);
+
+    memcpy(l->SL_privateData, s->SEH_privateData, 4);
+    l->SL_enumElement = ChunkArrayPtrToElement(l->SL_styleArray, s);
+    /* changeAttrs: the old base's elements (OLD), enumElement's the
+     * target, styleToChange's the new */
+    for (i = 0; i < l->SL_attrTotal; i++) {
+	target = StylePtr(l->SL_styleArray, l->SL_enumElement,
+			  NULL)->SEH_attrTokens[i];
+	e = LockLoopAttrArray(l, i, target, &size);
+	/* a copy of the element to change (its style CA_NULL_ELEMENT
+	 * keeps it apart from the original) */
+	EC_ERROR_IF(size > sizeof(copy), STYLE_SHEET_ELEMENT_IS_TOO_LARGE);
+	memcpy(copy, e, size);
+	((StyleSheetElementHeader *) copy)->SSEH_style = CA_NULL_ELEMENT;
+	added = ElementArrayAddElementSized(l->SL_attrArray, copy, size, 0,
+					    NULL);
+	s = StylePtr(l->SL_styleArray, l->SL_enumElement, NULL);
+	target = s->SEH_attrTokens[i];
+	s->SEH_attrTokens[i] = added;
+	oldTok = l->SL_changeAttrs[i];
+	l->SL_changeAttrs[i] = target;
+	newTok = StylePtr(l->SL_styleArray, l->SL_styleToChange,
+			  NULL)->SEH_attrTokens[i];
+	/* (the original is merged; the style points to the copy, its
+	 * old values, until ChangeStyle gives it the original back) */
+	MergeToken(l, oldTok, target, newTok);
+	UnlockLoopAttrArray(l);
+    }
+    l->SL_styleToChange = l->SL_enumElement;
+    ChangeStyle(l);
+
+    l->SL_styleToChange = saveStyle;
+    memcpy(l->SL_changeAttrs, saveAttrs, sizeof(saveAttrs));
+    memcpy(l->SL_privateData, savePrivate, 4);
+    return FALSE;
+}
+
+/*
+ * ChangeElementCallback: an element based on the style changed is
+ * merged from the old element to the new one, and folded into an equal
+ * one if there is one
+ */
+static Boolean ChangeElementCallback(void *element, void *enumData)
+{
+    StyleLocals *l = enumData;
+    StyleSheetElementHeader *e = element;
+    word tok, newTok;
+
+    if (StyleIsFree(e))
+	return FALSE;
+    tok = l->SL_enumElement = ChunkArrayPtrToElement(l->SL_attrArray, e);
+    /* (the new element is changed already) */
+    if (tok == l->SL_oldElement || tok == l->SL_newElement ||
+	e->SSEH_style != l->SL_styleToChange)
+	return FALSE;
+    if (l->SL_newElement != CA_NULL_ELEMENT)
+	MergeToken(l, l->SL_oldElement, tok, l->SL_newElement);
+    newTok = ElementArrayElementChanged(l->SL_attrArray, tok, 0, NULL);
+    if (newTok != tok)
+	/* (it went away) */
+	SubstituteToken(l, tok, newTok, FALSE);
+    return FALSE;
+}
+
+/*
+ * MergeToken: the element target of the attribute array locked becomes
+ * newTok's plus what target had other than oldTok (the merge callback
+ * of the attribute); nothing if oldTok is newTok, nor if there is no
+ * new element
+ */
+void MergeToken(StyleLocals *l, word oldTok, word target, word newTok)
+{
+    optr a = l->SL_attrArray;
+    byte result[STYLE_SHEET_MAX_ELEMENT_SIZE];
+    void *oldP, *targetP, *newP;
+    word targetSize, newSize, size;
+    StyleSheetMergeCallback *cb;
+
+    if (oldTok == newTok)
+	return;
+    l->SL_recalcFlag = 1;
+    newP = ElementToPtrCheckNull(a, newTok, &newSize);
+    if (!newP)
+	return;
+    EC_ERROR_IF(newSize > sizeof(result), STYLE_SHEET_ELEMENT_IS_TOO_LARGE);
+    memcpy(result, newP, newSize);
+    oldP = ElementToPtrCheckNull(a, oldTok, NULL);
+    targetP = ChunkArrayElementToPtr(a, target, &targetSize);
+    EC_ERROR_IF(StyleIsFree(targetP), STYLE_SHEET_ELEMENT_IS_FREE);
+    ((StyleSheetElementHeader *) result)->SSEH_style =
+	((StyleSheetElementHeader *) targetP)->SSEH_style;
+    cb = l->SL_params->SSP_mergeCallbacks[l->SL_attrCounter];
+    size = cb ? cb(targetP, result, oldP, l->SL_privateData, targetSize) :
+	   targetSize;
+    if (size != targetSize)
+	ChunkArrayElementResize(a, target, size);
+    /* (all but the reference count) */
+    targetP = ChunkArrayElementToPtr(a, target, &size);
+    memcpy((byte *) targetP + sizeof(RefElementHeader),
+	   result + sizeof(RefElementHeader),
+	   size - sizeof(RefElementHeader));
+}
+
+/* SubstituteToken: the object's references to oldTok become newTok
+ * (the substitution callback of the attribute) */
+void SubstituteToken(StyleLocals *l, word oldTok, word newTok,
+		     Boolean updateRefs)
+{
+    StyleSheetSubstitutionCallback *cb;
+
+    if (!l->SL_substituteFlag)
+	return;
+    cb = l->SL_params->SSP_substitutionCallbacks[l->SL_attrCounter];
+    if (cb)
+	l->SL_recalcFlag |= cb(l->SL_obj, oldTok, newTok, updateRefs);
+}
+
+/*
+ * StyleSheetCallMergeRoutines: the routines of the table whose bits are
+ * set in the diffs
+ */
+void StyleSheetCallMergeRoutines(const SSMergeEntry *table, word count,
+				 void *target, void *result, const void *old,
+				 const void *diffs, word data)
+{
+    for (; count; count--, table++) {
+	const byte *d = (const byte *) diffs + table->SSME_offset;
+	word w = (word) (d[0] | ((table->SSME_mask & 0xff00) ? d[1] << 8 : 0));
+
+	if (w & table->SSME_mask)
+	    table->SSME_routine(target, result, old, diffs,
+				table->SSME_data, data);
+    }
+}
+
+#if ERROR_CHECK
+/* ECCheckStyleCallback: reserved bytes 0, the base style not free, the
+ * attribute elements of the style refer to it */
+static Boolean ECCheckStyleCallback(void *element, void *enumData)
+{
+    StyleLocals *l = enumData;
+    StyleElementHeader *s = element;
+    word style, i, j, base;
+    StyleSheetElementHeader *e;
+
+    if (StyleIsFree(s))
+	return FALSE;
+    style = ChunkArrayPtrToElement(l->SL_styleArray, s);
+    for (j = 0; j < sizeof(s->SEH_reserved); j++)
+	EC_ERROR_IF(s->SEH_reserved[j], STYLE_RESERVED_SPACE_MUST_BE_0);
+    base = s->SEH_baseStyle;
+    (void) ElementToPtrCheckNull(l->SL_styleArray, base, NULL);
+    for (i = 0; i < l->SL_attrTotal; i++) {
+	word tok = StylePtr(l->SL_styleArray, style, NULL)->SEH_attrTokens[i];
+
+	e = LockLoopAttrArray(l, i, tok, NULL);
+	EC_ERROR_IF(e && e->SSEH_style != style,
+		    STYLE_SHEET_ELEMENT_HAS_WRONG_STYLE_TOKEN);
+	UnlockLoopAttrArray(l);
+    }
+    return FALSE;
+}
+
+/* ECCheckStyleArray: the styles sound (on leaving a routine) */
+void ECCheckStyleArray(StyleLocals *l)
+{
+    word counter = l->SL_attrCounter;
+
+    if (l->SL_attrArray)
+	return;			/* (an attribute array is locked) */
+    (void) ChunkArrayEnum(l->SL_styleArray, l, ECCheckStyleCallback);
+    l->SL_attrCounter = counter;
+}
+#endif

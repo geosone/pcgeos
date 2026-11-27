@@ -7617,6 +7617,45 @@ the test as the hardware would; the master volume.
   (`ClipboardRemoteSend`, `ClipboardRemoteReceive`), quick transfer
   (`userQuick.asm`).
 
+## 13ac. The styles library (`Library/Styles`, P6)
+
+- **A C interface of its own.** `styles.goh` had stubs only ("not yet
+  implemented"); under `GEOS_PORT32` every routine has C parameters.
+  A routine of the asm that worked on the object in `*ds:si` takes an
+  `optr`, and so do the substitution callbacks. A description buffer
+  is a pointer and the space left (`TCHAR **ptr, word *left`). The
+  callbacks of `StyleSheetParams` (`stylesh.h`) and the tables of
+  `StyleSheetCallDescribeRoutines` and `StyleSheetCallMergeRoutines`
+  hold C function pointers.
+- **The parameter structures of the messages** (`SSC*Params`) start
+  with the `ClassStruct *` of the styled class, as the asm's did with
+  its far pointer; the `MSG_META_STYLED_OBJECT_*` messages take them by
+  pointer (on the stack in the asm).
+- **`StyleElementHeader`** in memory: the `NameArrayElement` (4 bytes),
+  the base style, the flags, 6 reserved bytes, 4 bytes private to the
+  object (word-aligned like the text's `TextStyleElementHeader`), the
+  attribute tokens. `STYLE_ELEMENT_HEADER_SIZE` is 18; a name array of
+  styles has 14 + 2 bytes per attribute array as data, the name after
+  it.
+- **`StyleChunkDesc`**: the handle is 32 bits. `STYLE_CHUNK_NOT_IN_OBJ_BLOCK`
+  in the chunk handle (bit 0) still marks a memory block (`MemLock`)
+  rather than an object block (`ObjLockObjBlock`); with a VM file the
+  block is a VM block (`VMLock`).
+- **Dirty VM blocks.** The asm made VM blocks LMem blocks for a while so
+  that `ObjMarkDirty` worked on them; the port marks the arrays it
+  changed dirty when it unlocks them (`VMDirty`), the object's and the
+  transfer's apart: copying a style to the clipboard does not dirty the
+  document.
+- **The optimization block** of copying (what a token became) is an
+  LMem block whose header holds the chunks of its lists; the asm had
+  them at fixed chunk handles.
+- **The saved style** (`StyleSheetSaveStyle`) is an object block with a
+  style array and attribute arrays as the asm made it; it goes to the
+  reply object with `MSG_STYLE_SHEET_SET_SAVED_STYLE` (a `MemHandle`).
+- **The strings** come from `UI/uiStyleSheet.ui` (`ControlStrings`, uic
+  -g).
+- **Not yet:** `StyleSheetControlClass` (`UI/uiStyleSheet.asm`).
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

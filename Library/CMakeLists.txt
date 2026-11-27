@@ -6,6 +6,7 @@ add_subdirectory(Spool)
 add_subdirectory(Sound)
 add_subdirectory(User)
 add_subdirectory(SpecUI)
+add_subdirectory(Styles)
 add_subdirectory(Text)
 
 # The pictures (cvtpcx, cmake/GeosCvtpcx.cmake) of the libraries not in
@@ -15,6 +16,6 @@ foreach(_art AccPnt Bitmap Chart Color ConView GrObj IDialC ParentC Pen
              Pref/Prefkbd Pref/Preflang Pref/Preflf Pref/Preflink Pref/Preflo
              Pref/Preflvl Pref/Prefmous Pref/Prefos Pref/PrefPntC Pref/Prefsnd
              Pref/Preftd Pref/Prefts Pref/Prefvid Pref/TweakUI Spell Spline
-             Spreadsheet Styles)
+             Spreadsheet)
   add_subdirectory(${_art}/Art)
 endforeach()

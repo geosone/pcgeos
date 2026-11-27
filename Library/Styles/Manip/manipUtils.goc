@@ -1,0 +1,237 @@
+/*
+ * manipUtils.goc -- after manipUtils.asm: locking the style and
+ * attribute arrays, the common entry and exit of the routines, undo,
+ * errors.
+ *
+ * Port32 (Port32/ABI.md section 13ac): a VM block no longer becomes an
+ * LMem block for the time it is locked (the arrays of a transfer are
+ * LMem blocks already, as the text library makes them).  The flag of
+ * StyleSheetLockStyleChunk tells a VM block; a routine that changes
+ * arrays in VM blocks marks them dirty when it unlocks them (the asm's
+ * ObjMarkDirty dirtied an object block of a VM file).
+ */
+@include "stylesInt.goh"
+
+/* StyleLockChunk: the array of a StyleChunkDesc, locked; *vm: it is in
+ * a VM file */
+optr StyleLockChunk(const StyleChunkDesc *d, Boolean *vm)
+{
+    ChunkHandle ch = d->SCD_chunk;
+    MemHandle mh;
+
+    if (d->SCD_vmFile) {
+	(void) VMLock(d->SCD_vmFile, (VMBlockHandle) d->SCD_vmBlockOrMemHandle,
+		      &mh);
+	if (vm)
+	    *vm = TRUE;
+	return ConstructOptr(mh, ch);
+    }
+    mh = (MemHandle) d->SCD_vmBlockOrMemHandle;
+    if (ch & STYLE_CHUNK_NOT_IN_OBJ_BLOCK) {
+	ch = (ChunkHandle) (ch & ~STYLE_CHUNK_NOT_IN_OBJ_BLOCK);
+	(void) MemLock(mh);
+    } else
+	(void) ObjLockObjBlock(mh);
+    if (vm)
+	*vm = FALSE;
+    return ConstructOptr(mh, ch);
+}
+
+void StyleUnlockChunk(optr arr, Boolean vm, Boolean dirty)
+{
+    MemHandle mh = OptrToHandle(arr);
+
+    if (vm && dirty)
+	VMDirty(mh);
+    MemUnlock(mh);
+}
+
+optr StyleSheetLockStyleChunk(const StyleChunkDesc *desc, Boolean *flag)
+{
+    return StyleLockChunk(desc, flag);
+}
+
+void StyleSheetUnlockStyleChunk(optr array, Boolean flag)
+{
+    StyleUnlockChunk(array, flag, FALSE);
+}
+
+/* the number of attribute arrays a style array's styles refer to */
+word StyleAttrTotal(optr styleArray)
+{
+    NameArrayHeader *h = LMemDeref(styleArray);
+
+    return (word) ((h->NAH_dataSize - (STYLE_ELEMENT_HEADER_SIZE -
+				       sizeof(NameArrayElement))) / 2);
+}
+
+/* the offset of a style's name in its element */
+word StyleNameOffset(optr styleArray)
+{
+    NameArrayHeader *h = LMemDeref(styleArray);
+
+    return (word) (h->NAH_dataSize + sizeof(NameArrayElement));
+}
+
+Boolean StyleIsFree(const void *element)
+{
+    return ((const RefElementHeader *) element)->REH_refCount.WAAH_high ==
+	   (sbyte) EA_FREE_ELEMENT;
+}
+
+/* ElementToPtrCheckNull: the element, NULL for CA_NULL_ELEMENT */
+void *ElementToPtrCheckNull(optr arr, word token, word *size)
+{
+    void *e;
+
+    if (token == CA_NULL_ELEMENT) {
+	if (size)
+	    *size = 0;
+	return NULL;
+    }
+    e = ChunkArrayElementToPtr(arr, token, size);
+    EC_ERROR_IF(StyleIsFree(e), STYLE_SHEET_ELEMENT_IS_FREE);
+    return e;
+}
+
+StyleElementHeader *StylePtr(optr arr, word token, word *size)
+{
+    StyleElementHeader *s = ChunkArrayElementToPtr(arr, token, size);
+
+    EC_ERROR_IF(StyleIsFree(s), STYLE_SHEET_ELEMENT_IS_FREE);
+    return s;
+}
+
+/* LockCommon: the attribute arrays of l->SL_attrCounter */
+static void LockCommon(StyleLocals *l)
+{
+    StyleSheetParams *p = l->SL_params;
+    word i = l->SL_attrCounter;
+
+    l->SL_xferAttrArray = 0;
+    if (p->SSP_xferAttrArrays[i].SCD_vmBlockOrMemHandle)
+	l->SL_xferAttrArray = StyleLockChunk(&p->SSP_xferAttrArrays[i],
+					     &l->SL_xferAttrVM);
+    l->SL_attrArray = StyleLockChunk(&p->SSP_attrArrays[i], &l->SL_attrVM);
+}
+
+static void UnlockCommon(StyleLocals *l)
+{
+    StyleUnlockChunk(l->SL_attrArray, l->SL_attrVM, l->SL_dirty);
+    if (l->SL_xferAttrArray)
+	StyleUnlockChunk(l->SL_xferAttrArray, l->SL_xferAttrVM,
+			 l->SL_xferDirty);
+    l->SL_attrArray = 0;
+    l->SL_xferAttrArray = 0;
+}
+
+/*
+ * LockLoopAttrArray: the attribute arrays of the index-th attribute
+ * locked; the element token of the attribute array (NULL for
+ * CA_NULL_ELEMENT), *size its size
+ */
+void *LockLoopAttrArray(StyleLocals *l, word index, word token, word *size)
+{
+    l->SL_attrCounter = index;
+    LockCommon(l);
+    return ElementToPtrCheckNull(l->SL_attrArray, token, size);
+}
+
+/* UnlockLoopAttrArray: the attribute arrays unlocked (the caller's loop
+ * goes on to the next attribute) */
+void UnlockLoopAttrArray(StyleLocals *l)
+{
+    UnlockCommon(l);
+}
+
+void LockSpecificAttrArray(StyleLocals *l, word index)
+{
+    l->SL_attrCounter = index;
+    LockCommon(l);
+}
+
+void UnlockSpecificAttrArray(StyleLocals *l)
+{
+    UnlockCommon(l);
+    l->SL_attrCounter = 0;
+}
+
+/*
+ * EnterStyleSheet: the style arrays of the params locked (that of the
+ * transfer if there is one), the number of attribute arrays from the
+ * style array
+ */
+void EnterStyleSheet(StyleLocals *l, optr obj, StyleSheetParams *params)
+{
+    l->SL_obj = obj;
+    l->SL_params = params;
+    l->SL_styleArray = StyleLockChunk(&params->SSP_styleArray,
+				      &l->SL_styleVM);
+    l->SL_xferStyleArray = 0;
+    if (params->SSP_xferStyleArray.SCD_vmBlockOrMemHandle)
+	l->SL_xferStyleArray = StyleLockChunk(&params->SSP_xferStyleArray,
+					      &l->SL_xferStyleVM);
+    l->SL_attrTotal = StyleAttrTotal(l->SL_styleArray);
+    l->SL_attrCounter = 0;
+    l->SL_attrArray = 0;
+    l->SL_xferAttrArray = 0;
+}
+
+void LeaveStyleSheet(StyleLocals *l)
+{
+#if ERROR_CHECK
+    ECCheckStyleArray(l);
+#endif
+    StyleUnlockChunk(l->SL_styleArray, l->SL_styleVM, l->SL_dirty);
+    if (l->SL_xferStyleArray)
+	StyleUnlockChunk(l->SL_xferStyleArray, l->SL_xferStyleVM,
+			 l->SL_xferDirty);
+}
+
+/* MarkStylesDirty: the object's arrays (or the transfer's) change
+ * (ObjMarkDirty) */
+void MarkStylesDirty(StyleLocals *l, Boolean xfer)
+{
+    if (xfer)
+	l->SL_xferDirty = TRUE;
+    else {
+	l->SL_dirty = TRUE;
+	ObjMarkDirty(l->SL_styleArray);
+    }
+}
+
+/* IgnoreUndoAndFlush, AcceptUndo (UndoCommon): the process's undo
+ * actions held back while the styles change, the application busy */
+void IgnoreUndoAndFlush(void)
+{
+    optr proc = ConstructOptr(GeodeGetProcessHandle(), 0);
+
+    optr app = GeodeGetAppObject(0);
+
+    @send proc::MSG_GEN_PROCESS_UNDO_IGNORE_ACTIONS(TRUE);
+    if (app)
+	@call app::MSG_GEN_APPLICATION_MARK_BUSY();
+}
+
+void AcceptUndo(void)
+{
+    optr proc = ConstructOptr(GeodeGetProcessHandle(), 0);
+
+    optr app = GeodeGetAppObject(0);
+
+    @send proc::MSG_GEN_PROCESS_UNDO_ACCEPT_ACTIONS();
+    if (app)
+	@call app::MSG_GEN_APPLICATION_MARK_NOT_BUSY();
+}
+
+/* DisplayError: an error box with a string of ControlStrings */
+void DisplayError(ChunkHandle string)
+{
+    (void) UserStandardDialogOptr(NULL, NULL, 0, 0,
+				  ConstructOptr(OptrToHandle(
+						  @IllegalBaseStyleString),
+						string),
+				  (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+				  (GIT_NOTIFICATION <<
+				   CDBF_INTERACTION_TYPE_OFFSET));
+}

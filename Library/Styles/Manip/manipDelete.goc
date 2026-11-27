@@ -1,0 +1,90 @@
+/*
+ * manipDelete.goc -- after manipDelete.asm: deleting a style.
+ */
+@include "stylesInt.goh"
+
+/* DeleteStyleCallback: a style based on the one deleted is based on its
+ * base style */
+static Boolean DeleteStyleCallback(void *element, void *enumData)
+{
+    StyleLocals *l = enumData;
+    StyleElementHeader *s = element;
+
+    if (!StyleIsFree(s) && s->SEH_baseStyle == l->SL_styleToChange)
+	s->SEH_baseStyle = l->SL_baseStyle;
+    return FALSE;
+}
+
+/* DeleteElementCallback: an element based on the style deleted is based
+ * on its base style, and folded into an equal one if there is one */
+static Boolean DeleteElementCallback(void *element, void *enumData)
+{
+    StyleLocals *l = enumData;
+    StyleSheetElementHeader *e = element;
+    word tok, newTok;
+
+    if (StyleIsFree(e) || e->SSEH_style != l->SL_styleToChange)
+	return FALSE;
+    e->SSEH_style = l->SL_baseStyle;
+    /* (dirty, so that discarding the changes can revert it) */
+    ObjMarkDirty(l->SL_attrArray);
+    tok = ChunkArrayPtrToElement(l->SL_attrArray, e);
+    newTok = ElementArrayElementChanged(l->SL_attrArray, tok, 0, NULL);
+    if (newTok != tok)
+	SubstituteToken(l, tok, newTok, FALSE);
+    return FALSE;
+}
+
+/*
+ * StyleSheetDeleteStyle: the style of the used index goes (not a
+ * protected one); revertToBase: what used it takes its base style's
+ * attributes first.  The styles and elements based on it are based on
+ * its base style.  Non-zero if the object must be calculated again.
+ */
+word StyleSheetDeleteStyle(optr obj, StyleSheetParams *params,
+			   word usedIndex, Boolean revertToBase)
+{
+    StyleLocals l;
+    StyleElementHeader *s, *b;
+    word i;
+
+    if (!params->SSP_styleArray.SCD_chunk)
+	return 0;
+    memset(&l, 0, sizeof(l));
+    IgnoreUndoAndFlush();
+    EnterStyleSheet(&l, obj, params);
+    StyleSheetIncNotifyCounter();
+    l.SL_recalcFlag = 0;
+    l.SL_substituteFlag = TRUE;
+    l.SL_styleToChange = ElementArrayUsedIndexToToken(l.SL_styleArray,
+						      usedIndex, 0, NULL);
+    if (l.SL_styleToChange == CA_NULL_ELEMENT)
+	goto nothingToDelete;
+    s = StylePtr(l.SL_styleArray, l.SL_styleToChange, NULL);
+    /* (a protected one: a quick click on Delete) */
+    if (s->SEH_flags & SEF_PROTECTED)
+	goto nothingToDelete;
+    MarkStylesDirty(&l, FALSE);
+    l.SL_baseStyle = s->SEH_baseStyle;
+    b = ElementToPtrCheckNull(l.SL_styleArray, l.SL_baseStyle, NULL);
+    for (i = 0; i < MAX_STYLE_SHEET_ATTRS; i++)
+	l.SL_changeAttrs[i] = b && i < l.SL_attrTotal ? b->SEH_attrTokens[i] :
+			      CA_NULL_ELEMENT;
+    if (revertToBase)
+	ChangeStyle(&l);
+    (void) ChunkArrayEnum(l.SL_styleArray, &l, DeleteStyleCallback);
+    for (i = 0; i < l.SL_attrTotal; i++) {
+	(void) LockLoopAttrArray(&l, i, CA_NULL_ELEMENT, NULL);
+	if (revertToBase)
+	    /* (the style's old elements, which ChangeStyle gave back) */
+	    ElementArrayRemoveReference(l.SL_attrArray, l.SL_changeAttrs[i],
+					0, NULL);
+	(void) ChunkArrayEnum(l.SL_attrArray, &l, DeleteElementCallback);
+	UnlockLoopAttrArray(&l);
+    }
+    ElementArrayDelete(l.SL_styleArray, l.SL_styleToChange);
+nothingToDelete:
+    LeaveStyleSheet(&l);
+    AcceptUndo();
+    return l.SL_recalcFlag;
+}

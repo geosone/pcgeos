@@ -1,0 +1,141 @@
+/*
+ * manipDefine.goc -- after manipDefine.asm: defining a new style from
+ * the attributes of the selection, redefining a style from them.
+ */
+@include "stylesInt.goh"
+
+/*
+ * StyleSheetDefineStyle: a new style named after the text object, with
+ * the flags of the attribute list and the base style of dsp, an
+ * element of its own for each attribute (a copy of the selection's,
+ * based on the new style); then applied to the object (which gets
+ * MSG_META_STYLED_OBJECT_APPLY_STYLE).  Nothing for indeterminate
+ * attributes or an empty name; an error box for a name there is.
+ */
+void StyleSheetDefineStyle(optr obj, StyleSheetParams *params,
+			   const SSCDefineStyleParams *dsp,
+			   StyleSheetExtraUICallback *callback)
+{
+    StyleLocals l;
+    TCHAR name[NAME_ARRAY_MAX_NAME_LENGTH + 2];
+    byte element[STYLE_SHEET_MAX_ELEMENT_SIZE];
+    word newStyle = CA_NULL_ELEMENT, i, size, flags, tok;
+    StyleElementHeader *s;
+    void *e;
+
+    if (!params->SSP_styleArray.SCD_chunk)
+	return;
+    memset(&l, 0, sizeof(l));
+    IgnoreUndoAndFlush();
+    EnterStyleSheet(&l, obj, params);
+    /* (not if the attributes are indeterminate) */
+    for (i = 0; i < l.SL_attrTotal; i++)
+	if (dsp->SSCDSP_attrTokens[i] == CA_NULL_ELEMENT)
+	    goto skipDefine;
+    if (!@call (dsp->SSCDSP_textObject)::MSG_VIS_TEXT_GET_ALL_PTR(
+							(char *) name))
+	goto skipDefine;
+    /* (the text field cleared now that the name is taken) */
+    @send (dsp->SSCDSP_textObject)::MSG_VIS_TEXT_DO_KEY_FUNCTION(
+					VTKF_DELETE_EVERYTHING, 0);
+    if (NameArrayFind(l.SL_styleArray, name, 0, NULL) != CA_NULL_ELEMENT) {
+	DisplayError(OptrToChunk(@NameAlreadyExistsString));
+	goto skipDefine;
+    }
+    newStyle = NameArrayAdd(l.SL_styleArray, name, 0, 0, NULL);
+    MarkStylesDirty(&l, FALSE);
+    StyleSheetIncNotifyCounter();
+    flags = @call (dsp->SSCDSP_attrList)::
+		MSG_GEN_BOOLEAN_GROUP_GET_SELECTED_BOOLEANS();
+    s = StylePtr(l.SL_styleArray, newStyle, NULL);
+    s->SEH_flags = flags;
+    memset(s->SEH_privateData, 0, 4);
+    s->SEH_baseStyle = dsp->SSCDSP_baseStyle;
+    memcpy(s->SEH_reserved, dsp->SSCDSP_reserved, sizeof(s->SEH_reserved));
+    /* an element for each attribute, pointing at the new style */
+    for (i = 0; i < l.SL_attrTotal; i++) {
+	e = LockLoopAttrArray(&l, i, dsp->SSCDSP_attrTokens[i], &size);
+	memcpy(element, e, size);
+	((StyleSheetElementHeader *) element)->SSEH_style = newStyle;
+	tok = ElementArrayAddElementSized(l.SL_attrArray, element, size, 0,
+					  NULL);
+	StylePtr(l.SL_styleArray, newStyle, NULL)->SEH_attrTokens[i] = tok;
+	UnlockLoopAttrArray(&l);
+    }
+    /* the extra UI's part */
+    if (callback) {
+	s = StylePtr(l.SL_styleArray, newStyle, NULL);
+	callback(dsp->SSCDSP_extraUI, s,
+		 ElementToPtrCheckNull(l.SL_styleArray, s->SEH_baseStyle,
+				       NULL));
+    }
+skipDefine:
+    LeaveStyleSheet(&l);
+    if (newStyle != CA_NULL_ELEMENT) {
+	SSCApplyDeleteStyleParams ap;
+
+	ap.SSCADSP_deleteStyledClass = dsp->SSCDSP_defineStyledClasss;
+	ap.SSCADSP_flags = 0;
+	ap.SSCADSP_token = newStyle;
+	@call obj::MSG_META_STYLED_OBJECT_APPLY_STYLE(&ap);
+    }
+    AcceptUndo();
+}
+
+/* ModifyChangeAttrRef: a reference more (or less) to each element of
+ * l->SL_changeAttrs */
+static void ModifyChangeAttrRef(StyleLocals *l, Boolean add)
+{
+    word i;
+
+    for (i = 0; i < l->SL_attrTotal; i++) {
+	(void) LockLoopAttrArray(l, i, CA_NULL_ELEMENT, NULL);
+	if (add)
+	    ElementArrayAddReference(l->SL_attrArray, l->SL_changeAttrs[i]);
+	else
+	    ElementArrayRemoveReference(l->SL_attrArray, l->SL_changeAttrs[i],
+					0, NULL);
+	UnlockLoopAttrArray(l);
+    }
+}
+
+/*
+ * StyleSheetRedefineStyle: the base style of dsp gets the attributes of
+ * the selection (an attribute not based on the style keeps the style's
+ * own, which matters to styles of characters only); non-zero if the
+ * object must be calculated again
+ */
+word StyleSheetRedefineStyle(optr obj, StyleSheetParams *params,
+			     const SSCDefineStyleParams *dsp,
+			     StyleSheetExtraUICallback *callback)
+{
+    StyleLocals l;
+    StyleSheetElementHeader *e;
+    word i, tok;
+
+    (void) callback;
+    memset(&l, 0, sizeof(l));
+    IgnoreUndoAndFlush();
+    EnterStyleSheet(&l, obj, params);
+    l.SL_recalcFlag = 0;
+    l.SL_substituteFlag = TRUE;
+    if (dsp->SSCDSP_baseStyle != CA_NULL_ELEMENT) {
+	MarkStylesDirty(&l, FALSE);
+	l.SL_styleToChange = dsp->SSCDSP_baseStyle;
+	for (i = 0; i < l.SL_attrTotal; i++) {
+	    tok = dsp->SSCDSP_attrTokens[i];
+	    e = LockLoopAttrArray(&l, i, tok, NULL);
+	    if (!e || e->SSEH_style != l.SL_styleToChange)
+		tok = StylePtr(l.SL_styleArray, l.SL_styleToChange,
+			       NULL)->SEH_attrTokens[i];
+	    l.SL_changeAttrs[i] = tok;
+	    UnlockLoopAttrArray(&l);
+	}
+	ModifyChangeAttrRef(&l, TRUE);
+	ChangeStyle(&l);
+	ModifyChangeAttrRef(&l, FALSE);
+    }
+    LeaveStyleSheet(&l);
+    AcceptUndo();
+    return l.SL_recalcFlag;
+}

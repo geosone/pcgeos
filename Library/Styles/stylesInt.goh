@@ -1,0 +1,127 @@
+/*
+ * stylesInt.goh -- the styles library in C (Port32): what its files
+ * share (stylesGeode.def, stylesConstant.def, stylesGlobal.def, the
+ * STYLE_LOCALS of Manip/manipUtils.asm).
+ *
+ * The asm routines kept their state in one stack frame they inherited
+ * (STYLE_LOCALS, STYLE_MANIP_LOCALS, STYLE_COPY_LOCALS); here it is a
+ * StyleLocals passed by pointer.  The arrays are optrs, so nothing has
+ * to be dereferenced again after a block moved (DerefStyleLocals); a
+ * pointer into an array is fetched again after anything that may move
+ * its block.
+ */
+@include <stdapp.goh>
+@include <Objects/styles.goh>
+@include <Objects/vTextC.goh>
+#include <chunkarr.h>
+#include <lmem.h>
+#include <vm.h>
+#include <string.h>
+
+/* the reference count's high byte of a free element (chunkarr.def) */
+#define EA_FREE_ELEMENT	0xff
+
+/* Fatal errors (stylesConstant.def) */
+#define STYLE_SHEET_ELEMENT_IS_FREE			0x7f00
+#define STYLE_SHEET_ELEMENT_HAS_WRONG_STYLE_TOKEN	0x7f01
+#define STYLE_SHOULD_NOT_HAVE_EXISTED			0x7f02
+#define STYLE_SHEET_WRONG_CHUNK_ALLOCATED		0x7f03
+#define STYLE_RESERVED_SPACE_MUST_BE_0			0x7f04
+#define STYLE_SHEET_ATTEMPT_TO_DELETE_PROTECTED_STYLE	0x7f05
+#define STYLE_SHEET_ELEMENT_IS_TOO_LARGE		0x7f06
+#define STYLE_SHEET_CANNOT_COPY_NULL_ELEMENT		0x7f07
+
+/* the strings (UI/uiStyleSheet.ui: ControlStrings, uic -g) */
+@include "stylesUI.goh"
+
+typedef struct {
+    /* STYLE_LOCALS */
+    optr		SL_obj;		/* the *ds:si the routine got */
+    StyleSheetParams	*SL_params;
+    optr		SL_styleArray;
+    Boolean		SL_styleVM;
+    optr		SL_attrArray;	/* the one locked, or 0 */
+    Boolean		SL_attrVM;
+    optr		SL_xferStyleArray;	/* 0 if none */
+    Boolean		SL_xferStyleVM;
+    optr		SL_xferAttrArray;	/* 0 if none */
+    Boolean		SL_xferAttrVM;
+    Boolean		SL_dirty;	/* the arrays of the object change */
+    Boolean		SL_xferDirty;	/* the transfer's change */
+    word		SL_attrTotal;	/* attribute arrays */
+    word		SL_attrCounter;	/* the one locked */
+    /* STYLE_MANIP_LOCALS */
+    word		SL_styleToChange;
+    word		SL_changeAttrs[MAX_STYLE_SHEET_ATTRS];
+    byte		SL_privateData[4];
+    byte		SL_reserved[6];
+    word		SL_enumElement;
+    word		SL_oldElement;
+    word		SL_newElement;
+    word		SL_recalcFlag;
+    Boolean		SL_substituteFlag;
+    /* STYLE_DELETE_LOCALS */
+    word		SL_baseStyle;
+    /* STYLE_COPY_LOCALS */
+    word		SL_styleFlags;
+    word		SL_destStyle;
+    word		SL_destCopyFromStyle;
+    Boolean		SL_fromTransfer;
+    Boolean		SL_changeDestStyles;
+    MemHandle		SL_optBlock;
+    word		SL_createdNew;
+    word		SL_oldBaseStyle;
+} StyleLocals;
+
+/* manipUtils.goc */
+extern void EnterStyleSheet(StyleLocals *l, optr obj,
+			    StyleSheetParams *params);
+extern void LeaveStyleSheet(StyleLocals *l);
+extern void *LockLoopAttrArray(StyleLocals *l, word index, word token,
+			       word *size);
+extern void UnlockLoopAttrArray(StyleLocals *l);
+extern void LockSpecificAttrArray(StyleLocals *l, word index);
+extern void UnlockSpecificAttrArray(StyleLocals *l);
+extern void *ElementToPtrCheckNull(optr arr, word token, word *size);
+extern StyleElementHeader *StylePtr(optr arr, word token, word *size);
+extern void MarkStylesDirty(StyleLocals *l, Boolean xfer);
+extern void IgnoreUndoAndFlush(void);
+extern void AcceptUndo(void);
+extern void DisplayError(ChunkHandle string);
+extern optr StyleLockChunk(const StyleChunkDesc *d, Boolean *vm);
+extern void StyleUnlockChunk(optr arr, Boolean vm, Boolean dirty);
+extern word StyleAttrTotal(optr styleArray);
+extern word StyleNameOffset(optr styleArray);
+extern Boolean StyleIsFree(const void *element);
+extern void ECCheckStyleArray(StyleLocals *l);
+
+/* manipDescribe.goc */
+extern void AddSpace(TCHAR **ptr, word *left);
+extern void FindEndOfString(TCHAR **ptr, word *left);
+
+/* manipChange.goc */
+extern void ChangeStyle(StyleLocals *l);
+extern void MergeToken(StyleLocals *l, word oldTok, word target,
+		       word newTok);
+extern void SubstituteToken(StyleLocals *l, word oldTok, word newTok,
+			    Boolean updateRefs);
+
+/* manipGet.goc */
+extern Boolean IndexTokenCallback(void *element, dword cbData);
+
+/* manipCopy.goc */
+extern word CopyStyle(StyleLocals *l, word style);
+extern word CopyElement(StyleLocals *l, word element, Boolean relative);
+extern Boolean LookupOpt(StyleLocals *l, word which, word source,
+			 word sourceRef, word *dest);
+extern void AddOpt(StyleLocals *l, word which, word source, word sourceRef,
+		   word dest);
+extern optr SourceStyle(StyleLocals *l);
+extern optr DestStyle(StyleLocals *l);
+extern optr SourceAttr(StyleLocals *l);
+extern optr DestAttr(StyleLocals *l);
+
+/* the optimization block's chunks (OPT_STYLE_ARRAY_CHUNK,
+ * OPT_ATTR_ARRAY_CHUNK + 2 * attribute) */
+#define OPT_STYLE	0
+#define OPT_ATTR(i)	(1 + (i))

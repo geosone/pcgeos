@@ -1,0 +1,393 @@
+/*
+ * manipDescribe.goc -- after manipDescribe.asm: the description of a
+ * style or of a set of attributes as text, and the helpers the
+ * description callbacks build it with.
+ *
+ * Port32 (Port32/ABI.md section 13ac): a description buffer is a
+ * pointer to the next character and the room left (es:di and cx of the
+ * asm); a callback gets the characters already in the buffer as used
+ * (the asm's bp).
+ */
+@include "stylesInt.goh"
+#include <localize.h>
+#include <system.h>
+
+#define DESCRIBE_BUFFER_SIZE	500
+
+void AddSpace(TCHAR **ptr, word *left)
+{
+    StyleSheetAddCharToDescription(' ', ptr, left);
+}
+
+void StyleSheetAddCharToDescription(TCHAR c, TCHAR **ptr, word *left)
+{
+    if (!*left)
+	return;
+    *(*ptr)++ = c;
+    (*left)--;
+}
+
+/* StyleSheetAddNameFromPtr: a string (to its null), as far as it fits */
+void StyleSheetAddNameFromPtr(const TCHAR *name, TCHAR **ptr, word *left)
+{
+    while (*left) {
+	TCHAR c = *name++;
+
+	*(*ptr)++ = c;
+	(*left)--;
+	if (!c) {
+	    /* (the null is not counted) */
+	    (*ptr)--;
+	    (*left)++;
+	    break;
+	}
+    }
+}
+
+void StyleSheetAddNameFromChunk(optr name, TCHAR **ptr, word *left)
+{
+    (void) MemLock(OptrToHandle(name));
+    StyleSheetAddNameFromPtr(LMemDeref(name), ptr, left);
+    MemUnlock(OptrToHandle(name));
+}
+
+/* FindEndOfString: past what a routine wrote into the buffer, to its
+ * null */
+void FindEndOfString(TCHAR **ptr, word *left)
+{
+    while (*left && **ptr) {
+	(*ptr)++;
+	(*left)--;
+    }
+}
+
+void StyleSheetAddWord(word value, TCHAR **ptr, word *left)
+{
+    if (*left <= 6)
+	return;
+    (void) UtilHex32ToAscii((char *) *ptr, value, UHTAF_NULL_TERMINATE);
+    FindEndOfString(ptr, left);
+}
+
+/* StyleSheetAddAttributeHeader: the name of a kind of attributes, after
+ * " + " if separator */
+void StyleSheetAddAttributeHeader(Boolean separator, optr name,
+				  TCHAR **ptr, word *left)
+{
+    if (separator) {
+	AddSpace(ptr, left);
+	StyleSheetAddCharToDescription('+', ptr, left);
+	AddSpace(ptr, left);
+    }
+    StyleSheetAddNameFromChunk(name, ptr, left);
+    AddSpace(ptr, left);
+}
+
+/* StyleSheetDescribeExclusiveWord: the name of the value in the table,
+ * else the default string (if any) and the number */
+void StyleSheetDescribeExclusiveWord(word value,
+				     const SSDescribeWordEntry *table,
+				     word count, MemHandle strings,
+				     ChunkHandle defaultName,
+				     TCHAR **ptr, word *left)
+{
+    for (; count; count--, table++)
+	if (table->SSDWE_value == value) {
+	    StyleSheetAddNameFromChunk(ConstructOptr(strings,
+						     table->SSDWE_name),
+				       ptr, left);
+	    return;
+	}
+    if (defaultName)
+	StyleSheetAddNameFromChunk(ConstructOptr(strings, defaultName),
+				   ptr, left);
+    StyleSheetAddWord(value, ptr, left);
+}
+
+/* StyleSheetDescribeNonExclusiveWord: the names of the bits set, with
+ * spaces between them; how many */
+word StyleSheetDescribeNonExclusiveWord(word value,
+					const SSDescribeWordEntry *table,
+					word count, MemHandle strings,
+					TCHAR **ptr, word *left)
+{
+    word printed = 0;
+
+    for (; count; count--, table++) {
+	if (!(value & table->SSDWE_value))
+	    continue;
+	if (printed)
+	    AddSpace(ptr, left);
+	printed++;
+	StyleSheetAddNameFromChunk(ConstructOptr(strings,
+						 table->SSDWE_name),
+				   ptr, left);
+    }
+    return printed;
+}
+
+void StyleSheetDescribeWWFixed(WWFixedAsDWord value, word digits,
+			       optr name, TCHAR **ptr, word *left)
+{
+    if (*left <= 10)
+	return;
+    if (name) {
+	StyleSheetAddNameFromChunk(name, ptr, left);
+	AddSpace(ptr, left);
+    }
+    LocalFixedToAscii((char *) *ptr, value, digits);
+    FindEndOfString(ptr, left);
+}
+
+/*
+ * StyleSheetDescribeDistance: a distance (points * 8) in the units and
+ * the application's measurement type; relative: as "<distance>
+ * larger" or "smaller", nothing for 0
+ */
+void StyleSheetDescribeDistance(DistanceUnit units, sword value,
+				SSDescribeDistanceFlags flags, optr name,
+				TCHAR **ptr, word *left)
+{
+    sword v = value;
+    optr app;
+    MeasurementType mt = 0;
+    LocalDistanceFlags df;
+
+    if (!value && (flags & SSDDF_RELATIVE))
+	return;
+    if (name) {
+	StyleSheetAddNameFromChunk(name, ptr, left);
+	AddSpace(ptr, left);
+    }
+    if (*left <= 10)
+	return;
+    if (flags & SSDDF_RELATIVE) {
+	flags |= SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED;
+	if (v < 0)
+	    v = (sword) -v;
+    }
+    app = GeodeGetAppObject(0);
+    if (app)
+	mt = (@call app::MSG_GEN_APPLICATION_GET_MEASUREMENT_TYPE())
+		.WMT_measurementType;
+    df = (flags & SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED) ?
+	 (LDF_FULL_NAMES | LDF_PRINT_PLURAL_IF_NEEDED) : LDF_FULL_NAMES;
+    /* (13.3 to WWFixed) */
+    LocalDistanceToAscii((char *) *ptr, (WWFixedAsDWord) ((dword) (word) v
+							  << 13),
+			 units, mt, df);
+    FindEndOfString(ptr, left);
+    if (flags & SSDDF_RELATIVE) {
+	AddSpace(ptr, left);
+	StyleSheetAddNameFromChunk(value < 0 ? @DistanceSmallerString :
+				   @DistanceLargerString, ptr, left);
+    }
+}
+
+/* the word at an offset of a diff structure (only the bytes the mask
+ * asks for, which may be the last of the structure) */
+static word DiffWord(const void *diffs, word offset, word mask)
+{
+    const byte *d = (const byte *) diffs + offset;
+
+    return (word) (d[0] | ((mask & 0xff00) ? d[1] << 8 : 0));
+}
+
+/*
+ * StyleSheetCallDescribeRoutines: the routines of the table whose bits
+ * are set in the diffs, with a space after each, a comma between the
+ * categories (CallDescFlags)
+ */
+void StyleSheetCallDescribeRoutines(const SSDiffEntry *table, word count,
+				    TCHAR **ptr, word *left,
+				    const void *newAttrs,
+				    const void *oldAttrs, const void *diffs,
+				    word data)
+{
+    Boolean any = FALSE, anyInCategory = FALSE, separator = FALSE;
+
+    for (; count; count--, table++) {
+	if ((table->SSDE_flags & SSDF_NEW_CATEGORY) && anyInCategory) {
+	    anyInCategory = FALSE;
+	    separator = TRUE;
+	}
+	if (!(DiffWord(diffs, table->SSDE_offset, table->SSDE_mask) &
+	      table->SSDE_mask))
+	    continue;
+	if (separator) {
+	    separator = FALSE;
+	    (*ptr)[-1] = ',';
+	    AddSpace(ptr, left);
+	}
+	any = anyInCategory = TRUE;
+	table->SSDE_routine(ptr, left, newAttrs, oldAttrs, diffs, data);
+	AddSpace(ptr, left);
+    }
+    if (any) {
+	/* (the last space) */
+	(*ptr)--;
+	(*left)++;
+    }
+}
+
+typedef struct {
+    StyleLocals	DL_l;
+    TCHAR	DL_buffer[DESCRIBE_BUFFER_SIZE];
+    TCHAR	*DL_ptr;
+    word	DL_left;
+    word	DL_styleToken;
+    dword	DL_privateData;
+    word	DL_baseStyleToken;
+    Boolean	DL_attrs;
+    optr	DL_extraUI;
+} DescribeLocals;
+
+static void CallDescCallback(DescribeLocals *d,
+			     StyleSheetDescriptionCallback *cb,
+			     const void *derived, const void *base)
+{
+    if (!cb)
+	return;
+    cb(&d->DL_ptr, &d->DL_left,
+       (word) (DESCRIBE_BUFFER_SIZE - 1 - d->DL_left), derived, base,
+       d->DL_extraUI, d->DL_privateData, d->DL_attrs);
+}
+
+/*
+ * DescribeCommon: the description of a style (dsp) or of attributes
+ * (dap) into its text object: the base style's name, the special
+ * callback's text, each attribute's against the base style's
+ */
+static void DescribeCommon(StyleSheetParams *params,
+			   const SSCDescribeStyleParams *dsp,
+			   const SSCDescribeAttrsParams *dap)
+{
+    DescribeLocals d;
+    StyleLocals *l = &d.DL_l;
+    StyleElementHeader *s;
+    word i, size, tok;
+    const void *base, *derived;
+    optr text;
+
+    if (!params->SSP_styleArray.SCD_chunk)
+	return;
+    memset(&d, 0, sizeof(d));
+    EnterStyleSheet(l, 0, params);
+    d.DL_attrs = dap != NULL;
+    d.DL_left = DESCRIBE_BUFFER_SIZE - 1;	/* (the null) */
+    d.DL_ptr = d.DL_buffer;
+    d.DL_styleToken = d.DL_baseStyleToken = CA_NULL_ELEMENT;
+    d.DL_extraUI = dap ? dap->SSCDAP_extraUI : 0;
+    if (dap) {
+	/* (indeterminate if an attribute is) */
+	Boolean vm;
+	optr a;
+
+	for (i = 0; i < l->SL_attrTotal; i++)
+	    if (dap->SSCDAP_attrTokens[i] == CA_NULL_ELEMENT)
+		break;
+	if (i < l->SL_attrTotal)
+	    goto indeterminate;
+	a = StyleLockChunk(&params->SSP_attrArrays[0], &vm);
+	d.DL_baseStyleToken = ((StyleSheetElementHeader *)
+			       ElementToPtrCheckNull(a,
+						     dap->SSCDAP_attrTokens[0],
+						     NULL))->SSEH_style;
+	StyleUnlockChunk(a, vm, FALSE);
+    } else {
+	if (dsp->SSCDSP_usedIndex == CA_NULL_ELEMENT)
+	    goto indeterminate;
+	d.DL_styleToken = ElementArrayUsedIndexToToken(l->SL_styleArray,
+						       dsp->SSCDSP_usedIndex,
+						       0, NULL);
+	d.DL_baseStyleToken = StylePtr(l->SL_styleArray, d.DL_styleToken,
+				       NULL)->SEH_baseStyle;
+    }
+    /* the name of the base style first */
+    if (d.DL_baseStyleToken != CA_NULL_ELEMENT) {
+	word off = StyleNameOffset(l->SL_styleArray), n;
+
+	s = StylePtr(l->SL_styleArray, d.DL_baseStyleToken, &size);
+	n = (word) ((size - off) / sizeof(TCHAR));
+	if (n > d.DL_left)
+	    n = d.DL_left;
+	memcpy(d.DL_ptr, (byte *) s + off, n * sizeof(TCHAR));
+	d.DL_ptr += n;
+	d.DL_left = (word) (d.DL_left - n);
+    }
+    /* the application's own description (the special callback) */
+    tok = d.DL_styleToken != CA_NULL_ELEMENT ? d.DL_styleToken :
+	  d.DL_baseStyleToken;
+    d.DL_privateData = 0;
+    s = ElementToPtrCheckNull(l->SL_styleArray, tok, NULL);
+    if (s) {
+	memcpy(&d.DL_privateData, s->SEH_privateData, 4);
+	base = ElementToPtrCheckNull(l->SL_styleArray, s->SEH_baseStyle,
+				     NULL);
+	CallDescCallback(&d, params->SSP_specialDescriptionCallback, s,
+			 base);
+    }
+    /* each attribute against the base style's */
+    for (i = 0; i < l->SL_attrTotal; i++) {
+	s = ElementToPtrCheckNull(l->SL_styleArray, d.DL_baseStyleToken,
+				  NULL);
+	tok = s ? s->SEH_attrTokens[i] : CA_NULL_ELEMENT;
+	base = LockLoopAttrArray(l, i, tok, NULL);
+	if (d.DL_styleToken == CA_NULL_ELEMENT)
+	    tok = dap->SSCDAP_attrTokens[i];
+	else
+	    tok = StylePtr(l->SL_styleArray, d.DL_styleToken,
+			   NULL)->SEH_attrTokens[i];
+	derived = ElementToPtrCheckNull(l->SL_attrArray, tok, NULL);
+	CallDescCallback(&d, params->SSP_descriptionCallbacks[i], derived,
+			 base);
+	UnlockLoopAttrArray(l);
+    }
+    goto afterLoop;
+
+indeterminate:
+    StyleSheetAddNameFromChunk(@IndeterminateString, &d.DL_ptr, &d.DL_left);
+afterLoop:
+    *d.DL_ptr = 0;
+    text = dap ? dap->SSCDAP_textObject : dsp->SSCDSP_describeTextObject;
+    @call text::MSG_VIS_TEXT_REPLACE_ALL_PTR(d.DL_buffer, 0);
+    if (dap) {
+	/* the base style's flags in the attribute list (not the
+	 * protection, which it does not show) */
+	word flags = 0;
+
+	s = ElementToPtrCheckNull(l->SL_styleArray, d.DL_baseStyleToken,
+				  NULL);
+	if (s)
+	    flags = (word) (s->SEH_flags & ~SEF_PROTECTED);
+	@send (dap->SSCDAP_attrList)::MSG_GEN_BOOLEAN_GROUP_SET_GROUP_STATE(
+								flags, 0);
+    } else {
+	/* the delete triggers for a style that may be deleted */
+	s = ElementToPtrCheckNull(l->SL_styleArray, d.DL_styleToken, NULL);
+	if (s && (s->SEH_flags & SEF_PROTECTED)) {
+	    @send (dsp->SSCDSP_describeDeleteTrigger)::MSG_GEN_SET_NOT_ENABLED(
+								VUM_NOW);
+	    @send (dsp->SSCDSP_describeDeleteRevertTrigger)::
+		MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+	} else {
+	    @send (dsp->SSCDSP_describeDeleteTrigger)::MSG_GEN_SET_ENABLED(
+								VUM_NOW);
+	    @send (dsp->SSCDSP_describeDeleteRevertTrigger)::
+		MSG_GEN_SET_ENABLED(VUM_NOW);
+	}
+    }
+    LeaveStyleSheet(l);
+}
+
+void StyleSheetDescribeStyle(StyleSheetParams *params,
+			     const SSCDescribeStyleParams *dsp)
+{
+    DescribeCommon(params, dsp, NULL);
+}
+
+void StyleSheetDescribeAttrs(StyleSheetParams *params,
+			     const SSCDescribeAttrsParams *dap)
+{
+    DescribeCommon(params, NULL, dap);
+}

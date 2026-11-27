@@ -1,0 +1,150 @@
+/*
+ * manipGet.goc -- after manipGet.asm: the notification counter, a style
+ * and the number of styles, the monikers of a list of styles, checksums,
+ * the style to apply.
+ */
+@include "stylesInt.goh"
+
+static word notifyCounter = 0;
+
+word StyleSheetGetNotifyCounter(void)
+{
+    return notifyCounter;
+}
+
+void StyleSheetIncNotifyCounter(void)
+{
+    notifyCounter++;
+}
+
+/* IndexTokenCallback: the styles shown in the toolbox */
+Boolean IndexTokenCallback(void *element, dword cbData)
+{
+    (void) cbData;
+    return (((StyleElementHeader *) element)->SEH_flags &
+	    SEF_DISPLAY_IN_TOOLBOX) != 0;
+}
+
+/* LoadCallbackFlagBX: the callback that counts the toolbox's styles */
+static Boolean (*ToolboxCallback(Boolean toolbox))(void *, dword)
+{
+    return toolbox ? IndexTokenCallback : NULL;
+}
+
+/*
+ * StyleSheetGetStyle: the style into buffer (its size returned), its
+ * used index and its index among the toolbox's styles (CA_NULL_ELEMENT
+ * if it is not shown there; both for CA_NULL_ELEMENT)
+ */
+word StyleSheetGetStyle(const StyleChunkDesc *styleArray, word token,
+			void *buffer, word *usedIndex, word *usedToolIndex)
+{
+    Boolean vm;
+    optr a = StyleLockChunk(styleArray, &vm);
+    word size = 0, tool, used;
+
+    if (token == CA_NULL_ELEMENT) {
+	used = tool = CA_NULL_ELEMENT;
+    } else {
+	tool = ElementArrayTokenToUsedIndex(a, token, 0, IndexTokenCallback);
+	/* (converted back: another token if it is not in the tool list) */
+	if (ElementArrayUsedIndexToToken(a, tool, 0, IndexTokenCallback) !=
+	    token)
+	    tool = CA_NULL_ELEMENT;
+	used = ElementArrayTokenToUsedIndex(a, token, 0, NULL);
+	(void) ChunkArrayElementToPtr(a, token, &size);
+	ChunkArrayGetElement(a, token, buffer);
+    }
+    if (usedIndex)
+	*usedIndex = used;
+    if (usedToolIndex)
+	*usedToolIndex = tool;
+    StyleUnlockChunk(a, vm, FALSE);
+    return size;
+}
+
+/* StyleSheetGetStyleCounts: the number of styles, *toolboxCount those
+ * of the toolbox */
+word StyleSheetGetStyleCounts(const StyleChunkDesc *styleArray,
+			      word *toolboxCount)
+{
+    Boolean vm;
+    optr a = StyleLockChunk(styleArray, &vm);
+    word n = ElementArrayGetUsedCount(a, 0, NULL);
+
+    if (toolboxCount)
+	*toolboxCount = ElementArrayGetUsedCount(a, 0, IndexTokenCallback);
+    StyleUnlockChunk(a, vm, FALSE);
+    return n;
+}
+
+/*
+ * StyleSheetRequestEntryMoniker: the moniker of an entry of a list of
+ * styles (after its default entries): the style's name
+ */
+void StyleSheetRequestEntryMoniker(const StyleChunkDesc *styleArray,
+				   const SSCListInteractionParams *p)
+{
+    static TCHAR nullString[] = { 0 };
+    Boolean vm;
+    optr a = StyleLockChunk(styleArray, &vm);
+    word token, size, nameOff;
+    const byte *e;
+    const TCHAR *name = nullString;
+    word length = 0;
+
+    token = ElementArrayUsedIndexToToken(a, p->SSCLIP_entryNumber, 0,
+					 ToolboxCallback(p->SSCLIP_toolboxFlag
+							 != 0));
+    /* (the element may be free when things happened too fast) */
+    if (token != CA_NULL_ELEMENT) {
+	e = ChunkArrayElementToPtr(a, token, &size);
+	if (!StyleIsFree(e)) {
+	    nameOff = StyleNameOffset(a);
+	    name = (const TCHAR *) (e + nameOff);
+	    length = (word) (size - nameOff);
+	}
+    }
+    @call (p->SSCLIP_list)::MSG_GEN_DYNAMIC_LIST_REPLACE_ITEM_MONIKER(
+	(word) (p->SSCLIP_entryNumber + p->SSCLIP_defaultEntries), 0, 0, 0,
+	length, VMDT_TEXT, VMST_FPTR, (VisMonikerSource) (uintptr_t) name);
+    StyleUnlockChunk(a, vm, FALSE);
+}
+
+/*
+ * StyleSheetGenerateChecksum: a checksum of a structure (words), for
+ * the NotifyStyleChange (result = ((result + word) << 3) | word, as the
+ * asm rotated it)
+ */
+dword StyleSheetGenerateChecksum(const void *data, word size)
+{
+    const byte *b = data;
+    word lo = 0, hi = 0, n, w, i, c;
+    dword sum;
+
+    for (n = (word) (size / 2); n; n--, b += 2) {
+	w = (word) (b[0] | (b[1] << 8));
+	sum = ((dword) hi << 16 | lo) + w;
+	lo = (word) sum;
+	hi = (word) (sum >> 16);
+	for (i = 0; i < 3; i++) {
+	    /* rol bx; rcl dx */
+	    c = (word) (lo >> 15);
+	    lo = (word) ((lo << 1) | c);
+	    hi = (word) ((hi << 1) | c);
+	}
+	lo ^= w;
+    }
+    return ((dword) hi << 16) | lo;
+}
+
+/* StyleSheetGetStyleToApply: the token of the style to apply (from a
+ * used index of the list or of the toolbox) */
+word StyleSheetGetStyleToApply(optr styleArray,
+			       const SSCApplyDeleteStyleParams *p)
+{
+    if (!(p->SSCADSP_flags & SSCADSF_TOKEN_IS_USED_INDEX))
+	return p->SSCADSP_token;
+    return ElementArrayUsedIndexToToken(styleArray, p->SSCADSP_token, 0,
+		ToolboxCallback((p->SSCADSP_flags & SSCADSF_TOOLBOX_STYLE) != 0));
+}

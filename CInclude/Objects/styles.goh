@@ -19,6 +19,250 @@
 
 @deflib styles
 
+@ifdef GEOS_PORT32
+/*
+ * Port32 (Port32/ABI.md section 13ac): the routines take C parameters
+ * instead of registers.  A routine that worked on the object in *ds:si
+ * (whose substitution callbacks get it) takes it as obj.  A description
+ * buffer is a pointer to the next character and the room left (without
+ * the null), both updated: (TCHAR **ptr, word *left).  The callbacks of
+ * the tables are C functions.  The message structures start with the
+ * styled class, as the asm's (the C header of 16-bit GEOS left it
+ * out), and the messages take them as structures of the stack.
+ */
+
+typedef struct {
+    word	SSDWE_value;
+    ChunkHandle	SSDWE_name;
+} SSDescribeWordEntry;
+
+typedef ByteFlags SSDiffFlags;
+#define SSDF_NEW_CATEGORY	0x80
+
+/* a describe routine of a table: the new and old attribute structures,
+ * the diff structure, the word passed */
+typedef void SSDescribeRoutine(TCHAR **ptr, word *left, const void *newAttrs,
+			       const void *oldAttrs, const void *diffs,
+			       word data);
+
+typedef struct {
+    word		SSDE_offset;	/* of the word to test in the diffs */
+    word		SSDE_mask;
+    SSDescribeRoutine	*SSDE_routine;
+    SSDiffFlags		SSDE_flags;
+} SSDiffEntry;
+
+/* a merge routine of a table: target, result, old, the diff structure,
+ * the entry's data, the word passed */
+typedef void SSMergeRoutine(void *target, void *result, const void *old,
+			    const void *diffs, word data, word flags);
+
+typedef struct {
+    word		SSME_offset;	/* of the word to test in the diffs */
+    word		SSME_mask;
+    SSMergeRoutine	*SSME_routine;
+    word		SSME_data;
+} SSMergeEntry;
+
+typedef WordFlags SSDescribeDistanceFlags;
+#define SSDDF_RELATIVE				0x8000
+#define SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED	0x4000
+
+typedef struct {
+    ClassStruct	*SSCLIP_styledClass;
+    optr	SSCLIP_list;
+    word	SSCLIP_defaultEntries;
+    word	SSCLIP_toolboxFlag;
+    word	SSCLIP_entryNumber;
+} SSCListInteractionParams;
+
+typedef struct {
+    ClassStruct	*SSCUMP_styledClass;
+    word	SSCUMP_usedIndex;
+    optr	SSCUMP_textObject;
+    optr	SSCUMP_attrList;
+    optr	SSCUMP_baseList;
+    optr	SSCUMP_extraUI;
+} SSCUpdateModifyParams;
+
+typedef struct {
+    ClassStruct	*SSCDAP_styledClass;
+    optr	SSCDAP_textObject;
+    optr	SSCDAP_attrList;
+    word	SSCDAP_attrTokens[MAX_STYLE_SHEET_ATTRS];
+    optr	SSCDAP_extraUI;
+} SSCDescribeAttrsParams;
+
+typedef struct {
+    ClassStruct	*SSCDSP_describeStyledClass;
+    optr	SSCDSP_describeTextObject;
+    word	SSCDSP_usedIndex;
+    optr	SSCDSP_describeDeleteTrigger;
+    optr	SSCDSP_describeDeleteRevertTrigger;
+} SSCDescribeStyleParams;
+
+typedef WordFlags SSCApplyDeleteStyleFlags;
+#define SSCADSF_TOOLBOX_STYLE		0x8000
+#define SSCADSF_TOKEN_IS_USED_INDEX	0x4000
+#define SSCADSF_REVERT_TO_BASE_STYLE	0x2000
+
+typedef struct {
+    ClassStruct			*SSCADSP_deleteStyledClass;
+    SSCApplyDeleteStyleFlags	SSCADSP_flags;
+    word			SSCADSP_token;
+} SSCApplyDeleteStyleParams;
+
+typedef struct {
+    ClassStruct	*SSCDSP_defineStyledClasss;
+    word	SSCDSP_attrTokens[MAX_STYLE_SHEET_ATTRS];
+    word	SSCDSP_baseStyle;
+    optr	SSCDSP_attrList;
+    optr	SSCDSP_textObject;
+    optr	SSCDSP_extraUI;
+    byte	SSCDSP_reserved[6];
+} SSCDefineStyleParams;
+
+typedef struct {
+    ClassStruct	*SSCRTBSP_styledClass;
+} SSCReturnToBaseStyleParams;
+
+typedef struct {
+    ClassStruct	*SSCLSSP_styledClass;
+    optr	SSCLSSP_fileSelector;
+} SSCLoadStyleSheetParams;
+
+typedef struct {
+    ClassStruct	*SSCSSP_styledClass;
+    word	SSCSSP_attrTokens[MAX_STYLE_SHEET_ATTRS];
+    optr	SSCSSP_replyObject;
+} SSCSaveStyleParams;
+
+typedef struct {
+    ClassStruct	*SSCRSP_styledClass;
+    MemHandle	SSCRSP_blockHandle;
+} SSCRecallStyleParams;
+
+/* the callback of the extra UI of a style: the style and its base
+ * style (NULL for none) to the UI or from it */
+typedef void StyleSheetExtraUICallback(optr extraUI, void *style,
+				       const void *baseStyle);
+
+/* the token of the element in the destination (*optBlock: 0 the first
+ * time, then the one returned; the caller frees it) */
+extern word StyleSheetCopyElement(optr obj, StyleSheetParams *params,
+				  word element, word attrArray,
+				  Boolean fromTransfer, word relativeTo,
+				  MemHandle *optBlock);
+/* non-zero if the object must be calculated again */
+extern word StyleSheetImportStyles(optr obj, StyleSheetParams *params,
+				   Boolean changeDestStyles);
+extern void StyleSheetDescribeStyle(StyleSheetParams *params,
+				    const SSCDescribeStyleParams *dsp);
+extern void StyleSheetDescribeAttrs(StyleSheetParams *params,
+				    const SSCDescribeAttrsParams *dap);
+/* the style's size (into buffer, a NameArrayMaxElement) */
+extern word StyleSheetGetStyle(const StyleChunkDesc *styleArray,
+			       word token, void *buffer, word *usedIndex,
+			       word *usedToolIndex);
+/* the number of styles */
+extern word StyleSheetGetStyleCounts(const StyleChunkDesc *styleArray,
+				     word *toolboxCount);
+extern void StyleSheetRequestEntryMoniker(const StyleChunkDesc *styleArray,
+					  const SSCListInteractionParams *p);
+extern void StyleSheetUpdateModifyBox(const StyleChunkDesc *styleArray,
+				      const SSCUpdateModifyParams *p,
+				      StyleSheetExtraUICallback *callback);
+extern void StyleSheetModifyStyle(const StyleChunkDesc *styleArray,
+				  const SSCUpdateModifyParams *p,
+				  StyleSheetExtraUICallback *callback);
+extern word StyleSheetDeleteStyle(optr obj, StyleSheetParams *params,
+				  word usedIndex, Boolean revertToBase);
+extern void StyleSheetDefineStyle(optr obj, StyleSheetParams *params,
+				  const SSCDefineStyleParams *dsp,
+				  StyleSheetExtraUICallback *callback);
+extern word StyleSheetRedefineStyle(optr obj, StyleSheetParams *params,
+				    const SSCDefineStyleParams *dsp,
+				    StyleSheetExtraUICallback *callback);
+extern word StyleSheetGetStyleToApply(optr styleArray,
+				      const SSCApplyDeleteStyleParams *p);
+extern word StyleSheetGetNotifyCounter(void);
+extern void StyleSheetIncNotifyCounter(void);
+/* the file (0 on an error) */
+extern VMFileHandle StyleSheetOpenFileForImport(
+				const SSCLoadStyleSheetParams *p);
+extern void StyleSheetSaveStyle(optr obj, StyleSheetParams *params,
+				const SSCSaveStyleParams *ssp);
+/* fills in SSP_attrTokens */
+extern void StyleSheetPrepareForRecallStyle(optr obj,
+					    StyleSheetParams *params,
+					    MemHandle saved);
+
+extern void StyleSheetCallDescribeRoutines(const SSDiffEntry *table,
+					   word count, TCHAR **ptr,
+					   word *left, const void *newAttrs,
+					   const void *oldAttrs,
+					   const void *diffs, word data);
+extern void StyleSheetCallMergeRoutines(const SSMergeEntry *table,
+					word count, void *target,
+					void *result, const void *old,
+					const void *diffs, word data);
+extern void StyleSheetDescribeExclusiveWord(word value,
+					    const SSDescribeWordEntry *table,
+					    word count, MemHandle strings,
+					    ChunkHandle defaultName,
+					    TCHAR **ptr, word *left);
+/* the number of entries described */
+extern word StyleSheetDescribeNonExclusiveWord(word value,
+					       const SSDescribeWordEntry *table,
+					       word count, MemHandle strings,
+					       TCHAR **ptr, word *left);
+extern void StyleSheetDescribeWWFixed(WWFixedAsDWord value, word digits,
+				      optr name, TCHAR **ptr, word *left);
+extern void StyleSheetDescribeDistance(DistanceUnit units, sword value,
+				       SSDescribeDistanceFlags flags,
+				       optr name, TCHAR **ptr, word *left);
+extern void StyleSheetAddNameFromChunk(optr name, TCHAR **ptr, word *left);
+extern void StyleSheetAddCharToDescription(TCHAR c, TCHAR **ptr,
+					   word *left);
+extern void StyleSheetAddAttributeHeader(Boolean separator, optr name,
+					 TCHAR **ptr, word *left);
+/* *flag: what to pass to StyleSheetUnlockStyleChunk */
+extern optr StyleSheetLockStyleChunk(const StyleChunkDesc *desc,
+				     Boolean *flag);
+extern void StyleSheetUnlockStyleChunk(optr array, Boolean flag);
+extern dword StyleSheetGenerateChecksum(const void *data, word size);
+extern void StyleSheetAddNameFromPtr(const TCHAR *name, TCHAR **ptr,
+				     word *left);
+extern void StyleSheetAddWord(word value, TCHAR **ptr, word *left);
+
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_REQUEST_ENTRY_MONIKER(
+				SSCListInteractionParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_UPDATE_MODIFY_BOX(
+				SSCUpdateModifyParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_MODIFY_STYLE(
+				SSCUpdateModifyParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_DESCRIBE_ATTRS(
+				SSCDescribeAttrsParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_DESCRIBE_STYLE(
+				SSCDescribeStyleParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_APPLY_STYLE(
+				SSCApplyDeleteStyleParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_DELETE_STYLE(
+				SSCApplyDeleteStyleParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_DEFINE_STYLE(
+				SSCDefineStyleParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_REDEFINE_STYLE(
+				SSCDefineStyleParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_RETURN_TO_BASE_STYLE(
+				SSCReturnToBaseStyleParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_LOAD_STYLE_SHEET(
+				SSCLoadStyleSheetParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_SAVE_STYLE(
+				SSCSaveStyleParams *params = ss:bp);
+@importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_RECALL_STYLE(
+				SSCRecallStyleParams *params = ss:bp);
+
+@else
 extern void			/* Not yet implemented */
     _pascal StyleSheetCopyElement();
 
@@ -193,15 +437,22 @@ typedef struct {
 @importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_SAVE_STYLE();
 
 @importMessage MetaStylesMessages, void MSG_META_STYLED_OBJECT_RECALL_STYLE();
+@endif
 
 /*****************/
 
 @class StyleSheetControlClass, GenControlClass;
 
 
+@ifdef GEOS_PORT32
+@message optr MSG_STYLE_SHEET_GET_MODIFY_UI();
+@message optr MSG_STYLE_SHEET_GET_DEFINE_UI();
+@message void MSG_STYLE_SHEET_SET_SAVED_STYLE(MemHandle block = cx);
+@else
 @message void MSG_STYLE_SHEET_GET_MODIFY_UI();
 @message void MSG_STYLE_SHEET_GET_DEFINE_UI();
 @message void MSG_STYLE_SHEET_SET_SAVED_STYLE();
+@endif
 
 @message void MSG_SSC_SELECT_STYLE();
 @message void MSG_SSC_STATUS_STYLE();

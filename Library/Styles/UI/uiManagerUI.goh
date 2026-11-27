@@ -1,0 +1,6 @@
+/***********************************************************************
+ * uiManagerUI.goh -- the classes of the objects of uiManager.ui, for
+ * its goc source (uic -g, see cmake/GeosUic.cmake): ControlStrings has
+ * monikers and strings only.
+ ***********************************************************************/
+@include <stdapp.goh>

@@ -1,0 +1,106 @@
+/*
+ * manipModify.goc -- after manipModify.asm: the modify style dialog box:
+ * updated from a style, and the style from it.
+ */
+@include "stylesInt.goh"
+
+/* the style of a used index and its base style (NULL for none) */
+static StyleElementHeader *UsedStyle(optr a, word usedIndex, word *token,
+				     word *size, StyleElementHeader **base)
+{
+    StyleElementHeader *s;
+
+    *token = ElementArrayUsedIndexToToken(a, usedIndex, 0, NULL);
+    s = StylePtr(a, *token, size);
+    if (base)
+	*base = ElementToPtrCheckNull(a, s->SEH_baseStyle, NULL);
+    return s;
+}
+
+/*
+ * StyleSheetUpdateModifyBox: the box shows the style of the used index:
+ * its base style in the base list (0 for none, else the base's token
+ * plus one), its flags in the attribute list, the extra UI (callback),
+ * its name in the text object (selected)
+ */
+void StyleSheetUpdateModifyBox(const StyleChunkDesc *styleArray,
+			       const SSCUpdateModifyParams *p,
+			       StyleSheetExtraUICallback *callback)
+{
+    Boolean vm;
+    optr a;
+    StyleElementHeader *s, *base;
+    word token, size, nameOff, sel = 0, flags;
+
+    if (!styleArray->SCD_chunk)
+	return;
+    a = StyleLockChunk(styleArray, &vm);
+    nameOff = StyleNameOffset(a);
+    s = UsedStyle(a, p->SSCUMP_usedIndex, &token, &size, &base);
+    flags = s->SEH_flags;
+    if (base)
+	sel = (word) (s->SEH_baseStyle + 1);
+    @send (p->SSCUMP_baseList)::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(sel,
+									FALSE);
+    @send (p->SSCUMP_attrList)::MSG_GEN_BOOLEAN_GROUP_SET_GROUP_STATE(flags,
+									 0);
+    if (callback) {
+	s = UsedStyle(a, p->SSCUMP_usedIndex, &token, &size, &base);
+	callback(p->SSCUMP_extraUI, s, base);
+    }
+    s = UsedStyle(a, p->SSCUMP_usedIndex, &token, &size, NULL);
+    @call (p->SSCUMP_textObject)::MSG_VIS_TEXT_REPLACE_ALL_PTR(
+	(char *) ((byte *) s + nameOff),
+	(word) ((size - nameOff) / sizeof(TCHAR)));
+    @send (p->SSCUMP_textObject)::MSG_VIS_TEXT_SELECT_ALL();
+    StyleUnlockChunk(a, vm, FALSE);
+}
+
+/*
+ * StyleSheetModifyStyle: the style of the used index takes what the box
+ * shows: the base style (unless that would make the style based on
+ * itself, an error box), the flags, the name (unless empty), the extra
+ * UI's part (callback)
+ */
+void StyleSheetModifyStyle(const StyleChunkDesc *styleArray,
+			   const SSCUpdateModifyParams *p,
+			   StyleSheetExtraUICallback *callback)
+{
+    Boolean vm;
+    optr a;
+    StyleElementHeader *s, *base;
+    word sel, newBase, token, b, flags, size;
+    TCHAR name[NAME_ARRAY_MAX_NAME_LENGTH + 2];
+
+    if (!styleArray->SCD_chunk)
+	return;
+    IgnoreUndoAndFlush();
+    a = StyleLockChunk(styleArray, &vm);
+    sel = @call (p->SSCUMP_baseList)::MSG_GEN_ITEM_GROUP_GET_SELECTION();
+    sel--;
+    newBase = (sword) sel < 0 ? CA_NULL_ELEMENT :
+	      ElementArrayUsedIndexToToken(a, sel, 0, NULL);
+    token = ElementArrayUsedIndexToToken(a, p->SSCUMP_usedIndex, 0, NULL);
+    /* (no style may be based on itself or a style based on it) */
+    for (b = newBase; b != token; b = StylePtr(a, b, NULL)->SEH_baseStyle)
+	if (b == CA_NULL_ELEMENT)
+	    break;
+    if (b == token && b != CA_NULL_ELEMENT)
+	DisplayError(OptrToChunk(@IllegalBaseStyleString));
+    else {
+	ObjMarkDirty(a);
+	StyleSheetIncNotifyCounter();
+	StylePtr(a, token, NULL)->SEH_baseStyle = newBase;
+    }
+    flags = @call (p->SSCUMP_attrList)::
+		MSG_GEN_BOOLEAN_GROUP_GET_SELECTED_BOOLEANS();
+    StylePtr(a, token, NULL)->SEH_flags = flags;
+    if (@call (p->SSCUMP_textObject)::MSG_VIS_TEXT_GET_ALL_PTR((char *) name))
+	NameArrayChangeName(a, token, name, 0);
+    if (callback) {
+	s = UsedStyle(a, p->SSCUMP_usedIndex, &token, &size, &base);
+	callback(p->SSCUMP_extraUI, s, base);
+    }
+    StyleUnlockChunk(a, vm, TRUE);
+    AcceptUndo();
+}

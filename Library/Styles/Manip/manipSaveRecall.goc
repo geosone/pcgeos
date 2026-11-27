@@ -1,0 +1,133 @@
+/*
+ * manipSaveRecall.goc -- after manipSaveRecall.asm: saving the style of
+ * the selection into a block of its own, recalling it from there.
+ */
+@include "stylesInt.goh"
+
+/* the saved style: a style array and attribute arrays of the block, the
+ * elements saved */
+typedef struct {
+    ObjLMemBlockHeader	SRBH_meta;
+    ChunkHandle		SRBH_styleArray;
+    ChunkHandle		SRBH_attrArrays[MAX_STYLE_SHEET_ATTRS];
+    word		SRBH_attrTokens[MAX_STYLE_SHEET_ATTRS];
+} SaveRecallBlockHeader;
+
+static void SetXferDesc(StyleChunkDesc *d, MemHandle mh, ChunkHandle ch)
+{
+    d->SCD_vmFile = 0;
+    d->SCD_vmBlockOrMemHandle = mh;
+    /* (a memory block, locked by MemLock) */
+    d->SCD_chunk = (ChunkHandle) (ch | STYLE_CHUNK_NOT_IN_OBJ_BLOCK);
+}
+
+/*
+ * StyleSheetSaveStyle: the elements of ssp's attribute tokens and their
+ * styles copied into a new block (the transfer of the copy), which goes
+ * to ssp's reply object (MSG_STYLE_SHEET_SET_SAVED_STYLE)
+ */
+void StyleSheetSaveStyle(optr obj, StyleSheetParams *params,
+			 const SSCSaveStyleParams *ssp)
+{
+    StyleLocals l;
+    MemHandle mh;
+    NameArrayHeader *nh;
+    ChunkArrayHeader *ch;
+    ChunkHandle c;
+    word dataSize, hdrSize, i, tok;
+    StyleSheetElementHeader *e;
+
+    if (!params->SSP_styleArray.SCD_chunk)
+	return;
+    memset(&l, 0, sizeof(l));
+    EnterStyleSheet(&l, obj, params);
+    l.SL_xferDirty = TRUE;
+    /* the block with a style array and attribute arrays, set up as the
+     * transfer's */
+    mh = MemAllocLMem(LMEM_TYPE_OBJ_BLOCK, sizeof(SaveRecallBlockHeader));
+    (void) MemLock(mh);
+    nh = LMemDeref(l.SL_styleArray);
+    dataSize = nh->NAH_dataSize;
+    hdrSize = nh->NAH_meta.EAH_meta.CAH_offset;
+    c = NameArrayCreateAt(ConstructOptr(mh, 0), dataSize, hdrSize, 0);
+    SetXferDesc(&params->SSP_xferStyleArray, mh, c);
+    l.SL_xferStyleArray = ConstructOptr(mh, c);
+    l.SL_xferStyleVM = FALSE;
+    ((SaveRecallBlockHeader *) MemDeref(mh))->SRBH_styleArray = c;
+    for (i = 0; i < l.SL_attrTotal; i++) {
+	(void) LockLoopAttrArray(&l, i, CA_NULL_ELEMENT, NULL);
+	ch = LMemDeref(l.SL_attrArray);
+	c = ElementArrayCreateAt(ConstructOptr(mh, 0), ch->CAH_elementSize,
+				 ch->CAH_offset, 0);
+	SetXferDesc(&params->SSP_xferAttrArrays[i], mh, c);
+	((SaveRecallBlockHeader *) MemDeref(mh))->SRBH_attrArrays[i] = c;
+	UnlockLoopAttrArray(&l);
+    }
+    l.SL_optBlock = 0;
+    l.SL_fromTransfer = FALSE;
+    l.SL_changeDestStyles = FALSE;
+    /* the elements (with their styles) */
+    for (i = 0; i < l.SL_attrTotal; i++) {
+	tok = ssp->SSCSSP_attrTokens[i];
+	e = LockLoopAttrArray(&l, i, tok, NULL);
+	l.SL_styleToChange = e->SSEH_style;
+	/* (CopyStyle locks and unlocks the attribute arrays) */
+	UnlockSpecificAttrArray(&l);
+	l.SL_destStyle = l.SL_destCopyFromStyle =
+	    CopyStyle(&l, l.SL_styleToChange);
+	LockSpecificAttrArray(&l, i);
+	tok = CopyElement(&l, tok, FALSE);
+	((SaveRecallBlockHeader *) MemDeref(mh))->SRBH_attrTokens[i] = tok;
+	UnlockLoopAttrArray(&l);
+    }
+    @send (ssp->SSCSSP_replyObject)::MSG_STYLE_SHEET_SET_SAVED_STYLE(mh);
+    if (l.SL_optBlock)
+	MemFree(l.SL_optBlock);
+    LeaveStyleSheet(&l);
+}
+
+/*
+ * StyleSheetPrepareForRecallStyle: the saved style's elements (and
+ * styles) copied back into the object's arrays; their tokens in
+ * params->SSP_attrTokens.  A reference less to the block.
+ */
+void StyleSheetPrepareForRecallStyle(optr obj, StyleSheetParams *params,
+				     MemHandle saved)
+{
+    StyleLocals l;
+    SaveRecallBlockHeader *h;
+    StyleSheetElementHeader *e;
+    word i, tok;
+
+    if (!params->SSP_styleArray.SCD_chunk)
+	return;
+    memset(&l, 0, sizeof(l));
+    EnterStyleSheet(&l, obj, params);
+    l.SL_dirty = TRUE;
+    h = MemLock(saved);
+    SetXferDesc(&params->SSP_xferStyleArray, saved, h->SRBH_styleArray);
+    l.SL_xferStyleArray = ConstructOptr(saved, h->SRBH_styleArray);
+    l.SL_xferStyleVM = FALSE;
+    l.SL_optBlock = 0;
+    l.SL_fromTransfer = TRUE;
+    l.SL_changeDestStyles = FALSE;
+    for (i = 0; i < l.SL_attrTotal; i++)
+	SetXferDesc(&params->SSP_xferAttrArrays[i], saved,
+		    h->SRBH_attrArrays[i]);
+    for (i = 0; i < l.SL_attrTotal; i++) {
+	tok = ((SaveRecallBlockHeader *) MemDeref(saved))->SRBH_attrTokens[i];
+	(void) LockLoopAttrArray(&l, i, CA_NULL_ELEMENT, NULL);
+	e = ChunkArrayElementToPtr(l.SL_xferAttrArray, tok, NULL);
+	l.SL_styleToChange = e->SSEH_style;
+	UnlockSpecificAttrArray(&l);
+	l.SL_destStyle = l.SL_destCopyFromStyle =
+	    CopyStyle(&l, l.SL_styleToChange);
+	LockSpecificAttrArray(&l, i);
+	params->SSP_attrTokens[i] = CopyElement(&l, tok, FALSE);
+	UnlockLoopAttrArray(&l);
+    }
+    if (l.SL_optBlock)
+	MemFree(l.SL_optBlock);
+    LeaveStyleSheet(&l);
+    MemDecRefCount(saved);
+}

@@ -1,0 +1,130 @@
+/*
+ * manipTrans.goc -- after manipTrans.asm: copying an element to or from
+ * a transfer, importing styles, opening a file to import styles from.
+ */
+@include "stylesInt.goh"
+#include <file.h>
+
+/*
+ * StyleSheetCopyElement: the element of the attribute array attrArray
+ * (an index) copied from the object to the transfer or back, with its
+ * style; relativeTo (not CA_NULL_ELEMENT): an element of the
+ * destination whose style the copy takes, the element of the source
+ * style its old base.  The element in the destination; *optBlock:
+ * what was copied (0 the first time; the caller frees it).
+ */
+word StyleSheetCopyElement(optr obj, StyleSheetParams *params,
+			   word element, word attrArray,
+			   Boolean fromTransfer, word relativeTo,
+			   MemHandle *optBlock)
+{
+    StyleLocals l;
+    word st, tok;
+    Boolean relative;
+    StyleElementHeader *s;
+
+    if (!params->SSP_styleArray.SCD_chunk)
+	return element;
+    memset(&l, 0, sizeof(l));
+    l.SL_substituteFlag = FALSE;
+    EnterStyleSheet(&l, obj, params);
+    l.SL_optBlock = *optBlock;
+    l.SL_fromTransfer = fromTransfer ? TRUE : FALSE;
+    l.SL_changeDestStyles = fromTransfer ? FALSE : TRUE;
+    /* (only the destination changes) */
+    if (fromTransfer)
+	l.SL_dirty = TRUE;
+    else
+	l.SL_xferDirty = TRUE;
+    LockSpecificAttrArray(&l, attrArray);
+    st = ((StyleSheetElementHeader *)
+	  ChunkArrayElementToPtr(SourceAttr(&l), element, NULL))->SSEH_style;
+    if (relativeTo != CA_NULL_ELEMENT) {
+	/* the style of the destination element, the source style's
+	 * element as the old base */
+	s = ElementToPtrCheckNull(SourceStyle(&l), st, NULL);
+	l.SL_styleToChange = s ? s->SEH_attrTokens[attrArray] :
+			     CA_NULL_ELEMENT;
+	st = ((StyleSheetElementHeader *)
+	      ChunkArrayElementToPtr(DestAttr(&l), relativeTo,
+				     NULL))->SSEH_style;
+	UnlockSpecificAttrArray(&l);
+	relative = TRUE;
+    } else {
+	UnlockSpecificAttrArray(&l);
+	l.SL_styleToChange = st;
+	st = CopyStyle(&l, st);
+	relative = FALSE;
+    }
+    l.SL_destStyle = l.SL_destCopyFromStyle = st;
+    LockSpecificAttrArray(&l, attrArray);
+    if (LookupOpt(&l, OPT_ATTR(attrArray), element, relativeTo, &tok))
+	/* (known: a reference more) */
+	ElementArrayAddReference(DestAttr(&l), tok);
+    else {
+	tok = CopyElement(&l, element, relative);
+	AddOpt(&l, OPT_ATTR(attrArray), element, relativeTo, tok);
+    }
+    UnlockSpecificAttrArray(&l);
+    LeaveStyleSheet(&l);
+    *optBlock = l.SL_optBlock;
+    return tok;
+}
+
+static Boolean ImportStyleCallback(void *element, void *enumData)
+{
+    StyleLocals *l = enumData;
+
+    if (!StyleIsFree(element))
+	(void) CopyStyle(l, ChunkArrayPtrToElement(SourceStyle(l), element));
+    return FALSE;
+}
+
+/*
+ * StyleSheetImportStyles: every style of the transfer (the import
+ * source) copied to the object's arrays; changeDestStyles: a style the
+ * object has takes the source's definition.  Non-zero if the object
+ * must be calculated again.
+ */
+word StyleSheetImportStyles(optr obj, StyleSheetParams *params,
+			    Boolean changeDestStyles)
+{
+    StyleLocals l;
+
+    if (!params->SSP_styleArray.SCD_chunk)
+	return 0;
+    memset(&l, 0, sizeof(l));
+    EnterStyleSheet(&l, obj, params);
+    l.SL_optBlock = 0;
+    l.SL_substituteFlag = TRUE;
+    l.SL_fromTransfer = TRUE;
+    l.SL_changeDestStyles = changeDestStyles ? TRUE : FALSE;
+    l.SL_dirty = TRUE;
+    (void) ChunkArrayEnum(SourceStyle(&l), &l, ImportStyleCallback);
+    if (l.SL_optBlock)
+	MemFree(l.SL_optBlock);
+    StyleSheetIncNotifyCounter();
+    LeaveStyleSheet(&l);
+    return l.SL_recalcFlag;
+}
+
+/* StyleSheetOpenFileForImport: the file of the file selector, opened
+ * read-only (0 on an error) */
+VMFileHandle StyleSheetOpenFileForImport(const SSCLoadStyleSheetParams *p)
+{
+    char buffer[PATH_BUFFER_SIZE + FILE_LONGNAME_BUFFER_SIZE];
+    DiskHandle disk;
+    VMFileHandle f = 0;
+
+    FilePushDir();
+    disk = @call (p->SSCLSSP_fileSelector)::MSG_GEN_PATH_GET_DISK_HANDLE();
+    if (!@call (p->SSCLSSP_fileSelector)::MSG_GEN_PATH_GET(buffer,
+							   sizeof(buffer)) &&
+	FileSetCurrentPath(disk, buffer)) {
+	(void) @call (p->SSCLSSP_fileSelector)::
+	    MSG_GEN_FILE_SELECTOR_GET_SELECTION(buffer);
+	f = VMOpen(buffer, VMAF_FORCE_READ_ONLY, VMO_OPEN, 0);
+    }
+    FilePopDir();
+    return f;
+}
