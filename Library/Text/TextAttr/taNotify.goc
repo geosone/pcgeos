@@ -9,8 +9,7 @@
  * a notification block each.
  *
  * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: the
- * style and style sheet notifications (the Styles library is not in C;
- * their GCN lists get only the null status), the type notification
+ * type notification
  * (objects with types are not in C; their bit is cleared without
  * VTSF_TYPES, as in the asm).
  */
@@ -30,6 +29,10 @@ typedef struct {
     word			NV_attrFlags;	/* VTGAF_MERGE_WITH_PASSED */
     word			NV_charAttrToken;
     word			NV_paraAttrToken;
+    word			NV_styleToken;	/* the char attr's style */
+    byte			NV_styleDiffs;	/* 0xff: more than one */
+    dword			NV_charAttrChecksum;
+    dword			NV_paraAttrChecksum;
 } NotifyVars;
 
 typedef void NotifRoutine(optr o, NotifyVars *v, void *block);
@@ -48,7 +51,8 @@ static NotifRoutine GenSelectStateNotify, GenCharAttrNotify,
 		    GenParaAttrNotify, GenSelectionNotify, GenCountNotify,
 		    GenSearchReplaceEnableNotify, GenSpellEnableNotify,
 		    GenNameNotify, GenCursorPositionNotify,
-		    GenHyperlinkabilityNotify;
+		    GenHyperlinkabilityNotify, GenStyleNotify,
+		    GenStyleSheetNotify;
 
 /* BooleanByte and BooleanWord TRUE (geos.def) */
 #define BB_TRUE		0xff
@@ -74,10 +78,10 @@ static const NotifStruct notificationTable[] = {
     { GenCountNotify, sizeof(VisTextNotifyCountChange),
       GWNT_TEXT_COUNT_CHANGE,
       GAGCNLT_APP_TARGET_NOTIFY_TEXT_COUNT_CHANGE },
-    { NULL /* GenStyleSheetNotify */, sizeof(NotifyStyleSheetChange),
+    { GenStyleSheetNotify, sizeof(NotifyStyleSheetChange),
       GWNT_STYLE_SHEET_CHANGE,
       GAGCNLT_APP_TARGET_NOTIFY_STYLE_SHEET_TEXT_CHANGE },
-    { NULL /* GenStyleNotify */, sizeof(NotifyStyleChange),
+    { GenStyleNotify, sizeof(NotifyStyleChange),
       GWNT_STYLE_CHANGE,
       GAGCNLT_APP_TARGET_NOTIFY_STYLE_TEXT_CHANGE },
     { GenSearchReplaceEnableNotify,
@@ -368,7 +372,13 @@ static void GenCharAttrNotify(optr o, NotifyVars *v, void *block)
 	n->VTNCAC_charAttrToken = token;
 	v->NV_charAttrToken = token;
     }
-    /* (the checksum and the style for GenStyleNotify: not yet) */
+    /* the checksum and the style for GenStyleNotify */
+    if (!(v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED))
+	v->NV_charAttrChecksum = StyleSheetGenerateChecksum(
+				&n->VTNCAC_charAttr, sizeof(VisTextCharAttr));
+    v->NV_styleToken = n->VTNCAC_charAttr.VTCA_meta.SSEH_style;
+    v->NV_styleDiffs = (n->VTNCAC_charAttrDiffs.VTCAD_diffs &
+			VTCAF_MULTIPLE_STYLES) ? 0xff : 0;
 }
 
 /* GenParaAttrNotify: the selection's paragraph attribute, the selected
@@ -410,7 +420,79 @@ static void GenParaAttrNotify(optr o, NotifyVars *v, void *block)
     }
     n->VTNPAC_regionWidth = TR_RegionWidth(o, 0, 0,
 					   VIS_TEXT_DEFAULT_POINT_SIZE);
-    /* (the checksum for GenStyleNotify: not yet) */
+    /* the checksum for GenStyleNotify */
+    if (!(v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED))
+	v->NV_paraAttrChecksum = StyleSheetGenerateChecksum(
+				&n->VTNPAC_paraAttr, sizeof(VisTextMaxParaAttr));
+}
+
+/*
+ * GenStyleNotify: the selection's attribute tokens and their checksums,
+ * its style (indeterminate: more than one), the style's element and
+ * indices; whether the selection may return to the style's attributes
+ * (they differ, or something is indeterminate) and redefine the style
+ * (they differ, nothing indeterminate).  (After GenCharAttrNotify and
+ * GenParaAttrNotify, whose results it takes.)
+ */
+static void GenStyleNotify(optr o, NotifyVars *v, void *block)
+{
+    NotifyStyleChange *n = block;
+    word style = v->NV_styleToken, back, redefine;
+    byte diffs = v->NV_styleDiffs;
+    StyleChunkDesc d;
+    const TextStyleElementHeader *s;
+
+    n->NSC_attrTokens[0] = v->NV_charAttrToken;
+    n->NSC_attrTokens[1] = v->NV_paraAttrToken;
+    if (!(v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED)) {
+	n->NSC_attrChecksums[0] = v->NV_charAttrChecksum;
+	n->NSC_attrChecksums[1] = v->NV_paraAttrChecksum;
+	n->NSC_styleToken = style;
+    }
+    if (n->NSC_styleToken != style)
+	diffs = 0xff;
+    n->NSC_indeterminate |= diffs;
+    if (v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED)
+	return;
+    if (n->NSC_indeterminate)
+	style = CA_NULL_ELEMENT;
+    if (!GetStyleArray(o, &d))
+	return;
+    n->NSC_styleSize = StyleSheetGetStyle(&d, style, &n->NSC_style,
+					  &n->NSC_usedIndex,
+					  &n->NSC_usedToolIndex);
+    s = (const TextStyleElementHeader *) &n->NSC_style;
+    back = 0;
+    if (s->TSEH_charAttrToken != n->NSC_attrTokens[0])
+	back++;
+    if (!(s->TSEH_privateData.TSPD_flags & TSF_APPLY_TO_SELECTION_ONLY) &&
+	s->TSEH_paraAttrToken != n->NSC_attrTokens[1])
+	back++;
+    redefine = back;
+    if (v->NV_charAttrToken == CA_NULL_ELEMENT ||
+	(!(s->TSEH_privateData.TSPD_flags & TSF_APPLY_TO_SELECTION_ONLY) &&
+	 v->NV_paraAttrToken == CA_NULL_ELEMENT)) {
+	back++;
+	redefine = 0;
+    }
+    n->NSC_canReturnToBase = (byte) back;
+    /* (the asm's NSC_canRedefine) */
+    n->NSC_differsFromBase = (byte) redefine;
+    n->NSC_styleCounter = StyleSheetGetNotifyCounter();
+}
+
+/* GenStyleSheetNotify: the style array, how many styles there are (in
+ * the toolbox), the counter of changes */
+static void GenStyleSheetNotify(optr o, NotifyVars *v, void *block)
+{
+    NotifyStyleSheetChange *n = block;
+
+    if ((v->NV_sendFlags & VTNSF_STRUCTURE_INITIALIZED) ||
+	!GetStyleArray(o, &n->NSSHC_styleArray))
+	return;
+    n->NSSHC_styleCount = StyleSheetGetStyleCounts(&n->NSSHC_styleArray,
+						   &n->NSSHC_toolStyleCount);
+    n->NSSHC_counter = StyleSheetGetNotifyCounter();
 }
 
 /* GenNameNotify: names changed: a new count */

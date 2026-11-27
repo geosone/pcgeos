@@ -4,6 +4,7 @@
  * TA_UpdateRunsForReplacement, TA_ModifyRun.
  */
 @include "textInt.goh"
+@include <Objects/styles.goh>
 #include <chunkarr.h>
 #include <char.h>
 
@@ -279,9 +280,24 @@ static word ModifyElement(optr o, TextRunKind kind, word old,
 	cb(o, &buf, data);
 	return TA_AddElement(o, kind, &buf);
     }
-    /* (CA_NULL_ELEMENT, the base style: no style sheets yet) */
-    if (token == CA_NULL_ELEMENT)
+    /* CA_NULL_ELEMENT: back to the element of the style (if any) */
+    if (token == CA_NULL_ELEMENT) {
+	word style = ((StyleSheetElementHeader *) &buf)->SSEH_style;
+	StyleChunkDesc d;
+
+	if (style != CA_NULL_ELEMENT && GetStyleArray(o, &d)) {
+	    Boolean flag;
+	    optr a = StyleSheetLockStyleChunk(&d, &flag);
+	    const TextStyleElementHeader *e =
+		ChunkArrayElementToPtr(a, style, NULL);
+	    word base = kind == TRK_CHAR_ATTR ? e->TSEH_charAttrToken :
+			e->TSEH_paraAttrToken;
+
+	    StyleSheetUnlockStyleChunk(a, flag);
+	    TA_GetElement(o, kind, base, &buf);
+	}
 	return TA_AddElement(o, kind, &buf);
+    }
     t = token;
     TA_ElementAddRef(o, kind, t);
     return t;

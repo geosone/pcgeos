@@ -238,7 +238,7 @@ static void SetParaAttr(optr o, dword start, dword end,
 }
 
 /* DiffParaAttr: the fields in which two attributes differ marked */
-static void DiffParaAttr(const VisTextMaxParaAttr *ma,
+void DiffParaAttr(const VisTextMaxParaAttr *ma,
 			 const VisTextMaxParaAttr *mb,
 			 VisTextParaAttrDiffs *d)
 {

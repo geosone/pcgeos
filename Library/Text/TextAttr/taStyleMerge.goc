@@ -1,0 +1,314 @@
+/*
+ * taStyleMerge.goc -- after taStyleMerge.asm: the merge callbacks of the
+ * style sheet code (StyleSheetParams): an element based on a style
+ * that changed becomes the new element plus what it had other than the
+ * old one (target - old + new), field by field.
+ */
+@include "textInt.goh"
+@include <Objects/styles.goh>
+
+/* the merge routines of the tables (StyleSheetCallMergeRoutines): the
+ * target's field into the result where they differ; data: the offset
+ * of the field; flags: the TextStyleFlags of the style */
+static void MergeDWord(void *target, void *result, const void *old,
+		       const void *diffs, word data, word flags)
+{
+    (void) old; (void) diffs; (void) flags;
+    memcpy((byte *) result + data, (const byte *) target + data, 4);
+}
+
+static void MergeWord(void *target, void *result, const void *old,
+		      const void *diffs, word data, word flags)
+{
+    (void) old; (void) diffs; (void) flags;
+    memcpy((byte *) result + data, (const byte *) target + data, 2);
+}
+
+static void MergeByte(void *target, void *result, const void *old,
+		      const void *diffs, word data, word flags)
+{
+    (void) old; (void) diffs; (void) flags;
+    ((byte *) result)[data] = ((const byte *) target)[data];
+}
+
+/* the point size; relative: target - old + new */
+static void MergePointSize(void *target, void *result, const void *old,
+			   const void *diffs, word data, word flags)
+{
+    const VisTextCharAttr *t = target, *o = old;
+    VisTextCharAttr *r = result;
+    sdword v = ((sdword) t->VTCA_pointSize.WBF_int << 8) |
+	       t->VTCA_pointSize.WBF_frac;
+
+    (void) diffs; (void) data;
+    if (flags & TSF_POINT_SIZE_RELATIVE) {
+	v -= ((sdword) o->VTCA_pointSize.WBF_int << 8) |
+	     o->VTCA_pointSize.WBF_frac;
+	v += ((sdword) r->VTCA_pointSize.WBF_int << 8) |
+	     r->VTCA_pointSize.WBF_frac;
+    }
+    r->VTCA_pointSize.WBF_frac = (byte) v;
+    r->VTCA_pointSize.WBF_int = (word) (v >> 8);
+}
+
+/* the bits that differ from the target's, the others the new ones */
+static void MergeTextStyle(void *target, void *result, const void *old,
+			   const void *diffs, word data, word flags)
+{
+    const VisTextCharAttrDiffs *d = diffs;
+    VisTextCharAttr *r = result;
+    byte m = d->VTCAD_textStyles;
+
+    (void) old; (void) data; (void) flags;
+    r->VTCA_textStyles = (byte) ((((const VisTextCharAttr *) target)->
+				  VTCA_textStyles & m) |
+				 (r->VTCA_textStyles & ~m));
+}
+
+static void MergeExtendedStyle(void *target, void *result, const void *old,
+			       const void *diffs, word data, word flags)
+{
+    const VisTextCharAttrDiffs *d = diffs;
+    VisTextCharAttr *r = result;
+    word m = d->VTCAD_extendedStyles;
+
+    (void) old; (void) data; (void) flags;
+    r->VTCA_extendedStyles = (word) ((((const VisTextCharAttr *) target)->
+				      VTCA_extendedStyles & m) |
+				     (r->VTCA_extendedStyles & ~m));
+}
+
+#define CA_OFF(f)	((word) offsetof(VisTextCharAttr, f))
+#define CAD_OFF(f)	((word) offsetof(VisTextCharAttrDiffs, f))
+
+static const SSMergeEntry CAMergeTable[] = {
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_FONT_IDS, MergeWord,
+      CA_OFF(VTCA_fontID) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_POINT_SIZES, MergePointSize,
+      CA_OFF(VTCA_pointSize) },
+    { CAD_OFF(VTCAD_textStyles), 0xff, MergeTextStyle,
+      CA_OFF(VTCA_textStyles) },
+    { CAD_OFF(VTCAD_extendedStyles), 0xffff, MergeExtendedStyle,
+      CA_OFF(VTCA_extendedStyles) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_COLORS, MergeDWord,
+      CA_OFF(VTCA_color) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_GRAY_SCREENS, MergeByte,
+      CA_OFF(VTCA_grayScreen) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_PATTERNS, MergeWord,
+      CA_OFF(VTCA_pattern) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_FONT_WEIGHTS, MergeByte,
+      CA_OFF(VTCA_fontWeight) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_FONT_WIDTHS, MergeByte,
+      CA_OFF(VTCA_fontWidth) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_TRACK_KERNINGS, MergeWord,
+      CA_OFF(VTCA_trackKerning) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_BG_COLORS, MergeDWord,
+      CA_OFF(VTCA_bgColor) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_BG_GRAY_SCREENS, MergeByte,
+      CA_OFF(VTCA_bgGrayScreen) },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_BG_PATTERNS, MergeWord,
+      CA_OFF(VTCA_bgPattern) },
+};
+
+/*
+ * MergeCharAttr: the merge callback of character attributes; old NULL:
+ * against the default attribute, nothing relative.  The size stays.
+ */
+word MergeCharAttr(void *target, void *result, const void *old,
+		   const void *privateData, word size)
+{
+    VisTextCharAttrDiffs diffs;
+    word flags = ((const TextStylePrivateData *) privateData)->TSPD_flags;
+
+    memset(&diffs, 0, sizeof(diffs));
+    DiffCharAttr(target, old ? old : &TS_defaultCharAttr, &diffs);
+    if (!old)
+	flags = 0;
+    if (flags & TSF_POINT_SIZE_RELATIVE)
+	diffs.VTCAD_diffs |= VTCAF_MULTIPLE_POINT_SIZES;
+    StyleSheetCallMergeRoutines(CAMergeTable,
+				sizeof(CAMergeTable) / sizeof(CAMergeTable[0]),
+				target, result, old, &diffs, flags);
+    return size;
+}
+
+static void MergeParaAttributes(void *target, void *result, const void *old,
+				const void *diffs, word data, word flags)
+{
+    const VisTextParaAttrDiffs *d = diffs;
+    VisTextParaAttr *r = result;
+    word m = d->VTPAD_attributes;
+
+    (void) old; (void) data; (void) flags;
+    r->VTPA_attributes = (word) ((((const VisTextParaAttr *) target)->
+				  VTPA_attributes & m) |
+				 (r->VTPA_attributes & ~m));
+}
+
+/* a margin; relative: target - old + new */
+static void MergeMargin(void *target, void *result, const void *old,
+			const void *diffs, word data, word flags)
+{
+    word v, o, n;
+
+    (void) diffs;
+    memcpy(&v, (const byte *) target + data, 2);
+    if (flags & TSF_MARGINS_RELATIVE) {
+	memcpy(&o, (const byte *) old + data, 2);
+	memcpy(&n, (byte *) result + data, 2);
+	v = (word) (v - o + n);
+    }
+    memcpy((byte *) result + data, &v, 2);
+}
+
+/* the leading; relative: target - old + new */
+static void MergeLeading(void *target, void *result, const void *old,
+			 const void *diffs, word data, word flags)
+{
+    const VisTextParaAttr *t = target, *o = old;
+    VisTextParaAttr *r = result;
+    word v = t->VTPA_leading;
+
+    (void) diffs; (void) data;
+    if (flags & TSF_SPACING_RELATIVE)
+	v = (word) (v - o->VTPA_leading + r->VTPA_leading);
+    r->VTPA_leading = v;
+}
+
+/* the target's tabs (all the room of a VisTextMaxParaAttr, as the asm) */
+static void MergeTabList(void *target, void *result, const void *old,
+			 const void *diffs, word data, word flags)
+{
+    const VisTextMaxParaAttr *t = target;
+    VisTextMaxParaAttr *r = result;
+
+    (void) old; (void) diffs; (void) data; (void) flags;
+    r->VTMPA_paraAttr.VTPA_numberOfTabs = t->VTMPA_paraAttr.VTPA_numberOfTabs;
+    memcpy(r->VTMPA_tabs, t->VTMPA_tabs, sizeof(r->VTMPA_tabs));
+}
+
+static void MergeBorder(void *target, void *result, const void *old,
+			const void *diffs, word data, word flags)
+{
+    const VisTextParaAttr *t = target;
+    VisTextParaAttr *r = result;
+
+    (void) old; (void) diffs; (void) data; (void) flags;
+    r->VTPA_borderFlags = t->VTPA_borderFlags;
+    r->VTPA_borderShadow = t->VTPA_borderShadow;
+}
+
+/* the fields of a word whose bits differ, from the target */
+static word MergeFields(word target, word result, word diffs,
+			const word *fields, word count)
+{
+    for (; count; count--, fields++)
+	if (diffs & *fields)
+	    result = (word) ((result & ~*fields) | (target & *fields));
+    return result;
+}
+
+static void MergeHypenationInfo(void *target, void *result, const void *old,
+				const void *diffs, word data, word flags)
+{
+    static const word fields[] = {
+	VTHI_HYPHEN_MAX_LINES, VTHI_HYPHEN_SHORTEST_WORD,
+	VTHI_HYPHEN_SHORTEST_PREFIX, VTHI_HYPHEN_SHORTEST_SUFFIX
+    };
+    VisTextParaAttr *r = result;
+
+    (void) old; (void) data; (void) flags;
+    r->VTPA_hyphenationInfo = MergeFields(
+	((const VisTextParaAttr *) target)->VTPA_hyphenationInfo,
+	r->VTPA_hyphenationInfo,
+	((const VisTextParaAttrDiffs *) diffs)->VTPAD_hyphenationInfo,
+	fields, 4);
+}
+
+static void MergeKeepInfo(void *target, void *result, const void *old,
+			  const void *diffs, word data, word flags)
+{
+    static const word fields[] = { VTKI_TOP_LINES, VTKI_BOTTOM_LINES };
+    VisTextParaAttr *r = result;
+
+    (void) old; (void) data; (void) flags;
+    r->VTPA_keepInfo = (byte) MergeFields(
+	((const VisTextParaAttr *) target)->VTPA_keepInfo, r->VTPA_keepInfo,
+	((const VisTextParaAttrDiffs *) diffs)->VTPAD_keepInfo, fields, 2);
+}
+
+#define PA_OFF(f)	((word) offsetof(VisTextParaAttr, f))
+#define PAD_OFF(f)	((word) offsetof(VisTextParaAttrDiffs, f))
+
+static const SSMergeEntry PAMergeTable[] = {
+    { PAD_OFF(VTPAD_attributes), 0xffff, MergeParaAttributes,
+      PA_OFF(VTPA_attributes) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_LEFT_MARGINS, MergeMargin,
+      PA_OFF(VTPA_leftMargin) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_PARA_MARGINS, MergeMargin,
+      PA_OFF(VTPA_paraMargin) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_RIGHT_MARGINS, MergeMargin,
+      PA_OFF(VTPA_rightMargin) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_LINE_SPACINGS, MergeWord,
+      PA_OFF(VTPA_lineSpacing) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_LEADINGS, MergeLeading, 0 },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_TOP_SPACING, MergeWord,
+      PA_OFF(VTPA_spaceOnTop) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_BOTTOM_SPACING, MergeWord,
+      PA_OFF(VTPA_spaceOnBottom) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_DEFAULT_TABS, MergeWord,
+      PA_OFF(VTPA_defaultTabs) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_BG_COLORS, MergeDWord,
+      PA_OFF(VTPA_bgColor) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_BG_GRAY_SCREENS, MergeByte,
+      PA_OFF(VTPA_bgGrayScreen) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_BG_PATTERNS, MergeWord,
+      PA_OFF(VTPA_bgPattern) },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_TAB_LISTS, MergeTabList, 0 },
+    { PAD_OFF(VTPAD_borderDiffs),
+      VTPABF_MULTIPLE_BORDER_LEFT | VTPABF_MULTIPLE_BORDER_TOP |
+      VTPABF_MULTIPLE_BORDER_RIGHT | VTPABF_MULTIPLE_BORDER_BOTTOM |
+      VTPABF_MULTIPLE_BORDER_DOUBLES | VTPABF_MULTIPLE_BORDER_DRAW_INNERS |
+      VTPABF_MULTIPLE_BORDER_ANCHORS | VTPABF_MULTIPLE_BORDER_SHADOWS,
+      MergeBorder, 0 },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_WIDTHS, MergeByte,
+      PA_OFF(VTPA_borderWidth) },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_SPACINGS, MergeByte,
+      PA_OFF(VTPA_borderSpacing) },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_COLORS, MergeDWord,
+      PA_OFF(VTPA_borderColor) },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_GRAY_SCREENS,
+      MergeByte, PA_OFF(VTPA_borderGrayScreen) },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_PATTERNS, MergeWord,
+      PA_OFF(VTPA_borderPattern) },
+    { PAD_OFF(VTPAD_hyphenationInfo), 0xffff, MergeHypenationInfo, 0 },
+    { PAD_OFF(VTPAD_keepInfo), 0xff, MergeKeepInfo, 0 },
+};
+
+/*
+ * MergeParaAttr: the merge callback of paragraph attributes; old NULL:
+ * against the default attribute, nothing relative.  The size of the
+ * result (with its tabs).
+ */
+word MergeParaAttr(void *target, void *result, const void *old,
+		   const void *privateData, word size)
+{
+    VisTextParaAttrDiffs diffs;
+    word flags = ((const TextStylePrivateData *) privateData)->TSPD_flags;
+
+    (void) size;
+    memset(&diffs, 0, sizeof(diffs));
+    DiffParaAttr(target, old ? old : &TS_defaultParaAttr, &diffs);
+    if (!old)
+	flags = 0;
+    if (flags & TSF_MARGINS_RELATIVE)
+	diffs.VTPAD_diffs |= VTPAF_MULTIPLE_LEFT_MARGINS |
+			     VTPAF_MULTIPLE_PARA_MARGINS |
+			     VTPAF_MULTIPLE_RIGHT_MARGINS;
+    if (flags & TSF_SPACING_RELATIVE)
+	diffs.VTPAD_diffs |= VTPAF_MULTIPLE_LEADINGS;
+    StyleSheetCallMergeRoutines(PAMergeTable,
+				sizeof(PAMergeTable) / sizeof(PAMergeTable[0]),
+				target, result, old, &diffs, flags);
+    return TA_ParaAttrSize(result);
+}

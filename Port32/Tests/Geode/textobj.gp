@@ -13,6 +13,7 @@ class  TOProcessClass
 library geos
 library ui
 library text
+library styles
 resource TOObjects object
 export toState
 export TOStep

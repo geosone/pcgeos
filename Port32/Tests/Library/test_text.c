@@ -30,6 +30,8 @@
  *  23. copy, paste and cut of text; an application's clipboard object.
  *  24. the attribute runs of a copy, pasted; a large object's runs.
  *  25. the lines of a large object in its regions (draft mode).
+ *  26. style sheets: a style defined, applied, described, redefined,
+ *      deleted.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -40,10 +42,11 @@
 #include <string.h>
 
 extern const unsigned char ui_geode[], text_geode[], textobj_geode[],
+			   styles_geode[],
 			   berkeley_fnt[], vidmem_geode[];
 extern const unsigned long vidmem_geode_size;
 extern const unsigned long berkeley_fnt_size;
-extern const unsigned long ui_geode_size, text_geode_size,
+extern const unsigned long ui_geode_size, text_geode_size, styles_geode_size,
 			   textobj_geode_size;
 
 /* as textobj.goc */
@@ -70,6 +73,8 @@ typedef struct {
     word	TOS_paste[2];
     word	TOS_runs[2];
     word	TOS_regions[6];
+    char	TOS_styleDesc[80];
+    word	TOS_styles[4];
 } TOState;
 
 static int fails;
@@ -122,7 +127,8 @@ int main(int argc, char **argv)
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
-	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#"
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
+	"a12b-cE -.F14y#"
     };
     GeodeHandle app, mdrv;
     GeodeLoadError e;
@@ -155,6 +161,7 @@ int main(int argc, char **argv)
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     kernelCurrentGeode = GEODE;
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
+    GeodeRegisterImage("styles", styles_geode, styles_geode_size);
     GeodeRegisterImage("text", text_geode, text_geode_size);
     GeodeRegisterImage("textobj", textobj_geode, textobj_geode_size);
     /* bitmaps to draw into (step 19) */
@@ -177,7 +184,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 25; i++) {
+    for (i = 1; i <= 26; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);
@@ -210,6 +217,9 @@ int main(int argc, char **argv)
     printf("regions: %u, first %u lines %u high, lines %u; then %u, %u\n",
 	   st->TOS_regions[0], st->TOS_regions[1], st->TOS_regions[2],
 	   st->TOS_regions[3], st->TOS_regions[4], st->TOS_regions[5]);
+    printf("styles: %u, other's style %u, redefined font %x, after delete "
+	   "%u; \"%s\"\n", st->TOS_styles[0], st->TOS_styles[1],
+	   st->TOS_styles[2], st->TOS_styles[3], st->TOS_styleDesc);
     printf("tab: leader %x, line %x\n", st->TOS_tab[0], st->TOS_tab[1]);
     printf("notify: generated %u, types %x, send %x\n", st->TOS_generated, st->TOS_types, st->TOS_send);
     printf("geode checks: %u, failed %u (first at textobj.goc line %u)\n",

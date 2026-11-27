@@ -222,7 +222,7 @@ static void SetCharAttr(optr o, dword start, dword end,
 }
 
 /* DiffCharAttr: the fields in which two attributes differ marked */
-static void DiffCharAttr(const VisTextCharAttr *a, const VisTextCharAttr *b,
+void DiffCharAttr(const VisTextCharAttr *a, const VisTextCharAttr *b,
 			 VisTextCharAttrDiffs *diffs)
 {
     word d = diffs->VTCAD_diffs;

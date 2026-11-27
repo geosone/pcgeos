@@ -7490,15 +7490,28 @@ the modules of the asm; what is there:
   reference's file. `MSG_VIS_TEXT_REPLACE_ALL_`, `_SELECTION_` and
   `APPEND_` work with `VM_BLOCK`, `DB_ITEM` and `HUGE_ARRAY`, and
   `MSG_VIS_TEXT_GET_ALL_VM_BLOCK` and `_DB_ITEM` are ported.
-- **Not yet.** Attribute runs, tokens and styles, messages for the
-  paragraph attribute, extended styles, hyphenation, graphics, the large mouse messages, selection by words and lines while
-  dragging, quick transfer, the runs of a transfer, the pointer image over
-  text;
-  filters, undo, suspension, the style and style sheet notifications
-  (the Styles library),
-  the lines, regions and runs of large objects, the selection into a
-  VM block, DB item or huge array, search and spelling, the
-  controllers, the ruler.
+- **Style sheets** (`TextAttr/taStyle.goc`, `taStyleMerge.goc`,
+  `taStyleDesc.goc`, `taStyleStrings.goc`, `UI/uiTextStyleSheet.goc`)
+  on the styles library (§13ac): `VTSF_STYLES` makes the style array
+  (`ATTR_VIS_TEXT_STYLE_ARRAY`, a name array in a chunk or in a VM
+  block for large objects); the `MSG_META_STYLED_OBJECT_*` methods
+  define, redefine, apply, return to base, delete, describe, save,
+  recall and load style sheets; the merge and description tables of
+  character and paragraph attributes are C functions with `offsetof`
+  instead of field offsets; a run's element with `CA_NULL_ELEMENT`
+  takes its style's. `MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS` takes a
+  `StyleSheetParams *` and a flag (`taC.goc`:
+  `MsgVisTextLoadStyleSheetParams`). The character and paragraph
+  notifications carry the checksums, the style and style sheet
+  notifications are sent. Kept from the asm: a relative leading was
+  subtracted from the wrong register and is described as it is; a
+  description digit count the asm left as garbage is `DESC_ALL_DIGITS`.
+  Not yet: suspension (`MSG_META_SUSPEND`) and undo around the changes.
+- **Not yet.** Extended styles, hyphenation, graphics, the large mouse
+  messages, selection by words and lines while dragging, quick
+  transfer, the pointer image over text; undo, suspension; widows and
+  orphans, sections; the selection into a VM block, DB item or huge
+  array, search and spelling, the controllers, the ruler.
 - **Test.** ctest `library.text` (`test_text.c`, the process geode
   `Port32/Tests/Geode/textobj.goc`): text objects of a resource (with
   and without a text) and an instantiated one, of a subclass that

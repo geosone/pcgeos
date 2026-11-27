@@ -96,6 +96,10 @@ extern void TA_MapDefaultCharAttr(VisTextDefaultCharAttr def,
 extern Boolean TA_FindDefaultCharAttr(const VisTextCharAttr *a,
 				      VisTextDefaultCharAttr *def);
 extern void TA_GetSingleCharAttr(optr o, VisTextCharAttr *a);
+/* DiffCharAttr: the fields in which two attributes differ marked (or'ed
+ * into diffs) */
+extern void DiffCharAttr(const VisTextCharAttr *a, const VisTextCharAttr *b,
+			 VisTextCharAttrDiffs *diffs);
 extern void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a);
 /* ReflectChangeUpdateGeneric: after an attribute changed, the lines
  * made again and drawn (with the object's gstate), the selection
@@ -225,6 +229,8 @@ extern void SendToTextOutput(optr o, Message msg);
 extern void TA_MapDefaultParaAttr(VisTextDefaultParaAttr def,
 				  VisTextParaAttr *a);
 extern void TA_GetSingleParaAttr(optr o, VisTextMaxParaAttr *a);
+extern void DiffParaAttr(const VisTextMaxParaAttr *a,
+			 const VisTextMaxParaAttr *b, VisTextParaAttrDiffs *d);
 extern void TA_SetSingleParaAttr(optr o, const VisTextMaxParaAttr *a);
 /* CalcParaAttrSize: the attribute with its tabs */
 #define TA_ParaAttrSize(a) \
@@ -616,5 +622,41 @@ void CommonInitLineAndField(LineInfo *li);
 
 /* tslMain.goc (for tslMethodMouse.goc) */
 void SetShown(optr o, dword start, dword end, dword show);
+
+/* the style sheet code (TextAttr/taStyle*.goc, UI/uiTextStyleSheet.goc):
+ * the callbacks of StyleSheetParams, the default attributes the
+ * descriptions and merges compare against, the attribute list of the
+ * style sheet boxes */
+extern const VisTextCharAttr TS_defaultCharAttr;
+extern const VisTextMaxParaAttr TS_defaultParaAttr;
+extern word MergeCharAttr(void *target, void *result, const void *old,
+	const void *privateData, word size);
+extern word MergeParaAttr(void *target, void *result, const void *old,
+	const void *privateData, word size);
+extern void DescribeTextStyle(TCHAR **ptr, word *left, word used,
+	const void *derived, const void *base, optr extraUI,
+	dword privateData, word attrsFlag);
+extern void DescribeCharAttr(TCHAR **ptr, word *left, word used,
+	const void *derived, const void *base, optr extraUI,
+	dword privateData, word attrsFlag);
+extern void DescribeParaAttr(TCHAR **ptr, word *left, word used,
+	const void *derived, const void *base, optr extraUI,
+	dword privateData, word attrsFlag);
+extern word SubstCharAttr(optr o, word oldToken, word newToken,
+	Boolean updateRefs);
+extern word SubstParaAttr(optr o, word oldToken, word newToken,
+	Boolean updateRefs);
+extern void UpdateDescTextStyleAttributeList(optr list, void *style,
+	const void *baseStyle);
+extern void UpdateModifyTextStyleAttributeList(optr list, void *style,
+	const void *baseStyle);
+extern void ModifyTextStyleAttributeList(optr list, void *style,
+	const void *baseStyle);
+/* GetStyleArray: the style array of the object (FALSE: none); 
+ * LoadSSParams: the parameters of the object's style sheets (keepXfer:
+ * the transfer's arrays stay) */
+extern Boolean GetStyleArray(optr o, StyleChunkDesc *d);
+extern void LoadSSParams(optr o, StyleSheetParams *p, Boolean keepXfer);
+extern void StyleSendNotification(optr o);
 
 #endif

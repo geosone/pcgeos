@@ -16,6 +16,8 @@
 @include <Objects/clipbrd.goh>
 @include <Objects/vLTextC.goh>
 @include <Objects/gEditCC.goh>
+@include <Objects/gBoolGC.goh>
+@include <Objects/styles.goh>
 #include <string.h>
 #include <font.h>
 #include <fontID.h>
@@ -50,6 +52,8 @@ typedef struct {
     word	TOS_paste[2];		/* of step 23 */
     word	TOS_runs[2];		/* of step 24 */
     word	TOS_regions[6];		/* of step 25 */
+    char	TOS_styleDesc[80];	/* (step 26) the style described */
+    word	TOS_styles[4];		/* of step 26 */
 } TOState;
 
 TOState toState;
@@ -1790,6 +1794,121 @@ static Boolean TOItemName(TransferBlockID id, const char *name)
 	TOCHECK(toState.TOS_regions[5] == 1);
 	@call lt::MSG_META_OBJ_FREE();
 	ClipboardCloseClipboardFile();
+	break;
+    }
+    case 26: {
+	/* style sheets: a style defined from the attributes of a
+	 * paragraph (named by a text object, its flags from a boolean
+	 * group), applied to it and to another, described; redefined from
+	 * a new font: the other paragraph follows; deleted, reverting to
+	 * no style: the attributes stay, without the style */
+	StyleSheetParams p;
+	SSCDefineStyleParams dp;
+	SSCApplyDeleteStyleParams ap;
+	SSCDescribeStyleParams ds;
+	VisTextCharAttrDiffs d;
+	VisTextCharAttr ca;
+	VisTextMaxParaAttr pa;
+	VisTextParaAttrDiffs pd;
+	MemHandle mh = OptrToHandle(@TOText);
+	word tk, ptk, tools;
+	optr n, name, desc, list;
+	char db[100];
+
+	n = ObjInstantiate(mh, (ClassStruct *) &VisTextClass);
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("Head\rBody\r", 0);
+	@call n::MSG_VIS_TEXT_CREATE_STORAGE(VTSF_MULTIPLE_CHAR_ATTRS |
+					     VTSF_MULTIPLE_PARA_ATTRS |
+					     VTSF_STYLES, 0);
+	name = ObjInstantiate(mh, (ClassStruct *) &VisTextClass);
+	@call name::MSG_VIS_TEXT_REPLACE_ALL_PTR("Heading", 0);
+	desc = ObjInstantiate(mh, (ClassStruct *) &VisTextClass);
+	list = ObjInstantiate(mh, (ClassStruct *) &GenBooleanGroupClass);
+	@call n::MSG_VIS_TEXT_SET_FONT_ID(FID_ROMA, 5, 0);
+	@call n::MSG_VIS_TEXT_SET_LEFT_MARGIN(72 * 8, 0, 0);
+	(void) FontOf(n, 2, 2, &tk, &d);
+	ptk = ParaOf(n, 2, 2, &pa, &pd);
+	memset(&dp, 0, sizeof(dp));
+	dp.SSCDSP_defineStyledClasss = (ClassStruct *) &VisTextClass;
+	dp.SSCDSP_attrTokens[0] = tk;
+	dp.SSCDSP_attrTokens[1] = ptk;
+	dp.SSCDSP_baseStyle = CA_NULL_ELEMENT;
+	dp.SSCDSP_attrList = list;
+	dp.SSCDSP_textObject = name;
+	dp.SSCDSP_extraUI = list;
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(2, 2);
+	@call n::MSG_META_STYLED_OBJECT_DEFINE_STYLE(&dp);
+	@call n::MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS(&p, FALSE);
+	TOCHECK(p.SSP_styleArray.SCD_chunk != 0);
+	toState.TOS_styles[0] = StyleSheetGetStyleCounts(&p.SSP_styleArray,
+							 &tools);
+	TOCHECK(toState.TOS_styles[0] == 1);
+	/* (applied to its paragraph: the style's elements) */
+	(void) @call n::MSG_VIS_TEXT_GET_CHAR_ATTR(0, &d, &ca, 4, 0);
+	TOCHECK(ca.VTCA_fontID == FID_ROMA && ca.VTCA_meta.SSEH_style == 0);
+	(void) ParaOf(n, 0, 0, &pa, &pd);
+	TOCHECK(pa.VTMPA_paraAttr.VTPA_meta.SSEH_style == 0 &&
+		pa.VTMPA_paraAttr.VTPA_leftMargin == 72 * 8);
+	(void) @call n::MSG_VIS_TEXT_GET_CHAR_ATTR(0, &d, &ca, 9, 6);
+	toState.TOS_styles[1] = ca.VTCA_meta.SSEH_style;
+	TOCHECK(ca.VTCA_fontID != FID_ROMA && ca.VTCA_meta.SSEH_style != 0);
+	/* (described) */
+	memset(&ds, 0, sizeof(ds));
+	ds.SSCDSP_describeStyledClass = (ClassStruct *) &VisTextClass;
+	ds.SSCDSP_describeTextObject = desc;
+	ds.SSCDSP_usedIndex = 0;
+	ds.SSCDSP_describeDeleteTrigger = list;
+	ds.SSCDSP_describeDeleteRevertTrigger = list;
+	@call n::MSG_META_STYLED_OBJECT_DESCRIBE_STYLE(&ds);
+	(void) @call desc::MSG_VIS_TEXT_GET_ALL_PTR(db);
+	memcpy(toState.TOS_styleDesc, db, sizeof(toState.TOS_styleDesc) - 1);
+	{
+	    /* ("Character:" in it) */
+	    word i, found = 0;
+
+	    for (i = 0; db[i] && !found; i++)
+		found = !memcmp(db + i, "Character:", 10);
+	    TOCHECK(found);
+	}
+	/* (applied to the other paragraph) */
+	memset(&ap, 0, sizeof(ap));
+	ap.SSCADSP_deleteStyledClass = (ClassStruct *) &VisTextClass;
+	ap.SSCADSP_token = 0;
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(7, 7);
+	@call n::MSG_META_STYLED_OBJECT_APPLY_STYLE(&ap);
+	TOCHECK(FontOf(n, 5, 9, &tk, &d) == FID_ROMA);
+	(void) ParaOf(n, 7, 7, &pa, &pd);
+	TOCHECK(pa.VTMPA_paraAttr.VTPA_leftMargin == 72 * 8);
+	/* (redefined from the first paragraph's new font) */
+	@call n::MSG_VIS_TEXT_SET_FONT_ID(FID_DTC_URW_SANS, 5, 0);
+	(void) FontOf(n, 2, 2, &tk, &d);
+	ptk = ParaOf(n, 2, 2, &pa, &pd);
+	dp.SSCDSP_attrTokens[0] = tk;
+	dp.SSCDSP_attrTokens[1] = ptk;
+	dp.SSCDSP_baseStyle = 0;
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(2, 2);
+	@call n::MSG_META_STYLED_OBJECT_REDEFINE_STYLE(&dp);
+	toState.TOS_styles[2] = FontOf(n, 5, 9, &tk, &d);
+	TOCHECK(toState.TOS_styles[2] == FID_DTC_URW_SANS);
+	TOCHECK(FontOf(n, 0, 9, &tk, &d) == FID_DTC_URW_SANS &&
+		tk != CA_NULL_ELEMENT);
+	/* (deleted: no style, the attributes kept) */
+	ap.SSCADSP_flags = SSCADSF_REVERT_TO_BASE_STYLE;
+	@call n::MSG_META_STYLED_OBJECT_DELETE_STYLE(&ap);
+	@call n::MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS(&p, FALSE);
+	toState.TOS_styles[3] = StyleSheetGetStyleCounts(&p.SSP_styleArray,
+							 &tools);
+	TOCHECK(toState.TOS_styles[3] == 0);
+	(void) @call n::MSG_VIS_TEXT_GET_CHAR_ATTR(0, &d, &ca, 9, 0);
+	TOCHECK(ca.VTCA_fontID == FID_DTC_URW_SANS &&
+		ca.VTCA_meta.SSEH_style == CA_NULL_ELEMENT);
+	(void) ParaOf(n, 0, 9, &pa, &pd);
+	TOCHECK(pa.VTMPA_paraAttr.VTPA_meta.SSEH_style == CA_NULL_ELEMENT &&
+		pa.VTMPA_paraAttr.VTPA_leftMargin == 72 * 8);
+	@call n::MSG_META_OBJ_FREE();
+	@call name::MSG_META_OBJ_FREE();
+	@call desc::MSG_META_OBJ_FREE();
+	@call list::MSG_META_OBJ_FREE();
 	break;
     }
     }

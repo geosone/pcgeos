@@ -1,0 +1,125 @@
+/*
+ * taStyleStrings.goc -- after taStyleStrings.asm: the strings of the
+ * style sheet code (TextStyleStrings): the error box, the descriptions
+ * (FullCharJustString not: CHAR_JUSTIFICATION is FALSE).
+ */
+@include "textInt.goh"
+
+@start TextStyleStrings, data;
+
+@chunk char BadModifyStyleString[] =
+    "This base style change would result in having a "
+    "non-character only style based on a character only style, "
+    "which is illegal.";
+@chunk char CharacterOnlyString[] = "Character Only";
+@chunk char PointSizeRelativeString[] = "Point Size Relative";
+@chunk char MarginsRelativeString[] = "Indents Relative";
+@chunk char LeadingRelativeString[] = "Leading Relative";
+@chunk char CharacterString[] = "Character:";
+@chunk char UnknownFontString[] = "Font=";
+@chunk char UnderlineString[] = "Underline";
+@chunk char OutlineString[] = "Outline";
+@chunk char BoldString[] = "Bold";
+@chunk char ItalicString[] = "Italic";
+@chunk char StrikeThruString[] = "Strike-thru";
+@chunk char SuperscriptString[] = "Superscript";
+@chunk char SubscriptString[] = "Subscript";
+@chunk char BoxedString[] = "Boxed";
+@chunk char ButtonString[] = "Button";
+@chunk char IndexString[] = "Index";
+@chunk char AllCapString[] = "AllCaps";
+@chunk char SmallCapString[] = "SmallCaps";
+@chunk char HiddenString[] = "Hidden";
+@chunk char ChangeBarString[] = "ChangeBar";
+@chunk char FontWeightString[] = "Font Weight: ";
+@chunk char FontWidthString[] = "Font Width: ";
+@chunk char TrackKerningString[] = "Character Spacing:";
+@chunk char FilledString[] = "filled";
+@chunk char UnfilledString[] = "unfilled";
+@chunk char HalftoneString[] = "halftone";
+@chunk char BGColorString[] = "Background Color:";
+@chunk char BlackString[] = "Black";
+@chunk char DarkBlueString[] = "Dark Blue";
+@chunk char DarkGreenString[] = "Dark Green";
+@chunk char CyanString[] = "Cyan";
+@chunk char DarkRedString[] = "Dark Red";
+@chunk char DarkVioletString[] = "Dark Violet";
+@chunk char BrownString[] = "Brown";
+@chunk char LightGrayString[] = "Light Gray";
+@chunk char DarkGrayString[] = "Dark Gray";
+@chunk char LightBlueString[] = "Light Blue";
+@chunk char LightGreenString[] = "Light Green";
+@chunk char LightCyanString[] = "Light Cyan";
+@chunk char LightRedString[] = "Light Red";
+@chunk char LightVioletString[] = "Light Violet";
+@chunk char YellowString[] = "Yellow";
+@chunk char WhiteString[] = "White";
+@chunk char UnknownPatternString[] = "Unknown";
+@chunk char SolidPatternString[] = "Solid";
+@chunk char VerticalPatternString[] = "Vertical";
+@chunk char HorizontalPatternString[] = "Horizontal";
+@chunk char Degree45PatternString[] = "45 Degree";
+@chunk char Degree135PatternString[] = "135 Degree";
+@chunk char BrickPatternString[] = "Brick";
+@chunk char SlantedBrickPatternString[] = "Slanted Brick";
+@chunk char PatternString[] = "pattern";
+@chunk char ParagraphString[] = "Paragraph:";
+@chunk char LeftJustString[] = "Left Justified";
+@chunk char CenterJustString[] = "Centered";
+@chunk char RightJustString[] = "Right Justified";
+@chunk char FullJustString[] = "Full Justified";
+@chunk char LeftMarginString[] = "Hanging Left Indent";
+@chunk char ParaMarginString[] = "Left Indent of First Line";
+@chunk char RightMarginString[] = "Right Indent";
+@chunk char LineSpacingString[] = "Line Spacing:";
+@chunk char LeadingString[] = "Manual Leading:";
+@chunk char TopSpacingString[] = "Space On Top:";
+@chunk char BottomSpacingString[] = "Space On Bottom:";
+@chunk char DefaultTabsString[] = "Default Tabs:";
+@chunk char NoDefaultTabsString[] = "No Default Tabs";
+@chunk char ParaBGColorString[] = "BG Color:";
+@chunk char NoTabsString[] = "No Tabs";
+@chunk char TabsString[] = "Tabs:";
+@chunk char AnchoredWithString[] = "with '";
+@chunk char AnchoredEndString[] = "'";
+@chunk char WithString[] = "with";
+@chunk char LeaderString[] = "leader";
+@chunk char TabLineWidthString[] = "wide lines";
+@chunk char TabLineSpacingString[] = "spacing";
+@chunk char AnchoredString[] = "Anchored";
+@chunk char DotLeaderString[] = "dot";
+@chunk char LineLeaderString[] = "line";
+@chunk char BulletLeaderString[] = "bullet";
+@chunk char NoBorderString[] = "No Border";
+@chunk char DoubleBorderString[] = "Double Line Border";
+@chunk char ShadowBorderString[] = "Shadowed Border";
+@chunk char NormalBorderString[] = "Normal Border";
+@chunk char ShadowTopRightString[] = "from top-right";
+@chunk char ShadowBottomLeftString[] = "from bottom-left";
+@chunk char ShadowBottomRightString[] = "from bottom-right";
+@chunk char ShadowWidthString[] = "wide shadow";
+@chunk char SpaceBetweenString[] = "between lines";
+@chunk char SideString[] = "side only";
+@chunk char SidesString[] = "sides only";
+@chunk char LeftString[] = "left";
+@chunk char TopString[] = "top";
+@chunk char RightString[] = "right";
+@chunk char BottomString[] = "bottom";
+@chunk char DrawInnerString[] = "Draw Inner Lines";
+@chunk char BorderWidthString[] = "Border Width:";
+@chunk char BorderSpacingString[] = "Border Spacing:";
+@chunk char BorderColorString[] = "Border Color:";
+@chunk char DisableWordWrapString[] = "Word Wrap Disabled";
+@chunk char ColumnBreakBeforeString[] = "Column Break Before";
+@chunk char KeepParaWithNextString[] = "Keep Paragraph With Next";
+@chunk char KeepParaTogetherString[] = "Keep Paragraph Together";
+@chunk char AutoHyphenationString[] = "Auto-hyphenate";
+@chunk char MaxLinesString[] = "Max consecutive lines to hyphenate";
+@chunk char ShortestWordString[] = "Shortest word to hyphenate";
+@chunk char ShortestPrefixString[] = "Shortest prefix to hyphenate";
+@chunk char ShortestSuffixString[] = "Shortest suffix to hyphenate";
+@chunk char KeepLinesString[] = "Widow/Orphan control";
+@chunk char KeepTopString[] = "Max orphan size";
+@chunk char KeepBottomString[] = "Max widow size";
+
+@end TextStyleStrings;

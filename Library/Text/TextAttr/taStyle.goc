@@ -1,0 +1,391 @@
+/*
+ * taStyle.goc -- after taStyle.asm: the style sheets of a text object:
+ * the MSG_META_STYLED_OBJECT_* messages of the style sheet controller
+ * (on the Styles library), the parameters of the object's style sheets
+ * (LoadSSParams), the substitution of attribute tokens.
+ *
+ * Port32: no undo chains yet (the asm's TU_StartChainIfUndoable), and
+ * no TextSuspend around applying a style (MSG_META_SUSPEND is not in C
+ * yet): the notifications go out as the asm's would without them.
+ */
+@include "textInt.goh"
+@include <Objects/styles.goh>
+
+@extern chunk BadModifyStyleString;
+
+/*
+ * GetStyleArray: the style array of the object
+ * (ATTR_VIS_TEXT_STYLE_ARRAY): a chunk of its block, or with the
+ * elements in VM (a large object, or a small one whose attribute
+ * elements are in a VM block) the VM_ELEMENT_ARRAY_CHUNK of that VM
+ * block.  FALSE if there is none.
+ */
+Boolean GetStyleArray(optr o, StyleChunkDesc *d)
+{
+    word *w = ObjVarFindData(o, ATTR_VIS_TEXT_STYLE_ARRAY);
+    VisTextInstance *t;
+    Boolean vm;
+
+    d->SCD_chunk = 0;
+    if (!w)
+	return FALSE;
+    t = VT(o);
+    vm = (t->VTI_storageFlags & VTSF_LARGE) != 0;
+    if (!vm && (t->VTI_storageFlags & VTSF_MULTIPLE_CHAR_ATTRS)) {
+	/* (a small object: its elements may still be in VM) */
+	const TextRunArrayHeader *h =
+	    LMemDerefHandles(OptrToHandle(o), t->VTI_charAttrRuns);
+
+	vm = h->TRAH_elementVMBlock != 0;
+    }
+    if (vm) {
+	d->SCD_vmFile = T_GetVMFile(o);
+	d->SCD_vmBlockOrMemHandle = *w;
+	d->SCD_chunk = VM_ELEMENT_ARRAY_CHUNK;
+    } else {
+	d->SCD_vmFile = 0;
+	d->SCD_vmBlockOrMemHandle = OptrToHandle(o);
+	d->SCD_chunk = *w;
+    }
+    return TRUE;
+}
+
+/* the attribute array of runs: its element array, a chunk of the
+ * object's block or a VM block's VM_ELEMENT_ARRAY_CHUNK */
+static void LoadAttrArray(optr o, TextRunKind kind, StyleChunkDesc *d)
+{
+    TextRuns r;
+
+    TA_RunsOf(o, kind, &r);
+    d->SCD_vmFile = T_GetVMFile(o);
+    d->SCD_chunk = VM_ELEMENT_ARRAY_CHUNK;
+    if (r.TR_block)
+	d->SCD_vmBlockOrMemHandle = TA_RunsElementBlock(r.TR_file,
+							r.TR_block);
+    else {
+	const TextRunArrayHeader *h = LMemDeref(r.TR_chunk);
+
+	if (h->TRAH_elementVMBlock)
+	    d->SCD_vmBlockOrMemHandle = h->TRAH_elementVMBlock;
+	else {
+	    d->SCD_vmFile = 0;
+	    d->SCD_vmBlockOrMemHandle = OptrToHandle(o);
+	    d->SCD_chunk = h->TRAH_elementArray;
+	}
+    }
+}
+
+/*
+ * LoadSSParams: the parameters of the object's style sheets: the
+ * callbacks, the style array, the character and paragraph attribute
+ * arrays; the transfer's arrays VM_ELEMENT_ARRAY_CHUNKs of no block yet
+ * (keepXfer: as the caller has them).  The style array's chunk 0 if
+ * the object has no style sheets.
+ */
+void LoadSSParams(optr o, StyleSheetParams *p, Boolean keepXfer)
+{
+    memset(p, 0, keepXfer ? offsetof(StyleSheetParams, SSP_xferStyleArray) :
+			    sizeof(*p));
+    p->SSP_descriptionCallbacks[0] = DescribeCharAttr;
+    p->SSP_descriptionCallbacks[1] = DescribeParaAttr;
+    p->SSP_specialDescriptionCallback = DescribeTextStyle;
+    p->SSP_mergeCallbacks[0] = MergeCharAttr;
+    p->SSP_mergeCallbacks[1] = MergeParaAttr;
+    p->SSP_substitutionCallbacks[0] = SubstCharAttr;
+    p->SSP_substitutionCallbacks[1] = SubstParaAttr;
+    if (!keepXfer) {
+	p->SSP_xferStyleArray.SCD_chunk = VM_ELEMENT_ARRAY_CHUNK;
+	p->SSP_xferAttrArrays[0].SCD_chunk = VM_ELEMENT_ARRAY_CHUNK;
+	p->SSP_xferAttrArrays[1].SCD_chunk = VM_ELEMENT_ARRAY_CHUNK;
+    }
+    if (!GetStyleArray(o, &p->SSP_styleArray))
+	return;
+    LoadAttrArray(o, TRK_CHAR_ATTR, &p->SSP_attrArrays[0]);
+    LoadAttrArray(o, TRK_PARA_ATTR, &p->SSP_attrArrays[1]);
+}
+
+/* StyleSendNotification: the standard notifications (the style and
+ * style sheet ones among them) */
+void StyleSendNotification(optr o)
+{
+    TA_SendNotification(o, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS);
+}
+
+/* RecalcAllIfAX: the object calculated again if the style sheet code
+ * said so; the notifications */
+static void RecalcIf(optr o, word recalc)
+{
+    if (recalc)
+	@call o::MSG_VIS_TEXT_RECALC_FOR_ATTR_CHANGE(FALSE);
+    StyleSendNotification(o);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_REQUEST_ENTRY_MONIKER
+{
+    StyleChunkDesc d;
+
+    /* (some text objects have no styles: nothing then) */
+    if (GetStyleArray(oself, &d))
+	StyleSheetRequestEntryMoniker(&d, params);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_UPDATE_MODIFY_BOX
+{
+    StyleChunkDesc d;
+
+    (void) GetStyleArray(oself, &d);
+    StyleSheetUpdateModifyBox(&d, params, UpdateModifyTextStyleAttributeList);
+}
+
+/*
+ * VisTextModifyStyle: the style takes what the box shows, unless a
+ * style for more than the selection would be based on one for the
+ * selection only (an error box)
+ */
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_MODIFY_STYLE
+{
+    StyleChunkDesc d;
+    Boolean flag, bad = FALSE;
+    optr a;
+    word sel, base, style;
+
+    if (!GetStyleArray(oself, &d))
+	return;
+    a = StyleSheetLockStyleChunk(&d, &flag);
+    sel = @call (params->SSCUMP_baseList)::
+	MSG_GEN_ITEM_GROUP_GET_SELECTION();
+    /* (based on none is always all right) */
+    if ((sword) --sel >= 0) {
+	base = ElementArrayUsedIndexToToken(a, sel, 0, NULL);
+	if (((const TextStyleElementHeader *)
+	     ChunkArrayElementToPtr(a, base, NULL))->
+	    TSEH_privateData.TSPD_flags & TSF_APPLY_TO_SELECTION_ONLY) {
+	    style = ElementArrayUsedIndexToToken(a, params->SSCUMP_usedIndex,
+						 0, NULL);
+	    bad = !(((const TextStyleElementHeader *)
+		     ChunkArrayElementToPtr(a, style, NULL))->
+		    TSEH_privateData.TSPD_flags &
+		    TSF_APPLY_TO_SELECTION_ONLY);
+	}
+    }
+    StyleSheetUnlockStyleChunk(a, flag);
+    if (bad)
+	(void) UserStandardDialogOptr(NULL, NULL, 0, 0, @BadModifyStyleString,
+				      (CDT_ERROR << CDBF_DIALOG_TYPE_OFFSET) |
+				      (GIT_NOTIFICATION <<
+				       CDBF_INTERACTION_TYPE_OFFSET));
+    else {
+	TextMarkUserModified(oself);
+	(void) GetStyleArray(oself, &d);
+	StyleSheetModifyStyle(&d, params, ModifyTextStyleAttributeList);
+    }
+    StyleSendNotification(oself);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_DEFINE_STYLE
+{
+    StyleSheetParams p;
+
+    TextMarkUserModified(oself);
+    LoadSSParams(oself, &p, FALSE);
+    StyleSheetDefineStyle(oself, &p, params, ModifyTextStyleAttributeList);
+    StyleSendNotification(oself);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_REDEFINE_STYLE
+{
+    StyleSheetParams p;
+    word r;
+
+    TextMarkUserModified(oself);
+    LoadSSParams(oself, &p, FALSE);
+    r = StyleSheetRedefineStyle(oself, &p, params,
+				ModifyTextStyleAttributeList);
+    RecalcIf(oself, r);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_SAVE_STYLE
+{
+    StyleSheetParams p;
+
+    LoadSSParams(oself, &p, FALSE);
+    StyleSheetSaveStyle(oself, &p, params);
+}
+
+/* by default to the document, which opens the file and sends
+ * MSG_VIS_TEXT_LOAD_STYLE_SHEET */
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_LOAD_STYLE_SHEET
+{
+    EventHandle e = @record GenDocumentClass::
+	MSG_META_STYLED_OBJECT_LOAD_STYLE_SHEET(params);
+
+    @call oself::MSG_META_SEND_CLASSED_EVENT(e, (TravelOption) TO_APP_MODEL);
+}
+
+/* the styles of a style sheet (the transfer arrays of params) into the
+ * object's, taking their definitions */
+@extern method VisTextClass, MSG_VIS_TEXT_LOAD_STYLE_SHEET
+{
+    word r;
+
+    TextMarkUserModified(oself);
+    LoadSSParams(oself, params, TRUE);
+    if (!params->SSP_styleArray.SCD_chunk)
+	return;
+    r = StyleSheetImportStyles(oself, params, TRUE);
+    RecalcIf(oself, r);
+    /* (the asm sent the notifications twice) */
+    StyleSendNotification(oself);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_DESCRIBE_STYLE
+{
+    StyleSheetParams p;
+
+    LoadSSParams(oself, &p, FALSE);
+    StyleSheetDescribeStyle(&p, params);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_DESCRIBE_ATTRS
+{
+    StyleSheetParams p;
+
+    LoadSSParams(oself, &p, FALSE);
+    StyleSheetDescribeAttrs(&p, params);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS
+{
+    LoadSSParams(oself, params, preserveXfer);
+}
+
+/*
+ * SetAttrsCommon: the attribute tokens set: the character attribute on
+ * the selection (a style for the selection only) or its paragraphs,
+ * the paragraph attribute on the selection's paragraphs
+ */
+static void SetAttrsCommon(optr o, word charAttr, word paraAttr,
+			   TextStyleFlags flags)
+{
+    dword range = (flags & TSF_APPLY_TO_SELECTION_ONLY) ?
+		  VIS_TEXT_RANGE_SELECTION :
+		  VIS_TEXT_RANGE_PARAGRAPH_SELECTION;
+
+    @call o::MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN(charAttr, 0, range);
+    if (!(flags & TSF_APPLY_TO_SELECTION_ONLY))
+	@call o::MSG_VIS_TEXT_SET_PARA_ATTR_BY_TOKEN(paraAttr, 0,
+						      VIS_TEXT_RANGE_SELECTION);
+}
+
+/* the saved style's attributes (copied into the object's arrays) */
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_RECALL_STYLE
+{
+    StyleSheetParams p;
+
+    LoadSSParams(oself, &p, FALSE);
+    if (!p.SSP_styleArray.SCD_chunk)
+	return;
+    StyleSheetPrepareForRecallStyle(oself, &p, params->SSCRSP_blockHandle);
+    SetAttrsCommon(oself, p.SSP_attrTokens[0], p.SSP_attrTokens[1], 0);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_APPLY_STYLE
+{
+    StyleChunkDesc d;
+    Boolean flag;
+    optr a;
+    const TextStyleElementHeader *s;
+    word charAttr, paraAttr, flags;
+
+    if (!GetStyleArray(oself, &d))
+	return;
+    a = StyleSheetLockStyleChunk(&d, &flag);
+    s = ChunkArrayElementToPtr(a, StyleSheetGetStyleToApply(a, params),
+			       NULL);
+    charAttr = s->TSEH_charAttrToken;
+    paraAttr = s->TSEH_paraAttrToken;
+    flags = s->TSEH_privateData.TSPD_flags;
+    StyleSheetUnlockStyleChunk(a, flag);
+    SetAttrsCommon(oself, charAttr, paraAttr, flags);
+}
+
+/* the selection back to its styles' attributes */
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_RETURN_TO_BASE_STYLE
+{
+    (void) params;
+    @call oself::MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN(CA_NULL_ELEMENT, 0,
+						     VIS_TEXT_RANGE_SELECTION);
+    @call oself::MSG_VIS_TEXT_SET_PARA_ATTR_BY_TOKEN(CA_NULL_ELEMENT, 0,
+						     VIS_TEXT_RANGE_SELECTION);
+}
+
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_DELETE_STYLE
+{
+    StyleSheetParams p;
+    word r;
+
+    TextMarkUserModified(oself);
+    LoadSSParams(oself, &p, FALSE);
+    r = StyleSheetDeleteStyle(oself, &p, params->SSCADSP_token,
+			      (params->SSCADSP_flags &
+			       SSCADSF_REVERT_TO_BASE_STYLE) != 0);
+    RecalcIf(oself, r);
+}
+
+/* SubstCommon: MSG_VIS_TEXT_SUBST_ATTR_TOKEN to the object (which a
+ * manager of objects sharing the arrays may pass on); non-zero if the
+ * object must be calculated again */
+static word SubstCommon(optr o, word runOffset, word oldToken,
+			word newToken, Boolean updateRefs)
+{
+    Boolean recalc = FALSE;
+
+    @call o::MSG_VIS_TEXT_SUBST_ATTR_TOKEN(&recalc, FALSE, updateRefs,
+					   runOffset, newToken, oldToken);
+    return recalc;
+}
+
+/* the substitution callbacks of the style sheet code */
+word SubstCharAttr(optr o, word oldToken, word newToken, Boolean updateRefs)
+{
+    return SubstCommon(o, (word) offsetof(VisTextInstance, VTI_charAttrRuns),
+		       oldToken, newToken, updateRefs);
+}
+
+word SubstParaAttr(optr o, word oldToken, word newToken, Boolean updateRefs)
+{
+    return SubstCommon(o, (word) offsetof(VisTextInstance, VTI_paraAttrRuns),
+		       oldToken, newToken, updateRefs);
+}
+
+/*
+ * VisTextSubstAttrToken: the runs with oldToken get newToken (with
+ * updateRefFlag a reference less to the old element, one more to the
+ * new); runs coalesced if any changed.  The runs: those at runOffset
+ * (VTI_charAttrRuns or VTI_paraAttrRuns).
+ */
+@extern method VisTextClass, MSG_VIS_TEXT_SUBST_ATTR_TOKEN
+{
+    TextRunKind kind = runOffset ==
+		       (word) offsetof(VisTextInstance, VTI_charAttrRuns) ?
+		       TRK_CHAR_ATTR : TRK_PARA_ATTR;
+    TextRuns r;
+    word i;
+    Boolean changed = FALSE;
+
+    (void) relayed;
+    TA_RunsOf(oself, kind, &r);
+    for (i = 0; !TA_RunAtEnd(TA_RunsPosition(&r, i)); i++) {
+	if (TA_RunsToken(&r, i) != oldToken)
+	    continue;
+	if (updateRefFlag) {
+	    TA_RemoveElement(oself, kind, oldToken);
+	    TA_ElementAddRef(oself, kind, newToken);
+	}
+	TA_RunsSetToken(&r, i, newToken);
+	*recalcFlag = TRUE;
+	changed = TRUE;
+    }
+    if (changed)
+	(void) CoalesceRun(oself, kind);
+}

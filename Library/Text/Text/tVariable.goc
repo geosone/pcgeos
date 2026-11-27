@@ -3,6 +3,7 @@
  * (its @classdecl and the methods of the other files declared).
  */
 @include "textInt.goh"
+@include <Objects/styles.goh>
 #include <Internal/specUI.h>
 
 @classdecl VisTextClass;
@@ -47,6 +48,7 @@ char uisqCloseDouble = C_QUOTEDBLRIGHT;
 @extern method VisTextClass, MSG_META_TEXT_CR_FILTERED, MSG_META_TEXT_TAB_FILTERED;
 /* textMethodDraw.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW;
+@extern method VisTextClass, MSG_VIS_TEXT_RECALC_FOR_ATTR_CHANGE;
 @extern method VisTextClass, MSG_VIS_DRAW;
 /* textMethodGeometry.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_HEIGHT;
@@ -178,6 +180,23 @@ char uisqCloseDouble = C_QUOTEDBLRIGHT;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_RANGE;
 /* TextAttr/taRunQuery.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_GET_RUN_BOUNDS;
+/* TextAttr/taStyle.goc */
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_REQUEST_ENTRY_MONIKER;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_UPDATE_MODIFY_BOX;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_MODIFY_STYLE;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_DEFINE_STYLE;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_REDEFINE_STYLE;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_SAVE_STYLE;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_LOAD_STYLE_SHEET;
+@extern method VisTextClass, MSG_VIS_TEXT_LOAD_STYLE_SHEET;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_DESCRIBE_STYLE;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_DESCRIBE_ATTRS;
+@extern method VisTextClass, MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_RECALL_STYLE;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_APPLY_STYLE;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_RETURN_TO_BASE_STYLE;
+@extern method VisTextClass, MSG_META_STYLED_OBJECT_DELETE_STYLE;
+@extern method VisTextClass, MSG_VIS_TEXT_SUBST_ATTR_TOKEN;
 /* TextAttr/taStorage.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_CREATE_STORAGE;
 /* TextSelect/tslKbdShortcuts.goc */

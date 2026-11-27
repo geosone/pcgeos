@@ -1,0 +1,14 @@
+/*
+ * taC.goc -- after taC.asm: the C stubs of the attribute code
+ * (MsgVisTextLoadStyleSheetParams so far).
+ */
+@include "textInt.goh"
+
+/* MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS to the object, on the caller's
+ * structure (from the thread of the object) */
+void _pascal MsgVisTextLoadStyleSheetParams(StyleSheetParams *params,
+					    optr object, word preserveArrays)
+{
+    @call object::MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS(params,
+						       preserveArrays != 0);
+}

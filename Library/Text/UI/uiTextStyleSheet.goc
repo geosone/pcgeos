@@ -1,0 +1,56 @@
+/*
+ * uiTextStyleSheet.goc -- after uiTextStyleSheet.asm: the attribute
+ * list of the style sheet boxes (the extra UI callbacks of the style
+ * sheet code): the style's TextStyleFlags shown and taken.
+ *
+ * Port32: TextStyleSheetControlClass (the controller) is not in C yet.
+ */
+@include "textInt.goh"
+@include <Objects/gBoolGC.goh>
+
+/* UpdateTextStyleAttributeListCommon: the list shows the style's flags;
+ * "Character Only" not enabled for a style for the selection only that
+ * has a base style (alwaysEnable: enabled) */
+static void UpdateCommon(optr list, const TextStyleElementHeader *s,
+			 Boolean alwaysEnable)
+{
+    word flags = s->TSEH_privateData.TSPD_flags;
+    word base = s->TSEH_baseStyle;
+    Boolean enable;
+    optr b;
+
+    @send list::MSG_GEN_BOOLEAN_GROUP_SET_GROUP_STATE(flags, 0);
+    enable = alwaysEnable || base == CA_NULL_ELEMENT ||
+	     !(flags & TSF_APPLY_TO_SELECTION_ONLY);
+    b = @call list::MSG_GEN_BOOLEAN_GROUP_GET_BOOLEAN_OPTR(
+					TSF_APPLY_TO_SELECTION_ONLY);
+    if (!b)
+	return;
+    if (enable)
+	@send b::MSG_GEN_SET_ENABLED(VUM_NOW);
+    else
+	@send b::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+}
+
+void UpdateDescTextStyleAttributeList(optr list, void *style,
+				      const void *baseStyle)
+{
+    (void) baseStyle;
+    UpdateCommon(list, style, FALSE);
+}
+
+void UpdateModifyTextStyleAttributeList(optr list, void *style,
+					const void *baseStyle)
+{
+    (void) baseStyle;
+    UpdateCommon(list, style, TRUE);
+}
+
+/* ModifyTextStyleAttributeList: the style takes the list's flags */
+void ModifyTextStyleAttributeList(optr list, void *style,
+				  const void *baseStyle)
+{
+    (void) baseStyle;
+    ((TextStyleElementHeader *) style)->TSEH_privateData.TSPD_flags =
+	@call list::MSG_GEN_BOOLEAN_GROUP_GET_SELECTED_BOOLEANS();
+}

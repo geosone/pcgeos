@@ -3341,7 +3341,14 @@ typedef	struct {
 
 /***************************************************************************/
 
+@ifdef GEOS_PORT32
+/* Port32: a message like any other, sent from C as well: the
+ * structure is the caller's (preserveXfer: its transfer arrays stay) */
+@message void MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS(StyleSheetParams *params,
+						   Boolean preserveXfer);
+@else
 @message void MSG_VIS_TEXT_LOAD_STYLE_SHEET_PARAMS();
+@endif
 /*
  *  Fill in the passed StyleSheetParams structure.
  *

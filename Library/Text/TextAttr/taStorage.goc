@@ -138,10 +138,40 @@ static void CreateRuns(optr o, TextRunKind kind)
 }
 
 /*
+ * TA_CreateStyleArray: the name array of styles (TextStyleElementHeader
+ * and the name), a chunk of the object's block, or with vm the
+ * VM_ELEMENT_ARRAY_CHUNK of a new LMem VM block of its file.  The chunk,
+ * or the VM block.
+ */
+static word TA_CreateStyleArray(optr o, Boolean vm)
+{
+    MemHandle mh = OptrToHandle(o);
+    VMFileHandle f = 0;
+    VMBlockHandle b = 0;
+    ChunkHandle c;
+
+    if (vm) {
+	f = T_GetVMFile(o);
+	b = VMAllocLMem(f, LMEM_TYPE_GENERAL, 0);
+	(void) VMLock(f, b, &mh);
+    }
+    c = NameArrayCreate(mh, (word) (sizeof(TextStyleElementHeader) -
+				    sizeof(NameArrayElement)),
+			sizeof(NameArrayHeader), OCF_DIRTY);
+    if (!vm)
+	return c;
+    EC_ERROR_IF(c != VM_ELEMENT_ARRAY_CHUNK, -1);
+    VMDirty(mh);
+    VMUnlock(mh);
+    return b;
+}
+
+/*
  * VisTextCreateStorage: multiple character and paragraph attributes
- * (the object's attribute the one run's).  Port32: the chunk of the
- * single attribute is freed (the asm left it).  Not yet: types,
- * graphics, styles, regions.
+ * (the object's attribute the one run's), styles (the style array in
+ * ATTR_VIS_TEXT_STYLE_ARRAY: a chunk, or a large object's VM block).
+ * Port32: the chunk of the single attribute is freed (the asm left it).
+ * Not yet: types, graphics, regions.
  */
 @extern method VisTextClass, MSG_VIS_TEXT_CREATE_STORAGE
 {
@@ -152,6 +182,15 @@ static void CreateRuns(optr o, TextRunKind kind)
     if ((flags & VTSF_MULTIPLE_PARA_ATTRS) &&
 	!(VT(oself)->VTI_storageFlags & VTSF_MULTIPLE_PARA_ATTRS))
 	CreateRuns(oself, TRK_PARA_ATTR);
+    if ((flags & VTSF_STYLES) &&
+	!(VT(oself)->VTI_storageFlags & VTSF_STYLES)) {
+	word w = TA_CreateStyleArray(oself, (VT(oself)->VTI_storageFlags &
+					     VTSF_LARGE) != 0);
+
+	*(word *) ObjVarAddData(oself, ATTR_VIS_TEXT_STYLE_ARRAY |
+				VDF_SAVE_TO_STATE, sizeof(word)) = w;
+	VT(oself)->VTI_storageFlags |= VTSF_STYLES;
+    }
     ObjMarkDirty(oself);
     if (VT(oself)->VI_typeFlags & VTF_IS_GEN)
 	@call oself::MSG_VIS_TEXT_UPDATE_GENERIC();

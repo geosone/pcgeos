@@ -10,4 +10,9 @@ geos_sources(text_goc
   taRunTrans.goc
   taRunManip.goc
   taElement.goc
-  taNotify.goc)
+  taNotify.goc
+  taStyle.goc
+  taStyleMerge.goc
+  taStyleDesc.goc
+  taStyleStrings.goc
+  taC.goc)

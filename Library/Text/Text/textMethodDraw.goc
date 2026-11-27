@@ -275,11 +275,12 @@ void TextScreenUpdate(optr o)
     GrRestoreState(gstate);
 }
 
-@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW
+/* VisTextRecalcAndDraw: the lines made again, the text drawn */
+static void RecalcAndDraw(optr oself)
 {
-    WBFixed before = pself->VTI_height;
+    WBFixed before = VT(oself)->VTI_height;
 
-    if (!pself->VTI_lines)
+    if (!VT(oself)->VTI_lines)
 	return;				/* no geometry yet */
     TextGStateCreate(oself);
     EditUnHilite(oself);
@@ -288,4 +289,16 @@ void TextScreenUpdate(optr o)
     EditHilite(oself);
     TextGStateDestroy(oself);
     TR_RegionAdjustHeight(oself, before);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_RECALC_AND_DRAW
+{
+    RecalcAndDraw(oself);
+}
+
+/* (the same; relayed is for the managers that pass it on) */
+@extern method VisTextClass, MSG_VIS_TEXT_RECALC_FOR_ATTR_CHANGE
+{
+    (void) relayed;
+    RecalcAndDraw(oself);
 }

@@ -13,15 +13,18 @@ name text.lib
 type	library, single
 library	geos
 library	ui
+library	styles
 entry	TextLibraryEntry
 longname	"Text Library"
 tokenchars	"TEXL"
 tokenid		0
 
 resource TextTransStrings lmem read-only shared
+resource TextStyleStrings lmem read-only shared
 
 export VisTextClass
 export TextAllocClipboardObject
 export TextFinishWithClipboardObject
 export VisLargeTextClass
 export VTFClearSmartQuotes
+export MsgVisTextLoadStyleSheetParams

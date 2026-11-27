@@ -1,0 +1,1049 @@
+/*
+ * taStyleDesc.goc -- after taStyleDesc.asm: the description callbacks
+ * of the style sheet code (StyleSheetParams): a style's flags, and how
+ * its character and paragraph attributes differ from its base style's
+ * (or from the default attributes) in words.
+ *
+ * Port32: the tables of names are made on the stack, the chunk handles
+ * of the strings being known when the code runs.  Where the asm left a
+ * register to the routine it called (the fraction digits of
+ * StyleSheetDescribeWWFixed, the default name of
+ * StyleSheetDescribeExclusiveWord), DESC_ALL_DIGITS and 0 are passed:
+ * what the register held was a stack address.
+ */
+@include "textInt.goh"
+@include <Objects/styles.goh>
+
+/* (the fraction digits of a value: all there are) */
+#define DESC_ALL_DIGITS	0xffff
+
+@extern chunk CharacterOnlyString;
+@extern chunk PointSizeRelativeString;
+@extern chunk MarginsRelativeString;
+@extern chunk LeadingRelativeString;
+@extern chunk CharacterString;
+@extern chunk UnknownFontString;
+@extern chunk UnderlineString;
+@extern chunk OutlineString;
+@extern chunk BoldString;
+@extern chunk ItalicString;
+@extern chunk StrikeThruString;
+@extern chunk SuperscriptString;
+@extern chunk SubscriptString;
+@extern chunk BoxedString;
+@extern chunk ButtonString;
+@extern chunk IndexString;
+@extern chunk AllCapString;
+@extern chunk SmallCapString;
+@extern chunk HiddenString;
+@extern chunk ChangeBarString;
+@extern chunk FontWeightString;
+@extern chunk FontWidthString;
+@extern chunk TrackKerningString;
+@extern chunk FilledString;
+@extern chunk UnfilledString;
+@extern chunk HalftoneString;
+@extern chunk BGColorString;
+@extern chunk BlackString;
+@extern chunk DarkBlueString;
+@extern chunk DarkGreenString;
+@extern chunk CyanString;
+@extern chunk DarkRedString;
+@extern chunk DarkVioletString;
+@extern chunk BrownString;
+@extern chunk LightGrayString;
+@extern chunk DarkGrayString;
+@extern chunk LightBlueString;
+@extern chunk LightGreenString;
+@extern chunk LightCyanString;
+@extern chunk LightRedString;
+@extern chunk LightVioletString;
+@extern chunk YellowString;
+@extern chunk WhiteString;
+@extern chunk UnknownPatternString;
+@extern chunk PatternString;
+@extern chunk SolidPatternString;
+@extern chunk VerticalPatternString;
+@extern chunk HorizontalPatternString;
+@extern chunk Degree45PatternString;
+@extern chunk Degree135PatternString;
+@extern chunk BrickPatternString;
+@extern chunk SlantedBrickPatternString;
+@extern chunk ParagraphString;
+@extern chunk LeftJustString;
+@extern chunk CenterJustString;
+@extern chunk RightJustString;
+@extern chunk FullJustString;
+@extern chunk LeftMarginString;
+@extern chunk ParaMarginString;
+@extern chunk RightMarginString;
+@extern chunk LineSpacingString;
+@extern chunk LeadingString;
+@extern chunk TopSpacingString;
+@extern chunk BottomSpacingString;
+@extern chunk DefaultTabsString;
+@extern chunk NoDefaultTabsString;
+@extern chunk ParaBGColorString;
+@extern chunk NoTabsString;
+@extern chunk TabsString;
+@extern chunk AnchoredString;
+@extern chunk AnchoredWithString;
+@extern chunk AnchoredEndString;
+@extern chunk WithString;
+@extern chunk DotLeaderString;
+@extern chunk LineLeaderString;
+@extern chunk BulletLeaderString;
+@extern chunk LeaderString;
+@extern chunk TabLineWidthString;
+@extern chunk TabLineSpacingString;
+@extern chunk NoBorderString;
+@extern chunk DoubleBorderString;
+@extern chunk ShadowBorderString;
+@extern chunk NormalBorderString;
+@extern chunk SpaceBetweenString;
+@extern chunk ShadowTopRightString;
+@extern chunk ShadowBottomLeftString;
+@extern chunk ShadowBottomRightString;
+@extern chunk ShadowWidthString;
+@extern chunk LeftString;
+@extern chunk TopString;
+@extern chunk RightString;
+@extern chunk BottomString;
+@extern chunk SideString;
+@extern chunk SidesString;
+@extern chunk DrawInnerString;
+@extern chunk BorderWidthString;
+@extern chunk BorderSpacingString;
+@extern chunk BorderColorString;
+@extern chunk DisableWordWrapString;
+@extern chunk ColumnBreakBeforeString;
+@extern chunk KeepParaWithNextString;
+@extern chunk KeepParaTogetherString;
+@extern chunk AutoHyphenationString;
+@extern chunk MaxLinesString;
+@extern chunk ShortestWordString;
+@extern chunk ShortestPrefixString;
+@extern chunk ShortestSuffixString;
+@extern chunk KeepLinesString;
+@extern chunk KeepTopString;
+@extern chunk KeepBottomString;
+
+/* the block of the strings (TextStyleStrings) */
+#define STRINGS		OptrToHandle(@CharacterString)
+#define COUNT(t)	((word) (sizeof(t) / sizeof((t)[0])))
+
+/* (the asm's OurAddName and AddSpace) */
+static void AddName(optr name, TCHAR **ptr, word *left)
+{
+    StyleSheetAddNameFromChunk(name, ptr, left);
+}
+
+static void AddSpace(TCHAR **ptr, word *left)
+{
+    StyleSheetAddCharToDescription(' ', ptr, left);
+}
+
+/* the default attributes: what a style without a base style is
+ * described (and merged) against */
+const VisTextCharAttr TS_defaultCharAttr = {
+    .VTCA_meta = { .SSEH_style = 0 },
+    .VTCA_fontID = FID_DTC_URW_ROMAN,
+    .VTCA_pointSize = { 0, 12 },
+    .VTCA_color = { C_BLACK, CF_INDEX, 0, 0 },
+    .VTCA_fontWeight = FW_NORMAL,
+    .VTCA_fontWidth = FWI_MEDIUM,
+    .VTCA_grayScreen = SDM_100,
+    .VTCA_bgColor = { C_WHITE, CF_INDEX, 0, 0 },
+    .VTCA_bgGrayScreen = SDM_0,
+};
+
+const VisTextMaxParaAttr TS_defaultParaAttr = {
+    .VTMPA_paraAttr = {
+	.VTPA_meta = { .SSEH_style = CA_NULL_ELEMENT },
+	.VTPA_borderColor = { C_BLACK, CF_INDEX, 0, 0 },
+	.VTPA_lineSpacing = 1 << 8,		/* 1.0 */
+	.VTPA_bgColor = { C_WHITE, CF_INDEX, 0, 0 },
+	.VTPA_borderWidth = 1 * 8,
+	.VTPA_borderSpacing = 2 * 8,
+	.VTPA_borderShadow = 1 * 8,
+	.VTPA_borderGrayScreen = SDM_100,
+	.VTPA_bgGrayScreen = SDM_0,
+	.VTPA_defaultTabs = (PIXELS_PER_INCH * 8) / 2,
+	.VTPA_startingParaNumber = VIS_TEXT_DEFAULT_STARTING_NUMBER,
+    },
+};
+
+/*
+ * DescribeTextStyle: the special description callback: the attribute
+ * list of the box shows the style's flags; the flags in words but for
+ * the attributes of the selection (the "Define New Style" box)
+ */
+void DescribeTextStyle(TCHAR **ptr, word *left, word used,
+		       const void *derived, const void *base, optr extraUI,
+		       dword privateData, word attrsFlag)
+{
+    static const struct { word flag; int which; } names[] = {
+	{ TSF_APPLY_TO_SELECTION_ONLY, 0 }, { TSF_POINT_SIZE_RELATIVE, 1 },
+	{ TSF_MARGINS_RELATIVE, 2 }, { TSF_SPACING_RELATIVE, 3 }
+    };
+    optr strings[4];
+    word flags, i;
+    Boolean sep = used != 0;
+
+    (void) privateData;
+    UpdateDescTextStyleAttributeList(extraUI, (void *) derived, base);
+    if (attrsFlag)
+	return;
+    strings[0] = @CharacterOnlyString;
+    strings[1] = @PointSizeRelativeString;
+    strings[2] = @MarginsRelativeString;
+    strings[3] = @LeadingRelativeString;
+    flags = ((const TextStyleElementHeader *) derived)->
+	TSEH_privateData.TSPD_flags;
+    for (i = 0; i < COUNT(names); i++)
+	if (flags & names[i].flag) {
+	    StyleSheetAddAttributeHeader(sep, strings[names[i].which], ptr,
+					 left);
+	    sep = TRUE;
+	}
+}
+
+/* ---- character attributes --------------------------------------- */
+
+/* the font's name, or "Font=" and its number */
+static void DescFont(TCHAR **ptr, word *left, const void *newAttrs,
+		     const void *oldAttrs, const void *diffs, word data)
+{
+    char name[20 + 1];			/* FONT_NAME_LEN */
+    FontID id = ((const VisTextCharAttr *) newAttrs)->VTCA_fontID;
+
+    (void) oldAttrs; (void) diffs; (void) data;
+    if (GrGetFontName(id, name))
+	StyleSheetAddNameFromPtr(name, ptr, left);
+    else {
+	AddName(@UnknownFontString, ptr, left);
+	StyleSheetAddWord(id, ptr, left);
+    }
+}
+
+/* the point size; relative to the base style's if the style says so */
+static void DescPointSize(TCHAR **ptr, word *left, const void *newAttrs,
+			  const void *oldAttrs, const void *diffs, word data)
+{
+    const VisTextCharAttr *n = newAttrs, *o = oldAttrs;
+    sdword v = ((sdword) n->VTCA_pointSize.WBF_int << 8) |
+	       n->VTCA_pointSize.WBF_frac;
+    SSDescribeDistanceFlags f = 0;
+
+    (void) diffs;
+    if ((data & TSF_POINT_SIZE_RELATIVE) && o) {
+	v -= ((sdword) o->VTCA_pointSize.WBF_int << 8) |
+	     o->VTCA_pointSize.WBF_frac;
+	f = SSDDF_RELATIVE;
+    }
+    /* (8.8 to 13.3) */
+    StyleSheetDescribeDistance(DU_POINTS, (sword) (v >> 5), f, 0, ptr, left);
+}
+
+/* the styles that differ (the bits of the diffs, as the asm) */
+static void DescTextStyle(TCHAR **ptr, word *left, const void *newAttrs,
+			  const void *oldAttrs, const void *diffs, word data)
+{
+    SSDescribeWordEntry t[] = {
+	{ (word) (TS_UNDERLINE), OptrToChunk(@UnderlineString) },
+	{ (word) (TS_OUTLINE), OptrToChunk(@OutlineString) },
+	{ (word) (TS_BOLD), OptrToChunk(@BoldString) },
+	{ (word) (TS_ITALIC), OptrToChunk(@ItalicString) },
+	{ (word) (TS_STRIKE_THRU), OptrToChunk(@StrikeThruString) },
+	{ (word) (TS_SUPERSCRIPT), OptrToChunk(@SuperscriptString) },
+	{ (word) (TS_SUBSCRIPT), OptrToChunk(@SubscriptString) },
+    };
+
+    (void) newAttrs; (void) oldAttrs; (void) data;
+    (void) StyleSheetDescribeNonExclusiveWord(
+	((const VisTextCharAttrDiffs *) diffs)->VTCAD_textStyles, t,
+	COUNT(t), STRINGS, ptr, left);
+}
+
+static void DescExtendedStyle(TCHAR **ptr, word *left, const void *newAttrs,
+			      const void *oldAttrs, const void *diffs,
+			      word data)
+{
+    SSDescribeWordEntry t[] = {
+	{ (word) (VTES_BOXED), OptrToChunk(@BoxedString) },
+	{ (word) (VTES_BUTTON), OptrToChunk(@ButtonString) },
+	{ (word) (VTES_INDEX), OptrToChunk(@IndexString) },
+	{ (word) (VTES_ALL_CAP), OptrToChunk(@AllCapString) },
+	{ (word) (VTES_SMALL_CAP), OptrToChunk(@SmallCapString) },
+	{ (word) (VTES_HIDDEN), OptrToChunk(@HiddenString) },
+	{ (word) (VTES_CHANGE_BAR), OptrToChunk(@ChangeBarString) },
+    };
+
+    (void) newAttrs; (void) oldAttrs; (void) data;
+    (void) StyleSheetDescribeNonExclusiveWord(
+	((const VisTextCharAttrDiffs *) diffs)->VTCAD_extendedStyles, t,
+	COUNT(t), STRINGS, ptr, left);
+}
+
+static void DescFontWeight(TCHAR **ptr, word *left, const void *newAttrs,
+			   const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    StyleSheetDescribeWWFixed(
+	(WWFixedAsDWord) ((const VisTextCharAttr *) newAttrs)->VTCA_fontWeight
+	<< 16, DESC_ALL_DIGITS, @FontWeightString, ptr, left);
+}
+
+static void DescFontWidth(TCHAR **ptr, word *left, const void *newAttrs,
+			  const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    StyleSheetDescribeWWFixed(
+	(WWFixedAsDWord) ((const VisTextCharAttr *) newAttrs)->VTCA_fontWidth
+	<< 16, DESC_ALL_DIGITS, @FontWidthString, ptr, left);
+}
+
+static void DescTrackKerning(TCHAR **ptr, word *left, const void *newAttrs,
+			     const void *oldAttrs, const void *diffs,
+			     word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    StyleSheetDescribeWWFixed(
+	(WWFixedAsDWord) (word) ((const VisTextCharAttr *) newAttrs)->
+	VTCA_trackKerning << 16, DESC_ALL_DIGITS, @TrackKerningString, ptr,
+	left);
+}
+
+/* a color: the name (if any), the standard color's name */
+static void DescColorCommon(optr name, const ColorQuad *c, TCHAR **ptr,
+			    word *left)
+{
+    SSDescribeWordEntry t[] = {
+	{ (word) (C_BLACK), OptrToChunk(@BlackString) },
+	{ (word) (C_BLUE), OptrToChunk(@DarkBlueString) },
+	{ (word) (C_GREEN), OptrToChunk(@DarkGreenString) },
+	{ (word) (C_CYAN), OptrToChunk(@CyanString) },
+	{ (word) (C_RED), OptrToChunk(@DarkRedString) },
+	{ (word) (C_VIOLET), OptrToChunk(@DarkVioletString) },
+	{ (word) (C_BROWN), OptrToChunk(@BrownString) },
+	{ (word) (C_LIGHT_GRAY), OptrToChunk(@LightGrayString) },
+	{ (word) (C_DARK_GRAY), OptrToChunk(@DarkGrayString) },
+	{ (word) (C_LIGHT_BLUE), OptrToChunk(@LightBlueString) },
+	{ (word) (C_LIGHT_GREEN), OptrToChunk(@LightGreenString) },
+	{ (word) (C_LIGHT_CYAN), OptrToChunk(@LightCyanString) },
+	{ (word) (C_LIGHT_RED), OptrToChunk(@LightRedString) },
+	{ (word) (C_LIGHT_VIOLET), OptrToChunk(@LightVioletString) },
+	{ (word) (C_YELLOW), OptrToChunk(@YellowString) },
+	{ (word) (C_WHITE), OptrToChunk(@WhiteString) },
+    };
+
+    if (name) {
+	AddName(name, ptr, left);
+	AddSpace(ptr, left);
+    }
+    StyleSheetDescribeExclusiveWord(c->CQ_redOrIndex, t, COUNT(t), STRINGS,
+				    0, ptr, left);
+}
+
+static void DescTextColor(TCHAR **ptr, word *left, const void *newAttrs,
+			  const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescColorCommon(0, &((const VisTextCharAttr *) newAttrs)->VTCA_color,
+		    ptr, left);
+}
+
+/* a draw mask: filled, unfilled, or the percentage of halftone */
+static void DescGrayCommon(SystemDrawMask mask, TCHAR **ptr, word *left)
+{
+    dword r;
+
+    if (mask == SDM_100) {
+	AddName(@FilledString, ptr, left);
+	return;
+    }
+    if (mask == SDM_0) {
+	AddName(@UnfilledString, ptr, left);
+	return;
+    }
+    /* 64 - (mask - SDM_100) in 64ths, as a percentage, rounded */
+    r = (dword) ((100 * 256) / 64) * (word) (SDM_100 + 64 - mask) + 0x80;
+    StyleSheetDescribeWWFixed((WWFixedAsDWord) ((r >> 8) & 0xffff) << 16,
+			      DESC_ALL_DIGITS, 0, ptr, left);
+    StyleSheetAddCharToDescription('%', ptr, left);
+    AddSpace(ptr, left);
+    AddName(@HalftoneString, ptr, left);
+}
+
+static void DescGrayScreen(TCHAR **ptr, word *left, const void *newAttrs,
+			   const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescGrayCommon(((const VisTextCharAttr *) newAttrs)->VTCA_grayScreen, ptr,
+		   left);
+}
+
+/* a pattern (type in the low byte, data in the high one) */
+static void DescPatternCommon(const GraphicPattern *p, TCHAR **ptr,
+			      word *left)
+{
+    const byte *b = (const byte *) p;
+    SSDescribeWordEntry t[] = {
+	{ (word) (0), OptrToChunk(@SolidPatternString) },
+	{ (word) (PT_SYSTEM_HATCH | (SH_VERTICAL << 8)), OptrToChunk(@VerticalPatternString) },
+	{ (word) (PT_SYSTEM_HATCH | (SH_HORIZONTAL << 8)), OptrToChunk(@HorizontalPatternString) },
+	{ (word) (PT_SYSTEM_HATCH | (SH_45_DEGREE << 8)), OptrToChunk(@Degree45PatternString) },
+	{ (word) (PT_SYSTEM_HATCH | (SH_135_DEGREE << 8)), OptrToChunk(@Degree135PatternString) },
+	{ (word) (PT_SYSTEM_HATCH | (SH_BRICK << 8)), OptrToChunk(@BrickPatternString) },
+	{ (word) (PT_SYSTEM_HATCH | (SH_SLANTED_BRICK << 8)), OptrToChunk(@SlantedBrickPatternString) },
+    };
+
+    StyleSheetDescribeExclusiveWord((word) (b[0] | (b[1] << 8)), t, COUNT(t),
+				    STRINGS, OptrToChunk(@UnknownPatternString),
+				    ptr, left);
+    AddSpace(ptr, left);
+    AddName(@PatternString, ptr, left);
+}
+
+static void DescPattern(TCHAR **ptr, word *left, const void *newAttrs,
+			const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescPatternCommon(&((const VisTextCharAttr *) newAttrs)->VTCA_pattern,
+		      ptr, left);
+}
+
+static void DescBGColor(TCHAR **ptr, word *left, const void *newAttrs,
+			const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescColorCommon(@BGColorString,
+		    &((const VisTextCharAttr *) newAttrs)->VTCA_bgColor, ptr,
+		    left);
+}
+
+static void DescBGGrayScreen(TCHAR **ptr, word *left, const void *newAttrs,
+			     const void *oldAttrs, const void *diffs,
+			     word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescGrayCommon(((const VisTextCharAttr *) newAttrs)->VTCA_bgGrayScreen,
+		   ptr, left);
+}
+
+static void DescBGPattern(TCHAR **ptr, word *left, const void *newAttrs,
+			  const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescPatternCommon(&((const VisTextCharAttr *) newAttrs)->VTCA_bgPattern,
+		      ptr, left);
+}
+
+#define NEW_CAT		SSDF_NEW_CATEGORY
+#define CAD_OFF(f)	((word) offsetof(VisTextCharAttrDiffs, f))
+
+static const SSDiffEntry CADiffTable[] = {
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_FONT_IDS, DescFont, 0 },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_POINT_SIZES, DescPointSize, 0 },
+    { CAD_OFF(VTCAD_textStyles), 0xff, DescTextStyle, 0 },
+    { CAD_OFF(VTCAD_extendedStyles), 0xffff, DescExtendedStyle, 0 },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_COLORS, DescTextColor, NEW_CAT },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_GRAY_SCREENS, DescGrayScreen, 0 },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_PATTERNS, DescPattern, 0 },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_FONT_WEIGHTS, DescFontWeight,
+      NEW_CAT },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_FONT_WIDTHS, DescFontWidth,
+      NEW_CAT },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_TRACK_KERNINGS, DescTrackKerning,
+      NEW_CAT },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_BG_COLORS, DescBGColor, NEW_CAT },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_BG_GRAY_SCREENS, DescBGGrayScreen,
+      0 },
+    { CAD_OFF(VTCAD_diffs), VTCAF_MULTIPLE_BG_PATTERNS, DescBGPattern, 0 },
+};
+
+/* whether a structure is all zero */
+static Boolean AllZero(const void *p, word size)
+{
+    const byte *b = p;
+
+    for (; size; size--)
+	if (*b++)
+	    return FALSE;
+    return TRUE;
+}
+
+/*
+ * DescribeCharAttr: the description callback of character attributes:
+ * "Character:" and what differs from the base (no base: from the
+ * default attribute, the font and size always)
+ */
+void DescribeCharAttr(TCHAR **ptr, word *left, word used,
+		      const void *derived, const void *base, optr extraUI,
+		      dword privateData, word attrsFlag)
+{
+    VisTextCharAttrDiffs diffs;
+
+    (void) extraUI; (void) attrsFlag;
+    memset(&diffs, 0, sizeof(diffs));
+    if (!base)
+	diffs.VTCAD_diffs = VTCAF_MULTIPLE_FONT_IDS |
+			    VTCAF_MULTIPLE_POINT_SIZES;
+    DiffCharAttr(derived, base ? base : &TS_defaultCharAttr, &diffs);
+    diffs.VTCAD_diffs &= ~VTCAF_MULTIPLE_STYLES;
+    diffs.VTCAD_extendedStyles &= ~VTES_BACKGROUND_COLOR;
+    if (AllZero(&diffs, sizeof(diffs)))
+	return;
+    StyleSheetAddAttributeHeader(used != 0, @CharacterString, ptr, left);
+    StyleSheetCallDescribeRoutines(CADiffTable, COUNT(CADiffTable), ptr, left,
+				   derived, base, &diffs,
+				   (word) privateData);
+}
+
+/* ---- paragraph attributes --------------------------------------- */
+
+#define PA(p)	(&((const VisTextMaxParaAttr *) (p))->VTMPA_paraAttr)
+
+static void DescJustification(TCHAR **ptr, word *left, const void *newAttrs,
+			      const void *oldAttrs, const void *diffs,
+			      word data)
+{
+    SSDescribeWordEntry t[] = {
+	{ (word) (J_LEFT << VTPAA_JUSTIFICATION_OFFSET), OptrToChunk(@LeftJustString) },
+	{ (word) (J_CENTER << VTPAA_JUSTIFICATION_OFFSET), OptrToChunk(@CenterJustString) },
+	{ (word) (J_RIGHT << VTPAA_JUSTIFICATION_OFFSET), OptrToChunk(@RightJustString) },
+	{ (word) (J_FULL << VTPAA_JUSTIFICATION_OFFSET), OptrToChunk(@FullJustString) },
+    };
+
+    (void) oldAttrs; (void) diffs; (void) data;
+    StyleSheetDescribeExclusiveWord(
+	PA(newAttrs)->VTPA_attributes & VTPAA_JUSTIFICATION, t, COUNT(t),
+	STRINGS, 0, ptr, left);
+}
+
+/* a margin; relative to the base style's if the style says so */
+static void DescMargin(word v, const word *old, word flags, optr name,
+		       TCHAR **ptr, word *left)
+{
+    SSDescribeDistanceFlags f = SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED;
+
+    if ((flags & TSF_MARGINS_RELATIVE) && old) {
+	v = (word) (v - *old);
+	f = SSDDF_RELATIVE;
+    }
+    StyleSheetDescribeDistance(DU_INCHES_OR_CENTIMETERS, (sword) v, f, name,
+			       ptr, left);
+}
+
+static void DescLeftMargin(TCHAR **ptr, word *left, const void *newAttrs,
+			   const void *oldAttrs, const void *diffs, word data)
+{
+    (void) diffs;
+    DescMargin(PA(newAttrs)->VTPA_leftMargin,
+	       oldAttrs ? &PA(oldAttrs)->VTPA_leftMargin : NULL, data,
+	       @LeftMarginString, ptr, left);
+}
+
+static void DescParaMargin(TCHAR **ptr, word *left, const void *newAttrs,
+			   const void *oldAttrs, const void *diffs, word data)
+{
+    (void) diffs;
+    DescMargin(PA(newAttrs)->VTPA_paraMargin,
+	       oldAttrs ? &PA(oldAttrs)->VTPA_paraMargin : NULL, data,
+	       @ParaMarginString, ptr, left);
+}
+
+static void DescRightMargin(TCHAR **ptr, word *left, const void *newAttrs,
+			    const void *oldAttrs, const void *diffs, word data)
+{
+    (void) diffs;
+    DescMargin(PA(newAttrs)->VTPA_rightMargin,
+	       oldAttrs ? &PA(oldAttrs)->VTPA_rightMargin : NULL, data,
+	       @RightMarginString, ptr, left);
+}
+
+/*
+ * The line spacing, or the leading if there is one.  A relative leading
+ * is described as relative, but not made relative: the asm subtracted
+ * the base's leading from another register (ax, not dx), and so does
+ * not the port.
+ */
+static void DescLineSpacingAndLeading(TCHAR **ptr, word *left,
+				      const void *newAttrs,
+				      const void *oldAttrs,
+				      const void *diffs, word data)
+{
+    const VisTextParaAttr *n = PA(newAttrs);
+    SSDescribeDistanceFlags f = SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED;
+
+    (void) diffs;
+    if (!n->VTPA_leading) {
+	/* (BBFixed to WWFixed) */
+	StyleSheetDescribeWWFixed((WWFixedAsDWord) n->VTPA_lineSpacing << 8,
+				  DESC_ALL_DIGITS, @LineSpacingString, ptr,
+				  left);
+	return;
+    }
+    if ((data & TSF_SPACING_RELATIVE) && oldAttrs)
+	f = SSDDF_RELATIVE;
+    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS,
+			       (sword) n->VTPA_leading, f, @LeadingString,
+			       ptr, left);
+}
+
+static void DescTopSpacing(TCHAR **ptr, word *left, const void *newAttrs,
+			   const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS,
+			       (sword) PA(newAttrs)->VTPA_spaceOnTop,
+			       SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED,
+			       @TopSpacingString, ptr, left);
+}
+
+static void DescBottomSpacing(TCHAR **ptr, word *left, const void *newAttrs,
+			      const void *oldAttrs, const void *diffs,
+			      word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS,
+			       (sword) PA(newAttrs)->VTPA_spaceOnBottom,
+			       SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED,
+			       @BottomSpacingString, ptr, left);
+}
+
+static void DescDefaultTabs(TCHAR **ptr, word *left, const void *newAttrs,
+			    const void *oldAttrs, const void *diffs, word data)
+{
+    word v = PA(newAttrs)->VTPA_defaultTabs;
+
+    (void) oldAttrs; (void) diffs; (void) data;
+    if (v)
+	StyleSheetDescribeDistance(DU_INCHES_OR_CENTIMETERS, (sword) v,
+				   SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED,
+				   @DefaultTabsString, ptr, left);
+    else
+	AddName(@NoDefaultTabsString, ptr, left);
+}
+
+static void DescParaBGColor(TCHAR **ptr, word *left, const void *newAttrs,
+			    const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescColorCommon(@ParaBGColorString, &PA(newAttrs)->VTPA_bgColor, ptr,
+		    left);
+}
+
+static void DescParaBGGrayScreen(TCHAR **ptr, word *left,
+				 const void *newAttrs, const void *oldAttrs,
+				 const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescGrayCommon(PA(newAttrs)->VTPA_bgGrayScreen, ptr, left);
+}
+
+static void DescParaBGPattern(TCHAR **ptr, word *left, const void *newAttrs,
+			      const void *oldAttrs, const void *diffs,
+			      word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescPatternCommon(&PA(newAttrs)->VTPA_bgPattern, ptr, left);
+}
+
+/*
+ * The tabs: "Tabs: 1 inch, 2 inches centered, 3 inches anchored with
+ * '.' with bullet leader 50% halftone 3 point wide lines 4 point
+ * spacing, ..."
+ */
+static void DescTabList(TCHAR **ptr, word *left, const void *newAttrs,
+			const void *oldAttrs, const void *diffs, word data)
+{
+    const VisTextMaxParaAttr *m = newAttrs;
+    word n = m->VTMPA_paraAttr.VTPA_numberOfTabs, type, leader;
+    const Tab *t = m->VTMPA_tabs;
+    SSDescribeWordEntry types[] = {
+	{ (word) (TT_CENTER), OptrToChunk(@CenterJustString) },
+	{ (word) (TT_RIGHT), OptrToChunk(@RightJustString) },
+	{ (word) (TT_ANCHORED), OptrToChunk(@AnchoredString) },
+    };
+    SSDescribeWordEntry leaders[] = {
+	{ (word) (TL_DOT << TabLeader_OFFSET), OptrToChunk(@DotLeaderString) },
+	{ (word) (TL_LINE << TabLeader_OFFSET), OptrToChunk(@LineLeaderString) },
+	{ (word) (TL_BULLET << TabLeader_OFFSET), OptrToChunk(@BulletLeaderString) },
+    };
+
+    (void) oldAttrs; (void) diffs; (void) data;
+    if (!n) {
+	AddName(@NoTabsString, ptr, left);
+	return;
+    }
+    AddName(@TabsString, ptr, left);
+    AddSpace(ptr, left);
+    for (;; t++) {
+	StyleSheetDescribeDistance(DU_INCHES_OR_CENTIMETERS,
+				   (sword) t->T_position,
+				   SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED, 0,
+				   ptr, left);
+	type = t->T_attr & TabType;
+	if (type != TT_LEFT) {
+	    AddSpace(ptr, left);
+	    StyleSheetDescribeExclusiveWord(type, types, COUNT(types),
+					    STRINGS, 0, ptr, left);
+	    if (type == TT_ANCHORED) {
+		AddSpace(ptr, left);
+		AddName(@AnchoredWithString, ptr, left);
+		StyleSheetAddCharToDescription((TCHAR) (byte) t->T_anchor,
+					       ptr, left);
+		AddName(@AnchoredEndString, ptr, left);
+	    }
+	}
+	leader = t->T_attr & TabLeader;
+	if (leader) {
+	    AddSpace(ptr, left);
+	    AddName(@WithString, ptr, left);
+	    AddSpace(ptr, left);
+	    StyleSheetDescribeExclusiveWord(leader, leaders, COUNT(leaders),
+					    STRINGS, 0, ptr, left);
+	    AddSpace(ptr, left);
+	    AddName(@LeaderString, ptr, left);
+	}
+	if (t->T_grayScreen != SDM_100) {
+	    AddSpace(ptr, left);
+	    DescGrayCommon(t->T_grayScreen, ptr, left);
+	}
+	if (t->T_lineWidth) {
+	    AddSpace(ptr, left);
+	    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS,
+				       t->T_lineWidth, 0, 0, ptr, left);
+	    AddSpace(ptr, left);
+	    AddName(@TabLineWidthString, ptr, left);
+	}
+	if (t->T_lineSpacing != 1 * 8) {
+	    AddSpace(ptr, left);
+	    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS,
+				       t->T_lineSpacing, 0, 0, ptr, left);
+	    AddSpace(ptr, left);
+	    AddName(@TabLineSpacingString, ptr, left);
+	}
+	if (!--n)
+	    break;
+	StyleSheetAddCharToDescription(',', ptr, left);
+	AddSpace(ptr, left);
+    }
+}
+
+#define BORDER_SIDES	(VTPBF_LEFT | VTPBF_TOP | VTPBF_RIGHT | VTPBF_BOTTOM)
+
+/* the border: "Double Line Border with 2 points between lines",
+ * "Shadowed Border from bottom-right with 2 point shadow", "Normal
+ * Border top, left sides", ", draw inner lines" */
+static void DescBorder(TCHAR **ptr, word *left, const void *newAttrs,
+		       const void *oldAttrs, const void *diffs, word data)
+{
+    const VisTextParaAttr *a = PA(newAttrs);
+    word f = a->VTPA_borderFlags, shadow = a->VTPA_borderShadow, n;
+    SSDescribeWordEntry sides[] = {
+	{ (word) (VTPBF_LEFT), OptrToChunk(@LeftString) },
+	{ (word) (VTPBF_TOP), OptrToChunk(@TopString) },
+	{ (word) (VTPBF_RIGHT), OptrToChunk(@RightString) },
+	{ (word) (VTPBF_BOTTOM), OptrToChunk(@BottomString) },
+    };
+
+    (void) oldAttrs; (void) diffs; (void) data;
+    if (!(f & BORDER_SIDES)) {
+	AddName(@NoBorderString, ptr, left);
+	return;
+    }
+    AddName((f & VTPBF_DOUBLE) ? @DoubleBorderString :
+	    (f & VTPBF_SHADOW) ? @ShadowBorderString : @NormalBorderString,
+	    ptr, left);
+    if (f & VTPBF_DOUBLE) {
+	if (shadow != 1 * 8) {
+	    AddSpace(ptr, left);
+	    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS, (sword) shadow,
+				SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED,
+				@WithString, ptr, left);
+	    AddSpace(ptr, left);
+	    AddName(@SpaceBetweenString, ptr, left);
+	}
+    } else if (f & VTPBF_SHADOW) {
+	switch (f & VTPBF_ANCHOR) {
+	case SA_TOP_RIGHT:
+	    AddSpace(ptr, left);
+	    AddName(@ShadowTopRightString, ptr, left);
+	    break;
+	case SA_BOTTOM_LEFT:
+	    AddSpace(ptr, left);
+	    AddName(@ShadowBottomLeftString, ptr, left);
+	    break;
+	case SA_BOTTOM_RIGHT:
+	    AddSpace(ptr, left);
+	    AddName(@ShadowBottomRightString, ptr, left);
+	    break;
+	}
+	if (shadow != 1 * 8) {
+	    AddSpace(ptr, left);
+	    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS, (sword) shadow,
+				       0, @WithString, ptr, left);
+	    AddSpace(ptr, left);
+	    AddName(@ShadowWidthString, ptr, left);
+	}
+    }
+    if ((f & BORDER_SIDES) != BORDER_SIDES) {
+	AddSpace(ptr, left);
+	n = StyleSheetDescribeNonExclusiveWord(f & BORDER_SIDES, sides,
+					       COUNT(sides), STRINGS, ptr,
+					       left);
+	AddSpace(ptr, left);
+	AddName(n == 1 ? @SideString : @SidesString, ptr, left);
+    }
+    if (f & VTPBF_DRAW_INNER_LINES) {
+	StyleSheetAddCharToDescription(',', ptr, left);
+	AddSpace(ptr, left);
+	AddName(@DrawInnerString, ptr, left);
+    }
+}
+
+static void DescBorderWidth(TCHAR **ptr, word *left, const void *newAttrs,
+			    const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS,
+			       PA(newAttrs)->VTPA_borderWidth,
+			       SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED,
+			       @BorderWidthString, ptr, left);
+}
+
+static void DescBorderSpacing(TCHAR **ptr, word *left, const void *newAttrs,
+			      const void *oldAttrs, const void *diffs,
+			      word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    StyleSheetDescribeDistance(DU_POINTS_OR_MILLIMETERS,
+			       PA(newAttrs)->VTPA_borderSpacing,
+			       SSDDF_PLURAL_FOR_NON_RELATIVE_IF_NEEDED,
+			       @BorderSpacingString, ptr, left);
+}
+
+static void DescBorderColor(TCHAR **ptr, word *left, const void *newAttrs,
+			    const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescColorCommon(@BorderColorString, &PA(newAttrs)->VTPA_borderColor, ptr,
+		    left);
+}
+
+static void DescBorderGrayScreen(TCHAR **ptr, word *left,
+				 const void *newAttrs, const void *oldAttrs,
+				 const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescGrayCommon(PA(newAttrs)->VTPA_borderGrayScreen, ptr, left);
+}
+
+static void DescBorderPattern(TCHAR **ptr, word *left, const void *newAttrs,
+			      const void *oldAttrs, const void *diffs,
+			      word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescPatternCommon(&PA(newAttrs)->VTPA_borderPattern, ptr, left);
+}
+
+/* the flags of the attributes: their names */
+
+static void DescDisableWordWrap(TCHAR **ptr, word *left, const void *newAttrs,
+		const void *oldAttrs, const void *diffs, word data)
+{
+    (void) newAttrs; (void) oldAttrs; (void) diffs; (void) data;
+    AddName(@DisableWordWrapString, ptr, left);
+}
+static void DescColumnBreakBefore(TCHAR **ptr, word *left, const void *newAttrs,
+		const void *oldAttrs, const void *diffs, word data)
+{
+    (void) newAttrs; (void) oldAttrs; (void) diffs; (void) data;
+    AddName(@ColumnBreakBeforeString, ptr, left);
+}
+static void DescKeepParaWithNext(TCHAR **ptr, word *left, const void *newAttrs,
+		const void *oldAttrs, const void *diffs, word data)
+{
+    (void) newAttrs; (void) oldAttrs; (void) diffs; (void) data;
+    AddName(@KeepParaWithNextString, ptr, left);
+}
+static void DescKeepParaTogether(TCHAR **ptr, word *left, const void *newAttrs,
+		const void *oldAttrs, const void *diffs, word data)
+{
+    (void) newAttrs; (void) oldAttrs; (void) diffs; (void) data;
+    AddName(@KeepParaTogetherString, ptr, left);
+}
+static void DescAutoHyphenation(TCHAR **ptr, word *left, const void *newAttrs,
+		const void *oldAttrs, const void *diffs, word data)
+{
+    (void) newAttrs; (void) oldAttrs; (void) diffs; (void) data;
+    AddName(@AutoHyphenationString, ptr, left);
+}
+static void DescKeepLines(TCHAR **ptr, word *left, const void *newAttrs,
+		const void *oldAttrs, const void *diffs, word data)
+{
+    (void) newAttrs; (void) oldAttrs; (void) diffs; (void) data;
+    AddName(@KeepLinesString, ptr, left);
+}
+
+/* a field of the hyphenation or keep info: its value plus add */
+static void DescFieldCommon(word v, word shift, word add, optr name,
+			    TCHAR **ptr, word *left)
+{
+    StyleSheetDescribeWWFixed((WWFixedAsDWord) (word) ((v >> shift) + add)
+			      << 16, 0, name, ptr, left);
+}
+
+static void DescHyphenationMaxLines(TCHAR **ptr, word *left,
+				    const void *newAttrs, const void *oldAttrs,
+				    const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescFieldCommon(PA(newAttrs)->VTPA_hyphenationInfo &
+		    VTHI_HYPHEN_MAX_LINES, VTHI_HYPHEN_MAX_LINES_OFFSET, 1,
+		    @MaxLinesString, ptr, left);
+}
+
+static void DescHyphenationShortestWord(TCHAR **ptr, word *left,
+					const void *newAttrs,
+					const void *oldAttrs,
+					const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescFieldCommon(PA(newAttrs)->VTPA_hyphenationInfo &
+		    VTHI_HYPHEN_SHORTEST_WORD,
+		    VTHI_HYPHEN_SHORTEST_WORD_OFFSET, 1, @ShortestWordString,
+		    ptr, left);
+}
+
+static void DescHyphenationShortestPrefix(TCHAR **ptr, word *left,
+					  const void *newAttrs,
+					  const void *oldAttrs,
+					  const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescFieldCommon(PA(newAttrs)->VTPA_hyphenationInfo &
+		    VTHI_HYPHEN_SHORTEST_PREFIX,
+		    VTHI_HYPHEN_SHORTEST_PREFIX_OFFSET, 1,
+		    @ShortestPrefixString, ptr, left);
+}
+
+static void DescHyphenationShortestSuffix(TCHAR **ptr, word *left,
+					  const void *newAttrs,
+					  const void *oldAttrs,
+					  const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescFieldCommon(PA(newAttrs)->VTPA_hyphenationInfo &
+		    VTHI_HYPHEN_SHORTEST_SUFFIX,
+		    VTHI_HYPHEN_SHORTEST_SUFFIX_OFFSET, 1,
+		    @ShortestSuffixString, ptr, left);
+}
+
+static void DescKeepTop(TCHAR **ptr, word *left, const void *newAttrs,
+			const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescFieldCommon(PA(newAttrs)->VTPA_keepInfo & VTKI_TOP_LINES,
+		    VTKI_TOP_LINES_OFFSET, 2, @KeepTopString, ptr, left);
+}
+
+static void DescKeepBottom(TCHAR **ptr, word *left, const void *newAttrs,
+			   const void *oldAttrs, const void *diffs, word data)
+{
+    (void) oldAttrs; (void) diffs; (void) data;
+    DescFieldCommon(PA(newAttrs)->VTPA_keepInfo & VTKI_BOTTOM_LINES,
+		    VTKI_BOTTOM_LINES_OFFSET, 2, @KeepBottomString, ptr, left);
+}
+
+#define PAD_OFF(f)	((word) offsetof(VisTextParaAttrDiffs, f))
+
+static const SSDiffEntry PADiffTable[] = {
+    { PAD_OFF(VTPAD_attributes), VTPAA_JUSTIFICATION, DescJustification, 0 },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_LEFT_MARGINS, DescLeftMargin,
+      NEW_CAT },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_PARA_MARGINS, DescParaMargin,
+      NEW_CAT },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_RIGHT_MARGINS, DescRightMargin,
+      NEW_CAT },
+    { PAD_OFF(VTPAD_diffs),
+      VTPAF_MULTIPLE_LINE_SPACINGS | VTPAF_MULTIPLE_LEADINGS,
+      DescLineSpacingAndLeading, NEW_CAT },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_TOP_SPACING, DescTopSpacing,
+      NEW_CAT },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_BOTTOM_SPACING, DescBottomSpacing,
+      NEW_CAT },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_DEFAULT_TABS, DescDefaultTabs,
+      NEW_CAT },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_BG_COLORS, DescParaBGColor,
+      NEW_CAT },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_BG_GRAY_SCREENS,
+      DescParaBGGrayScreen, 0 },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_BG_PATTERNS, DescParaBGPattern,
+      0 },
+    { PAD_OFF(VTPAD_diffs), VTPAF_MULTIPLE_TAB_LISTS, DescTabList, NEW_CAT },
+    { PAD_OFF(VTPAD_borderDiffs),
+      VTPABF_MULTIPLE_BORDER_LEFT | VTPABF_MULTIPLE_BORDER_TOP |
+      VTPABF_MULTIPLE_BORDER_RIGHT | VTPABF_MULTIPLE_BORDER_BOTTOM |
+      VTPABF_MULTIPLE_BORDER_DOUBLES | VTPABF_MULTIPLE_BORDER_DRAW_INNERS |
+      VTPABF_MULTIPLE_BORDER_ANCHORS | VTPABF_MULTIPLE_BORDER_SHADOWS,
+      DescBorder, NEW_CAT },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_WIDTHS,
+      DescBorderWidth, NEW_CAT },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_SPACINGS,
+      DescBorderSpacing, NEW_CAT },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_COLORS,
+      DescBorderColor, NEW_CAT },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_GRAY_SCREENS,
+      DescBorderGrayScreen, 0 },
+    { PAD_OFF(VTPAD_borderDiffs), VTPABF_MULTIPLE_BORDER_PATTERNS,
+      DescBorderPattern, 0 },
+    { PAD_OFF(VTPAD_attributes), VTPAA_DISABLE_WORD_WRAP,
+      DescDisableWordWrap, NEW_CAT },
+    { PAD_OFF(VTPAD_attributes), VTPAA_COLUMN_BREAK_BEFORE,
+      DescColumnBreakBefore, NEW_CAT },
+    { PAD_OFF(VTPAD_attributes), VTPAA_KEEP_PARA_WITH_NEXT,
+      DescKeepParaWithNext, NEW_CAT },
+    { PAD_OFF(VTPAD_attributes), VTPAA_KEEP_PARA_TOGETHER,
+      DescKeepParaTogether, NEW_CAT },
+    { PAD_OFF(VTPAD_attributes), VTPAA_ALLOW_AUTO_HYPHENATION,
+      DescAutoHyphenation, NEW_CAT },
+    { PAD_OFF(VTPAD_hyphenationInfo), VTHI_HYPHEN_MAX_LINES,
+      DescHyphenationMaxLines, NEW_CAT },
+    { PAD_OFF(VTPAD_hyphenationInfo), VTHI_HYPHEN_SHORTEST_WORD,
+      DescHyphenationShortestWord, NEW_CAT },
+    { PAD_OFF(VTPAD_hyphenationInfo), VTHI_HYPHEN_SHORTEST_PREFIX,
+      DescHyphenationShortestPrefix, NEW_CAT },
+    { PAD_OFF(VTPAD_hyphenationInfo), VTHI_HYPHEN_SHORTEST_SUFFIX,
+      DescHyphenationShortestSuffix, NEW_CAT },
+    { PAD_OFF(VTPAD_attributes), VTPAA_KEEP_LINES, DescKeepLines, NEW_CAT },
+    { PAD_OFF(VTPAD_keepInfo), VTKI_TOP_LINES, DescKeepTop, NEW_CAT },
+    { PAD_OFF(VTPAD_keepInfo), VTKI_BOTTOM_LINES, DescKeepBottom, NEW_CAT },
+};
+
+/*
+ * DescribeParaAttr: the description callback of paragraph attributes:
+ * "Paragraph:" and what differs from the base (no base: from the
+ * default attribute, the justification always)
+ */
+void DescribeParaAttr(TCHAR **ptr, word *left, word used,
+		      const void *derived, const void *base, optr extraUI,
+		      dword privateData, word attrsFlag)
+{
+    VisTextParaAttrDiffs diffs;
+
+    (void) extraUI; (void) attrsFlag;
+    memset(&diffs, 0, sizeof(diffs));
+    if (!base)
+	diffs.VTPAD_attributes = VTPAA_JUSTIFICATION;
+    DiffParaAttr(derived, base ? base : &TS_defaultParaAttr, &diffs);
+    diffs.VTPAD_diffs &= ~VTPAF_MULTIPLE_STYLES;
+    if (AllZero(&diffs, sizeof(diffs)))
+	return;
+    StyleSheetAddAttributeHeader(used != 0, @ParagraphString, ptr, left);
+    StyleSheetCallDescribeRoutines(PADiffTable, COUNT(PADiffTable), ptr, left,
+				   derived, base, &diffs,
+				   (word) privateData);
+}
