@@ -1,0 +1,68 @@
+/*
+ * ttReplace.goc -- after ttReplace.asm:
+ * MSG_VIS_TEXT_REPLACE_WITH_TEXT_TRANSFER_FORMAT
+ * (VisTextReplaceWithTransferFormat): a range replaced by the text of a
+ * transfer format, as the user's change (filtered).  A transfer without
+ * text, one that would cross a section or make the text too long is
+ * refused with an error box (PASTE_ERROR_BOXES) unless the object has
+ * ATTR_VIS_TEXT_DONT_BEEP_ON_INSERTION_ERROR.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: the runs of the format
+ * copied (TA_CopyRunFromTransfer, the element blocks fixed), graphics
+ * relocated (TT_RelocateGraphics), the quick move's special case
+ * (QuickMoveSpecial), suspension; the error box is a beep (there is no
+ * MSG_GEN_APPLICATION_DO_STANDARD_DIALOG in C yet).
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+
+/* displayPasteError (Port32: the beep of PASTE_ERROR_BOXES FALSE) */
+static void PasteError(optr o)
+{
+    if (!ObjVarFindData(o, ATTR_VIS_TEXT_DONT_BEEP_ON_INSERTION_ERROR))
+	UserStandardSound(SST_ERROR);
+}
+
+/* VisTextReplaceWithTransferFormat (the asm's carry, set if refused,
+ * is not in the C message) */
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_WITH_TEXT_TRANSFER_FORMAT
+{
+    VisTextReplaceParameters p;
+    VisTextRange r;
+    TextTransferBlockHeader *t;
+    MemHandle mh;
+    dword count;
+
+    (void) pasteFrame;
+    r.VTR_start = start;
+    r.VTR_end = end;
+    TA_GetTextRange(oself, &r, 0);
+    t = VMLock(file, block, &mh);
+    memset(&p, 0, sizeof(p));
+    p.VTRP_range = r;
+    p.VTRP_flags = VTRF_FILTER | VTRF_USER_MODIFICATION;
+    p.VTRP_textReference.TR_type = TRT_HUGE_ARRAY;
+    p.VTRP_textReference.TR_ref.TRU_hugeArray.TRHA_file = file;
+    p.VTRP_textReference.TR_ref.TRU_hugeArray.TRHA_array =
+	VMCHAIN_GET_VM_BLOCK(t->TTBH_text);
+    VMUnlock(mh);
+    count = p.VTRP_textReference.TR_ref.TRU_hugeArray.TRHA_array ?
+	HugeArrayGetCount(file,
+			  p.VTRP_textReference.TR_ref.TRU_hugeArray.TRHA_array)
+	: 0;
+    if (!count || TR_CheckCrossSectionChange(oself, r.VTR_start, r.VTR_end)) {
+	PasteError(oself);
+	return;
+    }
+    p.VTRP_insCount = count - 1;
+    if (!TS_CheckLegalChange(oself, &p)) {
+	PasteError(oself);
+	return;
+    }
+    if (@call oself::MSG_VIS_TEXT_REPLACE_TEXT(&p)) {
+	PasteError(oself);
+	return;
+    }
+    TA_SendNotification(oself, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS |
+			VTNF_NAME);
+}

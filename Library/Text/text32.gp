@@ -18,6 +18,10 @@ longname	"Text Library"
 tokenchars	"TEXL"
 tokenid		0
 
+resource TextTransStrings lmem read-only shared
+
 export VisTextClass
-export VTFClearSmartQuotes
+export TextAllocClipboardObject
+export TextFinishWithClipboardObject
 export VisLargeTextClass
+export VTFClearSmartQuotes

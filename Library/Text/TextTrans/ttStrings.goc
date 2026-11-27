@@ -1,0 +1,22 @@
+/*
+ * ttStrings.goc -- after ttStrings.asm: the strings of the text
+ * transfer (TextTransStrings).
+ *
+ * Port32: textTransferItemName, the name of a text transfer item, is
+ * here; the asm's is in ControlStrings (UI/uiSearchReplace.ui), with
+ * the controllers, which are not in C yet.
+ */
+@include "textInt.goh"
+
+@start TextTransStrings, data;
+
+@chunk char TransferSizeWarning[] = "Due to memory constraints the size "
+    "of the text cut or copied was reduced. If you are trying to transfer "
+    "the entire text, use the Save As command.";
+
+@chunk char PasteErrorString[] = "Unable to insert text.  There may be too "
+    "many characters or characters that are not supported.";
+
+@chunk char textTransferItemName[] = "Unnamed Text";
+
+@end TextTransStrings;

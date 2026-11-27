@@ -7421,6 +7421,23 @@ the modules of the asm; what is there:
   "after" a large pointer leave out the null, as a small object's do.
   Large lines, regions and runs come later. Until then a large object
   has no lines and is not drawn (the clipboard's object is never drawn).
+- **The clipboard of the text** (`TextTrans/`). `MSG_META_CLIPBOARD_COPY`
+  stores the selection in the clipboard file as a transfer item with
+  one `CIF_TEXT` format: a `TextTransferBlockHeader` (a VM tree) whose
+  `TTBH_text` is a huge array of the characters and their null. The
+  item is as wide as the paragraph (a one-line object: as its text) and
+  as high as the object. `[text] transferLimit` (in KB) cuts the range,
+  with a warning. `_CUT` copies, then deletes. `_PASTE`
+  (`MSG_VIS_TEXT_REPLACE_WITH_TEXT_TRANSFER_FORMAT`) replaces the
+  selection as the user's change. A refusal beeps, because there is no
+  `MSG_GEN_APPLICATION_DO_STANDARD_DIALOG` in C yet, and the C message
+  does not report it (the asm's carry). `NSSC_pasteable` is set when
+  the normal item has text, or a gstring for an object with graphics.
+  `TextAllocClipboardObject` and `TextFinishWithClipboardObject` give
+  an application a large object whose text array becomes the format.
+  The format carries no runs yet, so pasted text takes the attributes
+  at its place. Graphics, undo chains, quick transfer and the
+  name/type/style arrays come later.
 - **References.** Text is copied from and to all kinds of references:
   pointer, chunk, block, VM block, DB item and huge array
   (`tsReference.goc`). A destination is first resized to the text plus
@@ -7432,10 +7449,10 @@ the modules of the asm; what is there:
   `MSG_VIS_TEXT_GET_ALL_VM_BLOCK` and `_DB_ITEM` are ported.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
   paragraph attribute, extended styles, hyphenation, graphics, the large mouse messages, selection by words and lines while
-  dragging, quick transfer, the clipboard, the pointer image over
+  dragging, quick transfer, the runs of a transfer, the pointer image over
   text;
   filters, undo, suspension, the style and style sheet notifications
-  (the Styles library) and `NSSC_pasteable` (the clipboard),
+  (the Styles library),
   the lines, regions and runs of large objects, the selection into a
   VM block, DB item or huge array, search and spelling, the
   controllers, the ruler.

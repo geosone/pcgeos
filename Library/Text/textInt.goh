@@ -44,6 +44,15 @@ typedef struct {
 extern const char *TS_RelockTextPtr(TextLockState *s, dword offset,
 				    word *after);
 extern void TS_ReleaseTextPtr(TextLockState *s);
+/* TextTrans/: the transfer format's header, a transfer item made of
+ * a format (0: of the selection), a paste from the clipboard, a
+ * warning */
+extern VMBlockHandle TT_CreateTransferFormatHeader(VMFileHandle f);
+extern VMBlockHandle TT_GenerateTransferItem(optr o, VMFileHandle f,
+					     VMBlockHandle format, optr owner,
+					     const char *name);
+extern Boolean TT_PasteCommon(optr o, dword start, dword end, word flags);
+extern void TT_DoWarningDialog(optr string);
 /* Text/textUtils.goc: the VM file of the object's huge arrays */
 extern VMFileHandle T_GetVMFile(optr o);
 extern dword TS_GetTextSize(optr o);

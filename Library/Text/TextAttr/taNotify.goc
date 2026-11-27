@@ -12,10 +12,10 @@
  * style and style sheet notifications (the Styles library is not in C;
  * their GCN lists get only the null status), the type notification
  * (objects with types are not in C; their bit is cleared without
- * VTSF_TYPES, as in the asm), the clipboard for NSSC_pasteable (not in
- * C: FALSE).
+ * VTSF_TYPES, as in the asm).
  */
 @include "textInt.goh"
+@include <Objects/clipbrd.goh>
 @include <Objects/gEditCC.goh>
 @include <Objects/Text/tCtrlC.goh>
 @include <Objects/styles.goh>
@@ -456,7 +456,22 @@ static void GenSelectStateNotify(optr o, NotifyVars *v, void *block)
 	    n->NSSC_deleteableSelection = BB_TRUE;
     }
     /* (editable: pasteable if the clipboard has text, or graphics for
-     * an object with graphics: the clipboard is not in C yet) */
+     * an object with graphics) */
+    if (editable) {
+	ClipboardQueryArgs q;
+
+	ClipboardQueryItem(TIF_NORMAL, &q);
+	if (q.CQA_numFormats &&
+	    (!ClipboardTestItemFormat(q.CQA_header,
+			FormatIDFromManufacturerAndType(
+			    MANUFACTURER_ID_GEOWORKS, CIF_TEXT)) ||
+	     (!ClipboardTestItemFormat(q.CQA_header,
+			FormatIDFromManufacturerAndType(
+			    MANUFACTURER_ID_GEOWORKS, CIF_GRAPHICS_STRING)) &&
+	      (VT(o)->VTI_storageFlags & VTSF_GRAPHICS))))
+	    n->NSSC_pasteable = BB_TRUE;
+	ClipboardDoneWithItem(q.CQA_header);
+    }
 }
 
 /* GenSelectionNotify: the selection, its line and region */

@@ -158,10 +158,11 @@ Ordered by dependency, each with host-side tests under `linux`:
   `library.text`. 2026-11-27: the UI's clipboard (`User/userTransfer.goc`,
   ABI.md §13ab), `library.text` step 21; the text of large objects
   (`VisLargeTextClass`, huge arrays) and all kinds of text references,
-  step 22.
-  Open: the lines, regions and runs of large objects, shared elements and style sheets (and their
-  notifications), undo, cut, copy and paste of text (`pasteable`),
-  quick transfer.
+  step 22; cut, copy and paste of text (`TextTrans/`, `pasteable`),
+  step 23.
+  Open: the lines, regions and runs of large objects, the runs of a
+  transfer, shared elements and style sheets (and their
+  notifications), undo, quick transfer.
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose
   dependency is ported since gets filled in after the asm, with its own
   ctest check. Done: the load error of the startup applications, the

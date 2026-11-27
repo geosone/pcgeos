@@ -1,0 +1,234 @@
+/*
+ * ttHigh.goc -- after ttHigh.asm: the clipboard of a text object
+ * (MSG_META_CLIPBOARD_CUT, _COPY, _PASTE: VisTextCut, VisTextCopy,
+ * CheckSelectionCrossSection, VisTextPaste, PasteCommon,
+ * GenerateTransferItem) and the clipboard object an application fills
+ * (TextAllocClipboardObject, TextFinishWithClipboardObject).
+ *
+ * A copy is a transfer item in the clipboard file with one format,
+ * CIF_TEXT (ttCreate.goc), as wide as the object's paragraph (a one
+ * line object: as its text) and as high as the object (0 from ten
+ * inches on).  A paste replaces the selection by the normal item's
+ * text (ttReplace.goc).
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: undo (the cut and the
+ * paste as one undo chain), graphics (pasting a CIF_GRAPHICS_STRING
+ * into an object with graphics, GenerateGStringFormatIfAppropriate),
+ * the runs of the clipboard object.
+ */
+@include "textInt.goh"
+@include <Objects/clipbrd.goh>
+@include <Objects/vLTextC.goh>
+#include <hugearr.h>
+
+@extern chunk textTransferItemName;
+
+/* CheckSelectionCrossSection: TRUE if the selection crosses a section */
+static Boolean CheckSelectionCrossSection(optr o)
+{
+    dword start, end;
+
+    TSL_SelectGetSelection(o, &start, &end);
+    return TR_CheckCrossSectionChange(o, start, end);
+}
+
+/* VisTextCut: copied, then deleted */
+@extern method VisTextClass, MSG_META_CLIPBOARD_CUT
+{
+    if (CheckSelectionCrossSection(oself))
+	return;
+    @call oself::MSG_META_CLIPBOARD_COPY();
+    @call oself::MSG_META_DELETE();
+}
+
+/*
+ * GenerateTransferItem: a transfer item in f with the format (made of
+ * the selection if 0) of the object; name its name (NULL: "Unnamed
+ * Text"); the item's header block
+ */
+VMBlockHandle TT_GenerateTransferItem(optr o, VMFileHandle f,
+				      VMBlockHandle format, optr owner,
+				      const char *name)
+{
+    VisTextInstance *t;
+    ClipboardItemHeader *h;
+    MemHandle mh, nh = 0;
+    sword height, width = 0;
+    word i;
+
+    if (!format)
+	format = @call o::MSG_VIS_TEXT_CREATE_TRANSFER_FORMAT(0, f, 0, 0,
+						VIS_TEXT_RANGE_SELECTION);
+    t = VT(o);
+    height = (sword) (t->VI_bounds.R_bottom - t->VI_bounds.R_top);
+    if (height >= 72 * 10)
+	height = 0;
+    if (t->VTI_state & VTS_ONE_LINE) {
+	/* (the asm asks for the position without a gstate) */
+	TextGStateCreate(o);
+	(void) TL_LineTextPosition(o, 0, 0x7fff, (dword) -1, &width, NULL);
+	TextGStateDestroy(o);
+    } else if (!(t->VTI_storageFlags & VTSF_LARGE) ||
+	       ((VisLargeTextInstance *) t)->VLTI_regionArray) {
+	VisTextMaxParaAttr a;
+	dword ps, pe;
+
+	TA_GetParaAttrForPosition(o, t->VTI_selectStart, &a, &ps, &pe);
+	width = (sword) (a.VTMPA_paraAttr.VTPA_rightMargin -
+			 a.VTMPA_paraAttr.VTPA_leftMargin);
+    }
+    mh = MemAlloc(sizeof(ClipboardItemHeader), HF_DYNAMIC | HF_SHARABLE,
+		  HAF_ZERO_INIT | HAF_LOCK | HAF_NO_ERR);
+    h = MemDeref(mh);
+    h->CIH_sourceID = owner;
+    h->CIH_owner = owner;
+    h->CIH_formatCount = 1;
+    h->CIH_formats[0].CIFI_format =
+	FormatIDFromManufacturerAndType(MANUFACTURER_ID_GEOWORKS, CIF_TEXT);
+    h->CIH_formats[0].CIFI_extra1 = (word) width;
+    h->CIH_formats[0].CIFI_extra2 = (word) height;
+    h->CIH_formats[0].CIFI_vmChain = VMCHAIN_MAKE_FROM_VM_BLOCK(format);
+    if (!name) {
+	nh = OptrToHandle(@textTransferItemName);
+	MemLock(nh);
+	name = LMemDeref(@textTransferItemName);
+    }
+    for (i = 0; i < sizeof(ClipboardItemNameBuffer) - 1 && name[i]; i++)
+	h->CIH_name[i] = name[i];
+    h->CIH_name[i] = 0;
+    if (nh)
+	MemUnlock(nh);
+    MemUnlock(mh);
+    return VMAttach(f, 0, mh);
+}
+
+/* VisTextCopy: the selection the normal transfer item (unless it
+ * crosses a section, ATTR_VIS_TEXT_ALLOW_CROSS_SECTION_COPY) */
+@extern method VisTextClass, MSG_META_CLIPBOARD_COPY
+{
+    VMFileHandle f;
+    VMBlockHandle item;
+
+    if (!ObjVarFindData(oself, ATTR_VIS_TEXT_ALLOW_CROSS_SECTION_COPY) &&
+	CheckSelectionCrossSection(oself))
+	return;
+    f = ClipboardGetClipboardFile();
+    if (!f)
+	return;
+    item = TT_GenerateTransferItem(oself, f, 0, oself, NULL);
+    (void) ClipboardRegisterItem(BlockIDFromFileAndBlock(f, item), 0);
+}
+
+/*
+ * PasteCommon: the range replaced by the text of the transfer item
+ * (flags: TIF_NORMAL, TIF_QUICK); TRUE if there was none to paste
+ * (Port32: a refused replacement is not told, the C message has no
+ * result)
+ */
+Boolean TT_PasteCommon(optr o, dword start, dword end,
+		       ClipboardItemFlags flags)
+{
+    ClipboardQueryArgs q;
+    ClipboardRequestArgs ra;
+    ClipboardItemFormatID text =
+	FormatIDFromManufacturerAndType(MANUFACTURER_ID_GEOWORKS, CIF_TEXT);
+    Boolean error = TRUE;
+
+    ClipboardQueryItem(flags, &q);
+    if (q.CQA_numFormats && !ClipboardTestItemFormat(q.CQA_header, text)) {
+	ClipboardRequestItemFormat(text, q.CQA_header, &ra);
+	@call o::MSG_VIS_TEXT_REPLACE_WITH_TEXT_TRANSFER_FORMAT(
+			VMCHAIN_GET_VM_BLOCK(ra.CRA_data), ra.CRA_file, 0,
+			end, start);
+	error = FALSE;
+    }
+    ClipboardDoneWithItem(q.CQA_header);
+    return error;
+}
+
+/* VisTextPaste: the selection replaced by the normal item, the
+ * selection then adjusted as after a paste (AT_PASTE) */
+@extern method VisTextClass, MSG_META_CLIPBOARD_PASTE
+{
+    byte adjust;
+
+    if (!(pself->VTI_state & VTS_EDITABLE))
+	return;
+    adjust = pself->VTI_intFlags & VTIF_ADJUST_TYPE;
+    pself->VTI_intFlags = (pself->VTI_intFlags & ~VTIF_ADJUST_TYPE) |
+			  AT_PASTE;
+    (void) TT_PasteCommon(oself, VIS_TEXT_RANGE_SELECTION, 0, TIF_NORMAL);
+    pself = VT(oself);
+    pself->VTI_intFlags = (pself->VTI_intFlags & ~VTIF_ADJUST_TYPE) |
+			  adjust;
+}
+
+/*
+ * TextAllocClipboardObject: a large text object for the thread with
+ * its text in file (0: the clipboard file), with the storage flags
+ */
+optr _pascal TextAllocClipboardObject(VMFileHandle file,
+				      VisTextStorageFlags storageFlags,
+				      byte regionFlag)
+{
+    MemHandle mh = UserAllocObjBlock(ThreadGetInfo(0, TGIT_THREAD_HANDLE));
+    optr o = ObjInstantiate(mh, (ClassStruct *) &VisLargeTextClass);
+
+    if (!file)
+	file = ClipboardGetClipboardFile();
+    @call o::MSG_VIS_TEXT_SET_VM_FILE(file);
+    @call o::MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES();
+    @call o::MSG_VIS_TEXT_CREATE_STORAGE(regionFlag, storageFlags);
+    return o;
+}
+
+/*
+ * TextFinishWithClipboardObject: the object's text a transfer format
+ * (its huge array kept), the object freed; by opt the format returned
+ * (TCO_RETURN_TRANSFER_FORMAT), freed (TCO_RETURN_NOTHING), made a
+ * transfer item of all the text (TCO_RETURN_TRANSFER_ITEM) or that
+ * item registered as the normal one (TCO_COPY)
+ */
+VMBlockHandle _pascal TextFinishWithClipboardObject(optr obj,
+						    TextClipboardOption opt,
+						    optr owner,
+						    const char *name)
+{
+    MemHandle mh = OptrToHandle(obj), th;
+    VMFileHandle f;
+    VMBlockHandle header, ret;
+    TextTransferBlockHeader *t;
+    VisTextInstance *vt;
+
+    ObjLockObjBlock(mh);
+    f = T_GetVMFile(obj);
+    header = TT_CreateTransferFormatHeader(f);
+    t = VMLock(f, header, &th);
+    vt = VT(obj);
+    t->TTBH_text = VMCHAIN_MAKE_FROM_VM_BLOCK(vt->VTI_text);
+    /* (Port32: the runs not yet) */
+    VMDirty(th);
+    VMUnlock(th);
+    ret = header;
+    switch (opt) {
+    case TCO_RETURN_NOTHING:
+	VMFreeVMChain(f, VMCHAIN_MAKE_FROM_VM_BLOCK(header));
+	ret = 0;
+	break;
+    case TCO_RETURN_TRANSFER_FORMAT:
+	break;
+    default:
+	vt = VT(obj);
+	vt->VTI_selectStart = 0;
+	vt->VTI_selectEnd = TS_GetTextSize(obj);
+	ret = TT_GenerateTransferItem(obj, f, header, owner, name);
+	if (opt == TCO_COPY) {
+	    (void) ClipboardRegisterItem(BlockIDFromFileAndBlock(f, ret), 0);
+	    ret = 0;
+	}
+	break;
+    }
+    MemUnlock(mh);
+    MemFree(mh);
+    return ret;
+}

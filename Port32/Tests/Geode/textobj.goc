@@ -15,6 +15,7 @@
 @include <Objects/gViewC.goh>
 @include <Objects/clipbrd.goh>
 @include <Objects/vLTextC.goh>
+@include <Objects/gEditCC.goh>
 #include <string.h>
 #include <font.h>
 #include <fontID.h>
@@ -45,6 +46,8 @@ typedef struct {
     word	TOS_tab[2];		/* of step 20 */
     word	TOS_clip;		/* of step 21 */
     word	TOS_large[3];		/* of step 22 */
+    MemHandle	TOS_selectBlock;	/* (step 23) the select state */
+    word	TOS_paste[2];		/* of step 23 */
 } TOState;
 
 TOState toState;
@@ -117,6 +120,7 @@ static Boolean Typed(const char *s)
     toState.TOS_send = params->VTGNP_sendFlags;
     @callsuper();
     toState.TOS_countBlock = params->VTGNP_notificationBlocks[5];
+    toState.TOS_selectBlock = params->VTGNP_notificationBlocks[0];
 }
 
 /* (step 15) the view is not asked: none here */
@@ -297,6 +301,18 @@ static VMBlockHandle TOMakeItem(VMFileHandle f, optr owner, word extra)
     VMDirty(mh);
     VMUnlock(mh);
     return h;
+}
+
+/* (step 23) the name of a transfer item */
+static Boolean TOItemName(TransferBlockID id, const char *name)
+{
+    MemHandle mh;
+    ClipboardItemHeader *h = VMLock(FileFromTransferBlockID(id),
+				    BlockFromTransferBlockID(id), &mh);
+    Boolean same = Same(h->CIH_name, name);
+
+    VMUnlock(mh);
+    return same;
 }
 
 @method TOProcessClass, MSG_TO_STEP
@@ -1499,6 +1515,82 @@ static VMBlockHandle TOMakeItem(VMFileHandle f, optr owner, word extra)
 	TOCHECK(@call lt::MSG_VIS_TEXT_GET_ALL_PTR(all) == 1 &&
 		!memcmp(all, "x", 2));
 	@call lt::MSG_META_BLOCK_FREE();
+	ClipboardCloseClipboardFile();
+	break;
+    }
+    case 23: {
+	/* the clipboard of the text: a copy, a paste, a cut; pasteable
+	 * told; a clipboard object of the application (its text the
+	 * format, TCO_COPY) pasted */
+	ClipboardQueryArgs q;
+	ClipboardRequestArgs ra;
+	TextTransferBlockHeader *t;
+	MemHandle mh;
+	NotifySelectStateChange *n;
+	optr co;
+
+	word state = @call TOText::MSG_VIS_TEXT_GET_STATE();
+
+	TOCHECK(ClipboardOpenClipboardFile() == 0);
+	@call TOText::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(VTS_EDITABLE, 0);
+	TOCHECK(@call TOText::MSG_VIS_TEXT_GET_STATE() & VTS_EDITABLE);
+	@call TOText::MSG_VIS_TEXT_SELECT_RANGE(3, 1);
+	@call TOText::MSG_META_CLIPBOARD_COPY();
+	ClipboardQueryItem(TIF_NORMAL, &q);
+	TOCHECK(q.CQA_numFormats == 1 && q.CQA_owner == @TOText &&
+		TOItemName(q.CQA_header, "Unnamed Text"));
+	ClipboardRequestItemFormat(FormatIDFromManufacturerAndType(
+			MANUFACTURER_ID_GEOWORKS, CIF_TEXT), q.CQA_header, &ra);
+	t = VMLock(ra.CRA_file, VMCHAIN_GET_VM_BLOCK(ra.CRA_data), &mh);
+	toState.TOS_paste[0] = (word) HugeArrayGetCount(ra.CRA_file,
+				VMCHAIN_GET_VM_BLOCK(t->TTBH_text));
+	TOCHECK(toState.TOS_paste[0] == 3 && !t->TTBH_charAttrRuns);
+	VMUnlock(mh);
+	ClipboardDoneWithItem(q.CQA_header);
+	/* (pasteable: told to the edit menu) */
+	(void) ObjVarAddData(@TOText,
+			     ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_TARGETED, 0);
+	toState.TOS_selectBlock = 0;
+	@call TOText::MSG_META_UI_FORCE_CONTROLLER_UPDATE(
+			MANUFACTURER_ID_GEOWORKS, GWNT_SELECT_STATE_CHANGE);
+	TOCHECK(toState.TOS_selectBlock != 0);
+	if (toState.TOS_selectBlock) {
+	    n = MemLock(toState.TOS_selectBlock);
+	    TOCHECK(n->NSSC_pasteable == 0xff &&
+		    n->NSSC_clipboardableSelection == 0xff);
+	    MemUnlock(toState.TOS_selectBlock);
+	    MemDecRefCount(toState.TOS_selectBlock);
+	}
+	(void) ObjVarDeleteData(@TOText,
+				ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_TARGETED);
+	@call TOText::MSG_VIS_TEXT_SELECT_RANGE(15, 15);
+	@call TOText::MSG_META_CLIPBOARD_PASTE();
+	(void) @call TOText::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+	TOCHECK(Same(buf, "a12b-cE -.F14y#12"));
+	@call TOText::MSG_VIS_TEXT_SELECT_RANGE(17, 15);
+	@call TOText::MSG_META_CLIPBOARD_CUT();
+	(void) @call TOText::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+	TOCHECK(Same(buf, "a12b-cE -.F14y#"));
+	ClipboardQueryItem(TIF_NORMAL, &q);
+	TOCHECK(q.CQA_numFormats == 1);
+	ClipboardDoneWithItem(q.CQA_header);
+	/* (the application's clipboard object) */
+	co = TextAllocClipboardObject(0, 0, 0);
+	@call co::MSG_VIS_TEXT_REPLACE_ALL_PTR("clip", 0);
+	TOCHECK(TextFinishWithClipboardObject(co, TCO_COPY, @TOText,
+					      "Mine") == 0);
+	ClipboardQueryItem(TIF_NORMAL, &q);
+	TOCHECK(q.CQA_numFormats == 1 && TOItemName(q.CQA_header, "Mine"));
+	ClipboardDoneWithItem(q.CQA_header);
+	@call TOText::MSG_VIS_TEXT_SELECT_RANGE(15, 15);
+	@call TOText::MSG_META_CLIPBOARD_PASTE();
+	toState.TOS_paste[1] = @call TOText::MSG_VIS_TEXT_GET_ALL_PTR(buf);
+	TOCHECK(Same(buf, "a12b-cE -.F14y#clip"));
+	@call TOText::MSG_VIS_TEXT_SELECT_RANGE(19, 15);
+	@call TOText::MSG_META_DELETE();
+	if (!(state & VTS_EDITABLE))
+	    @call TOText::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(0,
+							VTS_EDITABLE);
 	ClipboardCloseClipboardFile();
 	break;
     }

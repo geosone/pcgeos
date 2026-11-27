@@ -1,0 +1,102 @@
+/*
+ * ttCreate.goc -- after ttCreate.asm: MSG_VIS_TEXT_CREATE_TRANSFER_FORMAT
+ * (VisTextCreateTransferFormat, CreateTransferFormatHeader,
+ * GetTextTransferRangeLimit, WarnUserRangeChanged, TT_DoWarningDialog).
+ *
+ * A transfer format (TIF_TEXT) is a VM tree in the transfer file: a
+ * TextTransferBlockHeader whose VMChains name the text (a huge array of
+ * characters ending in a null), the runs and their elements.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: the runs and elements
+ * of the format (TA_CreateRunAndElementArrays, TA_CopyRunToTransfer;
+ * a transfer holds the text only, pasted text takes the attributes at
+ * its place), styles, names, types and graphics, the section breaks
+ * filtered out (FilterSectionBreakFromHugeArray: there are no sections
+ * yet), MakeTransferFormatNotLMem (there are no element blocks).
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+#include <initfile.h>
+
+@extern chunk TransferSizeWarning;
+
+/* CreateTransferFormatHeader: an empty TextTransferBlockHeader, a VM
+ * tree whose branches are its VMChains from TTBH_text on */
+VMBlockHandle TT_CreateTransferFormatHeader(VMFileHandle f)
+{
+    VMBlockHandle h = VMAlloc(f, sizeof(TextTransferBlockHeader), 0);
+    MemHandle mh;
+    TextTransferBlockHeader *t = VMLock(f, h, &mh);
+
+    memset(t, 0, sizeof(*t));
+    t->TTBH_meta.VMCT_meta.VMC_next = VM_CHAIN_TREE;
+    t->TTBH_meta.VMCT_offset = offsetof(TextTransferBlockHeader, TTBH_text);
+    t->TTBH_meta.VMCT_count = (sizeof(TextTransferBlockHeader) -
+			       offsetof(TextTransferBlockHeader, TTBH_text)) /
+			      sizeof(VMChain);
+    VMDirty(mh);
+    VMUnlock(mh);
+    return h;
+}
+
+/* GetTextTransferRangeLimit: [text] transferLimit, in KB; FALSE if
+ * there is none */
+static Boolean GetTextTransferRangeLimit(dword *limit)
+{
+    word kb;
+
+    if (InitFileReadInteger("text", "transferLimit", &kb))
+	return FALSE;
+    *limit = (dword) kb << 10;
+    return TRUE;
+}
+
+/* TT_DoWarningDialog: a warning to acknowledge */
+void TT_DoWarningDialog(optr string)
+{
+    (void) UserStandardDialogOptr(NULL, NULL, 0, 0, string,
+				  (CDT_WARNING << CDBF_DIALOG_TYPE_OFFSET) |
+				  (GIT_NOTIFICATION <<
+				   CDBF_INTERACTION_TYPE_OFFSET));
+}
+
+/* VisTextCreateTransferFormat: the range (the selection,
+ * VIS_TEXT_RANGE_SELECTION) as a transfer format in file; the range
+ * cut to the transfer limit, the selection with it, the user warned */
+@extern method VisTextClass, MSG_VIS_TEXT_CREATE_TRANSFER_FORMAT
+{
+    VisTextRange r;
+    TextReference ref;
+    VMBlockHandle header, text;
+    TextTransferBlockHeader *t;
+    MemHandle mh;
+    dword limit;
+
+    (void) block;
+    (void) pasteFrame;
+    r.VTR_start = start;
+    r.VTR_end = end;
+    TA_GetTextRange(oself, &r, 0);
+    if (GetTextTransferRangeLimit(&limit) &&
+	r.VTR_end - r.VTR_start > limit) {
+	r.VTR_end = r.VTR_start + limit;
+	/* WarnUserRangeChanged */
+	TT_DoWarningDialog(@TransferSizeWarning);
+	@call oself::MSG_VIS_TEXT_SELECT_RANGE(r.VTR_end, r.VTR_start);
+    }
+    /* (the asm has the array allocated; the reference goes by value, so
+     * it is made here and filled, VTGTRF_ALLOCATE_ALWAYS's result) */
+    text = HugeArrayCreate(file, sizeof(char), 0);
+    memset(&ref, 0, sizeof(ref));
+    ref.TR_type = TRT_HUGE_ARRAY;
+    ref.TR_ref.TRU_hugeArray.TRHA_file = file;
+    ref.TR_ref.TRU_hugeArray.TRHA_array = text;
+    (void) @call oself::MSG_VIS_TEXT_GET_TEXT_RANGE(0, ref, r.VTR_end,
+						    r.VTR_start);
+    header = TT_CreateTransferFormatHeader(file);
+    t = VMLock(file, header, &mh);
+    t->TTBH_text = VMCHAIN_MAKE_FROM_VM_BLOCK(text);
+    VMDirty(mh);
+    VMUnlock(mh);
+    return header;
+}
