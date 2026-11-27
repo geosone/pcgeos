@@ -28,8 +28,8 @@ static dword OffsetAtPosition(optr o, sword x, sword y)
     x = (sword) (x - v->VI_bounds.R_left - t->VTI_lrMargin -
 		 t->VTI_leftOffset);
     y = (sword) (y - v->VI_bounds.R_top - t->VTI_tbMargin);
-    line = TL_LineFromPosition(o, (sword) (y < 0 ? 0 : y), NULL);
-    x = (sword) (x - SmallGetLinePointer(o, line, NULL)->LI_adjustment);
+    line = TL_LineFromPosition(o, 0, (sword) (y < 0 ? 0 : y), NULL);
+    x = (sword) (x - TL_LineGetLeftEdge(o, line));
     off = TL_LineTextPosition(o, line, x, TEXT_ADDRESS_PAST_END, &pos,
 			      NULL);
     end = TSL_LineCursorEnd(o, line);
@@ -109,7 +109,7 @@ dword ComputeEventPositionAndOffset(optr o, dword line)
 {
     VisTextInstance *t = VT(o);
     sword x = (sword) (t->VTI_goalPosition - t->VTI_leftOffset -
-		       SmallGetLinePointer(o, line, NULL)->LI_adjustment), pos;
+		       TL_LineGetLeftEdge(o, line)), pos;
     dword off, end = TSL_LineCursorEnd(o, line);
 
     off = TL_LineTextPosition(o, line, x, TEXT_ADDRESS_PAST_END, &pos,

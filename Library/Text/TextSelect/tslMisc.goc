@@ -35,7 +35,7 @@ void InvertRange(optr o, dword start, dword end)
     GrSetAreaMaskSys(g, SDM_100);
     GrSetMixMode(g, MM_INVERT);
     for (line = first; line <= last; line++) {
-	const LineInfo *li = SmallGetLinePointer(o, line, NULL);
+	LineInfo *li = TL_LineLock(o, line, NULL);
 	sdword hgt = TEXT_WBF(&li->LI_hgt);
 	dword count = TL_LineGetCharCount(li);
 	word fields = TL_LineGetFieldCount(o, line);
@@ -48,7 +48,7 @@ void InvertRange(optr o, dword start, dword end)
 		(void) TL_LineTextPosition(o, line, 0x7fff, start, &x, NULL);
 		left = (sword) (x + adj);
 	    }
-	    li = SmallGetLinePointer(o, line, NULL);
+	    li = TL_LineRelock(o, line, li);
 	    if (ls + count <= end) {
 		const FieldInfo *fi = &li->LI_firstField + (fields - 1);
 
@@ -65,6 +65,7 @@ void InvertRange(optr o, dword start, dword end)
 		GrFillRect(g, left, (sword) ((top + 0xff) >> 8), right,
 			   (sword) ((top + hgt + 0xff) >> 8));
 	}
+	TL_LineUnlock(o, li);
 	top += hgt;
 	ls += count;
     }

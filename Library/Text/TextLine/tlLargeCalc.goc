@@ -1,0 +1,27 @@
+/*
+ * tlLargeCalc.goc -- after tlLargeCalc.asm: LargeLineAddField and
+ * LargeLineTruncateFields (the line resized to its fields; the asm's
+ * LargeLineCalculate locks the line around CommonLineCalculate, which
+ * tlCommonCalc.goc does itself).
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+
+/* the line with fields fields; the new fields are cleared */
+void LargeLineAddField(optr o, dword line, word fields)
+{
+    VMFileHandle f = T_GetVMFile(o);
+    word old, size = TL_LINE_SIZE(fields);
+    LineInfo *li = LargeGetLinePointer(o, line, &old);
+
+    LargeReleaseLineBlock(li);
+    if (old == size)
+	return;
+    HugeArrayResize(f, VT(o)->VTI_lines, line, size);
+    if (size > old) {
+	li = LargeGetLinePointer(o, line, NULL);
+	memset((byte *) li + old, 0, size - old);
+	HugeArrayDirty(li);
+	LargeReleaseLineBlock(li);
+    }
+}

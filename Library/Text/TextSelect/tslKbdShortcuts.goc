@@ -34,12 +34,11 @@ Boolean TSL_IsWordPart(optr o, dword offset)
 dword TSL_LineCursorEnd(optr o, dword line)
 {
     dword start = TL_LineToOffsetStart(o, line);
-    const LineInfo *li = SmallGetLinePointer(o, line, NULL);
-    dword count = TL_LineGetCharCount(li);
+    dword count = TL_LineGetChars(o, line);
 
     if (!count)
 	return start;
-    if ((li->LI_flags & (LF_ENDS_IN_CR | LF_ENDS_IN_COLUMN_BREAK |
+    if ((TL_LineGetFlags(o, line) & (LF_ENDS_IN_CR | LF_ENDS_IN_COLUMN_BREAK |
 			 LF_ENDS_IN_SECTION_BREAK)) ||
 	line + 1 < TL_LineGetCount(o))
 	return start + count - 1;
@@ -275,8 +274,7 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 	/* FindNextLineEdge: of the line the offset starts or is on */
 	off = TSL_SelectGetAdjustPosition(o, TRUE);
 	line = TL_LineFromOffset(o, off, FALSE, &off);
-	FakeSelectionAdjust(o, off + TL_LineGetCharCount(
-					SmallGetLinePointer(o, line, NULL)));
+	FakeSelectionAdjust(o, off + TL_LineGetChars(o, line));
 	break;
     case VTKF_DELETE_BACKWARD_CHAR:
 	if (range || start)
@@ -301,13 +299,10 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 	if (!range) {
 	    /* to the line's carriage return; at it, or on a line that
 	     * was wrapped, to the next line */
-	    const LineInfo *li;
-
 	    line = TSL_GetCursorLine(o);
 	    off = TL_LineToOffsetStart(o, line);
-	    li = SmallGetLinePointer(o, line, NULL);
-	    end = off + TL_LineGetCharCount(li);
-	    if ((li->LI_flags & LF_ENDS_IN_CR) && start < end - 1)
+	    end = off + TL_LineGetChars(o, line);
+	    if ((TL_LineGetFlags(o, line) & LF_ENDS_IN_CR) && start < end - 1)
 		end--;
 	}
 	DeleteRange(o, start, end);
@@ -364,14 +359,16 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 /* TSL_GetCursorLine: the line the cursor is on */
 dword TSL_GetCursorLine(optr o)
 {
-    return TL_LineFromPosition(o, VT(o)->VTI_cursorPos.P_y, NULL);
+    return TL_LineFromPosition(o, VT(o)->VTI_cursorRegion,
+			       VT(o)->VTI_cursorPos.P_y, NULL);
 }
 
 /* TSL_GetCursorLineBLOAndHeight: the baseline and height of the cursor's
  * line */
 void TSL_GetCursorLineBLOAndHeight(optr o, WBFixed *blo, WBFixed *hgt)
 {
-    TL_LineFromPositionGetBLOAndHeight(o, VT(o)->VTI_cursorPos.P_y, blo,
+    TL_LineFromPositionGetBLOAndHeight(o, VT(o)->VTI_cursorRegion,
+				       VT(o)->VTI_cursorPos.P_y, blo,
 				       hgt);
 }
 

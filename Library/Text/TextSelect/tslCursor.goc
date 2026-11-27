@@ -47,7 +47,7 @@ void CursorToggle(optr o)
 	ProcGetLibraryEntry(UserGetSpecificUI(), SPIR_DRAW_TEXT_CURSOR);
     if (!r)
 	return;
-    blo = SmallGetLinePointer(o, TSL_GetCursorLine(o), NULL)->LI_blo.WBF_int;
+    blo = TL_LineGetBLO(o, TSL_GetCursorLine(o)).WBF_int;
     t = VT(o);
     v = (VisInstance *) t;
     g = t->VTI_gstate;

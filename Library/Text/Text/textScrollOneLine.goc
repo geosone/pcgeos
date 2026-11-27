@@ -60,7 +60,7 @@ void TextScrollOneLine(optr o, dword offset)
     if (offset > size)
 	offset = size;
     /* where the line starts and how wide its text is */
-    left = SmallGetLinePointer(o, 0, NULL)->LI_adjustment;
+    left = TL_LineGetLeftEdge(o, 0);
     (void) TL_LineTextPosition(o, 0, 0x7fff, size, &text, NULL);
     off = (sword) VT(o)->VTI_leftOffset;
     if (text < display) {
@@ -103,7 +103,7 @@ void TextScrollOneLine(optr o, dword offset)
 	return;
     x = (sword) (position - pself->VI_bounds.R_left - pself->VTI_lrMargin -
 		 (sword) pself->VTI_leftOffset -
-		 SmallGetLinePointer(oself, 0, NULL)->LI_adjustment);
+		 TL_LineGetLeftEdge(oself, 0));
     off = TL_LineTextPosition(oself, 0, x, TEXT_ADDRESS_PAST_END, &pos,
 			      NULL);
     TextScrollOneLine(oself, off);

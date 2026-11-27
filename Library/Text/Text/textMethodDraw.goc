@@ -63,12 +63,16 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
     l->LICL_line = line;
     l->LICL_lineStart = start;
     TextClearBehindLine(l, top, flags, haveDrawn);
-    li = SmallGetLinePointer(o, line, NULL);
-    if (!TEXT_WBF(&li->LI_hgt))
+    li = TL_LineLock(o, line, NULL);
+    if (!TEXT_WBF(&li->LI_hgt)) {
+	TL_LineUnlock(o, li);
 	return;
+    }
     TextSize(o, &width, &height);
-    if (!(flags & TCBF_PRINT))
+    if (!(flags & TCBF_PRINT) && (li->LI_flags & LF_NEEDS_DRAW)) {
 	li->LI_flags &= ~LF_NEEDS_DRAW;
+	TL_LineDirty(o, li);
+    }
 
     for (f = 0; f < fields; f++) {
 	const FieldInfo *fi;
@@ -76,7 +80,7 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
 	dword off = start;
 	WWFixedAsDWord pad = 0;
 
-	li = SmallGetLinePointer(o, line, NULL);
+	li = TL_LineRelock(o, line, li);
 	fi = &li->LI_firstField + f;
 	n = fi->FI_nChars;
 	start += n;
@@ -86,9 +90,9 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
 						(sword) (top >> 8), off);
 
 	    if (leader != TL_NONE)
-		DrawTabLeader(l, SmallGetLinePointer(o, line, NULL), f,
+		DrawTabLeader(l, TL_LineRelock(o, line, li), f,
 			      (sword) (top >> 8), off, leader);
-	    li = SmallGetLinePointer(o, line, NULL);
+	    li = TL_LineRelock(o, line, li);
 	    fi = &li->LI_firstField + f;
 	    if (n) {
 		n--;
@@ -128,6 +132,7 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
 	GrDrawTextField(g, &v);
 	TS_ReleaseTextPtr(&lock);
     }
+    TL_LineUnlock(o, li);
     GrSetTextSpacePad(g, 0);
 }
 
@@ -157,13 +162,15 @@ void TextDraw(optr o, byte flags, Boolean onlyMarked)
 	GrGetMaskBounds(g, &mask);
     n = TL_LineGetCount(o);
     for (line = 0; line < n; line++) {
-	const LineInfo *li = SmallGetLinePointer(o, line, NULL);
+	const LineInfo *li = TL_LineLock(o, line, NULL);
 	sdword hgt = TEXT_WBF(&li->LI_hgt);
 	dword count = TL_LineGetCharCount(li);
+	LineFlags lf = li->LI_flags;
 	Boolean draw;
 
+	TL_LineUnlock(o, li);
 	if (onlyMarked)
-	    draw = (li->LI_flags & LF_NEEDS_DRAW) != 0;
+	    draw = (lf & LF_NEEDS_DRAW) != 0;
 	else if (all)
 	    draw = TRUE;
 	else

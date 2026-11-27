@@ -1,6 +1,7 @@
 /*
- * tlSmallLineInfo.goc -- after tlSmallLineInfo.asm: SmallLineGetCount,
- * SmallLineGetTop, SmallLineGetLeftEdge.
+ * tlSmallLineInfo.goc -- after tlSmallLineInfo.asm: SmallLineGetCount.
+ * (The tops, heights and positions of lines are common to small and
+ * large objects: tlExternal.goc.)
  */
 @include "textInt.goh"
 #include <chunkarr.h>
@@ -8,27 +9,4 @@
 dword SmallLineGetCount(optr o)
 {
     return VT(o)->VTI_lines ? ChunkArrayGetCount(Lines(o)) : 0;
-}
-
-/* SmallLineGetTop: the top of a line from the top of the text */
-WBFixed SmallLineGetTop(optr o, dword line)
-{
-    sdword top = 0;
-    dword i;
-    WBFixed w;
-
-    for (i = 0; i < line; i++) {
-	const LineInfo *li = SmallGetLinePointer(o, i, NULL);
-
-	top += ((sdword) li->LI_hgt.WBF_int << 8) + li->LI_hgt.WBF_frac;
-    }
-    w.WBF_int = (word) (top >> 8);
-    w.WBF_frac = (byte) top;
-    return w;
-}
-
-/* SmallLineGetLeftEdge: where a line starts (its adjustment) */
-sword SmallLineGetLeftEdge(optr o, dword line)
-{
-    return SmallGetLinePointer(o, line, NULL)->LI_adjustment;
 }

@@ -51,7 +51,7 @@ void TextRecalc(optr o, dword start, dword inserted, dword deleted)
 	    TL_LineInsert(o, line, 1);
 	    l.LICL_calcFlags |= CF_FORCE_CHANGED;
 	} else
-	    oldCount = TL_LineGetCharCount(SmallGetLinePointer(o, line, NULL));
+	    oldCount = TL_LineGetChars(o, line);
 	/* a line below a change of height, or other text in it */
 	if (l.LICL_insertedSpace ||
 	    (oldStart >= start + deleted &&
@@ -102,11 +102,12 @@ void TextCompleteRecalc(optr o)
     retValue->VTGLIRV_byteCount = 0;
     if (!pself->VTI_lines || vtglip->VTGLIP_line >= TL_LineGetCount(oself))
 	return TRUE;
-    li = SmallGetLinePointer(oself, vtglip->VTGLIP_line, &size);
+    li = TL_LineLock(oself, vtglip->VTGLIP_line, &size);
     if (size > vtglip->VTGLIP_bsize)
 	size = vtglip->VTGLIP_bsize;
     retValue->VTGLIRV_byteCount = size;
     memcpy(vtglip->VTGLIP_buffer, li, size);
+    TL_LineUnlock(oself, li);
     return FALSE;
 }
 
@@ -124,7 +125,6 @@ void TextCompleteRecalc(optr o)
 	return TRUE;
     params->VTGLOAFP_offset = TL_LineToOffsetStart(oself,
 						   params->VTGLOAFP_line);
-    params->VTGLOAFP_flags = SmallGetLinePointer(oself, params->VTGLOAFP_line,
-					NULL)->LI_flags;
+    params->VTGLOAFP_flags = TL_LineGetFlags(oself, params->VTGLOAFP_line);
     return FALSE;
 }

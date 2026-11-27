@@ -20,6 +20,7 @@
 @include "textInt.goh"
 #include <font.h>
 #include <char.h>
+#include <hugearr.h>
 
 #define PA(l)	((l)->LICL_theParaAttr.VTMPA_paraAttr)
 #define EXT(v)	((v)->TOCV_ext)
@@ -35,9 +36,26 @@ static word Rnd(sdword v)
     return (word) ((v + 0x80) >> 8);
 }
 
+/* the line calculated: a large object's stays locked for the calc
+ * (LargeLineCalculate), a small object's is looked up anew */
 static LineInfo *Line(LICL_vars *l)
 {
+    if (l->LICL_linePtr)
+	return l->LICL_linePtr;
     return SmallGetLinePointer(l->LICL_object, l->LICL_line, NULL);
+}
+
+/* the line with fields fields (a large one locked again) */
+static void AddField(LICL_vars *l, word fields)
+{
+    optr o = l->LICL_object;
+
+    if (l->LICL_linePtr) {
+	LargeReleaseLineBlock(l->LICL_linePtr);
+	TL_LineAddField(o, l->LICL_line, fields);
+	l->LICL_linePtr = LargeGetLinePointer(o, l->LICL_line, NULL);
+    } else
+	TL_LineAddField(o, l->LICL_line, fields);
 }
 
 static FieldInfo *Field(LICL_vars *l, word field)
@@ -361,10 +379,11 @@ static void AdjustForLeading(LICL_vars *l, TOC_vars *v)
     if (l->LICL_calcFlags & CF_SAVE_RESULTS) {
 	word blo = leading;
 
-	prev = SmallGetLinePointer(l->LICL_object, l->LICL_line - 1, NULL);
+	prev = TL_LineLock(l->LICL_object, l->LICL_line - 1, NULL);
 	if (prev->LI_flags & LF_ENDS_PARAGRAPH)
 	    blo = Rnd(((sdword) blo << 8) + PA(l).VTPA_spaceOnBottom);
 	prevDesc = (word) (Rnd(TEXT_WBF(&prev->LI_hgt)) - Rnd(TEXT_WBF(&prev->LI_blo)));
+	TL_LineUnlock(l->LICL_object, prev);
 	EXT(v).TOCE_lineBLO.WBF_int = (word) (blo - prevDesc);
 	EXT(v).TOCE_lineBLO.WBF_frac = 0;
     }
@@ -571,6 +590,8 @@ void CommonLineCalculate(LICL_vars *l, LineFlags flags)
 	    VarDataSizePtr(overflow) ? *overflow : 0;
     }
     l->LICL_lineStart = l->LICL_range.VTR_start;
+    l->LICL_linePtr = (VT(o)->VTI_storageFlags & VTSF_LARGE) ?
+	LargeGetLinePointer(o, l->LICL_line, NULL) : NULL;
     l->LICL_oldLineHeight = Line(l)->LI_hgt;
     old = TL_LineGetFieldCount(o, l->LICL_line);
 
@@ -589,14 +610,14 @@ void CommonLineCalculate(LICL_vars *l, LineFlags flags)
 	/* AddFieldToLine */
 	field++;
 	if (field >= TL_LineGetFieldCount(o, l->LICL_line)) {
-	    SmallLineAddField(o, l->LICL_line, (word) (field + 1));
+	    AddField(l, (word) (field + 1));
 	    l->LICL_calcFlags |= CF_LINE_CHANGED;
 	}
 	v.TOCV_ext.TOCE_otherFlags &= ~TOCOF_IS_FIRST_FIELD;
     }
     /* TruncateLineAtPosition */
     if (TL_LineGetFieldCount(o, l->LICL_line) != (word) (field + 1)) {
-	SmallLineAddField(o, l->LICL_line, (word) (field + 1));
+	AddField(l, (word) (field + 1));
 	l->LICL_calcFlags |= CF_LINE_CHANGED;
     }
     (void) old;
@@ -630,4 +651,9 @@ void CommonLineCalculate(LICL_vars *l, LineFlags flags)
     }
     if (l->LICL_calcFlags & (CF_LINE_CHANGED | CF_FORCE_CHANGED))
 	li->LI_flags |= LF_NEEDS_DRAW;
+    if (l->LICL_linePtr) {
+	HugeArrayDirty(l->LICL_linePtr);
+	LargeReleaseLineBlock(l->LICL_linePtr);
+	l->LICL_linePtr = NULL;
+    }
 }

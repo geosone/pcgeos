@@ -5,31 +5,184 @@
  * TL_LineToOffsetStart, TL_LineFromOffset, TL_LineGetTop,
  * TL_LineFromPositionGetBLOAndHeight, TL_LineGetHeight,
  * TL_LineGetParaCount, TL_LineToPosition, TL_LineFromExtPosition,
- * TL_LineToExtPosition, TL_LinePrevious, TL_LineNext.
+ * TL_LineToExtPosition, TL_LinePrevious, TL_LineNext; the access to a
+ * line of a small or a large object (TL_LineLock).
  */
 @include "textInt.goh"
+#include <hugearr.h>
+
+#define LARGE(o)	(VT(o)->VTI_storageFlags & VTSF_LARGE)
+
+/* ---------------------------------------------------------------------
+ * Access to a line (CallLineHandler: the small or the large variant)
+ * ------------------------------------------------------------------- */
+
+/* the line locked (a small object's: until its lines change), *size its
+ * size with the fields */
+LineInfo *TL_LineLock(optr o, dword line, word *size)
+{
+    return LARGE(o) ? LargeGetLinePointer(o, line, size)
+		    : SmallGetLinePointer(o, line, size);
+}
+
+/* a locked line again where its block may have moved: a small object's
+ * pointer anew, a large object's stays */
+LineInfo *TL_LineRelock(optr o, dword line, LineInfo *li)
+{
+    return LARGE(o) ? li : SmallGetLinePointer(o, line, NULL);
+}
+
+void TL_LineUnlock(optr o, const LineInfo *li)
+{
+    if (LARGE(o))
+	LargeReleaseLineBlock(li);
+}
+
+/* a locked line changed */
+void TL_LineDirty(optr o, LineInfo *li)
+{
+    if (LARGE(o))
+	HugeArrayDirty(li);
+    else
+	ObjMarkDirty(o);
+}
+
+/* the line with fields fields; the new fields are cleared */
+void TL_LineAddField(optr o, dword line, word fields)
+{
+    if (LARGE(o))
+	LargeLineAddField(o, line, fields);
+    else
+	SmallLineAddField(o, line, fields);
+}
+
+void TL_LineStorageCreate(optr o)
+{
+    if (LARGE(o))
+	LargeStorageCreate(o);
+    else
+	SmallStorageCreate(o);
+}
+
+void TL_LineStorageDestroy(optr o)
+{
+    if (LARGE(o))
+	LargeStorageDestroy(o);
+    else
+	SmallStorageDestroy(o);
+}
+
+dword TL_LineGetCount(optr o)
+{
+    return LARGE(o) ? LargeLineGetCount(o) : SmallLineGetCount(o);
+}
+
+void TL_LineInsert(optr o, dword line, word count)
+{
+    if (LARGE(o))
+	LargeLineInsert(o, line, count);
+    else
+	SmallLineInsert(o, line, count);
+}
+
+void TL_LineDelete(optr o, dword line, word count)
+{
+    if (LARGE(o))
+	LargeLineDelete(o, line, count);
+    else
+	SmallLineDelete(o, line, count);
+}
+
+word TL_LineGetFieldCount(optr o, dword line)
+{
+    word size;
+
+    TL_LineUnlock(o, TL_LineLock(o, line, &size));
+    return (word) ((size - offsetof(LineInfo, LI_firstField)) /
+		   sizeof(FieldInfo));
+}
+
+/* CommonLineGetFlags, CommonLineGetHeight, CommonLineGetBLO,
+ * LI_adjustment (SmallLineGetLeftEdge), the line's characters */
+LineFlags TL_LineGetFlags(optr o, dword line)
+{
+    const LineInfo *li = TL_LineLock(o, line, NULL);
+    LineFlags f = li->LI_flags;
+
+    TL_LineUnlock(o, li);
+    return f;
+}
+
+WBFixed TL_LineGetHeight(optr o, dword line)
+{
+    const LineInfo *li = TL_LineLock(o, line, NULL);
+    WBFixed h = li->LI_hgt;
+
+    TL_LineUnlock(o, li);
+    return h;
+}
+
+WBFixed TL_LineGetBLO(optr o, dword line)
+{
+    const LineInfo *li = TL_LineLock(o, line, NULL);
+    WBFixed b = li->LI_blo;
+
+    TL_LineUnlock(o, li);
+    return b;
+}
+
+sword TL_LineGetLeftEdge(optr o, dword line)
+{
+    const LineInfo *li = TL_LineLock(o, line, NULL);
+    sword a = li->LI_adjustment;
+
+    TL_LineUnlock(o, li);
+    return a;
+}
+
+dword TL_LineGetChars(optr o, dword line)
+{
+    const LineInfo *li = TL_LineLock(o, line, NULL);
+    dword n = TL_LineGetCharCount(li);
+
+    TL_LineUnlock(o, li);
+    return n;
+}
+
+/* (a line's sizes in 1/256) */
+static sdword Hgt(optr o, dword line)
+{
+    WBFixed h = TL_LineGetHeight(o, line);
+
+    return ((sdword) h.WBF_int << 8) + h.WBF_frac;
+}
+
+/* ---------------------------------------------------------------------
+ * Lines in their regions (the lines of a region follow each other from
+ * its first line, at its first offset; a small object has one region)
+ * ------------------------------------------------------------------- */
 
 /*
- * TL_LineFromPosition (SmallLineFromPositionGetInfo): the line at a
- * height in the text; the last one below them all (*below set)
+ * TL_LineFromPosition (Small/LargeLineFromPositionGetInfo,
+ * CommonLineFromPosCallback): the line of the region at a height in
+ * it; the last one if below them all (*below set)
  */
-dword TL_LineFromPosition(optr o, sword y, Boolean *below)
+dword TL_LineFromPosition(optr o, word region, sword y, Boolean *below)
 {
-    dword n = TL_LineGetCount(o), i;
+    dword first = TR_RegionGetTopLine(o, region),
+	  n = TR_RegionGetLineCount(o, region), i;
     sdword pos = (sdword) y << 8;
 
     if (below)
 	*below = FALSE;
     for (i = 0; i < n; i++) {
-	const LineInfo *li = SmallGetLinePointer(o, i, NULL);
-
-	pos -= ((sdword) li->LI_hgt.WBF_int << 8) + li->LI_hgt.WBF_frac;
+	pos -= Hgt(o, first + i);
 	if (pos < 0)
-	    return i;
+	    return first + i;
     }
     if (below)
 	*below = TRUE;
-    return n ? n - 1 : 0;
+    return n ? first + n - 1 : first;
 }
 
 void TL_LineCalculate(LICL_vars *l, LineFlags flags)
@@ -42,40 +195,6 @@ dword TL_LineTextPosition(optr o, dword line, sword pixel, dword stop, sword *x,
     return CommonLineTextPosition(o, line, pixel, stop, x, over);
 }
 
-void TL_LineStorageCreate(optr o)
-{
-    /* Port32: a large object has no lines yet (its regions, its lines
-     * in huge arrays) */
-    if (VT(o)->VTI_storageFlags & VTSF_LARGE)
-	return;
-    SmallStorageCreate(o);
-}
-
-void TL_LineStorageDestroy(optr o)
-{
-    SmallStorageDestroy(o);
-}
-
-dword TL_LineGetCount(optr o)
-{
-    return SmallLineGetCount(o);
-}
-
-void TL_LineInsert(optr o, dword line, word count)
-{
-    SmallLineInsert(o, line, count);
-}
-
-void TL_LineDelete(optr o, dword line, word count)
-{
-    SmallLineDelete(o, line, count);
-}
-
-LineFlags TL_LineGetFlags(optr o, dword line)
-{
-    return SmallLineGetFlags(o, line);
-}
-
 /* TL_LineClearBehind: behind a line its backgrounds */
 void TL_LineClearBehind(LICL_vars *l, sdword top, byte flags,
 			Boolean haveDrawn)
@@ -83,41 +202,72 @@ void TL_LineClearBehind(LICL_vars *l, sdword top, byte flags,
     CommonLineClearBehind(l, top, flags, haveDrawn);
 }
 
+/* TL_LineToOffsetStart (Small/LargeLineToOffsetStart): where a line's
+ * text starts */
 dword TL_LineToOffsetStart(optr o, dword line)
 {
-    return SmallLineToOffsetStart(o, line);
+    dword first, off, i;
+
+    (void) TR_RegionFromLineGetStartLineAndOffset(o, line, &first, &off);
+    for (i = first; i < line; i++)
+	off += TL_LineGetChars(o, i);
+    return off;
 }
 
+/*
+ * TL_LineFromOffset (Small/LargeLineFromOffsetGetStart): the line an
+ * offset is on; *start where that line starts.  An offset where one
+ * line ends and the next starts is on the first of them if first is
+ * set, else on the second.
+ */
 dword TL_LineFromOffset(optr o, dword offset, Boolean first, dword *start)
 {
-    return SmallLineFromOffsetGetStart(o, offset, first, start);
+    dword n = TL_LineGetCount(o), i, off, count;
+
+    (void) TR_RegionFromOffsetGetStartLineAndOffset(o, offset, &i, &off);
+    if (offset < off)
+	/* (the end of the region before: its last line) */
+	(void) TR_RegionFromOffsetGetStartLineAndOffset(o, offset - 1, &i,
+							&off);
+    for (; i < n; i++) {
+	count = TL_LineGetChars(o, i);
+	if (offset < off + count || i == n - 1 ||
+	    (offset == off + count && first))
+	    break;
+	off += count;
+    }
+    if (start)
+	*start = off;
+    return i;
 }
 
+/* TL_LineGetTop (LargeLineGetTopLeftAndStart): the top of a line in
+ * its region */
 WBFixed TL_LineGetTop(optr o, dword line)
 {
-    return SmallLineGetTop(o, line);
+    dword first, off, i;
+    sdword top = 0;
+    WBFixed w;
+
+    (void) TR_RegionFromLineGetStartLineAndOffset(o, line, &first, &off);
+    for (i = first; i < line; i++)
+	top += Hgt(o, i);
+    w.WBF_int = (word) (top >> 8);
+    w.WBF_frac = (byte) top;
+    return w;
 }
 
 /*
  * TL_LineFromPositionGetBLOAndHeight: the baseline and the height of
- * the line at a height in the text (the region's: small objects have
- * one)
+ * the line at a height in a region
  */
-void TL_LineFromPositionGetBLOAndHeight(optr o, sword y, WBFixed *blo,
-					WBFixed *hgt)
+void TL_LineFromPositionGetBLOAndHeight(optr o, word region, sword y,
+					WBFixed *blo, WBFixed *hgt)
 {
-    const LineInfo *li = SmallGetLinePointer(o,
-					      TL_LineFromPosition(o, y, NULL),
-					      NULL);
+    dword line = TL_LineFromPosition(o, region, y, NULL);
 
-    *blo = li->LI_blo;
-    *hgt = li->LI_hgt;
-}
-
-/* TL_LineGetHeight: the height of a line */
-WBFixed TL_LineGetHeight(optr o, dword line)
-{
-    return SmallGetLinePointer(o, line, NULL)->LI_hgt;
+    *blo = TL_LineGetBLO(o, line);
+    *hgt = TL_LineGetHeight(o, line);
 }
 
 /* TL_LineGetParaCount (CommonLineGetParaCountCallback): the paragraphs:
@@ -127,7 +277,7 @@ dword TL_LineGetParaCount(optr o)
     dword n = TL_LineGetCount(o), i, count = 0;
 
     for (i = 0; i < n; i++)
-	if (SmallGetLinePointer(o, i, NULL)->LI_flags & LF_STARTS_PARAGRAPH)
+	if (TL_LineGetFlags(o, i) & LF_STARTS_PARAGRAPH)
 	    count++;
     return count;
 }
@@ -135,7 +285,13 @@ dword TL_LineGetParaCount(optr o)
 /* TL_LineToPosition: a line's left edge and top in its region */
 void TL_LineToPosition(optr o, dword line, sword *x, sword *y)
 {
-    SmallLineToPosition(o, line, x, y);
+    WBFixed top = TL_LineGetTop(o, line);
+
+    *x = TL_LineGetLeftEdge(o, line);
+    /* (the small variant truncates, the large one rounds up: ceilwbf) */
+    *y = (sword) top.WBF_int;
+    if (LARGE(o) && top.WBF_frac)
+	(*y)++;
 }
 
 /* the part of a dword in a word: below 0 is 0, beyond is 0xffff */
@@ -162,7 +318,7 @@ dword TL_LineFromExtPosition(optr o, sdword x, sdword y, Boolean *below)
 	region = VT(o)->VTI_cursorRegion;
     TR_RegionGetTopLeft(o, region, &tl);
     /* (the asm's x within the region: a line does not depend on it) */
-    return TL_LineFromPosition(o, ClampWord(y - tl.PD_y), below);
+    return TL_LineFromPosition(o, region, ClampWord(y - tl.PD_y), below);
 }
 
 /* TL_LineToExtPosition: a line's left edge and top in the document */

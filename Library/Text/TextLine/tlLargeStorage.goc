@@ -1,0 +1,60 @@
+/*
+ * tlLargeStorage.goc -- after tlLargeStorage.asm: LargeStorageCreate,
+ * LargeStorageDestroy, LargeLineInsert, LargeLineDelete.
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+
+/* a new line (initLine, tInitLine): one field, empty */
+static void InitLine(LineInfo *li)
+{
+    CommonInitLineAndField(li);
+}
+
+/* LargeStorageCreate: the huge array with one line */
+void LargeStorageCreate(optr o)
+{
+    VMFileHandle f = T_GetVMFile(o);
+    VMBlockHandle lines = HugeArrayCreate(f, 0, 0);
+    byte buf[TL_LINE_SIZE(1)];
+
+    InitLine((LineInfo *) buf);
+    HugeArrayAppend(f, lines, TL_LINE_SIZE(1), buf);
+    VT(o)->VTI_lines = lines;
+    ObjMarkDirty(o);
+}
+
+/* LargeStorageDestroy */
+void LargeStorageDestroy(optr o)
+{
+    VisTextInstance *t = VT(o);
+
+    if (t->VTI_lines) {
+	HugeArrayDestroy(T_GetVMFile(o), t->VTI_lines);
+	VT(o)->VTI_lines = 0;
+	ObjMarkDirty(o);
+    }
+}
+
+/* LargeLineInsert: count new lines before a line (or at the end) */
+void LargeLineInsert(optr o, dword line, word count)
+{
+    VMFileHandle f = T_GetVMFile(o);
+    VMBlockHandle lines = VT(o)->VTI_lines;
+    byte buf[TL_LINE_SIZE(1)];
+
+    InitLine((LineInfo *) buf);
+    while (count--) {
+	if (line >= HugeArrayGetCount(f, lines))
+	    HugeArrayAppend(f, lines, TL_LINE_SIZE(1), buf);
+	else
+	    HugeArrayInsert(f, lines, TL_LINE_SIZE(1), line, buf);
+	line++;
+    }
+}
+
+/* LargeLineDelete */
+void LargeLineDelete(optr o, dword line, word count)
+{
+    HugeArrayDelete(T_GetVMFile(o), VT(o)->VTI_lines, count, line);
+}

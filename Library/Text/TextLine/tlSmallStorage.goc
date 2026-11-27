@@ -62,15 +62,6 @@ void SmallLineDelete(optr o, dword line, word count)
     ChunkArrayDeleteRange(Lines(o), (word) line, count);
 }
 
-word TL_LineGetFieldCount(optr o, dword line)
-{
-    word size;
-
-    (void) SmallGetLinePointer(o, line, &size);
-    return (word) ((size - offsetof(LineInfo, LI_firstField)) /
-		   sizeof(FieldInfo));
-}
-
 dword TL_LineGetCharCount(const LineInfo *li)
 {
     return ((dword) (byte) li->LI_count.WAAH_high << 16) |

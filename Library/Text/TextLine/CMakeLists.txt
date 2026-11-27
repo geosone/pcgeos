@@ -3,11 +3,12 @@ geos_sources(text_goc
   tlSmallStorage.goc
   tlSmallCalc.goc
   tlSmallUtils.goc
+  tlLargeStorage.goc
+  tlLargeCalc.goc
+  tlLargeUtils.goc
+  tlLargeLineInfo.goc
   tlCommonInit.goc
-  tlSmallOffset.goc
   tlSmallLineInfo.goc
-  tlSmallPosition.goc
-  tlSmallFlags.goc
   tlBorder.goc
   tlTabLine.goc
   tlTabLeader.goc

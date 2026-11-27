@@ -62,6 +62,24 @@ word TR_RegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
     return 0;
 }
 
+/* TR_RegionGetLineCount: the region's lines (SmallRegionGetLineCount:
+ * all of them) */
+dword TR_RegionGetLineCount(optr o, word region)
+{
+    (void) region;
+    return TL_LineGetCount(o);
+}
+
+/* TR_RegionFromLineGetStartLineAndOffset: the region of a line, its
+ * first line and offset */
+word TR_RegionFromLineGetStartLineAndOffset(optr o, dword line,
+					    dword *first, dword *start)
+{
+    (void) line;
+    SmallRegionFromOffsetGetStartLineAndOffset(o, first, start);
+    return 0;
+}
+
 /* TR_RegionFromLine: the region of a line */
 word TR_RegionFromLine(optr o, dword line)
 {

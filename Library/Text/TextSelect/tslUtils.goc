@@ -22,7 +22,7 @@ void TSL_ConvertOffsetToCoordinate(optr o, dword offset, sword *x, sword *y)
     sword pos;
 
     (void) TL_LineTextPosition(o, line, 0x7fff, offset, &pos, NULL);
-    *x = (sword) (pos + SmallGetLinePointer(o, line, NULL)->LI_adjustment);
+    *x = (sword) (pos + TL_LineGetLeftEdge(o, line));
     *y = (sword) top.WBF_int;
 }
 

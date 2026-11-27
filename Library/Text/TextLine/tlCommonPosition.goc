@@ -66,7 +66,7 @@ dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
 			  sword *x, Boolean *over)
 {
     word size, fields, f;
-    LineInfo *li = SmallGetLinePointer(o, line, &size);
+    LineInfo *li;
     dword cur = TL_LineToOffsetStart(o, line);
     LineFlags flags;
     WWFixedAsDWord pad;
@@ -77,7 +77,7 @@ dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
 
     if (!over)
 	over = &dummy;
-    li = SmallGetLinePointer(o, line, &size);
+    li = TL_LineLock(o, line, &size);
     flags = li->LI_flags;
     pad = ((dword) li->LI_spacePad.WBF_int << 16) |
 	  ((dword) li->LI_spacePad.WBF_frac << 8);
@@ -85,10 +85,10 @@ dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
     *x = 0;
     *over = FALSE;
     if (pixel <= 0)
-	return cur;
+	goto done;
     *over = isOver = TRUE;
     if (stop <= cur)
-	return cur;
+	goto done;
     for (f = 0; ; f++) {
 	if (f == fields) {
 	    /* calcFieldEnd: beyond the last field */
@@ -98,7 +98,7 @@ dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
 			     LF_ENDS_IN_SECTION_BREAK))
 		    cur--;
 		*x = oldEnd;
-		return cur;
+		goto done;
 	    }
 	    f--;
 	    fi = &li->LI_firstField + f;
@@ -111,10 +111,11 @@ dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
 	    /* betweenFields: in the room a tab made */
 	    if ((word) (pixel - oldEnd) <= (word) (fi->FI_position - pixel)) {
 		*x = oldEnd;
-		return cur;
+		goto done;
 	    }
 	    *x = fi->FI_position;
-	    return cur + 1;
+	    cur++;
+	    goto done;
 	}
 	width = fi->FI_width;
 	oldEnd = (sword) (fi->FI_position + width);
@@ -132,10 +133,12 @@ dword CommonLineTextPosition(optr o, dword line, sword pixel, dword stop,
 	cur++;
     if (stop <= cur) {
 	*x = left;
-	return cur;
+	goto done;
     }
     cur += FieldTextPosition(o, cur, stop - cur, (sword) (pixel - left), pad,
 			     x);
     *x = (sword) (*x + left);
+done:
+    TL_LineUnlock(o, li);
     return cur;
 }

@@ -1,0 +1,30 @@
+/*
+ * tlLargeUtils.goc -- after tlLargeUtils.asm: LargeGetLinePointer,
+ * LargeReleaseLineBlock.
+ *
+ * The lines of a large object are a huge array (VTI_lines) of
+ * variable-sized elements in the object's VM file (T_GetVMFile): a
+ * LineInfo with its fields.  A line is locked until it is released.
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+
+/* LargeGetLinePointer: the line locked, *size its size with the fields */
+LineInfo *LargeGetLinePointer(optr o, dword line, word *size)
+{
+    void *p;
+    word s;
+    dword n = HugeArrayLock(T_GetVMFile(o), VT(o)->VTI_lines, line, &p, &s);
+
+    EC_ERROR_IF(!(word) n, -1);
+    (void) n;
+    if (size)
+	*size = s;
+    return p;
+}
+
+/* LargeReleaseLineBlock */
+void LargeReleaseLineBlock(const LineInfo *li)
+{
+    HugeArrayUnlock((void *) li);
+}

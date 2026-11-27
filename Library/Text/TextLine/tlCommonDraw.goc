@@ -30,12 +30,11 @@ word FieldDrawStyleCallback(GDF_vars *v, TextAttr *attr, word offset,
  * TL_LineGetTop, which the caller has at hand) */
 static void ComputeLineBounds(LICL_vars *l, sdword top)
 {
-    const LineInfo *li = SmallGetLinePointer(l->LICL_object, l->LICL_line,
-					     NULL);
+    WBFixed hgt = TL_LineGetHeight(l->LICL_object, l->LICL_line);
     Rectangle *r = &l->LICL_theRect;
 
     r->R_top = (sword) (top >> 8);
-    r->R_bottom = (sword) (r->R_top + ((TEXT_WBF(&li->LI_hgt) + 0xff) >> 8));
+    r->R_bottom = (sword) (r->R_top + ((TEXT_WBF(&hgt) + 0xff) >> 8));
     TR_RegionLeftRight(l->LICL_object, 0, r->R_top,
 		       (word) (r->R_bottom - r->R_top), &r->R_left,
 		       &r->R_right);

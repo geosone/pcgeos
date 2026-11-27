@@ -257,6 +257,26 @@ extern void TL_LineInsert(optr o, dword line, word count);
 extern void TL_LineDelete(optr o, dword line, word count);
 extern void SmallLineAddField(optr o, dword line, word fields);
 extern word TL_LineGetFieldCount(optr o, dword line);
+/* TextLine/tlExternal.goc: a line of a small or a large object locked
+ * (a small object's until its lines change), given back, changed; its
+ * fields; its parts */
+extern LineInfo *TL_LineLock(optr o, dword line, word *size);
+extern void TL_LineUnlock(optr o, const LineInfo *li);
+extern LineInfo *TL_LineRelock(optr o, dword line, LineInfo *li);
+extern void TL_LineDirty(optr o, LineInfo *li);
+extern void TL_LineAddField(optr o, dword line, word fields);
+extern WBFixed TL_LineGetBLO(optr o, dword line);
+extern sword TL_LineGetLeftEdge(optr o, dword line);
+extern dword TL_LineGetChars(optr o, dword line);
+/* TextLine/tlLarge*.goc: the lines of a large object (a huge array) */
+extern LineInfo *LargeGetLinePointer(optr o, dword line, word *size);
+extern void LargeReleaseLineBlock(const LineInfo *li);
+extern void LargeStorageCreate(optr o);
+extern void LargeStorageDestroy(optr o);
+extern void LargeLineInsert(optr o, dword line, word count);
+extern void LargeLineDelete(optr o, dword line, word count);
+extern void LargeLineAddField(optr o, dword line, word fields);
+extern dword LargeLineGetCount(optr o);
 extern dword TL_LineGetCharCount(const LineInfo *li);
 extern void TL_LineSetCharCount(LineInfo *li, dword count);
 extern dword TL_LineToOffsetStart(optr o, dword line);
@@ -274,10 +294,7 @@ extern void TL_LineToExtPosition(optr o, dword line, sdword *x,
 				 sdword *y);
 extern Boolean TL_LinePrevious(optr o, dword *line);
 extern Boolean TL_LineNext(optr o, dword *line);
-/* TextLine/tlSmallLineInfo.goc, tlSmallPosition.goc */
-extern sword SmallLineGetLeftEdge(optr o, dword line);
-extern void SmallLineToPosition(optr o, dword line, sword *x, sword *y);
-extern void TL_LineFromPositionGetBLOAndHeight(optr o, sword y,
+extern void TL_LineFromPositionGetBLOAndHeight(optr o, word region, sword y,
 					       WBFixed *blo, WBFixed *hgt);
 
 /* the state of a calculation (texttext.def) */
@@ -326,6 +343,8 @@ typedef struct {
     sword		*LICL_borderOpposite;	/* by (TextDrawBorder) */
     VisTextParaBorderFlags LICL_prevLineBF;	/* the border before */
     VisTextParaBorderFlags LICL_nextLineBF;	/* and after the line */
+    LineInfo		*LICL_linePtr;	/* Port32: a large object's line
+					 * locked by its calc */
 } LICL_vars;
 
 /* Text/textBGBorder.goc: a paragraph's border (textline.def) */
@@ -364,7 +383,6 @@ extern void CommonLineClearArea(LICL_vars *l, sdword top, byte flags,
 extern void TL_LineClearBehind(LICL_vars *l, sdword top, byte flags,
 			       Boolean haveDrawn);
 extern LineFlags TL_LineGetFlags(optr o, dword line);
-extern LineFlags SmallLineGetFlags(optr o, dword line);
 
 /* TextLine/tlCommonCalc.goc */
 extern void TL_LineCalculate(LICL_vars *l, LineFlags flags);
@@ -416,6 +434,9 @@ extern dword TR_RegionGetTopLine(optr o, word region);
 extern word TR_RegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
 						dword *line, dword *start);
 extern word TR_RegionFromLine(optr o, dword line);
+extern dword TR_RegionGetLineCount(optr o, word region);
+extern word TR_RegionFromLineGetStartLineAndOffset(optr o, dword line,
+						dword *first, dword *start);
 extern word TR_RegionFromPoint(optr o, sdword x, sdword y);
 extern Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end);
 
@@ -423,7 +444,8 @@ extern Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end);
  * edge, LI_adjustment), the line at a height */
 extern dword TL_LineTextPosition(optr o, dword line, sword pixel,
 				 dword stop, sword *x, Boolean *over);
-extern dword TL_LineFromPosition(optr o, sword y, Boolean *below);
+extern dword TL_LineFromPosition(optr o, word region, sword y,
+				 Boolean *below);
 
 /* TextSelect/tslCursor.goc: the cursor */
 extern Boolean TextCheckCanDraw(optr o);
@@ -453,9 +475,6 @@ void SmallStorageDestroy(optr o);
 dword SmallLineGetCount(optr o);
 void SmallLineInsert(optr o, dword line, word count);
 void SmallLineDelete(optr o, dword line, word count);
-dword SmallLineToOffsetStart(optr o, dword line);
-dword SmallLineFromOffsetGetStart(optr o, dword offset, Boolean first, dword *start);
-WBFixed SmallLineGetTop(optr o, dword line);
 
 /* taAttr.goc (for taParaAttr.goc) */
 void SelectTab(optr o, word pos);

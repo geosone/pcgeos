@@ -1,0 +1,15 @@
+/*
+ * tlLargeLineInfo.goc -- after tlLargeLineInfo.asm: LargeLineGetCount.
+ * (The tops, heights and positions of lines are common to small and
+ * large objects: tlExternal.goc, from the region's first line.)
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+
+dword LargeLineGetCount(optr o)
+{
+    VisTextInstance *t = VT(o);
+
+    return t->VTI_lines ? HugeArrayGetCount(T_GetVMFile(o), t->VTI_lines)
+			: 0;
+}
