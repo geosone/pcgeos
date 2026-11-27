@@ -1,0 +1,18 @@
+/*
+ * trLargeGState.goc -- after trLargeGState.asm:
+ * LargeRegionTransformGState.
+ */
+@include "textInt.goh"
+
+/* LargeRegionTransformGState: the gstate's default transformation (the
+ * document's), moved to the region's top left (the asm sets no clip
+ * rectangle either) */
+void LargeRegionTransformGState(optr o, word region)
+{
+    GStateHandle g = VT(o)->VTI_gstate;
+    PointDWord tl;
+
+    GrSetDefaultTransform(g);
+    LargeRegionGetRegionTopLeft(o, region, &tl);
+    GrApplyTranslationDWord(g, tl.PD_x, tl.PD_y);
+}

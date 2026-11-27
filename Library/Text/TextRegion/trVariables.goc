@@ -8,3 +8,13 @@
 
 /* trLargeText.goc */
 @extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES;
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_SET_DISPLAY_MODE;
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_SET_DRAFT_REGION_SIZE;
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_GET_DRAFT_REGION_SIZE;
+@extern method VisLargeTextClass, MSG_META_CONTENT_VIEW_SIZE_CHANGED;
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_APPEND_REGION;
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_REGION_IS_LAST;
+@extern method VisLargeTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID;
+@extern method VisLargeTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY;
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_GET_REGION_COUNT;
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_GET_REGION_POS;

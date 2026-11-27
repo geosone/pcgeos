@@ -1,0 +1,274 @@
+/*
+ * trLargeInfo.goc -- after trLargeInfo.asm: the regions of a large
+ * object: PointAtRegionElement, LargeRegionGetRegionTopLeft,
+ * GetFillRegion, LargeRegionGetLineCount, LargeRegionGetCharCount,
+ * LargeRegionLeftRight, LargeRegionFromOffsetGetStartLineAndOffset,
+ * LargeRegionFromLineGetStartLineAndOffset, LargeRegionFromLine,
+ * LargeRegionFromPoint, LargeRegionGetTrueWidth, LargeRegionGetHeight,
+ * LargeRegionGetTrueHeight, LargeCheckCrossSectionChange,
+ * LargeRegionAlterFlags, LargeRegionGetFlags.
+ *
+ * The regions are a chunk array (VLTI_regionArray) of
+ * VisLargeTextRegionArrayElement: the characters and lines in each,
+ * its section, its place in the document and size, the height its
+ * lines take (VLTRAE_calcHeight).  Their lines and text follow each
+ * other.  In page mode (VLTDM_PAGE) a region is where its element
+ * says, else the regions are stacked from the top, each as high as
+ * its lines (VLTDM_GALLEY, the draft modes) or its size
+ * (VLTDM_CONDENSED), VLTI_regionSpacing between them; the draft modes
+ * make them VLTI_draftRegionSize.
+ *
+ * Port32 (Port32/ABI.md section 13z): no caching of the scans
+ * (VLTA_CACHE_REGION_CALCS); the regions are rectangles (a region's
+ * path in VLTRAE_region is not used yet); not yet regions in a huge
+ * array (VLTA_REGIONS_IN_HUGE_ARRAY).
+ */
+@include "textInt.goh"
+#include <chunkarr.h>
+
+static optr Regions(optr o)
+{
+    VisLargeTextInstance *t = VLT(o);
+
+    EC_ERROR_IF(t->VLTI_attrs & VLTA_REGIONS_IN_HUGE_ARRAY, -1);
+    return ConstructOptr(OptrToHandle(o), t->VLTI_regionArray);
+}
+
+/* PointAtRegionElement (a pointer until the object's block changes) */
+VisLargeTextRegionArrayElement *LargeRegionPtr(optr o, word region)
+{
+    return ChunkArrayElementToPtr(Regions(o), region, NULL);
+}
+
+/* the number of regions */
+word LargeRegionCount(optr o)
+{
+    VisLargeTextInstance *t = VLT(o);
+
+    if (!t->VLTI_regionArray)
+	return 0;
+    return (word) ChunkArrayGetCount(Regions(o));
+}
+
+static Boolean Draft(optr o)
+{
+    return VLT(o)->VLTI_displayMode >= VLTDM_DRAFT_WITH_STYLES;
+}
+
+static word Ceil(WBFixed w)
+{
+    return (word) (w.WBF_int + (w.WBF_frac ? 1 : 0));
+}
+
+/* LargeRegionGetRegionTopLeft */
+void LargeRegionGetRegionTopLeft(optr o, word region, PointDWord *p)
+{
+    VisLargeTextInstance *t = VLT(o);
+    VisLargeTextDisplayModes mode = t->VLTI_displayMode;
+    word spacing = t->VLTI_regionSpacing, i;
+
+    p->PD_x = 0;
+    p->PD_y = 0;
+    if (mode == VLTDM_PAGE) {
+	const VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, region);
+
+	*p = e->VLTRAE_spatialPosition;
+	return;
+    }
+    for (i = 0; i < region; i++) {
+	const VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, i);
+
+	/* addCondensed, addGalleyOrDraft */
+	p->PD_y += (mode == VLTDM_CONDENSED ? e->VLTRAE_size.XYS_height
+					    : Ceil(e->VLTRAE_calcHeight)) +
+		   spacing;
+    }
+}
+
+/* GetFillRegion (without a region): the region's width and height */
+static void RegionSize(optr o, word region, word *width, word *height)
+{
+    const VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, region);
+
+    *width = e->VLTRAE_size.XYS_width;
+    *height = e->VLTRAE_size.XYS_height;
+    if (Draft(o)) {
+	*width = VLT(o)->VLTI_draftRegionSize.XYS_width;
+	*height = VLT(o)->VLTI_draftRegionSize.XYS_height;
+    }
+}
+
+dword LargeRegionGetLineCount(optr o, word region)
+{
+    return LargeRegionPtr(o, region)->VLTRAE_lineCount;
+}
+
+dword LargeRegionGetCharCount(optr o, word region)
+{
+    return LargeRegionPtr(o, region)->VLTRAE_charCount;
+}
+
+/* LargeRegionLeftRight: the region's left and right edge (a rectangle:
+ * at every height) */
+void LargeRegionLeftRight(optr o, word region, sword *left, sword *right)
+{
+    word w, h;
+
+    RegionSize(o, region, &w, &h);
+    *left = 0;
+    *right = (sword) w;
+}
+
+/*
+ * LargeRegionFromOffsetGetStartLineAndOffset (FindRegionByOffset): the
+ * region an offset is in, its first line and offset; an offset where
+ * a region ends is in the next one, the end of the text in the last
+ * region with text
+ */
+word LargeRegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
+						dword *line, dword *start)
+{
+    word n = LargeRegionCount(o), i, last = 0;
+    dword l = 0, s = 0, lastL = 0, lastS = 0;
+
+    for (i = 0; i < n; i++) {
+	const VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, i);
+
+	if (e->VLTRAE_lineCount) {
+	    last = i;
+	    lastL = l;
+	    lastS = s;
+	    if (offset < s + e->VLTRAE_charCount)
+		break;
+	}
+	l += e->VLTRAE_lineCount;
+	s += e->VLTRAE_charCount;
+    }
+    if (line)
+	*line = lastL;
+    if (start)
+	*start = lastS;
+    return last;
+}
+
+/*
+ * LargeRegionFromLineGetStartLineAndOffset: the region of a line, its
+ * first line and offset (a line beyond them all: the last region with
+ * lines)
+ */
+word LargeRegionFromLineGetStartLineAndOffset(optr o, dword line,
+					      dword *first, dword *start)
+{
+    word n = LargeRegionCount(o), i, last = 0;
+    dword l = 0, s = 0, lastL = 0, lastS = 0;
+
+    for (i = 0; i < n; i++) {
+	const VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, i);
+
+	if (e->VLTRAE_lineCount) {
+	    last = i;
+	    lastL = l;
+	    lastS = s;
+	    if (line < l + e->VLTRAE_lineCount)
+		break;
+	}
+	l += e->VLTRAE_lineCount;
+	s += e->VLTRAE_charCount;
+    }
+    if (first)
+	*first = lastL;
+    if (start)
+	*start = lastS;
+    return last;
+}
+
+word LargeRegionFromLine(optr o, dword line)
+{
+    return LargeRegionFromLineGetStartLineAndOffset(o, line, NULL, NULL);
+}
+
+/*
+ * LargeRegionFromPoint: the region at a point of the document, or
+ * CA_NULL_ELEMENT; the last region of the text is as high as it is, the
+ * others in the stacked modes as their lines (and the spacing below)
+ */
+word LargeRegionFromPoint(optr o, sdword x, sdword y)
+{
+    word n = LargeRegionCount(o), i;
+    VisLargeTextDisplayModes mode = VLT(o)->VLTI_displayMode;
+
+    for (i = 0; i < n; i++) {
+	const VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, i);
+	PointDWord tl;
+	word w, h;
+
+	if (e->VLTRAE_flags & VLTRF_EMPTY)
+	    continue;
+	RegionSize(o, i, &w, &h);
+	e = LargeRegionPtr(o, i);
+	if (mode != VLTDM_PAGE && mode != VLTDM_CONDENSED &&
+	    !LargeRegionIsLastRegionInLastSection(o, i))
+	    h = Ceil(e->VLTRAE_calcHeight);
+	LargeRegionGetRegionTopLeft(o, i, &tl);
+	if (x >= tl.PD_x && x <= tl.PD_x + w && y >= tl.PD_y &&
+	    y <= tl.PD_y + h + VLT(o)->VLTI_regionSpacing)
+	    return i;
+    }
+    return CA_NULL_ELEMENT;
+}
+
+/* LargeRegionGetTrueWidth: the region's width (the draft modes' and
+ * galley's width for all if forBlt) */
+word LargeRegionGetTrueWidth(optr o, word region, Boolean forBlt)
+{
+    VisLargeTextInstance *t = VLT(o);
+
+    if (t->VLTI_displayMode >= VLTDM_DRAFT_WITH_STYLES ||
+	(forBlt && t->VLTI_displayMode >= VLTDM_GALLEY))
+	return t->VLTI_displayModeWidth;
+    return LargeRegionPtr(o, region)->VLTRAE_size.XYS_width;
+}
+
+/* LargeRegionGetHeight: the height its lines take */
+WBFixed LargeRegionGetHeight(optr o, word region)
+{
+    return LargeRegionPtr(o, region)->VLTRAE_calcHeight;
+}
+
+/* LargeRegionGetTrueHeight: the height of its rectangle */
+word LargeRegionGetTrueHeight(optr o, word region)
+{
+    word w, h;
+
+    RegionSize(o, region, &w, &h);
+    return h;
+}
+
+/* LargeCheckCrossSectionChange: TRUE if the range has text of two
+ * sections */
+Boolean LargeCheckCrossSectionChange(optr o, dword start, dword end)
+{
+    word a = LargeRegionFromOffsetGetStartLineAndOffset(o, start, NULL,
+							NULL),
+	 b = LargeRegionFromOffsetGetStartLineAndOffset(o, end, NULL, NULL);
+
+    if (a == b)
+	return FALSE;
+    return LargeRegionPtr(o, a)->VLTRAE_section !=
+	   LargeRegionPtr(o, b)->VLTRAE_section;
+}
+
+/* LargeRegionAlterFlags, LargeRegionGetFlags */
+void LargeRegionAlterFlags(optr o, word region, VisLargeTextRegionFlags set,
+			   VisLargeTextRegionFlags clear)
+{
+    VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, region);
+
+    e->VLTRAE_flags = (e->VLTRAE_flags & ~clear) | set;
+    ObjMarkDirty(o);
+}
+
+VisLargeTextRegionFlags LargeRegionGetFlags(optr o, word region)
+{
+    return LargeRegionPtr(o, region)->VLTRAE_flags;
+}

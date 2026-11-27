@@ -131,7 +131,7 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     TextCallShowSelection(o, VT(o)->VTI_selectStart, 0);
     TextGStateDestroy(o);
     if (VT(o)->VTI_lines)
-	SmallRegionAdjustHeight(o, before);
+	TR_RegionAdjustHeight(o, before);
     t = VT(o);
     t->VTI_selectMinStart = t->VTI_selectMinEnd = t->VTI_selectStart;
     t->VTI_intSelFlags &= ~VTISF_SELECTION_TYPE;

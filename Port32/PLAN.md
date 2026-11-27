@@ -160,9 +160,12 @@ Ordered by dependency, each with host-side tests under `linux`:
   (`VisLargeTextClass`, huge arrays) and all kinds of text references,
   step 22; cut, copy and paste of text (`TextTrans/`, `pasteable`),
   step 23; the attribute runs of large objects and of a transfer
-  (huge arrays, elements in VM blocks, `taRunTrans.goc`), step 24.
-  Open: the lines and regions of large objects, style sheets (and
-  their notifications), undo, quick transfer.
+  (huge arrays, elements in VM blocks, `taRunTrans.goc`), step 24;
+  the lines of large objects in a huge array and their regions
+  (display modes, lines flowing from region to region, regions added
+  and given up, drawing per region), step 25.
+  Open: style sheets (and their notifications), undo, quick transfer;
+  widows and orphans, sections.
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose
   dependency is ported since gets filled in after the asm, with its own
   ctest check. Done: the load error of the startup applications, the

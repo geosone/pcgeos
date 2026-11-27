@@ -1,13 +1,17 @@
 /*
  * trLargeText.goc -- after trLargeText.asm: the messages of
- * VisLargeTextClass: MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES
- * (VisLargeTextCreateDataStructures).
+ * VisLargeTextClass: MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES,
+ * _SET_DISPLAY_MODE, _SET_DRAFT_REGION_SIZE, _GET_DRAFT_REGION_SIZE,
+ * _APPEND_REGION, _REGION_IS_LAST, _GET_REGION_COUNT, _GET_REGION_POS,
+ * MSG_META_CONTENT_VIEW_SIZE_CHANGED, MSG_VIS_NOTIFY_GEOMETRY_VALID,
+ * MSG_VIS_TEXT_HEIGHT_NOTIFY; RecalcTotalSize, DisplayModeRecalcCommon.
  *
- * Port32 (Port32/ABI.md section 13z): a large object holds its text in
- * a huge array; not yet: its lines, its regions (the region array,
- * the display modes, the draft size), its runs in huge arrays.
+ * Port32 (Port32/ABI.md section 13z), not yet: regions in a huge
+ * array, MSG_VIS_LARGE_TEXT_REGION_CHANGED, _REGION_FROM_POINT,
+ * _PURGE_REGION_CACHE and _PURGE_CACHED_INFO (there is no cache).
  */
 @include "textInt.goh"
+#include <chunkarr.h>
 
 /* VisLargeTextCreateDataStructures: the object made large: its text
  * chunk freed, an empty huge array instead */
@@ -26,4 +30,185 @@
     t->VTI_text = 0;
     t->VTI_storageFlags |= VTSF_LARGE;
     TS_LargeCreateTextStorage(oself);
+}
+
+/* RecalcTotalSize: the size of the object in the stacked modes: as
+ * wide as its widest region (the draft modes: as the draft size), as
+ * high as its regions to the last one's bottom (VLTA_EXACT_HEIGHT: its
+ * lines' bottom) */
+void RecalcTotalSize(optr o)
+{
+    VisLargeTextInstance *t = VLT(o);
+    word n = LargeRegionCount(o), i, w = 0, h;
+    PointDWord tl;
+
+    if (t->VLTI_displayMode == VLTDM_PAGE || !n)
+	return;
+    for (i = 0; ; i++) {
+	const VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, i);
+
+	if (w < e->VLTRAE_size.XYS_width)
+	    w = e->VLTRAE_size.XYS_width;
+	if (i + 1 >= n || LargeRegionIsLastRegionInLastSection(o, i))
+	    break;
+    }
+    t = VLT(o);
+    if (t->VLTI_displayMode >= VLTDM_DRAFT_WITH_STYLES)
+	w = t->VLTI_draftRegionSize.XYS_width;
+    t->VLTI_displayModeWidth = w;
+    LargeRegionGetRegionTopLeft(o, i, &tl);
+    if (VLT(o)->VLTI_attrs & VLTA_EXACT_HEIGHT) {
+	WBFixed c = LargeRegionGetHeight(o, i);
+
+	h = (word) (c.WBF_int + (c.WBF_frac ? 1 : 0));
+    } else
+	h = LargeRegionGetTrueHeight(o, i);
+    VLT(o)->VLTI_totalHeight = tl.PD_y + h;
+    ObjMarkDirty(o);
+}
+
+/* DisplayModeRecalcCommon */
+static void DisplayModeRecalcCommon(optr o)
+{
+    @call o::MSG_VIS_RECREATE_CACHED_GSTATES();
+    SendLargeHeightNotify(o);
+    TA_SendNotification(o, VIS_TEXT_STANDARD_NOTIFICATION_FLAGS);
+    @call o::MSG_VIS_TEXT_SHOW_POSITION(VIS_TEXT_RANGE_SELECTION);
+}
+
+/* VisLargeTextSetDisplayMode: the draft modes (and leaving them)
+ * recalculate the text; they show no graphics */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_SET_DISPLAY_MODE
+{
+    VisLargeTextDisplayModes old = pself->VLTI_displayMode;
+
+    ObjMarkDirty(oself);
+    pself->VLTI_displayMode = mode;
+    RecalcTotalSize(oself);
+    if (mode >= VLTDM_DRAFT_WITH_STYLES || old >= VLTDM_DRAFT_WITH_STYLES)
+	@call oself::MSG_VIS_TEXT_RECALC_AND_DRAW();
+    if (mode >= VLTDM_DRAFT_WITH_STYLES)
+	@call oself::MSG_VIS_TEXT_SET_FEATURES(VTF_DONT_SHOW_GRAPHICS, 0);
+    else
+	@call oself::MSG_VIS_TEXT_SET_FEATURES(0, VTF_DONT_SHOW_GRAPHICS);
+    DisplayModeRecalcCommon(oself);
+}
+
+/* VisLargeTextSetDraftRegionSize */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_SET_DRAFT_REGION_SIZE
+{
+    if (width == pself->VLTI_draftRegionSize.XYS_width &&
+	height == pself->VLTI_draftRegionSize.XYS_height)
+	return;
+    ObjMarkDirty(oself);
+    pself->VLTI_draftRegionSize.XYS_width = width;
+    pself->VLTI_draftRegionSize.XYS_height = height;
+    if (pself->VLTI_displayMode >= VLTDM_DRAFT_WITH_STYLES)
+	pself->VLTI_displayModeWidth = width;
+    RecalcTotalSize(oself);
+    @call oself::MSG_VIS_TEXT_RECALC_AND_DRAW();
+    DisplayModeRecalcCommon(oself);
+}
+
+/* VisLargeTextGetDraftRegionSize */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_GET_DRAFT_REGION_SIZE
+{
+    (void) region;
+    /* (dx.cx: the height, the width) */
+    return ((dword) pself->VLTI_draftRegionSize.XYS_height << 16) |
+	   pself->VLTI_draftRegionSize.XYS_width;
+}
+
+/* VisLargeTextViewSizeChanged: the draft modes are as wide as the view */
+@extern method VisLargeTextClass, MSG_META_CONTENT_VIEW_SIZE_CHANGED
+{
+    (void) viewWindow;
+    (void) viewHeight;
+    if (pself->VLTI_displayMode < VLTDM_DRAFT_WITH_STYLES)
+	return;
+    @call oself::MSG_VIS_LARGE_TEXT_SET_DRAFT_REGION_SIZE(viewWidth,
+			pself->VLTI_draftRegionSize.XYS_height);
+}
+
+/* VisLargeTextAppendRegion: a region after one (CA_NULL_ELEMENT: at the
+ * end), all zero */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_APPEND_REGION
+{
+    optr a = ConstructOptr(OptrToHandle(oself), pself->VLTI_regionArray);
+    VisLargeTextRegionArrayElement *e;
+
+    EC_ERROR_IF(pself->VLTI_attrs & VLTA_REGIONS_IN_HUGE_ARRAY, -1);
+    if (region == CA_NULL_ELEMENT ||
+	(word) (region + 1) >= ChunkArrayGetCount(a))
+	e = ChunkArrayAppend(a, 0);
+    else
+	e = ChunkArrayInsertAt(a, ChunkArrayElementToPtr(a,
+					(word) (region + 1), NULL), 0);
+    memset(e, 0, sizeof(*e));
+    ObjMarkDirty(oself);
+}
+
+/* VisLargeTextRegionIsLast: the regions after one deleted */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_REGION_IS_LAST
+{
+    optr a = ConstructOptr(OptrToHandle(oself), pself->VLTI_regionArray);
+    word n = (word) ChunkArrayGetCount(a);
+
+    EC_ERROR_IF((word) (region + 1) > n, -1);
+    if ((word) (region + 1) < n)
+	ChunkArrayDeleteRange(a, (word) (region + 1),
+			      (word) (n - region - 1));
+    ObjMarkDirty(oself);
+}
+
+/* VisLargeTextNotifyGeometryValid: a first region; the lines made and
+ * calculated (VisText) */
+@extern method VisLargeTextClass, MSG_VIS_NOTIFY_GEOMETRY_VALID
+{
+    (void) ObjVarAddData(oself, TEMP_VIS_TEXT_FORCE_SEND_IS_LAST_REGION, 0);
+    pself = ObjDerefVis(oself);
+    pself->VI_optFlags &= ~VOF_GEOMETRY_INVALID;
+    if (pself->VTI_lines)
+	return;
+    if (!LargeRegionCount(oself))
+	@call oself::MSG_VIS_LARGE_TEXT_APPEND_REGION(CA_NULL_ELEMENT);
+    RecalcTotalSize(oself);
+    @callsuper();
+}
+
+/* VisLargeTextHeightNotify: the content's document as large as the
+ * object (the stacked modes) */
+@extern method VisLargeTextClass, MSG_VIS_TEXT_HEIGHT_NOTIFY
+{
+    sdword h = pself->VLTI_totalHeight;
+    word w = pself->VLTI_displayModeWidth;
+    EventHandle ev;
+
+    (void) newHeight;
+    if (!h)
+	return;
+    ev = @record VisContentClass::MSG_VIS_CONTENT_SET_DOC_BOUNDS(h,
+								 (sdword) w,
+								 0, 0);
+    @call oself::MSG_VIS_VUP_SEND_TO_OBJECT_OF_CLASS(ev);
+}
+
+/* VisLargeTextGetRegionCount */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_GET_REGION_COUNT
+{
+    return LargeRegionCount(oself);
+}
+
+/* VisLargeTextGetRegionPos: the region's top and the height of its
+ * lines */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_GET_REGION_POS
+{
+    PointDWord tl;
+    WBFixed h;
+
+    LargeRegionGetRegionTopLeft(oself, region, &tl);
+    h = LargeRegionGetHeight(oself, region);
+    retVal->VLTGRPRS_unused = 0;
+    retVal->VLTGRPRS_yPosition = tl.PD_y;
+    retVal->VLTGRPRS_height = (word) (h.WBF_int + (h.WBF_frac ? 1 : 0));
 }

@@ -6,4 +6,11 @@ geos_sources(text_goc
   trExternal.goc
   trSmallGet.goc
   trVariables.goc
-  trLargeText.goc)
+  trLargeText.goc
+  trLargeInfo.goc
+  trLargeGet.goc
+  trLargeNextPrev.goc
+  trLargeGState.goc
+  trLargeRegion.goc
+  trLargeSet.goc
+  trLargeClear.goc)

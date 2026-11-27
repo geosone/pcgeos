@@ -1,0 +1,30 @@
+/*
+ * trLargeGet.goc -- after trLargeGet.asm: LargeRegionGetTopLine,
+ * LargeRegionGetStartOffset (FindLineByRegion, FindOffsetByRegion).
+ *
+ * Port32 (Port32/ABI.md section 13z): the scans are not cached
+ * (VLTA_CACHE_REGION_CALCS, the Fetch/StoreCached* routines).
+ */
+@include "textInt.goh"
+
+/* LargeRegionGetTopLine: the region's first line */
+dword LargeRegionGetTopLine(optr o, word region)
+{
+    dword l = 0;
+    word i;
+
+    for (i = 0; i < region; i++)
+	l += LargeRegionPtr(o, i)->VLTRAE_lineCount;
+    return l;
+}
+
+/* LargeRegionGetStartOffset: the region's first offset */
+dword LargeRegionGetStartOffset(optr o, word region)
+{
+    dword s = 0;
+    word i;
+
+    for (i = 0; i < region; i++)
+	s += LargeRegionPtr(o, i)->VLTRAE_charCount;
+    return s;
+}

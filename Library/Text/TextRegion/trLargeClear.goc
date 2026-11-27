@@ -1,0 +1,60 @@
+/*
+ * trLargeClear.goc -- after trLargeClear.asm: LargeRegionClearToBottom,
+ * LargeRegionAdjustHeight, SendLargeHeightNotify.
+ *
+ * Port32 (Port32/ABI.md section 13z): below a region's last line the
+ * background to the region's bottom; not yet: the break drawn between
+ * the regions of the draft modes (DrawBreakCommon), the segments of a
+ * region with a path (LargeRegionClearSegments).
+ */
+@include "textInt.goh"
+
+/* LargeRegionClearToBottom */
+void LargeRegionClearToBottom(optr o, word region)
+{
+    WBFixed h = LargeRegionGetHeight(o, region);
+    word top = (word) (h.WBF_int + (h.WBF_frac ? 1 : 0)),
+	 bottom = LargeRegionGetTrueHeight(o, region),
+	 width = LargeRegionGetTrueWidth(o, region, TRUE);
+
+    if (bottom > top)
+	ClearRectCommon(o, 0, (sword) top, (sword) width, (sword) bottom);
+}
+
+/* SendLargeHeightNotify: a height notify pending (in the stacked
+ * modes) */
+void SendLargeHeightNotify(optr o)
+{
+    VisLargeTextInstance *t = VLT(o);
+
+    if (t->VLTI_displayMode != VLTDM_PAGE)
+	t->VLTI_flags |= VLTF_HEIGHT_NOTIFY_PENDING;
+}
+
+/*
+ * LargeRegionAdjustHeight: the height a region's lines take; in the
+ * stacked modes the object's height changed with it (the last region's
+ * only with VLTA_EXACT_HEIGHT: else its size counts)
+ */
+void LargeRegionAdjustHeight(optr o, word region, WBFixed height)
+{
+    VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, region);
+    sword before = (sword) (e->VLTRAE_calcHeight.WBF_int +
+			    (e->VLTRAE_calcHeight.WBF_frac ? 1 : 0)),
+	  after = (sword) (height.WBF_int + (height.WBF_frac ? 1 : 0));
+    VisLargeTextInstance *t;
+
+    if (e->VLTRAE_calcHeight.WBF_int == height.WBF_int &&
+	e->VLTRAE_calcHeight.WBF_frac == height.WBF_frac)
+	return;
+    e->VLTRAE_calcHeight = height;
+    ObjMarkDirty(o);
+    t = VLT(o);
+    if (t->VLTI_displayMode <= VLTDM_CONDENSED || after == before)
+	return;
+    if (!(t->VLTI_attrs & VLTA_EXACT_HEIGHT) &&
+	LargeRegionIsLastRegionInLastSection(o, region))
+	return;
+    t->VLTI_totalHeight += after - before;
+    SendLargeHeightNotify(o);
+}

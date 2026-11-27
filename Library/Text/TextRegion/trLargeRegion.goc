@@ -1,0 +1,71 @@
+/*
+ * trLargeRegion.goc -- after trLargeRegion.asm:
+ * LargeRegionMakeNextRegion, LargeRegionRegionIsLast.
+ *
+ * Port32 (Port32/ABI.md section 13z): one section is all a region's
+ * text goes on in (the next section's first region: not yet); no limit
+ * on the number of regions (_REGION_LIMIT, TR_GetTextLimits).
+ */
+@include "textInt.goh"
+
+/*
+ * LargeRegionMakeNextRegion: the region after *region in its section,
+ * appended (MSG_VIS_LARGE_TEXT_APPEND_REGION) if there is none; it is
+ * no longer empty.  FALSE if none could be made.
+ */
+Boolean LargeRegionMakeNextRegion(optr o, word *region)
+{
+    word n = LargeRegionCount(o), next = (word) (*region + 1);
+
+    if (next >= n ||
+	LargeRegionPtr(o, next)->VLTRAE_section !=
+	LargeRegionPtr(o, *region)->VLTRAE_section) {
+	/* makeNext: the IS_LAST message is sent later */
+	(void) ObjVarAddData(o, TEMP_VIS_TEXT_FORCE_SEND_IS_LAST_REGION, 0);
+	@call o::MSG_VIS_LARGE_TEXT_APPEND_REGION(*region);
+	if (LargeRegionCount(o) <= n)
+	    return FALSE;
+	/* (a new region is in the section of the one before) */
+	LargeRegionPtr(o, next)->VLTRAE_section =
+	    LargeRegionPtr(o, *region)->VLTRAE_section;
+    }
+    LargeRegionPtr(o, next)->VLTRAE_flags &= ~VLTRF_EMPTY;
+    ObjMarkDirty(o);
+    *region = next;
+    return TRUE;
+}
+
+/*
+ * LargeRegionRegionIsLast: the regions after the last one with text in
+ * its section emptied; the object told (MSG_VIS_LARGE_TEXT_REGION_IS_LAST)
+ * if it is the last section and there are regions after it or regions
+ * were appended
+ */
+void LargeRegionRegionIsLast(optr o, word region)
+{
+    word n = LargeRegionCount(o), sect, i;
+    Boolean force = FALSE, lastSection = TRUE;
+
+    if (ObjVarFindData(o, TEMP_VIS_TEXT_FORCE_SEND_IS_LAST_REGION)) {
+	(void) ObjVarDeleteData(o, TEMP_VIS_TEXT_FORCE_SEND_IS_LAST_REGION);
+	force = TRUE;
+    }
+    sect = LargeRegionPtr(o, region)->VLTRAE_section;
+    for (i = (word) (region + 1); i < n; i++) {
+	VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, i);
+
+	if (e->VLTRAE_section != sect) {
+	    lastSection = FALSE;
+	    break;
+	}
+	e->VLTRAE_charCount = 0;
+	e->VLTRAE_lineCount = 0;
+	e->VLTRAE_calcHeight.WBF_int = 0;
+	e->VLTRAE_calcHeight.WBF_frac = 0;
+	e->VLTRAE_flags |= VLTRF_EMPTY;
+	force = TRUE;
+    }
+    ObjMarkDirty(o);
+    if (force && lastSection)
+	@call o::MSG_VIS_LARGE_TEXT_REGION_IS_LAST(region);
+}

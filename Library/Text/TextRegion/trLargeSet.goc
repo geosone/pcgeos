@@ -1,0 +1,24 @@
+/*
+ * trLargeSet.goc -- after trLargeSet.asm: what a calculation sets in a
+ * region of a large object: its lines and characters and the height
+ * they take (LargeRegionSetTopLine, LargeRegionSetStartOffset and
+ * LargeAdjustNumberOfLines set the counts the asm adjusts).
+ *
+ * Port32 (Port32/ABI.md section 13z): the calculation goes over all
+ * the text and sets each region it fills (textCalc.goc), so the counts
+ * are not moved for a replacement first (LargeAdjustForReplacement,
+ * AdjustRegionDWord, LargeRegionInsertLines).
+ */
+@include "textInt.goh"
+
+/* the region holds count lines and chars characters */
+void LargeRegionSetCounts(optr o, word region, dword lines, dword chars)
+{
+    VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, region);
+
+    if (e->VLTRAE_lineCount != lines || e->VLTRAE_charCount != chars) {
+	e->VLTRAE_lineCount = lines;
+	e->VLTRAE_charCount = chars;
+	ObjMarkDirty(o);
+    }
+}

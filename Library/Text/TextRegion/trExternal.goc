@@ -1,11 +1,19 @@
 /*
  * trExternal.goc -- after trExternal.asm: TR_RegionTransformGState,
  * TR_RegionGetTopLeft, TR_RegionLeftRight, TR_RegionWidth,
- * TR_RegionGetTopLine, TR_RegionFromOffsetGetStartLineAndOffset,
- * TR_RegionFromLine, TR_CheckCrossSectionChange, TR_RegionFromPoint.  Port32: small objects
- * (one region); the large ones are not in C yet.
+ * TR_RegionGetTopLine, TR_RegionGetLineCount, TR_RegionGetCharCount,
+ * TR_RegionFromOffsetGetStartLineAndOffset,
+ * TR_RegionFromLineGetStartLineAndOffset, TR_RegionFromLine,
+ * TR_RegionNext, TR_RegionIsLast, TR_RegionGetHeight,
+ * TR_RegionGetTrueHeight, TR_RegionAlterFlags, TR_RegionGetFlags,
+ * TR_CheckCrossSectionChange, TR_RegionFromPoint, TR_RegionAdjustHeight,
+ * TR_RegionClearToBottom (CallRegionHandler: the small or the large
+ * variant).  A small object has one region, the text inside its
+ * margins.
  */
 @include "textInt.goh"
+
+#define LARGE(o)	(VT(o)->VTI_storageFlags & VTSF_LARGE)
 
 /* TR_RegionTransformGState: the gstate at the region's top left, unless
  * it is there already (VTI_gstateRegion) */
@@ -16,14 +24,29 @@ void TR_RegionTransformGState(optr o, word region, Boolean print)
     if (region == t->VTI_gstateRegion)
 	return;
     t->VTI_gstateRegion = region;
-    SmallRegionTransformGState(o, print);
+    if (LARGE(o))
+	LargeRegionTransformGState(o, region);
+    else
+	SmallRegionTransformGState(o, print);
 }
 
-/* TR_RegionGetTopLeft: the region's top left */
+/* TR_RegionMoveGState: the gstate at the region's top left (inside a
+ * GrSaveState: VTI_gstateRegion not touched) */
+void TR_RegionMoveGState(optr o, word region, Boolean print)
+{
+    if (LARGE(o))
+	LargeRegionTransformGState(o, region);
+    else
+	SmallRegionTransformGState(o, print);
+}
+
+/* TR_RegionGetTopLeft: the region's top left in the document */
 void TR_RegionGetTopLeft(optr o, word region, PointDWord *p)
 {
-    (void) region;
-    SmallRegionGetRegionTopLeft(o, p);
+    if (LARGE(o))
+	LargeRegionGetRegionTopLeft(o, region, p);
+    else
+	SmallRegionGetRegionTopLeft(o, p);
 }
 
 /* TR_RegionLeftRight: the region's left and right edge at a height (for
@@ -31,10 +54,12 @@ void TR_RegionGetTopLeft(optr o, word region, PointDWord *p)
 void TR_RegionLeftRight(optr o, word region, sword y, word pointSize,
 			sword *left, sword *right)
 {
-    (void) region;
     (void) y;
     (void) pointSize;
-    SmallRegionLeftRight(o, left, right);
+    if (LARGE(o))
+	LargeRegionLeftRight(o, region, left, right);
+    else
+	SmallRegionLeftRight(o, left, right);
 }
 
 /* TR_RegionWidth: the region's width there */
@@ -49,25 +74,39 @@ sword TR_RegionWidth(optr o, word region, sword y, word pointSize)
 /* TR_RegionGetTopLine: the region's first line */
 dword TR_RegionGetTopLine(optr o, word region)
 {
-    return SmallRegionGetTopLine(o, region);
-}
-
-/* TR_RegionFromOffsetGetStartLineAndOffset: the first line and offset of
- * the region of an offset */
-word TR_RegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
-					      dword *line, dword *start)
-{
-    (void) offset;
-    SmallRegionFromOffsetGetStartLineAndOffset(o, line, start);
-    return 0;
+    return LARGE(o) ? LargeRegionGetTopLine(o, region)
+		    : SmallRegionGetTopLine(o, region);
 }
 
 /* TR_RegionGetLineCount: the region's lines (SmallRegionGetLineCount:
  * all of them) */
 dword TR_RegionGetLineCount(optr o, word region)
 {
-    (void) region;
-    return TL_LineGetCount(o);
+    return LARGE(o) ? LargeRegionGetLineCount(o, region)
+		    : TL_LineGetCount(o);
+}
+
+/* TR_RegionGetCharCount: the region's characters (a small object's:
+ * all) */
+dword TR_RegionGetCharCount(optr o, word region)
+{
+    return LARGE(o) ? LargeRegionGetCharCount(o, region)
+		    : TS_GetTextSize(o);
+}
+
+/* TR_RegionFromOffsetGetStartLineAndOffset: the region of an offset, its
+ * first line and offset */
+word TR_RegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
+					      dword *line, dword *start)
+{
+    dword dl, ds;
+
+    if (LARGE(o))
+	return LargeRegionFromOffsetGetStartLineAndOffset(o, offset, line,
+							  start);
+    SmallRegionFromOffsetGetStartLineAndOffset(o, line ? line : &dl,
+					       start ? start : &ds);
+    return 0;
 }
 
 /* TR_RegionFromLineGetStartLineAndOffset: the region of a line, its
@@ -75,24 +114,64 @@ dword TR_RegionGetLineCount(optr o, word region)
 word TR_RegionFromLineGetStartLineAndOffset(optr o, dword line,
 					    dword *first, dword *start)
 {
-    (void) line;
-    SmallRegionFromOffsetGetStartLineAndOffset(o, first, start);
+    dword dl, ds;
+
+    if (LARGE(o))
+	return LargeRegionFromLineGetStartLineAndOffset(o, line, first,
+							start);
+    SmallRegionFromOffsetGetStartLineAndOffset(o, first ? first : &dl,
+					       start ? start : &ds);
     return 0;
 }
 
 /* TR_RegionFromLine: the region of a line */
 word TR_RegionFromLine(optr o, dword line)
 {
-    return SmallRegionFromLine(o, line);
+    return LARGE(o) ? LargeRegionFromLine(o, line)
+		    : SmallRegionFromLine(o, line);
+}
+
+/* TR_RegionNext: the next region (made if needed: MakeNextRegion);
+ * FALSE if there can be none (a small object) */
+Boolean TR_RegionNext(optr o, word *region)
+{
+    if (!LARGE(o))
+	return FALSE;
+    return LargeRegionMakeNextRegion(o, region);
+}
+
+/* TR_RegionIsLast: the regions after one given up (their lines and text
+ * went into it) */
+void TR_RegionIsLast(optr o, word region)
+{
+    if (LARGE(o))
+	LargeRegionRegionIsLast(o, region);
+}
+
+/* TR_RegionGetHeight: the height the region's lines take; its own */
+WBFixed TR_RegionGetHeight(optr o, word region)
+{
+    if (LARGE(o))
+	return LargeRegionGetHeight(o, region);
+    return VT(o)->VTI_height;
+}
+
+word TR_RegionGetTrueHeight(optr o, word region)
+{
+    sword w, h;
+
+    if (LARGE(o))
+	return LargeRegionGetTrueHeight(o, region);
+    TextSize(o, &w, &h);
+    return (word) h;
 }
 
 /* TR_CheckCrossSectionChange: TRUE if a range crosses a section (a
  * small object has one) */
 Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end)
 {
-    (void) o;
-    (void) start;
-    (void) end;
+    if (LARGE(o))
+	return LargeCheckCrossSectionChange(o, start, end);
     return FALSE;
 }
 
@@ -100,5 +179,37 @@ Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end)
  * CA_NULL_ELEMENT */
 word TR_RegionFromPoint(optr o, sdword x, sdword y)
 {
-    return SmallRegionFromPoint(o, x, y);
+    return LARGE(o) ? LargeRegionFromPoint(o, x, y)
+		    : SmallRegionFromPoint(o, x, y);
+}
+
+/*
+ * TR_RegionAdjustHeight: after a calculation: a small object tells a
+ * new height (SmallRegionAdjustHeight); a large one the size of its
+ * document if it changed (VLTF_HEIGHT_NOTIFY_PENDING, as
+ * TextCallShowSelection)
+ */
+void TR_RegionAdjustHeight(optr o, WBFixed before)
+{
+    VisLargeTextInstance *t;
+
+    if (!LARGE(o)) {
+	SmallRegionAdjustHeight(o, before);
+	return;
+    }
+    t = VLT(o);
+    if (!(t->VLTI_flags & VLTF_HEIGHT_NOTIFY_PENDING))
+	return;
+    t->VLTI_flags &= ~VLTF_HEIGHT_NOTIFY_PENDING;
+    if (!ObjVarFindData(o, TEMP_VIS_TEXT_FREEING_OBJECT))
+	@call o::MSG_VIS_TEXT_HEIGHT_NOTIFY(0);
+}
+
+/* TR_RegionClearToBottom: the background below the region's last line */
+void TR_RegionClearToBottom(optr o, word region)
+{
+    if (LARGE(o))
+	LargeRegionClearToBottom(o, region);
+    else
+	SmallRegionClearToBottom(o);
 }

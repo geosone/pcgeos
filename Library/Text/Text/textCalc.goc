@@ -13,12 +13,44 @@
  * or other text came to stand in it.  VTI_height is the sum of the
  * lines.
  *
- * Port32 (Port32/ABI.md section 13z): a small object has one region,
- * so nothing ripples between regions, and the lines are few: all of
- * them are calculated, not only those from the change on (the asm
- * stops where the lines meet the old ones again).
+ * A large object's lines fill its regions one after the other: a line
+ * that does not fit below the lines before it in a region goes to the
+ * top of the next one (made if needed), as does the line after a
+ * column or section break; the regions after the last one with text
+ * are given up (TR_RegionIsLast).
+ *
+ * Port32 (Port32/ABI.md section 13z): all the lines are calculated,
+ * not only those from the change on (the asm stops where the lines
+ * meet the old ones again; textCalcObject.asm's ripple between the
+ * regions); not yet: widows, orphans and lines kept together, the
+ * first region of the next section after a section break.
  */
 @include "textInt.goh"
+
+/*
+ * the height lines may fill in a region before the next line goes to
+ * the next region (none for a small object: it has one)
+ */
+static sdword RegionRoom(optr o, word region)
+{
+    if (!(VT(o)->VTI_storageFlags & VTSF_LARGE))
+	return 0x7fffffff;
+    return (sdword) TR_RegionGetTrueHeight(o, region) << 8;
+}
+
+/* a region's lines done: their number, their text, their height */
+static void CloseRegion(optr o, word region, dword lines, dword chars,
+			sdword bottom)
+{
+    WBFixed h;
+
+    if (!(VT(o)->VTI_storageFlags & VTSF_LARGE))
+	return;
+    h.WBF_int = (word) (bottom >> 8);
+    h.WBF_frac = (byte) bottom;
+    LargeRegionSetCounts(o, region, lines, chars);
+    LargeRegionAdjustHeight(o, region, h);
+}
 
 /*
  * TextRecalc: the lines again after a change: at start, inserted
@@ -26,10 +58,13 @@
  */
 void TextRecalc(optr o, dword start, dword inserted, dword deleted)
 {
-    LICL_vars l;
+    LICL_vars l, saved;
     LineFlags prev = LF_ENDS_PARAGRAPH;
-    dword line, oldStart = 0, n;
+    dword line, oldStart = 0, n, regionLines = 0, regionChars = 0;
     sdword bottom = 0;
+    word region = 0;
+    Boolean large = (VT(o)->VTI_storageFlags & VTSF_LARGE) != 0,
+	    moved = FALSE, wasTop = FALSE;
     VisTextInstance *t;
 
     if (!VT(o)->VTI_lines)
@@ -45,25 +80,54 @@ void TextRecalc(optr o, dword start, dword inserted, dword deleted)
 	l.LICL_range.VTR_end = TEXT_ADDRESS_PAST_END;
     T_GetNewParaAttr(&l, 0);
     for (line = 0;; line++) {
-	dword oldCount = 0;
+	dword oldCount = 0, count;
 
 	if (line >= TL_LineGetCount(o)) {
 	    TL_LineInsert(o, line, 1);
 	    l.LICL_calcFlags |= CF_FORCE_CHANGED;
-	} else
+	} else if (!wasTop)
 	    oldCount = TL_LineGetChars(o, line);
-	/* a line below a change of height, or other text in it */
-	if (l.LICL_insertedSpace ||
+	/* a line below a change of height, or other text in it, or in
+	 * another place (a region before it changed) */
+	if (l.LICL_insertedSpace || moved ||
 	    (oldStart >= start + deleted &&
 	     oldStart + inserted - deleted != l.LICL_range.VTR_start))
 	    l.LICL_calcFlags |= CF_FORCE_CHANGED;
-	oldStart += oldCount;
+	if (!wasTop)
+	    oldStart += oldCount;
+	wasTop = FALSE;
+	if (large)
+	    /* (the text from here on is in the region being filled) */
+	    LargeRegionSetCounts(o, region, regionLines + 1,
+				 TEXT_ADDRESS_PAST_END);
+	saved = l;
 	l.LICL_line = line;
+	l.LICL_regionTopLine = line - regionLines;
 	l.LICL_lineHeight.WBF_int = 0;
 	l.LICL_lineHeight.WBF_frac = 0;
 	T_EnsureCorrectParaAttr(&l, l.LICL_range.VTR_start);
 	TL_LineCalculate(&l, (prev & LF_ENDS_PARAGRAPH) ?
 			     LF_STARTS_PARAGRAPH : 0);
+	if (regionLines && bottom + ((sdword) l.LICL_lineHeight.WBF_int << 8) +
+	    l.LICL_lineHeight.WBF_frac > RegionRoom(o, region)) {
+	    /* the line goes to the next region (if there can be one):
+	     * calculated again at its top */
+	    word next = region;
+
+	    if (TR_RegionNext(o, &next)) {
+		CloseRegion(o, region, regionLines, regionChars, bottom);
+		region = next;
+		regionLines = 0;
+		regionChars = 0;
+		bottom = 0;
+		l = saved;
+		l.LICL_calcFlags |= CF_FORCE_CHANGED;
+		moved = TRUE;
+		wasTop = TRUE;
+		line--;
+		continue;
+	    }
+	}
 	l.LICL_calcFlags &= ~CF_FORCE_CHANGED;
 	/* the border above the next line (as VisTextCalcHeight) */
 	l.LICL_prevLineBF =
@@ -73,8 +137,25 @@ void TextRecalc(optr o, dword start, dword inserted, dword deleted)
 	l.LICL_lineBottom.WBF_int = (word) (bottom >> 8);
 	l.LICL_lineBottom.WBF_frac = (byte) bottom;
 	prev = l.LICL_lineFlags;
+	count = l.LICL_range.VTR_start - l.LICL_lineStart;
+	regionLines++;
+	regionChars += count;
 	if (prev & LF_ENDS_IN_NULL)
 	    break;
+	if (large && (prev & (LF_ENDS_IN_COLUMN_BREAK |
+			      LF_ENDS_IN_SECTION_BREAK))) {
+	    /* the next line at the top of the next region */
+	    word next = region;
+
+	    if (TR_RegionNext(o, &next)) {
+		CloseRegion(o, region, regionLines, regionChars, bottom);
+		region = next;
+		regionLines = 0;
+		regionChars = 0;
+		bottom = 0;
+		l.LICL_prevLineBF = 0;
+	    }
+	}
     }
     /* TruncateLines */
     n = TL_LineGetCount(o);
@@ -82,6 +163,15 @@ void TextRecalc(optr o, dword start, dword inserted, dword deleted)
 	TL_LineDelete(o, line + 1, (word) (n - line - 1));
     t = VT(o);
     t->VTI_height = l.LICL_lineBottom;
+    if (large) {
+	dword before = VLT(o)->VLTI_totalHeight;
+
+	CloseRegion(o, region, regionLines, regionChars, bottom);
+	TR_RegionIsLast(o, region);
+	RecalcTotalSize(o);
+	if (VLT(o)->VLTI_totalHeight != before)
+	    SendLargeHeightNotify(o);
+    }
     TextGStateDestroy(o);
 }
 

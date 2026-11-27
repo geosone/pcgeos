@@ -21,7 +21,8 @@ static word RoundPos(word v)
  * is never narrower than VIS_TEXT_MIN_TEXT_FIELD_WIDTH; a one line
  * object is as wide as a line may be.
  */
-static void ParaAttrVirtualToPhysical(optr o, VisTextMaxParaAttr *m)
+static void ParaAttrVirtualToPhysical(optr o, VisTextMaxParaAttr *m,
+				      dword pos)
 {
     VisTextParaAttr *a = &m->VTMPA_paraAttr;
     VisTextInstance *t = VT(o);
@@ -29,10 +30,22 @@ static void ParaAttrVirtualToPhysical(optr o, VisTextMaxParaAttr *m)
     sword width, right, limit, min;
     word i;
 
-    width = v->VI_bounds.R_right - v->VI_bounds.R_left -
-	    2 * t->VTI_lrMargin;
-    right = (t->VTI_state & VTS_ONE_LINE) ?
-	    VIS_TEXT_ONE_LINE_RIGHT_MARGIN : width;
+    width = v->VI_bounds.R_right - v->VI_bounds.R_left;
+    if (!width && (t->VTI_storageFlags & VTSF_LARGE) &&
+	LargeRegionCount(o)) {
+	/* largeObject: the region's (a rectangle: its left edge is 0) */
+	word region = LargeRegionFromOffsetGetStartLineAndOffset(o, pos,
+								 NULL, NULL);
+	sword l;
+
+	LargeRegionLeftRight(o, region, &l, &right);
+	width = (sword) LargeRegionGetTrueWidth(o, region, FALSE);
+	right = (sword) (right - l);
+    } else {
+	width = (sword) (width - 2 * t->VTI_lrMargin);
+	right = (t->VTI_state & VTS_ONE_LINE) ?
+		VIS_TEXT_ONE_LINE_RIGHT_MARGIN : width;
+    }
     a->VTPA_rightMargin = RoundPos(a->VTPA_rightMargin);
     a->VTPA_paraMargin = RoundPos(a->VTPA_paraMargin);
     a->VTPA_leftMargin = RoundPos(a->VTPA_leftMargin);
@@ -81,7 +94,7 @@ void TA_GetParaAttrForPosition(optr o, dword pos, VisTextMaxParaAttr *a,
 	*start = TA_RunPosition(o, TRK_PARA_ATTR, i);
 	*end = TA_RunPosition(o, TRK_PARA_ATTR, i + 1);
     }
-    ParaAttrVirtualToPhysical(o, a);
+    ParaAttrVirtualToPhysical(o, a, pos);
 }
 
 /*

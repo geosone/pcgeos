@@ -26,7 +26,7 @@ void ReflectChangeUpdateGeneric(optr o)
     EditHilite(o);
     TextGStateDestroy(o);
     if (lines)
-	SmallRegionAdjustHeight(o, before);
+	TR_RegionAdjustHeight(o, before);
     TextMarkUserModified(o);
     @call o::MSG_VIS_TEXT_ATTRIBUTE_CHANGE();
 }

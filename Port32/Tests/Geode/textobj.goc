@@ -49,6 +49,7 @@ typedef struct {
     MemHandle	TOS_selectBlock;	/* (step 23) the select state */
     word	TOS_paste[2];		/* of step 23 */
     word	TOS_runs[2];		/* of step 24 */
+    word	TOS_regions[6];		/* of step 25 */
 } TOState;
 
 TOState toState;
@@ -1695,6 +1696,99 @@ static Boolean TOItemName(TransferBlockID id, const char *name)
 	TOCHECK(RunIs(m, 9, 3, 10) && RunIs(m, 10, 10, TEXT_ADDRESS_PAST_END));
 	@call n::MSG_META_OBJ_FREE();
 	@call m::MSG_META_OBJ_FREE();
+	ClipboardCloseClipboardFile();
+	break;
+    }
+    case 25: {
+	/* the lines of a large object in its regions: draft mode, the
+	 * regions as wide as the draft size and so low that a few lines
+	 * fill one; the lines go on in the next region, the regions
+	 * stacked; fewer lines give up the regions after */
+	VisLargeTextInstance *vl;
+	VisLargeTextGetRegionPosReturnStruct pos;
+	MemHandle mh;
+	ChunkHandle ra;
+	optr lt;
+	word i, n, lines = 0;
+	dword chars = 0, total;
+	sdword y = 0;
+
+	TOCHECK(ClipboardOpenClipboardFile() == 0);
+	mh = UserAllocObjBlock(ThreadGetInfo(0, TGIT_THREAD_HANDLE));
+	lt = ObjInstantiate(mh, (ClassStruct *) &VisLargeTextClass);
+	/* (a message first builds the instance) */
+	@call lt::MSG_VIS_TEXT_SET_VM_FILE(ClipboardGetClipboardFile());
+	ObjLockObjBlock(mh);
+	/* (the array first: the block may move) */
+	ra = ChunkArrayCreate(mh, sizeof(VisLargeTextRegionArrayElement), 0,
+			      0);
+	vl = (VisLargeTextInstance *) ObjDerefVis(lt);
+	vl->VLTI_regionArray = ra;
+	vl->VLTI_displayMode = VLTDM_DRAFT_WITH_STYLES;
+	vl->VLTI_attrs = VLTA_EXACT_HEIGHT;
+	vl->VLTI_draftRegionSize.XYS_width = 200;
+	vl->VLTI_draftRegionSize.XYS_height = 40;
+	MemUnlock(mh);
+	@call lt::MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES();
+	@call lt::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+	TOCHECK(@call lt::MSG_VIS_LARGE_TEXT_GET_REGION_COUNT() == 1);
+	for (i = 0; i < 20; i++)
+	    @call lt::MSG_VIS_TEXT_APPEND_PTR("Here is some text.\r", 0);
+	n = @call lt::MSG_VIS_LARGE_TEXT_GET_REGION_COUNT();
+	toState.TOS_regions[0] = n;
+	TOCHECK(n >= 5);
+	/* (the regions hold all the lines and text, one after the other,
+	 * no more than fit; each one's top below the one before) */
+	ObjLockObjBlock(mh);
+	for (i = 0; i < n; i++) {
+	    VisLargeTextRegionArrayElement *e;
+
+	    vl = (VisLargeTextInstance *) ObjDerefVis(lt);
+	    e = ChunkArrayElementToPtr(ConstructOptr(mh, vl->VLTI_regionArray),
+				       i, NULL);
+	    TOCHECK(e->VLTRAE_lineCount > 0 &&
+		    e->VLTRAE_calcHeight.WBF_int <= 40);
+	    if (!i) {
+		toState.TOS_regions[1] = (word) e->VLTRAE_lineCount;
+		toState.TOS_regions[2] = e->VLTRAE_calcHeight.WBF_int;
+	    }
+	    lines += (word) e->VLTRAE_lineCount;
+	    chars += e->VLTRAE_charCount;
+	    MemUnlock(mh);
+	    @call lt::MSG_VIS_LARGE_TEXT_GET_REGION_POS(&pos, i);
+	    ObjLockObjBlock(mh);
+	    TOCHECK(pos.VLTGRPRS_yPosition == y);
+	    y += pos.VLTGRPRS_height;
+	}
+	vl = (VisLargeTextInstance *) ObjDerefVis(lt);
+	total = vl->VLTI_totalHeight;
+	MemUnlock(mh);
+	toState.TOS_regions[3] = lines;
+	TOCHECK(lines == 21 && chars == 20 * 19);
+	TOCHECK(total == (dword) y);
+	/* (a line's region and place: the first line of the second
+	 * region at its top) */
+	{
+	    VisTextGetLineOffsetAndFlagsParameters lp;
+
+	    lp.VTGLOAFP_line = toState.TOS_regions[1];
+	    TOCHECK(!@call lt::MSG_VIS_TEXT_GET_LINE_OFFSET_AND_FLAGS(&lp));
+	    TOCHECK(lp.VTGLOAFP_offset == 19 * (dword) toState.TOS_regions[1]);
+	    TOCHECK(@call lt::MSG_VIS_TEXT_GET_LINE_FROM_OFFSET(
+			lp.VTGLOAFP_offset) == toState.TOS_regions[1]);
+	}
+	/* (fewer lines: fewer regions) */
+	@call lt::MSG_VIS_TEXT_SELECT_RANGE(20 * 19, 5 * 19);
+	@call lt::MSG_VIS_TEXT_DELETE_SELECTION();
+	toState.TOS_regions[4] = @call lt::MSG_VIS_LARGE_TEXT_GET_REGION_COUNT();
+	TOCHECK(toState.TOS_regions[4] < n &&
+		toState.TOS_regions[4] ==
+		(word) ((6 + toState.TOS_regions[1] - 1) /
+			toState.TOS_regions[1]));
+	@call lt::MSG_VIS_TEXT_DELETE_ALL();
+	toState.TOS_regions[5] = @call lt::MSG_VIS_LARGE_TEXT_GET_REGION_COUNT();
+	TOCHECK(toState.TOS_regions[5] == 1);
+	@call lt::MSG_META_OBJ_FREE();
 	ClipboardCloseClipboardFile();
 	break;
     }

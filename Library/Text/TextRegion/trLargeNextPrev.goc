@@ -1,0 +1,44 @@
+/*
+ * trLargeNextPrev.goc -- after trLargeNextPrev.asm: LargeRegionNext,
+ * LargeRegionIsLastInSection, LargeRegionIsLastRegionInLastSection.
+ */
+@include "textInt.goh"
+
+/* LargeRegionNext: the next region with lines room (not empty), FALSE
+ * if none */
+Boolean LargeRegionNext(optr o, word *region)
+{
+    word n = LargeRegionCount(o), i;
+
+    for (i = (word) (*region + 1); i < n; i++)
+	if (!(LargeRegionPtr(o, i)->VLTRAE_flags & VLTRF_EMPTY)) {
+	    *region = i;
+	    return TRUE;
+	}
+    return FALSE;
+}
+
+/* LargeRegionIsLastInSection: no region of its section follows */
+Boolean LargeRegionIsLastInSection(optr o, word region)
+{
+    word n = LargeRegionCount(o), sect = LargeRegionPtr(o, region)->
+						VLTRAE_section, i;
+
+    for (i = (word) (region + 1); i < n; i++) {
+	const VisLargeTextRegionArrayElement *e = LargeRegionPtr(o, i);
+
+	if (e->VLTRAE_section != sect)
+	    return TRUE;
+	if (!(e->VLTRAE_flags & VLTRF_EMPTY))
+	    return FALSE;
+    }
+    return TRUE;
+}
+
+/* LargeRegionIsLastRegionInLastSection: the last region with room */
+Boolean LargeRegionIsLastRegionInLastSection(optr o, word region)
+{
+    word r = region;
+
+    return !LargeRegionNext(o, &r);
+}

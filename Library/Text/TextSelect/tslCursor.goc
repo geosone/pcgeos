@@ -59,7 +59,7 @@ void CursorToggle(optr o)
     if ((word) x > (word) right)
 	x = right;
     GrSaveState(g);
-    SmallRegionTransformGState(o, FALSE);
+    TR_RegionMoveGState(o, VT(o)->VTI_cursorRegion, FALSE);
     GrMoveTo(g, x, y);
     TA_GetCharAttrForPosition(o, VT(o)->VTI_selectStart, TRUE, &ca, NULL);
     GrSetFont(g, ca.VTCA_fontID,

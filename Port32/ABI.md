@@ -7424,8 +7424,34 @@ the modules of the asm; what is there:
   draw) keep the text they last locked in a `TextLockState` and release
   it at the next callback and when done. Unlike the asm, the characters
   "after" a large pointer leave out the null, as a small object's do.
-  Large lines, regions and runs come later. Until then a large object
-  has no lines and is not drawn (the clipboard's object is never drawn).
+  The runs of a large object are huge arrays too (`taRunTrans.goc`).
+- **Lines and regions of large objects.** A large object's lines are a
+  huge array of variable-size elements (`LineInfo` and its fields;
+  `TextLine/tlLarge*.goc`). A line is reached by `TL_LineLock`, which
+  returns a pointer to it, and given back by `TL_LineUnlock`.
+  `TL_LineRelock` refreshes that pointer after something that can move
+  the block, and `TL_LineDirty` marks the line changed. A line's top and
+  its text count from the first line of its region. The regions are
+  `VLTI_regionArray`, a chunk array of
+  `VisLargeTextRegionArrayElement` with each region's line and
+  character counts and its height (`TextRegion/trLarge*.goc`). Their
+  positions depend on the display mode. In page mode a region sits at
+  its own spatial position. Condensed mode stacks the regions by their
+  size; galley and draft mode stack them by their calculated height and
+  `VLTI_regionSpacing`. In the draft modes the regions are
+  `VLTI_draftRegionSize`. The calculation fills the regions one after
+  another. A line that does not fit below the lines before it starts
+  the next region, and so does a column or section break. The next
+  region is made if needed (`MSG_VIS_LARGE_TEXT_APPEND_REGION`). After
+  the last region with text, `MSG_VIS_LARGE_TEXT_REGION_IS_LAST`
+  removes the rest. A change of the total height sends
+  `MSG_VIS_TEXT_HEIGHT_NOTIFY`, which sets the content's document
+  bounds. Drawing, inverting and the cursor move the gstate to each
+  region (`TR_RegionMoveGState`). Unlike the asm, all the lines are
+  calculated again after a change, not only up to where they meet the
+  old ones. Not done yet: widows, orphans and lines kept together, a
+  section break that starts the next section's first region, and
+  `MSG_VIS_LARGE_TEXT_REGION_CHANGED` from a subclass.
 - **The clipboard of the text** (`TextTrans/`). `MSG_META_CLIPBOARD_COPY`
   stores the selection in the clipboard file as a transfer item with
   one `CIF_TEXT` format: a `TextTransferBlockHeader` (a VM tree) whose

@@ -14,6 +14,7 @@ void InvertRange(optr o, dword start, dword end)
     VisInstance *v = (VisInstance *) t;
     GStateHandle g = t->VTI_gstate;
     dword first, last, line, ls, s;
+    word region;
     sdword top;
     WBFixed wtop;
     sword width = (sword) (v->VI_bounds.R_right - v->VI_bounds.R_left -
@@ -30,16 +31,34 @@ void InvertRange(optr o, dword start, dword end)
 	return;
     wtop = TL_LineGetTop(o, first);
     top = TEXT_WBF(&wtop);
+    region = TR_RegionFromLine(o, first);
     GrSaveState(g);
-    SmallRegionTransformGState(o, FALSE);
-    GrSetAreaMaskSys(g, SDM_100);
-    GrSetMixMode(g, MM_INVERT);
     for (line = first; line <= last; line++) {
-	LineInfo *li = TL_LineLock(o, line, NULL);
-	sdword hgt = TEXT_WBF(&li->LI_hgt);
-	dword count = TL_LineGetCharCount(li);
-	word fields = TL_LineGetFieldCount(o, line);
-	sword adj = li->LI_adjustment, left, right, x;
+	LineInfo *li;
+	sdword hgt;
+	dword count;
+	word fields;
+	sword adj, left, right, x;
+
+	if (line == first || TR_RegionFromLine(o, line) != region) {
+	    /* (each region's lines in it) */
+	    if (line != first) {
+		region = TR_RegionFromLine(o, line);
+		top = 0;
+		GrRestoreState(g);
+		GrSaveState(g);
+	    }
+	    TR_RegionMoveGState(o, region, FALSE);
+	    GrSetAreaMaskSys(g, SDM_100);
+	    GrSetMixMode(g, MM_INVERT);
+	    if (t->VTI_storageFlags & VTSF_LARGE)
+		width = TR_RegionWidth(o, region, 0, 0);
+	}
+	li = TL_LineLock(o, line, NULL);
+	hgt = TEXT_WBF(&li->LI_hgt);
+	count = TL_LineGetCharCount(li);
+	fields = TL_LineGetFieldCount(o, line);
+	adj = li->LI_adjustment;
 
 	if (hgt) {
 	    if (ls >= start)

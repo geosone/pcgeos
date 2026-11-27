@@ -137,8 +137,8 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
 }
 
 /*
- * TextDraw (TextDrawRegionCallback): the lines from top to bottom (in
- * the text's coordinates), or all of them (TCBF_DRAW_ALL_LINES); with
+ * TextDraw (TextDrawRegionCallback): the lines of each region from its
+ * top to its bottom (in the region's coordinates), or all of them (TCBF_DRAW_ALL_LINES); with
  * onlyMarked those that need drawing (LF_NEEDS_DRAW).  The gstate is
  * VTI_gstate, moved to the text here and left as it was.
  */
@@ -146,49 +146,78 @@ void TextDraw(optr o, byte flags, Boolean onlyMarked)
 {
     VisTextInstance *t = VT(o);
     GStateHandle g = t->VTI_gstate;
-    dword n, line, start = 0;
-    sdword top = 0;
+    dword n, line, start, last;
+    sdword top;
     Rectangle mask;
+    RectDWord md;
     LICL_vars l;
-    Boolean drawn = FALSE, all = (flags & TCBF_DRAW_ALL_LINES) != 0;
+    Boolean drawn = FALSE, all = (flags & TCBF_DRAW_ALL_LINES) != 0,
+	    large = (t->VTI_storageFlags & VTSF_LARGE) != 0;
+    word region, regions = large ? LargeRegionCount(o) : 1;
 
     if (!t->VTI_lines || !g)
 	return;				/* TextCheckCanDraw */
     memset(&l, 0, sizeof(l));
     l.LICL_object = o;
-    GrSaveState(g);
-    SmallRegionTransformGState(o, (flags & TCBF_PRINT) != 0);
-    if (!all && !onlyMarked)
-	GrGetMaskBounds(g, &mask);
     n = TL_LineGetCount(o);
-    for (line = 0; line < n; line++) {
-	const LineInfo *li = TL_LineLock(o, line, NULL);
-	sdword hgt = TEXT_WBF(&li->LI_hgt);
-	dword count = TL_LineGetCharCount(li);
-	LineFlags lf = li->LI_flags;
-	Boolean draw;
+    /* (TextDrawRegionCallback for each region, LargeEnumRegionsInClipRect) */
+    for (region = 0; region < regions; region++) {
+	sdword h;
 
-	TL_LineUnlock(o, li);
-	if (onlyMarked)
-	    draw = (lf & LF_NEEDS_DRAW) != 0;
-	else if (all)
-	    draw = TRUE;
-	else
-	    /* TextDrawCheckMask: the lines the mask touches */
-	    draw = (sword) (top >> 8) <= mask.R_bottom &&
-		   (sword) ((top + hgt + 0xff) >> 8) >= mask.R_top;
-	if (draw) {
-	    LineDraw(&l, line, top, start, flags, drawn);
-	    drawn = TRUE;
+	if (large && (LargeRegionGetFlags(o, region) & VLTRF_EMPTY))
+	    continue;
+	GrSaveState(g);
+	TR_RegionMoveGState(o, region, (flags & TCBF_PRINT) != 0);
+	if (!all && !onlyMarked) {
+	    if (!large)
+		GrGetMaskBounds(g, &mask);
+	    else {
+		/* (the regions the mask does not touch are left out) */
+		h = (sdword) TR_RegionGetTrueHeight(o, region);
+		if (!GrGetMaskBoundsDWord(g, &md) || md.RD_bottom < 0 ||
+		    md.RD_top > h) {
+		    GrRestoreState(g);
+		    continue;
+		}
+		mask.R_top = (sword) (md.RD_top < 0 ? 0 : md.RD_top);
+		mask.R_bottom = (sword) (md.RD_bottom > h ? h : md.RD_bottom);
+	    }
 	}
-	start += count;
-	top += hgt;
+	line = TR_RegionGetTopLine(o, region);
+	last = line + TR_RegionGetLineCount(o, region);
+	if (last > n)
+	    last = n;
+	(void) TR_RegionFromLineGetStartLineAndOffset(o, line, NULL, &start);
+	top = 0;
+	for (; line < last; line++) {
+	    const LineInfo *li = TL_LineLock(o, line, NULL);
+	    sdword hgt = TEXT_WBF(&li->LI_hgt);
+	    dword count = TL_LineGetCharCount(li);
+	    LineFlags lf = li->LI_flags;
+	    Boolean draw;
+
+	    TL_LineUnlock(o, li);
+	    if (onlyMarked)
+		draw = (lf & LF_NEEDS_DRAW) != 0;
+	    else if (all)
+		draw = TRUE;
+	    else
+		/* TextDrawCheckMask: the lines the mask touches */
+		draw = (sword) (top >> 8) <= mask.R_bottom &&
+		       (sword) ((top + hgt + 0xff) >> 8) >= mask.R_top;
+	    if (draw) {
+		LineDraw(&l, line, top, start, flags, drawn);
+		drawn = TRUE;
+	    }
+	    start += count;
+	    top += hgt;
+	}
+	if (!(flags & TCBF_PRINT) &&
+	    !((flags & TCBF_MSG_DRAW) &&
+	      (VT(o)->VTI_features & VTF_TRANSPARENT)))
+	    TR_RegionClearToBottom(o, region);
+	GrRestoreState(g);
     }
-    if (!(flags & TCBF_PRINT) &&
-	!((flags & TCBF_MSG_DRAW) &&
-	  (VT(o)->VTI_features & VTF_TRANSPARENT)))
-	SmallRegionClearToBottom(o);
-    GrRestoreState(g);
 }
 
 /*
@@ -258,5 +287,5 @@ void TextScreenUpdate(optr o)
     TextScreenUpdate(oself);
     EditHilite(oself);
     TextGStateDestroy(oself);
-    SmallRegionAdjustHeight(oself, before);
+    TR_RegionAdjustHeight(oself, before);
 }

@@ -439,6 +439,52 @@ extern word TR_RegionFromLineGetStartLineAndOffset(optr o, dword line,
 						dword *first, dword *start);
 extern word TR_RegionFromPoint(optr o, sdword x, sdword y);
 extern Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end);
+extern dword TR_RegionGetCharCount(optr o, word region);
+extern Boolean TR_RegionNext(optr o, word *region);
+extern void TR_RegionIsLast(optr o, word region);
+extern WBFixed TR_RegionGetHeight(optr o, word region);
+extern word TR_RegionGetTrueHeight(optr o, word region);
+extern void TR_RegionAdjustHeight(optr o, WBFixed before);
+extern void TR_RegionClearToBottom(optr o, word region);
+extern void TR_RegionMoveGState(optr o, word region, Boolean print);
+
+/* TextRegion/trLarge*.goc: the regions of a large object */
+#define VLT(o)	((VisLargeTextInstance *) ObjDerefVis(o))
+extern VisLargeTextRegionArrayElement *LargeRegionPtr(optr o, word region);
+extern word LargeRegionCount(optr o);
+extern void LargeRegionGetRegionTopLeft(optr o, word region, PointDWord *p);
+extern dword LargeRegionGetLineCount(optr o, word region);
+extern dword LargeRegionGetCharCount(optr o, word region);
+extern void LargeRegionLeftRight(optr o, word region, sword *left,
+				 sword *right);
+extern word LargeRegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
+						dword *line, dword *start);
+extern word LargeRegionFromLineGetStartLineAndOffset(optr o, dword line,
+						dword *first, dword *start);
+extern word LargeRegionFromLine(optr o, dword line);
+extern word LargeRegionFromPoint(optr o, sdword x, sdword y);
+extern word LargeRegionGetTrueWidth(optr o, word region, Boolean forBlt);
+extern WBFixed LargeRegionGetHeight(optr o, word region);
+extern word LargeRegionGetTrueHeight(optr o, word region);
+extern Boolean LargeCheckCrossSectionChange(optr o, dword start, dword end);
+extern void LargeRegionAlterFlags(optr o, word region,
+				  VisLargeTextRegionFlags set,
+				  VisLargeTextRegionFlags clear);
+extern VisLargeTextRegionFlags LargeRegionGetFlags(optr o, word region);
+extern dword LargeRegionGetTopLine(optr o, word region);
+extern dword LargeRegionGetStartOffset(optr o, word region);
+extern Boolean LargeRegionNext(optr o, word *region);
+extern Boolean LargeRegionIsLastInSection(optr o, word region);
+extern Boolean LargeRegionIsLastRegionInLastSection(optr o, word region);
+extern void LargeRegionTransformGState(optr o, word region);
+extern Boolean LargeRegionMakeNextRegion(optr o, word *region);
+extern void LargeRegionRegionIsLast(optr o, word region);
+extern void LargeRegionSetCounts(optr o, word region, dword lines,
+				 dword chars);
+extern void LargeRegionClearToBottom(optr o, word region);
+extern void SendLargeHeightNotify(optr o);
+extern void LargeRegionAdjustHeight(optr o, word region, WBFixed height);
+extern void RecalcTotalSize(optr o);
 
 /* TextLine/tlCommonPosition.goc: positions on a line (from its left
  * edge, LI_adjustment), the line at a height */
