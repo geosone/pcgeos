@@ -13,8 +13,7 @@
  * Port32 (Port32/ABI.md section 13z): small objects.  A cursor at the
  * end of a line that was wrapped would stand at the start of the next
  * (the cursor is placed by its offset), so End and the moves up and
- * down stop one character before.  Not yet: overstrike mode, smart
- * quotes, pages.
+ * down stop one character before.  Not yet: pages.
  * As in the asm VTKF_SELECT_LINE, _PARAGRAPH and _OBJECT do nothing.
  */
 @include "textInt.goh"
@@ -337,7 +336,15 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 	FakeSelectionNoAdjust(o, start, TRUE);
 	break;
     case VTKF_TOGGLE_OVERSTRIKE_MODE:
+	/* VTFToggleOverstrikeMode: overstrike mode only if the user may */
+	if (VT(o)->VTI_state & VTS_OVERSTRIKE_MODE)
+	    @call o::MSG_VIS_TEXT_ENTER_INSERT_MODE(TRUE);
+	else if (UserGetOverstrikeMode())
+	    @call o::MSG_VIS_TEXT_ENTER_OVERSTRIKE_MODE(TRUE);
+	break;
     case VTKF_TOGGLE_SMART_QUOTES:
+	/* VTFToggleSmartQuotes */
+	uiSmartQuotes = (byte) ~uiSmartQuotes;
 	break;
     default:
 	return FALSE;
@@ -366,4 +373,10 @@ void TSL_GetCursorLineBLOAndHeight(optr o, WBFixed *blo, WBFixed *hgt)
 {
     TL_LineFromPositionGetBLOAndHeight(o, VT(o)->VTI_cursorPos.P_y, blo,
 				       hgt);
+}
+
+/* VTFClearSmartQuotes: smart quotes on again (exported) */
+void VTFClearSmartQuotes(void)
+{
+    uiSmartQuotes = 0;
 }

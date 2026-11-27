@@ -152,7 +152,8 @@ Ordered by dependency, each with host-side tests under `linux`:
   view, `MSG_VIS_TEXT_SHOW_SELECTION`); the notifications for the
   controllers (`taNotify.goc`: select state, attributes, selection,
   counts, search, spell, cursor position, the null status of a lost
-  target); ctest `library.text`.
+  target); overstrike mode and smart quotes; scrolling a view by lines
+  and pages; ctest `library.text`.
   Open: large objects, shared elements and style sheets (and their
   notifications), drawing borders, undo, the clipboard (`pasteable`).
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose

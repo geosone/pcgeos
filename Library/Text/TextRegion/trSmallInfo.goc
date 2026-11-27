@@ -1,7 +1,8 @@
 /*
  * trSmallInfo.goc -- after trSmallInfo.asm: SmallRegionGetRegionTopLeft,
  * SmallRegionLeftRight, SmallRegionFromOffsetGetStartLineAndOffset,
- * SmallRegionFromLine.  A small object has one region.
+ * SmallRegionFromLine, SmallRegionFromPoint.  A small object has one
+ * region.
  */
 @include "textInt.goh"
 
@@ -44,4 +45,24 @@ word SmallRegionFromLine(optr o, dword line)
     (void) o;
     (void) line;
     return 0;
+}
+
+/* SmallRegionFromPoint: the region at a point of the document (32
+ * bit): 0, or CA_NULL_ELEMENT outside the object */
+word SmallRegionFromPoint(optr o, sdword x, sdword y)
+{
+    VisTextInstance *t;
+    PointDWord tl;
+    word region = 0;
+
+    SmallRegionGetRegionTopLeft(o, &tl);
+    x -= tl.PD_x;
+    y -= tl.PD_y;
+    if (x < 0 || y < 0)
+	region = CA_NULL_ELEMENT;
+    t = VT(o);
+    if ((word) x > (word) (t->VI_bounds.R_right - t->VI_bounds.R_left) ||
+	(word) y > (word) (t->VI_bounds.R_bottom - t->VI_bounds.R_top))
+	region = CA_NULL_ELEMENT;
+    return region;
 }

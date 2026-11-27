@@ -140,6 +140,16 @@ static const InputMapHeader inputMapTable[] = {
 
 static const char inputCategoryStr[] = "input";
 
+/* InitOverstrikeMode: [ui] overstrikeMode, off if not there */
+void InitOverstrikeMode(void)
+{
+    Boolean on;
+
+    if (InitFileReadBoolean("ui", "overstrikeMode", &on))
+	on = FALSE;
+    uiOverstrikeMode = on ? (byte) -1 : 0;
+}
+
 /* the mouse driver's information, if there is one */
 static const MouseDriverInfo *MouseInfo(void)
 {
@@ -268,6 +278,7 @@ static Boolean SystemUI(void)
 
     UserMakeScreens(block);
     UserSetDefaultInputMap();
+    InitOverstrikeMode();
 
     /* the sound library (UserUpdateSoundParams) */
     @call Self()::MSG_USER_UPDATE_SOUND_PARAMS();

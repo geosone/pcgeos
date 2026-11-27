@@ -3732,14 +3732,14 @@ typedef struct {
 
 /***************************************************************************/
 
-@message sword MSG_VIS_TEXT_GET_SCROLL_AMOUNT(sword offset = dx,
-					      sword scrollAmount = cx) = dx;
+@message sword MSG_VIS_TEXT_GET_SCROLL_AMOUNT(
+				TrackScrollingParams *params = ss:bp) = dx;
 /*
  *	Decide the amount to scroll vertically.
  *
- *	Pass:	offset - offset to scroll from.
- *		scrollAmount - suggested amount to scroll. 
- *				(Positive or negative).
+ *	Pass:	params - the view's scrolling (Port32: as the asm's
+ *			 handler and its caller, OLTextNormalizePosition,
+ *			 use it; the SDK's dx and cx were never read)
  *	Return:	amount to scroll.
  *	Compat:	Cannot be use on one line objects
  */

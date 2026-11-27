@@ -10,6 +10,7 @@ UIFlags uiFlags;
 word uiAckID;
 optr uiAckOD;
 UIButtonFlags uiButtonFlags;
+byte uiOverstrikeMode;		/* -1: overstrike mode on */
 /* userVariable.def: the options of the fields (GenFieldLoadOptions) */
 UIInterfaceLevel uiInterfaceLevel = UIIL_ADVANCED;
 UIInterfaceLevel uiDefaultLaunchLevel = UIIL_ADVANCED;

@@ -1014,6 +1014,10 @@ extern void UserSendToApplicationViaProcess(Message msg, const void *params,
 					    word paramSize);
 /* TRUE if keyboard accelerators are on ([ui] kbdAcceleratorMode) */
 extern Boolean UserGetKbdAcceleratorMode(void);
+/* TRUE if the user may type in overstrike mode ([ui] overstrikeMode);
+ * set, and written to the init file */
+extern Boolean UserGetOverstrikeMode(void);
+extern void UserSetOverstrikeMode(Boolean on);
 /* the DisplayType of the first screen in the high byte, 0xff in the
  * low one once a screen set it (UserGetDisplayType of the asm) */
 extern word UserGetDisplayType(void);

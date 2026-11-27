@@ -7377,10 +7377,21 @@ the modules of the asm; what is there:
   `ATTR_VIS_TEXT_NOTIFY_EVEN_IF_NOT_TARGETED`); losing the target sends
   the null status. `MSG_META_UI_FORCE_CONTROLLER_UPDATE` too.
   `MemIncRefCount`/`MemDecRefCount` take a zero handle as the asm does.
+- **Overstrike mode and smart quotes** (`Text/textMethodManip.goc`,
+  `textMethodInput.goc`): in overstrike mode a typed character replaces
+  the one after a cursor; the key function toggles it only when the UI
+  allows it (`UserGetOverstrikeMode`, `[ui] overstrikeMode`, read when
+  the UI attaches). Smart quotes (`VTF_ALLOW_SMART_QUOTES`, `[text]
+  smartQuotes`) open after a space or bracket and at the start, else
+  close; the quotes come from `[localization] quotes` (the text
+  library's entry, `Text/textEntry.goc`).
+- **Scrolling a view on whole lines** (`Text/textScroll.goc`):
+  `MSG_VIS_TEXT_GET_SCROLL_AMOUNT` takes the `TrackScrollingParams`
+  (the C header said dx and cx, which the asm never read), asked by
+  `OLTextClass`'s `MSG_META_CONTENT_TRACK_SCROLLING`.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
   paragraph attribute, borders and paragraph backgrounds, tab leaders,
-  extended styles, hyphenation, graphics, overstrike mode, smart
-  quotes, the large mouse messages, selection by words and lines while
+  extended styles, hyphenation, graphics, the large mouse messages, selection by words and lines while
   dragging, quick transfer, the clipboard, the pointer image over
   text;
   filters, undo, suspension, the style and style sheet notifications

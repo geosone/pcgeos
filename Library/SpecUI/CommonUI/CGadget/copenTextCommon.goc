@@ -656,3 +656,21 @@ const KeyboardShortcut *SpecGetTextKbdBindings(word *count,
     *functions = textKbdFunctions;
     return textKbdBindings;
 }
+
+/*
+ * OLTextNormalizePosition: a vertical scroll by lines or pages on the
+ * text's whole lines (MSG_VIS_TEXT_GET_SCROLL_AMOUNT); not the initial
+ * position, a scroll into view or a drag
+ */
+@method OLTextClass, MSG_META_CONTENT_TRACK_SCROLLING
+{
+    ScrollAction a;
+
+    GenSetupTrackingArgs(args);
+    a = args->TSP_action;
+    if (a != SA_INITIAL_POS && a != SA_SCROLL_INTO && a != SA_SCROLL &&
+	a != SA_DRAG_SCROLL && (args->TSP_flags & SF_VERTICAL))
+	args->TSP_change.PD_y =
+	    (sword) @call oself::MSG_VIS_TEXT_GET_SCROLL_AMOUNT(args);
+    GenReturnTrackingArgs(args);
+}

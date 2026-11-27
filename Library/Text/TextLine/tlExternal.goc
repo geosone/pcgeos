@@ -4,7 +4,8 @@
  * TL_LineStorageDestroy, TL_LineGetCount, TL_LineInsert, TL_LineDelete,
  * TL_LineToOffsetStart, TL_LineFromOffset, TL_LineGetTop,
  * TL_LineFromPositionGetBLOAndHeight, TL_LineGetHeight,
- * TL_LineGetParaCount.
+ * TL_LineGetParaCount, TL_LineToPosition, TL_LineFromExtPosition,
+ * TL_LineToExtPosition, TL_LinePrevious, TL_LineNext.
  */
 @include "textInt.goh"
 
@@ -113,4 +114,67 @@ dword TL_LineGetParaCount(optr o)
 	if (SmallGetLinePointer(o, i, NULL)->LI_flags & LF_STARTS_PARAGRAPH)
 	    count++;
     return count;
+}
+
+/* TL_LineToPosition: a line's left edge and top in its region */
+void TL_LineToPosition(optr o, dword line, sword *x, sword *y)
+{
+    SmallLineToPosition(o, line, x, y);
+}
+
+/* the part of a dword in a word: below 0 is 0, beyond is 0xffff */
+static sword ClampWord(sdword v)
+{
+    if (v < 0)
+	return 0;
+    if (v > 0xffff)
+	return (sword) -1;
+    return (sword) v;
+}
+
+/*
+ * TL_LineFromExtPosition: the line at a point of the document (32 bit);
+ * the region there, else the cursor's.  *below set if the point is
+ * below the last line.
+ */
+dword TL_LineFromExtPosition(optr o, sdword x, sdword y, Boolean *below)
+{
+    PointDWord tl;
+    word region = TR_RegionFromPoint(o, x, y);
+
+    if (region == CA_NULL_ELEMENT)
+	region = VT(o)->VTI_cursorRegion;
+    TR_RegionGetTopLeft(o, region, &tl);
+    /* (the asm's x within the region: a line does not depend on it) */
+    return TL_LineFromPosition(o, ClampWord(y - tl.PD_y), below);
+}
+
+/* TL_LineToExtPosition: a line's left edge and top in the document */
+void TL_LineToExtPosition(optr o, dword line, sdword *x, sdword *y)
+{
+    PointDWord tl;
+    sword lx, ly;
+
+    TR_RegionGetTopLeft(o, TR_RegionFromLine(o, line), &tl);
+    TL_LineToPosition(o, line, &lx, &ly);
+    *x = tl.PD_x + (word) lx;
+    *y = tl.PD_y + (word) ly;
+}
+
+/* TL_LinePrevious, TL_LineNext: FALSE if there is none (*line kept) */
+Boolean TL_LinePrevious(optr o, dword *line)
+{
+    (void) o;
+    if (!*line)
+	return FALSE;
+    (*line)--;
+    return TRUE;
+}
+
+Boolean TL_LineNext(optr o, dword *line)
+{
+    if (*line + 1 >= TL_LineGetCount(o))
+	return FALSE;
+    (*line)++;
+    return TRUE;
 }

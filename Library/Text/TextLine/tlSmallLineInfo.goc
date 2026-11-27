@@ -1,6 +1,6 @@
 /*
  * tlSmallLineInfo.goc -- after tlSmallLineInfo.asm: SmallLineGetCount,
- * SmallLineGetTop.
+ * SmallLineGetTop, SmallLineGetLeftEdge.
  */
 @include "textInt.goh"
 #include <chunkarr.h>
@@ -25,4 +25,10 @@ WBFixed SmallLineGetTop(optr o, dword line)
     w.WBF_int = (word) (top >> 8);
     w.WBF_frac = (byte) top;
     return w;
+}
+
+/* SmallLineGetLeftEdge: where a line starts (its adjustment) */
+sword SmallLineGetLeftEdge(optr o, dword line)
+{
+    return SmallGetLinePointer(o, line, NULL)->LI_adjustment;
 }

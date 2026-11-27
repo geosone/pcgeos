@@ -151,6 +151,8 @@ export UserCallSystem
 export UserCreateSystemObject
 export UserDestroySystemObject
 export UserGetDisplayType
+export UserGetOverstrikeMode
+export UserSetOverstrikeMode
 export UserGetDefaultUILevel
 export UserGetDefaultLaunchLevel
 export UserGetLaunchModel

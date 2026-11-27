@@ -308,6 +308,9 @@ extern UIInterfaceLevel uiDefaultLaunchLevel;
 extern UIInterfaceOptions uiInterfaceOptions;
 extern UILaunchModel uiLaunchModel;
 extern UILaunchOptions uiLaunchOptions;
+extern byte uiOverstrikeMode;
+/* User/userMain.goc: [ui] overstrikeMode */
+extern void InitOverstrikeMode(void);
 extern optr uiSystemObj;
 extern optr uiFlowObj;
 extern GeodeHandle uiSpecUILibrary;

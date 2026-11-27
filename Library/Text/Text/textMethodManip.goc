@@ -1,0 +1,37 @@
+/*
+ * textMethodManip.goc -- after textMethodManip.asm:
+ * MSG_VIS_TEXT_ENTER_OVERSTRIKE_MODE, MSG_VIS_TEXT_ENTER_INSERT_MODE.
+ */
+@include "textInt.goh"
+
+/* VisTextEnterOverstrikeMode, VisTextEnterInsertMode: the mode; a
+ * cursor drawn again for it */
+static void SetMode(optr o, Boolean overstrike)
+{
+    VisTextInstance *t = VT(o);
+    Boolean is = (t->VTI_state & VTS_OVERSTRIKE_MODE) != 0;
+
+    if (is != overstrike && TSL_SelectIsCursor(o)) {
+	EditUnHilite(o);
+	t = VT(o);
+	t->VTI_state ^= VTS_OVERSTRIKE_MODE;
+	EditHilite(o);
+    }
+    t = VT(o);
+    if (overstrike)
+	t->VTI_state |= VTS_OVERSTRIKE_MODE;
+    else
+	t->VTI_state &= ~VTS_OVERSTRIKE_MODE;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_ENTER_OVERSTRIKE_MODE
+{
+    (void) calledFromTextObject;
+    SetMode(oself, TRUE);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_ENTER_INSERT_MODE
+{
+    (void) calledFromTextObject;
+    SetMode(oself, FALSE);
+}

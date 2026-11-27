@@ -121,6 +121,8 @@ extern void StartSelectAdjust(optr o, dword offset);
 extern Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f);
 /* where a line ends for the cursor */
 extern dword TSL_LineCursorEnd(optr o, dword line);
+/* smart quotes on again (text.gp exports it) */
+extern void VTFClearSmartQuotes(void);
 /* the baseline and height of the cursor's line */
 extern void TSL_GetCursorLineBLOAndHeight(optr o, WBFixed *blo, WBFixed *hgt);
 
@@ -132,6 +134,12 @@ extern Boolean FilterReplacement(optr o, VisTextReplaceParameters *p);
 extern Boolean TF_CheckIfCharFiltered(optr o, word c);
 /* Text/textScrollOneLine.goc */
 extern void TextScrollOneLine(optr o, dword offset);
+/* Text/tVariable.goc (tVariable.def): smart quotes; the quotes, in the
+ * order of the init file's [localization] quotes */
+extern byte uiSmartQuotes;
+extern char uisqOpenSingle, uisqCloseSingle, uisqOpenDouble,
+	    uisqCloseDouble;
+
 /* TextAttr/taNotify.goc: the notifications of flags for the
  * controllers (0: the null status, the target lost) */
 extern void TA_SendNotification(optr o, VisTextNotificationFlags flags);
@@ -190,6 +198,18 @@ extern dword TL_LineFromOffset(optr o, dword offset, Boolean first,
 extern WBFixed TL_LineGetTop(optr o, dword line);
 extern WBFixed TL_LineGetHeight(optr o, dword line);
 extern dword TL_LineGetParaCount(optr o);
+/* a line's place (left edge, top) in its region and in the document;
+ * the line at a document point; the lines around one (FALSE: none) */
+extern void TL_LineToPosition(optr o, dword line, sword *x, sword *y);
+extern dword TL_LineFromExtPosition(optr o, sdword x, sdword y,
+				    Boolean *below);
+extern void TL_LineToExtPosition(optr o, dword line, sdword *x,
+				 sdword *y);
+extern Boolean TL_LinePrevious(optr o, dword *line);
+extern Boolean TL_LineNext(optr o, dword *line);
+/* TextLine/tlSmallLineInfo.goc, tlSmallPosition.goc */
+extern sword SmallLineGetLeftEdge(optr o, dword line);
+extern void SmallLineToPosition(optr o, dword line, sword *x, sword *y);
 extern void TL_LineFromPositionGetBLOAndHeight(optr o, sword y,
 					       WBFixed *blo, WBFixed *hgt);
 
@@ -262,6 +282,7 @@ extern void SmallRegionLeftRight(optr o, sword *left, sword *right);
 extern void SmallRegionFromOffsetGetStartLineAndOffset(optr o, dword *line,
 							dword *offset);
 extern word SmallRegionFromLine(optr o, dword line);
+extern word SmallRegionFromPoint(optr o, sdword x, sdword y);
 /* TextRegion/trSmallGet.goc */
 extern dword SmallRegionGetTopLine(optr o, word region);
 /* TextRegion/trExternal.goc: the region of a line or offset, its edges */
@@ -272,6 +293,7 @@ extern dword TR_RegionGetTopLine(optr o, word region);
 extern word TR_RegionFromOffsetGetStartLineAndOffset(optr o, dword offset,
 						dword *line, dword *start);
 extern word TR_RegionFromLine(optr o, dword line);
+extern word TR_RegionFromPoint(optr o, sdword x, sdword y);
 extern Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end);
 
 /* TextLine/tlCommonPosition.goc: positions on a line (from its left

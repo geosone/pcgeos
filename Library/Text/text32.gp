@@ -13,8 +13,10 @@ name text.lib
 type	library, single
 library	geos
 library	ui
+entry	TextLibraryEntry
 longname	"Text Library"
 tokenchars	"TEXL"
 tokenid		0
 
 export VisTextClass
+export VTFClearSmartQuotes

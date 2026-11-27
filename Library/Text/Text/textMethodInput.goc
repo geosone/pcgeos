@@ -11,11 +11,12 @@
  * (MSG_META_TEXT_CR_FILTERED, MSG_META_TEXT_TAB_FILTERED) and passes
  * them up.
  *
- * Port32 (Port32/ABI.md section 13z), not yet: the FEP, smart quotes,
- * overstrike mode, the error beep, right to left.
+ * Port32 (Port32/ABI.md section 13z), not yet: the FEP, the error beep,
+ * right to left.
  */
 @include "textInt.goh"
 #include <Internal/specUI.h>
+#include <initfile.h>
 
 
 typedef const KeyboardShortcut *SpecGetTextKbdBindingsRoutine(
@@ -31,6 +32,17 @@ static Boolean Insert(optr o, char c)
 	return FALSE;
     memset(&p, 0, sizeof(p));
     p.VTRP_range.VTR_start = VIS_TEXT_RANGE_SELECTION;
+    /* overstrike mode: a cursor replaces the character after it (not
+     * at the end of the text) */
+    if (VT(o)->VTI_state & VTS_OVERSTRIKE_MODE) {
+	dword start, end;
+
+	TSL_SelectGetSelection(o, &start, &end);
+	if (start == end && start != TS_GetTextSize(o)) {
+	    p.VTRP_range.VTR_start = start;
+	    p.VTRP_range.VTR_end = start + 1;
+	}
+    }
     p.VTRP_insCount = 1;
     p.VTRP_flags = VTRF_FILTER | VTRF_KEYBOARD_INPUT |
 		   VTRF_USER_MODIFICATION;
@@ -38,6 +50,53 @@ static Boolean Insert(optr o, char c)
     p.VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer = &c;
     (void) VisTextReplace(o, &p);
     return TRUE;
+}
+
+/* CheckIfSmartQuotes: not turned off by the user, and [text]
+ * smartQuotes on */
+static Boolean CheckIfSmartQuotes(void)
+{
+    Boolean on;
+
+    if (uiSmartQuotes)
+	return FALSE;
+    if (InitFileReadBoolean("text", "smartQuotes", &on))
+	return FALSE;
+    return on != 0;
+}
+
+/* the characters after which a quote opens */
+static const char openQuoteList[] = {
+    ' ', '(', '[', '{', '<', C_TAB, C_ENTER, C_NONBRKSPACE
+};
+
+/* DoSmartQuotes: a quote typed as the opening or closing one */
+static char DoSmartQuotes(optr o, char c)
+{
+    char open, close, prev;
+    dword start, end;
+    word i;
+
+    if (!CheckIfSmartQuotes())
+	return c;
+    if (c == '\'') {
+	open = uisqOpenSingle;
+	close = uisqCloseSingle;
+    } else {
+	open = uisqOpenDouble;
+	close = uisqCloseDouble;
+    }
+    TSL_SelectGetSelection(o, &start, &end);
+    if (!start)
+	return open;
+    prev = (char) TS_GetCharAtOffset(o, start - 1);
+    for (i = 0; i < sizeof(openQuoteList); i++)
+	if (prev == openQuoteList[i])
+	    return open;
+    /* (after an opening quote of the other kind: open too) */
+    if (prev == (c == '\'' ? uisqOpenDouble : uisqOpenSingle))
+	return open;
+    return close;
 }
 
 /* CallKeyBinding: TRUE if the key was text or bound to a function */
@@ -51,8 +110,14 @@ static Boolean CallKeyBinding(optr o, word character, word flags,
 
     if (character != ((VC_ISCTRL << 8) | VC_BACKSPACE) &&
 	(!UserCheckAcceleratorChar(character, flags, state) ||
-	 UserCheckInsertableCtrlChar(character, flags, state)))
-	return Insert(o, (char) character);
+	 UserCheckInsertableCtrlChar(character, flags, state))) {
+	char c = (char) character;
+
+	if ((c == '\'' || c == '"') &&
+	    (VT(o)->VTI_features & VTF_ALLOW_SMART_QUOTES))
+	    c = DoSmartQuotes(o, c);
+	return Insert(o, c);
+    }
     r = (SpecGetTextKbdBindingsRoutine *)
 	ProcGetLibraryEntry(UserGetSpecificUI(), SPIR_GET_TEXT_KBD_BINDINGS);
     if (!r)

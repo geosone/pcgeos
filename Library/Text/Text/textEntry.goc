@@ -1,0 +1,33 @@
+/*
+ * textEntry.goc -- after textEntry.asm: TextLibraryEntry.
+ *
+ * Port32: the FEP (USE_FEP) is not loaded; the asm's builds without it
+ * only read the quotes.
+ */
+@include "textInt.goh"
+#include <library.h>
+#include <initfile.h>
+
+/* loadFep: the quotes of [localization] quotes, if any (four
+ * characters: open and close single, open and close double) */
+static void LoadQuotes(void)
+{
+    char q[4];
+    word size;
+
+    if (InitFileReadDataBuffer("localization", "quotes", q, sizeof(q),
+			       &size) || size != sizeof(q))
+	return;
+    uisqOpenSingle = q[0];
+    uisqCloseSingle = q[1];
+    uisqOpenDouble = q[2];
+    uisqCloseDouble = q[3];
+}
+
+Boolean TextLibraryEntry(LibraryCallType ty, GeodeHandle client)
+{
+    (void) client;
+    if (ty == LCT_ATTACH)
+	LoadQuotes();
+    return FALSE;
+}

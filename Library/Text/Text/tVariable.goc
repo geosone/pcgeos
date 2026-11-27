@@ -6,6 +6,15 @@
 #include <Internal/specUI.h>
 
 @classdecl VisTextClass;
+
+/* tVariable.def: smart quotes off by the user (VTFToggleSmartQuotes);
+ * the quotes, [localization] quotes may change them (textEntry.goc) */
+byte uiSmartQuotes;
+char uisqOpenSingle = C_QUOTESNGLEFT;
+char uisqCloseSingle = C_QUOTESNGRIGHT;
+char uisqOpenDouble = C_QUOTEDBLLEFT;
+char uisqCloseDouble = C_QUOTEDBLRIGHT;
+
 /* textCalc.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_FROM_OFFSET;
@@ -79,6 +88,13 @@
 @extern method VisTextClass, MSG_VIS_TEXT_DELETE_ALL;
 @extern method VisTextClass, MSG_META_DELETE;
 @extern method VisTextClass, MSG_VIS_TEXT_DELETE_SELECTION;
+/* textMethodClipboard.goc */
+@extern method VisTextClass, MSG_META_SELECT_ALL;
+/* textMethodManip.goc */
+@extern method VisTextClass, MSG_VIS_TEXT_ENTER_OVERSTRIKE_MODE;
+@extern method VisTextClass, MSG_VIS_TEXT_ENTER_INSERT_MODE;
+/* textScroll.goc */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SCROLL_AMOUNT;
 /* textScrollOneLine.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_SCROLL_ONE_LINE;
 /* textOutput.goc */

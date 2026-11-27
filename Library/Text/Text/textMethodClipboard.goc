@@ -1,0 +1,11 @@
+/*
+ * textMethodClipboard.goc -- after textMethodClipboard.asm: clipboard
+ * related methods: MSG_META_SELECT_ALL (VisTextClipboardSelectAll).
+ */
+@include "textInt.goh"
+
+/* VisTextClipboardSelectAll: all of the text selected */
+@extern method VisTextClass, MSG_META_SELECT_ALL
+{
+    @call oself::MSG_VIS_TEXT_SELECT_RANGE(TEXT_ADDRESS_PAST_END, 0);
+}

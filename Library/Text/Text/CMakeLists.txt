@@ -6,14 +6,18 @@ geos_sources(text_goc
   textMethodSet.goc
   textMethodGet.goc
   textMethodInstance.goc
+  textMethodManip.goc
+  textMethodClipboard.goc
   textGState.goc
   textCalc.goc
+  textEntry.goc
   textBGBorder.goc
   textMethodDraw.goc
   textMethodInput.goc
   textMethodGeometry.goc
   textFilter.goc
   textScrollOneLine.goc
+  textScroll.goc
   textOutput.goc
   textStuff.goc
   textCompatibility.goc

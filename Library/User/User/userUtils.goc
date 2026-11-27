@@ -417,6 +417,19 @@ Boolean UserGetKbdAcceleratorMode(void)
 	return TRUE;
     return on;
 }
+/* UserGetOverstrikeMode: overstrike mode allowed */
+Boolean UserGetOverstrikeMode(void)
+{
+    return uiOverstrikeMode != 0;
+}
+
+/* UserSetOverstrikeMode: allowed or not, kept in [ui] overstrikeMode */
+void UserSetOverstrikeMode(Boolean on)
+{
+    uiOverstrikeMode = on ? (byte) -1 : 0;
+    InitFileWriteBoolean("ui", "overstrikeMode", on ? TRUE : FALSE);
+}
+
 /* UserCallApplication: the message to the application object of the
  * current process (FALSE if there is none) */
 Boolean UserCallApplication(Message msg, const void *params,

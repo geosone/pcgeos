@@ -12,10 +12,13 @@
  */
 @include <stdapp.goh>
 @include <Objects/vTextC.goh>
+@include <Objects/gViewC.goh>
 #include <string.h>
 #include <font.h>
 #include <fontID.h>
 #include <chunkarr.h>
+#include <initfile.h>
+#include <char.h>
 #include <geoworks.h>
 
 typedef struct {
@@ -1132,6 +1135,93 @@ static word ParaOf(optr o, dword start, dword end, VisTextMaxParaAttr *a,
 	if (!(state & VTS_EDITABLE))
 	    @call TOText::MSG_VIS_TEXT_MODIFY_EDITABLE_SELECTABLE(0,
 							VTS_EDITABLE);
+	break;
+    }
+    case 17: {
+	/* overstrike mode: a cursor's character replaced, not at the
+	 * end; insert mode again.  Smart quotes ([text] smartQuotes): an
+	 * opening one at the start and after a space, else a closing one */
+	optr n = ObjInstantiate(OptrToHandle(@TOText),
+				(ClassStruct *) &VisTextClass);
+	char buf[16];
+
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("abc", 0);
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(1, 1);
+	@call n::MSG_VIS_TEXT_ENTER_OVERSTRIKE_MODE(FALSE);
+	TOCHECK(@call n::MSG_VIS_TEXT_GET_STATE() & VTS_OVERSTRIKE_MODE);
+	@call n::MSG_META_KBD_CHAR('X', CF_FIRST_PRESS, 0);
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(3, 3);
+	@call n::MSG_META_KBD_CHAR('Y', CF_FIRST_PRESS, 0);
+	TOCHECK(Is(n, "aXcY"));
+	@call n::MSG_VIS_TEXT_ENTER_INSERT_MODE(FALSE);
+	TOCHECK(!(@call n::MSG_VIS_TEXT_GET_STATE() & VTS_OVERSTRIKE_MODE));
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(1, 1);
+	@call n::MSG_META_KBD_CHAR('Z', CF_FIRST_PRESS, 0);
+	TOCHECK(Is(n, "aZXcY"));
+
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("", 0);
+	@call n::MSG_META_KBD_CHAR('"', CF_FIRST_PRESS, 0);
+	TOCHECK(Is(n, "\""));		/* (smart quotes not allowed) */
+	@call n::MSG_VIS_TEXT_SET_FEATURES(VTF_ALLOW_SMART_QUOTES, 0);
+	InitFileWriteBoolean("text", "smartQuotes", TRUE);
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("", 0);
+	@call n::MSG_META_KBD_CHAR('"', CF_FIRST_PRESS, 0);
+	@call n::MSG_META_KBD_CHAR('a', CF_FIRST_PRESS, 0);
+	@call n::MSG_META_KBD_CHAR('\'', CF_FIRST_PRESS, 0);
+	@call n::MSG_META_KBD_CHAR(' ', CF_FIRST_PRESS, 0);
+	@call n::MSG_META_KBD_CHAR('\'', CF_FIRST_PRESS, 0);
+	buf[0] = (char) C_QUOTEDBLLEFT;
+	buf[1] = 'a';
+	buf[2] = (char) C_QUOTESNGRIGHT;
+	buf[3] = ' ';
+	buf[4] = (char) C_QUOTESNGLEFT;
+	buf[5] = 0;
+	TOCHECK(Is(n, buf));
+	InitFileDeleteEntry("text", "smartQuotes");
+	break;
+    }
+    case 18: {
+	/* the view's scrolling on whole lines (Berkeley 10: 12 high):
+	 * a line down, a line up from a line's top and from within one,
+	 * the suggestion kept for the other actions */
+	optr n = ObjInstantiate(OptrToHandle(@TOText),
+				(ClassStruct *) &VisTextClass);
+	TrackScrollingParams p;
+	VisTextInstance *t;
+	WWFixed size;
+	sdword base;
+
+	size.WWF_int = 10;
+	size.WWF_frac = 0;
+	@call n::MSG_VIS_TEXT_SET_POINT_SIZE(size, TEXT_ADDRESS_PAST_END, 0);
+	@call n::MSG_VIS_SET_SIZE(50, 40);
+	@call n::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("a\rb\rc\rd\re", 0);
+	t = ObjDerefVis(n);
+	TOCHECK(t->VTI_height.WBF_int == 60);
+	base = t->VI_bounds.R_top + t->VTI_tbMargin;
+	memset(&p, 0, sizeof(p));
+	p.TSP_flags = SF_VERTICAL;
+	p.TSP_viewHeight = 12;
+	p.TSP_change.PD_y = 7;
+	p.TSP_action = SA_INC_FWD;
+	p.TSP_oldOrigin.PD_y = base;
+	TOCHECK(@call n::MSG_VIS_TEXT_GET_SCROLL_AMOUNT(&p) == 12);
+	p.TSP_action = SA_INC_BACK;
+	p.TSP_oldOrigin.PD_y = base + 24;
+	TOCHECK(@call n::MSG_VIS_TEXT_GET_SCROLL_AMOUNT(&p) == -12);
+	p.TSP_oldOrigin.PD_y = base + 30;
+	TOCHECK(@call n::MSG_VIS_TEXT_GET_SCROLL_AMOUNT(&p) == -6);
+	p.TSP_action = SA_TO_END;
+	TOCHECK(@call n::MSG_VIS_TEXT_GET_SCROLL_AMOUNT(&p) == 7);
+	/* (MSG_META_SELECT_ALL) */
+	{
+	    VisTextRange r;
+
+	    @call n::MSG_META_SELECT_ALL();
+	    @call n::MSG_VIS_TEXT_GET_SELECTION_RANGE(&r);
+	    TOCHECK(r.VTR_start == 0 && r.VTR_end == 9);
+	}
 	break;
     }
     }

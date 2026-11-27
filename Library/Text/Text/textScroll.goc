@@ -1,0 +1,137 @@
+/*
+ * textScroll.goc -- after textScroll.asm: MSG_VIS_TEXT_GET_SCROLL_AMOUNT
+ * (VisTextGetScrollAmount), ScrollLineUp, ScrollLineDown, ScrollPageUp,
+ * ScrollPageDown, CheckTooMuchDown, CheckTooMuchUp: the view's scrolling
+ * by lines and pages on whole lines, not past the text.
+ */
+@include "textInt.goh"
+@include <Objects/gViewC.goh>
+
+/* the asm's "to get to the object's bottom" */
+#define MYSTERIOUS_DAVE_BUTLER_CONSTANT_TO_GET_TO_OBJECT_BOTTOM	5
+
+/* CheckTooMuchDown: not beyond the bottom of the object */
+static sdword CheckTooMuchDown(optr o, const TrackScrollingParams *p,
+			       sdword amount)
+{
+    sdword bottom = VT(o)->VI_bounds.R_bottom;
+
+    if (amount + p->TSP_oldOrigin.PD_y + p->TSP_viewHeight - 1 - bottom -
+	MYSTERIOUS_DAVE_BUTLER_CONSTANT_TO_GET_TO_OBJECT_BOTTOM >= 0)
+	amount = bottom - p->TSP_oldOrigin.PD_y - p->TSP_viewHeight + 1;
+    return amount < 0 ? 0 : amount;
+}
+
+/* CheckTooMuchUp: not more than one window full */
+static sdword CheckTooMuchUp(const TrackScrollingParams *p, sdword amount)
+{
+    dword up = (dword) -amount;
+
+    if (up > (word) p->TSP_viewHeight)
+	up = (word) p->TSP_viewHeight;
+    return -(sdword) up;
+}
+
+/* ScrollLineUp: the top line aligned with the window's top, else the
+ * line before it */
+static sdword ScrollLineUp(optr o, const TrackScrollingParams *p)
+{
+    dword line = TL_LineFromExtPosition(o, p->TSP_oldOrigin.PD_x,
+					p->TSP_oldOrigin.PD_y, NULL);
+    sdword x, y, amount;
+
+    TL_LineToExtPosition(o, line, &x, &y);
+    amount = y - p->TSP_oldOrigin.PD_y;
+    if (!amount) {
+	if (TL_LinePrevious(o, &line)) {
+	    TL_LineToExtPosition(o, line, &x, &y);
+	    amount = y - p->TSP_oldOrigin.PD_y;
+	} else
+	    amount = p->TSP_change.PD_y;
+    }
+    return CheckTooMuchUp(p, amount);
+}
+
+/* ScrollLineDown: the next line at the window's top */
+static sdword ScrollLineDown(optr o, const TrackScrollingParams *p)
+{
+    dword line = TL_LineFromExtPosition(o, p->TSP_oldOrigin.PD_x,
+					p->TSP_oldOrigin.PD_y, NULL);
+    sdword x, y, amount;
+
+    for (;;) {
+	if (!TL_LineNext(o, &line)) {
+	    amount = p->TSP_change.PD_y;
+	    break;
+	}
+	TL_LineToExtPosition(o, line, &x, &y);
+	amount = y - p->TSP_oldOrigin.PD_y;
+	if (amount)
+	    break;
+    }
+    return CheckTooMuchDown(o, p, amount);
+}
+
+/* ScrollPageUp: the line at the new origin (within the margin) at the
+ * top */
+static sdword ScrollPageUp(optr o, const TrackScrollingParams *p)
+{
+    dword line = TL_LineFromExtPosition(o, p->TSP_newOrigin.PD_x,
+					p->TSP_newOrigin.PD_y -
+					VT(o)->VTI_tbMargin, NULL);
+    sdword x, y;
+
+    TL_LineToExtPosition(o, line, &x, &y);
+    return CheckTooMuchUp(p, y - p->TSP_oldOrigin.PD_y);
+}
+
+/* ScrollPageDown: the last line at the top; past the text: as far as
+ * it goes */
+static sdword ScrollPageDown(optr o, const TrackScrollingParams *p)
+{
+    Boolean below;
+    dword line = TL_LineFromExtPosition(o, p->TSP_newOrigin.PD_x,
+					p->TSP_newOrigin.PD_y -
+					VT(o)->VTI_tbMargin, &below);
+    sdword x, y, amount;
+
+    if (below)
+	y = -1;		/* (useLargeScroll) */
+    else
+	TL_LineToExtPosition(o, line, &x, &y);
+    amount = y - p->TSP_oldOrigin.PD_y;
+    if (amount < 0)
+	amount = p->TSP_change.PD_y;
+    return CheckTooMuchDown(o, p, amount);
+}
+
+/* VisTextGetScrollAmount: the vertical change for a scroll by lines or
+ * pages; the others (and nothing to scroll) keep the suggested one.
+ * (The asm returns its ax for the other actions, the message number and
+ * action; its caller only asks for lines and pages and the like.) */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_SCROLL_AMOUNT
+{
+    sdword amount = 0;
+
+    TextGStateCreate(oself);
+    switch (params->TSP_action) {
+    case SA_INC_BACK:
+	amount = ScrollLineUp(oself, params);
+	break;
+    case SA_INC_FWD:
+	amount = ScrollLineDown(oself, params);
+	break;
+    case SA_PAGE_BACK:
+	amount = ScrollPageUp(oself, params);
+	break;
+    case SA_PAGE_FWD:
+	amount = ScrollPageDown(oself, params);
+	break;
+    default:
+	break;
+    }
+    if (!amount)
+	amount = params->TSP_change.PD_y;
+    TextGStateDestroy(oself);
+    return (sword) amount;
+}

@@ -2,7 +2,7 @@
  * trExternal.goc -- after trExternal.asm: TR_RegionTransformGState,
  * TR_RegionGetTopLeft, TR_RegionLeftRight, TR_RegionWidth,
  * TR_RegionGetTopLine, TR_RegionFromOffsetGetStartLineAndOffset,
- * TR_RegionFromLine, TR_CheckCrossSectionChange.  Port32: small objects
+ * TR_RegionFromLine, TR_CheckCrossSectionChange, TR_RegionFromPoint.  Port32: small objects
  * (one region); the large ones are not in C yet.
  */
 @include "textInt.goh"
@@ -76,4 +76,11 @@ Boolean TR_CheckCrossSectionChange(optr o, dword start, dword end)
     (void) start;
     (void) end;
     return FALSE;
+}
+
+/* TR_RegionFromPoint: the region at a point of the document, or
+ * CA_NULL_ELEMENT */
+word TR_RegionFromPoint(optr o, sdword x, sdword y)
+{
+    return SmallRegionFromPoint(o, x, y);
 }
