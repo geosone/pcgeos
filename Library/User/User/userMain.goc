@@ -45,6 +45,7 @@
 @include <Objects/gFieldC.goh>
 @include <Internal/uProcC.goh>
 @include <Internal/flowC.goh>
+@include <Objects/clipbrd.goh>
 #include <initfile.h>
 #include <system.h>
 #include <sysstats.h>
@@ -362,9 +363,24 @@ static void LoadMouseDriver(void)
 
 /* UserDeleteStateFilesDialogResponse: Port32 has no state files; the
  * system fields, the applications to start */
+@extern chunk transferFileError;
+
 @method UserClass, MSG_USER_DELETE_STATE_FILES_DIALOG_RESPONSE
 {
-    (void) response;
+    Boolean noClipboard = FALSE;
+
+    /* the clipboard, unless [ui] noClipboard: truncated with the state
+     * files (IC_NO); if it cannot be opened the system exits */
+    if (InitFileReadBoolean("ui", "noClipboard", &noClipboard) ||
+	!noClipboard) {
+	if (UserOpenClipboard(response)) {
+	    MemLock(OptrToHandle(@transferFileError));
+	    SysNotify(SNF_EXIT, LMemDeref(@transferFileError), NULL);
+	    MemUnlock(OptrToHandle(@transferFileError));
+	    SysShutdown(SST_CLEAN_FORCED);
+	    return;
+	}
+    }
     UserMakeScreenFields();
     (void) @call Self()::MSG_USER_STARTUP_APPLS(0);
 }
@@ -524,6 +540,7 @@ static Boolean StartupApplsCB(const char *name, word sectionNum,
 	return;
     }
     UserDestroySystemObject();
+    ClipboardCloseClipboardFile();	/* the item for the next session */
     UserScreenExit();
     ImReleaseInput(uiFlowObj);
     WinReleaseChange(0, uiFlowObj);

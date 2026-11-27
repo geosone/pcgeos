@@ -49,11 +49,21 @@ typedef dword ClipboardItemFormatID;
 #define ManufacturerFromFormatID(id) 		((word) (id))
 #define TypeFromFormatID(id) 			((word) ((id) >> 16))
 
+@ifdef GEOS_PORT32
+/* Port32 (Port32/ABI.md section 13ab): 64 bits, the 32-bit file handle
+ * above the block */
+typedef unsigned long long TransferBlockID;
+
+#define BlockIDFromFileAndBlock(f,b) 	(((TransferBlockID)(f) << 16) | (word)(b))
+#define FileFromTransferBlockID(id) 	((VMFileHandle) ((id) >> 16))
+#define BlockFromTransferBlockID(id) 	((VMBlockHandle) (id))
+@else
 typedef dword TransferBlockID;
 
 #define BlockIDFromFileAndBlock(f,b) 	(((dword)(f) << 16) | (b))
 #define FileFromTransferBlockID(id) 	((VMFileHandle) ((id) >> 16))
 #define BlockFromTransferBlockID(id) 	((VMBlockHandle) (id))
+@endif
 
 typedef WordFlags ClipboardItemFlags;
 #define CIF_UNUSED1	0x8000
@@ -120,8 +130,14 @@ extern word _pascal	/* XXX */
 			     word maxNumFormats,
 			     ClipboardItemFormatID *buffer);
 
+@ifdef GEOS_PORT32
+/* Port32: the item's source (CIH_sourceID) */
+extern optr
+    _pascal ClipboardGetItemInfo(TransferBlockID header);
+@else
 extern dword		/* XXX */
     _pascal ClipboardGetItemInfo(TransferBlockID header);
+@endif
 
 typedef struct {
     VMFileHandle    	CRA_file;
@@ -157,6 +173,14 @@ extern word		/* XXX */
 
 extern void
     _pascal ClipboardCloseClipboardFile(void);
+
+@ifdef GEOS_PORT32
+/* Port32: in the asm's library (ui.gp) without a C prototype */
+extern void
+    _pascal ClipboardFreeItem(TransferBlockID header);
+extern void
+    _pascal ClipboardFreeItemsNotInUse(void);
+@endif
 
 extern void		/* XXX */
     _pascal ClipboardAddToNotificationList(optr notificationOD);

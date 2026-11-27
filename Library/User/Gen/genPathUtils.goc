@@ -42,6 +42,10 @@
 /* userStrings.asm (UserClass: LoadApplicationWithErrorMessage) */
 @chunk char cannotLoadAppError[] = "Unable to load application. (UI-07)";
 
+/* userStrings.asm (userTransfer.goc, UserClass) */
+@chunk char transferFileError[] = "Unable to open the clipboard file. (UI-04)";
+@chunk char transferItemFilename[] = "Clipboard";
+
 @visMoniker diskInDriveMoniker = "Disk Is In The Drive";
 @visMoniker cancelDiskRestoreMoniker = "Stop Trying To Reopen The File";
 

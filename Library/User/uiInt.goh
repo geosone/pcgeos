@@ -311,6 +311,8 @@ extern UILaunchOptions uiLaunchOptions;
 extern byte uiOverstrikeMode;
 /* User/userMain.goc: [ui] overstrikeMode */
 extern void InitOverstrikeMode(void);
+/* User/userTransfer.goc: the clipboard file at the UI's start */
+extern word UserOpenClipboard(word deleteState);
 extern optr uiSystemObj;
 extern optr uiFlowObj;
 extern GeodeHandle uiSpecUILibrary;

@@ -353,6 +353,7 @@ int main(int argc, char **argv)
     Put("SYSTEM/stream.geo", stream_geode, stream_geode_size);
     Put("SYSTEM/sound.geo", sound_geode, sound_geode_size);
     Put("SYSTEM/SOUND/tsnddrv.geo", tsnddrv_geode, tsnddrv_geode_size);
+    Put("PRIVDATA", NULL, 0);	/* the clipboard file */
     Put("USERDATA", NULL, 0);
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);

@@ -7510,6 +7510,31 @@ song; a non-blocking write into a full stream; a sample stream with an
 unsupported format, and 300 bytes through the DAC's stream of 64 read by
 the test as the hardware would; the master volume.
 
+## 13ab. The clipboard (`Library/User/User/userTransfer.goc`, P6)
+
+- **Items.** The normal, quick and undo transfer items, each a VM block
+  with a `ClipboardItemHeader` (its formats, each a VM chain) in some
+  VM file. `ClipboardQueryItem` holds an item until
+  `ClipboardDoneWithItem`; an item replaced while it is held waits in
+  the free list and is freed with its last holder.
+- **`TransferBlockID` is 64 bits** (`clipbrd.goh` under
+  `GEOS_PORT32`): the 32-bit file handle above the 16-bit block, as
+  `BlockIDFromFileAndBlock` makes it. `ClipboardGetItemInfo` returns
+  the source as an `optr` (the C header said `dword`).
+  `ClipboardFreeItem` and `ClipboardFreeItemsNotInUse`, exported by the
+  asm without a C prototype, have one.
+- **The clipboard file** (`SP_PRIVATE_DATA` "Clipboard") keeps the
+  normal item from one session to the next, without its owner and
+  source. The UI opens it when it starts the system (truncated when
+  the state files are deleted) unless `[ui] noClipboard` is set, and
+  closes it when the system object has detached. The header holds
+  64-bit optrs, so the file is the port's own: one whose item does not
+  fit (a header block too small, a bad format count, a missing chain)
+  is truncated.
+- **Not yet:** the clipboard sent to and received from another machine
+  (`ClipboardRemoteSend`, `ClipboardRemoteReceive`), quick transfer
+  (`userQuick.asm`).
+
 ## 14. Open
 
 1. **Loading geodes in the kernel** (`GeodeLoad` on `ghal_module`, §7.1).

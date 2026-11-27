@@ -13,6 +13,7 @@
 @include <stdapp.goh>
 @include <Objects/vTextC.goh>
 @include <Objects/gViewC.goh>
+@include <Objects/clipbrd.goh>
 #include <string.h>
 #include <font.h>
 #include <fontID.h>
@@ -39,6 +40,7 @@ typedef struct {
     MemHandle	TOS_countBlock;
     word	TOS_border[5];		/* of step 19, to print */
     word	TOS_tab[2];		/* of step 20 */
+    word	TOS_clip;		/* of step 21 */
 } TOState;
 
 TOState toState;
@@ -270,6 +272,27 @@ static word ParaOf(optr o, dword start, dword end, VisTextMaxParaAttr *a,
 		   VisTextParaAttrDiffs *d)
 {
     return @call o::MSG_VIS_TEXT_GET_PARA_ATTR(0, d, a, end, start);
+}
+
+/* an item in the clipboard file: one text format of one block */
+static VMBlockHandle TOMakeItem(VMFileHandle f, optr owner, word extra)
+{
+    VMBlockHandle h = VMAlloc(f, sizeof(ClipboardItemHeader), 0),
+		  d = VMAlloc(f, 16, 0);
+    ClipboardItemHeader *ih;
+    MemHandle mh;
+
+    ih = VMLock(f, h, &mh);
+    memset(ih, 0, sizeof(*ih));
+    ih->CIH_owner = owner;
+    ih->CIH_formatCount = 1;
+    ih->CIH_formats[0].CIFI_format =
+	FormatIDFromManufacturerAndType(MANUFACTURER_ID_GEOWORKS, CIF_TEXT);
+    ih->CIH_formats[0].CIFI_extra1 = extra;
+    ih->CIH_formats[0].CIFI_vmChain = VMCHAIN_MAKE_FROM_VM_BLOCK(d);
+    VMDirty(mh);
+    VMUnlock(mh);
+    return h;
 }
 
 @method TOProcessClass, MSG_TO_STEP
@@ -1346,6 +1369,56 @@ static word ParaOf(optr o, dword start, dword end, VisTextMaxParaAttr *a,
 	GrDestroyBitmap(g, BMD_KILL_DATA);
 	VMClose(vm, FALSE);
 	FileDelete("TOTAB.VM");
+	break;
+    }
+    case 21: {
+	/* the clipboard (the UI's): an item registered, queried, asked
+	 * for its format; replaced while it is held, freed when it is
+	 * let go; the normal item kept across closing the clipboard file
+	 * without its owner */
+	ClipboardItemFormatID text = FormatIDFromManufacturerAndType(
+		MANUFACTURER_ID_GEOWORKS, CIF_TEXT), fmts[4];
+	ClipboardQueryArgs q;
+	ClipboardRequestArgs ra;
+	VMFileHandle f;
+	VMBlockHandle h1, h2;
+	TransferBlockID id1, id2;
+
+	TOCHECK(ClipboardOpenClipboardFile() == 0);
+	f = ClipboardGetClipboardFile();
+	TOCHECK(f != 0);
+	h1 = TOMakeItem(f, @TOText, 5);
+	h2 = TOMakeItem(f, @TOText, 6);
+	id1 = BlockIDFromFileAndBlock(f, h1);
+	id2 = BlockIDFromFileAndBlock(f, h2);
+	TOCHECK(!ClipboardRegisterItem(id1, TIF_NORMAL));
+	ClipboardQueryItem(TIF_NORMAL, &q);
+	TOCHECK(q.CQA_numFormats == 1 && q.CQA_owner == @TOText &&
+		q.CQA_header == id1);
+	TOCHECK(!ClipboardTestItemFormat(q.CQA_header, text) &&
+		ClipboardTestItemFormat(q.CQA_header, text + 1));
+	TOCHECK(ClipboardEnumItemFormats(q.CQA_header, 4, fmts) == 1 &&
+		fmts[0] == text);
+	ClipboardRequestItemFormat(text, q.CQA_header, &ra);
+	TOCHECK(ra.CRA_file == f && ra.CRA_data != 0 && ra.CRA_extra1 == 5);
+	TOCHECK(!ClipboardRegisterItem(id2, TIF_NORMAL));
+	TOCHECK(ClipboardGetNormalItemInfo() == id2 &&
+		VMInfo(f, h1, NULL));
+	ClipboardDoneWithItem(q.CQA_header);
+	TOCHECK(!VMInfo(f, h1, NULL) &&
+		!VMInfo(f, VMCHAIN_GET_VM_BLOCK(ra.CRA_data), NULL));
+	ClipboardCloseClipboardFile();
+	TOCHECK(ClipboardGetClipboardFile() == 0);
+	TOCHECK(ClipboardOpenClipboardFile() == 0);
+	f = ClipboardGetClipboardFile();
+	ClipboardQueryItem(TIF_NORMAL, &q);
+	toState.TOS_clip = q.CQA_numFormats;
+	TOCHECK(q.CQA_numFormats == 1 && !q.CQA_owner &&
+		BlockFromTransferBlockID(q.CQA_header) == h2);
+	ClipboardRequestItemFormat(text, q.CQA_header, &ra);
+	TOCHECK(ra.CRA_extra1 == 6);
+	ClipboardDoneWithItem(q.CQA_header);
+	ClipboardCloseClipboardFile();
 	break;
     }
     }

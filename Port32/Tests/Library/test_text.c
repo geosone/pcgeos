@@ -25,6 +25,7 @@
  *  18. scrolling a view on whole lines.
  *  19. a paragraph's border and background drawn.
  *  20. a tab's leader and line drawn.
+ *  21. the clipboard: items registered, held, freed, kept.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -59,6 +60,7 @@ typedef struct {
     MemHandle	TOS_countBlock;
     word	TOS_border[5];
     word	TOS_tab[2];
+    word	TOS_clip;
 } TOState;
 
 static int fails;
@@ -110,7 +112,7 @@ int main(int argc, char **argv)
 	"Hi Hi Hi Hi Hi", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
-	"a12b-cE -.F14y#"
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#"
     };
     GeodeHandle app, mdrv;
     GeodeLoadError e;
@@ -133,6 +135,7 @@ int main(int argc, char **argv)
     } else
 	strcpy(top, "GTXTOP");
     ghal_fs_mkdir(top);
+    Put("PRIVDATA", NULL, 0);	/* the clipboard file */
     Put("USERDATA", NULL, 0);
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
@@ -164,7 +167,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 20; i++) {
+    for (i = 1; i <= 21; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);

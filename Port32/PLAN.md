@@ -155,9 +155,11 @@ Ordered by dependency, each with host-side tests under `linux`:
   target); overstrike mode and smart quotes; scrolling a view by lines
   and pages; paragraph borders and backgrounds; tab lines and
   leaders; ctest
-  `library.text`.
+  `library.text`. 2026-11-27: the UI's clipboard (`User/userTransfer.goc`,
+  ABI.md §13ab), `library.text` step 21.
   Open: large objects, shared elements and style sheets (and their
-  notifications), drawing borders, undo, the clipboard (`pasteable`).
+  notifications), undo, cut, copy and paste of text (`pasteable`),
+  quick transfer.
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose
   dependency is ported since gets filled in after the asm, with its own
   ctest check. Done: the load error of the startup applications, the

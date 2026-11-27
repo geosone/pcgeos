@@ -1,0 +1,637 @@
+/*
+ * userTransfer.goc -- after userTransfer.asm: the clipboard: the
+ * normal, quick and undo transfer items, registered, queried and
+ * requested in their formats, freed when nobody uses them any more;
+ * the clipboard file (SP_PRIVATE_DATA "Clipboard") that keeps the
+ * normal item from one session to the next; the notification list
+ * (GCNSLT_TRANSFER_NOTIFICATION).
+ *
+ * An item is a VM block with a ClipboardItemHeader in some VM file:
+ * its formats, each a VM chain.  An item replaced while somebody
+ * still holds it (ClipboardQueryItem without ClipboardDoneWithItem)
+ * waits in the free list until the last one is done with it.
+ *
+ * Port32 (Port32/ABI.md section 13ab): a TransferBlockID is 64 bits
+ * (the 32-bit file handle above the block).  The header holds 64-bit
+ * optrs, so the clipboard file is the port's own; one whose item does
+ * not fit (a header too small, a bad format count) is truncated.  Not
+ * yet: the clipboard sent to and received from another machine
+ * (ClipboardRemoteSend, ClipboardRemoteReceive, the net library).
+ */
+@include "uiInt.goh"
+@include <Objects/clipbrd.goh>
+@include <gcnlist.goh>
+#include <file.h>
+#include <vm.h>
+#include <initfile.h>
+#include <sem.h>
+#include <thread.h>
+
+/* the items, the free list (userConstant.def, userVariable.def) */
+typedef struct {
+    VMFileHandle	TII_vmFile;
+    VMBlockHandle	TII_vmBlock;
+    word		TII_refCount;
+} TransferItemInstance;
+
+#define INIT_TRANSFER_FREE_LIST_COUNT	4
+#define INC_TRANSFER_FREE_LIST_COUNT	4
+
+/* the clipboard file's map block */
+typedef struct {
+    VMBlockHandle	TFH_normalItem;
+} TransferFileHeader;
+
+static SemaphoreHandle transferSem;
+static VMFileHandle uiTransferVMFile;
+static TransferItemInstance quickTransferItem, normalTransferItem,
+			    undoTransferItem;
+static MemHandle transferFreeListBuffer;
+static word transferFreeListBufSize;	/* in bytes */
+
+@extern chunk transferItemFilename;
+
+/* PTransfer, VTransfer: the clipboard's semaphore */
+static void PTransfer(void)
+{
+    if (!transferSem)
+	transferSem = ThreadAllocSem(1);
+    ThreadPSem(transferSem);
+}
+
+static void VTransfer(void)
+{
+    ThreadVSem(transferSem);
+}
+
+/* TransferCommon_VMLock_DS: an item's header locked */
+static ClipboardItemHeader *LockHeader(VMFileHandle f, VMBlockHandle b,
+				       MemHandle *mh)
+{
+    return VMLock(f, b, mh);
+}
+
+/* SendToNotificationList: a message to the notification list */
+static void SendToNotificationList(Message m, VMFileHandle f,
+				   VMBlockHandle b)
+{
+    EventHandle ev;
+
+    if (m == MSG_META_CLIPBOARD_NOTIFY_TRANSFER_ITEM_FREED)
+	ev = @record null::MSG_META_CLIPBOARD_NOTIFY_TRANSFER_ITEM_FREED(f,
+									 b);
+    else
+	ev = @record null::MSG_META_CLIPBOARD_NOTIFY_NORMAL_TRANSFER_ITEM_CHANGED();
+    (void) GCNListSend(MANUFACTURER_ID_GEOWORKS,
+		       GCNSLT_TRANSFER_NOTIFICATION, ev, 0,
+		       GCNLSF_FORCE_QUEUE);
+}
+
+VMFileHandle ClipboardGetClipboardFile(void)
+{
+    return uiTransferVMFile;
+}
+
+/* ClipboardQueryItem: the normal or quick item (CIF_QUICK), held
+ * until ClipboardDoneWithItem; no formats if there is none */
+void ClipboardQueryItem(word flags, ClipboardQueryArgs *ret)
+{
+    TransferItemInstance *ti = (flags & CIF_QUICK) ? &quickTransferItem :
+						     &normalTransferItem;
+    MemHandle mh;
+
+    PTransfer();
+    ret->CQA_numFormats = 0;
+    ret->CQA_owner = 0;
+    ret->CQA_header = BlockIDFromFileAndBlock(ti->TII_vmFile,
+					      ti->TII_vmBlock);
+    if (ti->TII_vmBlock) {
+	ClipboardItemHeader *h;
+
+	ti->TII_refCount++;
+	h = LockHeader(ti->TII_vmFile, ti->TII_vmBlock, &mh);
+	ret->CQA_owner = h->CIH_owner;
+	ret->CQA_numFormats = h->CIH_formatCount;
+	VMUnlock(mh);
+    }
+    VTransfer();
+}
+
+/* FindFormat: the format's entry in a header, or NULL */
+static ClipboardItemFormatInfo *FindFormat(ClipboardItemHeader *h,
+					   ClipboardItemFormatID format)
+{
+    word i;
+
+    for (i = 0; i < h->CIH_formatCount; i++)
+	if (h->CIH_formats[i].CIFI_format == format)
+	    return &h->CIH_formats[i];
+    return NULL;
+}
+
+/* ClipboardTestItemFormat: FALSE if the item has the format (as the
+ * asm's carry) */
+Boolean ClipboardTestItemFormat(TransferBlockID header,
+				ClipboardItemFormatID format)
+{
+    VMBlockHandle b = BlockFromTransferBlockID(header);
+    Boolean missing = TRUE;
+    MemHandle mh;
+
+    PTransfer();
+    if (b) {
+	ClipboardItemHeader *h = LockHeader(FileFromTransferBlockID(header),
+					    b, &mh);
+
+	missing = FindFormat(h, format) == NULL;
+	VMUnlock(mh);
+    }
+    VTransfer();
+    return missing;
+}
+
+/* FreeTransferLow: an item's formats and its header freed */
+static void FreeTransferLow(VMFileHandle f, VMBlockHandle b)
+{
+    ClipboardItemHeader *h;
+    MemHandle mh;
+    word i, n;
+    VMChain chains[CLIPBOARD_MAX_FORMATS];
+
+    h = LockHeader(f, b, &mh);
+    n = h->CIH_formatCount;
+    if (n > CLIPBOARD_MAX_FORMATS)
+	n = CLIPBOARD_MAX_FORMATS;
+    for (i = 0; i < n; i++)
+	chains[i] = h->CIH_formats[i].CIFI_vmChain;
+    VMUnlock(mh);
+    for (i = 0; i < n; i++)
+	VMFreeVMChain(f, chains[i]);
+    VMFree(f, b);
+    (void) VMUpdate(f);
+}
+
+/* FreeTransfer: an item freed, the notification list told */
+static void FreeTransfer(VMFileHandle f, VMBlockHandle b)
+{
+    FreeTransferLow(f, b);
+    SendToNotificationList(MSG_META_CLIPBOARD_NOTIFY_TRANSFER_ITEM_FREED,
+			   f, b);
+}
+
+/* StoreInFreeList: an item replaced that is still held, kept with
+ * its count */
+static void StoreInFreeList(VMFileHandle f, VMBlockHandle b, word count)
+{
+    TransferItemInstance *list = MemLock(transferFreeListBuffer);
+    word n = transferFreeListBufSize / sizeof(TransferItemInstance), i;
+
+    for (i = 0; i < n && list[i].TII_vmBlock; i++)
+	;
+    if (i == n) {
+	MemUnlock(transferFreeListBuffer);
+	transferFreeListBufSize = (word) (transferFreeListBufSize +
+	    INC_TRANSFER_FREE_LIST_COUNT * sizeof(TransferItemInstance));
+	(void) MemReAlloc(transferFreeListBuffer, transferFreeListBufSize,
+			  HAF_ZERO_INIT | HAF_NO_ERR);
+	list = MemLock(transferFreeListBuffer);
+    }
+    list[i].TII_vmFile = f;
+    list[i].TII_vmBlock = b;
+    list[i].TII_refCount = count;
+    MemUnlock(transferFreeListBuffer);
+}
+
+/* ReplaceItem: an item's slot given a new one; the old one freed, or
+ * kept in the free list while it is held */
+static void ReplaceItem(TransferItemInstance *ti, VMFileHandle f,
+			VMBlockHandle b)
+{
+    if (ti->TII_vmBlock) {
+	if (ti->TII_refCount)
+	    StoreInFreeList(ti->TII_vmFile, ti->TII_vmBlock,
+			    ti->TII_refCount);
+	else
+	    FreeTransfer(ti->TII_vmFile, ti->TII_vmBlock);
+    }
+    ti->TII_vmFile = f;
+    ti->TII_vmBlock = b;
+    ti->TII_refCount = 0;
+}
+
+/* ClipboardDoneWithItem: one holder of an item less; an item in the
+ * free list is freed with its last */
+void ClipboardDoneWithItem(TransferBlockID header)
+{
+    VMFileHandle f = FileFromTransferBlockID(header);
+    VMBlockHandle b = BlockFromTransferBlockID(header);
+    TransferItemInstance *items[3], *list;
+    word i, n;
+
+    PTransfer();
+    if (!b) {
+	VTransfer();
+	return;
+    }
+    items[0] = &normalTransferItem;
+    items[1] = &quickTransferItem;
+    items[2] = &undoTransferItem;
+    for (i = 0; i < 3; i++)
+	if (items[i]->TII_vmFile == f && items[i]->TII_vmBlock == b) {
+	    EC_ERROR_IF(!items[i]->TII_refCount, -1);
+	    items[i]->TII_refCount--;
+	    VTransfer();
+	    return;
+	}
+    list = MemLock(transferFreeListBuffer);
+    n = transferFreeListBufSize / sizeof(TransferItemInstance);
+    for (i = 0; i < n; i++)
+	if (list[i].TII_vmFile == f && list[i].TII_vmBlock == b) {
+	    if (!--list[i].TII_refCount) {
+		list[i].TII_vmBlock = 0;
+		FreeTransfer(f, b);
+	    }
+	    break;
+	}
+    EC_ERROR_IF(i == n, -1);		/* TRANSFER_ITEM_DONE_NOT_FOUND */
+    MemUnlock(transferFreeListBuffer);
+    VTransfer();
+}
+
+/*
+ * ClipboardRegisterItem: the item becomes the normal or quick one (0:
+ * none); the one it replaces is freed or kept while it is held.
+ * TRUE (as the asm's carry) if a normal item could not be written
+ * (the disk full): it is freed then.
+ */
+Boolean ClipboardRegisterItem(TransferBlockID header, ClipboardItemFlags flags)
+{
+    VMFileHandle f = FileFromTransferBlockID(header);
+    VMBlockHandle b = BlockFromTransferBlockID(header);
+    Boolean error = FALSE;
+
+    PTransfer();
+    FileBatchChangeNotifications();
+    if (!b)
+	f = ClipboardGetClipboardFile();
+    if (b && !(flags & CIF_QUICK)) {
+	word e = VMUpdate(f);
+
+	if (e && e != VM_UPDATE_NOTHING_DIRTY) {
+	    FreeTransfer(f, b);
+	    error = TRUE;
+	}
+    }
+    if (!error) {
+	if (flags & CIF_QUICK)
+	    ReplaceItem(&quickTransferItem, f, b);
+	else {
+	    ReplaceItem(&normalTransferItem, f, b);
+	    SendToNotificationList(
+		MSG_META_CLIPBOARD_NOTIFY_NORMAL_TRANSFER_ITEM_CHANGED, 0, 0);
+	}
+    }
+    FileFlushChangeNotifications();
+    VTransfer();
+    return error;
+}
+
+/* ClipboardAddToNotificationList: told of the normal item's changes,
+ * at once of the one there is */
+void ClipboardAddToNotificationList(optr od)
+{
+    (void) GCNListAdd(od, MANUFACTURER_ID_GEOWORKS,
+		      GCNSLT_TRANSFER_NOTIFICATION);
+    @send, forceQueue od::MSG_META_CLIPBOARD_NOTIFY_NORMAL_TRANSFER_ITEM_CHANGED();
+}
+
+/* ClipboardRemoveFromNotificationList: TRUE if it was on the list */
+Boolean ClipboardRemoveFromNotificationList(optr od)
+{
+    return GCNListRemove(od, MANUFACTURER_ID_GEOWORKS,
+			 GCNSLT_TRANSFER_NOTIFICATION);
+}
+
+/* ClipboardFreeItemsNotInUse: the items nobody holds freed */
+void ClipboardFreeItemsNotInUse(void)
+{
+    TransferItemInstance *items[3];
+    word i;
+
+    PTransfer();
+    items[0] = &normalTransferItem;
+    items[1] = &quickTransferItem;
+    items[2] = &undoTransferItem;
+    for (i = 0; i < 3; i++)
+	if (!items[i]->TII_refCount) {
+	    VMFileHandle f = items[i]->TII_vmFile;
+	    VMBlockHandle b = items[i]->TII_vmBlock;
+
+	    items[i]->TII_vmFile = 0;
+	    items[i]->TII_vmBlock = 0;
+	    if (b)
+		FreeTransfer(f, b);
+	}
+    VTransfer();
+}
+
+/* ClipboardFreeItem: an item never registered freed */
+void ClipboardFreeItem(TransferBlockID header)
+{
+    FreeTransferLow(FileFromTransferBlockID(header),
+		    BlockFromTransferBlockID(header));
+}
+
+/* ClipboardUnregisterItem: the normal item the owner registered
+ * swapped back with the one before it (the undo item) */
+void ClipboardUnregisterItem(optr owner)
+{
+    MemHandle mh;
+
+    PTransfer();
+    if (normalTransferItem.TII_vmBlock) {
+	ClipboardItemHeader *h = LockHeader(normalTransferItem.TII_vmFile,
+					    normalTransferItem.TII_vmBlock,
+					    &mh);
+	optr o = h->CIH_owner;
+
+	VMUnlock(mh);
+	if (o == owner) {
+	    TransferItemInstance t = normalTransferItem;
+
+	    normalTransferItem.TII_vmFile = undoTransferItem.TII_vmFile;
+	    normalTransferItem.TII_vmBlock = undoTransferItem.TII_vmBlock;
+	    undoTransferItem.TII_vmFile = t.TII_vmFile;
+	    undoTransferItem.TII_vmBlock = t.TII_vmBlock;
+	    SendToNotificationList(
+		MSG_META_CLIPBOARD_NOTIFY_NORMAL_TRANSFER_ITEM_CHANGED, 0, 0);
+	}
+    }
+    VTransfer();
+}
+
+/* ClipboardEnumItemFormats: up to max of the item's formats */
+word ClipboardEnumItemFormats(TransferBlockID header, word max,
+			      ClipboardItemFormatID *buffer)
+{
+    VMBlockHandle b = BlockFromTransferBlockID(header);
+    word n = 0, i;
+    MemHandle mh;
+
+    PTransfer();
+    if (b) {
+	ClipboardItemHeader *h = LockHeader(FileFromTransferBlockID(header),
+					    b, &mh);
+
+	n = h->CIH_formatCount < max ? h->CIH_formatCount : max;
+	for (i = 0; i < n; i++)
+	    buffer[i] = h->CIH_formats[i].CIFI_format;
+	VMUnlock(mh);
+    }
+    VTransfer();
+    return n;
+}
+
+/* ClipboardRequestItemFormat: the format's chain and extra words (a
+ * null chain if the item has not got it) */
+void ClipboardRequestItemFormat(ClipboardItemFormatID format,
+				TransferBlockID header,
+				ClipboardRequestArgs *ret)
+{
+    VMFileHandle f = FileFromTransferBlockID(header);
+    VMBlockHandle b = BlockFromTransferBlockID(header);
+    MemHandle mh;
+
+    PTransfer();
+    ret->CRA_file = f;
+    ret->CRA_data = 0;
+    ret->CRA_extra1 = 0;
+    ret->CRA_extra2 = 0;
+    if (b) {
+	ClipboardItemHeader *h = LockHeader(f, b, &mh);
+	ClipboardItemFormatInfo *fi = FindFormat(h, format);
+
+	if (fi) {
+	    ret->CRA_data = fi->CIFI_vmChain;
+	    ret->CRA_extra1 = fi->CIFI_extra1;
+	    ret->CRA_extra2 = fi->CIFI_extra2;
+	}
+	VMUnlock(mh);
+    }
+    VTransfer();
+}
+
+/* ClipboardGetItemInfo: the item's source */
+optr ClipboardGetItemInfo(TransferBlockID header)
+{
+    VMBlockHandle b = BlockFromTransferBlockID(header);
+    optr src = 0;
+    MemHandle mh;
+
+    PTransfer();
+    if (b) {
+	ClipboardItemHeader *h = LockHeader(FileFromTransferBlockID(header),
+					    b, &mh);
+
+	src = h->CIH_sourceID;
+	VMUnlock(mh);
+    }
+    VTransfer();
+    return src;
+}
+
+/* GetTransferInfoCommon: an item */
+static TransferBlockID GetTransferInfoCommon(TransferItemInstance *ti)
+{
+    TransferBlockID id;
+
+    PTransfer();
+    id = BlockIDFromFileAndBlock(ti->TII_vmFile, ti->TII_vmBlock);
+    VTransfer();
+    return id;
+}
+
+TransferBlockID ClipboardGetNormalItemInfo(void)
+{
+    return GetTransferInfoCommon(&normalTransferItem);
+}
+
+TransferBlockID ClipboardGetQuickItemInfo(void)
+{
+    return GetTransferInfoCommon(&quickTransferItem);
+}
+
+TransferBlockID ClipboardGetUndoItemInfo(void)
+{
+    return GetTransferInfoCommon(&undoTransferItem);
+}
+
+/* ValidateTransferItem: TRUE if an item found in the clipboard file is
+ * sound: no owner (the file is closed without), its formats there */
+static Boolean ValidateTransferItem(VMFileHandle f, VMBlockHandle b)
+{
+    ClipboardItemHeader *h;
+    VMInfoStruct info;
+    MemHandle mh;
+    Boolean ok = TRUE;
+    word i;
+
+    if (!VMInfo(f, b, &info) || info.size < sizeof(ClipboardItemHeader))
+	return FALSE;
+    h = LockHeader(f, b, &mh);
+    if (h->CIH_owner || (h->CIH_flags & (CIF_UNUSED1 | CIF_UNUSED2)) ||
+	!h->CIH_formatCount || h->CIH_formatCount > CLIPBOARD_MAX_FORMATS)
+	ok = FALSE;
+    for (i = 0; ok && i < h->CIH_formatCount; i++) {
+	VMChain c = h->CIH_formats[i].CIFI_vmChain;
+
+	if (!VMCHAIN_IS_DBITEM(c) && !VMInfo(f, VMCHAIN_GET_VM_BLOCK(c), NULL))
+	    ok = FALSE;
+    }
+    VMUnlock(mh);
+    return ok;
+}
+
+/*
+ * ClipboardOpenClipboardFile (CLIPBOARDOPENCLIPBOARDFILE): the
+ * clipboard file opened, or made (truncated with IC_NO, or if it is no
+ * VM file or its item is not sound); its normal item taken.  0, or the
+ * VMStatus; shared by another GEOS it is no clipboard (the file 0).
+ * Port32: the C header passes nothing, the asm cx: this is the
+ * reopening one (UserOpenClipboard passes the truncation).
+ */
+static word OpenClipboard(Boolean truncate)
+{
+    VMFileHandle f;
+    word e = 0;
+    char *name;
+
+    PTransfer();
+    FilePushDir();
+    FileSetStandardPath(SP_PRIVATE_DATA);
+    for (;;) {
+	VMBlockHandle map;
+	MemHandle mh;
+	TransferFileHeader *tfh;
+	Boolean good = TRUE;
+
+	normalTransferItem.TII_vmBlock = 0;
+	normalTransferItem.TII_vmFile = 0;
+	MemLock(OptrToHandle(@transferItemFilename));
+	name = LMemDeref(@transferItemFilename);
+	f = VMOpen(name, VMAF_USE_BLOCK_LEVEL_SYNCHRONIZATION |
+			 VMAF_FORCE_DENY_WRITE,
+		   truncate ? VMO_CREATE_TRUNCATE : VMO_CREATE, 0);
+	MemUnlock(OptrToHandle(@transferItemFilename));
+	if (!f) {
+	    e = ThreadGetError();
+	    uiTransferVMFile = 0;
+	    if (e == VM_SHARING_DENIED) {
+		e = 0;
+		break;
+	    }
+	    if (!truncate && (e == VM_FILE_FORMAT_MISMATCH ||
+			      e == VM_OPEN_INVALID_VM_FILE)) {
+		truncate = TRUE;
+		continue;
+	    }
+	    FilePopDir();
+	    VTransfer();
+	    return e ? e : VM_OPEN_INVALID_VM_FILE;
+	}
+	uiTransferVMFile = f;
+	map = VMGetMapBlock(f);
+	if (!map) {
+	    map = VMAlloc(f, sizeof(TransferFileHeader), 0);
+	    VMSetMapBlock(f, map);
+	    tfh = VMLock(f, map, &mh);
+	    tfh->TFH_normalItem = 0;
+	    VMDirty(mh);
+	    VMUnlock(mh);
+	} else if (!VMInfo(f, map, NULL))
+	    good = FALSE;
+	else {
+	    tfh = VMLock(f, map, &mh);
+	    normalTransferItem.TII_vmFile = f;
+	    normalTransferItem.TII_vmBlock = tfh->TFH_normalItem;
+	    VMUnlock(mh);
+	    if (normalTransferItem.TII_vmBlock &&
+		!ValidateTransferItem(f, normalTransferItem.TII_vmBlock))
+		good = FALSE;
+	}
+	if (good)
+	    break;
+	VMClose(f, TRUE);
+	truncate = TRUE;
+    }
+    e = 0;
+    if (uiTransferVMFile) {
+	HandleModifyOwner(uiTransferVMFile, GeodeGetCodeProcessHandle());
+	VMSetExecThread(uiTransferVMFile,
+			(ThreadHandle) ThreadGetInfo(0, TGIT_THREAD_HANDLE));
+    }
+    transferFreeListBufSize =
+	INIT_TRANSFER_FREE_LIST_COUNT * sizeof(TransferItemInstance);
+    transferFreeListBuffer = MemAllocSetOwner(GeodeGetCodeProcessHandle(),
+					      transferFreeListBufSize,
+					      HF_DYNAMIC | HF_SHARABLE,
+					      HAF_ZERO_INIT | HAF_NO_ERR);
+    FilePopDir();
+    VTransfer();
+    return 0;
+}
+
+word ClipboardOpenClipboardFile(void)
+{
+    return OpenClipboard(FALSE);
+}
+
+/* UserOpenClipboard: the clipboard file at the UI's start (truncated
+ * if the state files are deleted: IC_NO) */
+word UserOpenClipboard(word deleteState)
+{
+    return OpenClipboard(deleteState == IC_NO);
+}
+
+/*
+ * ClipboardCloseClipboardFile (CLIPBOARDCLOSECLIPBOARDFILE): the quick
+ * and undo items freed, the normal one kept without its owner and
+ * source for the next session
+ */
+void ClipboardCloseClipboardFile(void)
+{
+    VMFileHandle f;
+    MemHandle mh;
+
+    PTransfer();
+    f = uiTransferVMFile;
+    if (f) {
+	TransferFileHeader *tfh;
+
+	if (quickTransferItem.TII_vmBlock)
+	    FreeTransferLow(quickTransferItem.TII_vmFile,
+			    quickTransferItem.TII_vmBlock);
+	if (undoTransferItem.TII_vmBlock)
+	    FreeTransferLow(undoTransferItem.TII_vmFile,
+			    undoTransferItem.TII_vmBlock);
+	if (normalTransferItem.TII_vmBlock) {
+	    ClipboardItemHeader *h = LockHeader(normalTransferItem.TII_vmFile,
+						normalTransferItem.TII_vmBlock,
+						&mh);
+
+	    VMDirty(mh);
+	    h->CIH_owner = 0;
+	    h->CIH_sourceID = 0;
+	    VMUnlock(mh);
+	}
+	tfh = VMLock(f, VMGetMapBlock(f), &mh);
+	VMDirty(mh);
+	tfh->TFH_normalItem = normalTransferItem.TII_vmBlock;
+	VMUnlock(mh);
+	VMClose(f, TRUE);
+	uiTransferVMFile = 0;
+	MemFree(transferFreeListBuffer);
+	transferFreeListBuffer = 0;
+    }
+    VTransfer();
+}

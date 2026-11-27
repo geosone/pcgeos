@@ -10,4 +10,5 @@ geos_sources(ui_goc
   userVariable.goc
   userDialog.goc
   userDocumentSave.goc
-  userLibrary.goc)
+  userLibrary.goc
+  userTransfer.goc)

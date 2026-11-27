@@ -157,6 +157,8 @@ int main(void)
     InitFileWriteString("ui", "execOnStartup", "uiapp");
     InitFileWriteString("screen 0", "driver", "vidmem");
     InitFileWriteString("screen 0", "device", "memory");
+    /* no file system here: no clipboard file */
+    InitFileWriteBoolean("ui", "noClipboard", TRUE);
 
     /* tspui has the UI as a library: a library only, its process ends */
     sp = GeodeUseLibrary("tspui", 0, 0, NULL);
