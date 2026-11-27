@@ -47,13 +47,13 @@ geos_add_test(library.ui.app test_ui_app)
 
 # the Motif specific UI (Library/SpecUI) on the host video driver: the
 # system, a screen and a field
-geos_test_program(test_ui_motif EMBED ui uimotif motif hostvid text)
+geos_test_program(test_ui_motif EMBED ui uimotif motif hostvid styles text)
 geos_add_test(library.ui.motif test_ui_motif DISPLAY)
 
 # the UI booted with the Motif specific UI and an application of
 # "[ui] execOnStartup" with a document window
 geos_test_program(test_ui_boot
-                  EMBED ui uiboot motif hostvid vidmem berkeley text
+                  EMBED ui uiboot motif hostvid vidmem berkeley styles text
                         sound stream tsnddrv
                   INCLUDES ${PROJECT_SOURCE_DIR}/CInclude/Internal
                            ${GEOS_TESTS_SRC}/Geode)

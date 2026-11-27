@@ -34,12 +34,12 @@
 
 extern const unsigned char ui_geode[], uiboot_geode[], motif_geode[],
 			   hostvid_geode[], vidmem_geode[], berkeley_fnt[],
-			   text_geode[], sound_geode[], stream_geode[],
-			   tsnddrv_geode[];
+			   text_geode[], styles_geode[], sound_geode[],
+			   stream_geode[], tsnddrv_geode[];
 extern const unsigned long ui_geode_size, uiboot_geode_size,
 			   motif_geode_size, hostvid_geode_size,
 			   vidmem_geode_size, berkeley_fnt_size,
-			   text_geode_size, sound_geode_size,
+			   text_geode_size, styles_geode_size, sound_geode_size,
 			   stream_geode_size, tsnddrv_geode_size;
 
 /* as uiboot.goc */
@@ -395,6 +395,7 @@ int main(int argc, char **argv)
 	Put("geos.ini", ini, sizeof(ini) - 1);
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
     GeodeRegisterImage("uiboot", uiboot_geode, uiboot_geode_size);
+    GeodeRegisterImage("styles", styles_geode, styles_geode_size);
     GeodeRegisterImage("text", text_geode, text_geode_size);
     GeodeRegisterImage("motif", motif_geode, motif_geode_size);
     GeodeRegisterImage("hostvid", hostvid_geode, hostvid_geode_size);
