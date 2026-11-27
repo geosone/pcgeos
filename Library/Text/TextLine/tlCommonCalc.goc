@@ -284,7 +284,7 @@ static void CalcFieldPosition(LICL_vars *l, TOC_vars *v, word field)
 
     tab = TabGetPositionAndAttributes(l,
 		(EXT(v).TOCE_lineFlags & LF_STARTS_PARAGRAPH) != 0, prev,
-		l->LICL_tabReference, &attr);
+		l->LICL_tabReference, &attr, NULL);
     l->LICL_lastFieldTabType = attr & TA_TYPE;
     switch (attr & TA_TYPE) {
     default:				/* TT_LEFT */

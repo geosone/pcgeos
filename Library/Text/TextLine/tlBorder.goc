@@ -14,8 +14,7 @@
  * (DrawSmallBorderThingy); a double border twice, the second inside
  * the first.
  *
- * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: the
- * tab lines (DrawTabLinesAfterPos).
+ * Port32 (Port32/ABI.md section 13z): small objects.
  */
 @include "textInt.goh"
 
@@ -29,7 +28,7 @@ static void FillLICLRect(LICL_vars *l)
 
 /* SetBorderColorAndAttributes: the border's color, mask and pattern;
  * TRUE if it has a pattern (to be reset afterwards) */
-static Boolean SetBorderColorAndAttributes(LICL_vars *l)
+Boolean SetBorderColorAndAttributes(LICL_vars *l)
 {
     const VisTextParaAttr *a = &l->LICL_theParaAttr.VTMPA_paraAttr;
     GStateHandle g = VT(l->LICL_object)->VTI_gstate;
@@ -188,10 +187,12 @@ void GetPrevNextBorder(LICL_vars *l)
 	    T_GetBorderInfo(l, TL_LineToOffsetStart(l->LICL_object, line));
 }
 
-/* TextClearBehindLine: the line's background, then its border */
+/* TextClearBehindLine: the line's background, then the lines of its
+ * tabs and its border */
 void TextClearBehindLine(LICL_vars *l, sdword top, byte flags,
 			 Boolean haveDrawn)
 {
     TL_LineClearBehind(l, top, flags, haveDrawn);
+    DrawTabLinesAfterPos(l, 0);
     DrawBorderIfAny(l, 0);
 }

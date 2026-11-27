@@ -24,8 +24,10 @@
  * Behind a line its paragraph's own background and its border
  * (TextClearBehindLine).
  *
- * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: tab
- * leaders, extended styles, graphics, hidden characters shown, right
+ * A field that starts with a tab has the tab's leader before it.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects.  Not yet:
+ * extended styles, graphics, hidden characters shown, right
  * to left.
  */
 @include "textInt.goh"
@@ -77,10 +79,20 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
 	fi = &li->LI_firstField + f;
 	n = fi->FI_nChars;
 	start += n;
-	if (fi->FI_tab != RULER_TAB_TO_LINE_LEFT && n) {
-	    /* the field starts with its tab */
-	    n--;
-	    off++;
+	if (fi->FI_tab != RULER_TAB_TO_LINE_LEFT) {
+	    /* the field starts with its tab: its leader drawn */
+	    byte leader = FieldGetTabLeaderType(l, li, f,
+						(sword) (top >> 8), off);
+
+	    if (leader != TL_NONE)
+		DrawTabLeader(l, SmallGetLinePointer(o, line, NULL), f,
+			      (sword) (top >> 8), off, leader);
+	    li = SmallGetLinePointer(o, line, NULL);
+	    fi = &li->LI_firstField + f;
+	    if (n) {
+		n--;
+		off++;
+	    }
 	}
 	if (f == fields - 1) {
 	    pad = ((dword) li->LI_spacePad.WBF_int << 16) |

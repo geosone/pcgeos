@@ -7,14 +7,17 @@
 #define PA(l)	((l)->LICL_theParaAttr.VTMPA_paraAttr)
 
 /* TabGetPositionAndAttributes: the position and the attributes of the
- * tab a reference names */
+ * tab a reference names; spacing (if wanted): the room its line takes,
+ * after a right tab, before the others (negative) */
 word TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
 				    word endPrevField, TabReference ref,
-				    byte *attr)
+				    byte *attr, sword *spacing)
 {
     byte num = ref & TR_REF_NUMBER;
 
     *attr = TT_LEFT;
+    if (spacing)
+	*spacing = 0;
     if (!(ref & 0x80)) {
 	const Tab *tab;
 
@@ -26,6 +29,12 @@ word TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
 	    return paraStart ? PA(l).VTPA_paraMargin : PA(l).VTPA_leftMargin;
 	tab = &l->LICL_theParaAttr.VTMPA_tabs[PA(l).VTPA_numberOfTabs - num];
 	*attr = tab->T_attr;
+	if (spacing) {
+	    *spacing = (sword) (((word) (byte) (tab->T_lineWidth +
+						tab->T_lineSpacing)) >> 3);
+	    if ((tab->T_attr & TA_TYPE) != TT_RIGHT)
+		*spacing = (sword) -*spacing;
+	}
 	return tab->T_position;
     }
     if (num == OTHER_INTRINSIC_TAB)

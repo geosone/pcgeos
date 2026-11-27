@@ -1,0 +1,117 @@
+/*
+ * tlTabLeader.goc -- after tlTabLeader.asm: the leader of a tab
+ * (DrawTabLeader, DrawTabLeaderLine, DrawTabLeaderBullet,
+ * DrawTabLeaderDot, DrawTabLeaderRepeatedString,
+ * SetupGStateForDrawAtOffset).
+ *
+ * A tab with a leader fills the room from the end of the field before
+ * it to the next field (no further than the tab's line) on the
+ * baseline: a line in the text's color, or as many dots or bullets as
+ * fit, in the attributes of the tab character.
+ *
+ * Port32: the text's scrolling (VTI_leftOffset), which the fields are
+ * drawn with, is added to the leader too (the asm leaves it out).
+ */
+@include "textInt.goh"
+#include <char.h>
+
+/* the leader's strings are drawn in pieces of this many */
+#define REPEATED_CHAR_COUNT	32
+
+/* SetupGStateForDrawAtOffset: the gstate in the attributes at pos */
+static void SetupGStateForDrawAtOffset(optr o, dword pos)
+{
+    TextAttr ta;
+    dword count;
+
+    (void) TA_FillTextAttrForDraw(o, pos, &ta, &count);
+    GrSetTextAttr(VT(o)->VTI_gstate, &ta);
+}
+
+/* DrawTabLeaderLine: a line on the baseline from left to right */
+static void DrawTabLeaderLine(optr o, const LineInfo *li, sword top,
+			      dword pos, sword left, sword right)
+{
+    GStateHandle g = VT(o)->VTI_gstate;
+    sword y = (sword) (top + ((TEXT_WBF(&li->LI_blo) + 0xff) >> 8));
+    RGBColorAsDWord c;
+
+    SetupGStateForDrawAtOffset(o, pos);
+    c = GrGetTextColor(g);
+    GrSetLineColor(g, CF_RGB, RGB_RED(c), RGB_GREEN(c), RGB_BLUE(c));
+    GrSetLineMaskSys(g, GrGetTextMask(g, NULL));
+    GrDrawHLine(g, left, y, right);
+}
+
+/* DrawTabLeaderRepeatedString: as many of the character as fit from
+ * left to right */
+static void DrawTabLeaderRepeatedString(optr o, const LineInfo *li,
+					sword top, dword pos, sword left,
+					sword right, char c)
+{
+    GStateHandle g = VT(o)->VTI_gstate;
+    sword y = (sword) (top + ((TEXT_WBF(&li->LI_blo) + 0xff) >> 8));
+    char s[REPEATED_CHAR_COUNT];
+    WWFixedAsDWord w;
+    word n;
+
+    memset(s, c, sizeof(s));
+    SetupGStateForDrawAtOffset(o, pos);
+    GrSetTextMode(g, TM_DRAW_BASE, TM_DRAW_OPTIONAL_HYPHENS |
+		  TM_DRAW_ACCENT | TM_DRAW_BOTTOM);
+    GrSetTrackKern(g, 0);
+    w = GrCharWidth(g, (byte) c);
+    if (!w)
+	return;
+    n = (word) (GrUDivWWFixed((WWFixedAsDWord) (word) (right - left) << 16,
+			      w) >> 16);
+    GrMoveTo(g, left, y);
+    while (n) {
+	word k = n < REPEATED_CHAR_COUNT ? n : REPEATED_CHAR_COUNT;
+
+	GrDrawTextAtCP(g, s, k);
+	n = (word) (n - k);
+    }
+}
+
+/*
+ * DrawTabLeader: the leader of the field f of a line (leader: its
+ * TabLeader), the line's top at top, its tab character at pos
+ */
+void DrawTabLeader(LICL_vars *l, const LineInfo *li, word f, sword top,
+		   dword pos, byte leader)
+{
+    optr o = l->LICL_object;
+    const FieldInfo *fi = &li->LI_firstField + f;
+    sword left = 0, right, spacing, tab, scroll = VT(o)->VTI_leftOffset;
+    byte attr;
+
+    if (f) {
+	const FieldInfo *p = fi - 1;
+
+	left = (sword) (p->FI_position + p->FI_width);
+    }
+    left = (sword) (left + li->LI_adjustment + scroll);
+    right = (sword) (fi->FI_position + li->LI_adjustment + scroll);
+    tab = (sword) TabGetPositionAndAttributes(l, FALSE, 0, fi->FI_tab,
+					      &attr, &spacing);
+    tab = (sword) (tab + spacing + scroll);
+    if (right > tab)
+	right = tab;
+    if (left > right)
+	return;
+    switch (leader) {
+    case TL_LINE:
+	DrawTabLeaderLine(o, li, top, pos, left, right);
+	break;
+    case TL_DOT:
+	/* DrawTabLeaderDot */
+	DrawTabLeaderRepeatedString(o, li, top, pos, left, right, '.');
+	break;
+    case TL_BULLET:
+	/* DrawTabLeaderBullet */
+	DrawTabLeaderRepeatedString(o, li, top, pos, left, right,
+				    (char) C_BULLET);
+	break;
+    }
+}

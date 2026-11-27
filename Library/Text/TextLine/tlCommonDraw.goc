@@ -1,6 +1,6 @@
 /*
  * tlCommonDraw.goc -- after tlCommonDraw.asm: Draw related stuff:
- * FieldDrawStyleCallback; behind a line its background, the
+ * FieldDrawStyleCallback, FieldGetTabLeaderType; behind a line its background, the
  * paragraph's own inside its border (CommonLineClearBehind,
  * CommonLineClearArea, ComputeLineBounds, GetBorderAndFlags,
  * LineWashParagraph, InsetBGColorAreaForBorder).
@@ -133,4 +133,22 @@ void CommonLineClearBehind(LICL_vars *l, sdword top, byte flags,
 			   Boolean haveDrawn)
 {
     CommonLineClearArea(l, top, flags, haveDrawn);
+}
+
+/* FieldGetTabLeaderType: the leader of the tab the field f starts
+ * with (the paragraph's attributes fetched again, as the asm) */
+byte FieldGetTabLeaderType(LICL_vars *l, const LineInfo *li, word f,
+			   sword top, dword pos)
+{
+    TabReference ref = (&li->LI_firstField + f)->FI_tab;
+    byte attr;
+
+    l->LICL_lineBottom.WBF_int = (word) top;
+    l->LICL_lineBottom.WBF_frac = 0;
+    l->LICL_lineHeight.WBF_int = (word) ((TEXT_WBF(&li->LI_hgt) + 0xff) >> 8);
+    l->LICL_lineHeight.WBF_frac = 0;
+    l->LICL_paraAttrStart = (dword) -1;
+    T_EnsureCorrectParaAttr(l, pos);
+    (void) TabGetPositionAndAttributes(l, FALSE, 0, ref, &attr, NULL);
+    return (byte) ((attr >> 2) & 0x07);	/* TA_LEADER */
 }

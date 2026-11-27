@@ -9,6 +9,8 @@ geos_sources(text_goc
   tlSmallPosition.goc
   tlSmallFlags.goc
   tlBorder.goc
+  tlTabLine.goc
+  tlTabLeader.goc
   tlCommonCalc.goc
   tlTabUtils.goc
   tlCommonPosition.goc

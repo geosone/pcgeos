@@ -300,7 +300,15 @@ extern LineFlags SmallLineGetFlags(optr o, dword line);
 extern void TL_LineCalculate(LICL_vars *l, LineFlags flags);
 extern word TabGetPositionAndAttributes(LICL_vars *l, Boolean paraStart,
 					   word endPrevField,
-					   TabReference ref, byte *attr);
+					   TabReference ref, byte *attr,
+					   sword *spacing);
+/* TextLine/tlTabLine.goc, tlTabLeader.goc, tlCommonDraw.goc */
+extern void DrawTabLinesAfterPos(LICL_vars *l, word pos);
+extern void DrawTabLeader(LICL_vars *l, const LineInfo *li, word f,
+			  sword top, dword pos, byte leader);
+extern byte FieldGetTabLeaderType(LICL_vars *l, const LineInfo *li,
+				  word f, sword top, dword pos);
+extern Boolean SetBorderColorAndAttributes(LICL_vars *l);
 
 /* Text/textCalc.goc: the lines calculated again */
 extern void T_GetNewParaAttr(LICL_vars *l, dword pos);

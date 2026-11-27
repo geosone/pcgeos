@@ -153,7 +153,8 @@ Ordered by dependency, each with host-side tests under `linux`:
   controllers (`taNotify.goc`: select state, attributes, selection,
   counts, search, spell, cursor position, the null status of a lost
   target); overstrike mode and smart quotes; scrolling a view by lines
-  and pages; paragraph borders and backgrounds; ctest
+  and pages; paragraph borders and backgrounds; tab lines and
+  leaders; ctest
   `library.text`.
   Open: large objects, shared elements and style sheets (and their
   notifications), drawing borders, undo, the clipboard (`pasteable`).

@@ -1,0 +1,58 @@
+/*
+ * tlTabLine.goc -- after tlTabLine.asm: the lines that go with tabs
+ * (DrawTabLinesAfterPos, TextDrawTabLine).
+ *
+ * A tab with a line width has a line in the border's color beside it
+ * from the top of the line to its bottom: before a left, center or
+ * anchored tab, after a right one, its spacing away.
+ *
+ * Port32: the asm adds the object's left edge and margin to the
+ * line's position, which the gstate is already moved by (the line
+ * stood that far to the right); here only the text's scrolling
+ * (VTI_leftOffset) is added.
+ */
+@include "textInt.goh"
+
+/* convertWidth: 1/8 points to points, rounded */
+static sword ConvertWidth(byte w)
+{
+    return (sword) (((word) w + 4) >> 3);
+}
+
+/* TextDrawTabLine: the line of a tab, in LICL_theRect's height */
+static void TextDrawTabLine(LICL_vars *l, const Tab *tab)
+{
+    VisTextInstance *t = VT(l->LICL_object);
+    GStateHandle g = t->VTI_gstate;
+    Boolean pattern = SetBorderColorAndAttributes(l);
+    sword width = ConvertWidth(tab->T_lineWidth),
+	  space = ConvertWidth(tab->T_lineSpacing), left;
+
+    GrSetAreaMaskSys(g, tab->T_grayScreen);
+    left = (sword) tab->T_position;
+    if ((tab->T_attr & 0x03) == TT_RIGHT)
+	left = (sword) (left + space);
+    else
+	left = (sword) (left - width - space);
+    left = (sword) (left + t->VTI_leftOffset);
+    GrFillRect(g, left, l->LICL_theRect.R_top, (sword) (left + width),
+	       l->LICL_theRect.R_bottom);
+    if (pattern) {
+	GraphicPattern none = { 0, 0 };
+
+	GrSetAreaPattern(g, none);
+    }
+}
+
+/* DrawTabLinesAfterPos: the lines of the tabs at pos or after it */
+void DrawTabLinesAfterPos(LICL_vars *l, word pos)
+{
+    word i, n = l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_numberOfTabs;
+
+    for (i = 0; i < n; i++) {
+	const Tab *tab = &l->LICL_theParaAttr.VTMPA_tabs[i];
+
+	if (tab->T_lineWidth && tab->T_position >= pos)
+	    TextDrawTabLine(l, tab);
+    }
+}

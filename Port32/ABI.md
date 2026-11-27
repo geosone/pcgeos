@@ -7397,8 +7397,16 @@ the modules of the asm; what is there:
   shadows and double lines as the asm.  The paragraph's own background
   fills the inside of its border when its gray screen is not SDM_0.
   In a calculation the border below a line is that of the text after
-  it (the asm kept what a line drawn before left there); the tab
-  lines are not drawn yet.
+  it (the asm kept what a line drawn before left there).
+- **Tab lines and leaders** (`TextLine/tlTabLine.goc`,
+  `tlTabLeader.goc`): a tab with a line width has a line in the
+  border's color beside it (before a left, center or anchored tab,
+  after a right one); a tab with a leader fills the room before its
+  field on the baseline with a line, dots or bullets in the tab
+  character's attributes.  Both are moved by the text's scrolling
+  (`VTI_leftOffset`) like the fields; the asm moved the tab line by the
+  object's left edge and margin, which the gstate already holds, and
+  left the scrolling out of the leader.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
   paragraph attribute, borders and paragraph backgrounds, tab leaders,
   extended styles, hyphenation, graphics, the large mouse messages, selection by words and lines while
