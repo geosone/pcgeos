@@ -12,6 +12,7 @@
 
 @include <stdapp.goh>
 @include <Objects/vTextC.goh>
+@include <Objects/vLTextC.goh>
 #include <string.h>
 
 #define VT(o)	((VisTextInstance *) ObjDerefVis(o))
@@ -22,6 +23,29 @@
 
 /* TextStorage/tsExternal.goc: the text of an object */
 extern void TS_SmallCreateTextStorage(optr o);
+/* TextStorage/tsLarge*.goc: the text of a large object */
+extern void TS_LargeCreateTextStorage(optr o);
+extern const char *LargeLockTextPtr(optr o, dword offset, word *after);
+extern void LargeUnlockTextPtr(const char *p);
+extern word LargeGetCharAtOffset(optr o, dword offset);
+extern dword LargeGetTextSize(optr o);
+extern Boolean LargeCheckLegalChange(optr o, VisTextReplaceParameters *p);
+extern dword LargeGetTextRange(optr o, const VisTextRange *range,
+			       TextReference *ref);
+extern void LargeReplaceRange(optr o, VisTextReplaceParameters *p);
+extern void TS_UnlockTextPtr(optr o, const char *p);
+/* the text a style callback of the kernel has locked: the object
+ * first (the callbacks find it through a pointer to an optr), the text
+ * last locked (released at the next callback and when done) */
+typedef struct {
+    optr		TLK_object;
+    const char		*TLK_locked;
+} TextLockState;
+extern const char *TS_RelockTextPtr(TextLockState *s, dword offset,
+				    word *after);
+extern void TS_ReleaseTextPtr(TextLockState *s);
+/* Text/textUtils.goc: the VM file of the object's huge arrays */
+extern VMFileHandle T_GetVMFile(optr o);
 extern dword TS_GetTextSize(optr o);
 extern dword TS_GetWordCount(optr o);
 /* the text from an offset on (till the next change of the object's
@@ -43,13 +67,13 @@ extern void TS_GetReplaceSize(optr o, VisTextReplaceParameters *p);
 extern dword TS_ComputeReferenceSize(const TextReference *ref);
 
 /* TextStorage/tsReference.goc: count characters of the reference to
- * dest; the buffer of a reference to write size bytes to (a chunk or a
- * block is made that large), and the block to unlock afterwards */
+ * dest; a reference made size bytes; count characters and a null
+ * written to a reference at off */
 extern void TS_CopyTextReference(char *dest, const TextReference *ref,
 				 dword count);
-extern char *TS_LockReferenceForWrite(TextReference *ref, dword size,
-				      MemHandle *unlock);
-extern void TS_UnlockReference(MemHandle unlock);
+extern void TS_ResizeReference(TextReference *ref, dword size);
+extern void TS_AppendToReference(TextReference *ref, dword off,
+				 const char *s, word count);
 
 /* TextAttr/taRange.goc: a virtual range (the selection, the end of the
  * text) made real */
@@ -223,6 +247,9 @@ typedef ByteFlags CalcFlags;
 
 typedef struct {
     optr		LICL_object;
+    TextLockState	LICL_textLock;	/* Port32: the text the calc's
+					 * callback has locked
+					 * (CF_TEXT_LOCKED) */
     VisTextRange	LICL_range;	/* start: the line to calculate
 					 * (then the next); end: of the
 					 * change */

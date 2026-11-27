@@ -1,5 +1,5 @@
 /*
- * textUtils.goc -- after textUtils.asm: SendToTextOutput.
+ * textUtils.goc -- after textUtils.asm: SendToTextOutput, T_GetVMFile.
  */
 @include "textInt.goh"
 #include <Internal/specUI.h>
@@ -38,4 +38,15 @@ void SendToTextOutputLowIfNotSelf(optr o, Message msg, const void *args,
 	@call o::MSG_GEN_OUTPUT_ACTION(ev, out);
     } else
 	CObjMessageP(0, out, msg, args, size, NULL, 0);
+}
+
+/* T_GetVMFile: VTI_vmFile, else the file the object's block is in */
+VMFileHandle T_GetVMFile(optr o)
+{
+    VMFileHandle f = VT(o)->VTI_vmFile;
+
+    if (!f)
+	f = (VMFileHandle) MemGetInfo(OptrToHandle(o),
+				      MGIT_OWNER_OR_VM_FILE_HANDLE);
+    return f;
 }

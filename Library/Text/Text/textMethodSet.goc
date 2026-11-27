@@ -18,6 +18,7 @@
  */
 @include "textInt.goh"
 #include <localize.h>
+#include <dbase.h>
 
 /* TextMarkUserModified */
 void TextMarkUserModified(optr o)
@@ -196,6 +197,31 @@ static void RefBlock(TextReference *r, MemHandle mh)
     r->TR_ref.TRU_block.TRB_handle = mh;
 }
 
+static void RefVMBlock(TextReference *r, VMFileHandle f, VMBlockHandle b)
+{
+    memset(r, 0, sizeof(*r));
+    r->TR_type = TRT_VM_BLOCK;
+    r->TR_ref.TRU_vmBlock.TRVMB_file = f;
+    r->TR_ref.TRU_vmBlock.TRVMB_block = b;
+}
+
+static void RefDBItem(TextReference *r, VMFileHandle f, DBGroup g, DBItem i)
+{
+    memset(r, 0, sizeof(*r));
+    r->TR_type = TRT_DB_ITEM;
+    r->TR_ref.TRU_dbItem.TRDBI_file = f;
+    r->TR_ref.TRU_dbItem.TRDBI_group = g;
+    r->TR_ref.TRU_dbItem.TRDBI_item = i;
+}
+
+static void RefHugeArray(TextReference *r, VMFileHandle f, VMBlockHandle a)
+{
+    memset(r, 0, sizeof(*r));
+    r->TR_type = TRT_HUGE_ARRAY;
+    r->TR_ref.TRU_hugeArray.TRHA_file = f;
+    r->TR_ref.TRU_hugeArray.TRHA_array = a;
+}
+
 /* VisTextReplaceAllPtr: the same text again changes nothing but the
  * modified state */
 @extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_PTR
@@ -203,10 +229,16 @@ static void RefBlock(TextReference *r, MemHandle mh)
     TextReference r;
     word after;
     const char *old = TS_LockTextPtr(oself, 0, &after);
+    Boolean same;
 
     if (!textLen)
 	textLen = LocalStringSize(text);
-    if (textLen == after && !memcmp(old, text, textLen)) {
+    /* (a large object's first block of text: the same text is only
+     * seen when all of it is in that block) */
+    same = textLen == after && TS_GetTextSize(oself) == after &&
+	   !memcmp(old, text, textLen);
+    TS_UnlockTextPtr(oself, old);
+    if (same) {
 	TextMarkNotUserModified(oself);
 	return;
     }
@@ -275,6 +307,78 @@ static void RefBlock(TextReference *r, MemHandle mh)
     TextReference r;
 
     RefBlock(&r, block);
+    ReplaceWith(oself, RW_APPEND, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_VM_BLOCK
+{
+    TextReference r;
+
+    RefVMBlock(&r, file, block);
+    ReplaceWith(oself, RW_ALL, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_DB_ITEM
+{
+    TextReference r;
+
+    RefDBItem(&r, file, group, item);
+    ReplaceWith(oself, RW_ALL, &r, 0);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_HUGE_ARRAY
+{
+    TextReference r;
+
+    RefHugeArray(&r, file, hugeArrayBlock);
+    ReplaceWith(oself, RW_ALL, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_VM_BLOCK
+{
+    TextReference r;
+
+    RefVMBlock(&r, file, block);
+    ReplaceWith(oself, RW_SELECTION, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_DB_ITEM
+{
+    TextReference r;
+
+    RefDBItem(&r, file, group, item);
+    ReplaceWith(oself, RW_SELECTION, &r, 0);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_HUGE_ARRAY
+{
+    TextReference r;
+
+    RefHugeArray(&r, file, hugeArrayBlock);
+    ReplaceWith(oself, RW_SELECTION, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_VM_BLOCK
+{
+    TextReference r;
+
+    RefVMBlock(&r, file, block);
+    ReplaceWith(oself, RW_APPEND, &r, textLen);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_DB_ITEM
+{
+    TextReference r;
+
+    RefDBItem(&r, file, group, item);
+    ReplaceWith(oself, RW_APPEND, &r, 0);
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_HUGE_ARRAY
+{
+    TextReference r;
+
+    RefHugeArray(&r, file, hugeArrayBlock);
     ReplaceWith(oself, RW_APPEND, &r, textLen);
 }
 

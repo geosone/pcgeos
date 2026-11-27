@@ -156,8 +156,10 @@ Ordered by dependency, each with host-side tests under `linux`:
   and pages; paragraph borders and backgrounds; tab lines and
   leaders; ctest
   `library.text`. 2026-11-27: the UI's clipboard (`User/userTransfer.goc`,
-  ABI.md §13ab), `library.text` step 21.
-  Open: large objects, shared elements and style sheets (and their
+  ABI.md §13ab), `library.text` step 21; the text of large objects
+  (`VisLargeTextClass`, huge arrays) and all kinds of text references,
+  step 22.
+  Open: the lines, regions and runs of large objects, shared elements and style sheets (and their
   notifications), undo, cut, copy and paste of text (`pasteable`),
   quick transfer.
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose

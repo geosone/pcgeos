@@ -1,17 +1,46 @@
 /*
  * tsReference.goc -- text copied from and to a reference (after
- * tsReference.asm): a pointer, a chunk (an optr) or a block.  A chunk
- * or a block written to is made as large as its text.
+ * tsReference.asm): a pointer, a chunk (an optr), a block, a VM block,
+ * a DB item or a huge array (CopyTextReference and the CopyTextFrom...
+ * of each kind; AppendFromPointerToTextReference and the AppendTextTo...
+ * of each kind, IsInsertPosAtEnd).  A reference written to is made as
+ * large as its text first (TS_ResizeReference: textMethodGet.asm's
+ * ResizeDestBuffer).
  *
- * Port32, not yet: references to VM blocks, DB items and huge arrays;
- * no TRT_SEGMENT_CHUNK.
+ * Port32: no TRT_SEGMENT_CHUNK (there are no segments).
  */
 @include "textInt.goh"
+#include <hugearr.h>
+#include <dbase.h>
 
-/* CopyTextReference */
+/* CopyTextFromHugeArray: block by block of the array */
+static void CopyTextFromHugeArray(char *dest, VMFileHandle f,
+				  VMBlockHandle a, dword count)
+{
+    dword pos = 0;
+
+    while (count) {
+	void *p;
+	word size, k;
+	dword n = HugeArrayLock(f, a, pos, &p, &size);
+
+	EC_ERROR_IF(!(word) n, -1);
+	k = (word) n;
+	if ((dword) k > count)
+	    k = (word) count;
+	memmove(dest, p, k);
+	HugeArrayUnlock(p);
+	dest += k;
+	pos += k;
+	count -= k;
+    }
+}
+
+/* CopyTextReference: count characters of the reference to dest */
 void TS_CopyTextReference(char *dest, const TextReference *ref, dword count)
 {
     MemHandle mh;
+    const void *p;
 
     switch (ref->TR_type) {
     case TRT_POINTER:
@@ -29,43 +58,135 @@ void TS_CopyTextReference(char *dest, const TextReference *ref, dword count)
 	memcpy(dest, MemLock(mh), count);
 	MemUnlock(mh);
 	break;
+    case TRT_VM_BLOCK:
+	p = VMLock(ref->TR_ref.TRU_vmBlock.TRVMB_file,
+		   ref->TR_ref.TRU_vmBlock.TRVMB_block, &mh);
+	memcpy(dest, p, count);
+	VMUnlock(mh);
+	break;
+    case TRT_DB_ITEM:
+	p = DBLock(ref->TR_ref.TRU_dbItem.TRDBI_file,
+		   ref->TR_ref.TRU_dbItem.TRDBI_group,
+		   ref->TR_ref.TRU_dbItem.TRDBI_item);
+	memcpy(dest, p, count);
+	DBUnlock((void *) p);
+	break;
+    case TRT_HUGE_ARRAY:
+	CopyTextFromHugeArray(dest, ref->TR_ref.TRU_hugeArray.TRHA_file,
+			      ref->TR_ref.TRU_hugeArray.TRHA_array, count);
+	break;
     default:
 	EC_ERROR(-1);
     }
 }
 
 /*
- * TS_LockReferenceForWrite: the buffer of a reference, a chunk or a
- * block made size bytes large; *unlock is the block to unlock after
- * writing (TS_UnlockReference)
+ * TS_ResizeReference (ResizeDestBuffer): a chunk, a block, a VM block
+ * or a DB item made size bytes; a pointer and a huge array stay as
+ * they are
  */
-char *TS_LockReferenceForWrite(TextReference *ref, dword size,
-			       MemHandle *unlock)
+void TS_ResizeReference(TextReference *ref, dword size)
 {
+    MemHandle mh;
     optr c;
 
-    *unlock = 0;
     switch (ref->TR_type) {
-    case TRT_POINTER:
-	return ref->TR_ref.TRU_pointer.TRP_pointer;
     case TRT_OPTR:
 	c = ref->TR_ref.TRU_blockChunk.TRBC_ref;
-	*unlock = OptrToHandle(c);
-	ObjLockObjBlock(*unlock);
+	ObjLockObjBlock(OptrToHandle(c));
 	LMemReAlloc(c, (word) size);
-	return LMemDeref(c);
+	MemUnlock(OptrToHandle(c));
+	break;
     case TRT_BLOCK:
-	*unlock = ref->TR_ref.TRU_block.TRB_handle;
-	MemReAlloc(*unlock, (word) size, HAF_NO_ERR);
-	return MemLock(*unlock);
+	MemReAlloc(ref->TR_ref.TRU_block.TRB_handle, (word) size, HAF_NO_ERR);
+	break;
+    case TRT_VM_BLOCK:
+	(void) VMLock(ref->TR_ref.TRU_vmBlock.TRVMB_file,
+		      ref->TR_ref.TRU_vmBlock.TRVMB_block, &mh);
+	MemReAlloc(mh, (word) size, HAF_NO_ERR);
+	VMDirty(mh);
+	VMUnlock(mh);
+	break;
+    case TRT_DB_ITEM:
+	DBReAlloc(ref->TR_ref.TRU_dbItem.TRDBI_file,
+		  ref->TR_ref.TRU_dbItem.TRDBI_group,
+		  ref->TR_ref.TRU_dbItem.TRDBI_item, (word) size);
+	break;
     default:
-	EC_ERROR(-1);
-	return NULL;
+	break;
     }
 }
 
-void TS_UnlockReference(MemHandle unlock)
+/* CopyAndNullTerminate */
+static void CopyAndNullTerminate(char *d, const char *s, word count)
 {
-    if (unlock)
-	MemUnlock(unlock);
+    memmove(d, s, count);
+    d[count] = 0;
+}
+
+/* AppendTextToHugeArray: inserted at off; the null appended if it was
+ * at the end (else the array is taken to end in one) */
+static void AppendTextToHugeArray(VMFileHandle f, VMBlockHandle a, dword off,
+				  const char *s, word count)
+{
+    /* IsInsertPosAtEnd */
+    Boolean atEnd = off == HugeArrayGetCount(f, a);
+    char nul = 0;
+
+    if (count)
+	HugeArrayInsert(f, a, count, off, s);
+    if (atEnd)
+	HugeArrayAppend(f, a, 1, &nul);
+}
+
+/*
+ * AppendFromPointerToTextReference: count characters written to the
+ * reference at off, a null after them
+ */
+void TS_AppendToReference(TextReference *ref, dword off, const char *s,
+			  word count)
+{
+    MemHandle mh;
+    optr c;
+    char *d;
+
+    switch (ref->TR_type) {
+    case TRT_POINTER:
+	CopyAndNullTerminate(ref->TR_ref.TRU_pointer.TRP_pointer + off, s,
+			     count);
+	break;
+    case TRT_OPTR:
+	c = ref->TR_ref.TRU_blockChunk.TRBC_ref;
+	ObjLockObjBlock(OptrToHandle(c));
+	CopyAndNullTerminate((char *) LMemDeref(c) + off, s, count);
+	MemUnlock(OptrToHandle(c));
+	break;
+    case TRT_BLOCK:
+	mh = ref->TR_ref.TRU_block.TRB_handle;
+	CopyAndNullTerminate((char *) MemLock(mh) + off, s, count);
+	MemUnlock(mh);
+	break;
+    case TRT_VM_BLOCK:
+	d = VMLock(ref->TR_ref.TRU_vmBlock.TRVMB_file,
+		   ref->TR_ref.TRU_vmBlock.TRVMB_block, &mh);
+	CopyAndNullTerminate(d + off, s, count);
+	VMDirty(mh);
+	VMUnlock(mh);
+	break;
+    case TRT_DB_ITEM:
+	d = DBLock(ref->TR_ref.TRU_dbItem.TRDBI_file,
+		   ref->TR_ref.TRU_dbItem.TRDBI_group,
+		   ref->TR_ref.TRU_dbItem.TRDBI_item);
+	CopyAndNullTerminate(d + off, s, count);
+	DBDirty(d);
+	DBUnlock(d);
+	break;
+    case TRT_HUGE_ARRAY:
+	AppendTextToHugeArray(ref->TR_ref.TRU_hugeArray.TRHA_file,
+			      ref->TR_ref.TRU_hugeArray.TRHA_array, off, s,
+			      count);
+	break;
+    default:
+	EC_ERROR(-1);
+    }
 }

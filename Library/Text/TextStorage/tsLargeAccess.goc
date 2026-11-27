@@ -1,0 +1,60 @@
+/*
+ * tsLargeAccess.goc -- after tsLargeAccess.asm: the text of a large
+ * object (VTSF_LARGE): a huge array of characters in the object's VM
+ * file (T_GetVMFile) named by VTI_text, with its null at the end
+ * (LargeGetCharAtOffset, LargeGetTextSize, LargeCheckLegalChange,
+ * LargeLockTextPtr, LargeUnlockTextPtr).
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+
+/* LargeLockTextPtr: the text at offset; *after the characters valid
+ * from there (to the end of its block of the array).  Port32: without
+ * the null, as the small object's (the asm counted it in the last
+ * block) */
+const char *LargeLockTextPtr(optr o, dword offset, word *after)
+{
+    VMFileHandle f = T_GetVMFile(o);
+    VMBlockHandle a = VT(o)->VTI_text;
+    void *p;
+    word size;
+    dword n = HugeArrayLock(f, a, offset, &p, &size);
+
+    EC_ERROR_IF(!(word) n, -1);	/* PASSED_OFFSET_DOES_NOT_EXIST... */
+    if (after) {
+	*after = (word) n;
+	if (offset + (word) n >= HugeArrayGetCount(f, a))
+	    (*after)--;
+    }
+    return p;
+}
+
+/* LargeUnlockTextPtr */
+void LargeUnlockTextPtr(const char *p)
+{
+    HugeArrayUnlock((void *) p);
+}
+
+/* LargeGetCharAtOffset */
+word LargeGetCharAtOffset(optr o, dword offset)
+{
+    const char *p = LargeLockTextPtr(o, offset, NULL);
+    word c = (byte) *p;
+
+    LargeUnlockTextPtr(p);
+    return c;
+}
+
+/* LargeGetTextSize: the characters without the null */
+dword LargeGetTextSize(optr o)
+{
+    return HugeArrayGetCount(T_GetVMFile(o), VT(o)->VTI_text) - 1;
+}
+
+/* LargeCheckLegalChange: any size is */
+Boolean LargeCheckLegalChange(optr o, VisTextReplaceParameters *p)
+{
+    (void) o;
+    (void) p;
+    return TRUE;
+}

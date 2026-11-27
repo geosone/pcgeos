@@ -198,7 +198,7 @@ static word CalcStyleCallback(TextMetricStyles *tms, word offset,
     VisTextExtendedStyles es;
     word after;
 
-    *text = TS_LockTextPtr(l->LICL_object, pos, &after);
+    *text = TS_RelockTextPtr(&l->LICL_textLock, pos, &after);
     es = TA_FillTextAttrForDraw(l->LICL_object, pos, &tms->TMS_textAttr,
 				&count);
     if (es & VTES_NOWRAP)
@@ -267,7 +267,10 @@ static Boolean FindFieldEnd(LICL_vars *l, TOC_vars *v, word field)
 				      EndPrevField(l, v, field));
     EXT(v).TOCE_anchorChar = 0;
     l->LICL_field = field;
+    l->LICL_textLock.TLK_object = l->LICL_object;
+    l->LICL_textLock.TLK_locked = NULL;
     GrTextObjCalc(t->VTI_gstate, v);
+    TS_ReleaseTextPtr(&l->LICL_textLock);
     if ((word) EXT(v).TOCE_nChars > l->LICL_extStylePos)
 	EXT(v).TOCE_lineFlags |= LF_CONTAINS_EXTENDED_STYLE;
     return (EXT(v).TOCE_lineFlags & LF_ENDS_IN_NULL) ||

@@ -1,0 +1,32 @@
+/*
+ * tsLargeGetText.goc -- after tsLargeGetText.asm: LargeGetTextRange.
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+
+/* LargeGetTextRange: the range copied to the reference block by block
+ * of the array, null terminated; the characters copied (Port32: the
+ * reference made its size first, as the small object's) */
+dword LargeGetTextRange(optr o, const VisTextRange *range,
+			TextReference *ref)
+{
+    dword n = range->VTR_end - range->VTR_start, left = n,
+	  pos = range->VTR_start;
+    dword done = 0;
+
+    TS_ResizeReference(ref, n + 1);
+    if (!n)
+	TS_AppendToReference(ref, 0, "", 0);
+    while (left) {
+	word after;
+	const char *p = LargeLockTextPtr(o, pos, &after);
+	word k = (dword) after < left ? after : (word) left;
+
+	TS_AppendToReference(ref, done, p, k);
+	LargeUnlockTextPtr(p);
+	done += k;
+	pos += k;
+	left -= k;
+    }
+    return n;
+}

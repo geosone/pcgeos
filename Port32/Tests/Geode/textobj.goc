@@ -14,12 +14,15 @@
 @include <Objects/vTextC.goh>
 @include <Objects/gViewC.goh>
 @include <Objects/clipbrd.goh>
+@include <Objects/vLTextC.goh>
 #include <string.h>
 #include <font.h>
 #include <fontID.h>
 #include <chunkarr.h>
 #include <initfile.h>
 #include <char.h>
+#include <hugearr.h>
+#include <dbase.h>
 #include <geoworks.h>
 
 typedef struct {
@@ -41,6 +44,7 @@ typedef struct {
     word	TOS_border[5];		/* of step 19, to print */
     word	TOS_tab[2];		/* of step 20 */
     word	TOS_clip;		/* of step 21 */
+    word	TOS_large[3];		/* of step 22 */
 } TOState;
 
 TOState toState;
@@ -1418,6 +1422,83 @@ static VMBlockHandle TOMakeItem(VMFileHandle f, optr owner, word extra)
 	ClipboardRequestItemFormat(text, q.CQA_header, &ra);
 	TOCHECK(ra.CRA_extra1 == 6);
 	ClipboardDoneWithItem(q.CQA_header);
+	ClipboardCloseClipboardFile();
+	break;
+    }
+    case 22: {
+	/* a large text object (as the clipboard's,
+	 * TextAllocClipboardObject): its text a huge array in a VM
+	 * file; replaced, appended to, read in parts, deleted from */
+	static char big[9000], all[9100];
+	char part[16];
+	TextReference ref;
+	VMFileHandle f;
+	MemHandle mh;
+	optr lt;
+	word i;
+
+	TOCHECK(ClipboardOpenClipboardFile() == 0);
+	f = ClipboardGetClipboardFile();
+	mh = UserAllocObjBlock(ThreadGetInfo(0, TGIT_THREAD_HANDLE));
+	lt = ObjInstantiate(mh, (ClassStruct *) &VisLargeTextClass);
+	@call lt::MSG_VIS_TEXT_SET_VM_FILE(f);
+	@call lt::MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES();
+	TOCHECK(@call lt::MSG_VIS_TEXT_GET_TEXT_SIZE() == 0);
+	@call lt::MSG_VIS_TEXT_REPLACE_ALL_PTR("large", 0);
+	for (i = 0; i < sizeof(big) - 1; i++)
+	    big[i] = (char) ('a' + i % 26);
+	@call lt::MSG_VIS_TEXT_APPEND_PTR(big, sizeof(big) - 1);
+	toState.TOS_large[0] = (word) @call lt::MSG_VIS_TEXT_GET_TEXT_SIZE();
+	TOCHECK(toState.TOS_large[0] == 5 + sizeof(big) - 1);
+	/* (a range from two blocks of the array) */
+	memset(&ref, 0, sizeof(ref));
+	ref.TR_type = TRT_POINTER;
+	ref.TR_ref.TRU_pointer.TRP_pointer = part;
+	TOCHECK(@call lt::MSG_VIS_TEXT_GET_TEXT_RANGE(0, ref, 8005, 7995)
+		== 10);
+	for (i = 0; i < 10; i++)
+	    TOCHECK(part[i] == (char) ('a' + (7990 + i) % 26));
+	TOCHECK(part[10] == 0);
+	@call lt::MSG_VIS_TEXT_SELECT_RANGE(6005, 3);
+	@call lt::MSG_VIS_TEXT_DELETE_SELECTION();
+	toState.TOS_large[1] = (word) @call lt::MSG_VIS_TEXT_GET_TEXT_SIZE();
+	TOCHECK(toState.TOS_large[1] == 3002);
+	toState.TOS_large[2] = @call lt::MSG_VIS_TEXT_GET_ALL_PTR(all);
+	TOCHECK(toState.TOS_large[2] == 3002 && !memcmp(all, "lar", 3) &&
+		all[3] == (char) ('a' + 6000 % 26) && all[3002] == 0);
+	/* (into a huge array, from it into a VM block and a DB item) */
+	{
+	    VMBlockHandle ha, vb;
+	    DBGroupAndItem gi;
+
+	    ref.TR_type = TRT_HUGE_ARRAY;
+	    ref.TR_ref.TRU_hugeArray.TRHA_file = f;
+	    /* (the reference goes by value: the array given, emptied) */
+	    ha = HugeArrayCreate(f, 1, 0);
+	    HugeArrayAppend(f, ha, 3, "old");
+	    ref.TR_ref.TRU_hugeArray.TRHA_array = ha;
+	    TOCHECK(@call lt::MSG_VIS_TEXT_GET_TEXT_RANGE(0, ref, 3002, 0)
+		    == 3002);
+	    TOCHECK(ha && HugeArrayGetCount(f, ha) == 3003);
+	    @call lt::MSG_VIS_TEXT_APPEND_HUGE_ARRAY(f, ha, 0);
+	    TOCHECK(@call lt::MSG_VIS_TEXT_GET_TEXT_SIZE() == 6004);
+	    vb = @call lt::MSG_VIS_TEXT_GET_ALL_VM_BLOCK(f, 0);
+	    gi = @call lt::MSG_VIS_TEXT_GET_ALL_DB_ITEM(f, DB_UNGROUPED, 0);
+	    @call lt::MSG_VIS_TEXT_REPLACE_ALL_PTR("y", 1);
+	    @call lt::MSG_VIS_TEXT_REPLACE_ALL_VM_BLOCK(f, vb, 0);
+	    TOCHECK(@call lt::MSG_VIS_TEXT_GET_TEXT_SIZE() == 6004);
+	    @call lt::MSG_VIS_TEXT_REPLACE_ALL_DB_ITEM(f,
+			DBGroupFromGroupAndItem(gi), DBItemFromGroupAndItem(gi));
+	    TOCHECK(@call lt::MSG_VIS_TEXT_GET_ALL_PTR(all) == 6004 &&
+		    !memcmp(all + 3002, "lar", 3));
+	    HugeArrayDestroy(f, ha);
+	    VMFree(f, vb);
+	    DBFreeUngrouped(f, gi);
+	}
+	@call lt::MSG_VIS_TEXT_REPLACE_ALL_PTR("x", 1);
+	TOCHECK(@call lt::MSG_VIS_TEXT_GET_ALL_PTR(all) == 1 &&
+		!memcmp(all, "x", 2));
+	@call lt::MSG_META_BLOCK_FREE();
 	ClipboardCloseClipboardFile();
 	break;
     }

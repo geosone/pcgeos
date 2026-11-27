@@ -7,16 +7,21 @@
  * (VTGTRF_ALLOCATE, VTGTRF_ALLOCATE_ALWAYS) and made as large as the
  * text where it is (VTGTRF_RESIZE_DEST: always, in Port32).
  *
- * Port32 (Port32/ABI.md section 13z), not yet: references to VM blocks,
- * DB items and huge arrays, the selection into a chunk or block, the
- * context notifications.
+ * A huge array written to is emptied first (ZeroHugeArray).
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: the selection into a
+ * chunk or block, the context notifications.
  */
 @include "textInt.goh"
+#include <hugearr.h>
+#include <dbase.h>
 
-/* AllocateDestBuffer: a chunk in the reference's block, or a block */
-static void AllocateDestBuffer(TextReference *ref)
+/* AllocateDestBuffer: a chunk in the reference's block, a block, a VM
+ * block or a DB item in the reference's file, a huge array there */
+static void AllocateDestBuffer(TextReference *ref, dword n)
 {
     MemHandle mh;
+    DBGroupAndItem gi;
 
     switch (ref->TR_type) {
     case TRT_OPTR:
@@ -29,6 +34,21 @@ static void AllocateDestBuffer(TextReference *ref)
     case TRT_BLOCK:
 	ref->TR_ref.TRU_block.TRB_handle =
 	    MemAlloc(1, HF_SWAPABLE, HAF_NO_ERR);
+	break;
+    case TRT_VM_BLOCK:
+	ref->TR_ref.TRU_vmBlock.TRVMB_block =
+	    VMAlloc(ref->TR_ref.TRU_vmBlock.TRVMB_file, (word) (n + 1), 0);
+	break;
+    case TRT_DB_ITEM:
+	gi = DBRawAlloc(ref->TR_ref.TRU_dbItem.TRDBI_file,
+		     ref->TR_ref.TRU_dbItem.TRDBI_group, (word) (n + 1));
+	ref->TR_ref.TRU_dbItem.TRDBI_group = DBGroupFromGroupAndItem(gi);
+	ref->TR_ref.TRU_dbItem.TRDBI_item = DBItemFromGroupAndItem(gi);
+	break;
+    case TRT_HUGE_ARRAY:
+	ref->TR_ref.TRU_hugeArray.TRHA_array =
+	    HugeArrayCreate(ref->TR_ref.TRU_hugeArray.TRHA_file, sizeof(char),
+			    0);
 	break;
     default:
 	break;
@@ -49,9 +69,18 @@ static dword GetTextRange(optr o, VisTextRange *range, TextReference *ref,
 	range->VTR_end = size;
     n = range->VTR_end - range->VTR_start;
     if ((flags & VTGTRF_ALLOCATE_ALWAYS) || (n && (flags & VTGTRF_ALLOCATE)))
-	AllocateDestBuffer(ref);
+	AllocateDestBuffer(ref, n);
     else if (!n && (flags & VTGTRF_ALLOCATE))
 	return 0;			/* nothing, and no buffer */
+    /* ZeroHugeArray */
+    if (ref->TR_type == TRT_HUGE_ARRAY) {
+	VMFileHandle f = ref->TR_ref.TRU_hugeArray.TRHA_file;
+	VMBlockHandle a = ref->TR_ref.TRU_hugeArray.TRHA_array;
+	dword c;
+
+	while ((c = HugeArrayGetCount(f, a)) != 0)
+	    HugeArrayDelete(f, a, c > 0xffff ? 0xffff : (word) c, 0);
+    }
     return TS_GetTextRange(o, range, ref);
 }
 
@@ -110,6 +139,35 @@ static dword GetInto(optr o, Boolean selection, TextReference *ref,
     (void) GetInto(oself, FALSE, &r,
 		   block ? VTGTRF_RESIZE_DEST : VTGTRF_ALLOCATE_ALWAYS);
     return r.TR_ref.TRU_block.TRB_handle;
+}
+
+/* (a new VM block or DB item where none is given) */
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_VM_BLOCK
+{
+    TextReference r;
+
+    memset(&r, 0, sizeof(r));
+    r.TR_type = TRT_VM_BLOCK;
+    r.TR_ref.TRU_vmBlock.TRVMB_file = file;
+    r.TR_ref.TRU_vmBlock.TRVMB_block = block;
+    (void) GetInto(oself, FALSE, &r,
+		   block ? VTGTRF_RESIZE_DEST : VTGTRF_ALLOCATE_ALWAYS);
+    return r.TR_ref.TRU_vmBlock.TRVMB_block;
+}
+
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_DB_ITEM
+{
+    TextReference r;
+
+    memset(&r, 0, sizeof(r));
+    r.TR_type = TRT_DB_ITEM;
+    r.TR_ref.TRU_dbItem.TRDBI_file = file;
+    r.TR_ref.TRU_dbItem.TRDBI_group = group;
+    r.TR_ref.TRU_dbItem.TRDBI_item = item;
+    (void) GetInto(oself, FALSE, &r,
+		   item ? VTGTRF_RESIZE_DEST : VTGTRF_ALLOCATE_ALWAYS);
+    return DBCombineGroupAndItem(r.TR_ref.TRU_dbItem.TRDBI_group,
+				 r.TR_ref.TRU_dbItem.TRDBI_item);
 }
 
 @extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_PTR

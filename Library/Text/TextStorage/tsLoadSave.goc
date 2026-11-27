@@ -1,0 +1,13 @@
+/*
+ * tsLoadSave.goc -- after tsLoadSave.asm: MSG_VIS_TEXT_SET_VM_FILE
+ * (VisTextSetVMFile).
+ *
+ * Port32, not yet: loading from and saving to DB items.
+ */
+@include "textInt.goh"
+
+/* VisTextSetVMFile: the file of the object's huge arrays */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_VM_FILE
+{
+    pself->VTI_vmFile = file;
+}

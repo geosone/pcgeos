@@ -1,0 +1,19 @@
+/*
+ * tsLargeCreDest.goc -- after tsLargeCreDest.asm:
+ * TS_LargeCreateTextStorage.
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+
+/* TS_LargeCreateTextStorage: a huge array of characters holding only
+ * the null */
+void TS_LargeCreateTextStorage(optr o)
+{
+    VMFileHandle f = T_GetVMFile(o);
+    VMBlockHandle a = HugeArrayCreate(f, sizeof(char), 0);
+    char nul = 0;
+
+    VT(o)->VTI_text = a;
+    HugeArrayAppend(f, a, 1, &nul);
+    ObjMarkDirty(o);
+}

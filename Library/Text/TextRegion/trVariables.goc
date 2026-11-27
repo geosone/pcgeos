@@ -1,0 +1,10 @@
+/*
+ * trVariables.goc -- after trVariables.asm: the class record of
+ * VisLargeTextClass (its @classdecl and its methods declared).
+ */
+@include "textInt.goh"
+
+@classdecl VisLargeTextClass;
+
+/* trLargeText.goc */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES;

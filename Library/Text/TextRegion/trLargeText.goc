@@ -1,0 +1,29 @@
+/*
+ * trLargeText.goc -- after trLargeText.asm: the messages of
+ * VisLargeTextClass: MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES
+ * (VisLargeTextCreateDataStructures).
+ *
+ * Port32 (Port32/ABI.md section 13z): a large object holds its text in
+ * a huge array; not yet: its lines, its regions (the region array,
+ * the display modes, the draft size), its runs in huge arrays.
+ */
+@include "textInt.goh"
+
+/* VisLargeTextCreateDataStructures: the object made large: its text
+ * chunk freed, an empty huge array instead */
+@extern method VisLargeTextClass, MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES
+{
+    VisTextInstance *t = VT(oself);
+
+    EC_ERROR_IF(t->VTI_storageFlags & VTSF_LARGE, -1);
+    EC_ERROR_IF(t->VTI_storageFlags & (VTSF_MULTIPLE_CHAR_ATTRS |
+				       VTSF_MULTIPLE_PARA_ATTRS |
+				       VTSF_TYPES | VTSF_GRAPHICS), -1);
+    EC_ERROR_IF(t->VTI_lines, -1);
+    if (t->VTI_text)
+	LMemFreeHandles(OptrToHandle(oself), t->VTI_text);
+    t = VT(oself);
+    t->VTI_text = 0;
+    t->VTI_storageFlags |= VTSF_LARGE;
+    TS_LargeCreateTextStorage(oself);
+}

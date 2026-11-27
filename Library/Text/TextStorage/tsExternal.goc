@@ -4,8 +4,11 @@
  * tsSmallModify.asm, tsSmallGetText.asm): the text of a small object is
  * a chunk of its block, null terminated (VTI_text).
  *
- * Port32, not yet: large objects (VTSF_LARGE: the text in a huge array),
- * the character classes, finding strings.
+ * A large object's (VTSF_LARGE) is a huge array (tsLarge*.goc): each
+ * routine goes to the one of its kind (CallStorageHandler).  A pointer
+ * from TS_LockTextPtr is given back with TS_UnlockTextPtr.
+ *
+ * Port32, not yet: the character classes, finding strings.
  */
 @include "textInt.goh"
 
@@ -18,32 +21,72 @@ static optr TextOptr(optr o)
     return ConstructOptr(OptrToHandle(o), VT(o)->VTI_text);
 }
 
+#define LARGE(o)	(VT(o)->VTI_storageFlags & VTSF_LARGE)
+
 dword TS_GetTextSize(optr o)
 {
+    if (LARGE(o))
+	return LargeGetTextSize(o);
     return (dword) LMemGetChunkSize(TextOptr(o)) - 1;
 }
 
 const char *TS_LockTextPtr(optr o, dword offset, word *after)
 {
-    optr t = TextOptr(o);
-    word size = LMemGetChunkSize(t) - 1;
+    optr t;
+    word size;
+
+    if (LARGE(o))
+	return LargeLockTextPtr(o, offset, after);
+    t = TextOptr(o);
+    size = LMemGetChunkSize(t) - 1;
 
     if (after)
 	*after = (word) (size - offset);
     return (const char *) LMemDeref(t) + offset;
 }
 
+/* TS_UnlockTextPtr: nothing to do for a small object */
+void TS_UnlockTextPtr(optr o, const char *p)
+{
+    if (LARGE(o))
+	LargeUnlockTextPtr(p);
+}
+
+/* TS_RelockTextPtr: the text a callback locked before released, the
+ * text at offset locked (the style callbacks: tlCommonCalc.asm,
+ * tlCommonPosition.asm, tlCommonDraw.asm) */
+const char *TS_RelockTextPtr(TextLockState *s, dword offset, word *after)
+{
+    TS_ReleaseTextPtr(s);
+    s->TLK_locked = TS_LockTextPtr(s->TLK_object, offset, after);
+    return s->TLK_locked;
+}
+
+void TS_ReleaseTextPtr(TextLockState *s)
+{
+    if (s->TLK_locked)
+	TS_UnlockTextPtr(s->TLK_object, s->TLK_locked);
+    s->TLK_locked = NULL;
+}
+
 word TS_GetCharAtOffset(optr o, dword offset)
 {
+    if (LARGE(o))
+	return LargeGetCharAtOffset(o, offset);
     return (byte) *TS_LockTextPtr(o, offset, NULL);
 }
 
 /* SmallCheckLegalChange */
 Boolean TS_CheckLegalChange(optr o, VisTextReplaceParameters *p)
 {
-    dword size = TS_GetTextSize(o) + p->VTRP_insCount -
+    dword size;
+    word max;
+
+    if (LARGE(o))
+	return LargeCheckLegalChange(o, p);
+    size = TS_GetTextSize(o) + p->VTRP_insCount -
 		 (p->VTRP_range.VTR_end - p->VTRP_range.VTR_start);
-    word max = VT(o)->VTI_maxLength;
+    max = VT(o)->VTI_maxLength;
 
     if (size <= max)
 	return TRUE;
@@ -58,10 +101,17 @@ Boolean TS_CheckLegalChange(optr o, VisTextReplaceParameters *p)
  * text copied in */
 void TS_ReplaceRange(optr o, VisTextReplaceParameters *p)
 {
-    optr t = TextOptr(o);
-    word start = (word) p->VTRP_range.VTR_start;
-    word del = (word) (p->VTRP_range.VTR_end - p->VTRP_range.VTR_start);
-    word ins = (word) p->VTRP_insCount;
+    optr t;
+    word start, del, ins;
+
+    if (LARGE(o)) {
+	LargeReplaceRange(o, p);
+	return;
+    }
+    t = TextOptr(o);
+    start = (word) p->VTRP_range.VTR_start;
+    del = (word) (p->VTRP_range.VTR_end - p->VTRP_range.VTR_start);
+    ins = (word) p->VTRP_insCount;
 
     if (ins > del)
 	LMemInsertAt(t, start, ins - del);
@@ -78,12 +128,12 @@ void TS_ReplaceRange(optr o, VisTextReplaceParameters *p)
 dword TS_GetTextRange(optr o, const VisTextRange *range, TextReference *ref)
 {
     dword n = range->VTR_end - range->VTR_start;
-    MemHandle unlock;
-    char *d = TS_LockReferenceForWrite(ref, n + 1, &unlock);
 
-    memcpy(d, (const char *) LMemDeref(TextOptr(o)) + range->VTR_start, n);
-    d[n] = 0;
-    TS_UnlockReference(unlock);
+    if (LARGE(o))
+	return LargeGetTextRange(o, range, ref);
+    TS_ResizeReference(ref, n + 1);
+    TS_AppendToReference(ref, 0, (const char *) LMemDeref(TextOptr(o)) +
+			 range->VTR_start, (word) n);
     return n;
 }
 

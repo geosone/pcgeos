@@ -44,6 +44,10 @@ dword TL_LineTextPosition(optr o, dword line, sword pixel, dword stop, sword *x,
 
 void TL_LineStorageCreate(optr o)
 {
+    /* Port32: a large object has no lines yet (its regions, its lines
+     * in huge arrays) */
+    if (VT(o)->VTI_storageFlags & VTSF_LARGE)
+	return;
     SmallStorageCreate(o);
 }
 

@@ -20,3 +20,4 @@ tokenid		0
 
 export VisTextClass
 export VTFClearSmartQuotes
+export VisLargeTextClass

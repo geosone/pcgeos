@@ -58,6 +58,7 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
     word fields = TL_LineGetFieldCount(o, line), f;
     sword width, height;
     GDF_vars v;
+    TextLockState lock;
 
     l->LICL_line = line;
     l->LICL_lineStart = start;
@@ -105,7 +106,9 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
 	if (!n)
 	    continue;
 	memset(&v, 0, sizeof(v));
-	v.GDFV_other = &o;
+	lock.TLK_object = o;
+	lock.TLK_locked = NULL;
+	v.GDFV_other = &lock;
 	v.GDFV_saved.GDFS_nChars = n;
 	v.GDFV_saved.GDFS_drawPos.PWBF_x.WBF_int =
 	    (sword) (li->LI_adjustment + VT(o)->VTI_leftOffset +
@@ -123,6 +126,7 @@ static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
 	v.GDFV_styleCallback = FieldDrawStyleCallback;
 	v.GDFV_textOffset = off;
 	GrDrawTextField(g, &v);
+	TS_ReleaseTextPtr(&lock);
     }
     GrSetTextSpacePad(g, 0);
 }

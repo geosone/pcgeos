@@ -203,6 +203,7 @@
     if (!charsToCalc || charsToCalc > after)
 	charsToCalc = after;
     w = charsToCalc ? GrTextWidth(g, text, charsToCalc) : 0;
+    TS_UnlockTextPtr(oself, text);
     TextGStateDestroy(oself);
     return w;
 }

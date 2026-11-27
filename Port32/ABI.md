@@ -7407,15 +7407,37 @@ the modules of the asm; what is there:
   (`VTI_leftOffset`) like the fields; the asm moved the tab line by the
   object's left edge and margin, which the gstate already holds, and
   left the scrolling out of the leader.
+- **Large objects.** A `VisLargeTextClass` object
+  (`TextRegion/trVariables.goc`, `trLargeText.goc`) is made large by
+  `MSG_VIS_LARGE_TEXT_CREATE_DATA_STRUCTURES`: its text chunk is freed,
+  and the text is a huge array of characters ending in a null
+  (`TextStorage/tsLarge*.goc`). The array is in `VTI_vmFile`
+  (`MSG_VIS_TEXT_SET_VM_FILE`), or else in the file its block belongs to
+  (`T_GetVMFile`). The `TS_*` routines go to the large variant on
+  `VTSF_LARGE`. A pointer from `TS_LockTextPtr` is given back with
+  `TS_UnlockTextPtr`. The kernel's style callbacks (calc, position,
+  draw) keep the text they last locked in a `TextLockState` and release
+  it at the next callback and when done. Unlike the asm, the characters
+  "after" a large pointer leave out the null, as a small object's do.
+  Large lines, regions and runs come later. Until then a large object
+  has no lines and is not drawn (the clipboard's object is never drawn).
+- **References.** Text is copied from and to all kinds of references:
+  pointer, chunk, block, VM block, DB item and huge array
+  (`tsReference.goc`). A destination is first resized to the text plus
+  its null (`TS_ResizeReference`); a huge array is emptied first instead
+  (`ZeroHugeArray`). A destination that is not given is allocated: a VM
+  block, a DB item (`DB_UNGROUPED` allowed) or a huge array in the
+  reference's file. `MSG_VIS_TEXT_REPLACE_ALL_`, `_SELECTION_` and
+  `APPEND_` work with `VM_BLOCK`, `DB_ITEM` and `HUGE_ARRAY`, and
+  `MSG_VIS_TEXT_GET_ALL_VM_BLOCK` and `_DB_ITEM` are ported.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
-  paragraph attribute, borders and paragraph backgrounds, tab leaders,
-  extended styles, hyphenation, graphics, the large mouse messages, selection by words and lines while
+  paragraph attribute, extended styles, hyphenation, graphics, the large mouse messages, selection by words and lines while
   dragging, quick transfer, the clipboard, the pointer image over
   text;
   filters, undo, suspension, the style and style sheet notifications
   (the Styles library) and `NSSC_pasteable` (the clipboard),
-  large objects (`VisLargeTextClass`, huge arrays), references to VM
-  blocks, DB items and huge arrays, search and spelling, the
+  the lines, regions and runs of large objects, the selection into a
+  VM block, DB item or huge array, search and spelling, the
   controllers, the ruler.
 - **Test.** ctest `library.text` (`test_text.c`, the process geode
   `Port32/Tests/Geode/textobj.goc`): text objects of a resource (with

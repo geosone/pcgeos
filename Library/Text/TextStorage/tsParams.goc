@@ -2,16 +2,35 @@
  * tsParams.goc -- the size of the text a reference names (after
  * tsParams.asm): up to its null.
  *
- * Port32, not yet: references to VM blocks, DB items and huge arrays;
- * there are no segments, so no TRT_SEGMENT_CHUNK.
+ * Port32: there are no segments, so no TRT_SEGMENT_CHUNK.
  */
 @include "textInt.goh"
 #include <localize.h>
+#include <hugearr.h>
+#include <dbase.h>
+
+/* GetSizeHugeArray: its elements, without the last if that is a null
+ * (Port32: an empty array has none) */
+static dword GetSizeHugeArray(VMFileHandle f, VMBlockHandle a)
+{
+    dword n = HugeArrayGetCount(f, a);
+    void *p;
+    word size;
+
+    if (!n)
+	return 0;
+    (void) HugeArrayLock(f, a, n - 1, &p, &size);
+    if (!*(const char *) p)
+	n--;
+    HugeArrayUnlock(p);
+    return n;
+}
 
 dword TS_ComputeReferenceSize(const TextReference *ref)
 {
     dword n = 0;
     MemHandle mh;
+    const char *p;
 
     switch (ref->TR_type) {
     case TRT_POINTER:
@@ -27,6 +46,23 @@ dword TS_ComputeReferenceSize(const TextReference *ref)
 	mh = ref->TR_ref.TRU_block.TRB_handle;
 	n = LocalStringSize(MemLock(mh));
 	MemUnlock(mh);
+	break;
+    case TRT_VM_BLOCK:
+	p = VMLock(ref->TR_ref.TRU_vmBlock.TRVMB_file,
+		   ref->TR_ref.TRU_vmBlock.TRVMB_block, &mh);
+	n = LocalStringSize(p);
+	VMUnlock(mh);
+	break;
+    case TRT_DB_ITEM:
+	p = DBLock(ref->TR_ref.TRU_dbItem.TRDBI_file,
+		   ref->TR_ref.TRU_dbItem.TRDBI_group,
+		   ref->TR_ref.TRU_dbItem.TRDBI_item);
+	n = LocalStringSize(p);
+	DBUnlock((void *) p);
+	break;
+    case TRT_HUGE_ARRAY:
+	n = GetSizeHugeArray(ref->TR_ref.TRU_hugeArray.TRHA_file,
+			     ref->TR_ref.TRU_hugeArray.TRHA_array);
 	break;
     default:
 	EC_ERROR(-1);

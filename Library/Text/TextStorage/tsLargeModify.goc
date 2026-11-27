@@ -1,0 +1,148 @@
+/*
+ * tsLargeModify.goc -- after tsLargeModify.asm: the text of a large
+ * object changed (LargeReplaceRange, DeleteRangeFromHugeArray,
+ * InsertIntoHugeArray and the InsertTextFrom... of each kind of
+ * reference).
+ *
+ * Port32: no TRT_SEGMENT_CHUNK (there are no segments).
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+#include <dbase.h>
+
+/* DeleteRangeFromHugeArray: count elements from pos, at most 0xffff at
+ * a time */
+static void DeleteRangeFromHugeArray(VMFileHandle f, VMBlockHandle a,
+				     dword pos, dword count)
+{
+    while (count) {
+	word k = count > 0xffff ? 0xffff : (word) count;
+
+	HugeArrayDelete(f, a, k, pos);
+	count -= k;
+    }
+}
+
+/* InsertTextFromPointer (and from the locked text of the others) */
+static void InsertTextFromPointer(VMFileHandle f, VMBlockHandle a, dword pos,
+				  const char *p, dword count)
+{
+    while (count) {
+	word k = count > 0xffff ? 0xffff : (word) count;
+
+	HugeArrayInsert(f, a, k, pos, p);
+	p += k;
+	pos += k;
+	count -= k;
+    }
+}
+
+/* InsertTextFromBlockChunk */
+static void InsertTextFromBlockChunk(VMFileHandle f, VMBlockHandle a,
+				     dword pos, optr c, dword count)
+{
+    ObjLockObjBlock(OptrToHandle(c));
+    InsertTextFromPointer(f, a, pos, LMemDeref(c), count);
+    MemUnlock(OptrToHandle(c));
+}
+
+/* InsertTextFromBlock */
+static void InsertTextFromBlock(VMFileHandle f, VMBlockHandle a, dword pos,
+				MemHandle mh, dword count)
+{
+    InsertTextFromPointer(f, a, pos, MemLock(mh), count);
+    MemUnlock(mh);
+}
+
+/* InsertTextFromVMBlock */
+static void InsertTextFromVMBlock(VMFileHandle f, VMBlockHandle a,
+				  dword pos, VMFileHandle sf, VMBlockHandle sb,
+				  dword count)
+{
+    MemHandle mh;
+    const char *p = VMLock(sf, sb, &mh);
+
+    InsertTextFromPointer(f, a, pos, p, count);
+    VMUnlock(mh);
+}
+
+/* InsertTextFromDBItem */
+static void InsertTextFromDBItem(VMFileHandle f, VMBlockHandle a,
+				 dword pos, VMFileHandle sf, DBGroup g,
+				 DBItem i, dword count)
+{
+    const char *p = DBLock(sf, g, i);
+
+    InsertTextFromPointer(f, a, pos, p, count);
+    DBUnlock((void *) p);
+}
+
+/* InsertTextFromHugeArray: block by block of the other array */
+static void InsertTextFromHugeArray(VMFileHandle f, VMBlockHandle a,
+				    dword pos, VMFileHandle sf,
+				    VMBlockHandle sa, dword count)
+{
+    dword from = 0;
+
+    while (count) {
+	void *p;
+	word size, k;
+	dword n = HugeArrayLock(sf, sa, from, &p, &size);
+
+	k = (word) n;
+	if ((dword) k > count)
+	    k = (word) count;
+	HugeArrayInsert(f, a, k, pos, p);
+	HugeArrayUnlock(p);
+	pos += k;
+	from += k;
+	count -= k;
+    }
+}
+
+/* InsertIntoHugeArray: count characters of the reference at pos */
+static void InsertIntoHugeArray(VMFileHandle f, VMBlockHandle a, dword pos,
+				const TextReference *r, dword count)
+{
+    switch (r->TR_type) {
+    case TRT_POINTER:
+	InsertTextFromPointer(f, a, pos, r->TR_ref.TRU_pointer.TRP_pointer,
+			      count);
+	break;
+    case TRT_OPTR:
+	InsertTextFromBlockChunk(f, a, pos,
+				 r->TR_ref.TRU_blockChunk.TRBC_ref, count);
+	break;
+    case TRT_BLOCK:
+	InsertTextFromBlock(f, a, pos, r->TR_ref.TRU_block.TRB_handle, count);
+	break;
+    case TRT_VM_BLOCK:
+	InsertTextFromVMBlock(f, a, pos, r->TR_ref.TRU_vmBlock.TRVMB_file,
+			      r->TR_ref.TRU_vmBlock.TRVMB_block, count);
+	break;
+    case TRT_DB_ITEM:
+	InsertTextFromDBItem(f, a, pos, r->TR_ref.TRU_dbItem.TRDBI_file,
+			     r->TR_ref.TRU_dbItem.TRDBI_group,
+			     r->TR_ref.TRU_dbItem.TRDBI_item, count);
+	break;
+    case TRT_HUGE_ARRAY:
+	InsertTextFromHugeArray(f, a, pos, r->TR_ref.TRU_hugeArray.TRHA_file,
+				r->TR_ref.TRU_hugeArray.TRHA_array, count);
+	break;
+    default:
+	EC_ERROR(-1);
+    }
+}
+
+/* LargeReplaceRange: the range deleted, the new text inserted */
+void LargeReplaceRange(optr o, VisTextReplaceParameters *p)
+{
+    VMFileHandle f = T_GetVMFile(o);
+    VMBlockHandle a = VT(o)->VTI_text;
+
+    DeleteRangeFromHugeArray(f, a, p->VTRP_range.VTR_start,
+			     p->VTRP_range.VTR_end - p->VTRP_range.VTR_start);
+    if (p->VTRP_insCount)
+	InsertIntoHugeArray(f, a, p->VTRP_range.VTR_start,
+			    &p->VTRP_textReference, p->VTRP_insCount);
+}

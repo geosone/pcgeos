@@ -15,11 +15,12 @@ static word PositionStyleCallback(TextMetricStyles *tms, word offset,
 				  const char **text)
 {
     GTP_vars *v = (GTP_vars *) tms;
-    optr o = *(optr *) v->GTPL_object;
+    TextLockState *s = v->GTPL_object;
+    optr o = s->TLK_object;
     dword pos = tms->TMS_fieldStart + offset, count;
     word after;
 
-    *text = TS_LockTextPtr(o, pos, &after);
+    *text = TS_RelockTextPtr(s, pos, &after);
     (void) TA_FillTextAttrForDraw(o, pos, &tms->TMS_textAttr, &count);
     return count < after ? (word) count : after;
 }
@@ -34,18 +35,22 @@ static word FieldTextPosition(optr o, dword start, dword max, sword pixel,
 {
     GStateHandle g = VT(o)->VTI_gstate;
     GTP_vars v;
+    TextLockState lock;
     word pos = 0, n;
 
     *x = 0;
     if (!max || !g)
 	return 0;
     memset(&v, 0, sizeof(v));
-    v.GTPL_object = &o;
+    lock.TLK_object = o;
+    lock.TLK_locked = NULL;
+    v.GTPL_object = &lock;
     v.GTPL_style.TMS_fieldStart = start;
     v.GTPL_style.TMS_styleCallBack = PositionStyleCallback;
     GrSetTextSpacePad(g, spacePad);
     n = GrTextPosition(g, &v, max > 0xffff ? 0xffff : (word) max,
 		       (word) pixel, &pos);
+    TS_ReleaseTextPtr(&lock);
     GrSetTextSpacePad(g, 0);
     *x = (sword) pos;
     return n;

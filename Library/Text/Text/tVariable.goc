@@ -15,6 +15,8 @@ char uisqCloseSingle = C_QUOTESNGRIGHT;
 char uisqOpenDouble = C_QUOTEDBLLEFT;
 char uisqCloseDouble = C_QUOTEDBLRIGHT;
 
+/* TextStorage/tsLoadSave.goc */
+@extern method VisTextClass, MSG_VIS_TEXT_SET_VM_FILE;
 /* textCalc.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_INFO;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_LINE_FROM_OFFSET;
@@ -51,6 +53,8 @@ char uisqCloseDouble = C_QUOTEDBLRIGHT;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_PTR;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_OPTR;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_BLOCK;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_VM_BLOCK;
+@extern method VisTextClass, MSG_VIS_TEXT_GET_ALL_DB_ITEM;
 @extern method VisTextClass, MSG_VIS_TEXT_GET_SELECTION_PTR;
 /* textMethodInput.goc */
 @extern method VisTextClass, MSG_META_KBD_CHAR;
@@ -84,6 +88,15 @@ char uisqCloseDouble = C_QUOTEDBLRIGHT;
 @extern method VisTextClass, MSG_VIS_TEXT_APPEND_PTR;
 @extern method VisTextClass, MSG_VIS_TEXT_APPEND_OPTR;
 @extern method VisTextClass, MSG_VIS_TEXT_APPEND_BLOCK;
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_VM_BLOCK;
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_DB_ITEM;
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_ALL_HUGE_ARRAY;
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_VM_BLOCK;
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_DB_ITEM;
+@extern method VisTextClass, MSG_VIS_TEXT_REPLACE_SELECTION_HUGE_ARRAY;
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_VM_BLOCK;
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_DB_ITEM;
+@extern method VisTextClass, MSG_VIS_TEXT_APPEND_HUGE_ARRAY;
 @extern method VisTextClass, MSG_META_DELETE_RANGE_OF_CHARS;
 @extern method VisTextClass, MSG_VIS_TEXT_DELETE_ALL;
 @extern method VisTextClass, MSG_META_DELETE;
