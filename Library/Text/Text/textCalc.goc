@@ -65,6 +65,9 @@ void TextRecalc(optr o, dword start, dword inserted, dword deleted)
 	TL_LineCalculate(&l, (prev & LF_ENDS_PARAGRAPH) ?
 			     LF_STARTS_PARAGRAPH : 0);
 	l.LICL_calcFlags &= ~CF_FORCE_CHANGED;
+	/* the border above the next line (as VisTextCalcHeight) */
+	l.LICL_prevLineBF =
+	    l.LICL_theParaAttr.VTMPA_paraAttr.VTPA_borderFlags;
 	bottom += ((sdword) l.LICL_lineHeight.WBF_int << 8) +
 		  l.LICL_lineHeight.WBF_frac;
 	l.LICL_lineBottom.WBF_int = (word) (bottom >> 8);

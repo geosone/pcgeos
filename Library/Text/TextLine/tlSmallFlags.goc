@@ -1,0 +1,10 @@
+/*
+ * tlSmallFlags.goc -- after tlSmallFlags.asm: SmallLineGetFlags.
+ */
+@include "textInt.goh"
+
+/* SmallLineGetFlags: a line's flags */
+LineFlags SmallLineGetFlags(optr o, dword line)
+{
+    return SmallGetLinePointer(o, line, NULL)->LI_flags;
+}

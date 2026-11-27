@@ -21,9 +21,12 @@
  * the inverted range); TextScreenUpdate's callers take it away before
  * the change and show it afterwards (EditUnHilite, EditHilite).
  *
- * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: the
- * paragraph's own background and borders, tab leaders, extended
- * styles, graphics, hidden characters shown, right to left.
+ * Behind a line its paragraph's own background and its border
+ * (TextClearBehindLine).
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: tab
+ * leaders, extended styles, graphics, hidden characters shown, right
+ * to left.
  */
 @include "textInt.goh"
 
@@ -44,25 +47,23 @@ void TextSize(optr o, sword *width, sword *height)
  * background; top is its top, start where its text starts.  The line
  * no longer needs drawing, unless this is printing.
  */
-static void LineDraw(optr o, dword line, sdword top, dword start,
+static void LineDraw(LICL_vars *l, dword line, sdword top, dword start,
 		     byte flags, Boolean haveDrawn)
 {
-    VisTextInstance *t = VT(o);
-    GStateHandle g = t->VTI_gstate;
-    LineInfo *li = SmallGetLinePointer(o, line, NULL);
+    optr o = l->LICL_object;
+    GStateHandle g = VT(o)->VTI_gstate;
+    LineInfo *li;
     word fields = TL_LineGetFieldCount(o, line), f;
-    sword width, height, y = (sword) (top >> 8), bottom;
+    sword width, height;
     GDF_vars v;
 
+    l->LICL_line = line;
+    l->LICL_lineStart = start;
+    TextClearBehindLine(l, top, flags, haveDrawn);
+    li = SmallGetLinePointer(o, line, NULL);
     if (!TEXT_WBF(&li->LI_hgt))
 	return;
     TextSize(o, &width, &height);
-    bottom = (sword) (y + ((TEXT_WBF(&li->LI_hgt) + 0xff) >> 8));
-    /* LineWashBackground */
-    if (!(flags & TCBF_PRINT) &&
-	!((flags & TCBF_MSG_DRAW) && (t->VTI_features & VTF_TRANSPARENT)))
-	ClearRectCommon(o, 0, (sword) (haveDrawn ? y + 1 : y), width,
-		  (sword) (bottom + 1));
     if (!(flags & TCBF_PRINT))
 	li->LI_flags &= ~LF_NEEDS_DRAW;
 
@@ -127,10 +128,13 @@ void TextDraw(optr o, byte flags, Boolean onlyMarked)
     dword n, line, start = 0;
     sdword top = 0;
     Rectangle mask;
+    LICL_vars l;
     Boolean drawn = FALSE, all = (flags & TCBF_DRAW_ALL_LINES) != 0;
 
     if (!t->VTI_lines || !g)
 	return;				/* TextCheckCanDraw */
+    memset(&l, 0, sizeof(l));
+    l.LICL_object = o;
     GrSaveState(g);
     SmallRegionTransformGState(o, (flags & TCBF_PRINT) != 0);
     if (!all && !onlyMarked)
@@ -151,7 +155,7 @@ void TextDraw(optr o, byte flags, Boolean onlyMarked)
 	    draw = (sword) (top >> 8) <= mask.R_bottom &&
 		   (sword) ((top + hgt + 0xff) >> 8) >= mask.R_top;
 	if (draw) {
-	    LineDraw(o, line, top, start, flags, drawn);
+	    LineDraw(&l, line, top, start, flags, drawn);
 	    drawn = TRUE;
 	}
 	start += count;

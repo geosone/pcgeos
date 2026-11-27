@@ -23,15 +23,19 @@
  *  16. the notifications for the controllers.
  *  17. overstrike mode, smart quotes.
  *  18. scrolling a view on whole lines.
+ *  19. a paragraph's border and background drawn.
  */
 #include "kernelC.h"
 #include "ghal.h"
+#include <Internal/videoDr.h>
+#include <driver.h>
 
 #include <stdio.h>
 #include <string.h>
 
 extern const unsigned char ui_geode[], text_geode[], textobj_geode[],
-			   berkeley_fnt[];
+			   berkeley_fnt[], vidmem_geode[];
+extern const unsigned long vidmem_geode_size;
 extern const unsigned long berkeley_fnt_size;
 extern const unsigned long ui_geode_size, text_geode_size,
 			   textobj_geode_size;
@@ -51,7 +55,8 @@ typedef struct {
     word	TOS_shown;
     word	TOS_generated;
     word	TOS_types, TOS_send;
-    word	TOS_countBlock;
+    MemHandle	TOS_countBlock;
+    word	TOS_border[5];
 } TOState;
 
 static int fails;
@@ -102,9 +107,9 @@ int main(int argc, char **argv)
 	"in aa blockin", "aXYde", "aXYde", "aXYde", "Hi Hi Hi",
 	"Hi Hi Hi Hi Hi", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
-	"a12b-cE -.F14y#", "a12b-cE -.F14y#"
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#"
     };
-    GeodeHandle app;
+    GeodeHandle app, mdrv;
     GeodeLoadError e;
     TOState *st;
     void (*step)(word);
@@ -128,11 +133,21 @@ int main(int argc, char **argv)
     Put("USERDATA", NULL, 0);
     Put("USERDATA/FONT", NULL, 0);
     Put("USERDATA/FONT/Berkeley.fnt", berkeley_fnt, berkeley_fnt_size);
+    Put("SYSTEM", NULL, 0);
+    Put("SYSTEM/VIDEO", NULL, 0);
+    Put("SYSTEM/VIDEO/vidmem.geo", vidmem_geode, vidmem_geode_size);
     CHECK(KernelBoot(top, "", &e) == 0 && e == GLE_OK);
     kernelCurrentGeode = GEODE;
     GeodeRegisterImage("ui", ui_geode, ui_geode_size);
     GeodeRegisterImage("text", text_geode, text_geode_size);
     GeodeRegisterImage("textobj", textobj_geode, textobj_geode_size);
+    /* bitmaps to draw into (step 19) */
+    FileSetStandardPath(SP_VIDEO_DRIVERS);
+    mdrv = GeodeUseDriver("vidmem.geo", VIDEO_PROTO_MAJOR,
+			  VIDEO_PROTO_MINOR, &e);
+    CHECK(mdrv != 0);
+    GeodeSetDefaultDriver(GDDT_MEMORY_VIDEO, mdrv);
+    FileSetStandardPath(SP_TOP);
 
     app = GeodeLoad("textobj", GA_PROCESS, GA_LIBRARY, 0, 0, &e);
     CHECK(app != 0);
@@ -146,7 +161,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 18; i++) {
+    for (i = 1; i <= 19; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);
@@ -167,6 +182,9 @@ int main(int argc, char **argv)
      * ReflectChange: once in step 9, once in step 11) */
     CHECK(st->TOS_modified == 5 && st->TOS_empty == 1);
 
+    printf("border: height %u, baseline %u, left at %u, pixels %x %x\n",
+	   st->TOS_border[0], st->TOS_border[1], st->TOS_border[2],
+	   st->TOS_border[3], st->TOS_border[4]);
     printf("notify: generated %u, types %x, send %x\n", st->TOS_generated, st->TOS_types, st->TOS_send);
     printf("geode checks: %u, failed %u (first at textobj.goc line %u)\n",
 	   st->TOS_checks, st->TOS_fails, st->TOS_failLine);

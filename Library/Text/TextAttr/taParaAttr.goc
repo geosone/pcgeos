@@ -7,7 +7,7 @@
  * attribute VTI_paraAttrRuns is a VisTextDefaultParaAttr
  * (VTSF_DEFAULT_PARA_ATTR) or the chunk of a VisTextParaAttr with its
  * tabs; with VTSF_MULTIPLE_PARA_ATTRS runs (taRunLow.goc) that start at
- * paragraphs.  Not yet: drawing borders, styles,
+ * paragraphs.  Not yet: styles,
  * undo, the notifications of a change.
  */
 @include "textInt.goh"

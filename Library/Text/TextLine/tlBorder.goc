@@ -1,0 +1,197 @@
+/*
+ * tlBorder.goc -- after tlBorder.asm: a paragraph's border drawn
+ * (TextClearBehindLine, DrawBorderIfAny, TextDrawBorder,
+ * DrawBorderSide, DrawSmallBorderThingy, FillLICLRect,
+ * SetBorderColorAndAttributes, GetPrevNextBorder, GetPrevBorder).
+ *
+ * A side is a rectangle along one edge of the line's bounds
+ * (LICL_theRect): LICL_borderSide is the edge it stands on,
+ * LICL_borderOpposite its other edge, LICL_borderStart and
+ * LICL_borderEnd its ends (the asm keeps the offsets of the four in
+ * LICL_mapRect; here they point into LICL_theRect).  The right and
+ * bottom sides grow inward (DBF_NEGATIVE).  A shadowed side is drawn
+ * thick, the side beside it thin where it meets the shadow
+ * (DrawSmallBorderThingy); a double border twice, the second inside
+ * the first.
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: the
+ * tab lines (DrawTabLinesAfterPos).
+ */
+@include "textInt.goh"
+
+/* FillLICLRect: the line's rectangle filled */
+static void FillLICLRect(LICL_vars *l)
+{
+    GrFillRect(VT(l->LICL_object)->VTI_gstate, l->LICL_theRect.R_left,
+	       l->LICL_theRect.R_top, l->LICL_theRect.R_right,
+	       l->LICL_theRect.R_bottom);
+}
+
+/* SetBorderColorAndAttributes: the border's color, mask and pattern;
+ * TRUE if it has a pattern (to be reset afterwards) */
+static Boolean SetBorderColorAndAttributes(LICL_vars *l)
+{
+    const VisTextParaAttr *a = &l->LICL_theParaAttr.VTMPA_paraAttr;
+    GStateHandle g = VT(l->LICL_object)->VTI_gstate;
+
+    GrSetAreaColor(g, a->VTPA_borderColor.CQ_info,
+		   a->VTPA_borderColor.CQ_redOrIndex,
+		   a->VTPA_borderColor.CQ_green, a->VTPA_borderColor.CQ_blue);
+    GrSetAreaMaskSys(g, a->VTPA_borderGrayScreen);
+    if (!a->VTPA_borderPattern.HP_type && !a->VTPA_borderPattern.HP_data)
+	return FALSE;
+    GrSetAreaPattern(g, a->VTPA_borderPattern);
+    return TRUE;
+}
+
+/* DrawSmallBorderThingy: the thin part of the side beside a shadow
+ * (shadow: the shadow's width, width: the border's with it) */
+static void DrawSmallBorderThingy(LICL_vars *l, sword shadow, sword width,
+				  byte flags)
+{
+    Rectangle save = l->LICL_theRect;
+    sword *start = l->LICL_borderStart, *end = l->LICL_borderEnd;
+
+    width -= shadow;
+    if (!(flags & DBF_NEGATIVE))
+	width = -width;
+    *l->LICL_borderSide = (sword) (*l->LICL_borderOpposite + width);
+    if (!(flags & DBF_SHADOW_FLAG)) {
+	start = l->LICL_borderEnd;
+	end = l->LICL_borderStart;
+	shadow = -shadow;
+    }
+    *end = (sword) (*start + shadow);
+    FillLICLRect(l);
+    l->LICL_theRect = save;
+}
+
+/* DrawBorderSide: one side of the border if flags has it (negative:
+ * DBF_NEGATIVE for the right and bottom side) */
+static void DrawBorderSide(LICL_vars *l, VisTextParaBorderFlags flags,
+			   VisTextParaBorderFlags side, byte negative)
+{
+    BorderInfo b;
+    Rectangle save;
+    sword w, adjust;
+
+    if (!(flags & side))
+	return;
+    GetBorderInfo(l, side, flags, &b);
+    b.BI_flags |= negative;
+    save = l->LICL_theRect;
+    w = (b.BI_flags & DBF_NEGATIVE) ? (sword) -b.BI_width : b.BI_width;
+    *l->LICL_borderOpposite = (sword) (*l->LICL_borderSide + w);
+    if (!(b.BI_flags & (DBF_NO_SHADOW | DBF_DOUBLE))) {
+	adjust = b.BI_shadow;
+	if (b.BI_flags & DBF_SIDE_SHADOWED)
+	    DrawSmallBorderThingy(l, b.BI_shadow, b.BI_width, b.BI_flags);
+	if (b.BI_flags & DBF_SHADOW_FLAG)
+	    *l->LICL_borderStart = (sword) (*l->LICL_borderStart + adjust);
+	else
+	    *l->LICL_borderEnd = (sword) (*l->LICL_borderEnd - adjust);
+    }
+    FillLICLRect(l);
+    if (b.BI_flags & DBF_DOUBLE) {
+	/* the second line inside the first (BI_shadow: the width with
+	 * the space between them) */
+	adjust = b.BI_shadow;
+	if (!(b.BI_flags & DBF_DONT_ADJUST_START))
+	    *l->LICL_borderStart = (sword) (*l->LICL_borderStart + adjust);
+	if (!(b.BI_flags & DBF_DONT_ADJUST_END))
+	    *l->LICL_borderEnd = (sword) (*l->LICL_borderEnd - adjust);
+	if (b.BI_flags & DBF_NEGATIVE)
+	    adjust = -adjust;
+	*l->LICL_borderSide = (sword) (*l->LICL_borderSide + adjust);
+	*l->LICL_borderOpposite = (sword) (*l->LICL_borderOpposite + adjust);
+	FillLICLRect(l);
+    }
+    l->LICL_theRect = save;
+}
+
+/*
+ * TextDrawBorder: the border of a line; LICL_theRect holds the line's
+ * bounds with the border except on the left (the border's room is
+ * taken off the left margin); the sides in ignore are left out
+ */
+void TextDrawBorder(LICL_vars *l, VisTextParaBorderFlags ignore)
+{
+    Rectangle *r = &l->LICL_theRect;
+    sword left = r->R_left;
+    Boolean pattern = SetBorderColorAndAttributes(l);
+    VisTextParaBorderFlags flags = CalcRealBorder(l) & ~ignore;
+    BorderInfo b;
+
+    GetBorderInfo(l, VTPBF_LEFT, flags, &b);
+    r->R_left = (sword) (r->R_left - b.BI_space);
+    /* (the asm asks for the right side too and does not use it) */
+
+    l->LICL_borderStart = &r->R_top;
+    l->LICL_borderSide = &r->R_left;
+    l->LICL_borderEnd = &r->R_bottom;
+    l->LICL_borderOpposite = &r->R_right;
+    DrawBorderSide(l, flags, VTPBF_LEFT, 0);
+    l->LICL_borderSide = &r->R_right;
+    l->LICL_borderOpposite = &r->R_left;
+    DrawBorderSide(l, flags, VTPBF_RIGHT, DBF_NEGATIVE);
+    l->LICL_borderStart = &r->R_left;
+    l->LICL_borderSide = &r->R_top;
+    l->LICL_borderEnd = &r->R_right;
+    l->LICL_borderOpposite = &r->R_bottom;
+    DrawBorderSide(l, flags, VTPBF_TOP, 0);
+    l->LICL_borderSide = &r->R_bottom;
+    l->LICL_borderOpposite = &r->R_top;
+    DrawBorderSide(l, flags, VTPBF_BOTTOM, DBF_NEGATIVE);
+
+    r->R_left = left;
+    if (pattern) {
+	GraphicPattern none = { 0, 0 };
+
+	GrSetAreaPattern(VT(l->LICL_object)->VTI_gstate, none);
+    }
+}
+
+/* DrawBorderIfAny: the border, if the paragraph has one */
+void DrawBorderIfAny(LICL_vars *l, VisTextParaBorderFlags ignore)
+{
+    if (l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_borderFlags &
+	(VTPBF_LEFT | VTPBF_TOP | VTPBF_RIGHT | VTPBF_BOTTOM))
+	TextDrawBorder(l, ignore);
+}
+
+/* GetPrevBorder: the border of the line before LICL_line (none
+ * before the first) */
+static void GetPrevBorder(LICL_vars *l)
+{
+    dword line = l->LICL_line;
+
+    if (!line) {
+	l->LICL_prevLineBF = 0;
+	return;
+    }
+    (void) TL_LinePrevious(l->LICL_object, &line);
+    l->LICL_prevLineBF =
+	T_GetBorderInfo(l, TL_LineToOffsetStart(l->LICL_object, line));
+}
+
+/* GetPrevNextBorder: the borders of the lines before and after
+ * LICL_line, which decide whether its top and bottom are drawn */
+void GetPrevNextBorder(LICL_vars *l)
+{
+    dword line = l->LICL_line;
+
+    GetPrevBorder(l);
+    if (!TL_LineNext(l->LICL_object, &line))
+	l->LICL_nextLineBF = 0;
+    else
+	l->LICL_nextLineBF =
+	    T_GetBorderInfo(l, TL_LineToOffsetStart(l->LICL_object, line));
+}
+
+/* TextClearBehindLine: the line's background, then its border */
+void TextClearBehindLine(LICL_vars *l, sdword top, byte flags,
+			 Boolean haveDrawn)
+{
+    TL_LineClearBehind(l, top, flags, haveDrawn);
+    DrawBorderIfAny(l, 0);
+}

@@ -67,6 +67,18 @@ void TL_LineDelete(optr o, dword line, word count)
     SmallLineDelete(o, line, count);
 }
 
+LineFlags TL_LineGetFlags(optr o, dword line)
+{
+    return SmallLineGetFlags(o, line);
+}
+
+/* TL_LineClearBehind: behind a line its backgrounds */
+void TL_LineClearBehind(LICL_vars *l, sdword top, byte flags,
+			Boolean haveDrawn)
+{
+    CommonLineClearBehind(l, top, flags, haveDrawn);
+}
+
 dword TL_LineToOffsetStart(optr o, dword line)
 {
     return SmallLineToOffsetStart(o, line);

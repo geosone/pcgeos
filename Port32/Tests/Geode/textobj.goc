@@ -37,6 +37,7 @@ typedef struct {
     VisTextNotificationFlags TOS_types;
     VisTextNotifySendFlags TOS_send;
     MemHandle	TOS_countBlock;
+    word	TOS_border[5];		/* of step 19, to print */
 } TOState;
 
 TOState toState;
@@ -1222,6 +1223,77 @@ static word ParaOf(optr o, dword start, dword end, VisTextMaxParaAttr *a,
 	    @call n::MSG_VIS_TEXT_GET_SELECTION_RANGE(&r);
 	    TOCHECK(r.VTR_start == 0 && r.VTR_end == 9);
 	}
+	break;
+    }
+    case 19: {
+	/* a paragraph's border (1 wide, 2 apart): room above and below
+	 * the line, the left margin moved past it, the sides drawn into
+	 * a bitmap; the paragraph's own background inside it */
+	optr n = ObjInstantiate(OptrToHandle(@TOText),
+				(ClassStruct *) &VisTextClass);
+	struct { LineInfo li; FieldInfo more[2]; } b;
+	VisTextGetLineInfoParameters gp;
+	VisTextGetLineInfoReturnValues gr;
+	VisTextInstance *t;
+	VMFileHandle vm;
+	GStateHandle g;
+	ColorQuad gray;
+	WWFixed size;
+	sword x, y;
+
+	size.WWF_int = 10;
+	size.WWF_frac = 0;
+	@call n::MSG_VIS_TEXT_SET_POINT_SIZE(size, TEXT_ADDRESS_PAST_END, 0);
+	@call n::MSG_VIS_SET_SIZE(50, 40);
+	@call n::MSG_VIS_NOTIFY_GEOMETRY_VALID();
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("Hi", 0);
+	@call n::MSG_VIS_TEXT_SET_BORDER_BITS(0, VTPBF_LEFT | VTPBF_TOP |
+					      VTPBF_RIGHT | VTPBF_BOTTOM,
+					      TEXT_ADDRESS_PAST_END, 0);
+	t = ObjDerefVis(n);
+	toState.TOS_border[0] = t->VTI_height.WBF_int;
+	gp.VTGLIP_buffer = &b.li;
+	gp.VTGLIP_bsize = sizeof(b);
+	gp.VTGLIP_line = 0;
+	TOCHECK(!@call n::MSG_VIS_TEXT_GET_LINE_INFO(&gr, &gp));
+	toState.TOS_border[1] = b.li.LI_blo.WBF_int;
+	toState.TOS_border[2] = b.li.LI_adjustment;
+	TOCHECK(t->VTI_height.WBF_int == 18 && b.li.LI_blo.WBF_int == 13 &&
+		b.li.LI_adjustment == 3);
+
+	vm = VMOpen("TOBORDER.VM", 0, VMO_CREATE_TRUNCATE, 0);
+	TOCHECK(vm != 0);
+	(void) GrCreateBitmap(BMF_24BIT, 50, 40, vm, 0, &g);
+	@call n::MSG_VIS_DRAW(DF_EXPOSED, g);
+	t = ObjDerefVis(n);
+	x = (sword) (t->VI_bounds.R_left + t->VTI_lrMargin);
+	y = (sword) (t->VI_bounds.R_top + t->VTI_tbMargin);
+	toState.TOS_border[3] = (word) GrGetPoint(g, x, (sword) (y + 5));
+	TOCHECK(GrGetPoint(g, x, (sword) (y + 5)) == 0 &&
+		GrGetPoint(g, (sword) (x + 1), (sword) (y + 5)) == 0xffffffUL &&
+		GrGetPoint(g, (sword) (x + 49 - 2 * t->VTI_lrMargin),
+			   (sword) (y + 5)) == 0 &&
+		GrGetPoint(g, (sword) (x + 30), y) == 0 &&
+		GrGetPoint(g, (sword) (x + 30), (sword) (y + 1)) == 0xffffffUL &&
+		GrGetPoint(g, (sword) (x + 30), (sword) (y + 17)) == 0 &&
+		GrGetPoint(g, (sword) (x + 30), (sword) (y + 18)) == 0xffffffUL);
+
+	gray.CQ_redOrIndex = C_LIGHT_GRAY;
+	gray.CQ_info = CF_INDEX;
+	gray.CQ_green = gray.CQ_blue = 0;
+	@call n::MSG_VIS_TEXT_SET_PARA_BG_COLOR(gray, TEXT_ADDRESS_PAST_END, 0);
+	@call n::MSG_VIS_TEXT_SET_PARA_BG_GRAY_SCREEN(SDM_100,
+						      TEXT_ADDRESS_PAST_END, 0);
+	@call n::MSG_VIS_DRAW(DF_EXPOSED, g);
+	toState.TOS_border[4] = (word) GrGetPoint(g, (sword) (x + 1),
+						  (sword) (y + 1));
+	TOCHECK(GrGetPoint(g, (sword) (x + 1), (sword) (y + 1)) == 0xaaaaaaUL &&
+		GrGetPoint(g, (sword) (x + 30), (sword) (y + 16)) == 0xaaaaaaUL &&
+		GrGetPoint(g, x, (sword) (y + 1)) == 0 &&
+		GrGetPoint(g, (sword) (x + 30), (sword) (y + 18)) == 0xffffffUL);
+	GrDestroyBitmap(g, BMD_KILL_DATA);
+	VMClose(vm, FALSE);
+	FileDelete("TOBORDER.VM");
 	break;
     }
     }

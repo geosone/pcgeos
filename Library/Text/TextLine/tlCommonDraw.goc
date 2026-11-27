@@ -1,5 +1,12 @@
 /*
- * tlCommonDraw.goc -- after tlCommonDraw.asm: Draw related stuff.
+ * tlCommonDraw.goc -- after tlCommonDraw.asm: Draw related stuff:
+ * FieldDrawStyleCallback; behind a line its background, the
+ * paragraph's own inside its border (CommonLineClearBehind,
+ * CommonLineClearArea, ComputeLineBounds, GetBorderAndFlags,
+ * LineWashParagraph, InsetBGColorAreaForBorder).
+ *
+ * Port32 (Port32/ABI.md section 13z): small objects.  Not yet: column
+ * and section breaks drawn, extended styles.
  */
 @include "textInt.goh"
 
@@ -15,4 +22,115 @@ word FieldDrawStyleCallback(GDF_vars *v, TextAttr *attr, word offset,
     *text = TS_LockTextPtr(o, pos, &after);
     (void) TA_FillTextAttrForDraw(o, pos, attr, &count);
     return count < after ? (word) count : after;
+}
+
+/* ComputeLineBounds: the line's rectangle, from its top (1/256) to
+ * its bottom, the region's edges beside it (the asm asks
+ * TL_LineGetTop, which the caller has at hand) */
+static void ComputeLineBounds(LICL_vars *l, sdword top)
+{
+    const LineInfo *li = SmallGetLinePointer(l->LICL_object, l->LICL_line,
+					     NULL);
+    Rectangle *r = &l->LICL_theRect;
+
+    r->R_top = (sword) (top >> 8);
+    r->R_bottom = (sword) (r->R_top + ((TEXT_WBF(&li->LI_hgt) + 0xff) >> 8));
+    TR_RegionLeftRight(l->LICL_object, 0, r->R_top,
+		       (word) (r->R_bottom - r->R_top), &r->R_left,
+		       &r->R_right);
+}
+
+/* GetBorderAndFlags: the borders before and after the line if it has
+ * one, its flags */
+static void GetBorderAndFlags(LICL_vars *l)
+{
+    if (l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_borderFlags &
+	(VTPBF_LEFT | VTPBF_TOP | VTPBF_RIGHT | VTPBF_BOTTOM))
+	GetPrevNextBorder(l);
+    l->LICL_lineFlags = TL_LineGetFlags(l->LICL_object, l->LICL_line);
+}
+
+/* InsetBGColorAreaForBorder: the paragraph's background inside its
+ * border */
+static void InsetBGColorAreaForBorder(LICL_vars *l)
+{
+    VisTextParaBorderFlags f = CalcRealBorder(l);
+    Rectangle *r = &l->LICL_theRect;
+    BorderInfo b;
+
+    GetBorderInfo(l, VTPBF_LEFT, f, &b);
+    r->R_left = (sword) (r->R_left + b.BI_bg - b.BI_space);
+    GetBorderInfo(l, VTPBF_TOP, f, &b);
+    r->R_top = (sword) (r->R_top + b.BI_bg);
+    GetBorderInfo(l, VTPBF_BOTTOM, f, &b);
+    r->R_bottom = (sword) (r->R_bottom - b.BI_bg);
+    GetBorderInfo(l, VTPBF_RIGHT, f, &b);
+    r->R_right = (sword) (r->R_right - b.BI_bg);
+}
+
+/* LineWashParagraph: the line's part of the paragraph's background */
+static void LineWashParagraph(LICL_vars *l)
+{
+    const VisTextParaAttr *a = &l->LICL_theParaAttr.VTMPA_paraAttr;
+    GStateHandle g = VT(l->LICL_object)->VTI_gstate;
+    Rectangle save = l->LICL_theRect;
+    Boolean pattern = a->VTPA_bgPattern.HP_type || a->VTPA_bgPattern.HP_data;
+
+    GrSetAreaColor(g, a->VTPA_bgColor.CQ_info, a->VTPA_bgColor.CQ_redOrIndex,
+		   a->VTPA_bgColor.CQ_green, a->VTPA_bgColor.CQ_blue);
+    GrSetAreaMaskSys(g, a->VTPA_bgGrayScreen);
+    if (pattern)
+	GrSetAreaPattern(g, a->VTPA_bgPattern);
+    if (a->VTPA_borderFlags &
+	(VTPBF_LEFT | VTPBF_TOP | VTPBF_RIGHT | VTPBF_BOTTOM))
+	InsetBGColorAreaForBorder(l);
+    GrFillRect(g, l->LICL_theRect.R_left, l->LICL_theRect.R_top,
+	       l->LICL_theRect.R_right, l->LICL_theRect.R_bottom);
+    l->LICL_theRect = save;
+    if (pattern) {
+	GraphicPattern none = { 0, 0 };
+
+	GrSetAreaPattern(g, none);
+    }
+}
+
+/*
+ * CommonLineClearArea (CommonLineClearBehind): behind a line its
+ * background (LineWashBackground: unless printing or drawing a
+ * transparent object for MSG_VIS_DRAW; not the top pixel once a line
+ * above was drawn), the paragraph's own between its margins.  Leaves
+ * LICL_theRect at the margins for the border.
+ */
+void CommonLineClearArea(LICL_vars *l, sdword top, byte flags,
+			 Boolean haveDrawn)
+{
+    optr o = l->LICL_object;
+    const VisTextParaAttr *a = &l->LICL_theParaAttr.VTMPA_paraAttr;
+    VisTextInstance *t;
+    Rectangle *r = &l->LICL_theRect;
+
+    T_EnsureCorrectParaAttr(l, l->LICL_lineStart);
+    GetBorderAndFlags(l);
+    ComputeLineBounds(l, top);
+    if (r->R_top == r->R_bottom)
+	return;
+    t = VT(o);
+    if (!(flags & TCBF_PRINT) &&
+	!((flags & TCBF_MSG_DRAW) && (t->VTI_features & VTF_TRANSPARENT)))
+	ClearRectCommon(o, r->R_left,
+			(sword) (haveDrawn ? r->R_top + 1 : r->R_top),
+			r->R_right, (sword) (r->R_bottom + 1));
+    r->R_left = (sword) (a->VTPA_leftMargin < a->VTPA_paraMargin ?
+			 a->VTPA_leftMargin : a->VTPA_paraMargin);
+    r->R_right = (sword) a->VTPA_rightMargin;
+    t = VT(o);
+    if (a->VTPA_bgGrayScreen != SDM_0 &&
+	memcmp(&a->VTPA_bgColor, &t->VTI_washColor, sizeof(ColorQuad)))
+	LineWashParagraph(l);
+}
+
+void CommonLineClearBehind(LICL_vars *l, sdword top, byte flags,
+			   Boolean haveDrawn)
+{
+    CommonLineClearArea(l, top, flags, haveDrawn);
 }

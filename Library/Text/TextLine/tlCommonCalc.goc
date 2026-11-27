@@ -12,7 +12,7 @@
  * What changed is noted (CF_LINE_CHANGED) and the line marked to draw.
  *
  * Port32 (Port32/ABI.md section 13z): small objects.  Not yet:
- * borders, hyphenation, graphics, character justification.  (The asm
+ * hyphenation, graphics, character justification.  (The asm
  * marks every line as holding an extended style: its style callback
  * notes the position whether there is one or not; here only a line
  * with one is marked.)
@@ -384,11 +384,14 @@ static void AdjustLineHeight(LICL_vars *l, TOC_vars *v)
 	     (sdword) (((dword) TEXT_WBF(&EXT(v).TOCE_lineHeight) *
 			PA(l).VTPA_lineSpacing) >> 8));
     if (EXT(v).TOCE_lineFlags & LF_STARTS_PARAGRAPH) {
-	/* AdjustParagraphStart: no space above the first line of the
-	 * text, unless the object asks for some */
+	/* AdjustParagraphStart: the border's room; no space above the
+	 * first line of the text, unless it has a border or the object
+	 * asks for some */
 	word add = 0;
 
-	if (l->LICL_line == l->LICL_regionTopLine) {
+	if (PA(l).VTPA_borderFlags & VTPBF_TOP)
+	    add = (word) CalcBorderSpacing(l, VTPBF_TOP);
+	if (!add && l->LICL_line == l->LICL_regionTopLine) {
 	    extra = ObjVarFindData(o,
 		ATTR_VIS_TEXT_ADD_SPACE_ON_TOP_TO_FIRST_LINE_OF_REGION);
 	    add = extra ? *extra : 0;
@@ -400,9 +403,18 @@ static void AdjustLineHeight(LICL_vars *l, TOC_vars *v)
 	    SetW(&EXT(v).TOCE_lineBLO, TEXT_WBF(&EXT(v).TOCE_lineBLO) + s);
 	}
     }
-    if (EXT(v).TOCE_lineFlags & LF_ENDS_PARAGRAPH)
-	SetW(&EXT(v).TOCE_lineHeight, TEXT_WBF(&EXT(v).TOCE_lineHeight) +
-	     PA(l).VTPA_spaceOnBottom);
+    if (EXT(v).TOCE_lineFlags & LF_ENDS_PARAGRAPH) {
+	/* AdjustParagraphEnd: with the border's room (the border after
+	 * the line: the asm leaves what a line drawn before put there) */
+	sdword s = PA(l).VTPA_spaceOnBottom;
+
+	if (PA(l).VTPA_borderFlags & VTPBF_BOTTOM) {
+	    l->LICL_nextLineBF = (l->LICL_lineFlags & LF_ENDS_IN_NULL) ? 0 :
+		T_GetBorderInfo(l, l->LICL_range.VTR_start);
+	    s += (sdword) CalcBorderSpacing(l, VTPBF_BOTTOM) << 8;
+	}
+	SetW(&EXT(v).TOCE_lineHeight, TEXT_WBF(&EXT(v).TOCE_lineHeight) + s);
+    }
     /* AdjustSingleLineObject: the font's tallest, whatever is in it */
     t = VT(o);
     if (t->VTI_state & VTS_ONE_LINE) {

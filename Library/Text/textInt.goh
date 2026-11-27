@@ -249,7 +249,52 @@ typedef struct {
     dword		LICL_paraAttrStart;
     dword		LICL_paraAttrEnd;
     VisTextMaxParaAttr	LICL_theParaAttr;
+    Rectangle		LICL_theRect;	/* the line's bounds, drawing */
+    sword		*LICL_borderStart;	/* LICL_mapRect: the edges */
+    sword		*LICL_borderSide;	/* of LICL_theRect a side */
+    sword		*LICL_borderEnd;	/* of the border is drawn */
+    sword		*LICL_borderOpposite;	/* by (TextDrawBorder) */
+    VisTextParaBorderFlags LICL_prevLineBF;	/* the border before */
+    VisTextParaBorderFlags LICL_nextLineBF;	/* and after the line */
 } LICL_vars;
+
+/* Text/textBGBorder.goc: a paragraph's border (textline.def) */
+typedef ByteFlags DrawBorderFlags;
+#define DBF_NEGATIVE		0x40	/* the side grows inward */
+#define DBF_SHADOW_FLAG		0x20	/* the start moved, else the end */
+#define DBF_NO_SHADOW		0x10
+#define DBF_SIDE_SHADOWED	0x08	/* this side has the shadow */
+#define DBF_DOUBLE		0x04
+#define DBF_DONT_ADJUST_START	0x02
+#define DBF_DONT_ADJUST_END	0x01
+typedef struct {
+    sword		BI_space;	/* the room it takes */
+    sword		BI_width;	/* the line's width */
+    sword		BI_shadow;	/* the shadow (double: the inset) */
+    sword		BI_bg;		/* the room the background leaves */
+    DrawBorderFlags	BI_flags;
+} BorderInfo;
+extern void GetBorderInfo(LICL_vars *l, VisTextParaBorderFlags side,
+			  VisTextParaBorderFlags flags, BorderInfo *b);
+extern VisTextParaBorderFlags T_GetBorderInfo(LICL_vars *l, dword pos);
+extern VisTextParaBorderFlags CalcRealBorder(LICL_vars *l);
+extern sword CalcBorderSpacing(LICL_vars *l, VisTextParaBorderFlags side);
+/* TextLine/tlBorder.goc */
+extern void TextClearBehindLine(LICL_vars *l, sdword top, byte flags,
+				Boolean haveDrawn);
+extern void DrawBorderIfAny(LICL_vars *l, VisTextParaBorderFlags ignore);
+extern void TextDrawBorder(LICL_vars *l, VisTextParaBorderFlags ignore);
+extern void GetPrevNextBorder(LICL_vars *l);
+/* TextLine/tlCommonDraw.goc, tlExternal.goc, tlSmallFlags.goc: behind
+ * a line (top: 1/256) */
+extern void CommonLineClearBehind(LICL_vars *l, sdword top, byte flags,
+				  Boolean haveDrawn);
+extern void CommonLineClearArea(LICL_vars *l, sdword top, byte flags,
+				Boolean haveDrawn);
+extern void TL_LineClearBehind(LICL_vars *l, sdword top, byte flags,
+			       Boolean haveDrawn);
+extern LineFlags TL_LineGetFlags(optr o, dword line);
+extern LineFlags SmallLineGetFlags(optr o, dword line);
 
 /* TextLine/tlCommonCalc.goc */
 extern void TL_LineCalculate(LICL_vars *l, LineFlags flags);

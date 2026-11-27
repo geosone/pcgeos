@@ -1,6 +1,11 @@
 /*
  * textBGBorder.goc -- after textBGBorder.asm: T_GetNewParaAttr,
- * T_EnsureCorrectParaAttr.
+ * T_EnsureCorrectParaAttr, T_GetBorderInfo, CalcRealBorder,
+ * CalcBorderSpacing, GetBorderInfo.
+ *
+ * A border's width, spacing and shadow are kept in 1/8 points; its
+ * room is taken off the paragraph's margins (T_GetNewParaAttr) and
+ * added to the height of its first and last line.
  */
 @include "textInt.goh"
 
@@ -8,10 +13,38 @@
  * margin the lines end at */
 void T_GetNewParaAttr(LICL_vars *l, dword pos)
 {
+    VisTextParaAttr *a = &l->LICL_theParaAttr.VTMPA_paraAttr;
+    Tab *tab = NULL;
+    BorderInfo b;
+    word i;
+
     TA_GetParaAttrForPosition(l->LICL_object, pos, &l->LICL_theParaAttr,
 			      &l->LICL_paraAttrStart, &l->LICL_paraAttrEnd);
-    l->LICL_realRightMargin =
-	l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_rightMargin;
+    l->LICL_realRightMargin = a->VTPA_rightMargin;
+    if (!a->VTPA_borderFlags)
+	return;
+    /* the room of the border inside the margins, and a tab at the
+     * right margin moved with it */
+    for (i = 0; i < a->VTPA_numberOfTabs; i++)
+	if (l->LICL_theParaAttr.VTMPA_tabs[i].T_position ==
+	    a->VTPA_rightMargin) {
+	    tab = &l->LICL_theParaAttr.VTMPA_tabs[i];
+	    break;
+	}
+    GetBorderInfo(l, VTPBF_RIGHT, a->VTPA_borderFlags, &b);
+    l->LICL_realRightMargin = (word) (l->LICL_realRightMargin - b.BI_space);
+    if (tab)
+	tab->T_position = (word) (tab->T_position - b.BI_space);
+    GetBorderInfo(l, VTPBF_LEFT, a->VTPA_borderFlags, &b);
+    if (a->VTPA_leftMargin > a->VTPA_paraMargin) {
+	a->VTPA_paraMargin = (word) (a->VTPA_paraMargin + b.BI_space);
+	if (a->VTPA_leftMargin < a->VTPA_paraMargin)
+	    a->VTPA_leftMargin = a->VTPA_paraMargin;
+    } else {
+	a->VTPA_leftMargin = (word) (a->VTPA_leftMargin + b.BI_space);
+	if (a->VTPA_paraMargin < a->VTPA_leftMargin)
+	    a->VTPA_paraMargin = a->VTPA_leftMargin;
+    }
 }
 
 /* T_EnsureCorrectParaAttr: the paragraph attribute of the position,
@@ -21,4 +54,137 @@ void T_EnsureCorrectParaAttr(LICL_vars *l, dword pos)
 {
     if (pos < l->LICL_paraAttrStart || pos >= l->LICL_paraAttrEnd)
 	T_GetNewParaAttr(l, pos);
+}
+
+/* convertWidth: a border's width (1/8 points) in points, rounded */
+static sword ConvertWidth(byte w)
+{
+    return (sword) (((word) w + 4) >> 3);
+}
+
+/* the sides (their high byte) that a shadow anchored at a corner
+ * touches, starts with, needs the top for, needs the bottom for */
+#define SIDE(f)		((byte) ((f) >> 8))
+static const byte borderShadowTable[] = {
+    SIDE(VTPBF_RIGHT | VTPBF_BOTTOM), SIDE(VTPBF_LEFT | VTPBF_BOTTOM),
+    SIDE(VTPBF_RIGHT | VTPBF_TOP), SIDE(VTPBF_LEFT | VTPBF_TOP)
+};
+static const byte borderShadowFlagTable[] = {
+    SIDE(VTPBF_RIGHT | VTPBF_BOTTOM), SIDE(VTPBF_LEFT | VTPBF_TOP),
+    SIDE(VTPBF_LEFT | VTPBF_TOP), SIDE(VTPBF_RIGHT | VTPBF_BOTTOM)
+};
+static const byte borderRequiresTop[] = {
+    SIDE(VTPBF_RIGHT), SIDE(VTPBF_LEFT), SIDE(VTPBF_LEFT), SIDE(VTPBF_RIGHT)
+};
+static const byte borderRequiresBottom[] = {
+    SIDE(VTPBF_LEFT), SIDE(VTPBF_RIGHT), SIDE(VTPBF_RIGHT), SIDE(VTPBF_LEFT)
+};
+
+/*
+ * GetBorderInfo: the measures of one side (VTPBF_LEFT ... _BOTTOM) of a
+ * border with the flags; all zero if the side has none.  A single
+ * border: BI_space the width with the shadow (if the side is
+ * shadowed) and the spacing, BI_width and BI_bg the width with the
+ * shadow, BI_shadow the shadow.  A double one: BI_space twice the
+ * width with the shadow and the spacing, BI_width the width, BI_shadow
+ * the width with the shadow (the space between the lines), BI_bg
+ * twice the width with the shadow.  DBF_SHADOW_FLAG: the side's start
+ * is moved for the shadow, else its end.
+ */
+void GetBorderInfo(LICL_vars *l, VisTextParaBorderFlags side,
+		   VisTextParaBorderFlags flags, BorderInfo *b)
+{
+    const VisTextParaAttr *a = &l->LICL_theParaAttr.VTMPA_paraAttr;
+    byte s = SIDE(side), anchor = (byte) (flags & VTPBF_ANCHOR);
+    sword width, shadow = 0;
+
+    memset(b, 0, sizeof(*b));
+    if (!(side & flags))
+	return;
+    width = ConvertWidth(a->VTPA_borderWidth);
+    if (flags & VTPBF_DOUBLE) {
+	b->BI_flags = DBF_DOUBLE;
+	if (side & (VTPBF_LEFT | VTPBF_RIGHT)) {
+	    if (!(flags & VTPBF_TOP))
+		b->BI_flags |= DBF_DONT_ADJUST_START;
+	    if (!(flags & VTPBF_BOTTOM))
+		b->BI_flags |= DBF_DONT_ADJUST_END;
+	}
+	b->BI_width = width;
+	b->BI_shadow = (sword) (width + ConvertWidth(a->VTPA_borderShadow));
+	b->BI_bg = (sword) (b->BI_shadow + width);
+	b->BI_space = (sword) (b->BI_bg + ConvertWidth(a->VTPA_borderSpacing));
+	return;
+    }
+    if (flags & VTPBF_SHADOW) {
+	if (s & borderShadowFlagTable[anchor])
+	    b->BI_flags |= DBF_SHADOW_FLAG;
+	if (s & borderShadowTable[anchor])
+	    b->BI_flags |= DBF_SIDE_SHADOWED;
+	if ((s & borderRequiresTop[anchor]) && !(flags & VTPBF_TOP))
+	    b->BI_flags |= DBF_NO_SHADOW;
+	if ((s & borderRequiresBottom[anchor]) && !(flags & VTPBF_BOTTOM))
+	    b->BI_flags |= DBF_NO_SHADOW;
+	/* (as the asm: no shadow drawn without spacing; its comment
+	 * says the shadow) */
+	if (!ConvertWidth(a->VTPA_borderSpacing))
+	    b->BI_flags |= DBF_NO_SHADOW;
+	shadow = ConvertWidth(a->VTPA_borderShadow);
+	if (b->BI_flags & DBF_SIDE_SHADOWED)
+	    width = (sword) (width + shadow);
+    }
+    b->BI_width = width;
+    b->BI_bg = width;
+    b->BI_shadow = shadow;
+    b->BI_space = (sword) (width + ConvertWidth(a->VTPA_borderSpacing));
+}
+
+/*
+ * T_GetBorderInfo: the border flags of the paragraph at pos (those at
+ * hand if it is in their range)
+ */
+VisTextParaBorderFlags T_GetBorderInfo(LICL_vars *l, dword pos)
+{
+    VisTextMaxParaAttr a;
+    dword start, end;
+
+    if (pos >= l->LICL_paraAttrStart && pos < l->LICL_paraAttrEnd)
+	return l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_borderFlags;
+    TA_GetParaAttrForPosition(l->LICL_object, pos, &a, &start, &end);
+    return a.VTMPA_paraAttr.VTPA_borderFlags;
+}
+
+/*
+ * CalcRealBorder: the sides of the border the line has: no top below
+ * a paragraph with the same border (unless the inner lines are
+ * drawn), no bottom above one, none but on the paragraph's first and
+ * last line (LICL_lineFlags, LICL_prevLineBF, LICL_nextLineBF)
+ */
+#define BORDER_KIND	(VTPBF_LEFT | VTPBF_TOP | VTPBF_RIGHT | VTPBF_BOTTOM | \
+			 VTPBF_DOUBLE | VTPBF_DRAW_INNER_LINES)
+VisTextParaBorderFlags CalcRealBorder(LICL_vars *l)
+{
+    VisTextParaBorderFlags own =
+	l->LICL_theParaAttr.VTMPA_paraAttr.VTPA_borderFlags, f = own;
+
+    if (!(f & VTPBF_DRAW_INNER_LINES) &&
+	!((l->LICL_prevLineBF ^ f) & BORDER_KIND))
+	f &= ~VTPBF_TOP;
+    if (((f & VTPBF_TOP) || !(f & VTPBF_DRAW_INNER_LINES)) &&
+	!((l->LICL_nextLineBF ^ own) & BORDER_KIND))
+	f &= ~VTPBF_BOTTOM;
+    if (!(l->LICL_lineFlags & LF_STARTS_PARAGRAPH))
+	f &= ~VTPBF_TOP;
+    if (!(l->LICL_lineFlags & LF_ENDS_PARAGRAPH))
+	f &= ~VTPBF_BOTTOM;
+    return f;
+}
+
+/* CalcBorderSpacing: the room the border takes on a side of the line */
+sword CalcBorderSpacing(LICL_vars *l, VisTextParaBorderFlags side)
+{
+    BorderInfo b;
+
+    GetBorderInfo(l, side, CalcRealBorder(l), &b);
+    return b.BI_space;
 }

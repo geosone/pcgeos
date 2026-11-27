@@ -26,7 +26,7 @@ geos_test_program(test_ui_vis EMBED ui uivis)
 geos_add_test(library.ui.vis test_ui_vis)
 
 # the text library (Library/Text): text objects off the screen
-geos_test_program(test_text EMBED ui text textobj berkeley)
+geos_test_program(test_text EMBED ui text textobj berkeley vidmem)
 geos_add_test(library.text test_text)
 
 # the flow object between the input manager and two geodes

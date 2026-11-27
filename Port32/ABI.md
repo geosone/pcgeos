@@ -7389,6 +7389,16 @@ the modules of the asm; what is there:
   `MSG_VIS_TEXT_GET_SCROLL_AMOUNT` takes the `TrackScrollingParams`
   (the C header said dx and cx, which the asm never read), asked by
   `OLTextClass`'s `MSG_META_CONTENT_TRACK_SCROLLING`.
+- **Paragraph borders and backgrounds** (`TextLine/tlBorder.goc`,
+  `Text/textBGBorder.goc`, `TextLine/tlCommonDraw.goc`): a border's
+  room is taken off the margins and added to the height of the
+  paragraph's first and last line; no top or bottom between two
+  paragraphs with the same border unless the inner lines are drawn;
+  shadows and double lines as the asm.  The paragraph's own background
+  fills the inside of its border when its gray screen is not SDM_0.
+  In a calculation the border below a line is that of the text after
+  it (the asm kept what a line drawn before left there); the tab
+  lines are not drawn yet.
 - **Not yet.** Attribute runs, tokens and styles, messages for the
   paragraph attribute, borders and paragraph backgrounds, tab leaders,
   extended styles, hyphenation, graphics, the large mouse messages, selection by words and lines while
