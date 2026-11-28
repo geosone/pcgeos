@@ -230,6 +230,9 @@ void TextScreenUpdate(optr o)
 
     if (!t->VTI_lines || !(((VisInstance *) t)->VI_attrs & VA_REALIZED))
 	return;
+    /* (suspended: the lines marked are drawn at the unsuspend) */
+    if (TextNoteSuspendedChange(o))
+	return;
     TextGStateCreate(o);
     TextDraw(o, 0, TRUE);
     TextGStateDestroy(o);

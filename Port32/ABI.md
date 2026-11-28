@@ -5266,6 +5266,17 @@ visual classes of `Library/User/Vis`:
 - **The process and the application's life** (`Proc/procClass.goc`
   after `procClass.asm`; `Gen/genAppAttDet.goc`,
   `genAppCommonIACP.goc`, `genAppMisc.goc` after their asm files):
+  - `GenProcessClass` undo (`Proc/procUndo.goc`): per process an
+    LMem block of chains (`START`/`REDO` token, the actions, `END`
+    token) in a private word of the geode (`GeodePrivAlloc` at the
+    library's attach); the actions' data in the undo file (the
+    clipboard file). Start, end, abort and flush chains, ignore and
+    accept actions, contexts; playback sends `MSG_META_UNDO` for each
+    action of the last chain while a redo chain takes the actions
+    the objects add. The undo state goes to
+    `GAGCNLT_EDIT_CONTROL_NOTIFY_UNDO_STATE_CHANGE` through
+    `MSG_GEN_PROCESS_SEND_TO_APP_GCN_LIST`. The undo block is freed at
+    `MSG_GEN_PROCESS_FINAL_DETACH`.
   - `GenProcessClass`: `MSG_META_ATTACH` with the AppLaunchBlock (the
     system busy meanwhile, `SP_TOP` the path), `MSG_META_APP_STARTUP` to
     the application object, then the mode message
@@ -5968,7 +5979,7 @@ visual classes of `Library/User/Vis`:
   - in `GenProcessClass` and `GenApplicationClass`: state files (a
     RESTORE_FROM_STATE launch opens the application), the instance
     reference for the field's restart list, transparent detach, UI
-    threads, undo, the
+    threads, the
     activation dialog, the save options query on quit, the floating
     keyboard, the removable disk list; the busy and input messages of
     `genAppMisc.asm`;
@@ -7221,8 +7232,7 @@ the modules of the asm; what is there:
   `VM_ELEMENT_ARRAY_CHUNK`), as are a small object's whose
   `TRAH_elementVMBlock` is set. `TextRuns` in `taRunLow.goc` names
   either kind of run array; the `TA_Runs*` routines work on it. Not
-  yet: style sheets (`CA_NULL_ELEMENT` as the base style), type and
-  graphic runs, undo.
+  yet: type and graphic runs.
   ctest `library.text` (steps 13 and 14).
 - **Port32 changes in the C API.** The block of
   `MSG_VIS_TEXT_REPLACE_ALL_BLOCK`, `MSG_VIS_TEXT_REPLACE_SELECTION_BLOCK`,
@@ -7479,7 +7489,8 @@ the modules of the asm; what is there:
   they repeat their neighbour. The element blocks stay LMem blocks: the
   kernel's `VMCopyVMChain` and `VMFreeVMChain` treat an `HF_LMEM` block
   as the end of its chain (`VMem/vmemChain.c`), so the asm's
-  `MakeTransferFormatNotLMem` is not needed. Graphics, undo chains,
+  `MakeTransferFormatNotLMem` is not needed. A cut and a paste are
+  each one undo chain. Graphics,
   quick transfer and the name/type/style arrays come later.
 - **References.** Text is copied from and to all kinds of references:
   pointer, chunk, block, VM block, DB item and huge array
@@ -7506,10 +7517,37 @@ the modules of the asm; what is there:
   notifications are sent. Kept from the asm: a relative leading was
   subtracted from the wrong register and is described as it is; a
   description digit count the asm left as garbage is `DESC_ALL_DIGITS`.
-  Not yet: suspension (`MSG_META_SUSPEND`) and undo around the changes.
+  Defining and applying a style suspend the object, applying one is
+  an undo chain.
+- **Undo** (`TextUndo/tuMain.goc`, `tuStrings.goc`; the
+  `GenProcessClass` undo chains of `User/Proc/procUndo.goc`): an object
+  with `VTF_ALLOW_UNDO` adds an action to the process's chain for each
+  replacement (the deleted text and the inserted range, in a VM chain
+  in the undo file: small in one block, large in a huge array), for
+  each change of attribute runs (the old runs of the range in a huge
+  array, `TA_AppendRunsInRangeToHugeArray`; undone by deleting the
+  range's runs and restoring the saved ones), and keeps one action for
+  typing while the cursor stays (characters appended, backspaced ones
+  prepended; `TU_NukeCachedUndo` when the selection moves, the target
+  goes, or a whole paragraph or the text is deleted by the keyboard).
+  `MSG_META_UNDO` plays an action back with the object suspended and
+  adds its redo action; the unsuspend is queued. The chain titles are
+  the asm's strings (`UndoStrings`). `UndoActionDataUnion` gets
+  `UADT_OPTR` (Port32 only, `gProcC.goh`): the asm passed an optr in
+  the two words of the flags. The run API's insert and delete leave
+  the element references to the caller (`TA_ElementAddRef`,
+  `TA_RemoveElement`).
+- **Suspension** (`Text/textSuspend.goc`): `MSG_META_SUSPEND` and
+  `_UNSUSPEND` count (`ATTR_VIS_TEXT_SUSPEND_DATA`); the first suspend
+  unhilites and starts an undo chain (ended at the last unsuspend
+  unless something else started one). While suspended a replacement
+  still makes its lines again (the asm collected the range for the
+  unsuspend); an attribute change waits and the unsuspend makes all
+  lines again. Drawing, the notifications and showing the selection
+  wait for the unsuspend.
 - **Not yet.** Extended styles, hyphenation, graphics, the large mouse
   messages, selection by words and lines while dragging, quick
-  transfer, the pointer image over text; undo, suspension; widows and
+  transfer, the pointer image over text; widows and
   orphans, sections; the selection into a VM block, DB item or huge
   array, search and spelling, the controllers, the ruler.
 - **Test.** ctest `library.text` (`test_text.c`, the process geode

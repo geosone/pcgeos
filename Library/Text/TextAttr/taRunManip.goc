@@ -1,12 +1,20 @@
 /*
  * taRunManip.goc -- after taRunManip.asm:
  * TA_UpdateRunsForSelectionChange, CoalesceRun,
- * TA_UpdateRunsForReplacement, TA_ModifyRun.
+ * TA_UpdateRunsForReplacement, TA_ModifyRun (ModifyRun, with its undo
+ * actions), the runs of undo actions (TA_AppendRunsInRangeToHugeArray,
+ * TA_RestoreRunsFromHugeArray, TA_DeleteRunsInRange,
+ * TA_DecrementRefCountsFromHugeArray).
  */
 @include "textInt.goh"
 @include <Objects/styles.goh>
 #include <chunkarr.h>
 #include <char.h>
+#include <hugearr.h>
+
+static dword ModifyRunWithoutUndo(optr o, TextRunKind kind, dword start,
+				  dword end, TA_ModifyCallback *cb,
+				  void *data, word token);
 
 /* TA_UpdateRunsForSelectionChange: a new selection drops the insertion
  * token */
@@ -59,6 +67,54 @@ dword CoalesceRun(optr o, TextRunKind kind)
     return lastPos;
 }
 /*
+ * DoUpdateRunUndo: the undo actions for the runs a replacement changes.
+ * A replacement that undoes one adds none unless it deletes (the runs
+ * of the deleted text would be lost).  Other runs than paragraph ones
+ * are kept only if one starts in the range before its end (then up to
+ * its end); paragraph runs up to the next paragraph's start (a run at
+ * the end may go with the carriage return).  An insertion keeps none,
+ * but for an insertion token.
+ */
+static void DoUpdateRunUndo(optr o, TextRunKind kind,
+			    const VisTextReplaceParameters *rp)
+{
+    VisTextRange r = rp->VTRP_range;
+    Boolean any;
+
+    if (!(VT(o)->VTI_features & VTF_ALLOW_UNDO))
+	return;
+    if (r.VTR_end == r.VTR_start) {
+	/* inserting */
+	if (GenProcessUndoCheckIfIgnoring() || kind == TRK_PARA_ATTR ||
+	    GetInsertionElement(o) == CA_NULL_ELEMENT)
+	    return;
+	TU_CreateUndoForRunModification(o, kind, &r);
+	return;
+    }
+    if (rp->VTRP_insCount && (rp->VTRP_flags & VTRF_UNDO))
+	return;
+    if (kind == TRK_PARA_ATTR) {
+	dword end, size;
+
+	if (!CheckIfRunsInRangeForUndo(o, kind, &r))
+	    return;
+	end = r.VTR_end;
+	(void) TSL_FindParagraphEnd(o, &end);
+	end++;
+	size = TS_GetTextSize(o);
+	r.VTR_end = end > size ? size : end;
+    } else {
+	r.VTR_end--;
+	any = CheckIfRunsInRangeForUndo(o, kind, &r);
+	r.VTR_end++;
+	if (!any)
+	    return;
+    }
+    TU_CreateUndoForRunsInRange(o, kind, &r);
+    TU_CreateUndoForRunModification(o, kind, &r);
+}
+
+/*
  * UpdateRun: the runs of a kind moved for the replacement of the range
  * by insCount characters (the text not yet replaced).  TRUE if the
  * attributes the UI shows may have changed.
@@ -73,6 +129,7 @@ static Boolean UpdateRun(optr o, TextRunKind kind,
     dword runPos, nextPos, p;
     word i, insToken = CA_NULL_ELEMENT;
 
+    DoUpdateRunUndo(o, kind, rp);
     /* a replacement takes the attribute of the replaced text */
     if (ins && del && !para) {
 	updateUI = TRUE;
@@ -238,7 +295,8 @@ doDelete:
 	    if (TSL_IsParagraphEnd(o, s, &eot) && !eot)
 		s++;
 	    e = middle ? s + ins : TEXT_ADDRESS_PAST_END;
-	    (void) TA_ModifyRun(o, kind, rStart, e, NULL, NULL, insToken);
+	    (void) ModifyRunWithoutUndo(o, kind, rStart, e, NULL, NULL,
+					insToken);
 	} else
 	    updateUI = TRUE;
 	TA_RemoveElement(o, kind, insToken);
@@ -310,8 +368,9 @@ static word ModifyElement(optr o, TextRunKind kind, word old,
  * instead.  The position of the last real run, or 0xffffffff for an
  * insertion token.
  */
-dword TA_ModifyRun(optr o, TextRunKind kind, dword start, dword end,
-		   TA_ModifyCallback *cb, void *data, word token)
+static dword ModifyRunWithoutUndo(optr o, TextRunKind kind, dword start,
+				  dword end, TA_ModifyCallback *cb,
+				  void *data, word token)
 {
     dword size = TS_GetTextSize(o), p;
     word i, endToken, ins;
@@ -365,4 +424,177 @@ dword TA_ModifyRun(optr o, TextRunKind kind, dword start, dword end,
     }
     TA_RemoveElement(o, kind, endToken);
     return CoalesceRun(o, kind);
+}
+
+/*
+ * ModifyRun: ModifyRunWithoutUndo with the undo actions: the runs of the
+ * range kept, and the range to clear of runs when undone.  Setting the
+ * insertion token can't be undone (the chain aborted).
+ */
+dword TA_ModifyRun(optr o, TextRunKind kind, dword start, dword end,
+		   TA_ModifyCallback *cb, void *data, word token)
+{
+    VisTextRange r;
+    dword last;
+
+    if (start == end && kind != TRK_PARA_ATTR) {
+	TU_AbortChainIfUndoable(o);
+	return ModifyRunWithoutUndo(o, kind, start, end, cb, data, token);
+    }
+    r.VTR_start = start;
+    r.VTR_end = end;
+    if (CheckIfRunsInRangeForUndo(o, kind, &r))
+	TU_CreateUndoForRunsInRange(o, kind, &r);
+    last = ModifyRunWithoutUndo(o, kind, start, end, cb, data, token);
+    if (CheckIfRunsInRangeForUndo(o, kind, &r))
+	TU_CreateUndoForRunModification(o, kind, &r);
+    return last;
+}
+
+/* ---------------------------------------------------------------------
+ * The runs of undo actions
+ * ------------------------------------------------------------------- */
+
+static dword ElPos(const TextRunArrayElement *e)
+{
+    return (word) e->TRAE_position.WAAH_low |
+	   ((dword) (byte) e->TRAE_position.WAAH_high << 16);
+}
+
+/*
+ * CheckIfRunsInRangeForUndo: TRUE if the object makes undo actions and a
+ * run starts in the range (its end included)
+ */
+Boolean CheckIfRunsInRangeForUndo(optr o, TextRunKind kind,
+				  const VisTextRange *r)
+{
+    word i;
+    dword p;
+
+    if (!TU_CheckForUndo(o))
+	return FALSE;
+    for (i = TA_RunForPosition(o, kind, r->VTR_start, FALSE); ; i++) {
+	p = TA_RunPosition(o, kind, i);
+	if (TA_RunAtEnd(p))
+	    return FALSE;
+	if (p >= r->VTR_start)
+	    return p <= r->VTR_end;
+    }
+}
+
+/*
+ * TA_AppendRunsInRangeToHugeArray: the runs starting in the range (its
+ * end included) appended to the huge array, their elements referenced
+ */
+void TA_AppendRunsInRangeToHugeArray(optr o, TextRunKind kind,
+				     const VisTextRange *r, VMFileHandle f,
+				     VMBlockHandle ha)
+{
+    word i;
+    dword p;
+    TextRunArrayElement e;
+
+    i = TA_RunForPosition(o, kind, r->VTR_start, FALSE);
+    for (p = TA_RunPosition(o, kind, i); p <= r->VTR_end;
+	 p = TA_RunPosition(o, kind, ++i)) {
+	if (TA_RunAtEnd(p))
+	    break;
+	if (p < r->VTR_start)
+	    continue;
+	memset(&e, 0, sizeof(e));
+	e.TRAE_position.WAAH_low = (sword) (word) p;
+	e.TRAE_position.WAAH_high = (sbyte) (byte) (p >> 16);
+	e.TRAE_token = TA_RunToken(o, kind, i);
+	TA_ElementAddRef(o, kind, e.TRAE_token);
+	(void) HugeArrayAppend(f, ha, 1, &e);
+    }
+}
+
+/* TA_DecrementRefCountsFromHugeArray: the references of the saved runs
+ * given up */
+void TA_DecrementRefCountsFromHugeArray(optr o, TextRunKind kind,
+					VMFileHandle f, VMBlockHandle ha)
+{
+    dword n = HugeArrayGetCount(f, ha), i;
+    TextRunArrayElement *e;
+    word size;
+
+    for (i = 0; i < n; i++) {
+	word token;
+
+	(void) HugeArrayLock(f, ha, i, (void **) &e, &size);
+	token = e->TRAE_token;
+	HugeArrayUnlock(e);
+	TA_RemoveElement(o, kind, token);
+    }
+}
+
+/*
+ * TA_DeleteRunsInRange: the runs starting in the range (its end
+ * included) deleted (kept for the redo first)
+ */
+void TA_DeleteRunsInRange(optr o, TextRunKind kind, const VisTextRange *r)
+{
+    word i;
+    dword p;
+
+    if (!CheckIfRunsInRangeForUndo(o, kind, r))
+	return;
+    TU_CreateUndoForRunsInRange(o, kind, r);
+    (void) ObjVarDeleteData(o, TEMP_VIS_TEXT_CACHED_RUN_INFO);
+    i = TA_RunForPosition(o, kind, r->VTR_start, FALSE);
+    for (;;) {
+	p = TA_RunPosition(o, kind, i);
+	if (p < r->VTR_start) {
+	    i++;
+	    continue;
+	}
+	if (p > r->VTR_end || TA_RunAtEnd(p))
+	    break;
+	TA_RemoveElement(o, kind, TA_RunToken(o, kind, i));
+	RunArrayDelete(o, kind, i);
+    }
+    TextGStateCreate(o);
+    ReflectChange(o);
+}
+
+/*
+ * TA_RestoreRunsFromHugeArray: the saved runs put back (the redo action
+ * clears their range again)
+ */
+void TA_RestoreRunsFromHugeArray(optr o, TextRunKind kind, VMFileHandle f,
+				 VMBlockHandle ha)
+{
+    dword n = HugeArrayGetCount(f, ha), k;
+    TextRunArrayElement *e;
+    VisTextRange r;
+    word i, size;
+
+    EC_ERROR_IF(!n, -1);
+    if (!n)
+	return;
+    (void) HugeArrayLock(f, ha, 0, (void **) &e, &size);
+    r.VTR_start = ElPos(e);
+    HugeArrayUnlock(e);
+    /* before the run after the first one restored (the run there may
+     * be gone) */
+    i = TA_RunForPosition(o, kind, r.VTR_start, FALSE);
+    if (TA_RunPosition(o, kind, i) <= r.VTR_start)
+	i++;
+    for (k = 0; k < n; k++, i++) {
+	dword pos;
+	word token;
+
+	(void) HugeArrayLock(f, ha, k, (void **) &e, &size);
+	pos = ElPos(e);
+	token = e->TRAE_token;
+	HugeArrayUnlock(e);
+	TA_RunInsert(o, kind, i, pos, token);
+	TA_ElementAddRef(o, kind, token);
+	r.VTR_end = pos;
+    }
+    (void) CoalesceRun(o, kind);
+    TU_CreateUndoForRunModification(o, kind, &r);
+    TextGStateCreate(o);
+    ReflectChange(o);
 }

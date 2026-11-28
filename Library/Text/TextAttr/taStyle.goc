@@ -3,15 +3,13 @@
  * the MSG_META_STYLED_OBJECT_* messages of the style sheet controller
  * (on the Styles library), the parameters of the object's style sheets
  * (LoadSSParams), the substitution of attribute tokens.
- *
- * Port32: no undo chains yet (the asm's TU_StartChainIfUndoable), and
- * no TextSuspend around applying a style (MSG_META_SUSPEND is not in C
- * yet): the notifications go out as the asm's would without them.
  */
 @include "textInt.goh"
 @include <Objects/styles.goh>
 
 @extern chunk BadModifyStyleString;
+@extern chunk StyleString;
+@extern chunk FormattingString;
 
 /*
  * GetStyleArray: the style array of the object
@@ -186,10 +184,14 @@ static void RecalcIf(optr o, word recalc)
 {
     StyleSheetParams p;
 
+    /* (suspended: the notifications in the right order, as the
+     * definition applies the style) */
+    TextSuspend(oself);
     TextMarkUserModified(oself);
     LoadSSParams(oself, &p, FALSE);
     StyleSheetDefineStyle(oself, &p, params, ModifyTextStyleAttributeList);
     StyleSendNotification(oself);
+    TextUnsuspend(oself);
 }
 
 @extern method VisTextClass, MSG_META_STYLED_OBJECT_REDEFINE_STYLE
@@ -267,14 +269,18 @@ static void RecalcIf(optr o, word recalc)
 static void SetAttrsCommon(optr o, word charAttr, word paraAttr,
 			   TextStyleFlags flags)
 {
-    dword range = (flags & TSF_APPLY_TO_SELECTION_ONLY) ?
-		  VIS_TEXT_RANGE_SELECTION :
-		  VIS_TEXT_RANGE_PARAGRAPH_SELECTION;
+    Boolean sel = (flags & TSF_APPLY_TO_SELECTION_ONLY) != 0;
+    dword range = sel ? VIS_TEXT_RANGE_SELECTION :
+			VIS_TEXT_RANGE_PARAGRAPH_SELECTION;
 
+    TextSuspend(o);
+    TU_StartChainIfUndoable(o, sel ? @StyleString : @FormattingString);
     @call o::MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN(charAttr, 0, range);
-    if (!(flags & TSF_APPLY_TO_SELECTION_ONLY))
+    if (!sel)
 	@call o::MSG_VIS_TEXT_SET_PARA_ATTR_BY_TOKEN(paraAttr, 0,
 						      VIS_TEXT_RANGE_SELECTION);
+    TU_EndChainIfUndoable(o);
+    TextUnsuspend(o);
 }
 
 /* the saved style's attributes (copied into the object's arrays) */
@@ -313,10 +319,12 @@ static void SetAttrsCommon(optr o, word charAttr, word paraAttr,
 @extern method VisTextClass, MSG_META_STYLED_OBJECT_RETURN_TO_BASE_STYLE
 {
     (void) params;
+    TextSuspend(oself);
     @call oself::MSG_VIS_TEXT_SET_CHAR_ATTR_BY_TOKEN(CA_NULL_ELEMENT, 0,
 						     VIS_TEXT_RANGE_SELECTION);
     @call oself::MSG_VIS_TEXT_SET_PARA_ATTR_BY_TOKEN(CA_NULL_ELEMENT, 0,
 						     VIS_TEXT_RANGE_SELECTION);
+    TextUnsuspend(oself);
 }
 
 @extern method VisTextClass, MSG_META_STYLED_OBJECT_DELETE_STYLE

@@ -105,6 +105,13 @@ extern void TA_SetSingleCharAttr(optr o, const VisTextCharAttr *a);
  * made again and drawn (with the object's gstate), the selection
  * shown, the object told */
 extern void ReflectChangeUpdateGeneric(optr o);
+/* ReflectChange: the same without the generic update */
+extern void ReflectChange(optr o);
+/* Text/textSuspend.goc: suspension (MSG_META_SUSPEND); a change while
+ * suspended noted (TRUE if suspended: drawn at the unsuspend) */
+extern void TextSuspend(optr o);
+extern void TextUnsuspend(optr o);
+extern Boolean TextNoteSuspendedChange(optr o);
 
 /* TextAttr/taRunLow.goc and beside: the attribute runs (VTSF_MULTIPLE_CHAR_ATTRS,
  * VTSF_MULTIPLE_PARA_ATTRS) */
@@ -658,5 +665,39 @@ extern void ModifyTextStyleAttributeList(optr list, void *style,
 extern Boolean GetStyleArray(optr o, StyleChunkDesc *d);
 extern void LoadSSParams(optr o, StyleSheetParams *p, Boolean keepXfer);
 extern void StyleSendNotification(optr o);
+
+/* TextUndo/tuMain.goc: undo (VTF_ALLOW_UNDO; the titles are chunks of
+ * UndoStrings) */
+extern Boolean TU_CheckForUndo(optr o);
+extern void TU_NukeCachedUndo(optr o);
+extern void TU_StartChainIfUndoable(optr o, optr title);
+extern void TU_EndChainIfUndoable(optr o);
+extern void TU_AbortChainIfUndoable(optr o);
+extern VisTextCachedUndoInfo *TU_DerefUndo(optr o);
+extern void TU_DoReplaceUndo(optr o, const VisTextReplaceParameters *p);
+extern void TU_IgnoreUndoActions(Boolean flush);
+extern void TU_AcceptUndoActions(void);
+extern void TU_StartUndoChain(optr o, optr title);
+extern void TU_EndUndoChain(optr o);
+extern void TU_AbortUndoChain(optr o);
+extern void TU_CreateEmptyChain(optr o, optr title);
+extern void TU_CreateUndoForRunsInRange(optr o, TextRunKind kind,
+					const VisTextRange *r);
+extern void TU_CreateUndoForRunModification(optr o, TextRunKind kind,
+					    const VisTextRange *r);
+/* TextAttr/taRunManip.goc: the runs of undo actions (huge arrays of
+ * TextRunArrayElement) */
+extern void TA_DecrementRefCountsFromHugeArray(optr o, TextRunKind kind,
+					       VMFileHandle f,
+					       VMBlockHandle ha);
+extern void TA_DeleteRunsInRange(optr o, TextRunKind kind,
+				 const VisTextRange *r);
+extern void TA_RestoreRunsFromHugeArray(optr o, TextRunKind kind,
+					VMFileHandle f, VMBlockHandle ha);
+extern void TA_AppendRunsInRangeToHugeArray(optr o, TextRunKind kind,
+					    const VisTextRange *r,
+					    VMFileHandle f, VMBlockHandle ha);
+extern Boolean CheckIfRunsInRangeForUndo(optr o, TextRunKind kind,
+					 const VisTextRange *r);
 
 #endif

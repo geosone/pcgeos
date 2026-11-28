@@ -1,0 +1,560 @@
+/*
+ * tuMain.goc -- after tuMain.asm: undo for the text object.  With
+ * VTF_ALLOW_UNDO a change becomes undo actions of the process's undo
+ * chain (GenProcessClass, Library/User/Proc/procUndo.goc): a replacement
+ * keeps the text it replaced (in the action's VM block, or a huge array
+ * for more), a change of runs keeps the runs it replaced (a huge array
+ * of TextRunArrayElement, their elements referenced) and the range to
+ * clear of runs when undone.  Typing goes on in the same action while
+ * the cursor stays where it typed (TEMP_VIS_TEXT_CACHED_UNDO_INFO).
+ * MSG_META_UNDO plays an action back, as replacements and run changes
+ * that make the redo actions.
+ *
+ * Port32 (Port32/ABI.md section 13z):
+ *  - The runs' offsets (offset VTI_charAttrRuns ...) are a TextRunKind
+ *    in RHAD_runOffset and DRD_runOffset.  No graphic and type runs yet.
+ *  - The titles are optrs of UndoStrings (tuStrings.goc).
+ *  - Not yet: the abort of a search or spell session at an undo
+ *    (SendAbortSearchSpellNotification; no search and spell yet).
+ */
+@include "textInt.goh"
+#include <hugearr.h>
+#include <string.h>
+
+typedef enum {
+    TUT_SMALL_REPLACEMENT_CHARS,
+    TUT_LARGE_REPLACEMENT_CHARS,
+    TUT_DELETE_RUNS_IN_RANGE,
+    TUT_SAVED_RUNS
+} TextUndoType;
+
+/* a replacement undone: CRD_charsToDelete characters at
+ * CRD_insertionPoint replaced by CRD_charsToInsert characters, which
+ * follow (small) or are the huge array CRD_meta.VMC_next (large) */
+typedef struct {
+    VMChainLink	CRD_meta;
+    dword	CRD_charsToDelete;
+    dword	CRD_insertionPoint;
+    dword	CRD_charsToInsert;
+} CommonReplacementData;
+
+#define CRD_CHARS(c)	((char *) ((CommonReplacementData *) (c) + 1))
+
+/* the directory of a huge array of saved runs */
+typedef struct {
+    HugeArrayDirectory	RHAD_meta;
+    word		RHAD_runOffset;
+} RunHAD;
+
+/* the runs of a range deleted */
+typedef struct {
+    VMChainLink		DRD_meta;
+    word		DRD_runOffset;
+    VisTextRange	DRD_range;
+} DeleteRunsData;
+
+/* the most characters one typing action keeps as the user backspaces */
+#define MAX_CHARS_PER_TYPING_UNDO_ACTION \
+    ((16 * 6) - sizeof(CommonReplacementData))
+/* the most characters a small action keeps */
+#define MAX_CHARS_IN_SMALL_STRUCT \
+    ((16 * 62) - sizeof(CommonReplacementData))
+
+/* ---------------------------------------------------------------------
+ * Undo on? (TextFixed)
+ * ------------------------------------------------------------------- */
+
+/* CheckForUndo: TRUE if the object makes undo actions now */
+Boolean TU_CheckForUndo(optr o)
+{
+    if (!(VT(o)->VTI_features & VTF_ALLOW_UNDO))
+	return FALSE;
+    return !GenProcessUndoCheckIfIgnoring();
+}
+
+/* TU_NukeCachedUndo: the next change starts a new action */
+void TU_NukeCachedUndo(optr o)
+{
+    if (TU_CheckForUndo(o))
+	TU_DerefUndo(o)->VTCUI_vmChain = 0;
+}
+
+void TU_StartChainIfUndoable(optr o, optr title)
+{
+    if (TU_CheckForUndo(o))
+	TU_StartUndoChain(o, title);
+}
+
+void TU_EndChainIfUndoable(optr o)
+{
+    if (TU_CheckForUndo(o))
+	TU_EndUndoChain(o);
+}
+
+void TU_AbortChainIfUndoable(optr o)
+{
+    if (TU_CheckForUndo(o))
+	TU_AbortUndoChain(o);
+}
+
+/* ---------------------------------------------------------------------
+ * Replacements (TextUndo)
+ * ------------------------------------------------------------------- */
+
+/* TU_DerefUndo: the cached typing action (made if none) */
+VisTextCachedUndoInfo *TU_DerefUndo(optr o)
+{
+    VisTextCachedUndoInfo *c = ObjVarFindData(o,
+					      TEMP_VIS_TEXT_CACHED_UNDO_INFO);
+
+    if (!c) {
+	c = ObjVarAddData(o, TEMP_VIS_TEXT_CACHED_UNDO_INFO,
+			  sizeof(VisTextCachedUndoInfo));
+	memset(c, 0, sizeof(*c));
+    }
+    return c;
+}
+
+static VMFileHandle GetUndoFile(void)
+{
+    return GenProcessUndoGetFile();
+}
+
+/* CopyCharsFromTextObjectToBuffer */
+static void CopyCharsToBuffer(optr o, dword start, word count, char *dest)
+{
+    VisTextRange r;
+    TextReference ref;
+    MemHandle mh;
+    char *buf;
+
+    if (!count)
+	return;
+    mh = MemAlloc(count + 1, HF_DYNAMIC, HAF_NO_ERR | HAF_LOCK);
+    buf = MemDeref(mh);
+    r.VTR_start = start;
+    r.VTR_end = start + count;
+    memset(&ref, 0, sizeof(ref));
+    ref.TR_type = TRT_POINTER;
+    ref.TR_ref.TRU_pointer.TRP_pointer = buf;
+    (void) TS_GetTextRange(o, &r, &ref);
+    memcpy(dest, buf, count);
+    MemFree(mh);
+}
+
+/* CopyCharsFromTextObjectToHugeArray */
+static VMBlockHandle CopyCharsToHugeArray(optr o, dword start, dword count,
+					  VMFileHandle f)
+{
+    VisTextRange r;
+    TextReference ref;
+    VMBlockHandle ha = HugeArrayCreate(f, sizeof(char), 0);
+
+    r.VTR_start = start;
+    r.VTR_end = start + count;
+    memset(&ref, 0, sizeof(ref));
+    ref.TR_type = TRT_HUGE_ARRAY;
+    ref.TR_ref.TRU_hugeArray.TRHA_file = f;
+    ref.TR_ref.TRU_hugeArray.TRHA_array = ha;
+    (void) TS_GetTextRange(o, &r, &ref);
+    return ha;
+}
+
+/* AppendChars, PrependChars: n characters of the object at start to
+ * the end or the front of the action's characters */
+static void AppendChars(optr o, CommonReplacementData *c, dword start,
+			word n)
+{
+    CopyCharsToBuffer(o, start, n,
+		      CRD_CHARS(c) + (word) c->CRD_charsToInsert);
+}
+
+static void PrependChars(optr o, CommonReplacementData *c, dword start,
+			 word n)
+{
+    memmove(CRD_CHARS(c) + n, CRD_CHARS(c), (word) c->CRD_charsToInsert);
+    CopyCharsToBuffer(o, start, n, CRD_CHARS(c));
+}
+
+/* AddVMChainUndoAction: the VM chain at block an action of the type */
+static void AddVMChainUndoAction(optr o, VMBlockHandle block,
+				 AddUndoActionFlags flags, TextUndoType type)
+{
+    AddUndoActionStruct a;
+
+    memset(&a, 0, sizeof(a));
+    a.AUAS_data.UAS_dataType = UADT_VM_CHAIN;
+    a.AUAS_flags = flags;
+    a.AUAS_data.UAS_appType = type;
+    a.AUAS_data.UAS_data.UADU_vmChain.UADVMC_vmChain =
+	VMCHAIN_MAKE_FROM_VM_BLOCK(block);
+    a.AUAS_output = o;
+    (void) @call process::MSG_GEN_PROCESS_UNDO_ADD_ACTION(&a);
+}
+
+/*
+ * AllocateCommonReplacementData, CreateNewReplaceUndoAction: the action
+ * that undoes the replacement (the replaced characters kept); its block
+ */
+static VMBlockHandle CreateNewReplaceUndoAction(optr o,
+					const VisTextReplaceParameters *p,
+					VMFileHandle f)
+{
+    dword n = p->VTRP_range.VTR_end - p->VTRP_range.VTR_start;
+    word room = 0;
+    VMBlockHandle b;
+    MemHandle mh;
+    CommonReplacementData *c;
+    TextUndoType type;
+
+    if (n <= MAX_CHARS_IN_SMALL_STRUCT) {
+	room = (word) n;
+	/* typing begins an action that grows */
+	if ((p->VTRP_flags & VTRF_KEYBOARD_INPUT) &&
+	    room <= MAX_CHARS_PER_TYPING_UNDO_ACTION)
+	    room = MAX_CHARS_PER_TYPING_UNDO_ACTION;
+    }
+    b = VMAlloc(f, sizeof(CommonReplacementData) + room, 0);
+    c = VMLock(f, b, &mh);
+    VMDirty(mh);
+    memset(c, 0, sizeof(*c));
+    c->CRD_charsToDelete = p->VTRP_insCount;
+    c->CRD_insertionPoint = p->VTRP_range.VTR_start;
+    c->CRD_charsToInsert = n;
+    if (n <= MAX_CHARS_IN_SMALL_STRUCT) {
+	CopyCharsToBuffer(o, p->VTRP_range.VTR_start, (word) n,
+			  CRD_CHARS(c));
+	type = TUT_SMALL_REPLACEMENT_CHARS;
+    } else {
+	VMUnlock(mh);
+	{
+	    VMBlockHandle ha = CopyCharsToHugeArray(o,
+				    p->VTRP_range.VTR_start, n, f);
+
+	    c = VMLock(f, b, &mh);
+	    VMDirty(mh);
+	    c->CRD_meta.VMC_next = ha;
+	}
+	type = TUT_LARGE_REPLACEMENT_CHARS;
+    }
+    VMUnlock(mh);
+    AddVMChainUndoAction(o, b, (p->VTRP_flags & VTRF_KEYBOARD_INPUT) ?
+			 AUAF_NOTIFY_BEFORE_FREEING : 0, type);
+    return b;
+}
+
+/*
+ * TU_DoReplaceUndo: the action for the replacement (before the text is
+ * replaced).  Typing goes on in the cached action while it can: deleting
+ * forward appends the characters, backspacing takes back what was typed
+ * or prepends the characters.
+ */
+void TU_DoReplaceUndo(optr o, const VisTextReplaceParameters *p)
+{
+    VisTextCachedUndoInfo *ci;
+    VMFileHandle f;
+    VMBlockHandle b;
+
+    EC_ERROR_IF(!(VT(o)->VTI_features & VTF_ALLOW_UNDO), -1);
+    EC_ERROR_IF(GenProcessUndoCheckIfIgnoring(), -1);
+    if (p->VTRP_flags & VTRF_KEYBOARD_INPUT) {
+	ci = TU_DerefUndo(o);
+	if (VMCHAIN_GET_VM_BLOCK(ci->VTCUI_vmChain)) {
+	    MemHandle mh;
+	    CommonReplacementData *c;
+	    dword n = p->VTRP_range.VTR_end - p->VTRP_range.VTR_start;
+	    dword cursor;
+	    Boolean ok = TRUE;
+
+	    f = ci->VTCUI_file;
+	    c = VMLock(f, VMCHAIN_GET_VM_BLOCK(ci->VTCUI_vmChain), &mh);
+	    if (n >> 16)
+		ok = FALSE;
+	    else if (n) {
+		word d = (word) n;
+
+		if (c->CRD_charsToInsert >> 16)
+		    ok = FALSE;
+		else {
+		    cursor = c->CRD_insertionPoint + c->CRD_charsToDelete;
+		    if (p->VTRP_range.VTR_start >= cursor) {
+			/* deleting forward: the characters appended */
+			EC_ERROR_IF(p->VTRP_range.VTR_start != cursor, -1);
+			if ((dword) d + c->CRD_charsToInsert >
+			    MAX_CHARS_PER_TYPING_UNDO_ACTION)
+			    ok = FALSE;
+			else {
+			    AppendChars(o, c, p->VTRP_range.VTR_start, d);
+			    c->CRD_charsToInsert += d;
+			}
+		    } else {
+			/* backspacing: what was typed taken back, the rest
+			 * prepended */
+			EC_ERROR_IF(p->VTRP_range.VTR_end != cursor, -1);
+			if (d >= c->CRD_charsToDelete &&
+			    (d - c->CRD_charsToDelete) + c->CRD_charsToInsert
+			    > MAX_CHARS_PER_TYPING_UNDO_ACTION)
+			    ok = FALSE;
+			else if (d <= c->CRD_charsToDelete)
+			    c->CRD_charsToDelete -= d;
+			else {
+			    word more = (word) (d - c->CRD_charsToDelete);
+
+			    c->CRD_charsToDelete = 0;
+			    c->CRD_insertionPoint -= more;
+			    PrependChars(o, c, c->CRD_insertionPoint, more);
+			    c->CRD_charsToInsert += more;
+			}
+		    }
+		}
+	    }
+	    if (ok) {
+		c->CRD_charsToDelete += p->VTRP_insCount;
+		VMDirty(mh);
+		VMUnlock(mh);
+		return;
+	    }
+	    /* too much for this action: a new one */
+	    VMUnlock(mh);
+	}
+    }
+    f = GetUndoFile();
+    b = CreateNewReplaceUndoAction(o, p, f);
+    ci = TU_DerefUndo(o);
+    ci->VTCUI_vmChain = 0;
+    if (p->VTRP_flags & VTRF_KEYBOARD_INPUT) {
+	ci->VTCUI_vmChain = VMCHAIN_MAKE_FROM_VM_BLOCK(b);
+	ci->VTCUI_file = f;
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Freeing and playing back
+ * ------------------------------------------------------------------- */
+
+/* VisTextUndoFreeingAction: a typing action going is no longer cached;
+ * saved runs give up their elements */
+@extern method VisTextClass, MSG_META_UNDO_FREEING_ACTION
+{
+    word type = (word) data->AUAS_data.UAS_appType;
+
+    EC_ERROR_IF(type > TUT_SAVED_RUNS, -1);
+    switch (type) {
+    case TUT_SMALL_REPLACEMENT_CHARS:
+    case TUT_LARGE_REPLACEMENT_CHARS: {
+	/* FreeTypingUndo */
+	VisTextCachedUndoInfo *ci = TU_DerefUndo(oself);
+
+	if (data->AUAS_data.UAS_data.UADU_vmChain.UADVMC_vmChain ==
+	    ci->VTCUI_vmChain)
+	    ci->VTCUI_vmChain = 0;
+	break;
+    }
+    case TUT_SAVED_RUNS: {
+	/* FreeRunsUndo */
+	VMFileHandle f = data->AUAS_data.UAS_data.UADU_vmChain.UADVMC_file;
+	VMBlockHandle ha = VMCHAIN_GET_VM_BLOCK(
+		data->AUAS_data.UAS_data.UADU_vmChain.UADVMC_vmChain);
+	RunHAD *h;
+	TextRunKind kind;
+
+	HugeArrayLockDir(f, ha, (void **) &h);
+	kind = (TextRunKind) h->RHAD_runOffset;
+	HugeArrayUnlockDir(h);
+	TA_DecrementRefCountsFromHugeArray(oself, kind, f, ha);
+	break;
+    }
+    default:
+	break;
+    }
+}
+
+/* SmallReplaceUndo, LargeReplaceUndo: the replacement undone (by the
+ * user, as an undo) */
+static void ReplaceUndo(optr o, const UndoActionStruct *u, Boolean large)
+{
+    VMFileHandle f = u->UAS_data.UADU_vmChain.UADVMC_file;
+    MemHandle mh;
+    CommonReplacementData *c = VMLock(f,
+		VMCHAIN_GET_VM_BLOCK(u->UAS_data.UADU_vmChain.UADVMC_vmChain),
+		&mh);
+    VisTextReplaceParameters p;
+
+    memset(&p, 0, sizeof(p));
+    p.VTRP_range.VTR_start = c->CRD_insertionPoint;
+    p.VTRP_range.VTR_end = c->CRD_insertionPoint + c->CRD_charsToDelete;
+    p.VTRP_insCount = c->CRD_charsToInsert;
+    p.VTRP_flags = VTRF_USER_MODIFICATION | VTRF_UNDO;
+    if (large) {
+	p.VTRP_textReference.TR_type = TRT_HUGE_ARRAY;
+	p.VTRP_textReference.TR_ref.TRU_hugeArray.TRHA_file = f;
+	p.VTRP_textReference.TR_ref.TRU_hugeArray.TRHA_array =
+	    c->CRD_meta.VMC_next;
+    } else {
+	p.VTRP_textReference.TR_type = TRT_POINTER;
+	p.VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer = CRD_CHARS(c);
+    }
+    (void) @call o::MSG_VIS_TEXT_REPLACE_TEXT(&p);
+    VMUnlock(mh);
+}
+
+/* DeleteRunsUndo */
+static void DeleteRunsUndo(optr o, const UndoActionStruct *u)
+{
+    VMFileHandle f = u->UAS_data.UADU_vmChain.UADVMC_file;
+    MemHandle mh;
+    DeleteRunsData *d = VMLock(f,
+		VMCHAIN_GET_VM_BLOCK(u->UAS_data.UADU_vmChain.UADVMC_vmChain),
+		&mh);
+    TextRunKind kind = (TextRunKind) d->DRD_runOffset;
+    VisTextRange r = d->DRD_range;
+
+    VMUnlock(mh);
+    TA_DeleteRunsInRange(o, kind, &r);
+}
+
+/* RestoreRunsUndo */
+static void RestoreRunsUndo(optr o, const UndoActionStruct *u)
+{
+    VMFileHandle f = u->UAS_data.UADU_vmChain.UADVMC_file;
+    VMBlockHandle ha = VMCHAIN_GET_VM_BLOCK(
+				u->UAS_data.UADU_vmChain.UADVMC_vmChain);
+    RunHAD *h;
+    TextRunKind kind;
+
+    HugeArrayLockDir(f, ha, (void **) &h);
+    kind = (TextRunKind) h->RHAD_runOffset;
+    HugeArrayUnlockDir(h);
+    TA_RestoreRunsFromHugeArray(o, kind, f, ha);
+}
+
+/* VisTextUndo: the action played back, the object suspended meanwhile
+ * (the unsuspend queued at the front) */
+@extern method VisTextClass, MSG_META_UNDO
+{
+    Boolean suspend = !(pself->VTI_intFlags & VTIF_SUSPENDED);
+    word type = (word) undoData->UAS_appType;
+
+    EC_ERROR_IF(!(pself->VTI_features & VTF_ALLOW_UNDO), -1);
+    EC_ERROR_IF(type > TUT_SAVED_RUNS, -1);
+    if (suspend)
+	TextSuspend(oself);
+    switch (type) {
+    case TUT_SMALL_REPLACEMENT_CHARS:
+	ReplaceUndo(oself, undoData, FALSE);
+	break;
+    case TUT_LARGE_REPLACEMENT_CHARS:
+	ReplaceUndo(oself, undoData, TRUE);
+	break;
+    case TUT_DELETE_RUNS_IN_RANGE:
+	DeleteRunsUndo(oself, undoData);
+	break;
+    case TUT_SAVED_RUNS:
+	RestoreRunsUndo(oself, undoData);
+	break;
+    default:
+	break;
+    }
+    if (suspend)
+	@send, forceQueue, insertAtFront oself::MSG_META_UNSUSPEND();
+}
+
+/* ---------------------------------------------------------------------
+ * Chains
+ * ------------------------------------------------------------------- */
+
+void TU_IgnoreUndoActions(Boolean flush)
+{
+    @call process::MSG_GEN_PROCESS_UNDO_IGNORE_ACTIONS(flush);
+}
+
+void TU_AcceptUndoActions(void)
+{
+    @call process::MSG_GEN_PROCESS_UNDO_ACCEPT_ACTIONS();
+}
+
+/* StartChain: a chain titled (0: the title of the next chain) */
+static void StartChain(optr o, optr title)
+{
+    @call process::MSG_GEN_PROCESS_UNDO_START_CHAIN(title, o);
+}
+
+/* TU_StartUndoChain: suspended (the first time) also a chain around all
+ * actions until the unsuspend */
+void TU_StartUndoChain(optr o, optr title)
+{
+    StartChain(o, title);
+    if (ObjVarDeleteData(o, TEMP_VIS_TEXT_UNDO_FOR_SUSPEND))
+	StartChain(o, 0);
+}
+
+/* EndChainCommon: flush: the chain thrown away if empty */
+static void EndChainCommon(Boolean flush)
+{
+    @call process::MSG_GEN_PROCESS_UNDO_END_CHAIN(flush);
+}
+
+void TU_EndUndoChain(optr o)
+{
+    (void) o;
+    EndChainCommon(TRUE);
+}
+
+void TU_AbortUndoChain(optr o)
+{
+    (void) o;
+    @call process::MSG_GEN_PROCESS_UNDO_ABORT_CHAIN();
+}
+
+/* TU_CreateEmptyChain: a chain kept though empty, for the actions of the
+ * replacement (and typing) to go in */
+void TU_CreateEmptyChain(optr o, optr title)
+{
+    TU_StartUndoChain(o, title);
+    EndChainCommon(FALSE);
+}
+
+/* ---------------------------------------------------------------------
+ * Runs
+ * ------------------------------------------------------------------- */
+
+/* TU_CreateUndoForRunsInRange: the runs of the range kept (their
+ * elements referenced till the action goes) */
+void TU_CreateUndoForRunsInRange(optr o, TextRunKind kind,
+				 const VisTextRange *r)
+{
+    VMFileHandle f = GetUndoFile();
+    VMBlockHandle ha;
+    RunHAD *h;
+
+    EC_ERROR_IF(GenProcessUndoCheckIfIgnoring(), -1);
+    ha = HugeArrayCreate(f, sizeof(TextRunArrayElement), sizeof(RunHAD));
+    HugeArrayLockDir(f, ha, (void **) &h);
+    h->RHAD_runOffset = (word) kind;
+    HugeArrayDirty(h);
+    HugeArrayUnlockDir(h);
+    TA_AppendRunsInRangeToHugeArray(o, kind, r, f, ha);
+    AddVMChainUndoAction(o, ha, AUAF_NOTIFY_BEFORE_FREEING, TUT_SAVED_RUNS);
+    TU_NukeCachedUndo(o);
+}
+
+/* TU_CreateUndoForRunModification: the runs of the range to be deleted
+ * when undone */
+void TU_CreateUndoForRunModification(optr o, TextRunKind kind,
+				     const VisTextRange *r)
+{
+    VMFileHandle f = GetUndoFile();
+    VMBlockHandle b;
+    MemHandle mh;
+    DeleteRunsData *d;
+
+    EC_ERROR_IF(GenProcessUndoCheckIfIgnoring(), -1);
+    b = VMAlloc(f, sizeof(DeleteRunsData), 0);
+    d = VMLock(f, b, &mh);
+    VMDirty(mh);
+    memset(d, 0, sizeof(*d));
+    d->DRD_runOffset = (word) kind;
+    d->DRD_range = *r;
+    VMUnlock(mh);
+    AddVMChainUndoAction(o, b, 0, TUT_DELETE_RUNS_IN_RANGE);
+}

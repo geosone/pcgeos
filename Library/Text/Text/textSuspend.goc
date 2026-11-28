@@ -1,23 +1,128 @@
 /*
- * textSuspend.goc -- after textSuspend.asm: This file contains...
+ * textSuspend.goc -- after textSuspend.asm: suspending the calculation
+ * and drawing of a text object (MSG_META_SUSPEND, MSG_META_UNSUSPEND,
+ * TextSuspend, TextUnsuspend; ATTR_VIS_TEXT_SUSPEND_DATA), the undo
+ * chain around the changes while suspended (TEMP_VIS_TEXT_UNDO_FOR_SUSPEND),
+ * ReflectChangeUpdateGeneric.
+ *
+ * Port32 (Port32/ABI.md section 13z): while suspended a replacement
+ * still makes its lines again (the asm left them for the unsuspend,
+ * collecting the range); an attribute change (ReflectChange) waits, and
+ * the unsuspend makes all lines again (VTSD_needsRecalc, no
+ * VTSD_recalcRange).  The drawing, the selection shown and the
+ * notifications wait too.
  */
 @include "textInt.goh"
 
+/* VisTextSuspend */
+@extern method VisTextClass, MSG_META_SUSPEND
+{
+    VisTextSuspendData *d;
+
+    if (!(pself->VTI_intFlags & VTIF_SUSPENDED)) {
+	TextGStateCreate(oself);
+	EditUnHilite(oself);
+	TextGStateDestroy(oself);
+	pself = VT(oself);
+	pself->VTI_intFlags |= VTIF_SUSPENDED;
+	/* an undoable action while suspended starts a chain around all
+	 * of them (TU_StartUndoChain) */
+	(void) ObjVarAddData(oself, TEMP_VIS_TEXT_UNDO_FOR_SUSPEND, 0);
+	d = ObjVarAddData(oself, ATTR_VIS_TEXT_SUSPEND_DATA,
+			  sizeof(VisTextSuspendData));
+	memset(d, 0, sizeof(*d));
+	d->VTSD_showSelectionPos = 0xffffffff;
+	d->VTSD_count = 1;
+    } else {
+	d = ObjVarFindData(oself, ATTR_VIS_TEXT_SUSPEND_DATA);
+	EC_ERROR_IF(!d || d->VTSD_count >= 40, -1);
+	d->VTSD_count++;
+    }
+    @callsuper();
+}
+
+/* VisTextUnsuspend: at the last one the chain ended, the changes drawn,
+ * the controllers told, the selection shown */
+@extern method VisTextClass, MSG_META_UNSUSPEND
+{
+    VisTextSuspendData *d = ObjVarFindData(oself, ATTR_VIS_TEXT_SUSPEND_DATA);
+    VisTextSuspendData s;
+    VisTextInstance *t;
+
+    EC_ERROR_IF(!d || d->VTSD_count >= 40, -1);
+    if (d && !--d->VTSD_count) {
+	/* the chain started while suspended (the flag is gone) */
+	if (!ObjVarDeleteData(oself, TEMP_VIS_TEXT_UNDO_FOR_SUSPEND))
+	    TU_EndUndoChain(oself);
+	d = ObjVarFindData(oself, ATTR_VIS_TEXT_SUSPEND_DATA);
+	s = *d;
+	t = VT(oself);
+	t->VTI_intFlags &= ~VTIF_SUSPENDED;
+	(void) ObjVarDeleteData(oself, ATTR_VIS_TEXT_SUSPEND_DATA);
+	if (s.VTSD_needsRecalc) {
+	    /* (ReflectChangeWithFlags: all lines made again, drawn) */
+	    if (VT(oself)->VTI_lines) {
+		dword size = TS_GetTextSize(oself);
+		WBFixed before = VT(oself)->VTI_height;
+
+		TextRecalc(oself, 0, size, size);
+		TextScreenUpdate(oself);
+		TR_RegionAdjustHeight(oself, before);
+	    }
+	    TA_SendNotification(oself, s.VTSD_notifications |
+				VIS_TEXT_STANDARD_NOTIFICATION_FLAGS);
+	} else if (s.VTSD_notifications)
+	    TA_SendNotification(oself, s.VTSD_notifications);
+	TextGStateCreate(oself);
+	EditHilite(oself);
+	TextGStateDestroy(oself);
+	if (s.VTSD_showSelectionPos != 0xffffffff) {
+	    t = VT(oself);
+	    @call oself::MSG_VIS_TEXT_SELECT_RANGE(t->VTI_selectEnd,
+						   t->VTI_selectStart);
+	}
+    }
+    @callsuper();
+}
+
+/* TextSuspend, TextUnsuspend */
+void TextSuspend(optr o)
+{
+    @call o::MSG_META_SUSPEND();
+}
+
+void TextUnsuspend(optr o)
+{
+    @call o::MSG_META_UNSUSPEND();
+}
+
+/* a change while suspended: drawn at the unsuspend (TRUE if suspended) */
+Boolean TextNoteSuspendedChange(optr o)
+{
+    VisTextSuspendData *d;
+
+    if (!(VT(o)->VTI_intFlags & VTIF_SUSPENDED))
+	return FALSE;
+    d = ObjVarFindData(o, ATTR_VIS_TEXT_SUSPEND_DATA);
+    if (d)
+	d->VTSD_needsRecalc = 0xff;	/* BB_TRUE */
+    return TRUE;
+}
+
 /*
- * ReflectChangeUpdateGeneric (textSuspend.asm): a generic object's
- * instance data updated; the lines of the range made again and drawn,
- * the selection shown again; the object user modified, told
+ * ReflectChange (textSuspend.asm): the lines of the range made again
+ * and drawn, the selection shown again; the object user modified, told
  * MSG_VIS_TEXT_ATTRIBUTE_CHANGE.  The range is the whole object.
  */
-void ReflectChangeUpdateGeneric(optr o)
+void ReflectChange(optr o)
 {
     dword size = TS_GetTextSize(o);
     WBFixed before = VT(o)->VTI_height;
     Boolean lines;
 
-    if (VT(o)->VI_typeFlags & VTF_IS_GEN)
-	@call o::MSG_VIS_TEXT_UPDATE_GENERIC();
-    lines = VT(o)->VTI_lines != 0;
+    /* (suspended: made again and drawn at the unsuspend; the runs may
+     * be half changed, as in an undo) */
+    lines = VT(o)->VTI_lines != 0 && !TextNoteSuspendedChange(o);
     if (lines) {
 	TextRecalc(o, 0, size, size);
 	TextScreenUpdate(o);
@@ -29,4 +134,13 @@ void ReflectChangeUpdateGeneric(optr o)
 	TR_RegionAdjustHeight(o, before);
     TextMarkUserModified(o);
     @call o::MSG_VIS_TEXT_ATTRIBUTE_CHANGE();
+}
+
+/* ReflectChangeUpdateGeneric: a generic object's instance data updated
+ * first (SendGenericUpdate) */
+void ReflectChangeUpdateGeneric(optr o)
+{
+    if (VT(o)->VI_typeFlags & VTF_IS_GEN)
+	@call o::MSG_VIS_TEXT_UPDATE_GENERIC();
+    ReflectChange(o);
 }

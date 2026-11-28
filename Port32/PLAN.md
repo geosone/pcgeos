@@ -167,8 +167,11 @@ Ordered by dependency, each with host-side tests under `linux`:
   styles library (`Library/Styles`, ABI.md §13ac; `taStyle*.goc`,
   `UI/uiTextStyleSheet.goc`: define, redefine, apply, return to base,
   delete, describe, save and recall, the style and style sheet
-  notifications), step 26.
-  Open: the style sheet controllers, undo, quick transfer; widows and
+  notifications), step 26; undo (`TextUndo/`, the `GenProcessClass`
+  undo chains of `procUndo.goc`: replacements, typing, attribute
+  changes undone and redone; suspension, one chain; ignored actions),
+  steps 27 to 36.
+  Open: the style sheet controllers, quick transfer; widows and
   orphans, sections.
 - **Interim stubs** (started 2026-11-25): every "Port32: not yet" whose
   dependency is ported since gets filled in after the asm, with its own

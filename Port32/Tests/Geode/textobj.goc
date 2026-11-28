@@ -54,6 +54,7 @@ typedef struct {
     word	TOS_regions[6];		/* of step 25 */
     char	TOS_styleDesc[80];	/* (step 26) the style described */
     word	TOS_styles[4];		/* of step 26 */
+    word	TOS_undo[8];		/* of step 27 */
 } TOState;
 
 TOState toState;
@@ -66,10 +67,22 @@ TOState toState;
 	if (!toState.TOS_failLine) toState.TOS_failLine = __LINE__; } \
     } while (0)
 
-@class TOProcessClass, ProcessClass;
+/* (a GenProcessClass for the undo chains of step 27; attached and
+ * detached as a plain process: no application object) */
+@class TOProcessClass, GenProcessClass;
     @message void MSG_TO_STEP(word step);
 @endc
 @classdecl TOProcessClass, neverSaved;
+
+@method TOProcessClass, MSG_META_DETACH
+{
+    struct { word id; optr caller; } p;
+
+    p.id = callerID;
+    p.caller = caller;
+    CObjCallSuperP((ClassStruct *) &GenProcessClass, oself, MSG_META_DETACH,
+		   &p, sizeof(p), NULL, 0);
+}
 
 @class TOTextClass, VisTextClass;
 @endc
@@ -319,6 +332,140 @@ static Boolean TOItemName(TransferBlockID id, const char *name)
 
     VMUnlock(mh);
     return same;
+}
+
+/*
+ * (steps 27 to 36) undo: the process's undo chain (GenProcessClass) with
+ * an object that allows undo: a replacement undone, redone, undone;
+ * typing, one action while the cursor stays, also backspacing into the
+ * text before; a font change undone and redone; changes while
+ * suspended, one chain; ignored actions.  Each step ends with a
+ * playback, checked by the next: the object's MSG_META_UNDO queues its
+ * unsuspend, which runs between the steps.
+ */
+static optr undoText;
+
+static void Playback(void)
+{
+    @call process::MSG_GEN_PROCESS_UNDO_PLAYBACK_CHAIN();
+}
+
+/* typed (VTRF_KEYBOARD_INPUT): the range replaced by the text */
+static void UndoTyped(optr o, dword start, dword end, const char *text)
+{
+    VisTextReplaceParameters rp;
+
+    memset(&rp, 0, sizeof(rp));
+    rp.VTRP_range.VTR_start = start;
+    rp.VTRP_range.VTR_end = end;
+    rp.VTRP_insCount = Len(text);
+    rp.VTRP_flags = VTRF_KEYBOARD_INPUT | VTRF_USER_MODIFICATION;
+    rp.VTRP_textReference.TR_type = TRT_POINTER;
+    rp.VTRP_textReference.TR_ref.TRU_pointer.TRP_pointer = (char *) text;
+    (void) @call o::MSG_VIS_TEXT_REPLACE_TEXT(&rp);
+}
+
+static void UndoStep(word step)
+{
+    optr n = undoText;
+    VisTextCharAttrDiffs d;
+    static FontID base;
+    word tk;
+
+    switch (step) {
+    case 27:
+	TOCHECK(ClipboardOpenClipboardFile() == 0);
+	(void) @call process::MSG_GEN_PROCESS_UNDO_SET_CONTEXT(1);
+	n = undoText = ObjInstantiate(OptrToHandle(@TOText),
+				      (ClassStruct *) &VisTextClass);
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("Hello world", 0);
+	@call n::MSG_VIS_TEXT_CREATE_STORAGE(VTSF_MULTIPLE_CHAR_ATTRS, 0);
+	@call n::MSG_VIS_TEXT_SET_FEATURES(VTF_ALLOW_UNDO, 0);
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(11, 6);
+	@call n::MSG_VIS_TEXT_REPLACE_SELECTION_PTR("there", 0);
+	TOCHECK(Is(n, "Hello there"));
+	Playback();
+	break;
+    case 28:
+	toState.TOS_undo[0] = Is(n, "Hello world");
+	TOCHECK(toState.TOS_undo[0]);
+	Playback();			/* (redo) */
+	break;
+    case 29:
+	TOCHECK(Is(n, "Hello there"));
+	Playback();
+	break;
+    case 30:
+	/* (three characters typed, one backspaced: one action) */
+	TOCHECK(Is(n, "Hello world"));
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(5, 5);
+	UndoTyped(n, 5, 5, ",");
+	UndoTyped(n, 6, 6, "!");
+	UndoTyped(n, 7, 7, "?");
+	UndoTyped(n, 7, 8, "");
+	TOCHECK(Is(n, "Hello,! world"));
+	Playback();
+	break;
+    case 31:
+	toState.TOS_undo[1] = Is(n, "Hello world");
+	TOCHECK(toState.TOS_undo[1]);
+	Playback();			/* (redo) */
+	break;
+    case 32:
+	/* (backspacing into the text before: prepended) */
+	TOCHECK(Is(n, "Hello,! world"));
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(7, 7);
+	UndoTyped(n, 6, 7, "");
+	UndoTyped(n, 5, 6, "");
+	UndoTyped(n, 4, 5, "");
+	UndoTyped(n, 3, 4, "");
+	TOCHECK(Is(n, "Hel world"));
+	Playback();
+	break;
+    case 33:
+	/* (a font change) */
+	TOCHECK(Is(n, "Hello,! world"));
+	base = FontOf(n, 0, 1, &tk, &d);
+	@call n::MSG_VIS_TEXT_SET_FONT_ID(FID_ROMA, 5, 0);
+	TOCHECK(FontOf(n, 0, 5, &tk, &d) == FID_ROMA);
+	Playback();
+	break;
+    case 34:
+	toState.TOS_undo[2] = FontOf(n, 0, 5, &tk, &d);
+	TOCHECK(toState.TOS_undo[2] == base &&
+		RunIs(n, 2, 0, TEXT_ADDRESS_PAST_END));
+	Playback();			/* (redo) */
+	break;
+    case 35:
+	TOCHECK(FontOf(n, 0, 5, &tk, &d) == FID_ROMA && RunIs(n, 2, 0, 5));
+	TOCHECK(Is(n, "Hello,! world"));
+	/* (suspended: two changes, one chain) */
+	@call n::MSG_META_SUSPEND();
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(13, 13);
+	@call n::MSG_VIS_TEXT_REPLACE_SELECTION_PTR(" one", 0);
+	@call n::MSG_VIS_TEXT_SELECT_RANGE(0, 0);
+	@call n::MSG_VIS_TEXT_REPLACE_SELECTION_PTR("Two ", 0);
+	@call n::MSG_META_UNSUSPEND();
+	TOCHECK(Is(n, "Two Hello,! world one"));
+	TOCHECK(!(((VisTextInstance *) ObjDerefVis(n))->VTI_intFlags &
+		  VTIF_SUSPENDED));
+	Playback();
+	break;
+    case 36:
+	toState.TOS_undo[3] = Is(n, "Hello,! world");
+	TOCHECK(toState.TOS_undo[3]);
+	TOCHECK(FontOf(n, 0, 5, &tk, &d) == FID_ROMA);
+	/* (ignored: nothing to undo) */
+	@call process::MSG_GEN_PROCESS_UNDO_IGNORE_ACTIONS(TRUE);
+	@call n::MSG_VIS_TEXT_REPLACE_ALL_PTR("Gone", 0);
+	@call process::MSG_GEN_PROCESS_UNDO_ACCEPT_ACTIONS();
+	Playback();
+	TOCHECK(Is(n, "Gone"));
+	(void) @call process::MSG_GEN_PROCESS_UNDO_SET_CONTEXT(0);
+	@call n::MSG_META_OBJ_FREE();
+	ClipboardCloseClipboardFile();
+	break;
+    }
 }
 
 @method TOProcessClass, MSG_TO_STEP
@@ -1911,6 +2058,10 @@ static Boolean TOItemName(TransferBlockID id, const char *name)
 	@call list::MSG_META_OBJ_FREE();
 	break;
     }
+    case 27: case 28: case 29: case 30: case 31: case 32: case 33:
+    case 34: case 35: case 36:
+	UndoStep(step);
+	break;
     }
     (void) @call TOText::MSG_VIS_TEXT_GET_ALL_PTR(buf);
     memcpy(toState.TOS_text, buf, sizeof(toState.TOS_text) - 1);

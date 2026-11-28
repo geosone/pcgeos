@@ -8,10 +8,11 @@
  * attribute that a default record can say is kept as one
  * (SetSingleCharAttr), the range of a change is the whole object.  With
  * VTSF_MULTIPLE_CHAR_ATTRS the range is changed in the runs
- * (taRunManip.goc).  Not yet: styles, undo, the notifications of a change
- * (TA_SendNotification).
+ * (taRunManip.goc), one undo chain ("Font/Style Change").
  */
 @include "textInt.goh"
+
+@extern chunk StyleString;
 #include <font.h>
 #include <fontID.h>
 #include <chunkarr.h>
@@ -171,8 +172,10 @@ static void SetCharAttr(optr o, dword start, dword end,
 
     if (FixupRange(o, &r, start, end)) {
 	token = TA_AddElement(o, TRK_CHAR_ATTR, &c);
+	TU_StartChainIfUndoable(o, @StyleString);
 	(void) TA_ModifyRun(o, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, NULL,
 			    NULL, token);
+	TU_EndChainIfUndoable(o);
 	TA_RemoveElement(o, TRK_CHAR_ATTR, token);
     } else
 	TA_SetSingleCharAttr(o, &c);
@@ -203,8 +206,10 @@ static void SetCharAttr(optr o, dword start, dword end,
 	ReflectChangeUpdateGeneric(oself);
 	return;
     }
+    TU_StartChainIfUndoable(oself, @StyleString);
     (void) TA_ModifyRun(oself, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, NULL,
 			NULL, token);
+    TU_EndChainIfUndoable(oself);
     ReflectChangeUpdateGeneric(oself);
 }
 
@@ -341,10 +346,12 @@ void CharAttrChangeCommon(optr o, dword start, dword end,
     VisTextCharAttr a;
     VisTextRange r;
 
-    if (FixupRange(o, &r, start, end))
+    if (FixupRange(o, &r, start, end)) {
+	TU_StartChainIfUndoable(o, @StyleString);
 	(void) TA_ModifyRun(o, TRK_CHAR_ATTR, r.VTR_start, r.VTR_end, cb,
 			    data, CA_NULL_ELEMENT);
-    else {
+	TU_EndChainIfUndoable(o);
+    } else {
 	TA_GetSingleCharAttr(o, &a);
 	cb(o, &a, data);
 	TA_SetSingleCharAttr(o, &a);

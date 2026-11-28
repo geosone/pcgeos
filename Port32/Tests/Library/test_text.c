@@ -32,6 +32,8 @@
  *  25. the lines of a large object in its regions (draft mode).
  *  26. style sheets: a style defined, applied, described, redefined,
  *      deleted.
+ *  27-36. undo: replacements, typing, a font change undone and redone;
+ *      changes while suspended in one chain; ignored actions.
  */
 #include "kernelC.h"
 #include "ghal.h"
@@ -75,6 +77,7 @@ typedef struct {
     word	TOS_regions[6];
     char	TOS_styleDesc[80];
     word	TOS_styles[4];
+    word	TOS_undo[8];
 } TOState;
 
 static int fails;
@@ -128,7 +131,10 @@ int main(int argc, char **argv)
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
 	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
-	"a12b-cE -.F14y#"
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#", "a12b-cE -.F14y#",
+	"a12b-cE -.F14y#", "a12b-cE -.F14y#"
     };
     GeodeHandle app, mdrv;
     GeodeLoadError e;
@@ -184,7 +190,7 @@ int main(int argc, char **argv)
     WAIT_FOR(st->TOS_attached);
     CHECK(st->TOS_attached == 1 && st->TOS_process == app);
 
-    for (i = 1; i <= 26; i++) {
+    for (i = 1; i <= 36; i++) {
 	step((word) i);
 	if (strcmp(st->TOS_text, text[i - 1]))
 	    printf("step %d: \"%s\"\n", i, st->TOS_text);
@@ -220,6 +226,9 @@ int main(int argc, char **argv)
     printf("styles: %u, other's style %u, redefined font %x, after delete "
 	   "%u; \"%s\"\n", st->TOS_styles[0], st->TOS_styles[1],
 	   st->TOS_styles[2], st->TOS_styles[3], st->TOS_styleDesc);
+    printf("undo: replaced %u, typed %u, font %x, suspended %u\n",
+	   st->TOS_undo[0], st->TOS_undo[1], st->TOS_undo[2],
+	   st->TOS_undo[3]);
     printf("tab: leader %x, line %x\n", st->TOS_tab[0], st->TOS_tab[1]);
     printf("notify: generated %u, types %x, send %x\n", st->TOS_generated, st->TOS_types, st->TOS_send);
     printf("geode checks: %u, failed %u (first at textobj.goc line %u)\n",

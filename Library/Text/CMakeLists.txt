@@ -17,6 +17,7 @@ add_subdirectory(TextLine)
 add_subdirectory(TextRegion)
 add_subdirectory(TextSelect)
 add_subdirectory(TextTrans)
+add_subdirectory(TextUndo)
 add_subdirectory(UI)
 geos_get_sources(_text_goc text_goc)
 geos_geode(text GP text32.gp GOC ${_text_goc}

@@ -11,12 +11,18 @@
  * tells it when it becomes empty or no longer is
  * (MSG_META_TEXT_EMPTY_STATUS_CHANGED).
  *
- * Port32 (Port32/ABI.md section 13z), not yet: filters, undo, the
- * attribute runs, lines and regions, the recalculation and the screen,
- * suspension, the notifications of the controllers, the character
- * limit, section breaks.
+ * With VTF_ALLOW_UNDO a replacement that is not itself an undo starts
+ * an (empty) undo chain, which the actions of the replacement go into:
+ * typing goes on in its chain while it has a cached action.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: the character limit,
+ * section breaks.
  */
 @include "textInt.goh"
+
+@extern chunk ReplacementString;
+@extern chunk DeleteString;
+@extern chunk TypingString;
 #include <localize.h>
 #include <dbase.h>
 
@@ -98,6 +104,22 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
 	return TRUE;
     if ((p->VTRP_flags & VTRF_FILTER) && FilterReplacement(o, p))
 	return TRUE;
+    /* the undo chain for this replacement */
+    if ((VT(o)->VTI_features & VTF_ALLOW_UNDO) &&
+	!(p->VTRP_flags & VTRF_UNDO) && !GenProcessUndoCheckIfIgnoring()) {
+	optr title = p->VTRP_insCount ? @ReplacementString : @DeleteString;
+	Boolean chain = TRUE;
+
+	if (p->VTRP_flags & VTRF_KEYBOARD_INPUT) {
+	    /* typing on: in the chain of the cached action */
+	    if (VMCHAIN_GET_VM_BLOCK(TU_DerefUndo(o)->VTCUI_vmChain))
+		chain = FALSE;
+	    else
+		title = @TypingString;
+	}
+	if (chain)
+	    TU_CreateEmptyChain(o, title);
+    }
     hadText = size != 0;
     flags = p->VTRP_flags;
     /* the selection off the screen while the text changes */
@@ -112,6 +134,9 @@ Boolean VisTextReplace(optr o, VisTextReplaceParameters *p)
     /* (the runs while the replaced text is still there) */
     if (TA_UpdateRunsForReplacement(o, p))
 	force = TRUE;
+    /* (TextReplace) the undo action, while the old text is there */
+    if (TU_CheckForUndo(o))
+	TU_DoReplaceUndo(o, p);
     TS_ReplaceRange(o, p);
     /* the lines again, those that changed drawn */
     before = VT(o)->VTI_height;

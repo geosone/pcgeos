@@ -21,6 +21,7 @@ tokenid		0
 
 resource TextTransStrings lmem read-only shared
 resource TextStyleStrings lmem read-only shared
+resource UndoStrings lmem read-only shared
 
 export VisTextClass
 export TextAllocClipboardObject

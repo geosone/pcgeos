@@ -34,6 +34,8 @@ void TSL_SelectSetSelectionWithoutNukingUndo(optr o, dword start, dword end)
 
 void TSL_SelectSetSelection(optr o, dword start, dword end)
 {
+    /* (typing elsewhere starts a new undo action) */
+    TU_NukeCachedUndo(o);
     TSL_SelectSetSelectionWithoutNukingUndo(o, start, end);
 }
 

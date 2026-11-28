@@ -1,0 +1,21 @@
+/*
+ * tuStrings.goc -- after tuStrings.ui: the titles of the text object's
+ * undo chains (UndoStrings).
+ */
+@include "textInt.goh"
+
+@start UndoStrings, data;
+
+@chunk char TypingString[] = "Typing";
+@chunk char FormattingString[] = "Formatting";
+@chunk char StyleString[] = "Font/Style Change";
+@chunk char ReplacementString[] = "Replace";
+@chunk char ReplaceAllString[] = "Replace All";
+@chunk char InkString[] = "Handwriting";
+@chunk char DeleteString[] = "Text Delete";
+@chunk char PasteString[] = "Paste";
+@chunk char CutString[] = "Cut";
+@chunk char QuickCopyString[] = "Quick Copy";
+@chunk char QuickMoveString[] = "Quick Move";
+
+@end UndoStrings;

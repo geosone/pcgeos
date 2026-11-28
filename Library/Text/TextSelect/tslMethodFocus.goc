@@ -96,6 +96,7 @@ static void SetTarget(optr o, Boolean target, Message msg)
 {
     SetTarget(oself, FALSE, MSG_META_TEXT_LOST_TARGET);
     TA_SendNotification(oself, 0);
+    TU_NukeCachedUndo(oself);
 }
 
 static void SetSysTarget(optr o, Boolean target)

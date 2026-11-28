@@ -11,6 +11,8 @@
  * undo, the notifications of a change.
  */
 @include "textInt.goh"
+
+@extern chunk FormattingString;
 #include <font.h>
 
 static const word defaultDefaultTabs[4] = {
@@ -160,10 +162,12 @@ void ChangeParaAttr(optr o, dword start, dword end,
     VisTextMaxParaAttr a;
     VisTextRange r;
 
-    if (UnHiliteAndFixupParaAttrRange(o, &r, start, end))
+    if (UnHiliteAndFixupParaAttrRange(o, &r, start, end)) {
+	TU_StartChainIfUndoable(o, @FormattingString);
 	(void) TA_ModifyRun(o, TRK_PARA_ATTR, r.VTR_start, r.VTR_end, cb,
 			    data, CA_NULL_ELEMENT);
-    else {
+	TU_EndChainIfUndoable(o);
+    } else {
 	TA_GetSingleParaAttr(o, &a);
 	cb(o, &a, data);
 	TA_SetSingleParaAttr(o, &a);
@@ -183,8 +187,10 @@ static void SetParaAttr(optr o, dword start, dword end,
     memcpy(&c, a, TA_ParaAttrSize(a));
     if (UnHiliteAndFixupParaAttrRange(o, &r, start, end)) {
 	token = TA_AddElement(o, TRK_PARA_ATTR, &c);
+	TU_StartChainIfUndoable(o, @FormattingString);
 	(void) TA_ModifyRun(o, TRK_PARA_ATTR, r.VTR_start, r.VTR_end, NULL,
 			    NULL, token);
+	TU_EndChainIfUndoable(o);
 	TA_RemoveElement(o, TRK_PARA_ATTR, token);
     } else
 	TA_SetSingleParaAttr(o, &c);
@@ -214,9 +220,12 @@ static void SetParaAttr(optr o, dword start, dword end,
     VisTextRange r;
 
     if (UnHiliteAndFixupParaAttrRange(oself, &r, rangeStart, rangeEnd) &&
-	paraAttrToken != CA_NULL_ELEMENT)
+	paraAttrToken != CA_NULL_ELEMENT) {
+	TU_StartChainIfUndoable(oself, @FormattingString);
 	(void) TA_ModifyRun(oself, TRK_PARA_ATTR, r.VTR_start, r.VTR_end,
 			    NULL, NULL, paraAttrToken);
+	TU_EndChainIfUndoable(oself);
+    }
     ReflectChangeUpdateGeneric(oself);
 }
 

@@ -18,7 +18,8 @@
  *
  * Port32 (Port32/ABI.md section 13z): runs are positions and tokens,
  * looked up by index (no pointers kept across a change of the block).
- * Not yet: graphics and type runs, undo, the cached last run position
+ * Undo of run changes: taRunManip.goc, TextUndo/.  Not yet: graphics
+ * and type runs, the cached last run position
  * (TEMP_VIS_TEXT_CACHED_RUN_INFO: only an optimization).
  */
 @include "textInt.goh"

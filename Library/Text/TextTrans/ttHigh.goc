@@ -11,8 +11,9 @@
  * inches on).  A paste replaces the selection by the normal item's
  * text (ttReplace.goc).
  *
- * Port32 (Port32/ABI.md section 13z), not yet: undo (the cut and the
- * paste as one undo chain), graphics (pasting a CIF_GRAPHICS_STRING
+ * A cut and a paste are each one undo chain.
+ *
+ * Port32 (Port32/ABI.md section 13z), not yet: graphics (pasting a CIF_GRAPHICS_STRING
  * into an object with graphics, GenerateGStringFormatIfAppropriate),
  * the types, graphics and styles of the clipboard object.
  */
@@ -22,6 +23,8 @@
 #include <hugearr.h>
 
 @extern chunk textTransferItemName;
+@extern chunk CutString;
+@extern chunk PasteString;
 
 /* CheckSelectionCrossSection: TRUE if the selection crosses a section */
 static Boolean CheckSelectionCrossSection(optr o)
@@ -37,8 +40,10 @@ static Boolean CheckSelectionCrossSection(optr o)
 {
     if (CheckSelectionCrossSection(oself))
 	return;
+    TU_StartChainIfUndoable(oself, @CutString);
     @call oself::MSG_META_CLIPBOARD_COPY();
     @call oself::MSG_META_DELETE();
+    TU_EndChainIfUndoable(oself);
 }
 
 /*
@@ -137,9 +142,11 @@ Boolean TT_PasteCommon(optr o, dword start, dword end,
     ClipboardQueryItem(flags, &q);
     if (q.CQA_numFormats && !ClipboardTestItemFormat(q.CQA_header, text)) {
 	ClipboardRequestItemFormat(text, q.CQA_header, &ra);
+	TU_StartChainIfUndoable(o, @PasteString);
 	@call o::MSG_VIS_TEXT_REPLACE_WITH_TEXT_TRANSFER_FORMAT(
 			VMCHAIN_GET_VM_BLOCK(ra.CRA_data), ra.CRA_file, 0,
 			end, start);
+	TU_EndChainIfUndoable(o);
 	error = FALSE;
     }
     ClipboardDoneWithItem(q.CQA_header);

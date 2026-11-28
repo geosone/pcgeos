@@ -308,10 +308,13 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 	DeleteRange(o, start, end);
 	break;
     case VTKF_DELETE_BACKWARD_PARAGRAPH:
+	/* (a new undo action, not the typing one) */
+	TU_NukeCachedUndo(o);
 	DeleteRange(o, range ? start : FindPreviousParagraphEdge(o, start),
 		    end);
 	break;
     case VTKF_DELETE_PARAGRAPH:
+	TU_NukeCachedUndo(o);
 	if (!range) {
 	    start = start ? FindPreviousParagraphEdge(o, start + 1) : 0;
 	    end = FindNextParagraphEdge(o, end);
@@ -319,12 +322,15 @@ Boolean TSL_HandleKbdShortcut(optr o, VisTextKeyFunction f)
 	DeleteRange(o, start, end);
 	break;
     case VTKF_DELETE_TO_START:
+	TU_NukeCachedUndo(o);
 	DeleteRange(o, 0, end);
 	break;
     case VTKF_DELETE_TO_END:
+	TU_NukeCachedUndo(o);
 	DeleteRange(o, start, size);
 	break;
     case VTKF_DELETE_EVERYTHING:
+	TU_NukeCachedUndo(o);
 	DeleteRange(o, 0, size);
 	break;
     case VTKF_DESELECT:

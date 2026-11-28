@@ -16,6 +16,12 @@ char uisqCloseSingle = C_QUOTESNGRIGHT;
 char uisqOpenDouble = C_QUOTEDBLLEFT;
 char uisqCloseDouble = C_QUOTEDBLRIGHT;
 
+/* Text/textSuspend.goc */
+@extern method VisTextClass, MSG_META_SUSPEND;
+@extern method VisTextClass, MSG_META_UNSUSPEND;
+/* TextUndo/tuMain.goc */
+@extern method VisTextClass, MSG_META_UNDO;
+@extern method VisTextClass, MSG_META_UNDO_FREEING_ACTION;
 /* TextTrans/ttCreate.goc, ttHigh.goc, ttReplace.goc */
 @extern method VisTextClass, MSG_VIS_TEXT_CREATE_TRANSFER_FORMAT;
 @extern method VisTextClass, MSG_META_CLIPBOARD_CUT;
