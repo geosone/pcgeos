@@ -102,11 +102,31 @@ typedef struct {
     VMFileHandle UADVMC_file;
 } UndoActionDataVMChain;
 
+@ifdef GEOS_PORT32
+/*
+ * Port32 (Port32/ABI.md section 13x): UADT_OPTR and UndoActionDataOptr
+ * as the asm has them: an action of UADT_PTR comes back to MSG_META_UNDO
+ * as UADT_OPTR, the optr of the locked DB item.
+ */
+#define UADT_OPTR 6
+
+typedef struct {
+    optr    UADO_optr;
+} UndoActionDataOptr;
+
+typedef union {
+    UndoActionDataFlags	    UADU_flags;
+    UndoActionDataPtr	    UADU_ptr;
+    UndoActionDataVMChain   UADU_vmChain;
+    UndoActionDataOptr	    UADU_optr;
+} UndoActionDataUnion;
+@else
 typedef union {
     UndoActionDataFlags	    UADU_flags;
     UndoActionDataPtr	    UADU_ptr;
     UndoActionDataVMChain   UADU_vmChain;
 } UndoActionDataUnion;
+@endif
 #define NULL_UNDO_CONTEXT   0
 
 typedef WordFlags AddUndoActionFlags;

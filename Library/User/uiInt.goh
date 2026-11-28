@@ -211,6 +211,11 @@ void GenAppQuitCommon(optr app, word quitLevel);
 
 /* the offset of the words (GeodePrivAlloc, in UILibraryEntry) */
 extern word genProcessPrivOffset;
+/* the undo block of a process (Proc/procUndo.goc), in its geode private
+ * data */
+#define UNDO_PRIV_WORDS		((sizeof(MemHandle) + 1) / 2)
+extern word genProcessUndoOffset;
+extern void GenProcessCleanupUndo(void);
 /* the current process's */
 void GenProcessGetDetach(GenProcessDetachData *d);
 

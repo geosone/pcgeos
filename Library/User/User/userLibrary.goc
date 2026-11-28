@@ -24,9 +24,14 @@ Boolean UILibraryEntry(LibraryCallType ty, GeodeHandle client)
 	/* GenProcessClass's words in each process */
 	genProcessPrivOffset = GeodePrivAlloc(GeodeGetCodeProcessHandle(),
 					      GEN_PROCESS_PRIV_WORDS);
-	return !genProcessPrivOffset || !IACPInit();
+	/* the undo block's handle (userMain.asm's undoOffset) */
+	genProcessUndoOffset = GeodePrivAlloc(GeodeGetCodeProcessHandle(),
+					      UNDO_PRIV_WORDS);
+	return !genProcessPrivOffset || !genProcessUndoOffset ||
+	       !IACPInit();
     case LCT_DETACH:
 	IACPExit();
+	GeodePrivFree(genProcessUndoOffset, UNDO_PRIV_WORDS);
 	GeodePrivFree(genProcessPrivOffset, GEN_PROCESS_PRIV_WORDS);
 	break;
     default:

@@ -16,7 +16,7 @@
  *    allocated by the library entry) from MSG_META_DETACH to
  *    MSG_GEN_PROCESS_FINAL_DETACH; the messages carry the process optr.
  *  - Not yet: state files (a RESTORE_FROM_STATE launch opens the
- *    application), transparent detach, UI threads, undo, the activation
+ *    application), transparent detach, UI threads, the activation
  *    dialog of the field, the application's instance reference sent to
  *    the field.
  */
@@ -26,6 +26,20 @@
 #include <string.h>
 
 @classdecl GenProcessClass;
+
+/* procUndo.goc */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_START_CHAIN;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_END_CHAIN;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_ADD_ACTION;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_GET_FILE;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_GET_CONTEXT;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_SET_CONTEXT;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_PLAYBACK_CHAIN;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_IGNORE_ACTIONS;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_ACCEPT_ACTIONS;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_CHECK_IF_IGNORING;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_ABORT_CHAIN;
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS;
 
 word genProcessPrivOffset;
 
@@ -315,6 +329,7 @@ static void AfterFlush(EventHandle ev)
     struct { word id; optr caller; } p;
 
     GenProcessGetDetach(&d);
+    GenProcessCleanupUndo();
     if (GeodeGetProcessHandle() == GeodeGetCodeProcessHandle()) {
 	if (d.GPDD_ackOD)
 	    @send, forceQueue d.GPDD_ackOD::MSG_META_ACK(0, oself);
@@ -324,6 +339,21 @@ static void AfterFlush(EventHandle ev)
     p.caller = d.GPDD_ackOD;
     CObjCallSuperP((ClassStruct *) &GenProcessClass, oself, MSG_META_DETACH,
 		   &p, sizeof(p), NULL, 0);
+}
+
+/* UI_SendToAppGCNList: to the application object's GCN lists (or
+ * thrown away without one) */
+@method GenProcessClass, MSG_GEN_PROCESS_SEND_TO_APP_GCN_LIST
+{
+    optr app = GeodeGetAppObject(0);
+
+    if (!app) {
+	MemDecRefCount(block);
+	ObjFreeMessage(event);
+	return;
+    }
+    @call app::MSG_META_GCN_LIST_SEND(sendFlags, event, block,
+				      manufListType, manufID);
 }
 
 /* ---------------------------------------------------------------------

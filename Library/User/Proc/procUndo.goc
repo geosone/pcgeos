@@ -1,0 +1,607 @@
+/*
+ * procUndo.goc -- the undo mechanism of GenProcessClass (after
+ * procUndo.asm): the undo chain of a process, actions added to it,
+ * played back into a redo chain, ignored, aborted; the edit control told
+ * of the chain (GAGCNLT_EDIT_CONTROL_NOTIFY_UNDO_STATE_CHANGE).
+ *
+ * The chain lives in an LMem block of the process (UndoLMemBlockHeader),
+ * a chunk array of AddUndoActionStruct: a start token (or a redo token),
+ * the actions, newest first, an end token.  While a chain is played back
+ * the redo chain begins after the end token (ULMBH_currentChain).
+ *
+ * Port32 (Port32/ABI.md section 13x):
+ *  - The block's handle is in the geode private data of the process at
+ *    genProcessUndoOffset (allocated by the library entry, the asm's
+ *    undoOffset), as many words as a MemHandle takes.
+ *  - An action is copied out of the array before it goes to its object:
+ *    the object may add actions (the redo chain), which moves the array.
+ *  - The asm's SendUndoNotification sent MSG_GEN_PROCESS_SEND_TO_APP_GCN_LIST
+ *    with its flags cleared by a later change (the parameters in ss:bp
+ *    as registers, same thread); here it goes as the message's structure.
+ *  - MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS is handled as the abort, as the
+ *    asm does (its own handler is commented out there).
+ */
+@include "uiInt.goh"
+@include <Objects/gEditCC.goh>
+#include <chunkarr.h>
+#include <dbase.h>
+#include <string.h>
+
+/* the start of a chain: UAS_appType is the optr of its title */
+#define UADT_START_TOKEN	0xffff
+/* the end of a chain */
+#define UADT_END_TOKEN		(UADT_START_TOKEN - 1)
+/* the start of a redo chain */
+#define UADT_REDO_TOKEN		(UADT_END_TOKEN - 1)
+
+#define MAX_UNDO_ACTIONS	300
+
+typedef struct {
+    LMemBlockHeader	ULMBH_header;
+    word		ULMBH_startCount;
+    ChunkHandle		ULMBH_actionArray;
+    word		ULMBH_ignoreCount;
+    /* the chain actions are added to: 0, but while playing back */
+    word		ULMBH_currentChain;
+    dword		ULMBH_context;
+    /* non-zero while aborting: the ignore count goes back when the
+     * start count reaches 0 */
+    word		ULMBH_aborting;
+} UndoLMemBlockHeader;
+
+word genProcessUndoOffset;
+
+/* the undo block, locked */
+typedef struct {
+    MemHandle		UB_block;
+    UndoLMemBlockHeader	*UB_header;
+    optr		UB_array;
+} UndoBlock;
+
+/* ---------------------------------------------------------------------
+ * The block
+ * ------------------------------------------------------------------- */
+
+/* the undo block of the process, if it has one */
+static MemHandle GetUndoBlock(void)
+{
+    word w[UNDO_PRIV_WORDS];
+    MemHandle mh = 0;
+
+    GeodePrivRead(0, genProcessUndoOffset, UNDO_PRIV_WORDS, w);
+    memcpy(&mh, w, sizeof(mh));
+    return mh;
+}
+
+/* the block's header (after a change to the array) */
+static UndoLMemBlockHeader *Header(UndoBlock *u)
+{
+    u->UB_header = (UndoLMemBlockHeader *) MemDeref(u->UB_block);
+    return u->UB_header;
+}
+
+/*
+ * LockUndoBlock: the undo block locked, made if the process has none
+ * yet.  TRUE if actions are ignored.  *count gets the number of items.
+ */
+static Boolean LockUndoBlock(UndoBlock *u, word *count)
+{
+    MemHandle mh = GetUndoBlock();
+    UndoLMemBlockHeader *h;
+
+    if (!mh) {
+	word w[UNDO_PRIV_WORDS];
+
+	mh = MemAllocLMem(LMEM_TYPE_GENERAL, sizeof(UndoLMemBlockHeader));
+	memset(w, 0, sizeof(w));
+	memcpy(w, &mh, sizeof(mh));
+	GeodePrivWrite(0, genProcessUndoOffset, UNDO_PRIV_WORDS, w);
+	h = (UndoLMemBlockHeader *) MemLock(mh);
+	h->ULMBH_currentChain = 0;
+	h->ULMBH_startCount = 0;
+	h->ULMBH_ignoreCount = 0;
+	h->ULMBH_aborting = 0;
+	h->ULMBH_context = NULL_UNDO_CONTEXT;
+	h->ULMBH_actionArray = ChunkArrayCreate(mh,
+					sizeof(AddUndoActionStruct), 0, 0);
+    } else
+	(void) MemLock(mh);
+    u->UB_block = mh;
+    h = Header(u);
+    u->UB_array = ConstructOptr(mh, h->ULMBH_actionArray);
+    if (count)
+	*count = ChunkArrayGetCount(u->UB_array);
+    return h->ULMBH_ignoreCount != 0;
+}
+
+static void UnlockUndoBlock(UndoBlock *u)
+{
+    MemUnlock(u->UB_block);
+}
+
+/* CleanupUndo (procClass.asm): the block freed at the process's end */
+void GenProcessCleanupUndo(void)
+{
+    MemHandle mh = GetUndoBlock();
+
+    if (mh) {
+	word w[UNDO_PRIV_WORDS];
+
+	MemFree(mh);
+	memset(w, 0, sizeof(w));
+	GeodePrivWrite(0, genProcessUndoOffset, UNDO_PRIV_WORDS, w);
+    }
+}
+
+/* ---------------------------------------------------------------------
+ * Actions
+ * ------------------------------------------------------------------- */
+
+/*
+ * SendUndoActionStruct: the action to its object: a VM chain with the
+ * undo file, the data of UADT_PTR as UADT_OPTR, the DB item locked
+ * meanwhile.
+ */
+static void SendUndoActionStruct(UndoActionStruct *a, optr out, Boolean undo,
+				 AddUndoActionStruct *add)
+{
+    UndoActionStruct *s = add ? &add->AUAS_data : a;
+    void *p = NULL;
+
+    if (s->UAS_dataType != UADT_FLAGS) {
+	VMFileHandle f = GenProcessUndoGetFile();
+
+	s->UAS_data.UADU_vmChain.UADVMC_file = f;
+	if (s->UAS_dataType == UADT_PTR) {
+	    optr ref;
+
+	    p = DBLockGetRefUngrouped(f,
+			s->UAS_data.UADU_vmChain.UADVMC_vmChain, &ref);
+	    s->UAS_data.UADU_optr.UADO_optr = ref;
+	    s->UAS_dataType = UADT_OPTR;
+	}
+    }
+    if (undo)
+	@call out::MSG_META_UNDO(a);
+    else
+	@call out::MSG_META_UNDO_FREEING_ACTION(add);
+    if (p)
+	DBUnlock(p);
+}
+
+/* FreeUndoVMChain */
+static void FreeUndoVMChain(VMChain c)
+{
+    VMFreeVMChain(GenProcessUndoGetFile(), c);
+}
+
+/*
+ * FreeUndoActionStruct: the data of the action freed (its object told
+ * first if it asked).  TRUE at the end token.  playedBack: freed after
+ * being played back.
+ */
+static Boolean FreeUndoActionStruct(const AddUndoActionStruct *e,
+				    Boolean playedBack)
+{
+    AddUndoActionStruct a = *e;
+
+    if (a.AUAS_data.UAS_dataType == UADT_END_TOKEN)
+	return TRUE;
+    if (a.AUAS_data.UAS_dataType == UADT_START_TOKEN)
+	return FALSE;
+    EC_ERROR_IF(a.AUAS_flags & ~(AUAF_NOTIFY_BEFORE_FREEING |
+			AUAF_NOTIFY_IF_FREED_WITHOUT_BEING_PLAYED_BACK), -1);
+    if ((a.AUAS_flags & AUAF_NOTIFY_BEFORE_FREEING) ||
+	((a.AUAS_flags & AUAF_NOTIFY_IF_FREED_WITHOUT_BEING_PLAYED_BACK) &&
+	 !playedBack)) {
+	/* SendUndoFreeNotification (on a copy) */
+	AddUndoActionStruct n = a;
+
+	SendUndoActionStruct(NULL, n.AUAS_output, FALSE, &n);
+    }
+    if (a.AUAS_data.UAS_dataType == UADT_PTR ||
+	a.AUAS_data.UAS_dataType == UADT_VM_CHAIN)
+	FreeUndoVMChain(a.AUAS_data.UAS_data.UADU_vmChain.UADVMC_vmChain);
+    return FALSE;
+}
+
+static Boolean _pascal FreeBeforeCB(void *e, void *d)
+{
+    (void) d;
+    return FreeUndoActionStruct(e, FALSE);
+}
+
+static Boolean _pascal FreeAfterCB(void *e, void *d)
+{
+    (void) d;
+    return FreeUndoActionStruct(e, TRUE);
+}
+
+/* FlushUndoChain: the chain freed and emptied */
+static void FlushUndoChain(UndoBlock *u)
+{
+    (void) ChunkArrayEnum(u->UB_array, NULL, FreeBeforeCB);
+    ChunkArrayZero(u->UB_array);
+    (void) Header(u);
+}
+
+/* PlaybackUndoAction: the action to its object; TRUE at the end token */
+static Boolean _pascal PlaybackCB(void *e, void *d)
+{
+    AddUndoActionStruct a = *(AddUndoActionStruct *) e;
+    UndoActionStruct s;
+
+    (void) d;
+    if (a.AUAS_data.UAS_dataType == UADT_END_TOKEN)
+	return TRUE;
+    if (a.AUAS_data.UAS_dataType >= UADT_REDO_TOKEN)
+	return FALSE;
+    memset(&s, 0, sizeof(s));
+    s.UAS_dataType = a.AUAS_data.UAS_dataType;
+    s.UAS_appType = a.AUAS_data.UAS_appType;
+    s.UAS_data = a.AUAS_data.UAS_data;
+    SendUndoActionStruct(&s, a.AUAS_output, TRUE, NULL);
+    return FALSE;
+}
+
+/*
+ * SendUndoNotification: the edit control told of the chain (its title,
+ * undo or redo, or that the last action can't be undone)
+ */
+static void SendUndoNotification(optr title, UndoDescription type)
+{
+    MemHandle b = MemAlloc(sizeof(NotifyUndoStateChange),
+			   HF_DYNAMIC | HF_SHARABLE, HAF_NO_ERR | HAF_LOCK);
+    NotifyUndoStateChange *n = (NotifyUndoStateChange *) MemDeref(b);
+    EventHandle ev;
+
+    n->NUSC_undoTitle = title;
+    n->NUSC_undoType = type;
+    MemUnlock(b);
+    MemInitRefCount(b, 1);
+    ev = @record (optr) 0::MSG_META_NOTIFY_WITH_DATA_BLOCK(
+			MANUFACTURER_ID_GEOWORKS, GWNT_UNDO_STATE_CHANGE, b);
+    @call ConstructOptr(GeodeGetProcessHandle(), 0)::
+	MSG_GEN_PROCESS_SEND_TO_APP_GCN_LIST(GCNLSF_SET_STATUS, ev, b,
+			GAGCNLT_EDIT_CONTROL_NOTIFY_UNDO_STATE_CHANGE,
+			MANUFACTURER_ID_GEOWORKS);
+}
+
+#if ERROR_CHECK
+/* EnsureObjBlockRunByProcessThread */
+static void ECCheckUndoOwner(optr o)
+{
+    MemHandle mh = OptrToHandle(o);
+
+    if (mh)
+	EC_ERROR_IF((ThreadHandle) MemGetInfo(mh, MGIT_EXEC_THREAD) !=
+		    (ThreadHandle) ProcInfo(GeodeGetProcessHandle()), -1);
+}
+#else
+#define ECCheckUndoOwner(o)
+#endif
+
+/* ---------------------------------------------------------------------
+ * The methods
+ * ------------------------------------------------------------------- */
+
+/* GenProcessUndoStartChain */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_START_CHAIN
+{
+    UndoBlock u;
+    UndoLMemBlockHeader *h;
+    AddUndoActionStruct *a;
+
+    if (LockUndoBlock(&u, NULL)) {
+	h = u.UB_header;
+	if (h->ULMBH_aborting)
+	    h->ULMBH_startCount++;
+	UnlockUndoBlock(&u);
+	return;
+    }
+    h = u.UB_header;
+    EC_ERROR_IF(h->ULMBH_context == NULL_UNDO_CONTEXT, -1);
+    if (++h->ULMBH_startCount == 1) {
+	/* a new chain: a start token */
+	FlushUndoChain(&u);
+	Header(&u)->ULMBH_currentChain = 0;
+	a = ChunkArrayAppend(u.UB_array, 0);
+	a->AUAS_data.UAS_dataType = UADT_START_TOKEN;
+	a->AUAS_flags = 0;
+	a->AUAS_data.UAS_appType = (dword) title;
+	a->AUAS_output = owner;
+	ECCheckUndoOwner(owner);
+    } else {
+	/* a chain without a title takes the next one's: chains grouped
+	 * into a higher level chain */
+	a = ChunkArrayElementToPtr(u.UB_array, h->ULMBH_currentChain, NULL);
+	if (!a->AUAS_data.UAS_appType)
+	    a->AUAS_data.UAS_appType = (dword) title;
+    }
+    UnlockUndoBlock(&u);
+}
+
+/* GenProcessUndoEndChain */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_END_CHAIN
+{
+    UndoBlock u;
+    UndoLMemBlockHeader *h;
+    AddUndoActionStruct *a;
+    word count;
+    optr title;
+    UndoDescription type = UD_UNDO;
+
+    if (LockUndoBlock(&u, &count)) {
+	/* an aborted chain: ignoring ends with it */
+	h = u.UB_header;
+	if (h->ULMBH_aborting) {
+	    EC_ERROR_IF(!h->ULMBH_startCount, -1);
+	    if (!--h->ULMBH_startCount) {
+		h->ULMBH_aborting = 0;
+		h->ULMBH_ignoreCount--;
+		EC_ERROR_IF(h->ULMBH_ignoreCount, -1);
+		FlushUndoChain(&u);
+	    }
+	}
+	UnlockUndoBlock(&u);
+	return;
+    }
+    h = u.UB_header;
+    EC_ERROR_IF(h->ULMBH_context == NULL_UNDO_CONTEXT, -1);
+    EC_ERROR_IF(!h->ULMBH_startCount, -1);
+    if (--h->ULMBH_startCount) {
+	UnlockUndoBlock(&u);
+	return;
+    }
+    EC_ERROR_IF(count > MAX_UNDO_ACTIONS, -1);
+    if (count <= 1 && flushChainIfEmpty) {
+	/* only the start token: no chain */
+	EC_ERROR_IF(count < 1, -1);
+	FlushUndoChain(&u);
+	title = 0;
+    } else {
+	a = ChunkArrayAppend(u.UB_array, 0);
+	a->AUAS_data.UAS_dataType = UADT_END_TOKEN;
+	a = ChunkArrayElementToPtr(u.UB_array, 0, NULL);
+	title = (optr) a->AUAS_data.UAS_appType;
+	if (a->AUAS_data.UAS_dataType != UADT_START_TOKEN) {
+	    EC_ERROR_IF(a->AUAS_data.UAS_dataType != UADT_REDO_TOKEN, -1);
+	    type = UD_REDO;
+	}
+    }
+    UnlockUndoBlock(&u);
+    SendUndoNotification(title, type);
+}
+
+/* GenProcessUndoAddAction: the action at the front of the current chain;
+ * the DB item of UADT_PTR data or the VM chain returned */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_ADD_ACTION
+{
+    AddUndoActionStruct a = *data;
+    UndoBlock u;
+    UndoLMemBlockHeader *h;
+    AddUndoActionStruct *e;
+    word count;
+
+    EC_ERROR_IF(a.AUAS_data.UAS_dataType > UADT_VM_CHAIN, -1);
+    EC_ERROR_IF(a.AUAS_flags & ~(AUAF_NOTIFY_BEFORE_FREEING |
+			AUAF_NOTIFY_IF_FREED_WITHOUT_BEING_PLAYED_BACK), -1);
+    if (a.AUAS_data.UAS_dataType == UADT_PTR) {
+	/* the data copied into a DB item */
+	VMFileHandle f = GenProcessUndoGetFile();
+	word size = a.AUAS_data.UAS_data.UADU_ptr.UADP_size;
+	const void *src = a.AUAS_data.UAS_data.UADU_ptr.UADP_ptr;
+	DBGroupAndItem gi = DBAllocUngrouped(f, size);
+	void *p = DBLockUngrouped(f, gi);
+
+	memcpy(p, src, size);
+	DBDirty(p);
+	DBUnlock(p);
+	memset(&a.AUAS_data.UAS_data, 0, sizeof(a.AUAS_data.UAS_data));
+	a.AUAS_data.UAS_data.UADU_vmChain.UADVMC_vmChain = gi;
+    }
+    if (LockUndoBlock(&u, &count)) {
+	/* ignored: its data freed */
+	UnlockUndoBlock(&u);
+	(void) FreeUndoActionStruct(&a, FALSE);
+	return 0;
+    }
+    EC_ERROR_IF(u.UB_header->ULMBH_context == NULL_UNDO_CONTEXT, -1);
+    /* (a chain of MAX_UNDO_ACTIONS ended, played back, and added to
+     * reaches MAX_UNDO_ACTIONS + 3) */
+    EC_ERROR_IF(count > MAX_UNDO_ACTIONS + 3, -1);
+    if (count >= MAX_UNDO_ACTIONS - 1)
+	/* too many: ignored from now on, the chain thrown away at its
+	 * end */
+	@call oself::MSG_GEN_PROCESS_UNDO_ABORT_CHAIN();
+    h = Header(&u);
+    if ((word) (h->ULMBH_currentChain + 1) < ChunkArrayGetCount(u.UB_array)) {
+	e = ChunkArrayElementToPtr(u.UB_array,
+				   (word) (h->ULMBH_currentChain + 1), NULL);
+	e = ChunkArrayInsertAt(u.UB_array, e, 0);
+    } else
+	e = ChunkArrayAppend(u.UB_array, 0);
+    *e = a;
+    ECCheckUndoOwner(a.AUAS_output);
+    UnlockUndoBlock(&u);
+    return a.AUAS_data.UAS_data.UADU_vmChain.UADVMC_vmChain;
+}
+
+/* GENPROCESSUNDOGETFILE: the clipboard file */
+VMFileHandle _pascal GenProcessUndoGetFile(void)
+{
+    return ClipboardGetClipboardFile();
+}
+
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_GET_FILE
+{
+    return GenProcessUndoGetFile();
+}
+
+/* GenProcessUndoGetContext */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_GET_CONTEXT
+{
+    UndoBlock u;
+    dword c;
+
+    (void) LockUndoBlock(&u, NULL);
+    c = u.UB_header->ULMBH_context;
+    UnlockUndoBlock(&u);
+    return c;
+}
+
+/* GenProcessUndoSetContext: the old context returned */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_SET_CONTEXT
+{
+    UndoBlock u;
+    dword old;
+
+    if (LockUndoBlock(&u, NULL))
+	old = u.UB_header->ULMBH_context;
+    else {
+	EC_ERROR_IF(u.UB_header->ULMBH_startCount, -1);
+	old = u.UB_header->ULMBH_context;
+	u.UB_header->ULMBH_context = context;
+    }
+    UnlockUndoBlock(&u);
+    return old;
+}
+
+/*
+ * GenProcessUndoPlaybackChain: the actions of the chain to their
+ * objects, into a new chain the other way round (undo becomes redo); the
+ * chain played back freed
+ */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_PLAYBACK_CHAIN
+{
+    UndoBlock u;
+    UndoLMemBlockHeader *h;
+    AddUndoActionStruct *n, *o;
+    word count;
+
+    if (LockUndoBlock(&u, &count)) {
+	UnlockUndoBlock(&u);
+	return;
+    }
+    h = u.UB_header;
+    EC_ERROR_IF(h->ULMBH_startCount, -1);
+    EC_ERROR_IF(h->ULMBH_context == NULL_UNDO_CONTEXT, -1);
+    EC_WARNING_IF(!count, -1);
+    if (!count) {
+	UnlockUndoBlock(&u);
+	return;
+    }
+    /* the new chain, with the same title and owner */
+    h->ULMBH_currentChain = count;
+    (void) ChunkArrayAppend(u.UB_array, 0);
+    n = ChunkArrayElementToPtr(u.UB_array, count, NULL);
+    o = ChunkArrayElementToPtr(u.UB_array, 0, NULL);
+    if (o->AUAS_data.UAS_dataType == UADT_REDO_TOKEN)
+	n->AUAS_data.UAS_dataType = UADT_START_TOKEN;
+    else {
+	EC_ERROR_IF(o->AUAS_data.UAS_dataType != UADT_START_TOKEN, -1);
+	n->AUAS_data.UAS_dataType = UADT_REDO_TOKEN;
+    }
+    n->AUAS_data.UAS_appType = o->AUAS_data.UAS_appType;
+    n->AUAS_output = o->AUAS_output;
+    n->AUAS_flags = 0;
+    Header(&u)->ULMBH_startCount++;
+    /* played back, then freed (the new chain stays) */
+    (void) ChunkArrayEnum(u.UB_array, NULL, PlaybackCB);
+    (void) ChunkArrayEnum(u.UB_array, NULL, FreeAfterCB);
+    ChunkArrayDeleteRange(u.UB_array, 0, count);
+    h = Header(&u);
+    /* (a redo chain aborted for too many actions is cleaned up by the
+     * end of the chain) */
+    EC_ERROR_IF(!h->ULMBH_aborting && h->ULMBH_ignoreCount, -1);
+    h->ULMBH_currentChain = 0;
+    UnlockUndoBlock(&u);
+    @call oself::MSG_GEN_PROCESS_UNDO_END_CHAIN(FALSE);
+}
+
+/* GenProcessUndoIgnoreActions */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_IGNORE_ACTIONS
+{
+    UndoBlock u;
+
+    if (flushActions)
+	@call oself::MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS();
+    (void) LockUndoBlock(&u, NULL);
+    u.UB_header->ULMBH_ignoreCount++;
+    EC_ERROR_IF(!u.UB_header->ULMBH_ignoreCount, -1);
+    UnlockUndoBlock(&u);
+}
+
+/* GenProcessUndoAcceptActions */
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_ACCEPT_ACTIONS
+{
+    UndoBlock u;
+
+    (void) LockUndoBlock(&u, NULL);
+    EC_ERROR_IF(!u.UB_header->ULMBH_ignoreCount, -1);
+    u.UB_header->ULMBH_ignoreCount--;
+    UnlockUndoBlock(&u);
+}
+
+/*
+ * GENPROCESSUNDOCHECKIFIGNORING: TRUE if actions are ignored.  An
+ * aborted chain ignores them until its end, but says it doesn't (with
+ * an ignore count of 1) so that its object, which skips the start and
+ * end of a chain while ignored, ends it.
+ */
+Boolean _pascal GenProcessUndoCheckIfIgnoring(void)
+{
+    UndoBlock u;
+    Boolean ign = FALSE;
+
+    if (LockUndoBlock(&u, NULL))
+	ign = !u.UB_header->ULMBH_aborting ||
+	      u.UB_header->ULMBH_ignoreCount != 1;
+    UnlockUndoBlock(&u);
+    return ign;
+}
+
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_CHECK_IF_IGNORING
+{
+    return GenProcessUndoCheckIfIgnoring();
+}
+
+/*
+ * GenProcessUndoAbortChain (and MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS):
+ * outside a chain the chain is flushed and nothing can be undone; inside
+ * one actions are ignored until it ends, when it is thrown away, and the
+ * last action can't be undone
+ */
+static void AbortChain(void)
+{
+    UndoBlock u;
+    UndoLMemBlockHeader *h;
+    UndoDescription type;
+
+    if (LockUndoBlock(&u, NULL)) {
+	UnlockUndoBlock(&u);
+	return;
+    }
+    h = u.UB_header;
+    if (!h->ULMBH_startCount) {
+	EC_ERROR_IF(h->ULMBH_currentChain, -1);
+	FlushUndoChain(&u);
+	type = UD_UNDO;
+    } else {
+	h->ULMBH_aborting = TRUE;
+	h->ULMBH_ignoreCount++;
+	type = UD_NOT_UNDOABLE;
+    }
+    UnlockUndoBlock(&u);
+    SendUndoNotification(0, type);
+}
+
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_ABORT_CHAIN
+{
+    AbortChain();
+}
+
+@extern method GenProcessClass, MSG_GEN_PROCESS_UNDO_FLUSH_ACTIONS
+{
+    AbortChain();
+}

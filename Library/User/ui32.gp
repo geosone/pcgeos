@@ -212,6 +212,10 @@ export GenPathSetCurrentPathFromObjectPath
 export GenPathUnrelocObjectPath
 export GenPathDiskRestoreError
 export UserDiskRestore
+
+# the undo mechanism of GenProcessClass (procUndo.goc)
+export GenProcessUndoGetFile
+export GenProcessUndoCheckIfIgnoring
 export GenFileSelectorClass
 export GenControlClass
 export GenControlSendToOutput
